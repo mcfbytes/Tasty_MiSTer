@@ -13,6 +13,36 @@ The command-line tool is `tasty`.
 
 > **Status:** early and hungry. No code has been published yet; this repository is the table being set.
 
+## Try it
+
+Once there is a release, it takes three steps and one command:
+
+1. Copy `tasty` to your MiSTer's SD card, for example `/media/fat/tasty/tasty`.
+2. Download a movie from TASVideos (one of the known-good runs below, as a `.fm2`) and put it on the SD card. You also
+   need your own dump of the game; the file names below are the No-Intro ones.
+3. SSH in and play it:
+
+```sh
+ssh root@<your-mister>
+/media/fat/tasty/tasty play /media/fat/tas/klmz3-smb.fm2 --rom "/media/fat/games/NES/Super Mario Bros. (World).nes"
+```
+
+`tasty` needs the FPGA to itself, so it first stops the running MiSTer binary. It then loads the core, applies the
+settings the movie was recorded with (region, power-on RAM fill), plays the run, and, 30 seconds after the last input,
+restarts `/media/fat/MiSTer`, which brings you back to the Menu core. Your own core settings are left as they were.
+Use `--return-after` or `--stay` to change that, or `tasty stop` to end early and go back to the menu straight away.
+
+**Known-good runs** (played to the end, in sync, on a DE10-Nano):
+
+| game | movie | length | ROM (No-Intro) |
+|---|---|---|---|
+| Super Mario Bros. | ["warps" by klmz](https://tasvideos.org/1330M) | 4:57 | `Super Mario Bros. (World).nes` |
+| Mike Tyson's Punch-Out!! | [by adelikat](https://tasvideos.org/1695M) | 17:47 | `Mike Tyson's Punch-Out!! (Japan, USA) (En) (Rev 1).nes` |
+
+**Known to desync:** Super Mario Bros. 3, ["warps" by Lord_Tom, Maru & Tompa](https://tasvideos.org/3922M). It runs
+in sync for about nine minutes, then falls one frame behind during World 8's tank fight, where the core and FCEUX
+differ. `tasty check` confirms your ROM matches a movie before you start.
+
 ## The menu (planned CLI)
 
 Subject to change until the first release.
@@ -22,7 +52,7 @@ tasty play <movie> [options]      load the core and ROM, then replay the movie
 tasty info <movie>                format, system, frame count, rerecords, ROM checksum
 tasty check <movie> --rom <file>  does this ROM match the movie's checksum?
 tasty status                      what is playing or recording, frame N of M, sync counters
-tasty stop                        stop playback and any recording
+tasty stop                        stop playback and any recording, then return to the menu
 tasty rec start|stop [options]    record whatever is on screen, no movie needed
 ```
 
@@ -36,6 +66,8 @@ tasty rec start|stop [options]    record whatever is on screen, no movie needed
 | `--ram-init zero\|ff\|random` | power-on RAM fill, where the core supports it |
 | `--stop-at <frame>` | stop at this movie frame |
 | `--loop` | start over when the movie ends |
+| `--return-after <seconds>` | how long to wait after the last input before returning to the menu (default `30`) |
+| `--stay` | never return on its own; the core keeps running until `tasty stop` |
 
 **Recording** (works with `tasty play` and `tasty rec start`)
 
