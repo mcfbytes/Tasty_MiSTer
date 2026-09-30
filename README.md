@@ -13,6 +13,54 @@ The command-line tool is `tasty`.
 
 > **Status:** early and hungry. No code has been published yet; this repository is the table being set.
 
+## The menu (planned CLI)
+
+Subject to change until the first release.
+
+```text
+tasty play <movie> [options]      load the core and ROM, then replay the movie
+tasty info <movie>                format, system, frame count, rerecords, ROM checksum
+tasty check <movie> --rom <file>  does this ROM match the movie's checksum?
+tasty status                      what is playing or recording, frame N of M, sync counters
+tasty stop                        stop playback and any recording
+tasty rec start|stop [options]    record whatever is on screen, no movie needed
+```
+
+**Playback**
+
+| option | meaning |
+|---|---|
+| `--rom <file>` | the ROM to boot (default: look it up by the movie's checksum) |
+| `--core <rbf>` | the core to load (default: the one for the movie's system) |
+| `--lead <frames>` | shift the whole movie by N frames (default: the core's measured power-on delay) |
+| `--ram-init zero\|ff\|random` | power-on RAM fill, where the core supports it |
+| `--stop-at <frame>` | stop at this movie frame |
+| `--loop` | start over when the movie ends |
+
+**Recording** (works with `tasty play` and `tasty rec start`)
+
+| option | meaning |
+|---|---|
+| `--record <dir>` | record to this directory; a local path or a mounted network share |
+| `--codec cscd\|zmbv` | `cscd` (default): lossless and cheapest on the CPU. `zmbv`: smaller files |
+| `--scale auto\|native\|half` | `auto` (default) records at native resolution and drops to half scale only if the CPU can't keep up |
+| `--every <n>` | keep every Nth frame, for long runs or tight disks |
+| `--from <frame>` `--to <frame>` | record only this slice of the movie |
+| `--segment <size>` | split files at this size (default `1G`, FAT32-safe) |
+| `--hashes` | also write `<name>.frames.tsv`: one line per frame with the core frame, the movie frame and a pixel hash |
+| `--hashes-only` | write the hash log only, no video; the fastest way to find the exact frame where a replay desyncs |
+
+Recordings are the core's own pixels, as it hands them to the scaler: native resolution, no filters, in plain AVI that
+`ffmpeg` reads directly:
+
+```sh
+tasty play smb3.fm2 --record /media/fat/recordings --hashes
+ffmpeg -i smb3_000.avi -c:v libx264 -crf 16 -pix_fmt yuv420p smb3.mp4
+```
+
+Recording is best effort. If the CPU or storage can't keep up, a frame is repeated and counted, and the replay never
+waits for the recording.
+
 ## The art
 
 Meet Tasty Kun: MiSTer Kun, sticking his tongue out.
