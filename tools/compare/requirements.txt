@@ -1,0 +1,4 @@
+# tasty-compare needs Python 3.9+ from the system. numpy is optional: it
+# speeds up --tolerance MAD on large frames. The stdlib path is complete.
+# ffmpeg/ffprobe are not pip packages; install them with the OS (see README).
+numpy>=1.20

@@ -1,0 +1,86 @@
+name: CI
+on:
+  push:
+    branches: [main, import]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-15 cmake ninja-build zlib1g-dev libminizip-dev liblzo2-dev python3
+      - name: Configure
+        run: cmake --preset host -DCMAKE_CXX_COMPILER=g++-15 -DCMAKE_C_COMPILER=gcc-15
+      - name: Build
+        run: cmake --build --preset host
+      - name: Test
+        run: ctest --preset host --output-on-failure
+
+  armhf-static:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Packages
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build python3 wget xz-utils
+      - name: Bootlin glibc toolchain
+        run: |
+          mkdir -p "$HOME/toolchains"
+          wget -q -O /tmp/glibc.tar.xz \
+            https://toolchains.bootlin.com/downloads/releases/toolchains/armv7-eabihf/tarballs/armv7-eabihf--glibc--stable-2026.08-1.tar.xz
+          echo "9b7e25a74e87dac1e05d399444295e254a3073a056101e3197a859490e5701cd  /tmp/glibc.tar.xz" | sha256sum -c -
+          tar -C "$HOME/toolchains" -xJf /tmp/glibc.tar.xz
+          echo "TASTY_TOOLCHAIN_ROOT=$HOME/toolchains/armv7-eabihf--glibc--stable-2026.08-1" >> "$GITHUB_ENV"
+      - name: Static deps
+        run: python3 src/tools/build-static-deps.py
+      - name: Configure
+        run: cmake --preset armhf-static -DTASTY_TOOLCHAIN_ROOT="$TASTY_TOOLCHAIN_ROOT" -DTASTY_STATIC_DEPS="$TASTY_TOOLCHAIN_ROOT/opt"
+      - name: Build
+        run: cmake --build --preset armhf-static
+      - name: Strip
+        run: |
+          BIN=build/armhf-static/src/firmware/tasty
+          STRIP="$TASTY_TOOLCHAIN_ROOT/bin/arm-buildroot-linux-gnueabihf-strip"
+          mkdir -p dist dist-debug
+          cp "$BIN" dist-debug/tasty-armhf-static-debug
+          "$STRIP" -o dist/tasty "$BIN"
+          echo "stripped $(stat -c%s dist/tasty) bytes (unstripped $(stat -c%s dist-debug/tasty-armhf-static-debug))"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tasty-armhf-static
+          path: dist/tasty
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tasty-armhf-static-debug
+          path: dist-debug/tasty-armhf-static-debug
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [host, armhf-static]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: tasty-armhf-static
+          path: dist
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/tasty
+          generate_release_notes: true

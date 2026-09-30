@@ -1,0 +1,42 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {"major": 3, "minor": 21, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "host",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/host",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_COMPILER": "g++-15",
+        "CMAKE_C_COMPILER": "gcc-15",
+        "TASTY_TESTS": "ON",
+        "TASTY_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "armhf-static",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/armhf-static",
+      "toolchainFile": "${sourceDir}/cmake/arm-linux-gnueabihf-static.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "TASTY_TESTS": "OFF",
+        "TASTY_BUILD_TESTS": "OFF",
+        "TASTY_SEAT_CHECKS": "OFF",
+        "TASTY_WERROR": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {"name": "host", "configurePreset": "host"},
+    {"name": "armhf-static", "configurePreset": "armhf-static"}
+  ],
+  "testPresets": [
+    {
+      "name": "host",
+      "configurePreset": "host",
+      "output": {"outputOnFailure": true}
+    }
+  ]
+}
