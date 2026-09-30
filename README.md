@@ -71,6 +71,8 @@ Meet Tasty Kun: MiSTer Kun, sticking his tongue out.
 | **Plain** | **Donut** | **Pizza** |
 | <img src="art/tasty-kun-onigiri.png" width="200" alt="Tasty Kun with onigiri"> | <img src="art/tasty-kun-icecream.png" width="200" alt="Tasty Kun with ice cream"> | <img src="art/tasty-kun-sushi.png" width="200" alt="Tasty Kun with sushi"> |
 | **Onigiri** | **Ice cream** | **Sushi** |
+| <img src="art/tasty-kun-taco.png" width="200" alt="Tasty Kun with a taco"> | <img src="art/tasty-kun-ramen.png" width="200" alt="Tasty Kun with ramen"> | <img src="art/tasty-kun-holubtsi.png" width="200" alt="Tasty Kun with holubtsi"> |
+| **Taco** | **Ramen** | **Holubtsi** |
 
 There is a pixel version too: <img src="art/tasty-kun-8bit-32x32.png" width="32" alt="8-bit Tasty Kun"> at 32x32
 ([big](art/tasty-kun-8bit.png)). Every variant comes as SVG and PNG in [`art/`](art/), along with the
