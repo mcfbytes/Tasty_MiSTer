@@ -21,6 +21,7 @@ set(TASTY_CORES_TASTY
   src/movie_archive.cpp
   src/movie_codec.cpp
   src/nes_movie_codec.cpp
+  src/nes_bk2_codec.cpp
   src/rom_digest.cpp
   src/snes_movie_codec.cpp
   src/snes_lsmv_codec.cpp
@@ -196,6 +197,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/movie_codec.h
   cores/movie_system.h
   cores/nes_movie_codec.h
+  cores/nes_bk2_codec.h
   cores/digest_value.h
   cores/rom_digest.h
   cores/snes_movie_codec.h
@@ -236,6 +238,15 @@ if(TASTY_BUILD_TESTS)
   add_test(NAME tasty.cores_nes_movie_codec COMMAND tasty_cores_nes_movie_codec_unit)
   set_tests_properties(tasty.cores_nes_movie_codec PROPERTIES TIMEOUT 60)
 
+  add_executable(tasty_cores_nes_bk2_codec_unit tests/nes_bk2_codec_unit.cpp)
+  target_link_libraries(tasty_cores_nes_bk2_codec_unit PRIVATE mister_cores tasty_test_options)
+  if(TASTY_WITH_MINIZIP)
+    target_compile_definitions(tasty_cores_nes_bk2_codec_unit PRIVATE TASTY_HAVE_MINIZIP=1)
+    target_include_directories(tasty_cores_nes_bk2_codec_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
+  endif()
+  add_test(NAME tasty.cores_nes_bk2_codec COMMAND tasty_cores_nes_bk2_codec_unit)
+  set_tests_properties(tasty.cores_nes_bk2_codec PROPERTIES TIMEOUT 60)
+
   add_executable(tasty_cores_snes_movie_codec_unit tests/snes_movie_codec_unit.cpp)
   target_link_libraries(tasty_cores_snes_movie_codec_unit PRIVATE mister_cores tasty_test_options)
   add_test(NAME tasty.cores_snes_movie_codec COMMAND tasty_cores_snes_movie_codec_unit)
@@ -248,6 +259,11 @@ if(TASTY_BUILD_TESTS)
 
   add_executable(tasty_cores_psx_movie_codec_unit tests/psx_movie_codec_unit.cpp)
   target_link_libraries(tasty_cores_psx_movie_codec_unit PRIVATE mister_cores tasty_test_options)
+  target_compile_definitions(tasty_cores_psx_movie_codec_unit PRIVATE
+    TASTY_PSX_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/psx")
+  if(TASTY_WITH_LIBCHDR)
+    target_compile_definitions(tasty_cores_psx_movie_codec_unit PRIVATE TASTY_HAVE_LIBCHDR=1)
+  endif()
   add_test(NAME tasty.cores_psx_movie_codec COMMAND tasty_cores_psx_movie_codec_unit)
   set_tests_properties(tasty.cores_psx_movie_codec PROPERTIES TIMEOUT 60)
 

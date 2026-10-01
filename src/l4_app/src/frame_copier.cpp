@@ -167,7 +167,7 @@ void FrameCopier::answer_(std::uint16_t gen, RecVerdict v) noexcept {
 void FrameCopier::begin_(const RecControl& c) noexcept {
     if (!window_ || w_.channel == nullptr || w_.clock == nullptr)
         return answer_(c.gen, RecVerdict::NoWindow);
-    if (c.mode == RecMode::Avi && !CscdCodec::kAvailable)
+    if (c.mode == RecMode::Avi && c.opt.codec != RecCodec::Zmbv && !CscdCodec::kAvailable)
         return answer_(c.gen, RecVerdict::NoCodec);
     const std::uint16_t answered = st_.answered;
     st_ = RecorderStatus{};
@@ -177,6 +177,7 @@ void FrameCopier::begin_(const RecControl& c) noexcept {
     answer_(c.gen, RecVerdict::None);
     path_ = c.path;
     mode_ = c.mode;
+    opt_ = c.opt;
     st_.avi = c.mode == RecMode::Avi ? 1 : 0;
     from_arm_ = c.op == RecOp::Arm;
     open_sent_ = close_sent_ = false;
@@ -329,6 +330,7 @@ bool FrameCopier::open_segment_() noexcept {
     loan->kind = RawKind::Open;
     loan->gen = st_.gen;
     loan->mode = mode_;
+    loan->opt = opt_;
     loan->path = path_;
     w_.channel->send(std::move(loan));
     open_sent_ = true;

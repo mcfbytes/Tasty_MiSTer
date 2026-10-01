@@ -34,7 +34,7 @@ struct ReplayMsg {
         P0Parity p0 = P0Parity::Any;
         std::int16_t lead = 0;
         PowerOnEvent event = PowerOnEvent::LoadEnd;
-        std::uint8_t pad_ = 0;
+        std::uint8_t late_frames = 0;
         std::uint32_t offset_us = 0;
         std::uint32_t period_ns = 0;
         std::uint32_t line0_ns = 0;

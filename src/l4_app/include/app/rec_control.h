@@ -3,6 +3,9 @@
 
 #include <cstdint>
 
+#include <type_traits>
+
+#include "app/rec_options.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -20,7 +23,11 @@ struct RecControl {
     RecOp op = RecOp::None;
     RecMode mode = RecMode::Hash;
     RecPath path{};
+    RecOptions opt{};
 };
+
+static_assert(std::is_trivially_copyable_v<RecControl>);
+static_assert(std::is_nothrow_default_constructible_v<RecControl>);
 
 using RecControlCell = xthread::Telemetry<RecControl, SeatTag::Ui>;
 

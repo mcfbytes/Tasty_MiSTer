@@ -46,7 +46,7 @@ bool FrameHasher::push_(const SidecarMsg& m) noexcept {
 bool FrameHasher::chunk_(const RawFrameSlot& s, bool real, SidecarMsg& m) noexcept {
     if (w_.video == nullptr) return true;
     if (!chunked_) {
-        if (!w_.video->chunk(s, real)) return false;
+        if (!w_.video->chunk(s, real, m.stamp.core_frame, m.stamp.movie_frame)) return false;
         chunked_ = true;
     }
     const AviEncoder::Position p = w_.video->position();

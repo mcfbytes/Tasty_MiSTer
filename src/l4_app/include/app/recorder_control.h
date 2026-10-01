@@ -39,8 +39,9 @@ public:
     RecorderControl(const RecorderControl&) = delete;
     RecorderControl& operator=(const RecorderControl&) = delete;
 
-    [[nodiscard]] bool take_start(std::string_view path, RecMode mode) noexcept;
-    [[nodiscard]] bool take_arm(std::string_view path, RecMode mode) noexcept;
+    [[nodiscard]] bool take_start(std::string_view path, RecMode mode,
+                                  RecOptions opt = {}) noexcept;
+    [[nodiscard]] bool take_arm(std::string_view path, RecMode mode, RecOptions opt = {}) noexcept;
     [[nodiscard]] bool take_stop() noexcept;
     [[nodiscard]] bool take_disarm() noexcept;
 
@@ -52,8 +53,10 @@ public:
     [[nodiscard]] std::uint16_t generation() const noexcept { return gen_; }
 
 private:
-    [[nodiscard]] bool request_(RecOp op, std::string_view path, RecMode mode) noexcept;
-    [[nodiscard]] bool publish_(RecOp op, std::string_view path, RecMode mode) noexcept;
+    [[nodiscard]] bool request_(RecOp op, std::string_view path, RecMode mode,
+                                RecOptions opt) noexcept;
+    [[nodiscard]] bool publish_(RecOp op, std::string_view path, RecMode mode,
+                                RecOptions opt) noexcept;
 
     Wiring w_;
     std::uint16_t gen_ = 0;

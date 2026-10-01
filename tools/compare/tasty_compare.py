@@ -62,6 +62,25 @@ class UsageError(Exception):
     pass
 
 
+class Picture(bytes):
+    """rgb24 pixels that carry their own geometry (a segment or a PNG may differ from the side's)."""
+
+    width: int
+    height: int
+
+    def __new__(cls, data: bytes, width: int, height: int) -> "Picture":
+        obj = super().__new__(cls, data)
+        obj.width = width
+        obj.height = height
+        return obj
+
+
+def dims(pix: bytes, width: int, height: int) -> tuple[int, int]:
+    if isinstance(pix, Picture):
+        return pix.width, pix.height
+    return width, height
+
+
 @dataclass
 class Row:
     core_frame: int
@@ -193,19 +212,24 @@ def parse_emu_log(path: Path) -> dict[int, str]:
                 mf = int(parts[0])
             except ValueError:
                 continue
-            # movie_frame  lag  hash  [kind]
-            if len(parts) >= 3 and all(c in "0123456789abcdefABCDEF" for c in parts[2]):
-                try:
-                    if int(parts[1]) == 1:
-                        continue
-                except ValueError:
-                    pass
-                out[mf] = parts[2].lower()
-            elif all(c in "0123456789abcdefABCDEF" for c in parts[1]):
+            # movie_frame  lag  hash  [kind]. A lag=1 row is the picture the emulator showed
+            # that frame and stays; a kind=png row's hash column is a placeholder, not a hash.
+            if len(parts) >= 3:
+                if len(parts) >= 4 and parts[3].lower() == "png":
+                    continue
+                if _is_hex(parts[2]):
+                    out[mf] = parts[2].lower()
+            elif _is_hex(parts[1]):
                 out[mf] = parts[1].lower()
     if not out:
-        raise UsageError(f"{path} has no movie_frame/hash rows")
+        raise UsageError(
+            f"{path} has no movie_frame/hash rows (a PNG-only dump: pass its directory as --emu)"
+        )
     return out
+
+
+def _is_hex(text: str) -> bool:
+    return bool(text) and all(c in "0123456789abcdefABCDEF" for c in text)
 
 
 def movie_index(rows: list[Row]) -> tuple[dict[int, Row], list[int]]:
@@ -460,7 +484,7 @@ def iter_png_frames(folder: Path) -> Iterator[tuple[int, bytes, int, int]]:
         raise UsageError(f"{folder} has no PNG frames")
     for i, p in enumerate(files):
         pix, w, h = read_png(p)
-        yield png_movie_frame(p, i), pix, w, h
+        yield png_movie_frame(p, i), Picture(pix, w, h), w, h
 
 
 def crop_bytes(pixels: bytes, width: int, height: int, crop: tuple[int, int, int, int]) -> tuple[bytes, int, int]:
@@ -609,8 +633,8 @@ def frame_leftover(
     ep = epix.get(mf + off)
     if mp is None or ep is None:
         return None
-    mp, _, _ = crop_bytes(mp, mw, mh, crop_m)
-    ep, _, _ = crop_bytes(ep, ew, eh, crop_e)
+    mp, _, _ = crop_bytes(mp, *dims(mp, mw, mh), crop_m)
+    ep, _, _ = crop_bytes(ep, *dims(ep, ew, eh), crop_e)
     if len(mp) != len(ep):
         return None
     return leftover_count(ep, mp)
@@ -963,25 +987,45 @@ def write_csv(path: Path, rows: list[tuple[int, bool, str]]) -> None:
             w.writerow([mf, "1" if match else "0", metric])
 
 
+def segment_rows(side: Side) -> dict[int, dict[int, Row]]:
+    """Sidecar rows by segment, then by avi_frame (which restarts at 0 in each segment)."""
+    out: dict[int, dict[int, Row]] = {}
+    for r in (side.by_movie or {}).values():
+        if r.avi_frame >= 0:
+            out.setdefault(r.segment, {})[r.avi_frame] = r
+    return out
+
+
 def load_movie_pixels(side: Side, max_frames: Optional[int] = None) -> dict[int, bytes]:
-    """Load pixels keyed by movie frame. AVI uses sidecar avi_frame, or 0..n."""
+    """Load pixels keyed by movie frame. A sidecar maps each <stem>_<segment>.avi frame; else 0..n."""
     out: dict[int, bytes] = {}
+    segs = segment_rows(side) if side.tsv is not None else {}
+    if side.avi is not None and segs:
+        assert side.tsv is not None
+        for seg in sorted(segs):
+            by_avi = segs[seg]
+            first = next(iter(by_avi.values()))
+            w, h = first.width, first.height
+            avi = sidecar_avi(side.tsv, seg)
+            if not avi.is_file():
+                raise UsageError(f"{avi} is missing (segment {seg} of {side.tsv.name})")
+            for i, pix in enumerate(iter_avi_frames(avi, w, h)):
+                r = by_avi.get(i)
+                if r is None:
+                    continue
+                out[r.movie_frame] = Picture(pix, w, h)
+                if max_frames is not None and len(out) >= max_frames:
+                    return out
+        if out:
+            return out
+        raise UsageError(f"{side.avi} decoded no frames")
     if side.avi is not None:
         w, h = side.width, side.height
         if not w:
             w, h = probe_size(side.avi)
             side.width, side.height = w, h
-        by_avi: dict[int, Row] = {}
-        if side.by_movie is not None:
-            by_avi = {r.avi_frame: r for r in side.by_movie.values() if r.avi_frame >= 0}
         for i, pix in enumerate(iter_avi_frames(side.avi, w, h)):
-            if by_avi:
-                r = by_avi.get(i)
-                if r is None:
-                    continue
-                out[r.movie_frame] = pix
-            else:
-                out[i] = pix
+            out[i] = pix
             if max_frames is not None and len(out) >= max_frames:
                 break
         if out:
@@ -1012,27 +1056,29 @@ def compare_pixels(
     tolerance: Optional[tuple[float, float]],
     learn_n: int,
     pixel_slop: int = 16,
+    overlap_only: bool = False,
+    movie: Optional[Iterable[int]] = None,
+    skipped: Iterable[int] = (),
+    capped: bool = False,
 ) -> tuple[Optional[int], list[tuple[int, bool, str]], dict[int, tuple[bytes, bytes, int, int]]]:
-    keys = sorted(set(mister_pix) & {k - offset for k in emu_pix})
-    aligned: list[tuple[int, bytes, bytes]] = []
+    keys = compared_frames(mister_pix, emu_pix, offset, overlap_only, movie, skipped, capped)
+    aligned: list[tuple[int, Optional[bytes], Optional[bytes]]] = []
     kept: dict[int, tuple[bytes, bytes, int, int]] = {}
     for mf in keys:
-        if mf < 0:
-            continue
         mp = mister_pix.get(mf)
         ep = emu_pix.get(mf + offset)
         if mp is None or ep is None:
+            aligned.append((mf, mp, ep))
             continue
-        mp, mw2, mh2 = crop_bytes(mp, mw, mh, crop_m)
-        ep, ew2, eh2 = crop_bytes(ep, ew, eh, crop_e)
+        mp, mw2, mh2 = crop_bytes(mp, *dims(mp, mw, mh), crop_m)
+        ep, ew2, eh2 = crop_bytes(ep, *dims(ep, ew, eh), crop_e)
         if (mw2, mh2) != (ew2, eh2):
             raise UsageError(
                 f"frame {mf}: size {mw2}x{mh2} vs {ew2}x{eh2} after crop; pass --crop"
             )
         aligned.append((mf, mp, ep))
         kept[mf] = (mp, ep, mw2, mh2)
-        mw, mh, ew, eh = mw2, mh2, ew2, eh2
-    if not aligned:
+    if not kept:
         raise UsageError("no overlapping movie frames after offset/crop")
     if pal is None and bijection:
         print(
@@ -1040,6 +1086,9 @@ def compare_pixels(
         )
     rows: list[tuple[int, bool, str]] = []
     for mf, mp, ep in aligned:
+        if mp is None or ep is None:
+            rows.append((mf, False, "missing-mister" if mp is None else "missing-emu"))
+            continue
         if pal is not None:
             mi = rgb_to_index(mp, pal)
             ei = rgb_to_index(ep, pal)
@@ -1063,6 +1112,33 @@ def compare_pixels(
     streak = 3 if len(rows) >= 100 else 1
     first = first_mismatch_streak(rows, streak)
     return first, rows, kept
+
+
+def compared_frames(
+    mister_pix: dict[int, bytes],
+    emu_pix: dict[int, bytes],
+    offset: int,
+    overlap_only: bool,
+    movie: Optional[Iterable[int]],
+    skipped: Iterable[int],
+    capped: bool,
+) -> list[int]:
+    """Movie frames to compare. Without --overlap a frame either side lacks is a mismatch, over
+    the MiSTer movie's span: from the emulator dump's first frame (FCEUX names frame 1 first) to
+    the movie's last (a dump that runs on is not a difference). `capped`: --max-frames cut both."""
+    mine = {k for k in mister_pix if k >= 0}
+    theirs = {k - offset for k in emu_pix}
+    both = mine & theirs
+    if overlap_only or not mine or not theirs:
+        return sorted(both)
+    want = set(mine) if capped or movie is None else {k for k in movie if k >= 0}
+    want -= set(skipped)
+    lo = max(min(want | mine), min(theirs))
+    hi = max(want | mine)
+    if capped:
+        hi = min(max(mine), max(theirs))
+    span = {k for k in want | mine | theirs if lo <= k <= hi} - set(skipped)
+    return sorted(span | both)
 
 
 def first_mismatch_streak(rows: list[tuple[int, bool, str]], n: int) -> Optional[int]:
@@ -1309,6 +1385,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             tolerance=parse_tolerance(args.tolerance),
             learn_n=30,
             pixel_slop=slop,
+            overlap_only=args.overlap,
+            movie=mister.by_movie.keys() if mister.by_movie is not None else None,
+            skipped=mister.skipped_missed or (),
+            capped=args.max_frames is not None,
         )
         args.out.mkdir(parents=True, exist_ok=True)
         write_csv(args.out / "frames.csv", rows)
@@ -1322,6 +1402,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         headline = unique or slip_at or first
         cf = core_frame_of(mister, headline)
         print(f"first difference: movie frame {headline} (core frame {cf}), offset {off}")
+        gap = next((m for mf, _ok, m in rows if mf == first and m.startswith("missing-")), None)
+        if gap is not None:
+            print(f"movie frame {first}: {gap} (one side has no picture; --overlap ignores it)")
         if slip_at is not None and new_off != off:
             sc = core_frame_of(mister, slip_at)
             print(

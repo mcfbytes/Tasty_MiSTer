@@ -160,7 +160,14 @@ public:
     void set_support_fhd(bool v) noexcept { support_fhd_ = v; }
 
     void force_vsync_adjust(std::uint8_t v) noexcept;
+
+    void arm_replay_ini(bool strict) noexcept;
     [[nodiscard]] std::uint8_t vsync_adjust() const noexcept { return vsync_adjust_; }
+
+    [[nodiscard]] bool direct_video() const noexcept { return direct_video_; }
+    [[nodiscard]] std::uint8_t direct_video_ini() const noexcept { return direct_video_ini_; }
+
+    [[nodiscard]] bool ini_read() const noexcept { return ini_read_; }
     [[nodiscard]] std::uint16_t output_width() const noexcept { return scrw_; }
     [[nodiscard]] std::uint16_t output_height() const noexcept { return scrh_; }
 
@@ -357,6 +364,9 @@ private:
     double refresh_min_ = 0.0;
     double refresh_max_ = 0.0;
     bool direct_video_ = false;
+    std::uint8_t direct_video_ini_ = 0;
+    bool replay_ini_ = false;
+    bool strict_direct_video_ = false;
     bool menu_pal_ = false;
     bool forced_scandoubler_ = false;
     std::uint16_t ar_cust_[4]{};

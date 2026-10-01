@@ -9,12 +9,14 @@
 #include <string_view>
 
 #include "app/owner_tick.h"
+#include "app/encode_status.h"
 #include "app/path_text.h"
 #include "app/recorder_status.h"
 #include "app/replay_status.h"
 #include "cores/movie_system.h"
 #include "hal/phys_region.h"
 #include "infra/seat.h"
+#include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "os/monotonic_clock.h"
 #include "tasty_cli.h"
@@ -43,7 +45,9 @@ public:
         std::string_view movie{};
         std::string_view rom{};
         std::optional<std::int32_t> lead{};
+        std::optional<std::uint32_t> phase_us{};
         std::optional<std::uint32_t> stop_at{};
+        std::optional<cores::IMovieCodec::RamFill> ram_fill{};
         bool set_settings = true;
     };
 
@@ -80,12 +84,14 @@ public:
         const app::IdentityLatch* identity = nullptr;
         const app::ReplayStatusCell* play = nullptr;
         const app::RecorderStatusCell* recstat = nullptr;
+        const app::EncodeStatusCell* encstat = nullptr;
         xthread::WakeFlag* main_stop = nullptr;
         const svc::Vfs* vfs = nullptr;
         const std::atomic<int>* stop = nullptr;
-        std::atomic<int>* want_stock = nullptr;
         std::atomic<int>* exit_code = nullptr;
         hal::PhysRegion video_fb{};
+
+        const xthread::Telemetry<std::uint8_t, SeatTag::Unbound>* direct_video_ini = nullptr;
     };
 
     TastySession(const Wiring& w, const TastyArgs& args) noexcept;
@@ -121,6 +127,8 @@ private:
     void print_settings_() noexcept;
     [[nodiscard]] Stage after_hide_() const noexcept;
 
+    [[nodiscard]] std::optional<std::uint8_t> direct_video_resolved_() const noexcept;
+
     Wiring w_;
     TastyArgs args_;
     os::MonotonicClock clock_{};
@@ -132,13 +140,15 @@ private:
     app::PathText menu_path_{};
     char last_status_[768]{};
     unsigned last_status_n_ = 0;
-    bool want_stock_ = false;
     bool rec_only_ = false;
     bool splash_ok_ = false;
     bool play_started_ = false;
     bool stop_sent_ = false;
     std::size_t settings_printed_ = 0;
+    std::uint8_t direct_video_was_ = 0;
+    bool direct_video_line_ = false;
     bool resampled_ = false;
+    std::uint32_t step_said_gen_ = 0;
     unsigned hide_tries_ = 0;
     std::uint32_t id_gen_ = 0;
     std::uint32_t video_edges_ = 0;

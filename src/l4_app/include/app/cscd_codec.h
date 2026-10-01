@@ -6,13 +6,13 @@
 #include <span>
 
 #include "app/frame_arena.h"
-#include "infra/error.h"
+#include "app/frame_codec.h"
 #include "infra/seat.h"
 
 namespace mister::app {
 
-class CscdCodec {
-    TASTY_SEAT_EXEMPT(component);
+class CscdCodec final : public IFrameCodec {
+    TASTY_SEAT_RESIDENT(Encode);
 
 public:
 #if defined(TASTY_HAVE_LZO) && TASTY_HAVE_LZO
@@ -32,8 +32,8 @@ public:
         return row_bytes(w) * h;
     }
 
-    [[nodiscard]] static constexpr std::size_t max_payload(std::uint32_t w,
-                                                           std::uint32_t h) noexcept {
+    [[nodiscard]] static constexpr std::size_t payload_bound(std::uint32_t w,
+                                                             std::uint32_t h) noexcept {
         const std::size_t n = picture_bytes(w, h);
         return kHeadBytes + n + n / 16u + 64u + 3u;
     }
@@ -42,19 +42,39 @@ public:
     CscdCodec(const CscdCodec&) = delete;
     CscdCodec& operator=(const CscdCodec&) = delete;
 
-    [[nodiscard]] Ex<void> begin(std::uint16_t w, std::uint16_t h) noexcept;
-    void end() noexcept;
-    [[nodiscard]] bool open() const noexcept { return width_ != 0; }
-    [[nodiscard]] std::uint16_t width() const noexcept { return width_; }
-    [[nodiscard]] std::uint16_t height() const noexcept { return height_; }
     [[nodiscard]] std::size_t mapped_bytes() const noexcept { return arena_.bytes(); }
 
+    void restart(const RecOptions&) noexcept override { TASTY_SEAT_BODY(CscdCodec); }
+    void arm(const os::IClock*, std::int64_t) noexcept override { TASTY_SEAT_BODY(CscdCodec); }
+    [[nodiscard]] Search search() const noexcept override {
+        TASTY_SEAT_BODY(CscdCodec);
+        return {};
+    }
+    [[nodiscard]] Ex<void> begin(std::uint16_t w, std::uint16_t h) noexcept override;
+    void end() noexcept override;
+    [[nodiscard]] bool open() const noexcept override {
+        TASTY_SEAT_BODY(CscdCodec);
+        return width_ != 0;
+    }
+    [[nodiscard]] std::uint16_t width() const noexcept override {
+        TASTY_SEAT_BODY(CscdCodec);
+        return width_;
+    }
+    [[nodiscard]] std::uint16_t height() const noexcept override {
+        TASTY_SEAT_BODY(CscdCodec);
+        return height_;
+    }
+    [[nodiscard]] std::size_t max_payload() const noexcept override {
+        TASTY_SEAT_BODY(CscdCodec);
+        return payload_bound(width_, height_);
+    }
+
     [[nodiscard]] std::size_t encode(const std::byte* rgb, std::size_t line, bool key,
-                                     std::span<std::byte> out) noexcept;
+                                     std::span<std::byte> out) noexcept override;
 
-    [[nodiscard]] std::size_t rekey(std::span<std::byte> out) noexcept;
+    [[nodiscard]] std::size_t rekey(std::span<std::byte> out) noexcept override;
 
-    [[nodiscard]] std::span<const std::byte> dup() const noexcept;
+    [[nodiscard]] std::span<const std::byte> dup() noexcept override;
 
     static void half_scale(const std::byte* rgb, std::size_t line, std::uint16_t w, std::uint16_t h,
                            std::byte* dst) noexcept;

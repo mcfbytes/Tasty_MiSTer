@@ -29,6 +29,7 @@ struct RawFrameSlot {
     std::uint32_t line = 0;
     std::uint32_t vtime = 0;
     RecMode mode = RecMode::Hash;
+    RecOptions opt{};
     const std::byte* pixels = nullptr;
     RecPath path{};
 };

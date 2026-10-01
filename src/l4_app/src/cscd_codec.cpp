@@ -25,6 +25,7 @@ constexpr std::size_t kWorkBytes = LZO1X_1_MEM_COMPRESS;
 }  // namespace
 
 Ex<void> CscdCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
+    TASTY_SEAT_BODY(CscdCodec);
     end();
 #ifdef TASTY_HAVE_LZO
     if (w == 0 || h == 0 || lzo_init() != LZO_E_OK)
@@ -62,17 +63,22 @@ Ex<void> CscdCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
 }
 
 void CscdCodec::end() noexcept {
+    TASTY_SEAT_BODY(CscdCodec);
     arena_.release();
     prev_ = delta_ = work_ = dup_ = nullptr;
     dup_len_ = 0;
     width_ = height_ = 0;
 }
 
-std::span<const std::byte> CscdCodec::dup() const noexcept { return {dup_, dup_len_}; }
+std::span<const std::byte> CscdCodec::dup() noexcept {
+    TASTY_SEAT_BODY(CscdCodec);
+    return {dup_, dup_len_};
+}
 
 std::size_t CscdCodec::encode(const std::byte* rgb, std::size_t line, bool key,
                               std::span<std::byte> out) noexcept {
-    if (!open() || rgb == nullptr || out.size() < max_payload(width_, height_)) return 0;
+    TASTY_SEAT_BODY(CscdCodec);
+    if (!open() || rgb == nullptr || out.size() < payload_bound(width_, height_)) return 0;
     const std::size_t row = row_bytes(width_);
     const std::size_t w = width_;
     for (std::size_t y = 0; y < height_; ++y) {
@@ -94,11 +100,13 @@ std::size_t CscdCodec::encode(const std::byte* rgb, std::size_t line, bool key,
 }
 
 std::size_t CscdCodec::rekey(std::span<std::byte> out) noexcept {
-    if (!open() || out.size() < max_payload(width_, height_)) return 0;
+    TASTY_SEAT_BODY(CscdCodec);
+    if (!open() || out.size() < payload_bound(width_, height_)) return 0;
     return pack_(prev_, true, out);
 }
 
 std::size_t CscdCodec::pack_(const std::byte* src, bool key, std::span<std::byte> out) noexcept {
+    TASTY_SEAT_BODY(CscdCodec);
 #ifdef TASTY_HAVE_LZO
     out[0] = key ? std::byte{kKeyBit} : std::byte{0};
     out[1] = std::byte{0};

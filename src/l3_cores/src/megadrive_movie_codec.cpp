@@ -165,6 +165,8 @@ constexpr std::uint64_t kLineClk = 6840;
 
 constexpr std::uint64_t kHoldClk = 5 * 32768 / 2;
 
+constexpr std::uint8_t kLateFrames = 2;
+
 constexpr std::size_t kGmvHead = 64;
 constexpr std::string_view kGmvMagic = "Gens Movie TEST";
 constexpr std::size_t kGmvChunk = 256;
@@ -308,9 +310,12 @@ Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv) {
     const std::uint64_t line = 2u * (six ? 12u : 8u) + 4u;
     if ((size->v - kGmvHead) / 3 * line > MovieArchiveFormat::kLogMax)
         return std::unexpected(refuse(CR::TooLong, ERR_SITE()));
-    std::string head = "GmvVersion " + std::to_string(byte(0x0F)) + "\nGmvPlayers " +
-                       std::to_string(byte(0x14)) + " " + std::to_string(byte(0x15)) +
-                       "\nGmvFlags " + std::to_string(byte(0x16)) + "\nLogKey:" + pad_key(1, six) +
+    const std::uint32_t rerecords =
+        byte(0x10) | byte(0x11) << 8 | byte(0x12) << 16 | byte(0x13) << 24;
+    std::string head = "GmvVersion " + std::to_string(byte(0x0F)) + "\nGmvRerecords " +
+                       std::to_string(rerecords) + "\nGmvPlayers " + std::to_string(byte(0x14)) +
+                       " " + std::to_string(byte(0x15)) + "\nGmvFlags " +
+                       std::to_string(byte(0x16)) + "\nLogKey:" + pad_key(1, six) +
                        pad_key(2, six) + "\n";
     const std::uint64_t frames = (size->v - kGmvHead) / 3;
     return std::unique_ptr<svc::IFile>(
@@ -442,6 +447,7 @@ Ex<IMovieCodec::Facts> MegaDriveMovieCodec::header_line(std::string_view line,
             f.region = (*v & 0x80u) != 0 ? Region::Pal : Region::Ntsc;
         }
     }
+    note_rerecords(key, val, f);
     f.layout = l.bits();
     return f;
 }
@@ -504,7 +510,8 @@ Ex<IMovieCodec::Frame> MegaDriveMovieCodec::frame(std::string_view line,
         }
         out.mask[static_cast<std::size_t>(role[g])] = m;
     }
-    if (!rest.empty()) return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
+
+    if (!rest.empty() && rest != "|") return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
     return out;
 }
 
@@ -525,7 +532,8 @@ IMovieCodec::SettingNeeds MegaDriveMovieCodec::setting_needs(const Facts& f) con
              .allowed = one(six),
              .preferred = six,
              .name = "6 Buttons Mode"});
-    if (!l.gmv && l.region == 0) {
+
+    if ((!l.gmv && l.region == 0) || (l.gmv && f.region != Region::Pal)) {
 
         out.add({.lo = kAutoRegionLo,
                  .width = 2,
@@ -545,13 +553,7 @@ IMovieCodec::SettingNeeds MegaDriveMovieCodec::setting_needs(const Facts& f) con
              .preferred = kAutoDisabled,
              .name = "Auto Region"});
     if (l.gmv) {
-
-        const bool pal = f.region == Region::Pal;
-        out.add({.lo = kRegionLo,
-                 .width = 2,
-                 .allowed = pal ? one(2) : static_cast<std::uint16_t>(one(0) | one(1)),
-                 .preferred = pal ? std::uint8_t{2} : std::uint8_t{1},
-                 .name = "Region"});
+        out.add({.lo = kRegionLo, .width = 2, .allowed = one(2), .preferred = 2, .name = "Region"});
         return out;
     }
     static constexpr std::array<std::uint8_t, 4> kCoreRegion{0, 1, 2, 0};
@@ -580,7 +582,8 @@ IMovieCodec::PowerOn MegaDriveMovieCodec::power_on(const Facts& f) const noexcep
             .clock_hz = pal ? kClkMdPalHz : kClkMdNtscHz,
             .lo = 0,
             .width = 0,
-            .when = 0};
+            .when = 0,
+            .late_frames = kLateFrames};
 }
 
 std::int32_t MegaDriveMovieCodec::default_lead(const Facts& f) const noexcept {

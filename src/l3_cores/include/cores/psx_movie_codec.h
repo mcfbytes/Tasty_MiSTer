@@ -11,6 +11,10 @@
 #include "cores/movie_codec.h"
 #include "infra/seat.h"
 
+namespace mister::svc {
+class IChdSource;
+}
+
 namespace mister::cores {
 
 class PsxMovieCodec final : public IMovieCodec {
@@ -62,6 +66,9 @@ public:
 
     static constexpr std::uint64_t kKeySectors = 26;
     static constexpr std::uint64_t kSectorBytes = 2352;
+
+    static constexpr std::uint32_t kChdFrameBytes = 2448;
+    static constexpr std::uint32_t kChdHunkMax = 1u << 20;
     static constexpr std::int32_t kLeadMin = -120;
     static constexpr std::int32_t kLeadMax = 1200;
     static_assert(kLeadMin >= INT16_MIN && kLeadMax <= INT16_MAX, "the Arm carries a 16-bit lead");
@@ -85,6 +92,9 @@ public:
 
     [[nodiscard]] Ex<DigestSource> digest_source(const svc::Vfs& vfs,
                                                  std::string_view rom) const override;
+    [[nodiscard]] std::string_view disc_images() const noexcept override {
+        return "a Redump .cue/.bin or a chdman .chd of one";
+    }
 
     [[nodiscard]] std::optional<Companion> companion(std::string_view rom,
                                                      const Facts& f) const override;
@@ -93,6 +103,10 @@ public:
 
     [[nodiscard]] static Ex<std::vector<std::uint8_t>> toc_prefix(
         std::string_view cue, std::span<const std::uint64_t> file_sizes);
+
+    [[nodiscard]] static Ex<std::vector<std::uint8_t>> chd_key(svc::IChdSource& chd);
+
+    [[nodiscard]] static Error chd_open_error(const Error& e) noexcept;
 };
 
 consteval bool psx_pad_bits_are_a_permutation() {

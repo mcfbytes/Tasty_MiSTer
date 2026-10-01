@@ -64,6 +64,7 @@ public:
     [[nodiscard]] bool rom_matches(const DigestValue& d, const Facts& f) const noexcept override;
 
     [[nodiscard]] std::uint8_t rom_digit() const noexcept override { return 1; }
+    [[nodiscard]] std::string_view games_folder() const noexcept override { return "Genesis"; }
 };
 
 [[nodiscard]] Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv);

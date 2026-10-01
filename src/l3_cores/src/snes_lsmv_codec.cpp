@@ -81,6 +81,7 @@ Ex<IMovieCodec::Facts> SnesLsmvCodec::header_line(std::string_view line,
 
         return std::unexpected(refuse(Refusal::System, ERR_SITE()));
     }
+    note_rerecords(key, val, f);
     return f;
 }
 

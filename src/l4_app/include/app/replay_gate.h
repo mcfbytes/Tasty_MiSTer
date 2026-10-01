@@ -119,6 +119,7 @@ private:
     std::int64_t period_ns_ = 0;
     std::int64_t line0_ns_ = 0;
     std::int64_t poweron_ns_ = 0;
+    std::uint8_t late_frames_ = 0;
     ReplayMsg::P0Parity p0_ = ReplayMsg::P0Parity::Any;
     ReplayMsg::PowerOnEvent event_ = ReplayMsg::PowerOnEvent::LoadEnd;
     std::uint32_t floor_back_ = kFloorBack;

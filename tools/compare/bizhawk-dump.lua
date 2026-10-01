@@ -4,8 +4,9 @@
 --   TASTY_DUMP_DIR  output directory (default .)
 --   TASTY_DUMP_PNG  1 = also write frame-NNNNNN.png via client.screenshot
 --
--- Writes emu.hashes.tsv with movie_frame, lag, and a CRC of the screenshot
--- bytes when a screenshot is taken; otherwise framecount only and PNG files.
+-- Writes emu.hashes.tsv (movie_frame, lag, hash, kind). The hash column is
+-- "-": this script computes no pixel hash, so compare the PNG directory
+-- (TASTY_DUMP_PNG=1), never the log alone.
 
 local outdir = os.getenv("TASTY_DUMP_DIR") or "."
 local want_png = os.getenv("TASTY_DUMP_PNG") == "1"
@@ -31,7 +32,7 @@ event.onframestart(function()
         lag = 1
     end
     local kind = "png"
-    local hash = "0"
+    local hash = "-"
     if want_png and client and client.screenshot then
         local png = string.format("%s/frame-%06d.png", outdir, fc)
         client.screenshot(png)

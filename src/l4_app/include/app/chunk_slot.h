@@ -21,11 +21,13 @@ struct ChunkSlot {
 
     ChunkKind kind = ChunkKind::Data;
     std::uint8_t scale = 1;
+    RecCodec codec = RecCodec::Cscd;
+    std::uint8_t pad_ = 0;
     std::uint16_t gen = 0;
     std::uint16_t segment = 0;
     std::uint16_t width = 0;
     std::uint16_t height = 0;
-    std::uint16_t pad_ = 0;
+    std::uint16_t frame_mul = 1;
     std::uint32_t vtime = 0;
     std::uint32_t used = 0;
     std::uint32_t chunks = 0;

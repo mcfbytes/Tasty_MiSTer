@@ -97,6 +97,7 @@ public:
         PowerOn,
         Firmware,
         RomKind,
+        RomChd,
         kCount,
     };
 
@@ -109,6 +110,8 @@ public:
         std::optional<std::uint32_t> stop_at{};
 
         bool set_settings = false;
+
+        std::optional<cores::IMovieCodec::RamFill> ram_fill{};
     };
 
     struct SetSetting {
@@ -120,6 +123,13 @@ public:
     static constexpr std::uint32_t kMaxFrames = 1u << 20;
     static constexpr std::uint32_t kPhaseMinUs = 1000;
     static constexpr std::uint32_t kPhaseGuardUs = 2000;
+
+    [[nodiscard]] static constexpr bool phase_fits(std::uint32_t phase_us,
+                                                   std::uint64_t period_ns) noexcept {
+        const std::uint64_t period_us = period_ns / 1000;
+        return period_us > kPhaseGuardUs && phase_us >= kPhaseMinUs &&
+               phase_us <= period_us - kPhaseGuardUs;
+    }
 
     static constexpr std::uint32_t kRunSplit = 60;
     static constexpr std::uint32_t kReadChunk = 16 * 1024;
@@ -208,6 +218,7 @@ private:
     std::uint32_t offset_us_ = 0;
     std::optional<std::int32_t> lead_override_{};
     std::optional<std::uint32_t> stop_at_{};
+    std::optional<cores::IMovieCodec::RamFill> ram_fill_{};
     bool set_ok_ = false;
     std::vector<SetSetting> set_{};
     std::int32_t lead_ = 0;
@@ -219,11 +230,15 @@ private:
     std::unique_ptr<svc::IFile> file_{};
     std::uint64_t file_size_ = 0;
 
+    bool stream_cut_ = false;
+
     std::unique_ptr<svc::IFile> rom_file_{};
     std::uint64_t rom_off_ = 0;
     std::uint64_t rom_end_ = 0;
     std::uint8_t rom_index_ = 0xFF;
     cores::RomDigest digest_{};
+    cores::RomDigest digest_alt_{};
+    bool has_alt_ = false;
     bool firmware_pass_ = false;
     std::uint64_t off_ = 0;
     std::uint64_t log_start_ = 0;

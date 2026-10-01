@@ -85,7 +85,9 @@ void TastySession::ask_core_(std::string_view path) noexcept {
 }
 
 void TastySession::fail_(int rc, const char* why) noexcept {
-    std::fprintf(stderr, "tasty: %s\n", why);
+    char buf[1500];
+    std::snprintf(buf, sizeof buf, "tasty: %s", why != nullptr ? why : "");
+    tasty_say(buf);
     if (w_.exit_code != nullptr) w_.exit_code->store(rc, std::memory_order_relaxed);
     go_menu_();
 }
@@ -126,11 +128,17 @@ void TastySession::fail_refusal_() noexcept {
                       static_cast<int>(movie.size()), movie.data());
     } else if (std::strcmp(why, "rom_kind") == 0) {
         std::snprintf(buf, sizeof buf,
-                      "replay refused: this disc image cannot be hashed; use a Redump .cue");
+                      "replay refused: this disc image cannot be hashed; use a Redump .cue/.bin "
+                      "or a chdman .chd of one");
+    } else if (std::strcmp(why, "rom_chd") == 0) {
+        std::snprintf(buf, sizeof buf,
+                      "replay refused: this build of tasty cannot read .chd disc images");
     } else if (std::strcmp(why, "checksum") == 0) {
         std::snprintf(buf, sizeof buf,
                       "replay refused: the ROM on the card is not the one the movie was recorded "
                       "with");
+    } else if (const char* plain = tasty_refusal_sentence(why); plain != nullptr) {
+        std::snprintf(buf, sizeof buf, "replay refused: %s", plain);
     } else if (set.empty()) {
         std::snprintf(buf, sizeof buf, "replay refused: %s", why);
     } else {
@@ -145,12 +153,35 @@ TastySession::Stage TastySession::after_hide_() const noexcept {
     return rec_only_ ? Stage::Start : Stage::LoadCore;
 }
 
+std::optional<std::uint8_t> TastySession::direct_video_resolved_() const noexcept {
+    if (w_.video != nullptr && !w_.video->ini_read()) return std::nullopt;
+    if (w_.direct_video_ini != nullptr && w_.direct_video_ini->generation() == 0)
+        return std::nullopt;
+    std::uint8_t was = 0;
+    if (w_.video != nullptr) {
+        const std::uint8_t pump = w_.video->direct_video_ini();
+        if (pump > was) was = pump;
+    }
+    if (w_.direct_video_ini != nullptr) {
+        std::uint8_t cell = 0;
+        if (w_.direct_video_ini->sample_into(cell) != 0 && cell > was) was = cell;
+    }
+    return was;
+}
+
 void TastySession::print_settings_() noexcept {
+    if (!direct_video_line_ && !args_.strict && direct_video_was_ != 0) {
+        std::fprintf(stderr, "tasty: direct_video: using 0 for this run (your setting: %u)\n",
+                     static_cast<unsigned>(direct_video_was_));
+        direct_video_line_ = true;
+    }
     if (w_.replay == nullptr) return;
     const std::size_t n = w_.replay->settings_set();
     for (; settings_printed_ < n; ++settings_printed_) {
         const std::string line = w_.replay->setting_line(settings_printed_);
-        std::fprintf(stderr, "tasty: %s\n", line.c_str());
+        char buf[1500];
+        std::snprintf(buf, sizeof buf, "tasty: %s", line.c_str());
+        tasty_say(buf);
     }
 }
 
@@ -167,6 +198,17 @@ void TastySession::write_status_(bool force) noexcept {
     app::RecorderStatus rec{};
     (void)w_.play->sample_into(play);
     (void)w_.recstat->sample_into(rec);
+    app::EncodeStatus enc{};
+    if (w_.encstat != nullptr) (void)w_.encstat->sample_into(enc);
+    if (enc.video.steps != 0 && step_said_gen_ != rec.gen + 1u) {
+        step_said_gen_ = rec.gen + 1u;
+        const char* why = enc.video.fell_behind != 0 ? "the encoder fell behind"
+                                                     : "the encoder was using too much CPU";
+        std::fprintf(stderr,
+                     "tasty: %s; the AVI continues at half size in a new "
+                     "segment (--scale native keeps full size and may repeat frames instead)\n",
+                     why);
+    }
     const std::uint32_t total = w_.replay != nullptr ? w_.replay->movie_frames() : 0;
     const char* end =
         (w_.replay != nullptr && w_.replay->refused()) ? "refused" : app::replay_end_name(play.end);
@@ -175,12 +217,13 @@ void TastySession::write_status_(bool force) noexcept {
         std::snprintf(buf, sizeof buf,
                       "{\"play\":\"%s\",\"end\":\"%s\",\"frame\":%d,\"frames\":%u,\"rec\":\"%s\","
                       "\"rows\":%u,\"late\":%u,\"underruns\":%u,\"skipped\":%u,\"drops\":%u,"
-                      "\"missed\":%u}\n",
+                      "\"missed\":%u,\"scale\":%u}\n",
                       play.level == app::ReplayLevel::Running        ? "running"
                       : play.level == app::ReplayLevel::AwaitPowerOn ? "arming"
                                                                      : "idle",
                       end, play.movie_frame, total, app::rec_state_name(rec.state), rec.rows,
-                      play.late, play.underruns, play.skipped_edges, play.pad_drops, rec.missed);
+                      play.late, play.underruns, play.skipped_edges, play.pad_drops, rec.missed,
+                      static_cast<unsigned>(enc.video.scale));
     if (n <= 0) return;
     const unsigned un = static_cast<unsigned>(n);
     if (!force && un == last_status_n_ && std::memcmp(last_status_, buf, un) == 0) {
@@ -261,19 +304,31 @@ void TastySession::tick() noexcept {
             }
             break;
         case Stage::Start: {
+            const auto dv = direct_video_resolved_();
+            if (!dv) break;
+            direct_video_was_ = *dv;
+            if (args_.strict && direct_video_was_ != 0) {
+                fail_(1,
+                      "replay refused (--strict): direct_video is not off; without --strict tasty "
+                      "sets it for this run");
+                break;
+            }
             const app::RecMode mode = args_.hashes_only ? app::RecMode::Hash : app::RecMode::Avi;
-            if (!args_.record.empty()) {
+            if (args_.record && !args_.record->empty() && !play_started_) {
+                const std::string_view rec = args_.record->view();
                 if (args_.verb == TastyVerb::Play) {
-                    if (w_.rec != nullptr) (void)w_.rec->take_arm(args_.record.view(), mode);
+                    if (w_.rec != nullptr) (void)w_.rec->take_arm(rec, mode, args_.rec);
                 } else {
-                    if (w_.rec != nullptr) (void)w_.rec->take_start(args_.record.view(), mode);
+                    if (w_.rec != nullptr) (void)w_.rec->take_start(rec, mode, args_.rec);
                 }
             }
             if (!rec_only_) {
                 const PlayAsk ask{.movie = args_.movie.view(),
                                   .rom = args_.rom.view(),
                                   .lead = args_.lead,
+                                  .phase_us = args_.phase_us,
                                   .stop_at = args_.stop_at,
+                                  .ram_fill = args_.ram_fill,
                                   .set_settings = !args_.strict};
                 if (w_.replay == nullptr || !w_.replay->take_play(ask)) {
                     fail_refusal_();
@@ -295,7 +350,7 @@ void TastySession::tick() noexcept {
             app::ReplayStatus play{};
             if (w_.play != nullptr) (void)w_.play->sample_into(play);
 
-            if (!resampled_ && !args_.record.empty() && w_.video != nullptr &&
+            if (!resampled_ && args_.record && !args_.record->empty() && w_.video != nullptr &&
                 play.level == app::ReplayLevel::Running && play.movie_frame >= kResampleFrame) {
                 w_.video->resample_geometry();
                 resampled_ = true;
@@ -305,8 +360,18 @@ void TastySession::tick() noexcept {
             if (end == app::ReplayEnd::EpochAmbiguous && w_.replay != nullptr &&
                 w_.replay->active())
                 break;
+            if (end == app::ReplayEnd::Finished && args_.loop) {
+                if (w_.replay != nullptr && w_.replay->active()) break;
+                settings_printed_ = 0;
+                direct_video_line_ = false;
+                stage_ = Stage::Start;
+                break;
+            }
             if (end != app::ReplayEnd::Finished && end != app::ReplayEnd::Stopped) {
-                std::fprintf(stderr, "tasty: replay ended %s\n", app::replay_end_name(end));
+                char buf[800];
+                std::snprintf(buf, sizeof buf, "tasty: %s",
+                              app::replay_end_sentence(end, play.epoch_fail));
+                tasty_say(buf);
                 if (w_.exit_code != nullptr) w_.exit_code->store(1, std::memory_order_relaxed);
             }
             if (args_.stay && end == app::ReplayEnd::Finished) break;
@@ -335,13 +400,10 @@ void TastySession::tick() noexcept {
         case Stage::WaitMenu:
             if (menu_ready_() || now - stage_ns_ > 20'000'000'000) {
                 write_status_(true);
-                want_stock_ = true;
                 stage_ = Stage::Done;
             }
             break;
         case Stage::Done:
-            if (want_stock_ && w_.want_stock != nullptr)
-                w_.want_stock->store(1, std::memory_order_relaxed);
             if (!stop_sent_ && w_.main_stop != nullptr) w_.main_stop->request();
             stop_sent_ = true;
             break;

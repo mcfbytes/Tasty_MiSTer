@@ -87,8 +87,10 @@ void AviWriter::open_(const ChunkSlot& s) noexcept {
     f_ = AviFormat::Fields{};
     f_.width = s.width;
     f_.height = s.height;
+    f_.codec = s.codec;
     f_.rate = AviFormat::kTickHz;
-    f_.scale = AviFormat::kDefaultVtime;
+    frame_mul_ = s.frame_mul == 0 ? 1 : s.frame_mul;
+    f_.scale = scaled_vtime_(AviFormat::kDefaultVtime);
     rate_known_ = false;
     if (AviFormat::plausible_vtime(s.vtime)) learn_rate_(s.vtime);
     AviFormat::Header h{};
@@ -158,12 +160,20 @@ void AviWriter::finalize_() noexcept {
     dirty_ = true;
 }
 
+static_assert(std::uint64_t{AviFormat::kVtimeMax} * kRecEveryMax <= 0xFFFF'FFFFu);
+
+std::uint32_t AviWriter::scaled_vtime_(std::uint32_t vtime) const noexcept {
+    const std::uint32_t mul = frame_mul_ == 0 ? 1u : frame_mul_;
+    const std::uint64_t product = std::uint64_t{vtime} * mul;
+    return static_cast<std::uint32_t>(product > 0xFFFF'FFFFu ? 0xFFFF'FFFFu : product);
+}
+
 void AviWriter::learn_rate_(std::uint32_t vtime) noexcept {
-    f_.scale = vtime;
+    f_.scale = scaled_vtime_(vtime);
     rate_known_ = true;
     for (std::size_t i = 0; i < nunrated_; ++i) {
         Unrated& u = unrated_[i];
-        u.f.scale = vtime;
+        u.f.scale = f_.scale;
         AviFormat::Header h{};
         AviFormat::header(u.f, h);
         std::size_t off = 0;

@@ -46,6 +46,7 @@ public:
         Archive,
         Subframe,
         System,
+        ChdUnsupported,
         kCount,
     };
     enum class Region : std::uint8_t { Ntsc, Pal };
@@ -65,6 +66,8 @@ public:
 
         bool has_firmware = false;
         DigestValue firmware{};
+        bool has_rerecords = false;
+        std::uint32_t rerecords = 0;
     };
     struct Frame {
         std::uint8_t commands = 0;
@@ -89,6 +92,8 @@ public:
         std::uint16_t when = 0;
         Parity p0 = Parity::Any;
         PowerOnEvent event = PowerOnEvent::LoadEnd;
+
+        std::uint8_t late_frames = 0;
     };
 
     struct LeadRange {
@@ -119,9 +124,10 @@ public:
         void add(const SettingNeed& need) noexcept {
             if (n < rows.size()) rows[n++] = need;
         }
-        [[nodiscard]] std::span<const SettingNeed> view() const noexcept {
+        [[nodiscard]] std::span<const SettingNeed> view() const& noexcept {
             return {rows.data(), n};
         }
+        std::span<const SettingNeed> view() const&& = delete;
     };
 
     virtual ~IMovieCodec() = default;
@@ -146,6 +152,16 @@ public:
     [[nodiscard]] virtual Ex<Frame> frame(std::string_view line, const Facts& f) const noexcept = 0;
 
     [[nodiscard]] virtual SettingNeeds setting_needs(const Facts& f) const noexcept = 0;
+
+    enum class RamFill : std::uint8_t { Zero, Ff, Random };
+
+    [[nodiscard]] virtual std::optional<SettingNeed> ram_fill_need(RamFill fill) const noexcept {
+        (void)fill;
+        return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<SettingNeeds> setting_needs_for(
+        const Facts& f, std::optional<RamFill> fill) const noexcept;
     [[nodiscard]] SettingVerdict check_settings(const proto::StatusWord& live,
                                                 const Facts& f) const noexcept;
     [[nodiscard]] virtual Raster raster(const Facts& f) const noexcept = 0;
@@ -170,6 +186,8 @@ public:
         return f.has_digest && d == f.digest;
     }
 
+    [[nodiscard]] virtual std::string_view games_folder() const noexcept { return {}; }
+
     [[nodiscard]] virtual std::uint8_t rom_digit() const noexcept = 0;
 
     static constexpr std::uint64_t kRomMax = 4u << 20;
@@ -178,12 +196,16 @@ public:
         std::string file{};
         DigestSpan span{};
         std::vector<std::uint8_t> prefix{};
+
+        std::optional<std::vector<std::uint8_t>> alt_prefix{};
     };
 
     [[nodiscard]] virtual Ex<DigestSource> digest_source(const svc::Vfs& vfs,
                                                          std::string_view rom) const {
         return head_digest_source(vfs, rom);
     }
+
+    [[nodiscard]] virtual std::string_view disc_images() const noexcept { return {}; }
 
     struct Companion {
         std::array<std::string, 2> paths{};
@@ -210,6 +232,8 @@ protected:
     IMovieCodec(const IMovieCodec&) = default;
     IMovieCodec& operator=(const IMovieCodec&) = default;
 };
+
+void note_rerecords(std::string_view key, std::string_view val, IMovieCodec::Facts& f) noexcept;
 
 [[nodiscard]] const IMovieCodec* movie_codec_for(std::string_view conf_str_name,
                                                  std::string_view movie_path) noexcept;

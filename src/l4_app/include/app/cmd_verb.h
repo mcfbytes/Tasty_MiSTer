@@ -47,10 +47,12 @@ struct CmdVerb {
     struct RecStart {
         std::string_view path;
         RecMode mode = RecMode::Avi;
+        RecOptions opt{};
     };
     struct RecArm {
         std::string_view path;
         RecMode mode = RecMode::Avi;
+        RecOptions opt{};
     };
     struct RecStop {};
     struct RecDisarm {};

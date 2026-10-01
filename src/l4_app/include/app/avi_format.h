@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 
+#include "app/rec_options.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -17,6 +18,7 @@ public:
     struct Fields {
         std::uint16_t width = 0;
         std::uint16_t height = 0;
+        RecCodec codec = RecCodec::Cscd;
         std::uint32_t rate = 0;
         std::uint32_t scale = 0;
         std::uint32_t frames = 0;

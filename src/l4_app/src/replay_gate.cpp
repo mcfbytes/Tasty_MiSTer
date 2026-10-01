@@ -122,21 +122,53 @@ std::int64_t released(std::int64_t j, ReplayMsg::P0Parity p0, std::uint32_t firs
     return ((first_count + static_cast<std::uint32_t>(j)) & 1u) == want ? j : j + 1;
 }
 
+struct EpochPick {
+    std::int64_t j;
+    std::int64_t hi;
+};
+
+EpochPick epoch_at(std::int64_t delay, std::int64_t poweron_ns, std::int64_t period_ns,
+                   std::int64_t line0_ns, ReplayMsg::P0Parity p0, std::uint32_t first_count) {
+    const std::int64_t x = poweron_ns + period_ns - line0_ns - delay;
+    return {released(ceil_div(x - ReplayGate::kEndSlackNs, period_ns), p0, first_count),
+            released(ceil_div(x + reactor::kTickNs, period_ns), p0, first_count)};
+}
+
 }  // namespace
 
 void ReplayGate::decide_epoch_(std::uint32_t delta) noexcept {
     const std::int64_t d = edge_ns_ - end_ns_;
     status_.epoch_delay_us = static_cast<std::uint32_t>(std::max<std::int64_t>(0, d) / 1000);
+    const EpochPick p = epoch_at(d, poweron_ns_, period_ns_, line0_ns_, p0_, last_raw_);
+    const bool band = p.j != p.hi;
 
-    const std::int64_t x = poweron_ns_ + period_ns_ - line0_ns_ - d;
-    const std::int64_t j = released(ceil_div(x - kEndSlackNs, period_ns_), p0_, last_raw_);
+    const bool untimed = p.j == 0 && -static_cast<std::int64_t>(lead_) >= kFloorBack;
 
-    const bool untimed = j == 0 && -static_cast<std::int64_t>(lead_) >= kFloorBack;
-    if (delta != 1 || j < 0 || untimed ||
-        j != released(ceil_div(x + reactor::kTickNs, period_ns_), p0_, last_raw_)) {
+    bool slipped = false;
+    std::uint8_t slip = 0;
+    if ((untimed || p.j < 0) && p0_ == ReplayMsg::P0Parity::Any && late_frames_ != 0 &&
+        period_ns_ > 0) {
+        for (std::uint8_t k = late_frames_; k != 0; --k) {
+            const std::int64_t earlier = d - static_cast<std::int64_t>(k) * period_ns_;
+            const EpochPick s =
+                epoch_at(earlier, poweron_ns_, period_ns_, line0_ns_, p0_, last_raw_);
+            if (s.j == s.hi && s.j == static_cast<std::int64_t>(k)) {
+                slipped = true;
+                slip = k;
+                break;
+            }
+        }
+    }
+    if (!slipped && (delta != 1 || p.j < 0 || untimed || band)) {
+
+        status_.epoch_fail = delta != 1 ? EpochFail::Retry
+                             : untimed  ? EpochFail::Untimed
+                             : p.j < 0  ? EpochFail::Before
+                                        : EpochFail::Retry;
         return disarm_(ReplayEnd::EpochAmbiguous, true);
     }
-    epoch_ = static_cast<std::uint32_t>(1 + j);
+
+    epoch_ = slipped ? slip : static_cast<std::uint32_t>(1 + p.j);
     status_.epoch_edge = epoch_;
     epoch_known_ = true;
 }
@@ -264,6 +296,7 @@ void ReplayGate::on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept 
     period_ns_ = a.period_ns;
     line0_ns_ = a.line0_ns;
     poweron_ns_ = a.poweron_ns;
+    late_frames_ = a.late_frames;
     p0_ = a.p0;
     event_ = a.event;
 
@@ -385,8 +418,6 @@ bool ReplayGate::suppresses(const proto::LinkOp& op) noexcept {
         return false;
     }
     if (player.v >= proto::JoystickPort::kMaxPorts) return false;
-    const std::uint8_t port = w_.emitter->joysticks().wire_port(player).v;
-    if (port >= kReplayPorts || (ports_ & (1u << port)) == 0) return false;
     ++status_.pad_drops;
     return true;
 }

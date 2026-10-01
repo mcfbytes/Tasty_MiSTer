@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Iterable
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -167,6 +168,35 @@ class TestHashes(unittest.TestCase):
             ]
         )
         self.assertEqual(rc, 0)
+
+    def test_lag_rows_stay_in_the_sequence(self) -> None:
+        rows = [(100 + i, i, f"{i * 17:08x}") for i in range(20)]
+        a = self.tmp / "a.frames.tsv"
+        write_tsv(a, rows)
+        log = self.tmp / "emu.hashes.tsv"
+        body = ["# movie_frame\tlag\thash\tkind\n"]
+        for i in range(20):
+            lag = 1 if i in (3, 4, 9) else 0
+            body.append(f"{i}\t{lag}\t{i * 17:08x}\trgb\n")
+        log.write_text("".join(body))
+        self.assertIn(3, tc.parse_emu_log(log))
+        rc = tc.main(["--mister", str(a), "--emu", str(log), "--hashes-only", "--out", str(self.tmp / "out")])
+        self.assertEqual(rc, 0)
+
+    def test_png_only_log_has_no_hashes(self) -> None:
+        rows = [(100 + i, i, f"{i * 17:08x}") for i in range(5)]
+        a = self.tmp / "a.frames.tsv"
+        write_tsv(a, rows)
+        for placeholder in ("0", "-", "00000000"):
+            log = self.tmp / f"emu-{len(placeholder)}.hashes.tsv"
+            log.write_text(
+                "# movie_frame\tlag\thash\tkind\n"
+                + "".join(f"{i}\t0\t{placeholder}\tpng\n" for i in range(5))
+            )
+            with self.assertRaises(tc.UsageError):
+                tc.parse_emu_log(log)
+            rc = tc.main(["--mister", str(a), "--emu", str(log), "--hashes-only", "--out", str(self.tmp / "out")])
+            self.assertEqual(rc, 2, placeholder)
 
     def test_one_frame_slip(self) -> None:
         a_rows = [(100 + i, i, f"{i * 17:08x}") for i in range(80)]
@@ -361,6 +391,34 @@ class TestPixels(unittest.TestCase):
         self.assertIn("11,0,", csv.replace(" ", ""))
         self.assertTrue((out / "frame-000011-sheet.png").is_file())
 
+    def png_run(self, folder: Path, frames: Iterable[int], seed: int = 0) -> None:
+        folder.mkdir(exist_ok=True)
+        for i in frames:
+            tc.write_png(folder / f"frame-{i:06d}.png", gradient(8, 8, seed + i), 8, 8)
+
+    def test_truncated_emu_dump_is_a_difference(self) -> None:
+        m, e = self.tmp / "m", self.tmp / "e"
+        self.png_run(m, range(120))
+        self.png_run(e, range(110))
+        out = self.tmp / "out"
+        rc = tc.main(["--mister", str(m), "--emu", str(e), "--no-colour-map", "--out", str(out), "--around", "0"])
+        self.assertEqual(rc, 1)
+        self.assertIn("110,0,missing-emu", (out / "frames.csv").read_text())
+        rc = tc.main(
+            ["--mister", str(m), "--emu", str(e), "--no-colour-map", "--overlap", "--out", str(self.tmp / "o2")]
+        )
+        self.assertEqual(rc, 0)
+
+    def test_emu_dump_outside_the_movie_is_not_a_difference(self) -> None:
+        """An FCEUX dump starts at frame 1 and may run past the movie's last frame."""
+        m, e = self.tmp / "m", self.tmp / "e"
+        self.png_run(m, range(120))
+        self.png_run(e, range(1, 126))
+        out = self.tmp / "out"
+        rc = tc.main(["--mister", str(m), "--emu", str(e), "--no-colour-map", "--out", str(out)])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len((out / "frames.csv").read_text().splitlines()), 1 + 119)
+
     def test_png_identical(self) -> None:
         w, h = 8, 8
         pix = gradient(w, h, 9)
@@ -442,6 +500,68 @@ class TestPixels(unittest.TestCase):
             ]
         )
         self.assertEqual(rc, 0)
+
+
+class TestSegments(unittest.TestCase):
+    """A recording split into <stem>_<segment>.avi files; avi_frame restarts at 0 in each."""
+
+    def setUp(self) -> None:
+        self.ffmpeg = shutil.which("ffmpeg")
+        if not self.ffmpeg:
+            self.skipTest("ffmpeg not on PATH")
+        self.tmp = Path(tempfile.mkdtemp(prefix="tasty-seg-"))
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def write_avi(self, dest: Path, frames: list[bytes], w: int, h: int) -> None:
+        raw = self.tmp / "raw.rgb"
+        raw.write_bytes(b"".join(frames))
+        r = subprocess.run(
+            [self.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
+             "-s", f"{w}x{h}", "-r", "60", "-i", str(raw), "-c:v", "rawvideo", "-pix_fmt", "bgr24", str(dest)],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            self.skipTest(f"ffmpeg could not write AVI: {r.stderr}")
+
+    def recording(self, segs: list[tuple[int, int, int]], avi_short: int = 0) -> tuple[Path, Path]:
+        """segs: (frames, width, height) per segment. Returns (sidecar, emu PNG dir)."""
+        lines = ["core_frame\theader_ctr\tcapture_ns\tdup_reason\tmovie_frame\thash\t"
+                 "width\theight\tsegment\tavi_frame\n"]
+        emu = self.tmp / "emu"
+        emu.mkdir()
+        mf = 0
+        for seg, (n, w, h) in enumerate(segs):
+            pics = [gradient(w, h, 11 * (mf + i)) for i in range(n)]
+            keep = n - avi_short if seg == len(segs) - 1 else n
+            self.write_avi(self.tmp / f"rec_{seg:03d}.avi", pics[:keep], w, h)
+            for i, pic in enumerate(pics):
+                lines.append(f"{100 + mf}\t{mf}\t{mf}\tnone\t{mf}\t{tc.crc32_rgb(pic, w, h)}\t{w}\t{h}\t{seg}\t{i}\n")
+                tc.write_png(emu / f"frame-{mf:06d}.png", pic, w, h)
+                mf += 1
+        tsv = self.tmp / "rec.frames.tsv"
+        tsv.write_text("".join(lines))
+        return tsv, emu
+
+    def compare(self, tsv: Path, emu: Path) -> int:
+        return tc.main(["--mister", str(tsv), "--emu", str(emu), "--no-colour-map", "--out", str(self.tmp / "out"),
+                        "--around", "0"])
+
+    def test_each_segment_decodes_its_own_avi(self) -> None:
+        tsv, emu = self.recording([(4, 8, 8), (4, 8, 8)])
+        self.assertEqual(self.compare(tsv, emu), 0)
+        rows = (self.tmp / "out" / "frames.csv").read_text().splitlines()
+        self.assertEqual(len(rows), 1 + 8)
+
+    def test_segment_keeps_its_own_geometry(self) -> None:
+        tsv, emu = self.recording([(4, 8, 8), (4, 16, 8)])
+        self.assertEqual(self.compare(tsv, emu), 0)
+
+    def test_short_avi_is_a_difference(self) -> None:
+        tsv, emu = self.recording([(6, 8, 8)], avi_short=2)
+        self.assertEqual(self.compare(tsv, emu), 1)
+        self.assertIn("4,0,missing-mister", (self.tmp / "out" / "frames.csv").read_text())
 
 
 class TestRecordings(unittest.TestCase):

@@ -121,15 +121,6 @@ constexpr ChdTypeRow kChdTypes[] = {
     {"AUDIO", 2352, TrackType::Cdda},
 };
 
-struct ChdTrackMeta {
-    std::uint32_t frames = 0;
-    std::uint32_t pregap = 0;
-    std::uint32_t postgap = 0;
-    char type[32]{};
-    char subtype[32]{};
-    char pgtype[32]{};
-};
-
 bool take_key(std::string_view& s, std::string_view key) noexcept {
     s = lstrip(s);
     if (!s.starts_with(key)) return false;
@@ -149,28 +140,6 @@ bool take_token(std::string_view& s, char* out, std::size_t cap) noexcept {
     return n != 0;
 }
 
-bool parse_chd_meta(const ChdMetaRow& row, ChdTrackMeta& out) noexcept {
-    std::string_view s = row.text;
-    std::uint32_t id = 0;
-    char pgsub[32]{};
-    if (!take_key(s, "TRACK:") || !take_uint(s, id)) return false;
-    if (!take_key(s, "TYPE:") || !take_token(s, out.type, sizeof(out.type))) return false;
-    if (!take_key(s, "SUBTYPE:") || !take_token(s, out.subtype, sizeof(out.subtype))) return false;
-    if (!take_key(s, "FRAMES:") || !take_uint(s, out.frames)) return false;
-    if (!row.v2) {
-
-        out.pregap = 0;
-        out.postgap = 0;
-        out.pgtype[0] = '\0';
-        return true;
-    }
-    if (!take_key(s, "PREGAP:") || !take_uint(s, out.pregap)) return false;
-    if (!take_key(s, "PGTYPE:") || !take_token(s, out.pgtype, sizeof(out.pgtype))) return false;
-    if (!take_key(s, "PGSUB:") || !take_token(s, pgsub, sizeof(pgsub))) return false;
-    if (!take_key(s, "POSTGAP:") || !take_uint(s, out.postgap)) return false;
-    return true;
-}
-
 std::uint64_t cue_file_pos(const Track& t) noexcept {
     const std::int64_t pos =
         static_cast<std::int64_t>(t.start.v) * static_cast<std::int64_t>(t.sector_size) - t.offset;
@@ -178,6 +147,25 @@ std::uint64_t cue_file_pos(const Track& t) noexcept {
 }
 
 }  // namespace
+
+std::optional<ChdTrack> parse_chd_track(const ChdMetaRow& row) noexcept {
+    std::string_view s = row.text;
+    ChdTrack out{};
+    char pgsub[32]{};
+    if (!take_key(s, "TRACK:") || !take_uint(s, out.number)) return std::nullopt;
+    if (!take_key(s, "TYPE:") || !take_token(s, out.type, sizeof(out.type))) return std::nullopt;
+    if (!take_key(s, "SUBTYPE:") || !take_token(s, out.subtype, sizeof(out.subtype)))
+        return std::nullopt;
+    if (!take_key(s, "FRAMES:") || !take_uint(s, out.frames)) return std::nullopt;
+
+    if (!row.v2) return out;
+    if (!take_key(s, "PREGAP:") || !take_uint(s, out.pregap)) return std::nullopt;
+    if (!take_key(s, "PGTYPE:") || !take_token(s, out.pgtype, sizeof(out.pgtype)))
+        return std::nullopt;
+    if (!take_key(s, "PGSUB:") || !take_token(s, pgsub, sizeof(pgsub))) return std::nullopt;
+    if (!take_key(s, "POSTGAP:") || !take_uint(s, out.postgap)) return std::nullopt;
+    return out;
+}
 
 static Ex<void> check_policy(const CuePolicy& policy, std::uint16_t site) {
     const CueAxis axis = unimplemented_axis(policy);
@@ -1079,8 +1067,9 @@ Ex<void> DiscEngine::mount_chd(std::unique_ptr<IChdSource> source,
     for (; count < kMaxCueTracks; ++count) {
         const auto row = chd_->track_metadata(count);
         if (!row) break;
-        ChdTrackMeta m;
-        if (!parse_chd_meta(*row, m)) break;
+        const std::optional<ChdTrack> parsed = parse_chd_track(*row);
+        if (!parsed) break;
+        const ChdTrack& m = *parsed;
 
         Track& t = toc_.tracks[count];
         t.number = TrackNumber{static_cast<std::uint8_t>(count + 1)};
@@ -1624,34 +1613,42 @@ private:
 
 }  // namespace
 
+Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file) {
+    if (!file) return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
+    auto sz = file->size();
+    if (!sz) return std::unexpected(sz.error());
+    auto src = std::make_unique<LibChdrSource>(std::move(file), sz->v);
+    auto opened = src->open();
+    if (!opened) return std::unexpected(opened.error());
+    return std::unique_ptr<IChdSource>(std::move(src));
+}
+
 Ex<void> DiscEngine::mount_chd_path(std::string_view chd_path) {
     auto f = open_file(chd_path);
     if (!f) return std::unexpected(f.error());
-    auto sz = (*f)->size();
-    if (!sz) return std::unexpected(sz.error());
 
     IFile* const primary_raw = f->get();
-    auto src = std::make_unique<LibChdrSource>(std::move(*f), sz->v);
-    auto opened = src->open();
-    if (!opened) return std::unexpected(opened.error());
+    auto src = open_chd(std::move(*f));
+    if (!src) return std::unexpected(src.error());
 
     std::unique_ptr<IChdSource> second;
     if (prefetch_ != nullptr) {
         if (auto f2 = open_file(chd_path)) {
-            auto sz2 = (*f2)->size();
-            if (sz2) {
-                auto s2 = std::make_unique<LibChdrSource>(std::move(*f2), sz2->v);
-                if (auto o2 = s2->open(); o2) second = std::move(s2);
-            }
+            if (auto s2 = open_chd(std::move(*f2)); s2) second = std::move(*s2);
         }
     }
-    auto mounted = mount_chd(std::move(src), std::move(second));
+    auto mounted = mount_chd(std::move(*src), std::move(second));
     if (!mounted) return mounted;
 
     const std::size_t depth = (prefetch_depth_ != 0) ? prefetch_depth_ : kPrefetchMinDepth;
     (void)primary_raw->advise(IFile::Access::WillNeed, 0,
                               static_cast<std::uint64_t>(hunk_bytes_) * depth);
     return {};
+}
+#else
+Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file) {
+    (void)file;
+    return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
 }
 #endif
 

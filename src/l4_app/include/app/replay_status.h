@@ -26,12 +26,15 @@ enum class ReplayEnd : std::uint8_t {
 
 enum class ReplayRef : std::uint8_t { None, Counter, Vsync };
 
+enum class EpochFail : std::uint8_t { None = 0, Retry = 1, Untimed = 2, Before = 3 };
+
 struct ReplayStatus {
     std::uint16_t gen = 0;
     ReplayLevel level = ReplayLevel::Idle;
     ReplayEnd end = ReplayEnd::None;
     ReplayRef ref = ReplayRef::None;
-    std::uint8_t pad_[3]{};
+    EpochFail epoch_fail = EpochFail::None;
+    std::uint8_t pad_[2]{};
     std::int32_t movie_frame = -1;
     std::int32_t applied_frame = -1;
     std::uint32_t writes = 0;
@@ -59,5 +62,8 @@ using ReplayStatusCell = xthread::Telemetry<ReplayStatus, SeatTag::RT>;
 using ReplayStatusText = FixedStr<640, StrFit::Clip>;
 [[nodiscard]] ReplayStatusText format_replay_status(const ReplayStatus& s) noexcept;
 [[nodiscard]] const char* replay_end_name(ReplayEnd e) noexcept;
+
+[[nodiscard]] const char* replay_end_sentence(ReplayEnd e,
+                                              EpochFail fail = EpochFail::None) noexcept;
 
 }  // namespace mister::app

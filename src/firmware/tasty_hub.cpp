@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+
 #include <memory>
 #include <new>
 #include <optional>
@@ -53,15 +54,47 @@ namespace {
 using namespace mister;
 
 std::atomic<int> g_stop_requested TASTY_PERSIST(proc, tasty_stop_requested){0};
+
+enum class HomeLane : int { Idle = 0, Open = 1, Stopping = 2, Left = 3 };
+std::atomic<int> g_home_owed TASTY_PERSIST(proc, tasty_home_owed){0};
+std::atomic<int> g_deferred_stop TASTY_PERSIST(proc, tasty_deferred_stop){0};
 static_assert(std::atomic<int>::is_always_lock_free);
 
-std::atomic<int> g_want_stock TASTY_PERSIST(proc, tasty_want_stock){0};
 std::atomic<int> g_exit_code TASTY_PERSIST(proc, tasty_exit_code){0};
 std::atomic<fw::ProcessMain*> g_process_main TASTY_PERSIST(proc, tasty_process_main){nullptr};
+static_assert(std::atomic<fw::ProcessMain*>::is_always_lock_free);
 
-extern "C" void on_tasty_stop(int) {
-    g_stop_requested.store(1, std::memory_order_seq_cst);
-    if (fw::ProcessMain* m = g_process_main.load(std::memory_order_seq_cst)) m->stop();
+alignas(16) unsigned char g_fatal_stack[32 * 1024] TASTY_PERSIST(proc, tasty_fatal_stack){};
+
+extern "C" void on_tasty_stop(int sig) {
+    const int prev = g_stop_requested.exchange(1, std::memory_order_seq_cst);
+    if (prev == 0) {
+        if (fw::ProcessMain* m = g_process_main.load(std::memory_order_seq_cst)) m->stop();
+        return;
+    }
+    const int lane = g_home_owed.load(std::memory_order_seq_cst);
+    if (lane == static_cast<int>(HomeLane::Open)) {
+        (void)fw::tasty_launch_home();
+        ::_exit(128 + sig);
+    }
+
+    if (lane == static_cast<int>(HomeLane::Stopping))
+        g_deferred_stop.store(sig, std::memory_order_seq_cst);
+}
+
+extern "C" void on_tasty_fatal(int sig) {
+    if (g_home_owed.load(std::memory_order_seq_cst) == static_cast<int>(HomeLane::Open))
+        (void)fw::tasty_launch_home();
+    sigset_t set;
+    ::sigemptyset(&set);
+    ::sigaddset(&set, sig);
+    (void)::sigprocmask(SIG_UNBLOCK, &set, nullptr);
+    struct sigaction sa {};
+    sa.sa_handler = SIG_DFL;
+    ::sigemptyset(&sa.sa_mask);
+    (void)::sigaction(sig, &sa, nullptr);
+    (void)::raise(sig);
+    ::_exit(128 + sig);
 }
 
 struct FeederReplay final : fw::TastySession::Replay {
@@ -73,8 +106,10 @@ struct FeederReplay final : fw::TastySession::Replay {
         app::ReplayFeeder::Play p{};
         p.movie = ask.movie;
         p.rom = ask.rom;
+        p.phase_us = ask.phase_us;
         p.lead = ask.lead;
         p.stop_at = ask.stop_at;
+        p.ram_fill = ask.ram_fill;
         p.set_settings = ask.set_settings;
         (void)f->take_play(p);
         return f->last_refusal() == app::ReplayFeeder::Refusal::None;
@@ -95,10 +130,8 @@ struct FeederReplay final : fw::TastySession::Replay {
     }
     const char* refusal_why() const noexcept override {
         if (f == nullptr) return "none";
-        if (f->last_refusal() == app::ReplayFeeder::Refusal::Movie &&
-            f->last_refusal_detail() ==
-                static_cast<std::uint32_t>(cores::IMovieCodec::Refusal::Savestate))
-            return "savestate";
+        if (f->last_refusal() == app::ReplayFeeder::Refusal::Movie)
+            return fw::tasty_movie_refusal_token(f->last_refusal_detail());
         return app::ReplayFeeder::refusal_name(f->last_refusal());
     }
     std::string_view refusal_setting() const noexcept override {
@@ -132,15 +165,17 @@ static_assert(std::is_trivially_destructible_v<decltype(g_windows_storage)>);
 void announce_board(const hal::BoardProfile& board, const hal::CompatibleBlob& blob) {
     for (const std::string_view s : board.compatible) {
         if (!blob.contains(s)) continue;
-        std::fprintf(stderr, "tasty: board %.*s\n", static_cast<int>(board.model.size()),
-                     board.model.data());
+        char buf[128];
+        std::snprintf(buf, sizeof buf, "tasty: board %.*s", static_cast<int>(board.model.size()),
+                      board.model.data());
+        fw::tasty_say(buf);
         break;
     }
     (void)blob;
 }
 
 void report_unknown_board(const hal::CompatibleBlob&) {
-    std::fprintf(stderr, "tasty: no board profile claims this device tree\n");
+    fw::tasty_say("tasty: no board profile claims this device tree");
 }
 
 enum class IoSeat : std::uint8_t { Stopped, Running };
@@ -157,56 +192,130 @@ int teardown(int rc, hal::ILinkPort& link, fw::Hub* hub, IoSeat io) {
 }
 
 [[noreturn]] void exit_io_wedged(const fw::ThreadAssembly& assembly) {
-    std::fprintf(stderr, "{\"t\":\"wedge\",\"seat\":\"T-IO\",\"tid\":%ld}\n", assembly.io_tid());
-    std::fflush(stderr);
-    (void)fw::tasty_spawn_stock();
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "{\"t\":\"wedge\",\"seat\":\"T-IO\",\"tid\":%ld}",
+                  assembly.io_tid());
+    fw::tasty_say(buf);
+    (void)fw::tasty_launch_home();
     ::_exit(fw::kRtWedgeExitStatus);
 }
 
 [[noreturn]] void exit_wedged(fw::ThreadAssembly& assembly, const Error& why) {
     (void)assembly;
-    std::fprintf(stderr, "tasty: T-RT wedged err=%u site=%u\n", static_cast<unsigned>(why.code),
-                 static_cast<unsigned>(why.site));
-    (void)fw::tasty_spawn_stock();
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "tasty: T-RT wedged err=%u site=%u",
+                  static_cast<unsigned>(why.code), static_cast<unsigned>(why.site));
+    fw::tasty_say(buf);
+    (void)fw::tasty_launch_home();
     ::_exit(fw::kRtWedgeExitStatus);
 }
 
 }  // namespace
 
+const std::atomic<int>& mister::fw::tasty_owner_stop_flag() noexcept { return g_stop_requested; }
+
+void mister::fw::tasty_owe_home() noexcept {
+    g_home_owed.store(static_cast<int>(HomeLane::Open), std::memory_order_seq_cst);
+}
+
+bool mister::fw::tasty_home_may_launch() noexcept {
+    const int lane = g_home_owed.load(std::memory_order_seq_cst);
+    return lane != static_cast<int>(HomeLane::Stopping) && lane != static_cast<int>(HomeLane::Left);
+}
+
+int mister::fw::tasty_stop_and_owe() noexcept {
+    g_deferred_stop.store(0, std::memory_order_seq_cst);
+    g_home_owed.store(static_cast<int>(HomeLane::Stopping), std::memory_order_seq_cst);
+    bool gone = false;
+    if (const auto stopped = tasty_stop_stock()) gone = *stopped;
+    if (!gone) {
+        g_home_owed.store(static_cast<int>(HomeLane::Left), std::memory_order_seq_cst);
+        tasty_say("tasty: the menu was left running");
+        return 1;
+    }
+    tasty_owe_home();
+    if (const int sig = g_deferred_stop.exchange(0, std::memory_order_seq_cst)) {
+        (void)tasty_launch_home();
+        ::_exit(128 + sig);
+    }
+    return 0;
+}
+
+void mister::fw::tasty_arm_owner_signals() noexcept {
+    stack_t ss{};
+    ss.ss_sp = g_fatal_stack;
+    ss.ss_size = sizeof g_fatal_stack;
+    ss.ss_flags = 0;
+    (void)::sigaltstack(&ss, nullptr);
+
+    struct sigaction ign {};
+    ign.sa_handler = SIG_IGN;
+    ::sigemptyset(&ign.sa_mask);
+    (void)::sigaction(SIGHUP, &ign, nullptr);
+    (void)::sigaction(SIGPIPE, &ign, nullptr);
+
+    struct sigaction sa {};
+    sa.sa_handler = &on_tasty_stop;
+    ::sigemptyset(&sa.sa_mask);
+    ::sigaddset(&sa.sa_mask, SIGINT);
+    ::sigaddset(&sa.sa_mask, SIGTERM);
+    ::sigaddset(&sa.sa_mask, SIGQUIT);
+    sa.sa_flags = SA_RESTART;
+    (void)::sigaction(SIGINT, &sa, nullptr);
+    (void)::sigaction(SIGTERM, &sa, nullptr);
+    (void)::sigaction(SIGQUIT, &sa, nullptr);
+
+    struct sigaction fat {};
+    fat.sa_handler = &on_tasty_fatal;
+    ::sigemptyset(&fat.sa_mask);
+    ::sigaddset(&fat.sa_mask, SIGSEGV);
+    ::sigaddset(&fat.sa_mask, SIGABRT);
+    ::sigaddset(&fat.sa_mask, SIGBUS);
+    fat.sa_flags = static_cast<int>(SA_ONSTACK | SA_RESETHAND);
+    (void)::sigaction(SIGSEGV, &fat, nullptr);
+    (void)::sigaction(SIGABRT, &fat, nullptr);
+    (void)::sigaction(SIGBUS, &fat, nullptr);
+}
+
 int mister::fw::tasty_run_owner(const TastyArgs& args) {
+    tasty_arm_owner_signals();
     static_assert(!tasty_boot_calls_handoff());
     TastyArgs local = args;
     if (!tasty_resolve_args(local)) {
-        std::fprintf(stderr, "tasty: cannot resolve paths\n");
+        tasty_say("tasty: cannot resolve paths");
         return 1;
     }
     if (local.verb == TastyVerb::Play) {
         if (::access(local.movie.c_str(), R_OK) != 0) {
-            std::fprintf(stderr, "tasty: missing movie %s\n", local.movie.c_str());
-            return 1;
-        }
-        if (::access(local.rom.c_str(), R_OK) != 0) {
-            std::fprintf(stderr, "tasty: missing rom %s\n", local.rom.c_str());
+            char buf[app::kPathMax + 32];
+            std::snprintf(buf, sizeof buf, "tasty: missing movie %s", local.movie.c_str());
+            tasty_say(buf);
             return 1;
         }
         auto vfs = mister::svc::Vfs::create_at("/");
         if (vfs) {
-            const int pf = tasty_preflight_rom(*vfs, local.movie.view(), local.rom.view());
+            const int pf = tasty_prepare_play(*vfs, local);
             if (pf != 0) return pf;
-        }
-    }
-    if (!local.record.empty()) {
-        auto rec = tasty_prepare_record(local.record, local.movie.view());
-        if (!rec) {
-            std::fprintf(stderr, "tasty: cannot create record path %s\n", local.record.c_str());
+        } else if (local.rom.empty()) {
+            tasty_say("tasty: pass --rom");
             return 1;
         }
+        if (local.rom.empty() || ::access(local.rom.c_str(), R_OK) != 0) {
+            char buf[app::kPathMax + 32];
+            std::snprintf(buf, sizeof buf, "tasty: missing rom %s", local.rom.c_str());
+            tasty_say(buf);
+            return 1;
+        }
+    }
+    if (local.record) {
+        auto rec = tasty_prepare_record(*local.record, local.movie.view());
+        if (!rec) return 1;
         local.record = *rec;
     }
     auto lock = tasty_lock_owner();
     if (!lock) {
         if (lock.error().code == Errc::busy) {
-            std::fprintf(stderr, "%s\n", tasty_busy_text().c_str());
+            tasty_say(tasty_busy_text());
             return 2;
         }
         report("tasty lock", lock.error());
@@ -214,7 +323,7 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
     }
     fw::ReturnHome home{};
     home.lock_fd = *lock;
-    (void)tasty_stop_stock();
+    if (const int held = tasty_stop_and_owe()) return held;
     (void)tasty_write_pid(::getpid(), local.movie.view());
 
     fw::RtEvidence ev{};
@@ -272,22 +381,12 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
         report("Executive::create", exec.error());
         return teardown(1, link, nullptr, IoSeat::Stopped);
     }
-    {
-        struct sigaction sa {};
-        sa.sa_handler = &on_tasty_stop;
-        sigemptyset(&sa.sa_mask);
-        sa.sa_flags = SA_RESTART;
-        (void)::sigaction(SIGINT, &sa, nullptr);
-        (void)::sigaction(SIGTERM, &sa, nullptr);
-        (void)::sigaction(SIGHUP, &sa, nullptr);
-        (void)::sigaction(SIGQUIT, &sa, nullptr);
-    }
     const bool fabric_ready = [&link] {
         const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
         return link.ready();
     }();
     if (!fabric_ready) {
-        std::fprintf(stderr, "tasty: FPGA not ready\n");
+        tasty_say("tasty: FPGA not ready");
         return teardown(1, link, nullptr, IoSeat::Stopped);
     }
     auto vfs = svc::Vfs::create(svc::StorageRoot{});
@@ -329,7 +428,7 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
     static_assert(__cpp_aligned_new >= 201606L);
     auto hub = std::make_unique<fw::Hub>(boot_parts, stop_signal);
     hub->force_vsync_adjust(args.vsync_adjust);
-    hub->omit_ui();
+    hub->arm_replay_ini(args.strict);
     const hal::PhysRegion fb = board.regions[static_cast<std::size_t>(hal::RegionId::VideoFb)];
     fw::ProcessMain& process_main = hub->process_main();
     FeederReplay feeder{};
@@ -342,12 +441,13 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
                         .identity = &hub->identity_latch(),
                         .play = &hub->replay_status(),
                         .recstat = &hub->recorder_status(),
+                        .encstat = &hub->encode_status(),
                         .main_stop = &process_main.stop_wake(),
                         .vfs = hub->vfs(),
                         .stop = &g_stop_requested,
-                        .want_stock = &g_want_stock,
                         .exit_code = &g_exit_code,
-                        .video_fb = fb},
+                        .video_fb = fb,
+                        .direct_video_ini = &hub->owner().direct_video_ini_cell()},
                        local};
     hub->set_owner_tick(&tasty);
 
@@ -421,15 +521,6 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
         exit_wedged(assembly, j.error());
     }
     const auto ran = assembly.rt_result();
-    {
-        struct sigaction sa {};
-        sa.sa_handler = SIG_DFL;
-        sigemptyset(&sa.sa_mask);
-        (void)::sigaction(SIGINT, &sa, nullptr);
-        (void)::sigaction(SIGTERM, &sa, nullptr);
-        (void)::sigaction(SIGHUP, &sa, nullptr);
-        (void)::sigaction(SIGQUIT, &sa, nullptr);
-    }
 
     {
         const mister::SeatScope shutdown_stands_in_for_rt{mister::SeatTag::RT};

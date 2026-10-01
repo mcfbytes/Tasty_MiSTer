@@ -40,19 +40,19 @@ int cmd_check(const mister::fw::TastyArgs& a) {
 }
 
 int cmd_rec_start_client(const mister::fw::TastyArgs& a) {
-    if (a.record.empty()) {
+    if (!a.record) {
         std::fprintf(stderr, "tasty: rec start needs --record\n");
         return 1;
     }
-    auto rec = mister::fw::tasty_prepare_record(a.record, {});
-    if (!rec) {
-        std::fprintf(stderr, "tasty: cannot create record path %s\n", a.record.c_str());
-        return 1;
-    }
-    char buf[1100];
+    auto rec = mister::fw::tasty_prepare_record(*a.record, {});
+    if (!rec) return 1;
+    char buf[1400];
     const char* mode = a.hashes_only ? "hash" : "avi";
-    const int n = std::snprintf(buf, sizeof buf, "rec_start %.*s %s", static_cast<int>(rec->size()),
-                                rec->view().data(), mode);
+    const auto opt = mister::app::format_rec_options(a.rec);
+    if (opt.empty()) return 1;
+    const int n =
+        std::snprintf(buf, sizeof buf, "rec_start %.*s %s %.*s", static_cast<int>(rec->size()),
+                      rec->view().data(), mode, static_cast<int>(opt.size()), opt.view().data());
     if (n <= 0 || static_cast<std::size_t>(n) >= sizeof buf) return 1;
     if (auto r = mister::fw::tasty_write_cmd(std::string_view(buf, static_cast<std::size_t>(n)));
         !r)
@@ -71,7 +71,10 @@ int main(int argc, char* argv[]) {
     }
     auto parsed = mister::fw::parse_tasty_args(std::span<const char* const>(
         const_cast<const char**>(argv), static_cast<std::size_t>(argc)));
-    if (!parsed) return print_err(parsed.error(), "args");
+    if (!parsed) {
+        std::fprintf(stderr, "tasty: %s\n", mister::fw::tasty_args_refusal(parsed.error().detail));
+        return 1;
+    }
     if (!mister::fw::tasty_resolve_args(*parsed)) {
         std::fprintf(stderr, "tasty: cannot resolve paths\n");
         return 1;

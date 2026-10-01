@@ -82,11 +82,11 @@ public:
 
     bool on(const CmdVerb::RecStart& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        return rec_ != nullptr && rec_->take_start(v.path, v.mode);
+        return rec_ != nullptr && rec_->take_start(v.path, v.mode, v.opt);
     }
     bool on(const CmdVerb::RecArm& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        return rec_ != nullptr && rec_->take_arm(v.path, v.mode);
+        return rec_ != nullptr && rec_->take_arm(v.path, v.mode, v.opt);
     }
     bool on(const CmdVerb::RecStop&) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);

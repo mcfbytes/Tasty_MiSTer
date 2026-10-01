@@ -64,7 +64,8 @@ RecPath RecorderControl::resolve(std::string_view arg, std::string_view root, st
     return out;
 }
 
-bool RecorderControl::publish_(RecOp op, std::string_view path, RecMode mode) noexcept {
+bool RecorderControl::publish_(RecOp op, std::string_view path, RecMode mode,
+                               RecOptions opt) noexcept {
     TASTY_SEAT_BODY(RecorderControl);
     if (w_.control == nullptr) return false;
     RecControl c{};
@@ -72,13 +73,15 @@ bool RecorderControl::publish_(RecOp op, std::string_view path, RecMode mode) no
     if (gen_ == 0) c.gen = gen_ = 1;
     c.op = op;
     c.mode = mode;
+    c.opt = opt;
     (void)c.path.assign(path);
     w_.control->publish(c);
     if (w_.capture_wake != nullptr) w_.capture_wake->kick();
     return true;
 }
 
-bool RecorderControl::request_(RecOp op, std::string_view path, RecMode mode) noexcept {
+bool RecorderControl::request_(RecOp op, std::string_view path, RecMode mode,
+                               RecOptions opt) noexcept {
     std::string name = "rec";
     if (w_.identity != nullptr) {
 
@@ -91,29 +94,29 @@ bool RecorderControl::request_(RecOp op, std::string_view path, RecMode mode) no
             w_.diag->appendf("{\"t\":\"rec\",\"k\":\"refused\",\"why\":\"path\"}");
         return true;
     }
-    (void)publish_(op, p.view(), mode);
+    (void)publish_(op, p.view(), mode, opt);
     return true;
 }
 
-bool RecorderControl::take_start(std::string_view path, RecMode mode) noexcept {
+bool RecorderControl::take_start(std::string_view path, RecMode mode, RecOptions opt) noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    return request_(RecOp::Start, path, mode);
+    return request_(RecOp::Start, path, mode, opt);
 }
 
-bool RecorderControl::take_arm(std::string_view path, RecMode mode) noexcept {
+bool RecorderControl::take_arm(std::string_view path, RecMode mode, RecOptions opt) noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    return request_(RecOp::Arm, path, mode);
+    return request_(RecOp::Arm, path, mode, opt);
 }
 
 bool RecorderControl::take_stop() noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    (void)publish_(RecOp::Stop, {}, RecMode::Hash);
+    (void)publish_(RecOp::Stop, {}, RecMode::Hash, {});
     return true;
 }
 
 bool RecorderControl::take_disarm() noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    (void)publish_(RecOp::Disarm, {}, RecMode::Hash);
+    (void)publish_(RecOp::Disarm, {}, RecMode::Hash, {});
     return true;
 }
 

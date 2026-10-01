@@ -30,9 +30,10 @@ namespace mister::app {
 namespace {
 
 constexpr std::array<const char*, static_cast<std::size_t>(ReplayFeeder::Refusal::kCount)>
-    kRefusalNames{"none",    "busy",     "not_wired", "no_codec", "movie_io", "movie",
-                  "rom_io",  "rom_size", "checksum",  "setting",  "phase",    "lead",
-                  "command", "too_long", "slot",      "power_on", "firmware", "rom_kind"};
+    kRefusalNames{"none",     "busy",     "not_wired", "no_codec", "movie_io",
+                  "movie",    "rom_io",   "rom_size",  "checksum", "setting",
+                  "phase",    "lead",     "command",   "too_long", "slot",
+                  "power_on", "firmware", "rom_kind",  "rom_chd"};
 static_assert(kRefusalNames.back() != nullptr, "every Refusal has a name");
 
 }  // namespace
@@ -160,6 +161,7 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
     }
     lead_override_ = p.lead;
     stop_at_ = p.stop_at;
+    ram_fill_ = p.ram_fill;
     set_ok_ = p.set_settings;
     set_.clear();
     offset_us_ = p.phase_us.value_or(0);
@@ -179,6 +181,7 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
     }
     file_ = std::move(*f);
     file_size_ = size->v;
+    stream_cut_ = false;
     off_ = 0;
     line_ = Line{};
     facts_ = {};
@@ -220,7 +223,7 @@ bool ReplayFeeder::read_lines_(bool scan) noexcept {
     std::array<std::byte, kReadChunk> buf;
     std::uint32_t spent = 0;
     while (spent < kTickBudget) {
-        if (off_ >= file_size_) {
+        if (stream_cut_ || off_ >= file_size_) {
             if (line_.len != 0 || line_.clipped) {
                 const Line l = line_;
                 line_ = Line{};
@@ -335,16 +338,17 @@ void ReplayFeeder::finish_scan_() noexcept {
     movie_frames_ = stop_at_ ? std::min(frames_, *stop_at_) : frames_;
     const cores::IMovieCodec::Raster r = codec_->raster(facts_);
     if (offset_us_ == 0) offset_us_ = r.period_ns / 2000;
-    const std::uint32_t max_us = r.period_ns / 1000 - kPhaseGuardUs;
-    if (offset_us_ < kPhaseMinUs || offset_us_ > max_us) return refuse_(Refusal::Phase, offset_us_);
+    if (!phase_fits(offset_us_, r.period_ns)) return refuse_(Refusal::Phase, offset_us_);
 
     const auto src = codec_->digest_source(*w_.vfs, rom_.view());
     if (!src) {
 
-        const auto why = static_cast<cores::IMovieCodec::Refusal>(src.error().detail);
+        using CR = cores::IMovieCodec::Refusal;
+        const auto why = static_cast<CR>(src.error().detail);
         if (src.error().code == Errc::bad_format)
-            return refuse_(why == cores::IMovieCodec::Refusal::Disk ? Refusal::RomKind
-                                                                    : Refusal::RomSize,
+            return refuse_(why == CR::Disk             ? Refusal::RomKind
+                           : why == CR::ChdUnsupported ? Refusal::RomChd
+                                                       : Refusal::RomSize,
                            src.error().detail);
         return refuse_(Refusal::RomIo, static_cast<std::uint32_t>(src.error().code));
     }
@@ -356,6 +360,11 @@ void ReplayFeeder::finish_scan_() noexcept {
     rom_end_ = facts_.has_digest ? src->span.offset + src->span.length : rom_off_;
     digest_ = cores::RomDigest{facts_.digest.kind};
     if (facts_.has_digest) digest_.update(src->prefix);
+    has_alt_ = facts_.has_digest && src->alt_prefix.has_value();
+    if (has_alt_) {
+        digest_alt_ = cores::RomDigest{facts_.digest.kind};
+        digest_alt_.update(*src->alt_prefix);
+    }
     firmware_pass_ = false;
     stage_ = Stage::Hashing;
 }
@@ -371,6 +380,7 @@ void ReplayFeeder::hash_rom_() noexcept {
         if (!got || *got == 0 || *got > want)
             return refuse_(firmware_pass_ ? Refusal::Firmware : Refusal::RomIo);
         digest_.update(chunk.first(*got));
+        if (has_alt_) digest_alt_.update(chunk.first(*got));
         rom_off_ += *got;
         spent += static_cast<std::uint32_t>(*got);
     }
@@ -385,7 +395,9 @@ void ReplayFeeder::finish_rom_() noexcept {
         refusal_path_.clear();
         return settle_();
     }
-    if (!codec_->rom_matches(digest_.finish(), facts_)) return refuse_(Refusal::Checksum);
+    const bool alt = has_alt_ && codec_->rom_matches(digest_alt_.finish(), facts_);
+    has_alt_ = false;
+    if (!codec_->rom_matches(digest_.finish(), facts_) && !alt) return refuse_(Refusal::Checksum);
     const auto c = facts_.has_firmware ? codec_->companion(rom_.view(), facts_) : std::nullopt;
     if (facts_.has_firmware && !c) return refuse_(Refusal::Firmware);
     if (!c) return settle_();
@@ -418,8 +430,13 @@ void ReplayFeeder::settle_() noexcept {
         }
     }
     const proto::ItemTable* rows = table ? &*table : nullptr;
-    const cores::IMovieCodec::SettingNeeds needs =
-        where_the_core_has(codec_->setting_needs(facts_), rows);
+    const auto asked = codec_->setting_needs_for(facts_, ram_fill_);
+    if (!asked) {
+        last_setting_ = "RAM init";
+        last_setting_offered_ = false;
+        return refuse_(Refusal::Setting);
+    }
+    const cores::IMovieCodec::SettingNeeds needs = where_the_core_has(*asked, rows);
     const auto needs_view = needs.view();
     const auto unmet = std::find_if(needs_view.begin(), needs_view.end(),
                                     [&live](const auto& n) { return !n.met_by(live); });
@@ -576,6 +593,7 @@ void ReplayFeeder::arm_() noexcept {
     off_ = log_start_;
     line_ = Line{};
     log_done_ = false;
+    stream_cut_ = false;
     stop_asked_ = false;
 
     publish_(ReplayOp::Play);
@@ -586,6 +604,7 @@ void ReplayFeeder::arm_() noexcept {
                            .p0 = p0_,
                            .lead = static_cast<std::int16_t>(lead_),
                            .event = event_,
+                           .late_frames = codec_->power_on(facts_).late_frames,
                            .offset_us = offset_us_,
                            .period_ns = r.period_ns,
                            .line0_ns = r.line0_ns,
@@ -615,7 +634,7 @@ bool ReplayFeeder::stream_line_(std::string_view line) noexcept {
 
     if (stop_at_ && frames_ >= *stop_at_) {
         log_done_ = true;
-        file_size_ = 0;
+        stream_cut_ = true;
         return true;
     }
     const auto fr = codec_->frame(line, facts_);
@@ -734,8 +753,8 @@ void ReplayFeeder::log_end_(const ReplayStatus& s) noexcept {
 
 void ReplayFeeder::finish_(const ReplayStatus& s) noexcept {
     log_end_(s);
-    if (s.end == ReplayEnd::EpochAmbiguous && tries_ + 1 < kEpochTries &&
-        stage_ != Stage::Stopping) {
+    if (s.end == ReplayEnd::EpochAmbiguous && s.epoch_fail != EpochFail::Untimed &&
+        tries_ + 1 < kEpochTries && stage_ != Stage::Stopping) {
         ++tries_;
         return arm_();
     }

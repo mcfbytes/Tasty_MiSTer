@@ -121,19 +121,76 @@ std::optional<CmdVerb::TasPlay> parse_tas_play(std::string_view args) {
     return v;
 }
 
-std::optional<std::pair<std::string_view, RecMode>> parse_rec(std::string_view args) {
+struct ParsedRec {
+    std::string_view path;
+    RecMode mode = RecMode::Avi;
+    RecOptions opt{};
+};
+
+std::optional<ParsedRec> parse_rec(std::string_view args) {
     const auto path = next_token(args);
     if (!path || path->empty()) return std::nullopt;
-    RecMode m = RecMode::Avi;
-    if (const auto mode = next_token(args); mode) {
-        if (*mode == "hash") {
-            m = RecMode::Hash;
-        } else if (*mode != "avi") {
+    ParsedRec v;
+    v.path = *path;
+    bool saw_mode = false;
+    unsigned seen = 0;
+    constexpr unsigned kCodec = 1u, kScale = 2u, kEvery = 4u, kFrom = 8u, kTo = 16u, kSeg = 32u,
+                       kMotion = 64u;
+    while (const auto tok = next_token(args)) {
+        const auto eq = tok->find('=');
+        if (eq == std::string_view::npos) {
+            if (saw_mode) return std::nullopt;
+            if (*tok == "hash")
+                v.mode = RecMode::Hash;
+            else if (*tok != "avi")
+                return std::nullopt;
+            saw_mode = true;
+            continue;
+        }
+        const std::string_view key = tok->substr(0, eq);
+        const std::string_view val = tok->substr(eq + 1);
+        if (val.empty()) return std::nullopt;
+        const auto take = [&](unsigned bit) {
+            if ((seen & bit) != 0) return false;
+            seen |= bit;
+            return true;
+        };
+        if (key == "codec") {
+            const auto c = parse_rec_codec(val);
+            if (!c || !take(kCodec)) return std::nullopt;
+            v.opt.codec = *c;
+        } else if (key == "scale") {
+            const auto s = parse_rec_scale(val);
+            if (!s || !take(kScale)) return std::nullopt;
+            v.opt.scale = *s;
+        } else if (key == "motion") {
+            const auto m = parse_rec_motion(val);
+            if (!m || !take(kMotion)) return std::nullopt;
+            v.opt.motion = *m;
+        } else if (key == "every") {
+            const auto n = parse_rec_every(val);
+            if (!n || !take(kEvery)) return std::nullopt;
+            v.opt.every = *n;
+        } else if (key == "from" || key == "to") {
+            std::int32_t n = 0;
+            const auto [at, ec] = std::from_chars(val.data(), val.data() + val.size(), n);
+            if (ec != std::errc{} || at != val.data() + val.size()) return std::nullopt;
+            const unsigned bit = key == "from" ? kFrom : kTo;
+            if (!take(bit)) return std::nullopt;
+            if (key == "from")
+                v.opt.from_frame = n;
+            else
+                v.opt.to_frame = n;
+        } else if (key == "segment") {
+            const auto n = parse_rec_size(val);
+            if (!n || !rec_segment_ok(*n) || !take(kSeg)) return std::nullopt;
+            v.opt.segment_bytes = *n;
+        } else {
             return std::nullopt;
         }
     }
-    if (!lstrip(args).empty()) return std::nullopt;
-    return std::pair{*path, m};
+    if (!lstrip(args).empty() || !rec_bounds_ok(v.opt)) return std::nullopt;
+    return v;
 }
 
 CmdLineOutcome taken(bool t) noexcept {
@@ -200,8 +257,8 @@ CmdLineOutcome deliver_cmd_line(std::string_view line, ICmdVerbSink& sink) noexc
         const bool arm = starts_with(line, "rec_arm ");
         const auto v = parse_rec(line.substr(arm ? 8 : 10));
         if (!v) return CmdLineOutcome::Unrecognised;
-        if (arm) return taken(sink.on(CmdVerb::RecArm{v->first, v->second}));
-        return taken(sink.on(CmdVerb::RecStart{v->first, v->second}));
+        if (arm) return taken(sink.on(CmdVerb::RecArm{v->path, v->mode, v->opt}));
+        return taken(sink.on(CmdVerb::RecStart{v->path, v->mode, v->opt}));
     }
     if (line == "rec_stop") return taken(sink.on(CmdVerb::RecStop{}));
     if (line == "rec_disarm") return taken(sink.on(CmdVerb::RecDisarm{}));

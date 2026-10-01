@@ -125,7 +125,8 @@ local function on_frame()
         hashed = table.concat(e)
         kind = "edges"
     end
-    log:write(fc .. "\t" .. lag .. "\t" .. hex8(crc32(hashed)) .. "\t" .. kind .. "\n")
+    local hash = no_hash and "-" or hex8(crc32(hashed))
+    log:write(fc .. "\t" .. lag .. "\t" .. hash .. "\t" .. kind .. "\n")
     log:flush()
     local do_png = want_png
     if png_to > 0 then

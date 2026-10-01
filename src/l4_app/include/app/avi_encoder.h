@@ -10,6 +10,7 @@
 #include "app/frame_arena.h"
 #include "app/raw_frame_slot.h"
 #include "app/rec_control.h"
+#include "app/zmbv_codec.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 
@@ -37,6 +38,8 @@ public:
     };
     static constexpr std::uint32_t kSegmentFrames = kChunksPerSegment;
 
+    static constexpr std::uint8_t kSustainWindows = 3;
+
     static constexpr std::int64_t kFlushNs = 250'000'000;
     static constexpr std::size_t kMinSlotBytes = 512u * 1024u;
 
@@ -54,7 +57,8 @@ public:
     [[nodiscard]] bool open(const RawFrameSlot& s) noexcept;
     [[nodiscard]] bool close(const RawFrameSlot& s) noexcept;
 
-    [[nodiscard]] bool chunk(const RawFrameSlot& s, bool real) noexcept;
+    [[nodiscard]] bool chunk(const RawFrameSlot& s, bool real, std::uint64_t core_frame,
+                             std::int32_t movie_frame) noexcept;
     [[nodiscard]] Position position() const noexcept { return pos_; }
 
     void note_held() noexcept { held_ = true; }
@@ -83,12 +87,24 @@ private:
     [[nodiscard]] bool all_home_() const noexcept;
     [[nodiscard]] bool size_roll_(std::size_t payload_max) const noexcept;
     void budget_(std::int64_t cpu_ns, std::int64_t now) noexcept;
+    void step_half_(bool behind) noexcept;
+    [[nodiscard]] std::int64_t frame_budget_ns_(std::uint32_t vtime) const noexcept;
     [[nodiscard]] std::int64_t now_() const noexcept;
     [[nodiscard]] std::int64_t cpu_now_() const noexcept;
+    [[nodiscard]] bool kept_(std::uint64_t core, std::int32_t movie) const noexcept;
+    [[nodiscard]] IFrameCodec& codec_for_(RecCodec c) noexcept;
+    [[nodiscard]] bool chunk_one_(IFrameCodec& codec, const RawFrameSlot& s, bool real,
+                                  std::uint32_t cand, std::uint32_t run, bool stable) noexcept;
 
     Wiring w_;
     Limits lim_{};
-    CscdCodec codec_{};
+    CscdCodec cscd_{};
+    ZmbvCodec zmbv_{};
+    RecOptions opt_{};
+    std::uint64_t seg_limit_ = 0;
+    IFrameCodec* codec_ = &cscd_;
+    bool step_ = true;
+    std::uint16_t frame_mul_ = 1;
     FrameArena half_{};
     FrameArena chunks_{};
     std::size_t data_cap_ = 0;
@@ -122,6 +138,7 @@ private:
 
     std::int64_t win_start_ = -1;
     std::int64_t win_cpu_ = 0;
+    std::uint8_t win_over_ = 0;
 };
 
 }  // namespace mister::app

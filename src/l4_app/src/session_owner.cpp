@@ -1750,6 +1750,13 @@ void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
 
     auto parsed = parse_ini_for_core(vfs_, svc::ConfigSnapshot{}, name, pending_facts_);
     if (parsed) {
+        if (replay_ini_) {
+
+            const std::uint8_t dv = svc::direct_video_resolved(*parsed);
+            direct_video_ini_cell_.publish(dv);
+            parsed->waitmount[0] = '\0';
+            if (!strict_direct_video_ && dv != 0) parsed->direct_video = 0;
+        }
         if (boot_config_pending_) boot_config_(name, *parsed, op);
         published_conf_ = conf_switches(*parsed);
         config_cell_.publish(*parsed);
@@ -1757,6 +1764,8 @@ void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
 
         op.ini_refused = true;
         op.parse_err = parsed.error().code;
+
+        if (replay_ini_) direct_video_ini_cell_.publish(std::uint8_t{0});
     }
     op.conf = published_conf_;
     boot_config_pending_ = false;
@@ -1777,6 +1786,11 @@ void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
 
     if (start_bounded_)
         start_due_ = os::Deadline::in(*clock_, std::chrono::milliseconds{start_bound_ms_});
+}
+
+void SessionOwner::arm_replay_ini(bool strict) noexcept {
+    replay_ini_ = true;
+    strict_direct_video_ = strict;
 }
 
 void SessionOwner::boot_config_(std::string_view core_name, const svc::ConfigSnapshot& cfg,

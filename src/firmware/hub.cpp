@@ -3,6 +3,7 @@
 
 #include <cstdio>
 
+#include "tasty_ctl.h"
 #include "infra/persist.h"
 #include "svc/config.h"
 #include "svc/config_snapshot.h"
@@ -17,9 +18,11 @@ namespace mister::fw {
 using namespace mister;
 
 void report(const char* what, const Error& e) {
-    std::fprintf(stderr, "mister: %s failed: Errc=%u site=%u detail=%u\n", what,
-                 static_cast<unsigned>(e.code), static_cast<unsigned>(e.site),
-                 static_cast<unsigned>(e.detail));
+    char buf[192];
+    std::snprintf(buf, sizeof buf, "mister: %s failed: Errc=%u site=%u detail=%u", what,
+                  static_cast<unsigned>(e.code), static_cast<unsigned>(e.site),
+                  static_cast<unsigned>(e.detail));
+    tasty_say(buf);
 }
 
 bool Hub::rides_io_(svc::IIoCoworker& lane, const char* what) noexcept {
@@ -400,8 +403,6 @@ Hub::~Hub() {
     assembly_.stop();
     (void)assembly_.join();
 }
-
-void Hub::omit_ui() noexcept {}
 
 void Hub::latch_boot_config() noexcept {
 

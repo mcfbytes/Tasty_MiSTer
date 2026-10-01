@@ -330,6 +330,13 @@ public:
     [[nodiscard]] bool boot_config_parsed() const noexcept { return !boot_config_pending_; }
 
     [[nodiscard]] const std::string& boot_handoff() const noexcept { return boot_handoff_; }
+
+    void arm_replay_ini(bool strict) noexcept;
+
+    [[nodiscard]] const xthread::Telemetry<std::uint8_t, SeatTag::Unbound>& direct_video_ini_cell()
+        const noexcept {
+        return direct_video_ini_cell_;
+    }
     [[nodiscard]] std::uint32_t identities_ok() const noexcept { return identities_ok_; }
     [[nodiscard]] std::uint32_t identities_fail() const noexcept { return identities_fail_; }
 
@@ -590,6 +597,9 @@ private:
     ConfigCell& config_cell_;
 
     proto::ConfSwitches published_conf_ = default_conf_switches();
+    bool replay_ini_ = false;
+    bool strict_direct_video_ = false;
+    xthread::Telemetry<std::uint8_t, SeatTag::Unbound> direct_video_ini_cell_{};
     EventQueue& owner_events_;
     ConfStrCell& conf_str_cell_;
     UiRequestRing ui_requests_;

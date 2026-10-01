@@ -9,6 +9,8 @@
 
 #include "cores/manifests/psx.h"
 #include "cores/movie_archive.h"
+#include "svc/chd_source.h"
+#include "svc/disc_engine.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 #include "svc/xml_scan.h"
@@ -207,6 +209,38 @@ std::array<std::uint8_t, 12> le32x3(std::int64_t a, std::int64_t b, std::int64_t
     return out;
 }
 
+struct TocTrack {
+    std::uint8_t number = 0;
+    bool data = false;
+    bool mode2 = false;
+    std::uint8_t flags = 0;
+    std::int64_t lba = 0;
+};
+
+std::vector<std::uint8_t> toc_bytes(std::span<const TocTrack> tracks, std::int64_t lead_out) {
+    std::vector<std::uint8_t> out;
+    out.reserve(PsxMovieCodec::kTocPrefixBytes);
+    const auto add = [&out](const std::array<std::uint8_t, 12>& e) {
+        out.insert(out.end(), e.begin(), e.end());
+    };
+
+    const bool xa =
+        std::any_of(tracks.begin(), tracks.end(), [](const TocTrack& t) { return t.mode2; });
+    add(le32x3(xa ? PsxMovieCodec::kSessionFormat : 0, tracks.front().number,
+               tracks.back().number));
+    for (std::size_t i = 1; i <= 100; ++i) {
+        if (i <= tracks.size()) {
+            const TocTrack& t = tracks[i - 1];
+            add(le32x3((t.data ? 4 : 0) | t.flags, 1, t.lba));
+        } else if (i == 100) {
+            add(le32x3(0, 1, lead_out));
+        } else {
+            add(le32x3(0, 0, 0));
+        }
+    }
+    return out;
+}
+
 std::string_view dir_of(std::string_view path) {
     const std::size_t slash = path.rfind('/');
     return slash == std::string_view::npos ? std::string_view{} : path.substr(0, slash + 1);
@@ -372,6 +406,7 @@ Ex<IMovieCodec::Facts> PsxMovieCodec::header_line(std::string_view line,
             if (val != "0") return std::unexpected(refuse(CR::Multitap, ERR_SITE()));
         }
     }
+    note_rerecords(key, val, f);
     f.layout = l.bits();
     return f;
 }
@@ -473,33 +508,96 @@ Ex<std::vector<std::uint8_t>> PsxMovieCodec::toc_prefix(std::string_view cue,
         base[i + 1] = base[i] + static_cast<std::int64_t>(file_sizes[i] / kSectorBytes);
     if (file_sizes.front() < kKeySectors * kSectorBytes)
         return std::unexpected(refuse(CR::Disk, ERR_SITE()));
-    std::vector<std::uint8_t> out;
-    out.reserve(kTocPrefixBytes);
-    const auto add = [&out](const std::array<std::uint8_t, 12>& e) {
-        out.insert(out.end(), e.begin(), e.end());
-    };
+    std::vector<TocTrack> toc;
+    toc.reserve(c->tracks.size());
+    for (const CueTrack& t : c->tracks)
+        toc.push_back({.number = t.number,
+                       .data = t.data,
+                       .mode2 = t.mode2,
+                       .flags = t.flags,
+                       .lba = base[t.file] + *t.index1});
+    return toc_bytes(toc, base.back());
+}
 
-    const bool xa =
-        std::any_of(c->tracks.begin(), c->tracks.end(), [](const CueTrack& t) { return t.mode2; });
-    add(le32x3(xa ? kSessionFormat : 0, c->tracks.front().number, c->tracks.back().number));
-    for (std::size_t i = 1; i <= 100; ++i) {
-        if (i <= c->tracks.size()) {
-            const CueTrack& t = c->tracks[i - 1];
-            add(le32x3((t.data ? 4 : 0) | t.flags, 1, base[t.file] + *t.index1));
-        } else if (i == 100) {
-            add(le32x3(0, 1, base.back()));
-        } else {
-            add(le32x3(0, 0, 0));
+Ex<std::vector<std::uint8_t>> PsxMovieCodec::chd_key(svc::IChdSource& chd) {
+
+    std::vector<TocTrack> toc;
+    std::int64_t lba = 0;
+    std::uint32_t first_frames = 0;
+    for (std::uint32_t i = 0;; ++i) {
+        const auto row = chd.track_metadata(i);
+        if (!row) break;
+        const auto t = svc::parse_chd_track(*row);
+        if (!t || t->number != i + 1 || i == 99)
+            return std::unexpected(refuse(CR::Disk, ERR_SITE()));
+        const std::string_view type(t->type);
+        TocTrack e{.number = static_cast<std::uint8_t>(t->number)};
+        if (type == "MODE2_RAW" || type == "MODE1_RAW") {
+            e.data = true;
+            e.mode2 = type == "MODE2_RAW";
+        } else if (type != "AUDIO") {
+            return std::unexpected(refuse(CR::Disk, ERR_SITE()));
         }
+
+        const bool held = t->pgtype[0] == 'V';
+        if ((t->pregap != 0 && !held) || t->postgap != 0)
+            return std::unexpected(refuse(CR::Disk, ERR_SITE()));
+        e.lba = lba + t->pregap;
+        lba += t->frames;
+        if (i == 0) first_frames = t->frames;
+        toc.push_back(e);
+    }
+    if (toc.empty() || !toc.front().data || toc.front().lba != 0 || first_frames < kKeySectors)
+        return std::unexpected(refuse(CR::Disk, ERR_SITE()));
+    std::vector<std::uint8_t> out = toc_bytes(toc, lba);
+
+    const svc::IChdSource::Geometry geo = chd.geometry();
+    if (geo.unit_bytes != kChdFrameBytes || geo.hunk_bytes < geo.unit_bytes ||
+        geo.hunk_bytes > kChdHunkMax)
+        return std::unexpected(refuse(CR::Disk, ERR_SITE()));
+    const std::uint32_t per_hunk = geo.hunk_bytes / geo.unit_bytes;
+    std::vector<std::byte> hunk(geo.hunk_bytes);
+    std::optional<std::uint32_t> held_hunk{};
+    out.reserve(out.size() + kKeySectors * kSectorBytes);
+    for (std::uint32_t f = 0; f < kKeySectors; ++f) {
+        if (held_hunk != f / per_hunk) {
+            if (auto r = chd.read_hunk(f / per_hunk, hunk); !r) return std::unexpected(r.error());
+            held_hunk = f / per_hunk;
+        }
+        const auto* p = reinterpret_cast<const std::uint8_t*>(hunk.data()) +
+                        static_cast<std::size_t>(f % per_hunk) * geo.unit_bytes;
+        out.insert(out.end(), p, p + kSectorBytes);
     }
     return out;
 }
 
+Error PsxMovieCodec::chd_open_error(const Error& e) noexcept {
+    if (e.code == Errc::mount_failed) return refuse(CR::ChdUnsupported, ERR_SITE());
+    if (e.code == Errc::bad_format) return refuse(CR::Disk, ERR_SITE());
+    return e;
+}
+
+namespace {
+
+[[nodiscard]] Ex<IMovieCodec::DigestSource> chd_digest_source(const svc::Vfs& vfs,
+                                                              std::string_view rom) {
+    auto f = vfs.open(rom, svc::OpenMode::Read);
+    if (!f) return std::unexpected(f.error());
+    auto chd = svc::open_chd(std::move(*f));
+    if (!chd) return std::unexpected(PsxMovieCodec::chd_open_error(chd.error()));
+    auto key = PsxMovieCodec::chd_key(**chd);
+    if (!key) return std::unexpected(key.error());
+    return IMovieCodec::DigestSource{
+        .file = std::string(rom), .span = {.offset = 0, .length = 0}, .prefix = std::move(*key)};
+}
+
+}  // namespace
+
 Ex<IMovieCodec::DigestSource> PsxMovieCodec::digest_source(const svc::Vfs& vfs,
                                                            std::string_view rom) const {
-
-    if (rom.size() < 4 || !svc::xml::iequal(rom.substr(rom.size() - 4), ".cue"))
-        return std::unexpected(refuse(CR::Disk, ERR_SITE()));
+    const std::string_view ext = rom.size() < 4 ? std::string_view{} : rom.substr(rom.size() - 4);
+    if (svc::xml::iequal(ext, ".chd")) return chd_digest_source(vfs, rom);
+    if (!svc::xml::iequal(ext, ".cue")) return std::unexpected(refuse(CR::Disk, ERR_SITE()));
     auto cue = vfs.open(rom, svc::OpenMode::Read);
     if (!cue) return std::unexpected(cue.error());
     const auto size = (*cue)->size();

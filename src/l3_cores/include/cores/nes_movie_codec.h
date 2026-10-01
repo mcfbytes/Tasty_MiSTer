@@ -12,7 +12,7 @@
 
 namespace mister::cores {
 
-class NesMovieCodec final : public IMovieCodec {
+class NesMovieCodec : public IMovieCodec {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
@@ -23,6 +23,7 @@ public:
     [[nodiscard]] Ex<void> finish_header(const Facts& f) const noexcept override;
     [[nodiscard]] Ex<Frame> frame(std::string_view line, const Facts& f) const noexcept override;
     [[nodiscard]] SettingNeeds setting_needs(const Facts& f) const noexcept override;
+    [[nodiscard]] std::optional<SettingNeed> ram_fill_need(RamFill fill) const noexcept override;
     [[nodiscard]] Raster raster(const Facts& f) const noexcept override;
     [[nodiscard]] PowerOn power_on(const Facts& f) const noexcept override;
 

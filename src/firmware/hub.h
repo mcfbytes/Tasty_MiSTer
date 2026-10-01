@@ -160,9 +160,15 @@ public:
     app::RecorderControl& recorder() noexcept { return recorder_; }
     const app::ReplayStatusCell& replay_status() const noexcept { return replay_status_; }
     const app::RecorderStatusCell& recorder_status() const noexcept { return rec_status_; }
+    const app::EncodeStatusCell& encode_status() const noexcept { return encode_status_; }
     const svc::Vfs* vfs() const noexcept { return vfs_; }
     void set_owner_tick(app::IOwnerTick* tick) noexcept { assembly_.ui().set_owner_tick(tick); }
     void force_vsync_adjust(std::uint8_t v) noexcept { video_pump_.force_vsync_adjust(v); }
+
+    void arm_replay_ini(bool strict) noexcept {
+        video_pump_.arm_replay_ini(strict);
+        owner_.arm_replay_ini(strict);
+    }
     const app::IdentityLatch& identity_latch() const noexcept { return session_.identity(); }
     app::UiRequestRing& ui_requests() noexcept { return owner_.ui_requests(); }
 
@@ -179,7 +185,6 @@ public:
     void settle_writes() noexcept { session_.settle_writes(); }
     [[nodiscard]] app::SessionState session_state() const noexcept { return session_.state(); }
     [[nodiscard]] Ex<void> pump_boot() { return rt_main_.pump_boot(); }
-    void omit_ui() noexcept;
 
 private:
     static std::optional<app::CmdFifo> open_cmd_fifo();

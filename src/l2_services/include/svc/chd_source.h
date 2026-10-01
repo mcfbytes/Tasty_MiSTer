@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 
@@ -11,6 +12,7 @@
 namespace mister::svc {
 
 struct ChdMetaRow;
+class IFile;
 
 class IChdSource {
 public:
@@ -32,5 +34,19 @@ protected:
     IChdSource(const IChdSource&) = default;
     IChdSource& operator=(const IChdSource&) = default;
 };
+
+struct ChdTrack {
+    std::uint32_t number = 0;
+    std::uint32_t frames = 0;
+    std::uint32_t pregap = 0;
+    std::uint32_t postgap = 0;
+    char type[32]{};
+    char subtype[32]{};
+    char pgtype[32]{};
+};
+
+[[nodiscard]] std::optional<ChdTrack> parse_chd_track(const ChdMetaRow& row) noexcept;
+
+[[nodiscard]] Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file);
 
 }  // namespace mister::svc

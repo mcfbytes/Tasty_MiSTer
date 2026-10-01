@@ -106,6 +106,11 @@ void VideoPump::force_vsync_adjust(std::uint8_t v) noexcept {
     vsync_adjust_ = v;
 }
 
+void VideoPump::arm_replay_ini(bool strict) noexcept {
+    replay_ini_ = true;
+    strict_direct_video_ = strict;
+}
+
 void VideoPump::set_mode_override(std::string_view spec) noexcept {
     latch_spec(spec);
     override_latched_ = true;
@@ -481,6 +486,7 @@ void VideoPump::load_spec_from_ini() {
     refresh_min_ = 0.0;
     refresh_max_ = 0.0;
     direct_video_ = false;
+    direct_video_ini_ = 0;
     menu_pal_ = false;
     forced_scandoubler_ = false;
 
@@ -517,8 +523,11 @@ void VideoPump::load_spec_from_ini() {
         return;
     }
 
-    opt.direct_video = svc::direct_video_resolved(*snap) != 0;
-    dv = opt.direct_video;
+    direct_video_ini_ = svc::direct_video_resolved(*snap);
+
+    const bool dv_on = direct_video_ini_ != 0 && !(replay_ini_ && !strict_direct_video_);
+    opt.direct_video = dv_on;
+    dv = dv_on;
     sq = snap->spd_quirk;
 
     for (int i = 0; i < 2; ++i) {
@@ -543,7 +552,7 @@ void VideoPump::load_spec_from_ini() {
     spec_ntsc_ = snap->video_mode_ntsc;
     menu_pal_ = snap->menu_pal != 0;
     forced_scandoubler_ = snap->forced_scandoubler != 0;
-    direct_video_ = svc::direct_video_resolved(*snap) != 0;
+    direct_video_ = dv_on;
     vsync_adjust_ = snap->vsync_adjust;
 
     if (direct_video_) vsync_adjust_ = 0;
@@ -560,7 +569,7 @@ void VideoPump::load_spec_from_ini() {
     io.hdr_mode = snap->hdr != 0;
     io.hlg = snap->hdr == 1;
     io.hdmi_limited = snap->hdmi_limited != 0;
-    io.ypbpr = (snap->vga_mode_int == 1) && (svc::direct_video_resolved(*snap) == 1);
+    io.ypbpr = (snap->vga_mode_int == 1) && direct_video_ && direct_video_ini_ == 1;
     io.dvi_mode = snap->dvi_mode == 1;
     io.hdmi_audio_96k = snap->hdmi_audio_96k != 0;
     idle_.set_timeout_minutes(snap->hdmi_off);

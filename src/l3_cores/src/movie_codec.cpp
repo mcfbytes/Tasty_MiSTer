@@ -4,6 +4,7 @@
 
 #include "cores/megadrive_movie_codec.h"
 #include "cores/movie_archive.h"
+#include "cores/nes_bk2_codec.h"
 #include "cores/nes_movie_codec.h"
 #include "cores/snes_bk2_codec.h"
 #include "cores/psx_movie_codec.h"
@@ -11,13 +12,19 @@
 #include "svc/file.h"
 #include "svc/vfs.h"
 
+#include <algorithm>
+#include <cerrno>
+#include <charconv>
+#include <span>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace mister::cores {
 namespace {
 
 constexpr NesMovieCodec kNesMovieCodec{};
+constexpr NesBk2Codec kNesBk2Codec{};
 constexpr SnesLsmvCodec kSnesLsmvCodec{};
 constexpr SnesBk2Codec kSnesBk2Codec{};
 constexpr MegaDriveMovieCodec kMegaDriveMovieCodec{};
@@ -29,8 +36,9 @@ struct CodecRow {
     std::string_view ext;
     const IMovieCodec* codec;
 };
-constexpr std::array<CodecRow, 6> kMovieCodecs{{
+constexpr std::array<CodecRow, 7> kMovieCodecs{{
     {CoreKind::Generic, "NES", "fm2", &kNesMovieCodec},
+    {CoreKind::Generic, "NES", "bk2", &kNesBk2Codec},
     {CoreKind::Snes, "SNES", "lsmv", &kSnesLsmvCodec},
     {CoreKind::Snes, "SNES", "bk2", &kSnesBk2Codec},
     {CoreKind::MegaDrive, "MegaDrive", "bk2", &kMegaDriveMovieCodec},
@@ -57,6 +65,28 @@ bool iequal(std::string_view a, std::string_view b) {
     return true;
 }
 
+std::optional<MovieSystem> system_for_platform(std::string_view platform,
+                                               std::string_view movie_path) {
+    struct Row {
+        std::string_view platform;
+        std::string_view name;
+        CoreKind kind;
+    };
+    static constexpr Row kRows[] = {
+        {"NES", "NES", CoreKind::Generic},
+        {"SNES", "SNES", CoreKind::Snes},
+        {"GEN", "MegaDrive", CoreKind::MegaDrive},
+        {"PSX", "PSX", CoreKind::Psx},
+    };
+    for (const Row& r : kRows) {
+        if (r.platform != platform) continue;
+        const IMovieCodec* c = movie_codec_for(r.name, movie_path);
+        if (c == nullptr) return std::nullopt;
+        return MovieSystem{.kind = r.kind, .conf_str_name = r.name, .codec = c};
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 unsigned IMovieCodec::SettingNeed::value_in(const proto::StatusWord& live) const noexcept {
@@ -66,6 +96,21 @@ unsigned IMovieCodec::SettingNeed::value_in(const proto::StatusWord& live) const
 bool IMovieCodec::SettingNeed::met_by(const proto::StatusWord& live) const noexcept {
     const unsigned v = value_in(live);
     return v < 16u && ((allowed >> v) & 1u) != 0;
+}
+
+std::optional<IMovieCodec::SettingNeeds> IMovieCodec::setting_needs_for(
+    const Facts& f, std::optional<RamFill> fill) const noexcept {
+    SettingNeeds needs = setting_needs(f);
+    if (!fill) return needs;
+    const auto ram = ram_fill_need(*fill);
+    if (!ram) return std::nullopt;
+    for (std::size_t i = 0; i < needs.n; ++i) {
+        if (needs.rows[i].name != ram->name) continue;
+        needs.rows[i] = *ram;
+        return needs;
+    }
+    needs.add(*ram);
+    return needs;
 }
 
 IMovieCodec::SettingVerdict IMovieCodec::check_settings(const proto::StatusWord& live,
@@ -124,6 +169,16 @@ std::optional<std::uint32_t> IMovieCodec::power_on_ns(const proto::StatusWord& l
     return static_cast<std::uint32_t>(ns);
 }
 
+void note_rerecords(std::string_view key, std::string_view val, IMovieCodec::Facts& f) noexcept {
+    if (key != "rerecordCount" && key != "rerecords" && key != "GmvRerecords") return;
+    if (val.empty() || val.size() > 10) return;
+    std::uint32_t v = 0;
+    const auto [p, ec] = std::from_chars(val.data(), val.data() + val.size(), v);
+    if (ec != std::errc{} || p != val.data() + val.size()) return;
+    f.has_rerecords = true;
+    f.rerecords = v;
+}
+
 const IMovieCodec* movie_codec_for(std::string_view conf_str_name,
                                    std::string_view movie_path) noexcept {
     const std::string_view ext = extension_of(movie_path);
@@ -158,48 +213,76 @@ std::optional<MovieSystem> movie_system_for_path(std::string_view movie_path) no
     return MovieSystem{.kind = found->kind, .conf_str_name = found->name, .codec = found->codec};
 }
 
-bool has_platform(std::string_view text, std::string_view name) noexcept {
-    std::string line = "Platform ";
-    line.append(name.begin(), name.end());
+std::optional<std::string> movie_bk2_platform(std::string_view text) noexcept {
+    constexpr std::string_view kKey = "Platform ";
     std::size_t at = 0;
     while (at < text.size()) {
         const std::size_t nl = text.find('\n', at);
         std::string_view row =
             text.substr(at, (nl == std::string_view::npos ? text.size() : nl) - at);
         if (!row.empty() && row.back() == '\r') row.remove_suffix(1);
-        if (row == line) return true;
+        if (row.size() > kKey.size() && row.substr(0, kKey.size()) == kKey) {
+            std::string_view v = row.substr(kKey.size());
+            while (!v.empty() && (v.front() == ' ' || v.front() == '\t'))
+                v.remove_prefix(1);
+            while (!v.empty() && (v.back() == ' ' || v.back() == '\t'))
+                v.remove_suffix(1);
+            if (v.empty() || v.size() > 32) return std::nullopt;
+            return std::string(v);
+        }
         if (nl == std::string_view::npos) break;
         at = nl + 1;
     }
-    return false;
+    return std::nullopt;
+}
+
+[[nodiscard]] Ex<std::optional<std::string>> movie_bk2_platform(svc::IFile& movie) {
+    const auto sz = movie.size();
+    if (!sz) return std::unexpected(sz.error());
+    const auto cap =
+        static_cast<std::size_t>(std::min<std::uint64_t>(sz->v, MovieArchiveFormat::kHeadMax));
+    if (cap == 0) return std::optional<std::string>{};
+    std::vector<char> raw(cap);
+    const auto n = movie.read_at(0, std::as_writable_bytes(std::span(raw.data(), raw.size())));
+    if (!n) return std::unexpected(n.error());
+    if (*n == 0) return std::optional<std::string>{};
+    return movie_bk2_platform(std::string_view(raw.data(), *n));
+}
+
+[[nodiscard]] Ex<std::optional<std::string>> movie_bk2_platform(const svc::Vfs& vfs,
+                                                                std::string_view movie_path) {
+    if (!iequal(extension_of(movie_path), "bk2")) return std::optional<std::string>{};
+    auto f = open_movie_archive(vfs, movie_path, kBk2Archive);
+    if (!f) return std::unexpected(f.error());
+    return movie_bk2_platform(**f);
 }
 
 std::optional<MovieSystem> movie_system_for(const svc::Vfs& vfs,
                                             std::string_view movie_path) noexcept {
     if (auto u = movie_system_for_path(movie_path)) return u;
     if (!iequal(extension_of(movie_path), "bk2")) return std::nullopt;
-    auto f = open_movie_archive(vfs, movie_path, kBk2Archive);
-    if (!f) return std::nullopt;
-    std::array<std::byte, 8192> raw{};
-    const auto n = (*f)->read_at(0, raw);
-    if (!n || *n == 0) return std::nullopt;
-    const std::string_view text{reinterpret_cast<const char*>(raw.data()), *n};
-    if (has_platform(text, "SNES")) {
-        const IMovieCodec* c = movie_codec_for("SNES", movie_path);
-        if (c == nullptr) return std::nullopt;
-        return MovieSystem{CoreKind::Snes, "SNES", c};
+    const auto plat = movie_bk2_platform(vfs, movie_path);
+    if (!plat || !*plat) return std::nullopt;
+    return system_for_platform(**plat, movie_path);
+}
+
+std::string movie_unplayable_reason(const Ex<std::optional<std::string>>& platform,
+                                    std::string_view movie_path) {
+    if (!platform) {
+        const Error& e = platform.error();
+        if (e.code == Errc::io && e.detail == static_cast<std::uint32_t>(ENOSYS))
+            return "ZIP support is not built in, so this .bk2 cannot be opened";
+        return "this .bk2 archive is unreadable; check that the file is complete";
     }
-    if (has_platform(text, "GEN")) {
-        const IMovieCodec* c = movie_codec_for("MegaDrive", movie_path);
-        if (c == nullptr) return std::nullopt;
-        return MovieSystem{CoreKind::MegaDrive, "MegaDrive", c};
-    }
-    if (has_platform(text, "PSX")) {
-        const IMovieCodec* c = movie_codec_for("PSX", movie_path);
-        if (c == nullptr) return std::nullopt;
-        return MovieSystem{CoreKind::Psx, "PSX", c};
-    }
-    return std::nullopt;
+    if (!platform->has_value())
+        return "this .bk2 names no Platform line, so tasty cannot tell which console it is for";
+    if (system_for_platform(**platform, movie_path)) return {};
+    return "this .bk2 is for " + **platform + "; tasty plays NES, SNES, Genesis and PSX movies";
+}
+
+std::string movie_unplayable_reason(const svc::Vfs& vfs, std::string_view movie_path) {
+    if (!iequal(extension_of(movie_path), "bk2") || !vfs.file_exists(movie_path)) return {};
+    return movie_unplayable_reason(movie_bk2_platform(vfs, movie_path), movie_path);
 }
 
 [[nodiscard]] Ex<IMovieCodec::Facts> read_movie_facts(const svc::Vfs& vfs, const IMovieCodec& codec,

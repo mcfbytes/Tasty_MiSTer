@@ -18,11 +18,14 @@ struct EncodeStatus {
         std::uint32_t enc_us_last = 0;
         std::uint32_t enc_us_max = 0;
         std::uint32_t budget_pct = 0;
+        std::uint32_t me_cut = 0;
         std::uint32_t arena_kib = 0;
         std::uint16_t segment = 0;
         std::uint8_t scale = 0;
         std::uint8_t steps = 0;
+        std::uint8_t fell_behind = 0;
         std::uint8_t rate_rolls = 0;
+        std::uint8_t me_rad = 0;
         std::uint32_t errors = 0;
         std::uint64_t bytes = 0;
     };

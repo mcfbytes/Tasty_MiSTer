@@ -170,6 +170,7 @@ private:
 
     RecPath path_{};
     RecMode mode_ = RecMode::Hash;
+    RecOptions opt_{};
     bool from_arm_ = false;
     bool open_sent_ = false;
     bool close_sent_ = false;

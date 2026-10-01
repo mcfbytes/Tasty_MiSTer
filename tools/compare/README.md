@@ -102,10 +102,45 @@ the shipped Kitrinx 34 file.
 
 **BizHawk (NES/SNES/Genesis/PSX):** open the ROM in EmuHawk 2.8+, load
 `bizhawk-dump.lua`, play the movie. Set `TASTY_DUMP_PNG=1` to write PNGs, then
-pass that directory as `--emu`.
+pass that directory as `--emu`. A `png` row's hash column is `-`: such a log
+alone is refused, not compared.
 
 **lsnes (SNES):** load `lsnes-dump.lua`, or File → Dump video from power-on
 (lossless) and pass the AVI as `--emu`.
+
+**TriCNES (NES):** `tricnes-dump/` is a headless runner for an unmodified
+checkout of [TriCNES](https://github.com/100thCoin/TriCNES) (WinForms, so the
+GUI does not run here). It needs the .NET 8 SDK (`DOTNET_ROOT` if the
+SDK is not on the default linker path). It does not need libgdiplus.
+The measured SMB3 run used TriCNES `94f1b1178057e84c56e4c2410c8391eee4d78975`.
+
+```sh
+dotnet build -c Release -p:TriCNESRoot=/path/to/TriCNES \
+  tools/compare/tricnes-dump/tricnes-dump.csproj
+tools/compare/tricnes-dump/bin/Release/net8.0/tricnes-dump \
+  --rom "Super Mario Bros. 3 (USA).nes" --movie smb3-warps.fm2 \
+  --out ./tricnes-smb3 --limit 34100
+```
+
+`emu.hashes.tsv` is `movie_frame`, `lag`, CRC-32 of the 256x240 RGB picture
+(`kind` `rgb`). `emu.edges.tsv` is the same columns for the palette-free edge
+map of rows 8..231 (`kind` `edges`). Exact edge CRCs miss sprite flicker: on
+SMB3 they match FCEUX on the title and then almost never, so they do not
+reproduce the published slip. The slip metric is colour-map leftover ≤ 32
+(`tasty-compare --system nes`). `--png DIR --png-spec 1-1600:1,33000-34100:1`
+writes that crop as `frame-NNNNNN.png` (256x224 RGB, rows 8..231). Pass
+that directory as `--emu`. The full RGB hash will not match a MiSTer
+sidecar: palettes differ, and the sidecar is 256x224.
+
+`--ppu-phase` is 0..3 and `--cpu-phase` is 0..11 (the TAS dialog's two
+alignment boxes). `--fceux-frame0 true` is the default, and it is the checked
+box for an `.fm2`. `--ppu-reset` is the power-on flag the GUI leaves false.
+An `.fm2` also starts from CPU phase 0 and the RAM pattern
+`00 00 00 00 00 FF FF FF`. Frame numbers count frame advances from 1. With
+frame-0 timing on, advance 1 is the short pre-frame, so TriCNES frame N is
+FCEUX `emu.framecount()` N−1. On SMB3 3922M, CPU phase 0 leaves FCEUX by
+frame 612. Phases 8, 9, 10 and 11 stay with it through the opening. Phase
+10, run to frame 34100, takes the same one-frame step as MiSTer at 33878.
 
 **Any emulator:** dump a lossless AVI or a PNG sequence from power-on, then
 `--emu path`. RGB bijection covers palette differences; `--crop` and

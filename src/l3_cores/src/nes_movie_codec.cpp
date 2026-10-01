@@ -148,6 +148,7 @@ Ex<IMovieCodec::Facts> NesMovieCodec::header_line(std::string_view line,
         std::copy(d->begin(), d->end(), f.digest.bytes.begin());
         f.has_digest = true;
     }
+    note_rerecords(key, val, f);
     return f;
 }
 
@@ -216,6 +217,18 @@ IMovieCodec::SettingNeeds NesMovieCodec::setting_needs(const Facts& f) const noe
              .preferred = want,
              .name = "System Type"});
     return out;
+}
+
+std::optional<IMovieCodec::SettingNeed> NesMovieCodec::ram_fill_need(RamFill fill) const noexcept {
+
+    const auto v = static_cast<std::uint8_t>(fill == RamFill::Zero ? 1
+                                             : fill == RamFill::Ff ? 2
+                                                                   : 3);
+    return SettingNeed{.lo = kRamClearLo,
+                       .width = 2,
+                       .allowed = static_cast<std::uint16_t>(1u << v),
+                       .preferred = v,
+                       .name = "RAM Clear"};
 }
 
 IMovieCodec::Raster NesMovieCodec::raster(const Facts& f) const noexcept {

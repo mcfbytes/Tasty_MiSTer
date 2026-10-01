@@ -53,7 +53,8 @@ binary), a short Tasty Kun splash, then the NES core boots and Mario runs the ga
 your NES core settings differ from the movie's, `tasty` prints each one it uses for this run, such as
 `RAM Clear: using $00 for this run (your setting: No)`; your saved settings are not touched. 30 seconds after the
 last input it restarts `/media/fat/MiSTer` and you are back at the menu. `--linger <seconds>` changes that wait,
-`--stay` keeps the core running, and `tasty stop` ends early. `--no-splash` skips the logo. Your saves are left
+`--stay` keeps the core running, and `tasty stop` ends early. A dropped SSH session no longer stops a run;
+`tasty stop` or Ctrl-C ends it and returns to the menu. `--no-splash` skips the logo. Your saves are left
 alone too: on the NES, SNES and Genesis the game powers on with no save loaded, as the movie expects, and the file
 in `saves/` is never opened.
 
@@ -72,10 +73,10 @@ movie is console-verified. On MiSTer it runs in sync for about nine minutes, the
 
 | system | core | movie formats | status |
 |---|---|---|---|
-| NES | NES | `.fm2` (FCEUX) | **works**: see the known-good runs below |
+| NES | NES | `.fm2` (FCEUX), `.bk2` (BizHawk NesHawk) | **works**: see the known-good runs below |
 | SNES | SNES | `.lsmv` (lsnes), `.bk2` (BizHawk) | **experimental**: plays, but the SNES is sensitive to exactly when in the frame input arrives, and no run has stayed in sync to the end yet |
-| Genesis / Mega Drive | MegaDrive | `.gmv` (Gens), `.bk2` (BizHawk) | **experimental**: replays cleanly, but the one movie tried doesn't reach gameplay yet |
-| PlayStation | PSX | `.bk2` (BizHawk) | **experimental**: shows off CD-ROM loading; CD timing on the core differs from the emulator, so expect desyncs. Discs as `.cue`/`.bin` (CHD not yet) |
+| Genesis / Mega Drive | MegaDrive | `.gmv` (Gens), `.bk2` (BizHawk) | **experimental**: starts and replays cleanly, but no movie stays in sync yet. Gens loads graphics faster than a real console, so Gens movies drift at each load; console verification replayed them one input per pad read, which tasty does not do yet |
+| PlayStation | PSX | `.bk2` (BizHawk) | **not working yet**: discs load (`.cue`/`.bin` or `.chd`), but CD timing on the core differs from the emulator and playback desyncs |
 
 **Tested movies**
 
@@ -111,45 +112,38 @@ tasty stop                        stop playback and return to the menu
 tasty rec start|stop [options]    record whatever is on screen, no movie needed
 ```
 
-**Playback (shipped)**
+**Playback**
 
 | option | meaning |
 |---|---|
-| `--rom <file>` | the ROM to boot (required for `play` in this cut) |
+| `--rom <file>` | the ROM to boot; without it, tasty searches `/media/fat/games` for one that matches the movie's checksum |
 | `--core <rbf>` | the core to load (default: the one for the movie's system) |
 | `--lead <frames>` | shift the whole movie by N frames |
+| `--phase <us>` | when in the frame the pad changes, in microseconds after vsync (default: half a frame) |
 | `--stop-at <frame>` | play movie frames 0 to N-1, then end there |
+| `--loop` | play the movie again each time it ends, until `tasty stop` (not with `--record`) |
+| `--ram-init zero\|ff\|random` | NES RAM Clear for this run; other cores refuse it |
 | `--linger <seconds>` | wait after the last input before returning to the menu (default `30`) |
 | `--stay` | never return on its own; the core keeps running until `tasty stop` |
 | `--strict` | refuse when a core setting differs from the movie's, instead of setting it for this run |
 | `--no-splash` | skip the logo before the core load |
 | `--vsync-adjust 0\|1` | scaler mode forced for the session (disk INI is left alone) |
 
-**Playback (planned)**
+While a movie plays, tasty mutes every controller so a stray press can't change the run, and runs the session with
+`direct_video` off (`--strict` refuses instead).
+
+**Recording** — works with `tasty play` and `tasty rec start`
 
 | option | meaning |
 |---|---|
-| `--rom` default | look the ROM up by the movie's checksum |
-| `--ram-init zero\|ff\|random` | power-on RAM fill, where the core supports it |
-| `--loop` | start over when the movie ends |
-
-**Recording (shipped)** — works with `tasty play` and `tasty rec start`
-
-| option | meaning |
-|---|---|
-| `--record <dir>` | record to this directory |
-| `--hashes` | also write a per-frame hash log |
-| `--hashes-only` | hash log only, no video |
-
-**Recording (planned)**
-
-| option | meaning |
-|---|---|
-| `--codec cscd\|zmbv` | `cscd` is what this cut records; `zmbv` is planned |
-| `--scale auto\|native\|half` | this cut records native |
-| `--every <n>` | keep every Nth frame |
-| `--from <frame>` `--to <frame>` | record only this slice |
-| `--segment <size>` | split files at this size |
+| `--record <dir>` or `<name>.avi` | record to this directory; a `.avi` name sets the file stem |
+| `--hashes-only` | hash log only, no video (an AVI always writes the hash log beside it) |
+| `--codec cscd\|zmbv` | `cscd` (default) or lossless `zmbv`, which `ffmpeg` reads |
+| `--motion auto\|off\|small\|full` | ZMBV motion search: `auto` (default) tunes itself to the CPU; `off` is fastest; `full` is the most thorough |
+| `--scale auto\|native\|half` | `auto` (default) halves the picture if the encoder can't keep up, and says so; `native` stays full size; `half` starts halved |
+| `--every <n>` | one AVI frame per n frames (1..600); the hash log keeps every frame |
+| `--from <frame>` `--to <frame>` | with `tasty play`: the movie-frame slice kept in the AVI (`from` inclusive, `to` exclusive) |
+| `--segment <size>` | roll the AVI at this size, 16M..2G (default 1G) |
 
 Recordings are the core's own pixels, as it hands them to the scaler: native resolution, no filters, in plain AVI that
 `ffmpeg` reads directly:
@@ -159,8 +153,8 @@ tasty play smb3.fm2 --record /media/fat/recordings --hashes
 ffmpeg -i smb3_000.avi -c:v libx264 -crf 16 -pix_fmt yuv420p smb3.mp4
 ```
 
-Recording is best effort. If the CPU or storage can't keep up, a frame is repeated and counted, and the replay never
-waits for the recording.
+Recording is best effort. If the encoder can't keep up, `--scale auto` first halves the picture and says so; past
+that, a frame is repeated and counted. The replay never waits for the recording.
 
 `info` prints the movie system and whether tasty plays it. Frame count and rerecords are planned.
 

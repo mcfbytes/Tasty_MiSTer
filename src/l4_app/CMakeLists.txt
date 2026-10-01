@@ -5,6 +5,8 @@ add_library(mister_app STATIC
   src/bitstream_programmer.cpp
   src/capture_main.cpp
   src/cscd_codec.cpp
+  src/rec_options.cpp
+  src/zmbv_codec.cpp
   src/core_frame_counter.cpp
   src/encode_main.cpp
   src/frame_arena.cpp
@@ -95,6 +97,9 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/chunk_slot.h
   app/core_frame_counter.h
   app/cscd_codec.h
+  app/frame_codec.h
+  app/rec_options.h
+  app/zmbv_codec.h
   app/core_frame_record.h
   app/encode_main.h
   app/encode_status.h

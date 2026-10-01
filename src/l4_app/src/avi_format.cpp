@@ -70,7 +70,10 @@ void AviFormat::header(const Fields& f, Header& out) noexcept {
     p.cc("strh");
     p.u32(56);
     p.cc("vids");
-    p.cc("CSCD");
+    if (f.codec == RecCodec::Zmbv)
+        p.cc("ZMBV");
+    else
+        p.cc("CSCD");
     p.u32(0);
     p.u16(0);
     p.u16(0);
@@ -92,9 +95,16 @@ void AviFormat::header(const Fields& f, Header& out) noexcept {
     p.u32(f.width);
     p.u32(f.height);
     p.u16(1);
-    p.u16(24);
-    p.cc("CSCD");
-    p.u32(static_cast<std::uint32_t>(CscdCodec::picture_bytes(f.width, f.height)));
+    const bool zmbv = f.codec == RecCodec::Zmbv;
+    p.u16(zmbv ? 32 : 24);
+    if (zmbv)
+        p.cc("ZMBV");
+    else
+        p.cc("CSCD");
+    const std::uint32_t image =
+        zmbv ? static_cast<std::uint32_t>(f.width) * f.height * 4u
+             : static_cast<std::uint32_t>(CscdCodec::picture_bytes(f.width, f.height));
+    p.u32(image);
     p.at += 16;
     p.cc("JUNK");
     p.u32(kMoviListAt - kJunkAt - 8);

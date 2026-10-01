@@ -49,6 +49,7 @@ private:
     void finalize_() noexcept;
 
     void learn_rate_(std::uint32_t vtime) noexcept;
+    [[nodiscard]] std::uint32_t scaled_vtime_(std::uint32_t vtime) const noexcept;
     void write_header_(std::int64_t now) noexcept;
     void sync_(std::int64_t now) noexcept;
     void fail_(int err) noexcept;
@@ -62,6 +63,7 @@ private:
     AviFormat::Fields f_{};
     std::uint64_t pos_ = 0;
     bool rate_known_ = false;
+    std::uint16_t frame_mul_ = 1;
 
     struct Unrated {
         UniqueFd fd{};

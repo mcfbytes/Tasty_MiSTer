@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>tricnes-dump</AssemblyName>
+    <RootNamespace>TricnesDump</RootNamespace>
+    <LangVersion>10</LangVersion>
+    <NoWarn>$(NoWarn);CS0162;CS0169;CS0414</NoWarn>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+  <PropertyGroup>
+    <TriCNESRoot Condition="'$(TriCNESRoot)' == ''">$(TRICNES_ROOT)</TriCNESRoot>
+  </PropertyGroup>
+  <Target Name="RequireTriCNES" BeforeTargets="CoreCompile">
+    <Error Condition="'$(TriCNESRoot)' == '' Or !Exists('$(TriCNESRoot)/Emulator.cs')"
+           Text="Set -p:TriCNESRoot= to a checkout of github.com/100thCoin/TriCNES (Emulator.cs)." />
+  </Target>
+  <ItemGroup>
+    <Compile Include="$(TriCNESRoot)/Emulator.cs" />
+    <Compile Include="$(TriCNESRoot)/6502Documentation.cs" />
+    <Compile Include="$(TriCNESRoot)/mappers/*.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="DrawingShim.cs" />
+  </ItemGroup>
+</Project>

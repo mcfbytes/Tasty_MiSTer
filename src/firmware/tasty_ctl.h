@@ -30,12 +30,16 @@ void tasty_unlock(int fd) noexcept;
 [[nodiscard]] std::optional<std::string> tasty_read_movie() noexcept;
 [[nodiscard]] std::string tasty_busy_text() noexcept;
 [[nodiscard]] Ex<void> tasty_signal_owner() noexcept;
-[[nodiscard]] Ex<void> tasty_stop_stock() noexcept;
+
+[[nodiscard]] Ex<bool> tasty_stop_stock() noexcept;
 [[nodiscard]] Ex<void> tasty_write_cmd(std::string_view line) noexcept;
 [[nodiscard]] Ex<void> tasty_write_status(std::string_view json) noexcept;
 [[nodiscard]] Ex<std::string> tasty_read_status() noexcept;
 void tasty_clear_status() noexcept;
+
 int tasty_spawn_stock() noexcept;
+
+void tasty_set_home_image(const char* exe, const char* arg) noexcept;
 [[nodiscard]] bool tasty_mkdir_p(std::string_view path) noexcept;
 [[nodiscard]] bool tasty_resolve_args(TastyArgs& a) noexcept;
 [[nodiscard]] std::optional<app::PathText> tasty_prepare_record(app::PathText record,
@@ -46,8 +50,13 @@ struct ReturnHome {
     int lock_fd = -1;
     bool armed = true;
     int* spawned = nullptr;
+    ReturnHome() noexcept;
     ~ReturnHome() noexcept;
 };
+
+void tasty_say(std::string_view line) noexcept;
+
+int tasty_launch_home() noexcept;
 
 enum class TastyClientAct : std::uint8_t { Idle, Signaled, WroteFifo };
 
@@ -55,10 +64,16 @@ enum class TastyClientAct : std::uint8_t { Idle, Signaled, WroteFifo };
 
 [[nodiscard]] bool tasty_rec_start_joins_owner() noexcept;
 [[nodiscard]] int tasty_run_client(TastyVerb v) noexcept;
+
+[[nodiscard]] const char* tasty_movie_refusal_token(std::uint32_t codec_refusal) noexcept;
+
+[[nodiscard]] const char* tasty_refusal_sentence(std::string_view why) noexcept;
 [[nodiscard]] int tasty_check_movie(const svc::Vfs& vfs, std::string_view movie,
                                     std::string_view rom);
 [[nodiscard]] int tasty_preflight_rom(const svc::Vfs& vfs, std::string_view movie,
                                       std::string_view rom);
+
+[[nodiscard]] int tasty_prepare_play(const svc::Vfs& vfs, TastyArgs& a);
 [[nodiscard]] int tasty_info_movie(const svc::Vfs& vfs, std::string_view movie);
 void tasty_set_ctl_paths(const char* lock, const char* pid, const char* status) noexcept;
 

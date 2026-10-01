@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "cores/generic_core.h"
+#include "cores/registry.h"
 #include "cores/movie_system.h"
 #include "cores/manifests/megadrive.h"
 #include "cores/manifests/psx.h"
@@ -36,8 +37,6 @@ bool ieq(std::string_view a, std::string_view b) noexcept {
 }
 
 }  // namespace
-
-std::span<const cores::CoreFactory> tasty_core_table() noexcept { return kTastyCores; }
 
 bool tasty_plays(std::string_view conf_str_name) noexcept {
     if (conf_str_name.empty()) return false;
