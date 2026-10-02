@@ -346,7 +346,8 @@ void ReplayGate::settle() noexcept {
     TASTY_SEAT_BODY(ReplayGate);
     if (level_ == ReplayLevel::Running && live_() && mf_ >= 0) {
         if (end_seen_ && !held_ && mf_ >= static_cast<std::int64_t>(end_frame_)) {
-            disarm_(ReplayEnd::Finished, true);
+            if (mf_ > static_cast<std::int64_t>(end_frame_) || now_ - edge_ns_ >= offset_ns_)
+                disarm_(ReplayEnd::Finished, true);
         } else if (!held_ && mf_ > covered_ && mf_ != underrun_at_) {
 
             underrun_at_ = mf_;

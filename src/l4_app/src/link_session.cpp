@@ -688,17 +688,45 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::FileTx& a,
     const FileBytes::Slot* const file = ctx.inbox->file(a.file);
     RtRelaxScope scope(ops_);
     cut_stage_();
+    if (a.phase == Phase::Whole || a.phase == Phase::Close) arm_open_save_(file, ctx.inbox);
 
     if (current_->stream_load() != nullptr) {
-        return stream_file_tx_(a, file) ? ILinkEncoder::Outcome::Encoded
-                                        : ILinkEncoder::Outcome::Dropped;
+        const bool ok = stream_file_tx_(a, file);
+        open_save_.reset();
+        return ok ? ILinkEncoder::Outcome::Encoded : ILinkEncoder::Outcome::Dropped;
     }
-    if (file == nullptr || file->bytes.empty()) return ILinkEncoder::Outcome::Dropped;
-    SpanFile f{file->bytes};
-    if (auto r = perform_file_tx_(f, file->path.view(), a.wire_index); !r) {
+    if (file == nullptr || file->bytes.empty()) {
+        open_save_.reset();
         return ILinkEncoder::Outcome::Dropped;
     }
-    return ILinkEncoder::Outcome::Encoded;
+    SpanFile f{file->bytes};
+    const auto r = perform_file_tx_(f, file->path.view(), a.wire_index);
+    open_save_.reset();
+    return r ? ILinkEncoder::Outcome::Encoded : ILinkEncoder::Outcome::Dropped;
+}
+
+void LinkSession::arm_open_save_(const FileBytes::Slot* file, const LinkTxChannel* inbox) noexcept {
+    open_save_.reset();
+    if (file == nullptr || inbox == nullptr || file->save == proto::FileId{}) return;
+    const FileBytes::Slot* const save = inbox->file(file->save);
+    if (save == nullptr) {
+        ++open_save_refusals_;
+        return;
+    }
+    open_save_ =
+        OpenSave{.path = proto::PathId{file->save.v}, .size = proto::FileSize{save->size_bytes}};
+}
+
+void LinkSession::announce_open_save_() noexcept {
+    if (!open_save_) return;
+    const OpenSave s = *open_save_;
+    open_save_.reset();
+    if (link_ == nullptr ||
+        !apply_bind_slot_(proto::SlotIndex{0}, proto::LinkOp::SlotBind::Mount, s.size, s.path)) {
+        ++open_save_refusals_;
+        return;
+    }
+    ++open_saves_mounted_;
 }
 
 bool LinkSession::stream_file_tx_(const proto::LinkOp::FileTx& a, const FileBytes::Slot* file) {
@@ -1977,6 +2005,7 @@ void LinkSession::after_file_tx_(std::uint8_t slot, std::string_view path) {
 
 void LinkSession::before_close() noexcept {
     TASTY_SEAT_BODY(LinkSession);
+    announce_open_save_();
     if (current_ == nullptr) return;
     if (cores::ISaveChannel* ch = current_->save_channel()) mount_save_channel(*ch);
 }

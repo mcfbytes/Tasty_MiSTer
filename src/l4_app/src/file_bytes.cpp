@@ -56,6 +56,7 @@ Ex<proto::FileId> FileBytes::intern(std::vector<std::uint8_t>&& bytes, std::stri
     s.size_bytes = whole != 0 ? whole : n;
     s.offset = offset;
     s.crc = crc;
+    s.save = {};
     named_at_[id] = at;
     live_[id] = true;
     next_ = static_cast<std::uint16_t>(id >= kRecycleSlots ? 1 : id + 1);
@@ -82,6 +83,7 @@ Ex<proto::FileId> FileBytes::intern(std::vector<std::uint8_t>&& bytes, std::stri
     s.load_addr = 0;
     s.size_bytes = size_bytes;
     s.crc = 0;
+    s.save = {};
     named_at_[id] = at;
     live_[id] = true;
     next_ = static_cast<std::uint16_t>(id >= kRecycleSlots ? 1 : id + 1);
@@ -112,7 +114,15 @@ Ex<proto::FileId> FileBytes::intern_at(proto::FileId fid, std::vector<std::uint8
     s.load_addr = load_addr;
     s.size_bytes = n;
     s.crc = 0;
+    s.save = {};
     return fid;
+}
+
+bool FileBytes::stamp_save(proto::FileId file, proto::FileId save) noexcept {
+    const std::uint16_t id = file.v;
+    if (id == kNone || id >= kSlots || storage_[id].bytes.empty()) return false;
+    storage_[id].save = save;
+    return true;
 }
 
 const FileBytes::Slot* FileBytes::get(proto::FileId fid) const noexcept {

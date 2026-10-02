@@ -16,6 +16,8 @@ class Vfs;
 namespace mister::fw {
 
 inline constexpr const char* kTastyLockPath = "/tmp/tasty.lock";
+
+inline constexpr const char* kTastySaveRoot = "tasty/saves";
 inline constexpr const char* kTastyPidPath = "/tmp/tasty.pid";
 inline constexpr const char* kTastyStatusPath = "/tmp/tasty.status";
 inline constexpr const char* kTastyStatusTmpPath = "/tmp/tasty.status.tmp";

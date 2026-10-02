@@ -174,6 +174,26 @@ void SessionOwner::on(const UiRequest::LoadFileByDigit& req, const UiRequest::He
     load_file_(UiRequest::LoadFileByDigit::kKind, req, head.tag);
 }
 
+void SessionOwner::on(const UiRequest::LoadRamImage& req, const UiRequest::Head& head) {
+    if (refuse_in_switch_(UiRequest::LoadRamImage::kKind, head.tag)) return;
+    if (refuse_in_load_(UiRequest::LoadRamImage::kKind, head.tag)) return;
+    if (!core_live_)
+        return refuse_file_ask_(UiRequest::LoadRamImage::kKind, head.tag, Errc::core_load);
+    if (!conf_str_ || !in_scope_(req.scope))
+        return refuse_file_ask_(UiRequest::LoadRamImage::kKind, head.tag, Errc::stale);
+    const auto index = conf_str_->ram_image_index();
+    if (!index || req.recipe.size() == 0) {
+        ++ram_images_declined_;
+        const Errc why = index ? Errc::bad_format : Errc::negotiation;
+        (void)owner_events_.push(infra::make<Event>(
+            Event::RamImageDeclined{.why = why}, Event::Head{EmitSite{ERR_SITE()}, {}, head.tag}));
+        return;
+    }
+
+    pending_ram_image_ = req.recipe;
+    pending_ram_index_ = *index;
+}
+
 void SessionOwner::on(const UiRequest::MountImage& req, const UiRequest::Head& head) {
     if (refuse_in_switch_(UiRequest::MountImage::kKind, head.tag)) return;
     if (refuse_in_load_(UiRequest::MountImage::kKind, head.tag)) return;
@@ -245,7 +265,8 @@ bool SessionOwner::refuse_in_switch_(UiRequest::Kind kind, CorrelationTag tag) n
 }
 
 bool SessionOwner::refuse_in_load_(UiRequest::Kind kind, CorrelationTag tag) noexcept {
-    if (!pieces_ && !load_ && !walk_) return false;
+    const bool rom_waits = save_mount_ && save_mount_->then_load;
+    if (!pieces_ && !load_ && !walk_ && !rom_waits) return false;
     ++loads_refused_busy_;
     publish_refusal_(kind, Errc::would_block, tag);
     return true;
@@ -462,6 +483,8 @@ Ex<proto::ConfStrFileRow> SessionOwner::resolve_load_(const UiRequest::LoadFileB
 
 template <class R>
 void SessionOwner::load_file_(UiRequest::Kind asked, const R& req, CorrelationTag tag) {
+
+    const cores::RamImageRecipe ram_image = std::exchange(pending_ram_image_, {});
     if (req.path.empty()) return refuse_file_ask_(asked, tag, Errc::bad_format);
 
     const auto row = resolve_load_(req);
@@ -477,12 +500,82 @@ void SessionOwner::load_file_(UiRequest::Kind asked, const R& req, CorrelationTa
         cr.slot = static_cast<std::uint8_t>(proto::ConfStr::wire_index(*row, member->view()));
     }
     cr.load_addr = row->load_addr;
+    cr.ram_image = ram_image;
+    cr.ram_index = pending_ram_index_;
 
     if (row->opensave && conf_str_->savestate().has_value()) {
         if (auto r = attach_savestates_(); !r) ++savestate_refusals_;
     }
     if (arm_loader_(cr)) return;
+    if (row->opensave) {
+        UiRequest::SaveChoice choice = UiRequest::SaveChoice::User;
+        if constexpr (requires { req.save; }) choice = req.save;
+        if (arm_open_save_(cr, choice, tag)) return;
+    }
     perform_content_(cr);
+}
+
+bool SessionOwner::arm_open_save_(const ContentRequest& cr, UiRequest::SaveChoice choice,
+                                  CorrelationTag tag) {
+    const auto core = cores::find_core(core_name_.view());
+    if (core && (*core)->make_ladder != nullptr) return false;
+    if (save_mount_ || held_mount_ || ladder_ != nullptr) {
+        ++open_saves_skipped_;
+        return false;
+    }
+    auto path = open_save_path_(cr.path.view(), choice);
+    if (!path) {
+        ++open_saves_skipped_;
+        return false;
+    }
+    save_mount_.emplace(SaveMount{.ask = MountAsk{.which = UiRequest::Kind::LoadFile,
+                                                  .index = proto::IoIndex{0},
+                                                  .path = *path,
+                                                  .tag = tag},
+                                  .due_ns = clock_->now().count() + kSaveMountBoundNs,
+                                  .then_load = cr});
+    ++open_saves_armed_;
+    return true;
+}
+
+std::optional<PathText> SessionOwner::open_save_path_(std::string_view rom,
+                                                      UiRequest::SaveChoice choice) {
+    if (vfs_ == nullptr || core_name_.empty()) return std::nullopt;
+    const bool replay = choice != UiRequest::SaveChoice::User;
+    if (replay && replay_save_root_.empty()) return std::nullopt;
+    std::string dir(replay ? replay_save_root_.view() : std::string_view{"saves"});
+    dir += '/';
+    dir.append(core_name_.view());
+    if (!vfs_->ensure_dir(dir)) return std::nullopt;
+    const std::size_t slash = rom.rfind('/');
+    std::string_view name = slash == std::string_view::npos ? rom : rom.substr(slash + 1);
+    if (const std::size_t dot = name.rfind('.'); dot != std::string_view::npos)
+        name = name.substr(0, dot);
+    std::string path = dir;
+    path += '/';
+    path.append(name);
+    path += ".sav";
+    if (replay && !prime_replay_save_(path, choice == UiRequest::SaveChoice::ReplaySeeded))
+        return std::nullopt;
+    PathText out{};
+    if (!out.assign(path)) return std::nullopt;
+    return out;
+}
+
+bool SessionOwner::prime_replay_save_(std::string_view path, bool seeded) {
+    std::vector<std::uint8_t> seed;
+    if (seeded) {
+        std::string from(replay_save_root_.view());
+        from += "/seed.sav";
+        auto f = vfs_->open(from, svc::OpenMode::ReadWhole);
+        const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
+        if (!sz) return false;
+        auto buf = read_whole_(**f, sz->v);
+        if (!buf) return false;
+        seed = std::move(*buf);
+    }
+    return durable_write(*vfs_, path, std::as_bytes(std::span<const std::uint8_t>(seed)))
+        .has_value();
 }
 
 std::optional<PathText> SessionOwner::bare_zip_member(std::string_view path, std::string_view exts,
@@ -529,6 +622,7 @@ void SessionOwner::perform_content_(const ContentRequest& req) {
             ++files_failed_;
             return;
         }
+        send_ram_image_(req);
         pieces_.emplace(std::move(*p));
         return;
     }
@@ -547,12 +641,35 @@ void SessionOwner::perform_content_(const ContentRequest& req) {
         ++files_failed_;
         return;
     }
+    if (req.save != proto::FileId{} && !inbox_.stamp_save(*id, req.save)) ++open_saves_skipped_;
+
+    const std::size_t need = req.ram_image.size() == 0 ? 1 : 2;
+    if (proto::kLinkTxCapacity - inbox_.ring().size() < need) {
+        ++op_drops_;
+        return;
+    }
+    send_ram_image_(req);
     if (!inbox_.push(proto::LinkOp::FileTx{.wire_index = req.slot, .file = *id})) {
         ++op_drops_;
         return;
     }
     ++ops_posted_;
     ++files_loaded_;
+}
+
+void SessionOwner::send_ram_image_(const ContentRequest& req) {
+    if (req.ram_image.size() == 0) return;
+    auto bytes = cores::expand(req.ram_image);
+    const auto id = inbox_.intern_file(std::move(bytes), ".ram", std::string_view{}, 0);
+    if (!id || !inbox_.push(proto::LinkOp::FileTx{.wire_index = req.ram_index, .file = *id})) {
+        ++ram_images_declined_;
+        (void)owner_events_.push(
+            infra::make<Event>(Event::RamImageDeclined{.why = Errc::io},
+                               Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}));
+        return;
+    }
+    ++ops_posted_;
+    ++ram_images_sent_;
 }
 
 void SessionOwner::step_pieces_() {
@@ -953,14 +1070,25 @@ void SessionOwner::step_save_mount_() {
                 finish_save_mount_(true);
                 return;
             }
-            const auto id = intern_path(path, e.size_bytes);
-            if (id && *id != proto::FileId{} &&
-                order(proto::LinkOp::BindSlot{.slot = slot,
-                                              .bind = proto::LinkOp::SlotBind::Mount,
-                                              .bracketed = m.bracketed,
-                                              .path = *id})) {
-                finish_save_mount_(true);
-                return;
+            if (m.then_load) {
+
+                if (const auto id = intern_path(path, e.size_bytes); id && *id != proto::FileId{}) {
+                    ContentRequest load = *m.then_load;
+                    load.save = *id;
+                    perform_content_(load);
+                    finish_save_mount_(true, true);
+                    return;
+                }
+            } else {
+                const auto id = intern_path(path, e.size_bytes);
+                if (id && *id != proto::FileId{} &&
+                    order(proto::LinkOp::BindSlot{.slot = slot,
+                                                  .bind = proto::LinkOp::SlotBind::Mount,
+                                                  .bracketed = m.bracketed,
+                                                  .path = *id})) {
+                    finish_save_mount_(true);
+                    return;
+                }
             }
         }
     }
@@ -970,6 +1098,14 @@ void SessionOwner::step_save_mount_() {
             (void)order(proto::LinkOp::BindSlot{.slot = slot,
                                                 .bind = proto::LinkOp::SlotBind::Detach,
                                                 .act_gen = next_generation()});
+        if (m.then_load) {
+
+            const ContentRequest load = *m.then_load;
+            ++open_saves_skipped_;
+            perform_content_(load);
+            finish_save_mount_(false, true);
+            return;
+        }
         finish_save_mount_(false);
         return;
     }
@@ -996,23 +1132,23 @@ void SessionOwner::step_save_mount_() {
 
     if (!order(proto::LinkOp::BindSlot{.slot = slot,
                                        .bind = proto::LinkOp::SlotBind::Attach,
-                                       .manual = !m.bracketed,
+                                       .manual = !m.bracketed && !m.then_load,
                                        .path = *id,
                                        .act_gen = g}))
         return;
     m.gen = g;
 }
 
-void SessionOwner::finish_save_mount_(bool ok) {
+void SessionOwner::finish_save_mount_(bool ok, bool quiet) {
     if (!save_mount_) return;
     const std::uint8_t slot = save_mount_->ask.index.v;
     const CorrelationTag tag = save_mount_->ask.tag;
     save_mount_.reset();
-    if (ok) {
+    if (ok && !quiet) {
         ++save_mounts_done_;
         (void)owner_events_.push(infra::make<Event>(
             Event::SdActivity{.slot = slot}, Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}));
-    } else {
+    } else if (!quiet) {
         (void)owner_events_.push(
             infra::make<Event>(Event::InfoRequest{.id = InfoId::ImageMountFailed},
                                Event::Head{EmitSite{ERR_SITE()}, {}, tag}));
@@ -1120,6 +1256,7 @@ void SessionOwner::drop_ladder_() {
 void SessionOwner::forget_core_() noexcept {
 
     conf_str_.reset();
+    pending_ram_image_ = {};
     core_live_ = false;
 }
 
@@ -1728,6 +1865,7 @@ void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
 
     proto::LinkOp::BindConfig op{};
     conf_str_.reset();
+    pending_ram_image_ = {};
     auto conf = proto::ConfStr::parse(raw, aperture_);
     if (!conf) {
 

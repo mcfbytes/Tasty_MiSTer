@@ -64,6 +64,8 @@ public:
 
     Ex<void> replace(std::string_view tmp_rel, std::string_view final_rel) const;
 
+    void sync_parent_dir(std::string_view rel) const noexcept;
+
     struct DurabilityLog {
         std::uint64_t file_syncs = 0;
         std::uint64_t dir_syncs = 0;
@@ -90,6 +92,7 @@ public:
     Ex<std::string> find_game_asset(const AssetQuery& q) const;
 
 private:
+    static void sync_dir_of_(const std::string& path) noexcept;
     Vfs() = default;
 
     Ex<std::unique_ptr<IFile>> open_backend_(std::string_view path, OpenMode mode) const;

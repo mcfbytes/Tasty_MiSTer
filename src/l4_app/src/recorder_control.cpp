@@ -80,15 +80,23 @@ bool RecorderControl::publish_(RecOp op, std::string_view path, RecMode mode,
     return true;
 }
 
-bool RecorderControl::request_(RecOp op, std::string_view path, RecMode mode,
-                               RecOptions opt) noexcept {
+std::string RecorderControl::name_() const {
     std::string name = "rec";
     if (w_.identity != nullptr) {
 
         auto id = std::make_unique<SessionIdentity>();
         if (w_.identity->copy(*id) && id->core[0] != '\0') name = id->core;
     }
-    const RecPath p = resolve(path, w_.root, name, std::time(nullptr));
+    return name;
+}
+
+bool RecorderControl::can_record(std::string_view path) const {
+    return !resolve(path, w_.root, name_(), std::time(nullptr)).empty();
+}
+
+bool RecorderControl::request_(RecOp op, std::string_view path, RecMode mode,
+                               RecOptions opt) noexcept {
+    const RecPath p = resolve(path, w_.root, name_(), std::time(nullptr));
     if (p.empty()) {
         if (w_.diag != nullptr)
             w_.diag->appendf("{\"t\":\"rec\",\"k\":\"refused\",\"why\":\"path\"}");

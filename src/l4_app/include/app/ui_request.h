@@ -11,6 +11,7 @@
 #include "app/xml_kind.h"
 #include "app/path_text.h"
 #include "app/types.h"
+#include "cores/ram_image.h"
 #include "cores/types.h"
 #include "infra/fixed_str.h"
 #include "infra/message_sum.h"
@@ -34,6 +35,7 @@ struct UiRequest {
         ResetCore,
         Reboot,
         LoadFileByDigit,
+        LoadRamImage,
         kCount,
     };
     struct Head {
@@ -93,16 +95,25 @@ struct UiRequest {
     struct Reboot {
         static constexpr Kind kKind = Kind::Reboot;
     };
+
+    enum class SaveChoice : std::uint8_t { User, ReplayFresh, ReplaySeeded };
     struct LoadFileByDigit {
         static constexpr Kind kKind = Kind::LoadFileByDigit;
         proto::FileSlotDigit digit{};
-        std::uint8_t pad_ = 0;
+        SaveChoice save = SaveChoice::User;
         CoreScope scope{};
         PathText path{};
     };
+
+    struct LoadRamImage {
+        static constexpr Kind kKind = Kind::LoadRamImage;
+        CoreScope scope{};
+        std::uint8_t pad_[2]{};
+        cores::RamImageRecipe recipe{};
+    };
     using Alternatives =
         std::tuple<LoadCore, SaveConfig, SaveDips, SaveCoreConfig, LoadCoreConfig, LoadFile,
-                   MountImage, UnmountImage, ResetCore, Reboot, LoadFileByDigit>;
+                   MountImage, UnmountImage, ResetCore, Reboot, LoadFileByDigit, LoadRamImage>;
 
     Kind kind = Kind::LoadCore;
     std::uint8_t pad_[3]{};

@@ -66,10 +66,13 @@ Ex<IMovieCodec::Facts> SnesLsmvCodec::header_line(std::string_view line,
         } else {
             return std::unexpected(refuse(Refusal::PortType, ERR_SITE()));
         }
-    } else if (key == "setting.hardreset" || key == "setting.compact") {
+    } else if (key == "setting.hardreset" || key == "setting.compact" ||
+               key == "setting.radominit") {
         if (val != "0" && val != "1")
             return std::unexpected(refuse(Refusal::NotAMovie, ERR_SITE()));
-        const std::uint8_t bit = key == "setting.hardreset" ? kHardReset : kCompact;
+        const std::uint8_t bit = key == "setting.hardreset" ? kHardReset
+                                 : key == "setting.compact" ? kCompact
+                                                            : kRandomInit;
         f.layout = static_cast<std::uint16_t>(val == "1" ? (f.layout | bit) : (f.layout & ~bit));
     } else if (key == "rom.sha256") {
         const auto d = parse_hex_digest(val, DigestKind::Sha256);
@@ -83,6 +86,21 @@ Ex<IMovieCodec::Facts> SnesLsmvCodec::header_line(std::string_view line,
     }
     note_rerecords(key, val, f);
     return f;
+}
+
+std::optional<SnesMovieCodec::WramFill> SnesLsmvCodec::do_recorder_wram(
+    const Facts& f) const noexcept {
+    if ((f.layout & kRandomInit) != 0) return std::nullopt;
+    return WramFill::Flat55;
+}
+
+RamImageRecipe SnesLsmvCodec::do_recorder_ram(const Facts& f) const noexcept {
+    if ((f.layout & kRandomInit) != 0) return {};
+    return {.kind = RamImageRecipe::Kind::Flat,
+            .first_fill = 0x55,
+            .second_fill = 0x00,
+            .first_bytes = kWramBytes,
+            .second_bytes = kAramBytes};
 }
 
 Ex<void> SnesLsmvCodec::finish_header(const Facts& f) const noexcept {

@@ -48,6 +48,7 @@ public:
         std::optional<std::uint32_t> phase_us{};
         std::optional<std::uint32_t> stop_at{};
         std::optional<cores::IMovieCodec::RamFill> ram_fill{};
+        bool seeded_save = false;
         bool set_settings = true;
     };
 
@@ -116,12 +117,16 @@ private:
     };
 
     void write_status_(bool force = false) noexcept;
+    [[nodiscard]] bool rec_only_over_() noexcept;
     void ask_core_(std::string_view path) noexcept;
     [[nodiscard]] bool core_ready_() const noexcept;
 
     [[nodiscard]] bool video_reloaded_() const noexcept;
     [[nodiscard]] bool menu_ready_() const noexcept;
     void fail_(int rc, const char* why) noexcept;
+
+    [[nodiscard]] bool copy_seed_() noexcept;
+    static constexpr std::uint64_t kSeedMaxBytes = 1u << 20;
     void fail_refusal_() noexcept;
     void go_menu_() noexcept;
     void print_settings_() noexcept;
@@ -143,6 +148,7 @@ private:
     bool rec_only_ = false;
     bool splash_ok_ = false;
     bool play_started_ = false;
+    bool rec_seen_ = false;
     bool stop_sent_ = false;
     std::size_t settings_printed_ = 0;
     std::uint8_t direct_video_was_ = 0;

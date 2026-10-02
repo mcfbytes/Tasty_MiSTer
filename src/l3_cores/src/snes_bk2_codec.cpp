@@ -103,6 +103,22 @@ Ex<IMovieCodec::Facts> SnesBk2Codec::header_line(std::string_view line,
 
         if (val == "0" || val == "None" || val == "Unplugged")
             return std::unexpected(refuse(Refusal::PortType, ERR_SITE()));
+    } else if (key == "Core") {
+        if (val == "BSNESv115+" || val == "SubBSNESv115+") f.layout |= kBsnes115;
+        if (val == "BSNES") f.layout |= kLibsnes;
+    } else if (key == "SyncSettings.o.RandomizedInitialState" ||
+               key == "SyncSettings.RandomizedInitialState") {
+        if (!truthy(val) && !falsy(val))
+            return std::unexpected(refuse(Refusal::Setting, ERR_SITE()));
+        if (falsy(val)) f.layout |= kLibsnesFlat;
+    } else if (key == "SyncSettings.o.Entropy" || key == "SyncSettings.Entropy") {
+        const int e = val == "0" || val == "None"   ? 0
+                      : val == "1" || val == "Low"  ? 1
+                      : val == "2" || val == "High" ? 2
+                                                    : -1;
+        if (e < 0) return std::unexpected(refuse(Refusal::Setting, ERR_SITE()));
+        f.layout =
+            static_cast<std::uint16_t>((f.layout & ~kEntropyMask) | (e + 1) << kEntropyShift);
     } else if (key == "SHA1" || ((key == "SHA256" || key == "MD5") && (f.layout & kSha1) == 0)) {
 
         const DigestKind kind = key == "SHA256"                    ? DigestKind::Sha256
@@ -179,6 +195,33 @@ std::optional<IMovieCodec::DigestSpan> SnesBk2Codec::rom_digest_span(
     std::span<const std::uint8_t>, std::uint64_t size) const noexcept {
     const std::uint64_t rem = size % 1024u;
     return past_header(size, rem == 128u || rem == 512u ? rem : 0u);
+}
+
+RamImageRecipe SnesBk2Codec::do_recorder_ram(const Facts& f) const noexcept {
+
+    if ((f.layout & kLibsnes) != 0) {
+        if ((f.layout & kLibsnesFlat) != 0)
+            return {.kind = RamImageRecipe::Kind::Flat,
+                    .first_fill = 0x55,
+                    .second_fill = 0x00,
+                    .first_bytes = kWramBytes,
+                    .second_bytes = kAramBytes};
+        return {.kind = RamImageRecipe::Kind::Lfsr,
+                .seed = 0,
+                .first_bytes = kWramBytes,
+                .second_bytes = kAramBytes};
+    }
+    if ((f.layout & kBsnes115) == 0) return {};
+    const unsigned set = (f.layout & kEntropyMask) >> kEntropyShift;
+
+    const auto entropy =
+        set == 0 ? RamImageRecipe::Entropy::Low : static_cast<RamImageRecipe::Entropy>(set - 1);
+    return {.kind = RamImageRecipe::Kind::Pcg32,
+            .entropy = entropy,
+            .second_fill = 0x00,
+            .seed = kSandboxClockSeed,
+            .first_bytes = kWramBytes,
+            .second_bytes = kAramBytes};
 }
 
 }  // namespace mister::cores

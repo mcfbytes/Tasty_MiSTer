@@ -211,6 +211,9 @@ public:
 
     [[nodiscard]] std::uint32_t file_tx_piece_drops() const noexcept { return ftx_piece_drops_; }
     [[nodiscard]] std::uint32_t file_tx_cuts() const noexcept { return ftx_cuts_; }
+
+    [[nodiscard]] std::uint32_t open_saves_mounted() const noexcept { return open_saves_mounted_; }
+    [[nodiscard]] std::uint32_t open_save_refusals() const noexcept { return open_save_refusals_; }
     [[nodiscard]] bool file_tx_held() const noexcept { return ftx_open_.has_value(); }
     [[nodiscard]] bool stage_held() const noexcept { return stage_open_.has_value(); }
     [[nodiscard]] std::uint32_t stage_drops() const noexcept { return stage_drops_; }
@@ -698,6 +701,16 @@ private:
     std::uint16_t ftx_index_ = 0;
     std::uint32_t ftx_piece_drops_ = 0;
     std::uint32_t ftx_cuts_ = 0;
+    std::uint32_t open_saves_mounted_ = 0;
+    std::uint32_t open_save_refusals_ = 0;
+
+    struct OpenSave {
+        proto::PathId path{};
+        proto::FileSize size{};
+    };
+    std::optional<OpenSave> open_save_;
+    void arm_open_save_(const FileBytes::Slot* file, const LinkTxChannel* inbox) noexcept;
+    void announce_open_save_() noexcept;
     std::uint32_t save_pulls_fenced_ = 0;
     std::uint32_t load_facts_refusals_ = 0;
     FileTxLevel ftx_level_scratch_{};

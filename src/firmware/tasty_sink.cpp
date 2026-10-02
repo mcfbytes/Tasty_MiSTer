@@ -7,7 +7,9 @@
 #include "app/identity_latch.h"
 #include "app/session_identity.h"
 #include "app/video_pump.h"
+#include "infra/error.h"
 #include "infra/message_sum.h"
+#include "tasty_ctl.h"
 
 namespace mister::fw {
 
@@ -40,6 +42,15 @@ void TastySink::on(const app::Event::InfoRequest&, const app::Event::Head&) {}
 void TastySink::on(const app::Event::ProgressUpdate&, const app::Event::Head&) {}
 void TastySink::on(const app::Event::DeadlineMiss&, const app::Event::Head&) {}
 void TastySink::on(const app::Event::RequestRefused&, const app::Event::Head&) {}
+void TastySink::on(const app::Event::RamImageDeclined& a, const app::Event::Head&) {
+    if (ram_image_said_) return;
+    ram_image_said_ = true;
+    tasty_say(a.why == Errc::negotiation
+                  ? "tasty: this core takes no power-on RAM image; the game starts from the "
+                    "core's own RAM fill"
+                  : "tasty: the power-on RAM image was not sent; the game starts from the "
+                    "core's own RAM fill");
+}
 void TastySink::on(const app::Event::ConfStrOnlySession&, const app::Event::Head&) {}
 void TastySink::on(const app::Event::SessionAdvisory&, const app::Event::Head&) {}
 

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "cores/digest_value.h"
+#include "cores/ram_image.h"
 #include "infra/error.h"
 #include "proto/status_word.h"
 #include "svc/file.h"
@@ -158,6 +159,11 @@ public:
     [[nodiscard]] virtual std::optional<SettingNeed> ram_fill_need(RamFill fill) const noexcept {
         (void)fill;
         return std::nullopt;
+    }
+
+    [[nodiscard]] virtual RamImageRecipe power_on_ram(const Facts& f) const noexcept {
+        (void)f;
+        return {};
     }
 
     [[nodiscard]] std::optional<SettingNeeds> setting_needs_for(

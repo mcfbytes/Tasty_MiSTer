@@ -21,6 +21,6 @@ static_assert(!kSnes.blank_save.declared(),
               "fresh save reads back the generic 0xFF memset");
 static_assert(kSnes.staging.order == StageOrder::None,
               "no boot ladder: the save mount is the host-side opensave act "
-              "after the ROM tx, not a staging rung");
+              "inside the ROM tx, not a staging rung");
 
 }  // namespace mister::cores::manifests

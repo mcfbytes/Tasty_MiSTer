@@ -1156,7 +1156,9 @@ Ex<void> Vfs::ensure_dir(std::string_view rel) const {
         if (!cur.empty() && cur.back() != '/') cur.push_back('/');
         cur.append(comp);
 
-        if (::mkdir(cur.c_str(), kCreateMode) != 0 && errno != EEXIST) {
+        if (::mkdir(cur.c_str(), kCreateMode) == 0) {
+            sync_dir_of_(cur);
+        } else if (errno != EEXIST) {
             const auto e = static_cast<std::uint32_t>(errno);
             return std::unexpected(Error{Errc::os, ERR_SITE(), e});
         }
@@ -1174,6 +1176,15 @@ Ex<void> Vfs::replace(std::string_view tmp_rel, std::string_view final_rel) cons
     g_dura_last_rename.store(dura_ticket(), std::memory_order_relaxed);
     g_dura_renames.fetch_add(1, std::memory_order_relaxed);
 
+    sync_dir_of_(to);
+    return {};
+}
+
+void Vfs::sync_parent_dir(std::string_view rel) const noexcept {
+    sync_dir_of_(compose(root_path_, rel));
+}
+
+void Vfs::sync_dir_of_(const std::string& to) noexcept {
     std::string dir = to;
     const std::size_t slash = dir.rfind('/');
     dir = (slash == std::string::npos) ? std::string(".")
@@ -1184,7 +1195,6 @@ Ex<void> Vfs::replace(std::string_view tmp_rel, std::string_view final_rel) cons
         (void)::close(dfd);
         if (ok) g_dura_dir_syncs.fetch_add(1, std::memory_order_relaxed);
     }
-    return {};
 }
 
 Vfs::DurabilityLog Vfs::durability_log() noexcept {

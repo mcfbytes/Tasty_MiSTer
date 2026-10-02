@@ -110,6 +110,7 @@ struct FeederReplay final : fw::TastySession::Replay {
         p.lead = ask.lead;
         p.stop_at = ask.stop_at;
         p.ram_fill = ask.ram_fill;
+        p.seeded_save = ask.seeded_save;
         p.set_settings = ask.set_settings;
         (void)f->take_play(p);
         return f->last_refusal() == app::ReplayFeeder::Refusal::None;
@@ -452,6 +453,7 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
     hub->set_owner_tick(&tasty);
 
     app::SessionOwner& owner = hub->owner();
+    owner.set_replay_save_root(fw::kTastySaveRoot);
     fw::ThreadAssembly& assembly = hub->threads();
 
     {

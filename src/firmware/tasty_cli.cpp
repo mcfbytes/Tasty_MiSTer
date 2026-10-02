@@ -46,6 +46,9 @@ void tasty_print_usage(std::FILE* out) noexcept {
              "                       not with --record\n"
              "  --ram-init zero|ff|random\n"
              "                       NES RAM Clear for this run; other cores are refused\n"
+             "  --save <file>        start the game's battery save as a copy of this file;\n"
+             "                       without it the run's save starts empty. Your own saves\n"
+             "                       are never opened or written\n"
              "  --linger <seconds>   wait after the last input before the menu (default 30)\n"
              "  --stay               never return to the menu on its own\n"
              "  --strict             refuse when a core setting differs from the movie's,\n"
@@ -128,6 +131,10 @@ const char* tasty_args_refusal(std::uint32_t detail) noexcept {
             return "--motion is auto, off, small or full";
         case 31:
             return "--from and --to count movie frames; use them with tasty play --record";
+        case 32:
+            return "--save needs a file";
+        case 33:
+            return "--save seeds a movie's battery save; use it with tasty play";
         default:
             return "bad arguments (try tasty help)";
     }
@@ -276,6 +283,12 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
             else
                 return fail(17);
             i += 2;
+        } else if (eq(o, "--save")) {
+            const char* p = need();
+            app::PathText save{};
+            if (p == nullptr || !save.assign(p)) return fail(32);
+            a.save = save;
+            i += 2;
         } else if (eq(o, "--strict")) {
             a.strict = true;
             ++i;
@@ -351,6 +364,7 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
     if (a.verb == TastyVerb::RecStart && (a.rec.from_frame >= 0 || a.rec.to_frame >= 0))
         return fail(31);
     if (a.verb == TastyVerb::Check && a.rom.empty()) return fail(21);
+    if (a.save && a.verb != TastyVerb::Play) return fail(33);
     return a;
 }
 

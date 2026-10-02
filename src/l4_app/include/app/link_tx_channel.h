@@ -47,6 +47,9 @@ public:
         return files_.intern(std::move(bytes), ext, path, load_addr, tx_.pushed(), tx_.popped(),
                              crc, whole, offset);
     }
+    [[nodiscard]] bool stamp_save(proto::FileId file, proto::FileId save) noexcept {
+        return files_.stamp_save(file, save);
+    }
     [[nodiscard]] Ex<proto::FileId> intern_file_path(std::string_view path,
                                                      std::uint64_t size_bytes) {
         return files_.intern_path(path, size_bytes, tx_.pushed(), tx_.popped());

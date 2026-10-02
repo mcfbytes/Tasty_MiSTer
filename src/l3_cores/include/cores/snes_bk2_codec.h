@@ -29,7 +29,18 @@ public:
     static constexpr std::uint8_t kLogKey = 0x04;
     static constexpr std::uint8_t kSha1 = 0x08;
 
+    static constexpr std::uint16_t kBsnes115 = 0x10;
+    static constexpr std::uint16_t kEntropyShift = 5;
+    static constexpr std::uint16_t kEntropyMask = 0x3u << kEntropyShift;
+
+    static constexpr std::uint16_t kLibsnes = 0x80;
+    static constexpr std::uint16_t kLibsnesFlat = 0x100;
+
+    static constexpr std::uint32_t kSandboxClockSeed =
+        static_cast<std::uint32_t>(1495889068ull * 1000000ull);
+
     static constexpr std::int32_t kBizHawkLead = -1;
+    static constexpr std::int32_t kLibsnesLead = -2;
 
     [[nodiscard]] const MovieArchiveFormat* archive() const noexcept override {
         return &kBk2Archive;
@@ -40,8 +51,8 @@ public:
                                         const Facts& so_far) const noexcept override;
     [[nodiscard]] Ex<void> finish_header(const Facts& f) const noexcept override;
     [[nodiscard]] Ex<Frame> frame(std::string_view line, const Facts& f) const noexcept override;
-    [[nodiscard]] std::int32_t default_lead(const Facts&) const noexcept override {
-        return kBizHawkLead;
+    [[nodiscard]] std::int32_t default_lead(const Facts& f) const noexcept override {
+        return (f.layout & kLibsnes) != 0 ? kLibsnesLead : kBizHawkLead;
     }
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
@@ -65,6 +76,12 @@ public:
                                                         {"R", Button::R}}};
 
     [[nodiscard]] static Ex<std::uint8_t> column_of(std::string_view name) noexcept;
+
+private:
+    [[nodiscard]] std::optional<WramFill> do_recorder_wram(const Facts&) const noexcept override {
+        return std::nullopt;
+    }
+    [[nodiscard]] RamImageRecipe do_recorder_ram(const Facts& f) const noexcept override;
 };
 
 consteval std::array<SnesMovieCodec::Button, 12> bk2_pad_order() {

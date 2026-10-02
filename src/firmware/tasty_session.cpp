@@ -5,7 +5,9 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "app/durable_write.h"
 #include "app/rbf_resolve.h"
 #include "app/replay_status.h"
 #include "app/recorder_control.h"
@@ -82,6 +84,19 @@ void TastySession::ask_core_(std::string_view path) noexcept {
     req.xml = app::XmlKind::Rbf;
     if (!req.path.assign(path)) return;
     (void)w_.asks->push(req);
+}
+
+bool TastySession::copy_seed_() noexcept {
+    if (!args_.save || w_.vfs == nullptr) return false;
+    auto in = w_.vfs->open(args_.save->view(), svc::OpenMode::ReadWhole);
+    const auto sz = in ? (*in)->size() : Ex<svc::FileSize>{std::unexpected(in.error())};
+    if (!sz || sz->v > kSeedMaxBytes) return false;
+    std::vector<std::byte> bytes(static_cast<std::size_t>(sz->v));
+    const auto got = (*in)->read_at(0, bytes);
+    if (!got || *got != bytes.size()) return false;
+    if (!w_.vfs->ensure_dir(kTastySaveRoot)) return false;
+    return app::durable_write(*w_.vfs, std::string(kTastySaveRoot) + "/seed.sav", bytes)
+        .has_value();
 }
 
 void TastySession::fail_(int rc, const char* why) noexcept {
@@ -188,6 +203,26 @@ void TastySession::print_settings_() noexcept {
 void TastySession::go_menu_() noexcept {
     stage_ = Stage::LoadMenu;
     stage_ns_ = 0;
+}
+
+bool TastySession::rec_only_over_() noexcept {
+    if (w_.recstat == nullptr) return false;
+    app::RecorderStatus rec{};
+    if (w_.recstat->sample_into(rec) == 0) return false;
+    if (rec.state != app::RecState::Idle) {
+        rec_seen_ = true;
+        return false;
+    }
+    const bool refused =
+        rec.verdict != app::RecVerdict::None && rec.verdict != app::RecVerdict::Started;
+    if (refused && !rec_seen_) {
+        char buf[160];
+        std::snprintf(buf, sizeof buf, "tasty: the recording did not start (%s)",
+                      app::rec_verdict_name(rec.verdict));
+        tasty_say(buf);
+        if (w_.exit_code != nullptr) w_.exit_code->store(1, std::memory_order_relaxed);
+    }
+    return rec_seen_ || refused;
 }
 
 void TastySession::write_status_(bool force) noexcept {
@@ -316,6 +351,15 @@ void TastySession::tick() noexcept {
             const app::RecMode mode = args_.hashes_only ? app::RecMode::Hash : app::RecMode::Avi;
             if (args_.record && !args_.record->empty() && !play_started_) {
                 const std::string_view rec = args_.record->view();
+                if (w_.rec != nullptr && !w_.rec->can_record(rec)) {
+                    char why[app::kPathMax + 64];
+                    std::snprintf(why, sizeof why,
+                                  "cannot record to %.*s: a recording goes under %s",
+                                  static_cast<int>(rec.size()), rec.data(),
+                                  app::RecorderControl::kRoot.data());
+                    fail_(1, why);
+                    break;
+                }
                 if (args_.verb == TastyVerb::Play) {
                     if (w_.rec != nullptr) (void)w_.rec->take_arm(rec, mode, args_.rec);
                 } else {
@@ -323,12 +367,18 @@ void TastySession::tick() noexcept {
                 }
             }
             if (!rec_only_) {
+                const bool seeded = args_.save.has_value();
+                if (seeded && !copy_seed_()) {
+                    fail_(1, "replay refused: cannot copy the --save file");
+                    break;
+                }
                 const PlayAsk ask{.movie = args_.movie.view(),
                                   .rom = args_.rom.view(),
                                   .lead = args_.lead,
                                   .phase_us = args_.phase_us,
                                   .stop_at = args_.stop_at,
                                   .ram_fill = args_.ram_fill,
+                                  .seeded_save = seeded,
                                   .set_settings = !args_.strict};
                 if (w_.replay == nullptr || !w_.replay->take_play(ask)) {
                     fail_refusal_();
@@ -342,7 +392,10 @@ void TastySession::tick() noexcept {
         case Stage::Run: {
             print_settings_();
             write_status_();
-            if (rec_only_) break;
+            if (rec_only_) {
+                if (rec_only_over_()) go_menu_();
+                break;
+            }
             if (w_.replay != nullptr && w_.replay->refused()) {
                 fail_refusal_();
                 break;

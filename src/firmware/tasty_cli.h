@@ -36,6 +36,8 @@ struct TastyArgs {
     std::optional<std::uint32_t> phase_us{};
     std::optional<std::uint32_t> stop_at{};
     std::optional<cores::IMovieCodec::RamFill> ram_fill{};
+
+    std::optional<app::PathText> save{};
     std::uint32_t return_after_s = 30;
     std::uint8_t vsync_adjust = 0;
     bool stay = false;

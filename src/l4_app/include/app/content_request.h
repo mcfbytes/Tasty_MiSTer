@@ -5,8 +5,10 @@
 #include <type_traits>
 
 #include "app/path_text.h"
+#include "cores/ram_image.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -15,6 +17,9 @@ struct ContentRequest {
     PathText path{};
     std::uint8_t slot = 0;
     std::uint32_t load_addr = 0;
+    proto::FileId save{};
+    cores::RamImageRecipe ram_image{};
+    std::uint8_t ram_index = 0;
 };
 static_assert(std::is_trivially_copyable_v<ContentRequest>,
               "the path rides the request, never a PathId");

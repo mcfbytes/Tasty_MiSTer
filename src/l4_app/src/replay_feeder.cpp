@@ -162,6 +162,7 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
     lead_override_ = p.lead;
     stop_at_ = p.stop_at;
     ram_fill_ = p.ram_fill;
+    seeded_save_ = p.seeded_save;
     set_ok_ = p.set_settings;
     set_.clear();
     offset_us_ = p.phase_us.value_or(0);
@@ -703,11 +704,20 @@ void ReplayFeeder::tick_arming_(const ReplayStatus& s, bool fresh) noexcept {
                     .scope = scope};
                 asked = w_.asks->push(ask) != kUncaused;
             } else if (w_.asks != nullptr) {
+
+                const cores::RamImageRecipe ram = codec_->power_on_ram(facts_);
+                const std::size_t need = ram.size() == 0 ? 1 : 2;
+                const bool image_asked =
+                    UiRequestRing::kSlots - w_.asks->size() >= need &&
+                    (ram.size() == 0 || w_.asks->push(UiRequest::LoadRamImage{
+                                            .scope = scope, .recipe = ram}) != kUncaused);
                 UiRequest::LoadFileByDigit ask{};
                 ask.digit = proto::FileSlotDigit{codec_->rom_digit()};
+                ask.save = seeded_save_ ? UiRequest::SaveChoice::ReplaySeeded
+                                        : UiRequest::SaveChoice::ReplayFresh;
                 ask.scope = scope;
                 (void)ask.path.assign(rom_.view());
-                asked = w_.asks->push(ask) != kUncaused;
+                asked = image_asked && w_.asks->push(ask) != kUncaused;
             }
             if (!asked) {
                 publish_(ReplayOp::Stop);
@@ -753,8 +763,8 @@ void ReplayFeeder::log_end_(const ReplayStatus& s) noexcept {
 
 void ReplayFeeder::finish_(const ReplayStatus& s) noexcept {
     log_end_(s);
-    if (s.end == ReplayEnd::EpochAmbiguous && s.epoch_fail != EpochFail::Untimed &&
-        tries_ + 1 < kEpochTries && stage_ != Stage::Stopping) {
+    if (s.end == ReplayEnd::EpochAmbiguous && tries_ + 1 < kEpochTries &&
+        stage_ != Stage::Stopping) {
         ++tries_;
         return arm_();
     }

@@ -50,6 +50,7 @@ struct Event {
         ConfStrOnlySession,
         SessionAdvisory,
         SessionEnded,
+        RamImageDeclined,
         kCount,
     };
     enum class ConfStrOnlyCause : std::uint8_t { RegistryMiss, NoStorage };
@@ -105,9 +106,16 @@ struct Event {
     struct SessionEnded {
         static constexpr Kind kKind = Kind::SessionEnded;
     };
+
+    struct RamImageDeclined {
+        static constexpr Kind kKind = Kind::RamImageDeclined;
+
+        Errc why{};
+    };
     using Alternatives =
         std::tuple<CoreLoaded, SessionFailed, SdActivity, InfoRequest, ProgressUpdate, DeadlineMiss,
-                   RequestRefused, ConfStrOnlySession, SessionAdvisory, SessionEnded>;
+                   RequestRefused, ConfStrOnlySession, SessionAdvisory, SessionEnded,
+                   RamImageDeclined>;
 
     Kind kind = Kind::CoreLoaded;
     std::uint8_t pad_[3]{};
@@ -140,6 +148,7 @@ inline constexpr auto kDeliveryTable = std::to_array<DeliveryRow>({
     {Event::Kind::ConfStrOnlySession, Delivery::Edge},
     {Event::Kind::SessionAdvisory, Delivery::Edge},
     {Event::Kind::SessionEnded, Delivery::Edge},
+    {Event::Kind::RamImageDeclined, Delivery::Edge},
 });
 static_assert(infra::rows_are_ordinal(kDeliveryTable),
               "every Event::Kind needs exactly one kDeliveryTable row, at its "
@@ -158,7 +167,7 @@ public:
     static constexpr std::size_t kCapacity = 256;
 
     static constexpr std::size_t kKinds = static_cast<std::size_t>(Event::Kind::kCount);
-    static_assert(kKinds == 10, "Event::Kind changed cardinality: audit loss_[] consumers "
+    static_assert(kKinds == 11, "Event::Kind changed cardinality: audit loss_[] consumers "
                                 "and update this pin");
 
     [[nodiscard]] bool push(const Event& e) noexcept;

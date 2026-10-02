@@ -45,7 +45,7 @@ struct AxiUnkindedDecl {
 };
 
 struct Capability {
-    enum class Kind : std::uint8_t { SaveState, Uart, Midi, Irq, Axi, Unknown };
+    enum class Kind : std::uint8_t { SaveState, Uart, Midi, Irq, Axi, InitRam, Unknown };
     Kind kind;
     std::string raw;
 };
@@ -254,6 +254,8 @@ public:
     std::uint32_t axi_unknown_kind_count() const noexcept { return axi_unknown_kinds_; }
     const std::optional<SaveStateDecl>& savestate() const noexcept { return ss_; }
 
+    std::optional<std::uint8_t> ram_image_index() const noexcept { return ram_image_index_; }
+
     std::optional<os::UioLine> irq_line_for(reactor::Cause klass) const;
 
     const std::vector<std::string>& raw_items() const noexcept { return items_; }
@@ -322,6 +324,7 @@ private:
     std::vector<AxiDdrDecl> axi_ddr_;
     std::vector<AxiUnkindedDecl> axi_unkinded_;
     std::uint32_t axi_unknown_kinds_ = 0;
+    std::optional<std::uint8_t> ram_image_index_;
     std::optional<SaveStateDecl> ss_;
     std::vector<std::string> items_;
     ItemTable ast_;

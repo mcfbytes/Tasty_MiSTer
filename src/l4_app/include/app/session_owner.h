@@ -215,6 +215,7 @@ public:
     void on(const UiRequest::ResetCore& req, const UiRequest::Head& head);
     void on(const UiRequest::Reboot& req, const UiRequest::Head& head);
     void on(const UiRequest::LoadFileByDigit& req, const UiRequest::Head& head);
+    void on(const UiRequest::LoadRamImage& req, const UiRequest::Head& head);
     void misrouted(const UiRequest& m) noexcept;
 
     void on(const proto::LinkEvent::ReadyEdge& e) noexcept;
@@ -300,6 +301,11 @@ public:
     }
     [[nodiscard]] std::uint32_t files_failed() const noexcept { return files_failed_; }
 
+    [[nodiscard]] std::uint32_t ram_images_sent() const noexcept { return ram_images_sent_; }
+    [[nodiscard]] std::uint32_t ram_images_declined() const noexcept {
+        return ram_images_declined_;
+    }
+
     [[nodiscard]] const cores::LoaderMemo& loader_memo() const noexcept { return loader_memo_; }
     [[nodiscard]] bool walk_live() const noexcept { return walk_.has_value(); }
 
@@ -371,6 +377,13 @@ public:
     [[nodiscard]] bool save_mount_live() const noexcept { return save_mount_.has_value(); }
     [[nodiscard]] std::uint32_t save_mounts_done() const noexcept { return save_mounts_done_; }
 
+    [[nodiscard]] std::uint32_t open_saves_armed() const noexcept { return open_saves_armed_; }
+    [[nodiscard]] std::uint32_t open_saves_skipped() const noexcept { return open_saves_skipped_; }
+
+    void set_replay_save_root(std::string_view rel) noexcept {
+        (void)replay_save_root_.assign(rel);
+    }
+
 private:
     struct MountAsk {
         UiRequest::Kind which = UiRequest::Kind::MountImage;
@@ -423,7 +436,13 @@ private:
     void arm_plain_mount_(const MountAsk& ask);
 
     void step_save_mount_();
-    void finish_save_mount_(bool ok);
+    void finish_save_mount_(bool ok, bool quiet = false);
+
+    [[nodiscard]] bool arm_open_save_(const ContentRequest& cr, UiRequest::SaveChoice choice,
+                                      CorrelationTag tag);
+    [[nodiscard]] std::optional<PathText> open_save_path_(std::string_view rom,
+                                                          UiRequest::SaveChoice choice);
+    [[nodiscard]] bool prime_replay_save_(std::string_view path, bool seeded);
 
     [[nodiscard]] bool mount_busy_() const noexcept {
         return ladder_ != nullptr || save_mount_.has_value();
@@ -557,6 +576,7 @@ private:
     [[nodiscard]] StepArg step_arg_(Programmed p) const noexcept;
     Programmed program_at_boot_();
     void perform_content_(const ContentRequest& req);
+    void send_ram_image_(const ContentRequest& req);
 
     void refuse_file_ask_(UiRequest::Kind asked, CorrelationTag tag, Errc code) noexcept;
     [[nodiscard]] Ex<proto::ConfStrFileRow> resolve_load_(const UiRequest::LoadFile& r) const;
@@ -630,9 +650,14 @@ private:
         bool unmounted = false;
 
         bool bracketed = false;
+
+        std::optional<ContentRequest> then_load{};
     };
     std::optional<SaveMount> save_mount_;
     std::uint32_t save_mounts_done_ = 0;
+    std::uint32_t open_saves_armed_ = 0;
+    std::uint32_t open_saves_skipped_ = 0;
+    FixedStr<64, StrFit::Reject> replay_save_root_{};
 
     FixedStr<64, StrFit::Clip> core_name_{};
     std::uint32_t start_assets_ordered_ = 0;
@@ -760,6 +785,11 @@ private:
     std::uint32_t files_loaded_ = 0;
     bool link_wide_ = false;
     std::uint32_t files_failed_ = 0;
+    std::uint32_t ram_images_sent_ = 0;
+    std::uint32_t ram_images_declined_ = 0;
+
+    cores::RamImageRecipe pending_ram_image_{};
+    std::uint8_t pending_ram_index_ = 0;
     std::optional<FileTxPieces> pieces_{};
     std::optional<LoadLadder> load_{};
     std::optional<LoadWalk> walk_{};

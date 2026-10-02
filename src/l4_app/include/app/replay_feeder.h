@@ -112,6 +112,8 @@ public:
         bool set_settings = false;
 
         std::optional<cores::IMovieCodec::RamFill> ram_fill{};
+
+        bool seeded_save = false;
     };
 
     struct SetSetting {
@@ -219,6 +221,7 @@ private:
     std::optional<std::int32_t> lead_override_{};
     std::optional<std::uint32_t> stop_at_{};
     std::optional<cores::IMovieCodec::RamFill> ram_fill_{};
+    bool seeded_save_ = false;
     bool set_ok_ = false;
     std::vector<SetSetting> set_{};
     std::int32_t lead_ = 0;

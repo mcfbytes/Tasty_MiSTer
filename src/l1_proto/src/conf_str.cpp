@@ -477,6 +477,18 @@ Ex<ConfStr> ConfStr::parse(std::string_view raw, hal::PhysRegion aperture) {
         return true;
     };
 
+    auto try_initram = [&c](std::string_view f1, std::size_t pos) -> std::size_t {
+        if (!f1.substr(pos).starts_with("INITRAM")) return pos;
+        const std::size_t comma = f1.find(',', pos);
+        const std::size_t seg_end = comma == std::string_view::npos ? f1.size() : comma;
+        std::uint32_t index = 0;
+        const std::string_view body = f1.substr(pos + 7, seg_end - (pos + 7));
+        if (body.size() != 2 || !parse_num(body, 16, index)) return pos;
+        c.ram_image_index_ = static_cast<std::uint8_t>(index);
+        c.caps_.push_back({Capability::Kind::InitRam, std::string(f1.substr(pos, seg_end - pos))});
+        return seg_end;
+    };
+
     if (fields.size() >= 2) {
         const std::string_view f1 = fields[1];
         std::size_t pos = 0;
@@ -492,6 +504,7 @@ Ex<ConfStr> ConfStr::parse(std::string_view raw, hal::PhysRegion aperture) {
             if (auto r = try_axi(f1, pos); !r) {
                 return std::unexpected(r.error());
             }
+            pos = try_initram(f1, pos);
 
             const std::size_t comma = f1.find(',', pos);
             if (pos == seg_start) {

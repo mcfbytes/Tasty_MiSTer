@@ -25,6 +25,7 @@ public:
     static constexpr std::uint8_t kHardReset = 0x02;
     static constexpr std::uint8_t kCompact = 0x04;
     static constexpr std::uint8_t kGametype = 0x08;
+    static constexpr std::uint8_t kRandomInit = 0x10;
 
     static constexpr std::int32_t kLsnesLead = 0;
 
@@ -42,6 +43,10 @@ public:
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
         std::span<const std::uint8_t> head, std::uint64_t size) const noexcept override;
+
+private:
+    [[nodiscard]] std::optional<WramFill> do_recorder_wram(const Facts& f) const noexcept override;
+    [[nodiscard]] RamImageRecipe do_recorder_ram(const Facts& f) const noexcept override;
 };
 
 static_assert(snes_pad_order_is_a_permutation(SnesLsmvCodec::kPadOrder),

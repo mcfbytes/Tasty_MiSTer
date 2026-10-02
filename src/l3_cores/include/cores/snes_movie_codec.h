@@ -31,6 +31,8 @@ public:
 
     static constexpr std::uint8_t kSaveStateBit = 12;
 
+    enum class WramFill : std::uint8_t { Pattern9966, Pattern00FF, Flat55, FlatFF };
+
     static constexpr std::uint64_t kRomMin = 128 * 1024;
 
     [[nodiscard]] static constexpr std::uint32_t bit(Button b) noexcept {
@@ -41,6 +43,12 @@ public:
     [[nodiscard]] Raster raster(const Facts& f) const noexcept final;
     [[nodiscard]] PowerOn power_on(const Facts& f) const noexcept final;
     [[nodiscard]] std::uint8_t rom_digit() const noexcept final { return 1; }
+
+    [[nodiscard]] RamImageRecipe power_on_ram(const Facts& f) const noexcept final {
+        return do_recorder_ram(f);
+    }
+    static constexpr std::uint32_t kWramBytes = 128 * 1024;
+    static constexpr std::uint32_t kAramBytes = 64 * 1024;
 
 protected:
     SnesMovieCodec() = default;
@@ -57,6 +65,12 @@ protected:
     [[nodiscard]] static Error refuse(Refusal r, std::uint16_t site) noexcept {
         return Error{Errc::bad_format, site, static_cast<std::uint32_t>(r)};
     }
+
+private:
+    [[nodiscard]] virtual std::optional<WramFill> do_recorder_wram(
+        const Facts& f) const noexcept = 0;
+
+    [[nodiscard]] virtual RamImageRecipe do_recorder_ram(const Facts& f) const noexcept = 0;
 };
 
 template <std::size_t N>

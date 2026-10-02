@@ -58,12 +58,34 @@ last input it restarts `/media/fat/MiSTer` and you are back at the menu. `--ling
 alone too: on the NES, SNES and Genesis the game powers on with no save loaded, as the movie expects, and the file
 in `saves/` is never opened.
 
-**Known-good runs** (played to the end, in sync, on a DE10-Nano):
+**Known-good runs** (played to the end, in sync, on a DE10-Nano with the stock cores). The last column is
+anything beyond `tasty play <movie> --rom <file>` the run needed; "none" means the defaults just work:
 
-| game | movie | length | ROM (No-Intro) |
-|---|---|---|---|
-| Super Mario Bros. | ["warps" by klmz](https://tasvideos.org/1330M) | 4:57 | `Super Mario Bros. (World).nes` |
-| Mike Tyson's Punch-Out!! | [by adelikat](https://tasvideos.org/1695M) | 17:47 | `Mike Tyson's Punch-Out!! (Japan, USA) (En) (Rev 1).nes` |
+| system | game | movie | length | ROM (No-Intro) | needed |
+|---|---|---|---|---|---|
+| NES | Super Mario Bros. | ["warps" by klmz](https://tasvideos.org/1330M) | 4:57 | `Super Mario Bros. (World).nes` | none |
+| NES | Super Mario Bros. | ["warps" by HappyLee](https://tasvideos.org/1715M) | 4:57 | `Super Mario Bros. (World).nes` | none |
+| NES | Mike Tyson's Punch-Out!! | [by adelikat](https://tasvideos.org/1695M) | 17:47 | `Mike Tyson's Punch-Out!! (Japan, USA) (En) (Rev 1).nes` | none |
+| NES | Tetris | ["playaround" by Baxter](https://tasvideos.org/1502M) | 2:17 | `Tetris (USA).nes` | none |
+| NES | Tetris | ["maximum score" by r57shell & Archanfel](https://tasvideos.org/4853M) | 2:53 | `Tetris (USA).nes` | none; 999999 lands just after the last input, so add `--stay` to see it |
+| NES | Castlevania | [by Challenger & eien86](https://tasvideos.org/4840M) | 10:12 | `Castlevania (USA).nes` | none |
+| NES | Zelda II: The Adventure of Link | ["warp glitch" by TASeditor, Arc, Inzult & EZGames69](https://tasvideos.org/4234M) | 5:32 | `Zelda II - The Adventure of Link (USA).nes` | none; `--stay` to watch the ending and credits |
+| NES | Ghosts'n Goblins | [by DreamYao](https://tasvideos.org/4469M) | 8:04 | `Ghosts'n Goblins (USA).nes` | none; `--stay` to watch the ending |
+| NES | Galaga: Demons of Death | [by eien86](https://tasvideos.org/5557M) | 8:17 | `Galaga - Demons of Death (USA).nes` | none |
+| NES | Mighty Final Fight | [by Xipo](https://tasvideos.org/3538M) | 8:06 | `Mighty Final Fight (USA).nes` | none |
+| NES | Rush'n Attack | ["1 player" by peco_de_guile & aiqiyou](https://tasvideos.org/4884M) | 9:39 | `Rush'n Attack (USA).nes` | none; `--stay` to watch the ending and credits |
+| NES | Star Wars: The Empire Strikes Back | [by link_7777](https://tasvideos.org/6397M) | 10:42 | `Star Wars - The Empire Strikes Back (USA).nes` | none |
+| NES | Pac-Man (Tengen) | [by eien86](https://tasvideos.org/5231M) | 12:02 | `Pac-Man (USA) (Tengen).nes` | none |
+| SNES | Super Punch-Out!! | [by adelikat](https://tasvideos.org/4933M) | 15:52 | `Super Punch-Out!! (USA).sfc` | none |
+| SNES | Super Mario All-Stars: Super Mario Bros. | [by Niftski & HappyLee](https://tasvideos.org/6744M) | 5:03 | `Super Mario Collection (Japan).sfc` | `--lead -1` |
+| SNES | Contra III: The Alien Wars | ["2 players" by Mr_K & EZGames69](https://tasvideos.org/4363M) | 12:37 | `Contra III - The Alien Wars (USA).sfc` | none; `--stay` to watch the ending |
+
+**Probably good:** Mike Tyson's Punch-Out!! [4226M by McHazard](https://tasvideos.org/4226M) (BizHawk, `Mike Tyson's
+Punch-Out!! (Japan, USA) (En) (Rev 1).nes`, no options). Tyson is going down on the last frame; the count was not recorded.
+
+**About `--lead`.** tasty picks a default for each movie format (FCEUX `.fm2` -3, BizHawk NES -2, BizHawk SNES -2).
+On the SNES the right value varies from movie to movie: Super Mario All-Stars needs `-1`, Super Punch-Out!! and Contra
+III need the default. If a SNES movie goes wrong in its first minute, try `--lead -1` before giving up on it.
 
 **Known to desync:** Super Mario Bros. 3, ["warps" by Lord_Tom, Maru & Tompa](https://tasvideos.org/3922M). The
 movie is console-verified. On MiSTer it runs in sync for about nine minutes, then falls one frame behind during World
@@ -74,7 +96,7 @@ movie is console-verified. On MiSTer it runs in sync for about nine minutes, the
 | system | core | movie formats | status |
 |---|---|---|---|
 | NES | NES | `.fm2` (FCEUX), `.bk2` (BizHawk NesHawk) | **works**: see the known-good runs below |
-| SNES | SNES | `.lsmv` (lsnes), `.bk2` (BizHawk) | **experimental**: plays, but the SNES is sensitive to exactly when in the frame input arrives, and no run has stayed in sync to the end yet |
+| SNES | SNES | `.lsmv` (lsnes), `.bk2` (BizHawk) | **works for some movies**: three play to the end (above). The SNES is sensitive to exactly when in the frame input arrives, so some movies need a `--lead` other than the default |
 | Genesis / Mega Drive | MegaDrive | `.gmv` (Gens), `.bk2` (BizHawk) | **experimental**: starts and replays cleanly, but no movie stays in sync yet. Gens loads graphics faster than a real console, so Gens movies drift at each load; console verification replayed them one input per pad read, which tasty does not do yet |
 | PlayStation | PSX | `.bk2` (BizHawk) | **not working yet**: discs load (`.cue`/`.bin` or `.chd`), but CD timing on the core differs from the emulator and playback desyncs |
 
@@ -85,10 +107,12 @@ movie is console-verified. On MiSTer it runs in sync for about nine minutes, the
 | Super Mario Bros. | [1330M](https://tasvideos.org/1330M) | in sync to the end |
 | Mike Tyson's Punch-Out!! | [1695M](https://tasvideos.org/1695M) | in sync to the end |
 | Tetris | [1502M](https://tasvideos.org/1502M) | in sync to the end |
+| Castlevania | [4840M](https://tasvideos.org/4840M) | console-verified; in sync to the end, Dracula included |
 | Super Mario Bros. 3 | [3922M](https://tasvideos.org/3922M) | console-verified; on MiSTer it slips one frame behind in World 8's tank fight, under investigation (see "For core developers") |
 | Rockman / Mega Man | [2601M](https://tasvideos.org/2601M) | desyncs |
 | Kiwi Kraze | [4438M](https://tasvideos.org/4438M) | desyncs |
 | Super Mario World | [3019M](https://tasvideos.org/3019M) | partly in sync |
+| Super Mario World | [4144M](https://tasvideos.org/4144M) | console-verified; desyncs in Yoshi's Island 3, about 1:14 in, with the RAM fill matched |
 | Marble Madness | [939M](https://tasvideos.org/939M) | replays cleanly, doesn't reach gameplay yet |
 | Tekken 3 | BizHawk `.bk2` | loads and plays; CD timing desyncs |
 
@@ -96,10 +120,17 @@ movie is console-verified. On MiSTer it runs in sync for about nine minutes, the
 - It starts from power-on (movies that start from a savestate or saved game are refused), with standard pads: no Zapper, Four Score, Famicom Disk System,
   DualShock analog or mid-movie resets.
 - Your own ROM or disc image that matches the movie's checksum (`tasty check` tells you).
-- The core settings the movie was recorded with (NES: NTSC and RAM Clear $00; SNES: NTSC; Genesis: 6 Buttons Mode and
-  the region). You don't change anything: tasty sets them in memory for the run, prints each one it changed, and
-  leaves your saved settings alone. `--strict` refuses instead. PSX needs the same BIOS as the movie; that is a file,
+- The core settings the movie was recorded with (NES: NTSC and RAM Clear $00; SNES: NTSC, and Initial WRAM 55 for an
+  lsnes movie; Genesis: 6 Buttons Mode and the region). You don't change anything: tasty sets them in memory for
+  the run, prints each one it changed, and leaves your saved settings alone. `--strict` refuses instead. PSX needs the same BIOS as the movie; that is a file,
   not a setting, and tasty names the one it needs.
+- On the SNES, RAM the game reads before writing it. The core fills RAM with one of four fixed patterns at power-on.
+  lsnes fills WRAM with `55`, which the core can match, and its sound RAM with `00`, which it cannot. BizHawk's
+  older `BSNES` core (`Core BSNES` in a `.bk2`'s header) and its newer `BSNESv115+` core fill RAM from
+  pseudo-random sequences that no core setting reproduces. tasty can send that exact power-on RAM to a SNES core
+  that accepts one; the stock core does not yet (proposed in
+  [SNES_MiSTer#510](https://github.com/MiSTer-devel/SNES_MiSTer/pull/510)), so tasty says so once and the game
+  starts from the core's own fill. Many movies don't depend on it: Super Punch-Out!! and Contra III play in sync either way.
 
 ## <img src="art/icons/ramen-48.png" width="24" alt=""> Command line
 
@@ -123,6 +154,7 @@ tasty rec start|stop [options]    record whatever is on screen, no movie needed
 | `--stop-at <frame>` | play movie frames 0 to N-1, then end there |
 | `--loop` | play the movie again each time it ends, until `tasty stop` (not with `--record`) |
 | `--ram-init zero\|ff\|random` | NES RAM Clear for this run; other cores refuse it |
+| `--save <file>` | start the game's battery save as a copy of this file; without it the save starts empty. Your own saves are never opened or written |
 | `--linger <seconds>` | wait after the last input before returning to the menu (default `30`) |
 | `--stay` | never return on its own; the core keeps running until `tasty stop` |
 | `--strict` | refuse when a core setting differs from the movie's, instead of setting it for this run |
@@ -152,6 +184,9 @@ Recordings are the core's own pixels, as it hands them to the scaler: native res
 tasty play smb3.fm2 --record /media/fat/recordings --hashes
 ffmpeg -i smb3_000.avi -c:v libx264 -crf 16 -pix_fmt yuv420p smb3.mp4
 ```
+
+Recordings go under `/media/` (the SD card or a USB drive); any other path is refused before anything starts.
+`tasty rec stop` ends a recording; a `tasty rec start` session then returns to the menu, as `tasty stop` does.
 
 Recording is best effort. If the encoder can't keep up, `--scale auto` first halves the picture and says so; past
 that, a frame is repeated and counted. The replay never waits for the recording.

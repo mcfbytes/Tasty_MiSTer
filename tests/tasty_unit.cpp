@@ -464,6 +464,29 @@ void test_cli_loop_and_ram_init() {
     CHECK(!fw::parse_tasty_args(std::span<const char* const>(bad)).has_value());
 }
 
+void test_cli_save_is_play_only() {
+    const char* const play[] = {"tasty", "play", "m.fm2", "--save", "/s/a.sav"};
+    const auto a = fw::parse_tasty_args(std::span<const char* const>(play));
+    CHECK(a.has_value() && a->save && a->save->view() == "/s/a.sav");
+    const auto refused = [](const auto& argv) {
+        const auto d = fw::parse_tasty_args(std::span<const char* const>(argv));
+        CHECK(!d.has_value());
+        if (!d)
+            CHECK(std::string_view(fw::tasty_args_refusal(d.error().detail)) ==
+                  "--save seeds a movie's battery save; use it with tasty play");
+    };
+    const char* const info[] = {"tasty", "info", "m.fm2", "--save", "/s/a.sav"};
+    const char* const check[] = {"tasty", "check", "m.fm2", "--rom", "r.nes", "--save", "/s/a.sav"};
+    const char* const status[] = {"tasty", "status", "--save", "/s/a.sav"};
+    const char* const stop[] = {"tasty", "stop", "--save", "/s/a.sav"};
+    const char* const rec[] = {"tasty", "rec", "start", "--record", "/x", "--save", "/s/a.sav"};
+    refused(info);
+    refused(check);
+    refused(status);
+    refused(stop);
+    refused(rec);
+}
+
 void test_registry() {
     CHECK(fw::tasty_plays("NES"));
     CHECK(fw::tasty_plays("SNES"));
@@ -1087,6 +1110,57 @@ void test_rec_only_stop_leaves() {
     CHECK(x.replay.stops >= 1);
 }
 
+void test_rec_only_leaves_when_its_recording_ends() {
+    for (const bool refused : {false, true}) {
+        Sess x;
+        x.args.verb = fw::TastyVerb::RecStart;
+        x.args.no_splash = true;
+        x.s.emplace(x.w, x.args);
+        const auto rec = [&x](app::RecState st, app::RecVerdict v) {
+            const SeatScope cap{SeatTag::Capture};
+            app::RecorderStatus r{};
+            r.gen = 1;
+            r.state = st;
+            r.verdict = v;
+            x.recstat.publish(r);
+        };
+        x.tick();
+        x.tick();
+        if (refused) {
+            rec(app::RecState::Idle, app::RecVerdict::NoLiveBuffer);
+        } else {
+            rec(app::RecState::Recording, app::RecVerdict::Started);
+            for (int i = 0; i < 4; ++i)
+                x.tick();
+            CHECK(x.replay.stops == 0);
+            rec(app::RecState::Idle, app::RecVerdict::Stopped);
+        }
+        x.tick();
+        home(x);
+        CHECK(x.replay.stops >= 1);
+        CHECK(x.exit_code.load() == (refused ? 1 : 0));
+    }
+}
+
+void test_record_path_outside_the_root_is_refused() {
+    Tmp t("/tasty_tasty_recroot_");
+    CHECK(!t.root.empty());
+    app::RecorderControl rc{app::RecorderControl::Wiring{.root = t.root}};
+    Sess x;
+    x.w.rec = &rc;
+    x.args.verb = fw::TastyVerb::RecStart;
+    x.args.no_splash = true;
+    CHECK(x.args.record.emplace().assign("/proc/"));
+    x.s.emplace(x.w, x.args);
+    StderrTo err;
+    x.tick();
+    x.tick();
+    home(x);
+    CHECK(x.exit_code.load() == 1);
+    CHECK(err.text().find("cannot record to /proc/") != std::string::npos);
+    CHECK(rc.generation() == 0);
+}
+
 void test_stale_generation() {
     Tmp t("/tasty_tasty_gen_");
     CHECK(!t.root.empty());
@@ -1106,6 +1180,102 @@ void test_stale_generation() {
     x.tick();
     x.tick();
     CHECK(x.replay.plays == 1);
+}
+
+namespace {
+std::optional<std::string> slurp(const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (f == nullptr) return std::nullopt;
+    std::string b;
+    char buf[4096];
+    for (std::size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;)
+        b.append(buf, n);
+    std::fclose(f);
+    return b;
+}
+
+struct SeedRun {
+    unsigned plays = 0;
+    bool seeded = false;
+    int exit_code = -1;
+    std::optional<std::string> seed{};
+};
+
+SeedRun seed_run(const Tmp& t, const char* save) {
+    SeedRun out{};
+    auto vfs = svc::Vfs::create_at(t.root);
+    CHECK(vfs.has_value());
+    if (!vfs) return out;
+    Sess x{&*vfs};
+    x.args.save.emplace();
+    (void)x.args.save->assign(save);
+    x.s.emplace(x.w, x.args);
+    to_run(x);
+    out.plays = x.replay.plays;
+    out.seeded = x.replay.last.seeded_save;
+    out.exit_code = x.exit_code.load();
+    out.seed = slurp(t.p("tasty/saves/seed.sav"));
+    (void)::unlink(t.p("tasty/saves/seed.sav").c_str());
+    (void)::rmdir(t.p("tasty/saves").c_str());
+    (void)::rmdir(t.p("tasty").c_str());
+    return out;
+}
+}  // namespace
+
+void test_save_seed_copied() {
+    Tmp t("/tasty_tasty_seed_");
+    CHECK(!t.root.empty());
+    if (t.root.empty()) return;
+    std::string bytes(8192, '\0');
+    for (std::size_t i = 0; i < bytes.size(); ++i)
+        bytes[i] = static_cast<char>(i * 7u + 3u);
+    CHECK(t.put("my.sav", bytes));
+    const SeedRun r = seed_run(t, "my.sav");
+    CHECK_EQ(r.plays, 1u);
+    CHECK(r.seeded);
+    CHECK_EQ(r.exit_code, 0);
+    CHECK(r.seed && *r.seed == bytes);
+    CHECK(slurp(t.p("my.sav")) == bytes);
+
+    CHECK(t.put("empty.sav", ""));
+    const SeedRun e = seed_run(t, "empty.sav");
+    CHECK_EQ(e.plays, 1u);
+    CHECK(e.seeded);
+    CHECK(e.seed && e.seed->empty());
+    (void)::unlink(t.p("my.sav").c_str());
+    (void)::unlink(t.p("empty.sav").c_str());
+}
+
+void test_save_seed_refusals() {
+    Tmp t("/tasty_tasty_seedno_");
+    CHECK(!t.root.empty());
+    if (t.root.empty()) return;
+    const SeedRun missing = seed_run(t, "absent.sav");
+    CHECK_EQ(missing.plays, 0u);
+    CHECK_EQ(missing.exit_code, 1);
+    CHECK(!missing.seed);
+
+    CHECK(t.put("max.sav", std::string(1u << 20, 'm')));
+    const SeedRun max = seed_run(t, "max.sav");
+    CHECK_EQ(max.plays, 1u);
+    CHECK(max.seed && max.seed->size() == (1u << 20));
+    CHECK(t.put("big.sav", std::string((1u << 20) + 1u, 'b')));
+    const SeedRun big = seed_run(t, "big.sav");
+    CHECK_EQ(big.plays, 0u);
+    CHECK_EQ(big.exit_code, 1);
+    CHECK(!big.seed);
+
+    auto vfs = svc::Vfs::create_at(t.root);
+    CHECK(vfs.has_value());
+    if (vfs) {
+        Sess x{&*vfs};
+        to_run(x);
+        CHECK_EQ(x.replay.plays, 1u);
+        CHECK(!x.replay.last.seeded_save);
+        CHECK(!slurp(t.p("tasty/saves/seed.sav")));
+    }
+    (void)::unlink(t.p("max.sav").c_str());
+    (void)::unlink(t.p("big.sav").c_str());
 }
 
 void test_status_force() {
@@ -2903,6 +3073,9 @@ int main(int argc, char** argv) {
     test_boot_no_handoff();
     test_cli_play_needs_rom();
     test_cli_loop_and_ram_init();
+    test_cli_save_is_play_only();
+    test_save_seed_copied();
+    test_save_seed_refusals();
     test_registry();
     test_codec_path();
     test_null_osd();
@@ -2956,6 +3129,8 @@ int main(int argc, char** argv) {
     test_stay_finished_holds();
     test_stay_stop_leaves();
     test_rec_only_stop_leaves();
+    test_rec_only_leaves_when_its_recording_ends();
+    test_record_path_outside_the_root_is_refused();
     test_stale_generation();
     test_status_force();
     test_status_frames_total();

@@ -23,6 +23,7 @@ set(TASTY_CORES_TASTY
   src/nes_movie_codec.cpp
   src/nes_bk2_codec.cpp
   src/rom_digest.cpp
+  src/ram_image.cpp
   src/snes_movie_codec.cpp
   src/snes_lsmv_codec.cpp
   src/snes_bk2_codec.cpp
@@ -200,6 +201,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/nes_bk2_codec.h
   cores/digest_value.h
   cores/rom_digest.h
+  cores/ram_image.h
   cores/snes_movie_codec.h
   cores/snes_lsmv_codec.h
   cores/snes_bk2_codec.h
@@ -251,6 +253,11 @@ if(TASTY_BUILD_TESTS)
   target_link_libraries(tasty_cores_snes_movie_codec_unit PRIVATE mister_cores tasty_test_options)
   add_test(NAME tasty.cores_snes_movie_codec COMMAND tasty_cores_snes_movie_codec_unit)
   set_tests_properties(tasty.cores_snes_movie_codec PROPERTIES TIMEOUT 60)
+
+  add_executable(tasty_cores_ram_image_unit tests/ram_image_unit.cpp)
+  target_link_libraries(tasty_cores_ram_image_unit PRIVATE mister_cores tasty_test_options)
+  add_test(NAME tasty.cores_ram_image COMMAND tasty_cores_ram_image_unit)
+  set_tests_properties(tasty.cores_ram_image PROPERTIES TIMEOUT 60)
 
   add_executable(tasty_cores_megadrive_movie_codec_unit tests/megadrive_movie_codec_unit.cpp)
   target_link_libraries(tasty_cores_megadrive_movie_codec_unit PRIVATE mister_cores tasty_test_options)

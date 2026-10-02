@@ -43,6 +43,7 @@ public:
         std::uint64_t size_bytes = 0;
         std::uint64_t offset = 0;
         std::uint32_t crc = 0;
+        proto::FileId save{};
     };
 
     [[nodiscard]] Ex<proto::FileId> intern(std::vector<std::uint8_t>&& bytes, std::string_view ext,
@@ -50,6 +51,8 @@ public:
                                            std::uint32_t at, std::uint32_t popped,
                                            std::uint32_t crc = 0, std::uint64_t whole = 0,
                                            std::uint64_t offset = 0);
+
+    [[nodiscard]] bool stamp_save(proto::FileId file, proto::FileId save) noexcept;
 
     [[nodiscard]] Ex<proto::FileId> intern_path(std::string_view path, std::uint64_t size_bytes,
                                                 std::uint32_t at, std::uint32_t popped);

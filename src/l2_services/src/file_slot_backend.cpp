@@ -74,6 +74,7 @@ Ex<proto::FileSize> FileSlotBackend::create(std::span<const std::uint8_t> first)
             Error{Errc::short_write, ERR_SITE(), static_cast<std::uint32_t>(*n)});
     }
     if (auto r = (*f)->flush(); !r) return std::unexpected(r.error());
+    vfs_->sync_parent_dir(path);
     file_ = std::move(*f);
     return proto::FileSize{first.size()};
 }

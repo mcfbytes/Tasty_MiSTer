@@ -45,6 +45,8 @@ public:
     [[nodiscard]] bool take_stop() noexcept;
     [[nodiscard]] bool take_disarm() noexcept;
 
+    [[nodiscard]] bool can_record(std::string_view path) const;
+
     void tick() noexcept;
 
     [[nodiscard]] static RecPath resolve(std::string_view arg, std::string_view root,
@@ -53,6 +55,7 @@ public:
     [[nodiscard]] std::uint16_t generation() const noexcept { return gen_; }
 
 private:
+    [[nodiscard]] std::string name_() const;
     [[nodiscard]] bool request_(RecOp op, std::string_view path, RecMode mode,
                                 RecOptions opt) noexcept;
     [[nodiscard]] bool publish_(RecOp op, std::string_view path, RecMode mode,

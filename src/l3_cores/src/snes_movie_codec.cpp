@@ -25,6 +25,7 @@ constexpr std::array<SettingRule, 8> kRules{{
 }};
 
 constexpr std::uint8_t kVideoRegionLo = 14;
+constexpr std::uint8_t kInitialWramLo = 21;
 
 }  // namespace
 
@@ -44,6 +45,14 @@ IMovieCodec::SettingNeeds SnesMovieCodec::setting_needs(const Facts& f) const no
              .allowed = static_cast<std::uint16_t>(1u << want),
              .preferred = want,
              .name = "Video Region"});
+    if (const auto fill = do_recorder_wram(f)) {
+        const auto v = static_cast<std::uint8_t>(*fill);
+        out.add({.lo = kInitialWramLo,
+                 .width = 2,
+                 .allowed = static_cast<std::uint16_t>(1u << v),
+                 .preferred = v,
+                 .name = "Initial WRAM"});
+    }
     return out;
 }
 

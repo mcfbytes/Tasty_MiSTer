@@ -8,6 +8,8 @@
 
 namespace mister::cores::manifests {
 
+inline constexpr auto kSnesStartAssets = stock_start_chain("SNES");
+
 inline constexpr CoreProfile kSnes{
     .kind = CoreKind::Snes,
     .name = "SNES",
@@ -15,6 +17,7 @@ inline constexpr CoreProfile kSnes{
     .services = {},
     .slots = {},
     .boot_assets = {},
+    .start_assets = kSnesStartAssets,
     .signatures = {},
     .file_tx_whole = true,
 };
