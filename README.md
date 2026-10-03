@@ -83,13 +83,40 @@ anything beyond `tasty play <movie> --rom <file>` the run needed; "none" means t
 **Probably good:** Mike Tyson's Punch-Out!! [4226M by McHazard](https://tasvideos.org/4226M) (BizHawk, `Mike Tyson's
 Punch-Out!! (Japan, USA) (En) (Rev 1).nes`, no options). Tyson is going down on the last frame; the count was not recorded.
 
-**About `--lead`.** tasty picks a default for each movie format (FCEUX `.fm2` -3, BizHawk NES -2, BizHawk SNES -2).
-On the SNES the right value varies from movie to movie: Super Mario All-Stars needs `-1`, Super Punch-Out!! and Contra
-III need the default. If a SNES movie goes wrong in its first minute, try `--lead -1` before giving up on it.
+**Candidates, not yet played to the end.** Each stayed in sync for its first 60 seconds and was stopped there, so it
+may still desync later; a report either way is welcome. The SNES ones were checked on a test build of the SNES core
+that starts from the emulator's power-on RAM (see below), and are untested on the stock core.
 
-**Known to desync:** Super Mario Bros. 3, ["warps" by Lord_Tom, Maru & Tompa](https://tasvideos.org/3922M). The
-movie is console-verified. On MiSTer it runs in sync for about nine minutes, then falls one frame behind during World
-8's tank fight; under investigation. `tasty check` confirms your ROM matches a movie before you start.
+| system | game | movie | length | ROM (No-Intro) | needed |
+|---|---|---|---|---|---|
+| NES | Prince of Persia | [by eien86](https://tasvideos.org/4651M) | 15:20 | `Prince of Persia (USA).nes` | none |
+| NES | Adventure Island 3 | [by J.Y](https://tasvideos.org/4462M) | 18:20 | `Adventure Island 3 (USA).nes` | none |
+| NES | Mega Man 2 | [by Shinryuu](https://tasvideos.org/4410M) | 23:39 | `Rockman 2 - Dr. Wily no Nazo (Japan).nes` | none |
+| NES | Mega Man 3 | [by Pike & Tiancaiwhr](https://tasvideos.org/2439M) | 30:21 | `Rockman 3 - Dr. Wily no Saigo! (Japan).nes` | none |
+| SNES | Super Star Wars | [by Exonym](https://tasvideos.org/2722M) | 18:36 | `Super Star Wars (USA).sfc` | `--lead -1` |
+| SNES | The Magical Quest Starring Mickey Mouse | [by Tompa](https://tasvideos.org/4486M) | 14:47 | `Magical Quest Starring Mickey Mouse, The (USA).sfc` | none |
+| SNES | Disney's Aladdin | ["capeless" by jaysmad](https://tasvideos.org/3375M) | 16:37 | `Aladdin (USA).sfc` | none |
+| SNES | The Lion King | [by EZGames69, SBDWolf, Akiteru & ShgofcTAS](https://tasvideos.org/6987M) | 10:50 | `Lion King, The (USA).sfc` | none |
+| SNES | Super Metroid | [by Sniq](https://tasvideos.org/3653M) | 35:58 | `Super Metroid (Japan, USA) (En,Ja).sfc` | none |
+
+**About `--lead`.** tasty picks a default for each movie format (FCEUX `.fm2` -3, BizHawk NES -2, BizHawk SNES -2
+for its older `BSNES` core and -1 for `BSNESv115+`). On the SNES the right value varies from movie to movie: Super
+Mario All-Stars needs `-1`, Super Punch-Out!! and Contra III need the default, and Rockman X
+[6658M](https://tasvideos.org/6658M) (`BSNESv115+`) needs `-2`. If a SNES movie goes wrong in its first minute (Start
+never takes, or the attract demo plays), try `-1` and `-2` before giving up on it.
+
+**Known to desync.** A TAS is tuned to the frame its emulator accepted each input on, so wherever that emulator's
+timing differs from the hardware, a faithful core goes its own way; console-verified movies are the best bet. These
+run in sync for a long stretch first:
+- Super Mario Bros. 3, ["warps" by Lord_Tom, Maru & Tompa](https://tasvideos.org/3922M) (console-verified): about
+  nine minutes, then one frame behind during World 8's tank fight.
+- Super Mario All-Stars: The Lost Levels, ["warpless, Mario" by HappyLee](https://tasvideos.org/3456M)
+  (console-verified, `--lead -1`): Worlds 1 to 5, about 14 minutes, then goes wrong in World 6.
+- Mega Man X, [3151M](https://tasvideos.org/3151M), ["100%" 3197M](https://tasvideos.org/3197M) and Rockman X
+  ["X-Buster only" 6658M](https://tasvideos.org/6658M): the intro and Chill Penguin in sync, then all three go wrong just
+  after that boss, identically with and without the emulator's power-on RAM.
+
+`tasty check` confirms your ROM matches a movie before you start.
 
 ## <img src="art/icons/pizza-48.png" width="24" alt=""> What it plays
 
@@ -111,8 +138,10 @@ movie is console-verified. On MiSTer it runs in sync for about nine minutes, the
 | Super Mario Bros. 3 | [3922M](https://tasvideos.org/3922M) | console-verified; on MiSTer it slips one frame behind in World 8's tank fight, under investigation (see "For core developers") |
 | Rockman / Mega Man | [2601M](https://tasvideos.org/2601M) | desyncs |
 | Kiwi Kraze | [4438M](https://tasvideos.org/4438M) | desyncs |
-| Super Mario World | [3019M](https://tasvideos.org/3019M) | partly in sync |
-| Super Mario World | [4144M](https://tasvideos.org/4144M) | console-verified; desyncs in Yoshi's Island 3, about 1:14 in, with the RAM fill matched |
+| Super Mario World | [3019M](https://tasvideos.org/3019M) | console-verified; in sync through Yoshi's Island 3, desyncs in Yoshi's Island 4, about 2:00 in |
+| Super Mario World | [4144M](https://tasvideos.org/4144M) | console-verified; desyncs in Yoshi's Island 3, about 1:14 in, with lsnes's power-on WRAM and sound RAM matched |
+| Super Mario World "game end glitch" | [3989M](https://tasvideos.org/3989M), [2380M](https://tasvideos.org/2380M) | refused: the code it injects arrives through two multitaps |
+| Castlevania III | ["Grant path, warp glitch" 7006M](https://tasvideos.org/7006M) | desyncs early, game over within three minutes |
 | Marble Madness | [939M](https://tasvideos.org/939M) | replays cleanly, doesn't reach gameplay yet |
 | Tekken 3 | BizHawk `.bk2` | loads and plays; CD timing desyncs |
 
@@ -130,7 +159,8 @@ movie is console-verified. On MiSTer it runs in sync for about nine minutes, the
   pseudo-random sequences that no core setting reproduces. tasty can send that exact power-on RAM to a SNES core
   that accepts one; the stock core does not yet (proposed in
   [SNES_MiSTer#510](https://github.com/MiSTer-devel/SNES_MiSTer/pull/510)), so tasty says so once and the game
-  starts from the core's own fill. Many movies don't depend on it: Super Punch-Out!! and Contra III play in sync either way.
+  starts from the core's own fill. Many movies don't depend on it: Super Punch-Out!! and Contra III play in sync either
+way, and Mega Man X plays frame-identically with and without it.
 
 ## <img src="art/icons/ramen-48.png" width="24" alt=""> Command line
 
