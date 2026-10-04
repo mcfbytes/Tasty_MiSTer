@@ -11,7 +11,8 @@ recorded on.
 
 The command-line tool is `tasty`.
 
-> **Status:** early and hungry. The first release: NES runs play frame-exact on a DE10-Nano; other systems are experimental.
+> **Status:** early and hungry. NES runs play frame-exact on a DE10-Nano, some SNES runs play to the end, and the
+> other systems are experimental.
 
 ## <img src="art/icons/taco-48.png" width="24" alt=""> Try it
 
@@ -58,8 +59,21 @@ last input it restarts `/media/fat/MiSTer` and you are back at the menu. `--ling
 alone too: on the NES, SNES and Genesis the game powers on with no save loaded, as the movie expects, and the file
 in `saves/` is never opened.
 
-**Known-good runs** (played to the end, in sync, on a DE10-Nano with the stock cores). The last column is
-anything beyond `tasty play <movie> --rom <file>` the run needed; "none" means the defaults just work:
+`tasty check` confirms your ROM matches a movie before you start.
+
+## <img src="art/icons/pizza-48.png" width="24" alt=""> What it plays
+
+| system | core | movie formats | status |
+|---|---|---|---|
+| NES | NES | `.fm2` (FCEUX), `.bk2` (BizHawk NesHawk) | **works**: see the known-good runs below |
+| SNES | SNES | `.lsmv` (lsnes), `.bk2` (BizHawk) | **works for some movies**: five play to the end (below). The SNES is sensitive to exactly when in the frame input arrives, so some movies need a `--lead` other than the default |
+| Genesis / Mega Drive | MegaDrive | `.gmv` (Gens), `.bk2` (BizHawk) | **experimental**: starts and replays cleanly, but no movie stays in sync yet. Gens loads graphics faster than a real console, so Gens movies drift at each load; console verification replayed them one input per pad read, which tasty does not do yet |
+| PlayStation | PSX | `.bk2` (BizHawk) | **not working yet**: discs load (`.cue`/`.bin` or `.chd`), but CD timing on the core differs from the emulator and playback desyncs |
+
+### Known-good runs
+
+Played to the end, in sync, on a DE10-Nano with the stock cores. The last column is anything beyond
+`tasty play <movie> --rom <file>` the run needed; "none" means the defaults just work:
 
 | system | game | movie | length | ROM (No-Intro) | needed |
 |---|---|---|---|---|---|
@@ -68,7 +82,7 @@ anything beyond `tasty play <movie> --rom <file>` the run needed; "none" means t
 | NES | Mike Tyson's Punch-Out!! | [by adelikat](https://tasvideos.org/1695M) | 17:47 | `Mike Tyson's Punch-Out!! (Japan, USA) (En) (Rev 1).nes` | none |
 | NES | Tetris | ["playaround" by Baxter](https://tasvideos.org/1502M) | 2:17 | `Tetris (USA).nes` | none |
 | NES | Tetris | ["maximum score" by r57shell & Archanfel](https://tasvideos.org/4853M) | 2:53 | `Tetris (USA).nes` | none; 999999 lands just after the last input, so add `--stay` to see it |
-| NES | Castlevania | [by Challenger & eien86](https://tasvideos.org/4840M) | 10:12 | `Castlevania (USA).nes` | none |
+| NES | Castlevania | [by Challenger & eien86](https://tasvideos.org/4840M), console-verified | 10:12 | `Castlevania (USA).nes` | none |
 | NES | Zelda II: The Adventure of Link | ["warp glitch" by TASeditor, Arc, Inzult & EZGames69](https://tasvideos.org/4234M) | 5:32 | `Zelda II - The Adventure of Link (USA).nes` | none; `--stay` to watch the ending and credits |
 | NES | Ghosts'n Goblins | [by DreamYao](https://tasvideos.org/4469M) | 8:04 | `Ghosts'n Goblins (USA).nes` | none; `--stay` to watch the ending |
 | NES | Galaga: Demons of Death | [by eien86](https://tasvideos.org/5557M) | 8:17 | `Galaga - Demons of Death (USA).nes` | none |
@@ -85,7 +99,9 @@ anything beyond `tasty play <movie> --rom <file>` the run needed; "none" means t
 **Probably good:** Mike Tyson's Punch-Out!! [4226M by McHazard](https://tasvideos.org/4226M) (BizHawk, `Mike Tyson's
 Punch-Out!! (Japan, USA) (En) (Rev 1).nes`, no options). Tyson is going down on the last frame; the count was not recorded.
 
-**Candidates, not yet played to the end.** Each stayed in sync for its first 60 seconds and was stopped there, so it
+### Candidates
+
+Not yet played to the end. Each stayed in sync for its first 60 seconds and was stopped there, so it
 may still desync later; a report either way is welcome.
 
 | system | game | movie | length | ROM (No-Intro) | needed |
@@ -95,61 +111,43 @@ may still desync later; a report either way is welcome.
 | NES | Mega Man 2 | [by Shinryuu](https://tasvideos.org/4410M) | 23:39 | `Rockman 2 - Dr. Wily no Nazo (Japan).nes` | none |
 | NES | Mega Man 3 | [by Pike & Tiancaiwhr](https://tasvideos.org/2439M) | 30:21 | `Rockman 3 - Dr. Wily no Saigo! (Japan).nes` | none |
 
-**About `--lead`.** tasty picks a default for each movie format (FCEUX `.fm2` -3, BizHawk NES -2, BizHawk SNES -2
+### Known to desync
+
+A TAS is tuned to the frame its emulator accepted each input on, so wherever that emulator's timing differs from the
+hardware, a faithful core goes its own way; console-verified movies are the best bet.
+
+| system | game | movie | how far it gets |
+|---|---|---|---|
+| NES | Super Mario Bros. 3 | ["warps" by Lord_Tom, Maru & Tompa](https://tasvideos.org/3922M), console-verified | about nine minutes, then one frame behind during World 8's tank fight (see "For core developers") |
+| NES | Rockman / Mega Man | [2601M](https://tasvideos.org/2601M) | desyncs |
+| NES | Kiwi Kraze | [4438M](https://tasvideos.org/4438M) | desyncs |
+| NES | Castlevania III | ["Grant path, warp glitch" 7006M](https://tasvideos.org/7006M) | early: game over within three minutes |
+| SNES | Super Mario All-Stars: The Lost Levels | ["warpless, Mario" by HappyLee](https://tasvideos.org/3456M), console-verified, `--lead -1` | Worlds 1 to 5, about 14 minutes, then goes wrong in World 6 |
+| SNES | The Magical Quest Starring Mickey Mouse | [by Tompa](https://tasvideos.org/4486M) | five worlds without a life lost, about 13:30 of 14:48, then Mickey loses a life in 6-2 and the movie ends before Pete |
+| SNES | Mega Man X / Rockman X | [3151M](https://tasvideos.org/3151M), ["100%" 3197M](https://tasvideos.org/3197M), ["X-Buster only" 6658M](https://tasvideos.org/6658M) | the intro and Chill Penguin, then all three go wrong just after that boss, identically with and without the emulator's power-on RAM |
+| SNES | Disney's Aladdin | ["capeless" 3375M](https://tasvideos.org/3375M), `--lead -1` | stage 1, the Cave of Wonders and the carpet ride, then the lava escape goes wrong |
+| SNES | Super Mario World | [3019M](https://tasvideos.org/3019M), console-verified | through Yoshi's Island 3, then desyncs in Yoshi's Island 4, about 2:00 in |
+| SNES | Super Mario World | [4144M](https://tasvideos.org/4144M), console-verified | desyncs in Yoshi's Island 3, about 1:14 in, with lsnes's power-on WRAM and sound RAM matched |
+| SNES | Super Star Wars | [2722M](https://tasvideos.org/2722M) | goes wrong within the first few minutes |
+| SNES | The Lion King | [6987M](https://tasvideos.org/6987M) | goes wrong within the first few minutes |
+| SNES | Super Metroid | [3653M](https://tasvideos.org/3653M) | goes wrong within the first few minutes |
+| Genesis | Marble Madness | [939M](https://tasvideos.org/939M) | replays cleanly, doesn't reach gameplay yet |
+| PlayStation | Tekken 3 | BizHawk `.bk2` | loads and plays; CD timing desyncs |
+
+### The SNES and `--lead`
+
+tasty picks a default for each movie format (FCEUX `.fm2` -3, BizHawk NES -2, BizHawk SNES -2
 for its older `BSNES` core and -1 for `BSNESv115+`). On the SNES the right value varies from movie to movie: Super
 Mario All-Stars needs `-1`, Super Punch-Out!! and Contra III need the default, and Rockman X
 [6658M](https://tasvideos.org/6658M) (`BSNESv115+`) needs `-2`. If a SNES movie goes wrong in its first minute (Start
 never takes, or the attract demo plays), try `-1` and `-2` before giving up on it.
 
-**Known to desync.** A TAS is tuned to the frame its emulator accepted each input on, so wherever that emulator's
-timing differs from the hardware, a faithful core goes its own way; console-verified movies are the best bet. These
-run in sync for a long stretch first:
-- Super Mario Bros. 3, ["warps" by Lord_Tom, Maru & Tompa](https://tasvideos.org/3922M) (console-verified): about
-  nine minutes, then one frame behind during World 8's tank fight.
-- Super Mario All-Stars: The Lost Levels, ["warpless, Mario" by HappyLee](https://tasvideos.org/3456M)
-  (console-verified, `--lead -1`): Worlds 1 to 5, about 14 minutes, then goes wrong in World 6.
-- Mega Man X, [3151M](https://tasvideos.org/3151M), ["100%" 3197M](https://tasvideos.org/3197M) and Rockman X
-  ["X-Buster only" 6658M](https://tasvideos.org/6658M): the intro and Chill Penguin in sync, then all three go wrong just
-  after that boss, identically with and without the emulator's power-on RAM.
-- The Magical Quest Starring Mickey Mouse, [by Tompa](https://tasvideos.org/4486M): five worlds without a life lost,
-  about 13:30 of 14:48, then Mickey loses a life in 6-2 and the movie ends before Pete.
-- Disney's Aladdin ["capeless" 3375M](https://tasvideos.org/3375M) (`--lead -1`): stage 1, the Cave of Wonders and the
-  carpet ride, then the lava escape goes wrong. Super Star Wars [2722M](https://tasvideos.org/2722M), The Lion King
-  [6987M](https://tasvideos.org/6987M) and Super Metroid [3653M](https://tasvideos.org/3653M) go wrong within the first
-  few minutes.
+### What a movie needs
 
-`tasty check` confirms your ROM matches a movie before you start.
-
-## <img src="art/icons/pizza-48.png" width="24" alt=""> What it plays
-
-| system | core | movie formats | status |
-|---|---|---|---|
-| NES | NES | `.fm2` (FCEUX), `.bk2` (BizHawk NesHawk) | **works**: see the known-good runs below |
-| SNES | SNES | `.lsmv` (lsnes), `.bk2` (BizHawk) | **works for some movies**: five play to the end (above). The SNES is sensitive to exactly when in the frame input arrives, so some movies need a `--lead` other than the default |
-| Genesis / Mega Drive | MegaDrive | `.gmv` (Gens), `.bk2` (BizHawk) | **experimental**: starts and replays cleanly, but no movie stays in sync yet. Gens loads graphics faster than a real console, so Gens movies drift at each load; console verification replayed them one input per pad read, which tasty does not do yet |
-| PlayStation | PSX | `.bk2` (BizHawk) | **not working yet**: discs load (`.cue`/`.bin` or `.chd`), but CD timing on the core differs from the emulator and playback desyncs |
-
-**Tested movies**
-
-| game | movie | result |
-|---|---|---|
-| Super Mario Bros. | [1330M](https://tasvideos.org/1330M) | in sync to the end |
-| Mike Tyson's Punch-Out!! | [1695M](https://tasvideos.org/1695M) | in sync to the end |
-| Tetris | [1502M](https://tasvideos.org/1502M) | in sync to the end |
-| Castlevania | [4840M](https://tasvideos.org/4840M) | console-verified; in sync to the end, Dracula included |
-| Super Mario Bros. 3 | [3922M](https://tasvideos.org/3922M) | console-verified; on MiSTer it slips one frame behind in World 8's tank fight, under investigation (see "For core developers") |
-| Rockman / Mega Man | [2601M](https://tasvideos.org/2601M) | desyncs |
-| Kiwi Kraze | [4438M](https://tasvideos.org/4438M) | desyncs |
-| Super Mario World | [3019M](https://tasvideos.org/3019M) | console-verified; in sync through Yoshi's Island 3, desyncs in Yoshi's Island 4, about 2:00 in |
-| Super Mario World | [4144M](https://tasvideos.org/4144M) | console-verified; desyncs in Yoshi's Island 3, about 1:14 in, with lsnes's power-on WRAM and sound RAM matched |
-| Super Mario World "game end glitch" | [3989M](https://tasvideos.org/3989M), [2380M](https://tasvideos.org/2380M) | refused: the code it injects arrives through two multitaps |
-| Castlevania III | ["Grant path, warp glitch" 7006M](https://tasvideos.org/7006M) | desyncs early, game over within three minutes |
-| Marble Madness | [939M](https://tasvideos.org/939M) | replays cleanly, doesn't reach gameplay yet |
-| Tekken 3 | BizHawk `.bk2` | loads and plays; CD timing desyncs |
-
-**What a movie needs**
-- It starts from power-on (movies that start from a savestate or saved game are refused), with standard pads: no Zapper, Four Score, Famicom Disk System,
-  DualShock analog or mid-movie resets.
+- It starts from power-on (movies that start from a savestate or saved game are refused), with standard pads: no
+  Zapper, Four Score, multitap, Famicom Disk System, DualShock analog or mid-movie resets. Super Mario World's "game end
+  glitch" movies ([3989M](https://tasvideos.org/3989M), [2380M](https://tasvideos.org/2380M)) are refused for that
+  reason: the code they inject arrives through two multitaps.
 - Your own ROM or disc image that matches the movie's checksum (`tasty check` tells you).
 - The core settings the movie was recorded with (NES: NTSC and RAM Clear $00; SNES: NTSC, and Initial WRAM 55 for an
   lsnes movie; Genesis: 6 Buttons Mode and the region). You don't change anything: tasty sets them in memory for
@@ -160,9 +158,9 @@ run in sync for a long stretch first:
   older `BSNES` core (`Core BSNES` in a `.bk2`'s header) and its newer `BSNESv115+` core fill RAM from
   pseudo-random sequences that no core setting reproduces. tasty can send that exact power-on RAM to a SNES core
   that accepts one; the stock core does not yet (proposed in
-  [SNES_MiSTer#510](https://github.com/MiSTer-devel/SNES_MiSTer/pull/510)), so tasty says so once and the game
+  [SNES_MiSTer#512](https://github.com/MiSTer-devel/SNES_MiSTer/pull/512)), so tasty says so once and the game
   starts from the core's own fill. Many movies don't depend on it: Super Punch-Out!! and Contra III play in sync either
-way, and Mega Man X plays frame-identically with and without it.
+  way, and Mega Man X plays frame-identically with and without it.
 
 ## <img src="art/icons/ramen-48.png" width="24" alt=""> Command line
 
