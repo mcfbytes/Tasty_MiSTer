@@ -79,13 +79,14 @@ anything beyond `tasty play <movie> --rom <file>` the run needed; "none" means t
 | SNES | Super Punch-Out!! | [by adelikat](https://tasvideos.org/4933M) | 15:52 | `Super Punch-Out!! (USA).sfc` | none |
 | SNES | Super Mario All-Stars: Super Mario Bros. | [by Niftski & HappyLee](https://tasvideos.org/6744M) | 5:03 | `Super Mario Collection (Japan).sfc` | `--lead -1` |
 | SNES | Contra III: The Alien Wars | ["2 players" by Mr_K & EZGames69](https://tasvideos.org/4363M) | 12:37 | `Contra III - The Alien Wars (USA).sfc` | none; `--stay` to watch the ending |
+| SNES | Beethoven: The Ultimate Canine Caper! | [by TASeditor](https://tasvideos.org/4688M) | 4:24 | `Beethoven - The Ultimate Canine Caper! (USA).sfc` | none; `--stay` to watch the credits |
+| SNES | The Chessmaster | ["Newcomer 1" by thegugafá & Walgrey](https://tasvideos.org/7176M) | 0:20 | `Chessmaster, The (USA).sfc` | none |
 
 **Probably good:** Mike Tyson's Punch-Out!! [4226M by McHazard](https://tasvideos.org/4226M) (BizHawk, `Mike Tyson's
 Punch-Out!! (Japan, USA) (En) (Rev 1).nes`, no options). Tyson is going down on the last frame; the count was not recorded.
 
 **Candidates, not yet played to the end.** Each stayed in sync for its first 60 seconds and was stopped there, so it
-may still desync later; a report either way is welcome. The SNES ones were checked on a test build of the SNES core
-that starts from the emulator's power-on RAM (see below), and are untested on the stock core.
+may still desync later; a report either way is welcome.
 
 | system | game | movie | length | ROM (No-Intro) | needed |
 |---|---|---|---|---|---|
@@ -93,11 +94,6 @@ that starts from the emulator's power-on RAM (see below), and are untested on th
 | NES | Adventure Island 3 | [by J.Y](https://tasvideos.org/4462M) | 18:20 | `Adventure Island 3 (USA).nes` | none |
 | NES | Mega Man 2 | [by Shinryuu](https://tasvideos.org/4410M) | 23:39 | `Rockman 2 - Dr. Wily no Nazo (Japan).nes` | none |
 | NES | Mega Man 3 | [by Pike & Tiancaiwhr](https://tasvideos.org/2439M) | 30:21 | `Rockman 3 - Dr. Wily no Saigo! (Japan).nes` | none |
-| SNES | Super Star Wars | [by Exonym](https://tasvideos.org/2722M) | 18:36 | `Super Star Wars (USA).sfc` | `--lead -1` |
-| SNES | The Magical Quest Starring Mickey Mouse | [by Tompa](https://tasvideos.org/4486M) | 14:47 | `Magical Quest Starring Mickey Mouse, The (USA).sfc` | none |
-| SNES | Disney's Aladdin | ["capeless" by jaysmad](https://tasvideos.org/3375M) | 16:37 | `Aladdin (USA).sfc` | none |
-| SNES | The Lion King | [by EZGames69, SBDWolf, Akiteru & ShgofcTAS](https://tasvideos.org/6987M) | 10:50 | `Lion King, The (USA).sfc` | none |
-| SNES | Super Metroid | [by Sniq](https://tasvideos.org/3653M) | 35:58 | `Super Metroid (Japan, USA) (En,Ja).sfc` | none |
 
 **About `--lead`.** tasty picks a default for each movie format (FCEUX `.fm2` -3, BizHawk NES -2, BizHawk SNES -2
 for its older `BSNES` core and -1 for `BSNESv115+`). On the SNES the right value varies from movie to movie: Super
@@ -115,6 +111,12 @@ run in sync for a long stretch first:
 - Mega Man X, [3151M](https://tasvideos.org/3151M), ["100%" 3197M](https://tasvideos.org/3197M) and Rockman X
   ["X-Buster only" 6658M](https://tasvideos.org/6658M): the intro and Chill Penguin in sync, then all three go wrong just
   after that boss, identically with and without the emulator's power-on RAM.
+- The Magical Quest Starring Mickey Mouse, [by Tompa](https://tasvideos.org/4486M): five worlds without a life lost,
+  about 13:30 of 14:48, then Mickey loses a life in 6-2 and the movie ends before Pete.
+- Disney's Aladdin ["capeless" 3375M](https://tasvideos.org/3375M) (`--lead -1`): stage 1, the Cave of Wonders and the
+  carpet ride, then the lava escape goes wrong. Super Star Wars [2722M](https://tasvideos.org/2722M), The Lion King
+  [6987M](https://tasvideos.org/6987M) and Super Metroid [3653M](https://tasvideos.org/3653M) go wrong within the first
+  few minutes.
 
 `tasty check` confirms your ROM matches a movie before you start.
 
@@ -123,7 +125,7 @@ run in sync for a long stretch first:
 | system | core | movie formats | status |
 |---|---|---|---|
 | NES | NES | `.fm2` (FCEUX), `.bk2` (BizHawk NesHawk) | **works**: see the known-good runs below |
-| SNES | SNES | `.lsmv` (lsnes), `.bk2` (BizHawk) | **works for some movies**: three play to the end (above). The SNES is sensitive to exactly when in the frame input arrives, so some movies need a `--lead` other than the default |
+| SNES | SNES | `.lsmv` (lsnes), `.bk2` (BizHawk) | **works for some movies**: five play to the end (above). The SNES is sensitive to exactly when in the frame input arrives, so some movies need a `--lead` other than the default |
 | Genesis / Mega Drive | MegaDrive | `.gmv` (Gens), `.bk2` (BizHawk) | **experimental**: starts and replays cleanly, but no movie stays in sync yet. Gens loads graphics faster than a real console, so Gens movies drift at each load; console verification replayed them one input per pad read, which tasty does not do yet |
 | PlayStation | PSX | `.bk2` (BizHawk) | **not working yet**: discs load (`.cue`/`.bin` or `.chd`), but CD timing on the core differs from the emulator and playback desyncs |
 
