@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="340" height="340" viewBox="-170 -170 340 340">
+ <rect x="-160" y="-110" width="320" height="230" rx="24" fill="#c7372f" stroke="#000" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+ <rect x="-136" y="-86" width="272" height="182" rx="10" fill="#2b1d1a" stroke="#000" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+ <rect x="-128" y="-78" width="122" height="166" rx="6" fill="#fafafa"/>
+ <circle cx="-67" cy="5" r="22" fill="#e0405a" stroke="#000" stroke-width="8"/>
+ <rect x="2" y="-78" width="126" height="76" rx="6" fill="#ffd34d"/>
+ <path d="M44 -78 L44 -2 M86 -78 L86 -2" stroke="#e8a92a" stroke-width="10"/>
+ <rect x="2" y="6" width="126" height="82" rx="6" fill="#3a2a22"/>
+ <circle cx="36" cy="44" r="22" fill="#5fb53f"/><circle cx="64" cy="34" r="24" fill="#4ea233"/><circle cx="94" cy="50" r="22" fill="#5fb53f"/>
+ <rect x="-136" y="-86" width="272" height="182" rx="10" fill="none" stroke="#000" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+ <path d="M-6 -86 L-6 96 M-6 2 L136 2" stroke="#000" stroke-width="16"/>
+</svg>

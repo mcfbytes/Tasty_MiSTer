@@ -14,6 +14,21 @@ The command-line tool is `tasty`.
 > **Status:** early and hungry. NES runs play frame-exact on a DE10-Nano, some SNES runs play to the end, and the
 > other systems are experimental.
 
+## <img src="art/icons/cloche-48.png" width="24" alt=""> On the menu
+
+- [Try it](#-try-it)
+- [What it plays](#-what-it-plays)
+  - [Known-good runs](#-known-good-runs)
+  - [Candidates](#-candidates)
+  - [Known to desync](#-known-to-desync)
+  - [The SNES and `--lead`](#-the-snes-and---lead)
+  - [What a movie needs](#-what-a-movie-needs)
+- [Command line](#-command-line)
+- [Build](#-build)
+- [The art](#-the-art)
+- [For core developers: find the first different frame](#-for-core-developers-find-the-first-different-frame)
+- [Credits and licence](#-credits-and-licence)
+
 ## <img src="art/icons/taco-48.png" width="24" alt=""> Try it
 
 **Quick start.** On the MiSTer (SSH in as `root`), with your own Super Mario Bros. ROM somewhere under
@@ -70,7 +85,7 @@ in `saves/` is never opened.
 | Genesis / Mega Drive | MegaDrive | `.gmv` (Gens), `.bk2` (BizHawk) | **experimental**: starts and replays cleanly, but no movie stays in sync yet. Gens loads graphics faster than a real console, so Gens movies drift at each load; console verification replayed them one input per pad read, which tasty does not do yet |
 | PlayStation | PSX | `.bk2` (BizHawk) | **not working yet**: discs load (`.cue`/`.bin` or `.chd`), but CD timing on the core differs from the emulator and playback desyncs |
 
-### Known-good runs
+### <img src="art/icons/cake-48.png" width="24" alt=""> Known-good runs
 
 Played to the end, in sync, on a DE10-Nano with the stock cores. The last column is anything beyond
 `tasty play <movie> --rom <file>` the run needed; "none" means the defaults just work:
@@ -99,7 +114,7 @@ Played to the end, in sync, on a DE10-Nano with the stock cores. The last column
 **Probably good:** Mike Tyson's Punch-Out!! [4226M by McHazard](https://tasvideos.org/4226M) (BizHawk, `Mike Tyson's
 Punch-Out!! (Japan, USA) (En) (Rev 1).nes`, no options). Tyson is going down on the last frame; the count was not recorded.
 
-### Candidates
+### <img src="art/icons/dumpling-48.png" width="24" alt=""> Candidates
 
 Not yet played to the end. Each stayed in sync for its first 60 seconds and was stopped there, so it
 may still desync later; a report either way is welcome.
@@ -111,7 +126,7 @@ may still desync later; a report either way is welcome.
 | NES | Mega Man 2 | [by Shinryuu](https://tasvideos.org/4410M) | 23:39 | `Rockman 2 - Dr. Wily no Nazo (Japan).nes` | none |
 | NES | Mega Man 3 | [by Pike & Tiancaiwhr](https://tasvideos.org/2439M) | 30:21 | `Rockman 3 - Dr. Wily no Saigo! (Japan).nes` | none |
 
-### Known to desync
+### <img src="art/icons/toast-48.png" width="24" alt=""> Known to desync
 
 A TAS is tuned to the frame its emulator accepted each input on, so wherever that emulator's timing differs from the
 hardware, a faithful core goes its own way; console-verified movies are the best bet.
@@ -134,7 +149,7 @@ hardware, a faithful core goes its own way; console-verified movies are the best
 | Genesis | Marble Madness | [939M](https://tasvideos.org/939M) | replays cleanly, doesn't reach gameplay yet |
 | PlayStation | Tekken 3 | BizHawk `.bk2` | loads and plays; CD timing desyncs |
 
-### The SNES and `--lead`
+### <img src="art/icons/egg-48.png" width="24" alt=""> The SNES and `--lead`
 
 tasty picks a default for each movie format (FCEUX `.fm2` -3, BizHawk NES -2, BizHawk SNES -2
 for its older `BSNES` core and -1 for `BSNESv115+`). On the SNES the right value varies from movie to movie: Super
@@ -142,7 +157,7 @@ Mario All-Stars needs `-1`, Super Punch-Out!! and Contra III need the default, a
 [6658M](https://tasvideos.org/6658M) (`BSNESv115+`) needs `-2`. If a SNES movie goes wrong in its first minute (Start
 never takes, or the attract demo plays), try `-1` and `-2` before giving up on it.
 
-### What a movie needs
+### <img src="art/icons/bento-48.png" width="24" alt=""> What a movie needs
 
 - It starts from power-on (movies that start from a savestate or saved game are refused), with standard pads: no
   Zapper, Four Score, multitap, Famicom Disk System, DualShock analog or mid-movie resets. Super Mario World's "game end
@@ -267,7 +282,9 @@ Meet Tasty Kun: MiSTer Kun, sticking his tongue out.
 
 There is a pixel version too: <img src="art/tasty-kun-8bit-32x32.png" width="32" alt="8-bit Tasty Kun"> at 32x32
 ([big](art/tasty-kun-8bit.png)). Every variant comes as SVG and PNG in [`art/`](art/), along with the
-[banner](art/banner.png) and the [social preview](art/social-preview.png). Heading icons live in [`art/icons/`](art/icons/).
+[banner](art/banner.png) and the [social preview](art/social-preview.png). Heading icons live in [`art/icons/`](art/icons/): Tasty Kun's eight foods, plus a cake that turned out
+perfectly, a dumpling still steaming, toast that went its own way, an egg timed to the frame, a bento with
+everything packed, and a cloche for the menu (SVG sources in [`art/icons/src/`](art/icons/src/)).
 
 ## <img src="art/icons/donut-48.png" width="24" alt=""> For core developers: find the first different frame
 

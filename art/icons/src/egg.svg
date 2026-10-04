@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="340" height="340" viewBox="-170 -170 340 340">
+ <path d="M-86 -40 C-86 -130 -40 -160 0 -160 C40 -160 86 -130 86 -40 Z" fill="#fff8ec" stroke="#000" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+ <path d="M-86 -40 L-62 -60 L-40 -38 L-16 -62 L8 -38 L32 -62 L56 -38 L86 -58" fill="none" stroke="#000" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+ <ellipse cx="0" cy="-52" rx="50" ry="14" fill="#ffb21f"/>
+ <path d="M50 -50 C64 -40 66 -16 58 0 C52 10 44 0 46 -14 C47 -26 44 -40 40 -46 Z" fill="#ffb21f" stroke="#000" stroke-width="8" stroke-linejoin="round"/>
+ <path d="M-110 -10 C-110 70 -60 100 0 100 C60 100 110 70 110 -10 Z" fill="#4aa3df" stroke="#000" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+ <path d="M-26 100 L-34 130 L34 130 L26 100" fill="#4aa3df" stroke="#000" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+ <path d="M-90 150 L90 150 C90 130 60 124 0 124 C-60 124 -90 130 -90 150 Z" fill="#4aa3df" stroke="#000" stroke-width="16" stroke-linejoin="round" stroke-linecap="round"/>
+ <path d="M-70 10 C-66 40 -50 60 -30 70" fill="none" stroke="#bfe2f7" stroke-width="12" stroke-linecap="round"/>
+</svg>
