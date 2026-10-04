@@ -23,9 +23,15 @@ ZLIB_SHA = "d7a0654783a4da529d1bb793b7ad9c3318020af77667bcae35f95d0e42a792f3"
 LZO_URL = "https://www.oberhumer.com/opensource/lzo/download/lzo-2.10.tar.gz"
 LZO_SHA = "c0f892943208266f9b6543b3ae308fab6284c5c90e627931446fb49b4221a072"
 
-LIBCHDR_REV = "8e7b8bd32bc676b7e5c6b42fe7d2daca986c4a0d"
+LIBCHDR_REV = "607694ca0812edfc9cc2030c64634fc2393668de"
 LIBCHDR_URL = f"https://github.com/rtissera/libchdr/archive/{LIBCHDR_REV}.tar.gz"
-LIBCHDR_SHA = "04d6c61946c95addb78f4554740283b93249b81d8437e3d8a58ca1899c824dcc"
+LIBCHDR_SHA = "02e772a74c4e5ec110bb646e729e1910268d2dae2c76df2a1b35525cc3826a9c"
+
+# Buildroot_MiSTer's target flags (gcc --with-cpu/fpu/float/mode, TARGET_CFLAGS), plus the 64-bit
+# off_t/time_t tasty itself compiles with: zlib's gz* API passes off_t across the boundary.
+CPU_FLAGS = ["-mcpu=cortex-a9", "-mfpu=neon-vfpv3", "-mfloat-abi=hard", "-marm"]
+BR_FLAGS = ["-O2", "-g0", "-D_FORTIFY_SOURCE=1", "-D_LARGEFILE_SOURCE", "-D_LARGEFILE64_SOURCE",
+            "-D_FILE_OFFSET_BITS=64", "-D_TIME_BITS=64"]
 
 
 def sha256_file(p: Path) -> str:
@@ -85,12 +91,12 @@ def main() -> int:
     ar = root / "bin/arm-buildroot-linux-gnueabihf-ar"
     prefix = Path(os.environ.get("TASTY_STATIC_DEPS", str(root / "opt")))
     prefix.mkdir(parents=True, exist_ok=True)
-    work = Path(os.environ.get("TASTY_STATIC_DEPS_SRC", "/tmp/tasty-static-deps"))
+    work = Path(os.environ.get("TASTY_STATIC_DEPS_SRC", str(prefix.parent / "tasty-static-deps-src")))
     work.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["CC"] = str(cc)
     env["AR"] = str(ar)
-    cflags = "-O2 -fPIC -march=armv7-a -mfpu=neon -mfloat-abi=hard"
+    cflags = " ".join([*BR_FLAGS, "-fPIC", *CPU_FLAGS])
     env["CFLAGS"] = cflags
     env["PATH"] = str(root / "bin") + ":" + env.get("PATH", "")
     cmake_cc = [
@@ -100,6 +106,7 @@ def main() -> int:
         "-DCMAKE_SYSTEM_PROCESSOR=arm",
         "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
         f"-DCMAKE_C_FLAGS={cflags}",
+        "-DCMAKE_C_FLAGS_RELEASE=-DNDEBUG",  # as Buildroot: the -O level is BR_FLAGS', not -O3
         f"-DCMAKE_INSTALL_PREFIX={prefix}",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DBUILD_SHARED_LIBS=OFF",
@@ -136,11 +143,9 @@ def main() -> int:
             [
                 str(cc),
                 "-c",
-                "-O2",
+                *BR_FLAGS,
                 "-fPIC",
-                "-march=armv7-a",
-                "-mfpu=neon",
-                "-mfloat-abi=hard",
+                *CPU_FLAGS,
                 "-I" + str(prefix / "include"),
                 src,
                 "-o",

@@ -24,5 +24,5 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
 
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -static-libgcc -static-libstdc++")
-add_compile_options(-march=armv7-a -mfpu=neon -mfloat-abi=hard)
+add_compile_options(-mcpu=cortex-a9 -mfpu=neon-vfpv3 -mfloat-abi=hard -marm -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64)
 set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
