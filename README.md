@@ -76,6 +76,21 @@ in `saves/` is never opened.
 
 `tasty check` confirms your ROM matches a movie before you start.
 
+**Recommended kernel settings.** `tasty` locks its memory in RAM and feeds the core from a real-time thread. With
+the kernel's default settings, memory compaction can still move those locked pages, which stalls the thread for long
+enough to desync a run. It is rare, but it has been measured: a 21 ms stall, more than a whole frame. To turn this
+off on every boot, add these two lines to `/media/fat/linux/user-startup.sh` and reboot. If the file does not exist,
+create it with `#!/bin/sh` as its first line.
+
+```sh
+sysctl -w vm.compact_unevictable_allowed=0
+sysctl -w vm.compaction_proactiveness=0
+```
+
+Run the same two lines over SSH to apply them now without rebooting. To undo, delete the lines and reboot; the kernel
+defaults are 1 and 20. Compaction itself keeps working: it just leaves locked memory alone and no longer runs in the
+background. Stock MiSTer is unaffected either way, because the stock MiSTer binary does not lock its memory.
+
 ## <img src="art/icons/pizza-48.png" width="24" alt=""> What it plays
 
 | system | core | movie formats | status |
