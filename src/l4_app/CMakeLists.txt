@@ -13,6 +13,13 @@ add_library(mister_app STATIC
   src/frame_copier.cpp
   src/frame_hasher.cpp
   src/rec_write_main.cpp
+  src/hps_framebuffer.cpp
+  src/launcher_host.cpp
+  src/launcher_key_bridge.cpp
+  src/launcher_main.cpp
+  src/launcher_screen.cpp
+  src/scanout_packet.cpp
+  src/scanout_relay.cpp
   src/recorder_control.cpp
   src/recorder_status.cpp
   src/sidecar_writer.cpp
@@ -36,8 +43,13 @@ add_library(mister_app STATIC
   src/idle_blank.cpp
   src/mgl_pump.cpp
   src/name_config.cpp
+  src/remembered_path.cpp
   src/osd_wire.cpp
   src/pcm_main.cpp
+  src/mailbox_relay.cpp
+  src/companion_host.cpp
+  src/companion_walk.cpp
+  src/addon_send.cpp
   src/pcm_ring_feeder.cpp
   src/process_integration.cpp
   src/rbf_resolve.cpp
@@ -80,11 +92,8 @@ target_link_libraries(mister_app
   PUBLIC mister_cores
   PRIVATE tasty_options ZLIB::ZLIB)
 
-if(TASTY_WITH_LZO)
-  target_include_directories(mister_app SYSTEM PRIVATE ${TASTY_LZO_INCLUDE_DIR})
-  target_link_libraries(mister_app PRIVATE ${TASTY_LZO_LIBRARY})
-  target_compile_definitions(mister_app PUBLIC TASTY_HAVE_LZO=1)
-endif()
+target_include_directories(mister_app SYSTEM PRIVATE ${TASTY_LZO_INCLUDE_DIR})
+target_link_libraries(mister_app PRIVATE ${TASTY_LZO_LIBRARY})
 
 tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/activity_source.h
@@ -111,6 +120,19 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/raw_frame_slot.h
   app/rec_control.h
   app/rec_write_main.h
+  app/hps_framebuffer.h
+  app/launcher_demand.h
+  app/launcher_fb_ack.h
+  app/launcher_host.h
+  app/launcher_key_bridge.h
+  app/launcher_main.h
+  app/launcher_profile.h
+  app/launcher_screen.h
+  app/launcher_state.h
+  app/scanout_channel.h
+  app/scanout_packet.h
+  app/scanout_relay.h
+  app/uio_burst.h
   app/rec_write_status.h
   app/recorder_control.h
   app/recorder_status.h
@@ -161,10 +183,17 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/mgl_pump.h
   app/mra_facts.h
   app/name_config.h
+  app/remembered_path.h
   app/osd_wire.h
   app/path_text.h
   app/pcm_command.h
   app/pcm_ring_feeder.h
+  app/mailbox_slot.h
+  app/mailbox_relay.h
+  app/companion_bind.h
+  app/companion_host.h
+  app/companion_walk.h
+  app/addon_send.h
   app/recents_store.h
   app/romset_alias_reader.h
   app/romset_aliases.h
@@ -229,12 +258,39 @@ if(TASTY_BUILD_TESTS)
 
   add_executable(tasty_app_cheat_store_unit tests/cheat_store_unit.cpp)
   target_link_libraries(tasty_app_cheat_store_unit PRIVATE mister_app tasty_test_options)
-  if(TASTY_WITH_MINIZIP)
-    target_compile_definitions(tasty_app_cheat_store_unit PRIVATE TASTY_HAVE_MINIZIP=1)
-    target_include_directories(tasty_app_cheat_store_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-  endif()
+  target_include_directories(tasty_app_cheat_store_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
   add_test(NAME tasty.app_cheat_store COMMAND tasty_app_cheat_store_unit)
   set_tests_properties(tasty.app_cheat_store PROPERTIES TIMEOUT 60)
+
+  add_executable(tasty_launcher_fake_child tests/launcher_fake_child.cpp)
+  set(TASTY_FAKE_LAUNCHER_PATH "$<TARGET_FILE:tasty_launcher_fake_child>")
+
+  if(CMAKE_CROSSCOMPILING AND CMAKE_CROSSCOMPILING_EMULATOR)
+    set(_tasty_emu "${CMAKE_CROSSCOMPILING_EMULATOR}")
+    list(TRANSFORM _tasty_emu PREPEND "'")
+    list(TRANSFORM _tasty_emu APPEND "'")
+    list(JOIN _tasty_emu " " _tasty_emu)
+    set(TASTY_FAKE_LAUNCHER_PATH "${CMAKE_CURRENT_BINARY_DIR}/launcher_fake_child.sh")
+    file(GENERATE OUTPUT "${TASTY_FAKE_LAUNCHER_PATH}"
+      CONTENT "#!/bin/sh\nexec ${_tasty_emu} '$<TARGET_FILE:tasty_launcher_fake_child>' \"$@\"\n"
+      FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+                       WORLD_READ WORLD_EXECUTE)
+  endif()
+  add_executable(tasty_launcher_host_unit tests/launcher_host_unit.cpp)
+  target_link_libraries(tasty_launcher_host_unit PRIVATE mister_app tasty_test_options)
+  target_compile_definitions(tasty_launcher_host_unit PRIVATE
+    TASTY_FAKE_LAUNCHER="${TASTY_FAKE_LAUNCHER_PATH}")
+  add_dependencies(tasty_launcher_host_unit tasty_launcher_fake_child)
+  add_test(NAME tasty.launcher_host COMMAND tasty_launcher_host_unit)
+  set_tests_properties(tasty.launcher_host PROPERTIES TIMEOUT 120)
+
+  add_executable(tasty_scanout_relay_unit tests/scanout_relay_unit.cpp)
+  target_link_libraries(tasty_scanout_relay_unit PRIVATE mister_app tasty_test_options)
+  add_test(NAME tasty.scanout_relay COMMAND tasty_scanout_relay_unit)
+
+  add_executable(tasty_launcher_ui_unit tests/launcher_ui_unit.cpp)
+  target_link_libraries(tasty_launcher_ui_unit PRIVATE mister_app tasty_test_options)
+  add_test(NAME tasty.launcher_ui COMMAND tasty_launcher_ui_unit)
 
   add_executable(tasty_app_unit tests/app_unit.cpp)
   target_link_libraries(tasty_app_unit PRIVATE mister_app tasty_test_options)
@@ -294,6 +350,11 @@ if(TASTY_BUILD_TESTS)
   add_test(NAME tasty.app_binder COMMAND tasty_app_binder_unit)
   set_tests_properties(tasty.app_binder PROPERTIES TIMEOUT 60)
 
+  add_executable(tasty_app_mailbox_relay_unit tests/mailbox_relay_unit.cpp)
+  target_link_libraries(tasty_app_mailbox_relay_unit PRIVATE mister_app tasty_test_options)
+  add_test(NAME tasty.app_mailbox_relay COMMAND tasty_app_mailbox_relay_unit)
+  set_tests_properties(tasty.app_mailbox_relay PROPERTIES TIMEOUT 60)
+
   add_executable(tasty_app_pcm_feeder_unit tests/pcm_feeder_unit.cpp)
   target_link_libraries(tasty_app_pcm_feeder_unit PRIVATE mister_app tasty_test_options Threads::Threads)
   add_test(NAME tasty.app_pcm_feeder COMMAND tasty_app_pcm_feeder_unit)
@@ -347,19 +408,13 @@ if(TASTY_BUILD_TESTS)
 
   add_executable(tasty_session_owner_unit tests/session_owner_unit.cpp)
   target_link_libraries(tasty_session_owner_unit PRIVATE mister_app tasty_test_options)
-  if(TASTY_WITH_MINIZIP)
-    target_compile_definitions(tasty_session_owner_unit PRIVATE TASTY_HAVE_MINIZIP=1)
-    target_include_directories(tasty_session_owner_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-  endif()
+  target_include_directories(tasty_session_owner_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
   add_test(NAME tasty.session_owner COMMAND tasty_session_owner_unit)
   set_tests_properties(tasty.session_owner PROPERTIES RESOURCE_LOCK tmp-GAMEID)
 
   add_executable(tasty_app_load_walk_unit tests/load_walk_unit.cpp)
   target_link_libraries(tasty_app_load_walk_unit PRIVATE mister_app tasty_test_options)
-  if(TASTY_WITH_MINIZIP)
-    target_compile_definitions(tasty_app_load_walk_unit PRIVATE TASTY_HAVE_MINIZIP=1)
-    target_include_directories(tasty_app_load_walk_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-  endif()
+  target_include_directories(tasty_app_load_walk_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
   add_test(NAME tasty.app_load_walk COMMAND tasty_app_load_walk_unit)
   set_tests_properties(tasty.app_load_walk PROPERTIES TIMEOUT 120)
 

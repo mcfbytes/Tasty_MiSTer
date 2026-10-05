@@ -131,6 +131,7 @@ private:
     std::span<const BootAsset> start_rows_{};
     std::size_t start_row_ = 0;
     bool core_start_ = false;
+    bool index0_taken_ = false;
     bool cheats_ordered_ = false;
     std::uint32_t mount_gen_ = 0;
     std::uint32_t save_gen_ = 0;

@@ -15,11 +15,7 @@ class CscdCodec final : public IFrameCodec {
     TASTY_SEAT_RESIDENT(Encode);
 
 public:
-#if defined(TASTY_HAVE_LZO) && TASTY_HAVE_LZO
     static constexpr bool kAvailable = true;
-#else
-    static constexpr bool kAvailable = false;
-#endif
 
     static constexpr std::size_t kHeadBytes = 2;
     static constexpr std::uint8_t kKeyBit = 0x01;

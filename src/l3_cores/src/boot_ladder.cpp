@@ -12,7 +12,7 @@ namespace mister::cores {
 
 BootLadder::BootLadder(const CoreProfile& profile, const LadderContext& ctx)
     : profile_(profile), vfs_(ctx.vfs), host_(ctx.host), clock_(ctx.clock),
-      core_start_(ctx.at_core_start) {
+      core_start_(ctx.at_core_start), index0_taken_(ctx.at_core_start && ctx.index0_taken) {
     if (ctx.at_core_start) start_rows_ = profile.start_assets;
     image_.assign(ctx.image_path);
     image_dir_.assign(dir_of(ctx.image_path));
@@ -27,6 +27,9 @@ Ex<bool> BootLadder::step() {
     if (done()) return finish_acts_();
     ++report_.rungs;
 
+    while (start_row_ < start_rows_.size() &&
+           !start_row_sends(start_rows_[start_row_], index0_taken_))
+        ++start_row_;
     if (start_row_ < start_rows_.size()) return step_start_row_();
     if (core_start_ && !steps_at_core_start()) return finish_acts_();
     auto r = on_step();

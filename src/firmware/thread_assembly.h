@@ -34,6 +34,7 @@ class BtPump;
 class CaptureMain;
 class EncodeMain;
 class RecWriteMain;
+class LauncherMain;
 }  // namespace mister::app
 namespace mister::svc {
 class PrefetchMain;
@@ -80,6 +81,8 @@ public:
         app::CaptureMain* capture = nullptr;
         app::EncodeMain* encode = nullptr;
         app::RecWriteMain* rec_write = nullptr;
+
+        app::LauncherMain* launcher = nullptr;
     };
 
     Ex<void> spawn(RtMode mode, const SeatMains& mains);
@@ -120,6 +123,7 @@ public:
     long capture_tid() const noexcept { return capture_tid_.load(std::memory_order_acquire); }
     long encode_tid() const noexcept { return encode_tid_.load(std::memory_order_acquire); }
     long rec_write_tid() const noexcept { return rec_write_tid_.load(std::memory_order_acquire); }
+    long launcher_tid() const noexcept { return launcher_tid_.load(std::memory_order_acquire); }
 
     [[nodiscard]] bool io_wedged() const noexcept { return io_poisoned_; }
 
@@ -147,6 +151,7 @@ private:
     app::CaptureMain& main_(std::type_identity<app::CaptureMain>) noexcept;
     app::EncodeMain& main_(std::type_identity<app::EncodeMain>) noexcept;
     app::RecWriteMain& main_(std::type_identity<app::RecWriteMain>) noexcept;
+    app::LauncherMain& main_(std::type_identity<app::LauncherMain>) noexcept;
     static constexpr hal::Seat seat_(std::type_identity<DiagMain>) noexcept;
     static constexpr hal::Seat seat_(std::type_identity<UiMain>) noexcept;
     static constexpr hal::Seat seat_(std::type_identity<svc::PrefetchMain>) noexcept;
@@ -158,6 +163,7 @@ private:
     static constexpr hal::Seat seat_(std::type_identity<app::CaptureMain>) noexcept;
     static constexpr hal::Seat seat_(std::type_identity<app::EncodeMain>) noexcept;
     static constexpr hal::Seat seat_(std::type_identity<app::RecWriteMain>) noexcept;
+    static constexpr hal::Seat seat_(std::type_identity<app::LauncherMain>) noexcept;
 
     std::atomic<long>* tid_cell_(hal::Seat s) noexcept;
 
@@ -170,6 +176,7 @@ private:
     app::CaptureMain* capture_ = nullptr;
     app::EncodeMain* encode_ = nullptr;
     app::RecWriteMain* rec_write_ = nullptr;
+    app::LauncherMain* launcher_ = nullptr;
 
     RtEvidence own_ev_{};
     RtEvidence& ev_;
@@ -186,6 +193,7 @@ private:
     pthread_t capture_thread_{};
     pthread_t encode_thread_{};
     pthread_t rec_write_thread_{};
+    pthread_t launcher_thread_{};
     bool diag_live_ = false;
     bool ui_live_ = false;
     bool frame_live_ = false;
@@ -198,6 +206,7 @@ private:
     bool capture_live_ = false;
     bool encode_live_ = false;
     bool rec_write_live_ = false;
+    bool launcher_live_ = false;
 
     std::atomic<long> diag_tid_{0};
     std::atomic<long> ui_tid_{0};
@@ -210,6 +219,7 @@ private:
     std::atomic<long> capture_tid_{0};
     std::atomic<long> encode_tid_{0};
     std::atomic<long> rec_write_tid_{0};
+    std::atomic<long> launcher_tid_{0};
 
     Ex<void> rt_result_{};
     xthread::WakeFlag own_main_wake_{};

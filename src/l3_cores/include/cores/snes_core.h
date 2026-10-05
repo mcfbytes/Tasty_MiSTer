@@ -7,6 +7,8 @@
 #include <string_view>
 
 #include "cores/core_support.h"
+#include "cores/generic_core.h"
+#include "cores/mailbox_rows.h"
 #include "cores/snes_rom.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
@@ -15,11 +17,14 @@
 
 namespace mister::cores {
 
-class SnesCore final : public Core {
+class SnesCore final : public Core, public IMailboxRows {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    SnesCore(const CoreProfile& p, const HostServices& h) : Core(p, h) {}
+    SnesCore(const CoreProfile& p, const HostServices& h)
+        : Core(p, h), data_host_(kGenericProfile, h) {}
+
+    void service_mailbox_tick() noexcept override;
 
     static constexpr std::size_t kChunkBytes = 4096;
 
@@ -40,6 +45,8 @@ private:
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return bytes_sent_; }
     [[nodiscard]] Ex<void> on_file_tx(IoIndex index, svc::IFile& f) override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
+    [[nodiscard]] IMailboxRows* on_mailbox_rows() noexcept override { return this; }
+    [[nodiscard]] IStreamLoad* on_window_load() noexcept override { return &data_host_; }
 
     [[nodiscard]] Ex<void> tx_rom_(IoIndex index, svc::IFile& f, std::uint32_t file_size);
     [[nodiscard]] Ex<void> tx_raw_(IoIndex index, svc::IFile& f, std::uint64_t total);
@@ -59,6 +66,8 @@ private:
     std::uint16_t last_index_ = 0;
 
     std::uint8_t buf_[kChunkBytes]{};
+
+    GenericCore data_host_;
 };
 
 }  // namespace mister::cores

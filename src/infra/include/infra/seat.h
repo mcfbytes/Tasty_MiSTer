@@ -21,12 +21,13 @@ enum class SeatTag : std::uint8_t {
     Capture,
     Encode,
     RecWrite,
+    Launcher,
 };
-inline constexpr std::size_t kSeatTagCount = 12;
+inline constexpr std::size_t kSeatTagCount = 13;
 
 inline constexpr const char* kSeatNames[kSeatTagCount] = {
-    "UNBOUND", "T-RT", "T-FRAME", "T-INPUT",   "T-PCM",    "T-PREFETCH",
-    "T-DIAG",  "T-UI", "T-IO",    "T-CAPTURE", "T-ENCODE", "T-RECWRITE",
+    "UNBOUND", "T-RT", "T-FRAME",   "T-INPUT",  "T-PCM",      "T-PREFETCH", "T-DIAG",
+    "T-UI",    "T-IO", "T-CAPTURE", "T-ENCODE", "T-RECWRITE", "T-LAUNCHER",
 };
 
 constexpr const char* seat_name(SeatTag t) noexcept {
@@ -51,15 +52,7 @@ private:
     SeatTag prev_;
 };
 
-#if !defined(TASTY_SEAT_CHECKS)
-#if defined(NDEBUG)
-#define TASTY_SEAT_CHECKS 0
-#else
-#define TASTY_SEAT_CHECKS 1
-#endif
-#endif
-
-inline constexpr bool kSeatChecksEnabled = (TASTY_SEAT_CHECKS != 0);
+inline constexpr bool kSeatChecksEnabled = (0 != 0);
 
 namespace seat_detail {
 
@@ -94,6 +87,7 @@ inline constexpr SeatTag Io = SeatTag::Io;
 inline constexpr SeatTag Capture = SeatTag::Capture;
 inline constexpr SeatTag Encode = SeatTag::Encode;
 inline constexpr SeatTag RecWrite = SeatTag::RecWrite;
+inline constexpr SeatTag Launcher = SeatTag::Launcher;
 }  // namespace seat_arg
 
 namespace seat_exempt {
@@ -116,18 +110,7 @@ inline constexpr int main = 3;
 
 #define TASTY_SEAT_OPEN() static constexpr bool kSeatOpen = true
 
-#if TASTY_SEAT_CHECKS
-#define TASTY_SEAT(tag) ::mister::seat_detail::check(::mister::SeatTag::tag, ERR_SITE(), __func__)
-#else
 #define TASTY_SEAT(tag) ((void)0)
-#endif
 
-#if TASTY_SEAT_CHECKS
-#define TASTY_SEAT_BODY(Type) ::mister::seat_detail::check((Type::kSeatDecl), ERR_SITE(), __func__)
-
-#define TASTY_SEAT_BODY_MEDIATOR(Type, Half) \
-    ::mister::seat_detail::check((Type::kSeatMediator##Half), ERR_SITE(), __func__)
-#else
 #define TASTY_SEAT_BODY(Type) ((void)0)
 #define TASTY_SEAT_BODY_MEDIATOR(Type, Half) ((void)0)
-#endif

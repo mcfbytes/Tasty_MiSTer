@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/cscd_codec.h"
 
-#ifdef TASTY_HAVE_LZO
 #include <lzo/lzo1x.h>
-#endif
 
 #include <cerrno>
 #include <cstring>
@@ -12,7 +10,6 @@ namespace mister::app {
 
 namespace {
 
-#ifdef TASTY_HAVE_LZO
 constexpr std::size_t kAlign = 64;
 
 constexpr std::size_t up(std::size_t n) noexcept { return (n + kAlign - 1) / kAlign * kAlign; }
@@ -20,14 +17,12 @@ constexpr std::size_t up(std::size_t n) noexcept { return (n + kAlign - 1) / kAl
 constexpr std::size_t dup_cap(std::size_t n) noexcept { return n / 64u + 256u; }
 
 constexpr std::size_t kWorkBytes = LZO1X_1_MEM_COMPRESS;
-#endif
 
 }  // namespace
 
 Ex<void> CscdCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
     end();
-#ifdef TASTY_HAVE_LZO
     if (w == 0 || h == 0 || lzo_init() != LZO_E_OK)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     const std::size_t pic = picture_bytes(w, h);
@@ -55,11 +50,6 @@ Ex<void> CscdCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     std::memset(tmp, 0, n);
     dup_len_ = kHeadBytes + n;
     return {};
-#else
-    (void)w;
-    (void)h;
-    return std::unexpected(Error{Errc::slot_range, ERR_SITE(), ENOSYS});
-#endif
 }
 
 void CscdCodec::end() noexcept {
@@ -107,7 +97,6 @@ std::size_t CscdCodec::rekey(std::span<std::byte> out) noexcept {
 
 std::size_t CscdCodec::pack_(const std::byte* src, bool key, std::span<std::byte> out) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
-#ifdef TASTY_HAVE_LZO
     out[0] = key ? std::byte{kKeyBit} : std::byte{0};
     out[1] = std::byte{0};
     lzo_uint n = 0;
@@ -116,12 +105,6 @@ std::size_t CscdCodec::pack_(const std::byte* src, bool key, std::span<std::byte
             reinterpret_cast<unsigned char*>(out.data() + kHeadBytes), &n, work_) != LZO_E_OK)
         return 0;
     return kHeadBytes + n;
-#else
-    (void)src;
-    (void)key;
-    (void)out;
-    return 0;
-#endif
 }
 
 void CscdCodec::half_scale(const std::byte* rgb, std::size_t line, std::uint16_t w, std::uint16_t h,

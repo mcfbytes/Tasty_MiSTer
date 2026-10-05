@@ -24,6 +24,8 @@ struct LadderContext {
     bool noreset = false;
 
     bool at_core_start = false;
+
+    bool index0_taken = false;
 };
 
 using MakeLadder = std::unique_ptr<BootLadder> (*)(const CoreProfile&, const LadderContext&);

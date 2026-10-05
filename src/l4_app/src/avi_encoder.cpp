@@ -2,6 +2,7 @@
 #include "app/avi_encoder.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string_view>
@@ -74,6 +75,9 @@ bool AviEncoder::open(const RawFrameSlot& s) noexcept {
     win_start_ = -1;
     win_cpu_ = 0;
     win_over_ = 0;
+    cause_ = HalfCause::None;
+    calm_ns_ = 0;
+    returned_ns_ = -1;
     cscd_.end();
     zmbv_.end();
     st_ = EncodeStatus::Video{};
@@ -219,9 +223,16 @@ bool AviEncoder::chunk_one_(IFrameCodec& codec, const RawFrameSlot& s, bool real
     } else {
         ++since_key_;
     }
-    const bool full = w_.raw != nullptr && w_.raw->outbound() + 1 >= kRawFrameSlots;
-    if (step_ && real && !held_ && full && scale_ == 1) step_half_(true);
-    if (real && !full) held_ = false;
+
+    const std::size_t queued = w_.raw != nullptr ? w_.raw->outbound() + 1 : 0;
+    const std::size_t depth = s.depth != 0 ? s.depth : kRawFrameSlots;
+    const bool full = w_.raw != nullptr && queued >= depth;
+    if (real)
+        st_.queue_max = std::max<std::uint8_t>(st_.queue_max, static_cast<std::uint8_t>(queued));
+    if (step_ && real && !held_ && full && scale_ == 1) step_half_(true, now_());
+
+    if (real && queued * 4 <= depth) held_ = false;
+    if (real && w_.raw != nullptr) recover_(queued, depth, now_());
     dirty_ = true;
     return true;
 }
@@ -263,12 +274,38 @@ std::int64_t AviEncoder::frame_budget_ns_(std::uint32_t vtime) const noexcept {
     return period * static_cast<std::int64_t>(lim_.budget_pct) / 100;
 }
 
-void AviEncoder::step_half_(bool behind) noexcept {
+void AviEncoder::step_half_(bool behind, std::int64_t now) noexcept {
     scale_ = 2;
     need_roll_ = true;
-    ++st_.steps;
+    if (st_.steps != UINT8_MAX) ++st_.steps;
     st_.scale = 2;
-    if (behind) st_.fell_behind = 1;
+    st_.fell_behind = behind ? 1 : 0;
+    cause_ = behind && !too_soon_(now) ? HalfCause::Queue : HalfCause::Held;
+    st_.held = cause_ == HalfCause::Held ? 1 : 0;
+    calm_ns_ = now;
+}
+
+bool AviEncoder::too_soon_(std::int64_t now) const noexcept {
+    return returned_ns_ >= 0 && now - returned_ns_ < kSustainWindows * lim_.budget_window_ns;
+}
+
+void AviEncoder::recover_(std::size_t queued, std::size_t depth, std::int64_t now) noexcept {
+    if (scale_ != 2 || cause_ != HalfCause::Queue) return;
+    if (queued * 4 > depth) {
+        calm_ns_ = now;
+        return;
+    }
+    const std::uint8_t doublings = std::min(st_.recovered, kRecoverDoublings);
+    if (now - calm_ns_ < (lim_.recover_ns << doublings)) return;
+    scale_ = 1;
+    need_roll_ = true;
+    cause_ = HalfCause::None;
+    returned_ns_ = now;
+    if (st_.recovered != UINT8_MAX) ++st_.recovered;
+    st_.scale = 1;
+
+    win_start_ = -1;
+    win_over_ = 0;
 }
 
 void AviEncoder::budget_(std::int64_t cpu_ns, std::int64_t now) noexcept {
@@ -285,7 +322,7 @@ void AviEncoder::budget_(std::int64_t cpu_ns, std::int64_t now) noexcept {
     } else {
         win_over_ = 0;
     }
-    if (step_ && scale_ == 1 && win_over_ >= kSustainWindows) step_half_(false);
+    if (step_ && scale_ == 1 && win_over_ >= kSustainWindows) step_half_(false, now);
     win_start_ = now;
     win_cpu_ = 0;
 }

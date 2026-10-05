@@ -24,6 +24,7 @@ class LinkTxChannel;
 class OsdWire;
 class ReplayGate;
 class CoreFrameCounter;
+class ScanoutRelay;
 
 class RtMain final : public xthread::SeatMain<RtMain> {
     TASTY_SEAT_RESIDENT(RT);
@@ -45,6 +46,8 @@ public:
     }
 
     void bind_frames(CoreFrameCounter* frames) noexcept { frames_ = frames; }
+
+    void bind_scanout(ScanoutRelay* relay) noexcept { scanout_ = relay; }
 
     void start() noexcept;
 
@@ -80,6 +83,8 @@ private:
     void replay_step_() noexcept;
 
     void frames_step_() noexcept;
+
+    void scanout_step_() noexcept;
     [[nodiscard]] bool replay_ready_() const noexcept;
     [[nodiscard]] bool switch_window_() const noexcept;
     void note_switch_() const noexcept;
@@ -100,6 +105,7 @@ private:
     ReplayGate* replay_ = nullptr;
     ReplayRing* replay_ring_ = nullptr;
     CoreFrameCounter* frames_ = nullptr;
+    ScanoutRelay* scanout_ = nullptr;
     bool stopping_ = false;
     Ex<void> result_{};
     std::uint32_t round_budget_words_;

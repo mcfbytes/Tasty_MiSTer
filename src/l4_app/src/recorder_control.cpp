@@ -136,11 +136,14 @@ void RecorderControl::tick() noexcept {
     if (w_.diag == nullptr) return;
     if (s.verdict != RecVerdict::None && s.answered != logged_answer_) {
         logged_answer_ = s.answered;
+        const char* remedy = rec_verdict_remedy(s.verdict);
         w_.diag->appendf(
             "{\"t\":\"rec\",\"k\":\"verdict\",\"gen\":%u,\"v\":\"%s\",\"stride_mib\":%u,"
-            "\"lowlat\":%u}",
+            "\"lowlat\":%u%s%s%s}",
             static_cast<unsigned>(s.answered), rec_verdict_name(s.verdict),
-            static_cast<unsigned>(s.stride_mib), static_cast<unsigned>(s.lowlat));
+            static_cast<unsigned>(s.stride_mib), static_cast<unsigned>(s.lowlat),
+            remedy != nullptr ? ",\"remedy\":\"" : "", remedy != nullptr ? remedy : "",
+            remedy != nullptr ? "\"" : "");
     }
     if (s.end != RecVerdict::None && s.gen != logged_end_) {
         logged_end_ = s.gen;

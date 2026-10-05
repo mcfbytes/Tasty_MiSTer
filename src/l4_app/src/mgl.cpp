@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/mgl.h"
 
+#include "app/name_config.h"
+
 #include <cstring>
 
 #include "app/mgl_item_dispatch.h"
@@ -67,6 +69,10 @@ bool parse_ul(std::string_view s, std::uint32_t& out) {
 
 Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
     items_ = {};
+    remember_ = {};
+    stem_ = RememberedStem{};
+    remembered_ = 0;
+    remember_failures_ = 0;
     scope_ = {};
     file_home_.clear();
     image_home_.clear();
@@ -237,7 +243,21 @@ Ex<void> MglPlayer::publish_load_() {
                   .index = proto::IoIndex{ld->index}, .scope = scope_, .path = path});
     record_publish(tag);
     tags_[current_] = tag;
+
+    if (const auto& at = remember_[current_]; tag && at && names_ != nullptr) {
+        if (names_->save_path(stem_, at->slot, at->ioctl_index, path.view()))
+            ++remembered_;
+        else
+            ++remember_failures_;
+    }
     return {};
+}
+
+void MglPlayer::remember(std::uint8_t i, const RememberedStem& stem, RememberedSlot slot,
+                         std::uint8_t ioctl_index) noexcept {
+    if (i >= count_) return;
+    stem_ = stem;
+    remember_[i] = RememberAt{slot, ioctl_index};
 }
 
 bool MglPlayer::owns(CorrelationTag tag) const noexcept {

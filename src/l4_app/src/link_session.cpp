@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/link_session.h"
+
+#include "app/mailbox_relay.h"
 #include "infra/posix_compat.h"
 
 #include "app/config_apply.h"
@@ -327,7 +329,8 @@ void LinkSession::publish_identity() {
     }
 
     identity_.publish(
-        eff, name, joy, j_names, cores::profile_for(name).is_front_end,
+        eff, name, RememberedStem::of(name, bindings_.facts()), joy, j_names,
+        cores::profile_for(name).is_front_end,
         current_ != nullptr && current_->profile().suppress_analog_followup,
         current_ != nullptr ? current_->profile().analog_reshape : nullptr,
         cores::profile_for(name).cue_browse_dir, &cores::profile_for(name).cheats,
@@ -600,6 +603,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::DropCore& a, const Li
         holds_at_drop_ = encoder_.holds();
     }
     ++core_edge_seq_;
+    if (mailbox_ != nullptr) mailbox_->forget();
     RtRelaxScope scope(ops_);
     if (const auto r = detach(); !r) {
         last_error_ = r.error();
@@ -677,9 +681,11 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::FileTx& a,
                                       const LinkOpCtx& ctx) noexcept {
     using Phase = proto::LinkOp::FileTxPhase;
 
+    const bool window = a.phase == Phase::WindowOpen || a.phase == Phase::WindowClose;
     if (link_ == nullptr || current_ == nullptr || ctx.inbox == nullptr ||
         machine_.state() != SessionState::Running ||
-        (current_->stream_load() == nullptr && a.phase != Phase::Whole)) {
+        ((window ? current_->window_load() : current_->stream_load()) == nullptr &&
+         a.phase != Phase::Whole)) {
         if (a.phase != Phase::Whole) ++ftx_piece_drops_;
 
         if (a.phase == Phase::WindowOpen) publish_ftx_level_(a.act, false);
@@ -690,7 +696,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::FileTx& a,
     cut_stage_();
     if (a.phase == Phase::Whole || a.phase == Phase::Close) arm_open_save_(file, ctx.inbox);
 
-    if (current_->stream_load() != nullptr) {
+    if (window || current_->stream_load() != nullptr) {
         const bool ok = stream_file_tx_(a, file);
         open_save_.reset();
         return ok ? ILinkEncoder::Outcome::Encoded : ILinkEncoder::Outcome::Dropped;
@@ -754,7 +760,8 @@ bool LinkSession::stream_file_tx_(const proto::LinkOp::FileTx& a, const FileByte
             binder_.file_progress().arm(*this,
                                         a.phase == Phase::Whole ? file->bytes.size() : a.total);
         }
-        auto b = cores::StreamLoadBracket::open(*current_->stream_load(), current_->image_sink(),
+        cores::IStreamLoad& load = window ? *current_->window_load() : *current_->stream_load();
+        auto b = cores::StreamLoadBracket::open(load, current_->image_sink(),
                                                 proto::IoIndex{a.wire_index}, window ? a.total : 0);
         if (!b) {
             if (window) {
@@ -797,7 +804,9 @@ bool LinkSession::stream_file_tx_(const proto::LinkOp::FileTx& a, const FileByte
     ftx_open_.reset();
     if (!window) binder_.file_progress().disarm();
     if (!ok) return false;
-    after_file_tx_(a.wire_index, file->path.view());
+
+    if (!window || current_->stream_load() != nullptr)
+        after_file_tx_(a.wire_index, file->path.view());
     return true;
 }
 
@@ -869,6 +878,28 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::LoadFacts& a,
     RtRelaxScope scope(ops_);
     if (!current_->apply_load_facts(ctx.inbox->bytes(a.facts))) {
         ++load_facts_refusals_;
+        return ILinkEncoder::Outcome::Dropped;
+    }
+    return ILinkEncoder::Outcome::Encoded;
+}
+
+ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::MailboxWrite& a,
+                                      const LinkOpCtx&) noexcept {
+    if (link_ == nullptr || current_ == nullptr || machine_.state() != SessionState::Running) {
+        ++mailbox_write_drops_;
+        return ILinkEncoder::Outcome::Dropped;
+    }
+    const std::array<std::uint16_t, 4> w{a.opcode, a.words[0], a.words[1], a.words[2]};
+    proto::SpiFioQueue& q = binder_.fio_queue();
+    bool queued = q.append_command(w).has_value();
+    if (!queued) {
+        (void)q.flush();
+        queued = q.append_command(w).has_value();
+    }
+    (void)q.flush();
+    if (mailbox_ != nullptr) mailbox_->bind(a.poll, a.gen);
+    if (!queued) {
+        ++mailbox_write_drops_;
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -2579,6 +2610,7 @@ Ex<std::size_t> LinkSession::save_upload_now() {
 Ex<void> LinkSession::make_core_(std::string_view manifest, bool hint_manifest) {
 
     if (drop_owed_) settle_retire_(RetireEnd::Adopt);
+    if (mailbox_ != nullptr) mailbox_->forget();
     const std::string name{conf_str_name()};
     {
 
@@ -2608,7 +2640,8 @@ Ex<void> LinkSession::make_core_(std::string_view manifest, bool hint_manifest) 
                                                    binder_.grant_windows(*(*f)->profile),
                                                    discs_,
                                                    this,
-                                                   &binder_.fio_queue()};
+                                                   &binder_.fio_queue(),
+                                                   mailbox_};
                     auto made = (*f)->make(*(*f)->profile, host);
                     current_ = CorePtr(made.release());
 
@@ -2630,7 +2663,8 @@ Ex<void> LinkSession::make_core_(std::string_view manifest, bool hint_manifest) 
                                                binder_.grant_windows(cores::kGenericProfile),
                                                discs_,
                                                this,
-                                               &binder_.fio_queue()};
+                                               &binder_.fio_queue(),
+                                               mailbox_};
                 auto made = cores::make_generic(cores::kGenericProfile, host);
                 current_ = CorePtr(made.release());
                 grant_manifest_(*current_, manifest);

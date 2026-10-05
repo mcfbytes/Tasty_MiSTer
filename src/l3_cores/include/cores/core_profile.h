@@ -131,7 +131,13 @@ struct CoreProfile {
     bool file_tx_whole = false;
 
     ResetRow reset{};
+
+    StartMount undeclared_start_mount = StartMount::Generic;
 };
+
+[[nodiscard]] constexpr StartMount start_mount_of(const CoreProfile& p, IoIndex index) {
+    return start_mount_of(p.slots, index, p.undeclared_start_mount);
+}
 
 Ex<void> assert_services_match_census(const CoreProfile& p,
                                       std::span<const LinkDecoderDecl> census_rows);

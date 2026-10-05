@@ -11,6 +11,7 @@
 #include "infra/seat.h"
 #include "infra/spsc_ring.h"
 #include "proto/conf_switches.h"
+#include "proto/mailbox_poll.h"
 #include "proto/ps2_frame.h"
 #include "proto/reset_edge.h"
 #include "proto/rotation_dir.h"
@@ -69,6 +70,7 @@ struct LinkOp {
         SetWideIndex,
         CoreReset,
         LoadFacts,
+        MailboxWrite,
         kCount,
     };
     static constexpr std::size_t kStore = 12;
@@ -362,6 +364,14 @@ struct LinkOp {
         TxSlabId facts{};
     };
 
+    struct MailboxWrite {
+        static constexpr Kind kKind = Kind::MailboxWrite;
+        std::uint8_t opcode = 0;
+        MailboxPoll poll = MailboxPoll::Keep;
+        std::uint16_t gen = 0;
+        std::array<std::uint16_t, 3> words{};
+    };
+
     using Alternatives =
         std::tuple<HoldReset, ReleaseReset, WriteStatus, OsdFlush, JoyEmit, SendRtc, BlockAnswer,
                    BindDecoders, BindSlot, FileTx, BindFacts, BindConfig, BindUart, BindSlotConfig,
@@ -370,7 +380,7 @@ struct LinkOp {
                    MakeCore, SessionUp, StageMount, StagePayload, StageReset, StageDiscPayload,
                    StageCheats, SetOsdVisible, PulseOption, SetVideoMode, ApplyCheats, SetDip,
                    SetCoreOption, SettleCoreOptions, SetVolume, AnnounceMount, SetWideIndex,
-                   CoreReset, LoadFacts>;
+                   CoreReset, LoadFacts, MailboxWrite>;
     Kind kind = Kind::HoldReset;
     std::uint8_t pad_[3]{};
     alignas(4) std::array<std::byte, kStore> store{};
@@ -378,7 +388,7 @@ struct LinkOp {
 
 static_assert(infra::MessageSum<LinkOp> && infra::alternatives_are_total<LinkOp>());
 static_assert(sizeof(LinkOp) == 16 && alignof(LinkOp) == 4);
-static_assert(infra::ordinal(LinkOp::Kind::kCount) == 46);
+static_assert(infra::ordinal(LinkOp::Kind::kCount) == 47);
 
 [[nodiscard]] constexpr bool sets_region(const LinkOp::StagePayload& a) noexcept {
     return a.region != LinkOp::StagePayload::kNoRegion;

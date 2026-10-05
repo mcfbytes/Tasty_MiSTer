@@ -27,9 +27,11 @@
 #include "app/link_rows.h"
 #include "app/mra_facts.h"
 #include "app/pending_load.h"
+#include "app/remembered_path.h"
 #include "app/ui_request_dispatch.h"
 #include "app/config_apply.h"
 #include "app/event.h"
+#include "cores/boot_asset.h"
 #include "cores/ladder_context.h"
 #include "cores/payload_pieces.h"
 #include "cores/registry.h"
@@ -109,15 +111,18 @@ unsigned SessionOwner::tick() {
 
     step_ladder_();
     step_save_mount_();
+    step_addons_();
     step_pieces_();
     step_load_();
     step_walk_();
+    step_companion_();
 
     const unsigned acks = take_park_acks_();
     try_program_();
 
     watch_start_();
     fall_back_to_front_end_();
+    swap_to_launcher_image_();
 
     watch_readiness_();
 
@@ -126,7 +131,7 @@ unsigned SessionOwner::tick() {
 }
 
 void SessionOwner::on(const UiRequest::LoadCore& req, const UiRequest::Head& head) {
-    on_load_core_(req, head.tag);
+    on_load_core_(launcher_alias_(req), head.tag);
 }
 
 void SessionOwner::on(const UiRequest::SaveConfig&, const UiRequest::Head& head) {
@@ -181,17 +186,15 @@ void SessionOwner::on(const UiRequest::LoadRamImage& req, const UiRequest::Head&
         return refuse_file_ask_(UiRequest::LoadRamImage::kKind, head.tag, Errc::core_load);
     if (!conf_str_ || !in_scope_(req.scope))
         return refuse_file_ask_(UiRequest::LoadRamImage::kKind, head.tag, Errc::stale);
-    const auto index = conf_str_->ram_image_index();
-    if (!index || req.recipe.size() == 0) {
+    if (req.recipe.size() == 0) {
         ++ram_images_declined_;
-        const Errc why = index ? Errc::bad_format : Errc::negotiation;
-        (void)owner_events_.push(infra::make<Event>(
-            Event::RamImageDeclined{.why = why}, Event::Head{EmitSite{ERR_SITE()}, {}, head.tag}));
+        (void)owner_events_.push(
+            infra::make<Event>(Event::RamImageDeclined{.why = Errc::bad_format},
+                               Event::Head{EmitSite{ERR_SITE()}, {}, head.tag}));
         return;
     }
 
     pending_ram_image_ = req.recipe;
-    pending_ram_index_ = *index;
 }
 
 void SessionOwner::on(const UiRequest::MountImage& req, const UiRequest::Head& head) {
@@ -266,7 +269,9 @@ bool SessionOwner::refuse_in_switch_(UiRequest::Kind kind, CorrelationTag tag) n
 
 bool SessionOwner::refuse_in_load_(UiRequest::Kind kind, CorrelationTag tag) noexcept {
     const bool rom_waits = save_mount_ && save_mount_->then_load;
-    if (!pieces_ && !load_ && !walk_ && !rom_waits) return false;
+    if (!pieces_ && !load_ && !walk_ && !companion_walk_ && !rom_waits && !addons_ &&
+        !addons_after_)
+        return false;
     ++loads_refused_busy_;
     publish_refusal_(kind, Errc::would_block, tag);
     return true;
@@ -492,26 +497,91 @@ void SessionOwner::load_file_(UiRequest::Kind asked, const R& req, CorrelationTa
     if (!core_live_ || vfs_ == nullptr) return refuse_file_ask_(asked, tag, Errc::core_load);
     if (!conf_str_ || boot_restore_owed_) return refuse_file_ask_(asked, tag, Errc::negotiation);
     if (!row) return refuse_file_ask_(asked, tag, row.error().code);
-    ContentRequest cr{};
-    if (!cr.path.assign(req.path.view())) return refuse_file_ask_(asked, tag, Errc::bad_format);
-    cr.slot = static_cast<std::uint8_t>(proto::ConfStr::wire_index(*row, req.path.view()));
-    if (const auto member = zip_member_(*row, req.path.view())) {
-        cr.path = *member;
-        cr.slot = static_cast<std::uint8_t>(proto::ConfStr::wire_index(*row, member->view()));
-    }
-    cr.load_addr = row->load_addr;
-    cr.ram_image = ram_image;
-    cr.ram_index = pending_ram_index_;
+    auto cr = content_for_(*row, req.path.view());
+    if (!cr) return refuse_file_ask_(asked, tag, Errc::bad_format);
+    UiRequest::SaveChoice choice = UiRequest::SaveChoice::User;
+    if constexpr (requires { req.save; }) choice = req.save;
+    const PickedLoad load{.content = *cr, .opensave = row->opensave, .choice = choice, .tag = tag};
+    plan_addons_(*row, req.path.view(), load, ram_image);
+    if (!picked_load_) run_load_(load);
+}
 
-    if (row->opensave && conf_str_->savestate().has_value()) {
+void SessionOwner::plan_addons_(const proto::ConfStrFileRow& row, std::string_view pick,
+                                const PickedLoad& load, const cores::RamImageRecipe& image) {
+    AddonSend addons = AddonSend::plan(row.addon, pick, load.content.slot);
+    if (image.size() != 0 && !addons.take_image(cores::expand(image))) {
+        ++ram_images_declined_;
+        (void)owner_events_.push(
+            infra::make<Event>(Event::RamImageDeclined{.why = Errc::negotiation},
+                               Event::Head{EmitSite{ERR_SITE()}, {}, load.tag}));
+    }
+    if (addons.empty()) return;
+    if (row.addon_after) {
+        addons_after_.emplace(std::move(addons));
+        return;
+    }
+    addons_.emplace(std::move(addons));
+    picked_load_ = load;
+}
+
+void SessionOwner::run_load_(const PickedLoad& load) {
+    attach_row_savestates_(load.opensave);
+    if (arm_loader_(load.content)) return;
+    order_row_content_(load.content, load.opensave, load.choice, load.tag);
+}
+
+bool SessionOwner::content_ordered_() const noexcept {
+    const bool rom_waits = save_mount_ && save_mount_->then_load;
+    return !picked_load_ && !pieces_ && !load_ && !walk_ && !companion_walk_ && !rom_waits;
+}
+
+void SessionOwner::step_addons_() {
+    if (!addons_ && addons_after_ && content_ordered_()) {
+        addons_ = std::move(addons_after_);
+        addons_after_.reset();
+    }
+    if (!addons_ || vfs_ == nullptr) return;
+    if (addons_->step(*this, *vfs_) == AddonSend::Pass::Waiting) return;
+    addons_sent_ += addons_->sent();
+    addons_missing_ += addons_->missing();
+    if (addons_->image_sent()) ++ram_images_sent_;
+    if (addons_->image_failed()) {
+        ++ram_images_declined_;
+        (void)owner_events_.push(
+            infra::make<Event>(Event::RamImageDeclined{.why = Errc::io},
+                               Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}));
+    }
+    addons_.reset();
+    if (picked_load_) {
+        const PickedLoad load = *picked_load_;
+        picked_load_.reset();
+        run_load_(load);
+    }
+}
+
+std::optional<ContentRequest> SessionOwner::content_for_(const proto::ConfStrFileRow& row,
+                                                         std::string_view path) const {
+    ContentRequest cr{};
+    if (!cr.path.assign(path)) return std::nullopt;
+    cr.slot = static_cast<std::uint8_t>(proto::ConfStr::wire_index(row, path));
+    if (const auto member = zip_member_(row, path)) {
+        cr.path = *member;
+        cr.slot = static_cast<std::uint8_t>(proto::ConfStr::wire_index(row, member->view()));
+    }
+    cr.load_addr = row.load_addr;
+    return cr;
+}
+
+void SessionOwner::attach_row_savestates_(bool opensave) {
+
+    if (opensave && conf_str_ && conf_str_->savestate().has_value()) {
         if (auto r = attach_savestates_(); !r) ++savestate_refusals_;
     }
-    if (arm_loader_(cr)) return;
-    if (row->opensave) {
-        UiRequest::SaveChoice choice = UiRequest::SaveChoice::User;
-        if constexpr (requires { req.save; }) choice = req.save;
-        if (arm_open_save_(cr, choice, tag)) return;
-    }
+}
+
+void SessionOwner::order_row_content_(const ContentRequest& cr, bool opensave,
+                                      UiRequest::SaveChoice choice, CorrelationTag tag) {
+    if (opensave && arm_open_save_(cr, choice, tag)) return;
     perform_content_(cr);
 }
 
@@ -615,14 +685,13 @@ void SessionOwner::perform_content_(const ContentRequest& req) {
         return;
     }
 
-    const bool quiet = ladder_ == nullptr && !save_mount_ && !held_mount_;
+    const bool quiet = !req.whole && ladder_ == nullptr && !save_mount_ && !held_mount_;
     if (sz->v > FileBytes::kPieceBytes && quiet && streams_files_()) {
         auto p = FileTxPieces::start(std::move(*f), sz->v, req.slot, path);
         if (!p) {
             ++files_failed_;
             return;
         }
-        send_ram_image_(req);
         pieces_.emplace(std::move(*p));
         return;
     }
@@ -642,34 +711,13 @@ void SessionOwner::perform_content_(const ContentRequest& req) {
         return;
     }
     if (req.save != proto::FileId{} && !inbox_.stamp_save(*id, req.save)) ++open_saves_skipped_;
-
-    const std::size_t need = req.ram_image.size() == 0 ? 1 : 2;
-    if (proto::kLinkTxCapacity - inbox_.ring().size() < need) {
-        ++op_drops_;
-        return;
-    }
-    send_ram_image_(req);
     if (!inbox_.push(proto::LinkOp::FileTx{.wire_index = req.slot, .file = *id})) {
         ++op_drops_;
         return;
     }
     ++ops_posted_;
     ++files_loaded_;
-}
-
-void SessionOwner::send_ram_image_(const ContentRequest& req) {
-    if (req.ram_image.size() == 0) return;
-    auto bytes = cores::expand(req.ram_image);
-    const auto id = inbox_.intern_file(std::move(bytes), ".ram", std::string_view{}, 0);
-    if (!id || !inbox_.push(proto::LinkOp::FileTx{.wire_index = req.ram_index, .file = *id})) {
-        ++ram_images_declined_;
-        (void)owner_events_.push(
-            infra::make<Event>(Event::RamImageDeclined{.why = Errc::io},
-                               Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}));
-        return;
-    }
-    ++ops_posted_;
-    ++ram_images_sent_;
+    if (req.load_addr == 0) begin_companion_(path);
 }
 
 void SessionOwner::step_pieces_() {
@@ -700,8 +748,12 @@ SessionOwner::RungWait SessionOwner::rung_wait_() const noexcept {
         each(pieces_.has_value(), pieces_ && pieces_->ready(inbox_)),
         each(load_.has_value(), load_ && load_->wants_pass(inbox_, ftx_level_cell_)),
         each(walk_.has_value(), walk_ && walk_->wants_pass(inbox_, ftx_level_cell_)),
+        each(companion_walk_.has_value(),
+             companion_walk_ && companion_walk_->wants_pass(inbox_, ftx_level_cell_)),
         each(ladder_ != nullptr, (ladder_moved_ || walk_answer_fresh_) && room),
         each(save_mount_.has_value(), false),
+        each(addons_.has_value(), addons_ && addons_->wants_pass(inbox_)),
+        each(!addons_ && addons_after_.has_value(), content_ordered_()),
     });
 }
 
@@ -808,7 +860,7 @@ bool SessionOwner::arm_walk_(const ContentRequest& req, const cores::CoreFactory
 }
 
 bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, std::uint32_t gen) {
-    if (walk_ || pieces_ || load_ || vfs_ == nullptr) return false;
+    if (walk_ || pieces_ || load_ || addons_ || vfs_ == nullptr) return false;
     walk_answer_ = cores::MountStatus{.generation = gen, .state = cores::MountState::Failed};
     const auto row = cores::find_core(core_name_.view());
     if (!row || (*row)->make_loader == nullptr) return true;
@@ -865,6 +917,74 @@ void SessionOwner::step_walk_() {
     walk_.reset();
 }
 
+void SessionOwner::make_companion_() {
+    withdraw_companion_();
+    if (vfs_ == nullptr) return;
+    const auto hint = made_with_manifest_ ? cores::LoadHint::XmlManifest : cores::LoadHint::None;
+    const auto row = cores::find_core(core_name_.view(), hint);
+    if (!row || (*row)->make_companion == nullptr) return;
+    companion_ = (*row)->make_companion(*vfs_);
+    if (companion_binds_ == nullptr || companion_ == nullptr) return;
+    companion_attached_ = companion_binds_->push(
+        infra::make<CompanionBind>(CompanionBind::Attach{.servant = companion_->servant()}));
+    if (!companion_attached_) ++companion_attach_refusals_;
+}
+
+void SessionOwner::withdraw_companion_() noexcept {
+    companion_walk_.reset();
+    if (companion_ == nullptr) return;
+    if (companion_attached_ && !companion_binds_->push(infra::make<CompanionBind>(
+                                   CompanionBind::Attach{.servant = cores::ServantId::None})))
+        ++companion_attach_refusals_;
+    companion_attached_ = false;
+    companion_.reset();
+}
+
+void SessionOwner::begin_companion_(std::string_view path) {
+    if (companion_ == nullptr) return;
+    if (companion_walk_) {
+        ++companion_skips_;
+        return;
+    }
+    const cores::CompanionAsk ask{
+        .path = path, .mailbox_live = companion_attached_, .aperture_base = aperture_.phys.v};
+    auto plan = companion_->plan(ask);
+    if (!plan) {
+        ++companion_skips_;
+        return;
+    }
+    companion_gen_ = static_cast<std::uint16_t>(companion_gen_ + 1u);
+    if (companion_gen_ == 0) companion_gen_ = 1;
+    auto w =
+        CompanionWalk::start(*plan, companion_gen_, plan->loads ? companion_->loader() : nullptr);
+    if (!w) {
+        ++companion_skips_;
+        return;
+    }
+    companion_walk_.emplace(std::move(*w));
+    ++companion_walks_;
+
+    if (!companion_walk_->loads()) step_companion_();
+    if (companion_walk_ && !companion_walk_->loads()) step_companion_();
+}
+
+void SessionOwner::step_companion_() {
+    if (!companion_walk_ || vfs_ == nullptr) return;
+    CompanionWalk::Host host{
+        .load = LoadWalk::Host{.rung = LoadLadder::Host{inbox_, ftx_level_cell_, owner_events_},
+                               .owner = *this,
+                               .map = window_map_,
+                               .aperture = aperture_,
+                               .vfs = *vfs_,
+                               .windows = loaded_profile_().windows,
+                               .now_ns = clock_->now().count()},
+        .binds = companion_attached_ ? companion_binds_ : nullptr};
+    const std::uint32_t before = inbox_.ring().pushed();
+    const CompanionWalk::Pass pass = companion_walk_->step(host);
+    ops_posted_ += static_cast<std::uint32_t>(inbox_.ring().pushed() - before);
+    if (pass == CompanionWalk::Pass::Done) companion_walk_.reset();
+}
+
 void SessionOwner::step_load_() {
     if (!load_) return;
     LoadLadder::Host host{inbox_, ftx_level_cell_, owner_events_};
@@ -885,12 +1005,13 @@ void SessionOwner::step_load_() {
 
 void SessionOwner::publish_window_counts_() noexcept { window_cell_.publish(window_counts_); }
 
-bool SessionOwner::streams_files_() const {
+const cores::CoreProfile& SessionOwner::loaded_profile_() const {
     const auto hint = made_with_manifest_ ? cores::LoadHint::XmlManifest : cores::LoadHint::None;
     const auto row = cores::find_core(core_name_.view(), hint);
-    const cores::CoreProfile& p = row ? *(*row)->profile : cores::profile_for({});
-    return !p.file_tx_whole;
+    return row ? *(*row)->profile : cores::profile_for({});
 }
+
+bool SessionOwner::streams_files_() const { return !loaded_profile_().file_tx_whole; }
 
 std::uint32_t SessionOwner::next_generation() noexcept {
     ++act_gen_;
@@ -964,7 +1085,7 @@ void SessionOwner::bios_missing() {
 
 void SessionOwner::on_mount_image_(const MountAsk& ask) {
     if (mount_busy_()) {
-        if (held_mount_.has_value() && start_ladder_) {
+        if (held_mount_.has_value() && (start_ladder_ || start_mounts_live_())) {
 
             publish_refusal_(ask.which, Errc::would_block, ask.tag);
             return;
@@ -1143,6 +1264,7 @@ void SessionOwner::finish_save_mount_(bool ok, bool quiet) {
     if (!save_mount_) return;
     const std::uint8_t slot = save_mount_->ask.index.v;
     const CorrelationTag tag = save_mount_->ask.tag;
+    quiet = quiet || save_mount_->start;
     save_mount_.reset();
     if (ok && !quiet) {
         ++save_mounts_done_;
@@ -1153,11 +1275,7 @@ void SessionOwner::finish_save_mount_(bool ok, bool quiet) {
             infra::make<Event>(Event::InfoRequest{.id = InfoId::ImageMountFailed},
                                Event::Head{EmitSite{ERR_SITE()}, {}, tag}));
     }
-    if (held_mount_.has_value()) {
-        const MountAsk next = *held_mount_;
-        held_mount_.reset();
-        arm_mount_(next);
-    }
+    arm_next_mount_();
 }
 
 void SessionOwner::step_ladder_() {
@@ -1192,6 +1310,7 @@ void SessionOwner::finish_ladder_(bool ok) {
     ladder_.reset();
     ladder_moved_ = false;
     start_ladder_ = false;
+    start_pick_ladder_ = false;
     const Event::Head head{EmitSite{ERR_SITE()}, {}, kUncaused};
     if (ok) {
         if (touched)
@@ -1207,10 +1326,74 @@ void SessionOwner::finish_ladder_(bool ok) {
         reset_owed_.reset();
         (void)order_reset_(op, kUncaused);
     }
-    if (held_mount_.has_value()) {
-        const MountAsk next = *held_mount_;
-        held_mount_.reset();
-        arm_mount_(next);
+    arm_next_mount_();
+}
+
+void SessionOwner::arm_next_mount_() {
+    while (!mount_busy_() && !start_mounts_.empty()) {
+        const MountAsk next = start_mounts_.front();
+        start_mounts_.pop_front();
+        arm_start_mount_(next);
+    }
+    if (mount_busy_() || !held_mount_.has_value()) return;
+    const MountAsk next = *held_mount_;
+    held_mount_.reset();
+    arm_mount_(next);
+}
+
+void SessionOwner::arm_start_mount_(const MountAsk& ask) {
+    const cores::CoreProfile& profile = loaded_profile_();
+    switch (cores::start_mount_of(profile, ask.index)) {
+        case cores::StartMount::AsPick:
+            ++remembered_mounts_armed_;
+            arm_mount_(ask);
+            start_pick_ladder_ = ladder_ != nullptr;
+            return;
+        case cores::StartMount::Unmodelled:
+            ++remembered_mounts_skipped_;
+            return;
+        case cores::StartMount::Generic:
+            break;
+    }
+    const std::span<const cores::FileSlot> slots = profile.slots;
+    switch (cores::role_of(slots, ask.index)) {
+        case cores::SlotRole::Disc:
+            ++remembered_mounts_skipped_;
+            return;
+        case cores::SlotRole::Save:
+
+            ++remembered_mounts_armed_;
+            ++mounts_armed_;
+            ladder_slot_ = ask.index.v;
+            save_mount_.emplace(SaveMount{.ask = ask,
+                                          .due_ns = clock_->now().count() + kSaveMountBoundNs,
+                                          .bracketed = false,
+                                          .start = true});
+            return;
+        case cores::SlotRole::Image:
+            break;
+    }
+    if (!vfs_->open(ask.path.view(), svc::OpenMode::Read)) {
+        ++remembered_mounts_skipped_;
+        return;
+    }
+    ++remembered_mounts_armed_;
+    arm_plain_mount_(ask);
+}
+
+void SessionOwner::read_remembered_mounts_() {
+    start_mounts_.clear();
+    if (!conf_str_ || vfs_ == nullptr || remembered_files_ == RememberedFiles::Ignore) return;
+    for (const proto::IoIndex index : conf_str_->remembered_mounts()) {
+        const std::string path =
+            read_remembered_path(*vfs_, remembered_stem_, RememberedSlot::Mount, index.v);
+        if (path.empty()) continue;
+        MountAsk ask{.which = UiRequest::Kind::MountImage, .index = index, .tag = kUncaused};
+        if (!ask.path.assign(path)) {
+            ++remembered_mounts_skipped_;
+            continue;
+        }
+        start_mounts_.push_back(ask);
     }
 }
 
@@ -1231,9 +1414,14 @@ void SessionOwner::drop_ladder_() {
     }
     ladder_moved_ = false;
     start_ladder_ = false;
+    start_pick_ladder_ = false;
     save_mount_.reset();
     held_mount_.reset();
+    start_mounts_.clear();
     pieces_.reset();
+    addons_.reset();
+    picked_load_.reset();
+    addons_after_.reset();
     if (load_) {
         load_.reset();
         ++window_counts_.cancelled;
@@ -1254,6 +1442,7 @@ void SessionOwner::drop_ladder_() {
 }
 
 void SessionOwner::forget_core_() noexcept {
+    withdraw_companion_();
 
     conf_str_.reset();
     pending_ram_image_ = {};
@@ -1759,6 +1948,7 @@ void SessionOwner::on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept {
     boot_restore_owed_ = false;
     if (m.made) core_made_once_ = true;
     core_live_ = m.made;
+    if (m.made) make_companion_();
     if (!m.made) {
 
         ++core_make_refusals_;
@@ -1775,15 +1965,62 @@ void SessionOwner::on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept {
 }
 
 void SessionOwner::order_session_up_() noexcept {
+    const std::vector<RememberedFile> remembered = read_remembered_files_();
+
+    const bool index0_taken = std::ranges::any_of(
+        remembered, [](const RememberedFile& f) noexcept { return f.row.ioctl_index == 0; });
 
     (void)push_gating_op_(infra::make<proto::LinkOp>(proto::LinkOp::SessionUp{}));
 
-    if (!arm_start_ladder_()) order_start_assets_();
+    const bool ladder = arm_start_ladder_(index0_taken);
+    order_remembered_files_(remembered);
+    if (!ladder) order_start_assets_(index0_taken);
+
+    read_remembered_mounts_();
+    arm_next_mount_();
 }
 
-void SessionOwner::order_start_assets_() noexcept {
+std::vector<SessionOwner::RememberedFile> SessionOwner::read_remembered_files_() const {
+    std::vector<RememberedFile> out;
+    if (!conf_str_ || vfs_ == nullptr || remembered_stem_.empty()) return out;
+    if (remembered_files_ == RememberedFiles::Ignore) return out;
+    for (const proto::ConfStrFileRow& row : conf_str_->remembered_rows()) {
+        std::string path =
+            read_remembered_path(*vfs_, remembered_stem_, RememberedSlot::File, row.ioctl_index);
+        if (!path.empty()) out.push_back(RememberedFile{row, std::move(path)});
+    }
+    return out;
+}
+
+void SessionOwner::order_remembered_files_(std::span<const RememberedFile> files) {
+    for (const RememberedFile& f : files) {
+        auto cr = content_for_(f.row, f.path);
+        if (!cr) {
+            ++remembered_missed_;
+            continue;
+        }
+        cr->whole = true;
+
+        if (f.row.opensave && !vfs_->open(cr->path.view(), svc::OpenMode::Read)) {
+            ++remembered_missed_;
+            continue;
+        }
+        const std::uint32_t failed = files_failed_;
+        const std::uint32_t drops = op_drops_;
+        attach_row_savestates_(f.row.opensave);
+        order_row_content_(*cr, f.row.opensave, UiRequest::SaveChoice::User, kUncaused);
+        if (files_failed_ != failed) {
+            ++remembered_missed_;
+        } else if (op_drops_ == drops) {
+            ++remembered_ordered_;
+        }
+    }
+}
+
+void SessionOwner::order_start_assets_(bool index0_taken) noexcept {
     if (vfs_ == nullptr) return;
     for (const cores::BootAsset& row : cores::profile_for(core_name_.view()).start_assets) {
+        if (!cores::start_row_sends(row, index0_taken)) continue;
         std::string rel(row.subdir);
         if (!rel.empty()) rel += '/';
         rel.append(row.name);
@@ -1797,7 +2034,7 @@ void SessionOwner::order_start_assets_() noexcept {
     }
 }
 
-bool SessionOwner::arm_start_ladder_() {
+bool SessionOwner::arm_start_ladder_(bool index0_taken) {
     if (core_name_.empty() || vfs_ == nullptr || ladder_ != nullptr) return false;
     const auto row = cores::find_core(core_name_.view());
     if (!row || (*row)->make_ladder == nullptr) return false;
@@ -1809,7 +2046,8 @@ bool SessionOwner::arm_start_ladder_() {
                                    .image_path = {},
                                    .last_dir = {},
                                    .noreset = false,
-                                   .at_core_start = true};
+                                   .at_core_start = true,
+                                   .index0_taken = index0_taken};
     ladder_ = (*row)->make_ladder(*(*row)->profile, ctx);
     if (ladder_ == nullptr) return false;
     start_ladder_ = true;
@@ -1898,10 +2136,12 @@ void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
         if (boot_config_pending_) boot_config_(name, *parsed, op);
         published_conf_ = conf_switches(*parsed);
         config_cell_.publish(*parsed);
+        publish_launcher_demand_(name, svc::direct_video_resolved(*parsed) != 0);
     } else {
 
         op.ini_refused = true;
         op.parse_err = parsed.error().code;
+        publish_launcher_demand_(name, false);
 
         if (replay_ini_) direct_video_ini_cell_.publish(std::uint8_t{0});
     }
@@ -1910,6 +2150,8 @@ void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
     if (cs.savestate().has_value() && vfs_ != nullptr && !name.empty()) {
         (void)vfs_->ensure_dir(std::string("savestates/") + std::string(name));
     }
+
+    remembered_stem_ = RememberedStem::of(name, pending_facts_);
     elect_defmra_(cs.default_manifest());
     intern_saved_cfg_(effective_name(name, pending_facts_), op);
     op.savestate_dir_ready = cs.savestate().has_value();
@@ -1939,9 +2181,68 @@ void SessionOwner::boot_config_(std::string_view core_name, const svc::ConfigSna
     }
     boot_handoff_.clear();
     if (vfs_ == nullptr) return;
+    if (const LauncherProfile* l = launcher_for_main(cfg.main)) {
+        latch_launcher_(*l, core_name);
+        return;
+    }
     if (auto exe = alternate_executable(*vfs_, cfg.main, self_exe_path())) {
         boot_handoff_ = std::move(*exe);
     }
+}
+
+void SessionOwner::latch_launcher_(const LauncherProfile& l, std::string_view core_name) {
+    launcher_demand_.profile = &l;
+    const svc::SearchPolicy root{svc::search::kRootOnly, true};
+    if (auto p = vfs_->resolve(l.program, root); p) {
+        struct ::stat st = {};
+        if (::stat(p->c_str(), &st) == 0 && S_ISREG(st.st_mode))
+            (void)launcher_demand_.program.assign(*p);
+    }
+    UiRequest::LoadCore image{.xml = XmlKind::Rbf};
+    if (image.path.assign(l.front_end_image) && validate_switch_(image))
+        (void)launcher_image_.assign(l.front_end_image);
+
+    launcher_swap_owed_ = !launcher_image_.empty() && cores::profile_for(core_name).is_front_end &&
+                          !same_image_name(pending_.path.view(), launcher_image_.view());
+}
+
+UiRequest::LoadCore SessionOwner::launcher_alias_(const UiRequest::LoadCore& req) const noexcept {
+    if (launcher_image_.empty() || !names_front_end_image(req.path.view(), req.xml)) return req;
+    UiRequest::LoadCore out = req;
+    (void)out.path.assign(launcher_image_.view());
+    return out;
+}
+
+void SessionOwner::publish_launcher_demand_(std::string_view core_name,
+                                            bool direct_video) noexcept {
+    if (launcher_cell_ == nullptr || launcher_demand_.profile == nullptr) return;
+
+    launcher_demand_.front_end = cores::profile_for(core_name).is_front_end && !launcher_swap_owed_;
+    launcher_demand_.direct_video = direct_video;
+    launcher_demand_.scanout_core = launcher_demand_.front_end && !launcher_image_.empty() &&
+                                    same_image_name(pending_.path.view(), launcher_image_.view());
+    ++launcher_demand_.core_gen;
+    launcher_cell_->publish(launcher_demand_);
+    if (launcher_wake_ != nullptr) launcher_wake_->kick_if_armed();
+}
+
+void SessionOwner::withdraw_launcher_demand_() noexcept {
+    if (launcher_cell_ == nullptr || launcher_demand_.profile == nullptr) return;
+    if (!launcher_demand_.front_end) return;
+    launcher_demand_.front_end = false;
+    launcher_demand_.scanout_core = false;
+    ++launcher_demand_.core_gen;
+    launcher_cell_->publish(launcher_demand_);
+    if (launcher_wake_ != nullptr) launcher_wake_->kick_if_armed();
+}
+
+void SessionOwner::swap_to_launcher_image_() {
+    if (!launcher_swap_owed_ || before_seats_ || switch_standing_ || recovering_) return;
+    if (proto::kLinkTxCapacity - inbox_.ring().size() < kTeardownOps || !park_->ask_room()) return;
+    launcher_swap_owed_ = false;
+    UiRequest::LoadCore req{.xml = XmlKind::Rbf};
+    if (!req.path.assign(launcher_image_.view())) return;
+    (void)ask_switch_(req, kUncaused);
 }
 
 bool SessionOwner::wait_for_mount_(std::string_view needle) {
@@ -2051,7 +2352,7 @@ void SessionOwner::retry_held_load_() {
 }
 
 void SessionOwner::ask_switch_or_refuse_(const UiRequest::LoadCore& req, CorrelationTag tag) {
-    if (ask_switch_(req, tag) == Asked::NoRoom)
+    if (ask_switch_(launcher_alias_(req), tag) == Asked::NoRoom)
         publish_refusal_(UiRequest::Kind::LoadCore, Errc::would_block, tag);
 }
 
@@ -2093,6 +2394,7 @@ SessionOwner::Asked SessionOwner::ask_switch_(const UiRequest::LoadCore& req, Co
         last_order_.reset();
         ++orders_superseded_;
     }
+    withdraw_launcher_demand_();
 
     pause_seats_(gen_, false);
     receipt_.reset();

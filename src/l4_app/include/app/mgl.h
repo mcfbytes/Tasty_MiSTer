@@ -4,11 +4,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <tuple>
 
 #include "app/link_tx_channel.h"
 #include "app/path_text.h"
+#include "app/remembered_path.h"
 #include "app/ui_request_ring.h"
 #include "app/types.h"
 #include "infra/fixed_str.h"
@@ -19,6 +21,8 @@
 #include "infra/seat.h"
 
 namespace mister::app {
+
+class NameConfig;
 
 struct MglItem {
     TASTY_SEAT_EXEMPT(component);
@@ -77,6 +81,13 @@ public:
     void set_scope(CoreScope s) noexcept { scope_ = s; }
     [[nodiscard]] CoreScope scope() const noexcept { return scope_; }
 
+    void set_names(NameConfig* names) noexcept { names_ = names; }
+
+    void remember(std::uint8_t i, const RememberedStem& stem, RememberedSlot slot,
+                  std::uint8_t ioctl_index) noexcept;
+    [[nodiscard]] std::uint32_t remembered() const noexcept { return remembered_; }
+    [[nodiscard]] std::uint32_t remember_failures() const noexcept { return remember_failures_; }
+
     void arm(const os::IClock& clock);
 
     [[nodiscard]] Ex<void> advance(const os::IClock& clock);
@@ -120,6 +131,16 @@ private:
 
     LinkTxChannel* link_tx_ = nullptr;
     UiRequestRing* asks_ = nullptr;
+    NameConfig* names_ = nullptr;
+
+    struct RememberAt {
+        RememberedSlot slot = RememberedSlot::File;
+        std::uint8_t ioctl_index = 0;
+    };
+    std::array<std::optional<RememberAt>, kMaxItems> remember_{};
+    RememberedStem stem_{};
+    std::uint32_t remembered_ = 0;
+    std::uint32_t remember_failures_ = 0;
     CoreScope scope_{};
     std::array<MglItem, kMaxItems> items_{};
     PathText file_home_{};

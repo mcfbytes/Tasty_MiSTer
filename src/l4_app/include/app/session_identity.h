@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "app/game_id.h"
+#include "app/remembered_path.h"
 #include "cores/cheat_lookup.h"
 #include "cores/file_slot.h"
 #include "infra/fixed_str.h"
@@ -23,6 +24,8 @@ struct SessionIdentity {
     char core[kMax] = {};
 
     char rbf[kMax] = {};
+
+    RememberedStem stem{};
 
     bool setname_same_dir = false;
     svc::JoyPlan joy{};
@@ -50,5 +53,7 @@ struct SessionIdentity {
 [[nodiscard]] inline std::string_view home_name(const SessionIdentity& id) noexcept {
     return id.setname_same_dir ? std::string_view{id.rbf} : std::string_view{id.core};
 }
+
+static_assert(RememberedStem::kMax == SessionIdentity::kMax, "the stem clips as `core` does");
 
 }  // namespace mister::app

@@ -38,8 +38,9 @@ Ex<void> Core::pre_init_(proto::CoreSession& s) {
 Ex<void> Core::flush_dirty_state_() { return {}; }
 
 Ex<void> Core::mount(IoIndex slot, const MountedPath& p) {
-    const bool declared = std::any_of(profile_->slots.begin(), profile_->slots.end(),
-                                      [slot](const FileSlot& fs) { return fs.index == slot; });
+    const bool declared =
+        std::any_of(profile_->slots.begin(), profile_->slots.end(),
+                    [slot](const FileSlot& fs) { return fs.index == slot && !is_load_row(fs); });
     if (!declared && !profile_->slots.empty()) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
     }

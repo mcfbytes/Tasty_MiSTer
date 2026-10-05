@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -11,6 +12,9 @@
 
 namespace mister::svc {
 class Vfs;
+}
+namespace mister::os {
+struct WritebackProbe;
 }
 
 namespace mister::fw {
@@ -46,6 +50,16 @@ void tasty_set_home_image(const char* exe, const char* arg) noexcept;
 [[nodiscard]] bool tasty_resolve_args(TastyArgs& a) noexcept;
 [[nodiscard]] std::optional<app::PathText> tasty_prepare_record(app::PathText record,
                                                                 std::string_view movie) noexcept;
+
+void warn_writeback_cpumask(const os::WritebackProbe& wb, int rt_cpu, const char* prog,
+                            std::FILE* out) noexcept;
+
+[[nodiscard]] std::string_view tasty_record_dir(std::string_view record) noexcept;
+
+void tasty_warn_record_writeback(std::string_view record, int rt_cpu) noexcept;
+
+void tasty_warn_record_writeback(std::string_view record, int rt_cpu, const char* cpumask_path,
+                                 const char* unbound_path, std::FILE* out) noexcept;
 void tasty_set_owner_comm(const char* comm) noexcept;
 
 struct ReturnHome {

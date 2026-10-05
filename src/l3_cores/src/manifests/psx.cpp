@@ -121,4 +121,9 @@ std::unique_ptr<BootLadder> make_psx_ladder(const CoreProfile& p, const LadderCo
     return std::make_unique<PsxLadder>(p, ctx);
 }
 
+static_assert(start_mount_of(kPsxSlots, IoIndex{1}) == StartMount::Generic);
+static_assert(start_mount_of(kPsxSlots, IoIndex{2}) == StartMount::Generic);
+static_assert(start_mount_of(kPsxSlots, IoIndex{3}) == StartMount::Generic);
+static_assert(start_mount_of(kPsxSlots, IoIndex{7}) == StartMount::Generic);
+
 }  // namespace mister::cores::manifests

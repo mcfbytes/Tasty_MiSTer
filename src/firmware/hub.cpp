@@ -12,6 +12,7 @@
 #include "reactor/core_state.h"
 #include "hal/axi.h"
 #include "reactor/notifier.h"
+#include "cores/mailbox_servants.h"
 
 namespace mister::fw {
 
@@ -102,7 +103,8 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop)
       input_main_{input_pipeline_.decode()}, input_sample_(input_pipeline_.sample()),
       router_{nullptr, &video_pump_}, fifo_(open_cmd_fifo()),
       frame_(open_frame_clock(plat.video.vsync_device, plat.exec)), prefetch_(),
-      prefetch_main_{prefetch_}, pcm_feeder_{clock_}, pcm_main_{pcm_feeder_}, io_main_{},
+      prefetch_main_{prefetch_}, pcm_feeder_{clock_}, pcm_main_{pcm_feeder_},
+      mailbox_relay_{pcm_main_.wake()}, companion_host_{pcm_main_.wake()}, io_main_{},
       storage_(io_main_.wake()), discs_(io_main_.wake()), shots_(), shot_pump_(), surface_(),
       osd_wire_{surface_, plat.link},
       parts_{
@@ -284,6 +286,13 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop)
         seat_mains_.pcm = &pcm_main_;
 
         session_.set_pcm_feeder(&pcm_feeder_);
+
+        if (vfs_ != nullptr) {
+            companion_host_.install(cores::make_servants(*vfs_));
+            pcm_main_.bind_mailbox(mailbox_relay_, companion_host_);
+            session_.attach_mailbox(mailbox_relay_);
+            owner_.set_companion_binds(&companion_host_.binds());
+        }
     }
 
     session_.block_slots().attach_channel(storage_);

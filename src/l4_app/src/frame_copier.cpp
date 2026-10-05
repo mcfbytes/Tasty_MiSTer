@@ -274,11 +274,10 @@ void FrameCopier::probe_step_(std::int64_t now) noexcept {
         if (live_[i] && h && h->supported())
             bytes = std::max(bytes, static_cast<std::size_t>(h->line) * h->height);
     }
-    if (auto r = arena_.reserve(kRawFrameSlots, std::max(bytes, kMinSlotBytes)); !r) {
+    if (!reserve_arena_(std::max(bytes, kMinSlotBytes))) {
         answer_(st_.gen, RecVerdict::NoMemory);
         return end_(RecVerdict::NoMemory);
     }
-    st_.arena_kib = static_cast<std::uint32_t>(arena_.bytes() / 1024u);
     answer_(st_.gen, RecVerdict::Started);
     st_.state = from_arm_ ? RecState::Armed : RecState::Recording;
     if (!from_arm_) (void)open_segment_();
@@ -313,14 +312,58 @@ bool FrameCopier::probe_decide_(std::int64_t now) noexcept {
         probe_start_ns_ = now;
         return false;
     } else {
-        answer_(st_.gen, RecVerdict::NoLiveBuffer);
-        end_(RecVerdict::NoLiveBuffer);
+        const RecVerdict v = port_stuck_() ? RecVerdict::ScalerPortStuck : RecVerdict::NoLiveBuffer;
+        answer_(st_.gen, v);
+        end_(v);
         return false;
     }
     st_.stride_mib = static_cast<std::uint8_t>(stride_ >> 20);
     st_.lowlat = lowlat_ ? 1 : 0;
     dirty_ = true;
     return true;
+}
+
+namespace {
+
+bool plausible(const ScalerHeader& h) noexcept {
+    const unsigned hs = h.header_size;
+    return h.supported() && hs >= 64u && hs <= 4096u && (hs & (hs - 1u)) == 0u && h.width != 0 &&
+           h.height != 0 && static_cast<unsigned>(h.width) * 3u <= h.line;
+}
+
+std::size_t frame_end(std::size_t base, const ScalerHeader& h) noexcept {
+    return base + h.header_size + static_cast<std::size_t>(h.height) * h.line;
+}
+}  // namespace
+
+bool FrameCopier::port_stuck_() noexcept {
+    static constexpr std::size_t kBeat = 16;
+    static constexpr std::size_t kMaxShort = 255 * kBeat;
+    std::array<std::byte, 4096> chunk;
+    const std::size_t len = window_->len();
+    for (std::size_t off = 0; off + chunk.size() <= len; off += chunk.size()) {
+        if (!window_->copy(off, chunk)) return false;
+        for (std::size_t i = 0; i < chunk.size(); i += kBeat) {
+            const auto h = ScalerHeader::decode(
+                std::span<const std::byte, ScalerHeader::kBytes>(chunk.data() + i, kBeat));
+            if (!plausible(h)) continue;
+            const std::size_t at = off + i;
+            for (const std::size_t stride :
+                 {ScalerBuffers::kStrideLarge, ScalerBuffers::kStrideSmall}) {
+                const std::size_t base = at - at % stride;
+                const std::size_t end = frame_end(base, h);
+                if (end <= at || end - at > kMaxShort || (end - at) % kBeat != 0) continue;
+                if (const auto b = window_->header(base); b && b->supported()) continue;
+                const std::size_t large = at - at % ScalerBuffers::kStrideLarge;
+                if (large != base) {
+                    const auto l = window_->header(large);
+                    if (l && plausible(*l) && base < frame_end(large, *l)) continue;
+                }
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 bool FrameCopier::open_segment_() noexcept {
@@ -363,11 +406,20 @@ bool FrameCopier::regrow_() noexcept {
     if (!all_home_()) return true;
     const std::size_t want = regrow_bytes_;
     regrow_bytes_ = 0;
-    if (auto r = arena_.reserve(kRawFrameSlots, want); !r) {
+    if (!reserve_arena_(want)) {
         end_(RecVerdict::NoMemory);
         return false;
     }
+    return true;
+}
+
+bool FrameCopier::reserve_arena_(std::size_t slot_bytes) noexcept {
+    const std::size_t want = raw_depth(slot_bytes);
+    const std::size_t depth =
+        w_.channel->set_live(static_cast<std::uint8_t>(want)) ? want : w_.channel->live();
+    if (auto r = arena_.reserve(depth, slot_bytes); !r) return false;
     st_.arena_kib = static_cast<std::uint32_t>(arena_.bytes() / 1024u);
+    st_.depth = static_cast<std::uint8_t>(depth);
     dirty_ = true;
     return true;
 }
@@ -863,6 +915,7 @@ void FrameCopier::deliver_(std::size_t buf, const ScalerHeader& h,
     slot.kind = RawKind::Frame;
     slot.gen = st_.gen;
     slot.runs = npending_;
+    slot.depth = st_.depth;
     std::uint32_t rows = 1;
     for (std::uint8_t i = 0; i < npending_; ++i) {
         slot.run[i] = pending_[i];

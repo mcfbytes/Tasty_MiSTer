@@ -23,11 +23,15 @@ enum class RecVerdict : std::uint8_t {
     ReplayEnded,
     NoCodec,
     NoMemory,
+
+    ScalerPortStuck,
     kCount,
 };
 
 [[nodiscard]] const char* rec_state_name(RecState s) noexcept;
 [[nodiscard]] const char* rec_verdict_name(RecVerdict v) noexcept;
+
+[[nodiscard]] const char* rec_verdict_remedy(RecVerdict v) noexcept;
 
 struct RecorderStatus {
     std::uint16_t gen = 0;
@@ -40,6 +44,7 @@ struct RecorderStatus {
     std::uint8_t anchored = 0;
     std::uint8_t avi = 0;
     std::uint8_t interlaced = 0;
+    std::uint8_t depth = 0;
     std::uint16_t width = 0;
     std::uint16_t height = 0;
     std::uint32_t rows = 0;

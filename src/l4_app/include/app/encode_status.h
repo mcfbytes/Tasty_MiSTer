@@ -24,6 +24,9 @@ struct EncodeStatus {
         std::uint8_t scale = 0;
         std::uint8_t steps = 0;
         std::uint8_t fell_behind = 0;
+        std::uint8_t recovered = 0;
+        std::uint8_t held = 0;
+        std::uint8_t queue_max = 0;
         std::uint8_t rate_rolls = 0;
         std::uint8_t me_rad = 0;
         std::uint32_t errors = 0;

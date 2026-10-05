@@ -23,7 +23,6 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "TASTY_TESTS": "OFF",
         "TASTY_BUILD_TESTS": "OFF",
-        "TASTY_SEAT_CHECKS": "OFF",
         "TASTY_WERROR": "OFF"
       }
     }

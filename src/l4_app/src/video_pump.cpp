@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/video_pump.h"
+#include "app/hps_framebuffer.h"
 
 #include <cstdio>
 #include <cstring>
@@ -116,8 +117,9 @@ void VideoPump::set_mode_override(std::string_view spec) noexcept {
     override_latched_ = true;
 }
 
-bool VideoPump::take_fb_cmd(std::string_view) noexcept {
+bool VideoPump::take_fb_cmd(std::string_view line) noexcept {
     TASTY_SEAT_BODY(VideoPump);
+    if (hps_fb_ != nullptr) return hps_fb_->take_fb_cmd(line);
     const PublishOnExit publish_on_exit{this};
     ++stats_.fb_cmds_dropped;
     return true;

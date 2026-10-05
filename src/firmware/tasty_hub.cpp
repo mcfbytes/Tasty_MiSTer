@@ -281,6 +281,8 @@ void mister::fw::tasty_arm_owner_signals() noexcept {
 int mister::fw::tasty_run_owner(const TastyArgs& args) {
     tasty_arm_owner_signals();
     static_assert(!tasty_boot_calls_handoff());
+
+    static_assert(!Hub::kRoutesMgl);
     TastyArgs local = args;
     if (!tasty_resolve_args(local)) {
         tasty_say("tasty: cannot resolve paths");
@@ -332,6 +334,8 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
         report("mlockall", r.error());
         return 1;
     }
+
+    fw::warn_vm_compaction(ev.vm_compaction, "tasty", stderr);
     fw::prefault_current_stack(hal::kFifoStackBytes, ev);
 
     auto compatible = hal::read_compatible(hal::kCompatiblePath);
@@ -347,6 +351,9 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
     }
     const hal::BoardProfile& board = **selected;
     announce_board(board, *compatible);
+    if (local.record)
+        tasty_warn_record_writeback(local.record->view(),
+                                    hal::seat_of(board.threads, hal::Seat::RT).cpu);
 
     if (auto t = fw::rt_topology_init(board.threads, fw::RtMode::Required, ev); !t) {
         report("thread map", t.error());
@@ -454,6 +461,7 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
 
     app::SessionOwner& owner = hub->owner();
     owner.set_replay_save_root(fw::kTastySaveRoot);
+    owner.set_remembered_files(app::SessionOwner::RememberedFiles::Ignore);
     fw::ThreadAssembly& assembly = hub->threads();
 
     {

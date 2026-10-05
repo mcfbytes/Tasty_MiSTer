@@ -117,6 +117,7 @@ private:
     };
 
     void write_status_(bool force = false) noexcept;
+    [[nodiscard]] bool scaler_port_stuck_() const noexcept;
     [[nodiscard]] bool rec_only_over_() noexcept;
     void ask_core_(std::string_view path) noexcept;
     [[nodiscard]] bool core_ready_() const noexcept;
@@ -154,7 +155,10 @@ private:
     std::uint8_t direct_video_was_ = 0;
     bool direct_video_line_ = false;
     bool resampled_ = false;
-    std::uint32_t step_said_gen_ = 0;
+
+    std::uint32_t said_gen_ = 0;
+    std::uint8_t said_steps_ = 0;
+    std::uint8_t said_recovered_ = 0;
     unsigned hide_tries_ = 0;
     std::uint32_t id_gen_ = 0;
     std::uint32_t video_edges_ = 0;

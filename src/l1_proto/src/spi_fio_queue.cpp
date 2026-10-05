@@ -76,6 +76,21 @@ std::uint32_t SpiFioQueue::cost_(const FioWindow& w) const noexcept {
     return infra::dispatch<infra::AllRouted>(w, c);
 }
 
+bool SpiFioQueue::fits(std::size_t windows, std::size_t bytes,
+                       std::size_t brackets) const noexcept {
+    TASTY_SEAT_BODY(SpiFioQueue);
+    const bool restarts = head_ == size_;
+    const std::size_t used_windows = restarts ? 0u : size_;
+    const std::size_t used_bytes = restarts ? 0u : slab_used_;
+    return brackets <= kMaxBrackets && used_bytes + bytes <= kSlabBytes &&
+           used_windows + windows <= kWindows;
+}
+
+std::size_t SpiFioQueue::bracket_windows(std::size_t bytes) const noexcept {
+    return windows_for(bytes,
+                       std::size_t{piece_words_} * (link_->width() == hal::Width::Word ? 2u : 1u));
+}
+
 Ex<void> SpiFioQueue::submit(std::span<const Bracket> act) {
     TASTY_SEAT_BODY(SpiFioQueue);
     if (!idle()) {

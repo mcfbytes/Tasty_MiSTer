@@ -209,10 +209,12 @@ bool TastySession::rec_only_over_() noexcept {
     if (w_.recstat == nullptr) return false;
     app::RecorderStatus rec{};
     if (w_.recstat->sample_into(rec) == 0) return false;
+
     if (rec.state != app::RecState::Idle) {
-        rec_seen_ = true;
+        if (rec.state != app::RecState::Probing) rec_seen_ = true;
         return false;
     }
+    if (rec.verdict == app::RecVerdict::Started) rec_seen_ = true;
     const bool refused =
         rec.verdict != app::RecVerdict::None && rec.verdict != app::RecVerdict::Started;
     if (refused && !rec_seen_) {
@@ -225,6 +227,33 @@ bool TastySession::rec_only_over_() noexcept {
     return rec_seen_ || refused;
 }
 
+namespace {
+
+void say_scale_step(const app::EncodeStatus::Video& v) noexcept {
+    const char* why = v.fell_behind == 0 ? "the encoder was using too much CPU"
+                      : v.held != 0      ? "the encoder fell behind again soon after catching up"
+                                         : "the encoder fell behind";
+    const char* until = v.fell_behind != 0 && v.held == 0 ? " until it catches up" : "";
+    std::fprintf(stderr,
+                 "tasty: %s; the AVI continues at half size in a new segment%s (--scale native "
+                 "keeps full size and may repeat frames instead)\n",
+                 why, until);
+}
+
+void say_scale_return() noexcept {
+    std::fprintf(stderr,
+                 "tasty: the encoder caught up; the AVI is back at full size in a new segment\n");
+}
+
+}  // namespace
+
+bool TastySession::scaler_port_stuck_() const noexcept {
+    if (w_.recstat == nullptr) return false;
+    app::RecorderStatus rec{};
+    if (w_.recstat->sample_into(rec) == 0) return false;
+    return rec.verdict == app::RecVerdict::ScalerPortStuck;
+}
+
 void TastySession::write_status_(bool force) noexcept {
     if (w_.play == nullptr || w_.recstat == nullptr) return;
     const std::int64_t now = clock_.now().count();
@@ -235,15 +264,19 @@ void TastySession::write_status_(bool force) noexcept {
     (void)w_.recstat->sample_into(rec);
     app::EncodeStatus enc{};
     if (w_.encstat != nullptr) (void)w_.encstat->sample_into(enc);
-    if (enc.video.steps != 0 && step_said_gen_ != rec.gen + 1u) {
-        step_said_gen_ = rec.gen + 1u;
-        const char* why = enc.video.fell_behind != 0 ? "the encoder fell behind"
-                                                     : "the encoder was using too much CPU";
-        std::fprintf(stderr,
-                     "tasty: %s; the AVI continues at half size in a new "
-                     "segment (--scale native keeps full size and may repeat frames instead)\n",
-                     why);
+    if (said_gen_ != rec.gen + 1u) {
+        said_gen_ = rec.gen + 1u;
+        said_steps_ = 0;
+        said_recovered_ = 0;
     }
+
+    const bool stepped = enc.video.steps > said_steps_;
+    const bool returned = enc.video.recovered > said_recovered_;
+    said_steps_ = enc.video.steps;
+    said_recovered_ = enc.video.recovered;
+    if (returned && enc.video.scale == 2) say_scale_return();
+    if (stepped) say_scale_step(enc.video);
+    if (returned && enc.video.scale != 2) say_scale_return();
     const std::uint32_t total = w_.replay != nullptr ? w_.replay->movie_frames() : 0;
     const char* end =
         (w_.replay != nullptr && w_.replay->refused()) ? "refused" : app::replay_end_name(play.end);
@@ -392,6 +425,10 @@ void TastySession::tick() noexcept {
         case Stage::Run: {
             print_settings_();
             write_status_();
+            if (scaler_port_stuck_()) {
+                fail_(1, app::rec_verdict_remedy(app::RecVerdict::ScalerPortStuck));
+                break;
+            }
             if (rec_only_) {
                 if (rec_only_over_()) go_menu_();
                 break;

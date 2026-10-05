@@ -18,12 +18,13 @@ namespace mister::cores {
 namespace {
 
 constexpr auto kCoreTable = std::to_array<CoreFactory>({
-    {CoreKind::Menu, "MENU", &kMenuProfile, &make_generic, nullptr, nullptr},
+    {CoreKind::Menu, "MENU", &kMenuProfile, &make_generic, nullptr, nullptr, nullptr},
     {CoreKind::Psx, "PSX", &manifests::kPsx, &manifests::make_psx, &manifests::make_psx_ladder,
-     nullptr},
-    {CoreKind::Snes, "SNES", &manifests::kSnes, &manifests::make_snes, nullptr, nullptr},
+     nullptr, nullptr},
+    {CoreKind::Snes, "SNES", &manifests::kSnes, &manifests::make_snes, nullptr, nullptr,
+     &manifests::make_snes_companion},
     {CoreKind::MegaDrive, "MegaDrive", &manifests::kMegaDrive, &manifests::make_megadrive, nullptr,
-     nullptr},
+     nullptr, nullptr},
 });
 
 consteval bool table_names_agree() {
@@ -47,6 +48,14 @@ consteval bool kinds_are_the_rows() {
     }
     return kCoreTable.size() + 1 == std::to_underlying(CoreKind::Count);
 }
+
+consteval bool generic_rows_start_no_mount() {
+    for (const CoreFactory& f : kCoreTable)
+        if (f.make == &make_generic && f.profile->undeclared_start_mount != StartMount::Unmodelled)
+            return false;
+    return true;
+}
+static_assert(generic_rows_start_no_mount(), "a make_generic row must not arm an SC start mount");
 
 consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
     return !p.is_front_end && p.services.empty() && p.slots.empty() && p.boot_assets.empty() &&
@@ -175,6 +184,15 @@ consteval bool loader_rows_stream() {
 }
 static_assert(loader_rows_stream(),
               "a row with a MAIN loader answers the stream role: its profile is not file_tx_whole");
+
+consteval bool companion_rows_declare_a_window() {
+    for (const CoreFactory& f : kCoreTable) {
+        if (f.make_companion != nullptr && f.profile->windows.empty()) return false;
+    }
+    return true;
+}
+static_assert(companion_rows_declare_a_window(),
+              "a row with a MAIN companion declares the window its sibling file loads into");
 
 bool iequal(std::string_view a, std::string_view b) {
     if (a.size() != b.size()) return false;

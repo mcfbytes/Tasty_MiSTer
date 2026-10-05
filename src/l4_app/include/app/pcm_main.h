@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <optional>
 
+#include "app/companion_host.h"
+#include "app/mailbox_relay.h"
 #include "app/pcm_ring_feeder.h"
 #include "infra/error.h"
 #include "infra/pause_latch.h"
@@ -26,6 +28,10 @@ public:
 
     [[nodiscard]] Ex<void> open() noexcept;
 
+    void bind_mailbox(MailboxRelay& relay, CompanionHost& host) noexcept;
+
+    [[nodiscard]] xthread::WakeFlag& wake() noexcept { return wake_; }
+
     void start() noexcept;
     void stop() noexcept { stop_.request(); }
 
@@ -36,7 +42,7 @@ public:
     [[nodiscard]] xthread::SeatPark& park() noexcept { return *park_; }
     [[nodiscard]] bool paused() noexcept { return pause_.observe(*this); }
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
-    void settle() noexcept { feeder_.release(); }
+    void settle() noexcept;
 
     void on_pause() noexcept;
     void on_resume() noexcept {}
@@ -49,7 +55,12 @@ public:
 private:
     [[nodiscard]] bool inboxes_empty_() const noexcept { return cmds_.empty(); }
 
+    void serve_mailbox_() noexcept;
+    [[nodiscard]] bool mailbox_rest_() const noexcept;
+
     PcmRingFeeder& feeder_;
+    MailboxRelay* relay_ = nullptr;
+    CompanionHost* host_ = nullptr;
     xthread::WakeFlag wake_{};
     xthread::WakeFlag stop_{};
     PcmRingFeeder::Commands cmds_{wake_};

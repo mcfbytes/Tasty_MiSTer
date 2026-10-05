@@ -118,6 +118,7 @@ class VideoWire;
 class OsdWire;
 class InputWire;
 class DurableWriteService;
+class MailboxRelay;
 class WindowJobService;
 class LinkRxChannel;
 
@@ -186,6 +187,8 @@ public:
 
     void attach_discs(svc::DiscReadService& d) noexcept { discs_ = &d; }
     [[nodiscard]] svc::DiscReadService* discs() noexcept { return discs_; }
+
+    void attach_mailbox(MailboxRelay& r) noexcept { mailbox_ = &r; }
 
     void set_log_lane(xthread::LogLane* lane) noexcept {
         log_lane_ = lane;
@@ -273,6 +276,7 @@ public:
     Result on(const proto::LinkOp::SetWideIndex& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::CoreReset& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::LoadFacts& a, const LinkOpCtx& ctx) noexcept;
+    Result on(const proto::LinkOp::MailboxWrite& a, const LinkOpCtx& ctx) noexcept;
     Result misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept;
 
     [[nodiscard]] bool declares_turbo() const noexcept override;
@@ -561,6 +565,8 @@ private:
 
     const svc::Vfs* vfs_ = nullptr;
     svc::DiscReadService* discs_ = nullptr;
+    MailboxRelay* mailbox_ = nullptr;
+    std::uint32_t mailbox_write_drops_ = 0;
     svc::ChdPrefetch* prefetch_ = nullptr;
 
     [[nodiscard]] Ex<void> arm_or_write_(std::string_view rel, std::span<const std::byte> bytes);

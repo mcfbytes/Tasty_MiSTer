@@ -112,6 +112,7 @@ private:
     void probe_step_(std::int64_t now) noexcept;
     void probe_read_(std::size_t side, std::int64_t now) noexcept;
     [[nodiscard]] bool probe_decide_(std::int64_t now) noexcept;
+    [[nodiscard]] bool port_stuck_() noexcept;
     [[nodiscard]] bool open_segment_() noexcept;
     void close_step_() noexcept;
     void watch_step_() noexcept;
@@ -159,6 +160,7 @@ private:
     [[nodiscard]] bool rate_is_ours_(std::uint32_t seq) const noexcept;
     void deliver_(std::size_t buf, const hal::ScalerHeader& h, const FrameStamp& s) noexcept;
     [[nodiscard]] bool regrow_() noexcept;
+    [[nodiscard]] bool reserve_arena_(std::size_t slot_bytes) noexcept;
 
     Wiring w_;
     std::optional<hal::ScalerBuffers> window_;

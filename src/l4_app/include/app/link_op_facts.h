@@ -71,6 +71,7 @@ inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
     {proto::LinkOp::Kind::SetWideIndex, OpTarget::Session, Window::Framed, {}},
     {proto::LinkOp::Kind::CoreReset, OpTarget::Session, Window::FramedLive, {}},
     {proto::LinkOp::Kind::LoadFacts, OpTarget::Session, Window::Framed, {}},
+    {proto::LinkOp::Kind::MailboxWrite, OpTarget::Session, Window::Framed, {"req", ""}},
 });
 static_assert(infra::rows_are_ordinal(kLinkOpFacts),
               "kLinkOpFacts is one row per LinkOp kind, in ordinal order");

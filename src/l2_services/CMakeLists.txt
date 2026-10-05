@@ -35,33 +35,27 @@ target_link_libraries(mister_services
 find_package(ZLIB REQUIRED)
 target_link_libraries(mister_services PRIVATE ZLIB::ZLIB)
 
-if(TASTY_WITH_LIBCHDR)
-  if(NOT TASTY_LIBCHDR_INCLUDE_DIR OR NOT TASTY_LIBCHDR_LIBRARY)
-    message(FATAL_ERROR
-      "TASTY_WITH_LIBCHDR=ON but libchdr was not found "
-      "(include=${TASTY_LIBCHDR_INCLUDE_DIR} lib=${TASTY_LIBCHDR_LIBRARY}). "
-      "The x86-64 host has none; use the arm-buildroot toolchain, whose sysroot "
-      "ships libchdr.so and include/libchdr/chd.h.")
-  endif()
-  target_include_directories(mister_services SYSTEM PRIVATE ${TASTY_LIBCHDR_INCLUDE_DIR})
-  target_link_libraries(mister_services PUBLIC ${TASTY_LIBCHDR_LIBRARY})
-  target_compile_definitions(mister_services PRIVATE TASTY_HAVE_LIBCHDR=1)
+if(NOT TASTY_LIBCHDR_INCLUDE_DIR OR NOT TASTY_LIBCHDR_LIBRARY)
+  message(FATAL_ERROR
+    "libchdr is required but was not found "
+    "(include=${TASTY_LIBCHDR_INCLUDE_DIR} lib=${TASTY_LIBCHDR_LIBRARY}). "
+    "The x86-64 host has none; use the arm-buildroot toolchain, whose sysroot "
+    "ships libchdr.so and include/libchdr/chd.h.")
 endif()
+target_include_directories(mister_services SYSTEM PRIVATE ${TASTY_LIBCHDR_INCLUDE_DIR})
+target_link_libraries(mister_services PUBLIC ${TASTY_LIBCHDR_LIBRARY})
 
-if(TASTY_WITH_MINIZIP)
-  if(NOT TASTY_MINIZIP_INCLUDE_DIR OR NOT TASTY_MINIZIP_LIBRARY)
-    message(FATAL_ERROR
-      "TASTY_WITH_MINIZIP=ON but libminizip was not found "
-      "(include=${TASTY_MINIZIP_INCLUDE_DIR} lib=${TASTY_MINIZIP_LIBRARY}). "
-      "The x86-64 host ships the armhf -dev package's headers under "
-      "/usr/include/minizip but no x86-64 library; use the arm-buildroot "
-      "toolchain, whose sysroot ships libminizip.so and include/minizip/unzip.h.")
-  endif()
-  target_include_directories(mister_services SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-
-  target_link_libraries(mister_services PUBLIC ${TASTY_MINIZIP_LIBRARY})
-  target_compile_definitions(mister_services PRIVATE TASTY_HAVE_MINIZIP=1)
+if(NOT TASTY_MINIZIP_INCLUDE_DIR OR NOT TASTY_MINIZIP_LIBRARY)
+  message(FATAL_ERROR
+    "libminizip is required but was not found "
+    "(include=${TASTY_MINIZIP_INCLUDE_DIR} lib=${TASTY_MINIZIP_LIBRARY}). "
+    "The x86-64 host ships the armhf -dev package's headers under "
+    "/usr/include/minizip but no x86-64 library; use the arm-buildroot "
+    "toolchain, whose sysroot ships libminizip.so and include/minizip/unzip.h.")
 endif()
+target_include_directories(mister_services SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
+
+target_link_libraries(mister_services PUBLIC ${TASTY_MINIZIP_LIBRARY})
 
 tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/adv7513_breaker.h
@@ -180,13 +174,6 @@ if(TASTY_BUILD_TESTS)
 
   target_link_libraries(tasty_svc_gzip_inflate_unit PRIVATE ZLIB::ZLIB)
 
-  if(TASTY_WITH_LIBCHDR)
-    target_compile_definitions(tasty_svc_decomp_unit PRIVATE TASTY_HAVE_LIBCHDR=1)
-  endif()
-  if(TASTY_WITH_MINIZIP)
-    target_compile_definitions(tasty_svc_decomp_unit PRIVATE TASTY_HAVE_MINIZIP=1)
-    target_include_directories(tasty_svc_decomp_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
+  target_include_directories(tasty_svc_decomp_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
 
-    target_compile_definitions(tasty_svc_vfs_unit PRIVATE TASTY_HAVE_MINIZIP=1)
-  endif()
 endif()

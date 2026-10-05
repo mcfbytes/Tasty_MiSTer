@@ -44,6 +44,9 @@ struct RtEvidence {
     RtSetup encode_affinity;
     RtSetup recwrite_sched;
     RtSetup recwrite_affinity;
+
+    RtSetup launcher_sched;
+    RtSetup launcher_affinity;
     RtSetup rt_fifo;
     RtSetup rt_affinity;
 

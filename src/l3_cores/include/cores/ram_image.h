@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -26,6 +27,8 @@ struct RamImageRecipe {
     }
 };
 static_assert(std::is_trivially_copyable_v<RamImageRecipe>);
+
+inline constexpr std::string_view kRamImageAddon = "RAM";
 
 [[nodiscard]] std::vector<std::uint8_t> expand(const RamImageRecipe& r);
 

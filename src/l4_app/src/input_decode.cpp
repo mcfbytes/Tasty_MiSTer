@@ -152,6 +152,7 @@ Ex<void> InputDecode::rebuild_registrations() {
             if (joy_key_[slot] != key) {
                 joy_key_[slot] = key;
                 joy_prev_[slot] = d.report().menu_buttons.v;
+                if (launcher_keys_ != nullptr) launcher_keys_->reseat_pad(slot, joy_prev_[slot]);
                 for (std::uint64_t& w : ui_key_down_[slot])
                     w = 0;
             }
@@ -161,6 +162,7 @@ Ex<void> InputDecode::rebuild_registrations() {
         for (; slot < svc::kMaxDevices; ++slot) {
             joy_key_[slot] = 0;
             joy_prev_[slot] = 0;
+            if (launcher_keys_ != nullptr) launcher_keys_->reseat_pad(slot, 0);
             for (std::uint64_t& w : ui_key_down_[slot])
                 w = 0;
         }
@@ -249,6 +251,12 @@ unsigned InputDecode::after_wait() {
     if (!ready() || n < 0) return 0;
 
     if (const auto a = arm_reader_.take_if_changed(wire_.capture_arm())) arm_ = *a;
+    bridging_ = false;
+    if (launcher_keys_ != nullptr) {
+        const bool owns = launcher_cell_->sample().value.owns_screen && !muted_ &&
+                          (wire_.gates() & InputWire::kGateOsdVisible) == 0u;
+        bridging_ = launcher_keys_->set_active(owns);
+    }
 
     unsigned decoded = 0;
     bool published = false;
@@ -453,6 +461,10 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, std::s
             if (!ui_repeat && !push_ui_edge(ke)) break;
             if (!is_pass_through_modifier(e.code)) continue;
         }
+        if (bridging_) {
+            launcher_keys_->key(ke.code, ke.pressed != 0);
+            continue;
+        }
 
         if (kbd_.key_event(proto::HidUsage{static_cast<std::uint8_t>(ke.code)}, ke.pressed != 0)) {
             InputWire::bump(n_keys_pub_, 1);
@@ -567,8 +579,14 @@ void InputDecode::publish_joy_menu(const svc::DeviceReport& r, std::size_t dev_s
     const std::uint32_t now = r.menu_buttons.v;
     const std::uint32_t prev = joy_prev_[dev_slot];
     joy_prev_[dev_slot] = now;
+    if (launcher_keys_ != nullptr) launcher_keys_->pad(dev_slot, now);
 
     if (arm_.armed != 0) {
+        osdbtn_ = 0;
+        return;
+    }
+
+    if (bridging_) {
         osdbtn_ = 0;
         return;
     }

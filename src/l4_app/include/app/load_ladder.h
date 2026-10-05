@@ -88,6 +88,7 @@ private:
     [[nodiscard]] Pass cut_(Host& h);
 
     void progress_(Host& h, bool edge) noexcept;
+    [[nodiscard]] std::uint32_t bracket_length_() const noexcept;
 
     Job job_;
     LoadWindow window_;

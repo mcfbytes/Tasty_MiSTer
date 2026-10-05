@@ -25,6 +25,7 @@ const CoreProfile kGenericProfile{
     .slots = kNoSlots,
     .boot_assets = kNoAssets,
     .signatures = kNoSignatures,
+    .undeclared_start_mount = StartMount::Unmodelled,
 };
 
 void GenericCore::set_pending_ext(std::string_view ext) noexcept { (void)ext_.assign(ext); }

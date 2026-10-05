@@ -8,6 +8,7 @@
 #include "app/rec_control.h"
 #include "app/recorder_control.h"
 #include "app/recorder_status.h"
+#include "infra/diag_log.h"
 #include "app/replay_status.h"
 #include "app/ui_request_ring.h"
 #include "app/video_pump.h"
@@ -36,6 +37,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <sys/mman.h>
@@ -59,12 +61,7 @@
 #include <string_view>
 #include <vector>
 
-#ifndef TASTY_HAVE_MINIZIP
-#define TASTY_HAVE_MINIZIP 0
-#endif
-#if TASTY_HAVE_MINIZIP
 #include <minizip/zip.h>
-#endif
 
 using namespace mister;
 
@@ -143,7 +140,8 @@ struct Tmp {
 
 void publish_id(app::IdentityLatch& ident, std::string_view rbf) {
     const SeatScope rt{SeatTag::RT};
-    ident.publish(rbf, rbf, svc::JoyPlan{}, "", false, false, nullptr, nullptr, nullptr, {});
+    ident.publish(rbf, rbf, mister::app::RememberedStem::of(rbf, {}), svc::JoyPlan{}, "", false,
+                  false, nullptr, nullptr, nullptr, {});
 }
 
 void publish_end(app::ReplayStatusCell& cell, app::ReplayEnd end) {
@@ -589,6 +587,15 @@ void test_lock_unlink() {
     CHECK(fd2.has_value());
     if (fd2) fw::tasty_unlock(*fd2);
     fw::tasty_set_ctl_paths(fw::kTastyLockPath, fw::kTastyPidPath, fw::kTastyStatusPath);
+}
+
+void test_record_dir() {
+    CHECK(fw::tasty_record_dir("/media/fat/tasty/cap/") == "/media/fat/tasty/cap");
+    CHECK(fw::tasty_record_dir("/media/fat/tasty/cap/contra") == "/media/fat/tasty/cap");
+    CHECK(fw::tasty_record_dir("/media/fat/tasty/cap/out.avi") == "/media/fat/tasty/cap");
+    CHECK(fw::tasty_record_dir("/out.avi") == "/");
+    CHECK(fw::tasty_record_dir("/") == "/");
+    CHECK(fw::tasty_record_dir("out.avi") == ".");
 }
 
 void test_prepare_record_stem() {
@@ -1142,6 +1149,101 @@ void test_rec_only_leaves_when_its_recording_ends() {
     }
 }
 
+void test_rec_only_probe_refusal_fails_the_run() {
+    for (const auto v : {app::RecVerdict::NoLiveBuffer, app::RecVerdict::ScalerPortStuck}) {
+        Sess x;
+        x.args.verb = fw::TastyVerb::RecStart;
+        x.args.no_splash = true;
+        x.s.emplace(x.w, x.args);
+        const auto rec = [&x](app::RecState st, app::RecVerdict verdict) {
+            const SeatScope cap{SeatTag::Capture};
+            app::RecorderStatus r{};
+            r.gen = 1;
+            r.answered = 1;
+            r.state = st;
+            r.verdict = verdict;
+            x.recstat.publish(r);
+        };
+        StderrTo err;
+        x.tick();
+        x.tick();
+        rec(app::RecState::Probing, app::RecVerdict::None);
+        for (int i = 0; i < 3; ++i)
+            x.tick();
+        CHECK(x.replay.stops == 0);
+        rec(app::RecState::Idle, v);
+        x.tick();
+        home(x);
+        const std::string said = err.text();
+        CHECK(x.replay.stops >= 1);
+        CHECK(x.exit_code.load() == 1);
+        if (v == app::RecVerdict::NoLiveBuffer) {
+            CHECK(said.find("did not start (no_live_buffer)") != std::string::npos);
+        } else {
+            CHECK(said.find("reboot the MiSTer to clear it") != std::string::npos);
+        }
+    }
+}
+
+void test_a_stuck_port_ends_a_replay() {
+    Sess x;
+    x.args.stay = true;
+    x.s.emplace(x.w, x.args);
+    to_run(x);
+    StderrTo err;
+    {
+        const SeatScope cap{SeatTag::Capture};
+        app::RecorderStatus r{};
+        r.gen = 1;
+        r.answered = 1;
+        r.state = app::RecState::Idle;
+        r.verdict = app::RecVerdict::ScalerPortStuck;
+        x.recstat.publish(r);
+    }
+    for (int i = 0; i < 4; ++i)
+        x.tick();
+    home(x);
+    const std::string said = err.text();
+    CHECK(x.replay.stops >= 1);
+    CHECK(x.exit_code.load() == 1);
+    const std::string remedy = app::rec_verdict_remedy(app::RecVerdict::ScalerPortStuck);
+    const auto first = said.find(remedy);
+    CHECK(first != std::string::npos);
+    CHECK(first == std::string::npos || said.find(remedy, first + 1) == std::string::npos);
+    CHECK(app::rec_verdict_remedy(app::RecVerdict::NoLiveBuffer) == nullptr);
+}
+
+void test_the_verdict_line_names_the_remedy() {
+    Tmp t("/tasty_tasty_remedy_");
+    CHECK(!t.root.empty());
+    xthread::DiagLog diag;
+    CHECK(diag.open(t.p("diag").c_str()));
+    app::RecorderStatusCell status{};
+    app::RecorderControl rc{app::RecorderControl::Wiring{.status = &status, .diag = &diag}};
+    {
+        const SeatScope cap{SeatTag::Capture};
+        app::RecorderStatus r{};
+        r.gen = 1;
+        r.answered = 1;
+        r.verdict = app::RecVerdict::ScalerPortStuck;
+        status.publish(r);
+    }
+    {
+        const SeatScope ui{SeatTag::Ui};
+        rc.tick();
+    }
+    std::string line;
+    if (std::FILE* f = std::fopen(t.p("diag").c_str(), "rb")) {
+        char buf[4096];
+        const std::size_t n = std::fread(buf, 1, sizeof buf, f);
+        line.assign(buf, n);
+        std::fclose(f);
+    }
+    CHECK(line.find("\"v\":\"scaler_port_stuck\"") != std::string::npos);
+    CHECK(line.find("\"remedy\":\"") != std::string::npos);
+    CHECK(line.find("reboot the MiSTer to clear it") != std::string::npos);
+}
+
 void test_record_path_outside_the_root_is_refused() {
     Tmp t("/tasty_tasty_recroot_");
     CHECK(!t.root.empty());
@@ -1414,12 +1516,83 @@ void test_status_scale_step_warns_per_recording() {
 }
 
 void test_status_scale_step_warns_once() {
-    const char* tail = "; the AVI continues at half size in a new "
-                       "segment (--scale native keeps full size and may repeat frames instead)\n";
-    const std::string cpu = std::string("tasty: the encoder was using too much CPU") + tail;
-    const std::string behind = std::string("tasty: the encoder fell behind") + tail;
+    const char* tail = " (--scale native keeps full size and may repeat frames instead)\n";
+    const std::string cpu =
+        std::string("tasty: the encoder was using too much CPU; the AVI continues at half size in "
+                    "a new segment") +
+        tail;
+    const std::string behind =
+        std::string("tasty: the encoder fell behind; the AVI continues at half size in a new "
+                    "segment until it catches up") +
+        tail;
     expect_scale_sentence(0, cpu.c_str(), "too much CPU");
     expect_scale_sentence(1, behind.c_str(), "fell behind");
+}
+
+void test_status_scale_return_is_said() {
+    Tmp t("/tasty_tasty_sr_");
+    CHECK(!t.root.empty());
+    if (t.root.empty()) return;
+    const std::string lock = t.p("lock");
+    const std::string pid = t.p("pid");
+    const std::string st = t.p("status");
+    fw::tasty_set_ctl_paths(lock.c_str(), pid.c_str(), st.c_str());
+    app::EncodeStatusCell enc{};
+    Sess x;
+    x.w.encstat = &enc;
+    x.s.emplace(x.w, x.args);
+    const auto publish = [&](std::uint8_t steps, std::uint8_t recovered, std::uint8_t held = 0) {
+        const SeatScope enc_seat{SeatTag::Encode};
+        app::EncodeStatus body{};
+        body.video.scale = steps > recovered ? 2 : 1;
+        body.video.steps = steps;
+        body.video.recovered = recovered;
+        body.video.fell_behind = 1;
+        body.video.held = held;
+        enc.publish(body);
+    };
+    const std::string back =
+        "tasty: the encoder caught up; the AVI is back at full size in a new segment\n";
+    const auto ends_with = [](const std::string& text, const std::string& tail) {
+        return text.size() >= tail.size() &&
+               text.compare(text.size() - tail.size(), tail.size(), tail) == 0;
+    };
+    const auto said = [&] {
+        ::usleep(260 * 1000);
+        StderrTo cap;
+        x.tick();
+        return cap.text();
+    };
+    to_run(x);
+    publish(1, 0);
+    CHECK(said().find("fell behind") != std::string::npos);
+    publish(1, 1);
+    CHECK(said() ==
+          "tasty: the encoder caught up; the AVI is back at full size in a new segment\n");
+    CHECK(said().empty());
+    publish(2, 1);
+    CHECK(said().find("fell behind") != std::string::npos);
+
+    publish(3, 2);
+    std::string both = said();
+    CHECK(both.find(back) == 0);
+    CHECK(both.find("until it catches up") != std::string::npos);
+    publish(4, 4);
+    both = said();
+    CHECK(both.find("tasty: the encoder fell behind;") == 0);
+    CHECK(ends_with(both, back));
+
+    publish(5, 4, 1);
+    const std::string held = said();
+    CHECK(held.find("fell behind again soon after catching up") != std::string::npos);
+    CHECK(held.find("until it catches up") == std::string::npos);
+    publish_end(x.play, app::ReplayEnd::Finished);
+    {
+        StderrTo cap;
+        x.tick();
+        home(x);
+    }
+    fw::tasty_set_ctl_paths(fw::kTastyLockPath, fw::kTastyPidPath, fw::kTastyStatusPath);
 }
 
 void test_check_exits() {
@@ -1489,7 +1662,6 @@ void test_check_exits() {
     (void)::unlink(t.p("bad.nes").c_str());
 }
 
-#if TASTY_HAVE_MINIZIP
 bool write_bk2_text(const std::string& path, const std::string& header, const std::string& log) {
     zipFile zf = ::zipOpen64(path.c_str(), APPEND_STATUS_CREATE);
     if (zf == nullptr) return false;
@@ -1610,13 +1782,9 @@ void test_bk2_sniff() {
         err = cap.text();
     }
     CHECK(rc == 1);
-#if TASTY_HAVE_LIBCHDR
     CHECK(err ==
           "tasty: cannot hash disc image junk.chd; use a Redump .cue/.bin or a chdman .chd of "
           "one\n");
-#else
-    CHECK(err == "tasty: this build of tasty cannot read .chd disc images: junk.chd\n");
-#endif
 }
 
 void test_bk2_unknown_platform_refused() {
@@ -1642,7 +1810,6 @@ void test_bk2_unknown_platform_refused() {
     (void)::unlink(t.p("n64.bk2").c_str());
     (void)::unlink(t.p("r.nes").c_str());
 }
-#endif
 
 void test_cli_run_flags() {
     const char* const av[] = {"tasty",     "play", "m.fm2",    "--rom", "r.nes",
@@ -2814,6 +2981,15 @@ void test_stop_wait_timeout_launches_nothing() {
     CHECK(*n.p == 0);
 }
 
+namespace {
+int g_termed_fd = -1;
+}
+
+extern "C" void note_term(int) {
+    const char b = 1;
+    (void)!::write(g_termed_fd, &b, 1);
+}
+
 void test_sigbus_during_stop_does_not_home() {
     if (!no_mister_yet()) return;
     SharedInt n;
@@ -2824,17 +3000,24 @@ void test_sigbus_during_stop_does_not_home() {
         CHECK(false);
         return;
     }
+    int termed[2] = {-1, -1};
+    if (::pipe(termed) != 0) {
+        CHECK(false);
+        return;
+    }
     MisterHold hold;
     hold.pid = ::fork();
     CHECK(hold.pid >= 0);
     if (hold.pid < 0) return;
     if (hold.pid == 0) {
         ::close(ready[0]);
+        ::close(termed[0]);
         if (!set_mister_comm()) ::_exit(9);
-        struct sigaction ign {};
-        ign.sa_handler = SIG_IGN;
-        ::sigemptyset(&ign.sa_mask);
-        (void)::sigaction(SIGTERM, &ign, nullptr);
+        g_termed_fd = termed[1];
+        struct sigaction note {};
+        note.sa_handler = &note_term;
+        ::sigemptyset(&note.sa_mask);
+        (void)::sigaction(SIGTERM, &note, nullptr);
         const char up = 1;
         if (::write(ready[1], &up, 1) != 1) ::_exit(9);
         ::close(ready[1]);
@@ -2842,14 +3025,22 @@ void test_sigbus_during_stop_does_not_home() {
             ::pause();
     }
     ::close(ready[1]);
+    ::close(termed[1]);
     char up = 0;
     CHECK(::read(ready[0], &up, 1) == 1);
     ::close(ready[0]);
-    if (up != 1) return;
+    if (up != 1) {
+        ::close(termed[0]);
+        return;
+    }
     const pid_t owner = ::fork();
     CHECK(owner >= 0);
-    if (owner < 0) return;
+    if (owner < 0) {
+        ::close(termed[0]);
+        return;
+    }
     if (owner == 0) {
+        ::close(termed[0]);
         struct rlimit rl {};
         rl.rlim_cur = 0;
         rl.rlim_max = 0;
@@ -2858,14 +3049,15 @@ void test_sigbus_during_stop_does_not_home() {
         fw::tasty_arm_owner_signals();
         fw::ReturnHome home{};
         home.spawned = n.p;
-        std::thread poke([] {
-            ::usleep(200 * 1000);
-            ::kill(::getpid(), SIGBUS);
-        });
-        poke.detach();
         const int rc = fw::tasty_stop_and_owe();
         ::_exit(rc == 0 ? 4 : 5);
     }
+
+    pollfd pf{termed[0], POLLIN, 0};
+    const bool in_wait = ::poll(&pf, 1, 10000) == 1;
+    CHECK(in_wait);
+    ::close(termed[0]);
+    (void)::kill(owner, SIGBUS);
     int st = 0;
     while (::waitpid(owner, &st, 0) < 0 && errno == EINTR) {
     }
@@ -3096,6 +3288,7 @@ int main(int argc, char** argv) {
     test_home_exec_resets_signals();
     test_signal_during_grace_does_not_kill_early();
     test_lock_unlink();
+    test_record_dir();
     test_prepare_record_stem();
     test_prepare_record_avi_stem();
     test_prepare_record_says_why();
@@ -3130,11 +3323,15 @@ int main(int argc, char** argv) {
     test_stay_stop_leaves();
     test_rec_only_stop_leaves();
     test_rec_only_leaves_when_its_recording_ends();
+    test_rec_only_probe_refusal_fails_the_run();
+    test_a_stuck_port_ends_a_replay();
+    test_the_verdict_line_names_the_remedy();
     test_record_path_outside_the_root_is_refused();
     test_stale_generation();
     test_status_force();
     test_status_frames_total();
     test_status_scale_step_warns_once();
+    test_status_scale_return_is_said();
     test_status_scale_step_warns_per_recording();
     test_check_exits();
     test_cli_run_flags();
@@ -3147,11 +3344,9 @@ int main(int argc, char** argv) {
     test_session_waits_for_the_osd_hide();
     test_recorded_replay_rereads_the_geometry();
     test_unrecorded_replay_leaves_the_geometry();
-#if TASTY_HAVE_MINIZIP
     test_bk2_sniff();
     test_bk2_unknown_platform_refused();
     test_nes_bk2_check_header_forms();
-#endif
     if (failures) {
         std::printf("tasty_unit: %d check(s) FAILED\n", failures);
         return 1;

@@ -22,6 +22,7 @@ class SpiFioQueue;
 namespace mister::cores {
 
 class CoreInitHost;
+class IMailboxPort;
 
 struct HostServices {
     const svc::Vfs& vfs;
@@ -39,6 +40,8 @@ struct HostServices {
     const CoreInitHost* init_host = nullptr;
 
     proto::SpiFioQueue* fio_queue = nullptr;
+
+    IMailboxPort* mailbox = nullptr;
 };
 
 }  // namespace mister::cores

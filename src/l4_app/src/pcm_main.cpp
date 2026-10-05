@@ -20,6 +20,11 @@ Ex<void> PcmMain::open() noexcept {
     return {};
 }
 
+void PcmMain::bind_mailbox(MailboxRelay& relay, CompanionHost& host) noexcept {
+    relay_ = &relay;
+    host_ = &host;
+}
+
 void PcmMain::start() noexcept {
     TASTY_SEAT_BODY(PcmMain);
     if (!park_) {
@@ -32,6 +37,7 @@ void PcmMain::start() noexcept {
 
 void PcmMain::serve() noexcept {
     if (stopping()) return;
+    serve_mailbox_();
     if (feeder_.take_park_ask()) {
         while (cmds_.pop().has_value()) {
         }
@@ -43,14 +49,35 @@ void PcmMain::serve() noexcept {
     feeder_.fill_pass();
 }
 
+void PcmMain::serve_mailbox_() noexcept {
+    if (relay_ == nullptr) return;
+    host_->serve();
+    relay_->serve_worker(*host_);
+    host_->refill_one();
+}
+
+bool PcmMain::mailbox_rest_() const noexcept {
+    return relay_ == nullptr || (relay_->worker_idle() && host_->rest());
+}
+
 void PcmMain::on_pause() noexcept {
     while (cmds_.pop().has_value())
         ++paused_cmd_drops_;
     feeder_.park_now();
+    if (relay_ != nullptr) {
+        relay_->park_now();
+        host_->release();
+    }
+}
+
+void PcmMain::settle() noexcept {
+    feeder_.release();
+    if (host_ != nullptr) host_->release();
 }
 
 bool PcmMain::idle() const noexcept {
     if (stopping()) return true;
+    if (!mailbox_rest_()) return false;
     if (!feeder_.rest()) return false;
     return feeder_.parked() || inboxes_empty_();
 }

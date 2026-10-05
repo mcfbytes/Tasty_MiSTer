@@ -21,6 +21,7 @@ enum class Seat : std::uint8_t {
     Capture,
     Encode,
     RecWrite,
+    Launcher,
 };
 
 enum class SchedPolicy : std::uint8_t { Fifo, Other };
@@ -37,7 +38,7 @@ struct ThreadRole {
     SpawnKind spawn;
 };
 
-inline constexpr std::size_t kThreadSeats = 11;
+inline constexpr std::size_t kThreadSeats = 12;
 using ThreadMap = std::array<ThreadRole, kThreadSeats>;
 
 inline constexpr std::size_t kCommNameMax = 15;
@@ -47,6 +48,8 @@ inline constexpr std::size_t kFifoStackBytes = 256u * 1024u;
 inline constexpr std::size_t kOtherStackBytes = 8u * 1024u * 1024u;
 
 inline constexpr std::size_t kRecorderStackBytes = 256u * 1024u;
+
+inline constexpr std::size_t kLauncherStackBytes = 256u * 1024u;
 
 inline constexpr ThreadMap kDe10ThreadMap{{
     {.seat = Seat::RT,
@@ -125,6 +128,13 @@ inline constexpr ThreadMap kDe10ThreadMap{{
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kRecorderStackBytes,
+     .spawn = SpawnKind::Create},
+    {.seat = Seat::Launcher,
+     .name = "T-LAUNCHER",
+     .cpu = 0,
+     .policy = SchedPolicy::Other,
+     .prio = 0,
+     .stack_bytes = kLauncherStackBytes,
      .spawn = SpawnKind::Create},
 }};
 
@@ -217,6 +227,11 @@ constexpr bool recorder_off_rt_cpu(const ThreadMap& m) noexcept {
     const int rt = seat_of(m, Seat::RT).cpu;
     return seat_of(m, Seat::Capture).cpu != rt && seat_of(m, Seat::Encode).cpu != rt &&
            seat_of(m, Seat::RecWrite).cpu != rt;
+}
+
+constexpr bool launcher_off_rt_cpu(const ThreadMap& m) noexcept {
+    const ThreadRole& l = seat_of(m, Seat::Launcher);
+    return l.cpu != seat_of(m, Seat::RT).cpu && l.policy == SchedPolicy::Other;
 }
 
 constexpr bool capture_ranks_lowest(const ThreadMap& m) noexcept {
@@ -331,6 +346,8 @@ constexpr SeatTag tag_of(Seat s) noexcept {
             return SeatTag::Encode;
         case Seat::RecWrite:
             return SeatTag::RecWrite;
+        case Seat::Launcher:
+            return SeatTag::Launcher;
     }
     return SeatTag::Unbound;
 }

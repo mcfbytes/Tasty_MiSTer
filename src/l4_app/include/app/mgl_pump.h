@@ -22,6 +22,9 @@ namespace mister::app {
 
 class InfoSink;
 class IdentityLatch;
+class NameConfig;
+
+enum class MglRemember : std::uint8_t { AsStock, Never };
 
 inline constexpr std::size_t kMglDocMax = 64u * 1024u;
 
@@ -44,6 +47,9 @@ struct MglPumpStats {
     std::uint32_t homes_unbound = 0;
 
     std::uint32_t busy_replays = 0;
+
+    std::uint32_t paths_remembered = 0;
+    std::uint32_t remember_failures = 0;
 };
 
 using MglPumpCell = xthread::Telemetry<MglPumpStats, SeatTag::Ui>;
@@ -76,6 +82,14 @@ public:
     void set_identity(const IdentityLatch* id) noexcept { identity_ = id; }
 
     void set_conf_cell(const ConfStrCell* cell) noexcept { conf_cell_ = cell; }
+
+    void set_names(NameConfig* names) noexcept {
+        names_ = names;
+        player_.set_names(names);
+    }
+
+    void set_remember(MglRemember r) noexcept { remember_ = r; }
+    [[nodiscard]] MglRemember remember() const noexcept { return remember_; }
 
     [[nodiscard]] bool take_playlist(std::string_view path) noexcept;
 
@@ -132,9 +146,13 @@ private:
 
     [[nodiscard]] CoreScope sample_scope();
 
+    void latch_remember_();
+
     const svc::Vfs* vfs_;
     const IdentityLatch* identity_ = nullptr;
     const ConfStrCell* conf_cell_ = nullptr;
+    NameConfig* names_ = nullptr;
+    MglRemember remember_ = MglRemember::AsStock;
 
     ConfStrText conf_scratch_{};
     const os::IClock* clock_;

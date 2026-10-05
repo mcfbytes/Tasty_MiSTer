@@ -61,6 +61,11 @@ public:
         return 3u + (bytes == 0 ? 1u : (bytes + piece_bytes - 1u) / piece_bytes);
     }
 
+    [[nodiscard]] bool fits(std::size_t windows, std::size_t bytes,
+                            std::size_t brackets) const noexcept;
+
+    [[nodiscard]] std::size_t bracket_windows(std::size_t bytes) const noexcept;
+
     [[nodiscard]] Ex<void> submit(std::span<const Bracket> act);
 
     [[nodiscard]] Ex<void> append(std::span<const Bracket> act);

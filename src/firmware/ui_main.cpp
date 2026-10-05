@@ -7,6 +7,7 @@
 #include "app/event_sink.h"
 #include "app/link_rx_channel.h"
 #include "app/mgl_pump.h"
+#include "app/launcher_screen.h"
 #include "app/owner_tick.h"
 #include "app/recorder_control.h"
 #include "app/replay_feeder.h"
@@ -69,6 +70,7 @@ void UiMain::serve() noexcept {
     if (fifo_ != nullptr && park_ && park_->extra_ready()) (void)fifo_->service();
     if (mgl_ != nullptr) mgl_->tick();
     if (video_ != nullptr) video_->tick();
+    if (launcher_screen_ != nullptr) launcher_screen_->tick();
     if (bt_ != nullptr) bt_->tick();
     if (shots_ != nullptr) shots_->tick();
     if (replay_ != nullptr) replay_->tick();

@@ -22,7 +22,7 @@ jobs:
       - name: Packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-15 cmake ninja-build zlib1g-dev libminizip-dev liblzo2-dev python3
+          sudo apt-get install -y g++-15 cmake ninja-build zlib1g-dev libchdr-dev libminizip-dev liblzo2-dev python3
       - name: Configure
         run: cmake --preset host -DCMAKE_CXX_COMPILER=g++-15 -DCMAKE_C_COMPILER=gcc-15
       - name: Build

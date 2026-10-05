@@ -29,12 +29,7 @@
 
 static_assert(sizeof(::off_t) >= 8, "_FILE_OFFSET_BITS=64 is required (warnings.cmake)");
 
-#ifndef TASTY_HAVE_MINIZIP
-#define TASTY_HAVE_MINIZIP 0
-#endif
-#if TASTY_HAVE_MINIZIP
 #include <minizip/unzip.h>
-#endif
 
 namespace mister::svc {
 
@@ -272,8 +267,6 @@ private:
     std::span<const std::byte> blob_;
     std::shared_ptr<std::atomic<std::uint32_t>> hints_;
 };
-
-#if TASTY_HAVE_MINIZIP
 
 constexpr int kZipCaseInsensitive = 2;
 
@@ -650,7 +643,6 @@ private:
     std::string archive_;
     ZipEntries z_;
 };
-#endif
 
 int open_flags(OpenMode m) {
     switch (m) {
@@ -929,12 +921,7 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
         if (detail::has_nested_zip(full)) {
             return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
         }
-#if TASTY_HAVE_MINIZIP
         return zip_open_member(std::string(zs.archive), std::string(zs.member));
-#else
-
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(ENOSYS)});
-#endif
     }
 
     const int flags = open_flags(mode);
@@ -1013,11 +1000,9 @@ Ex<std::unique_ptr<IFile>> Vfs::open_zip_by_crc(std::string_view path, Crc32 crc
                     return std::unique_ptr<IFile>(new MemoryFile(m.blob, m.hints));
                 }
             }
-#if TASTY_HAVE_MINIZIP
             if (auto hit = zip_open_member_by_crc(std::string(zs.archive), crc.v)) {
                 return hit;
             }
-#endif
         }
     }
     return open(path, OpenMode::Read);
@@ -1025,16 +1010,10 @@ Ex<std::unique_ptr<IFile>> Vfs::open_zip_by_crc(std::string_view path, Crc32 crc
 
 Ex<std::unique_ptr<IArchive>> Vfs::open_archive(std::string_view path,
                                                 std::size_t max_entries) const {
-#if TASTY_HAVE_MINIZIP
     const std::string full = compose(root_path_, path);
     auto entries = zip_entries(full, max_entries);
     if (!entries) return std::unexpected(entries.error());
     return std::unique_ptr<IArchive>(new ZipArchive(full, std::move(*entries)));
-#else
-    (void)path;
-    (void)max_entries;
-    return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(ENOSYS)});
-#endif
 }
 
 bool Vfs::dir_exists(std::string_view path) const noexcept {
@@ -1054,7 +1033,6 @@ Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) c
 
     const ZipSplit zs = detail::zip_split(full);
     if (zs.zipped) {
-#if TASTY_HAVE_MINIZIP
         auto listing = zip_list(std::string(zs.archive));
         if (!listing) return std::unexpected(listing.error());
 
@@ -1065,9 +1043,6 @@ Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) c
                 detail::ZipMember{listing->names[i], listing->sizes[i], listing->dirs[i] != 0});
         }
         return detail::zip_folder_entries(zs.member, members, f);
-#else
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(ENOSYS)});
-#endif
     }
 
     ::DIR* d = ::opendir(full.c_str());
@@ -1264,14 +1239,10 @@ namespace {
 bool valid_asset(const std::string& p, bool require_zip = false) {
     if (!path_is_regular(p)) return false;
     if (!require_zip) return true;
-#if TASTY_HAVE_MINIZIP
     auto uf = zip_open_archive(p);
     if (!uf) return false;
     ::unzClose(*uf);
     return true;
-#else
-    return false;
-#endif
 }
 
 std::optional<std::string> asset_in_same_dir(const std::string& rom_full, std::string_view ext) {

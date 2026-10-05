@@ -10,6 +10,8 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <deque>
+#include <vector>
 
 #include "app/board_ops.h"
 #include "app/bitstream_programmer.h"
@@ -22,6 +24,9 @@
 #include "app/fabric_state.h"
 #include "app/fallback_counts.h"
 #include "app/quiesce.h"
+#include "app/addon_send.h"
+#include "app/companion_host.h"
+#include "app/companion_walk.h"
 #include "app/content_request.h"
 #include "app/file_tx_pieces.h"
 #include "app/file_tx_level.h"
@@ -32,12 +37,15 @@
 #include "app/mra_facts.h"
 #include "app/path_text.h"
 #include "app/pending_load.h"
+#include "app/remembered_path.h"
 #include "app/ui_request.h"
 #include "app/ui_request_ring.h"
+#include "cores/companion_load.h"
 #include "cores/loader_memo.h"
 #include "cores/boot_ladder.h"
 #include "cores/ladder_host.h"
 #include "infra/pause_latch.h"
+#include "app/launcher_demand.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
@@ -109,6 +117,15 @@ public:
 
     void set_boot_handoff(hal::IBootHandoff* page) noexcept { handoff_ = page; }
 
+    void set_launcher_demand(LauncherDemandCell* cell, xthread::WakeFlag* wake) noexcept {
+        launcher_cell_ = cell;
+        launcher_wake_ = wake;
+    }
+
+    [[nodiscard]] const LauncherProfile* launcher() const noexcept {
+        return launcher_demand_.profile;
+    }
+
     void set_programmer(BitstreamProgrammer* p) noexcept { programmer_ = p; }
     void set_storage(const svc::Vfs* vfs) noexcept { vfs_ = vfs; }
 
@@ -175,6 +192,18 @@ public:
     [[nodiscard]] const LoadLadder* load() const noexcept { return load_ ? &*load_ : nullptr; }
 
     [[nodiscard]] const LoadWalk* walk() const noexcept { return walk_ ? &*walk_ : nullptr; }
+
+    void set_companion_binds(CompanionHost::Binds* b) noexcept { companion_binds_ = b; }
+
+    [[nodiscard]] const CompanionWalk* companion_walk() const noexcept {
+        return companion_walk_ ? &*companion_walk_ : nullptr;
+    }
+    [[nodiscard]] std::uint32_t companion_walks() const noexcept { return companion_walks_; }
+    [[nodiscard]] std::uint32_t companion_skips() const noexcept { return companion_skips_; }
+
+    [[nodiscard]] std::uint32_t companion_attach_refusals() const noexcept {
+        return companion_attach_refusals_;
+    }
     [[nodiscard]] const LoadWindowCounts& window_counts() const noexcept { return window_counts_; }
     [[nodiscard]] const xthread::Telemetry<LoadWindowCounts, SeatTag::Unbound>& window_cell()
         const noexcept {
@@ -299,7 +328,24 @@ public:
     [[nodiscard]] std::uint32_t start_assets_ordered() const noexcept {
         return start_assets_ordered_;
     }
+
+    [[nodiscard]] std::uint32_t remembered_ordered() const noexcept { return remembered_ordered_; }
+    [[nodiscard]] const RememberedStem& remembered_stem() const noexcept {
+        return remembered_stem_;
+    }
+
+    [[nodiscard]] std::uint32_t remembered_mounts_armed() const noexcept {
+        return remembered_mounts_armed_;
+    }
+    [[nodiscard]] std::uint32_t remembered_mounts_skipped() const noexcept {
+        return remembered_mounts_skipped_;
+    }
+    [[nodiscard]] std::size_t start_mounts_owed() const noexcept { return start_mounts_.size(); }
+    [[nodiscard]] std::uint32_t remembered_missed() const noexcept { return remembered_missed_; }
     [[nodiscard]] std::uint32_t files_failed() const noexcept { return files_failed_; }
+
+    [[nodiscard]] std::uint32_t addons_sent() const noexcept { return addons_sent_; }
+    [[nodiscard]] std::uint32_t addons_missing() const noexcept { return addons_missing_; }
 
     [[nodiscard]] std::uint32_t ram_images_sent() const noexcept { return ram_images_sent_; }
     [[nodiscard]] std::uint32_t ram_images_declined() const noexcept {
@@ -384,6 +430,10 @@ public:
         (void)replay_save_root_.assign(rel);
     }
 
+    enum class RememberedFiles : std::uint8_t { AsStock, Ignore };
+    void set_remembered_files(RememberedFiles r) noexcept { remembered_files_ = r; }
+    [[nodiscard]] RememberedFiles remembered_files() const noexcept { return remembered_files_; }
+
 private:
     struct MountAsk {
         UiRequest::Kind which = UiRequest::Kind::MountImage;
@@ -432,8 +482,15 @@ private:
     void arm_mount_(const MountAsk& ask);
     void arm_ladder_(const MountAsk& ask, const cores::CoreFactory& row);
 
-    [[nodiscard]] bool arm_start_ladder_();
+    [[nodiscard]] bool arm_start_ladder_(bool index0_taken);
     void arm_plain_mount_(const MountAsk& ask);
+
+    void arm_next_mount_();
+    void arm_start_mount_(const MountAsk& ask);
+    void read_remembered_mounts_();
+    [[nodiscard]] bool start_mounts_live_() const noexcept {
+        return !start_mounts_.empty() || (save_mount_ && save_mount_->start) || start_pick_ladder_;
+    }
 
     void step_save_mount_();
     void finish_save_mount_(bool ok, bool quiet = false);
@@ -480,6 +537,15 @@ private:
     void owe_front_end_() noexcept;
     void fall_back_to_front_end_();
 
+    void latch_launcher_(const LauncherProfile& l, std::string_view core_name);
+
+    [[nodiscard]] UiRequest::LoadCore launcher_alias_(
+        const UiRequest::LoadCore& req) const noexcept;
+    void publish_launcher_demand_(std::string_view core_name, bool direct_video) noexcept;
+
+    void withdraw_launcher_demand_() noexcept;
+    void swap_to_launcher_image_();
+
     void recover_session_();
 
     void probe_for_recovery_();
@@ -516,6 +582,8 @@ private:
     [[nodiscard]] bool refuse_in_switch_(UiRequest::Kind kind, CorrelationTag tag) noexcept;
     [[nodiscard]] bool refuse_in_load_(UiRequest::Kind kind, CorrelationTag tag) noexcept;
 
+    [[nodiscard]] const cores::CoreProfile& loaded_profile_() const;
+
     [[nodiscard]] bool streams_files_() const;
 
     void step_pieces_();
@@ -524,6 +592,11 @@ private:
     [[nodiscard]] bool arm_walk_(const ContentRequest& req, const cores::CoreFactory& row);
     void step_load_();
     void step_walk_();
+
+    void make_companion_();
+    void withdraw_companion_() noexcept;
+    void begin_companion_(std::string_view path);
+    void step_companion_();
     void publish_window_counts_() noexcept;
 
     [[nodiscard]] Ex<void> attach_savestates_() noexcept;
@@ -551,7 +624,14 @@ private:
     void on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept;
     void order_session_up_() noexcept;
 
-    void order_start_assets_() noexcept;
+    void order_start_assets_(bool index0_taken) noexcept;
+
+    struct RememberedFile {
+        proto::ConfStrFileRow row;
+        std::string path;
+    };
+    [[nodiscard]] std::vector<RememberedFile> read_remembered_files_() const;
+    void order_remembered_files_(std::span<const RememberedFile> files);
 
     void order_bind_identity_(const proto::ConfStr& conf);
 
@@ -576,7 +656,6 @@ private:
     [[nodiscard]] StepArg step_arg_(Programmed p) const noexcept;
     Programmed program_at_boot_();
     void perform_content_(const ContentRequest& req);
-    void send_ram_image_(const ContentRequest& req);
 
     void refuse_file_ask_(UiRequest::Kind asked, CorrelationTag tag, Errc code) noexcept;
     [[nodiscard]] Ex<proto::ConfStrFileRow> resolve_load_(const UiRequest::LoadFile& r) const;
@@ -584,6 +663,28 @@ private:
 
     template <class R>
     void load_file_(UiRequest::Kind asked, const R& req, CorrelationTag tag);
+
+    [[nodiscard]] std::optional<ContentRequest> content_for_(const proto::ConfStrFileRow& row,
+                                                             std::string_view path) const;
+
+    void attach_row_savestates_(bool opensave);
+
+    void order_row_content_(const ContentRequest& cr, bool opensave, UiRequest::SaveChoice choice,
+                            CorrelationTag tag);
+
+    struct PickedLoad {
+        ContentRequest content{};
+        bool opensave = false;
+        UiRequest::SaveChoice choice = UiRequest::SaveChoice::User;
+        CorrelationTag tag{};
+    };
+
+    void plan_addons_(const proto::ConfStrFileRow& row, std::string_view pick,
+                      const PickedLoad& load, const cores::RamImageRecipe& image);
+    void run_load_(const PickedLoad& load);
+    void step_addons_();
+
+    [[nodiscard]] bool content_ordered_() const noexcept;
 
     [[nodiscard]] std::optional<PathText> zip_member_(const proto::ConfStrFileRow& row,
                                                       std::string_view path) const;
@@ -638,6 +739,7 @@ private:
 
     bool ladder_moved_ = false;
     bool start_ladder_ = false;
+    bool start_pick_ladder_ = false;
     std::optional<proto::LinkOp::CoreReset> reset_owed_{};
     std::uint32_t resets_ordered_ = 0;
 
@@ -652,15 +754,23 @@ private:
         bool bracketed = false;
 
         std::optional<ContentRequest> then_load{};
+        bool start = false;
     };
     std::optional<SaveMount> save_mount_;
     std::uint32_t save_mounts_done_ = 0;
     std::uint32_t open_saves_armed_ = 0;
     std::uint32_t open_saves_skipped_ = 0;
     FixedStr<64, StrFit::Reject> replay_save_root_{};
+    RememberedFiles remembered_files_ = RememberedFiles::AsStock;
 
     FixedStr<64, StrFit::Clip> core_name_{};
     std::uint32_t start_assets_ordered_ = 0;
+    std::uint32_t remembered_ordered_ = 0;
+    std::uint32_t remembered_missed_ = 0;
+
+    std::deque<MountAsk> start_mounts_{};
+    std::uint32_t remembered_mounts_armed_ = 0;
+    std::uint32_t remembered_mounts_skipped_ = 0;
 
     std::uint8_t ladder_slot_ = 0;
     std::uint32_t mounts_armed_ = 0;
@@ -687,6 +797,8 @@ private:
     xthread::Telemetry<std::uint32_t, SeatTag::Unbound> save_write_failures_cell_{};
 
     PathText saved_cfg_stem_{};
+
+    RememberedStem remembered_stem_{};
     std::uint32_t ops_posted_ = 0;
     std::uint32_t op_drops_ = 0;
     std::uint32_t identities_ok_ = 0;
@@ -707,6 +819,11 @@ private:
     bool before_seats_ = false;
     bool front_end_owed_ = false;
     PathText front_end_image_{};
+    LauncherDemand launcher_demand_{};
+    PathText launcher_image_{};
+    LauncherDemandCell* launcher_cell_ = nullptr;
+    xthread::WakeFlag* launcher_wake_ = nullptr;
+    bool launcher_swap_owed_ = false;
     FallbackCounts fallbacks_{};
     xthread::Telemetry<FallbackCounts, SeatTag::Unbound> fallback_cell_{};
     StepArg pending_step_arg_{};
@@ -789,11 +906,24 @@ private:
     std::uint32_t ram_images_declined_ = 0;
 
     cores::RamImageRecipe pending_ram_image_{};
-    std::uint8_t pending_ram_index_ = 0;
+
+    std::optional<AddonSend> addons_{};
+    std::optional<PickedLoad> picked_load_{};
+    std::optional<AddonSend> addons_after_{};
+    std::uint32_t addons_sent_ = 0;
+    std::uint32_t addons_missing_ = 0;
     std::optional<FileTxPieces> pieces_{};
     std::optional<LoadLadder> load_{};
     std::optional<LoadWalk> walk_{};
     std::span<const cores::CoreWindowDecl> walk_windows_{};
+    CompanionHost::Binds* companion_binds_ = nullptr;
+    std::unique_ptr<cores::ICompanionLoad> companion_{};
+    bool companion_attached_ = false;
+    std::uint32_t companion_attach_refusals_ = 0;
+    std::optional<CompanionWalk> companion_walk_{};
+    std::uint16_t companion_gen_ = 0;
+    std::uint32_t companion_walks_ = 0;
+    std::uint32_t companion_skips_ = 0;
     std::uint32_t walk_gen_ = 0;
     cores::MountStatus walk_answer_{};
     bool walk_answer_fresh_ = false;

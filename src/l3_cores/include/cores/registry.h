@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "cores/companion_load.h"
 #include "cores/ladder_context.h"
 #include "cores/loader_context.h"
 
@@ -24,6 +25,8 @@ struct CoreFactory {
     MakeLadder make_ladder;
 
     MakeLoader make_loader;
+
+    MakeCompanion make_companion;
 };
 
 std::span<const CoreFactory> core_table();

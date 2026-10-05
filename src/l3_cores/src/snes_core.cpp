@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/snes_core.h"
 
+#include "cores/mailbox_port.h"
+#include "cores/manifests/snes.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -24,7 +27,16 @@ bool iequal(std::string_view a, std::string_view b) noexcept {
 
 Ex<void> SnesCore::do_init(proto::CoreSession&) { return {}; }
 
-void SnesCore::on_set_pending_file_ext(std::string_view ext) noexcept { (void)ext_.assign(ext); }
+void SnesCore::on_set_pending_file_ext(std::string_view ext) noexcept {
+    (void)ext_.assign(ext);
+    data_host_.set_pending_ext(ext);
+}
+
+void SnesCore::service_mailbox_tick() noexcept {
+    TASTY_SEAT_BODY(SnesCore);
+    if (host().mailbox == nullptr || host().fio_queue == nullptr) return;
+    host().mailbox->service_rt(host().link, *host().fio_queue, manifests::kSnesMailboxFrame);
+}
 
 Ex<void> SnesCore::on_mount(IoIndex, const MountedPath&) { return unimplemented(ERR_SITE()); }
 

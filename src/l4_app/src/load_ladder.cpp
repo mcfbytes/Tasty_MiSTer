@@ -84,7 +84,7 @@ LoadLadder::Pass LoadLadder::open_(Host& h) {
     const proto::LinkOp::FileTx op{.wire_index = job_.wire_index,
                                    .phase = proto::LinkOp::FileTxPhase::WindowOpen,
                                    .file = *id,
-                                   .total = static_cast<std::uint32_t>(extent_),
+                                   .total = bracket_length_(),
                                    .act = job_.act};
     if (!h.inbox.push(op)) return Pass::Waiting;
     progress_(h, true);
@@ -203,7 +203,7 @@ LoadLadder::Pass LoadLadder::close_(Host& h) {
     const proto::LinkOp::FileTx op{.wire_index = job_.wire_index,
                                    .phase = proto::LinkOp::FileTxPhase::WindowClose,
                                    .file = *id,
-                                   .total = static_cast<std::uint32_t>(extent_)};
+                                   .total = bracket_length_()};
     if (!h.inbox.push(op)) return Pass::Waiting;
     pc_ = Pc::Over;
     progress_(h, true);
@@ -247,6 +247,10 @@ LoadLadder::Pass LoadLadder::cut_(Host& h) {
     pc_ = Pc::Over;
     progress_(h, true);
     return Pass::Failed;
+}
+
+std::uint32_t LoadLadder::bracket_length_() const noexcept {
+    return job_.row.length != 0 ? job_.row.length : static_cast<std::uint32_t>(extent_);
 }
 
 void LoadLadder::progress_(Host& h, bool edge) noexcept {

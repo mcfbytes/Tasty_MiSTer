@@ -477,18 +477,6 @@ Ex<ConfStr> ConfStr::parse(std::string_view raw, hal::PhysRegion aperture) {
         return true;
     };
 
-    auto try_initram = [&c](std::string_view f1, std::size_t pos) -> std::size_t {
-        if (!f1.substr(pos).starts_with("INITRAM")) return pos;
-        const std::size_t comma = f1.find(',', pos);
-        const std::size_t seg_end = comma == std::string_view::npos ? f1.size() : comma;
-        std::uint32_t index = 0;
-        const std::string_view body = f1.substr(pos + 7, seg_end - (pos + 7));
-        if (body.size() != 2 || !parse_num(body, 16, index)) return pos;
-        c.ram_image_index_ = static_cast<std::uint8_t>(index);
-        c.caps_.push_back({Capability::Kind::InitRam, std::string(f1.substr(pos, seg_end - pos))});
-        return seg_end;
-    };
-
     if (fields.size() >= 2) {
         const std::string_view f1 = fields[1];
         std::size_t pos = 0;
@@ -504,7 +492,6 @@ Ex<ConfStr> ConfStr::parse(std::string_view raw, hal::PhysRegion aperture) {
             if (auto r = try_axi(f1, pos); !r) {
                 return std::unexpected(r.error());
             }
-            pos = try_initram(f1, pos);
 
             const std::size_t comma = f1.find(',', pos);
             if (pos == seg_start) {
@@ -553,12 +540,44 @@ std::string_view ConfStr::button_list(int type) const noexcept {
     return {};
 }
 
+namespace {
+
+std::uint8_t view_page(const Item& it) noexcept { return it.declares_page ? 0 : it.page; }
+
+const Item* bound_addon(std::span<const Item> items, std::size_t row) noexcept {
+    const std::uint8_t page = view_page(items[row]);
+    for (std::size_t i = row; i-- > 0;) {
+        const Item& it = items[i];
+        if (view_page(it) != page || evaluate(it, OsdMask{0}).hidden) continue;
+        if (it.kind == ItemKind::Addon) return &it;
+        if (it.kind == ItemKind::FileSlot || it.kind == ItemKind::MountSlot) return nullptr;
+    }
+    return nullptr;
+}
+
+std::string_view addon_list(const ItemTable& ast, const Item* addon) noexcept {
+    if (addon == nullptr) return {};
+    const std::string_view body = ast.text(addon->body);
+    const std::size_t comma = body.find(',');
+    return comma == std::string_view::npos ? std::string_view{} : body.substr(comma + 1);
+}
+
+bool addon_after(const ItemTable& ast, const Item* addon) noexcept {
+    if (addon == nullptr) return false;
+    const std::string_view body = ast.text(addon->body);
+    return body.size() >= 2 && body[1] == '1';
+}
+
+}  // namespace
+
 void ConfStr::walk_items() { slots_ = slots_of(ast_); }
 
 std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
     std::vector<ConfStrEntry> slots;
     std::uint32_t selentry = 0;
-    for (const Item& it : ast.items()) {
+    const std::span<const Item> items = ast.items();
+    for (std::size_t n = 0; n < items.size(); ++n) {
+        const Item& it = items[n];
         if (evaluate(it, OsdMask{0}).hidden) continue;
 
         if (!it.declares_page && it.page != 0) continue;
@@ -583,6 +602,9 @@ std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
                              : (fs.letter == 'F') ? static_cast<std::uint8_t>(selentry + 1u)
                                                   : static_cast<std::uint8_t>(0u);
             if (fs.letter == 'F') fs.load_addr = parse_load_addr(ast.subfield(it, 3));
+            const Item* addon = bound_addon(items, n);
+            fs.addon = std::string{addon_list(ast, addon)};
+            fs.addon_after = addon_after(ast, addon);
             slots.push_back(std::move(fs));
         }
 
@@ -649,8 +671,32 @@ std::optional<ConfStrFileRow> ConfStr::menu_pick(ItemOrdinal item, IoIndex drawn
     const Item& it = items[item.v];
     if (it.kind != ItemKind::FileSlot) return std::nullopt;
 
-    return ConfStrFileRow{ast_.subfield(it, 1), drawn.v, parse_load_addr(ast_.subfield(it, 3)),
-                          it.opensave};
+    const Item* addon = bound_addon(items, item.v);
+    return ConfStrFileRow{ast_.subfield(it, 1),
+                          drawn.v,
+                          parse_load_addr(ast_.subfield(it, 3)),
+                          it.opensave,
+                          addon_list(ast_, addon),
+                          addon_after(ast_, addon)};
+}
+
+std::vector<ConfStrFileRow> ConfStr::remembered_rows() const {
+    std::vector<ConfStrFileRow> rows;
+    for (const Item& it : ast_.items()) {
+        if (it.kind != ItemKind::FileSlot || !it.store_name || !it.has_digit) continue;
+        rows.push_back(ConfStrFileRow{ast_.subfield(it, 1), it.digit,
+                                      parse_load_addr(ast_.subfield(it, 3)), it.opensave});
+    }
+    return rows;
+}
+
+std::vector<IoIndex> ConfStr::remembered_mounts() const {
+    std::vector<IoIndex> slots;
+    for (const Item& it : ast_.items()) {
+        if (it.kind != ItemKind::MountSlot || !it.store_name || !it.has_digit) continue;
+        slots.push_back(IoIndex{it.digit});
+    }
+    return slots;
 }
 
 std::uint8_t ConfStr::ext_subindex(std::string_view filename, std::string_view ext_list) noexcept {

@@ -50,8 +50,8 @@ static_assert(windows_well_formed(kDe10Windows),
               "DE10 window rows must be in position order, one row per id");
 
 inline constexpr std::array<PhysRegion, kRegionCount> kDe10Regions{
-    regions::kMinimigShare, regions::kX86Share,    regions::kX86Mem,  regions::kMsuAudio,
-    regions::kA2065Flat,    regions::kSaturnCdBuf, regions::kVideoFb, regions::kScalerOut,
+    regions::kMinimigShare, regions::kX86Share, regions::kX86Mem,    regions::kA2065Flat,
+    regions::kSaturnCdBuf,  regions::kVideoFb,  regions::kScalerOut,
 };
 static_assert(regions_well_formed(kDe10Regions),
               "DE10 region rows must be in RegionId enum order, one row per id");
@@ -346,6 +346,10 @@ static_assert(every_thread_map([](const ThreadMap& m) { return io_outranks_pcm(m
 static_assert(every_thread_map([](const ThreadMap& m) { return recorder_off_rt_cpu(m); }),
               "INVARIANT 2, the recorder's seats: T-CAPTURE, T-ENCODE and T-RECWRITE copy, hash "
               "and write payload-sized bytes; none may share T-RT's CPU, at any policy.");
+
+static_assert(every_thread_map([](const ThreadMap& m) { return launcher_off_rt_cpu(m); }),
+              "T-LAUNCHER hosts an external program that inherits its CPU and policy: it is "
+              "SCHED_OTHER and off T-RT's CPU, so nothing it spawns can run on T-RT's core.");
 
 static_assert(every_thread_map([](const ThreadMap& m) { return capture_ranks_lowest(m); }),
               "the recorder is best effort: T-CAPTURE is FIFO so its copy window is reachable, "

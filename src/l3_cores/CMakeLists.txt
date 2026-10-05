@@ -1,3 +1,4 @@
+
 set(TASTY_CORES_TASTY
   src/md5.cpp
   src/boot_ladder.cpp
@@ -18,6 +19,10 @@ set(TASTY_CORES_TASTY
   src/registry.cpp
   src/snes_core.cpp
   src/snes_rom.cpp
+  src/msu_machine.cpp
+  src/msu_companion.cpp
+  src/msu_data_loader.cpp
+  src/mailbox_servants.cpp
   src/movie_archive.cpp
   src/movie_codec.cpp
   src/nes_movie_codec.cpp
@@ -194,6 +199,18 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/signature_row.h
   cores/snes_core.h
   cores/snes_rom.h
+  cores/msu_wire.h
+  cores/msu_machine.h
+  cores/msu_companion.h
+  cores/msu_data_loader.h
+  cores/mailbox_port.h
+  cores/mailbox_rows.h
+  cores/mailbox_census_rows.h
+  cores/mailbox_servant.h
+  cores/mailbox_servants.h
+  cores/companion_ask.h
+  cores/companion_plan.h
+  cores/companion_load.h
   cores/movie_archive.h
   cores/movie_codec.h
   cores/movie_system.h
@@ -242,10 +259,7 @@ if(TASTY_BUILD_TESTS)
 
   add_executable(tasty_cores_nes_bk2_codec_unit tests/nes_bk2_codec_unit.cpp)
   target_link_libraries(tasty_cores_nes_bk2_codec_unit PRIVATE mister_cores tasty_test_options)
-  if(TASTY_WITH_MINIZIP)
-    target_compile_definitions(tasty_cores_nes_bk2_codec_unit PRIVATE TASTY_HAVE_MINIZIP=1)
-    target_include_directories(tasty_cores_nes_bk2_codec_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-  endif()
+  target_include_directories(tasty_cores_nes_bk2_codec_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
   add_test(NAME tasty.cores_nes_bk2_codec COMMAND tasty_cores_nes_bk2_codec_unit)
   set_tests_properties(tasty.cores_nes_bk2_codec PROPERTIES TIMEOUT 60)
 
@@ -268,18 +282,12 @@ if(TASTY_BUILD_TESTS)
   target_link_libraries(tasty_cores_psx_movie_codec_unit PRIVATE mister_cores tasty_test_options)
   target_compile_definitions(tasty_cores_psx_movie_codec_unit PRIVATE
     TASTY_PSX_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/psx")
-  if(TASTY_WITH_LIBCHDR)
-    target_compile_definitions(tasty_cores_psx_movie_codec_unit PRIVATE TASTY_HAVE_LIBCHDR=1)
-  endif()
   add_test(NAME tasty.cores_psx_movie_codec COMMAND tasty_cores_psx_movie_codec_unit)
   set_tests_properties(tasty.cores_psx_movie_codec PROPERTIES TIMEOUT 60)
 
   add_executable(tasty_cores_movie_archive_unit tests/movie_archive_unit.cpp)
   target_link_libraries(tasty_cores_movie_archive_unit PRIVATE mister_cores tasty_test_options)
-  if(TASTY_WITH_MINIZIP)
-    target_compile_definitions(tasty_cores_movie_archive_unit PRIVATE TASTY_HAVE_MINIZIP=1)
-    target_include_directories(tasty_cores_movie_archive_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-  endif()
+  target_include_directories(tasty_cores_movie_archive_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
   add_test(NAME tasty.cores_movie_archive COMMAND tasty_cores_movie_archive_unit)
   set_tests_properties(tasty.cores_movie_archive PROPERTIES TIMEOUT 300)
 
@@ -432,6 +440,11 @@ if(TASTY_BUILD_TESTS)
   target_link_libraries(tasty_cores_snes_rom_unit PRIVATE mister_cores tasty_test_options)
   add_test(NAME tasty.cores_snes_rom COMMAND tasty_cores_snes_rom_unit)
   set_tests_properties(tasty.cores_snes_rom PROPERTIES TIMEOUT 60)
+
+  add_executable(tasty_cores_snes_msu_unit tests/snes_msu_unit.cpp)
+  target_link_libraries(tasty_cores_snes_msu_unit PRIVATE mister_cores tasty_test_options)
+  add_test(NAME tasty.cores_snes_msu COMMAND tasty_cores_snes_msu_unit)
+  set_tests_properties(tasty.cores_snes_msu PROPERTIES TIMEOUT 60)
 
   add_executable(tasty_cores_snes_core_unit tests/snes_core_unit.cpp)
   target_link_libraries(tasty_cores_snes_core_unit PRIVATE mister_cores tasty_test_options)

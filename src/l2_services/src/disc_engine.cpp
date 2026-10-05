@@ -12,9 +12,7 @@
 
 #include "vfs_detail.h"
 
-#if defined(TASTY_HAVE_LIBCHDR)
 #include <libchdr/chd.h>
-#endif
 
 namespace mister::svc {
 
@@ -231,12 +229,7 @@ Ex<void> DiscEngine::mount(std::string_view image_path) {
         image_named_sub = true;
     } else if (ends_with_ci(image_path, ".chd")) {
         image_named_sub = true;
-#if defined(TASTY_HAVE_LIBCHDR)
         r = mount_chd_path(image_path);
-#else
-
-        r = std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
-#endif
     } else {
         r = mount_iso(image_path);
     }
@@ -1500,7 +1493,6 @@ void DiscEngine::prefetch_hint(Lba lba) {
     prefetch_->submit(hunk);
 }
 
-#if defined(TASTY_HAVE_LIBCHDR)
 namespace {
 
 struct CoreFileBinding {
@@ -1645,11 +1637,5 @@ Ex<void> DiscEngine::mount_chd_path(std::string_view chd_path) {
                               static_cast<std::uint64_t>(hunk_bytes_) * depth);
     return {};
 }
-#else
-Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file) {
-    (void)file;
-    return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
-}
-#endif
 
 }  // namespace mister::svc

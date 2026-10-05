@@ -53,11 +53,16 @@ public:
     static constexpr std::int64_t kSilenceSlackNs = 2 * reactor::kTickNs;
     static constexpr std::int64_t kSilenceWindowNs = 1'000'000'000;
 
+    static constexpr std::int64_t kSlipNs = 2 * reactor::kTickNs;
+
+    static constexpr std::int64_t kGapNs = 2 * reactor::kTickNs;
+
     explicit ReplayGate(const Wiring& w) noexcept : w_(w) {}
     ReplayGate(const ReplayGate&) = delete;
     ReplayGate& operator=(const ReplayGate&) = delete;
 
-    void tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswers late = {}) noexcept;
+    void tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswers late = {},
+              std::optional<std::uint32_t> queued = std::nullopt) noexcept;
     [[nodiscard]] bool wants_record() const noexcept;
 
     [[nodiscard]] std::uint32_t take_round_words() noexcept {
@@ -94,6 +99,8 @@ private:
                       std::uint8_t ports) noexcept;
     void force_release_(std::uint8_t ports) noexcept;
     void note_late_(std::uint32_t first) noexcept;
+    void note_gap_() noexcept;
+    void note_depth_() noexcept;
     void disarm_(ReplayEnd why, bool release) noexcept;
     [[nodiscard]] bool pre_epoch_(std::uint32_t frame) const noexcept;
     [[nodiscard]] bool live_() const noexcept;
@@ -133,6 +140,8 @@ private:
     std::int64_t last_sample_ns_ = 0;
     std::int64_t end_ns_ = 0;
     std::int64_t prev_edge_ns_ = 0;
+    std::int64_t read_ns_ = 0;
+    std::int64_t edge_gap_ns_ = 0;
     std::uint32_t blk_seen_ = 0;
     std::uint32_t blk_base_ = 0;
     bool epoch_known_ = false;
@@ -141,6 +150,9 @@ private:
     std::int64_t now_ = 0;
     bool ready_ = false;
     std::uint32_t round_words_ = 0;
+    std::optional<std::uint32_t> queued_{};
+    std::int64_t tick_ns_ = 0;
+    std::int64_t gap_ns_ = 0;
     std::int64_t mf_ = -1;
     std::int64_t covered_ = -1;
     std::int64_t underrun_at_ = -1;

@@ -10,6 +10,8 @@
 #include "cores/movie_system.h"
 #include "cores/registry.h"
 #include "cores/rom_digest.h"
+#include "hal/board_profile.h"
+#include "hal/thread_map.h"
 #include "infra/error.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
@@ -57,6 +59,11 @@ int cmd_rec_start_client(const mister::fw::TastyArgs& a) {
     if (auto r = mister::fw::tasty_write_cmd(std::string_view(buf, static_cast<std::size_t>(n)));
         !r)
         return print_err(r.error(), "cmd");
+    if (const auto blob = mister::hal::read_compatible(mister::hal::kCompatiblePath)) {
+        if (const auto board = mister::hal::select_board(*blob))
+            mister::fw::tasty_warn_record_writeback(
+                rec->view(), mister::hal::seat_of((*board)->threads, mister::hal::Seat::RT).cpu);
+    }
     return 0;
 }
 

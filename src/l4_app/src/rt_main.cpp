@@ -9,6 +9,7 @@
 #include "app/link_session.h"
 #include "app/core_frame_counter.h"
 #include "app/replay_gate.h"
+#include "app/scanout_relay.h"
 #include "infra/message_sum.h"
 #include "proto/spi_fio_queue.h"
 #include "reactor/executive.h"
@@ -16,9 +17,10 @@
 
 namespace mister::app {
 
-static_assert(ReplayGate::kMaxRoundWords + CoreFrameCounter::kMaxRoundWords <=
-                  proto::tightest_round_budget_words(),
-              "the replay's and the frame reader's words together stay inside the round budget");
+static_assert(
+    ReplayGate::kMaxRoundWords + CoreFrameCounter::kMaxRoundWords + ScanoutRelay::kMaxRoundWords <=
+        proto::tightest_round_budget_words(),
+    "the replay's, the frame reader's and the scanout relay's words together fit the round budget");
 
 void RtMain::start() noexcept {
     TASTY_SEAT_BODY(RtMain);
@@ -64,6 +66,7 @@ bool RtMain::drain_fio_() noexcept {
 
     std::uint32_t spent = replay_ != nullptr ? replay_->take_round_words() : 0u;
     if (frames_ != nullptr) spent += frames_->take_round_words();
+    if (scanout_ != nullptr) spent += scanout_->take_round_words();
     if (session_ == nullptr) return false;
     proto::SpiFioQueue& q = session_->binder().fio_queue();
     if (session_->park().engaged()) {
@@ -94,6 +97,8 @@ void RtMain::round(bool tick) {
     replay_step_();
 
     frames_step_();
+
+    scanout_step_();
 
     if (input_ != nullptr) input_->on_rt_round(tick, core_edge_seq_(), session_live_());
 
@@ -144,6 +149,23 @@ unsigned RtMain::drain_(LinkTxChannel& inbox, unsigned already, unsigned budget,
     return got;
 }
 
+void RtMain::scanout_step_() noexcept {
+    if (scanout_ == nullptr) return;
+
+    using Wire = ScanoutRelay::Wire;
+    if (!scanout_->collect()) {
+        scanout_->step(Wire::Held);
+        return;
+    }
+    if (session_ != nullptr && session_->session_starting())
+        scanout_->step(Wire::CoreStarting);
+    else if (wire_held_() || (session_ != nullptr &&
+                              (session_->park().engaged() || !session_->ui_inbox().drained())))
+        scanout_->step(Wire::Held);
+    else
+        scanout_->step(Wire::Ready);
+}
+
 bool RtMain::replay_ready_() const noexcept {
     return session_live_() && (session_ == nullptr || !session_->park().engaged());
 }
@@ -152,7 +174,8 @@ void RtMain::replay_step_() noexcept {
     if (replay_ == nullptr) return;
     const proto::LateAnswers late =
         session_ != nullptr ? session_->take_late_answers() : proto::LateAnswers{};
-    replay_->tick(replay_ready_(), core_edge_seq_(), late);
+    replay_->tick(replay_ready_(), core_edge_seq_(), late,
+                  static_cast<std::uint32_t>(replay_ring_->size()));
     for (unsigned n = 0; n < ReplayGate::kReplayBudget && replay_->wants_record(); ++n) {
         const auto m = replay_ring_->pop();
         if (!m) break;

@@ -53,6 +53,10 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/ps2_keyboard.h
   proto/ps2_mouse.h
   proto/ps2_frame.h
+  proto/mailbox_act.h
+  proto/mailbox_frame.h
+  proto/mailbox_frame_decl.h
+  proto/mailbox_poll.h
   proto/ps2_wire.h
   proto/save_request.h
   proto/save_state_decl.h

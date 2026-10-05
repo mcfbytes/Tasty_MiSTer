@@ -45,7 +45,7 @@ struct AxiUnkindedDecl {
 };
 
 struct Capability {
-    enum class Kind : std::uint8_t { SaveState, Uart, Midi, Irq, Axi, InitRam, Unknown };
+    enum class Kind : std::uint8_t { SaveState, Uart, Midi, Irq, Axi, Unknown };
     Kind kind;
     std::string raw;
 };
@@ -62,6 +62,8 @@ struct ConfStrEntry {
     std::uint8_t ioctl_index = 0;
 
     std::uint32_t load_addr = 0;
+    std::string addon;
+    bool addon_after = false;
 };
 
 struct ConfStrFileRow {
@@ -69,6 +71,8 @@ struct ConfStrFileRow {
     std::uint8_t ioctl_index = 0;
     std::uint32_t load_addr = 0;
     bool opensave = false;
+    std::string_view addon{};
+    bool addon_after = false;
 };
 
 enum class FileSlotMatch : std::uint8_t { Exact, RowZero };
@@ -254,8 +258,6 @@ public:
     std::uint32_t axi_unknown_kind_count() const noexcept { return axi_unknown_kinds_; }
     const std::optional<SaveStateDecl>& savestate() const noexcept { return ss_; }
 
-    std::optional<std::uint8_t> ram_image_index() const noexcept { return ram_image_index_; }
-
     std::optional<os::UioLine> irq_line_for(reactor::Cause klass) const;
 
     const std::vector<std::string>& raw_items() const noexcept { return items_; }
@@ -300,6 +302,10 @@ public:
 
     std::optional<ConfStrFileRow> menu_pick(ItemOrdinal item, IoIndex drawn) const noexcept;
 
+    [[nodiscard]] std::vector<ConfStrFileRow> remembered_rows() const;
+
+    [[nodiscard]] std::vector<IoIndex> remembered_mounts() const;
+
     static std::uint8_t ext_subindex(std::string_view filename, std::string_view ext_list) noexcept;
 
     static std::uint16_t wire_index(ConfStrFileRow row, std::string_view filename) noexcept {
@@ -310,7 +316,8 @@ public:
         return wire_index(row_of(slot), filename);
     }
     static ConfStrFileRow row_of(const ConfStrEntry& slot) noexcept {
-        return ConfStrFileRow{slot.ext, slot.ioctl_index, slot.load_addr, slot.opensave};
+        return ConfStrFileRow{slot.ext,      slot.ioctl_index, slot.load_addr,
+                              slot.opensave, slot.addon,       slot.addon_after};
     }
 
 private:
@@ -324,7 +331,6 @@ private:
     std::vector<AxiDdrDecl> axi_ddr_;
     std::vector<AxiUnkindedDecl> axi_unkinded_;
     std::uint32_t axi_unknown_kinds_ = 0;
-    std::optional<std::uint8_t> ram_image_index_;
     std::optional<SaveStateDecl> ss_;
     std::vector<std::string> items_;
     ItemTable ast_;

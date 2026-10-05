@@ -73,6 +73,14 @@ Ex<std::string_view> PendingLoad::manifest_doc_(const svc::Vfs& vfs) const {
     return std::string_view{doc_};
 }
 
+bool same_image_name(std::string_view rel, std::string_view image) noexcept {
+    const auto base = [](std::string_view p) noexcept {
+        const std::size_t slash = p.rfind('/');
+        return slash == std::string_view::npos ? p : p.substr(slash + 1);
+    };
+    return !rel.empty() && ieq(base(rel), base(image));
+}
+
 bool names_front_end_image(std::string_view rel, XmlKind kind) noexcept {
     if (kind != XmlKind::Rbf) return false;
     const std::size_t slash = rel.rfind('/');

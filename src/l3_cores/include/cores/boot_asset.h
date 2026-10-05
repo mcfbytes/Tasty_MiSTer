@@ -56,4 +56,8 @@ consteval std::array<BootAsset, 5> stock_start_chain(std::string_view subdir) {
     }};
 }
 
+[[nodiscard]] constexpr bool start_row_sends(const BootAsset& row, bool index0_taken) noexcept {
+    return !(index0_taken && row.dest.v == 0);
+}
+
 }  // namespace mister::cores

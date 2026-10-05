@@ -11,11 +11,9 @@
 #include "hal/phys_region.h"
 #include "svc/video_service.h"
 
-#ifdef TASTY_SPLASH_EMBED
 #include <zlib.h>
 
 #include "splash_embed.h"
-#endif
 
 namespace mister::fw {
 namespace {
@@ -75,7 +73,6 @@ bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
     if (fb_region_.len == 0 || need > fb_region_.len) return false;
     auto view = fb_->view(0, need);
     std::uint32_t* dst = reinterpret_cast<std::uint32_t*>(view.data() + kPixelOff);
-#ifdef TASTY_SPLASH_EMBED
     auto* raw = static_cast<unsigned char*>(std::malloc(kSplashEmbedRaw));
     if (raw == nullptr) return false;
     uLongf n = kSplashEmbedRaw;
@@ -116,23 +113,6 @@ bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
     }
     std::free(raw);
     return true;
-#else
-    const std::uint32_t side = width < height ? width / 3 : height / 3;
-    const std::uint32_t x0 = width / 2 - side / 2;
-    const std::uint32_t y0 = height / 2 - side / 2;
-    for (std::uint32_t y = 0; y < height; ++y) {
-        for (std::uint32_t x = 0; x < width; ++x) {
-            std::uint32_t c = kArgbBg;
-            if (x >= x0 && x < x0 + side && y >= y0 && y < y0 + side && side != 0) {
-                const std::uint32_t lx = (x - x0) * kLogo / side;
-                const std::uint32_t ly = (y - y0) * kLogo / side;
-                if (lx < kLogo && ly < kLogo) c = pixel(lx, ly);
-            }
-            dst[y * width + x] = c;
-        }
-    }
-    return true;
-#endif
 }
 
 Ex<void> TastySplash::show(app::VideoPump& video, std::uint32_t width,

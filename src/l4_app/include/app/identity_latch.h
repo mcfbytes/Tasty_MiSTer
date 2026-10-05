@@ -25,12 +25,12 @@ public:
     IdentityLatch(const IdentityLatch&) = delete;
     IdentityLatch& operator=(const IdentityLatch&) = delete;
 
-    void publish(std::string_view core, std::string_view rbf, const svc::JoyPlan& joy,
-                 std::string_view j_names, bool front_end, bool suppress_analog_followup,
-                 const svc::IAnalogReshape* analog_reshape, const char* cue_dir,
-                 const cores::CheatLookup* cheats, std::span<const cores::FileSlot> slots,
-                 const GameId& game_id = {}, bool setname_same_dir = false,
-                 bool image_no_zip = false) noexcept;
+    void publish(std::string_view core, std::string_view rbf, const RememberedStem& stem,
+                 const svc::JoyPlan& joy, std::string_view j_names, bool front_end,
+                 bool suppress_analog_followup, const svc::IAnalogReshape* analog_reshape,
+                 const char* cue_dir, const cores::CheatLookup* cheats,
+                 std::span<const cores::FileSlot> slots, const GameId& game_id = {},
+                 bool setname_same_dir = false, bool image_no_zip = false) noexcept;
 
     [[nodiscard]] bool copy(SessionIdentity& out) const noexcept;
 

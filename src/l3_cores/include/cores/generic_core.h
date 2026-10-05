@@ -22,6 +22,7 @@ inline constexpr CoreProfile kMenuProfile{
     .boot_assets = {},
     .signatures = {},
     .is_front_end = true,
+    .undeclared_start_mount = StartMount::Unmodelled,
 };
 
 class GenericCore final : public Core, public IStreamLoad {

@@ -33,6 +33,7 @@
 #include "cores/rom_digest.h"
 #include "infra/error.h"
 #include "infra/persist.h"
+#include "os/writeback_probe.h"
 #include "svc/file.h"
 #include "svc/scan_filter.h"
 #include "svc/vfs.h"
@@ -973,6 +974,46 @@ std::optional<app::PathText> tasty_prepare_record(app::PathText record,
     const std::string joined = path + "/" + std::string(stem_of(movie));
     if (!record.assign(joined)) return refuse("that record path is too long", path);
     return record;
+}
+
+void warn_writeback_cpumask(const os::WritebackProbe& wb, int rt_cpu, const char* prog,
+                            std::FILE* out) noexcept {
+    if (!wb.fs_magic || !os::is_network_fs(*wb.fs_magic)) return;
+    const auto cpus = os::effective_writeback_cpus(wb);
+    if (!cpus || rt_cpu < 0 || rt_cpu >= 64) return;
+    const std::uint64_t rt_bit = std::uint64_t{1} << rt_cpu;
+    if ((*cpus & rt_bit) == 0) return;
+    std::uint64_t fix = *wb.cpumask & ~rt_bit;
+    if (fix == 0) fix = rt_cpu == 0 ? 2u : 1u;
+    std::fprintf(out,
+                 "%s: warning: writeback cpumask=%llx: flushing to a network share may run on "
+                 "real-time CPU %d and stall real-time I/O; fix: echo %llx > %s\n",
+                 prog, static_cast<unsigned long long>(*wb.cpumask), rt_cpu,
+                 static_cast<unsigned long long>(fix), os::kWritebackCpumaskPath);
+}
+
+std::string_view tasty_record_dir(std::string_view record) noexcept {
+    if (!record.empty() && record.back() == '/') {
+        record.remove_suffix(1);
+    } else {
+        const auto slash = record.rfind('/');
+        if (slash == std::string_view::npos) return ".";
+        record = record.substr(0, slash);
+    }
+    return record.empty() ? std::string_view("/") : record;
+}
+
+void tasty_warn_record_writeback(std::string_view record, int rt_cpu, const char* cpumask_path,
+                                 const char* unbound_path, std::FILE* out) noexcept {
+    app::PathText dir{};
+    if (!dir.assign(tasty_record_dir(record))) return;
+    warn_writeback_cpumask(os::read_writeback_probe(dir.c_str(), cpumask_path, unbound_path),
+                           rt_cpu, "tasty", out);
+}
+
+void tasty_warn_record_writeback(std::string_view record, int rt_cpu) noexcept {
+    tasty_warn_record_writeback(record, rt_cpu, os::kWritebackCpumaskPath, os::kUnboundCpumaskPath,
+                                stderr);
 }
 
 }  // namespace mister::fw

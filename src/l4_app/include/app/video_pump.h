@@ -34,6 +34,8 @@ class Vfs;
 
 namespace mister::app {
 
+class HpsFramebuffer;
+
 enum class VideoI2cOutcome : std::uint8_t {
     Unwired = 0,
     Absent,
@@ -124,6 +126,8 @@ public:
     [[nodiscard]] bool take_video_mode(std::string_view spec) noexcept;
 
     [[nodiscard]] bool take_fb_cmd(std::string_view line) noexcept;
+
+    void set_hps_framebuffer(HpsFramebuffer* fb) noexcept { hps_fb_ = fb; }
 
     void tick();
 
@@ -341,6 +345,7 @@ private:
     std::uint32_t geo_polls_ = 0;
     std::uint32_t geo_edges_ = 0;
     std::uint32_t geo_gen_seen_ = 0;
+    HpsFramebuffer* hps_fb_ = nullptr;
     std::uint16_t scrw_ = 0;
     std::uint16_t scrh_ = 0;
     std::uint8_t vscale_mode_ = 0;

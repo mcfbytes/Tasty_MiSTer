@@ -18,6 +18,8 @@ using proto::IoIndex;
 
 enum class SlotRole : std::uint8_t { Image, Disc, Save };
 
+enum class StartMount : std::uint8_t { Generic, AsPick, Unmodelled };
+
 struct FileSlot {
     TASTY_SEAT_EXEMPT(const_shared);
     IoIndex index;
@@ -33,6 +35,8 @@ struct FileSlot {
     std::unique_ptr<IRomsetAliasSource> (*romset_aliases)() = nullptr;
 
     bool opens_zip = false;
+
+    StartMount start_mount = StartMount::Generic;
 };
 
 [[nodiscard]] constexpr bool walks_romset(std::span<const FileSlot> slots, IoIndex index) {
@@ -42,10 +46,19 @@ struct FileSlot {
     return false;
 }
 
+[[nodiscard]] constexpr bool is_load_row(const FileSlot& s) { return s.romset_browse; }
+
 [[nodiscard]] constexpr SlotRole role_of(std::span<const FileSlot> slots, IoIndex index) {
     for (const FileSlot& s : slots)
-        if (s.index == index && !s.romset_browse) return s.role;
+        if (s.index == index && !is_load_row(s)) return s.role;
     return SlotRole::Image;
+}
+
+[[nodiscard]] constexpr StartMount start_mount_of(std::span<const FileSlot> slots, IoIndex index,
+                                                  StartMount undeclared = StartMount::Generic) {
+    for (const FileSlot& s : slots)
+        if (s.index == index && !is_load_row(s)) return s.start_mount;
+    return undeclared;
 }
 
 [[nodiscard]] constexpr std::size_t disc_rows(std::span<const FileSlot> slots) {

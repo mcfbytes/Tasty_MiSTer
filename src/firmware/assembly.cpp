@@ -29,6 +29,7 @@
 #include "app/encode_main.h"
 #include "app/pcm_main.h"
 #include "app/rec_write_main.h"
+#include "app/launcher_main.h"
 #include "app/rt_main.h"
 #include "svc/chd_prefetch.h"
 #include "svc/prefetch_main.h"
@@ -400,7 +401,8 @@ ThreadAssembly::ThreadAssembly(xthread::RtStats& stats, app::EventQueue& events,
 
 bool ThreadAssembly::any_live() const noexcept {
     return diag_live_ || ui_live_ || frame_live_ || input_live_ || prefetch_live_ || pcm_live_ ||
-           io_live_ || rt_live_ || capture_live_ || encode_live_ || rec_write_live_;
+           io_live_ || rt_live_ || capture_live_ || encode_live_ || rec_write_live_ ||
+           launcher_live_;
 }
 
 ThreadAssembly::~ThreadAssembly() {
@@ -462,6 +464,8 @@ RtSetup* ThreadAssembly::affinity_row(hal::Seat s) noexcept {
             return &ev_.encode_affinity;
         case Seat::RecWrite:
             return &ev_.recwrite_affinity;
+        case Seat::Launcher:
+            return &ev_.launcher_affinity;
     }
     return nullptr;
 }
@@ -488,6 +492,9 @@ app::EncodeMain& ThreadAssembly::main_(std::type_identity<app::EncodeMain>) noex
 }
 app::RecWriteMain& ThreadAssembly::main_(std::type_identity<app::RecWriteMain>) noexcept {
     return *rec_write_;
+}
+app::LauncherMain& ThreadAssembly::main_(std::type_identity<app::LauncherMain>) noexcept {
+    return *launcher_;
 }
 
 constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<DiagMain>) noexcept {
@@ -523,6 +530,9 @@ constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::EncodeMain>) n
 constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::RecWriteMain>) noexcept {
     return Seat::RecWrite;
 }
+constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::LauncherMain>) noexcept {
+    return Seat::Launcher;
+}
 
 std::atomic<long>* ThreadAssembly::tid_cell_(hal::Seat s) noexcept {
     switch (s) {
@@ -548,6 +558,8 @@ std::atomic<long>* ThreadAssembly::tid_cell_(hal::Seat s) noexcept {
             return &encode_tid_;
         case Seat::RecWrite:
             return &rec_write_tid_;
+        case Seat::Launcher:
+            return &launcher_tid_;
     }
     return nullptr;
 }
@@ -583,6 +595,7 @@ Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
     capture_ = recorder ? mains.capture : nullptr;
     encode_ = recorder ? mains.encode : nullptr;
     rec_write_ = recorder ? mains.rec_write : nullptr;
+    launcher_ = mains.launcher;
     diag_sampler_.set_input_build(mains.input_build);
     diag_sampler_.set_prefetch(prefetch_ != nullptr ? &prefetch_->prefetch() : nullptr);
 
@@ -678,13 +691,24 @@ Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
         capture_live_ = true;
     }
 
+    if (launcher_ != nullptr) {
+        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Launcher),
+                                &ThreadAssembly::trampoline<app::LauncherMain>, this,
+                                launcher_thread_, mode, ev_.launcher_sched);
+            !r) {
+            return r;
+        }
+        launcher_live_ = true;
+    }
+
     return await_published([this] {
         return diag_tid() != 0 && ui_tid() != 0 && (frame_ == nullptr || frame_tid() != 0) &&
                (prefetch_ == nullptr || prefetch_tid() != 0) &&
                (pcm_ == nullptr || pcm_tid() != 0) && (input_ == nullptr || input_tid() != 0) &&
                (io_ == nullptr || io_tid() != 0) &&
                (capture_ == nullptr ||
-                (capture_tid() != 0 && encode_tid() != 0 && rec_write_tid() != 0));
+                (capture_tid() != 0 && encode_tid() != 0 && rec_write_tid() != 0)) &&
+               (launcher_ == nullptr || launcher_tid() != 0);
     });
 }
 
@@ -811,6 +835,7 @@ void ThreadAssembly::stop() noexcept {
     if (io_ != nullptr) io_->stop();
 
     if (capture_ != nullptr) capture_->stop();
+    if (launcher_ != nullptr) launcher_->stop();
 }
 
 void ThreadAssembly::mark_quiescing() noexcept { quiescing_.request(); }
@@ -854,6 +879,11 @@ Ex<void> ThreadAssembly::join() {
         if (const int rc = ::pthread_join(rec_write_thread_, nullptr); rc != 0)
             return os_error(ERR_SITE(), rc);
         rec_write_live_ = false;
+    }
+    if (launcher_live_) {
+        if (const int rc = ::pthread_join(launcher_thread_, nullptr); rc != 0)
+            return os_error(ERR_SITE(), rc);
+        launcher_live_ = false;
     }
     if (pcm_live_) {
         if (const int rc = ::pthread_join(pcm_thread_, nullptr); rc != 0) {

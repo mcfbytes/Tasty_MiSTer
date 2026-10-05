@@ -35,6 +35,7 @@ struct TransferRow {
     std::uint32_t file_offset = 0;
     std::uint32_t file_len = 0;
     std::uint32_t extent = 0;
+    std::uint32_t length = 0;
     bool placed = false;
     std::uint32_t mirror = 0;
     PostNotify notify{};

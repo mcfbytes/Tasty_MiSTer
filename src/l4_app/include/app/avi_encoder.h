@@ -35,10 +35,14 @@ public:
         std::uint32_t budget_pct = 50;
 
         std::uint32_t rate_frames = 60;
+
+        std::int64_t recover_ns = 4'000'000'000;
     };
     static constexpr std::uint32_t kSegmentFrames = kChunksPerSegment;
 
     static constexpr std::uint8_t kSustainWindows = 3;
+
+    static constexpr std::uint8_t kRecoverDoublings = 3;
 
     static constexpr std::int64_t kFlushNs = 250'000'000;
     static constexpr std::size_t kMinSlotBytes = 512u * 1024u;
@@ -87,7 +91,11 @@ private:
     [[nodiscard]] bool all_home_() const noexcept;
     [[nodiscard]] bool size_roll_(std::size_t payload_max) const noexcept;
     void budget_(std::int64_t cpu_ns, std::int64_t now) noexcept;
-    void step_half_(bool behind) noexcept;
+    void step_half_(bool behind, std::int64_t now) noexcept;
+
+    [[nodiscard]] bool too_soon_(std::int64_t now) const noexcept;
+
+    void recover_(std::size_t queued, std::size_t depth, std::int64_t now) noexcept;
     [[nodiscard]] std::int64_t frame_budget_ns_(std::uint32_t vtime) const noexcept;
     [[nodiscard]] std::int64_t now_() const noexcept;
     [[nodiscard]] std::int64_t cpu_now_() const noexcept;
@@ -135,6 +143,11 @@ private:
     std::int64_t loan_ns_ = 0;
     Position pos_{};
     bool held_ = false;
+
+    enum class HalfCause : std::uint8_t { None, Queue, Held };
+    HalfCause cause_ = HalfCause::None;
+    std::int64_t calm_ns_ = 0;
+    std::int64_t returned_ns_ = -1;
 
     std::int64_t win_start_ = -1;
     std::int64_t win_cpu_ = 0;

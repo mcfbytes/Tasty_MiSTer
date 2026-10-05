@@ -28,9 +28,11 @@ void ReplayGate::sample_control_() noexcept {
     if (control_seen_.take_if_changed(*w_.control, c)) ctrl_ = c;
 }
 
-void ReplayGate::tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswers late) noexcept {
+void ReplayGate::tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswers late,
+                      std::optional<std::uint32_t> queued) noexcept {
     TASTY_SEAT_BODY(ReplayGate);
     sample_control_();
+    queued_ = queued;
     blk_seen_ = late.count;
     if (level_ == ReplayLevel::Running &&
         (late.count - blk_base_ != status_.blk_late || late.max_us > status_.blk_late_max_us)) {
@@ -58,8 +60,13 @@ void ReplayGate::tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswer
     if (level_ == ReplayLevel::AwaitPowerOn) return;
     if (!ready) {
         ++status_.held_rounds;
+        tick_ns_ = 0;
+        gap_ns_ = 0;
         return;
     }
+    gap_ns_ = tick_ns_ != 0 ? now_ - tick_ns_ : 0;
+    tick_ns_ = now_;
+    note_gap_();
     if (!sample_ref_()) return;
     if (!epoch_known_) {
         if (p0_ == ReplayMsg::P0Parity::AfterSilence && now_ - end_ns_ > kSilenceWindowNs)
@@ -67,6 +74,7 @@ void ReplayGate::tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswer
         return;
     }
     mf_ = static_cast<std::int64_t>(frames_) - epoch_ - lead_;
+    note_depth_();
     if (held_ && due_(*held_)) {
         const ReplayMsg::Input r = *held_;
         held_.reset();
@@ -93,12 +101,20 @@ bool ReplayGate::sample_ref_() noexcept {
         if (w_.vsync == nullptr || w_.vsync->sample_into(rec) == 0) return false;
         raw = rec.seq;
     }
+    const std::int64_t prev_read = read_ns_;
+    read_ns_ = now_;
     if (raw == last_raw_) return true;
     last_sample_ns_ = now_;
     const std::uint32_t d = (raw - last_raw_) & wrap_mask_;
     last_raw_ = raw;
     frames_ += d;
-    edge_ns_ = now_;
+    std::int64_t edge = now_;
+
+    if (epoch_known_ && prev_read != 0 && now_ - prev_read > kGapNs)
+        edge = std::min(now_,
+                        std::max(prev_read, edge_ns_ + static_cast<std::int64_t>(d) * period_ns_));
+    edge_gap_ns_ = edge - edge_ns_;
+    edge_ns_ = edge;
     if (d > 1) status_.skipped_edges += d - 1;
     if (!epoch_known_) {
         if (p0_ == ReplayMsg::P0Parity::AfterSilence) {
@@ -201,7 +217,30 @@ bool ReplayGate::due_(const ReplayMsg::Input& r) const noexcept {
 
 void ReplayGate::note_late_(std::uint32_t first) noexcept {
     ++status_.late;
-    if (status_.first_late_frame < 0) status_.first_late_frame = static_cast<std::int32_t>(first);
+    if (status_.first_late_frame >= 0) return;
+    status_.first_late_frame = static_cast<std::int32_t>(first);
+    status_.late_gap_us = static_cast<std::uint32_t>(gap_ns_ / 1000);
+    status_.late_into_us =
+        static_cast<std::uint32_t>(std::max<std::int64_t>(0, now_ - edge_ns_) / 1000);
+    status_.late_edge_us =
+        static_cast<std::uint32_t>(std::max<std::int64_t>(0, edge_gap_ns_) / 1000);
+    status_.late_depth = queued_.value_or(0);
+}
+
+void ReplayGate::note_gap_() noexcept {
+    if (gap_ns_ / 1000 > status_.gap_max_us) {
+        status_.gap_max_us = static_cast<std::uint32_t>(gap_ns_ / 1000);
+        status_.gap_frame = static_cast<std::int32_t>(mf_);
+    }
+}
+
+void ReplayGate::note_depth_() noexcept {
+    if (!queued_ || end_seen_ || !live_()) return;
+    const auto depth = static_cast<std::int32_t>(*queued_ + (held_ ? 1u : 0u));
+    if (status_.depth_min < 0 || depth < status_.depth_min) {
+        status_.depth_min = depth;
+        status_.depth_min_frame = static_cast<std::int32_t>(mf_);
+    }
 }
 
 void ReplayGate::apply_(const ReplayMsg::Input& r) noexcept {
@@ -213,11 +252,17 @@ void ReplayGate::apply_(const ReplayMsg::Input& r) noexcept {
         write_(r);
         return;
     }
-    if (last < mf_) return note_late_(r.first);
+
+    const std::int64_t level = now_ - edge_ns_ >= offset_ns_ ? mf_ : mf_ - 1;
+    if (last < level) {
+        ++status_.lost;
+        return note_late_(r.first);
+    }
     if (first < mf_) {
         note_late_(r.first);
     } else {
         const auto us = static_cast<std::uint32_t>((now_ - edge_ns_) / 1000);
+        if (now_ - edge_ns_ - offset_ns_ > kSlipNs) ++status_.delayed;
         status_.apply_min_us = status_.on_time == 0 ? us : std::min(status_.apply_min_us, us);
         status_.apply_max_us = std::max(status_.apply_max_us, us);
         ++status_.on_time;
@@ -305,6 +350,10 @@ void ReplayGate::on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept 
     epoch_known_ = false;
     epoch_ = 0;
     frames_ = 0;
+    read_ns_ = 0;
+    edge_gap_ns_ = 0;
+    tick_ns_ = 0;
+    gap_ns_ = 0;
     mf_ = -1;
     covered_ = -1;
     underrun_at_ = -1;
@@ -402,6 +451,7 @@ void ReplayGate::begin_run_() noexcept {
     edge_ns_ = now_;
     prev_edge_ns_ = now_;
     last_sample_ns_ = now_;
+    read_ns_ = now_;
     blk_base_ = blk_seen_;
     level_ = ReplayLevel::Running;
     dirty_ = true;

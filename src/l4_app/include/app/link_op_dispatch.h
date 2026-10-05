@@ -165,6 +165,9 @@ concept LinkOpSessionSink = std::same_as<typename S::Result, ILinkEncoder::Outco
                                 {
                                     s.on(std::declval<const proto::LinkOp::LoadFacts&>(), c)
                                 } -> std::same_as<ILinkEncoder::Outcome>;
+                                {
+                                    s.on(std::declval<const proto::LinkOp::MailboxWrite&>(), c)
+                                } -> std::same_as<ILinkEncoder::Outcome>;
                                 { s.misrouted(m, c) } -> std::same_as<ILinkEncoder::Outcome>;
                             };
 

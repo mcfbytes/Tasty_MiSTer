@@ -8,6 +8,8 @@
 #include <cstdint>
 
 #include "app/input_wire.h"
+#include "app/launcher_key_bridge.h"
+#include "app/launcher_state.h"
 #include "infra/error.h"
 #include "os/clock.h"
 #include "proto/link_event.h"
@@ -25,6 +27,7 @@ class DiagLog;
 }
 
 namespace mister::app {
+static_assert(LauncherKeyBridge::kPadSlots >= svc::kMaxDevices);
 class LinkTxChannel;
 class LinkRxChannel;
 
@@ -61,6 +64,11 @@ public:
     void set_link_inbox(LinkTxChannel* inbox) noexcept { inbox_ = inbox; }
 
     void set_link_rx(LinkRxChannel* rx) noexcept { link_rx_ = rx; }
+
+    void set_launcher(const LauncherStateCell* cell, LauncherKeyBridge* keys) noexcept {
+        launcher_cell_ = cell;
+        launcher_keys_ = cell != nullptr ? keys : nullptr;
+    }
 
     void on(const proto::LinkEvent::Ps2Control& c);
     void on(const proto::LinkEvent::Ps2ControlEnded&) noexcept;
@@ -118,6 +126,9 @@ private:
     xthread::DiagLog* diag_ = nullptr;
     LinkTxChannel* inbox_ = nullptr;
     LinkRxChannel* link_rx_ = nullptr;
+    const LauncherStateCell* launcher_cell_ = nullptr;
+    LauncherKeyBridge* launcher_keys_ = nullptr;
+    bool bridging_ = false;
 
     proto::Ps2Keyboard kbd_{};
     proto::Ps2Mouse mouse_{};

@@ -20,6 +20,7 @@ class EventQueue;
 class IEventSink;
 class IOwnerTick;
 class IUiRoundPort;
+class LauncherScreen;
 class MglPump;
 class LinkRxChannel;
 class RecorderControl;
@@ -60,6 +61,8 @@ public:
     void set_replay(app::ReplayFeeder* feeder) noexcept { replay_ = feeder; }
 
     void set_recorder(app::RecorderControl* rec) noexcept { recorder_ = rec; }
+
+    void set_launcher_screen(app::LauncherScreen* s) noexcept { launcher_screen_ = s; }
 
     void set_uart(app::UartModeController* uart) noexcept {
         uart_ = uart;
@@ -108,6 +111,7 @@ private:
     app::ScreenshotPump* shots_ = nullptr;
     app::ReplayFeeder* replay_ = nullptr;
     app::RecorderControl* recorder_ = nullptr;
+    app::LauncherScreen* launcher_screen_ = nullptr;
     app::UartModeController* uart_ = nullptr;
     app::IEventSink* ui_sink_ = nullptr;
     app::IUiRoundPort* ui_round_ = nullptr;

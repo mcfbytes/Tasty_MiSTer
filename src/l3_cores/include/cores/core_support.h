@@ -32,6 +32,7 @@ class IStagingCore;
 class ICdServiceRows;
 class ICdDiagnostics;
 class IPcmWireRows;
+class IMailboxRows;
 class ICheatEngine;
 class ISaveUpload;
 class IStreamLoad;
@@ -86,6 +87,8 @@ public:
     [[nodiscard]] ICdServiceRows* cd_service_rows() noexcept { return on_cd_service_rows(); }
 
     [[nodiscard]] IPcmWireRows* pcm_wire_rows() noexcept { return on_pcm_wire_rows(); }
+
+    [[nodiscard]] IMailboxRows* mailbox_rows() noexcept { return on_mailbox_rows(); }
     [[nodiscard]] const ICdDiagnostics* cd_diagnostics() const noexcept {
         return on_cd_diagnostics();
     }
@@ -93,6 +96,8 @@ public:
     [[nodiscard]] ISaveUpload* save_upload() noexcept { return on_save_upload(); }
 
     [[nodiscard]] IStreamLoad* stream_load() noexcept { return on_stream_load(); }
+
+    [[nodiscard]] IStreamLoad* window_load() noexcept { return on_window_load(); }
 
     [[nodiscard]] ISectorKick* sector_kick() noexcept { return on_sector_kick(); }
     [[nodiscard]] IDipSwitches* dip_switches() noexcept { return on_dip_switches(); }
@@ -148,11 +153,13 @@ private:
     [[nodiscard]] virtual IStagingCore* on_staging_core() noexcept { return nullptr; }
     [[nodiscard]] virtual ICdServiceRows* on_cd_service_rows() noexcept { return nullptr; }
     [[nodiscard]] virtual IPcmWireRows* on_pcm_wire_rows() noexcept { return nullptr; }
+    [[nodiscard]] virtual IMailboxRows* on_mailbox_rows() noexcept { return nullptr; }
     [[nodiscard]] virtual const ICdDiagnostics* on_cd_diagnostics() const noexcept {
         return nullptr;
     }
     [[nodiscard]] virtual ISaveUpload* on_save_upload() noexcept { return nullptr; }
     [[nodiscard]] virtual IStreamLoad* on_stream_load() noexcept { return nullptr; }
+    [[nodiscard]] virtual IStreamLoad* on_window_load() noexcept { return on_stream_load(); }
     [[nodiscard]] virtual ISectorKick* on_sector_kick() noexcept { return nullptr; }
     [[nodiscard]] virtual IDipSwitches* on_dip_switches() noexcept { return nullptr; }
     [[nodiscard]] virtual IConfigSlots* on_config_slots() noexcept { return nullptr; }

@@ -343,7 +343,9 @@ void DiagSampler::render_rec() noexcept {
     diag_.appendf(
         "{\"t\":\"rec\",\"seq\":%u,%s,\"hashed\":%u,\"hash_us\":%u,\"hash_us_max\":%u,"
         "\"enc_held\":%u,\"written\":%u,\"wdrop\":%u,\"wbytes\":%llu,\"werr\":%d,"
-        "\"scale\":%u,\"steps\":%u,\"encoded\":%u,\"dups\":%u,\"keys\":%u,\"enc_us\":%u,"
+        "\"scale\":%u,\"steps\":%u,\"recovered\":%u,\"held\":%u,\"q_max\":%u,\"encoded\":%u,"
+        "\"dups\":%u,"
+        "\"keys\":%u,\"enc_us\":%u,"
         "\"enc_us_max\":%u,\"budget_pct\":%u,\"me_rad\":%u,\"me_cut\":%u,\"chunk_full\":%u,"
         "\"enc_err\":%u,"
         "\"chunk_kib\":%u,\"seg\":%u,\"segs\":%u,\"avi_frames\":%u,\"avi_drop\":%u,"
@@ -351,10 +353,11 @@ void DiagSampler::render_rec() noexcept {
         diag_seq_, app::format_recorder_status(s).c_str(), e.frames, e.hash_us_last, e.hash_us_max,
         e.ring_full, w.rows, w.dropped, static_cast<unsigned long long>(w.bytes),
         static_cast<int>(w.err), static_cast<unsigned>(v.scale), static_cast<unsigned>(v.steps),
-        v.encoded, v.dups, v.keys, v.enc_us_last, v.enc_us_max, v.budget_pct,
-        static_cast<unsigned>(v.me_rad), v.me_cut, v.chunk_full, v.errors, v.arena_kib,
-        static_cast<unsigned>(a.segment), static_cast<unsigned>(a.segments), a.frames, a.dropped,
-        static_cast<unsigned long long>(a.bytes), static_cast<int>(a.err));
+        static_cast<unsigned>(v.recovered), static_cast<unsigned>(v.held),
+        static_cast<unsigned>(v.queue_max), v.encoded, v.dups, v.keys, v.enc_us_last, v.enc_us_max,
+        v.budget_pct, static_cast<unsigned>(v.me_rad), v.me_cut, v.chunk_full, v.errors,
+        v.arena_kib, static_cast<unsigned>(a.segment), static_cast<unsigned>(a.segments), a.frames,
+        a.dropped, static_cast<unsigned long long>(a.bytes), static_cast<int>(a.err));
 }
 
 void DiagSampler::render_sess(const app::DiagCounters& dc) noexcept {

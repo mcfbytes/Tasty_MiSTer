@@ -11,7 +11,6 @@ enum class RegionId : std::uint8_t {
     MinimigShare,
     X86Share,
     X86Mem,
-    MsuAudio,
     A2065Flat,
     SaturnCdBuf,
 
@@ -21,6 +20,6 @@ enum class RegionId : std::uint8_t {
 
 inline constexpr std::size_t kRegionCount = static_cast<std::size_t>(RegionId::ScalerOut) + 1;
 
-static_assert(kRegionCount <= 8, "RegionId grew: a core window belongs on its manifest");
+static_assert(kRegionCount <= 7, "RegionId grew: a core window belongs on its manifest");
 
 }  // namespace mister::hal

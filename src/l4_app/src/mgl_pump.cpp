@@ -6,6 +6,7 @@
 #include "app/rbf_resolve.h"
 #include "app/session_identity.h"
 #include "infra/message_sum.h"
+#include "proto/conf_str.h"
 #include "svc/search_policy.h"
 #include "svc/xml_scan.h"
 
@@ -13,6 +14,7 @@
 #include <cstring>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace mister::app {
 
@@ -67,6 +69,32 @@ CoreScope MglPump::sample_scope() {
     return CoreScope{conf_scratch_.gen};
 }
 
+void MglPump::latch_remember_() {
+    if (remember_ == MglRemember::Never || names_ == nullptr) return;
+
+    if (player_.scope().gen.v == 0 || conf_scratch_.truncated) return;
+    const auto table =
+        proto::ItemTable::parse(std::string_view(conf_scratch_.text, conf_scratch_.len));
+    if (!table) return;
+    SessionIdentity id{};
+    const RememberedStem stem = identity_ != nullptr && identity_->copy(id)
+                                    ? id.stem
+                                    : RememberedStem::of(table->core_name(), {});
+    const std::vector<proto::ConfStrEntry> slots = proto::ConfStr::slots_of(*table);
+    for (std::uint8_t i = 0; i < player_.count(); ++i) {
+        const auto ld = infra::as<MglItem::Load>(player_.item(i));
+        if (!ld) continue;
+        const bool file = ld->slot == MglItem::Slot::File;
+        const proto::FileSlotHit hit =
+            proto::ConfStr::find_slot_in(slots, file ? 'F' : 'S', ld->index);
+
+        if (hit.entry == nullptr || !hit.entry->store_name) continue;
+        if (!file && hit.how != proto::FileSlotMatch::Exact) continue;
+        player_.remember(i, stem, file ? RememberedSlot::File : RememberedSlot::Mount,
+                         hit.entry->ioctl_index);
+    }
+}
+
 bool MglPump::take_playlist(std::string_view path) noexcept {
     TASTY_SEAT_BODY(MglPump);
     const PublishOnExit publish_on_exit{this};
@@ -107,6 +135,7 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
     }
     bind_homes();
     player_.set_scope(sample_scope());
+    latch_remember_();
     if (player_.count() == 0) {
 
         enter(State::Idle);
@@ -187,6 +216,7 @@ void MglPump::enter(State s) noexcept {
         player_ = MglPlayer{};
         player_.set_link_tx(link_tx_);
         player_.set_asks(asks_);
+        player_.set_names(names_);
     }
     state_ = s;
     check_invariant();
@@ -342,9 +372,13 @@ void MglPump::pump_advance() {
         const std::uint8_t before_item = player_.current();
         const std::uint32_t before_pub = player_.publishes();
         const std::uint32_t before_drop = player_.drops();
+        const std::uint32_t before_saved = player_.remembered();
+        const std::uint32_t before_unsaved = player_.remember_failures();
         auto r = player_.advance(*clock_);
         stats_.publishes += player_.publishes() - before_pub;
         stats_.item_drops += player_.drops() - before_drop;
+        stats_.paths_remembered += player_.remembered() - before_saved;
+        stats_.remember_failures += player_.remember_failures() - before_unsaved;
         if (!r) {
 
             abandon(InfoId::CoreLoadFailed, r.error().code);

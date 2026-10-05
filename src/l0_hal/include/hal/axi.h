@@ -31,14 +31,12 @@ inline constexpr PhysRegion kX86Share{os::PhysAddr{0x300C'E000u}, 0x0000'2000u, 
 
 inline constexpr PhysRegion kX86Mem{os::PhysAddr{0x3000'0000u}, kLenUnsourced, "x86-mem"};
 
-inline constexpr PhysRegion kMsuAudio{os::PhysAddr{0x2060'0000u}, kLenUnsourced, "snes-msu"};
-
 inline constexpr PhysRegion kA2065Flat{os::PhysAddr{0x1FF0'0000u}, 0x0001'0000u, "a2065-flat"};
 
 inline constexpr PhysRegion kSaturnCdBuf{os::PhysAddr{0x3100'0000u}, 0x0000'4000u, "saturn-cd-buf"};
 
 inline constexpr std::array<PhysRegion, kRegionCount> kCatalog{
-    kMinimigShare, kX86Share, kX86Mem, kMsuAudio, kA2065Flat, kSaturnCdBuf, kVideoFb, kScalerOut,
+    kMinimigShare, kX86Share, kX86Mem, kA2065Flat, kSaturnCdBuf, kVideoFb, kScalerOut,
 };
 
 constexpr bool catalog_names_are_distinct() noexcept {

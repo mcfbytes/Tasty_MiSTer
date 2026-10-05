@@ -17,13 +17,14 @@ namespace mister::fw {
 namespace {
 
 const auto kTastyCores = std::to_array<cores::CoreFactory>({
-    {cores::CoreKind::Menu, "MENU", &cores::kMenuProfile, &cores::make_generic, nullptr, nullptr},
-    {cores::CoreKind::Snes, "SNES", &cores::manifests::kSnes, &cores::manifests::make_snes, nullptr,
+    {cores::CoreKind::Menu, "MENU", &cores::kMenuProfile, &cores::make_generic, nullptr, nullptr,
      nullptr},
+    {cores::CoreKind::Snes, "SNES", &cores::manifests::kSnes, &cores::manifests::make_snes, nullptr,
+     nullptr, &cores::manifests::make_snes_companion},
     {cores::CoreKind::MegaDrive, "MegaDrive", &cores::manifests::kMegaDrive,
-     &cores::manifests::make_megadrive, nullptr, nullptr},
+     &cores::manifests::make_megadrive, nullptr, nullptr, nullptr},
     {cores::CoreKind::Psx, "PSX", &cores::manifests::kPsx, &cores::manifests::make_psx,
-     &cores::manifests::make_psx_ladder, nullptr},
+     &cores::manifests::make_psx_ladder, nullptr, nullptr},
 });
 
 bool ieq(std::string_view a, std::string_view b) noexcept {

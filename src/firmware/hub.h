@@ -5,6 +5,8 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <type_traits>
+#include <variant>
 
 #include "app/bt_pump.h"
 #include "app/cmd_fifo.h"
@@ -80,6 +82,8 @@
 #include "reactor/round_timer.h"
 #include "hal/link_port.h"
 #include "proto/osd_surface.h"
+#include "app/companion_host.h"
+#include "app/mailbox_relay.h"
 #include "app/pcm_main.h"
 #include "app/pcm_ring_feeder.h"
 #include "svc/chd_prefetch.h"
@@ -163,6 +167,8 @@ public:
     const app::EncodeStatusCell& encode_status() const noexcept { return encode_status_; }
     const svc::Vfs* vfs() const noexcept { return vfs_; }
     void set_owner_tick(app::IOwnerTick* tick) noexcept { assembly_.ui().set_owner_tick(tick); }
+    using MglRoute = std::monostate;
+    static constexpr bool kRoutesMgl = !std::is_same_v<MglRoute, std::monostate>;
     void force_vsync_adjust(std::uint8_t v) noexcept { video_pump_.force_vsync_adjust(v); }
 
     void arm_replay_ini(bool strict) noexcept {
@@ -204,6 +210,7 @@ private:
     app::EventQueue events_;
     app::EventQueue owner_events_;
     os::MonotonicClock clock_;
+    MglRoute mgl_pump_;
     app::VideoPump video_pump_;
     app::BtPump bt_pump_;
     app::LinkTxChannel input_inbox_;
@@ -229,6 +236,8 @@ private:
     svc::PrefetchMain prefetch_main_;
     app::PcmRingFeeder pcm_feeder_;
     app::PcmMain pcm_main_;
+    app::MailboxRelay mailbox_relay_;
+    app::CompanionHost companion_host_;
     svc::IoMain io_main_;
     svc::StorageService storage_;
     svc::DiscReadService discs_;

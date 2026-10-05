@@ -50,4 +50,6 @@ private:
 inline constexpr std::string_view kFrontEndImage = "menu.rbf";
 [[nodiscard]] bool names_front_end_image(std::string_view rel, XmlKind kind) noexcept;
 
+[[nodiscard]] bool same_image_name(std::string_view rel, std::string_view image) noexcept;
+
 }  // namespace mister::app

@@ -46,6 +46,11 @@ inline constexpr auto kThreeDoDocRows = std::to_array<reactor::LinkDecoderDecl>(
      reactor::OsdBudget::Pinned},
 });
 
+inline constexpr auto kSnesDocRows = std::to_array<reactor::LinkDecoderDecl>({
+    {"snes.mailbox", reactor::Cause::Tick, nullptr, 0, reactor::DeadlineClass::A,
+     reactor::OsdBudget::Shared},
+});
+
 inline constexpr auto kMegaDriveDocRows = std::to_array<reactor::LinkDecoderDecl>({
     {"megadrive.mdp_tick", reactor::Cause::Tick, nullptr, 5, reactor::DeadlineClass::A,
      reactor::OsdBudget::Pinned},
@@ -72,6 +77,7 @@ inline constexpr auto kNeoGeoDocRows = std::to_array<reactor::LinkDecoderDecl>({
 
 inline constexpr auto kDocCensus = std::to_array<DocCensus>({
     {"PSX", kPsxDocRows},
+    {"SNES", kSnesDocRows},
     {"MegaDrive", kMegaDriveDocRows},
 });
 

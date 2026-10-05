@@ -30,6 +30,8 @@ public:
     [[nodiscard]] bool push(const proto::LinkOp& op) noexcept { return tx_.push(op); }
     [[nodiscard]] std::optional<proto::LinkOp> pop() noexcept { return tx_.pop(); }
 
+    [[nodiscard]] bool drained() const noexcept { return tx_.pushed() == tx_.popped(); }
+
     [[nodiscard]] Ex<proto::TxSlabId> intern(std::span<const std::uint8_t> bytes) noexcept {
         return bytes_.intern(bytes, tx_.pushed(), tx_.popped()).transform([](std::uint16_t v) {
             return proto::TxSlabId{v};

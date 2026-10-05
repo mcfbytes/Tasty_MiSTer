@@ -22,30 +22,14 @@ std::string NameConfig::card_cid_path(std::string_view sd_block) {
     return p;
 }
 
-std::string NameConfig::blob_name(std::string_view core, Slot s, std::uint8_t index) {
-    std::string n{core};
-    n += (s == Slot::File) ? ".f" : ".s";
-    n += std::to_string(index);
-    return n;
-}
-
-Ex<void> NameConfig::save_path(std::string_view core, Slot s, std::uint8_t index,
+Ex<void> NameConfig::save_path(const RememberedStem& stem, Slot s, std::uint8_t index,
                                std::string_view path) {
     TASTY_SEAT_BODY(NameConfig);
+
+    if (stem.empty()) return std::unexpected(Error{Errc::not_found, ERR_SITE(), index});
     std::array<std::byte, kPathBlob> blob{};
     std::memcpy(blob.data(), path.data(), std::min(path.size(), kPathBlob - 1));
-    return durable_write(*vfs_, "config/" + blob_name(core, s, index), blob);
-}
-
-std::string NameConfig::load_path(std::string_view core, Slot s, std::uint8_t index) const {
-    TASTY_SEAT_BODY(NameConfig);
-    auto f = vfs_->open("config/" + blob_name(core, s, index), svc::OpenMode::ReadWhole);
-    if (!f) return {};
-    std::array<std::byte, kPathBlob> blob{};
-    auto n = (*f)->read_at(0, blob);
-    if (!n || *n == 0) return {};
-    const char* c = reinterpret_cast<const char*>(blob.data());
-    return std::string{c, ::strnlen(c, kPathBlob)};
+    return durable_write(*vfs_, "config/" + remembered_blob_name(stem, s, index), blob);
 }
 
 bool NameConfig::read_card_cid(std::span<std::byte, kCidLen> out) const {

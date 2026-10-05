@@ -55,11 +55,21 @@ struct ReplayStatus {
     std::uint32_t epoch_edge = 0;
     std::uint32_t blk_late = 0;
     std::uint32_t blk_late_max_us = 0;
+    std::uint32_t lost = 0;
+    std::uint32_t delayed = 0;
+    std::uint32_t gap_max_us = 0;
+    std::int32_t gap_frame = -1;
+    std::uint32_t late_gap_us = 0;
+    std::uint32_t late_into_us = 0;
+    std::uint32_t late_edge_us = 0;
+    std::uint32_t late_depth = 0;
+    std::int32_t depth_min = -1;
+    std::int32_t depth_min_frame = -1;
 };
 
 using ReplayStatusCell = xthread::Telemetry<ReplayStatus, SeatTag::RT>;
 
-using ReplayStatusText = FixedStr<640, StrFit::Clip>;
+using ReplayStatusText = FixedStr<832, StrFit::Clip>;
 [[nodiscard]] ReplayStatusText format_replay_status(const ReplayStatus& s) noexcept;
 [[nodiscard]] const char* replay_end_name(ReplayEnd e) noexcept;
 
