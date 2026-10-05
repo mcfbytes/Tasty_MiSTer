@@ -91,6 +91,19 @@ Run the same two lines over SSH to apply them now without rebooting. To undo, de
 defaults are 1 and 20. Compaction itself keeps working: it just leaves locked memory alone and no longer runs in the
 background. Stock MiSTer is unaffected either way, because the stock MiSTer binary does not lock its memory.
 
+The kernel's writeback workers, which flush written files out to their disk or share, can also run on that thread's
+CPU (CPU 1). While one is running there, input delivery waits, during playback and recording alike. Recording to a
+network share (CIFS/SMB) made this measurable: stalls of 25-39 ms, more than a frame, and a desynced run. Keeping
+writeback on CPU 0 removed them. This is a sysfs setting, not a sysctl, so add this line to the same
+`/media/fat/linux/user-startup.sh`:
+
+```sh
+echo 1 > /sys/bus/workqueue/devices/writeback/cpumask
+```
+
+The value is a CPU mask: `1` is CPU 0 only, `3` (the default) is both. Writes to the SD card or a USB drive still
+happen, just on CPU 0. To undo, delete the line and reboot.
+
 ## <img src="art/icons/pizza-48.png" width="24" alt=""> What it plays
 
 | system | core | movie formats | status |
