@@ -4,10 +4,13 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <utility>
 
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
+#include "proto/fio_bracket.h"
+#include "proto/upload_session.h"
 #include "proto/session_params.h"
 #include "proto/types.h"
 
@@ -27,13 +30,12 @@ public:
     [[nodiscard]] static Ex<DownloadSession> open(hal::ISpiTransport& link, WideIoIndex index);
 
     ~DownloadSession();
-    DownloadSession(DownloadSession&& o) noexcept;
+    DownloadSession(DownloadSession&& o) noexcept
+        : bracket_(std::move(o.bracket_)), posted_(std::exchange(o.posted_, false)) {}
     DownloadSession& operator=(DownloadSession&&) = delete;
 
     Ex<void> write(std::span<const std::uint8_t> data);
     Ex<void> write(std::span<const std::uint8_t> data, hal::Width w);
-    Ex<void> read(std::span<std::uint8_t> data);
-    Ex<void> read(std::span<std::uint8_t> data, hal::Width w);
 
     Ex<void> end();
 
@@ -51,15 +53,12 @@ public:
 
     static Ex<void> send_cheats(hal::ISpiTransport& link, std::span<const std::uint8_t> table);
 
-    bool active() const noexcept { return link_ != nullptr; }
-    TransferDirection direction() const noexcept { return direction_; }
-    WideIoIndex index() const noexcept { return WideIoIndex{index_}; }
+    bool active() const noexcept { return bracket_.active(); }
+    WideIoIndex index() const noexcept { return WideIoIndex{bracket_.index()}; }
 
 private:
-    explicit DownloadSession(hal::ISpiTransport& link) : link_(&link) {}
-    hal::ISpiTransport* link_;
-    std::uint16_t index_ = 0;
-    TransferDirection direction_ = TransferDirection::Download;
+    explicit DownloadSession(FioBracket&& b) noexcept : bracket_(std::move(b)) {}
+    FioBracket bracket_;
     bool posted_ = false;
 };
 

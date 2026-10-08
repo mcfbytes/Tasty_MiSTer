@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "support/check.h"
+#include "support/video_quiet.h"
 
 #include "app/encode_status.h"
 #include "app/event.h"
 #include "app/identity_latch.h"
 #include "app/link_tx_channel.h"
+#include "app/pending_load.h"
 #include "app/rec_control.h"
 #include "app/recorder_control.h"
 #include "app/recorder_status.h"
@@ -207,7 +209,7 @@ struct VresLink final : hal::ISpiTransport, hal::ICoreSignals {
     std::uint32_t vtime = 0;
     bool ready() const { return true; }
     Ex<hal::CoreIdentity> identify() override { return hal::CoreIdentity{}; }
-    hal::CoreCapabilities capabilities() const override { return {}; }
+    hal::CoreCapabilities latch_capabilities() override { return {}; }
     void set_core_reset(bool) override {}
     void select(hal::ChipSelect) override {
         open_ = true;
@@ -253,13 +255,18 @@ struct PumpRig {
     Tmp root{"/tasty_tasty_pump"};
     std::optional<svc::Vfs> vfs{};
     ZeroClock clock{};
+    mister::testing::QuietVideoEnv quiet{};
+    app::LinkTxChannel tx{};
     std::optional<app::VideoPump> pump{};
     VresLink link{};
     std::int64_t t = 0;
 
     PumpRig() {
         if (auto v = svc::Vfs::create_at(root.root)) vfs.emplace(std::move(*v));
-        if (vfs) pump.emplace(*vfs, clock, hal::board_by_id(hal::BoardId::De10Nano).video);
+        if (vfs)
+            pump.emplace(*vfs, clock, hal::board_by_id(hal::BoardId::De10Nano).video,
+                         infra::OptRef<svc::adv7513::II2cAdapter>{}, quiet.hdmi,
+                         app::VideoPump::Wiring{.activity = quiet.activity, .link_tx = tx});
     }
 
     void core(std::uint32_t seq, std::uint32_t vtime) {
@@ -673,6 +680,26 @@ void test_info_missing() {
     CHECK(vfs.has_value());
     if (!vfs) return;
     CHECK(fw::tasty_info_movie(*vfs, "missing.fm2") == 1);
+}
+
+void test_manifest_doc_role_follows_the_core_set() {
+    CHECK(cores::manifest_doc_role() == nullptr);
+    Tmp t("/tasty_tasty_mra_");
+    CHECK(!t.root.empty());
+    CHECK(t.put("case.mra", "<misterromdescription></misterromdescription>"));
+    auto vfs = svc::Vfs::create_at(t.root);
+    CHECK(vfs.has_value());
+    if (vfs) {
+        app::LoadRequest req{};
+        CHECK(req.path.assign("case.mra"));
+        req.kind = app::XmlKind::Mra;
+        app::PendingLoad pending;
+        pending.arm(req);
+        const auto loaded = pending.load_manifest(*vfs);
+        CHECK(!loaded.has_value());
+        if (!loaded) CHECK(loaded.error().code == Errc::bad_format);
+    }
+    (void)::unlink(t.p("case.mra").c_str());
 }
 
 struct StdoutTo {
@@ -3268,6 +3295,7 @@ int main(int argc, char** argv) {
     test_cli_save_is_play_only();
     test_save_seed_copied();
     test_save_seed_refusals();
+    test_manifest_doc_role_follows_the_core_set();
     test_registry();
     test_codec_path();
     test_null_osd();

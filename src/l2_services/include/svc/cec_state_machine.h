@@ -32,7 +32,8 @@ public:
     Ex<void> poll_deadline();
     std::uint32_t max_rx_depth_seen() const noexcept { return max_rx_depth_; }
 
-    void set_io(const adv7513::Io& io) noexcept { io_ = io; }
+    explicit CecStateMachine(const adv7513::Io& io = adv7513::kUnboundIo) noexcept : io_(io) {}
+    explicit CecStateMachine(const adv7513::Io&&) = delete;
     CecState state() const noexcept { return state_; }
     void set_state(CecState s) noexcept { state_ = s; }
 
@@ -46,7 +47,7 @@ public:
 
 private:
     std::uint32_t max_rx_depth_ = 0;
-    adv7513::Io io_{};
+    const adv7513::Io& io_;
     CecState state_ = CecState::Disabled;
     std::optional<CecMessage> last_{};
     std::uint32_t rx_released_ = 0;

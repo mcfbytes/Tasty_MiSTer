@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "infra/fixed_str.h"
+#include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -67,11 +70,59 @@ struct ReplayStatus {
     std::int32_t depth_min_frame = -1;
 };
 
+inline constexpr std::array<const char*, static_cast<std::size_t>(ReplayEnd::kCount)>
+    kReplayEndNames{"none",     "finished", "stopped", "superseded", "switch",
+                    "ref_lost", "no_ref",   "epoch",   "refused"};
+static_assert(infra::json_clean_names(kReplayEndNames), "a name is rendered unescaped");
+
+[[nodiscard]] constexpr const char* replay_end_name(ReplayEnd e) noexcept {
+    const auto i = static_cast<std::size_t>(e);
+    return i < kReplayEndNames.size() ? kReplayEndNames[i] : "?";
+}
+
+constexpr void to_json(infra::JsonOut& o, const ReplayStatus& s) noexcept {
+    o.field("gen", s.gen);
+    o.field("lvl", s.level);
+    o.str("end", replay_end_name(s.end), infra::json_longest(kReplayEndNames));
+    o.field("ref", s.ref);
+    o.field("frame", s.movie_frame);
+    o.field("applied", s.applied_frame);
+    o.field("writes", s.writes);
+    o.field("on_time", s.on_time);
+    o.field("late", s.late);
+    o.field("first_late", s.first_late_frame);
+    o.field("underruns", s.underruns);
+    o.field("first_underrun", s.first_underrun_frame);
+    o.field("pre_epoch", s.pre_epoch);
+    o.field("skipped", s.skipped_edges);
+    o.field("held", s.held_rounds);
+    o.field("drops", s.pad_drops);
+    o.field("stale", s.stale);
+    o.field("link_err", s.link_errors);
+    o.field("min_us", s.apply_min_us);
+    o.field("max_us", s.apply_max_us);
+    o.field("epoch_us", s.epoch_delay_us);
+    o.field("epoch", s.epoch_edge);
+    o.field("blk_late", s.blk_late);
+    o.field("blk_max_us", s.blk_late_max_us);
+    o.field("lost", s.lost);
+    o.field("delayed", s.delayed);
+    o.field("gap_max_us", s.gap_max_us);
+    o.field("gap_frame", s.gap_frame);
+    o.field("late_gap_us", s.late_gap_us);
+    o.field("late_into_us", s.late_into_us);
+    o.field("late_edge_us", s.late_edge_us);
+    o.field("late_depth", s.late_depth);
+    o.field("depth_min", s.depth_min);
+    o.field("depth_min_frame", s.depth_min_frame);
+}
+
 using ReplayStatusCell = xthread::Telemetry<ReplayStatus, SeatTag::RT>;
 
 using ReplayStatusText = FixedStr<832, StrFit::Clip>;
+static_assert(infra::json_worst_len<ReplayStatus>() <= ReplayStatusText::kCapacity,
+              "the status text never clips");
 [[nodiscard]] ReplayStatusText format_replay_status(const ReplayStatus& s) noexcept;
-[[nodiscard]] const char* replay_end_name(ReplayEnd e) noexcept;
 
 [[nodiscard]] const char* replay_end_sentence(ReplayEnd e,
                                               EpochFail fail = EpochFail::None) noexcept;

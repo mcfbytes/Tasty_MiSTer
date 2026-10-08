@@ -12,6 +12,7 @@
 namespace mister::app {
 
 struct ConfStrText {
+    TASTY_SEAT_EXEMPT(const_shared);
     std::uint16_t len = 0;
 
     proto::BindGeneration gen{};

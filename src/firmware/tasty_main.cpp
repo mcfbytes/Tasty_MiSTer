@@ -62,7 +62,7 @@ int cmd_rec_start_client(const mister::fw::TastyArgs& a) {
     if (const auto blob = mister::hal::read_compatible(mister::hal::kCompatiblePath)) {
         if (const auto board = mister::hal::select_board(*blob))
             mister::fw::tasty_warn_record_writeback(
-                rec->view(), mister::hal::seat_of((*board)->threads, mister::hal::Seat::RT).cpu);
+                rec->view(), mister::hal::seat_of((*board)->threads, mister::SeatTag::RT).cpu);
     }
     return 0;
 }

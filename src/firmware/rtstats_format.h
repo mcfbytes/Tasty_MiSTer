@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "hal/thread_map.h"
+#include "rt_evidence.h"
+
 #define TASTY_RTSTATS_FMT                                                \
     "{\"t\":\"rtstats\",\"seq\":%u,\"reason\":\"%s\","                   \
     "\"heartbeat\":%llu,\"drains\":%llu,\"rss_bytes\":%llu,"             \
@@ -41,7 +44,7 @@
     "\"cfg\":%u,\"dw\":%u,\"def\":%u,\"exp\":%u,\"sec\":%u,"             \
     "\"pfx\":%u,\"stg\":%u,\"stale\":%u},"                               \
     "\"db\":{\"dec\":%u,\"bnd\":%u,\"ref\":%u,\"fb\":%u,\"ret\":%u},"    \
-    "\"rt\":{\"cpu\":%u,\"cov\":%u,\"ok\":%u,\"nm\":%u,\"err\":%u},"     \
+    "\"rt\":{\"cpu\":%u,\"cov\":%u,\"ok\":%llu,\"nm\":%u,\"err\":%u},"   \
     "\"rnd\":{\"ep\":%u,\"ems\":%u,"                                     \
     "\"sn\":%u,\"smn\":%u,\"smx\":%u,\"sp\":%u,\"so\":%u,"               \
     "\"sc\":%u,\"si\":%u,"                                               \
@@ -124,7 +127,9 @@
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
-        TASTY_RTSTATS_BOOL_MAX, 1073741823u, 4095u, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,  \
+        TASTY_RTSTATS_BOOL_MAX,                                                                    \
+        static_cast<unsigned long long>(::mister::fw::kRtEvidenceAllApplied),                      \
+        (1u << ::mister::hal::kThreadSeats) - 1u, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,    \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
         TASTY_RTSTATS_U32_MAX, 536871u, TASTY_RTSTATS_U32_MAX, 4u, 23u, TASTY_RTSTATS_U32_MAX,     \
         TASTY_RTSTATS_U32_MAX, 536871u, 4u, 23u, 7u, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \

@@ -2,6 +2,8 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <type_traits>
 
 #include "app/companion_host.h"
 #include "app/mailbox_slot.h"
@@ -57,8 +59,8 @@ private:
 
     Chan chan_;
 
-    std::uint16_t last_head_ = 0;
-    bool have_last_ = false;
+    std::optional<std::uint16_t> last_head_{};
+    static_assert(std::is_trivially_copyable_v<decltype(last_head_)>);
     bool polling_ = false;
     std::uint16_t gen_ = 0;
     std::uint16_t round_ = 0;

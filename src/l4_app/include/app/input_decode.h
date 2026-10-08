@@ -6,11 +6,14 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 #include "app/input_wire.h"
 #include "app/launcher_key_bridge.h"
 #include "app/launcher_state.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
+#include "infra/park_fds.h"
 #include "os/clock.h"
 #include "proto/link_event.h"
 #include "proto/ps2_frame.h"
@@ -35,7 +38,7 @@ class InputDecode {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
-    static constexpr hal::Seat kSeat = hal::Seat::Input;
+    static constexpr SeatTag kSeat = SeatTag::Input;
 
     struct Counts {
         std::uint32_t rounds = 0;
@@ -51,24 +54,32 @@ public:
         std::uint32_t captures = 0;
     };
 
-    InputDecode(InputWire& wire, os::IClock& clock) noexcept : wire_(wire), clock_(&clock) {}
+    class Fds {
+    public:
+        [[nodiscard]] static Ex<Fds> create(InputWire& wire) noexcept;
+        Fds(Fds&&) noexcept = default;
+        Fds(const Fds&) = delete;
+        Fds& operator=(const Fds&) = delete;
+        Fds& operator=(Fds&&) = delete;
+
+    private:
+        friend class InputDecode;
+        explicit Fds(UniqueFd epfd) noexcept : epfd_(std::move(epfd)) {}
+        UniqueFd epfd_;
+    };
+
+    struct Wiring {
+        xthread::DiagLog& diag;
+        LinkTxChannel& inbox;
+        LinkRxChannel& link_rx;
+        infra::OptRef<const LauncherStateCell> cell{};
+        infra::OptRef<LauncherKeyBridge> keys{};
+    };
+
+    InputDecode(Fds fds, InputWire& wire, svc::InputService& svc, os::IClock& clock,
+                Wiring w) noexcept;
     InputDecode(const InputDecode&) = delete;
     InputDecode& operator=(const InputDecode&) = delete;
-
-    Ex<void> open();
-
-    Ex<void> arm(svc::InputService& svc);
-
-    void set_diag(xthread::DiagLog* diag) noexcept { diag_ = diag; }
-
-    void set_link_inbox(LinkTxChannel* inbox) noexcept { inbox_ = inbox; }
-
-    void set_link_rx(LinkRxChannel* rx) noexcept { link_rx_ = rx; }
-
-    void set_launcher(const LauncherStateCell* cell, LauncherKeyBridge* keys) noexcept {
-        launcher_cell_ = cell;
-        launcher_keys_ = cell != nullptr ? keys : nullptr;
-    }
 
     void on(const proto::LinkEvent::Ps2Control& c);
     void on(const proto::LinkEvent::Ps2ControlEnded&) noexcept;
@@ -77,18 +88,14 @@ public:
     void misrouted(const proto::LinkEvent& m) noexcept;
     std::uint32_t link_event_misrouted() const noexcept { return link_event_misrouted_; }
 
-    [[nodiscard]] Ex<void> watch_stop(const xthread::WakeFlag& stop) noexcept;
-
-    [[nodiscard]] Ex<void> watch_wake(xthread::WakeFlag& wake) noexcept;
+    [[nodiscard]] Ex<void> watch(const xthread::ParkFds& fds) noexcept;
 
     void mute(bool on) noexcept { muted_ = on; }
     [[nodiscard]] bool muted() const noexcept { return muted_; }
 
     unsigned drop_link_events() noexcept;
 
-    [[nodiscard]] bool ready() const noexcept { return svc_ != nullptr && epfd_.valid(); }
-
-    void before_wait();
+    void before_wait(infra::OptRef<const xthread::WakeFlag> stop = {});
     void wait_events(int timeout_ms) noexcept;
     unsigned after_wait();
 
@@ -107,7 +114,8 @@ public:
     proto::Ps2Mouse& mouse() noexcept { return mouse_; }
 
 private:
-    Ex<void> rebuild_registrations();
+    enum class Reseat : std::uint8_t { Skip, Bridge };
+    void rebuild_registrations(Reseat bridge);
     void publish_joy_levels();
     void publish_from(const svc::DeviceReport& r, bool is_mouse, std::size_t dev_slot);
 
@@ -118,21 +126,21 @@ private:
     unsigned flush_ps2_frames_();
     void flush_mouse_();
     void sweep_dropped_keys_();
-    bool apply_requests();
+    bool apply_requests(infra::OptRef<const xthread::WakeFlag> stop);
     void evict_fd(int fd);
 
     InputWire& wire_;
-    svc::InputService* svc_ = nullptr;
-    xthread::DiagLog* diag_ = nullptr;
-    LinkTxChannel* inbox_ = nullptr;
-    LinkRxChannel* link_rx_ = nullptr;
-    const LauncherStateCell* launcher_cell_ = nullptr;
-    LauncherKeyBridge* launcher_keys_ = nullptr;
+    svc::InputService& svc_;
+    xthread::DiagLog& diag_;
+    LinkTxChannel& inbox_;
+    LinkRxChannel& link_rx_;
+    infra::OptRef<const LauncherStateCell> launcher_cell_;
+    infra::OptRef<LauncherKeyBridge> launcher_keys_;
     bool bridging_ = false;
 
     proto::Ps2Keyboard kbd_{};
     proto::Ps2Mouse mouse_{};
-    os::IClock* clock_;
+    os::IClock& clock_;
 
     std::int64_t last_mouse_ns_ = 0;
     bool mouse_pending_ = false;
@@ -158,7 +166,7 @@ private:
     std::uint32_t joy_ui_keys_ = 0;
     std::uint32_t link_event_misrouted_ = 0;
 
-    UniqueFd epfd_{};
+    UniqueFd epfd_;
 
     std::atomic<std::uint32_t> registered_{0};
     std::uint32_t seen_gen_ = 0;
@@ -174,7 +182,7 @@ private:
     CaptureArm arm_{};
     std::uint32_t capture_served_ = 0;
 
-    const xthread::WakeFlag* stop_ = nullptr;
+    int stop_fd_ = -1;
     xthread::WakeFlag* pause_wake_ = nullptr;
     bool muted_ = false;
 
@@ -205,9 +213,9 @@ static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
               "the coalesced kick buys nothing (arch §2).");
 static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
                   return hal::seat_of(m, InputDecode::kSeat).prio <
-                             hal::seat_of(m, hal::Seat::RT).prio &&
+                             hal::seat_of(m, SeatTag::RT).prio &&
                          hal::seat_of(m, InputDecode::kSeat).cpu !=
-                             hal::seat_of(m, hal::Seat::RT).cpu;
+                             hal::seat_of(m, SeatTag::RT).cpu;
               }),
               "item: this lane owns a SECOND epoll set and BLOCKS in it, "
               "and it spins on nanosleep(200us) inside the item baton. "
@@ -217,7 +225,7 @@ static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
               "puts a second block point on the RT partition.");
 static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
                   return hal::seat_of(m, InputDecode::kSeat).prio >
-                         hal::seat_of(m, hal::Seat::Prefetch).prio;
+                         hal::seat_of(m, SeatTag::Prefetch).prio;
               }),
               "item: this is the INPUT half of arch's "
               "input_outranks_prefetch rule — a decode round must PREEMPT a "

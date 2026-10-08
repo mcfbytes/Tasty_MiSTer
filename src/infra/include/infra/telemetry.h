@@ -2,14 +2,13 @@
 #pragma once
 
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <optional>
 #include <type_traits>
 
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "infra/seq_cell.h"
 
 namespace mister::xthread {
 
@@ -70,45 +69,17 @@ public:
         seat_assert<Owner>(ERR_SITE(), "Telemetry::publish off its owning seat");
         ++seq_;
         if (seq_ == 0) seq_ = 1;
-        gen_.store(0, std::memory_order_relaxed);
-        std::atomic_thread_fence(std::memory_order_release);
-
-        const auto* src = reinterpret_cast<const unsigned char*>(&v);
-        std::atomic<std::uint32_t>* const words = body_;
-        for (std::size_t i = 0; i < kFull; ++i) {
-            std::uint32_t w;
-            std::memcpy(&w, src + i * kWord, kWord);
-            words[i].store(w, std::memory_order_relaxed);
-        }
-        if constexpr (kTail != 0) {
-            std::uint32_t w = 0;
-            std::memcpy(&w, src + kFull * kWord, kTail);
-            words[kFull].store(w, std::memory_order_relaxed);
-        }
-        gen_.store(seq_, std::memory_order_release);
+        cell_.write(seq_, v);
     }
 
     void invalidate() noexcept {
         seat_assert<Owner>(ERR_SITE(), "Telemetry::invalidate off its owning seat");
-        gen_.store(0, std::memory_order_relaxed);
+        cell_.clear();
     }
 
     [[nodiscard]] std::uint32_t sample_into(T& dst) const noexcept {
         for (unsigned attempt = 0; attempt < Attempts; ++attempt) {
-            const std::uint32_t g1 = gen_.load(std::memory_order_acquire);
-            if (g1 == 0) continue;
-            auto* out = reinterpret_cast<unsigned char*>(&dst);
-            const std::atomic<std::uint32_t>* const words = body_;
-            for (std::size_t i = 0; i < kFull; ++i) {
-                const std::uint32_t w = words[i].load(std::memory_order_relaxed);
-                std::memcpy(out + i * kWord, &w, kWord);
-            }
-            if constexpr (kTail != 0) {
-                const std::uint32_t w = words[kFull].load(std::memory_order_relaxed);
-                std::memcpy(out + kFull * kWord, &w, kTail);
-            }
-            std::atomic_thread_fence(std::memory_order_acquire);
-            if (gen_.load(std::memory_order_relaxed) == g1) return g1;
+            if (const std::uint32_t g = cell_.try_read(dst)) return g;
         }
         refused_.fetch_add(1, std::memory_order_relaxed);
         return 0;
@@ -122,20 +93,13 @@ public:
         return s;
     }
 
-    [[nodiscard]] std::uint32_t generation() const noexcept {
-        return gen_.load(std::memory_order_acquire);
-    }
+    [[nodiscard]] std::uint32_t generation() const noexcept { return cell_.generation(); }
     [[nodiscard]] std::uint32_t refusals() const noexcept {
         return refused_.load(std::memory_order_relaxed);
     }
 
 private:
-    static constexpr std::size_t kWord = sizeof(std::uint32_t);
-    static constexpr std::size_t kFull = sizeof(T) / kWord;
-    static constexpr std::size_t kTail = sizeof(T) % kWord;
-
-    std::atomic<std::uint32_t> gen_{0};
-    std::atomic<std::uint32_t> body_[kFull + (kTail != 0 ? 1 : 0)]{};
+    SeqCell<T> cell_;
     std::uint32_t seq_ = 0;
     mutable std::atomic<std::uint32_t> refused_{0};
 };

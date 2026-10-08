@@ -35,16 +35,13 @@ public:
 
     const DeviceIdentity& device() const noexcept { return device_; }
     MapKind kind() const noexcept { return kind_; }
-    std::optional<std::uint16_t> captured() const noexcept {
-        return has_capture_ ? std::optional<std::uint16_t>(captured_) : std::nullopt;
-    }
+    std::optional<std::uint16_t> captured() const noexcept { return captured_; }
 
 private:
     Step step_ = Step::Idle;
     DeviceIdentity device_{};
     MapKind kind_ = MapKind::Joystick;
-    std::uint16_t captured_ = 0;
-    bool has_capture_ = false;
+    std::optional<std::uint16_t> captured_{};
 };
 
 }  // namespace mister::svc

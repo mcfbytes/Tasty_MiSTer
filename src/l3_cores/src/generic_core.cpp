@@ -37,7 +37,6 @@ Ex<proto::SessionParams> GenericCore::stream_opening(IoIndex) {
     bytes_sent_ = 0;
     tx_crc_ = 0;
     proto::SessionParams params{};
-    params.direction = proto::TransferDirection::Download;
     params.ext = ext_.view();
     params.aux = proto::AuxValue{aux_};
     return params;
@@ -60,8 +59,8 @@ Ex<void> GenericCore::on_mount(IoIndex slot, const MountedPath&) {
     return unimplemented(ERR_SITE());
 }
 
-std::unique_ptr<Core> make_generic(const CoreProfile& p, const HostServices& h) {
-    return std::make_unique<GenericCore>(p, h);
+std::unique_ptr<Core> make_generic(const CoreProfile& p, const CoreGrant& g) {
+    return std::make_unique<GenericCore>(p, g.services);
 }
 
 }  // namespace mister::cores

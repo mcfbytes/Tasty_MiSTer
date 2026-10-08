@@ -46,6 +46,7 @@
 #include "cores/ladder_host.h"
 #include "infra/pause_latch.h"
 #include "app/launcher_demand.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
@@ -90,21 +91,49 @@ public:
         EventQueue& owner_events;
         ConfStrCell& conf_str_cell;
 
-        xthread::WakeFlag* main_wake = nullptr;
+        LadderStateCell& ladder_cell;
+
+        xthread::WakeFlag& main_wake;
+
+        BoardOps ops{};
+
+        infra::OptRef<hal::IBootHandoff> boot_handoff{};
+        LauncherDemandCell* launcher_demand = nullptr;
+        infra::OptRef<xthread::WakeFlag> launcher_wake{};
+
+        BitstreamProgrammer& programmer;
+        const svc::Vfs& storage;
+        ILoadWindowMap& window_map;
+
+        FabricCell& fabric_cell;
+
+        const proto::StatusCell& status_cell;
+        const MountStatusCell& mount_status_cell;
+        const SaveExtentCell& save_extent_cell;
+        const FileTxLevelCell& file_tx_level_cell;
+
+        const hal::PinLevelCell& pin_levels;
+
+        infra::OptRef<const os::IClock> clock{};
     };
 
     SessionOwner(QuiesceChannel& park, const Link& link) noexcept
-        : park_(&park), inbox_(link.inbox), rx_(link.rx), config_cell_(link.config_cell),
+        : park_(park), inbox_(link.inbox), rx_(link.rx), config_cell_(link.config_cell),
           owner_events_(link.owner_events), conf_str_cell_(link.conf_str_cell),
-          ui_requests_(link.main_wake != nullptr ? UiRequestRing{*link.main_wake}
-                                                 : UiRequestRing{}) {
+          ui_requests_(link.main_wake), status_cell_(link.status_cell),
+          mount_status_cell_(link.mount_status_cell), save_extent_cell_(link.save_extent_cell),
+          levels_(link.pin_levels),
+          clock_(link.clock.has_value() ? static_cast<const os::IClock&>(*link.clock)
+                                        : static_cast<const os::IClock&>(default_clock_)),
+          ladder_cell_(link.ladder_cell), programmer_(link.programmer), vfs_(link.storage),
+          cell_(link.fabric_cell), ops_(link.ops), window_map_(link.window_map),
+          ftx_level_cell_(link.file_tx_level_cell) {
         (void)front_end_image_.assign(kFrontEndImage);
+        adopt_(link);
     }
 
     SessionOwner(const SessionOwner&) = delete;
     SessionOwner& operator=(const SessionOwner&) = delete;
-
-    void set_board_ops(const BoardOps& ops) noexcept { ops_ = ops; }
 
     void set_identity_poll_budget(std::uint32_t n) noexcept { identity_poll_budget_ = n; }
 
@@ -115,39 +144,16 @@ public:
 
     void set_readiness_poll_budget(std::uint32_t n) noexcept { readiness_poll_budget_ = n; }
 
-    void set_boot_handoff(hal::IBootHandoff* page) noexcept { handoff_ = page; }
-
-    void set_launcher_demand(LauncherDemandCell* cell, xthread::WakeFlag* wake) noexcept {
-        launcher_cell_ = cell;
-        launcher_wake_ = wake;
-    }
-
     [[nodiscard]] const LauncherProfile* launcher() const noexcept {
         return launcher_demand_.profile;
     }
 
-    void set_programmer(BitstreamProgrammer* p) noexcept { programmer_ = p; }
-    void set_storage(const svc::Vfs* vfs) noexcept { vfs_ = vfs; }
-
     void set_aperture(hal::PhysRegion region) noexcept { aperture_ = region; }
 
-    void set_fabric_cell(FabricCell* cell) {
-        cell_ = cell;
-        publish_fabric_();
-    }
-
-    void set_status_cell(const proto::StatusCell* cell) noexcept { status_cell_ = cell; }
-
-    void set_mount_status_cell(const MountStatusCell* cell) noexcept { mount_status_cell_ = cell; }
-    void set_save_extent_cell(const SaveExtentCell* cell) noexcept { save_extent_cell_ = cell; }
-
-    [[nodiscard]] LadderStateCell& ladder_cell() noexcept { return ladder_cell_; }
     [[nodiscard]] const LadderStateCell& ladder_cell() const noexcept { return ladder_cell_; }
 
-    void set_clock(const os::IClock& c) noexcept { clock_ = &c; }
-
-    void grant_pause(hal::Seat s, xthread::PauseLatch& latch) noexcept {
-        pauses_[static_cast<std::size_t>(s)] = &latch;
+    void grant_pause(SeatTag s, xthread::PauseLatch& latch) noexcept {
+        pauses_[hal::row_index(s)] = &latch;
     }
 
     [[nodiscard]] bool program_owed() const noexcept;
@@ -185,9 +191,6 @@ public:
 
     [[nodiscard]] std::uint32_t reboot_refusals() const noexcept { return reboot_refusals_; }
 
-    void set_window_map(ILoadWindowMap* m) noexcept { window_map_ = m; }
-    void set_file_tx_level_cell(const FileTxLevelCell* c) noexcept { ftx_level_cell_ = c; }
-
     [[nodiscard]] bool load_live() const noexcept { return load_.has_value(); }
     [[nodiscard]] const LoadLadder* load() const noexcept { return load_ ? &*load_ : nullptr; }
 
@@ -217,8 +220,6 @@ public:
     [[nodiscard]] std::uint32_t loads_refused_busy() const noexcept { return loads_refused_busy_; }
 
     [[nodiscard]] std::uint32_t savestate_refusals() const noexcept { return savestate_refusals_; }
-
-    void set_pin_levels(const hal::PinLevelCell* levels) noexcept { levels_ = levels; }
 
     void set_boot_cookie(std::uint16_t c) {
         cookie_ = c;
@@ -404,7 +405,7 @@ public:
         return doorbell_intern_refusals_;
     }
 
-    [[nodiscard]] bool park_acks_empty() const noexcept { return park_->ack_empty(); }
+    [[nodiscard]] bool park_acks_empty() const noexcept { return park_.ack_empty(); }
 
     [[nodiscard]] UiRequestRing& ui_requests() noexcept { return ui_requests_; }
 
@@ -646,6 +647,8 @@ private:
 
     void publish_fabric_();
 
+    void adopt_(const Link& link);
+
     enum class Programmed : std::uint8_t { NotNeeded, Ok, Failed };
 
     Programmed program_(const ParkReceipt& receipt);
@@ -712,7 +715,7 @@ private:
 
     [[nodiscard]] bool write_durably_(std::string_view rel, std::span<const std::byte> bytes);
 
-    QuiesceChannel* park_;
+    QuiesceChannel& park_;
     LinkTxChannel& inbox_;
     LinkRxChannel& rx_;
     ConfigCell& config_cell_;
@@ -724,15 +727,15 @@ private:
     EventQueue& owner_events_;
     ConfStrCell& conf_str_cell_;
     UiRequestRing ui_requests_;
-    const proto::StatusCell* status_cell_ = nullptr;
-    const MountStatusCell* mount_status_cell_ = nullptr;
-    const SaveExtentCell* save_extent_cell_ = nullptr;
-    const hal::PinLevelCell* levels_ = nullptr;
+    const proto::StatusCell& status_cell_;
+    const MountStatusCell& mount_status_cell_;
+    const SaveExtentCell& save_extent_cell_;
+    const hal::PinLevelCell& levels_;
     os::MonotonicClock default_clock_{};
-    const os::IClock* clock_ = &default_clock_;
+    const os::IClock& clock_;
 
     std::unique_ptr<cores::BootLadder> ladder_;
-    LadderStateCell ladder_cell_{};
+    LadderStateCell& ladder_cell_;
 
     std::string ladder_last_dir_;
     bool ladder_noreset_ = false;
@@ -827,9 +830,9 @@ private:
     FallbackCounts fallbacks_{};
     xthread::Telemetry<FallbackCounts, SeatTag::Unbound> fallback_cell_{};
     StepArg pending_step_arg_{};
-    BitstreamProgrammer* programmer_ = nullptr;
-    const svc::Vfs* vfs_ = nullptr;
-    FabricCell* cell_ = nullptr;
+    BitstreamProgrammer& programmer_;
+    const svc::Vfs& vfs_;
+    FabricCell& cell_;
     std::uint16_t cookie_ = 0;
     std::uint32_t fabric_gen_ = 0;
     hal::PhysRegion aperture_{os::PhysAddr{0}, 0, nullptr};
@@ -840,7 +843,7 @@ private:
     std::uint32_t identity_intern_refusals_ = 0;
     std::uint32_t doorbell_intern_refusals_ = 0;
     bool load_ok_ = false;
-    BoardOps ops_{};
+    const BoardOps ops_{};
     hal::IBootHandoff* handoff_ = nullptr;
     std::uint32_t reboots_settled_ = 0;
     struct OwedReboot {
@@ -929,8 +932,8 @@ private:
     bool walk_answer_fresh_ = false;
 
     cores::LoaderMemo loader_memo_{};
-    ILoadWindowMap* window_map_ = nullptr;
-    const FileTxLevelCell* ftx_level_cell_ = nullptr;
+    ILoadWindowMap& window_map_;
+    const FileTxLevelCell& ftx_level_cell_;
     LoadWindowCounts window_counts_{};
     xthread::Telemetry<LoadWindowCounts, SeatTag::Unbound> window_cell_{};
     bool made_with_manifest_ = false;

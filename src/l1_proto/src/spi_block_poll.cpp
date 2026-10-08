@@ -46,10 +46,16 @@ constexpr std::uint8_t kCsd[16] = {0xf1, 0x40, 0x40, 0x0a, 0x80, 0x7f, 0xe5, 0xe
 
 }  // namespace
 
+IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
+    if (!wiring_.roles || slot.v >= kBlockSlots) return nullptr;
+    const infra::OptRef<IBlockGeometry> g = (*wiring_.roles)[slot.v].geometry;
+    return g ? &*g : nullptr;
+}
+
 [[nodiscard]] Ex<void> SpiBlockPoll::send_config(hal::ISpiTransport& link) {
     std::uint8_t csd[sizeof(kCsd)];
     std::memcpy(csd, kCsd, sizeof(csd));
-    const std::uint64_t size0 = slot0_file_bytes_ == nullptr ? 0 : *slot0_file_bytes_;
+    const std::uint64_t size0 = wiring_.slot0_file_bytes ? *wiring_.slot0_file_bytes : 0;
     csd[6] = static_cast<std::uint8_t>(size0 >> 9);
     csd[7] = static_cast<std::uint8_t>(size0 >> 17);
     csd[8] = static_cast<std::uint8_t>(size0 >> 25);
@@ -164,8 +170,8 @@ constexpr std::uint8_t kCsd[16] = {0xf1, 0x40, 0x40, 0x0a, 0x80, 0x7f, 0xe5, 0xe
     if (!d.decoded) return d;
 
     BlockGeometry geo{d.block_size, 0};
-    if (geometry_ != nullptr && !stock) {
-        geo = geometry_->geometry_for(d.req.slot, d.req.lba, geo);
+    if (IBlockGeometry* const hook = geometry_for_(d.req.slot); hook != nullptr && !stock) {
+        geo = hook->geometry_for(d.req.slot, d.req.lba, geo);
     }
     if (geo.block_size == 0) geo.block_size = d.block_size;
     if (geo.block_size > kBlockStagingBytes) {

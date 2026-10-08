@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/unique_fd.h"
 #include "proto/joystick.h"
 #include "svc/device_match.h"
@@ -77,7 +78,9 @@ class InputService {
     TASTY_SEAT_OPEN();
 
 public:
-    static Ex<InputService> create();
+    [[nodiscard]] static InputService create();
+
+    [[nodiscard]] static InputService create(const Vfs& storage);
 
     Ex<void> enumerate();
 
@@ -102,9 +105,8 @@ public:
     PlayerSlots& players() noexcept { return players_; }
     const MapStore& maps() const noexcept { return maps_; }
 
-    Ex<void> load_maps_for(std::string_view core, bool front_end);
-
-    void bind_storage(const Vfs& vfs) noexcept { maps_.bind_storage(&vfs); }
+    Ex<void> load_maps_for(std::string_view core, bool front_end,
+                           infra::OptRef<const IAnalogReshape> reshape = std::nullopt);
 
     Ex<unsigned> on_fd_ready(int fd);
 
@@ -132,8 +134,7 @@ public:
     void set_joy_plan(const JoyPlan& plan) noexcept { joy_plan_ = plan; }
     const JoyPlan& joy_plan() const noexcept { return joy_plan_; }
 
-    void set_analog_reshape(const IAnalogReshape* r) noexcept { reshape_ = r; }
-    const IAnalogReshape* analog_reshape() const noexcept { return reshape_; }
+    infra::OptRef<const IAnalogReshape> analog_reshape() const noexcept { return reshape_; }
 
     void set_unique_mapping(std::span<const std::uint32_t> rows);
 
@@ -164,6 +165,7 @@ public:
 
 private:
     InputService() = default;
+    explicit InputService(const Vfs& storage) noexcept : maps_(storage) {}
 
     void note_report(InputDevice& dev);
     void recompute_joy_masks();
@@ -185,7 +187,7 @@ private:
     std::vector<NoMergeRule> cfg_no_merge_;
     std::vector<DeadzoneRule> cfg_deadzone_;
     JoyPlan joy_plan_{};
-    const IAnalogReshape* reshape_ = nullptr;
+    infra::OptRef<const IAnalogReshape> reshape_;
     std::vector<std::uint32_t> unique_rows_;
     Vid spinner_vid_{};
     Pid spinner_pid_{};

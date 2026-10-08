@@ -4,33 +4,19 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 #include "infra/seat.h"
 
 namespace mister::hal {
-
-enum class Seat : std::uint8_t {
-    RT,
-    Frame,
-    Input,
-    Pcm,
-    Prefetch,
-    Diag,
-    Ui,
-    Io,
-    Capture,
-    Encode,
-    RecWrite,
-    Launcher,
-};
 
 enum class SchedPolicy : std::uint8_t { Fifo, Other };
 
 enum class SpawnKind : std::uint8_t { PromoteInPlace, Create };
 
 struct ThreadRole {
-    Seat seat;
-    const char* name;
+    TASTY_SEAT_EXEMPT(const_shared);
+    SeatTag seat;
     int cpu;
     SchedPolicy policy;
     int prio;
@@ -38,10 +24,30 @@ struct ThreadRole {
     SpawnKind spawn;
 };
 
-inline constexpr std::size_t kThreadSeats = 12;
+inline constexpr std::size_t kThreadSeats = kSeatTagCount - 1;
 using ThreadMap = std::array<ThreadRole, kThreadSeats>;
 
 inline constexpr std::size_t kCommNameMax = 15;
+
+inline constexpr std::size_t kCommRoleMax = 10;
+
+struct CommName {
+    std::array<char, kCommNameMax + 1> text{};
+};
+constexpr CommName comm_name(std::string_view prefix, std::string_view role) noexcept {
+    CommName out;
+    if (role.size() > kCommNameMax) role = role.substr(0, kCommNameMax);
+    const std::size_t room = kCommNameMax - role.size();
+    const std::size_t avail = room > 0 ? room - 1 : 0;
+    const std::size_t keep = prefix.size() < avail ? prefix.size() : avail;
+    std::size_t n = 0;
+    for (std::size_t i = 0; i < keep; ++i)
+        out.text[n++] = prefix[i];
+    if (keep > 0) out.text[n++] = ':';
+    for (const char c : role)
+        out.text[n++] = c;
+    return out;
+}
 
 inline constexpr std::size_t kFifoStackBytes = 256u * 1024u;
 
@@ -51,95 +57,93 @@ inline constexpr std::size_t kRecorderStackBytes = 256u * 1024u;
 
 inline constexpr std::size_t kLauncherStackBytes = 256u * 1024u;
 
+inline constexpr std::size_t kHdOsdStackBytes = 2u * 1024u * 1024u;
+
 inline constexpr ThreadMap kDe10ThreadMap{{
-    {.seat = Seat::RT,
-     .name = "T-RT",
+    {.seat = SeatTag::RT,
      .cpu = 1,
      .policy = SchedPolicy::Fifo,
      .prio = 40,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Frame,
-     .name = "T-FRAME",
+    {.seat = SeatTag::Frame,
      .cpu = 1,
      .policy = SchedPolicy::Fifo,
      .prio = 35,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Input,
-     .name = "T-INPUT",
+    {.seat = SeatTag::Input,
      .cpu = 0,
      .policy = SchedPolicy::Fifo,
      .prio = 25,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Pcm,
-     .name = "T-PCM",
+    {.seat = SeatTag::Pcm,
      .cpu = 0,
      .policy = SchedPolicy::Fifo,
      .prio = 22,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Prefetch,
-     .name = "T-PREFETCH",
+    {.seat = SeatTag::Prefetch,
      .cpu = 0,
      .policy = SchedPolicy::Fifo,
      .prio = 20,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Diag,
-     .name = "T-DIAG",
+    {.seat = SeatTag::Diag,
      .cpu = 0,
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kOtherStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Ui,
-     .name = "T-UI",
+    {.seat = SeatTag::Ui,
      .cpu = 0,
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kOtherStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Io,
-     .name = "T-IO",
+    {.seat = SeatTag::Io,
      .cpu = 0,
      .policy = SchedPolicy::Fifo,
      .prio = 23,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Capture,
-     .name = "T-CAPTURE",
+    {.seat = SeatTag::Capture,
      .cpu = 0,
      .policy = SchedPolicy::Fifo,
      .prio = 15,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Encode,
-     .name = "T-ENCODE",
+    {.seat = SeatTag::Encode,
      .cpu = 0,
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kRecorderStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::RecWrite,
-     .name = "T-RECWRITE",
+    {.seat = SeatTag::RecWrite,
      .cpu = 0,
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kRecorderStackBytes,
      .spawn = SpawnKind::Create},
-    {.seat = Seat::Launcher,
-     .name = "T-LAUNCHER",
+    {.seat = SeatTag::Launcher,
      .cpu = 0,
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kLauncherStackBytes,
      .spawn = SpawnKind::Create},
+    {.seat = SeatTag::HdOsd,
+     .cpu = 0,
+     .policy = SchedPolicy::Other,
+     .prio = 0,
+     .stack_bytes = kHdOsdStackBytes,
+     .spawn = SpawnKind::Create},
 }};
 
-constexpr const ThreadRole& seat_of(const ThreadMap& m, Seat s) noexcept {
-    return m[static_cast<std::size_t>(s)];
+constexpr std::size_t row_index(SeatTag tag) noexcept { return static_cast<std::size_t>(tag) - 1; }
+
+constexpr const ThreadRole& seat_of(const ThreadMap& m, SeatTag tag) noexcept {
+    return m[row_index(tag)];
 }
 
 constexpr std::size_t name_len(const char* s) noexcept {
@@ -151,28 +155,28 @@ constexpr std::size_t name_len(const char* s) noexcept {
 
 constexpr bool well_formed(const ThreadMap& m) noexcept {
     for (std::size_t i = 0; i < m.size(); ++i) {
-        if (static_cast<std::size_t>(m[i].seat) != i) return false;
+        if (static_cast<std::size_t>(m[i].seat) != i + 1) return false;
     }
     return true;
 }
 
 constexpr bool rt_holds_highest_fifo_prio(const ThreadMap& m) noexcept {
-    const ThreadRole& rt = seat_of(m, Seat::RT);
+    const ThreadRole& rt = seat_of(m, SeatTag::RT);
     if (rt.policy != SchedPolicy::Fifo) return false;
     for (const ThreadRole& r : m) {
-        if (r.seat == Seat::RT) continue;
+        if (r.seat == SeatTag::RT) continue;
         if (r.policy == SchedPolicy::Fifo && r.prio >= rt.prio) return false;
     }
     return true;
 }
 
 constexpr bool prefetch_off_rt_cpu(const ThreadMap& m) noexcept {
-    return seat_of(m, Seat::Prefetch).cpu != seat_of(m, Seat::RT).cpu;
+    return seat_of(m, SeatTag::Prefetch).cpu != seat_of(m, SeatTag::RT).cpu;
 }
 
 constexpr bool input_outranks_prefetch(const ThreadMap& m) noexcept {
-    const ThreadRole& in = seat_of(m, Seat::Input);
-    const ThreadRole& pf = seat_of(m, Seat::Prefetch);
+    const ThreadRole& in = seat_of(m, SeatTag::Input);
+    const ThreadRole& pf = seat_of(m, SeatTag::Prefetch);
     if (in.policy != SchedPolicy::Fifo || pf.policy != SchedPolicy::Fifo) {
         return false;
     }
@@ -180,12 +184,12 @@ constexpr bool input_outranks_prefetch(const ThreadMap& m) noexcept {
 }
 
 constexpr bool pcm_off_rt_cpu(const ThreadMap& m) noexcept {
-    return seat_of(m, Seat::Pcm).cpu != seat_of(m, Seat::RT).cpu;
+    return seat_of(m, SeatTag::Pcm).cpu != seat_of(m, SeatTag::RT).cpu;
 }
 
 constexpr bool input_outranks_pcm(const ThreadMap& m) noexcept {
-    const ThreadRole& in = seat_of(m, Seat::Input);
-    const ThreadRole& pcm = seat_of(m, Seat::Pcm);
+    const ThreadRole& in = seat_of(m, SeatTag::Input);
+    const ThreadRole& pcm = seat_of(m, SeatTag::Pcm);
     if (in.policy != SchedPolicy::Fifo || pcm.policy != SchedPolicy::Fifo) {
         return false;
     }
@@ -193,8 +197,8 @@ constexpr bool input_outranks_pcm(const ThreadMap& m) noexcept {
 }
 
 constexpr bool pcm_outranks_prefetch(const ThreadMap& m) noexcept {
-    const ThreadRole& pcm = seat_of(m, Seat::Pcm);
-    const ThreadRole& pf = seat_of(m, Seat::Prefetch);
+    const ThreadRole& pcm = seat_of(m, SeatTag::Pcm);
+    const ThreadRole& pf = seat_of(m, SeatTag::Prefetch);
     if (pcm.policy != SchedPolicy::Fifo || pf.policy != SchedPolicy::Fifo) {
         return false;
     }
@@ -202,12 +206,12 @@ constexpr bool pcm_outranks_prefetch(const ThreadMap& m) noexcept {
 }
 
 constexpr bool io_off_rt_cpu(const ThreadMap& m) noexcept {
-    return seat_of(m, Seat::Io).cpu != seat_of(m, Seat::RT).cpu;
+    return seat_of(m, SeatTag::Io).cpu != seat_of(m, SeatTag::RT).cpu;
 }
 
 constexpr bool input_outranks_io(const ThreadMap& m) noexcept {
-    const ThreadRole& in = seat_of(m, Seat::Input);
-    const ThreadRole& io = seat_of(m, Seat::Io);
+    const ThreadRole& in = seat_of(m, SeatTag::Input);
+    const ThreadRole& io = seat_of(m, SeatTag::Io);
     if (in.policy != SchedPolicy::Fifo || io.policy != SchedPolicy::Fifo) {
         return false;
     }
@@ -215,8 +219,8 @@ constexpr bool input_outranks_io(const ThreadMap& m) noexcept {
 }
 
 constexpr bool io_outranks_pcm(const ThreadMap& m) noexcept {
-    const ThreadRole& io = seat_of(m, Seat::Io);
-    const ThreadRole& pcm = seat_of(m, Seat::Pcm);
+    const ThreadRole& io = seat_of(m, SeatTag::Io);
+    const ThreadRole& pcm = seat_of(m, SeatTag::Pcm);
     if (io.policy != SchedPolicy::Fifo || pcm.policy != SchedPolicy::Fifo) {
         return false;
     }
@@ -224,23 +228,35 @@ constexpr bool io_outranks_pcm(const ThreadMap& m) noexcept {
 }
 
 constexpr bool recorder_off_rt_cpu(const ThreadMap& m) noexcept {
-    const int rt = seat_of(m, Seat::RT).cpu;
-    return seat_of(m, Seat::Capture).cpu != rt && seat_of(m, Seat::Encode).cpu != rt &&
-           seat_of(m, Seat::RecWrite).cpu != rt;
+    const int rt = seat_of(m, SeatTag::RT).cpu;
+    return seat_of(m, SeatTag::Capture).cpu != rt && seat_of(m, SeatTag::Encode).cpu != rt &&
+           seat_of(m, SeatTag::RecWrite).cpu != rt;
 }
 
 constexpr bool launcher_off_rt_cpu(const ThreadMap& m) noexcept {
-    const ThreadRole& l = seat_of(m, Seat::Launcher);
-    return l.cpu != seat_of(m, Seat::RT).cpu && l.policy == SchedPolicy::Other;
+    const ThreadRole& l = seat_of(m, SeatTag::Launcher);
+    return l.cpu != seat_of(m, SeatTag::RT).cpu && l.policy == SchedPolicy::Other;
+}
+
+constexpr bool other_rows_off_rt_cpu(const ThreadMap& m) noexcept {
+    const int rt = seat_of(m, SeatTag::RT).cpu;
+    for (const ThreadRole& r : m) {
+        if (r.policy == SchedPolicy::Other && r.cpu == rt) return false;
+    }
+    return true;
+}
+
+constexpr bool hdosd_is_other(const ThreadMap& m) noexcept {
+    return seat_of(m, SeatTag::HdOsd).policy == SchedPolicy::Other;
 }
 
 constexpr bool capture_ranks_lowest(const ThreadMap& m) noexcept {
-    const ThreadRole& cap = seat_of(m, Seat::Capture);
+    const ThreadRole& cap = seat_of(m, SeatTag::Capture);
     if (cap.policy != SchedPolicy::Fifo) return false;
-    if (seat_of(m, Seat::Encode).policy != SchedPolicy::Other) return false;
-    if (seat_of(m, Seat::RecWrite).policy != SchedPolicy::Other) return false;
+    if (seat_of(m, SeatTag::Encode).policy != SchedPolicy::Other) return false;
+    if (seat_of(m, SeatTag::RecWrite).policy != SchedPolicy::Other) return false;
     for (const ThreadRole& r : m) {
-        if (r.seat == Seat::Capture || r.policy != SchedPolicy::Fifo) continue;
+        if (r.seat == SeatTag::Capture || r.policy != SchedPolicy::Fifo) continue;
         if (r.prio <= cap.prio) return false;
     }
     return true;
@@ -276,7 +292,7 @@ constexpr bool spawn_stack_consistent(const ThreadMap& m) noexcept {
     return true;
 }
 
-constexpr Seat highest_fifo_seat(const ThreadMap& m) noexcept {
+constexpr SeatTag highest_fifo_seat(const ThreadMap& m) noexcept {
     const ThreadRole* best = nullptr;
     for (const ThreadRole& r : m) {
         if (r.policy != SchedPolicy::Fifo) continue;
@@ -285,10 +301,10 @@ constexpr Seat highest_fifo_seat(const ThreadMap& m) noexcept {
     return best != nullptr ? best->seat : m[0].seat;
 }
 
-constexpr bool names_fit_comm(const ThreadMap& m) noexcept {
-    for (const ThreadRole& r : m) {
-        if (r.name == nullptr || name_len(r.name) == 0) return false;
-        if (name_len(r.name) > kCommNameMax) return false;
+constexpr bool names_fit_comm(const std::array<SeatNameRow, kSeatTagCount>& rows) noexcept {
+    for (const SeatNameRow& r : rows) {
+        if (r.second == nullptr || name_len(r.second) == 0) return false;
+        if (name_len(r.second) > kCommRoleMax) return false;
     }
     return true;
 }
@@ -309,79 +325,17 @@ constexpr bool cpus_within(const ThreadMap& m, long online_cpus) noexcept {
 }
 
 constexpr bool main_off_rt_cpu(const ThreadMap& m, int main_cpu) noexcept {
-    if (main_cpu == seat_of(m, Seat::RT).cpu) return false;
+    if (main_cpu == seat_of(m, SeatTag::RT).cpu) return false;
     for (const ThreadRole& r : m) {
         if (r.cpu == main_cpu) return true;
     }
     return false;
 }
 
-void adopt_placement(const ThreadMap& m, Seat seat) noexcept;
+void adopt_placement(const ThreadMap& m, SeatTag seat) noexcept;
 
 bool widen_self_affinity() noexcept;
 
 bool restore_self_affinity() noexcept;
-
-constexpr SeatTag tag_of(Seat s) noexcept {
-    switch (s) {
-        case Seat::RT:
-            return SeatTag::RT;
-        case Seat::Frame:
-            return SeatTag::Frame;
-        case Seat::Input:
-            return SeatTag::Input;
-        case Seat::Pcm:
-            return SeatTag::Pcm;
-        case Seat::Prefetch:
-            return SeatTag::Prefetch;
-        case Seat::Diag:
-            return SeatTag::Diag;
-        case Seat::Ui:
-            return SeatTag::Ui;
-        case Seat::Io:
-            return SeatTag::Io;
-        case Seat::Capture:
-            return SeatTag::Capture;
-        case Seat::Encode:
-            return SeatTag::Encode;
-        case Seat::RecWrite:
-            return SeatTag::RecWrite;
-        case Seat::Launcher:
-            return SeatTag::Launcher;
-    }
-    return SeatTag::Unbound;
-}
-
-constexpr bool same_name(const char* a, const char* b) noexcept {
-    std::size_t i = 0;
-    while (a[i] != '\0' && a[i] == b[i])
-        ++i;
-    return a[i] == b[i];
-}
-
-constexpr bool names_match_seat_tags(const ThreadMap& m) noexcept {
-    for (const ThreadRole& r : m) {
-        if (!same_name(r.name, seat_name(tag_of(r.seat)))) return false;
-    }
-    return true;
-}
-
-constexpr bool every_seat_has_a_tag(const ThreadMap& m) noexcept {
-    for (const ThreadRole& r : m) {
-        if (tag_of(r.seat) == SeatTag::Unbound) return false;
-    }
-    return true;
-}
-
-static_assert(static_cast<std::uint8_t>(SeatTag::Unbound) == 0,
-              "TRAP 1: the runtime tag's zero must NOT be a real seat. "
-              "hal::Seat::RT is 0, so a tag that reused this enum's "
-              "numbering would make every never-tagged thread — the process "
-              "main thread and every test thread — claim T-RT, and TASTY_SEAT "
-              "would be silent on exactly the crossing it exists to catch.");
-
-static_assert(kSeatTagCount == kThreadSeats + 1,
-              "one runtime tag per seat, plus Unbound. Adding a seat to this "
-              "table without adding its SeatTag lands here, not at runtime.");
 
 }  // namespace mister::hal

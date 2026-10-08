@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "cores/core_grant.h"
 #include "cores/core_support.h"
 #include "cores/stream_load.h"
 #include "proto/download_session.h"
@@ -65,6 +66,6 @@ private:
     std::uint16_t last_index_ = 0;
 };
 
-std::unique_ptr<Core> make_generic(const CoreProfile& p, const HostServices& h);
+std::unique_ptr<Core> make_generic(const CoreProfile& p, const CoreGrant& g);
 
 }  // namespace mister::cores

@@ -29,13 +29,12 @@ public:
     using GeomCell = xthread::Telemetry<DiscGeometry, SeatTag::Io>;
     using CountCell = xthread::Telemetry<DiscCounters, SeatTag::Io>;
 
-    DiscStore(const Vfs& vfs, GeomCell& geom, CountCell& counters) noexcept
-        : vfs_(&vfs), geom_(&geom), counters_(&counters) {}
+    DiscStore(const Vfs& vfs, GeomCell& geom, CountCell& counters, ChdPrefetch& prefetch) noexcept
+        : vfs_(&vfs), geom_(geom), counters_(counters), prefetch_(prefetch) {}
 
-    DiscStore(const IImageOpener& opener, GeomCell& geom, CountCell& counters) noexcept
-        : opener_(&opener), geom_(&geom), counters_(&counters) {}
-
-    void bind_prefetch(ChdPrefetch* p) noexcept { prefetch_ = p; }
+    DiscStore(const IImageOpener& opener, GeomCell& geom, CountCell& counters,
+              ChdPrefetch& prefetch) noexcept
+        : opener_(&opener), geom_(geom), counters_(counters), prefetch_(prefetch) {}
 
     [[nodiscard]] Ex<std::size_t> read_form(DiscForm form, proto::Lba lba,
                                             std::span<std::byte> dst) override;
@@ -51,9 +50,9 @@ private:
 
     const Vfs* vfs_ = nullptr;
     const IImageOpener* opener_ = nullptr;
-    GeomCell* geom_;
-    CountCell* counters_;
-    ChdPrefetch* prefetch_ = nullptr;
+    GeomCell& geom_;
+    CountCell& counters_;
+    ChdPrefetch& prefetch_;
     const CuePolicy* policy_ = nullptr;
 
     std::uint32_t next_lba_ = 0;

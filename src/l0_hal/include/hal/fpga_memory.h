@@ -68,4 +68,6 @@ private:
     os::MmioRegion::Access access_ = os::MmioRegion::Access::ReadWrite;
 };
 
+void copy_to_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept;
+
 }  // namespace mister::hal

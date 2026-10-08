@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "app/rbf_resolve.h"
+#include "cores/registry.h"
 #include "svc/vfs.h"
 #include "svc/xml_scan.h"
 
@@ -25,6 +26,11 @@ bool ieq(std::string_view a, std::string_view b) {
     return true;
 }
 
+[[nodiscard]] std::string_view manifest_root_of(std::string_view rel) noexcept {
+    const cores::ManifestDocRole* role = cores::manifest_doc_role();
+    return role != nullptr ? role->root_of(rel) : std::string_view{};
+}
+
 [[nodiscard]] Ex<std::string> read_manifest_at(const svc::Vfs& vfs, std::string_view rel,
                                                svc::OpenMode mode) {
     auto mra = vfs.resolve(rel, svc::SearchPolicy{svc::search::kRootOnly, true});
@@ -33,7 +39,8 @@ bool ieq(std::string_view a, std::string_view b) {
     if (!f) return std::unexpected(f.error());
     const auto sz = (*f)->size();
     if (!sz) return std::unexpected(sz.error());
-    constexpr std::uint64_t kDocMax = 0;
+    const cores::ManifestDocRole* role = cores::manifest_doc_role();
+    const std::uint64_t kDocMax = role != nullptr ? role->doc_max : 0;
     if (sz->v == 0 || sz->v > kDocMax) {
         return std::unexpected(
             Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(sz->v)});
@@ -51,8 +58,13 @@ bool ieq(std::string_view a, std::string_view b) {
 }
 
 void fill_facts(MraFacts& facts, std::string_view doc) {
-    (void)facts;
-    (void)doc;
+    const cores::ManifestDocRole* role = cores::manifest_doc_role();
+    if (role == nullptr) return;
+    cores::ManifestDocFacts parsed = role->facts_of(doc);
+    facts.vertical = parsed.vertical;
+    facts.rotation = parsed.rotation;
+    facts.setname = std::move(parsed.setname);
+    facts.setname_same_dir = parsed.setname_same_dir;
 }
 
 }  // namespace
@@ -60,17 +72,15 @@ void fill_facts(MraFacts& facts, std::string_view doc) {
 void PendingLoad::arm(const LoadRequest& req) noexcept {
     req_ = req;
 
-    doc_.clear();
-    doc_read_ = false;
+    doc_.reset();
 }
 
-Ex<std::string_view> PendingLoad::manifest_doc_(const svc::Vfs& vfs) const {
-    if (doc_read_) return std::string_view{doc_};
+Ex<void> PendingLoad::load_manifest(const svc::Vfs& vfs) {
+    if (req_.kind != XmlKind::Mra || doc_) return {};
     auto r = read_manifest_at(vfs, path(), svc::OpenMode::Read);
     if (!r) return std::unexpected(r.error());
     doc_ = std::move(*r);
-    doc_read_ = true;
-    return std::string_view{doc_};
+    return {};
 }
 
 bool same_image_name(std::string_view rel, std::string_view image) noexcept {
@@ -101,8 +111,7 @@ bool names_front_end_image(std::string_view rel, XmlKind kind) noexcept {
     if (!doc_r) return std::unexpected(doc_r.error());
     const std::string_view frag = svc::xml::rbf_text(*doc_r);
     if (frag.empty()) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    const std::string_view arcade_root{};
-    std::string dir(arcade_root);
+    std::string dir(manifest_root_of(rel));
     if (!dir.empty()) dir.push_back('/');
     dir.append("cores");
     auto name = resolve_rbf_name(vfs, dir, frag, true);
@@ -123,13 +132,12 @@ Ex<std::string> PendingLoad::resolve(const svc::Vfs& vfs) const {
     return vfs.resolve(rel, policy);
 }
 
-MraFacts PendingLoad::mra_facts(const svc::Vfs& vfs) const {
+MraFacts PendingLoad::mra_facts() const {
     if (req_.kind != XmlKind::Mra) return MraFacts{};
     MraFacts facts{};
     facts.is_arcade = true;
-    auto doc = manifest_doc_(vfs);
-    if (!doc) return facts;
-    fill_facts(facts, *doc);
+    if (!doc_) return facts;
+    fill_facts(facts, *doc_);
     return facts;
 }
 
@@ -144,9 +152,8 @@ MraFacts mra_facts_at(const svc::Vfs& vfs, std::string_view rel) {
 
 Ex<std::string> PendingLoad::resolve_mra_(const svc::Vfs& vfs) const {
     const std::string_view rel = path();
-    auto doc_r = manifest_doc_(vfs);
-    if (!doc_r) return std::unexpected(doc_r.error());
-    const std::string_view doc = *doc_r;
+    if (!doc_) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    const std::string_view doc = *doc_;
 
     const std::string_view frag = svc::xml::rbf_text(doc);
     if (frag.empty()) {
@@ -154,9 +161,7 @@ Ex<std::string> PendingLoad::resolve_mra_(const svc::Vfs& vfs) const {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     }
 
-    (void)rel;
-    const std::string_view arcade_root{};
-    std::string dir(arcade_root);
+    std::string dir(manifest_root_of(rel));
     if (!dir.empty()) dir.push_back('/');
     dir.append("cores");
 
@@ -167,8 +172,9 @@ Ex<std::string> PendingLoad::resolve_mra_(const svc::Vfs& vfs) const {
     return vfs.resolve(dir, svc::SearchPolicy{svc::search::kRootOnly, true});
 }
 
-Ex<void> PendingLoad::validate(const svc::Vfs& vfs) const {
+Ex<void> PendingLoad::validate(const svc::Vfs& vfs) {
     if (req_.path.empty()) return {};
+    if (auto m = load_manifest(vfs); !m) return std::unexpected(m.error());
     auto p = resolve(vfs);
     if (!p) return std::unexpected(p.error());
     auto f = vfs.open(*p, svc::OpenMode::Read);

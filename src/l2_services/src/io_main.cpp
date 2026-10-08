@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/io_main.h"
 
+#include <utility>
+
 namespace mister::svc {
 
-Ex<void> IoMain::open() noexcept {
-    if (wake_.fd() < 0) {
-        if (auto r = wake_.open_fd(); !r) return r;
-    }
-    if (stop_.fd() < 0) {
-        if (auto r = stop_.open_fd(); !r) return r;
-    }
-    if (!park_) park_.emplace(wake_, stop_);
-    return {};
-}
+IoMain::IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker) noexcept
+    : wake_(fds.wake()), pause_(wake_, asker ? &*asker : nullptr),
+      stop_(std::move(fds).take_stop()), park_(wake_, stop_) {}
 
 bool IoMain::add_coworker(IIoCoworker* c) noexcept {
     if (c == nullptr || n_coworkers_ >= kMaxCoworkers) return false;
@@ -33,11 +28,6 @@ void IoMain::remove_coworker(IIoCoworker* c) noexcept {
 
 void IoMain::start() noexcept {
     TASTY_SEAT_BODY(IoMain);
-    if (!park_) {
-        if constexpr (kSeatChecksEnabled)
-            fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "IoMain started unopened");
-        return;
-    }
     loop_();
 }
 

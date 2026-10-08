@@ -9,6 +9,7 @@
 namespace mister::app {
 
 struct FileTxLevel {
+    TASTY_SEAT_EXEMPT(const_shared);
     std::uint32_t act = 0;
     bool open = false;
     bool payload = false;

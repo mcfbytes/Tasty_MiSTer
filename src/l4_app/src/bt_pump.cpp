@@ -39,7 +39,7 @@ void BtPump::tick() {
         }
     }
 
-    if (diag_ != nullptr) {
+    if (diag_) {
         diag_->appendf("{\"t\":\"bt_oneshot\",\"outcome\":\"%s\","
                        "\"delay_ms\":%u,\"detail\":%u}",
                        outcome, static_cast<unsigned>(kDelay.count()),

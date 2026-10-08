@@ -1,26 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/recorder_status.h"
 
-#include <cinttypes>
-#include <cstdio>
+#include "infra/json_out.h"
 
 namespace mister::app {
-
-const char* rec_state_name(RecState s) noexcept {
-    switch (s) {
-        case RecState::Idle:
-            return "idle";
-        case RecState::Probing:
-            return "probing";
-        case RecState::Armed:
-            return "armed";
-        case RecState::Recording:
-            return "recording";
-        case RecState::Closing:
-            return "closing";
-    }
-    return "?";
-}
 
 const char* rec_verdict_name(RecVerdict v) noexcept {
     switch (v) {
@@ -61,27 +44,10 @@ const char* rec_verdict_remedy(RecVerdict v) noexcept {
 }
 
 RecStatusText format_recorder_status(const RecorderStatus& s) noexcept {
-    char buf[RecStatusText::kBufSize];
-    (void)std::snprintf(
-        buf, sizeof buf,
-        "\"state\":\"%s\",\"gen\":%u,\"avi\":%u,\"stride_mib\":%u,\"lowlat\":%u,\"anchored\":%u,"
-        "\"interlaced\":%u,"
-        "\"w\":%u,"
-        "\"h\":%u,\"rows\":%" PRIu32 ",\"captured\":%" PRIu32 ",\"missed\":%" PRIu32
-        ",\"torn\":%" PRIu32 ",\"backpressure\":%" PRIu32 ",\"resize\":%" PRIu32
-        ",\"gaps\":%" PRIu32 ",\"drift\":%" PRIu32 ",\"rebased\":%" PRIu32
-        ",\"bad_header\":%" PRIu32 ",\"woven\":%" PRIu32 ",\"unmatched\":%" PRIu32
-        ",\"copy_us\":%" PRIu32 ",\"copy_us_max\":%" PRIu32 ",\"arena_kib\":%" PRIu32
-        ",\"depth\":%u,\"first\":%" PRIu64 ",\"last\":%" PRIu64,
-        rec_state_name(s.state), static_cast<unsigned>(s.gen), static_cast<unsigned>(s.avi),
-        static_cast<unsigned>(s.stride_mib), static_cast<unsigned>(s.lowlat),
-        static_cast<unsigned>(s.anchored), static_cast<unsigned>(s.interlaced),
-        static_cast<unsigned>(s.width), static_cast<unsigned>(s.height), s.rows, s.captured,
-        s.missed, s.torn, s.backpressure, s.resize, s.gap_estimated, s.stamp_drift, s.rebased,
-        s.bad_header, s.woven, s.unmatched, s.copy_us_last, s.copy_us_max, s.arena_kib,
-        static_cast<unsigned>(s.depth), s.first_core_frame, s.last_core_frame);
+    infra::JsonOut o;
+    to_json(o, s);
     RecStatusText out;
-    (void)out.assign(buf);
+    (void)out.assign(o.view());
     return out;
 }
 

@@ -3,11 +3,14 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 #include "svc/analog_xy.h"
@@ -88,8 +91,11 @@ public:
     void set_axis(unsigned code, const AxisCal& cal);
 
     Ex<void> set_joy_map(const ButtonMap& map);
-    bool has_joy_map() const noexcept { return has_map_; }
-    std::span<const std::uint32_t> joy_map() const noexcept { return joy_map_; }
+    bool has_joy_map() const noexcept { return joy_map_.has_value(); }
+    std::span<const std::uint32_t> joy_map() const noexcept {
+        return joy_map_ ? std::span<const std::uint32_t>{*joy_map_}
+                        : std::span<const std::uint32_t>{kUnsetJoyMap};
+    }
 
     Ex<void> set_sys_map(const ButtonMap& map);
     std::span<const std::uint32_t> sys_map() const noexcept { return sys_map_; }
@@ -103,8 +109,8 @@ public:
 
     StickCal stick_cal(int stick) const noexcept;
 
-    void set_reshape(const IAnalogReshape* r) noexcept { reshape_ = r; }
-    const IAnalogReshape* reshape() const noexcept { return reshape_; }
+    void set_reshape(infra::OptRef<const IAnalogReshape> r) noexcept { reshape_ = r; }
+    infra::OptRef<const IAnalogReshape> reshape() const noexcept { return reshape_; }
 
     Ex<unsigned> drain();
     const DeviceReport& report() const noexcept { return report_; }
@@ -128,12 +134,15 @@ private:
     QuirkId quirk_ = QuirkId::None;
     bool mod_ = false;
     bool grabbed_ = false;
-    bool has_map_ = false;
     std::int32_t deadzone_ = 0;
-    const IAnalogReshape* reshape_ = nullptr;
+    infra::OptRef<const IAnalogReshape> reshape_;
     std::uint8_t mouse_buttons_ = 0;
     std::uint8_t osd_combo_ = 0;
-    std::array<std::uint32_t, 32> joy_map_{};
+
+    static constexpr std::array<std::uint32_t, 32> kUnsetJoyMap{};
+    std::optional<std::array<std::uint32_t, 32>> joy_map_{};
+
+    static_assert(std::is_trivially_copyable_v<decltype(joy_map_)>);
     std::array<std::uint32_t, 32> sys_map_{};
     std::array<std::uint32_t, 32> menu_map_{};
     std::array<AxisCal, kAxisCount> axes_{};

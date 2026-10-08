@@ -77,9 +77,6 @@ public:
         return on_apply_load_facts(facts);
     }
 
-    void set_manifest_path(std::string_view path) { on_set_manifest_path(path); }
-
-    void set_manifest_text(std::string_view text) { on_set_manifest_text(text); }
     [[nodiscard]] std::string_view manifest_error() const noexcept { return on_manifest_error(); }
 
     [[nodiscard]] ButtonOverride button_override() const noexcept { return on_button_override(); }
@@ -145,8 +142,6 @@ private:
     [[nodiscard]] virtual Ex<void> on_apply_load_facts(std::span<const std::uint8_t>) {
         return unimplemented(ERR_SITE());
     }
-    virtual void on_set_manifest_path(std::string_view) {}
-    virtual void on_set_manifest_text(std::string_view) {}
     [[nodiscard]] virtual std::string_view on_manifest_error() const noexcept { return {}; }
 
     [[nodiscard]] virtual ButtonOverride on_button_override() const noexcept { return {}; }

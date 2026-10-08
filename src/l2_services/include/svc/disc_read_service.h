@@ -8,6 +8,7 @@
 
 #include "infra/counter.h"
 #include "infra/loan_channel.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "infra/telemetry.h"
@@ -32,13 +33,16 @@ public:
     using GeomCell = xthread::Telemetry<DiscGeometry, SeatTag::Io>;
     using CountCell = xthread::Telemetry<DiscCounters, SeatTag::Io>;
 
-    DiscReadService() noexcept : chan_(xthread::Polled{}), mounts_(xthread::Polled{}) {}
+    struct Wiring {
+        GeomCell& geometry;
+        CountCell& counters;
+        infra::OptRef<IDiscReader> reader{};
+        infra::OptRef<IDiscMounter> mounter{};
+    };
 
-    explicit DiscReadService(xthread::WakeFlag& io_wake) noexcept
-        : chan_(io_wake), mounts_(io_wake) {}
+    explicit DiscReadService(const Wiring& w) noexcept;
 
-    void bind_reader(IDiscReader& r) noexcept { reader_ = &r; }
-    void bind_mounter(IDiscMounter& m) noexcept { mounter_ = &m; }
+    DiscReadService(xthread::WakeFlag& io_wake, const Wiring& w) noexcept;
 
     [[nodiscard]] GeomCell& geometry_cell() noexcept { return geom_cell_; }
     [[nodiscard]] CountCell& counters_cell() noexcept { return count_cell_; }
@@ -101,14 +105,14 @@ private:
 
     Chan chan_;
     MountChan mounts_;
-    GeomCell geom_cell_{};
-    CountCell count_cell_{};
+    GeomCell& geom_cell_;
+    CountCell& count_cell_;
     GeomCell::Reader geom_rd_{};
     CountCell::Reader count_rd_{};
     DiscGeometry geom_{};
     DiscCounters count_{};
-    IDiscReader* reader_ = nullptr;
-    IDiscMounter* mounter_ = nullptr;
+    IDiscReader* reader_;
+    IDiscMounter* mounter_;
 
     FixedStr<kDiscPathCap, StrFit::Reject> armed_path_{};
     DiscOp armed_op_ = DiscOp::Mount;

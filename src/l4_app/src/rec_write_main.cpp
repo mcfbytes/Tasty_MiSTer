@@ -5,24 +5,8 @@
 
 namespace mister::app {
 
-Ex<void> RecWriteMain::open() noexcept {
-    if (wake_.fd() < 0) {
-        if (auto r = wake_.open_fd(); !r) return r;
-    }
-    if (stop_.fd() < 0) {
-        if (auto r = stop_.open_fd(); !r) return r;
-    }
-    if (!park_) park_.emplace(wake_, stop_);
-    return {};
-}
-
 void RecWriteMain::start() noexcept {
     TASTY_SEAT_BODY(RecWriteMain);
-    if (!park_) {
-        if constexpr (kSeatChecksEnabled)
-            fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "RecWriteMain started unopened");
-        return;
-    }
     loop_();
 }
 

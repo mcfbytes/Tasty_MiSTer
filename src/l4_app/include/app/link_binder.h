@@ -42,21 +42,22 @@ class LinkBinder {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    explicit LinkBinder(hal::ISpiTransport& link) noexcept
-        : fio_queue_(link), spi_sink_(link, &fio_queue_), doorbells_(uio_doorbells_) {}
+    struct Wiring {
+        reactor::Executive& exec;
+        reactor::CoreState& state;
+        xthread::LogLane& log_lane;
+        hal::DoorbellPolicy doorbells{};
+        hal::FpgaAperture fpga_mem{};
+        hal::PhysRegion lw_window{};
+        os::UioLineSpace doorbell_nodes{};
+    };
 
-    LinkBinder(hal::ISpiTransport& link, hal::IDoorbellSource& src) noexcept
-        : fio_queue_(link), spi_sink_(link, &fio_queue_), doorbells_(src) {}
+    LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept
+        : LinkBinder(link, uio_doorbells_, w) {}
 
-    void attach_executive(reactor::Executive& exec, reactor::CoreState& state) noexcept {
-        exec_ = &exec;
-        state_ = &state;
-        notifiers_.attach_executive(exec);
-    }
+    LinkBinder(hal::ISpiTransport& link, hal::IDoorbellSource& src, const Wiring& w) noexcept;
 
-    void service_on_caller(std::int64_t now_ns) noexcept {
-        if (exec_ != nullptr) exec_->service_on_caller(now_ns);
-    }
+    void service_on_caller(std::int64_t now_ns) noexcept { exec_.service_on_caller(now_ns); }
 
     [[nodiscard]] proto::IImageSink& grant_bulk() noexcept;
 
@@ -80,16 +81,6 @@ public:
     [[nodiscard]] Ex<void> unbind_session();
 
     [[nodiscard]] bool bridge_windows_live() const noexcept;
-
-    void set_log_lane(xthread::LogLane* lane) noexcept { log_lane_ = lane; }
-
-    void set_doorbell_policy(hal::DoorbellPolicy p) noexcept { policy_ = p; }
-
-    void set_fpga_aperture(hal::FpgaAperture ap) noexcept { aperture_ = ap; }
-
-    void set_lw_window(hal::PhysRegion lw) noexcept { uio_doorbells_.set_lw_window(lw); }
-
-    void set_doorbell_nodes(os::UioLineSpace s) noexcept { uio_doorbells_.set_line_space(s); }
 
     [[nodiscard]] std::uint32_t doorbells_declared() const noexcept { return doorbells_declared_; }
     [[nodiscard]] std::size_t doorbells_bound() const noexcept { return notifiers_.size(); }
@@ -128,10 +119,10 @@ private:
     hal::IDoorbellSource& doorbells_;
     hal::DoorbellPolicy policy_{};
     reactor::CauseSet bound_classes_;
-    reactor::Executive* exec_ = nullptr;
-    reactor::CoreState* state_ = nullptr;
+    reactor::Executive& exec_;
+    reactor::CoreState& state_;
     reactor::CoreNotifiers notifiers_;
-    xthread::LogLane* log_lane_ = nullptr;
+    xthread::LogLane& log_lane_;
     std::uint32_t doorbells_declared_ = 0;
     std::uint32_t fallbacks_ = 0;
 };

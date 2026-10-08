@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "cores/core_grant.h"
 #include "cores/boot_ladder.h"
 
 #include <array>
@@ -138,7 +139,7 @@ inline constexpr CoreProfile kPsx{
     .file_tx_whole = true,
 };
 
-std::unique_ptr<Core> make_psx(const CoreProfile& p, const HostServices& h);
+std::unique_ptr<Core> make_psx(const CoreProfile& p, const CoreGrant& g);
 
 std::unique_ptr<BootLadder> make_psx_ladder(const CoreProfile& p, const LadderContext& ctx);
 

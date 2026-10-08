@@ -17,14 +17,24 @@ namespace mister::fw {
 namespace {
 
 const auto kTastyCores = std::to_array<cores::CoreFactory>({
-    {cores::CoreKind::Menu, "MENU", &cores::kMenuProfile, &cores::make_generic, nullptr, nullptr,
-     nullptr},
-    {cores::CoreKind::Snes, "SNES", &cores::manifests::kSnes, &cores::manifests::make_snes, nullptr,
-     nullptr, &cores::manifests::make_snes_companion},
-    {cores::CoreKind::MegaDrive, "MegaDrive", &cores::manifests::kMegaDrive,
-     &cores::manifests::make_megadrive, nullptr, nullptr, nullptr},
-    {cores::CoreKind::Psx, "PSX", &cores::manifests::kPsx, &cores::manifests::make_psx,
-     &cores::manifests::make_psx_ladder, nullptr, nullptr},
+    {.kind = cores::CoreKind::Menu,
+     .name = "MENU",
+     .profile = &cores::kMenuProfile,
+     .make = &cores::make_generic},
+    {.kind = cores::CoreKind::Snes,
+     .name = "SNES",
+     .profile = &cores::manifests::kSnes,
+     .make = &cores::manifests::make_snes,
+     .make_companion = &cores::manifests::make_snes_companion},
+    {.kind = cores::CoreKind::MegaDrive,
+     .name = "MegaDrive",
+     .profile = &cores::manifests::kMegaDrive,
+     .make = &cores::manifests::make_megadrive},
+    {.kind = cores::CoreKind::Psx,
+     .name = "PSX",
+     .profile = &cores::manifests::kPsx,
+     .make = &cores::manifests::make_psx,
+     .make_ladder = &cores::manifests::make_psx_ladder},
 });
 
 bool ieq(std::string_view a, std::string_view b) noexcept {

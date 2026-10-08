@@ -173,7 +173,7 @@ static Ex<void> check_policy(const CuePolicy& policy, std::uint16_t site) {
     return {};
 }
 
-DiscEngine::DiscEngine(CuePolicy p) : policy_(p) {
+DiscEngine::DiscEngine(CuePolicy p, ChdPrefetch& prefetch) : policy_(p), prefetch_(prefetch) {
     switch (p.frame_shaping) {
         case CuePolicy::FrameShaping::None:
             break;
@@ -183,18 +183,19 @@ DiscEngine::DiscEngine(CuePolicy p) : policy_(p) {
     }
 }
 
-Ex<DiscEngine> DiscEngine::create(const Vfs& vfs, CuePolicy policy) {
+Ex<DiscEngine> DiscEngine::create(const Vfs& vfs, CuePolicy policy, ChdPrefetch& prefetch) {
     auto ok = check_policy(policy, ERR_SITE());
     if (!ok) return std::unexpected(ok.error());
-    DiscEngine d(policy);
+    DiscEngine d(policy, prefetch);
     d.vfs_ = &vfs;
     return d;
 }
 
-Ex<DiscEngine> DiscEngine::create(const IImageOpener& opener, CuePolicy policy) {
+Ex<DiscEngine> DiscEngine::create(const IImageOpener& opener, CuePolicy policy,
+                                  ChdPrefetch& prefetch) {
     auto ok = check_policy(policy, ERR_SITE());
     if (!ok) return std::unexpected(ok.error());
-    DiscEngine d(policy);
+    DiscEngine d(policy, prefetch);
     d.opener_ = &opener;
     return d;
 }
@@ -268,9 +269,7 @@ Ex<void> DiscEngine::mount(std::string_view image_path) {
 
 Ex<void> DiscEngine::unmount() {
 
-    if (prefetch_ != nullptr) {
-        if (!prefetch_->settle_park()) ++park_timeouts_;
-    }
+    if (!prefetch_.get().settle_park()) ++park_timeouts_;
     for (auto& f : files_)
         f.reset();
     file_count_ = 0;
@@ -1045,13 +1044,13 @@ Ex<void> DiscEngine::mount_chd(std::unique_ptr<IChdSource> source,
     hunk_ptr_ = nullptr;
     chd_ = std::move(source);
 
-    if (prefetch_ != nullptr && prefetch_source != nullptr) {
-        if (auto a = prefetch_->attach(std::move(prefetch_source),
-                                       static_cast<std::uint32_t>(hunk_bytes_), hunk_count_);
+    if (prefetch_source != nullptr) {
+        if (auto a = prefetch_.get().attach(std::move(prefetch_source),
+                                            static_cast<std::uint32_t>(hunk_bytes_), hunk_count_);
             !a) {
             ++prefetch_refusals_;
         } else {
-            prefetch_depth_ = prefetch_->depth();
+            prefetch_depth_ = prefetch_.get().depth();
         }
     }
 
@@ -1185,11 +1184,9 @@ std::optional<TrackIndex> DiscEngine::source_track(Lba lba) const {
 
 Ex<void> DiscEngine::load_hunk(std::uint32_t hunk) {
 
-    if (prefetch_ != nullptr) {
-        if (const std::byte* p = prefetch_->take(hunk); p != nullptr) {
-            hunk_ptr_ = p;
-            return {};
-        }
+    if (const std::byte* p = prefetch_.get().take(hunk); p != nullptr) {
+        hunk_ptr_ = p;
+        return {};
     }
     if (hunk == hunk_memo_) {
         hunk_ptr_ = hunk_buf_.get();
@@ -1197,7 +1194,7 @@ Ex<void> DiscEngine::load_hunk(std::uint32_t hunk) {
     }
 
     ++sync_decompress_;
-    if (prefetch_ != nullptr) prefetch_->note_miss();
+    prefetch_.get().note_miss();
     auto r = chd_->read_hunk(hunk, std::span<std::byte>(hunk_buf_.get(), hunk_bytes_));
     if (!r) {
         hunk_memo_ = kNoHunk;
@@ -1481,7 +1478,6 @@ void DiscEngine::advise_ahead(Lba lba) noexcept {
 
 void DiscEngine::prefetch_hint(Lba lba) {
 
-    if (prefetch_ == nullptr) return;
     if (!chd_ || sectors_per_hunk_ == 0) return;
 
     const auto ti = source_track(lba);
@@ -1490,7 +1486,7 @@ void DiscEngine::prefetch_hint(Lba lba) {
     if (chd_lba < 0) return;
     const std::uint32_t hunk = static_cast<std::uint32_t>(chd_lba) / sectors_per_hunk_;
     if (hunk_count_ != 0 && hunk >= hunk_count_) return;
-    prefetch_->submit(hunk);
+    prefetch_.get().submit(hunk);
 }
 
 namespace {
@@ -1624,7 +1620,7 @@ Ex<void> DiscEngine::mount_chd_path(std::string_view chd_path) {
     if (!src) return std::unexpected(src.error());
 
     std::unique_ptr<IChdSource> second;
-    if (prefetch_ != nullptr) {
+    if (prefetch_.get().opened()) {
         if (auto f2 = open_file(chd_path)) {
             if (auto s2 = open_chd(std::move(*f2)); s2) second = std::move(*s2);
         }

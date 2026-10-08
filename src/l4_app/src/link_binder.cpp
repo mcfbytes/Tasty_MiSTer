@@ -23,6 +23,15 @@ std::uint64_t log_now_ns() noexcept {
 
 }  // namespace
 
+LinkBinder::LinkBinder(hal::ISpiTransport& link, hal::IDoorbellSource& src,
+                       const Wiring& w) noexcept
+    : fio_queue_(link), spi_sink_(link, &fio_queue_), aperture_(w.fpga_mem), doorbells_(src),
+      policy_(w.doorbells), exec_(w.exec), state_(w.state), notifiers_(w.exec),
+      log_lane_(w.log_lane) {
+    uio_doorbells_.set_lw_window(w.lw_window);
+    uio_doorbells_.set_line_space(w.doorbell_nodes);
+}
+
 proto::IImageSink& LinkBinder::grant_bulk() noexcept { return progress_sink_; }
 
 void LinkBinder::release_windows() noexcept {
@@ -68,12 +77,11 @@ cores::CoreWindowGrant LinkBinder::grant_windows(const cores::CoreProfile& profi
 
 Ex<void> LinkBinder::bind_census(std::span<const reactor::LinkDecoderDecl> rows,
                                  cores::Core* owner) {
-    if (exec_ == nullptr || state_ == nullptr) return {};
 
-    reactor::ICoreToken* const prev = state_->owner;
-    state_->owner = rows.empty() ? nullptr : owner;
-    auto r = exec_->bind(rows, *state_);
-    if (!r) state_->owner = prev;
+    reactor::ICoreToken* const prev = state_.owner;
+    state_.owner = rows.empty() ? nullptr : owner;
+    auto r = exec_.bind(rows, state_);
+    if (!r) state_.owner = prev;
     return r;
 }
 
@@ -136,22 +144,18 @@ void LinkBinder::bind_one_doorbell(const proto::IrqBinding& b) noexcept {
     auto slot = notifiers_.bind_doorbell(std::move(*uio), b.klass, std::move(window));
     if (!slot) return fall_back(b, slot.error().code);
     bound_classes_ |= reactor::CauseSet{b.klass};
-    if (log_lane_ != nullptr) {
-        (void)log_lane_->push(LogRec::DoorbellBound{.cause_base = b.cause_base.v,
-                                                    .klass = static_cast<std::uint8_t>(b.klass),
-                                                    .line = static_cast<std::uint8_t>(b.line)},
-                              log_now_ns());
-    }
+    (void)log_lane_.push(LogRec::DoorbellBound{.cause_base = b.cause_base.v,
+                                               .klass = static_cast<std::uint8_t>(b.klass),
+                                               .line = static_cast<std::uint8_t>(b.line)},
+                         log_now_ns());
 }
 
 void LinkBinder::fall_back(const proto::IrqBinding& b, Errc why) noexcept {
     ++fallbacks_;
-    if (log_lane_ != nullptr) {
-        (void)log_lane_->push(LogRec::DoorbellPolling{.why = why,
-                                                      .klass = static_cast<std::uint8_t>(b.klass),
-                                                      .line = static_cast<std::uint8_t>(b.line)},
-                              log_now_ns());
-    }
+    (void)log_lane_.push(LogRec::DoorbellPolling{.why = why,
+                                                 .klass = static_cast<std::uint8_t>(b.klass),
+                                                 .line = static_cast<std::uint8_t>(b.line)},
+                         log_now_ns());
 }
 
 DoorbellStats LinkBinder::doorbell_stats() const noexcept {
@@ -159,10 +163,8 @@ DoorbellStats LinkBinder::doorbell_stats() const noexcept {
     d.declared = doorbells_declared_;
     d.bound = static_cast<std::uint32_t>(notifiers_.size());
     d.refusals = fallbacks_;
-    if (exec_ != nullptr) {
-        d.fallbacks = exec_->doorbell_fallbacks();
-        d.retirements = exec_->doorbell_retirements();
-    }
+    d.fallbacks = exec_.doorbell_fallbacks();
+    d.retirements = exec_.doorbell_retirements();
     return d;
 }
 

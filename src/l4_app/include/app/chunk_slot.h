@@ -10,7 +10,7 @@
 
 namespace mister::app {
 
-enum class ChunkKind : std::uint8_t { Open, Data, Close };
+enum class ChunkKind : std::uint8_t { Open, Data, Close, Refuse };
 
 struct ChunkSlot {
     TASTY_SEAT_MEDIATOR(Any, Any);
@@ -36,7 +36,7 @@ struct ChunkSlot {
     RecPath path{};
 };
 
-inline constexpr std::size_t kChunkSlots = 8;
+inline constexpr std::size_t kChunkSlots = 32;
 
 inline constexpr std::uint32_t kChunksPerSegment = 65536;
 using ChunkChannel =

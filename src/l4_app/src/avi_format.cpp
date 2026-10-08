@@ -5,7 +5,7 @@
 
 #include "app/cscd_codec.h"
 
-namespace mister::app {
+namespace mister::app::avi {
 
 namespace {
 
@@ -30,7 +30,7 @@ struct Put {
 constexpr std::uint32_t kStrl = 4 + (8 + 56) + (8 + 40);
 constexpr std::uint32_t kHdrl = 4 + (8 + 56) + 8 + kStrl;
 constexpr std::uint32_t kJunkAt = 12 + 8 + kHdrl;
-constexpr std::uint32_t kMoviListAt = AviFormat::kHeaderBytes - 12;
+constexpr std::uint32_t kMoviListAt = kHeaderBytes - 12;
 static_assert(kJunkAt + 8 < kMoviListAt, "the header's lists must leave room for JUNK");
 
 constexpr std::uint32_t clamp32(std::uint64_t v) noexcept {
@@ -39,7 +39,7 @@ constexpr std::uint32_t clamp32(std::uint64_t v) noexcept {
 
 }  // namespace
 
-void AviFormat::header(const Fields& f, Header& out) noexcept {
+void header(const Fields& f, Header& out) noexcept {
     out.fill(std::byte{0});
     Put p{out};
     const std::uint32_t scale = f.scale != 0 ? f.scale : kDefaultVtime;
@@ -114,20 +114,20 @@ void AviFormat::header(const Fields& f, Header& out) noexcept {
     p.cc("movi");
 }
 
-void AviFormat::chunk_head(std::uint32_t payload, std::span<std::byte, kChunkHead> out) noexcept {
+void chunk_head(std::uint32_t payload, std::span<std::byte, kChunkHead> out) noexcept {
     Put p{out};
     p.cc("00dc");
     p.u32(payload);
 }
 
-void AviFormat::index_head(std::uint32_t entries, std::span<std::byte, kChunkHead> out) noexcept {
+void index_head(std::uint32_t entries, std::span<std::byte, kChunkHead> out) noexcept {
     Put p{out};
     p.cc("idx1");
     p.u32(entries * static_cast<std::uint32_t>(kIndexEntry));
 }
 
-void AviFormat::index_entry(bool key, std::uint32_t offset, std::uint32_t payload,
-                            std::span<std::byte, kIndexEntry> out) noexcept {
+void index_entry(bool key, std::uint32_t offset, std::uint32_t payload,
+                 std::span<std::byte, kIndexEntry> out) noexcept {
     Put p{out};
     p.cc("00dc");
     p.u32(key ? kKeyFlag : 0u);
@@ -135,4 +135,4 @@ void AviFormat::index_entry(bool key, std::uint32_t offset, std::uint32_t payloa
     p.u32(payload);
 }
 
-}  // namespace mister::app
+}  // namespace mister::app::avi

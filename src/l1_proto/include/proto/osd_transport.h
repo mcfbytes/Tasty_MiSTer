@@ -8,16 +8,11 @@
 #include "hal/selected.h"
 #include "hal/spi_transport.h"
 #include "proto/osd_surface.h"
+#include "proto/osd_target.h"
 #include "proto/types.h"
 #include "infra/seat.h"
 
 namespace mister::proto {
-
-enum class OsdTarget : std::uint8_t {
-    Hdmi = 1,
-    Vga = 2,
-    All = 3,
-};
 
 enum class OsdMode : std::uint8_t {
     Plain = 0x00,

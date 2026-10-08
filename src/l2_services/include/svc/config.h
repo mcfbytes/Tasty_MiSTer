@@ -12,7 +12,7 @@ namespace mister::svc {
 
 inline constexpr std::size_t kNumIniOptions = 111;
 
-inline constexpr std::size_t kNumExtOptions = 1;
+inline constexpr std::size_t kNumExtOptions = 3;
 
 inline constexpr std::size_t kMaxParseErrors = 4;
 inline constexpr std::size_t kParseErrorChars = 128;

@@ -3,13 +3,15 @@
 
 #include <pthread.h>
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
-#include <type_traits>
 
 #include "rt_evidence.h"
+#include "seat_set.h"
 #include "hal/thread_map.h"
 #include "infra/error.h"
 #include "infra/wake_flag.h"
@@ -25,24 +27,10 @@ namespace mister::app {
 class CmdFifo;
 class EventQueue;
 class InputBuild;
-class InputMain;
-class PcmMain;
-class RtMain;
 class MglPump;
 class VideoPump;
 class BtPump;
-class CaptureMain;
-class EncodeMain;
-class RecWriteMain;
-class LauncherMain;
 }  // namespace mister::app
-namespace mister::svc {
-class PrefetchMain;
-class IoMain;
-}  // namespace mister::svc
-namespace mister::reactor {
-class FrameMain;
-}
 
 namespace mister::fw {
 
@@ -52,15 +40,23 @@ class ThreadAssembly {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
+    struct DiagWires {
+        xthread::DiagLog& log;
+        xthread::LogLane& rt_lane;
+        const std::atomic<bool>& transitioning;
+    };
+
     ThreadAssembly(const hal::ThreadMap& threads, xthread::RtStats& stats, app::EventQueue& events,
-                   RtEvidence& boot, xthread::WakeFlag& main_wake,
-                   const UiMain::Wiring& ui) noexcept;
+                   RtEvidence& boot, xthread::WakeFlag& main_wake, const DiagWires& diag,
+                   const UiMain::Wires& ui_wires, const UiMain::Wiring& ui,
+                   const DiagSampler::Sources& diag_sources) noexcept;
 
     ThreadAssembly(const hal::ThreadMap&, xthread::RtStats&, app::EventQueue&, RtEvidence&&,
-                   xthread::WakeFlag&, const UiMain::Wiring&) = delete;
+                   xthread::WakeFlag&, const DiagWires&, const UiMain::Wires&,
+                   const UiMain::Wiring&, const DiagSampler::Sources&) = delete;
 
-    ThreadAssembly(xthread::RtStats& stats, app::EventQueue& events,
-                   const UiMain::Wiring& ui = {}) noexcept;
+    ThreadAssembly(xthread::RtStats& stats, app::EventQueue& events, const UiMain::Wiring& ui,
+                   const DiagSampler::Sources& diag) noexcept;
     ~ThreadAssembly();
 
     ThreadAssembly(const ThreadAssembly&) = delete;
@@ -68,21 +64,12 @@ public:
 
     DiagSampler& diag() noexcept { return diag_sampler_; }
     const DiagSampler& diag() const noexcept { return diag_sampler_; }
-    UiMain& ui() noexcept { return ui_main_; }
+
+    UiMain* ui() noexcept { return ui_main_ ? &*ui_main_ : nullptr; }
 
     struct SeatMains {
-        svc::PrefetchMain* prefetch = nullptr;
-        app::PcmMain* pcm = nullptr;
-        reactor::FrameMain* frame = nullptr;
-        app::InputMain* input = nullptr;
+        MainSlots mains{};
         app::InputBuild* input_build = nullptr;
-        svc::IoMain* io = nullptr;
-
-        app::CaptureMain* capture = nullptr;
-        app::EncodeMain* encode = nullptr;
-        app::RecWriteMain* rec_write = nullptr;
-
-        app::LauncherMain* launcher = nullptr;
     };
 
     Ex<void> spawn(RtMode mode, const SeatMains& mains);
@@ -109,131 +96,72 @@ public:
 
     void mark_quiescing() noexcept;
 
-    void mark_transitioning(bool on) noexcept;
-
     const RtEvidence& evidence() const noexcept { return ev_; }
 
-    long diag_tid() const noexcept { return diag_tid_.load(std::memory_order_acquire); }
-    long ui_tid() const noexcept { return ui_tid_.load(std::memory_order_acquire); }
-    long frame_tid() const noexcept { return frame_tid_.load(std::memory_order_acquire); }
-    long input_tid() const noexcept { return input_tid_.load(std::memory_order_acquire); }
-    long prefetch_tid() const noexcept { return prefetch_tid_.load(std::memory_order_acquire); }
-    long pcm_tid() const noexcept { return pcm_tid_.load(std::memory_order_acquire); }
-    long io_tid() const noexcept { return io_tid_.load(std::memory_order_acquire); }
-    long capture_tid() const noexcept { return capture_tid_.load(std::memory_order_acquire); }
-    long encode_tid() const noexcept { return encode_tid_.load(std::memory_order_acquire); }
-    long rec_write_tid() const noexcept { return rec_write_tid_.load(std::memory_order_acquire); }
-    long launcher_tid() const noexcept { return launcher_tid_.load(std::memory_order_acquire); }
+    long tid(SeatTag s) const noexcept {
+        return tid_[seat_index(s)].load(std::memory_order_acquire);
+    }
 
     [[nodiscard]] bool io_wedged() const noexcept { return io_poisoned_; }
 
-    [[nodiscard]] bool has_io_seat() const noexcept { return io_ != nullptr; }
-    long rt_tid() const noexcept { return rt_tid_.load(std::memory_order_acquire); }
+    [[nodiscard]] bool has_io_seat() const noexcept { return mains_.get<svc::IoMain>() != nullptr; }
 
 private:
-    void bind_ui_cells_(const UiMain::Wiring& ui) noexcept;
+    static DiagSampler::Sources with_ui_cells_(DiagSampler::Sources s,
+                                               const UiMain::Wiring& ui) noexcept;
 
-    void adopt_seat(hal::Seat s) noexcept;
+    void adopt_seat(SeatTag s) noexcept;
 
-    RtSetup* affinity_row(hal::Seat s) noexcept;
+    static std::array<char, hal::kCommNameMax + 1> process_comm_() noexcept;
 
-    template <class M>
+    template <class Row>
     static void* trampoline(void* self);
 
-    DiagMain& main_(std::type_identity<DiagMain>) noexcept;
-    UiMain& main_(std::type_identity<UiMain>) noexcept;
-    svc::PrefetchMain& main_(std::type_identity<svc::PrefetchMain>) noexcept;
-    app::PcmMain& main_(std::type_identity<app::PcmMain>) noexcept;
-    reactor::FrameMain& main_(std::type_identity<reactor::FrameMain>) noexcept;
-    app::InputMain& main_(std::type_identity<app::InputMain>) noexcept;
-    svc::IoMain& main_(std::type_identity<svc::IoMain>) noexcept;
-    app::RtMain& main_(std::type_identity<app::RtMain>) noexcept;
-    app::CaptureMain& main_(std::type_identity<app::CaptureMain>) noexcept;
-    app::EncodeMain& main_(std::type_identity<app::EncodeMain>) noexcept;
-    app::RecWriteMain& main_(std::type_identity<app::RecWriteMain>) noexcept;
-    app::LauncherMain& main_(std::type_identity<app::LauncherMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<DiagMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<UiMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<svc::PrefetchMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<app::PcmMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<reactor::FrameMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<app::InputMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<svc::IoMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<app::RtMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<app::CaptureMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<app::EncodeMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<app::RecWriteMain>) noexcept;
-    static constexpr hal::Seat seat_(std::type_identity<app::LauncherMain>) noexcept;
+    struct SeatTable;
 
-    std::atomic<long>* tid_cell_(hal::Seat s) noexcept;
+    void stop_bound_(SeatTag s) noexcept;
+    template <class... Rows>
+    void stop_seat_(SeatTag s, SeatList<Rows...>) noexcept;
+    template <class Row>
+    void stop_one_() noexcept;
 
-    app::RtMain* rt_ = nullptr;
-    app::InputMain* input_ = nullptr;
-    svc::PrefetchMain* prefetch_ = nullptr;
-    app::PcmMain* pcm_ = nullptr;
-    svc::IoMain* io_ = nullptr;
-    reactor::FrameMain* frame_ = nullptr;
-    app::CaptureMain* capture_ = nullptr;
-    app::EncodeMain* encode_ = nullptr;
-    app::RecWriteMain* rec_write_ = nullptr;
-    app::LauncherMain* launcher_ = nullptr;
+    MainSlots mains_{};
 
     RtEvidence own_ev_{};
     RtEvidence& ev_;
     const hal::ThreadMap& threads_;
 
-    pthread_t diag_thread_{};
-    pthread_t ui_thread_{};
-    pthread_t frame_thread_{};
-    pthread_t input_thread_{};
-    pthread_t prefetch_thread_{};
-    pthread_t pcm_thread_{};
-    pthread_t io_thread_{};
-    pthread_t rt_thread_{};
-    pthread_t capture_thread_{};
-    pthread_t encode_thread_{};
-    pthread_t rec_write_thread_{};
-    pthread_t launcher_thread_{};
-    bool diag_live_ = false;
-    bool ui_live_ = false;
-    bool frame_live_ = false;
-    bool input_live_ = false;
-    bool prefetch_live_ = false;
-    bool pcm_live_ = false;
-    bool io_live_ = false;
+    std::array<char, hal::kCommNameMax + 1> comm_prefix_ = process_comm_();
+    std::array<pthread_t, hal::kThreadSeats> thread_{};
+    std::array<bool, hal::kThreadSeats> live_{};
     bool io_poisoned_ = false;
-    bool rt_live_ = false;
-    bool capture_live_ = false;
-    bool encode_live_ = false;
-    bool rec_write_live_ = false;
-    bool launcher_live_ = false;
-
-    std::atomic<long> diag_tid_{0};
-    std::atomic<long> ui_tid_{0};
-    std::atomic<long> frame_tid_{0};
-    std::atomic<long> input_tid_{0};
-    std::atomic<long> prefetch_tid_{0};
-    std::atomic<long> pcm_tid_{0};
-    std::atomic<long> io_tid_{0};
-    std::atomic<long> rt_tid_{0};
-    std::atomic<long> capture_tid_{0};
-    std::atomic<long> encode_tid_{0};
-    std::atomic<long> rec_write_tid_{0};
-    std::atomic<long> launcher_tid_{0};
+    std::array<std::atomic<long>, hal::kThreadSeats> tid_{};
 
     Ex<void> rt_result_{};
     xthread::WakeFlag own_main_wake_{};
     xthread::WakeFlag& main_wake_;
 
+    struct OwnWires {
+        xthread::DiagLog log;
+        xthread::LogLane rt_lane;
+        std::atomic<bool> transitioning{false};
+        xthread::WakeFlag ui_wake;
+        app::UartModeController::Handoffs uart_handoffs{ui_wake};
+    };
+    std::unique_ptr<OwnWires> own_wires_;
+
     std::atomic<bool> rt_exited_{false};
     std::atomic<bool> io_exited_{false};
     xthread::WakeFlag quiescing_;
+    Ex<void> born_{};
 
-    std::atomic<bool> transitioning_{false};
+    void create_mains_(app::EventQueue& events, const UiMain::Wires& ui_wires,
+                       const UiMain::Wiring& ui) noexcept;
 
     DiagSampler diag_sampler_;
-    DiagMain diag_main_;
-    UiMain ui_main_;
+    xthread::WakeFlag diag_wake_{};
+    std::optional<DiagMain> diag_main_;
+    std::optional<UiMain> ui_main_;
 };
 
 }  // namespace mister::fw

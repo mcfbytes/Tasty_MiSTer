@@ -5,11 +5,13 @@
 #include <optional>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
 #include "proto/block_geometry.h"
 #include "proto/block_geometry_hook.h"
 #include "proto/sd_request.h"
+#include "proto/slot_roles.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -24,6 +26,14 @@ class SpiBlockPoll {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
+    struct Wiring {
+        infra::OptRef<const std::uint64_t> slot0_file_bytes{};
+        infra::OptRef<const SlotRoleTable> roles{};
+    };
+
+    SpiBlockPoll() noexcept = default;
+    explicit SpiBlockPoll(Wiring w) noexcept : wiring_(w) {}
+
     struct Decode {
         bool decoded = false;
         SdRequest req;
@@ -35,17 +45,14 @@ public:
     [[nodiscard]] Ex<Decode> poll(hal::ISpiTransport& link,
                                   std::optional<SdStatusWord> known = std::nullopt);
 
-    void set_geometry_hook(IBlockGeometry* hook) noexcept { geometry_ = hook; }
-
-    void bind_slot0_file_bytes(const std::uint64_t* p) noexcept { slot0_file_bytes_ = p; }
-
     const DecodeCounters& diagnostics() const noexcept { return diag_; }
 
     [[nodiscard]] Ex<void> send_config(hal::ISpiTransport& link);
 
 private:
-    IBlockGeometry* geometry_ = nullptr;
-    const std::uint64_t* slot0_file_bytes_ = nullptr;
+    [[nodiscard]] IBlockGeometry* geometry_for_(SlotIndex slot) const noexcept;
+
+    Wiring wiring_{};
     DecodeCounters diag_{};
 };
 

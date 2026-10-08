@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "hal/scaler_buffers.h"
 
+#include "hal/fpga_memory.h"
+
 #include <cstdint>
 #include <cstring>
 
@@ -33,7 +35,7 @@ Ex<void> ScalerBuffers::copy(std::size_t off, std::span<std::byte> dst) {
     return {};
 }
 
-void copy_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept {
+void copy_to_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept {
 #if defined(__arm__) && defined(__ARM_FP)
 
     const bool aligned =
@@ -52,6 +54,10 @@ void copy_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept
     }
 #endif
     std::memcpy(dst, src, n);
+}
+
+void copy_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept {
+    copy_to_uncached(dst, src, n);
 }
 
 }  // namespace mister::hal

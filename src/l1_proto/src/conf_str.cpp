@@ -356,7 +356,20 @@ Ex<ItemTable> ItemTable::parse(std::string_view raw) {
                 }
                 break;
             }
-            default:
+            case ItemKind::Addon:
+            case ItemKind::JoyNames:
+            case ItemKind::Cheats:
+            case ItemKind::Info:
+            case ItemKind::Version:
+            case ItemKind::CfgVer:
+            case ItemKind::NoOsd:
+            case ItemKind::PageDecl:
+            case ItemKind::Separator:
+            case ItemKind::Dip:
+            case ItemKind::DefMra:
+            case ItemKind::Turbo:
+            case ItemKind::Unknown:
+            case ItemKind::kCount:
                 break;
         }
         t.items_.push_back(it);

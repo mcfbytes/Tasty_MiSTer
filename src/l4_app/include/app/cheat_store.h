@@ -27,7 +27,7 @@ class CheatStore {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    explicit CheatStore(const svc::Vfs& vfs) noexcept : vfs_(&vfs) {}
+    CheatStore(const svc::Vfs& vfs, CheatBlobCell& cell) noexcept : vfs_(&vfs), blob_cell_(&cell) {}
 
     [[nodiscard]] Ex<void> open(const TxDigest& d, std::string_view core,
                                 const cores::CheatLookup& look);
@@ -60,7 +60,7 @@ public:
 
     [[nodiscard]] const CheatBlobCell& blob_cell() const noexcept {
         TASTY_SEAT_BODY(CheatStore);
-        return blob_cell_;
+        return *blob_cell_;
     }
 
     [[nodiscard]] std::uint32_t refusals() const noexcept {
@@ -78,11 +78,11 @@ private:
     void publish_() noexcept;
 
     const svc::Vfs* vfs_;
+    CheatBlobCell* blob_cell_;
     std::vector<CheatRecord> recs_;
     cores::CheatGeometry geom_{};
     std::string archive_;
     CheatBlob blob_{};
-    CheatBlobCell blob_cell_{};
     std::size_t loaded_ = 0;
     std::uint32_t refusals_ = 0;
     std::uint32_t opens_ = 0;

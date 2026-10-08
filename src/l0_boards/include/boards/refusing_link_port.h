@@ -20,7 +20,7 @@ public:
     [[nodiscard]] hal::SpiSample sample() const noexcept override;
 
     [[nodiscard]] Ex<hal::CoreIdentity> identify() override;
-    hal::CoreCapabilities capabilities() const override;
+    hal::CoreCapabilities latch_capabilities() override;
     void set_core_reset(bool asserted) override;
 
     void select(hal::ChipSelect cs) override;

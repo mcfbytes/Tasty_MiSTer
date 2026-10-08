@@ -49,15 +49,14 @@ class PcmRingFeeder final : public cores::ICoreWindow, public cores::IPcmFeed {
 public:
     using Commands = xthread::Inbox<PcmCommand, kPcmCommandDepth>;
 
-    explicit PcmRingFeeder(const os::IClock& clock) noexcept : clock_(&clock) {}
+    PcmRingFeeder(const os::IClock& clock, Commands& commands) noexcept
+        : clock_(&clock), commands_(&commands) {}
     ~PcmRingFeeder() override = default;
 
     PcmRingFeeder(const PcmRingFeeder&) = delete;
     PcmRingFeeder& operator=(const PcmRingFeeder&) = delete;
     PcmRingFeeder(PcmRingFeeder&&) = delete;
     PcmRingFeeder& operator=(PcmRingFeeder&&) = delete;
-
-    void bind_commands(Commands& c) noexcept { commands_ = &c; }
 
     [[nodiscard]] bool take_park_ask() noexcept;
     void finish_park() noexcept;
@@ -144,7 +143,7 @@ private:
 
     const os::IClock* clock_;
 
-    Commands* commands_ = nullptr;
+    Commands* const commands_;
     xthread::Telemetry<std::uint32_t, SeatTag::RT> read_point_{};
     xthread::Telemetry<cores::PcmFeedState, SeatTag::Pcm> state_{};
 
@@ -188,26 +187,26 @@ private:
 };
 
 static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, hal::Seat::Pcm).spawn == hal::SpawnKind::Create;
+                  return hal::seat_of(m, SeatTag::Pcm).spawn == hal::SpawnKind::Create;
               }),
               "T-PCM is spawned, not promoted in place: PcmMain::start is a "
               "thread body reached through ThreadAssembly::trampoline<PcmMain>, "
               "the same shape as RtMain::start behind trampoline<RtMain>.");
 static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, hal::Seat::Pcm).policy == hal::SchedPolicy::Fifo &&
-                         hal::seat_of(m, hal::Seat::Pcm).prio < hal::seat_of(m, hal::Seat::RT).prio;
+                  return hal::seat_of(m, SeatTag::Pcm).policy == hal::SchedPolicy::Fifo &&
+                         hal::seat_of(m, SeatTag::Pcm).prio < hal::seat_of(m, SeatTag::RT).prio;
               }),
               "arch RULE 2: this seat blocks on poll(2) and on file reads, "
               "and it must never be able to preempt the sole GPO owner.");
 static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, hal::Seat::Pcm).cpu != hal::seat_of(m, hal::Seat::RT).cpu;
+                  return hal::seat_of(m, SeatTag::Pcm).cpu != hal::seat_of(m, SeatTag::RT).cpu;
               }),
               "thread_map.h's pcm_off_rt_cpu, restated where the worker is: up "
               "to 8 KiB of memcpy into uncached FPGA DDR per pass must not "
               "contend for the CPU the executive's 5 ms cadence is measured "
               "on.");
 static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, hal::Seat::Pcm).stack_bytes == hal::kFifoStackBytes;
+                  return hal::seat_of(m, SeatTag::Pcm).stack_bytes == hal::kFifoStackBytes;
               }),
               "the staging buffer is a MEMBER, not a frame: the row's stack is "
               "the FIFO stack every created RT seat takes, unchanged.");

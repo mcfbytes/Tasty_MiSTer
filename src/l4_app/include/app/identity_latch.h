@@ -37,7 +37,7 @@ public:
     [[nodiscard]] std::uint32_t generation() const noexcept { return cell_.generation(); }
 
 private:
-    xthread::Telemetry<SessionIdentity> cell_{};
+    xthread::Telemetry<SessionIdentity, SeatTag::RT> cell_{};
 
     SessionIdentity scratch_{};
 };

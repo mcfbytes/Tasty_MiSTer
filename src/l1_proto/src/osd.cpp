@@ -63,12 +63,12 @@ std::uint32_t OsdSurface::refusals() const noexcept {
 }
 
 void OsdSurface::set_visible_rows(unsigned n) noexcept {
-    visible_rows_.publish(static_cast<std::uint8_t>(n > kMaxRows ? kMaxRows : n));
+    visible_rows_.publish(VisibleRows{static_cast<std::uint8_t>(n > kMaxRows ? kMaxRows : n)});
 }
 
 unsigned OsdSurface::visible_rows() const noexcept {
     const auto s = visible_rows_.sample();
-    return s ? static_cast<unsigned>(s.value) : kMaxRows;
+    return s ? static_cast<unsigned>(s.value.n) : kMaxRows;
 }
 
 void OsdSurface::clear() noexcept {

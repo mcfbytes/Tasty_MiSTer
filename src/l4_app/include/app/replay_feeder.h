@@ -14,6 +14,7 @@
 #include "app/path_text.h"
 #include "app/replay_control.h"
 #include "app/replay_msg.h"
+#include "app/replay_ring.h"
 #include "app/replay_status.h"
 #include "app/session_identity.h"
 #include "cores/movie_codec.h"
@@ -173,22 +174,15 @@ private:
         std::array<char, cores::IMovieCodec::kLineMax + 1> text{};
         std::uint16_t len = 0;
         bool clipped = false;
-        std::uint64_t start = 0;
-    };
-    struct Run {
-        std::uint32_t first = 0;
-        std::uint32_t last = 0;
-        std::array<std::uint32_t, kReplayPorts> mask{};
     };
 
     void refuse_(Refusal why, std::uint32_t detail = 0) noexcept;
     void log_end_(const ReplayStatus& s) noexcept;
-    [[nodiscard]] bool read_lines_(bool scan) noexcept;
-    [[nodiscard]] bool on_line_(std::string_view line, bool clipped, std::uint64_t start,
-                                bool scan) noexcept;
-    [[nodiscard]] bool scan_line_(std::string_view line, bool clipped,
-                                  std::uint64_t start) noexcept;
-    [[nodiscard]] bool stream_line_(std::string_view line) noexcept;
+    void read_lines_() noexcept;
+    [[nodiscard]] bool on_line_(std::string_view line, bool clipped) noexcept;
+    [[nodiscard]] bool scan_line_(std::string_view line, bool clipped) noexcept;
+    void note_frame_(std::uint32_t f, const cores::IMovieCodec::Frame& fr) noexcept;
+    void release_movie_() noexcept;
     void finish_scan_() noexcept;
     void hash_rom_() noexcept;
     void finish_rom_() noexcept;
@@ -201,8 +195,7 @@ private:
     void arm_() noexcept;
     void tick_arming_(const ReplayStatus& s, bool fresh) noexcept;
     void tick_running_(const ReplayStatus& s, bool fresh) noexcept;
-    [[nodiscard]] bool flush_() noexcept;
-    [[nodiscard]] bool push_run_() noexcept;
+    void stream_() noexcept;
     void checkpoints_(const ReplayStatus& s) noexcept;
     void load_checkpoints_() noexcept;
     [[nodiscard]] std::optional<ReplayStatus> sample_status_() const noexcept;
@@ -233,26 +226,23 @@ private:
     std::unique_ptr<svc::IFile> file_{};
     std::uint64_t file_size_ = 0;
 
-    bool stream_cut_ = false;
-
     std::unique_ptr<svc::IFile> rom_file_{};
     std::uint64_t rom_off_ = 0;
     std::uint64_t rom_end_ = 0;
     std::uint8_t rom_index_ = 0xFF;
     cores::RomDigest digest_{};
-    cores::RomDigest digest_alt_{};
-    bool has_alt_ = false;
+    std::optional<cores::RomDigest> digest_alt_{};
     bool firmware_pass_ = false;
     std::uint64_t off_ = 0;
-    std::uint64_t log_start_ = 0;
     bool in_log_ = false;
     bool log_done_ = false;
     Line line_{};
 
     std::uint32_t frames_ = 0;
     std::uint32_t movie_frames_ = 0;
-    std::optional<Run> run_{};
-    std::optional<Run> next_{};
+
+    std::vector<ReplayMsg::Input> runs_{};
+    std::size_t next_run_ = 0;
     bool end_pushed_ = false;
     unsigned tries_ = 0;
     std::int64_t since_ns_ = 0;

@@ -9,6 +9,8 @@
 namespace mister::app {
 
 struct LauncherState {
+    TASTY_SEAT_EXEMPT(const_shared);
+
     std::uint32_t screen_gen = 0;
     bool owns_screen = false;
     bool settled = false;

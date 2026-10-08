@@ -6,6 +6,15 @@
 
 namespace mister::svc {
 
+DiscReadService::DiscReadService(const Wiring& w) noexcept
+    : chan_(xthread::Polled{}), mounts_(xthread::Polled{}), geom_cell_(w.geometry),
+      count_cell_(w.counters), reader_(w.reader ? &*w.reader : nullptr),
+      mounter_(w.mounter ? &*w.mounter : nullptr) {}
+
+DiscReadService::DiscReadService(xthread::WakeFlag& io_wake, const Wiring& w) noexcept
+    : chan_(io_wake), mounts_(io_wake), geom_cell_(w.geometry), count_cell_(w.counters),
+      reader_(w.reader ? &*w.reader : nullptr), mounter_(w.mounter ? &*w.mounter : nullptr) {}
+
 void DiscReadService::set_generation(std::uint32_t g) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiscReadService, A);
     if (g == gen_) return;

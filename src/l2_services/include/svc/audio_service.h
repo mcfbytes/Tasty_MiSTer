@@ -29,7 +29,7 @@ class AudioService {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static Ex<AudioService> create();
+    [[nodiscard]] static AudioService create() noexcept;
 
     void set_volume(proto::VolumeCmd kind, int arg);
 

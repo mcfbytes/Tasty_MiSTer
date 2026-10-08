@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/video_pump.h"
-#include "app/hps_framebuffer.h"
 
 #include <cstdio>
 #include <cstring>
@@ -51,25 +50,19 @@ std::uint32_t fpix_khz(double mhz) noexcept {
 
 }  // namespace
 
-VideoPump::VideoPump(const svc::Vfs& vfs, const os::IClock& clock,
-                     const hal::VideoOutDecl& board) noexcept
-    : vfs_(&vfs), clock_(&clock), board_(board) {
-    if (auto v = svc::VideoService::create()) {
-        video_.emplace(std::move(*v));
-        video_->set_wire_sink(wire_);
+VideoPump::VideoPump(const svc::Vfs& vfs, const os::IClock& clock, const hal::VideoOutDecl& board,
+                     infra::OptRef<svc::adv7513::II2cAdapter> i2c,
+                     const hal::IHdmiInterrupt& hdmi_int, Wiring wiring) noexcept
+    : vfs_(vfs), clock_(clock), board_(board), wire_(VideoWire::Wiring{.link_tx = wiring.link_tx}),
+      video_(
+          std::in_place,
+          svc::VideoService::Wiring{infra::OptRef<svc::VideoService::IVideoWireSink>{wire_},
+                                    infra::OptRef<svc::VideoService::IResolutionSampler>{wire_}}),
+      adapter_(i2c ? *i2c : i2c_backend_), breaker_(adapter_), hdmi_int_(hdmi_int),
+      activity_(wiring.activity) {
 
-        video_->set_hdmi_capable(false);
-        video_->set_resolution_sampler(wire_);
-        publish_scaling_policy();
-    }
-    adapter_ = &i2c_backend_;
-    rebind_sub_maps();
-}
-
-void VideoPump::set_i2c_adapter(svc::adv7513::II2cAdapter& a) noexcept {
-    if (probed_) return;
-    adapter_ = &a;
-    breaker_.bind(a);
+    video_->set_hdmi_capable(false);
+    publish_scaling_policy();
     rebind_sub_maps();
 }
 
@@ -84,12 +77,12 @@ void VideoPump::load_filters() {
     auto set = std::make_unique<svc::FilterSet>();
     const svc::ScalerSeeds seeds{vfilter_seeds_[0], vfilter_seeds_[1], vfilter_seeds_[2],
                                  vfilter_seeds_[3]};
-    svc::load_filter_set(*vfs_, std::string_view{core_name_, core_name_len_}, seeds, *set);
+    svc::load_filter_set(vfs_, std::string_view{core_name_, core_name_len_}, seeds, *set);
     wire_.publish_filters(*set);
     filter_mode_ = set->modes[0];
     const bool enabled[4] = {set->modes[0] != 0, set->modes[1] != 0, set->modes[2] != 0,
                              set->modes[3] != 0};
-    if (video_.has_value()) video_->set_filter_slots(std::span<const bool>(enabled, 4));
+    video_->set_filter_slots(std::span<const bool>(enabled, 4));
     ++stats_.filter_loads;
     publish_scaling_policy();
 }
@@ -117,9 +110,8 @@ void VideoPump::set_mode_override(std::string_view spec) noexcept {
     override_latched_ = true;
 }
 
-bool VideoPump::take_fb_cmd(std::string_view line) noexcept {
+bool VideoPump::take_fb_cmd(std::string_view) noexcept {
     TASTY_SEAT_BODY(VideoPump);
-    if (hps_fb_ != nullptr) return hps_fb_->take_fb_cmd(line);
     const PublishOnExit publish_on_exit{this};
     ++stats_.fb_cmds_dropped;
     return true;
@@ -154,17 +146,13 @@ void VideoPump::on_core_loaded(bool front_end) {
 
     ints_armed_ = false;
     prelude_done_seen_ = wire_.prelude_stats().completions;
-    if (video_.has_value()) {
-        video_->set_hdmi_capable(false);
-        hpd_gen_seen_ = video_->hotplug_generation().v;
-        audio_gen_seen_ = video_->audio_generation().v;
-    }
+    video_->set_hdmi_capable(false);
+    hpd_gen_seen_ = video_->hotplug_generation().v;
+    audio_gen_seen_ = video_->audio_generation().v;
     front_end_ = front_end;
-    if (video_.has_value()) video_->reset_resolution_gate();
-    if (video_.has_value()) {
-        geo_edges_ = 0;
-        geo_gen_seen_ = video_->resolution_generation().v;
-    }
+    video_->reset_resolution_gate();
+    geo_edges_ = 0;
+    geo_gen_seen_ = video_->resolution_generation().v;
     publish_scaling_policy();
 }
 
@@ -184,22 +172,20 @@ void VideoPump::tick() {
     service_recovery();
     service_mode_phase();
 
-    if (video_) {
-        ++geo_polls_;
-        if (const auto r = video_->poll_resolution(); !r) {
-            if (r.error().code != Errc::not_found) last_error_ = r.error();
-        }
-        const auto g = video_->resolution_generation().v;
-        if (g != geo_gen_seen_) {
-            geo_gen_seen_ = g;
-            ++geo_edges_;
-            service_family_switch();
-        }
-        service_hotplug();
-        service_idle_blank();
+    ++geo_polls_;
+    if (const auto r = video_->poll_resolution(); !r) {
+        if (r.error().code != Errc::not_found) last_error_ = r.error();
     }
+    const auto g = video_->resolution_generation().v;
+    if (g != geo_gen_seen_) {
+        geo_gen_seen_ = g;
+        ++geo_edges_;
+        service_family_switch();
+    }
+    service_hotplug();
+    service_idle_blank();
 
-    if (!pending_ || !video_) return;
+    if (!pending_) return;
     pending_ = false;
     if (const auto r = apply_now(); !r) last_error_ = r.error();
 }
@@ -216,17 +202,15 @@ void VideoPump::publish_monitoring() noexcept {
     stats_cell_.publish(stats_);
 
     GeometryRecord g{};
-    if (video_.has_value()) {
-        const svc::VideoSample& s = video_->info();
-        g.valid = geo_edges_ != 0u || s.res != 0u || s.width != 0u;
-        g.fb_en = s.fb_en();
-        g.rotated = s.rotated();
-        g.res = s.res;
-        g.width = s.width;
-        g.height = s.height;
-        g.vtime = s.vtime;
-        g.core_seq = wire_.sampled_core_seq();
-    }
+    const svc::VideoSample& s = video_->info();
+    g.valid = geo_edges_ != 0u || s.res != 0u || s.width != 0u;
+    g.fb_en = s.fb_en();
+    g.rotated = s.rotated();
+    g.res = s.res;
+    g.width = s.width;
+    g.height = s.height;
+    g.vtime = s.vtime;
+    g.core_seq = wire_.sampled_core_seq();
     geo_cell_.publish(g);
 }
 
@@ -244,34 +228,31 @@ void VideoPump::publish_scaling_policy() noexcept {
 }
 
 void VideoPump::service_idle_blank() {
-    if (!video_.has_value()) return;
 
-    if (activity_ == nullptr) return;
     const auto want =
-        idle_.tick(clock_->now().count(), activity_->activity_seq(), activity_->input_grabbed());
+        idle_.tick(clock_.now().count(), activity_.activity_seq(), activity_.input_grabbed());
     if (!want.has_value()) return;
     if (auto r = video_->request_power(*want); !r) last_error_ = r.error();
 }
 
 bool VideoPump::hdmi_int_asserted() const {
     TASTY_SEAT_BODY(VideoPump);
-    return hdmi_int_ != nullptr && hdmi_int_->hdmi_int_asserted();
+    return hdmi_int_.hdmi_int_asserted();
 }
 
 void VideoPump::bind_adv7513_io() noexcept {
-    if (!video_.has_value() || adapter_ == nullptr) return;
     svc::adv7513::Io io{};
     io.main = &main_map_;
     io.edid = &edid_map_;
     io.cec = &cec_map_;
     io.hdmi = this;
     io.delay = &delay_;
-    io.clock = clock_;
+    io.clock = &clock_;
     video_->set_adv7513_io(io);
 }
 
 void VideoPump::service_hotplug() {
-    if (!adv_ || !video_.has_value()) return;
+    if (!adv_) return;
 
     if (!ints_armed_) {
         const auto ps = wire_.prelude_stats();
@@ -285,7 +266,7 @@ void VideoPump::service_hotplug() {
     }
     if (!video_->hdmi_capable()) return;
 
-    const std::int64_t now = clock_->now().count();
+    const std::int64_t now = clock_.now().count();
     if (now < next_hpd_ns_) return;
     next_hpd_ns_ = now + 100'000'000;
     const std::uint32_t failed_before = breaker_.failures();
@@ -306,8 +287,6 @@ void VideoPump::service_hotplug() {
 }
 
 void VideoPump::configure_transmitter() {
-    if (adapter_ == nullptr) return;
-
     if (!probed_) {
         probed_ = true;
         if (!attach_transmitter()) return;
@@ -315,14 +294,14 @@ void VideoPump::configure_transmitter() {
     const bool want_init = init_pending_;
     init_pending_ = false;
 
-    if (want_init && video_.has_value()) video_->clear_init_owed();
+    if (want_init) video_->clear_init_owed();
 
     if (!adv_) return;
 
     if (!want_init) return;
 
     svc::adv7513::InitOptions opts = init_opts_;
-    opts.has_hdmi_int = video_.has_value() && video_->hdmi_capable();
+    opts.has_hdmi_int = video_->hdmi_capable();
     const auto r = adv_->configure(opts);
     sync_bus_counters();
     if (!r) {
@@ -353,7 +332,7 @@ bool VideoPump::attach_transmitter() {
     }
     adv_.emplace(std::move(*b));
     stats_.i2c = I2cOutcome::Present;
-    attached_ns_ = clock_->now().count();
+    attached_ns_ = clock_.now().count();
 
     bind_adv7513_io();
     return true;
@@ -361,7 +340,7 @@ bool VideoPump::attach_transmitter() {
 
 void VideoPump::schedule_reprobe() noexcept {
     next_probe_ns_ =
-        clock_->now().count() + static_cast<std::int64_t>(probe_backoff_ms_) * 1'000'000;
+        clock_.now().count() + static_cast<std::int64_t>(probe_backoff_ms_) * 1'000'000;
     probe_backoff_ms_ =
         probe_backoff_ms_ >= kReprobeMaxMs / 2 ? kReprobeMaxMs : probe_backoff_ms_ * 2;
 }
@@ -379,12 +358,12 @@ void VideoPump::service_recovery() {
         mode_pending_ = false;
         stats_.i2c = I2cOutcome::Failed;
 
-        if (clock_->now().count() - attached_ns_ >= std::int64_t{kReprobeMaxMs} * 1'000'000)
+        if (clock_.now().count() - attached_ns_ >= std::int64_t{kReprobeMaxMs} * 1'000'000)
             probe_backoff_ms_ = kReprobeFirstMs;
         schedule_reprobe();
         return;
     }
-    if (clock_->now().count() < next_probe_ns_) return;
+    if (clock_.now().count() < next_probe_ns_) return;
     ++stats_.i2c_reprobes;
     if (!attach_transmitter()) return;
     init_pending_ = true;
@@ -469,7 +448,7 @@ void VideoPump::service_mode_phase() {
         return;
     }
 
-    const std::int64_t elapsed_ms = (clock_->now().count() - stage_ns_) / 1'000'000;
+    const std::int64_t elapsed_ms = (clock_.now().count() - stage_ns_) / 1'000'000;
     if (elapsed_ms < kModeSettleMs) return;
 
     mode_pending_ = false;
@@ -503,7 +482,7 @@ void VideoPump::load_spec_from_ini() {
         spd_quirk_ = sq;
     };
 
-    auto bytes = read_all(*vfs_, "MiSTer.ini");
+    auto bytes = read_all(vfs_, "MiSTer.ini");
     if (!bytes) {
         if (vsync_force_) {
             vsync_adjust_ = *vsync_force_;
@@ -513,8 +492,8 @@ void VideoPump::load_spec_from_ini() {
         return;
     }
 
-    svc::ConfigParser::PassNames names{};
-    auto snap = svc::ConfigParser::parse_two_pass(
+    svc::config_parser::PassNames names{};
+    auto snap = svc::config_parser::parse_two_pass(
         std::string_view{reinterpret_cast<const char*>(bytes->data()), bytes->size()}, names);
     if (!snap) {
         if (vsync_force_) {
@@ -695,7 +674,7 @@ Ex<void> VideoPump::apply_family(svc::VmodeFamily f, double fpix_mhz) {
     if (fm.have_raw_pll && !adjusted) {
         video_->set_pll_block(fm.raw_pll);
     } else {
-        const auto p = svc::PllSolver::solve(clock);
+        const auto p = svc::pll::solve(clock);
         if (!p) {
             ++stats_.solve_failures;
             return std::unexpected(Error{Errc::bad_format, ERR_SITE(), fpix_detail(clock)});
@@ -706,7 +685,7 @@ Ex<void> VideoPump::apply_family(svc::VmodeFamily f, double fpix_mhz) {
         }
         if (p->approximated) ++stats_.approximated;
 
-        if (!adjusted) video_->set_pll_block(svc::PllSolver::block(*p));
+        if (!adjusted) video_->set_pll_block(svc::pll::block(*p));
     }
 
     svc::Modeline m = fm.stored.mode;
@@ -718,7 +697,7 @@ Ex<void> VideoPump::apply_family(svc::VmodeFamily f, double fpix_mhz) {
     }
     ++stats_.applies;
     output_locked_ = vsync_adjust_ == 2 && adjusted;
-    last_apply_ns_ = clock_->now().count();
+    last_apply_ns_ = clock_.now().count();
 
     if (adv_ && init_ok_) {
         pending_mode_ = fm.stored.mode;

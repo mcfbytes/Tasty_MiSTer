@@ -21,7 +21,7 @@ class SessionMachine {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    explicit SessionMachine(EventQueue& events) noexcept : events_(&events) {}
+    SessionMachine(EventQueue& events, xthread::LogLane& lane) noexcept;
 
     SessionMachine(const SessionMachine&) = delete;
     SessionMachine& operator=(const SessionMachine&) = delete;
@@ -29,8 +29,6 @@ public:
     [[nodiscard]] SessionState state() const noexcept { return state_; }
 
     void adopt_tag(CorrelationTag t) noexcept { tag_ = t; }
-
-    void set_log_lane(xthread::LogLane* lane) noexcept;
 
     void transition(SessionState to);
 
@@ -46,12 +44,12 @@ public:
     void echo(const Event::InfoRequest& a, EmitSite site, CorrelationTag tag);
 
 private:
-    EventQueue* events_;
+    EventQueue& events_;
     SessionState state_ = SessionState::Boot;
 
     CorrelationTag tag_{};
 
-    xthread::LogLane* log_lane_ = nullptr;
+    xthread::LogLane& log_lane_;
     std::uint64_t last_transition_ns_ = 0;
 };
 

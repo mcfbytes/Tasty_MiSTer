@@ -48,6 +48,7 @@ public:
 
 private:
     [[nodiscard]] bool emit_(const RawFrameSlot& s) noexcept;
+    [[nodiscard]] bool emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept;
     [[nodiscard]] bool push_(const SidecarMsg& m) noexcept;
 
     [[nodiscard]] bool chunk_(const RawFrameSlot& s, bool real, SidecarMsg& m) noexcept;

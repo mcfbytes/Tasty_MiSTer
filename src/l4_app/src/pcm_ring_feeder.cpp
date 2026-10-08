@@ -12,7 +12,7 @@ constexpr std::size_t kAlignMask = static_cast<std::size_t>(kPcmSampleAlign) - 1
 
 void PcmRingFeeder::wake_main_() noexcept {
     wakes_.fetch_add(1, std::memory_order_relaxed);
-    if (commands_ != nullptr) commands_->kick_if_armed();
+    commands_->kick_if_armed();
 }
 
 void PcmRingFeeder::request_park() noexcept {
@@ -50,7 +50,6 @@ Ex<void> PcmRingFeeder::attach_ring(hal::FpgaMemory ring) noexcept {
         return std::unexpected(
             Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(len)});
     }
-    if (commands_ == nullptr) return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
 
     if (!parked()) return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
 
@@ -92,7 +91,6 @@ Ex<void> PcmRingFeeder::set_source(std::unique_ptr<cores::IPcmSource> src) {
     read_val_ = 0;
     if (src == nullptr) return {};
     if (!ring_.has_value()) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    if (commands_ == nullptr) return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     src_ = std::move(src);
 
     parked_.store(false, std::memory_order_release);
@@ -140,7 +138,7 @@ Ex<void> PcmRingFeeder::submit_(const PcmCommand& c) noexcept {
         discards_.fetch_add(1, std::memory_order_relaxed);
         return {};
     }
-    if (commands_ == nullptr || !commands_->push(c)) {
+    if (!commands_->push(c)) {
         drops_.fetch_add(1, std::memory_order_relaxed);
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }

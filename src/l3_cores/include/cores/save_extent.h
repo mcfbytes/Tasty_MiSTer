@@ -2,12 +2,14 @@
 #pragma once
 
 #include <cstdint>
+#include "infra/seat.h"
 
 namespace mister::cores {
 
 enum class SaveAnswer : std::uint8_t { Pending, Known, Declined };
 
 struct SaveExtent {
+    TASTY_SEAT_EXEMPT(const_shared);
     std::uint32_t generation = 0;
     std::uint64_t size_bytes = 0;
     SaveAnswer answer = SaveAnswer::Pending;

@@ -9,10 +9,12 @@
 #include "app/conf_str_cell.h"
 #include "app/event.h"
 #include "app/mgl.h"
+#include "app/name_config.h"
 #include "app/path_text.h"
 #include "app/types.h"
 #include "infra/diag_log.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "os/clock.h"
@@ -22,7 +24,16 @@ namespace mister::app {
 
 class InfoSink;
 class IdentityLatch;
-class NameConfig;
+
+struct MglPumpWiring {
+    LinkTxChannel& link_tx;
+    UiRequestRing& asks;
+    const IdentityLatch& identity;
+    const ConfStrCell& conf;
+    NameConfig& names;
+    xthread::DiagLog& diag;
+    infra::OptRef<InfoSink> info{};
+};
 
 enum class MglRemember : std::uint8_t { AsStock, Never };
 
@@ -60,33 +71,12 @@ class MglPump {
 public:
     enum class State : std::uint8_t { Idle, PendingRead, AwaitingCore, Playing };
 
-    MglPump(const svc::Vfs& vfs, const os::IClock& clock) noexcept : vfs_(&vfs), clock_(&clock) {}
+    using Wiring = MglPumpWiring;
+
+    MglPump(const svc::Vfs& vfs, const os::IClock& clock, Wiring wiring) noexcept;
 
     MglPump(const MglPump&) = delete;
     MglPump& operator=(const MglPump&) = delete;
-
-    void set_info_sink(InfoSink* sink) noexcept { info_ = sink; }
-
-    void set_link_tx(LinkTxChannel* tx) noexcept {
-        link_tx_ = tx;
-        player_.set_link_tx(tx);
-    }
-
-    void set_asks(UiRequestRing* asks) noexcept {
-        asks_ = asks;
-        player_.set_asks(asks);
-    }
-
-    void set_diag(xthread::DiagLog* d) noexcept { diag_ = d; }
-
-    void set_identity(const IdentityLatch* id) noexcept { identity_ = id; }
-
-    void set_conf_cell(const ConfStrCell* cell) noexcept { conf_cell_ = cell; }
-
-    void set_names(NameConfig* names) noexcept {
-        names_ = names;
-        player_.set_names(names);
-    }
 
     void set_remember(MglRemember r) noexcept { remember_ = r; }
     [[nodiscard]] MglRemember remember() const noexcept { return remember_; }
@@ -148,20 +138,19 @@ private:
 
     void latch_remember_();
 
-    const svc::Vfs* vfs_;
-    const IdentityLatch* identity_ = nullptr;
-    const ConfStrCell* conf_cell_ = nullptr;
-    NameConfig* names_ = nullptr;
+    const svc::Vfs& vfs_;
+    const IdentityLatch& identity_;
+    const ConfStrCell& conf_cell_;
+    NameConfig& names_;
     MglRemember remember_ = MglRemember::AsStock;
 
     ConfStrText conf_scratch_{};
-    const os::IClock* clock_;
-    InfoSink* info_ = nullptr;
-    LinkTxChannel* link_tx_ = nullptr;
-    UiRequestRing* asks_ = nullptr;
-    xthread::DiagLog* diag_ = nullptr;
+    const os::IClock& clock_;
+    infra::OptRef<InfoSink> info_{};
+    UiRequestRing& asks_;
+    xthread::DiagLog& diag_;
 
-    MglPlayer player_{};
+    MglPlayer player_;
     State state_ = State::Idle;
     Stats stats_{};
 

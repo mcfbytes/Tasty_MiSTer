@@ -48,8 +48,10 @@ constexpr std::uint32_t bumped(std::uint32_t c) noexcept { return c == 0xFFFF'FF
 
 }  // namespace
 
-Ex<Executive> Executive::create(xthread::RtStats& stats) {
-    Executive ex{stats};
+Ex<Executive> Executive::create(xthread::RtStats& stats) { return create(stats, Wiring{}); }
+
+Ex<Executive> Executive::create(xthread::RtStats& stats, const Wiring& wiring) {
+    Executive ex{stats, wiring};
 
     ex.epfd_.reset(::epoll_create1(EPOLL_CLOEXEC));
     if (!ex.epfd_.valid()) {
@@ -471,10 +473,6 @@ void Executive::run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment
 
     if (s.period_ms != 0) next_due_[slot] = tick_count_ + s.period_ms;
 }
-
-void Executive::set_log_lane(xthread::LogLane* lane) { log_lane_ = lane; }
-
-void Executive::set_round_timer(RoundTimer* timer) { round_timer_ = timer; }
 
 void Executive::stop() noexcept { wake_.request(); }
 

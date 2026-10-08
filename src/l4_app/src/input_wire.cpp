@@ -21,9 +21,8 @@ bool InputWire::push_ui_key(RawKeyEdge e) noexcept {
 }
 
 bool InputWire::kick_rt() noexcept {
-    if (rt_exec_ == nullptr) return false;
     if (!arm_kick()) return false;
-    rt_exec_->kick();
+    rt_exec_.kick();
     return true;
 }
 

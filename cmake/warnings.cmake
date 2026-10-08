@@ -24,6 +24,7 @@ target_compile_options(tasty_options INTERFACE
   -Wsuggest-override
   -Wextra-semi
   -Wdouble-promotion
+  -Wswitch-enum
   -fno-exceptions
   -fno-rtti
 )

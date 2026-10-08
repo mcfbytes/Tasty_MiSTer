@@ -26,7 +26,8 @@ public:
     const EdidBlock& current() const noexcept { return edid_; }
     Generation generation() const noexcept { return gen_; }
 
-    void set_io(const adv7513::Io& io) noexcept { io_ = io; }
+    explicit EdidStore(const adv7513::Io& io = adv7513::kUnboundIo) noexcept : io_(io) {}
+    explicit EdidStore(const adv7513::Io&&) = delete;
 
     static constexpr std::uint32_t kReadyTimeoutMs = 500;
     static constexpr std::uint32_t kReadyPollUs = 10000;
@@ -45,7 +46,7 @@ private:
 
     EdidBlock edid_{};
     Generation gen_{};
-    adv7513::Io io_{};
+    const adv7513::Io& io_;
     std::array<std::byte, 256 * kMaxSegments> full_{};
     std::size_t full_len_ = 0;
     std::uint32_t ready_timeouts_ = 0;

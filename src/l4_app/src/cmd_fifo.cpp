@@ -53,23 +53,6 @@ std::string_view lstrip(std::string_view s) {
     return s.substr(i);
 }
 
-class NoSink final : public ICmdVerbSink {
-public:
-    bool on(const CmdVerb::LoadCore&) noexcept override { return false; }
-    bool on(const CmdVerb::Playlist&) noexcept override { return false; }
-    bool on(const CmdVerb::VideoMode&) noexcept override { return false; }
-    bool on(const CmdVerb::FbCmd&) noexcept override { return false; }
-    bool on(const CmdVerb::Screenshot&) noexcept override { return false; }
-    bool on(const CmdVerb::Volume&) noexcept override { return false; }
-    bool on(const CmdVerb::RtStats&) noexcept override { return false; }
-    bool on(const CmdVerb::TasPlay&) noexcept override { return false; }
-    bool on(const CmdVerb::TasStop&) noexcept override { return false; }
-    bool on(const CmdVerb::RecStart&) noexcept override { return false; }
-    bool on(const CmdVerb::RecArm&) noexcept override { return false; }
-    bool on(const CmdVerb::RecStop&) noexcept override { return false; }
-    bool on(const CmdVerb::RecDisarm&) noexcept override { return false; }
-};
-
 std::optional<std::string_view> next_token(std::string_view& rest) {
     rest = lstrip(rest);
     if (rest.empty()) return std::nullopt;
@@ -266,7 +249,8 @@ CmdLineOutcome deliver_cmd_line(std::string_view line, ICmdVerbSink& sink) noexc
     return CmdLineOutcome::Unrecognised;
 }
 
-CmdFifo::CmdFifo(UniqueFd fd, std::string_view path) noexcept : fd_(static_cast<UniqueFd&&>(fd)) {
+CmdFifo::CmdFifo(UniqueFd fd, std::string_view path, ICmdVerbSink& route) noexcept
+    : fd_(static_cast<UniqueFd&&>(fd)), route_(route) {
 
     (void)path_.assign(path);
 }
@@ -303,7 +287,7 @@ std::string_view CmdFifo::path() const noexcept { return path_.view(); }
 
 std::string_view CmdFifo::last_unrecognised() const noexcept { return last_bad_.view(); }
 
-Ex<CmdFifo> CmdFifo::open(const char* path) {
+Ex<CmdFifo> CmdFifo::open(const char* path, ICmdVerbSink& route) {
     if (path == nullptr) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
@@ -327,7 +311,7 @@ Ex<CmdFifo> CmdFifo::open(const char* path) {
         (void)::unlink(path);
         return std::unexpected(Error{Errc::os, ERR_SITE(), e});
     }
-    return CmdFifo{UniqueFd{fd}, p};
+    return CmdFifo{UniqueFd{fd}, p, route};
 }
 
 Ex<unsigned> CmdFifo::service() {
@@ -355,7 +339,6 @@ Ex<unsigned> CmdFifo::service() {
 
     std::string_view rest{buf, static_cast<std::size_t>(len)};
     unsigned routed = 0;
-    NoSink no_sink;
 
     while (!rest.empty()) {
         const std::size_t nl = rest.find('\n');
@@ -365,7 +348,7 @@ Ex<unsigned> CmdFifo::service() {
         if (line.empty()) continue;
         ++stats_.lines;
 
-        switch (deliver_cmd_line(line, route_ != nullptr ? *route_ : no_sink)) {
+        switch (deliver_cmd_line(line, route_.get())) {
             case CmdLineOutcome::Routed:
                 ++routed_;
                 ++routed;

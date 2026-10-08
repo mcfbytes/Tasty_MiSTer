@@ -16,7 +16,7 @@ class ScalerFrameSource final : public IFrameSource {
     TASTY_SEAT_RESIDENT(Diag);
 
 public:
-    static constexpr hal::Seat kSeat = hal::Seat::Diag;
+    static constexpr SeatTag kSeat = SeatTag::Diag;
 
     static constexpr std::size_t kStockCaptureBytes = 2048u * 3u * 1024u;
 
@@ -67,7 +67,7 @@ static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
                          hal::SchedPolicy::Other;
               }),
               "the capture blocks; it cannot run under SCHED_FIFO");
-static_assert(ScalerFrameSource::kSeat == hal::Seat::Diag,
+static_assert(ScalerFrameSource::kSeat == SeatTag::Diag,
               "the drain that calls capture() is T-DIAG's; two seats would be two readers");
 
 }  // namespace mister::app

@@ -168,7 +168,7 @@ void CheatStore::publish_() noexcept {
     blob_.len = static_cast<std::uint16_t>(pos);
     blob_.unit = geom_.unit;
     loaded_ = geom_.unit != 0 ? pos / geom_.unit : 0;
-    blob_cell_.publish(blob_);
+    blob_cell_->publish(blob_);
 }
 
 Ex<bool> CheatStore::toggle(std::size_t i) {

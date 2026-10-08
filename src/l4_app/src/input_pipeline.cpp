@@ -3,32 +3,28 @@
 #include "app/input_pipeline.h"
 
 #include <type_traits>
+#include <utility>
 
 #include "app/link_tx_channel.h"
 
 namespace mister::app {
 
-static_assert(std::is_constructible_v<InputPipeline, const svc::Vfs&, hal::ISpiTransport&,
-                                      os::IClock&, proto::ILinkRouter&>,
+static_assert(std::is_constructible_v<InputPipeline, InputDecode::Fds, InputWire&, InputBuild&,
+                                      InputEmit&, os::IClock&, InputDecode::Wiring>,
               "the intended constructor must still exist");
+static_assert(!std::is_default_constructible_v<InputPipeline>,
+              "an unopened pipeline must have no representation");
 
-InputPipeline::InputPipeline(const svc::Vfs& vfs, hal::ISpiTransport& link, os::IClock& clock,
-                             proto::ILinkRouter& router) noexcept
-    : decode_(wire_, clock), build_(vfs, wire_), emit_(wire_, link, router) {}
-
-Ex<void> InputPipeline::open() {
-    if (auto b = build_.open(); !b) return std::unexpected(b.error());
-
-    emit_.arm();
-    if (auto c = wire_.open_ctrl(); !c) return std::unexpected(c.error());
-    if (auto o = decode_.open(); !o) return std::unexpected(o.error());
-    return decode_.arm(build_.service());
-}
+InputPipeline::InputPipeline(InputDecode::Fds fds, InputWire& wire, InputBuild& build,
+                             InputEmit& emit, os::IClock& clock,
+                             InputDecode::Wiring decode_wiring) noexcept
+    : wire_(wire), build_(build), emit_(emit),
+      decode_(std::move(fds), wire, build.service(), clock, decode_wiring),
+      sample_{&decode_, &build_, &emit_, &wire_} {}
 
 void InputEmit::on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live) {
 
     TASTY_SEAT_BODY(InputEmit);
-    if (!armed_) return;
     InputWire::bump(n_rt_rounds_, 1);
 
     const std::uint32_t gates = wire_.gates();
@@ -48,7 +44,6 @@ void InputEmit::on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live) {
 
 void InputEmit::apply_edge_reset() {
     TASTY_SEAT_BODY(InputEmit);
-    if (!armed_) return;
     if (const std::uint32_t rs = wire_.edge_reset_seq(); rs != wm_reset_seq_) {
         wm_reset_seq_ = rs;
         em_.joysticks().reset_edges();
@@ -65,25 +60,12 @@ InputEmit::Counts InputEmit::counts() const noexcept {
     return c;
 }
 
-InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire) noexcept : vfs_(&vfs), wire_(wire) {
+InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view input_dir)
+    : wire_(wire) {
 
-    if (auto svc = svc::InputService::create(); svc) {
-        svc_.emplace(std::move(*svc));
-    }
-}
+    svc_.emplace(svc::InputService::create(vfs));
 
-void InputBuild::set_input_dir(std::string_view dir) { input_dir_.assign(dir); }
-
-void InputBuild::set_cfg_deadzone_rules(std::span<const svc::DeadzoneRule> rows) {
-    if (svc_) svc_->set_cfg_deadzone_rules(rows);
-}
-
-Ex<void> InputBuild::open() {
-    if (!svc_) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    opened_ = true;
-
-    svc_->bind_storage(*vfs_);
-    if (!input_dir_.empty()) svc_->set_input_dir(input_dir_);
+    if (!input_dir.empty()) svc_->set_input_dir(input_dir);
 
     if (auto w = svc_->open_hotplug_watch(); !w) {
         InputWire::bump(n_enum_fail_, 1);
@@ -95,13 +77,15 @@ Ex<void> InputBuild::open() {
     (void)svc_->load_maps_for(std::string_view{}, false);
 
     wire_.publish_gates(svc_->grabbed() ? InputWire::kGateGrabbed : 0u, InputWire::kGateOsdVisible);
-    return {};
+}
+
+void InputBuild::set_cfg_deadzone_rules(std::span<const svc::DeadzoneRule> rows) {
+    svc_->set_cfg_deadzone_rules(rows);
 }
 
 bool InputBuild::rebind_round(unsigned wait_ms) {
 
     TASTY_SEAT_BODY(InputBuild);
-    if (!opened_) return false;
 
     if ((wire_.requests() & InputWire::kReqHotplug) == 0u) return false;
     wire_.clear_request(InputWire::kReqHotplug);
@@ -147,8 +131,9 @@ bool InputBuild::rebind_round(unsigned wait_ms) {
         const InputWire::CoreNameCell core = wire_.core_name();
 
         svc_->set_joy_plan(wire_.joy_plan());
-        svc_->set_analog_reshape(wire_.analog_reshape());
-        (void)svc_->load_maps_for(core.view(), core.front_end);
+        const svc::IAnalogReshape* r = wire_.analog_reshape();
+        const auto reshape = infra::opt_ref_of(r);
+        (void)svc_->load_maps_for(core.view(), core.front_end, reshape);
     }
     wire_.clear_request(InputWire::kReqRebuild);
     wire_.note_rebuild_done();
@@ -159,7 +144,6 @@ bool InputBuild::rebind_round(unsigned wait_ms) {
 InputBuild::Counts InputBuild::counts() const noexcept {
     Counts c{};
     c.enumerate_failures = n_enum_fail_.load(std::memory_order_relaxed);
-    if (!opened_) return c;
     c.devices = svc_->stats().devices;
     c.mapped = svc_->mapped_devices();
     c.slotted = svc_->slotted_devices();

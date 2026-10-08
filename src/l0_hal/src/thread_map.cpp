@@ -10,11 +10,11 @@ namespace mister::hal {
 namespace {
 
 thread_local const ThreadMap* t_map TASTY_PERSIST(proc, hal_placement_map) = nullptr;
-thread_local Seat t_seat TASTY_PERSIST(proc, hal_placement_seat) = Seat::RT;
+thread_local SeatTag t_seat TASTY_PERSIST(proc, hal_placement_seat) = SeatTag::RT;
 
 }  // namespace
 
-void adopt_placement(const ThreadMap& m, Seat seat) noexcept {
+void adopt_placement(const ThreadMap& m, SeatTag seat) noexcept {
     t_map = &m;
     t_seat = seat;
 }

@@ -20,7 +20,7 @@
 #include "app/identity_latch.h"
 #include "app/link_tx_channel.h"
 #include "cores/registry.h"
-#include "hub.h"
+#include "report.h"
 #include "proto/link_op.h"
 #include "svc/vfs.h"
 #include "tasty_registry.h"

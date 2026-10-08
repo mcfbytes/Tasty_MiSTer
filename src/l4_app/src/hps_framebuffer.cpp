@@ -7,7 +7,6 @@
 #include <array>
 #include <cstdio>
 
-#include "app/video_pump.h"
 #include "svc/video_service.h"
 
 namespace mister::app {
@@ -25,10 +24,10 @@ constexpr std::uint32_t kPixelOff = 4096;
 
 }  // namespace
 
-Ex<void> HpsFramebuffer::publish_(std::uint16_t fmt, std::uint32_t w, std::uint32_t h,
-                                  std::uint32_t hmin, std::uint32_t hmax, std::uint32_t vmin,
-                                  std::uint32_t vmax, std::uint32_t stride) noexcept {
-    const auto addr = static_cast<std::uint32_t>(fb_.phys.v + kPixelOff);
+Ex<void> HpsFramebuffer::publish_(std::uint32_t addr, std::uint16_t fmt, std::uint32_t w,
+                                  std::uint32_t h, std::uint32_t hmin, std::uint32_t hmax,
+                                  std::uint32_t vmin, std::uint32_t vmax,
+                                  std::uint32_t stride) noexcept {
     const std::array<std::uint16_t, 10> words{
         static_cast<std::uint16_t>(kFbEn | fmt), static_cast<std::uint16_t>(addr),
         static_cast<std::uint16_t>(addr >> 16),  static_cast<std::uint16_t>(w),
@@ -36,7 +35,7 @@ Ex<void> HpsFramebuffer::publish_(std::uint16_t fmt, std::uint32_t w, std::uint3
         static_cast<std::uint16_t>(hmax),        static_cast<std::uint16_t>(vmin),
         static_cast<std::uint16_t>(vmax),        static_cast<std::uint16_t>(stride),
     };
-    return video_.wire().publish(svc::kUioSetFbuf, words);
+    return wire_.publish(svc::kUioSetFbuf, words);
 }
 
 void HpsFramebuffer::write_mode_param_(unsigned fmt, unsigned rb, std::uint32_t w, std::uint32_t h,
@@ -51,36 +50,60 @@ void HpsFramebuffer::write_mode_param_(unsigned fmt, unsigned rb, std::uint32_t 
 
 Ex<void> HpsFramebuffer::raise() noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
-    const std::uint32_t ow = video_.output_width();
-    const std::uint32_t oh = video_.output_height();
+    const std::uint32_t ow = output_.output_width();
+    const std::uint32_t oh = output_.output_height();
     if (fb_.len == 0 || ow == 0 || oh == 0)
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     const std::uint32_t scale = ow * oh > kFbPixels ? 2u : 1u;
     width_ = ow / scale;
     height_ = oh / scale;
     raised_ = true;
+    viewing_ = false;
     write_mode_param_(8888, 1, width_, height_, width_ * 4u);
     if (held_) return {};
-    return publish_(kFmtRxB | kFmt8888, width_, height_, 0, ow - 1, 0, oh - 1, width_ * 4u);
+    return publish_(static_cast<std::uint32_t>(fb_.phys.v + kPixelOff), kFmtRxB | kFmt8888, width_,
+                    height_, 0, ow - 1, 0, oh - 1, width_ * 4u);
+}
+
+Ex<void> HpsFramebuffer::raise_view(const FbView& view) noexcept {
+    TASTY_SEAT_BODY(HpsFramebuffer);
+    const std::uint32_t ow = output_.output_width();
+    const std::uint32_t oh = output_.output_height();
+    if (fb_.len == 0 || ow == 0 || oh == 0)
+        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
+    const std::uint64_t bytes = static_cast<std::uint64_t>(view.height) * view.stride;
+    if (view.offset > fb_.len || bytes > fb_.len - view.offset)
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), view.offset});
+    const std::uint16_t fmt = view.format == FbView::FbFormat::Rgb565
+                                  ? kFmt565
+                                  : static_cast<std::uint16_t>(kFmtRxB | kFmt8888);
+    width_ = view.width;
+    height_ = view.height;
+    raised_ = true;
+    viewing_ = true;
+    if (held_) return {};
+    return publish_(static_cast<std::uint32_t>(fb_.phys.v + view.offset), fmt, view.width,
+                    view.height, 0, ow - 1, 0, oh - 1, view.stride);
 }
 
 Ex<void> HpsFramebuffer::drop() noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
     raised_ = false;
+    viewing_ = false;
     if (held_) return {};
     const std::array<std::uint16_t, 1> off{0};
-    return video_.wire().publish(svc::kUioSetFbuf, off);
+    return wire_.publish(svc::kUioSetFbuf, off);
 }
 
 bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
     ++fb_cmds_;
-    if (!raised_ || held_) {
+    if (!raised_ || held_ || viewing_) {
         ++refused_;
         return true;
     }
-    const std::uint32_t ow = video_.output_width();
-    const std::uint32_t oh = video_.output_height();
+    const std::uint32_t ow = output_.output_width();
+    const std::uint32_t oh = output_.output_height();
     const std::string text(line);
     int fmt = 0;
     int rb = 0;
@@ -152,7 +175,9 @@ bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
     const std::uint32_t stride = ((uw * bpp) + 15u) & ~15u;
     width_ = uw;
     height_ = uh;
-    if (!publish_(sc, uw, uh, hmin, hmax, vmin, vmax, stride)) ++refused_;
+    if (!publish_(static_cast<std::uint32_t>(fb_.phys.v + kPixelOff), sc, uw, uh, hmin, hmax, vmin,
+                  vmax, stride))
+        ++refused_;
     if (write_param)
         write_mode_param_(static_cast<unsigned>(fmt), static_cast<unsigned>(rb), uw, uh, stride);
     return true;

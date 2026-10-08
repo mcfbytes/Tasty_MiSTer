@@ -139,7 +139,7 @@ class UartModeController {
 public:
     using Handoffs = xthread::Inbox<UartHandoff, kUartHandoffDepth>;
 
-    void bind_handoffs(Handoffs& h) noexcept { inbox_ = &h; }
+    explicit UartModeController(Handoffs* inbox = nullptr) noexcept : inbox_(inbox) {}
 
     Ex<UartMode> probe_mode() const;
     Ex<MidiLinkMode> probe_midilink() const;
@@ -210,7 +210,7 @@ private:
     void post_(const UartHandoff& h) noexcept;
 
     Stats stats_{};
-    Handoffs* inbox_ = nullptr;
+    Handoffs* const inbox_;
     xthread::Counter script_spawns_{}, script_failures_{}, script_nonzero_{}, handoff_drops_{},
         handoff_misrouted_{};
 };

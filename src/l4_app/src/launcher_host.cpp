@@ -60,12 +60,11 @@ bool send_text(int fd, std::string_view s) noexcept {
 
 }  // namespace
 
-Ex<void> LauncherHost::open() noexcept {
-    if (epoll_.valid()) return {};
-    epoll_.reset(::epoll_create1(EPOLL_CLOEXEC));
-    if (!epoll_.valid())
+Ex<LauncherHost::Fds> LauncherHost::Fds::create() noexcept {
+    UniqueFd epoll(::epoll_create1(EPOLL_CLOEXEC));
+    if (!epoll.valid())
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    return {};
+    return Fds{std::move(epoll)};
 }
 
 void LauncherHost::watch_(int fd) noexcept {

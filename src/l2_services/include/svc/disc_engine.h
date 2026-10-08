@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -20,14 +21,13 @@
 #include "svc/toc.h"
 #include "svc/track.h"
 #include "svc/types.h"
+#include "svc/chd_prefetch.h"
 #include "svc/vfs.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
 
 using proto::Lba;
-
-class ChdPrefetch;
 
 struct ChdMetaRow {
     std::string_view text;
@@ -38,9 +38,10 @@ class DiscEngine {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    static Ex<DiscEngine> create(const Vfs& vfs, CuePolicy policy);
+    static Ex<DiscEngine> create(const Vfs& vfs, CuePolicy policy, ChdPrefetch& prefetch);
 
-    static Ex<DiscEngine> create(const IImageOpener& opener, CuePolicy policy);
+    static Ex<DiscEngine> create(const IImageOpener& opener, CuePolicy policy,
+                                 ChdPrefetch& prefetch);
 
     Ex<void> mount(std::string_view image_path);
     Ex<void> unmount();
@@ -73,8 +74,6 @@ public:
 
     void advise_ahead(Lba lba) noexcept;
 
-    void set_prefetch(ChdPrefetch* p) noexcept { prefetch_ = p; }
-
     std::uint32_t chd_hunk_bytes() const noexcept {
         return chd_ != nullptr ? static_cast<std::uint32_t>(hunk_bytes_) : 0;
     }
@@ -94,7 +93,7 @@ public:
     std::uint32_t prefetch_refusals() const noexcept { return prefetch_refusals_; }
 
 private:
-    explicit DiscEngine(CuePolicy p);
+    explicit DiscEngine(CuePolicy p, ChdPrefetch& prefetch);
 
     enum class Form : std::uint8_t { Native, UserData, RedBook };
 
@@ -151,7 +150,8 @@ private:
     std::uint32_t hunk_memo_ = kNoHunk;
 
     const std::byte* hunk_ptr_ = nullptr;
-    ChdPrefetch* prefetch_ = nullptr;
+
+    std::reference_wrapper<ChdPrefetch> prefetch_;
 
     std::size_t prefetch_depth_ = 0;
     std::uint32_t sync_decompress_ = 0;

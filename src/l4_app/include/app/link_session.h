@@ -27,8 +27,6 @@
 #include "proto/spi_status_decoder.h"
 #include "app/board_ops.h"
 #include "app/bracket_close.h"
-#include "app/cheat_blob_cell.h"
-#include "app/cheat_catalog_cell.h"
 #include "app/config_slot_cell.h"
 #include "app/ladder_cell.h"
 #include "app/file_tx_level.h"
@@ -54,10 +52,8 @@
 #include "app/start_in_flight.h"
 #include "app/spi_encoder.h"
 #include "proto/status_cell.h"
-#include "app/tx_digest_cell.h"
 #include "proto/save_ask.h"
 #include "app/save_flush.h"
-#include "app/cheat_apply.h"
 #include "app/core_option_acts.h"
 #include "proto/session_live.h"
 #include "proto/osd_focus.h"
@@ -77,8 +73,8 @@
 #include "infra/telemetry.h"
 #include "infra/seat.h"
 #include "svc/config_snapshot.h"
+#include "infra/opt_ref.h"
 #include "os/clock.h"
-#include "os/monotonic_clock.h"
 
 #include "reactor/executive.h"
 #include "reactor/link_decoder.h"
@@ -98,13 +94,13 @@ class DiscReadService;
 struct ConfigSnapshot;
 class Vfs;
 class IFile;
-class AudioService;
 class ChdPrefetch;
 class InputEmitter;
 }  // namespace mister::svc
 
 namespace mister::cores {
 class Core;
+struct CoreManifest;
 class ISaveUpload;
 }  // namespace mister::cores
 
@@ -115,6 +111,7 @@ class ImageBracket;
 namespace mister::app {
 
 class VideoWire;
+class ICheatApply;
 class OsdWire;
 class InputWire;
 class DurableWriteService;
@@ -125,6 +122,8 @@ class LinkRxChannel;
 struct SupervisorParts;
 
 struct CoreDeleter {
+
+    CoreDeleter& operator=(std::default_delete<cores::Core>) noexcept { return *this; }
     void operator()(cores::Core* p) const noexcept;
 };
 
@@ -134,7 +133,6 @@ class LinkSession : private cores::CoreInitHost,
                     private ISaveFlush,
                     private proto::ISessionLive,
                     private proto::IOsdFocus,
-                    private ICheatApply,
                     private ICoreOptionActs {
     TASTY_SEAT_RESIDENT(RT);
 
@@ -153,35 +151,9 @@ public:
     [[nodiscard]] SessionState state() const noexcept { return machine_.state(); }
     proto::CoreSession& session() noexcept { return session_; }
 
-    void attach_storage(const svc::Vfs& vfs) noexcept {
-        vfs_ = &vfs;
-
-        save_src_ = std::make_unique<SaveImageSource>(vfs);
-        slots_.attach_source(*save_src_);
-
-        streams_.bind_vfs(vfs);
-    }
-
-    void attach_executive(reactor::Executive& exec, reactor::CoreState& state) noexcept {
-        binder_.attach_executive(exec, state);
-    }
-    void set_board_ops(const BoardOps& ops) noexcept { ops_ = ops; }
-
-    void set_boot_handoff(hal::IBootHandoff* page) noexcept { handoff_ = page; }
-
     UartModeController& uart() noexcept { return uart_; }
 
-    void set_doorbell_policy(hal::DoorbellPolicy p) noexcept { binder_.set_doorbell_policy(p); }
-
     void set_pcm_feeder(PcmRingFeeder* feeder) noexcept { binder_.set_pcm_feeder(feeder); }
-    void set_fpga_aperture(hal::FpgaAperture ap) noexcept { binder_.set_fpga_aperture(ap); }
-
-    void set_lw_window(hal::PhysRegion lw) noexcept { binder_.set_lw_window(lw); }
-
-    void attach_clock(const os::IClock& c) noexcept {
-        clock_ = &c;
-        slots_.attach_clock(c);
-    }
 
     void attach_prefetch(svc::ChdPrefetch& pf) noexcept { prefetch_ = &pf; }
 
@@ -190,23 +162,17 @@ public:
 
     void attach_mailbox(MailboxRelay& r) noexcept { mailbox_ = &r; }
 
-    void set_log_lane(xthread::LogLane* lane) noexcept {
-        log_lane_ = lane;
-        machine_.set_log_lane(lane);
-        binder_.set_log_lane(lane);
-    }
-
     void set_write_service(DurableWriteService* w) noexcept { writes_ = w; }
 
     void set_window_job_service(WindowJobService* w) noexcept { window_jobs_ = w; }
 
-    [[nodiscard]] LinkTxChannel& link_inbox() noexcept { return *link_inbox_; }
-    [[nodiscard]] LinkTxChannel& ui_inbox() noexcept { return *ui_inbox_; }
-    [[nodiscard]] LinkTxChannel& input_inbox() noexcept { return *input_inbox_; }
-    [[nodiscard]] LinkRxChannel& link_rx() noexcept { return *link_rx_; }
+    [[nodiscard]] LinkTxChannel& link_inbox() noexcept { return link_inbox_; }
+    [[nodiscard]] LinkTxChannel& ui_inbox() noexcept { return ui_inbox_; }
+    [[nodiscard]] LinkTxChannel& input_inbox() noexcept { return input_inbox_; }
+    [[nodiscard]] LinkRxChannel& link_rx() noexcept { return link_rx_; }
 
     [[nodiscard]] const xthread::Telemetry<svc::ConfigSnapshot>& config_cell() noexcept {
-        return *config_cell_;
+        return config_cell_;
     }
     [[nodiscard]] std::uint32_t link_ops_encoded() const noexcept { return link_ops_encoded_; }
     [[nodiscard]] std::uint32_t link_op_drops() const noexcept { return link_op_drops_; }
@@ -280,8 +246,6 @@ public:
     Result misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept;
 
     [[nodiscard]] bool declares_turbo() const noexcept override;
-
-    void attach_input_emitter(svc::InputEmitter& em) noexcept { encoder_.attach_joysticks(em); }
     [[nodiscard]] const MraFacts& mra_facts() const noexcept { return bindings_.facts(); }
     [[nodiscard]] const SessionBindings& bindings() const noexcept { return bindings_; }
 
@@ -329,7 +293,7 @@ public:
         return config_slot_cell_;
     }
 
-    void set_ladder_cell(LadderStateCell* c) noexcept { ladder_cell_ = c; }
+    [[nodiscard]] LadderStateCell& ladder_cell() noexcept { return ladder_cell_; }
 
     [[nodiscard]] const MountStatusCell& mount_status_cell() const noexcept {
         return mount_status_cell_;
@@ -342,20 +306,9 @@ public:
     [[nodiscard]] const OptionCell& option_cell() const noexcept { return option_cell_; }
     [[nodiscard]] std::uint32_t option_sets() const noexcept { return option_sets_; }
 
-    [[nodiscard]] const TxDigestCell& tx_digest_cell() const noexcept { return tx_digest_cell_; }
-    [[nodiscard]] const CheatCatalogCell& cheat_catalog_cell() const noexcept {
-        return cheat_catalog_cell_;
-    }
-
-    void set_cheat_blob_cell(const CheatBlobCell* c) noexcept { cheat_blob_cell_ = c; }
-
-    [[nodiscard]] bool apply_cheats_counted() noexcept override;
-
     [[nodiscard]] bool set_dip_counted(std::uint8_t row, std::uint32_t choice) noexcept override;
     [[nodiscard]] bool set_option_counted(std::uint8_t row, std::uint8_t choice) noexcept override;
     [[nodiscard]] bool settle_options_counted() noexcept override;
-    [[nodiscard]] std::uint32_t cheat_applies() const noexcept { return cheat_applies_; }
-    [[nodiscard]] std::uint32_t cheat_refusals() const noexcept { return cheat_refusals_; }
 
     [[nodiscard]] std::uint32_t manifest_errors() const noexcept { return manifest_errors_; }
 
@@ -420,9 +373,7 @@ public:
 
     [[nodiscard]] const BoardOps& board_ops() const noexcept { return ops_; }
 
-    [[nodiscard]] const os::IClock& clock() const noexcept {
-        return clock_ != nullptr ? *clock_ : default_clock_;
-    }
+    [[nodiscard]] const os::IClock& clock() const noexcept { return clock_; }
 
     [[nodiscard]] bool session_starting() const noexcept { return start_.on(); }
 
@@ -485,13 +436,11 @@ private:
     [[nodiscard]] Ex<void> apply_bind_slot_(proto::SlotIndex slot, proto::LinkOp::SlotBind kind,
                                             proto::FileSize size, proto::PathId path_id);
 
-    void apply_bind_slot_roles_(proto::SlotIndex slot, proto::IResidentImageSource* resident,
-                                proto::IImageSource* descriptor) noexcept;
-    void apply_geometry_hook_(proto::IBlockGeometry* hook) noexcept;
+    void apply_bind_slot_roles_(proto::SlotIndex slot, const proto::SlotRoles& roles) noexcept;
+
+    [[nodiscard]] proto::SlotRoles current_slot_roles_() noexcept;
 
     void arm_request(const LoadRequest& req);
-
-    [[nodiscard]] Ex<void> validate_pending() const;
 
     [[nodiscard]] svc::ConfigSnapshot& live_config_() noexcept;
     [[nodiscard]] svc::ConfigSnapshot& spare_config_() noexcept;
@@ -555,9 +504,10 @@ private:
     [[nodiscard]] std::span<const reactor::LinkDecoderDecl> census_rows_(
         std::array<reactor::LinkDecoderDecl, kMaxServices>& out) const noexcept;
 
-    hal::ISpiTransport* link_;
+    hal::ISpiTransport& link_;
 
-    hal::ICoreSignals* signals_;
+    LinkBinder binder_;
+
     FencedCoreSignals fenced_signals_;
     hal::IBootHandoff* handoff_ = nullptr;
 
@@ -565,6 +515,11 @@ private:
 
     const svc::Vfs* vfs_ = nullptr;
     svc::DiscReadService* discs_ = nullptr;
+    svc::DiscReadService& unbound_discs_;
+
+    [[nodiscard]] svc::DiscReadService& granted_discs_() noexcept {
+        return discs_ != nullptr ? *discs_ : unbound_discs_;
+    }
     MailboxRelay* mailbox_ = nullptr;
     std::uint32_t mailbox_write_drops_ = 0;
     svc::ChdPrefetch* prefetch_ = nullptr;
@@ -579,14 +534,14 @@ private:
     DurableWriteService* writes_ = nullptr;
     WindowJobService* window_jobs_ = nullptr;
     svc::IStorageLifecycle* storage_life_ = nullptr;
-    LinkTxChannel* link_inbox_ = nullptr;
-    LinkTxChannel* ui_inbox_ = nullptr;
-    LinkTxChannel* input_inbox_ = nullptr;
-    LinkRxChannel* link_rx_ = nullptr;
+    LinkTxChannel& link_inbox_;
+    LinkTxChannel& ui_inbox_;
+    LinkTxChannel& input_inbox_;
+    LinkRxChannel& link_rx_;
     LinkRouter& router_;
     Port out_;
     proto::SpiSampler sampler_;
-    const xthread::Telemetry<svc::ConfigSnapshot>* config_cell_ = nullptr;
+    const xthread::Telemetry<svc::ConfigSnapshot>& config_cell_;
     xthread::Telemetry<svc::ConfigSnapshot>::Reader config_reader_{};
 
     StartInFlight start_;
@@ -661,7 +616,7 @@ private:
     void reset_video_geometry() override;
     void arm_video_prelude() override;
     void publish_core_identity() override;
-    BoardOps ops_{};
+    const BoardOps ops_{};
     bool stdout_armed_ = false;
 
     FabricCell fabric_cell_{};
@@ -677,9 +632,7 @@ private:
     bool ever_running_ = false;
 
     proto::CoreSession session_;
-
-    LinkBinder binder_;
-    UartModeController uart_{};
+    UartModeController uart_;
     StdoutRouter stdout_router_{};
 
     PendingLoad pending_{};
@@ -698,7 +651,7 @@ private:
 
     bool core_ready_ = true;
 
-    xthread::LogLane* log_lane_ = nullptr;
+    xthread::LogLane& log_lane_;
     std::uint64_t load_start_ns_ = 0;
 
     std::uint32_t ftx_count_ = 0;
@@ -729,7 +682,7 @@ private:
     std::uint16_t copy_act_ = 0;
     std::uint32_t copy_rounds_ = 0;
 
-    LadderStateCell* ladder_cell_ = nullptr;
+    LadderStateCell& ladder_cell_;
 
     DiagCountersCell diag_{};
 
@@ -750,15 +703,7 @@ private:
     DipTable dip_scratch_{};
     DipCell dip_cell_{};
 
-    TxDigest tx_digest_scratch_{};
-    TxDigestCell tx_digest_cell_{};
-    CheatCatalog cheat_catalog_scratch_{};
-    CheatCatalogCell cheat_catalog_cell_{};
-    const CheatBlobCell* cheat_blob_cell_ = nullptr;
-    CheatBlobCell::Reader cheat_blob_reader_{};
-    CheatBlob cheat_blob_scratch_{};
-    std::uint32_t cheat_applies_ = 0;
-    std::uint32_t cheat_refusals_ = 0;
+    ICheatApply& cheats_;
     std::uint32_t manifest_errors_ = 0;
     std::uint32_t dip_sets_ = 0;
     std::uint32_t dip_saves_ = 0;
@@ -798,23 +743,20 @@ private:
     cores::ProgressTicker stage_tick_{};
     std::uint32_t config_loads_ = 0;
     void publish_config_slots() noexcept;
-    void grant_manifest_(cores::Core& c, std::string_view path);
+    [[nodiscard]] cores::CoreManifest granted_manifest_(std::string_view path) const;
 
     OptionTable option_scratch_{};
     OptionCell option_cell_{};
     std::uint32_t option_sets_ = 0;
     void publish_option_table() noexcept;
-    void publish_cheat_catalog() noexcept;
 
-    void reset_cheats(TxDigest::Kind kind, std::string_view path, std::uint32_t crc,
-                      bool same_game) noexcept;
     void surface_manifest_error();
 
     void publish_status_word() noexcept;
 
     Error last_error_{};
-    const os::IClock* clock_ = nullptr;
-    os::MonotonicClock default_clock_{};
+
+    const os::IClock& clock_;
 
     std::uint32_t core_shutdowns_ = 0;
 
@@ -824,9 +766,7 @@ private:
 
     std::uint8_t config_live_ = 0;
 
-    std::unique_ptr<svc::AudioService> audio_;
-
-    proto::BlockSlots slots_{};
+    proto::BlockSlots slots_;
     static_assert(sizeof(proto::BlockSlots) < 4096, "slots_ is an inline member of a "
                                                     "T-RT type; it must stay small");
 
@@ -855,7 +795,7 @@ private:
     static constexpr std::size_t kMaxAbandonedCores = 4;
     std::array<Retiree, kMaxAbandonedCores> abandoned_{};
 
-    FileStreamService streams_;
+    FileStreamService& streams_;
 
     SpiEncoder encoder_;
 

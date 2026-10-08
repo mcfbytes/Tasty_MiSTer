@@ -330,9 +330,30 @@ bool movie_system_supported(const MovieSystem& sys) noexcept {
         case CoreKind::Psx:
         case CoreKind::Menu:
             return sys.codec != nullptr || sys.kind == CoreKind::Menu;
-        default:
+        case CoreKind::MegaCd:
+        case CoreKind::PceCd:
+        case CoreKind::Arcade:
+        case CoreKind::Electron:
+        case CoreKind::AtariSt:
+        case CoreKind::ThreeDo:
+        case CoreKind::N64:
+        case CoreKind::NeoGeo:
+        case CoreKind::Ao486:
+        case CoreKind::Pc110:
+        case CoreKind::Z486:
+        case CoreKind::Z386:
+        case CoreKind::Pcxt:
+        case CoreKind::Tandy1000:
+        case CoreKind::Pcjr:
+        case CoreKind::PcxtEga:
+        case CoreKind::Uneon:
+        case CoreKind::Saturn:
+        case CoreKind::Cdi:
+        case CoreKind::Count:
             return false;
     }
+
+    return false;
 }
 
 bool movie_system_plays(std::string_view conf_str_name) noexcept {

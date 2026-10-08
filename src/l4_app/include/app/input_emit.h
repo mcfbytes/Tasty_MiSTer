@@ -21,7 +21,7 @@ class InputEmit {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr hal::Seat kSeat = hal::Seat::RT;
+    static constexpr SeatTag kSeat = SeatTag::RT;
 
     struct Counts {
         std::uint32_t rt_rounds = 0;
@@ -34,9 +34,6 @@ public:
         : wire_(wire), ps2_(link, router) {}
     InputEmit(const InputEmit&) = delete;
     InputEmit& operator=(const InputEmit&) = delete;
-
-    void arm() noexcept { armed_ = true; }
-    bool armed() const noexcept { return armed_; }
 
     void on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live);
 
@@ -52,7 +49,6 @@ private:
     InputWire& wire_;
 
     proto::SpiPs2Decoder ps2_;
-    bool armed_ = false;
 
     std::uint32_t wm_reset_seq_ = 0;
 

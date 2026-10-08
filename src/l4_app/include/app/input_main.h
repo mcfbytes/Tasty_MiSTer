@@ -6,6 +6,8 @@
 #include "app/input_decode.h"
 #include "app/input_park.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
+#include "infra/park_fds.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
@@ -19,14 +21,14 @@ class InputMain final : public xthread::SeatMain<InputMain> {
 public:
     static constexpr int kInputPollMs = 50;
 
-    explicit InputMain(InputDecode& decode) noexcept
-        : decode_(decode), park_(decode, pause_wake_) {}
+    InputMain(InputDecode& decode, xthread::ParkFds fds,
+              infra::OptRef<xthread::WakeFlag> asker = {}) noexcept
+        : decode_(decode), pause_wake_(fds.wake()), stop_(std::move(fds).take_stop()),
+          pause_(pause_wake_, asker ? &*asker : nullptr), park_(decode, pause_wake_) {}
     InputMain(const InputMain&) = delete;
     InputMain& operator=(const InputMain&) = delete;
     InputMain(InputMain&&) = delete;
     InputMain& operator=(InputMain&&) = delete;
-
-    [[nodiscard]] Ex<void> open() noexcept;
 
     void start() noexcept;
     void stop() noexcept { stop_.request(); }
@@ -54,12 +56,11 @@ public:
 
 private:
     InputDecode& decode_;
-    xthread::WakeFlag stop_{};
-    xthread::WakeFlag pause_wake_{};
-    xthread::PauseLatch pause_{pause_wake_};
+    xthread::WakeFlag& pause_wake_;
+    xthread::WakeFlag stop_;
+    xthread::PauseLatch pause_;
     std::uint32_t paused_link_drops_ = 0;
     InputPark park_;
-    bool opened_ = false;
 };
 
 static_assert(xthread::SeatBody<InputMain>);

@@ -41,7 +41,10 @@ public:
     unsigned visible_rows() const noexcept;
 
 private:
-    xthread::Telemetry<std::uint8_t> visible_rows_{};
+    struct VisibleRows {
+        std::uint8_t n;
+    };
+    xthread::Telemetry<VisibleRows> visible_rows_{};
 
     std::uint8_t rows_[kMaxRows][kRowBytes]{};
     xthread::Telemetry<Row> published_[kMaxRows]{};

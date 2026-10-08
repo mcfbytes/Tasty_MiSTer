@@ -37,7 +37,10 @@ public:
 
     bool flush_one() noexcept;
 
-    [[nodiscard]] Ex<void> set_show(proto::LinkOp::OsdShow s) noexcept;
+    [[nodiscard]] Ex<void> set_show(proto::LinkOp::OsdShow s) noexcept {
+        return set_show(s, target_);
+    }
+    [[nodiscard]] Ex<void> set_show(proto::LinkOp::OsdShow s, proto::OsdTarget t) noexcept;
 
     void on_fabric_reprogrammed() noexcept { show_ = proto::LinkOp::OsdShow::Off; }
 
@@ -66,6 +69,7 @@ private:
     proto::OsdSurface* surface_;
     hal::ISpiTransport* link_;
     proto::OsdTransport osd_{};
+    proto::OsdTransport rows_{};
     proto::OsdSurface::Row scratch_{};
 
     std::uint32_t seen_[proto::OsdSurface::kMaxRows]{};
@@ -77,6 +81,7 @@ private:
     std::uint32_t backlog_hw_ = 0;
     std::uint32_t vis_writes_ = 0;
     proto::LinkOp::OsdShow show_ = proto::LinkOp::OsdShow::Off;
+    proto::OsdTarget target_ = proto::OsdTarget::All;
 };
 
 }  // namespace mister::app

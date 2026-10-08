@@ -21,6 +21,7 @@
 #include "app/video_pump.h"
 #include "hal/scaler_buffers.h"
 #include "hal/scaler_header.h"
+#include "hal/scaler_probe.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "os/delay.h"
@@ -47,8 +48,6 @@ public:
     };
 
     static constexpr int kPollMs = 4;
-
-    static constexpr std::int64_t kProbeNs = 250'000'000;
     static constexpr std::int64_t kDefaultPeriodNs = 16'666'667;
 
     static constexpr std::int64_t kParkPeriods = 12;
@@ -71,36 +70,14 @@ public:
 
     [[nodiscard]] const RecorderStatus& status() const noexcept { return st_; }
 
-    using BufMask = std::array<bool, hal::ScalerBuffers::kBuffers>;
-    static_assert(hal::ScalerBuffers::kBuffers == 3, "kAllLive spells out every buffer");
-    static constexpr BufMask kAllLive{true, true, true};
+    using BufMask = hal::ScalerProbe::BufMask;
+    using Pick = hal::ScalerProbe::Pick;
 
 private:
-    struct ProbeSide {
-        std::array<std::uint8_t, hal::ScalerBuffers::kBuffers> first{};
-        BufMask seen{};
-        BufMask moved{};
-        BufMask triple{};
-    };
     struct Heads {
         std::array<hal::ScalerHeader, hal::ScalerBuffers::kBuffers> h{};
         bool ok = false;
     };
-
-public:
-    struct Pick {
-        std::size_t buf = 0;
-        std::uint8_t lag = 0;
-        bool woven = false;
-
-        std::size_t prev = hal::ScalerBuffers::kBuffers;
-    };
-
-    [[nodiscard]] static std::optional<Pick> pick_complete(
-        const std::array<hal::ScalerHeader, hal::ScalerBuffers::kBuffers>& h,
-        const BufMask& live = kAllLive) noexcept;
-
-private:
     void sample_control_() noexcept;
     void answer_(std::uint16_t gen, RecVerdict v) noexcept;
     void begin_(const RecControl& c) noexcept;
@@ -110,9 +87,6 @@ private:
     [[nodiscard]] bool all_home_() const noexcept;
 
     void probe_step_(std::int64_t now) noexcept;
-    void probe_read_(std::size_t side, std::int64_t now) noexcept;
-    [[nodiscard]] bool probe_decide_(std::int64_t now) noexcept;
-    [[nodiscard]] bool port_stuck_() noexcept;
     [[nodiscard]] bool open_segment_() noexcept;
     void close_step_() noexcept;
     void watch_step_() noexcept;
@@ -153,6 +127,7 @@ private:
     void cross_check_(const CoreFrameRecord& cell, std::uint64_t core, std::int64_t lag) noexcept;
     [[nodiscard]] std::int32_t movie_of_(const CoreFrameRecord& cell,
                                          std::uint64_t core) const noexcept;
+    void attach_pending_(RawFrameSlot& slot) noexcept;
     void defer_(std::uint64_t first, std::uint32_t count, std::uint8_t first_ctr,
                 DupReason why) noexcept;
     [[nodiscard]] bool geometry_ok_(const hal::ScalerHeader& h) const noexcept;
@@ -180,8 +155,7 @@ private:
     bool lowlat_ = false;
     std::size_t regrow_bytes_ = 0;
 
-    std::int64_t probe_start_ns_ = 0;
-    std::array<ProbeSide, 2> probe_{};
+    hal::ScalerProbe probe_{};
     std::int64_t period_ns_ = kDefaultPeriodNs;
 
     std::array<std::array<std::uint16_t, 8>, hal::ScalerBuffers::kBuffers> seen_key_{};
@@ -189,9 +163,11 @@ private:
     std::int64_t track_ns_ = 0;
     BufMask live_{};
 
-    bool have_last_ = false;
-    std::uint8_t last_ctr_ = 0;
-    std::int64_t last_seen_ns_ = 0;
+    struct LastCtr {
+        std::uint8_t ctr = 0;
+        std::int64_t seen_ns = 0;
+    };
+    std::optional<LastCtr> last_{};
     std::uint64_t ext_ = 0;
     std::int64_t anchor_off_ = 0;
 
@@ -210,6 +186,8 @@ private:
     bool woven_ = false;
     bool matched_ = true;
     std::uint8_t npending_ = 0;
+    CoreFrameRecord last_cell_{};
+    bool have_cell_ = false;
 
     bool ll_waiting_ = false;
     std::uint8_t ll_ctr_ = 0;

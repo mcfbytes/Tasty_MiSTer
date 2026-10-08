@@ -10,7 +10,7 @@
 
 namespace mister::cores {
 
-namespace pcm_detail {
+namespace detail {
 
 template <const CoreProfile& kProfile>
 class WireTickRow final : public reactor::ILinkDecoder {
@@ -25,9 +25,9 @@ public:
     }
 };
 
-}  // namespace pcm_detail
+}  // namespace detail
 
 template <const CoreProfile& kProfile>
-inline constexpr pcm_detail::WireTickRow<kProfile> kPcmWireTick{};
+inline constexpr detail::WireTickRow<kProfile> kPcmWireTick{};
 
 }  // namespace mister::cores

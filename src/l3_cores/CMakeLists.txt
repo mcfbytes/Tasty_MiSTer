@@ -55,6 +55,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/acsi_dma.h
   cores/acsi_engine.h
   cores/arcade_core.h
+  cores/manifest_doc_role.h
   cores/assembled_rom.h
   cores/blank_region.h
   cores/blank_save_spec.h
@@ -119,6 +120,8 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/host_file_sandbox.h
   cores/host_file_server.h
   cores/host_services.h
+  cores/core_grant.h
+  cores/core_manifest.h
   cores/mailbox_window.h
   cores/mdp_cue.h
   cores/mdp_source.h
@@ -252,227 +255,257 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
 )
 
 if(TASTY_BUILD_TESTS)
-  add_executable(tasty_cores_nes_movie_codec_unit tests/nes_movie_codec_unit.cpp)
-  target_link_libraries(tasty_cores_nes_movie_codec_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_nes_movie_codec COMMAND tasty_cores_nes_movie_codec_unit)
-  set_tests_properties(tasty.cores_nes_movie_codec PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_nes_movie_codec_unit
+    NAME tasty.cores_nes_movie_codec
+    SOURCES tests/nes_movie_codec_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_nes_bk2_codec_unit tests/nes_bk2_codec_unit.cpp)
-  target_link_libraries(tasty_cores_nes_bk2_codec_unit PRIVATE mister_cores tasty_test_options)
+  tasty_unit_test(tasty_cores_nes_bk2_codec_unit
+    NAME tasty.cores_nes_bk2_codec
+    SOURCES tests/nes_bk2_codec_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
   target_include_directories(tasty_cores_nes_bk2_codec_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-  add_test(NAME tasty.cores_nes_bk2_codec COMMAND tasty_cores_nes_bk2_codec_unit)
-  set_tests_properties(tasty.cores_nes_bk2_codec PROPERTIES TIMEOUT 60)
 
-  add_executable(tasty_cores_snes_movie_codec_unit tests/snes_movie_codec_unit.cpp)
-  target_link_libraries(tasty_cores_snes_movie_codec_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_snes_movie_codec COMMAND tasty_cores_snes_movie_codec_unit)
-  set_tests_properties(tasty.cores_snes_movie_codec PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_snes_movie_codec_unit
+    NAME tasty.cores_snes_movie_codec
+    SOURCES tests/snes_movie_codec_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_ram_image_unit tests/ram_image_unit.cpp)
-  target_link_libraries(tasty_cores_ram_image_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_ram_image COMMAND tasty_cores_ram_image_unit)
-  set_tests_properties(tasty.cores_ram_image PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_ram_image_unit
+    NAME tasty.cores_ram_image
+    SOURCES tests/ram_image_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_megadrive_movie_codec_unit tests/megadrive_movie_codec_unit.cpp)
-  target_link_libraries(tasty_cores_megadrive_movie_codec_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_megadrive_movie_codec COMMAND tasty_cores_megadrive_movie_codec_unit)
-  set_tests_properties(tasty.cores_megadrive_movie_codec PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_megadrive_movie_codec_unit
+    NAME tasty.cores_megadrive_movie_codec
+    SOURCES tests/megadrive_movie_codec_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_psx_movie_codec_unit tests/psx_movie_codec_unit.cpp)
-  target_link_libraries(tasty_cores_psx_movie_codec_unit PRIVATE mister_cores tasty_test_options)
-  target_compile_definitions(tasty_cores_psx_movie_codec_unit PRIVATE
-    TASTY_PSX_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/psx")
-  add_test(NAME tasty.cores_psx_movie_codec COMMAND tasty_cores_psx_movie_codec_unit)
-  set_tests_properties(tasty.cores_psx_movie_codec PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_psx_movie_codec_unit
+    NAME tasty.cores_psx_movie_codec
+    SOURCES tests/psx_movie_codec_unit.cpp
+    DEFINES TASTY_PSX_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/psx"
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_movie_archive_unit tests/movie_archive_unit.cpp)
-  target_link_libraries(tasty_cores_movie_archive_unit PRIVATE mister_cores tasty_test_options)
+  tasty_unit_test(tasty_cores_movie_archive_unit
+    NAME tasty.cores_movie_archive
+    SOURCES tests/movie_archive_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 300)
   target_include_directories(tasty_cores_movie_archive_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-  add_test(NAME tasty.cores_movie_archive COMMAND tasty_cores_movie_archive_unit)
-  set_tests_properties(tasty.cores_movie_archive PROPERTIES TIMEOUT 300)
 
   foreach(mod IN ITEMS arcade cd cdi pce megacd neogeo psx saturn st threedo)
-    add_executable(tasty_cores_${mod}_unit tests/${mod}_core_unit.cpp)
-    target_link_libraries(tasty_cores_${mod}_unit PRIVATE mister_cores tasty_test_options)
 
-    target_compile_definitions(tasty_cores_${mod}_unit PRIVATE
-      TASTY_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/goldens")
-    add_test(NAME tasty.cores_${mod} COMMAND tasty_cores_${mod}_unit)
-    set_tests_properties(tasty.cores_${mod} PROPERTIES TIMEOUT 60)
+    tasty_unit_test(tasty_cores_${mod}_unit
+      NAME tasty.cores_${mod}
+      SOURCES tests/${mod}_core_unit.cpp
+      DEFINES TASTY_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/goldens"
+      LIBS mister_cores tasty_test_options
+      TIMEOUT 60)
   endforeach()
 
-  add_executable(tasty_cores_threedo_cue_unit tests/threedo_cue_unit.cpp)
-  target_link_libraries(tasty_cores_threedo_cue_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_threedo_cue COMMAND tasty_cores_threedo_cue_unit)
-  set_tests_properties(tasty.cores_threedo_cue PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_threedo_cue_unit
+    NAME tasty.cores_threedo_cue
+    SOURCES tests/threedo_cue_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_cheat_sink_unit tests/cheat_sink_unit.cpp)
-  target_link_libraries(tasty_cores_cheat_sink_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_cheat_sink COMMAND tasty_cores_cheat_sink_unit)
-  set_tests_properties(tasty.cores_cheat_sink PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_cheat_sink_unit
+    NAME tasty.cores_cheat_sink
+    SOURCES tests/cheat_sink_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_n64_rom_unit tests/n64_rom_unit.cpp)
-  target_link_libraries(tasty_cores_n64_rom_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_n64_rom COMMAND tasty_cores_n64_rom_unit)
-  set_tests_properties(tasty.cores_n64_rom PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_n64_rom_unit
+    NAME tasty.cores_n64_rom
+    SOURCES tests/n64_rom_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_n64_db_unit tests/n64_db_unit.cpp)
-  target_compile_definitions(tasty_cores_n64_db_unit PRIVATE
-    TASTY_N64_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/n64")
-  target_link_libraries(tasty_cores_n64_db_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_n64_db COMMAND tasty_cores_n64_db_unit)
-  set_tests_properties(tasty.cores_n64_db PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_n64_db_unit
+    NAME tasty.cores_n64_db
+    SOURCES tests/n64_db_unit.cpp
+    DEFINES TASTY_N64_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/n64"
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_n64_unit tests/n64_unit.cpp)
-  target_compile_definitions(tasty_cores_n64_unit PRIVATE
-    TASTY_CONFSTR_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/confstr")
-  target_link_libraries(tasty_cores_n64_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_n64 COMMAND tasty_cores_n64_unit)
-  set_tests_properties(tasty.cores_n64 PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_n64_unit
+    NAME tasty.cores_n64
+    SOURCES tests/n64_unit.cpp
+    DEFINES TASTY_CONFSTR_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/confstr"
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_n64dd_unit tests/n64dd_unit.cpp)
-  target_link_libraries(tasty_cores_n64dd_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_n64dd COMMAND tasty_cores_n64dd_unit)
-  set_tests_properties(tasty.cores_n64dd PROPERTIES TIMEOUT 120)
+  tasty_unit_test(tasty_cores_n64dd_unit
+    NAME tasty.cores_n64dd
+    SOURCES tests/n64dd_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 120)
 
-  add_executable(tasty_cores_n64_cheat_unit tests/n64_cheat_unit.cpp)
-  target_link_libraries(tasty_cores_n64_cheat_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_n64_cheat COMMAND tasty_cores_n64_cheat_unit)
-  set_tests_properties(tasty.cores_n64_cheat PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_n64_cheat_unit
+    NAME tasty.cores_n64_cheat
+    SOURCES tests/n64_cheat_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_n64_saves_unit tests/n64_saves_unit.cpp)
-  target_link_libraries(tasty_cores_n64_saves_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_n64_saves COMMAND tasty_cores_n64_saves_unit)
-  set_tests_properties(tasty.cores_n64_saves PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_n64_saves_unit
+    NAME tasty.cores_n64_saves
+    SOURCES tests/n64_saves_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_n64_cpak_unit tests/n64_cpak_unit.cpp)
-  target_link_libraries(tasty_cores_n64_cpak_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_n64_cpak COMMAND tasty_cores_n64_cpak_unit)
-  set_tests_properties(tasty.cores_n64_cpak PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_n64_cpak_unit
+    NAME tasty.cores_n64_cpak
+    SOURCES tests/n64_cpak_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_nvram_store_unit tests/nvram_store_unit.cpp)
-  target_link_libraries(tasty_cores_nvram_store_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_nvram_store COMMAND tasty_cores_nvram_store_unit)
-  set_tests_properties(tasty.cores_nvram_store PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_nvram_store_unit
+    NAME tasty.cores_nvram_store
+    SOURCES tests/nvram_store_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_boot_ladder_unit tests/boot_ladder_unit.cpp)
-  target_link_libraries(tasty_cores_boot_ladder_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_boot_ladder COMMAND tasty_cores_boot_ladder_unit)
-  set_tests_properties(tasty.cores_boot_ladder PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_boot_ladder_unit
+    NAME tasty.cores_boot_ladder
+    SOURCES tests/boot_ladder_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_image_sink_unit tests/image_sink_unit.cpp)
-  target_link_libraries(tasty_cores_image_sink_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_image_sink COMMAND tasty_cores_image_sink_unit)
-  set_tests_properties(tasty.cores_image_sink PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_image_sink_unit
+    NAME tasty.cores_image_sink
+    SOURCES tests/image_sink_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_host_file_server_unit tests/host_file_server_unit.cpp)
-  target_link_libraries(tasty_cores_host_file_server_unit
-    PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_host_file_server
-           COMMAND tasty_cores_host_file_server_unit)
-  set_tests_properties(tasty.cores_host_file_server PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_host_file_server_unit
+    NAME tasty.cores_host_file_server
+    SOURCES tests/host_file_server_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_mra_doc_unit tests/mra_doc_unit.cpp)
-  target_link_libraries(tasty_cores_mra_doc_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_mra_doc COMMAND tasty_cores_mra_doc_unit)
-  set_tests_properties(tasty.cores_mra_doc PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_mra_doc_unit
+    NAME tasty.cores_mra_doc
+    SOURCES tests/mra_doc_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_stock_scan_unit tests/stock_scan_unit.cpp)
-  target_link_libraries(tasty_cores_stock_scan_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_stock_scan COMMAND tasty_cores_stock_scan_unit)
-  set_tests_properties(tasty.cores_stock_scan PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_stock_scan_unit
+    NAME tasty.cores_stock_scan
+    SOURCES tests/stock_scan_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_romsets_unit tests/romsets_unit.cpp)
-  target_link_libraries(tasty_cores_romsets_unit PRIVATE mister_cores tasty_test_options)
-  target_compile_definitions(tasty_cores_romsets_unit PRIVATE
-    TASTY_NEOGEO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/neogeo")
-  add_test(NAME tasty.cores_romsets COMMAND tasty_cores_romsets_unit)
-  set_tests_properties(tasty.cores_romsets PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_romsets_unit
+    NAME tasty.cores_romsets
+    SOURCES tests/romsets_unit.cpp
+    DEFINES TASTY_NEOGEO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/neogeo"
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_neogeo_manifest_unit tests/neogeo_manifest_unit.cpp)
-  target_link_libraries(tasty_cores_neogeo_manifest_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_neogeo_manifest COMMAND tasty_cores_neogeo_manifest_unit)
-  set_tests_properties(tasty.cores_neogeo_manifest PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_neogeo_manifest_unit
+    NAME tasty.cores_neogeo_manifest
+    SOURCES tests/neogeo_manifest_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_neogeo_alias_source_unit tests/neogeo_alias_source_unit.cpp)
-  target_link_libraries(tasty_cores_neogeo_alias_source_unit PRIVATE mister_cores tasty_test_options)
-  target_compile_definitions(tasty_cores_neogeo_alias_source_unit PRIVATE
-    TASTY_NEOGEO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/neogeo")
-  add_test(NAME tasty.cores_neogeo_alias_source COMMAND tasty_cores_neogeo_alias_source_unit)
-  set_tests_properties(tasty.cores_neogeo_alias_source PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_neogeo_alias_source_unit
+    NAME tasty.cores_neogeo_alias_source
+    SOURCES tests/neogeo_alias_source_unit.cpp
+    DEFINES TASTY_NEOGEO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/neogeo"
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_neo_file_unit tests/neo_file_unit.cpp)
-  target_link_libraries(tasty_cores_neo_file_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_neo_file COMMAND tasty_cores_neo_file_unit)
-  set_tests_properties(tasty.cores_neo_file PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_neo_file_unit
+    NAME tasty.cores_neo_file
+    SOURCES tests/neo_file_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_neo_transform_unit tests/neo_transform_unit.cpp)
-  target_link_libraries(tasty_cores_neo_transform_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_neo_transform COMMAND tasty_cores_neo_transform_unit)
-  set_tests_properties(tasty.cores_neo_transform PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_neo_transform_unit
+    NAME tasty.cores_neo_transform
+    SOURCES tests/neo_transform_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_neogeo_loader_unit tests/neogeo_loader_unit.cpp)
-  target_link_libraries(tasty_cores_neogeo_loader_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_neogeo_loader COMMAND tasty_cores_neogeo_loader_unit)
-  set_tests_properties(tasty.cores_neogeo_loader PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_neogeo_loader_unit
+    NAME tasty.cores_neogeo_loader
+    SOURCES tests/neogeo_loader_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_rom_assembly_unit tests/rom_assembly_unit.cpp)
-  target_link_libraries(tasty_cores_rom_assembly_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_rom_assembly COMMAND tasty_cores_rom_assembly_unit)
-  set_tests_properties(tasty.cores_rom_assembly PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_rom_assembly_unit
+    NAME tasty.cores_rom_assembly
+    SOURCES tests/rom_assembly_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_config_blob_unit tests/config_blob_unit.cpp)
-  target_link_libraries(tasty_cores_config_blob_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_config_blob COMMAND tasty_cores_config_blob_unit)
-  set_tests_properties(tasty.cores_config_blob PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_config_blob_unit
+    NAME tasty.cores_config_blob
+    SOURCES tests/config_blob_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_config_slots_unit tests/config_slots_unit.cpp)
-  target_link_libraries(tasty_cores_config_slots_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_config_slots COMMAND tasty_cores_config_slots_unit)
-  set_tests_properties(tasty.cores_config_slots PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_config_slots_unit
+    NAME tasty.cores_config_slots
+    SOURCES tests/config_slots_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_option_rows_unit tests/option_rows_unit.cpp)
-  target_link_libraries(tasty_cores_option_rows_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_option_rows COMMAND tasty_cores_option_rows_unit)
-  set_tests_properties(tasty.cores_option_rows PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_option_rows_unit
+    NAME tasty.cores_option_rows
+    SOURCES tests/option_rows_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_snes_rom_unit tests/snes_rom_unit.cpp)
-  target_link_libraries(tasty_cores_snes_rom_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_snes_rom COMMAND tasty_cores_snes_rom_unit)
-  set_tests_properties(tasty.cores_snes_rom PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_snes_rom_unit
+    NAME tasty.cores_snes_rom
+    SOURCES tests/snes_rom_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_snes_msu_unit tests/snes_msu_unit.cpp)
-  target_link_libraries(tasty_cores_snes_msu_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_snes_msu COMMAND tasty_cores_snes_msu_unit)
-  set_tests_properties(tasty.cores_snes_msu PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_snes_msu_unit
+    NAME tasty.cores_snes_msu
+    SOURCES tests/snes_msu_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_snes_core_unit tests/snes_core_unit.cpp)
-  target_link_libraries(tasty_cores_snes_core_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_snes_core COMMAND tasty_cores_snes_core_unit)
-  set_tests_properties(tasty.cores_snes_core PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_snes_core_unit
+    NAME tasty.cores_snes_core
+    SOURCES tests/snes_core_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_uef_unit tests/uef_unit.cpp)
-  target_link_libraries(tasty_cores_uef_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_uef COMMAND tasty_cores_uef_unit)
-  set_tests_properties(tasty.cores_uef PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_uef_unit
+    NAME tasty.cores_uef
+    SOURCES tests/uef_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_megadrive_unit tests/megadrive_unit.cpp)
-  target_link_libraries(tasty_cores_megadrive_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_megadrive COMMAND tasty_cores_megadrive_unit)
-  set_tests_properties(tasty.cores_megadrive PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_megadrive_unit
+    NAME tasty.cores_megadrive
+    SOURCES tests/megadrive_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_mdp_cue_unit tests/mdp_cue_unit.cpp)
-  target_link_libraries(tasty_cores_mdp_cue_unit PRIVATE mister_cores tasty_test_options)
-  add_test(NAME tasty.cores_mdp_cue COMMAND tasty_cores_mdp_cue_unit)
-  set_tests_properties(tasty.cores_mdp_cue PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_cores_mdp_cue_unit
+    NAME tasty.cores_mdp_cue
+    SOURCES tests/mdp_cue_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_cores_electron_core_unit tests/electron_core_unit.cpp)
-  target_link_libraries(tasty_cores_electron_core_unit PRIVATE mister_cores tasty_test_options)
-
+  tasty_unit_test(tasty_cores_electron_core_unit
+    NAME tasty.cores_electron_core
+    SOURCES tests/electron_core_unit.cpp
+    LIBS mister_cores tasty_test_options ZLIB::ZLIB
+    TIMEOUT 60)
   find_package(ZLIB REQUIRED)
-  target_link_libraries(tasty_cores_electron_core_unit PRIVATE ZLIB::ZLIB)
-  add_test(NAME tasty.cores_electron_core COMMAND tasty_cores_electron_core_unit)
-  set_tests_properties(tasty.cores_electron_core PROPERTIES TIMEOUT 60)
 
   get_filename_component(TASTY_L3_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
   target_link_libraries(tasty_cores_megacd_unit PRIVATE trace_replay)

@@ -45,7 +45,7 @@ public:
     static constexpr std::uint8_t kRecoverDoublings = 3;
 
     static constexpr std::int64_t kFlushNs = 250'000'000;
-    static constexpr std::size_t kMinSlotBytes = 512u * 1024u;
+    static constexpr std::size_t kMinSlotBytes = 1024u * 1024u;
 
     explicit AviEncoder(const Wiring& w) noexcept : w_(w) {}
     AviEncoder(const Wiring& w, const Limits& l) noexcept : w_(w), lim_(l) {}
@@ -86,6 +86,9 @@ private:
     [[nodiscard]] bool open_segment_(std::uint32_t vtime) noexcept;
     [[nodiscard]] bool marker_(ChunkKind kind, std::uint32_t vtime) noexcept;
     [[nodiscard]] std::byte* reserve_(std::size_t payload_max) noexcept;
+
+    enum class Reserve : std::uint8_t { Ok, Busy, NoMemory };
+    [[nodiscard]] Reserve reserve_chunks_(std::size_t need) noexcept;
     void commit_(std::size_t payload, bool key) noexcept;
     void flush_() noexcept;
     [[nodiscard]] bool all_home_() const noexcept;

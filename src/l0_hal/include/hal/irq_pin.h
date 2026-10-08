@@ -24,7 +24,7 @@ constexpr bool irq_pins_well_formed(std::span<const IrqPin> pins, const ThreadMa
     if (pins.size() > kMaxIrqPins) return false;
     const auto hi = static_cast<unsigned>(max_cpu(m));
     const std::uint32_t known = hi >= 31u ? 0xFFFF'FFFFu : (2u << hi) - 1u;
-    const std::uint32_t rt = 1u << static_cast<unsigned>(seat_of(m, Seat::RT).cpu);
+    const std::uint32_t rt = 1u << static_cast<unsigned>(seat_of(m, SeatTag::RT).cpu);
     for (const IrqPin& p : pins) {
         if (p.action.empty()) return false;
         if (p.cpus.v == 0 || (p.cpus.v & ~known) != 0) return false;

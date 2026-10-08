@@ -7,10 +7,6 @@ namespace mister::reactor {
 
 Ex<NotifierSlot> CoreNotifiers::bind_doorbell(
     os::UioHandle uio, Cause klass, std::optional<hal::RegisterWindow<hal::CauseReg>> window) {
-
-    if (exec_ == nullptr) {
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    }
     std::size_t i = 0;
     while (i < kMaxLines && entries_[i].live)
         ++i;
@@ -27,7 +23,7 @@ Ex<NotifierSlot> CoreNotifiers::bind_doorbell(
         e.window.reset();
         return std::unexpected(n.error());
     }
-    auto s = exec_->add_notifier(std::move(*n));
+    auto s = exec_.add_notifier(std::move(*n));
     if (!s) {
         e.window.reset();
         return std::unexpected(s.error());
@@ -42,7 +38,7 @@ void CoreNotifiers::release() noexcept {
     for (Entry& e : entries_) {
         if (!e.live) continue;
 
-        if (exec_ != nullptr) (void)exec_->remove_notifier(e.slot);
+        (void)exec_.remove_notifier(e.slot);
         e.live = false;
         e.window.reset();
         --live_;

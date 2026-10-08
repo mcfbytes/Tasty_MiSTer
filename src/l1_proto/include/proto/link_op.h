@@ -17,6 +17,7 @@
 #include "proto/rotation_dir.h"
 #include "proto/save_ask.h"
 #include "proto/types.h"
+#include "proto/osd_target.h"
 #include "proto/volume_cmd.h"
 
 namespace mister::proto {
@@ -311,6 +312,7 @@ struct LinkOp {
     struct SetOsdVisible {
         static constexpr Kind kKind = Kind::SetOsdVisible;
         OsdShow show{};
+        OsdTarget target = OsdTarget::All;
     };
     struct PulseOption {
         static constexpr Kind kKind = Kind::PulseOption;

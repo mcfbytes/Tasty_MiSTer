@@ -98,7 +98,7 @@ void ReplayFeeder::refuse_(Refusal why, std::uint32_t detail) noexcept {
     last_detail_ = detail;
     ++refusals_;
     stage_ = Stage::Idle;
-    file_.reset();
+    release_movie_();
     rom_file_.reset();
     if (w_.diag != nullptr) {
         w_.diag->appendf(
@@ -182,7 +182,7 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
     }
     file_ = std::move(*f);
     file_size_ = size->v;
-    stream_cut_ = false;
+    runs_.clear();
     off_ = 0;
     line_ = Line{};
     facts_ = {};
@@ -206,7 +206,7 @@ bool ReplayFeeder::take_stop() noexcept {
         case Stage::Hashing:
         case Stage::Settling:
             stage_ = Stage::Idle;
-            file_.reset();
+            release_movie_();
             rom_file_.reset();
             break;
         case Stage::Arming:
@@ -220,52 +220,37 @@ bool ReplayFeeder::take_stop() noexcept {
     return true;
 }
 
-bool ReplayFeeder::read_lines_(bool scan) noexcept {
+void ReplayFeeder::release_movie_() noexcept {
+    file_.reset();
+    runs_ = {};
+}
+
+void ReplayFeeder::read_lines_() noexcept {
     std::array<std::byte, kReadChunk> buf;
     std::uint32_t spent = 0;
     while (spent < kTickBudget) {
-        if (stream_cut_ || off_ >= file_size_) {
+        if (off_ >= file_size_) {
             if (line_.len != 0 || line_.clipped) {
                 const Line l = line_;
                 line_ = Line{};
-                if (!on_line_(std::string_view(l.text.data(), l.len), l.clipped, l.start, scan))
-                    return false;
+                if (!on_line_(std::string_view(l.text.data(), l.len), l.clipped)) return;
             }
-            if (scan) {
-                finish_scan_();
-            } else if (flush_() && !end_pushed_) {
-                if (run_ && !push_run_()) return false;
-                run_.reset();
-                end_pushed_ = w_.ring->push(infra::make<ReplayMsg>(ReplayMsg::End{.frame = frames_},
-                                                                   ReplayMsg::Head{gen_}));
-            }
-            return false;
+            return finish_scan_();
         }
         const auto got = file_->read_at(off_, buf);
         if (!got || *got == 0) {
-            if (scan) {
-                if (!got && got.error().code == Errc::bad_format && codec_->archive() != nullptr)
-                    refuse_(Refusal::Movie, got.error().detail);
-                else
-                    refuse_(Refusal::MovieIo,
-                            got ? 0u : static_cast<std::uint32_t>(got.error().code));
-                return false;
-            }
-            file_size_ = off_;
-            continue;
+            if (!got && got.error().code == Errc::bad_format && codec_->archive() != nullptr)
+                return refuse_(Refusal::Movie, got.error().detail);
+            return refuse_(Refusal::MovieIo,
+                           got ? 0u : static_cast<std::uint32_t>(got.error().code));
         }
         spent += static_cast<std::uint32_t>(*got);
         for (std::size_t i = 0; i < *got; ++i) {
             const char c = static_cast<char>(buf[i]);
-            const std::uint64_t at = off_ + i;
-            if (line_.len == 0 && !line_.clipped) line_.start = at;
             if (c == '\n') {
                 const Line l = line_;
                 line_ = Line{};
-                if (!on_line_(std::string_view(l.text.data(), l.len), l.clipped, l.start, scan)) {
-                    off_ = at + 1;
-                    return false;
-                }
+                if (!on_line_(std::string_view(l.text.data(), l.len), l.clipped)) return;
                 continue;
             }
             if (line_.len < line_.text.size()) {
@@ -276,21 +261,19 @@ bool ReplayFeeder::read_lines_(bool scan) noexcept {
         }
         off_ += *got;
     }
-    return true;
 }
 
-bool ReplayFeeder::on_line_(std::string_view line, bool clipped, std::uint64_t start,
-                            bool scan) noexcept {
+bool ReplayFeeder::on_line_(std::string_view line, bool clipped) noexcept {
     if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
     if (line.empty() && !clipped) return true;
     if (in_log_ && (log_done_ || codec_->ends_log(line))) {
         log_done_ = true;
         return true;
     }
-    return scan ? scan_line_(line, clipped, start) : stream_line_(line);
+    return scan_line_(line, clipped);
 }
 
-bool ReplayFeeder::scan_line_(std::string_view line, bool clipped, std::uint64_t start) noexcept {
+bool ReplayFeeder::scan_line_(std::string_view line, bool clipped) noexcept {
     using CR = cores::IMovieCodec::Refusal;
     if (!in_log_) {
         if (!codec_->starts_log(line)) {
@@ -307,7 +290,6 @@ bool ReplayFeeder::scan_line_(std::string_view line, bool clipped, std::uint64_t
             return false;
         }
         in_log_ = true;
-        log_start_ = start;
     }
     if (clipped) {
         refuse_(Refusal::Movie, static_cast<std::uint32_t>(CR::BadLine));
@@ -327,7 +309,22 @@ bool ReplayFeeder::scan_line_(std::string_view line, bool clipped, std::uint64_t
         refuse_(Refusal::TooLong, frames_);
         return false;
     }
+    if (const std::uint32_t f = frames_ - 1; !stop_at_ || f < *stop_at_) note_frame_(f, *fr);
     return true;
+}
+
+void ReplayFeeder::note_frame_(std::uint32_t f, const cores::IMovieCodec::Frame& fr) noexcept {
+    std::array<std::uint32_t, kReplayPorts> m{};
+    for (std::size_t p = 0; p < kReplayPorts && p < fr.mask.size(); ++p)
+        m[p] = fr.mask[p];
+    if (!runs_.empty()) {
+        ReplayMsg::Input& run = runs_.back();
+        if (run.mask == m && run.last - run.first + 1 < kRunSplit) {
+            run.last = f;
+            return;
+        }
+    }
+    runs_.push_back(ReplayMsg::Input{.first = f, .last = f, .mask = m});
 }
 
 void ReplayFeeder::finish_scan_() noexcept {
@@ -337,6 +334,9 @@ void ReplayFeeder::finish_scan_() noexcept {
                        static_cast<std::uint32_t>(cores::IMovieCodec::Refusal::NotAMovie));
     }
     movie_frames_ = stop_at_ ? std::min(frames_, *stop_at_) : frames_;
+
+    file_.reset();
+    runs_.shrink_to_fit();
     const cores::IMovieCodec::Raster r = codec_->raster(facts_);
     if (offset_us_ == 0) offset_us_ = r.period_ns / 2000;
     if (!phase_fits(offset_us_, r.period_ns)) return refuse_(Refusal::Phase, offset_us_);
@@ -361,10 +361,10 @@ void ReplayFeeder::finish_scan_() noexcept {
     rom_end_ = facts_.has_digest ? src->span.offset + src->span.length : rom_off_;
     digest_ = cores::RomDigest{facts_.digest.kind};
     if (facts_.has_digest) digest_.update(src->prefix);
-    has_alt_ = facts_.has_digest && src->alt_prefix.has_value();
-    if (has_alt_) {
-        digest_alt_ = cores::RomDigest{facts_.digest.kind};
-        digest_alt_.update(*src->alt_prefix);
+    digest_alt_.reset();
+    if (facts_.has_digest && src->alt_prefix.has_value()) {
+        digest_alt_.emplace(facts_.digest.kind);
+        digest_alt_->update(*src->alt_prefix);
     }
     firmware_pass_ = false;
     stage_ = Stage::Hashing;
@@ -381,7 +381,7 @@ void ReplayFeeder::hash_rom_() noexcept {
         if (!got || *got == 0 || *got > want)
             return refuse_(firmware_pass_ ? Refusal::Firmware : Refusal::RomIo);
         digest_.update(chunk.first(*got));
-        if (has_alt_) digest_alt_.update(chunk.first(*got));
+        if (digest_alt_) digest_alt_->update(chunk.first(*got));
         rom_off_ += *got;
         spent += static_cast<std::uint32_t>(*got);
     }
@@ -396,8 +396,8 @@ void ReplayFeeder::finish_rom_() noexcept {
         refusal_path_.clear();
         return settle_();
     }
-    const bool alt = has_alt_ && codec_->rom_matches(digest_alt_.finish(), facts_);
-    has_alt_ = false;
+    const bool alt = digest_alt_ && codec_->rom_matches(digest_alt_->finish(), facts_);
+    digest_alt_.reset();
     if (!codec_->rom_matches(digest_.finish(), facts_) && !alt) return refuse_(Refusal::Checksum);
     const auto c = facts_.has_firmware ? codec_->companion(rom_.view(), facts_) : std::nullopt;
     if (facts_.has_firmware && !c) return refuse_(Refusal::Firmware);
@@ -587,14 +587,9 @@ std::optional<std::uint8_t> ReplayFeeder::rom_slot_() noexcept {
 void ReplayFeeder::arm_() noexcept {
     ++gen_;
     if (gen_ == 0) gen_ = 1;
-    run_.reset();
-    next_.reset();
+    next_run_ = 0;
     end_pushed_ = false;
     frames_ = 0;
-    off_ = log_start_;
-    line_ = Line{};
-    log_done_ = false;
-    stream_cut_ = false;
     stop_asked_ = false;
 
     publish_(ReplayOp::Play);
@@ -618,60 +613,21 @@ void ReplayFeeder::arm_() noexcept {
     since_ns_ = now_ns_();
 }
 
-bool ReplayFeeder::push_run_() noexcept {
-    const ReplayMsg::Input in{.first = run_->first, .last = run_->last, .mask = run_->mask};
-    return w_.ring->push(infra::make<ReplayMsg>(in, ReplayMsg::Head{gen_}));
-}
-
-bool ReplayFeeder::flush_() noexcept {
-    if (!next_) return true;
-    if (!push_run_()) return false;
-    run_ = next_;
-    next_.reset();
-    return true;
-}
-
-bool ReplayFeeder::stream_line_(std::string_view line) noexcept {
-
-    if (stop_at_ && frames_ >= *stop_at_) {
-        log_done_ = true;
-        stream_cut_ = true;
-        return true;
+void ReplayFeeder::stream_() noexcept {
+    while (next_run_ < runs_.size()) {
+        const ReplayMsg::Input& run = runs_[next_run_];
+        if (!w_.ring->push(infra::make<ReplayMsg>(run, ReplayMsg::Head{gen_}))) return;
+        frames_ = run.last + 1;
+        ++next_run_;
     }
-    const auto fr = codec_->frame(line, facts_);
-    if (!fr) {
-
-        file_size_ = 0;
-        return false;
-    }
-    const std::uint32_t f = frames_;
-    std::array<std::uint32_t, kReplayPorts> m{};
-    for (std::size_t p = 0; p < kReplayPorts && p < fr->mask.size(); ++p)
-        m[p] = fr->mask[p];
-    ++frames_;
-    if (!run_) {
-        run_ = Run{f, f, m};
-        return true;
-    }
-    if (run_->mask == m && run_->last - run_->first + 1 < kRunSplit) {
-        run_->last = f;
-        return true;
-    }
-    if (!push_run_()) {
-        next_ = Run{f, f, m};
-        return false;
-    }
-    run_ = Run{f, f, m};
-    return true;
+    end_pushed_ = w_.ring->push(
+        infra::make<ReplayMsg>(ReplayMsg::End{.frame = movie_frames_}, ReplayMsg::Head{gen_}));
 }
 
 void ReplayFeeder::tick() noexcept {
     TASTY_SEAT_BODY(ReplayFeeder);
     if (stage_ == Stage::Idle) return;
-    if (stage_ == Stage::Scanning) {
-        (void)read_lines_(true);
-        return;
-    }
+    if (stage_ == Stage::Scanning) return read_lines_();
     if (stage_ == Stage::Hashing) return hash_rom_();
     if (stage_ == Stage::Settling) return settle_();
     const auto s = sample_status_();
@@ -686,7 +642,7 @@ void ReplayFeeder::tick() noexcept {
         tick_arming_(s.value_or(ReplayStatus{}), fresh);
     if (stage_ == Stage::Idle || stage_ == Stage::Stopping) return;
     if (s) checkpoints_(*s);
-    if (flush_() && !end_pushed_) (void)read_lines_(false);
+    if (!end_pushed_) stream_();
 }
 
 void ReplayFeeder::tick_arming_(const ReplayStatus& s, bool fresh) noexcept {
@@ -771,7 +727,7 @@ void ReplayFeeder::finish_(const ReplayStatus& s) noexcept {
 
     if (w_.input != nullptr) w_.input->publish_edge_reset();
     stage_ = Stage::Idle;
-    file_.reset();
+    release_movie_();
 }
 
 }  // namespace mister::app

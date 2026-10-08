@@ -12,6 +12,7 @@
 
 #include "infra/error.h"
 #include "infra/log_lane.h"
+#include "infra/opt_ref.h"
 #include "infra/rt_stats.h"
 #include "infra/unique_fd.h"
 #include "infra/wake_flag.h"
@@ -43,7 +44,13 @@ class Executive {
 
 public:
     static constexpr std::size_t kMaxBorrowedFds = 16;
-    static Ex<Executive> create(xthread::RtStats& stats);
+
+    struct Wiring {
+        infra::OptRef<RoundTimer> round_timer{};
+        infra::OptRef<xthread::LogLane> log_lane{};
+    };
+    [[nodiscard]] static Ex<Executive> create(xthread::RtStats& stats, const Wiring& wiring);
+    [[nodiscard]] static Ex<Executive> create(xthread::RtStats& stats);
 
     Ex<void> bind(std::span<const LinkDecoderDecl> services, CoreState& state);
 
@@ -106,17 +113,15 @@ public:
         return slot < service_count_ ? row_retirements_[slot] : 0u;
     }
 
-    void set_log_lane(xthread::LogLane* lane);
-
-    void set_round_timer(RoundTimer* timer);
-
     Executive(Executive&&) noexcept;
     Executive(const Executive&) = delete;
     Executive& operator=(const Executive&) = delete;
     Executive& operator=(Executive&&) = delete;
 
 private:
-    explicit Executive(xthread::RtStats& stats) : stats_(&stats) {
+    Executive(xthread::RtStats& stats, const Wiring& wiring)
+        : stats_(&stats), log_lane_(wiring.log_lane ? &*wiring.log_lane : nullptr),
+          round_timer_(wiring.round_timer ? &*wiring.round_timer : nullptr) {
         for (auto& t : last_raise_)
             t = kNeverRaised;
         for (auto& t : line_raise_ms_)

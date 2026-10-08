@@ -55,19 +55,7 @@ bool FrameHasher::chunk_(const RawFrameSlot& s, bool real, SidecarMsg& m) noexce
     return true;
 }
 
-bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
-    SidecarMsg m{};
-    m.gen = s.gen;
-    if (s.kind != RawKind::Frame) {
-        if (!chunked_ && w_.video != nullptr) {
-            if (!(s.kind == RawKind::Open ? w_.video->open(s) : w_.video->close(s))) return false;
-        }
-        chunked_ = true;
-        m.kind = s.kind == RawKind::Open ? SidecarKind::Open : SidecarKind::Close;
-        m.path = s.path;
-        if (s.kind == RawKind::Open) prev_hash_ = 0;
-        return push_(m);
-    }
+bool FrameHasher::emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept {
     m.kind = SidecarKind::Row;
     m.width = s.width;
     m.height = s.height;
@@ -92,6 +80,24 @@ bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
             chunked_ = false;
         }
     }
+    return true;
+}
+
+bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
+    SidecarMsg m{};
+    m.gen = s.gen;
+    if (s.kind == RawKind::Close && !emit_runs_(s, m)) return false;
+    if (s.kind != RawKind::Frame) {
+        if (!chunked_ && w_.video != nullptr) {
+            if (!(s.kind == RawKind::Open ? w_.video->open(s) : w_.video->close(s))) return false;
+        }
+        chunked_ = true;
+        m.kind = s.kind == RawKind::Open ? SidecarKind::Open : SidecarKind::Close;
+        m.path = s.path;
+        if (s.kind == RawKind::Open) prev_hash_ = 0;
+        return push_(m);
+    }
+    if (!emit_runs_(s, m)) return false;
     const bool real = s.stamp.dup == DupReason::None && s.pixels != nullptr;
     if (real && !hashed_) {
         const std::int64_t t0 = w_.clock != nullptr ? w_.clock->now().count() : 0;

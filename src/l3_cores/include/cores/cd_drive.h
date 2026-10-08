@@ -96,7 +96,6 @@ private:
     svc::DiscCounters counters_{};
 
     svc::DiscReadService* discs_ = nullptr;
-    std::optional<svc::DiscReadService> own_discs_;
     svc::DiscMountState mount_seen_ = svc::DiscMountState::Idle;
 
     std::unique_ptr<CdEngine> engine_;

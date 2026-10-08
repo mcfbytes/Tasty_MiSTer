@@ -27,8 +27,6 @@ public:
     I2cBreaker(const I2cBreaker&) = delete;
     I2cBreaker& operator=(const I2cBreaker&) = delete;
 
-    void bind(II2cAdapter& inner) noexcept { inner_ = &inner; }
-
     [[nodiscard]] Ex<std::uint8_t> probe(unsigned bus, std::uint8_t addr) override;
     [[nodiscard]] Ex<void> open(unsigned bus, std::uint8_t addr) override;
     [[nodiscard]] Ex<std::uint8_t> read(std::uint8_t addr, std::uint8_t reg) override;

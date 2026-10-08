@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "infra/fixed_str.h"
+#include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -28,7 +31,15 @@ enum class RecVerdict : std::uint8_t {
     kCount,
 };
 
-[[nodiscard]] const char* rec_state_name(RecState s) noexcept;
+inline constexpr std::array<const char*, 5> kRecStateNames{"idle", "probing", "armed", "recording",
+                                                           "closing"};
+static_assert(kRecStateNames.size() == static_cast<std::size_t>(RecState::Closing) + 1);
+static_assert(infra::json_clean_names(kRecStateNames), "a name is rendered unescaped");
+
+[[nodiscard]] constexpr const char* rec_state_name(RecState s) noexcept {
+    const auto i = static_cast<std::size_t>(s);
+    return i < kRecStateNames.size() ? kRecStateNames[i] : "?";
+}
 [[nodiscard]] const char* rec_verdict_name(RecVerdict v) noexcept;
 
 [[nodiscard]] const char* rec_verdict_remedy(RecVerdict v) noexcept;
@@ -66,10 +77,42 @@ struct RecorderStatus {
     std::uint64_t last_core_frame = 0;
 };
 
+constexpr void to_json(infra::JsonOut& o, const RecorderStatus& s) noexcept {
+    o.str("state", rec_state_name(s.state), infra::json_longest(kRecStateNames));
+    o.field("gen", s.gen);
+    o.field("avi", s.avi);
+    o.field("stride_mib", s.stride_mib);
+    o.field("lowlat", s.lowlat);
+    o.field("anchored", s.anchored);
+    o.field("interlaced", s.interlaced);
+    o.field("w", s.width);
+    o.field("h", s.height);
+    o.field("rows", s.rows);
+    o.field("captured", s.captured);
+    o.field("missed", s.missed);
+    o.field("torn", s.torn);
+    o.field("backpressure", s.backpressure);
+    o.field("resize", s.resize);
+    o.field("gaps", s.gap_estimated);
+    o.field("drift", s.stamp_drift);
+    o.field("rebased", s.rebased);
+    o.field("bad_header", s.bad_header);
+    o.field("woven", s.woven);
+    o.field("unmatched", s.unmatched);
+    o.field("copy_us", s.copy_us_last);
+    o.field("copy_us_max", s.copy_us_max);
+    o.field("arena_kib", s.arena_kib);
+    o.field("depth", s.depth);
+    o.field("first", s.first_core_frame);
+    o.field("last", s.last_core_frame);
+}
+
 using RecorderStatusCell = xthread::Telemetry<RecorderStatus, SeatTag::Capture>;
 
 using RecStatusText = FixedStr<640, StrFit::Clip>;
 
+static_assert(infra::json_worst_len<RecorderStatus>() <= RecStatusText::kCapacity,
+              "the status text never clips");
 [[nodiscard]] RecStatusText format_recorder_status(const RecorderStatus& s) noexcept;
 
 }  // namespace mister::app

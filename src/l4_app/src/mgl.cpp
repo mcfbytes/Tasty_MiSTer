@@ -67,24 +67,29 @@ bool parse_ul(std::string_view s, std::uint32_t& out) {
 
 }  // namespace
 
-Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
-    items_ = {};
-    remember_ = {};
-    stem_ = RememberedStem{};
+void MglPlayer::reset() noexcept {
+
+    remember_.fill(std::nullopt);
+    stem_ = {};
     remembered_ = 0;
     remember_failures_ = 0;
     scope_ = {};
-    file_home_.clear();
-    image_home_.clear();
+    items_ = {};
+    file_home_ = {};
+    image_home_ = {};
     count_ = 0;
     current_ = 0;
-    armed_ = false;
     publishes_ = 0;
     drops_ = 0;
-    last_tag_ = kUncaused;
-    tags_ = {};
-    timer_ = os::Deadline::immediate();
+    last_tag_ = {};
+    tags_.fill({});
+    armed_ = false;
     state_ = MglState::Done;
+    timer_ = os::Deadline::immediate();
+}
+
+Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
+    reset();
 
     if (!core_supports_mgl) {
 
@@ -231,21 +236,17 @@ Ex<void> MglPlayer::publish_load_() {
     if (!fits) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), current_});
     }
-    if (asks_ == nullptr) {
-        ++drops_;
-        return {};
-    }
     const CorrelationTag tag =
         ld->slot == MglItem::Slot::File
-            ? asks_->push(UiRequest::LoadFileByDigit{
+            ? asks_.push(UiRequest::LoadFileByDigit{
                   .digit = proto::FileSlotDigit{ld->index}, .scope = scope_, .path = path})
-            : asks_->push(UiRequest::MountImage{
+            : asks_.push(UiRequest::MountImage{
                   .index = proto::IoIndex{ld->index}, .scope = scope_, .path = path});
     record_publish(tag);
     tags_[current_] = tag;
 
-    if (const auto& at = remember_[current_]; tag && at && names_ != nullptr) {
-        if (names_->save_path(stem_, at->slot, at->ioctl_index, path.view()))
+    if (const auto& at = remember_[current_]; tag && at) {
+        if (names_.save_path(stem_, at->slot, at->ioctl_index, path.view()))
             ++remembered_;
         else
             ++remember_failures_;
@@ -317,7 +318,7 @@ Ex<void> MglPlayer::advance(const os::IClock& clock) {
         case MglState::ResetAssert: {
 
             const proto::LinkOp::PulseOption op{.bit = proto::StatusBit{0}};
-            record_wire_publish(link_tx_ != nullptr && link_tx_->push(op));
+            record_wire_publish(link_tx_.push(op));
 
             const std::uint8_t hold_s = hold_of_(current_);
             const auto hold_ms = (hold_s != 0) ? std::chrono::milliseconds{hold_s * 1000}

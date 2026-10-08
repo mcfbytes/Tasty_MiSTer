@@ -173,7 +173,7 @@ constexpr std::uint32_t kSearchCeiling = 1u << 20;
 
 }  // namespace
 
-std::uint32_t PllSolver::encode_div(std::uint32_t div) {
+std::uint32_t pll::encode_div(std::uint32_t div) {
 
     if (div & 1u) {
         return 0x20000u | (((div / 2u) + 1u) << 8) | (div / 2u);
@@ -181,7 +181,7 @@ std::uint32_t PllSolver::encode_div(std::uint32_t div) {
     return ((div / 2u) << 8) | (div / 2u);
 }
 
-std::optional<PllParams> PllSolver::find(double f_out_mhz) {
+std::optional<PllParams> pll::find(double f_out_mhz) {
 
     if (!(f_out_mhz > 0.0)) return std::nullopt;
 
@@ -216,7 +216,7 @@ std::optional<PllParams> PllSolver::find(double f_out_mhz) {
     }
 }
 
-PllParams PllSolver::approximate(double f_out_mhz) {
+PllParams pll::approximate(double f_out_mhz) {
 
     PllParams p{};
     p.approximated = true;
@@ -246,7 +246,7 @@ PllParams PllSolver::approximate(double f_out_mhz) {
     return p;
 }
 
-PllBlock PllSolver::block(const PllParams& p) {
+PllBlock pll::block(const PllParams& p) {
 
     PllBlock b{};
     b[0] = 4;
@@ -264,13 +264,13 @@ PllBlock PllSolver::block(const PllParams& p) {
     return b;
 }
 
-std::optional<PllParams> PllSolver::solve(double f_out_mhz) {
+std::optional<PllParams> pll::solve(double f_out_mhz) {
     if (!(f_out_mhz > 0.0)) return std::nullopt;
     if (auto p = find(f_out_mhz)) return p;
     return approximate(f_out_mhz);
 }
 
-double PllSolver::fpix_mhz(double f_out_mhz) {
+double pll::fpix_mhz(double f_out_mhz) {
 
     if (!(f_out_mhz > 0.0)) return 0.0;
 
@@ -886,7 +886,11 @@ Ex<void> CecStateMachine::poll_deadline() {
     return {};
 }
 
-Ex<VideoService> VideoService::create() { return VideoService(); }
+VideoService::VideoService(Wiring w) noexcept
+    : sink_(w.sink ? &*w.sink : nullptr), sampler_(w.sampler ? &*w.sampler : nullptr) {}
+
+VideoService VideoService::create(Wiring w) { return VideoService(w); }
+VideoService VideoService::create() { return VideoService(Wiring{}); }
 
 Ex<VideoService::ParsedMode> VideoService::parse_mode(std::string_view spec) const {
     if (spec.empty()) {
@@ -1061,11 +1065,11 @@ Ex<void> VideoService::apply(const Modeline& m) {
     if (sink_ == nullptr) return err(Errc::negotiation, ERR_SITE());
 
     if (m.fpix_mhz > 0.0) {
-        auto p = PllSolver::solve(m.fpix_mhz);
+        auto p = pll::solve(m.fpix_mhz);
         if (!p) {
             return err(Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(m.fpix_mhz));
         }
-        pll_ = PllSolver::block(*p);
+        pll_ = pll::block(*p);
     }
 
     Modeline::WireOptions opt = wire_opt_;

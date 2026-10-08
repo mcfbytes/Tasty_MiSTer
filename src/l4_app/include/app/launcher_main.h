@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <optional>
+#include <utility>
 
 #include "app/launcher_host.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
+#include "infra/park_fds.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
@@ -17,14 +19,14 @@ class LauncherMain final : public xthread::SeatMain<LauncherMain> {
     TASTY_SEAT_RESIDENT(Launcher);
 
 public:
-    LauncherMain(LauncherHost& host, xthread::WakeFlag& wake) noexcept
-        : host_(host), wake_(wake), pause_(wake) {}
+    LauncherMain(LauncherHost& host, xthread::ParkFds fds,
+                 infra::OptRef<xthread::WakeFlag> asker = {}) noexcept
+        : host_(host), wake_(fds.wake()), stop_(std::move(fds).take_stop()),
+          pause_(wake_, asker ? &*asker : nullptr), park_(wake_, stop_, host_.poll_fd()) {}
     LauncherMain(const LauncherMain&) = delete;
     LauncherMain& operator=(const LauncherMain&) = delete;
     LauncherMain(LauncherMain&&) = delete;
     LauncherMain& operator=(LauncherMain&&) = delete;
-
-    [[nodiscard]] Ex<void> open() noexcept;
 
     void start() noexcept;
     void stop() noexcept { stop_.request(); }
@@ -33,7 +35,7 @@ public:
     [[nodiscard]] bool idle() const noexcept { return host_.idle(); }
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
     [[nodiscard]] int park_ms() const noexcept { return host_.park_ms(); }
-    [[nodiscard]] xthread::SeatPark& park() noexcept { return *park_; }
+    [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
     [[nodiscard]] bool paused() noexcept { return pause_.observe(*this); }
 
     [[nodiscard]] bool pause_pending() const noexcept {
@@ -56,9 +58,9 @@ public:
 private:
     LauncherHost& host_;
     xthread::WakeFlag& wake_;
-    xthread::WakeFlag stop_{};
+    xthread::WakeFlag stop_;
     xthread::PauseLatch pause_;
-    std::optional<xthread::SeatPark> park_{};
+    xthread::SeatPark park_;
     xthread::PauseGen taken_ = 0;
 };
 

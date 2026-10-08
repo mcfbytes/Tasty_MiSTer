@@ -18,13 +18,21 @@ namespace mister::cores {
 namespace {
 
 constexpr auto kCoreTable = std::to_array<CoreFactory>({
-    {CoreKind::Menu, "MENU", &kMenuProfile, &make_generic, nullptr, nullptr, nullptr},
-    {CoreKind::Psx, "PSX", &manifests::kPsx, &manifests::make_psx, &manifests::make_psx_ladder,
-     nullptr, nullptr},
-    {CoreKind::Snes, "SNES", &manifests::kSnes, &manifests::make_snes, nullptr, nullptr,
-     &manifests::make_snes_companion},
-    {CoreKind::MegaDrive, "MegaDrive", &manifests::kMegaDrive, &manifests::make_megadrive, nullptr,
-     nullptr, nullptr},
+    {.kind = CoreKind::Menu, .name = "MENU", .profile = &kMenuProfile, .make = &make_generic},
+    {.kind = CoreKind::Psx,
+     .name = "PSX",
+     .profile = &manifests::kPsx,
+     .make = &manifests::make_psx,
+     .make_ladder = &manifests::make_psx_ladder},
+    {.kind = CoreKind::Snes,
+     .name = "SNES",
+     .profile = &manifests::kSnes,
+     .make = &manifests::make_snes,
+     .make_companion = &manifests::make_snes_companion},
+    {.kind = CoreKind::MegaDrive,
+     .name = "MegaDrive",
+     .profile = &manifests::kMegaDrive,
+     .make = &manifests::make_megadrive},
 });
 
 consteval bool table_names_agree() {
@@ -224,6 +232,13 @@ std::span<const CoreFactory> core_table() { return kCoreTable; }
         return std::unexpected(Error{Errc::core_load, ERR_SITE(), 1});
     }
     return find_core(conf_str_name);
+}
+
+const ManifestDocRole* manifest_doc_role() {
+    for (const CoreFactory& f : kCoreTable) {
+        if (f.manifest_doc != nullptr) return f.manifest_doc;
+    }
+    return nullptr;
 }
 
 const CoreProfile& profile_for(std::string_view conf_str_name) {

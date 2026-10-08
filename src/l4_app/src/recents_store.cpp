@@ -53,7 +53,7 @@ std::string RecentsStore::join(std::string_view dir, std::string_view name) {
     return p;
 }
 
-Ex<std::vector<std::byte>> RecentsStore::read_raw(std::string_view core, ListId id) const {
+Ex<std::vector<std::byte>> RecentsStore::read_raw(std::string_view core, ListId id) {
     std::vector<std::byte> buf(kFileSize, std::byte{0});
     auto f = vfs_->open("config/" + file_name(core, id), svc::OpenMode::ReadWhole);
     if (!f) return std::unexpected(f.error());
@@ -67,7 +67,7 @@ Ex<std::vector<std::byte>> RecentsStore::read_raw(std::string_view core, ListId 
     return buf;
 }
 
-std::vector<RecentsStore::Entry> RecentsStore::load(std::string_view core, ListId id) const {
+std::vector<RecentsStore::Entry> RecentsStore::load(std::string_view core, ListId id) {
     TASTY_SEAT_BODY(RecentsStore);
     std::vector<Entry> out;
     if (!enabled_) return out;

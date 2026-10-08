@@ -7,6 +7,12 @@ add_library(mister_fw_assembly STATIC
   diag_sampler.cpp
   ui_main.cpp
   census.cpp
+  report.cpp
+  ladder_scope.cpp
+  process_main.cpp
+  device_block.cpp
+  replay_block.cpp
+  recorder_block.cpp
 )
 target_include_directories(mister_fw_assembly PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mister_fw_assembly
@@ -21,9 +27,6 @@ add_library(mister_fw_tasty STATIC
   tasty_session.cpp
   tasty_sink.cpp
   tasty_splash.cpp
-  hub.cpp
-  process_main.cpp
-  ladder_scope.cpp
 )
 target_include_directories(mister_fw_tasty PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(mister_fw_tasty

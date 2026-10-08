@@ -3,26 +3,26 @@ add_library(mister_services STATIC
   src/adv7513_bus.cpp
   src/audio_service.cpp
   src/chd_prefetch.cpp
-  src/prefetch_main.cpp
   src/config.cpp
   src/disc_engine.cpp
   src/disc_geometry.cpp
   src/disc_read_service.cpp
   src/disc_store.cpp
-  src/frame_shapers.cpp
   src/disk_format_row.cpp
   src/disk_image.cpp
   src/file_slot_backend.cpp
   src/filter_store.cpp
+  src/frame_shapers.cpp
   src/gzip_inflate.cpp
   src/input_emitter.cpp
   src/input_rules.cpp
   src/input_service.cpp
   src/io_main.cpp
+  src/prefetch_main.cpp
   src/raw_disk_image.cpp
+  src/read_bounded.cpp
   src/storage_service.cpp
   src/toc_frame.cpp
-  src/read_bounded.cpp
   src/vfs.cpp
   src/video_service.cpp
   src/xml_scan.cpp
@@ -142,6 +142,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/toc_frame.h
   svc/track.h
   svc/types.h
+  svc/unbound_disc.h
   svc/vfs.h
   svc/video_sample.h
   svc/video_service.h
@@ -157,19 +158,18 @@ if(TASTY_BUILD_TESTS)
       set(tasty_src "tests/l2_integration.cpp")
       set(tasty_test "tasty.l2_integration")
     endif()
-    add_executable(tasty_svc_${tasty_mod}_unit ${tasty_src})
-    target_link_libraries(tasty_svc_${tasty_mod}_unit PRIVATE mister_services tasty_test_options)
 
-    target_include_directories(tasty_svc_${tasty_mod}_unit PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
-    target_compile_definitions(tasty_svc_${tasty_mod}_unit PRIVATE
-      TASTY_CORPORA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../harness/corpora"
+    tasty_unit_test(tasty_svc_${tasty_mod}_unit
+      NAME ${tasty_test}
+      SOURCES ${tasty_src}
+      INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/../tests
+      DEFINES TASTY_CORPORA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../harness/corpora"
 
-      TASTY_CAPTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../harness/capture/captures"
+        TASTY_CAPTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../harness/capture/captures"
 
-      TASTY_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/goldens")
-    add_test(NAME ${tasty_test} COMMAND tasty_svc_${tasty_mod}_unit)
-    set_tests_properties(${tasty_test} PROPERTIES TIMEOUT 60)
+        TASTY_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/goldens"
+      LIBS mister_services tasty_test_options
+      TIMEOUT 60)
   endforeach()
 
   target_link_libraries(tasty_svc_gzip_inflate_unit PRIVATE ZLIB::ZLIB)

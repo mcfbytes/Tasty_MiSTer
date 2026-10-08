@@ -109,7 +109,6 @@ private:
     svc::DiscReadService* discs_ = nullptr;
     svc::DiscCounters counters_{};
     svc::DiscReadService::CountCell::Reader counts_{};
-    std::optional<svc::DiscReadService> own_discs_;
     svc::DiscMountState mount_seen_ = svc::DiscMountState::Idle;
 
     std::int64_t scan_lba_ = 0;

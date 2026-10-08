@@ -11,19 +11,20 @@ struct PllParams;
 
 using PllBlock = std::array<std::uint32_t, 12>;
 
-class PllSolver {
-public:
-    static std::uint32_t encode_div(std::uint32_t div);
+namespace pll {
 
-    static std::optional<PllParams> find(double f_out_mhz);
+std::uint32_t encode_div(std::uint32_t div);
 
-    static PllParams approximate(double f_out_mhz);
+std::optional<PllParams> find(double f_out_mhz);
 
-    static PllBlock block(const PllParams& p);
+PllParams approximate(double f_out_mhz);
 
-    static std::optional<PllParams> solve(double f_out_mhz);
+PllBlock block(const PllParams& p);
 
-    static double fpix_mhz(double f_out_mhz);
-};
+std::optional<PllParams> solve(double f_out_mhz);
+
+double fpix_mhz(double f_out_mhz);
+
+}  // namespace pll
 
 }  // namespace mister::svc

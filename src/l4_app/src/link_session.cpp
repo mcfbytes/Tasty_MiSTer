@@ -21,6 +21,8 @@
 #include "app/link_event_facts.h"
 #include "app/link_op_dispatch.h"
 #include "app/link_op_facts.h"
+#include "app/cheat_apply.h"
+#include "app/encoder_roles.h"
 #include "proto/image_bracket.h"
 #include "proto/osd_surface.h"
 #include "hal/boot_handoff.h"
@@ -44,8 +46,6 @@
 #include "app/session_seats.h"
 #include "app/video_wire.h"
 #include "cores/cd_core.h"
-#include "cores/cheat_records.h"
-#include "cores/cheat_sink.h"
 #include "cores/config_slots.h"
 #include "cores/dip_switches.h"
 #include "cores/option_rows.h"
@@ -230,62 +230,64 @@ Ex<void> StdoutRouter::route(std::uint8_t debug) {
     return {};
 }
 
+namespace {
+
+LinkBinder::Wiring binder_wiring(const SupervisorParts& parts) noexcept {
+    return LinkBinder::Wiring{
+        .exec = parts.exec,
+        .state = parts.core_state,
+        .log_lane = parts.log_lane,
+        .doorbells = parts.doorbells,
+        .fpga_mem = parts.fpga_mem,
+        .lw_window = parts.lw_window,
+        .doorbell_nodes = parts.doorbell_nodes,
+    };
+}
+
+}  // namespace
+
 void CoreDeleter::operator()(cores::Core* p) const noexcept { delete p; }
 
 LinkSession::LinkSession(hal::ISpiTransport& link, hal::ICoreSignals& signals,
                          hal::ISpiSampleSource& samples, [[maybe_unused]] hal::PhysRegion aperture,
                          EventQueue& events, const SupervisorParts& parts) noexcept
-    : link_(&link), signals_(&fenced_signals_), fenced_signals_(signals), machine_(events),
-      router_(parts.router), out_{router_},
-      sampler_(samples, router_, static_cast<const proto::ISessionLive&>(*this)),
-      video_(parts.video), input_(parts.input), osd_(parts.osd),
-      quiesce_(parts.main_wake != nullptr ? QuiesceChannel{*parts.main_wake} : QuiesceChannel{}),
-      session_(link, fenced_signals_), binder_(link),
+    : link_(link), binder_(link, binder_wiring(parts)),
+      fenced_signals_(signals, binder_.fio_queue()), handoff_(parts.boot_handoff),
+      machine_(events, parts.log_lane), vfs_(parts.vfs), unbound_discs_(parts.unbound_discs),
+      link_inbox_(parts.link_inbox), ui_inbox_(parts.ui_inbox), input_inbox_(parts.input_inbox),
+      link_rx_(parts.link_rx), router_(parts.router), out_{router_},
+      sampler_(samples, router_, static_cast<const proto::ISessionLive&>(*this), parts.pin_levels),
+      config_cell_(parts.config_cell), video_(parts.video), input_(parts.input), osd_(parts.osd),
+      ops_(parts.board_ops), quiesce_(parts.main_wake), session_(link, fenced_signals_),
+      uart_(parts.uart_handoffs),
       identify_decoder_(fenced_signals_, session_, router_, bindings_.generation()),
       status_decoder_(link, session_, status_cell_, static_cast<const proto::ISessionLive&>(*this)),
-      conf_str_decoder_(link, session_, router_, bindings_.generation()), clock_(parts.clock),
+      conf_str_decoder_(link, session_, router_, bindings_.generation()), log_lane_(parts.log_lane),
+      ladder_cell_(parts.ladder_cell), cheats_(parts.cheats), clock_(parts.clock),
+      slots_(proto::BlockSlots::Wiring{
+          .clock = infra::OptRef<const os::IClock>{clock_},
+          .channel = parts.storage_channel != nullptr
+                         ? infra::OptRef<proto::IStorageChannel>{*parts.storage_channel}
+                         : infra::OptRef<proto::IStorageChannel>{}}),
       block_decoder_(link, router_, slots_, static_cast<const proto::ISessionLive&>(*this)),
       osd_mask_decoder_(link, router_, static_cast<const proto::IOsdFocus&>(*this)),
-      streams_(parts.io_wake != nullptr ? FileStreamService{*parts.io_wake} : FileStreamService{}),
-      encoder_(link, fenced_signals_, session_, osd_) {
+      streams_(parts.streams),
+      encoder_(link, fenced_signals_, session_, osd_, slots_, video_, parts.input_emitter) {
 
-    proto::IResetFence& fence = binder_.fio_queue();
-    fenced_signals_.attach_fence(fence);
-    session_.status().fence_with(&fence);
-    video_.attach_reset_fence(fence);
+    session_.status().fence_with(&binder_.fio_queue());
 
     config_store_[0] = std::make_unique<svc::ConfigSnapshot>();
     config_store_[1] = std::make_unique<svc::ConfigSnapshot>();
-    if (auto a = svc::AudioService::create()) {
-        audio_ = std::make_unique<svc::AudioService>(std::move(*a));
 
-        video_.attach_audio(*audio_);
+    if (vfs_ != nullptr) {
+        save_src_ = std::make_unique<SaveImageSource>(*vfs_);
+        slots_.attach_source(*save_src_);
     }
-    encoder_.attach_slots(slots_);
-    encoder_.attach_save_flush(*this);
-    encoder_.attach_video(video_);
-    encoder_.attach_cheats(*this);
-    encoder_.attach_core_options(*this);
-    slots_.attach_clock(clock());
-
-    if (parts.vfs != nullptr) attach_storage(*parts.vfs);
     if (parts.stdout_routing) enable_stdout_routing();
-    set_doorbell_policy(parts.doorbells);
-    set_fpga_aperture(parts.fpga_mem);
-    set_lw_window(parts.lw_window);
-    binder_.set_doorbell_nodes(parts.doorbell_nodes);
-    if (parts.exec != nullptr && parts.core_state != nullptr) {
-        attach_executive(*parts.exec, *parts.core_state);
-    }
-    link_inbox_ = &parts.link_inbox;
-    link_rx_ = &parts.link_rx;
 
-    owed_mount_.bind(mount_status_cell_, link_rx_);
+    owed_mount_.bind(mount_status_cell_, &link_rx_);
     for (OwedSaveBind& owed : owed_save_)
-        owed.bind(save_extent_cell_, link_rx_);
-    config_cell_ = &parts.config_cell;
-    ui_inbox_ = &parts.ui_inbox;
-    input_inbox_ = &parts.input_inbox;
+        owed.bind(save_extent_cell_, &link_rx_);
 }
 
 LinkSession::~LinkSession() = default;
@@ -373,7 +375,7 @@ LinkSession::RoundEntry LinkSession::poll(bool tick) {
 
             if (!video_.prelude_running()) {
 
-                (void)video_.update_but_sw(*link_, but, osd_.has_focus());
+                (void)video_.update_but_sw(link_, but, osd_.has_focus(), &binder_.fio_queue());
 
                 if (!osd_rearmed_) {
 
@@ -406,8 +408,8 @@ void LinkSession::tick(RoundEntry entry) {
 
     answer_reboot_();
 
-    if (link_ != nullptr && live_at_entry && session_live() && core_ready_) {
-        video_.on_rt_round(*link_, clock().now().count());
+    if (live_at_entry && session_live() && core_ready_) {
+        video_.on_rt_round(link_, clock().now().count(), &binder_.fio_queue());
     }
 
     if (const cores::ICdDiagnostics* cd =
@@ -527,7 +529,17 @@ void LinkSession::answer_save_ask_(const proto::LinkOp::SaveAsk& ask) noexcept {
 void LinkSession::deliver(const proto::LinkOp& op, LinkTxChannel* inbox,
                           bool windows_closed) noexcept {
 
-    const LinkOpCtx ctx{.inbox = inbox, .windows_closed = windows_closed, .live = session_live_()};
+    const EncoderRoles roles{
+        .saves = this,
+        .cheats = &cheats_,
+        .cheat_call = {.core = current_.get(),
+                       .fio_held = ftx_open_.has_value() || stage_open_.has_value()},
+        .acts = this};
+    const LinkOpCtx ctx{.inbox = inbox,
+                        .windows_closed = windows_closed,
+                        .live = session_live_(),
+                        .fence = &binder_.fio_queue(),
+                        .roles = &roles};
     const auto kind = infra::kind_of(op);
     ILinkEncoder::Outcome r = ILinkEncoder::Outcome::Dropped;
     if (admitted(window_for(kind), ctx)) {
@@ -554,14 +566,13 @@ void LinkSession::deliver(const proto::LinkOp& op, LinkTxChannel* inbox,
 }
 
 void LinkSession::take_bound_config_() noexcept {
-    if (config_cell_ == nullptr) return;
-    if (config_reader_.take_if_changed(*config_cell_, spare_config_())) {
+    if (config_reader_.take_if_changed(config_cell_, spare_config_())) {
         if (auto r = apply(live_config_(), spare_config_()); r) {
             promote_spare_();
         } else {
             push(Event::SessionAdvisory{.why = r.error().code});
         }
-    } else if (config_reader_.seen() != 0 && config_cell_->generation() == config_reader_.seen()) {
+    } else if (config_reader_.seen() != 0 && config_cell_.generation() == config_reader_.seen()) {
         if (auto r = apply(live_config_(), live_config_()); !r) {
             push(Event::SessionAdvisory{.why = r.error().code});
         }
@@ -615,15 +626,12 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::DropCore& a, const Li
 
 ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::AnnounceMount& a,
                                       const LinkOpCtx&) noexcept {
-    if (link_ == nullptr) {
-        return ILinkEncoder::Outcome::Dropped;
-    }
     const proto::SlotIndex si = a.slot;
     if (si.v >= proto::kBlockSlots) {
         return ILinkEncoder::Outcome::Dropped;
     }
 
-    if (auto r = slots_.notify_mount(*link_, a.loaded); !r) {
+    if (auto r = slots_.notify_mount(link_, a.loaded); !r) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -634,9 +642,6 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::BindSlot& a,
     if (a.bind == proto::LinkOp::SlotBind::Attach || a.bind == proto::LinkOp::SlotBind::Detach) {
         return apply_save_bind_(a, ctx.inbox);
     }
-    if (link_ == nullptr) {
-        return ILinkEncoder::Outcome::Dropped;
-    }
     const proto::SlotIndex si = a.slot;
     if (si.v >= proto::kBlockSlots) {
         return ILinkEncoder::Outcome::Dropped;
@@ -644,8 +649,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::BindSlot& a,
 
     if (current_ != nullptr) {
         apply_bind_slot_roles_(proto::SlotIndex{current_->profile().staging.disc_slot.v},
-                               current_->block_source(), nullptr);
-        apply_geometry_hook_(current_->block_geometry());
+                               current_slot_roles_());
     }
 
     const proto::LinkOp::SlotBind kind = a.bind;
@@ -682,8 +686,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::FileTx& a,
     using Phase = proto::LinkOp::FileTxPhase;
 
     const bool window = a.phase == Phase::WindowOpen || a.phase == Phase::WindowClose;
-    if (link_ == nullptr || current_ == nullptr || ctx.inbox == nullptr ||
-        machine_.state() != SessionState::Running ||
+    if (current_ == nullptr || ctx.inbox == nullptr || machine_.state() != SessionState::Running ||
         ((window ? current_->window_load() : current_->stream_load()) == nullptr &&
          a.phase != Phase::Whole)) {
         if (a.phase != Phase::Whole) ++ftx_piece_drops_;
@@ -727,8 +730,7 @@ void LinkSession::announce_open_save_() noexcept {
     if (!open_save_) return;
     const OpenSave s = *open_save_;
     open_save_.reset();
-    if (link_ == nullptr ||
-        !apply_bind_slot_(proto::SlotIndex{0}, proto::LinkOp::SlotBind::Mount, s.size, s.path)) {
+    if (!apply_bind_slot_(proto::SlotIndex{0}, proto::LinkOp::SlotBind::Mount, s.size, s.path)) {
         ++open_save_refusals_;
         return;
     }
@@ -821,7 +823,7 @@ ILinkEncoder::Outcome LinkSession::stage_copy_(const proto::LinkOp::StagePayload
     for (std::size_t i = 0; i < n; ++i)
         w[i] = static_cast<std::uint16_t>(bytes[2u * i] | (bytes[2u * i + 1u] << 8));
     (void)binder_.fio_queue().flush();
-    auto ds = proto::DownloadSession::begin(*link_, a.dest);
+    auto ds = proto::DownloadSession::begin(link_, a.dest);
     if (!ds) return ILinkEncoder::Outcome::Dropped;
     if (auto r = ds->post(std::span(w).first(a.copy_word)); !r) {
         return ILinkEncoder::Outcome::Dropped;
@@ -885,7 +887,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::LoadFacts& a,
 
 ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::MailboxWrite& a,
                                       const LinkOpCtx&) noexcept {
-    if (link_ == nullptr || current_ == nullptr || machine_.state() != SessionState::Running) {
+    if (current_ == nullptr || machine_.state() != SessionState::Running) {
         ++mailbox_write_drops_;
         return ILinkEncoder::Outcome::Dropped;
     }
@@ -1074,7 +1076,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::RebootNow& a,
                                       const LinkOpCtx&) noexcept {
     if (a.quiesce) {
 
-        signals_->set_core_reset(true);
+        fenced_signals_.set_core_reset(true);
         rebooting_ = true;
         reboot_answered_ = false;
         reboot_seq_ = a.seq;
@@ -1150,7 +1152,8 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::StageCheats& a,
     if (current_ == nullptr) return ILinkEncoder::Outcome::Dropped;
     const FileBytes::Slot* const file = ctx.inbox == nullptr ? nullptr : ctx.inbox->file(a.path);
     if (file == nullptr) return ILinkEncoder::Outcome::Dropped;
-    reset_cheats(TxDigest::Kind::Mount, file->path.view(), 0, a.same_game);
+    cheats_.content_loaded(current_.get(), TxDigest::Kind::Mount, file->path.view(), 0,
+                           a.same_game);
     return ILinkEncoder::Outcome::Encoded;
 }
 
@@ -1158,11 +1161,11 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::SetWideIndex& a,
                                       const LinkOpCtx&) noexcept {
     cores::IStagingCore* cd = current_ != nullptr ? current_->staging_core() : nullptr;
 
-    if (link_ == nullptr || cd == nullptr) {
+    if (cd == nullptr) {
         return ILinkEncoder::Outcome::Dropped;
     }
     (void)binder_.fio_queue().flush();
-    if (auto r = proto::DownloadSession::set_index(*link_, a.dest); !r) {
+    if (auto r = proto::DownloadSession::set_index(link_, a.dest); !r) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -1178,7 +1181,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::StagePayload& a,
     std::optional<RtRelaxScope> relaxed;
     if (a.copy_word == 0 || a.phase != Phase::Whole) relaxed.emplace(ops_);
 
-    if (link_ == nullptr || current_ == nullptr || (cd == nullptr && proto::sets_region(a))) {
+    if (current_ == nullptr || (cd == nullptr && proto::sets_region(a))) {
         return drop_stage_();
     }
     const FileBytes::Slot* file = nullptr;
@@ -1233,7 +1236,7 @@ ILinkEncoder::Outcome LinkSession::drop_stage_() noexcept {
 }
 
 bool LinkSession::stage_fits_round_(std::size_t bytes) const noexcept {
-    const std::size_t words = link_->width() == hal::Width::Word ? (bytes + 1u) / 2u : bytes;
+    const std::size_t words = link_.width() == hal::Width::Word ? (bytes + 1u) / 2u : bytes;
     return words <= proto::tightest_load_budget_words();
 }
 
@@ -1278,8 +1281,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::StageDiscPayload& a,
 ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::SetVolume& a,
                                       const LinkOpCtx&) noexcept {
 
-    if (audio_ == nullptr) return ILinkEncoder::Outcome::Dropped;
-    audio_->set_volume(a.cmd, a.arg);
+    video_.audio().set_volume(a.cmd, a.arg);
     return ILinkEncoder::Outcome::Encoded;
 }
 
@@ -1344,7 +1346,7 @@ void LinkSession::settle_writes() noexcept {
 
 template <class A>
 void LinkSession::log_edge(const A& alt) noexcept {
-    if (log_lane_ != nullptr) (void)log_lane_->push(alt, log_now_ns());
+    (void)log_lane_.push(alt, log_now_ns());
 }
 
 Ex<std::optional<UiRequest::LoadCore>> LinkSession::boot(std::span<const char* const> argv) {
@@ -1385,7 +1387,7 @@ Ex<std::optional<UiRequest::LoadCore>> LinkSession::boot(std::span<const char* c
         sw.path = req.path;
         sw.xml = req.kind;
 
-        signals_->set_core_reset(true);
+        fenced_signals_.set_core_reset(true);
         start_.arm_at_boot();
         return sw;
     }
@@ -1420,15 +1422,15 @@ Ex<void> LinkSession::reset_core(bool cold) {
     }
     auto& st = session_.status();
     st.set_bit(proto::StatusBit{0}, true);
-    if (auto r = st.flush(*link_); !r) return r;
+    if (auto r = st.flush(link_); !r) return r;
     st.set_bit(proto::StatusBit{0}, false);
-    return st.flush(*link_);
+    return st.flush(link_);
 }
 
 Ex<void> LinkSession::board_reboot(bool cold) {
 
     ::sync();
-    signals_->set_core_reset(true);
+    fenced_signals_.set_core_reset(true);
     sleep_ms(500);
 
     if (handoff_ != nullptr) (void)handoff_->write_reboot_flag(!cold);
@@ -1486,9 +1488,9 @@ void LinkSession::refuse_start_(const Error& e) noexcept {
 
 Ex<bool> LinkSession::adopt_programmed_core_() {
 
-    signals_->clear_gpo();
-    signals_->set_core_reset(false);
-    session_ = proto::CoreSession(*link_, *signals_, proto::MemSizeCookie{fabric_.cookie()},
+    fenced_signals_.clear_gpo();
+    fenced_signals_.set_core_reset(false);
+    session_ = proto::CoreSession(link_, fenced_signals_, proto::MemSizeCookie{fabric_.cookie()},
                                   &binder_.fio_queue());
     return true;
 }
@@ -1507,14 +1509,14 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
     osd_.on_fabric_reprogrammed();
     machine_.transition(SessionState::Running);
     const bool front_end = cores::profile_for(conf_str_name()).is_front_end;
-    cores::CoreInitContext init_ctx{*link_, session_, *this, current_.get()};
+    cores::CoreInitContext init_ctx{link_, session_, *this, current_.get()};
     (void)run_core_init(init_ctx, current_ != nullptr ? current_->profile().init_additions
                                                       : std::span<const cores::CoreInitStep>{});
     publish_status_word();
     publish_dip_table();
     publish_config_slots();
     publish_option_table();
-    publish_cheat_catalog();
+    cheats_.session_up(current_.get());
     surface_manifest_error();
     osd_mask_decoder_.forget(front_end);
     osd_rearmed_ = false;
@@ -1575,8 +1577,8 @@ Ex<void> LinkSession::shutdown() {
 
 void LinkSession::release_bus() noexcept {
 
-    link_->deselect();
-    signals_->set_core_reset(false);
+    link_.deselect();
+    fenced_signals_.set_core_reset(false);
 }
 
 Ex<void> LinkSession::apply(const svc::ConfigSnapshot& previous, const svc::ConfigSnapshot& next) {
@@ -1610,14 +1612,6 @@ void LinkSession::arm_request(const LoadRequest& req) {
 
     load_start_ns_ = log_now_ns();
     pending_.arm(req);
-}
-
-Ex<void> LinkSession::validate_pending() const {
-    if (pending_.request().path.empty()) return {};
-    if (vfs_ == nullptr) {
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 1});
-    }
-    return pending_.validate(*vfs_);
 }
 
 Ex<void> LinkSession::rebind_census(std::span<const reactor::LinkDecoderDecl> rows) {
@@ -1889,11 +1883,11 @@ Ex<void> LinkSession::apply_bind_slot_(proto::SlotIndex slot, proto::LinkOp::Slo
                                        proto::FileSize size, proto::PathId path_id) {
     switch (kind) {
         case proto::LinkOp::SlotBind::Mount:
-            return slots_.mount(*link_, slot, size, path_id);
+            return slots_.mount(link_, slot, size, path_id);
         case proto::LinkOp::SlotBind::Unmount:
-            return slots_.unmount(*link_, slot);
+            return slots_.unmount(link_, slot);
         case proto::LinkOp::SlotBind::MountCd:
-            return slots_.mount_cd(*link_, slot, size);
+            return slots_.mount_cd(link_, slot, size);
         case proto::LinkOp::SlotBind::Attach:
         case proto::LinkOp::SlotBind::Detach:
             break;
@@ -1902,20 +1896,24 @@ Ex<void> LinkSession::apply_bind_slot_(proto::SlotIndex slot, proto::LinkOp::Slo
         Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(infra::ordinal(kind))});
 }
 
-void LinkSession::apply_bind_slot_roles_(proto::SlotIndex slot,
-                                         proto::IResidentImageSource* resident,
-                                         proto::IImageSource* descriptor) noexcept {
-    slots_.attach_slot_source(slot, resident);
-    slots_.attach_slot_descriptor(slot, descriptor);
+proto::SlotRoles LinkSession::current_slot_roles_() noexcept {
+    proto::IResidentImageSource* const resident = current_->block_source();
+    proto::IBlockGeometry* const geometry = current_->block_geometry();
+    return proto::SlotRoles{
+        .resident = resident != nullptr ? infra::OptRef<proto::IResidentImageSource>{*resident}
+                                        : infra::OptRef<proto::IResidentImageSource>{},
+        .geometry = geometry != nullptr ? infra::OptRef<proto::IBlockGeometry>{*geometry}
+                                        : infra::OptRef<proto::IBlockGeometry>{}};
 }
 
-void LinkSession::apply_geometry_hook_(proto::IBlockGeometry* hook) noexcept {
-    slots_.set_geometry_hook(hook);
+void LinkSession::apply_bind_slot_roles_(proto::SlotIndex slot,
+                                         const proto::SlotRoles& roles) noexcept {
+    slots_.bind_roles(slot, roles);
 }
 
 void LinkSession::mount_save_channel(cores::ISaveChannel& channel) {
     TASTY_SEAT_BODY(LinkSession);
-    if (link_ == nullptr || vfs_ == nullptr) return;
+    if (vfs_ == nullptr) return;
     const auto count = channel.claim_mount_plan();
     if (!count) return;
     const std::uint16_t previous = channel_slots_;
@@ -1957,11 +1955,13 @@ void LinkSession::mount_save_channel(cores::ISaveChannel& channel) {
                 channel.descriptor().note_attached(si, false, proto::FileSize{});
             }
         }
-        apply_bind_slot_roles_(si, nullptr, &channel.descriptor());
+        apply_bind_slot_roles_(
+            si, proto::SlotRoles{.descriptor =
+                                     infra::OptRef<proto::IImageSource>{channel.descriptor()}});
         if (auto r = apply_bind_slot_(si, proto::LinkOp::SlotBind::Mount, mounts[i].size,
                                       proto::PathId{0});
             !r) {
-            apply_bind_slot_roles_(si, nullptr, nullptr);
+            apply_bind_slot_roles_(si, proto::SlotRoles{});
             last_error_ = r.error();
             continue;
         }
@@ -1971,14 +1971,10 @@ void LinkSession::mount_save_channel(cores::ISaveChannel& channel) {
 }
 
 void LinkSession::unmount_save_channel() {
-    if (link_ == nullptr) {
-        channel_slots_ = 0;
-        return;
-    }
     for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
         if ((channel_slots_ & (1u << i)) == 0u) continue;
         const proto::SlotIndex si{i};
-        apply_bind_slot_roles_(si, nullptr, nullptr);
+        apply_bind_slot_roles_(si, proto::SlotRoles{});
         if (auto r = apply_bind_slot_(si, proto::LinkOp::SlotBind::Unmount, proto::FileSize{},
                                       proto::PathId{});
             r)
@@ -2026,7 +2022,8 @@ void LinkSession::after_file_tx_(std::uint8_t slot, std::string_view path) {
     ftx_index_ = slot;
     ftx_bytes_ = current_->last_tx_bytes();
     if (bindings_.declares_cheats()) {
-        reset_cheats(TxDigest::Kind::Load, path, current_->last_tx_crc(), false);
+        cheats_.content_loaded(current_.get(), TxDigest::Kind::Load, path, current_->last_tx_crc(),
+                               false);
     }
     push(Event::SdActivity{.slot = slot});
     if (cores::ISaveChannel* ch = current_->save_channel()) {
@@ -2121,7 +2118,7 @@ Ex<void> LinkSession::detach() {
     (void)slots_.install_completions();
     settle_retire_(RetireEnd::Poll);
 
-    session_ = proto::CoreSession(*link_, *signals_, &binder_.fio_queue());
+    session_ = proto::CoreSession(link_, fenced_signals_, &binder_.fio_queue());
     return {};
 }
 
@@ -2257,7 +2254,7 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
 
     out.last_error_detail = last_error_.detail;
 
-    const LadderCell lad = ladder_cell_ == nullptr ? LadderCell{} : ladder_cell_->sample().value;
+    const LadderCell lad = ladder_cell_.sample().value;
     const cores::BootLadder::Report& rep = lad.report;
     out.ladder_live = lad.live ? 1u : 0u;
     out.ladder_pc = lad.pc;
@@ -2317,12 +2314,13 @@ void LinkSession::publish_config_slots() noexcept {
     config_slot_cell_.publish(config_slot_scratch_);
 }
 
-void LinkSession::grant_manifest_(cores::Core& c, std::string_view path) {
-    if (!path.empty()) c.set_manifest_path(path);
-    const FileBytes::Slot* const doc = link_inbox_->file(FileBytes::kManifestId);
+cores::CoreManifest LinkSession::granted_manifest_(std::string_view path) const {
+    cores::CoreManifest m{.path = path};
+    const FileBytes::Slot* const doc = link_inbox_.file(FileBytes::kManifestId);
     if (doc != nullptr && !doc->bytes.empty()) {
-        c.set_manifest_text({reinterpret_cast<const char*>(doc->bytes.data()), doc->bytes.size()});
+        m.text = {reinterpret_cast<const char*>(doc->bytes.data()), doc->bytes.size()};
     }
+    return m;
 }
 
 void LinkSession::publish_option_table() noexcept {
@@ -2379,52 +2377,6 @@ void LinkSession::publish_dip_table() noexcept {
         }
     }
     dip_cell_.publish(dip_scratch_);
-}
-
-void LinkSession::publish_cheat_catalog() noexcept {
-    cheat_catalog_scratch_ = CheatCatalog{};
-    cores::ICheatRecords* rec = current_ != nullptr ? current_->cheat_records() : nullptr;
-    if (rec != nullptr) {
-        const cores::CheatGeometry g = rec->cheat_geometry();
-        cheat_catalog_scratch_.unit = g.unit;
-        cheat_catalog_scratch_.max_active = g.max_active;
-        const std::size_t have = rec->cheat_count();
-        for (std::size_t i = 0; i < have; ++i) {
-            const auto bytes = rec->cheat_bytes(i);
-            const std::size_t used = cheat_catalog_scratch_.used;
-            if (cheat_catalog_scratch_.count >= CheatCatalog::kMaxRows ||
-                bytes.size() > CheatCatalog::kArenaBytes - used) {
-                ++cheat_catalog_scratch_.dropped;
-                continue;
-            }
-            CheatCatalog::Row& row = cheat_catalog_scratch_.rows[cheat_catalog_scratch_.count];
-            copy_cell_text(row.name, rec->cheat_name(i));
-            row.offset = static_cast<std::uint16_t>(used);
-            row.len = static_cast<std::uint16_t>(bytes.size());
-            std::memcpy(cheat_catalog_scratch_.data + used, bytes.data(), bytes.size());
-            cheat_catalog_scratch_.used = static_cast<std::uint16_t>(used + bytes.size());
-            ++cheat_catalog_scratch_.count;
-        }
-    }
-    cheat_catalog_cell_.publish(cheat_catalog_scratch_);
-}
-
-void LinkSession::reset_cheats(TxDigest::Kind kind, std::string_view path, std::uint32_t crc,
-                               bool same_game) noexcept {
-    if (current_ != nullptr) {
-        if (cores::ICheatSink* sink = current_->cheat_sink(); sink != nullptr) {
-            if (auto r = sink->apply({}, 16); !r) {
-                ++cheat_refusals_;
-            }
-        }
-    }
-    cheat_blob_reader_.forget();
-    tx_digest_scratch_ = TxDigest{};
-    tx_digest_scratch_.kind = kind;
-    tx_digest_scratch_.crc = crc;
-    tx_digest_scratch_.same_game = same_game;
-    (void)tx_digest_scratch_.path.assign(path);
-    tx_digest_cell_.publish(tx_digest_scratch_);
 }
 
 void LinkSession::surface_manifest_error() {
@@ -2507,13 +2459,13 @@ Ex<std::size_t> LinkSession::flush_save_upload() {
 
     cores::ISaveUpload* up = current_->save_upload();
     if (up == nullptr) return std::size_t{0};
-    if (link_ == nullptr || vfs_ == nullptr) {
+    if (vfs_ == nullptr) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     }
     if (up->save_file_name().empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-    auto req = proto::read_save_request(*link_);
+    auto req = proto::read_save_request(link_);
     if (!req) return std::unexpected(req.error());
     if (!req->requested()) return std::size_t{0};
     return write_save_upload_(*up);
@@ -2528,40 +2480,6 @@ bool LinkSession::save_upload_counted() noexcept {
         return false;
     }
     if (*s != 0) ++save_uploads_;
-    return true;
-}
-
-bool LinkSession::apply_cheats_counted() noexcept {
-    TASTY_SEAT_BODY(LinkSession);
-    if (current_ == nullptr || cheat_blob_cell_ == nullptr) {
-        ++cheat_refusals_;
-        return false;
-    }
-
-    if (ftx_open_ || stage_open_) {
-        ++cheat_refusals_;
-        return false;
-    }
-    if (!cheat_blob_reader_.take_if_changed(*cheat_blob_cell_, cheat_blob_scratch_)) {
-
-        ++cheat_refusals_;
-        return true;
-    }
-    cores::ICheatSink* sink = current_->cheat_sink();
-    if (sink == nullptr) {
-        ++cheat_refusals_;
-        return false;
-    }
-    const std::size_t n = cheat_blob_scratch_.len <= sizeof(cheat_blob_scratch_.bytes)
-                              ? cheat_blob_scratch_.len
-                              : sizeof(cheat_blob_scratch_.bytes);
-    if (auto r = sink->apply(std::span<const std::uint8_t>(cheat_blob_scratch_.bytes, n),
-                             cheat_blob_scratch_.unit);
-        !r) {
-        ++cheat_refusals_;
-        return false;
-    }
-    ++cheat_applies_;
     return true;
 }
 
@@ -2632,20 +2550,19 @@ Ex<void> LinkSession::make_core_(std::string_view manifest, bool hint_manifest) 
                 } else {
                     const os::IClock& hc = clock();
 
-                    const cores::HostServices host{*vfs_,
-                                                   *link_,
-                                                   hc,
-                                                   prefetch_,
-                                                   &binder_.grant_bulk(),
-                                                   binder_.grant_windows(*(*f)->profile),
-                                                   discs_,
-                                                   this,
-                                                   &binder_.fio_queue(),
-                                                   mailbox_};
-                    auto made = (*f)->make(*(*f)->profile, host);
-                    current_ = CorePtr(made.release());
+                    const cores::HostServices services{*vfs_,
+                                                       link_,
+                                                       hc,
+                                                       prefetch_,
+                                                       &binder_.grant_bulk(),
+                                                       binder_.grant_windows(*(*f)->profile),
+                                                       &granted_discs_(),
+                                                       this,
+                                                       &binder_.fio_queue(),
+                                                       mailbox_};
 
-                    grant_manifest_(*current_, manifest);
+                    const cores::CoreGrant host{services, granted_manifest_(manifest)};
+                    current_ = (*f)->make(*(*f)->profile, host);
                     if (auto r = current_->init(session_); !r) {
                         current_.reset();
                         binder_.release_windows();
@@ -2655,19 +2572,18 @@ Ex<void> LinkSession::make_core_(std::string_view manifest, bool hint_manifest) 
             } else if (vfs_ != nullptr && current_ == nullptr) {
 
                 const os::IClock& hc = clock();
-                const cores::HostServices host{*vfs_,
-                                               *link_,
-                                               hc,
-                                               prefetch_,
-                                               &binder_.grant_bulk(),
-                                               binder_.grant_windows(cores::kGenericProfile),
-                                               discs_,
-                                               this,
-                                               &binder_.fio_queue(),
-                                               mailbox_};
-                auto made = cores::make_generic(cores::kGenericProfile, host);
-                current_ = CorePtr(made.release());
-                grant_manifest_(*current_, manifest);
+                const cores::HostServices services{*vfs_,
+                                                   link_,
+                                                   hc,
+                                                   prefetch_,
+                                                   &binder_.grant_bulk(),
+                                                   binder_.grant_windows(cores::kGenericProfile),
+                                                   &granted_discs_(),
+                                                   this,
+                                                   &binder_.fio_queue(),
+                                                   mailbox_};
+                const cores::CoreGrant host{services, granted_manifest_(manifest)};
+                current_ = cores::make_generic(cores::kGenericProfile, host);
                 if (auto r = current_->init(session_); !r) {
                     current_.reset();
                     binder_.release_windows();
@@ -2698,8 +2614,7 @@ Ex<void> LinkSession::raise_session_() {
 
     if (current_ != nullptr) {
         apply_bind_slot_roles_(proto::SlotIndex{current_->profile().staging.disc_slot.v},
-                               current_->block_source(), nullptr);
-        apply_geometry_hook_(current_->block_geometry());
+                               current_slot_roles_());
     }
 
     if (current_ != nullptr) {
@@ -2740,7 +2655,7 @@ Ex<void> LinkSession::raise_session_() {
         }
         bindings_.spend_uart_files();
 
-        (void)uart_.load_for_core(*link_, eff, uart_capable, uart_token, midi_token, &files);
+        (void)uart_.load_for_core(link_, eff, uart_capable, uart_token, midi_token, &files);
     }
     return {};
 }
@@ -2749,7 +2664,7 @@ void LinkSession::handoff_to_alternate_executable(const char* exe,
                                                   std::span<const char* const> argv) {
 
     ::sync();
-    signals_->set_core_reset(true);
+    fenced_signals_.set_core_reset(true);
     const char* path = (argv.size() > 1 && argv[1] != nullptr) ? argv[1] : "";
     const char* xml = (argv.size() > 2) ? argv[2] : nullptr;
     if (xml != nullptr && xml[0] == '\0') xml = nullptr;
@@ -2773,7 +2688,7 @@ void LinkSession::handoff_to_alternate_executable(const char* exe,
 Ex<void> LinkSession::re_exec(const LoadRequest& req) {
 
     ::sync();
-    signals_->set_core_reset(true);
+    fenced_signals_.set_core_reset(true);
 
     const std::string app = self_exe_path();
     if (app.empty()) {

@@ -60,7 +60,6 @@ Ex<proto::SessionParams> MegaDriveCore::stream_opening(IoIndex) {
     bytes_sent_ = 0;
     tx_crc_ = 0;
     proto::SessionParams params{};
-    params.direction = proto::TransferDirection::Download;
     params.ext = ext_.view();
     return params;
 }

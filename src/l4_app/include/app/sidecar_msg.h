@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "app/frame_stamp.h"
@@ -24,6 +25,7 @@ struct SidecarMsg {
     RecPath path{};
 };
 
-using SidecarRing = xthread::SpscRing<SidecarMsg, 128>;
+inline constexpr std::size_t kSidecarRingRows = 512;
+using SidecarRing = xthread::SpscRing<SidecarMsg, kSidecarRingRows>;
 
 }  // namespace mister::app

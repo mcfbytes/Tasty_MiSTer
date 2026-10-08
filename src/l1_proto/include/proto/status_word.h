@@ -5,10 +5,12 @@
 #include <cstdint>
 
 #include "proto/types.h"
+#include "infra/seat.h"
 
 namespace mister::proto {
 
 struct StatusWord {
+    TASTY_SEAT_EXEMPT(const_shared);
     static constexpr unsigned kBits = 128;
     static constexpr unsigned kWords = 8;
     std::array<std::uint16_t, kWords> words{};

@@ -24,12 +24,10 @@
 #include "svc/geometry_gate.h"
 #include "svc/scaling_policy.h"
 #include "svc/scaling_words.h"
+#include "svc/audio_service.h"
 #include "svc/video_service.h"
 #include "infra/seat.h"
-
-namespace mister::svc {
-class AudioService;
-}
+#include "infra/seq_cell.h"
 
 namespace mister::app {
 
@@ -37,6 +35,13 @@ struct VideoGeoLatch {
     svc::VideoSample sample{};
     std::uint32_t core_seq = 0;
 };
+
+struct BlockPayload {
+    std::uint16_t words[svc::kVideoWireWords]{};
+    std::uint8_t opcode = 0;
+    std::uint8_t count = 0;
+};
+static_assert(std::is_trivially_copyable_v<BlockPayload>);
 
 class VideoWire : public svc::VideoService::IVideoWireSink,
                   public svc::VideoService::IResolutionSampler,
@@ -56,41 +61,30 @@ public:
                   "rides, not to any other ring that happens to be the same size.");
     static_assert(kSlots <= 256, "LinkOp::slot is a uint8_t");
 
-    struct Block {
+    using Block = xthread::SeqCell<BlockPayload>;
 
-        struct Payload {
-            std::uint16_t words[kWords]{};
-            std::uint8_t opcode = 0;
-            std::uint8_t count = 0;
-        };
-        static_assert(std::is_trivially_copyable_v<Payload>);
-        static constexpr std::size_t kBodyWord = sizeof(std::uint32_t);
-        static constexpr std::size_t kBodyFull = sizeof(Payload) / kBodyWord;
-        static constexpr std::size_t kBodyTail = sizeof(Payload) % kBodyWord;
-
-        std::atomic<std::uint32_t> gen{0};
-
-        std::atomic<std::uint32_t> body[kBodyFull + (kBodyTail != 0 ? 1 : 0)]{};
+    struct Wiring {
+        LinkTxChannel& link_tx;
     };
 
-    VideoWire() = default;
+    explicit VideoWire(Wiring w) noexcept : link_tx_(w.link_tx) {}
     VideoWire(const VideoWire&) = delete;
     VideoWire& operator=(const VideoWire&) = delete;
 
     Ex<void> publish(std::uint8_t opcode, std::span<const std::uint16_t> words) override;
 
-    void attach_link_tx(LinkTxChannel& tx) noexcept { link_tx_ = &tx; }
-
     Ex<void> stage(std::uint8_t opcode, std::span<const std::uint16_t> words);
 
     std::uint32_t staged_generation() const noexcept { return gen_; }
 
-    Ex<void> emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint32_t gen);
+    Ex<void> emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint32_t gen,
+                  proto::IResetFence* fence = nullptr);
 
     static constexpr std::int64_t kGeoFirstPeriodMs = 1000;
     static constexpr std::int64_t kGeoPeriodMs = 500;
 
-    void on_rt_round(hal::ISpiTransport& link, std::int64_t now_ns);
+    void on_rt_round(hal::ISpiTransport& link, std::int64_t now_ns,
+                     proto::IResetFence* fence = nullptr);
 
     Ex<svc::VideoSample> sample(bool force) override;
 
@@ -129,9 +123,7 @@ public:
 
     void arm_prelude() noexcept;
 
-    void attach_audio(svc::AudioService& a) noexcept { audio_ = &a; }
-
-    void attach_reset_fence(proto::IResetFence& f) noexcept { fence_ = &f; }
+    [[nodiscard]] svc::AudioService& audio() noexcept { return audio_; }
 
     void set_key_map(proto::ConfSwitches conf) noexcept {
         tail_but_sw_ =
@@ -141,7 +133,8 @@ public:
 
     static constexpr std::uint16_t kButton1 = 0x0001;
     static constexpr std::uint16_t kButton2 = 0x0002;
-    bool update_but_sw(hal::ISpiTransport& link, std::uint16_t buttons, bool osd_visible) noexcept;
+    bool update_but_sw(hal::ISpiTransport& link, std::uint16_t buttons, bool osd_visible,
+                       proto::IResetFence* fence = nullptr) noexcept;
     std::uint32_t but_sw_writes() const noexcept { return but_sw_writes_; }
     std::uint32_t but_sw_errors() const noexcept { return but_sw_errors_; }
 
@@ -234,7 +227,7 @@ public:
     Stats stats() const noexcept;
 
 private:
-    bool step_prelude(hal::ISpiTransport& link);
+    bool step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence);
 
     bool consume_filters();
     bool service_filter_publish(hal::ISpiTransport& link);
@@ -243,11 +236,11 @@ private:
     void step_filter_stream(hal::ISpiTransport& link);
     std::size_t select_slot(const svc::VideoSample& s) const;
 
-    LinkTxChannel* link_tx_ = nullptr;
+    LinkTxChannel& link_tx_;
     std::uint32_t gen_ = 0;
     Block table_[kSlots]{};
 
-    xthread::Telemetry<VideoGeoLatch> geo_cell_{};
+    xthread::Telemetry<VideoGeoLatch, SeatTag::RT> geo_cell_{};
     std::uint32_t geo_core_seq_ = 0;
     std::uint32_t sampled_seq_ = 0;
 
@@ -262,7 +255,7 @@ private:
 
     svc::GeometryGate geo_gate_{};
 
-    xthread::Telemetry<svc::FilterSet> flt_cell_{};
+    xthread::Telemetry<svc::FilterSet, SeatTag::Ui> flt_cell_{};
 
     svc::FilterSet flt_local_{};
     bool flt_have_ = false;
@@ -297,12 +290,12 @@ private:
     bool pre_replaying_ = false;
 
     bool pre_in_block_ = false;
-    svc::AudioService* audio_ = nullptr;
-    proto::IResetFence* fence_ = nullptr;
+    svc::AudioService audio_{svc::AudioService::create()};
     std::uint16_t tail_but_sw_ = 0;
     std::uint16_t but_sw_sent_ = 0;
 
-    [[nodiscard]] Ex<void> emit_but_sw_(hal::ISpiTransport& link, std::uint16_t word) noexcept;
+    [[nodiscard]] Ex<void> emit_but_sw_(hal::ISpiTransport& link, std::uint16_t word,
+                                        proto::IResetFence* fence) noexcept;
 
     std::uint16_t but_sw_shadow_ = 0;
     bool but_sw_seen_ = false;

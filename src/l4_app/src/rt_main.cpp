@@ -55,8 +55,8 @@ void RtMain::serve() noexcept {
     exec_.service_round();
 
     const bool drained = drain_fio_();
-    const bool wrote = !drained && exec_.osd_budget_open() && osd_ != nullptr &&
-                       !switch_window_() && osd_->flush_one();
+    const bool wrote =
+        !drained && exec_.osd_budget_open() && osd_ && !switch_window_() && osd_->flush_one();
     exec_.end_round(wrote);
 }
 
@@ -64,10 +64,10 @@ void RtMain::settle() noexcept { exec_.settle(); }
 
 bool RtMain::drain_fio_() noexcept {
 
-    std::uint32_t spent = replay_ != nullptr ? replay_->take_round_words() : 0u;
-    if (frames_ != nullptr) spent += frames_->take_round_words();
-    if (scanout_ != nullptr) spent += scanout_->take_round_words();
-    if (session_ == nullptr) return false;
+    std::uint32_t spent = replay_ ? replay_->take_round_words() : 0u;
+    if (frames_) spent += frames_->take_round_words();
+    if (scanout_) spent += scanout_->take_round_words();
+    if (!session_) return false;
     proto::SpiFioQueue& q = session_->binder().fio_queue();
     if (session_->park().engaged()) {
         q.abandon();
@@ -80,9 +80,9 @@ void RtMain::round(bool tick) {
     TASTY_SEAT_BODY(RtMain);
     note_switch_();
 
-    if (input_ != nullptr) input_->apply_edge_reset();
+    if (input_) input_->apply_edge_reset();
 
-    if (session_ != nullptr) {
+    if (session_) {
         const LinkSession::RoundEntry entry = session_->poll(tick);
         drain_ops();
         session_->tick(entry);
@@ -92,7 +92,7 @@ void RtMain::round(bool tick) {
         }
     }
 
-    if (session_ != nullptr) session_->reap_storage();
+    if (session_) session_->reap_storage();
 
     replay_step_();
 
@@ -100,16 +100,16 @@ void RtMain::round(bool tick) {
 
     scanout_step_();
 
-    if (input_ != nullptr) input_->on_rt_round(tick, core_edge_seq_(), session_live_());
+    if (input_) input_->on_rt_round(tick, core_edge_seq_(), session_live_());
 
-    if (tick && session_ != nullptr) session_->poll_osd_mask();
+    if (tick && session_) session_->poll_osd_mask();
 
-    if (tick && session_ != nullptr) session_->publish_doorbell_stats();
+    if (tick && session_) session_->publish_doorbell_stats();
     note_switch_();
 }
 
 void RtMain::drain_ops() noexcept {
-    if (session_ == nullptr) return;
+    if (!session_) return;
 
     bool closed = session_->park().engaged();
     unsigned n = 0;
@@ -117,7 +117,7 @@ void RtMain::drain_ops() noexcept {
     closed = closed || session_->park().engaged();
     n += drain_(session_->ui_inbox(), n, kLinkOpBudget, closed);
 
-    if (wire_ != nullptr) wire_->consume_kick();
+    if (wire_) wire_->consume_kick();
     (void)drain_(session_->input_inbox(), 0, kInputOpBudget, closed);
 }
 
@@ -130,16 +130,16 @@ unsigned RtMain::drain_(LinkTxChannel& inbox, unsigned already, unsigned budget,
         if (!op) break;
         ++got;
 
-        if (pads && replay_ != nullptr && replay_->suppresses(*op)) continue;
+        if (pads && replay_ && replay_->suppresses(*op)) continue;
         const std::uint32_t ends = session_->downloads_closed();
         const std::uint32_t resets = session_->resets_pulsed();
         session_->deliver(*op, &inbox, windows_closed);
 
-        if (replay_ != nullptr && session_->downloads_closed() != ends) {
+        if (replay_ && session_->downloads_closed() != ends) {
             replay_->note_download_end(session_->last_download_index());
         }
 
-        if (replay_ != nullptr && session_->resets_pulsed() != resets) replay_->note_core_reset();
+        if (replay_ && session_->resets_pulsed() != resets) replay_->note_core_reset();
         const auto ftx = infra::as<proto::LinkOp::FileTx>(*op);
 
         if (ftx && ftx->phase != proto::LinkOp::FileTxPhase::Whole) break;
@@ -150,30 +150,29 @@ unsigned RtMain::drain_(LinkTxChannel& inbox, unsigned already, unsigned budget,
 }
 
 void RtMain::scanout_step_() noexcept {
-    if (scanout_ == nullptr) return;
+    if (!scanout_) return;
 
     using Wire = ScanoutRelay::Wire;
     if (!scanout_->collect()) {
         scanout_->step(Wire::Held);
         return;
     }
-    if (session_ != nullptr && session_->session_starting())
+    if (session_ && session_->session_starting())
         scanout_->step(Wire::CoreStarting);
-    else if (wire_held_() || (session_ != nullptr &&
-                              (session_->park().engaged() || !session_->ui_inbox().drained())))
+    else if (wire_held_() ||
+             (session_ && (session_->park().engaged() || !session_->ui_inbox().drained())))
         scanout_->step(Wire::Held);
     else
         scanout_->step(Wire::Ready);
 }
 
 bool RtMain::replay_ready_() const noexcept {
-    return session_live_() && (session_ == nullptr || !session_->park().engaged());
+    return session_live_() && (!session_ || !session_->park().engaged());
 }
 
 void RtMain::replay_step_() noexcept {
-    if (replay_ == nullptr) return;
-    const proto::LateAnswers late =
-        session_ != nullptr ? session_->take_late_answers() : proto::LateAnswers{};
+    if (!replay_) return;
+    const proto::LateAnswers late = session_ ? session_->take_late_answers() : proto::LateAnswers{};
     replay_->tick(replay_ready_(), core_edge_seq_(), late,
                   static_cast<std::uint32_t>(replay_ring_->size()));
     for (unsigned n = 0; n < ReplayGate::kReplayBudget && replay_->wants_record(); ++n) {
@@ -185,15 +184,14 @@ void RtMain::replay_step_() noexcept {
 }
 
 void RtMain::frames_step_() noexcept {
-    if (frames_ == nullptr) return;
-    const std::int32_t movie =
-        replay_ != nullptr && replay_->armed() ? replay_->status().movie_frame : -1;
+    if (!frames_) return;
+    const std::int32_t movie = replay_ && replay_->armed() ? replay_->status().movie_frame : -1;
     frames_->settle(replay_ready_(), core_edge_seq_(), movie);
 }
 
 Ex<void> RtMain::pump_boot() {
 
-    if (session_ == nullptr || exec_.run_entered()) {
+    if (!session_ || exec_.run_entered()) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0u});
     }
     LinkSession& s = *session_;
@@ -221,22 +219,21 @@ Ex<void> RtMain::pump_boot() {
 }
 
 bool RtMain::switch_window_() const noexcept {
-    return session_ != nullptr && (session_->session_starting() || session_->park().engaged());
+    return session_ && (session_->session_starting() || session_->park().engaged());
 }
 
-bool RtMain::wire_held_() const noexcept { return session_ != nullptr && session_->wire_held(); }
+bool RtMain::wire_held_() const noexcept { return session_ && session_->wire_held(); }
 
 bool RtMain::session_live_() const noexcept {
-    return session_ == nullptr || session_->liveness().session_live();
+    return !session_ || session_->liveness().session_live();
 }
 
 std::uint32_t RtMain::core_edge_seq_() const noexcept {
-    return session_ != nullptr ? session_->core_edge_seq() : 0u;
+    return session_ ? session_->core_edge_seq() : 0u;
 }
 
 void RtMain::note_switch_() const noexcept {
-    if (timer_ != nullptr && switch_window_())
-        timer_->note_lifecycle(reactor::RoundLifecycle::Switch);
+    if (timer_ && switch_window_()) timer_->note_lifecycle(reactor::RoundLifecycle::Switch);
 }
 
 }  // namespace mister::app

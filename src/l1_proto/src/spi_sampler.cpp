@@ -27,7 +27,7 @@ void SpiSampler::service(bool hold_buttons) noexcept {
         }
     }
     if (first || g.ready != last_.ready || g.buttons != last_.buttons || g.hdmi != last_.hdmi) {
-        levels_.publish(decoded(g));
+        levels_->publish(decoded(g));
     }
     last_ = g;
     seen_ = true;

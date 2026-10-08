@@ -9,7 +9,7 @@
 
 namespace mister::cores {
 
-namespace kick_detail {
+namespace detail {
 
 template <const CoreProfile& kProfile>
 class SectorKickRow final : public reactor::ILinkDecoder {
@@ -21,9 +21,9 @@ public:
     }
 };
 
-}  // namespace kick_detail
+}  // namespace detail
 
 template <const CoreProfile& kProfile>
-inline constexpr kick_detail::SectorKickRow<kProfile> kSectorKick{};
+inline constexpr detail::SectorKickRow<kProfile> kSectorKick{};
 
 }  // namespace mister::cores

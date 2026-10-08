@@ -11,7 +11,7 @@
 #include "infra/loan_channel.h"
 #include "infra/spsc_ring.h"
 #include "infra/wake_flag.h"
-#include "svc/disc_engine.h"
+#include "svc/chd_source.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
@@ -90,6 +90,8 @@ public:
     ChdPrefetch& operator=(ChdPrefetch&&) = delete;
 
     [[nodiscard]] Ex<void> open();
+
+    [[nodiscard]] bool opened() const noexcept { return wake_.fd() >= 0; }
 
     [[nodiscard]] xthread::WakeFlag& wake() noexcept { return wake_; }
 

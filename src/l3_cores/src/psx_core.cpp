@@ -51,11 +51,8 @@ bool ends_with_ci(std::string_view s, std::string_view tail) {
 
 Ex<void> PsxCore::do_init(proto::CoreSession&) {
 
+    if (host().discs == nullptr) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     discs_ = host().discs;
-    if (discs_ == nullptr) {
-        own_discs_.emplace();
-        discs_ = &*own_discs_;
-    }
     geom_ = discs_->geometry();
     return {};
 }

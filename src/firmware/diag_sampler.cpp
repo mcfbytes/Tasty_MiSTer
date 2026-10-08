@@ -11,6 +11,8 @@
 
 #include <cstdio>
 #include <ctime>
+#include <optional>
+#include <tuple>
 
 #include "app/event.h"
 #include "infra/log_rec_dispatch.h"
@@ -31,25 +33,41 @@ std::uint64_t mono_now_ns() noexcept {
            static_cast<std::uint64_t>(ts.tv_nsec);
 }
 
+DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
+    return DiagRecords{
+        SessRecord{sources.pause_expiries, sources.recover_polls, sources.save_write_failures,
+                   sources.fallbacks},
+        TasRecord{sources.replay},
+        RecRecord{sources.rec_capture, sources.rec_encode, sources.rec_write, sources.rec_avi},
+        HdRecord{sources.hd}};
+}
+
 }  // namespace
 
 DiagSampler::DiagSampler(xthread::RtStats& stats, app::EventQueue& events, const RtEvidence& ev,
-                         const xthread::WakeFlag& quiescing,
-                         const std::atomic<bool>& transitioning) noexcept
-    : stats_(&stats), events_(&events), ev_(ev), quiescing_(quiescing),
-      transitioning_(transitioning) {}
+                         const xthread::WakeFlag& quiescing, const std::atomic<bool>& transitioning,
+                         xthread::DiagLog& diag, xthread::LogLane& rt_lane,
+                         const Sources& sources) noexcept
+    : stats_(stats), events_(events), ev_(ev), quiescing_(quiescing), transitioning_(transitioning),
+      video_wire_(sources.video_wire), frames_(sources.frames), shots_(sources.screenshots),
+      fifo_stats_(sources.fifo), mgl_stats_(sources.mgl), mgl_row0_(sources.mgl_row0),
+      window_counts_(sources.window_counts), video_stats_(sources.video_stats),
+      video_geo_(sources.video_geometry), diag_cell_(sources.diag),
+      doorbell_cell_(sources.doorbell), round_timing_(sources.round_timing),
+      ui_pages_(sources.ui_pages), diag_(diag), lane_rt_(rt_lane), records_(make_records(sources)) {
+}
 
 void DiagSampler::sample(bool stopping) noexcept {
 
-    const std::uint64_t hb = stats_->heartbeat.load(std::memory_order_relaxed);
+    const std::uint64_t hb = stats_.heartbeat.load(std::memory_order_relaxed);
     const std::uint64_t prev = diag_stats_.heartbeat_last.exchange(hb, std::memory_order_relaxed);
 
     if (!stopping && !quiescing_.ever_requested() &&
         !transitioning_.load(std::memory_order_acquire) && hb != 0 && hb == prev) {
         if (++unchanged_streak_ >= 2) {
             diag_stats_.heartbeat_stalls.fetch_add(1, std::memory_order_relaxed);
-            std::fprintf(stderr, "%s: executive heartbeat stalled at %llu\n",
-                         seat_name(hal::tag_of(kSeat)), static_cast<unsigned long long>(hb));
+            std::fprintf(stderr, "%s: executive heartbeat stalled at %llu\n", seat_name(kSeat),
+                         static_cast<unsigned long long>(hb));
         }
     } else {
         unchanged_streak_ = 0;
@@ -57,26 +75,29 @@ void DiagSampler::sample(bool stopping) noexcept {
 
     if (auto rss = read_vm_rss_bytes()) {
         diag_stats_.rss_bytes.store(*rss, std::memory_order_relaxed);
-        if (*rss > kRssSoftCeilingBytes) {
+        const bool over = *rss > kRssSoftCeilingBytes;
+
+        if (over && !rss_over_now_) {
             diag_stats_.rss_over_ceiling.fetch_add(1, std::memory_order_relaxed);
-            std::fprintf(stderr, "%s: RSS %llu over soft ceiling %llu\n",
-                         seat_name(hal::tag_of(kSeat)), static_cast<unsigned long long>(*rss),
+            std::fprintf(stderr, "%s: RSS %llu over soft ceiling %llu\n", seat_name(kSeat),
+                         static_cast<unsigned long long>(*rss),
                          static_cast<unsigned long long>(kRssSoftCeilingBytes));
         }
+        rss_over_now_ = over;
     }
 
     if (prefetch_ != nullptr) {
-        stats_->ring_drops[2].set(prefetch_->counters().drops);
+        stats_.ring_drops[2].set(prefetch_->counters().drops);
     }
 
-    stats_->ring_drops[3].set(lane_rt_.total_losses());
+    stats_.ring_drops[3].set(lane_rt_.total_losses());
 
     diag_stats_.drains.fetch_add(1, std::memory_order_relaxed);
 
     if (diag_.is_open()) {
 
         for (std::size_t k = 0; k < app::EventQueue::kKinds; ++k) {
-            const std::uint32_t l = events_->losses(static_cast<app::Event::Kind>(k));
+            const std::uint32_t l = events_.losses(static_cast<app::Event::Kind>(k));
             if (l != last_ev_loss_[k]) {
                 diag_.appendf("{\"t\":\"drops\",\"src\":\"event\","
                               "\"kind\":%u,\"n\":%u}",
@@ -98,20 +119,20 @@ void DiagSampler::sample(bool stopping) noexcept {
             last_rss_over_ = ro;
             alarm = true;
         }
-        if (stats_->spin_timeouts.get() != last_spin_) {
-            last_spin_ = stats_->spin_timeouts.get();
+        if (stats_.spin_timeouts.get() != last_spin_) {
+            last_spin_ = stats_.spin_timeouts.get();
             alarm = true;
         }
         for (std::size_t r = 0; r < kNumRings; ++r) {
-            if (stats_->ring_drops[r].get() != last_ring_[r]) {
-                last_ring_[r] = stats_->ring_drops[r].get();
+            if (stats_.ring_drops[r].get() != last_ring_[r]) {
+                last_ring_[r] = stats_.ring_drops[r].get();
                 alarm = true;
             }
         }
 
         std::uint32_t dlm = 0;
         for (std::size_t i = 0; i < kMaxServices; ++i) {
-            const std::uint32_t n = stats_->deadline_miss[i].get();
+            const std::uint32_t n = stats_.deadline_miss[i].get();
             dlm = (dlm > 0xFFFFFFFFu - n) ? 0xFFFFFFFFu : dlm + n;
         }
         if (dlm != last_dlm_) {
@@ -120,7 +141,7 @@ void DiagSampler::sample(bool stopping) noexcept {
         }
         if (alarm) render_records("alarm");
 
-        if (const std::uint32_t d = stats_->dump_requests.load(std::memory_order_relaxed);
+        if (const std::uint32_t d = stats_.dump_requests.load(std::memory_order_relaxed);
             d != last_dump_) {
             last_dump_ = d;
             render_records("cmd");
@@ -134,7 +155,7 @@ void DiagSampler::sample(bool stopping) noexcept {
 
 void DiagSampler::answer() noexcept {
     if (diag_.is_open()) {
-        if (const std::uint32_t d = stats_->dump_requests.load(std::memory_order_relaxed);
+        if (const std::uint32_t d = stats_.dump_requests.load(std::memory_order_relaxed);
             d != last_dump_) {
             last_dump_ = d;
             render_records("cmd");
@@ -148,8 +169,7 @@ void DiagSampler::render_final() noexcept {
 }
 
 void DiagSampler::drain_screenshots() noexcept {
-    if (shots_ == nullptr) return;
-    while (auto req = shots_->take()) {
+    while (auto req = shots_.take()) {
         bool ok = false;
         if (frame_src_ != nullptr) {
             if (auto frame = frame_src_->capture(req->scaled != 0); frame) {
@@ -270,7 +290,7 @@ void DiagSampler::drain_log_lane() noexcept {
 DiagSampler::CdInstruments DiagSampler::cd_instruments() const noexcept {
     CdInstruments c{};
     for (std::size_t i = 0; i < kMaxServices; ++i) {
-        const std::uint32_t n = stats_->deadline_miss[i].get();
+        const std::uint32_t n = stats_.deadline_miss[i].get();
         if (n == 0) continue;
         c.deadline_slots |= (1u << i);
 
@@ -294,9 +314,10 @@ DiagSampler::CdInstruments DiagSampler::cd_instruments() const noexcept {
     return c;
 }
 
-unsigned DiagSampler::rt_evidence_mask() const noexcept { return fw::rt_evidence_mask(ev_); }
+std::uint64_t DiagSampler::rt_evidence_mask() const noexcept { return fw::rt_evidence_mask(ev_); }
 
 unsigned DiagSampler::rt_name_mask() const noexcept {
+    static_assert(hal::kThreadSeats <= 32, "rt.nm is one 32-bit word");
     unsigned m = 0;
     for (std::size_t i = 0; i < hal::kThreadSeats; ++i) {
         if (ev_.seat_name[i].applied) m |= (1u << i);
@@ -308,101 +329,50 @@ unsigned DiagSampler::rt_first_errno() const noexcept { return fw::rt_first_errn
 
 void DiagSampler::render_records(const char* reason) noexcept {
 
-    app::DiagCounters dc =
-        (diag_cell_ != nullptr) ? diag_cell_->sample().value : app::DiagCounters{};
+    app::DiagCounters dc = diag_cell_.sample().value;
 
-    if (window_counts_ != nullptr) {
-        const app::LoadWindowCounts w = window_counts_->sample().value;
+    {
+        const app::LoadWindowCounts w = window_counts_.sample().value;
         dc.file_tx_window = w.windows;
         dc.file_tx_window_refusals = w.refusals;
         dc.file_tx_window_refusal_code = w.refusal_code;
     }
     render_rtstats(reason, dc);
-    render_sess(dc);
-    render_tas();
-    render_rec();
+    const RecordCtx ctx{dc};
+    std::apply([&](const auto&... r) { (emit_(r, ctx), ...); }, records_);
     ++diag_seq_;
 }
 
-void DiagSampler::render_tas() noexcept {
-    app::ReplayStatus s{};
-    if (replay_ == nullptr || replay_->sample_into(s) == 0) return;
-    diag_.appendf("{\"t\":\"tas\",\"seq\":%u,%s}", diag_seq_, app::format_replay_status(s).c_str());
-}
-
-void DiagSampler::render_rec() noexcept {
-    app::RecorderStatus s{};
-    if (rec_cap_ == nullptr || rec_cap_->sample_into(s) == 0) return;
-    app::EncodeStatus e{};
-    app::RecWriteStatus w{};
-    app::AviWriteStatus a{};
-    if (rec_enc_ != nullptr) (void)rec_enc_->sample_into(e);
-    if (rec_wr_ != nullptr) (void)rec_wr_->sample_into(w);
-    if (rec_avi_ != nullptr) (void)rec_avi_->sample_into(a);
-    const app::EncodeStatus::Video& v = e.video;
-    diag_.appendf(
-        "{\"t\":\"rec\",\"seq\":%u,%s,\"hashed\":%u,\"hash_us\":%u,\"hash_us_max\":%u,"
-        "\"enc_held\":%u,\"written\":%u,\"wdrop\":%u,\"wbytes\":%llu,\"werr\":%d,"
-        "\"scale\":%u,\"steps\":%u,\"recovered\":%u,\"held\":%u,\"q_max\":%u,\"encoded\":%u,"
-        "\"dups\":%u,"
-        "\"keys\":%u,\"enc_us\":%u,"
-        "\"enc_us_max\":%u,\"budget_pct\":%u,\"me_rad\":%u,\"me_cut\":%u,\"chunk_full\":%u,"
-        "\"enc_err\":%u,"
-        "\"chunk_kib\":%u,\"seg\":%u,\"segs\":%u,\"avi_frames\":%u,\"avi_drop\":%u,"
-        "\"avi_bytes\":%llu,\"avi_err\":%d}",
-        diag_seq_, app::format_recorder_status(s).c_str(), e.frames, e.hash_us_last, e.hash_us_max,
-        e.ring_full, w.rows, w.dropped, static_cast<unsigned long long>(w.bytes),
-        static_cast<int>(w.err), static_cast<unsigned>(v.scale), static_cast<unsigned>(v.steps),
-        static_cast<unsigned>(v.recovered), static_cast<unsigned>(v.held),
-        static_cast<unsigned>(v.queue_max), v.encoded, v.dups, v.keys, v.enc_us_last, v.enc_us_max,
-        v.budget_pct, static_cast<unsigned>(v.me_rad), v.me_cut, v.chunk_full, v.errors,
-        v.arena_kib, static_cast<unsigned>(a.segment), static_cast<unsigned>(a.segments), a.frames,
-        a.dropped, static_cast<unsigned long long>(a.bytes), static_cast<int>(a.err));
-}
-
-void DiagSampler::render_sess(const app::DiagCounters& dc) noexcept {
-    static_assert(DiagSampler::kSessWorstCase <= DiagSampler::kDiagLineCeiling,
-                  "the sess record's worst case must fit the xthread::DiagLog ceiling");
-    const std::uint32_t pex = (pause_expiries_ != nullptr) ? pause_expiries_->sample().value : 0u;
-    const std::uint32_t polls = (recover_polls_ != nullptr) ? recover_polls_->sample().value : 0u;
-    const std::uint32_t swf =
-        (save_write_failures_ != nullptr) ? save_write_failures_->sample().value : 0u;
-    const app::FallbackCounts fb =
-        (fallbacks_ != nullptr) ? fallbacks_->sample().value : app::FallbackCounts{};
-    diag_.appendf(TASTY_SESS_FMT, diag_seq_, static_cast<unsigned>(dc.link), dc.core_shutdowns,
-                  polls, static_cast<unsigned>(dc.stage_status_change), dc.status_reply_refusals,
-                  static_cast<unsigned>(dc.last_error_code),
-                  static_cast<unsigned>(dc.last_error_site),
-
-                  static_cast<unsigned>(dc.last_error_detail), dc.prefetch_park_timeouts, pex,
-                  dc.stale_owner_steps, dc.start_answer_drops, swf, fb.start_timeouts,
-                  fb.front_end_asked, fb.front_end_failed, dc.core_abandons);
+template <DiagRecord R>
+void DiagSampler::emit_(const R& r, const RecordCtx& ctx) noexcept {
+    static_assert(infra::json_record_worst(R::kKey, infra::json_worst_len<typename R::View>()) <=
+                      kDiagLineCeiling,
+                  "a record's worst case must fit the xthread::DiagLog ceiling");
+    const std::optional<typename R::View> v = r.sample(ctx);
+    if (!v) return;
+    infra::JsonOut o;
+    o.begin_record(R::kKey, diag_seq_);
+    to_json(o, *v);
+    o.end_record();
+    diag_.append(o);
 }
 
 void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc) noexcept {
 
-    const app::DoorbellStats db =
-        (doorbell_cell_ != nullptr) ? doorbell_cell_->sample().value : app::DoorbellStats{};
-    const std::uint32_t ev_lost_edge = events_->losses(app::Delivery::Edge);
-    const std::uint32_t ev_lost = events_->losses(app::Delivery::Hint) + ev_lost_edge;
+    const app::DoorbellStats db = doorbell_cell_.sample().value;
+    const std::uint32_t ev_lost_edge = events_.losses(app::Delivery::Edge);
+    const std::uint32_t ev_lost = events_.losses(app::Delivery::Hint) + ev_lost_edge;
     const app::CmdFifoStats fs =
         (fifo_stats_ != nullptr) ? fifo_stats_->sample().value : app::CmdFifoStats{};
     const CdInstruments cd = cd_instruments();
     const app::IFrameSource::Counts shot =
         (frame_src_ != nullptr) ? frame_src_->counts() : app::IFrameSource::Counts{};
 
-    const app::VideoPumpStats vs =
-        (video_stats_ != nullptr) ? video_stats_->sample().value : app::VideoPumpStats{};
-    const app::VideoGeometryRecord gr =
-        (video_geo_ != nullptr) ? video_geo_->sample().value : app::VideoGeometryRecord{};
-    app::VideoWire::Stats ws{};
-    app::VideoWire::GeoStats gs{};
-    app::VideoWire::PreludeStats ps{};
-    if (video_wire_ != nullptr) {
-        ws = video_wire_->stats();
-        gs = video_wire_->geo_stats();
-        ps = video_wire_->prelude_stats();
-    }
+    const app::VideoPumpStats vs = video_stats_.sample().value;
+    const app::VideoGeometryRecord gr = video_geo_.sample().value;
+    const app::VideoWire::Stats ws = video_wire_.stats();
+    const app::VideoWire::GeoStats gs = video_wire_.geo_stats();
+    const app::VideoWire::PreludeStats ps = video_wire_.prelude_stats();
 
     const unsigned rf_bits =
         (vs.solve_failures != 0u ? 1u : 0u) | (vs.zero_divider != 0u ? 2u : 0u) |
@@ -432,7 +402,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         app::collect_input_stats((input_ != nullptr) ? *input_ : app::InputSample{});
     const app::MglPumpStats ms =
         (mgl_stats_ != nullptr) ? mgl_stats_->sample().value : app::MglPumpStats{};
-    const std::uint32_t mgl_row0 = (mgl_row0_ != nullptr) ? mgl_row0_->sample().value : 0u;
+    const std::uint32_t mgl_row0 = mgl_row0_.sample().value;
 
     const app::UiPageRecord up =
         (ui_pages_ != nullptr) ? ui_pages_->sample().value : app::UiPageRecord{};
@@ -440,19 +410,18 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
     const reactor::FrameRecord fr =
         (frames_ != nullptr) ? frames_->sample().value : reactor::FrameRecord{};
 
-    const reactor::RoundTiming rnd =
-        (round_timing_ != nullptr) ? round_timing_->sample().value : reactor::RoundTiming{};
+    const reactor::RoundTiming rnd = round_timing_.sample().value;
 
     diag_.appendf(
         TASTY_RTSTATS_FMT, diag_seq_, reason,
-        static_cast<unsigned long long>(stats_->heartbeat.load(std::memory_order_relaxed)),
+        static_cast<unsigned long long>(stats_.heartbeat.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(diag_stats_.drains.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(diag_stats_.rss_bytes.load(std::memory_order_relaxed)),
         diag_stats_.heartbeat_stalls.load(std::memory_order_relaxed),
-        diag_stats_.rss_over_ceiling.load(std::memory_order_relaxed), stats_->ring_drops[0].get(),
-        stats_->ring_drops[1].get(), stats_->ring_drops[2].get(), stats_->ring_drops[3].get(),
-        stats_->spin_timeouts.get(), stats_->spurious_causes.get(),
-        static_cast<unsigned>(events_->depth()), ev_lost, ev_lost_edge, fs.reads, fs.lines,
+        diag_stats_.rss_over_ceiling.load(std::memory_order_relaxed), stats_.ring_drops[0].get(),
+        stats_.ring_drops[1].get(), stats_.ring_drops[2].get(), stats_.ring_drops[3].get(),
+        stats_.spin_timeouts.get(), stats_.spurious_causes.get(),
+        static_cast<unsigned>(events_.depth()), ev_lost, ev_lost_edge, fs.reads, fs.lines,
         fs.unrouted, fs.unrecognised, static_cast<unsigned>(dc.ladder_live),
         static_cast<unsigned>(dc.ladder_pc), dc.ladder_rungs,
         static_cast<unsigned long long>(dc.ladder_bytes), dc.ladder_assets,
@@ -492,8 +461,8 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
 
         db.declared, db.bound, db.refusals, db.fallbacks, db.retirements,
         static_cast<unsigned>(ev_.online_cpus < 0 ? 0 : ev_.online_cpus),
-        static_cast<unsigned>(ev_.cpu_coverage.applied), rt_evidence_mask(), rt_name_mask(),
-        rt_first_errno(),
+        static_cast<unsigned>(ev_.cpu_coverage.applied),
+        static_cast<unsigned long long>(rt_evidence_mask()), rt_name_mask(), rt_first_errno(),
 
         rnd.epoch, reactor::round_us(rnd.epoch_ns / 1000), rnd.steady.n,
         reactor::round_us(rnd.steady.min_ns), reactor::round_us(rnd.steady.max_ns),
@@ -525,8 +494,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         dc.cd_not_resident, cd.decode_us, cd.evictions, dc.cd_busy_ticks, dc.cd_egress_abandons,
 
         up.depth, up.top_id, up.vis_publishes, up.cell_refusals, up.page_refusals, fr.seq,
-        (shots_ != nullptr) ? shots_->drops() : 0u,
-        (shots_ != nullptr) ? shots_->result_drops() : 0u, shots_written_, shots_failed_,
+        shots_.drops(), shots_.result_drops(), shots_written_, shots_failed_,
 
         shot.captures, shot.refused, shot.torn, diag_.drops(), diag_.truncations());
 }

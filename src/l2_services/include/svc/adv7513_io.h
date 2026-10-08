@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "infra/seat.h"
+
 namespace mister::svc::adv7513 {
 
 class IRegMap;
@@ -25,6 +27,7 @@ class IClock;
 namespace mister::svc::adv7513 {
 
 struct Io {
+    TASTY_SEAT_RESIDENT(Ui);
     IRegMap* main = nullptr;
     IRegMap* edid = nullptr;
     IRegMap* cec = nullptr;
@@ -33,5 +36,7 @@ struct Io {
     os::IDelay* delay = nullptr;
     const os::IClock* clock = nullptr;
 };
+
+inline constexpr Io kUnboundIo{};
 
 }  // namespace mister::svc::adv7513

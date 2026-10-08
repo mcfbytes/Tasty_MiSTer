@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
@@ -71,11 +72,14 @@ class MapStore {
     TASTY_SEAT_EXEMPT(component);
 
 public:
+    MapStore() noexcept = default;
+
+    explicit MapStore(const Vfs& vfs) noexcept : vfs_(vfs) {}
+
     static std::string filename(std::string_view core, const DeviceIdentity& id, MapKind kind,
                                 bool mod);
 
-    void bind_storage(const Vfs* vfs) noexcept { vfs_ = vfs; }
-    const Vfs* storage() const noexcept { return vfs_; }
+    infra::OptRef<const Vfs> storage() const noexcept { return vfs_; }
 
     Ex<ButtonMap> load(std::string_view core, const DeviceIdentity& id, MapKind kind,
                        bool mod) const;
@@ -83,7 +87,7 @@ public:
                   bool mod) const;
 
 private:
-    const Vfs* vfs_ = nullptr;
+    infra::OptRef<const Vfs> vfs_;
 };
 
 }  // namespace mister::svc

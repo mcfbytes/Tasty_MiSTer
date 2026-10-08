@@ -8,8 +8,8 @@ namespace mister::cores::manifests {
 static_assert(kMegaDriveServices[0].osd_budget == OsdBudget::Pinned,
               "the 5 ms PCM tick pins the OSD budget");
 
-std::unique_ptr<Core> make_megadrive(const CoreProfile& p, const HostServices& h) {
-    return std::make_unique<MegaDriveCore>(p, h);
+std::unique_ptr<Core> make_megadrive(const CoreProfile& p, const CoreGrant& g) {
+    return std::make_unique<MegaDriveCore>(p, g.services);
 }
 
 }  // namespace mister::cores::manifests

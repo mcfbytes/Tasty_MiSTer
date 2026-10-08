@@ -30,9 +30,10 @@ tasty_add_header_checks(tasty_boards_header_checks LIB mister_boards HEADERS
 if(TASTY_BUILD_TESTS)
 
   foreach(mod IN ITEMS link_port loader)
-    add_executable(tasty_boards_${mod}_unit tests/${mod}_unit.cpp)
-    target_link_libraries(tasty_boards_${mod}_unit PRIVATE mister_boards tasty_test_options)
-    add_test(NAME tasty.boards_${mod} COMMAND tasty_boards_${mod}_unit)
-    set_tests_properties(tasty.boards_${mod} PROPERTIES TIMEOUT 60)
+    tasty_unit_test(tasty_boards_${mod}_unit
+      NAME tasty.boards_${mod}
+      SOURCES tests/${mod}_unit.cpp
+      LIBS mister_boards tasty_test_options
+      TIMEOUT 60)
   endforeach()
 endif()

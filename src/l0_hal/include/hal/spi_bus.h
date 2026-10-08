@@ -33,7 +33,7 @@ public:
     SpiBus& operator=(SpiBus&&) noexcept = default;
 
     Ex<CoreIdentity> identify() override;
-    CoreCapabilities capabilities() const override;
+    CoreCapabilities latch_capabilities() override;
     void set_core_reset(bool asserted) override;
     void clear_gpo() override;
 
@@ -108,8 +108,8 @@ private:
     volatile std::uint32_t* gpo_reg_ = nullptr;
     const volatile std::uint32_t* gpi_reg_ = nullptr;
 
-    mutable Width width_ = Width::Byte;
-    mutable std::uint8_t io_version_ = 0;
+    Width width_ = Width::Byte;
+    std::uint8_t io_version_ = 0;
     ISpiOutputObserver* obs_ = nullptr;
     xthread::RtStats* stats_ = nullptr;
     Post post_ = Post::None;

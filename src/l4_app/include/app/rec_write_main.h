@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <optional>
-
 #include "app/avi_writer.h"
 #include "app/sidecar_writer.h"
 #include "infra/error.h"
+#include "infra/park_fds.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
 #include "infra/seat_park.h"
@@ -17,14 +16,13 @@ class RecWriteMain final : public xthread::SeatMain<RecWriteMain> {
     TASTY_SEAT_RESIDENT(RecWrite);
 
 public:
-    RecWriteMain(SidecarWriter& writer, AviWriter& avi, xthread::WakeFlag& wake) noexcept
-        : writer_(writer), avi_(avi), wake_(wake) {}
+    RecWriteMain(SidecarWriter& writer, AviWriter& avi, xthread::ParkFds fds) noexcept
+        : writer_(writer), avi_(avi), wake_(fds.wake()), stop_(std::move(fds).take_stop()),
+          park_(wake_, stop_) {}
     RecWriteMain(const RecWriteMain&) = delete;
     RecWriteMain& operator=(const RecWriteMain&) = delete;
     RecWriteMain(RecWriteMain&&) = delete;
     RecWriteMain& operator=(RecWriteMain&&) = delete;
-
-    [[nodiscard]] Ex<void> open() noexcept;
 
     void start() noexcept;
     void stop() noexcept { stop_.request(); }
@@ -34,7 +32,7 @@ public:
     [[nodiscard]] bool idle() const noexcept { return writer_.idle() && avi_.idle(); }
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
     [[nodiscard]] int park_ms() const noexcept;
-    [[nodiscard]] xthread::SeatPark& park() noexcept { return *park_; }
+    [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept { return false; }
     [[nodiscard]] bool pause_pending() const noexcept { return false; }
@@ -47,8 +45,8 @@ private:
     SidecarWriter& writer_;
     AviWriter& avi_;
     xthread::WakeFlag& wake_;
-    xthread::WakeFlag stop_{};
-    std::optional<xthread::SeatPark> park_{};
+    xthread::WakeFlag stop_;
+    xthread::SeatPark park_;
 };
 
 static_assert(xthread::SeatBody<RecWriteMain>);

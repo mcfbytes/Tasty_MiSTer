@@ -12,6 +12,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -45,41 +46,43 @@ std::string games_home(const svc::Vfs& vfs, std::string_view dir) {
 
 }  // namespace
 
+MglPump::MglPump(const svc::Vfs& vfs, const os::IClock& clock, Wiring wiring) noexcept
+    : vfs_(vfs), identity_(wiring.identity), conf_cell_(wiring.conf), names_(wiring.names),
+      clock_(clock), info_(wiring.info), asks_(wiring.asks), diag_(wiring.diag),
+      player_(MglPlayer::Wiring{
+          .link_tx = wiring.link_tx, .asks = wiring.asks, .names = wiring.names}) {}
+
 void MglPump::bind_homes() {
-    if (identity_ == nullptr) return;
     SessionIdentity id{};
-    bool bound = identity_->copy(id);
+    bool bound = identity_.copy(id);
     if (bound) {
 
-        const std::string file_home = games_home(*vfs_, home_name(id));
+        const std::string file_home = games_home(vfs_, home_name(id));
         const std::string image_home =
-            id.cue_dir != nullptr ? games_home(*vfs_, id.cue_dir) : file_home;
+            id.cue_dir != nullptr ? games_home(vfs_, id.cue_dir) : file_home;
         bound = player_.set_homes(file_home, image_home);
     }
     if (bound) return;
 
     ++stats_.homes_unbound;
-    if (diag_ != nullptr) {
-        diag_->appendf("{\"t\":\"ev\",\"k\":\"MglHomeUnbound\",\"n\":%u}", stats_.homes_unbound);
-    }
+    diag_.appendf("{\"t\":\"ev\",\"k\":\"MglHomeUnbound\",\"n\":%u}", stats_.homes_unbound);
 }
 
 CoreScope MglPump::sample_scope() {
-    if (conf_cell_ == nullptr || conf_cell_->sample_into(conf_scratch_) == 0) return {};
+    if (conf_cell_.sample_into(conf_scratch_) == 0) return {};
     return CoreScope{conf_scratch_.gen};
 }
 
 void MglPump::latch_remember_() {
-    if (remember_ == MglRemember::Never || names_ == nullptr) return;
+    if (remember_ == MglRemember::Never) return;
 
     if (player_.scope().gen.v == 0 || conf_scratch_.truncated) return;
     const auto table =
         proto::ItemTable::parse(std::string_view(conf_scratch_.text, conf_scratch_.len));
     if (!table) return;
     SessionIdentity id{};
-    const RememberedStem stem = identity_ != nullptr && identity_->copy(id)
-                                    ? id.stem
-                                    : RememberedStem::of(table->core_name(), {});
+    const RememberedStem stem =
+        identity_.copy(id) ? id.stem : RememberedStem::of(table->core_name(), {});
     const std::vector<proto::ConfStrEntry> slots = proto::ConfStr::slots_of(*table);
     for (std::uint8_t i = 0; i < player_.count(); ++i) {
         const auto ld = infra::as<MglItem::Load>(player_.item(i));
@@ -149,7 +152,7 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
             ++stats_.file_items;
         }
     }
-    player_.arm(*clock_);
+    player_.arm(clock_);
     busy_since_.reset();
     enter(State::Playing);
     ++stats_.armed;
@@ -187,7 +190,7 @@ void MglPump::on_request_refused(CorrelationTag tag, Errc why) {
         return;
     }
     ++stats_.load_retries;
-    if (retries_used_ >= kMaxLoadRetries || retry_deadline_.expired(*clock_)) {
+    if (retries_used_ >= kMaxLoadRetries || retry_deadline_.expired(clock_)) {
         abandon(InfoId::CoreLoadFailed, Errc::negotiation);
         return;
     }
@@ -197,14 +200,14 @@ void MglPump::on_request_refused(CorrelationTag tag, Errc why) {
 
 void MglPump::replay_busy_(CorrelationTag tag) {
     const bool first = !busy_since_;
-    if (first) busy_since_ = os::Deadline::in(*clock_, std::chrono::milliseconds{kBusyBoundMs});
-    if (!first && busy_since_->expired(*clock_)) {
+    if (first) busy_since_ = os::Deadline::in(clock_, std::chrono::milliseconds{kBusyBoundMs});
+    if (!first && busy_since_->expired(clock_)) {
         if (!player_.owns(tag)) return;
         if (state_ == State::Idle) ++stats_.abandoned;
         abandon(InfoId::CoreLoadFailed, Errc::timeout);
         return;
     }
-    if (!player_.replay_refused(tag, *clock_)) return;
+    if (!player_.replay_refused(tag, clock_)) return;
     ++stats_.busy_replays;
     state_ = State::Playing;
     check_invariant();
@@ -212,12 +215,7 @@ void MglPump::replay_busy_(CorrelationTag tag) {
 
 void MglPump::enter(State s) noexcept {
 
-    if (s != State::Playing) {
-        player_ = MglPlayer{};
-        player_.set_link_tx(link_tx_);
-        player_.set_asks(asks_);
-        player_.set_names(names_);
-    }
+    if (s != State::Playing) player_.reset();
     state_ = s;
     check_invariant();
 }
@@ -243,7 +241,7 @@ void MglPump::tick() {
     switch (state_) {
         case State::PendingRead:
 
-            if (retry_deadline_.expired(*clock_)) {
+            if (retry_deadline_.expired(clock_)) {
                 abandon(InfoId::CoreLoadFailed, Errc::negotiation);
                 return;
             }
@@ -252,7 +250,7 @@ void MglPump::tick() {
 
         case State::AwaitingCore:
 
-            if (arm_deadline_.expired(*clock_)) {
+            if (arm_deadline_.expired(clock_)) {
                 ++stats_.arm_timeouts;
                 abandon(InfoId::CoreLoadFailed, Errc::timeout);
             }
@@ -283,16 +281,16 @@ void MglPump::begin_read() {
     if (path.empty()) {
         ++stats_.read_failures;
         last_error_ = Errc::bad_format;
-        if (info_ != nullptr) info_->info(InfoId::CoreLoadFailed);
+        if (info_) info_->info(InfoId::CoreLoadFailed);
         last_info_ = InfoId::CoreLoadFailed;
         return;
     }
 
-    auto f = vfs_->open(path, svc::OpenMode::ReadWhole);
+    auto f = vfs_.open(path, svc::OpenMode::ReadWhole);
     if (!f) {
         ++stats_.read_failures;
         last_error_ = f.error().code;
-        if (info_ != nullptr) info_->info(InfoId::CoreLoadFailed);
+        if (info_) info_->info(InfoId::CoreLoadFailed);
         last_info_ = InfoId::CoreLoadFailed;
         return;
     }
@@ -301,7 +299,7 @@ void MglPump::begin_read() {
 
         ++stats_.read_failures;
         last_error_ = sz ? Errc::bad_format : sz.error().code;
-        if (info_ != nullptr) info_->info(InfoId::CoreLoadFailed);
+        if (info_) info_->info(InfoId::CoreLoadFailed);
         last_info_ = InfoId::CoreLoadFailed;
         return;
     }
@@ -310,7 +308,7 @@ void MglPump::begin_read() {
     if (!got || *got == 0) {
         ++stats_.read_failures;
         last_error_ = got ? Errc::io : got.error().code;
-        if (info_ != nullptr) info_->info(InfoId::CoreLoadFailed);
+        if (info_) info_->info(InfoId::CoreLoadFailed);
         last_info_ = InfoId::CoreLoadFailed;
         return;
     }
@@ -321,7 +319,7 @@ void MglPump::begin_read() {
 
         ++stats_.no_rbf;
         last_error_ = Errc::not_found;
-        if (info_ != nullptr) info_->info(InfoId::CoreNotFound);
+        if (info_) info_->info(InfoId::CoreNotFound);
         last_info_ = InfoId::CoreNotFound;
         doc_len_ = 0;
         return;
@@ -333,14 +331,14 @@ void MglPump::begin_read() {
     if (auto r = resolve_rbf(std::string_view{want_, want_len_}); !r) {
         ++stats_.no_rbf;
         last_error_ = r.error().code;
-        if (info_ != nullptr) info_->info(InfoId::CoreNotFound);
+        if (info_) info_->info(InfoId::CoreNotFound);
         last_info_ = InfoId::CoreNotFound;
         doc_len_ = 0;
         return;
     }
 
     enter(State::PendingRead);
-    retry_deadline_ = os::Deadline::in(*clock_, std::chrono::milliseconds{kLoadRetryMs});
+    retry_deadline_ = os::Deadline::in(clock_, std::chrono::milliseconds{kLoadRetryMs});
     (void)publish_load();
 }
 
@@ -348,12 +346,12 @@ bool MglPump::publish_load() {
     UiRequest::LoadCore req{};
 
     req.xml = XmlKind::Rbf;
-    if (asks_ == nullptr || !req.path.assign(std::string_view{rbf_, rbf_len_})) {
+    if (!req.path.assign(std::string_view{rbf_, rbf_len_})) {
         abandon(InfoId::CoreLoadFailed, Errc::bad_format);
         return false;
     }
 
-    const CorrelationTag tag = asks_->push(req);
+    const CorrelationTag tag = asks_.push(req);
     if (!tag) {
         ++stats_.load_retries;
         return false;
@@ -361,7 +359,7 @@ bool MglPump::publish_load() {
     ++stats_.loads;
     load_tag_ = tag;
     enter(State::AwaitingCore);
-    arm_deadline_ = os::Deadline::in(*clock_, std::chrono::milliseconds{kArmTimeoutMs});
+    arm_deadline_ = os::Deadline::in(clock_, std::chrono::milliseconds{kArmTimeoutMs});
     return true;
 }
 
@@ -374,7 +372,7 @@ void MglPump::pump_advance() {
         const std::uint32_t before_drop = player_.drops();
         const std::uint32_t before_saved = player_.remembered();
         const std::uint32_t before_unsaved = player_.remember_failures();
-        auto r = player_.advance(*clock_);
+        auto r = player_.advance(clock_);
         stats_.publishes += player_.publishes() - before_pub;
         stats_.item_drops += player_.drops() - before_drop;
         stats_.paths_remembered += player_.remembered() - before_saved;
@@ -409,15 +407,13 @@ void MglPump::abandon(InfoId id, Errc code) {
     last_error_ = code;
     if (id != InfoId::None) {
         last_info_ = id;
-        if (info_ != nullptr) info_->info(id);
+        if (info_) info_->info(id);
     }
 
-    if (diag_ != nullptr) {
-        diag_->appendf("{\"t\":\"ev\",\"k\":\"MglAbandoned\","
-                       "\"err\":%u,\"info\":%u,\"ab\":%u,\"fi\":%u}",
-                       static_cast<unsigned>(code), static_cast<unsigned>(id), stats_.abandoned,
-                       stats_.file_items);
-    }
+    diag_.appendf("{\"t\":\"ev\",\"k\":\"MglAbandoned\","
+                  "\"err\":%u,\"info\":%u,\"ab\":%u,\"fi\":%u}",
+                  static_cast<unsigned>(code), static_cast<unsigned>(id), stats_.abandoned,
+                  stats_.file_items);
 }
 
 Ex<void> MglPump::resolve_rbf(std::string_view want) {
@@ -425,7 +421,7 @@ Ex<void> MglPump::resolve_rbf(std::string_view want) {
     std::string_view stem;
     split_rbf(want, dir, stem);
 
-    auto found = resolve_rbf_name(*vfs_, dir, stem, false);
+    auto found = resolve_rbf_name(vfs_, dir, stem, false);
     if (!found) return std::unexpected(found.error());
     const std::string_view best = *found;
 

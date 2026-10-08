@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string_view>
 
 #include "app/cmd_verb_sink.h"
@@ -36,7 +37,7 @@ class CmdFifo {
 public:
     static constexpr std::size_t kPathMax = 108;
 
-    static Ex<CmdFifo> open(const char* path = kCmdFifoPath);
+    static Ex<CmdFifo> open(const char* path, ICmdVerbSink& route);
 
     ~CmdFifo();
     CmdFifo(CmdFifo&&) noexcept;
@@ -49,8 +50,6 @@ public:
 
     Ex<unsigned> service();
 
-    void set_route(ICmdVerbSink* route) noexcept { route_ = route; }
-
     std::uint32_t routed() const noexcept { return routed_; }
 
     using Stats = CmdFifoStats;
@@ -62,7 +61,7 @@ public:
     std::string_view last_unrecognised() const noexcept;
 
 private:
-    explicit CmdFifo(UniqueFd fd, std::string_view path) noexcept;
+    CmdFifo(UniqueFd fd, std::string_view path, ICmdVerbSink& route) noexcept;
 
     UniqueFd fd_;
 
@@ -71,7 +70,7 @@ private:
     Stats stats_{};
 
     CmdFifoCell cell_{};
-    ICmdVerbSink* route_ = nullptr;
+    std::reference_wrapper<ICmdVerbSink> route_;
     std::uint32_t routed_ = 0;
 };
 

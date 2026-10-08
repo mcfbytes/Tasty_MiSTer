@@ -8,7 +8,6 @@
 
 #include "infra/message_sum.h"
 #include "infra/seat.h"
-#include "infra/spsc_ring.h"
 
 namespace mister::app {
 
@@ -63,7 +62,5 @@ static_assert(infra::MessageSum<ReplayMsg> && infra::HasHead<ReplayMsg> &&
               infra::alternatives_are_total<ReplayMsg>());
 
 static_assert(sizeof(ReplayMsg) == 28, "kind, pad, head and a 24-byte store");
-
-using ReplayRing = xthread::SpscRing<ReplayMsg, 256>;
 
 }  // namespace mister::app

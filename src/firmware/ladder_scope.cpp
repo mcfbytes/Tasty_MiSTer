@@ -8,14 +8,13 @@
 
 #include "hal/bridge_sequencer.h"
 #include "reactor/round_timer.h"
-#include "thread_assembly.h"
 
 namespace mister::fw {
 
 void LadderScope::relax() {
     TASTY_SEAT_BODY(LadderScope);
-    assembly_.mark_transitioning(true);
-    if (timer_ != nullptr) timer_->note_lifecycle(reactor::RoundLifecycle::Rung);
+    transitioning_.store(true, std::memory_order_release);
+    if (timer_) timer_->note_lifecycle(reactor::RoundLifecycle::Rung);
     if (::pthread_getschedparam(::pthread_self(), &saved_policy_, &saved_param_) != 0) {
         saved_policy_ = SCHED_OTHER;
         saved_param_ = sched_param{};
@@ -31,7 +30,7 @@ void LadderScope::restore() {
         std::fprintf(stderr, "mister: RT restore after ladder rung FAILED (%u)\n",
                      static_cast<unsigned>(n));
     }
-    assembly_.mark_transitioning(false);
+    transitioning_.store(false, std::memory_order_release);
 }
 
 void LadderScope::board_reset() {

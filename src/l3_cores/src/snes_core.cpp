@@ -192,7 +192,6 @@ Ex<void> SnesCore::tx_rom_(IoIndex index, svc::IFile& f, std::uint32_t file_size
     const auto hdr = snes::header_block(addr, payload, addr != 0 ? &typing : nullptr);
 
     proto::SessionParams params{};
-    params.direction = proto::TransferDirection::Download;
     params.ext = ext_.view();
     auto session = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{index.v}, params);
     if (!session) return std::unexpected(session.error());
@@ -242,7 +241,6 @@ Ex<void> SnesCore::stream_mirrored_(proto::ImageBracket& session, svc::IFile& f,
 
 Ex<void> SnesCore::tx_raw_(IoIndex index, svc::IFile& f, std::uint64_t total) {
     proto::SessionParams params{};
-    params.direction = proto::TransferDirection::Download;
     params.ext = ext_.view();
 
     auto session = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{index.v}, params);

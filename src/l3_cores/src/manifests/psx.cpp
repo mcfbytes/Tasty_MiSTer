@@ -8,8 +8,8 @@
 
 namespace mister::cores::manifests {
 
-std::unique_ptr<Core> make_psx(const CoreProfile& p, const HostServices& h) {
-    return std::make_unique<PsxCore>(p, kPsxCuePolicy, h);
+std::unique_ptr<Core> make_psx(const CoreProfile& p, const CoreGrant& g) {
+    return std::make_unique<PsxCore>(p, kPsxCuePolicy, g.services);
 }
 
 static_assert(kPsxMcdHeader.size() == 8192, "mcdheader.h:2: static const uint8_t mcdheader[8192]");

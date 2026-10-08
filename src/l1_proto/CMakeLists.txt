@@ -49,6 +49,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/save_ask.h
   proto/joystick.h
   proto/osd_surface.h
+  proto/osd_target.h
   proto/osd_transport.h
   proto/ps2_keyboard.h
   proto/ps2_mouse.h
@@ -64,6 +65,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/sd_request.h
   proto/session_params.h
   proto/slot_attributes.h
+  proto/slot_roles.h
   proto/spi_block_decoder.h
   proto/spi_block_poll.h
   proto/spi_conf_str_decoder.h
@@ -107,24 +109,22 @@ if(TASTY_BUILD_TESTS)
       list(APPEND tasty_srcs "${TASTY_TESTS_DIR}/support/fakecore_transport.cpp")
     endif()
 
-    add_executable(tasty_proto_${tasty_name}_unit ${tasty_srcs})
-    target_include_directories(tasty_proto_${tasty_name}_unit PRIVATE ${TASTY_TESTS_DIR})
-    target_compile_definitions(tasty_proto_${tasty_name}_unit PRIVATE
-      TASTY_CORPORA_DIR="${TASTY_ROOT}/../harness/corpora"
-      TASTY_CAPTURE_DIR="${TASTY_ROOT}/../harness/capture/captures"
-      TASTY_PROTO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
-      TASTY_BLK_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
-    target_link_libraries(tasty_proto_${tasty_name}_unit PRIVATE mister_proto tasty_test_options)
+    tasty_unit_test(tasty_proto_${tasty_name}_unit
+      NAME ${A_TEST}
+      SOURCES ${tasty_srcs}
+      INCLUDES ${TASTY_TESTS_DIR}
+      DEFINES TASTY_CORPORA_DIR="${TASTY_ROOT}/../harness/corpora"
+        TASTY_CAPTURE_DIR="${TASTY_ROOT}/../harness/capture/captures"
+        TASTY_PROTO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+        TASTY_BLK_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+      LIBS mister_proto tasty_test_options
+      TIMEOUT ${A_TIMEOUT})
     if(A_HARNESS)
       target_link_libraries(tasty_proto_${tasty_name}_unit PRIVATE fakecore)
     endif()
     if(A_REPLAY)
       target_link_libraries(tasty_proto_${tasty_name}_unit PRIVATE trace_replay fakecore)
     endif()
-
-    add_test(NAME ${A_TEST} COMMAND tasty_proto_${tasty_name}_unit)
-
-    set_tests_properties(${A_TEST} PROPERTIES TIMEOUT ${A_TIMEOUT})
   endfunction()
 
   foreach(tasty_mod IN ITEMS block_slots decoder_row download_session joystick link link_port osd ps2 save_request savestate spi_block_decoder spi_block_poll spi_conf_str_decoder spi_fio_queue spi_identify_decoder spi_osd_mask_decoder spi_sampler spi_status_decoder status_register)

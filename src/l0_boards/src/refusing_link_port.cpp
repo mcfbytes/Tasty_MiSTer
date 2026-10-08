@@ -18,7 +18,7 @@ Ex<hal::CoreIdentity> RefusingLinkPort::identify() {
     return unimplemented(ERR_SITE());
 }
 
-hal::CoreCapabilities RefusingLinkPort::capabilities() const {
+hal::CoreCapabilities RefusingLinkPort::latch_capabilities() {
     TASTY_SEAT_BODY(RefusingLinkPort);
     return {};
 }

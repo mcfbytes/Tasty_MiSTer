@@ -262,9 +262,9 @@ consteval bool boards_place_main_off_rt_cpu() {
 }
 
 static_assert(every_thread_map([](const ThreadMap& m) { return well_formed(m); }),
-              "item: every board's thread-map rows must be in Seat enum order, "
-              "one row per seat. seat_of() returns the first match and the "
-              "evidence record indexes by Seat; a reordered or duplicated row "
+              "item: every board's thread-map rows must be in SeatTag order, "
+              "one row per real seat. seat_of() indexes by row_index and the "
+              "evidence record does too; a reordered or duplicated row "
               "would silently hand a call site the wrong seat's policy, "
               "priority and CPU.");
 
@@ -351,6 +351,14 @@ static_assert(every_thread_map([](const ThreadMap& m) { return launcher_off_rt_c
               "T-LAUNCHER hosts an external program that inherits its CPU and policy: it is "
               "SCHED_OTHER and off T-RT's CPU, so nothing it spawns can run on T-RT's core.");
 
+static_assert(every_thread_map([](const ThreadMap& m) { return other_rows_off_rt_cpu(m); }),
+              "no SCHED_OTHER seat shares T-RT's CPU: a SCHED_OTHER thread there is contention "
+              "the SPI and RT round is measured against.");
+
+static_assert(
+    every_thread_map([](const ThreadMap& m) { return hdosd_is_other(m); }),
+    "T-HDOSD is SCHED_OTHER: a raster tick is not a deadline seat and takes no FIFO slot.");
+
 static_assert(every_thread_map([](const ThreadMap& m) { return capture_ranks_lowest(m); }),
               "the recorder is best effort: T-CAPTURE is FIFO so its copy window is reachable, "
               "but BELOW every other FIFO seat, so a copy never delays input, audio, storage or "
@@ -383,7 +391,7 @@ static_assert(every_thread_map([](const ThreadMap& m) { return spawn_stack_consi
               "Change BOTH fields or neither.");
 
 static_assert(every_thread_map([](const ThreadMap& m) {
-                  return seat_of(m, Seat::RT).spawn == SpawnKind::Create;
+                  return seat_of(m, SeatTag::RT).spawn == SpawnKind::Create;
               }),
               "pass ST (c): T-RT is a CREATED thread on its own row-declared "
               "stack, spawned LAST, and ::main is the supervisor that joins it "
@@ -391,7 +399,7 @@ static_assert(every_thread_map([](const ThreadMap& m) {
               "cannot time-join itself — a wedged executive would then have no "
               "witness but a silent hang.");
 
-static_assert(every_thread_map([](const ThreadMap& m) { return names_fit_comm(m); }),
+static_assert(names_fit_comm(kSeatNames),
               "item: every seat name must be non-empty and <= 15 chars, "
               "because pthread_setname_np takes 16 bytes INCLUDING the NUL "
               "(glibc returns ERANGE; the kernel truncates). A name that does "
@@ -411,18 +419,13 @@ static_assert(max_cpu(kDe10Profile.threads) == 1,
               "own row, never an edit to this one; re-read the runtime sysconf "
               "gate in fw::rt_topology_init before that happens.");
 
-static_assert(every_thread_map([](const ThreadMap& m) { return names_match_seat_tags(m); }),
-              "the pthread name in this table and the display name "
-              "`infra/seat.h` renders for the same seat must be the SAME "
-              "STRING. They were hand-copied into three places (kSeatNames, "
-              "this table, the unit suite) with no join, so a rename could "
-              "land in one and not the others and the only witness would be a "
-              "/proc thread name that no longer matches what a log line says.");
-
-static_assert(every_thread_map([](const ThreadMap& m) { return every_seat_has_a_tag(m); }),
-              "every row in every board's thread map must convert to a real runtime "
-              "tag. A row falling through tag_of() would run Unbound, and an "
-              "Unbound thread passes no TASTY_SEAT check and fails every one.");
+static_assert(every_thread_map([](const ThreadMap& m) {
+                  for (const ThreadRole& r : m)
+                      if (r.seat == SeatTag::Unbound) return false;
+                  return true;
+              }),
+              "no ThreadMap row is Unbound: an Unbound thread passes no TASTY_SEAT "
+              "check, and seat_of() has no row for it.");
 
 consteval bool boards_ack_bounds_nonzero() {
     return every_measured(&BoardProfile::timing, [](const LinkTiming& t) consteval {

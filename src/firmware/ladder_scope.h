@@ -8,6 +8,7 @@
 
 #include "app/board_ops.h"
 #include "hal/boards_table.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
@@ -19,18 +20,17 @@ class RoundTimer;
 
 namespace mister::fw {
 
-class ThreadAssembly;
-
 class LadderScope final : public app::IRtPriorityScope, public app::IBoardReset {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr hal::Seat kSeat = hal::Seat::RT;
+    static constexpr SeatTag kSeat = SeatTag::RT;
 
     static constexpr unsigned kResetSettleMs = 5000;
 
-    LadderScope(ThreadAssembly& assembly, hal::IBridgeSequencer& bridges) noexcept
-        : assembly_(assembly), bridges_(bridges) {}
+    LadderScope(std::atomic<bool>& transitioning, hal::IBridgeSequencer& bridges,
+                infra::OptRef<reactor::RoundTimer> timer = {}) noexcept
+        : transitioning_(transitioning), bridges_(bridges), timer_(timer) {}
     LadderScope(const LadderScope&) = delete;
     LadderScope& operator=(const LadderScope&) = delete;
 
@@ -38,12 +38,10 @@ public:
     void restore() override;
     void board_reset() override;
 
-    void set_round_timer(reactor::RoundTimer* timer) noexcept { timer_ = timer; }
-
 private:
-    ThreadAssembly& assembly_;
+    std::atomic<bool>& transitioning_;
     hal::IBridgeSequencer& bridges_;
-    reactor::RoundTimer* timer_ = nullptr;
+    infra::OptRef<reactor::RoundTimer> timer_{};
     int saved_policy_ = SCHED_OTHER;
     sched_param saved_param_{};
     std::atomic<std::uint32_t> restore_failures_{0};

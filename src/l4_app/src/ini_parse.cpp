@@ -46,12 +46,12 @@ namespace {
         text.assign(reinterpret_cast<const char*>(bytes->data()), bytes->size());
     }
     if (!text.empty()) {
-        svc::ConfigParser::PassNames names{};
+        svc::config_parser::PassNames names{};
         names.core_name = effective_name(conf_str_name, facts);
         names.orig_core_name = conf_str_name;
         names.is_arcade = facts.is_arcade;
         names.arcade_vertical = facts.vertical;
-        auto parsed = svc::ConfigParser::parse_two_pass(text, names);
+        auto parsed = svc::config_parser::parse_two_pass(text, names);
         if (!parsed) return std::unexpected(parsed.error());
         next = std::move(*parsed);
     }

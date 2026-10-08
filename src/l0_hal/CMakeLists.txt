@@ -6,6 +6,7 @@ add_library(mister_hal STATIC
   src/irq_pin.cpp
   src/link_timing.cpp
   src/scaler_buffers.cpp
+  src/scaler_probe.cpp
   src/spi_bus.cpp
   src/thread_map.cpp
 )
@@ -51,6 +52,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/register_window.h
   hal/scaler_buffers.h
   hal/scaler_header.h
+  hal/scaler_probe.h
   hal/selected.h
   hal/spi_bus.h
   hal/spi_output_observer.h
@@ -68,27 +70,36 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
 if(TASTY_BUILD_TESTS)
 
   foreach(mod IN ITEMS axi board_profile board_windows fabric_region irq_pin spi)
-    add_executable(tasty_hal_${mod}_unit tests/${mod}_unit.cpp)
-    target_link_libraries(tasty_hal_${mod}_unit PRIVATE mister_hal tasty_test_options)
-    add_test(NAME tasty.hal_${mod} COMMAND tasty_hal_${mod}_unit)
-    set_tests_properties(tasty.hal_${mod} PROPERTIES TIMEOUT 60)
+    tasty_unit_test(tasty_hal_${mod}_unit
+      NAME tasty.hal_${mod}
+      SOURCES tests/${mod}_unit.cpp
+      LIBS mister_hal tasty_test_options
+      TIMEOUT 60)
   endforeach()
 
+  tasty_unit_test(tasty_hal_scaler_probe_unit
+    NAME tasty.hal_scaler_probe
+    SOURCES tests/scaler_probe_unit.cpp
+    LIBS mister_hal tasty_test_options
+    TIMEOUT 60)
   target_compile_definitions(tasty_hal_board_profile_unit PRIVATE
     TASTY_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 
-  add_executable(tasty_hal_fact_probe tests/fact_probe.cpp)
-  target_link_libraries(tasty_hal_fact_probe PRIVATE mister_hal tasty_test_options)
-  add_test(NAME tasty.hal_fact_probe COMMAND tasty_hal_fact_probe)
+  tasty_unit_test(tasty_hal_fact_probe
+    NAME tasty.hal_fact_probe
+    SOURCES tests/fact_probe.cpp
+    LIBS mister_hal tasty_test_options)
   foreach(arm IN ITEMS 1 2 3)
-    add_executable(tasty_hal_fact_probe_arm${arm} EXCLUDE_FROM_ALL tests/fact_probe.cpp)
-    target_compile_definitions(tasty_hal_fact_probe_arm${arm} PRIVATE TASTY_FACT_PROBE=${arm})
-    target_link_libraries(tasty_hal_fact_probe_arm${arm} PRIVATE mister_hal tasty_test_options)
-    add_test(NAME tasty.hal_fact_probe_arm${arm}
-             COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
-                     --target tasty_hal_fact_probe_arm${arm})
-    set_tests_properties(tasty.hal_fact_probe_arm${arm} PROPERTIES
-      TIMEOUT 120 RUN_SERIAL TRUE LABELS compile_probe)
+    tasty_unit_test(tasty_hal_fact_probe_arm${arm}
+      NAME tasty.hal_fact_probe_arm${arm}
+      SOURCES tests/fact_probe.cpp
+      EXCLUDE_FROM_ALL
+      DEFINES TASTY_FACT_PROBE=${arm}
+      LIBS mister_hal tasty_test_options
+      COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target tasty_hal_fact_probe_arm${arm}
+      LABELS compile_probe
+      TIMEOUT 120
+      PROPERTIES RUN_SERIAL TRUE)
   endforeach()
   set_tests_properties(tasty.hal_fact_probe_arm1 PROPERTIES
     PASS_REGULAR_EXPRESSION "unmeasured_fact_read_in_a_constant_expression")
@@ -97,19 +108,21 @@ if(TASTY_BUILD_TESTS)
   set_tests_properties(tasty.hal_fact_probe_arm3 PROPERTIES
     PASS_REGULAR_EXPRESSION "no matching function|no matching constructor")
 
-  add_executable(tasty_hal_window_probe tests/window_probe.cpp)
-  target_link_libraries(tasty_hal_window_probe PRIVATE mister_hal tasty_test_options)
-  add_test(NAME tasty.hal_window_probe COMMAND tasty_hal_window_probe)
+  tasty_unit_test(tasty_hal_window_probe
+    NAME tasty.hal_window_probe
+    SOURCES tests/window_probe.cpp
+    LIBS mister_hal tasty_test_options)
   foreach(arm IN ITEMS 1 2)
-    add_executable(tasty_hal_window_probe_arm${arm} EXCLUDE_FROM_ALL tests/window_probe.cpp)
-    target_compile_definitions(tasty_hal_window_probe_arm${arm} PRIVATE TASTY_WINDOW_PROBE=${arm})
-    target_link_libraries(tasty_hal_window_probe_arm${arm} PRIVATE mister_hal tasty_test_options)
-    add_test(NAME tasty.hal_window_probe_arm${arm}
-             COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
-                     --target tasty_hal_window_probe_arm${arm})
-    set_tests_properties(tasty.hal_window_probe_arm${arm} PROPERTIES
-      TIMEOUT 120 RUN_SERIAL TRUE LABELS compile_probe
-      PASS_REGULAR_EXPRESSION "no_window_of_that_name")
+    tasty_unit_test(tasty_hal_window_probe_arm${arm}
+      NAME tasty.hal_window_probe_arm${arm}
+      SOURCES tests/window_probe.cpp
+      EXCLUDE_FROM_ALL
+      DEFINES TASTY_WINDOW_PROBE=${arm}
+      LIBS mister_hal tasty_test_options
+      COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target tasty_hal_window_probe_arm${arm}
+      LABELS compile_probe
+      TIMEOUT 120
+      PROPERTIES RUN_SERIAL TRUE PASS_REGULAR_EXPRESSION "no_window_of_that_name")
   endforeach()
 
   target_link_libraries(tasty_hal_axi_unit PRIVATE mister_boards)

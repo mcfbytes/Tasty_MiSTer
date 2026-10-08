@@ -24,7 +24,7 @@ protected:
 public:
     virtual Ex<CoreIdentity> identify() = 0;
 
-    virtual CoreCapabilities capabilities() const = 0;
+    virtual CoreCapabilities latch_capabilities() = 0;
 
     virtual void set_core_reset(bool asserted) = 0;
 

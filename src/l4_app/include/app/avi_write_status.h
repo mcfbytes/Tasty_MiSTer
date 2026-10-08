@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "app/rec_write_status.h"
+#include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -22,6 +23,15 @@ struct AviWriteStatus {
     std::uint32_t syncs = 0;
     std::uint64_t bytes = 0;
 };
+
+constexpr void to_json(infra::JsonOut& o, const AviWriteStatus& a) noexcept {
+    o.field("seg", a.segment);
+    o.field("segs", a.segments);
+    o.field("avi_frames", a.frames);
+    o.field("avi_drop", a.dropped);
+    o.field("avi_bytes", a.bytes);
+    o.field("avi_err", a.err);
+}
 
 using AviWriteStatusCell = xthread::Telemetry<AviWriteStatus, SeatTag::RecWrite>;
 

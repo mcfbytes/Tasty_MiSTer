@@ -11,50 +11,11 @@
 
 namespace mister::app {
 
-namespace {
-
-void store_block_payload(VideoWire::Block& b, const VideoWire::Block::Payload& v) noexcept {
-    const auto* src = reinterpret_cast<const unsigned char*>(&v);
-    std::atomic<std::uint32_t>* const w = b.body;
-    for (std::size_t i = 0; i < VideoWire::Block::kBodyFull; ++i) {
-        std::uint32_t word;
-        std::memcpy(&word, src + i * VideoWire::Block::kBodyWord, VideoWire::Block::kBodyWord);
-        w[i].store(word, std::memory_order_relaxed);
-    }
-    if constexpr (VideoWire::Block::kBodyTail != 0) {
-        std::uint32_t word = 0;
-        std::memcpy(&word, src + VideoWire::Block::kBodyFull * VideoWire::Block::kBodyWord,
-                    VideoWire::Block::kBodyTail);
-        w[VideoWire::Block::kBodyFull].store(word, std::memory_order_relaxed);
-    }
-}
-
-void load_block_payload(const VideoWire::Block& b, VideoWire::Block::Payload& dst) noexcept {
-    auto* out = reinterpret_cast<unsigned char*>(&dst);
-    const std::atomic<std::uint32_t>* const w = b.body;
-    for (std::size_t i = 0; i < VideoWire::Block::kBodyFull; ++i) {
-        const std::uint32_t word = w[i].load(std::memory_order_relaxed);
-        std::memcpy(out + i * VideoWire::Block::kBodyWord, &word, VideoWire::Block::kBodyWord);
-    }
-    if constexpr (VideoWire::Block::kBodyTail != 0) {
-        const std::uint32_t word = w[VideoWire::Block::kBodyFull].load(std::memory_order_relaxed);
-        std::memcpy(out + VideoWire::Block::kBodyFull * VideoWire::Block::kBodyWord, &word,
-                    VideoWire::Block::kBodyTail);
-    }
-}
-
-}  // namespace
-
 Ex<void> VideoWire::publish(std::uint8_t opcode, std::span<const std::uint16_t> words) {
     return stage(opcode, words);
 }
 
 Ex<void> VideoWire::stage(std::uint8_t opcode, std::span<const std::uint16_t> words) {
-    if (link_tx_ == nullptr) {
-
-        rejected_.fetch_add(1, std::memory_order_relaxed);
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    }
     if (words.empty() || words.size() > kWords) {
         rejected_.fetch_add(1, std::memory_order_relaxed);
         return std::unexpected(
@@ -64,20 +25,14 @@ Ex<void> VideoWire::stage(std::uint8_t opcode, std::span<const std::uint16_t> wo
     const std::uint32_t gen = (gen_ + 1u) != 0u ? gen_ + 1u : 1u;
     const std::size_t slot = static_cast<std::size_t>(gen) % kSlots;
 
-    Block& b = table_[slot];
-
-    Block::Payload p{};
+    BlockPayload p{};
     std::memcpy(p.words, words.data(), words.size() * sizeof(std::uint16_t));
     p.opcode = opcode;
     p.count = static_cast<std::uint8_t>(words.size());
-
-    b.gen.store(0u, std::memory_order_relaxed);
-    std::atomic_thread_fence(std::memory_order_release);
-    store_block_payload(b, p);
-    b.gen.store(gen, std::memory_order_release);
+    table_[slot].write(gen, p);
 
     const proto::LinkOp::SetVideoMode mode{.block = static_cast<std::uint8_t>(slot), .gen = gen};
-    if (!link_tx_->push(mode)) {
+    if (!link_tx_.push(mode)) {
 
         rejected_.fetch_add(1, std::memory_order_relaxed);
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), gen});
@@ -87,7 +42,8 @@ Ex<void> VideoWire::stage(std::uint8_t opcode, std::span<const std::uint16_t> wo
     return {};
 }
 
-Ex<void> VideoWire::emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint32_t gen) {
+Ex<void> VideoWire::emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint32_t gen,
+                         proto::IResetFence* fence) {
 
     if (prelude_running() && !pre_replaying_) {
         pre_parked_slot_ = slot;
@@ -100,23 +56,15 @@ Ex<void> VideoWire::emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint3
         rejected_.fetch_add(1, std::memory_order_relaxed);
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot});
     }
-    const Block& b = table_[slot];
 
-    if (gen == 0u || b.gen.load(std::memory_order_acquire) != gen) {
+    BlockPayload local{};
+    if (gen == 0u || table_[slot].try_read(local) != gen || local.count == 0u ||
+        local.count > kWords) {
         stale_.fetch_add(1, std::memory_order_relaxed);
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), gen});
     }
-
-    Block::Payload local{};
-    load_block_payload(b, local);
-    std::atomic_thread_fence(std::memory_order_acquire);
     const std::uint8_t opcode = local.opcode;
     const std::uint8_t count = local.count;
-
-    if (b.gen.load(std::memory_order_relaxed) != gen || count == 0u || count > kWords) {
-        stale_.fetch_add(1, std::memory_order_relaxed);
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), gen});
-    }
     const auto r =
         svc::emit_video_words(link, opcode, std::span<const std::uint16_t>(local.words, count));
     if (!r) {
@@ -127,7 +75,7 @@ Ex<void> VideoWire::emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint3
     emitted_.fetch_add(1, std::memory_order_relaxed);
 
     if (!pre_in_block_) {
-        if (auto arm = emit_but_sw_(link, tail_but_sw_); !arm) {
+        if (auto arm = emit_but_sw_(link, tail_but_sw_, fence); !arm) {
 
             bump(arm_fail_);
         }
@@ -135,8 +83,8 @@ Ex<void> VideoWire::emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint3
     return {};
 }
 
-bool VideoWire::update_but_sw(hal::ISpiTransport& link, std::uint16_t buttons,
-                              bool osd_visible) noexcept {
+bool VideoWire::update_but_sw(hal::ISpiTransport& link, std::uint16_t buttons, bool osd_visible,
+                              proto::IResetFence* fence) noexcept {
 
     auto map = static_cast<std::uint16_t>(tail_but_sw_ & ~(kButton1 | kButton2));
     if ((buttons & app::InputWire::kButtonOsd) != 0u) map |= kButton1;
@@ -149,7 +97,7 @@ bool VideoWire::update_but_sw(hal::ISpiTransport& link, std::uint16_t buttons,
     if (osd_visible) wire = static_cast<std::uint16_t>(wire & ~kButton2);
     tail_but_sw_ = wire;
     ++but_sw_writes_;
-    if (auto r = emit_but_sw_(link, wire); !r) {
+    if (auto r = emit_but_sw_(link, wire, fence); !r) {
         ++but_sw_errors_;
         return false;
     }
@@ -159,8 +107,9 @@ bool VideoWire::update_but_sw(hal::ISpiTransport& link, std::uint16_t buttons,
     return true;
 }
 
-Ex<void> VideoWire::emit_but_sw_(hal::ISpiTransport& link, std::uint16_t word) noexcept {
-    if (fence_ != nullptr) fence_->before_buttons(but_sw_sent_, word);
+Ex<void> VideoWire::emit_but_sw_(hal::ISpiTransport& link, std::uint16_t word,
+                                 proto::IResetFence* fence) noexcept {
+    if (fence != nullptr) fence->before_buttons(but_sw_sent_, word);
     auto r = svc::emit_but_sw(link, word);
     if (r) but_sw_sent_ = word;
     return r;
@@ -181,10 +130,11 @@ namespace {
 constexpr std::int64_t kMs = 1'000'000;
 }
 
-void VideoWire::on_rt_round(hal::ISpiTransport& link, std::int64_t now_ns) {
+void VideoWire::on_rt_round(hal::ISpiTransport& link, std::int64_t now_ns,
+                            proto::IResetFence* fence) {
     bump(geo_rounds_);
 
-    if (step_prelude(link)) return;
+    if (step_prelude(link, fence)) return;
 
     if (fs_active_) {
         step_filter_stream(link);
@@ -288,7 +238,7 @@ void VideoWire::arm_prelude() noexcept {
     bump(pre_arms_);
 }
 
-bool VideoWire::step_prelude(hal::ISpiTransport& link) {
+bool VideoWire::step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence) {
     if (!prelude_running()) return false;
 
     switch (pre_step_) {
@@ -401,7 +351,7 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link) {
 
             pre_replaying_ = true;
             pre_in_block_ = true;
-            (void)emit(link, slot, gen);
+            (void)emit(link, slot, gen, fence);
             pre_in_block_ = false;
             pre_replaying_ = false;
             break;
@@ -434,17 +384,13 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link) {
             }
             pre_af_flags_.store(af, std::memory_order_relaxed);
 
-            std::uint8_t push_vol = 0;
-            std::uint8_t audvol = 0;
-            if (audio_ != nullptr) {
-                audio_->accept_probe_reply(static_cast<std::uint8_t>(af), policy().front_end);
-                if (auto f = audio_->flush(); !f) {
-                    bump(pre_errors_);
-                    tf |= static_cast<std::uint16_t>(kTailFailFlush);
-                }
-                push_vol = audio_->core_volume_byte();
-                audvol = audio_->audvol_wire_byte();
+            audio_.accept_probe_reply(static_cast<std::uint8_t>(af), policy().front_end);
+            if (auto f = audio_.flush(); !f) {
+                bump(pre_errors_);
+                tf |= static_cast<std::uint16_t>(kTailFailFlush);
             }
+            const std::uint8_t push_vol = audio_.core_volume_byte();
+            const std::uint8_t audvol = audio_.audvol_wire_byte();
 
             if (af != 0) {
                 if (auto r = svc::emit_afilter_volume(link, push_vol); !r) {
@@ -459,7 +405,7 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link) {
                 bump(pre_errors_);
                 tf |= static_cast<std::uint16_t>(kTailFailVol);
             }
-            if (auto r = emit_but_sw_(link, tail_but_sw_); !r) {
+            if (auto r = emit_but_sw_(link, tail_but_sw_, fence); !r) {
                 bump(pre_errors_);
                 tf |= static_cast<std::uint16_t>(kTailFailButSw);
             }
@@ -474,15 +420,15 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link) {
                 const std::uint32_t gen = pre_parked_gen_;
                 pre_parked_ = false;
                 pre_replaying_ = true;
-                (void)emit(link, slot, gen);
+                (void)emit(link, slot, gen, fence);
                 pre_replaying_ = false;
             }
             break;
         }
 
         case PreludeStep::Idle:
+        case PreludeStep::ArCust:
         case PreludeStep::Done:
-        default:
             return false;
     }
 

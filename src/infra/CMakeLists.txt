@@ -13,14 +13,19 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/error.h
   infra/fixed_str.h
   infra/inbox.h
+  infra/json_name.h
+  infra/json_out.h
   infra/log_lane.h
   infra/log_rec.h
   infra/message_sum.h
+  infra/opt_ref.h
+  infra/park_fds.h
   infra/persist.h
   infra/rt_stats.h
   infra/seat.h
   infra/seat_main.h
   infra/seat_park.h
+  infra/seq_cell.h
   infra/never_park.h
   infra/slot_pool.h
   infra/loan_channel.h
@@ -31,74 +36,97 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
 )
 
 if(TASTY_BUILD_TESTS)
-  add_executable(tasty_infra_crc32_unit tests/crc32_unit.cpp)
-  target_link_libraries(tasty_infra_crc32_unit PRIVATE mister_infra tasty_test_options)
-  add_test(NAME tasty.infra_crc32 COMMAND tasty_infra_crc32_unit)
-  set_tests_properties(tasty.infra_crc32 PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_crc32_unit
+    NAME tasty.infra_crc32
+    SOURCES tests/crc32_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
 
   find_package(Threads REQUIRED)
-  add_executable(tasty_infra_loan_channel_unit tests/loan_channel_unit.cpp)
-  target_link_libraries(tasty_infra_loan_channel_unit PRIVATE mister_infra tasty_test_options Threads::Threads)
-  add_test(NAME tasty.infra_loan_channel COMMAND tasty_infra_loan_channel_unit)
-  set_tests_properties(tasty.infra_loan_channel PROPERTIES TIMEOUT 120)
+  tasty_unit_test(tasty_infra_loan_channel_unit
+    NAME tasty.infra_loan_channel
+    SOURCES tests/loan_channel_unit.cpp
+    LIBS mister_infra tasty_test_options Threads::Threads
+    TIMEOUT 120)
 
-  add_executable(tasty_infra_park_smoke tests/park_smoke.cpp)
-  target_link_libraries(tasty_infra_park_smoke PRIVATE mister_infra tasty_test_options)
-  add_test(NAME tasty.infra_park_smoke COMMAND tasty_infra_park_smoke)
-  set_tests_properties(tasty.infra_park_smoke PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_park_smoke
+    NAME tasty.infra_park_smoke
+    SOURCES tests/park_smoke.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_infra_wake_flag_arm_unit tests/wake_flag_arm_unit.cpp)
-  target_link_libraries(tasty_infra_wake_flag_arm_unit PRIVATE mister_infra tasty_test_options)
-  add_test(NAME tasty.infra_wake_flag_arm COMMAND tasty_infra_wake_flag_arm_unit)
-  set_tests_properties(tasty.infra_wake_flag_arm PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_wake_flag_arm_unit
+    NAME tasty.infra_wake_flag_arm
+    SOURCES tests/wake_flag_arm_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_infra_spsc_ring_unit tests/spsc_ring_unit.cpp)
-  target_link_libraries(tasty_infra_spsc_ring_unit PRIVATE mister_infra tasty_test_options Threads::Threads)
-  add_test(NAME tasty.infra_spsc_ring COMMAND tasty_infra_spsc_ring_unit)
-  set_tests_properties(tasty.infra_spsc_ring PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_spsc_ring_unit
+    NAME tasty.infra_spsc_ring
+    SOURCES tests/spsc_ring_unit.cpp
+    LIBS mister_infra tasty_test_options Threads::Threads
+    TIMEOUT 60)
 
-  add_executable(tasty_infra_seat_park_unit tests/seat_park_unit.cpp)
-  target_link_libraries(tasty_infra_seat_park_unit PRIVATE mister_infra tasty_test_options Threads::Threads)
-  add_test(NAME tasty.infra_seat_park COMMAND tasty_infra_seat_park_unit)
-  set_tests_properties(tasty.infra_seat_park PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_seat_park_unit
+    NAME tasty.infra_seat_park
+    SOURCES tests/seat_park_unit.cpp
+    LIBS mister_infra tasty_test_options Threads::Threads
+    TIMEOUT 60)
 
-  add_executable(tasty_infra_seat_main_unit tests/seat_main_unit.cpp)
-  target_link_libraries(tasty_infra_seat_main_unit PRIVATE mister_infra tasty_test_options)
-  add_test(NAME tasty.infra_seat_main COMMAND tasty_infra_seat_main_unit)
-  set_tests_properties(tasty.infra_seat_main PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_park_fds_unit
+    NAME tasty.infra_park_fds
+    SOURCES tests/park_fds_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_infra_pause_latch_unit tests/pause_latch_unit.cpp)
-  target_link_libraries(tasty_infra_pause_latch_unit PRIVATE mister_infra tasty_test_options)
-  add_test(NAME tasty.infra_pause_latch COMMAND tasty_infra_pause_latch_unit)
-  set_tests_properties(tasty.infra_pause_latch PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_seat_main_unit
+    NAME tasty.infra_seat_main
+    SOURCES tests/seat_main_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_infra_inbox_unit tests/inbox_unit.cpp)
-  target_link_libraries(tasty_infra_inbox_unit PRIVATE mister_infra tasty_test_options)
-  add_test(NAME tasty.infra_inbox COMMAND tasty_infra_inbox_unit)
-  set_tests_properties(tasty.infra_inbox PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_pause_latch_unit
+    NAME tasty.infra_pause_latch
+    SOURCES tests/pause_latch_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_infra_lost_wakeup_unit tests/lost_wakeup_unit.cpp)
-  target_link_libraries(tasty_infra_lost_wakeup_unit PRIVATE mister_infra tasty_test_options Threads::Threads)
-  add_test(NAME tasty.infra_lost_wakeup COMMAND tasty_infra_lost_wakeup_unit)
-  set_tests_properties(tasty.infra_lost_wakeup PROPERTIES TIMEOUT 120)
+  tasty_unit_test(tasty_infra_json_out_unit
+    NAME tasty.infra_json_out
+    SOURCES tests/json_out_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
 
-  foreach(model IN ITEMS wake_inbox_lost_wakeup spsc_wrap telemetry_seqlock counter_monotonic pause_latch_barrier)
-    add_executable(tasty_infra_model_${model} tests/model/${model}.cpp)
-    target_link_libraries(tasty_infra_model_${model} PRIVATE mister_infra tasty_test_options Threads::Threads)
-    add_test(NAME tasty.infra_model_${model} COMMAND tasty_infra_model_${model})
-    set_tests_properties(tasty.infra_model_${model} PROPERTIES TIMEOUT 120)
+  tasty_unit_test(tasty_infra_inbox_unit
+    NAME tasty.infra_inbox
+    SOURCES tests/inbox_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
+
+  tasty_unit_test(tasty_infra_lost_wakeup_unit
+    NAME tasty.infra_lost_wakeup
+    SOURCES tests/lost_wakeup_unit.cpp
+    LIBS mister_infra tasty_test_options Threads::Threads
+    TIMEOUT 120)
+
+  foreach(model IN ITEMS wake_inbox_lost_wakeup spsc_wrap telemetry_seqlock counter_monotonic
+                        pause_latch_barrier seq_cell_exact)
+    tasty_unit_test(tasty_infra_model_${model}
+      NAME tasty.infra_model_${model}
+      SOURCES tests/model/${model}.cpp
+      LIBS mister_infra tasty_test_options Threads::Threads
+      TIMEOUT 120)
   endforeach()
   add_test(NAME tasty.infra_genmc
            COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/model/run-genmc.sh
                    ${CMAKE_CURRENT_SOURCE_DIR}/include)
   set_tests_properties(tasty.infra_genmc PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 
-  add_executable(tasty_infra_model_loan_channel_handoff tests/model/loan_channel_handoff.cpp)
-  target_link_libraries(tasty_infra_model_loan_channel_handoff
-                        PRIVATE mister_infra tasty_test_options Threads::Threads)
-  add_test(NAME tasty.infra_model_loan_channel_handoff
-           COMMAND tasty_infra_model_loan_channel_handoff)
-  set_tests_properties(tasty.infra_model_loan_channel_handoff PROPERTIES TIMEOUT 120)
+  tasty_unit_test(tasty_infra_model_loan_channel_handoff
+    NAME tasty.infra_model_loan_channel_handoff
+    SOURCES tests/model/loan_channel_handoff.cpp
+    LIBS mister_infra tasty_test_options Threads::Threads
+    TIMEOUT 120)
   add_test(NAME tasty.infra_genmc_loan
            COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/model/run-genmc-loan.sh
                    ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -109,20 +137,35 @@ if(TASTY_BUILD_TESTS)
                    ${CMAKE_CURRENT_SOURCE_DIR}/include)
   set_tests_properties(tasty.infra_genmc_cells PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
 
-  add_executable(tasty_infra_slot_pool_unit tests/slot_pool_unit.cpp)
-  target_link_libraries(tasty_infra_slot_pool_unit PRIVATE mister_infra tasty_test_options)
-  add_test(NAME tasty.infra_slot_pool COMMAND tasty_infra_slot_pool_unit)
-  set_tests_properties(tasty.infra_slot_pool PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_seq_cell_unit
+    NAME tasty.infra_seq_cell
+    SOURCES tests/seq_cell_unit.cpp
+    LIBS mister_infra tasty_test_options Threads::Threads
+    TIMEOUT 60)
 
-  add_executable(tasty_infra_claim_set_unit tests/claim_set_unit.cpp)
-  target_link_libraries(tasty_infra_claim_set_unit PRIVATE mister_infra tasty_test_options)
-  add_test(NAME tasty.infra_claim_set COMMAND tasty_infra_claim_set_unit)
-  set_tests_properties(tasty.infra_claim_set PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_slot_pool_unit
+    NAME tasty.infra_slot_pool
+    SOURCES tests/slot_pool_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
 
-  add_executable(tasty_infra_message_sum_unit tests/message_sum_unit.cpp)
-  target_link_libraries(tasty_infra_message_sum_unit PRIVATE mister_infra tasty_test_options)
-  add_test(NAME tasty.infra_message_sum COMMAND tasty_infra_message_sum_unit)
-  set_tests_properties(tasty.infra_message_sum PROPERTIES TIMEOUT 60)
+  tasty_unit_test(tasty_infra_opt_ref_unit
+    NAME tasty.infra_opt_ref
+    SOURCES tests/opt_ref_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
+
+  tasty_unit_test(tasty_infra_claim_set_unit
+    NAME tasty.infra_claim_set
+    SOURCES tests/claim_set_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
+
+  tasty_unit_test(tasty_infra_message_sum_unit
+    NAME tasty.infra_message_sum
+    SOURCES tests/message_sum_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
 
   set(_unrouted "an on\\(\\) overload for an alternative this sink is not routed")
   set(_msgsum_probe_unrouted_on "${_unrouted}")
@@ -132,15 +175,19 @@ if(TASTY_BUILD_TESTS)
   set(_msgsum_probe_untotal "a message sum whose alternatives are not total")
   set(_msgsum_probe_prvalue_ctx "cannot convert .*Round.* to .*Round&|cannot bind to a temporary")
   foreach(probe IN ITEMS unrouted_on generic_on rvalue_on missing_on untotal prvalue_ctx)
-    add_executable(tasty_infra_message_sum_${probe}_probe EXCLUDE_FROM_ALL
-                   tests/message_sum_${probe}_probe.cpp)
-    target_link_libraries(tasty_infra_message_sum_${probe}_probe PRIVATE mister_infra tasty_test_options)
-    add_test(NAME tasty.infra_message_sum_${probe}_probe
-             COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
-                     --target tasty_infra_message_sum_${probe}_probe)
-    set_tests_properties(tasty.infra_message_sum_${probe}_probe PROPERTIES
-      PASS_REGULAR_EXPRESSION "${_msgsum_probe_${probe}}" TIMEOUT 120 RUN_SERIAL TRUE
-      LABELS compile_probe)
+    tasty_unit_test(tasty_infra_message_sum_${probe}_probe
+      NAME tasty.infra_message_sum_${probe}_probe
+      SOURCES tests/message_sum_${probe}_probe.cpp
+      EXCLUDE_FROM_ALL
+      LIBS mister_infra tasty_test_options
+      COMMAND ${CMAKE_COMMAND}
+        --build
+        ${CMAKE_BINARY_DIR}
+        --target
+        tasty_infra_message_sum_${probe}_probe
+      LABELS compile_probe
+      TIMEOUT 120
+      PROPERTIES PASS_REGULAR_EXPRESSION "${_msgsum_probe_${probe}}" RUN_SERIAL TRUE)
   endforeach()
 
   get_property(_tasty_genmc_tests DIRECTORY PROPERTY TESTS)

@@ -38,9 +38,14 @@ bool LoadWalk::wants_pass(const LinkTxChannel& inbox, const FileTxLevelCell* lev
             return false;
         case Pc::Pieces:
             return inbox.ring().size() < cores::PayloadPieces::kAhead;
-        default:
+        case Pc::Hold:
+        case Pc::Row:
+        case Pc::Save:
+        case Pc::Release:
             return inbox.ring().size() < proto::kLinkTxCapacity;
     }
+
+    return false;
 }
 
 LoadWalk::Pass LoadWalk::step(Host& h) {

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 #include "app/launcher_demand.h"
 #include "app/launcher_fb_ack.h"
@@ -55,12 +56,25 @@ public:
         std::uint32_t stale_swept = 0;
     };
 
-    LauncherHost(const Wiring& w, const Timing& t) noexcept : w_(w), t_(t) {}
-    explicit LauncherHost(const Wiring& w) noexcept : LauncherHost(w, Timing{}) {}
+    class Fds {
+    public:
+        [[nodiscard]] static Ex<Fds> create() noexcept;
+        Fds(Fds&&) noexcept = default;
+        Fds(const Fds&) = delete;
+        Fds& operator=(const Fds&) = delete;
+        Fds& operator=(Fds&&) = delete;
+
+    private:
+        friend class LauncherHost;
+        explicit Fds(UniqueFd epoll) noexcept : epoll_(std::move(epoll)) {}
+        UniqueFd epoll_;
+    };
+
+    LauncherHost(Fds fds, const Wiring& w, const Timing& t) noexcept
+        : w_(w), t_(t), epoll_(std::move(fds.epoll_)) {}
+    LauncherHost(Fds fds, const Wiring& w) noexcept : LauncherHost(std::move(fds), w, Timing{}) {}
     LauncherHost(const LauncherHost&) = delete;
     LauncherHost& operator=(const LauncherHost&) = delete;
-
-    [[nodiscard]] Ex<void> open() noexcept;
     [[nodiscard]] int poll_fd() const noexcept { return epoll_.get(); }
 
     void serve() noexcept;
@@ -105,7 +119,7 @@ private:
 
     Wiring w_;
     Timing t_;
-    UniqueFd epoll_{};
+    UniqueFd epoll_;
     LauncherDemandCell::Reader demand_seen_{};
     LauncherDemand demand_{};
     std::optional<os::ChildProcess> child_{};

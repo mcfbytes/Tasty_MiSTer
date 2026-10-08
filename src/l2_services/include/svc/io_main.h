@@ -3,9 +3,10 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
+#include "infra/park_fds.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
@@ -24,13 +25,11 @@ class IoMain final : public xthread::SeatMain<IoMain> {
 public:
     static constexpr std::size_t kMaxCoworkers = 5;
 
-    IoMain() noexcept = default;
+    explicit IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker = {}) noexcept;
     IoMain(const IoMain&) = delete;
     IoMain& operator=(const IoMain&) = delete;
     IoMain(IoMain&&) = delete;
     IoMain& operator=(IoMain&&) = delete;
-
-    [[nodiscard]] Ex<void> open() noexcept;
 
     [[nodiscard]] bool add_coworker(IIoCoworker* c) noexcept;
     void remove_coworker(IIoCoworker* c) noexcept;
@@ -44,7 +43,7 @@ public:
     [[nodiscard]] bool idle() const noexcept;
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
     [[nodiscard]] int park_ms() const noexcept { return kIoBlockForeverMs; }
-    [[nodiscard]] xthread::SeatPark& park() noexcept { return *park_; }
+    [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
     [[nodiscard]] bool paused() noexcept { return pause_.observe(*this); }
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
     void settle() noexcept {}
@@ -56,12 +55,12 @@ public:
     [[nodiscard]] xthread::PauseLatch& pause_latch() noexcept { return pause_; }
 
 private:
-    xthread::WakeFlag wake_{};
-    xthread::PauseLatch pause_{wake_};
-    xthread::WakeFlag stop_{};
+    xthread::WakeFlag& wake_;
+    xthread::PauseLatch pause_;
+    xthread::WakeFlag stop_;
     IIoCoworker* coworkers_[kMaxCoworkers]{};
     std::uint8_t n_coworkers_ = 0;
-    std::optional<xthread::SeatPark> park_{};
+    xthread::SeatPark park_;
 };
 
 static_assert(xthread::SeatBody<IoMain>);

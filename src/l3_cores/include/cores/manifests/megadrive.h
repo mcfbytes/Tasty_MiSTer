@@ -4,6 +4,7 @@
 #include <array>
 #include <memory>
 
+#include "cores/core_grant.h"
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
 #include "cores/pcm_census_rows.h"
@@ -39,6 +40,6 @@ inline constexpr CoreProfile kMegaDrive{
     .windows = kMdPlusWindows,
 };
 
-std::unique_ptr<Core> make_megadrive(const CoreProfile& p, const HostServices& h);
+std::unique_ptr<Core> make_megadrive(const CoreProfile& p, const CoreGrant& g);
 
 }  // namespace mister::cores::manifests

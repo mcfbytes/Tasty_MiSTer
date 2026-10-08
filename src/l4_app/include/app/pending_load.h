@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -29,17 +30,17 @@ public:
 
     [[nodiscard]] Ex<std::string> resolve(const svc::Vfs& vfs) const;
 
-    [[nodiscard]] MraFacts mra_facts(const svc::Vfs& vfs) const;
+    [[nodiscard]] Ex<void> load_manifest(const svc::Vfs& vfs);
 
-    [[nodiscard]] Ex<void> validate(const svc::Vfs& vfs) const;
+    [[nodiscard]] MraFacts mra_facts() const;
+
+    [[nodiscard]] Ex<void> validate(const svc::Vfs& vfs);
 
 private:
-    [[nodiscard]] Ex<std::string_view> manifest_doc_(const svc::Vfs& vfs) const;
     [[nodiscard]] Ex<std::string> resolve_mra_(const svc::Vfs& vfs) const;
 
     LoadRequest req_{};
-    mutable std::string doc_;
-    mutable bool doc_read_ = false;
+    std::optional<std::string> doc_;
 };
 
 [[nodiscard]] MraFacts mra_facts_at(const svc::Vfs& vfs, std::string_view rel);

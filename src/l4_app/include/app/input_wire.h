@@ -50,7 +50,7 @@ public:
     static constexpr std::uint32_t kReqOsdOn = 1u << 5;
     static constexpr std::uint32_t kReqOsdApply = 1u << 6;
 
-    InputWire() = default;
+    explicit InputWire(reactor::Executive& rt_exec) noexcept : rt_exec_(rt_exec) {}
     InputWire(const InputWire&) = delete;
     InputWire& operator=(const InputWire&) = delete;
 
@@ -248,8 +248,6 @@ public:
     void consume_kick() noexcept { kick_armed_.store(false, std::memory_order_release); }
     bool kick_armed() const noexcept { return kick_armed_.load(std::memory_order_acquire); }
 
-    void set_rt_wake(reactor::Executive* exec) noexcept { rt_exec_ = exec; }
-
     bool kick_rt() noexcept;
 
     Ex<void> open_ctrl() noexcept;
@@ -344,9 +342,9 @@ private:
 
     std::atomic<std::uint32_t> edge_reset_{0};
 
-    xthread::Telemetry<CoreNameCell> name_cell_{};
+    xthread::Telemetry<CoreNameCell, SeatTag::Ui> name_cell_{};
 
-    xthread::Telemetry<svc::JoyPlan> plan_cell_{};
+    xthread::Telemetry<svc::JoyPlan, SeatTag::Ui> plan_cell_{};
 
     std::atomic<const svc::IAnalogReshape*> reshape_{nullptr};
 
@@ -362,7 +360,7 @@ private:
     std::atomic<std::uint32_t> req_{0};
     std::atomic<bool> kick_armed_{false};
 
-    reactor::Executive* rt_exec_ = nullptr;
+    reactor::Executive& rt_exec_;
     std::atomic<bool> paused_{false};
     std::atomic<std::uint32_t> pause_seq_{0};
 

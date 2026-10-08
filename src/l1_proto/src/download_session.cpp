@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/download_session.h"
+#include "proto/upload_session.h"
 #include "hal/selected.h"
 
 #include <optional>
@@ -119,26 +120,22 @@ Ex<DownloadSession> DownloadSession::begin(hal::ISpiTransport& link, IoIndex ind
     return begin(link, WideIoIndex{index.v}, params);
 }
 
-Ex<DownloadSession> DownloadSession::begin(hal::ISpiTransport& link, WideIoIndex index,
-                                           const SessionParams& params) {
-    if (auto r = set_index(link, index); !r) return std::unexpected(r.error());
+Ex<FioBracket> FioBracket::begin(hal::ISpiTransport& link, WideIoIndex index, hal::SpiWord mode,
+                                 const SessionParams& params) {
+    if (auto r = DownloadSession::set_index(link, index); !r) return std::unexpected(r.error());
     if (!params.ext.empty()) {
-        if (auto r = send_file_info(link, params.ext); !r) {
+        if (auto r = DownloadSession::send_file_info(link, params.ext); !r) {
             return std::unexpected(r.error());
         }
     }
 
-    std::optional<DownloadSession> session;
+    std::optional<FioBracket> bracket;
     {
         hal::Selected cs(link, hal::ChipSelect::Fpga);
         if (auto r = link.transfer(kFileTx); !r) return std::unexpected(r.error());
-        const hal::SpiWord mode =
-            (params.direction == TransferDirection::Upload) ? kModeUpload : kModeDownload;
         if (auto r = link.transfer(mode); !r) return std::unexpected(r.error());
 
-        session.emplace(DownloadSession{link});
-        session->index_ = index.v;
-        session->direction_ = params.direction;
+        bracket.emplace(FioBracket{link, index.v});
 
         if (params.aux.v != 0) {
             const auto lo = static_cast<std::uint16_t>(params.aux.v & 0xFFFFu);
@@ -147,81 +144,103 @@ Ex<DownloadSession> DownloadSession::begin(hal::ISpiTransport& link, WideIoIndex
             if (r) r = beat(link, hi);
             if (!r) {
                 cs.release();
-                (void)session->end();
+                (void)bracket->end();
                 return std::unexpected(r.error());
             }
         }
     }
-    return std::move(*session);
+    return std::move(*bracket);
+}
+
+Ex<FioBracket> FioBracket::window(hal::ISpiTransport& link, WideIoIndex index, hal::SpiWord mode) {
+    hal::Selected cs(link, hal::ChipSelect::Fpga);
+    if (auto r = link.transfer(kFileTx); !r) return std::unexpected(r.error());
+    if (auto r = link.transfer(mode); !r) return std::unexpected(r.error());
+    return FioBracket{link, index.v};
+}
+
+FioBracket::~FioBracket() {
+    if (link_ != nullptr) (void)end();
+}
+
+Ex<void> FioBracket::end() {
+    if (link_ == nullptr) return {};
+
+    hal::ISpiTransport* link = std::exchange(link_, nullptr);
+    hal::Selected cs(*link, hal::ChipSelect::Fpga);
+    if (auto r = link->transfer(kFileTx); !r) return std::unexpected(r.error());
+    if (auto r = link->transfer(kModeEnd); !r) return std::unexpected(r.error());
+    return {};
+}
+
+Ex<DownloadSession> DownloadSession::begin(hal::ISpiTransport& link, WideIoIndex index,
+                                           const SessionParams& params) {
+    auto b = FioBracket::begin(link, index, kModeDownload, params);
+    if (!b) return std::unexpected(b.error());
+    return DownloadSession{std::move(*b)};
 }
 
 Ex<DownloadSession> DownloadSession::open(hal::ISpiTransport& link, WideIoIndex index) {
-    hal::Selected cs(link, hal::ChipSelect::Fpga);
-    if (auto r = link.transfer(kFileTx); !r) return std::unexpected(r.error());
-    if (auto r = link.transfer(kModeDownload); !r) return std::unexpected(r.error());
-    DownloadSession session{link};
-    session.index_ = index.v;
-    return session;
+    auto b = FioBracket::window(link, index, kModeDownload);
+    if (!b) return std::unexpected(b.error());
+    return DownloadSession{std::move(*b)};
+}
+
+Ex<UploadSession> UploadSession::begin(hal::ISpiTransport& link, WideIoIndex index) {
+    auto b = FioBracket::begin(link, index, kModeUpload, SessionParams{});
+    if (!b) return std::unexpected(b.error());
+    return UploadSession{std::move(*b)};
 }
 
 DownloadSession::~DownloadSession() {
-    if (posted_) {
-        abandon();
-    } else if (link_ != nullptr) {
-        (void)end();
-    }
+    if (posted_) abandon();
 }
 
-DownloadSession::DownloadSession(DownloadSession&& o) noexcept
-    : link_(std::exchange(o.link_, nullptr)), index_(o.index_), direction_(o.direction_),
-      posted_(std::exchange(o.posted_, false)) {}
-
 Ex<void> DownloadSession::write(std::span<const std::uint8_t> data) {
-    if (link_ == nullptr) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    return write(data, link_->width());
+    hal::ISpiTransport* link = bracket_.link();
+    if (link == nullptr) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
+    return write(data, link->width());
 }
 
 Ex<void> DownloadSession::write(std::span<const std::uint8_t> data, hal::Width w) {
-    if (link_ == nullptr) {
+    hal::ISpiTransport* link = bracket_.link();
+    if (link == nullptr) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     }
-    if (direction_ != TransferDirection::Download) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_});
-    }
-    hal::Selected cs(*link_, hal::ChipSelect::Fpga);
-    if (auto r = link_->transfer(kFileTxDat); !r) return std::unexpected(r.error());
-    return emit_payload(*link_, data, w);
+    hal::Selected cs(*link, hal::ChipSelect::Fpga);
+    if (auto r = link->transfer(kFileTxDat); !r) return std::unexpected(r.error());
+    return emit_payload(*link, data, w);
 }
 
-Ex<void> DownloadSession::read(std::span<std::uint8_t> data) {
-    if (link_ == nullptr) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    return read(data, link_->width());
+Ex<void> UploadSession::read(std::span<std::uint8_t> data) {
+    hal::ISpiTransport* link = bracket_.link();
+    if (link == nullptr) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
+    return read(data, link->width());
 }
 
-Ex<void> DownloadSession::read(std::span<std::uint8_t> data, hal::Width w) {
-    if (link_ == nullptr) {
+Ex<void> UploadSession::read(std::span<std::uint8_t> data, hal::Width w) {
+    hal::ISpiTransport* link = bracket_.link();
+    if (link == nullptr) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     }
-    if (direction_ != TransferDirection::Upload) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_});
-    }
-    hal::Selected cs(*link_, hal::ChipSelect::Fpga);
-    if (auto r = link_->transfer(kFileTxDat); !r) return std::unexpected(r.error());
-    return absorb_payload(*link_, data, w);
+    hal::Selected cs(*link, hal::ChipSelect::Fpga);
+    if (auto r = link->transfer(kFileTxDat); !r) return std::unexpected(r.error());
+    return absorb_payload(*link, data, w);
 }
 
 Ex<void> DownloadSession::post(std::span<const std::uint16_t> words) {
-    if (link_ == nullptr || posted_ || words.empty() || direction_ != TransferDirection::Download) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_});
+    hal::ISpiTransport* link = bracket_.link();
+    if (link == nullptr || posted_ || words.empty()) {
+        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), bracket_.index()});
     }
 
-    link_->select(hal::ChipSelect::Fpga);
-    Ex<void> r = link_->transfer(kFileTxDat).transform([](hal::SpiWord) noexcept {});
+    link->select(hal::ChipSelect::Fpga);
+    Ex<void> r = link->transfer(kFileTxDat).transform([](hal::SpiWord) noexcept {});
     for (std::size_t i = 0; r && i + 1u < words.size(); ++i)
-        r = beat(*link_, words[i]).transform([](hal::SpiWord) noexcept {});
-    if (r) r = link_->post(hal::SpiWord{words.back()});
+        r = beat(*link, words[i]).transform([](hal::SpiWord) noexcept {});
+    if (r) r = link->post(hal::SpiWord{words.back()});
     if (!r) {
-        link_->deselect();
+        link->deselect();
         return r;
     }
     posted_ = true;
@@ -229,8 +248,9 @@ Ex<void> DownloadSession::post(std::span<const std::uint16_t> words) {
 }
 
 Ex<bool> DownloadSession::settle(std::span<const std::uint16_t> tail) {
-    if (!posted_) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_});
-    auto done = link_->posted_done();
+    if (!posted_) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), bracket_.index()});
+    hal::ISpiTransport* link = bracket_.link();
+    auto done = link->posted_done();
     if (!done) {
         abandon();
         return std::unexpected(done.error());
@@ -239,8 +259,8 @@ Ex<bool> DownloadSession::settle(std::span<const std::uint16_t> tail) {
     posted_ = false;
     Ex<void> r{};
     for (std::size_t i = 0; r && i < tail.size(); ++i)
-        r = beat(*link_, tail[i]).transform([](hal::SpiWord) noexcept {});
-    link_->deselect();
+        r = beat(*link, tail[i]).transform([](hal::SpiWord) noexcept {});
+    link->deselect();
     if (!r) return std::unexpected(r.error());
     return true;
 }
@@ -248,20 +268,15 @@ Ex<bool> DownloadSession::settle(std::span<const std::uint16_t> tail) {
 void DownloadSession::abandon() noexcept {
     if (!posted_) return;
     posted_ = false;
-    link_->abandon_post();
-    link_->deselect();
-    link_ = nullptr;
+    hal::ISpiTransport* link = bracket_.link();
+    link->abandon_post();
+    link->deselect();
+    bracket_.detach();
 }
 
 Ex<void> DownloadSession::end() {
-    if (link_ == nullptr) return {};
-    if (posted_) return std::unexpected(Error{Errc::would_block, ERR_SITE(), index_});
-
-    hal::ISpiTransport* link = std::exchange(link_, nullptr);
-    hal::Selected cs(*link, hal::ChipSelect::Fpga);
-    if (auto r = link->transfer(kFileTx); !r) return std::unexpected(r.error());
-    if (auto r = link->transfer(kModeEnd); !r) return std::unexpected(r.error());
-    return {};
+    if (posted_) return std::unexpected(Error{Errc::would_block, ERR_SITE(), bracket_.index()});
+    return bracket_.end();
 }
 
 Ex<void> DownloadSession::send_cheats(hal::ISpiTransport& link,

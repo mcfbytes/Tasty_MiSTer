@@ -29,7 +29,7 @@ Ex<void> ChdPrefetch::open() {
         slab_.reset(new (std::nothrow) std::byte[kPrefetchBudgetBytes]);
         if (slab_ == nullptr) return std::unexpected(Error{Errc::os, ERR_SITE(), 0});
     }
-    if (wake_.fd() >= 0) return {};
+    if (opened()) return {};
     return wake_.open_fd();
 }
 
@@ -69,6 +69,8 @@ void ChdPrefetch::reset_consumer_() noexcept {
 }
 
 bool ChdPrefetch::settle_park() noexcept {
+
+    if (!opened()) return true;
     request_park();
     if (!parked()) {
 
@@ -87,7 +89,7 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, std::uint32_t hunk
     if (!src || hunk_bytes == 0 || hunk_count == 0) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), hunk_bytes});
     }
-    if (wake_.fd() < 0) return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
+    if (!opened()) return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
 
     depth_ = 0;
     forward_span_ = 0;
@@ -302,7 +304,7 @@ PrefetchCounters ChdPrefetch::counters() const noexcept {
 
     c.drops = chan_.census().breaches;
     c.errors = errors_.load(std::memory_order_relaxed);
-    c.state = wake_.fd() < 0 ? 0u : (parked() ? 1u : 2u);
+    c.state = !opened() ? 0u : (parked() ? 1u : 2u);
     c.decode_us = decode_us_.load(std::memory_order_relaxed);
     c.evictions = evictions_.load(std::memory_order_relaxed);
     return c;

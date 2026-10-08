@@ -9,6 +9,7 @@
 namespace mister::hal {
 
 struct PinLevels {
+    TASTY_SEAT_EXEMPT(const_shared);
     bool core_ready = false;
     bool menu_button = false;
     bool user_button = false;

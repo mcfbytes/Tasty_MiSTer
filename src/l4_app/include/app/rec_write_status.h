@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -20,6 +21,13 @@ struct RecWriteStatus {
     std::uint32_t syncs = 0;
     std::uint64_t bytes = 0;
 };
+
+constexpr void to_json(infra::JsonOut& o, const RecWriteStatus& w) noexcept {
+    o.field("written", w.rows);
+    o.field("wdrop", w.dropped);
+    o.field("wbytes", w.bytes);
+    o.field("werr", w.err);
+}
 
 using RecWriteStatusCell = xthread::Telemetry<RecWriteStatus, SeatTag::RecWrite>;
 

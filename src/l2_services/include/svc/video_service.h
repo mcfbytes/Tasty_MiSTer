@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "hal/spi_transport.h"
 #include "svc/adv7513_io.h"
 #include "svc/cec_state_machine.h"
@@ -179,7 +180,13 @@ class VideoService {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    static Ex<VideoService> create();
+    struct Wiring;
+
+    VideoService(const VideoService&) = delete;
+    VideoService& operator=(const VideoService&) = delete;
+    explicit VideoService(Wiring w) noexcept;
+    [[nodiscard]] static VideoService create(Wiring w);
+    [[nodiscard]] static VideoService create();
 
     struct ParsedMode {
         Modeline mode{};
@@ -219,7 +226,6 @@ public:
         IVideoWireSink(const IVideoWireSink&) = default;
         IVideoWireSink& operator=(const IVideoWireSink&) = default;
     };
-    void set_wire_sink(IVideoWireSink& s) noexcept { sink_ = &s; }
 
     class IResolutionSampler {
     public:
@@ -231,13 +237,13 @@ public:
         IResolutionSampler(const IResolutionSampler&) = default;
         IResolutionSampler& operator=(const IResolutionSampler&) = default;
     };
-    void set_resolution_sampler(IResolutionSampler& s) noexcept { sampler_ = &s; }
 
-    void set_adv7513_io(const adv7513::Io& io) noexcept {
-        io_ = io;
-        edid_.set_io(io);
-        cec_.set_io(io);
-    }
+    struct Wiring {
+        infra::OptRef<IVideoWireSink> sink{};
+        infra::OptRef<IResolutionSampler> sampler{};
+    };
+
+    void set_adv7513_io(const adv7513::Io& io) noexcept { io_ = io; }
 
     void set_hdmi_capable(bool v) noexcept { hdmi_capable_ = v; }
     bool hdmi_capable() const noexcept { return hdmi_capable_; }
@@ -309,18 +315,16 @@ public:
     const PllBlock& pll_block() const noexcept { return pll_; }
 
 private:
-    VideoService() = default;
-
     Ex<void> apply_tmds_power(bool on);
 
     Ex<void> settle_and_publish();
 
-    EdidStore edid_;
-    CecStateMachine cec_;
+    adv7513::Io io_{};
+    EdidStore edid_{io_};
+    CecStateMachine cec_{io_};
 
     IVideoWireSink* sink_ = nullptr;
     IResolutionSampler* sampler_ = nullptr;
-    adv7513::Io io_{};
     Modeline::WireOptions wire_opt_{};
 
     VideoSample info_{};

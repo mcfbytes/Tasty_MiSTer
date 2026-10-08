@@ -52,16 +52,11 @@ public:
     static constexpr std::size_t kMaxPartitions = 6;
     static constexpr std::size_t kMaxImageChars = 255;
 
-    [[nodiscard]] static Ex<NvramStore> create(NvramPolicy policy);
-
-    [[nodiscard]] Ex<void> load(std::string_view image_basename,
-                                std::span<const SavePartition> declared);
+    [[nodiscard]] static Ex<NvramStore> load(NvramPolicy policy, std::string_view image_basename,
+                                             std::span<const SavePartition> declared);
 
     [[nodiscard]] Ex<void> relayout(std::span<const std::uint32_t> lengths);
 
-    void unload() noexcept;
-
-    bool loaded() const noexcept { return loaded_; }
     std::string_view image() const noexcept { return image_.view(); }
     std::span<const SavePartition> partitions() const noexcept { return {table_, count_}; }
 
@@ -84,7 +79,6 @@ private:
     FixedStr<kMaxImageChars + 1, StrFit::Reject> image_{};
     SavePartition table_[kMaxPartitions]{};
     std::uint8_t count_ = 0;
-    bool loaded_ = false;
 };
 
 }  // namespace mister::cores

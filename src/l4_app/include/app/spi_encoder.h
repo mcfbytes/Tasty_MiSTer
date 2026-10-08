@@ -25,28 +25,14 @@ namespace mister::app {
 
 class OsdWire;
 class VideoWire;
-class ISaveFlush;
-class ICheatApply;
-class ICoreOptionActs;
 
 class SpiEncoder final : public ILinkEncoder {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    explicit SpiEncoder(hal::ISpiTransport& link, hal::ICoreSignals& signals,
-                        proto::CoreSession& session, OsdWire& osd) noexcept;
-
-    void attach_slots(proto::BlockSlots& slots) noexcept { slots_ = &slots; }
-
-    void attach_joysticks(svc::InputEmitter& em) noexcept { em_ = &em; }
-
-    void attach_save_flush(ISaveFlush& saves) noexcept { saves_ = &saves; }
-
-    void attach_video(VideoWire& video) noexcept { video_ = &video; }
-
-    void attach_cheats(ICheatApply& cheats) noexcept { cheats_ = &cheats; }
-
-    void attach_core_options(ICoreOptionActs& acts) noexcept { acts_ = &acts; }
+    SpiEncoder(hal::ISpiTransport& link, hal::ICoreSignals& signals, proto::CoreSession& session,
+               OsdWire& osd, proto::BlockSlots& slots, VideoWire& video,
+               svc::InputEmitter& em) noexcept;
 
     using Result = ILinkEncoder::Outcome;
 
@@ -77,16 +63,13 @@ public:
 
 private:
     std::uint32_t holds_ = 0;
-    hal::ISpiTransport* link_;
-    hal::ICoreSignals* signals_;
-    proto::CoreSession* session_;
-    OsdWire* osd_;
-    proto::BlockSlots* slots_ = nullptr;
-    svc::InputEmitter* em_ = nullptr;
-    ISaveFlush* saves_ = nullptr;
-    VideoWire* video_ = nullptr;
-    ICheatApply* cheats_ = nullptr;
-    ICoreOptionActs* acts_ = nullptr;
+    hal::ISpiTransport& link_;
+    hal::ICoreSignals& signals_;
+    proto::CoreSession& session_;
+    OsdWire& osd_;
+    proto::BlockSlots& slots_;
+    VideoWire& video_;
+    svc::InputEmitter& em_;
     std::uint32_t link_op_misrouted_ = 0;
 };
 

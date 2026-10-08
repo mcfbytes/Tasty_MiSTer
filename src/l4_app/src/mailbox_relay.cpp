@@ -21,7 +21,7 @@ void MailboxRelay::forget() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, A);
     polling_ = false;
     gen_ = 0;
-    have_last_ = false;
+    last_head_.reset();
 }
 
 void MailboxRelay::service_rt(hal::ISpiTransport& link, proto::SpiFioQueue& queue,
@@ -35,7 +35,7 @@ void MailboxRelay::service_rt(hal::ISpiTransport& link, proto::SpiFioQueue& queu
         if (!done) break;
         if (!done.completed() || done->gen != gen_ || gen_ == 0) {
             stale_.add();
-            have_last_ = false;
+            last_head_.reset();
             continue;
         }
         write_(queue, *done);
@@ -53,7 +53,7 @@ void MailboxRelay::service_rt(hal::ISpiTransport& link, proto::SpiFioQueue& queu
                 return;
             }
             f.w[i] = r->v;
-            if (i == 0) moved = !have_last_ || f.w[0] != last_head_;
+            if (i == 0) moved = !last_head_ || f.w[0] != *last_head_;
         }
     }
     polls_.add();
@@ -69,7 +69,6 @@ void MailboxRelay::service_rt(hal::ISpiTransport& link, proto::SpiFioQueue& queu
     l->act = {};
     chan_.send(std::move(l));
     last_head_ = f.w[0];
-    have_last_ = true;
     forwarded_.add();
 }
 

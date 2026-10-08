@@ -2,10 +2,10 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
 
 #include "diag_sampler.h"
 #include "infra/error.h"
+#include "infra/park_fds.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
 #include "infra/seat_park.h"
@@ -20,15 +20,15 @@ class DiagMain final : public xthread::SeatMain<DiagMain> {
     TASTY_SEAT_RESIDENT(Diag);
 
 public:
-    static constexpr hal::Seat kSeat = hal::Seat::Diag;
+    static constexpr SeatTag kSeat = SeatTag::Diag;
 
-    explicit DiagMain(DiagSampler& sampler) noexcept : sampler_(sampler) {}
+    DiagMain(DiagSampler& sampler, xthread::ParkFds fds) noexcept
+        : sampler_(sampler), wake_(fds.wake()), stop_(std::move(fds).take_stop()),
+          park_(wake_, stop_) {}
     DiagMain(const DiagMain&) = delete;
     DiagMain& operator=(const DiagMain&) = delete;
     DiagMain(DiagMain&&) = delete;
     DiagMain& operator=(DiagMain&&) = delete;
-
-    [[nodiscard]] Ex<void> open() noexcept;
 
     void start() noexcept;
     void stop() noexcept { stop_.request(); }
@@ -37,7 +37,7 @@ public:
     [[nodiscard]] bool idle() const noexcept { return true; }
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
     [[nodiscard]] int park_ms() const noexcept { return static_cast<int>(rest_ms_); }
-    [[nodiscard]] xthread::SeatPark& park() noexcept { return *park_; }
+    [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept { return false; }
     [[nodiscard]] bool pause_pending() const noexcept { return false; }
@@ -45,9 +45,9 @@ public:
 
 private:
     DiagSampler& sampler_;
-    xthread::WakeFlag wake_{};
-    xthread::WakeFlag stop_{};
-    std::optional<xthread::SeatPark> park_{};
+    xthread::WakeFlag& wake_;
+    xthread::WakeFlag stop_;
+    xthread::SeatPark park_;
     std::uint32_t slice_ = 0;
     unsigned rest_ms_ = 0;
     bool final_sampled_ = false;

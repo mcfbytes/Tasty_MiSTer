@@ -70,18 +70,22 @@ class MglPlayer {
 public:
     static constexpr std::size_t kMaxItems = 6;
 
+    struct Wiring {
+        LinkTxChannel& link_tx;
+        UiRequestRing& asks;
+        NameConfig& names;
+    };
+
+    explicit MglPlayer(Wiring w) noexcept : link_tx_(w.link_tx), asks_(w.asks), names_(w.names) {}
+
+    void reset() noexcept;
+
     [[nodiscard]] Ex<void> parse(std::string_view xml, bool core_supports_mgl);
-
-    void set_link_tx(LinkTxChannel* tx) noexcept { link_tx_ = tx; }
-
-    void set_asks(UiRequestRing* asks) noexcept { asks_ = asks; }
 
     [[nodiscard]] bool set_homes(std::string_view file_home, std::string_view image_home) noexcept;
 
     void set_scope(CoreScope s) noexcept { scope_ = s; }
     [[nodiscard]] CoreScope scope() const noexcept { return scope_; }
-
-    void set_names(NameConfig* names) noexcept { names_ = names; }
 
     void remember(std::uint8_t i, const RememberedStem& stem, RememberedSlot slot,
                   std::uint8_t ioctl_index) noexcept;
@@ -129,9 +133,9 @@ private:
     void record_publish(CorrelationTag tag) noexcept;
     void record_wire_publish(bool pushed) noexcept;
 
-    LinkTxChannel* link_tx_ = nullptr;
-    UiRequestRing* asks_ = nullptr;
-    NameConfig* names_ = nullptr;
+    LinkTxChannel& link_tx_;
+    UiRequestRing& asks_;
+    NameConfig& names_;
 
     struct RememberAt {
         RememberedSlot slot = RememberedSlot::File;

@@ -10,7 +10,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string_view>
 
+#include "infra/json_out.h"
 #include "infra/unique_fd.h"
 #include "infra/seat.h"
 
@@ -22,6 +24,8 @@ class DiagLog {
 public:
     static constexpr std::size_t kMaxLine = 4095;
     static_assert(kMaxLine + 1 <= PIPE_BUF, "one record must still be one atomic write");
+    static_assert(infra::JsonOut::kCapacity == kMaxLine - 1,
+                  "a JsonOut record is exactly what appendf keeps");
 
     DiagLog() = default;
 
@@ -53,19 +57,23 @@ public:
             if (len > sizeof buf - 2) len = sizeof buf - 2;
         }
         buf[len] = '\n';
-        ++len;
-        if (echo_stderr_) {
-            const auto e = ::write(STDERR_FILENO, buf, len);
-            (void)e;
-        }
-        if (!fd_.valid()) {
-            drops_.fetch_add(1, std::memory_order_relaxed);
+        emit_(buf, len + 1);
+    }
+
+    void append(infra::JsonOut& o) noexcept {
+        if (!o.overflowed()) {
+            const std::string_view line = o.take_line();
+            emit_(line.data(), line.size());
             return;
         }
-        if (::write(fd_.get(), buf, len) != static_cast<::ssize_t>(len)) {
-
-            drops_.fetch_add(1, std::memory_order_relaxed);
-        }
+        truncations_.fetch_add(1, std::memory_order_relaxed);
+        char buf[96];
+        const int n = std::snprintf(buf, sizeof buf - 1, "{\"t\":\"trunc\",\"need\":%u,\"max\":%u}",
+                                    static_cast<unsigned>(o.need()),
+                                    static_cast<unsigned>(infra::JsonOut::kCapacity));
+        const auto len = n < 0 ? 0u : static_cast<std::size_t>(n);
+        buf[len] = '\n';
+        emit_(buf, len + 1);
     }
 
     std::uint32_t drops() const noexcept { return drops_.load(std::memory_order_relaxed); }
@@ -75,6 +83,21 @@ public:
     }
 
 private:
+    void emit_(const char* line, std::size_t len) noexcept {
+        if (echo_stderr_) {
+            const auto e = ::write(STDERR_FILENO, line, len);
+            (void)e;
+        }
+        if (!fd_.valid()) {
+            drops_.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        if (::write(fd_.get(), line, len) != static_cast<::ssize_t>(len)) {
+
+            drops_.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
     UniqueFd fd_;
 
     std::atomic<std::uint32_t> drops_{0};

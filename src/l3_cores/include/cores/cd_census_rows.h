@@ -10,7 +10,7 @@
 
 namespace mister::cores {
 
-namespace cd_detail {
+namespace detail {
 
 [[nodiscard]] inline ICdServiceRows* rows_for(reactor::CoreState& st,
                                               const CoreProfile& p) noexcept {
@@ -35,11 +35,11 @@ public:
     }
 };
 
-}  // namespace cd_detail
+}  // namespace detail
 
 template <const CoreProfile& kProfile>
-inline constexpr cd_detail::CommandEdgeRow<kProfile> kCdCommandEdge{};
+inline constexpr detail::CommandEdgeRow<kProfile> kCdCommandEdge{};
 template <const CoreProfile& kProfile>
-inline constexpr cd_detail::ServiceTickRow<kProfile> kCdServiceTick{};
+inline constexpr detail::ServiceTickRow<kProfile> kCdServiceTick{};
 
 }  // namespace mister::cores

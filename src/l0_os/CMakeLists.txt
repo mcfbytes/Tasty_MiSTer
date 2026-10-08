@@ -9,8 +9,8 @@ add_library(mister_os STATIC
   src/run_sync.cpp
   src/small_file.cpp
   src/uinput_keyboard.cpp
-  src/vt_console.cpp
   src/vm_compaction.cpp
+  src/vt_console.cpp
 )
 target_include_directories(mister_os PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_os
@@ -46,9 +46,10 @@ tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
 if(TASTY_BUILD_TESTS)
 
   foreach(mod IN ITEMS child_process clock i2c_device mmio run_sync)
-    add_executable(tasty_os_${mod}_unit tests/${mod}_unit.cpp)
-    target_link_libraries(tasty_os_${mod}_unit PRIVATE mister_os tasty_test_options)
-    add_test(NAME tasty.os_${mod} COMMAND tasty_os_${mod}_unit)
-    set_tests_properties(tasty.os_${mod} PROPERTIES TIMEOUT 60)
+    tasty_unit_test(tasty_os_${mod}_unit
+      NAME tasty.os_${mod}
+      SOURCES tests/${mod}_unit.cpp
+      LIBS mister_os tasty_test_options
+      TIMEOUT 60)
   endforeach()
 endif()

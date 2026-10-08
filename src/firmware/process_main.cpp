@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "process_main.h"
 
-#include "hub.h"
+#include "report.h"
 #include "supervisor_verdict.h"
 #include "thread_assembly.h"
 #include "app/link_event_dispatch.h"

@@ -5,33 +5,15 @@
 
 namespace mister::app {
 
-PcmMain::PcmMain(PcmRingFeeder& feeder) noexcept : feeder_(feeder) {}
-
-Ex<void> PcmMain::open() noexcept {
-    if (wake_.fd() < 0) {
-        if (auto r = wake_.open_fd(); !r) return r;
-    }
-    if (stop_.fd() < 0) {
-        if (auto r = stop_.open_fd(); !r) return r;
-    }
-    if (!park_) park_.emplace(wake_, stop_);
-
-    feeder_.bind_commands(cmds_);
-    return {};
-}
-
-void PcmMain::bind_mailbox(MailboxRelay& relay, CompanionHost& host) noexcept {
-    relay_ = &relay;
-    host_ = &host;
-}
+PcmMain::PcmMain(PcmRingFeeder& feeder, xthread::ParkFds fds, PcmRingFeeder::Commands& commands,
+                 std::optional<Mailbox> mailbox, infra::OptRef<xthread::WakeFlag> asker) noexcept
+    : feeder_(feeder), relay_(mailbox ? &mailbox->relay : nullptr),
+      host_(mailbox ? &mailbox->host : nullptr), wake_(fds.wake()),
+      stop_(std::move(fds).take_stop()), cmds_(commands), pause_(wake_, asker ? &*asker : nullptr),
+      park_(wake_, stop_) {}
 
 void PcmMain::start() noexcept {
     TASTY_SEAT_BODY(PcmMain);
-    if (!park_) {
-        if constexpr (kSeatChecksEnabled)
-            fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "PcmMain started unopened");
-        return;
-    }
     loop_();
 }
 

@@ -10,11 +10,11 @@ bool DiscStore::mounted_for_test() const noexcept {
 void DiscStore::publish_() noexcept {
 
     if (engine_.has_value()) {
-        geom_->publish(engine_->geometry());
-        counters_->publish(engine_->counters());
+        geom_.publish(engine_->geometry());
+        counters_.publish(engine_->counters());
     } else {
-        geom_->publish(DiscGeometry{});
-        counters_->publish(DiscCounters{});
+        geom_.publish(DiscGeometry{});
+        counters_.publish(DiscCounters{});
     }
 }
 
@@ -31,7 +31,7 @@ Ex<std::size_t> DiscStore::read_form(DiscForm form, proto::Lba lba, std::span<st
         next_lba_ = lba.v + 1;
     }
 
-    counters_->publish(engine_->counters());
+    counters_.publish(engine_->counters());
     return r;
 }
 
@@ -46,14 +46,13 @@ bool DiscStore::ensure_engine_(const CuePolicy* policy) noexcept {
             publish_();
             return false;
         }
-        auto d = opener_ != nullptr ? DiscEngine::create(*opener_, *policy_)
-                                    : DiscEngine::create(*vfs_, *policy_);
+        auto d = opener_ != nullptr ? DiscEngine::create(*opener_, *policy_, prefetch_)
+                                    : DiscEngine::create(*vfs_, *policy_, prefetch_);
         if (!d) {
             publish_();
             return false;
         }
         engine_.emplace(std::move(*d));
-        engine_->set_prefetch(prefetch_);
         next_lba_ = 0;
     }
     return true;

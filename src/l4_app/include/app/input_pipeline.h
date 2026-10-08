@@ -8,12 +8,8 @@
 #include "app/input_emit.h"
 #include "app/input_sample.h"
 #include "app/input_wire.h"
-#include "infra/error.h"
 #include "os/clock.h"
-#include "hal/spi_transport.h"
-#include "proto/link_router.h"
 #include "svc/input_service.h"
-#include "svc/vfs.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -22,13 +18,11 @@ class InputPipeline {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
-    InputPipeline(const svc::Vfs& vfs, hal::ISpiTransport& link, os::IClock& clock,
-                  proto::ILinkRouter& router) noexcept;
+    InputPipeline(InputDecode::Fds fds, InputWire& wire, InputBuild& build, InputEmit& emit,
+                  os::IClock& clock, InputDecode::Wiring decode_wiring) noexcept;
 
     InputPipeline(const InputPipeline&) = delete;
     InputPipeline& operator=(const InputPipeline&) = delete;
-
-    Ex<void> open();
 
     InputWire& wire() noexcept { return wire_; }
     const InputWire& wire() const noexcept { return wire_; }
@@ -39,13 +33,14 @@ public:
     InputEmit& emit() noexcept { return emit_; }
     const InputEmit& emit() const noexcept { return emit_; }
 
-    InputSample sample() const noexcept { return InputSample{&decode_, &build_, &emit_, &wire_}; }
+    const InputSample& sample() const noexcept { return sample_; }
 
 private:
-    InputWire wire_{};
+    InputWire& wire_;
+    InputBuild& build_;
+    InputEmit& emit_;
     InputDecode decode_;
-    InputBuild build_;
-    InputEmit emit_;
+    const InputSample sample_;
 };
 
 struct InputStats {

@@ -30,7 +30,7 @@ inline constexpr std::array<LauncherProfile, 1> kLaunchers{{
      .vt = 7},
 }};
 
-namespace launcher_detail {
+namespace detail {
 
 constexpr bool ieq(std::string_view a, std::string_view b) noexcept {
     if (a.size() != b.size()) return false;
@@ -44,15 +44,14 @@ constexpr bool ieq(std::string_view a, std::string_view b) noexcept {
     return true;
 }
 
-}  // namespace launcher_detail
+}  // namespace detail
 
 constexpr const LauncherProfile* launcher_for_main(std::string_view cfg_main) noexcept {
     for (const LauncherProfile& p : kLaunchers) {
-        if (launcher_detail::ieq(cfg_main, p.main_value)) return &p;
+        if (detail::ieq(cfg_main, p.main_value)) return &p;
         if (cfg_main.size() > p.main_value.size() && cfg_main.front() == '/' &&
             cfg_main[cfg_main.size() - p.main_value.size() - 1] == '/' &&
-            launcher_detail::ieq(cfg_main.substr(cfg_main.size() - p.main_value.size()),
-                                 p.main_value))
+            detail::ieq(cfg_main.substr(cfg_main.size() - p.main_value.size()), p.main_value))
             return &p;
     }
     return nullptr;

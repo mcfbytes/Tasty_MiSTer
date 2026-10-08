@@ -4,6 +4,7 @@
 #include <array>
 #include <memory>
 
+#include "cores/core_grant.h"
 #include "cores/companion_load.h"
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
@@ -46,7 +47,7 @@ inline constexpr CoreProfile kSnes{
     .file_tx_whole = true,
 };
 
-std::unique_ptr<Core> make_snes(const CoreProfile& p, const HostServices& h);
+std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g);
 
 std::unique_ptr<ICompanionLoad> make_snes_companion(const svc::Vfs& vfs);
 

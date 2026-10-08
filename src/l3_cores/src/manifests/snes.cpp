@@ -12,8 +12,8 @@
 
 namespace mister::cores::manifests {
 
-std::unique_ptr<Core> make_snes(const CoreProfile& p, const HostServices& h) {
-    return std::make_unique<SnesCore>(p, h);
+std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g) {
+    return std::make_unique<SnesCore>(p, g.services);
 }
 
 std::unique_ptr<ICompanionLoad> make_snes_companion(const svc::Vfs& vfs) {

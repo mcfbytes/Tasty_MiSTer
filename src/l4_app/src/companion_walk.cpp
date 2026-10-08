@@ -24,9 +24,13 @@ bool CompanionWalk::wants_pass(const LinkTxChannel& inbox,
             return false;
         case Pc::Load:
             return !walk_ || walk_->wants_pass(inbox, level);
-        default:
+        case Pc::Bind:
+        case Pc::Before:
+        case Pc::After:
             return inbox.ring().size() < proto::kLinkTxCapacity;
     }
+
+    return false;
 }
 
 CompanionWalk::Pass CompanionWalk::step(Host& h) {

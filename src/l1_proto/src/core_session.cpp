@@ -51,7 +51,7 @@ Ex<CoreType> CoreSession::accept_identity(const Ex<hal::CoreIdentity>& id) {
             break;
     }
 
-    caps_ = signals_->capabilities();
+    caps_ = signals_->latch_capabilities();
     if (type_ == CoreType::Unknown) {
         caps_.width = hal::Width::Byte;
         caps_.io_version = 0;

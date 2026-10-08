@@ -14,6 +14,7 @@
 #include "infra/fixed_str.h"
 #include "infra/loan_channel.h"
 #include "infra/message_sum.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "svc/file.h"
 #include "svc/io_coworker.h"
@@ -95,11 +96,11 @@ public:
     using Chan = xthread::LoanChannel<FileStreamSlot, kStreamDepth, SeatTag::RT, SeatTag::Io>;
     using Loan = Chan::Loan;
 
-    FileStreamService() noexcept : chan_(xthread::Polled{}) {}
+    explicit FileStreamService(infra::OptRef<const svc::Vfs> vfs = {}) noexcept
+        : vfs_(vfs ? &*vfs : nullptr), chan_(xthread::Polled{}) {}
 
-    explicit FileStreamService(xthread::WakeFlag& io_wake) noexcept : chan_(io_wake) {}
-
-    void bind_vfs(const svc::Vfs& vfs) noexcept { vfs_ = &vfs; }
+    FileStreamService(xthread::WakeFlag& io_wake, infra::OptRef<const svc::Vfs> vfs) noexcept
+        : vfs_(vfs ? &*vfs : nullptr), chan_(io_wake) {}
 
     void seal_boot_pump() noexcept { sealed_ = true; }
     [[nodiscard]] bool sealed() const noexcept { return sealed_; }

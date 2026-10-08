@@ -13,7 +13,9 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 #include <set>
+#include <type_traits>
 #include <utility>
 
 #include "infra/persist.h"
@@ -143,10 +145,10 @@ std::optional<std::string> fold_case_lookup(std::string_view base, std::string_v
 
 class PosixFile final : public IFile {
 public:
-    PosixFile(UniqueFd fd, FileKind kind, std::uint64_t fixed_size, bool has_fixed_size,
-              std::string path, bool unlink_at_close)
+    PosixFile(UniqueFd fd, FileKind kind, std::optional<std::uint64_t> fixed_size, std::string path,
+              bool unlink_at_close)
         : fd_(static_cast<UniqueFd&&>(fd)), path_(std::move(path)), fixed_size_(fixed_size),
-          kind_(kind), has_fixed_size_(has_fixed_size), unlink_at_close_(unlink_at_close) {}
+          kind_(kind), unlink_at_close_(unlink_at_close) {}
 
     ~PosixFile() override {
 
@@ -194,7 +196,7 @@ public:
 
     Ex<FileSize> size() const override {
 
-        if (has_fixed_size_) return FileSize{fixed_size_};
+        if (fixed_size_) return FileSize{*fixed_size_};
         struct ::stat st {};
         if (::fstat(fd_.get(), &st) != 0) {
             const auto e = static_cast<std::uint32_t>(errno);
@@ -231,10 +233,11 @@ public:
 private:
     UniqueFd fd_;
     std::string path_;
-    std::uint64_t fixed_size_ = 0;
+    std::optional<std::uint64_t> fixed_size_{};
     FileKind kind_ = FileKind::Real;
-    bool has_fixed_size_ = false;
     bool unlink_at_close_ = false;
+
+    static_assert(std::is_trivially_copyable_v<decltype(fixed_size_)>);
 };
 
 class MemoryFile final : public IFile {
@@ -939,8 +942,7 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
     }
 
     FileKind kind = FileKind::Real;
-    std::uint64_t fixed = 0;
-    bool has_fixed = false;
+    std::optional<std::uint64_t> fixed;
 
     if (istarts_with(full, "/dev/shm/")) {
 
@@ -954,12 +956,11 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
             return std::unexpected(Error{Errc::os, ERR_SITE(), e});
         }
         fixed = static_cast<std::uint64_t>(blksize);
-        has_fixed = true;
     }
 
     const bool unlink_at_close = (kind == FileKind::Shm) && mode_creates(mode);
     return std::unique_ptr<IFile>(
-        new PosixFile(static_cast<UniqueFd&&>(fd), kind, fixed, has_fixed, full, unlink_at_close));
+        new PosixFile(static_cast<UniqueFd&&>(fd), kind, fixed, full, unlink_at_close));
 }
 
 Ex<void> Vfs::mount_memory(std::string_view path, std::span<const std::byte> blob, Crc32 crc) {

@@ -66,7 +66,7 @@ Ex<std::string> read_whole_file(const UniqueFd& fd) {
 
 }  // namespace
 
-Ex<AudioService> AudioService::create() { return AudioService(); }
+AudioService AudioService::create() noexcept { return AudioService(); }
 
 void AudioService::set_volume(proto::VolumeCmd kind, int arg) {
     vol_att_ &= kVolValidMask;

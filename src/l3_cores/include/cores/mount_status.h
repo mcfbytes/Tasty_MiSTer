@@ -5,10 +5,12 @@
 
 #include "cores/staging_core.h"
 #include "infra/fixed_str.h"
+#include "infra/seat.h"
 
 namespace mister::cores {
 
 struct MountStatus {
+    TASTY_SEAT_EXEMPT(const_shared);
     std::uint32_t generation = 0;
     MountState state = MountState::Pending;
     bool data_first_track = false;

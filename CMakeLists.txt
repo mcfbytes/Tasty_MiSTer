@@ -28,6 +28,7 @@ endforeach()
 
 include(cmake/warnings.cmake)
 include(cmake/header_checks.cmake)
+include(cmake/unit_test.cmake)
 enable_testing()
 
 if(NOT TASTY_VDATE)

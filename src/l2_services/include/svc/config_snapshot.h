@@ -117,6 +117,8 @@ struct ConfigSnapshot {
     std::uint8_t sanity_check = 0;
 
     std::uint8_t scanrate_lock = 0;
+    std::uint8_t osd_style = 0;
+    std::uint8_t hd_osd_fps = 10;
 
     std::uint8_t alt_ini = 0;
     bool second_pass_ran = false;

@@ -162,6 +162,8 @@ constexpr Option kSchema[] = {
 
 constexpr Option kExtSchema[] = {
     {"SCANRATE_LOCK", OptionType::U8, 0, 1, 0, TASTY_CFG_OFF(scanrate_lock), 0, false},
+    {"OSD_STYLE", OptionType::U8, 0, 1, 0, TASTY_CFG_OFF(osd_style), 0, false},
+    {"HD_OSD_FPS", OptionType::U8, 1, 30, 10, TASTY_CFG_OFF(hd_osd_fps), 0, false},
 };
 
 #undef TASTY_CFG_OFF
@@ -363,7 +365,7 @@ void parse_numeric(const Option& o, const char* text, std::byte* out, ConfigSnap
             endptr = end;
             u32 = static_cast<std::uint32_t>(raw);
             const std::int64_t before = static_cast<std::int64_t>(u32);
-            const std::int64_t after = ConfigParser::clamp(o, before);
+            const std::int64_t after = config_parser::clamp(o, before);
             out_of_range = (after != before);
             u32 = static_cast<std::uint32_t>(after);
             break;
@@ -376,7 +378,7 @@ void parse_numeric(const Option& o, const char* text, std::byte* out, ConfigSnap
             endptr = end;
             i32 = static_cast<std::int32_t>(raw);
             const std::int64_t before = i32;
-            const std::int64_t after = ConfigParser::clamp(o, before);
+            const std::int64_t after = config_parser::clamp(o, before);
             out_of_range = (after != before);
             i32 = static_cast<std::int32_t>(after);
             break;
@@ -397,7 +399,6 @@ void parse_numeric(const Option& o, const char* text, std::byte* out, ConfigSnap
         }
         case OptionType::Str:
         case OptionType::StrArr:
-        default:
             out_of_range = false;
             break;
     }
@@ -439,7 +440,6 @@ void parse_numeric(const Option& o, const char* text, std::byte* out, ConfigSnap
             break;
         case OptionType::Str:
         case OptionType::StrArr:
-        default:
             break;
     }
 }
@@ -450,7 +450,7 @@ struct SectionVerdict {
     bool video_header = false;
 };
 
-SectionVerdict classify_section(std::string_view raw, const ConfigParser::PassNames& names) {
+SectionVerdict classify_section(std::string_view raw, const config_parser::PassNames& names) {
     SectionVerdict v;
     if (raw.empty()) return v;
     const char lead = raw.front();
@@ -517,7 +517,7 @@ bool read_line(std::string_view text, std::size_t& pos, std::string& line) {
 
         if (line.size() >= kIniLineSize - 1 || c == kCommentChar) ignore = true;
         if (c == kLineEnd) break;
-        if (ConfigParser::admits(c) && !ignore && !skip) line.push_back(c);
+        if (config_parser::admits(c) && !ignore && !skip) line.push_back(c);
     }
 
     while (!line.empty() && is_space(line.back()))
@@ -611,7 +611,16 @@ void parse_var(const std::string& line, ConfigSnapshot& into,
             }
             break;
         }
-        default:
+        case OptionType::U8:
+        case OptionType::U16:
+        case OptionType::U32:
+        case OptionType::I32:
+        case OptionType::I8:
+        case OptionType::I16:
+        case OptionType::Hex8:
+        case OptionType::Hex16:
+        case OptionType::Hex32:
+        case OptionType::F32:
 
             parse_numeric(o, value, base, into);
             break;
@@ -624,7 +633,7 @@ std::span<const Option> option_schema() { return kSchema; }
 
 std::span<const Option> option_schema_ext() { return kExtSchema; }
 
-bool ConfigParser::admits(char c) {
+bool config_parser::admits(char c) {
 
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '[' ||
            c == ']' || c == '(' || c == ')' || c == '-' || c == '+' || c == '/' || c == '=' ||
@@ -632,20 +641,20 @@ bool ConfigParser::admits(char c) {
            c == '*' || c == ':' || c == '~' || c == ' ' || c == '\t';
 }
 
-std::int64_t ConfigParser::clamp(const Option& o, std::int64_t v) {
+std::int64_t config_parser::clamp(const Option& o, std::int64_t v) {
 
     if (v < o.min) return o.min;
     if (v > o.max) return o.max;
     return v;
 }
 
-SectionMatch ConfigParser::match_section(std::string_view header, const PassNames& names) {
+SectionMatch config_parser::match_section(std::string_view header, const PassNames& names) {
     if (header.empty()) return SectionMatch::Global;
     return classify_section(header, names).kind;
 }
 
-Ex<ConfigParser::PassOutcome> ConfigParser::parse(std::string_view text, const PassNames& names,
-                                                  ConfigSnapshot& into) {
+Ex<config_parser::PassOutcome> config_parser::parse(std::string_view text, const PassNames& names,
+                                                    ConfigSnapshot& into) {
 
     PassOutcome outcome;
 
@@ -696,7 +705,7 @@ Ex<ConfigParser::PassOutcome> ConfigParser::parse(std::string_view text, const P
     return outcome;
 }
 
-Ex<ConfigSnapshot> ConfigParser::parse_two_pass(std::string_view text, const PassNames& names) {
+Ex<ConfigSnapshot> config_parser::parse_two_pass(std::string_view text, const PassNames& names) {
     ConfigSnapshot cfg{};
 
     auto p1 = parse(text, names, cfg);

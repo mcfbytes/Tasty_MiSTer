@@ -6,6 +6,7 @@
 
 #include "infra/diag_log.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "os/clock.h"
 #include "infra/seat.h"
 
@@ -17,11 +18,11 @@ class BtPump {
 public:
     using Probe = Ex<bool> (*)();
 
-    BtPump(const os::IClock& clock, Probe probe) noexcept : clock_(&clock), probe_(probe) {}
+    BtPump(const os::IClock& clock, Probe probe,
+           infra::OptRef<xthread::DiagLog> diag = std::nullopt) noexcept
+        : clock_(&clock), probe_(probe), diag_(diag) {}
 
     static constexpr std::chrono::milliseconds kDelay{6000};
-
-    void set_diag(xthread::DiagLog* d) noexcept { diag_ = d; }
 
     void tick();
 
@@ -43,7 +44,7 @@ private:
     State state_ = State::Unarmed;
     std::chrono::nanoseconds due_{};
     Stats stats_{};
-    xthread::DiagLog* diag_ = nullptr;
+    infra::OptRef<xthread::DiagLog> diag_;
 };
 
 }  // namespace mister::app

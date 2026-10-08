@@ -21,8 +21,8 @@
 #include "assembly.h"
 #include "board_parts.h"
 #include "census.h"
-#include "hub.h"
 #include "process_main.h"
+#include "report.h"
 #include "app/board_ops.h"
 #include "hal/board_profile.h"
 #include "hal/thread_map.h"
@@ -40,11 +40,104 @@
 #include "rt_evidence.h"
 #include "rt_setup.h"
 #include "reactor/executive.h"
+#include "svc/config_snapshot.h"
+#include "svc/deadzone_rule.h"
 #include "svc/vfs.h"
 #include "app/replay_feeder.h"
 #include "cores/movie_codec.h"
 #include "tasty_ctl.h"
 #include "tasty_session.h"
+
+namespace mister::fw {
+
+DiagSampler::Sources TastyHub::diag_sources_(const BootParts& plat) noexcept {
+    const DiagSampler::DeviceCells d = device_.diag_sources(plat);
+    return DiagSampler::Sources{
+        .mgl_row0 = d.mgl_row0,
+        .window_counts = d.window_counts,
+        .video_stats = device_.video_pump_.stats_cell(),
+        .video_geometry = device_.video_pump_.geometry_cell(),
+        .video_wire = device_.video_pump_.wire(),
+        .diag = d.diag,
+        .pause_expiries = d.pause_expiries,
+        .recover_polls = d.recover_polls,
+        .save_write_failures = d.save_write_failures,
+        .fallbacks = d.fallbacks,
+        .doorbell = d.doorbell,
+        .round_timing = d.round_timing,
+        .frames = d.frames,
+        .replay = replay_.replay_status_,
+        .rec_capture = rec_.rec_status_,
+        .rec_encode = rec_.encode_status_,
+        .rec_write = rec_.rec_write_status_,
+        .rec_avi = rec_.avi_write_status_,
+        .screenshots = d.screenshots,
+    };
+}
+
+TastyHub::TastyHub(const BootParts& plat, app::IStopSignal& stop)
+    : device_{plat, stop, DeviceBlock::Front{}},
+      tasty_sink_{device_.video_pump_, &device_.session_.identity()},
+      shot_pump_{app::ScreenshotPump::Wiring{.queue = device_.shots_}},
+      replay_{plat, device_, shot_pump_, null_osd_}, rec_{plat, device_, replay_.replay_status_},
+      router_{app::CmdRouter::Wiring{.video = device_.video_pump_,
+                                     .shots = shot_pump_,
+                                     .replay = replay_.replay_feeder_,
+                                     .rec = rec_.recorder_,
+                                     .ui_requests = device_.owner_.ui_requests(),
+                                     .stats = plat.stats,
+                                     .link_tx = device_.ui_inbox_}},
+      fifo_(DeviceBlock::open_cmd_fifo(router_)),
+      rt_main_{plat.exec, plat.link_timing,
+               app::RtMain::Wiring{
+                   .session = infra::OptRef<app::LinkSession>{device_.session_},
+                   .input = infra::OptRef<app::InputEmit>{device_.input_emit_},
+                   .osd = infra::OptRef<app::OsdWire>{device_.osd_wire_},
+                   .timer = infra::OptRef<reactor::RoundTimer>{plat.round_timer},
+                   .wire = infra::OptRef<app::InputWire>{device_.input_wire_},
+                   .frames = infra::OptRef<app::CoreFrameCounter>{device_.frame_counter_},
+                   .replay = infra::OptRef<app::ReplayGate>{replay_.replay_gate_},
+                   .replay_ring = infra::OptRef<app::ReplayRing>{replay_.replay_ring_},
+               }},
+      assembly_{plat.threads,
+                plat.stats,
+                device_.events_,
+                plat.rt_evidence,
+                device_.main_wake_,
+                ThreadAssembly::DiagWires{.log = device_.diag_log_,
+                                          .rt_lane = plat.rt_lane,
+                                          .transitioning = device_.transitioning_},
+                UiMain::Wires{.wake = device_.ui_wake_, .uart_handoffs = device_.uart_handoffs_},
+                UiMain::Wiring{.fifo = fifo_ ? &*fifo_ : nullptr,
+                               .mgl = nullptr,
+                               .video = device_.video_pump_,
+                               .ui_sink = tasty_sink_,
+                               .owner_events = device_.owner_events_,
+                               .shots = shot_pump_,
+                               .replay = replay_.replay_feeder_,
+                               .recorder = rec_.recorder_,
+                               .link_rx = device_.ui_rx_},
+                diag_sources_(plat)},
+      process_main_{device_.owner_, assembly_, device_.main_wake_} {
+    device_.open_wires(plat);
+    device_.open_seats(plat, DeviceBlock::Seats{.mains = seat_mains_, .diag = assembly_.diag()});
+    rec_.open_seats(seat_mains_);
+    device_.grant_pauses(seat_mains_, assembly_.ui());
+}
+
+TastyHub::~TastyHub() {
+    if (!assembly_.any_live()) return;
+    assembly_.stop();
+    (void)assembly_.join();
+}
+
+void TastyHub::latch_boot_config() noexcept {
+    auto c = std::make_unique<svc::ConfigSnapshot>();
+    if (device_.config_cell_.sample_into(*c) == 0) c = std::make_unique<svc::ConfigSnapshot>();
+    device_.input_build_.set_cfg_deadzone_rules(svc::parse_deadzone_rules(*c));
+}
+
+}  // namespace mister::fw
 
 using mister::fw::report;
 extern char** environ;
@@ -52,6 +145,12 @@ extern char** environ;
 namespace {
 
 using namespace mister;
+
+class TastyVoice final : public fw::IReportVoice {
+public:
+    void say(std::string_view line) const noexcept override { fw::tasty_say(line); }
+};
+const TastyVoice kTastyVoice{};
 
 std::atomic<int> g_stop_requested TASTY_PERSIST(proc, tasty_stop_requested){0};
 
@@ -181,7 +280,7 @@ void report_unknown_board(const hal::CompatibleBlob&) {
 
 enum class IoSeat : std::uint8_t { Stopped, Running };
 
-int teardown(int rc, hal::ILinkPort& link, fw::Hub* hub, IoSeat io) {
+int teardown(int rc, hal::ILinkPort& link, fw::TastyHub* hub, IoSeat io) {
     if (hub != nullptr) {
         const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
         if (auto sd = hub->shutdown_link(); !sd) report("LinkSession::shutdown", sd.error());
@@ -195,7 +294,7 @@ int teardown(int rc, hal::ILinkPort& link, fw::Hub* hub, IoSeat io) {
 [[noreturn]] void exit_io_wedged(const fw::ThreadAssembly& assembly) {
     char buf[96];
     std::snprintf(buf, sizeof buf, "{\"t\":\"wedge\",\"seat\":\"T-IO\",\"tid\":%ld}",
-                  assembly.io_tid());
+                  assembly.tid(SeatTag::Io));
     fw::tasty_say(buf);
     (void)fw::tasty_launch_home();
     ::_exit(fw::kRtWedgeExitStatus);
@@ -279,10 +378,9 @@ void mister::fw::tasty_arm_owner_signals() noexcept {
 }
 
 int mister::fw::tasty_run_owner(const TastyArgs& args) {
+    set_report_voice(&kTastyVoice);
     tasty_arm_owner_signals();
     static_assert(!tasty_boot_calls_handoff());
-
-    static_assert(!Hub::kRoutesMgl);
     TastyArgs local = args;
     if (!tasty_resolve_args(local)) {
         tasty_say("tasty: cannot resolve paths");
@@ -353,7 +451,7 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
     announce_board(board, *compatible);
     if (local.record)
         tasty_warn_record_writeback(local.record->view(),
-                                    hal::seat_of(board.threads, hal::Seat::RT).cpu);
+                                    hal::seat_of(board.threads, SeatTag::RT).cpu);
 
     if (auto t = fw::rt_topology_init(board.threads, fw::RtMode::Required, ev); !t) {
         report("thread map", t.error());
@@ -378,13 +476,18 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
     hal::BoardWindows& windows = *(new (static_cast<void*>(g_windows_storage))
                                        hal::BoardWindows(std::move(*opened_windows)));
     static xthread::RtStats stats TASTY_PERSIST(proc, tasty_rt_stats){};
+
+    static reactor::RoundTimer round_timer TASTY_PERSIST(proc, tasty_round_timer){};
+    static xthread::LogLane rt_lane TASTY_PERSIST(proc, tasty_rt_lane){};
     auto parts = fw::BoardParts::make(board, windows, stats);
     if (!parts) {
         report(parts.error().role, parts.error().why);
         return 1;
     }
     hal::ILinkPort& link = parts->link();
-    auto exec = reactor::Executive::create(stats);
+    auto exec = reactor::Executive::create(
+        stats, {.round_timer = infra::OptRef<reactor::RoundTimer>{round_timer},
+                .log_lane = infra::OptRef<xthread::LogLane>{rt_lane}});
     if (!exec) {
         report("Executive::create", exec.error());
         return teardown(1, link, nullptr, IoSeat::Stopped);
@@ -412,7 +515,7 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
         report("ProgramGeometry", program.error());
         return teardown(1, link, nullptr, IoSeat::Stopped);
     }
-    const fw::Hub::BootParts boot_parts{
+    const fw::BootParts boot_parts{
         .link = link,
         .bridges = parts->bridges(),
         .programmer = parts->programmer(),
@@ -426,6 +529,8 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
         .threads = board.threads,
         .exec = *exec,
         .stats = stats,
+        .round_timer = round_timer,
+        .rt_lane = rt_lane,
         .vfs = *vfs,
         .rt_evidence = ev,
         .kernel_rt = ev.kernel,
@@ -434,7 +539,7 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
     };
     MainStopSignal stop_signal{};
     static_assert(__cpp_aligned_new >= 201606L);
-    auto hub = std::make_unique<fw::Hub>(boot_parts, stop_signal);
+    auto hub = std::make_unique<fw::TastyHub>(boot_parts, stop_signal);
     hub->force_vsync_adjust(args.vsync_adjust);
     hub->arm_replay_ini(args.strict);
     const hal::PhysRegion fb = board.regions[static_cast<std::size_t>(hal::RegionId::VideoFb)];

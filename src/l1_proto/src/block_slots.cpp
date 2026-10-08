@@ -54,7 +54,9 @@ struct SlotOf {
 
 }  // namespace
 
-BlockSlots::BlockSlots() noexcept { block_poll_.bind_slot0_file_bytes(&slots_[0].file_bytes.v); }
+BlockSlots::BlockSlots() noexcept : BlockSlots(Wiring{}) {}
+BlockSlots::BlockSlots(Wiring w) noexcept
+    : chan_(w.channel ? &*w.channel : nullptr), clock_(w.clock), source_(w.source) {}
 
 Ex<void> BlockSlots::announce(hal::ISpiTransport& link, SlotIndex slot, FileSize size_bytes,
                               bool writable) {
@@ -199,9 +201,7 @@ ArenaHalf BlockSlots::fill_half(SlotIndex slot) const noexcept {
     return ArenaHalf{kNoHalf};
 }
 
-std::int64_t BlockSlots::now_ns() const noexcept {
-    return clock_ == nullptr ? 0 : clock_->now().count();
-}
+std::int64_t BlockSlots::now_ns() const noexcept { return clock_ ? clock_->now().count() : 0; }
 
 void BlockSlots::note_answer_wait_(std::int64_t waited_ns) noexcept {
     if (waited_ns <= kLateAnswerNs) return;
@@ -231,7 +231,7 @@ BlockSlots::Refill BlockSlots::refill_resident(SlotIndex slot, Lba base, std::ui
     auto n = src.read_at(slot, offset, dst);
     if (!n) {
 
-        if (n.error().code == Errc::would_block && answer_owed && clock_ != nullptr) {
+        if (n.error().code == Errc::would_block && answer_owed && clock_.has_value()) {
 
             const std::int64_t now = now_ns();
             if (resident_due_ns_[slot.v] == 0) resident_due_ns_[slot.v] = now + kAnswerDeadlineNs;
@@ -510,7 +510,7 @@ unsigned BlockSlots::install_completions() noexcept {
     for (unsigned i = 0; i < kBlockSlots; ++i) {
         const SlotIndex slot{static_cast<std::uint8_t>(i)};
         const SlotGate& p = slot_gate_[i];
-        if (p.state != SlotGate::State::Idle && clock_ != nullptr && now >= p.due_ns) {
+        if (p.state != SlotGate::State::Idle && clock_.has_value() && now >= p.due_ns) {
             expire(slot);
         }
     }
@@ -519,7 +519,7 @@ unsigned BlockSlots::install_completions() noexcept {
 
 BlockSlots::Blank BlockSlots::no_half_answer(SlotIndex slot) noexcept {
     std::int64_t& due = no_half_due_ns_[slot.v];
-    if (clock_ == nullptr) {
+    if (!clock_) {
         ++diag_.no_half_substitutes;
         due = 0;
         return Blank::Static;

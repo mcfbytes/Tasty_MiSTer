@@ -20,7 +20,7 @@ SeatTag adopt_seat_tag(SeatTag t) noexcept {
     return prev;
 }
 
-namespace seat_detail {
+namespace seat::detail {
 
 [[noreturn]] void violation(SeatTag want, SeatTag got, std::uint16_t site, const char* what) {
     const auto detail = static_cast<std::uint32_t>((static_cast<std::uint32_t>(want) << 8) |
@@ -30,5 +30,5 @@ namespace seat_detail {
     fatal(Error{Errc::negotiation, site, detail}, what);
 }
 
-}  // namespace seat_detail
+}  // namespace seat::detail
 }  // namespace mister

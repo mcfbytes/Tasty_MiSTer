@@ -9,8 +9,10 @@
 #include <string_view>
 
 #include "app/activity_source.h"
+#include "infra/opt_ref.h"
 #include "app/event.h"
 #include "app/idle_blank.h"
+#include "app/output_geometry.h"
 #include "app/video_wire.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -33,8 +35,6 @@ class Vfs;
 }
 
 namespace mister::app {
-
-class HpsFramebuffer;
 
 enum class VideoI2cOutcome : std::uint8_t {
     Unwired = 0,
@@ -111,14 +111,20 @@ struct VideoGeometryRecord {
 using VideoStatsCell = xthread::Telemetry<VideoPumpStats, SeatTag::Ui>;
 using VideoGeometryCell = xthread::Telemetry<VideoGeometryRecord, SeatTag::Ui>;
 
-class VideoPump : public hal::IHdmiInterrupt {
+class VideoPump : public hal::IHdmiInterrupt, public IOutputGeometry {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
     static constexpr std::size_t kSpecMax = 1024;
 
-    VideoPump(const svc::Vfs& vfs, const os::IClock& clock,
-              const hal::VideoOutDecl& board) noexcept;
+    struct Wiring {
+        const IActivitySource& activity;
+        LinkTxChannel& link_tx;
+    };
+
+    VideoPump(const svc::Vfs& vfs, const os::IClock& clock, const hal::VideoOutDecl& board,
+              infra::OptRef<svc::adv7513::II2cAdapter> i2c, const hal::IHdmiInterrupt& hdmi_int,
+              Wiring wiring) noexcept;
 
     VideoPump(const VideoPump&) = delete;
     VideoPump& operator=(const VideoPump&) = delete;
@@ -126,8 +132,6 @@ public:
     [[nodiscard]] bool take_video_mode(std::string_view spec) noexcept;
 
     [[nodiscard]] bool take_fb_cmd(std::string_view line) noexcept;
-
-    void set_hps_framebuffer(HpsFramebuffer* fb) noexcept { hps_fb_ = fb; }
 
     void tick();
 
@@ -146,9 +150,7 @@ public:
 
     [[nodiscard]] const VideoGeometryCell& geometry_cell() const noexcept { return geo_cell_; }
 
-    void resample_geometry() noexcept {
-        if (video_.has_value()) video_->request_force_sample();
-    }
+    void resample_geometry() noexcept { video_->request_force_sample(); }
 
     std::uint32_t geometry_polls() const noexcept { return geo_polls_; }
     std::uint32_t geometry_edges() const noexcept { return geo_edges_; }
@@ -172,20 +174,21 @@ public:
     [[nodiscard]] std::uint8_t direct_video_ini() const noexcept { return direct_video_ini_; }
 
     [[nodiscard]] bool ini_read() const noexcept { return ini_read_; }
-    [[nodiscard]] std::uint16_t output_width() const noexcept { return scrw_; }
-    [[nodiscard]] std::uint16_t output_height() const noexcept { return scrh_; }
+    [[nodiscard]] std::uint16_t output_width() const noexcept override {
+        TASTY_SEAT_BODY(VideoPump);
+        return scrw_;
+    }
+    [[nodiscard]] std::uint16_t output_height() const noexcept override {
+        TASTY_SEAT_BODY(VideoPump);
+        return scrh_;
+    }
 
     void set_core_name(std::string_view name) noexcept;
 
     void set_mode_override(std::string_view spec) noexcept;
 
-    void set_i2c_adapter(svc::adv7513::II2cAdapter& a) noexcept;
-
-    void set_hdmi_int_source(const hal::IHdmiInterrupt& s) noexcept { hdmi_int_ = &s; }
-
     bool hdmi_int_asserted() const override;
 
-    void set_activity_source(const IActivitySource& s) noexcept { activity_ = &s; }
     const IdleBlank& idle_blank() const noexcept { return idle_; }
 
     static constexpr std::int64_t kModeSettleMs = 250;
@@ -279,17 +282,17 @@ private:
     void load_filters();
     void latch_spec(std::string_view spec) noexcept;
 
-    const svc::Vfs* vfs_;
-    const os::IClock* clock_;
+    const svc::Vfs& vfs_;
+    const os::IClock& clock_;
     hal::VideoOutDecl board_;
 
-    std::optional<svc::VideoService> video_{};
-    VideoWire wire_{};
+    VideoWire wire_;
+    std::optional<svc::VideoService> video_;
 
     svc::adv7513::LinuxAdapter i2c_backend_{};
-    svc::adv7513::II2cAdapter* adapter_ = nullptr;
+    svc::adv7513::II2cAdapter& adapter_;
 
-    svc::adv7513::I2cBreaker breaker_{i2c_backend_};
+    svc::adv7513::I2cBreaker breaker_;
 
     svc::adv7513::SubMap main_map_{};
     svc::adv7513::SubMap edid_map_{};
@@ -332,8 +335,8 @@ private:
     std::uint32_t hpd_gen_seen_ = 0;
     std::uint32_t audio_gen_seen_ = 0;
     std::int64_t next_hpd_ns_ = 0;
-    const hal::IHdmiInterrupt* hdmi_int_ = nullptr;
-    const IActivitySource* activity_ = nullptr;
+    const hal::IHdmiInterrupt& hdmi_int_;
+    const IActivitySource& activity_;
     IdleBlank idle_{};
     bool spd_direct_video_ = false;
     std::uint8_t spd_quirk_ = 0;
@@ -345,7 +348,6 @@ private:
     std::uint32_t geo_polls_ = 0;
     std::uint32_t geo_edges_ = 0;
     std::uint32_t geo_gen_seen_ = 0;
-    HpsFramebuffer* hps_fb_ = nullptr;
     std::uint16_t scrw_ = 0;
     std::uint16_t scrh_ = 0;
     std::uint8_t vscale_mode_ = 0;

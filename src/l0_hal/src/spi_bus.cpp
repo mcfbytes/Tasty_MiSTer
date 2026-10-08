@@ -144,11 +144,11 @@ Ex<CoreIdentity> SpiBus::identify() {
     return CoreIdentity{type_byte, type_byte == kCoreTypeDualSdram};
 }
 
-CoreCapabilities SpiBus::capabilities() const {
+CoreCapabilities SpiBus::latch_capabilities() {
 
     if ((gpo_.v & kCoreEnable) == 0u) {
         fatal(Error{Errc::negotiation, ERR_SITE(), gpo_.v},
-              "SpiBus::capabilities() sampled with core-enable low");
+              "SpiBus::latch_capabilities() sampled with core-enable low");
     }
 
     const std::uint32_t gpi = read_gpi();

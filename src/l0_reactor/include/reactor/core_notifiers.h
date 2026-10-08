@@ -17,13 +17,11 @@ class CoreNotifiers {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    CoreNotifiers() noexcept = default;
+    explicit CoreNotifiers(Executive& exec) noexcept : exec_(exec) {}
     ~CoreNotifiers() { release(); }
 
     CoreNotifiers(const CoreNotifiers&) = delete;
     CoreNotifiers& operator=(const CoreNotifiers&) = delete;
-
-    void attach_executive(Executive& exec) noexcept { exec_ = &exec; }
 
     [[nodiscard]] Ex<NotifierSlot> bind_doorbell(
         os::UioHandle uio, Cause klass, std::optional<hal::RegisterWindow<hal::CauseReg>> window);
@@ -39,7 +37,7 @@ private:
         bool live = false;
     };
 
-    Executive* exec_ = nullptr;
+    Executive& exec_;
     Entry entries_[kMaxLines];
     std::size_t live_ = 0;
 };

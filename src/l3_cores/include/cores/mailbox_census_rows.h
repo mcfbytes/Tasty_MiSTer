@@ -10,7 +10,7 @@
 
 namespace mister::cores {
 
-namespace mailbox_detail {
+namespace detail {
 
 template <const CoreProfile& kProfile>
 class TickRow final : public reactor::ILinkDecoder {
@@ -25,9 +25,9 @@ public:
     }
 };
 
-}  // namespace mailbox_detail
+}  // namespace detail
 
 template <const CoreProfile& kProfile>
-inline constexpr mailbox_detail::TickRow<kProfile> kMailboxTick{};
+inline constexpr detail::TickRow<kProfile> kMailboxTick{};
 
 }  // namespace mister::cores

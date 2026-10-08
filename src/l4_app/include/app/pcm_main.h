@@ -8,6 +8,8 @@
 #include "app/mailbox_relay.h"
 #include "app/pcm_ring_feeder.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
+#include "infra/park_fds.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
@@ -20,17 +22,18 @@ class PcmMain final : public xthread::SeatMain<PcmMain> {
     TASTY_SEAT_RESIDENT(Pcm);
 
 public:
-    explicit PcmMain(PcmRingFeeder& feeder) noexcept;
+    struct Mailbox {
+        MailboxRelay& relay;
+        CompanionHost& host;
+    };
+
+    PcmMain(PcmRingFeeder& feeder, xthread::ParkFds fds, PcmRingFeeder::Commands& commands,
+            std::optional<Mailbox> mailbox = std::nullopt,
+            infra::OptRef<xthread::WakeFlag> asker = {}) noexcept;
     PcmMain(const PcmMain&) = delete;
     PcmMain& operator=(const PcmMain&) = delete;
     PcmMain(PcmMain&&) = delete;
     PcmMain& operator=(PcmMain&&) = delete;
-
-    [[nodiscard]] Ex<void> open() noexcept;
-
-    void bind_mailbox(MailboxRelay& relay, CompanionHost& host) noexcept;
-
-    [[nodiscard]] xthread::WakeFlag& wake() noexcept { return wake_; }
 
     void start() noexcept;
     void stop() noexcept { stop_.request(); }
@@ -39,7 +42,7 @@ public:
     [[nodiscard]] bool idle() const noexcept;
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
     [[nodiscard]] int park_ms() const noexcept { return feeder_.rest_ms(); }
-    [[nodiscard]] xthread::SeatPark& park() noexcept { return *park_; }
+    [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
     [[nodiscard]] bool paused() noexcept { return pause_.observe(*this); }
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
     void settle() noexcept;
@@ -59,14 +62,14 @@ private:
     [[nodiscard]] bool mailbox_rest_() const noexcept;
 
     PcmRingFeeder& feeder_;
-    MailboxRelay* relay_ = nullptr;
-    CompanionHost* host_ = nullptr;
-    xthread::WakeFlag wake_{};
-    xthread::WakeFlag stop_{};
-    PcmRingFeeder::Commands cmds_{wake_};
-    xthread::PauseLatch pause_{wake_};
+    MailboxRelay* const relay_;
+    CompanionHost* const host_;
+    xthread::WakeFlag& wake_;
+    xthread::WakeFlag stop_;
+    PcmRingFeeder::Commands& cmds_;
+    xthread::PauseLatch pause_;
     std::uint32_t paused_cmd_drops_ = 0;
-    std::optional<xthread::SeatPark> park_{};
+    xthread::SeatPark park_;
 };
 
 static_assert(xthread::SeatBody<PcmMain>);

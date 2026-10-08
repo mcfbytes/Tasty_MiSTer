@@ -70,7 +70,7 @@ std::string MapStore::filename(std::string_view core, const DeviceIdentity& id, 
 
 Ex<ButtonMap> MapStore::load(std::string_view core, const DeviceIdentity& id, MapKind kind,
                              bool mod) const {
-    if (vfs_ == nullptr) {
+    if (!vfs_) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     }
     const std::string name = filename(core, id, kind, mod);
@@ -109,7 +109,7 @@ Ex<ButtonMap> MapStore::load(std::string_view core, const DeviceIdentity& id, Ma
 
 Ex<void> MapStore::save(std::string_view core, const DeviceIdentity& id, const ButtonMap& map,
                         bool mod) const {
-    if (vfs_ == nullptr) {
+    if (!vfs_) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     }
     const std::size_t want = map_spec(map.kind).bytes;
@@ -241,15 +241,16 @@ Ex<void> InputDevice::set_joy_map(const ButtonMap& map) {
             Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(map.blob.size())});
     }
 
-    for (std::size_t i = 0; i < joy_map_.size(); ++i) {
+    std::array<std::uint32_t, 32> words{};
+    for (std::size_t i = 0; i < words.size(); ++i) {
         std::uint32_t v = 0;
         for (std::size_t b = 0; b < 4; ++b) {
             v |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(map.blob[i * 4 + b]))
                  << (8u * b);
         }
-        joy_map_[i] = v;
+        words[i] = v;
     }
-    has_map_ = true;
+    joy_map_ = words;
     return {};
 }
 
@@ -285,7 +286,8 @@ bool InputDevice::matches_sys_button(std::uint16_t code) const noexcept {
 }
 
 bool InputDevice::has_nonzero_joy_map() const noexcept {
-    for (const std::uint32_t w : joy_map_) {
+    if (!joy_map_) return false;
+    for (const std::uint32_t w : *joy_map_) {
         if (w != 0) return true;
     }
     return false;
@@ -549,7 +551,7 @@ Ex<unsigned> InputDevice::drain() {
                     dp.max_range = sc.max_range;
                     AnalogXy xy = rules::apply_deadzone(raw_[stick], dp);
 
-                    if (reshape_ != nullptr) xy = reshape_->reshape(xy, cal, sc);
+                    if (reshape_) xy = reshape_->reshape(xy, cal, sc);
                     if (!(xy == prev_stick_[stick])) {
                         report_.stick_changed[stick] = true;
                         prev_stick_[stick] = xy;
@@ -566,9 +568,9 @@ Ex<unsigned> InputDevice::drain() {
     }
 
     mouse_buttons_ = report_.mouse_buttons;
-    if (keys_changed && has_map_) {
+    if (keys_changed && joy_map_) {
 
-        const JoyMask now = rules::mask_for(joy_map_, down_);
+        const JoyMask now = rules::mask_for(*joy_map_, down_);
         report_.buttons = now;
         report_.buttons_changed = !(now == joy_prev_);
         joy_prev_ = now;
@@ -649,7 +651,8 @@ void InputService::refresh_slot_census() noexcept {
     n_ghost_.set(ghosts);
 }
 
-Ex<InputService> InputService::create() { return InputService(); }
+InputService InputService::create() { return InputService(); }
+InputService InputService::create(const Vfs& storage) { return InputService(storage); }
 
 Ex<void> InputService::open_hotplug_watch() {
     if (inotify_.valid()) return {};
@@ -787,7 +790,8 @@ bool is_psx_core(std::string_view core) noexcept {
 }
 }  // namespace
 
-Ex<void> InputService::load_maps_for(std::string_view core_in, bool front_end) {
+Ex<void> InputService::load_maps_for(std::string_view core_in, bool front_end,
+                                     infra::OptRef<const IAnalogReshape> reshape) {
 
     const std::string_view core = front_end ? std::string_view{} : core_in;
 
@@ -809,7 +813,7 @@ Ex<void> InputService::load_maps_for(std::string_view core_in, bool front_end) {
         }
         (void)d.set_sys_map(*sys);
 
-        d.set_reshape(reshape_);
+        d.set_reshape(reshape);
 
         const ButtonMap* wire = sys;
         ButtonMap core_file;
@@ -833,6 +837,7 @@ Ex<void> InputService::load_maps_for(std::string_view core_in, bool front_end) {
         if (d.has_nonzero_joy_map()) ++mapped;
     }
     n_mapped_.set(mapped);
+    reshape_ = reshape;
 
     refresh_slot_census();
     return {};
@@ -980,8 +985,7 @@ Ex<void> InputService::adopt(InputDevice&& dev) {
 Ex<void> MappingWizard::begin(const DeviceIdentity& id, MapKind kind) {
     device_ = id;
     kind_ = kind;
-    captured_ = 0;
-    has_capture_ = false;
+    captured_ = std::nullopt;
 
     step_ = id.id.empty() ? Step::AwaitDevice : Step::AwaitButton;
     return {};
@@ -996,7 +1000,6 @@ void MappingWizard::on_device(const DeviceIdentity& id) {
 void MappingWizard::on_button(std::uint16_t code) {
     if (step_ != Step::AwaitButton || code == 0) return;
     captured_ = code;
-    has_capture_ = true;
 }
 
 Ex<MappingWizard::Step> MappingWizard::advance() {
@@ -1007,7 +1010,7 @@ Ex<MappingWizard::Step> MappingWizard::advance() {
         case Step::AwaitDevice:
             break;
         case Step::AwaitButton:
-            if (has_capture_) step_ = Step::Confirm;
+            if (captured_) step_ = Step::Confirm;
             break;
         case Step::Confirm:
             step_ = Step::Persist;

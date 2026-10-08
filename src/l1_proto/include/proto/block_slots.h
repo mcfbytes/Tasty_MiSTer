@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "hal/spi_transport.h"
@@ -14,6 +15,7 @@
 #include "proto/image_source.h"
 #include "proto/late_answers.h"
 #include "proto/resident_image_source.h"
+#include "proto/slot_roles.h"
 #include "proto/spi_block_poll.h"
 #include "proto/storage_channel.h"
 #include "proto/storage_completion.h"
@@ -25,7 +27,15 @@ class BlockSlots {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
+    struct Wiring {
+        infra::OptRef<IImageSource> source{};
+        infra::OptRef<const os::IClock> clock{};
+
+        infra::OptRef<IStorageChannel> channel{};
+    };
+
     BlockSlots() noexcept;
+    explicit BlockSlots(Wiring w) noexcept;
 
     BlockSlots(const BlockSlots&) = delete;
     BlockSlots& operator=(const BlockSlots&) = delete;
@@ -70,32 +80,16 @@ public:
 
     void attach_source(IImageSource& source) {
         invalidate_all();
-        source_ = &source;
+        source_ = infra::OptRef<IImageSource>{source};
     }
-    void detach_source() {
-        invalidate_all();
-        source_ = nullptr;
-    }
-
-    void attach_channel(IStorageChannel& chan) noexcept { chan_ = &chan; }
 
     void set_storage_live(bool live) noexcept { storage_live_ = live; }
 
-    void attach_clock(const os::IClock& clock) noexcept { clock_ = &clock; }
-
-    void attach_slot_source(SlotIndex slot, IResidentImageSource* source) {
+    void bind_roles(SlotIndex slot, const SlotRoles& roles) noexcept {
         if (slot.v >= kBlockSlots) return;
         windows_[slot.v] = Window{};
-        slot_sources_[slot.v] = source;
+        roles_[slot.v] = roles;
     }
-
-    void attach_slot_descriptor(SlotIndex slot, IImageSource* source) {
-        if (slot.v >= kBlockSlots) return;
-        windows_[slot.v] = Window{};
-        slot_descriptors_[slot.v] = source;
-    }
-
-    void set_geometry_hook(IBlockGeometry* hook) noexcept { block_poll_.set_geometry_hook(hook); }
 
     Ex<void> mount(hal::ISpiTransport& link, SlotIndex slot, FileSize size_bytes, PathId path_id);
     Ex<void> unmount(hal::ISpiTransport& link, SlotIndex slot);
@@ -124,11 +118,9 @@ public:
     void reset_all() noexcept {
         for (unsigned i = 0; i < kBlockSlots; ++i) {
             slots_[i] = Slot{};
-            slot_sources_[i] = nullptr;
-            slot_descriptors_[i] = nullptr;
+            roles_[i] = SlotRoles{};
             slot_gate_[i] = SlotGate{};
         }
-        block_poll_.set_geometry_hook(nullptr);
         invalidate_all();
     }
 
@@ -239,10 +231,14 @@ private:
     }
 
     IImageSource* source_for(SlotIndex s) const noexcept {
-        if (slot_descriptors_[s.v] != nullptr) return slot_descriptors_[s.v];
-        return slot_sources_[s.v] != nullptr ? slot_sources_[s.v] : source_;
+        const SlotRoles& r = roles_[s.v];
+        if (r.descriptor) return &*r.descriptor;
+        if (r.resident) return &*r.resident;
+        return source_ ? &*source_ : nullptr;
     }
-    IResidentImageSource* resident_for(SlotIndex s) const noexcept { return slot_sources_[s.v]; }
+    IResidentImageSource* resident_for(SlotIndex s) const noexcept {
+        return roles_[s.v].resident ? &*roles_[s.v].resident : nullptr;
+    }
 
     Slot slots_[kBlockSlots]{};
     Window windows_[kBlockSlots]{};
@@ -258,13 +254,15 @@ private:
     void note_answer_wait_(std::int64_t waited_ns) noexcept;
 
     IStorageChannel* chan_ = nullptr;
-    const os::IClock* clock_ = nullptr;
+    infra::OptRef<const os::IClock> clock_;
     bool storage_live_ = false;
     std::uint32_t next_seq_ = 1;
-    IImageSource* source_ = nullptr;
-    IResidentImageSource* slot_sources_[kBlockSlots]{};
-    IImageSource* slot_descriptors_[kBlockSlots]{};
-    SpiBlockPoll block_poll_;
+    infra::OptRef<IImageSource> source_;
+    SlotRoleTable roles_{};
+
+    SpiBlockPoll block_poll_{SpiBlockPoll::Wiring{
+        .slot0_file_bytes = infra::OptRef<const std::uint64_t>{slots_[0].file_bytes.v},
+        .roles = infra::OptRef<const SlotRoleTable>{roles_}}};
     Diagnostics diag_{};
 };
 

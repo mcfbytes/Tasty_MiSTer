@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -30,6 +31,7 @@
 #include "app/pcm_main.h"
 #include "app/rec_write_main.h"
 #include "app/launcher_main.h"
+#include "app/hd_osd_main.h"
 #include "app/rt_main.h"
 #include "svc/chd_prefetch.h"
 #include "svc/prefetch_main.h"
@@ -40,8 +42,6 @@
 namespace mister::fw {
 
 namespace {
-
-using hal::Seat;
 
 long sys_gettid() noexcept { return static_cast<long>(::syscall(SYS_gettid)); }
 
@@ -382,27 +382,70 @@ Ex<std::uint64_t> read_vm_rss_bytes() {
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 }
 
+struct ThreadAssembly::SeatTable {
+    struct Entry {
+        void* (*body)(void*) = nullptr;
+    };
+    using Entries = std::array<Entry, hal::kThreadSeats>;
+
+    template <class... Rows>
+    static consteval Entries make(SeatList<Rows...>) {
+        Entries t{};
+        ((t[seat_index(Rows::seat)] = Entry{&ThreadAssembly::trampoline<Rows>}), ...);
+        return t;
+    }
+
+    static const Entries kSeatEntries;
+
+    static const Entry& of(SeatTag s) noexcept { return kSeatEntries[seat_index(s)]; }
+};
+
+constexpr ThreadAssembly::SeatTable::Entries ThreadAssembly::SeatTable::kSeatEntries =
+    ThreadAssembly::SeatTable::make(SeatMainList{});
+
 ThreadAssembly::ThreadAssembly(const hal::ThreadMap& threads, xthread::RtStats& stats,
                                app::EventQueue& events, RtEvidence& boot,
-                               xthread::WakeFlag& main_wake, const UiMain::Wiring& ui) noexcept
+                               xthread::WakeFlag& main_wake, const DiagWires& diag,
+                               const UiMain::Wires& ui_wires, const UiMain::Wiring& ui,
+                               const DiagSampler::Sources& diag_sources) noexcept
     : ev_(boot), threads_(threads), main_wake_(main_wake),
-      diag_sampler_(stats, events, ev_, quiescing_, transitioning_), diag_main_(diag_sampler_),
-      ui_main_(events, ui) {
-    bind_ui_cells_(ui);
+      diag_sampler_(stats, events, ev_, quiescing_, diag.transitioning, diag.log, diag.rt_lane,
+                    with_ui_cells_(diag_sources, ui)) {
+    create_mains_(events, ui_wires, ui);
 }
 
 ThreadAssembly::ThreadAssembly(xthread::RtStats& stats, app::EventQueue& events,
-                               const UiMain::Wiring& ui) noexcept
+                               const UiMain::Wiring& ui, const DiagSampler::Sources& diag) noexcept
     : ev_(own_ev_), threads_(hal::kDe10ThreadMap), main_wake_(own_main_wake_),
-      diag_sampler_(stats, events, ev_, quiescing_, transitioning_), diag_main_(diag_sampler_),
-      ui_main_(events, ui) {
-    bind_ui_cells_(ui);
+      own_wires_(std::make_unique<OwnWires>()),
+      diag_sampler_(stats, events, ev_, quiescing_, own_wires_->transitioning, own_wires_->log,
+                    own_wires_->rt_lane, with_ui_cells_(diag, ui)) {
+    create_mains_(events, UiMain::Wires{own_wires_->ui_wake, own_wires_->uart_handoffs}, ui);
+}
+
+void ThreadAssembly::create_mains_(app::EventQueue& events, const UiMain::Wires& ui_wires,
+                                   const UiMain::Wiring& ui) noexcept {
+    auto diag_fds = xthread::ParkFds::create(diag_wake_);
+    if (!diag_fds) {
+        born_ = std::unexpected(diag_fds.error());
+        return;
+    }
+    auto ui_fds = xthread::ParkFds::create(ui_wires.wake);
+    if (!ui_fds) {
+        born_ = std::unexpected(ui_fds.error());
+        return;
+    }
+    diag_main_.emplace(diag_sampler_, std::move(*diag_fds));
+    ui_main_.emplace(events, std::move(*ui_fds), ui_wires.uart_handoffs, ui, main_wake_);
+    mains_.bind(&*diag_main_);
+    mains_.bind(&*ui_main_);
 }
 
 bool ThreadAssembly::any_live() const noexcept {
-    return diag_live_ || ui_live_ || frame_live_ || input_live_ || prefetch_live_ || pcm_live_ ||
-           io_live_ || rt_live_ || capture_live_ || encode_live_ || rec_write_live_ ||
-           launcher_live_;
+    for (const bool live : live_) {
+        if (live) return true;
+    }
+    return false;
 }
 
 ThreadAssembly::~ThreadAssembly() {
@@ -412,400 +455,210 @@ ThreadAssembly::~ThreadAssembly() {
     }
 }
 
-void ThreadAssembly::bind_ui_cells_(const UiMain::Wiring& ui) noexcept {
-    diag_sampler_.set_cmd_fifo_cell(ui.fifo != nullptr ? &ui.fifo->stats_cell() : nullptr);
-    diag_sampler_.set_mgl_cell(ui.mgl != nullptr ? &ui.mgl->stats_cell() : nullptr);
-    diag_sampler_.set_video_stats_cell(ui.video != nullptr ? &ui.video->stats_cell() : nullptr);
-    diag_sampler_.set_video_geometry_cell(ui.video != nullptr ? &ui.video->geometry_cell()
-                                                              : nullptr);
-
-    diag_sampler_.set_video_wire(ui.video != nullptr ? &ui.video->wire() : nullptr);
+DiagSampler::Sources ThreadAssembly::with_ui_cells_(DiagSampler::Sources s,
+                                                    const UiMain::Wiring& ui) noexcept {
+    return DiagSampler::Sources{
+        .fifo = ui.fifo != nullptr ? &ui.fifo->stats_cell() : nullptr,
+        .mgl = ui.mgl != nullptr ? &ui.mgl->stats_cell() : nullptr,
+        .mgl_row0 = s.mgl_row0,
+        .window_counts = s.window_counts,
+        .video_stats = ui.video.stats_cell(),
+        .video_geometry = ui.video.geometry_cell(),
+        .video_wire = ui.video.wire(),
+        .diag = s.diag,
+        .pause_expiries = s.pause_expiries,
+        .recover_polls = s.recover_polls,
+        .save_write_failures = s.save_write_failures,
+        .fallbacks = s.fallbacks,
+        .doorbell = s.doorbell,
+        .round_timing = s.round_timing,
+        .frames = s.frames,
+        .ui_pages = s.ui_pages,
+        .hd = s.hd,
+        .replay = s.replay,
+        .rec_capture = s.rec_capture,
+        .rec_encode = s.rec_encode,
+        .rec_write = s.rec_write,
+        .rec_avi = s.rec_avi,
+        .screenshots = s.screenshots,
+    };
 }
 
-void ThreadAssembly::adopt_seat(hal::Seat s) noexcept {
+std::array<char, hal::kCommNameMax + 1> ThreadAssembly::process_comm_() noexcept {
+    std::array<char, hal::kCommNameMax + 1> out{};
+    if (::prctl(PR_GET_NAME, out.data(), 0, 0, 0) != 0) out.fill('\0');
+    return out;
+}
+
+void ThreadAssembly::adopt_seat(SeatTag s) noexcept {
     const hal::ThreadRole& r = hal::seat_of(threads_, s);
 
-    const int nrc = ::pthread_setname_np(::pthread_self(), r.name);
-    ev_.seat_name[static_cast<std::size_t>(s)] = RtSetup{nrc == 0, nrc};
-    if (RtSetup* aff = affinity_row(s); aff != nullptr) {
+    const hal::CommName comm = hal::comm_name(comm_prefix_.data(), seat_role(s));
+    const int nrc = ::pthread_setname_np(::pthread_self(), comm.text.data());
+    ev_.seat_name[seat_index(s)] = RtSetup{nrc == 0, nrc};
 
-        if (r.spawn == hal::SpawnKind::PromoteInPlace || !kPosixGlibc) {
-            pin_current_cpu(r.cpu, *aff);
-        } else {
-            confirm_current_cpu(r.cpu, *aff);
-        }
+    RtSetup& aff = ev_.seat_affinity[seat_index(s)];
+    if (r.spawn == hal::SpawnKind::PromoteInPlace || !kPosixGlibc) {
+        pin_current_cpu(r.cpu, aff);
+    } else {
+        confirm_current_cpu(r.cpu, aff);
     }
 
     hal::adopt_placement(threads_, s);
-    (void)adopt_seat_tag(hal::tag_of(s));
+    (void)adopt_seat_tag(s);
 }
 
-RtSetup* ThreadAssembly::affinity_row(hal::Seat s) noexcept {
-    switch (s) {
-        case Seat::RT:
-            return &ev_.rt_affinity;
-        case Seat::Frame:
-            return &ev_.frame_affinity;
-        case Seat::Input:
-            return &ev_.input_affinity;
-        case Seat::Diag:
-            return &ev_.diag_affinity;
-        case Seat::Ui:
-            return &ev_.ui_affinity;
-        case Seat::Prefetch:
-            return &ev_.prefetch_affinity;
-        case Seat::Pcm:
-            return &ev_.pcm_affinity;
-        case Seat::Io:
-            return &ev_.io_affinity;
-        case Seat::Capture:
-            return &ev_.capture_affinity;
-        case Seat::Encode:
-            return &ev_.encode_affinity;
-        case Seat::RecWrite:
-            return &ev_.recwrite_affinity;
-        case Seat::Launcher:
-            return &ev_.launcher_affinity;
-    }
-    return nullptr;
+template <class Row>
+void ThreadAssembly::stop_one_() noexcept {
+    if (auto* m = mains_.get<typename Row::Main>(); m != nullptr) m->stop();
 }
 
-DiagMain& ThreadAssembly::main_(std::type_identity<DiagMain>) noexcept { return diag_main_; }
-UiMain& ThreadAssembly::main_(std::type_identity<UiMain>) noexcept { return ui_main_; }
-svc::PrefetchMain& ThreadAssembly::main_(std::type_identity<svc::PrefetchMain>) noexcept {
-    return *prefetch_;
-}
-app::PcmMain& ThreadAssembly::main_(std::type_identity<app::PcmMain>) noexcept { return *pcm_; }
-reactor::FrameMain& ThreadAssembly::main_(std::type_identity<reactor::FrameMain>) noexcept {
-    return *frame_;
-}
-app::InputMain& ThreadAssembly::main_(std::type_identity<app::InputMain>) noexcept {
-    return *input_;
-}
-svc::IoMain& ThreadAssembly::main_(std::type_identity<svc::IoMain>) noexcept { return *io_; }
-app::RtMain& ThreadAssembly::main_(std::type_identity<app::RtMain>) noexcept { return *rt_; }
-app::CaptureMain& ThreadAssembly::main_(std::type_identity<app::CaptureMain>) noexcept {
-    return *capture_;
-}
-app::EncodeMain& ThreadAssembly::main_(std::type_identity<app::EncodeMain>) noexcept {
-    return *encode_;
-}
-app::RecWriteMain& ThreadAssembly::main_(std::type_identity<app::RecWriteMain>) noexcept {
-    return *rec_write_;
-}
-app::LauncherMain& ThreadAssembly::main_(std::type_identity<app::LauncherMain>) noexcept {
-    return *launcher_;
+template <class... Rows>
+void ThreadAssembly::stop_seat_(SeatTag s, SeatList<Rows...>) noexcept {
+    ((Rows::seat == s ? stop_one_<Rows>() : void()), ...);
 }
 
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<DiagMain>) noexcept {
-    return DiagMain::kSeat;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<UiMain>) noexcept {
-    return UiMain::kSeat;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<svc::PrefetchMain>) noexcept {
-    return Seat::Prefetch;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::PcmMain>) noexcept {
-    return Seat::Pcm;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<reactor::FrameMain>) noexcept {
-    return Seat::Frame;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::InputMain>) noexcept {
-    return Seat::Input;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<svc::IoMain>) noexcept {
-    return Seat::Io;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::RtMain>) noexcept {
-    return Seat::RT;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::CaptureMain>) noexcept {
-    return Seat::Capture;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::EncodeMain>) noexcept {
-    return Seat::Encode;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::RecWriteMain>) noexcept {
-    return Seat::RecWrite;
-}
-constexpr hal::Seat ThreadAssembly::seat_(std::type_identity<app::LauncherMain>) noexcept {
-    return Seat::Launcher;
-}
+void ThreadAssembly::stop_bound_(SeatTag s) noexcept { stop_seat_(s, SeatMainList{}); }
 
-std::atomic<long>* ThreadAssembly::tid_cell_(hal::Seat s) noexcept {
-    switch (s) {
-        case Seat::RT:
-            return &rt_tid_;
-        case Seat::Frame:
-            return &frame_tid_;
-        case Seat::Input:
-            return &input_tid_;
-        case Seat::Diag:
-            return &diag_tid_;
-        case Seat::Ui:
-            return &ui_tid_;
-        case Seat::Prefetch:
-            return &prefetch_tid_;
-        case Seat::Pcm:
-            return &pcm_tid_;
-        case Seat::Io:
-            return &io_tid_;
-        case Seat::Capture:
-            return &capture_tid_;
-        case Seat::Encode:
-            return &encode_tid_;
-        case Seat::RecWrite:
-            return &rec_write_tid_;
-        case Seat::Launcher:
-            return &launcher_tid_;
-    }
-    return nullptr;
-}
-
-template <class M>
+template <class Row>
 void* ThreadAssembly::trampoline(void* self) {
+    using M = typename Row::Main;
     static_assert(xthread::SeatBody<M>);
-    constexpr hal::Seat s = seat_(std::type_identity<M>{});
+    constexpr SeatTag s = Row::seat;
     auto* a = static_cast<ThreadAssembly*>(self);
     a->adopt_seat(s);
-    a->tid_cell_(s)->store(sys_gettid(), std::memory_order_release);
-    a->main_(std::type_identity<M>{}).start();
-    if constexpr (s == Seat::RT) {
+    a->tid_[seat_index(s)].store(sys_gettid(), std::memory_order_release);
+    a->mains_.get<M>()->start();
+    if constexpr (s == SeatTag::RT) {
 
-        a->rt_result_ = a->rt_->result();
+        a->rt_result_ = a->mains_.get<M>()->result();
         a->rt_exited_.store(true, std::memory_order_release);
         a->main_wake_.request();
     }
-    if constexpr (s == Seat::Io) {
+    if constexpr (s == SeatTag::Io) {
         a->io_exited_.store(true, std::memory_order_release);
     }
     return nullptr;
 }
 
 Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
-    frame_ = mains.frame;
-    input_ = mains.input;
-    prefetch_ = mains.prefetch;
-    pcm_ = mains.pcm;
-    io_ = mains.io;
-    const bool recorder =
-        mains.capture != nullptr && mains.encode != nullptr && mains.rec_write != nullptr;
-    capture_ = recorder ? mains.capture : nullptr;
-    encode_ = recorder ? mains.encode : nullptr;
-    rec_write_ = recorder ? mains.rec_write : nullptr;
-    launcher_ = mains.launcher;
+
+    app::RtMain* const rt = mains_.get<app::RtMain>();
+    mains_ = mains.mains;
+    if (!born_) return born_;
+    mains_.bind(&*diag_main_);
+    mains_.bind(&*ui_main_);
+    mains_.bind(rt);
+
+    if (!(mains_.bound(SeatTag::Capture) && mains_.bound(SeatTag::Encode) &&
+          mains_.bound(SeatTag::RecWrite))) {
+        mains_.bind(static_cast<app::CaptureMain*>(nullptr));
+        mains_.bind(static_cast<app::EncodeMain*>(nullptr));
+        mains_.bind(static_cast<app::RecWriteMain*>(nullptr));
+    }
+    svc::PrefetchMain* const prefetch = mains_.get<svc::PrefetchMain>();
     diag_sampler_.set_input_build(mains.input_build);
-    diag_sampler_.set_prefetch(prefetch_ != nullptr ? &prefetch_->prefetch() : nullptr);
+    diag_sampler_.set_prefetch(prefetch != nullptr ? &prefetch->prefetch() : nullptr);
 
-    if (auto o = diag_main_.open(); !o) return o;
-    if (auto o = ui_main_.open(); !o) return o;
-
-    if (auto r =
-            spawn_seat(hal::seat_of(threads_, Seat::Diag), &ThreadAssembly::trampoline<DiagMain>,
-                       this, diag_thread_, mode, ev_.diag_sched);
-        !r) {
-        return r;
-    }
-    diag_live_ = true;
-
-    if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Ui), &ThreadAssembly::trampoline<UiMain>,
-                            this, ui_thread_, mode, ev_.ui_sched);
-        !r) {
-        return r;
-    }
-    ui_live_ = true;
-
-    if (prefetch_ != nullptr) {
-        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Prefetch),
-                                &ThreadAssembly::trampoline<svc::PrefetchMain>, this,
-                                prefetch_thread_, mode, ev_.prefetch_fifo);
+    for (const SeatTag s : std::span(kSpawnOrder).first(kSpawnOrder.size() - 1)) {
+        if (!mains_.bound(s)) continue;
+        const std::size_t i = seat_index(s);
+        if (auto r = spawn_seat(hal::seat_of(threads_, s), SeatTable::of(s).body, this, thread_[i],
+                                mode, ev_.seat_sched[i]);
             !r) {
             return r;
         }
-        prefetch_live_ = true;
-    }
-
-    if (pcm_ != nullptr) {
-        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Pcm),
-                                &ThreadAssembly::trampoline<app::PcmMain>, this, pcm_thread_, mode,
-                                ev_.pcm_fifo);
-            !r) {
-            return r;
-        }
-        pcm_live_ = true;
-    }
-
-    if (frame_ != nullptr) {
-        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Frame),
-                                &ThreadAssembly::trampoline<reactor::FrameMain>, this,
-                                frame_thread_, mode, ev_.frame_fifo);
-            !r) {
-            return r;
-        }
-        frame_live_ = true;
-    }
-
-    if (input_ != nullptr) {
-        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Input),
-                                &ThreadAssembly::trampoline<app::InputMain>, this, input_thread_,
-                                mode, ev_.input_fifo);
-            !r) {
-            return r;
-        }
-        input_live_ = true;
-    }
-
-    if (io_ != nullptr) {
-        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Io),
-                                &ThreadAssembly::trampoline<svc::IoMain>, this, io_thread_, mode,
-                                ev_.io_fifo);
-            !r) {
-            return r;
-        }
-        io_live_ = true;
-    }
-
-    if (rec_write_ != nullptr) {
-        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::RecWrite),
-                                &ThreadAssembly::trampoline<app::RecWriteMain>, this,
-                                rec_write_thread_, mode, ev_.recwrite_sched);
-            !r) {
-            return r;
-        }
-        rec_write_live_ = true;
-        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Encode),
-                                &ThreadAssembly::trampoline<app::EncodeMain>, this, encode_thread_,
-                                mode, ev_.encode_sched);
-            !r) {
-            return r;
-        }
-        encode_live_ = true;
-        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Capture),
-                                &ThreadAssembly::trampoline<app::CaptureMain>, this,
-                                capture_thread_, mode, ev_.capture_fifo);
-            !r) {
-            return r;
-        }
-        capture_live_ = true;
-    }
-
-    if (launcher_ != nullptr) {
-        if (auto r = spawn_seat(hal::seat_of(threads_, Seat::Launcher),
-                                &ThreadAssembly::trampoline<app::LauncherMain>, this,
-                                launcher_thread_, mode, ev_.launcher_sched);
-            !r) {
-            return r;
-        }
-        launcher_live_ = true;
+        live_[i] = true;
     }
 
     return await_published([this] {
-        return diag_tid() != 0 && ui_tid() != 0 && (frame_ == nullptr || frame_tid() != 0) &&
-               (prefetch_ == nullptr || prefetch_tid() != 0) &&
-               (pcm_ == nullptr || pcm_tid() != 0) && (input_ == nullptr || input_tid() != 0) &&
-               (io_ == nullptr || io_tid() != 0) &&
-               (capture_ == nullptr ||
-                (capture_tid() != 0 && encode_tid() != 0 && rec_write_tid() != 0)) &&
-               (launcher_ == nullptr || launcher_tid() != 0);
+        for (std::size_t i = 0; i < hal::kThreadSeats; ++i) {
+            if (live_[i] && tid_[i].load(std::memory_order_acquire) == 0) return false;
+        }
+        return true;
     });
 }
 
 Ex<void> ThreadAssembly::spawn_rt(RtMode mode, app::RtMain& rt) {
 
-    rt_ = &rt;
-    if (auto r =
-            spawn_seat(hal::seat_of(threads_, Seat::RT), &ThreadAssembly::trampoline<app::RtMain>,
-                       this, rt_thread_, mode, ev_.rt_fifo);
+    mains_.bind(&rt);
+    const std::size_t i = seat_index(SeatTag::RT);
+    if (auto r = spawn_seat(hal::seat_of(threads_, SeatTag::RT), SeatTable::of(SeatTag::RT).body,
+                            this, thread_[i], mode, ev_.seat_sched[i]);
         !r) {
         return r;
     }
-    rt_live_ = true;
-    return await_published([this] { return rt_tid() != 0; });
+    live_[i] = true;
+    return await_published([this] { return tid(SeatTag::RT) != 0; });
 }
 
-Ex<void> ThreadAssembly::join_rt_within(std::int64_t deadline_ns) {
-    if (!rt_live_) return {};
-    timespec abs{};
-    (void)::clock_gettime(CLOCK_MONOTONIC, &abs);
-    const std::int64_t total = static_cast<std::int64_t>(abs.tv_nsec) + deadline_ns;
-    abs.tv_sec += static_cast<time_t>(total / 1'000'000'000);
-    abs.tv_nsec = static_cast<long>(total % 1'000'000'000);
+namespace {
+
+int join_within(pthread_t thread, [[maybe_unused]] const std::atomic<bool>& exited,
+                const timespec& abs) noexcept {
 #if defined(__GLIBC__)
-    const int rc = ::pthread_clockjoin_np(rt_thread_, nullptr, CLOCK_MONOTONIC, &abs);
+    return ::pthread_clockjoin_np(thread, nullptr, CLOCK_MONOTONIC, &abs);
 #else
-    int rc = 0;
     for (;;) {
-        if (rt_exited_.load(std::memory_order_acquire)) {
-            rc = ::pthread_join(rt_thread_, nullptr);
-            break;
-        }
+        if (exited.load(std::memory_order_acquire)) return ::pthread_join(thread, nullptr);
         timespec now{};
         (void)::clock_gettime(CLOCK_MONOTONIC, &now);
         if (now.tv_sec > abs.tv_sec || (now.tv_sec == abs.tv_sec && now.tv_nsec >= abs.tv_nsec)) {
-            rc = ETIMEDOUT;
-            break;
+            return ETIMEDOUT;
         }
         timespec slp{};
         slp.tv_nsec = 1'000'000;
         (void)::clock_nanosleep(CLOCK_MONOTONIC, 0, &slp, nullptr);
     }
 #endif
+}
+
+timespec deadline_from_now(std::int64_t deadline_ns) noexcept {
+    timespec abs{};
+    (void)::clock_gettime(CLOCK_MONOTONIC, &abs);
+    const std::int64_t total = static_cast<std::int64_t>(abs.tv_nsec) + deadline_ns;
+    abs.tv_sec += static_cast<time_t>(total / 1'000'000'000);
+    abs.tv_nsec = static_cast<long>(total % 1'000'000'000);
+    return abs;
+}
+
+}  // namespace
+
+Ex<void> ThreadAssembly::join_rt_within(std::int64_t deadline_ns) {
+    const std::size_t i = seat_index(SeatTag::RT);
+    if (!live_[i]) return {};
+    const int rc = join_within(thread_[i], rt_exited_, deadline_from_now(deadline_ns));
     if (rc == ETIMEDOUT) {
         return std::unexpected(
             Error{Errc::timeout, ERR_SITE(), static_cast<std::uint32_t>(deadline_ns / 1'000'000)});
     }
     if (rc != 0) return os_error(ERR_SITE(), rc);
-    rt_live_ = false;
+    live_[i] = false;
     return {};
 }
 
 Ex<void> ThreadAssembly::join_io_within(std::int64_t deadline_ns) {
-    if (!io_live_) return {};
-    timespec abs{};
-    (void)::clock_gettime(CLOCK_MONOTONIC, &abs);
-    const std::int64_t total = static_cast<std::int64_t>(abs.tv_nsec) + deadline_ns;
-    abs.tv_sec += static_cast<time_t>(total / 1'000'000'000);
-    abs.tv_nsec = static_cast<long>(total % 1'000'000'000);
-#if defined(__GLIBC__)
-    const int rc = ::pthread_clockjoin_np(io_thread_, nullptr, CLOCK_MONOTONIC, &abs);
-#else
-    int rc = 0;
-    for (;;) {
-        if (io_exited_.load(std::memory_order_acquire)) {
-            rc = ::pthread_join(io_thread_, nullptr);
-            break;
-        }
-        timespec now{};
-        (void)::clock_gettime(CLOCK_MONOTONIC, &now);
-        if (now.tv_sec > abs.tv_sec || (now.tv_sec == abs.tv_sec && now.tv_nsec >= abs.tv_nsec)) {
-            rc = ETIMEDOUT;
-            break;
-        }
-        timespec slp{};
-        slp.tv_nsec = 1'000'000;
-        (void)::clock_nanosleep(CLOCK_MONOTONIC, 0, &slp, nullptr);
-    }
-#endif
+    const std::size_t i = seat_index(SeatTag::Io);
+    if (!live_[i]) return {};
+    const int rc = join_within(thread_[i], io_exited_, deadline_from_now(deadline_ns));
     if (rc == ETIMEDOUT) {
         return std::unexpected(
             Error{Errc::timeout, ERR_SITE(), static_cast<std::uint32_t>(deadline_ns / 1'000'000)});
     }
     if (rc != 0) return os_error(ERR_SITE(), rc);
-    io_live_ = false;
+    live_[i] = false;
     return {};
 }
 
 Ex<void> ThreadAssembly::stop_and_join_rt(std::int64_t deadline_ns) {
-    if (!rt_live_) return {};
+    if (!live_[seat_index(SeatTag::RT)]) return {};
     timespec now{};
     (void)::clock_gettime(CLOCK_MONOTONIC, &now);
     const std::int64_t hard =
         static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec + deadline_ns;
     for (;;) {
 
-        rt_->stop();
+        mains_.get<app::RtMain>()->stop();
         (void)::clock_gettime(CLOCK_MONOTONIC, &now);
         const std::int64_t now_ns =
             static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec;
@@ -821,39 +674,24 @@ Ex<void> ThreadAssembly::stop_and_join_rt(std::int64_t deadline_ns) {
 
 void ThreadAssembly::stop() noexcept {
 
-    if (rt_live_) rt_->stop();
-    diag_main_.stop();
-    ui_main_.stop();
-    if (frame_ != nullptr) frame_->stop();
-
-    if (input_ != nullptr) input_->stop();
-
-    if (prefetch_ != nullptr) prefetch_->stop();
-
-    if (pcm_ != nullptr) pcm_->stop();
-
-    if (io_ != nullptr) io_->stop();
-
-    if (capture_ != nullptr) capture_->stop();
-    if (launcher_ != nullptr) launcher_->stop();
+    for (const SeatTag s : kStopOrder) {
+        if (s == SeatTag::RT && !live_[seat_index(s)]) continue;
+        stop_bound_(s);
+    }
 }
 
 void ThreadAssembly::mark_quiescing() noexcept { quiescing_.request(); }
 
-void ThreadAssembly::mark_transitioning(bool on) noexcept {
-
-    transitioning_.store(on, std::memory_order_release);
-}
-
 Ex<void> ThreadAssembly::join() {
 
-    if (rt_live_) {
+    static_assert(kJoinOrder[0] == SeatTag::RT && kJoinOrder[1] == SeatTag::Io);
+    if (live_[seat_index(SeatTag::RT)]) {
 
         if (auto r = stop_and_join_rt(kRtStopDeadlineNs); !r) return r;
     }
 
     Ex<void> io_err{};
-    if (io_live_ && !io_poisoned_) {
+    if (live_[seat_index(SeatTag::Io)] && !io_poisoned_) {
         if (auto r = join_io_within(kIoStopDeadlineNs); !r) {
             if (r.error().code == Errc::timeout) {
 
@@ -863,64 +701,14 @@ Ex<void> ThreadAssembly::join() {
         }
     }
 
-    if (capture_live_) {
-        if (const int rc = ::pthread_join(capture_thread_, nullptr); rc != 0)
-            return os_error(ERR_SITE(), rc);
-        capture_live_ = false;
-    }
-    if (encode_ != nullptr) encode_->stop();
-    if (encode_live_) {
-        if (const int rc = ::pthread_join(encode_thread_, nullptr); rc != 0)
-            return os_error(ERR_SITE(), rc);
-        encode_live_ = false;
-    }
-    if (rec_write_ != nullptr) rec_write_->stop();
-    if (rec_write_live_) {
-        if (const int rc = ::pthread_join(rec_write_thread_, nullptr); rc != 0)
-            return os_error(ERR_SITE(), rc);
-        rec_write_live_ = false;
-    }
-    if (launcher_live_) {
-        if (const int rc = ::pthread_join(launcher_thread_, nullptr); rc != 0)
-            return os_error(ERR_SITE(), rc);
-        launcher_live_ = false;
-    }
-    if (pcm_live_) {
-        if (const int rc = ::pthread_join(pcm_thread_, nullptr); rc != 0) {
+    for (const SeatTag s : std::span(kJoinOrder).subspan(2)) {
+        if (drains_after_join(kStopAfterJoinOf, s)) stop_bound_(s);
+        const std::size_t i = seat_index(s);
+        if (!live_[i]) continue;
+        if (const int rc = ::pthread_join(thread_[i], nullptr); rc != 0) {
             return os_error(ERR_SITE(), rc);
         }
-        pcm_live_ = false;
-    }
-    if (prefetch_live_) {
-        if (const int rc = ::pthread_join(prefetch_thread_, nullptr); rc != 0) {
-            return os_error(ERR_SITE(), rc);
-        }
-        prefetch_live_ = false;
-    }
-    if (frame_live_) {
-        if (const int rc = ::pthread_join(frame_thread_, nullptr); rc != 0) {
-            return os_error(ERR_SITE(), rc);
-        }
-        frame_live_ = false;
-    }
-
-    if (input_live_) {
-        if (const int rc = ::pthread_join(input_thread_, nullptr); rc != 0) {
-            return os_error(ERR_SITE(), rc);
-        }
-        input_live_ = false;
-    }
-    if (ui_live_) {
-        if (const int rc = ::pthread_join(ui_thread_, nullptr); rc != 0) {
-            return os_error(ERR_SITE(), rc);
-        }
-        ui_live_ = false;
-    }
-    if (diag_live_) {
-        if (const int rc = ::pthread_join(diag_thread_, nullptr); rc != 0) {
-            return os_error(ERR_SITE(), rc);
-        }
-        diag_live_ = false;
+        live_[i] = false;
     }
 
     return io_err;

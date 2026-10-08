@@ -17,13 +17,13 @@ class BasicPauseLatch {
     static_assert(std::atomic<PauseGen>::is_always_lock_free);
 
 public:
-    explicit BasicPauseLatch(BasicWakeFlag<Kick>& seat_wake) noexcept : seat_wake_(&seat_wake) {}
+    explicit BasicPauseLatch(BasicWakeFlag<Kick>& seat_wake,
+                             BasicWakeFlag<Kick>* asker_wake = nullptr) noexcept
+        : seat_wake_(&seat_wake), asker_wake_(asker_wake) {}
     BasicPauseLatch(const BasicPauseLatch&) = delete;
     BasicPauseLatch& operator=(const BasicPauseLatch&) = delete;
     BasicPauseLatch(BasicPauseLatch&&) = delete;
     BasicPauseLatch& operator=(BasicPauseLatch&&) = delete;
-
-    void bind_asker_wake(BasicWakeFlag<Kick>& w) noexcept { asker_wake_ = &w; }
 
     void pause(PauseGen g) noexcept {
         ask_.store(g, std::memory_order_release);
@@ -63,7 +63,7 @@ public:
 
 private:
     BasicWakeFlag<Kick>* seat_wake_;
-    BasicWakeFlag<Kick>* asker_wake_ = nullptr;
+    BasicWakeFlag<Kick>* asker_wake_;
     PauseGen taken_ = 0;
     std::atomic<PauseGen> ask_{0};
     alignas(64) std::atomic<PauseGen> paused_{0};

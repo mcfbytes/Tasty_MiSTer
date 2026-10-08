@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <string>
 #include <string_view>
 
 #include "app/input_decode.h"
@@ -22,7 +21,7 @@ class InputBuild {
     TASTY_SEAT_RESIDENT(Diag);
 
 public:
-    static constexpr hal::Seat kSeat = hal::Seat::Diag;
+    static constexpr SeatTag kSeat = SeatTag::Diag;
 
     struct Counts {
         std::uint32_t enumerate_failures = 0;
@@ -40,31 +39,22 @@ public:
         std::uint32_t slot_hash[svc::kMaxPlayers]{};
     };
 
-    InputBuild(const svc::Vfs& vfs, InputWire& wire) noexcept;
+    InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view input_dir = {});
     InputBuild(const InputBuild&) = delete;
     InputBuild& operator=(const InputBuild&) = delete;
 
-    Ex<void> open();
-
     void set_cfg_deadzone_rules(std::span<const svc::DeadzoneRule> rows);
-
-    void set_input_dir(std::string_view dir);
 
     bool rebind_round(unsigned wait_ms = 250);
 
     svc::InputService& service() noexcept { return *svc_; }
     const svc::InputService& service() const noexcept { return *svc_; }
-
-    bool opened() const noexcept { return opened_; }
     Counts counts() const noexcept;
 
 private:
-    const svc::Vfs* vfs_;
     InputWire& wire_;
 
     std::optional<svc::InputService> svc_{};
-    std::string input_dir_{};
-    bool opened_ = false;
 
     std::atomic<std::uint32_t> n_enum_fail_{0};
 };

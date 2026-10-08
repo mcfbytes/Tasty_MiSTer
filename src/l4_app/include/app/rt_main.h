@@ -3,10 +3,11 @@
 
 #include <cstdint>
 
-#include "app/replay_msg.h"
+#include "app/replay_ring.h"
 #include "app/rt_park.h"
 #include "hal/link_timing.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
 
@@ -30,24 +31,29 @@ class RtMain final : public xthread::SeatMain<RtMain> {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    RtMain(reactor::Executive& exec, LinkSession* session, InputEmit* in,
-           const hal::LinkTimingValues& timing, OsdWire* osd = nullptr,
-           reactor::RoundTimer* timer = nullptr, InputWire* wire = nullptr) noexcept
-        : exec_(exec), session_(session), input_(in), osd_(osd), timer_(timer), wire_(wire),
-          park_(exec), round_budget_words_(timing.round_budget_words) {}
+    struct Wiring {
+        infra::OptRef<LinkSession> session{};
+        infra::OptRef<InputEmit> input{};
+        infra::OptRef<OsdWire> osd{};
+        infra::OptRef<reactor::RoundTimer> timer{};
+        infra::OptRef<InputWire> wire{};
+        infra::OptRef<CoreFrameCounter> frames{};
+        infra::OptRef<ScanoutRelay> scanout{};
+        infra::OptRef<ReplayGate> replay{};
+        infra::OptRef<ReplayRing> replay_ring{};
+    };
+
+    RtMain(reactor::Executive& exec, const hal::LinkTimingValues& timing, Wiring wiring) noexcept
+        : exec_(exec), session_(wiring.session), input_(wiring.input), osd_(wiring.osd),
+          timer_(wiring.timer), wire_(wiring.wire), park_(exec),
+          replay_((wiring.replay && wiring.replay_ring) ? wiring.replay
+                                                        : infra::OptRef<ReplayGate>{}),
+          replay_ring_(wiring.replay_ring), frames_(wiring.frames), scanout_(wiring.scanout),
+          round_budget_words_(timing.round_budget_words) {}
     RtMain(const RtMain&) = delete;
     RtMain& operator=(const RtMain&) = delete;
     RtMain(RtMain&&) = delete;
     RtMain& operator=(RtMain&&) = delete;
-
-    void bind_replay(ReplayGate* gate, ReplayRing* ring) noexcept {
-        replay_ = (gate != nullptr && ring != nullptr) ? gate : nullptr;
-        replay_ring_ = ring;
-    }
-
-    void bind_frames(CoreFrameCounter* frames) noexcept { frames_ = frames; }
-
-    void bind_scanout(ScanoutRelay* relay) noexcept { scanout_ = relay; }
 
     void start() noexcept;
 
@@ -93,19 +99,19 @@ private:
     [[nodiscard]] bool wire_held_() const noexcept;
 
     reactor::Executive& exec_;
-    LinkSession* session_;
+    infra::OptRef<LinkSession> session_{};
 
-    InputEmit* input_;
-    OsdWire* osd_;
+    infra::OptRef<InputEmit> input_{};
+    infra::OptRef<OsdWire> osd_{};
 
-    reactor::RoundTimer* timer_;
+    infra::OptRef<reactor::RoundTimer> timer_{};
 
-    InputWire* wire_;
+    infra::OptRef<InputWire> wire_{};
     RtPark park_;
-    ReplayGate* replay_ = nullptr;
-    ReplayRing* replay_ring_ = nullptr;
-    CoreFrameCounter* frames_ = nullptr;
-    ScanoutRelay* scanout_ = nullptr;
+    infra::OptRef<ReplayGate> replay_{};
+    infra::OptRef<ReplayRing> replay_ring_{};
+    infra::OptRef<CoreFrameCounter> frames_{};
+    infra::OptRef<ScanoutRelay> scanout_{};
     bool stopping_ = false;
     Ex<void> result_{};
     std::uint32_t round_budget_words_;

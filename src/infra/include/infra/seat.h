@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 #include "infra/error.h"
 
@@ -22,17 +24,73 @@ enum class SeatTag : std::uint8_t {
     Encode,
     RecWrite,
     Launcher,
+    HdOsd,
+    kCount,
 };
-inline constexpr std::size_t kSeatTagCount = 13;
+inline constexpr std::size_t kSeatTagCount = static_cast<std::size_t>(SeatTag::kCount);
+static_assert(static_cast<std::uint8_t>(SeatTag::Unbound) == 0,
+              "a thread_local SeatTag is zero-initialised, so 0 is Unbound");
 
-inline constexpr const char* kSeatNames[kSeatTagCount] = {
-    "UNBOUND", "T-RT", "T-FRAME",   "T-INPUT",  "T-PCM",      "T-PREFETCH", "T-DIAG",
-    "T-UI",    "T-IO", "T-CAPTURE", "T-ENCODE", "T-RECWRITE", "T-LAUNCHER",
-};
+using SeatNameRow = std::pair<SeatTag, const char*>;
+
+inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatNames{{
+    {SeatTag::Unbound, "UNBOUND"},
+    {SeatTag::RT, "T-RT"},
+    {SeatTag::Frame, "T-FRAME"},
+    {SeatTag::Input, "T-INPUT"},
+    {SeatTag::Pcm, "T-PCM"},
+    {SeatTag::Prefetch, "T-PREFETCH"},
+    {SeatTag::Diag, "T-DIAG"},
+    {SeatTag::Ui, "T-UI"},
+    {SeatTag::Io, "T-IO"},
+    {SeatTag::Capture, "T-CAPTURE"},
+    {SeatTag::Encode, "T-ENCODE"},
+    {SeatTag::RecWrite, "T-RECWRITE"},
+    {SeatTag::Launcher, "T-LAUNCHER"},
+    {SeatTag::HdOsd, "T-HDOSD"},
+}};
+
+consteval bool seat_name_rows_are_ordinal() {
+    for (std::size_t i = 0; i < kSeatTagCount; ++i) {
+        if (static_cast<std::size_t>(kSeatNames[i].first) != i) return false;
+    }
+    return true;
+}
+static_assert(seat_name_rows_are_ordinal(), "kSeatNames: row i names tag i, one row per tag");
 
 constexpr const char* seat_name(SeatTag t) noexcept {
     const auto i = static_cast<std::size_t>(t);
-    return i < kSeatTagCount ? kSeatNames[i] : "?";
+    return i < kSeatTagCount ? kSeatNames[i].second : "?";
+}
+
+inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatRoles{{
+    {SeatTag::Unbound, "unbound"},
+    {SeatTag::RT, "link"},
+    {SeatTag::Frame, "frame"},
+    {SeatTag::Input, "input"},
+    {SeatTag::Pcm, "pcm"},
+    {SeatTag::Prefetch, "prefetch"},
+    {SeatTag::Diag, "diag"},
+    {SeatTag::Ui, "ui"},
+    {SeatTag::Io, "io"},
+    {SeatTag::Capture, "capture"},
+    {SeatTag::Encode, "encode"},
+    {SeatTag::RecWrite, "recwrite"},
+    {SeatTag::Launcher, "launcher"},
+    {SeatTag::HdOsd, "hdosd"},
+}};
+
+consteval bool seat_role_rows_are_ordinal() {
+    for (std::size_t i = 0; i < kSeatTagCount; ++i) {
+        if (static_cast<std::size_t>(kSeatRoles[i].first) != i) return false;
+    }
+    return true;
+}
+static_assert(seat_role_rows_are_ordinal(), "kSeatRoles: row i names tag i, one row per tag");
+
+constexpr const char* seat_role(SeatTag t) noexcept {
+    const auto i = static_cast<std::size_t>(t);
+    return i < kSeatTagCount ? kSeatRoles[i].second : "?";
 }
 
 [[nodiscard]] SeatTag current_seat() noexcept;
@@ -54,7 +112,7 @@ private:
 
 inline constexpr bool kSeatChecksEnabled = (0 != 0);
 
-namespace seat_detail {
+namespace seat::detail {
 
 [[noreturn]] void violation(SeatTag want, SeatTag got, std::uint16_t site, const char* what);
 
@@ -64,13 +122,13 @@ inline void check(SeatTag want, std::uint16_t site, const char* what) noexcept {
     }
 }
 
-}  // namespace seat_detail
+}  // namespace seat::detail
 
 template <SeatTag Want>
 inline void seat_assert([[maybe_unused]] std::uint16_t site,
                         [[maybe_unused]] const char* what) noexcept {
     if constexpr (kSeatChecksEnabled && Want != SeatTag::Unbound) {
-        seat_detail::check(Want, site, what);
+        seat::detail::check(Want, site, what);
     }
 }
 
@@ -88,6 +146,7 @@ inline constexpr SeatTag Capture = SeatTag::Capture;
 inline constexpr SeatTag Encode = SeatTag::Encode;
 inline constexpr SeatTag RecWrite = SeatTag::RecWrite;
 inline constexpr SeatTag Launcher = SeatTag::Launcher;
+inline constexpr SeatTag HdOsd = SeatTag::HdOsd;
 }  // namespace seat_arg
 
 namespace seat_exempt {

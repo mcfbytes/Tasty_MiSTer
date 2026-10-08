@@ -26,9 +26,28 @@ proto::StorageStatus status_of(Errc e) noexcept {
         case Errc::mount_failed:
         case Errc::timeout:
             return proto::StorageStatus::Io;
-        default:
+        case Errc::spi_timeout:
+        case Errc::spi_nak:
+        case Errc::fpga_not_ready:
+        case Errc::bad_confstr:
+        case Errc::bad_opcode:
+        case Errc::slot_range:
+        case Errc::negotiation:
+        case Errc::mmap_failed:
+        case Errc::uio_open:
+        case Errc::dt_missing:
+        case Errc::bridge_state:
+        case Errc::core_load:
+        case Errc::cancelled:
+        case Errc::would_block:
+        case Errc::unimplemented:
+        case Errc::aperture_range:
+        case Errc::stale:
+        case Errc::busy:
             return proto::StorageStatus::Refused;
     }
+
+    return proto::StorageStatus::Refused;
 }
 
 }  // namespace
