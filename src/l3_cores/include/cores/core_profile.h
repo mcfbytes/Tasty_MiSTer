@@ -17,6 +17,7 @@
 #include "cores/signature_row.h"
 #include "cores/staging_policy.h"
 #include "infra/error.h"
+#include "proto/sector_floor.h"
 #include "reactor/link_decoder_decl.h"
 #include "svc/disk_format_row.h"
 #include "infra/seat.h"
@@ -109,6 +110,8 @@ struct CoreProfile {
 
     BlockService block_service = BlockService::Generic;
     std::uint8_t block_drain_budget = 4;
+
+    proto::SectorFloor block_sector_floor{};
 
     bool suppresses_mgl = false;
 

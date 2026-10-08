@@ -130,6 +130,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/minimig_core.h
   cores/mounted_path.h
   cores/mra_cheat.h
+  cores/mra_cheat_records.h
   cores/mra_doc.h
   cores/cheat_engine.h
   cores/cheat_engine_row.h

@@ -17,8 +17,6 @@ class ICheatApply {
 public:
     virtual ~ICheatApply() = default;
 
-    virtual void session_up(cores::Core* core) noexcept = 0;
-
     virtual void content_loaded(cores::Core* core, TxDigest::Kind kind, std::string_view path,
                                 std::uint32_t crc, bool same_game) noexcept = 0;
 

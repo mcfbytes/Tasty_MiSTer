@@ -149,7 +149,7 @@ void ChdPrefetch::serve() noexcept {
 
     TASTY_SEAT_BODY_MEDIATOR(ChdPrefetch, A);
     rests_ = false;
-    if (park_req_.load(std::memory_order_acquire) && !parked()) {
+    if (park_due(parked_, park_req_)) {
         release_media_();
         parked_.store(true, std::memory_order_release);
     }

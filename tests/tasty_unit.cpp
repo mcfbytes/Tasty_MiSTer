@@ -2780,6 +2780,12 @@ void test_owner_sigbus_homes() {
     CHECK(*n.p == 1);
 }
 
+const char* stock_comm() {
+    static char name[16] = {};
+    if (name[0] == '\0') std::snprintf(name, sizeof name, "MiSTer%d", static_cast<int>(::getpid()));
+    return name;
+}
+
 int count_mister_comm() {
     DIR* d = ::opendir("/proc");
     if (d == nullptr) return -1;
@@ -2798,7 +2804,7 @@ int count_mister_comm() {
         if (got <= 0) continue;
         std::string_view s{buf, static_cast<std::size_t>(got)};
         if (!s.empty() && s.back() == '\n') s.remove_suffix(1);
-        if (s == "MiSTer") ++n;
+        if (s == stock_comm()) ++n;
     }
     ::closedir(d);
     return n;
@@ -2807,9 +2813,10 @@ int count_mister_comm() {
 bool set_mister_comm() {
     const int fd = ::open("/proc/self/comm", O_WRONLY | O_CLOEXEC);
     if (fd < 0) return false;
-    const ssize_t w = ::write(fd, "MiSTer", 6);
+    const std::size_t len = std::strlen(stock_comm());
+    const ssize_t w = ::write(fd, stock_comm(), len);
     ::close(fd);
-    return w == 6;
+    return w == static_cast<ssize_t>(len);
 }
 
 bool is_zombie(pid_t pid) {
@@ -2869,6 +2876,7 @@ struct ShareMap {
 };
 
 bool no_mister_yet() {
+    fw::tasty_set_stock_comm(stock_comm());
     const int already = count_mister_comm();
     if (already != 0) std::printf("stop test would signal %d process(es) named MiSTer\n", already);
     CHECK(already == 0);

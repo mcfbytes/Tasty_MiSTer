@@ -24,10 +24,12 @@ void SpiBlockDecoder::service() {
             ++counters_.deferred;
             break;
         }
+        const std::uint32_t bytes = d->req.block_count.v * d->block_size;
 
-        (void)out_.push(LinkEvent::BlockRequest{
-            .slot = d->req.slot, .lba = d->req.lba, .bytes = d->req.block_count.v * d->block_size});
+        (void)out_.push(
+            LinkEvent::BlockRequest{.slot = d->req.slot, .lba = d->req.lba, .bytes = bytes});
         ++counters_.served;
+        if (floor_.is_sector(bytes)) ++counters_.sectors;
     }
 }
 

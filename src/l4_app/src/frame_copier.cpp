@@ -19,8 +19,6 @@ constexpr std::int64_t kMsNs = 1'000'000;
 
 constexpr std::int64_t kLowlatGuardNs = 2 * kMsNs;
 
-constexpr std::size_t kMinSlotBytes = 256u * 1024u;
-
 constexpr std::uint8_t ctr_minus(std::uint8_t c, std::uint32_t n) noexcept {
     return static_cast<std::uint8_t>((c - n) & 0x7u);
 }
@@ -272,7 +270,7 @@ void FrameCopier::probe_step_(std::int64_t now) noexcept {
         if (live_[i] && h && h->supported())
             bytes = std::max(bytes, static_cast<std::size_t>(h->line) * h->height);
     }
-    if (!reserve_arena_(std::max(bytes, kMinSlotBytes))) {
+    if (!reserve_arena_(bytes)) {
         answer_(st_.gen, RecVerdict::NoMemory);
         return end_(RecVerdict::NoMemory);
     }
@@ -346,7 +344,8 @@ bool FrameCopier::regrow_() noexcept {
     return true;
 }
 
-bool FrameCopier::reserve_arena_(std::size_t slot_bytes) noexcept {
+bool FrameCopier::reserve_arena_(std::size_t frame_bytes) noexcept {
+    const std::size_t slot_bytes = raw_stripe(frame_bytes);
     const std::size_t want = raw_depth(slot_bytes);
     const std::size_t depth =
         w_.channel->set_live(static_cast<std::uint8_t>(want)) ? want : w_.channel->live();

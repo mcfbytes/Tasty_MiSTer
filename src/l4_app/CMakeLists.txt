@@ -8,6 +8,7 @@ add_library(mister_app STATIC
   src/bitstream_programmer.cpp
   src/bt_pump.cpp
   src/capture_main.cpp
+  src/cheat_catalog_pack.cpp
   src/cheat_link.cpp
   src/cheat_store.cpp
   src/cmd_fifo.cpp
@@ -448,6 +449,9 @@ if(TASTY_BUILD_TESTS)
     SOURCES tests/binder_unit.cpp
     LIBS mister_app tasty_test_options
     TIMEOUT 60)
+  if(NOT CMAKE_CROSSCOMPILING)
+    set_tests_properties(tasty.app_binder PROPERTIES FAIL_REGULAR_EXPRESSION "NOT CHECKED:")
+  endif()
 
   tasty_unit_test(tasty_app_mailbox_relay_unit
     NAME tasty.app_mailbox_relay

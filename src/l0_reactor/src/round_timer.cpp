@@ -65,7 +65,9 @@ std::int64_t RoundTimer::end(std::int64_t t_end_ns) noexcept {
             acc_.all_life_cause = cause;
         }
     } else {
-        record_(acc_.steady, dur, cause);
+        std::uint32_t& h = acc_.all_steady_hist[record_(acc_.steady, dur, cause)];
+        h = sat_add(h, 1);
+        if (acc_.all_steady_rounds != kU32Max) acc_.all_steady_sum_ns += dur;
         acc_.all_steady_rounds = sat_add(acc_.all_steady_rounds, 1);
         if (dur > kOverNs) acc_.all_steady_over_1ms = sat_add(acc_.all_steady_over_1ms, 1);
         if (dur > acc_.all_steady_max_ns) {
@@ -84,7 +86,8 @@ void RoundTimer::flush(std::int64_t now_ns) noexcept {
     if (epoch_start_ns_ != 0) close_epoch_(now_ns);
 }
 
-void RoundTimer::record_(RoundTiming::Dist& d, std::uint64_t ns, RoundTiming::Cause c) noexcept {
+std::size_t RoundTimer::record_(RoundTiming::Dist& d, std::uint64_t ns,
+                                RoundTiming::Cause c) noexcept {
     if (d.n == 0 || ns < d.min_ns) d.min_ns = ns;
     d.n = sat_add(d.n, 1);
     d.sum_ns += ns;
@@ -93,8 +96,9 @@ void RoundTimer::record_(RoundTiming::Dist& d, std::uint64_t ns, RoundTiming::Ca
         d.max_cause = c;
     }
     if (ns > kOverNs) d.over_1ms = sat_add(d.over_1ms, 1);
-    std::uint32_t& h = d.hist[round_bucket(ns)];
-    h = sat_add(h, 1);
+    const std::size_t b = round_bucket(ns);
+    d.hist[b] = sat_add(d.hist[b], 1);
+    return b;
 }
 
 void RoundTimer::close_epoch_(std::int64_t now_ns) noexcept {

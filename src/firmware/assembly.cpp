@@ -12,6 +12,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -448,11 +449,37 @@ bool ThreadAssembly::any_live() const noexcept {
     return false;
 }
 
-ThreadAssembly::~ThreadAssembly() {
-    if (any_live()) {
-        stop();
-        (void)join();
+ThreadAssembly::~ThreadAssembly() { stop_join_or_exit(); }
+
+namespace {
+constexpr ThreadAssembly::StopBudget kShippingBudget{.rt_ns = kRtStopDeadlineNs,
+                                                     .io_ns = kIoStopDeadlineNs};
+}
+
+void ThreadAssembly::stop_join_or_exit() noexcept { stop_join_or_exit(kShippingBudget); }
+
+void ThreadAssembly::stop_join_or_exit(StopBudget budget) noexcept {
+    if (!any_live()) return;
+    stop();
+    (void)join(budget);
+    if (any_live()) exit_seats_live_();
+}
+
+void ThreadAssembly::exit_seats_live_() const noexcept {
+    for (const SeatTag s : kJoinOrder) {
+        if (!live_[seat_index(s)]) continue;
+        char line[128];
+        const int n = std::snprintf(line, sizeof line,
+                                    "{\"t\":\"wedge\",\"seat\":\"%s\",\"tid\":%ld,"
+                                    "\"at\":\"teardown\",\"exit\":%d}\n",
+                                    seat_name(s), tid(s), kRtWedgeExitStatus);
+        if (n > 0) {
+            const auto len = std::min(static_cast<std::size_t>(n), sizeof line - 1);
+            const auto w = ::write(STDERR_FILENO, line, len);
+            (void)w;
+        }
     }
+    ::_exit(kRtWedgeExitStatus);
 }
 
 DiagSampler::Sources ThreadAssembly::with_ui_cells_(DiagSampler::Sources s,
@@ -682,22 +709,24 @@ void ThreadAssembly::stop() noexcept {
 
 void ThreadAssembly::mark_quiescing() noexcept { quiescing_.request(); }
 
-Ex<void> ThreadAssembly::join() {
+Ex<void> ThreadAssembly::join() { return join(kShippingBudget); }
+
+Ex<void> ThreadAssembly::join(StopBudget budget) {
 
     static_assert(kJoinOrder[0] == SeatTag::RT && kJoinOrder[1] == SeatTag::Io);
     if (live_[seat_index(SeatTag::RT)]) {
 
-        if (auto r = stop_and_join_rt(kRtStopDeadlineNs); !r) return r;
+        if (auto r = stop_and_join_rt(budget.rt_ns); !r) return r;
     }
 
-    Ex<void> io_err{};
+    Ex<void> err{};
     if (live_[seat_index(SeatTag::Io)] && !io_poisoned_) {
-        if (auto r = join_io_within(kIoStopDeadlineNs); !r) {
+        if (auto r = join_io_within(budget.io_ns); !r) {
             if (r.error().code == Errc::timeout) {
 
                 io_poisoned_ = true;
             }
-            io_err = std::unexpected(r.error());
+            err = std::unexpected(r.error());
         }
     }
 
@@ -706,12 +735,13 @@ Ex<void> ThreadAssembly::join() {
         const std::size_t i = seat_index(s);
         if (!live_[i]) continue;
         if (const int rc = ::pthread_join(thread_[i], nullptr); rc != 0) {
-            return os_error(ERR_SITE(), rc);
+            if (err) err = os_error(ERR_SITE(), rc);
+            continue;
         }
         live_[i] = false;
     }
 
-    return io_err;
+    return err;
 }
 
 }  // namespace mister::fw

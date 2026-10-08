@@ -125,11 +125,7 @@ TastyHub::TastyHub(const BootParts& plat, app::IStopSignal& stop)
     device_.grant_pauses(seat_mains_, assembly_.ui());
 }
 
-TastyHub::~TastyHub() {
-    if (!assembly_.any_live()) return;
-    assembly_.stop();
-    (void)assembly_.join();
-}
+TastyHub::~TastyHub() { assembly_.stop_join_or_exit(); }
 
 void TastyHub::latch_boot_config() noexcept {
     auto c = std::make_unique<svc::ConfigSnapshot>();

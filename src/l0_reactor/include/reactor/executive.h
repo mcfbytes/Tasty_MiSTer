@@ -113,6 +113,9 @@ public:
         return slot < service_count_ ? row_retirements_[slot] : 0u;
     }
 
+    static constexpr std::uint8_t kClaimStreakMax = 4;
+    std::uint32_t claim_yields() const noexcept { return claim_yields_; }
+
     Executive(Executive&&) noexcept;
     Executive(const Executive&) = delete;
     Executive& operator=(const Executive&) = delete;
@@ -157,6 +160,8 @@ private:
     bool row_carried_[kMaxServices] = {};
     std::uint32_t row_fallbacks_[kMaxServices] = {};
     std::uint32_t row_retirements_[kMaxServices] = {};
+    std::uint8_t claim_streak_[kMaxServices] = {};
+    std::uint32_t claim_yields_ = 0;
     std::uint32_t fallbacks_total_ = 0;
     std::uint32_t retirements_total_ = 0;
     std::size_t service_count_ = 0;

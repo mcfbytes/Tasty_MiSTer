@@ -32,6 +32,6 @@ struct CheatCatalog {
 };
 static_assert(std::is_trivially_copyable_v<CheatCatalog>);
 
-using CheatCatalogCell = xthread::Telemetry<CheatCatalog, SeatTag::RT>;
+using CheatCatalogCell = xthread::Telemetry<CheatCatalog, SeatTag::Unbound>;
 
 }  // namespace mister::app

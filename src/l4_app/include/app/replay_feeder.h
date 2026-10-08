@@ -141,6 +141,7 @@ public:
     static constexpr std::size_t kCheckpoints = 64;
     static constexpr std::int64_t kAnswerNs = 2'000'000'000;
     static constexpr std::int64_t kPowerOnNs = 20'000'000'000;
+    static constexpr std::int64_t kDiscSettleNs = 2'000'000'000;
 
     explicit ReplayFeeder(const Wiring& w) noexcept;
     ~ReplayFeeder();
@@ -246,6 +247,7 @@ private:
     bool end_pushed_ = false;
     unsigned tries_ = 0;
     std::int64_t since_ns_ = 0;
+    std::optional<std::int64_t> disc_ns_{};
     bool stop_asked_ = false;
 
     std::array<std::uint32_t, kCheckpoints> checks_{};

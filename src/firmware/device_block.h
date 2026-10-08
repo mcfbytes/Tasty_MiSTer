@@ -10,6 +10,7 @@
 #include "app/board_ops.h"
 #include "app/bt_pump.h"
 #include "app/cheat_blob_cell.h"
+#include "app/cheat_catalog_cell.h"
 #include "app/cheat_link.h"
 #include "app/cmd_fifo.h"
 #include "app/companion_host.h"
@@ -188,6 +189,8 @@ public:
     reactor::CoreState core_state_{};
 
     app::CheatBlobCell cheat_blob_{};
+
+    app::CheatCatalogCell cheat_catalog_{};
     app::CheatLink cheat_link_{cheat_blob_};
 
     LadderScope ladder_;

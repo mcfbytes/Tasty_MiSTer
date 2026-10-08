@@ -9,6 +9,7 @@
 #include "proto/link_event.h"
 #include "proto/link_port.h"
 #include "proto/link_router.h"
+#include "proto/sector_floor.h"
 #include "proto/session_live.h"
 
 namespace mister::proto {
@@ -26,6 +27,7 @@ public:
         std::uint32_t served = 0;
         std::uint32_t errors = 0;
         std::uint32_t deferred = 0;
+        std::uint32_t sectors = 0;
         std::uint16_t err_code = 0;
     };
 
@@ -39,12 +41,17 @@ public:
     void bind_budget(unsigned budget) noexcept { budget_ = budget; }
     [[nodiscard]] const Counters& counters() const noexcept { return counters_; }
 
+    void bind_sector_floor(SectorFloor floor) noexcept { floor_ = floor; }
+
+    [[nodiscard]] std::uint32_t osd_claims() const noexcept { return counters_.sectors; }
+
 private:
     hal::ISpiTransport* link_;
     BlockSlots* slots_;
     const ISessionLive* live_;
     Port out_;
     unsigned budget_ = kDrainBudget;
+    SectorFloor floor_{};
     Counters counters_{};
 };
 

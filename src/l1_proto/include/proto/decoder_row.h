@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
+
 #include "infra/seat.h"
 #include "reactor/link_decoder.h"
 
@@ -19,6 +21,14 @@ public:
     constexpr bool active() const override {
         TASTY_SEAT_BODY(DecoderRow);
         return d_->active();
+    }
+    std::uint32_t osd_claims() const override {
+        TASTY_SEAT_BODY(DecoderRow);
+        if constexpr (requires { d_->osd_claims(); }) {
+            return d_->osd_claims();
+        } else {
+            return 0;
+        }
     }
 
 private:

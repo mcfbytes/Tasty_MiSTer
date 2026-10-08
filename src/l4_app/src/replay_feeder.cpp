@@ -191,6 +191,7 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
     frames_ = 0;
     movie_frames_ = 0;
     tries_ = 0;
+    disc_ns_.reset();
     vsync_ok_ = w_.video != nullptr && w_.video->output_locked();
     stage_ = Stage::Scanning;
     return true;
@@ -653,7 +654,17 @@ void ReplayFeeder::tick_arming_(const ReplayStatus& s, bool fresh) noexcept {
             if (w_.conf != nullptr && w_.conf->sample_into(conf_) != 0)
                 scope = CoreScope{conf_.gen};
             bool asked = false;
-            if (w_.asks != nullptr && event_ == ReplayMsg::PowerOnEvent::ResetPulse) {
+            if (w_.asks != nullptr && event_ == ReplayMsg::PowerOnEvent::ResetPulse &&
+                codec_->rom_is_disc() && !disc_ns_) {
+                UiRequest::MountImage mount{.index = proto::IoIndex{codec_->rom_digit()},
+                                            .scope = scope};
+                if (mount.path.assign(rom_.view()) && w_.asks->push(mount) != kUncaused) {
+                    disc_ns_ = now_ns_();
+                    return;
+                }
+            } else if (disc_ns_ && now_ns_() - *disc_ns_ < kDiscSettleNs) {
+                return;
+            } else if (w_.asks != nullptr && event_ == ReplayMsg::PowerOnEvent::ResetPulse) {
 
                 const UiRequest::ResetCore ask{
                     .edge = proto::ResetEdge::osd_toggle(proto::StatusBit{0}, false),
@@ -693,6 +704,9 @@ void ReplayFeeder::tick_arming_(const ReplayStatus& s, bool fresh) noexcept {
     if (fresh && s.level == ReplayLevel::Running) {
         stage_ = Stage::Streaming;
     } else if (now_ns_() - since_ns_ > kPowerOnNs) {
+        if (w_.diag != nullptr)
+            w_.diag->appendf("{\"t\":\"tas\",\"k\":\"no_power_on\",\"disc\":%u}",
+                             disc_ns_ ? 1u : 0u);
         publish_(ReplayOp::Stop);
         stage_ = Stage::Stopping;
         since_ns_ = now_ns_();

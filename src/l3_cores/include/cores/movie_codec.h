@@ -196,6 +196,8 @@ public:
 
     [[nodiscard]] virtual std::uint8_t rom_digit() const noexcept = 0;
 
+    [[nodiscard]] virtual bool rom_is_disc() const noexcept { return false; }
+
     static constexpr std::uint64_t kRomMax = 4u << 20;
 
     struct DigestSource {

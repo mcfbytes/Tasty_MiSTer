@@ -41,10 +41,12 @@ struct RoundTiming {
     Cause all_steady_cause{}, all_life_cause{};
     std::uint32_t all_steady_rounds = 0, all_life_rounds = 0;
     std::uint32_t all_steady_over_1ms = 0, tick_overruns = 0;
+    std::uint64_t all_steady_sum_ns = 0;
+    std::uint32_t all_steady_hist[kRoundBuckets] = {};
 };
 static_assert(std::is_trivially_copyable_v<RoundTiming>);
 static_assert(std::is_nothrow_default_constructible_v<RoundTiming>);
-static_assert(sizeof(RoundTiming) <= 512, "one memcpy per epoch, bounded by a constant");
+static_assert(sizeof(RoundTiming) == 512, "one memcpy per epoch; a new field must make room");
 
 using RoundTimingCell = xthread::Telemetry<RoundTiming, SeatTag::RT>;
 
@@ -63,6 +65,10 @@ constexpr std::uint32_t round_us(std::uint64_t ns) noexcept {
 }
 constexpr std::uint32_t round_avg_us(const RoundTiming::Dist& d) noexcept {
     return d.n == 0 ? 0u : round_us(d.sum_ns / d.n);
+}
+
+constexpr std::uint32_t round_all_steady_avg_us(const RoundTiming& t) noexcept {
+    return t.all_steady_rounds == 0 ? 0u : round_us(t.all_steady_sum_ns / t.all_steady_rounds);
 }
 
 constexpr std::uint32_t round_p99_us(const RoundTiming::Dist& d) noexcept {

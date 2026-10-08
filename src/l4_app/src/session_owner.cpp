@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "app/xml_kind.h"
+#include "app/cheat_catalog_pack.h"
 #include "app/conf_str_cell.h"
 #include "app/durable_write.h"
 #include "app/durable_write_service.h"
@@ -32,6 +33,7 @@
 #include "app/config_apply.h"
 #include "app/event.h"
 #include "cores/boot_asset.h"
+#include "cores/cheat_records.h"
 #include "cores/ladder_context.h"
 #include "cores/payload_pieces.h"
 #include "cores/registry.h"
@@ -1514,7 +1516,19 @@ void SessionOwner::intern_manifest_(std::string_view rel) {
             }
         }
     }
+    pack_manifest_cheats_(buf);
     (void)inbox_.intern_file_at(FileBytes::kManifestId, std::move(buf), ".mra", rel, 0);
+}
+
+void SessionOwner::pack_manifest_cheats_(std::span<const std::uint8_t> doc) {
+    const cores::ManifestDocRole* role = cores::manifest_doc_role();
+    if (role == nullptr) {
+        cheat_catalog_ = CheatCatalog{};
+        return;
+    }
+    const std::unique_ptr<cores::ICheatRecords> records =
+        role->cheats_of({reinterpret_cast<const char*>(doc.data()), doc.size()});
+    pack_cheat_catalog(*records, cheat_catalog_);
 }
 
 void SessionOwner::latch_mra_facts_() {
@@ -1947,6 +1961,9 @@ void SessionOwner::on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept {
         refuse_started_switch_(m.err);
         return;
     }
+
+    static constexpr CheatCatalog kNoCheats{};
+    cheat_catalog_cell_.publish(m.cheat_records ? cheat_catalog_ : kNoCheats);
     if (m.restore_owed) {
 
         boot_restore_owed_ = true;

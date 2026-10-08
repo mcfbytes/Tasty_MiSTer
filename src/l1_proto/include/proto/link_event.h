@@ -80,6 +80,8 @@ struct LinkEvent {
         static constexpr Kind kKind = Kind::CoreMade;
         bool made = false;
         bool restore_owed = false;
+        bool cheat_records = false;
+        std::uint8_t pad_{};
         std::uint16_t bind_gen = 0;
         Errc err{};
     };

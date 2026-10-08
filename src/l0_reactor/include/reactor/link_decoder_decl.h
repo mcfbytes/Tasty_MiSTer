@@ -14,7 +14,7 @@ enum class DeadlineClass : std::uint8_t {
     B,
 };
 
-enum class OsdBudget : std::uint8_t { Shared, Pinned };
+enum class OsdBudget : std::uint8_t { Shared, Pinned, Claimed };
 
 struct LinkDecoderDecl {
     const char* name;

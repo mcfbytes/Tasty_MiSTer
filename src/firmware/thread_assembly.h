@@ -91,8 +91,17 @@ public:
 
     [[nodiscard]] Ex<void> rt_result() const noexcept { return rt_result_; }
 
+    struct StopBudget {
+        std::int64_t rt_ns;
+        std::int64_t io_ns;
+    };
+
     void stop() noexcept;
-    Ex<void> join();
+    [[nodiscard]] Ex<void> join();
+    [[nodiscard]] Ex<void> join(StopBudget budget);
+
+    void stop_join_or_exit() noexcept;
+    void stop_join_or_exit(StopBudget budget) noexcept;
 
     void mark_quiescing() noexcept;
 
@@ -118,6 +127,8 @@ private:
     static void* trampoline(void* self);
 
     struct SeatTable;
+
+    [[noreturn]] void exit_seats_live_() const noexcept;
 
     void stop_bound_(SeatTag s) noexcept;
     template <class... Rows>

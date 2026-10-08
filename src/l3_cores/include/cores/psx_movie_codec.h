@@ -100,6 +100,7 @@ public:
                                                      const Facts& f) const override;
 
     [[nodiscard]] std::uint8_t rom_digit() const noexcept override { return 1; }
+    [[nodiscard]] bool rom_is_disc() const noexcept override { return true; }
 
     [[nodiscard]] static Ex<std::vector<std::uint8_t>> toc_prefix(
         std::string_view cue, std::span<const std::uint64_t> file_sizes);

@@ -111,7 +111,7 @@ inline constexpr ThreadMap kDe10ThreadMap{{
     {.seat = SeatTag::Capture,
      .cpu = 0,
      .policy = SchedPolicy::Fifo,
-     .prio = 15,
+     .prio = 21,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Encode,
@@ -250,14 +250,16 @@ constexpr bool hdosd_is_other(const ThreadMap& m) noexcept {
     return seat_of(m, SeatTag::HdOsd).policy == SchedPolicy::Other;
 }
 
-constexpr bool capture_ranks_lowest(const ThreadMap& m) noexcept {
+constexpr bool capture_outranks_only_prefetch(const ThreadMap& m) noexcept {
     const ThreadRole& cap = seat_of(m, SeatTag::Capture);
-    if (cap.policy != SchedPolicy::Fifo) return false;
+    const ThreadRole& pf = seat_of(m, SeatTag::Prefetch);
+    if (cap.policy != SchedPolicy::Fifo || pf.policy != SchedPolicy::Fifo) return false;
     if (seat_of(m, SeatTag::Encode).policy != SchedPolicy::Other) return false;
     if (seat_of(m, SeatTag::RecWrite).policy != SchedPolicy::Other) return false;
+    if (cap.prio <= pf.prio) return false;
     for (const ThreadRole& r : m) {
-        if (r.seat == SeatTag::Capture || r.policy != SchedPolicy::Fifo) continue;
-        if (r.prio <= cap.prio) return false;
+        if (r.seat == SeatTag::Capture || r.seat == SeatTag::Prefetch) continue;
+        if (r.policy == SchedPolicy::Fifo && r.prio <= cap.prio) return false;
     }
     return true;
 }

@@ -135,7 +135,7 @@ private:
     [[nodiscard]] bool rate_is_ours_(std::uint32_t seq) const noexcept;
     void deliver_(std::size_t buf, const hal::ScalerHeader& h, const FrameStamp& s) noexcept;
     [[nodiscard]] bool regrow_() noexcept;
-    [[nodiscard]] bool reserve_arena_(std::size_t slot_bytes) noexcept;
+    [[nodiscard]] bool reserve_arena_(std::size_t frame_bytes) noexcept;
 
     Wiring w_;
     std::optional<hal::ScalerBuffers> window_;

@@ -65,6 +65,7 @@ const char* g_status_path TASTY_PERSIST(proc, tasty_ctl_status) = kTastyStatusPa
 const char* g_status_tmp_path TASTY_PERSIST(proc, tasty_ctl_status_tmp) = kTastyStatusTmpPath;
 char g_status_tmp_buf[256] TASTY_PERSIST(proc, tasty_ctl_status_tmp_buf){};
 const char* g_owner_comm TASTY_PERSIST(proc, tasty_ctl_comm) = "tasty";
+const char* g_stock_comm TASTY_PERSIST(proc, tasty_ctl_stock_comm) = "MiSTer";
 std::atomic<int> g_home_claimed TASTY_PERSIST(proc, tasty_home_claimed){0};
 std::atomic<ReturnHome*> g_return_home TASTY_PERSIST(proc, tasty_return_home){nullptr};
 static_assert(std::atomic<int>::is_always_lock_free);
@@ -101,7 +102,7 @@ bool comm_matches(int pid, std::string_view want) noexcept {
     return s == want;
 }
 
-bool comm_is_mister(int pid) noexcept { return comm_matches(pid, "MiSTer"); }
+bool comm_is_mister(int pid) noexcept { return comm_matches(pid, g_stock_comm); }
 
 std::optional<timespec> mono_deadline(unsigned seconds) noexcept {
     timespec out{};
@@ -377,6 +378,10 @@ void tasty_set_ctl_paths(const char* lock, const char* pid, const char* status) 
 
 void tasty_set_owner_comm(const char* comm) noexcept {
     if (comm != nullptr && comm[0] != '\0') g_owner_comm = comm;
+}
+
+void tasty_set_stock_comm(const char* comm) noexcept {
+    if (comm != nullptr && comm[0] != '\0') g_stock_comm = comm;
 }
 
 void tasty_set_home_image(const char* exe, const char* arg) noexcept {

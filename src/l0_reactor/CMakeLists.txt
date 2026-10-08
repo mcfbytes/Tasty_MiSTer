@@ -41,6 +41,11 @@ if(TASTY_BUILD_TESTS)
   target_include_directories(tasty_reactor_executive_unit
                              PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 
+  if(NOT CMAKE_CROSSCOMPILING)
+    set_tests_properties(tasty.reactor_executive
+                         PROPERTIES FAIL_REGULAR_EXPRESSION "NOT CHECKED:")
+  endif()
+
   tasty_unit_test(tasty_corestate_redef_probe
     NAME tasty.reactor_corestate_redef
     SOURCES tests/corestate_redef_probe.cpp

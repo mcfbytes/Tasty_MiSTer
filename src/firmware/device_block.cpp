@@ -179,6 +179,7 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
                  .config_cell = config_cell_,
                  .owner_events = owner_events_,
                  .conf_str_cell = conf_str_cell_,
+                 .cheat_catalog_cell = cheat_catalog_,
                  .ladder_cell = ladder_cell_,
                  .main_wake = main_wake_,
                  .ops = parts_.board_ops,

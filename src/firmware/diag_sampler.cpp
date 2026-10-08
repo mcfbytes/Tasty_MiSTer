@@ -37,7 +37,7 @@ DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
     return DiagRecords{
         SessRecord{sources.pause_expiries, sources.recover_polls, sources.save_write_failures,
                    sources.fallbacks},
-        TasRecord{sources.replay},
+        RndRecord{sources.round_timing}, TasRecord{sources.replay},
         RecRecord{sources.rec_capture, sources.rec_encode, sources.rec_write, sources.rec_avi},
         HdRecord{sources.hd}};
 }

@@ -941,6 +941,8 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::MakeCore& a,
             proto::LinkEvent::CoreMade{.made = made.has_value(),
                                        .restore_owed = made.has_value() && current_ != nullptr &&
                                                        current_->config_slots() != nullptr,
+                                       .cheat_records = made.has_value() && current_ != nullptr &&
+                                                        current_->cheat_records() != nullptr,
                                        .bind_gen = bindings_.generation().v,
                                        .err = made.has_value() ? Errc{} : made.error().code}))
         ++core_made_drops_;
@@ -1516,7 +1518,6 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
     publish_dip_table();
     publish_config_slots();
     publish_option_table();
-    cheats_.session_up(current_.get());
     surface_manifest_error();
     osd_mask_decoder_.forget(front_end);
     osd_rearmed_ = false;
@@ -1628,6 +1629,7 @@ Ex<void> LinkSession::bind_pre_session_(proto::BindGeneration gen) {
     return rebind_census(rows);
 }
 
+static_assert(requires(const proto::SpiBlockDecoder& d) { d.osd_claims(); });
 static_assert(cores::CoreProfile{}.block_drain_budget == proto::SpiBlockDecoder::kDrainBudget,
               "the generic profile's drain bound is stock's four-iteration loop");
 
@@ -1643,7 +1645,7 @@ std::span<const reactor::LinkDecoderDecl> LinkSession::census_rows_(
                                                 &block_row_,
                                                 0,
                                                 reactor::DeadlineClass::A,
-                                                reactor::OsdBudget::Shared};
+                                                reactor::OsdBudget::Claimed};
         }
     }
     if (current_ != nullptr) {
@@ -2619,6 +2621,7 @@ Ex<void> LinkSession::raise_session_() {
 
     if (current_ != nullptr) {
         block_decoder_.bind_budget(current_->profile().block_drain_budget);
+        block_decoder_.bind_sector_floor(current_->profile().block_sector_floor);
         std::array<reactor::LinkDecoderDecl, kMaxServices> rows{};
         const SessionBindings::Doorbells& db = bindings_.doorbells();
         if (auto r =

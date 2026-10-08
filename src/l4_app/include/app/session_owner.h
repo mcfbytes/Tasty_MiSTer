@@ -15,6 +15,7 @@
 
 #include "app/board_ops.h"
 #include "app/bitstream_programmer.h"
+#include "app/cheat_catalog_cell.h"
 #include "app/conf_str_cell.h"
 #include "app/ladder_cell.h"
 #include "app/mount_status_cell.h"
@@ -91,6 +92,8 @@ public:
         EventQueue& owner_events;
         ConfStrCell& conf_str_cell;
 
+        CheatCatalogCell& cheat_catalog_cell;
+
         LadderStateCell& ladder_cell;
 
         xthread::WakeFlag& main_wake;
@@ -120,9 +123,9 @@ public:
     SessionOwner(QuiesceChannel& park, const Link& link) noexcept
         : park_(park), inbox_(link.inbox), rx_(link.rx), config_cell_(link.config_cell),
           owner_events_(link.owner_events), conf_str_cell_(link.conf_str_cell),
-          ui_requests_(link.main_wake), status_cell_(link.status_cell),
-          mount_status_cell_(link.mount_status_cell), save_extent_cell_(link.save_extent_cell),
-          levels_(link.pin_levels),
+          cheat_catalog_cell_(link.cheat_catalog_cell), ui_requests_(link.main_wake),
+          status_cell_(link.status_cell), mount_status_cell_(link.mount_status_cell),
+          save_extent_cell_(link.save_extent_cell), levels_(link.pin_levels),
           clock_(link.clock.has_value() ? static_cast<const os::IClock&>(*link.clock)
                                         : static_cast<const os::IClock&>(default_clock_)),
           ladder_cell_(link.ladder_cell), programmer_(link.programmer), vfs_(link.storage),
@@ -693,6 +696,7 @@ private:
                                                       std::string_view path) const;
     void intern_rel_at_(proto::FileId id, std::string_view rel);
     void intern_manifest_(std::string_view rel);
+    void pack_manifest_cheats_(std::span<const std::uint8_t> doc);
     void order_slot_previews_(const std::byte* pack, std::size_t len);
     void latch_mra_facts_();
     void order_bind_facts_() noexcept;
@@ -726,6 +730,9 @@ private:
     xthread::Telemetry<std::uint8_t, SeatTag::Unbound> direct_video_ini_cell_{};
     EventQueue& owner_events_;
     ConfStrCell& conf_str_cell_;
+    CheatCatalogCell& cheat_catalog_cell_;
+
+    CheatCatalog cheat_catalog_{};
     UiRequestRing ui_requests_;
     const proto::StatusCell& status_cell_;
     const MountStatusCell& mount_status_cell_;

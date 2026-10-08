@@ -133,6 +133,9 @@ inline constexpr CoreProfile kPsx{
     .signatures = {},
     .blank_save = kPsxBlankSave,
     .staging = kPsxStaging,
+
+    .block_drain_budget = 1,
+    .block_sector_floor = {.bytes = static_cast<std::uint32_t>(svc::kCdDataSize)},
     .image_rows_no_zip = true,
 
     .cheats = {.reset_on_remount = true},

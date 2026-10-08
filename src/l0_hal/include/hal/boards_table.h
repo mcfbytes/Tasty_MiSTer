@@ -359,10 +359,12 @@ static_assert(
     every_thread_map([](const ThreadMap& m) { return hdosd_is_other(m); }),
     "T-HDOSD is SCHED_OTHER: a raster tick is not a deadline seat and takes no FIFO slot.");
 
-static_assert(every_thread_map([](const ThreadMap& m) { return capture_ranks_lowest(m); }),
-              "the recorder is best effort: T-CAPTURE is FIFO so its copy window is reachable, "
-              "but BELOW every other FIFO seat, so a copy never delays input, audio, storage or "
-              "a CHD hunk; T-ENCODE and T-RECWRITE are SCHED_OTHER.");
+static_assert(every_thread_map([](const ThreadMap& m) {
+                  return capture_outranks_only_prefetch(m);
+              }),
+              "T-CAPTURE is FIFO above T-PREFETCH alone: its copy has one frame, a CHD hunk has "
+              "the read-ahead ring; it stays below input, audio, storage and T-RT; T-ENCODE and "
+              "T-RECWRITE are SCHED_OTHER.");
 
 static_assert(every_thread_map([](const ThreadMap& m) { return fifo_prios_all_distinct(m); }),
               "item INVARIANT 4: every SCHED_FIFO seat must have a DISTINCT "

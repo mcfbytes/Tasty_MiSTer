@@ -62,6 +62,8 @@ void tasty_warn_record_writeback(std::string_view record, int rt_cpu, const char
                                  const char* unbound_path, std::FILE* out) noexcept;
 void tasty_set_owner_comm(const char* comm) noexcept;
 
+void tasty_set_stock_comm(const char* comm) noexcept;
+
 struct ReturnHome {
     int lock_fd = -1;
     bool armed = true;

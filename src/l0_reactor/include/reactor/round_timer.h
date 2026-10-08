@@ -30,8 +30,14 @@ public:
     [[nodiscard]] std::int64_t last_mark_ns() const noexcept { return last_mark_ns_; }
     [[nodiscard]] const RoundTimingCell& cell() const noexcept { return cell_; }
 
+    void preload_all_steady(std::uint32_t rounds, std::uint64_t sum_ns) noexcept {
+        acc_.all_steady_rounds = rounds;
+        acc_.all_steady_sum_ns = sum_ns;
+    }
+
 private:
-    static void record_(RoundTiming::Dist& d, std::uint64_t ns, RoundTiming::Cause c) noexcept;
+    static std::size_t record_(RoundTiming::Dist& d, std::uint64_t ns,
+                               RoundTiming::Cause c) noexcept;
     void close_epoch_(std::int64_t now_ns) noexcept;
 
     RoundTiming acc_{};

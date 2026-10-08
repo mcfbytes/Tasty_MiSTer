@@ -114,6 +114,11 @@ public:
                                   std::uint32_t hunk_count) noexcept;
 
     bool parked() const noexcept { return parked_.load(std::memory_order_acquire); }
+
+    template <class Flag>
+    [[nodiscard]] static bool park_due(const Flag& parked, const Flag& park_req) noexcept {
+        return !parked.load(std::memory_order_acquire) && park_req.load(std::memory_order_acquire);
+    }
     bool attached() const noexcept { return depth_ != 0; }
 
     std::size_t depth() const noexcept { return depth_; }

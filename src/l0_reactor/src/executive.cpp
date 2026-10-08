@@ -86,6 +86,7 @@ Executive::Executive(Executive&& o) noexcept
     round_count_ = o.round_count_;
     fallbacks_total_ = o.fallbacks_total_;
     retirements_total_ = o.retirements_total_;
+    claim_yields_ = o.claim_yields_;
     for (std::size_t i = 0; i < notifier_count_; ++i)
         notifiers_[i] = std::move(o.notifiers_[i]);
     for (std::size_t i = 0; i < service_count_; ++i) {
@@ -94,6 +95,7 @@ Executive::Executive(Executive&& o) noexcept
         row_carried_[i] = o.row_carried_[i];
         row_fallbacks_[i] = o.row_fallbacks_[i];
         row_retirements_[i] = o.row_retirements_[i];
+        claim_streak_[i] = o.claim_streak_[i];
     }
     for (std::size_t i = 0; i < borrowed_count_; ++i)
         borrowed_[i] = o.borrowed_[i];
@@ -137,6 +139,7 @@ Ex<void> Executive::bind(std::span<const LinkDecoderDecl> services, CoreState& s
         row_carried_[slot] = false;
         row_fallbacks_[slot] = 0;
         row_retirements_[slot] = 0;
+        claim_streak_[slot] = 0;
         ++slot;
     }
     service_count_ = slot;
@@ -444,7 +447,20 @@ void Executive::run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment
     if (!s.impl->active()) return;
 
     if (s.osd_budget == OsdBudget::Pinned) fifo_this_round_ = true;
+    const bool claims = s.osd_budget == OsdBudget::Claimed;
+    if (claims && claim_streak_[slot] >= kClaimStreakMax) {
+
+        claim_streak_[slot] = 0;
+        ++claim_yields_;
+        return;
+    }
+    const std::uint32_t claimed = claims ? s.impl->osd_claims() : 0u;
     s.impl->service(*core_state_);
+    if (claims) {
+        const bool claim = s.impl->osd_claims() != claimed;
+        if (claim) fifo_this_round_ = true;
+        claim_streak_[slot] = claim ? static_cast<std::uint8_t>(claim_streak_[slot] + 1u) : 0u;
+    }
     const std::int64_t t_done = now_ns();
     if (round_timer_ != nullptr) round_timer_->mark(seg, slot, t_done);
     std::int64_t d = t_done - wake_ns;
