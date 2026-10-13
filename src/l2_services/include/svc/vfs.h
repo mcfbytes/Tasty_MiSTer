@@ -34,14 +34,14 @@ class Vfs {
     TASTY_SEAT_EXEMPT(const_shared);
 
 public:
-    static Ex<Vfs> create(StorageRoot root);
+    [[nodiscard]] static Ex<Vfs> create(StorageRoot root);
 
-    static Ex<Vfs> create_at(std::string_view root_path);
+    [[nodiscard]] static Ex<Vfs> create_at(std::string_view root_path);
 
     const std::string& root_path() const noexcept { return root_path_; }
     const StorageRoot& root() const noexcept { return root_; }
 
-    Ex<std::string> resolve(std::string_view rel, const SearchPolicy& policy) const;
+    [[nodiscard]] Ex<std::string> resolve(std::string_view rel, const SearchPolicy& policy) const;
 
     Ex<std::unique_ptr<IFile>> open(std::string_view path, OpenMode mode) const;
 
@@ -51,7 +51,8 @@ public:
     [[nodiscard]] Ex<std::unique_ptr<IArchive>> open_archive(std::string_view path,
                                                              std::size_t max_entries) const;
 
-    Ex<void> mount_memory(std::string_view path, std::span<const std::byte> blob, Crc32 crc = {});
+    [[nodiscard]] Ex<void> mount_memory(std::string_view path, std::span<const std::byte> blob,
+                                        Crc32 crc = {});
 
     [[nodiscard]] std::uint32_t memory_sequential_hints(std::string_view path) const noexcept;
 
@@ -60,9 +61,11 @@ public:
     bool dir_exists(std::string_view path) const noexcept;
     bool file_exists(std::string_view path) const noexcept;
 
-    Ex<void> ensure_dir(std::string_view rel) const;
+    [[nodiscard]] Ex<std::int64_t> modified(std::string_view path) const;
 
-    Ex<void> replace(std::string_view tmp_rel, std::string_view final_rel) const;
+    [[nodiscard]] Ex<void> ensure_dir(std::string_view rel) const;
+
+    [[nodiscard]] Ex<void> replace(std::string_view tmp_rel, std::string_view final_rel) const;
 
     void sync_parent_dir(std::string_view rel) const noexcept;
 
@@ -89,7 +92,7 @@ public:
 
         bool require_zip = false;
     };
-    Ex<std::string> find_game_asset(const AssetQuery& q) const;
+    [[nodiscard]] Ex<std::string> find_game_asset(const AssetQuery& q) const;
 
 private:
     static void sync_dir_of_(const std::string& path) noexcept;

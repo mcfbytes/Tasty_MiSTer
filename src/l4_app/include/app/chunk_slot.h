@@ -3,8 +3,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "app/rec_control.h"
+#include "infra/endian.h"
 #include "infra/loan_channel.h"
 #include "infra/seat.h"
 
@@ -19,6 +21,14 @@ struct ChunkSlot {
 
     static constexpr std::uint32_t kKey = 0x8000'0000u;
 
+    [[nodiscard]] static std::uint32_t desc_word(std::span<const std::byte> table,
+                                                 std::size_t i) noexcept {
+        return infra::load_le<std::uint32_t>(table.subspan(i * 4u).first<4>());
+    }
+    static void set_desc_word(std::span<std::byte> table, std::size_t i, std::uint32_t w) noexcept {
+        infra::store_le<std::uint32_t>(table.subspan(i * 4u).first<4>(), w);
+    }
+
     ChunkKind kind = ChunkKind::Data;
     std::uint8_t scale = 1;
     RecCodec codec = RecCodec::Cscd;
@@ -31,8 +41,8 @@ struct ChunkSlot {
     std::uint32_t vtime = 0;
     std::uint32_t used = 0;
     std::uint32_t chunks = 0;
-    const std::byte* bytes = nullptr;
-    const std::uint32_t* desc = nullptr;
+    std::span<const std::byte> bytes{};
+    std::span<const std::byte> desc{};
     RecPath path{};
 };
 

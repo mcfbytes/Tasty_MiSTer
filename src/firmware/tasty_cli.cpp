@@ -1,27 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "tasty_cli.h"
 
-#include <charconv>
 #include <cstdio>
+
+#include "infra/parse_int.h"
 
 namespace mister::fw {
 namespace {
 
 bool eq(std::string_view a, const char* b) noexcept { return a == std::string_view(b); }
-
-std::optional<std::uint32_t> u32(std::string_view s) noexcept {
-    std::uint32_t v = 0;
-    const auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (ec != std::errc{} || p != s.data() + s.size()) return std::nullopt;
-    return v;
-}
-
-std::optional<std::int32_t> i32(std::string_view s) noexcept {
-    std::int32_t v = 0;
-    const auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (ec != std::errc{} || p != s.data() + s.size()) return std::nullopt;
-    return v;
-}
 
 [[nodiscard]] Ex<TastyArgs> fail(std::uint32_t d) noexcept {
     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), d});
@@ -231,35 +218,35 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
         } else if (eq(o, "--lead")) {
             const char* p = need();
             if (p == nullptr) return fail(13);
-            const auto n = i32(p);
+            const auto n = infra::parse_int<std::int32_t>(p);
             if (!n) return fail(13);
             a.lead = *n;
             i += 2;
         } else if (eq(o, "--phase")) {
             const char* p = need();
             if (p == nullptr) return fail(18);
-            const auto n = u32(p);
+            const auto n = infra::parse_int<std::uint32_t>(p);
             if (!n) return fail(18);
             a.phase_us = *n;
             i += 2;
         } else if (eq(o, "--stop-at")) {
             const char* p = need();
             if (p == nullptr) return fail(16);
-            const auto n = u32(p);
+            const auto n = infra::parse_int<std::uint32_t>(p);
             if (!n || *n == 0) return fail(16);
             a.stop_at = *n;
             i += 2;
         } else if (eq(o, "--linger") || eq(o, "--return-after")) {
             const char* p = need();
             if (p == nullptr) return fail(14);
-            const auto n = u32(p);
+            const auto n = infra::parse_int<std::uint32_t>(p);
             if (!n) return fail(14);
             a.return_after_s = *n;
             i += 2;
         } else if (eq(o, "--vsync-adjust")) {
             const char* p = need();
             if (p == nullptr) return fail(15);
-            const auto n = u32(p);
+            const auto n = infra::parse_int<std::uint32_t>(p);
             if (!n || *n > 1) return fail(15);
             a.vsync_adjust = static_cast<std::uint8_t>(*n);
             i += 2;
@@ -334,7 +321,7 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
         } else if (eq(o, "--from")) {
             const char* p = need();
             if (p == nullptr) return fail(25);
-            const auto n = i32(p);
+            const auto n = infra::parse_int<std::int32_t>(p);
             if (!n || *n < 0) return fail(25);
             a.rec.from_frame = *n;
             rec_opt = true;
@@ -342,7 +329,7 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
         } else if (eq(o, "--to")) {
             const char* p = need();
             if (p == nullptr) return fail(26);
-            const auto n = i32(p);
+            const auto n = infra::parse_int<std::int32_t>(p);
             if (!n || *n < 0) return fail(26);
             a.rec.to_frame = *n;
             rec_opt = true;

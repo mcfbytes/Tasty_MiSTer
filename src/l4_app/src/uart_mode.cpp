@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 
-#include "app/process_integration.h"
 #include "cores/registry.h"
 #include "hal/spi_transport.h"
 #include "svc/vfs.h"
@@ -22,19 +21,17 @@ namespace {
 
 constexpr hal::SpiWord kSetUart{0x3B};
 
-constexpr const char* kUartSpeedFile = "/tmp/UART_SPEED";
-constexpr const char* kCoreNameFile = "/tmp/CORENAME";
-constexpr const char* kRbfNameFile = "/tmp/RBFNAME";
-
 bool file_exists(const char* path) noexcept {
     struct stat st {};
     return ::stat(path, &st) == 0;
 }
 
-void copy_name(char* dst, std::size_t cap, std::string_view src) noexcept {
-    const std::size_t n = src.size() < cap - 1 ? src.size() : cap - 1;
-    if (n != 0) std::memcpy(dst, src.data(), n);
+[[nodiscard]] Ex<std::size_t> copy_name(std::span<char> dst, std::string_view src) noexcept {
+    if (dst.empty()) return 0u;
+    const std::size_t n = src.size() < dst.size() - 1 ? src.size() : dst.size() - 1;
+    if (n != 0) std::memcpy(dst.data(), src.data(), n);
     dst[n] = '\0';
+    return n;
 }
 
 }  // namespace
@@ -136,13 +133,13 @@ Ex<void> UartModeController::set_mode(hal::ISpiTransport& link, UartMode m) {
             return std::unexpected(r.error());
         }
     }
-    mode_ = masked;
-    ++stats_.mode_writes;
+    rt_.mode = masked;
+    ++rt_.stats.mode_writes;
 
     UartHandoff::Mode a{};
     a.baud = baud;
-    copy_name(a.core, kNameMax, core_name_);
-    copy_name(a.rbf, kNameMax, rbf_name_);
+    (void)copy_name(a.core, rt_.core_name);
+    (void)copy_name(a.rbf, rt_.rbf_name);
     a.mode = masked;
     post_(infra::make<UartHandoff>(a));
     return {};
@@ -151,59 +148,30 @@ Ex<void> UartModeController::set_mode(hal::ISpiTransport& link, UartMode m) {
 Ex<void> UartModeController::set_midilink(MidiLinkMode ml) {
     seat_assert<SeatTag::RT>(ERR_SITE(), "UartModeController::set_midilink off T-RT");
 
-    const bool usb = usb_ser_latched_ ? usb_ser_present_ : file_exists("/dev/ttyUSB0");
+    const bool usb = rt_.usb_ser_latched ? rt_.usb_ser_present : file_exists("/dev/ttyUSB0");
     if (ml == MidiLinkMode::UsbSer && !usb) {
         ml = MidiLinkMode::Tcp;
     }
 
     post_(infra::make<UartHandoff>(UartHandoff::MidiLink{ml}));
-    midilink_ = ml;
+    rt_.midilink = ml;
     return {};
 }
 
 void UartModeController::post_(const UartHandoff& h) noexcept {
-    if (inbox_ == nullptr || !inbox_->push(h)) handoff_drops_.add(1);
+    if (inbox_ == nullptr || !inbox_->push(h)) rt_.handoff_drops.add(1);
 }
-
-void UartModeController::on(const UartHandoff::MidiLink& a) {
-    seat_assert<SeatTag::Ui>(ERR_SITE(), "UartModeController::on off T-UI");
-    for (const char* p : kMidiLinkRemovalOrder)
-        (void)::unlink(p);
-    const auto i = static_cast<std::size_t>(a.mode);
-    if (i < kMidiLinkSentinels.size()) {
-        (void)proc::write_tmp_handoff(kMidiLinkSentinels[i], std::string_view{});
-    }
-}
-
-void UartModeController::on(const UartHandoff::Mode& a) {
-    seat_assert<SeatTag::Ui>(ERR_SITE(), "UartModeController::on off T-UI");
-    (void)proc::write_tmp_handoff(kCoreNameFile, a.core);
-    (void)proc::write_tmp_handoff(kRbfNameFile, a.rbf);
-    char sp[16] = {};
-    const int len = std::snprintf(sp, sizeof sp, "%u", a.baud);
-    (void)proc::write_tmp_handoff(
-        kUartSpeedFile, std::string_view{sp, len < 0 ? 0u : static_cast<std::size_t>(len)});
-    script_spawns_.add(1);
-    int rc = 0;
-    if (auto r = proc::uartmode_script(static_cast<std::uint8_t>(a.mode), &rc); !r) {
-        script_failures_.add(1);
-    } else if (rc != 0) {
-        script_nonzero_.add(1);
-    }
-}
-
-void UartModeController::misrouted(const UartHandoff&) noexcept { handoff_misrouted_.add(1); }
 
 Ex<void> UartModeController::reset_uart(hal::ISpiTransport&) { return unimplemented(ERR_SITE()); }
 
 void UartModeController::bind_identity(std::string_view core, std::string_view rbf) noexcept {
-    copy_name(core_name_, kNameMax, core);
-    copy_name(rbf_name_, kNameMax, rbf);
+    (void)copy_name(rt_.core_name, core);
+    (void)copy_name(rt_.rbf_name, rbf);
 }
 
 void UartModeController::latch_usb_ser(bool present) noexcept {
-    usb_ser_latched_ = true;
-    usb_ser_present_ = present;
+    rt_.usb_ser_latched = true;
+    rt_.usb_ser_present = present;
 }
 
 Ex<void> UartModeController::load_for_core(hal::ISpiTransport& link, std::string_view core_name,
@@ -211,21 +179,21 @@ Ex<void> UartModeController::load_for_core(hal::ISpiTransport& link, std::string
                                            std::string_view midi_token,
                                            const UartPersistFiles* files) {
 
-    idx_ = {};
-    parse_baud_token(uart_token, std::span<std::uint32_t, kBaudTableSize>(uart_table_));
-    parse_baud_token(midi_token, std::span<std::uint32_t, kBaudTableSize>(midi_table_));
+    rt_.idx = {};
+    parse_baud_token(uart_token, std::span<std::uint32_t, kBaudTableSize>(rt_.uart_table));
+    parse_baud_token(midi_token, std::span<std::uint32_t, kBaudTableSize>(rt_.midi_table));
 
-    if (!midi_token.empty() && midi_table_[0] == 0) midi_table_[0] = 31250;
-    uart_capable_ = uart_capable;
-    ++stats_.loads;
+    if (!midi_token.empty() && rt_.midi_table[0] == 0) rt_.midi_table[0] = 31250;
+    rt_.uart_capable = uart_capable;
+    ++rt_.stats.loads;
 
     std::uint32_t word = 0;
     if (uart_capable) {
-        if (uart_table_[0] == 0) {
+        if (rt_.uart_table[0] == 0) {
 
-            uart_table_[0] = cores::profile_for(core_name).default_uart_baud;
+            rt_.uart_table[0] = cores::profile_for(core_name).default_uart_baud;
 
-            if (midi_table_[0] == 0) midi_table_[0] = 31250u;
+            if (rt_.midi_table[0] == 0) rt_.midi_table[0] = 31250u;
         }
 
         std::array<std::uint32_t, 3> speeds{};
@@ -241,7 +209,7 @@ Ex<void> UartModeController::load_for_core(hal::ISpiTransport& link, std::string
         (void)validate_baud(UartMode::Ppp, speeds[0]);
         (void)validate_baud(UartMode::Midi, speeds[1]);
 
-        (void)validate_baud(UartMode::Modem, speeds[2] != 0 ? speeds[2] : uart_table_[0]);
+        (void)validate_baud(UartMode::Modem, speeds[2] != 0 ? speeds[2] : rt_.uart_table[0]);
     }
 
     Ex<void> first = {};
@@ -265,7 +233,7 @@ Ex<void> UartModeController::save_for_core(std::string_view) const {
 
 std::span<const std::uint32_t> UartModeController::baud_table(BaudSpace s) const {
     if (s == BaudSpace::Mlink) return kMlinkSpeeds;
-    const auto& t = (s == BaudSpace::Midi) ? midi_table_ : uart_table_;
+    const auto& t = (s == BaudSpace::Midi) ? rt_.midi_table : rt_.uart_table;
 
     std::size_t n = 0;
     while (n < t.size() && t[n] != 0)
@@ -284,14 +252,14 @@ Ex<void> UartModeController::validate_baud(UartMode m, std::uint32_t baud) {
             break;
         }
     }
-    idx_[static_cast<std::size_t>(s)] = static_cast<std::uint32_t>(idx);
+    rt_.idx[static_cast<std::size_t>(s)] = static_cast<std::uint32_t>(idx);
     return {};
 }
 
 std::uint32_t UartModeController::baud_for(UartMode m) const noexcept {
     const BaudSpace s = baud_space_for(m);
     const auto bauds = baud_table(s);
-    const std::size_t i = idx_[static_cast<std::size_t>(s)];
+    const std::size_t i = rt_.idx[static_cast<std::size_t>(s)];
     return i < bauds.size() ? bauds[i] : 0u;
 }
 

@@ -3,6 +3,7 @@
 
 #include <memory>
 
+#include "hal/phys_region.h"
 #include "infra/seat.h"
 #include "svc/vfs.h"
 
@@ -18,6 +19,8 @@ struct LoaderContext {
     const CoreProfile& profile;
     bool turbo = false;
     LoaderMemo* memo = nullptr;
+
+    hal::PhysRegion aperture{os::PhysAddr{0}, 0, nullptr};
 };
 
 using MakeLoader = std::unique_ptr<ILoader> (*)(const LoaderContext&);

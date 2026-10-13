@@ -9,13 +9,17 @@
 
 #include "cores/manifests/psx.h"
 #include "cores/movie_archive.h"
+#include "infra/ascii.h"
+#include "infra/byte_view.h"
 #include "svc/chd_source.h"
 #include "svc/disc_engine.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
-#include "svc/xml_scan.h"
 
 namespace mister::cores {
+
+using infra::ieq;
+
 namespace {
 
 using CR = IMovieCodec::Refusal;
@@ -62,8 +66,8 @@ std::optional<std::uint32_t> decimal(std::string_view s, std::size_t digits) {
 }
 
 std::optional<bool> boolean(std::string_view v) {
-    if (v == "1" || svc::xml::iequal(v, "true")) return true;
-    if (v == "0" || svc::xml::iequal(v, "false")) return false;
+    if (v == "1" || ieq(v, "true")) return true;
+    if (v == "0" || ieq(v, "false")) return false;
     return std::nullopt;
 }
 
@@ -130,7 +134,7 @@ std::optional<std::uint32_t> msf(std::string_view s) {
         const Fields fl = fields(text.substr(0, nl));
         text.remove_prefix(nl == std::string_view::npos ? text.size() : nl + 1);
         const std::string_view kw = fl.f[0];
-        if (svc::xml::iequal(kw, "FILE")) {
+        if (ieq(kw, "FILE")) {
             std::string_view name;
             std::string_view type;
             if (!fl.rest.empty() && fl.rest.front() == '"') {
@@ -143,24 +147,24 @@ std::optional<std::uint32_t> msf(std::string_view s) {
                 name = fl.f[1];
                 type = fl.f[2];
             }
-            if (name.empty() || !svc::xml::iequal(type, "BINARY") || c.files.size() == 99)
+            if (name.empty() || !ieq(type, "BINARY") || c.files.size() == 99)
                 return std::unexpected(refuse(CR::Disk, ERR_SITE()));
             c.files.emplace_back(name);
-        } else if (svc::xml::iequal(kw, "TRACK")) {
+        } else if (ieq(kw, "TRACK")) {
             const auto n = decimal(fl.f[1], 2);
             const std::string_view type = fl.f[2];
             if (c.files.empty() || !n || *n != c.tracks.size() + 1)
                 return std::unexpected(refuse(CR::Disk, ERR_SITE()));
             CueTrack t{.number = static_cast<std::uint8_t>(*n),
                        .file = static_cast<std::uint16_t>(c.files.size() - 1)};
-            if (svc::xml::iequal(type, "MODE2/2352") || svc::xml::iequal(type, "MODE1/2352")) {
+            if (ieq(type, "MODE2/2352") || ieq(type, "MODE1/2352")) {
                 t.data = true;
-                t.mode2 = svc::xml::iequal(type, "MODE2/2352");
-            } else if (!svc::xml::iequal(type, "AUDIO")) {
+                t.mode2 = ieq(type, "MODE2/2352");
+            } else if (!ieq(type, "AUDIO")) {
                 return std::unexpected(refuse(CR::Disk, ERR_SITE()));
             }
             c.tracks.push_back(t);
-        } else if (svc::xml::iequal(kw, "INDEX")) {
+        } else if (ieq(kw, "INDEX")) {
             const auto n = decimal(fl.f[1], 2);
             const auto at = msf(fl.f[2]);
             if (c.tracks.empty() || !n || !at) return std::unexpected(refuse(CR::Disk, ERR_SITE()));
@@ -170,22 +174,22 @@ std::optional<std::uint32_t> msf(std::string_view s) {
                 t.index1 = *at;
             else if (*n == 1)
                 return std::unexpected(refuse(CR::Disk, ERR_SITE()));
-        } else if (svc::xml::iequal(kw, "FLAGS")) {
+        } else if (ieq(kw, "FLAGS")) {
             if (c.tracks.empty()) return std::unexpected(refuse(CR::Disk, ERR_SITE()));
             std::uint8_t& fl_bits = c.tracks.back().flags;
             for (std::size_t i = 1; i < fl.f.size() && !fl.f[i].empty(); ++i) {
                 const std::string_view f = fl.f[i];
-                if (svc::xml::iequal(f, "PRE")) {
+                if (ieq(f, "PRE")) {
                     fl_bits |= 0x1u;
-                } else if (svc::xml::iequal(f, "DCP")) {
+                } else if (ieq(f, "DCP")) {
                     fl_bits |= 0x2u;
-                } else if (svc::xml::iequal(f, "4CH")) {
+                } else if (ieq(f, "4CH")) {
                     fl_bits |= 0x8u;
-                } else if (!svc::xml::iequal(f, "SCMS")) {
+                } else if (!ieq(f, "SCMS")) {
                     return std::unexpected(refuse(CR::Disk, ERR_SITE()));
                 }
             }
-        } else if (svc::xml::iequal(kw, "PREGAP") || svc::xml::iequal(kw, "POSTGAP")) {
+        } else if (ieq(kw, "PREGAP") || ieq(kw, "POSTGAP")) {
             return std::unexpected(refuse(CR::Disk, ERR_SITE()));
         }
     }
@@ -395,7 +399,7 @@ Ex<IMovieCodec::Facts> PsxMovieCodec::header_line(std::string_view line,
 
             const auto n = index(k.substr(12));
             if (!n) return std::unexpected(refuse(CR::PortType, ERR_SITE()));
-            if (!svc::xml::iequal(val, *n == 0 ? "gamepad" : "none"))
+            if (!ieq(val, *n == 0 ? "gamepad" : "none"))
                 return std::unexpected(refuse(CR::PortType, ERR_SITE()));
             if (*n == 0) l.pad_digital = true;
         } else if (k == "MednafenValues.psx.input.port1.memcard") {
@@ -564,7 +568,7 @@ Ex<std::vector<std::uint8_t>> PsxMovieCodec::chd_key(svc::IChdSource& chd) {
             if (auto r = chd.read_hunk(f / per_hunk, hunk); !r) return std::unexpected(r.error());
             held_hunk = f / per_hunk;
         }
-        const auto* p = reinterpret_cast<const std::uint8_t*>(hunk.data()) +
+        const auto* p = infra::byte_cast<const std::uint8_t>(std::span(hunk)).data() +
                         static_cast<std::size_t>(f % per_hunk) * geo.unit_bytes;
         out.insert(out.end(), p, p + kSectorBytes);
     }
@@ -596,8 +600,8 @@ namespace {
 Ex<IMovieCodec::DigestSource> PsxMovieCodec::digest_source(const svc::Vfs& vfs,
                                                            std::string_view rom) const {
     const std::string_view ext = rom.size() < 4 ? std::string_view{} : rom.substr(rom.size() - 4);
-    if (svc::xml::iequal(ext, ".chd")) return chd_digest_source(vfs, rom);
-    if (!svc::xml::iequal(ext, ".cue")) return std::unexpected(refuse(CR::Disk, ERR_SITE()));
+    if (ieq(ext, ".chd")) return chd_digest_source(vfs, rom);
+    if (!ieq(ext, ".cue")) return std::unexpected(refuse(CR::Disk, ERR_SITE()));
     auto cue = vfs.open(rom, svc::OpenMode::Read);
     if (!cue) return std::unexpected(cue.error());
     const auto size = (*cue)->size();

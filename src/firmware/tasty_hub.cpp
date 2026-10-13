@@ -17,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 #include "assembly.h"
 #include "board_parts.h"
@@ -55,6 +56,7 @@ DiagSampler::Sources TastyHub::diag_sources_(const BootParts& plat) noexcept {
     return DiagSampler::Sources{
         .mgl_row0 = d.mgl_row0,
         .window_counts = d.window_counts,
+        .bay_counts = d.bay_counts,
         .video_stats = device_.video_pump_.stats_cell(),
         .video_geometry = device_.video_pump_.geometry_cell(),
         .video_wire = device_.video_pump_.wire(),
@@ -63,6 +65,7 @@ DiagSampler::Sources TastyHub::diag_sources_(const BootParts& plat) noexcept {
         .recover_polls = d.recover_polls,
         .save_write_failures = d.save_write_failures,
         .fallbacks = d.fallbacks,
+        .ini_write_failures = d.ini_write_failures,
         .doorbell = d.doorbell,
         .round_timing = d.round_timing,
         .frames = d.frames,
@@ -97,7 +100,7 @@ TastyHub::TastyHub(const BootParts& plat, app::IStopSignal& stop)
                    .wire = infra::OptRef<app::InputWire>{device_.input_wire_},
                    .frames = infra::OptRef<app::CoreFrameCounter>{device_.frame_counter_},
                    .replay = infra::OptRef<app::ReplayGate>{replay_.replay_gate_},
-                   .replay_ring = infra::OptRef<app::ReplayRing>{replay_.replay_ring_},
+                   .replay_ring = wired_end(replay_.replay_ring_.receiver(), "ReplayRing receiver"),
                }},
       assembly_{plat.threads,
                 plat.stats,
@@ -108,8 +111,7 @@ TastyHub::TastyHub(const BootParts& plat, app::IStopSignal& stop)
                                           .rt_lane = plat.rt_lane,
                                           .transitioning = device_.transitioning_},
                 UiMain::Wires{.wake = device_.ui_wake_, .uart_handoffs = device_.uart_handoffs_},
-                UiMain::Wiring{.fifo = fifo_ ? &*fifo_ : nullptr,
-                               .mgl = nullptr,
+                UiMain::Wiring{.fifo = infra::opt_ref_of(fifo_ ? &*fifo_ : nullptr),
                                .video = device_.video_pump_,
                                .ui_sink = tasty_sink_,
                                .owner_events = device_.owner_events_,
@@ -117,8 +119,7 @@ TastyHub::TastyHub(const BootParts& plat, app::IStopSignal& stop)
                                .replay = replay_.replay_feeder_,
                                .recorder = rec_.recorder_,
                                .link_rx = device_.ui_rx_},
-                diag_sources_(plat)},
-      process_main_{device_.owner_, assembly_, device_.main_wake_} {
+                diag_sources_(plat)} {
     device_.open_wires(plat);
     device_.open_seats(plat, DeviceBlock::Seats{.mains = seat_mains_, .diag = assembly_.diag()});
     rec_.open_seats(seat_mains_);
@@ -127,10 +128,20 @@ TastyHub::TastyHub(const BootParts& plat, app::IStopSignal& stop)
 
 TastyHub::~TastyHub() { assembly_.stop_join_or_exit(); }
 
+Ex<void> TastyHub::open_process_main() noexcept {
+    if (process_main_) return {};
+    auto fds = xthread::ParkFds::create(device_.main_wake_, device_.main_stop_);
+    if (!fds) return std::unexpected(fds.error());
+    process_main_.emplace(device_.owner_, assembly_, std::move(*fds));
+    return {};
+}
+
 void TastyHub::latch_boot_config() noexcept {
     auto c = std::make_unique<svc::ConfigSnapshot>();
     if (device_.config_cell_.sample_into(*c) == 0) c = std::make_unique<svc::ConfigSnapshot>();
-    device_.input_build_.set_cfg_deadzone_rules(svc::parse_deadzone_rules(*c));
+    const auto deadzones = svc::parse_deadzone_rules(*c);
+    device_.input_build_.set_cfg_deadzone_rules(deadzones);
+    if (device_.input_pipeline_) device_.input_pipeline_->latch_cfg(deadzones, c->rumble != 0);
 }
 
 }  // namespace mister::fw
@@ -194,10 +205,11 @@ extern "C" void on_tasty_fatal(int sig) {
 
 struct FeederReplay final : fw::TastySession::Replay {
     TASTY_SEAT_RESIDENT(Ui);
-    app::ReplayFeeder* f = nullptr;
+
+    explicit FeederReplay(app::ReplayFeeder& feeder) noexcept : f(feeder) {}
+    app::ReplayFeeder& f;
     bool take_play(const fw::TastySession::PlayAsk& ask) noexcept override {
         TASTY_SEAT_BODY(FeederReplay);
-        if (f == nullptr) return false;
         app::ReplayFeeder::Play p{};
         p.movie = ask.movie;
         p.rom = ask.rom;
@@ -207,44 +219,31 @@ struct FeederReplay final : fw::TastySession::Replay {
         p.ram_fill = ask.ram_fill;
         p.seeded_save = ask.seeded_save;
         p.set_settings = ask.set_settings;
-        (void)f->take_play(p);
-        return f->last_refusal() == app::ReplayFeeder::Refusal::None;
+        (void)f.take_play(p);
+        return f.last_refusal() == app::ReplayFeeder::Refusal::None;
     }
     void take_stop() noexcept override {
         TASTY_SEAT_BODY(FeederReplay);
-        if (f != nullptr) (void)f->take_stop();
+        (void)f.take_stop();
     }
-    std::uint32_t frames() const noexcept override { return f != nullptr ? f->frames() : 0; }
-    std::uint32_t movie_frames() const noexcept override {
-        return f != nullptr ? f->movie_frames() : 0;
-    }
+    std::uint32_t frames() const noexcept override { return f.frames(); }
+    std::uint32_t movie_frames() const noexcept override { return f.movie_frames(); }
     bool refused() const noexcept override {
-        return f != nullptr && f->last_refusal() != app::ReplayFeeder::Refusal::None;
+        return f.last_refusal() != app::ReplayFeeder::Refusal::None;
     }
-    bool active() const noexcept override {
-        return f != nullptr && f->stage() != app::ReplayFeeder::Stage::Idle;
-    }
+    bool active() const noexcept override { return f.stage() != app::ReplayFeeder::Stage::Idle; }
     const char* refusal_why() const noexcept override {
-        if (f == nullptr) return "none";
-        if (f->last_refusal() == app::ReplayFeeder::Refusal::Movie)
-            return fw::tasty_movie_refusal_token(f->last_refusal_detail());
-        return app::ReplayFeeder::refusal_name(f->last_refusal());
+        if (f.last_refusal() == app::ReplayFeeder::Refusal::Movie)
+            return fw::tasty_movie_refusal_token(f.last_refusal_detail());
+        return app::ReplayFeeder::refusal_name(f.last_refusal());
     }
-    std::string_view refusal_setting() const noexcept override {
-        return f != nullptr ? f->last_setting() : std::string_view{};
-    }
-    bool refusal_setting_offered() const noexcept override {
-        return f != nullptr && f->last_setting_offered();
-    }
-    std::string_view refusal_path() const noexcept override {
-        return f != nullptr ? f->refusal_path() : std::string_view{};
-    }
-    std::size_t settings_set() const noexcept override {
-        return f != nullptr ? f->settings_set().size() : 0;
-    }
+    std::string_view refusal_setting() const noexcept override { return f.last_setting(); }
+    bool refusal_setting_offered() const noexcept override { return f.last_setting_offered(); }
+    std::string_view refusal_path() const noexcept override { return f.refusal_path(); }
+    std::size_t settings_set() const noexcept override { return f.settings_set().size(); }
     std::string setting_line(std::size_t i) const override {
-        if (f == nullptr || i >= f->settings_set().size()) return {};
-        const app::ReplayFeeder::SetSetting& s = f->settings_set()[i];
+        if (i >= f.settings_set().size()) return {};
+        const app::ReplayFeeder::SetSetting& s = f.settings_set()[i];
         return std::string(s.name) + ": using " + s.now + " for this run (your setting: " + s.was +
                ")";
     }
@@ -539,24 +538,22 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
     hub->force_vsync_adjust(args.vsync_adjust);
     hub->arm_replay_ini(args.strict);
     const hal::PhysRegion fb = board.regions[static_cast<std::size_t>(hal::RegionId::VideoFb)];
-    fw::ProcessMain& process_main = hub->process_main();
-    FeederReplay feeder{};
-    feeder.f = &hub->replay_feeder();
-    TastySession tasty{{.video = &hub->video_pump(),
-                        .replay = &feeder,
-                        .rec = &hub->recorder(),
-                        .asks = &hub->ui_requests(),
-                        .link_tx = &hub->ui_link_tx(),
-                        .identity = &hub->identity_latch(),
-                        .play = &hub->replay_status(),
-                        .recstat = &hub->recorder_status(),
-                        .encstat = &hub->encode_status(),
-                        .main_stop = &process_main.stop_wake(),
-                        .vfs = hub->vfs(),
-                        .stop = &g_stop_requested,
-                        .exit_code = &g_exit_code,
+    FeederReplay feeder{hub->replay_feeder()};
+    TastySession tasty{{.video = infra::OptRef{hub->video_pump()},
+                        .replay = feeder,
+                        .rec = hub->recorder(),
+                        .asks = hub->ui_requests(),
+                        .link_tx = hub->ui_link_tx(),
+                        .identity = hub->identity_latch(),
+                        .play = hub->replay_status(),
+                        .recstat = hub->recorder_status(),
+                        .encstat = hub->encode_status(),
+                        .main_stop = hub->main_stop(),
+                        .vfs = *vfs,
+                        .stop = g_stop_requested,
+                        .exit_code = g_exit_code,
                         .video_fb = fb,
-                        .direct_video_ini = &hub->owner().direct_video_ini_cell()},
+                        .direct_video_ini = hub->owner().direct_video_ini_cell()},
                        local};
     hub->set_owner_tick(&tasty);
 
@@ -580,13 +577,13 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
             owner.expect_boot_negotiate();
         bool boot_config_latched = false;
         for (;;) {
-            process_main.run_once();
+            fw::ProcessMain::pass(owner);
             if (!boot_config_latched && owner.boot_config_parsed()) {
                 boot_config_latched = true;
                 hub->latch_boot_config();
             }
             if (g_stop_requested.load(std::memory_order_seq_cst) != 0) {
-                process_main.stop();
+                hub->main_stop().request();
                 break;
             }
             auto r = hub->pump_boot();
@@ -613,7 +610,7 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
         return teardown(1, link, hub.get(), IoSeat::Stopped);
     }
     if (assembly.has_io_seat()) hub->seal_boot_pump();
-    Ex<void> rt_up = process_main.open();
+    Ex<void> rt_up = hub->open_process_main();
     if (rt_up) rt_up = assembly.spawn_rt(fw::RtMode::Required, hub->rt_main());
     if (!rt_up) {
         report("spawn_rt", rt_up.error());
@@ -624,6 +621,7 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
         if (assembly.io_wedged()) exit_io_wedged(assembly);
         return rc;
     }
+    fw::ProcessMain& process_main = *hub->process_main();
     g_process_main.store(&process_main, std::memory_order_seq_cst);
     if (g_stop_requested.load(std::memory_order_seq_cst) != 0) process_main.stop();
     process_main.start();

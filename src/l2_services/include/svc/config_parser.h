@@ -27,9 +27,10 @@ struct PassOutcome {
     bool used_video_section = false;
 };
 
-Ex<PassOutcome> parse(std::string_view text, const PassNames& names, ConfigSnapshot& into);
+[[nodiscard]] Ex<PassOutcome> parse(std::string_view text, const PassNames& names,
+                                    ConfigSnapshot& into);
 
-Ex<ConfigSnapshot> parse_two_pass(std::string_view text, const PassNames& names);
+[[nodiscard]] Ex<ConfigSnapshot> parse_two_pass(std::string_view text, const PassNames& names);
 
 bool admits(char c);
 

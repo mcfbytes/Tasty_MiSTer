@@ -9,7 +9,7 @@
 namespace mister::hal {
 
 Ex<ScalerBuffers> ScalerBuffers::map(const PhysRegion& scaler_out) {
-    auto m = FpgaMemory::map(span_of(scaler_out), os::MmioRegion::Access::ReadOnly);
+    auto m = FpgaMemory::map_aperture(span_of(scaler_out), os::MmioRegion::Access::ReadOnly);
     if (!m) return std::unexpected(m.error());
     return ScalerBuffers{std::move(*m)};
 }

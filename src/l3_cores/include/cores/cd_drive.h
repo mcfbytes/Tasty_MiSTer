@@ -19,6 +19,7 @@
 #include "cores/core_support.h"
 #include "cores/staging_core.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "svc/disc_read_service.h"
 
@@ -36,12 +37,14 @@ class CdDrive final : public ICdTransport,
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    CdDrive(Core& owner, const CdProfile& cd, const HostServices& host);
+    CdDrive(Core& owner, const CdProfile& cd, const HostServices& host, ICoreWindow* window);
     ~CdDrive() override;
     CdDrive(const CdDrive&) = delete;
     CdDrive& operator=(const CdDrive&) = delete;
 
-    [[nodiscard]] Ex<void> init(ICoreWindow* window);
+    [[nodiscard]] Ex<void> adopt();
+
+    void retire() noexcept;
 
     [[nodiscard]] Ex<void> reset();
 
@@ -52,7 +55,7 @@ public:
     const CdProfile& cd_profile() const noexcept { return *cd_; }
     CdEngine* engine() noexcept { return engine_.get(); }
     [[nodiscard]] const CdEngine* engine() const noexcept { return engine_.get(); }
-    svc::DiscReadService* discs() noexcept { return discs_; }
+    svc::DiscReadService* discs() noexcept { return discs_ ? &*discs_ : nullptr; }
     [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return geom_; }
     ICdTransport& transport() noexcept { return *this; }
     std::uint32_t wire_faults() const noexcept { return wire_faults_; }
@@ -89,13 +92,13 @@ private:
     const CdProfile* cd_;
     hal::ISpiTransport* link_;
     const os::IClock* clock_;
-    svc::DiscReadService* granted_discs_;
+    infra::OptRef<svc::DiscReadService> granted_discs_{};
     proto::SpiFioQueue* fio_queue_;
     std::uint32_t wire_faults_ = 0;
     svc::DiscGeometry geom_{};
     svc::DiscCounters counters_{};
 
-    svc::DiscReadService* discs_ = nullptr;
+    infra::OptRef<svc::DiscReadService> discs_{};
     svc::DiscMountState mount_seen_ = svc::DiscMountState::Idle;
 
     std::unique_ptr<CdEngine> engine_;

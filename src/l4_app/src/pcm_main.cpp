@@ -5,6 +5,29 @@
 
 namespace mister::app {
 
+namespace {
+
+struct DrainSink {
+    TASTY_SEAT_EXEMPT(component);
+    PcmRingFeeder& feeder;
+    std::uint32_t discarded = 0;
+    void on(const PcmCommand::Play&) noexcept { ++discarded; }
+    void on(const PcmCommand::Stop&) noexcept { ++discarded; }
+    void on(const PcmCommand::Resume&) noexcept { ++discarded; }
+    void on(const PcmCommand::AttachRing& a) noexcept { feeder.on(a); }
+    void on(const PcmCommand::AttachSource& a) noexcept { feeder.on(a); }
+    void misrouted(const PcmCommand& c) noexcept { feeder.misrouted(c); }
+};
+
+}  // namespace
+
+std::uint32_t PcmMain::drain_() noexcept {
+    DrainSink sink{.feeder = feeder_};
+    while (const auto c = cmds_.pop())
+        infra::dispatch<app::PcmCommandRoutes>(*c, sink);
+    return sink.discarded;
+}
+
 PcmMain::PcmMain(PcmRingFeeder& feeder, xthread::ParkFds fds, PcmRingFeeder::Commands& commands,
                  std::optional<Mailbox> mailbox, infra::OptRef<xthread::WakeFlag> asker) noexcept
     : feeder_(feeder), relay_(mailbox ? &mailbox->relay : nullptr),
@@ -21,8 +44,7 @@ void PcmMain::serve() noexcept {
     if (stopping()) return;
     serve_mailbox_();
     if (feeder_.take_park_ask()) {
-        while (cmds_.pop().has_value()) {
-        }
+        (void)drain_();
         feeder_.finish_park();
     }
     if (feeder_.parked()) return;
@@ -43,8 +65,7 @@ bool PcmMain::mailbox_rest_() const noexcept {
 }
 
 void PcmMain::on_pause() noexcept {
-    while (cmds_.pop().has_value())
-        ++paused_cmd_drops_;
+    paused_cmd_drops_ += drain_();
     feeder_.park_now();
     if (relay_ != nullptr) {
         relay_->park_now();
@@ -53,6 +74,7 @@ void PcmMain::on_pause() noexcept {
 }
 
 void PcmMain::settle() noexcept {
+    (void)drain_();
     feeder_.release();
     if (host_ != nullptr) host_->release();
 }

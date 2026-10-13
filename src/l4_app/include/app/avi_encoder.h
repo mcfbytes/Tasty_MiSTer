@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "app/chunk_slot.h"
 #include "app/cscd_codec.h"
@@ -11,6 +12,7 @@
 #include "app/raw_frame_slot.h"
 #include "app/rec_control.h"
 #include "app/zmbv_codec.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 
@@ -21,10 +23,10 @@ class AviEncoder {
 
 public:
     struct Wiring {
-        ChunkChannel* out = nullptr;
-        const RawFrameChannel* raw = nullptr;
-        const os::IClock* clock = nullptr;
-        const os::IClock* cpu = nullptr;
+        infra::OptRef<ChunkChannel> out{};
+        infra::OptRef<const RawFrameChannel> raw{};
+        infra::OptRef<const os::IClock> clock{};
+        infra::OptRef<const os::IClock> cpu{};
     };
 
     struct Limits {
@@ -141,8 +143,8 @@ private:
     bool need_key_ = true;
     std::uint32_t since_key_ = 0;
     ChunkChannel::Loan loan_{};
-    std::byte* data_ = nullptr;
-    std::uint32_t* desc_ = nullptr;
+    std::span<std::byte> data_{};
+    std::span<std::byte> desc_{};
     std::int64_t loan_ns_ = 0;
     Position pos_{};
     bool held_ = false;

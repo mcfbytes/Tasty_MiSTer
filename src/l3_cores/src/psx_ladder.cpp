@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/psx_ladder.h"
 
-#include <strings.h>
-
 #include <cstddef>
 
 #include "cores/file_slot.h"
+#include "infra/ascii.h"
+#include "infra/byte_view.h"
 #include "svc/file.h"
 
 namespace mister::cores {
@@ -73,7 +73,7 @@ std::uint16_t PsxLadder::scan_libcrypt_() const {
     if (sbi == nullptr) return 0;
 
     std::uint8_t buf[1024];
-    auto rd = sbi->read_at(0, std::span<std::byte>{reinterpret_cast<std::byte*>(buf), sizeof(buf)});
+    auto rd = sbi->read_at(0, infra::byte_cast<std::byte>(std::span(buf)));
     if (!rd || *rd == 0) return 0;
     const std::size_t sz = *rd;
     std::uint16_t mask = 0;
@@ -98,7 +98,7 @@ std::uint16_t PsxLadder::menu_file_index() const {
         const std::string_view fields = s.extensions;
         for (std::size_t o = 0; o + 3 <= fields.size(); o += 3) {
             const std::string_view cand = fields.substr(o, 3);
-            if (want.size() == 3 && ::strncasecmp(cand.data(), want.data(), 3) == 0) {
+            if (infra::ieq(cand, want)) {
                 ext_idx = static_cast<std::uint16_t>(o / 3);
                 break;
             }
@@ -186,7 +186,21 @@ Ex<bool> PsxLadder::on_step() {
 
         case Rung::DiscPayload:
 
+            if (sub_ == 0) {
+                ss_gen_ = next_gen();
+                ss_due_ns_ = now_ns() + kSaveStateHoldBoundNs;
+                sub_ = host_.order_savestates(image_, ss_gen_) ? 1 : 2;
+            }
+            if (sub_ == 1) {
+                if (static_cast<std::int32_t>(host_.savestates_answered() - ss_gen_) < 0) {
+                    if (now_ns() < ss_due_ns_) return false;
+                    report_.savestate_hold_expired = true;
+                }
+                sub_ = 2;
+            }
+
             if (!order_disc_payload(facts_)) return false;
+            sub_ = 0;
             rung_ = Rung::Announce;
             return false;
 

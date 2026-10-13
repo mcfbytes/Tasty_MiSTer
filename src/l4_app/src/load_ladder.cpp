@@ -62,6 +62,8 @@ LoadLadder::Pass LoadLadder::step(Host& h) {
             return finish_();
         case Pc::Facts:
             return facts_(h);
+        case Pc::Mount:
+            return mount_(h);
         case Pc::Close:
             return close_(h);
         case Pc::Cut:
@@ -118,6 +120,7 @@ LoadLadder::Pass LoadLadder::chunk_(Host& h) {
         if (!r || *r == 0) return cut_(h);
         got += *r;
     }
+    key_.feed(piece);
     if (row.shaped) job_.loader->shape(row, piece, off_);
     if (row.placed) {
         if (!job_.loader->place(row, piece, off_, window_)) return cut_(h);
@@ -192,13 +195,31 @@ LoadLadder::Pass LoadLadder::facts_(Host& h) {
         if (!id) return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
         if (!h.inbox.push(proto::LinkOp::LoadFacts{.facts = *id})) return Pass::Waiting;
     }
+
+    const bool mounts = !job_.save.empty() && job_.row.bracket != cores::RowBracket::None;
+    pc_ = mounts ? Pc::Mount : Pc::Close;
+    return Pass::Stepped;
+}
+
+LoadLadder::Pass LoadLadder::mount_(Host& h) {
+    if (h.inbox.ring().size() >= proto::kLinkTxCapacity) return Pass::Waiting;
+    auto id = h.inbox.intern_file_path(job_.save.view(), job_.save_bytes);
+    if (!id) {
+        if (id.error().code == Errc::would_block) return Pass::Waiting;
+        pc_ = Pc::Close;
+        return Pass::Stepped;
+    }
+    if (!h.inbox.push(proto::LinkOp::BindSlot{
+            .slot = proto::SlotIndex{0}, .bind = proto::LinkOp::SlotBind::Mount, .path = *id})) {
+        return Pass::Waiting;
+    }
     pc_ = Pc::Close;
     return Pass::Stepped;
 }
 
 LoadLadder::Pass LoadLadder::close_(Host& h) {
     if (job_.row.bracket == cores::RowBracket::None) return notify_(h);
-    auto id = h.inbox.intern_file_path(path_.view(), job_.total);
+    auto id = h.inbox.intern_file_path(path_.view(), job_.total, key_.value());
     if (!id) return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
     const proto::LinkOp::FileTx op{.wire_index = job_.wire_index,
                                    .phase = proto::LinkOp::FileTxPhase::WindowClose,

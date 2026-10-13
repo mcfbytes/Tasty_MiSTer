@@ -57,6 +57,11 @@ public:
         return mgl_ && mgl_->take_playlist(v.path);
     }
 
+    bool on(const Mgl& doc) noexcept override {
+        TASTY_SEAT_BODY(CmdRouter);
+        return mgl_ && mgl_->take_parsed(doc);
+    }
+
     bool on(const CmdVerb::VideoMode& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
         return video_.take_video_mode(v.spec);

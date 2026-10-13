@@ -70,9 +70,9 @@ public:
 
     [[nodiscard]] std::span<const std::byte> peek(std::string_view rel) const noexcept override;
 
-    [[nodiscard]] std::uint32_t refusals() const noexcept { return refusals_.get(); }
-    [[nodiscard]] std::uint32_t failures() const noexcept { return failures_.get(); }
-    [[nodiscard]] std::uint32_t writes() const noexcept { return writes_.get(); }
+    [[nodiscard]] std::uint32_t refusals() const noexcept { return rt_.refusals.get(); }
+    [[nodiscard]] std::uint32_t failures() const noexcept { return rt_.failures.get(); }
+    [[nodiscard]] std::uint32_t writes() const noexcept { return rt_.writes.get(); }
     [[nodiscard]] std::size_t in_flight() const noexcept;
 
     void serve() noexcept override;
@@ -91,13 +91,18 @@ private:
 
     [[nodiscard]] bool arm_save_(std::string_view rel, std::span<const std::byte> bytes) noexcept;
 
+    struct Rt {
+        std::uint32_t seq = 0;
+        Shadow shadow[kWriteDepth]{};
+        std::uint8_t saves_armed = 0;
+        xthread::Counter refusals{}, failures{}, writes{};
+    };
+
     const svc::Vfs* vfs_;
-    std::uint32_t seq_ = 0;
+
+    Rt rt_{};
     Chan chan_;
-    Shadow shadow_[kWriteDepth]{};
     SaveChan save_chan_;
-    std::uint8_t saves_armed_ = 0;
-    xthread::Counter refusals_{}, failures_{}, writes_{};
 };
 
 }  // namespace mister::app

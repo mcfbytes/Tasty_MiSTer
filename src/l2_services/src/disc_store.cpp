@@ -35,19 +35,19 @@ Ex<std::size_t> DiscStore::read_form(DiscForm form, proto::Lba lba, std::span<st
     return r;
 }
 
-bool DiscStore::ensure_engine_(const CuePolicy* policy) noexcept {
+bool DiscStore::ensure_engine_(infra::OptRef<const CuePolicy> policy) noexcept {
 
-    if (policy != nullptr && policy != policy_) {
+    if (policy.has_value() && (!policy_.has_value() || &*policy_ != &*policy)) {
         engine_.reset();
         policy_ = policy;
     }
     if (!engine_.has_value()) {
-        if (policy_ == nullptr) {
+        if (!policy_.has_value()) {
             publish_();
             return false;
         }
-        auto d = opener_ != nullptr ? DiscEngine::create(*opener_, *policy_, prefetch_)
-                                    : DiscEngine::create(*vfs_, *policy_, prefetch_);
+        auto d = opener_ ? DiscEngine::create(*opener_, *policy_, prefetch_)
+                         : DiscEngine::create(*vfs_, *policy_, prefetch_);
         if (!d) {
             publish_();
             return false;
@@ -58,7 +58,7 @@ bool DiscStore::ensure_engine_(const CuePolicy* policy) noexcept {
     return true;
 }
 
-bool DiscStore::mount(const CuePolicy* policy, std::string_view path) noexcept {
+bool DiscStore::mount(infra::OptRef<const CuePolicy> policy, std::string_view path) noexcept {
     TASTY_SEAT_BODY(DiscStore);
     if (!ensure_engine_(policy)) return false;
 
@@ -72,7 +72,7 @@ bool DiscStore::mount(const CuePolicy* policy, std::string_view path) noexcept {
     return ok;
 }
 
-bool DiscStore::unmount(const CuePolicy* policy) noexcept {
+bool DiscStore::unmount(infra::OptRef<const CuePolicy> policy) noexcept {
     TASTY_SEAT_BODY(DiscStore);
     if (!ensure_engine_(policy)) return false;
     (void)engine_->unmount();
@@ -83,7 +83,7 @@ bool DiscStore::unmount(const CuePolicy* policy) noexcept {
 void DiscStore::release() noexcept {
     TASTY_SEAT_BODY(DiscStore);
     engine_.reset();
-    policy_ = nullptr;
+    policy_.reset();
     publish_();
 }
 

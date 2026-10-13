@@ -9,6 +9,7 @@
 #include <system_error>
 
 #include "cores/movie_archive.h"
+#include "infra/byte_view.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
@@ -187,7 +188,7 @@ public:
         if (off < head_.size()) {
             const auto n =
                 static_cast<std::size_t>(std::min<std::uint64_t>(dst.size(), head_.size() - off));
-            std::copy_n(reinterpret_cast<const std::byte*>(head_.data()) + off, n, dst.data());
+            std::copy_n(infra::text_bytes(head_).data() + off, n, dst.data());
             done = n;
         }
         while (done < dst.size()) {
@@ -210,8 +211,7 @@ public:
             const std::size_t skip = static_cast<std::size_t>(at % line_);
             const std::size_t n =
                 std::min(dst.size() - done, static_cast<std::size_t>(whole * line_) - skip);
-            std::copy_n(reinterpret_cast<const std::byte*>(text.data()) + skip, n,
-                        dst.data() + done);
+            std::copy_n(std::as_bytes(std::span(text)).data() + skip, n, dst.data() + done);
             done += n;
             if (whole < count) break;
         }
@@ -301,7 +301,7 @@ Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv) {
     if (!got) return std::unexpected(got.error());
     if (*got != h.size()) return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
     const auto byte = [&](std::size_t i) { return static_cast<unsigned>(h[i]); };
-    if (std::string_view(reinterpret_cast<const char*>(h.data()), kGmvMagic.size()) != kGmvMagic)
+    if (infra::as_text(std::span(h).first(kGmvMagic.size())) != kGmvMagic)
         return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
 
     const bool six1 = byte(0x14) == '6', six2 = byte(0x15) == '6';
@@ -334,8 +334,7 @@ Ex<std::unique_ptr<svc::IFile>> MegaDriveMovieCodec::open_movie(const svc::Vfs& 
     std::array<std::byte, kGmvMagic.size()> m{};
     const auto got = (*f)->read_at(0, m);
     if (!got) return std::unexpected(got.error());
-    if (*got == m.size() &&
-        std::string_view(reinterpret_cast<const char*>(m.data()), m.size()) == kGmvMagic) {
+    if (*got == m.size() && infra::as_text(std::span(m)) == kGmvMagic) {
         return open_gmv_text(std::move(*f));
     }
     f->reset();

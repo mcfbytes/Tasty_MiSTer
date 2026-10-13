@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/unique_fd.h"
 #include "hal/cause_reg.h"
 #include "reactor/cause_set.h"
@@ -51,15 +52,14 @@ class Notifier {
     TASTY_SEAT_MEDIATOR(Any, RT);
 
 public:
-    static Ex<Notifier> doorbell_adopt(os::UioHandle uio,
-                                       const hal::RegisterWindow<hal::CauseReg>* cause,
-                                       Cause klass);
+    [[nodiscard]] static Ex<Notifier> doorbell_adopt(
+        os::UioLineRef uio, const hal::RegisterWindow<hal::CauseReg>* cause, Cause klass);
 
-    static Ex<Notifier> ticker(std::chrono::nanoseconds period);
+    [[nodiscard]] static Ex<Notifier> ticker(std::chrono::nanoseconds period);
 
-    static Ex<Notifier> frame(int eventfd);
+    [[nodiscard]] static Ex<Notifier> frame(int eventfd);
 
-    static Ex<Notifier> test(int eventfd, Cause injected);
+    [[nodiscard]] static Ex<Notifier> test(int eventfd, Cause injected);
 
     Notifier(Notifier&&) noexcept = default;
     Notifier& operator=(Notifier&&) noexcept = default;
@@ -73,16 +73,16 @@ public:
 
 private:
     enum class Kind : std::uint8_t { Doorbell, Ticker, Frame, Test };
-    Notifier(Kind k, UniqueFd fd, const hal::RegisterWindow<hal::CauseReg>* cause, Cause delivers)
-        : kind_(k), fd_(static_cast<UniqueFd&&>(fd)), cause_(cause), delivers_(delivers) {}
-    Notifier(os::UioHandle uio, const hal::RegisterWindow<hal::CauseReg>* cause, Cause klass)
-        : kind_(Kind::Doorbell), uio_(static_cast<os::UioHandle&&>(uio)), cause_(cause),
-          delivers_(klass) {}
+    using CauseWindow = hal::RegisterWindow<hal::CauseReg>;
+    Notifier(Kind k, UniqueFd fd, Cause delivers)
+        : kind_(k), fd_(static_cast<UniqueFd&&>(fd)), delivers_(delivers) {}
+    Notifier(os::UioLineRef uio, infra::OptRef<const CauseWindow> cause, Cause klass)
+        : kind_(Kind::Doorbell), uio_(uio), cause_(cause), delivers_(klass) {}
 
     Kind kind_;
     UniqueFd fd_;
-    os::UioHandle uio_;
-    const hal::RegisterWindow<hal::CauseReg>* cause_ = nullptr;
+    os::UioLineRef uio_;
+    infra::OptRef<const CauseWindow> cause_{};
     Cause delivers_ = Cause::None;
 };
 

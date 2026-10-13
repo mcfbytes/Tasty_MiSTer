@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "infra/opt_ref.h"
+
 namespace mister::svc {
 
 struct CuePolicy;
@@ -20,7 +22,8 @@ public:
     IDiscMounter(IDiscMounter&&) = delete;
     IDiscMounter& operator=(IDiscMounter&&) = delete;
 
-    [[nodiscard]] bool apply(DiscOp op, const CuePolicy* policy, std::string_view path) noexcept {
+    [[nodiscard]] bool apply(DiscOp op, infra::OptRef<const CuePolicy> policy,
+                             std::string_view path) noexcept {
         switch (op) {
             case DiscOp::Mount:
                 return mount(policy, path);
@@ -33,8 +36,9 @@ public:
         return false;
     }
 
-    [[nodiscard]] virtual bool mount(const CuePolicy* policy, std::string_view path) noexcept = 0;
-    [[nodiscard]] virtual bool unmount(const CuePolicy* policy) noexcept = 0;
+    [[nodiscard]] virtual bool mount(infra::OptRef<const CuePolicy> policy,
+                                     std::string_view path) noexcept = 0;
+    [[nodiscard]] virtual bool unmount(infra::OptRef<const CuePolicy> policy) noexcept = 0;
 
     virtual void release() noexcept = 0;
 

@@ -36,7 +36,7 @@ public:
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
     [[nodiscard]] int park_ms() const noexcept { return prefetch_.park_ms(); }
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
-    [[nodiscard]] bool paused() noexcept { return pause_.observe(*this); }
+    [[nodiscard]] bool paused() noexcept { return pause_.observe(pause_seen_, *this); }
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
     void settle() noexcept { prefetch_.release(); }
 
@@ -49,6 +49,7 @@ public:
 private:
     ChdPrefetch& prefetch_;
     xthread::PauseLatch pause_;
+    xthread::PauseLatch::Observer pause_seen_{};
     xthread::WakeFlag stop_;
     xthread::SeatPark park_;
 };

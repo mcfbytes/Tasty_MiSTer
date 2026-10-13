@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/path_text.h"
+#include "app/types.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
@@ -44,6 +45,8 @@ public:
         std::uint64_t offset = 0;
         std::uint32_t crc = 0;
         proto::FileId save{};
+        std::uint32_t aux = 0;
+        ContentEdge edge = ContentEdge::Content;
     };
 
     [[nodiscard]] Ex<proto::FileId> intern(std::vector<std::uint8_t>&& bytes, std::string_view ext,
@@ -54,8 +57,11 @@ public:
 
     [[nodiscard]] bool stamp_save(proto::FileId file, proto::FileId save) noexcept;
 
+    [[nodiscard]] bool stamp_edge(proto::FileId file, ContentEdge edge) noexcept;
+
     [[nodiscard]] Ex<proto::FileId> intern_path(std::string_view path, std::uint64_t size_bytes,
-                                                std::uint32_t at, std::uint32_t popped);
+                                                std::uint32_t at, std::uint32_t popped,
+                                                std::uint32_t crc = 0, std::uint32_t aux = 0);
 
     [[nodiscard]] Ex<proto::FileId> intern_at(proto::FileId id, std::vector<std::uint8_t>&& bytes,
                                               std::string_view ext, std::string_view path,

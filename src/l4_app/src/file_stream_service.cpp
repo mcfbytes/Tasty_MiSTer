@@ -145,9 +145,9 @@ void perform_stream(const svc::Vfs& vfs, IoState st, Job& job) noexcept {
 }  // namespace
 
 FileStreamService::Loan FileStreamService::acquire_() noexcept {
-    if (vfs_ == nullptr) return Loan{};
+    if (!vfs_) return Loan{};
     auto loan = chan_.acquire();
-    if (!loan) refusals_.add(1);
+    if (!loan) rt_.refusals.add(1);
     return loan;
 }
 
@@ -161,23 +161,23 @@ bool FileStreamService::arm_open(std::string_view rel, std::string_view out_rel,
                                  svc::OpenMode out_mode) noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "FileStreamService::arm_open off T-RT");
 
-    if (rt_stream_open_ || (rel.empty() && out_rel.empty())) {
-        refusals_.add(1);
+    if (rt_.stream_open || (rel.empty() && out_rel.empty())) {
+        rt_.refusals.add(1);
         return false;
     }
     auto loan = acquire_();
     if (!loan) return false;
     Ask::Open a{};
     if (!a.rel.assign(rel) || !a.out_rel.assign(out_rel)) {
-        refusals_.add(1);
+        rt_.refusals.add(1);
         return false;
     }
     a.out_mode = out_mode;
-    loan->ask = infra::make<Ask>(a, Ask::Head{++gen_});
+    loan->ask = infra::make<Ask>(a, Ask::Head{++rt_.gen});
     loan->size = 0;
     loan->got = 0;
     loan->ok = 0;
-    rt_stream_open_ = true;
+    rt_.stream_open = true;
     send_(std::move(loan));
     return true;
 }
@@ -185,12 +185,12 @@ bool FileStreamService::arm_open(std::string_view rel, std::string_view out_rel,
 bool FileStreamService::arm_step(std::uint64_t off, std::uint32_t want) noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "FileStreamService::arm_step off T-RT");
     if (want == 0 || want > kStreamChunkBytes) {
-        refusals_.add(1);
+        rt_.refusals.add(1);
         return false;
     }
     auto loan = acquire_();
     if (!loan) return false;
-    loan->ask = infra::make<Ask>(Ask::Read{.offset = off, .want = want}, Ask::Head{gen_});
+    loan->ask = infra::make<Ask>(Ask::Read{.offset = off, .want = want}, Ask::Head{rt_.gen});
     loan->got = 0;
     loan->ok = 0;
     send_(std::move(loan));
@@ -200,14 +200,14 @@ bool FileStreamService::arm_step(std::uint64_t off, std::uint32_t want) noexcept
 bool FileStreamService::arm_write(std::uint64_t off, std::span<const std::byte> bytes) noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "FileStreamService::arm_write off T-RT");
     if (bytes.empty() || bytes.size() > kStreamChunkBytes) {
-        refusals_.add(1);
+        rt_.refusals.add(1);
         return false;
     }
     auto loan = acquire_();
     if (!loan) return false;
     loan->ask = infra::make<Ask>(
         Ask::Write{.offset = off, .want = static_cast<std::uint32_t>(bytes.size())},
-        Ask::Head{gen_});
+        Ask::Head{rt_.gen});
     loan->got = 0;
     loan->ok = 0;
     std::memcpy(loan->data, bytes.data(), bytes.size());
@@ -219,7 +219,7 @@ bool FileStreamService::arm_sync() noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "FileStreamService::arm_sync off T-RT");
     auto loan = acquire_();
     if (!loan) return false;
-    loan->ask = infra::make<Ask>(Ask::Sync{}, Ask::Head{gen_});
+    loan->ask = infra::make<Ask>(Ask::Sync{}, Ask::Head{rt_.gen});
     loan->got = 0;
     loan->ok = 0;
     send_(std::move(loan));
@@ -230,10 +230,10 @@ bool FileStreamService::arm_close() noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "FileStreamService::arm_close off T-RT");
     auto loan = acquire_();
     if (!loan) return false;
-    loan->ask = infra::make<Ask>(Ask::Close{}, Ask::Head{gen_});
+    loan->ask = infra::make<Ask>(Ask::Close{}, Ask::Head{rt_.gen});
     loan->got = 0;
     loan->ok = 0;
-    rt_stream_open_ = false;
+    rt_.stream_open = false;
     send_(std::move(loan));
     return true;
 }
@@ -243,16 +243,17 @@ FileStreamService::Loan FileStreamService::reap() noexcept {
     auto loan = chan_.reap();
 
     if (loan) {
-        OpenWatch watch{loan.completed() && loan->ok != 0, rt_stream_open_};
+        OpenWatch watch{loan.completed() && loan->ok != 0, rt_.stream_open};
         infra::dispatch<StreamAskRoutes>(loan->ask, watch);
     }
     return loan;
 }
 
 void FileStreamService::serve() noexcept {
-    if (vfs_ == nullptr) return;
+    if (!vfs_) return;
     if (auto job = chan_.take())
-        perform_stream(*vfs_, IoState{src_, out_, io_gen_, opens_, closes_, stales_}, job);
+        perform_stream(*vfs_, IoState{io_.src, io_.out, io_.gen, io_.opens, io_.closes, io_.stales},
+                       job);
 }
 
 bool FileStreamService::idle() const noexcept { return chan_.outbound() == 0; }
@@ -263,12 +264,13 @@ void FileStreamService::pump_on_caller() noexcept {
         sealed_pumps_.add(1);
         return;
     }
-    if (vfs_ == nullptr) return;
+    if (!vfs_) return;
     const SeatScope stands_in_for_io{SeatTag::Io};
     for (std::size_t i = 0; i < kStreamDepth; ++i) {
         auto job = chan_.take();
         if (!job) break;
-        perform_stream(*vfs_, IoState{src_, out_, io_gen_, opens_, closes_, stales_}, job);
+        perform_stream(*vfs_, IoState{io_.src, io_.out, io_.gen, io_.opens, io_.closes, io_.stales},
+                       job);
     }
 }
 

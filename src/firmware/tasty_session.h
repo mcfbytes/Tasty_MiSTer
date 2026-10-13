@@ -15,6 +15,7 @@
 #include "app/replay_status.h"
 #include "cores/movie_system.h"
 #include "hal/phys_region.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
@@ -77,22 +78,22 @@ public:
     };
 
     struct Wiring {
-        app::VideoPump* video = nullptr;
-        Replay* replay = nullptr;
-        app::RecorderControl* rec = nullptr;
-        app::UiRequestRing* asks = nullptr;
-        app::LinkTxChannel* link_tx = nullptr;
-        const app::IdentityLatch* identity = nullptr;
-        const app::ReplayStatusCell* play = nullptr;
-        const app::RecorderStatusCell* recstat = nullptr;
-        const app::EncodeStatusCell* encstat = nullptr;
-        xthread::WakeFlag* main_stop = nullptr;
-        const svc::Vfs* vfs = nullptr;
-        const std::atomic<int>* stop = nullptr;
-        std::atomic<int>* exit_code = nullptr;
+        infra::OptRef<app::VideoPump> video{};
+        Replay& replay;
+        app::RecorderControl& rec;
+        app::UiRequestRing& asks;
+        app::LinkTxChannel& link_tx;
+        const app::IdentityLatch& identity;
+        const app::ReplayStatusCell& play;
+        const app::RecorderStatusCell& recstat;
+        const app::EncodeStatusCell& encstat;
+        xthread::WakeFlag& main_stop;
+        const svc::Vfs& vfs;
+        const std::atomic<int>& stop;
+        std::atomic<int>& exit_code;
         hal::PhysRegion video_fb{};
 
-        const xthread::Telemetry<std::uint8_t, SeatTag::Unbound>* direct_video_ini = nullptr;
+        const xthread::Telemetry<std::uint8_t, SeatTag::Unbound>& direct_video_ini;
     };
 
     TastySession(const Wiring& w, const TastyArgs& args) noexcept;
@@ -119,6 +120,10 @@ private:
     void write_status_(bool force = false) noexcept;
     [[nodiscard]] bool scaler_port_stuck_() const noexcept;
     [[nodiscard]] bool rec_only_over_() noexcept;
+
+    void sample_rec_failure_() noexcept;
+
+    void note_rec_failure_(const app::RecorderStatus& rec) noexcept;
     void ask_core_(std::string_view path) noexcept;
     [[nodiscard]] bool core_ready_() const noexcept;
 
@@ -150,6 +155,7 @@ private:
     bool splash_ok_ = false;
     bool play_started_ = false;
     bool rec_seen_ = false;
+    bool rec_failure_said_ = false;
     bool stop_sent_ = false;
     std::size_t settings_printed_ = 0;
     std::uint8_t direct_video_was_ = 0;

@@ -16,6 +16,8 @@ public:
     virtual void forget_cells() noexcept = 0;
     virtual bool take_link(const proto::LinkEvent& ev) noexcept = 0;
 
+    virtual void settle() noexcept = 0;
+
 protected:
     IUiRoundPort() = default;
     IUiRoundPort(const IUiRoundPort&) = default;

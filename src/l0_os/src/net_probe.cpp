@@ -9,6 +9,8 @@
 #include <cerrno>
 #include <cstring>
 
+#include "infra/byte_view.h"
+
 namespace mister::os {
 namespace {
 
@@ -40,8 +42,8 @@ NetPresence net_presence_from_list(std::span<const Ipv4If> ifs) noexcept {
         if (ifa->ifa_addr == nullptr || ifa->ifa_name == nullptr) continue;
         if (ifa->ifa_addr->sa_family != AF_INET) continue;
         const auto* sin = reinterpret_cast<const sockaddr_in*>(ifa->ifa_addr);
-        std::uint8_t octets[4];
-        std::memcpy(octets, &sin->sin_addr.s_addr, sizeof octets);
+        const auto octets =
+            infra::byte_cast<const std::uint8_t>(infra::bytes_of(sin->sin_addr.s_addr));
         const Ipv4If one{std::string_view{ifa->ifa_name}, octets[0], octets[1]};
         const NetPresence p = net_presence_from_list(std::span<const Ipv4If>(&one, 1));
         out.wired = out.wired || p.wired;

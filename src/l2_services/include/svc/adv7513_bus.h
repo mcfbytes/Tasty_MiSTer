@@ -53,33 +53,35 @@ public:
     Adv7513Bus(const Adv7513Bus&) = delete;
     Adv7513Bus& operator=(const Adv7513Bus&) = delete;
     Adv7513Bus(Adv7513Bus&&) noexcept = default;
-    Adv7513Bus& operator=(Adv7513Bus&&) noexcept = default;
 
-    static Ex<Adv7513Bus> attach(II2cAdapter& a, const hal::VideoOutDecl& board, ProbeReport& out);
+    Adv7513Bus& operator=(Adv7513Bus&&) = delete;
 
-    Ex<void> configure(const InitOptions& o);
+    [[nodiscard]] static Ex<Adv7513Bus> attach(II2cAdapter& a, const hal::VideoOutDecl& board,
+                                               ProbeReport& out);
 
-    Ex<void> configure_audio(const InitOptions& o);
+    [[nodiscard]] Ex<void> configure(const InitOptions& o);
 
-    Ex<void> tmds_power(bool on);
+    [[nodiscard]] Ex<void> configure_audio(const InitOptions& o);
 
-    Ex<std::uint8_t> read_status();
+    [[nodiscard]] Ex<void> tmds_power(bool on);
 
-    Ex<void> arm_interrupts(bool on);
+    [[nodiscard]] Ex<std::uint8_t> read_status();
 
-    Ex<void> set_mode(const Modeline& m, bool direct_video_menu);
+    [[nodiscard]] Ex<void> arm_interrupts(bool on);
 
-    Ex<void> set_packet(std::uint8_t mask, std::uint8_t offset, const std::uint8_t* data,
-                        std::size_t n);
+    [[nodiscard]] Ex<void> set_mode(const Modeline& m, bool direct_video_menu);
 
-    Ex<void> spd_config(const SpdPacket& p);
-    Ex<void> spd_disable();
+    [[nodiscard]] Ex<void> set_packet(std::uint8_t mask, std::uint8_t offset,
+                                      const std::uint8_t* data, std::size_t n);
+
+    [[nodiscard]] Ex<void> spd_config(const SpdPacket& p);
+    [[nodiscard]] Ex<void> spd_disable();
 
     struct Verify {
         std::uint8_t r41 = 0, r17 = 0, r3b = 0, r3c = 0;
         bool matched = false;
     };
-    Ex<Verify> verify(const Modeline& m, bool direct_video_menu);
+    [[nodiscard]] Ex<Verify> verify(const Modeline& m, bool direct_video_menu);
 
     unsigned bus() const noexcept { return bus_; }
     std::uint32_t writes() const noexcept { return writes_; }
@@ -91,11 +93,11 @@ public:
     bool mode_cached() const noexcept { return last_vic_ != 0xFFu; }
 
 private:
-    Adv7513Bus() = default;
+    Adv7513Bus(II2cAdapter& a, unsigned bus) noexcept : a_(a), bus_(bus) {}
 
-    Ex<void> write_rows(std::span<const RegWrite> rows);
+    [[nodiscard]] Ex<void> write_rows(std::span<const RegWrite> rows);
 
-    II2cAdapter* a_ = nullptr;
+    II2cAdapter& a_;
     unsigned bus_ = 0;
 
     std::uint8_t last_sync_invert_ = 0xFF;

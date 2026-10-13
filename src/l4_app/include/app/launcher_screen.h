@@ -6,6 +6,7 @@
 #include "app/launcher_fb_ack.h"
 #include "app/launcher_state.h"
 #include "app/osd_close.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 
@@ -19,12 +20,12 @@ class LauncherScreen {
 
 public:
     struct Wiring {
-        const LauncherStateCell* state = nullptr;
-        LauncherFbAckCell* fb_ack = nullptr;
-        xthread::WakeFlag* launcher_wake = nullptr;
-        HpsFramebuffer* fb = nullptr;
-        const VideoPump* video = nullptr;
-        IOsdClose* osd = nullptr;
+        const LauncherStateCell& state;
+        LauncherFbAckCell& fb_ack;
+        xthread::WakeFlag& launcher_wake;
+        HpsFramebuffer& fb;
+        const VideoPump& video;
+        IOsdClose& osd;
     };
 
     explicit LauncherScreen(const Wiring& w) noexcept : w_(w) {}

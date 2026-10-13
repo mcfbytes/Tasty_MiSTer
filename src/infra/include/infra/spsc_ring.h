@@ -8,6 +8,8 @@
 #include <limits>
 #include <optional>
 #include <type_traits>
+#include <utility>
+
 #include "infra/seat.h"
 
 namespace mister::xthread {
@@ -35,9 +37,68 @@ class SpscRing {
 public:
     using index_type = Index;
 
+    class Producer {
+        TASTY_SEAT_EXEMPT(component);
+
+    public:
+        Producer() noexcept = default;
+        Producer(Producer&& o) noexcept : ring_(std::exchange(o.ring_, nullptr)) {}
+        Producer& operator=(Producer&& o) noexcept {
+            if (this != &o) ring_ = std::exchange(o.ring_, nullptr);
+            return *this;
+        }
+        Producer(const Producer&) = delete;
+        Producer& operator=(const Producer&) = delete;
+
+        [[nodiscard]] explicit operator bool() const noexcept { return ring_ != nullptr; }
+        [[nodiscard]] bool push(const T& v) noexcept { return ring_->push(v); }
+        [[nodiscard]] std::size_t size() const noexcept { return ring_->size(); }
+        [[nodiscard]] Index pushed() const noexcept { return ring_->pushed(); }
+        [[nodiscard]] Index popped() const noexcept { return ring_->popped(); }
+
+    private:
+        friend class SpscRing;
+        explicit Producer(SpscRing* r) noexcept : ring_(r) {}
+        SpscRing* ring_ = nullptr;
+    };
+
+    class Consumer {
+        TASTY_SEAT_EXEMPT(component);
+
+    public:
+        Consumer() noexcept = default;
+        Consumer(Consumer&& o) noexcept : ring_(std::exchange(o.ring_, nullptr)) {}
+        Consumer& operator=(Consumer&& o) noexcept {
+            if (this != &o) ring_ = std::exchange(o.ring_, nullptr);
+            return *this;
+        }
+        Consumer(const Consumer&) = delete;
+        Consumer& operator=(const Consumer&) = delete;
+
+        [[nodiscard]] explicit operator bool() const noexcept { return ring_ != nullptr; }
+        [[nodiscard]] std::optional<T> pop() noexcept { return ring_->pop(); }
+        [[nodiscard]] std::size_t size() const noexcept { return ring_->size(); }
+        [[nodiscard]] Index pushed() const noexcept { return ring_->pushed(); }
+        [[nodiscard]] Index popped() const noexcept { return ring_->popped(); }
+
+    private:
+        friend class SpscRing;
+        explicit Consumer(SpscRing* r) noexcept : ring_(r) {}
+        SpscRing* ring_ = nullptr;
+    };
+
     SpscRing() = default;
 
     explicit SpscRing(Index at) noexcept : head_(at), tail_(at) {}
+    SpscRing(const SpscRing&) = delete;
+    SpscRing& operator=(const SpscRing&) = delete;
+
+    [[nodiscard]] Producer producer() noexcept {
+        return mint_(kProducerMinted) ? Producer{this} : Producer{};
+    }
+    [[nodiscard]] Consumer consumer() noexcept {
+        return mint_(kConsumerMinted) ? Consumer{this} : Consumer{};
+    }
 
     bool push(const T& v) noexcept {
         const Index head = static_cast<Index>(head_.load(std::memory_order_relaxed));
@@ -73,7 +134,16 @@ public:
     }
 
 private:
+    static constexpr std::uint8_t kProducerMinted = 1;
+    static constexpr std::uint8_t kConsumerMinted = 2;
+    [[nodiscard]] bool mint_(std::uint8_t side) noexcept {
+        if ((minted_ & side) != 0) return false;
+        minted_ = static_cast<std::uint8_t>(minted_ | side);
+        return true;
+    }
+
     alignas(64) std::atomic<std::uint32_t> head_{0};
+    std::uint8_t minted_ = 0;
     alignas(64) std::atomic<std::uint32_t> tail_{0};
     alignas(64) T slots_[N];
 };

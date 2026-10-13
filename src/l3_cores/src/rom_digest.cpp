@@ -54,8 +54,17 @@ std::optional<DigestValue> parse_hex_digest(std::string_view text, DigestKind ki
 }
 
 RomDigest::RomDigest(DigestKind kind) noexcept : kind_(kind) {
-    if (kind_ == DigestKind::Sha1) std::copy(kSha1Init.begin(), kSha1Init.end(), h_.begin());
-    if (kind_ == DigestKind::Sha256) h_ = kSha256Init;
+    switch (kind_) {
+        case DigestKind::Sha1:
+            std::copy(kSha1Init.begin(), kSha1Init.end(), h_.begin());
+            break;
+        case DigestKind::Sha256:
+            h_ = kSha256Init;
+            break;
+        case DigestKind::Md5:
+        case DigestKind::Crc32:
+            break;
+    }
 }
 
 void RomDigest::sha1_block_(const std::uint8_t* p) noexcept {
@@ -122,18 +131,30 @@ void RomDigest::sha256_block_(const std::uint8_t* p) noexcept {
 }
 
 void RomDigest::block_(const std::uint8_t* p) noexcept {
-    if (kind_ == DigestKind::Sha1) {
-        sha1_block_(p);
-    } else {
-        sha256_block_(p);
+    switch (kind_) {
+        case DigestKind::Sha1:
+            sha1_block_(p);
+            return;
+        case DigestKind::Sha256:
+            sha256_block_(p);
+            return;
+        case DigestKind::Md5:
+        case DigestKind::Crc32:
+            return;
     }
 }
 
 void RomDigest::update(std::span<const std::uint8_t> data) noexcept {
-    if (kind_ == DigestKind::Md5) return md5_.update(data);
-    if (kind_ == DigestKind::Crc32) {
-        h_[0] = crc32_update(h_[0], data);
-        return;
+    switch (kind_) {
+        case DigestKind::Md5:
+            md5_.update(data);
+            return;
+        case DigestKind::Crc32:
+            h_[0] = crc32_update(h_[0], data);
+            return;
+        case DigestKind::Sha1:
+        case DigestKind::Sha256:
+            break;
     }
     std::size_t fill = static_cast<std::size_t>(total_ % 64u);
     total_ += data.size();
@@ -153,15 +174,20 @@ void RomDigest::update(std::span<const std::uint8_t> data) noexcept {
 
 DigestValue RomDigest::finish() noexcept {
     DigestValue out{.kind = kind_, .len = digest_len(kind_)};
-    if (kind_ == DigestKind::Md5) {
-        const auto d = md5_.digest();
-        std::copy(d.begin(), d.end(), out.bytes.begin());
-        return out;
-    }
-    if (kind_ == DigestKind::Crc32) {
-        for (std::size_t i = 0; i < out.len; ++i)
-            out.bytes[i] = static_cast<std::uint8_t>(h_[0] >> (24 - 8 * i));
-        return out;
+    switch (kind_) {
+        case DigestKind::Md5: {
+            const auto d = md5_.digest();
+            std::copy(d.begin(), d.end(), out.bytes.begin());
+            return out;
+        }
+        case DigestKind::Crc32: {
+            for (std::size_t i = 0; i < out.len; ++i)
+                out.bytes[i] = static_cast<std::uint8_t>(h_[0] >> (24 - 8 * i));
+            return out;
+        }
+        case DigestKind::Sha1:
+        case DigestKind::Sha256:
+            break;
     }
     const std::uint64_t bits = total_ * 8u;
     std::size_t fill = static_cast<std::size_t>(total_ % 64u);

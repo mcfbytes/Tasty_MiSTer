@@ -25,24 +25,26 @@ int region_index(HdDirtyLedger::Region region) noexcept {
 void HdDirtyLedger::reset(HdRect panel, HdRect game) noexcept {
     stale_[0][0] = stale_[1][0] = game;
     stale_[0][1] = stale_[1][1] = panel;
-    tick_[0] = tick_[1] = {};
 }
 
 void HdDirtyLedger::invalidate(HdRect panel, HdRect game) noexcept { reset(panel, game); }
 
-void HdDirtyLedger::begin_tick() noexcept { tick_[0] = tick_[1] = {}; }
-
 void HdDirtyLedger::mark(Region region, HdRect dirty) noexcept {
+    if (empty(dirty)) return;
     const int r = region_index(region);
-    tick_[r] = unite(tick_[r], dirty);
+    stale_[0][r] = unite(stale_[0][r], dirty);
+    stale_[1][r] = unite(stale_[1][r], dirty);
 }
 
-HdRect HdDirtyLedger::consume(std::uint8_t slot, Region region) noexcept {
+HdRect HdDirtyLedger::peek(std::uint8_t slot, Region region) const noexcept {
+    return stale_[slot & 1u][region_index(region)];
+}
+
+HdRect HdDirtyLedger::take(std::uint8_t slot, Region region) noexcept {
     const int s = slot & 1u;
     const int r = region_index(region);
-    const HdRect out = unite(stale_[s][r], tick_[r]);
+    const HdRect out = stale_[s][r];
     stale_[s][r] = {};
-    if (!empty(tick_[r])) stale_[s ^ 1][r] = unite(stale_[s ^ 1][r], tick_[r]);
     return out;
 }
 

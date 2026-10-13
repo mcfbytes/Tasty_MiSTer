@@ -16,32 +16,25 @@
 #include "app/capture_hit.h"
 #include "app/raw_key_edge.h"
 #include "svc/input_service.h"
+#include "svc/joy_plan.h"
 #include "infra/seat.h"
-
-namespace mister::reactor {
-class Executive;
-}
 
 namespace mister::app {
 
 using CaptureArmCell = xthread::Telemetry<CaptureArm, SeatTag::Ui>;
 using CaptureHitCell = xthread::Telemetry<CaptureHit, SeatTag::Input>;
 
+using RumblePadsCell = xthread::Telemetry<std::uint8_t, SeatTag::Input>;
+
 class InputWire final : public IActivitySource {
     TASTY_SEAT_MEDIATOR(Input, Any);
 
 public:
-    static constexpr std::size_t kKeyRingSlots = 2 * (svc::kMaxDevices * svc::kMaxKeyEdges);
-    static_assert(kKeyRingSlots == 2048, "item bound item 3: 32 x 32 x 2");
-
-    static constexpr std::uint8_t kKeyDrainBudget = 8;
-
     static constexpr std::uint32_t kGateGrabbed = 1u << 0;
     static constexpr std::uint32_t kGateOsdVisible = 1u << 1;
 
     static constexpr std::uint32_t kGateKeysDropped = 1u << 2;
 
-    static constexpr std::uint32_t kReqRebuild = 1u << 0;
     static constexpr std::uint32_t kReqGrabOn = 1u << 1;
     static constexpr std::uint32_t kReqGrabApply = 1u << 2;
 
@@ -50,7 +43,9 @@ public:
     static constexpr std::uint32_t kReqOsdOn = 1u << 5;
     static constexpr std::uint32_t kReqOsdApply = 1u << 6;
 
-    explicit InputWire(reactor::Executive& rt_exec) noexcept : rt_exec_(rt_exec) {}
+    static constexpr std::size_t kUiKeyRingSlots = 256;
+
+    InputWire() noexcept = default;
     InputWire(const InputWire&) = delete;
     InputWire& operator=(const InputWire&) = delete;
 
@@ -71,12 +66,6 @@ public:
                        svc::JoyMask{static_cast<std::uint32_t>(cell >> 32)}};
     }
 
-    bool push_key(RawKeyEdge e) noexcept;
-
-    std::optional<RawKeyEdge> pop_key() noexcept { return keys_.pop(); }
-
-    static constexpr std::size_t kUiKeyRingSlots = 256;
-
     bool push_ui_key(RawKeyEdge e) noexcept;
 
     std::optional<RawKeyEdge> pop_ui_key() noexcept { return ui_keys_.pop(); }
@@ -87,7 +76,6 @@ public:
     std::uint32_t ui_keys_published() const noexcept {
         return ui_keys_pub_.load(std::memory_order_relaxed);
     }
-    std::size_t keys_queued() const noexcept { return keys_.size(); }
 
     std::uint32_t keys_dropped() const noexcept {
         return keys_dropped_.load(std::memory_order_relaxed);
@@ -182,10 +170,10 @@ public:
     CaptureHitCell& capture_hit() noexcept { return capture_hit_; }
     const CaptureHitCell& capture_hit() const noexcept { return capture_hit_; }
 
-    std::uint32_t next_capture_token() noexcept {
-        if (++capture_token_ == 0) ++capture_token_;
-        return capture_token_;
-    }
+    RumblePadsCell& rumble_pads_cell() noexcept { return rumble_pads_; }
+    const RumblePadsCell& rumble_pads_cell() const noexcept { return rumble_pads_; }
+
+    std::uint8_t rumble_pads() const noexcept { return rumble_pads_.sample().value; }
 
     void publish_analog_reshape(const svc::IAnalogReshape* r) noexcept {
         reshape_.store(r, std::memory_order_release);
@@ -226,16 +214,15 @@ public:
                                              std::memory_order_relaxed));
     }
 
-    bool take_osd_request(bool& on) noexcept {
+    [[nodiscard]] std::optional<bool> take_osd_request() noexcept {
         std::uint32_t cur = req_.load(std::memory_order_acquire);
         std::uint32_t next = 0;
         do {
-            if ((cur & kReqOsdApply) == 0u) return false;
+            if ((cur & kReqOsdApply) == 0u) return std::nullopt;
             next = cur & ~kReqOsdApply;
         } while (!req_.compare_exchange_weak(cur, next, std::memory_order_acq_rel,
                                              std::memory_order_acquire));
-        on = (cur & kReqOsdOn) != 0u;
-        return true;
+        return (cur & kReqOsdOn) != 0u;
     }
 
     void request(std::uint32_t set) noexcept { req_.fetch_or(set, std::memory_order_release); }
@@ -248,9 +235,7 @@ public:
     void consume_kick() noexcept { kick_armed_.store(false, std::memory_order_release); }
     bool kick_armed() const noexcept { return kick_armed_.load(std::memory_order_acquire); }
 
-    bool kick_rt() noexcept;
-
-    Ex<void> open_ctrl() noexcept;
+    [[nodiscard]] Ex<void> open_ctrl() noexcept;
 
     int ctrl_fd() const noexcept { return ctrl_.fd(); }
 
@@ -262,21 +247,6 @@ public:
                         const svc::IAnalogReshape* analog_reshape) noexcept;
     void on_core_detached() noexcept;
 
-    void begin_pause() noexcept {
-        bump(pause_seq_, 1u);
-        paused_.store(true, std::memory_order_release);
-    }
-    void end_pause() noexcept { paused_.store(false, std::memory_order_release); }
-    std::uint32_t pause_seq() const noexcept { return pause_seq_.load(std::memory_order_acquire); }
-
-    void set_paused(bool on) noexcept {
-        if (on) {
-            begin_pause();
-        } else {
-            end_pause();
-        }
-    }
-    bool paused() const noexcept { return paused_.load(std::memory_order_acquire); }
     void note_rebuild_refused() noexcept { bump(rebuilds_refused_, 1u); }
     void note_rebuild_done() noexcept { bump(rebuilds_done_, 1u); }
 
@@ -322,14 +292,12 @@ public:
     static_assert(std::atomic<std::uint32_t>::is_always_lock_free,
                   "the two gate words and every counter must be lock-free too");
     static_assert(std::atomic<const svc::IAnalogReshape*>::is_always_lock_free,
-                  "the reshape cell is ONE pointer and is read on T-DIAG inside "
-                  "the baton: a libatomic lock here would be a lock on the "
+                  "the reshape cell is ONE pointer and is read on T-DIAG in "
+                  "the rebuild: a libatomic lock here would be a lock on the "
                   "hotplug path");
 
 private:
     std::atomic<std::uint64_t> joy_[svc::kMaxPlayers]{};
-
-    xthread::SpscRing<RawKeyEdge, kKeyRingSlots> keys_{};
 
     xthread::SpscRing<RawKeyEdge, kUiKeyRingSlots> ui_keys_{};
     std::atomic<std::uint32_t> ui_keys_dropped_{0};
@@ -350,7 +318,7 @@ private:
 
     CaptureArmCell capture_arm_{};
     CaptureHitCell capture_hit_{};
-    std::uint32_t capture_token_ = 0;
+    RumblePadsCell rumble_pads_{};
 
     xthread::WakeFlag ctrl_{};
 
@@ -359,10 +327,6 @@ private:
     std::atomic<std::uint32_t> activity_seq_{0};
     std::atomic<std::uint32_t> req_{0};
     std::atomic<bool> kick_armed_{false};
-
-    reactor::Executive& rt_exec_;
-    std::atomic<bool> paused_{false};
-    std::atomic<std::uint32_t> pause_seq_{0};
 
     std::atomic<std::uint32_t> keys_dropped_{0};
     std::atomic<std::uint32_t> key_sweeps_{0};

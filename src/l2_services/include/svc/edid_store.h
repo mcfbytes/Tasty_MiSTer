@@ -22,7 +22,7 @@ class EdidStore {
     TASTY_SEAT_EXEMPT(component);
 
 public:
-    Ex<void> refresh();
+    [[nodiscard]] Ex<void> refresh();
     const EdidBlock& current() const noexcept { return edid_; }
     Generation generation() const noexcept { return gen_; }
 
@@ -42,7 +42,7 @@ public:
     std::span<const std::byte> full() const noexcept;
 
 private:
-    Ex<bool> read_segment(std::uint8_t segment, std::span<std::byte> out);
+    [[nodiscard]] Ex<bool> read_segment(std::uint8_t segment, std::span<std::byte> out);
 
     EdidBlock edid_{};
     Generation gen_{};

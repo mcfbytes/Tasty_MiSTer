@@ -30,13 +30,34 @@ Ex<FileTxPieces> FileTxPieces::start(std::unique_ptr<svc::IFile> file, std::uint
     return p;
 }
 
-bool FileTxPieces::ready(const LinkTxChannel& inbox) const noexcept {
+Ex<FileTxPieces> FileTxPieces::resume(std::unique_ptr<svc::IFile> file, std::uint64_t total,
+                                      std::uint8_t wire_index, std::string_view path,
+                                      std::uint64_t from, std::uint32_t crc) {
+    if (from > total) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 2});
+    auto p = start(std::move(file), total, wire_index, path);
+    if (!p) return p;
+    p->sent_ = from;
+    p->keyed_to_ = total;
+    p->crc_ = crc;
+    p->pieces_ = 1;
+    return p;
+}
+
+std::optional<FileTxLevel> FileTxPieces::answer_(const FileTxLevelCell& level) const noexcept {
+    if (!outstanding_) return std::nullopt;
+    const auto s = level.sample();
+    if (!s) return std::nullopt;
+
+    if (!s.value.answers(outstanding_->act)) return std::nullopt;
+    return s.value;
+}
+
+bool FileTxPieces::ready(const LinkTxChannel& inbox, const FileTxLevelCell& level) const noexcept {
+    if (cut_owed_) return true;
+    if (outstanding_ && !answer_(level)) return false;
     if (inbox.ring().size() + 1 >= proto::kLinkTxCapacity) return false;
 
-    if (slab_full_at_ && inbox.ring().popped() == *slab_full_at_) return false;
-    if (cut_owed_ || pieces_ < kAhead) return true;
-
-    return static_cast<std::int32_t>(inbox.ring().popped() - prev_at_) > 0;
+    return !(slab_full_at_ && inbox.ring().popped() == *slab_full_at_);
 }
 
 bool FileTxPieces::stage_() {
@@ -54,15 +75,35 @@ bool FileTxPieces::stage_() {
         loader_->shape(row_, buf, sent_);
         if (sent_ + n == total_ && !loader_->finish(nullptr)) return false;
     }
-    key_.feed(buf);
+
+    if (sent_ + n > keyed_to_) {
+        key_.feed(std::span<const std::uint8_t>(buf).subspan(
+            static_cast<std::size_t>(keyed_to_ - sent_)));
+        keyed_to_ = sent_ + n;
+    }
     staged_ = std::move(buf);
     return true;
 }
 
-FileTxPieces::Pass FileTxPieces::step(LinkTxChannel& inbox) {
+FileTxPieces::Pass FileTxPieces::step(LinkTxChannel& inbox, const FileTxLevelCell& level,
+                                      std::uint32_t act) {
     using Phase = proto::LinkOp::FileTxPhase;
     if (cut_owed_) return cut_(inbox);
-    if (!ready(inbox)) return Pass::Waiting;
+    if (!ready(inbox, level)) return Pass::Waiting;
+
+    if (outstanding_) {
+        const auto ans = answer_(level);
+        if (!ans) return Pass::Waiting;
+        const Outstanding o = *outstanding_;
+        outstanding_.reset();
+        if (ans->held_act == o.act) {
+            if (loader_ != nullptr || ans->held_bytes > o.bytes) return fail_(inbox);
+            sent_ = o.from + ans->held_bytes;
+            ++rewinds_;
+        } else if (!ans->stream_served) {
+            return fail_(inbox);
+        }
+    }
 
     if (!staged_ && !stage_()) return fail_(inbox);
     const std::uint64_t n = staged_->size();
@@ -77,9 +118,11 @@ FileTxPieces::Pass FileTxPieces::step(LinkTxChannel& inbox) {
         facts_sent_ = true;
     }
 
-    const std::uint32_t at = inbox.ring().pushed();
-    auto id = inbox.intern_file(std::move(*staged_), ext_of(path_.view()), path_.view(), 0,
-                                last ? key_.value() : 0);
+    const std::uint64_t whole = n == 0 ? total_ : 0;
+    const std::uint64_t offset = n == 0 ? sent_ : 0;
+    const std::uint32_t crc = last ? crc_.value_or(key_.value()) : 0;
+    auto id = inbox.intern_file(std::move(*staged_), ext_of(path_.view()), path_.view(), 0, crc,
+                                whole, offset);
     if (!id) {
         if (id.error().code == Errc::would_block) {
             slab_full_at_ = inbox.ring().popped();
@@ -91,12 +134,17 @@ FileTxPieces::Pass FileTxPieces::step(LinkTxChannel& inbox) {
     const proto::LinkOp::FileTx op{.wire_index = wire_index_,
                                    .phase = phase,
                                    .file = *id,
-                                   .total = static_cast<std::uint32_t>(total_)};
+                                   .total = static_cast<std::uint32_t>(total_),
+                                   .act = act};
     (void)inbox.push(op);
     slab_full_at_.reset();
+
+    if (last) {
+        last_ = LastOp{.act = act, .from = sent_, .crc = crc, .shaped = loader_ != nullptr};
+    } else {
+        outstanding_ = Outstanding{.act = act, .from = sent_, .bytes = n};
+    }
     sent_ += n;
-    prev_at_ = last_at_;
-    last_at_ = at;
     ++pieces_;
     return last ? Pass::Done : Pass::Sent;
 }

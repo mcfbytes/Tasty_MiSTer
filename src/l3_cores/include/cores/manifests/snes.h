@@ -42,13 +42,47 @@ inline constexpr CoreProfile kSnes{
     .slots = {},
     .boot_assets = {},
     .start_assets = kSnesStartAssets,
+    .start = StartRule::Assets,
     .signatures = {},
     .windows = kSnesWindows,
     .file_tx_whole = true,
 };
 
+extern const CoreProfile kSgb;
+
+inline constexpr auto kSgbServices = std::to_array<LinkDecoderDecl>({
+    {
+        "sgb.mailbox",
+        reactor::Cause::Tick,
+        &kMailboxTick<kSgb>,
+        0,
+        DeadlineClass::A,
+        OsdBudget::Shared,
+    },
+});
+
+inline constexpr proto::MailboxFrameDecl kSgbMailboxFrame = kSnesMailboxFrame;
+
+inline constexpr auto kSgbWindows = std::to_array<CoreWindowDecl>({
+    {.region = {0x0060'0000u, 0u, "sgb-msu-data"}, .feeds_pcm = false},
+});
+
+inline constexpr CoreProfile kSgb{
+    .kind = CoreKind::Sgb,
+    .name = "SGB",
+    .rbf = "",
+    .services = kSgbServices,
+    .slots = {},
+    .boot_assets = {},
+    .signatures = {},
+    .windows = kSgbWindows,
+    .undeclared_start_mount = StartMount::Unmodelled,
+};
+
 std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g);
 
-std::unique_ptr<ICompanionLoad> make_snes_companion(const svc::Vfs& vfs);
+std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g);
+
+std::unique_ptr<ICompanionLoad> make_msu_companion(const svc::Vfs& vfs);
 
 }  // namespace mister::cores::manifests

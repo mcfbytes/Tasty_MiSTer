@@ -44,9 +44,13 @@ private:
     struct VisibleRows {
         std::uint8_t n;
     };
-    xthread::Telemetry<VisibleRows> visible_rows_{};
 
-    std::uint8_t rows_[kMaxRows][kRowBytes]{};
+    struct Ui {
+        std::uint8_t rows[kMaxRows][kRowBytes]{};
+    };
+
+    xthread::Telemetry<VisibleRows> visible_rows_{};
+    Ui ui_{};
     xthread::Telemetry<Row> published_[kMaxRows]{};
 
     static_assert(std::atomic<std::uint32_t>::is_always_lock_free,

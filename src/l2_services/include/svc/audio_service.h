@@ -40,12 +40,12 @@ public:
     void set_core_volume(int cmd);
     std::uint8_t core_volume_byte() const noexcept { return corevol_att_; }
 
-    Ex<bool> probe_filter();
+    [[nodiscard]] Ex<bool> probe_filter();
     bool has_filter() const noexcept { return has_filter_; }
 
     void accept_probe_reply(std::uint8_t raw_reply, bool front_end) noexcept;
 
-    Ex<void> load_filter(std::string_view name);
+    [[nodiscard]] Ex<void> load_filter(std::string_view name);
 
     [[nodiscard]] Ex<void> apply_filter(std::string_view contents);
 
@@ -53,7 +53,7 @@ public:
         return std::span<const std::uint16_t>(filter_words_.data(), filter_word_count_);
     }
 
-    Ex<void> flush();
+    [[nodiscard]] Ex<void> flush();
 
     std::uint8_t audvol_wire_byte() const noexcept { return pending_audvol_; }
 
@@ -76,10 +76,10 @@ private:
     std::uint8_t pending_audvol_ = 0;
 };
 
-Ex<std::uint16_t> emit_afilter_probe(hal::ISpiTransport& link);
+[[nodiscard]] Ex<std::uint16_t> emit_afilter_probe(hal::ISpiTransport& link);
 
-Ex<void> emit_afilter_volume(hal::ISpiTransport& link, std::uint8_t vol);
+[[nodiscard]] Ex<void> emit_afilter_volume(hal::ISpiTransport& link, std::uint8_t vol);
 
-Ex<void> emit_audvol(hal::ISpiTransport& link, std::uint8_t vol);
+[[nodiscard]] Ex<void> emit_audvol(hal::ISpiTransport& link, std::uint8_t vol);
 
 }  // namespace mister::svc

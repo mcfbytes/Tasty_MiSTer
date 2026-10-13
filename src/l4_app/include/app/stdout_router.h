@@ -2,8 +2,11 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
+#include <memory>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -41,9 +44,14 @@ public:
 private:
     const char* null_path_ = "/dev/null";
     const char* debug_path_ = "/tmp/debug.txt";
-    void* orig_ = nullptr;
-    void* null_ = nullptr;
-    void* dbg_ = nullptr;
+    struct FileCloser {
+        void operator()(std::FILE* f) const noexcept { (void)std::fclose(f); }
+    };
+    using OwnedFile = std::unique_ptr<std::FILE, FileCloser>;
+
+    infra::OptRef<std::FILE> orig_{};
+    OwnedFile null_{};
+    OwnedFile dbg_{};
     Sink sink_ = Sink::Original;
 };
 

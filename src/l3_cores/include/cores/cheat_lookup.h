@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <string_view>
+
 #include "infra/seat.h"
 
 namespace mister::cores {
@@ -8,7 +10,7 @@ namespace mister::cores {
 struct CheatLookup {
     TASTY_SEAT_EXEMPT(const_shared);
 
-    const char* cd_dir_suffix = nullptr;
+    std::string_view cd_dir_suffix{};
 
     bool cd_asset_layout = false;
 

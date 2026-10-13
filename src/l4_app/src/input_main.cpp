@@ -11,7 +11,7 @@ void InputMain::start() noexcept {
 void InputMain::serve() noexcept {
     (void)decode_.after_wait();
     if (stopping()) return;
-    decode_.before_wait(infra::OptRef<const xthread::WakeFlag>{stop_});
+    decode_.before_wait();
 }
 
 void InputMain::on_pause() noexcept {

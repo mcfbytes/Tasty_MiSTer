@@ -33,11 +33,17 @@ void sleep_ns(long ns) noexcept {
 
 constexpr long ramp(long ns) noexcept { return ns >= kPollMaxNs / 2 ? kPollMaxNs : ns * 2; }
 
-int try_reap(::pid_t pid, int& status) noexcept {
+struct Reaped {
+    int rc;
+    int status;
+};
+
+[[nodiscard]] Reaped try_reap(::pid_t pid) noexcept {
+    int status = 0;
     for (;;) {
         const ::pid_t r = ::waitpid(pid, &status, WNOHANG);
         if (r < 0 && errno == EINTR) continue;
-        return static_cast<int>(r);
+        return Reaped{static_cast<int>(r), r > 0 ? status : 0};
     }
 }
 
@@ -95,7 +101,7 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
 
 }  // namespace
 
-Ex<int> run_sync(std::span<const char* const> argv, std::int32_t timeout_ms) {
+[[nodiscard]] Ex<int> run_sync(std::span<const char* const> argv, std::int32_t timeout_ms) {
     if (argv.empty()) return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
 
     std::vector<char*> args = to_argv(argv);
@@ -127,19 +133,19 @@ Ex<int> run_sync(std::span<const char* const> argv, std::int32_t timeout_ms) {
     const std::int64_t bound_ns = static_cast<std::int64_t>(timeout_ms) * 1'000'000;
     long ivl = kPollStartNs;
     for (std::int64_t waited_ns = 0; waited_ns < bound_ns; waited_ns += ivl, ivl = ramp(ivl)) {
-        const int r = try_reap(pid, status);
-        if (r > 0) return decode(status);
-        if (r < 0) {
+        const Reaped re = try_reap(pid);
+        if (re.rc > 0) return decode(re.status);
+        if (re.rc < 0) {
             return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
         }
         sleep_ns(ivl);
     }
 
-    if (try_reap(pid, status) > 0) return decode(status);
+    if (const Reaped re = try_reap(pid); re.rc > 0) return decode(re.status);
 
     (void)::kill(pid, SIGTERM);
     for (int waited = 0; waited < kGraceMs; waited += 10) {
-        if (try_reap(pid, status) > 0) {
+        if (try_reap(pid).rc > 0) {
             return std::unexpected(Error{Errc::timeout, ERR_SITE(), 0});
         }
         sleep_ns(kPollMaxNs);
@@ -154,7 +160,7 @@ Ex<int> run_sync(std::span<const char* const> argv, std::int32_t timeout_ms) {
     return std::unexpected(Error{Errc::timeout, ERR_SITE(), 0});
 }
 
-Ex<void> run_detached(std::span<const char* const> argv) {
+[[nodiscard]] Ex<void> run_detached(std::span<const char* const> argv) {
     if (argv.empty() || argv[0] == nullptr || argv[0][0] != '/') {
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }

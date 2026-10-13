@@ -12,6 +12,7 @@
 #include "cores/cd_diagnostics.h"
 #include "cores/cd_engine.h"
 #include "cores/cd_engine_stats.h"
+#include "cores/cd_flow.h"
 #include "cores/cd_flow_query.h"
 #include "cores/cd_profile.h"
 #include "cores/cd_sector_egress.h"
@@ -28,35 +29,11 @@
 
 namespace mister::cores {
 
-struct CdFlow {
-    std::uint32_t waits = 0;
-    std::uint32_t cdda_sectors = 0;
-
-    std::uint32_t data_sectors = 0;
-    std::uint32_t idle_ticks = 0;
-
-    std::uint32_t gated_ticks = 0;
-    std::uint8_t drive_state = 0;
-    std::uint32_t drive_track = 0;
-    std::int32_t drive_lba = 0;
-
-    std::int32_t drive_audio_lba = 0;
-
-    std::uint32_t substitutes = 0;
-    std::uint32_t subcode_substitutes = 0;
-    std::uint32_t not_resident = 0;
-    bool drive_is_data = true;
-
-    std::uint32_t busy_ticks = 0;
-    std::uint32_t egress_abandons = 0;
-};
-
 class CdCore : public Core, public IStreamLoad {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    CdCore(const CoreProfile& profile, const CdProfile& cd, const HostServices& host)
-        : Core(profile, host), drive_(*this, cd, host) {}
+    CdCore(const CoreProfile& profile, const CdProfile& cd, const HostServices& host);
 
     const CdProfile& cd_profile() const noexcept { return drive_.cd_profile(); }
 
@@ -74,7 +51,8 @@ public:
     [[nodiscard]] bool cdda_capture_armed() const noexcept { return drive_.cdda_capture_armed(); }
 
 private:
-    [[nodiscard]] Ex<void> do_init(proto::CoreSession& s) override;
+    [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
+    void do_retire() noexcept override { drive_.retire(); }
     [[nodiscard]] Ex<void> do_reset() override { return drive_.reset(); }
     [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return &drive_; }
     [[nodiscard]] ICdServiceRows* on_cd_service_rows() noexcept override { return &drive_; }

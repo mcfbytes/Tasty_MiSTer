@@ -30,7 +30,8 @@ public:
                  bool suppress_analog_followup, const svc::IAnalogReshape* analog_reshape,
                  const char* cue_dir, const cores::CheatLookup* cheats,
                  std::span<const cores::FileSlot> slots, const GameId& game_id = {},
-                 bool setname_same_dir = false, bool image_no_zip = false) noexcept;
+                 bool setname_same_dir = false, bool image_no_zip = false,
+                 cores::PauseOnOsd pause = cores::PauseOnOsd::Option) noexcept;
 
     [[nodiscard]] bool copy(SessionIdentity& out) const noexcept;
 

@@ -7,6 +7,7 @@
 #include "cores/mailbox_servants.h"
 #include "infra/counter.h"
 #include "infra/inbox.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 
@@ -46,7 +47,7 @@ public:
 private:
     Binds binds_;
     cores::ServantSet servants_{};
-    cores::IMailboxServant* held_ = nullptr;
+    infra::OptRef<cores::IMailboxServant> held_{};
     std::uint16_t bound_gen_ = 0;
     xthread::Counter attaches_, applied_, unheld_;
 };

@@ -14,7 +14,7 @@ namespace mister::app {
 struct PcmCommand {
     TASTY_SEAT_EXEMPT(component);
 
-    enum class Kind : std::uint8_t { Play, Stop, Resume, kCount };
+    enum class Kind : std::uint8_t { Play, Stop, Resume, AttachRing, AttachSource, kCount };
     static constexpr std::size_t kStore = 2;
 
     struct Play {
@@ -29,7 +29,16 @@ struct PcmCommand {
         static constexpr Kind kKind = Kind::Resume;
     };
 
-    using Alternatives = std::tuple<Play, Stop, Resume>;
+    struct AttachRing {
+        static constexpr Kind kKind = Kind::AttachRing;
+        std::uint8_t lease = 0;
+    };
+    struct AttachSource {
+        static constexpr Kind kKind = Kind::AttachSource;
+        std::uint8_t lease = 0;
+    };
+
+    using Alternatives = std::tuple<Play, Stop, Resume, AttachRing, AttachSource>;
 
     Kind kind = Kind::Stop;
     std::uint8_t pad_{};

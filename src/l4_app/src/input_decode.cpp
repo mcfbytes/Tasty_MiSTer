@@ -25,7 +25,8 @@ constexpr std::int64_t kMouseDividerNs = 15'000'000;
 
 constexpr std::uint16_t kKeyF12 = 88;
 constexpr std::uint16_t kKeyMenu = 139;
-bool is_osd_toggle(std::uint16_t code) noexcept { return code == kKeyF12 || code == kKeyMenu; }
+constexpr std::uint16_t kKeyLeftMeta = 125;
+constexpr std::uint16_t kKeyRightMeta = 126;
 
 bool is_pass_through_modifier(std::uint16_t code) noexcept {
     return code == 56 || code == 100 || code == 125 || code == 126;
@@ -58,11 +59,13 @@ Ex<InputDecode::Fds> InputDecode::Fds::create(InputWire& wire) noexcept {
     return Fds{std::move(epfd)};
 }
 
-InputDecode::InputDecode(Fds fds, InputWire& wire, svc::InputService& svc, os::IClock& clock,
-                         Wiring w) noexcept
-    : wire_(wire), svc_(svc), diag_(w.diag), inbox_(w.inbox), link_rx_(w.link_rx),
+InputDecode::InputDecode(Fds fds, InputWire& wire, svc::InputService& svc,
+                         DeviceTableChannel& tables, os::IClock& clock, Wiring w) noexcept
+    : wire_(wire), svc_(svc), tables_rx_(tables), diag_(w.diag), inbox_(w.inbox),
+      link_rx_(w.link_rx), rt_wake_(w.rt_wake), rumble_(svc, wire.rumble_pads_cell(), w.diag),
       launcher_cell_(w.cell), launcher_keys_(w.cell ? w.keys : infra::OptRef<LauncherKeyBridge>{}),
-      clock_(clock), epfd_(std::move(fds.epfd_)) {
+      ui_wake_(w.ui_wake), clock_(clock), epfd_(std::move(fds.epfd_)) {
+    (void)take_tables_();
     rebuild_registrations(Reseat::Skip);
 }
 
@@ -78,7 +81,7 @@ Ex<void> InputDecode::watch(const xthread::ParkFds& fds) noexcept {
         }
     }
     stop_fd_ = fds.stop_fd();
-    pause_wake_ = &fds.wake();
+    pause_wake_ = infra::OptRef<xthread::WakeFlag>{fds.wake()};
     return {};
 }
 
@@ -159,7 +162,24 @@ void InputDecode::rebuild_registrations(Reseat bridge) {
     seen_gen_ = svc_.devices_generation();
 }
 
-bool InputDecode::apply_requests(infra::OptRef<const xthread::WakeFlag> stop) {
+unsigned InputDecode::take_tables_() noexcept {
+    unsigned n = 0;
+    while (const auto t = tables_rx_.next()) {
+        deregister_devices_();
+        svc_.install(*t);
+        tables_rx_.taken();
+        ++n;
+    }
+    return n;
+}
+
+void InputDecode::deregister_devices_() noexcept {
+    for (const svc::InputDevice& d : svc_.devices()) {
+        (void)::epoll_ctl(epfd_.get(), EPOLL_CTL_DEL, d.fd(), nullptr);
+    }
+}
+
+bool InputDecode::apply_requests() {
     bool rebuilt = false;
     const std::uint32_t req = wire_.requests();
     if ((req & InputWire::kReqGrabApply) != 0u) {
@@ -170,21 +190,13 @@ bool InputDecode::apply_requests(infra::OptRef<const xthread::WakeFlag> stop) {
         wire_.clear_request(InputWire::kReqGrabApply);
     }
 
-    bool osd_on = false;
-    if (wire_.take_osd_request(osd_on)) {
-        wire_.publish_gates(osd_on ? InputWire::kGateOsdVisible : 0u,
-                            osd_on ? 0u : InputWire::kGateOsdVisible);
+    const auto osd_on = wire_.take_osd_request();
+    if (osd_on) {
+        wire_.publish_gates(*osd_on ? InputWire::kGateOsdVisible : 0u,
+                            *osd_on ? 0u : InputWire::kGateOsdVisible);
     }
-    if ((req & InputWire::kReqRebuild) != 0u) {
 
-        wire_.begin_pause();
-        while ((wire_.requests() & InputWire::kReqRebuild) != 0u &&
-               !(stop && stop->ever_requested())) {
-
-            timespec ts{0, 200'000};
-            (void)::nanosleep(&ts, nullptr);
-        }
-        wire_.end_pause();
+    if (take_tables_() != 0u) {
         rebuild_registrations(Reseat::Bridge);
         rebuilt = true;
     }
@@ -216,10 +228,11 @@ unsigned InputDecode::decode_round(int timeout_ms) {
     return after_wait();
 }
 
-void InputDecode::before_wait(infra::OptRef<const xthread::WakeFlag> stop) {
+void InputDecode::before_wait() {
     InputWire::bump(n_rounds_, 1);
     drain_link_events_();
-    rebuilt_ = apply_requests(stop);
+    rebuilt_ = apply_requests();
+    rumble_.refresh();
 }
 
 void InputDecode::wait_events(int timeout_ms) noexcept {
@@ -231,7 +244,10 @@ unsigned InputDecode::after_wait() {
     const bool rebuilt = rebuilt_;
     n_ready_ = 0;
     rebuilt_ = false;
-    if (n < 0) return 0;
+    if (n < 0) {
+        counts_cell_.publish(counts());
+        return 0;
+    }
 
     if (const auto a = arm_reader_.take_if_changed(wire_.capture_arm())) arm_ = *a;
     bridging_ = false;
@@ -241,6 +257,7 @@ unsigned InputDecode::after_wait() {
         bridging_ = launcher_keys_->set_active(owns);
     }
 
+    drain_link_events_();
     unsigned decoded = 0;
     bool published = false;
     for (int i = 0; i < n; ++i) {
@@ -252,7 +269,7 @@ unsigned InputDecode::after_wait() {
         }
 
         if (fd == stop_fd_) continue;
-        if (pause_wake_ != nullptr && fd == pause_wake_->fd()) {
+        if (pause_wake_ && fd == pause_wake_->fd()) {
             pause_wake_->drain();
             continue;
         }
@@ -302,8 +319,12 @@ unsigned InputDecode::after_wait() {
     if (!muted_ && (published || rebuilt || framed != 0 ||
                     wire_.edge_reset_seq() != wm_edge_reset_ || wire_.gates() != wm_gates_)) {
 
-        if (wire_.kick_rt()) InputWire::bump(n_kicks_, 1);
+        if (wire_.arm_kick()) {
+            rt_wake_.kick();
+            InputWire::bump(n_kicks_, 1);
+        }
     }
+    counts_cell_.publish(counts());
     return decoded;
 }
 
@@ -319,6 +340,31 @@ void InputDecode::on(const proto::LinkEvent::Ps2Control& c) {
 }
 
 void InputDecode::on(const proto::LinkEvent::Ps2ControlEnded&) noexcept { end_ps2_control(); }
+
+void InputDecode::on(const proto::LinkEvent::PolledWord& w) noexcept {
+    switch (w.shape) {
+        case proto::user_io::PollShape::RumblePoll:
+            rumble_.on(w);
+            return;
+        case proto::user_io::PollShape::F12ModPoll:
+            f12_mod_needed_ = w.word != 0;
+            return;
+        case proto::user_io::PollShape::InfoPoll:
+        case proto::user_io::PollShape::kCount:
+            break;
+    }
+    ++link_event_misrouted_;
+}
+
+bool InputDecode::is_osd_toggle_(std::uint16_t code) const noexcept {
+    if (code == kKeyMenu) return true;
+    if (code != kKeyF12) return false;
+    if (!f12_mod_needed_) return true;
+    for (const auto& down : ui_key_down_) {
+        if (ui_down_test(down, kKeyLeftMeta) || ui_down_test(down, kKeyRightMeta)) return true;
+    }
+    return false;
+}
 
 void InputDecode::end_ps2_control() noexcept {
     kbd_.end_control();
@@ -404,7 +450,11 @@ void InputDecode::sweep_dropped_keys_() {
 
 bool InputDecode::push_ui_edge(const RawKeyEdge& e) {
     if (muted_) return true;
-    if (wire_.push_ui_key(e)) return true;
+    if (wire_.push_ui_key(e)) {
+
+        if (ui_wake_) ui_wake_->kick_if_armed();
+        return true;
+    }
     diag_.appendf("{\"t\":\"input_drop\",\"ring\":\"ui_keys\",\"cap\":%u,"
                   "\"dropped\":%u,\"code\":%u,\"pressed\":%u}",
                   static_cast<unsigned>(InputWire::kUiKeyRingSlots),
@@ -428,7 +478,7 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, std::s
         if (has_slot) ui_down_set(ui_key_down_[dev_slot], e.code, e.pressed != 0);
 
         const RawKeyEdge ke{e.code, e.pressed ? std::uint8_t{1} : std::uint8_t{0}, 0};
-        if (is_osd_toggle(e.code)) {
+        if (is_osd_toggle_(e.code)) {
 
             const RawKeyEdge tog{kKeyF12, ke.pressed, ke.reserved};
             if (!ui_repeat && !push_ui_edge(tog)) break;
@@ -687,6 +737,18 @@ InputDecode::Counts InputDecode::counts() const noexcept {
     c.joy_seen = n_joy_seen_.load(std::memory_order_relaxed);
     c.joy_players = n_joy_players_.load(std::memory_order_relaxed);
     c.captures = n_captures_.load(std::memory_order_relaxed);
+    c.mapped = svc_.mapped_devices();
+    c.slotted = svc_.slotted_devices();
+    c.mask_changes = svc_.mask_recomputes();
+    c.axis_edges = svc_.axis_edges();
+    c.mouse_remainder = svc_.mouse_remainder_bytes();
+    c.key_overflows = svc_.key_overflows();
+    c.quirk_drops = svc_.quirk_drops();
+    c.slot_live = svc_.live_slot_mask();
+    c.slot_ghosts = svc_.ghost_slots();
+    for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
+        c.slot_hash[i] = svc_.slot_key_hash(i);
+    }
     return c;
 }
 

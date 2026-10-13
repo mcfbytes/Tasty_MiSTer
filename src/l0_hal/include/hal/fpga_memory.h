@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
 
 #include "infra/error.h"
 #include "os/mmio_region.h"
@@ -13,16 +14,30 @@
 
 namespace mister::hal {
 
+inline constexpr std::string_view kApertureUioName = "mister_ddr_aperture";
+
+struct ApertureChoice {
+    bool via_uio = false;
+    int node = -1;
+    os::PhysAddr node_base{};
+    std::size_t node_size = 0;
+};
+
+[[nodiscard]] ApertureChoice resolve_aperture(const char* sysfs_root, const PhysRegion& r) noexcept;
+
 class FpgaMemory {
     TASTY_SEAT_EXEMPT(component);
 
 public:
-    static Ex<FpgaMemory> map(PhysRegion r,
-                              os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite);
+    [[nodiscard]] static Ex<FpgaMemory> map(
+        PhysRegion r, os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite);
 
-    static Ex<FpgaMemory> map_uio(
+    [[nodiscard]] static Ex<FpgaMemory> map_uio(
         int fd, os::PhysAddr node_base, PhysRegion r,
         os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite);
+
+    [[nodiscard]] static Ex<FpgaMemory> map_aperture(
+        PhysRegion r, os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite);
 
     static FpgaMemory borrow(std::span<std::byte> backing, PhysRegion r);
 
@@ -34,17 +49,17 @@ public:
 
     std::span<std::byte> view(std::size_t off, std::size_t len);
 
-    Ex<std::size_t> write_at(std::size_t off, std::span<const std::byte> src);
-    Ex<std::size_t> read_at(std::size_t off, std::span<std::byte> dst) const;
+    [[nodiscard]] Ex<std::size_t> write_at(std::size_t off, std::span<const std::byte> src);
+    [[nodiscard]] Ex<std::size_t> read_at(std::size_t off, std::span<std::byte> dst) const;
 
     void publish() noexcept;
 
     void handoff() noexcept;
 
-    Ex<void> rebind(PhysRegion r);
-    Ex<void> rebind(std::span<std::byte> backing, PhysRegion r);
+    [[nodiscard]] Ex<void> rebind(PhysRegion r);
+    [[nodiscard]] Ex<void> rebind(std::span<std::byte> backing, PhysRegion r);
 
-    Ex<void> rebind_uio(int fd, os::PhysAddr node_base, PhysRegion r);
+    [[nodiscard]] Ex<void> rebind_uio(int fd, os::PhysAddr node_base, PhysRegion r);
 
     bool uio_bound() const noexcept { return uio_bound_; }
 

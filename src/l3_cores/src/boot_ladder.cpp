@@ -155,6 +155,8 @@ std::optional<std::string> BootLadder::resolve_row(const BootAsset& row) const {
             cand += '/';
             cand.append(row.name);
             return cand;
+        case AssetAnchor::CoreHome:
+            return std::nullopt;
     }
     return std::nullopt;
 }

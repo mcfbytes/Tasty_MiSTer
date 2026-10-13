@@ -25,12 +25,12 @@ const CoreProfile kGenericProfile{
     .slots = kNoSlots,
     .boot_assets = kNoAssets,
     .signatures = kNoSignatures,
-    .undeclared_start_mount = StartMount::Unmodelled,
+    .undeclared_role = SlotRole::Save,
 };
 
 void GenericCore::set_pending_ext(std::string_view ext) noexcept { (void)ext_.assign(ext); }
 
-Ex<void> GenericCore::do_init(proto::CoreSession&) { return {}; }
+Ex<void> GenericCore::do_adopt(const CoreAdopt&) { return {}; }
 
 Ex<proto::SessionParams> GenericCore::stream_opening(IoIndex) {
     TASTY_SEAT_BODY(GenericCore);
@@ -38,7 +38,6 @@ Ex<proto::SessionParams> GenericCore::stream_opening(IoIndex) {
     tx_crc_ = 0;
     proto::SessionParams params{};
     params.ext = ext_.view();
-    params.aux = proto::AuxValue{aux_};
     return params;
 }
 

@@ -8,6 +8,7 @@
 #include "cores/core_profile.h"
 #include "cores/movie_codec.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 
 namespace mister::svc {
 class IFile;
@@ -19,7 +20,7 @@ namespace mister::cores {
 struct MovieSystem {
     CoreKind kind = CoreKind::Generic;
     std::string_view conf_str_name{};
-    const IMovieCodec* codec = nullptr;
+    infra::OptRef<const IMovieCodec> codec{};
 };
 
 [[nodiscard]] std::optional<MovieSystem> movie_system_for_path(

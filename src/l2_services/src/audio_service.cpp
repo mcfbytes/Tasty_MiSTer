@@ -49,7 +49,7 @@ bool is_v1_marker(std::string_view st) {
     return lower(st[0]) == 'v' && lower(st[1]) == '1';
 }
 
-Ex<std::string> read_whole_file(const UniqueFd& fd) {
+[[nodiscard]] Ex<std::string> read_whole_file(const UniqueFd& fd) {
     std::string out;
     char chunk[4096];
     for (;;) {
@@ -254,7 +254,7 @@ Ex<void> AudioService::flush() {
     return {};
 }
 
-Ex<std::uint16_t> emit_afilter_probe(hal::ISpiTransport& link) {
+[[nodiscard]] Ex<std::uint16_t> emit_afilter_probe(hal::ISpiTransport& link) {
     hal::Selected cs(link, hal::ChipSelect::Io);
 
     auto op = link.transfer(hal::SpiWord{kUioSetAfilter});
@@ -263,7 +263,7 @@ Ex<std::uint16_t> emit_afilter_probe(hal::ISpiTransport& link) {
 }
 
 namespace {
-Ex<void> write_bytes(hal::ISpiTransport& link, std::span<const std::uint8_t> b) {
+[[nodiscard]] Ex<void> write_bytes(hal::ISpiTransport& link, std::span<const std::uint8_t> b) {
     for (const std::uint8_t byte : b) {
         auto r = link.transfer(hal::SpiWord{byte});
         if (!r) return std::unexpected(r.error());
@@ -272,14 +272,14 @@ Ex<void> write_bytes(hal::ISpiTransport& link, std::span<const std::uint8_t> b) 
 }
 }  // namespace
 
-Ex<void> emit_afilter_volume(hal::ISpiTransport& link, std::uint8_t vol) {
+[[nodiscard]] Ex<void> emit_afilter_volume(hal::ISpiTransport& link, std::uint8_t vol) {
     hal::Selected cs(link, hal::ChipSelect::Io);
 
     const std::uint8_t b[2] = {kUioSetAfilter, vol};
     return write_bytes(link, std::span<const std::uint8_t>(b, 2));
 }
 
-Ex<void> emit_audvol(hal::ISpiTransport& link, std::uint8_t vol) {
+[[nodiscard]] Ex<void> emit_audvol(hal::ISpiTransport& link, std::uint8_t vol) {
     hal::Selected cs(link, hal::ChipSelect::Io);
 
     const std::uint8_t b[2] = {kUioAudVol, vol};

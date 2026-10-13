@@ -174,9 +174,9 @@ void RtMain::replay_step_() noexcept {
     if (!replay_) return;
     const proto::LateAnswers late = session_ ? session_->take_late_answers() : proto::LateAnswers{};
     replay_->tick(replay_ready_(), core_edge_seq_(), late,
-                  static_cast<std::uint32_t>(replay_ring_->size()));
+                  static_cast<std::uint32_t>(replay_ring_.size()));
     for (unsigned n = 0; n < ReplayGate::kReplayBudget && replay_->wants_record(); ++n) {
-        const auto m = replay_ring_->pop();
+        const auto m = replay_ring_.pop();
         if (!m) break;
         infra::dispatch<infra::AllRouted>(*m, *replay_);
     }

@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "proto/types.h"
@@ -30,30 +31,32 @@ public:
     using CountCell = xthread::Telemetry<DiscCounters, SeatTag::Io>;
 
     DiscStore(const Vfs& vfs, GeomCell& geom, CountCell& counters, ChdPrefetch& prefetch) noexcept
-        : vfs_(&vfs), geom_(geom), counters_(counters), prefetch_(prefetch) {}
+        : vfs_(vfs), geom_(geom), counters_(counters), prefetch_(prefetch) {}
 
     DiscStore(const IImageOpener& opener, GeomCell& geom, CountCell& counters,
               ChdPrefetch& prefetch) noexcept
-        : opener_(&opener), geom_(geom), counters_(counters), prefetch_(prefetch) {}
+        : opener_(opener), geom_(geom), counters_(counters), prefetch_(prefetch) {}
 
     [[nodiscard]] Ex<std::size_t> read_form(DiscForm form, proto::Lba lba,
                                             std::span<std::byte> dst) override;
-    [[nodiscard]] bool mount(const CuePolicy* policy, std::string_view path) noexcept override;
-    [[nodiscard]] bool unmount(const CuePolicy* policy) noexcept override;
+    [[nodiscard]] bool mount(infra::OptRef<const CuePolicy> policy,
+                             std::string_view path) noexcept override;
+    [[nodiscard]] bool unmount(infra::OptRef<const CuePolicy> policy) noexcept override;
     void release() noexcept override;
 
     [[nodiscard]] bool mounted_for_test() const noexcept;
 
 private:
-    [[nodiscard]] bool ensure_engine_(const CuePolicy* policy) noexcept;
+    [[nodiscard]] bool ensure_engine_(infra::OptRef<const CuePolicy> policy) noexcept;
     void publish_() noexcept;
 
-    const Vfs* vfs_ = nullptr;
-    const IImageOpener* opener_ = nullptr;
+    infra::OptRef<const Vfs> vfs_;
+    infra::OptRef<const IImageOpener> opener_;
     GeomCell& geom_;
     CountCell& counters_;
     ChdPrefetch& prefetch_;
-    const CuePolicy* policy_ = nullptr;
+
+    infra::OptRef<const CuePolicy> policy_;
 
     std::uint32_t next_lba_ = 0;
     std::optional<DiscEngine> engine_;

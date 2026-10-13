@@ -35,13 +35,13 @@ public:
     CdEngine(const CdEngine&) = delete;
     CdEngine& operator=(const CdEngine&) = delete;
 
-    Ex<void> on_command_edge(std::uint8_t req);
+    [[nodiscard]] Ex<void> on_command_edge(std::uint8_t req);
 
-    Ex<void> on_tick();
+    [[nodiscard]] Ex<void> on_tick();
 
-    Ex<void> push_sector();
+    [[nodiscard]] Ex<void> push_sector();
 
-    Ex<void> reset();
+    [[nodiscard]] Ex<void> reset();
 
     [[nodiscard]] bool cart_load_ejects() const noexcept { return do_cart_load_ejects(); }
 
@@ -56,7 +56,7 @@ public:
     }
 
     bool command_wanted() const noexcept { return command_wanted_; }
-    Ex<void> accept_command(std::span<const std::uint16_t> words);
+    [[nodiscard]] Ex<void> accept_command(std::span<const std::uint16_t> words);
 
     void seed_edge_memo(std::uint8_t req) noexcept {
         last_req_ = req;
@@ -67,7 +67,7 @@ public:
     bool flow_bound() const noexcept { return flow_ != nullptr; }
 
     void set_region(bool region) noexcept { do_set_region(region); }
-    Ex<void> notify_disc(bool loaded);
+    [[nodiscard]] Ex<void> notify_disc(bool loaded);
     bool streaming() const noexcept { return do_streaming(); }
 
     CdEngineStats stats() const noexcept { return do_stats(); }
@@ -115,10 +115,10 @@ protected:
     bool can_send_ready_(svc::TrackType type, bool skip_mode1);
 
 private:
-    virtual Ex<void> do_accept(std::span<const std::uint16_t> words) = 0;
-    virtual Ex<void> do_tick() = 0;
-    virtual Ex<void> do_push_sector() = 0;
-    virtual Ex<void> do_notify_disc(bool loaded) = 0;
+    [[nodiscard]] virtual Ex<void> do_accept(std::span<const std::uint16_t> words) = 0;
+    [[nodiscard]] virtual Ex<void> do_tick() = 0;
+    [[nodiscard]] virtual Ex<void> do_push_sector() = 0;
+    [[nodiscard]] virtual Ex<void> do_notify_disc(bool loaded) = 0;
     virtual void do_reset_machine() noexcept = 0;
     virtual bool do_streaming() const noexcept = 0;
     virtual DriveView do_drive_view() const noexcept = 0;

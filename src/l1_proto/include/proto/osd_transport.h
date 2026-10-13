@@ -33,16 +33,16 @@ public:
     [[nodiscard]] Ex<void> flush_row(hal::ISpiTransport& link, OsdRow r,
                                      std::span<const std::uint8_t> bytes);
 
-    Ex<void> set_visible(hal::ISpiTransport& link, bool visible);
+    [[nodiscard]] Ex<void> set_visible(hal::ISpiTransport& link, bool visible);
 
-    Ex<void> enable(hal::ISpiTransport& link, OsdMode mode);
+    [[nodiscard]] Ex<void> enable(hal::ISpiTransport& link, OsdMode mode);
 
-    Ex<void> enable_info(hal::ISpiTransport& link, std::uint16_t x, std::uint16_t y,
-                         std::uint16_t width, std::uint16_t height);
+    [[nodiscard]] Ex<void> enable_info(hal::ISpiTransport& link, std::uint16_t x, std::uint16_t y,
+                                       std::uint16_t width, std::uint16_t height);
 
-    Ex<void> set_rotation(hal::ISpiTransport& link, OsdRotation rotate);
+    [[nodiscard]] Ex<void> set_rotation(hal::ISpiTransport& link, OsdRotation rotate);
 
-    Ex<void> menu_ctl(hal::ISpiTransport& link, bool enable_menu);
+    [[nodiscard]] Ex<void> menu_ctl(hal::ISpiTransport& link, bool enable_menu);
 
     [[nodiscard]] Ex<void> set_target(OsdTarget t) noexcept {
         target_ = t;
@@ -64,7 +64,7 @@ public:
 
 private:
     hal::Selected begin(hal::ISpiTransport& link);
-    Ex<void> command(hal::ISpiTransport& link, std::uint16_t cmd);
+    [[nodiscard]] Ex<void> command(hal::ISpiTransport& link, std::uint16_t cmd);
 
     OsdTarget target_ = OsdTarget::All;
     std::uint32_t unrouted_selects_ = 0;

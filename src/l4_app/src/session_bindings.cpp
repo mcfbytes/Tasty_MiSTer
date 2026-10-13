@@ -5,6 +5,9 @@
 #include <cstring>
 #include <span>
 
+#include "infra/byte_view.h"
+#include "infra/endian.h"
+
 namespace mister::app {
 
 namespace {
@@ -26,7 +29,7 @@ void SessionBindings::bind_facts(const proto::LinkOp::BindFacts& op,
     facts_.rotation = op.rotation;
     if (op.setname != proto::TxSlabId{} && inbox != nullptr) {
         const auto bytes = inbox->bytes(op.setname);
-        facts_.setname.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        facts_.setname.assign(infra::as_text(bytes));
     }
 }
 
@@ -35,6 +38,7 @@ void SessionBindings::bind_identity(const proto::LinkOp::BindIdentity& op,
     Identity& id = identity_.emplace(Identity{});
     id.declares_cheats = op.declares_cheats;
     id.declares_turbo = op.declares_turbo;
+    id.declares_info = op.declares_info;
     if (op.blob == proto::TxSlabId{} || inbox == nullptr) return;
     const auto blob = inbox->bytes(op.blob);
 
@@ -44,7 +48,7 @@ void SessionBindings::bind_identity(const proto::LinkOp::BindIdentity& op,
         std::size_t end = at;
         while (end < blob.size() && blob[end] != 0)
             ++end;
-        const std::string_view v(reinterpret_cast<const char*>(blob.data()) + at, end - at);
+        const std::string_view v = infra::as_text(blob.subspan(at, end - at));
         if (f == 0) {
             (void)id.core_name.assign(v);
         } else {
@@ -70,7 +74,7 @@ void SessionBindings::bind_uart(const proto::LinkOp::BindUart& op,
     uart_.capable = op.capable;
     if (inbox != nullptr && op.tokens != proto::TxSlabId{}) {
         const auto blob = inbox->bytes(op.tokens);
-        const std::string_view v(reinterpret_cast<const char*>(blob.data()), blob.size());
+        const std::string_view v = infra::as_text(blob);
         const auto sep = v.find('\0');
         (void)uart_.uart_token.assign(v.substr(0, sep));
         if (sep != std::string_view::npos) (void)uart_.midi_token.assign(v.substr(sep + 1));
@@ -84,7 +88,10 @@ void SessionBindings::bind_doorbells(const proto::LinkOp::BindDoorbells& op,
     if (op.table == proto::TxSlabId{} || inbox == nullptr) return;
     const auto bytes = inbox->bytes(op.table);
     const std::size_t n = std::min(bytes.size() / sizeof(proto::IrqBinding), kDoorbellRows);
-    if (n != 0) std::memcpy(doorbells_.rows.data(), bytes.data(), n * sizeof(proto::IrqBinding));
+    for (std::size_t i = 0; i < n; ++i) {
+        doorbells_.rows[i] = infra::load_native<proto::IrqBinding>(
+            bytes.subspan(i * sizeof(proto::IrqBinding)).first<sizeof(proto::IrqBinding)>());
+    }
     doorbells_.count = static_cast<std::uint8_t>(n);
 }
 

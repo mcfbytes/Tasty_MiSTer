@@ -192,31 +192,34 @@ Admission admit_node(const NodeFacts& f) {
 namespace rules {
 namespace {
 
-void append_hex4(std::string& out, std::uint16_t v) {
+std::string hex4(std::uint16_t v) {
     static constexpr char kDigits[] = "0123456789abcdef";
+    std::string out;
     for (int shift = 12; shift >= 0; shift -= 4) {
         out.push_back(kDigits[(static_cast<unsigned>(v) >> shift) & 0xFu]);
     }
+    return out;
 }
 
-void append_hex8(std::string& out, std::uint32_t v) {
+std::string hex8(std::uint32_t v) {
     static constexpr char kDigits[] = "0123456789abcdef";
+    std::string out;
     for (int shift = 28; shift >= 0; shift -= 4) {
         out.push_back(kDigits[(v >> shift) & 0xFu]);
     }
+    return out;
 }
 
-void append_dec(std::string& out, std::uint32_t v) {
+std::string dec(std::uint32_t v) {
     char buf[16];
     const auto r = std::to_chars(buf, buf + sizeof buf, v);
-    out.append(buf, static_cast<std::size_t>(r.ptr - buf));
+    return std::string(buf, static_cast<std::size_t>(r.ptr - buf));
 }
 
 std::string vid_pid(Vid vid, Pid pid) {
-    std::string s;
-    append_hex4(s, vid.v);
+    std::string s = hex4(vid.v);
     s.push_back('_');
-    append_hex4(s, pid.v);
+    s += hex4(pid.v);
     return s;
 }
 
@@ -282,7 +285,7 @@ void derive_idstr(DeviceSlot& slot) {
         }
         std::string s = id_stem();
         s.push_back('_');
-        append_dec(s, sum);
+        s += dec(sum);
         slot.id.id = std::move(s);
         slot.id.source = IdSource::VidPidNameSum;
         return;
@@ -306,7 +309,7 @@ std::string unique_mapping(const DeviceIdentity& id, const UniquePolicy& pol) {
     if (!wants_unique_mapping(id, pol)) return id.id;
     std::string s = id.id;
     s.push_back('_');
-    append_hex8(s, id.unique_hash);
+    s += hex8(id.unique_hash);
     return s;
 }
 
@@ -395,7 +398,7 @@ void make_unique(std::span<DeviceSlot> slots, const DeviceMatch& match) {
         if (idx == slots.size()) break;
         lastmin = min;
         slots[idx].id.merge_id.push_back('/');
-        append_dec(slots[idx].id.merge_id, cnt);
+        slots[idx].id.merge_id += dec(cnt);
         slots[idx].id.port_suffix = static_cast<std::uint8_t>(cnt);
         ++cnt;
     }
@@ -500,7 +503,7 @@ std::string map_filename(std::string_view core, const DeviceIdentity& id, MapKin
         s.append(id.id);
         if (id.unique_filenames) {
             s.push_back('_');
-            append_hex8(s, id.unique_hash);
+            s += hex8(id.unique_hash);
         }
     }
     if (spec.mod_suffix && mod) s.append("_m");

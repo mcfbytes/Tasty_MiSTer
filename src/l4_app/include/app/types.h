@@ -15,4 +15,10 @@ struct EmitSite {
     friend constexpr bool operator==(EmitSite, EmitSite) = default;
 };
 
+enum class ContentEdge : std::uint8_t {
+    Content = 0,
+    Silent = 1,
+    ChainEnd = 2,
+};
+
 }  // namespace mister::app

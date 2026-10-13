@@ -9,43 +9,24 @@
 #include <string_view>
 #include <vector>
 
+#include "infra/ascii.h"
 #include "svc/vfs.h"
 
 namespace mister::svc::detail {
-
-constexpr char to_lower(char c) noexcept {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-constexpr bool ieq(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        if (to_lower(a[i]) != to_lower(b[i])) return false;
-    }
-    return true;
-}
-
-constexpr bool istarts_with(std::string_view s, std::string_view p) noexcept {
-    return s.size() >= p.size() && ieq(s.substr(0, p.size()), p);
-}
-
-constexpr bool iends_with(std::string_view s, std::string_view p) noexcept {
-    return s.size() >= p.size() && ieq(s.substr(s.size() - p.size()), p);
-}
 
 constexpr std::size_t ifind(std::string_view hay, std::string_view needle) noexcept {
     if (needle.empty()) return 0;
     if (hay.size() < needle.size()) return std::string_view::npos;
     for (std::size_t i = 0; i + needle.size() <= hay.size(); ++i) {
-        if (ieq(hay.substr(i, needle.size()), needle)) return i;
+        if (infra::ieq(hay.substr(i, needle.size()), needle)) return i;
     }
     return std::string_view::npos;
 }
 
 constexpr int icompare_n(std::string_view a, std::string_view b, std::size_t n) noexcept {
     for (std::size_t i = 0; i < n; ++i) {
-        const char ca = (i < a.size()) ? to_lower(a[i]) : '\0';
-        const char cb = (i < b.size()) ? to_lower(b[i]) : '\0';
+        const char ca = (i < a.size()) ? infra::ascii_lower(a[i]) : '\0';
+        const char cb = (i < b.size()) ? infra::ascii_lower(b[i]) : '\0';
         if (ca != cb) return (ca < cb) ? -1 : 1;
         if (ca == '\0') return 0;
     }
@@ -88,7 +69,7 @@ constexpr bool has_nested_zip(std::string_view path) noexcept {
 constexpr std::optional<std::string_view> relative_member(std::string_view folder,
                                                           std::string_view path) noexcept {
     if (folder.empty()) return path;
-    if (!istarts_with(path, folder)) return std::nullopt;
+    if (!infra::istarts_with(path, folder)) return std::nullopt;
     const std::string_view sub = path.substr(folder.size());
     if (!sub.empty() && sub.front() == '/') return sub.substr(1);
     return std::nullopt;

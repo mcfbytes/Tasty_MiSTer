@@ -48,6 +48,9 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/phys_region.h
   hal/pin_levels.h
   hal/program_geometry.h
+  hal/reg.h
+  hal/reg_block.h
+  hal/reg_field.h
   hal/region_id.h
   hal/register_window.h
   hal/scaler_buffers.h
@@ -69,7 +72,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
 
 if(TASTY_BUILD_TESTS)
 
-  foreach(mod IN ITEMS axi board_profile board_windows fabric_region irq_pin spi)
+  foreach(mod IN ITEMS board_profile fabric_region irq_pin reg spi)
     tasty_unit_test(tasty_hal_${mod}_unit
       NAME tasty.hal_${mod}
       SOURCES tests/${mod}_unit.cpp
@@ -108,6 +111,31 @@ if(TASTY_BUILD_TESTS)
   set_tests_properties(tasty.hal_fact_probe_arm3 PROPERTIES
     PASS_REGULAR_EXPRESSION "no matching function|no matching constructor")
 
+  tasty_unit_test(tasty_hal_reg_probe
+    NAME tasty.hal_reg_probe
+    SOURCES tests/reg_probe.cpp
+    LIBS mister_hal tasty_test_options)
+  foreach(arm IN ITEMS 1 2 3 4)
+    tasty_unit_test(tasty_hal_reg_probe_arm${arm}
+      NAME tasty.hal_reg_probe_arm${arm}
+      SOURCES tests/reg_probe.cpp
+      EXCLUDE_FROM_ALL
+      DEFINES TASTY_REG_PROBE=${arm}
+      LIBS mister_hal tasty_test_options
+      COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target tasty_hal_reg_probe_arm${arm}
+      LABELS compile_probe
+      TIMEOUT 120
+      PROPERTIES RUN_SERIAL TRUE)
+  endforeach()
+  set_tests_properties(tasty.hal_reg_probe_arm1 PROPERTIES
+    PASS_REGULAR_EXPRESSION "readable[^\n]*evaluated to")
+  set_tests_properties(tasty.hal_reg_probe_arm2 PROPERTIES
+    PASS_REGULAR_EXPRESSION "writable[^\n]*evaluated to")
+  set_tests_properties(tasty.hal_reg_probe_arm3 PROPERTIES
+    PASS_REGULAR_EXPRESSION "a register field is dword-aligned")
+  set_tests_properties(tasty.hal_reg_probe_arm4 PROPERTIES
+    PASS_REGULAR_EXPRESSION "the field lies inside the layout")
+
   tasty_unit_test(tasty_hal_window_probe
     NAME tasty.hal_window_probe
     SOURCES tests/window_probe.cpp
@@ -124,7 +152,4 @@ if(TASTY_BUILD_TESTS)
       TIMEOUT 120
       PROPERTIES RUN_SERIAL TRUE PASS_REGULAR_EXPRESSION "no_window_of_that_name")
   endforeach()
-
-  target_link_libraries(tasty_hal_axi_unit PRIVATE mister_boards)
-  target_link_libraries(tasty_hal_board_windows_unit PRIVATE mister_boards)
 endif()

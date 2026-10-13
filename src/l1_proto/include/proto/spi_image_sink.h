@@ -24,6 +24,7 @@ public:
     [[nodiscard]] Ex<void> begin(WideIoIndex index, const SessionParams& params) override;
     [[nodiscard]] Ex<void> write(std::span<const std::uint8_t> data) override;
     [[nodiscard]] Ex<void> end() override;
+    [[nodiscard]] Ex<std::size_t> write_taken(std::span<const std::uint8_t> data) override;
 
     [[nodiscard]] bool active() const noexcept { return ds_.has_value() && ds_->active(); }
 

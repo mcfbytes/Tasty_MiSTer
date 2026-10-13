@@ -3,6 +3,7 @@
 #include "proto/upload_session.h"
 #include "hal/selected.h"
 
+#include <algorithm>
 #include <optional>
 #include <utility>
 
@@ -28,11 +29,14 @@ constexpr std::uint8_t ascii_upper(std::uint8_t c) noexcept {
     return (c >= 'a' && c <= 'z') ? static_cast<std::uint8_t>(c - 0x20u) : c;
 }
 
-Ex<hal::SpiWord> beat(hal::ISpiTransport& link, std::uint16_t out) {
+[[nodiscard]] Ex<hal::SpiWord> beat(hal::ISpiTransport& link, std::uint16_t out) {
     return link.transfer(hal::SpiWord{out});
 }
 
-Ex<void> emit_payload(hal::ISpiTransport& link, std::span<const std::uint8_t> data, hal::Width w) {
+constexpr bool taken(hal::SpiWord) noexcept { return true; }
+
+[[nodiscard]] Ex<void> emit_payload(hal::ISpiTransport& link, std::span<const std::uint8_t> data,
+                                    hal::Width w) {
     if (w == hal::Width::Word) {
         const std::size_t pairs = data.size() / 2u;
         for (std::size_t i = 0; i < pairs; ++i) {
@@ -53,7 +57,8 @@ Ex<void> emit_payload(hal::ISpiTransport& link, std::span<const std::uint8_t> da
     return {};
 }
 
-Ex<void> absorb_payload(hal::ISpiTransport& link, std::span<std::uint8_t> data, hal::Width w) {
+[[nodiscard]] Ex<void> absorb_payload(hal::ISpiTransport& link, std::span<std::uint8_t> data,
+                                      hal::Width w) {
     if (w == hal::Width::Word) {
         const std::size_t pairs = data.size() / 2u;
         for (std::size_t i = 0; i < pairs; ++i) {
@@ -77,7 +82,7 @@ Ex<void> absorb_payload(hal::ISpiTransport& link, std::span<std::uint8_t> data, 
     return {};
 }
 
-Ex<void> write_index_register(hal::ISpiTransport& link, std::uint16_t index) {
+[[nodiscard]] Ex<void> write_index_register(hal::ISpiTransport& link, std::uint16_t index) {
     hal::Selected cs(link, hal::ChipSelect::Fpga);
     if (auto r = link.transfer(kFileIndex); !r) return std::unexpected(r.error());
     if (auto r = beat(link, index); !r) return std::unexpected(r.error());
@@ -133,7 +138,12 @@ Ex<FioBracket> FioBracket::begin(hal::ISpiTransport& link, WideIoIndex index, ha
     {
         hal::Selected cs(link, hal::ChipSelect::Fpga);
         if (auto r = link.transfer(kFileTx); !r) return std::unexpected(r.error());
-        if (auto r = link.transfer(mode); !r) return std::unexpected(r.error());
+
+        const bool guarded = mode.v == kModeDownload.v && params.aux.v == 0;
+        if (auto r = guarded ? link.transfer_or_post(mode) : beat(link, mode.v).transform(taken);
+            !r) {
+            return std::unexpected(r.error());
+        }
 
         bracket.emplace(FioBracket{link, index.v});
 
@@ -210,6 +220,26 @@ Ex<void> DownloadSession::write(std::span<const std::uint8_t> data, hal::Width w
     hal::Selected cs(*link, hal::ChipSelect::Fpga);
     if (auto r = link->transfer(kFileTxDat); !r) return std::unexpected(r.error());
     return emit_payload(*link, data, w);
+}
+
+Ex<std::size_t> DownloadSession::write_taken(std::span<const std::uint8_t> data) {
+    hal::ISpiTransport* link = bracket_.link();
+    if (link == nullptr) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
+    if (link->posted()) return 0;
+    hal::Selected cs(*link, hal::ChipSelect::Fpga);
+    auto head = link->transfer_or_post(kFileTxDat);
+    if (!head) return std::unexpected(head.error());
+    if (!*head) return 0;
+    const std::size_t step = link->width() == hal::Width::Word ? 2u : 1u;
+    for (std::size_t at = 0; at < data.size(); at += step) {
+        auto word = static_cast<std::uint16_t>(data[at]);
+        if (step == 2u && at + 1u < data.size())
+            word = static_cast<std::uint16_t>(word | (data[at + 1u] << 8));
+        auto r = link->transfer_or_post(hal::SpiWord{word});
+        if (!r) return std::unexpected(r.error());
+        if (!*r) return std::min(at + step, data.size());
+    }
+    return data.size();
 }
 
 Ex<void> UploadSession::read(std::span<std::uint8_t> data) {

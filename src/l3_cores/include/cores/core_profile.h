@@ -12,10 +12,12 @@
 #include "cores/core_init_step.h"
 #include "cores/core_window_decl.h"
 #include "cores/file_slot.h"
+#include "cores/host_policy.h"
 #include "cores/option_row.h"
 #include "cores/reset_row.h"
 #include "cores/signature_row.h"
 #include "cores/staging_policy.h"
+#include "cores/start_rule.h"
 #include "infra/error.h"
 #include "proto/sector_floor.h"
 #include "reactor/link_decoder_decl.h"
@@ -39,6 +41,7 @@ enum class CoreKind : std::uint8_t {
     PceCd,
     Psx,
     Snes,
+    Sgb,
     Arcade,
     Electron,
     AtariSt,
@@ -92,6 +95,8 @@ struct CoreProfile {
     std::span<const BootAsset> boot_assets;
 
     std::span<const BootAsset> start_assets{};
+
+    StartRule start = StartRule::Chain;
     std::span<const SignatureRow> signatures;
     BlankSaveSpec blank_save{};
 
@@ -136,13 +141,21 @@ struct CoreProfile {
     ResetRow reset{};
 
     StartMount undeclared_start_mount = StartMount::Generic;
+
+    SlotRole undeclared_role = SlotRole::Image;
+
+    HostPolicy host{};
 };
 
 [[nodiscard]] constexpr StartMount start_mount_of(const CoreProfile& p, IoIndex index) {
     return start_mount_of(p.slots, index, p.undeclared_start_mount);
 }
 
-Ex<void> assert_services_match_census(const CoreProfile& p,
-                                      std::span<const LinkDecoderDecl> census_rows);
+[[nodiscard]] constexpr SlotRole role_of(const CoreProfile& p, IoIndex index) {
+    return role_of(p.slots, index, p.undeclared_role);
+}
+
+[[nodiscard]] Ex<void> assert_services_match_census(const CoreProfile& p,
+                                                    std::span<const LinkDecoderDecl> census_rows);
 
 }  // namespace mister::cores

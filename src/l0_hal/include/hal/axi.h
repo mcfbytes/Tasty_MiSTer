@@ -92,9 +92,9 @@ struct MappedRegs {
     bool via_uio = false;
 };
 
-Ex<MappedRegs> map_registers(os::PhysAddr phys, std::size_t len);
+[[nodiscard]] Ex<MappedRegs> map_registers(os::PhysAddr phys, std::size_t len);
 
-Ex<MappedRegs> map_lw_registers(PhysRegion lw, LwOffset off, std::size_t len);
+[[nodiscard]] Ex<MappedRegs> map_lw_registers(PhysRegion lw, LwOffset off, std::size_t len);
 
 [[nodiscard]] Ex<MappedRegs> map_named(std::string_view uio_name, os::PhysAddr phys,
                                        std::size_t len);

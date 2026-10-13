@@ -4,16 +4,18 @@
 #include <cerrno>
 #include <string_view>
 
+#include "infra/byte_view.h"
+
 namespace mister::svc {
 
 namespace {
 
 std::span<std::byte> as_bytes_mut(std::span<std::uint8_t> s) noexcept {
-    return std::span<std::byte>(reinterpret_cast<std::byte*>(s.data()), s.size());
+    return infra::byte_cast<std::byte>(s);
 }
 
 std::span<const std::byte> as_bytes_const(std::span<const std::uint8_t> s) noexcept {
-    return std::span<const std::byte>(reinterpret_cast<const std::byte*>(s.data()), s.size());
+    return infra::byte_cast<const std::byte>(s);
 }
 
 }  // namespace

@@ -5,13 +5,13 @@
 
 namespace mister::cores {
 
-Ex<void> Core::init(proto::CoreSession& s) {
-    if (inited_) {
-        fatal(Error{Errc::core_load, ERR_SITE(), 0}, "Core::init twice");
+Ex<void> Core::adopt(const CoreAdopt& a) {
+    if (adopted_) {
+        fatal(Error{Errc::core_load, ERR_SITE(), 0}, "Core::adopt twice");
     }
-    if (auto r = pre_init_(s); !r) return r;
-    if (auto r = do_init(s); !r) return r;
-    inited_ = true;
+    if (auto r = pre_adopt_(a.session); !r) return r;
+    if (auto r = do_adopt(a); !r) return r;
+    adopted_ = true;
     return {};
 }
 
@@ -25,12 +25,12 @@ Ex<std::optional<proto::StatusBit>> Core::reset(const proto::ResetEdge& edge) {
 Ex<void> Core::shutdown() {
     auto flushed = flush_dirty_state_();
     auto down = do_shutdown();
-    inited_ = false;
+    adopted_ = false;
     if (!flushed) return flushed;
     return down;
 }
 
-Ex<void> Core::pre_init_(proto::CoreSession& s) {
+Ex<void> Core::pre_adopt_(proto::CoreSession& s) {
     s.set_suppress_status_wire(profile_->suppress_reset_status_write);
     return {};
 }

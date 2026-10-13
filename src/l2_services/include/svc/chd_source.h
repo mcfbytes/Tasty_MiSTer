@@ -27,7 +27,7 @@ public:
 
     virtual std::optional<ChdMetaRow> track_metadata(std::uint32_t index) = 0;
 
-    virtual Ex<void> read_hunk(std::uint32_t hunk, std::span<std::byte> dst) = 0;
+    [[nodiscard]] virtual Ex<void> read_hunk(std::uint32_t hunk, std::span<std::byte> dst) = 0;
 
 protected:
     IChdSource() = default;

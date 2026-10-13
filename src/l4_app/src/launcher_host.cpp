@@ -20,6 +20,8 @@
 #include <vector>
 
 #include "app/scanout_packet.h"
+#include "infra/byte_view.h"
+#include "infra/parse_int.h"
 
 extern char** environ;
 
@@ -78,14 +80,11 @@ void LauncherHost::unwatch_(int fd) noexcept {
     (void)::epoll_ctl(epoll_.get(), EPOLL_CTL_DEL, fd, nullptr);
 }
 
-void LauncherHost::publish_() noexcept {
-    if (w_.state != nullptr) w_.state->publish(state_);
-}
+void LauncherHost::publish_() noexcept { w_.state.publish(state_); }
 
 void LauncherHost::take_demand_() noexcept {
-    if (w_.demand == nullptr) return;
     LauncherDemand d{};
-    if (!demand_seen_.take_if_changed(*w_.demand, d)) return;
+    if (!demand_seen_.take_if_changed(w_.demand, d)) return;
     if (d.core_gen != demand_.core_gen) strikes_ = 0;
     demand_ = d;
 }
@@ -134,8 +133,7 @@ void LauncherHost::step_() noexcept {
             release_screen_(false);
             return;
         }
-        const bool acked =
-            w_.fb_ack != nullptr && w_.fb_ack->sample().value.screen_gen == state_.screen_gen;
+        const bool acked = w_.fb_ack.sample().value.screen_gen == state_.screen_gen;
         if (acked || (ack_by_ && now >= *ack_by_)) spawn_();
         return;
     }
@@ -150,10 +148,10 @@ void LauncherHost::step_() noexcept {
 }
 
 void LauncherHost::claim_screen_() noexcept {
-    if (!state_.owns_screen && w_.console != nullptr) {
-        if (const auto vt = w_.console->active(); vt && *vt != demand_.profile->vt) prior_vt_ = *vt;
+    if (!state_.owns_screen) {
+        if (const auto vt = w_.console.active(); vt && *vt != demand_.profile->vt) prior_vt_ = *vt;
         const std::string tty(demand_.profile->tty);
-        w_.console->blank(tty.c_str());
+        w_.console.blank(tty.c_str());
     }
     ++state_.screen_gen;
     if (state_.screen_gen == 0) state_.screen_gen = 1;
@@ -188,7 +186,7 @@ void LauncherHost::spawn_() noexcept {
     const std::array<const char*, 1> argv{demand_.program.c_str()};
     const std::string tty(p.tty);
     auto c = os::ChildProcess::spawn(
-        {.argv = argv, .envp = envp, .tty = tty.c_str(), .kept_fd = child_end.get()});
+        {.argv = argv, .envp = envp, .tty = tty, .kept_fd = child_end.get()});
     if (!c) {
         ++n_.spawn_failures;
         close_lease_();
@@ -199,13 +197,13 @@ void LauncherHost::spawn_() noexcept {
     child_.emplace(std::move(*c));
     watch_(child_->pidfd());
     if (lease_.valid()) watch_(lease_.get());
-    if (w_.console != nullptr) (void)w_.console->activate(p.vt);
+    (void)w_.console.activate(p.vt);
     settle_by_ = spawned_at_ + nanoseconds{t_.settle_limit};
 }
 
 void LauncherHost::settle_() noexcept {
     if (state_.settled) return;
-    const bool on_vt = w_.console != nullptr && w_.console->active() == demand_.profile->vt;
+    const bool on_vt = w_.console.active() == demand_.profile->vt;
     if (!on_vt && settle_by_ && now_() < *settle_by_) return;
     state_.settled = true;
     settle_by_.reset();
@@ -223,7 +221,7 @@ void LauncherHost::grant_() noexcept {
 
 void LauncherHost::finish_grant_() noexcept {
     if (!grant_by_ || !lease_.valid()) return;
-    if (!(w_.fb_ack != nullptr && w_.fb_ack->sample().value.held)) {
+    if (!w_.fb_ack.sample().value.held) {
         if (now_() < *grant_by_) return;
         ++n_.refusals;
         (void)send_text(lease_.get(), scanout::kRefuse);
@@ -294,10 +292,10 @@ void LauncherHost::release_screen_(bool restore_console) noexcept {
     state_.settled = false;
     state_.scanout_owned = false;
     if (had) publish_();
-    if (restore_console && w_.console != nullptr && demand_.profile != nullptr) {
+    if (restore_console && demand_.profile != nullptr) {
         const std::string tty(demand_.profile->tty);
-        w_.console->restore_text(tty.c_str());
-        if (prior_vt_ > 0) (void)w_.console->activate(prior_vt_);
+        w_.console.restore_text(tty.c_str());
+        if (prior_vt_ > 0) (void)w_.console.activate(prior_vt_);
     }
 }
 
@@ -322,15 +320,11 @@ void LauncherHost::resume() noexcept {
 }
 
 bool LauncherHost::idle() const noexcept {
-    if (w_.demand != nullptr) {
-        const std::uint32_t g = w_.demand->generation();
-        if (g != 0 && g != demand_seen_.seen()) return false;
-    }
-    if (grant_by_ && w_.fb_ack != nullptr && w_.fb_ack->sample().value.held) return false;
-    if (claiming_ && w_.fb_ack != nullptr &&
-        w_.fb_ack->sample().value.screen_gen == state_.screen_gen)
-        return false;
-    return w_.scanout == nullptr || w_.scanout->answers_empty();
+    const std::uint32_t g = w_.demand.generation();
+    if (g != 0 && g != demand_seen_.seen()) return false;
+    if (grant_by_ && w_.fb_ack.sample().value.held) return false;
+    if (claiming_ && w_.fb_ack.sample().value.screen_gen == state_.screen_gen) return false;
+    return w_.scanout.answers_empty();
 }
 
 bool LauncherHost::quiescent() const noexcept {
@@ -366,9 +360,8 @@ void LauncherHost::sweep_stale_() noexcept {
     const std::string_view want = demand_.program.view();
     const ::pid_t self = ::getpid();
     while (const dirent* ent = ::readdir(d)) {
-        char* end = nullptr;
-        const long pid = std::strtol(ent->d_name, &end, 10);
-        if (end == ent->d_name || *end != '\0' || pid <= 0 || pid == self) continue;
+        const long pid = infra::parse_int<long>(ent->d_name).value_or(0);
+        if (pid <= 0 || pid == self) continue;
         char link[64];
         (void)std::snprintf(link, sizeof link, "/proc/%ld/exe", pid);
         char target[PATH_MAX];
@@ -385,7 +378,7 @@ void LauncherHost::sweep_stale_() noexcept {
 }
 
 void LauncherHost::serve_lease_() noexcept {
-    if (held_ask_ && !burst_in_flight_ && w_.scanout != nullptr && w_.scanout->post(*held_ask_)) {
+    if (held_ask_ && !burst_in_flight_ && w_.scanout.post(*held_ask_)) {
         held_ask_.reset();
         burst_in_flight_ = true;
     }
@@ -407,7 +400,7 @@ void LauncherHost::serve_lease_() noexcept {
 
 void LauncherHost::on_packet_(const std::byte* data, std::size_t n) noexcept {
     if (!lease_granted_) {
-        const std::string_view text(reinterpret_cast<const char*>(data), n);
+        const std::string_view text = infra::as_text(std::span(data, n));
         if (text != scanout::kRequest || request_waiting_) {
             ++n_.refusals;
             (void)send_text(lease_.get(), scanout::kRefuse);
@@ -419,7 +412,7 @@ void LauncherHost::on_packet_(const std::byte* data, std::size_t n) noexcept {
         return;
     }
 
-    if (burst_in_flight_ || held_ask_ || w_.scanout == nullptr) {
+    if (burst_in_flight_ || held_ask_) {
         ++n_.invalid_packets;
         return;
     }
@@ -428,15 +421,14 @@ void LauncherHost::on_packet_(const std::byte* data, std::size_t n) noexcept {
         ++n_.invalid_packets;
         return;
     }
-    if (w_.scanout->post(*b))
+    if (w_.scanout.post(*b))
         burst_in_flight_ = true;
     else
         held_ask_ = *b;
 }
 
 void LauncherHost::deliver_answers_() noexcept {
-    if (w_.scanout == nullptr) return;
-    while (const auto a = w_.scanout->take_answer()) {
+    while (const auto a = w_.scanout.take_answer()) {
         burst_in_flight_ = false;
         ++n_.bursts;
         if (!lease_.valid() || !lease_granted_) continue;

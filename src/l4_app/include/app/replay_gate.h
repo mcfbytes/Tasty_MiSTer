@@ -9,6 +9,7 @@
 #include "app/replay_msg.h"
 #include "app/replay_status.h"
 #include "hal/spi_transport.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "proto/frame_counter_read.h"
@@ -29,13 +30,13 @@ class ReplayGate {
 
 public:
     struct Wiring {
-        hal::ISpiTransport* link = nullptr;
-        CoreFrameCounter* frames = nullptr;
-        svc::InputEmitter* emitter = nullptr;
-        const os::IClock* clock = nullptr;
-        const ReplayControlCell* control = nullptr;
-        ReplayStatusCell* status = nullptr;
-        const reactor::FrameCell* vsync = nullptr;
+        hal::ISpiTransport& link;
+        CoreFrameCounter& frames;
+        svc::InputEmitter& emitter;
+        const os::IClock& clock;
+        const ReplayControlCell& control;
+        ReplayStatusCell& status;
+        infra::OptRef<const reactor::FrameCell> vsync{};
     };
 
     static constexpr unsigned kReplayBudget = 8;

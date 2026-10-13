@@ -39,10 +39,11 @@ bool PcmRingFeeder::ready_for_source() noexcept {
         request_swap_();
         return false;
     }
-    return park_.load(std::memory_order_acquire) == Park::Idle;
+
+    return park_.load(std::memory_order_acquire) == Park::Idle && reap_leases_();
 }
 
-Ex<void> PcmRingFeeder::attach_ring(hal::FpgaMemory ring) noexcept {
+Ex<void> PcmRingFeeder::adopt_ring(hal::FpgaMemory&& ring) noexcept {
 
     const std::size_t len = ring.region().len;
 
@@ -51,7 +52,9 @@ Ex<void> PcmRingFeeder::attach_ring(hal::FpgaMemory ring) noexcept {
             Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(len)});
     }
 
-    if (!parked()) return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    if (!parked() || !reap_leases_()) {
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    }
 
     Park cur = park_.load(std::memory_order_acquire);
     while (cur == Park::Owed || cur == Park::SwapOwed) {
@@ -62,13 +65,15 @@ Ex<void> PcmRingFeeder::attach_ring(hal::FpgaMemory ring) noexcept {
     }
     if (cur != Park::Idle) return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
 
-    release_media_();
-    rp_seen_ = 0;
-    read_val_ = 0;
-    ring_.emplace(std::move(ring));
-    ring_len_ = static_cast<std::uint32_t>(len);
-    ring_mask_ = ring_len_ - 1u;
-    visible_len_.store(ring_len_, std::memory_order_release);
+    PcmMedia m{};
+    m.ring.emplace(std::move(ring));
+    const std::uint32_t before = visible_len_.load(std::memory_order_acquire);
+    visible_len_.store(static_cast<std::uint32_t>(len), std::memory_order_release);
+    if (auto r = hand_over_<PcmCommand::AttachRing>(m); !r) {
+        visible_len_.store(before, std::memory_order_release);
+        ring = std::move(*m.ring);
+        return r;
+    }
 
     return {};
 }
@@ -85,13 +90,16 @@ Ex<void> PcmRingFeeder::set_source(std::unique_ptr<cores::IPcmSource> src) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
 
-    src_.reset();
-    reset_playback_();
-    rp_seen_ = 0;
-    read_val_ = 0;
-    if (src == nullptr) return {};
-    if (!ring_.has_value()) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    src_ = std::move(src);
+    if (src == nullptr) {
+        PcmMedia none{};
+        return hand_over_<PcmCommand::AttachSource>(none);
+    }
+    if (visible_len_.load(std::memory_order_acquire) == 0) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    }
+    PcmMedia m{};
+    m.src = std::move(src);
+    if (auto r = hand_over_<PcmCommand::AttachSource>(m); !r) return r;
 
     parked_.store(false, std::memory_order_release);
 
@@ -103,16 +111,20 @@ Ex<void> PcmRingFeeder::set_source(std::unique_ptr<cores::IPcmSource> src) {
 Ex<void> PcmRingFeeder::attach(hal::FpgaMemory ring,
                                std::unique_ptr<cores::IPcmSource> src) noexcept {
     if (!src) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    if (auto r = attach_ring(std::move(ring)); !r) return r;
+    if (auto r = adopt_ring(std::move(ring)); !r) return r;
     return set_source(std::move(src));
 }
 
 void PcmRingFeeder::detach() noexcept { request_park(); }
 
 void PcmRingFeeder::release_media_() noexcept {
+    drop_ring_();
+    visible_len_.store(0, std::memory_order_release);
+}
+
+void PcmRingFeeder::drop_ring_() noexcept {
     release_source_();
     ring_.reset();
-    visible_len_.store(0, std::memory_order_release);
     ring_len_ = 0;
     ring_mask_ = 0;
 }
@@ -131,6 +143,37 @@ void PcmRingFeeder::reset_playback_() noexcept {
     draining_ = false;
     primed_ = false;
     drained_ = false;
+}
+
+bool PcmRingFeeder::reap_leases_() noexcept {
+    if (const auto st = state_.sample()) {
+        for (std::size_t i = 0; i < kPcmMediaLeases; ++i) {
+            if (cmd_.leases[i] &&
+                static_cast<std::int32_t>(st.value.attaches - cmd_.lease_seq[i]) >= 0) {
+                cmd_.leases[i].reset();
+            }
+        }
+    }
+    return media_.available() != 0;
+}
+
+template <class Alt>
+Ex<void> PcmRingFeeder::hand_over_(PcmMedia& media) noexcept {
+    (void)reap_leases_();
+    auto lease = media_.acquire();
+    if (!lease) return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    *lease = std::move(media);
+    const std::uint8_t idx = media_.index_of(lease.get());
+    if (!commands_->push(infra::make<PcmCommand>(Alt{idx}))) {
+        drops_.fetch_add(1, std::memory_order_relaxed);
+        media = std::move(*lease);
+        *lease = PcmMedia{};
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    }
+    ++cmd_.sent;
+    cmd_.lease_seq[idx] = cmd_.sent;
+    cmd_.leases[idx] = std::move(lease);
+    return {};
 }
 
 Ex<void> PcmRingFeeder::submit_(const PcmCommand& c) noexcept {
@@ -213,18 +256,19 @@ bool PcmRingFeeder::take_park_ask() noexcept {
                                          std::memory_order_acquire)) {
             continue;
         }
-
-        if (next == Park::Releasing) {
-            release_media_();
-        } else {
-            release_source_();
-        }
+        work_.swap_taken = next == Park::SwapReleasing;
         return true;
     }
     return false;
 }
 
 void PcmRingFeeder::finish_park() noexcept {
+
+    if (work_.swap_taken) {
+        release_source_();
+    } else {
+        release_media_();
+    }
     publish_state_();
     parked_.store(true, std::memory_order_release);
     Park cur = park_.load(std::memory_order_acquire);
@@ -244,6 +288,34 @@ void PcmRingFeeder::on(const PcmCommand::Stop&) noexcept {
 void PcmRingFeeder::on(const PcmCommand::Resume&) noexcept {
     ++served_;
     paused_ = false;
+}
+
+PcmMedia* PcmRingFeeder::leased_(std::uint8_t lease) noexcept {
+    return lease < kPcmMediaLeases ? &media_.at(lease) : nullptr;
+}
+
+void PcmRingFeeder::on(const PcmCommand::AttachRing& a) noexcept {
+    if (PcmMedia* m = leased_(a.lease); m != nullptr && m->ring.has_value()) {
+        drop_ring_();
+        rp_seen_ = 0;
+        read_val_ = 0;
+        ring_.swap(m->ring);
+        ring_len_ = static_cast<std::uint32_t>(ring_->region().len);
+        ring_mask_ = ring_len_ - 1u;
+    }
+    ++work_.attaches;
+    publish_state_();
+}
+
+void PcmRingFeeder::on(const PcmCommand::AttachSource& a) noexcept {
+    if (PcmMedia* m = leased_(a.lease); m != nullptr) {
+        release_source_();
+        rp_seen_ = 0;
+        read_val_ = 0;
+        src_ = std::move(m->src);
+    }
+    ++work_.attaches;
+    publish_state_();
 }
 
 void PcmRingFeeder::misrouted(const PcmCommand&) noexcept {
@@ -407,9 +479,11 @@ void PcmRingFeeder::publish_state_() noexcept {
     s.primed = primed_;
     s.drained = drained_;
     s.served = served_;
+    s.attaches = work_.attaches;
     if (s.write_point == published_.write_point && s.playing == published_.playing &&
         s.primed == published_.primed && s.drained == published_.drained &&
-        s.served == published_.served && state_.generation() != 0) {
+        s.served == published_.served && s.attaches == published_.attaches &&
+        state_.generation() != 0) {
         return;
     }
     published_ = s;

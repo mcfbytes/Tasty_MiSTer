@@ -1,18 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/rbf_resolve.h"
 
+#include "infra/ascii.h"
 #include "svc/vfs.h"
-#include "svc/xml_scan.h"
 
 namespace mister::app {
-
-namespace xml = mister::svc::xml;
 
 namespace {
 
 [[nodiscard]] bool stem_matches(std::string_view name, std::string_view prefix) noexcept {
     if (name.size() <= prefix.size()) return false;
-    if (!xml::iequal(name.substr(0, prefix.size()), prefix)) return false;
+    if (!infra::ieq(name.substr(0, prefix.size()), prefix)) return false;
     const char sep = name[prefix.size()];
     return sep == '.' || sep == '_';
 }
@@ -46,7 +44,7 @@ namespace {
         if (e.is_zip_member) continue;
         const std::string_view name = e.name;
         if (name.size() <= 4) continue;
-        if (!xml::iequal(name.substr(name.size() - 4), ".rbf")) continue;
+        if (!infra::ieq(name.substr(name.size() - 4), ".rbf")) continue;
 
         if (!stem_matches(name, stem) && !(arcade && stem_matches(name, arcade_stem))) continue;
 

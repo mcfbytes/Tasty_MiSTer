@@ -87,6 +87,10 @@ struct DiagCounters {
     std::uint32_t start_answer_drops = 0;
 
     std::uint32_t core_abandons = 0;
+
+    std::uint32_t info_poll_pushes = 0;
+
+    std::uint32_t fed_refusals = 0;
 };
 
 using DiagCountersCell = xthread::Telemetry<DiagCounters, SeatTag::RT>;

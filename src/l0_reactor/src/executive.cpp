@@ -74,8 +74,9 @@ Ex<Executive> Executive::create(xthread::RtStats& stats, const Wiring& wiring) {
 }
 
 Executive::Executive(Executive&& o) noexcept
-    : stats_(o.stats_), epfd_(std::move(o.epfd_)), tick_fd_(std::move(o.tick_fd_)),
-      wake_(std::move(o.wake_)), notifier_count_(o.notifier_count_), delivered_(o.delivered_),
+    : stats_(o.stats_), latency_(o.latency_), epfd_(std::move(o.epfd_)),
+      tick_fd_(std::move(o.tick_fd_)), wake_(std::move(o.wake_)),
+      notifier_count_(o.notifier_count_), delivered_(o.delivered_),
       service_count_(o.service_count_), core_state_(o.core_state_),
       borrowed_count_(o.borrowed_count_), tick_count_(o.tick_count_), deadline_ns_(o.deadline_ns_),
       log_lane_(o.log_lane_), round_timer_(o.round_timer_), bound_in_round_(o.bound_in_round_),
@@ -143,10 +144,10 @@ Ex<void> Executive::bind(std::span<const LinkDecoderDecl> services, CoreState& s
         ++slot;
     }
     service_count_ = slot;
-    core_state_ = &state;
+    core_state_ = infra::OptRef<CoreState>{state};
 
     bound_in_round_ = true;
-    if (round_timer_ != nullptr) round_timer_->note_lifecycle(RoundLifecycle::Bind);
+    if (round_timer_) round_timer_->note_lifecycle(RoundLifecycle::Bind);
     return {};
 }
 
@@ -305,7 +306,7 @@ bool Executive::dispatch_ready() noexcept {
     stats_->heartbeat.fetch_add(1, std::memory_order_relaxed);
     ++round_count_;
     t_wake_ = now_ns();
-    if (round_timer_ != nullptr) round_timer_->begin(t_wake_);
+    if (round_timer_) round_timer_->begin(t_wake_);
     fifo_this_round_ = false;
     swept_ = false;
 
@@ -323,8 +324,8 @@ bool Executive::dispatch_ready() noexcept {
                         deadline_ns_ + static_cast<std::int64_t>(expiries - 1) * kTickNs;
                     std::int64_t jit = t_wake_ - latest;
                     if (jit < 0) jit = 0;
-                    stats_->tick_jitter.record(std::chrono::nanoseconds{jit});
-                    if (round_timer_ != nullptr) round_timer_->wake(jit, expiries - 1);
+                    latency_.tick_jitter.record(std::chrono::nanoseconds{jit});
+                    if (round_timer_) round_timer_->wake(jit, expiries - 1);
                     deadline_ns_ = latest + kTickNs;
                     tick_count_ += expiries;
                     swept_ = true;
@@ -365,16 +366,16 @@ bool Executive::dispatch_ready() noexcept {
 bool Executive::take_stop() noexcept { return !fault_ || stop_seen_.take(wake_); }
 
 void Executive::service_round() noexcept {
-    if (round_timer_ != nullptr) round_timer_->mark(RoundSegment::Steps, 0, now_ns());
+    if (round_timer_) round_timer_->mark(RoundSegment::Steps, 0, now_ns());
     if (!bound_in_round_) service_round(swept_, t_wake_);
 }
 
 void Executive::end_round(bool wrote) noexcept {
-    if (round_timer_ != nullptr) (void)round_timer_->end(wrote ? now_ns() : 0);
+    if (round_timer_) (void)round_timer_->end(wrote ? now_ns() : 0);
 }
 
 void Executive::settle() noexcept {
-    if (round_timer_ != nullptr) round_timer_->flush(now_ns());
+    if (round_timer_) round_timer_->flush(now_ns());
 
     itimerspec disarm{};
     [[maybe_unused]] int r = ::timerfd_settime(tick_fd_.get(), 0, &disarm, nullptr);
@@ -442,7 +443,7 @@ void Executive::service_round(bool swept, std::int64_t wake_ns) {
 }
 
 void Executive::run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment seg) {
-    if (core_state_ == nullptr) return;
+    if (!core_state_) return;
     const LinkDecoderDecl& s = services_[slot];
     if (!s.impl->active()) return;
 
@@ -462,10 +463,10 @@ void Executive::run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment
         claim_streak_[slot] = claim ? static_cast<std::uint8_t>(claim_streak_[slot] + 1u) : 0u;
     }
     const std::int64_t t_done = now_ns();
-    if (round_timer_ != nullptr) round_timer_->mark(seg, slot, t_done);
+    if (round_timer_) round_timer_->mark(seg, slot, t_done);
     std::int64_t d = t_done - wake_ns;
     if (d < 0) d = 0;
-    stats_->service_latency[slot].record(std::chrono::nanoseconds{d});
+    latency_.service_latency[slot].record(std::chrono::nanoseconds{d});
 
     if (s.period_ms != 0) {
         const std::int64_t budget_ns = static_cast<std::int64_t>(s.period_ms) * 1'000'000;
@@ -474,7 +475,7 @@ void Executive::run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment
                 stats_->deadline_miss[slot].add();
             }
 
-            if (log_lane_ != nullptr) {
+            if (log_lane_) {
                 const std::int64_t over = d - budget_ns;
                 const std::uint32_t over_sat = over > static_cast<std::int64_t>(0xFFFFFFFFu)
                                                    ? 0xFFFFFFFFu

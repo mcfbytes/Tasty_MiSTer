@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 
 #include "app/replay_ring.h"
 #include "app/rt_park.h"
@@ -40,7 +41,7 @@ public:
         infra::OptRef<CoreFrameCounter> frames{};
         infra::OptRef<ScanoutRelay> scanout{};
         infra::OptRef<ReplayGate> replay{};
-        infra::OptRef<ReplayRing> replay_ring{};
+        ReplayRing::Receiver replay_ring{};
     };
 
     RtMain(reactor::Executive& exec, const hal::LinkTimingValues& timing, Wiring wiring) noexcept
@@ -48,8 +49,8 @@ public:
           timer_(wiring.timer), wire_(wiring.wire), park_(exec),
           replay_((wiring.replay && wiring.replay_ring) ? wiring.replay
                                                         : infra::OptRef<ReplayGate>{}),
-          replay_ring_(wiring.replay_ring), frames_(wiring.frames), scanout_(wiring.scanout),
-          round_budget_words_(timing.round_budget_words) {}
+          replay_ring_(std::move(wiring.replay_ring)), frames_(wiring.frames),
+          scanout_(wiring.scanout), round_budget_words_(timing.round_budget_words) {}
     RtMain(const RtMain&) = delete;
     RtMain& operator=(const RtMain&) = delete;
     RtMain(RtMain&&) = delete;
@@ -109,7 +110,7 @@ private:
     infra::OptRef<InputWire> wire_{};
     RtPark park_;
     infra::OptRef<ReplayGate> replay_{};
-    infra::OptRef<ReplayRing> replay_ring_{};
+    ReplayRing::Receiver replay_ring_{};
     infra::OptRef<CoreFrameCounter> frames_{};
     infra::OptRef<ScanoutRelay> scanout_{};
     bool stopping_ = false;

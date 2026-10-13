@@ -9,6 +9,7 @@
 
 #include "cores/button_override.h"
 #include "cores/cheat_records.h"
+#include "cores/core_adopt.h"
 #include "cores/core_profile.h"
 #include "cores/fio_cheat_sink.h"
 #include "cores/host_services.h"
@@ -53,7 +54,9 @@ public:
     Core(const Core&) = delete;
     Core& operator=(const Core&) = delete;
 
-    [[nodiscard]] Ex<void> init(proto::CoreSession& s);
+    [[nodiscard]] Ex<void> adopt(const CoreAdopt& a);
+
+    void retire() noexcept { do_retire(); }
 
     [[nodiscard]] Ex<std::optional<proto::StatusBit>> reset(const proto::ResetEdge& edge);
     [[nodiscard]] Ex<void> shutdown();
@@ -76,8 +79,6 @@ public:
     [[nodiscard]] Ex<void> apply_load_facts(std::span<const std::uint8_t> facts) {
         return on_apply_load_facts(facts);
     }
-
-    [[nodiscard]] std::string_view manifest_error() const noexcept { return on_manifest_error(); }
 
     [[nodiscard]] ButtonOverride button_override() const noexcept { return on_button_override(); }
     [[nodiscard]] IStagingCore* staging_core() noexcept { return on_staging_core(); }
@@ -126,7 +127,8 @@ protected:
     const HostServices& host() const noexcept { return host_; }
 
 private:
-    [[nodiscard]] virtual Ex<void> do_init(proto::CoreSession& s) = 0;
+    [[nodiscard]] virtual Ex<void> do_adopt(const CoreAdopt& a) = 0;
+    virtual void do_retire() noexcept {}
     [[nodiscard]] virtual Ex<void> do_reset() { return {}; }
     [[nodiscard]] virtual Ex<void> do_shutdown() { return {}; }
     [[nodiscard]] virtual Ex<void> on_mount(IoIndex, const MountedPath&) { return {}; }
@@ -142,7 +144,6 @@ private:
     [[nodiscard]] virtual Ex<void> on_apply_load_facts(std::span<const std::uint8_t>) {
         return unimplemented(ERR_SITE());
     }
-    [[nodiscard]] virtual std::string_view on_manifest_error() const noexcept { return {}; }
 
     [[nodiscard]] virtual ButtonOverride on_button_override() const noexcept { return {}; }
     [[nodiscard]] virtual IStagingCore* on_staging_core() noexcept { return nullptr; }
@@ -169,14 +170,14 @@ private:
     [[nodiscard]] virtual proto::IBlockGeometry* on_block_geometry() noexcept { return nullptr; }
     [[nodiscard]] virtual IWindowSave* on_window_save() noexcept { return nullptr; }
 
-    [[nodiscard]] Ex<void> pre_init_(proto::CoreSession& s);
+    [[nodiscard]] Ex<void> pre_adopt_(proto::CoreSession& s);
     [[nodiscard]] Ex<void> flush_dirty_state_();
 
     const CoreProfile* profile_;
     HostServices host_;
     proto::SpiImageSink spi_sink_;
     FioCheatSink fio_cheats_;
-    bool inited_ = false;
+    bool adopted_ = false;
 };
 
 [[nodiscard]] inline Core* bound_core(reactor::CoreState& st) noexcept {

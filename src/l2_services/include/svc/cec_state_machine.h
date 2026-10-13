@@ -29,7 +29,7 @@ class CecStateMachine {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    Ex<void> poll_deadline();
+    [[nodiscard]] Ex<void> poll_deadline();
     std::uint32_t max_rx_depth_seen() const noexcept { return max_rx_depth_; }
 
     explicit CecStateMachine(const adv7513::Io& io = adv7513::kUnboundIo) noexcept : io_(io) {}

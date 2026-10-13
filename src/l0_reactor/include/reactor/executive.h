@@ -13,6 +13,7 @@
 #include "infra/error.h"
 #include "infra/log_lane.h"
 #include "infra/opt_ref.h"
+#include "infra/rt_latency.h"
 #include "infra/rt_stats.h"
 #include "infra/unique_fd.h"
 #include "infra/wake_flag.h"
@@ -52,15 +53,15 @@ public:
     [[nodiscard]] static Ex<Executive> create(xthread::RtStats& stats, const Wiring& wiring);
     [[nodiscard]] static Ex<Executive> create(xthread::RtStats& stats);
 
-    Ex<void> bind(std::span<const LinkDecoderDecl> services, CoreState& state);
+    [[nodiscard]] Ex<void> bind(std::span<const LinkDecoderDecl> services, CoreState& state);
 
     [[nodiscard]] Ex<NotifierSlot> add_notifier(Notifier n);
 
     [[nodiscard]] Ex<void> remove_notifier(NotifierSlot slot);
 
-    Ex<void> add_fd(int fd);
+    [[nodiscard]] Ex<void> add_fd(int fd);
 
-    Ex<void> remove_fd(int fd);
+    [[nodiscard]] Ex<void> remove_fd(int fd);
 
     [[nodiscard]] Ex<void> enter() noexcept;
 
@@ -82,7 +83,11 @@ public:
 
     void kick();
 
+    [[nodiscard]] xthread::WakeFlag::Kicker kicker() noexcept { return wake_.kicker(); }
+
     std::size_t borrowed_high_water() const noexcept { return borrowed_count_; }
+
+    [[nodiscard]] const xthread::RtLatency& latency() const noexcept { return latency_; }
 
     std::size_t service_count() const noexcept { return service_count_; }
 
@@ -123,8 +128,7 @@ public:
 
 private:
     Executive(xthread::RtStats& stats, const Wiring& wiring)
-        : stats_(&stats), log_lane_(wiring.log_lane ? &*wiring.log_lane : nullptr),
-          round_timer_(wiring.round_timer ? &*wiring.round_timer : nullptr) {
+        : stats_(&stats), log_lane_(wiring.log_lane), round_timer_(wiring.round_timer) {
         for (auto& t : last_raise_)
             t = kNeverRaised;
         for (auto& t : line_raise_ms_)
@@ -140,6 +144,7 @@ private:
     void recompute_raise(Cause c) noexcept;
 
     xthread::RtStats* stats_;
+    xthread::RtLatency latency_{};
     UniqueFd epfd_;
     UniqueFd tick_fd_;
 
@@ -165,15 +170,15 @@ private:
     std::uint32_t fallbacks_total_ = 0;
     std::uint32_t retirements_total_ = 0;
     std::size_t service_count_ = 0;
-    CoreState* core_state_ = nullptr;
+    infra::OptRef<CoreState> core_state_;
     int borrowed_[kMaxBorrowedFds] = {};
 
     std::size_t borrowed_count_ = 0;
     std::uint64_t tick_count_ = 0;
     std::uint64_t round_count_ = 0;
     std::int64_t deadline_ns_ = 0;
-    xthread::LogLane* log_lane_ = nullptr;
-    RoundTimer* round_timer_ = nullptr;
+    infra::OptRef<xthread::LogLane> log_lane_;
+    infra::OptRef<RoundTimer> round_timer_;
     bool bound_in_round_ = false;
 
     bool fifo_this_round_ = false;

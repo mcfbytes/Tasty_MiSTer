@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/savestate_engine.h"
 
-#include <cstring>
 #include <utility>
 
 namespace mister::proto {
@@ -14,10 +13,6 @@ constexpr const char* kSlotNames[SaveStateEngine::kSlots] = {
     "savestate-2",
     "savestate-3",
 };
-
-bool word_aligned(const void* p) noexcept {
-    return (reinterpret_cast<std::uintptr_t>(p) & 0x3u) == 0u;
-}
 
 bool exceeds_four_slot_span(const SaveStateDecl& ss, hal::PhysRegion aperture) noexcept {
     const std::uint64_t span =
@@ -43,6 +38,11 @@ std::string compose_path(std::string_view subdir, std::string_view stem, unsigne
 }
 
 }  // namespace
+
+std::string SaveStateEngine::slot_file(std::string_view subdir, std::string_view stem,
+                                       unsigned digit) {
+    return compose_path(subdir, stem, digit);
+}
 
 bool SaveStateEngine::window_valid(const SaveStateDecl& ss) const noexcept {
     if (ss.size == 0u || ss.size > kMaxSlotBytes) return false;
@@ -86,8 +86,6 @@ std::string SaveStateEngine::savestate_path_stock(const SaveTarget& target) {
     return compose_path(subdir, savestate_stem(target.rom_path), 0u);
 }
 
-void SaveStateEngine::bind(const Environment& env) { env_ = env; }
-
 Ex<void> SaveStateEngine::arm(const SaveTarget& target) {
     const std::string_view subdir = target.arcade ? kArcadeSubdir : target.core_name;
     std::string stem = savestate_stem(target.rom_path);
@@ -114,49 +112,22 @@ std::string SaveStateEngine::path_for(unsigned slot) const {
     return compose_path(subdir_, stem_, slot + 1u);
 }
 
-hal::PhysRegion SaveStateEngine::region_for(const SaveStateDecl& ss, unsigned slot) const {
+hal::PhysRegion SaveStateEngine::region_for(const SaveStateDecl& ss, unsigned slot) {
 
     const hal::FabricAddr at{ss.base.v + static_cast<std::uint32_t>(slot) * ss.size};
     return hal::PhysRegion{hal::to_phys(at), static_cast<std::size_t>(ss.size), kSlotNames[slot]};
 }
 
 Ex<void> SaveStateEngine::map_slots(const SaveStateDecl& ss, bool remap) {
-    const bool borrowed = !env_.host_backing.empty();
-    if (borrowed) {
-        const std::size_t need = static_cast<std::size_t>(ss.size) * kSlots;
-
-        if (env_.host_backing.size() < need || (ss.size & 0x3u) != 0u ||
-            !word_aligned(env_.host_backing.data())) {
-            return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), ss.size});
-        }
-    }
-
     for (unsigned i = 0; i < kSlots; ++i) {
-        const hal::PhysRegion r = region_for(ss, i);
-        Ex<void> rc{};
-        if (borrowed) {
-            const auto back =
-                env_.host_backing.subspan(static_cast<std::size_t>(i) * ss.size, ss.size);
-            if (remap && regions_[i]) {
-                rc = regions_[i]->rebind(back, r);
-            } else {
-                regions_[i] = hal::FpgaMemory::borrow(back, r);
-            }
-        } else if (remap && regions_[i]) {
-            rc = regions_[i]->rebind(r);
-        } else {
-            auto m = hal::FpgaMemory::map(r);
-            if (!m) {
-                rc = std::unexpected(m.error());
-            } else {
-                regions_[i] = std::move(*m);
-            }
-        }
-        if (!rc) {
+        if (remap) regions_[i].reset();
+        auto m = env_.map.map(region_for(ss, i));
+        if (!m) {
 
             drop_slots();
-            return rc;
+            return std::unexpected(m.error());
         }
+        regions_[i] = std::move(*m);
     }
     return {};
 }
@@ -171,33 +142,7 @@ void SaveStateEngine::drop_slots() noexcept {
     window_ = SaveStateDecl{};
 }
 
-Ex<void> SaveStateEngine::prime_slots() {
-    for (unsigned i = 0; i < kSlots; ++i) {
-        ss_cnt_[i] = kSentinel;
-
-        const auto win = regions_[i]->view(0, static_cast<std::size_t>(window_.size));
-
-        std::memset(win.data(), 0, win.size());
-
-        auto r = env_.files->read_all(path_for(i), win);
-        if (!r && r.error().code == Errc::not_found && i == 0u) {
-
-            r = env_.files->read_all(compose_path(subdir_, stem_, 0u), win);
-        }
-        if (!r && r.error().code != Errc::not_found) {
-
-            ++load_failures_;
-        }
-
-        regions_[i]->store_release(kCounterWord, kSentinel);
-    }
-    return {};
-}
-
 Ex<void> SaveStateEngine::attach(const SaveStateDecl& ss) {
-    if (env_.files == nullptr || env_.clock == nullptr) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    }
     if (!armed_) {
 
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 1});
@@ -215,14 +160,13 @@ Ex<void> SaveStateEngine::attach(const SaveStateDecl& ss) {
     if (auto m = map_slots(ss, mapped_); !m) return m;
     window_ = ss;
     mapped_ = true;
+    for (auto& c : ss_cnt_)
+        c = kSentinel;
     ever_attached_ = true;
-    return prime_slots();
+    return {};
 }
 
 Ex<void> SaveStateEngine::rebind(const SaveStateDecl& ss) {
-    if (env_.files == nullptr || env_.clock == nullptr) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    }
     if (!ever_attached_) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 2});
     }
@@ -234,7 +178,9 @@ Ex<void> SaveStateEngine::rebind(const SaveStateDecl& ss) {
     if (auto m = map_slots(ss, mapped_); !m) return m;
     window_ = ss;
     mapped_ = true;
-    return prime_slots();
+    for (auto& c : ss_cnt_)
+        c = kSentinel;
+    return {};
 }
 
 Ex<void> SaveStateEngine::scan_slots() {
@@ -253,12 +199,13 @@ Ex<void> SaveStateEngine::scan_slots() {
         const std::uint64_t bytes = (std::uint64_t{dwords} + 2u) * 4u;
         if (bytes > std::uint64_t{window_.size}) continue;
 
-        if (env_.save_toast != nullptr) env_.save_toast->on_save(i);
+        if (env_.toast) env_.toast->on_save(i);
 
         const auto payload = mem.view(0, static_cast<std::size_t>(bytes));
-        auto w = env_.files->write_all_sync(path_for(i), payload);
+        auto w = env_.files.write_all_sync(path_for(i), payload);
         if (!w) {
 
+            ++write_failures_;
             if (!first_error) first_error = w.error();
             continue;
         }
@@ -271,11 +218,8 @@ Ex<void> SaveStateEngine::scan_slots() {
 
 Ex<void> SaveStateEngine::poll() {
     if (!mapped_ || !armed_) return {};
-    if (env_.clock == nullptr || env_.files == nullptr) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    }
 
-    const auto now = env_.clock->now();
+    const auto now = env_.clock.now();
     if (next_scan_ && now < *next_scan_) return {};
     next_scan_ = now + kScanPeriod;
 
@@ -285,7 +229,7 @@ Ex<void> SaveStateEngine::poll() {
 Ex<void> SaveStateEngine::detach() {
     Ex<void> result{};
 
-    if (mapped_ && armed_ && env_.files != nullptr) result = scan_slots();
+    if (mapped_ && armed_) result = scan_slots();
 
     drop_slots();
     armed_ = false;

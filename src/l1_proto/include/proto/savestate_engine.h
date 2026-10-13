@@ -10,6 +10,8 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
+#include "infra/seat.h"
 #include "os/clock.h"
 #include "hal/fpga_memory.h"
 #include "hal/phys_region.h"
@@ -18,12 +20,12 @@
 namespace mister::proto {
 
 class SaveStateEngine {
+    TASTY_SEAT_EXEMPT(component);
+
 public:
     static constexpr unsigned kSlots = 4;
 
     static constexpr std::uint32_t kMaxSlotBytes = 128u * 1024u * 1024u;
-
-    explicit SaveStateEngine(hal::PhysRegion aperture) noexcept : aperture_(aperture) {}
 
     static constexpr std::size_t kHeaderBytes = 8;
     static constexpr std::uint32_t kCounterWord = 0;
@@ -41,9 +43,11 @@ public:
     public:
         virtual ~ISaveStateFiles() = default;
 
-        virtual Ex<std::size_t> read_all(std::string_view path, std::span<std::byte> dst) = 0;
+        [[nodiscard]] virtual Ex<std::size_t> read_at(std::string_view path, std::uint64_t offset,
+                                                      std::span<std::byte> dst) = 0;
 
-        virtual Ex<void> write_all_sync(std::string_view path, std::span<const std::byte> src) = 0;
+        [[nodiscard]] virtual Ex<void> write_all_sync(std::string_view path,
+                                                      std::span<const std::byte> src) = 0;
 
     protected:
         ISaveStateFiles() = default;
@@ -63,34 +67,49 @@ public:
         ISaveToast& operator=(const ISaveToast&) = default;
     };
 
-    struct Environment {
-        ISaveStateFiles* files = nullptr;
-        const os::IClock* clock = nullptr;
+    class ISlotMap {
+    public:
+        virtual ~ISlotMap() = default;
 
-        ISaveToast* save_toast = nullptr;
+        [[nodiscard]] virtual Ex<hal::FpgaMemory> map(const hal::PhysRegion& r) = 0;
 
-        std::span<std::byte> host_backing{};
+    protected:
+        ISlotMap() = default;
+        ISlotMap(const ISlotMap&) = default;
+        ISlotMap& operator=(const ISlotMap&) = default;
     };
 
+    struct Environment {
+        TASTY_SEAT_EXEMPT(component);
+        ISaveStateFiles& files;
+        const os::IClock& clock;
+        ISlotMap& map;
+        infra::OptRef<ISaveToast> toast{};
+    };
+
+    SaveStateEngine(hal::PhysRegion aperture, const Environment& env) noexcept
+        : aperture_(aperture), env_(env) {}
+    SaveStateEngine(const SaveStateEngine&) = delete;
+    SaveStateEngine& operator=(const SaveStateEngine&) = delete;
+
     struct SaveTarget {
+        TASTY_SEAT_EXEMPT(component);
         std::string_view core_name;
         std::string_view rom_path;
         bool arcade = false;
     };
 
-    void bind(const Environment& env);
-
-    Ex<void> arm(const SaveTarget& target);
+    [[nodiscard]] Ex<void> arm(const SaveTarget& target);
     void disarm() noexcept;
     bool armed() const noexcept { return armed_; }
 
-    Ex<void> attach(const SaveStateDecl& ss);
+    [[nodiscard]] Ex<void> attach(const SaveStateDecl& ss);
 
-    Ex<void> rebind(const SaveStateDecl& ss);
+    [[nodiscard]] Ex<void> rebind(const SaveStateDecl& ss);
 
-    Ex<void> poll();
+    [[nodiscard]] Ex<void> poll();
 
-    Ex<void> detach();
+    [[nodiscard]] Ex<void> detach();
 
     bool window_valid(const SaveStateDecl& ss) const noexcept;
 
@@ -99,26 +118,27 @@ public:
     static std::string savestate_path(const SaveTarget& target, unsigned slot);
     static std::string savestate_path_stock(const SaveTarget& target);
 
+    static hal::PhysRegion region_for(const SaveStateDecl& ss, unsigned slot);
+    static std::string slot_file(std::string_view subdir, std::string_view stem, unsigned digit);
+
     bool mapped() const noexcept { return mapped_; }
     const SaveStateDecl& window() const noexcept { return window_; }
     std::uint32_t shadow_counter(unsigned slot) const;
     unsigned saves_written() const noexcept { return saves_written_; }
-    unsigned load_failures() const noexcept { return load_failures_; }
+    unsigned write_failures() const noexcept { return write_failures_; }
 
     std::uint32_t span_warnings() const noexcept { return span_warnings_; }
 
     hal::PhysRegion aperture() const noexcept { return aperture_; }
 
 private:
-    Ex<void> map_slots(const SaveStateDecl& ss, bool remap);
-    Ex<void> prime_slots();
-    Ex<void> scan_slots();
+    [[nodiscard]] Ex<void> map_slots(const SaveStateDecl& ss, bool remap);
+    [[nodiscard]] Ex<void> scan_slots();
     void drop_slots() noexcept;
     std::string path_for(unsigned slot) const;
-    hal::PhysRegion region_for(const SaveStateDecl& ss, unsigned slot) const;
 
     hal::PhysRegion aperture_;
-    Environment env_{};
+    Environment env_;
     SaveStateDecl window_{};
 
     std::optional<hal::FpgaMemory> regions_[kSlots];
@@ -133,7 +153,7 @@ private:
 
     std::optional<std::chrono::nanoseconds> next_scan_;
     unsigned saves_written_ = 0;
-    unsigned load_failures_ = 0;
+    unsigned write_failures_ = 0;
     std::uint32_t span_warnings_ = 0;
 };
 

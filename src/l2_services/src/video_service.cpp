@@ -24,8 +24,8 @@ namespace mister::svc {
 
 namespace {
 
-bool parse_u32_base0(std::string_view s, std::uint32_t& out) {
-    if (s.empty()) return false;
+std::optional<std::uint32_t> parse_u32_base0(std::string_view s) {
+    if (s.empty()) return std::nullopt;
     int base = 10;
     if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
         base = 16;
@@ -36,16 +36,20 @@ bool parse_u32_base0(std::string_view s, std::uint32_t& out) {
     }
     const auto* first = s.data();
     const auto* last = s.data() + s.size();
+    std::uint32_t out = 0;
     auto [ptr, ec] = std::from_chars(first, last, out, base);
-    return ec == std::errc{} && ptr == last;
+    if (ec != std::errc{} || ptr != last) return std::nullopt;
+    return out;
 }
 
-bool parse_double_all(std::string_view s, double& out) {
-    if (s.empty()) return false;
+std::optional<double> parse_double_all(std::string_view s) {
+    if (s.empty()) return std::nullopt;
     const auto* first = s.data();
     const auto* last = s.data() + s.size();
+    double out = 0.0;
     auto [ptr, ec] = std::from_chars(first, last, out);
-    return ec == std::errc{} && ptr == last;
+    if (ec != std::errc{} || ptr != last) return std::nullopt;
+    return out;
 }
 
 std::int64_t strtoull_prefix(std::string_view s) {
@@ -96,19 +100,24 @@ bool iequals(std::string_view a, std::string_view b) {
 
 constexpr std::size_t kMaxTokens = 32;
 
-std::size_t tokenize_commas(std::string_view s, std::array<std::string_view, kMaxTokens>& out) {
-    std::size_t n = 0;
+struct TokenList {
+    std::array<std::string_view, kMaxTokens> items{};
+    std::size_t count = 0;
+};
+
+TokenList tokenize_commas(std::string_view s) {
+    TokenList out{};
     std::size_t i = 0;
-    while (i < s.size() && n < kMaxTokens) {
+    while (i < s.size() && out.count < kMaxTokens) {
         while (i < s.size() && s[i] == ',')
             ++i;
         if (i >= s.size()) break;
         const std::size_t start = i;
         while (i < s.size() && s[i] != ',')
             ++i;
-        out[n++] = s.substr(start, i - start);
+        out.items[out.count++] = s.substr(start, i - start);
     }
-    return n;
+    return out;
 }
 
 std::unexpected<Error> err(Errc c, std::uint16_t site, std::uint32_t detail = 0) {
@@ -886,8 +895,7 @@ Ex<void> CecStateMachine::poll_deadline() {
     return {};
 }
 
-VideoService::VideoService(Wiring w) noexcept
-    : sink_(w.sink ? &*w.sink : nullptr), sampler_(w.sampler ? &*w.sampler : nullptr) {}
+VideoService::VideoService(Wiring w) noexcept : sink_(w.sink), sampler_(w.sampler) {}
 
 VideoService VideoService::create(Wiring w) { return VideoService(w); }
 VideoService VideoService::create() { return VideoService(Wiring{}); }
@@ -897,8 +905,8 @@ Ex<VideoService::ParsedMode> VideoService::parse_mode(std::string_view spec) con
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
-    std::array<std::string_view, kMaxTokens> tokens{};
-    const std::size_t token_cnt = tokenize_commas(spec, tokens);
+    const TokenList tokens = tokenize_commas(spec);
+    const std::size_t token_cnt = tokens.count;
     if (token_cnt == 0) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
@@ -907,11 +915,16 @@ Ex<VideoService::ParsedMode> VideoService::parse_mode(std::string_view spec) con
     double valf = 0.0;
     std::size_t cnt = 0;
     for (; cnt < token_cnt; ++cnt) {
-        if (!parse_u32_base0(tokens[cnt], val[cnt])) break;
+        const auto parsed = parse_u32_base0(tokens.items[cnt]);
+        if (!parsed) break;
+        val[cnt] = *parsed;
     }
 
     if (cnt == 2 && token_cnt > 2) {
-        if (parse_double_all(tokens[cnt], valf)) ++cnt;
+        if (const auto parsed = parse_double_all(tokens.items[cnt])) {
+            valf = *parsed;
+            ++cnt;
+        }
     }
 
     ParsedMode out{};
@@ -919,7 +932,7 @@ Ex<VideoService::ParsedMode> VideoService::parse_mode(std::string_view spec) con
     m.rb = 1;
 
     for (std::size_t i = cnt; i < token_cnt; ++i) {
-        const std::string_view flag = tokens[i];
+        const std::string_view flag = tokens.items[i];
         if (iequals(flag, "+vsync"))
             m.vpol = true;
         else if (iequals(flag, "-vsync"))
@@ -1060,23 +1073,21 @@ VideoService::StoredMode VideoService::preset_fallback(bool support_fhd, bool su
     return out;
 }
 
-Ex<void> VideoService::apply(const Modeline& m) {
+Ex<void> VideoService::apply(const Modeline& m, PllBlock pll, Modeline::WireOptions opt) {
 
-    if (sink_ == nullptr) return err(Errc::negotiation, ERR_SITE());
+    if (!sink_) return err(Errc::negotiation, ERR_SITE());
 
     if (m.fpix_mhz > 0.0) {
         auto p = pll::solve(m.fpix_mhz);
         if (!p) {
             return err(Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(m.fpix_mhz));
         }
-        pll_ = pll::block(*p);
+        pll = pll::block(*p);
     }
-
-    Modeline::WireOptions opt = wire_opt_;
 
     opt.vsync_align = opt.vsync_align && (m.fpix_mhz > 0.0);
 
-    const std::array<std::uint16_t, 26> words = m.to_wire(pll_, opt);
+    const std::array<std::uint16_t, 26> words = m.to_wire(pll, opt);
     return sink_->publish(kUioSetVideo, std::span<const std::uint16_t>(words.data(), words.size()));
 }
 
@@ -1102,7 +1113,7 @@ void VideoService::set_filter_slots(std::span<const bool> enabled) noexcept {
 
 Ex<void> VideoService::poll_resolution() {
 
-    if (sampler_ == nullptr) return err(Errc::negotiation, ERR_SITE());
+    if (!sampler_) return err(Errc::negotiation, ERR_SITE());
 
     const bool force = force_next_;
     auto s = sampler_->sample(force);
@@ -1281,8 +1292,8 @@ Ex<void> VideoService::request_power(bool on) {
     return {};
 }
 
-Ex<void> emit_video_words(hal::ISpiTransport& link, std::uint8_t opcode,
-                          std::span<const std::uint16_t> words) {
+[[nodiscard]] Ex<void> emit_video_words(hal::ISpiTransport& link, std::uint8_t opcode,
+                                        std::span<const std::uint16_t> words) {
     if (words.empty() || words.size() > kVideoWireWords) {
         return err(Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size()));
     }
@@ -1301,13 +1312,13 @@ Ex<void> emit_video_words(hal::ISpiTransport& link, std::uint8_t opcode,
 
 namespace {
 
-inline Ex<std::uint16_t> read_word(hal::ISpiTransport& link) {
+[[nodiscard]] inline Ex<std::uint16_t> read_word(hal::ISpiTransport& link) {
     auto r = link.transfer(hal::SpiWord{0});
     if (!r) return std::unexpected(r.error());
     return r->v;
 }
 
-inline Ex<std::uint32_t> read_dword(hal::ISpiTransport& link) {
+[[nodiscard]] inline Ex<std::uint32_t> read_dword(hal::ISpiTransport& link) {
     auto lo = read_word(link);
     if (!lo) return std::unexpected(lo.error());
     auto hi = read_word(link);
@@ -1315,7 +1326,8 @@ inline Ex<std::uint32_t> read_dword(hal::ISpiTransport& link) {
     return static_cast<std::uint32_t>(*lo) | (static_cast<std::uint32_t>(*hi) << 16);
 }
 
-inline Ex<void> write_bytes(hal::ISpiTransport& link, std::span<const std::uint8_t> b) {
+[[nodiscard]] inline Ex<void> write_bytes(hal::ISpiTransport& link,
+                                          std::span<const std::uint8_t> b) {
     for (const std::uint8_t byte : b) {
         auto r = link.transfer(hal::SpiWord{byte});
         if (!r) return std::unexpected(r.error());
@@ -1325,7 +1337,7 @@ inline Ex<void> write_bytes(hal::ISpiTransport& link, std::span<const std::uint8
 
 }  // namespace
 
-Ex<std::uint16_t> emit_fbuf(hal::ISpiTransport& link, std::uint16_t word) {
+[[nodiscard]] Ex<std::uint16_t> emit_fbuf(hal::ISpiTransport& link, std::uint16_t word) {
     hal::Selected cs(link, hal::ChipSelect::Io);
 
     auto op = link.transfer(hal::SpiWord{kUioSetFbuf});
@@ -1337,7 +1349,8 @@ Ex<std::uint16_t> emit_fbuf(hal::ISpiTransport& link, std::uint16_t word) {
     return op->v;
 }
 
-Ex<void> emit_ar_custom(hal::ISpiTransport& link, std::span<const std::uint16_t> words) {
+[[nodiscard]] Ex<void> emit_ar_custom(hal::ISpiTransport& link,
+                                      std::span<const std::uint16_t> words) {
     if (words.size() != 4) {
         return err(Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size()));
     }
@@ -1353,7 +1366,7 @@ Ex<void> emit_ar_custom(hal::ISpiTransport& link, std::span<const std::uint16_t>
     return {};
 }
 
-Ex<std::uint16_t> emit_filter_mode(hal::ISpiTransport& link, std::uint8_t mode) {
+[[nodiscard]] Ex<std::uint16_t> emit_filter_mode(hal::ISpiTransport& link, std::uint8_t mode) {
     hal::Selected cs(link, hal::ChipSelect::Io);
     auto op = link.transfer(hal::SpiWord{kUioSetFltNum});
     if (!op) return std::unexpected(op.error());
@@ -1367,7 +1380,8 @@ Ex<std::uint16_t> emit_filter_mode(hal::ISpiTransport& link, std::uint8_t mode) 
     return op->v;
 }
 
-Ex<void> emit_filter_coeff_chunk(hal::ISpiTransport& link, std::span<const std::uint16_t> chunk) {
+[[nodiscard]] Ex<void> emit_filter_coeff_chunk(hal::ISpiTransport& link,
+                                               std::span<const std::uint16_t> chunk) {
 
     if (chunk.size() > kFilterCoeffWords) {
         return err(Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(chunk.size()));
@@ -1384,7 +1398,8 @@ Ex<void> emit_filter_coeff_chunk(hal::ISpiTransport& link, std::span<const std::
     return {};
 }
 
-Ex<std::uint16_t> emit_shadow_mask(hal::ISpiTransport& link, std::uint16_t flag_word) {
+[[nodiscard]] Ex<std::uint16_t> emit_shadow_mask(hal::ISpiTransport& link,
+                                                 std::uint16_t flag_word) {
     hal::Selected cs(link, hal::ChipSelect::Io);
     auto op = link.transfer(hal::SpiWord{kUioShadowMask});
     if (!op) return std::unexpected(op.error());
@@ -1400,14 +1415,14 @@ Ex<std::uint16_t> emit_shadow_mask(hal::ISpiTransport& link, std::uint16_t flag_
     return op->v;
 }
 
-Ex<std::uint16_t> emit_hdmi_int_probe(hal::ISpiTransport& link) {
+[[nodiscard]] Ex<std::uint16_t> emit_hdmi_int_probe(hal::ISpiTransport& link) {
     hal::Selected cs(link, hal::ChipSelect::Io);
     auto op = link.transfer(hal::SpiWord{kUioHdmiInt});
     if (!op) return std::unexpected(op.error());
     return op->v;
 }
 
-Ex<std::uint16_t> emit_gamma_probe(hal::ISpiTransport& link) {
+[[nodiscard]] Ex<std::uint16_t> emit_gamma_probe(hal::ISpiTransport& link) {
     hal::Selected cs(link, hal::ChipSelect::Io);
     auto op = link.transfer(hal::SpiWord{kUioSetGamma});
     if (!op) return std::unexpected(op.error());
@@ -1444,8 +1459,8 @@ ScalingWords scaling_words(const VideoSample& s, const ScalingPolicy& pol) noexc
     return out;
 }
 
-Ex<GeometryPass> sample_video_geometry(hal::ISpiTransport& link, bool force, GeometryGate& gate,
-                                       IFilterResend* filters) {
+[[nodiscard]] Ex<GeometryPass> sample_video_geometry(hal::ISpiTransport& link, bool force,
+                                                     GeometryGate& gate, IFilterResend* filters) {
     GeometryPass pass{};
     pass.sample = gate.last;
 
@@ -1468,28 +1483,37 @@ Ex<GeometryPass> sample_video_geometry(hal::ISpiTransport& link, bool force, Geo
         commit_res = *res;
         if (pass.res_changed || force) {
             if (pass.res_changed) commit_vi_seen = true;
-            auto w32 = [&](std::uint32_t& dst) -> Ex<void> {
-                auto v = read_dword(link);
-                if (!v) return std::unexpected(v.error());
-                dst = *v;
-                return {};
-            };
-            auto w16 = [&](std::uint16_t& dst) -> Ex<void> {
-                auto v = read_word(link);
-                if (!v) return std::unexpected(v.error());
-                dst = *v;
-                return {};
-            };
-            if (auto r = w32(pass.sample.width); !r) return std::unexpected(r.error());
-            if (auto r = w32(pass.sample.height); !r) return std::unexpected(r.error());
-            if (auto r = w32(pass.sample.htime); !r) return std::unexpected(r.error());
-            if (auto r = w32(pass.sample.vtime); !r) return std::unexpected(r.error());
-            if (auto r = w32(pass.sample.ptime); !r) return std::unexpected(r.error());
-            if (auto r = w32(pass.sample.vtimeh); !r) return std::unexpected(r.error());
-            if (auto r = w32(pass.sample.ctime); !r) return std::unexpected(r.error());
-            if (auto r = w16(pass.sample.pixrep); !r) return std::unexpected(r.error());
-            if (auto r = w16(pass.sample.de_h); !r) return std::unexpected(r.error());
-            if (auto r = w16(pass.sample.de_v); !r) return std::unexpected(r.error());
+
+            auto width = read_dword(link);
+            if (!width) return std::unexpected(width.error());
+            pass.sample.width = *width;
+            auto height = read_dword(link);
+            if (!height) return std::unexpected(height.error());
+            pass.sample.height = *height;
+            auto htime = read_dword(link);
+            if (!htime) return std::unexpected(htime.error());
+            pass.sample.htime = *htime;
+            auto vtime = read_dword(link);
+            if (!vtime) return std::unexpected(vtime.error());
+            pass.sample.vtime = *vtime;
+            auto ptime = read_dword(link);
+            if (!ptime) return std::unexpected(ptime.error());
+            pass.sample.ptime = *ptime;
+            auto vtimeh = read_dword(link);
+            if (!vtimeh) return std::unexpected(vtimeh.error());
+            pass.sample.vtimeh = *vtimeh;
+            auto ctime = read_dword(link);
+            if (!ctime) return std::unexpected(ctime.error());
+            pass.sample.ctime = *ctime;
+            auto pixrep = read_word(link);
+            if (!pixrep) return std::unexpected(pixrep.error());
+            pass.sample.pixrep = *pixrep;
+            auto de_h = read_word(link);
+            if (!de_h) return std::unexpected(de_h.error());
+            pass.sample.de_h = *de_h;
+            auto de_v = read_word(link);
+            if (!de_v) return std::unexpected(de_v.error());
+            pass.sample.de_v = *de_v;
 
             auto fc_lo = read_word(link);
             if (!fc_lo) return std::unexpected(fc_lo.error());
@@ -1510,17 +1534,21 @@ Ex<GeometryPass> sample_video_geometry(hal::ISpiTransport& link, bool force, Geo
         commit_fb_crc = crc;
         pass.sample.fb_crc = crc;
         if (pass.fb_changed || force || pass.res_changed) {
-            auto w16 = [&](std::uint16_t& dst) -> Ex<void> {
-                auto v = read_word(link);
-                if (!v) return std::unexpected(v.error());
-                dst = *v;
-                return {};
-            };
-            if (auto r = w16(pass.sample.arx_raw); !r) return std::unexpected(r.error());
-            if (auto r = w16(pass.sample.ary_raw); !r) return std::unexpected(r.error());
-            if (auto r = w16(pass.sample.fb_fmt); !r) return std::unexpected(r.error());
-            if (auto r = w16(pass.sample.fb_width); !r) return std::unexpected(r.error());
-            if (auto r = w16(pass.sample.fb_height); !r) return std::unexpected(r.error());
+            auto arx_raw = read_word(link);
+            if (!arx_raw) return std::unexpected(arx_raw.error());
+            pass.sample.arx_raw = *arx_raw;
+            auto ary_raw = read_word(link);
+            if (!ary_raw) return std::unexpected(ary_raw.error());
+            pass.sample.ary_raw = *ary_raw;
+            auto fb_fmt = read_word(link);
+            if (!fb_fmt) return std::unexpected(fb_fmt.error());
+            pass.sample.fb_fmt = *fb_fmt;
+            auto fb_width = read_word(link);
+            if (!fb_width) return std::unexpected(fb_width.error());
+            pass.sample.fb_width = *fb_width;
+            auto fb_height = read_word(link);
+            if (!fb_height) return std::unexpected(fb_height.error());
+            pass.sample.fb_height = *fb_height;
         }
     }
 

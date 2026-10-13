@@ -67,7 +67,7 @@ RecPath RecorderControl::resolve(std::string_view arg, std::string_view root, st
 bool RecorderControl::publish_(RecOp op, std::string_view path, RecMode mode,
                                RecOptions opt) noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    if (w_.control == nullptr) return false;
+    if (!w_.control) return false;
     RecControl c{};
     c.gen = ++gen_;
     if (gen_ == 0) c.gen = gen_ = 1;
@@ -76,13 +76,13 @@ bool RecorderControl::publish_(RecOp op, std::string_view path, RecMode mode,
     c.opt = opt;
     (void)c.path.assign(path);
     w_.control->publish(c);
-    if (w_.capture_wake != nullptr) w_.capture_wake->kick();
+    if (w_.capture_wake) w_.capture_wake->kick();
     return true;
 }
 
 std::string RecorderControl::name_() const {
     std::string name = "rec";
-    if (w_.identity != nullptr) {
+    if (w_.identity) {
 
         auto id = std::make_unique<SessionIdentity>();
         if (w_.identity->copy(*id) && id->core[0] != '\0') name = id->core;
@@ -98,8 +98,7 @@ bool RecorderControl::request_(RecOp op, std::string_view path, RecMode mode,
                                RecOptions opt) noexcept {
     const RecPath p = resolve(path, w_.root, name_(), std::time(nullptr));
     if (p.empty()) {
-        if (w_.diag != nullptr)
-            w_.diag->appendf("{\"t\":\"rec\",\"k\":\"refused\",\"why\":\"path\"}");
+        if (w_.diag) w_.diag->appendf("{\"t\":\"rec\",\"k\":\"refused\",\"why\":\"path\"}");
         return true;
     }
     (void)publish_(op, p.view(), mode, opt);
@@ -130,10 +129,10 @@ bool RecorderControl::take_disarm() noexcept {
 
 void RecorderControl::tick() noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    if (w_.status == nullptr) return;
+    if (!w_.status) return;
     RecorderStatus s{};
     if (!status_seen_.take_if_changed(*w_.status, s)) return;
-    if (w_.diag == nullptr) return;
+    if (!w_.diag) return;
     if (s.verdict != RecVerdict::None && s.answered != logged_answer_) {
         logged_answer_ = s.answered;
         const char* remedy = rec_verdict_remedy(s.verdict);
@@ -148,7 +147,7 @@ void RecorderControl::tick() noexcept {
     if (s.end != RecVerdict::None && s.gen != logged_end_) {
         logged_end_ = s.gen;
         RecWriteStatus ws{};
-        if (w_.writer != nullptr) (void)w_.writer->sample_into(ws);
+        if (w_.writer) (void)w_.writer->sample_into(ws);
         w_.diag->appendf("{\"t\":\"rec\",\"k\":\"end\",\"gen\":%u,\"why\":\"%s\",%s,\"werr\":%d}",
                          static_cast<unsigned>(s.gen), rec_verdict_name(s.end),
                          format_recorder_status(s).c_str(), static_cast<int>(ws.err));

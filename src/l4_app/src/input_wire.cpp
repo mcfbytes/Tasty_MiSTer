@@ -1,15 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/input_wire.h"
 
-#include "reactor/executive.h"
-
 namespace mister::app {
-
-bool InputWire::push_key(RawKeyEdge e) noexcept {
-    if (keys_.push(e)) return true;
-    note_key_drop(1u);
-    return false;
-}
 
 bool InputWire::push_ui_key(RawKeyEdge e) noexcept {
     if (ui_keys_.push(e)) {
@@ -18,12 +10,6 @@ bool InputWire::push_ui_key(RawKeyEdge e) noexcept {
     }
     bump(ui_keys_dropped_, 1u);
     return false;
-}
-
-bool InputWire::kick_rt() noexcept {
-    if (!arm_kick()) return false;
-    rt_exec_.kick();
-    return true;
 }
 
 Ex<void> InputWire::open_ctrl() noexcept {

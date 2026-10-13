@@ -43,7 +43,7 @@ public:
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
     [[nodiscard]] int park_ms() const noexcept { return feeder_.rest_ms(); }
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
-    [[nodiscard]] bool paused() noexcept { return pause_.observe(*this); }
+    [[nodiscard]] bool paused() noexcept { return pause_.observe(pause_seen_, *this); }
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
     void settle() noexcept;
 
@@ -58,6 +58,8 @@ public:
 private:
     [[nodiscard]] bool inboxes_empty_() const noexcept { return cmds_.empty(); }
 
+    std::uint32_t drain_() noexcept;
+
     void serve_mailbox_() noexcept;
     [[nodiscard]] bool mailbox_rest_() const noexcept;
 
@@ -68,6 +70,7 @@ private:
     xthread::WakeFlag stop_;
     PcmRingFeeder::Commands& cmds_;
     xthread::PauseLatch pause_;
+    xthread::PauseLatch::Observer pause_seen_{};
     std::uint32_t paused_cmd_drops_ = 0;
     xthread::SeatPark park_;
 };

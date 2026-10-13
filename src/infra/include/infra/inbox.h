@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/spsc_ring.h"
 #include "infra/wake_flag.h"
@@ -16,7 +17,7 @@ class Inbox {
     TASTY_SEAT_MEDIATOR(Any, Any);
 
 public:
-    explicit Inbox(BasicWakeFlag<Kick>& wake) noexcept : wake_(&wake) {}
+    explicit Inbox(BasicWakeFlag<Kick>& wake) noexcept : wake_(wake) {}
 
     explicit Inbox(Polled) noexcept {}
     Inbox(const Inbox&) = delete;
@@ -26,15 +27,15 @@ public:
 
     [[nodiscard]] bool push(const T& v) noexcept {
         if (!ring_.push(v)) return false;
-        if (wake_ != nullptr) wake_->kick_if_armed();
+        if (wake_) wake_->kick_if_armed();
         return true;
     }
 
     void kick_if_armed() noexcept {
-        if (wake_ != nullptr) wake_->kick_if_armed();
+        if (wake_) wake_->kick_if_armed();
     }
     void kick() noexcept {
-        if (wake_ != nullptr) wake_->kick();
+        if (wake_) wake_->kick();
     }
     [[nodiscard]] std::optional<T> pop() noexcept { return ring_.pop(); }
     [[nodiscard]] bool empty() const noexcept { return ring_.size() == 0; }
@@ -44,7 +45,7 @@ public:
     [[nodiscard]] std::uint32_t popped() const noexcept { return ring_.popped(); }
 
 private:
-    BasicWakeFlag<Kick>* wake_ = nullptr;
+    infra::OptRef<BasicWakeFlag<Kick>> wake_{};
     SpscRing<T, N> ring_{};
 };
 

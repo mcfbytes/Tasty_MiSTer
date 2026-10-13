@@ -9,6 +9,7 @@
 #include "app/conf_str_cell.h"
 #include "app/event.h"
 #include "app/mgl.h"
+#include "app/mgl_doc.h"
 #include "app/name_config.h"
 #include "app/path_text.h"
 #include "app/types.h"
@@ -83,6 +84,8 @@ public:
 
     [[nodiscard]] bool take_playlist(std::string_view path) noexcept;
 
+    [[nodiscard]] bool take_parsed(const Mgl& doc) noexcept;
+
     void tick();
 
     void on_core_loaded(CorrelationTag tag, bool mgl_capable);
@@ -123,6 +126,8 @@ private:
     void check_invariant() const noexcept;
 
     void begin_read();
+
+    [[nodiscard]] bool resolve_and_load(std::string_view want);
     void pump_advance();
     void abandon(InfoId id, Errc code);
 
@@ -174,6 +179,9 @@ private:
 
     std::uint32_t doc_len_ = 0;
     char doc_[kMglDocMax]{};
+
+    std::optional<Mgl> latched_doc_{};
+    std::optional<Mgl> armed_doc_{};
 
     CorrelationTag load_tag_{};
 

@@ -15,11 +15,11 @@ class Ps2Keyboard {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
-    Ex<void> key_event(HidUsage hid_usage, bool pressed);
+    [[nodiscard]] Ex<void> key_event(HidUsage hid_usage, bool pressed);
 
     [[nodiscard]] bool next_frame(Ps2Frame& out) noexcept;
 
-    Ex<void> accept_control(std::uint16_t word0);
+    [[nodiscard]] Ex<void> accept_control(std::uint16_t word0);
 
     void end_control() noexcept;
 

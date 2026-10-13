@@ -2,7 +2,9 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -100,6 +102,14 @@ public:
     }
 
     [[nodiscard]] std::string_view subfield(const Item& it, unsigned n) const noexcept;
+
+    [[nodiscard]] std::optional<std::size_t> info_row() const noexcept {
+        for (std::size_t i = 0; i < items_.size(); ++i) {
+            const std::string_view raw = text(items_[i].raw);
+            if (!raw.empty() && raw.front() == 'I') return i;
+        }
+        return std::nullopt;
+    }
 
     [[nodiscard]] std::uint32_t cond_overflows() const noexcept { return cond_overflows_; }
 

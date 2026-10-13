@@ -17,6 +17,7 @@ struct IrqBinding {
     reactor::Cause klass;
     os::UioLine line;
     hal::LwOffset cause_base;
+    friend constexpr bool operator==(const IrqBinding&, const IrqBinding&) = default;
 };
 
 }  // namespace mister::proto

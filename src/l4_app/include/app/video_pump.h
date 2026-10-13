@@ -253,7 +253,7 @@ private:
     };
 
     void note_i2c(I2cOutcome o) noexcept;
-    Ex<void> apply_now();
+    [[nodiscard]] Ex<void> apply_now();
 
     void resolve_families();
     FamilyMode resolve_one(std::string_view spec, bool count_fallback);
@@ -301,6 +301,8 @@ private:
     std::optional<svc::adv7513::Adv7513Bus> adv_{};
     svc::adv7513::ProbeReport probe_{};
     svc::adv7513::InitOptions init_opts_{};
+
+    svc::Modeline::WireOptions wire_opt_{};
 
     Stats stats_{};
 

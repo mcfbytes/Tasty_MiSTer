@@ -36,26 +36,29 @@ std::uint64_t mono_now_ns() noexcept {
 DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
     return DiagRecords{
         SessRecord{sources.pause_expiries, sources.recover_polls, sources.save_write_failures,
-                   sources.fallbacks},
-        RndRecord{sources.round_timing}, TasRecord{sources.replay},
+                   sources.fallbacks, sources.ini_write_failures},
+        BayRecord{sources.bay_counts},
+        RndRecord{sources.round_timing},
+        TasRecord{sources.replay},
         RecRecord{sources.rec_capture, sources.rec_encode, sources.rec_write, sources.rec_avi},
         HdRecord{sources.hd}};
 }
 
 }  // namespace
 
-DiagSampler::DiagSampler(xthread::RtStats& stats, app::EventQueue& events, const RtEvidence& ev,
+DiagSampler::DiagSampler(xthread::RtStats& stats, app::EventQueue& events,
+                         const xthread::Telemetry<RtEvidence, SeatTag::Unbound>& ev,
                          const xthread::WakeFlag& quiescing, const std::atomic<bool>& transitioning,
                          xthread::DiagLog& diag, xthread::LogLane& rt_lane,
                          const Sources& sources) noexcept
-    : stats_(stats), events_(events), ev_(ev), quiescing_(quiescing), transitioning_(transitioning),
-      video_wire_(sources.video_wire), frames_(sources.frames), shots_(sources.screenshots),
-      fifo_stats_(sources.fifo), mgl_stats_(sources.mgl), mgl_row0_(sources.mgl_row0),
-      window_counts_(sources.window_counts), video_stats_(sources.video_stats),
-      video_geo_(sources.video_geometry), diag_cell_(sources.diag),
-      doorbell_cell_(sources.doorbell), round_timing_(sources.round_timing),
-      ui_pages_(sources.ui_pages), diag_(diag), lane_rt_(rt_lane), records_(make_records(sources)) {
-}
+    : stats_(stats), events_(events), ev_cell_(ev), quiescing_(quiescing),
+      transitioning_(transitioning), video_wire_(sources.video_wire), frames_(sources.frames),
+      shots_(sources.screenshots), fifo_stats_(sources.fifo), mgl_stats_(sources.mgl),
+      mgl_row0_(sources.mgl_row0), window_counts_(sources.window_counts),
+      video_stats_(sources.video_stats), video_geo_(sources.video_geometry),
+      diag_cell_(sources.diag), doorbell_cell_(sources.doorbell),
+      round_timing_(sources.round_timing), ui_pages_(sources.ui_pages), diag_(diag),
+      lane_rt_(rt_lane), records_(make_records(sources)) {}
 
 void DiagSampler::sample(bool stopping) noexcept {
 
@@ -86,7 +89,7 @@ void DiagSampler::sample(bool stopping) noexcept {
         rss_over_now_ = over;
     }
 
-    if (prefetch_ != nullptr) {
+    if (prefetch_) {
         stats_.ring_drops[2].set(prefetch_->counters().drops);
     }
 
@@ -148,7 +151,7 @@ void DiagSampler::sample(bool stopping) noexcept {
         }
     }
 
-    if (input_build_ != nullptr) (void)input_build_->rebind_round();
+    if (input_build_) (void)input_build_->rebind_round();
 
     drain_screenshots();
 }
@@ -171,7 +174,7 @@ void DiagSampler::render_final() noexcept {
 void DiagSampler::drain_screenshots() noexcept {
     while (auto req = shots_.take()) {
         bool ok = false;
-        if (frame_src_ != nullptr) {
+        if (frame_src_) {
             if (auto frame = frame_src_->capture(req->scaled != 0); frame) {
                 const auto png = app::encode_png_rgb24(frame->width, frame->height, frame->rgb);
                 if (!png.empty()) {
@@ -260,7 +263,10 @@ void DiagSampler::on(const LogRec::DoorbellPolling& a, const LogRec::Head& h) no
 }
 static_assert(LogRecSink<DiagSampler>);
 
-void DiagSampler::misrouted(const LogRec&) noexcept { ++log_misrouted_; }
+void DiagSampler::misrouted(const LogRec&) noexcept {
+    TASTY_SEAT_BODY(DiagSampler);
+    ++log_misrouted_;
+}
 
 void DiagSampler::drain_log_lane() noexcept {
     for (std::size_t n = 0; n < xthread::kLogLaneCap; ++n) {
@@ -299,7 +305,7 @@ DiagSampler::CdInstruments DiagSampler::cd_instruments() const noexcept {
         else
             c.deadline_misses += n;
     }
-    if (prefetch_ != nullptr) {
+    if (prefetch_) {
         const svc::PrefetchCounters p = prefetch_->counters();
         c.prefetch_state = p.state;
         c.hits = p.hits;
@@ -328,6 +334,8 @@ unsigned DiagSampler::rt_name_mask() const noexcept {
 unsigned DiagSampler::rt_first_errno() const noexcept { return fw::rt_first_errno(ev_); }
 
 void DiagSampler::render_records(const char* reason) noexcept {
+
+    if (auto fresh = ev_reader_.take_if_changed(ev_cell_)) ev_ = *fresh;
 
     app::DiagCounters dc = diag_cell_.sample().value;
 
@@ -362,11 +370,10 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
     const app::DoorbellStats db = doorbell_cell_.sample().value;
     const std::uint32_t ev_lost_edge = events_.losses(app::Delivery::Edge);
     const std::uint32_t ev_lost = events_.losses(app::Delivery::Hint) + ev_lost_edge;
-    const app::CmdFifoStats fs =
-        (fifo_stats_ != nullptr) ? fifo_stats_->sample().value : app::CmdFifoStats{};
+    const app::CmdFifoStats fs = (fifo_stats_) ? fifo_stats_->sample().value : app::CmdFifoStats{};
     const CdInstruments cd = cd_instruments();
     const app::IFrameSource::Counts shot =
-        (frame_src_ != nullptr) ? frame_src_->counts() : app::IFrameSource::Counts{};
+        (frame_src_) ? frame_src_->counts() : app::IFrameSource::Counts{};
 
     const app::VideoPumpStats vs = video_stats_.sample().value;
     const app::VideoGeometryRecord gr = video_geo_.sample().value;
@@ -398,17 +405,17 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
     static_assert(kMaxServices - 1 == 23u);
     static_assert(reactor::kRoundLifecycleAll == 7u);
 
+    const bool have_input = input_.has_value();
+    const app::InputBuild::Counts build_counts =
+        (have_input && input_build_) ? input_build_->counts() : app::InputBuild::Counts{};
     const app::InputStats ips =
-        app::collect_input_stats((input_ != nullptr) ? *input_ : app::InputSample{});
-    const app::MglPumpStats ms =
-        (mgl_stats_ != nullptr) ? mgl_stats_->sample().value : app::MglPumpStats{};
+        app::collect_input_stats(have_input ? *input_ : app::InputSample{}, build_counts);
+    const app::MglPumpStats ms = (mgl_stats_) ? mgl_stats_->sample().value : app::MglPumpStats{};
     const std::uint32_t mgl_row0 = mgl_row0_.sample().value;
 
-    const app::UiPageRecord up =
-        (ui_pages_ != nullptr) ? ui_pages_->sample().value : app::UiPageRecord{};
+    const app::UiPageRecord up = (ui_pages_) ? ui_pages_->sample().value : app::UiPageRecord{};
 
-    const reactor::FrameRecord fr =
-        (frames_ != nullptr) ? frames_->sample().value : reactor::FrameRecord{};
+    const reactor::FrameRecord fr = (frames_) ? frames_->sample().value : reactor::FrameRecord{};
 
     const reactor::RoundTiming rnd = round_timing_.sample().value;
 
@@ -459,7 +466,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         dc.blk_stock, dc.blk_config, dc.blk_discarded, dc.blk_deferred, dc.blk_expired,
         dc.blk_blocks, dc.blk_pf_expired, dc.blk_staging_expired, dc.blk_stale,
 
-        db.declared, db.bound, db.refusals, db.fallbacks, db.retirements,
+        db.declared, db.bound, db.refusals, db.fallbacks, db.retirements, db.release_failures,
         static_cast<unsigned>(ev_.online_cpus < 0 ? 0 : ev_.online_cpus),
         static_cast<unsigned>(ev_.cpu_coverage.applied),
         static_cast<unsigned long long>(rt_evidence_mask()), rt_name_mask(), rt_first_errno(),
@@ -493,8 +500,10 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         static_cast<int>(dc.cd_drive_audio_lba), dc.cd_substitutes, dc.cd_subcode_substitutes,
         dc.cd_not_resident, cd.decode_us, cd.evictions, dc.cd_busy_ticks, dc.cd_egress_abandons,
 
-        up.depth, up.top_id, up.vis_publishes, up.cell_refusals, up.page_refusals, fr.seq,
-        shots_.drops(), shots_.result_drops(), shots_written_, shots_failed_,
+        up.depth, up.top_id, up.vis_publishes, up.cell_refusals, up.page_refusals, up.button_levels,
+        up.button_edges, up.button_longs, up.button_classic, up.button_injects,
+        up.button_core_resets, up.last_hold_ms, fr.seq, shots_.drops(), shots_.result_drops(),
+        shots_written_, shots_failed_,
 
         shot.captures, shot.refused, shot.torn, diag_.drops(), diag_.truncations());
 }

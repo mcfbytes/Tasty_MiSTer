@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "proto/types.h"
@@ -11,6 +12,14 @@ enum class CddaOrder : std::uint8_t { LittleEndian, BigEndian };
 
 using proto::JoyMask;
 using proto::PlayerIndex;
+
+inline constexpr unsigned kMaxPlayers = 6;
+
+struct RumblePadSet {
+    std::uint8_t players = 0;
+    std::array<std::uint32_t, kMaxPlayers> pads{};
+    friend constexpr bool operator==(const RumblePadSet&, const RumblePadSet&) = default;
+};
 
 struct TrackNumber {
     std::uint8_t v = 0;

@@ -74,7 +74,7 @@ void FrameCopier::serve() noexcept {
     TASTY_SEAT_BODY(FrameCopier);
     reap_();
     sample_control_();
-    std::int64_t now = w_.clock != nullptr ? w_.clock->now().count() : 0;
+    std::int64_t now = w_.clock.now().count();
     switch (st_.state) {
         case RecState::Idle:
             break;
@@ -99,24 +99,24 @@ void FrameCopier::serve() noexcept {
             close_step_();
             break;
     }
-    if (dirty_ && w_.status != nullptr) w_.status->publish(st_);
+    if (dirty_) w_.status.publish(st_);
     dirty_ = false;
 }
 
 bool FrameCopier::idle() const noexcept {
-    const bool control_moved = w_.control != nullptr && w_.control->generation() != 0 &&
-                               w_.control->generation() != control_seen_.seen();
+    const bool control_moved =
+        w_.control.generation() != 0 && w_.control.generation() != control_seen_.seen();
     return !control_moved;
 }
 
 int FrameCopier::park_ms() const noexcept {
     if (st_.state == RecState::Idle) return -1;
     const bool live = st_.state == RecState::Armed || st_.state == RecState::Recording;
-    if (live && lowlat_ && ll_waiting_ && w_.clock != nullptr) {
-        const std::int64_t left = ll_due_ns_ - w_.clock->now().count();
+    if (live && lowlat_ && ll_waiting_) {
+        const std::int64_t left = ll_due_ns_ - w_.clock.now().count();
 
         if (left <= 0) return 0;
-        if (left < kMsNs) return w_.delay != nullptr ? 0 : 1;
+        if (left < kMsNs) return 0;
         return static_cast<int>(std::min<std::int64_t>(left / kMsNs, kPollMs));
     }
     return kPollMs;
@@ -128,12 +128,12 @@ void FrameCopier::release() noexcept {
     if (st_.state != RecState::Idle && st_.state != RecState::Closing) end_(RecVerdict::Stopped);
     if (st_.state == RecState::Closing) close_step_();
     set_demand_(false);
-    if (w_.status != nullptr) w_.status->publish(st_);
+    w_.status.publish(st_);
 }
 
 void FrameCopier::sample_control_() noexcept {
     RecControl c{};
-    if (w_.control == nullptr || !control_seen_.take_if_changed(*w_.control, c)) return;
+    if (!control_seen_.take_if_changed(w_.control, c)) return;
     switch (c.op) {
         case RecOp::Start:
         case RecOp::Arm:
@@ -163,8 +163,7 @@ void FrameCopier::answer_(std::uint16_t gen, RecVerdict v) noexcept {
 }
 
 void FrameCopier::begin_(const RecControl& c) noexcept {
-    if (!window_ || w_.channel == nullptr || w_.clock == nullptr)
-        return answer_(c.gen, RecVerdict::NoWindow);
+    if (!window_) return answer_(c.gen, RecVerdict::NoWindow);
     if (c.mode == RecMode::Avi && c.opt.codec != RecCodec::Zmbv && !CscdCodec::kAvailable)
         return answer_(c.gen, RecVerdict::NoCodec);
     const std::uint16_t answered = st_.answered;
@@ -189,7 +188,7 @@ void FrameCopier::begin_(const RecControl& c) noexcept {
     cell_epoch_ = 0;
     core_seq_known_ = false;
     npending_ = 0;
-    have_cell_ = false;
+    last_cell_.reset();
     lag_steps_ = 1;
     woven_ = false;
     matched_ = true;
@@ -201,9 +200,9 @@ void FrameCopier::begin_(const RecControl& c) noexcept {
     covers_zero_ = false;
     epoch_wait_ns_ = -1;
     ReplayStatus rs{};
-    if (from_arm_ && w_.replay != nullptr && w_.replay->sample_into(rs) != 0) note_replay_(rs);
+    if (from_arm_ && w_.replay.sample_into(rs) != 0) note_replay_(rs);
     period_ns_ = kDefaultPeriodNs;
-    const std::int64_t t0 = w_.clock->now().count();
+    const std::int64_t t0 = w_.clock.now().count();
     probe_.restart(t0);
     armed_ns_ = t0;
     set_demand_(true);
@@ -221,26 +220,24 @@ void FrameCopier::end_(RecVerdict why) noexcept {
 void FrameCopier::set_demand_(bool on) noexcept {
     if (on == demand_on_) return;
     demand_on_ = on;
-    if (w_.demand != nullptr) w_.demand->publish(FrameDemand{.on = static_cast<std::uint8_t>(on)});
+    w_.demand.publish(FrameDemand{.on = static_cast<std::uint8_t>(on)});
 }
 
 void FrameCopier::reap_() noexcept {
-    if (w_.channel == nullptr) return;
     for (std::size_t i = 0; i < kRawFrameSlots; ++i) {
-        auto back = w_.channel->reap();
+        auto back = w_.channel.reap();
         if (!back) break;
     }
 }
 
 bool FrameCopier::all_home_() const noexcept {
-    const auto c = w_.channel->census();
+    const auto c = w_.channel.census();
     return c.idle == c.live;
 }
 
 void FrameCopier::probe_step_(std::int64_t now) noexcept {
 
-    if (ReplayStatus rs{}; from_arm_ && w_.replay != nullptr && w_.replay->sample_into(rs) != 0)
-        note_replay_(rs);
+    if (ReplayStatus rs{}; from_arm_ && w_.replay.sample_into(rs) != 0) note_replay_(rs);
     probe_.read(*window_);
     const auto d = probe_.decide(now);
     if (d == hal::ScalerProbe::Verdict::Pending) return;
@@ -280,7 +277,7 @@ void FrameCopier::probe_step_(std::int64_t now) noexcept {
 }
 
 bool FrameCopier::open_segment_() noexcept {
-    auto loan = w_.channel->acquire();
+    auto loan = w_.channel.acquire();
     if (!loan) return false;
     *loan = RawFrameSlot{};
     loan->kind = RawKind::Open;
@@ -288,7 +285,7 @@ bool FrameCopier::open_segment_() noexcept {
     loan->mode = mode_;
     loan->opt = opt_;
     loan->path = path_;
-    w_.channel->send(std::move(loan));
+    w_.channel.send(std::move(loan));
     open_sent_ = true;
     core_seq_known_ = false;
     st_.state = RecState::Recording;
@@ -298,16 +295,16 @@ bool FrameCopier::open_segment_() noexcept {
 
 void FrameCopier::close_step_() noexcept {
     if (open_sent_ && !close_sent_) {
-        auto loan = w_.channel->acquire();
+        auto loan = w_.channel.acquire();
         if (!loan) return;
         *loan = RawFrameSlot{};
         loan->kind = RawKind::Close;
         loan->gen = st_.gen;
         attach_pending_(*loan);
-        w_.channel->send(std::move(loan));
+        w_.channel.send(std::move(loan));
         close_sent_ = true;
     }
-    if (w_.channel != nullptr && !all_home_()) return;
+    if (!all_home_()) return;
 
     arena_.release();
     st_.arena_kib = 0;
@@ -329,7 +326,7 @@ void FrameCopier::attach_pending_(RawFrameSlot& slot) noexcept {
     slot.width = st_.width;
     slot.height = st_.height;
     slot.stamp.core_frame = end;
-    if (have_cell_) slot.stamp.movie_frame = movie_of_(last_cell_, end);
+    if (last_cell_) slot.stamp.movie_frame = movie_of_(*last_cell_, end);
     dirty_ = true;
 }
 
@@ -348,7 +345,7 @@ bool FrameCopier::reserve_arena_(std::size_t frame_bytes) noexcept {
     const std::size_t slot_bytes = raw_stripe(frame_bytes);
     const std::size_t want = raw_depth(slot_bytes);
     const std::size_t depth =
-        w_.channel->set_live(static_cast<std::uint8_t>(want)) ? want : w_.channel->live();
+        w_.channel.set_live(static_cast<std::uint8_t>(want)) ? want : w_.channel.live();
     if (auto r = arena_.reserve(depth, slot_bytes); !r) return false;
     st_.arena_kib = static_cast<std::uint32_t>(arena_.bytes() / 1024u);
     st_.depth = static_cast<std::uint8_t>(depth);
@@ -357,21 +354,21 @@ bool FrameCopier::reserve_arena_(std::size_t frame_bytes) noexcept {
 }
 
 void FrameCopier::watch_step_() noexcept {
-    if (st_.state == RecState::Recording && w_.writer != nullptr) {
+    if (st_.state == RecState::Recording) {
         RecWriteStatus ws{};
-        if (w_.writer->sample_into(ws) != 0 && ws.gen == st_.gen &&
+        if (w_.writer.sample_into(ws) != 0 && ws.gen == st_.gen &&
             ws.state == RecWriteState::Failed)
             return end_(RecVerdict::WriterFailed);
     }
-    if (st_.state == RecState::Recording && w_.avi_writer != nullptr) {
+    if (st_.state == RecState::Recording) {
         AviWriteStatus as{};
-        if (w_.avi_writer->sample_into(as) != 0 && as.gen == st_.gen &&
+        if (w_.avi_writer.sample_into(as) != 0 && as.gen == st_.gen &&
             as.state == RecWriteState::Failed)
             return end_(RecVerdict::WriterFailed);
     }
-    if (st_.state == RecState::Recording && w_.frames != nullptr) {
+    if (st_.state == RecState::Recording) {
         CoreFrameRecord f{};
-        if (w_.frames->sample_into(f) != 0) {
+        if (w_.frames.sample_into(f) != 0) {
             if (!core_seq_known_) {
                 core_seq_ = f.core_seq;
                 core_seq_known_ = true;
@@ -380,9 +377,9 @@ void FrameCopier::watch_step_() noexcept {
             }
         }
     }
-    if (from_arm_ && w_.replay != nullptr) {
+    if (from_arm_) {
         ReplayStatus r{};
-        if (w_.replay->sample_into(r) == 0) return;
+        if (w_.replay.sample_into(r) == 0) return;
         if (st_.state == RecState::Armed) note_replay_(r);
         if (r.level == ReplayLevel::Running) {
             replay_running_ = true;
@@ -390,7 +387,7 @@ void FrameCopier::watch_step_() noexcept {
         } else if (r.end == ReplayEnd::EpochAmbiguous || r.level == ReplayLevel::AwaitPowerOn) {
             replay_running_ = false;
 
-            const std::int64_t now = w_.clock->now().count();
+            const std::int64_t now = w_.clock.now().count();
             if (epoch_wait_ns_ < 0) epoch_wait_ns_ = now;
             if (now - epoch_wait_ns_ > kEpochWaitNs) return end_(RecVerdict::ReplayEnded);
         } else if (replay_running_ && st_.state == RecState::Armed) {
@@ -408,9 +405,8 @@ void FrameCopier::note_replay_(const ReplayStatus& r) noexcept {
 }
 
 bool FrameCopier::replay_before_epoch_() const noexcept {
-    if (w_.replay == nullptr) return false;
     ReplayStatus r{};
-    if (w_.replay->sample_into(r) == 0) return false;
+    if (w_.replay.sample_into(r) == 0) return false;
     if (r.level == ReplayLevel::AwaitPowerOn) return true;
     if (r.level == ReplayLevel::Idle &&
         (r.end == ReplayEnd::None || r.end == ReplayEnd::EpochAmbiguous))
@@ -565,10 +561,9 @@ void FrameCopier::follow_mode_(bool single, std::int64_t now) noexcept {
 }
 
 std::int64_t FrameCopier::approach_(std::int64_t now) noexcept {
-    if (!ll_waiting_ || w_.delay == nullptr || now >= ll_due_ns_ || ll_due_ns_ - now >= kMsNs)
-        return now;
-    w_.delay->sleep_until(std::chrono::nanoseconds{ll_due_ns_});
-    return w_.clock->now().count();
+    if (!ll_waiting_ || now >= ll_due_ns_ || ll_due_ns_ - now >= kMsNs) return now;
+    w_.delay.sleep_until(std::chrono::nanoseconds{ll_due_ns_});
+    return w_.clock.now().count();
 }
 
 std::int32_t FrameCopier::movie_of_(const CoreFrameRecord& cell,
@@ -670,8 +665,8 @@ FrameStamp FrameCopier::stamp_(std::uint8_t ctr, std::int64_t now, const CoreFra
         static_cast<std::uint64_t>(static_cast<std::int64_t>(ext_) + anchor_off_);
     s.core_frame = core;
 
-    if (cell == nullptr && st_.anchored != 0 && have_cell_ && last_cell_.epoch == cell_epoch_)
-        s.movie_frame = movie_of_(last_cell_, core);
+    if (cell == nullptr && st_.anchored != 0 && last_cell_ && last_cell_->epoch == cell_epoch_)
+        s.movie_frame = movie_of_(*last_cell_, core);
     if (cell == nullptr || st_.anchored == 0) return s;
     if (cell->epoch != cell_epoch_) rebase_(*cell, core, lag);
     cross_check_(*cell, core, lag);
@@ -701,13 +696,9 @@ void FrameCopier::on_complete_(std::size_t buf, std::uint8_t ctr, std::int64_t n
                                std::int64_t behind, std::uint32_t fields) noexcept {
 
     CoreFrameRecord rec{};
-    const bool have =
-        w_.frames != nullptr && w_.frames->sample_into(rec) != 0 && rec.supported != 0;
+    const bool have = w_.frames.sample_into(rec) != 0 && rec.supported != 0;
     const CoreFrameRecord* cell = have ? &rec : nullptr;
-    if (have) {
-        last_cell_ = rec;
-        have_cell_ = true;
-    }
+    if (have) last_cell_ = rec;
     const std::int64_t lag = lag_(behind);
     const std::uint32_t n = frames_since_(ctr, now, cell, behind);
     ext_ += n;
@@ -771,14 +762,14 @@ void FrameCopier::defer_(std::uint64_t first, std::uint32_t count, std::uint8_t 
 
 bool FrameCopier::rate_is_ours_(std::uint32_t seq) const noexcept {
     if (core_seq_known_) return seq == core_seq_;
-    if (w_.frames == nullptr || w_.frames->generation() == 0) return true;
+    if (w_.frames.generation() == 0) return true;
     CoreFrameRecord f{};
-    return w_.frames->sample_into(f) != 0 && seq == f.core_seq;
+    return w_.frames.sample_into(f) != 0 && seq == f.core_seq;
 }
 
 void FrameCopier::deliver_(std::size_t buf, const ScalerHeader& h,
                            const FrameStamp& stamp) noexcept {
-    auto loan = w_.channel->acquire();
+    auto loan = w_.channel.acquire();
     if (!loan) {
         ++st_.backpressure;
         dirty_ = true;
@@ -801,19 +792,17 @@ void FrameCopier::deliver_(std::size_t buf, const ScalerHeader& h,
     slot.height = h.height;
     slot.line = h.line;
     VideoGeometryRecord g{};
-    if (w_.video != nullptr && w_.video->sample_into(g) != 0 && g.valid &&
-        rate_is_ours_(g.core_seq))
-        slot.vtime = g.vtime;
+    if (w_.video.sample_into(g) != 0 && g.valid && rate_is_ours_(g.core_seq)) slot.vtime = g.vtime;
     const std::size_t bytes = static_cast<std::size_t>(h.line) * h.height;
-    const std::span<std::byte> stripe = arena_.stripe(w_.channel->index_of(loan));
+    const std::span<std::byte> stripe = arena_.stripe(w_.channel.index_of(loan));
     if (bytes > stripe.size()) {
         s.dup = DupReason::Resize;
         ++st_.resize;
         regrow_bytes_ = std::max(regrow_bytes_, bytes);
     } else {
-        const std::int64_t t0 = w_.clock->now().count();
+        const std::int64_t t0 = w_.clock.now().count();
         const auto r = window_->copy(base_(buf) + h.header_size, stripe.first(bytes));
-        const std::int64_t t1 = w_.clock->now().count();
+        const std::int64_t t1 = w_.clock.now().count();
         const auto after = window_->header(base_(buf));
         copy_ns_ = (3 * copy_ns_ + (t1 - t0)) / 4;
         st_.copy_us_last = static_cast<std::uint32_t>((t1 - t0) / 1000);
@@ -824,11 +813,11 @@ void FrameCopier::deliver_(std::size_t buf, const ScalerHeader& h,
             ++st_.torn;
         } else {
             ++st_.captured;
-            slot.pixels = stripe.data();
+            slot.pixels = stripe.first(bytes);
         }
     }
     slot.stamp = s;
-    w_.channel->send(std::move(loan));
+    w_.channel.send(std::move(loan));
     st_.rows += rows;
     st_.last_core_frame = s.core_frame;
     st_.width = h.width;

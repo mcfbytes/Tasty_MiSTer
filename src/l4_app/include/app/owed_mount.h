@@ -10,6 +10,7 @@
 #include "app/path_text.h"
 #include "cores/mount_status.h"
 #include "infra/fixed_str.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -36,8 +37,8 @@ public:
 
     void bind(Cell& cell, LinkRxChannel* rx) noexcept {
         strand();
-        cell_ = &cell;
-        rx_ = rx;
+        cell_ = infra::opt_ref_of(&cell);
+        rx_ = infra::opt_ref_of(rx);
     }
 
     [[nodiscard]] bool owed() const noexcept { return gen_ != 0; }
@@ -74,8 +75,8 @@ private:
                   cores::MountStatus body) noexcept {
         set_verdict(body, v);
         body.generation = generation;
-        if (cell_ != nullptr) cell_->publish(body);
-        if (rx_ != nullptr) rx_->request_wake();
+        if (cell_) cell_->publish(body);
+        if (rx_) rx_->request_wake();
     }
     void forget_() noexcept {
         path_.clear();
@@ -92,8 +93,8 @@ private:
         gen_ = std::exchange(other.gen_, 0u);
     }
 
-    Cell* cell_ = nullptr;
-    LinkRxChannel* rx_ = nullptr;
+    infra::OptRef<Cell> cell_{};
+    infra::OptRef<LinkRxChannel> rx_{};
     cores::MountStatus strand_body_{};
     FixedStr<kPathMax, StrFit::Clip> path_{};
     std::int64_t quiesce_deadline_ns_ = 0;

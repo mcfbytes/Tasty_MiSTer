@@ -30,8 +30,8 @@ class IFilterResend;
 inline constexpr std::uint8_t kUioSetVideo = 0x20;
 inline constexpr std::size_t kVideoWireWords = 26;
 
-Ex<void> emit_video_words(hal::ISpiTransport& link, std::uint8_t opcode,
-                          std::span<const std::uint16_t> words);
+[[nodiscard]] Ex<void> emit_video_words(hal::ISpiTransport& link, std::uint8_t opcode,
+                                        std::span<const std::uint16_t> words);
 
 inline constexpr std::uint8_t kUioSetFbuf = 0x2F;
 inline constexpr std::uint8_t kUioSetArCust = 0x3A;
@@ -39,19 +39,21 @@ inline constexpr std::uint8_t kUioShadowMask = 0x3E;
 inline constexpr std::uint8_t kUioHdmiInt = 0x44;
 inline constexpr std::uint8_t kUioSetGamma = 0x32;
 
-Ex<std::uint16_t> emit_fbuf(hal::ISpiTransport& link, std::uint16_t word);
+[[nodiscard]] Ex<std::uint16_t> emit_fbuf(hal::ISpiTransport& link, std::uint16_t word);
 
-Ex<void> emit_ar_custom(hal::ISpiTransport& link, std::span<const std::uint16_t> words);
+[[nodiscard]] Ex<void> emit_ar_custom(hal::ISpiTransport& link,
+                                      std::span<const std::uint16_t> words);
 
-Ex<std::uint16_t> emit_filter_mode(hal::ISpiTransport& link, std::uint8_t mode);
+[[nodiscard]] Ex<std::uint16_t> emit_filter_mode(hal::ISpiTransport& link, std::uint8_t mode);
 
-Ex<void> emit_filter_coeff_chunk(hal::ISpiTransport& link, std::span<const std::uint16_t> chunk);
+[[nodiscard]] Ex<void> emit_filter_coeff_chunk(hal::ISpiTransport& link,
+                                               std::span<const std::uint16_t> chunk);
 
-Ex<std::uint16_t> emit_shadow_mask(hal::ISpiTransport& link, std::uint16_t flag_word);
+[[nodiscard]] Ex<std::uint16_t> emit_shadow_mask(hal::ISpiTransport& link, std::uint16_t flag_word);
 
-Ex<std::uint16_t> emit_hdmi_int_probe(hal::ISpiTransport& link);
+[[nodiscard]] Ex<std::uint16_t> emit_hdmi_int_probe(hal::ISpiTransport& link);
 
-Ex<std::uint16_t> emit_gamma_probe(hal::ISpiTransport& link);
+[[nodiscard]] Ex<std::uint16_t> emit_gamma_probe(hal::ISpiTransport& link);
 
 inline constexpr std::size_t kFilterPhases = 256;
 inline constexpr std::size_t kFilterTaps = 4;
@@ -173,8 +175,9 @@ struct GeometryPass {
     bool yc_sent = false;
 };
 
-Ex<GeometryPass> sample_video_geometry(hal::ISpiTransport& link, bool force, GeometryGate& gate,
-                                       IFilterResend* filters = nullptr);
+[[nodiscard]] Ex<GeometryPass> sample_video_geometry(hal::ISpiTransport& link, bool force,
+                                                     GeometryGate& gate,
+                                                     IFilterResend* filters = nullptr);
 
 class VideoService {
     TASTY_SEAT_RESIDENT(Ui);
@@ -196,7 +199,7 @@ public:
 
         std::optional<PllBlock> raw_pll{};
     };
-    Ex<ParsedMode> parse_mode(std::string_view spec) const;
+    [[nodiscard]] Ex<ParsedMode> parse_mode(std::string_view spec) const;
 
     struct StoredMode {
         Modeline mode{};
@@ -207,11 +210,11 @@ public:
 
     static StoredMode preset_fallback(bool support_fhd, bool supports_pr);
 
-    Ex<void> apply(const Modeline& m);
+    [[nodiscard]] Ex<void> apply(const Modeline& m, PllBlock pll, Modeline::WireOptions opt);
 
-    Ex<void> poll_resolution();
+    [[nodiscard]] Ex<void> poll_resolution();
 
-    Ex<void> poll_hotplug();
+    [[nodiscard]] Ex<void> poll_hotplug();
 
     EdidStore& edid() noexcept { return edid_; }
     CecStateMachine& cec() noexcept { return cec_; }
@@ -219,7 +222,8 @@ public:
     class IVideoWireSink {
     public:
         virtual ~IVideoWireSink() = default;
-        virtual Ex<void> publish(std::uint8_t opcode, std::span<const std::uint16_t> words) = 0;
+        [[nodiscard]] virtual Ex<void> publish(std::uint8_t opcode,
+                                               std::span<const std::uint16_t> words) = 0;
 
     protected:
         IVideoWireSink() = default;
@@ -230,7 +234,7 @@ public:
     class IResolutionSampler {
     public:
         virtual ~IResolutionSampler() = default;
-        virtual Ex<VideoSample> sample(bool force) = 0;
+        [[nodiscard]] virtual Ex<VideoSample> sample(bool force) = 0;
 
     protected:
         IResolutionSampler() = default;
@@ -248,18 +252,13 @@ public:
     void set_hdmi_capable(bool v) noexcept { hdmi_capable_ = v; }
     bool hdmi_capable() const noexcept { return hdmi_capable_; }
 
-    void set_wire_options(const Modeline::WireOptions& o) noexcept {
-        TASTY_SEAT_BODY(VideoService);
-        wire_opt_ = o;
-    }
-
     void set_supports_pr(bool v) noexcept { supports_pr_ = v; }
     bool supports_pr() const noexcept { return supports_pr_; }
 
     const VideoSample& info() const noexcept { return info_; }
     Generation resolution_generation() const noexcept { return res_gen_; }
 
-    Ex<void> request_power(bool on);
+    [[nodiscard]] Ex<void> request_power(bool on);
     bool power_requested() const noexcept { return power_requested_; }
 
     bool init_owed() const noexcept { return init_owed_; }
@@ -311,21 +310,17 @@ public:
         force_next_ = true;
     }
 
-    void set_pll_block(const PllBlock& b) noexcept { pll_ = b; }
-    const PllBlock& pll_block() const noexcept { return pll_; }
-
 private:
-    Ex<void> apply_tmds_power(bool on);
+    [[nodiscard]] Ex<void> apply_tmds_power(bool on);
 
-    Ex<void> settle_and_publish();
+    [[nodiscard]] Ex<void> settle_and_publish();
 
     adv7513::Io io_{};
     EdidStore edid_{io_};
     CecStateMachine cec_{io_};
 
-    IVideoWireSink* sink_ = nullptr;
-    IResolutionSampler* sampler_ = nullptr;
-    Modeline::WireOptions wire_opt_{};
+    infra::OptRef<IVideoWireSink> sink_{};
+    infra::OptRef<IResolutionSampler> sampler_{};
 
     VideoSample info_{};
     Generation res_gen_{};
@@ -338,7 +333,6 @@ private:
     bool sink_powered_ = false;
     bool force_next_ = true;
     bool vi_seen_ = false;
-    PllBlock pll_{};
 
     std::uint16_t last_res_ = 0;
     std::uint8_t last_fb_crc_ = 0;

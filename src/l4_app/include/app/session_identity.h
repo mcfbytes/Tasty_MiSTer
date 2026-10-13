@@ -9,6 +9,7 @@
 #include "app/remembered_path.h"
 #include "cores/cheat_lookup.h"
 #include "cores/file_slot.h"
+#include "cores/pause_on_osd.h"
 #include "infra/fixed_str.h"
 #include "svc/joy_plan.h"
 
@@ -48,6 +49,8 @@ struct SessionIdentity {
     bool image_no_zip = false;
 
     GameId game_id{};
+
+    cores::PauseOnOsd pause = cores::PauseOnOsd::Option;
 };
 
 [[nodiscard]] inline std::string_view home_name(const SessionIdentity& id) noexcept {

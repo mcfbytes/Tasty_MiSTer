@@ -9,6 +9,7 @@
 
 #include "app/types.h"
 #include "app/ui_request.h"
+#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
@@ -35,6 +36,7 @@ enum class InfoId : std::uint32_t {
     FbTerminalRequired,
     CdBiosMissing,
     RomLoadFailed,
+    SavingState,
 };
 
 struct Event {
@@ -51,6 +53,7 @@ struct Event {
         SessionAdvisory,
         SessionEnded,
         RamImageDeclined,
+        RequestDone,
         kCount,
     };
     enum class ConfStrOnlyCause : std::uint8_t { RegistryMiss, NoStorage };
@@ -112,10 +115,15 @@ struct Event {
 
         Errc why{};
     };
+
+    struct RequestDone {
+        static constexpr Kind kKind = Kind::RequestDone;
+        UiRequest::Kind which{};
+    };
     using Alternatives =
         std::tuple<CoreLoaded, SessionFailed, SdActivity, InfoRequest, ProgressUpdate, DeadlineMiss,
                    RequestRefused, ConfStrOnlySession, SessionAdvisory, SessionEnded,
-                   RamImageDeclined>;
+                   RamImageDeclined, RequestDone>;
 
     Kind kind = Kind::CoreLoaded;
     std::uint8_t pad_[3]{};
@@ -149,6 +157,7 @@ inline constexpr auto kDeliveryTable = std::to_array<DeliveryRow>({
     {Event::Kind::SessionAdvisory, Delivery::Edge},
     {Event::Kind::SessionEnded, Delivery::Edge},
     {Event::Kind::RamImageDeclined, Delivery::Edge},
+    {Event::Kind::RequestDone, Delivery::Edge},
 });
 static_assert(infra::rows_are_ordinal(kDeliveryTable),
               "every Event::Kind needs exactly one kDeliveryTable row, at its "
@@ -167,7 +176,7 @@ public:
     static constexpr std::size_t kCapacity = 256;
 
     static constexpr std::size_t kKinds = static_cast<std::size_t>(Event::Kind::kCount);
-    static_assert(kKinds == 11, "Event::Kind changed cardinality: audit loss_[] consumers "
+    static_assert(kKinds == 12, "Event::Kind changed cardinality: audit loss_[] consumers "
                                 "and update this pin");
 
     [[nodiscard]] bool push(const Event& e) noexcept;
@@ -181,7 +190,8 @@ public:
 
 private:
     xthread::SpscRing<Event, kCapacity> ring_{};
-    std::uint32_t loss_[kKinds]{};
+
+    xthread::Counter loss_[kKinds]{};
 };
 
 }  // namespace mister::app

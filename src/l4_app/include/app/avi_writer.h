@@ -19,8 +19,8 @@ class AviWriter {
 
 public:
     struct Wiring {
-        ChunkChannel* in = nullptr;
-        AviWriteStatusCell* status = nullptr;
+        ChunkChannel& in;
+        AviWriteStatusCell& status;
     };
 
     static constexpr unsigned kJobsPerPass = 4;

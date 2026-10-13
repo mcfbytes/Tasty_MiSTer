@@ -3,12 +3,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
 #include "cores/core_support.h"
 #include "cores/generic_core.h"
-#include "cores/mailbox_rows.h"
+#include "cores/mailbox_carriage.h"
 #include "cores/snes_rom.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
@@ -17,14 +18,11 @@
 
 namespace mister::cores {
 
-class SnesCore final : public Core, public IMailboxRows {
+class SnesCore final : public Core {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    SnesCore(const CoreProfile& p, const HostServices& h)
-        : Core(p, h), data_host_(kGenericProfile, h) {}
-
-    void service_mailbox_tick() noexcept override;
+    SnesCore(const CoreProfile& p, const HostServices& h);
 
     static constexpr std::size_t kChunkBytes = 4096;
 
@@ -40,12 +38,14 @@ private:
         snes::CartSniff sniff{};
     };
 
-    [[nodiscard]] Ex<void> do_init(proto::CoreSession& s) override;
+    [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     void on_set_pending_file_ext(std::string_view ext) noexcept override;
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return bytes_sent_; }
     [[nodiscard]] Ex<void> on_file_tx(IoIndex index, svc::IFile& f) override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
-    [[nodiscard]] IMailboxRows* on_mailbox_rows() noexcept override { return this; }
+    [[nodiscard]] IMailboxRows* on_mailbox_rows() noexcept override {
+        return mailbox_ ? &*mailbox_ : nullptr;
+    }
     [[nodiscard]] IStreamLoad* on_window_load() noexcept override { return &data_host_; }
 
     [[nodiscard]] Ex<void> tx_rom_(IoIndex index, svc::IFile& f, std::uint32_t file_size);
@@ -68,6 +68,8 @@ private:
     std::uint8_t buf_[kChunkBytes]{};
 
     GenericCore data_host_;
+
+    std::optional<MailboxCarriage> mailbox_;
 };
 
 }  // namespace mister::cores

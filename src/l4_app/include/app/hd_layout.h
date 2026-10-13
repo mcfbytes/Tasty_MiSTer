@@ -16,16 +16,15 @@ struct HdLayout {
     Rect panel{};
     Rect game{};
     Rect cover{};
-    float scale = 1.f;
 };
 
 [[nodiscard]] constexpr HdLayout layout_for(std::uint32_t w, std::uint32_t h) noexcept {
     HdLayout L{};
     if (h == 0 || w == 0) return L;
-    L.scale = static_cast<float>(h) / 720.f;
     const auto ih = static_cast<std::int32_t>(h);
     const auto iw = static_cast<std::int32_t>(w);
-    const auto panel_w = static_cast<std::int32_t>((static_cast<std::uint64_t>(h) * 3u) / 4u);
+    const auto panel_w = static_cast<std::int32_t>(std::max<std::uint64_t>(
+        static_cast<std::uint64_t>(w) * 36u / 100u, static_cast<std::uint64_t>(h) * 60u / 100u));
     L.panel = {.x = 0, .y = 0, .w = panel_w, .h = ih};
     L.game = {.x = panel_w, .y = 0, .w = iw - panel_w, .h = ih};
     const std::int64_t gw = L.game.w;

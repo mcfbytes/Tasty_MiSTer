@@ -5,13 +5,15 @@
 
 #include <algorithm>
 
+#include "infra/byte_view.h"
+
 namespace mister::app {
 
 std::uint32_t FrameHasher::hash_rows(const RawFrameSlot& s) noexcept {
     uLong crc = ::crc32(0L, Z_NULL, 0);
-    if (s.pixels == nullptr) return static_cast<std::uint32_t>(crc);
+    if (s.pixels.empty()) return static_cast<std::uint32_t>(crc);
     const std::size_t row = static_cast<std::size_t>(s.width) * 3u;
-    const auto* p = reinterpret_cast<const Bytef*>(s.pixels);
+    const auto* p = infra::byte_cast<const std::uint8_t>(s.pixels).data();
     for (std::uint32_t y = 0; y < s.height; ++y)
         crc = ::crc32(crc, p + static_cast<std::size_t>(y) * s.line, static_cast<uInt>(row));
     return static_cast<std::uint32_t>(crc);
@@ -19,22 +21,20 @@ std::uint32_t FrameHasher::hash_rows(const RawFrameSlot& s) noexcept {
 
 bool FrameHasher::idle() const noexcept { return job_ || drained(); }
 
-bool FrameHasher::drained() const noexcept {
-    return !job_ && (w_.channel == nullptr || w_.channel->outbound() == 0);
-}
+bool FrameHasher::drained() const noexcept { return !job_ && w_.channel.outbound() == 0; }
 
 int FrameHasher::park_ms() const noexcept {
     if (job_) return kHeldPollMs;
-    return w_.video != nullptr ? w_.video->park_ms() : -1;
+    return w_.video.park_ms();
 }
 
 void FrameHasher::release() noexcept {
     job_ = RawFrameChannel::Job{};
-    if (w_.video != nullptr) w_.video->release();
+    w_.video.release();
 }
 
 bool FrameHasher::push_(const SidecarMsg& m) noexcept {
-    if (w_.out->push(m)) {
+    if (w_.out.push(m)) {
         if (m.kind == SidecarKind::Row) ++st_.rows;
         return true;
     }
@@ -44,12 +44,11 @@ bool FrameHasher::push_(const SidecarMsg& m) noexcept {
 }
 
 bool FrameHasher::chunk_(const RawFrameSlot& s, bool real, SidecarMsg& m) noexcept {
-    if (w_.video == nullptr) return true;
     if (!chunked_) {
-        if (!w_.video->chunk(s, real, m.stamp.core_frame, m.stamp.movie_frame)) return false;
+        if (!w_.video.chunk(s, real, m.stamp.core_frame, m.stamp.movie_frame)) return false;
         chunked_ = true;
     }
-    const AviEncoder::Position p = w_.video->position();
+    const AviEncoder::Position p = w_.video.position();
     m.segment = p.segment;
     m.seg_frame = p.lost ? -1 : p.frame;
     return true;
@@ -88,8 +87,8 @@ bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
     m.gen = s.gen;
     if (s.kind == RawKind::Close && !emit_runs_(s, m)) return false;
     if (s.kind != RawKind::Frame) {
-        if (!chunked_ && w_.video != nullptr) {
-            if (!(s.kind == RawKind::Open ? w_.video->open(s) : w_.video->close(s))) return false;
+        if (!chunked_) {
+            if (!(s.kind == RawKind::Open ? w_.video.open(s) : w_.video.close(s))) return false;
         }
         chunked_ = true;
         m.kind = s.kind == RawKind::Open ? SidecarKind::Open : SidecarKind::Close;
@@ -98,52 +97,49 @@ bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
         return push_(m);
     }
     if (!emit_runs_(s, m)) return false;
-    const bool real = s.stamp.dup == DupReason::None && s.pixels != nullptr;
+    const bool real = s.stamp.dup == DupReason::None && !s.pixels.empty();
     if (real && !hashed_) {
-        const std::int64_t t0 = w_.clock != nullptr ? w_.clock->now().count() : 0;
+        const std::int64_t t0 = w_.clock.now().count();
         cur_hash_ = hash_rows(s);
         hashed_ = true;
         ++st_.frames;
-        if (w_.clock != nullptr) {
-            st_.hash_us_last = static_cast<std::uint32_t>((w_.clock->now().count() - t0) / 1000);
-            st_.hash_us_max = std::max(st_.hash_us_max, st_.hash_us_last);
-        }
+        st_.hash_us_last = static_cast<std::uint32_t>((w_.clock.now().count() - t0) / 1000);
+        st_.hash_us_max = std::max(st_.hash_us_max, st_.hash_us_last);
     }
     m.stamp = s.stamp;
     m.hash = real ? cur_hash_ : prev_hash_;
     if (!chunk_(s, real, m) || !push_(m)) return false;
 
-    if (w_.video == nullptr || !w_.video->position().lost) prev_hash_ = m.hash;
+    if (!w_.video.position().lost) prev_hash_ = m.hash;
     return true;
 }
 
 void FrameHasher::serve() noexcept {
     TASTY_SEAT_BODY(FrameHasher);
-    if (w_.channel == nullptr || w_.out == nullptr) return;
-    if (w_.video != nullptr) w_.video->tend();
+    w_.video.tend();
     for (unsigned n = 0; n < kJobsPerPass; ++n) {
         if (!job_) {
-            job_ = w_.channel->take();
+            job_ = w_.channel.take();
             next_ = 0;
             hashed_ = false;
             chunked_ = false;
         }
         if (!job_) break;
         const bool done = emit_(*job_);
-        if (w_.writer_wake != nullptr) w_.writer_wake->kick_if_armed();
+        w_.writer_wake.kick_if_armed();
         if (!done) {
-            if (w_.video != nullptr) w_.video->note_held();
+            w_.video.note_held();
             break;
         }
         job_.complete();
         job_ = RawFrameChannel::Job{};
         dirty_ = true;
     }
-    if (w_.video != nullptr && w_.video->take_dirty()) {
-        st_.video = w_.video->counts();
+    if (w_.video.take_dirty()) {
+        st_.video = w_.video.counts();
         dirty_ = true;
     }
-    if (dirty_ && w_.status != nullptr) w_.status->publish(st_);
+    if (dirty_) w_.status.publish(st_);
     dirty_ = false;
 }
 

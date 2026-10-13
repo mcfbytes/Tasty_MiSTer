@@ -36,21 +36,15 @@ public:
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
     [[nodiscard]] int park_ms() const noexcept { return host_.park_ms(); }
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
-    [[nodiscard]] bool paused() noexcept { return pause_.observe(*this); }
+    [[nodiscard]] bool paused() noexcept { return pause_.observe(pause_seen_, *this); }
 
     [[nodiscard]] bool pause_pending() const noexcept {
-        return pause_.pending() && (pause_.asked() != taken_ || host_.quiescent());
+        return pause_.pending() && (pause_.asked() != pause_seen_.taken() || host_.quiescent());
     }
     void settle() noexcept {}
 
-    void on_pause() noexcept {
-        taken_ = pause_.asked();
-        host_.pause();
-    }
-    void on_resume() noexcept {
-        taken_ = 0;
-        host_.resume();
-    }
+    void on_pause() noexcept { host_.pause(); }
+    void on_resume() noexcept { host_.resume(); }
     [[nodiscard]] bool quiescent() const noexcept { return host_.quiescent(); }
 
     [[nodiscard]] xthread::PauseLatch& pause_latch() noexcept { return pause_; }
@@ -60,8 +54,8 @@ private:
     xthread::WakeFlag& wake_;
     xthread::WakeFlag stop_;
     xthread::PauseLatch pause_;
+    xthread::PauseLatch::Observer pause_seen_{};
     xthread::SeatPark park_;
-    xthread::PauseGen taken_ = 0;
 };
 
 static_assert(xthread::SeatBody<LauncherMain>);

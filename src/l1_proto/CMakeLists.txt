@@ -9,6 +9,7 @@ add_library(mister_proto STATIC
   src/osd.cpp
   src/ps2.cpp
   src/savestate_engine.cpp
+  src/savestate_primer.cpp
   src/spi_block_decoder.cpp
   src/spi_block_poll.cpp
   src/spi_conf_str_decoder.cpp
@@ -18,6 +19,7 @@ add_library(mister_proto STATIC
   src/spi_sampler.cpp
   src/spi_status_decoder.cpp
   src/status_register.cpp
+  src/user_io/poll_reader.cpp
 )
 target_include_directories(mister_proto PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_proto
@@ -31,6 +33,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/block_slots.h
   proto/late_answers.h
   proto/conf_str.h
+  proto/conf_switches.h
   proto/core_session.h
   proto/download_session.h
   proto/frame_count.h
@@ -39,6 +42,8 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/image_sink.h
   proto/image_source.h
   proto/resident_image_source.h
+  proto/irq_binding.h
+  proto/item_probe.h
   proto/item_table.h
   proto/link_event.h
   proto/link_op.h
@@ -62,7 +67,9 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/save_request.h
   proto/save_state_decl.h
   proto/savestate_engine.h
+  proto/savestate_primer.h
   proto/sd_request.h
+  proto/sector_floor.h
   proto/session_params.h
   proto/slot_attributes.h
   proto/slot_roles.h
@@ -71,21 +78,35 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/spi_conf_str_decoder.h
   proto/spi_fio_queue.h
   proto/fio_window.h
+  proto/fio_bracket.h
   proto/spi_image_sink.h
   proto/spi_identify_decoder.h
   proto/spi_osd_mask_decoder.h
   proto/osd_focus.h
+  proto/spi_ps2_decoder.h
   proto/spi_sampler.h
   proto/spi_status_decoder.h
+  proto/standard_item.h
+  proto/standard_item_row.h
   proto/status_register.h
   proto/status_word.h
   proto/status_cell.h
   proto/storage_channel.h
   proto/storage_completion.h
+  proto/storage_completion_dispatch.h
   proto/storage_request.h
+  proto/storage_request_dispatch.h
   proto/types.h
+  proto/upload_session.h
   proto/volume_cmd.h
   proto/rotation_dir.h
+  proto/reset_edge.h
+  proto/reset_fence.h
+  proto/reset_terms.h
+  proto/user_io/poll_shape.h
+  proto/user_io/poll_reader.h
+  proto/user_io/rumble_poll.h
+  proto/user_io/poll_params.h
 )
 
 if(TASTY_BUILD_TESTS)
@@ -127,13 +148,21 @@ if(TASTY_BUILD_TESTS)
     endif()
   endfunction()
 
-  foreach(tasty_mod IN ITEMS block_slots decoder_row download_session joystick link link_port osd ps2 save_request savestate spi_block_decoder spi_block_poll spi_conf_str_decoder spi_fio_queue spi_identify_decoder spi_osd_mask_decoder spi_sampler spi_status_decoder status_register)
+  foreach(tasty_mod IN ITEMS block_slots decoder_row download_session joystick link link_port osd ps2 save_request savestate spi_block_decoder spi_block_poll spi_conf_str_decoder spi_fio_queue spi_identify_decoder spi_osd_mask_decoder spi_sampler spi_status_decoder status_register poll_reader)
     tasty_proto_suite(${tasty_mod})
   endforeach()
 
   tasty_proto_suite(conf_str SOURCE tests/confstr_parity.cpp)
   tasty_proto_suite(conf_str_items SOURCE tests/conf_str_items.cpp
                  TEST tasty.proto_conf_str_items)
+  tasty_proto_suite(standard_item)
+  tasty_unit_test(tasty_proto_standard_item_corpus
+    NAME tasty.proto_standard_item_corpus
+    SOURCES tests/standard_item_corpus.cpp
+    INCLUDES ${TASTY_TESTS_DIR}
+    DEFINES TASTY_CONFSTR_FIXTURE_DIR="${TASTY_TESTS_DIR}/fixtures/confstr"
+    LIBS mister_proto tasty_test_options
+    TIMEOUT 60)
 
   tasty_proto_suite(core_session SOURCE tests/core_session_unit.cpp HARNESS)
   tasty_proto_suite(frame_counter_read HARNESS)

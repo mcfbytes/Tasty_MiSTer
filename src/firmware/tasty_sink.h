@@ -36,6 +36,7 @@ public:
     void on(const app::Event::SessionAdvisory& a, const app::Event::Head& h);
     void on(const app::Event::SessionEnded& a, const app::Event::Head& h);
     void on(const app::Event::RamImageDeclined& a, const app::Event::Head& h);
+    void on(const app::Event::RequestDone& a, const app::Event::Head& h);
     void misrouted(const app::Event& e) noexcept;
     [[nodiscard]] std::uint32_t event_misrouted() const noexcept { return event_misrouted_; }
 

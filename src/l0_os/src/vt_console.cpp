@@ -9,9 +9,11 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdio>
 #include <string_view>
 
 #include "infra/unique_fd.h"
+#include "os/ui_vt_console.h"
 
 namespace mister::os {
 namespace {
@@ -30,10 +32,11 @@ void write_all(int fd, std::string_view s) noexcept {
     }
 }
 
-}  // namespace
+void vt_tty(char (&path)[16], int vt) noexcept {
+    (void)std::snprintf(path, sizeof path, "/dev/tty%d", vt);
+}
 
-std::optional<int> LinuxVtConsole::active() noexcept {
-    TASTY_SEAT_BODY(LinuxVtConsole);
+std::optional<int> active_op() noexcept {
     const UniqueFd fd = open_rw(kConsole);
     if (!fd.valid()) return std::nullopt;
     vt_stat st{};
@@ -41,8 +44,7 @@ std::optional<int> LinuxVtConsole::active() noexcept {
     return static_cast<int>(st.v_active);
 }
 
-Ex<void> LinuxVtConsole::activate(int vt) noexcept {
-    TASTY_SEAT_BODY(LinuxVtConsole);
+[[nodiscard]] Ex<void> activate_op(int vt) noexcept {
     const UniqueFd fd = open_rw(kConsole);
     if (!fd.valid())
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
@@ -51,16 +53,14 @@ Ex<void> LinuxVtConsole::activate(int vt) noexcept {
     return {};
 }
 
-void LinuxVtConsole::blank(const char* tty) noexcept {
-    TASTY_SEAT_BODY(LinuxVtConsole);
+void blank_op(const char* tty) noexcept {
     const UniqueFd fd = open_rw(tty);
     if (!fd.valid()) return;
     constexpr std::string_view kBlank = "\033[0m\033[?25l\033[37m\033[40m\033[2J\033[H";
     write_all(fd.get(), kBlank);
 }
 
-void LinuxVtConsole::restore_text(const char* tty) noexcept {
-    TASTY_SEAT_BODY(LinuxVtConsole);
+void restore_text_op(const char* tty) noexcept {
     const UniqueFd fd = open_rw(tty);
     if (!fd.valid()) return;
     (void)::ioctl(fd.get(), KDSETMODE, KD_TEXT);
@@ -76,6 +76,108 @@ void LinuxVtConsole::restore_text(const char* tty) noexcept {
     }
     constexpr std::string_view kShow = "\033[0m\033[2J\033[H\033[?25h";
     write_all(fd.get(), kShow);
+}
+
+std::optional<bool> text_mode_op(int vt) noexcept {
+    char path[16];
+    vt_tty(path, vt);
+    const UniqueFd fd = open_rw(path);
+    if (!fd.valid()) return std::nullopt;
+    int mode = 0;
+    if (::ioctl(fd.get(), KDGETMODE, &mode) != 0) return std::nullopt;
+    return mode == KD_TEXT;
+}
+
+void graphics_op(int vt) noexcept {
+    char path[16];
+    vt_tty(path, vt);
+    const UniqueFd fd = open_rw(path);
+    if (!fd.valid()) return;
+    constexpr std::string_view kHide = "\033[0m\033[?25l";
+    write_all(fd.get(), kHide);
+    (void)::ioctl(fd.get(), KDSETMODE, KD_GRAPHICS);
+}
+
+void text_op(int vt) noexcept {
+    char path[16];
+    vt_tty(path, vt);
+    const UniqueFd fd = open_rw(path);
+    if (!fd.valid()) return;
+    (void)::ioctl(fd.get(), KDSETMODE, KD_TEXT);
+    constexpr std::string_view kShow = "\033[0m\033[?25h";
+    write_all(fd.get(), kShow);
+}
+
+}  // namespace
+
+std::optional<int> LinuxVtConsole::active() noexcept {
+    TASTY_SEAT_BODY(LinuxVtConsole);
+    return active_op();
+}
+
+Ex<void> LinuxVtConsole::activate(int vt) noexcept {
+    TASTY_SEAT_BODY(LinuxVtConsole);
+    return activate_op(vt);
+}
+
+void LinuxVtConsole::blank(const char* tty) noexcept {
+    TASTY_SEAT_BODY(LinuxVtConsole);
+    blank_op(tty);
+}
+
+void LinuxVtConsole::restore_text(const char* tty) noexcept {
+    TASTY_SEAT_BODY(LinuxVtConsole);
+    restore_text_op(tty);
+}
+
+std::optional<bool> LinuxVtConsole::text_mode(int vt) noexcept {
+    TASTY_SEAT_BODY(LinuxVtConsole);
+    return text_mode_op(vt);
+}
+
+void LinuxVtConsole::graphics(int vt) noexcept {
+    TASTY_SEAT_BODY(LinuxVtConsole);
+    graphics_op(vt);
+}
+
+void LinuxVtConsole::text(int vt) noexcept {
+    TASTY_SEAT_BODY(LinuxVtConsole);
+    text_op(vt);
+}
+
+std::optional<int> UiVtConsole::active() noexcept {
+    TASTY_SEAT_BODY(UiVtConsole);
+    return active_op();
+}
+
+Ex<void> UiVtConsole::activate(int vt) noexcept {
+    TASTY_SEAT_BODY(UiVtConsole);
+    return activate_op(vt);
+}
+
+void UiVtConsole::blank(const char* tty) noexcept {
+    TASTY_SEAT_BODY(UiVtConsole);
+    blank_op(tty);
+}
+
+void UiVtConsole::restore_text(const char* tty) noexcept {
+    TASTY_SEAT_BODY(UiVtConsole);
+    restore_text_op(tty);
+}
+
+std::optional<bool> UiVtConsole::text_mode(int vt) noexcept {
+    TASTY_SEAT_BODY(UiVtConsole);
+    return text_mode_op(vt);
+}
+
+void UiVtConsole::graphics(int vt) noexcept {
+    TASTY_SEAT_BODY(UiVtConsole);
+    graphics_op(vt);
+}
+
+void UiVtConsole::text(int vt) noexcept {
+    TASTY_SEAT_BODY(UiVtConsole);
+    text_op(vt);
 }
 
 }  // namespace mister::os

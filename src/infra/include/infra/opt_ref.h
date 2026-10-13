@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <memory>
 #include <optional>
 #include <type_traits>
 
@@ -18,7 +17,8 @@ class OptRef {
 public:
     constexpr OptRef() noexcept = default;
     constexpr OptRef(std::nullopt_t) noexcept {}
-    constexpr explicit OptRef(T& ref) noexcept : ptr_(std::addressof(ref)) {}
+
+    constexpr explicit OptRef(T& ref) noexcept : ptr_(__builtin_addressof(ref)) {}
     OptRef(T&&) = delete;
 
     constexpr OptRef& operator=(std::nullopt_t) noexcept {

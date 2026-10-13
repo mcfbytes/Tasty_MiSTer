@@ -6,7 +6,9 @@
 #include <optional>
 #include <span>
 
+#include "app/bay_releases.h"
 #include "app/bitstream_programmer.h"
+#include "app/built_core.h"
 #include "app/board_ops.h"
 #include "app/bt_pump.h"
 #include "app/cheat_blob_cell.h"
@@ -34,6 +36,8 @@
 #include "app/osd_wire.h"
 #include "app/pcm_main.h"
 #include "app/pcm_ring_feeder.h"
+#include "app/save_state_attach.h"
+#include "app/save_state_facts.h"
 #include "app/scaler_frame_source.h"
 #include "app/screenshot_queue.h"
 #include "app/session_owner.h"
@@ -41,6 +45,7 @@
 #include "app/video_pump.h"
 #include "app/window_job_service.h"
 #include "boot_parts.h"
+#include "cores/save_copy_level.h"
 #include "hal/fpga_memory.h"
 #include "hal/hdmi_int_level.h"
 #include "infra/diag_log.h"
@@ -71,7 +76,7 @@ class DeviceBlock {
 
 public:
     struct Front {
-        app::LauncherDemandCell* launcher_demand = nullptr;
+        infra::OptRef<app::LauncherDemandCell> launcher_demand{};
         infra::OptRef<xthread::WakeFlag> launcher_wake{};
         infra::OptRef<const app::LauncherStateCell> launcher_state{};
         infra::OptRef<app::LauncherKeyBridge> launcher_keys{};
@@ -81,6 +86,8 @@ public:
     struct Seats {
         ThreadAssembly::SeatMains& mains;
         DiagSampler& diag;
+
+        infra::OptRef<app::SaveStateAttach> save_states{};
     };
 
     static constexpr const char* kDiagPath = "/tmp/MiSTer_diag";
@@ -146,6 +153,8 @@ public:
 
     xthread::WakeFlag main_wake_;
 
+    xthread::WakeFlag main_stop_{};
+
     app::LinkTxChannel main_inbox_;
     app::LinkRxChannel main_rx_;
     app::LinkRxChannel ui_rx_;
@@ -190,8 +199,15 @@ public:
 
     app::CheatBlobCell cheat_blob_{};
 
+    app::SaveStateAttach::AskInbox save_state_asks_{xthread::Polled{}};
+    app::SaveStateFactsCell save_state_facts_{};
+    cores::SaveCopyCell save_copy_{};
+
     app::CheatCatalogCell cheat_catalog_{};
     app::CheatLink cheat_link_{cheat_blob_};
+
+    app::CoreBay bay_{};
+    app::BayReleasesCell bay_releases_{};
 
     LadderScope ladder_;
     const app::SupervisorParts parts_;
@@ -205,7 +221,7 @@ public:
     app::CoreFrameCell core_frames_{};
     app::CoreFrameCounter frame_counter_;
 
-    const svc::Vfs* vfs_ = nullptr;
+    const svc::Vfs& vfs_;
 };
 
 }  // namespace mister::fw

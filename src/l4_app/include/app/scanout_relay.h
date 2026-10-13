@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <utility>
 
 #include "app/scanout_channel.h"
 #include "app/uio_burst.h"
@@ -15,8 +16,8 @@ class ScanoutRelay {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    ScanoutRelay(hal::ISpiTransport& link, ScanoutChannel& channel) noexcept
-        : link_(link), channel_(channel) {}
+    ScanoutRelay(hal::ISpiTransport& link, ScanoutChannel::Answerer channel) noexcept
+        : link_(link), channel_(std::move(channel)) {}
     ScanoutRelay(const ScanoutRelay&) = delete;
     ScanoutRelay& operator=(const ScanoutRelay&) = delete;
 
@@ -41,7 +42,7 @@ private:
     void refuse_(const UioBurst& ask) noexcept;
 
     hal::ISpiTransport& link_;
-    ScanoutChannel& channel_;
+    ScanoutChannel::Answerer channel_;
     std::optional<UioBurst> ask_{};
     std::optional<UioBurst> unsent_{};
     std::uint32_t round_words_ = 0;

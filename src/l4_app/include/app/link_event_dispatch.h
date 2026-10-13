@@ -12,7 +12,7 @@ namespace mister::app {
 template <EventSink Seat>
 struct LinkEventRoutes {
     template <class A>
-    static constexpr bool routed = kLinkEventFacts[infra::ordinal(A::kKind)].sink == Seat;
+    static constexpr bool routed = routed_to<A>(Seat);
 };
 
 template <class S>
@@ -33,6 +33,7 @@ template <class S>
 concept LinkEventUiSink = requires(S& s, const proto::LinkEvent& m) {
     s.on(std::declval<const proto::LinkEvent::ButtonLevel&>());
     s.on(std::declval<const proto::LinkEvent::OsdMask&>());
+    s.on(std::declval<const proto::LinkEvent::PolledWord&>());
     s.misrouted(m);
 };
 
@@ -40,6 +41,7 @@ template <class S>
 concept LinkEventInputSink = requires(S& s, const proto::LinkEvent& m) {
     s.on(std::declval<const proto::LinkEvent::Ps2Control&>());
     s.on(std::declval<const proto::LinkEvent::Ps2ControlEnded&>());
+    s.on(std::declval<const proto::LinkEvent::PolledWord&>());
     s.misrouted(m);
 };
 

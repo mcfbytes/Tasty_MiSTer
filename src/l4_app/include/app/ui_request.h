@@ -36,6 +36,8 @@ struct UiRequest {
         Reboot,
         LoadFileByDigit,
         LoadRamImage,
+        SetOsdStyle,
+        SdramDetected,
         kCount,
     };
     struct Head {
@@ -111,9 +113,19 @@ struct UiRequest {
         std::uint8_t pad_[2]{};
         cores::RamImageRecipe recipe{};
     };
-    using Alternatives =
-        std::tuple<LoadCore, SaveConfig, SaveDips, SaveCoreConfig, LoadCoreConfig, LoadFile,
-                   MountImage, UnmountImage, ResetCore, Reboot, LoadFileByDigit, LoadRamImage>;
+
+    struct SetOsdStyle {
+        static constexpr Kind kKind = Kind::SetOsdStyle;
+        std::uint8_t style = 0;
+    };
+
+    struct SdramDetected {
+        static constexpr Kind kKind = Kind::SdramDetected;
+        std::uint16_t osd_mask = 0;
+    };
+    using Alternatives = std::tuple<LoadCore, SaveConfig, SaveDips, SaveCoreConfig, LoadCoreConfig,
+                                    LoadFile, MountImage, UnmountImage, ResetCore, Reboot,
+                                    LoadFileByDigit, LoadRamImage, SetOsdStyle, SdramDetected>;
 
     Kind kind = Kind::LoadCore;
     std::uint8_t pad_[3]{};

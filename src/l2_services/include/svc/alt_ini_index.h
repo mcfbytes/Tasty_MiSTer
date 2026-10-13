@@ -14,7 +14,7 @@ inline constexpr std::size_t kMaxAltInis = 3;
 
 class AltIniIndex {
 public:
-    Ex<void> scan_once(std::span<const std::string> root_dirents);
+    [[nodiscard]] Ex<void> scan_once(std::span<const std::string> root_dirents);
 
     std::string_view name_for(std::uint8_t alt) const;
 

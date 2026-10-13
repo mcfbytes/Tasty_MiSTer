@@ -10,7 +10,6 @@ namespace mister::app {
 
 struct HdBadgeView {
     HdOsdStatus::Badge badge = HdOsdStatus::Badge::Unknown;
-    std::uint8_t fps = 0;
 };
 
 static_assert(static_cast<std::uint8_t>(HdOsdStatus::Badge::Unknown) == 0);

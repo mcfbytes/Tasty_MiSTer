@@ -50,30 +50,30 @@ std::expected<BoardParts, BoardParts::Refusal> BoardParts::make(const hal::Board
             auto bus = hal::SpiBus::open(std::move(*mailbox), &stats);
             if (!bus) return std::unexpected(Refusal{"SpiBus::open", bus.error()});
             auto link = std::make_unique<hal::SpiBus>(std::move(*bus));
-            auto prog = boards::CycloneVProgrammer::open(windows);
+            auto prog = boards::cyclone_v::Programmer::open(windows);
             if (!prog)
-                return refuse_after_link(*link, "BoardParts::make (CycloneVProgrammer::open)",
+                return refuse_after_link(*link, "BoardParts::make (cyclone_v::Programmer::open)",
                                          prog.error());
-            auto brg = boards::CycloneVBridges::open(windows);
+            auto brg = boards::cyclone_v::Bridges::open(windows);
             if (!brg)
-                return refuse_after_link(*link, "BoardParts::make (CycloneVBridges::open)",
+                return refuse_after_link(*link, "BoardParts::make (cyclone_v::Bridges::open)",
                                          brg.error());
             return BoardParts(std::move(link),
-                              std::make_unique<boards::CycloneVProgrammer>(std::move(*prog)),
-                              std::make_unique<boards::CycloneVBridges>(std::move(*brg)));
+                              std::make_unique<boards::cyclone_v::Programmer>(std::move(*prog)),
+                              std::make_unique<boards::cyclone_v::Bridges>(std::move(*brg)));
         }
         case hal::BoardId::De25Nano:
             return BoardParts(std::make_unique<boards::RefusingLinkPort>(),
-                              std::make_unique<boards::Agilex5Programmer>(),
-                              std::make_unique<boards::Agilex5Bridges>());
+                              std::make_unique<boards::agilex_5::Programmer>(),
+                              std::make_unique<boards::agilex_5::Bridges>());
         case hal::BoardId::Zynq7000:
             return BoardParts(std::make_unique<boards::RefusingLinkPort>(),
-                              std::make_unique<boards::Zynq7000Programmer>(),
-                              std::make_unique<boards::Zynq7000Bridges>());
+                              std::make_unique<boards::zynq_7000::Programmer>(),
+                              std::make_unique<boards::zynq_7000::Bridges>());
         case hal::BoardId::SpiSbc:
             return BoardParts(std::make_unique<boards::RefusingLinkPort>(),
-                              std::make_unique<boards::SpiSbcProgrammer>(),
-                              std::make_unique<boards::SpiSbcBridges>());
+                              std::make_unique<boards::spi_sbc::Programmer>(),
+                              std::make_unique<boards::spi_sbc::Bridges>());
     }
 
     return std::unexpected(Refusal{"BoardParts::make", Error{Errc::dt_missing, ERR_SITE(), 0}});

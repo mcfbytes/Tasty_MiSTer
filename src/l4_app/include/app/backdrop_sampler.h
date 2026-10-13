@@ -8,6 +8,7 @@
 
 #include "hal/scaler_buffers.h"
 #include "hal/scaler_probe.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 
@@ -26,6 +27,7 @@ public:
         std::uint16_t line = 0;
         bool live = false;
         bool fresh = false;
+        bool same = false;
         bool lowlat = false;
         bool stuck = false;
         std::uint8_t stride_mib = 0;
@@ -48,13 +50,15 @@ private:
     [[nodiscard]] bool copy_frame_() noexcept;
 
     hal::ScalerBuffers window_;
-    const os::IClock* clock_ = nullptr;
+    infra::OptRef<const os::IClock> clock_{};
     hal::ScalerProbe probe_{};
     Phase phase_ = Phase::Probe;
     bool have_applies_ = false;
     bool lowlat_ = false;
     bool stuck_ = false;
     bool live_ = false;
+    bool have_prev_ = false;
+    bool same_ = false;
     std::uint32_t applies_ = 0;
     std::uint32_t torn_ = 0;
     std::size_t stride_ = 0;
@@ -65,6 +69,7 @@ private:
     std::uint16_t line_ = 0;
     std::size_t view_n_ = 0;
     std::vector<std::byte> cache_{};
+    std::vector<std::byte> prev_{};
 };
 
 }  // namespace mister::app

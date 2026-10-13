@@ -16,8 +16,10 @@ set(TASTY_CORES_TASTY
   src/nvram_store.cpp
   src/wav_data.cpp
   src/psx_core.cpp
+  src/addressed_load.cpp
   src/registry.cpp
   src/snes_core.cpp
+  src/mailbox_carriage.cpp
   src/snes_rom.cpp
   src/msu_machine.cpp
   src/msu_companion.cpp
@@ -53,10 +55,16 @@ endif()
 
 tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/acsi_dma.h
+  cores/addressed_load.h
+  cores/generic_profile.h
   cores/acsi_engine.h
   cores/arcade_core.h
+  cores/arcade_facts.h
+  cores/arcade_manifest_role.h
+  cores/manifest_doc_facts.h
   cores/manifest_doc_role.h
   cores/assembled_rom.h
+  cores/fill_run.h
   cores/blank_region.h
   cores/blank_save_spec.h
   cores/boot_asset.h
@@ -68,6 +76,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/cd_drive.h
   cores/cd_engine.h
   cores/cd_engine_stats.h
+  cores/cd_flow.h
   cores/cd_flow_query.h
   cores/cd_head_prime.h
   cores/cd_io_indices.h
@@ -79,6 +88,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/ladder_host.h
   cores/mount_status.h
   cores/save_extent.h
+  cores/save_copy_level.h
   cores/stream_load.h
   cores/stream_load_bracket.h
   cores/stream_load_end.h
@@ -132,6 +142,12 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/mra_cheat.h
   cores/mra_cheat_records.h
   cores/mra_doc.h
+  cores/mra_stager.h
+  cores/manifest_act.h
+  cores/manifest_counts.h
+  cores/send_bracket.h
+  cores/stage_window.h
+  cores/manifest_stager.h
   cores/cheat_engine.h
   cores/cheat_engine_row.h
   cores/n64_analog.h
@@ -200,8 +216,11 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/sector_kick.h
   cores/sector_kick_row.h
   cores/sega_cdd_engine.h
+  cores/service_tick_row.h
   cores/signature_row.h
   cores/snes_core.h
+  cores/sgb_core.h
+  cores/mailbox_carriage.h
   cores/snes_rom.h
   cores/msu_wire.h
   cores/msu_machine.h
@@ -275,6 +294,12 @@ if(TASTY_BUILD_TESTS)
     LIBS mister_cores tasty_test_options
     TIMEOUT 60)
 
+  tasty_unit_test(tasty_cores_addressed_load_unit
+    NAME tasty.cores_addressed_load
+    SOURCES tests/addressed_load_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
+
   tasty_unit_test(tasty_cores_ram_image_unit
     NAME tasty.cores_ram_image
     SOURCES tests/ram_image_unit.cpp
@@ -333,6 +358,12 @@ if(TASTY_BUILD_TESTS)
     NAME tasty.cores_n64_db
     SOURCES tests/n64_db_unit.cpp
     DEFINES TASTY_N64_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/n64"
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
+
+  tasty_unit_test(tasty_cores_core_adopt_unit
+    NAME tasty.cores_core_adopt
+    SOURCES tests/core_adopt_unit.cpp
     LIBS mister_cores tasty_test_options
     TIMEOUT 60)
 
@@ -486,6 +517,12 @@ if(TASTY_BUILD_TESTS)
   tasty_unit_test(tasty_cores_uef_unit
     NAME tasty.cores_uef
     SOURCES tests/uef_unit.cpp
+    LIBS mister_cores tasty_test_options
+    TIMEOUT 60)
+
+  tasty_unit_test(tasty_cores_generic_core_unit
+    NAME tasty.cores_generic_core
+    SOURCES tests/generic_core_unit.cpp
     LIBS mister_cores tasty_test_options
     TIMEOUT 60)
 

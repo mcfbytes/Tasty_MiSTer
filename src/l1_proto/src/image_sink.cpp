@@ -51,6 +51,14 @@ Ex<void> SpiImageSink::write(std::span<const std::uint8_t> data) {
     return ds_->write(data);
 }
 
+Ex<std::size_t> SpiImageSink::write_taken(std::span<const std::uint8_t> data) {
+    TASTY_SEAT_BODY(SpiImageSink);
+    if (!active()) {
+        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
+    }
+    return ds_->write_taken(data);
+}
+
 Ex<void> SpiImageSink::end() {
     TASTY_SEAT_BODY(SpiImageSink);
     if (!ds_) {

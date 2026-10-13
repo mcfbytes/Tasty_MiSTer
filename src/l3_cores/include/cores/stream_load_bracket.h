@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -28,6 +29,8 @@ public:
     ~StreamLoadBracket();
 
     [[nodiscard]] Ex<void> write(std::span<const std::uint8_t> piece);
+
+    [[nodiscard]] Ex<std::size_t> write_taken(std::span<const std::uint8_t> piece);
 
     [[nodiscard]] Ex<void> close(std::uint64_t bytes, std::uint32_t crc);
 

@@ -2,6 +2,7 @@
 #include "app/backdrop_scaler.h"
 
 #include <cstdint>
+#include <cstring>
 
 namespace mister::app {
 namespace {
@@ -51,6 +52,7 @@ void BackdropScaler::open(const HdTheme& theme) noexcept {
     q8_ = q > 256u ? static_cast<std::uint16_t>(256) : static_cast<std::uint16_t>(q);
     src_w_ = 0;
     xmap_.clear();
+    row_px_.clear();
 }
 
 void BackdropScaler::ensure_xmap_(std::uint16_t src_w, std::int32_t cover_w) noexcept {
@@ -80,34 +82,86 @@ HdRect BackdropScaler::scale(std::span<const std::byte> rgb, std::uint16_t src_w
     const auto frame_w = static_cast<std::int32_t>(stride_px);
     game = clip_box(game, frame_w, frame_h);
     if (game.w <= 0 || game.h <= 0) return {};
-    for (std::int32_t y = game.y; y < game.y + game.h; ++y) {
-        auto* row = frame.data() + static_cast<std::size_t>(y) * stride_px;
-        for (std::int32_t x = game.x; x < game.x + game.w; ++x)
-            row[x] = primary_;
-    }
-    cover = intersect(clip_box(cover, frame_w, frame_h), game);
-    if (cover.w <= 0 || cover.h <= 0) return report ? game : HdRect{};
+    const HdRect cov = intersect(clip_box(cover, frame_w, frame_h), game);
+    paint_band_(rgb, src_w, src_h, src_line, frame, stride_px, game, cov, game.y, game.y + game.h);
+    return report ? game : HdRect{};
+}
+
+void BackdropScaler::scale_rows(std::span<const std::byte> rgb, std::uint16_t src_w,
+                                std::uint16_t src_h, std::uint16_t src_line,
+                                std::span<std::uint16_t> frame, std::uint32_t stride_px,
+                                HdRect game, HdRect cover, std::int32_t y0,
+                                std::int32_t y1) noexcept {
+    TASTY_SEAT_BODY(BackdropScaler);
+    if (stride_px == 0 || frame.empty() || src_w == 0 || src_h == 0 || src_line < src_w * 3u)
+        return;
+    const auto frame_h = static_cast<std::int32_t>(frame.size() / stride_px);
+    const auto frame_w = static_cast<std::int32_t>(stride_px);
+    game = clip_box(game, frame_w, frame_h);
+    if (game.w <= 0 || game.h <= 0) return;
+    const auto band0 = y0 > game.y ? y0 : game.y;
+    const auto band1 = y1 < game.y + game.h ? y1 : game.y + game.h;
+    if (band0 >= band1) return;
+    const HdRect cov = intersect(clip_box(cover, frame_w, frame_h), game);
+    paint_band_(rgb, src_w, src_h, src_line, frame, stride_px, game, cov, band0, band1);
+}
+
+void BackdropScaler::paint_band_(std::span<const std::byte> rgb, std::uint16_t src_w,
+                                 std::uint16_t src_h, std::uint16_t src_line,
+                                 std::span<std::uint16_t> frame, std::uint32_t stride_px,
+                                 HdRect game, HdRect cover, std::int32_t y0,
+                                 std::int32_t y1) noexcept {
+    const auto gx0 = game.x;
+    const auto gx1 = game.x + game.w;
+    const bool has_cover = cover.w > 0 && cover.h > 0;
     const auto bytes = static_cast<std::size_t>(src_line) * src_h;
-    if (rgb.size() < bytes) return report ? game : HdRect{};
+
+    const bool draw_cover = has_cover && rgb.size() >= bytes;
+    const auto cx0 = cover.x;
+    const auto cx1 = cover.x + cover.w;
+    const auto cy0 = cover.y;
+    const auto cy1 = cover.y + cover.h;
+    for (std::int32_t y = y0; y < y1; ++y) {
+        auto* row = frame.data() + static_cast<std::size_t>(y) * stride_px;
+        if (draw_cover && y >= cy0 && y < cy1) {
+            for (std::int32_t x = gx0; x < cx0; ++x)
+                row[x] = primary_;
+            for (std::int32_t x = cx1; x < gx1; ++x)
+                row[x] = primary_;
+        } else {
+            for (std::int32_t x = gx0; x < gx1; ++x)
+                row[x] = primary_;
+        }
+    }
+    if (!draw_cover) return;
+    const auto dy0 = y0 > cy0 ? y0 : cy0;
+    const auto dy1 = y1 < cy1 ? y1 : cy1;
+    if (dy0 >= dy1) return;
     ensure_xmap_(src_w, cover.w);
+    if (row_px_.size() < static_cast<std::size_t>(cover.w))
+        row_px_.resize(static_cast<std::size_t>(cover.w));
     const auto dim = [this](std::uint8_t c) noexcept {
         return static_cast<std::uint8_t>((static_cast<std::uint32_t>(c) * q8_) >> 8);
     };
-    for (std::int32_t y = cover.y; y < cover.y + cover.h; ++y) {
+    std::uint32_t packed_sy = 0xFFFFFFFFu;
+    for (std::int32_t y = dy0; y < dy1; ++y) {
         auto sy =
             static_cast<std::uint32_t>(y - cover.y) * src_h / static_cast<std::uint32_t>(cover.h);
         if (sy >= src_h) sy = static_cast<std::uint32_t>(src_h - 1);
-        const auto* src = rgb.data() + static_cast<std::size_t>(sy) * src_line;
-        auto* dst = frame.data() + static_cast<std::size_t>(y) * stride_px;
-        for (std::int32_t x = cover.x; x < cover.x + cover.w; ++x) {
-            const auto sx = xmap_[static_cast<std::size_t>(x - cover.x)];
-            const auto* p = src + static_cast<std::size_t>(sx) * 3u;
-            dst[x] =
-                pack565(dim(static_cast<std::uint8_t>(p[0])), dim(static_cast<std::uint8_t>(p[1])),
-                        dim(static_cast<std::uint8_t>(p[2])));
+        if (sy != packed_sy) {
+            packed_sy = sy;
+            const auto* src = rgb.data() + static_cast<std::size_t>(sy) * src_line;
+            for (std::int32_t x = 0; x < cover.w; ++x) {
+                const auto sx = xmap_[static_cast<std::size_t>(x)];
+                const auto* p = src + static_cast<std::size_t>(sx) * 3u;
+                row_px_[static_cast<std::size_t>(x)] = pack565(
+                    dim(static_cast<std::uint8_t>(p[0])), dim(static_cast<std::uint8_t>(p[1])),
+                    dim(static_cast<std::uint8_t>(p[2])));
+            }
         }
+        auto* dst = frame.data() + static_cast<std::size_t>(y) * stride_px + cover.x;
+        std::memcpy(dst, row_px_.data(), static_cast<std::size_t>(cover.w) * sizeof(std::uint16_t));
     }
-    return report ? game : HdRect{};
 }
 
 }  // namespace mister::app

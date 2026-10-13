@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "cores/movie_codec.h"
+#include "infra/byte_view.h"
 #include "infra/crc32.h"
 #include "svc/archive.h"
 #include "svc/file.h"
@@ -90,8 +91,7 @@ bool readable(const svc::ArchiveEntry& e) noexcept {
         done += *got;
     }
     const auto bytes = std::as_bytes(std::span(out));
-    const std::span<const std::uint8_t> u(reinterpret_cast<const std::uint8_t*>(bytes.data()),
-                                          bytes.size());
+    const std::span<const std::uint8_t> u = infra::byte_cast<const std::uint8_t>(bytes);
     if (crc32_update(0, u) != e.crc) return refuse(CR::Archive, ERR_SITE());
     return out;
 }
@@ -236,8 +236,7 @@ public:
         if (*got != want) return refuse(CR::Archive, ERR_SITE());
         account_(0, std::span<const std::byte>(b).first(want));
         if (!crc_ok_()) return refuse(CR::Archive, ERR_SITE());
-        if (want == 3 && std::string_view(reinterpret_cast<const char*>(b.data()), 3) == kBom)
-            base_ = 3;
+        if (want == 3 && infra::as_text(std::span(b).first(3)) == kBom) base_ = 3;
         return {};
     }
 
@@ -247,7 +246,7 @@ public:
         if (off < head_.size()) {
             const auto n =
                 static_cast<std::size_t>(std::min<std::uint64_t>(dst.size(), head_.size() - off));
-            std::copy_n(reinterpret_cast<const std::byte*>(head_.data()) + off, n, dst.data());
+            std::copy_n(infra::text_bytes(head_).data() + off, n, dst.data());
             done = n;
         }
         if (done == dst.size()) return done;
@@ -279,8 +278,7 @@ private:
     void account_(std::uint64_t at, std::span<const std::byte> b) noexcept {
         if (at > crc_pos_ || at + b.size() <= crc_pos_) return;
         b = b.subspan(static_cast<std::size_t>(crc_pos_ - at));
-        crc_ = crc32_update(crc_, std::span<const std::uint8_t>(
-                                      reinterpret_cast<const std::uint8_t*>(b.data()), b.size()));
+        crc_ = crc32_update(crc_, infra::byte_cast<const std::uint8_t>(b));
         crc_pos_ += b.size();
     }
     bool crc_ok_() const noexcept { return crc_pos_ != member_size_ || crc_ == crc_want_; }

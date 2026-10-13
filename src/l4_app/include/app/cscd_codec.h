@@ -80,10 +80,10 @@ private:
                                     std::span<std::byte> out) noexcept;
 
     FrameArena arena_{};
-    std::byte* prev_ = nullptr;
-    std::byte* delta_ = nullptr;
-    std::byte* work_ = nullptr;
-    std::byte* dup_ = nullptr;
+    std::span<std::byte> prev_{};
+    std::span<std::byte> delta_{};
+    std::span<std::byte> work_{};
+    std::span<std::byte> dup_{};
     std::size_t dup_len_ = 0;
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;

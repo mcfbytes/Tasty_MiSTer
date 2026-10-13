@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/slot_pool.h"
 #include "infra/spsc_ring.h"
@@ -41,6 +42,18 @@ public:
         std::uint8_t done = 0;
     };
     static_assert(std::is_trivially_copyable_v<Handoff> && sizeof(Handoff) == 2);
+
+    struct Census {
+        std::uint8_t idle = 0, held_by_owner = 0, outbound = 0, held_by_worker = 0, inbound = 0;
+        std::uint8_t live = 0;
+        std::uint32_t breaches = 0;
+        [[nodiscard]] constexpr std::size_t total() const noexcept {
+            return std::size_t(idle) + held_by_owner + outbound + held_by_worker + inbound;
+        }
+        [[nodiscard]] constexpr bool intact() const noexcept {
+            return breaches == 0 && total() == live;
+        }
+    };
 
     class Loan {
         TASTY_SEAT_EXEMPT(component);
@@ -140,12 +153,88 @@ public:
     static_assert(!std::is_trivially_copyable_v<Loan>);
     static_assert(!std::is_trivially_copyable_v<Job>);
 
+    class Owner {
+        TASTY_SEAT_EXEMPT(component);
+
+    public:
+        Owner() noexcept = default;
+        Owner(Owner&& o) noexcept : ch_(std::exchange(o.ch_, nullptr)) {}
+        Owner& operator=(Owner&& o) noexcept {
+            if (this != &o) ch_ = std::exchange(o.ch_, nullptr);
+            return *this;
+        }
+        Owner(const Owner&) = delete;
+        Owner& operator=(const Owner&) = delete;
+
+        [[nodiscard]] explicit operator bool() const noexcept { return ch_ != nullptr; }
+        [[nodiscard]] Loan acquire() noexcept { return ch_->acquire(); }
+        void send(Loan&& l) noexcept { ch_->send(std::move(l)); }
+        [[nodiscard]] Loan reap() noexcept { return ch_->reap(); }
+        [[nodiscard]] std::size_t reclaim_all_parked() noexcept {
+            return ch_->reclaim_all_parked();
+        }
+        [[nodiscard]] bool set_live(std::uint8_t n) noexcept { return ch_->set_live(n); }
+        [[nodiscard]] Census census() const noexcept { return ch_->census(); }
+        [[nodiscard]] std::uint8_t live() const noexcept { return ch_->live(); }
+        [[nodiscard]] std::uint8_t index_of(const Loan& l) const noexcept {
+            return ch_->index_of(l);
+        }
+        [[nodiscard]] bool arm_owner() noexcept
+            requires SeatMayBlock<OwnerSeat>
+        {
+            return ch_->arm_owner();
+        }
+        void disarm_owner() noexcept
+            requires SeatMayBlock<OwnerSeat>
+        {
+            ch_->disarm_owner();
+        }
+
+    private:
+        friend class LoanChannel;
+        explicit Owner(LoanChannel* ch) noexcept : ch_(ch) {}
+        LoanChannel* ch_ = nullptr;
+    };
+
+    class Worker {
+        TASTY_SEAT_EXEMPT(component);
+
+    public:
+        Worker() noexcept = default;
+        Worker(Worker&& o) noexcept : ch_(std::exchange(o.ch_, nullptr)) {}
+        Worker& operator=(Worker&& o) noexcept {
+            if (this != &o) ch_ = std::exchange(o.ch_, nullptr);
+            return *this;
+        }
+        Worker(const Worker&) = delete;
+        Worker& operator=(const Worker&) = delete;
+
+        [[nodiscard]] explicit operator bool() const noexcept { return ch_ != nullptr; }
+        [[nodiscard]] Job take() noexcept { return ch_->take(); }
+        [[nodiscard]] std::size_t outbound() const noexcept { return ch_->outbound(); }
+        [[nodiscard]] bool arm_worker() noexcept
+            requires SeatMayBlock<WorkerSeat>
+        {
+            return ch_->arm_worker();
+        }
+        void disarm_worker() noexcept
+            requires SeatMayBlock<WorkerSeat>
+        {
+            ch_->disarm_worker();
+        }
+
+    private:
+        friend class LoanChannel;
+        explicit Worker(LoanChannel* ch) noexcept : ch_(ch) {}
+        LoanChannel* ch_ = nullptr;
+    };
+
     explicit LoanChannel(WakeFlag& worker_wake) noexcept
         requires(!SeatMayBlock<OwnerSeat> && SeatMayBlock<WorkerSeat>)
-        : worker_wake_(&worker_wake) {}
+        : worker_wake_(worker_wake) {}
     explicit LoanChannel(WakeFlag& owner_wake) noexcept
         requires(SeatMayBlock<OwnerSeat> && !SeatMayBlock<WorkerSeat>)
-        : owner_wake_(&owner_wake) {}
+        : owner_wake_(owner_wake) {}
     explicit LoanChannel(Polled) noexcept
         requires(SeatMayBlock<OwnerSeat> != SeatMayBlock<WorkerSeat>)
     {}
@@ -154,15 +243,24 @@ public:
     {}
     LoanChannel(WakeFlag& worker_wake, WakeFlag& owner_wake) noexcept
         requires(SeatMayBlock<OwnerSeat> && SeatMayBlock<WorkerSeat>)
-        : worker_wake_(&worker_wake), owner_wake_(&owner_wake) {}
+        : worker_wake_(worker_wake), owner_wake_(owner_wake) {}
     LoanChannel(WakeFlag& worker_wake, Polled) noexcept
         requires(SeatMayBlock<OwnerSeat> && SeatMayBlock<WorkerSeat>)
-        : worker_wake_(&worker_wake) {}
+        : worker_wake_(worker_wake) {}
 
     LoanChannel(const LoanChannel&) = delete;
     LoanChannel& operator=(const LoanChannel&) = delete;
     LoanChannel(LoanChannel&&) = delete;
     LoanChannel& operator=(LoanChannel&&) = delete;
+
+    [[nodiscard]] Owner owner() noexcept { return mint_(kOwnerMinted) ? Owner{this} : Owner{}; }
+    [[nodiscard]] Worker worker() noexcept {
+        return mint_(kWorkerMinted) ? Worker{this} : Worker{};
+    }
+
+    [[nodiscard]] std::uint32_t breaches() const noexcept {
+        return breaches_.load(std::memory_order_relaxed);
+    }
 
     [[nodiscard]] Loan acquire() noexcept {
         seat_assert<OwnerSeat>(ERR_SITE(), "LoanChannel::acquire off the owner seat");
@@ -209,26 +307,26 @@ public:
     [[nodiscard]] bool arm_worker() noexcept
         requires SeatMayBlock<WorkerSeat>
     {
-        if (worker_wake_ == nullptr) return false;
+        if (!worker_wake_) return false;
         worker_wake_->arm();
         return out_.size() == 0;
     }
     void disarm_worker() noexcept
         requires SeatMayBlock<WorkerSeat>
     {
-        if (worker_wake_ != nullptr) worker_wake_->disarm();
+        if (worker_wake_) worker_wake_->disarm();
     }
     [[nodiscard]] bool arm_owner() noexcept
         requires SeatMayBlock<OwnerSeat>
     {
-        if (owner_wake_ == nullptr) return false;
+        if (!owner_wake_) return false;
         owner_wake_->arm();
         return back_.size() == 0;
     }
     void disarm_owner() noexcept
         requires SeatMayBlock<OwnerSeat>
     {
-        if (owner_wake_ != nullptr) owner_wake_->disarm();
+        if (owner_wake_) owner_wake_->disarm();
     }
 
     [[nodiscard]] std::size_t reclaim_all_parked() noexcept {
@@ -265,19 +363,8 @@ public:
         return true;
     }
 
-    struct Census {
-        std::uint8_t idle = 0, held_by_owner = 0, outbound = 0, held_by_worker = 0, inbound = 0;
-        std::uint8_t live = 0;
-        std::uint32_t breaches = 0;
-        [[nodiscard]] constexpr std::size_t total() const noexcept {
-            return std::size_t(idle) + held_by_owner + outbound + held_by_worker + inbound;
-        }
-        [[nodiscard]] constexpr bool intact() const noexcept {
-            return breaches == 0 && total() == live;
-        }
-    };
-
     [[nodiscard]] Census census() const noexcept {
+        seat_assert<OwnerSeat>(ERR_SITE(), "LoanChannel::census off the owner seat");
         return Census{
             static_cast<std::uint8_t>(pool_.available()), loans_.load(std::memory_order_relaxed),
             static_cast<std::uint8_t>(out_.size()),       jobs_.load(std::memory_order_relaxed),
@@ -286,33 +373,45 @@ public:
     }
 
     [[nodiscard]] std::size_t outbound() const noexcept { return out_.size(); }
-    [[nodiscard]] std::uint8_t live() const noexcept { return live_; }
+
+    [[nodiscard]] std::uint8_t live() const noexcept {
+        seat_assert<OwnerSeat>(ERR_SITE(), "LoanChannel::live off the owner seat");
+        return live_;
+    }
     static constexpr std::size_t capacity() noexcept { return N; }
 
 private:
     friend class Loan;
     friend class Job;
+    static constexpr std::uint8_t kOwnerMinted = 1;
+    static constexpr std::uint8_t kWorkerMinted = 2;
+    [[nodiscard]] bool mint_(std::uint8_t side) noexcept {
+        if ((minted_ & side) != 0) return false;
+        minted_ = static_cast<std::uint8_t>(minted_ | side);
+        return true;
+    }
     static void bump_(std::atomic<std::uint8_t>& a, int d) noexcept {
         a.store(static_cast<std::uint8_t>(a.load(std::memory_order_relaxed) + d),
                 std::memory_order_relaxed);
     }
     void kick_worker_() noexcept {
         if constexpr (SeatMayBlock<WorkerSeat>) {
-            if (worker_wake_ != nullptr) worker_wake_->kick_if_armed();
+            if (worker_wake_) worker_wake_->kick_if_armed();
         }
     }
     void kick_owner_() noexcept {
         if constexpr (SeatMayBlock<OwnerSeat>) {
-            if (owner_wake_ != nullptr) owner_wake_->kick_if_armed();
+            if (owner_wake_) owner_wake_->kick_if_armed();
         }
     }
 
     SpscRing<Handoff, N> out_{};
     SpscRing<Handoff, N> back_{};
-    WakeFlag* worker_wake_ = nullptr;
-    WakeFlag* owner_wake_ = nullptr;
+    infra::OptRef<WakeFlag> worker_wake_{};
+    infra::OptRef<WakeFlag> owner_wake_{};
     std::atomic<std::uint8_t> loans_{0};
     std::atomic<std::uint8_t> jobs_{0};
+    std::uint8_t minted_ = 0;
     std::atomic<std::uint32_t> breaches_{0};
     std::uint8_t live_ = N;
     Pool pool_{};

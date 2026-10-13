@@ -5,6 +5,8 @@
 #include <type_traits>
 
 #include "app/path_text.h"
+#include "app/types.h"
+#include "app/ui_request.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "proto/types.h"
@@ -18,6 +20,10 @@ struct ContentRequest {
     std::uint32_t load_addr = 0;
     proto::FileId save{};
     bool whole = false;
+    ContentEdge edge = ContentEdge::Content;
+
+    UiRequest::Kind asked{};
+    CorrelationTag tag{};
 };
 static_assert(std::is_trivially_copyable_v<ContentRequest>,
               "the path rides the request, never a PathId");

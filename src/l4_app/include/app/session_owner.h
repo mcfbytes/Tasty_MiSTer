@@ -17,6 +17,7 @@
 #include "app/bitstream_programmer.h"
 #include "app/cheat_catalog_cell.h"
 #include "app/conf_str_cell.h"
+#include "app/core_builder.h"
 #include "app/ladder_cell.h"
 #include "app/mount_status_cell.h"
 #include "proto/save_ask.h"
@@ -35,10 +36,14 @@
 #include "app/load_walk.h"
 #include "app/load_window_counts.h"
 #include "app/load_window_map.h"
+#include "app/manifest_ladder.h"
 #include "app/mra_facts.h"
 #include "app/path_text.h"
 #include "app/pending_load.h"
 #include "app/remembered_path.h"
+#include "app/save_state_attach.h"
+#include "app/save_state_facts.h"
+#include "app/start_chain.h"
 #include "app/ui_request.h"
 #include "app/ui_request_ring.h"
 #include "cores/companion_load.h"
@@ -118,6 +123,15 @@ public:
         const hal::PinLevelCell& pin_levels;
 
         infra::OptRef<const os::IClock> clock{};
+
+        infra::OptRef<SaveStateAttach::AskInbox> save_state_asks{};
+        infra::OptRef<const SaveStateFactsCell> save_state_facts{};
+
+        CoreBay& bay;
+        const BayReleasesCell& bay_releases;
+        const CoreTerms& core_terms;
+
+        infra::OptRef<hal::IDoorbellSource> doorbell_source{};
     };
 
     SessionOwner(QuiesceChannel& park, const Link& link) noexcept
@@ -130,7 +144,9 @@ public:
                                         : static_cast<const os::IClock&>(default_clock_)),
           ladder_cell_(link.ladder_cell), programmer_(link.programmer), vfs_(link.storage),
           cell_(link.fabric_cell), ops_(link.ops), window_map_(link.window_map),
-          ftx_level_cell_(link.file_tx_level_cell) {
+          ftx_level_cell_(link.file_tx_level_cell), save_state_asks_(link.save_state_asks),
+          save_state_facts_(link.save_state_facts),
+          builder_(link.bay, link.bay_releases, link.core_terms, link.doorbell_source) {
         (void)front_end_image_.assign(kFrontEndImage);
         adopt_(link);
     }
@@ -211,6 +227,12 @@ public:
         return companion_attach_refusals_;
     }
     [[nodiscard]] const LoadWindowCounts& window_counts() const noexcept { return window_counts_; }
+
+    [[nodiscard]] const ManifestLadder* manifest_walk() const noexcept {
+        return manifest_ ? &*manifest_ : nullptr;
+    }
+
+    [[nodiscard]] std::uint32_t manifest_errors() const noexcept { return manifest_errors_; }
     [[nodiscard]] const xthread::Telemetry<LoadWindowCounts, SeatTag::Unbound>& window_cell()
         const noexcept {
         return window_cell_;
@@ -218,11 +240,19 @@ public:
 
     [[nodiscard]] bool pieces_live() const noexcept { return pieces_.has_value(); }
 
+    [[nodiscard]] bool content_watched() const noexcept { return watch_.has_value(); }
+
     [[nodiscard]] bool rung_pending() const noexcept;
 
     [[nodiscard]] std::uint32_t loads_refused_busy() const noexcept { return loads_refused_busy_; }
 
     [[nodiscard]] std::uint32_t savestate_refusals() const noexcept { return savestate_refusals_; }
+
+    [[nodiscard]] bool savestate_held() const noexcept { return ss_hold_.has_value(); }
+
+    [[nodiscard]] std::uint32_t savestate_hold_expiries() const noexcept {
+        return savestate_hold_expiries_;
+    }
 
     void set_boot_cookie(std::uint16_t c) {
         cookie_ = c;
@@ -234,6 +264,10 @@ public:
     void service_boot(const UiRequest::LoadCore& req);
 
     void expect_boot_negotiate() noexcept;
+
+    void latch_boot_companion(std::string_view xml) noexcept;
+
+    [[nodiscard]] const CoreBuilder& core_builder() const noexcept { return builder_; }
 
     void on_seats_live() noexcept { before_seats_ = false; }
 
@@ -249,6 +283,8 @@ public:
     void on(const UiRequest::Reboot& req, const UiRequest::Head& head);
     void on(const UiRequest::LoadFileByDigit& req, const UiRequest::Head& head);
     void on(const UiRequest::LoadRamImage& req, const UiRequest::Head& head);
+    void on(const UiRequest::SetOsdStyle& req, const UiRequest::Head& head);
+    void on(const UiRequest::SdramDetected& req, const UiRequest::Head& head);
     void misrouted(const UiRequest& m) noexcept;
 
     void on(const proto::LinkEvent::ReadyEdge& e) noexcept;
@@ -345,8 +381,18 @@ public:
         return remembered_mounts_skipped_;
     }
     [[nodiscard]] std::size_t start_mounts_owed() const noexcept { return start_mounts_.size(); }
+
+    [[nodiscard]] std::uint32_t boot_images_armed() const noexcept { return boot_images_armed_; }
+    [[nodiscard]] std::uint32_t boot_images_skipped() const noexcept {
+        return boot_images_skipped_;
+    }
     [[nodiscard]] std::uint32_t remembered_missed() const noexcept { return remembered_missed_; }
     [[nodiscard]] std::uint32_t files_failed() const noexcept { return files_failed_; }
+
+    [[nodiscard]] std::uint32_t long_wait_resumes() const noexcept { return long_wait_resumes_; }
+    [[nodiscard]] std::uint32_t long_wait_refusals() const noexcept { return long_wait_refusals_; }
+
+    [[nodiscard]] std::uint32_t long_wait_drops() const noexcept { return long_wait_drops_; }
 
     [[nodiscard]] std::uint32_t addons_sent() const noexcept { return addons_sent_; }
     [[nodiscard]] std::uint32_t addons_missing() const noexcept { return addons_missing_; }
@@ -370,6 +416,19 @@ public:
     [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Unbound>&
     save_write_failures_cell() const noexcept {
         return save_write_failures_cell_;
+    }
+
+    [[nodiscard]] std::uint32_t ini_write_failures() const noexcept { return ini_write_failures_; }
+
+    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Unbound>&
+    ini_write_failures_cell() const noexcept {
+        return ini_write_failures_cell_;
+    }
+
+    [[nodiscard]] std::uint32_t memsz_unmeasured() const noexcept { return memsz_unmeasured_; }
+
+    [[nodiscard]] std::uint32_t sdram_write_failures() const noexcept {
+        return sdram_write_failures_;
     }
 
     [[nodiscard]] LinkTxChannel& inbox() noexcept { return inbox_; }
@@ -444,6 +503,12 @@ private:
         proto::IoIndex index{};
         PathText path{};
         CorrelationTag tag{};
+        std::optional<std::uint8_t> index_word{};
+    };
+
+    struct Owed {
+        UiRequest::Kind which{};
+        CorrelationTag tag{};
     };
 
     [[nodiscard]] bool order(const proto::LinkOp& op) override;
@@ -473,6 +538,9 @@ private:
     [[nodiscard]] bool order_walk(proto::IoIndex slot, std::string_view path,
                                   std::uint32_t gen) override;
     [[nodiscard]] cores::MountStatus walk_status() override { return walk_answer_; }
+
+    [[nodiscard]] bool order_savestates(std::string_view image, std::uint32_t gen) override;
+    [[nodiscard]] std::uint32_t savestates_answered() override;
     [[nodiscard]] cores::SaveExtent save_extent() override;
     [[nodiscard]] proto::StatusWord status_word() override;
     void bios_missing() override;
@@ -491,9 +559,16 @@ private:
 
     void arm_next_mount_();
     void arm_start_mount_(const MountAsk& ask);
-    void read_remembered_mounts_();
+
+    [[nodiscard]] bool read_remembered_mounts_();
+
+    [[nodiscard]] std::optional<std::uint8_t> pick_index_word_(proto::IoIndex index,
+                                                               std::string_view path) const;
+    void queue_boot_images_(const StartChain& chain);
+    void arm_boot_image_(const MountAsk& ask);
     [[nodiscard]] bool start_mounts_live_() const noexcept {
-        return !start_mounts_.empty() || (save_mount_ && save_mount_->start) || start_pick_ladder_;
+        return !start_mounts_.empty() || !boot_images_.empty() ||
+               (save_mount_ && save_mount_->start) || start_pick_ladder_;
     }
 
     void step_save_mount_();
@@ -562,6 +637,8 @@ private:
 
     void on_load_core_(const UiRequest::LoadCore& req, CorrelationTag tag);
 
+    void note_memsz_(const UiRequest::LoadCore& req) noexcept;
+
     enum class Asked : std::uint8_t { Yes, Invalid, NoRoom };
     Asked ask_switch_(const UiRequest::LoadCore& req, CorrelationTag tag);
 
@@ -592,7 +669,31 @@ private:
 
     void step_pieces_();
 
-    [[nodiscard]] bool arm_loader_(const ContentRequest& req);
+    struct ContentWatch {
+        std::uint32_t act = 0;
+        std::unique_ptr<svc::IFile> file{};
+        std::uint64_t total = 0;
+        std::uint32_t crc = 0;
+        std::uint8_t wire_index = 0;
+        PathText path{};
+        std::uint64_t from = 0;
+        bool cut_on_hold = false;
+    };
+
+    [[nodiscard]] bool order_content_tx_(proto::FileId file, ContentWatch watch);
+
+    void step_watch_();
+
+    void forget_watch_() noexcept;
+
+    void watch_last_piece_();
+    [[nodiscard]] bool watch_answered_() const noexcept;
+
+    [[nodiscard]] bool arm_loader_(const ContentRequest& req, std::string_view save = {},
+                                   std::uint64_t save_bytes = 0);
+
+    [[nodiscard]] const cores::CoreFactory* load_row_() const;
+    [[nodiscard]] bool owns_loader_() const;
     [[nodiscard]] bool arm_walk_(const ContentRequest& req, const cores::CoreFactory& row);
     void step_load_();
     void step_walk_();
@@ -603,7 +704,8 @@ private:
     void step_companion_();
     void publish_window_counts_() noexcept;
 
-    [[nodiscard]] Ex<void> attach_savestates_() noexcept;
+    [[nodiscard]] bool ask_savestates_(std::string_view rom, std::uint32_t gen) noexcept;
+    [[nodiscard]] bool savestates_answered_(std::uint32_t gen) const noexcept;
     void order_hold_reset_() noexcept;
 
     template <class A>
@@ -628,7 +730,17 @@ private:
     void on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept;
     void order_session_up_() noexcept;
 
-    void order_start_assets_(bool index0_taken) noexcept;
+    [[nodiscard]] StartChain::Facts start_facts_(std::string_view rbf, bool index0_taken,
+                                                 bool slot0_held, bool remembered,
+                                                 bool ladder) const;
+
+    [[nodiscard]] std::string start_rbf_() const;
+
+    void order_start_chain_(const StartChain& chain);
+
+    void order_rbf_tail_(std::string_view path, proto::WideIoIndex dest, std::uint64_t offset);
+
+    [[nodiscard]] bool order_reset_level_(bool asserted);
 
     struct RememberedFile {
         proto::ConfStrFileRow row;
@@ -673,10 +785,13 @@ private:
     [[nodiscard]] std::optional<ContentRequest> content_for_(const proto::ConfStrFileRow& row,
                                                              std::string_view path) const;
 
-    void attach_row_savestates_(bool opensave);
+    [[nodiscard]] std::optional<std::uint32_t> attach_row_savestates_(bool opensave,
+                                                                      std::string_view rom);
 
     void order_row_content_(const ContentRequest& cr, bool opensave, UiRequest::SaveChoice choice,
                             CorrelationTag tag);
+
+    void launch_content_(const ContentRequest& cr);
 
     struct PickedLoad {
         ContentRequest content{};
@@ -688,6 +803,9 @@ private:
     void plan_addons_(const proto::ConfStrFileRow& row, std::string_view pick,
                       const PickedLoad& load, const cores::RamImageRecipe& image);
     void run_load_(const PickedLoad& load);
+
+    void run_attached_load_(const PickedLoad& load);
+    void step_savestate_hold_();
     void step_addons_();
 
     [[nodiscard]] bool content_ordered_() const noexcept;
@@ -696,11 +814,19 @@ private:
                                                       std::string_view path) const;
     void intern_rel_at_(proto::FileId id, std::string_view rel);
     void intern_manifest_(std::string_view rel);
+    [[nodiscard]] std::vector<std::uint8_t> read_manifest_(std::string_view rel) const;
     void pack_manifest_cheats_(std::span<const std::uint8_t> doc);
     void order_slot_previews_(const std::byte* pack, std::size_t len);
     void latch_mra_facts_();
     void order_bind_facts_() noexcept;
-    void order_make_core_() noexcept;
+    void order_make_core_();
+    [[nodiscard]] std::string_view make_core_rel_() const noexcept;
+    void post_make_core_();
+
+    [[nodiscard]] bool arm_manifest_();
+    void step_manifest_();
+    void finish_core_made_() noexcept;
+    [[nodiscard]] std::string_view manifest_text_() const noexcept;
     void elect_defmra_(std::string_view text);
     void intern_saved_cfg_(std::string_view core_name, proto::LinkOp::BindConfig& op);
     [[nodiscard]] proto::TxSlabId intern_exact_(std::string_view rel, std::size_t want);
@@ -712,6 +838,8 @@ private:
     void on_slot_names_(const proto::LinkEvent::SaveBytes& e);
     void finish_boot_restore_() noexcept;
     void publish_refusal_(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept;
+
+    void publish_done_(UiRequest::Kind which, CorrelationTag tag) noexcept;
 
     void advise_switch_failed_(Errc code) noexcept;
     void order_save_upload_() noexcept;
@@ -750,6 +878,8 @@ private:
     bool ladder_moved_ = false;
     bool start_ladder_ = false;
     bool start_pick_ladder_ = false;
+    Owed ladder_owed_{};
+    Owed content_owed_{};
     std::optional<proto::LinkOp::CoreReset> reset_owed_{};
     std::uint32_t resets_ordered_ = 0;
 
@@ -775,12 +905,18 @@ private:
 
     FixedStr<64, StrFit::Clip> core_name_{};
     std::uint32_t start_assets_ordered_ = 0;
+
+    bool generic_identity_ = false;
     std::uint32_t remembered_ordered_ = 0;
     std::uint32_t remembered_missed_ = 0;
 
     std::deque<MountAsk> start_mounts_{};
     std::uint32_t remembered_mounts_armed_ = 0;
     std::uint32_t remembered_mounts_skipped_ = 0;
+
+    std::deque<MountAsk> boot_images_{};
+    std::uint32_t boot_images_armed_ = 0;
+    std::uint32_t boot_images_skipped_ = 0;
 
     std::uint8_t ladder_slot_ = 0;
     std::uint32_t mounts_armed_ = 0;
@@ -805,6 +941,10 @@ private:
     std::uint32_t config_saves_ = 0;
     std::uint32_t save_write_failures_ = 0;
     xthread::Telemetry<std::uint32_t, SeatTag::Unbound> save_write_failures_cell_{};
+    std::uint32_t ini_write_failures_ = 0;
+    xthread::Telemetry<std::uint32_t, SeatTag::Unbound> ini_write_failures_cell_{};
+    std::uint32_t memsz_unmeasured_ = 0;
+    std::uint32_t sdram_write_failures_ = 0;
 
     PathText saved_cfg_stem_{};
 
@@ -920,10 +1060,25 @@ private:
     std::optional<AddonSend> addons_{};
     std::optional<PickedLoad> picked_load_{};
     std::optional<AddonSend> addons_after_{};
+
+    struct SaveStateHold {
+        PickedLoad load{};
+        std::uint32_t gen = 0;
+        std::int64_t due_ns = 0;
+    };
+    std::optional<SaveStateHold> ss_hold_{};
     std::uint32_t addons_sent_ = 0;
     std::uint32_t addons_missing_ = 0;
     std::optional<FileTxPieces> pieces_{};
+    std::optional<ContentWatch> watch_{};
+    std::uint32_t long_wait_resumes_ = 0;
+    std::uint32_t long_wait_refusals_ = 0;
+    std::uint32_t long_wait_drops_ = 0;
     std::optional<LoadLadder> load_{};
+    std::optional<ManifestLadder> manifest_{};
+    bool made_restore_owed_ = false;
+    bool made_cheat_records_ = false;
+    std::uint32_t manifest_errors_ = 0;
     std::optional<LoadWalk> walk_{};
     std::span<const cores::CoreWindowDecl> walk_windows_{};
     CompanionHost::Binds* companion_binds_ = nullptr;
@@ -941,11 +1096,18 @@ private:
     cores::LoaderMemo loader_memo_{};
     ILoadWindowMap& window_map_;
     const FileTxLevelCell& ftx_level_cell_;
+    infra::OptRef<SaveStateAttach::AskInbox> save_state_asks_;
+    infra::OptRef<const SaveStateFactsCell> save_state_facts_;
+
+    CoreBuilder builder_;
     LoadWindowCounts window_counts_{};
     xthread::Telemetry<LoadWindowCounts, SeatTag::Unbound> window_cell_{};
     bool made_with_manifest_ = false;
+    PathText manifest_rel_{};
+    PathText boot_companion_{};
     std::uint32_t loads_refused_busy_ = 0;
     std::uint32_t savestate_refusals_ = 0;
+    std::uint32_t savestate_hold_expiries_ = 0;
     std::uint32_t images_sized_ = 0;
     MraFacts pending_facts_{};
     bool facts_pending_ = false;

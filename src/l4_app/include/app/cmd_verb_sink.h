@@ -5,6 +5,8 @@
 
 namespace mister::app {
 
+struct Mgl;
+
 class ICmdVerbSink {
 public:
     virtual ~ICmdVerbSink() = default;
@@ -22,6 +24,11 @@ public:
     [[nodiscard]] virtual bool on(const CmdVerb::RecArm& v) noexcept = 0;
     [[nodiscard]] virtual bool on(const CmdVerb::RecStop& v) noexcept = 0;
     [[nodiscard]] virtual bool on(const CmdVerb::RecDisarm& v) noexcept = 0;
+
+    [[nodiscard]] virtual bool on(const Mgl& doc) noexcept {
+        (void)doc;
+        return false;
+    }
 
 protected:
     ICmdVerbSink() = default;

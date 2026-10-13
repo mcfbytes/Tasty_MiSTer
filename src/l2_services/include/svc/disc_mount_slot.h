@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "infra/fixed_str.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "svc/disc_mounter.h"
 
@@ -20,7 +21,7 @@ struct DiscMountSlot {
 
     FixedStr<kDiscPathCap, StrFit::Reject> path{};
 
-    const CuePolicy* policy = nullptr;
+    infra::OptRef<const CuePolicy> policy{};
     std::uint32_t gen = 0;
     DiscOp op = DiscOp::Mount;
     std::uint8_t mounted = 0;

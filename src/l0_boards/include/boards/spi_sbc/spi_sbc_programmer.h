@@ -7,11 +7,11 @@
 #include "infra/error.h"
 #include "hal/fpga_programmer.h"
 
-namespace mister::boards {
+namespace mister::boards::spi_sbc {
 
-class SpiSbcProgrammer final : public hal::IFpgaProgrammer {
+class Programmer final : public hal::IFpgaProgrammer {
 public:
-    SpiSbcProgrammer() = default;
+    Programmer() = default;
 
     [[nodiscard]] Ex<bool> program_begin() override;
     [[nodiscard]] Ex<void> program_chunk(std::span<const std::byte> chunk) override;
@@ -21,4 +21,4 @@ public:
     bool programmed() const override;
 };
 
-}  // namespace mister::boards
+}  // namespace mister::boards::spi_sbc

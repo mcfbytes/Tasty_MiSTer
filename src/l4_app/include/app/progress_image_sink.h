@@ -8,6 +8,7 @@
 #include "cores/load_progress.h"
 #include "cores/progress_ticker.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/image_sink.h"
 #include "proto/spi_image_sink.h"
@@ -31,11 +32,19 @@ public:
         if (r) count(data.size());
         return r;
     }
+
+    [[nodiscard]] Ex<std::size_t> write_taken(std::span<const std::uint8_t> data) override {
+        TASTY_SEAT_BODY(ProgressImageSink);
+        auto r = inner_->write_taken(data);
+        if (r) count(*r);
+        return r;
+    }
     [[nodiscard]] Ex<void> end() override {
         TASTY_SEAT_BODY(ProgressImageSink);
-        if (IBracketClose* const c = closing_; c != nullptr) {
-            closing_ = nullptr;
-            c->before_close();
+        if (closing_) {
+            IBracketClose& c = *closing_;
+            closing_.reset();
+            c.before_close();
         }
         return inner_->end();
     }
@@ -45,7 +54,7 @@ public:
         TASTY_SEAT_BODY(ProgressImageSink);
         sent_ = 0;
         armed_ = true;
-        closing_ = closing;
+        closing_ = infra::opt_ref_of(closing);
         tick_.bind(&sink);
         tick_.begin(total);
     }
@@ -58,7 +67,7 @@ public:
     }
     void disarm() noexcept {
         TASTY_SEAT_BODY(ProgressImageSink);
-        closing_ = nullptr;
+        closing_.reset();
         if (!armed_) return;
         armed_ = false;
         tick_.finish();
@@ -69,7 +78,7 @@ public:
 private:
     proto::SpiImageSink* inner_;
     cores::ProgressTicker tick_{};
-    IBracketClose* closing_ = nullptr;
+    infra::OptRef<IBracketClose> closing_{};
     std::uint64_t sent_ = 0;
     bool armed_ = false;
 };

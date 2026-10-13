@@ -14,11 +14,11 @@ class Ps2Mouse {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
-    Ex<void> motion(int dx, int dy, int dz, std::uint8_t buttons);
+    [[nodiscard]] Ex<void> motion(int dx, int dy, int dz, std::uint8_t buttons);
 
     [[nodiscard]] bool next_frame(Ps2Frame& out) noexcept;
 
-    Ex<void> accept_control(std::uint16_t word1);
+    [[nodiscard]] Ex<void> accept_control(std::uint16_t word1);
 
     void end_control() noexcept;
 

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 
 #include "app/load_window.h"
@@ -11,6 +12,7 @@
 #include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/loan_channel.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "hal/phys_region.h"
 #include "proto/reset_edge.h"
@@ -22,7 +24,7 @@ namespace mister::app {
 
 struct WindowJobSlot {
     TASTY_SEAT_MEDIATOR(Any, Any);
-    const cores::IWindowJobKind* kind = nullptr;
+    infra::OptRef<const cores::IWindowJobKind> kind{};
     Error err{Errc::io, 0, 0};
     std::uint8_t ok = 0;
     std::byte order[cores::kWindowOrderBytes];
@@ -42,7 +44,7 @@ public:
                      xthread::WakeFlag& io_wake) noexcept
         : vfs_(&vfs), map_(&map), aperture_(aperture), chan_(io_wake) {}
 
-    ~WindowJobService() override;
+    ~WindowJobService() override = default;
 
     [[nodiscard]] bool arm_osd_open(cores::IWindowSave& role) noexcept;
     [[nodiscard]] bool arm_reset_edge(cores::IWindowSave& role,
@@ -55,11 +57,11 @@ public:
 
     void forget_held() noexcept;
 
-    [[nodiscard]] bool busy() const noexcept { return armed_; }
-    [[nodiscard]] std::uint32_t jobs_ok() const noexcept { return ok_.get(); }
-    [[nodiscard]] std::uint32_t jobs_failed() const noexcept { return failed_.get(); }
-    [[nodiscard]] std::uint32_t refusals() const noexcept { return refusals_.get(); }
-    [[nodiscard]] std::uint32_t flushes() const noexcept { return flushes_.get(); }
+    [[nodiscard]] bool busy() const noexcept { return rt_.armed; }
+    [[nodiscard]] std::uint32_t jobs_ok() const noexcept { return rt_.ok.get(); }
+    [[nodiscard]] std::uint32_t jobs_failed() const noexcept { return rt_.failed.get(); }
+    [[nodiscard]] std::uint32_t refusals() const noexcept { return rt_.refusals.get(); }
+    [[nodiscard]] std::uint32_t flushes() const noexcept { return rt_.flushes.get(); }
 
     void serve() noexcept override;
     [[nodiscard]] bool idle() const noexcept override;
@@ -67,24 +69,34 @@ public:
 private:
     enum class Held : std::uint8_t { None, Waiting, Flushing };
 
+    struct DestroyInPlace {
+        void operator()(cores::IWindowJob* p) const noexcept { p->~IWindowJob(); }
+    };
+
     [[nodiscard]] Chan::Loan acquire_() noexcept;
     void send_(Chan::Loan&& loan, const cores::IWindowJobKind* kind) noexcept;
     void finish_(bool ok, Error err) noexcept;
 
+    struct Rt {
+        bool armed = false;
+        Held held = Held::None;
+        std::uint32_t held_act = 0;
+        proto::IoIndex held_index{};
+        xthread::Counter ok{}, failed{}, refusals{}, flushes{};
+    };
+
+    struct Io {
+        Chan::Job job{};
+        std::unique_ptr<cores::IWindowJob, DestroyInPlace> running{};
+        std::optional<LoadWindow> window{};
+    };
+
     const svc::Vfs* vfs_;
     ILoadWindowMap* map_;
     hal::PhysRegion aperture_;
-
-    bool armed_ = false;
-    Held held_ = Held::None;
-    std::uint32_t held_act_ = 0;
-    proto::IoIndex held_index_{};
-    xthread::Counter ok_{}, failed_{}, refusals_{}, flushes_{};
+    Rt rt_{};
     Chan chan_;
-
-    Chan::Job job_{};
-    cores::IWindowJob* running_ = nullptr;
-    std::optional<LoadWindow> window_{};
+    Io io_{};
 };
 
 }  // namespace mister::app

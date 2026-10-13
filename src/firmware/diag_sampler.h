@@ -15,6 +15,7 @@
 #include "app/event.h"
 #include "app/diag_counters.h"
 #include "app/fallback_counts.h"
+#include "app/core_builder.h"
 #include "app/load_window_counts.h"
 #include "app/video_pump.h"
 #include "app/avi_write_status.h"
@@ -24,8 +25,10 @@
 #include "app/replay_status.h"
 #include "app/hd_osd_status.h"
 #include "diag_records.h"
+#include "rt_evidence.h"
 #include "infra/diag_log.h"
 #include "infra/log_lane.h"
+#include "infra/opt_ref.h"
 #include "infra/rt_stats.h"
 #include "infra/wake_flag.h"
 #include "hal/thread_map.h"
@@ -45,9 +48,7 @@ class ChdPrefetch;
 
 namespace mister::fw {
 
-struct RtEvidence;
-
-inline constexpr std::uint64_t kRssSoftCeilingBytes = 64ull * 1024 * 1024;
+inline constexpr std::uint64_t kRssSoftCeilingBytes = 96ull * 1024 * 1024;
 
 struct DiagStats {
     std::atomic<std::uint64_t> drains{0};
@@ -69,22 +70,25 @@ public:
     struct DeviceCells {
         const Unbound<std::uint32_t>& mgl_row0;
         const Unbound<app::LoadWindowCounts>& window_counts;
+        const app::BayCountsCell& bay_counts;
         const app::DiagCountersCell& diag;
         const Unbound<std::uint32_t>& pause_expiries;
         const Unbound<std::uint32_t>& recover_polls;
         const Unbound<std::uint32_t>& save_write_failures;
         const Unbound<app::FallbackCounts>& fallbacks;
+        const Unbound<std::uint32_t>& ini_write_failures;
         const app::DoorbellStatsCell& doorbell;
         const reactor::RoundTimingCell& round_timing;
-        const reactor::FrameCell* frames = nullptr;
+        infra::OptRef<const reactor::FrameCell> frames{};
         app::ScreenshotQueue& screenshots;
     };
 
     struct Sources {
-        const app::CmdFifoCell* fifo = nullptr;
-        const app::MglPumpCell* mgl = nullptr;
+        infra::OptRef<const app::CmdFifoCell> fifo{};
+        infra::OptRef<const app::MglPumpCell> mgl{};
         const Unbound<std::uint32_t>& mgl_row0;
         const Unbound<app::LoadWindowCounts>& window_counts;
+        const app::BayCountsCell& bay_counts;
         const app::VideoStatsCell& video_stats;
         const app::VideoGeometryCell& video_geometry;
         app::VideoWire& video_wire;
@@ -93,11 +97,12 @@ public:
         const Unbound<std::uint32_t>& recover_polls;
         const Unbound<std::uint32_t>& save_write_failures;
         const Unbound<app::FallbackCounts>& fallbacks;
+        const Unbound<std::uint32_t>& ini_write_failures;
         const app::DoorbellStatsCell& doorbell;
         const reactor::RoundTimingCell& round_timing;
-        const reactor::FrameCell* frames = nullptr;
-        const app::UiPageCell* ui_pages = nullptr;
-        const app::HdOsdStatusCell* hd = nullptr;
+        infra::OptRef<const reactor::FrameCell> frames{};
+        infra::OptRef<const app::UiPageCell> ui_pages{};
+        infra::OptRef<const app::HdOsdStatusCell> hd{};
         const app::ReplayStatusCell& replay;
         const app::RecorderStatusCell& rec_capture;
         const app::EncodeStatusCell& rec_encode;
@@ -106,17 +111,19 @@ public:
         app::ScreenshotQueue& screenshots;
     };
 
-    DiagSampler(xthread::RtStats& stats, app::EventQueue& events, const RtEvidence& ev,
+    DiagSampler(xthread::RtStats& stats, app::EventQueue& events, const Unbound<RtEvidence>& ev,
                 const xthread::WakeFlag& quiescing, const std::atomic<bool>& transitioning,
                 xthread::DiagLog& diag, xthread::LogLane& rt_lane, const Sources& sources) noexcept;
 
     DiagSampler(const DiagSampler&) = delete;
     DiagSampler& operator=(const DiagSampler&) = delete;
 
-    void set_input_build(app::InputBuild* build) noexcept { input_build_ = build; }
+    void set_input_build(app::InputBuild* build) noexcept {
+        input_build_ = infra::opt_ref_of(build);
+    }
 
-    void set_input_sample(const app::InputSample* s) noexcept { input_ = s; }
-    void set_prefetch(svc::ChdPrefetch* pf) noexcept { prefetch_ = pf; }
+    void set_input_sample(const app::InputSample* s) noexcept { input_ = infra::opt_ref_of(s); }
+    void set_prefetch(svc::ChdPrefetch* pf) noexcept { prefetch_ = infra::opt_ref_of(pf); }
 
     bool open_diag(const char* path) noexcept { return diag_.open(path); }
     const xthread::DiagLog& diag() const noexcept { return diag_; }
@@ -125,7 +132,7 @@ public:
 
     xthread::LogLane* rt_log_lane() noexcept { return &lane_rt_; }
 
-    void set_frame_source(app::IFrameSource* s) noexcept { frame_src_ = s; }
+    void set_frame_source(app::IFrameSource* s) noexcept { frame_src_ = infra::opt_ref_of(s); }
     void set_screenshot_dir(std::string dir) noexcept { shot_dir_ = std::move(dir); }
 
     void drain_screenshots() noexcept;
@@ -137,7 +144,7 @@ public:
 
     const DiagStats& stats() const noexcept { return diag_stats_; }
 
-    static constexpr std::size_t kRtstatsWorstCase = 3920;
+    static constexpr std::size_t kRtstatsWorstCase = 4064;
 
     static constexpr std::size_t kSessWorstCase =
         infra::json_record_worst(SessRecord::kKey, infra::json_worst_len<SessView>());
@@ -193,24 +200,28 @@ private:
 
     xthread::RtStats& stats_;
     app::EventQueue& events_;
-    const RtEvidence& ev_;
+
+    const Unbound<RtEvidence>& ev_cell_;
+    Unbound<RtEvidence>::Reader ev_reader_{};
+
+    RtEvidence ev_{};
     const xthread::WakeFlag& quiescing_;
     const std::atomic<bool>& transitioning_;
 
     app::VideoWire& video_wire_;
-    app::InputBuild* input_build_ = nullptr;
-    const app::InputSample* input_ = nullptr;
-    svc::ChdPrefetch* prefetch_ = nullptr;
+    infra::OptRef<app::InputBuild> input_build_{};
+    infra::OptRef<const app::InputSample> input_{};
+    infra::OptRef<svc::ChdPrefetch> prefetch_{};
 
-    const reactor::FrameCell* frames_ = nullptr;
+    infra::OptRef<const reactor::FrameCell> frames_{};
     app::ScreenshotQueue& shots_;
 
-    app::IFrameSource* frame_src_ = nullptr;
+    infra::OptRef<app::IFrameSource> frame_src_{};
     std::string shot_dir_;
     std::uint32_t shots_written_ = 0;
     std::uint32_t shots_failed_ = 0;
-    const app::CmdFifoCell* fifo_stats_ = nullptr;
-    const app::MglPumpCell* mgl_stats_ = nullptr;
+    infra::OptRef<const app::CmdFifoCell> fifo_stats_{};
+    infra::OptRef<const app::MglPumpCell> mgl_stats_{};
     const xthread::Telemetry<std::uint32_t, SeatTag::Unbound>& mgl_row0_;
     const xthread::Telemetry<app::LoadWindowCounts, SeatTag::Unbound>& window_counts_;
     const app::VideoStatsCell& video_stats_;
@@ -218,7 +229,7 @@ private:
     const app::DiagCountersCell& diag_cell_;
     const app::DoorbellStatsCell& doorbell_cell_;
     const reactor::RoundTimingCell& round_timing_;
-    const app::UiPageCell* ui_pages_ = nullptr;
+    infra::OptRef<const app::UiPageCell> ui_pages_{};
     xthread::DiagLog& diag_;
     xthread::LogLane& lane_rt_;
 

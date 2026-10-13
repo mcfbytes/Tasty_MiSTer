@@ -5,6 +5,8 @@
 #include "svc/rw_interleaver.h"
 #include "svc/sector_descrambler.h"
 
+#include "infra/byte_view.h"
+
 #include <algorithm>
 #include <charconv>
 #include <cstring>
@@ -52,30 +54,32 @@ std::string_view lstrip(std::string_view s) noexcept {
 constexpr std::size_t kNoDigitLimit = 0;
 constexpr std::size_t kCueFieldDigits = 2;
 
-bool take_uint(std::string_view& s, std::uint32_t& out,
-               std::size_t max_digits = kNoDigitLimit) noexcept {
+std::optional<std::uint32_t> take_uint(std::string_view& s,
+                                       std::size_t max_digits = kNoDigitLimit) noexcept {
     s = lstrip(s);
     const std::size_t span =
         (max_digits == kNoDigitLimit) ? s.size() : std::min(s.size(), max_digits);
     const char* first = s.data();
     const char* last = s.data() + span;
+    std::uint32_t out = 0;
     const auto r = std::from_chars(first, last, out);
-    if (r.ec != std::errc{} || r.ptr == first) return false;
+    if (r.ec != std::errc{} || r.ptr == first) return std::nullopt;
     s.remove_prefix(static_cast<std::size_t>(r.ptr - first));
-    return true;
+    return out;
 }
 
-bool take_msf(std::string_view s, std::uint32_t& frames) noexcept {
-    std::uint32_t m = 0, sec = 0, f = 0;
-    if (!take_uint(s, m, kCueFieldDigits)) return false;
-    if (s.empty() || s.front() != ':') return false;
+std::optional<std::uint32_t> take_msf(std::string_view s) noexcept {
+    const auto m = take_uint(s, kCueFieldDigits);
+    if (!m) return std::nullopt;
+    if (s.empty() || s.front() != ':') return std::nullopt;
     s.remove_prefix(1);
-    if (!take_uint(s, sec, kCueFieldDigits)) return false;
-    if (s.empty() || s.front() != ':') return false;
+    const auto sec = take_uint(s, kCueFieldDigits);
+    if (!sec) return std::nullopt;
+    if (s.empty() || s.front() != ':') return std::nullopt;
     s.remove_prefix(1);
-    if (!take_uint(s, f, kCueFieldDigits)) return false;
-    frames = m * 60 * kFramesPerSecond + sec * kFramesPerSecond + f;
-    return true;
+    const auto f = take_uint(s, kCueFieldDigits);
+    if (!f) return std::nullopt;
+    return *m * 60 * kFramesPerSecond + *sec * kFramesPerSecond + *f;
 }
 
 std::uint8_t bcd(std::uint32_t v) noexcept {
@@ -86,21 +90,23 @@ class LineReader {
 public:
     explicit LineReader(std::string_view text) noexcept : text_(text) {}
 
-    bool next(char* out, std::size_t cap) noexcept {
+    [[nodiscard]] Ex<void> next(std::span<char> out) noexcept {
+        if (out.empty()) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
         do {
             std::size_t n = 0;
             out[0] = '\0';
             while (pos_ < text_.size() && text_[pos_] != '\n') {
                 const char c = text_[pos_++];
                 if (c == '\r') continue;
-                if (n + 1 < cap) {
+                if (n + 1 < out.size()) {
                     out[n++] = c;
                     out[n] = '\0';
                 }
             }
             if (pos_ < text_.size()) ++pos_;
         } while (out[0] == '\0' && pos_ < text_.size());
-        return out[0] != '\0';
+        if (out[0] == '\0') return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+        return {};
     }
 
 private:
@@ -126,16 +132,20 @@ bool take_key(std::string_view& s, std::string_view key) noexcept {
     return true;
 }
 
-bool take_token(std::string_view& s, char* out, std::size_t cap) noexcept {
+struct Taken {
+    std::size_t written = 0;
+    std::string_view rest;
+};
+[[nodiscard]] Taken take_token(std::span<char> out, std::string_view s) noexcept {
     s = lstrip(s);
     std::size_t n = 0;
-    while (n + 1 < cap && n < s.size() && s[n] != ' ' && s[n] != '\t') {
+    while (n + 1 < out.size() && n < s.size() && s[n] != ' ' && s[n] != '\t') {
         out[n] = s[n];
         ++n;
     }
-    out[n] = '\0';
+    if (!out.empty()) out[n] = '\0';
     s.remove_prefix(n);
-    return n != 0;
+    return Taken{n, s};
 }
 
 std::uint64_t cue_file_pos(const Track& t) noexcept {
@@ -150,22 +160,44 @@ std::optional<ChdTrack> parse_chd_track(const ChdMetaRow& row) noexcept {
     std::string_view s = row.text;
     ChdTrack out{};
     char pgsub[32]{};
-    if (!take_key(s, "TRACK:") || !take_uint(s, out.number)) return std::nullopt;
-    if (!take_key(s, "TYPE:") || !take_token(s, out.type, sizeof(out.type))) return std::nullopt;
-    if (!take_key(s, "SUBTYPE:") || !take_token(s, out.subtype, sizeof(out.subtype)))
-        return std::nullopt;
-    if (!take_key(s, "FRAMES:") || !take_uint(s, out.frames)) return std::nullopt;
+    if (!take_key(s, "TRACK:")) return std::nullopt;
+    const auto number = take_uint(s);
+    if (!number) return std::nullopt;
+    out.number = *number;
+    if (!take_key(s, "TYPE:")) return std::nullopt;
+    const Taken type = take_token(out.type, s);
+    if (type.written == 0) return std::nullopt;
+    s = type.rest;
+    if (!take_key(s, "SUBTYPE:")) return std::nullopt;
+    const Taken subtype = take_token(out.subtype, s);
+    if (subtype.written == 0) return std::nullopt;
+    s = subtype.rest;
+    if (!take_key(s, "FRAMES:")) return std::nullopt;
+    const auto frames = take_uint(s);
+    if (!frames) return std::nullopt;
+    out.frames = *frames;
 
     if (!row.v2) return out;
-    if (!take_key(s, "PREGAP:") || !take_uint(s, out.pregap)) return std::nullopt;
-    if (!take_key(s, "PGTYPE:") || !take_token(s, out.pgtype, sizeof(out.pgtype)))
-        return std::nullopt;
-    if (!take_key(s, "PGSUB:") || !take_token(s, pgsub, sizeof(pgsub))) return std::nullopt;
-    if (!take_key(s, "POSTGAP:") || !take_uint(s, out.postgap)) return std::nullopt;
+    if (!take_key(s, "PREGAP:")) return std::nullopt;
+    const auto pregap = take_uint(s);
+    if (!pregap) return std::nullopt;
+    out.pregap = *pregap;
+    if (!take_key(s, "PGTYPE:")) return std::nullopt;
+    const Taken pgtype = take_token(out.pgtype, s);
+    if (pgtype.written == 0) return std::nullopt;
+    s = pgtype.rest;
+    if (!take_key(s, "PGSUB:")) return std::nullopt;
+    const Taken pgsub_tok = take_token(pgsub, s);
+    if (pgsub_tok.written == 0) return std::nullopt;
+    s = pgsub_tok.rest;
+    if (!take_key(s, "POSTGAP:")) return std::nullopt;
+    const auto postgap = take_uint(s);
+    if (!postgap) return std::nullopt;
+    out.postgap = *postgap;
     return out;
 }
 
-static Ex<void> check_policy(const CuePolicy& policy, std::uint16_t site) {
+[[nodiscard]] static Ex<void> check_policy(const CuePolicy& policy, std::uint16_t site) {
     const CueAxis axis = unimplemented_axis(policy);
     if (axis != CueAxis::None) {
         return std::unexpected(Error{Errc::unimplemented, site, static_cast<std::uint32_t>(axis)});
@@ -173,7 +205,9 @@ static Ex<void> check_policy(const CuePolicy& policy, std::uint16_t site) {
     return {};
 }
 
-DiscEngine::DiscEngine(CuePolicy p, ChdPrefetch& prefetch) : policy_(p), prefetch_(prefetch) {
+DiscEngine::DiscEngine(CuePolicy p, ChdPrefetch& prefetch, infra::OptRef<const Vfs> vfs,
+                       infra::OptRef<const IImageOpener> opener)
+    : policy_(p), vfs_(vfs), opener_(opener), prefetch_(prefetch) {
     switch (p.frame_shaping) {
         case CuePolicy::FrameShaping::None:
             break;
@@ -186,25 +220,21 @@ DiscEngine::DiscEngine(CuePolicy p, ChdPrefetch& prefetch) : policy_(p), prefetc
 Ex<DiscEngine> DiscEngine::create(const Vfs& vfs, CuePolicy policy, ChdPrefetch& prefetch) {
     auto ok = check_policy(policy, ERR_SITE());
     if (!ok) return std::unexpected(ok.error());
-    DiscEngine d(policy, prefetch);
-    d.vfs_ = &vfs;
-    return d;
+    return DiscEngine(policy, prefetch, infra::OptRef<const Vfs>{vfs}, {});
 }
 
 Ex<DiscEngine> DiscEngine::create(const IImageOpener& opener, CuePolicy policy,
                                   ChdPrefetch& prefetch) {
     auto ok = check_policy(policy, ERR_SITE());
     if (!ok) return std::unexpected(ok.error());
-    DiscEngine d(policy, prefetch);
-    d.opener_ = &opener;
-    return d;
+    return DiscEngine(policy, prefetch, {}, infra::OptRef<const IImageOpener>{opener});
 }
 
 Ex<std::unique_ptr<IFile>> DiscEngine::open_file(std::string_view path) const {
     Ex<std::unique_ptr<IFile>> f = std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    if (opener_ != nullptr) {
+    if (opener_) {
         f = opener_->open_read(path);
-    } else if (vfs_ != nullptr) {
+    } else if (vfs_) {
         f = vfs_->open(path, OpenMode::Read);
     }
     if (f) (void)(*f)->advise(IFile::Access::Sequential, 0, 0);
@@ -283,7 +313,7 @@ Ex<void> DiscEngine::unmount() {
     sectors_per_hunk_ = 0;
     hunk_count_ = 0;
     hunk_memo_ = kNoHunk;
-    hunk_ptr_ = nullptr;
+    hunk_view_ = {};
     prefetch_depth_ = 0;
     sync_decompress_ = 0;
     toc_ = Toc{};
@@ -344,7 +374,7 @@ Ex<void> DiscEngine::mount_cue(std::string_view cue_path) {
 
     LineReader reader(text);
     char line[1024];
-    while (reader.next(line, sizeof(line))) {
+    while (reader.next(std::span(line))) {
         std::string_view sv = lstrip(std::string_view(line));
 
         if (sv.starts_with("FILE")) {
@@ -389,10 +419,10 @@ Ex<void> DiscEngine::mount_cue(std::string_view cue_path) {
 
         if (sv.starts_with("TRACK")) {
             std::string_view rest = sv.substr(5);
-            std::uint32_t number = 0;
-            if (!take_uint(rest, number, kCueFieldDigits)) continue;
+            const auto number = take_uint(rest, kCueFieldDigits);
+            if (!number) continue;
 
-            if (number != last + 1) {
+            if (*number != last + 1) {
                 aborted = true;
                 break;
             }
@@ -446,30 +476,29 @@ Ex<void> DiscEngine::mount_cue(std::string_view cue_path) {
         }
 
         if (sv.starts_with("PREGAP")) {
-            std::uint32_t frames = 0;
-            if (take_msf(sv.substr(6), frames)) {
-                pregap += frames;
-                track_pregap = frames;
+            if (const auto frames = take_msf(sv.substr(6))) {
+                pregap += *frames;
+                track_pregap = *frames;
             }
             continue;
         }
 
         if (sv.starts_with("INDEX")) {
             std::string_view rest = sv.substr(5);
-            std::uint32_t index = 0;
-            std::uint32_t frames = 0;
-            if (!take_uint(rest, index, kCueFieldDigits)) continue;
-            if (!take_msf(rest, frames)) continue;
+            const auto index = take_uint(rest, kCueFieldDigits);
+            if (!index) continue;
+            const auto frames = take_msf(rest);
+            if (!frames) continue;
 
-            if (index == 0) {
+            if (*index == 0) {
 
                 if (last != 0 && toc_.tracks[last - 1].end == Lba{0}) {
                     toc_.tracks[last - 1].end =
-                        pregap_relative ? Lba{pregap} : Lba{frames + pregap};
+                        pregap_relative ? Lba{pregap} : Lba{*frames + pregap};
                 }
                 continue;
             }
-            if (index != 1) continue;
+            if (*index != 1) continue;
 
             Track& t = toc_.tracks[last];
             t.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
@@ -486,7 +515,7 @@ Ex<void> DiscEngine::mount_cue(std::string_view cue_path) {
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
                 }
                 t.backing = last_backing;
-                t.start = Lba{frames + pregap};
+                t.start = Lba{*frames + pregap};
                 if (!accumulate) {
                     t.offset = static_cast<std::int64_t>(pregap) *
                                    static_cast<std::int64_t>(t.sector_size) -
@@ -528,7 +557,7 @@ Ex<void> DiscEngine::mount_cue(std::string_view cue_path) {
                 const std::uint64_t payload = (pending_size > hdr) ? pending_size - hdr : 0;
                 const std::uint64_t sectors = (payload + ss - 1) / ss;
                 t.end = Lba{t.start.v + static_cast<std::uint32_t>(sectors)};
-                t.start = Lba{t.start.v + frames};
+                t.start = Lba{t.start.v + *frames};
                 toc_.end = t.end;
             }
 
@@ -620,7 +649,7 @@ Ex<void> DiscEngine::mount_cue_index_triple(std::string_view cue_path) {
 
     LineReader reader(text);
     char line[1024];
-    while (reader.next(line, sizeof(line))) {
+    while (reader.next(std::span(line))) {
         std::string_view sv = lstrip(std::string_view(line));
 
         if (sv.starts_with("FILE")) {
@@ -655,11 +684,11 @@ Ex<void> DiscEngine::mount_cue_index_triple(std::string_view cue_path) {
 
         if (sv.starts_with("TRACK")) {
             std::string_view rest = sv.substr(5);
-            std::uint32_t number = 0;
-            if (!take_uint(rest, number, kCueFieldDigits)) continue;
+            const auto number = take_uint(rest, kCueFieldDigits);
+            if (!number) continue;
             pregap = 0;
 
-            if (number != last + 1) {
+            if (*number != last + 1) {
                 return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
             }
             Track& t = toc_.tracks[last];
@@ -680,9 +709,8 @@ Ex<void> DiscEngine::mount_cue_index_triple(std::string_view cue_path) {
         }
 
         if (sv.starts_with("PREGAP")) {
-            std::uint32_t frames = 0;
-            if (take_msf(sv.substr(6), frames)) {
-                pregap += frames;
+            if (const auto frames = take_msf(sv.substr(6))) {
+                pregap += *frames;
                 toc_.tracks[last].pregap_declared = true;
             }
             continue;
@@ -690,17 +718,17 @@ Ex<void> DiscEngine::mount_cue_index_triple(std::string_view cue_path) {
 
         if (sv.starts_with("INDEX")) {
             std::string_view rest = sv.substr(5);
-            std::uint32_t index = 0;
-            std::uint32_t frames = 0;
-            if (!take_uint(rest, index, kCueFieldDigits)) continue;
-            if (!take_msf(rest, frames)) continue;
+            const auto index = take_uint(rest, kCueFieldDigits);
+            if (!index) continue;
+            const auto frames = take_msf(rest);
+            if (!frames) continue;
 
-            if (index == 0) {
+            if (*index == 0) {
 
-                if (!pending_open) pregap = frames;
+                if (!pending_open) pregap = *frames;
                 continue;
             }
-            if (index != 1) continue;
+            if (*index != 1) continue;
 
             Track& t = toc_.tracks[last];
             t.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
@@ -711,7 +739,7 @@ Ex<void> DiscEngine::mount_cue_index_triple(std::string_view cue_path) {
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
                 }
                 t.backing = toc_.tracks[0].backing;
-                std::uint32_t start = frames;
+                std::uint32_t start = *frames;
                 if (t.pregap_declared) start += pregap;
 
                 std::int64_t file_base =
@@ -745,7 +773,7 @@ Ex<void> DiscEngine::mount_cue_index_triple(std::string_view cue_path) {
                 ++file_count_;
                 pending_open = false;
 
-                t.pregap = frames;
+                t.pregap = *frames;
                 if (t.type != TrackType::Cdda && last == 0) {
                     t.pregap = static_cast<std::uint32_t>(kRedBookPregap);
                 }
@@ -800,7 +828,7 @@ Ex<void> DiscEngine::mount_cue_index_pair(std::string_view cue_path) {
 
     LineReader reader(text);
     char line[1024];
-    while (reader.next(line, sizeof(line))) {
+    while (reader.next(std::span(line))) {
         std::string_view sv = lstrip(std::string_view(line));
 
         if (sv.starts_with("FILE")) {
@@ -833,10 +861,10 @@ Ex<void> DiscEngine::mount_cue_index_pair(std::string_view cue_path) {
 
         if (sv.starts_with("TRACK")) {
             std::string_view rest = sv.substr(5);
-            std::uint32_t number = 0;
-            if (!take_uint(rest, number, kCueFieldDigits)) continue;
+            const auto number = take_uint(rest, kCueFieldDigits);
+            if (!number) continue;
             index0 = 0;
-            if (number != last + 1) {
+            if (*number != last + 1) {
                 return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
             }
             Track& t = toc_.tracks[last];
@@ -857,16 +885,16 @@ Ex<void> DiscEngine::mount_cue_index_pair(std::string_view cue_path) {
 
         if (sv.starts_with("INDEX")) {
             std::string_view rest = sv.substr(5);
-            std::uint32_t index = 0;
-            std::uint32_t frames = 0;
-            if (!take_uint(rest, index, kCueFieldDigits)) continue;
-            if (!take_msf(rest, frames)) continue;
-            if (index == 0) {
-                index0 = frames;
+            const auto index = take_uint(rest, kCueFieldDigits);
+            if (!index) continue;
+            const auto frames = take_msf(rest);
+            if (!frames) continue;
+            if (*index == 0) {
+                index0 = *frames;
                 continue;
             }
-            if (index != 1) continue;
-            index1 = frames;
+            if (*index != 1) continue;
+            index1 = *frames;
 
             Track& t = toc_.tracks[last];
             t.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
@@ -962,9 +990,10 @@ Ex<void> DiscEngine::mount_iso(std::string_view iso_path) {
         auto rd = (*f)->read_at(seek, std::span<std::byte>(pvd, sizeof(pvd)));
         if (!rd || *rd != sizeof(pvd)) continue;
 
-        const auto* b = reinterpret_cast<const unsigned char*>(pvd);
-        const bool iso9660 = b[0] == 1 && std::memcmp(b + 1, "CD001", 5) == 0 && b[6] == 1;
-        const bool high_sierra = b[8] == 1 && std::memcmp(b + 9, "CDROM", 5) == 0 && b[14] == 1;
+        const auto b = infra::byte_cast<const unsigned char>(std::span(pvd));
+        const bool iso9660 = b[0] == 1 && std::memcmp(b.data() + 1, "CD001", 5) == 0 && b[6] == 1;
+        const bool high_sierra =
+            b[8] == 1 && std::memcmp(b.data() + 9, "CDROM", 5) == 0 && b[14] == 1;
         if (!iso9660 && !high_sierra) continue;
 
         Track& t = toc_.tracks[0];
@@ -1041,7 +1070,7 @@ Ex<void> DiscEngine::mount_chd(std::unique_ptr<IChdSource> source,
 
     hunk_buf_ = std::make_unique<std::byte[]>(hunk_bytes_);
     hunk_memo_ = kNoHunk;
-    hunk_ptr_ = nullptr;
+    hunk_view_ = {};
     chd_ = std::move(source);
 
     if (prefetch_source != nullptr) {
@@ -1185,11 +1214,11 @@ std::optional<TrackIndex> DiscEngine::source_track(Lba lba) const {
 Ex<void> DiscEngine::load_hunk(std::uint32_t hunk) {
 
     if (const std::byte* p = prefetch_.get().take(hunk); p != nullptr) {
-        hunk_ptr_ = p;
+        hunk_view_ = std::span<const std::byte>(p, hunk_bytes_);
         return {};
     }
     if (hunk == hunk_memo_) {
-        hunk_ptr_ = hunk_buf_.get();
+        hunk_view_ = std::span<const std::byte>(hunk_buf_.get(), hunk_bytes_);
         return {};
     }
 
@@ -1198,11 +1227,11 @@ Ex<void> DiscEngine::load_hunk(std::uint32_t hunk) {
     auto r = chd_->read_hunk(hunk, std::span<std::byte>(hunk_buf_.get(), hunk_bytes_));
     if (!r) {
         hunk_memo_ = kNoHunk;
-        hunk_ptr_ = nullptr;
+        hunk_view_ = {};
         return std::unexpected(r.error());
     }
     hunk_memo_ = hunk;
-    hunk_ptr_ = hunk_buf_.get();
+    hunk_view_ = std::span<const std::byte>(hunk_buf_.get(), hunk_bytes_);
     return {};
 }
 
@@ -1265,9 +1294,9 @@ Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form fo
         std::memset(dst.data(), 0, kCdDataSize);
         if (ss == kUserDataBytes) {
 
-            auto* b = reinterpret_cast<unsigned char*>(dst.data());
+            auto b = infra::byte_cast<unsigned char>(dst);
             b[0] = 0x00;
-            std::memset(b + 1, 0xff, 10);
+            std::memset(b.data() + 1, 0xff, 10);
             b[11] = 0x00;
             const std::uint32_t f_lba = lba.v + static_cast<std::uint32_t>(kRedBookPregap);
             b[12] = bcd(f_lba / (kFramesPerSecond * 60));
@@ -1292,10 +1321,10 @@ Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form fo
             return std::unexpected(
                 Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(base)});
         }
-        if (hunk_ptr_ == nullptr) {
+        if (hunk_view_.empty()) {
             return std::unexpected(Error{Errc::io, ERR_SITE(), hunk});
         }
-        std::memcpy(dst.data() + dst_off, hunk_ptr_ + base, len);
+        std::memcpy(dst.data() + dst_off, hunk_view_.data() + base, len);
         normalize_cdda_(t, form, dst.subspan(dst_off, len));
         return out_len;
     }
@@ -1378,10 +1407,10 @@ Ex<std::size_t> DiscEngine::read_subcode(Lba lba, std::span<std::byte> dst) {
             return std::unexpected(
                 Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(base)});
         }
-        if (hunk_ptr_ == nullptr) {
+        if (hunk_view_.empty()) {
             return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
         }
-        std::memcpy(dst.data(), hunk_ptr_ + base, kSubcodeBytes);
+        std::memcpy(dst.data(), hunk_view_.data() + base, kSubcodeBytes);
         return kSubcodeBytes;
     }
 
@@ -1491,11 +1520,26 @@ void DiscEngine::prefetch_hint(Lba lba) {
 
 namespace {
 
+struct CoreFileBinding;
+
+std::uint64_t cf_fsize(core_file* f);
+std::size_t cf_fread(void* dst, std::size_t elem, std::size_t count, core_file* f);
+int cf_fclose(core_file* f);
+int cf_fseek(core_file* f, std::int64_t off, int whence);
+
 struct CoreFileBinding {
+    CoreFileBinding(IFile& source, std::uint64_t byte_size) noexcept
+        : file(&source), size(byte_size) {
+        cf.argp = this;
+        cf.fsize = &cf_fsize;
+        cf.fread = &cf_fread;
+        cf.fclose = &cf_fclose;
+        cf.fseek = &cf_fseek;
+    }
     core_file cf{};
-    IFile* file = nullptr;
+    IFile* file;
     std::uint64_t pos = 0;
-    std::uint64_t size = 0;
+    std::uint64_t size;
 };
 
 std::uint64_t cf_fsize(core_file* f) {
@@ -1529,62 +1573,73 @@ int cf_fseek(core_file* f, std::int64_t off, int whence) {
     return 0;
 }
 
-class LibChdrSource final : public IChdSource {
-public:
-    LibChdrSource(std::unique_ptr<IFile> file, std::uint64_t size) : file_(std::move(file)) {
-        binding_.cf.argp = &binding_;
-        binding_.cf.fsize = &cf_fsize;
-        binding_.cf.fread = &cf_fread;
-        binding_.cf.fclose = &cf_fclose;
-        binding_.cf.fseek = &cf_fseek;
-        binding_.file = file_.get();
-        binding_.size = size;
+struct OpenedHandle {
+    chd_file* chd;
+    const chd_header* header;
+    std::uint32_t err;
+};
+
+[[nodiscard]] OpenedHandle open_handle(CoreFileBinding& b) noexcept {
+    chd_file* chd = nullptr;
+    const chd_error err = chd_open_core_file(&b.cf, CHD_OPEN_READ, nullptr, &chd);
+    if (err != CHDERR_NONE) {
+        return OpenedHandle{nullptr, nullptr, static_cast<std::uint32_t>(err)};
     }
+    const chd_header* header = chd_get_header(chd);
+    if (header == nullptr) {
+        chd_close(chd);
+        return OpenedHandle{nullptr, nullptr, 0};
+    }
+    return OpenedHandle{chd, header, 0};
+}
+
+class LibChdrSource final : public IChdSource {
+    struct Key {};
+
+public:
+    [[nodiscard]] static Ex<std::unique_ptr<LibChdrSource>> open(std::unique_ptr<IFile> file,
+                                                                 std::uint64_t size) {
+        auto src = std::make_unique<LibChdrSource>(Key{}, std::move(file), size);
+        if (src->handle_.chd == nullptr) {
+            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), src->handle_.err});
+        }
+        return src;
+    }
+
+    LibChdrSource(Key, std::unique_ptr<IFile> file, std::uint64_t size) noexcept
+        : file_(std::move(file)), binding_(*file_, size), handle_(open_handle(binding_)) {}
     ~LibChdrSource() override {
-        if (chd_ != nullptr) chd_close(chd_);
+        if (handle_.chd != nullptr) chd_close(handle_.chd);
     }
     LibChdrSource(const LibChdrSource&) = delete;
     LibChdrSource& operator=(const LibChdrSource&) = delete;
 
-    Ex<void> open() {
-        const chd_error err = chd_open_core_file(&binding_.cf, CHD_OPEN_READ, nullptr, &chd_);
-        if (err != CHDERR_NONE) {
-            chd_ = nullptr;
-            return std::unexpected(
-                Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(err)});
-        }
-        header_ = chd_get_header(chd_);
-        if (header_ == nullptr) {
-            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-        }
-        return {};
-    }
-
     Geometry geometry() const noexcept override {
-        return Geometry{header_->hunkbytes, header_->unitbytes, header_->totalhunks};
+        return Geometry{handle_.header->hunkbytes, handle_.header->unitbytes,
+                        handle_.header->totalhunks};
     }
 
     std::optional<ChdMetaRow> track_metadata(std::uint32_t index) override {
 
-        if (chd_get_metadata(chd_, CDROM_TRACK_METADATA2_TAG, index, meta_, sizeof(meta_), nullptr,
-                             nullptr, nullptr) == CHDERR_NONE) {
+        if (chd_get_metadata(handle_.chd, CDROM_TRACK_METADATA2_TAG, index, meta_, sizeof(meta_),
+                             nullptr, nullptr, nullptr) == CHDERR_NONE) {
             meta_[sizeof(meta_) - 1] = '\0';
             return ChdMetaRow{std::string_view(meta_), true};
         }
-        if (chd_get_metadata(chd_, CDROM_TRACK_METADATA_TAG, index, meta_, sizeof(meta_), nullptr,
-                             nullptr, nullptr) == CHDERR_NONE) {
+        if (chd_get_metadata(handle_.chd, CDROM_TRACK_METADATA_TAG, index, meta_, sizeof(meta_),
+                             nullptr, nullptr, nullptr) == CHDERR_NONE) {
             meta_[sizeof(meta_) - 1] = '\0';
             return ChdMetaRow{std::string_view(meta_), false};
         }
         return std::nullopt;
     }
 
-    Ex<void> read_hunk(std::uint32_t hunk, std::span<std::byte> dst) override {
-        if (dst.size() < header_->hunkbytes) {
+    [[nodiscard]] Ex<void> read_hunk(std::uint32_t hunk, std::span<std::byte> dst) override {
+        if (dst.size() < handle_.header->hunkbytes) {
             return std::unexpected(
                 Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(dst.size())});
         }
-        const chd_error err = chd_read(chd_, hunk, dst.data());
+        const chd_error err = chd_read(handle_.chd, hunk, dst.data());
         if (err != CHDERR_NONE) {
             return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(err)});
         }
@@ -1593,9 +1648,8 @@ public:
 
 private:
     std::unique_ptr<IFile> file_;
-    CoreFileBinding binding_{};
-    chd_file* chd_ = nullptr;
-    const chd_header* header_ = nullptr;
+    CoreFileBinding binding_;
+    OpenedHandle handle_;
     char meta_[512]{};
 };
 
@@ -1605,10 +1659,9 @@ Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file) {
     if (!file) return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
     auto sz = file->size();
     if (!sz) return std::unexpected(sz.error());
-    auto src = std::make_unique<LibChdrSource>(std::move(file), sz->v);
-    auto opened = src->open();
-    if (!opened) return std::unexpected(opened.error());
-    return std::unique_ptr<IChdSource>(std::move(src));
+    auto src = LibChdrSource::open(std::move(file), sz->v);
+    if (!src) return std::unexpected(src.error());
+    return std::unique_ptr<IChdSource>(std::move(*src));
 }
 
 Ex<void> DiscEngine::mount_chd_path(std::string_view chd_path) {

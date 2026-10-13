@@ -15,6 +15,7 @@ add_library(mister_services STATIC
   src/frame_shapers.cpp
   src/gzip_inflate.cpp
   src/input_emitter.cpp
+  src/input_enumerator.cpp
   src/input_rules.cpp
   src/input_service.cpp
   src/io_main.cpp
@@ -26,6 +27,7 @@ add_library(mister_services STATIC
   src/vfs.cpp
   src/video_service.cpp
   src/xml_scan.cpp
+  src/xml_scanner.cpp
 )
 target_include_directories(mister_services PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_services
@@ -73,8 +75,12 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/archive.h
   svc/audio_service.h
   svc/axis_cal.h
+  svc/block_ctl.h
+  svc/block_half.h
   svc/button_map.h
   svc/cec_state_machine.h
+  svc/chd_meta_row.h
+  svc/chd_prefetch.h
   svc/chd_source.h
   svc/config.h
   svc/config_parser.h
@@ -109,19 +115,25 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/gzip_inflate.h
   svc/i2c_adapter.h
   svc/image_opener.h
+  svc/device_table.h
   svc/input_device.h
   svc/input_emitter.h
+  svc/input_enumerator.h
   svc/input_service.h
+  svc/rumble_out.h
+  svc/joy_plan.h
   svc/key_edge.h
   svc/map_store.h
   svc/mapping_wizard.h
   svc/modeline.h
   svc/movable_counter.h
   svc/no_merge_rule.h
+  svc/parse_error.h
   svc/per_core_setting.h
   svc/player_slots.h
   svc/pll_params.h
   svc/pll_solver.h
+  svc/prefetch_main.h
   svc/raw_disk_image.h
   svc/scaling_policy.h
   svc/scaling_words.h
@@ -135,6 +147,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/io_main.h
   svc/file_slot_backend.h
   svc/slot_path.h
+  svc/stick_cal.h
   svc/storage_backend.h
   svc/storage_lifecycle.h
   svc/storage_service.h
@@ -146,7 +159,11 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/vfs.h
   svc/video_sample.h
   svc/video_service.h
+  svc/xml_attr.h
   svc/xml_scan.h
+  svc/xml_scanner.h
+  svc/xml_tag.h
+  svc/xml_token.h
 )
 
 if(TASTY_BUILD_TESTS)

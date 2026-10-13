@@ -8,6 +8,7 @@
 #include "app/frame_arena.h"
 #include "app/frame_codec.h"
 #include "app/rec_options.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 
@@ -83,14 +84,14 @@ private:
     void step_(int dir) noexcept;
 
     FrameArena arena_{};
-    std::byte* prev_ = nullptr;
-    std::byte* cur_ = nullptr;
-    std::byte* plain_ = nullptr;
-    std::byte* pkt_ = nullptr;
-    std::byte* zmem_ = nullptr;
-    std::byte* dup_plain_ = nullptr;
-    std::int8_t* hist_ = nullptr;
-    const os::IClock* clock_ = nullptr;
+    std::span<std::byte> prev_{};
+    std::span<std::byte> cur_{};
+    std::span<std::byte> plain_{};
+    std::span<std::byte> pkt_{};
+    std::span<std::byte> zmem_{};
+    std::span<std::byte> dup_plain_{};
+    std::span<std::byte> hist_{};
+    infra::OptRef<const os::IClock> clock_{};
     std::int64_t threshold_ns_ = 0;
     std::int64_t search_budget_ns_ = 0;
     std::int64_t frame_t0_ = 0;

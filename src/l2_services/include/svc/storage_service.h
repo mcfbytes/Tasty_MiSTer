@@ -8,6 +8,7 @@
 #include <span>
 
 #include "infra/loan_channel.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/block_geometry.h"
 #include "proto/storage_channel.h"
@@ -50,6 +51,8 @@ public:
     struct Work {
         std::span<std::uint8_t> data;
         proto::StorageCompletion& answer;
+        infra::OptRef<IStorageBackend> backend{};
+        std::uint32_t gen = 0;
         bool performed = false;
     };
 
@@ -96,16 +99,29 @@ private:
 
     void perform_(const proto::StorageRequest& ask, Work& w) noexcept;
 
+    [[nodiscard]] infra::OptRef<IStorageBackend> live_(proto::SlotIndex slot,
+                                                       const Work& w) const noexcept;
+
     void finish_(proto::StorageStatus st, Work& w, const proto::StorageCompletion& c) noexcept;
-
-    [[nodiscard]] IStorageBackend* data_backend_(proto::SlotIndex slot) noexcept;
-
     Data data_;
     Ctl ctl_;
 
-    Data::Loan data_hands_[kSlots][kHalves]{};
-    Ctl::Loan ctl_hands_[kSlots]{};
-    bool owned_ = false;
+    struct Rt {
+
+        Data::Loan data_hands[kSlots][kHalves]{};
+        Ctl::Loan ctl_hands[kSlots]{};
+
+        infra::OptRef<IStorageBackend> bound[kSlots]{};
+
+        std::uint32_t gen[kSlots]{};
+        bool owned = false;
+    };
+    Rt rt_{};
+
+    struct Io {
+        std::uint32_t served[kSlots]{};
+    };
+    Io io_{};
 
     std::atomic<std::uint32_t> submits_{0};
     std::atomic<std::uint32_t> completions_{0};
@@ -114,9 +130,6 @@ private:
     std::atomic<std::uint32_t> depth_max_{0};
     std::atomic<std::uint32_t> request_misrouted_{0};
     std::atomic<std::uint32_t> abandoned_{0};
-
-    IStorageBackend* attach_[kSlots]{};
-    IStorageBackend* backends_[kSlots]{};
 };
 
 static_assert(sizeof(StorageService) > 512u * 1024u,

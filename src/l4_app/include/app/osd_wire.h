@@ -21,6 +21,14 @@ struct UiPageRecord {
     std::uint32_t cell_refusals = 0;
 
     std::uint32_t page_refusals = 0;
+
+    std::uint32_t button_levels = 0;
+    std::uint32_t button_edges = 0;
+    std::uint32_t button_longs = 0;
+    std::uint32_t button_classic = 0;
+    std::uint32_t button_injects = 0;
+    std::uint32_t button_core_resets = 0;
+    std::uint32_t last_hold_ms = 0;
 };
 
 using UiPageCell = xthread::Telemetry<UiPageRecord, SeatTag::Ui>;
@@ -44,7 +52,7 @@ public:
 
     void on_fabric_reprogrammed() noexcept { show_ = proto::LinkOp::OsdShow::Off; }
 
-    Ex<void> set_visible(bool on) noexcept {
+    [[nodiscard]] Ex<void> set_visible(bool on) noexcept {
         return set_show(on ? proto::LinkOp::OsdShow::Menu : proto::LinkOp::OsdShow::Off);
     }
 

@@ -52,7 +52,7 @@ inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
     {proto::LinkOp::Kind::SaveAsk, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::Ps2Frame, OpTarget::Wire, Window::Framed, {}},
     {proto::LinkOp::Kind::DropCore, OpTarget::Session, Window::None, {}},
-    {proto::LinkOp::Kind::MakeCore, OpTarget::Session, Window::None, {}},
+    {proto::LinkOp::Kind::AdoptCore, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::SessionUp, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::StageMount, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::StagePayload, OpTarget::Session, Window::Framed, {}},

@@ -12,6 +12,7 @@
 #include "infra/spsc_ring.h"
 #include "proto/save_ask.h"
 #include "proto/types.h"
+#include "proto/user_io/poll_shape.h"
 
 namespace mister::proto {
 
@@ -31,6 +32,7 @@ struct LinkEvent {
         Ps2ControlEnded,
         StartRefused,
         RebootQuiesced,
+        PolledWord,
         kCount,
     };
     static constexpr std::size_t kStore = 12;
@@ -122,9 +124,19 @@ struct LinkEvent {
         std::uint8_t pad_[2]{};
     };
 
-    using Alternatives = std::tuple<ReadyEdge, ButtonLevel, BlockRequest, ConfStr, SaveBytes,
-                                    Ps2Control, CoreMade, IdentityMatched, IdentityMismatch,
-                                    OsdMask, Ps2ControlEnded, StartRefused, RebootQuiesced>;
+    struct PolledWord {
+        static constexpr Kind kKind = Kind::PolledWord;
+        user_io::PollShape shape{};
+        std::uint8_t param = 0;
+        std::uint16_t word = 0;
+        BindGeneration bind_gen{};
+        std::uint8_t pad_[2]{};
+    };
+
+    using Alternatives =
+        std::tuple<ReadyEdge, ButtonLevel, BlockRequest, ConfStr, SaveBytes, Ps2Control, CoreMade,
+                   IdentityMatched, IdentityMismatch, OsdMask, Ps2ControlEnded, StartRefused,
+                   RebootQuiesced, PolledWord>;
     Kind kind = Kind::ReadyEdge;
     std::uint8_t pad_[3]{};
     alignas(4) std::array<std::byte, kStore> store{};
@@ -132,7 +144,7 @@ struct LinkEvent {
 
 static_assert(infra::MessageSum<LinkEvent> && infra::alternatives_are_total<LinkEvent>());
 static_assert(sizeof(LinkEvent) == 16 && alignof(LinkEvent) == 4);
-static_assert(infra::ordinal(LinkEvent::Kind::kCount) == 13);
+static_assert(infra::ordinal(LinkEvent::Kind::kCount) == 14);
 
 inline constexpr std::size_t kLinkRxCapacity = 64;
 using LinkRxRing = xthread::SpscRing<LinkEvent, kLinkRxCapacity>;

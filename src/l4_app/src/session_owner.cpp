@@ -23,12 +23,15 @@
 #include "app/conf_str_cell.h"
 #include "app/durable_write.h"
 #include "app/durable_write_service.h"
+#include "app/ini_key_edit.h"
 #include "app/ini_parse.h"
 #include "app/link_event_dispatch.h"
 #include "app/link_rows.h"
 #include "app/mra_facts.h"
 #include "app/pending_load.h"
 #include "app/remembered_path.h"
+#include "app/sdram_size_code.h"
+#include "app/stream_io.h"
 #include "app/ui_request_dispatch.h"
 #include "app/config_apply.h"
 #include "app/event.h"
@@ -36,12 +39,15 @@
 #include "cores/cheat_records.h"
 #include "cores/ladder_context.h"
 #include "cores/payload_pieces.h"
+#include "cores/addressed_load.h"
+#include "cores/manifest_doc_role.h"
 #include "cores/registry.h"
 #include "cores/staging_core.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
 #include "hal/boot_handoff.h"
 #include "proto/conf_str.h"
+#include "proto/core_session.h"
 #include "proto/link_op.h"
 #include "proto/link_op.h"
 #include "svc/file.h"
@@ -102,6 +108,8 @@ static_assert(proto::kLinkTxCapacity >= kTeardownOps);
 
 unsigned SessionOwner::tick() {
 
+    builder_.reap();
+
     if (watch_reboot_()) {
         publish_fabric_();
         return 0;
@@ -112,10 +120,14 @@ unsigned SessionOwner::tick() {
     retry_held_load_();
 
     step_ladder_();
+
+    step_savestate_hold_();
     step_save_mount_();
     step_addons_();
+    step_watch_();
     step_pieces_();
     step_load_();
+    step_manifest_();
     step_walk_();
     step_companion_();
 
@@ -215,6 +227,41 @@ void SessionOwner::on(const UiRequest::UnmountImage& req, const UiRequest::Head&
     on_mount_image_(MountAsk{UiRequest::UnmountImage::kKind, req.index, PathText{}, head.tag});
 }
 
+void SessionOwner::on(const UiRequest::SetOsdStyle& req, const UiRequest::Head&) {
+    constexpr std::string_view kIni = "MiSTer.ini";
+    std::string text;
+    auto f = vfs_.open(kIni, svc::OpenMode::ReadWhole);
+    if (f) {
+        const auto sz = (*f)->size();
+        const auto buf = sz ? read_whole_(**f, sz->v) : std::nullopt;
+        if (!buf) {
+            ini_write_failures_cell_.publish(++ini_write_failures_);
+            return;
+        }
+        text.assign(reinterpret_cast<const char*>(buf->data()), buf->size());
+    } else if (!(f.error().code == Errc::os && f.error().detail == ENOENT) &&
+               f.error().code != Errc::not_found) {
+        ini_write_failures_cell_.publish(++ini_write_failures_);
+        return;
+    }
+    const std::string out = ini_set_key(text, "osd_style", req.style != 0 ? "1" : "0");
+    if (!write_durably_(kIni, std::as_bytes(std::span<const char>(out.data(), out.size())))) {
+        ini_write_failures_cell_.publish(++ini_write_failures_);
+    }
+}
+
+void SessionOwner::on(const UiRequest::SdramDetected& req, const UiRequest::Head&) {
+    const std::uint8_t code = sdram_size_code(req.osd_mask);
+
+    if (handoff_ != nullptr && !handoff_->write_sdram_cfg(code)) ++sdram_write_failures_;
+    set_boot_cookie(static_cast<std::uint16_t>(kSdramCookieMeasured | code));
+}
+
+void SessionOwner::note_memsz_(const UiRequest::LoadCore& req) noexcept {
+    if (req.path.empty() || names_front_end_image(req.path.view(), req.xml)) return;
+    if ((cookie_ & kSdramCookieMeasured) == 0) ++memsz_unmeasured_;
+}
+
 static_assert(UiRequestSink<SessionOwner>);
 
 void SessionOwner::on(const UiRequest::ResetCore& req, const UiRequest::Head& head) {
@@ -272,7 +319,7 @@ bool SessionOwner::refuse_in_switch_(UiRequest::Kind kind, CorrelationTag tag) n
 bool SessionOwner::refuse_in_load_(UiRequest::Kind kind, CorrelationTag tag) noexcept {
     const bool rom_waits = save_mount_ && save_mount_->then_load;
     if (!pieces_ && !load_ && !walk_ && !companion_walk_ && !rom_waits && !addons_ &&
-        !addons_after_)
+        !addons_after_ && !ss_hold_)
         return false;
     ++loads_refused_busy_;
     publish_refusal_(kind, Errc::would_block, tag);
@@ -306,8 +353,10 @@ void SessionOwner::watch_readiness_() {
 }
 
 void SessionOwner::watch_start_() noexcept {
+
     if (!start_bounded_ || start_bound_ms_ == 0) return;
-    if (start_due_.expired(clock_)) give_up_start_(Errc::timeout);
+    if (!start_due_.expired(clock_)) return;
+    give_up_start_(Errc::timeout);
 }
 
 void SessionOwner::give_up_start_(Errc why) noexcept {
@@ -426,6 +475,7 @@ void SessionOwner::adopt_(const Link& link) {
 void SessionOwner::service_boot(const UiRequest::LoadCore& req) {
 
     publish_fabric_();
+    note_memsz_(req);
     pending_ = req;
     pending_tag_ = kUncaused;
 
@@ -486,8 +536,7 @@ Ex<proto::ConfStrFileRow> SessionOwner::resolve_load_(const UiRequest::LoadFileB
         return std::unexpected(Error{Errc::stale, ERR_SITE(), r.scope.gen.v});
     const proto::FileSlotHit hit =
         conf_str_ ? conf_str_->find_load_slot(r.digit) : proto::FileSlotHit{};
-    if (hit.entry == nullptr)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.digit.v});
+    if (!hit.entry) return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.digit.v});
 
     if (hit.how == proto::FileSlotMatch::RowZero) mgl_row0_cell_.publish(++mgl_row0_);
     return proto::ConfStr::row_of(*hit.entry);
@@ -506,6 +555,8 @@ void SessionOwner::load_file_(UiRequest::Kind asked, const R& req, CorrelationTa
     if (!row) return refuse_file_ask_(asked, tag, row.error().code);
     auto cr = content_for_(*row, req.path.view());
     if (!cr) return refuse_file_ask_(asked, tag, Errc::bad_format);
+    cr->asked = asked;
+    cr->tag = tag;
     UiRequest::SaveChoice choice = UiRequest::SaveChoice::User;
     if constexpr (requires { req.save; }) choice = req.save;
     const PickedLoad load{.content = *cr, .opensave = row->opensave, .choice = choice, .tag = tag};
@@ -532,14 +583,35 @@ void SessionOwner::plan_addons_(const proto::ConfStrFileRow& row, std::string_vi
 }
 
 void SessionOwner::run_load_(const PickedLoad& load) {
-    attach_row_savestates_(load.opensave);
-    if (arm_loader_(load.content)) return;
+    if (const auto gen = attach_row_savestates_(load.opensave, load.content.path.view())) {
+        ss_hold_ = SaveStateHold{.load = load,
+                                 .gen = *gen,
+                                 .due_ns = clock_.now().count() + cores::kSaveStateHoldBoundNs};
+        return;
+    }
+    run_attached_load_(load);
+}
+
+void SessionOwner::run_attached_load_(const PickedLoad& load) {
+    if (owns_loader_() && arm_loader_(load.content)) return;
     order_row_content_(load.content, load.opensave, load.choice, load.tag);
+}
+
+void SessionOwner::step_savestate_hold_() {
+    if (!ss_hold_) return;
+    if (!savestates_answered_(ss_hold_->gen)) {
+        if (clock_.now().count() < ss_hold_->due_ns) return;
+        ++savestate_hold_expiries_;
+    }
+    const PickedLoad load = ss_hold_->load;
+    ss_hold_.reset();
+    run_attached_load_(load);
 }
 
 bool SessionOwner::content_ordered_() const noexcept {
     const bool rom_waits = save_mount_ && save_mount_->then_load;
-    return !picked_load_ && !pieces_ && !load_ && !walk_ && !companion_walk_ && !rom_waits;
+    return !picked_load_ && !ss_hold_ && !pieces_ && !load_ && !walk_ && !companion_walk_ &&
+           !rom_waits;
 }
 
 void SessionOwner::step_addons_() {
@@ -579,17 +651,62 @@ std::optional<ContentRequest> SessionOwner::content_for_(const proto::ConfStrFil
     return cr;
 }
 
-void SessionOwner::attach_row_savestates_(bool opensave) {
+std::optional<std::uint32_t> SessionOwner::attach_row_savestates_(bool opensave,
+                                                                  std::string_view rom) {
+    if (!opensave || !conf_str_ || !conf_str_->savestate().has_value()) return std::nullopt;
+    const std::uint32_t gen = next_generation();
+    if (!ask_savestates_(rom, gen)) return std::nullopt;
+    return gen;
+}
 
-    if (opensave && conf_str_ && conf_str_->savestate().has_value()) {
-        if (auto r = attach_savestates_(); !r) ++savestate_refusals_;
+bool SessionOwner::ask_savestates_(std::string_view rom, std::uint32_t gen) noexcept {
+    const bool service =
+        save_state_asks_ && save_state_facts_ && save_state_facts_->generation() != 0;
+    SaveStateAttach::Ask ask{.decl = *conf_str_->savestate(),
+                             .core_name = core_name_,
+                             .arcade = made_with_manifest_,
+                             .generation = gen};
+    if (!service || !ask.rom_path.assign(rom) || !save_state_asks_->push(ask)) {
+        ++savestate_refusals_;
+        return false;
     }
+    return true;
+}
+
+bool SessionOwner::savestates_answered_(std::uint32_t gen) const noexcept {
+    if (!save_state_facts_) return true;
+    const std::uint32_t answered = save_state_facts_->sample().value.answered;
+    return static_cast<std::int32_t>(answered - gen) >= 0;
+}
+
+bool SessionOwner::order_savestates(std::string_view image, std::uint32_t gen) {
+    if (!conf_str_ || !conf_str_->savestate().has_value()) return false;
+    return ask_savestates_(image, gen);
+}
+
+std::uint32_t SessionOwner::savestates_answered() {
+    return save_state_facts_ ? save_state_facts_->sample().value.answered : 0u;
 }
 
 void SessionOwner::order_row_content_(const ContentRequest& cr, bool opensave,
                                       UiRequest::SaveChoice choice, CorrelationTag tag) {
     if (opensave && arm_open_save_(cr, choice, tag)) return;
-    perform_content_(cr);
+    launch_content_(cr);
+}
+
+void SessionOwner::launch_content_(const ContentRequest& cr) {
+    if (owns_loader_() || !arm_loader_(cr)) perform_content_(cr);
+}
+
+const cores::CoreFactory* SessionOwner::load_row_() const {
+    const auto hint = made_with_manifest_ ? cores::LoadHint::XmlManifest : cores::LoadHint::None;
+    const auto row = cores::find_core(core_name_.view(), hint);
+    return row ? *row : nullptr;
+}
+
+bool SessionOwner::owns_loader_() const {
+    const cores::CoreFactory* row = load_row_();
+    return row != nullptr && row->make_loader != nullptr;
 }
 
 bool SessionOwner::arm_open_save_(const ContentRequest& cr, UiRequest::SaveChoice choice,
@@ -677,9 +794,8 @@ std::optional<PathText> SessionOwner::zip_member_(const proto::ConfStrFileRow& r
     return bare_zip_member(path, row.ext, *members);
 }
 
-Ex<void> SessionOwner::attach_savestates_() noexcept { return unimplemented(ERR_SITE()); }
-
 void SessionOwner::perform_content_(const ContentRequest& req) {
+    content_owed_ = Owed{req.asked, req.tag};
     if (req.path.empty()) {
         ++files_failed_;
         return;
@@ -699,6 +815,7 @@ void SessionOwner::perform_content_(const ContentRequest& req) {
             ++files_failed_;
             return;
         }
+        forget_watch_();
         pieces_.emplace(std::move(*p));
         return;
     }
@@ -718,22 +835,104 @@ void SessionOwner::perform_content_(const ContentRequest& req) {
         return;
     }
     if (req.save != proto::FileId{} && !inbox_.stamp_save(*id, req.save)) ++open_saves_skipped_;
-    if (!inbox_.push(proto::LinkOp::FileTx{.wire_index = req.slot, .file = *id})) {
+    if (req.edge != ContentEdge::Content) (void)inbox_.stamp_edge(*id, req.edge);
+
+    ContentWatch watch{.file = std::move(*f),
+                       .total = sz->v,
+                       .crc = key.value(),
+                       .wire_index = req.slot,
+                       .cut_on_hold =
+                           req.save != proto::FileId{} || req.edge != ContentEdge::Content};
+    if (!watch.path.assign(path)) watch.file.reset();
+    if (!order_content_tx_(*id, std::move(watch))) {
         ++op_drops_;
         return;
     }
     ++ops_posted_;
     ++files_loaded_;
+    publish_done_(req.asked, req.tag);
     if (req.load_addr == 0) begin_companion_(path);
 }
 
+bool SessionOwner::order_content_tx_(proto::FileId file, ContentWatch watch) {
+    watch.act = next_generation();
+    const proto::LinkOp::FileTx op{.wire_index = watch.wire_index, .file = file, .act = watch.act};
+    if (!inbox_.push(op)) return false;
+    watch_.emplace(std::move(watch));
+    return true;
+}
+
+bool SessionOwner::watch_answered_() const noexcept {
+    if (!watch_) return false;
+    const auto s = ftx_level_cell_.sample();
+    return s && s.value.answers(watch_->act);
+}
+
+void SessionOwner::forget_watch_() noexcept {
+    if (!watch_) return;
+    watch_.reset();
+    ++long_wait_drops_;
+}
+
+void SessionOwner::step_watch_() {
+    if (!watch_) return;
+    const auto s = ftx_level_cell_.sample();
+    if (!s || !s.value.answers(watch_->act)) return;
+    const FileTxLevel& l = s.value;
+    if (l.held_act != watch_->act) {
+        watch_.reset();
+        return;
+    }
+
+    if (pieces_ || load_ || walk_ || companion_walk_) {
+        forget_watch_();
+        return;
+    }
+    ContentWatch& w = *watch_;
+    if (!w.cut_on_hold && w.file) {
+        auto p = FileTxPieces::resume(std::move(w.file), w.total, w.wire_index, w.path.view(),
+                                      w.from + l.held_bytes, w.crc);
+        if (p) {
+            pieces_.emplace(std::move(*p));
+            ++long_wait_resumes_;
+            watch_.reset();
+            return;
+        }
+    }
+    const proto::LinkOp::FileTx cut{.wire_index = w.wire_index,
+                                    .phase = proto::LinkOp::FileTxPhase::Close,
+                                    .total = static_cast<std::uint32_t>(w.total)};
+    if (!inbox_.push(cut)) return;
+    ++ops_posted_;
+    ++files_failed_;
+    ++long_wait_refusals_;
+    watch_.reset();
+}
+
+void SessionOwner::watch_last_piece_() {
+    const FileTxPieces::LastOp l = pieces_->last_op();
+    ContentWatch w{.act = l.act,
+                   .file = pieces_->take_file(),
+                   .total = pieces_->total(),
+                   .crc = l.crc,
+                   .wire_index = pieces_->wire_index(),
+                   .from = l.from,
+                   .cut_on_hold = l.shaped};
+    if (!w.path.assign(pieces_->path())) w.file.reset();
+    watch_.emplace(std::move(w));
+}
+
 void SessionOwner::step_pieces_() {
-    if (!pieces_) return;
+    if (!pieces_ || !pieces_->ready(inbox_, ftx_level_cell_)) return;
     const std::uint32_t before = inbox_.ring().pushed();
-    const FileTxPieces::Pass pass = pieces_->step(inbox_);
+    const FileTxPieces::Pass pass = pieces_->step(inbox_, ftx_level_cell_, next_generation());
     ops_posted_ += static_cast<std::uint32_t>(inbox_.ring().pushed() - before);
     if (pass == FileTxPieces::Pass::Done) {
-        ++files_loaded_;
+        if (!pieces_->resumed()) {
+            ++files_loaded_;
+            publish_done_(content_owed_.which, content_owed_.tag);
+        }
+        watch_last_piece_();
     } else if (pass == FileTxPieces::Pass::Failed) {
         ++files_failed_;
     } else {
@@ -752,25 +951,38 @@ SessionOwner::RungWait SessionOwner::rung_wait_() const noexcept {
     };
     const bool room = inbox_.ring().size() < proto::kLinkTxCapacity;
     return std::max({
-        each(pieces_.has_value(), pieces_ && pieces_->ready(inbox_)),
+        each(pieces_.has_value(), pieces_ && pieces_->ready(inbox_, ftx_level_cell_)),
+        each(watch_.has_value(), watch_answered_() && room),
         each(load_.has_value(), load_ && load_->wants_pass(inbox_, &ftx_level_cell_)),
         each(walk_.has_value(), walk_ && walk_->wants_pass(inbox_, &ftx_level_cell_)),
         each(companion_walk_.has_value(),
              companion_walk_ && companion_walk_->wants_pass(inbox_, &ftx_level_cell_)),
         each(ladder_ != nullptr, (ladder_moved_ || walk_answer_fresh_) && room),
         each(save_mount_.has_value(), false),
+        each(ss_hold_.has_value(), ss_hold_ && savestates_answered_(ss_hold_->gen)),
         each(addons_.has_value(), addons_ && addons_->wants_pass(inbox_)),
         each(!addons_ && addons_after_.has_value(), content_ordered_()),
+        each(manifest_.has_value(), manifest_ && manifest_->wants_pass(inbox_, &ftx_level_cell_)),
     });
 }
 
-bool SessionOwner::arm_loader_(const ContentRequest& req) {
-    const auto hint = made_with_manifest_ ? cores::LoadHint::XmlManifest : cores::LoadHint::None;
-    const auto row = cores::find_core(core_name_.view(), hint);
-    if (!row || (*row)->make_loader == nullptr) return false;
-    if (cores::walks_romset((*row)->profile->slots, proto::IoIndex{req.slot})) {
-        return arm_walk_(req, **row);
+bool SessionOwner::arm_loader_(const ContentRequest& req, std::string_view save,
+                               std::uint64_t save_bytes) {
+    const cores::CoreFactory* row = load_row_();
+    const cores::MakeLoader make = cores::loader_for(row, req.load_addr);
+    if (make == nullptr) return false;
+    const bool own = row != nullptr && row->make_loader != nullptr;
+
+    if (!own && (load_ || walk_ || pieces_)) {
+        ++files_failed_;
+        return true;
     }
+    content_owed_ = Owed{req.asked, req.tag};
+    if (own && cores::walks_romset(row->profile->slots, proto::IoIndex{req.slot})) {
+        return arm_walk_(req, *row);
+    }
+    const cores::CoreProfile& profile =
+        row != nullptr ? *row->profile : cores::profile_for(core_name_.view());
     const std::string_view path = req.path.view();
     auto f = vfs_.open(path, svc::OpenMode::ReadWhole);
     const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
@@ -779,8 +991,7 @@ bool SessionOwner::arm_loader_(const ContentRequest& req) {
         return true;
     }
     const bool turbo = conf_str_ && conf_str_->declares_turbo();
-    auto loader =
-        (*row)->make_loader(cores::LoaderContext{vfs_, *(*row)->profile, turbo, &loader_memo_});
+    auto loader = make(cores::LoaderContext{vfs_, profile, turbo, &loader_memo_, aperture_});
     const cores::LoadAsk ask{
         .index = proto::IoIndex{req.slot}, .path = path, .size = sz->v, .load_addr = req.load_addr};
     const auto plan = loader->plan(ask, status_word());
@@ -795,12 +1006,14 @@ bool SessionOwner::arm_loader_(const ContentRequest& req) {
             ++files_failed_;
             return true;
         }
-        walk_windows_ = (*row)->profile->windows;
+        walk_windows_ = profile.windows;
+        forget_watch_();
         walk_.emplace(std::move(*w));
         return true;
     }
     const cores::TransferRow& r = plan->rows[0];
-    if (!r.shaped && !r.placed) return false;
+    const bool plain = !r.shaped && !r.placed;
+    if (plain && r.dest != cores::RowDest::Window) return false;
     if (r.dest == cores::RowDest::Window) {
         const std::uint64_t extent = std::max<std::uint64_t>(sz->v, r.extent);
         auto w = LoadWindow::open(window_map_, aperture_, os::PhysAddr{r.addr}, extent);
@@ -814,18 +1027,24 @@ bool SessionOwner::arm_loader_(const ContentRequest& req) {
             }
         }
         if (w) {
-            auto l = LoadLadder::start(LoadLadder::Job{.loader = std::move(loader),
-                                                       .file = std::move(*f),
-                                                       .total = sz->v,
-                                                       .wire_index = req.slot,
-                                                       .act = next_generation(),
-                                                       .row = r,
-                                                       .mirror = std::move(mirror)},
-                                       std::move(*w), path);
+            LoadLadder::Job job{.loader = std::move(loader),
+                                .file = std::move(*f),
+                                .total = sz->v,
+                                .wire_index = req.slot,
+                                .act = next_generation(),
+                                .row = r,
+                                .mirror = std::move(mirror),
+                                .save_bytes = save_bytes};
+            if (!job.save.assign(save)) {
+                ++files_failed_;
+                return true;
+            }
+            auto l = LoadLadder::start(std::move(job), std::move(*w), path);
             if (!l) {
                 ++files_failed_;
                 return true;
             }
+            forget_watch_();
             load_.emplace(std::move(*l));
             return true;
         }
@@ -837,19 +1056,23 @@ bool SessionOwner::arm_loader_(const ContentRequest& req) {
             ++files_failed_;
             return true;
         }
+
+        if (plain) return false;
     }
     auto p = FileTxPieces::start(std::move(*f), sz->v, req.slot, path, std::move(loader), r);
     if (!p) {
         ++files_failed_;
         return true;
     }
+    forget_watch_();
     pieces_.emplace(std::move(*p));
     return true;
 }
 
 bool SessionOwner::arm_walk_(const ContentRequest& req, const cores::CoreFactory& row) {
     const bool turbo = conf_str_ && conf_str_->declares_turbo();
-    auto loader = row.make_loader(cores::LoaderContext{vfs_, *row.profile, turbo, &loader_memo_});
+    auto loader =
+        row.make_loader(cores::LoaderContext{vfs_, *row.profile, turbo, &loader_memo_, aperture_});
     const cores::LoadAsk ask{
         .index = proto::IoIndex{req.slot}, .path = req.path.view(), .load_addr = req.load_addr};
     const auto plan = loader->plan(ask, status_word());
@@ -860,18 +1083,20 @@ bool SessionOwner::arm_walk_(const ContentRequest& req, const cores::CoreFactory
         return true;
     }
     walk_windows_ = row.profile->windows;
+    forget_watch_();
     walk_.emplace(std::move(*w));
     return true;
 }
 
 bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, std::uint32_t gen) {
     if (walk_ || pieces_ || load_ || addons_) return false;
+    content_owed_ = Owed{};
     walk_answer_ = cores::MountStatus{.generation = gen, .state = cores::MountState::Failed};
     const auto row = cores::find_core(core_name_.view());
     if (!row || (*row)->make_loader == nullptr) return true;
     const bool turbo = conf_str_ && conf_str_->declares_turbo();
-    auto loader =
-        (*row)->make_loader(cores::LoaderContext{vfs_, *(*row)->profile, turbo, &loader_memo_});
+    auto loader = (*row)->make_loader(
+        cores::LoaderContext{vfs_, *(*row)->profile, turbo, &loader_memo_, aperture_});
     const cores::LoadAsk ask{.index = slot, .path = path, .disc = true};
     const auto plan = loader->plan(ask, status_word());
     auto w = plan ? LoadWalk::start(std::move(loader), *plan)
@@ -881,6 +1106,7 @@ bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, std::u
         return true;
     }
     walk_windows_ = (*row)->profile->windows;
+    forget_watch_();
     walk_.emplace(std::move(*w));
     walk_gen_ = gen;
     walk_answer_.state = cores::MountState::Pending;
@@ -901,6 +1127,7 @@ void SessionOwner::step_walk_() {
     ops_posted_ += static_cast<std::uint32_t>(inbox_.ring().pushed() - before);
     if (pass == LoadWalk::Pass::Done) {
         ++files_loaded_;
+        publish_done_(content_owed_.which, content_owed_.tag);
     } else if (pass == LoadWalk::Pass::Failed) {
         ++files_failed_;
         if (walk_->refused() || walk_->stalled()) {
@@ -965,6 +1192,7 @@ void SessionOwner::begin_companion_(std::string_view path) {
         ++companion_skips_;
         return;
     }
+    forget_watch_();
     companion_walk_.emplace(std::move(*w));
     ++companion_walks_;
 
@@ -995,15 +1223,15 @@ void SessionOwner::step_load_() {
     const std::uint32_t before = inbox_.ring().pushed();
     const LoadLadder::Pass pass = load_->step(host);
     ops_posted_ += static_cast<std::uint32_t>(inbox_.ring().pushed() - before);
+    if (pass != LoadLadder::Pass::Done && pass != LoadLadder::Pass::Failed) return;
+    load_.reset();
     if (pass == LoadLadder::Pass::Done) {
         ++files_loaded_;
         ++window_counts_.windows;
-    } else if (pass == LoadLadder::Pass::Failed) {
-        ++files_failed_;
+        publish_done_(content_owed_.which, content_owed_.tag);
     } else {
-        return;
+        ++files_failed_;
     }
-    load_.reset();
     publish_window_counts_();
 }
 
@@ -1104,18 +1332,22 @@ void SessionOwner::arm_mount_(const MountAsk& ask) {
         return;
     }
     ladder_slot_ = ask.index.v;
-    const auto row = cores::find_core(core_name_.view());
-    const cores::SlotRole role =
-        row ? cores::role_of((*row)->profile->slots, ask.index) : cores::SlotRole::Image;
-    switch (role) {
-        case cores::SlotRole::Disc:
+    const cores::CoreProfile& p = loaded_profile_();
+    switch (cores::role_of(p, ask.index)) {
+        case cores::SlotRole::Disc: {
+            const auto row = cores::find_core(core_name_.view());
+            if (!row) break;
             arm_ladder_(ask, **row);
             return;
+        }
         case cores::SlotRole::Save: {
             ++mounts_armed_;
-            const cores::StagingPolicy& sp = (*row)->profile->staging;
+            const cores::StagingPolicy& sp = p.staging;
             const bool framed = sp.save_dest != proto::WideIoIndex{} && sp.save_slot == ask.index;
-            save_mount_.emplace(SaveMount{.ask = ask,
+            MountAsk routed = ask;
+            if (!framed && !routed.index_word)
+                routed.index_word = pick_index_word_(ask.index, ask.path.view());
+            save_mount_.emplace(SaveMount{.ask = routed,
                                           .due_ns = clock_.now().count() + kSaveMountBoundNs,
                                           .bracketed = framed});
             return;
@@ -1124,6 +1356,17 @@ void SessionOwner::arm_mount_(const MountAsk& ask) {
             break;
     }
     arm_plain_mount_(ask);
+}
+
+std::optional<std::uint8_t> SessionOwner::pick_index_word_(proto::IoIndex index,
+                                                           std::string_view path) const {
+    if (!conf_str_) return std::nullopt;
+    const proto::ConfStrEntry* row = nullptr;
+    for (const proto::ConfStrEntry& e : conf_str_->file_slots())
+        if (e.letter == 'S' && e.ioctl_index == index.v) row = &e;
+    if (row == nullptr) return std::nullopt;
+    return static_cast<std::uint8_t>((proto::ConfStr::ext_subindex(path, row->ext) << 6) |
+                                     (row->selentry + 1));
 }
 
 void SessionOwner::arm_ladder_(const MountAsk& ask, const cores::CoreFactory& row) {
@@ -1142,6 +1385,7 @@ void SessionOwner::arm_ladder_(const MountAsk& ask, const cores::CoreFactory& ro
 
     ladder_last_dir_.assign(ladder_->next_last_dir());
     ladder_moved_ = true;
+    ladder_owed_ = Owed{ask.which, ask.tag};
     ++mounts_armed_;
     ++ladders_run_;
     publish_ladder_(true);
@@ -1169,7 +1413,7 @@ void SessionOwner::arm_plain_mount_(const MountAsk& ask) {
         ++images_sized_;
     }
     ++mounts_armed_;
-    (void)order(op);
+    if (order(op)) publish_done_(ask.which, ask.tag);
 }
 
 void SessionOwner::step_save_mount_() {
@@ -1188,6 +1432,11 @@ void SessionOwner::step_save_mount_() {
             }
             if (m.then_load) {
 
+                if (!owns_loader_() && arm_loader_(*m.then_load, path, e.size_bytes)) {
+                    finish_save_mount_(true, true);
+                    return;
+                }
+
                 if (const auto id = intern_path(path, e.size_bytes); id && *id != proto::FileId{}) {
                     ContentRequest load = *m.then_load;
                     load.save = *id;
@@ -1201,7 +1450,9 @@ void SessionOwner::step_save_mount_() {
                     order(proto::LinkOp::BindSlot{.slot = slot,
                                                   .bind = proto::LinkOp::SlotBind::Mount,
                                                   .bracketed = m.bracketed,
-                                                  .path = *id})) {
+                                                  .path = *id,
+                                                  .sends_index = m.ask.index_word.has_value(),
+                                                  .index_word = m.ask.index_word.value_or(0)})) {
                     finish_save_mount_(true);
                     return;
                 }
@@ -1218,7 +1469,7 @@ void SessionOwner::step_save_mount_() {
 
             const ContentRequest load = *m.then_load;
             ++open_saves_skipped_;
-            perform_content_(load);
+            launch_content_(load);
             finish_save_mount_(false, true);
             return;
         }
@@ -1231,7 +1482,9 @@ void SessionOwner::step_save_mount_() {
         if (!m.unmounted) {
             if (!order(proto::LinkOp::BindSlot{.slot = slot,
                                                .bind = proto::LinkOp::SlotBind::Unmount,
-                                               .bracketed = m.bracketed}))
+                                               .bracketed = m.bracketed,
+                                               .sends_index = m.ask.index_word.has_value(),
+                                               .index_word = m.ask.index_word.value_or(0)}))
                 return;
             m.unmounted = true;
         }
@@ -1259,12 +1512,14 @@ void SessionOwner::finish_save_mount_(bool ok, bool quiet) {
     if (!save_mount_) return;
     const std::uint8_t slot = save_mount_->ask.index.v;
     const CorrelationTag tag = save_mount_->ask.tag;
+    const UiRequest::Kind which = save_mount_->ask.which;
     quiet = quiet || save_mount_->start;
     save_mount_.reset();
     if (ok && !quiet) {
         ++save_mounts_done_;
         (void)owner_events_.push(infra::make<Event>(
             Event::SdActivity{.slot = slot}, Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}));
+        publish_done_(which, tag);
     } else if (!quiet) {
         (void)owner_events_.push(
             infra::make<Event>(Event::InfoRequest{.id = InfoId::ImageMountFailed},
@@ -1300,6 +1555,7 @@ void SessionOwner::finish_ladder_(bool ok) {
     ladder_last_dir_.assign(ladder_->next_last_dir());
     ladder_noreset_ = ladder_->next_noreset();
     const cores::BootLadder::Report rep = ladder_->report();
+    if (rep.savestate_hold_expired) ++savestate_hold_expiries_;
 
     const bool touched = !start_ladder_ || rep.save_mounted || rep.save_detached;
     ladder_.reset();
@@ -1307,10 +1563,12 @@ void SessionOwner::finish_ladder_(bool ok) {
     start_ladder_ = false;
     start_pick_ladder_ = false;
     const Event::Head head{EmitSite{ERR_SITE()}, {}, kUncaused};
+    const Owed owed = std::exchange(ladder_owed_, Owed{});
     if (ok) {
         if (touched)
             (void)owner_events_.push(
                 infra::make<Event>(Event::SdActivity{.slot = ladder_slot_}, head));
+        publish_done_(owed.which, owed.tag);
     } else {
         (void)owner_events_.push(
             infra::make<Event>(Event::InfoRequest{.id = InfoId::ImageMountFailed}, head));
@@ -1325,10 +1583,16 @@ void SessionOwner::finish_ladder_(bool ok) {
 }
 
 void SessionOwner::arm_next_mount_() {
-    while (!mount_busy_() && !start_mounts_.empty()) {
-        const MountAsk next = start_mounts_.front();
-        start_mounts_.pop_front();
-        arm_start_mount_(next);
+    while (!mount_busy_() && (!start_mounts_.empty() || !boot_images_.empty())) {
+        if (!start_mounts_.empty()) {
+            const MountAsk next = start_mounts_.front();
+            start_mounts_.pop_front();
+            arm_start_mount_(next);
+            continue;
+        }
+        const MountAsk next = boot_images_.front();
+        boot_images_.pop_front();
+        arm_boot_image_(next);
     }
     if (mount_busy_() || !held_mount_.has_value()) return;
     const MountAsk next = *held_mount_;
@@ -1350,8 +1614,7 @@ void SessionOwner::arm_start_mount_(const MountAsk& ask) {
         case cores::StartMount::Generic:
             break;
     }
-    const std::span<const cores::FileSlot> slots = profile.slots;
-    switch (cores::role_of(slots, ask.index)) {
+    switch (cores::role_of(profile, ask.index)) {
         case cores::SlotRole::Disc:
             ++remembered_mounts_skipped_;
             return;
@@ -1376,19 +1639,58 @@ void SessionOwner::arm_start_mount_(const MountAsk& ask) {
     arm_plain_mount_(ask);
 }
 
-void SessionOwner::read_remembered_mounts_() {
+bool SessionOwner::read_remembered_mounts_() {
     start_mounts_.clear();
-    if (!conf_str_ || remembered_files_ == RememberedFiles::Ignore) return;
-    for (const proto::IoIndex index : conf_str_->remembered_mounts()) {
+    if (!conf_str_ || remembered_files_ == RememberedFiles::Ignore) return false;
+    bool slot0_held = false;
+    const proto::ItemTable items = conf_str_->item_table();
+    for (const proto::Item& it : items.items()) {
+        if (it.kind != proto::ItemKind::MountSlot || !it.store_name || !it.has_digit) continue;
         const std::string path =
-            read_remembered_path(vfs_, remembered_stem_, RememberedSlot::Mount, index.v);
+            read_remembered_path(vfs_, remembered_stem_, RememberedSlot::Mount, it.digit);
         if (path.empty()) continue;
-        MountAsk ask{.which = UiRequest::Kind::MountImage, .index = index, .tag = kUncaused};
+        slot0_held = slot0_held || it.digit == 0;
+        MountAsk ask{.which = UiRequest::Kind::MountImage,
+                     .index = proto::IoIndex{it.digit},
+                     .tag = kUncaused};
+        ask.index_word = static_cast<std::uint8_t>(
+            (proto::ConfStr::ext_subindex(path, items.subfield(it, 1)) << 6) | it.digit);
         if (!ask.path.assign(path)) {
             ++remembered_mounts_skipped_;
             continue;
         }
         start_mounts_.push_back(ask);
+    }
+    return slot0_held;
+}
+
+void SessionOwner::queue_boot_images_(const StartChain& chain) {
+    boot_images_.clear();
+    for (const StartFile& f : chain.boot_images()) {
+        MountAsk ask{.which = UiRequest::Kind::MountImage,
+                     .index = proto::IoIndex{static_cast<std::uint8_t>(f.dest.v >> 6)},
+                     .path = f.path,
+                     .tag = kUncaused,
+                     .index_word = static_cast<std::uint8_t>(f.dest.v)};
+        boot_images_.push_back(ask);
+    }
+}
+
+void SessionOwner::arm_boot_image_(const MountAsk& ask) {
+    switch (cores::role_of(loaded_profile_(), ask.index)) {
+        case cores::SlotRole::Save:
+            ++boot_images_armed_;
+            ++mounts_armed_;
+            ladder_slot_ = ask.index.v;
+            save_mount_.emplace(SaveMount{.ask = ask,
+                                          .due_ns = clock_.now().count() + kSaveMountBoundNs,
+                                          .bracketed = false,
+                                          .start = true});
+            return;
+        case cores::SlotRole::Disc:
+        case cores::SlotRole::Image:
+            ++boot_images_skipped_;
+            return;
     }
 }
 
@@ -1413,10 +1715,14 @@ void SessionOwner::drop_ladder_() {
     save_mount_.reset();
     held_mount_.reset();
     start_mounts_.clear();
+    boot_images_.clear();
     pieces_.reset();
+    watch_.reset();
     addons_.reset();
     picked_load_.reset();
+    ss_hold_.reset();
     addons_after_.reset();
+    manifest_.reset();
     if (load_) {
         load_.reset();
         ++window_counts_.cancelled;
@@ -1492,13 +1798,19 @@ void SessionOwner::order_slot_previews_(const std::byte* pack, std::size_t len) 
 }
 
 void SessionOwner::intern_manifest_(std::string_view rel) {
+    std::vector<std::uint8_t> buf = read_manifest_(rel);
+    pack_manifest_cheats_(buf);
+    (void)inbox_.intern_file_at(FileBytes::kManifestId, std::move(buf), ".mra", rel, 0);
+}
+
+std::vector<std::uint8_t> SessionOwner::read_manifest_(std::string_view rel) const {
     std::vector<std::uint8_t> buf;
     if (!rel.empty()) {
         auto f = vfs_.open(rel, svc::OpenMode::ReadWhole);
         if (f) {
             auto sz = (*f)->size();
-            const cores::ManifestDocRole* role = cores::manifest_doc_role();
-            const std::uint64_t kMaxDoc = role != nullptr ? role->doc_max : 16ull * 1024u * 1024u;
+            const cores::IManifestDocRole* role = cores::manifest_doc_role();
+            const std::uint64_t kMaxDoc = role != nullptr ? role->doc_max() : 16ull * 1024u * 1024u;
             if (sz && sz->v != 0 && sz->v <= kMaxDoc) {
                 buf.resize(static_cast<std::size_t>(sz->v));
                 std::size_t off = 0;
@@ -1516,12 +1828,11 @@ void SessionOwner::intern_manifest_(std::string_view rel) {
             }
         }
     }
-    pack_manifest_cheats_(buf);
-    (void)inbox_.intern_file_at(FileBytes::kManifestId, std::move(buf), ".mra", rel, 0);
+    return buf;
 }
 
 void SessionOwner::pack_manifest_cheats_(std::span<const std::uint8_t> doc) {
-    const cores::ManifestDocRole* role = cores::manifest_doc_role();
+    const cores::IManifestDocRole* role = cores::manifest_doc_role();
     if (role == nullptr) {
         cheat_catalog_ = CheatCatalog{};
         return;
@@ -1581,13 +1892,14 @@ void SessionOwner::order_bind_identity_(const proto::ConfStr& conf) {
     (void)push_gating_op_(infra::make<proto::LinkOp>(
         proto::LinkOp::BindIdentity{.blob = *id,
                                     .declares_cheats = conf.declares_cheats(),
-                                    .declares_turbo = conf.declares_turbo()}));
+                                    .declares_turbo = conf.declares_turbo(),
+                                    .declares_info = conf.declares_info()}));
 }
 
 void SessionOwner::order_bind_doorbells_(const proto::ConfStr& conf) {
-    constexpr std::size_t kRows = LinkTxChannel::Bytes::kBytes / sizeof(proto::IrqBinding);
     const auto& irqs = conf.irq_bindings();
-    const std::size_t rows = std::min(irqs.size(), kRows);
+
+    const std::size_t rows = std::min(irqs.size(), kMaxDoorbellRows);
     proto::LinkOp::BindDoorbells op{
         .declared = static_cast<std::uint8_t>(std::min<std::size_t>(irqs.size(), 0xFF))};
     if (rows != 0) {
@@ -1625,25 +1937,51 @@ void SessionOwner::order_bind_facts_() noexcept {
     (void)push_gating_op_(infra::make<proto::LinkOp>(op));
 }
 
-void SessionOwner::order_make_core_() noexcept {
-    proto::LinkOp::MakeCore op{};
+std::string_view SessionOwner::make_core_rel_() const noexcept {
+    if (pending_.xml == XmlKind::Mra && !pending_.path.empty()) return pending_.path.view();
+    return defmra_rel_;
+}
 
-    std::string_view rel{};
-    if (pending_.xml == XmlKind::Mra && !pending_.path.empty()) {
-        rel = pending_.path.view();
-    } else if (!defmra_rel_.empty()) {
-        rel = defmra_rel_;
+void SessionOwner::order_make_core_() {
+    manifest_.reset();
+    post_make_core_();
+}
+
+void SessionOwner::post_make_core_() {
+    const std::string_view rel = make_core_rel_();
+
+    const std::string built_from{rel.empty() ? boot_companion_.view() : rel};
+    boot_companion_ = PathText{};
+    made_with_manifest_ = !built_from.empty();
+    if (!made_with_manifest_ || !manifest_rel_.assign(built_from)) manifest_rel_ = PathText{};
+    const proto::LinkOp::AdoptCore op = builder_.build(CoreBuilder::Ask{
+        .name = core_name_.view(),
+        .manifest = {.path = built_from, .text = manifest_text_()},
+        .irqs = conf_str_ ? conf_str_->irq_bindings() : std::span<const proto::IrqBinding>{}});
+
+    if (!push_gating_op_(infra::make<proto::LinkOp>(op))) {
+        builder_.forget(op);
+        give_up_start_(Errc::would_block);
+        return;
     }
-    if (!rel.empty()) {
-        const auto* p = reinterpret_cast<const std::uint8_t*>(rel.data());
-        const auto id = inbox_.intern(std::span<const std::uint8_t>(p, rel.size()));
-        if (id) {
-            op.manifest = *id;
-            op.manifest_hint = true;
-        }
+
+    if (made_with_manifest_ && conf_str_ && conf_str_->savestate().has_value()) {
+        (void)ask_savestates_(manifest_rel_.view(), next_generation());
     }
-    made_with_manifest_ = op.manifest_hint;
-    (void)push_gating_op_(infra::make<proto::LinkOp>(op));
+
+    if (start_bounded_)
+        start_due_ = os::Deadline::in(clock_, std::chrono::milliseconds{start_bound_ms_});
+}
+
+std::string_view SessionOwner::manifest_text_() const noexcept {
+    const FileBytes::Slot* const doc = inbox_.file(FileBytes::kManifestId);
+    if (doc == nullptr || doc->bytes.empty()) return {};
+    return {reinterpret_cast<const char*>(doc->bytes.data()), doc->bytes.size()};
+}
+
+void SessionOwner::latch_boot_companion(std::string_view xml) noexcept {
+    boot_companion_ = PathText{};
+    if (svc::Vfs::extension_matches(xml, "MRA")) (void)boot_companion_.assign(xml);
 }
 
 void SessionOwner::elect_defmra_(std::string_view text) {
@@ -1813,6 +2151,12 @@ void SessionOwner::on_save_config_(CorrelationTag tag) {
     publish_save_verdict_(ok, tag);
 }
 
+void SessionOwner::publish_done_(UiRequest::Kind which, CorrelationTag tag) noexcept {
+    if (tag == kUncaused) return;
+    (void)owner_events_.push(infra::make<Event>(Event::RequestDone{.which = which},
+                                                Event::Head{EmitSite{ERR_SITE()}, {}, tag}));
+}
+
 void SessionOwner::publish_refusal_(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept {
     (void)owner_events_.push(infra::make<Event>(Event::RequestRefused{.which = which, .why = code},
                                                 Event::Head{EmitSite{ERR_SITE()}, {}, tag}));
@@ -1961,10 +2305,60 @@ void SessionOwner::on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept {
         refuse_started_switch_(m.err);
         return;
     }
+    made_restore_owed_ = m.restore_owed;
+    made_cheat_records_ = m.cheat_records;
+
+    if (arm_manifest_()) return;
+    finish_core_made_();
+}
+
+bool SessionOwner::arm_manifest_() {
+    manifest_.reset();
+    if (!made_with_manifest_) return false;
+    const cores::IManifestDocRole* role = cores::manifest_doc_role();
+    if (role == nullptr) return false;
+    std::unique_ptr<cores::IManifestStager> stager =
+        role->stager_of(manifest_text_(), manifest_rel_.view(), vfs_);
+    if (stager == nullptr) return false;
+    manifest_.emplace(std::move(stager), manifest_rel_);
+    return true;
+}
+
+void SessionOwner::step_manifest_() {
+    if (!manifest_) return;
+    ManifestLadder::Host host{.rung = LoadLadder::Host{inbox_, &ftx_level_cell_, owner_events_},
+                              .owner = *this,
+                              .map = window_map_,
+                              .aperture = aperture_,
+                              .windows = window_counts_,
+                              .now_ns = clock_.now().count()};
+    const std::uint32_t before = inbox_.ring().pushed();
+    const ManifestLadder::Pass pass = manifest_->step(host);
+    ops_posted_ += static_cast<std::uint32_t>(inbox_.ring().pushed() - before);
+    publish_window_counts_();
+    if (pass == ManifestLadder::Pass::Failed) {
+        const Errc why = manifest_->failure();
+        manifest_.reset();
+        give_up_start_(why);
+        return;
+    }
+    if (pass != ManifestLadder::Pass::Done) return;
+
+    if (!manifest_->error().empty()) {
+        ++manifest_errors_;
+        (void)owner_events_.push(
+            infra::make<Event>(Event::InfoRequest{.id = InfoId::RomLoadFailed},
+                               Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}));
+    }
+    manifest_.reset();
+    finish_core_made_();
+}
+
+void SessionOwner::finish_core_made_() noexcept {
 
     static constexpr CheatCatalog kNoCheats{};
-    cheat_catalog_cell_.publish(m.cheat_records ? cheat_catalog_ : kNoCheats);
-    if (m.restore_owed) {
+    cheat_catalog_cell_.publish(made_cheat_records_ ? cheat_catalog_ : kNoCheats);
+    if (made_restore_owed_) {
 
         boot_restore_owed_ = true;
         if (order_save_ask_(proto::SaveKind::SlotNames, 0, CorrelationTag{}, true)) return;
@@ -1982,10 +2376,18 @@ void SessionOwner::order_session_up_() noexcept {
     (void)push_gating_op_(infra::make<proto::LinkOp>(proto::LinkOp::SessionUp{}));
 
     const bool ladder = arm_start_ladder_(index0_taken);
-    order_remembered_files_(remembered);
-    if (!ladder) order_start_assets_(index0_taken);
+    const std::string rbf = start_rbf_();
 
-    read_remembered_mounts_();
+    const bool slot0_held = read_remembered_mounts_();
+    const StartChain chain = StartChain::plan(
+        start_facts_(rbf, index0_taken, slot0_held, !remembered.empty(), ladder), vfs_);
+
+    const bool held = chain.holds_reset() && order_reset_level_(true);
+    order_remembered_files_(remembered);
+    order_start_chain_(chain);
+    if (held) (void)order_reset_level_(false);
+
+    queue_boot_images_(chain);
     arm_next_mount_();
 }
 
@@ -2016,7 +2418,7 @@ void SessionOwner::order_remembered_files_(std::span<const RememberedFile> files
         }
         const std::uint32_t failed = files_failed_;
         const std::uint32_t drops = op_drops_;
-        attach_row_savestates_(f.row.opensave);
+        (void)attach_row_savestates_(f.row.opensave, cr->path.view());
         order_row_content_(*cr, f.row.opensave, UiRequest::SaveChoice::User, kUncaused);
         if (files_failed_ != failed) {
             ++remembered_missed_;
@@ -2026,20 +2428,90 @@ void SessionOwner::order_remembered_files_(std::span<const RememberedFile> files
     }
 }
 
-void SessionOwner::order_start_assets_(bool index0_taken) noexcept {
-    for (const cores::BootAsset& row : cores::profile_for(core_name_.view()).start_assets) {
-        if (!cores::start_row_sends(row, index0_taken)) continue;
-        std::string rel(row.subdir);
-        if (!rel.empty()) rel += '/';
-        rel.append(row.name);
-        const auto path = vfs_.resolve(rel, svc::SearchPolicy{row.where, true});
-        if (!path) continue;
-        ContentRequest cr{};
-        if (!cr.path.assign(*path)) continue;
-        cr.slot = static_cast<std::uint8_t>(row.dest.v);
-        perform_content_(cr);
-        ++start_assets_ordered_;
+StartChain::Facts SessionOwner::start_facts_(std::string_view rbf, bool index0_taken,
+                                             bool slot0_held, bool remembered, bool ladder) const {
+    const cores::CoreProfile& p = cores::profile_for(core_name_.view());
+    return StartChain::Facts{.rule = p.start,
+                             .declared = p.start_assets,
+                             .home = core_name_.view(),
+                             .rbf = rbf,
+                             .manifest_load = made_with_manifest_,
+                             .generic_identity = generic_identity_,
+                             .index0_taken = index0_taken,
+                             .remembered = remembered,
+                             .ladder = ladder,
+                             .slot0_held = slot0_held};
+}
+
+std::string SessionOwner::start_rbf_() const {
+    if (pending_.path.empty() || pending_.xml != XmlKind::Rbf) return {};
+    auto rel = resolve_bitstream(vfs_, pending_.path.view(), pending_.xml);
+    return rel ? std::move(*rel) : std::string{};
+}
+
+void SessionOwner::order_start_chain_(const StartChain& chain) {
+    const auto files = chain.files();
+    for (std::size_t i = 0; i < files.size(); ++i) {
+        const StartFile& f = files[i];
+        const std::uint32_t failed = files_failed_;
+        const std::uint32_t drops = op_drops_;
+        if (f.offset != 0) {
+            order_rbf_tail_(f.path.view(), f.dest, f.offset);
+        } else {
+            ContentRequest cr{};
+            cr.path = f.path;
+            cr.slot = static_cast<std::uint8_t>(f.dest.v);
+            cr.whole = chain.holds_reset();
+
+            cr.edge = i + 1 == files.size() ? ContentEdge::ChainEnd : ContentEdge::Silent;
+            perform_content_(cr);
+        }
+        if (files_failed_ == failed && op_drops_ == drops) ++start_assets_ordered_;
     }
+}
+
+void SessionOwner::order_rbf_tail_(std::string_view path, proto::WideIoIndex dest,
+                                   std::uint64_t offset) {
+    auto src = stream_open(vfs_, path, svc::OpenMode::ReadWhole);
+    if (!src || src->size < offset) {
+        ++files_failed_;
+        return;
+    }
+    if (src->size == offset) {
+        ++files_failed_;
+        return;
+    }
+    std::vector<std::uint8_t> buf(static_cast<std::size_t>(src->size - offset));
+    if (!stream_read(*src->f, offset, std::as_writable_bytes(std::span<std::uint8_t>(buf)))) {
+        ++files_failed_;
+        return;
+    }
+    const std::size_t dot = path.rfind('.');
+    const std::string_view ext =
+        dot == std::string_view::npos ? std::string_view{} : path.substr(dot);
+    LoadKey key(buf.size());
+    key.feed(buf);
+    const auto id = inbox_.intern_file(std::move(buf), ext, path, 0, key.value());
+    if (!id) {
+        ++files_failed_;
+        return;
+    }
+    (void)inbox_.stamp_edge(*id, ContentEdge::Silent);
+
+    if (!order_content_tx_(*id, ContentWatch{.total = src->size - offset,
+                                             .crc = key.value(),
+                                             .wire_index = static_cast<std::uint8_t>(dest.v),
+                                             .cut_on_hold = true})) {
+        ++op_drops_;
+        return;
+    }
+    ++ops_posted_;
+    ++files_loaded_;
+}
+
+bool SessionOwner::order_reset_level_(bool asserted) {
+    return push_gating_op_(infra::make<proto::LinkOp>(proto::LinkOp::WriteStatus{
+        .start = proto::StatusBit{0}, .width = 1, .value = asserted ? 1u : 0u}));
 }
 
 bool SessionOwner::arm_start_ladder_(bool index0_taken) {
@@ -2059,6 +2531,7 @@ bool SessionOwner::arm_start_ladder_(bool index0_taken) {
     ladder_ = (*row)->make_ladder(*(*row)->profile, ctx);
     if (ladder_ == nullptr) return false;
     start_ladder_ = true;
+    ladder_owed_ = Owed{};
     ladder_slot_ = sp.save_slot.v;
     ladder_last_dir_.assign(ladder_->next_last_dir());
     ladder_moved_ = true;
@@ -2171,9 +2644,6 @@ void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
     order_bind_uart_(effective_name(name, pending_facts_), &cs);
 
     order_make_core_();
-
-    if (start_bounded_)
-        start_due_ = os::Deadline::in(clock_, std::chrono::milliseconds{start_bound_ms_});
 }
 
 void SessionOwner::arm_replay_ini(bool strict) noexcept {
@@ -2288,6 +2758,7 @@ void SessionOwner::on_identity_mismatch_(const proto::LinkEvent::IdentityMismatc
 void SessionOwner::on_identity_matched_(const proto::LinkEvent::IdentityMatched& w) noexcept {
     ++identities_ok_;
     if (w.bind_gen.v != gen_) return;
+    generic_identity_ = proto::fold_core_type(w.type_byte) == proto::CoreType::EightBit;
 
     if (!awaiting_identity_) {
         link_wide_ = w.wide;
@@ -2387,6 +2858,7 @@ SessionOwner::Asked SessionOwner::ask_switch_(const UiRequest::LoadCore& req, Co
         return Asked::NoRoom;
     }
     gen_ = next;
+    generic_identity_ = false;
     recover_owed_ = false;
     front_end_owed_ = false;
     front_end_fallback_armed_ = !names_front_end_image(req.path.view(), req.xml);
@@ -2409,10 +2881,12 @@ SessionOwner::Asked SessionOwner::ask_switch_(const UiRequest::LoadCore& req, Co
     awaiting_conf_str_ = false;
     pending_ = req;
     pending_tag_ = tag;
+    boot_companion_ = PathText{};
 
     forget_core_();
     order_teardown_();
     switch_standing_ = true;
+    note_memsz_(req);
     return Asked::Yes;
 }
 
@@ -2506,6 +2980,8 @@ void SessionOwner::try_program_() {
     (void)::unlink("/tmp/GAMEID");
 
     (void)::unlink("/tmp/CONFSTR");
+
+    builder_.drop_windows(r);
     const Programmed p = program_(r);
     pending_step_arg_ = step_arg_(p);
 

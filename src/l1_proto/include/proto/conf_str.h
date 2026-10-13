@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "reactor/notifier.h"
 #include "hal/phys_region.h"
 #include "hal/types.h"
@@ -51,6 +52,7 @@ struct Capability {
 };
 
 struct ConfStrEntry {
+    TASTY_SEAT_EXEMPT(const_shared);
     char letter = 0;
     std::uint8_t selentry = 0;
     std::uint8_t digit = 0;
@@ -78,7 +80,7 @@ struct ConfStrFileRow {
 enum class FileSlotMatch : std::uint8_t { Exact, RowZero };
 
 struct FileSlotHit {
-    const ConfStrEntry* entry = nullptr;
+    infra::OptRef<const ConfStrEntry> entry{};
     FileSlotMatch how = FileSlotMatch::Exact;
 };
 
@@ -241,7 +243,7 @@ class ConfStr {
     TASTY_SEAT_EXEMPT(main);
 
 public:
-    static Ex<ConfStr> parse(std::string_view raw, hal::PhysRegion aperture);
+    [[nodiscard]] static Ex<ConfStr> parse(std::string_view raw, hal::PhysRegion aperture);
 
     const std::string& name() const noexcept { return name_; }
 
@@ -270,6 +272,8 @@ public:
         }
         return false;
     }
+
+    [[nodiscard]] bool declares_info() const noexcept { return ast_.info_row().has_value(); }
 
     [[nodiscard]] bool declares_turbo() const noexcept {
         for (const Item& it : ast_.items()) {

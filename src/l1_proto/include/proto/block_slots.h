@@ -78,11 +78,6 @@ public:
 
     enum class Pass : std::uint8_t { Idle, Answered, Deferred };
 
-    void attach_source(IImageSource& source) {
-        invalidate_all();
-        source_ = infra::OptRef<IImageSource>{source};
-    }
-
     void set_storage_live(bool live) noexcept { storage_live_ = live; }
 
     void bind_roles(SlotIndex slot, const SlotRoles& roles) noexcept {
@@ -91,8 +86,9 @@ public:
         roles_[slot.v] = roles;
     }
 
-    Ex<void> mount(hal::ISpiTransport& link, SlotIndex slot, FileSize size_bytes, PathId path_id);
-    Ex<void> unmount(hal::ISpiTransport& link, SlotIndex slot);
+    [[nodiscard]] Ex<void> mount(hal::ISpiTransport& link, SlotIndex slot, FileSize size_bytes,
+                                 PathId path_id);
+    [[nodiscard]] Ex<void> unmount(hal::ISpiTransport& link, SlotIndex slot);
 
     [[nodiscard]] Ex<void> mount_cd(hal::ISpiTransport& link, SlotIndex slot, FileSize size_bytes);
 
@@ -171,12 +167,14 @@ private:
         bool blank_next = false;
     };
 
-    Ex<void> send_config(hal::ISpiTransport& link);
-    Ex<void> announce(hal::ISpiTransport& link, SlotIndex slot, FileSize size_bytes, bool writable);
-    Ex<Pass> serve_read(hal::ISpiTransport& link, const SdRequest& req, std::uint32_t block_size,
-                        std::uint32_t window_blocks, std::uint16_t ack);
-    Ex<Pass> serve_write(hal::ISpiTransport& link, const SdRequest& req, std::uint32_t block_size,
-                         std::uint16_t ack);
+    [[nodiscard]] Ex<void> send_config(hal::ISpiTransport& link);
+    [[nodiscard]] Ex<void> announce(hal::ISpiTransport& link, SlotIndex slot, FileSize size_bytes,
+                                    bool writable);
+    [[nodiscard]] Ex<Pass> serve_read(hal::ISpiTransport& link, const SdRequest& req,
+                                      std::uint32_t block_size, std::uint32_t window_blocks,
+                                      std::uint16_t ack);
+    [[nodiscard]] Ex<Pass> serve_write(hal::ISpiTransport& link, const SdRequest& req,
+                                       std::uint32_t block_size, std::uint16_t ack);
 
     [[nodiscard]] Ex<void> emit_read_data_phase_(hal::ISpiTransport& link, SlotIndex slot,
                                                  std::span<const std::uint8_t> serve,
@@ -253,7 +251,7 @@ private:
     std::uint32_t late_max_us_ = 0;
     void note_answer_wait_(std::int64_t waited_ns) noexcept;
 
-    IStorageChannel* chan_ = nullptr;
+    infra::OptRef<IStorageChannel> chan_;
     infra::OptRef<const os::IClock> clock_;
     bool storage_live_ = false;
     std::uint32_t next_seq_ = 1;

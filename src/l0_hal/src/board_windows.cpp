@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "hal/board_windows.h"
 
-#include <algorithm>
 #include <cstdio>
 #include <utility>
 
@@ -26,9 +25,7 @@ Ex<BoardWindows> BoardWindows::open(const BoardProfile& profile, FallbackNotice 
         }
         const auto slot = static_cast<std::size_t>(d.id);
         const detail::MappedRegs& page = w.pages_[slot].emplace(std::move(*m));
-        const std::size_t len =
-            page.pages.length() >= page.lead ? page.pages.length() - page.lead : 0;
-        w.lends_[slot] = Lend{detail::regs_advance(page.pages.base(), page.lead), len};
+        w.lends_[slot] = reg::Block::of(page.pages, page.lead);
     }
     return w;
 }
@@ -41,28 +38,28 @@ Ex<BoardWindows> BoardWindows::attach(const BoardProfile& profile,
     BoardWindows w{profile};
     for (const WindowImage& img : images) {
         const auto slot = static_cast<std::size_t>(img.id);
-        if (slot >= profile.windows.size() || img.id == profile.lw_window || img.base == nullptr ||
-            w.lends_[slot].base != nullptr) {
+        if (slot >= profile.windows.size() || img.id == profile.lw_window || img.words.empty() ||
+            w.lends_[slot].lent()) {
             return std::unexpected(
                 Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(slot)});
         }
 
-        w.lends_[slot] = Lend{img.base, std::min(img.len, profile.windows[slot].region.len)};
+        w.lends_[slot] = reg::Block::over(img.words).first(profile.windows[slot].region.len);
     }
     return w;
 }
 
-Ex<volatile void*> BoardWindows::lead_of(WindowId id, std::size_t need) const {
+Ex<reg::Block> BoardWindows::lead_of(WindowId id, std::size_t need) const {
     const auto slot = static_cast<std::size_t>(id);
-    if (slot >= profile_->windows.size() || lends_[slot].base == nullptr) {
+    if (slot >= profile_->windows.size() || !lends_[slot].lent()) {
         return std::unexpected(
             Error{Errc::dt_missing, ERR_SITE(), static_cast<std::uint32_t>(slot)});
     }
-    if (need == 0 || lends_[slot].len < need) {
+    if (need == 0 || lends_[slot].size() < need) {
         return std::unexpected(
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(need)});
     }
-    return lends_[slot].base;
+    return lends_[slot];
 }
 
 Ex<Mailbox> BoardWindows::take_mailbox() {
@@ -77,7 +74,7 @@ Ex<Mailbox> BoardWindows::take_mailbox() {
     return Mailbox{MailboxRegs{*gpo, *gpi}, *timing, std::move(*claim)};
 }
 
-Ex<volatile std::uint32_t*> BoardWindows::mailbox_gpo() const {
+Ex<reg::Reg<reg::WO>> BoardWindows::mailbox_gpo() const {
     const auto fact = profile_->mailbox_gpo_offset.resolve(
         ERR_SITE(), static_cast<std::uint32_t>(FactField::MailboxGpoOffset));
     if (!fact) return std::unexpected(fact.error());
@@ -85,10 +82,12 @@ Ex<volatile std::uint32_t*> BoardWindows::mailbox_gpo() const {
     auto base =
         lead_of(profile_->mailbox_window, static_cast<std::size_t>(off) + sizeof(std::uint32_t));
     if (!base) return std::unexpected(base.error());
-    return reinterpret_cast<volatile std::uint32_t*>(detail::regs_advance(*base, off));
+    auto r = base->at<reg::WO>(off);
+    if (!r) return std::unexpected(Error{Errc::slot_range, ERR_SITE(), off});
+    return *r;
 }
 
-Ex<const volatile std::uint32_t*> BoardWindows::mailbox_gpi() const {
+Ex<reg::Reg<reg::RO>> BoardWindows::mailbox_gpi() const {
     const auto fact = profile_->mailbox_gpi_offset.resolve(
         ERR_SITE(), static_cast<std::uint32_t>(FactField::MailboxGpiOffset));
     if (!fact) return std::unexpected(fact.error());
@@ -96,7 +95,9 @@ Ex<const volatile std::uint32_t*> BoardWindows::mailbox_gpi() const {
     auto base =
         lead_of(profile_->mailbox_window, static_cast<std::size_t>(off) + sizeof(std::uint32_t));
     if (!base) return std::unexpected(base.error());
-    return reinterpret_cast<const volatile std::uint32_t*>(detail::regs_advance(*base, off));
+    auto r = base->at<reg::RO>(off);
+    if (!r) return std::unexpected(Error{Errc::slot_range, ERR_SITE(), off});
+    return *r;
 }
 
 }  // namespace mister::hal

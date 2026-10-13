@@ -52,9 +52,13 @@ public:
     [[nodiscard]] bool stamp_save(proto::FileId file, proto::FileId save) noexcept {
         return files_.stamp_save(file, save);
     }
+    [[nodiscard]] bool stamp_edge(proto::FileId file, ContentEdge edge) noexcept {
+        return files_.stamp_edge(file, edge);
+    }
     [[nodiscard]] Ex<proto::FileId> intern_file_path(std::string_view path,
-                                                     std::uint64_t size_bytes) {
-        return files_.intern_path(path, size_bytes, tx_.pushed(), tx_.popped());
+                                                     std::uint64_t size_bytes,
+                                                     std::uint32_t crc = 0, std::uint32_t aux = 0) {
+        return files_.intern_path(path, size_bytes, tx_.pushed(), tx_.popped(), crc, aux);
     }
 
     [[nodiscard]] Ex<proto::FileId> intern_file_at(proto::FileId id,

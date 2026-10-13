@@ -134,6 +134,18 @@ public:
         Seq seen_ = 0;
     };
 
+    class Kicker {
+        TASTY_SEAT_EXEMPT(component);
+
+    public:
+        explicit Kicker(BasicWakeFlag& flag) noexcept : flag_(&flag) {}
+        void kick() const noexcept { flag_->kick(); }
+
+    private:
+        BasicWakeFlag* flag_;
+    };
+    [[nodiscard]] Kicker kicker() noexcept { return Kicker{*this}; }
+
     void drain() noexcept {
         if constexpr (Kick::kModel) {
             pending_.exchange(0, std::memory_order_acquire);

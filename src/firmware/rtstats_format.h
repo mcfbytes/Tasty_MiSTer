@@ -43,7 +43,8 @@
     "\"ovs\":%u,\"unc\":%u,\"blank\":%u,\"wf\":%u,\"leg\":%u,"           \
     "\"cfg\":%u,\"dw\":%u,\"def\":%u,\"exp\":%u,\"sec\":%u,"             \
     "\"pfx\":%u,\"stg\":%u,\"stale\":%u},"                               \
-    "\"db\":{\"dec\":%u,\"bnd\":%u,\"ref\":%u,\"fb\":%u,\"ret\":%u},"    \
+    "\"db\":{\"dec\":%u,\"bnd\":%u,\"ref\":%u,\"fb\":%u,"                \
+    "\"ret\":%u,\"drf\":%u},"                                            \
     "\"rt\":{\"cpu\":%u,\"cov\":%u,\"ok\":%llu,\"nm\":%u,\"err\":%u},"   \
     "\"rnd\":{\"ep\":%u,\"ems\":%u,"                                     \
     "\"sn\":%u,\"smn\":%u,\"smx\":%u,\"sp\":%u,\"so\":%u,"               \
@@ -64,7 +65,8 @@
     "\"sub\":%u,\"ssub\":%u,\"nores\":%u,\"dus\":%u,\"ev\":%u,"          \
     "\"bsy\":%u,\"eab\":%u},"                                            \
     "\"ui\":{\"depth\":%u,\"top\":%u,\"vis\":%u,\"cellref\":%u,"         \
-    "\"pageref\":%u},"                                                   \
+    "\"pageref\":%u,\"bev\":%u,\"bedge\":%u,\"blng\":%u,\"bcls\":%u,"    \
+    "\"binj\":%u,\"bcrs\":%u,\"bhold\":%u},"                             \
     "\"frame\":{\"seq\":%u},"                                            \
     "\"shot\":{\"drops\":%u,\"rdrops\":%u,\"ok\":%u,\"fail\":%u,"        \
     "\"cap\":%u,\"ref\":%u,\"torn\":%u},"                                \
@@ -127,7 +129,7 @@
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
-        TASTY_RTSTATS_BOOL_MAX,                                                                    \
+        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_BOOL_MAX,                                             \
         static_cast<unsigned long long>(::mister::fw::kRtEvidenceAllApplied),                      \
         (1u << ::mister::hal::kThreadSeats) - 1u, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,    \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
@@ -148,18 +150,22 @@
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX
+        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
+        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
+        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX
 
-#define TASTY_SESS_FMT                                          \
-    "{\"t\":\"sess\",\"seq\":%u,\"link\":%u,\"shutdowns\":%u,"  \
-    "\"recover_polls\":%u,\"ssc\":%u,\"ssr\":%u,"               \
-    "\"err\":%u,\"err_site\":%u,\"err_detail\":%u,\"pkto\":%u," \
-    "\"pex\":%u,\"stale\":%u,\"srd\":%u,\"swf\":%u,"            \
-    "\"stto\":%u,\"feask\":%u,\"fefail\":%u,\"cabn\":%u}"
+#define TASTY_SESS_FMT                                               \
+    "{\"t\":\"sess\",\"seq\":%u,\"link\":%u,\"shutdowns\":%u,"       \
+    "\"recover_polls\":%u,\"ssc\":%u,\"ssr\":%u,"                    \
+    "\"err\":%u,\"err_site\":%u,\"err_detail\":%u,\"pkto\":%u,"      \
+    "\"pex\":%u,\"stale\":%u,\"srd\":%u,\"swf\":%u,"                 \
+    "\"stto\":%u,\"feask\":%u,\"fefail\":%u,\"cabn\":%u,\"iwf\":%u," \
+    "\"ipush\":%u}"
 
 #define TASTY_SESS_WORST_ARGS                                                                      \
     TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U8_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,     \
         TASTY_RTSTATS_U8_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U16_MAX, TASTY_RTSTATS_U16_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
-        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX
+        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX,                       \
+        TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX

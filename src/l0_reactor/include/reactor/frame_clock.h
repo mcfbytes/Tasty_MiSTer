@@ -11,6 +11,7 @@
 #include "infra/wake_flag.h"
 #include "hal/types.h"
 #include "infra/seat.h"
+#include "os/framebuffer.h"
 
 namespace mister::reactor {
 
@@ -38,7 +39,7 @@ private:
     FrameClock() = default;
     std::atomic<std::uint32_t> seq_{0};
     FrameCell cell_{};
-    UniqueFd fb_fd_;
+    os::Framebuffer fb_;
     xthread::WakeFlag frame_wake_{};
 };
 

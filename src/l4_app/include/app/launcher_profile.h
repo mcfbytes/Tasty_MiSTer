@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <string_view>
 
+#include "infra/ascii.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -30,28 +31,12 @@ inline constexpr std::array<LauncherProfile, 1> kLaunchers{{
      .vt = 7},
 }};
 
-namespace detail {
-
-constexpr bool ieq(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const auto ca = static_cast<unsigned char>(a[i]);
-        const auto cb = static_cast<unsigned char>(b[i]);
-        const auto la = (ca >= 'A' && ca <= 'Z') ? ca + 32 : ca;
-        const auto lb = (cb >= 'A' && cb <= 'Z') ? cb + 32 : cb;
-        if (la != lb) return false;
-    }
-    return true;
-}
-
-}  // namespace detail
-
 constexpr const LauncherProfile* launcher_for_main(std::string_view cfg_main) noexcept {
     for (const LauncherProfile& p : kLaunchers) {
-        if (detail::ieq(cfg_main, p.main_value)) return &p;
+        if (infra::ieq(cfg_main, p.main_value)) return &p;
         if (cfg_main.size() > p.main_value.size() && cfg_main.front() == '/' &&
             cfg_main[cfg_main.size() - p.main_value.size() - 1] == '/' &&
-            detail::ieq(cfg_main.substr(cfg_main.size() - p.main_value.size()), p.main_value))
+            infra::ieq(cfg_main.substr(cfg_main.size() - p.main_value.size()), p.main_value))
             return &p;
     }
     return nullptr;

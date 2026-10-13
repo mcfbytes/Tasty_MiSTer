@@ -12,8 +12,6 @@
 
 namespace mister::svc {
 
-inline constexpr unsigned kMaxPlayers = 6;
-
 struct DeviceIdentity;
 
 class PlayerSlots {
@@ -21,7 +19,7 @@ class PlayerSlots {
 
 public:
     std::optional<PlayerIndex> slot_of(const DeviceIdentity& id) const;
-    Ex<void> assign(const DeviceIdentity& id, PlayerIndex player);
+    [[nodiscard]] Ex<void> assign(const DeviceIdentity& id, PlayerIndex player);
 
     std::optional<PlayerIndex> first_free(std::uint32_t live_mask) const;
 

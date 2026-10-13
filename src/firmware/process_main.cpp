@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "process_main.h"
 
-#include "report.h"
 #include "supervisor_verdict.h"
 #include "thread_assembly.h"
 #include "app/link_event_dispatch.h"
@@ -13,41 +12,26 @@
 namespace mister::fw {
 
 ProcessMain::ProcessMain(app::SessionOwner& owner, const ThreadAssembly& assembly,
-                         xthread::WakeFlag& wake) noexcept
-    : owner_(owner), assembly_(assembly), wake_(wake) {}
-
-Ex<void> ProcessMain::open() noexcept {
-    if (wake_.fd() < 0) {
-        if (auto r = wake_.open_fd(); !r) return r;
-    }
-    if (stop_.fd() < 0) {
-        if (auto r = stop_.open_fd(); !r) return r;
-    }
-    if (!park_) park_.emplace(wake_, stop_);
-    return {};
-}
+                         xthread::ParkFds fds) noexcept
+    : owner_(owner), assembly_(assembly), stop_(fds.stop_wire()), park_(fds.wake(), stop_) {}
 
 void ProcessMain::start() noexcept {
-    if (!park_) {
-        report("ProcessMain::start", Error{Errc::negotiation, ERR_SITE(), 0});
-        if constexpr (kSeatChecksEnabled)
-            fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "ProcessMain started unopened");
-        return;
-    }
     owner_.on_seats_live();
     loop_();
 }
 
-void ProcessMain::serve() noexcept {
-    while (const auto e = owner_.rx().pop()) {
-        infra::dispatch<app::LinkEventRoutes<app::EventSink::Main>>(*e, owner_);
+void ProcessMain::pass(app::SessionOwner& owner) noexcept {
+    while (const auto e = owner.rx().pop()) {
+        infra::dispatch<app::LinkEventRoutes<app::EventSink::Main>>(*e, owner);
     }
 
-    while (const auto req = owner_.ui_requests().pop()) {
-        infra::dispatch<app::UiRequestRoutes>(*req, owner_);
+    while (const auto req = owner.ui_requests().pop()) {
+        infra::dispatch<app::UiRequestRoutes>(*req, owner);
     }
-    (void)owner_.tick();
+    (void)owner.tick();
 }
+
+void ProcessMain::serve() noexcept { pass(owner_); }
 
 bool ProcessMain::idle() const noexcept {
     if (stopping()) return true;

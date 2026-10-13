@@ -6,7 +6,7 @@
 
 namespace mister::fw {
 
-Ex<void> verify_census() {
+[[nodiscard]] Ex<void> verify_census() {
     const std::span<const cores::CoreFactory> table = cores::core_table();
 
     for (std::size_t i = 0; i < table.size(); ++i) {

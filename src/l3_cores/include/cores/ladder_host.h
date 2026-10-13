@@ -15,6 +15,8 @@
 
 namespace mister::cores {
 
+inline constexpr std::int64_t kSaveStateHoldBoundNs = 20'000'000'000;
+
 class ILadderHost {
 public:
     virtual ~ILadderHost() = default;
@@ -52,6 +54,10 @@ public:
     }
 
     [[nodiscard]] virtual MountStatus walk_status() { return {}; }
+
+    [[nodiscard]] virtual bool order_savestates(std::string_view, std::uint32_t) { return false; }
+
+    [[nodiscard]] virtual std::uint32_t savestates_answered() { return 0; }
     [[nodiscard]] virtual SaveExtent save_extent() = 0;
     [[nodiscard]] virtual proto::StatusWord status_word() = 0;
 

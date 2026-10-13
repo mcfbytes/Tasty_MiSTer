@@ -10,6 +10,7 @@
 #include "app/event.h"
 #include "app/file_tx_level.h"
 #include "app/link_tx_channel.h"
+#include "app/load_key.h"
 #include "app/load_window.h"
 #include "app/path_text.h"
 #include "cores/loader.h"
@@ -34,6 +35,7 @@ public:
         Conclude,
         Finish,
         Facts,
+        Mount,
         Close,
         Cut,
         Over
@@ -55,6 +57,9 @@ public:
         cores::TransferRow row{};
 
         std::optional<LoadWindow> mirror{};
+
+        PathText save{};
+        std::uint64_t save_bytes = 0;
     };
 
     [[nodiscard]] static Ex<LoadLadder> start(Job job, LoadWindow window, std::string_view path);
@@ -74,7 +79,7 @@ public:
 
 private:
     LoadLadder(Job job, LoadWindow window) noexcept
-        : job_(std::move(job)), window_(std::move(window)) {}
+        : job_(std::move(job)), window_(std::move(window)), key_(job_.total) {}
 
     [[nodiscard]] Pass open_(Host& h);
     [[nodiscard]] Pass await_open_(Host& h);
@@ -83,6 +88,7 @@ private:
     [[nodiscard]] Pass conclude_(Host& h);
     [[nodiscard]] Pass finish_();
     [[nodiscard]] Pass facts_(Host& h);
+    [[nodiscard]] Pass mount_(Host& h);
     [[nodiscard]] Pass close_(Host& h);
     [[nodiscard]] Pass notify_(Host& h);
     [[nodiscard]] Pass cut_(Host& h);
@@ -92,6 +98,7 @@ private:
 
     Job job_;
     LoadWindow window_;
+    LoadKey key_;
     PathText path_{};
     std::vector<std::uint8_t> buf_;
     std::uint64_t off_ = 0;

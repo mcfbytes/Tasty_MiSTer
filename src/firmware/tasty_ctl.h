@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "tasty_cli.h"
 
 namespace mister::svc {
@@ -67,7 +68,7 @@ void tasty_set_stock_comm(const char* comm) noexcept;
 struct ReturnHome {
     int lock_fd = -1;
     bool armed = true;
-    int* spawned = nullptr;
+    infra::OptRef<int> spawned{};
     ReturnHome() noexcept;
     ~ReturnHome() noexcept;
 };

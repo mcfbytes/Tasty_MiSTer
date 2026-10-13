@@ -3,12 +3,13 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 
 namespace mister::app {
 
 BackdropSampler::BackdropSampler(hal::ScalerBuffers window, const os::IClock* clock) noexcept
-    : window_(std::move(window)), clock_(clock) {}
+    : window_(std::move(window)), clock_(infra::opt_ref_of(clock)) {}
 
 bool BackdropSampler::note_applies(std::uint32_t applies, std::int64_t now) noexcept {
     TASTY_SEAT_BODY(BackdropSampler);
@@ -27,6 +28,8 @@ void BackdropSampler::restart(std::int64_t now) noexcept {
     lowlat_ = false;
     stuck_ = false;
     live_ = false;
+    have_prev_ = false;
+    same_ = false;
     torn_ = 0;
     width_ = height_ = line_ = 0;
     view_n_ = 0;
@@ -48,6 +51,7 @@ int BackdropSampler::park_ms(std::int64_t now) const noexcept {
 
 BackdropSampler::Image BackdropSampler::poll(std::int64_t now, bool copy) noexcept {
     TASTY_SEAT_BODY(BackdropSampler);
+    same_ = false;
     if (phase_ == Phase::Probe && (next_poll_ == 0 || now >= next_poll_)) {
         probe_.read(window_);
         next_poll_ = now + kPollNs;
@@ -76,6 +80,7 @@ BackdropSampler::Image BackdropSampler::image_(bool fresh) const noexcept {
     img.line = line_;
     img.live = live_;
     img.fresh = fresh && live_;
+    img.same = same_ && live_;
     img.lowlat = lowlat_;
     img.stuck = stuck_;
     img.stride_mib = stride_mib_;
@@ -115,17 +120,23 @@ bool BackdropSampler::copy_frame_() noexcept {
     if (nbytes == 0 || header->header_size > stride_ || nbytes > stride_ - header->header_size)
         return false;
     if (cache_.size() < nbytes) cache_.resize(nbytes);
+    if (prev_.size() < nbytes) prev_.resize(nbytes);
     const std::uint8_t before = header->frame_counter();
-    if (clock_ != nullptr) (void)clock_->now();
+    if (clock_) (void)clock_->now();
     if (!window_.copy(buf * stride_ + header->header_size,
-                      std::span<std::byte>{cache_.data(), nbytes}))
+                      std::span<std::byte>{prev_.data(), nbytes}))
         return false;
-    if (clock_ != nullptr) (void)clock_->now();
+    if (clock_) (void)clock_->now();
+    same_ = have_prev_ && nbytes == view_n_ && header->width == width_ &&
+            header->height == height_ && header->line == line_ &&
+            std::memcmp(prev_.data(), cache_.data(), nbytes) == 0;
+    cache_.swap(prev_);
     width_ = header->width;
     height_ = header->height;
     line_ = header->line;
     view_n_ = nbytes;
     live_ = true;
+    have_prev_ = true;
     if (lowlat_) {
         const auto after = window_.header(buf * stride_);
         if (after && after->frame_counter() != before) ++torn_;

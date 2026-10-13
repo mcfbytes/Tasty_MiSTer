@@ -8,8 +8,8 @@
 
 #include "infra/error.h"
 #include "hal/axi.h"
-#include "os/mmio_region.h"
 #include "hal/phys_region.h"
+#include "hal/reg_block.h"
 #include "hal/types.h"
 #include "infra/seat.h"
 
@@ -22,13 +22,13 @@ class RegisterWindow {
 public:
     using Reg = typename Layout::Reg;
 
-    static Ex<RegisterWindow> map(PhysRegion lw_window, LwOffset lw_offset) {
+    [[nodiscard]] static Ex<RegisterWindow> map(PhysRegion lw_window, LwOffset lw_offset) {
         auto m = detail::map_lw_registers(lw_window, lw_offset, Layout::kSize);
         if (!m) return std::unexpected(m.error());
         return RegisterWindow(std::move(m->pages), m->lead);
     }
 
-    static Ex<RegisterWindow> map_phys(os::PhysAddr phys) {
+    [[nodiscard]] static Ex<RegisterWindow> map_phys(os::PhysAddr phys) {
         auto m = detail::map_registers(phys, Layout::kSize);
         if (!m) return std::unexpected(m.error());
         return RegisterWindow(std::move(m->pages), m->lead);
@@ -115,6 +115,19 @@ private:
         return static_cast<std::size_t>(off);
     }
 
+public:
+    static RegisterWindow borrow(reg::Block lend) { return borrow(lend.base_, lend.len_); }
+
+    template <reg::Access A, std::uint32_t Off>
+    [[nodiscard]] reg::Reg<A> field(reg::Field<A, Off>) const {
+        static_assert(Off <= Layout::kSize - 4u, "the field lies inside the layout");
+        if (base_ == nullptr) {
+            fatal(Error{Errc::mmap_failed, ERR_SITE(), Off}, "RegisterWindow: unmapped");
+        }
+        return reg::Reg<A>(static_cast<volatile std::uint32_t*>(detail::regs_advance(base_, Off)));
+    }
+
+private:
     std::optional<os::MmioRegion> pages_;
     volatile void* base_ = nullptr;
 #ifndef NDEBUG

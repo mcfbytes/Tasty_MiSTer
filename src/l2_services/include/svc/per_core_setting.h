@@ -24,8 +24,8 @@ public:
         return s;
     }
 
-    Ex<T> load(const Vfs& vfs, std::string_view core) const;
-    Ex<void> save(const Vfs& vfs, std::string_view core, const T& v) const;
+    [[nodiscard]] Ex<T> load(const Vfs& vfs, std::string_view core) const;
+    [[nodiscard]] Ex<void> save(const Vfs& vfs, std::string_view core, const T& v) const;
 
     const T& value() const noexcept { return value_; }
 

@@ -30,11 +30,12 @@ class IFile {
 public:
     virtual ~IFile() = default;
 
-    virtual Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) = 0;
-    virtual Ex<std::size_t> write_at(std::uint64_t off, std::span<const std::byte> src) = 0;
+    [[nodiscard]] virtual Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) = 0;
+    [[nodiscard]] virtual Ex<std::size_t> write_at(std::uint64_t off,
+                                                   std::span<const std::byte> src) = 0;
 
-    virtual Ex<FileSize> size() const = 0;
-    virtual Ex<void> flush() = 0;
+    [[nodiscard]] virtual Ex<FileSize> size() const = 0;
+    [[nodiscard]] virtual Ex<void> flush() = 0;
     virtual FileKind kind() const noexcept = 0;
 
     enum class Access : std::uint8_t { Sequential, WillNeed };

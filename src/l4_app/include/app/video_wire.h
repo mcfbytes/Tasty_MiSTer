@@ -71,14 +71,15 @@ public:
     VideoWire(const VideoWire&) = delete;
     VideoWire& operator=(const VideoWire&) = delete;
 
-    Ex<void> publish(std::uint8_t opcode, std::span<const std::uint16_t> words) override;
+    [[nodiscard]] Ex<void> publish(std::uint8_t opcode,
+                                   std::span<const std::uint16_t> words) override;
 
-    Ex<void> stage(std::uint8_t opcode, std::span<const std::uint16_t> words);
+    [[nodiscard]] Ex<void> stage(std::uint8_t opcode, std::span<const std::uint16_t> words);
 
     std::uint32_t staged_generation() const noexcept { return gen_; }
 
-    Ex<void> emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint32_t gen,
-                  proto::IResetFence* fence = nullptr);
+    [[nodiscard]] Ex<void> emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint32_t gen,
+                                proto::IResetFence* fence = nullptr);
 
     static constexpr std::int64_t kGeoFirstPeriodMs = 1000;
     static constexpr std::int64_t kGeoPeriodMs = 500;
@@ -86,7 +87,7 @@ public:
     void on_rt_round(hal::ISpiTransport& link, std::int64_t now_ns,
                      proto::IResetFence* fence = nullptr);
 
-    Ex<svc::VideoSample> sample(bool force) override;
+    [[nodiscard]] Ex<svc::VideoSample> sample(bool force) override;
 
     [[nodiscard]] std::uint32_t sampled_core_seq() const noexcept { return sampled_seq_; }
 

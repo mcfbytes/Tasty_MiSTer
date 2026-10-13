@@ -16,6 +16,7 @@
 #include "proto/spi_osd_mask_decoder.h"
 #include "proto/spi_ps2_decoder.h"
 #include "proto/spi_sampler.h"
+#include "proto/user_io/poll_reader.h"
 
 namespace mister::app {
 
@@ -27,7 +28,8 @@ struct Unproduced {
 
 using LinkEventProducers =
     std::tuple<LinkSession, proto::SpiIdentifyDecoder, proto::SpiConfStrDecoder, proto::SpiSampler,
-               proto::SpiBlockDecoder, proto::SpiPs2Decoder, proto::SpiOsdMaskDecoder>;
+               proto::SpiBlockDecoder, proto::SpiPs2Decoder, proto::SpiOsdMaskDecoder,
+               proto::user_io::PollReader>;
 
 namespace detail {
 template <class T>

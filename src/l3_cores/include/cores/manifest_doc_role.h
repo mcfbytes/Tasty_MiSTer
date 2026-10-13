@@ -3,27 +3,33 @@
 
 #include <cstdint>
 #include <memory>
-#include <string>
 #include <string_view>
 
 #include "cores/cheat_records.h"
-#include "proto/rotation_dir.h"
+#include "cores/manifest_doc_facts.h"
+#include "cores/manifest_stager.h"
+#include "svc/vfs.h"
 
 namespace mister::cores {
 
-struct ManifestDocFacts {
-    bool vertical = false;
-    proto::RotationDir rotation = proto::RotationDir::None;
-    std::string setname;
-    bool setname_same_dir = false;
-};
+class IManifestDocRole {
+public:
+    [[nodiscard]] virtual std::uint64_t doc_max() const noexcept = 0;
+    [[nodiscard]] virtual std::string_view root_of(
+        std::string_view manifest_rel) const noexcept = 0;
+    [[nodiscard]] virtual ManifestDocFacts facts_of(std::string_view doc) const = 0;
 
-struct ManifestDocRole {
-    std::uint64_t doc_max;
-    std::string_view (*root_of)(std::string_view manifest_rel) noexcept;
-    ManifestDocFacts (*facts_of)(std::string_view doc);
+    [[nodiscard]] virtual std::unique_ptr<ICheatRecords> cheats_of(std::string_view doc) const = 0;
 
-    std::unique_ptr<ICheatRecords> (*cheats_of)(std::string_view doc);
+    [[nodiscard]] virtual std::unique_ptr<IManifestStager> stager_of(std::string_view doc,
+                                                                     std::string_view manifest_rel,
+                                                                     const svc::Vfs& vfs) const = 0;
+
+protected:
+    ~IManifestDocRole() = default;
+    constexpr IManifestDocRole() = default;
+    IManifestDocRole(const IManifestDocRole&) = default;
+    IManifestDocRole& operator=(const IManifestDocRole&) = default;
 };
 
 }  // namespace mister::cores

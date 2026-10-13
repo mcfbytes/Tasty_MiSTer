@@ -6,6 +6,7 @@
 
 #include "cores/file_slot.h"
 #include "cores/romset_alias_source.h"
+#include "infra/byte_view.h"
 #include "svc/read_bounded.h"
 #include "svc/vfs.h"
 
@@ -25,7 +26,7 @@ std::optional<std::string> RomsetAliasReader::read_prefix(std::string_view path,
     TASTY_SEAT_BODY(RomsetAliasReader);
     auto bytes = svc::read_bounded(*vfs_, path, cap);
     if (!bytes) return std::nullopt;
-    return std::string(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+    return std::string(infra::as_text(std::span(*bytes)));
 }
 
 RomsetAlias RomsetAliasReader::query(std::string_view dir, std::string_view home,

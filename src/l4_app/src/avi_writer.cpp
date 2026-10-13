@@ -9,15 +9,14 @@
 
 namespace mister::app {
 
-bool AviWriter::idle() const noexcept { return w_.in == nullptr || w_.in->outbound() == 0; }
+bool AviWriter::idle() const noexcept { return w_.in.outbound() == 0; }
 
 int AviWriter::park_ms() const noexcept { return -1; }
 
 void AviWriter::serve() noexcept {
     TASTY_SEAT_BODY(AviWriter);
-    if (w_.in == nullptr) return;
     for (unsigned n = 0; n < kJobsPerPass; ++n) {
-        auto job = w_.in->take();
+        auto job = w_.in.take();
         if (!job) break;
         switch (job->kind) {
             case ChunkKind::Open:
@@ -40,18 +39,18 @@ void AviWriter::serve() noexcept {
         }
         job.complete();
     }
-    if (dirty_ && w_.status != nullptr) w_.status->publish(st_);
+    if (dirty_) w_.status.publish(st_);
     dirty_ = false;
 }
 
 void AviWriter::release() noexcept {
     TASTY_SEAT_BODY(AviWriter);
-    while (w_.in != nullptr && w_.in->outbound() != 0)
+    while (w_.in.outbound() != 0)
         serve();
     if (fd_.valid()) finalize_();
     drop_unrated_();
     index_.release();
-    if (w_.status != nullptr) w_.status->publish(st_);
+    w_.status.publish(st_);
 }
 
 void AviWriter::open_(const ChunkSlot& s) noexcept {
@@ -109,16 +108,17 @@ void AviWriter::data_(const ChunkSlot& s) noexcept {
         dirty_ = true;
         return;
     }
-    if (!write_all_(s.bytes, s.used)) {
+    if (!write_all_(s.bytes.data(), s.used)) {
         st_.dropped += s.chunks;
         return;
     }
     std::byte* const idx = index_.stripe(0).data();
     std::uint64_t at = pos_;
     for (std::uint32_t i = 0; i < s.chunks; ++i) {
-        const std::uint32_t len = s.desc[i] & ~ChunkSlot::kKey;
+        const std::uint32_t word = ChunkSlot::desc_word(s.desc, i);
+        const std::uint32_t len = word & ~ChunkSlot::kKey;
         if (entries_ < kMaxEntries) {
-            avi::index_entry((s.desc[i] & ChunkSlot::kKey) != 0,
+            avi::index_entry((word & ChunkSlot::kKey) != 0,
                              static_cast<std::uint32_t>(at - avi::kMoviFourcc), len,
                              std::span<std::byte, avi::kIndexEntry>(
                                  idx + std::size_t{entries_} * avi::kIndexEntry, avi::kIndexEntry));

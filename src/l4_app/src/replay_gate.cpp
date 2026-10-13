@@ -13,19 +13,17 @@ namespace mister::app {
 static_assert(ReplayGate::kMaxRoundWords <= proto::tightest_round_budget_words(),
               "a replay round's own words never exceed the round budget they are taken from");
 
-std::int64_t ReplayGate::now_ns_() const noexcept { return w_.clock->now().count(); }
+std::int64_t ReplayGate::now_ns_() const noexcept { return w_.clock.now().count(); }
 
 Ex<proto::FrameCount> ReplayGate::read_counter_() noexcept {
-    if (w_.frames == nullptr) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     round_words_ += proto::FrameCounterRead::kReadWords;
-    return w_.frames->read();
+    return w_.frames.read();
 }
 
 void ReplayGate::sample_control_() noexcept {
-    if (w_.control == nullptr) return;
     ReplayControl c{};
 
-    if (control_seen_.take_if_changed(*w_.control, c)) ctrl_ = c;
+    if (control_seen_.take_if_changed(w_.control, c)) ctrl_ = c;
 }
 
 void ReplayGate::tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswers late,
@@ -98,7 +96,7 @@ bool ReplayGate::sample_ref_() noexcept {
         raw = r->count;
     } else {
         reactor::FrameRecord rec{};
-        if (w_.vsync == nullptr || w_.vsync->sample_into(rec) == 0) return false;
+        if (!w_.vsync || w_.vsync->sample_into(rec) == 0) return false;
         raw = rec.seq;
     }
     const std::int64_t prev_read = read_ns_;
@@ -277,10 +275,10 @@ void ReplayGate::write_(const ReplayMsg::Input& r) noexcept {
 
 void ReplayGate::write_masks_(const std::array<std::uint32_t, kReplayPorts>& mask,
                               std::uint8_t ports) noexcept {
-    proto::JoystickPort& joy = w_.emitter->joysticks();
+    proto::JoystickPort& joy = w_.emitter.joysticks();
     for (std::uint8_t p = 0; p < kReplayPorts; ++p) {
         if ((ports & (1u << p)) == 0) continue;
-        const auto out = joy.submit(*w_.link, joy.wire_port(proto::PlayerIndex{p}),
+        const auto out = joy.submit(w_.link, joy.wire_port(proto::PlayerIndex{p}),
                                     proto::JoyMask{mask[p]}, proto::JoyMask{});
         if (!out || *out) round_words_ += proto::JoystickPort::kMaxDigitalPushWords;
         if (!out) {
@@ -292,12 +290,12 @@ void ReplayGate::write_masks_(const std::array<std::uint32_t, kReplayPorts>& mas
 }
 
 void ReplayGate::force_release_(std::uint8_t ports) noexcept {
-    proto::JoystickPort& joy = w_.emitter->joysticks();
+    proto::JoystickPort& joy = w_.emitter.joysticks();
     for (std::uint8_t p = 0; p < kReplayPorts; ++p) {
         if ((ports & (1u << p)) == 0) continue;
         const proto::PlayerIndex port = joy.wire_port(proto::PlayerIndex{p});
-        auto out = joy.submit(*w_.link, port, proto::JoyMask{}, proto::JoyMask{});
-        if (out && !*out) out = joy.release(*w_.link, port, proto::JoyMask{~0u});
+        auto out = joy.submit(w_.link, port, proto::JoyMask{}, proto::JoyMask{});
+        if (out && !*out) out = joy.release(w_.link, port, proto::JoyMask{~0u});
         if (!out || *out) round_words_ += proto::JoystickPort::kMaxDigitalPushWords;
         if (!out) {
             ++status_.link_errors;
@@ -316,10 +314,9 @@ void ReplayGate::on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept 
     TASTY_SEAT_BODY(ReplayGate);
 
     sample_control_();
-    const bool wired = w_.link != nullptr && w_.emitter != nullptr && w_.clock != nullptr;
 
     if (level_ != ReplayLevel::Idle || release_ports_ != 0 || ctrl_.op != ReplayOp::Play ||
-        ctrl_.gen != h.gen || !wired || a.ports == 0 || a.period_ns == 0) {
+        ctrl_.gen != h.gen || a.ports == 0 || a.period_ns == 0) {
         ++status_.stale;
         status_.gen = h.gen;
         status_.end = ReplayEnd::Refused;
@@ -409,7 +406,7 @@ void ReplayGate::settle() noexcept {
     if (level_ == ReplayLevel::Idle && (!dirty_ || release_ports_ != 0)) return;
     status_.level = level_;
     status_.movie_frame = static_cast<std::int32_t>(mf_);
-    if (w_.status != nullptr) w_.status->publish(status_);
+    w_.status.publish(status_);
     dirty_ = false;
 }
 
@@ -438,7 +435,7 @@ void ReplayGate::begin_run_() noexcept {
     } else {
         reactor::FrameRecord rec{};
 
-        if (!vsync_ok_ || p0_ != ReplayMsg::P0Parity::Any || w_.vsync == nullptr ||
+        if (!vsync_ok_ || p0_ != ReplayMsg::P0Parity::Any || !w_.vsync ||
             w_.vsync->sample_into(rec) == 0) {
             return disarm_(ReplayEnd::NoReference, false);
         }

@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "hal/spi_transport.h"
 #include "proto/reset_fence.h"
 #include "proto/status_word.h"
@@ -26,10 +27,10 @@ public:
 
     void adopt(std::span<const std::uint16_t, kWords> words) noexcept;
 
-    Ex<void> set_field(const char* spec, std::uint32_t value);
+    [[nodiscard]] Ex<void> set_field(const char* spec, std::uint32_t value);
 
-    void fence_with(IResetFence* fence) noexcept { fence_ = fence; }
-    Ex<void> flush(hal::ISpiTransport& link);
+    void fence_with(IResetFence* fence) noexcept { fence_ = infra::opt_ref_of(fence); }
+    [[nodiscard]] Ex<void> flush(hal::ISpiTransport& link);
 
     bool dirty() const noexcept { return dirty_; }
 
@@ -41,7 +42,7 @@ private:
     std::array<std::uint16_t, kWords> words_{};
     bool dirty_ = false;
     StatusWord sent_{};
-    IResetFence* fence_ = nullptr;
+    infra::OptRef<IResetFence> fence_{};
 };
 
 }  // namespace mister::proto

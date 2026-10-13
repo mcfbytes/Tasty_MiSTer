@@ -23,7 +23,7 @@ namespace mister::hal {
 class BoardWindows;
 }
 
-namespace mister::boards {
+namespace mister::boards::cyclone_v {
 
 struct FpgaMgr {
     enum class Reg : std::uint32_t {
@@ -100,19 +100,19 @@ inline constexpr std::size_t kHandoffEnvLimit = kHandoffSdramOffset;
 
 inline constexpr std::uint16_t kHandoffSdramPresent = 0x8000;
 
-class CycloneVProgrammer final : public hal::IFpgaProgrammer, public hal::IBootHandoff {
+class Programmer final : public hal::IFpgaProgrammer, public hal::IBootHandoff {
     TASTY_SEAT_EXEMPT(main);
 
 public:
-    [[nodiscard]] static Ex<CycloneVProgrammer> open(hal::BoardWindows& windows);
+    [[nodiscard]] static Ex<Programmer> open(hal::BoardWindows& windows);
 
-    [[nodiscard]] static Ex<CycloneVProgrammer> open_at(const char* manager_dir);
+    [[nodiscard]] static Ex<Programmer> open_at(const char* manager_dir);
 
-    static CycloneVProgrammer over(hal::RegisterWindow<FpgaMgr> mgr,
-                                   hal::RegisterWindow<FpgaMgrData> data, hal::FpgaMemory handoff);
+    static Programmer over(hal::RegisterWindow<FpgaMgr> mgr, hal::RegisterWindow<FpgaMgrData> data,
+                           hal::FpgaMemory handoff);
 
-    CycloneVProgrammer(CycloneVProgrammer&& o) noexcept;
-    CycloneVProgrammer& operator=(CycloneVProgrammer&&) = delete;
+    Programmer(Programmer&& o) noexcept;
+    Programmer& operator=(Programmer&&) = delete;
 
     [[nodiscard]] Ex<bool> program_begin() override;
     [[nodiscard]] Ex<void> program_chunk(std::span<const std::byte> chunk) override;
@@ -136,8 +136,8 @@ public:
     [[nodiscard]] Ex<void> write_reboot_flag(bool warm) override;
 
 private:
-    CycloneVProgrammer(hal::RegisterWindow<FpgaMgr> mgr, hal::RegisterWindow<FpgaMgrData> data,
-                       std::optional<hal::FpgaMemory> handoff);
+    Programmer(hal::RegisterWindow<FpgaMgr> mgr, hal::RegisterWindow<FpgaMgrData> data,
+               std::optional<hal::FpgaMemory> handoff);
 
     enum class StepPc : std::uint8_t {
         Idle,
@@ -187,4 +187,4 @@ static_assert(hal::IFpgaProgrammer::kProgramStepBudget * FpgaMgr::kPollsPerPass 
                   FpgaMgr::kTimeoutCount,
               "program() must spend exactly stock's poll budget per wait");
 
-}  // namespace mister::boards
+}  // namespace mister::boards::cyclone_v

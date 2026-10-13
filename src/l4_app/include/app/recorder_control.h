@@ -8,6 +8,7 @@
 #include "app/rec_control.h"
 #include "app/rec_write_status.h"
 #include "app/recorder_status.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 
@@ -26,12 +27,12 @@ public:
     static constexpr std::string_view kRoot = "/media/";
 
     struct Wiring {
-        RecControlCell* control = nullptr;
-        xthread::WakeFlag* capture_wake = nullptr;
-        const RecorderStatusCell* status = nullptr;
-        const RecWriteStatusCell* writer = nullptr;
-        xthread::DiagLog* diag = nullptr;
-        const IdentityLatch* identity = nullptr;
+        infra::OptRef<RecControlCell> control{};
+        infra::OptRef<xthread::WakeFlag> capture_wake{};
+        infra::OptRef<const RecorderStatusCell> status{};
+        infra::OptRef<const RecWriteStatusCell> writer{};
+        infra::OptRef<xthread::DiagLog> diag{};
+        infra::OptRef<const IdentityLatch> identity{};
         std::string_view root = kRoot;
     };
 

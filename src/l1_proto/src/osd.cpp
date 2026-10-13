@@ -16,7 +16,7 @@ constexpr std::uint16_t kRowMask = 0x1F;
 constexpr std::uint16_t kModeMask = 0x0A;
 constexpr std::uint16_t kMenuLatchRow = 8;
 
-Ex<void> put(hal::ISpiTransport& link, std::uint16_t w) {
+[[nodiscard]] Ex<void> put(hal::ISpiTransport& link, std::uint16_t w) {
     auto r = link.transfer(hal::SpiWord{w});
     if (!r) return std::unexpected(r.error());
     return {};
@@ -28,20 +28,20 @@ std::span<std::uint8_t> OsdSurface::row(OsdRow r) {
     if (r.v >= kMaxRows) {
         fatal(Error{Errc::slot_range, ERR_SITE(), r.v}, "osd row");
     }
-    return std::span<std::uint8_t>(rows_[r.v], kRowBytes);
+    return std::span<std::uint8_t>(ui_.rows[r.v], kRowBytes);
 }
 
 std::span<const std::uint8_t> OsdSurface::row(OsdRow r) const {
     if (r.v >= kMaxRows) {
         fatal(Error{Errc::slot_range, ERR_SITE(), r.v}, "osd row");
     }
-    return std::span<const std::uint8_t>(rows_[r.v], kRowBytes);
+    return std::span<const std::uint8_t>(ui_.rows[r.v], kRowBytes);
 }
 
 void OsdSurface::publish(OsdRow r) noexcept {
     if (r.v >= kMaxRows) return;
     Row staged;
-    std::memcpy(staged.b, rows_[r.v], kRowBytes);
+    std::memcpy(staged.b, ui_.rows[r.v], kRowBytes);
     published_[r.v].publish(staged);
 }
 
@@ -74,7 +74,7 @@ unsigned OsdSurface::visible_rows() const noexcept {
 void OsdSurface::clear() noexcept {
     for (unsigned i = 0; i < kPageRows; ++i) {
         for (unsigned b = 0; b < kRowBytes; ++b)
-            rows_[i][b] = 0;
+            ui_.rows[i][b] = 0;
     }
     for (unsigned i = 0; i < kMaxRows; ++i) {
         publish(OsdRow{static_cast<std::uint8_t>(i)});

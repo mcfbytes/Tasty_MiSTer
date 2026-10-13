@@ -9,9 +9,7 @@
 #include "hal/board_windows.h"
 #include "hal/boards_table.h"
 
-namespace mister::boards {
-
-using cyclone_v::Window;
+namespace mister::boards::cyclone_v {
 
 consteval bool de10_row_matches(Window w, std::string_view name, os::PhysAddr transcribed) {
     const hal::WindowDecl& d = hal::window(hal::kDe10Profile, cyclone_v::id(w));
@@ -30,11 +28,11 @@ static_assert(hal::kDe10Profile.windows.size() == cyclone_v::kWindowCount &&
                   hal::kDe10Profile.lw_window == cyclone_v::id(Window::LwBridge),
               "the DE10 board row disagrees with the Cyclone V window names or bases");
 
-CycloneVBridges::CycloneVBridges(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
-                                 hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic)
+Bridges::Bridges(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
+                 hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic)
     : sdr_(std::move(sdr)), rst_(std::move(rst)), sys_(std::move(sys)), nic_(std::move(nic)) {}
 
-Ex<CycloneVBridges> CycloneVBridges::open(hal::BoardWindows& windows) {
+Ex<Bridges> Bridges::open(hal::BoardWindows& windows) {
     auto sdr = windows.take<SdrCtl>(cyclone_v::id(Window::Sdr));
     if (!sdr) return std::unexpected(sdr.error());
     auto rst = windows.take<RstMgr>(cyclone_v::id(Window::RstMgr));
@@ -43,21 +41,19 @@ Ex<CycloneVBridges> CycloneVBridges::open(hal::BoardWindows& windows) {
     if (!sys) return std::unexpected(sys.error());
     auto nic = windows.take<Nic301>(cyclone_v::id(Window::Nic301));
     if (!nic) return std::unexpected(nic.error());
-    CycloneVBridges b(std::move(sdr->regs), std::move(rst->regs), std::move(sys->regs),
-                      std::move(nic->regs));
+    Bridges b(std::move(sdr->regs), std::move(rst->regs), std::move(sys->regs),
+              std::move(nic->regs));
     b.claims_ = {std::move(sdr->claim), std::move(rst->claim), std::move(sys->claim),
                  std::move(nic->claim)};
     return b;
 }
 
-CycloneVBridges CycloneVBridges::over(hal::RegisterWindow<SdrCtl> sdr,
-                                      hal::RegisterWindow<RstMgr> rst,
-                                      hal::RegisterWindow<SysMgr> sys,
-                                      hal::RegisterWindow<Nic301> nic) {
-    return CycloneVBridges(std::move(sdr), std::move(rst), std::move(sys), std::move(nic));
+Bridges Bridges::over(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
+                      hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic) {
+    return Bridges(std::move(sdr), std::move(rst), std::move(sys), std::move(nic));
 }
 
-void CycloneVBridges::apply(std::span<const BridgeStep> steps) {
+void Bridges::apply(std::span<const BridgeStep> steps) {
     for (const BridgeStep& step : steps) {
         switch (step.block) {
             case BridgeBlock::Sdr: {
@@ -84,20 +80,20 @@ void CycloneVBridges::apply(std::span<const BridgeStep> steps) {
     }
 }
 
-Ex<void> CycloneVBridges::pre_program() {
+Ex<void> Bridges::pre_program() {
     apply(kDisableSequence);
     return {};
 }
 
-Ex<void> CycloneVBridges::post_program() {
+Ex<void> Bridges::post_program() {
     apply(kEnableSequence);
     return {};
 }
 
-Ex<void> CycloneVBridges::request_board_reset() {
+Ex<void> Bridges::request_board_reset() {
     hal::RegisterWindow<RstMgr>::Transaction t(rst_);
     rst_.write(RstMgr::Reg::Ctrl, RstMgr::kResetRequest);
     return {};
 }
 
-}  // namespace mister::boards
+}  // namespace mister::boards::cyclone_v

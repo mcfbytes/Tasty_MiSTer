@@ -18,12 +18,12 @@ class FrameHasher {
 
 public:
     struct Wiring {
-        RawFrameChannel* channel = nullptr;
-        SidecarRing* out = nullptr;
-        xthread::WakeFlag* writer_wake = nullptr;
-        EncodeStatusCell* status = nullptr;
-        const os::IClock* clock = nullptr;
-        AviEncoder* video = nullptr;
+        RawFrameChannel& channel;
+        SidecarRing& out;
+        xthread::WakeFlag& writer_wake;
+        EncodeStatusCell& status;
+        const os::IClock& clock;
+        AviEncoder& video;
     };
 
     static constexpr int kHeldPollMs = 5;

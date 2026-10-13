@@ -10,6 +10,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include <span>
+
+#include "infra/endian.h"
 
 namespace mister::svc {
 namespace {
@@ -317,22 +320,22 @@ void record_value(ConfigSnapshot& into, ParseError::Kind kind, std::string_view 
 }
 
 std::byte* field_ptr(ConfigSnapshot& s, std::uint16_t off) {
-    return reinterpret_cast<std::byte*>(&s) + off;
+    return std::as_writable_bytes(std::span<ConfigSnapshot, 1>(&s, 1)).data() + off;
 }
 
 template <class T>
 void store_as(std::byte* out, T v) {
-    std::memcpy(out, &v, sizeof(T));
+    infra::store_native<T>(std::span<std::byte, sizeof(T)>(out, sizeof(T)), v);
 }
 
 std::uint32_t load_u32(const std::byte* base, std::size_t index) {
-    std::uint32_t v = 0;
-    std::memcpy(&v, base + index * sizeof(std::uint32_t), sizeof(v));
-    return v;
+    return infra::load_native<std::uint32_t>(
+        std::span<const std::byte, 4>(base + index * sizeof(std::uint32_t), 4));
 }
 
 void store_u32(std::byte* base, std::size_t index, std::uint32_t v) {
-    std::memcpy(base + index * sizeof(std::uint32_t), &v, sizeof(v));
+    infra::store_native<std::uint32_t>(
+        std::span<std::byte, 4>(base + index * sizeof(std::uint32_t), 4), v);
 }
 
 bool has_hex_prefix(const char* text) {
@@ -505,29 +508,44 @@ SectionVerdict classify_section(std::string_view raw, const config_parser::PassN
     return v;
 }
 
-bool read_line(std::string_view text, std::size_t& pos, std::string& line) {
-    line.clear();
-    char c = 0;
-    bool ignore = false;
-    bool skip = true;
-    for (;;) {
-        c = (pos < text.size()) ? text[pos++] : '\0';
-        if (c == '\0') break;
-        if (!is_space(c)) skip = false;
+class IniLineReader {
+public:
+    explicit IniLineReader(std::string_view text) : text_(text) { line_.reserve(kIniLineSize); }
 
-        if (line.size() >= kIniLineSize - 1 || c == kCommentChar) ignore = true;
-        if (c == kLineEnd) break;
-        if (config_parser::admits(c) && !ignore && !skip) line.push_back(c);
+    struct Line {
+        std::string_view text;
+        bool eof = false;
+    };
+
+    [[nodiscard]] Line next() {
+        line_.clear();
+        char c = 0;
+        bool ignore = false;
+        bool skip = true;
+        for (;;) {
+            c = (pos_ < text_.size()) ? text_[pos_++] : '\0';
+            if (c == '\0') break;
+            if (!is_space(c)) skip = false;
+
+            if (line_.size() >= kIniLineSize - 1 || c == kCommentChar) ignore = true;
+            if (c == kLineEnd) break;
+            if (config_parser::admits(c) && !ignore && !skip) line_.push_back(c);
+        }
+
+        while (!line_.empty() && is_space(line_.back()))
+            line_.pop_back();
+        return Line{line_, c == '\0'};
     }
 
-    while (!line.empty() && is_space(line.back()))
-        line.pop_back();
-    return c == '\0';
-}
+private:
+    std::string_view text_;
+    std::size_t pos_ = 0;
+    std::string line_;
+};
 
-char char_at(const std::string& s, std::size_t i) { return i < s.size() ? s[i] : '\0'; }
+char char_at(std::string_view s, std::size_t i) { return i < s.size() ? s[i] : '\0'; }
 
-void parse_var(const std::string& line, ConfigSnapshot& into,
+void parse_var(std::string_view line, ConfigSnapshot& into,
                bool (&array_append)[kNumIniOptions + kNumExtOptions]) {
 
     std::size_t i = 0;
@@ -544,7 +562,7 @@ void parse_var(const std::string& line, ConfigSnapshot& into,
     while (char_at(line, i) == '=' || is_space(char_at(line, i)))
         ++i;
 
-    const char* value = line.c_str() + i;
+    const char* value = line.data() + i;
 
     constexpr std::size_t kNoRow = kNumIniOptions + kNumExtOptions;
     std::size_t var_id = kNoRow;
@@ -662,12 +680,10 @@ Ex<config_parser::PassOutcome> config_parser::parse(std::string_view text, const
 
     bool array_append[kNumIniOptions + kNumExtOptions] = {};
 
-    std::string line;
-    line.reserve(kIniLineSize);
-    std::size_t pos = 0;
+    IniLineReader reader{text};
 
     for (;;) {
-        const bool eof = read_line(text, pos, line);
+        const auto [line, eof] = reader.next();
         const char first = line.empty() ? '\0' : line.front();
 
         if (first == kSectionStart) {

@@ -28,7 +28,12 @@ constexpr auto kCoreTable = std::to_array<CoreFactory>({
      .name = "SNES",
      .profile = &manifests::kSnes,
      .make = &manifests::make_snes,
-     .make_companion = &manifests::make_snes_companion},
+     .make_companion = &manifests::make_msu_companion},
+    {.kind = CoreKind::Sgb,
+     .name = "SGB",
+     .profile = &manifests::kSgb,
+     .make = &manifests::make_sgb,
+     .make_companion = &manifests::make_msu_companion},
     {.kind = CoreKind::MegaDrive,
      .name = "MegaDrive",
      .profile = &manifests::kMegaDrive,
@@ -64,6 +69,21 @@ consteval bool generic_rows_start_no_mount() {
     return true;
 }
 static_assert(generic_rows_start_no_mount(), "a make_generic row must not arm an SC start mount");
+
+consteval bool generic_rows_keep_the_class_route() {
+    for (const CoreFactory& f : kCoreTable)
+        if (f.make == &make_generic && f.profile->undeclared_role != SlotRole::Image) return false;
+    return true;
+}
+static_assert(generic_rows_keep_the_class_route(),
+              "a make_generic row must not route an undeclared slot to the slot service");
+
+consteval bool no_row_defaults_to_a_disc() {
+    for (const CoreFactory& f : kCoreTable)
+        if (f.profile->undeclared_role == SlotRole::Disc) return false;
+    return true;
+}
+static_assert(no_row_defaults_to_a_disc(), "no row's undeclared_role may be Disc");
 
 consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
     return !p.is_front_end && p.services.empty() && p.slots.empty() && p.boot_assets.empty() &&
@@ -121,6 +141,44 @@ consteval bool start_assets_fit_the_ceiling() {
 static_assert(start_assets_fit_the_ceiling(),
               "a manifest with more than kMaxStartAssets start assets outgrows "
               "FileBytes::kMaxLiveFiles; raise it only with its derivation");
+
+consteval bool start_rule_matches_its_rows() {
+    for (const CoreFactory& f : kCoreTable)
+        if ((f.profile->start == StartRule::Assets) == f.profile->start_assets.empty())
+            return false;
+    return true;
+}
+static_assert(start_rule_matches_its_rows(),
+              "StartRule::Assets is the rule of exactly the rows that declare start_assets");
+consteval bool no_manifest_row_anchors_core_home() {
+    const auto anchored = [](std::span<const BootAsset> rows) consteval {
+        for (const BootAsset& r : rows)
+            if (r.anchor == AssetAnchor::CoreHome) return true;
+        return false;
+    };
+    for (const CoreFactory& f : kCoreTable)
+        if (anchored(f.profile->boot_assets) || anchored(f.profile->start_assets)) return false;
+    return true;
+}
+static_assert(no_manifest_row_anchors_core_home(),
+              "AssetAnchor::CoreHome is the generic chain's alone; no ladder can resolve it");
+consteval bool front_end_and_hint_rows_start_nothing() {
+    for (const CoreFactory& f : kCoreTable)
+        if ((f.profile->is_front_end || f.profile->name.empty()) &&
+            f.profile->start != StartRule::None)
+            return false;
+    return true;
+}
+static_assert(front_end_and_hint_rows_start_nothing(),
+              "the front end and a hint-only row run their own start arm: StartRule::None");
+consteval bool start_ladder_rows_take_assets() {
+    for (const CoreFactory& f : kCoreTable)
+        if (!f.profile->staging.start_save_dir.empty() && f.profile->start != StartRule::Assets)
+            return false;
+    return true;
+}
+static_assert(start_ladder_rows_take_assets(),
+              "a start ladder carries declared rows only: a start_save_dir row takes Assets");
 
 consteval bool manifest_windows_fit_every_sourced_aperture() {
     for (const CoreFactory& f : kCoreTable) {
@@ -192,6 +250,15 @@ consteval bool loader_rows_stream() {
 }
 static_assert(loader_rows_stream(),
               "a row with a MAIN loader answers the stream role: its profile is not file_tx_whole");
+consteval bool loader_rows_keep_their_loader() {
+    for (const CoreFactory& f : kCoreTable) {
+        if (f.make_loader == nullptr) continue;
+        if (loader_for(&f, 0) != f.make_loader || loader_for(&f, 1) != f.make_loader) return false;
+    }
+    return true;
+}
+static_assert(loader_rows_keep_their_loader(),
+              "loader_for answers a row's own loader whatever the pick's address");
 
 consteval bool companion_rows_declare_a_window() {
     for (const CoreFactory& f : kCoreTable) {
@@ -234,7 +301,7 @@ std::span<const CoreFactory> core_table() { return kCoreTable; }
     return find_core(conf_str_name);
 }
 
-const ManifestDocRole* manifest_doc_role() {
+const IManifestDocRole* manifest_doc_role() {
     for (const CoreFactory& f : kCoreTable) {
         if (f.manifest_doc != nullptr) return f.manifest_doc;
     }

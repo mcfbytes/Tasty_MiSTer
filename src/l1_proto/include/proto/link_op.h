@@ -52,7 +52,7 @@ struct LinkOp {
         SaveAsk,
         Ps2Frame,
         DropCore,
-        MakeCore,
+        AdoptCore,
         SessionUp,
         StageMount,
         StagePayload,
@@ -137,7 +137,8 @@ struct LinkOp {
         bool bracketed = false;
         bool manual = false;
         FileId path{};
-        std::uint8_t pad2_[2]{};
+        bool sends_index = false;
+        std::uint8_t index_word = 0;
         std::uint32_t act_gen = 0;
     };
 
@@ -225,6 +226,8 @@ struct LinkOp {
         TxSlabId blob{};
         bool declares_cheats = false;
         bool declares_turbo = false;
+        bool declares_info = false;
+        std::uint8_t pad_{};
     };
 
     struct BindDoorbells {
@@ -263,11 +266,16 @@ struct LinkOp {
     struct DropCore {
         static constexpr Kind kKind = Kind::DropCore;
     };
-    struct MakeCore {
-        static constexpr Kind kKind = Kind::MakeCore;
-        bool manifest_hint = false;
-        std::uint8_t pad_{};
-        TxSlabId manifest{};
+
+    enum class Built : std::uint8_t { Core, NoName, NoStorage, RegistryMiss, Refused };
+    struct AdoptCore {
+        static constexpr Kind kKind = Kind::AdoptCore;
+        static constexpr std::uint8_t kNoSlot = 0xFF;
+        std::uint8_t slot = kNoSlot;
+        Built outcome = Built::Refused;
+        std::uint16_t gen = 0;
+        Errc err{};
+        std::uint8_t pad_[2]{};
     };
     struct SessionUp {
         static constexpr Kind kKind = Kind::SessionUp;
@@ -379,7 +387,7 @@ struct LinkOp {
                    BindDecoders, BindSlot, FileTx, BindFacts, BindConfig, BindUart, BindSlotConfig,
                    BindMount, BindSlotPreviews, RebootNow, ApplyCore, AbortSwitch, BindIdentity,
                    BindDoorbells, BindJoy, JoyRelease, SaveUpload, SaveAsk, Ps2Frame, DropCore,
-                   MakeCore, SessionUp, StageMount, StagePayload, StageReset, StageDiscPayload,
+                   AdoptCore, SessionUp, StageMount, StagePayload, StageReset, StageDiscPayload,
                    StageCheats, SetOsdVisible, PulseOption, SetVideoMode, ApplyCheats, SetDip,
                    SetCoreOption, SettleCoreOptions, SetVolume, AnnounceMount, SetWideIndex,
                    CoreReset, LoadFacts, MailboxWrite>;

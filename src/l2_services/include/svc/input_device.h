@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <linux/input.h>
+
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -12,9 +14,10 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
-#include "infra/unique_fd.h"
+#include "os/evdev.h"
 #include "svc/analog_xy.h"
 #include "svc/axis_cal.h"
+#include "svc/button_map.h"
 #include "svc/device_identity.h"
 #include "svc/device_report.h"
 #include "svc/stick_cal.h"
@@ -51,22 +54,28 @@ constexpr bool is_pdsp_like(QuirkId q) {
 
 inline constexpr unsigned kAxisCount = 64;
 
+inline constexpr std::uint16_t kRumbleLengthMs = 0x7FFF;
+using AxisTable = std::array<AxisCal, kAxisCount>;
+
 inline constexpr std::size_t kDownWords = 14;
 inline constexpr std::uint16_t kKeyEmuBase = 768;
 static_assert(kDownWords * 64u == 896u && 896u > kKeyEmuBase + 2u * (kAxisCount - 1u) + 1u,
               "down_ must hold every KEY_EMU synthetic axis code "
               "(input.cpp:6113): 768 + 2*63 + 1 = 895");
 
+[[nodiscard]] ff_effect make_rumble_effect(QuirkId quirk, std::int16_t id, std::uint16_t strong,
+                                           std::uint16_t weak) noexcept;
+
 class InputDevice {
     TASTY_SEAT_EXEMPT(component);
 
 public:
-    static Ex<InputDevice> open(std::string_view devnode);
+    [[nodiscard]] static Ex<InputDevice> open(std::string_view devnode);
 
-    static Ex<InputDevice> adopt(int fd, std::string_view devnode, const DeviceIdentity& id,
-                                 bool mouse);
+    [[nodiscard]] static Ex<InputDevice> adopt(int fd, std::string_view devnode,
+                                               const DeviceIdentity& id, bool mouse);
 
-    int fd() const noexcept { return fd_.get(); }
+    int fd() const noexcept { return ev_.fd(); }
     const std::string& devnode() const noexcept { return devnode_; }
     bool is_mouse() const noexcept { return mouse_; }
 
@@ -88,16 +97,15 @@ public:
     bool grabbed() const noexcept { return grabbed_; }
 
     const AxisCal& axis(unsigned code) const;
-    void set_axis(unsigned code, const AxisCal& cal);
 
-    Ex<void> set_joy_map(const ButtonMap& map);
+    void install_joy_map(const JoyWords& words) noexcept { joy_map_ = words; }
     bool has_joy_map() const noexcept { return joy_map_.has_value(); }
     std::span<const std::uint32_t> joy_map() const noexcept {
         return joy_map_ ? std::span<const std::uint32_t>{*joy_map_}
                         : std::span<const std::uint32_t>{kUnsetJoyMap};
     }
 
-    Ex<void> set_sys_map(const ButtonMap& map);
+    void install_sys_map(const JoyWords& words) noexcept;
     std::span<const std::uint32_t> sys_map() const noexcept { return sys_map_; }
 
     std::span<const std::uint32_t> menu_map() const noexcept { return menu_map_; }
@@ -112,10 +120,16 @@ public:
     void set_reshape(infra::OptRef<const IAnalogReshape> r) noexcept { reshape_ = r; }
     infra::OptRef<const IAnalogReshape> reshape() const noexcept { return reshape_; }
 
-    Ex<unsigned> drain();
+    [[nodiscard]] Ex<unsigned> drain();
     const DeviceReport& report() const noexcept { return report_; }
 
-    Ex<void> set_grabbed(bool on);
+    [[nodiscard]] Ex<void> set_grabbed(bool on);
+
+    bool has_rumble() const noexcept { return rumble_; }
+
+    [[nodiscard]] Ex<void> set_rumble(std::uint16_t strong, std::uint16_t weak);
+
+    [[nodiscard]] bool release_for_handover() noexcept;
 
     InputDevice(InputDevice&&) noexcept = default;
     InputDevice& operator=(InputDevice&&) noexcept = default;
@@ -123,8 +137,15 @@ public:
     InputDevice& operator=(const InputDevice&) = delete;
 
 private:
+    friend struct InputDeviceTestAccess;
+    void replace_axes(const AxisTable& table) noexcept { axes_ = table; }
+    void mark_rumble(bool on) noexcept { rumble_ = on; }
+    void mark_rumble_id(std::int16_t id) noexcept { rumble_id_ = id; }
+    void mark_grabbed(bool on) noexcept { grabbed_ = on; }
+    std::int16_t rumble_id() const noexcept { return rumble_id_; }
     InputDevice() = default;
-    UniqueFd fd_{};
+    void mark_down(std::uint16_t code, bool on) noexcept;
+    os::Evdev ev_{};
     std::string devnode_;
     std::string uniq_;
     std::string mac_;
@@ -134,6 +155,8 @@ private:
     QuirkId quirk_ = QuirkId::None;
     bool mod_ = false;
     bool grabbed_ = false;
+    bool rumble_ = false;
+    std::int16_t rumble_id_ = -1;
     std::int32_t deadzone_ = 0;
     infra::OptRef<const IAnalogReshape> reshape_;
     std::uint8_t mouse_buttons_ = 0;
@@ -145,7 +168,7 @@ private:
     static_assert(std::is_trivially_copyable_v<decltype(joy_map_)>);
     std::array<std::uint32_t, 32> sys_map_{};
     std::array<std::uint32_t, 32> menu_map_{};
-    std::array<AxisCal, kAxisCount> axes_{};
+    AxisTable axes_{};
     std::array<std::uint64_t, kDownWords> down_{};
     std::array<std::uint8_t, kAxisCount> axis_edge_{};
     AnalogXy raw_[2]{};

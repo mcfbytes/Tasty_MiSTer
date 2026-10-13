@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/input_service.h"
 #include "hal/selected.h"
+#include "os/evdev.h"
 #include "svc/analog_reshape.h"
 #include "svc/button_map.h"
 #include "svc/mapping_wizard.h"
 #include "svc/vfs.h"
 
-#include <dirent.h>
 #include <fcntl.h>
 #include <linux/input.h>
 #include <sys/inotify.h>
-#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -30,8 +29,6 @@ constexpr hal::SpiWord kGetKbdLed{0x1F};
 constexpr hal::SpiWord kPs2Ctl{0x21};
 constexpr std::uint16_t kLedPollTicks = 100;
 
-constexpr std::string_view kProcDevices = "/proc/bus/input/devices";
-
 constexpr std::size_t kSysBtnCntOk = 21;
 constexpr std::size_t kSysBtnCntEsc = 22;
 
@@ -40,26 +37,6 @@ const AxisCal kNullAxis{};
 Error os_error(std::uint16_t site) {
     return Error{Errc::os, site, static_cast<std::uint32_t>(errno)};
 }
-
-Ex<std::string> read_all(std::string_view path) {
-    std::string name(path);
-    UniqueFd fd(::open(name.c_str(), O_RDONLY | O_CLOEXEC));
-    if (!fd.valid()) return std::unexpected(os_error(ERR_SITE()));
-    std::string out;
-    char buf[4096];
-    while (true) {
-        const ssize_t n = ::read(fd.get(), buf, sizeof buf);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return std::unexpected(os_error(ERR_SITE()));
-        }
-        if (n == 0) break;
-        out.append(buf, static_cast<std::size_t>(n));
-    }
-    return out;
-}
-
-constexpr std::size_t kJoyMapBytes = map_spec(MapKind::Joystick).bytes;
 
 }  // namespace
 
@@ -156,19 +133,29 @@ Ex<void> MapStore::save(std::string_view core, const DeviceIdentity& id, const B
 
 namespace {
 
-void cache_axes(int fd, std::array<AxisCal, kAxisCount>& axes) {
+AxisTable cache_axes(const os::Evdev& ev) {
+    AxisTable axes{};
     for (unsigned code = 0; code < kAxisCount; ++code) {
-        struct input_absinfo info {};
-        if (::ioctl(fd, EVIOCGABS(code), &info) < 0) continue;
+        const std::optional<input_absinfo> info = ev.abs_info(code);
+        if (!info) continue;
         AxisCal cal{};
-        cal.min = info.minimum;
-        cal.max = info.maximum;
-        cal.flat = info.flat;
-        cal.fuzz = info.fuzz;
+        cal.min = info->minimum;
+        cal.max = info->maximum;
+        cal.flat = info->flat;
+        cal.fuzz = info->fuzz;
         axes[code] = cal;
     }
+    return axes;
 }
 
+}  // namespace
+
+namespace {
+
+bool reports_rumble(const os::Evdev& ev) noexcept {
+    if (!ev.effect_count()) return false;
+    return ev.has_ff(FF_RUMBLE);
+}
 }  // namespace
 
 Ex<InputDevice> InputDevice::open(std::string_view devnode) {
@@ -177,34 +164,34 @@ Ex<InputDevice> InputDevice::open(std::string_view devnode) {
     }
     std::string path(devnode);
 
-    UniqueFd fd(::open(path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC));
-    if (!fd.valid()) return std::unexpected(os_error(ERR_SITE()));
+    os::Evdev ev(::open(path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC));
+    if (!ev.valid()) return std::unexpected(os_error(ERR_SITE()));
 
     InputDevice dev;
     dev.devnode_ = path;
     dev.mouse_ = rules::is_mouse_node(path);
     if (!dev.mouse_) {
-        struct input_id id {};
-        if (::ioctl(fd.get(), EVIOCGID, &id) >= 0) {
-            dev.id_.vid = Vid{id.vendor};
-            dev.id_.pid = Pid{id.product};
-            dev.id_.version = id.version;
-            dev.id_.bustype = id.bustype;
+        if (const auto id = ev.id()) {
+            dev.id_.vid = Vid{id->vendor};
+            dev.id_.pid = Pid{id->product};
+            dev.id_.version = id->version;
+            dev.id_.bustype = id->bustype;
         }
         char name[128] = {};
-        if (::ioctl(fd.get(), EVIOCGNAME(sizeof name), name) >= 0) {
+        if (ev.name(name)) {
             name[sizeof name - 1] = 0;
             dev.id_.name = name;
         }
 
         char uniq[32] = {};
-        if (::ioctl(fd.get(), EVIOCGUNIQ(sizeof uniq), uniq) >= 0) {
+        if (ev.uniq(uniq)) {
             uniq[sizeof uniq - 1] = 0;
             dev.uniq_ = uniq;
         }
-        cache_axes(fd.get(), dev.axes_);
+        dev.axes_ = cache_axes(ev);
+        dev.rumble_ = reports_rumble(ev);
     }
-    dev.fd_ = std::move(fd);
+    dev.ev_ = std::move(ev);
     return dev;
 }
 
@@ -212,7 +199,7 @@ Ex<InputDevice> InputDevice::adopt(int fd, std::string_view devnode, const Devic
                                    bool mouse) {
     if (fd < 0) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     InputDevice dev;
-    dev.fd_.reset(fd);
+    dev.ev_ = os::Evdev{fd};
     dev.devnode_ = devnode;
     dev.mouse_ = mouse;
     dev.id_ = id;
@@ -230,48 +217,12 @@ StickCal InputDevice::stick_cal(int stick) const noexcept {
     return StickCal{max_cardinal_[i], std::sqrt(max_range_sq_[i])};
 }
 
-void InputDevice::set_axis(unsigned code, const AxisCal& cal) {
-    if (code >= kAxisCount) return;
-    axes_[code] = cal;
-}
-
-Ex<void> InputDevice::set_joy_map(const ButtonMap& map) {
-    if (map.kind != MapKind::Joystick || map.blob.size() != kJoyMapBytes) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(map.blob.size())});
-    }
-
-    std::array<std::uint32_t, 32> words{};
-    for (std::size_t i = 0; i < words.size(); ++i) {
-        std::uint32_t v = 0;
-        for (std::size_t b = 0; b < 4; ++b) {
-            v |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(map.blob[i * 4 + b]))
-                 << (8u * b);
-        }
-        words[i] = v;
-    }
-    joy_map_ = words;
-    return {};
-}
-
-Ex<void> InputDevice::set_sys_map(const ButtonMap& map) {
-    if (map.kind != MapKind::Joystick || map.blob.size() != kJoyMapBytes) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(map.blob.size())});
-    }
-    for (std::size_t i = 0; i < sys_map_.size(); ++i) {
-        std::uint32_t v = 0;
-        for (std::size_t b = 0; b < 4; ++b) {
-            v |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(map.blob[i * 4 + b]))
-                 << (8u * b);
-        }
-        sys_map_[i] = v;
-    }
+void InputDevice::install_sys_map(const JoyWords& words) noexcept {
+    sys_map_ = words;
 
     if (sys_map_[kSysBtnCntEsc] == 0) sys_map_[kSysBtnCntEsc] = sys_map_[kSysBtnCntOk];
 
     menu_map_ = rules::derive_menu_map(sys_map_, quirk_ != QuirkId::Wheel);
-    return {};
 }
 
 bool InputDevice::matches_sys_button(std::uint16_t code) const noexcept {
@@ -294,25 +245,71 @@ bool InputDevice::has_nonzero_joy_map() const noexcept {
 }
 
 Ex<void> InputDevice::set_grabbed(bool on) {
-    if (!fd_.valid()) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    if (::ioctl(fd_.get(), EVIOCGRAB, on ? 1 : 0) < 0) {
+    if (!ev_.valid()) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    if (!ev_.grab(on)) {
         return std::unexpected(os_error(ERR_SITE()));
     }
     grabbed_ = on;
     return {};
 }
 
-namespace {
+ff_effect make_rumble_effect(QuirkId quirk, std::int16_t id, std::uint16_t strong,
+                             std::uint16_t weak) noexcept {
+    ff_effect e{};
+    e.type = FF_RUMBLE;
+    e.id = id;
+    e.direction = quirk == QuirkId::Wheel ? 0x4000 : 0x0000;
+    e.u.rumble.strong_magnitude = strong;
+    e.u.rumble.weak_magnitude = weak;
+    e.replay.length = kRumbleLengthMs;
+    e.replay.delay = 0;
+    return e;
+}
 
-void bit_set(std::array<std::uint64_t, kDownWords>& bits, std::uint16_t code, bool on) {
+Ex<void> InputDevice::set_rumble(std::uint16_t strong, std::uint16_t weak) {
+    if (!rumble_ || !ev_.valid()) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    if (strong == 0 && weak == 0) {
+        if (rumble_id_ == -1) return {};
+        const bool removed = ev_.erase_effect(static_cast<int>(rumble_id_));
+        rumble_id_ = -1;
+        if (!removed) return std::unexpected(os_error(ERR_SITE()));
+        return {};
+    }
+    ff_effect e = make_rumble_effect(quirk_, rumble_id_, strong, weak);
+    if (!ev_.upload_effect(e)) return std::unexpected(os_error(ERR_SITE()));
+    rumble_id_ = e.id;
+    input_event play{};
+    play.type = EV_FF;
+    play.code = static_cast<std::uint16_t>(rumble_id_);
+    play.value = 1;
+    if (::write(ev_.fd(), &play, sizeof play) < 0) return std::unexpected(os_error(ERR_SITE()));
+    return {};
+}
+
+bool InputDevice::release_for_handover() noexcept {
+    bool ok = true;
+    if (rumble_id_ != -1) {
+        ok = ev_.valid() && ev_.erase_effect(static_cast<int>(rumble_id_));
+        rumble_id_ = -1;
+    }
+    if (grabbed_) {
+        ok = ev_.valid() && ev_.grab(false) && ok;
+        grabbed_ = false;
+    }
+    return ok;
+}
+
+void InputDevice::mark_down(std::uint16_t code, bool on) noexcept {
     const std::size_t word = code / 64u;
-    if (word >= bits.size()) return;
+    if (word >= down_.size()) return;
     const std::uint64_t mask = std::uint64_t{1} << (code % 64u);
     if (on)
-        bits[word] |= mask;
+        down_[word] |= mask;
     else
-        bits[word] &= ~mask;
+        down_[word] &= ~mask;
 }
+
+namespace {
 
 std::int32_t normalize_axis(std::int32_t value, const AxisCal& cal) {
     const std::int32_t hrange = (cal.max - cal.min) / 2;
@@ -331,29 +328,30 @@ std::int32_t normalize_axis(std::int32_t value, const AxisCal& cal) {
     return v;
 }
 
-int stick_of(std::uint16_t code, bool& is_y) {
+struct StickAxis {
+    int stick;
+    bool is_y;
+};
+
+std::optional<StickAxis> stick_of(std::uint16_t code) {
     switch (code) {
         case ABS_X:
-            is_y = false;
-            return 0;
+            return StickAxis{0, false};
         case ABS_Y:
-            is_y = true;
-            return 0;
+            return StickAxis{0, true};
         case ABS_RX:
-            is_y = false;
-            return 1;
+            return StickAxis{1, false};
         case ABS_RY:
-            is_y = true;
-            return 1;
+            return StickAxis{1, true};
         default:
-            return -1;
+            return std::nullopt;
     }
 }
 
 }  // namespace
 
 Ex<unsigned> InputDevice::drain() {
-    if (!fd_.valid()) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    if (!ev_.valid()) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 
     report_ = DeviceReport{};
     report_.buttons = joy_prev_;
@@ -366,7 +364,7 @@ Ex<unsigned> InputDevice::drain() {
     bool keys_changed = false;
 
     const auto push_key_edge = [&](std::uint16_t code, bool pressed) {
-        bit_set(down_, code, pressed);
+        mark_down(code, pressed);
         keys_changed = true;
         if (report_.key_count < kMaxKeyEdges) {
             report_.keys[report_.key_count] = KeyEdge{code, pressed};
@@ -444,7 +442,7 @@ Ex<unsigned> InputDevice::drain() {
     struct input_event evs[32];
     bool more = true;
     while (more) {
-        const ssize_t n = ::read(fd_.get(), evs, sizeof evs);
+        const ssize_t n = ev_.read(evs);
         if (n < 0) {
 
             if (errno == EINTR) continue;
@@ -515,14 +513,15 @@ Ex<unsigned> InputDevice::drain() {
                     report_.mouse_changed = true;
                     break;
                 case EV_ABS: {
-                    bool is_y = false;
-                    const int stick = stick_of(static_cast<std::uint16_t>(ev.code), is_y);
+                    const auto sa = stick_of(static_cast<std::uint16_t>(ev.code));
 
                     const AxisCal& cal = axis(ev.code);
-                    if (stick < 0) {
+                    if (!sa) {
                         synth_axis(static_cast<std::uint16_t>(ev.code), ev.value, cal);
                         break;
                     }
+                    const int stick = sa->stick;
+                    const bool is_y = sa->is_y;
                     const std::int32_t v = normalize_axis(ev.value, cal);
                     if (is_y)
                         raw_[stick].y = v;
@@ -633,7 +632,7 @@ std::uint32_t key_hash(std::string_view key) noexcept {
 void InputService::refresh_slot_census() noexcept {
     std::uint32_t bound = 0;
     std::uint32_t live = 0;
-    for (const InputDevice& d : devices_) {
+    for (const InputDevice& d : table_.devices) {
         if (const auto s = players_.slot_of(d.identity())) {
             ++bound;
             live |= 1u << s->v;
@@ -652,14 +651,40 @@ void InputService::refresh_slot_census() noexcept {
 }
 
 InputService InputService::create() { return InputService(); }
-InputService InputService::create(const Vfs& storage) { return InputService(storage); }
 
-Ex<void> InputService::open_hotplug_watch() {
+void InputService::install(DeviceTable& incoming) noexcept {
+    std::swap(table_, incoming);
+    for (InputDevice& d : incoming.devices) {
+        if (!d.release_for_handover()) n_grab_fail_.add(1);
+    }
+    for (InputDevice& d : table_.devices) {
+        if (grabbed_ && !d.set_grabbed(true)) n_grab_fail_.add(1);
+    }
+    ++devices_gen_;
+    for (JoyMask& m : joy_mask_) {
+        m = JoyMask{};
+    }
+    n_mapped_.set(table_.mapped);
+    refresh_slot_census();
+    for (InputDevice& d : table_.devices) {
+        if (d.drain()) note_report(d);
+    }
+}
+
+void InputService::apply_deadzone_rules(std::span<const DeadzoneRule> rows) noexcept {
+    for (InputDevice& d : table_.devices) {
+        const DeviceIdentity& id = d.identity();
+        d.set_deadzone(
+            rules::deadzone_for(d.quirk(), id.vid, id.pid, id.id, d.sysfs(), id.merge_id, rows));
+    }
+}
+
+Ex<void> InputService::open_hotplug_watch(std::string_view dir) {
     if (inotify_.valid()) return {};
     inotify_.reset(::inotify_init1(IN_NONBLOCK | IN_CLOEXEC));
     if (!inotify_.valid()) return std::unexpected(os_error(ERR_SITE()));
-    if (::inotify_add_watch(inotify_.get(), input_dir_.c_str(), IN_MODIFY | IN_CREATE | IN_DELETE) <
-        0) {
+    const std::string path(dir);
+    if (::inotify_add_watch(inotify_.get(), path.c_str(), IN_MODIFY | IN_CREATE | IN_DELETE) < 0) {
         const Error e = os_error(ERR_SITE());
         inotify_.reset();
         return std::unexpected(e);
@@ -669,196 +694,11 @@ Ex<void> InputService::open_hotplug_watch() {
 
 std::uint8_t InputService::mouse_button_level() const noexcept {
     std::uint8_t level = 0;
-    for (const InputDevice& d : devices_) {
+    for (const InputDevice& d : table_.devices) {
         if (!d.is_mouse()) continue;
         level = static_cast<std::uint8_t>(level | d.report().mouse_buttons);
     }
     return level;
-}
-
-Ex<void> InputService::enumerate() {
-
-    ++devices_gen_;
-    devices_.clear();
-
-    for (JoyMask& m : joy_mask_)
-        m = JoyMask{};
-    n_mapped_.set(0);
-    refresh_slot_census();
-    stats_.overflow = 0;
-    stats_.empty_id_skips = 0;
-    stats_.mouse_fixups = 0;
-
-    stats_.rejected = 0;
-
-    DIR* dir = ::opendir(input_dir_.c_str());
-    if (dir == nullptr) return std::unexpected(os_error(ERR_SITE()));
-
-    unsigned seen = 0;
-    while (const struct dirent* de = ::readdir(dir)) {
-        const std::string_view name(de->d_name);
-        if (!name.starts_with("event") && !name.starts_with("mouse")) continue;
-        ++seen;
-        if (devices_.size() >= kMaxDevices) {
-
-            ++stats_.overflow;
-            continue;
-        }
-        std::string path(input_dir_);
-        path.push_back('/');
-        path.append(name);
-        auto dev = InputDevice::open(path);
-        if (!dev) continue;
-        (void)admit_and_adopt(std::move(*dev));
-    }
-    ::closedir(dir);
-
-    if (auto r = resolve_identities(); !r) return r;
-
-    if (stats_.overflow != 0) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), seen});
-    }
-    return {};
-}
-
-bool InputService::admit_and_adopt(InputDevice&& dev) {
-    const Admission adm =
-        admit_node(NodeFacts{dev.identity().vid, dev.identity().pid, dev.identity().name});
-    if (!adm.accept) {
-        ++stats_.rejected;
-        return false;
-    }
-    dev.set_quirk(adm.quirk);
-    devices_.push_back(std::move(dev));
-    return true;
-}
-
-Ex<void> InputService::resolve_identities() {
-
-    std::vector<rules::DeviceSlot> slots(devices_.size());
-    for (std::size_t i = 0; i < devices_.size(); ++i) {
-        slots[i].devname = devices_[i].devnode();
-        slots[i].mouse = devices_[i].is_mouse();
-        slots[i].uniq = devices_[i].uniq();
-        slots[i].id = devices_[i].identity();
-
-        slots[i].quirk = devices_[i].quirk();
-        rules::derive_idstr(slots[i]);
-    }
-
-    std::string proc;
-    if (auto text = read_all(kProcDevices); text) {
-        proc = std::move(*text);
-    }
-
-    const rules::SpinnerPolicy spin{spinner_vid_, spinner_pid_};
-    const rules::MergeStats st = rules::resolve_identities(slots, proc, cfg_no_merge_, spin);
-    const rules::UniquePolicy unique{false, false, unique_rows_};
-    stats_.mouse_fixups = st.mouse_fixups;
-    stats_.empty_id_skips = st.empty_id_skips;
-
-    for (std::size_t i = 0; i < devices_.size(); ++i) {
-        devices_[i].identity() = slots[i].id;
-        devices_[i].identity().unique_filenames = rules::wants_unique_mapping(slots[i].id, unique);
-        devices_[i].set_quirk(slots[i].quirk);
-        devices_[i].set_bt_facts(slots[i].mac, slots[i].sysfs);
-    }
-    stats_.devices = static_cast<unsigned>(devices_.size());
-    apply_deadzones();
-    return {};
-}
-
-void InputService::apply_deadzones() noexcept {
-    for (InputDevice& d : devices_) {
-        const DeviceIdentity& id = d.identity();
-        d.set_deadzone(rules::deadzone_for(d.quirk(), id.vid, id.pid, id.id, d.sysfs(), id.merge_id,
-                                           cfg_deadzone_));
-    }
-}
-
-namespace {
-
-bool is_psx_core(std::string_view core) noexcept {
-    if (core.size() != 3) return false;
-    static constexpr char kPsx[3] = {'P', 'S', 'X'};
-    for (std::size_t i = 0; i < 3; ++i) {
-        char c = core[i];
-        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - ('a' - 'A'));
-        if (c != kPsx[i]) return false;
-    }
-    return true;
-}
-}  // namespace
-
-Ex<void> InputService::load_maps_for(std::string_view core_in, bool front_end,
-                                     infra::OptRef<const IAnalogReshape> reshape) {
-
-    const std::string_view core = front_end ? std::string_view{} : core_in;
-
-    const bool axis_emu = !is_psx_core(core_in);
-
-    const ButtonMap fallback_sys = rules::default_sys_map();
-    ButtonMap zero_map;
-    zero_map.kind = MapKind::Joystick;
-    zero_map.blob.assign(kJoyMapBytes, std::byte{0});
-
-    std::uint32_t mapped = 0;
-    for (InputDevice& d : devices_) {
-
-        const ButtonMap* sys = &fallback_sys;
-        ButtonMap sys_file;
-        if (auto m = maps_.load(std::string_view{}, d.identity(), MapKind::Joystick, d.mod()); m) {
-            sys_file = std::move(*m);
-            sys = &sys_file;
-        }
-        (void)d.set_sys_map(*sys);
-
-        d.set_reshape(reshape);
-
-        const ButtonMap* wire = sys;
-        ButtonMap core_file;
-        ButtonMap derived;
-        if (!core.empty()) {
-            if (auto m = maps_.load(core, d.identity(), MapKind::Joystick, d.mod()); m) {
-
-                core_file = std::move(*m);
-                wire = &core_file;
-            } else if (is_pdsp_like(d.quirk())) {
-
-                wire = &zero_map;
-            } else {
-
-                derived = rules::derive_joy_map(d.sys_map(), axis_emu, joy_plan_);
-                wire = &derived;
-            }
-        }
-
-        (void)d.set_joy_map(*wire);
-        if (d.has_nonzero_joy_map()) ++mapped;
-    }
-    n_mapped_.set(mapped);
-    reshape_ = reshape;
-
-    refresh_slot_census();
-    return {};
-}
-
-void InputService::set_cfg_deadzone_rules(std::span<const DeadzoneRule> rows) {
-    cfg_deadzone_.assign(rows.begin(), rows.end());
-    apply_deadzones();
-}
-
-void InputService::set_cfg_no_merge_rules(std::span<const NoMergeRule> rows) {
-    cfg_no_merge_.assign(rows.begin(), rows.end());
-}
-
-void InputService::set_spinner(Vid vid, Pid pid) noexcept {
-    spinner_vid_ = vid;
-    spinner_pid_ = pid;
-}
-
-void InputService::set_unique_mapping(std::span<const std::uint32_t> rows) {
-    unique_rows_.assign(rows.begin(), rows.end());
 }
 
 Ex<void> InputService::on_hotplug() {
@@ -895,7 +735,7 @@ Ex<unsigned> InputService::on_fd_ready(int fd) {
         if (auto r = on_hotplug(); !r) return std::unexpected(r.error());
         return 0u;
     }
-    for (InputDevice& d : devices_) {
+    for (InputDevice& d : table_.devices) {
         if (d.fd() != fd) continue;
         auto n = d.drain();
         if (!n) return std::unexpected(n.error());
@@ -932,7 +772,7 @@ void InputService::maybe_assign_slot(InputDevice& dev) {
     if (!claim) return;
 
     std::uint32_t live = 0;
-    for (const InputDevice& d : devices_) {
+    for (const InputDevice& d : table_.devices) {
         if (const auto s = players_.slot_of(d.identity())) live |= 1u << s->v;
     }
     const auto slot = players_.first_free(live);
@@ -945,13 +785,53 @@ void InputService::recompute_joy_masks() {
     n_mask_recompute_.add(1);
     for (JoyMask& m : joy_mask_)
         m = JoyMask{};
-    for (const InputDevice& d : devices_) {
+    for (const InputDevice& d : table_.devices) {
 
         if (d.is_mouse()) continue;
         const auto slot = players_.slot_of(d.identity());
         if (!slot) continue;
         joy_mask_[slot->v].v |= d.report().buttons.v;
     }
+}
+
+RumblePadSet InputService::rumble_pads() const noexcept {
+    TASTY_SEAT_BODY(InputService);
+    RumblePadSet out{};
+    if (!cfg_rumble_) return out;
+    for (const InputDevice& d : table_.devices) {
+        if (!d.has_rumble() || d.is_mouse()) continue;
+        const auto s = players_.slot_of(d.identity());
+        if (!s) continue;
+        out.players = static_cast<std::uint8_t>(out.players | (1u << s->v));
+
+        std::uint32_t h = out.pads[s->v] != 0 ? out.pads[s->v] : 2166136261u;
+        for (const char c : PlayerSlots::key_of(d.identity())) {
+            h ^= static_cast<std::uint8_t>(c);
+            h *= 16777619u;
+        }
+        h ^= 0xFFu;
+        h *= 16777619u;
+        out.pads[s->v] = h != 0 ? h : 1u;
+    }
+    return out;
+}
+
+RumbleApply InputService::rumble(PlayerIndex player, std::uint16_t strong,
+                                 std::uint16_t weak) noexcept {
+    TASTY_SEAT_BODY(InputService);
+    if (!cfg_rumble_) return RumbleApply::NoDevice;
+    RumbleApply out = RumbleApply::NoDevice;
+    for (InputDevice& d : table_.devices) {
+        if (!d.has_rumble() || d.is_mouse()) continue;
+        const auto s = players_.slot_of(d.identity());
+        if (!s || s->v != player.v) continue;
+        if (!d.set_rumble(strong, weak)) {
+            out = RumbleApply::Failed;
+        } else if (out == RumbleApply::NoDevice) {
+            out = RumbleApply::Applied;
+        }
+    }
+    return out;
 }
 
 JoyMask InputService::joy_mask(PlayerIndex player) const {
@@ -962,7 +842,7 @@ JoyMask InputService::joy_mask(PlayerIndex player) const {
 Ex<void> InputService::set_grabbed(bool on) {
     grabbed_ = on;
     Ex<void> first{};
-    for (InputDevice& d : devices_) {
+    for (InputDevice& d : table_.devices) {
 
         if (auto r = d.set_grabbed(grabbed_); !r && first) {
             first = std::unexpected(r.error());
@@ -972,12 +852,11 @@ Ex<void> InputService::set_grabbed(bool on) {
 }
 
 Ex<void> InputService::adopt(InputDevice&& dev) {
-    if (devices_.size() >= kMaxDevices) {
+    if (table_.devices.size() >= kMaxDevices) {
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(devices_.size())});
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(table_.devices.size())});
     }
-    devices_.push_back(std::move(dev));
-    stats_.devices = static_cast<unsigned>(devices_.size());
+    table_.devices.push_back(std::move(dev));
     ++devices_gen_;
     return {};
 }
@@ -1028,7 +907,7 @@ Ex<MappingWizard::Step> MappingWizard::advance() {
 
 void MappingWizard::cancel() { step_ = Step::Cancelled; }
 
-Ex<void> emit_but_sw(hal::ISpiTransport& link, std::uint16_t map) {
+[[nodiscard]] Ex<void> emit_but_sw(hal::ISpiTransport& link, std::uint16_t map) {
     hal::Selected cs(link, hal::ChipSelect::Io);
 
     if (auto r = link.transfer(hal::SpiWord{kUioButSw}); !r) {

@@ -5,11 +5,14 @@
 #include <cstdint>
 #include <span>
 
+#include "infra/byte_view.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "hal/boot_handoff.h"
 
 namespace mister::hal {
+
+inline constexpr std::size_t kWordAlign = 4u;
 
 class IFpgaProgrammer {
 public:
@@ -29,10 +32,10 @@ public:
         if (bitstream.empty()) {
             return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
         }
-        const auto misalign =
-            static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(bitstream.data()) & 0x3u);
-        if (misalign != 0) {
-            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), misalign});
+        if (!infra::is_aligned(bitstream.data(), kWordAlign)) {
+            return std::unexpected(Error{
+                Errc::bad_format, ERR_SITE(),
+                static_cast<std::uint32_t>(infra::misalignment(bitstream.data(), kWordAlign))});
         }
         if (auto r = to_rest_(program_begin()); !r) return r;
         if (auto r = program_chunk(bitstream); !r) return r;

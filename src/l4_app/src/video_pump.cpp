@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "infra/byte_view.h"
 #include "svc/config.h"
 #include "svc/config_parser.h"
 #include "svc/filter_store.h"
@@ -242,12 +243,12 @@ bool VideoPump::hdmi_int_asserted() const {
 
 void VideoPump::bind_adv7513_io() noexcept {
     svc::adv7513::Io io{};
-    io.main = &main_map_;
-    io.edid = &edid_map_;
-    io.cec = &cec_map_;
-    io.hdmi = this;
-    io.delay = &delay_;
-    io.clock = &clock_;
+    io.main = infra::OptRef<svc::adv7513::IRegMap>{main_map_};
+    io.edid = infra::OptRef<svc::adv7513::IRegMap>{edid_map_};
+    io.cec = infra::OptRef<svc::adv7513::IRegMap>{cec_map_};
+    io.hdmi = infra::OptRef<const hal::IHdmiInterrupt>{*this};
+    io.delay = infra::OptRef<os::IDelay>{delay_};
+    io.clock = infra::OptRef<const os::IClock>{clock_};
     video_->set_adv7513_io(io);
 }
 
@@ -476,7 +477,7 @@ void VideoPump::load_spec_from_ini() {
     bool dv = false;
     std::uint8_t sq = 0;
     const auto commit_options = [&] {
-        video_->set_wire_options(opt);
+        wire_opt_ = opt;
         init_opts_ = io;
         spd_direct_video_ = dv;
         spd_quirk_ = sq;
@@ -493,8 +494,7 @@ void VideoPump::load_spec_from_ini() {
     }
 
     svc::config_parser::PassNames names{};
-    auto snap = svc::config_parser::parse_two_pass(
-        std::string_view{reinterpret_cast<const char*>(bytes->data()), bytes->size()}, names);
+    auto snap = svc::config_parser::parse_two_pass(infra::as_text(std::span(*bytes)), names);
     if (!snap) {
         if (vsync_force_) {
             vsync_adjust_ = *vsync_force_;
@@ -671,8 +671,9 @@ Ex<void> VideoPump::apply_family(svc::VmodeFamily f, double fpix_mhz) {
     stats_.last_mode_index = fm.index;
     stats_.last_fpix_khz = fpix_khz(clock);
 
+    svc::PllBlock pll_block{};
     if (fm.have_raw_pll && !adjusted) {
-        video_->set_pll_block(fm.raw_pll);
+        pll_block = fm.raw_pll;
     } else {
         const auto p = svc::pll::solve(clock);
         if (!p) {
@@ -685,12 +686,12 @@ Ex<void> VideoPump::apply_family(svc::VmodeFamily f, double fpix_mhz) {
         }
         if (p->approximated) ++stats_.approximated;
 
-        if (!adjusted) video_->set_pll_block(svc::pll::block(*p));
+        if (!adjusted) pll_block = svc::pll::block(*p);
     }
 
     svc::Modeline m = fm.stored.mode;
     m.fpix_mhz = fpix_mhz;
-    const auto r = video_->apply(m);
+    const auto r = video_->apply(m, pll_block, wire_opt_);
     if (!r) {
         ++stats_.stage_failures;
         return r;

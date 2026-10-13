@@ -11,6 +11,7 @@
 #include "svc/button_map.h"
 #include "svc/deadzone_rule.h"
 #include "svc/input_service.h"
+#include "svc/joy_plan.h"
 
 namespace mister::svc::rules {
 

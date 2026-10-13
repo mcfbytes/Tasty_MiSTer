@@ -18,6 +18,12 @@ public:
     virtual void blank(const char* tty) noexcept = 0;
 
     virtual void restore_text(const char* tty) noexcept = 0;
+
+    [[nodiscard]] virtual std::optional<bool> text_mode(int vt) noexcept = 0;
+
+    virtual void graphics(int vt) noexcept = 0;
+
+    virtual void text(int vt) noexcept = 0;
 };
 
 }  // namespace mister::os

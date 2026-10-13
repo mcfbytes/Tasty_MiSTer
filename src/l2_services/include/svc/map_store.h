@@ -81,10 +81,10 @@ public:
 
     infra::OptRef<const Vfs> storage() const noexcept { return vfs_; }
 
-    Ex<ButtonMap> load(std::string_view core, const DeviceIdentity& id, MapKind kind,
-                       bool mod) const;
-    Ex<void> save(std::string_view core, const DeviceIdentity& id, const ButtonMap& map,
-                  bool mod) const;
+    [[nodiscard]] Ex<ButtonMap> load(std::string_view core, const DeviceIdentity& id, MapKind kind,
+                                     bool mod) const;
+    [[nodiscard]] Ex<void> save(std::string_view core, const DeviceIdentity& id,
+                                const ButtonMap& map, bool mod) const;
 
 private:
     infra::OptRef<const Vfs> vfs_;

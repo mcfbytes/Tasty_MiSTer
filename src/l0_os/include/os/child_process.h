@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -17,7 +18,7 @@ inline constexpr int kChildKeptFd = 3;
 struct ChildProcessSpec {
     std::span<const char* const> argv;
     std::span<const char* const> envp;
-    const char* tty = nullptr;
+    const std::string& tty;
     int kept_fd = -1;
 };
 

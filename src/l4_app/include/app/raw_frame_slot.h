@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "app/frame_stamp.h"
 #include "app/rec_control.h"
@@ -32,7 +33,7 @@ struct RawFrameSlot {
     std::uint32_t vtime = 0;
     RecMode mode = RecMode::Hash;
     RecOptions opt{};
-    const std::byte* pixels = nullptr;
+    std::span<const std::byte> pixels{};
     RecPath path{};
 };
 

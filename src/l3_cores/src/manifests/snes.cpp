@@ -8,6 +8,7 @@
 
 #include "cores/msu_companion.h"
 #include "cores/msu_wire.h"
+#include "cores/sgb_core.h"
 #include "cores/snes_core.h"
 
 namespace mister::cores::manifests {
@@ -16,11 +17,33 @@ std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g) {
     return std::make_unique<SnesCore>(p, g.services);
 }
 
-std::unique_ptr<ICompanionLoad> make_snes_companion(const svc::Vfs& vfs) {
+std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g) {
+    return std::make_unique<SgbCore>(p, g.services, kSgbMailboxFrame);
+}
+
+std::unique_ptr<ICompanionLoad> make_msu_companion(const svc::Vfs& vfs) {
     return std::make_unique<MsuCompanion>(vfs);
 }
 
 static_assert(kSnes.kind == CoreKind::Snes);
+static_assert(kSgbWindows[0].region.offset == kSnesWindows[0].region.offset &&
+                  kSgbWindows[0].region.len == kSnesWindows[0].region.len &&
+                  kSgbWindows[0].feeds_pcm == kSnesWindows[0].feeds_pcm,
+              "the two rows carry one MSU-1 data window: MsuCompanion writes the data base "
+              "through kSnesWindows while the walk places against the row's own");
+static_assert(kSgb.kind == CoreKind::Sgb);
+static_assert(kSgb.name == std::string_view{"SGB"},
+              "SGB.sv:152: hps_io CONF_STR field 0 is \"SGB\", the name stock's "
+              "is_sgb() compares (user_io.cpp:249-252)");
+static_assert(kSgb.services.size() == 1 && kSgb.services[0].impl == &kMailboxTick<kSgb> &&
+                  kSgb.services[0].period_ms == 0 &&
+                  kSgb.services[0].klass == kSnes.services[0].klass &&
+                  kSgb.services[0].cause == kSnes.services[0].cause &&
+                  kSgbMailboxFrame.poll_opcode == kSnesMailboxFrame.poll_opcode &&
+                  kSgbMailboxFrame.words == kSnesMailboxFrame.words,
+              "user_io.cpp:3223: snes_poll runs for is_snes() || is_sgb(), one cadence and frame");
+static_assert(kSgb.undeclared_start_mount == StartMount::Unmodelled,
+              "SgbCore forwards a mount to GenericCore, which arms none: no SC start mount");
 static_assert(kSnes.name == std::string_view{"SNES"},
               "user_io.cpp:244: is_snes() is strcasecmp(orig_name, \"SNES\")");
 static_assert(kSnes.services.size() == 1 && kSnes.services[0].period_ms == 0 &&

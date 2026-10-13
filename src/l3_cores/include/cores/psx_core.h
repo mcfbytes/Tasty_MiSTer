@@ -14,6 +14,7 @@
 #include "cores/sector_kick.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "cores/cd_diagnostics.h"
 #include "proto/block_geometry_hook.h"
@@ -36,7 +37,7 @@ public:
 
     [[nodiscard]] std::optional<svc::DiscCounters> disc_counters() const noexcept override {
         TASTY_SEAT_BODY(PsxCore);
-        if (discs_ == nullptr) return std::nullopt;
+        if (!discs_) return std::nullopt;
         return counters_;
     }
     [[nodiscard]] std::optional<CdFlow> cd_flow() const noexcept override {
@@ -44,12 +45,13 @@ public:
         return std::nullopt;
     }
 
-    svc::DiscReadService* discs() noexcept { return discs_; }
+    svc::DiscReadService* discs() noexcept { return discs_ ? &*discs_ : nullptr; }
     [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return geom_; }
 
     [[nodiscard]] std::string_view game_id() const noexcept { return game_id_.view(); }
     [[nodiscard]] svc::DiscRegion region() const noexcept { return region_; }
     [[nodiscard]] std::uint32_t kicks() const noexcept { return kicks_; }
+    [[nodiscard]] std::uint32_t held_kicks() const noexcept { return held_kicks_; }
     [[nodiscard]] std::uint32_t wire_faults() const noexcept { return wire_faults_; }
     [[nodiscard]] std::uint32_t filler_sectors() const noexcept { return filler_sectors_; }
     [[nodiscard]] std::uint32_t pregap_zero_sectors() const noexcept {
@@ -84,7 +86,7 @@ public:
                                       proto::BlockGeometry wire) override;
 
 private:
-    [[nodiscard]] Ex<void> do_init(proto::CoreSession& s) override;
+    [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
     [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return this; }
     [[nodiscard]] ISectorKick* on_sector_kick() noexcept override { return this; }
@@ -104,9 +106,11 @@ private:
     svc::DiscMountState refresh_disc_() noexcept;
     [[nodiscard]] Ex<void> finish_mount_();
 
+    [[nodiscard]] bool copy_in_flight_() const noexcept;
+
     const svc::CuePolicy* cue_;
 
-    svc::DiscReadService* discs_ = nullptr;
+    infra::OptRef<svc::DiscReadService> discs_{};
     svc::DiscCounters counters_{};
     svc::DiscReadService::CountCell::Reader counts_{};
     svc::DiscMountState mount_seen_ = svc::DiscMountState::Idle;
@@ -124,6 +128,7 @@ private:
     svc::DiscRegion region_ = svc::DiscRegion::Unknown;
 
     std::uint32_t kicks_ = 0;
+    std::uint32_t held_kicks_ = 0;
     std::uint32_t wire_faults_ = 0;
     std::uint32_t filler_sectors_ = 0;
     std::uint32_t pregap_zero_sectors_ = 0;

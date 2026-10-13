@@ -63,6 +63,7 @@ Ex<void> SpiFioQueue::Emitter::on(const FioWindow::IoCommand& c) noexcept {
 }
 
 Ex<void> SpiFioQueue::Emitter::misrouted(const FioWindow&) noexcept {
+    TASTY_SEAT_BODY(SpiFioQueue::Emitter);
     return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), 0});
 }
 

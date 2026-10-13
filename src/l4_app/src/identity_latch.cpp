@@ -21,7 +21,8 @@ void IdentityLatch::publish(std::string_view core, std::string_view rbf, const R
                             const svc::IAnalogReshape* analog_reshape, const char* cue_dir,
                             const cores::CheatLookup* cheats,
                             std::span<const cores::FileSlot> slots, const GameId& game_id,
-                            bool setname_same_dir, bool image_no_zip) noexcept {
+                            bool setname_same_dir, bool image_no_zip,
+                            cores::PauseOnOsd pause) noexcept {
 
     copy_cstr(scratch_.core, core);
     copy_cstr(scratch_.rbf, rbf);
@@ -37,6 +38,7 @@ void IdentityLatch::publish(std::string_view core, std::string_view rbf, const R
     scratch_.slots = slots;
     scratch_.image_no_zip = image_no_zip;
     scratch_.game_id = game_id;
+    scratch_.pause = pause;
     cell_.publish(scratch_);
 }
 

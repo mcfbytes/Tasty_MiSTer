@@ -15,7 +15,7 @@ namespace {
 
 constexpr std::size_t kDevPathMax = 32;
 
-Ex<UniqueFd> open_i2c_node(unsigned bus, std::uint8_t addr) {
+[[nodiscard]] Ex<UniqueFd> open_i2c_node(unsigned bus, std::uint8_t addr) {
     char path[kDevPathMax];
     std::snprintf(path, sizeof path, "/dev/i2c-%u", bus);
 
@@ -33,8 +33,8 @@ Ex<UniqueFd> open_i2c_node(unsigned bus, std::uint8_t addr) {
     return owned;
 }
 
-Ex<void> smbus_ioctl(int fd, std::uint8_t read_write, std::uint8_t command, int type,
-                     i2c_smbus_data* data, std::uint16_t site) {
+[[nodiscard]] Ex<void> smbus_ioctl(int fd, std::uint8_t read_write, std::uint8_t command, int type,
+                                   i2c_smbus_data* data, std::uint16_t site) {
     i2c_smbus_ioctl_data args{};
     args.read_write = read_write;
     args.command = command;

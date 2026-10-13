@@ -40,7 +40,11 @@ public:
     void latch_boot_config() noexcept;
     ThreadAssembly& threads() noexcept { return assembly_; }
     app::RtMain& rt_main() noexcept { return rt_main_; }
-    ProcessMain& process_main() noexcept { return process_main_; }
+
+    [[nodiscard]] Ex<void> open_process_main() noexcept;
+    ProcessMain* process_main() noexcept { return process_main_ ? &*process_main_ : nullptr; }
+
+    xthread::WakeFlag& main_stop() noexcept { return device_.main_stop_; }
     const ThreadAssembly::SeatMains& seat_mains() const noexcept { return seat_mains_; }
 
     app::VideoPump& video_pump() noexcept { return device_.video_pump_; }
@@ -49,7 +53,7 @@ public:
     const app::ReplayStatusCell& replay_status() const noexcept { return replay_.replay_status_; }
     const app::RecorderStatusCell& recorder_status() const noexcept { return rec_.rec_status_; }
     const app::EncodeStatusCell& encode_status() const noexcept { return rec_.encode_status_; }
-    const svc::Vfs* vfs() const noexcept { return device_.vfs_; }
+    const svc::Vfs* vfs() const noexcept { return &device_.vfs_; }
     void set_owner_tick(app::IOwnerTick* tick) noexcept {
         if (UiMain* const ui = assembly_.ui(); ui != nullptr) ui->set_owner_tick(tick);
     }
@@ -92,7 +96,7 @@ private:
     app::RtMain rt_main_;
     ThreadAssembly assembly_;
     ThreadAssembly::SeatMains seat_mains_{};
-    ProcessMain process_main_;
+    std::optional<ProcessMain> process_main_;
 };
 
 [[nodiscard]] constexpr bool tasty_boot_calls_handoff() noexcept { return false; }

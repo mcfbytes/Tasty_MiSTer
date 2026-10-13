@@ -33,18 +33,18 @@ class FrameCopier {
 
 public:
     struct Wiring {
-        const os::IClock* clock = nullptr;
+        const os::IClock& clock;
 
-        os::IDelay* delay = nullptr;
-        const RecControlCell* control = nullptr;
-        RecorderStatusCell* status = nullptr;
-        FrameDemandCell* demand = nullptr;
-        const CoreFrameCell* frames = nullptr;
-        const ReplayStatusCell* replay = nullptr;
-        const RecWriteStatusCell* writer = nullptr;
-        const AviWriteStatusCell* avi_writer = nullptr;
-        const VideoGeometryCell* video = nullptr;
-        RawFrameChannel* channel = nullptr;
+        os::IDelay& delay;
+        const RecControlCell& control;
+        RecorderStatusCell& status;
+        FrameDemandCell& demand;
+        const CoreFrameCell& frames;
+        const ReplayStatusCell& replay;
+        const RecWriteStatusCell& writer;
+        const AviWriteStatusCell& avi_writer;
+        const VideoGeometryCell& video;
+        RawFrameChannel& channel;
     };
 
     static constexpr int kPollMs = 4;
@@ -186,8 +186,7 @@ private:
     bool woven_ = false;
     bool matched_ = true;
     std::uint8_t npending_ = 0;
-    CoreFrameRecord last_cell_{};
-    bool have_cell_ = false;
+    std::optional<CoreFrameRecord> last_cell_{};
 
     bool ll_waiting_ = false;
     std::uint8_t ll_ctr_ = 0;

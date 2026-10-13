@@ -3,15 +3,14 @@
 
 #include <atomic>
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <string_view>
 
+#include "app/device_table_channel.h"
 #include "app/input_decode.h"
 #include "app/input_wire.h"
-#include "infra/error.h"
 #include "hal/boards_table.h"
-#include "svc/input_service.h"
+#include "svc/input_enumerator.h"
 #include "svc/vfs.h"
 #include "infra/seat.h"
 
@@ -26,17 +25,7 @@ public:
     struct Counts {
         std::uint32_t enumerate_failures = 0;
         std::uint32_t devices = 0;
-        std::uint32_t mapped = 0;
-        std::uint32_t slotted = 0;
-        std::uint32_t mask_changes = 0;
-        std::uint32_t axis_edges = 0;
-        std::uint32_t mouse_remainder = 0;
-        std::uint32_t key_overflows = 0;
-        std::uint32_t quirk_drops = 0;
         std::uint32_t rejected = 0;
-        std::uint32_t slot_live = 0;
-        std::uint32_t slot_ghosts = 0;
-        std::uint32_t slot_hash[svc::kMaxPlayers]{};
     };
 
     InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view input_dir = {});
@@ -45,16 +34,23 @@ public:
 
     void set_cfg_deadzone_rules(std::span<const svc::DeadzoneRule> rows);
 
-    bool rebind_round(unsigned wait_ms = 250);
+    bool rebind_round();
 
-    svc::InputService& service() noexcept { return *svc_; }
-    const svc::InputService& service() const noexcept { return *svc_; }
+    svc::InputEnumerator& enumerator() noexcept { return en_; }
+    const svc::InputEnumerator& enumerator() const noexcept { return en_; }
+
+    DeviceTableChannel& tables() noexcept { return tables_; }
+
+    void note_watch_failure() noexcept { InputWire::bump(n_enum_fail_, 1); }
     Counts counts() const noexcept;
 
 private:
-    InputWire& wire_;
+    bool hand_over_();
 
-    std::optional<svc::InputService> svc_{};
+    InputWire& wire_;
+    svc::InputEnumerator en_;
+    DeviceTableChannel tables_{};
+    DeviceTableChannel::Sender tx_{tables_};
 
     std::atomic<std::uint32_t> n_enum_fail_{0};
 };
@@ -62,28 +58,13 @@ private:
 static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
                   return hal::seat_of(m, InputBuild::kSeat).policy == hal::SchedPolicy::Other;
               }),
-              "item: this lane runs opendir(3) over /dev/input, up to "
-              "kMaxDevices open(2) calls, EVIOCG* ioctls and the map-file "
-              "reads behind load_maps_for, and it nanosleeps for up to "
-              "wait_ms inside the item baton. That is the amendment's "
-              "REFUSAL of 'move enumerate() onto T-INPUT' made a build error: "
-              "on a SCHED_FIFO row it is a directory scan on the RT "
-              "partition (arch §2).");
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, InputBuild::kSeat).prio <
-                         hal::seat_of(m, InputDecode::kSeat).prio;
-              }),
-              "item: the baton is a rendezvous in which THIS lane waits "
-              "for the decode lane to reach its pause point. The waiter must "
-              "be the lower-priority side (input_pipeline.cpp's own note: a "
-              "SCHED_OTHER thread waiting on a SCHED_FIFO thread is the safe "
-              "direction), or the wait can starve the thread it is waiting "
-              "for and every hotplug refuses at the timeout.");
+              "this lane runs opendir(3) over /dev/input, up to kMaxDevices open(2) "
+              "calls, EVIOCG* ioctls and the map-file reads behind load_maps_for: on a "
+              "SCHED_FIFO row that is a directory scan on the RT partition (arch §2), "
+              "which is why enumeration never moves onto the decode lane.");
 static_assert(InputBuild::kSeat != InputDecode::kSeat,
-              "item: build and decode must be TWO seats. On one seat the "
-              "baton becomes a self-wait -- rebind_round() would spin for "
-              "wait_ms waiting for a pause its own thread cannot publish -- "
-              "and enumerate() would rebuild devices_ under the drain() it is "
-              "supposed to exclude (row item).");
+              "build and decode must be TWO seats: the table is built whole on one and "
+              "installed whole on the other, and on one seat the build would run inside "
+              "the decode round it is meant to stay out of.");
 
 }  // namespace mister::app

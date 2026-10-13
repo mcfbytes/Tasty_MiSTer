@@ -8,6 +8,7 @@
 #include "infra/claim_set.h"
 #include "infra/seat.h"
 #include "hal/link_timing.h"
+#include "hal/reg.h"
 
 namespace mister::hal {
 
@@ -16,8 +17,8 @@ inline constexpr std::size_t kMailboxCount = 1;
 using MailboxClaims = infra::ClaimSet<MailboxId, kMailboxCount>;
 
 struct MailboxRegs {
-    volatile std::uint32_t* gpo = nullptr;
-    const volatile std::uint32_t* gpi = nullptr;
+    reg::Reg<reg::WO> gpo;
+    reg::Reg<reg::RO> gpi;
 };
 
 class Mailbox {
@@ -32,8 +33,8 @@ public:
     Mailbox& operator=(const Mailbox&) = delete;
     ~Mailbox() = default;
 
-    [[nodiscard]] volatile std::uint32_t* gpo() const noexcept { return regs_.gpo; }
-    [[nodiscard]] const volatile std::uint32_t* gpi() const noexcept { return regs_.gpi; }
+    [[nodiscard]] reg::Reg<reg::WO> gpo() const noexcept { return regs_.gpo; }
+    [[nodiscard]] reg::Reg<reg::RO> gpi() const noexcept { return regs_.gpi; }
 
     [[nodiscard]] const LinkTimingValues& timing() const noexcept { return timing_; }
 

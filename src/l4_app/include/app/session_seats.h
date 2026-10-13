@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "app/bay_releases.h"
 #include "app/board_ops.h"
+#include "app/built_core.h"
 #include "app/file_stream_service.h"
 #include "app/ini_parse.h"
 #include "app/ladder_cell.h"
 #include "app/uart_mode.h"
+#include "cores/save_copy_level.h"
+#include "infra/opt_ref.h"
 #include "infra/wake_flag.h"
 #include "hal/doorbell_policy.h"
 #include "hal/fpga_aperture.h"
@@ -60,7 +64,7 @@ struct SupervisorParts {
     LinkTxChannel& input_inbox;
     LinkRouter& router;
 
-    LadderStateCell& ladder_cell;
+    const LadderStateCell& ladder_cell;
 
     FileStreamService& streams;
 
@@ -77,6 +81,9 @@ struct SupervisorParts {
 
     ICheatApply& cheats;
 
+    CoreBay& bay;
+    BayReleasesCell& bay_releases;
+
     const svc::Vfs* vfs = nullptr;
 
     UartModeController::Handoffs* uart_handoffs = nullptr;
@@ -92,6 +99,8 @@ struct SupervisorParts {
     proto::IStorageChannel* storage_channel = nullptr;
 
     BoardOps board_ops{};
+
+    infra::OptRef<const cores::SaveCopyCell> save_copy{};
 };
 
 }  // namespace mister::app

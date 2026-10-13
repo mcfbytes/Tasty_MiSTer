@@ -16,6 +16,7 @@
 #include "infra/error.h"
 #include "infra/inbox.h"
 #include "infra/seat.h"
+#include "infra/slot_pool.h"
 #include "infra/telemetry.h"
 #include "app/pcm_command.h"
 #include "os/clock.h"
@@ -43,6 +44,15 @@ inline constexpr std::size_t kPcmCommandDepth = 8;
 static_assert((kPcmCommandDepth & (kPcmCommandDepth - 1)) == 0,
               "xthread::SpscRing requires a power-of-two capacity");
 
+inline constexpr std::size_t kPcmMediaLeases = 4;
+static_assert(kPcmMediaLeases < kPcmCommandDepth);
+
+struct PcmMedia {
+    TASTY_SEAT_MEDIATOR(Any, Any);
+    std::optional<hal::FpgaMemory> ring{};
+    std::unique_ptr<cores::IPcmSource> src{};
+};
+
 class PcmRingFeeder final : public cores::ICoreWindow, public cores::IPcmFeed {
     TASTY_SEAT_MEDIATOR(Pcm, RT);
 
@@ -59,11 +69,15 @@ public:
     PcmRingFeeder& operator=(PcmRingFeeder&&) = delete;
 
     [[nodiscard]] bool take_park_ask() noexcept;
+
     void finish_park() noexcept;
 
     void on(const PcmCommand::Play& a) noexcept;
     void on(const PcmCommand::Stop& a) noexcept;
     void on(const PcmCommand::Resume& a) noexcept;
+
+    void on(const PcmCommand::AttachRing& a) noexcept;
+    void on(const PcmCommand::AttachSource& a) noexcept;
     void misrouted(const PcmCommand& c) noexcept;
 
     void fill_pass() noexcept;
@@ -80,7 +94,7 @@ public:
     [[nodiscard]] Ex<void> attach(hal::FpgaMemory ring,
                                   std::unique_ptr<cores::IPcmSource> src) noexcept;
 
-    [[nodiscard]] Ex<void> attach_ring(hal::FpgaMemory ring) noexcept;
+    [[nodiscard]] Ex<void> adopt_ring(hal::FpgaMemory&& ring) noexcept;
 
     void detach() noexcept;
 
@@ -130,11 +144,18 @@ private:
     [[nodiscard]] Ex<void> submit_(const PcmCommand& c) noexcept;
     void request_swap_() noexcept;
 
+    [[nodiscard]] bool reap_leases_() noexcept;
+
+    template <class Alt>
+    [[nodiscard]] Ex<void> hand_over_(PcmMedia& media) noexcept;
+
     void refresh_read_point_() noexcept;
     void apply_play_(std::uint8_t track, bool loop) noexcept;
     void fill_() noexcept;
     void release_media_() noexcept;
+    void drop_ring_() noexcept;
     void release_source_() noexcept;
+    [[nodiscard]] PcmMedia* leased_(std::uint8_t lease) noexcept;
     void reset_playback_() noexcept;
     void publish_state_() noexcept;
     [[nodiscard]] std::uint32_t prefill_target_() const noexcept;
@@ -161,8 +182,19 @@ private:
 
     std::atomic<std::uint32_t> visible_len_{0};
 
+    xthread::SlotPool<PcmMedia, kPcmMediaLeases> media_{};
+
     std::uint32_t last_observed_ = 0;
     bool ever_observed_ = false;
+
+    using Lease = xthread::SlotPool<PcmMedia, kPcmMediaLeases>::Lease;
+    struct Commander {
+        TASTY_SEAT_RESIDENT(RT);
+        Lease leases[kPcmMediaLeases]{};
+        std::uint32_t lease_seq[kPcmMediaLeases]{};
+        std::uint32_t sent = 0;
+    };
+    Commander cmd_{};
 
     std::optional<hal::FpgaMemory> ring_{};
     std::unique_ptr<cores::IPcmSource> src_{};
@@ -177,6 +209,13 @@ private:
     bool primed_ = false;
     bool drained_ = false;
     std::uint32_t served_ = 0;
+
+    struct Worker {
+        TASTY_SEAT_RESIDENT(Pcm);
+        std::uint32_t attaches = 0;
+        bool swap_taken = false;
+    };
+    Worker work_{};
 
     std::uint32_t rp_seen_ = 0;
     std::uint32_t read_val_ = 0;

@@ -17,7 +17,7 @@
 
 namespace mister::app::proc {
 
-Ex<void> uartmode_script(std::uint8_t mode, int* exit_code) {
+[[nodiscard]] Ex<int> uartmode_script(std::uint8_t mode) {
 
     char n[8] = {};
     const int len = std::snprintf(n, sizeof n, "%u", static_cast<unsigned>(mode));
@@ -29,23 +29,22 @@ Ex<void> uartmode_script(std::uint8_t mode, int* exit_code) {
     if (*rc == 127) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     }
-    if (exit_code != nullptr) *exit_code = *rc;
-    return {};
+    return *rc;
 }
 
-Ex<void> mlinkutil_baud(std::uint32_t) { return unimplemented(ERR_SITE()); }
+[[nodiscard]] Ex<void> mlinkutil_baud(std::uint32_t) { return unimplemented(ERR_SITE()); }
 
-Ex<void> mlinkutil_soundfont(std::string_view) { return unimplemented(ERR_SITE()); }
+[[nodiscard]] Ex<void> mlinkutil_soundfont(std::string_view) { return unimplemented(ERR_SITE()); }
 
-Ex<std::string> midilink_soundfont() { return unimplemented(ERR_SITE()); }
+[[nodiscard]] Ex<std::string> midilink_soundfont() { return unimplemented(ERR_SITE()); }
 
-Ex<void> bluetoothd_hcireset() {
+[[nodiscard]] Ex<void> bluetoothd_hcireset() {
 
     const std::array<const char*, 2> argv{"/bin/bluetoothd", "hcireset"};
     return os::run_detached(argv);
 }
 
-Ex<void> bluetoothd_renew() {
+[[nodiscard]] Ex<void> bluetoothd_renew() {
 
     const std::array<const char*, 2> argv{"/bin/bluetoothd", "renew"};
     auto rc = os::run_sync(argv);
@@ -54,7 +53,7 @@ Ex<void> bluetoothd_renew() {
     return {};
 }
 
-Ex<void> hciconfig_reset() {
+[[nodiscard]] Ex<void> hciconfig_reset() {
 
     const std::array<const char*, 3> argv{"hciconfig", "hci0", "reset"};
     auto rc = os::run_sync(argv);
@@ -63,9 +62,9 @@ Ex<void> hciconfig_reset() {
     return {};
 }
 
-Ex<void> btctl_disconnect(std::string_view) { return unimplemented(ERR_SITE()); }
+[[nodiscard]] Ex<void> btctl_disconnect(std::string_view) { return unimplemented(ERR_SITE()); }
 
-Ex<void> killall_sigint_bt() {
+[[nodiscard]] Ex<void> killall_sigint_bt() {
 
     const std::array<const char*, 4> argv{"killall", "-SIGINT", "btpair", "btctl"};
     auto rc = os::run_sync(argv);
@@ -95,7 +94,7 @@ void restore_ui_affinity() noexcept {
         std::fprintf(stderr, "mister: T-UI affinity narrow not applied\n");
 }
 
-Ex<void> write_tmp_handoff(const char* path, std::string_view data) {
+[[nodiscard]] Ex<void> write_tmp_handoff(const char* path, std::string_view data) {
 
     const int fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
     if (fd < 0) {

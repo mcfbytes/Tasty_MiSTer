@@ -10,6 +10,7 @@
 #include <cstring>
 #include <span>
 
+#include "infra/byte_view.h"
 #include "infra/unique_fd.h"
 
 namespace mister::os {
@@ -56,7 +57,7 @@ bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept {
     return false;
 }
 
-Ex<bool> bluetooth_adapter_up() {
+[[nodiscard]] Ex<bool> bluetooth_adapter_up() {
     const int fd = ::socket(kAfBluetooth, SOCK_RAW | SOCK_CLOEXEC, kBtprotoHci);
     if (fd < 0) {
         const int e = errno;
@@ -76,8 +77,7 @@ Ex<bool> bluetooth_adapter_up() {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
 
-    return hci_devlist_any_up(
-        std::span<const std::byte>(reinterpret_cast<const std::byte*>(&dl), sizeof dl));
+    return hci_devlist_any_up(infra::bytes_of(dl));
 }
 
 }  // namespace mister::os

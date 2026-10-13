@@ -10,11 +10,14 @@
 
 #include <cerrno>
 #include <cstring>
+#include <span>
 #include <utility>
 
+#include "infra/byte_view.h"
+#include "infra/endian.h"
 #include "infra/unique_fd.h"
 
-namespace mister::boards {
+namespace mister::boards::cyclone_v {
 namespace {
 
 constexpr std::uint32_t kStageResetPhase = 1;
@@ -34,25 +37,18 @@ constexpr std::uint32_t observed_of(std::uint32_t mode, std::uint32_t ext) noexc
     return (mode & FpgaMgr::kStatModeMask) | ((ext & 0xFu) << 4);
 }
 
-std::span<std::byte> bytes_of(const os::MmioRegion& m) noexcept {
-    return std::span<std::byte>(reinterpret_cast<std::byte*>(const_cast<void*>(m.base())),
-                                m.length());
-}
-
 }  // namespace
 
-CycloneVProgrammer::CycloneVProgrammer(hal::RegisterWindow<FpgaMgr> mgr,
-                                       hal::RegisterWindow<FpgaMgrData> data,
-                                       std::optional<hal::FpgaMemory> handoff)
+Programmer::Programmer(hal::RegisterWindow<FpgaMgr> mgr, hal::RegisterWindow<FpgaMgrData> data,
+                       std::optional<hal::FpgaMemory> handoff)
     : mgr_(std::move(mgr)), data_(std::move(data)), handoff_(std::move(handoff)) {}
 
-CycloneVProgrammer CycloneVProgrammer::over(hal::RegisterWindow<FpgaMgr> mgr,
-                                            hal::RegisterWindow<FpgaMgrData> data,
-                                            hal::FpgaMemory handoff) {
-    return CycloneVProgrammer(std::move(mgr), std::move(data), std::move(handoff));
+Programmer Programmer::over(hal::RegisterWindow<FpgaMgr> mgr, hal::RegisterWindow<FpgaMgrData> data,
+                            hal::FpgaMemory handoff) {
+    return Programmer(std::move(mgr), std::move(data), std::move(handoff));
 }
 
-Ex<CycloneVProgrammer> CycloneVProgrammer::open(hal::BoardWindows& windows) {
+Ex<Programmer> Programmer::open(hal::BoardWindows& windows) {
 
     auto mgr = windows.take<FpgaMgr>(cyclone_v::id(cyclone_v::Window::FpgaMgr));
     if (!mgr) return std::unexpected(mgr.error());
@@ -60,12 +56,12 @@ Ex<CycloneVProgrammer> CycloneVProgrammer::open(hal::BoardWindows& windows) {
     if (!data) return std::unexpected(data.error());
     auto hand = hal::FpgaMemory::map(kHandoffPage);
     if (!hand) return std::unexpected(hand.error());
-    CycloneVProgrammer p(std::move(mgr->regs), std::move(data->regs), std::move(*hand));
+    Programmer p(std::move(mgr->regs), std::move(data->regs), std::move(*hand));
     p.claims_ = {std::move(mgr->claim), std::move(data->claim)};
     return p;
 }
 
-Ex<CycloneVProgrammer> CycloneVProgrammer::open_at(const char* manager_dir) {
+Ex<Programmer> Programmer::open_at(const char* manager_dir) {
     if (manager_dir == nullptr) {
         return std::unexpected(
             Error{Errc::dt_missing, ERR_SITE(), static_cast<std::uint32_t>(EFAULT)});
@@ -87,34 +83,30 @@ Ex<CycloneVProgrammer> CycloneVProgrammer::open_at(const char* manager_dir) {
     auto hand_pages = os::MmioRegion::map_fd(owner.get(), kHandoffPage.phys, kHandoffPage.len);
     if (!hand_pages) return std::unexpected(hand_pages.error());
 
-    CycloneVProgrammer loader(
+    Programmer loader(
         hal::RegisterWindow<FpgaMgr>::borrow(mgr_pages->base(), mgr_pages->length()),
         hal::RegisterWindow<FpgaMgrData>::borrow(data_pages->base(), data_pages->length()),
-        hal::FpgaMemory::borrow(bytes_of(*hand_pages), kHandoffPage));
+        hal::FpgaMemory::borrow(hand_pages->plain_bytes(), kHandoffPage));
     loader.mgr_pages_ = std::move(*mgr_pages);
     loader.data_pages_ = std::move(*data_pages);
     loader.handoff_pages_ = std::move(*hand_pages);
     return loader;
 }
 
-void CycloneVProgrammer::ctrl_update(std::uint32_t clear, std::uint32_t set) {
+void Programmer::ctrl_update(std::uint32_t clear, std::uint32_t set) {
     hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
     mgr_.write(FpgaMgr::Reg::Ctrl, (mgr_.read(FpgaMgr::Reg::Ctrl) & ~clear) | set);
 }
 
-void CycloneVProgrammer::set_cd_ratio(std::uint32_t ratio) {
+void Programmer::set_cd_ratio(std::uint32_t ratio) {
     ctrl_update(FpgaMgr::kCtrlCdRatioMask, (ratio & 0x3u) << FpgaMgr::kCtrlCdRatioLsb);
 }
 
-std::uint32_t CycloneVProgrammer::mode() {
-    return mgr_.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatModeMask;
-}
+std::uint32_t Programmer::mode() { return mgr_.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatModeMask; }
 
-std::uint32_t CycloneVProgrammer::ext_nibble() {
-    return mgr_.read(FpgaMgr::Reg::GpioExtPorta) & 0xFu;
-}
+std::uint32_t Programmer::ext_nibble() { return mgr_.read(FpgaMgr::Reg::GpioExtPorta) & 0xFu; }
 
-void CycloneVProgrammer::dclk_arm_(std::uint32_t count) {
+void Programmer::dclk_arm_(std::uint32_t count) {
     hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
 
     if (mgr_.read(FpgaMgr::Reg::DclkStat) != 0u) {
@@ -123,13 +115,13 @@ void CycloneVProgrammer::dclk_arm_(std::uint32_t count) {
     mgr_.write(FpgaMgr::Reg::DclkCnt, count);
 }
 
-bool CycloneVProgrammer::dclk_done_() {
+bool Programmer::dclk_done_() {
     if (mgr_.read(FpgaMgr::Reg::DclkStat) == 0u) return false;
     mgr_.write(FpgaMgr::Reg::DclkStat, FpgaMgr::kDclkStatDone);
     return true;
 }
 
-bool CycloneVProgrammer::rung_done_() {
+bool Programmer::rung_done_() {
     switch (step_) {
         case StepPc::Idle:
             return true;
@@ -151,7 +143,7 @@ bool CycloneVProgrammer::rung_done_() {
     return true;
 }
 
-CycloneVProgrammer::Awaited CycloneVProgrammer::await_(std::uint32_t polls) {
+Programmer::Awaited Programmer::await_(std::uint32_t polls) {
     hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
     while (polls != 0u) {
         --polls;
@@ -160,7 +152,7 @@ CycloneVProgrammer::Awaited CycloneVProgrammer::await_(std::uint32_t polls) {
     return {false, 0u};
 }
 
-Ex<bool> CycloneVProgrammer::program_begin() {
+Ex<bool> Programmer::program_begin() {
 
     data_txn_.reset();
     tail_seen_ = false;
@@ -196,7 +188,7 @@ Ex<bool> CycloneVProgrammer::program_begin() {
     return program_step();
 }
 
-void CycloneVProgrammer::program_write(std::span<const std::byte> image) {
+void Programmer::program_write(std::span<const std::byte> image) {
 
     const std::byte* src = image.data();
     const std::size_t loops32 = image.size() / 32u;
@@ -206,15 +198,13 @@ void CycloneVProgrammer::program_write(std::span<const std::byte> image) {
 
     for (std::size_t g = 0; g < loops32; ++g) {
         for (std::size_t k = 0; k < FpgaMgrData::kBurstWords; ++k) {
-            std::uint32_t w = 0;
-            std::memcpy(&w, src, sizeof w);
+            const auto w = infra::load_le<std::uint32_t>(std::span<const std::byte, 4>(src, 4));
             src += sizeof w;
             data_.write(static_cast<FpgaMgrData::Reg>(static_cast<std::uint32_t>(k * 4u)), w);
         }
     }
     for (std::size_t n = 0; n < loops4; ++n) {
-        std::uint32_t w = 0;
-        std::memcpy(&w, src, sizeof w);
+        const auto w = infra::load_le<std::uint32_t>(std::span<const std::byte, 4>(src, 4));
         src += sizeof w;
         data_.write(FpgaMgrData::Reg::Data, w);
     }
@@ -225,7 +215,7 @@ void CycloneVProgrammer::program_write(std::span<const std::byte> image) {
     }
 }
 
-Ex<void> CycloneVProgrammer::poll_config_done() {
+Ex<void> Programmer::poll_config_done() {
 
     if (data_txn_.has_value()) {
         return std::unexpected(Error{Errc::bridge_state, ERR_SITE(), 1});
@@ -256,7 +246,7 @@ Ex<void> CycloneVProgrammer::poll_config_done() {
     return {};
 }
 
-Ex<bool> CycloneVProgrammer::program_step() {
+Ex<bool> Programmer::program_step() {
 
     Awaited a{true, FpgaMgr::kPollsPerPass};
     for (;;) {
@@ -308,7 +298,7 @@ Ex<bool> CycloneVProgrammer::program_step() {
     }
 }
 
-std::uint32_t CycloneVProgrammer::pending_stage() noexcept {
+std::uint32_t Programmer::pending_stage() noexcept {
     switch (step_) {
         case StepPc::Idle:
             return 0;
@@ -328,26 +318,26 @@ std::uint32_t CycloneVProgrammer::pending_stage() noexcept {
     return 0;
 }
 
-CycloneVProgrammer::CycloneVProgrammer(CycloneVProgrammer&& o) noexcept
+Programmer::Programmer(Programmer&& o) noexcept
     : mgr_pages_(std::move(o.mgr_pages_)), data_pages_(std::move(o.data_pages_)),
       handoff_pages_(std::move(o.handoff_pages_)), mgr_(std::move(o.mgr_)),
       data_(std::move(o.data_)), handoff_(std::move(o.handoff_)), claims_(std::move(o.claims_)) {
     if (o.data_txn_.has_value() || o.step_ != StepPc::Idle) {
-        fatal(Error{Errc::bridge_state, ERR_SITE(), 0}, "CycloneVProgrammer: move mid-program");
+        fatal(Error{Errc::bridge_state, ERR_SITE(), 0}, "Programmer: move mid-program");
     }
 }
 
-Ex<void> CycloneVProgrammer::program_chunk(std::span<const std::byte> chunk) {
+Ex<void> Programmer::program_chunk(std::span<const std::byte> chunk) {
     if (!data_txn_.has_value()) {
         return std::unexpected(Error{Errc::bridge_state, ERR_SITE(), 0});
     }
     if (chunk.empty()) return {};
 
-    const auto misalign =
-        static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(chunk.data()) & 0x3u);
-    if (misalign != 0) {
+    if (!infra::is_aligned(chunk.data(), hal::kWordAlign)) {
         data_txn_.reset();
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), misalign});
+        return std::unexpected(
+            Error{Errc::bad_format, ERR_SITE(),
+                  static_cast<std::uint32_t>(infra::misalignment(chunk.data(), hal::kWordAlign))});
     }
 
     if (tail_seen_) {
@@ -360,7 +350,7 @@ Ex<void> CycloneVProgrammer::program_chunk(std::span<const std::byte> chunk) {
     return {};
 }
 
-Ex<bool> CycloneVProgrammer::program_end() {
+Ex<bool> Programmer::program_end() {
     if (!data_txn_.has_value()) {
         return std::unexpected(Error{Errc::bridge_state, ERR_SITE(), 0});
     }
@@ -372,7 +362,7 @@ Ex<bool> CycloneVProgrammer::program_end() {
     return program_step();
 }
 
-bool CycloneVProgrammer::programmed() const {
+bool Programmer::programmed() const {
     if ((mgr_.read(FpgaMgr::Reg::GpioExtPorta) & FpgaMgr::kMonId) == 0u) {
         return false;
     }
@@ -383,23 +373,24 @@ bool CycloneVProgrammer::programmed() const {
     return (mgr_.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatModeMask) == FpgaMgr::kModeUserMode;
 }
 
-std::byte* CycloneVProgrammer::handoff_base() {
+std::byte* Programmer::handoff_base() {
     if (!handoff_.has_value()) return nullptr;
     return handoff_->view(0, kHandoffPage.len).data();
 }
 
-Ex<hal::HandoffPage> CycloneVProgrammer::handoff() {
+Ex<hal::HandoffPage> Programmer::handoff() {
     const std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
     }
-    const auto* raw = reinterpret_cast<const std::uint8_t*>(page);
+    const auto raw =
+        infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(page, kHandoffPage.len));
 
     hal::HandoffPage out{};
     out.env_valid = raw[0] == kHandoffEnvCookie[0] && raw[1] == kHandoffEnvCookie[1] &&
                     raw[2] == kHandoffEnvCookie[2] && raw[3] == kHandoffEnvCookie[3];
 
-    const std::uint8_t* sd = raw + kHandoffSdramOffset;
+    const auto sd = raw.subspan(kHandoffSdramOffset);
     if (sd[0] == kHandoffSdramCookie[0] && sd[1] == kHandoffSdramCookie[1]) {
         out.sdram_valid = true;
         out.sdram_cfg = static_cast<std::uint16_t>(kHandoffSdramPresent |
@@ -407,18 +398,19 @@ Ex<hal::HandoffPage> CycloneVProgrammer::handoff() {
                                                    static_cast<std::uint32_t>(sd[3]));
     }
 
-    const std::uint8_t* al = raw + kHandoffAltCfgOffset;
+    const auto al = raw.subspan(kHandoffAltCfgOffset);
     if (al[0] == kHandoffAltCfgCookie[0] && al[1] == kHandoffAltCfgCookie[1] &&
         al[2] == kHandoffAltCfgCookie[2]) {
         out.altcfg_valid = true;
         out.altcfg = al[3];
     }
 
-    std::memcpy(&out.reboot_flag, raw + kHandoffRebootOffset, sizeof out.reboot_flag);
+    out.reboot_flag = infra::load_native<std::uint32_t>(
+        std::span<const std::byte, 4>(page + kHandoffRebootOffset, 4));
     return out;
 }
 
-Ex<void> CycloneVProgrammer::write_env(std::string_view core_name, std::span<const std::byte> cfg) {
+Ex<void> Programmer::write_env(std::string_view core_name, std::span<const std::byte> cfg) {
     std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
@@ -450,12 +442,13 @@ Ex<void> CycloneVProgrammer::write_env(std::string_view core_name, std::span<con
     return {};
 }
 
-Ex<void> CycloneVProgrammer::write_sdram_cfg(std::uint16_t cfg) {
+Ex<void> Programmer::write_sdram_cfg(std::uint16_t cfg) {
     std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
     }
-    auto* cell = reinterpret_cast<std::uint8_t*>(page) + kHandoffSdramOffset;
+    auto cell = infra::byte_cast<std::uint8_t>(std::span<std::byte>(page, kHandoffPage.len))
+                    .subspan(kHandoffSdramOffset);
     cell[0] = kHandoffSdramCookie[0];
     cell[1] = kHandoffSdramCookie[1];
     cell[2] = static_cast<std::uint8_t>(cfg >> 8);
@@ -463,12 +456,13 @@ Ex<void> CycloneVProgrammer::write_sdram_cfg(std::uint16_t cfg) {
     return {};
 }
 
-Ex<void> CycloneVProgrammer::write_altcfg(std::uint8_t alt) {
+Ex<void> Programmer::write_altcfg(std::uint8_t alt) {
     std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
     }
-    auto* cell = reinterpret_cast<std::uint8_t*>(page) + kHandoffAltCfgOffset;
+    auto cell = infra::byte_cast<std::uint8_t>(std::span<std::byte>(page, kHandoffPage.len))
+                    .subspan(kHandoffAltCfgOffset);
     cell[0] = kHandoffAltCfgCookie[0];
     cell[1] = kHandoffAltCfgCookie[1];
     cell[2] = kHandoffAltCfgCookie[2];
@@ -476,17 +470,18 @@ Ex<void> CycloneVProgrammer::write_altcfg(std::uint8_t alt) {
     return {};
 }
 
-Ex<void> CycloneVProgrammer::write_reboot_flag(bool warm) {
+Ex<void> Programmer::write_reboot_flag(bool warm) {
     std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
     }
     const std::uint32_t flag = warm ? kHandoffRebootWarm : 0u;
-    std::memcpy(page + kHandoffRebootOffset, &flag, sizeof flag);
+    infra::store_native<std::uint32_t>(std::span<std::byte, 4>(page + kHandoffRebootOffset, 4),
+                                       flag);
     return {};
 }
 
 static_assert(hal::board_by_id(hal::BoardId::De10Nano).program.quantum.value() == 32u &&
               hal::board_by_id(hal::BoardId::De10Nano).program.align.value() == 4u);
 
-}  // namespace mister::boards
+}  // namespace mister::boards::cyclone_v

@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <string>
+#include <utility>
 
 #include "cores/mailbox_servants.h"
 #include "infra/opt_ref.h"
@@ -69,15 +70,17 @@ DiagSampler::DeviceCells DeviceBlock::diag_sources(const BootParts& plat) noexce
     return DiagSampler::DeviceCells{
         .mgl_row0 = owner_.mgl_row0_cell(),
         .window_counts = owner_.window_cell(),
+        .bay_counts = owner_.core_builder().counts_cell(),
         .diag = session_.diag_cell(),
         .pause_expiries = owner_.pause_expiries_cell(),
         .recover_polls = owner_.recover_polls_cell(),
         .save_write_failures = owner_.save_write_failures_cell(),
         .fallbacks = owner_.fallback_cell(),
+        .ini_write_failures = owner_.ini_write_failures_cell(),
         .doorbell = session_.doorbell_cell(),
         .round_timing = plat.round_timer.cell(),
 
-        .frames = frame_ != nullptr ? &frame_->frame_cell() : nullptr,
+        .frames = infra::opt_ref_of(frame_ != nullptr ? &frame_->frame_cell() : nullptr),
         .screenshots = shots_,
     };
 }
@@ -113,15 +116,15 @@ void DeviceBlock::grant_pauses(const ThreadAssembly::SeatMains& mains, UiMain* u
 
 DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Front& front)
     : front_(front), file_streams_{io_wake_, infra::OptRef<const svc::Vfs>{plat.vfs}}, events_(),
-      owner_events_(), clock_(), input_wire_{plat.exec}, video_pump_{plat.vfs,
-                                                                     clock_,
-                                                                     plat.video,
-                                                                     {},
-                                                                     hdmi_level_,
-                                                                     app::VideoPump::Wiring{
-                                                                         .activity = input_wire_,
-                                                                         .link_tx = ui_inbox_,
-                                                                     }},
+      owner_events_(), clock_(), input_wire_{}, video_pump_{plat.vfs,
+                                                            clock_,
+                                                            plat.video,
+                                                            {},
+                                                            hdmi_level_,
+                                                            app::VideoPump::Wiring{
+                                                                .activity = input_wire_,
+                                                                .link_tx = ui_inbox_,
+                                                            }},
       bt_pump_{clock_, &os::bluetooth_adapter_up, infra::OptRef<xthread::DiagLog>{diag_log_}},
       main_rx_{main_wake_}, link_router_{main_rx_, ui_rx_, input_rx_},
       input_emit_{input_wire_, plat.link, link_router_}, input_build_{plat.vfs, input_wire_},
@@ -157,6 +160,8 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
 
           .log_lane = plat.rt_lane,
           .cheats = cheat_link_,
+          .bay = bay_,
+          .bay_releases = bay_releases_,
           .vfs = &plat.vfs,
           .uart_handoffs = front.grants_uart ? &uart_handoffs_ : nullptr,
           .stdout_routing = true,
@@ -169,6 +174,7 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
           .storage_channel = &storage_,
 
           .board_ops = {.reset = &ladder_, .rt = &ladder_, .stop = &stop},
+          .save_copy = infra::OptRef<const cores::SaveCopyCell>{save_copy_},
       },
       session_{plat.link, plat.link, plat.link, plat.fpga_mem.region, events_, parts_},
       bitstream_{plat.programmer, plat.bridges, plat.vfs, plat.program},
@@ -187,7 +193,7 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
                      plat.programmer.boot_handoff() != nullptr
                          ? infra::OptRef<hal::IBootHandoff>{*plat.programmer.boot_handoff()}
                          : infra::OptRef<hal::IBootHandoff>{},
-                 .launcher_demand = front.launcher_demand,
+                 .launcher_demand = front.launcher_demand ? &*front.launcher_demand : nullptr,
                  .launcher_wake = front.launcher_wake,
                  .programmer = bitstream_,
                  .storage = plat.vfs,
@@ -197,10 +203,18 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
                  .mount_status_cell = session_.mount_status_cell(),
                  .save_extent_cell = session_.save_extent_cell(),
                  .file_tx_level_cell = session_.file_tx_level_cell(),
-                 .pin_levels = pin_levels_}},
+                 .pin_levels = pin_levels_,
+                 .save_state_asks = infra::OptRef{save_state_asks_},
+                 .save_state_facts = infra::OptRef{std::as_const(save_state_facts_)},
+                 .bay = bay_,
+                 .bay_releases = bay_releases_,
+                 .core_terms = session_.core_terms()}},
       frame_counter_{app::CoreFrameCounter::Wiring{
-          .link = &plat.link, .clock = &clock_, .demand = &frame_demand_, .out = &core_frames_}},
-      vfs_(&plat.vfs) {}
+          .link = plat.link,
+          .clock = clock_,
+          .demand = infra::OptRef<const app::FrameDemandCell>{frame_demand_},
+          .out = infra::OptRef<app::CoreFrameCell>{core_frames_}}},
+      vfs_(plat.vfs) {}
 
 void DeviceBlock::open_wires(const BootParts& plat) noexcept {
     (void)diag_log_.open(kDiagPath);
@@ -232,8 +246,10 @@ void DeviceBlock::open_seats(const BootParts& plat, const Seats& seats) noexcept
                                     .diag = diag_log_,
                                     .inbox = input_inbox_,
                                     .link_rx = input_rx_,
+                                    .rt_wake = plat.exec.kicker(),
                                     .cell = front_.launcher_state,
                                     .keys = front_.launcher_keys,
+                                    .ui_wake = infra::opt_ref_of(&ui_wake_),
                                 });
         if (auto park = xthread::ParkFds::create(input_wake_); !park) {
             report("InputMain::open (degraded: input unavailable)", park.error());
@@ -244,7 +260,7 @@ void DeviceBlock::open_seats(const BootParts& plat, const Seats& seats) noexcept
                                 infra::OptRef{main_wake_});
 
             seats.mains.mains.bind(&*input_main_);
-            seats.mains.input_build = &input_build_;
+            seats.mains.input_build = infra::OptRef{input_build_};
             seats.diag.set_input_sample(&input_pipeline_->sample());
         }
     }
@@ -270,11 +286,9 @@ void DeviceBlock::open_seats(const BootParts& plat, const Seats& seats) noexcept
 
         session_.set_pcm_feeder(&pcm_feeder_);
 
-        if (vfs_ != nullptr) {
-            companion_host_.install(cores::make_servants(*vfs_));
-            session_.attach_mailbox(mailbox_relay_);
-            owner_.set_companion_binds(&companion_host_.binds());
-        }
+        companion_host_.install(cores::make_servants(vfs_));
+        session_.attach_mailbox(mailbox_relay_);
+        owner_.set_companion_binds(&companion_host_.binds());
     }
 
     if (auto fds = xthread::ParkFds::create(io_wake_); !fds) {
@@ -284,20 +298,21 @@ void DeviceBlock::open_seats(const BootParts& plat, const Seats& seats) noexcept
     }
 
     bool writes_ride = false;
-    if (vfs_ != nullptr) {
-        writes_.emplace(*vfs_, io_wake_);
-        writes_ride = rides_io_(*writes_, "IoMain::add_coworker (degraded: no durable writes)");
-    }
+    writes_.emplace(vfs_, io_wake_);
+    writes_ride = rides_io_(*writes_, "IoMain::add_coworker (degraded: no durable writes)");
 
     const bool discs_ride = rides_io_(discs_, "IoMain::add_coworker (degraded: no disc reads)");
 
     (void)rides_io_(file_streams_, "IoMain::add_coworker (degraded: no file streams)");
 
     bool window_jobs_ride = false;
-    if (vfs_ != nullptr) {
-        window_jobs_.emplace(*vfs_, io_window_map_, plat.fpga_mem.region, io_wake_);
-        window_jobs_ride =
-            rides_io_(*window_jobs_, "IoMain::add_coworker (degraded: no window jobs)");
+    window_jobs_.emplace(vfs_, io_window_map_, plat.fpga_mem.region, io_wake_);
+    window_jobs_ride = rides_io_(*window_jobs_, "IoMain::add_coworker (degraded: no window jobs)");
+
+    if (seats.save_states &&
+        rides_io_(*seats.save_states, "IoMain::add_coworker (degraded: no save states)")) {
+        const mister::SeatScope publishes_as_ui{mister::SeatTag::Ui};
+        seats.save_states->start();
     }
 
     const bool storage_rides =

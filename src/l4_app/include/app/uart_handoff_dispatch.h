@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "app/uart_mode.h"
+#include "app/uart_performer.h"
 #include "infra/message_sum.h"
 
 namespace mister::app {
@@ -16,5 +17,7 @@ concept UartHandoffSink = requires(S& s, const UartHandoff& m) {
 };
 
 using UartHandoffRoutes = infra::AllRouted;
+
+static_assert(UartHandoffSink<UartPerformer>);
 
 }  // namespace mister::app

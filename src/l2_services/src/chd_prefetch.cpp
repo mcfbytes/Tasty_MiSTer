@@ -43,8 +43,8 @@ void ChdPrefetch::rest_(int ms, std::uint32_t want, bool watch_free) noexcept {
 
 bool ChdPrefetch::idle() const noexcept {
     if (!rests_) return false;
-    if (rest_parked_) return parked();
-    return !(park_req_.load(std::memory_order_acquire) ||
+    if (rest_parked_) return parked() && attaches_.empty();
+    return !(!attaches_.empty() || park_req_.load(std::memory_order_acquire) ||
              want_hunk_.load(std::memory_order_acquire) != want_seen_ ||
              (watch_free_ && chan_.outbound() != 0));
 }
@@ -92,9 +92,7 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, std::uint32_t hunk
     if (!opened()) return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
 
     depth_ = 0;
-    forward_span_ = 0;
     hunk_bytes_ = 0;
-    hunk_count_ = 0;
     poisoned_ = false;
 
     const std::size_t depth = derive_depth(kPrefetchBudgetBytes, hunk_bytes);
@@ -109,19 +107,18 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, std::uint32_t hunk
         resident_[i] = Chan::Loan{};
     resident_count_ = 0;
     want_ = kNoPrefetchHunk;
-    held_ = Chan::Job{};
     (void)chan_.reclaim_all_parked();
     want_hunk_.store(kNoPrefetchHunk, std::memory_order_release);
 
     hunk_bytes_ = hunk_bytes;
-    hunk_count_ = hunk_count;
     depth_ = depth;
 
     const std::uint32_t avail = static_cast<std::uint32_t>(depth_) - kPrefetchLookBehind;
-    forward_span_ = avail < kPrefetchForwardSpan ? avail : kPrefetchForwardSpan;
-    src_ = std::move(src);
-    next_ = 0;
-    tracking_ = kNoPrefetchHunk;
+    ChdMedia media;
+    media.src = std::move(src);
+    media.hunk_bytes = hunk_bytes;
+    media.hunk_count = hunk_count;
+    media.forward_span = avail < kPrefetchForwardSpan ? avail : kPrefetchForwardSpan;
 
     if (!chan_.set_live(static_cast<std::uint8_t>(depth_))) {
         depth_ = 0;
@@ -130,14 +127,63 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, std::uint32_t hunk
     for (std::size_t i = 0; i < depth_; ++i)
         chan_.send(chan_.acquire());
 
+    if (auto r = hand_over_(std::move(media)); !r) {
+        (void)chan_.reclaim_all_parked();
+        depth_ = 0;
+        return r;
+    }
+
     park_req_.store(false, std::memory_order_release);
     parked_.store(false, std::memory_order_release);
     wake_.kick();
     return {};
 }
 
+bool ChdPrefetch::reap_leases_() noexcept {
+    const std::uint32_t taken = attaches_taken_.load(std::memory_order_acquire);
+    for (std::size_t i = 0; i < kChdMediaLeases; ++i) {
+        if (cmd_.leases[i] && static_cast<std::int32_t>(taken - cmd_.lease_seq[i]) >= 0)
+            cmd_.leases[i].reset();
+    }
+    return media_.available() != 0;
+}
+
+Ex<void> ChdPrefetch::hand_over_(ChdMedia&& media) noexcept {
+    (void)reap_leases_();
+    auto lease = media_.acquire();
+    if (!lease) return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    *lease = std::move(media);
+    const std::uint8_t idx = media_.index_of(lease.get());
+    if (!attaches_.push(ChdAttach{idx})) {
+        *lease = ChdMedia{};
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    }
+    ++cmd_.sent;
+    cmd_.lease_seq[idx] = cmd_.sent;
+    cmd_.leases[idx] = std::move(lease);
+    return {};
+}
+
+void ChdPrefetch::take_attaches_() noexcept {
+    while (const auto a = attaches_.pop()) {
+        if (a->lease < kChdMediaLeases) {
+            held_ = Chan::Job{};
+            ChdMedia& m = media_.at(a->lease);
+            src_ = std::move(m.src);
+            worker_hunk_bytes_ = m.hunk_bytes;
+            hunk_count_ = m.hunk_count;
+            forward_span_ = m.forward_span;
+            next_ = 0;
+            tracking_ = kNoPrefetchHunk;
+            disabled_ = false;
+        }
+        attaches_taken_.store(++taken_, std::memory_order_release);
+    }
+}
+
 void ChdPrefetch::release_media_() noexcept {
 
+    take_attaches_();
     held_ = Chan::Job{};
     src_.reset();
     tracking_ = kNoPrefetchHunk;
@@ -149,6 +195,7 @@ void ChdPrefetch::serve() noexcept {
 
     TASTY_SEAT_BODY_MEDIATOR(ChdPrefetch, A);
     rests_ = false;
+    take_attaches_();
     if (park_due(parked_, park_req_)) {
         release_media_();
         parked_.store(true, std::memory_order_release);
@@ -195,9 +242,9 @@ void ChdPrefetch::serve() noexcept {
     }
 
     const std::uint32_t h = next_;
-    std::byte* dst = slab_.get() + static_cast<std::size_t>(job.index()) * hunk_bytes_;
+    std::byte* dst = slab_.get() + static_cast<std::size_t>(job.index()) * worker_hunk_bytes_;
     const std::int64_t t0 = decode_now_ns();
-    auto r = src_->read_hunk(h, std::span<std::byte>(dst, hunk_bytes_));
+    auto r = src_->read_hunk(h, std::span<std::byte>(dst, worker_hunk_bytes_));
     decode_us_.fetch_add(static_cast<std::uint32_t>((decode_now_ns() - t0) / 1000),
                          std::memory_order_relaxed);
     if (!r) {
@@ -302,7 +349,7 @@ PrefetchCounters ChdPrefetch::counters() const noexcept {
     c.decodes = decodes_.load(std::memory_order_relaxed);
     c.seeks = seeks_.load(std::memory_order_relaxed);
 
-    c.drops = chan_.census().breaches;
+    c.drops = chan_.breaches();
     c.errors = errors_.load(std::memory_order_relaxed);
     c.state = !opened() ? 0u : (parked() ? 1u : 2u);
     c.decode_us = decode_us_.load(std::memory_order_relaxed);

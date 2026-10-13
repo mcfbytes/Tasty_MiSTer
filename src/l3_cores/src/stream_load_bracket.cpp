@@ -43,6 +43,20 @@ Ex<void> StreamLoadBracket::write(std::span<const std::uint8_t> piece) {
     return {};
 }
 
+Ex<std::size_t> StreamLoadBracket::write_taken(std::span<const std::uint8_t> piece) {
+    TASTY_SEAT_BODY(StreamLoadBracket);
+    if (!bracket_) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_.v});
+    std::size_t taken = 0;
+    while (taken < piece.size()) {
+        const std::size_t n = std::min(piece.size() - taken, kFileTxChunkBytes);
+        auto r = bracket_->write_taken(piece.subspan(taken, n));
+        if (!r) return std::unexpected(r.error());
+        taken += *r;
+        if (*r < n) break;
+    }
+    return taken;
+}
+
 Ex<void> StreamLoadBracket::close(std::uint64_t bytes, std::uint32_t crc) {
     TASTY_SEAT_BODY(StreamLoadBracket);
     if (!bracket_) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_.v});

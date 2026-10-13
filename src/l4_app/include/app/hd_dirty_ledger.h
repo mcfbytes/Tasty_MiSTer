@@ -16,14 +16,13 @@ public:
 
     void reset(HdRect panel, HdRect game) noexcept;
     void invalidate(HdRect panel, HdRect game) noexcept;
-    void begin_tick() noexcept;
     void mark(Region region, HdRect dirty) noexcept;
-    [[nodiscard]] HdRect consume(std::uint8_t slot, Region region) noexcept;
+    [[nodiscard]] HdRect peek(std::uint8_t slot, Region region) const noexcept;
+    [[nodiscard]] HdRect take(std::uint8_t slot, Region region) noexcept;
 
 private:
     static constexpr int kRegions = 2;
     HdRect stale_[2][kRegions]{};
-    HdRect tick_[kRegions]{};
 };
 
 }  // namespace mister::app

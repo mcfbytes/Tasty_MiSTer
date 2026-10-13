@@ -3,7 +3,6 @@
 
 #include <dirent.h>
 #include <fcntl.h>
-#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/vfs.h>
 #include <unistd.h>
@@ -20,14 +19,8 @@
 
 #include "infra/persist.h"
 #include "infra/unique_fd.h"
+#include "os/block_device.h"
 #include "vfs_detail.h"
-
-#if __has_include(<linux/fs.h>)
-#include <linux/fs.h>
-#endif
-#ifndef BLKGETSIZE64
-#define BLKGETSIZE64 _IOR(0x12, 114, size_t)
-#endif
 
 static_assert(sizeof(::off_t) >= 8, "_FILE_OFFSET_BITS=64 is required (warnings.cmake)");
 
@@ -36,12 +29,13 @@ static_assert(sizeof(::off_t) >= 8, "_FILE_OFFSET_BITS=64 is required (warnings.
 namespace mister::svc {
 
 using detail::compose;
-using detail::iends_with;
-using detail::ieq;
 using detail::ifind;
-using detail::istarts_with;
-using detail::to_lower;
 using detail::ZipSplit;
+
+using infra::ascii_lower;
+using infra::iends_with;
+using infra::ieq;
+using infra::istarts_with;
 
 namespace {
 
@@ -158,7 +152,7 @@ public:
     PosixFile(const PosixFile&) = delete;
     PosixFile& operator=(const PosixFile&) = delete;
 
-    Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
+    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
         std::size_t done = 0;
         while (done < dst.size()) {
             const ::ssize_t n = ::pread(fd_.get(), dst.data() + done, dst.size() - done,
@@ -175,7 +169,8 @@ public:
         return done;
     }
 
-    Ex<std::size_t> write_at(std::uint64_t off, std::span<const std::byte> src) override {
+    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t off,
+                                           std::span<const std::byte> src) override {
         std::size_t done = 0;
         while (done < src.size()) {
             const ::ssize_t n = ::pwrite(fd_.get(), src.data() + done, src.size() - done,
@@ -194,7 +189,7 @@ public:
         return done;
     }
 
-    Ex<FileSize> size() const override {
+    [[nodiscard]] Ex<FileSize> size() const override {
 
         if (fixed_size_) return FileSize{*fixed_size_};
         struct ::stat st {};
@@ -205,7 +200,7 @@ public:
         return FileSize{static_cast<std::uint64_t>(st.st_size)};
     }
 
-    Ex<void> flush() override {
+    [[nodiscard]] Ex<void> flush() override {
 
         g_dura_last_file_sync.store(dura_ticket(), std::memory_order_relaxed);
         g_dura_file_syncs.fetch_add(1, std::memory_order_relaxed);
@@ -245,7 +240,7 @@ public:
     MemoryFile(std::span<const std::byte> blob, std::shared_ptr<std::atomic<std::uint32_t>> hints)
         : blob_(blob), hints_(std::move(hints)) {}
 
-    Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
+    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
         if (off >= blob_.size()) return std::size_t{0};
         const std::size_t start = static_cast<std::size_t>(off);
         const std::size_t n = std::min(blob_.size() - start, dst.size());
@@ -253,12 +248,12 @@ public:
         return n;
     }
 
-    Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override {
+    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
     }
 
-    Ex<FileSize> size() const override { return FileSize{blob_.size()}; }
-    Ex<void> flush() override { return {}; }
+    [[nodiscard]] Ex<FileSize> size() const override { return FileSize{blob_.size()}; }
+    [[nodiscard]] Ex<void> flush() override { return {}; }
     FileKind kind() const noexcept override { return FileKind::Memory; }
 
     [[nodiscard]] Ex<void> advise(Access a, std::uint64_t, std::uint64_t) override {
@@ -290,7 +285,7 @@ std::string zip_current_name(unzFile uf, const unz_file_info64& fi) {
     return nm;
 }
 
-Ex<unzFile> zip_open_archive(const std::string& archive) {
+[[nodiscard]] Ex<unzFile> zip_open_archive(const std::string& archive) {
     unzFile uf = ::unzOpen64(archive.c_str());
     if (uf == nullptr) {
         if (::access(archive.c_str(), R_OK) != 0) {
@@ -351,7 +346,7 @@ struct ZipListing {
     std::vector<char> dirs;
 };
 
-Ex<ZipListing> zip_list(const std::string& archive) {
+[[nodiscard]] Ex<ZipListing> zip_list(const std::string& archive) {
     auto uf = zip_open_archive(archive);
     if (!uf) return std::unexpected(uf.error());
 
@@ -406,7 +401,7 @@ public:
     ZipFile(const ZipFile&) = delete;
     ZipFile& operator=(const ZipFile&) = delete;
 
-    Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
+    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
         if (off >= size_) return std::size_t{0};
         if (off < pos_) {
             if (auto r = rewind(); !r) return std::unexpected(r.error());
@@ -432,12 +427,12 @@ public:
         return done;
     }
 
-    Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override {
+    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t, std::span<const std::byte>) override {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
     }
 
-    Ex<FileSize> size() const override { return FileSize{size_}; }
-    Ex<void> flush() override { return {}; }
+    [[nodiscard]] Ex<FileSize> size() const override { return FileSize{size_}; }
+    [[nodiscard]] Ex<void> flush() override { return {}; }
     FileKind kind() const noexcept override { return FileKind::Zip; }
 
     [[nodiscard]] Ex<void> advise(Access a, std::uint64_t, std::uint64_t) override {
@@ -453,7 +448,7 @@ public:
     }
 
 private:
-    Ex<void> rewind() {
+    [[nodiscard]] Ex<void> rewind() {
         if (stream_open_) {
             ::unzCloseCurrentFile(uf_);
             stream_open_ = false;
@@ -471,7 +466,7 @@ private:
         return {};
     }
 
-    Ex<void> skip_to(std::uint64_t target) {
+    [[nodiscard]] Ex<void> skip_to(std::uint64_t target) {
         std::byte scratch[4096];
         while (pos_ < target) {
             const std::uint64_t want = std::min<std::uint64_t>(target - pos_, sizeof scratch);
@@ -950,12 +945,12 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
     } else if (S_ISBLK(st.st_mode) || (st.st_rdev != 0 && st.st_size == 0)) {
 
         kind = FileKind::BlockDev;
-        unsigned long long blksize = 0;
-        if (::ioctl(fd.get(), BLKGETSIZE64, &blksize) < 0) {
+        const auto bytes = os::BlockDevice{fd.get()}.size_bytes();
+        if (!bytes) {
             const auto e = static_cast<std::uint32_t>(errno);
             return std::unexpected(Error{Errc::os, ERR_SITE(), e});
         }
-        fixed = static_cast<std::uint64_t>(blksize);
+        fixed = *bytes;
     }
 
     const bool unlink_at_close = (kind == FileKind::Shm) && mode_creates(mode);
@@ -1023,6 +1018,15 @@ bool Vfs::dir_exists(std::string_view path) const noexcept {
 
 bool Vfs::file_exists(std::string_view path) const noexcept {
     return path_is_regular(compose(root_path_, path));
+}
+
+Ex<std::int64_t> Vfs::modified(std::string_view path) const {
+    const std::string full = compose(root_path_, path);
+    struct ::stat st {};
+    if (::stat(full.c_str(), &st) != 0) {
+        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+    }
+    return static_cast<std::int64_t>(st.st_mtim.tv_sec);
 }
 
 Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) const {
@@ -1207,7 +1211,7 @@ bool Vfs::extension_matches(std::string_view filename, std::string_view packed_e
             if (e[i] == '*') break;
             const char c = (i < fext.size()) ? fext[i] : '\0';
             if (e[i] == '?' && c != '\0') continue;
-            if (to_lower(e[i]) != to_lower(c)) found = false;
+            if (ascii_lower(e[i]) != ascii_lower(c)) found = false;
 
             if (e[i] == '\0' || !found) break;
         }

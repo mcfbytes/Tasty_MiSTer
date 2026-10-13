@@ -20,10 +20,10 @@ public:
     LinuxAdapter(const LinuxAdapter&) = delete;
     LinuxAdapter& operator=(const LinuxAdapter&) = delete;
 
-    Ex<std::uint8_t> probe(unsigned bus, std::uint8_t addr) override;
-    Ex<void> open(unsigned bus, std::uint8_t addr) override;
-    Ex<std::uint8_t> read(std::uint8_t addr, std::uint8_t reg) override;
-    Ex<void> write(std::uint8_t addr, std::uint8_t reg, std::uint8_t val) override;
+    [[nodiscard]] Ex<std::uint8_t> probe(unsigned bus, std::uint8_t addr) override;
+    [[nodiscard]] Ex<void> open(unsigned bus, std::uint8_t addr) override;
+    [[nodiscard]] Ex<std::uint8_t> read(std::uint8_t addr, std::uint8_t reg) override;
+    [[nodiscard]] Ex<void> write(std::uint8_t addr, std::uint8_t reg, std::uint8_t val) override;
 
 private:
     struct Slot {

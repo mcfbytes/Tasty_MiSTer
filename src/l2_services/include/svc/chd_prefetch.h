@@ -7,7 +7,9 @@
 #include <memory>
 
 #include "infra/error.h"
+#include "infra/inbox.h"
 #include "infra/rt_stats.h"
+#include "infra/slot_pool.h"
 #include "infra/loan_channel.h"
 #include "infra/spsc_ring.h"
 #include "infra/wake_flag.h"
@@ -60,6 +62,26 @@ static_assert(kPrefetchRingFloor <= kPrefetchMaxDepth,
               "the floor cannot exceed the ring's compile-time capacity");
 static_assert(kPrefetchMaxDepth - kPrefetchLookBehind >= kPrefetchRingFloor - kPrefetchLookBehind,
               "at the ceiling: the forward span is monotone non-decreasing in depth");
+
+inline constexpr std::size_t kChdMediaLeases = 2;
+inline constexpr std::size_t kChdAttachDepth = 4;
+static_assert(kChdMediaLeases < kChdAttachDepth);
+static_assert((kChdAttachDepth & (kChdAttachDepth - 1)) == 0,
+              "xthread::SpscRing requires a power-of-two capacity");
+
+struct ChdMedia {
+    TASTY_SEAT_MEDIATOR(Any, Any);
+    std::unique_ptr<IChdSource> src{};
+
+    std::uint32_t hunk_bytes = 0;
+    std::uint32_t hunk_count = 0;
+    std::uint32_t forward_span = 0;
+};
+
+struct ChdAttach {
+    TASTY_SEAT_EXEMPT(component);
+    std::uint8_t lease = 0;
+};
 
 struct PrefetchCounters {
     std::uint32_t hits = 0;
@@ -144,6 +166,12 @@ private:
 
     void rest_(int ms, std::uint32_t want, bool watch_free) noexcept;
     void release_media_() noexcept;
+
+    void take_attaches_() noexcept;
+
+    [[nodiscard]] bool reap_leases_() noexcept;
+
+    [[nodiscard]] Ex<void> hand_over_(ChdMedia&& media) noexcept;
     void kick_worker_() noexcept;
     std::size_t evict_(std::uint32_t current) noexcept;
 
@@ -154,11 +182,28 @@ private:
     std::atomic<bool> park_req_{false};
     std::atomic<bool> parked_{true};
 
+    xthread::Inbox<ChdAttach, kChdAttachDepth> attaches_{wake_};
+    std::atomic<std::uint32_t> attaches_taken_{0};
+    xthread::SlotPool<ChdMedia, kChdMediaLeases> media_{};
+
     std::atomic<std::uint32_t> hits_{0}, misses_{0}, decodes_{0};
     std::atomic<std::uint32_t> decode_us_{0}, evictions_{0};
     std::atomic<std::uint32_t> seeks_{0}, errors_{0};
 
+    using Lease = xthread::SlotPool<ChdMedia, kChdMediaLeases>::Lease;
+    struct Commander {
+        TASTY_SEAT_RESIDENT(Io);
+        Lease leases[kChdMediaLeases]{};
+        std::uint32_t lease_seq[kChdMediaLeases]{};
+        std::uint32_t sent = 0;
+    };
+    Commander cmd_{};
+
     std::unique_ptr<IChdSource> src_{};
+    std::uint32_t hunk_count_ = 0;
+    std::uint32_t forward_span_ = 0;
+    std::uint32_t worker_hunk_bytes_ = 0;
+    std::uint32_t taken_ = 0;
     std::uint32_t next_ = 0;
     std::uint32_t tracking_ = kNoPrefetchHunk;
     bool disabled_ = false;
@@ -173,10 +218,8 @@ private:
 
     std::unique_ptr<std::byte[]> slab_{};
     std::size_t hunk_bytes_ = 0;
-    std::uint32_t hunk_count_ = 0;
 
     std::size_t depth_ = 0;
-    std::uint32_t forward_span_ = 0;
 
     Chan::Loan resident_[kPrefetchMaxDepth]{};
 

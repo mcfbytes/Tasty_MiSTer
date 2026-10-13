@@ -53,12 +53,10 @@ int add_file_actions(posix_spawn_file_actions_t& fa, const ChildProcessSpec& spe
             return rc;
         first_closed = kChildKeptFd + 1;
     }
-    if (spec.tty != nullptr) {
-        if (const int rc = ::posix_spawn_file_actions_addopen(&fa, 0, spec.tty, O_RDWR, 0))
-            return rc;
-        if (const int rc = ::posix_spawn_file_actions_adddup2(&fa, 0, 1)) return rc;
-        if (const int rc = ::posix_spawn_file_actions_adddup2(&fa, 0, 2)) return rc;
-    }
+    if (const int rc = ::posix_spawn_file_actions_addopen(&fa, 0, spec.tty.c_str(), O_RDWR, 0))
+        return rc;
+    if (const int rc = ::posix_spawn_file_actions_adddup2(&fa, 0, 1)) return rc;
+    if (const int rc = ::posix_spawn_file_actions_adddup2(&fa, 0, 2)) return rc;
     return ::posix_spawn_file_actions_addclosefrom_np(&fa, first_closed);
 }
 
@@ -79,6 +77,7 @@ Ex<ChildProcess> ChildProcess::spawn(const ChildProcessSpec& spec) {
     if (spec.argv.empty() || spec.argv[0] == nullptr || spec.argv[0][0] != '/') {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     }
+    if (spec.tty.empty()) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 1});
     SpawnObjects o;
     if (!o.fa_ok || !o.attr_ok) return os_error(ERR_SITE(), ENOMEM);
     if (const int rc = add_file_actions(o.fa, spec)) return os_error(ERR_SITE(), rc);

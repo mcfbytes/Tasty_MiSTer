@@ -166,29 +166,64 @@ fw::TastyArgs play_args() {
 }
 
 struct Sess {
+
+    struct Binds {
+        app::RecorderControl* rec = nullptr;
+        const app::EncodeStatusCell* encstat = nullptr;
+        const xthread::Telemetry<std::uint8_t, SeatTag::Unbound>* direct_video_ini = nullptr;
+    };
+
+    static svc::Vfs open_tmp() {
+        auto v = svc::Vfs::create_at("/tmp");
+        if (!v) std::abort();
+        return std::move(*v);
+    }
+
+    svc::Vfs own_vfs = open_tmp();
     FakeReplay replay{};
     app::IdentityLatch ident{};
     app::ReplayStatusCell play{};
     app::RecorderStatusCell recstat{};
+    app::EncodeStatusCell encstat{};
     app::UiRequestRing asks{};
     app::LinkTxChannel tx{};
+    app::RecControlCell rec_control{};
+    app::RecWriteStatusCell rec_write{};
+    xthread::WakeFlag rec_wake{};
+
+    app::RecorderControl rec{app::RecorderControl::Wiring{
+        .control = infra::OptRef<app::RecControlCell>{rec_control},
+        .capture_wake = infra::OptRef<xthread::WakeFlag>{rec_wake},
+        .status = infra::OptRef<const app::RecorderStatusCell>{recstat},
+        .writer = infra::OptRef<const app::RecWriteStatusCell>{rec_write},
+        .root = "/"}};
+    xthread::WakeFlag main_stop{};
+    xthread::Telemetry<std::uint8_t, SeatTag::Unbound> dv_ini{};
     std::atomic<int> stop{0};
     std::atomic<int> exit_code{0};
     fw::TastyArgs args = play_args();
-    fw::TastySession::Wiring w{};
+    fw::TastySession::Wiring w;
     std::optional<fw::TastySession> s{};
     const SeatScope ui{SeatTag::Ui};
 
-    explicit Sess(const svc::Vfs* vfs = nullptr, const std::atomic<int>* stop_flag = nullptr) {
-        w.replay = &replay;
-        w.identity = &ident;
-        w.play = &play;
-        w.recstat = &recstat;
-        w.asks = &asks;
-        w.link_tx = &tx;
-        w.stop = stop_flag != nullptr ? stop_flag : &stop;
-        w.exit_code = &exit_code;
-        w.vfs = vfs;
+    explicit Sess(const svc::Vfs* vfs = nullptr, const std::atomic<int>* stop_flag = nullptr)
+        : Sess(vfs, stop_flag, Binds{}) {}
+    Sess(const svc::Vfs* vfs, const std::atomic<int>* stop_flag, Binds b)
+        : w{.replay = replay,
+            .rec = b.rec != nullptr ? *b.rec : rec,
+            .asks = asks,
+            .link_tx = tx,
+            .identity = ident,
+            .play = play,
+            .recstat = recstat,
+            .encstat = b.encstat != nullptr ? *b.encstat : encstat,
+            .main_stop = main_stop,
+            .vfs = vfs != nullptr ? *vfs : own_vfs,
+            .stop = stop_flag != nullptr ? *stop_flag : stop,
+            .exit_code = exit_code,
+            .direct_video_ini = b.direct_video_ini != nullptr ? *b.direct_video_ini : dv_ini} {
+
+        dv_ini.publish(std::uint8_t{0});
         s.emplace(w, args);
     }
     void tick() { s->tick(); }
@@ -419,9 +454,9 @@ void test_session_passes_record_options() {
     CHECK(::mkdir(media.c_str(), 0755) == 0);
     CHECK(::mkdir(fat.c_str(), 0755) == 0);
     app::RecControlCell cell;
-    app::RecorderControl rec(app::RecorderControl::Wiring{.control = &cell, .root = media});
-    Sess x;
-    x.w.rec = &rec;
+    app::RecorderControl rec(app::RecorderControl::Wiring{
+        .control = infra::OptRef<app::RecControlCell>{cell}, .root = media});
+    Sess x{nullptr, nullptr, {.rec = &rec}};
     x.args.rec.codec = app::RecCodec::Zmbv;
     x.args.rec.motion = app::RecMotion::Full;
     x.args.rec.every = 3;
@@ -521,7 +556,7 @@ void test_movie_system_path() {
     if (nes) {
         CHECK(nes->kind == cores::CoreKind::Generic);
         CHECK(nes->conf_str_name == "NES");
-        CHECK(nes->codec != nullptr);
+        CHECK(nes->codec.has_value());
         CHECK(cores::movie_system_supported(*nes));
     }
     CHECK(cores::movie_system_for_path("a.lsmv").has_value());
@@ -552,13 +587,13 @@ void test_return_home() {
     int n = 0;
     {
         fw::ReturnHome h{};
-        h.spawned = &n;
+        h.spawned = infra::OptRef{n};
     }
     CHECK(n == 1);
     n = 0;
     {
         fw::ReturnHome h{};
-        h.spawned = &n;
+        h.spawned = infra::OptRef{n};
         h.armed = false;
     }
     CHECK(n == 0);
@@ -568,7 +603,7 @@ void test_return_home_error_path() {
     int n = 0;
     auto fail = [&] {
         fw::ReturnHome h{};
-        h.spawned = &n;
+        h.spawned = infra::OptRef{n};
         return 1;
     };
     CHECK(fail() == 1);
@@ -890,7 +925,7 @@ void test_start_waits_for_video_edge() {
     if (!r.pump) return;
     fw::TastySink sink{*r.pump, nullptr};
     Sess x;
-    x.w.video = &*r.pump;
+    x.w.video = infra::OptRef{*r.pump};
     x.s.emplace(x.w, x.args);
     x.tick();
     publish_id(x.ident, "NES");
@@ -1176,6 +1211,137 @@ void test_rec_only_leaves_when_its_recording_ends() {
     }
 }
 
+void test_rec_only_reports_a_failure_after_it_started() {
+    Sess x;
+    x.args.verb = fw::TastyVerb::RecStart;
+    x.args.no_splash = true;
+    x.s.emplace(x.w, x.args);
+    const auto rec = [&x](app::RecState st, app::RecVerdict v) {
+        const SeatScope cap{SeatTag::Capture};
+        app::RecorderStatus r{};
+        r.gen = 1;
+        r.state = st;
+        r.verdict = v;
+        x.recstat.publish(r);
+    };
+    StderrTo err;
+    x.tick();
+    rec(app::RecState::Recording, app::RecVerdict::Started);
+    for (int i = 0; i < 4; ++i)
+        x.tick();
+    CHECK(x.replay.stops == 0);
+    rec(app::RecState::Idle, app::RecVerdict::WriterFailed);
+    x.tick();
+    x.tick();
+    home(x);
+    const std::string said = err.text();
+    CHECK(x.replay.stops >= 1);
+    CHECK(x.exit_code.load() == 1);
+    const std::string line = "the recording failed after it started (writer_failed)";
+    const auto first = said.find(line);
+    CHECK(first != std::string::npos);
+    CHECK(first == std::string::npos || said.find(line, first + 1) == std::string::npos);
+}
+
+void test_rec_only_a_stopped_recording_after_it_started_is_clean() {
+    Sess x;
+    x.args.verb = fw::TastyVerb::RecStart;
+    x.args.no_splash = true;
+    x.s.emplace(x.w, x.args);
+    const auto rec = [&x](app::RecState st, app::RecVerdict v) {
+        const SeatScope cap{SeatTag::Capture};
+        app::RecorderStatus r{};
+        r.gen = 1;
+        r.state = st;
+        r.verdict = v;
+        x.recstat.publish(r);
+    };
+    StderrTo err;
+    x.tick();
+    rec(app::RecState::Recording, app::RecVerdict::Started);
+    for (int i = 0; i < 4; ++i)
+        x.tick();
+    rec(app::RecState::Idle, app::RecVerdict::Stopped);
+    x.tick();
+    home(x);
+    const std::string said = err.text();
+    CHECK(x.replay.stops >= 1);
+    CHECK(x.exit_code.load() == 0);
+    CHECK(said.find("the recording failed after it started") == std::string::npos);
+}
+
+void test_a_recorded_replay_reports_a_failure_while_it_runs() {
+    Tmp t("/tasty_tasty_recrep_");
+    CHECK(!t.root.empty());
+    if (t.root.empty()) return;
+    Sess x;
+    app::PathText cap{};
+    CHECK(cap.assign(t.p("cap")));
+    x.args.record = cap;
+    x.s.emplace(x.w, x.args);
+    const auto rec = [&x](app::RecState st, app::RecVerdict v) {
+        const SeatScope s{SeatTag::Capture};
+        app::RecorderStatus r{};
+        r.gen = 1;
+        r.state = st;
+        r.verdict = v;
+        x.recstat.publish(r);
+    };
+    StderrTo err;
+    to_run(x);
+    CHECK(x.replay.plays == 1);
+    rec(app::RecState::Recording, app::RecVerdict::Started);
+    for (int i = 0; i < 4; ++i)
+        x.tick();
+    CHECK(x.replay.stops == 0);
+    CHECK(x.exit_code.load() == 0);
+    rec(app::RecState::Idle, app::RecVerdict::WriterFailed);
+    for (int i = 0; i < 10; ++i)
+        x.tick();
+    CHECK(x.replay.stops == 0);
+    CHECK(x.exit_code.load() == 1);
+    const std::string said = err.text();
+    const std::string line = "the recording failed after it started (writer_failed)";
+    const auto first = said.find(line);
+    CHECK(first != std::string::npos);
+    CHECK(first == std::string::npos || said.find(line, first + 1) == std::string::npos);
+}
+
+void test_a_recorded_replay_reports_a_failure_as_it_closes() {
+    Tmp t("/tasty_tasty_recrepc_");
+    CHECK(!t.root.empty());
+    if (t.root.empty()) return;
+    Sess x;
+    app::PathText cap{};
+    CHECK(cap.assign(t.p("cap")));
+    x.args.record = cap;
+    x.s.emplace(x.w, x.args);
+    const auto rec = [&x](app::RecState st, app::RecVerdict v) {
+        const SeatScope s{SeatTag::Capture};
+        app::RecorderStatus r{};
+        r.gen = 1;
+        r.state = st;
+        r.verdict = v;
+        x.recstat.publish(r);
+    };
+    StderrTo err;
+    to_run(x);
+    rec(app::RecState::Recording, app::RecVerdict::Started);
+    x.tick();
+    publish_end(x.play, app::ReplayEnd::Finished);
+    x.tick();
+    CHECK(x.exit_code.load() == 0);
+    rec(app::RecState::Idle, app::RecVerdict::WriterFailed);
+    x.tick();
+    home(x);
+    CHECK(x.exit_code.load() == 1);
+    const std::string said = err.text();
+    const std::string line = "the recording failed after it started (writer_failed)";
+    const auto first = said.find(line);
+    CHECK(first != std::string::npos);
+    CHECK(first == std::string::npos || said.find(line, first + 1) == std::string::npos);
+}
+
 void test_rec_only_probe_refusal_fails_the_run() {
     for (const auto v : {app::RecVerdict::NoLiveBuffer, app::RecVerdict::ScalerPortStuck}) {
         Sess x;
@@ -1246,7 +1412,9 @@ void test_the_verdict_line_names_the_remedy() {
     xthread::DiagLog diag;
     CHECK(diag.open(t.p("diag").c_str()));
     app::RecorderStatusCell status{};
-    app::RecorderControl rc{app::RecorderControl::Wiring{.status = &status, .diag = &diag}};
+    app::RecorderControl rc{
+        app::RecorderControl::Wiring{.status = infra::OptRef<const app::RecorderStatusCell>{status},
+                                     .diag = infra::OptRef<xthread::DiagLog>{diag}}};
     {
         const SeatScope cap{SeatTag::Capture};
         app::RecorderStatus r{};
@@ -1275,8 +1443,7 @@ void test_record_path_outside_the_root_is_refused() {
     Tmp t("/tasty_tasty_recroot_");
     CHECK(!t.root.empty());
     app::RecorderControl rc{app::RecorderControl::Wiring{.root = t.root}};
-    Sess x;
-    x.w.rec = &rc;
+    Sess x{nullptr, nullptr, {.rec = &rc}};
     x.args.verb = fw::TastyVerb::RecStart;
     x.args.no_splash = true;
     CHECK(x.args.record.emplace().assign("/proc/"));
@@ -1460,9 +1627,7 @@ void expect_scale_sentence(std::uint8_t fell, const char* warn, const char* need
     const std::string st = t.p("status");
     fw::tasty_set_ctl_paths(lock.c_str(), pid.c_str(), st.c_str());
     app::EncodeStatusCell enc{};
-    Sess x;
-    x.w.encstat = &enc;
-    x.s.emplace(x.w, x.args);
+    Sess x{nullptr, nullptr, {.encstat = &enc}};
     {
         const SeatScope enc_seat{SeatTag::Encode};
         app::EncodeStatus body{};
@@ -1504,9 +1669,7 @@ void test_status_scale_step_warns_per_recording() {
     const std::string st = t.p("status");
     fw::tasty_set_ctl_paths(lock.c_str(), pid.c_str(), st.c_str());
     app::EncodeStatusCell enc{};
-    Sess x;
-    x.w.encstat = &enc;
-    x.s.emplace(x.w, x.args);
+    Sess x{nullptr, nullptr, {.encstat = &enc}};
     const auto step = [&](std::uint16_t gen) {
         {
             const SeatScope cap{SeatTag::Capture};
@@ -1565,9 +1728,7 @@ void test_status_scale_return_is_said() {
     const std::string st = t.p("status");
     fw::tasty_set_ctl_paths(lock.c_str(), pid.c_str(), st.c_str());
     app::EncodeStatusCell enc{};
-    Sess x;
-    x.w.encstat = &enc;
-    x.s.emplace(x.w, x.args);
+    Sess x{nullptr, nullptr, {.encstat = &enc}};
     const auto publish = [&](std::uint8_t steps, std::uint8_t recovered, std::uint8_t held = 0) {
         const SeatScope enc_seat{SeatTag::Encode};
         app::EncodeStatus body{};
@@ -1895,8 +2056,7 @@ void test_session_direct_video_force() {
     {
         cell.publish(std::uint8_t{1});
         StderrTo err;
-        Sess x;
-        x.w.direct_video_ini = &cell;
+        Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
         x.args.strict = true;
         x.s.emplace(x.w, x.args);
         to_run(x);
@@ -1909,8 +2069,7 @@ void test_session_direct_video_force() {
     {
         cell.publish(std::uint8_t{1});
         StderrTo err;
-        Sess x;
-        x.w.direct_video_ini = &cell;
+        Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
         x.s.emplace(x.w, x.args);
         to_run(x);
         x.tick();
@@ -1923,8 +2082,7 @@ void test_session_direct_video_force() {
     {
         cell.publish(std::uint8_t{0});
         StderrTo err;
-        Sess x;
-        x.w.direct_video_ini = &cell;
+        Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
         x.s.emplace(x.w, x.args);
         to_run(x);
         x.tick();
@@ -1939,9 +2097,8 @@ void test_session_direct_video_force() {
         CHECK(pump.root.put("MiSTer.ini", ini));
         pump.pump->arm_replay_ini(false);
         cell.publish(std::uint8_t{0});
-        Sess x;
-        x.w.video = &*pump.pump;
-        x.w.direct_video_ini = &cell;
+        Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
+        x.w.video = infra::OptRef{*pump.pump};
         x.s.emplace(x.w, x.args);
         x.tick();
         publish_id(x.ident, "NES");
@@ -1971,9 +2128,8 @@ void test_strict_rec_start_waits_for_the_ini() {
     CHECK(pump.root.put("MiSTer.ini", "[MiSTer]\ndirect_video=1\nvideo_mode=8\n"));
     pump.pump->arm_replay_ini(true);
     xthread::Telemetry<std::uint8_t, SeatTag::Unbound> cell{};
-    Sess x;
-    x.w.video = &*pump.pump;
-    x.w.direct_video_ini = &cell;
+    Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
+    x.w.video = infra::OptRef{*pump.pump};
     x.args.verb = fw::TastyVerb::RecStart;
     x.args.no_splash = true;
     x.args.strict = true;
@@ -2160,12 +2316,17 @@ void test_recorded_replay_rereads_the_geometry() {
     PumpRig r;
     CHECK(r.pump.has_value());
     if (!r.pump) return;
+    Tmp t("/tasty_tasty_recgeo_");
+    CHECK(!t.root.empty());
+    if (t.root.empty()) return;
     fw::TastySink sink{*r.pump, nullptr};
     Sess x;
-    x.w.video = &*r.pump;
+    x.w.video = infra::OptRef{*r.pump};
     app::PathText cap{};
-    CHECK(cap.assign("/tmp/tasty_tasty_rec/cap"));
+    CHECK(cap.assign(t.p("cap")));
     x.args.record = cap;
+
+    (void)x.args.movie.assign("m.gmv");
     x.s.emplace(x.w, x.args);
     r.core(1, 19'108);
     x.tick();
@@ -2206,7 +2367,9 @@ void test_unrecorded_replay_leaves_the_geometry() {
     if (!r.pump) return;
     fw::TastySink sink{*r.pump, nullptr};
     Sess x;
-    x.w.video = &*r.pump;
+    x.w.video = infra::OptRef{*r.pump};
+
+    (void)x.args.movie.assign("m.gmv");
     x.s.emplace(x.w, x.args);
     r.core(1, 19'108);
     x.tick();
@@ -2692,7 +2855,7 @@ void test_owner_sigterm_ends_and_homes_once() {
     if (n.p == nullptr) return;
     const ChildEnd end = in_child([&] {
         fw::ReturnHome home{};
-        home.spawned = n.p;
+        home.spawned = infra::opt_ref_of(n.p);
         fw::tasty_owe_home();
         fw::tasty_arm_owner_signals();
         Sess x{nullptr, &fw::tasty_owner_stop_flag()};
@@ -2744,7 +2907,7 @@ void test_owner_second_sigterm_homes_and_exits() {
     const ChildEnd end = in_child([&] {
         (void)::alarm(2);
         fw::ReturnHome home{};
-        home.spawned = n.p;
+        home.spawned = infra::opt_ref_of(n.p);
         fw::tasty_owe_home();
         fw::tasty_arm_owner_signals();
         ::raise(SIGTERM);
@@ -2768,7 +2931,7 @@ void test_owner_sigbus_homes() {
         (void)::setrlimit(RLIMIT_CORE, &rl);
         (void)::alarm(2);
         fw::ReturnHome home{};
-        home.spawned = n.p;
+        home.spawned = infra::opt_ref_of(n.p);
         fw::tasty_owe_home();
         fw::tasty_arm_owner_signals();
         ::raise(SIGBUS);
@@ -2928,7 +3091,7 @@ void test_second_sigterm_during_stop_homes_after_exit() {
         (void)::alarm(12);
         fw::tasty_arm_owner_signals();
         fw::ReturnHome home{};
-        home.spawned = &share.p->home;
+        home.spawned = infra::OptRef{share.p->home};
         BoardShare* board = share.p;
         std::thread poke([board] {
             ::usleep(100 * 1000);
@@ -2995,7 +3158,7 @@ void test_stop_wait_timeout_launches_nothing() {
         int rc = 0;
         {
             fw::ReturnHome home{};
-            home.spawned = n.p;
+            home.spawned = infra::opt_ref_of(n.p);
             rc = fw::tasty_stop_and_owe();
         }
         if (saved >= 0) {
@@ -3083,7 +3246,7 @@ void test_sigbus_during_stop_does_not_home() {
         (void)::alarm(8);
         fw::tasty_arm_owner_signals();
         fw::ReturnHome home{};
-        home.spawned = n.p;
+        home.spawned = infra::opt_ref_of(n.p);
         const int rc = fw::tasty_stop_and_owe();
         ::_exit(rc == 0 ? 4 : 5);
     }
@@ -3359,6 +3522,10 @@ int main(int argc, char** argv) {
     test_stay_stop_leaves();
     test_rec_only_stop_leaves();
     test_rec_only_leaves_when_its_recording_ends();
+    test_rec_only_reports_a_failure_after_it_started();
+    test_rec_only_a_stopped_recording_after_it_started_is_clean();
+    test_a_recorded_replay_reports_a_failure_while_it_runs();
+    test_a_recorded_replay_reports_a_failure_as_it_closes();
     test_rec_only_probe_refusal_fails_the_run();
     test_a_stuck_port_ends_a_replay();
     test_the_verdict_line_names_the_remedy();

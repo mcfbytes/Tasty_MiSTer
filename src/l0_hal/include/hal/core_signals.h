@@ -22,7 +22,7 @@ protected:
     ICoreSignals& operator=(ICoreSignals&&) = default;
 
 public:
-    virtual Ex<CoreIdentity> identify() = 0;
+    [[nodiscard]] virtual Ex<CoreIdentity> identify() = 0;
 
     virtual CoreCapabilities latch_capabilities() = 0;
 

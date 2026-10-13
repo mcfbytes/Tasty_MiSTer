@@ -6,17 +6,16 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <cctype>
-#include <charconv>
 #include <cerrno>
 #include <cstring>
 #include <optional>
-#include <system_error>
 #include <utility>
 
 #include "app/cmd_verb.h"
 #include "app/path_text.h"
 #include "app/xml_kind.h"
+#include "infra/ascii.h"
+#include "infra/parse_int.h"
 #include "proto/volume_cmd.h"
 
 namespace mister::app {
@@ -26,21 +25,11 @@ bool starts_with(std::string_view s, std::string_view p) {
     return s.size() >= p.size() && s.compare(0, p.size(), p) == 0;
 }
 
-bool iequal(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const auto ca = static_cast<unsigned char>(a[i]);
-        const auto cb = static_cast<unsigned char>(b[i]);
-        if (std::tolower(ca) != std::tolower(cb)) return false;
-    }
-    return true;
-}
-
 XmlKind xml_kind_of(std::string_view s) {
     if (s.size() <= 4) return XmlKind::Rbf;
     const std::string_view tail = s.substr(s.size() - 4);
-    if (iequal(tail, ".mra")) return XmlKind::Mra;
-    if (iequal(tail, ".mgl")) return XmlKind::Mgl;
+    if (infra::ieq(tail, ".mra")) return XmlKind::Mra;
+    if (infra::ieq(tail, ".mgl")) return XmlKind::Mgl;
     return XmlKind::Rbf;
 }
 
@@ -76,11 +65,7 @@ std::optional<std::int32_t> small_int(std::string_view s) {
     if (s.size() > 1 && s.front() == '+' && s[1] != '-') s.remove_prefix(1);
     const std::size_t digits = !s.empty() && s.front() == '-' ? s.size() - 1 : s.size();
     if (digits > 9) return std::nullopt;
-    std::int32_t v = 0;
-    const char* const end = s.data() + s.size();
-    const auto [at, ec] = std::from_chars(s.data(), end, v);
-    if (ec != std::errc{} || at != end) return std::nullopt;
-    return v;
+    return infra::parse_int<std::int32_t>(s);
 }
 
 std::optional<CmdVerb::TasPlay> parse_tas_play(std::string_view args) {
@@ -155,15 +140,14 @@ std::optional<ParsedRec> parse_rec(std::string_view args) {
             if (!n || !take(kEvery)) return std::nullopt;
             v.opt.every = *n;
         } else if (key == "from" || key == "to") {
-            std::int32_t n = 0;
-            const auto [at, ec] = std::from_chars(val.data(), val.data() + val.size(), n);
-            if (ec != std::errc{} || at != val.data() + val.size()) return std::nullopt;
+            const auto n = infra::parse_int<std::int32_t>(val);
+            if (!n) return std::nullopt;
             const unsigned bit = key == "from" ? kFrom : kTo;
             if (!take(bit)) return std::nullopt;
             if (key == "from")
-                v.opt.from_frame = n;
+                v.opt.from_frame = *n;
             else
-                v.opt.to_frame = n;
+                v.opt.to_frame = *n;
         } else if (key == "segment") {
             const auto n = parse_rec_size(val);
             if (!n || !rec_segment_ok(*n) || !take(kSeg)) return std::nullopt;

@@ -82,7 +82,7 @@ std::optional<MovieSystem> system_for_platform(std::string_view platform,
         if (r.platform != platform) continue;
         const IMovieCodec* c = movie_codec_for(r.name, movie_path);
         if (c == nullptr) return std::nullopt;
-        return MovieSystem{.kind = r.kind, .conf_str_name = r.name, .codec = c};
+        return MovieSystem{.kind = r.kind, .conf_str_name = r.name, .codec = infra::opt_ref_of(c)};
     }
     return std::nullopt;
 }
@@ -210,7 +210,9 @@ std::optional<MovieSystem> movie_system_for_path(std::string_view movie_path) no
         ++n;
     }
     if (n != 1 || found == nullptr) return std::nullopt;
-    return MovieSystem{.kind = found->kind, .conf_str_name = found->name, .codec = found->codec};
+    return MovieSystem{.kind = found->kind,
+                       .conf_str_name = found->name,
+                       .codec = infra::opt_ref_of(found->codec)};
 }
 
 std::optional<std::string> movie_bk2_platform(std::string_view text) noexcept {
@@ -329,9 +331,10 @@ bool movie_system_supported(const MovieSystem& sys) noexcept {
         case CoreKind::MegaDrive:
         case CoreKind::Psx:
         case CoreKind::Menu:
-            return sys.codec != nullptr || sys.kind == CoreKind::Menu;
+            return sys.codec.has_value() || sys.kind == CoreKind::Menu;
         case CoreKind::MegaCd:
         case CoreKind::PceCd:
+        case CoreKind::Sgb:
         case CoreKind::Arcade:
         case CoreKind::Electron:
         case CoreKind::AtariSt:
@@ -359,7 +362,8 @@ bool movie_system_supported(const MovieSystem& sys) noexcept {
 bool movie_system_plays(std::string_view conf_str_name) noexcept {
     for (const CodecRow& r : kMovieCodecs) {
         if (r.name != conf_str_name) continue;
-        if (movie_system_supported(MovieSystem{r.kind, r.name, r.codec})) return true;
+        if (movie_system_supported(MovieSystem{r.kind, r.name, infra::opt_ref_of(r.codec)}))
+            return true;
     }
     return false;
 }

@@ -13,9 +13,17 @@
 #include "proto/spi_ps2_decoder.h"
 #include "svc/input_emitter.h"
 #include "infra/error.h"
+#include "infra/telemetry.h"
 #include "infra/seat.h"
 
 namespace mister::app {
+
+struct InputEmitCounts {
+    std::uint32_t rt_rounds = 0;
+    std::uint32_t joy_transactions = 0;
+    std::uint32_t rt_errors = 0;
+    std::uint32_t edge_resets = 0;
+};
 
 class InputEmit {
     TASTY_SEAT_RESIDENT(RT);
@@ -23,12 +31,9 @@ class InputEmit {
 public:
     static constexpr SeatTag kSeat = SeatTag::RT;
 
-    struct Counts {
-        std::uint32_t rt_rounds = 0;
-        std::uint32_t joy_transactions = 0;
-        std::uint32_t rt_errors = 0;
-        std::uint32_t edge_resets = 0;
-    };
+    using Counts = InputEmitCounts;
+
+    using CountsCell = xthread::Telemetry<Counts, SeatTag::RT>;
 
     InputEmit(InputWire& wire, hal::ISpiTransport& link, proto::ILinkRouter& router) noexcept
         : wire_(wire), ps2_(link, router) {}
@@ -42,6 +47,7 @@ public:
     svc::InputEmitter& emitter() noexcept { return em_; }
     const svc::InputEmitter& emitter() const noexcept { return em_; }
     Counts counts() const noexcept;
+    const CountsCell& counts_cell() const noexcept { return counts_cell_; }
 
 private:
     svc::InputEmitter em_{};
@@ -54,6 +60,7 @@ private:
 
     std::uint32_t wm_core_edge_seq_ = 0;
 
+    CountsCell counts_cell_{};
     std::atomic<std::uint32_t> n_rt_rounds_{0};
     std::atomic<std::uint32_t> n_joy_tx_{0};
     std::atomic<std::uint32_t> n_edge_reset_{0};
@@ -77,9 +84,8 @@ static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
               }),
               "item: this lane DRAINS what the decode lane publishes, on "
               "the round the executive owns. At or below the decode lane's "
-              "priority a full 2048-slot key ring could be refilled faster "
-              "than it is drained, and the kKeyDrainBudget back-pressure "
-              "arm would never make progress (arch §2).");
+              "priority the decode lane could refill what this lane drains "
+              "faster than it is drained (arch §2).");
 static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
                   return hal::seat_of(m, InputEmit::kSeat).cpu !=
                          hal::seat_of(m, InputDecode::kSeat).cpu;

@@ -11,7 +11,9 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "proto/types.h"
+#include "svc/chd_meta_row.h"
 #include "svc/chd_source.h"
 #include "svc/cue_policy.h"
 #include "svc/disc_counters.h"
@@ -29,32 +31,28 @@ namespace mister::svc {
 
 using proto::Lba;
 
-struct ChdMetaRow {
-    std::string_view text;
-    bool v2 = true;
-};
-
 class DiscEngine {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    static Ex<DiscEngine> create(const Vfs& vfs, CuePolicy policy, ChdPrefetch& prefetch);
+    [[nodiscard]] static Ex<DiscEngine> create(const Vfs& vfs, CuePolicy policy,
+                                               ChdPrefetch& prefetch);
 
-    static Ex<DiscEngine> create(const IImageOpener& opener, CuePolicy policy,
-                                 ChdPrefetch& prefetch);
+    [[nodiscard]] static Ex<DiscEngine> create(const IImageOpener& opener, CuePolicy policy,
+                                               ChdPrefetch& prefetch);
 
-    Ex<void> mount(std::string_view image_path);
-    Ex<void> unmount();
+    [[nodiscard]] Ex<void> mount(std::string_view image_path);
+    [[nodiscard]] Ex<void> unmount();
 
     [[nodiscard]] Ex<void> mount_chd(std::unique_ptr<IChdSource> source,
                                      std::unique_ptr<IChdSource> prefetch_source = nullptr);
 
-    Ex<std::size_t> read_sector(Lba lba, std::span<std::byte> dst);
+    [[nodiscard]] Ex<std::size_t> read_sector(Lba lba, std::span<std::byte> dst);
 
-    Ex<std::size_t> read_subcode(Lba lba, std::span<std::byte> dst);
+    [[nodiscard]] Ex<std::size_t> read_subcode(Lba lba, std::span<std::byte> dst);
 
-    Ex<std::size_t> read_user_data(Lba lba, std::span<std::byte> dst);
-    Ex<std::size_t> read_raw_frame(Lba lba, std::span<std::byte> dst);
+    [[nodiscard]] Ex<std::size_t> read_user_data(Lba lba, std::span<std::byte> dst);
+    [[nodiscard]] Ex<std::size_t> read_raw_frame(Lba lba, std::span<std::byte> dst);
 
     [[nodiscard]] Ex<std::size_t> read_full_frame(Lba lba, std::span<std::byte> dst);
 
@@ -93,7 +91,8 @@ public:
     std::uint32_t prefetch_refusals() const noexcept { return prefetch_refusals_; }
 
 private:
-    explicit DiscEngine(CuePolicy p, ChdPrefetch& prefetch);
+    DiscEngine(CuePolicy p, ChdPrefetch& prefetch, infra::OptRef<const Vfs> vfs,
+               infra::OptRef<const IImageOpener> opener);
 
     enum class Form : std::uint8_t { Native, UserData, RedBook };
 
@@ -113,8 +112,8 @@ private:
 
     [[nodiscard]] Ex<void> declare_iso_2048(std::unique_ptr<IFile> f, FileSize sz);
 
-    Ex<void> mount_chd_path(std::string_view chd_path);
-    Ex<std::size_t> read_form(Lba lba, std::span<std::byte> dst, Form form);
+    [[nodiscard]] Ex<void> mount_chd_path(std::string_view chd_path);
+    [[nodiscard]] Ex<std::size_t> read_form(Lba lba, std::span<std::byte> dst, Form form);
 
     void normalize_cdda_(const Track& t, Form form, std::span<std::byte> frame) const noexcept;
 
@@ -128,8 +127,8 @@ private:
 
     CddaOrder cdda_order_ = kWireCddaOrder;
 
-    const Vfs* vfs_ = nullptr;
-    const IImageOpener* opener_ = nullptr;
+    infra::OptRef<const Vfs> vfs_;
+    infra::OptRef<const IImageOpener> opener_;
 
     std::unique_ptr<IFile> files_[kMaxTracks]{};
     std::uint16_t file_count_ = 0;
@@ -149,7 +148,7 @@ private:
     static constexpr std::uint32_t kNoHunk = 0xFFFFFFFFu;
     std::uint32_t hunk_memo_ = kNoHunk;
 
-    const std::byte* hunk_ptr_ = nullptr;
+    std::span<const std::byte> hunk_view_{};
 
     std::reference_wrapper<ChdPrefetch> prefetch_;
 

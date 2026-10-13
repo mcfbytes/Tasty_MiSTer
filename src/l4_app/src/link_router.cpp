@@ -23,7 +23,8 @@ LinkRxChannel* LinkRouter::channel_(proto::LinkEvent::Kind k) const noexcept {
 
 bool LinkRouter::push(const proto::LinkEvent& e) noexcept {
     TASTY_SEAT_BODY(LinkRouter);
-    LinkRxChannel* const c = channel_(infra::kind_of(e));
+    const std::size_t i = infra::ordinal(sink_for(e));
+    LinkRxChannel* const c = i < chans_.size() ? chans_[i] : nullptr;
     if (c == nullptr || !c->push(e)) {
         ++drops_;
         return false;

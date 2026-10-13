@@ -40,7 +40,7 @@ public:
     [[nodiscard]] InputPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept {
-        (void)pause_.observe(*this);
+        (void)pause_.observe(pause_seen_, *this);
         return false;
     }
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
@@ -59,6 +59,7 @@ private:
     xthread::WakeFlag& pause_wake_;
     xthread::WakeFlag stop_;
     xthread::PauseLatch pause_;
+    xthread::PauseLatch::Observer pause_seen_{};
     std::uint32_t paused_link_drops_ = 0;
     InputPark park_;
 };

@@ -13,7 +13,7 @@ class FpgaMemory;
 
 class DmaRing {
 public:
-    static Ex<DmaRing> create(FpgaMemory& mem, std::size_t off, std::size_t len);
+    [[nodiscard]] static Ex<DmaRing> create(FpgaMemory& mem, std::size_t off, std::size_t len);
 
     static constexpr std::size_t kHeaderBytes = 8;
     static constexpr std::size_t kMinCapacity = 16;
@@ -28,10 +28,10 @@ public:
     std::size_t space() const;
 
 private:
-    DmaRing() = default;
+    explicit DmaRing(FpgaMemory& mem) noexcept : mem_(mem) {}
     void check_live() const;
 
-    FpgaMemory* mem_ = nullptr;
+    FpgaMemory& mem_;
     std::size_t data_off_ = 0;
     std::size_t mask_ = 0;
     std::size_t head_word_ = 0;

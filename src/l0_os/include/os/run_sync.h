@@ -8,8 +8,8 @@
 
 namespace mister::os {
 
-Ex<int> run_sync(std::span<const char* const> argv, std::int32_t timeout_ms = 30'000);
+[[nodiscard]] Ex<int> run_sync(std::span<const char* const> argv, std::int32_t timeout_ms = 30'000);
 
-Ex<void> run_detached(std::span<const char* const> argv);
+[[nodiscard]] Ex<void> run_detached(std::span<const char* const> argv);
 
 }  // namespace mister::os

@@ -26,8 +26,8 @@ public:
     };
 
     Step step() const noexcept { return step_; }
-    Ex<void> begin(const DeviceIdentity& id, MapKind kind);
-    Ex<Step> advance();
+    [[nodiscard]] Ex<void> begin(const DeviceIdentity& id, MapKind kind);
+    [[nodiscard]] Ex<Step> advance();
     void cancel();
 
     void on_device(const DeviceIdentity& id);

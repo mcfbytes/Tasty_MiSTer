@@ -4,15 +4,15 @@
 #include "infra/error.h"
 #include "hal/bridge_sequencer.h"
 
-namespace mister::boards {
+namespace mister::boards::spi_sbc {
 
-class SpiSbcBridges final : public hal::IBridgeSequencer {
+class Bridges final : public hal::IBridgeSequencer {
 public:
-    SpiSbcBridges() = default;
+    Bridges() = default;
 
     [[nodiscard]] Ex<void> pre_program() override;
     [[nodiscard]] Ex<void> post_program() override;
     [[nodiscard]] Ex<void> request_board_reset() override;
 };
 
-}  // namespace mister::boards
+}  // namespace mister::boards::spi_sbc

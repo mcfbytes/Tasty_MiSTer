@@ -27,7 +27,7 @@ bool ieq(std::string_view a, std::string_view b) {
 }
 
 [[nodiscard]] std::string_view manifest_root_of(std::string_view rel) noexcept {
-    const cores::ManifestDocRole* role = cores::manifest_doc_role();
+    const cores::IManifestDocRole* role = cores::manifest_doc_role();
     return role != nullptr ? role->root_of(rel) : std::string_view{};
 }
 
@@ -39,8 +39,8 @@ bool ieq(std::string_view a, std::string_view b) {
     if (!f) return std::unexpected(f.error());
     const auto sz = (*f)->size();
     if (!sz) return std::unexpected(sz.error());
-    const cores::ManifestDocRole* role = cores::manifest_doc_role();
-    const std::uint64_t kDocMax = role != nullptr ? role->doc_max : 0;
+    const cores::IManifestDocRole* role = cores::manifest_doc_role();
+    const std::uint64_t kDocMax = role != nullptr ? role->doc_max() : 0;
     if (sz->v == 0 || sz->v > kDocMax) {
         return std::unexpected(
             Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(sz->v)});
@@ -58,7 +58,7 @@ bool ieq(std::string_view a, std::string_view b) {
 }
 
 void fill_facts(MraFacts& facts, std::string_view doc) {
-    const cores::ManifestDocRole* role = cores::manifest_doc_role();
+    const cores::IManifestDocRole* role = cores::manifest_doc_role();
     if (role == nullptr) return;
     cores::ManifestDocFacts parsed = role->facts_of(doc);
     facts.vertical = parsed.vertical;
@@ -130,15 +130,6 @@ Ex<std::string> PendingLoad::resolve(const svc::Vfs& vfs) const {
                                          ? svc::SearchPolicy{svc::search::kSdRootOnly, true}
                                          : svc::SearchPolicy{svc::search::kRootOnly, true};
     return vfs.resolve(rel, policy);
-}
-
-MraFacts PendingLoad::mra_facts() const {
-    if (req_.kind != XmlKind::Mra) return MraFacts{};
-    MraFacts facts{};
-    facts.is_arcade = true;
-    if (!doc_) return facts;
-    fill_facts(facts, *doc_);
-    return facts;
 }
 
 MraFacts mra_facts_at(const svc::Vfs& vfs, std::string_view rel) {

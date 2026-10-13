@@ -32,6 +32,7 @@
 #include "cores/movie_system.h"
 #include "cores/rom_digest.h"
 #include "infra/error.h"
+#include "infra/parse_int.h"
 #include "infra/persist.h"
 #include "os/writeback_probe.h"
 #include "svc/file.h"
@@ -441,7 +442,7 @@ int tasty_launch_home() noexcept {
     int expected = 0;
     if (!g_home_claimed.compare_exchange_strong(expected, 1, std::memory_order_seq_cst)) return 0;
     ReturnHome* h = g_return_home.load(std::memory_order_seq_cst);
-    if (h != nullptr && h->spawned != nullptr) {
+    if (h != nullptr && h->spawned) {
         *h->spawned += 1;
         return 0;
     }
@@ -467,9 +468,11 @@ std::optional<int> tasty_read_pid() noexcept {
     const ssize_t n = ::read(fd, buf, sizeof buf - 1);
     ::close(fd);
     if (n <= 0) return std::nullopt;
-    int pid = 0;
-    if (std::sscanf(buf, "%d", &pid) != 1 || pid <= 0) return std::nullopt;
-    return pid;
+    std::string_view s{buf, static_cast<std::size_t>(n)};
+    if (const auto nl = s.find('\n'); nl != std::string_view::npos) s = s.substr(0, nl + 1);
+    const auto pid = infra::parse_int<int>(infra::trim_line_end(s));
+    if (!pid || *pid <= 0) return std::nullopt;
+    return *pid;
 }
 
 std::optional<std::string> tasty_read_movie() noexcept {
@@ -510,7 +513,7 @@ std::string tasty_busy_text() noexcept {
     unsigned n = 0;
     while (const dirent* e = ::readdir(d)) {
         if (e->d_name[0] < '1' || e->d_name[0] > '9') continue;
-        const int pid = std::atoi(e->d_name);
+        const int pid = infra::parse_int<int>(e->d_name).value_or(0);
         if (pid <= 0 || !comm_is_mister(pid)) continue;
         if (n < 16) pids[n++] = pid;
     }
@@ -740,7 +743,7 @@ int tasty_preflight_rom(const svc::Vfs& vfs, std::string_view movie, std::string
         return 1;
     }
     const auto sys = cores::movie_system_for(vfs, movie);
-    if (!sys || sys->codec == nullptr) return 0;
+    if (!sys || !sys->codec) return 0;
     auto src = sys->codec->digest_source(vfs, rom);
     if (src) return 0;
     report_unhashable(*sys->codec, rom, src.error());
@@ -754,7 +757,7 @@ int tasty_check_movie(const svc::Vfs& vfs, std::string_view movie, std::string_v
         return 1;
     }
     const auto sys = cores::movie_system_for(vfs, movie);
-    if (!sys || sys->codec == nullptr) {
+    if (!sys || !sys->codec) {
         const std::string why = cores::movie_unplayable_reason(vfs, movie);
         if (!why.empty()) {
             std::fprintf(stderr, "tasty: %s\n", why.c_str());
@@ -817,7 +820,7 @@ int tasty_prepare_play(const svc::Vfs& vfs, TastyArgs& a) {
         return 1;
     }
     const auto sys = cores::movie_system_for(vfs, a.movie.view());
-    if (!sys || sys->codec == nullptr) {
+    if (!sys || !sys->codec) {
         std::fprintf(stderr, "tasty: no codec for %s\n", a.movie.c_str());
         return 1;
     }
@@ -864,7 +867,7 @@ int tasty_info_movie(const svc::Vfs& vfs, std::string_view movie) {
         return 1;
     }
     const auto sys = cores::movie_system_for(vfs, movie);
-    if (!sys || sys->codec == nullptr) {
+    if (!sys || !sys->codec) {
         std::fprintf(stderr, "tasty: no codec for %.*s\n", static_cast<int>(movie.size()),
                      movie.data());
         return 1;

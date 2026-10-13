@@ -14,6 +14,8 @@
 #include "seat_set.h"
 #include "hal/thread_map.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
+#include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "diag_main.h"
 #include "diag_sampler.h"
@@ -69,10 +71,10 @@ public:
 
     struct SeatMains {
         MainSlots mains{};
-        app::InputBuild* input_build = nullptr;
+        infra::OptRef<app::InputBuild> input_build{};
     };
 
-    Ex<void> spawn(RtMode mode, const SeatMains& mains);
+    [[nodiscard]] Ex<void> spawn(RtMode mode, const SeatMains& mains);
 
     [[nodiscard]] bool any_live() const noexcept;
 
@@ -168,6 +170,10 @@ private:
 
     void create_mains_(app::EventQueue& events, const UiMain::Wires& ui_wires,
                        const UiMain::Wiring& ui) noexcept;
+
+    void publish_evidence_() noexcept;
+
+    xthread::Telemetry<RtEvidence, SeatTag::Unbound> ev_cell_{};
 
     DiagSampler diag_sampler_;
     xthread::WakeFlag diag_wake_{};

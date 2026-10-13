@@ -11,12 +11,12 @@ class II2cAdapter {
 public:
     virtual ~II2cAdapter() = default;
 
-    virtual Ex<std::uint8_t> probe(unsigned bus, std::uint8_t addr) = 0;
+    [[nodiscard]] virtual Ex<std::uint8_t> probe(unsigned bus, std::uint8_t addr) = 0;
 
-    virtual Ex<void> open(unsigned bus, std::uint8_t addr) = 0;
+    [[nodiscard]] virtual Ex<void> open(unsigned bus, std::uint8_t addr) = 0;
 
-    virtual Ex<std::uint8_t> read(std::uint8_t addr, std::uint8_t reg) = 0;
-    virtual Ex<void> write(std::uint8_t addr, std::uint8_t reg, std::uint8_t val) = 0;
+    [[nodiscard]] virtual Ex<std::uint8_t> read(std::uint8_t addr, std::uint8_t reg) = 0;
+    [[nodiscard]] virtual Ex<void> write(std::uint8_t addr, std::uint8_t reg, std::uint8_t val) = 0;
 
 protected:
     II2cAdapter() = default;

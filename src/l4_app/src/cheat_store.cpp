@@ -36,10 +36,10 @@ bool name_less(const CheatRecord& a, const CheatRecord& b) noexcept {
     return x.size() < y.size();
 }
 
-std::string compose_dir(std::string_view core, const char* suffix) {
+std::string compose_dir(std::string_view core, std::string_view suffix) {
     std::string d{"cheats/"};
     d.append(core);
-    if (suffix != nullptr) d.append(suffix);
+    if (!suffix.empty()) d.append(suffix);
     return d;
 }
 
@@ -72,7 +72,7 @@ Ex<void> CheatStore::open(const TxDigest& d, std::string_view core,
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     }
 
-    const std::string core_dir = compose_dir(core, nullptr);
+    const std::string core_dir = compose_dir(core, {});
     const bool cd = d.kind == TxDigest::Kind::Mount && look.cd_asset_layout;
     const std::string cd_dir = cd ? compose_dir(core, look.cd_dir_suffix) : std::string{};
 

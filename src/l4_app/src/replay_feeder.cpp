@@ -88,10 +88,10 @@ cores::IMovieCodec::SettingNeeds where_the_core_has(cores::IMovieCodec::SettingN
 
 }  // namespace
 
-ReplayFeeder::ReplayFeeder(const Wiring& w) noexcept : w_(w) {}
+ReplayFeeder::ReplayFeeder(Wiring w) noexcept : w_(std::move(w)) {}
 ReplayFeeder::~ReplayFeeder() = default;
 
-std::int64_t ReplayFeeder::now_ns_() const noexcept { return w_.clock->now().count(); }
+std::int64_t ReplayFeeder::now_ns_() const noexcept { return w_.clock.now().count(); }
 
 void ReplayFeeder::refuse_(Refusal why, std::uint32_t detail) noexcept {
     last_refusal_ = why;
@@ -100,23 +100,20 @@ void ReplayFeeder::refuse_(Refusal why, std::uint32_t detail) noexcept {
     stage_ = Stage::Idle;
     release_movie_();
     rom_file_.reset();
-    if (w_.diag != nullptr) {
-        w_.diag->appendf(
-            "{\"t\":\"tas\",\"k\":\"refused\",\"why\":\"%s\",\"detail\":%u,\"setting\":\"%.*s\"}",
-            refusal_name(why), detail, static_cast<int>(last_setting_.size()),
-            last_setting_.data());
-    }
+    w_.diag.appendf(
+        "{\"t\":\"tas\",\"k\":\"refused\",\"why\":\"%s\",\"detail\":%u,\"setting\":\"%.*s\"}",
+        refusal_name(why), detail, static_cast<int>(last_setting_.size()), last_setting_.data());
     log_end_(ReplayStatus{.gen = gen_, .end = ReplayEnd::Refused});
 }
 
 std::optional<ReplayStatus> ReplayFeeder::sample_status_() const noexcept {
     ReplayStatus s{};
-    if (w_.status == nullptr || w_.status->sample_into(s) == 0) return std::nullopt;
+    if (w_.status.sample_into(s) == 0) return std::nullopt;
     return s;
 }
 
 void ReplayFeeder::publish_(ReplayOp op) noexcept {
-    w_.control->publish(ReplayControl{.gen = gen_, .op = op});
+    w_.control.publish(ReplayControl{.gen = gen_, .op = op});
 }
 
 bool ReplayFeeder::take_play(const Play& p) noexcept {
@@ -128,12 +125,10 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
         ++refusals_;
         last_refusal_ = Refusal::Busy;
         last_detail_ = 0;
-        if (w_.diag != nullptr)
-            w_.diag->appendf("{\"t\":\"tas\",\"k\":\"refused\",\"why\":\"busy\"}");
+        w_.diag.appendf("{\"t\":\"tas\",\"k\":\"refused\",\"why\":\"busy\"}");
         return true;
     }
-    if (w_.vfs == nullptr || w_.clock == nullptr || w_.ring == nullptr || w_.control == nullptr ||
-        w_.status == nullptr || w_.identity == nullptr || w_.core_status == nullptr) {
+    if (!w_.vfs) {
         refuse_(Refusal::NotWired);
         return true;
     }
@@ -141,8 +136,10 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
         refuse_(Refusal::MovieIo);
         return true;
     }
-    codec_ = w_.identity->copy(ident_) ? cores::movie_codec_for(ident_.rbf, p.movie) : nullptr;
-    if (codec_ == nullptr) {
+    codec_ = w_.identity.copy(ident_)
+                 ? infra::opt_ref_of(cores::movie_codec_for(ident_.rbf, p.movie))
+                 : infra::OptRef<const cores::IMovieCodec>{};
+    if (!codec_) {
         refuse_(Refusal::NoCodec);
         return true;
     }
@@ -192,7 +189,7 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
     movie_frames_ = 0;
     tries_ = 0;
     disc_ns_.reset();
-    vsync_ok_ = w_.video != nullptr && w_.video->output_locked();
+    vsync_ok_ = w_.video.output_locked();
     stage_ = Stage::Scanning;
     return true;
 }
@@ -424,9 +421,9 @@ void ReplayFeeder::finish_rom_() noexcept {
 
 void ReplayFeeder::settle_() noexcept {
     proto::StatusWord live{};
-    if (w_.core_status->sample_into(live) == 0) return refuse_(Refusal::NotWired);
+    if (w_.core_status.sample_into(live) == 0) return refuse_(Refusal::NotWired);
     std::optional<proto::ItemTable> table{};
-    if (w_.conf != nullptr && w_.conf->sample_into(conf_) != 0 && !conf_.truncated) {
+    if (w_.conf.sample_into(conf_) != 0 && !conf_.truncated) {
         if (auto t = proto::ItemTable::parse(std::string_view(conf_.text, conf_.len))) {
             table = std::move(*t);
         }
@@ -447,8 +444,7 @@ void ReplayFeeder::settle_() noexcept {
         if (stage_ == Stage::Settling && now_ns_() - since_ns_ <= kAnswerNs) return;
         last_setting_ = unmet->name;
         last_setting_offered_ = unmet->settable();
-        if (stage_ == Stage::Settling || !set_ok_ || w_.settings_tx == nullptr ||
-            !set_unmet_(live, needs, rows))
+        if (stage_ == Stage::Settling || !set_ok_ || !set_unmet_(live, needs, rows))
             return refuse_(Refusal::Setting);
         stage_ = Stage::Settling;
         since_ns_ = now_ns_();
@@ -488,16 +484,13 @@ void ReplayFeeder::settle_() noexcept {
         rom_index_ = *slot;
     }
     load_checkpoints_();
-    if (w_.diag != nullptr) {
-        w_.diag->appendf(
-            "{\"t\":\"tas\",\"k\":\"armed\",\"frames\":%u,\"ports\":%u,\"lead\":%d,"
-            "\"phase_us\":%u,\"poweron_us\":%u,\"vsync_ok\":%u,\"checks\":%u,\"status\":"
-            "\"%04x%04x%04x%04x%04x%04x%04x%04x\"}",
-            frames_, static_cast<unsigned>(facts_.ports), static_cast<int>(lead_), offset_us_,
-            poweron_ns_ / 1000u, vsync_ok_ ? 1u : 0u, static_cast<unsigned>(n_checks_),
-            live.words[7], live.words[6], live.words[5], live.words[4], live.words[3],
-            live.words[2], live.words[1], live.words[0]);
-    }
+    w_.diag.appendf("{\"t\":\"tas\",\"k\":\"armed\",\"frames\":%u,\"ports\":%u,\"lead\":%d,"
+                    "\"phase_us\":%u,\"poweron_us\":%u,\"vsync_ok\":%u,\"checks\":%u,\"status\":"
+                    "\"%04x%04x%04x%04x%04x%04x%04x%04x\"}",
+                    frames_, static_cast<unsigned>(facts_.ports), static_cast<int>(lead_),
+                    offset_us_, poweron_ns_ / 1000u, vsync_ok_ ? 1u : 0u,
+                    static_cast<unsigned>(n_checks_), live.words[7], live.words[6], live.words[5],
+                    live.words[4], live.words[3], live.words[2], live.words[1], live.words[0]);
     arm_();
 }
 
@@ -512,7 +505,7 @@ bool ReplayFeeder::set_unmet_(const proto::StatusWord& live,
         }
     }
     const auto put = [this](const cores::IMovieCodec::SettingNeed& n, unsigned value) {
-        return w_.settings_tx->push(proto::LinkOp::WriteStatus{
+        return w_.settings_tx.push(proto::LinkOp::WriteStatus{
             .start = proto::StatusBit{n.lo}, .width = n.width, .value = value});
     };
     for (std::size_t k = 0; k < needs.n; ++k) {
@@ -533,13 +526,10 @@ bool ReplayFeeder::set_unmet_(const proto::StatusWord& live,
         set_.push_back(SetSetting{.name = n.name,
                                   .was = value_label(labels, n, was),
                                   .now = value_label(labels, n, n.preferred)});
-        if (w_.diag != nullptr) {
-            w_.diag->appendf("{\"t\":\"tas\",\"k\":\"set\",\"setting\":\"%.*s\",\"lo\":%u,"
-                             "\"width\":%u,\"was\":%u,\"now\":%u}",
-                             static_cast<int>(n.name.size()), n.name.data(),
-                             static_cast<unsigned>(n.lo), static_cast<unsigned>(n.width), was,
-                             static_cast<unsigned>(n.preferred));
-        }
+        w_.diag.appendf("{\"t\":\"tas\",\"k\":\"set\",\"setting\":\"%.*s\",\"lo\":%u,"
+                        "\"width\":%u,\"was\":%u,\"now\":%u}",
+                        static_cast<int>(n.name.size()), n.name.data(), static_cast<unsigned>(n.lo),
+                        static_cast<unsigned>(n.width), was, static_cast<unsigned>(n.preferred));
     }
     last_setting_ = {};
     return true;
@@ -575,13 +565,12 @@ void ReplayFeeder::load_checkpoints_() noexcept {
 }
 
 std::optional<std::uint8_t> ReplayFeeder::rom_slot_() noexcept {
-    if (w_.conf == nullptr) return std::uint8_t{0xFF};
-    if (w_.conf->sample_into(conf_) == 0 || conf_.truncated) return std::nullopt;
+    if (w_.conf.sample_into(conf_) == 0 || conf_.truncated) return std::nullopt;
     const auto table = proto::ItemTable::parse(std::string_view(conf_.text, conf_.len));
     if (!table) return std::nullopt;
     const std::vector<proto::ConfStrEntry> slots = proto::ConfStr::slots_of(*table);
     const proto::FileSlotHit hit = proto::ConfStr::find_slot_in(slots, 'F', codec_->rom_digit());
-    if (hit.entry == nullptr) return std::nullopt;
+    if (!hit.entry) return std::nullopt;
     return hit.entry->ioctl_index;
 }
 
@@ -606,7 +595,7 @@ void ReplayFeeder::arm_() noexcept {
                            .period_ns = r.period_ns,
                            .line0_ns = r.line0_ns,
                            .poweron_ns = poweron_ns_};
-    if (!w_.ring->push(infra::make<ReplayMsg>(a, ReplayMsg::Head{gen_}))) {
+    if (!w_.ring.push(infra::make<ReplayMsg>(a, ReplayMsg::Head{gen_}))) {
         publish_(ReplayOp::Stop);
         return refuse_(Refusal::Busy);
     }
@@ -617,11 +606,11 @@ void ReplayFeeder::arm_() noexcept {
 void ReplayFeeder::stream_() noexcept {
     while (next_run_ < runs_.size()) {
         const ReplayMsg::Input& run = runs_[next_run_];
-        if (!w_.ring->push(infra::make<ReplayMsg>(run, ReplayMsg::Head{gen_}))) return;
+        if (!w_.ring.push(infra::make<ReplayMsg>(run, ReplayMsg::Head{gen_}))) return;
         frames_ = run.last + 1;
         ++next_run_;
     }
-    end_pushed_ = w_.ring->push(
+    end_pushed_ = w_.ring.push(
         infra::make<ReplayMsg>(ReplayMsg::End{.frame = movie_frames_}, ReplayMsg::Head{gen_}));
 }
 
@@ -651,32 +640,31 @@ void ReplayFeeder::tick_arming_(const ReplayStatus& s, bool fresh) noexcept {
         if (fresh && s.level == ReplayLevel::AwaitPowerOn) {
 
             CoreScope scope{};
-            if (w_.conf != nullptr && w_.conf->sample_into(conf_) != 0)
-                scope = CoreScope{conf_.gen};
+            if (w_.conf.sample_into(conf_) != 0) scope = CoreScope{conf_.gen};
             bool asked = false;
-            if (w_.asks != nullptr && event_ == ReplayMsg::PowerOnEvent::ResetPulse &&
-                codec_->rom_is_disc() && !disc_ns_) {
+            if (event_ == ReplayMsg::PowerOnEvent::ResetPulse && codec_->rom_is_disc() &&
+                !disc_ns_) {
                 UiRequest::MountImage mount{.index = proto::IoIndex{codec_->rom_digit()},
                                             .scope = scope};
-                if (mount.path.assign(rom_.view()) && w_.asks->push(mount) != kUncaused) {
+                if (mount.path.assign(rom_.view()) && w_.asks.push(mount) != kUncaused) {
                     disc_ns_ = now_ns_();
                     return;
                 }
             } else if (disc_ns_ && now_ns_() - *disc_ns_ < kDiscSettleNs) {
                 return;
-            } else if (w_.asks != nullptr && event_ == ReplayMsg::PowerOnEvent::ResetPulse) {
+            } else if (event_ == ReplayMsg::PowerOnEvent::ResetPulse) {
 
                 const UiRequest::ResetCore ask{
                     .edge = proto::ResetEdge::osd_toggle(proto::StatusBit{0}, false),
                     .scope = scope};
-                asked = w_.asks->push(ask) != kUncaused;
-            } else if (w_.asks != nullptr) {
+                asked = w_.asks.push(ask) != kUncaused;
+            } else {
 
                 const cores::RamImageRecipe ram = codec_->power_on_ram(facts_);
                 const std::size_t need = ram.size() == 0 ? 1 : 2;
                 const bool image_asked =
-                    UiRequestRing::kSlots - w_.asks->size() >= need &&
-                    (ram.size() == 0 || w_.asks->push(UiRequest::LoadRamImage{
+                    UiRequestRing::kSlots - w_.asks.size() >= need &&
+                    (ram.size() == 0 || w_.asks.push(UiRequest::LoadRamImage{
                                             .scope = scope, .recipe = ram}) != kUncaused);
                 UiRequest::LoadFileByDigit ask{};
                 ask.digit = proto::FileSlotDigit{codec_->rom_digit()};
@@ -684,7 +672,7 @@ void ReplayFeeder::tick_arming_(const ReplayStatus& s, bool fresh) noexcept {
                                         : UiRequest::SaveChoice::ReplayFresh;
                 ask.scope = scope;
                 (void)ask.path.assign(rom_.view());
-                asked = image_asked && w_.asks->push(ask) != kUncaused;
+                asked = image_asked && w_.asks.push(ask) != kUncaused;
             }
             if (!asked) {
                 publish_(ReplayOp::Stop);
@@ -694,7 +682,7 @@ void ReplayFeeder::tick_arming_(const ReplayStatus& s, bool fresh) noexcept {
             }
             stage_ = Stage::Loading;
             since_ns_ = now_ns_();
-            if (w_.osd != nullptr) w_.osd->close_osd();
+            w_.osd.close_osd();
         } else if (now_ns_() - since_ns_ > kAnswerNs) {
             publish_(ReplayOp::Stop);
             finish_(ReplayStatus{.gen = gen_, .end = ReplayEnd::Refused});
@@ -704,9 +692,7 @@ void ReplayFeeder::tick_arming_(const ReplayStatus& s, bool fresh) noexcept {
     if (fresh && s.level == ReplayLevel::Running) {
         stage_ = Stage::Streaming;
     } else if (now_ns_() - since_ns_ > kPowerOnNs) {
-        if (w_.diag != nullptr)
-            w_.diag->appendf("{\"t\":\"tas\",\"k\":\"no_power_on\",\"disc\":%u}",
-                             disc_ns_ ? 1u : 0u);
+        w_.diag.appendf("{\"t\":\"tas\",\"k\":\"no_power_on\",\"disc\":%u}", disc_ns_ ? 1u : 0u);
         publish_(ReplayOp::Stop);
         stage_ = Stage::Stopping;
         since_ns_ = now_ns_();
@@ -714,21 +700,20 @@ void ReplayFeeder::tick_arming_(const ReplayStatus& s, bool fresh) noexcept {
 }
 
 void ReplayFeeder::checkpoints_(const ReplayStatus& s) noexcept {
-    if (s.gen != gen_ || w_.shots == nullptr) return;
+    if (s.gen != gen_) return;
     while (next_check_ < n_checks_ && s.movie_frame >= 0 &&
            static_cast<std::uint32_t>(s.movie_frame) >= checks_[next_check_]) {
         char name[48];
         const int n = std::snprintf(name, sizeof name, "tas-%u-%u.png", static_cast<unsigned>(gen_),
                                     checks_[next_check_]);
-        if (n > 0) (void)w_.shots->take(std::string_view(name, static_cast<std::size_t>(n)), false);
+        if (n > 0) (void)w_.shots.take(std::string_view(name, static_cast<std::size_t>(n)), false);
         ++next_check_;
     }
 }
 
 void ReplayFeeder::log_end_(const ReplayStatus& s) noexcept {
-    if (w_.diag == nullptr) return;
-    w_.diag->appendf("{\"t\":\"tas\",\"k\":\"end\",%s,\"tries\":%u}",
-                     format_replay_status(s).c_str(), tries_);
+    w_.diag.appendf("{\"t\":\"tas\",\"k\":\"end\",%s,\"tries\":%u}",
+                    format_replay_status(s).c_str(), tries_);
 }
 
 void ReplayFeeder::finish_(const ReplayStatus& s) noexcept {
@@ -739,7 +724,7 @@ void ReplayFeeder::finish_(const ReplayStatus& s) noexcept {
         return arm_();
     }
 
-    if (w_.input != nullptr) w_.input->publish_edge_reset();
+    w_.input.publish_edge_reset();
     stage_ = Stage::Idle;
     release_movie_();
 }

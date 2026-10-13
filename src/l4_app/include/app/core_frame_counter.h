@@ -7,6 +7,7 @@
 #include "app/frame_demand.h"
 #include "hal/spi_transport.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "proto/frame_counter_read.h"
@@ -18,10 +19,10 @@ class CoreFrameCounter {
 
 public:
     struct Wiring {
-        hal::ISpiTransport* link = nullptr;
-        const os::IClock* clock = nullptr;
-        const FrameDemandCell* demand = nullptr;
-        CoreFrameCell* out = nullptr;
+        hal::ISpiTransport& link;
+        const os::IClock& clock;
+        infra::OptRef<const FrameDemandCell> demand{};
+        infra::OptRef<CoreFrameCell> out{};
     };
 
     static constexpr std::int64_t kRebaseNs = 1'000'000'000;

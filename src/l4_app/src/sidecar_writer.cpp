@@ -2,7 +2,6 @@
 #include "app/sidecar_writer.h"
 
 #include <fcntl.h>
-#include <sys/mman.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -12,15 +11,14 @@
 
 namespace mister::app {
 
-bool SidecarWriter::idle() const noexcept { return w_.in == nullptr || w_.in->size() == 0; }
+bool SidecarWriter::idle() const noexcept { return w_.in.size() == 0; }
 
 int SidecarWriter::park_ms() const noexcept { return -1; }
 
 void SidecarWriter::serve() noexcept {
     TASTY_SEAT_BODY(SidecarWriter);
-    if (w_.in == nullptr) return;
     for (unsigned n = 0; n < kMsgsPerPass; ++n) {
-        const auto m = w_.in->pop();
+        const auto m = w_.in.pop();
         if (!m) break;
         switch (m->kind) {
             case SidecarKind::Open:
@@ -34,14 +32,14 @@ void SidecarWriter::serve() noexcept {
                 break;
         }
     }
-    if (dirty_ && w_.status != nullptr) w_.status->publish(st_);
+    if (dirty_) w_.status.publish(st_);
     dirty_ = false;
 }
 
 void SidecarWriter::release() noexcept {
     TASTY_SEAT_BODY(SidecarWriter);
     if (fd_.valid()) close_();
-    if (w_.status != nullptr) w_.status->publish(st_);
+    w_.status.publish(st_);
 }
 
 void SidecarWriter::open_(const SidecarMsg& m) noexcept {
@@ -57,29 +55,20 @@ void SidecarWriter::open_(const SidecarMsg& m) noexcept {
     const std::size_t n = std::strlen(kHeader);
     used_ = 0;
     if (!grow_(n)) return fail_(ENOMEM);
-    std::memcpy(buf_, kHeader, n);
+    std::memcpy(buf_.data(), kHeader, n);
     used_ = n;
 }
 
 bool SidecarWriter::grow_(std::size_t need) noexcept {
-    std::size_t cap = cap_ == 0 ? kBufBytes : cap_;
+    const std::size_t had = buf_.size();
+    std::size_t cap = had == 0 ? kBufBytes : had;
     while (cap < used_ + need)
         cap *= 2;
-    if (cap == cap_) return true;
-    void* const p = buf_ == nullptr ? ::mmap(nullptr, cap, PROT_READ | PROT_WRITE,
-                                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
-                                    : ::mremap(buf_, cap_, cap, MREMAP_MAYMOVE);
-    if (p == MAP_FAILED) return false;
-    buf_ = static_cast<char*>(p);
-    cap_ = cap;
-    return true;
+    if (cap == had) return true;
+    return buf_.resize(cap);
 }
 
-void SidecarWriter::unmap_() noexcept {
-    if (buf_ != nullptr) (void)::munmap(buf_, cap_);
-    buf_ = nullptr;
-    cap_ = 0;
-}
+void SidecarWriter::unmap_() noexcept { buf_.release(); }
 
 void SidecarWriter::row_(const SidecarMsg& m) noexcept {
     if (m.gen != st_.gen || st_.state != RecWriteState::Open) {
@@ -100,14 +89,14 @@ void SidecarWriter::row_(const SidecarMsg& m) noexcept {
     if (n != 0 && st_.state == RecWriteState::Open && !grow_(n)) {
 
         flush_();
-        if (st_.state == RecWriteState::Open && n > cap_) fail_(ENOMEM);
+        if (st_.state == RecWriteState::Open && n > buf_.size()) fail_(ENOMEM);
     }
     if (n == 0 || st_.state != RecWriteState::Open) {
         ++st_.dropped;
         dirty_ = true;
         return;
     }
-    std::memcpy(buf_ + used_, line, n);
+    std::memcpy(buf_.data() + used_, line, n);
     used_ += n;
     ++st_.rows;
     dirty_ = true;
@@ -116,7 +105,7 @@ void SidecarWriter::row_(const SidecarMsg& m) noexcept {
 void SidecarWriter::flush_() noexcept {
     std::size_t off = 0;
     while (off < used_ && fd_.valid()) {
-        const ssize_t w = ::write(fd_.get(), buf_ + off, used_ - off);
+        const ssize_t w = ::write(fd_.get(), buf_.data() + off, used_ - off);
         if (w < 0 && errno == EINTR) continue;
         if (w <= 0) {
             used_ = 0;

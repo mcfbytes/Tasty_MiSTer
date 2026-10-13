@@ -82,6 +82,10 @@ public:
 
     [[nodiscard]] Ex<void> parse(std::string_view xml, bool core_supports_mgl);
 
+    enum class PathBase : std::uint8_t { Home, Card };
+
+    [[nodiscard]] Ex<void> adopt(const MglItem& item, PathBase base, bool core_supports_mgl);
+
     [[nodiscard]] bool set_homes(std::string_view file_home, std::string_view image_home) noexcept;
 
     void set_scope(CoreScope s) noexcept { scope_ = s; }
@@ -149,6 +153,7 @@ private:
     std::array<MglItem, kMaxItems> items_{};
     PathText file_home_{};
     PathText image_home_{};
+    PathBase base_ = PathBase::Home;
     std::uint8_t count_ = 0;
     std::uint8_t current_ = 0;
     std::uint32_t publishes_ = 0;

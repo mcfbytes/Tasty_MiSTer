@@ -18,6 +18,7 @@ enum class AssetAnchor : std::uint8_t {
     Search,
     ImageDir,
     ImageParentDir,
+    CoreHome,
 };
 
 enum class AssetLoader : std::uint8_t { GenericFileTx, PceBios };
@@ -46,15 +47,21 @@ inline constexpr std::size_t kMaxStartAssets = 5;
 
 inline constexpr svc::SearchDir kCoreHomeDir[] = {svc::SearchDir::CoreDir};
 
-consteval std::array<BootAsset, 5> stock_start_chain(std::string_view subdir) {
-    return {{
-        {.name = "boot0.rom", .where = kCoreHomeDir, .subdir = subdir, .dest = WideIoIndex{0x00}},
-        {.name = "boot1.rom", .where = kCoreHomeDir, .subdir = subdir, .dest = WideIoIndex{0x40}},
-        {.name = "boot2.rom", .where = kCoreHomeDir, .subdir = subdir, .dest = WideIoIndex{0x80}},
-        {.name = "boot3.rom", .where = kCoreHomeDir, .subdir = subdir, .dest = WideIoIndex{0xC0}},
-        {.name = "boot.rom", .where = kCoreHomeDir, .subdir = subdir, .dest = WideIoIndex{0x00}},
-    }};
+consteval std::array<BootAsset, 5> stock_start_chain(std::string_view subdir,
+                                                     AssetAnchor anchor = AssetAnchor::Search) {
+    const auto row = [subdir, anchor](std::string_view name, std::uint16_t dest) consteval {
+        return BootAsset{.name = name,
+                         .where = kCoreHomeDir,
+                         .anchor = anchor,
+                         .subdir = subdir,
+                         .dest = WideIoIndex{dest}};
+    };
+    return {{row("boot0.rom", 0x00), row("boot1.rom", 0x40), row("boot2.rom", 0x80),
+             row("boot3.rom", 0xC0), row("boot.rom", 0x00)}};
 }
+
+inline constexpr auto kCoreHomeChain = stock_start_chain({}, AssetAnchor::CoreHome);
+static_assert(kCoreHomeChain.size() <= kMaxStartAssets);
 
 [[nodiscard]] constexpr bool start_row_sends(const BootAsset& row, bool index0_taken) noexcept {
     return !(index0_taken && row.dest.v == 0);

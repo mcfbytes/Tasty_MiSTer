@@ -2,9 +2,9 @@
 #include "os/vm_compaction.h"
 
 #include <array>
-#include <charconv>
 #include <span>
 
+#include "infra/parse_int.h"
 #include "os/small_file.h"
 
 namespace mister::os {
@@ -22,10 +22,7 @@ std::optional<long> read_one(const char* path) noexcept {
 std::optional<long> sysctl_value_from(std::string_view text) noexcept {
     while (!text.empty() && (text.back() == '\n' || text.back() == ' '))
         text.remove_suffix(1);
-    long v = 0;
-    const auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), v);
-    if (text.empty() || ec != std::errc{} || end != text.data() + text.size()) return std::nullopt;
-    return v;
+    return infra::parse_int<long>(text);
 }
 
 VmCompaction read_vm_compaction(const char* unevictable_path,

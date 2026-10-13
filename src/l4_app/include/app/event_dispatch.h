@@ -21,6 +21,7 @@ concept EventUiSink = requires(S& s, const Event& m, const Event::Head& h) {
     s.on(std::declval<const Event::SessionAdvisory&>(), h);
     s.on(std::declval<const Event::SessionEnded&>(), h);
     s.on(std::declval<const Event::RamImageDeclined&>(), h);
+    s.on(std::declval<const Event::RequestDone&>(), h);
     s.misrouted(m);
 };
 

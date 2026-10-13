@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include "app/types.h"
@@ -35,25 +36,28 @@ public:
     using Pending = Chan::Loan;
     using Job = Chan::Job;
 
-    ScreenshotQueue() noexcept : chan_(xthread::Polled{}, xthread::Polled{}) {}
+    ScreenshotQueue() noexcept
+        : chan_(xthread::Polled{}, xthread::Polled{}), ui_(chan_.owner()), diag_(chan_.worker()) {}
 
     [[nodiscard]] Pending arm() noexcept {
-        auto p = chan_.acquire();
+        auto p = ui_.acquire();
         if (!p) drops_.add(1);
         return p;
     }
-    void submit(Pending&& p) noexcept { chan_.send(std::move(p)); }
+    void submit(Pending&& p) noexcept { ui_.send(std::move(p)); }
 
-    [[nodiscard]] Job take() noexcept { return chan_.take(); }
+    [[nodiscard]] Job take() noexcept { return diag_.take(); }
 
-    [[nodiscard]] Pending reap() noexcept { return chan_.reap(); }
+    [[nodiscard]] Pending reap() noexcept { return ui_.reap(); }
 
     std::uint32_t drops() const noexcept { return drops_.get(); }
 
-    std::uint32_t result_drops() const noexcept { return chan_.census().breaches; }
+    std::uint32_t result_drops() const noexcept { return chan_.breaches(); }
 
 private:
     Chan chan_;
+    Chan::Owner ui_;
+    Chan::Worker diag_;
     xthread::Counter drops_{};
 };
 

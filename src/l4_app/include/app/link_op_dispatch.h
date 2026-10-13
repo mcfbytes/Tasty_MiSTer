@@ -130,7 +130,7 @@ concept LinkOpSessionSink = std::same_as<typename S::Result, ILinkEncoder::Outco
                                     s.on(std::declval<const proto::LinkOp::DropCore&>(), c)
                                 } -> std::same_as<ILinkEncoder::Outcome>;
                                 {
-                                    s.on(std::declval<const proto::LinkOp::MakeCore&>(), c)
+                                    s.on(std::declval<const proto::LinkOp::AdoptCore&>(), c)
                                 } -> std::same_as<ILinkEncoder::Outcome>;
                                 {
                                     s.on(std::declval<const proto::LinkOp::SessionUp&>(), c)

@@ -15,6 +15,8 @@ struct PcmFeedState {
     bool drained = false;
 
     std::uint32_t served = 0;
+
+    std::uint32_t attaches = 0;
 };
 
 }  // namespace mister::cores

@@ -8,12 +8,15 @@
 #include <cstdint>
 #include <utility>
 
+#include "app/device_table_channel.h"
 #include "app/input_wire.h"
 #include "app/launcher_key_bridge.h"
 #include "app/launcher_state.h"
+#include "app/rumble_relay.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
+#include "infra/telemetry.h"
 #include "os/clock.h"
 #include "proto/link_event.h"
 #include "proto/ps2_frame.h"
@@ -34,25 +37,40 @@ static_assert(LauncherKeyBridge::kPadSlots >= svc::kMaxDevices);
 class LinkTxChannel;
 class LinkRxChannel;
 
+struct InputDecodeCounts {
+    std::uint32_t rounds = 0;
+    std::uint32_t events = 0;
+    std::uint32_t keys_published = 0;
+    std::uint32_t keys_emitted = 0;
+    std::uint32_t mouse_packets = 0;
+    std::uint32_t kicks = 0;
+    std::uint32_t fd_evictions = 0;
+    std::uint32_t registered = 0;
+    std::uint32_t joy_seen = 0;
+    std::uint32_t joy_players = 0;
+    std::uint32_t captures = 0;
+
+    std::uint32_t mapped = 0;
+    std::uint32_t slotted = 0;
+    std::uint32_t mask_changes = 0;
+    std::uint32_t axis_edges = 0;
+    std::uint32_t mouse_remainder = 0;
+    std::uint32_t key_overflows = 0;
+    std::uint32_t quirk_drops = 0;
+    std::uint32_t slot_live = 0;
+    std::uint32_t slot_ghosts = 0;
+    std::uint32_t slot_hash[svc::kMaxPlayers]{};
+};
+
 class InputDecode {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
     static constexpr SeatTag kSeat = SeatTag::Input;
 
-    struct Counts {
-        std::uint32_t rounds = 0;
-        std::uint32_t events = 0;
-        std::uint32_t keys_published = 0;
-        std::uint32_t keys_emitted = 0;
-        std::uint32_t mouse_packets = 0;
-        std::uint32_t kicks = 0;
-        std::uint32_t fd_evictions = 0;
-        std::uint32_t registered = 0;
-        std::uint32_t joy_seen = 0;
-        std::uint32_t joy_players = 0;
-        std::uint32_t captures = 0;
-    };
+    using Counts = InputDecodeCounts;
+
+    using CountsCell = xthread::Telemetry<Counts, SeatTag::Input>;
 
     class Fds {
     public:
@@ -72,17 +90,21 @@ public:
         xthread::DiagLog& diag;
         LinkTxChannel& inbox;
         LinkRxChannel& link_rx;
+        xthread::WakeFlag::Kicker rt_wake;
         infra::OptRef<const LauncherStateCell> cell{};
         infra::OptRef<LauncherKeyBridge> keys{};
+        infra::OptRef<xthread::WakeFlag> ui_wake{};
     };
 
-    InputDecode(Fds fds, InputWire& wire, svc::InputService& svc, os::IClock& clock,
-                Wiring w) noexcept;
+    InputDecode(Fds fds, InputWire& wire, svc::InputService& svc, DeviceTableChannel& tables,
+                os::IClock& clock, Wiring w) noexcept;
     InputDecode(const InputDecode&) = delete;
     InputDecode& operator=(const InputDecode&) = delete;
 
     void on(const proto::LinkEvent::Ps2Control& c);
     void on(const proto::LinkEvent::Ps2ControlEnded&) noexcept;
+
+    void on(const proto::LinkEvent::PolledWord& w) noexcept;
 
     void end_ps2_control() noexcept;
     void misrouted(const proto::LinkEvent& m) noexcept;
@@ -95,13 +117,14 @@ public:
 
     unsigned drop_link_events() noexcept;
 
-    void before_wait(infra::OptRef<const xthread::WakeFlag> stop = {});
+    void before_wait();
     void wait_events(int timeout_ms) noexcept;
     unsigned after_wait();
 
     unsigned decode_round(int timeout_ms);
 
     Counts counts() const noexcept;
+    const CountsCell& counts_cell() const noexcept { return counts_cell_; }
 
     int epoll_fd() const noexcept { return epfd_.get(); }
     std::size_t registered_fds() const noexcept {
@@ -112,6 +135,9 @@ public:
 
     proto::Ps2Keyboard& keyboard() noexcept { return kbd_; }
     proto::Ps2Mouse& mouse() noexcept { return mouse_; }
+    const RumbleRelay& rumble() const noexcept { return rumble_; }
+
+    [[nodiscard]] bool f12_mod_needed() const noexcept { return f12_mod_needed_; }
 
 private:
     enum class Reseat : std::uint8_t { Skip, Bridge };
@@ -126,16 +152,29 @@ private:
     unsigned flush_ps2_frames_();
     void flush_mouse_();
     void sweep_dropped_keys_();
-    bool apply_requests(infra::OptRef<const xthread::WakeFlag> stop);
+
+    [[nodiscard]] bool is_osd_toggle_(std::uint16_t code) const noexcept;
+    bool apply_requests();
+
+    unsigned take_tables_() noexcept;
+    void deregister_devices_() noexcept;
     void evict_fd(int fd);
 
     InputWire& wire_;
     svc::InputService& svc_;
+    DeviceTableChannel::Receiver tables_rx_;
     xthread::DiagLog& diag_;
     LinkTxChannel& inbox_;
     LinkRxChannel& link_rx_;
+
+    xthread::WakeFlag::Kicker rt_wake_;
+    RumbleRelay rumble_;
+
+    bool f12_mod_needed_ = false;
     infra::OptRef<const LauncherStateCell> launcher_cell_;
     infra::OptRef<LauncherKeyBridge> launcher_keys_;
+
+    infra::OptRef<xthread::WakeFlag> ui_wake_;
     bool bridging_ = false;
 
     proto::Ps2Keyboard kbd_{};
@@ -183,7 +222,7 @@ private:
     std::uint32_t capture_served_ = 0;
 
     int stop_fd_ = -1;
-    xthread::WakeFlag* pause_wake_ = nullptr;
+    infra::OptRef<xthread::WakeFlag> pause_wake_;
     bool muted_ = false;
 
     static constexpr std::size_t kMaxEpollEvents = 16;
@@ -191,6 +230,7 @@ private:
     int n_ready_ = 0;
     bool rebuilt_ = false;
 
+    CountsCell counts_cell_{};
     std::atomic<std::uint32_t> n_rounds_{0};
     std::atomic<std::uint32_t> n_events_{0};
     std::atomic<std::uint32_t> n_keys_pub_{0};
@@ -217,8 +257,7 @@ static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
                          hal::seat_of(m, InputDecode::kSeat).cpu !=
                              hal::seat_of(m, SeatTag::RT).cpu;
               }),
-              "item: this lane owns a SECOND epoll set and BLOCKS in it, "
-              "and it spins on nanosleep(200us) inside the item baton. "
+              "item: this lane owns a SECOND epoll set and BLOCKS in it. "
               "T-RT's seat has exactly one legal block point (the Executive's "
               "own epoll_wait, reactor/executive.h) and no legal sleep at "
               "all, so seating this lane at T-RT's priority or on T-RT's CPU "

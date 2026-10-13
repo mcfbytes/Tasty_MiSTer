@@ -33,6 +33,18 @@ enum class CoreType : std::uint8_t {
     SharpMz = 0xA7,
 };
 
+[[nodiscard]] constexpr CoreType fold_core_type(std::uint8_t type_byte) noexcept {
+    switch (type_byte) {
+        case 0xA4:
+        case 0xA8:
+            return CoreType::EightBit;
+        case 0xA7:
+            return CoreType::SharpMz;
+        default:
+            return CoreType::Unknown;
+    }
+}
+
 class CoreSession {
     TASTY_SEAT_RESIDENT(RT);
 
@@ -56,20 +68,20 @@ public:
 
     [[nodiscard]] Ex<void> configure_after_identity();
 
-    Ex<void> set_memory_size(MemSizeCookie cookie);
+    [[nodiscard]] Ex<void> set_memory_size(MemSizeCookie cookie);
 
-    Ex<void> assert_reset();
+    [[nodiscard]] Ex<void> assert_reset();
 
     [[nodiscard]] Ex<void> accept_conf_str(const Ex<std::span<const std::uint8_t>>& body);
 
     [[nodiscard]] bool conf_str_window_open() const noexcept;
 
-    Ex<void> load_saved_config();
-    Ex<void> send_rtc();
+    [[nodiscard]] Ex<void> load_saved_config();
+    [[nodiscard]] Ex<void> send_rtc();
 
     [[nodiscard]] Ex<void> send_rtc_at(std::uint32_t unix_seconds);
 
-    Ex<void> release_reset();
+    [[nodiscard]] Ex<void> release_reset();
 
     void refuse() noexcept { phase_ = SessionPhase::Failed; }
 
@@ -86,7 +98,7 @@ public:
     [[nodiscard]] Ex<void> flush_status();
 
 private:
-    Ex<void> fail(Error e);
+    [[nodiscard]] Ex<void> fail(Error e);
     [[nodiscard]] bool ladder_window_() const noexcept;
 
     hal::ISpiTransport* link_;

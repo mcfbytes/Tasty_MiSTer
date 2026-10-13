@@ -29,7 +29,7 @@ tasty_add_header_checks(tasty_boards_header_checks LIB mister_boards HEADERS
 
 if(TASTY_BUILD_TESTS)
 
-  foreach(mod IN ITEMS link_port loader)
+  foreach(mod IN ITEMS axi board_windows link_port loader)
     tasty_unit_test(tasty_boards_${mod}_unit
       NAME tasty.boards_${mod}
       SOURCES tests/${mod}_unit.cpp

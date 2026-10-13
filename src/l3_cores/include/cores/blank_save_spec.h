@@ -7,6 +7,7 @@
 #include <span>
 
 #include "cores/blank_region.h"
+#include "infra/byte_view.h"
 
 namespace mister::cores {
 
@@ -31,7 +32,7 @@ inline void blank_paste(std::uint64_t base, std::span<std::uint8_t> out, std::ui
     const std::uint64_t from = at > base ? at : base;
     const std::uint64_t to = src_end < win_end ? src_end : win_end;
     std::memcpy(out.data() + (from - base),
-                reinterpret_cast<const std::uint8_t*>(src.data()) + (from - at),
+                infra::byte_cast<const std::uint8_t>(src).data() + (from - at),
                 static_cast<std::size_t>(to - from));
 }
 }  // namespace detail

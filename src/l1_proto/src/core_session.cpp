@@ -34,22 +34,8 @@ Ex<CoreType> CoreSession::accept_identity(const Ex<hal::CoreIdentity>& id) {
         return std::unexpected(id.error());
     }
 
-    dual_sdram_ = id->dual_sdram;
-    switch (id->type_byte) {
-        case 0xA4:
-            type_ = CoreType::EightBit;
-            break;
-        case 0xA8:
-            type_ = CoreType::EightBit;
-            dual_sdram_ = true;
-            break;
-        case 0xA7:
-            type_ = CoreType::SharpMz;
-            break;
-        default:
-            type_ = CoreType::Unknown;
-            break;
-    }
+    dual_sdram_ = id->dual_sdram || id->type_byte == 0xA8;
+    type_ = fold_core_type(id->type_byte);
 
     caps_ = signals_->latch_capabilities();
     if (type_ == CoreType::Unknown) {

@@ -41,8 +41,11 @@ if(TASTY_BUILD_TESTS)
   target_include_directories(tasty_reactor_executive_unit
                              PRIVATE ${CMAKE_SOURCE_DIR}/tests)
 
+  add_test(NAME tasty.reactor_executive_timing COMMAND tasty_reactor_executive_unit --timing)
+  set_tests_properties(tasty.reactor_executive_timing PROPERTIES
+                       TIMEOUT 120 LABELS timing RUN_SERIAL TRUE)
   if(NOT CMAKE_CROSSCOMPILING)
-    set_tests_properties(tasty.reactor_executive
+    set_tests_properties(tasty.reactor_executive_timing
                          PROPERTIES FAIL_REGULAR_EXPRESSION "NOT CHECKED:")
   endif()
 

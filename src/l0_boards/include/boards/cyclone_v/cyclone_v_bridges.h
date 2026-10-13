@@ -15,7 +15,7 @@ namespace mister::hal {
 class BoardWindows;
 }
 
-namespace mister::boards {
+namespace mister::boards::cyclone_v {
 
 struct SdrCtl {
     enum class Reg : std::uint32_t { FpgaPortRst = 0x5080 };
@@ -72,14 +72,14 @@ inline constexpr BridgeStep kEnableSequence[] = {
     {BridgeBlock::Nic301, Nic301::kBridgesVisible},
 };
 
-class CycloneVBridges final : public hal::IBridgeSequencer {
+class Bridges final : public hal::IBridgeSequencer {
     TASTY_SEAT_EXEMPT(main);
 
 public:
-    [[nodiscard]] static Ex<CycloneVBridges> open(hal::BoardWindows& windows);
+    [[nodiscard]] static Ex<Bridges> open(hal::BoardWindows& windows);
 
-    static CycloneVBridges over(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
-                                hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic);
+    static Bridges over(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
+                        hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic);
 
     [[nodiscard]] Ex<void> pre_program() override;
     [[nodiscard]] Ex<void> post_program() override;
@@ -87,9 +87,9 @@ public:
     [[nodiscard]] Ex<void> request_board_reset() override;
 
 private:
-    CycloneVBridges() = default;
-    CycloneVBridges(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
-                    hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic);
+    Bridges() = default;
+    Bridges(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
+            hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic);
     void apply(std::span<const BridgeStep> steps);
 
     hal::RegisterWindow<SdrCtl> sdr_;
@@ -100,4 +100,4 @@ private:
     std::array<hal::WindowClaim, 4> claims_{};
 };
 
-}  // namespace mister::boards
+}  // namespace mister::boards::cyclone_v

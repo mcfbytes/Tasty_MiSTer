@@ -61,26 +61,39 @@ Cmp::Head answer_head(const Req::Head& h, proto::StorageStatus st) noexcept {
     return Cmp::Head{h.seq, h.slot, st, {}};
 }
 
+enum class Stamp : std::uint8_t {
+    Bound,
+    Staged,
+    Unbind,
+};
+
 struct Admit {
     Req::Head head{};
     proto::ArenaHalf half{};
     bool known = false;
     bool data = false;
+    Stamp stamp = Stamp::Bound;
 };
 struct AdmitReader {
     using Result = Admit;
     Admit on(const Req::Read& a, const Req::Head& h) const noexcept {
-        return {h, a.half, true, true};
+        return {h, a.half, true, true, Stamp::Bound};
     }
     Admit on(const Req::Write& a, const Req::Head& h) const noexcept {
-        return {h, a.half, true, true};
+        return {h, a.half, true, true, Stamp::Bound};
     }
     Admit on(const Req::Create& a, const Req::Head& h) const noexcept {
-        return {h, a.half, true, true};
+        return {h, a.half, true, true, Stamp::Bound};
     }
-    Admit on(const Req::Flush&, const Req::Head& h) const noexcept { return {h, {}, true, false}; }
-    Admit on(const Req::Attach&, const Req::Head& h) const noexcept { return {h, {}, true, false}; }
-    Admit on(const Req::Detach&, const Req::Head& h) const noexcept { return {h, {}, true, false}; }
+    Admit on(const Req::Flush&, const Req::Head& h) const noexcept {
+        return {h, {}, true, false, Stamp::Bound};
+    }
+    Admit on(const Req::Attach&, const Req::Head& h) const noexcept {
+        return {h, {}, true, false, Stamp::Staged};
+    }
+    Admit on(const Req::Detach&, const Req::Head& h) const noexcept {
+        return {h, {}, true, false, Stamp::Unbind};
+    }
     Admit misrouted(const Req&) const noexcept { return {}; }
 };
 static_assert(proto::StorageRequestSink<AdmitReader>);
@@ -89,22 +102,25 @@ static_assert(proto::StorageRequestSink<AdmitReader>);
 
 static_assert(proto::StorageRequestSink<StorageService, StorageService::Work>);
 
-IStorageBackend* StorageService::data_backend_(proto::SlotIndex slot) noexcept {
-    return slot.v < kSlots ? backends_[slot.v] : nullptr;
+infra::OptRef<IStorageBackend> StorageService::live_(proto::SlotIndex slot,
+                                                     const Work& w) const noexcept {
+    if (slot.v >= kSlots || w.gen != io_.served[slot.v]) return {};
+    return w.backend;
 }
 
 void StorageService::on(const Req::Read& a, const Req::Head& h, Work& w) noexcept {
     Cmp::Read c{.offset = a.offset, .half = a.half};
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (IStorageBackend* b = data_backend_(h.slot); b == nullptr) {
+    if (const auto live = live_(h.slot, w); !live) {
         st = proto::StorageStatus::Refused;
     } else {
-        b->note_tag(h.tag);
+        IStorageBackend& b = *live;
+        b.note_tag(h.tag);
 
         const std::span<std::uint8_t> whole = w.data;
         const std::span<std::uint8_t> dst =
             whole.first(a.bytes > whole.size() ? whole.size() : a.bytes);
-        auto n = b->read_at(a.offset, dst);
+        auto n = b.read_at(a.offset, dst);
 
         if (n) {
             const std::size_t got = *n < dst.size() ? *n : dst.size();
@@ -120,14 +136,15 @@ void StorageService::on(const Req::Read& a, const Req::Head& h, Work& w) noexcep
 void StorageService::on(const Req::Write& a, const Req::Head& h, Work& w) noexcept {
     Cmp::Write c{.offset = a.offset, .half = a.half};
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (IStorageBackend* b = data_backend_(h.slot); b == nullptr) {
+    if (const auto live = live_(h.slot, w); !live) {
         st = proto::StorageStatus::Refused;
     } else {
-        b->note_tag(h.tag);
+        IStorageBackend& b = *live;
+        b.note_tag(h.tag);
         const std::span<const std::uint8_t> whole = w.data;
         const std::uint32_t want =
             a.bytes > whole.size() ? static_cast<std::uint32_t>(whole.size()) : a.bytes;
-        auto n = b->write_at(a.offset, whole.first(want));
+        auto n = b.write_at(a.offset, whole.first(want));
         if (!n) {
             st = status_of(n.error().code);
         } else {
@@ -141,14 +158,15 @@ void StorageService::on(const Req::Write& a, const Req::Head& h, Work& w) noexce
 void StorageService::on(const Req::Create& a, const Req::Head& h, Work& w) noexcept {
     Cmp::Create c{.half = a.half};
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (IStorageBackend* b = data_backend_(h.slot); b == nullptr) {
+    if (const auto live = live_(h.slot, w); !live) {
         st = proto::StorageStatus::Refused;
     } else {
-        b->note_tag(h.tag);
+        IStorageBackend& b = *live;
+        b.note_tag(h.tag);
         const std::span<const std::uint8_t> whole = w.data;
         const std::uint32_t want =
             a.bytes > whole.size() ? static_cast<std::uint32_t>(whole.size()) : a.bytes;
-        auto e = b->create(whole.first(want));
+        auto e = b.create(whole.first(want));
         if (e) {
             c.size = e->v;
             c.bytes = want;
@@ -161,11 +179,12 @@ void StorageService::on(const Req::Create& a, const Req::Head& h, Work& w) noexc
 
 void StorageService::on(const Req::Flush&, const Req::Head& h, Work& w) noexcept {
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (IStorageBackend* b = data_backend_(h.slot); b == nullptr) {
+    if (const auto live = live_(h.slot, w); !live) {
         st = proto::StorageStatus::Refused;
     } else {
-        b->note_tag(h.tag);
-        if (auto e = b->flush(); !e) st = status_of(e.error().code);
+        IStorageBackend& b = *live;
+        b.note_tag(h.tag);
+        if (auto e = b.flush(); !e) st = status_of(e.error().code);
     }
     finish_(st, w, infra::make<Cmp>(Cmp::Flush{}, answer_head(h, st)));
 }
@@ -173,13 +192,11 @@ void StorageService::on(const Req::Flush&, const Req::Head& h, Work& w) noexcept
 void StorageService::on(const Req::Attach&, const Req::Head& h, Work& w) noexcept {
     Cmp::Attach c{};
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    const unsigned s = h.slot.v;
-    if (s >= kSlots || attach_[s] == nullptr) {
+    if (h.slot.v >= kSlots || !w.backend) {
         st = proto::StorageStatus::Refused;
     } else {
-        backends_[s] = attach_[s];
-        attach_[s] = nullptr;
-        auto e = backends_[s]->open_extent();
+        io_.served[h.slot.v] = w.gen;
+        auto e = w.backend->open_extent();
         if (e) {
             c.size = e->v;
         } else {
@@ -191,14 +208,13 @@ void StorageService::on(const Req::Attach&, const Req::Head& h, Work& w) noexcep
 
 void StorageService::on(const Req::Detach&, const Req::Head& h, Work& w) noexcept {
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (const unsigned s = h.slot.v; s >= kSlots) {
+    if (h.slot.v >= kSlots) {
         st = proto::StorageStatus::Refused;
     } else {
 
-        if (backends_[s] != nullptr) backends_[s]->release();
-        backends_[s] = nullptr;
+        io_.served[h.slot.v] = w.gen;
 
-        attach_[s] = nullptr;
+        if (w.backend) w.backend->release();
     }
     finish_(st, w, infra::make<Cmp>(Cmp::Detach{}, answer_head(h, st)));
 }
@@ -221,13 +237,13 @@ void StorageService::perform_(const Req& ask, Work& w) noexcept {
 void StorageService::serve() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(StorageService, A);
     if (Ctl::Job j = ctl_.take()) {
-        Work w{{}, j->answer};
+        Work w{{}, j->answer, j->backend, j->gen};
         perform_(j->ask, w);
         if (w.performed) j.complete();
         return;
     }
     if (Data::Job j = data_.take()) {
-        Work w{std::span<std::uint8_t>{j->data, kHalfBytes}, j->answer};
+        Work w{std::span<std::uint8_t>{j->data, kHalfBytes}, j->answer, j->backend, j->gen};
         perform_(j->ask, w);
         if (w.performed) j.complete();
     }
@@ -238,31 +254,31 @@ bool StorageService::idle() const noexcept { return data_.outbound() == 0 && ctl
 StorageService::~StorageService() {
 
     const SeatScope as_rt{SeatTag::RT};
-    for (auto& slot : data_hands_)
+    for (auto& slot : rt_.data_hands)
         for (auto& l : slot)
             l = Data::Loan{};
-    for (auto& l : ctl_hands_)
+    for (auto& l : rt_.ctl_hands)
         l = Ctl::Loan{};
 }
 
 void StorageService::own_all_() noexcept {
-    if (owned_) return;
-    owned_ = true;
+    if (rt_.owned) return;
+    rt_.owned = true;
     for (std::size_t n = 0; n < Data::capacity(); ++n) {
         Data::Loan l = data_.acquire();
         const std::uint8_t i = data_.index_of(l);
-        if (i < kSlots * kHalves) data_hands_[i / kHalves][i % kHalves] = std::move(l);
+        if (i < kSlots * kHalves) rt_.data_hands[i / kHalves][i % kHalves] = std::move(l);
     }
     for (std::size_t n = 0; n < Ctl::capacity(); ++n) {
         Ctl::Loan l = ctl_.acquire();
         const std::uint8_t i = ctl_.index_of(l);
-        if (i < kSlots) ctl_hands_[i] = std::move(l);
+        if (i < kSlots) rt_.ctl_hands[i] = std::move(l);
     }
 }
 
 bool StorageService::home_(unsigned slot) const noexcept {
-    if (!owned_) return true;
-    return data_hands_[slot][0] && data_hands_[slot][1] && ctl_hands_[slot];
+    if (!rt_.owned) return true;
+    return rt_.data_hands[slot][0] && rt_.data_hands[slot][1] && rt_.ctl_hands[slot];
 }
 
 proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexcept {
@@ -277,20 +293,44 @@ proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexc
     const unsigned s = a.head.slot.v;
 
     if (a.data) {
-        Data::Loan& l = data_hands_[s][a.half.v];
+        Data::Loan& l = rt_.data_hands[s][a.half.v];
         if (!l) {
             refusals_.fetch_add(1, std::memory_order_relaxed);
             return proto::StorageSeq{0};
         }
         l->ask = req;
+        l->backend = rt_.bound[s];
+        l->gen = rt_.gen[s];
         data_.send(std::move(l));
     } else {
-        Ctl::Loan& l = ctl_hands_[s];
+        Ctl::Loan& l = rt_.ctl_hands[s];
         if (!l) {
             refusals_.fetch_add(1, std::memory_order_relaxed);
             return proto::StorageSeq{0};
         }
         l->ask = req;
+        switch (a.stamp) {
+            case Stamp::Staged:
+
+                l->backend = l->stage;
+                if (l->stage) {
+                    rt_.bound[s] = l->stage;
+                    ++rt_.gen[s];
+                    l->stage.reset();
+                }
+                break;
+            case Stamp::Unbind:
+
+                l->backend = rt_.bound[s];
+                l->stage.reset();
+                rt_.bound[s].reset();
+                ++rt_.gen[s];
+                break;
+            case Stamp::Bound:
+                l->backend = rt_.bound[s];
+                break;
+        }
+        l->gen = rt_.gen[s];
         ctl_.send(std::move(l));
     }
     submits_.fetch_add(1, std::memory_order_relaxed);
@@ -311,13 +351,15 @@ std::optional<proto::StorageCompletion> StorageService::reap() noexcept {
             slot = ctl_.index_of(l);
             completed = l.completed();
             if (completed) c = l->answer;
-            ctl_hands_[slot] = std::move(l);
+            l->backend.reset();
+            rt_.ctl_hands[slot] = std::move(l);
         } else if (Data::Loan d = data_.reap()) {
             const std::uint8_t i = data_.index_of(d);
             slot = i / kHalves;
             completed = d.completed();
             if (completed) c = d->answer;
-            data_hands_[slot][i % kHalves] = std::move(d);
+            d->backend.reset();
+            rt_.data_hands[slot][i % kHalves] = std::move(d);
         } else {
             return std::nullopt;
         }
@@ -332,8 +374,8 @@ std::optional<proto::StorageCompletion> StorageService::reap() noexcept {
 
 std::span<const std::uint8_t> StorageService::half(proto::SlotIndex slot,
                                                    proto::ArenaHalf which) const noexcept {
-    if (slot.v >= kSlots || which.v >= kHalves || !owned_) return {};
-    const Data::Loan& l = data_hands_[slot.v][which.v];
+    if (slot.v >= kSlots || which.v >= kHalves || !rt_.owned) return {};
+    const Data::Loan& l = rt_.data_hands[slot.v][which.v];
     if (!l) return {};
     return std::span<const std::uint8_t>{l->data, kHalfBytes};
 }
@@ -342,7 +384,7 @@ std::span<std::uint8_t> StorageService::half_mut(proto::SlotIndex slot,
                                                  proto::ArenaHalf which) noexcept {
     if (slot.v >= kSlots || which.v >= kHalves) return {};
     own_all_();
-    const Data::Loan& l = data_hands_[slot.v][which.v];
+    const Data::Loan& l = rt_.data_hands[slot.v][which.v];
     if (!l) return {};
     return std::span<std::uint8_t>{l->data, kHalfBytes};
 }
@@ -353,13 +395,15 @@ bool StorageService::stage_backend(proto::SlotIndex slot, IStorageBackend& backe
         refusals_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
+    own_all_();
+    infra::OptRef<IStorageBackend>& staged = rt_.ctl_hands[slot.v]->stage;
 
-    if (attach_[slot.v] == &backend) return true;
-    if (attach_[slot.v] != nullptr) {
+    if (staged && &*staged == &backend) return true;
+    if (staged) {
         refusals_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
-    attach_[slot.v] = &backend;
+    staged = infra::OptRef<IStorageBackend>{backend};
     return true;
 }
 
@@ -369,8 +413,8 @@ bool StorageService::release_slot(proto::SlotIndex slot) noexcept {
         refusals_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
-    attach_[slot.v] = nullptr;
-    backends_[slot.v] = nullptr;
+    if (rt_.owned) rt_.ctl_hands[slot.v]->stage.reset();
+    rt_.bound[slot.v].reset();
     return true;
 }
 

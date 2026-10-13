@@ -32,8 +32,6 @@ public:
 
     [[nodiscard]] Ex<void> load_manifest(const svc::Vfs& vfs);
 
-    [[nodiscard]] MraFacts mra_facts() const;
-
     [[nodiscard]] Ex<void> validate(const svc::Vfs& vfs);
 
 private:

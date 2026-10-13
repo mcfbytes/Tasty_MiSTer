@@ -4,6 +4,7 @@
 #include <array>
 #include <cstring>
 
+#include "infra/byte_view.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -23,8 +24,7 @@ std::string read_remembered_path(const svc::Vfs& vfs, const RememberedStem& stem
     std::array<std::byte, kRememberedBlob> blob{};
     auto n = (*f)->read_at(0, blob);
     if (!n || *n == 0) return {};
-    const char* c = reinterpret_cast<const char*>(blob.data());
-    return std::string{c, ::strnlen(c, kRememberedBlob)};
+    return std::string{infra::text_until_nul(blob.data(), kRememberedBlob)};
 }
 
 }  // namespace mister::app

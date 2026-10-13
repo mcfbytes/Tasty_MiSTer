@@ -3,11 +3,13 @@
 
 #include <cstdint>
 
+#include "infra/seat.h"
 #include "proto/mailbox_frame.h"
 
 namespace mister::proto {
 
 struct MailboxFrameDecl {
+    TASTY_SEAT_EXEMPT(component);
     std::uint16_t poll_opcode = 0;
     std::uint8_t words = 0;
 };

@@ -33,6 +33,7 @@ public:
         bool save_mounted = false;
         bool save_detached = false;
         bool region_written = false;
+        bool savestate_hold_expired = false;
         std::uint8_t region = 0;
         std::uint32_t assets_loaded = 0;
         std::uint32_t rungs = 0;

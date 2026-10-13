@@ -13,6 +13,8 @@ concept PcmCommandSink = requires(S& s, const PcmCommand& m) {
     s.on(std::declval<const PcmCommand::Play&>());
     s.on(std::declval<const PcmCommand::Stop&>());
     s.on(std::declval<const PcmCommand::Resume&>());
+    s.on(std::declval<const PcmCommand::AttachRing&>());
+    s.on(std::declval<const PcmCommand::AttachSource&>());
     s.misrouted(m);
 };
 

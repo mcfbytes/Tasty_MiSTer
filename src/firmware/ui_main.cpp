@@ -11,6 +11,7 @@
 #include "app/owner_tick.h"
 #include "app/recorder_control.h"
 #include "app/replay_feeder.h"
+#include "app/save_state_attach.h"
 #include "app/screenshot_pump.h"
 #include "app/uart_handoff_dispatch.h"
 #include "app/uart_mode.h"
@@ -27,12 +28,13 @@ UiMain::UiMain(app::EventQueue& events, xthread::ParkFds fds,
       video_(wiring.video), bt_(wiring.bt), shots_(wiring.shots), replay_(wiring.replay),
       recorder_(wiring.recorder), launcher_screen_(wiring.launcher_screen), uart_(wiring.uart),
       ui_sink_(wiring.ui_sink), ui_round_(wiring.ui_round), ui_rx_(wiring.link_rx),
-      wake_(fds.wake()), stop_(std::move(fds).take_stop()), pause_(wake_, &asker),
-      uart_handoffs_(handoffs), park_(wake_, stop_, fifo_ != nullptr ? fifo_->fd() : -1) {}
+      save_states_(wiring.save_states), wake_(fds.wake()), stop_(std::move(fds).take_stop()),
+      pause_(wake_, &asker), uart_handoffs_(handoffs),
+      park_(wake_, stop_, fifo_ ? fifo_->fd() : -1) {}
 
 void UiMain::start() noexcept {
     TASTY_SEAT_BODY(UiMain);
-    if (ui_round_ != nullptr) ui_round_->boot_witness();
+    if (ui_round_) ui_round_->boot_witness();
     loop_();
 }
 
@@ -47,25 +49,26 @@ void UiMain::serve() noexcept {
     bool link_work = false;
 
     while (const auto ev = ui_rx_.pop()) {
-        if (ui_round_ != nullptr)
+        if (ui_round_)
             link_work |= ui_round_->take_link(*ev);
         else
             ++roundless_link_drops_;
     }
-    if (fifo_ != nullptr && park_.extra_ready()) (void)fifo_->service();
-    if (mgl_ != nullptr) mgl_->tick();
+    if (fifo_ && park_.extra_ready()) (void)fifo_->service();
+    if (mgl_) mgl_->tick();
     video_.tick();
-    if (launcher_screen_ != nullptr) launcher_screen_->tick();
-    if (bt_ != nullptr) bt_->tick();
+    if (launcher_screen_) launcher_screen_->tick();
+    if (bt_) bt_->tick();
     shots_.tick();
     replay_.tick();
     recorder_.tick();
-    if (owner_tick_ != nullptr) owner_tick_->tick();
-    if (uart_ != nullptr) {
+    if (save_states_) save_states_->tick();
+    if (owner_tick_) owner_tick_->tick();
+    if (uart_) {
         while (const auto h = uart_handoffs_.pop())
-            infra::dispatch<app::UartHandoffRoutes>(*h, *uart_);
+            infra::dispatch<app::UartHandoffRoutes>(*h, uart_performer_);
     }
-    if (ui_round_ != nullptr) ui_round_->round(link_work);
+    if (ui_round_) ui_round_->round(link_work);
     drain_events_();
 }
 
@@ -73,7 +76,8 @@ void UiMain::on_pause() noexcept {
     park_.mute_extra(true);
     while (ui_rx_.pop().has_value())
         ++paused_link_drops_;
-    if (ui_round_ != nullptr) ui_round_->forget_cells();
+    if (ui_round_) ui_round_->forget_cells();
+    if (save_states_) save_states_->on_ui_pause();
     video_.on_pause();
 }
 
@@ -85,6 +89,7 @@ void UiMain::on_resume() noexcept {
 void UiMain::settle() noexcept {
     drain_events_();
     shots_.tick();
+    if (ui_round_) ui_round_->settle();
 }
 
 }  // namespace mister::fw

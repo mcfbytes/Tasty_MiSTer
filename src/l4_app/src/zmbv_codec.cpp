@@ -3,9 +3,12 @@
 
 #include <zlib.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <new>
+
+#include "infra/byte_view.h"
 
 namespace mister::app {
 namespace {
@@ -58,26 +61,26 @@ Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     const std::size_t total =
         up(pic) * 2 + up(worst) + up(bound + 8) + zbytes + up(mv) + up(hist_n);
     if (auto r = arena_.reserve(1, total); !r) return r;
-    std::byte* p = arena_.stripe(0).data();
-    prev_ = p;
-    p += up(pic);
-    cur_ = p;
-    p += up(pic);
-    plain_ = p;
-    p += up(worst);
-    pkt_ = p;
-    p += up(bound + 8);
-    zmem_ = p;
-    p += zbytes;
-    dup_plain_ = p;
+    std::span<std::byte> rest = arena_.stripe(0);
+    const auto carve = [&rest](std::size_t n) {
+        const std::span<std::byte> s = rest.first(n);
+        rest = rest.subspan(n);
+        return s;
+    };
+    prev_ = carve(up(pic));
+    cur_ = carve(up(pic));
+    plain_ = carve(up(worst));
+    pkt_ = carve(up(bound + 8));
+    zmem_ = carve(zbytes);
+    dup_plain_ = carve(up(mv));
     dup_plain_len_ = mv;
-    p += up(mv);
-    hist_ = reinterpret_cast<std::int8_t*>(p);
-    std::memset(hist_, 0, hist_n);
+    const std::span<std::byte> hist = carve(up(hist_n));
+    hist_ = hist.first(hist_n);
+    std::fill(hist_.begin(), hist_.end(), std::byte{0});
     width_ = w;
     height_ = h;
     max_payload_ = 7 + bound;
-    auto* z = new (zmem_) z_stream{};
+    auto* z = new (zmem_.data()) z_stream{};
     if (::deflateInit(z, kLevel) != Z_OK) {
         end();
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
@@ -93,13 +96,13 @@ void ZmbvCodec::end() noexcept {
 }
 
 void ZmbvCodec::release_() noexcept {
-    if (z_ready_ && zmem_ != nullptr) {
-        ::deflateEnd(zs_of(zmem_));
+    if (z_ready_ && !zmem_.empty()) {
+        ::deflateEnd(zs_of(zmem_.data()));
         z_ready_ = false;
     }
     arena_.release();
-    prev_ = cur_ = plain_ = pkt_ = zmem_ = dup_plain_ = nullptr;
-    hist_ = nullptr;
+    prev_ = cur_ = plain_ = pkt_ = zmem_ = dup_plain_ = {};
+    hist_ = {};
     dup_plain_len_ = 0;
     max_payload_ = 0;
     width_ = height_ = 0;
@@ -110,10 +113,11 @@ std::size_t ZmbvCodec::deflate_sync_(const std::byte* in, std::size_t n, std::by
                                      std::size_t cap) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
     if (!z_ready_ || cap > 0x7FFFFFFFu || n > 0x7FFFFFFFu) return 0;
-    z_stream* z = zs_of(zmem_);
-    z->next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(in));
+    z_stream* z = zs_of(zmem_.data());
+    z->next_in = const_cast<Bytef*>(
+        infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(in, n)).data());
     z->avail_in = static_cast<uInt>(n);
-    z->next_out = reinterpret_cast<Bytef*>(dst);
+    z->next_out = infra::byte_cast<std::uint8_t>(std::span<std::byte>(dst, cap)).data();
     z->avail_out = static_cast<uInt>(cap);
     const int rc = ::deflate(z, Z_SYNC_FLUSH);
     if (rc != Z_OK || z->avail_in != 0) return 0;
@@ -122,9 +126,12 @@ std::size_t ZmbvCodec::deflate_sync_(const std::byte* in, std::size_t n, std::by
 
 void ZmbvCodec::to_bgr0_(const std::byte* rgb, std::size_t line) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
-    auto* dst = reinterpret_cast<std::uint8_t*>(cur_);
+    auto* dst = infra::byte_cast<std::uint8_t>(cur_).data();
     for (std::uint16_t y = 0; y < height_; ++y) {
-        const auto* s = reinterpret_cast<const std::uint8_t*>(rgb + std::size_t{y} * line);
+        const auto* s = infra::byte_cast<const std::uint8_t>(
+                            std::span<const std::byte>(rgb + std::size_t{y} * line,
+                                                       static_cast<std::size_t>(width_) * 3u))
+                            .data();
         for (std::uint16_t x = 0; x < width_; ++x) {
             dst[0] = s[2];
             dst[1] = s[1];
@@ -139,7 +146,7 @@ void ZmbvCodec::to_bgr0_(const std::byte* rgb, std::size_t line) noexcept {
 std::size_t ZmbvCodec::emit_key_(const std::byte* bgr0, std::span<std::byte> out) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
     if (out.size() < max_payload_ || !z_ready_) return 0;
-    if (::deflateReset(zs_of(zmem_)) != Z_OK) return 0;
+    if (::deflateReset(zs_of(zmem_.data())) != Z_OK) return 0;
     out[0] = std::byte{1};
     out[1] = std::byte{0};
     out[2] = std::byte{1};
@@ -165,13 +172,14 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
     const std::size_t mv_bytes =
         (std::size_t(bx_) * static_cast<std::size_t>(by_) * 2u + 3u) & ~std::size_t{3};
-    std::memset(plain_, 0, mv_bytes);
-    auto* mv = reinterpret_cast<std::int8_t*>(plain_);
-    auto* xor_at = reinterpret_cast<std::uint8_t*>(plain_ + mv_bytes);
-    const auto* cur = reinterpret_cast<const std::uint32_t*>(cur_);
-    const auto* prev = reinterpret_cast<const std::uint32_t*>(prev_);
+    std::memset(plain_.data(), 0, mv_bytes);
+    std::byte* mv = plain_.data();
+    auto* const plain_bytes = infra::byte_cast<std::uint8_t>(plain_).data();
+    auto* xor_at = plain_bytes + mv_bytes;
+    const auto* cur = reinterpret_cast<const std::uint32_t*>(cur_.data());
+    const auto* prev = reinterpret_cast<const std::uint32_t*>(prev_.data());
     const int W = width_;
-    const bool watch = clock_ != nullptr && motion_ != RecMotion::Off && search_budget_ns_ > 0;
+    const bool watch = clock_.has_value() && motion_ != RecMotion::Off && search_budget_ns_ > 0;
     bool cut = false;
     int block = 0;
     int bi = 0;
@@ -217,9 +225,10 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
                         dy = oy;
                     }
                 }
-                if (best != 0 && hist_ != nullptr) {
-                    const int px = hist_[block];
-                    const int py = hist_[block + 1];
+                if (best != 0 && !hist_.empty()) {
+                    const auto hb = static_cast<std::size_t>(block);
+                    const int px = static_cast<std::int8_t>(hist_[hb]);
+                    const int py = static_cast<std::int8_t>(hist_[hb + 1]);
                     if (!on_small_list(px, py) && inside(px, py)) {
                         const std::uint32_t s = sad(px, py, best);
                         if (s < best) {
@@ -248,13 +257,14 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
                     }
                 }
             }
-            if (hist_ != nullptr) {
-                hist_[block] = static_cast<std::int8_t>(dx);
-                hist_[block + 1] = static_cast<std::int8_t>(dy);
+            if (!hist_.empty()) {
+                const auto hb = static_cast<std::size_t>(block);
+                hist_[hb] = std::byte{static_cast<unsigned char>(dx)};
+                hist_[hb + 1] = std::byte{static_cast<unsigned char>(dy)};
             }
             const bool xored = best != 0;
-            mv[block] = static_cast<std::int8_t>((dx << 1) | (xored ? 1 : 0));
-            mv[block + 1] = static_cast<std::int8_t>(dy << 1);
+            mv[block] = std::byte{static_cast<unsigned char>((dx << 1) | (xored ? 1 : 0))};
+            mv[block + 1] = std::byte{static_cast<unsigned char>(dy << 1)};
             if (!xored) continue;
             for (int j = 0; j < bh; ++j) {
                 for (int i = 0; i < bw; ++i) {
@@ -273,7 +283,7 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
         ++me_cut_;
         cut_frame_ = true;
     }
-    return static_cast<std::size_t>(reinterpret_cast<std::byte*>(xor_at) - plain_);
+    return static_cast<std::size_t>(xor_at - plain_bytes);
 }
 
 std::size_t ZmbvCodec::encode(const std::byte* rgb, std::size_t line, bool key,
@@ -282,19 +292,19 @@ std::size_t ZmbvCodec::encode(const std::byte* rgb, std::size_t line, bool key,
     if (!open() || rgb == nullptr) return 0;
     sad_calls_ = 0;
     cut_frame_ = false;
-    const bool watch = clock_ != nullptr && motion_ != RecMotion::Off && search_budget_ns_ > 0;
+    const bool watch = clock_.has_value() && motion_ != RecMotion::Off && search_budget_ns_ > 0;
     if (watch) frame_t0_ = clock_->now().count();
     to_bgr0_(rgb, line);
     std::int64_t post0 = 0;
     std::size_t n;
     if (key) {
-        n = emit_key_(cur_, out);
+        n = emit_key_(cur_.data(), out);
     } else {
         const std::size_t plain_n = build_inter_();
         if (watch) post0 = clock_->now().count();
-        n = emit_inter_(plain_, plain_n, out);
+        n = emit_inter_(plain_.data(), plain_n, out);
     }
-    std::memcpy(prev_, cur_, std::size_t{width_} * height_ * 4u);
+    std::memcpy(prev_.data(), cur_.data(), std::size_t{width_} * height_ * 4u);
     if (watch) {
         const std::int64_t t1 = clock_->now().count();
         if (key) {
@@ -311,7 +321,7 @@ void ZmbvCodec::restart(const RecOptions& opt) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
     const RecMotion motion = opt.motion;
     motion_ = motion;
-    clock_ = nullptr;
+    clock_.reset();
     threshold_ns_ = 0;
     search_budget_ns_ = 0;
     post_ns_ = 0;
@@ -336,7 +346,7 @@ void ZmbvCodec::restart(const RecOptions& opt) noexcept {
 
 void ZmbvCodec::arm(const os::IClock* clock, std::int64_t budget_ns) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
-    clock_ = clock;
+    clock_ = infra::opt_ref_of(clock);
     threshold_ns_ = budget_ns > 0 ? budget_ns : 0;
     std::int64_t room = threshold_ns_ - post_ns_;
     if (room < kMeSearchFloorNs) room = kMeSearchFloorNs;
@@ -387,16 +397,15 @@ void ZmbvCodec::step_(int dir) noexcept {
 std::size_t ZmbvCodec::rekey(std::span<std::byte> out) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
     if (!open()) return 0;
-    return emit_key_(prev_, out);
+    return emit_key_(prev_.data(), out);
 }
 
 std::span<const std::byte> ZmbvCodec::dup() noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
-    if (!open() || pkt_ == nullptr) return {};
-    const std::size_t n =
-        emit_inter_(dup_plain_, dup_plain_len_, std::span<std::byte>(pkt_, max_payload_));
+    if (!open() || pkt_.empty()) return {};
+    const std::size_t n = emit_inter_(dup_plain_.data(), dup_plain_len_, pkt_.first(max_payload_));
     if (n == 0) return {};
-    return {pkt_, n};
+    return {pkt_.data(), n};
 }
 
 }  // namespace mister::app

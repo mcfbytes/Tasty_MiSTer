@@ -37,7 +37,7 @@ class CmdFifo {
 public:
     static constexpr std::size_t kPathMax = 108;
 
-    static Ex<CmdFifo> open(const char* path, ICmdVerbSink& route);
+    [[nodiscard]] static Ex<CmdFifo> open(const char* path, ICmdVerbSink& route);
 
     ~CmdFifo();
     CmdFifo(CmdFifo&&) noexcept;
@@ -48,7 +48,7 @@ public:
     int fd() const noexcept { return fd_.get(); }
     std::string_view path() const noexcept;
 
-    Ex<unsigned> service();
+    [[nodiscard]] Ex<unsigned> service();
 
     std::uint32_t routed() const noexcept { return routed_; }
 

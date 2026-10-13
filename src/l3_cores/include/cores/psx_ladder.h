@@ -56,6 +56,8 @@ private:
     bool stage_save_ = false;
     bool stage_assets_ = false;
     proto::LinkOp::StageDiscPayload facts_{};
+    std::uint32_t ss_gen_ = 0;
+    std::int64_t ss_due_ns_ = 0;
 };
 
 }  // namespace mister::cores

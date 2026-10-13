@@ -14,9 +14,10 @@ class ICdTransport {
 public:
     virtual ~ICdTransport() = default;
 
-    virtual Ex<void> send_data(IoIndex io_index, std::span<const std::byte> payload) = 0;
+    [[nodiscard]] virtual Ex<void> send_data(IoIndex io_index,
+                                             std::span<const std::byte> payload) = 0;
 
-    virtual Ex<void> send_status(std::uint64_t bcd_frame) = 0;
+    [[nodiscard]] virtual Ex<void> send_status(std::uint64_t bcd_frame) = 0;
 
 protected:
     ICdTransport() = default;

@@ -11,7 +11,7 @@ constexpr std::uint16_t kJoystick2 = 0x10;
 constexpr std::uint16_t kAstick = 0x1A;
 constexpr std::uint16_t kAstick2 = 0x3D;
 
-Ex<void> put(hal::ISpiTransport& link, std::uint16_t w) {
+[[nodiscard]] Ex<void> put(hal::ISpiTransport& link, std::uint16_t w) {
     auto r = link.transfer(hal::SpiWord{w});
     if (!r) return std::unexpected(r.error());
     return {};

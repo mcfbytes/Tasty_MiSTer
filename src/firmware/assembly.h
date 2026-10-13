@@ -25,12 +25,13 @@ enum class RtMode : std::uint8_t { Required, BestEffort };
 
 void pin_current_cpu(int cpu, RtSetup& out) noexcept;
 
-Ex<void> verify_cpu_topology(const hal::ThreadMap& m, long online_cpus, RtMode mode,
-                             RtEvidence& ev) noexcept;
+[[nodiscard]] Ex<void> verify_cpu_topology(const hal::ThreadMap& m, long online_cpus, RtMode mode,
+                                           RtEvidence& ev) noexcept;
 
-Ex<void> rt_topology_init(const hal::ThreadMap& m, RtMode mode, RtEvidence& ev) noexcept;
+[[nodiscard]] Ex<void> rt_topology_init(const hal::ThreadMap& m, RtMode mode,
+                                        RtEvidence& ev) noexcept;
 
-Ex<void> rt_memory_init(RtMode mode, RtEvidence& ev);
+[[nodiscard]] Ex<void> rt_memory_init(RtMode mode, RtEvidence& ev);
 
 void warn_vm_compaction(const os::VmCompaction& vm, const char* prog, std::FILE* out) noexcept;
 
@@ -65,7 +66,7 @@ struct SchedInfo {
     char state = '?';
     FixedStr<31, StrFit::Clip> wchan;
 };
-Ex<SchedInfo> read_thread_sched(long tid);
+[[nodiscard]] Ex<SchedInfo> read_thread_sched(long tid);
 
 inline constexpr int kRtWedgeExitStatus = 75;
 
@@ -75,7 +76,7 @@ inline constexpr std::int64_t kIoStopDeadlineNs = 5'000'000'000;
 
 inline constexpr std::int64_t kRtJoinSliceNs = 20'000'000;
 
-Ex<std::uint64_t> read_vm_rss_bytes();
+[[nodiscard]] Ex<std::uint64_t> read_vm_rss_bytes();
 
 inline constexpr std::size_t kInputWorstCaseFds = svc::kMaxDevices + 1;
 static_assert(kInputWorstCaseFds > reactor::Executive::kMaxBorrowedFds,

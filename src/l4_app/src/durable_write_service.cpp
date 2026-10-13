@@ -23,17 +23,17 @@ bool DurableWriteService::arm(std::string_view rel, std::span<const std::byte> b
 
     if (kind == WriteKind::Save) return arm_save_(rel, bytes);
     if (rel.empty() || bytes.size() > kWriteLaneBytes) {
-        refusals_.add(1);
+        rt_.refusals.add(1);
         return false;
     }
     auto loan = chan_.acquire();
     if (!loan) {
-        refusals_.add(1);
+        rt_.refusals.add(1);
         return false;
     }
     const std::uint8_t idx = chan_.index_of(loan);
     if (!loan->rel.assign(rel)) {
-        refusals_.add(1);
+        rt_.refusals.add(1);
         return false;
     }
     loan->len = static_cast<std::uint32_t>(bytes.size());
@@ -41,11 +41,11 @@ bool DurableWriteService::arm(std::string_view rel, std::span<const std::byte> b
     loan->ok = 0;
     if (!bytes.empty()) std::memcpy(loan->data, bytes.data(), bytes.size());
 
-    Shadow& sh = shadow_[idx];
+    Shadow& sh = rt_.shadow[idx];
     (void)sh.rel.assign(rel);
     sh.len = loan->len;
     if (!bytes.empty()) std::memcpy(sh.data, bytes.data(), bytes.size());
-    sh.seq = ++seq_;
+    sh.seq = ++rt_.seq;
     sh.live = true;
 
     chan_.send(std::move(loan));
@@ -55,23 +55,23 @@ bool DurableWriteService::arm(std::string_view rel, std::span<const std::byte> b
 bool DurableWriteService::arm_save_(std::string_view rel,
                                     std::span<const std::byte> bytes) noexcept {
     if (rel.empty() || bytes.size() > kSaveLaneBytes) {
-        refusals_.add(1);
+        rt_.refusals.add(1);
         return false;
     }
     auto loan = save_chan_.acquire();
     if (!loan) {
-        refusals_.add(1);
+        rt_.refusals.add(1);
         return false;
     }
     if (!loan->rel.assign(rel)) {
-        refusals_.add(1);
+        rt_.refusals.add(1);
         return false;
     }
     loan->len = static_cast<std::uint32_t>(bytes.size());
     loan->kind = WriteKind::Save;
     loan->ok = 0;
     if (!bytes.empty()) std::memcpy(loan->data, bytes.data(), bytes.size());
-    ++saves_armed_;
+    ++rt_.saves_armed;
     save_chan_.send(std::move(loan));
     return true;
 }
@@ -79,23 +79,23 @@ bool DurableWriteService::arm_save_(std::string_view rel,
 std::optional<DurableWriteService::WriteDone> DurableWriteService::reap() noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "DurableWriteService::reap off T-RT");
     if (auto done = chan_.reap()) {
-        shadow_[chan_.index_of(done)].live = false;
+        rt_.shadow[chan_.index_of(done)].live = false;
         const bool ok = done.completed() && done->ok != 0;
         if (ok) {
-            writes_.add(1);
+            rt_.writes.add(1);
         } else {
-            failures_.add(1);
+            rt_.failures.add(1);
         }
         return WriteDone{done->kind, ok};
     }
     auto done = save_chan_.reap();
     if (!done) return std::nullopt;
-    if (saves_armed_ != 0) --saves_armed_;
+    if (rt_.saves_armed != 0) --rt_.saves_armed;
     const bool ok = done.completed() && done->ok != 0;
     if (ok) {
-        writes_.add(1);
+        rt_.writes.add(1);
     } else {
-        failures_.add(1);
+        rt_.failures.add(1);
     }
     return WriteDone{done->kind, ok};
 }
@@ -103,7 +103,7 @@ std::optional<DurableWriteService::WriteDone> DurableWriteService::reap() noexce
 std::span<const std::byte> DurableWriteService::peek(std::string_view rel) const noexcept {
 
     const Shadow* best = nullptr;
-    for (const Shadow& sh : shadow_) {
+    for (const Shadow& sh : rt_.shadow) {
         if (!sh.live || sh.rel.view() != rel) continue;
         if (best == nullptr || sh.seq > best->seq) best = &sh;
     }
@@ -112,8 +112,8 @@ std::span<const std::byte> DurableWriteService::peek(std::string_view rel) const
 }
 
 std::size_t DurableWriteService::in_flight() const noexcept {
-    std::size_t n = saves_armed_;
-    for (const Shadow& sh : shadow_)
+    std::size_t n = rt_.saves_armed;
+    for (const Shadow& sh : rt_.shadow)
         if (sh.live) ++n;
     return n;
 }

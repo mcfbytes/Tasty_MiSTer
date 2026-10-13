@@ -5,8 +5,8 @@
 
 namespace mister::cores {
 
-Ex<void> assert_services_match_census(const CoreProfile& p,
-                                      std::span<const LinkDecoderDecl> census_rows) {
+[[nodiscard]] Ex<void> assert_services_match_census(const CoreProfile& p,
+                                                    std::span<const LinkDecoderDecl> census_rows) {
     if (p.services.size() != census_rows.size()) {
         return std::unexpected(
             Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(p.services.size())});

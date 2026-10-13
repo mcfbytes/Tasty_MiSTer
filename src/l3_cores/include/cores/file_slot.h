@@ -48,10 +48,11 @@ struct FileSlot {
 
 [[nodiscard]] constexpr bool is_load_row(const FileSlot& s) { return s.romset_browse; }
 
-[[nodiscard]] constexpr SlotRole role_of(std::span<const FileSlot> slots, IoIndex index) {
+[[nodiscard]] constexpr SlotRole role_of(std::span<const FileSlot> slots, IoIndex index,
+                                         SlotRole undeclared = SlotRole::Image) {
     for (const FileSlot& s : slots)
         if (s.index == index && !is_load_row(s)) return s.role;
-    return SlotRole::Image;
+    return undeclared;
 }
 
 [[nodiscard]] constexpr StartMount start_mount_of(std::span<const FileSlot> slots, IoIndex index,

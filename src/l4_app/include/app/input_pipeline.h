@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
 #include "app/input_build.h"
 #include "app/input_decode.h"
@@ -33,12 +34,20 @@ public:
     InputEmit& emit() noexcept { return emit_; }
     const InputEmit& emit() const noexcept { return emit_; }
 
+    svc::InputService& service() noexcept { return service_; }
+    const svc::InputService& service() const noexcept { return service_; }
+
+    void latch_cfg(std::span<const svc::DeadzoneRule> deadzones, bool rumble) noexcept;
+
     const InputSample& sample() const noexcept { return sample_; }
 
 private:
+    [[nodiscard]] static svc::InputService open_service_(InputBuild& build) noexcept;
+
     InputWire& wire_;
     InputBuild& build_;
     InputEmit& emit_;
+    svc::InputService service_;
     InputDecode decode_;
     const InputSample sample_;
 };
@@ -87,6 +96,6 @@ struct InputStats {
     std::uint32_t button_actions = 0;
 };
 
-InputStats collect_input_stats(const InputSample& s) noexcept;
+InputStats collect_input_stats(const InputSample& s, const InputBuild::Counts& b) noexcept;
 
 }  // namespace mister::app

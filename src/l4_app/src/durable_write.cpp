@@ -8,8 +8,8 @@
 
 namespace mister::app {
 
-Ex<void> durable_write(const svc::Vfs& vfs, std::string_view rel,
-                       std::span<const std::byte> bytes) {
+[[nodiscard]] Ex<void> durable_write(const svc::Vfs& vfs, std::string_view rel,
+                                     std::span<const std::byte> bytes) {
     if (rel.empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }

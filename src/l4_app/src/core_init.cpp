@@ -3,26 +3,28 @@
 
 namespace mister::app {
 
-Ex<void> init_reset_video_geometry(CoreInitContext& ctx) {
+[[nodiscard]] Ex<void> init_reset_video_geometry(CoreInitContext& ctx) {
     ctx.host.reset_video_geometry();
     return {};
 }
 
-Ex<void> init_arm_video_prelude(CoreInitContext& ctx) {
+[[nodiscard]] Ex<void> init_arm_video_prelude(CoreInitContext& ctx) {
     ctx.host.arm_video_prelude();
     return {};
 }
 
-Ex<void> init_flush_status(CoreInitContext& ctx) { return ctx.session.flush_status(); }
+[[nodiscard]] Ex<void> init_flush_status(CoreInitContext& ctx) {
+    return ctx.session.flush_status();
+}
 
-Ex<void> init_publish_identity(CoreInitContext& ctx) {
+[[nodiscard]] Ex<void> init_publish_identity(CoreInitContext& ctx) {
     ctx.host.publish_core_identity();
     return {};
 }
 
 namespace {
 
-Ex<void> walk(CoreInitContext& ctx, std::span<const CoreInitStep> rows) {
+[[nodiscard]] Ex<void> walk(CoreInitContext& ctx, std::span<const CoreInitStep> rows) {
     const CoreTypeMask dialect = cores::dialect_bit(ctx.session.type());
     for (const CoreInitStep& step : rows) {
         if (step.fn == nullptr) continue;
@@ -36,7 +38,8 @@ Ex<void> walk(CoreInitContext& ctx, std::span<const CoreInitStep> rows) {
 
 }  // namespace
 
-Ex<void> run_core_init(CoreInitContext& ctx, std::span<const CoreInitStep> additions) {
+[[nodiscard]] Ex<void> run_core_init(CoreInitContext& ctx,
+                                     std::span<const CoreInitStep> additions) {
     if (auto r = walk(ctx, kCoreInitBase); !r) return r;
     return walk(ctx, additions);
 }

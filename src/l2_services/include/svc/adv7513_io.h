@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::svc::adv7513 {
@@ -28,13 +29,13 @@ namespace mister::svc::adv7513 {
 
 struct Io {
     TASTY_SEAT_RESIDENT(Ui);
-    IRegMap* main = nullptr;
-    IRegMap* edid = nullptr;
-    IRegMap* cec = nullptr;
-    const hal::IHdmiInterrupt* hdmi = nullptr;
+    infra::OptRef<IRegMap> main{};
+    infra::OptRef<IRegMap> edid{};
+    infra::OptRef<IRegMap> cec{};
+    infra::OptRef<const hal::IHdmiInterrupt> hdmi{};
 
-    os::IDelay* delay = nullptr;
-    const os::IClock* clock = nullptr;
+    infra::OptRef<os::IDelay> delay{};
+    infra::OptRef<const os::IClock> clock{};
 };
 
 inline constexpr Io kUnboundIo{};

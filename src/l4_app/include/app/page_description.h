@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "infra/fixed_str.h"
 
@@ -11,21 +12,35 @@ namespace mister::app {
 
 struct PageDescription {
     static constexpr std::size_t kMaxRows = 12;
-    enum class RowKind : std::uint8_t { Action, Submenu, Value };
+    enum class RowKind : std::uint8_t { Action, Submenu, Value, Separator, Text, Bar };
+    enum class Shape : std::uint8_t { List, Choice };
+
+    enum class RowIcon : std::uint8_t { None, Folder, Archive, Up, Recent };
     struct Row {
-        FixedStr<40, StrFit::Clip> label{};
+        FixedStr<128, StrFit::Clip> label{};
         FixedStr<24, StrFit::Clip> value{};
         RowKind kind = RowKind::Action;
+        RowIcon icon = RowIcon::None;
         bool enabled = true;
         bool selected = false;
+        bool steps = false;
+        std::uint8_t fill = 0;
         friend bool operator==(const Row&, const Row&) = default;
     };
     FixedStr<48, StrFit::Clip> title{};
     FixedStr<48, StrFit::Clip> crumb{};
+
+    FixedStr<64, StrFit::Clip> subtitle{};
     std::array<Row, kMaxRows> rows{};
     std::uint8_t row_count = 0;
-    std::uint8_t first_visible = 0;
+    std::uint16_t first = 0;
+    std::uint16_t total = 0;
+    std::uint8_t pinned = 0;
+    Shape shape = Shape::List;
+    FixedStr<48, StrFit::Clip> footer{};
     friend bool operator==(const PageDescription&, const PageDescription&) = default;
 };
+
+static_assert(std::is_trivially_copyable_v<PageDescription>);
 
 }  // namespace mister::app

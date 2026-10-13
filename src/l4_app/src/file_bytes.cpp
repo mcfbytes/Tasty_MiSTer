@@ -37,7 +37,8 @@ Ex<proto::FileId> FileBytes::intern(std::vector<std::uint8_t>&& bytes, std::stri
                                     std::string_view path, std::uint32_t load_addr,
                                     std::uint32_t at, std::uint32_t popped, std::uint32_t crc,
                                     std::uint64_t whole, std::uint64_t offset) {
-    if (bytes.empty()) {
+
+    if (bytes.empty() && (whole == 0 || offset != whole)) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     release_free_(popped);
@@ -57,6 +58,8 @@ Ex<proto::FileId> FileBytes::intern(std::vector<std::uint8_t>&& bytes, std::stri
     s.offset = offset;
     s.crc = crc;
     s.save = {};
+    s.aux = 0;
+    s.edge = ContentEdge::Content;
     named_at_[id] = at;
     live_[id] = true;
     next_ = static_cast<std::uint16_t>(id >= kRecycleSlots ? 1 : id + 1);
@@ -65,7 +68,8 @@ Ex<proto::FileId> FileBytes::intern(std::vector<std::uint8_t>&& bytes, std::stri
 
 [[nodiscard]] Ex<proto::FileId> FileBytes::intern_path(std::string_view path,
                                                        std::uint64_t size_bytes, std::uint32_t at,
-                                                       std::uint32_t popped) {
+                                                       std::uint32_t popped, std::uint32_t crc,
+                                                       std::uint32_t aux) {
     if (path.empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
@@ -82,8 +86,10 @@ Ex<proto::FileId> FileBytes::intern(std::vector<std::uint8_t>&& bytes, std::stri
     }
     s.load_addr = 0;
     s.size_bytes = size_bytes;
-    s.crc = 0;
+    s.crc = crc;
     s.save = {};
+    s.aux = aux;
+    s.edge = ContentEdge::Content;
     named_at_[id] = at;
     live_[id] = true;
     next_ = static_cast<std::uint16_t>(id >= kRecycleSlots ? 1 : id + 1);
@@ -115,6 +121,8 @@ Ex<proto::FileId> FileBytes::intern_at(proto::FileId fid, std::vector<std::uint8
     s.size_bytes = n;
     s.crc = 0;
     s.save = {};
+    s.aux = 0;
+    s.edge = ContentEdge::Content;
     return fid;
 }
 
@@ -122,6 +130,13 @@ bool FileBytes::stamp_save(proto::FileId file, proto::FileId save) noexcept {
     const std::uint16_t id = file.v;
     if (id == kNone || id >= kSlots || storage_[id].bytes.empty()) return false;
     storage_[id].save = save;
+    return true;
+}
+
+bool FileBytes::stamp_edge(proto::FileId file, ContentEdge edge) noexcept {
+    const std::uint16_t id = file.v;
+    if (id == kNone || id >= kSlots || storage_[id].bytes.empty()) return false;
+    storage_[id].edge = edge;
     return true;
 }
 

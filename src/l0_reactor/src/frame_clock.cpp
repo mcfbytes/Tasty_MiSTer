@@ -2,8 +2,6 @@
 #include "reactor/frame_clock.h"
 
 #include <fcntl.h>
-#include <linux/fb.h>
-#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -34,7 +32,7 @@ Ex<std::unique_ptr<FrameClock>> FrameClock::open(const char* fbdev_path) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
     std::unique_ptr<FrameClock> fc(new FrameClock());
-    fc->fb_fd_.reset(fb);
+    fc->fb_ = os::Framebuffer{fb};
     if (auto w = fc->frame_wake_.open_fd(); !w) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), w.error().detail});
     }
@@ -43,11 +41,14 @@ Ex<std::unique_ptr<FrameClock>> FrameClock::open(const char* fbdev_path) {
 
 void FrameClock::wait_vsync() noexcept {
     TASTY_SEAT_BODY(FrameClock);
-    std::uint32_t zero = 0;
-    if (::ioctl(fb_fd_.get(), FBIO_WAITFORVSYNC, &zero) < 0) {
-        if (errno == EINTR) return;
-        back_off();
-        return;
+    switch (fb_.wait_vsync()) {
+        case os::Framebuffer::Wait::Edge:
+            break;
+        case os::Framebuffer::Wait::Interrupted:
+            return;
+        case os::Framebuffer::Wait::Failed:
+            back_off();
+            return;
     }
     const std::uint32_t n_seq = seq_.fetch_add(1, std::memory_order_release) + 1u;
 

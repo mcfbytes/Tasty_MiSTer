@@ -6,21 +6,31 @@ target_include_directories(mister_infra PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/inclu
 target_link_libraries(mister_infra PRIVATE tasty_options)
 
 tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
+  infra/ascii.h
+  infra/byte_view.h
   infra/claim_set.h
   infra/counter.h
   infra/crc32.h
+  infra/endian.h
   infra/diag_log.h
   infra/error.h
   infra/fixed_str.h
   infra/inbox.h
   infra/json_name.h
   infra/json_out.h
+  infra/lat_hist.h
   infra/log_lane.h
   infra/log_rec.h
+  infra/log_rec_dispatch.h
   infra/message_sum.h
   infra/opt_ref.h
   infra/park_fds.h
+  infra/park_like.h
+  infra/parse_int.h
+  infra/pause_latch.h
   infra/persist.h
+  infra/posix_compat.h
+  infra/rt_latency.h
   infra/rt_stats.h
   infra/seat.h
   infra/seat_main.h
@@ -39,6 +49,18 @@ if(TASTY_BUILD_TESTS)
   tasty_unit_test(tasty_infra_crc32_unit
     NAME tasty.infra_crc32
     SOURCES tests/crc32_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
+
+  tasty_unit_test(tasty_infra_byte_view_unit
+    NAME tasty.infra_byte_view
+    SOURCES tests/byte_view_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
+
+  tasty_unit_test(tasty_infra_endian_unit
+    NAME tasty.infra_endian
+    SOURCES tests/endian_unit.cpp
     LIBS mister_infra tasty_test_options
     TIMEOUT 60)
 
@@ -149,9 +171,21 @@ if(TASTY_BUILD_TESTS)
     LIBS mister_infra tasty_test_options
     TIMEOUT 60)
 
+  tasty_unit_test(tasty_infra_ascii_unit
+    NAME tasty.infra_ascii
+    SOURCES tests/ascii_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
+
   tasty_unit_test(tasty_infra_opt_ref_unit
     NAME tasty.infra_opt_ref
     SOURCES tests/opt_ref_unit.cpp
+    LIBS mister_infra tasty_test_options
+    TIMEOUT 60)
+
+  tasty_unit_test(tasty_infra_parse_int_unit
+    NAME tasty.infra_parse_int
+    SOURCES tests/parse_int_unit.cpp
     LIBS mister_infra tasty_test_options
     TIMEOUT 60)
 

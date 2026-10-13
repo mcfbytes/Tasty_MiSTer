@@ -26,6 +26,9 @@ public:
     ImageBracket& operator=(ImageBracket&&) = delete;
 
     [[nodiscard]] Ex<void> write(std::span<const std::uint8_t> data) { return sink_->write(data); }
+    [[nodiscard]] Ex<std::size_t> write_taken(std::span<const std::uint8_t> data) {
+        return sink_->write_taken(data);
+    }
 
     [[nodiscard]] Ex<void> end();
 

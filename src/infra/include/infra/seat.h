@@ -173,3 +173,16 @@ inline constexpr int main = 3;
 
 #define TASTY_SEAT_BODY(Type) ((void)0)
 #define TASTY_SEAT_BODY_MEDIATOR(Type, Half) ((void)0)
+
+#define TASTY_SEAT_FROM(Owner) \
+    using SeatOwner = Owner;   \
+    static constexpr bool kSeatFrom = true
+
+namespace mister::seat_owner {
+struct RT {
+    TASTY_SEAT_RESIDENT(RT);
+};
+struct Main {
+    TASTY_SEAT_EXEMPT(main);
+};
+}  // namespace mister::seat_owner

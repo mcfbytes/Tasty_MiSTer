@@ -34,10 +34,11 @@ public:
     proto::JoystickPort& joysticks() noexcept { return joy_; }
     const proto::JoystickPort& joysticks() const noexcept { return joy_; }
 
-    Ex<unsigned> service_joysticks(hal::ISpiTransport& link, bool local_walk = true);
-    Ex<bool> push_paddle(hal::ISpiTransport& link, PlayerIndex player, std::int32_t raw,
-                         const AxisCal& cal);
-    Ex<bool> push_spinner(hal::ISpiTransport& link, PlayerIndex player, std::int32_t delta);
+    [[nodiscard]] Ex<unsigned> service_joysticks(hal::ISpiTransport& link, bool local_walk = true);
+    [[nodiscard]] Ex<bool> push_paddle(hal::ISpiTransport& link, PlayerIndex player,
+                                       std::int32_t raw, const AxisCal& cal);
+    [[nodiscard]] Ex<bool> push_spinner(hal::ISpiTransport& link, PlayerIndex player,
+                                        std::int32_t delta);
 
     unsigned axis_range_zero() const noexcept { return axis_range_zero_; }
 

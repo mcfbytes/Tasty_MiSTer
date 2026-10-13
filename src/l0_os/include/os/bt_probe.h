@@ -8,7 +8,7 @@
 
 namespace mister::os {
 
-Ex<bool> bluetooth_adapter_up();
+[[nodiscard]] Ex<bool> bluetooth_adapter_up();
 
 bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept;
 

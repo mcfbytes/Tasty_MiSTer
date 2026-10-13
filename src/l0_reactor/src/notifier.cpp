@@ -21,7 +21,7 @@ ssize_t read_exact(int fd, void* buf, std::size_t n) {
 
 }  // namespace
 
-Ex<Notifier> Notifier::doorbell_adopt(os::UioHandle uio,
+Ex<Notifier> Notifier::doorbell_adopt(os::UioLineRef uio,
                                       const hal::RegisterWindow<hal::CauseReg>* cause,
                                       Cause klass) {
 
@@ -29,7 +29,12 @@ Ex<Notifier> Notifier::doorbell_adopt(os::UioHandle uio,
         return std::unexpected(
             Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(EBADF)});
     }
-    return Notifier{static_cast<os::UioHandle&&>(uio), cause, klass};
+
+    (void)uio.consume();
+    if (auto armed = uio.rearm(); !armed) {
+        return std::unexpected(Error{Errc::uio_open, ERR_SITE(), armed.error().detail});
+    }
+    return Notifier{uio, infra::opt_ref_of(cause), klass};
 }
 
 Ex<Notifier> Notifier::ticker(std::chrono::nanoseconds period) {
@@ -50,7 +55,7 @@ Ex<Notifier> Notifier::ticker(std::chrono::nanoseconds period) {
         ::close(fd);
         return std::unexpected(Error{Errc::os, ERR_SITE(), e});
     }
-    return Notifier{Kind::Ticker, UniqueFd{fd}, nullptr, Cause::Tick};
+    return Notifier{Kind::Ticker, UniqueFd{fd}, Cause::Tick};
 }
 
 Ex<Notifier> Notifier::frame(int eventfd) {
@@ -62,7 +67,7 @@ Ex<Notifier> Notifier::frame(int eventfd) {
     if (fd < 0) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
-    return Notifier{Kind::Frame, UniqueFd{fd}, nullptr, Cause::Frame};
+    return Notifier{Kind::Frame, UniqueFd{fd}, Cause::Frame};
 }
 
 Ex<Notifier> Notifier::test(int eventfd, Cause injected) {
@@ -74,7 +79,7 @@ Ex<Notifier> Notifier::test(int eventfd, Cause injected) {
     if (fd < 0) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
-    return Notifier{Kind::Test, UniqueFd{fd}, nullptr, injected};
+    return Notifier{Kind::Test, UniqueFd{fd}, injected};
 }
 
 CauseDecode Notifier::drain_checked() {
@@ -102,8 +107,7 @@ CauseDecode Notifier::drain_checked() {
         case Kind::Doorbell: {
 
             if (!uio_.consume()) return {};
-            const std::uint32_t word =
-                cause_ != nullptr ? cause_->read(hal::CauseReg::Reg::Cause) : 0u;
+            const std::uint32_t word = cause_ ? cause_->read(hal::CauseReg::Reg::Cause) : 0u;
             const CauseDecode d = decode_cause_checked(word);
 
             (void)uio_.rearm();

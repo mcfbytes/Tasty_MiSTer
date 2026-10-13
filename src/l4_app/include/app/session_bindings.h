@@ -41,6 +41,7 @@ public:
         FixedStr<kButtonListCap, StrFit::Clip> jp{};
         bool declares_cheats = false;
         bool declares_turbo = false;
+        bool declares_info = false;
     };
 
     struct Uart {
@@ -101,6 +102,9 @@ public:
     }
     [[nodiscard]] bool declares_turbo() const noexcept {
         return identity_.has_value() && identity_->declares_turbo;
+    }
+    [[nodiscard]] bool declares_info() const noexcept {
+        return identity_.has_value() && identity_->declares_info;
     }
 
 private:

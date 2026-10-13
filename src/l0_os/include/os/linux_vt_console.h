@@ -16,6 +16,9 @@ public:
     [[nodiscard]] Ex<void> activate(int vt) noexcept override;
     void blank(const char* tty) noexcept override;
     void restore_text(const char* tty) noexcept override;
+    [[nodiscard]] std::optional<bool> text_mode(int vt) noexcept override;
+    void graphics(int vt) noexcept override;
+    void text(int vt) noexcept override;
 };
 
 }  // namespace mister::os

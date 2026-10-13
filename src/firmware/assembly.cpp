@@ -27,6 +27,7 @@
 #include "thread_assembly.h"
 #include "os/kernel_rt_probe.h"
 #include "os/small_file.h"
+#include "os/stack_touch.h"
 #include "app/capture_main.h"
 #include "app/encode_main.h"
 #include "app/pcm_main.h"
@@ -60,23 +61,21 @@ void sleep_ns(long ns) noexcept {
     } while (rc == EINTR);
 }
 
-Ex<std::size_t> read_proc(const char* path, char* buf, std::size_t cap) {
-    const auto got = os::read_small_file(path, std::span<char>(buf, cap - 1));
+[[nodiscard]] Ex<std::size_t> read_proc(const char* path, std::span<char> buf) {
+    const auto got = os::read_small_file(path, buf.first(buf.size() - 1));
     if (!got) return std::unexpected(got.error());
     buf[*got] = '\0';
     return *got;
 }
 
-bool parse_u64(const char* s, std::uint64_t& out, const char** end) noexcept {
-    if (s == nullptr || *s < '0' || *s > '9') return false;
+[[nodiscard]] std::optional<std::uint64_t> parse_u64(const char* s) noexcept {
+    if (s == nullptr || *s < '0' || *s > '9') return std::nullopt;
     std::uint64_t v = 0;
     while (*s >= '0' && *s <= '9') {
         v = v * 10u + static_cast<std::uint64_t>(*s - '0');
         ++s;
     }
-    out = v;
-    if (end != nullptr) *end = s;
-    return true;
+    return v;
 }
 
 void confirm_current_cpu(int cpu, RtSetup& out) noexcept {
@@ -90,8 +89,8 @@ void confirm_current_cpu(int cpu, RtSetup& out) noexcept {
     out = RtSetup{exact, exact ? 0 : ERANGE};
 }
 
-Ex<void> spawn_seat(const hal::ThreadRole& r, void* (*fn)(void*), void* arg, pthread_t& out,
-                    RtMode mode, RtSetup& sched_ev) {
+[[nodiscard]] Ex<void> spawn_seat(const hal::ThreadRole& r, void* (*fn)(void*), void* arg,
+                                  pthread_t& out, RtMode mode, RtSetup& sched_ev) {
     pthread_attr_t attr;
     if (const int rc = ::pthread_attr_init(&attr); rc != 0) {
         return os_error(ERR_SITE(), rc);
@@ -150,7 +149,7 @@ template <class Ready>
 
 }  // namespace
 
-Ex<void> rt_memory_init(RtMode mode, RtEvidence& ev) {
+[[nodiscard]] Ex<void> rt_memory_init(RtMode mode, RtEvidence& ev) {
 
     ev.kernel = os::read_kernel_rt(os::kRealtimeFlagPath);
     ev.kernel_rt = RtSetup{ev.kernel == os::KernelRt::PreemptRt, 0};
@@ -199,19 +198,6 @@ void warn_vm_compaction(const os::VmCompaction& vm, const char* prog, std::FILE*
     }
 }
 
-namespace {
-
-[[gnu::noinline]] void touch_stack_pages(std::size_t span) noexcept {
-    if (span == 0) return;
-    volatile unsigned char* const p = static_cast<volatile unsigned char*>(__builtin_alloca(span));
-    for (std::size_t off = span - 1;; off -= kStackPageBytes) {
-        p[off] = 0;
-        if (off < kStackPageBytes) break;
-    }
-    p[0] = 0;
-}
-}  // namespace
-
 void prefault_current_stack(std::size_t requested, RtEvidence& ev) noexcept {
     rlimit rl{};
     if (::getrlimit(RLIMIT_STACK, &rl) != 0) {
@@ -240,7 +226,7 @@ void prefault_current_stack(std::size_t requested, RtEvidence& ev) noexcept {
     const bool growable = !kPosixGlibc && sys_gettid() == ::getpid();
     const std::size_t bound = prefault_mapped_bound(mapped, ev.stack_rlimit_bytes, growable);
     const std::size_t span = stack_prefault_span(requested, used, bound, ev.stack_rlimit_bytes);
-    touch_stack_pages(span);
+    os::touch_stack_pages(span, kStackPageBytes);
     ev.main_stack_prefault_bytes = span;
     ev.main_stack_prefault = RtSetup{span == requested, span == requested ? 0 : ENOMEM};
 }
@@ -257,8 +243,8 @@ void pin_current_cpu(int cpu, RtSetup& out) noexcept {
     confirm_current_cpu(cpu, out);
 }
 
-Ex<void> verify_cpu_topology(const hal::ThreadMap& m, long online_cpus, RtMode mode,
-                             RtEvidence& ev) noexcept {
+[[nodiscard]] Ex<void> verify_cpu_topology(const hal::ThreadMap& m, long online_cpus, RtMode mode,
+                                           RtEvidence& ev) noexcept {
     ev.online_cpus = online_cpus;
     if (online_cpus <= 0) {
 
@@ -291,7 +277,8 @@ bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
     return true;
 }
 
-Ex<void> rt_topology_init(const hal::ThreadMap& m, RtMode mode, RtEvidence& ev) noexcept {
+[[nodiscard]] Ex<void> rt_topology_init(const hal::ThreadMap& m, RtMode mode,
+                                        RtEvidence& ev) noexcept {
     errno = 0;
     const long online = ::sysconf(_SC_NPROCESSORS_ONLN);
     auto r = verify_cpu_topology(m, online, mode, ev);
@@ -305,11 +292,11 @@ Ex<void> rt_topology_init(const hal::ThreadMap& m, RtMode mode, RtEvidence& ev) 
     return r;
 }
 
-Ex<SchedInfo> read_thread_sched(long tid) {
+[[nodiscard]] Ex<SchedInfo> read_thread_sched(long tid) {
     char path[64];
     std::snprintf(path, sizeof path, "/proc/self/task/%ld/stat", tid);
     char buf[1024];
-    auto n = read_proc(path, buf, sizeof buf);
+    auto n = read_proc(path, std::span(buf));
     if (!n) return std::unexpected(n.error());
 
     const char* p = nullptr;
@@ -331,15 +318,15 @@ Ex<SchedInfo> read_thread_sched(long tid) {
             ++p;
         if (token == 0) info.state = *start;
         if (token == 37 || token == 38) {
-            std::uint64_t v = 0;
-            if (!parse_u64(start, v, nullptr)) {
+            const auto v = parse_u64(start);
+            if (!v) {
                 return std::unexpected(
                     Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(token)});
             }
             if (token == 37)
-                info.rt_priority = static_cast<int>(v);
+                info.rt_priority = static_cast<int>(*v);
             else
-                info.policy = static_cast<int>(v);
+                info.policy = static_cast<int>(*v);
         }
         ++token;
     }
@@ -350,7 +337,7 @@ Ex<SchedInfo> read_thread_sched(long tid) {
 
     std::snprintf(path, sizeof path, "/proc/self/task/%ld/wchan", tid);
     char wbuf[64];
-    if (auto w = read_proc(path, wbuf, sizeof wbuf)) {
+    if (auto w = read_proc(path, std::span(wbuf))) {
         std::size_t len = std::strcspn(wbuf, "\n");
         if (len > 0 && !(len == 1 && wbuf[0] == '0')) {
             (void)info.wchan.assign(std::string_view(wbuf, len));
@@ -359,9 +346,9 @@ Ex<SchedInfo> read_thread_sched(long tid) {
     return info;
 }
 
-Ex<std::uint64_t> read_vm_rss_bytes() {
+[[nodiscard]] Ex<std::uint64_t> read_vm_rss_bytes() {
     char buf[4096];
-    auto n = read_proc("/proc/self/status", buf, sizeof buf);
+    auto n = read_proc("/proc/self/status", std::span(buf));
     if (!n) return std::unexpected(n.error());
     const char* key = "VmRSS:";
     for (const char* s = buf; *s != '\0'; ++s) {
@@ -374,11 +361,11 @@ Ex<std::uint64_t> read_vm_rss_bytes() {
         if (*k != '\0') continue;
         while (*t == ' ' || *t == '\t')
             ++t;
-        std::uint64_t kb = 0;
-        if (!parse_u64(t, kb, nullptr)) {
+        const auto kb = parse_u64(t);
+        if (!kb) {
             return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
         }
-        return kb * 1024u;
+        return *kb * 1024u;
     }
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 }
@@ -410,7 +397,7 @@ ThreadAssembly::ThreadAssembly(const hal::ThreadMap& threads, xthread::RtStats& 
                                const UiMain::Wires& ui_wires, const UiMain::Wiring& ui,
                                const DiagSampler::Sources& diag_sources) noexcept
     : ev_(boot), threads_(threads), main_wake_(main_wake),
-      diag_sampler_(stats, events, ev_, quiescing_, diag.transitioning, diag.log, diag.rt_lane,
+      diag_sampler_(stats, events, ev_cell_, quiescing_, diag.transitioning, diag.log, diag.rt_lane,
                     with_ui_cells_(diag_sources, ui)) {
     create_mains_(events, ui_wires, ui);
 }
@@ -419,10 +406,12 @@ ThreadAssembly::ThreadAssembly(xthread::RtStats& stats, app::EventQueue& events,
                                const UiMain::Wiring& ui, const DiagSampler::Sources& diag) noexcept
     : ev_(own_ev_), threads_(hal::kDe10ThreadMap), main_wake_(own_main_wake_),
       own_wires_(std::make_unique<OwnWires>()),
-      diag_sampler_(stats, events, ev_, quiescing_, own_wires_->transitioning, own_wires_->log,
+      diag_sampler_(stats, events, ev_cell_, quiescing_, own_wires_->transitioning, own_wires_->log,
                     own_wires_->rt_lane, with_ui_cells_(diag, ui)) {
     create_mains_(events, UiMain::Wires{own_wires_->ui_wake, own_wires_->uart_handoffs}, ui);
 }
+
+void ThreadAssembly::publish_evidence_() noexcept { ev_cell_.publish(ev_); }
 
 void ThreadAssembly::create_mains_(app::EventQueue& events, const UiMain::Wires& ui_wires,
                                    const UiMain::Wiring& ui) noexcept {
@@ -485,10 +474,11 @@ void ThreadAssembly::exit_seats_live_() const noexcept {
 DiagSampler::Sources ThreadAssembly::with_ui_cells_(DiagSampler::Sources s,
                                                     const UiMain::Wiring& ui) noexcept {
     return DiagSampler::Sources{
-        .fifo = ui.fifo != nullptr ? &ui.fifo->stats_cell() : nullptr,
-        .mgl = ui.mgl != nullptr ? &ui.mgl->stats_cell() : nullptr,
+        .fifo = infra::opt_ref_of(ui.fifo ? &ui.fifo->stats_cell() : nullptr),
+        .mgl = infra::opt_ref_of(ui.mgl ? &ui.mgl->stats_cell() : nullptr),
         .mgl_row0 = s.mgl_row0,
         .window_counts = s.window_counts,
+        .bay_counts = s.bay_counts,
         .video_stats = ui.video.stats_cell(),
         .video_geometry = ui.video.geometry_cell(),
         .video_wire = ui.video.wire(),
@@ -497,6 +487,7 @@ DiagSampler::Sources ThreadAssembly::with_ui_cells_(DiagSampler::Sources s,
         .recover_polls = s.recover_polls,
         .save_write_failures = s.save_write_failures,
         .fallbacks = s.fallbacks,
+        .ini_write_failures = s.ini_write_failures,
         .doorbell = s.doorbell,
         .round_timing = s.round_timing,
         .frames = s.frames,
@@ -584,7 +575,9 @@ Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
         mains_.bind(static_cast<app::RecWriteMain*>(nullptr));
     }
     svc::PrefetchMain* const prefetch = mains_.get<svc::PrefetchMain>();
-    diag_sampler_.set_input_build(mains.input_build);
+
+    publish_evidence_();
+    diag_sampler_.set_input_build(mains.input_build ? &*mains.input_build : nullptr);
     diag_sampler_.set_prefetch(prefetch != nullptr ? &prefetch->prefetch() : nullptr);
 
     for (const SeatTag s : std::span(kSpawnOrder).first(kSpawnOrder.size() - 1)) {
@@ -598,12 +591,17 @@ Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
         live_[i] = true;
     }
 
-    return await_published([this] {
-        for (std::size_t i = 0; i < hal::kThreadSeats; ++i) {
-            if (live_[i] && tid_[i].load(std::memory_order_acquire) == 0) return false;
-        }
-        return true;
-    });
+    if (auto p = await_published([this] {
+            for (std::size_t i = 0; i < hal::kThreadSeats; ++i) {
+                if (live_[i] && tid_[i].load(std::memory_order_acquire) == 0) return false;
+            }
+            return true;
+        });
+        !p) {
+        return p;
+    }
+    publish_evidence_();
+    return {};
 }
 
 Ex<void> ThreadAssembly::spawn_rt(RtMode mode, app::RtMain& rt) {
@@ -616,7 +614,9 @@ Ex<void> ThreadAssembly::spawn_rt(RtMode mode, app::RtMain& rt) {
         return r;
     }
     live_[i] = true;
-    return await_published([this] { return tid(SeatTag::RT) != 0; });
+    if (auto p = await_published([this] { return tid(SeatTag::RT) != 0; }); !p) return p;
+    publish_evidence_();
+    return {};
 }
 
 namespace {

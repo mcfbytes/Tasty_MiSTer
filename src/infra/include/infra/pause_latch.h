@@ -41,14 +41,29 @@ public:
     }
     [[nodiscard]] PauseGen asked() const noexcept { return ask_.load(std::memory_order_acquire); }
 
+    class Observer {
+        TASTY_SEAT_EXEMPT(component);
+        friend class BasicPauseLatch;
+
+    public:
+        Observer() = default;
+        Observer(const Observer&) = delete;
+        Observer& operator=(const Observer&) = delete;
+
+        [[nodiscard]] PauseGen taken() const noexcept { return taken_; }
+
+    private:
+        PauseGen taken_ = 0;
+    };
+
     template <class Body>
-    [[nodiscard]] bool observe(Body& b) noexcept {
+    [[nodiscard]] bool observe(Observer& seen, Body& b) noexcept {
         const PauseGen a = ask_.load(std::memory_order_acquire);
         const PauseGen p = paused_.load(std::memory_order_relaxed);
-        if (a != taken_) {
-            if (taken_ != 0) b.on_resume();
+        if (a != seen.taken_) {
+            if (seen.taken_ != 0) b.on_resume();
             if (a != 0) b.on_pause();
-            taken_ = a;
+            seen.taken_ = a;
         }
         if (a != p && (a == 0 || b.quiescent())) {
             paused_.store(a, std::memory_order_release);
@@ -64,7 +79,6 @@ public:
 private:
     BasicWakeFlag<Kick>* seat_wake_;
     BasicWakeFlag<Kick>* asker_wake_;
-    PauseGen taken_ = 0;
     std::atomic<PauseGen> ask_{0};
     alignas(64) std::atomic<PauseGen> paused_{0};
 };

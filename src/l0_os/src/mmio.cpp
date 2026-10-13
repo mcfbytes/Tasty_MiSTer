@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -44,24 +45,27 @@ std::size_t page_size() {
 
 constexpr unsigned kMaxUioNodes = 64;
 
-constexpr char kUioClassRoot[] = "/sys/class/uio";
-
-bool read_uio_name(const char* root, unsigned idx, char* out, std::size_t cap) {
+[[nodiscard]] Ex<void> read_uio_name(const char* root, unsigned idx, std::span<char> out) {
+    if (out.empty()) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     char path[128];
     const int n = std::snprintf(path, sizeof path, "%s/uio%u/name", root, idx);
-    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof path) return false;
+    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof path) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(n)});
+    }
 
     const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return false;
-    const ssize_t got = ::read(fd, out, cap - 1);
+    if (fd < 0) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    const ssize_t got = ::read(fd, out.data(), out.size() - 1);
     ::close(fd);
-    if (got <= 0) return false;
+    if (got <= 0) {
+        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(got)});
+    }
 
     std::size_t len = static_cast<std::size_t>(got);
     while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r'))
         --len;
     out[len] = '\0';
-    return true;
+    return {};
 }
 
 }  // namespace
@@ -74,8 +78,8 @@ int find_uio_node_under(const char* sysfs_root, std::string_view name) noexcept 
 
     for (unsigned i = 0; i < kMaxUioNodes; ++i) {
         char have[48];
-        if (!read_uio_name(sysfs_root, i, have, sizeof have)) continue;
-        if (std::strcmp(have, want) == 0) return static_cast<int>(i);
+        if (!read_uio_name(sysfs_root, i, std::span(have))) continue;
+        if (std::string_view{have} == want) return static_cast<int>(i);
     }
     return -1;
 }
@@ -183,26 +187,20 @@ Ex<UioHandle> UioHandle::adopt(UioLine line, UniqueFd fd) {
         return std::unexpected(Error{Errc::uio_open, ERR_SITE(), std::to_underlying(line)});
     }
 
-    const std::uint32_t enable = 1;
-    const ssize_t n = ::write(fd.get(), &enable, sizeof enable);
-    if (n < 0) {
-        return std::unexpected(
-            Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+    const int flags = ::fcntl(fd.get(), F_GETFL);
+    if (flags < 0 || (flags & O_NONBLOCK) == 0) {
+        return std::unexpected(Error{Errc::uio_open, ERR_SITE(), std::to_underlying(line)});
     }
-    if (n != static_cast<ssize_t>(sizeof enable)) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(n)});
-    }
-
     UioHandle h;
     h.fd_ = std::move(fd);
     h.line_ = line;
     return h;
 }
 
-Ex<std::uint32_t> UioHandle::consume() {
+Ex<std::uint32_t> UioLineRef::consume() const {
 
     std::uint32_t count = 0;
-    const ssize_t n = ::read(fd_.get(), &count, sizeof count);
+    const ssize_t n = ::read(fd_, &count, sizeof count);
     if (n < 0) {
         const int e = errno;
 
@@ -215,9 +213,9 @@ Ex<std::uint32_t> UioHandle::consume() {
     return count;
 }
 
-Ex<void> UioHandle::rearm() {
+Ex<void> UioLineRef::rearm() const {
     const std::uint32_t enable = 1;
-    const ssize_t w = ::write(fd_.get(), &enable, sizeof enable);
+    const ssize_t w = ::write(fd_, &enable, sizeof enable);
     if (w < 0) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }

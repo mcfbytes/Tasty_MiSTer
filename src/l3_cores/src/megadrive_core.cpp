@@ -14,7 +14,7 @@
 
 namespace mister::cores {
 
-Ex<void> MegaDriveCore::do_init(proto::CoreSession&) { return {}; }
+Ex<void> MegaDriveCore::do_adopt(const CoreAdopt&) { return {}; }
 
 void MegaDriveCore::on_set_pending_file_ext(std::string_view ext) noexcept {
     (void)ext_.assign(ext);

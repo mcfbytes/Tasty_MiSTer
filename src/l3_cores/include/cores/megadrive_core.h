@@ -65,7 +65,7 @@ private:
         std::uint8_t volume = 0;
     };
 
-    [[nodiscard]] Ex<void> do_init(proto::CoreSession& s) override;
+    [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     void on_set_pending_file_ext(std::string_view ext) noexcept override;
     void on_set_pending_file_path(std::string_view path) noexcept override;
     [[nodiscard]] IStreamLoad* on_stream_load() noexcept override { return this; }

@@ -52,9 +52,13 @@ void TastySink::on(const app::Event::RamImageDeclined& a, const app::Event::Head
                     "core's own RAM fill");
 }
 void TastySink::on(const app::Event::ConfStrOnlySession&, const app::Event::Head&) {}
+void TastySink::on(const app::Event::RequestDone&, const app::Event::Head&) {}
 void TastySink::on(const app::Event::SessionAdvisory&, const app::Event::Head&) {}
 
-void TastySink::misrouted(const app::Event&) noexcept { ++event_misrouted_; }
+void TastySink::misrouted(const app::Event&) noexcept {
+    TASTY_SEAT_BODY(TastySink);
+    ++event_misrouted_;
+}
 
 static_assert(app::EventUiSink<TastySink>);
 

@@ -6,6 +6,7 @@
 
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "os/anon_mapping.h"
 
 namespace mister::app {
 
@@ -28,7 +29,7 @@ public:
     [[nodiscard]] std::size_t bytes() const noexcept { return slots_ * slot_bytes_; }
 
 private:
-    std::byte* base_ = nullptr;
+    os::AnonMapping map_{};
     std::size_t slots_ = 0;
     std::size_t slot_bytes_ = 0;
 };

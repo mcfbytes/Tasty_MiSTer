@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/snes_core.h"
 
-#include "cores/mailbox_port.h"
 #include "cores/manifests/snes.h"
+#include "infra/byte_view.h"
 
 #include <algorithm>
 #include <array>
@@ -25,17 +25,15 @@ bool iequal(std::string_view a, std::string_view b) noexcept {
 
 }  // namespace
 
-Ex<void> SnesCore::do_init(proto::CoreSession&) { return {}; }
+SnesCore::SnesCore(const CoreProfile& p, const HostServices& h)
+    : Core(p, h), data_host_(kGenericProfile, h),
+      mailbox_(MailboxCarriage::granted(h, manifests::kSnesMailboxFrame)) {}
+
+Ex<void> SnesCore::do_adopt(const CoreAdopt&) { return {}; }
 
 void SnesCore::on_set_pending_file_ext(std::string_view ext) noexcept {
     (void)ext_.assign(ext);
     data_host_.set_pending_ext(ext);
-}
-
-void SnesCore::service_mailbox_tick() noexcept {
-    TASTY_SEAT_BODY(SnesCore);
-    if (host().mailbox == nullptr || host().fio_queue == nullptr) return;
-    host().mailbox->service_rt(host().link, *host().fio_queue, manifests::kSnesMailboxFrame);
 }
 
 Ex<void> SnesCore::on_mount(IoIndex, const MountedPath&) { return unimplemented(ERR_SITE()); }
@@ -122,7 +120,7 @@ Ex<SnesCore::Analysis> SnesCore::analyze_(svc::IFile& f, std::uint32_t base,
     const auto sig_is = [&](const std::uint8_t* magic, std::size_t n) {
         return sig_len >= n && std::memcmp(sig.data(), magic, n) == 0;
     };
-    out.sniff.bsx_bios = sig_is(reinterpret_cast<const std::uint8_t*>(snes::kBsxBiosMagic.data()),
+    out.sniff.bsx_bios = sig_is(infra::text_bytes<const std::uint8_t>(snes::kBsxBiosMagic).data(),
                                 snes::kBsxBiosMagic.size());
     out.sniff.cc92 = sig_is(snes::kCc92Signature.data(), snes::kCc92Signature.size());
     out.sniff.pf94 = sig_is(snes::kPf94TenKSignature.data(), snes::kPf94TenKSignature.size()) ||

@@ -130,6 +130,7 @@ inline constexpr CoreProfile kPsx{
     .slots = kPsxSlots,
     .boot_assets = kPsxBootAssets,
     .start_assets = kPsxStartAssets,
+    .start = StartRule::Assets,
     .signatures = {},
     .blank_save = kPsxBlankSave,
     .staging = kPsxStaging,

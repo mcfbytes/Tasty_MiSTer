@@ -4,7 +4,9 @@
 #include <cstdint>
 
 #include "app/uart_mode.h"
+#include "app/uart_performer.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/park_fds.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
@@ -25,6 +27,7 @@ class MglPump;
 class LinkRxChannel;
 class RecorderControl;
 class ReplayFeeder;
+class SaveStateAttach;
 class ScreenshotPump;
 class VideoPump;
 struct Event;
@@ -46,19 +49,21 @@ public:
     };
 
     struct Wiring {
-        app::CmdFifo* fifo = nullptr;
-        app::MglPump* mgl = nullptr;
+        infra::OptRef<app::CmdFifo> fifo{};
+        infra::OptRef<app::MglPump> mgl{};
         app::VideoPump& video;
-        app::UartModeController* uart = nullptr;
+        bool uart = false;
         app::IEventSink& ui_sink;
         app::EventQueue& owner_events;
-        app::BtPump* bt = nullptr;
+        infra::OptRef<app::BtPump> bt{};
         app::ScreenshotPump& shots;
         app::ReplayFeeder& replay;
         app::RecorderControl& recorder;
-        app::LauncherScreen* launcher_screen = nullptr;
-        app::IUiRoundPort* ui_round = nullptr;
+        infra::OptRef<app::LauncherScreen> launcher_screen{};
+        infra::OptRef<app::IUiRoundPort> ui_round{};
         app::LinkRxChannel& link_rx;
+
+        infra::OptRef<app::SaveStateAttach> save_states{};
     };
 
     UiMain(app::EventQueue& events, xthread::ParkFds fds,
@@ -69,7 +74,7 @@ public:
     UiMain(UiMain&&) = delete;
     UiMain& operator=(UiMain&&) = delete;
 
-    void set_owner_tick(app::IOwnerTick* tick) noexcept { owner_tick_ = tick; }
+    void set_owner_tick(app::IOwnerTick* tick) noexcept { owner_tick_ = infra::opt_ref_of(tick); }
 
     void start() noexcept;
     void stop() noexcept { stop_.request(); }
@@ -79,7 +84,7 @@ public:
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
     [[nodiscard]] int park_ms() const noexcept { return kUiPollMs; }
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
-    [[nodiscard]] bool paused() noexcept { return pause_.observe(*this); }
+    [[nodiscard]] bool paused() noexcept { return pause_.observe(pause_seen_, *this); }
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
     void settle() noexcept;
 
@@ -100,22 +105,25 @@ private:
 
     app::EventQueue& events_;
     app::EventQueue& owner_events_;
-    app::CmdFifo* const fifo_;
-    app::MglPump* const mgl_;
+    const infra::OptRef<app::CmdFifo> fifo_;
+    const infra::OptRef<app::MglPump> mgl_;
     app::VideoPump& video_;
-    app::BtPump* const bt_;
+    const infra::OptRef<app::BtPump> bt_;
     app::ScreenshotPump& shots_;
     app::ReplayFeeder& replay_;
     app::RecorderControl& recorder_;
-    app::LauncherScreen* const launcher_screen_;
-    app::UartModeController* const uart_;
+    const infra::OptRef<app::LauncherScreen> launcher_screen_;
+    const bool uart_;
+    app::UartPerformer uart_performer_{};
     app::IEventSink& ui_sink_;
-    app::IUiRoundPort* const ui_round_;
-    app::IOwnerTick* owner_tick_ = nullptr;
+    const infra::OptRef<app::IUiRoundPort> ui_round_;
+    infra::OptRef<app::IOwnerTick> owner_tick_{};
     app::LinkRxChannel& ui_rx_;
+    infra::OptRef<app::SaveStateAttach> save_states_;
     xthread::WakeFlag& wake_;
     xthread::WakeFlag stop_;
     xthread::PauseLatch pause_;
+    xthread::PauseLatch::Observer pause_seen_{};
     std::uint32_t paused_link_drops_ = 0;
     std::uint32_t roundless_link_drops_ = 0;
 

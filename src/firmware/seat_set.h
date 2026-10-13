@@ -184,7 +184,6 @@ consteval bool join_order_holds(const std::array<SeatTag, N>& join,
     if (!covers_each_seat_once(join)) return false;
     if (join[0] != SeatTag::RT || join[1] != SeatTag::Io) return false;
     if (join[N - 1] != SeatTag::Diag) return false;
-    if (!before(join, SeatTag::Input, SeatTag::Ui)) return false;
     for (const DrainEdge& e : drains) {
         if (!before(join, e.producer, e.seat)) return false;
     }

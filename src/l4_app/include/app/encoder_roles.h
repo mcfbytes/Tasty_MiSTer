@@ -2,6 +2,7 @@
 #pragma once
 
 #include "app/cheat_call.h"
+#include "infra/opt_ref.h"
 
 namespace mister::app {
 
@@ -10,10 +11,10 @@ class ICheatApply;
 class ICoreOptionActs;
 
 struct EncoderRoles {
-    ISaveFlush* saves = nullptr;
-    ICheatApply* cheats = nullptr;
+    infra::OptRef<ISaveFlush> saves{};
+    infra::OptRef<ICheatApply> cheats{};
     CheatCall cheat_call{};
-    ICoreOptionActs* acts = nullptr;
+    infra::OptRef<ICoreOptionActs> acts{};
 };
 
 }  // namespace mister::app

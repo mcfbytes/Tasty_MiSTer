@@ -2,6 +2,8 @@
 #pragma once
 
 #include "cores/core_window_grant.h"
+#include "cores/save_copy_level.h"
+#include "infra/opt_ref.h"
 
 namespace mister::svc {
 class Vfs;
@@ -21,7 +23,6 @@ class SpiFioQueue;
 
 namespace mister::cores {
 
-class CoreInitHost;
 class IMailboxPort;
 
 struct HostServices {
@@ -37,11 +38,11 @@ struct HostServices {
 
     svc::DiscReadService* discs = nullptr;
 
-    const CoreInitHost* init_host = nullptr;
-
     proto::SpiFioQueue* fio_queue = nullptr;
 
     IMailboxPort* mailbox = nullptr;
+
+    infra::OptRef<const SaveCopyCell> save_copy{};
 };
 
 }  // namespace mister::cores

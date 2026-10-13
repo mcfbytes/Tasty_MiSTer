@@ -2,7 +2,6 @@
 #pragma once
 
 #include <cstddef>
-#include <optional>
 
 #include "app/replay_msg.h"
 #include "infra/seat.h"
@@ -15,13 +14,17 @@ class ReplayRing {
 
 public:
     static constexpr std::size_t kSlots = 256;
+    using Ring = xthread::SpscRing<ReplayMsg, kSlots>;
+    using Sender = Ring::Producer;
+    using Receiver = Ring::Consumer;
 
-    [[nodiscard]] bool push(const ReplayMsg& msg) noexcept { return ring_.push(msg); }
-    [[nodiscard]] std::optional<ReplayMsg> pop() noexcept { return ring_.pop(); }
-    [[nodiscard]] std::size_t size() const noexcept { return ring_.size(); }
+    [[nodiscard]] Sender sender() noexcept { return ring_.producer(); }
+    [[nodiscard]] Receiver receiver() noexcept { return ring_.consumer(); }
+
+    [[nodiscard]] Ring& ring_for_test() noexcept { return ring_; }
 
 private:
-    xthread::SpscRing<ReplayMsg, kSlots> ring_{};
+    Ring ring_{};
 };
 
 }  // namespace mister::app

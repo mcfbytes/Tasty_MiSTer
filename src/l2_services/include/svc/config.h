@@ -7,6 +7,7 @@
 
 #include "infra/fixed_str.h"
 #include "infra/error.h"
+#include "svc/parse_error.h"
 
 namespace mister::svc {
 
@@ -15,7 +16,6 @@ inline constexpr std::size_t kNumIniOptions = 111;
 inline constexpr std::size_t kNumExtOptions = 3;
 
 inline constexpr std::size_t kMaxParseErrors = 4;
-inline constexpr std::size_t kParseErrorChars = 128;
 
 enum class OptionType : std::uint8_t {
     U8,
@@ -57,17 +57,6 @@ enum class SectionMatch : std::uint8_t {
     VideoUnqualified,
     PrefixWildcard,
     NoMatch,
-};
-
-struct ParseError {
-    enum class Kind : std::uint8_t {
-        UnknownOption,
-        NotANumber,
-        OutOfRange,
-        InvalidFormat,
-    };
-    Kind kind{Kind::UnknownOption};
-    FixedStr<kParseErrorChars, StrFit::Clip> text{};
 };
 
 }  // namespace mister::svc

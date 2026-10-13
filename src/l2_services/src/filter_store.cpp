@@ -5,12 +5,12 @@
 #include "svc/filter_send_plan.h"
 #include "svc/filter_set.h"
 
-#include <strings.h>
-
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include "infra/ascii.h"
+#include "infra/byte_view.h"
 #include "svc/vfs.h"
 
 namespace mister::svc {
@@ -86,11 +86,11 @@ bool parse_video_filter(std::string_view text, FilterBank& out) {
     buf.push_back('\0');
     LineCursor cursor{buf.data(), buf.data() + buf.size() - 1};
     while (const char* line = cursor.next()) {
-        if (count == 0 && ::strcasecmp(line, "adaptive") == 0) {
+        if (count == 0 && infra::ieq(line, "adaptive")) {
             is_adaptive = true;
             continue;
         }
-        if (count == 0 && ::strcasecmp(line, "10bit") == 0) {
+        if (count == 0 && infra::ieq(line, "10bit")) {
             scale = 1;
             continue;
         }
@@ -191,9 +191,7 @@ void load_filter_set(const Vfs& vfs, std::string_view core, const ScalerSeeds& s
         if (path.size() > kScalerNameCap) path.resize(kScalerNameCap);
         const auto bytes = read_file(vfs, path);
         const std::string_view text =
-            bytes.empty()
-                ? std::string_view{}
-                : std::string_view{reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+            bytes.empty() ? std::string_view{} : infra::as_text(std::span(bytes));
         const bool ok = parse_video_filter(text, out.banks[s]);
         out.modes[s] = ok ? slots[s].mode : 0;
     }

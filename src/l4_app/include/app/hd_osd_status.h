@@ -26,10 +26,31 @@ struct HdOsdStatus {
     std::uint32_t copy_us_max = 0;
     std::uint32_t sample_us_last = 0;
     std::uint32_t sample_us_max = 0;
+    std::uint32_t read_us_last = 0;
+    std::uint32_t read_us_max = 0;
+    std::uint32_t scale_us_last = 0;
+    std::uint32_t scale_us_max = 0;
     std::uint16_t backdrop_w = 0;
     std::uint16_t backdrop_h = 0;
     std::uint16_t stride_mib = 0;
     std::uint8_t lowlat = 0;
+
+    std::uint8_t uio = 0;
+
+    std::uint32_t bd_same = 0;
+    std::uint32_t panel_us_last = 0;
+    std::uint32_t panel_us_max = 0;
+
+    std::uint32_t ask_us_min = 0;
+    std::uint32_t ask_us_p50 = 0;
+    std::uint32_t ask_us_max = 0;
+    std::uint32_t ask_n = 0;
+    std::uint32_t inplace = 0;
+    std::uint32_t flips = 0;
+    std::uint32_t bd_frames = 0;
+    std::uint32_t bd_us_last = 0;
+    std::uint32_t bd_us_max = 0;
+    std::uint32_t copy_kb = 0;
 };
 
 static_assert(std::is_trivially_copyable_v<HdOsdStatus>);
@@ -47,10 +68,28 @@ constexpr void to_json(infra::JsonOut& o, const HdOsdStatus& s) noexcept {
     o.field("copy_us_max", s.copy_us_max);
     o.field("sample_us", s.sample_us_last);
     o.field("sample_us_max", s.sample_us_max);
+    o.field("read_us", s.read_us_last);
+    o.field("read_us_max", s.read_us_max);
+    o.field("scale_us", s.scale_us_last);
+    o.field("scale_us_max", s.scale_us_max);
     o.field("bw", s.backdrop_w);
     o.field("bh", s.backdrop_h);
     o.field("stride_mib", s.stride_mib);
     o.field("lowlat", s.lowlat);
+    o.field("uio", s.uio);
+    o.field("bd_same", s.bd_same);
+    o.field("panel_us", s.panel_us_last);
+    o.field("panel_us_max", s.panel_us_max);
+    o.field("ask_us_min", s.ask_us_min);
+    o.field("ask_us", s.ask_us_p50);
+    o.field("ask_us_max", s.ask_us_max);
+    o.field("ask_n", s.ask_n);
+    o.field("inplace", s.inplace);
+    o.field("flips", s.flips);
+    o.field("bd_frames", s.bd_frames);
+    o.field("bd_us", s.bd_us_last);
+    o.field("bd_us_max", s.bd_us_max);
+    o.field("copy_kb", s.copy_kb);
 }
 
 using HdOsdStatusCell = xthread::Telemetry<HdOsdStatus, SeatTag::HdOsd>;

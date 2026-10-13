@@ -18,9 +18,24 @@ static_assert(!std::is_default_constructible_v<InputPipeline>,
 InputPipeline::InputPipeline(InputDecode::Fds fds, InputWire& wire, InputBuild& build,
                              InputEmit& emit, os::IClock& clock,
                              InputDecode::Wiring decode_wiring) noexcept
-    : wire_(wire), build_(build), emit_(emit),
-      decode_(std::move(fds), wire, build.service(), clock, decode_wiring),
-      sample_{&decode_, &build_, &emit_, &wire_} {}
+    : wire_(wire), build_(build), emit_(emit), service_(open_service_(build)),
+      decode_(std::move(fds), wire, service_, build.tables(), clock, decode_wiring),
+      sample_{infra::OptRef<const InputDecode::CountsCell>{decode_.counts_cell()},
+              infra::OptRef<const InputEmit::CountsCell>{emit_.counts_cell()},
+              infra::OptRef<const InputWire>{wire_}} {}
+
+svc::InputService InputPipeline::open_service_(InputBuild& build) noexcept {
+    svc::InputService s = svc::InputService::create();
+    if (auto w = s.open_hotplug_watch(build.enumerator().input_dir()); !w) {
+        build.note_watch_failure();
+    }
+    return s;
+}
+
+void InputPipeline::latch_cfg(std::span<const svc::DeadzoneRule> deadzones, bool rumble) noexcept {
+    service_.apply_deadzone_rules(deadzones);
+    service_.set_cfg_rumble(rumble);
+}
 
 void InputEmit::on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live) {
 
@@ -37,9 +52,11 @@ void InputEmit::on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live) {
         ps2_.forget();
     }
 
-    if (!live) return;
-    if (tick) ps2_.probe();
-    ps2_.service();
+    if (live) {
+        if (tick) ps2_.probe();
+        ps2_.service();
+    }
+    counts_cell_.publish(counts());
 }
 
 void InputEmit::apply_edge_reset() {
@@ -48,6 +65,7 @@ void InputEmit::apply_edge_reset() {
         wm_reset_seq_ = rs;
         em_.joysticks().reset_edges();
         InputWire::bump(n_edge_reset_, 1);
+        counts_cell_.publish(counts());
     }
 }
 
@@ -61,81 +79,60 @@ InputEmit::Counts InputEmit::counts() const noexcept {
 }
 
 InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view input_dir)
-    : wire_(wire) {
+    : wire_(wire), en_(svc::InputEnumerator::create(vfs)) {
+    if (!input_dir.empty()) en_.set_input_dir(input_dir);
 
-    svc_.emplace(svc::InputService::create(vfs));
-
-    if (!input_dir.empty()) svc_->set_input_dir(input_dir);
-
-    if (auto w = svc_->open_hotplug_watch(); !w) {
-        InputWire::bump(n_enum_fail_, 1);
-    }
-    if (auto e = svc_->enumerate(); !e) {
+    if (auto e = en_.enumerate(); !e) {
         InputWire::bump(n_enum_fail_, 1);
     }
 
-    (void)svc_->load_maps_for(std::string_view{}, false);
+    (void)en_.load_maps_for(std::string_view{}, false);
 
-    wire_.publish_gates(svc_->grabbed() ? InputWire::kGateGrabbed : 0u, InputWire::kGateOsdVisible);
+    (void)hand_over_();
+
+    wire_.publish_gates(svc::InputService::kBornGrabbed ? InputWire::kGateGrabbed : 0u,
+                        InputWire::kGateOsdVisible);
 }
 
 void InputBuild::set_cfg_deadzone_rules(std::span<const svc::DeadzoneRule> rows) {
-    svc_->set_cfg_deadzone_rules(rows);
+    en_.set_cfg_deadzone_rules(rows);
 }
 
-bool InputBuild::rebind_round(unsigned wait_ms) {
+bool InputBuild::hand_over_() {
+    svc::DeviceTable t = en_.take_table();
+    return tx_.send(t).has_value();
+}
+
+bool InputBuild::rebind_round() {
 
     TASTY_SEAT_BODY(InputBuild);
-
+    tx_.reap();
     if ((wire_.requests() & InputWire::kReqHotplug) == 0u) return false;
+
+    if (!tx_.ready()) {
+        wire_.note_rebuild_refused();
+        return false;
+    }
+
     wire_.clear_request(InputWire::kReqHotplug);
 
-    for (unsigned i = 0; i < wait_ms * 10u && wire_.paused(); ++i) {
-        timespec ts{0, 100'000};
-        (void)::nanosleep(&ts, nullptr);
-    }
-    if (wire_.paused()) {
-        wire_.request(InputWire::kReqHotplug);
-        wire_.note_rebuild_refused();
-        return false;
-    }
-
-    const std::uint32_t seq0 = wire_.pause_seq();
-
-    wire_.request(InputWire::kReqRebuild);
-
-    wire_.wake();
-
-    bool paused = false;
-    for (unsigned i = 0; i < wait_ms * 10u && !paused; ++i) {
-        paused = wire_.paused() && wire_.pause_seq() != seq0;
-        if (!paused) {
-            timespec ts{0, 100'000};
-            (void)::nanosleep(&ts, nullptr);
-        }
-    }
-    if (!paused) {
-
-        wire_.clear_request(InputWire::kReqRebuild);
-        wire_.request(InputWire::kReqHotplug);
-        wire_.note_rebuild_refused();
-        return false;
-    }
-
-    if (auto e = svc_->enumerate(); !e) {
+    if (auto e = en_.enumerate(); !e) {
         InputWire::bump(n_enum_fail_, 1);
     }
-
     {
 
         const InputWire::CoreNameCell core = wire_.core_name();
 
-        svc_->set_joy_plan(wire_.joy_plan());
+        en_.set_joy_plan(wire_.joy_plan());
         const svc::IAnalogReshape* r = wire_.analog_reshape();
         const auto reshape = infra::opt_ref_of(r);
-        (void)svc_->load_maps_for(core.view(), core.front_end, reshape);
+        (void)en_.load_maps_for(core.view(), core.front_end, reshape);
     }
-    wire_.clear_request(InputWire::kReqRebuild);
+    if (!hand_over_()) {
+        wire_.request(InputWire::kReqHotplug);
+        wire_.note_rebuild_refused();
+        return false;
+    }
     wire_.note_rebuild_done();
     wire_.wake();
     return true;
@@ -144,27 +141,15 @@ bool InputBuild::rebind_round(unsigned wait_ms) {
 InputBuild::Counts InputBuild::counts() const noexcept {
     Counts c{};
     c.enumerate_failures = n_enum_fail_.load(std::memory_order_relaxed);
-    c.devices = svc_->stats().devices;
-    c.mapped = svc_->mapped_devices();
-    c.slotted = svc_->slotted_devices();
-    c.mask_changes = svc_->mask_recomputes();
-    c.axis_edges = svc_->axis_edges();
-    c.mouse_remainder = svc_->mouse_remainder_bytes();
-    c.key_overflows = svc_->key_overflows();
-    c.quirk_drops = svc_->quirk_drops();
-    c.rejected = svc_->rejected_nodes();
-    c.slot_live = svc_->live_slot_mask();
-    c.slot_ghosts = svc_->ghost_slots();
-    for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
-        c.slot_hash[i] = svc_->slot_key_hash(i);
-    }
+    c.devices = en_.stats().devices;
+    c.rejected = en_.rejected_nodes();
     return c;
 }
 
-InputStats collect_input_stats(const InputSample& s) noexcept {
+InputStats collect_input_stats(const InputSample& s, const InputBuild::Counts& b) noexcept {
     InputStats out{};
-    if (s.decode != nullptr) {
-        const InputDecode::Counts d = s.decode->counts();
+    if (s.decode) {
+        const InputDecode::Counts d = s.decode->sample().value;
         out.rounds = d.rounds;
         out.events = d.events;
         out.keys_published = d.keys_published;
@@ -176,33 +161,30 @@ InputStats collect_input_stats(const InputSample& s) noexcept {
         out.joy_seen = d.joy_seen;
         out.joy_players = d.joy_players;
         out.captures = d.captures;
-    }
-    if (s.build != nullptr) {
-        const InputBuild::Counts b = s.build->counts();
-        out.enumerate_failures = b.enumerate_failures;
-        out.devices = b.devices;
-        out.mapped = b.mapped;
-        out.slotted = b.slotted;
-        out.mask_changes = b.mask_changes;
-        out.axis_edges = b.axis_edges;
-        out.mouse_remainder = b.mouse_remainder;
-        out.key_overflows = b.key_overflows;
-        out.quirk_drops = b.quirk_drops;
-        out.rejected = b.rejected;
-        out.slot_live = b.slot_live;
-        out.slot_ghosts = b.slot_ghosts;
+        out.mapped = d.mapped;
+        out.slotted = d.slotted;
+        out.mask_changes = d.mask_changes;
+        out.axis_edges = d.axis_edges;
+        out.mouse_remainder = d.mouse_remainder;
+        out.key_overflows = d.key_overflows;
+        out.quirk_drops = d.quirk_drops;
+        out.slot_live = d.slot_live;
+        out.slot_ghosts = d.slot_ghosts;
         for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
-            out.slot_hash[i] = b.slot_hash[i];
+            out.slot_hash[i] = d.slot_hash[i];
         }
     }
-    if (s.emit != nullptr) {
-        const InputEmit::Counts e = s.emit->counts();
+    out.enumerate_failures = b.enumerate_failures;
+    out.devices = b.devices;
+    out.rejected = b.rejected;
+    if (s.emit) {
+        const InputEmit::Counts e = s.emit->sample().value;
         out.rt_rounds = e.rt_rounds;
         out.joy_transactions = e.joy_transactions;
         out.rt_errors = e.rt_errors;
         out.edge_resets = e.edge_resets;
     }
-    if (s.wire != nullptr) {
+    if (s.wire) {
         out.gates = s.wire->gates();
         out.ui_keys = s.wire->ui_keys_published();
         out.ui_keys_dropped = s.wire->ui_keys_dropped();

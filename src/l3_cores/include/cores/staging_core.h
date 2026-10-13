@@ -21,7 +21,7 @@ public:
 
     [[nodiscard]] virtual MountState mount_disc(std::string_view path) = 0;
     virtual void set_region(std::uint8_t region) = 0;
-    virtual Ex<void> deferred_reset() = 0;
+    [[nodiscard]] virtual Ex<void> deferred_reset() = 0;
 
     virtual proto::IImageSink& image_sink() noexcept = 0;
 

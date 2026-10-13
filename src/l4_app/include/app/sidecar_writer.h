@@ -8,6 +8,7 @@
 #include "app/sidecar_msg.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
+#include "os/anon_mapping.h"
 
 namespace mister::app {
 
@@ -16,8 +17,8 @@ class SidecarWriter {
 
 public:
     struct Wiring {
-        SidecarRing* in = nullptr;
-        RecWriteStatusCell* status = nullptr;
+        SidecarRing& in;
+        RecWriteStatusCell& status;
     };
 
     static constexpr std::size_t kBufBytes = 64u * 1024u;
@@ -42,7 +43,7 @@ public:
 
     [[nodiscard]] const RecWriteStatus& status() const noexcept { return st_; }
 
-    [[nodiscard]] std::size_t mapped_bytes() const noexcept { return cap_; }
+    [[nodiscard]] std::size_t mapped_bytes() const noexcept { return buf_.size(); }
 
 private:
     void open_(const SidecarMsg& m) noexcept;
@@ -56,8 +57,7 @@ private:
 
     Wiring w_;
     UniqueFd fd_{};
-    char* buf_ = nullptr;
-    std::size_t cap_ = 0;
+    os::AnonMapping buf_{};
     std::size_t used_ = 0;
     RecWriteStatus st_{};
     bool dirty_ = false;

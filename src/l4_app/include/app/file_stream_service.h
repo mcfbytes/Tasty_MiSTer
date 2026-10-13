@@ -97,10 +97,10 @@ public:
     using Loan = Chan::Loan;
 
     explicit FileStreamService(infra::OptRef<const svc::Vfs> vfs = {}) noexcept
-        : vfs_(vfs ? &*vfs : nullptr), chan_(xthread::Polled{}) {}
+        : vfs_(vfs), chan_(xthread::Polled{}) {}
 
     FileStreamService(xthread::WakeFlag& io_wake, infra::OptRef<const svc::Vfs> vfs) noexcept
-        : vfs_(vfs ? &*vfs : nullptr), chan_(io_wake) {}
+        : vfs_(vfs), chan_(io_wake) {}
 
     void seal_boot_pump() noexcept { sealed_ = true; }
     [[nodiscard]] bool sealed() const noexcept { return sealed_; }
@@ -118,21 +118,21 @@ public:
 
     [[nodiscard]] Loan reap() noexcept;
 
-    [[nodiscard]] bool has_open_stream() const noexcept { return rt_stream_open_; }
+    [[nodiscard]] bool has_open_stream() const noexcept { return rt_.stream_open; }
 
-    [[nodiscard]] std::uint32_t generation() const noexcept { return gen_; }
+    [[nodiscard]] std::uint32_t generation() const noexcept { return rt_.gen; }
 
-    [[nodiscard]] std::uint32_t refusals() const noexcept { return refusals_.get(); }
-    [[nodiscard]] std::uint32_t declines() const noexcept { return declines_.get(); }
+    [[nodiscard]] std::uint32_t refusals() const noexcept { return rt_.refusals.get(); }
+    [[nodiscard]] std::uint32_t declines() const noexcept { return rt_.declines.get(); }
 
     [[nodiscard]] std::uint32_t sealed_pumps() const noexcept { return sealed_pumps_.get(); }
 
-    [[nodiscard]] std::uint32_t opens() const noexcept { return opens_.get(); }
+    [[nodiscard]] std::uint32_t opens() const noexcept { return io_.opens.get(); }
 
-    [[nodiscard]] std::uint32_t closes() const noexcept { return closes_.get(); }
+    [[nodiscard]] std::uint32_t closes() const noexcept { return io_.closes.get(); }
 
-    [[nodiscard]] std::uint32_t stales() const noexcept { return stales_.get(); }
-    void count_decline() noexcept { declines_.add(1); }
+    [[nodiscard]] std::uint32_t stales() const noexcept { return io_.stales.get(); }
+    void count_decline() noexcept { rt_.declines.add(1); }
     [[nodiscard]] Chan::Census census() const noexcept { return chan_.census(); }
 
     void serve() noexcept override;
@@ -146,15 +146,24 @@ private:
     [[nodiscard]] Loan acquire_() noexcept;
     void send_(Loan&& l) noexcept;
 
-    const svc::Vfs* vfs_ = nullptr;
-    bool sealed_ = false;
-    bool rt_stream_open_ = false;
-    std::uint32_t gen_ = 0;
+    struct Rt {
+        bool stream_open = false;
+        std::uint32_t gen = 0;
+        xthread::Counter refusals{}, declines{};
+    };
 
-    StreamFile src_{}, out_{};
-    std::uint32_t io_gen_ = 0;
-    xthread::Counter refusals_{}, declines_{}, sealed_pumps_{};
-    xthread::Counter opens_{}, closes_{}, stales_{};
+    struct Io {
+        StreamFile src{}, out{};
+        std::uint32_t gen = 0;
+        xthread::Counter opens{}, closes{}, stales{};
+    };
+
+    infra::OptRef<const svc::Vfs> vfs_{};
+
+    bool sealed_ = false;
+    xthread::Counter sealed_pumps_{};
+    Rt rt_{};
+    Io io_{};
     Chan chan_;
 };
 

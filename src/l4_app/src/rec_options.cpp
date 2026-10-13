@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <limits>
 
+#include "infra/parse_int.h"
+
 namespace mister::app {
 namespace {
 
@@ -71,11 +73,9 @@ std::optional<RecMotion> parse_rec_motion(std::string_view s) noexcept {
 }
 
 std::optional<std::uint16_t> parse_rec_every(std::string_view s) noexcept {
-    unsigned v = 0;
-    const auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (ec != std::errc{} || p != s.data() + s.size() || v == 0 || v > kRecEveryMax)
-        return std::nullopt;
-    return static_cast<std::uint16_t>(v);
+    const auto v = infra::parse_int<unsigned>(s);
+    if (!v || *v == 0 || *v > kRecEveryMax) return std::nullopt;
+    return static_cast<std::uint16_t>(*v);
 }
 
 std::optional<std::uint64_t> parse_rec_size(std::string_view s) noexcept {

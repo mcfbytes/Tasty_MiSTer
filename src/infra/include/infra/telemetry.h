@@ -67,9 +67,10 @@ public:
 
     void publish(const T& v) noexcept {
         seat_assert<Owner>(ERR_SITE(), "Telemetry::publish off its owning seat");
-        ++seq_;
-        if (seq_ == 0) seq_ = 1;
-        cell_.write(seq_, v);
+        std::uint32_t g = seq_.load(std::memory_order_relaxed) + 1u;
+        if (g == 0) g = 1;
+        seq_.store(g, std::memory_order_relaxed);
+        cell_.write(g, v);
     }
 
     void invalidate() noexcept {
@@ -100,7 +101,7 @@ public:
 
 private:
     SeqCell<T> cell_;
-    std::uint32_t seq_ = 0;
+    std::atomic<std::uint32_t> seq_{0};
     mutable std::atomic<std::uint32_t> refused_{0};
 };
 

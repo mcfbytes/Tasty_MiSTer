@@ -11,6 +11,10 @@
 #include <string>
 
 #include "app/file_stream_service.h"
+#include "app/bay_releases.h"
+#include "app/retiree.h"
+#include "app/built_core.h"
+#include "app/core_terms.h"
 #include "infra/wake_flag.h"
 #include "hal/pin_levels.h"
 #include "proto/image_bracket.h"
@@ -20,6 +24,7 @@
 #include "proto/download_session.h"
 #include "proto/spi_block_decoder.h"
 #include "proto/spi_osd_mask_decoder.h"
+#include "proto/user_io/poll_reader.h"
 #include "proto/spi_conf_str_decoder.h"
 #include "proto/decoder_row.h"
 #include "proto/spi_identify_decoder.h"
@@ -66,6 +71,7 @@
 #include "cores/stream_load_bracket.h"
 #include "cores/save_channel.h"
 #include "cores/core_init_host.h"
+#include "cores/save_copy_level.h"
 #include "infra/fixed_str.h"
 #include "infra/message_sum.h"
 #include "infra/error.h"
@@ -100,7 +106,6 @@ class InputEmitter;
 
 namespace mister::cores {
 class Core;
-struct CoreManifest;
 class ISaveUpload;
 }  // namespace mister::cores
 
@@ -121,18 +126,13 @@ class LinkRxChannel;
 
 struct SupervisorParts;
 
-struct CoreDeleter {
-
-    CoreDeleter& operator=(std::default_delete<cores::Core>) noexcept { return *this; }
-    void operator()(cores::Core* p) const noexcept;
-};
-
 class LinkSession : private cores::CoreInitHost,
                     private cores::ILoadProgress,
                     private IBracketClose,
                     private ISaveFlush,
                     private proto::ISessionLive,
                     private proto::IOsdFocus,
+                    private proto::user_io::IPollParams,
                     private ICoreOptionActs {
     TASTY_SEAT_RESIDENT(RT);
 
@@ -151,16 +151,19 @@ public:
     [[nodiscard]] SessionState state() const noexcept { return machine_.state(); }
     proto::CoreSession& session() noexcept { return session_; }
 
-    UartModeController& uart() noexcept { return uart_; }
+    void set_pcm_feeder(PcmRingFeeder* feeder) noexcept;
 
-    void set_pcm_feeder(PcmRingFeeder* feeder) noexcept { binder_.set_pcm_feeder(feeder); }
+    void attach_prefetch(svc::ChdPrefetch& pf) noexcept;
 
-    void attach_prefetch(svc::ChdPrefetch& pf) noexcept { prefetch_ = &pf; }
-
-    void attach_discs(svc::DiscReadService& d) noexcept { discs_ = &d; }
+    void attach_discs(svc::DiscReadService& d) noexcept;
     [[nodiscard]] svc::DiscReadService* discs() noexcept { return discs_; }
 
-    void attach_mailbox(MailboxRelay& r) noexcept { mailbox_ = &r; }
+    void attach_mailbox(MailboxRelay& r) noexcept;
+
+    [[nodiscard]] const CoreTerms& core_terms() const noexcept { return terms_; }
+
+    [[nodiscard]] CoreBay& core_bay() noexcept { return bay_; }
+    [[nodiscard]] const BayReleasesCell& bay_releases() const noexcept { return releases_; }
 
     void set_write_service(DurableWriteService* w) noexcept { writes_ = w; }
 
@@ -199,9 +202,15 @@ public:
 
     [[nodiscard]] std::uint32_t resets_pulsed() const noexcept { return resets_pulsed_; }
 
-    [[nodiscard]] bool wire_held() const noexcept { return copy_ds_.has_value(); }
+    [[nodiscard]] bool wire_held() const noexcept { return copy_ds_.has_value() || link_.posted(); }
 
     [[nodiscard]] std::uint32_t copy_held_rounds() const noexcept { return copy_rounds_; }
+
+    [[nodiscard]] std::uint32_t file_tx_holds() const noexcept { return ftx_holds_; }
+    [[nodiscard]] std::uint32_t file_tx_held_rounds() const noexcept { return ftx_held_rounds_; }
+    [[nodiscard]] std::uint32_t file_tx_hold_abandons() const noexcept {
+        return ftx_hold_abandons_;
+    }
 
     [[nodiscard]] std::uint32_t save_pulls_fenced() const noexcept { return save_pulls_fenced_; }
 
@@ -230,7 +239,7 @@ public:
     Result on(const proto::LinkOp::BindDoorbells& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::SaveAsk& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::DropCore& a, const LinkOpCtx& ctx) noexcept;
-    Result on(const proto::LinkOp::MakeCore& a, const LinkOpCtx& ctx) noexcept;
+    Result on(const proto::LinkOp::AdoptCore& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::SessionUp& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::StageMount& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::StagePayload& a, const LinkOpCtx& ctx) noexcept;
@@ -245,7 +254,7 @@ public:
     Result on(const proto::LinkOp::MailboxWrite& a, const LinkOpCtx& ctx) noexcept;
     Result misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept;
 
-    [[nodiscard]] bool declares_turbo() const noexcept override;
+    [[nodiscard]] bool declares_turbo() const noexcept;
     [[nodiscard]] const MraFacts& mra_facts() const noexcept { return bindings_.facts(); }
     [[nodiscard]] const SessionBindings& bindings() const noexcept { return bindings_; }
 
@@ -293,8 +302,6 @@ public:
         return config_slot_cell_;
     }
 
-    [[nodiscard]] LadderStateCell& ladder_cell() noexcept { return ladder_cell_; }
-
     [[nodiscard]] const MountStatusCell& mount_status_cell() const noexcept {
         return mount_status_cell_;
     }
@@ -310,8 +317,6 @@ public:
     [[nodiscard]] bool set_option_counted(std::uint8_t row, std::uint8_t choice) noexcept override;
     [[nodiscard]] bool settle_options_counted() noexcept override;
 
-    [[nodiscard]] std::uint32_t manifest_errors() const noexcept { return manifest_errors_; }
-
     proto::BlockSlots& block_slots() noexcept { return slots_; }
     const SaveImageSource& save_source() const noexcept { return *save_src_; }
 
@@ -324,6 +329,19 @@ public:
             stdout_router_.set_paths(null_path, debug_path);
         }
     }
+
+    [[nodiscard]] StdoutRouter* boot_stdout_router() noexcept {
+#ifndef NDEBUG
+
+        if (machine_.state() != SessionState::Boot) {
+            fatal(Error{Errc::negotiation, ERR_SITE(), 0},
+                  "boot_stdout_router after the boot pump is sealed");
+        }
+#endif
+        return stdout_armed_ ? &stdout_router_ : nullptr;
+    }
+
+    void note_stdout_open_failed(Errc why) { push(Event::SessionAdvisory{.why = why}); }
 
     struct RoundEntry {
         bool live = false;
@@ -356,15 +374,25 @@ public:
 
     const proto::SpiOsdMaskDecoder& osd_mask_decoder() const noexcept { return osd_mask_decoder_; }
 
+    const proto::user_io::PollReader& info_poll() const noexcept { return info_poll_; }
+
+    const proto::user_io::PollReader& rumble_poll() const noexcept { return rumble_poll_; }
+
+    const proto::user_io::PollReader& f12_mod_poll() const noexcept { return f12_mod_poll_; }
+
+    [[nodiscard]] std::uint32_t census_row_drops() const noexcept { return census_row_drops_; }
+
     std::uint32_t core_shutdowns() const noexcept { return core_shutdowns_; }
 
     [[nodiscard]] std::uint32_t core_edge_seq() const noexcept { return core_edge_seq_; }
 
-    [[nodiscard]] cores::Core* live_core() noexcept { return current_.get(); }
+    [[nodiscard]] cores::Core* live_core() noexcept { return core_ptr_(); }
 
-    [[nodiscard]] bool core_retiring() const noexcept { return retiring_.core != nullptr; }
+    [[nodiscard]] bool core_retiring() const noexcept { return retiring_.gen != 0; }
 
     [[nodiscard]] std::uint32_t core_abandons() const noexcept { return core_abandons_; }
+
+    [[nodiscard]] std::uint32_t stale_adopts() const noexcept { return stale_adopts_; }
 
     [[nodiscard]] Ex<std::optional<UiRequest::LoadCore>> boot(std::span<const char* const> argv);
 
@@ -401,8 +429,6 @@ public:
     const svc::ConfigSnapshot* config() const noexcept { return config_store_[config_live_].get(); }
 
 private:
-    using CorePtr = std::unique_ptr<cores::Core, CoreDeleter>;
-
     [[nodiscard]] bool session_live() const noexcept override {
         TASTY_SEAT_BODY(LinkSession);
         return session_live_();
@@ -414,11 +440,15 @@ private:
 
     [[nodiscard]] bool osd_focused() const noexcept override;
 
+    [[nodiscard]] std::uint8_t issued_params(proto::user_io::PollShape s) noexcept override;
+
     [[nodiscard]] Ex<void> detach();
 
     [[nodiscard]] Ex<void> raise_session_();
 
-    [[nodiscard]] Ex<void> make_core_(std::string_view manifest, bool hint_manifest);
+    [[nodiscard]] Ex<void> adopt_(const proto::LinkOp::AdoptCore& a);
+
+    void release_(std::uint8_t slot, std::uint16_t gen) noexcept;
 
     void on_load_progress(std::uint16_t cur, std::uint16_t max) noexcept override;
 
@@ -462,16 +492,19 @@ private:
 
     void refuse_start_(const Error& e) noexcept;
 
-    [[nodiscard]] Ex<void> perform_file_tx_(svc::IFile& f, std::string_view path,
-                                            std::uint8_t slot);
+    [[nodiscard]] Ex<void> perform_file_tx_(svc::IFile& f, std::string_view path, std::uint8_t slot,
+                                            ContentEdge edge);
 
     [[nodiscard]] bool stream_file_tx_(const proto::LinkOp::FileTx& a, const FileBytes::Slot* file);
 
-    void after_file_tx_(std::uint8_t slot, std::string_view path);
+    void after_file_tx_(std::uint8_t slot, std::string_view path, ContentEdge edge);
 
     void cut_file_tx_() noexcept;
 
     void publish_ftx_level_(std::uint32_t act, bool open, bool payload = false) noexcept;
+
+    void publish_stream_(std::uint32_t act, bool served,
+                         std::optional<std::uint32_t> held = std::nullopt) noexcept;
 
     [[nodiscard]] ILinkEncoder::Outcome stage_copy_(const proto::LinkOp::StagePayload& a,
                                                     std::span<const std::uint8_t> bytes) noexcept;
@@ -502,7 +535,11 @@ private:
     [[nodiscard]] Ex<void> rebind_census(std::span<const reactor::LinkDecoderDecl> rows);
 
     [[nodiscard]] std::span<const reactor::LinkDecoderDecl> census_rows_(
-        std::array<reactor::LinkDecoderDecl, kMaxServices>& out) const noexcept;
+        std::array<reactor::LinkDecoderDecl, kMaxServices>& out) noexcept;
+
+    [[nodiscard]] std::size_t put_census_row_(std::span<reactor::LinkDecoderDecl> out,
+                                              std::size_t n,
+                                              const reactor::LinkDecoderDecl& row) noexcept;
 
     hal::ISpiTransport& link_;
 
@@ -516,10 +553,6 @@ private:
     const svc::Vfs* vfs_ = nullptr;
     svc::DiscReadService* discs_ = nullptr;
     svc::DiscReadService& unbound_discs_;
-
-    [[nodiscard]] svc::DiscReadService& granted_discs_() noexcept {
-        return discs_ != nullptr ? *discs_ : unbound_discs_;
-    }
     MailboxRelay* mailbox_ = nullptr;
     std::uint32_t mailbox_write_drops_ = 0;
     svc::ChdPrefetch* prefetch_ = nullptr;
@@ -579,7 +612,7 @@ private:
     enum class RetireEnd : std::uint8_t { Poll, Round, Adopt, Exit };
     void settle_retire_(RetireEnd end) noexcept;
     void abandon_retiring_(bool counted) noexcept;
-    void settle_abandoned_(RetireEnd end) noexcept;
+    void settle_abandoned_() noexcept;
 
     [[nodiscard]] std::uint16_t poisoned_slots_() const noexcept;
     std::uint32_t prefetch_park_timeouts_ = 0;
@@ -681,8 +714,11 @@ private:
     std::uint8_t copy_tail_n_ = 0;
     std::uint16_t copy_act_ = 0;
     std::uint32_t copy_rounds_ = 0;
+    std::uint32_t ftx_holds_ = 0;
+    std::uint32_t ftx_held_rounds_ = 0;
+    std::uint32_t ftx_hold_abandons_ = 0;
 
-    LadderStateCell& ladder_cell_;
+    const LadderStateCell& ladder_cell_;
 
     DiagCountersCell diag_{};
 
@@ -704,7 +740,8 @@ private:
     DipCell dip_cell_{};
 
     ICheatApply& cheats_;
-    std::uint32_t manifest_errors_ = 0;
+
+    infra::OptRef<const cores::SaveCopyCell> save_copy_;
     std::uint32_t dip_sets_ = 0;
     std::uint32_t dip_saves_ = 0;
     void publish_dip_table() noexcept;
@@ -743,20 +780,19 @@ private:
     cores::ProgressTicker stage_tick_{};
     std::uint32_t config_loads_ = 0;
     void publish_config_slots() noexcept;
-    [[nodiscard]] cores::CoreManifest granted_manifest_(std::string_view path) const;
 
     OptionTable option_scratch_{};
     OptionCell option_cell_{};
     std::uint32_t option_sets_ = 0;
     void publish_option_table() noexcept;
 
-    void surface_manifest_error();
-
     void publish_status_word() noexcept;
 
     Error last_error_{};
 
     const os::IClock& clock_;
+
+    CoreTerms terms_;
 
     std::uint32_t core_shutdowns_ = 0;
 
@@ -766,6 +802,8 @@ private:
 
     std::uint8_t config_live_ = 0;
 
+    std::unique_ptr<SaveImageSource> save_src_;
+
     proto::BlockSlots slots_;
     static_assert(sizeof(proto::BlockSlots) < 4096, "slots_ is an inline member of a "
                                                     "T-RT type; it must stay small");
@@ -774,25 +812,43 @@ private:
     proto::DecoderRow<proto::SpiBlockDecoder> block_row_{block_decoder_};
 
     proto::SpiOsdMaskDecoder osd_mask_decoder_;
-    std::unique_ptr<SaveImageSource> save_src_;
+
+    proto::user_io::PollReader info_poll_;
+    proto::DecoderRow<proto::user_io::PollReader> info_row_{info_poll_};
+
+    proto::user_io::PollReader rumble_poll_;
+
+    xthread::Telemetry<std::uint8_t, SeatTag::Input>::Reader rumble_pads_reader_{};
+    std::uint8_t rumble_pads_ = 0;
+    proto::DecoderRow<proto::user_io::PollReader> rumble_row_{rumble_poll_};
+
+    proto::user_io::PollReader f12_mod_poll_;
+    std::uint32_t census_row_drops_ = 0;
 
     std::uint16_t channel_slots_ = 0;
 
     std::uint16_t channel_borrows_ = 0;
 
-    CorePtr current_;
+    CoreBay& bay_;
+    BayReleasesCell& releases_;
+    BayReleases released_{};
 
-    struct Retiree {
-        CorePtr core;
-        svc::IStorageLifecycle* seat = nullptr;
-        std::uint16_t mask = 0;
-        std::uint16_t sent = 0;
-    };
+    infra::OptRef<cores::Core> current_{};
+    std::uint8_t adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
+    std::uint16_t adopted_gen_ = 0;
+    [[nodiscard]] cores::Core* core_ptr_() const noexcept {
+        return current_ ? &*current_ : nullptr;
+    }
+
+    void drop_borrow_() noexcept;
+
+    std::uint32_t stale_adopts_ = 0;
 
     [[nodiscard]] bool poll_retiree_(Retiree& r) noexcept;
+
+    void release_retiree_(const Retiree& r) noexcept;
     Retiree retiring_{};
 
-    static constexpr std::size_t kMaxAbandonedCores = 4;
     std::array<Retiree, kMaxAbandonedCores> abandoned_{};
 
     FileStreamService& streams_;

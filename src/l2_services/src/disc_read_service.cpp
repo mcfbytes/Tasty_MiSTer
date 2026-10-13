@@ -191,7 +191,7 @@ DiscMountState DiscReadService::arm_mount(DiscOp op, const CuePolicy* policy,
     armed_op_ = op;
     DiscMountSlot& m = *l;
     (void)m.path.assign(path);
-    m.policy = policy;
+    m.policy = infra::opt_ref_of(policy);
     m.gen = gen_;
     m.op = op;
     m.mounted = 0;
@@ -208,7 +208,7 @@ void DiscReadService::release() noexcept {
     if (auto l = mounts_.acquire()) {
         DiscMountSlot& m = *l;
         m.path.clear();
-        m.policy = nullptr;
+        m.policy.reset();
         m.gen = gen_;
         m.op = DiscOp::Release;
         m.mounted = 0;

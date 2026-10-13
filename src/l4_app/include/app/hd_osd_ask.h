@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "app/hd_osd_status.h"
 #include "app/hd_surface.h"
 #include "app/page_description.h"
 #include "infra/seat.h"
@@ -17,6 +18,10 @@ struct HdOsdAsk {
     HdSurface surface{};
     std::uint32_t video_applies = 0;
     PageDescription page{};
+
+    std::uint64_t stamp_ns = 0;
+
+    HdOsdStatus::Badge badge = HdOsdStatus::Badge::Unknown;
 };
 
 static_assert(std::is_trivially_copyable_v<HdOsdAsk>);

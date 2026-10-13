@@ -19,6 +19,7 @@
 #include "app/session_identity.h"
 #include "cores/movie_codec.h"
 #include "cores/rom_digest.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "proto/status_cell.h"
@@ -49,23 +50,23 @@ class ReplayFeeder {
 
 public:
     struct Wiring {
-        const svc::Vfs* vfs = nullptr;
-        const os::IClock* clock = nullptr;
-        ReplayRing* ring = nullptr;
-        ReplayControlCell* control = nullptr;
-        const ReplayStatusCell* status = nullptr;
-        const IdentityLatch* identity = nullptr;
-        const proto::StatusCell* core_status = nullptr;
-        const ConfStrCell* conf = nullptr;
-        UiRequestRing* asks = nullptr;
-        const VideoPump* video = nullptr;
-        InputWire* input = nullptr;
-        ScreenshotPump* shots = nullptr;
-        xthread::DiagLog* diag = nullptr;
+        infra::OptRef<const svc::Vfs> vfs{};
+        const os::IClock& clock;
+        ReplayRing::Sender ring;
+        ReplayControlCell& control;
+        const ReplayStatusCell& status;
+        const IdentityLatch& identity;
+        const proto::StatusCell& core_status;
+        const ConfStrCell& conf;
+        UiRequestRing& asks;
+        const VideoPump& video;
+        InputWire& input;
+        ScreenshotPump& shots;
+        xthread::DiagLog& diag;
 
-        IOsdClose* osd = nullptr;
+        IOsdClose& osd;
 
-        LinkTxChannel* settings_tx = nullptr;
+        LinkTxChannel& settings_tx;
     };
 
     enum class Stage : std::uint8_t {
@@ -143,7 +144,7 @@ public:
     static constexpr std::int64_t kPowerOnNs = 20'000'000'000;
     static constexpr std::int64_t kDiscSettleNs = 2'000'000'000;
 
-    explicit ReplayFeeder(const Wiring& w) noexcept;
+    explicit ReplayFeeder(Wiring w) noexcept;
     ~ReplayFeeder();
     ReplayFeeder(const ReplayFeeder&) = delete;
     ReplayFeeder& operator=(const ReplayFeeder&) = delete;
@@ -207,7 +208,7 @@ private:
     Wiring w_;
     Stage stage_ = Stage::Idle;
     std::uint16_t gen_ = 0;
-    const cores::IMovieCodec* codec_ = nullptr;
+    infra::OptRef<const cores::IMovieCodec> codec_{};
     cores::IMovieCodec::Facts facts_{};
     PathText movie_{};
     PathText rom_{};

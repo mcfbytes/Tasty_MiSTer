@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "app/durable_write.h"
+#include "infra/byte_view.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -17,8 +18,7 @@ void put_field(std::byte* dst, std::size_t cap, std::string_view s) {
 }
 
 std::string_view get_field(const std::byte* p, std::size_t cap) {
-    const char* c = reinterpret_cast<const char*>(p);
-    return std::string_view{c, ::strnlen(c, cap)};
+    return infra::text_until_nul(p, cap);
 }
 
 int index_on_disk(RecentsStore::ListId id) noexcept {

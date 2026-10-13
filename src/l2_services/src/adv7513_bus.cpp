@@ -141,15 +141,12 @@ Ex<Adv7513Bus> Adv7513Bus::attach(II2cAdapter& a, const hal::VideoOutDecl& board
     }
 
     out.presence = Presence::Found;
-    Adv7513Bus b;
-    b.a_ = &a;
-    b.bus_ = found;
-    return b;
+    return Adv7513Bus{a, found};
 }
 
 Ex<void> Adv7513Bus::write_rows(std::span<const RegWrite> rows) {
     for (const RegWrite& w : rows) {
-        auto r = a_->write(kMainAddr, w.reg, w.val);
+        auto r = a_.write(kMainAddr, w.reg, w.val);
         if (!r) {
 
             ++errors_;
@@ -182,7 +179,7 @@ Ex<void> Adv7513Bus::tmds_power(bool on) {
 }
 
 Ex<std::uint8_t> Adv7513Bus::read_status() {
-    auto r = a_->read(kMainAddr, kRegStatus);
+    auto r = a_.read(kMainAddr, kRegStatus);
     if (!r) return err(r.error().code, ERR_SITE(), reg_errno_detail(kRegStatus, r.error().detail));
     return *r;
 }
@@ -227,7 +224,7 @@ Ex<void> Adv7513Bus::set_mode(const Modeline& m, bool direct_video_menu) {
             {0x3C, b.vic},
         };
         for (const RegWrite& w : rows) {
-            auto r = a_->write(kMainAddr, w.reg, w.val);
+            auto r = a_.write(kMainAddr, w.reg, w.val);
             if (!r) {
                 ++errors_;
                 if (fail_reg_ == 0) fail_reg_ = w.reg;
@@ -273,7 +270,7 @@ Ex<void> Adv7513Bus::set_packet(std::uint8_t mask, std::uint8_t offset, const st
         return err(Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(n));
     }
 
-    auto cur = a_->read(kMainAddr, kRegPacketEnable);
+    auto cur = a_.read(kMainAddr, kRegPacketEnable);
     if (!cur) {
         ++errors_;
         if (spd_fail_reg_ == 0) spd_fail_reg_ = kRegPacketEnable;
@@ -283,7 +280,7 @@ Ex<void> Adv7513Bus::set_packet(std::uint8_t mask, std::uint8_t offset, const st
     const std::uint8_t want =
         data != nullptr ? static_cast<std::uint8_t>(*cur | mask)
                         : static_cast<std::uint8_t>(*cur & static_cast<std::uint8_t>(~mask));
-    if (auto w = a_->write(kMainAddr, kRegPacketEnable, want); !w) {
+    if (auto w = a_.write(kMainAddr, kRegPacketEnable, want); !w) {
         ++errors_;
         if (spd_fail_reg_ == 0) spd_fail_reg_ = kRegPacketEnable;
         return err(w.error().code, ERR_SITE(),
@@ -294,7 +291,7 @@ Ex<void> Adv7513Bus::set_packet(std::uint8_t mask, std::uint8_t offset, const st
     if (data == nullptr) return {};
 
     const std::uint8_t upd = static_cast<std::uint8_t>(offset + kPacketUpdateOff);
-    if (auto w = a_->write(kSpdAddr, upd, 0x80); !w) {
+    if (auto w = a_.write(kSpdAddr, upd, 0x80); !w) {
         ++errors_;
         if (spd_fail_reg_ == 0) spd_fail_reg_ = upd;
         return err(w.error().code, ERR_SITE(), reg_errno_detail(upd, w.error().detail));
@@ -302,7 +299,7 @@ Ex<void> Adv7513Bus::set_packet(std::uint8_t mask, std::uint8_t offset, const st
     ++writes_;
     for (std::size_t i = 0; i < n; ++i) {
         const std::uint8_t reg = static_cast<std::uint8_t>(offset + i);
-        if (auto w = a_->write(kSpdAddr, reg, data[i]); !w) {
+        if (auto w = a_.write(kSpdAddr, reg, data[i]); !w) {
 
             ++errors_;
             if (spd_fail_reg_ == 0) spd_fail_reg_ = reg;
@@ -310,7 +307,7 @@ Ex<void> Adv7513Bus::set_packet(std::uint8_t mask, std::uint8_t offset, const st
         }
         ++writes_;
     }
-    if (auto w = a_->write(kSpdAddr, upd, 0x00); !w) {
+    if (auto w = a_.write(kSpdAddr, upd, 0x00); !w) {
         ++errors_;
         if (spd_fail_reg_ == 0) spd_fail_reg_ = upd;
         return err(w.error().code, ERR_SITE(), reg_errno_detail(upd, w.error().detail));
@@ -332,7 +329,7 @@ Ex<Adv7513Bus::Verify> Adv7513Bus::verify(const Modeline& m, bool direct_video_m
     const std::uint8_t regs[4] = {kRegPower, 0x17, 0x3B, 0x3C};
     std::uint8_t* const out[4] = {&v.r41, &v.r17, &v.r3b, &v.r3c};
     for (int i = 0; i < 4; ++i) {
-        auto r = a_->read(kMainAddr, regs[i]);
+        auto r = a_.read(kMainAddr, regs[i]);
         if (!r) return err(r.error().code, ERR_SITE(), reg_errno_detail(regs[i], r.error().detail));
         *out[i] = *r;
     }

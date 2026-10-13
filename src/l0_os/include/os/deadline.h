@@ -21,7 +21,7 @@ public:
     bool expired(const IClock& c) const { return c.now() >= at_; }
     std::chrono::nanoseconds at() const noexcept { return at_; }
 
-    Ex<void> sleep_until() const;
+    [[nodiscard]] Ex<void> sleep_until() const;
 
 private:
     explicit Deadline(std::chrono::nanoseconds at) : at_(at) {}

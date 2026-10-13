@@ -6,11 +6,14 @@
 #include <cstring>
 
 #include "app/mgl_item_dispatch.h"
+#include "infra/ascii.h"
 #include "svc/xml_scan.h"
+#include "svc/xml_scanner.h"
 
 namespace mister::app {
 
 namespace xml = svc::xml;
+using infra::ieq;
 
 namespace {
 
@@ -23,7 +26,7 @@ struct RawItem {
     FixedStr<MglItem::kPathMax, StrFit::Clip> path{};
 };
 
-bool parse_ul(std::string_view s, std::uint32_t& out) {
+[[nodiscard]] std::uint32_t parse_ul(std::string_view s) {
     std::size_t i = 0;
     while (i < s.size() && xml::is_space(s[i]))
         ++i;
@@ -40,8 +43,7 @@ bool parse_ul(std::string_view s, std::uint32_t& out) {
         base = 8;
         ++i;
         if (i == s.size()) {
-            out = 0;
-            return true;
+            return 0;
         }
     }
     std::uint64_t v = 0;
@@ -58,11 +60,10 @@ bool parse_ul(std::string_view s, std::uint32_t& out) {
         v = v * base + d;
         if (v > 0xFFFFFFFFull) v = 0xFFFFFFFFull;
     }
-    if (!any) return false;
+    if (!any) return 0;
 
-    out = neg ? static_cast<std::uint32_t>(0u - static_cast<std::uint32_t>(v))
-              : static_cast<std::uint32_t>(v);
-    return true;
+    return neg ? static_cast<std::uint32_t>(0u - static_cast<std::uint32_t>(v))
+               : static_cast<std::uint32_t>(v);
 }
 
 }  // namespace
@@ -77,6 +78,7 @@ void MglPlayer::reset() noexcept {
     items_ = {};
     file_home_ = {};
     image_home_ = {};
+    base_ = PathBase::Home;
     count_ = 0;
     current_ = 0;
     publishes_ = 0;
@@ -97,50 +99,48 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
     }
 
     bool inside_mgl = false;
-    std::size_t pos = 0;
-    xml::Tag tag{};
+    xml::XmlScanner scan{doc};
     xml::Attr attrs[xml::kMaxAttrs];
-    std::size_t nattrs = 0;
 
     std::array<RawItem, kMaxItems> raw{};
 
-    while (xml::next_tag(doc, pos, tag, attrs, nattrs)) {
-        if (xml::iequal(tag.name, "mistergamedescription")) {
-            inside_mgl = !tag.closing;
+    while (const auto tag = scan.next_tag(attrs)) {
+        if (ieq(tag->name, "mistergamedescription")) {
+            inside_mgl = !tag->closing;
             continue;
         }
-        if (tag.closing) continue;
+        if (tag->closing) continue;
 
         if (!inside_mgl || count_ >= kMaxItems) continue;
 
         RawItem& it = raw[count_];
 
-        if (xml::iequal(tag.name, "file")) {
+        if (ieq(tag->name, "file")) {
             unsigned valid = 0;
-            for (std::size_t i = 0; i < nattrs; ++i) {
+            for (std::size_t i = 0; i < tag->attr_count; ++i) {
                 const xml::Attr& a = attrs[i];
                 std::uint32_t n = 0;
-                if (xml::iequal(a.name, "delay")) {
+                if (ieq(a.name, "delay")) {
 
-                    (void)parse_ul(a.value, n);
+                    n = parse_ul(a.value);
                     it.delay_s = static_cast<std::uint16_t>(n > 0xFFFFu ? 0xFFFFu : n);
                     valid |= 0x1u;
-                } else if (xml::iequal(a.name, "type")) {
+                } else if (ieq(a.name, "type")) {
 
-                    if (xml::iequal(a.value, "s")) {
+                    if (ieq(a.value, "s")) {
                         it.slot = MglItem::Slot::Image;
                         valid |= 0x2u;
-                    } else if (xml::iequal(a.value, "f")) {
+                    } else if (ieq(a.value, "f")) {
                         it.slot = MglItem::Slot::File;
                         valid |= 0x2u;
                     }
-                } else if (xml::iequal(a.name, "index")) {
-                    (void)parse_ul(a.value, n);
+                } else if (ieq(a.name, "index")) {
+                    n = parse_ul(a.value);
 
                     if (n > 15u) continue;
                     it.index = static_cast<std::uint8_t>(n);
                     valid |= 0x4u;
-                } else if (xml::iequal(a.name, "path")) {
+                } else if (ieq(a.name, "path")) {
                     (void)it.path.assign(a.value);
                     valid |= 0x8u;
                 }
@@ -151,17 +151,17 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
                     .slot = it.slot, .index = it.index, .delay_s = it.delay_s, .path = it.path});
                 ++count_;
             }
-        } else if (xml::iequal(tag.name, "reset")) {
+        } else if (ieq(tag->name, "reset")) {
             bool valid = false;
-            for (std::size_t i = 0; i < nattrs; ++i) {
+            for (std::size_t i = 0; i < tag->attr_count; ++i) {
                 const xml::Attr& a = attrs[i];
                 std::uint32_t n = 0;
-                if (xml::iequal(a.name, "delay")) {
-                    (void)parse_ul(a.value, n);
+                if (ieq(a.name, "delay")) {
+                    n = parse_ul(a.value);
                     it.delay_s = static_cast<std::uint16_t>(n > 0xFFFFu ? 0xFFFFu : n);
                     valid = true;
-                } else if (xml::iequal(a.name, "hold")) {
-                    (void)parse_ul(a.value, n);
+                } else if (ieq(a.name, "hold")) {
+                    n = parse_ul(a.value);
 
                     it.index = static_cast<std::uint8_t>(n > 0xFFu ? 0xFFu : n);
                 }
@@ -175,6 +175,20 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
     }
 
     state_ = (count_ == 0) ? MglState::Done : MglState::Armed;
+    return {};
+}
+
+Ex<void> MglPlayer::adopt(const MglItem& item, PathBase base, bool core_supports_mgl) {
+    TASTY_SEAT_BODY(MglPlayer);
+    reset();
+    if (!core_supports_mgl) return {};
+
+    if (const auto ld = infra::as<MglItem::Load>(item); ld && ld->index > 15u) return {};
+
+    base_ = base;
+    items_[0] = item;
+    count_ = 1;
+    state_ = MglState::Armed;
     return {};
 }
 
@@ -230,7 +244,7 @@ Ex<void> MglPlayer::publish_load_() {
     const std::string_view p = ld->path.view();
     const PathText& home = ld->slot == MglItem::Slot::File ? file_home_ : image_home_;
     PathText path{};
-    const bool fits = (p.front() == '/' || home.empty())
+    const bool fits = (p.front() == '/' || home.empty() || base_ == PathBase::Card)
                           ? path.assign(p)
                           : path.assign(home.view()) && path.append("/") && path.append(p);
     if (!fits) {

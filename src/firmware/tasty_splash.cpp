@@ -4,7 +4,9 @@
 #include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <span>
 
+#include "infra/endian.h"
 #include "os/mmio_region.h"
 
 #include "app/video_pump.h"
@@ -72,7 +74,10 @@ bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
     const std::size_t need = kPixelOff + static_cast<std::size_t>(width) * height * 4u;
     if (fb_region_.len == 0 || need > fb_region_.len) return false;
     auto view = fb_->view(0, need);
-    std::uint32_t* dst = reinterpret_cast<std::uint32_t*>(view.data() + kPixelOff);
+    const std::span<std::byte> px = view.subspan(kPixelOff);
+    const auto put = [px, width](std::uint32_t y, std::uint32_t x, std::uint32_t c) {
+        infra::store_le<std::uint32_t>(px.subspan((std::size_t{y} * width + x) * 4u).first<4>(), c);
+    };
     auto* raw = static_cast<unsigned char*>(std::malloc(kSplashEmbedRaw));
     if (raw == nullptr) return false;
     uLongf n = kSplashEmbedRaw;
@@ -108,7 +113,7 @@ bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
                         std::uint32_t{p[2]};
                 }
             }
-            dst[y * width + x] = c;
+            put(y, x, c);
         }
     }
     std::free(raw);

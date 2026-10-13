@@ -2,6 +2,7 @@
 #include "app/ini_parse.h"
 
 #include "app/config_apply.h"
+#include "infra/byte_view.h"
 #include "svc/config_parser.h"
 #include "svc/vfs.h"
 
@@ -43,7 +44,7 @@ namespace {
     }
     std::string text;
     if (auto bytes = read_all(*vfs, "MiSTer.ini")) {
-        text.assign(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+        text.assign(infra::as_text(std::span(*bytes)));
     }
     if (!text.empty()) {
         svc::config_parser::PassNames names{};

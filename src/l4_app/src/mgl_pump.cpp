@@ -5,6 +5,7 @@
 #include "app/info_sink.h"
 #include "app/rbf_resolve.h"
 #include "app/session_identity.h"
+#include "infra/byte_view.h"
 #include "infra/message_sum.h"
 #include "proto/conf_str.h"
 #include "svc/search_policy.h"
@@ -91,7 +92,7 @@ void MglPump::latch_remember_() {
         const proto::FileSlotHit hit =
             proto::ConfStr::find_slot_in(slots, file ? 'F' : 'S', ld->index);
 
-        if (hit.entry == nullptr || !hit.entry->store_name) continue;
+        if (!hit.entry || !hit.entry->store_name) continue;
         if (!file && hit.how != proto::FileSlotMatch::Exact) continue;
         player_.remember(i, stem, file ? RememberedSlot::File : RememberedSlot::Mount,
                          hit.entry->ioctl_index);
@@ -107,6 +108,23 @@ bool MglPump::take_playlist(std::string_view path) noexcept {
     std::memcpy(latch_, p.data(), n);
     latch_[n] = '\0';
     latch_len_ = static_cast<std::uint16_t>(n);
+
+    if (pending_) ++stats_.superseded;
+    pending_ = true;
+    latched_doc_.reset();
+    ++stats_.routed;
+    return true;
+}
+
+bool MglPump::take_parsed(const Mgl& doc) noexcept {
+    TASTY_SEAT_BODY(MglPump);
+    const PublishOnExit publish_on_exit{this};
+    if (!doc.complete()) {
+        ++stats_.read_failures;
+        last_error_ = Errc::bad_format;
+        return false;
+    }
+    latched_doc_ = doc;
 
     if (pending_) ++stats_.superseded;
     pending_ = true;
@@ -132,10 +150,23 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
         return;
     }
 
-    if (auto r = player_.parse(std::string_view{doc_, doc_len_}, true); !r) {
-        abandon(InfoId::CoreLoadFailed, r.error().code);
+    Ex<void> doc;
+    if (!armed_doc_) {
+        doc = player_.parse(std::string_view{doc_, doc_len_}, true);
+    } else {
+
+        const Mgl& mgl = *armed_doc_;
+        const auto slot = mgl.slot == Mgl::Slot::Image ? MglItem::Slot::Image : MglItem::Slot::File;
+        doc = player_.adopt(
+            infra::make<MglItem>(MglItem::Load{
+                .slot = slot, .index = mgl.index, .delay_s = mgl.delay_s, .path = mgl.path}),
+            MglPlayer::PathBase::Card, true);
+    }
+    if (!doc) {
+        abandon(InfoId::CoreLoadFailed, doc.error().code);
         return;
     }
+    armed_doc_.reset();
     bind_homes();
     player_.set_scope(sample_scope());
     latch_remember_();
@@ -278,6 +309,13 @@ void MglPump::begin_read() {
     rbf_len_ = 0;
     want_len_ = 0;
 
+    armed_doc_ = std::move(latched_doc_);
+    latched_doc_.reset();
+    if (armed_doc_) {
+        if (!resolve_and_load(armed_doc_->rbf.view())) armed_doc_.reset();
+        return;
+    }
+
     if (path.empty()) {
         ++stats_.read_failures;
         last_error_ = Errc::bad_format;
@@ -303,8 +341,8 @@ void MglPump::begin_read() {
         last_info_ = InfoId::CoreLoadFailed;
         return;
     }
-    auto got = (*f)->read_at(0, std::span<std::byte>(reinterpret_cast<std::byte*>(doc_),
-                                                     static_cast<std::size_t>(sz->v)));
+    auto got = (*f)->read_at(
+        0, std::as_writable_bytes(std::span(doc_)).first(static_cast<std::size_t>(sz->v)));
     if (!got || *got == 0) {
         ++stats_.read_failures;
         last_error_ = got ? Errc::io : got.error().code;
@@ -314,7 +352,10 @@ void MglPump::begin_read() {
     }
     doc_len_ = static_cast<std::uint32_t>(*got);
 
-    const std::string_view want = xml::rbf_text(std::string_view{doc_, doc_len_});
+    (void)resolve_and_load(xml::rbf_text(std::string_view{doc_, doc_len_}));
+}
+
+bool MglPump::resolve_and_load(std::string_view want) {
     if (want.empty()) {
 
         ++stats_.no_rbf;
@@ -322,7 +363,7 @@ void MglPump::begin_read() {
         if (info_) info_->info(InfoId::CoreNotFound);
         last_info_ = InfoId::CoreNotFound;
         doc_len_ = 0;
-        return;
+        return false;
     }
     want_len_ = static_cast<std::uint16_t>(want.size() < kPathMax ? want.size() : kPathMax - 1);
     std::memcpy(want_, want.data(), want_len_);
@@ -334,12 +375,13 @@ void MglPump::begin_read() {
         if (info_) info_->info(InfoId::CoreNotFound);
         last_info_ = InfoId::CoreNotFound;
         doc_len_ = 0;
-        return;
+        return false;
     }
 
     enter(State::PendingRead);
     retry_deadline_ = os::Deadline::in(clock_, std::chrono::milliseconds{kLoadRetryMs});
     (void)publish_load();
+    return true;
 }
 
 bool MglPump::publish_load() {
@@ -404,6 +446,7 @@ void MglPump::abandon(InfoId id, Errc code) {
 
     load_tag_ = kUncaused;
     doc_len_ = 0;
+    armed_doc_.reset();
     last_error_ = code;
     if (id != InfoId::None) {
         last_info_ = id;

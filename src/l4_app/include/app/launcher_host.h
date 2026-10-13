@@ -11,6 +11,7 @@
 #include "app/launcher_state.h"
 #include "app/scanout_channel.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 #include "os/child_process.h"
@@ -24,12 +25,12 @@ class LauncherHost {
 
 public:
     struct Wiring {
-        const LauncherDemandCell* demand = nullptr;
-        LauncherStateCell* state = nullptr;
-        const LauncherFbAckCell* fb_ack = nullptr;
-        ScanoutChannel* scanout = nullptr;
-        os::IVtConsole* console = nullptr;
-        const os::IClock* clock = nullptr;
+        const LauncherDemandCell& demand;
+        LauncherStateCell& state;
+        const LauncherFbAckCell& fb_ack;
+        ScanoutChannel::Asker scanout;
+        os::IVtConsole& console;
+        const os::IClock& clock;
     };
 
     struct Timing {
@@ -70,9 +71,10 @@ public:
         UniqueFd epoll_;
     };
 
-    LauncherHost(Fds fds, const Wiring& w, const Timing& t) noexcept
-        : w_(w), t_(t), epoll_(std::move(fds.epoll_)) {}
-    LauncherHost(Fds fds, const Wiring& w) noexcept : LauncherHost(std::move(fds), w, Timing{}) {}
+    LauncherHost(Fds fds, Wiring w, const Timing& t) noexcept
+        : w_(std::move(w)), t_(t), epoll_(std::move(fds.epoll_)) {}
+    LauncherHost(Fds fds, Wiring w) noexcept
+        : LauncherHost(std::move(fds), std::move(w), Timing{}) {}
     LauncherHost(const LauncherHost&) = delete;
     LauncherHost& operator=(const LauncherHost&) = delete;
     [[nodiscard]] int poll_fd() const noexcept { return epoll_.get(); }
@@ -94,7 +96,7 @@ public:
 private:
     using Ns = std::chrono::nanoseconds;
 
-    [[nodiscard]] Ns now_() const noexcept { return w_.clock->now(); }
+    [[nodiscard]] Ns now_() const noexcept { return w_.clock.now(); }
     void step_() noexcept;
     void take_demand_() noexcept;
     [[nodiscard]] bool wanted_() const noexcept;
