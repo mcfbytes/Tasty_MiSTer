@@ -123,10 +123,9 @@ bool InputBuild::rebind_round() {
 
         const InputWire::CoreNameCell core = wire_.core_name();
 
-        en_.set_joy_plan(wire_.joy_plan());
         const svc::IAnalogReshape* r = wire_.analog_reshape();
         const auto reshape = infra::opt_ref_of(r);
-        (void)en_.load_maps_for(core.view(), core.front_end, reshape);
+        (void)en_.load_maps_for(core.view(), core.front_end, reshape, wire_.joy_plan());
     }
     if (!hand_over_()) {
         wire_.request(InputWire::kReqHotplug);

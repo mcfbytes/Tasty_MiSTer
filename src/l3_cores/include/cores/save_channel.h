@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <string_view>
 
 #include "infra/error.h"
@@ -27,6 +28,8 @@ public:
     [[nodiscard]] virtual Ex<Mount> mount_at(std::size_t i) = 0;
 
     [[nodiscard]] virtual svc::IStorageBackend* backend(std::size_t i) noexcept = 0;
+
+    [[nodiscard]] virtual std::span<const std::byte> order(std::size_t i) noexcept = 0;
 
     [[nodiscard]] virtual proto::IImageSource& descriptor() noexcept = 0;
 

@@ -36,7 +36,7 @@ struct PayloadWindow {
 [[nodiscard]] Ex<PayloadWindow> container_window(std::span<const std::byte> hdr, std::uint64_t fsz);
 
 class BitstreamProgrammer {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     BitstreamProgrammer(hal::IFpgaProgrammer& programmer, hal::IBridgeSequencer& bridges,

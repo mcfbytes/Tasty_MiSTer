@@ -24,7 +24,8 @@ struct ThreadRole {
     SpawnKind spawn;
 };
 
-inline constexpr std::size_t kThreadSeats = kSeatTagCount - 1;
+inline constexpr std::size_t kThreadSeats = kSeatTagCount - 2;
+static_assert(static_cast<std::size_t>(SeatTag::Main) == kSeatTagCount - 1, "Main is the last tag");
 using ThreadMap = std::array<ThreadRole, kThreadSeats>;
 
 inline constexpr std::size_t kCommNameMax = 15;
@@ -140,7 +141,14 @@ inline constexpr ThreadMap kDe10ThreadMap{{
      .spawn = SpawnKind::Create},
 }};
 
-constexpr std::size_t row_index(SeatTag tag) noexcept { return static_cast<std::size_t>(tag) - 1; }
+constexpr bool has_row(SeatTag tag) noexcept {
+    return tag != SeatTag::Unbound && tag != SeatTag::Main;
+}
+
+constexpr std::size_t row_index(SeatTag tag) noexcept {
+    if (!has_row(tag)) __builtin_trap();
+    return static_cast<std::size_t>(tag) - 1;
+}
 
 constexpr const ThreadRole& seat_of(const ThreadMap& m, SeatTag tag) noexcept {
     return m[row_index(tag)];

@@ -20,7 +20,7 @@ class FileSlotBackend final : public IStorageBackend {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    FileSlotBackend(const Vfs& vfs, const SlotPath& path) noexcept : vfs_(&vfs), path_(&path) {}
+    explicit FileSlotBackend(const Vfs& vfs) noexcept : vfs_(&vfs) {}
     FileSlotBackend(const FileSlotBackend&) = delete;
     FileSlotBackend& operator=(const FileSlotBackend&) = delete;
 
@@ -28,14 +28,14 @@ public:
                                           std::span<std::uint8_t> dst) override;
     [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t offset,
                                            std::span<const std::uint8_t> src) override;
-    [[nodiscard]] Ex<proto::FileSize> open_extent() override;
+    [[nodiscard]] Ex<proto::FileSize> open_extent(std::span<const std::byte> order) override;
     [[nodiscard]] Ex<proto::FileSize> create(std::span<const std::uint8_t> first) override;
     [[nodiscard]] Ex<void> flush() override;
     void release() noexcept override;
 
 private:
     const Vfs* vfs_;
-    const SlotPath* path_;
+    SlotPathText path_{};
     std::unique_ptr<IFile> file_{};
 };
 

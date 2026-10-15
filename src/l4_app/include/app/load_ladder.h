@@ -22,7 +22,7 @@
 namespace mister::app {
 
 class LoadLadder {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     enum class Pass : std::uint8_t { Stepped, Waiting, Done, Failed };
@@ -42,9 +42,9 @@ public:
     };
 
     struct Host {
-        LinkTxChannel& inbox;
+        LinkTxChannel<SeatTag::Main>& inbox;
         const FileTxLevelCell* level;
-        EventQueue& events;
+        EventQueue<SeatTag::Main>& events;
     };
 
     struct Job {
@@ -56,17 +56,18 @@ public:
 
         cores::TransferRow row{};
 
-        std::optional<LoadWindow> mirror{};
+        std::optional<LoadWindow<seat_owner::Main>> mirror{};
 
         PathText save{};
         std::uint64_t save_bytes = 0;
     };
 
-    [[nodiscard]] static Ex<LoadLadder> start(Job job, LoadWindow window, std::string_view path);
+    [[nodiscard]] static Ex<LoadLadder> start(Job job, LoadWindow<seat_owner::Main> window,
+                                              std::string_view path);
 
     [[nodiscard]] Pass step(Host& h);
 
-    [[nodiscard]] bool wants_pass(const LinkTxChannel& inbox,
+    [[nodiscard]] bool wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
                                   const FileTxLevelCell* level) const noexcept;
 
     [[nodiscard]] Pc pc() const noexcept { return pc_; }
@@ -78,7 +79,7 @@ public:
     }
 
 private:
-    LoadLadder(Job job, LoadWindow window) noexcept
+    LoadLadder(Job job, LoadWindow<seat_owner::Main> window) noexcept
         : job_(std::move(job)), window_(std::move(window)), key_(job_.total) {}
 
     [[nodiscard]] Pass open_(Host& h);
@@ -97,7 +98,7 @@ private:
     [[nodiscard]] std::uint32_t bracket_length_() const noexcept;
 
     Job job_;
-    LoadWindow window_;
+    LoadWindow<seat_owner::Main> window_;
     LoadKey key_;
     PathText path_{};
     std::vector<std::uint8_t> buf_;

@@ -116,12 +116,16 @@ public:
     [[nodiscard]] IWindowSave* window_save() noexcept { return on_window_save(); }
 
     [[nodiscard]] proto::IImageSink& image_sink() noexcept {
-        return host_.bulk != nullptr ? *host_.bulk : spi_sink_;
+        return host_.bulk ? *host_.bulk : spi_sink_;
     }
 
 protected:
     Core(const CoreProfile& p, const HostServices& h)
-        : profile_(&p), host_(h), spi_sink_(h.link, h.fio_queue), fio_cheats_(h.link, h.fio_queue) {
+        : profile_(&p), host_(h), spi_sink_(h.link, fio_queue_of_(h)),
+          fio_cheats_(h.link, fio_queue_of_(h)) {}
+
+    [[nodiscard]] static proto::SpiFioQueue* fio_queue_of_(const HostServices& h) noexcept {
+        return h.fio_queue ? h.fio_queue.operator->() : nullptr;
     }
 
     const HostServices& host() const noexcept { return host_; }
@@ -181,7 +185,7 @@ private:
 };
 
 [[nodiscard]] inline Core* bound_core(reactor::CoreState& st) noexcept {
-    return static_cast<Core*>(st.owner);
+    return st.owner ? static_cast<Core*>(st.owner.operator->()) : nullptr;
 }
 
 }  // namespace mister::cores

@@ -9,7 +9,7 @@ struct LinkOp;
 
 namespace mister::app {
 
-class LinkTxChannel;
+class ILinkTxReader;
 struct LinkOpCtx;
 
 class ILinkEncoder {

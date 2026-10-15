@@ -17,7 +17,7 @@ Ex<CompanionWalk> CompanionWalk::start(const cores::CompanionPlan& plan, std::ui
     return w;
 }
 
-bool CompanionWalk::wants_pass(const LinkTxChannel& inbox,
+bool CompanionWalk::wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
                                const FileTxLevelCell* level) const noexcept {
     switch (pc_) {
         case Pc::Over:
@@ -50,7 +50,7 @@ CompanionWalk::Pass CompanionWalk::step(Host& h) {
 }
 
 CompanionWalk::Pass CompanionWalk::bind_(Host& h) {
-    if (h.binds != nullptr) {
+    if (h.binds) {
         const CompanionBind m = infra::make<CompanionBind>(
             CompanionBind::Bind{.stem = stem_, .gen = gen_, .present = plan_.present});
         if (!h.binds->push(m)) return Pass::Waiting;

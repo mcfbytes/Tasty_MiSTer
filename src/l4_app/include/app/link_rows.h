@@ -69,7 +69,8 @@ struct BindOutcome {
     std::uint32_t slots_refused = 0;
 };
 
-[[nodiscard]] inline BindOutcome bind_link_rows(std::span<const LinkRow> rows, LinkTxChannel& tx,
+[[nodiscard]] inline BindOutcome bind_link_rows(std::span<const LinkRow> rows,
+                                                LinkTxChannel<SeatTag::Main>& tx,
                                                 [[maybe_unused]] std::uint32_t gen) noexcept {
     BindOutcome out{};
     for (const LinkRow& row : rows) {

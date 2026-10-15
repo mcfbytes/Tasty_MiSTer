@@ -27,6 +27,7 @@ struct RtStats;
 }
 namespace mister::app {
 class CmdFifo;
+template <SeatTag Producer>
 class EventQueue;
 class InputBuild;
 class MglPump;
@@ -48,17 +49,18 @@ public:
         const std::atomic<bool>& transitioning;
     };
 
-    ThreadAssembly(const hal::ThreadMap& threads, xthread::RtStats& stats, app::EventQueue& events,
-                   RtEvidence& boot, xthread::WakeFlag& main_wake, const DiagWires& diag,
+    ThreadAssembly(const hal::ThreadMap& threads, xthread::RtStats& stats,
+                   app::EventQueue<SeatTag::RT>& events, RtEvidence& boot,
+                   xthread::WakeFlag& main_wake, const DiagWires& diag,
                    const UiMain::Wires& ui_wires, const UiMain::Wiring& ui,
                    const DiagSampler::Sources& diag_sources) noexcept;
 
-    ThreadAssembly(const hal::ThreadMap&, xthread::RtStats&, app::EventQueue&, RtEvidence&&,
-                   xthread::WakeFlag&, const DiagWires&, const UiMain::Wires&,
+    ThreadAssembly(const hal::ThreadMap&, xthread::RtStats&, app::EventQueue<SeatTag::RT>&,
+                   RtEvidence&&, xthread::WakeFlag&, const DiagWires&, const UiMain::Wires&,
                    const UiMain::Wiring&, const DiagSampler::Sources&) = delete;
 
-    ThreadAssembly(xthread::RtStats& stats, app::EventQueue& events, const UiMain::Wiring& ui,
-                   const DiagSampler::Sources& diag) noexcept;
+    ThreadAssembly(xthread::RtStats& stats, app::EventQueue<SeatTag::RT>& events,
+                   const UiMain::Wiring& ui, const DiagSampler::Sources& diag) noexcept;
     ~ThreadAssembly();
 
     ThreadAssembly(const ThreadAssembly&) = delete;
@@ -168,12 +170,12 @@ private:
     xthread::WakeFlag quiescing_;
     Ex<void> born_{};
 
-    void create_mains_(app::EventQueue& events, const UiMain::Wires& ui_wires,
+    void create_mains_(app::EventQueue<SeatTag::RT>& events, const UiMain::Wires& ui_wires,
                        const UiMain::Wiring& ui) noexcept;
 
     void publish_evidence_() noexcept;
 
-    xthread::Telemetry<RtEvidence, SeatTag::Unbound> ev_cell_{};
+    xthread::Telemetry<RtEvidence, SeatTag::Main> ev_cell_{};
 
     DiagSampler diag_sampler_;
     xthread::WakeFlag diag_wake_{};

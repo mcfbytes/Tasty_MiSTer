@@ -18,7 +18,7 @@
 namespace mister::app {
 
 class UiRequestRing {
-    TASTY_SEAT_MEDIATOR(Ui, Any);
+    TASTY_SEAT_MEDIATOR(Ui, Main);
 
 public:
     static constexpr std::size_t kSlots = 8;

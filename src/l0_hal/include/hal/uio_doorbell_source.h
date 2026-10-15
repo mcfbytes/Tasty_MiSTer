@@ -14,7 +14,7 @@
 namespace mister::hal {
 
 class UioDoorbellSource final : public IDoorbellSource {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     void set_lw_window(PhysRegion lw) noexcept { lw_ = lw; }
@@ -22,9 +22,11 @@ public:
     void set_line_space(os::UioLineSpace s) noexcept { lines_ = s; }
 
     [[nodiscard]] Ex<os::UioHandle> open_line(os::UioLine line) override {
+        TASTY_SEAT_BODY(UioDoorbellSource);
         return os::UioHandle::open(line, lines_);
     }
     [[nodiscard]] Ex<RegisterWindow<CauseReg>> map_cause(LwOffset base) override {
+        TASTY_SEAT_BODY(UioDoorbellSource);
         return RegisterWindow<CauseReg>::map(lw_, base);
     }
 

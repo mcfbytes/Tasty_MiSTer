@@ -11,6 +11,7 @@
 #include "cores/file_slot.h"
 #include "cores/pause_on_osd.h"
 #include "infra/fixed_str.h"
+#include "infra/opt_ref.h"
 #include "svc/joy_plan.h"
 
 namespace mister::svc {
@@ -38,11 +39,11 @@ struct SessionIdentity {
 
     bool suppress_analog_followup = false;
 
-    const svc::IAnalogReshape* analog_reshape = nullptr;
+    infra::OptRef<const svc::IAnalogReshape> analog_reshape{};
 
-    const char* cue_dir = nullptr;
+    std::string_view cue_dir{};
 
-    const cores::CheatLookup* cheats = nullptr;
+    infra::OptRef<const cores::CheatLookup> cheats{};
 
     std::span<const cores::FileSlot> slots{};
 

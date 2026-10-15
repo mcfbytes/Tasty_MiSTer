@@ -28,13 +28,13 @@ LinkBinder::LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept
 proto::IImageSink& LinkBinder::grant_bulk() noexcept { return progress_sink_; }
 
 void LinkBinder::release_feeder() noexcept {
-    if (feeder_granted_ && feeder_ != nullptr) feeder_->detach();
+    if (feeder_granted_ && feeder_) feeder_->detach();
     feeder_granted_ = false;
 }
 
 bool LinkBinder::adopt_fed_ring(hal::FpgaMemory&& ring) noexcept {
 
-    if (feeder_ == nullptr || !feeder_->adopt_ring(std::move(ring))) {
+    if (!feeder_ || !feeder_->adopt_ring(std::move(ring))) {
         ++fed_refusals_;
         return false;
     }
@@ -45,8 +45,8 @@ bool LinkBinder::adopt_fed_ring(hal::FpgaMemory&& ring) noexcept {
 Ex<void> LinkBinder::bind_census(std::span<const reactor::LinkDecoderDecl> rows,
                                  cores::Core* owner) {
 
-    reactor::ICoreToken* const prev = state_.owner;
-    state_.owner = rows.empty() ? nullptr : owner;
+    const infra::OptRef<reactor::ICoreToken> prev = state_.owner;
+    state_.owner = infra::opt_ref_of<reactor::ICoreToken>(rows.empty() ? nullptr : owner);
     auto r = exec_.bind(rows, state_);
     if (!r) state_.owner = prev;
     return r;
@@ -137,7 +137,7 @@ bool LinkBinder::bridge_windows_live() const noexcept {
 
     if (notifiers_.size() != 0) return true;
 
-    if (feeder_ != nullptr && feeder_->attached()) return true;
+    if (feeder_ && feeder_->attached()) return true;
     return feeder_granted_;
 }
 

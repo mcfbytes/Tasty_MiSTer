@@ -25,6 +25,7 @@ enum class SeatTag : std::uint8_t {
     RecWrite,
     Launcher,
     HdOsd,
+    Main,
     kCount,
 };
 inline constexpr std::size_t kSeatTagCount = static_cast<std::size_t>(SeatTag::kCount);
@@ -48,6 +49,7 @@ inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatNames{{
     {SeatTag::RecWrite, "T-RECWRITE"},
     {SeatTag::Launcher, "T-LAUNCHER"},
     {SeatTag::HdOsd, "T-HDOSD"},
+    {SeatTag::Main, "MAIN"},
 }};
 
 consteval bool seat_name_rows_are_ordinal() {
@@ -78,6 +80,7 @@ inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatRoles{{
     {SeatTag::RecWrite, "recwrite"},
     {SeatTag::Launcher, "launcher"},
     {SeatTag::HdOsd, "hdosd"},
+    {SeatTag::Main, "main"},
 }};
 
 consteval bool seat_role_rows_are_ordinal() {
@@ -147,13 +150,13 @@ inline constexpr SeatTag Encode = SeatTag::Encode;
 inline constexpr SeatTag RecWrite = SeatTag::RecWrite;
 inline constexpr SeatTag Launcher = SeatTag::Launcher;
 inline constexpr SeatTag HdOsd = SeatTag::HdOsd;
+inline constexpr SeatTag Main = SeatTag::Main;
 }  // namespace seat_arg
 
 namespace seat_exempt {
 inline constexpr int component = 0;
 inline constexpr int const_shared = 1;
 inline constexpr int boot = 2;
-inline constexpr int main = 3;
 }  // namespace seat_exempt
 
 }  // namespace mister
@@ -181,8 +184,5 @@ inline constexpr int main = 3;
 namespace mister::seat_owner {
 struct RT {
     TASTY_SEAT_RESIDENT(RT);
-};
-struct Main {
-    TASTY_SEAT_EXEMPT(main);
 };
 }  // namespace mister::seat_owner

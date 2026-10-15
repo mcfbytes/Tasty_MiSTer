@@ -8,7 +8,7 @@
 namespace mister::cores {
 
 struct LoaderMemo {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
     FixedStr<svc::kSlotPathCap, StrFit::Reject> last_boot{};
 };

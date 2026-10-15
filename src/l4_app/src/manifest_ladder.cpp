@@ -25,7 +25,7 @@ ManifestLadder::Pass ManifestLadder::step(Host& h) {
     return Pass::Failed;
 }
 
-bool ManifestLadder::wants_pass(const LinkTxChannel& inbox,
+bool ManifestLadder::wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
                                 const FileTxLevelCell* level) const noexcept {
     switch (pc_) {
         case Pc::Next:
@@ -64,7 +64,8 @@ ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& 
         refuse_window_(h, Errc::slot_range);
         return Pass::Stepped;
     }
-    auto win = LoadWindow::open(h.map, h.aperture, os::PhysAddr{w.address}, w.bytes);
+    auto win =
+        LoadWindow<seat_owner::Main>::open(h.map, h.aperture, os::PhysAddr{w.address}, w.bytes);
     if (!win) {
         refuse_window_(h, win.error().code);
         return Pass::Stepped;
@@ -113,7 +114,7 @@ ManifestLadder::Pass ManifestLadder::rung_(Host& h) {
 }
 
 ManifestLadder::Pass ManifestLadder::send_(Host& h) {
-    LinkTxChannel& inbox = h.rung.inbox;
+    LinkTxChannel<SeatTag::Main>& inbox = h.rung.inbox;
     if (inbox.ring().size() >= proto::kLinkTxCapacity) return Pass::Waiting;
     cores::SendBracket& b = *bracket_;
     const std::uint64_t bytes = b.bytes.size();

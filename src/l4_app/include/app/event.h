@@ -169,8 +169,11 @@ constexpr Delivery delivery_of(Event::Kind k) noexcept {
     return idx < kDeliveryRows ? kDeliveryTable[idx].delivery : Delivery::Edge;
 }
 
+template <SeatTag Producer>
 class EventQueue {
     TASTY_SEAT_MEDIATOR(Any, Ui);
+    static_assert(Producer != SeatTag::Ui && Producer != SeatTag::Unbound,
+                  "the producer is a named seat other than T-UI, which drains");
 
 public:
     static constexpr std::size_t kCapacity = 256;
@@ -193,5 +196,8 @@ private:
 
     xthread::Counter loss_[kKinds]{};
 };
+
+extern template class EventQueue<SeatTag::RT>;
+extern template class EventQueue<SeatTag::Main>;
 
 }  // namespace mister::app

@@ -91,10 +91,6 @@
 #include "svc/storage_lifecycle.h"
 #include "svc/joy_plan.h"
 
-namespace mister::hal {
-class IBootHandoff;
-}
-
 namespace mister::svc {
 class DiscReadService;
 struct ConfigSnapshot;
@@ -122,6 +118,7 @@ class InputWire;
 class DurableWriteService;
 class MailboxRelay;
 class WindowJobService;
+template <SeatTag Consumer>
 class LinkRxChannel;
 
 struct SupervisorParts;
@@ -138,8 +135,8 @@ class LinkSession : private cores::CoreInitHost,
 
 public:
     LinkSession(hal::ISpiTransport& link, hal::ICoreSignals& signals,
-                hal::ISpiSampleSource& samples, hal::PhysRegion aperture, EventQueue& events,
-                const SupervisorParts& parts) noexcept;
+                hal::ISpiSampleSource& samples, hal::PhysRegion aperture,
+                EventQueue<SeatTag::RT>& events, const SupervisorParts& parts) noexcept;
     ~LinkSession();
 
     LinkSession(const LinkSession&) = delete;
@@ -156,7 +153,7 @@ public:
     void attach_prefetch(svc::ChdPrefetch& pf) noexcept;
 
     void attach_discs(svc::DiscReadService& d) noexcept;
-    [[nodiscard]] svc::DiscReadService* discs() noexcept { return discs_; }
+    [[nodiscard]] infra::OptRef<svc::DiscReadService> discs() noexcept { return discs_; }
 
     void attach_mailbox(MailboxRelay& r) noexcept;
 
@@ -165,16 +162,19 @@ public:
     [[nodiscard]] CoreBay& core_bay() noexcept { return bay_; }
     [[nodiscard]] const BayReleasesCell& bay_releases() const noexcept { return releases_; }
 
-    void set_write_service(DurableWriteService* w) noexcept { writes_ = w; }
+    void set_write_service(DurableWriteService* w) noexcept { writes_ = infra::opt_ref_of(w); }
 
-    void set_window_job_service(WindowJobService* w) noexcept { window_jobs_ = w; }
+    void set_window_job_service(WindowJobService* w) noexcept {
+        window_jobs_ = infra::opt_ref_of(w);
+    }
 
-    [[nodiscard]] LinkTxChannel& link_inbox() noexcept { return link_inbox_; }
-    [[nodiscard]] LinkTxChannel& ui_inbox() noexcept { return ui_inbox_; }
-    [[nodiscard]] LinkTxChannel& input_inbox() noexcept { return input_inbox_; }
-    [[nodiscard]] LinkRxChannel& link_rx() noexcept { return link_rx_; }
+    [[nodiscard]] LinkTxChannel<SeatTag::Main>& link_inbox() noexcept { return link_inbox_; }
+    [[nodiscard]] LinkTxChannel<SeatTag::Ui>& ui_inbox() noexcept { return ui_inbox_; }
+    [[nodiscard]] LinkTxChannel<SeatTag::Input>& input_inbox() noexcept { return input_inbox_; }
+    [[nodiscard]] LinkRxChannel<SeatTag::Main>& link_rx() noexcept { return link_rx_; }
 
-    [[nodiscard]] const xthread::Telemetry<svc::ConfigSnapshot>& config_cell() noexcept {
+    [[nodiscard]] const xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>&
+    config_cell() noexcept {
         return config_cell_;
     }
     [[nodiscard]] std::uint32_t link_ops_encoded() const noexcept { return link_ops_encoded_; }
@@ -269,7 +269,7 @@ public:
     }
 
     void set_storage_lifecycle(svc::IStorageLifecycle* l) noexcept {
-        storage_life_ = l;
+        storage_life_ = infra::opt_ref_of(l);
         slots_.set_storage_live(l != nullptr);
     }
 
@@ -351,7 +351,7 @@ public:
 
     void tick(RoundEntry entry);
 
-    void deliver(const proto::LinkOp& op, LinkTxChannel* inbox, bool windows_closed) noexcept;
+    void deliver(const proto::LinkOp& op, const ILinkTxReader& inbox, bool windows_closed) noexcept;
 
     void reap_storage() noexcept;
 
@@ -396,8 +396,8 @@ public:
 
     [[nodiscard]] Ex<std::optional<UiRequest::LoadCore>> boot(std::span<const char* const> argv);
 
-    [[noreturn]] void handoff_to_alternate_executable(const char* exe,
-                                                      std::span<const char* const> argv);
+    [[nodiscard]] ExitReboot handoff_to_alternate_executable(const char* exe,
+                                                             std::span<const char* const> argv);
 
     [[nodiscard]] const BoardOps& board_ops() const noexcept { return ops_; }
 
@@ -408,9 +408,9 @@ public:
     [[nodiscard]] const proto::ISessionLive& liveness() const noexcept { return *this; }
     [[nodiscard]] Ex<void> load_core(const LoadRequest& req);
 
-    [[nodiscard]] Ex<void> reset_core(bool cold);
+    [[nodiscard]] Ex<void> reset_core();
 
-    [[nodiscard]] Ex<void> shutdown();
+    [[nodiscard]] Ex<ExitReboot> shutdown();
 
     void release_bus() noexcept;
 
@@ -480,7 +480,7 @@ private:
 
     [[nodiscard]] Ex<void> re_exec(const LoadRequest&);
 
-    [[nodiscard]] Ex<void> board_reboot(bool cold);
+    void hold_for_reboot_();
 
     void apply_core_(const proto::LinkOp::ApplyCore& a);
 
@@ -495,7 +495,7 @@ private:
     [[nodiscard]] Ex<void> perform_file_tx_(svc::IFile& f, std::string_view path, std::uint8_t slot,
                                             ContentEdge edge);
 
-    [[nodiscard]] bool stream_file_tx_(const proto::LinkOp::FileTx& a, const FileBytes::Slot* file);
+    [[nodiscard]] bool stream_file_tx_(const proto::LinkOp::FileTx& a, const InternedFile* file);
 
     void after_file_tx_(std::uint8_t slot, std::string_view path, ContentEdge edge);
 
@@ -546,16 +546,15 @@ private:
     LinkBinder binder_;
 
     FencedCoreSignals fenced_signals_;
-    hal::IBootHandoff* handoff_ = nullptr;
 
     SessionMachine machine_;
 
-    const svc::Vfs* vfs_ = nullptr;
-    svc::DiscReadService* discs_ = nullptr;
+    infra::OptRef<const svc::Vfs> vfs_{};
+    infra::OptRef<svc::DiscReadService> discs_{};
     svc::DiscReadService& unbound_discs_;
-    MailboxRelay* mailbox_ = nullptr;
+    infra::OptRef<MailboxRelay> mailbox_{};
     std::uint32_t mailbox_write_drops_ = 0;
-    svc::ChdPrefetch* prefetch_ = nullptr;
+    infra::OptRef<svc::ChdPrefetch> prefetch_{};
 
     [[nodiscard]] Ex<void> arm_or_write_(std::string_view rel, std::span<const std::byte> bytes);
     void drain_write_verdicts_();
@@ -564,18 +563,18 @@ private:
 
     [[nodiscard]] Ex<std::size_t> write_save_upload_(cores::ISaveUpload& up);
 
-    DurableWriteService* writes_ = nullptr;
-    WindowJobService* window_jobs_ = nullptr;
-    svc::IStorageLifecycle* storage_life_ = nullptr;
-    LinkTxChannel& link_inbox_;
-    LinkTxChannel& ui_inbox_;
-    LinkTxChannel& input_inbox_;
-    LinkRxChannel& link_rx_;
+    infra::OptRef<DurableWriteService> writes_{};
+    infra::OptRef<WindowJobService> window_jobs_{};
+    infra::OptRef<svc::IStorageLifecycle> storage_life_{};
+    LinkTxChannel<SeatTag::Main>& link_inbox_;
+    LinkTxChannel<SeatTag::Ui>& ui_inbox_;
+    LinkTxChannel<SeatTag::Input>& input_inbox_;
+    LinkRxChannel<SeatTag::Main>& link_rx_;
     LinkRouter& router_;
     Port out_;
     proto::SpiSampler sampler_;
-    const xthread::Telemetry<svc::ConfigSnapshot>& config_cell_;
-    xthread::Telemetry<svc::ConfigSnapshot>::Reader config_reader_{};
+    const xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>& config_cell_;
+    xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>::Reader config_reader_{};
 
     StartInFlight start_;
     std::uint32_t link_ops_encoded_ = 0;
@@ -701,7 +700,8 @@ private:
         proto::FileSize size{};
     };
     std::optional<OpenSave> open_save_;
-    void arm_open_save_(const FileBytes::Slot* file, const LinkTxChannel* inbox) noexcept;
+    void arm_open_save_(const InternedFile* file,
+                        infra::OptRef<const ILinkTxReader> inbox) noexcept;
     void announce_open_save_() noexcept;
     std::uint32_t save_pulls_fenced_ = 0;
     std::uint32_t load_facts_refusals_ = 0;
@@ -761,8 +761,8 @@ private:
 
     [[nodiscard]] ILinkEncoder::Outcome perform_bound_mount_(
         const proto::LinkOp::BindMount& bm, const std::optional<SessionBindings::Mount>& image);
-    [[nodiscard]] ILinkEncoder::Outcome apply_save_bind_(const proto::LinkOp::BindSlot& bind,
-                                                         LinkTxChannel* inbox) noexcept;
+    [[nodiscard]] ILinkEncoder::Outcome apply_save_bind_(
+        const proto::LinkOp::BindSlot& bind, infra::OptRef<const ILinkTxReader> inbox) noexcept;
 
     void settle_save_binds_() noexcept;
     void settle_stage_mount_() noexcept;

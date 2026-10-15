@@ -119,7 +119,7 @@ public:
 
     struct Wiring {
         const IActivitySource& activity;
-        LinkTxChannel& link_tx;
+        LinkTxChannel<SeatTag::Ui>& link_tx;
     };
 
     VideoPump(const svc::Vfs& vfs, const os::IClock& clock, const hal::VideoOutDecl& board,

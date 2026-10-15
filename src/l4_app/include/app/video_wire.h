@@ -64,7 +64,7 @@ public:
     using Block = xthread::SeqCell<BlockPayload>;
 
     struct Wiring {
-        LinkTxChannel& link_tx;
+        LinkTxChannel<SeatTag::Ui>& link_tx;
     };
 
     explicit VideoWire(Wiring w) noexcept : link_tx_(w.link_tx) {}
@@ -237,7 +237,7 @@ private:
     void step_filter_stream(hal::ISpiTransport& link);
     std::size_t select_slot(const svc::VideoSample& s) const;
 
-    LinkTxChannel& link_tx_;
+    LinkTxChannel<SeatTag::Ui>& link_tx_;
     std::uint32_t gen_ = 0;
     Block table_[kSlots]{};
 

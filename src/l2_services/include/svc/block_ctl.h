@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
@@ -21,10 +22,13 @@ struct BlockCtl {
 
     infra::OptRef<IStorageBackend> backend{};
 
+    std::uint16_t order_len = 0;
+    alignas(8) std::byte order[kStorageOrderBytes]{};
+
     infra::OptRef<IStorageBackend> stage{};
 };
 
 static_assert(std::is_trivially_copyable_v<BlockCtl> &&
-              sizeof(BlockCtl) == 72u + 2u * sizeof(infra::OptRef<IStorageBackend>));
+              sizeof(BlockCtl) <= 96u + kStorageOrderBytes);
 
 }  // namespace mister::svc

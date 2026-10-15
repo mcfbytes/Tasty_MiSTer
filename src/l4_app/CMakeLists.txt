@@ -6,6 +6,7 @@ add_library(mister_app STATIC
   src/backdrop_sampler.cpp
   src/backdrop_scaler.cpp
   src/bitstream_programmer.cpp
+  src/board_reboot.cpp
   src/bt_pump.cpp
   src/capture_main.cpp
   src/cheat_catalog_pack.cpp
@@ -20,6 +21,7 @@ add_library(mister_app STATIC
   src/core_builder.cpp
   src/core_window.cpp
   src/cscd_codec.cpp
+  src/dev_mem_window_map.cpp
   src/durable_write.cpp
   src/ini_key_edit.cpp
   src/durable_write_service.cpp
@@ -111,7 +113,8 @@ target_include_directories(mister_app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 find_package(ZLIB REQUIRED)
 target_link_libraries(mister_app
   PUBLIC mister_cores
-  PRIVATE tasty_options ZLIB::ZLIB)
+  PUBLIC ZLIB::ZLIB
+  PRIVATE tasty_options)
 
 target_include_directories(mister_app SYSTEM PRIVATE ${TASTY_LZO_INCLUDE_DIR})
 target_link_libraries(mister_app PRIVATE ${TASTY_LZO_LIBRARY})
@@ -457,6 +460,11 @@ if(TASTY_BUILD_TESTS)
   tasty_unit_test(tasty_link_channel_unit
     NAME tasty.link_channel
     SOURCES tests/link_channel_unit.cpp
+    LIBS mister_app tasty_test_options)
+
+  tasty_unit_test(tasty_ring_slab_unit
+    NAME tasty.ring_slab
+    SOURCES tests/ring_slab_unit.cpp
     LIBS mister_app tasty_test_options)
 
   tasty_unit_test(tasty_session_bindings_unit

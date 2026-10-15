@@ -18,12 +18,14 @@
 namespace mister::app {
 class BtPump;
 class CmdFifo;
+template <SeatTag Producer>
 class EventQueue;
 class IEventSink;
 class IOwnerTick;
 class IUiRoundPort;
 class LauncherScreen;
 class MglPump;
+template <SeatTag Seat>
 class LinkRxChannel;
 class RecorderControl;
 class ReplayFeeder;
@@ -54,19 +56,19 @@ public:
         app::VideoPump& video;
         bool uart = false;
         app::IEventSink& ui_sink;
-        app::EventQueue& owner_events;
+        app::EventQueue<SeatTag::Main>& owner_events;
         infra::OptRef<app::BtPump> bt{};
         app::ScreenshotPump& shots;
         app::ReplayFeeder& replay;
         app::RecorderControl& recorder;
         infra::OptRef<app::LauncherScreen> launcher_screen{};
         infra::OptRef<app::IUiRoundPort> ui_round{};
-        app::LinkRxChannel& link_rx;
+        app::LinkRxChannel<SeatTag::Ui>& link_rx;
 
         infra::OptRef<app::SaveStateAttach> save_states{};
     };
 
-    UiMain(app::EventQueue& events, xthread::ParkFds fds,
+    UiMain(app::EventQueue<SeatTag::RT>& events, xthread::ParkFds fds,
            app::UartModeController::Handoffs& handoffs, const Wiring& wiring,
            xthread::WakeFlag& asker) noexcept;
     UiMain(const UiMain&) = delete;
@@ -103,8 +105,8 @@ public:
 private:
     void drain_events_() noexcept;
 
-    app::EventQueue& events_;
-    app::EventQueue& owner_events_;
+    app::EventQueue<SeatTag::RT>& events_;
+    app::EventQueue<SeatTag::Main>& owner_events_;
     const infra::OptRef<app::CmdFifo> fifo_;
     const infra::OptRef<app::MglPump> mgl_;
     app::VideoPump& video_;
@@ -118,7 +120,7 @@ private:
     app::IEventSink& ui_sink_;
     const infra::OptRef<app::IUiRoundPort> ui_round_;
     infra::OptRef<app::IOwnerTick> owner_tick_{};
-    app::LinkRxChannel& ui_rx_;
+    app::LinkRxChannel<SeatTag::Ui>& ui_rx_;
     infra::OptRef<app::SaveStateAttach> save_states_;
     xthread::WakeFlag& wake_;
     xthread::WakeFlag stop_;

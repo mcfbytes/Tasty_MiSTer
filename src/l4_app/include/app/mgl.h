@@ -71,7 +71,7 @@ public:
     static constexpr std::size_t kMaxItems = 6;
 
     struct Wiring {
-        LinkTxChannel& link_tx;
+        LinkTxChannel<SeatTag::Ui>& link_tx;
         UiRequestRing& asks;
         NameConfig& names;
     };
@@ -137,7 +137,7 @@ private:
     void record_publish(CorrelationTag tag) noexcept;
     void record_wire_publish(bool pushed) noexcept;
 
-    LinkTxChannel& link_tx_;
+    LinkTxChannel<SeatTag::Ui>& link_tx_;
     UiRequestRing& asks_;
     NameConfig& names_;
 

@@ -126,7 +126,6 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/map_store.h
   svc/mapping_wizard.h
   svc/modeline.h
-  svc/movable_counter.h
   svc/no_merge_rule.h
   svc/parse_error.h
   svc/per_core_setting.h

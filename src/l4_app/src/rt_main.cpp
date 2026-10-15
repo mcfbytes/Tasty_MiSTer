@@ -121,9 +121,10 @@ void RtMain::drain_ops() noexcept {
     (void)drain_(session_->input_inbox(), 0, kInputOpBudget, closed);
 }
 
-unsigned RtMain::drain_(LinkTxChannel& inbox, unsigned already, unsigned budget,
+template <SeatTag Producer>
+unsigned RtMain::drain_(LinkTxChannel<Producer>& inbox, unsigned already, unsigned budget,
                         bool windows_closed) noexcept {
-    const bool pads = &inbox == &session_->input_inbox();
+    constexpr bool pads = Producer == SeatTag::Input;
     unsigned got = 0;
     while (already + got < budget && !wire_held_()) {
         const auto op = inbox.pop();
@@ -133,7 +134,7 @@ unsigned RtMain::drain_(LinkTxChannel& inbox, unsigned already, unsigned budget,
         if (pads && replay_ && replay_->suppresses(*op)) continue;
         const std::uint32_t ends = session_->downloads_closed();
         const std::uint32_t resets = session_->resets_pulsed();
-        session_->deliver(*op, &inbox, windows_closed);
+        session_->deliver(*op, inbox, windows_closed);
 
         if (replay_ && session_->downloads_closed() != ends) {
             replay_->note_download_end(session_->last_download_index());
@@ -201,8 +202,8 @@ Ex<void> RtMain::pump_boot() {
     }
     while (s.session_starting()) {
 
-        if (const IStopSignal* stop = s.board_ops().stop;
-            stop != nullptr && stop->stop_requested()) {
+        if (const infra::OptRef<IStopSignal> stop = s.board_ops().stop;
+            stop && stop->stop_requested()) {
             return std::unexpected(
                 Error{Errc::cancelled, ERR_SITE(), static_cast<std::uint32_t>(s.state())});
         }

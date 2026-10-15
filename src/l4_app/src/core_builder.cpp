@@ -53,12 +53,12 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
         *terms_.vfs,
         terms_.link,
         terms_.clock,
-        terms_.prefetch ? &*terms_.prefetch : nullptr,
-        &terms_.bulk,
+        terms_.prefetch,
+        infra::OptRef<proto::IImageSink>{terms_.bulk},
         grant_windows(slot, profile),
-        terms_.discs ? &*terms_.discs : &terms_.unbound_discs,
-        &terms_.fio_queue,
-        terms_.mailbox ? &*terms_.mailbox : nullptr,
+        terms_.discs ? terms_.discs : infra::OptRef<svc::DiscReadService>{terms_.unbound_discs},
+        infra::OptRef<proto::SpiFioQueue>{terms_.fio_queue},
+        terms_.mailbox,
         terms_.save_copy,
     };
     const cores::CoreGrant grant{services, ask.manifest};

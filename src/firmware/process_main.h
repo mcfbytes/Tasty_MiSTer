@@ -18,7 +18,7 @@ class ThreadAssembly;
 inline constexpr int kSupervisorWakeMs = 1000;
 
 class ProcessMain final : public xthread::SeatMain<ProcessMain> {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     ProcessMain(app::SessionOwner& owner, const ThreadAssembly& assembly,

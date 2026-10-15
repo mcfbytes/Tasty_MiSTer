@@ -3,6 +3,7 @@ find_package(Threads REQUIRED)
 add_library(mister_fw_assembly STATIC
   assembly.cpp
   board_parts.cpp
+  board_reset.cpp
   diag_main.cpp
   diag_sampler.cpp
   ui_main.cpp

@@ -28,7 +28,7 @@ struct StartFile {
 };
 
 class StartChain {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     struct Facts {

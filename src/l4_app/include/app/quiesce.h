@@ -28,7 +28,7 @@ static_assert(sizeof(Quiesced) <= 8, "one cache line holds the whole handshake")
 inline constexpr std::size_t kQuiesceSlots = 4;
 
 class QuiesceChannel {
-    TASTY_SEAT_MEDIATOR(Any, RT);
+    TASTY_SEAT_MEDIATOR(Main, RT);
 
 public:
     QuiesceChannel() noexcept : ack_(xthread::Polled{}) {}

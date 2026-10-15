@@ -35,7 +35,7 @@ public:
     }
     ~OwedMount() { strand(); }
 
-    void bind(Cell& cell, LinkRxChannel* rx) noexcept {
+    void bind(Cell& cell, LinkRxChannel<SeatTag::Main>* rx) noexcept {
         strand();
         cell_ = infra::opt_ref_of(&cell);
         rx_ = infra::opt_ref_of(rx);
@@ -94,7 +94,7 @@ private:
     }
 
     infra::OptRef<Cell> cell_{};
-    infra::OptRef<LinkRxChannel> rx_{};
+    infra::OptRef<LinkRxChannel<SeatTag::Main>> rx_{};
     cores::MountStatus strand_body_{};
     FixedStr<kPathMax, StrFit::Clip> path_{};
     std::int64_t quiesce_deadline_ns_ = 0;

@@ -16,6 +16,7 @@ std::string_view MsuCompanion::stem_of(std::string_view path) noexcept {
 }
 
 Ex<CompanionPlan> MsuCompanion::plan(const CompanionAsk& ask) {
+    TASTY_SEAT_BODY(MsuCompanion);
     if (!stem_.assign(stem_of(ask.path)))
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     CompanionPlan p{};
@@ -51,6 +52,9 @@ Ex<CompanionPlan> MsuCompanion::plan(const CompanionAsk& ask) {
     return p;
 }
 
-std::unique_ptr<ILoader> MsuCompanion::loader() { return std::make_unique<MsuDataLoader>(); }
+std::unique_ptr<ILoader> MsuCompanion::loader() {
+    TASTY_SEAT_BODY(MsuCompanion);
+    return std::make_unique<MsuDataLoader>();
+}
 
 }  // namespace mister::cores

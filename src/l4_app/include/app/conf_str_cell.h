@@ -25,6 +25,6 @@ static_assert(sizeof(ConfStrText::text) == proto::CoreSession::kConfStrCap,
               "here so they cannot drift");
 static_assert(std::is_trivially_copyable_v<ConfStrText>);
 
-using ConfStrCell = xthread::Telemetry<ConfStrText>;
+using ConfStrCell = xthread::Telemetry<ConfStrText, SeatTag::Main>;
 
 }  // namespace mister::app

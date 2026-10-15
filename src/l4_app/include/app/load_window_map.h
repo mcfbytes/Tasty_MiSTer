@@ -7,6 +7,7 @@
 
 namespace mister::app {
 
+template <class Owner>
 class ILoadWindowMap {
 public:
     virtual ~ILoadWindowMap() = default;

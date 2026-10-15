@@ -8,13 +8,14 @@
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "infra/opt_ref.h"
 
 namespace mister::app {
 
 struct OptionTable {
     TASTY_SEAT_EXEMPT(const_shared);
     struct Row {
-        const cores::OptionRow* decl = nullptr;
+        infra::OptRef<const cores::OptionRow> decl{};
         std::uint8_t current = 0;
         bool dimmed = false;
         FixedStr<cores::kOptionTextChars + 1, StrFit::Clip> text{};

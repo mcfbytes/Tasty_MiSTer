@@ -21,7 +21,7 @@ inline constexpr std::size_t kMaxAbandonedCores = 4;
 inline constexpr std::size_t kCoreBaySlots = kMaxAbandonedCores + 2;
 
 struct BuiltCore {
-    TASTY_SEAT_MEDIATOR(Any, Any);
+    TASTY_SEAT_MEDIATOR(Main, RT);
     CorePtr core;
     std::array<std::optional<CoreWindow>, cores::kMaxCoreWindows> windows{};
     std::optional<hal::FpgaMemory> fed_ring{};

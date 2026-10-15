@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <span>
 
+#include <zlib.h>
+
 #include "app/frame_arena.h"
 #include "app/frame_codec.h"
 #include "app/rec_options.h"
@@ -84,11 +86,11 @@ private:
     void step_(int dir) noexcept;
 
     FrameArena arena_{};
+    z_stream z_{};
     std::span<std::byte> prev_{};
     std::span<std::byte> cur_{};
     std::span<std::byte> plain_{};
     std::span<std::byte> pkt_{};
-    std::span<std::byte> zmem_{};
     std::span<std::byte> dup_plain_{};
     std::span<std::byte> hist_{};
     infra::OptRef<const os::IClock> clock_{};

@@ -16,11 +16,13 @@ ProcessMain::ProcessMain(app::SessionOwner& owner, const ThreadAssembly& assembl
     : owner_(owner), assembly_(assembly), stop_(fds.stop_wire()), park_(fds.wake(), stop_) {}
 
 void ProcessMain::start() noexcept {
+    TASTY_SEAT_BODY(ProcessMain);
     owner_.on_seats_live();
     loop_();
 }
 
 void ProcessMain::pass(app::SessionOwner& owner) noexcept {
+    seat_assert<SeatTag::Main>(ERR_SITE(), "ProcessMain::pass off MAIN");
     while (const auto e = owner.rx().pop()) {
         infra::dispatch<app::LinkEventRoutes<app::EventSink::Main>>(*e, owner);
     }

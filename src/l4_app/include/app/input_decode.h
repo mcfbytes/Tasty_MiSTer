@@ -34,7 +34,9 @@ class DiagLog;
 
 namespace mister::app {
 static_assert(LauncherKeyBridge::kPadSlots >= svc::kMaxDevices);
+template <SeatTag Seat>
 class LinkTxChannel;
+template <SeatTag Seat>
 class LinkRxChannel;
 
 struct InputDecodeCounts {
@@ -72,6 +74,13 @@ public:
 
     using CountsCell = xthread::Telemetry<Counts, SeatTag::Input>;
 
+    struct MouseDelta {
+        std::int32_t dx = 0, dy = 0, dz = 0;
+        std::uint8_t buttons = 0;
+        bool button_edge = false;
+        bool moved = false;
+    };
+
     class Fds {
     public:
         [[nodiscard]] static Ex<Fds> create(InputWire& wire) noexcept;
@@ -88,8 +97,8 @@ public:
 
     struct Wiring {
         xthread::DiagLog& diag;
-        LinkTxChannel& inbox;
-        LinkRxChannel& link_rx;
+        LinkTxChannel<SeatTag::Input>& inbox;
+        LinkRxChannel<SeatTag::Input>& link_rx;
         xthread::WakeFlag::Kicker rt_wake;
         infra::OptRef<const LauncherStateCell> cell{};
         infra::OptRef<LauncherKeyBridge> keys{};
@@ -164,8 +173,8 @@ private:
     svc::InputService& svc_;
     DeviceTableChannel::Receiver tables_rx_;
     xthread::DiagLog& diag_;
-    LinkTxChannel& inbox_;
-    LinkRxChannel& link_rx_;
+    LinkTxChannel<SeatTag::Input>& inbox_;
+    LinkRxChannel<SeatTag::Input>& link_rx_;
 
     xthread::WakeFlag::Kicker rt_wake_;
     RumbleRelay rumble_;
@@ -213,9 +222,42 @@ private:
     static constexpr std::uint32_t kEvictRearmCredit = 4;
     std::uint32_t rearm_credit_ = kEvictRearmCredit;
 
-    std::uint32_t m_x_ = 0, m_y_ = 0, m_w_ = 0;
-    std::uint32_t m_edges_ = 0;
-    std::uint8_t m_btn_ = 0;
+    struct MouseAccumulator {
+        TASTY_SEAT_EXEMPT(component);
+        std::uint32_t x = 0, y = 0, wheel = 0;
+        std::uint32_t edges = 0;
+        std::uint8_t buttons = 0;
+        std::uint32_t wm_x = 0, wm_y = 0, wm_w = 0, wm_edges = 0;
+
+        void accumulate(std::int32_t rx, std::int32_t ry, std::int32_t rw) noexcept {
+            x += static_cast<std::uint32_t>(rx);
+            y += static_cast<std::uint32_t>(ry);
+            wheel += static_cast<std::uint32_t>(rw);
+        }
+        void note_buttons(std::uint8_t level) noexcept {
+            if (level != buttons) {
+                buttons = level;
+                ++edges;
+            }
+        }
+
+        MouseDelta take() noexcept {
+            MouseDelta d{};
+            d.dx = static_cast<std::int32_t>(x - wm_x);
+            d.dy = static_cast<std::int32_t>(y - wm_y);
+            d.dz = static_cast<std::int32_t>(wheel - wm_w);
+            d.buttons = buttons;
+            d.button_edge = (edges != wm_edges);
+            d.moved = (d.dx != 0) || (d.dy != 0) || (d.dz != 0);
+            wm_x = x;
+            wm_y = y;
+            wm_w = wheel;
+            wm_edges = edges;
+            return d;
+        }
+    };
+    friend struct InputDecodeTestAccess;
+    MouseAccumulator mouse_acc_;
 
     CaptureArmCell::Reader arm_reader_{};
     CaptureArm arm_{};

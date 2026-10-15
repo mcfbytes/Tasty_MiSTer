@@ -15,6 +15,6 @@ struct LadderCell {
     bool live = false;
 };
 
-using LadderStateCell = xthread::Telemetry<LadderCell, SeatTag::Unbound>;
+using LadderStateCell = xthread::Telemetry<LadderCell, SeatTag::Main>;
 
 }  // namespace mister::app

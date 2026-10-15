@@ -423,11 +423,11 @@ static_assert(max_cpu(kDe10Profile.threads) == 1,
 
 static_assert(every_thread_map([](const ThreadMap& m) {
                   for (const ThreadRole& r : m)
-                      if (r.seat == SeatTag::Unbound) return false;
+                      if (!has_row(r.seat)) return false;
                   return true;
               }),
-              "no ThreadMap row is Unbound: an Unbound thread passes no TASTY_SEAT "
-              "check, and seat_of() has no row for it.");
+              "no ThreadMap row is Unbound or Main: an Unbound thread passes no TASTY_SEAT "
+              "check, ::main places MAIN on main_cpu, and seat_of() has a row for neither.");
 
 consteval bool boards_ack_bounds_nonzero() {
     return every_measured(&BoardProfile::timing, [](const LinkTiming& t) consteval {

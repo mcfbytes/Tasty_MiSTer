@@ -109,7 +109,7 @@ AddonSend::Pass AddonSend::step(cores::ILadderHost& host, const svc::Vfs& vfs) {
     return Pass::Done;
 }
 
-bool AddonSend::wants_pass(const LinkTxChannel& inbox) const noexcept {
+bool AddonSend::wants_pass(const LinkTxChannel<SeatTag::Main>& inbox) const noexcept {
     return inbox.ring().size() < cores::PayloadPieces::kAhead;
 }
 

@@ -20,7 +20,7 @@
 namespace mister::cores {
 
 class PayloadPieces {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     static constexpr std::size_t kPieceWords = proto::tightest_load_budget_words();

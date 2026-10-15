@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "app/board_ops.h"
+#include "app/board_reboot.h"
 #include "app/bitstream_programmer.h"
 #include "app/cheat_catalog_cell.h"
 #include "app/conf_str_cell.h"
@@ -54,6 +55,7 @@
 #include "app/launcher_demand.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/seat_owner_main.h"
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "os/clock.h"
@@ -84,17 +86,18 @@ class Vfs;
 
 namespace mister::app {
 
+template <SeatTag Producer>
 class EventQueue;
 
 class SessionOwner : private cores::ILadderHost {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     struct Link {
-        LinkTxChannel& inbox;
-        LinkRxChannel& rx;
+        LinkTxChannel<SeatTag::Main>& inbox;
+        LinkRxChannel<SeatTag::Main>& rx;
         ConfigCell& config_cell;
-        EventQueue& owner_events;
+        EventQueue<SeatTag::Main>& owner_events;
         ConfStrCell& conf_str_cell;
 
         CheatCatalogCell& cheat_catalog_cell;
@@ -106,12 +109,12 @@ public:
         BoardOps ops{};
 
         infra::OptRef<hal::IBootHandoff> boot_handoff{};
-        LauncherDemandCell* launcher_demand = nullptr;
+        infra::OptRef<LauncherDemandCell> launcher_demand{};
         infra::OptRef<xthread::WakeFlag> launcher_wake{};
 
         BitstreamProgrammer& programmer;
         const svc::Vfs& storage;
-        ILoadWindowMap& window_map;
+        ILoadWindowMap<seat_owner::Main>& window_map;
 
         FabricCell& fabric_cell;
 
@@ -146,7 +149,8 @@ public:
           cell_(link.fabric_cell), ops_(link.ops), window_map_(link.window_map),
           ftx_level_cell_(link.file_tx_level_cell), save_state_asks_(link.save_state_asks),
           save_state_facts_(link.save_state_facts),
-          builder_(link.bay, link.bay_releases, link.core_terms, link.doorbell_source) {
+          builder_(link.bay, link.bay_releases, link.core_terms, link.doorbell_source),
+          reboot_(link.boot_handoff, link.ops.reset, link.ops.sleeper) {
         (void)front_end_image_.assign(kFrontEndImage);
         adopt_(link);
     }
@@ -163,7 +167,7 @@ public:
 
     void set_readiness_poll_budget(std::uint32_t n) noexcept { readiness_poll_budget_ = n; }
 
-    [[nodiscard]] const LauncherProfile* launcher() const noexcept {
+    [[nodiscard]] infra::OptRef<const LauncherProfile> launcher() const noexcept {
         return launcher_demand_.profile;
     }
 
@@ -181,7 +185,7 @@ public:
 
     [[nodiscard]] std::uint32_t pause_expiries() const noexcept { return pause_expiries_; }
 
-    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Unbound>& pause_expiries_cell()
+    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Main>& pause_expiries_cell()
         const noexcept {
         return pause_expiries_cell_;
     }
@@ -199,7 +203,7 @@ public:
     [[nodiscard]] bool front_end_owed() const noexcept { return front_end_owed_; }
     [[nodiscard]] const FallbackCounts& fallback_counts() const noexcept { return fallbacks_; }
 
-    [[nodiscard]] const xthread::Telemetry<FallbackCounts, SeatTag::Unbound>& fallback_cell()
+    [[nodiscard]] const xthread::Telemetry<FallbackCounts, SeatTag::Main>& fallback_cell()
         const noexcept {
         return fallback_cell_;
     }
@@ -215,7 +219,9 @@ public:
 
     [[nodiscard]] const LoadWalk* walk() const noexcept { return walk_ ? &*walk_ : nullptr; }
 
-    void set_companion_binds(CompanionHost::Binds* b) noexcept { companion_binds_ = b; }
+    void set_companion_binds(CompanionHost::Binds* b) noexcept {
+        companion_binds_ = infra::opt_ref_of(b);
+    }
 
     [[nodiscard]] const CompanionWalk* companion_walk() const noexcept {
         return companion_walk_ ? &*companion_walk_ : nullptr;
@@ -233,7 +239,11 @@ public:
     }
 
     [[nodiscard]] std::uint32_t manifest_errors() const noexcept { return manifest_errors_; }
-    [[nodiscard]] const xthread::Telemetry<LoadWindowCounts, SeatTag::Unbound>& window_cell()
+
+    [[nodiscard]] std::string_view manifest_text_for_test() const noexcept {
+        return manifest_text_();
+    }
+    [[nodiscard]] const xthread::Telemetry<LoadWindowCounts, SeatTag::Main>& window_cell()
         const noexcept {
         return window_cell_;
     }
@@ -301,12 +311,14 @@ public:
     [[nodiscard]] std::uint32_t recoveries() const noexcept { return recoveries_; }
     [[nodiscard]] std::uint32_t recover_polls() const noexcept { return recover_polls_; }
 
-    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Unbound>& recover_polls_cell()
+    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Main>& recover_polls_cell()
         const noexcept {
         return recover_polls_cell_;
     }
 
     [[nodiscard]] std::uint32_t reboots_settled() const noexcept { return reboots_settled_; }
+
+    [[nodiscard]] BoardReboot& board_reboot() noexcept { return reboot_; }
 
     [[nodiscard]] bool reboot_owed() const noexcept { return reboot_owed_.has_value(); }
 
@@ -348,7 +360,7 @@ public:
     [[nodiscard]] CoreScope conf_scope() const noexcept { return CoreScope{conf_str_gen_}; }
 
     [[nodiscard]] std::uint32_t mgl_row0() const noexcept { return mgl_row0_; }
-    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Unbound>& mgl_row0_cell()
+    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Main>& mgl_row0_cell()
         const noexcept {
         return mgl_row0_cell_;
     }
@@ -413,15 +425,15 @@ public:
         return save_write_failures_;
     }
 
-    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Unbound>&
-    save_write_failures_cell() const noexcept {
+    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Main>& save_write_failures_cell()
+        const noexcept {
         return save_write_failures_cell_;
     }
 
     [[nodiscard]] std::uint32_t ini_write_failures() const noexcept { return ini_write_failures_; }
 
-    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Unbound>&
-    ini_write_failures_cell() const noexcept {
+    [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Main>& ini_write_failures_cell()
+        const noexcept {
         return ini_write_failures_cell_;
     }
 
@@ -431,15 +443,14 @@ public:
         return sdram_write_failures_;
     }
 
-    [[nodiscard]] LinkTxChannel& inbox() noexcept { return inbox_; }
-    [[nodiscard]] const LinkTxChannel& inbox() const noexcept { return inbox_; }
-    [[nodiscard]] proto::LinkTxRing& tx() noexcept { return inbox_.ring(); }
+    [[nodiscard]] LinkTxChannel<SeatTag::Main>& inbox() noexcept { return inbox_; }
+    [[nodiscard]] const LinkTxChannel<SeatTag::Main>& inbox() const noexcept { return inbox_; }
     [[nodiscard]] const proto::LinkTxRing& tx() const noexcept { return inbox_.ring(); }
     [[nodiscard]] std::uint32_t ops_posted() const noexcept { return ops_posted_; }
     [[nodiscard]] std::uint32_t op_drops() const noexcept { return op_drops_; }
 
-    [[nodiscard]] LinkRxChannel& rx() noexcept { return rx_; }
-    [[nodiscard]] const LinkRxChannel& rx() const noexcept { return rx_; }
+    [[nodiscard]] LinkRxChannel<SeatTag::Main>& rx() noexcept { return rx_; }
+    [[nodiscard]] const LinkRxChannel<SeatTag::Main>& rx() const noexcept { return rx_; }
     [[nodiscard]] ConfigCell& config_cell() noexcept { return config_cell_; }
 
     [[nodiscard]] bool boot_config_parsed() const noexcept { return !boot_config_pending_; }
@@ -448,7 +459,7 @@ public:
 
     void arm_replay_ini(bool strict) noexcept;
 
-    [[nodiscard]] const xthread::Telemetry<std::uint8_t, SeatTag::Unbound>& direct_video_ini_cell()
+    [[nodiscard]] const xthread::Telemetry<std::uint8_t, SeatTag::Main>& direct_video_ini_cell()
         const noexcept {
         return direct_video_ini_cell_;
     }
@@ -522,9 +533,11 @@ private:
                                                  std::string_view ext, std::uint64_t whole,
                                                  std::uint64_t offset) override;
     [[nodiscard]] std::size_t link_in_flight() const noexcept override {
+        TASTY_SEAT_BODY(SessionOwner);
         return inbox_.ring().size();
     }
     [[nodiscard]] std::size_t link_word_bytes() const noexcept override {
+        TASTY_SEAT_BODY(SessionOwner);
         return link_wide_ ? 2u : 1u;
     }
 
@@ -537,7 +550,10 @@ private:
 
     [[nodiscard]] bool order_walk(proto::IoIndex slot, std::string_view path,
                                   std::uint32_t gen) override;
-    [[nodiscard]] cores::MountStatus walk_status() override { return walk_answer_; }
+    [[nodiscard]] cores::MountStatus walk_status() override {
+        TASTY_SEAT_BODY(SessionOwner);
+        return walk_answer_;
+    }
 
     [[nodiscard]] bool order_savestates(std::string_view image, std::uint32_t gen) override;
     [[nodiscard]] std::uint32_t savestates_answered() override;
@@ -812,7 +828,7 @@ private:
 
     [[nodiscard]] std::optional<PathText> zip_member_(const proto::ConfStrFileRow& row,
                                                       std::string_view path) const;
-    void intern_rel_at_(proto::FileId id, std::string_view rel);
+    [[nodiscard]] bool intern_rel_at_(proto::FileId id, std::string_view rel);
     void intern_manifest_(std::string_view rel);
     [[nodiscard]] std::vector<std::uint8_t> read_manifest_(std::string_view rel) const;
     void pack_manifest_cheats_(std::span<const std::uint8_t> doc);
@@ -848,15 +864,15 @@ private:
     [[nodiscard]] bool write_durably_(std::string_view rel, std::span<const std::byte> bytes);
 
     QuiesceChannel& park_;
-    LinkTxChannel& inbox_;
-    LinkRxChannel& rx_;
+    LinkTxChannel<SeatTag::Main>& inbox_;
+    LinkRxChannel<SeatTag::Main>& rx_;
     ConfigCell& config_cell_;
 
     proto::ConfSwitches published_conf_ = default_conf_switches();
     bool replay_ini_ = false;
     bool strict_direct_video_ = false;
-    xthread::Telemetry<std::uint8_t, SeatTag::Unbound> direct_video_ini_cell_{};
-    EventQueue& owner_events_;
+    xthread::Telemetry<std::uint8_t, SeatTag::Main> direct_video_ini_cell_{};
+    EventQueue<SeatTag::Main>& owner_events_;
     ConfStrCell& conf_str_cell_;
     CheatCatalogCell& cheat_catalog_cell_;
 
@@ -933,16 +949,16 @@ private:
     std::uint32_t readiness_poll_budget_ = 0;
     std::uint32_t recoveries_ = 0;
     std::uint32_t recover_polls_ = 0;
-    xthread::Telemetry<std::uint32_t, SeatTag::Unbound> recover_polls_cell_{};
+    xthread::Telemetry<std::uint32_t, SeatTag::Main> recover_polls_cell_{};
 
     std::uint8_t slot_load_slot_ = 0;
 
     std::uint8_t slot_save_slot_ = 0;
     std::uint32_t config_saves_ = 0;
     std::uint32_t save_write_failures_ = 0;
-    xthread::Telemetry<std::uint32_t, SeatTag::Unbound> save_write_failures_cell_{};
+    xthread::Telemetry<std::uint32_t, SeatTag::Main> save_write_failures_cell_{};
     std::uint32_t ini_write_failures_ = 0;
-    xthread::Telemetry<std::uint32_t, SeatTag::Unbound> ini_write_failures_cell_{};
+    xthread::Telemetry<std::uint32_t, SeatTag::Main> ini_write_failures_cell_{};
     std::uint32_t memsz_unmeasured_ = 0;
     std::uint32_t sdram_write_failures_ = 0;
 
@@ -971,11 +987,11 @@ private:
     PathText front_end_image_{};
     LauncherDemand launcher_demand_{};
     PathText launcher_image_{};
-    LauncherDemandCell* launcher_cell_ = nullptr;
-    xthread::WakeFlag* launcher_wake_ = nullptr;
+    infra::OptRef<LauncherDemandCell> launcher_cell_{};
+    infra::OptRef<xthread::WakeFlag> launcher_wake_{};
     bool launcher_swap_owed_ = false;
     FallbackCounts fallbacks_{};
-    xthread::Telemetry<FallbackCounts, SeatTag::Unbound> fallback_cell_{};
+    xthread::Telemetry<FallbackCounts, SeatTag::Main> fallback_cell_{};
     StepArg pending_step_arg_{};
     BitstreamProgrammer& programmer_;
     const svc::Vfs& vfs_;
@@ -991,7 +1007,7 @@ private:
     std::uint32_t doorbell_intern_refusals_ = 0;
     bool load_ok_ = false;
     const BoardOps ops_{};
-    hal::IBootHandoff* handoff_ = nullptr;
+    infra::OptRef<hal::IBootHandoff> handoff_{};
     std::uint32_t reboots_settled_ = 0;
     struct OwedReboot {
         bool cold = true;
@@ -1026,7 +1042,7 @@ private:
     std::optional<proto::LinkOp> last_order_{};
     os::Deadline pause_due_ = os::Deadline::immediate();
     std::uint32_t pause_expiries_ = 0;
-    xthread::Telemetry<std::uint32_t, SeatTag::Unbound> pause_expiries_cell_{};
+    xthread::Telemetry<std::uint32_t, SeatTag::Main> pause_expiries_cell_{};
     std::uint32_t switch_belt_refusals_ = 0;
     bool reboot_failed_ = false;
     std::uint32_t load_core_refusals_ = 0;
@@ -1046,7 +1062,7 @@ private:
 
     bool core_live_ = false;
     std::uint32_t mgl_row0_ = 0;
-    xthread::Telemetry<std::uint32_t, SeatTag::Unbound> mgl_row0_cell_{};
+    xthread::Telemetry<std::uint32_t, SeatTag::Main> mgl_row0_cell_{};
     std::uint32_t programs_run_ = 0;
     std::uint32_t programs_failed_ = 0;
     std::uint32_t files_loaded_ = 0;
@@ -1081,7 +1097,7 @@ private:
     std::uint32_t manifest_errors_ = 0;
     std::optional<LoadWalk> walk_{};
     std::span<const cores::CoreWindowDecl> walk_windows_{};
-    CompanionHost::Binds* companion_binds_ = nullptr;
+    infra::OptRef<CompanionHost::Binds> companion_binds_{};
     std::unique_ptr<cores::ICompanionLoad> companion_{};
     bool companion_attached_ = false;
     std::uint32_t companion_attach_refusals_ = 0;
@@ -1094,16 +1110,19 @@ private:
     bool walk_answer_fresh_ = false;
 
     cores::LoaderMemo loader_memo_{};
-    ILoadWindowMap& window_map_;
+    ILoadWindowMap<seat_owner::Main>& window_map_;
     const FileTxLevelCell& ftx_level_cell_;
     infra::OptRef<SaveStateAttach::AskInbox> save_state_asks_;
     infra::OptRef<const SaveStateFactsCell> save_state_facts_;
 
     CoreBuilder builder_;
+
+    BoardReboot reboot_;
     LoadWindowCounts window_counts_{};
-    xthread::Telemetry<LoadWindowCounts, SeatTag::Unbound> window_cell_{};
+    xthread::Telemetry<LoadWindowCounts, SeatTag::Main> window_cell_{};
     bool made_with_manifest_ = false;
     PathText manifest_rel_{};
+    std::vector<std::uint8_t> manifest_doc_{};
     PathText boot_companion_{};
     std::uint32_t loads_refused_busy_ = 0;
     std::uint32_t savestate_refusals_ = 0;

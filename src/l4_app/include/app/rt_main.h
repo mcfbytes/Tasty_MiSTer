@@ -22,6 +22,7 @@ namespace mister::app {
 class LinkSession;
 class InputEmit;
 class InputWire;
+template <SeatTag Producer>
 class LinkTxChannel;
 class OsdWire;
 class ReplayGate;
@@ -82,7 +83,8 @@ public:
     static constexpr unsigned kInputOpBudget = 2 * 6;
 
 private:
-    unsigned drain_(LinkTxChannel& inbox, unsigned already, unsigned budget,
+    template <SeatTag Producer>
+    unsigned drain_(LinkTxChannel<Producer>& inbox, unsigned already, unsigned budget,
                     bool windows_closed) noexcept;
 
     bool drain_fio_() noexcept;

@@ -46,8 +46,8 @@ DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
 
 }  // namespace
 
-DiagSampler::DiagSampler(xthread::RtStats& stats, app::EventQueue& events,
-                         const xthread::Telemetry<RtEvidence, SeatTag::Unbound>& ev,
+DiagSampler::DiagSampler(xthread::RtStats& stats, app::EventQueue<SeatTag::RT>& events,
+                         const xthread::Telemetry<RtEvidence, SeatTag::Main>& ev,
                          const xthread::WakeFlag& quiescing, const std::atomic<bool>& transitioning,
                          xthread::DiagLog& diag, xthread::LogLane& rt_lane,
                          const Sources& sources) noexcept
@@ -99,7 +99,7 @@ void DiagSampler::sample(bool stopping) noexcept {
 
     if (diag_.is_open()) {
 
-        for (std::size_t k = 0; k < app::EventQueue::kKinds; ++k) {
+        for (std::size_t k = 0; k < app::EventQueue<SeatTag::RT>::kKinds; ++k) {
             const std::uint32_t l = events_.losses(static_cast<app::Event::Kind>(k));
             if (l != last_ev_loss_[k]) {
                 diag_.appendf("{\"t\":\"drops\",\"src\":\"event\","

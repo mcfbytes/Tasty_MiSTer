@@ -19,7 +19,7 @@ struct FabricState {
 static_assert(std::is_trivially_copyable_v<FabricState>);
 static_assert(std::is_nothrow_default_constructible_v<FabricState>);
 
-using FabricCell = xthread::Telemetry<FabricState>;
+using FabricCell = xthread::Telemetry<FabricState, SeatTag::Main>;
 
 inline constexpr std::int64_t kFabricStaleNs = 5'000'000'000;
 

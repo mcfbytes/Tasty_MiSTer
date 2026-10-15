@@ -19,7 +19,7 @@
 namespace mister::app {
 
 class FileTxPieces {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     enum class Pass : std::uint8_t { Sent, Waiting, Done, Failed };
@@ -42,9 +42,10 @@ public:
                                                  std::string_view path, std::uint64_t from,
                                                  std::uint32_t crc);
 
-    [[nodiscard]] Pass step(LinkTxChannel& inbox, const FileTxLevelCell& level, std::uint32_t act);
+    [[nodiscard]] Pass step(LinkTxChannel<SeatTag::Main>& inbox, const FileTxLevelCell& level,
+                            std::uint32_t act);
 
-    [[nodiscard]] bool ready(const LinkTxChannel& inbox,
+    [[nodiscard]] bool ready(const LinkTxChannel<SeatTag::Main>& inbox,
                              const FileTxLevelCell& level) const noexcept;
 
     [[nodiscard]] std::uint64_t sent() const noexcept { return sent_; }
@@ -75,8 +76,8 @@ private:
 
     [[nodiscard]] bool stage_();
 
-    [[nodiscard]] Pass fail_(LinkTxChannel& inbox);
-    [[nodiscard]] Pass cut_(LinkTxChannel& inbox);
+    [[nodiscard]] Pass fail_(LinkTxChannel<SeatTag::Main>& inbox);
+    [[nodiscard]] Pass cut_(LinkTxChannel<SeatTag::Main>& inbox);
 
     std::unique_ptr<svc::IFile> file_;
     std::unique_ptr<cores::ILoader> loader_;

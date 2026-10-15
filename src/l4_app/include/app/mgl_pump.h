@@ -27,7 +27,7 @@ class InfoSink;
 class IdentityLatch;
 
 struct MglPumpWiring {
-    LinkTxChannel& link_tx;
+    LinkTxChannel<SeatTag::Ui>& link_tx;
     UiRequestRing& asks;
     const IdentityLatch& identity;
     const ConfStrCell& conf;

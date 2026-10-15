@@ -34,7 +34,7 @@ public:
         RecorderControl& rec;
         UiRequestRing& ui_requests;
         xthread::RtStats& stats;
-        LinkTxChannel& link_tx;
+        LinkTxChannel<SeatTag::Ui>& link_tx;
     };
 
     explicit CmdRouter(Wiring wiring) noexcept
@@ -129,7 +129,7 @@ private:
     RecorderControl& rec_;
     UiRequestRing& ui_requests_;
     xthread::RtStats& stats_;
-    LinkTxChannel& link_tx_;
+    LinkTxChannel<SeatTag::Ui>& link_tx_;
     std::uint32_t volume_drops_ = 0;
     std::uint32_t load_core_drops_ = 0;
 };

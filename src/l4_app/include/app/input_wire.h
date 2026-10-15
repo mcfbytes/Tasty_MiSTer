@@ -97,45 +97,6 @@ public:
         return keys_released_.load(std::memory_order_relaxed);
     }
 
-    void publish_mouse(std::int32_t x, std::int32_t y, std::int32_t wheel, std::uint8_t buttons,
-                       std::uint32_t button_edges) noexcept {
-        const std::uint64_t xy = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(x)) << 32) |
-                                 static_cast<std::uint32_t>(y);
-        const std::uint64_t wb =
-            (static_cast<std::uint64_t>(static_cast<std::uint32_t>(wheel)) << 32) |
-            (static_cast<std::uint64_t>(button_edges & 0x00FFFFFFu) << 8) | buttons;
-        m_xy_.store(xy, std::memory_order_relaxed);
-        m_wb_.store(wb, std::memory_order_release);
-    }
-
-    struct MouseDelta {
-        std::int32_t dx = 0, dy = 0, dz = 0;
-        std::uint8_t buttons = 0;
-        bool button_edge = false;
-        bool moved = false;
-    };
-
-    MouseDelta take_mouse() noexcept {
-        const std::uint64_t wb = m_wb_.load(std::memory_order_acquire);
-        const std::uint64_t xy = m_xy_.load(std::memory_order_relaxed);
-        const auto x = static_cast<std::uint32_t>(xy >> 32);
-        const auto y = static_cast<std::uint32_t>(xy);
-        const auto w = static_cast<std::uint32_t>(wb >> 32);
-        const auto edges = static_cast<std::uint32_t>((wb >> 8) & 0x00FFFFFFu);
-        MouseDelta d{};
-        d.dx = static_cast<std::int32_t>(x - wm_x_);
-        d.dy = static_cast<std::int32_t>(y - wm_y_);
-        d.dz = static_cast<std::int32_t>(w - wm_w_);
-        d.buttons = static_cast<std::uint8_t>(wb & 0xFFu);
-        d.button_edge = (edges != wm_edges_);
-        d.moved = (d.dx != 0) || (d.dy != 0) || (d.dz != 0);
-        wm_x_ = x;
-        wm_y_ = y;
-        wm_w_ = w;
-        wm_edges_ = edges;
-        return d;
-    }
-
     static constexpr std::size_t kCoreNameCap = 32;
 
     struct CoreNameCell {
@@ -285,7 +246,7 @@ public:
     }
 
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
-                  "item: every joystick/mouse cell is one naturally-aligned "
+                  "item: every joystick cell is one naturally-aligned "
                   "64-bit atomic. ARMv7 has LDREXD/STREXD so this holds on the "
                   "binding toolchain — but PROVE it here rather than assume it: "
                   "a libatomic call on the T-RT drain is a lock on the RT path.");
@@ -302,11 +263,6 @@ private:
     xthread::SpscRing<RawKeyEdge, kUiKeyRingSlots> ui_keys_{};
     std::atomic<std::uint32_t> ui_keys_dropped_{0};
     std::atomic<std::uint32_t> ui_keys_pub_{0};
-
-    std::atomic<std::uint64_t> m_xy_{0};
-    std::atomic<std::uint64_t> m_wb_{0};
-
-    std::uint32_t wm_x_ = 0, wm_y_ = 0, wm_w_ = 0, wm_edges_ = 0;
 
     std::atomic<std::uint32_t> edge_reset_{0};
 

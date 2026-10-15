@@ -16,13 +16,14 @@
 #include "cores/loader.h"
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "infra/seat_owner_main.h"
 #include "hal/phys_region.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
 
 class LoadWalk {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     enum class Pass : std::uint8_t { Stepped, Waiting, Done, Failed };
@@ -42,7 +43,7 @@ public:
     struct Host {
         LoadLadder::Host rung;
         cores::ILadderHost& owner;
-        ILoadWindowMap* map;
+        ILoadWindowMap<seat_owner::Main>* map;
         hal::PhysRegion aperture;
         const svc::Vfs& vfs;
         std::span<const cores::CoreWindowDecl> windows;
@@ -54,7 +55,7 @@ public:
 
     [[nodiscard]] Pass step(Host& h);
 
-    [[nodiscard]] bool wants_pass(const LinkTxChannel& inbox,
+    [[nodiscard]] bool wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
                                   const FileTxLevelCell* level) const noexcept;
 
     [[nodiscard]] Pc pc() const noexcept { return pc_; }

@@ -22,6 +22,7 @@
 #include "proto/sector_floor.h"
 #include "reactor/link_decoder_decl.h"
 #include "svc/disk_format_row.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
@@ -109,7 +110,7 @@ struct CoreProfile {
 
     bool suppress_analog_followup = false;
 
-    const svc::IAnalogReshape* analog_reshape = nullptr;
+    infra::OptRef<const svc::IAnalogReshape> analog_reshape{};
 
     bool is_front_end = false;
 
@@ -122,7 +123,7 @@ struct CoreProfile {
 
     std::uint32_t default_uart_baud = 115200;
 
-    const char* cue_browse_dir = nullptr;
+    std::string_view cue_browse_dir{};
 
     bool image_rows_no_zip = false;
 

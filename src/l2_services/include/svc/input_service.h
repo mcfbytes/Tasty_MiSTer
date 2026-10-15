@@ -8,13 +8,13 @@
 #include <string_view>
 #include <vector>
 
+#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/unique_fd.h"
 #include "proto/joystick.h"
 #include "svc/device_match.h"
 #include "svc/input_device.h"
-#include "svc/movable_counter.h"
 #include "svc/deadzone_rule.h"
 #include "svc/device_table.h"
 #include "svc/no_merge_rule.h"
@@ -155,17 +155,17 @@ private:
     bool hotplug_pending_ = false;
     std::uint32_t devices_gen_ = 0;
     JoyMask joy_mask_[kMaxPlayers]{};
-    MovableCounter n_mapped_{};
-    MovableCounter n_slotted_{};
-    MovableCounter n_mask_recompute_{};
-    MovableCounter n_axis_edges_{};
-    MovableCounter n_mouse_rem_{};
-    MovableCounter n_key_overflow_{};
-    MovableCounter n_quirk_drops_{};
-    MovableCounter n_grab_fail_{};
-    MovableCounter n_live_mask_{};
-    MovableCounter n_slot_hash_[kMaxPlayers]{};
-    MovableCounter n_ghost_{};
+    xthread::Counter n_mapped_{};
+    xthread::Counter n_slotted_{};
+    xthread::Counter n_mask_recompute_{};
+    xthread::Counter n_axis_edges_{};
+    xthread::Counter n_mouse_rem_{};
+    xthread::Counter n_key_overflow_{};
+    xthread::Counter n_quirk_drops_{};
+    xthread::Counter n_grab_fail_{};
+    xthread::Counter n_live_mask_{};
+    xthread::Counter n_slot_hash_[kMaxPlayers]{};
+    xthread::Counter n_ghost_{};
 };
 
 inline constexpr std::uint8_t kUioButSw = 0x01;

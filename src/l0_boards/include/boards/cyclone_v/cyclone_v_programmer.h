@@ -101,7 +101,7 @@ inline constexpr std::size_t kHandoffEnvLimit = kHandoffSdramOffset;
 inline constexpr std::uint16_t kHandoffSdramPresent = 0x8000;
 
 class Programmer final : public hal::IFpgaProgrammer, public hal::IBootHandoff {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     [[nodiscard]] static Ex<Programmer> open(hal::BoardWindows& windows);
@@ -124,7 +124,10 @@ public:
 
     bool programmed() const override;
 
-    hal::IBootHandoff* boot_handoff() noexcept override { return this; }
+    hal::IBootHandoff* boot_handoff() noexcept override {
+        TASTY_SEAT_BODY(Programmer);
+        return this;
+    }
 
     [[nodiscard]] Ex<void> write_env(std::string_view core_name,
                                      std::span<const std::byte> cfg) override;

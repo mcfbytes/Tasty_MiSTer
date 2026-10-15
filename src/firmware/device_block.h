@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <type_traits>
 
 #include "app/bay_releases.h"
 #include "app/bitstream_programmer.h"
@@ -54,6 +55,7 @@
 #include "infra/park_fds.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
+#include "board_reset.h"
 #include "ladder_scope.h"
 #include "os/clock.h"
 #include "proto/osd_surface.h"
@@ -140,24 +142,27 @@ public:
     hal::PinLevelCell pin_levels_{};
 
     hal::HdmiIntLevel hdmi_level_{pin_levels_};
-    app::EventQueue events_;
-    app::EventQueue owner_events_;
+
+    app::EventQueue<SeatTag::RT> events_;
+    app::EventQueue<SeatTag::Main> owner_events_;
+    static_assert(!std::is_same_v<decltype(events_), decltype(owner_events_)>,
+                  "the two EventQueues are one per producer seat and never interchangeable");
     os::MonotonicClock clock_;
 
-    app::LinkTxChannel ui_inbox_;
+    app::LinkTxChannel<SeatTag::Ui> ui_inbox_;
     app::InputWire input_wire_;
     app::VideoPump video_pump_;
     app::BtPump bt_pump_;
-    app::LinkTxChannel input_inbox_;
-    app::LinkRxChannel input_rx_;
+    app::LinkTxChannel<SeatTag::Input> input_inbox_;
+    app::LinkRxChannel<SeatTag::Input> input_rx_;
 
     xthread::WakeFlag main_wake_;
 
     xthread::WakeFlag main_stop_{};
 
-    app::LinkTxChannel main_inbox_;
-    app::LinkRxChannel main_rx_;
-    app::LinkRxChannel ui_rx_;
+    app::LinkTxChannel<SeatTag::Main> main_inbox_;
+    app::LinkRxChannel<SeatTag::Main> main_rx_;
+    app::LinkRxChannel<SeatTag::Ui> ui_rx_;
 
     xthread::WakeFlag ui_wake_;
     app::UartModeController::Handoffs uart_handoffs_{ui_wake_};
@@ -185,7 +190,7 @@ public:
     svc::DiscStore disc_store_;
     svc::DiscReadService discs_;
     std::optional<app::DurableWriteService> writes_;
-    app::DevMemWindowMap io_window_map_{};
+    app::DevMemWindowMap<seat_owner::Io> io_window_map_{};
     std::optional<app::WindowJobService> window_jobs_;
     app::ScreenshotQueue shots_;
     std::optional<app::ScalerFrameSource> frame_src_;
@@ -210,11 +215,18 @@ public:
     app::BayReleasesCell bay_releases_{};
 
     LadderScope ladder_;
+
+    BoardReset board_reset_;
     const app::SupervisorParts parts_;
     app::LinkSession session_;
 
     app::BitstreamProgrammer bitstream_;
-    app::DevMemWindowMap window_map_{};
+    app::DevMemWindowMap<seat_owner::Main> window_map_{};
+    app::DevMemWindowMap<seat_owner::Ui> ui_window_map_{};
+    static_assert(!std::is_same_v<decltype(window_map_), decltype(io_window_map_)> &&
+                      !std::is_same_v<decltype(window_map_), decltype(ui_window_map_)> &&
+                      !std::is_same_v<decltype(io_window_map_), decltype(ui_window_map_)>,
+                  "one window map per mapping seat; no instance is shared between two");
     app::SessionOwner owner_;
 
     app::FrameDemandCell frame_demand_{};

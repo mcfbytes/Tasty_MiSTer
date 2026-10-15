@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "app/doorbell_cell.h"
 #include "app/doorbell_lines.h"
@@ -58,7 +59,7 @@ public:
 
     void release_feeder() noexcept;
 
-    void set_pcm_feeder(PcmRingFeeder* feeder) noexcept { feeder_ = feeder; }
+    void set_pcm_feeder(PcmRingFeeder* feeder) noexcept { feeder_ = infra::opt_ref_of(feeder); }
 
     [[nodiscard]] Ex<void> bind_census(std::span<const reactor::LinkDecoderDecl> rows,
                                        cores::Core* owner);
@@ -92,7 +93,7 @@ private:
     proto::SpiFioQueue fio_queue_;
     proto::SpiImageSink spi_sink_;
     ProgressImageSink progress_sink_{spi_sink_};
-    PcmRingFeeder* feeder_ = nullptr;
+    infra::OptRef<PcmRingFeeder> feeder_{};
     bool feeder_granted_ = false;
     std::uint32_t fed_refusals_ = 0;
     reactor::CauseSet bound_classes_;

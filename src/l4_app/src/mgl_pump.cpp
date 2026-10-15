@@ -60,7 +60,7 @@ void MglPump::bind_homes() {
 
         const std::string file_home = games_home(vfs_, home_name(id));
         const std::string image_home =
-            id.cue_dir != nullptr ? games_home(vfs_, id.cue_dir) : file_home;
+            !id.cue_dir.empty() ? games_home(vfs_, id.cue_dir) : file_home;
         bound = player_.set_homes(file_home, image_home);
     }
     if (bound) return;

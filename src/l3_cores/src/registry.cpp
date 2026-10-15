@@ -89,10 +89,10 @@ consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
     return !p.is_front_end && p.services.empty() && p.slots.empty() && p.boot_assets.empty() &&
            p.start_assets.empty() && p.signatures.empty() && p.windows.empty() &&
            p.staging.order == StageOrder::None && !p.suppresses_mgl && !p.skips_memsz &&
-           !p.suppress_reset_status_write && !p.suppress_analog_followup &&
-           p.analog_reshape == nullptr && p.cue_browse_dir == nullptr &&
-           p.default_uart_baud == 115200 && p.disk_formats.empty() && p.option_rows.empty() &&
-           p.option_pages.empty() && p.init_additions.empty() && !p.blank_save.declared();
+           !p.suppress_reset_status_write && !p.suppress_analog_followup && !p.analog_reshape &&
+           p.cue_browse_dir.empty() && p.default_uart_baud == 115200 && p.disk_formats.empty() &&
+           p.option_rows.empty() && p.option_pages.empty() && p.init_additions.empty() &&
+           !p.blank_save.declared();
 }
 
 consteval bool staging_cores_declare_blank_save() {
@@ -131,7 +131,7 @@ consteval bool boot_buffers_fit_the_ceiling() {
 }
 static_assert(boot_buffers_fit_the_ceiling(),
               "a manifest whose ladder can load more than kMaxBootBuffers boot assets "
-              "outgrows FileBytes::kMaxLiveFiles; raise it only with its derivation");
+              "outgrows app::InternedFile::kMaxLiveFiles; raise it only with its derivation");
 consteval bool start_assets_fit_the_ceiling() {
     for (const CoreFactory& f : kCoreTable) {
         if (f.profile->start_assets.size() > kMaxStartAssets) return false;
@@ -140,7 +140,7 @@ consteval bool start_assets_fit_the_ceiling() {
 }
 static_assert(start_assets_fit_the_ceiling(),
               "a manifest with more than kMaxStartAssets start assets outgrows "
-              "FileBytes::kMaxLiveFiles; raise it only with its derivation");
+              "app::InternedFile::kMaxLiveFiles; raise it only with its derivation");
 
 consteval bool start_rule_matches_its_rows() {
     for (const CoreFactory& f : kCoreTable)
@@ -303,7 +303,7 @@ std::span<const CoreFactory> core_table() { return kCoreTable; }
 
 const IManifestDocRole* manifest_doc_role() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.manifest_doc != nullptr) return f.manifest_doc;
+        if (f.manifest_doc) return f.manifest_doc.operator->();
     }
     return nullptr;
 }

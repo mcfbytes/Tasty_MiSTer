@@ -115,8 +115,7 @@ void WindowJobService::serve() noexcept {
     }
     cores::IWindowJob& job = *io_.running;
     if (!io_.window) {
-        auto w =
-            LoadWindow::open(*map_, aperture_, os::PhysAddr{job.window_addr()}, job.window_len());
+        auto w = Window::open(*map_, aperture_, os::PhysAddr{job.window_addr()}, job.window_len());
         if (!w) {
             finish_(false, w.error());
             return;

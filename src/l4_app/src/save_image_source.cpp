@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/save_image_source.h"
 
+#include "infra/byte_view.h"
+
 namespace mister::app {
 
 static_assert(SaveImageSource::kSlots == 7, "one backend initializer per announceable slot");
 
 SaveImageSource::SaveImageSource(const svc::Vfs& vfs) noexcept
-    : backends_{{vfs, bindings_[0].path}, {vfs, bindings_[1].path}, {vfs, bindings_[2].path},
-                {vfs, bindings_[3].path}, {vfs, bindings_[4].path}, {vfs, bindings_[5].path},
-                {vfs, bindings_[6].path}} {}
+    : backends_{svc::FileSlotBackend{vfs}, svc::FileSlotBackend{vfs}, svc::FileSlotBackend{vfs},
+                svc::FileSlotBackend{vfs}, svc::FileSlotBackend{vfs}, svc::FileSlotBackend{vfs},
+                svc::FileSlotBackend{vfs}} {}
 
 SaveImageSource::Binding* SaveImageSource::find(proto::SlotIndex slot) {
     if (slot.v >= kSlots) return nullptr;
@@ -20,22 +22,23 @@ const SaveImageSource::Binding* SaveImageSource::find(proto::SlotIndex slot) con
     return &bindings_[slot.v];
 }
 
-bool SaveImageSource::bind(proto::SlotIndex slot, std::string_view path, bool manual) noexcept {
+bool SaveImageSource::bind(proto::SlotIndex slot, std::string_view path, bool manual,
+                           const cores::BlankSaveSpec& blank) noexcept {
     Binding* b = find(slot);
     if (b == nullptr) return false;
 
     if (b->attach != Attach::Detached) return false;
     b->exists = false;
     b->size = proto::FileSize{};
-    b->blank = cores::BlankSaveSpec{};
+    b->blank = blank;
     b->manual = !path.empty() && manual;
     b->close_owed = false;
     if (path.empty()) {
-        b->path.path.clear();
+        b->path.clear();
         return true;
     }
-    if (!b->path.path.assign(path)) {
-        b->path.path.clear();
+    if (!b->path.assign(path)) {
+        b->path.clear();
         return false;
     }
     return true;
@@ -47,18 +50,14 @@ void SaveImageSource::unbind_all() {
     }
 }
 
-void SaveImageSource::set_blank_pattern(proto::SlotIndex slot, const cores::BlankSaveSpec& spec) {
-    if (Binding* b = find(slot); b != nullptr) b->blank = spec;
-}
-
 std::string_view SaveImageSource::path_of(proto::SlotIndex slot) const {
     const Binding* b = find(slot);
-    return b == nullptr ? std::string_view{} : b->path.path.view();
+    return b == nullptr ? std::string_view{} : b->path.view();
 }
 
 proto::SlotAttributes SaveImageSource::attributes(proto::SlotIndex slot) const {
     const Binding* b = find(slot);
-    if (b == nullptr || b->path.path.view().empty()) return proto::SlotAttributes{};
+    if (b == nullptr || b->path.view().empty()) return proto::SlotAttributes{};
     const bool pre = !b->manual;
     return proto::SlotAttributes{
         .writable = pre || b->exists, .growable = pre, .deferred_create = pre && !b->exists};
@@ -102,7 +101,7 @@ void SaveImageSource::note_detached(proto::SlotIndex slot) noexcept {
     b->exists = false;
     b->size = proto::FileSize{};
 
-    b->path.path.clear();
+    b->path.clear();
     b->blank = cores::BlankSaveSpec{};
     b->manual = false;
     b->close_owed = false;
@@ -122,6 +121,12 @@ void SaveImageSource::mark(proto::SlotIndex slot, Attach state) noexcept {
 svc::IStorageBackend* SaveImageSource::backend(proto::SlotIndex slot) noexcept {
     if (slot.v >= kSlots) return nullptr;
     return &backends_[slot.v];
+}
+
+std::span<const std::byte> SaveImageSource::order(proto::SlotIndex slot) const noexcept {
+    const Binding* b = find(slot);
+    if (b == nullptr) return {};
+    return infra::text_bytes(b->path.view());
 }
 
 bool SaveImageSource::fill_blank(proto::SlotIndex slot, proto::Lba lba,

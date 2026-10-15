@@ -7,6 +7,7 @@
 #include "app/link_rx_channel.h"
 #include "app/save_extent_cell.h"
 #include "cores/save_extent.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -31,10 +32,10 @@ public:
     }
     ~OwedSaveBind() { strand(); }
 
-    void bind(Cell& cell, LinkRxChannel* rx) noexcept {
+    void bind(Cell& cell, LinkRxChannel<SeatTag::Main>* rx) noexcept {
         strand();
-        cell_ = &cell;
-        rx_ = rx;
+        cell_ = infra::opt_ref_of(&cell);
+        rx_ = infra::opt_ref_of(rx);
     }
 
     [[nodiscard]] bool owed() const noexcept { return gen_ != 0; }
@@ -60,8 +61,8 @@ private:
     void publish_(std::uint32_t generation, cores::SaveVerdict v, cores::SaveExtent body) noexcept {
         set_verdict(body, v);
         body.generation = generation;
-        if (cell_ != nullptr) cell_->publish(body);
-        if (rx_ != nullptr) rx_->request_wake();
+        if (cell_) cell_->publish(body);
+        if (rx_) rx_->request_wake();
     }
     void adopt_(OwedSaveBind& other) noexcept {
         cell_ = other.cell_;
@@ -70,8 +71,8 @@ private:
         gen_ = std::exchange(other.gen_, 0u);
     }
 
-    Cell* cell_ = nullptr;
-    LinkRxChannel* rx_ = nullptr;
+    infra::OptRef<Cell> cell_{};
+    infra::OptRef<LinkRxChannel<SeatTag::Main>> rx_{};
     cores::SaveExtent strand_body_{};
     std::uint32_t gen_ = 0;
 };

@@ -18,6 +18,8 @@
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/seat_owner_io.h"
+#include "infra/seat_owner_ui.h"
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "os/clock.h"
@@ -61,8 +63,8 @@ public:
         SaveStateFactsCell& facts;
         cores::SaveCopyCell& copy;
         const svc::Vfs& vfs;
-        ILoadWindowMap& map;
-        ILoadWindowMap& ui_map;
+        ILoadWindowMap<seat_owner::Io>& map;
+        ILoadWindowMap<seat_owner::Ui>& ui_map;
         hal::PhysRegion aperture;
         const os::IClock& clock;
         xthread::WakeFlag& io_wake;
@@ -102,27 +104,27 @@ private:
         TASTY_SEAT_RESIDENT(Io);
 
     public:
-        explicit IoSlotMap(ILoadWindowMap& map) noexcept : map_(map) {}
+        explicit IoSlotMap(ILoadWindowMap<seat_owner::Io>& map) noexcept : map_(map) {}
         [[nodiscard]] Ex<hal::FpgaMemory> map(const hal::PhysRegion& r) override {
             TASTY_SEAT_BODY(IoSlotMap);
             return map_.map(r);
         }
 
     private:
-        ILoadWindowMap& map_;
+        ILoadWindowMap<seat_owner::Io>& map_;
     };
     class UiSlotMap final : public proto::SaveStateEngine::ISlotMap {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
-        explicit UiSlotMap(ILoadWindowMap& map) noexcept : map_(map) {}
+        explicit UiSlotMap(ILoadWindowMap<seat_owner::Ui>& map) noexcept : map_(map) {}
         [[nodiscard]] Ex<hal::FpgaMemory> map(const hal::PhysRegion& r) override {
             TASTY_SEAT_BODY(UiSlotMap);
             return map_.map(r);
         }
 
     private:
-        ILoadWindowMap& map_;
+        ILoadWindowMap<seat_owner::Ui>& map_;
     };
 
     void take_ask_(const Ask& ask) noexcept;

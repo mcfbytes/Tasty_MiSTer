@@ -16,17 +16,24 @@
 namespace mister::cores {
 
 class PsxLadder final : public BootLadder {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     PsxLadder(const CoreProfile& profile, const LadderContext& ctx)
         : BootLadder(profile, ctx), last_dir_(ctx.last_dir), noreset_(ctx.noreset) {}
 
     [[nodiscard]] std::uint8_t pc() const noexcept override {
+        TASTY_SEAT_BODY(PsxLadder);
         return static_cast<std::uint8_t>(rung_);
     }
-    [[nodiscard]] std::string_view next_last_dir() const noexcept override { return last_dir_; }
-    [[nodiscard]] bool next_noreset() const noexcept override { return noreset_; }
+    [[nodiscard]] std::string_view next_last_dir() const noexcept override {
+        TASTY_SEAT_BODY(PsxLadder);
+        return last_dir_;
+    }
+    [[nodiscard]] bool next_noreset() const noexcept override {
+        TASTY_SEAT_BODY(PsxLadder);
+        return noreset_;
+    }
 
     [[nodiscard]] bool reset_requested() const noexcept { return facts_.reset; }
     [[nodiscard]] std::uint16_t libcrypt_mask() const noexcept { return facts_.libcrypt_mask; }

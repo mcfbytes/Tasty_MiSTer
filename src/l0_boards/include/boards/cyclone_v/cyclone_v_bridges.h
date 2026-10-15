@@ -73,7 +73,7 @@ inline constexpr BridgeStep kEnableSequence[] = {
 };
 
 class Bridges final : public hal::IBridgeSequencer {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     [[nodiscard]] static Ex<Bridges> open(hal::BoardWindows& windows);

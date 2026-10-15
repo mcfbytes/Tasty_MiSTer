@@ -53,6 +53,7 @@ public:
         proto::StorageCompletion& answer;
         infra::OptRef<IStorageBackend> backend{};
         std::uint32_t gen = 0;
+        std::span<const std::byte> order{};
         bool performed = false;
     };
 
@@ -88,12 +89,15 @@ public:
     [[nodiscard]] std::span<std::uint8_t> half_mut(proto::SlotIndex,
                                                    proto::ArenaHalf) noexcept override;
 
-    [[nodiscard]] bool stage_backend(proto::SlotIndex, IStorageBackend&) noexcept override;
+    [[nodiscard]] bool stage_backend(proto::SlotIndex, IStorageBackend&,
+                                     std::span<const std::byte> order) noexcept override;
     [[nodiscard]] bool release_slot(proto::SlotIndex) noexcept override;
     [[nodiscard]] bool quiesced() const noexcept override;
 
 private:
     void own_all_() noexcept;
+
+    static void set_order_(BlockCtl& hand, std::span<const std::byte> order) noexcept;
 
     [[nodiscard]] bool home_(unsigned slot) const noexcept;
 

@@ -28,9 +28,6 @@ struct CoreState;
 namespace mister::os {
 class IClock;
 }
-namespace mister::hal {
-class IBootHandoff;
-}
 namespace mister::proto {
 class IStorageChannel;
 }
@@ -46,7 +43,9 @@ namespace mister::app {
 class VideoWire;
 class InputWire;
 class OsdWire;
+template <SeatTag Producer>
 class LinkTxChannel;
+template <SeatTag Consumer>
 class LinkRxChannel;
 class LinkRouter;
 class ICheatApply;
@@ -56,12 +55,12 @@ struct SupervisorParts {
     InputWire& input;
     OsdWire& osd;
 
-    LinkTxChannel& link_inbox;
-    LinkRxChannel& link_rx;
+    LinkTxChannel<SeatTag::Main>& link_inbox;
+    LinkRxChannel<SeatTag::Main>& link_rx;
     const ConfigCell& config_cell;
-    LinkTxChannel& ui_inbox;
+    LinkTxChannel<SeatTag::Ui>& ui_inbox;
 
-    LinkTxChannel& input_inbox;
+    LinkTxChannel<SeatTag::Input>& input_inbox;
     LinkRouter& router;
 
     const LadderStateCell& ladder_cell;
@@ -84,9 +83,9 @@ struct SupervisorParts {
     CoreBay& bay;
     BayReleasesCell& bay_releases;
 
-    const svc::Vfs* vfs = nullptr;
+    infra::OptRef<const svc::Vfs> vfs{};
 
-    UartModeController::Handoffs* uart_handoffs = nullptr;
+    infra::OptRef<UartModeController::Handoffs> uart_handoffs{};
     bool stdout_routing = false;
 
     hal::DoorbellPolicy doorbells{};
@@ -94,9 +93,7 @@ struct SupervisorParts {
     hal::PhysRegion lw_window{};
     os::UioLineSpace doorbell_nodes{};
 
-    hal::IBootHandoff* boot_handoff = nullptr;
-
-    proto::IStorageChannel* storage_channel = nullptr;
+    infra::OptRef<proto::IStorageChannel> storage_channel{};
 
     BoardOps board_ops{};
 

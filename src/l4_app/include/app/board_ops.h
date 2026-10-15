@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
+
+#include "infra/opt_ref.h"
+
 namespace mister::app {
+
+enum class ExitReboot : std::uint8_t { None, Cold };
 
 class IBoardReset {
 public:
@@ -49,10 +55,10 @@ protected:
 };
 
 struct BoardOps {
-    IBoardReset* reset = nullptr;
-    ISleeper* sleeper = nullptr;
-    IRtPriorityScope* rt = nullptr;
-    IStopSignal* stop = nullptr;
+    infra::OptRef<IBoardReset> reset{};
+    infra::OptRef<ISleeper> sleeper{};
+    infra::OptRef<IRtPriorityScope> rt{};
+    infra::OptRef<IStopSignal> stop{};
 };
 
 }  // namespace mister::app

@@ -10,6 +10,8 @@
 
 namespace mister::svc {
 
+inline constexpr std::size_t kStorageOrderBytes = 2304;
+
 class IStorageBackend {
 public:
     virtual ~IStorageBackend() = default;
@@ -19,7 +21,7 @@ public:
     [[nodiscard]] virtual Ex<std::size_t> write_at(std::uint64_t offset,
                                                    std::span<const std::uint8_t> src) = 0;
 
-    [[nodiscard]] virtual Ex<proto::FileSize> open_extent() = 0;
+    [[nodiscard]] virtual Ex<proto::FileSize> open_extent(std::span<const std::byte> order) = 0;
 
     [[nodiscard]] virtual Ex<proto::FileSize> create(std::span<const std::uint8_t>) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});

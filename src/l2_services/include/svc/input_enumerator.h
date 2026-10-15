@@ -38,9 +38,9 @@ public:
 
     void apply_deadzones() noexcept;
 
-    [[nodiscard]] Ex<void> load_maps_for(
-        std::string_view core, bool front_end,
-        infra::OptRef<const IAnalogReshape> reshape = std::nullopt);
+    [[nodiscard]] Ex<void> load_maps_for(std::string_view core, bool front_end,
+                                         infra::OptRef<const IAnalogReshape> reshape = std::nullopt,
+                                         const JoyPlan& joy = JoyPlan{});
 
     [[nodiscard]] Ex<void> adopt(InputDevice&& dev);
 
@@ -58,7 +58,6 @@ public:
 
     void set_unique_mapping(std::span<const std::uint32_t> rows);
 
-    void set_joy_plan(const JoyPlan& plan) noexcept { joy_plan_ = plan; }
     const JoyPlan& joy_plan() const noexcept { return joy_plan_; }
 
     infra::OptRef<const IAnalogReshape> analog_reshape() const noexcept { return reshape_; }

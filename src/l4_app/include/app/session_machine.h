@@ -21,7 +21,7 @@ class SessionMachine {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    SessionMachine(EventQueue& events, xthread::LogLane& lane) noexcept;
+    SessionMachine(EventQueue<SeatTag::RT>& events, xthread::LogLane& lane) noexcept;
 
     SessionMachine(const SessionMachine&) = delete;
     SessionMachine& operator=(const SessionMachine&) = delete;
@@ -44,7 +44,7 @@ public:
     void echo(const Event::InfoRequest& a, EmitSite site, CorrelationTag tag);
 
 private:
-    EventQueue& events_;
+    EventQueue<SeatTag::RT>& events_;
     SessionState state_ = SessionState::Boot;
 
     CorrelationTag tag_{};

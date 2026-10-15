@@ -379,7 +379,7 @@ void InputDecode::misrouted(const proto::LinkEvent&) noexcept {
 static_assert(LinkEventInputSink<InputDecode>);
 
 void InputDecode::flush_mouse_() {
-    const InputWire::MouseDelta md = wire_.take_mouse();
+    const MouseDelta md = mouse_acc_.take();
     carry_x_ += md.dx;
     carry_y_ += md.dy;
     carry_z_ += md.dz;
@@ -514,19 +514,9 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, std::s
 
     if (is_mouse) {
 
-        if (svc_.grabbed()) {
-            m_x_ += static_cast<std::uint32_t>(r.rel_x);
-            m_y_ += static_cast<std::uint32_t>(r.rel_y);
-            m_w_ += static_cast<std::uint32_t>(r.rel_wheel);
-        }
+        if (svc_.grabbed()) mouse_acc_.accumulate(r.rel_x, r.rel_y, r.rel_wheel);
 
-        const std::uint8_t level = svc_.mouse_button_level();
-        if (level != m_btn_) {
-            m_btn_ = level;
-            ++m_edges_;
-        }
-        wire_.publish_mouse(static_cast<std::int32_t>(m_x_), static_cast<std::int32_t>(m_y_),
-                            static_cast<std::int32_t>(m_w_), m_btn_, m_edges_);
+        mouse_acc_.note_buttons(svc_.mouse_button_level());
     }
 }
 

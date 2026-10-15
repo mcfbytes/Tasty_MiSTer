@@ -22,7 +22,7 @@ class Vfs;
 namespace mister::app {
 
 class AddonSend {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     enum class Pass : std::uint8_t { Waiting, Done };
@@ -44,7 +44,7 @@ public:
     [[nodiscard]] bool take_image(std::vector<std::uint8_t> bytes);
 
     [[nodiscard]] Pass step(cores::ILadderHost& host, const svc::Vfs& vfs);
-    [[nodiscard]] bool wants_pass(const LinkTxChannel& inbox) const noexcept;
+    [[nodiscard]] bool wants_pass(const LinkTxChannel<SeatTag::Main>& inbox) const noexcept;
 
     [[nodiscard]] const std::vector<Entry>& entries() const noexcept { return entries_; }
     [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }

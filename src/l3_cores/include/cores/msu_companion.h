@@ -13,7 +13,7 @@
 namespace mister::cores {
 
 class MsuCompanion final : public ICompanionLoad {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     explicit MsuCompanion(const svc::Vfs& vfs) noexcept : vfs_(&vfs) {}
@@ -22,7 +22,10 @@ public:
 
     [[nodiscard]] Ex<CompanionPlan> plan(const CompanionAsk& ask) override;
     [[nodiscard]] std::unique_ptr<ILoader> loader() override;
-    [[nodiscard]] ServantId servant() const noexcept override { return ServantId::Msu1; }
+    [[nodiscard]] ServantId servant() const noexcept override {
+        TASTY_SEAT_BODY(MsuCompanion);
+        return ServantId::Msu1;
+    }
 
     [[nodiscard]] static std::string_view stem_of(std::string_view path) noexcept;
 

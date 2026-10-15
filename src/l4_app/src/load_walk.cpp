@@ -23,7 +23,8 @@ Ex<LoadWalk> LoadWalk::start(std::unique_ptr<cores::ILoader> loader, const cores
     return LoadWalk(std::move(loader), plan);
 }
 
-bool LoadWalk::wants_pass(const LinkTxChannel& inbox, const FileTxLevelCell* level) const noexcept {
+bool LoadWalk::wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
+                          const FileTxLevelCell* level) const noexcept {
     switch (pc_) {
         case Pc::Over:
             return false;
@@ -125,11 +126,12 @@ LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
     const auto phys = cores::row_address(r, h.windows, h.aperture.phys.v);
     if (!phys) return fail_(h);
     const std::uint64_t extent = r.extent != 0 ? r.extent : std::uint64_t{r.file_len} * r.stride;
-    auto w = LoadWindow::open(*h.map, h.aperture, os::PhysAddr{*phys}, extent);
+    auto w = LoadWindow<seat_owner::Main>::open(*h.map, h.aperture, os::PhysAddr{*phys}, extent);
     if (!w) return fail_(h);
-    std::optional<LoadWindow> mirror{};
+    std::optional<LoadWindow<seat_owner::Main>> mirror{};
     if (r.mirror != 0) {
-        auto m = LoadWindow::open(*h.map, h.aperture, os::PhysAddr{r.mirror}, extent);
+        auto m =
+            LoadWindow<seat_owner::Main>::open(*h.map, h.aperture, os::PhysAddr{r.mirror}, extent);
         if (!m) return fail_(h);
         mirror.emplace(std::move(*m));
     }

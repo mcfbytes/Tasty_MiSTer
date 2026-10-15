@@ -30,17 +30,17 @@ struct HostServices {
     hal::ISpiTransport& link;
 
     const os::IClock& clock;
-    svc::ChdPrefetch* prefetch = nullptr;
+    infra::OptRef<svc::ChdPrefetch> prefetch{};
 
-    proto::IImageSink* bulk = nullptr;
+    infra::OptRef<proto::IImageSink> bulk{};
 
     CoreWindowGrant windows{};
 
-    svc::DiscReadService* discs = nullptr;
+    infra::OptRef<svc::DiscReadService> discs{};
 
-    proto::SpiFioQueue* fio_queue = nullptr;
+    infra::OptRef<proto::SpiFioQueue> fio_queue{};
 
-    IMailboxPort* mailbox = nullptr;
+    infra::OptRef<IMailboxPort> mailbox{};
 
     infra::OptRef<const SaveCopyCell> save_copy{};
 };

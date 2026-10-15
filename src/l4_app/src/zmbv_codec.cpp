@@ -17,8 +17,6 @@ constexpr std::size_t kAlign = 64;
 
 constexpr std::size_t up(std::size_t n) noexcept { return (n + kAlign - 1) / kAlign * kAlign; }
 
-z_stream* zs_of(std::byte* p) noexcept { return reinterpret_cast<z_stream*>(p); }
-
 constexpr int kMeRung[] = {1, 2, 4, 8};
 
 struct Cand {
@@ -57,9 +55,7 @@ Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     const std::size_t worst = mv + pic;
 
     const std::size_t bound = worst + ((worst + 7) >> 3) + ((worst + 63) >> 6) + 64u + 16u;
-    const std::size_t zbytes = up(sizeof(z_stream));
-    const std::size_t total =
-        up(pic) * 2 + up(worst) + up(bound + 8) + zbytes + up(mv) + up(hist_n);
+    const std::size_t total = up(pic) * 2 + up(worst) + up(bound + 8) + up(mv) + up(hist_n);
     if (auto r = arena_.reserve(1, total); !r) return r;
     std::span<std::byte> rest = arena_.stripe(0);
     const auto carve = [&rest](std::size_t n) {
@@ -71,7 +67,6 @@ Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     cur_ = carve(up(pic));
     plain_ = carve(up(worst));
     pkt_ = carve(up(bound + 8));
-    zmem_ = carve(zbytes);
     dup_plain_ = carve(up(mv));
     dup_plain_len_ = mv;
     const std::span<std::byte> hist = carve(up(hist_n));
@@ -80,8 +75,8 @@ Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     width_ = w;
     height_ = h;
     max_payload_ = 7 + bound;
-    auto* z = new (zmem_.data()) z_stream{};
-    if (::deflateInit(z, kLevel) != Z_OK) {
+    z_ = z_stream{};
+    if (::deflateInit(&z_, kLevel) != Z_OK) {
         end();
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     }
@@ -96,12 +91,12 @@ void ZmbvCodec::end() noexcept {
 }
 
 void ZmbvCodec::release_() noexcept {
-    if (z_ready_ && !zmem_.empty()) {
-        ::deflateEnd(zs_of(zmem_.data()));
+    if (z_ready_) {
+        ::deflateEnd(&z_);
         z_ready_ = false;
     }
     arena_.release();
-    prev_ = cur_ = plain_ = pkt_ = zmem_ = dup_plain_ = {};
+    prev_ = cur_ = plain_ = pkt_ = dup_plain_ = {};
     hist_ = {};
     dup_plain_len_ = 0;
     max_payload_ = 0;
@@ -113,7 +108,7 @@ std::size_t ZmbvCodec::deflate_sync_(const std::byte* in, std::size_t n, std::by
                                      std::size_t cap) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
     if (!z_ready_ || cap > 0x7FFFFFFFu || n > 0x7FFFFFFFu) return 0;
-    z_stream* z = zs_of(zmem_.data());
+    z_stream* z = &z_;
     z->next_in = const_cast<Bytef*>(
         infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(in, n)).data());
     z->avail_in = static_cast<uInt>(n);
@@ -146,7 +141,7 @@ void ZmbvCodec::to_bgr0_(const std::byte* rgb, std::size_t line) noexcept {
 std::size_t ZmbvCodec::emit_key_(const std::byte* bgr0, std::span<std::byte> out) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
     if (out.size() < max_payload_ || !z_ready_) return 0;
-    if (::deflateReset(zs_of(zmem_.data())) != Z_OK) return 0;
+    if (::deflateReset(&z_) != Z_OK) return 0;
     out[0] = std::byte{1};
     out[1] = std::byte{0};
     out[2] = std::byte{1};
@@ -176,8 +171,8 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
     std::byte* mv = plain_.data();
     auto* const plain_bytes = infra::byte_cast<std::uint8_t>(plain_).data();
     auto* xor_at = plain_bytes + mv_bytes;
-    const auto* cur = reinterpret_cast<const std::uint32_t*>(cur_.data());
-    const auto* prev = reinterpret_cast<const std::uint32_t*>(prev_.data());
+    const auto cur = infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(cur_));
+    const auto prev = infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(prev_));
     const int W = width_;
     const bool watch = clock_.has_value() && motion_ != RecMotion::Off && search_budget_ns_ > 0;
     bool cut = false;
@@ -198,9 +193,8 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
                 ++sad_calls_;
                 std::uint32_t s = 0;
                 for (int j = 0; j < bh; ++j) {
-                    const auto* a = reinterpret_cast<const std::uint8_t*>(cur + (y + j) * W + x);
-                    const auto* b =
-                        reinterpret_cast<const std::uint8_t*>(prev + (y + dy + j) * W + (x + dx));
+                    const auto* a = cur.data() + std::size_t(((y + j) * W + x) * 4);
+                    const auto* b = prev.data() + std::size_t(((y + dy + j) * W + (x + dx)) * 4);
                     for (int i = 0; i < bw * 4; ++i) {
                         const int d = int{a[i]} - int{b[i]};
                         s += static_cast<std::uint32_t>(d < 0 ? -d : d);
@@ -268,12 +262,10 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
             if (!xored) continue;
             for (int j = 0; j < bh; ++j) {
                 for (int i = 0; i < bw; ++i) {
-                    const std::uint32_t v =
-                        cur[(y + j) * W + x + i] ^ prev[(y + dy + j) * W + x + dx + i];
-                    xor_at[0] = static_cast<std::uint8_t>(v);
-                    xor_at[1] = static_cast<std::uint8_t>(v >> 8);
-                    xor_at[2] = static_cast<std::uint8_t>(v >> 16);
-                    xor_at[3] = static_cast<std::uint8_t>(v >> 24);
+                    const auto* a = cur.data() + std::size_t(((y + j) * W + x + i) * 4);
+                    const auto* b = prev.data() + std::size_t(((y + dy + j) * W + x + dx + i) * 4);
+                    for (int k = 0; k < 4; ++k)
+                        xor_at[k] = static_cast<std::uint8_t>(a[k] ^ b[k]);
                     xor_at += 4;
                 }
             }

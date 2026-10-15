@@ -153,6 +153,7 @@ Programmer::Awaited Programmer::await_(std::uint32_t polls) {
 }
 
 Ex<bool> Programmer::program_begin() {
+    TASTY_SEAT_BODY(Programmer);
 
     data_txn_.reset();
     tail_seen_ = false;
@@ -247,6 +248,7 @@ Ex<void> Programmer::poll_config_done() {
 }
 
 Ex<bool> Programmer::program_step() {
+    TASTY_SEAT_BODY(Programmer);
 
     Awaited a{true, FpgaMgr::kPollsPerPass};
     for (;;) {
@@ -299,6 +301,7 @@ Ex<bool> Programmer::program_step() {
 }
 
 std::uint32_t Programmer::pending_stage() noexcept {
+    TASTY_SEAT_BODY(Programmer);
     switch (step_) {
         case StepPc::Idle:
             return 0;
@@ -328,6 +331,7 @@ Programmer::Programmer(Programmer&& o) noexcept
 }
 
 Ex<void> Programmer::program_chunk(std::span<const std::byte> chunk) {
+    TASTY_SEAT_BODY(Programmer);
     if (!data_txn_.has_value()) {
         return std::unexpected(Error{Errc::bridge_state, ERR_SITE(), 0});
     }
@@ -351,6 +355,7 @@ Ex<void> Programmer::program_chunk(std::span<const std::byte> chunk) {
 }
 
 Ex<bool> Programmer::program_end() {
+    TASTY_SEAT_BODY(Programmer);
     if (!data_txn_.has_value()) {
         return std::unexpected(Error{Errc::bridge_state, ERR_SITE(), 0});
     }
@@ -363,6 +368,7 @@ Ex<bool> Programmer::program_end() {
 }
 
 bool Programmer::programmed() const {
+    TASTY_SEAT_BODY(Programmer);
     if ((mgr_.read(FpgaMgr::Reg::GpioExtPorta) & FpgaMgr::kMonId) == 0u) {
         return false;
     }
@@ -379,6 +385,7 @@ std::byte* Programmer::handoff_base() {
 }
 
 Ex<hal::HandoffPage> Programmer::handoff() {
+    TASTY_SEAT_BODY(Programmer);
     const std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
@@ -411,6 +418,7 @@ Ex<hal::HandoffPage> Programmer::handoff() {
 }
 
 Ex<void> Programmer::write_env(std::string_view core_name, std::span<const std::byte> cfg) {
+    TASTY_SEAT_BODY(Programmer);
     std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
@@ -443,6 +451,7 @@ Ex<void> Programmer::write_env(std::string_view core_name, std::span<const std::
 }
 
 Ex<void> Programmer::write_sdram_cfg(std::uint16_t cfg) {
+    TASTY_SEAT_BODY(Programmer);
     std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
@@ -457,6 +466,7 @@ Ex<void> Programmer::write_sdram_cfg(std::uint16_t cfg) {
 }
 
 Ex<void> Programmer::write_altcfg(std::uint8_t alt) {
+    TASTY_SEAT_BODY(Programmer);
     std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
@@ -471,6 +481,7 @@ Ex<void> Programmer::write_altcfg(std::uint8_t alt) {
 }
 
 Ex<void> Programmer::write_reboot_flag(bool warm) {
+    TASTY_SEAT_BODY(Programmer);
     std::byte* page = handoff_base();
     if (page == nullptr) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});

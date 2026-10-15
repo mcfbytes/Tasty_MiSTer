@@ -89,7 +89,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::OsdFlush& a,
         }
         flushed =
             osd.flush_row(link_, row, std::span<const std::uint8_t>(sampled.b, sizeof sampled.b));
-    } else if (ctx.inbox == nullptr) {
+    } else if (!ctx.inbox) {
         return ILinkEncoder::Outcome::Dropped;
     } else {
         const auto bytes = ctx.inbox->bytes(a.bytes);
@@ -173,7 +173,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::BlockAnswer& a,
 ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SaveUpload&,
                                      const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
-    if (ctx.roles == nullptr || !ctx.roles->saves) {
+    if (!ctx.roles || !ctx.roles->saves) {
         return ILinkEncoder::Outcome::Dropped;
     }
     if (!ctx.roles->saves->save_upload_counted()) {
@@ -186,7 +186,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SetVideoMode& a,
                                      const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
-    if (!video_.emit(link_, a.block, a.gen, ctx.fence)) {
+    if (!video_.emit(link_, a.block, a.gen, ctx.fence ? &*ctx.fence : nullptr)) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -218,7 +218,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::ApplyCheats&,
                                      const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
-    if (ctx.roles == nullptr || !ctx.roles->cheats) {
+    if (!ctx.roles || !ctx.roles->cheats) {
         return ILinkEncoder::Outcome::Dropped;
     }
     if (!ctx.roles->cheats->apply_cheats_counted(ctx.roles->cheat_call)) {
@@ -231,7 +231,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SetDip& a,
                                      const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
-    if (ctx.roles == nullptr || !ctx.roles->acts) {
+    if (!ctx.roles || !ctx.roles->acts) {
         return ILinkEncoder::Outcome::Dropped;
     }
     if (!ctx.roles->acts->set_dip_counted(a.row, a.choice)) {
@@ -243,7 +243,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SetDip& a,
 ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SetCoreOption& a,
                                      const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
-    if (ctx.roles == nullptr || !ctx.roles->acts) {
+    if (!ctx.roles || !ctx.roles->acts) {
         return ILinkEncoder::Outcome::Dropped;
     }
     const bool ok = ctx.roles->acts->set_option_counted(a.row, a.choice);
@@ -253,7 +253,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SetCoreOption& a,
 ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SettleCoreOptions&,
                                      const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
-    if (ctx.roles == nullptr || !ctx.roles->acts) {
+    if (!ctx.roles || !ctx.roles->acts) {
         return ILinkEncoder::Outcome::Dropped;
     }
     const bool ok = ctx.roles->acts->settle_options_counted();

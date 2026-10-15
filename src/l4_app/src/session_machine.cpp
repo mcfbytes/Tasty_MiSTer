@@ -16,7 +16,7 @@ std::uint64_t log_now_ns() noexcept {
 
 }  // namespace
 
-SessionMachine::SessionMachine(EventQueue& events, xthread::LogLane& lane) noexcept
+SessionMachine::SessionMachine(EventQueue<SeatTag::RT>& events, xthread::LogLane& lane) noexcept
     : events_(events), log_lane_(lane), last_transition_ns_(log_now_ns()) {}
 
 void SessionMachine::transition(SessionState to) {

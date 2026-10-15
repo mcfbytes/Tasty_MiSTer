@@ -40,6 +40,7 @@ namespace mister::app {
 class IdentityLatch;
 class InputWire;
 class IOsdClose;
+template <SeatTag Seat>
 class LinkTxChannel;
 class ScreenshotPump;
 class UiRequestRing;
@@ -66,7 +67,7 @@ public:
 
         IOsdClose& osd;
 
-        LinkTxChannel& settings_tx;
+        LinkTxChannel<SeatTag::Ui>& settings_tx;
     };
 
     enum class Stage : std::uint8_t {

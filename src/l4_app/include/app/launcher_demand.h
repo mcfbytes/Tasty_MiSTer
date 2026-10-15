@@ -6,12 +6,13 @@
 #include "app/launcher_profile.h"
 #include "infra/fixed_str.h"
 #include "infra/telemetry.h"
+#include "infra/opt_ref.h"
 
 namespace mister::app {
 
 struct LauncherDemand {
 
-    const LauncherProfile* profile = nullptr;
+    infra::OptRef<const LauncherProfile> profile{};
     FixedStr<256, StrFit::Reject> program{};
     std::uint32_t core_gen = 0;
     bool front_end = false;
@@ -20,6 +21,6 @@ struct LauncherDemand {
     bool scanout_core = false;
 };
 
-using LauncherDemandCell = xthread::Telemetry<LauncherDemand>;
+using LauncherDemandCell = xthread::Telemetry<LauncherDemand, SeatTag::Main>;
 
 }  // namespace mister::app

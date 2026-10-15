@@ -240,7 +240,7 @@ inline constexpr std::array<CondRule, 4> kCondRules{{
 }};
 
 class ConfStr {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     [[nodiscard]] static Ex<ConfStr> parse(std::string_view raw, hal::PhysRegion aperture);

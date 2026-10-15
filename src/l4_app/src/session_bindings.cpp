@@ -21,7 +21,7 @@ std::uint32_t le32(std::span<const std::uint8_t> b, std::size_t off) noexcept {
 }  // namespace
 
 void SessionBindings::bind_facts(const proto::LinkOp::BindFacts& op,
-                                 const LinkTxChannel* inbox) noexcept {
+                                 const ILinkTxReader* inbox) noexcept {
     facts_ = MraFacts{};
     facts_.is_arcade = op.is_arcade;
     facts_.vertical = op.vertical;
@@ -34,7 +34,7 @@ void SessionBindings::bind_facts(const proto::LinkOp::BindFacts& op,
 }
 
 void SessionBindings::bind_identity(const proto::LinkOp::BindIdentity& op,
-                                    const LinkTxChannel* inbox) noexcept {
+                                    const ILinkTxReader* inbox) noexcept {
     Identity& id = identity_.emplace(Identity{});
     id.declares_cheats = op.declares_cheats;
     id.declares_turbo = op.declares_turbo;
@@ -59,7 +59,7 @@ void SessionBindings::bind_identity(const proto::LinkOp::BindIdentity& op,
 }
 
 void SessionBindings::bind_uart(const proto::LinkOp::BindUart& op,
-                                const LinkTxChannel* inbox) noexcept {
+                                const ILinkTxReader* inbox) noexcept {
     uart_ = Uart{};
     if (inbox != nullptr && op.mode != proto::TxSlabId{}) {
         const auto b = inbox->bytes(op.mode);
@@ -82,7 +82,7 @@ void SessionBindings::bind_uart(const proto::LinkOp::BindUart& op,
 }
 
 void SessionBindings::bind_doorbells(const proto::LinkOp::BindDoorbells& op,
-                                     const LinkTxChannel* inbox) noexcept {
+                                     const ILinkTxReader* inbox) noexcept {
     doorbells_ = Doorbells{};
     doorbells_.declared = op.declared;
     if (op.table == proto::TxSlabId{} || inbox == nullptr) return;
@@ -96,9 +96,9 @@ void SessionBindings::bind_doorbells(const proto::LinkOp::BindDoorbells& op,
 }
 
 Ex<std::optional<SessionBindings::Mount>> SessionBindings::decode_mount(
-    const proto::LinkOp::BindMount& op, const LinkTxChannel* inbox) noexcept {
+    const proto::LinkOp::BindMount& op, const ILinkTxReader* inbox) noexcept {
     if (op.image == proto::FileId{} || inbox == nullptr) return std::optional<Mount>{};
-    const FileBytes::Slot* const file = inbox->file(op.image);
+    const InternedFile* const file = inbox->file(op.image);
     if (file == nullptr || file->path.empty()) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), op.image.v});
     }

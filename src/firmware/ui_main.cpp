@@ -21,7 +21,7 @@
 
 namespace mister::fw {
 
-UiMain::UiMain(app::EventQueue& events, xthread::ParkFds fds,
+UiMain::UiMain(app::EventQueue<SeatTag::RT>& events, xthread::ParkFds fds,
                app::UartModeController::Handoffs& handoffs, const Wiring& wiring,
                xthread::WakeFlag& asker) noexcept
     : events_(events), owner_events_(wiring.owner_events), fifo_(wiring.fifo), mgl_(wiring.mgl),

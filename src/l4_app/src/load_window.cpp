@@ -8,8 +8,11 @@
 
 namespace mister::app {
 
-Ex<LoadWindow> LoadWindow::open(ILoadWindowMap& map, const hal::PhysRegion& aperture,
-                                os::PhysAddr addr, std::uint64_t len) {
+template <class Owner>
+Ex<LoadWindow<Owner>> LoadWindow<Owner>::open(ILoadWindowMap<Owner>& map,
+                                              const hal::PhysRegion& aperture, os::PhysAddr addr,
+                                              std::uint64_t len) {
+    TASTY_SEAT_BODY(SeatOwner);
     auto region = hal::resolve_load_region(aperture, addr, len);
     if (!region) return std::unexpected(region.error());
     auto mem = map.map(*region);
@@ -17,12 +20,18 @@ Ex<LoadWindow> LoadWindow::open(ILoadWindowMap& map, const hal::PhysRegion& aper
     return LoadWindow(std::move(*mem));
 }
 
-Ex<std::size_t> LoadWindow::write(std::size_t off, std::span<const std::byte> src) {
+template <class Owner>
+Ex<std::size_t> LoadWindow<Owner>::write(std::size_t off, std::span<const std::byte> src) {
+    TASTY_SEAT_BODY(SeatOwner);
     return mem_.write_at(off, src);
 }
 
-Ex<std::size_t> LoadWindow::write_lanes(std::size_t off, std::span<const std::byte> src,
-                                        std::size_t stride) {
+template <class Owner>
+Ex<std::size_t> LoadWindow<Owner>::write_lanes(std::size_t off, std::span<const std::byte> src,
+                                               std::size_t stride)
+    requires std::same_as<Owner, seat_owner::Main>
+{
+    TASTY_SEAT_BODY(SeatOwner);
     constexpr std::size_t kUnit = 2;
     const std::size_t units = src.size() / kUnit;
     if (stride == 0) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
@@ -40,14 +49,33 @@ Ex<std::size_t> LoadWindow::write_lanes(std::size_t off, std::span<const std::by
     return units * kUnit;
 }
 
-Ex<std::size_t> LoadWindow::read(std::size_t off, std::span<std::byte> dst) const {
+template <class Owner>
+Ex<std::size_t> LoadWindow<Owner>::read(std::size_t off, std::span<std::byte> dst) const {
+    TASTY_SEAT_BODY(SeatOwner);
     return mem_.read_at(off, dst);
 }
 
-void LoadWindow::publish() noexcept { mem_.publish(); }
+template <class Owner>
+void LoadWindow<Owner>::publish() noexcept {
+    TASTY_SEAT_BODY(SeatOwner);
+    mem_.publish();
+}
 
-std::size_t LoadWindow::size() const noexcept { return mem_.region().len; }
+template <class Owner>
+std::size_t LoadWindow<Owner>::size() const noexcept {
+    TASTY_SEAT_BODY(SeatOwner);
+    return mem_.region().len;
+}
 
-void LoadWindow::handoff() noexcept { mem_.handoff(); }
+template <class Owner>
+void LoadWindow<Owner>::handoff() noexcept
+    requires std::same_as<Owner, seat_owner::Main>
+{
+    TASTY_SEAT_BODY(SeatOwner);
+    mem_.handoff();
+}
+
+template class LoadWindow<seat_owner::Main>;
+template class LoadWindow<seat_owner::Io>;
 
 }  // namespace mister::app

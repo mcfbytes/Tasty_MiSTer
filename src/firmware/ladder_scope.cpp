@@ -2,11 +2,9 @@
 #include "ladder_scope.h"
 
 #include <pthread.h>
-#include <unistd.h>
 
 #include <cstdio>
 
-#include "hal/bridge_sequencer.h"
 #include "reactor/round_timer.h"
 
 namespace mister::fw {
@@ -31,15 +29,6 @@ void LadderScope::restore() {
                      static_cast<unsigned>(n));
     }
     transitioning_.store(false, std::memory_order_release);
-}
-
-void LadderScope::board_reset() {
-    TASTY_SEAT_BODY(LadderScope);
-
-    if (!bridges_.request_board_reset()) return;
-    for (unsigned ms = 0; ms < kResetSettleMs; ms += 100) {
-        ::usleep(100000);
-    }
 }
 
 }  // namespace mister::fw

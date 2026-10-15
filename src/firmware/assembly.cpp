@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <bit>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -218,8 +219,8 @@ void prefault_current_stack(std::size_t requested, RtEvidence& ev) noexcept {
         ev.main_stack_prefault = RtSetup{false, grc};
         return;
     }
-    const auto top = reinterpret_cast<std::uintptr_t>(base) + mapped;
-    const auto sp = reinterpret_cast<std::uintptr_t>(__builtin_frame_address(0));
+    const auto top = std::bit_cast<std::uintptr_t>(base) + mapped;
+    const auto sp = std::bit_cast<std::uintptr_t>(__builtin_frame_address(0));
 
     const std::size_t used = (sp < top && sp >= top - mapped) ? top - sp : mapped;
 
@@ -392,7 +393,7 @@ constexpr ThreadAssembly::SeatTable::Entries ThreadAssembly::SeatTable::kSeatEnt
     ThreadAssembly::SeatTable::make(SeatMainList{});
 
 ThreadAssembly::ThreadAssembly(const hal::ThreadMap& threads, xthread::RtStats& stats,
-                               app::EventQueue& events, RtEvidence& boot,
+                               app::EventQueue<SeatTag::RT>& events, RtEvidence& boot,
                                xthread::WakeFlag& main_wake, const DiagWires& diag,
                                const UiMain::Wires& ui_wires, const UiMain::Wiring& ui,
                                const DiagSampler::Sources& diag_sources) noexcept
@@ -402,7 +403,7 @@ ThreadAssembly::ThreadAssembly(const hal::ThreadMap& threads, xthread::RtStats& 
     create_mains_(events, ui_wires, ui);
 }
 
-ThreadAssembly::ThreadAssembly(xthread::RtStats& stats, app::EventQueue& events,
+ThreadAssembly::ThreadAssembly(xthread::RtStats& stats, app::EventQueue<SeatTag::RT>& events,
                                const UiMain::Wiring& ui, const DiagSampler::Sources& diag) noexcept
     : ev_(own_ev_), threads_(hal::kDe10ThreadMap), main_wake_(own_main_wake_),
       own_wires_(std::make_unique<OwnWires>()),
@@ -413,7 +414,8 @@ ThreadAssembly::ThreadAssembly(xthread::RtStats& stats, app::EventQueue& events,
 
 void ThreadAssembly::publish_evidence_() noexcept { ev_cell_.publish(ev_); }
 
-void ThreadAssembly::create_mains_(app::EventQueue& events, const UiMain::Wires& ui_wires,
+void ThreadAssembly::create_mains_(app::EventQueue<SeatTag::RT>& events,
+                                   const UiMain::Wires& ui_wires,
                                    const UiMain::Wiring& ui) noexcept {
     auto diag_fds = xthread::ParkFds::create(diag_wake_);
     if (!diag_fds) {
@@ -577,7 +579,7 @@ Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
     svc::PrefetchMain* const prefetch = mains_.get<svc::PrefetchMain>();
 
     publish_evidence_();
-    diag_sampler_.set_input_build(mains.input_build ? &*mains.input_build : nullptr);
+    diag_sampler_.set_input_build(mains.input_build);
     diag_sampler_.set_prefetch(prefetch != nullptr ? &prefetch->prefetch() : nullptr);
 
     for (const SeatTag s : std::span(kSpawnOrder).first(kSpawnOrder.size() - 1)) {

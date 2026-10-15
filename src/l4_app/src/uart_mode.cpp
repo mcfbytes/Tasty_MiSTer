@@ -159,7 +159,7 @@ Ex<void> UartModeController::set_midilink(MidiLinkMode ml) {
 }
 
 void UartModeController::post_(const UartHandoff& h) noexcept {
-    if (inbox_ == nullptr || !inbox_->push(h)) rt_.handoff_drops.add(1);
+    if (!inbox_ || !inbox_->push(h)) rt_.handoff_drops.add(1);
 }
 
 Ex<void> UartModeController::reset_uart(hal::ISpiTransport&) { return unimplemented(ERR_SITE()); }

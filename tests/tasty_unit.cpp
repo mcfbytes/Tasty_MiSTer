@@ -143,7 +143,7 @@ struct Tmp {
 void publish_id(app::IdentityLatch& ident, std::string_view rbf) {
     const SeatScope rt{SeatTag::RT};
     ident.publish(rbf, rbf, mister::app::RememberedStem::of(rbf, {}), svc::JoyPlan{}, "", false,
-                  false, nullptr, nullptr, nullptr, {});
+                  false, {}, std::string_view{}, {}, {});
 }
 
 void publish_end(app::ReplayStatusCell& cell, app::ReplayEnd end) {
@@ -170,7 +170,7 @@ struct Sess {
     struct Binds {
         app::RecorderControl* rec = nullptr;
         const app::EncodeStatusCell* encstat = nullptr;
-        const xthread::Telemetry<std::uint8_t, SeatTag::Unbound>* direct_video_ini = nullptr;
+        const xthread::Telemetry<std::uint8_t, SeatTag::Main>* direct_video_ini = nullptr;
     };
 
     static svc::Vfs open_tmp() {
@@ -186,7 +186,7 @@ struct Sess {
     app::RecorderStatusCell recstat{};
     app::EncodeStatusCell encstat{};
     app::UiRequestRing asks{};
-    app::LinkTxChannel tx{};
+    app::LinkTxChannel<mister::SeatTag::Ui> tx{};
     app::RecControlCell rec_control{};
     app::RecWriteStatusCell rec_write{};
     xthread::WakeFlag rec_wake{};
@@ -198,7 +198,7 @@ struct Sess {
         .writer = infra::OptRef<const app::RecWriteStatusCell>{rec_write},
         .root = "/"}};
     xthread::WakeFlag main_stop{};
-    xthread::Telemetry<std::uint8_t, SeatTag::Unbound> dv_ini{};
+    xthread::Telemetry<std::uint8_t, SeatTag::Main> dv_ini{};
     std::atomic<int> stop{0};
     std::atomic<int> exit_code{0};
     fw::TastyArgs args = play_args();
@@ -223,7 +223,10 @@ struct Sess {
             .exit_code = exit_code,
             .direct_video_ini = b.direct_video_ini != nullptr ? *b.direct_video_ini : dv_ini} {
 
-        dv_ini.publish(std::uint8_t{0});
+        {
+            const SeatScope as_main{SeatTag::Main};
+            dv_ini.publish(std::uint8_t{0});
+        }
         s.emplace(w, args);
     }
     void tick() { s->tick(); }
@@ -234,7 +237,7 @@ struct Sess {
     }
 
     bool load_asked() {
-        const SeatScope main{SeatTag::Unbound};
+        const SeatScope as_main{SeatTag::Main};
         const auto a = asks.pop();
         return a && infra::as<app::UiRequest::LoadCore>(*a).has_value();
     }
@@ -291,7 +294,7 @@ struct PumpRig {
     std::optional<svc::Vfs> vfs{};
     ZeroClock clock{};
     mister::testing::QuietVideoEnv quiet{};
-    app::LinkTxChannel tx{};
+    app::LinkTxChannel<mister::SeatTag::Ui> tx{};
     std::optional<app::VideoPump> pump{};
     VresLink link{};
     std::int64_t t = 0;
@@ -2052,7 +2055,7 @@ void test_session_play_ask() {
 }
 
 void test_session_direct_video_force() {
-    xthread::Telemetry<std::uint8_t, SeatTag::Unbound> cell{};
+    xthread::Telemetry<std::uint8_t, SeatTag::Main> cell{};
     {
         cell.publish(std::uint8_t{1});
         StderrTo err;
@@ -2127,7 +2130,7 @@ void test_strict_rec_start_waits_for_the_ini() {
     if (!pump.pump) return;
     CHECK(pump.root.put("MiSTer.ini", "[MiSTer]\ndirect_video=1\nvideo_mode=8\n"));
     pump.pump->arm_replay_ini(true);
-    xthread::Telemetry<std::uint8_t, SeatTag::Unbound> cell{};
+    xthread::Telemetry<std::uint8_t, SeatTag::Main> cell{};
     Sess x{nullptr, nullptr, {.direct_video_ini = &cell}};
     x.w.video = infra::OptRef{*pump.pump};
     x.args.verb = fw::TastyVerb::RecStart;
@@ -2141,7 +2144,10 @@ void test_strict_rec_start_waits_for_the_ini() {
         CHECK(err.text().find("direct_video") == std::string::npos);
         CHECK(x.exit_code.load() != 1);
     }
-    cell.publish(std::uint8_t{0});
+    {
+        const SeatScope as_main{SeatTag::Main};
+        cell.publish(std::uint8_t{0});
+    }
     fw::TastySink sink{*pump.pump, nullptr};
     sink.deliver(infra::make<app::Event>(app::Event::CoreLoaded{}, app::Event::Head{}));
     (void)pump.tick();

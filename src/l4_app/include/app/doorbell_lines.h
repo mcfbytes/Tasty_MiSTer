@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <optional>
 
-#include "app/link_tx_channel.h"
+#include "app/link_tx_reader.h"
 #include "hal/cause_reg.h"
 #include "hal/register_window.h"
 #include "infra/error.h"
@@ -15,8 +15,7 @@
 
 namespace mister::app {
 
-inline constexpr std::size_t kMaxDoorbellRows =
-    LinkTxChannel::Bytes::kBytes / sizeof(proto::IrqBinding);
+inline constexpr std::size_t kMaxDoorbellRows = kLinkTxSlabBytes / sizeof(proto::IrqBinding);
 
 struct DoorbellLines {
     TASTY_SEAT_EXEMPT(component);

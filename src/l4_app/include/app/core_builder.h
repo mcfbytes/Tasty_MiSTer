@@ -36,10 +36,10 @@ struct BayCounts {
     std::uint32_t window_refusals = 0;
 };
 static_assert(std::is_trivially_copyable_v<BayCounts>);
-using BayCountsCell = xthread::Telemetry<BayCounts, SeatTag::Unbound>;
+using BayCountsCell = xthread::Telemetry<BayCounts, SeatTag::Main>;
 
 class CoreBuilder {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     struct Ask {

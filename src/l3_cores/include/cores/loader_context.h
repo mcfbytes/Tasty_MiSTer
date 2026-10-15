@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "hal/phys_region.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "svc/vfs.h"
 
@@ -18,7 +19,7 @@ struct LoaderContext {
     const svc::Vfs& vfs;
     const CoreProfile& profile;
     bool turbo = false;
-    LoaderMemo* memo = nullptr;
+    LoaderMemo& memo;
 
     hal::PhysRegion aperture{os::PhysAddr{0}, 0, nullptr};
 };

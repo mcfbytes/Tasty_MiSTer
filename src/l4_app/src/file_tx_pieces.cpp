@@ -52,7 +52,8 @@ std::optional<FileTxLevel> FileTxPieces::answer_(const FileTxLevelCell& level) c
     return s.value;
 }
 
-bool FileTxPieces::ready(const LinkTxChannel& inbox, const FileTxLevelCell& level) const noexcept {
+bool FileTxPieces::ready(const LinkTxChannel<SeatTag::Main>& inbox,
+                         const FileTxLevelCell& level) const noexcept {
     if (cut_owed_) return true;
     if (outstanding_ && !answer_(level)) return false;
     if (inbox.ring().size() + 1 >= proto::kLinkTxCapacity) return false;
@@ -61,8 +62,8 @@ bool FileTxPieces::ready(const LinkTxChannel& inbox, const FileTxLevelCell& leve
 }
 
 bool FileTxPieces::stage_() {
-    const auto n =
-        static_cast<std::size_t>(std::min<std::uint64_t>(FileBytes::kPieceBytes, total_ - sent_));
+    const auto n = static_cast<std::size_t>(
+        std::min<std::uint64_t>(InternedFile::kPieceBytes, total_ - sent_));
     std::vector<std::uint8_t> buf(n);
     std::size_t got = 0;
     while (got < n) {
@@ -85,8 +86,8 @@ bool FileTxPieces::stage_() {
     return true;
 }
 
-FileTxPieces::Pass FileTxPieces::step(LinkTxChannel& inbox, const FileTxLevelCell& level,
-                                      std::uint32_t act) {
+FileTxPieces::Pass FileTxPieces::step(LinkTxChannel<SeatTag::Main>& inbox,
+                                      const FileTxLevelCell& level, std::uint32_t act) {
     using Phase = proto::LinkOp::FileTxPhase;
     if (cut_owed_) return cut_(inbox);
     if (!ready(inbox, level)) return Pass::Waiting;
@@ -149,13 +150,13 @@ FileTxPieces::Pass FileTxPieces::step(LinkTxChannel& inbox, const FileTxLevelCel
     return last ? Pass::Done : Pass::Sent;
 }
 
-FileTxPieces::Pass FileTxPieces::fail_(LinkTxChannel& inbox) {
+FileTxPieces::Pass FileTxPieces::fail_(LinkTxChannel<SeatTag::Main>& inbox) {
     if (pieces_ == 0) return Pass::Failed;
     cut_owed_ = true;
     return cut_(inbox);
 }
 
-FileTxPieces::Pass FileTxPieces::cut_(LinkTxChannel& inbox) {
+FileTxPieces::Pass FileTxPieces::cut_(LinkTxChannel<SeatTag::Main>& inbox) {
     const proto::LinkOp::FileTx op{.wire_index = wire_index_,
                                    .phase = proto::LinkOp::FileTxPhase::Close,
                                    .total = static_cast<std::uint32_t>(total_)};

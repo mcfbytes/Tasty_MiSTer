@@ -12,6 +12,7 @@
 #include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/inbox.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
@@ -88,7 +89,7 @@ class UartModeController {
 public:
     using Handoffs = xthread::Inbox<UartHandoff, kUartHandoffDepth>;
 
-    explicit UartModeController(Handoffs* inbox = nullptr) noexcept : inbox_(inbox) {}
+    explicit UartModeController(infra::OptRef<Handoffs> inbox = {}) noexcept : inbox_(inbox) {}
 
     [[nodiscard]] Ex<UartMode> probe_mode() const;
     [[nodiscard]] Ex<MidiLinkMode> probe_midilink() const;
@@ -148,7 +149,7 @@ private:
 
     void post_(const UartHandoff& h) noexcept;
 
-    Handoffs* const inbox_;
+    const infra::OptRef<Handoffs> inbox_;
     Rt rt_{};
 };
 

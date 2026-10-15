@@ -92,15 +92,15 @@ constexpr void to_json(infra::JsonOut& o, const SessView& v) noexcept {
 
 struct SessRecord {
     template <class T>
-    using Unbound = xthread::Telemetry<T, SeatTag::Unbound>;
+    using Main = xthread::Telemetry<T, SeatTag::Main>;
 
     static constexpr infra::JsonName kKey{"sess"};
     using View = SessView;
-    const Unbound<std::uint32_t>& pause_expiries;
-    const Unbound<std::uint32_t>& recover_polls;
-    const Unbound<std::uint32_t>& save_write_failures;
-    const Unbound<app::FallbackCounts>& fallbacks;
-    const Unbound<std::uint32_t>& ini_write_failures;
+    const Main<std::uint32_t>& pause_expiries;
+    const Main<std::uint32_t>& recover_polls;
+    const Main<std::uint32_t>& save_write_failures;
+    const Main<app::FallbackCounts>& fallbacks;
+    const Main<std::uint32_t>& ini_write_failures;
     [[nodiscard]] std::optional<View> sample(const RecordCtx& ctx) const noexcept {
         const app::DiagCounters& dc = ctx.dc;
         const app::FallbackCounts fb = fallbacks.sample().value;

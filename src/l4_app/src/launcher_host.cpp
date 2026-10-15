@@ -90,7 +90,7 @@ void LauncherHost::take_demand_() noexcept {
 }
 
 bool LauncherHost::hosting_() const noexcept {
-    if (demand_.profile == nullptr || !demand_.front_end || demand_.program.empty()) return false;
+    if (!demand_.profile || !demand_.front_end || demand_.program.empty()) return false;
     return escaped_gen_ != demand_.core_gen && given_up_gen_ != demand_.core_gen;
 }
 
@@ -107,7 +107,7 @@ void LauncherHost::serve() noexcept {
 
 void LauncherHost::step_() noexcept {
     take_demand_();
-    if (!swept_ && demand_.profile != nullptr && !demand_.program.empty()) sweep_stale_();
+    if (!swept_ && demand_.profile && !demand_.program.empty()) sweep_stale_();
     reap_();
     deliver_answers_();
     serve_lease_();
@@ -292,7 +292,7 @@ void LauncherHost::release_screen_(bool restore_console) noexcept {
     state_.settled = false;
     state_.scanout_owned = false;
     if (had) publish_();
-    if (restore_console && demand_.profile != nullptr) {
+    if (restore_console && demand_.profile) {
         const std::string tty(demand_.profile->tty);
         w_.console.restore_text(tty.c_str());
         if (prior_vt_ > 0) (void)w_.console.activate(prior_vt_);

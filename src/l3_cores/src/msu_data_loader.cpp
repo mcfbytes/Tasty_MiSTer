@@ -21,11 +21,13 @@ namespace {
 }  // namespace
 
 Ex<LoadPlan> MsuDataLoader::plan(const LoadAsk&, const proto::StatusWord&) {
+    TASTY_SEAT_BODY(MsuDataLoader);
     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
 }
 
 Ex<void> MsuDataLoader::place(const TransferRow&, std::span<const std::uint8_t> piece,
                               std::uint64_t off, ICoreWindow& window) {
+    TASTY_SEAT_BODY(MsuDataLoader);
     if (off < msu::kGapAt) {
         const auto n =
             static_cast<std::size_t>(std::min<std::uint64_t>(piece.size(), msu::kGapAt - off));

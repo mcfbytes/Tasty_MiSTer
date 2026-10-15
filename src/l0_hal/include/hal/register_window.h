@@ -67,14 +67,17 @@ public:
 
     class Transaction {
     public:
-        explicit Transaction(RegisterWindow& w) {
+        explicit Transaction(RegisterWindow& w)
 #ifndef NDEBUG
-            depth_ = &w.depth_;
-            if (*depth_ != 0) {
-                fatal(Error{Errc::bridge_state, ERR_SITE(), *depth_},
+            : depth_(w.depth_)
+#endif
+        {
+#ifndef NDEBUG
+            if (depth_ != 0) {
+                fatal(Error{Errc::bridge_state, ERR_SITE(), depth_},
                       "RegisterWindow: nested Transaction");
             }
-            ++*depth_;
+            ++depth_;
 #else
             (void)w;
 #endif
@@ -83,7 +86,7 @@ public:
         ~Transaction() {
             detail::regs_fence();
 #ifndef NDEBUG
-            --*depth_;
+            --depth_;
 #endif
         }
         Transaction(const Transaction&) = delete;
@@ -91,7 +94,7 @@ public:
 
 #ifndef NDEBUG
     private:
-        std::uint32_t* depth_ = nullptr;
+        std::uint32_t& depth_;
 #endif
     };
 

@@ -109,6 +109,7 @@ std::uint16_t PsxLadder::menu_file_index() const {
 }
 
 Ex<bool> PsxLadder::on_step() {
+    TASTY_SEAT_BODY(PsxLadder);
     switch (rung_) {
         case Rung::MountDisc: {
 

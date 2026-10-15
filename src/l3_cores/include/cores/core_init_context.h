@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "infra/opt_ref.h"
+
 namespace mister::hal {
 class ISpiTransport;
 }
@@ -17,7 +19,7 @@ struct CoreInitContext {
     hal::ISpiTransport& link;
     proto::CoreSession& session;
     CoreInitHost& host;
-    Core* core = nullptr;
+    infra::OptRef<Core> core{};
 };
 
 }  // namespace mister::cores

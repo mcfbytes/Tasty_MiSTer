@@ -65,18 +65,18 @@ public:
     static constexpr SeatTag kSeat = SeatTag::Diag;
 
     template <class T>
-    using Unbound = xthread::Telemetry<T, SeatTag::Unbound>;
+    using Main = xthread::Telemetry<T, SeatTag::Main>;
 
     struct DeviceCells {
-        const Unbound<std::uint32_t>& mgl_row0;
-        const Unbound<app::LoadWindowCounts>& window_counts;
+        const Main<std::uint32_t>& mgl_row0;
+        const Main<app::LoadWindowCounts>& window_counts;
         const app::BayCountsCell& bay_counts;
         const app::DiagCountersCell& diag;
-        const Unbound<std::uint32_t>& pause_expiries;
-        const Unbound<std::uint32_t>& recover_polls;
-        const Unbound<std::uint32_t>& save_write_failures;
-        const Unbound<app::FallbackCounts>& fallbacks;
-        const Unbound<std::uint32_t>& ini_write_failures;
+        const Main<std::uint32_t>& pause_expiries;
+        const Main<std::uint32_t>& recover_polls;
+        const Main<std::uint32_t>& save_write_failures;
+        const Main<app::FallbackCounts>& fallbacks;
+        const Main<std::uint32_t>& ini_write_failures;
         const app::DoorbellStatsCell& doorbell;
         const reactor::RoundTimingCell& round_timing;
         infra::OptRef<const reactor::FrameCell> frames{};
@@ -86,18 +86,18 @@ public:
     struct Sources {
         infra::OptRef<const app::CmdFifoCell> fifo{};
         infra::OptRef<const app::MglPumpCell> mgl{};
-        const Unbound<std::uint32_t>& mgl_row0;
-        const Unbound<app::LoadWindowCounts>& window_counts;
+        const Main<std::uint32_t>& mgl_row0;
+        const Main<app::LoadWindowCounts>& window_counts;
         const app::BayCountsCell& bay_counts;
         const app::VideoStatsCell& video_stats;
         const app::VideoGeometryCell& video_geometry;
         app::VideoWire& video_wire;
         const app::DiagCountersCell& diag;
-        const Unbound<std::uint32_t>& pause_expiries;
-        const Unbound<std::uint32_t>& recover_polls;
-        const Unbound<std::uint32_t>& save_write_failures;
-        const Unbound<app::FallbackCounts>& fallbacks;
-        const Unbound<std::uint32_t>& ini_write_failures;
+        const Main<std::uint32_t>& pause_expiries;
+        const Main<std::uint32_t>& recover_polls;
+        const Main<std::uint32_t>& save_write_failures;
+        const Main<app::FallbackCounts>& fallbacks;
+        const Main<std::uint32_t>& ini_write_failures;
         const app::DoorbellStatsCell& doorbell;
         const reactor::RoundTimingCell& round_timing;
         infra::OptRef<const reactor::FrameCell> frames{};
@@ -111,15 +111,16 @@ public:
         app::ScreenshotQueue& screenshots;
     };
 
-    DiagSampler(xthread::RtStats& stats, app::EventQueue& events, const Unbound<RtEvidence>& ev,
-                const xthread::WakeFlag& quiescing, const std::atomic<bool>& transitioning,
-                xthread::DiagLog& diag, xthread::LogLane& rt_lane, const Sources& sources) noexcept;
+    DiagSampler(xthread::RtStats& stats, app::EventQueue<SeatTag::RT>& events,
+                const Main<RtEvidence>& ev, const xthread::WakeFlag& quiescing,
+                const std::atomic<bool>& transitioning, xthread::DiagLog& diag,
+                xthread::LogLane& rt_lane, const Sources& sources) noexcept;
 
     DiagSampler(const DiagSampler&) = delete;
     DiagSampler& operator=(const DiagSampler&) = delete;
 
-    void set_input_build(app::InputBuild* build) noexcept {
-        input_build_ = infra::opt_ref_of(build);
+    void set_input_build(const infra::OptRef<app::InputBuild>& build) noexcept {
+        input_build_ = build;
     }
 
     void set_input_sample(const app::InputSample* s) noexcept { input_ = infra::opt_ref_of(s); }
@@ -199,10 +200,10 @@ private:
     unsigned rt_first_errno() const noexcept;
 
     xthread::RtStats& stats_;
-    app::EventQueue& events_;
+    app::EventQueue<SeatTag::RT>& events_;
 
-    const Unbound<RtEvidence>& ev_cell_;
-    Unbound<RtEvidence>::Reader ev_reader_{};
+    const Main<RtEvidence>& ev_cell_;
+    Main<RtEvidence>::Reader ev_reader_{};
 
     RtEvidence ev_{};
     const xthread::WakeFlag& quiescing_;
@@ -222,8 +223,8 @@ private:
     std::uint32_t shots_failed_ = 0;
     infra::OptRef<const app::CmdFifoCell> fifo_stats_{};
     infra::OptRef<const app::MglPumpCell> mgl_stats_{};
-    const xthread::Telemetry<std::uint32_t, SeatTag::Unbound>& mgl_row0_;
-    const xthread::Telemetry<app::LoadWindowCounts, SeatTag::Unbound>& window_counts_;
+    const xthread::Telemetry<std::uint32_t, SeatTag::Main>& mgl_row0_;
+    const xthread::Telemetry<app::LoadWindowCounts, SeatTag::Main>& window_counts_;
     const app::VideoStatsCell& video_stats_;
     const app::VideoGeometryCell& video_geo_;
     const app::DiagCountersCell& diag_cell_;
@@ -240,7 +241,7 @@ private:
 
     unsigned unchanged_streak_ = 0;
     std::uint32_t last_dump_ = 0;
-    std::uint32_t last_ev_loss_[app::EventQueue::kKinds] = {};
+    std::uint32_t last_ev_loss_[app::EventQueue<SeatTag::RT>::kKinds] = {};
     std::uint32_t last_hb_stalls_ = 0;
     std::uint32_t last_rss_over_ = 0;
     bool rss_over_now_ = false;

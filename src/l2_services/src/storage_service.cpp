@@ -196,7 +196,7 @@ void StorageService::on(const Req::Attach&, const Req::Head& h, Work& w) noexcep
         st = proto::StorageStatus::Refused;
     } else {
         io_.served[h.slot.v] = w.gen;
-        auto e = w.backend->open_extent();
+        auto e = w.backend->open_extent(w.order);
         if (e) {
             c.size = e->v;
         } else {
@@ -237,7 +237,8 @@ void StorageService::perform_(const Req& ask, Work& w) noexcept {
 void StorageService::serve() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(StorageService, A);
     if (Ctl::Job j = ctl_.take()) {
-        Work w{{}, j->answer, j->backend, j->gen};
+        Work w{
+            {}, j->answer, j->backend, j->gen, std::span<const std::byte>{j->order, j->order_len}};
         perform_(j->ask, w);
         if (w.performed) j.complete();
         return;
@@ -323,6 +324,7 @@ proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexc
 
                 l->backend = rt_.bound[s];
                 l->stage.reset();
+                l->order_len = 0;
                 rt_.bound[s].reset();
                 ++rt_.gen[s];
                 break;
@@ -389,22 +391,33 @@ std::span<std::uint8_t> StorageService::half_mut(proto::SlotIndex slot,
     return std::span<std::uint8_t>{l->data, kHalfBytes};
 }
 
-bool StorageService::stage_backend(proto::SlotIndex slot, IStorageBackend& backend) noexcept {
+bool StorageService::stage_backend(proto::SlotIndex slot, IStorageBackend& backend,
+                                   std::span<const std::byte> order) noexcept {
 
-    if (slot.v >= kSlots || !home_(slot.v)) {
+    if (slot.v >= kSlots || !home_(slot.v) || order.size() > kStorageOrderBytes) {
         refusals_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
     own_all_();
-    infra::OptRef<IStorageBackend>& staged = rt_.ctl_hands[slot.v]->stage;
+    BlockCtl& hand = *rt_.ctl_hands[slot.v];
+    infra::OptRef<IStorageBackend>& staged = hand.stage;
 
-    if (staged && &*staged == &backend) return true;
+    if (staged && &*staged == &backend) {
+        set_order_(hand, order);
+        return true;
+    }
     if (staged) {
         refusals_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
     staged = infra::OptRef<IStorageBackend>{backend};
+    set_order_(hand, order);
     return true;
+}
+
+void StorageService::set_order_(BlockCtl& hand, std::span<const std::byte> order) noexcept {
+    hand.order_len = static_cast<std::uint16_t>(order.size());
+    if (!order.empty()) std::memcpy(hand.order, order.data(), order.size());
 }
 
 bool StorageService::release_slot(proto::SlotIndex slot) noexcept {
@@ -413,7 +426,10 @@ bool StorageService::release_slot(proto::SlotIndex slot) noexcept {
         refusals_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
-    if (rt_.owned) rt_.ctl_hands[slot.v]->stage.reset();
+    if (rt_.owned) {
+        rt_.ctl_hands[slot.v]->stage.reset();
+        rt_.ctl_hands[slot.v]->order_len = 0;
+    }
     rt_.bound[slot.v].reset();
     return true;
 }

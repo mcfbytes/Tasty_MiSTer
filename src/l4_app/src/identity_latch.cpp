@@ -18,8 +18,9 @@ void copy_cstr(char (&dst)[SessionIdentity::kMax], std::string_view src) noexcep
 void IdentityLatch::publish(std::string_view core, std::string_view rbf, const RememberedStem& stem,
                             const svc::JoyPlan& joy, std::string_view j_names, bool front_end,
                             bool suppress_analog_followup,
-                            const svc::IAnalogReshape* analog_reshape, const char* cue_dir,
-                            const cores::CheatLookup* cheats,
+                            infra::OptRef<const svc::IAnalogReshape> analog_reshape,
+                            std::string_view cue_dir,
+                            infra::OptRef<const cores::CheatLookup> cheats,
                             std::span<const cores::FileSlot> slots, const GameId& game_id,
                             bool setname_same_dir, bool image_no_zip,
                             cores::PauseOnOsd pause) noexcept {

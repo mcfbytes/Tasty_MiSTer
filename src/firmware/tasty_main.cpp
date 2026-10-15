@@ -13,6 +13,7 @@
 #include "hal/board_profile.h"
 #include "hal/thread_map.h"
 #include "infra/error.h"
+#include "infra/seat.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 #include "tasty_cli.h"
@@ -72,6 +73,7 @@ int cmd_client(mister::fw::TastyVerb v) { return mister::fw::tasty_run_client(v)
 }  // namespace
 
 int main(int argc, char* argv[]) {
+    (void)mister::adopt_seat_tag(mister::SeatTag::Main);
     if (argc < 2) {
         mister::fw::tasty_print_usage();
         return 1;

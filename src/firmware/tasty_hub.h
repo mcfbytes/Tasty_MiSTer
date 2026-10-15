@@ -68,13 +68,15 @@ public:
     }
     app::UiRequestRing& ui_requests() noexcept { return device_.owner_.ui_requests(); }
 
-    app::LinkTxChannel& ui_link_tx() noexcept { return device_.ui_inbox_; }
+    app::LinkTxChannel<SeatTag::Ui>& ui_link_tx() noexcept { return device_.ui_inbox_; }
     [[nodiscard]] Ex<std::optional<app::UiRequest::LoadCore>> boot_link(
         std::span<const char* const> argv) {
         return device_.session_.boot(argv);
     }
     void seal_boot_pump() noexcept { device_.session_.seal_boot_pump(); }
-    [[nodiscard]] Ex<void> shutdown_link() { return device_.session_.shutdown(); }
+    [[nodiscard]] Ex<app::ExitReboot> shutdown_link() { return device_.session_.shutdown(); }
+
+    void release_link_bus() noexcept { device_.session_.release_bus(); }
     void settle_writes() noexcept { device_.session_.settle_writes(); }
     [[nodiscard]] app::SessionState session_state() const noexcept {
         return device_.session_.state();

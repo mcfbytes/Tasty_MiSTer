@@ -15,11 +15,12 @@
 #include "hal/phys_region.h"
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "infra/seat_owner_main.h"
 
 namespace mister::app {
 
 class ManifestLadder {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     enum class Pass : std::uint8_t { Stepped, Waiting, Done, Failed };
@@ -36,7 +37,7 @@ public:
     struct Host {
         LoadLadder::Host rung;
         cores::ILadderHost& owner;
-        ILoadWindowMap& map;
+        ILoadWindowMap<seat_owner::Main>& map;
         hal::PhysRegion aperture;
         LoadWindowCounts& windows;
         std::int64_t now_ns = 0;
@@ -47,7 +48,7 @@ public:
 
     [[nodiscard]] Pass step(Host& h);
 
-    [[nodiscard]] bool wants_pass(const LinkTxChannel& inbox,
+    [[nodiscard]] bool wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
                                   const FileTxLevelCell* level) const noexcept;
 
     [[nodiscard]] Pc pc() const noexcept { return pc_; }

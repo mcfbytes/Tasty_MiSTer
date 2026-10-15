@@ -46,8 +46,8 @@ std::span<const std::uint8_t> find_bytes(std::span<const std::uint8_t> hay,
 
 Ex<void> PsxCore::do_adopt(const CoreAdopt&) {
 
-    if (host().discs == nullptr) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    discs_ = infra::opt_ref_of(host().discs);
+    if (!host().discs) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    discs_ = host().discs;
     geom_ = discs_->geometry();
     return {};
 }

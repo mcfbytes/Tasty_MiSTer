@@ -25,6 +25,7 @@
 #include "process_main.h"
 #include "report.h"
 #include "app/board_ops.h"
+#include "app/board_reboot.h"
 #include "hal/board_profile.h"
 #include "hal/thread_map.h"
 #include "hal/board_windows.h"
@@ -275,10 +276,31 @@ void report_unknown_board(const hal::CompatibleBlob&) {
 
 enum class IoSeat : std::uint8_t { Stopped, Running };
 
+void reboot_at_exit(fw::TastyHub& hub, Ex<app::ExitReboot> sd) {
+    if (!sd) {
+        report("LinkSession::shutdown", sd.error());
+        return;
+    }
+    if (*sd != app::ExitReboot::Cold) return;
+    {
+        const mister::SeatScope main_as_main{mister::SeatTag::Main};
+        if (auto r = hub.owner().board_reboot().reboot(true); !r) {
+            report("BoardReboot::reboot", r.error());
+        }
+    }
+    const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
+    hub.release_link_bus();
+}
+
 int teardown(int rc, hal::ILinkPort& link, fw::TastyHub* hub, IoSeat io) {
     if (hub != nullptr) {
+        Ex<app::ExitReboot> sd = app::ExitReboot::None;
+        {
+            const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
+            sd = hub->shutdown_link();
+        }
+        reboot_at_exit(*hub, sd);
         const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
-        if (auto sd = hub->shutdown_link(); !sd) report("LinkSession::shutdown", sd.error());
         if (io == IoSeat::Stopped) hub->settle_writes();
     } else {
         fw::release_link(link);
@@ -571,16 +593,23 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
             report("LinkSession::boot", b.error());
             return teardown(1, link, hub.get(), IoSeat::Stopped);
         }
-        if (*b)
-            owner.service_boot(**b);
-        else
-            owner.expect_boot_negotiate();
+        {
+
+            const mister::SeatScope main_as_main{mister::SeatTag::Main};
+            if (*b)
+                owner.service_boot(**b);
+            else
+                owner.expect_boot_negotiate();
+        }
         bool boot_config_latched = false;
         for (;;) {
-            fw::ProcessMain::pass(owner);
-            if (!boot_config_latched && owner.boot_config_parsed()) {
-                boot_config_latched = true;
-                hub->latch_boot_config();
+            {
+                const mister::SeatScope main_as_main{mister::SeatTag::Main};
+                fw::ProcessMain::pass(owner);
+                if (!boot_config_latched && owner.boot_config_parsed()) {
+                    boot_config_latched = true;
+                    hub->latch_boot_config();
+                }
             }
             if (g_stop_requested.load(std::memory_order_seq_cst) != 0) {
                 hub->main_stop().request();
@@ -631,11 +660,13 @@ int mister::fw::tasty_run_owner(const TastyArgs& args) {
     }
     const auto ran = assembly.rt_result();
 
+    Ex<app::ExitReboot> sd = app::ExitReboot::None;
     {
         const mister::SeatScope shutdown_stands_in_for_rt{mister::SeatTag::RT};
         assembly.mark_quiescing();
-        if (auto sd = hub->shutdown_link(); !sd) report("LinkSession::shutdown", sd.error());
+        sd = hub->shutdown_link();
     }
+    reboot_at_exit(*hub, sd);
     assembly.stop();
     if (auto j = assembly.join(); !j) report("ThreadAssembly::join", j.error());
     if (assembly.io_wedged()) exit_io_wedged(assembly);

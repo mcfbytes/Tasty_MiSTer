@@ -166,8 +166,8 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/n64_options.h
   cores/n64_patch_table.h
   cores/n64_rom.h
-  cores/n64_save_binding.h
   cores/n64_save_layout.h
+  cores/n64_save_order.h
   cores/n64_save_port.h
   cores/n64_save_store.h
   cores/n64_save_type.h

@@ -12,7 +12,8 @@
 
 namespace mister::app {
 
-Ex<LoadLadder> LoadLadder::start(Job job, LoadWindow window, std::string_view path) {
+Ex<LoadLadder> LoadLadder::start(Job job, LoadWindow<seat_owner::Main> window,
+                                 std::string_view path) {
     const cores::TransferRow& r = job.row;
     const std::uint64_t placed = job.total * (r.stride == 0 ? 1u : r.stride);
     const std::uint64_t extent = r.extent != 0 ? r.extent : placed;
@@ -28,11 +29,11 @@ Ex<LoadLadder> LoadLadder::start(Job job, LoadWindow window, std::string_view pa
     if (!l.path_.assign(path)) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 1});
     l.extent_ = extent;
     l.buf_.resize(static_cast<std::size_t>(std::min<std::uint64_t>(
-        FileBytes::kPieceBytes, std::max<std::uint64_t>(l.job_.total, extent - placed))));
+        InternedFile::kPieceBytes, std::max<std::uint64_t>(l.job_.total, extent - placed))));
     return l;
 }
 
-bool LoadLadder::wants_pass(const LinkTxChannel& inbox,
+bool LoadLadder::wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
                             const FileTxLevelCell* level) const noexcept {
     if (pc_ == Pc::Over) return false;
     if (pc_ == Pc::AwaitOpen) {
@@ -110,7 +111,7 @@ LoadLadder::Pass LoadLadder::await_open_(Host& h) {
 LoadLadder::Pass LoadLadder::chunk_(Host& h) {
     const cores::TransferRow& row = job_.row;
 
-    const std::size_t cap = std::min(buf_.size(), FileBytes::kPieceBytes / row.stride);
+    const std::size_t cap = std::min(buf_.size(), InternedFile::kPieceBytes / row.stride);
     const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(cap, job_.total - off_));
     const std::span<std::uint8_t> piece(buf_.data(), n);
     std::size_t got = 0;

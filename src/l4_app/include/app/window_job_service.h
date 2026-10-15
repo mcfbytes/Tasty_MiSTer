@@ -37,11 +37,14 @@ class WindowJobService final : public svc::IIoCoworker {
 public:
     using Chan = xthread::LoanChannel<WindowJobSlot, 1, SeatTag::RT, SeatTag::Io>;
 
-    WindowJobService(const svc::Vfs& vfs, ILoadWindowMap& map, hal::PhysRegion aperture) noexcept
+    using Window = LoadWindow<seat_owner::Io>;
+
+    WindowJobService(const svc::Vfs& vfs, ILoadWindowMap<seat_owner::Io>& map,
+                     hal::PhysRegion aperture) noexcept
         : vfs_(&vfs), map_(&map), aperture_(aperture), chan_(xthread::Polled{}) {}
 
-    WindowJobService(const svc::Vfs& vfs, ILoadWindowMap& map, hal::PhysRegion aperture,
-                     xthread::WakeFlag& io_wake) noexcept
+    WindowJobService(const svc::Vfs& vfs, ILoadWindowMap<seat_owner::Io>& map,
+                     hal::PhysRegion aperture, xthread::WakeFlag& io_wake) noexcept
         : vfs_(&vfs), map_(&map), aperture_(aperture), chan_(io_wake) {}
 
     ~WindowJobService() override = default;
@@ -88,11 +91,11 @@ private:
     struct Io {
         Chan::Job job{};
         std::unique_ptr<cores::IWindowJob, DestroyInPlace> running{};
-        std::optional<LoadWindow> window{};
+        std::optional<Window> window{};
     };
 
     const svc::Vfs* vfs_;
-    ILoadWindowMap* map_;
+    ILoadWindowMap<seat_owner::Io>* map_;
     hal::PhysRegion aperture_;
     Rt rt_{};
     Chan chan_;

@@ -13,12 +13,13 @@
 #include "cores/companion_plan.h"
 #include "cores/loader.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::app {
 
 class CompanionWalk {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     enum class Pass : std::uint8_t { Stepped, Waiting, Done };
@@ -26,7 +27,7 @@ public:
 
     struct Host {
         LoadWalk::Host load;
-        CompanionHost::Binds* binds;
+        infra::OptRef<CompanionHost::Binds> binds{};
     };
 
     [[nodiscard]] static Ex<CompanionWalk> start(const cores::CompanionPlan& plan,
@@ -34,7 +35,7 @@ public:
                                                  std::unique_ptr<cores::ILoader> loader);
 
     [[nodiscard]] Pass step(Host& h);
-    [[nodiscard]] bool wants_pass(const LinkTxChannel& inbox,
+    [[nodiscard]] bool wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
                                   const FileTxLevelCell* level) const noexcept;
 
     [[nodiscard]] Pc pc() const noexcept { return pc_; }

@@ -23,7 +23,7 @@
 namespace mister::cores {
 
 class BootLadder {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     struct Report {

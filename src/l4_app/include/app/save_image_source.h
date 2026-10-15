@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -26,8 +27,8 @@ public:
 
     explicit SaveImageSource(const svc::Vfs& vfs) noexcept;
 
-    [[nodiscard]] bool bind(proto::SlotIndex slot, std::string_view path,
-                            bool manual = false) noexcept;
+    [[nodiscard]] bool bind(proto::SlotIndex slot, std::string_view path, bool manual = false,
+                            const cores::BlankSaveSpec& blank = {}) noexcept;
     std::string_view path_of(proto::SlotIndex slot) const;
 
     [[nodiscard]] bool manual(proto::SlotIndex slot) const noexcept;
@@ -36,8 +37,6 @@ public:
     [[nodiscard]] bool close_owed(proto::SlotIndex slot) const noexcept;
 
     void unbind_all();
-
-    void set_blank_pattern(proto::SlotIndex slot, const cores::BlankSaveSpec& spec);
 
     proto::SlotAttributes attributes(proto::SlotIndex slot) const override;
 
@@ -56,9 +55,11 @@ public:
 
     [[nodiscard]] svc::IStorageBackend* backend(proto::SlotIndex slot) noexcept;
 
+    [[nodiscard]] std::span<const std::byte> order(proto::SlotIndex slot) const noexcept;
+
 private:
     struct Binding {
-        svc::SlotPath path{};
+        svc::SlotPathText path{};
         bool exists = false;
         proto::FileSize size{};
         Attach attach = Attach::Detached;

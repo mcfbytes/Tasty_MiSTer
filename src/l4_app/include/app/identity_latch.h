@@ -27,8 +27,9 @@ public:
 
     void publish(std::string_view core, std::string_view rbf, const RememberedStem& stem,
                  const svc::JoyPlan& joy, std::string_view j_names, bool front_end,
-                 bool suppress_analog_followup, const svc::IAnalogReshape* analog_reshape,
-                 const char* cue_dir, const cores::CheatLookup* cheats,
+                 bool suppress_analog_followup,
+                 infra::OptRef<const svc::IAnalogReshape> analog_reshape, std::string_view cue_dir,
+                 infra::OptRef<const cores::CheatLookup> cheats,
                  std::span<const cores::FileSlot> slots, const GameId& game_id = {},
                  bool setname_same_dir = false, bool image_no_zip = false,
                  cores::PauseOnOsd pause = cores::PauseOnOsd::Option) noexcept;

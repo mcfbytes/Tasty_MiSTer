@@ -136,7 +136,8 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
                         .reader = infra::OptRef<svc::IDiscReader>{disc_store_},
                         .mounter = infra::OptRef<svc::IDiscMounter>{disc_store_}}),
       shots_(), surface_(), osd_wire_{surface_, plat.link},
-      ladder_{transitioning_, plat.bridges, infra::OptRef<reactor::RoundTimer>{plat.round_timer}},
+      ladder_{transitioning_, infra::OptRef<reactor::RoundTimer>{plat.round_timer}},
+      board_reset_{plat.bridges},
       parts_{
           .video = video_pump_.wire(),
           .input = input_wire_,
@@ -162,18 +163,18 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
           .cheats = cheat_link_,
           .bay = bay_,
           .bay_releases = bay_releases_,
-          .vfs = &plat.vfs,
-          .uart_handoffs = front.grants_uart ? &uart_handoffs_ : nullptr,
+          .vfs = infra::OptRef<const svc::Vfs>{plat.vfs},
+          .uart_handoffs = infra::opt_ref_of(front.grants_uart ? &uart_handoffs_ : nullptr),
           .stdout_routing = true,
           .doorbells = plat.doorbells,
           .fpga_mem = plat.fpga_mem,
           .lw_window = plat.lw_window,
           .doorbell_nodes = plat.doorbell_nodes,
-          .boot_handoff = plat.programmer.boot_handoff(),
 
-          .storage_channel = &storage_,
+          .storage_channel = infra::OptRef<proto::IStorageChannel>{storage_},
 
-          .board_ops = {.reset = &ladder_, .rt = &ladder_, .stop = &stop},
+          .board_ops = {.rt = infra::OptRef<app::IRtPriorityScope>{ladder_},
+                        .stop = infra::OptRef<app::IStopSignal>{stop}},
           .save_copy = infra::OptRef<const cores::SaveCopyCell>{save_copy_},
       },
       session_{plat.link, plat.link, plat.link, plat.fpga_mem.region, events_, parts_},
@@ -188,12 +189,13 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
                  .cheat_catalog_cell = cheat_catalog_,
                  .ladder_cell = ladder_cell_,
                  .main_wake = main_wake_,
-                 .ops = parts_.board_ops,
+
+                 .ops = {.reset = infra::OptRef<app::IBoardReset>{board_reset_}},
                  .boot_handoff =
                      plat.programmer.boot_handoff() != nullptr
                          ? infra::OptRef<hal::IBootHandoff>{*plat.programmer.boot_handoff()}
                          : infra::OptRef<hal::IBootHandoff>{},
-                 .launcher_demand = front.launcher_demand ? &*front.launcher_demand : nullptr,
+                 .launcher_demand = front.launcher_demand,
                  .launcher_wake = front.launcher_wake,
                  .programmer = bitstream_,
                  .storage = plat.vfs,
@@ -329,12 +331,8 @@ void DeviceBlock::open_seats(const BootParts& plat, const Seats& seats) noexcept
         if (storage_rides) session_.set_storage_lifecycle(&storage_);
     }
 
-    {
-
-        const mister::SeatScope asks_as_rt{mister::SeatTag::RT};
-        if (hal::IBootHandoff* page = plat.programmer.boot_handoff()) {
-            owner_.set_boot_cookie(page->handoff()->sdram_cfg);
-        }
+    if (hal::IBootHandoff* page = plat.programmer.boot_handoff()) {
+        owner_.set_boot_cookie(page->handoff()->sdram_cfg);
     }
 }
 

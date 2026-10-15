@@ -164,7 +164,8 @@ void InputEnumerator::apply_deadzones() noexcept {
 }
 
 Ex<void> InputEnumerator::load_maps_for(std::string_view core_in, bool front_end,
-                                        infra::OptRef<const IAnalogReshape> reshape) {
+                                        infra::OptRef<const IAnalogReshape> reshape,
+                                        const JoyPlan& joy) {
 
     const std::string_view core = front_end ? std::string_view{} : core_in;
 
@@ -201,7 +202,7 @@ Ex<void> InputEnumerator::load_maps_for(std::string_view core_in, bool front_end
                 wire = &zero_map;
             } else {
 
-                derived = rules::derive_joy_map(d.sys_map(), axis_emu, joy_plan_);
+                derived = rules::derive_joy_map(d.sys_map(), axis_emu, joy);
                 wire = &derived;
             }
         }
@@ -211,6 +212,7 @@ Ex<void> InputEnumerator::load_maps_for(std::string_view core_in, bool front_end
     }
     table_.mapped = mapped;
     reshape_ = reshape;
+    joy_plan_ = joy;
     return {};
 }
 

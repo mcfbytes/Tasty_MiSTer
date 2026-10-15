@@ -11,36 +11,29 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 
-namespace mister::hal {
-class IBridgeSequencer;
-}
 namespace mister::reactor {
 class RoundTimer;
 }
 
 namespace mister::fw {
 
-class LadderScope final : public app::IRtPriorityScope, public app::IBoardReset {
+class LadderScope final : public app::IRtPriorityScope {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
     static constexpr SeatTag kSeat = SeatTag::RT;
 
-    static constexpr unsigned kResetSettleMs = 5000;
-
-    LadderScope(std::atomic<bool>& transitioning, hal::IBridgeSequencer& bridges,
-                infra::OptRef<reactor::RoundTimer> timer = {}) noexcept
-        : transitioning_(transitioning), bridges_(bridges), timer_(timer) {}
+    explicit LadderScope(std::atomic<bool>& transitioning,
+                         infra::OptRef<reactor::RoundTimer> timer = {}) noexcept
+        : transitioning_(transitioning), timer_(timer) {}
     LadderScope(const LadderScope&) = delete;
     LadderScope& operator=(const LadderScope&) = delete;
 
     void relax() override;
     void restore() override;
-    void board_reset() override;
 
 private:
     std::atomic<bool>& transitioning_;
-    hal::IBridgeSequencer& bridges_;
     infra::OptRef<reactor::RoundTimer> timer_{};
     int saved_policy_ = SCHED_OTHER;
     sched_param saved_param_{};

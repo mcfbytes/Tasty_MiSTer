@@ -20,13 +20,16 @@ std::span<const std::byte> as_bytes_const(std::span<const std::uint8_t> s) noexc
 
 }  // namespace
 
-Ex<proto::FileSize> FileSlotBackend::open_extent() {
+Ex<proto::FileSize> FileSlotBackend::open_extent(std::span<const std::byte> order) {
     TASTY_SEAT_BODY(FileSlotBackend);
     file_.reset();
-    const std::string_view path = path_->path.view();
-    if (path.empty()) {
+    path_.clear();
+
+    if (!path_.assign(infra::as_text(order)) || path_.view().empty()) {
+        path_.clear();
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     }
+    const std::string_view path = path_.view();
 
     if (const std::size_t slash = path.rfind('/'); slash != std::string_view::npos && slash > 0) {
         (void)vfs_->ensure_dir(path.substr(0, slash));
@@ -64,7 +67,7 @@ Ex<std::size_t> FileSlotBackend::write_at(std::uint64_t offset, std::span<const 
 
 Ex<proto::FileSize> FileSlotBackend::create(std::span<const std::uint8_t> first) {
     TASTY_SEAT_BODY(FileSlotBackend);
-    const std::string_view path = path_->path.view();
+    const std::string_view path = path_.view();
     if (path.empty()) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 
     auto f = vfs_->open(path, OpenMode::Create);

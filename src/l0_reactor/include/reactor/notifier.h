@@ -49,7 +49,7 @@ constexpr Cause decode_cause(std::uint32_t word) noexcept {
 }
 
 class Notifier {
-    TASTY_SEAT_MEDIATOR(Any, RT);
+    TASTY_SEAT_MEDIATOR(Main, RT);
 
 public:
     [[nodiscard]] static Ex<Notifier> doorbell_adopt(

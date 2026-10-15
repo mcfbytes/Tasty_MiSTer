@@ -19,7 +19,7 @@
 namespace mister::cores {
 
 class AddressedLoad final : public ILoader {
-    TASTY_SEAT_EXEMPT(main);
+    TASTY_SEAT_RESIDENT(Main);
 
 public:
     explicit AddressedLoad(const hal::PhysRegion& aperture) noexcept : aperture_(aperture) {}
@@ -31,7 +31,10 @@ public:
     [[nodiscard]] Ex<LoadPlan> plan(const LoadAsk& ask, const proto::StatusWord& status) override;
     void shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t off) override;
     [[nodiscard]] Ex<void> finish(ICoreWindow* window) override;
-    [[nodiscard]] std::span<const std::uint8_t> facts() const noexcept override { return {}; }
+    [[nodiscard]] std::span<const std::uint8_t> facts() const noexcept override {
+        TASTY_SEAT_BODY(AddressedLoad);
+        return {};
+    }
 
 private:
     hal::PhysRegion aperture_;

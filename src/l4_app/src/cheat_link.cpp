@@ -30,7 +30,7 @@ void CheatLink::content_loaded(cores::Core* core, TxDigest::Kind kind, std::stri
 
 bool CheatLink::apply_cheats_counted(const CheatCall& call) noexcept {
     TASTY_SEAT_BODY(CheatLink);
-    if (call.core == nullptr) {
+    if (!call.core) {
         ++refusals_;
         return false;
     }

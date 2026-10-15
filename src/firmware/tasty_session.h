@@ -25,6 +25,7 @@
 
 namespace mister::app {
 class IdentityLatch;
+template <SeatTag Seat>
 class LinkTxChannel;
 class RecorderControl;
 class ReplayFeeder;
@@ -82,7 +83,7 @@ public:
         Replay& replay;
         app::RecorderControl& rec;
         app::UiRequestRing& asks;
-        app::LinkTxChannel& link_tx;
+        app::LinkTxChannel<SeatTag::Ui>& link_tx;
         const app::IdentityLatch& identity;
         const app::ReplayStatusCell& play;
         const app::RecorderStatusCell& recstat;
@@ -93,7 +94,7 @@ public:
         std::atomic<int>& exit_code;
         hal::PhysRegion video_fb{};
 
-        const xthread::Telemetry<std::uint8_t, SeatTag::Unbound>& direct_video_ini;
+        const xthread::Telemetry<std::uint8_t, SeatTag::Main>& direct_video_ini;
     };
 
     TastySession(const Wiring& w, const TastyArgs& args) noexcept;

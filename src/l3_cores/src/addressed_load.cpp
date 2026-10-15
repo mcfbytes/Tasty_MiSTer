@@ -24,6 +24,7 @@ std::optional<TransferRow> AddressedLoad::window_row(std::uint32_t addr, std::ui
 }
 
 Ex<LoadPlan> AddressedLoad::plan(const LoadAsk& ask, const proto::StatusWord&) {
+    TASTY_SEAT_BODY(AddressedLoad);
     LoadPlan p{};
     p.count = 1;
 
@@ -36,9 +37,14 @@ Ex<LoadPlan> AddressedLoad::plan(const LoadAsk& ask, const proto::StatusWord&) {
     return p;
 }
 
-void AddressedLoad::shape(const TransferRow&, std::span<std::uint8_t>, std::uint64_t) {}
+void AddressedLoad::shape(const TransferRow&, std::span<std::uint8_t>, std::uint64_t) {
+    TASTY_SEAT_BODY(AddressedLoad);
+}
 
-Ex<void> AddressedLoad::finish(ICoreWindow*) { return {}; }
+Ex<void> AddressedLoad::finish(ICoreWindow*) {
+    TASTY_SEAT_BODY(AddressedLoad);
+    return {};
+}
 
 std::unique_ptr<ILoader> make_addressed_load(const LoaderContext& ctx) {
     return std::make_unique<AddressedLoad>(ctx.aperture);

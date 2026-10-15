@@ -18,6 +18,7 @@
 #include "cores/core_support.h"
 #include "cores/generic_profile.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 
 namespace mister::cores {
 
@@ -33,7 +34,7 @@ struct CoreFactory {
 
     MakeCompanion make_companion = nullptr;
 
-    const IManifestDocRole* manifest_doc = nullptr;
+    infra::OptRef<const IManifestDocRole> manifest_doc{};
 };
 
 std::span<const CoreFactory> core_table();

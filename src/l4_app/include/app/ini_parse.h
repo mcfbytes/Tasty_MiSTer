@@ -15,7 +15,7 @@ class Vfs;
 
 namespace mister::app {
 
-using ConfigCell = xthread::Telemetry<svc::ConfigSnapshot>;
+using ConfigCell = xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>;
 
 [[nodiscard]] Ex<svc::ConfigSnapshot> parse_ini_for_core(const svc::Vfs* vfs,
                                                          const svc::ConfigSnapshot& defaults,

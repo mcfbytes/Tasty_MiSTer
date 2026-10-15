@@ -34,6 +34,9 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/rt_stats.h
   infra/seat.h
   infra/seat_main.h
+  infra/seat_owner_io.h
+  infra/seat_owner_main.h
+  infra/seat_owner_ui.h
   infra/seat_park.h
   infra/seq_cell.h
   infra/never_park.h

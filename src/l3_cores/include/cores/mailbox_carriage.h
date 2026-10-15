@@ -20,7 +20,7 @@ public:
 
     [[nodiscard]] static std::optional<MailboxCarriage> granted(
         const HostServices& h, proto::MailboxFrameDecl frame) noexcept {
-        if (h.mailbox == nullptr || h.fio_queue == nullptr) return std::nullopt;
+        if (!h.mailbox || !h.fio_queue) return std::nullopt;
         return std::optional<MailboxCarriage>{std::in_place, h.link, *h.mailbox, *h.fio_queue,
                                               frame};
     }

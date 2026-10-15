@@ -81,16 +81,19 @@ void Bridges::apply(std::span<const BridgeStep> steps) {
 }
 
 Ex<void> Bridges::pre_program() {
+    TASTY_SEAT_BODY(Bridges);
     apply(kDisableSequence);
     return {};
 }
 
 Ex<void> Bridges::post_program() {
+    TASTY_SEAT_BODY(Bridges);
     apply(kEnableSequence);
     return {};
 }
 
 Ex<void> Bridges::request_board_reset() {
+    TASTY_SEAT_BODY(Bridges);
     hal::RegisterWindow<RstMgr>::Transaction t(rst_);
     rst_.write(RstMgr::Reg::Ctrl, RstMgr::kResetRequest);
     return {};

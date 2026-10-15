@@ -9,7 +9,7 @@
 #include <string_view>
 #include <type_traits>
 
-#include "app/link_tx_channel.h"
+#include "app/link_tx_reader.h"
 #include "app/mra_facts.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
@@ -28,11 +28,10 @@ class SessionBindings {
 
 public:
     static constexpr std::size_t kIdentityNameCap = 64;
-    static constexpr std::size_t kButtonListCap = LinkTxChannel::Bytes::kBytes;
+    static constexpr std::size_t kButtonListCap = kLinkTxSlabBytes;
     static constexpr std::size_t kCapTokenCap = 96;
 
-    static constexpr std::size_t kDoorbellRows =
-        LinkTxChannel::Bytes::kBytes / sizeof(proto::IrqBinding);
+    static constexpr std::size_t kDoorbellRows = kLinkTxSlabBytes / sizeof(proto::IrqBinding);
 
     struct Identity {
         FixedStr<kIdentityNameCap, StrFit::Clip> core_name{};
@@ -62,18 +61,18 @@ public:
     };
 
     struct Mount {
-        decltype(FileBytes::Slot::path) path{};
+        decltype(InternedFile::path) path{};
         std::uint64_t size_bytes = 0;
     };
 
-    void bind_facts(const proto::LinkOp::BindFacts& op, const LinkTxChannel* inbox) noexcept;
-    void bind_identity(const proto::LinkOp::BindIdentity& op, const LinkTxChannel* inbox) noexcept;
-    void bind_uart(const proto::LinkOp::BindUart& op, const LinkTxChannel* inbox) noexcept;
+    void bind_facts(const proto::LinkOp::BindFacts& op, const ILinkTxReader* inbox) noexcept;
+    void bind_identity(const proto::LinkOp::BindIdentity& op, const ILinkTxReader* inbox) noexcept;
+    void bind_uart(const proto::LinkOp::BindUart& op, const ILinkTxReader* inbox) noexcept;
     void bind_doorbells(const proto::LinkOp::BindDoorbells& op,
-                        const LinkTxChannel* inbox) noexcept;
+                        const ILinkTxReader* inbox) noexcept;
 
     [[nodiscard]] static Ex<std::optional<Mount>> decode_mount(const proto::LinkOp::BindMount& op,
-                                                               const LinkTxChannel* inbox) noexcept;
+                                                               const ILinkTxReader* inbox) noexcept;
 
     void forget_core() noexcept {
         identity_.reset();
