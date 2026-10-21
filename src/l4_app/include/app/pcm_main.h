@@ -27,28 +27,41 @@ public:
         CompanionHost& host;
     };
 
-    PcmMain(PcmRingFeeder& feeder, xthread::ParkFds fds, PcmRingFeeder::Commands& commands,
-            std::optional<Mailbox> mailbox = std::nullopt,
-            infra::OptRef<xthread::WakeFlag> asker = {}) noexcept;
+    PcmMain(
+        PcmRingFeeder& feeder,
+        xthread::ParkFds fds,
+        PcmRingFeeder::Commands& commands,
+        std::optional<Mailbox> mailbox = std::nullopt,
+        infra::OptRef<xthread::WakeFlag> asker = {}
+    ) noexcept;
     PcmMain(const PcmMain&) = delete;
     PcmMain& operator=(const PcmMain&) = delete;
     PcmMain(PcmMain&&) = delete;
     PcmMain& operator=(PcmMain&&) = delete;
 
     void start() noexcept;
+
     void stop() noexcept { stop_.request(); }
 
     void serve() noexcept;
     [[nodiscard]] bool idle() const noexcept;
+
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
     [[nodiscard]] int park_ms() const noexcept { return feeder_.rest_ms(); }
+
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
+
     [[nodiscard]] bool paused() noexcept { return pause_.observe(pause_seen_, *this); }
+
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
+
     void settle() noexcept;
 
     void on_pause() noexcept;
+
     void on_resume() noexcept {}
+
     [[nodiscard]] bool quiescent() const noexcept { return true; }
 
     [[nodiscard]] xthread::PauseLatch& pause_latch() noexcept { return pause_; }
@@ -77,4 +90,4 @@ private:
 
 static_assert(xthread::SeatBody<PcmMain>);
 
-}  // namespace mister::app
+}

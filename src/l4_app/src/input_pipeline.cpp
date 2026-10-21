@@ -9,24 +9,44 @@
 
 namespace mister::app {
 
-static_assert(std::is_constructible_v<InputPipeline, InputDecode::Fds, InputWire&, InputBuild&,
-                                      InputEmit&, os::IClock&, InputDecode::Wiring>,
-              "the intended constructor must still exist");
-static_assert(!std::is_default_constructible_v<InputPipeline>,
-              "an unopened pipeline must have no representation");
+static_assert(
+    std::is_constructible_v<
+        InputPipeline,
+        InputDecode::Fds,
+        InputWire&,
+        InputBuild&,
+        InputEmit&,
+        os::IClock&,
+        InputDecode::Wiring>,
+    "the intended constructor must still exist"
+);
+static_assert(
+    !std::is_default_constructible_v<InputPipeline>,
+    "an unopened pipeline must have no representation"
+);
 
-InputPipeline::InputPipeline(InputDecode::Fds fds, InputWire& wire, InputBuild& build,
-                             InputEmit& emit, os::IClock& clock,
-                             InputDecode::Wiring decode_wiring) noexcept
-    : wire_(wire), build_(build), emit_(emit), service_(open_service_(build)),
+InputPipeline::InputPipeline(
+    InputDecode::Fds fds,
+    InputWire& wire,
+    InputBuild& build,
+    InputEmit& emit,
+    os::IClock& clock,
+    InputDecode::Wiring decode_wiring
+) noexcept
+    : wire_(wire),
+      build_(build),
+      emit_(emit),
+      service_(open_service_(build)),
       decode_(std::move(fds), wire, service_, build.tables(), clock, decode_wiring),
-      sample_{infra::OptRef<const InputDecode::CountsCell>{decode_.counts_cell()},
-              infra::OptRef<const InputEmit::CountsCell>{emit_.counts_cell()},
-              infra::OptRef<const InputWire>{wire_}} {}
+      sample_{
+          infra::OptRef<const InputDecode::CountsCell>{decode_.counts_cell()},
+          infra::OptRef<const InputEmit::CountsCell>{emit_.counts_cell()},
+          infra::OptRef<const InputWire>{wire_}
+      } {}
 
 svc::InputService InputPipeline::open_service_(InputBuild& build) noexcept {
     svc::InputService s = svc::InputService::create();
-    if (auto w = s.open_hotplug_watch(build.enumerator().input_dir()); !w) {
+    if (auto w = s.hotplug().open(build.enumerator().input_dir()); !w) {
         build.note_watch_failure();
     }
     return s;
@@ -53,7 +73,8 @@ void InputEmit::on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live) {
     }
 
     if (live) {
-        if (tick) ps2_.probe();
+        if (tick)
+            ps2_.probe();
         ps2_.service();
     }
     counts_cell_.publish(counts());
@@ -79,8 +100,10 @@ InputEmit::Counts InputEmit::counts() const noexcept {
 }
 
 InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view input_dir)
-    : wire_(wire), en_(svc::InputEnumerator::create(vfs)) {
-    if (!input_dir.empty()) en_.set_input_dir(input_dir);
+    : wire_(wire),
+      en_(svc::InputEnumerator::create(vfs)) {
+    if (!input_dir.empty())
+        en_.set_input_dir(input_dir);
 
     if (auto e = en_.enumerate(); !e) {
         InputWire::bump(n_enum_fail_, 1);
@@ -90,8 +113,10 @@ InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view in
 
     (void)hand_over_();
 
-    wire_.publish_gates(svc::InputService::kBornGrabbed ? InputWire::kGateGrabbed : 0u,
-                        InputWire::kGateOsdVisible);
+    wire_.publish_gates(
+        svc::InputService::kBornGrabbed ? InputWire::kGateGrabbed : 0u,
+        InputWire::kGateOsdVisible
+    );
 }
 
 void InputBuild::set_cfg_deadzone_rules(std::span<const svc::DeadzoneRule> rows) {
@@ -107,7 +132,8 @@ bool InputBuild::rebind_round() {
 
     TASTY_SEAT_BODY(InputBuild);
     tx_.reap();
-    if ((wire_.requests() & InputWire::kReqHotplug) == 0u) return false;
+    if ((wire_.requests() & InputWire::kReqHotplug) == 0u)
+        return false;
 
     if (!tx_.ready()) {
         wire_.note_rebuild_refused();
@@ -198,4 +224,4 @@ InputStats collect_input_stats(const InputSample& s, const InputBuild::Counts& b
     return out;
 }
 
-}  // namespace mister::app
+}

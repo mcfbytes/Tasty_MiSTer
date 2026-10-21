@@ -57,12 +57,14 @@ struct Event {
         kCount,
     };
     enum class ConfStrOnlyCause : std::uint8_t { RegistryMiss, NoStorage };
+
     struct Head {
         EmitSite site{};
         std::uint8_t pad_[2]{};
 
         CorrelationTag tag{};
     };
+
     static constexpr std::size_t kStore = 4;
 
     struct CoreLoaded {
@@ -71,41 +73,50 @@ struct Event {
         bool mgl_capable = false;
         bool front_end = false;
     };
+
     struct SessionFailed {
         static constexpr Kind kKind = Kind::SessionFailed;
         Errc why{};
     };
+
     struct SdActivity {
         static constexpr Kind kKind = Kind::SdActivity;
         std::uint8_t slot = 0;
     };
+
     struct InfoRequest {
         static constexpr Kind kKind = Kind::InfoRequest;
         InfoId id = InfoId::None;
     };
+
     struct ProgressUpdate {
         static constexpr Kind kKind = Kind::ProgressUpdate;
         std::uint16_t cur = 0;
         std::uint16_t max = 0;
     };
+
     struct DeadlineMiss {
         static constexpr Kind kKind = Kind::DeadlineMiss;
         std::uint16_t slot = 0;
     };
+
     struct RequestRefused {
         static constexpr Kind kKind = Kind::RequestRefused;
         UiRequest::Kind which{};
         std::uint8_t pad_ = 0;
         Errc why{};
     };
+
     struct ConfStrOnlySession {
         static constexpr Kind kKind = Kind::ConfStrOnlySession;
         ConfStrOnlyCause cause{};
     };
+
     struct SessionAdvisory {
         static constexpr Kind kKind = Kind::SessionAdvisory;
         Errc why{};
     };
+
     struct SessionEnded {
         static constexpr Kind kKind = Kind::SessionEnded;
     };
@@ -120,20 +131,34 @@ struct Event {
         static constexpr Kind kKind = Kind::RequestDone;
         UiRequest::Kind which{};
     };
-    using Alternatives =
-        std::tuple<CoreLoaded, SessionFailed, SdActivity, InfoRequest, ProgressUpdate, DeadlineMiss,
-                   RequestRefused, ConfStrOnlySession, SessionAdvisory, SessionEnded,
-                   RamImageDeclined, RequestDone>;
+
+    using Alternatives = std::tuple<
+        CoreLoaded,
+        SessionFailed,
+        SdActivity,
+        InfoRequest,
+        ProgressUpdate,
+        DeadlineMiss,
+        RequestRefused,
+        ConfStrOnlySession,
+        SessionAdvisory,
+        SessionEnded,
+        RamImageDeclined,
+        RequestDone>;
 
     Kind kind = Kind::CoreLoaded;
     std::uint8_t pad_[3]{};
     Head head{};
     alignas(4) std::array<std::byte, kStore> store{};
 };
-static_assert(infra::MessageSum<Event> && infra::HasHead<Event> &&
-              infra::alternatives_are_total<Event>());
-static_assert(sizeof(Event) == 16 && alignof(Event) == 4 && sizeof(Event::Head) == 8,
-              "16 B: the head at 4, a 4-byte store every alternative fits");
+
+static_assert(
+    infra::MessageSum<Event> && infra::HasHead<Event> && infra::alternatives_are_total<Event>()
+);
+static_assert(
+    sizeof(Event) == 16 && alignof(Event) == 4 && sizeof(Event::Head) == 8,
+    "16 B: the head at 4, a 4-byte store every alternative fits"
+);
 
 enum class Delivery : std::uint8_t {
     Hint,
@@ -159,9 +184,11 @@ inline constexpr auto kDeliveryTable = std::to_array<DeliveryRow>({
     {Event::Kind::RamImageDeclined, Delivery::Edge},
     {Event::Kind::RequestDone, Delivery::Edge},
 });
-static_assert(infra::rows_are_ordinal(kDeliveryTable),
-              "every Event::Kind needs exactly one kDeliveryTable row, at its "
-              "own ordinal: a new kind must DECLARE whether it is re-syncable");
+static_assert(
+    infra::rows_are_ordinal(kDeliveryTable),
+    "every Event::Kind needs exactly one kDeliveryTable row, at its "
+    "own ordinal: a new kind must DECLARE whether it is re-syncable"
+);
 inline constexpr std::size_t kDeliveryRows = kDeliveryTable.size();
 
 constexpr Delivery delivery_of(Event::Kind k) noexcept {
@@ -172,15 +199,20 @@ constexpr Delivery delivery_of(Event::Kind k) noexcept {
 template <SeatTag Producer>
 class EventQueue {
     TASTY_SEAT_MEDIATOR(Any, Ui);
-    static_assert(Producer != SeatTag::Ui && Producer != SeatTag::Unbound,
-                  "the producer is a named seat other than T-UI, which drains");
+    static_assert(
+        Producer != SeatTag::Ui && Producer != SeatTag::Unbound,
+        "the producer is a named seat other than T-UI, which drains"
+    );
 
 public:
     static constexpr std::size_t kCapacity = 256;
 
     static constexpr std::size_t kKinds = static_cast<std::size_t>(Event::Kind::kCount);
-    static_assert(kKinds == 12, "Event::Kind changed cardinality: audit loss_[] consumers "
-                                "and update this pin");
+    static_assert(
+        kKinds == 12,
+        "Event::Kind changed cardinality: audit loss_[] consumers "
+        "and update this pin"
+    );
 
     [[nodiscard]] bool push(const Event& e) noexcept;
 
@@ -189,6 +221,7 @@ public:
     std::uint32_t losses(Event::Kind k) const noexcept;
 
     std::uint32_t losses(Delivery d) const noexcept;
+
     std::size_t depth() const noexcept { return ring_.size(); }
 
 private:
@@ -200,4 +233,4 @@ private:
 extern template class EventQueue<SeatTag::RT>;
 extern template class EventQueue<SeatTag::Main>;
 
-}  // namespace mister::app
+}

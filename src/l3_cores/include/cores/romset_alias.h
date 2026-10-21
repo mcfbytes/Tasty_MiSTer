@@ -11,4 +11,4 @@ struct RomsetAlias {
     std::optional<std::string> alias;
 };
 
-}  // namespace mister::cores
+}

@@ -13,6 +13,7 @@
 #include "app/load_key.h"
 #include "app/load_window.h"
 #include "app/path_text.h"
+#include "app/rung.h"
 #include "cores/loader.h"
 #include "cores/transfer_row.h"
 #include "infra/error.h"
@@ -21,7 +22,7 @@
 
 namespace mister::app {
 
-class LoadLadder {
+class LoadLadder final : public Rung {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
@@ -62,16 +63,29 @@ public:
         std::uint64_t save_bytes = 0;
     };
 
-    [[nodiscard]] static Ex<LoadLadder> start(Job job, LoadWindow<seat_owner::Main> window,
-                                              std::string_view path);
+    [[nodiscard]] static Ex<LoadLadder> start(
+        Job job,
+        LoadWindow<seat_owner::Main> window,
+        std::string_view path
+    );
 
     [[nodiscard]] Pass step(Host& h);
 
-    [[nodiscard]] bool wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
-                                  const FileTxLevelCell* level) const noexcept;
+    [[nodiscard]] bool wants_pass(
+        const LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell* level
+    ) const noexcept;
+
+    [[nodiscard]] bool wants_pass(
+        const LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell& level
+    ) const noexcept override;
+    [[nodiscard]] Rung::Pass step(const RungEdges& edges, cores::ILadderHost& owner) override;
 
     [[nodiscard]] Pc pc() const noexcept { return pc_; }
+
     [[nodiscard]] std::uint64_t written() const noexcept { return off_; }
+
     [[nodiscard]] const cores::ILoader& loader() const noexcept { return *job_.loader; }
 
     [[nodiscard]] std::unique_ptr<cores::ILoader> take_loader() && noexcept {
@@ -80,7 +94,9 @@ public:
 
 private:
     LoadLadder(Job job, LoadWindow<seat_owner::Main> window) noexcept
-        : job_(std::move(job)), window_(std::move(window)), key_(job_.total) {}
+        : job_(std::move(job)),
+          window_(std::move(window)),
+          key_(job_.total) {}
 
     [[nodiscard]] Pass open_(Host& h);
     [[nodiscard]] Pass await_open_(Host& h);
@@ -108,4 +124,4 @@ private:
     Pc pc_ = Pc::Open;
 };
 
-}  // namespace mister::app
+}

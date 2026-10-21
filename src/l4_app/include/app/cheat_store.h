@@ -29,8 +29,11 @@ class CheatStore {
 public:
     CheatStore(const svc::Vfs& vfs, CheatBlobCell& cell) noexcept : vfs_(&vfs), blob_cell_(&cell) {}
 
-    [[nodiscard]] Ex<void> open(const TxDigest& d, std::string_view core,
-                                const cores::CheatLookup& look);
+    [[nodiscard]] Ex<void> open(
+        const TxDigest& d,
+        std::string_view core,
+        const cores::CheatLookup& look
+    );
 
     void take(const CheatCatalog& cat);
 
@@ -47,12 +50,15 @@ public:
         TASTY_SEAT_BODY(CheatStore);
         return loaded_;
     }
+
     [[nodiscard]] std::uint32_t unit() const noexcept {
         TASTY_SEAT_BODY(CheatStore);
         return geom_.unit;
     }
+
     [[nodiscard]] CheatRow row(std::size_t i) const noexcept;
     [[nodiscard]] std::span<const std::uint8_t> blob() const noexcept;
+
     [[nodiscard]] std::string_view archive() const noexcept {
         TASTY_SEAT_BODY(CheatStore);
         return archive_;
@@ -67,6 +73,7 @@ public:
         TASTY_SEAT_BODY(CheatStore);
         return refusals_;
     }
+
     [[nodiscard]] std::uint32_t opens() const noexcept {
         TASTY_SEAT_BODY(CheatStore);
         return opens_;
@@ -88,4 +95,4 @@ private:
     std::uint32_t opens_ = 0;
 };
 
-}  // namespace mister::app
+}

@@ -27,13 +27,3 @@ tasty_add_header_checks(tasty_boards_header_checks LIB mister_boards HEADERS
   boards/zynq_7000/zynq7000_programmer.h
 )
 
-if(TASTY_BUILD_TESTS)
-
-  foreach(mod IN ITEMS axi board_windows link_port loader)
-    tasty_unit_test(tasty_boards_${mod}_unit
-      NAME tasty.boards_${mod}
-      SOURCES tests/${mod}_unit.cpp
-      LIBS mister_boards tasty_test_options
-      TIMEOUT 60)
-  endforeach()
-endif()

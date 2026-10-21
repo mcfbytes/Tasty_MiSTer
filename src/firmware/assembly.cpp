@@ -46,7 +46,9 @@ namespace mister::fw {
 
 namespace {
 
-long sys_gettid() noexcept { return static_cast<long>(::syscall(SYS_gettid)); }
+long sys_gettid() noexcept {
+    return static_cast<long>(::syscall(SYS_gettid));
+}
 
 std::unexpected<Error> os_error(std::uint16_t site, int err) {
     return std::unexpected(Error{Errc::os, site, static_cast<std::uint32_t>(err)});
@@ -64,13 +66,15 @@ void sleep_ns(long ns) noexcept {
 
 [[nodiscard]] Ex<std::size_t> read_proc(const char* path, std::span<char> buf) {
     const auto got = os::read_small_file(path, buf.first(buf.size() - 1));
-    if (!got) return std::unexpected(got.error());
+    if (!got)
+        return std::unexpected(got.error());
     buf[*got] = '\0';
     return *got;
 }
 
 [[nodiscard]] std::optional<std::uint64_t> parse_u64(const char* s) noexcept {
-    if (s == nullptr || *s < '0' || *s > '9') return std::nullopt;
+    if (s == nullptr || *s < '0' || *s > '9')
+        return std::nullopt;
     std::uint64_t v = 0;
     while (*s >= '0' && *s <= '9') {
         v = v * 10u + static_cast<std::uint64_t>(*s - '0');
@@ -90,8 +94,14 @@ void confirm_current_cpu(int cpu, RtSetup& out) noexcept {
     out = RtSetup{exact, exact ? 0 : ERANGE};
 }
 
-[[nodiscard]] Ex<void> spawn_seat(const hal::ThreadRole& r, void* (*fn)(void*), void* arg,
-                                  pthread_t& out, RtMode mode, RtSetup& sched_ev) {
+[[nodiscard]] Ex<void> spawn_seat(
+    const hal::ThreadRole& r,
+    void* (*fn)(void*),
+    void* arg,
+    pthread_t& out,
+    RtMode mode,
+    RtSetup& sched_ev
+) {
     pthread_attr_t attr;
     if (const int rc = ::pthread_attr_init(&attr); rc != 0) {
         return os_error(ERR_SITE(), rc);
@@ -102,8 +112,10 @@ void confirm_current_cpu(int cpu, RtSetup& out) noexcept {
     CPU_SET(static_cast<std::size_t>(r.cpu), &set);
     (void)::pthread_attr_setaffinity_np(&attr, sizeof set, &set);
     (void)::pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
-    (void)::pthread_attr_setschedpolicy(&attr, r.policy == hal::SchedPolicy::Fifo ? SCHED_FIFO
-                                                                                  : SCHED_OTHER);
+    (void)::pthread_attr_setschedpolicy(
+        &attr,
+        r.policy == hal::SchedPolicy::Fifo ? SCHED_FIFO : SCHED_OTHER
+    );
     sched_param sp{};
     sp.sched_priority = r.prio;
     (void)::pthread_attr_setschedparam(&attr, &sp);
@@ -134,28 +146,33 @@ void confirm_current_cpu(int cpu, RtSetup& out) noexcept {
     (void)::pthread_attr_setaffinity_np(&attr, sizeof set, &set);
     rc = ::pthread_create(&out, &attr, fn, arg);
     (void)::pthread_attr_destroy(&attr);
-    if (rc != 0) return os_error(ERR_SITE(), rc);
+    if (rc != 0)
+        return os_error(ERR_SITE(), rc);
     return {};
 }
 
 template <class Ready>
 [[nodiscard]] Ex<void> await_published(Ready ready) {
     for (int spins = 0; spins < 200'000; ++spins) {
-        if (ready()) return {};
+        if (ready())
+            return {};
         (void)::sched_yield();
-        if ((spins & 0x3FF) == 0x3FF) sleep_ns(1'000'000);
+        if ((spins & 0x3FF) == 0x3FF)
+            sleep_ns(1'000'000);
     }
     return std::unexpected(Error{Errc::timeout, ERR_SITE(), 0});
 }
 
-}  // namespace
+}
 
 [[nodiscard]] Ex<void> rt_memory_init(RtMode mode, RtEvidence& ev) {
 
     ev.kernel = os::read_kernel_rt(os::kRealtimeFlagPath);
     ev.kernel_rt = RtSetup{ev.kernel == os::KernelRt::PreemptRt, 0};
-    ev.vm_compaction =
-        os::read_vm_compaction(os::kCompactUnevictablePath, os::kCompactionProactivenessPath);
+    ev.vm_compaction = os::read_vm_compaction(
+        os::kCompactUnevictablePath,
+        os::kCompactionProactivenessPath
+    );
 
 #if defined(__GLIBC__)
     ev.trim_pin = RtSetup{::mallopt(M_TRIM_THRESHOLD, -1) == 1, 0};
@@ -186,16 +203,29 @@ void warn_vm_compaction(const os::VmCompaction& vm, const char* prog, std::FILE*
         const char* effect;
         const char* path;
     };
+
     const Row rows[] = {
-        {vm.unevictable_allowed, "vm.compact_unevictable_allowed",
-         "the kernel may move locked memory", os::kCompactUnevictablePath},
-        {vm.proactiveness, "vm.compaction_proactiveness",
-         "background compaction may move locked memory", os::kCompactionProactivenessPath},
+        {vm.unevictable_allowed,
+         "vm.compact_unevictable_allowed",
+         "the kernel may move locked memory",
+         os::kCompactUnevictablePath},
+        {vm.proactiveness,
+         "vm.compaction_proactiveness",
+         "background compaction may move locked memory",
+         os::kCompactionProactivenessPath},
     };
     for (const Row& r : rows) {
-        if (!r.value || *r.value == 0) continue;
-        std::fprintf(out, "%s: warning: %s=%ld: %s and stall real-time I/O; fix: echo 0 > %s\n",
-                     prog, r.name, *r.value, r.effect, r.path);
+        if (!r.value || *r.value == 0)
+            continue;
+        std::fprintf(
+            out,
+            "%s: warning: %s=%ld: %s and stall real-time I/O; fix: echo 0 > %s\n",
+            prog,
+            r.name,
+            *r.value,
+            r.effect,
+            r.path
+        );
     }
 }
 
@@ -244,8 +274,12 @@ void pin_current_cpu(int cpu, RtSetup& out) noexcept {
     confirm_current_cpu(cpu, out);
 }
 
-[[nodiscard]] Ex<void> verify_cpu_topology(const hal::ThreadMap& m, long online_cpus, RtMode mode,
-                                           RtEvidence& ev) noexcept {
+[[nodiscard]] Ex<void> verify_cpu_topology(
+    const hal::ThreadMap& m,
+    long online_cpus,
+    RtMode mode,
+    RtEvidence& ev
+) noexcept {
     ev.online_cpus = online_cpus;
     if (online_cpus <= 0) {
 
@@ -270,20 +304,27 @@ void pin_current_cpu(int cpu, RtSetup& out) noexcept {
 bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
     cpu_set_t set;
     CPU_ZERO(&set);
-    if (::sched_getaffinity(0, sizeof set, &set) != 0) return false;
+    if (::sched_getaffinity(0, sizeof set, &set) != 0)
+        return false;
     for (const hal::ThreadRole& r : m) {
-        if (r.cpu < 0 || r.cpu >= CPU_SETSIZE) return false;
-        if (CPU_ISSET(static_cast<std::size_t>(r.cpu), &set) == 0) return false;
+        if (r.cpu < 0 || r.cpu >= CPU_SETSIZE)
+            return false;
+        if (CPU_ISSET(static_cast<std::size_t>(r.cpu), &set) == 0)
+            return false;
     }
     return true;
 }
 
-[[nodiscard]] Ex<void> rt_topology_init(const hal::ThreadMap& m, RtMode mode,
-                                        RtEvidence& ev) noexcept {
+[[nodiscard]] Ex<void> rt_topology_init(
+    const hal::ThreadMap& m,
+    RtMode mode,
+    RtEvidence& ev
+) noexcept {
     errno = 0;
     const long online = ::sysconf(_SC_NPROCESSORS_ONLN);
     auto r = verify_cpu_topology(m, online, mode, ev);
-    if (r) return r;
+    if (r)
+        return r;
 
     if (cpus_in_affinity_mask(m)) {
 
@@ -298,11 +339,13 @@ bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
     std::snprintf(path, sizeof path, "/proc/self/task/%ld/stat", tid);
     char buf[1024];
     auto n = read_proc(path, std::span(buf));
-    if (!n) return std::unexpected(n.error());
+    if (!n)
+        return std::unexpected(n.error());
 
     const char* p = nullptr;
     for (const char* s = buf; *s != '\0'; ++s) {
-        if (*s == ')') p = s;
+        if (*s == ')')
+            p = s;
     }
     if (p == nullptr) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
@@ -313,16 +356,19 @@ bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
     while (*p != '\0') {
         while (*p == ' ')
             ++p;
-        if (*p == '\0' || *p == '\n') break;
+        if (*p == '\0' || *p == '\n')
+            break;
         const char* start = p;
         while (*p != '\0' && *p != ' ' && *p != '\n')
             ++p;
-        if (token == 0) info.state = *start;
+        if (token == 0)
+            info.state = *start;
         if (token == 37 || token == 38) {
             const auto v = parse_u64(start);
             if (!v) {
                 return std::unexpected(
-                    Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(token)});
+                    Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(token)}
+                );
             }
             if (token == 37)
                 info.rt_priority = static_cast<int>(*v);
@@ -333,7 +379,8 @@ bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
     }
     if (info.policy < 0 || info.rt_priority < 0) {
         return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(token)});
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(token)}
+        );
     }
 
     std::snprintf(path, sizeof path, "/proc/self/task/%ld/wchan", tid);
@@ -350,7 +397,8 @@ bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
 [[nodiscard]] Ex<std::uint64_t> read_vm_rss_bytes() {
     char buf[4096];
     auto n = read_proc("/proc/self/status", std::span(buf));
-    if (!n) return std::unexpected(n.error());
+    if (!n)
+        return std::unexpected(n.error());
     const char* key = "VmRSS:";
     for (const char* s = buf; *s != '\0'; ++s) {
         const char* k = key;
@@ -359,7 +407,8 @@ bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
             ++t;
             ++k;
         }
-        if (*k != '\0') continue;
+        if (*k != '\0')
+            continue;
         while (*t == ' ' || *t == '\t')
             ++t;
         const auto kb = parse_u64(t);
@@ -375,6 +424,7 @@ struct ThreadAssembly::SeatTable {
     struct Entry {
         void* (*body)(void*) = nullptr;
     };
+
     using Entries = std::array<Entry, hal::kThreadSeats>;
 
     template <class... Rows>
@@ -389,34 +439,72 @@ struct ThreadAssembly::SeatTable {
     static const Entry& of(SeatTag s) noexcept { return kSeatEntries[seat_index(s)]; }
 };
 
-constexpr ThreadAssembly::SeatTable::Entries ThreadAssembly::SeatTable::kSeatEntries =
-    ThreadAssembly::SeatTable::make(SeatMainList{});
+constexpr ThreadAssembly::SeatTable::Entries
+    ThreadAssembly::SeatTable::kSeatEntries = ThreadAssembly::SeatTable::make(SeatMainList{});
 
-ThreadAssembly::ThreadAssembly(const hal::ThreadMap& threads, xthread::RtStats& stats,
-                               app::EventQueue<SeatTag::RT>& events, RtEvidence& boot,
-                               xthread::WakeFlag& main_wake, const DiagWires& diag,
-                               const UiMain::Wires& ui_wires, const UiMain::Wiring& ui,
-                               const DiagSampler::Sources& diag_sources) noexcept
-    : ev_(boot), threads_(threads), main_wake_(main_wake),
-      diag_sampler_(stats, events, ev_cell_, quiescing_, diag.transitioning, diag.log, diag.rt_lane,
-                    with_ui_cells_(diag_sources, ui)) {
+ThreadAssembly::ThreadAssembly(
+    const hal::ThreadMap& threads,
+    xthread::RtStats& stats,
+    app::EventQueue<SeatTag::RT>& events,
+    RtEvidence& boot,
+    xthread::WakeFlag& main_wake,
+    const DiagWires& diag,
+    const UiMain::Wires& ui_wires,
+    const UiMain::Wiring& ui,
+    const DiagSampler::Sources& diag_sources,
+    const DiagSampler::Services& diag_services
+) noexcept
+    : ev_(boot),
+      threads_(threads),
+      main_wake_(main_wake),
+      diag_sampler_(
+          stats,
+          events,
+          ev_cell_,
+          quiescing_,
+          diag.transitioning,
+          diag.log,
+          diag.rt_lane,
+          with_ui_cells_(diag_sources, ui),
+          diag_services
+      ) {
     create_mains_(events, ui_wires, ui);
 }
 
-ThreadAssembly::ThreadAssembly(xthread::RtStats& stats, app::EventQueue<SeatTag::RT>& events,
-                               const UiMain::Wiring& ui, const DiagSampler::Sources& diag) noexcept
-    : ev_(own_ev_), threads_(hal::kDe10ThreadMap), main_wake_(own_main_wake_),
+ThreadAssembly::ThreadAssembly(
+    xthread::RtStats& stats,
+    app::EventQueue<SeatTag::RT>& events,
+    const UiMain::Wiring& ui,
+    const DiagSampler::Sources& diag,
+    const DiagSampler::Services& services
+) noexcept
+    : ev_(own_ev_),
+      threads_(hal::kDe10ThreadMap),
+      main_wake_(own_main_wake_),
       own_wires_(std::make_unique<OwnWires>()),
-      diag_sampler_(stats, events, ev_cell_, quiescing_, own_wires_->transitioning, own_wires_->log,
-                    own_wires_->rt_lane, with_ui_cells_(diag, ui)) {
+      diag_sampler_(
+          stats,
+          events,
+          ev_cell_,
+          quiescing_,
+          own_wires_->transitioning,
+          own_wires_->log,
+          own_wires_->rt_lane,
+          with_ui_cells_(diag, ui),
+          services
+      ) {
     create_mains_(events, UiMain::Wires{own_wires_->ui_wake, own_wires_->uart_handoffs}, ui);
 }
 
-void ThreadAssembly::publish_evidence_() noexcept { ev_cell_.publish(ev_); }
+void ThreadAssembly::publish_evidence_() noexcept {
+    ev_cell_.publish(ev_);
+}
 
-void ThreadAssembly::create_mains_(app::EventQueue<SeatTag::RT>& events,
-                                   const UiMain::Wires& ui_wires,
-                                   const UiMain::Wiring& ui) noexcept {
+void ThreadAssembly::create_mains_(
+    app::EventQueue<SeatTag::RT>& events,
+    const UiMain::Wires& ui_wires,
+    const UiMain::Wiring& ui
+) noexcept {
     auto diag_fds = xthread::ParkFds::create(diag_wake_);
     if (!diag_fds) {
         born_ = std::unexpected(diag_fds.error());
@@ -435,35 +523,50 @@ void ThreadAssembly::create_mains_(app::EventQueue<SeatTag::RT>& events,
 
 bool ThreadAssembly::any_live() const noexcept {
     for (const bool live : live_) {
-        if (live) return true;
+        if (live)
+            return true;
     }
     return false;
 }
 
-ThreadAssembly::~ThreadAssembly() { stop_join_or_exit(); }
-
-namespace {
-constexpr ThreadAssembly::StopBudget kShippingBudget{.rt_ns = kRtStopDeadlineNs,
-                                                     .io_ns = kIoStopDeadlineNs};
+ThreadAssembly::~ThreadAssembly() {
+    stop_join_or_exit();
 }
 
-void ThreadAssembly::stop_join_or_exit() noexcept { stop_join_or_exit(kShippingBudget); }
+namespace {
+constexpr ThreadAssembly::StopBudget kShippingBudget{
+    .rt_ns = kRtStopDeadlineNs,
+    .io_ns = kIoStopDeadlineNs
+};
+}
+
+void ThreadAssembly::stop_join_or_exit() noexcept {
+    stop_join_or_exit(kShippingBudget);
+}
 
 void ThreadAssembly::stop_join_or_exit(StopBudget budget) noexcept {
-    if (!any_live()) return;
+    if (!any_live())
+        return;
     stop();
     (void)join(budget);
-    if (any_live()) exit_seats_live_();
+    if (any_live())
+        exit_seats_live_();
 }
 
 void ThreadAssembly::exit_seats_live_() const noexcept {
     for (const SeatTag s : kJoinOrder) {
-        if (!live_[seat_index(s)]) continue;
+        if (!live_[seat_index(s)])
+            continue;
         char line[128];
-        const int n = std::snprintf(line, sizeof line,
-                                    "{\"t\":\"wedge\",\"seat\":\"%s\",\"tid\":%ld,"
-                                    "\"at\":\"teardown\",\"exit\":%d}\n",
-                                    seat_name(s), tid(s), kRtWedgeExitStatus);
+        const int n = std::snprintf(
+            line,
+            sizeof line,
+            "{\"t\":\"wedge\",\"seat\":\"%s\",\"tid\":%ld,"
+            "\"at\":\"teardown\",\"exit\":%d}\n",
+            seat_name(s),
+            tid(s),
+            kRtWedgeExitStatus
+        );
         if (n > 0) {
             const auto len = std::min(static_cast<std::size_t>(n), sizeof line - 1);
             const auto w = ::write(STDERR_FILENO, line, len);
@@ -473,8 +576,10 @@ void ThreadAssembly::exit_seats_live_() const noexcept {
     ::_exit(kRtWedgeExitStatus);
 }
 
-DiagSampler::Sources ThreadAssembly::with_ui_cells_(DiagSampler::Sources s,
-                                                    const UiMain::Wiring& ui) noexcept {
+DiagSampler::Sources ThreadAssembly::with_ui_cells_(
+    DiagSampler::Sources s,
+    const UiMain::Wiring& ui
+) noexcept {
     return DiagSampler::Sources{
         .fifo = infra::opt_ref_of(ui.fifo ? &ui.fifo->stats_cell() : nullptr),
         .mgl = infra::opt_ref_of(ui.mgl ? &ui.mgl->stats_cell() : nullptr),
@@ -506,7 +611,8 @@ DiagSampler::Sources ThreadAssembly::with_ui_cells_(DiagSampler::Sources s,
 
 std::array<char, hal::kCommNameMax + 1> ThreadAssembly::process_comm_() noexcept {
     std::array<char, hal::kCommNameMax + 1> out{};
-    if (::prctl(PR_GET_NAME, out.data(), 0, 0, 0) != 0) out.fill('\0');
+    if (::prctl(PR_GET_NAME, out.data(), 0, 0, 0) != 0)
+        out.fill('\0');
     return out;
 }
 
@@ -530,7 +636,8 @@ void ThreadAssembly::adopt_seat(SeatTag s) noexcept {
 
 template <class Row>
 void ThreadAssembly::stop_one_() noexcept {
-    if (auto* m = mains_.get<typename Row::Main>(); m != nullptr) m->stop();
+    if (auto* m = mains_.get<typename Row::Main>(); m != nullptr)
+        m->stop();
 }
 
 template <class... Rows>
@@ -538,7 +645,9 @@ void ThreadAssembly::stop_seat_(SeatTag s, SeatList<Rows...>) noexcept {
     ((Rows::seat == s ? stop_one_<Rows>() : void()), ...);
 }
 
-void ThreadAssembly::stop_bound_(SeatTag s) noexcept { stop_seat_(s, SeatMainList{}); }
+void ThreadAssembly::stop_bound_(SeatTag s) noexcept {
+    stop_seat_(s, SeatMainList{});
+}
 
 template <class Row>
 void* ThreadAssembly::trampoline(void* self) {
@@ -565,28 +674,34 @@ Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
 
     app::RtMain* const rt = mains_.get<app::RtMain>();
     mains_ = mains.mains;
-    if (!born_) return born_;
+    if (!born_)
+        return born_;
     mains_.bind(&*diag_main_);
     mains_.bind(&*ui_main_);
     mains_.bind(rt);
 
-    if (!(mains_.bound(SeatTag::Capture) && mains_.bound(SeatTag::Encode) &&
-          mains_.bound(SeatTag::RecWrite))) {
+    if (!(mains_.bound(SeatTag::Capture)
+          && mains_.bound(SeatTag::Encode)
+          && mains_.bound(SeatTag::RecWrite))) {
         mains_.bind(static_cast<app::CaptureMain*>(nullptr));
         mains_.bind(static_cast<app::EncodeMain*>(nullptr));
         mains_.bind(static_cast<app::RecWriteMain*>(nullptr));
     }
-    svc::PrefetchMain* const prefetch = mains_.get<svc::PrefetchMain>();
 
     publish_evidence_();
-    diag_sampler_.set_input_build(mains.input_build);
-    diag_sampler_.set_prefetch(prefetch != nullptr ? &prefetch->prefetch() : nullptr);
 
     for (const SeatTag s : std::span(kSpawnOrder).first(kSpawnOrder.size() - 1)) {
-        if (!mains_.bound(s)) continue;
+        if (!mains_.bound(s))
+            continue;
         const std::size_t i = seat_index(s);
-        if (auto r = spawn_seat(hal::seat_of(threads_, s), SeatTable::of(s).body, this, thread_[i],
-                                mode, ev_.seat_sched[i]);
+        if (auto r = spawn_seat(
+                hal::seat_of(threads_, s),
+                SeatTable::of(s).body,
+                this,
+                thread_[i],
+                mode,
+                ev_.seat_sched[i]
+            );
             !r) {
             return r;
         }
@@ -595,7 +710,8 @@ Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
 
     if (auto p = await_published([this] {
             for (std::size_t i = 0; i < hal::kThreadSeats; ++i) {
-                if (live_[i] && tid_[i].load(std::memory_order_acquire) == 0) return false;
+                if (live_[i] && tid_[i].load(std::memory_order_acquire) == 0)
+                    return false;
             }
             return true;
         });
@@ -610,26 +726,37 @@ Ex<void> ThreadAssembly::spawn_rt(RtMode mode, app::RtMain& rt) {
 
     mains_.bind(&rt);
     const std::size_t i = seat_index(SeatTag::RT);
-    if (auto r = spawn_seat(hal::seat_of(threads_, SeatTag::RT), SeatTable::of(SeatTag::RT).body,
-                            this, thread_[i], mode, ev_.seat_sched[i]);
+    if (auto r = spawn_seat(
+            hal::seat_of(threads_, SeatTag::RT),
+            SeatTable::of(SeatTag::RT).body,
+            this,
+            thread_[i],
+            mode,
+            ev_.seat_sched[i]
+        );
         !r) {
         return r;
     }
     live_[i] = true;
-    if (auto p = await_published([this] { return tid(SeatTag::RT) != 0; }); !p) return p;
+    if (auto p = await_published([this] { return tid(SeatTag::RT) != 0; }); !p)
+        return p;
     publish_evidence_();
     return {};
 }
 
 namespace {
 
-int join_within(pthread_t thread, [[maybe_unused]] const std::atomic<bool>& exited,
-                const timespec& abs) noexcept {
+int join_within(
+    pthread_t thread,
+    [[maybe_unused]] const std::atomic<bool>& exited,
+    const timespec& abs
+) noexcept {
 #if defined(__GLIBC__)
     return ::pthread_clockjoin_np(thread, nullptr, CLOCK_MONOTONIC, &abs);
 #else
     for (;;) {
-        if (exited.load(std::memory_order_acquire)) return ::pthread_join(thread, nullptr);
+        if (exited.load(std::memory_order_acquire))
+            return ::pthread_join(thread, nullptr);
         timespec now{};
         (void)::clock_gettime(CLOCK_MONOTONIC, &now);
         if (now.tv_sec > abs.tv_sec || (now.tv_sec == abs.tv_sec && now.tv_nsec >= abs.tv_nsec)) {
@@ -651,49 +778,59 @@ timespec deadline_from_now(std::int64_t deadline_ns) noexcept {
     return abs;
 }
 
-}  // namespace
+}
 
 Ex<void> ThreadAssembly::join_rt_within(std::int64_t deadline_ns) {
     const std::size_t i = seat_index(SeatTag::RT);
-    if (!live_[i]) return {};
+    if (!live_[i])
+        return {};
     const int rc = join_within(thread_[i], rt_exited_, deadline_from_now(deadline_ns));
     if (rc == ETIMEDOUT) {
         return std::unexpected(
-            Error{Errc::timeout, ERR_SITE(), static_cast<std::uint32_t>(deadline_ns / 1'000'000)});
+            Error{Errc::timeout, ERR_SITE(), static_cast<std::uint32_t>(deadline_ns / 1'000'000)}
+        );
     }
-    if (rc != 0) return os_error(ERR_SITE(), rc);
+    if (rc != 0)
+        return os_error(ERR_SITE(), rc);
     live_[i] = false;
     return {};
 }
 
 Ex<void> ThreadAssembly::join_io_within(std::int64_t deadline_ns) {
     const std::size_t i = seat_index(SeatTag::Io);
-    if (!live_[i]) return {};
+    if (!live_[i])
+        return {};
     const int rc = join_within(thread_[i], io_exited_, deadline_from_now(deadline_ns));
     if (rc == ETIMEDOUT) {
         return std::unexpected(
-            Error{Errc::timeout, ERR_SITE(), static_cast<std::uint32_t>(deadline_ns / 1'000'000)});
+            Error{Errc::timeout, ERR_SITE(), static_cast<std::uint32_t>(deadline_ns / 1'000'000)}
+        );
     }
-    if (rc != 0) return os_error(ERR_SITE(), rc);
+    if (rc != 0)
+        return os_error(ERR_SITE(), rc);
     live_[i] = false;
     return {};
 }
 
 Ex<void> ThreadAssembly::stop_and_join_rt(std::int64_t deadline_ns) {
-    if (!live_[seat_index(SeatTag::RT)]) return {};
+    if (!live_[seat_index(SeatTag::RT)])
+        return {};
     timespec now{};
     (void)::clock_gettime(CLOCK_MONOTONIC, &now);
-    const std::int64_t hard =
-        static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec + deadline_ns;
+    const std::int64_t hard = static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000
+        + now.tv_nsec
+        + deadline_ns;
     for (;;) {
 
         mains_.get<app::RtMain>()->stop();
         (void)::clock_gettime(CLOCK_MONOTONIC, &now);
-        const std::int64_t now_ns =
-            static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000 + now.tv_nsec;
+        const std::int64_t now_ns = static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000
+            + now.tv_nsec;
         std::int64_t rem = hard - now_ns;
-        if (rem <= 0) return join_rt_within(0);
-        if (rem > kRtJoinSliceNs) rem = kRtJoinSliceNs;
+        if (rem <= 0)
+            return join_rt_within(0);
+        if (rem > kRtJoinSliceNs)
+            rem = kRtJoinSliceNs;
         if (auto r = join_rt_within(rem); r)
             return r;
         else if (r.error().code != Errc::timeout)
@@ -704,21 +841,28 @@ Ex<void> ThreadAssembly::stop_and_join_rt(std::int64_t deadline_ns) {
 void ThreadAssembly::stop() noexcept {
 
     for (const SeatTag s : kStopOrder) {
-        if (s == SeatTag::RT && !live_[seat_index(s)]) continue;
+        if (s == SeatTag::RT && !live_[seat_index(s)])
+            continue;
         stop_bound_(s);
     }
 }
 
-void ThreadAssembly::mark_quiescing() noexcept { quiescing_.request(); }
+void ThreadAssembly::mark_quiescing() noexcept {
 
-Ex<void> ThreadAssembly::join() { return join(kShippingBudget); }
+    quiescing_.request();
+}
+
+Ex<void> ThreadAssembly::join() {
+    return join(kShippingBudget);
+}
 
 Ex<void> ThreadAssembly::join(StopBudget budget) {
 
     static_assert(kJoinOrder[0] == SeatTag::RT && kJoinOrder[1] == SeatTag::Io);
     if (live_[seat_index(SeatTag::RT)]) {
 
-        if (auto r = stop_and_join_rt(budget.rt_ns); !r) return r;
+        if (auto r = stop_and_join_rt(budget.rt_ns); !r)
+            return r;
     }
 
     Ex<void> err{};
@@ -733,11 +877,14 @@ Ex<void> ThreadAssembly::join(StopBudget budget) {
     }
 
     for (const SeatTag s : std::span(kJoinOrder).subspan(2)) {
-        if (drains_after_join(kStopAfterJoinOf, s)) stop_bound_(s);
+        if (drains_after_join(kStopAfterJoinOf, s))
+            stop_bound_(s);
         const std::size_t i = seat_index(s);
-        if (!live_[i]) continue;
+        if (!live_[i])
+            continue;
         if (const int rc = ::pthread_join(thread_[i], nullptr); rc != 0) {
-            if (err) err = os_error(ERR_SITE(), rc);
+            if (err)
+                err = os_error(ERR_SITE(), rc);
             continue;
         }
         live_[i] = false;
@@ -746,4 +893,4 @@ Ex<void> ThreadAssembly::join(StopBudget budget) {
     return err;
 }
 
-}  // namespace mister::fw
+}

@@ -24,4 +24,4 @@ struct LoadPlan {
     PlanFrame frame{};
 };
 
-}  // namespace mister::cores
+}

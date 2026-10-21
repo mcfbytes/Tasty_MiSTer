@@ -10,7 +10,7 @@
 namespace mister::app {
 class IdentityLatch;
 class VideoPump;
-}  // namespace mister::app
+}
 
 namespace mister::fw {
 
@@ -19,7 +19,9 @@ class TastySink final : public app::IEventSink {
 
 public:
     TastySink(app::VideoPump& video, const app::IdentityLatch* identity) noexcept
-        : video_(&video), identity_(identity) {}
+        : video_(&video),
+          identity_(identity) {}
+
     TastySink(const TastySink&) = delete;
     TastySink& operator=(const TastySink&) = delete;
 
@@ -38,6 +40,7 @@ public:
     void on(const app::Event::RamImageDeclined& a, const app::Event::Head& h);
     void on(const app::Event::RequestDone& a, const app::Event::Head& h);
     void misrouted(const app::Event& e) noexcept;
+
     [[nodiscard]] std::uint32_t event_misrouted() const noexcept { return event_misrouted_; }
 
 private:
@@ -47,4 +50,4 @@ private:
     bool ram_image_said_ = false;
 };
 
-}  // namespace mister::fw
+}

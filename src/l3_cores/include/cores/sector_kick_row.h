@@ -16,14 +16,16 @@ class SectorKickRow final : public reactor::ILinkDecoder {
 public:
     void service(reactor::CoreState& st) const override {
         Core* c = bound_core(st);
-        if (c == nullptr || &c->profile() != &kProfile) return;
-        if (ISectorKick* k = c->sector_kick()) k->service_kick();
+        if (c == nullptr || &c->profile() != &kProfile)
+            return;
+        if (ISectorKick* k = c->sector_kick())
+            k->service_kick();
     }
 };
 
-}  // namespace detail
+}
 
 template <const CoreProfile& kProfile>
 inline constexpr detail::SectorKickRow<kProfile> kSectorKick{};
 
-}  // namespace mister::cores
+}

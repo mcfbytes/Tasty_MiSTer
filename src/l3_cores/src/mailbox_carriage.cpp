@@ -10,4 +10,4 @@ void MailboxCarriage::service_mailbox_tick() noexcept {
     port_.service_rt(link_, queue_, frame_);
 }
 
-}  // namespace mister::cores
+}

@@ -30,6 +30,7 @@ public:
     static constexpr unsigned kJobsPerPass = 4;
 
     explicit FrameHasher(const Wiring& w) noexcept : w_(w) {}
+
     FrameHasher(const FrameHasher&) = delete;
     FrameHasher& operator=(const FrameHasher&) = delete;
 
@@ -37,7 +38,9 @@ public:
     [[nodiscard]] bool idle() const noexcept;
 
     [[nodiscard]] bool drained() const noexcept;
+
     [[nodiscard]] bool holding() const noexcept { return static_cast<bool>(job_); }
+
     [[nodiscard]] int park_ms() const noexcept;
 
     void release() noexcept;
@@ -64,4 +67,4 @@ private:
     bool dirty_ = false;
 };
 
-}  // namespace mister::app
+}

@@ -7,8 +7,10 @@
 
 namespace mister::app {
 
-static_assert(proto::ILinkRouter::kChunkBytes == kLinkRxSlabBytes,
-              "the chunk width handed to producers is the slab's slot width");
+static_assert(
+    proto::ILinkRouter::kChunkBytes == kLinkRxSlabBytes,
+    "the chunk width handed to producers is the slab's slot width"
+);
 
 LinkRouter::LinkRouter(const Channels& c) noexcept : main_(c.main), ui_(c.ui), input_(c.input) {}
 
@@ -28,12 +30,16 @@ bool LinkRouter::push(const proto::LinkEvent& e) noexcept {
         case EventSink::kCount:
             break;
     }
-    if (!pushed) ++drops_;
+    if (!pushed)
+        ++drops_;
     return pushed;
 }
 
-bool LinkRouter::can_intern(proto::LinkEvent::Kind k, std::size_t bytes,
-                            unsigned chunks) const noexcept {
+bool LinkRouter::can_intern(
+    proto::LinkEvent::Kind k,
+    std::size_t bytes,
+    unsigned chunks
+) const noexcept {
     TASTY_SEAT_BODY(LinkRouter);
     switch (sink_for(k)) {
         case EventSink::Main:
@@ -48,8 +54,10 @@ bool LinkRouter::can_intern(proto::LinkEvent::Kind k, std::size_t bytes,
     return false;
 }
 
-Ex<proto::RxSlabId> LinkRouter::intern(proto::LinkEvent::Kind k,
-                                       std::span<const std::uint8_t> bytes) noexcept {
+Ex<proto::RxSlabId> LinkRouter::intern(
+    proto::LinkEvent::Kind k,
+    std::span<const std::uint8_t> bytes
+) noexcept {
     TASTY_SEAT_BODY(LinkRouter);
     Ex<proto::RxSlabId> id = std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     switch (sink_for(k)) {
@@ -60,13 +68,15 @@ Ex<proto::RxSlabId> LinkRouter::intern(proto::LinkEvent::Kind k,
             id = ui_.intern(bytes);
             break;
         case EventSink::Input:
-            if (input_) id = input_->intern(bytes);
+            if (input_)
+                id = input_->intern(bytes);
             break;
         case EventSink::kCount:
             break;
     }
-    if (!id) ++intern_refusals_;
+    if (!id)
+        ++intern_refusals_;
     return id;
 }
 
-}  // namespace mister::app
+}

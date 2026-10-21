@@ -32,6 +32,7 @@ public:
     };
 
     SpiBlockPoll() noexcept = default;
+
     explicit SpiBlockPoll(Wiring w) noexcept : wiring_(w) {}
 
     struct Decode {
@@ -42,8 +43,10 @@ public:
         std::uint32_t window_blocks = 0;
     };
 
-    [[nodiscard]] Ex<Decode> poll(hal::ISpiTransport& link,
-                                  std::optional<SdStatusWord> known = std::nullopt);
+    [[nodiscard]] Ex<Decode> poll(
+        hal::ISpiTransport& link,
+        std::optional<SdStatusWord> known = std::nullopt
+    );
 
     const DecodeCounters& diagnostics() const noexcept { return diag_; }
 
@@ -56,4 +59,4 @@ private:
     DecodeCounters diag_{};
 };
 
-}  // namespace mister::proto
+}

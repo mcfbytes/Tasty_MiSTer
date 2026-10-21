@@ -14,4 +14,4 @@ struct SavePartition {
     std::uint8_t index = 0;
 };
 
-}  // namespace mister::cores
+}

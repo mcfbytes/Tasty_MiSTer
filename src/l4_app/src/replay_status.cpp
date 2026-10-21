@@ -42,4 +42,4 @@ ReplayStatusText format_replay_status(const ReplayStatus& s) noexcept {
     return out;
 }
 
-}  // namespace mister::app
+}

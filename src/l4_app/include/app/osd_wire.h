@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <span>
 
+#include "app/ui_page_record.h"
 #include "infra/error.h"
-#include "infra/telemetry.h"
 #include "hal/spi_transport.h"
 #include "proto/link_op.h"
 #include "proto/osd_transport.h"
@@ -13,32 +13,13 @@
 
 namespace mister::app {
 
-struct UiPageRecord {
-    std::uint32_t depth = 0;
-    std::uint32_t top_id = 0;
-    std::uint32_t vis_publishes = 0;
-
-    std::uint32_t cell_refusals = 0;
-
-    std::uint32_t page_refusals = 0;
-
-    std::uint32_t button_levels = 0;
-    std::uint32_t button_edges = 0;
-    std::uint32_t button_longs = 0;
-    std::uint32_t button_classic = 0;
-    std::uint32_t button_injects = 0;
-    std::uint32_t button_core_resets = 0;
-    std::uint32_t last_hold_ms = 0;
-};
-
-using UiPageCell = xthread::Telemetry<UiPageRecord, SeatTag::Ui>;
-
 class OsdWire {
     TASTY_SEAT_MEDIATOR(Ui, RT);
 
 public:
     OsdWire(proto::OsdSurface& surface, hal::ISpiTransport& link) noexcept
-        : surface_(&surface), link_(&link) {}
+        : surface_(&surface),
+          link_(&link) {}
 
     OsdWire(const OsdWire&) = delete;
     OsdWire& operator=(const OsdWire&) = delete;
@@ -48,6 +29,7 @@ public:
     [[nodiscard]] Ex<void> set_show(proto::LinkOp::OsdShow s) noexcept {
         return set_show(s, target_);
     }
+
     [[nodiscard]] Ex<void> set_show(proto::LinkOp::OsdShow s, proto::OsdTarget t) noexcept;
 
     void on_fabric_reprogrammed() noexcept { show_ = proto::LinkOp::OsdShow::Off; }
@@ -57,14 +39,21 @@ public:
     }
 
     std::uint32_t rows_flushed() const noexcept { return rows_flushed_; }
+
     std::uint32_t flush_failures() const noexcept { return flush_failures_; }
+
     std::uint32_t commits_refused() const noexcept { return commits_refused_; }
 
     std::uint32_t sample_refusals() const noexcept { return sample_refusals_; }
+
     std::uint32_t starved() const noexcept { return starved_; }
+
     std::uint32_t backlog_high_water() const noexcept { return backlog_hw_; }
+
     std::uint32_t visibility_writes() const noexcept { return vis_writes_; }
+
     proto::LinkOp::OsdShow show() const noexcept { return show_; }
+
     bool lit() const noexcept { return show_ != proto::LinkOp::OsdShow::Off; }
 
     bool has_focus() const noexcept { return show_ == proto::LinkOp::OsdShow::Menu; }
@@ -92,4 +81,4 @@ private:
     proto::OsdTarget target_ = proto::OsdTarget::All;
 };
 
-}  // namespace mister::app
+}

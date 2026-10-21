@@ -14,6 +14,7 @@ class FrameMain final : public xthread::SeatMain<FrameMain> {
 
 public:
     explicit FrameMain(FrameClock& clock) noexcept : clock_(clock) {}
+
     FrameMain(const FrameMain&) = delete;
     FrameMain& operator=(const FrameMain&) = delete;
     FrameMain(FrameMain&&) = delete;
@@ -22,16 +23,23 @@ public:
     [[nodiscard]] FrameClock& clock() noexcept { return clock_; }
 
     void start() noexcept;
+
     void stop() noexcept { stop_.request(); }
 
     void serve() noexcept;
+
     [[nodiscard]] bool idle() const noexcept { return true; }
+
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
     [[nodiscard]] int park_ms() const noexcept { return -1; }
+
     [[nodiscard]] xthread::NeverPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept { return false; }
+
     [[nodiscard]] bool pause_pending() const noexcept { return false; }
+
     void settle() noexcept {}
 
 private:
@@ -42,4 +50,4 @@ private:
 
 static_assert(xthread::SeatBody<FrameMain>);
 
-}  // namespace mister::reactor
+}

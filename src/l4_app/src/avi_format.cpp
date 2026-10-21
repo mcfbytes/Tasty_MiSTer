@@ -12,15 +12,19 @@ namespace {
 struct Put {
     std::span<std::byte> out;
     std::size_t at = 0;
+
     void u8(std::uint8_t v) noexcept { out[at++] = std::byte{v}; }
+
     void u16(std::uint16_t v) noexcept {
         u8(static_cast<std::uint8_t>(v));
         u8(static_cast<std::uint8_t>(v >> 8));
     }
+
     void u32(std::uint32_t v) noexcept {
         u16(static_cast<std::uint16_t>(v));
         u16(static_cast<std::uint16_t>(v >> 16));
     }
+
     void cc(const char (&s)[5]) noexcept {
         for (int i = 0; i < 4; ++i)
             u8(static_cast<std::uint8_t>(s[i]));
@@ -37,7 +41,7 @@ constexpr std::uint32_t clamp32(std::uint64_t v) noexcept {
     return static_cast<std::uint32_t>(std::min<std::uint64_t>(v, 0xFFFF'FFFFu));
 }
 
-}  // namespace
+}
 
 void header(const Fields& f, Header& out) noexcept {
     out.fill(std::byte{0});
@@ -101,9 +105,9 @@ void header(const Fields& f, Header& out) noexcept {
         p.cc("ZMBV");
     else
         p.cc("CSCD");
-    const std::uint32_t image =
-        zmbv ? static_cast<std::uint32_t>(f.width) * f.height * 4u
-             : static_cast<std::uint32_t>(CscdCodec::picture_bytes(f.width, f.height));
+    const std::uint32_t image = zmbv
+        ? static_cast<std::uint32_t>(f.width) * f.height * 4u
+        : static_cast<std::uint32_t>(CscdCodec::picture_bytes(f.width, f.height));
     p.u32(image);
     p.at += 16;
     p.cc("JUNK");
@@ -126,8 +130,12 @@ void index_head(std::uint32_t entries, std::span<std::byte, kChunkHead> out) noe
     p.u32(entries * static_cast<std::uint32_t>(kIndexEntry));
 }
 
-void index_entry(bool key, std::uint32_t offset, std::uint32_t payload,
-                 std::span<std::byte, kIndexEntry> out) noexcept {
+void index_entry(
+    bool key,
+    std::uint32_t offset,
+    std::uint32_t payload,
+    std::span<std::byte, kIndexEntry> out
+) noexcept {
     Put p{out};
     p.cc("00dc");
     p.u32(key ? kKeyFlag : 0u);
@@ -135,4 +143,4 @@ void index_entry(bool key, std::uint32_t offset, std::uint32_t payload,
     p.u32(payload);
 }
 
-}  // namespace mister::app::avi
+}

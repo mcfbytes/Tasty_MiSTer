@@ -29,4 +29,4 @@ protected:
     IImageSink& operator=(const IImageSink&) = default;
 };
 
-}  // namespace mister::proto
+}

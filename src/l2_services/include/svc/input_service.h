@@ -8,15 +8,15 @@
 #include <string_view>
 #include <vector>
 
-#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
-#include "infra/unique_fd.h"
 #include "proto/joystick.h"
 #include "svc/device_match.h"
 #include "svc/input_device.h"
 #include "svc/deadzone_rule.h"
 #include "svc/device_table.h"
+#include "svc/hotplug_watch.h"
+#include "svc/input_counters.h"
 #include "svc/no_merge_rule.h"
 #include "svc/player_slots.h"
 #include "svc/rumble_out.h"
@@ -32,6 +32,7 @@ struct MouseFixupRule {
     QuirkId quirk;
     const char* why;
 };
+
 std::optional<MouseFixupRule> find_mouse_fixup(Vid vid, Pid pid);
 
 enum class NameMatch : std::uint8_t {
@@ -83,16 +84,12 @@ public:
 
     void apply_deadzone_rules(std::span<const DeadzoneRule> rows) noexcept;
 
-    [[nodiscard]] Ex<void> on_hotplug();
+    HotplugWatch& hotplug() noexcept { return hotplug_; }
 
-    bool hotplug_pending() const noexcept { return hotplug_pending_; }
-    bool take_hotplug_pending() noexcept {
-        const bool p = hotplug_pending_;
-        hotplug_pending_ = false;
-        return p;
-    }
+    const HotplugWatch& hotplug() const noexcept { return hotplug_; }
 
     std::span<InputDevice> devices() noexcept { return table_.devices; }
+
     std::span<const InputDevice> devices() const noexcept { return table_.devices; }
 
     JoyMask joy_mask(PlayerIndex player) const;
@@ -105,36 +102,22 @@ public:
 
     std::uint8_t mouse_button_level() const noexcept;
 
-    [[nodiscard]] Ex<void> open_hotplug_watch(std::string_view dir);
-
     [[nodiscard]] Ex<void> set_grabbed(bool on);
+
     bool grabbed() const noexcept { return grabbed_; }
 
     [[nodiscard]] Ex<void> adopt(InputDevice&& dev);
 
-    int hotplug_fd() const noexcept { return inotify_.get(); }
-
     void set_cfg_rumble(bool on) noexcept { cfg_rumble_ = on; }
 
     [[nodiscard]] RumblePadSet rumble_pads() const noexcept override;
-    [[nodiscard]] RumbleApply rumble(PlayerIndex player, std::uint16_t strong,
-                                     std::uint16_t weak) noexcept override;
+    [[nodiscard]] RumbleApply rumble(
+        PlayerIndex player,
+        std::uint16_t strong,
+        std::uint16_t weak
+    ) noexcept override;
 
-    std::uint32_t mapped_devices() const noexcept { return n_mapped_.get(); }
-    std::uint32_t slotted_devices() const noexcept { return n_slotted_.get(); }
-    std::uint32_t mask_recomputes() const noexcept { return n_mask_recompute_.get(); }
-    std::uint32_t axis_edges() const noexcept { return n_axis_edges_.get(); }
-    std::uint32_t mouse_remainder_bytes() const noexcept { return n_mouse_rem_.get(); }
-    std::uint32_t key_overflows() const noexcept { return n_key_overflow_.get(); }
-    std::uint32_t quirk_drops() const noexcept { return n_quirk_drops_.get(); }
-
-    std::uint32_t grab_failures() const noexcept { return n_grab_fail_.get(); }
-
-    std::uint32_t live_slot_mask() const noexcept { return n_live_mask_.get(); }
-    std::uint32_t slot_key_hash(std::uint8_t player) const noexcept {
-        return player < kMaxPlayers ? n_slot_hash_[player].get() : 0u;
-    }
-    std::uint32_t ghost_slots() const noexcept { return n_ghost_.get(); }
+    const InputCounters& counters() const noexcept { return counters_; }
 
 private:
     InputService() = default;
@@ -148,27 +131,16 @@ private:
 
     DeviceTable table_{};
     PlayerSlots players_;
-    UniqueFd inotify_{};
+    HotplugWatch hotplug_{};
 
     bool grabbed_ = kBornGrabbed;
     bool cfg_rumble_ = true;
-    bool hotplug_pending_ = false;
     std::uint32_t devices_gen_ = 0;
     JoyMask joy_mask_[kMaxPlayers]{};
-    xthread::Counter n_mapped_{};
-    xthread::Counter n_slotted_{};
-    xthread::Counter n_mask_recompute_{};
-    xthread::Counter n_axis_edges_{};
-    xthread::Counter n_mouse_rem_{};
-    xthread::Counter n_key_overflow_{};
-    xthread::Counter n_quirk_drops_{};
-    xthread::Counter n_grab_fail_{};
-    xthread::Counter n_live_mask_{};
-    xthread::Counter n_slot_hash_[kMaxPlayers]{};
-    xthread::Counter n_ghost_{};
+    InputCounters counters_{};
 };
 
 inline constexpr std::uint8_t kUioButSw = 0x01;
 [[nodiscard]] Ex<void> emit_but_sw(hal::ISpiTransport& link, std::uint16_t map);
 
-}  // namespace mister::svc
+}

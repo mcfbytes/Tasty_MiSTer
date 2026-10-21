@@ -13,14 +13,16 @@ hal::PinLevels decoded(const hal::SpiSample& g) noexcept {
     };
 }
 
-}  // namespace
+}
 
 void SpiSampler::service(bool hold_buttons) noexcept {
     hal::SpiSample g = src_->sample();
-    if (hold_buttons && seen_) g.buttons = last_.buttons;
+    if (hold_buttons && seen_)
+        g.buttons = last_.buttons;
     const bool first = !seen_;
     if (!first) {
-        if (g.ready != last_.ready) (void)out_.push(LinkEvent::ReadyEdge{.ready = g.ready});
+        if (g.ready != last_.ready)
+            (void)out_.push(LinkEvent::ReadyEdge{.ready = g.ready});
         if (g.buttons != last_.buttons) {
             const hal::PinLevels lv = decoded(g);
             (void)out_.push(LinkEvent::ButtonLevel{.osd = lv.menu_button, .user = lv.user_button});
@@ -33,4 +35,4 @@ void SpiSampler::service(bool hold_buttons) noexcept {
     seen_ = true;
 }
 
-}  // namespace mister::proto
+}

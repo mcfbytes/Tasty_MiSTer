@@ -15,4 +15,4 @@ protected:
     IPcmWireRows& operator=(const IPcmWireRows&) = default;
 };
 
-}  // namespace mister::cores
+}

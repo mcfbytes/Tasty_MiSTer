@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "svc/disc_engine.h"
+#include <cstdint>
 
 namespace mister::cores {
 
@@ -9,7 +9,7 @@ class ICdFlowQuery {
 public:
     virtual ~ICdFlowQuery() = default;
 
-    virtual bool can_send_data(svc::TrackType type) = 0;
+    virtual bool can_send_data(std::uint16_t selector) = 0;
 
 protected:
     ICdFlowQuery() = default;
@@ -17,4 +17,4 @@ protected:
     ICdFlowQuery& operator=(const ICdFlowQuery&) = default;
 };
 
-}  // namespace mister::cores
+}

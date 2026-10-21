@@ -9,8 +9,9 @@ void CaptureMain::start() noexcept {
 }
 
 void CaptureMain::serve() noexcept {
-    if (stopping()) return;
+    if (stopping())
+        return;
     copier_.serve();
 }
 
-}  // namespace mister::app
+}

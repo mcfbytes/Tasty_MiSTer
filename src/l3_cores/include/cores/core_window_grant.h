@@ -20,7 +20,8 @@ struct CoreWindowGrant {
 
     [[nodiscard]] ICoreWindow* named(std::string_view name) const noexcept {
         for (std::size_t i = 0; i < kMaxCoreWindows; ++i) {
-            if (!names[i].empty() && names[i] == name) return windows[i];
+            if (!names[i].empty() && names[i] == name)
+                return windows[i];
         }
         return nullptr;
     }
@@ -40,4 +41,4 @@ struct CoreWindowGrant {
     }
 };
 
-}  // namespace mister::cores
+}

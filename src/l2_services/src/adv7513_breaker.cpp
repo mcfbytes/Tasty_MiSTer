@@ -46,16 +46,18 @@ void I2cBreaker::note(bool ok, std::uint8_t op, std::uint8_t reg, const Error* e
         return;
     }
 
-    if (e == nullptr || e->code != Errc::io) return;
+    if (e == nullptr || e->code != Errc::io)
+        return;
     ++failures_;
-    const std::uint16_t err =
-        e->detail > 0xFFFFu ? std::uint16_t{0xFFFF} : static_cast<std::uint16_t>(e->detail);
+    const std::uint16_t err = e->detail > 0xFFFFu ? std::uint16_t{0xFFFF}
+                                                  : static_cast<std::uint16_t>(e->detail);
     last_errno_ = err;
-    if (first_.op == 0) first_ = Failure{op, reg, err};
+    if (first_.op == 0)
+        first_ = Failure{op, reg, err};
     if (++run_ >= kTripAfter && !open_) {
         open_ = true;
         ++trips_;
     }
 }
 
-}  // namespace mister::svc::adv7513
+}

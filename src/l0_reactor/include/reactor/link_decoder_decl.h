@@ -25,4 +25,4 @@ struct LinkDecoderDecl {
     OsdBudget osd_budget;
 };
 
-}  // namespace mister::reactor
+}

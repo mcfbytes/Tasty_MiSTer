@@ -25,11 +25,14 @@ struct Command {
     std::uint16_t opcode;
     std::uint8_t words;
 };
+
 inline constexpr Command kCommands[] = {{0x57, 12}, {0x59, 6}, {0x5B, 11}};
 
 [[nodiscard]] std::optional<UioBurst> decode(std::span<const std::byte> packet) noexcept;
 
-[[nodiscard]] std::size_t encode_reply(const UioBurst& answered,
-                                       std::span<std::byte, kMaxPacketBytes> out) noexcept;
+[[nodiscard]] std::size_t encode_reply(
+    const UioBurst& answered,
+    std::span<std::byte, kMaxPacketBytes> out
+) noexcept;
 
-}  // namespace mister::app::scanout
+}

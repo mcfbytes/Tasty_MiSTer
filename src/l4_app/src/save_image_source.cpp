@@ -8,26 +8,40 @@ namespace mister::app {
 static_assert(SaveImageSource::kSlots == 7, "one backend initializer per announceable slot");
 
 SaveImageSource::SaveImageSource(const svc::Vfs& vfs) noexcept
-    : backends_{svc::FileSlotBackend{vfs}, svc::FileSlotBackend{vfs}, svc::FileSlotBackend{vfs},
-                svc::FileSlotBackend{vfs}, svc::FileSlotBackend{vfs}, svc::FileSlotBackend{vfs},
-                svc::FileSlotBackend{vfs}} {}
+    : backends_{
+          svc::FileSlotBackend{vfs},
+          svc::FileSlotBackend{vfs},
+          svc::FileSlotBackend{vfs},
+          svc::FileSlotBackend{vfs},
+          svc::FileSlotBackend{vfs},
+          svc::FileSlotBackend{vfs},
+          svc::FileSlotBackend{vfs}
+      } {}
 
 SaveImageSource::Binding* SaveImageSource::find(proto::SlotIndex slot) {
-    if (slot.v >= kSlots) return nullptr;
+    if (slot.v >= kSlots)
+        return nullptr;
     return &bindings_[slot.v];
 }
 
 const SaveImageSource::Binding* SaveImageSource::find(proto::SlotIndex slot) const {
-    if (slot.v >= kSlots) return nullptr;
+    if (slot.v >= kSlots)
+        return nullptr;
     return &bindings_[slot.v];
 }
 
-bool SaveImageSource::bind(proto::SlotIndex slot, std::string_view path, bool manual,
-                           const cores::BlankSaveSpec& blank) noexcept {
+bool SaveImageSource::bind(
+    proto::SlotIndex slot,
+    std::string_view path,
+    bool manual,
+    const cores::BlankSaveSpec& blank
+) noexcept {
     Binding* b = find(slot);
-    if (b == nullptr) return false;
+    if (b == nullptr)
+        return false;
 
-    if (b->attach != Attach::Detached) return false;
+    if (b->attach != Attach::Detached)
+        return false;
     b->exists = false;
     b->size = proto::FileSize{};
     b->blank = blank;
@@ -57,10 +71,14 @@ std::string_view SaveImageSource::path_of(proto::SlotIndex slot) const {
 
 proto::SlotAttributes SaveImageSource::attributes(proto::SlotIndex slot) const {
     const Binding* b = find(slot);
-    if (b == nullptr || b->path.view().empty()) return proto::SlotAttributes{};
+    if (b == nullptr || b->path.view().empty())
+        return proto::SlotAttributes{};
     const bool pre = !b->manual;
     return proto::SlotAttributes{
-        .writable = pre || b->exists, .growable = pre, .deferred_create = pre && !b->exists};
+        .writable = pre || b->exists,
+        .growable = pre,
+        .deferred_create = pre && !b->exists
+    };
 }
 
 bool SaveImageSource::manual(proto::SlotIndex slot) const noexcept {
@@ -70,7 +88,8 @@ bool SaveImageSource::manual(proto::SlotIndex slot) const noexcept {
 
 void SaveImageSource::owe_close(proto::SlotIndex slot) noexcept {
     TASTY_SEAT_BODY(SaveImageSource);
-    if (Binding* b = find(slot); b != nullptr) b->close_owed = true;
+    if (Binding* b = find(slot); b != nullptr)
+        b->close_owed = true;
 }
 
 bool SaveImageSource::close_owed(proto::SlotIndex slot) const noexcept {
@@ -80,15 +99,20 @@ bool SaveImageSource::close_owed(proto::SlotIndex slot) const noexcept {
 
 proto::FileSize SaveImageSource::size_of(proto::SlotIndex slot) const {
     const Binding* b = find(slot);
-    if (b == nullptr || !b->exists) return proto::FileSize{};
+    if (b == nullptr || !b->exists)
+        return proto::FileSize{};
     return b->size;
 }
 
-void SaveImageSource::note_attached(proto::SlotIndex slot, bool exists,
-                                    proto::FileSize size) noexcept {
+void SaveImageSource::note_attached(
+    proto::SlotIndex slot,
+    bool exists,
+    proto::FileSize size
+) noexcept {
     TASTY_SEAT_BODY(SaveImageSource);
     Binding* b = find(slot);
-    if (b == nullptr) return;
+    if (b == nullptr)
+        return;
     b->exists = exists;
     b->size = exists ? size : proto::FileSize{};
     b->attach = Attach::Attached;
@@ -97,7 +121,8 @@ void SaveImageSource::note_attached(proto::SlotIndex slot, bool exists,
 void SaveImageSource::note_detached(proto::SlotIndex slot) noexcept {
     TASTY_SEAT_BODY(SaveImageSource);
     Binding* b = find(slot);
-    if (b == nullptr) return;
+    if (b == nullptr)
+        return;
     b->exists = false;
     b->size = proto::FileSize{};
 
@@ -115,26 +140,33 @@ SaveImageSource::Attach SaveImageSource::attach_state(proto::SlotIndex slot) con
 
 void SaveImageSource::mark(proto::SlotIndex slot, Attach state) noexcept {
     TASTY_SEAT_BODY(SaveImageSource);
-    if (Binding* b = find(slot); b != nullptr) b->attach = state;
+    if (Binding* b = find(slot); b != nullptr)
+        b->attach = state;
 }
 
 svc::IStorageBackend* SaveImageSource::backend(proto::SlotIndex slot) noexcept {
-    if (slot.v >= kSlots) return nullptr;
+    if (slot.v >= kSlots)
+        return nullptr;
     return &backends_[slot.v];
 }
 
 std::span<const std::byte> SaveImageSource::order(proto::SlotIndex slot) const noexcept {
     const Binding* b = find(slot);
-    if (b == nullptr) return {};
+    if (b == nullptr)
+        return {};
     return infra::text_bytes(b->path.view());
 }
 
-bool SaveImageSource::fill_blank(proto::SlotIndex slot, proto::Lba lba,
-                                 std::span<std::uint8_t> window) {
+bool SaveImageSource::fill_blank(
+    proto::SlotIndex slot,
+    proto::Lba lba,
+    std::span<std::uint8_t> window
+) {
     const Binding* b = find(slot);
-    if (b == nullptr || !b->blank.declared()) return false;
+    if (b == nullptr || !b->blank.declared())
+        return false;
     cores::render_blank(b->blank, static_cast<std::uint64_t>(lba.v) * kBlankBlockBytes, window);
     return true;
 }
 
-}  // namespace mister::app
+}

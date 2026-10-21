@@ -23,7 +23,9 @@ public:
         grabbed_ = grabbed;
         osd_visible_ = osd_visible;
     }
+
     bool grabbed() const noexcept { return grabbed_; }
+
     bool osd_visible() const noexcept { return osd_visible_; }
 
     void set_joy_mask(PlayerIndex player, JoyMask mask) noexcept;
@@ -32,13 +34,21 @@ public:
     JoyMask autofire_mask(PlayerIndex player) const noexcept;
 
     proto::JoystickPort& joysticks() noexcept { return joy_; }
+
     const proto::JoystickPort& joysticks() const noexcept { return joy_; }
 
     [[nodiscard]] Ex<unsigned> service_joysticks(hal::ISpiTransport& link, bool local_walk = true);
-    [[nodiscard]] Ex<bool> push_paddle(hal::ISpiTransport& link, PlayerIndex player,
-                                       std::int32_t raw, const AxisCal& cal);
-    [[nodiscard]] Ex<bool> push_spinner(hal::ISpiTransport& link, PlayerIndex player,
-                                        std::int32_t delta);
+    [[nodiscard]] Ex<bool> push_paddle(
+        hal::ISpiTransport& link,
+        PlayerIndex player,
+        std::int32_t raw,
+        const AxisCal& cal
+    );
+    [[nodiscard]] Ex<bool> push_spinner(
+        hal::ISpiTransport& link,
+        PlayerIndex player,
+        std::int32_t delta
+    );
 
     unsigned axis_range_zero() const noexcept { return axis_range_zero_; }
 
@@ -53,4 +63,4 @@ private:
     unsigned axis_range_zero_ = 0;
 };
 
-}  // namespace mister::svc
+}

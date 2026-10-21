@@ -32,7 +32,8 @@ constexpr std::uint64_t pack_row(std::uint32_t y) noexcept {
         const int dy = static_cast<int>(y) - 16;
         const int m = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
         unsigned p = 0;
-        if (m < 14) p = ((x ^ y) & 1u) != 0 ? 2u : 1u;
+        if (m < 14)
+            p = ((x ^ y) & 1u) != 0 ? 2u : 1u;
         r |= static_cast<std::uint64_t>(p) << ((31u - x) * 2u);
     }
     return r;
@@ -47,39 +48,47 @@ constexpr std::array<std::uint64_t, kLogo> kPixmap = {
     pack_row(30), pack_row(31),
 };
 
-}  // namespace
+}
 
 std::uint32_t TastySplash::pixel(std::uint32_t x, std::uint32_t y) noexcept {
-    if (x >= kLogo || y >= kLogo) return kArgbBg;
+    if (x >= kLogo || y >= kLogo)
+        return kArgbBg;
     const std::uint64_t row = kPixmap[y];
     const unsigned p = static_cast<unsigned>((row >> ((31u - x) * 2u)) & 3u);
-    if (p == 0) return kArgbBg;
-    if (p == 2) return kArgbAcc;
+    if (p == 0)
+        return kArgbBg;
+    if (p == 2)
+        return kArgbAcc;
     return kArgbFg;
 }
 
 Ex<void> TastySplash::map(const hal::PhysRegion& fb) noexcept {
     TASTY_SEAT_BODY(TastySplash);
-    if (fb_) return {};
+    if (fb_)
+        return {};
     fb_region_ = fb;
     auto m = hal::FpgaMemory::map(fb, os::MmioRegion::Access::ReadWrite);
-    if (!m) return std::unexpected(m.error());
+    if (!m)
+        return std::unexpected(m.error());
     fb_.emplace(std::move(*m));
     return {};
 }
 
 bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
     TASTY_SEAT_BODY(TastySplash);
-    if (!fb_ || width == 0 || height == 0) return false;
+    if (!fb_ || width == 0 || height == 0)
+        return false;
     const std::size_t need = kPixelOff + static_cast<std::size_t>(width) * height * 4u;
-    if (fb_region_.len == 0 || need > fb_region_.len) return false;
+    if (fb_region_.len == 0 || need > fb_region_.len)
+        return false;
     auto view = fb_->view(0, need);
     const std::span<std::byte> px = view.subspan(kPixelOff);
     const auto put = [px, width](std::uint32_t y, std::uint32_t x, std::uint32_t c) {
         infra::store_le<std::uint32_t>(px.subspan((std::size_t{y} * width + x) * 4u).first<4>(), c);
     };
     auto* raw = static_cast<unsigned char*>(std::malloc(kSplashEmbedRaw));
-    if (raw == nullptr) return false;
+    if (raw == nullptr)
+        return false;
     uLongf n = kSplashEmbedRaw;
     if (uncompress(raw, &n, kSplashEmbed, kSplashEmbedZ) != Z_OK || n != kSplashEmbedRaw) {
         std::free(raw);
@@ -109,8 +118,10 @@ bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
                 const std::uint32_t ly = (y - y0) * ih / dh;
                 if (lx < iw && ly < ih) {
                     const unsigned char* p = raw + (static_cast<std::size_t>(ly) * iw + lx) * 4u;
-                    c = 0xFF000000u | (std::uint32_t{p[0]} << 16) | (std::uint32_t{p[1]} << 8) |
-                        std::uint32_t{p[2]};
+                    c = 0xFF000000u
+                        | (std::uint32_t{p[0]} << 16)
+                        | (std::uint32_t{p[1]} << 8)
+                        | std::uint32_t{p[2]};
                 }
             }
             put(y, x, c);
@@ -120,8 +131,11 @@ bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
     return true;
 }
 
-Ex<void> TastySplash::show(app::VideoPump& video, std::uint32_t width,
-                           std::uint32_t height) noexcept {
+Ex<void> TastySplash::show(
+    app::VideoPump& video,
+    std::uint32_t width,
+    std::uint32_t height
+) noexcept {
     TASTY_SEAT_BODY(TastySplash);
     const std::uint32_t w = width != 0 ? width : kDefaultW;
     const std::uint32_t h = height != 0 ? height : kDefaultH;
@@ -147,4 +161,4 @@ Ex<void> TastySplash::hide(app::VideoPump& video) noexcept {
     return video.wire().publish(svc::kUioSetFbuf, words);
 }
 
-}  // namespace mister::fw
+}

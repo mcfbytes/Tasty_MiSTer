@@ -20,11 +20,23 @@ namespace mister::proto::user_io {
 
 using reactor::LinkDecoderDecl;
 inline constexpr auto kHostPollRows = std::to_array<LinkDecoderDecl>({
-    {"link.info_poll", reactor::Cause::Tick, nullptr, 100, reactor::DeadlineClass::A,
+    {"link.info_poll",
+     reactor::Cause::Tick,
+     nullptr,
+     100,
+     reactor::DeadlineClass::A,
      reactor::OsdBudget::Shared},
-    {"link.rumble_poll", reactor::Cause::Tick, nullptr, 0, reactor::DeadlineClass::A,
+    {"link.rumble_poll",
+     reactor::Cause::Tick,
+     nullptr,
+     0,
+     reactor::DeadlineClass::A,
      reactor::OsdBudget::Shared},
-    {"link.f12_mod_poll", reactor::Cause::None, nullptr, 0, reactor::DeadlineClass::A,
+    {"link.f12_mod_poll",
+     reactor::Cause::None,
+     nullptr,
+     0,
+     reactor::DeadlineClass::A,
      reactor::OsdBudget::Shared},
 });
 static_assert(kHostPollRows.size() == kPollShapes.size(), "one census row per poll shape");
@@ -32,10 +44,12 @@ static_assert(kHostPollRows.size() == kPollShapes.size(), "one census row per po
 consteval bool start_rows_have_no_cause() {
     for (std::size_t i = 0; i < kPollShapes.size(); ++i) {
         const bool at_start = kPollShapes[i].cadence == Cadence::SessionStart;
-        if (at_start != (kHostPollRows[i].cause == reactor::Cause::None)) return false;
+        if (at_start != (kHostPollRows[i].cause == reactor::Cause::None))
+            return false;
     }
     return true;
 }
+
 static_assert(start_rows_have_no_cause(), "a session-start row is never dispatched by the census");
 
 class PollReader {
@@ -44,25 +58,39 @@ class PollReader {
 public:
     using Port = LinkPort<LinkEvent::PolledWord>;
 
-    PollReader(hal::ISpiTransport& link, ILinkRouter& router, const ISessionLive& live,
-               IPollParams& params, PollShape shape) noexcept
-        : link_(link), live_(live), params_(params), shape_(shape), out_(router) {}
+    PollReader(
+        hal::ISpiTransport& link,
+        ILinkRouter& router,
+        const ISessionLive& live,
+        IPollParams& params,
+        PollShape shape
+    ) noexcept
+        : link_(link),
+          live_(live),
+          params_(params),
+          shape_(shape),
+          out_(router) {}
 
     void service() noexcept;
 
     void start_beat() noexcept;
+
     [[nodiscard]] bool active() const noexcept { return armed_ && live_.session_live(); }
 
     void arm(bool declared, BindGeneration gen) noexcept;
 
     [[nodiscard]] reactor::LinkDecoderDecl census_row(
-        const reactor::ILinkDecoder& impl) const noexcept;
+        const reactor::ILinkDecoder& impl
+    ) const noexcept;
 
     [[nodiscard]] bool armed() const noexcept { return armed_; }
 
     [[nodiscard]] std::uint32_t polls() const noexcept { return polls_; }
+
     [[nodiscard]] std::uint32_t pushes() const noexcept { return pushes_; }
+
     [[nodiscard]] std::uint32_t declined() const noexcept { return declined_; }
+
     [[nodiscard]] std::uint32_t errors() const noexcept { return errors_; }
 
     [[nodiscard]] std::uint16_t mirror(std::uint8_t param) const noexcept {
@@ -88,4 +116,4 @@ private:
     std::uint32_t errors_ = 0;
 };
 
-}  // namespace mister::proto::user_io
+}

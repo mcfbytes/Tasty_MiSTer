@@ -16,7 +16,8 @@ public:
 
     [[nodiscard]] virtual proto::MailboxAct serve(
         const proto::MailboxFrame& frame,
-        std::span<std::uint8_t, proto::kMailboxActBytes> bytes) noexcept = 0;
+        std::span<std::uint8_t, proto::kMailboxActBytes> bytes
+    ) noexcept = 0;
 
     virtual void begin_core() noexcept = 0;
 
@@ -33,4 +34,4 @@ protected:
     IMailboxServant& operator=(const IMailboxServant&) = default;
 };
 
-}  // namespace mister::cores
+}

@@ -25,12 +25,16 @@ public:
     explicit AddressedLoad(const hal::PhysRegion& aperture) noexcept : aperture_(aperture) {}
 
     [[nodiscard]] static std::optional<TransferRow> window_row(
-        std::uint32_t addr, std::uint64_t bytes, proto::IoIndex index,
-        const hal::PhysRegion& aperture) noexcept;
+        std::uint32_t addr,
+        std::uint64_t bytes,
+        proto::IoIndex index,
+        const hal::PhysRegion& aperture
+    ) noexcept;
 
     [[nodiscard]] Ex<LoadPlan> plan(const LoadAsk& ask, const proto::StatusWord& status) override;
     void shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t off) override;
     [[nodiscard]] Ex<void> finish(ICoreWindow* window) override;
+
     [[nodiscard]] std::span<const std::uint8_t> facts() const noexcept override {
         TASTY_SEAT_BODY(AddressedLoad);
         return {};
@@ -42,4 +46,4 @@ private:
 
 std::unique_ptr<ILoader> make_addressed_load(const LoaderContext& ctx);
 
-}  // namespace mister::cores
+}

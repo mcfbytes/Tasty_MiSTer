@@ -17,6 +17,7 @@ constexpr CoreTypeMask dialect_bit(proto::CoreType t) noexcept {
     }
     return CoreTypeMask{};
 }
+
 inline constexpr CoreTypeMask kEightBitOnly{0x01};
 
-}  // namespace mister::cores
+}

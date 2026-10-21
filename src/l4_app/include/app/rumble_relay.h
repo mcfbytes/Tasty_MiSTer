@@ -17,7 +17,10 @@ class RumbleRelay {
 
 public:
     RumbleRelay(svc::IRumbleOut& out, RumblePadsCell& pads, xthread::DiagLog& diag) noexcept
-        : out_(out), pads_(pads), diag_(diag) {}
+        : out_(out),
+          pads_(pads),
+          diag_(diag) {}
+
     RumbleRelay(const RumbleRelay&) = delete;
     RumbleRelay& operator=(const RumbleRelay&) = delete;
 
@@ -30,10 +33,15 @@ public:
     }
 
     [[nodiscard]] std::uint32_t applied() const noexcept { return applied_; }
+
     [[nodiscard]] std::uint32_t repeats() const noexcept { return repeats_; }
+
     [[nodiscard]] std::uint32_t no_device() const noexcept { return no_device_; }
+
     [[nodiscard]] std::uint32_t failures() const noexcept { return failures_; }
+
     [[nodiscard]] std::uint32_t out_of_range() const noexcept { return out_of_range_; }
+
     [[nodiscard]] std::uint32_t reapplied() const noexcept { return reapplied_; }
 
 private:
@@ -52,4 +60,4 @@ private:
     std::uint32_t reapplied_ = 0;
 };
 
-}  // namespace mister::app
+}

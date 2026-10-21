@@ -13,4 +13,4 @@ struct PcmExtent {
     bool loops = false;
 };
 
-}  // namespace mister::cores
+}

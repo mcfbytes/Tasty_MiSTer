@@ -10,4 +10,4 @@ struct ChdMetaRow {
     bool v2 = true;
 };
 
-}  // namespace mister::svc
+}

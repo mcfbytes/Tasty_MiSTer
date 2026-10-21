@@ -13,9 +13,13 @@ struct HdWindow {
 };
 
 [[nodiscard]] constexpr HdWindow hd_window(
-    std::uint16_t selected, std::uint16_t total, std::uint16_t prev_first,
-    std::uint16_t height = static_cast<std::uint16_t>(PageDescription::kMaxRows)) noexcept {
-    if (total == 0 || height == 0) return HdWindow{0, 0};
+    std::uint16_t selected,
+    std::uint16_t total,
+    std::uint16_t prev_first,
+    std::uint16_t height = static_cast<std::uint16_t>(PageDescription::kMaxRows)
+) noexcept {
+    if (total == 0 || height == 0)
+        return HdWindow{0, 0};
     const std::uint16_t sel = selected >= total ? static_cast<std::uint16_t>(total - 1) : selected;
     const std::uint16_t count = total < height ? total : height;
     const std::uint16_t max_first = static_cast<std::uint16_t>(total - count);
@@ -28,4 +32,4 @@ struct HdWindow {
     return HdWindow{first, static_cast<std::uint8_t>(count)};
 }
 
-}  // namespace mister::app
+}

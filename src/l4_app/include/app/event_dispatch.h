@@ -27,4 +27,4 @@ concept EventUiSink = requires(S& s, const Event& m, const Event::Head& h) {
 
 using EventRoutes = infra::AllRouted;
 
-}  // namespace mister::app
+}

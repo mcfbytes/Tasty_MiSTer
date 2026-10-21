@@ -79,7 +79,8 @@ constexpr const T* size_dispatch(std::span<const SizeRow<T>> rows, std::uint32_t
     for (const auto& r : rows) {
         const std::uint32_t lo = r.size_bytes - r.tolerance;
         const std::uint32_t hi = r.size_bytes + r.tolerance;
-        if (size >= lo && size <= hi) return &r.value;
+        if (size >= lo && size <= hi)
+            return &r.value;
     }
     return nullptr;
 }
@@ -156,7 +157,9 @@ struct CoreProfile {
     return role_of(p.slots, index, p.undeclared_role);
 }
 
-[[nodiscard]] Ex<void> assert_services_match_census(const CoreProfile& p,
-                                                    std::span<const LinkDecoderDecl> census_rows);
+[[nodiscard]] Ex<void> assert_services_match_census(
+    const CoreProfile& p,
+    std::span<const LinkDecoderDecl> census_rows
+);
 
-}  // namespace mister::cores
+}

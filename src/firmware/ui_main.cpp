@@ -21,20 +21,39 @@
 
 namespace mister::fw {
 
-UiMain::UiMain(app::EventQueue<SeatTag::RT>& events, xthread::ParkFds fds,
-               app::UartModeController::Handoffs& handoffs, const Wiring& wiring,
-               xthread::WakeFlag& asker) noexcept
-    : events_(events), owner_events_(wiring.owner_events), fifo_(wiring.fifo), mgl_(wiring.mgl),
-      video_(wiring.video), bt_(wiring.bt), shots_(wiring.shots), replay_(wiring.replay),
-      recorder_(wiring.recorder), launcher_screen_(wiring.launcher_screen), uart_(wiring.uart),
-      ui_sink_(wiring.ui_sink), ui_round_(wiring.ui_round), ui_rx_(wiring.link_rx),
-      save_states_(wiring.save_states), wake_(fds.wake()), stop_(std::move(fds).take_stop()),
-      pause_(wake_, &asker), uart_handoffs_(handoffs),
+UiMain::UiMain(
+    app::EventQueue<SeatTag::RT>& events,
+    xthread::ParkFds fds,
+    app::UartModeController::Handoffs& handoffs,
+    const Wiring& wiring,
+    xthread::WakeFlag& asker
+) noexcept
+    : events_(events),
+      owner_events_(wiring.owner_events),
+      fifo_(wiring.fifo),
+      mgl_(wiring.mgl),
+      video_(wiring.video),
+      bt_(wiring.bt),
+      shots_(wiring.shots),
+      replay_(wiring.replay),
+      recorder_(wiring.recorder),
+      launcher_screen_(wiring.launcher_screen),
+      uart_(wiring.uart),
+      ui_sink_(wiring.ui_sink),
+      ui_round_(wiring.ui_round),
+      owner_tick_(wiring.owner_tick),
+      ui_rx_(wiring.link_rx),
+      save_states_(wiring.save_states),
+      wake_(fds.wake()),
+      stop_(std::move(fds).take_stop()),
+      pause_(wake_, &asker),
+      uart_handoffs_(handoffs),
       park_(wake_, stop_, fifo_ ? fifo_->fd() : -1) {}
 
 void UiMain::start() noexcept {
     TASTY_SEAT_BODY(UiMain);
-    if (ui_round_) ui_round_->boot_witness();
+    if (ui_round_)
+        ui_round_->boot_witness();
     loop_();
 }
 
@@ -54,21 +73,28 @@ void UiMain::serve() noexcept {
         else
             ++roundless_link_drops_;
     }
-    if (fifo_ && park_.extra_ready()) (void)fifo_->service();
-    if (mgl_) mgl_->tick();
+    if (fifo_ && park_.extra_ready())
+        (void)fifo_->service();
+    if (mgl_)
+        mgl_->tick();
     video_.tick();
-    if (launcher_screen_) launcher_screen_->tick();
-    if (bt_) bt_->tick();
+    if (launcher_screen_)
+        launcher_screen_->tick();
+    if (bt_)
+        bt_->tick();
     shots_.tick();
     replay_.tick();
     recorder_.tick();
-    if (save_states_) save_states_->tick();
-    if (owner_tick_) owner_tick_->tick();
+    if (save_states_)
+        save_states_->tick();
+    if (owner_tick_)
+        owner_tick_->tick();
     if (uart_) {
         while (const auto h = uart_handoffs_.pop())
             infra::dispatch<app::UartHandoffRoutes>(*h, uart_performer_);
     }
-    if (ui_round_) ui_round_->round(link_work);
+    if (ui_round_)
+        ui_round_->round(link_work);
     drain_events_();
 }
 
@@ -76,8 +102,10 @@ void UiMain::on_pause() noexcept {
     park_.mute_extra(true);
     while (ui_rx_.pop().has_value())
         ++paused_link_drops_;
-    if (ui_round_) ui_round_->forget_cells();
-    if (save_states_) save_states_->on_ui_pause();
+    if (ui_round_)
+        ui_round_->forget_cells();
+    if (save_states_)
+        save_states_->on_ui_pause();
     video_.on_pause();
 }
 
@@ -89,7 +117,8 @@ void UiMain::on_resume() noexcept {
 void UiMain::settle() noexcept {
     drain_events_();
     shots_.tick();
-    if (ui_round_) ui_round_->settle();
+    if (ui_round_)
+        ui_round_->settle();
 }
 
-}  // namespace mister::fw
+}

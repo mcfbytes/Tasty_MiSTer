@@ -34,35 +34,47 @@ public:
     [[nodiscard]] const MovieArchiveFormat* archive() const noexcept override {
         return &kBk2Archive;
     }
+
     [[nodiscard]] bool starts_log(std::string_view line) const noexcept override;
     [[nodiscard]] bool ends_log(std::string_view line) const noexcept override;
-    [[nodiscard]] Ex<Facts> header_line(std::string_view line,
-                                        const Facts& so_far) const noexcept override;
+    [[nodiscard]] Ex<Facts> header_line(
+        std::string_view line,
+        const Facts& so_far
+    ) const noexcept override;
     [[nodiscard]] Ex<void> finish_header(const Facts& f) const noexcept override;
     [[nodiscard]] Ex<Frame> frame(std::string_view line, const Facts& f) const noexcept override;
+
     [[nodiscard]] std::int32_t default_lead(const Facts&) const noexcept override {
         return kNesHawkLead;
     }
+
     [[nodiscard]] LeadRange lead_range() const noexcept override { return {kLeadMin, kLeadMax}; }
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
-        std::span<const std::uint8_t> head, std::uint64_t size) const noexcept override;
+        std::span<const std::uint8_t> head,
+        std::uint64_t size
+    ) const noexcept override;
 
-    [[nodiscard]] Ex<DigestSource> digest_source(const svc::Vfs& vfs,
-                                                 std::string_view rom) const override;
+    [[nodiscard]] Ex<DigestSource> digest_source(
+        const svc::Vfs& vfs,
+        std::string_view rom
+    ) const override;
 
     struct PadName {
         std::string_view name;
         std::uint8_t bit;
     };
-    static constexpr std::array<PadName, 8> kPadNames{{{"Up", 3},
-                                                       {"Down", 2},
-                                                       {"Left", 1},
-                                                       {"Right", 0},
-                                                       {"Start", 7},
-                                                       {"Select", 6},
-                                                       {"B", 5},
-                                                       {"A", 4}}};
+
+    static constexpr std::array<PadName, 8> kPadNames{
+        {{"Up", 3},
+         {"Down", 2},
+         {"Left", 1},
+         {"Right", 0},
+         {"Start", 7},
+         {"Select", 6},
+         {"B", 5},
+         {"A", 4}}
+    };
 
     [[nodiscard]] static Ex<std::uint8_t> column_of(std::string_view name) noexcept;
 };
@@ -70,13 +82,18 @@ public:
 consteval bool nes_bk2_pad_bits_are_a_permutation() {
     unsigned seen = 0;
     for (const NesBk2Codec::PadName& p : NesBk2Codec::kPadNames) {
-        if (p.bit > 7) return false;
-        if ((seen & (1u << p.bit)) != 0) return false;
+        if (p.bit > 7)
+            return false;
+        if ((seen & (1u << p.bit)) != 0)
+            return false;
         seen |= 1u << p.bit;
     }
     return seen == 0xFFu;
 }
-static_assert(nes_bk2_pad_bits_are_a_permutation(),
-              "BizHawk's NES pad names are a permutation of bits 0-7");
 
-}  // namespace mister::cores
+static_assert(
+    nes_bk2_pad_bits_are_a_permutation(),
+    "BizHawk's NES pad names are a permutation of bits 0-7"
+);
+
+}

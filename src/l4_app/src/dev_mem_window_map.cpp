@@ -13,4 +13,4 @@ template class DevMemWindowMap<seat_owner::Main>;
 template class DevMemWindowMap<seat_owner::Io>;
 template class DevMemWindowMap<seat_owner::Ui>;
 
-}  // namespace mister::app
+}

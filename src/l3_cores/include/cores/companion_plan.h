@@ -21,4 +21,4 @@ struct CompanionPlan {
     TransferRow row{};
 };
 
-}  // namespace mister::cores
+}

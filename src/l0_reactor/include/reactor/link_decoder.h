@@ -10,6 +10,7 @@ struct CoreState;
 class ILinkDecoder {
 public:
     virtual void service(CoreState& core) const = 0;
+
     virtual constexpr bool active() const { return true; }
 
     virtual std::uint32_t osd_claims() const { return 0; }
@@ -22,4 +23,4 @@ protected:
     ~ILinkDecoder() = default;
 };
 
-}  // namespace mister::reactor
+}

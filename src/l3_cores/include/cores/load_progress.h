@@ -17,4 +17,4 @@ protected:
     ILoadProgress& operator=(const ILoadProgress&) = default;
 };
 
-}  // namespace mister::cores
+}

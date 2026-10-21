@@ -41,44 +41,62 @@ public:
 
     [[nodiscard]] Ex<void> begin(std::uint16_t w, std::uint16_t h) noexcept override;
     void end() noexcept override;
+
     [[nodiscard]] bool open() const noexcept override {
         TASTY_SEAT_BODY(ZmbvCodec);
         return width_ != 0;
     }
+
     [[nodiscard]] std::uint16_t width() const noexcept override {
         TASTY_SEAT_BODY(ZmbvCodec);
         return width_;
     }
+
     [[nodiscard]] std::uint16_t height() const noexcept override {
         TASTY_SEAT_BODY(ZmbvCodec);
         return height_;
     }
+
     [[nodiscard]] std::size_t max_payload() const noexcept override {
         TASTY_SEAT_BODY(ZmbvCodec);
         return max_payload_;
     }
+
     [[nodiscard]] std::size_t mapped_bytes() const noexcept { return arena_.bytes(); }
 
-    [[nodiscard]] std::size_t encode(const std::byte* rgb, std::size_t line, bool key,
-                                     std::span<std::byte> out) noexcept override;
+    [[nodiscard]] std::size_t encode(
+        const std::byte* rgb,
+        std::size_t line,
+        bool key,
+        std::span<std::byte> out
+    ) noexcept override;
     [[nodiscard]] std::size_t rekey(std::span<std::byte> out) noexcept override;
     [[nodiscard]] std::span<const std::byte> dup() noexcept override;
 
     void restart(const RecOptions& opt) noexcept override;
     void arm(const os::IClock* clock, std::int64_t budget_ns) noexcept override;
+
     [[nodiscard]] Search search() const noexcept override {
         TASTY_SEAT_BODY(ZmbvCodec);
         return {.radius = static_cast<std::uint8_t>(radius_), .cut = me_cut_};
     }
+
     [[nodiscard]] std::uint32_t sad_calls() const noexcept { return sad_calls_; }
 
 private:
     void release_() noexcept;
-    [[nodiscard]] std::size_t deflate_sync_(const std::byte* in, std::size_t n, std::byte* dst,
-                                            std::size_t cap) noexcept;
+    [[nodiscard]] std::size_t deflate_sync_(
+        const std::byte* in,
+        std::size_t n,
+        std::byte* dst,
+        std::size_t cap
+    ) noexcept;
     [[nodiscard]] std::size_t emit_key_(const std::byte* bgr0, std::span<std::byte> out) noexcept;
-    [[nodiscard]] std::size_t emit_inter_(const std::byte* plain, std::size_t n,
-                                          std::span<std::byte> out) noexcept;
+    [[nodiscard]] std::size_t emit_inter_(
+        const std::byte* plain,
+        std::size_t n,
+        std::span<std::byte> out
+    ) noexcept;
     [[nodiscard]] std::size_t build_inter_() noexcept;
     void to_bgr0_(const std::byte* rgb, std::size_t line) noexcept;
     void note_post_(std::int64_t post) noexcept;
@@ -114,4 +132,4 @@ private:
     bool cut_frame_ = false;
 };
 
-}  // namespace mister::app
+}

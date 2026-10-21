@@ -14,7 +14,8 @@ namespace mister::app {
 void MailboxRelay::bind(proto::MailboxPoll poll, std::uint16_t gen) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, A);
     gen_ = gen;
-    if (poll != proto::MailboxPoll::Keep) polling_ = poll == proto::MailboxPoll::On;
+    if (poll != proto::MailboxPoll::Keep)
+        polling_ = poll == proto::MailboxPoll::On;
 }
 
 void MailboxRelay::forget() noexcept {
@@ -24,15 +25,20 @@ void MailboxRelay::forget() noexcept {
     last_head_.reset();
 }
 
-void MailboxRelay::service_rt(hal::ISpiTransport& link, proto::SpiFioQueue& queue,
-                              const proto::MailboxFrameDecl& frame) noexcept {
+void MailboxRelay::service_rt(
+    hal::ISpiTransport& link,
+    proto::SpiFioQueue& queue,
+    const proto::MailboxFrameDecl& frame
+) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, A);
     ++round_;
     const std::size_t widest = queue.bracket_windows(proto::kMailboxActBytes);
     for (unsigned i = 0; i < kReapPerRound; ++i) {
-        if (!queue.fits(widest, proto::kMailboxActBytes, 1)) break;
+        if (!queue.fits(widest, proto::kMailboxActBytes, 1))
+            break;
         const Chan::Loan done = chan_.reap();
-        if (!done) break;
+        if (!done)
+            break;
         if (!done.completed() || done->gen != gen_ || gen_ == 0) {
             stale_.add();
             last_head_.reset();
@@ -40,24 +46,28 @@ void MailboxRelay::service_rt(hal::ISpiTransport& link, proto::SpiFioQueue& queu
         }
         write_(queue, *done);
     }
-    if (!polling_ || !proto::well_formed(frame)) return;
+    if (!polling_ || !proto::well_formed(frame))
+        return;
     proto::MailboxFrame f{};
     bool moved = true;
     {
         hal::Selected cs(link, hal::ChipSelect::Io);
         for (std::uint8_t i = 0; i < frame.words && moved; ++i) {
-            const auto r =
-                link.transfer(hal::SpiWord{i == 0 ? frame.poll_opcode : std::uint16_t{0}});
+            const auto r = link.transfer(
+                hal::SpiWord{i == 0 ? frame.poll_opcode : std::uint16_t{0}}
+            );
             if (!r) {
                 wire_faults_.add();
                 return;
             }
             f.w[i] = r->v;
-            if (i == 0) moved = !last_head_ || f.w[0] != *last_head_;
+            if (i == 0)
+                moved = !last_head_ || f.w[0] != *last_head_;
         }
     }
     polls_.add();
-    if (!moved) return;
+    if (!moved)
+        return;
     Chan::Loan l = chan_.acquire();
     if (!l) {
         declines_.add();
@@ -75,7 +85,8 @@ void MailboxRelay::service_rt(hal::ISpiTransport& link, proto::SpiFioQueue& queu
 void MailboxRelay::write_(proto::SpiFioQueue& queue, const MailboxSlot& s) noexcept {
     using Kind = proto::MailboxAct::Kind;
     const proto::MailboxAct& a = s.act;
-    if (a.kind == Kind::None) return;
+    if (a.kind == Kind::None)
+        return;
     bool ok = false;
     if (a.kind == Kind::Command) {
         const std::array<std::uint16_t, 4> w{a.opcode, a.words[0], a.words[1], a.words[2]};
@@ -109,4 +120,4 @@ void MailboxRelay::park_now() noexcept {
     }
 }
 
-}  // namespace mister::app
+}

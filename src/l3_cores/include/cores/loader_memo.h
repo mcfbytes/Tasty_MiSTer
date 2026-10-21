@@ -13,4 +13,4 @@ struct LoaderMemo {
     FixedStr<svc::kSlotPathCap, StrFit::Reject> last_boot{};
 };
 
-}  // namespace mister::cores
+}

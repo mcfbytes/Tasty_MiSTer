@@ -61,4 +61,4 @@ struct BoardOps {
     infra::OptRef<IStopSignal> stop{};
 };
 
-}  // namespace mister::app
+}

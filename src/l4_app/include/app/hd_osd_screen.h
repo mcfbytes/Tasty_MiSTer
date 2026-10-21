@@ -35,6 +35,7 @@ public:
     };
 
     explicit HdOsdScreen(const Wiring& w) noexcept : w_(w) {}
+
     HdOsdScreen(const HdOsdScreen&) = delete;
     HdOsdScreen& operator=(const HdOsdScreen&) = delete;
 
@@ -83,4 +84,4 @@ private:
     bool drop_owed_ = false;
 };
 
-}  // namespace mister::app
+}

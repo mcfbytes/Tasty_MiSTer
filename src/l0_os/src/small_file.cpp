@@ -22,13 +22,15 @@ namespace mister::os {
     while (got < buf.size()) {
         const ssize_t n = ::read(guard.get(), buf.data() + got, buf.size() - got);
         if (n < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
         }
-        if (n == 0) break;
+        if (n == 0)
+            break;
         got += static_cast<std::size_t>(n);
     }
     return got;
 }
 
-}  // namespace mister::os
+}

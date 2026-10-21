@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Build static zlib-ng (compat), minizip, lzo, and libchdr for the static glibc toolchain."""
+"""Build static zlib-ng (compat), minizip, lzo, and libchdr for the static glibc toolchain, and fetch
+the two Noto Sans faces the HD OSD embeds. Slint is build-static-slint.sh's."""
 from __future__ import annotations
 
 import hashlib
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
 # Hashes from Buildroot package/*.hash (zlib-ng, minizip-zlib/libzlib, lzo, libchdr).
@@ -26,6 +28,13 @@ LZO_SHA = "c0f892943208266f9b6543b3ae308fab6284c5c90e627931446fb49b4221a072"
 LIBCHDR_REV = "607694ca0812edfc9cc2030c64634fc2393668de"
 LIBCHDR_URL = f"https://github.com/rtissera/libchdr/archive/{LIBCHDR_REV}.tar.gz"
 LIBCHDR_SHA = "02e772a74c4e5ec110bb646e729e1910268d2dae2c76df2a1b35525cc3826a9c"
+
+# The MiSTer image's Noto Sans (OFL-1.1); the release publishes no checksum, this one is the image's.
+NOTO_VER = "2.015"
+NOTO_URL = (f"https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSans-v{NOTO_VER}/"
+            f"NotoSans-v{NOTO_VER}.zip")
+NOTO_SHA = "0c34df072a3fa7efbb7cbf34950e1f971a4447cffe365d3a359e2d4089b958f5"
+NOTO_FACES = ("NotoSans-Regular.ttf", "NotoSans-Bold.ttf")
 
 # Buildroot_MiSTer's target flags (gcc --with-cpu/fpu/float/mode, TARGET_CFLAGS), plus the 64-bit
 # off_t/time_t tasty itself compiles with: zlib's gz* API passes off_t across the boundary.
@@ -85,6 +94,17 @@ def merge_archives(ar: Path, out: Path, archives: list[Path]) -> None:
     subprocess.run([str(ar), "-M"], input="\n".join(lines) + "\n", text=True, check=True)
 
 
+def fetch_fonts(work: Path, prefix: Path) -> None:
+    z = work / f"NotoSans-v{NOTO_VER}.zip"
+    fetch(NOTO_URL, z, NOTO_SHA)
+    out = prefix / "fonts"
+    out.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(z) as zf:
+        for face in NOTO_FACES:
+            (out / face).write_bytes(zf.read(f"NotoSans/unhinted/ttf/{face}"))
+        (out / "OFL.txt").write_bytes(zf.read("OFL.txt"))
+
+
 def main() -> int:
     root = Path(os.environ["TASTY_TOOLCHAIN_ROOT"])
     cc = root / "bin/arm-buildroot-linux-gnueabihf-gcc"
@@ -111,6 +131,8 @@ def main() -> int:
         "-DCMAKE_BUILD_TYPE=Release",
         "-DBUILD_SHARED_LIBS=OFF",
     ]
+
+    fetch_fonts(work, prefix)
 
     zng_tar = work / f"zlib-ng-{ZLIB_NG_VER}.tar.gz"
     fetch(ZLIB_NG_URL, zng_tar, ZLIB_NG_SHA)
@@ -217,8 +239,9 @@ def main() -> int:
         shutil.copy2(h, hdr_dst / h.name)
 
     print("static deps in", prefix)
-    for name in ["libz.a", "libminizip.a", "liblzo2.a", "libchdr.a"]:
-        p = prefix / "lib" / name
+    for name in ["lib/libz.a", "lib/libminizip.a", "lib/liblzo2.a", "lib/libchdr.a",
+                 *(f"fonts/{f}" for f in NOTO_FACES)]:
+        p = prefix / name
         print(" ", p, "ok" if p.is_file() else "MISSING")
         if not p.is_file():
             return 1

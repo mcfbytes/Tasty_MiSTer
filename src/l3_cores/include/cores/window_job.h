@@ -36,8 +36,10 @@ protected:
 
 class IWindowJobKind {
 public:
-    [[nodiscard]] virtual IWindowJob* build(std::span<std::byte> arena,
-                                            std::span<const std::byte> order) const noexcept = 0;
+    [[nodiscard]] virtual IWindowJob* build(
+        std::span<std::byte> arena,
+        std::span<const std::byte> order
+    ) const noexcept = 0;
 
 protected:
     IWindowJobKind() = default;
@@ -51,15 +53,20 @@ public:
     virtual ~IWindowSave() = default;
 
     [[nodiscard]] virtual const IWindowJobKind* on_osd_open(
-        std::span<std::byte> order) noexcept = 0;
+        std::span<std::byte> order
+    ) noexcept = 0;
 
     [[nodiscard]] virtual const IWindowJobKind* on_reset_edge(
-        const proto::ResetEdge& edge, std::span<std::byte> order) noexcept = 0;
+        const proto::ResetEdge& edge,
+        std::span<std::byte> order
+    ) noexcept = 0;
 
     [[nodiscard]] virtual bool owes_flush(proto::IoIndex index) const noexcept = 0;
 
-    [[nodiscard]] virtual const IWindowJobKind* take_flush(proto::IoIndex index,
-                                                           std::span<std::byte> order) noexcept = 0;
+    [[nodiscard]] virtual const IWindowJobKind* take_flush(
+        proto::IoIndex index,
+        std::span<std::byte> order
+    ) noexcept = 0;
 
 protected:
     IWindowSave() = default;
@@ -67,4 +74,4 @@ protected:
     IWindowSave& operator=(const IWindowSave&) = default;
 };
 
-}  // namespace mister::cores
+}

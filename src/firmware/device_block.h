@@ -33,6 +33,7 @@
 #include "app/link_rx_channel.h"
 #include "app/link_session.h"
 #include "app/link_tx_channel.h"
+#include "app/disk_relay.h"
 #include "app/mailbox_relay.h"
 #include "app/osd_wire.h"
 #include "app/pcm_main.h"
@@ -98,7 +99,7 @@ public:
     DeviceBlock(const DeviceBlock&) = delete;
     DeviceBlock& operator=(const DeviceBlock&) = delete;
 
-    void open_wires(const BootParts& plat) noexcept;
+    void open_wires() noexcept;
 
     void open_seats(const BootParts& plat, const Seats& seats) noexcept;
 
@@ -108,14 +109,46 @@ public:
 
     [[nodiscard]] DiagSampler::DeviceCells diag_sources(const BootParts& plat) noexcept;
 
+    [[nodiscard]] DiagSampler::Services diag_services() noexcept;
+
     static std::optional<app::CmdFifo> open_cmd_fifo(app::ICmdVerbSink& route);
 
 private:
-    static std::unique_ptr<reactor::FrameClock> open_frame_clock(const char* vsync_device,
-                                                                 reactor::Executive& exec);
+    static std::unique_ptr<reactor::FrameClock> open_frame_clock(
+        const char* vsync_device,
+        reactor::Executive& exec
+    );
+
+    static std::optional<svc::PrefetchMain> open_prefetch_main(
+        svc::ChdPrefetch& prefetch,
+        xthread::WakeFlag& main_wake
+    );
+    static std::optional<app::PcmMain> open_pcm_main(
+        xthread::WakeFlag& pcm_wake,
+        app::PcmRingFeeder& feeder,
+        app::PcmRingFeeder::Commands& commands,
+        app::MailboxRelay& relay,
+        app::CompanionHost& host,
+        xthread::WakeFlag& main_wake
+    );
+    static std::optional<svc::IoMain> open_io_main(
+        xthread::WakeFlag& io_wake,
+        xthread::WakeFlag& main_wake
+    );
+
+    [[nodiscard]] app::SupervisorParts::Services services_() noexcept;
 
     [[nodiscard]] static Ex<hal::FpgaMemory> map_scaler_out(
-        std::span<const hal::PhysRegion> regions);
+        std::span<const hal::PhysRegion> regions
+    );
+
+    [[nodiscard]] std::optional<app::ScalerFrameSource> open_frame_source_(
+        const BootParts& plat
+    ) noexcept;
+    [[nodiscard]] std::optional<app::InputPipeline> open_input_pipeline_(
+        const BootParts& plat
+    ) noexcept;
+    [[nodiscard]] std::optional<app::InputMain> open_input_main_() noexcept;
 
     [[nodiscard]] bool rides_io_(svc::IIoCoworker& lane, const char* what) noexcept;
     template <class Row>
@@ -139,14 +172,18 @@ public:
 
     app::FileStreamService file_streams_;
 
+    app::DiskRelay disk_relay_{io_wake_};
+
     hal::PinLevelCell pin_levels_{};
 
     hal::HdmiIntLevel hdmi_level_{pin_levels_};
 
     app::EventQueue<SeatTag::RT> events_;
     app::EventQueue<SeatTag::Main> owner_events_;
-    static_assert(!std::is_same_v<decltype(events_), decltype(owner_events_)>,
-                  "the two EventQueues are one per producer seat and never interchangeable");
+    static_assert(
+        !std::is_same_v<decltype(events_), decltype(owner_events_)>,
+        "the two EventQueues are one per producer seat and never interchangeable"
+    );
     os::MonotonicClock clock_;
 
     app::LinkTxChannel<SeatTag::Ui> ui_inbox_;
@@ -189,9 +226,9 @@ public:
     svc::StorageService storage_;
     svc::DiscStore disc_store_;
     svc::DiscReadService discs_;
-    std::optional<app::DurableWriteService> writes_;
+    app::DurableWriteService writes_;
     app::DevMemWindowMap<seat_owner::Io> io_window_map_{};
-    std::optional<app::WindowJobService> window_jobs_;
+    app::WindowJobService window_jobs_;
     app::ScreenshotQueue shots_;
     std::optional<app::ScalerFrameSource> frame_src_;
     proto::OsdSurface surface_;
@@ -223,10 +260,12 @@ public:
     app::BitstreamProgrammer bitstream_;
     app::DevMemWindowMap<seat_owner::Main> window_map_{};
     app::DevMemWindowMap<seat_owner::Ui> ui_window_map_{};
-    static_assert(!std::is_same_v<decltype(window_map_), decltype(io_window_map_)> &&
-                      !std::is_same_v<decltype(window_map_), decltype(ui_window_map_)> &&
-                      !std::is_same_v<decltype(io_window_map_), decltype(ui_window_map_)>,
-                  "one window map per mapping seat; no instance is shared between two");
+    static_assert(
+        !std::is_same_v<decltype(window_map_), decltype(io_window_map_)>
+            && !std::is_same_v<decltype(window_map_), decltype(ui_window_map_)>
+            && !std::is_same_v<decltype(io_window_map_), decltype(ui_window_map_)>,
+        "one window map per mapping seat; no instance is shared between two"
+    );
     app::SessionOwner owner_;
 
     app::FrameDemandCell frame_demand_{};
@@ -236,4 +275,4 @@ public:
     const svc::Vfs& vfs_;
 };
 
-}  // namespace mister::fw
+}

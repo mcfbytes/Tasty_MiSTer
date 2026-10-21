@@ -16,15 +16,22 @@ std::string remembered_blob_name(const RememberedStem& stem, RememberedSlot s, s
     return n;
 }
 
-std::string read_remembered_path(const svc::Vfs& vfs, const RememberedStem& stem, RememberedSlot s,
-                                 std::uint8_t index) {
-    if (stem.empty()) return {};
+std::string read_remembered_path(
+    const svc::Vfs& vfs,
+    const RememberedStem& stem,
+    RememberedSlot s,
+    std::uint8_t index
+) {
+    if (stem.empty())
+        return {};
     auto f = vfs.open("config/" + remembered_blob_name(stem, s, index), svc::OpenMode::ReadWhole);
-    if (!f) return {};
+    if (!f)
+        return {};
     std::array<std::byte, kRememberedBlob> blob{};
     auto n = (*f)->read_at(0, blob);
-    if (!n || *n == 0) return {};
+    if (!n || *n == 0)
+        return {};
     return std::string{infra::text_until_nul(blob.data(), kRememberedBlob)};
 }
 
-}  // namespace mister::app
+}

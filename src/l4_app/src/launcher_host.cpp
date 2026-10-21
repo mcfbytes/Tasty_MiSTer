@@ -51,16 +51,17 @@ std::vector<std::string> child_env(bool lease) {
     }
     env.emplace_back(kEnvLocale);
     env.emplace_back(kEnvHome);
-    if (lease) env.push_back(fd_prefix + std::to_string(os::kChildKeptFd));
+    if (lease)
+        env.push_back(fd_prefix + std::to_string(os::kChildKeptFd));
     return env;
 }
 
 bool send_text(int fd, std::string_view s) noexcept {
-    return ::send(fd, s.data(), s.size(), MSG_DONTWAIT | MSG_NOSIGNAL) ==
-           static_cast<ssize_t>(s.size());
+    return ::send(fd, s.data(), s.size(), MSG_DONTWAIT | MSG_NOSIGNAL)
+        == static_cast<ssize_t>(s.size());
 }
 
-}  // namespace
+}
 
 Ex<LauncherHost::Fds> LauncherHost::Fds::create() noexcept {
     UniqueFd epoll(::epoll_create1(EPOLL_CLOEXEC));
@@ -80,21 +81,28 @@ void LauncherHost::unwatch_(int fd) noexcept {
     (void)::epoll_ctl(epoll_.get(), EPOLL_CTL_DEL, fd, nullptr);
 }
 
-void LauncherHost::publish_() noexcept { w_.state.publish(state_); }
+void LauncherHost::publish_() noexcept {
+    w_.state.publish(state_);
+}
 
 void LauncherHost::take_demand_() noexcept {
     LauncherDemand d{};
-    if (!demand_seen_.take_if_changed(w_.demand, d)) return;
-    if (d.core_gen != demand_.core_gen) strikes_ = 0;
+    if (!demand_seen_.take_if_changed(w_.demand, d))
+        return;
+    if (d.core_gen != demand_.core_gen)
+        strikes_ = 0;
     demand_ = d;
 }
 
 bool LauncherHost::hosting_() const noexcept {
-    if (!demand_.profile || !demand_.front_end || demand_.program.empty()) return false;
+    if (!demand_.profile || !demand_.front_end || demand_.program.empty())
+        return false;
     return escaped_gen_ != demand_.core_gen && given_up_gen_ != demand_.core_gen;
 }
 
-bool LauncherHost::wanted_() const noexcept { return !paused_ && hosting_(); }
+bool LauncherHost::wanted_() const noexcept {
+    return !paused_ && hosting_();
+}
 
 void LauncherHost::serve() noexcept {
     TASTY_SEAT_BODY(LauncherHost);
@@ -107,7 +115,8 @@ void LauncherHost::serve() noexcept {
 
 void LauncherHost::step_() noexcept {
     take_demand_();
-    if (!swept_ && demand_.profile && !demand_.program.empty()) sweep_stale_();
+    if (!swept_ && demand_.profile && !demand_.program.empty())
+        sweep_stale_();
     reap_();
     deliver_answers_();
     serve_lease_();
@@ -134,27 +143,32 @@ void LauncherHost::step_() noexcept {
             return;
         }
         const bool acked = w_.fb_ack.sample().value.screen_gen == state_.screen_gen;
-        if (acked || (ack_by_ && now >= *ack_by_)) spawn_();
+        if (acked || (ack_by_ && now >= *ack_by_))
+            spawn_();
         return;
     }
     if (!wanted_()) {
         respawn_at_.reset();
-        if (state_.owns_screen) release_screen_(false);
+        if (state_.owns_screen)
+            release_screen_(false);
         return;
     }
-    if (respawn_at_ && now < *respawn_at_) return;
+    if (respawn_at_ && now < *respawn_at_)
+        return;
     respawn_at_.reset();
     claim_screen_();
 }
 
 void LauncherHost::claim_screen_() noexcept {
     if (!state_.owns_screen) {
-        if (const auto vt = w_.console.active(); vt && *vt != demand_.profile->vt) prior_vt_ = *vt;
+        if (const auto vt = w_.console.active(); vt && *vt != demand_.profile->vt)
+            prior_vt_ = *vt;
         const std::string tty(demand_.profile->tty);
         w_.console.blank(tty.c_str());
     }
     ++state_.screen_gen;
-    if (state_.screen_gen == 0) state_.screen_gen = 1;
+    if (state_.screen_gen == 0)
+        state_.screen_gen = 1;
     state_.owns_screen = true;
     state_.settled = false;
     publish_();
@@ -170,8 +184,10 @@ void LauncherHost::spawn_() noexcept {
     UniqueFd child_end{};
     const std::string device(p.scanout_device);
 
-    if (!device.empty() && demand_.scanout_core && !demand_.direct_video &&
-        ::access(device.c_str(), F_OK) == 0) {
+    if (!device.empty()
+        && demand_.scanout_core
+        && !demand_.direct_video
+        && ::access(device.c_str(), F_OK) == 0) {
         int sv[2] = {-1, -1};
         if (::socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0, sv) == 0) {
             lease_.reset(sv[0]);
@@ -186,7 +202,8 @@ void LauncherHost::spawn_() noexcept {
     const std::array<const char*, 1> argv{demand_.program.c_str()};
     const std::string tty(p.tty);
     auto c = os::ChildProcess::spawn(
-        {.argv = argv, .envp = envp, .tty = tty, .kept_fd = child_end.get()});
+        {.argv = argv, .envp = envp, .tty = tty, .kept_fd = child_end.get()}
+    );
     if (!c) {
         ++n_.spawn_failures;
         close_lease_();
@@ -196,33 +213,40 @@ void LauncherHost::spawn_() noexcept {
     ++n_.spawns;
     child_.emplace(std::move(*c));
     watch_(child_->pidfd());
-    if (lease_.valid()) watch_(lease_.get());
+    if (lease_.valid())
+        watch_(lease_.get());
     (void)w_.console.activate(p.vt);
     settle_by_ = spawned_at_ + nanoseconds{t_.settle_limit};
 }
 
 void LauncherHost::settle_() noexcept {
-    if (state_.settled) return;
+    if (state_.settled)
+        return;
     const bool on_vt = w_.console.active() == demand_.profile->vt;
-    if (!on_vt && settle_by_ && now_() < *settle_by_) return;
+    if (!on_vt && settle_by_ && now_() < *settle_by_)
+        return;
     state_.settled = true;
     settle_by_.reset();
     publish_();
-    if (request_waiting_) grant_();
+    if (request_waiting_)
+        grant_();
 }
 
 void LauncherHost::grant_() noexcept {
     request_waiting_ = false;
-    if (!lease_.valid()) return;
+    if (!lease_.valid())
+        return;
     state_.scanout_owned = true;
     publish_();
     grant_by_ = now_() + nanoseconds{t_.fb_ack_limit};
 }
 
 void LauncherHost::finish_grant_() noexcept {
-    if (!grant_by_ || !lease_.valid()) return;
+    if (!grant_by_ || !lease_.valid())
+        return;
     if (!w_.fb_ack.sample().value.held) {
-        if (now_() < *grant_by_) return;
+        if (now_() < *grant_by_)
+            return;
         ++n_.refusals;
         (void)send_text(lease_.get(), scanout::kRefuse);
         close_lease_();
@@ -238,9 +262,11 @@ void LauncherHost::finish_grant_() noexcept {
 }
 
 void LauncherHost::reap_() noexcept {
-    if (!child_) return;
+    if (!child_)
+        return;
     const auto e = child_->try_reap();
-    if (!e) return;
+    if (!e)
+        return;
     child_.reset();
     close_lease_();
     on_exit_(*e);
@@ -267,7 +293,8 @@ void LauncherHost::on_exit_(const os::ChildProcessExit& e) noexcept {
         respawn_at_ = std::max(now, spawned_at_ + nanoseconds{t_.respawn});
         return;
     }
-    if (now - spawned_at_ >= nanoseconds{t_.healthy_run}) strikes_ = 0;
+    if (now - spawned_at_ >= nanoseconds{t_.healthy_run})
+        strikes_ = 0;
     ++strikes_;
     ++n_.strikes;
     if (strikes_ >= t_.strikes) {
@@ -280,7 +307,8 @@ void LauncherHost::on_exit_(const os::ChildProcessExit& e) noexcept {
 }
 
 void LauncherHost::begin_stop_() noexcept {
-    if (!child_ || stopping_) return;
+    if (!child_ || stopping_)
+        return;
     stopping_ = true;
     (void)child_->signal(SIGTERM);
     kill_at_ = now_() + nanoseconds{t_.kill_after};
@@ -291,11 +319,13 @@ void LauncherHost::release_screen_(bool restore_console) noexcept {
     state_.owns_screen = false;
     state_.settled = false;
     state_.scanout_owned = false;
-    if (had) publish_();
+    if (had)
+        publish_();
     if (restore_console && demand_.profile) {
         const std::string tty(demand_.profile->tty);
         w_.console.restore_text(tty.c_str());
-        if (prior_vt_ > 0) (void)w_.console.activate(prior_vt_);
+        if (prior_vt_ > 0)
+            (void)w_.console.activate(prior_vt_);
     }
 }
 
@@ -321,9 +351,12 @@ void LauncherHost::resume() noexcept {
 
 bool LauncherHost::idle() const noexcept {
     const std::uint32_t g = w_.demand.generation();
-    if (g != 0 && g != demand_seen_.seen()) return false;
-    if (grant_by_ && w_.fb_ack.sample().value.held) return false;
-    if (claiming_ && w_.fb_ack.sample().value.screen_gen == state_.screen_gen) return false;
+    if (g != 0 && g != demand_seen_.seen())
+        return false;
+    if (grant_by_ && w_.fb_ack.sample().value.held)
+        return false;
+    if (claiming_ && w_.fb_ack.sample().value.screen_gen == state_.screen_gen)
+        return false;
     return w_.scanout.answers_empty();
 }
 
@@ -334,21 +367,26 @@ bool LauncherHost::quiescent() const noexcept {
 int LauncherHost::park_ms() const noexcept {
     std::optional<Ns> due{};
     const auto consider = [&due](const std::optional<Ns>& d) noexcept {
-        if (d && (!due || *d < *due)) due = d;
+        if (d && (!due || *d < *due))
+            due = d;
     };
     consider(respawn_at_);
     consider(kill_at_);
     consider(grant_by_);
-    if (held_ask_) consider(now_() + nanoseconds{kSettlePoll});
-    if (claiming_) consider(ack_by_);
+    if (held_ask_)
+        consider(now_() + nanoseconds{kSettlePoll});
+    if (claiming_)
+        consider(ack_by_);
     std::optional<Ns> settle{};
     if (child_ && !state_.settled && settle_by_) {
         settle = std::min(*settle_by_, now_() + nanoseconds{kSettlePoll});
         consider(settle);
     }
-    if (!due) return -1;
+    if (!due)
+        return -1;
     const Ns left = *due - now_();
-    if (left.count() <= 0) return 0;
+    if (left.count() <= 0)
+        return 0;
     const auto ms = std::chrono::ceil<milliseconds>(left).count();
     return ms > INT_MAX ? INT_MAX : static_cast<int>(ms);
 }
@@ -356,23 +394,28 @@ int LauncherHost::park_ms() const noexcept {
 void LauncherHost::sweep_stale_() noexcept {
     swept_ = true;
     DIR* d = ::opendir("/proc");
-    if (d == nullptr) return;
+    if (d == nullptr)
+        return;
     const std::string_view want = demand_.program.view();
     const ::pid_t self = ::getpid();
     while (const dirent* ent = ::readdir(d)) {
         const long pid = infra::parse_int<long>(ent->d_name).value_or(0);
-        if (pid <= 0 || pid == self) continue;
+        if (pid <= 0 || pid == self)
+            continue;
         char link[64];
         (void)std::snprintf(link, sizeof link, "/proc/%ld/exe", pid);
         char target[PATH_MAX];
         const ssize_t n = ::readlink(link, target, sizeof target - 1);
-        if (n <= 0) continue;
+        if (n <= 0)
+            continue;
         std::string_view exe(target, static_cast<std::size_t>(n));
         constexpr std::string_view kDeleted = " (deleted)";
         if (exe.size() > kDeleted.size() && exe.substr(exe.size() - kDeleted.size()) == kDeleted)
             exe.remove_suffix(kDeleted.size());
-        if (exe != want) continue;
-        if (::kill(static_cast<::pid_t>(pid), SIGKILL) == 0) ++n_.stale_swept;
+        if (exe != want)
+            continue;
+        if (::kill(static_cast<::pid_t>(pid), SIGKILL) == 0)
+            ++n_.stale_swept;
     }
     ::closedir(d);
 }
@@ -390,8 +433,10 @@ void LauncherHost::serve_lease_() noexcept {
             return;
         }
         if (n < 0) {
-            if (errno == EINTR) continue;
-            if (errno != EAGAIN && errno != EWOULDBLOCK) close_lease_();
+            if (errno == EINTR)
+                continue;
+            if (errno != EAGAIN && errno != EWOULDBLOCK)
+                close_lease_();
             return;
         }
         on_packet_(buf, static_cast<std::size_t>(n));
@@ -408,7 +453,8 @@ void LauncherHost::on_packet_(const std::byte* data, std::size_t n) noexcept {
             return;
         }
         request_waiting_ = true;
-        if (state_.settled) grant_();
+        if (state_.settled)
+            grant_();
         return;
     }
 
@@ -431,7 +477,8 @@ void LauncherHost::deliver_answers_() noexcept {
     while (const auto a = w_.scanout.take_answer()) {
         burst_in_flight_ = false;
         ++n_.bursts;
-        if (!lease_.valid() || !lease_granted_) continue;
+        if (!lease_.valid() || !lease_granted_)
+            continue;
 
         if (!a->ok) {
             close_lease_();
@@ -439,8 +486,9 @@ void LauncherHost::deliver_answers_() noexcept {
         }
         std::array<std::byte, scanout::kMaxPacketBytes> out{};
         const std::size_t len = scanout::encode_reply(*a, out);
-        if (len == 0 || ::send(lease_.get(), out.data(), len, MSG_DONTWAIT | MSG_NOSIGNAL) !=
-                            static_cast<ssize_t>(len))
+        if (len == 0
+            || ::send(lease_.get(), out.data(), len, MSG_DONTWAIT | MSG_NOSIGNAL)
+                != static_cast<ssize_t>(len))
             close_lease_();
     }
 }
@@ -460,4 +508,4 @@ void LauncherHost::close_lease_() noexcept {
     }
 }
 
-}  // namespace mister::app
+}

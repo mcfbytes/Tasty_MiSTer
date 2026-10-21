@@ -28,4 +28,4 @@ struct CdFlow {
     std::uint32_t egress_abandons = 0;
 };
 
-}  // namespace mister::cores
+}

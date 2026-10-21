@@ -10,4 +10,4 @@ struct CoreIdentity {
     bool dual_sdram = false;
 };
 
-}  // namespace mister::hal
+}

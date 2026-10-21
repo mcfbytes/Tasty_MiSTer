@@ -22,22 +22,26 @@ void SpiStatusDecoder::service() noexcept {
     {
         hal::Selected cs(*link_, hal::ChipSelect::Io);
         const auto head = link_->transfer(kStatusPoll);
-        if (!head) return;
+        if (!head)
+            return;
         const auto stchg = static_cast<std::uint8_t>(head->v & 0xFFu);
-        if ((stchg & 0xF0u) != 0xA0u || (stchg & 0x0Fu) == last_) return;
+        if ((stchg & 0xF0u) != 0xA0u || (stchg & 0x0Fu) == last_)
+            return;
         nibble = static_cast<std::uint8_t>(stchg & 0x0Fu);
         for (unsigned i = 0; i < StatusRegister::kWords; ++i) {
             const auto w = link_->transfer(hal::SpiWord{0});
-            if (!w) return;
+            if (!w)
+                return;
             words_[i] = w->v;
         }
     }
     last_ = nibble;
     words_[0] = static_cast<std::uint16_t>(words_[0] & ~1u);
     shadow.adopt(words_);
-    if (!session_->flush_status()) ++flush_refusals_;
+    if (!session_->flush_status())
+        ++flush_refusals_;
     published_ = shadow.value();
     cell_->publish(published_);
 }
 
-}  // namespace mister::proto
+}

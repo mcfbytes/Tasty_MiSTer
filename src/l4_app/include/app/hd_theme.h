@@ -33,4 +33,4 @@ struct HdTheme {
 [[nodiscard]] std::uint32_t settle_565(std::uint32_t rgb) noexcept;
 [[nodiscard]] HdTheme derive_theme(HdStyle style) noexcept;
 
-}  // namespace mister::app
+}

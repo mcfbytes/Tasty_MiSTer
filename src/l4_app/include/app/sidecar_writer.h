@@ -31,7 +31,9 @@ public:
                                            "avi_frame\n";
 
     explicit SidecarWriter(const Wiring& w) noexcept : w_(w) {}
+
     ~SidecarWriter() { unmap_(); }
+
     SidecarWriter(const SidecarWriter&) = delete;
     SidecarWriter& operator=(const SidecarWriter&) = delete;
 
@@ -63,4 +65,4 @@ private:
     bool dirty_ = false;
 };
 
-}  // namespace mister::app
+}

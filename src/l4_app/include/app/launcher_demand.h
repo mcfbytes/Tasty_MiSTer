@@ -23,4 +23,4 @@ struct LauncherDemand {
 
 using LauncherDemandCell = xthread::Telemetry<LauncherDemand, SeatTag::Main>;
 
-}  // namespace mister::app
+}

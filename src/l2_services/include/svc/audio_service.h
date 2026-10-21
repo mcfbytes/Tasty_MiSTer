@@ -34,13 +34,17 @@ public:
     void set_volume(proto::VolumeCmd kind, int arg);
 
     std::uint8_t volume_byte() const noexcept { return vol_att_ & kVolValidMask; }
+
     bool muted() const noexcept { return (vol_att_ & kVolMuteBit) != 0; }
+
     std::uint8_t attenuation() const noexcept { return vol_att_ & kVolAttMask; }
 
     void set_core_volume(int cmd);
+
     std::uint8_t core_volume_byte() const noexcept { return corevol_att_; }
 
     [[nodiscard]] Ex<bool> probe_filter();
+
     bool has_filter() const noexcept { return has_filter_; }
 
     void accept_probe_reply(std::uint8_t raw_reply, bool front_end) noexcept;
@@ -82,4 +86,4 @@ private:
 
 [[nodiscard]] Ex<void> emit_audvol(hal::ISpiTransport& link, std::uint8_t vol);
 
-}  // namespace mister::svc
+}

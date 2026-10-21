@@ -14,4 +14,4 @@ struct ScanFilter {
     bool romset_browse = false;
 };
 
-}  // namespace mister::svc
+}

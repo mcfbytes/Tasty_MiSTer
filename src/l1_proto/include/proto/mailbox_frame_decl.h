@@ -18,4 +18,4 @@ struct MailboxFrameDecl {
     return d.poll_opcode != 0 && d.words >= 1 && d.words <= kMailboxFrameWords;
 }
 
-}  // namespace mister::proto
+}

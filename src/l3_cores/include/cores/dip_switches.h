@@ -17,8 +17,10 @@ public:
 
     [[nodiscard]] virtual std::size_t dip_count() const noexcept = 0;
     [[nodiscard]] virtual DipRowView dip_row(std::size_t row) const noexcept = 0;
-    [[nodiscard]] virtual std::string_view dip_choice(std::size_t row,
-                                                      std::size_t choice) const noexcept = 0;
+    [[nodiscard]] virtual std::string_view dip_choice(
+        std::size_t row,
+        std::size_t choice
+    ) const noexcept = 0;
 
     [[nodiscard]] virtual Ex<void> set_dip(std::size_t row, std::size_t choice) = 0;
 
@@ -33,4 +35,4 @@ protected:
     IDipSwitches& operator=(const IDipSwitches&) = default;
 };
 
-}  // namespace mister::cores
+}

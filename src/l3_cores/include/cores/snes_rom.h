@@ -17,8 +17,10 @@ inline constexpr std::uint32_t kNoHeader = 0;
     return (file_size & 512u) ? 512u : 0u;
 }
 
-[[nodiscard]] std::uint32_t score_header(std::span<const std::uint8_t> image,
-                                         std::uint32_t addr) noexcept;
+[[nodiscard]] std::uint32_t score_header(
+    std::span<const std::uint8_t> image,
+    std::uint32_t addr
+) noexcept;
 
 [[nodiscard]] std::uint32_t find_header(std::span<const std::uint8_t> image) noexcept;
 
@@ -26,16 +28,24 @@ inline constexpr std::uint32_t kHeaderWindowBytes = 64;
 
 [[nodiscard]] std::uint16_t window_reset_vector(std::span<const std::uint8_t> hdr) noexcept;
 
-[[nodiscard]] constexpr std::uint32_t resetop_addr(std::uint32_t addr,
-                                                   std::uint16_t resetvector) noexcept {
+[[nodiscard]] constexpr std::uint32_t resetop_addr(
+    std::uint32_t addr,
+    std::uint16_t resetvector
+) noexcept {
     return (addr & ~0x7fffu) | (resetvector & 0x7fffu);
 }
 
-[[nodiscard]] std::uint32_t score_window(std::span<const std::uint8_t> hdr, std::uint8_t resetop,
-                                         std::uint32_t addr) noexcept;
+[[nodiscard]] std::uint32_t score_window(
+    std::span<const std::uint8_t> hdr,
+    std::uint8_t resetop,
+    std::uint32_t addr
+) noexcept;
 
-[[nodiscard]] std::uint32_t pick_header(std::uint32_t score_lo, std::uint32_t score_hi,
-                                        std::uint32_t score_ex) noexcept;
+[[nodiscard]] std::uint32_t pick_header(
+    std::uint32_t score_lo,
+    std::uint32_t score_hi,
+    std::uint32_t score_ex
+) noexcept;
 
 inline constexpr std::uint32_t kSignatureProbe = 0x7FC0;
 inline constexpr std::string_view kBsxBiosMagic{"Satellaview BS-X     "};
@@ -67,14 +77,21 @@ struct TypingBytes {
     std::uint8_t region = 0;
 };
 
-[[nodiscard]] TypingBytes type_cart(std::span<const std::uint8_t> window, std::uint32_t window_base,
-                                    std::uint32_t addr, std::uint32_t payload,
-                                    const CartSniff& sniff) noexcept;
+[[nodiscard]] TypingBytes type_cart(
+    std::span<const std::uint8_t> window,
+    std::uint32_t window_base,
+    std::uint32_t addr,
+    std::uint32_t payload,
+    const CartSniff& sniff
+) noexcept;
 
 inline constexpr std::uint32_t kHeaderBlockBytes = 512;
 
 [[nodiscard]] std::array<std::uint8_t, kHeaderBlockBytes> header_block(
-    std::uint32_t addr, std::uint32_t payload, const TypingBytes* typing) noexcept;
+    std::uint32_t addr,
+    std::uint32_t payload,
+    const TypingBytes* typing
+) noexcept;
 
 [[nodiscard]] std::uint32_t next_pow2(std::uint32_t v) noexcept;
 
@@ -86,7 +103,11 @@ struct MirrorRun {
     std::uint32_t src = 0;
     std::uint32_t len = 0;
 };
-[[nodiscard]] MirrorRun mirror_run(std::uint32_t pos, std::uint32_t payload,
-                                   std::uint32_t padded) noexcept;
 
-}  // namespace mister::cores::snes
+[[nodiscard]] MirrorRun mirror_run(
+    std::uint32_t pos,
+    std::uint32_t payload,
+    std::uint32_t padded
+) noexcept;
+
+}

@@ -23,4 +23,4 @@ static_assert(std::is_nothrow_default_constructible_v<HdFlipSlot>);
 
 using HdFlipChannel = xthread::LoanChannel<HdFlipSlot, 2, SeatTag::HdOsd, SeatTag::Ui>;
 
-}  // namespace mister::app
+}

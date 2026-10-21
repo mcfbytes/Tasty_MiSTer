@@ -8,59 +8,63 @@
 namespace mister::fw {
 namespace {
 
-bool eq(std::string_view a, const char* b) noexcept { return a == std::string_view(b); }
+bool eq(std::string_view a, const char* b) noexcept {
+    return a == std::string_view(b);
+}
 
 [[nodiscard]] Ex<TastyArgs> fail(std::uint32_t d) noexcept {
     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), d});
 }
 
-}  // namespace
+}
 
 void tasty_print_usage(std::FILE* out) noexcept {
     std::fprintf(
-        out, "usage: tasty play <movie> [--rom <file>] [options]\n"
-             "       tasty info <movie>\n"
-             "       tasty check <movie> --rom <file>\n"
-             "       tasty status | stop\n"
-             "       tasty rec start|stop [--record <path>]\n"
-             "play options:\n"
-             "  --rom <file>         ROM file (default: search /media/fat/games by checksum)\n"
-             "  --core <rbf>         the core to load (default: the movie's system)\n"
-             "  --lead <frames>      shift the whole movie by N frames\n"
-             "  --phase <us>         pad write delay from vsync (default: half a frame)\n"
-             "  --stop-at <frame>    play movie frames 0 to N-1, then end there\n"
-             "  --loop               play the movie again each time it ends, until tasty stop;\n"
-             "                       not with --record\n"
-             "  --ram-init zero|ff|random\n"
-             "                       NES RAM Clear for this run; other cores are refused\n"
-             "  --save <file>        start the game's battery save as a copy of this file;\n"
-             "                       without it the run's save starts empty. Your own saves\n"
-             "                       are never opened or written\n"
-             "  --linger <seconds>   wait after the last input before the menu (default 30)\n"
-             "  --stay               never return to the menu on its own\n"
-             "  --strict             refuse when a core setting differs from the movie's,\n"
-             "                       or when direct_video is on, instead of setting it\n"
-             "                       for this run\n"
-             "  --no-splash          skip the logo\n"
-             "  --vsync-adjust 0|1   scaler mode for the session\n"
-             "  --record <dir>|<name>.avi\n"
-             "                       record the run; a .avi name is the file stem\n"
-             "  --codec cscd|zmbv    video codec (default cscd)\n"
-             "  --motion auto|off|small|full\n"
-             "                       zmbv motion search (default auto); zmbv only\n"
-             "  --scale auto|native|half\n"
-             "                       auto halves if the encode will not fit;\n"
-             "                       native stays full; half starts halved\n"
-             "  --every <n>          one AVI frame per n core frames (default 1);\n"
-             "                       each kept frame lasts n core-frame times\n"
-             "  --from <frame>       first movie frame kept in the AVI\n"
-             "  --to <frame>         first movie frame left out of the AVI\n"
-             "  --segment <size>     roll the AVI at this size, 16M..2G (default 1G)\n"
-             "  --hashes             accepted; an AVI always writes the hash log beside it\n"
-             "  --hashes-only        hash log only, no video\n"
-             "The hash log lists every core frame. AVI frame N of segment S is the\n"
-             "row whose segment and avi_frame columns are S and N; -1 was hashed\n"
-             "and not written. The hash is the core picture, not the AVI picture.\n");
+        out,
+        "usage: tasty play <movie> [--rom <file>] [options]\n"
+        "       tasty info <movie>\n"
+        "       tasty check <movie> --rom <file>\n"
+        "       tasty status | stop\n"
+        "       tasty rec start|stop [--record <path>]\n"
+        "play options:\n"
+        "  --rom <file>         ROM file (default: search /media/fat/games by checksum)\n"
+        "  --core <rbf>         the core to load (default: the movie's system)\n"
+        "  --lead <frames>      shift the whole movie by N frames\n"
+        "  --phase <us>         pad write delay from vsync (default: half a frame)\n"
+        "  --stop-at <frame>    play movie frames 0 to N-1, then end there\n"
+        "  --loop               play the movie again each time it ends, until tasty stop;\n"
+        "                       not with --record\n"
+        "  --ram-init zero|ff|random\n"
+        "                       NES RAM Clear for this run; other cores are refused\n"
+        "  --save <file>        start the game's battery save as a copy of this file;\n"
+        "                       without it the run's save starts empty. Your own saves\n"
+        "                       are never opened or written\n"
+        "  --linger <seconds>   wait after the last input before the menu (default 30)\n"
+        "  --stay               never return to the menu on its own\n"
+        "  --strict             refuse when a core setting differs from the movie's,\n"
+        "                       or when direct_video is on, instead of setting it\n"
+        "                       for this run\n"
+        "  --no-splash          skip the logo\n"
+        "  --vsync-adjust 0|1   scaler mode for the session\n"
+        "  --record <dir>|<name>.avi\n"
+        "                       record the run; a .avi name is the file stem\n"
+        "  --codec cscd|zmbv    video codec (default cscd)\n"
+        "  --motion auto|off|small|full\n"
+        "                       zmbv motion search (default auto); zmbv only\n"
+        "  --scale auto|native|half\n"
+        "                       auto halves if the encode will not fit;\n"
+        "                       native stays full; half starts halved\n"
+        "  --every <n>          one AVI frame per n core frames (default 1);\n"
+        "                       each kept frame lasts n core-frame times\n"
+        "  --from <frame>       first movie frame kept in the AVI\n"
+        "  --to <frame>         first movie frame left out of the AVI\n"
+        "  --segment <size>     roll the AVI at this size, 16M..2G (default 1G)\n"
+        "  --hashes             accepted; an AVI always writes the hash log beside it\n"
+        "  --hashes-only        hash log only, no video\n"
+        "The hash log lists every core frame. AVI frame N of segment S is the\n"
+        "row whose segment and avi_frame columns are S and N; -1 was hashed\n"
+        "and not written. The hash is the core picture, not the AVI picture.\n"
+    );
 }
 
 const char* tasty_args_refusal(std::uint32_t detail) noexcept {
@@ -151,7 +155,8 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
 
 [[nodiscard]] Ex<TastyArgs> parse_tasty_args(std::span<const char* const> argv) noexcept {
     TastyArgs a{};
-    if (argv.size() < 2) return fail(1);
+    if (argv.size() < 2)
+        return fail(1);
     std::string_view v0{argv[1]};
     std::size_t i = 2;
     if (eq(v0, "help") || eq(v0, "--help") || eq(v0, "-h")) {
@@ -160,25 +165,32 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
     }
     if (eq(v0, "play")) {
         a.verb = TastyVerb::Play;
-        if (argv.size() < 3) return fail(2);
-        if (!a.movie.assign(argv[2])) return fail(3);
+        if (argv.size() < 3)
+            return fail(2);
+        if (!a.movie.assign(argv[2]))
+            return fail(3);
         i = 3;
     } else if (eq(v0, "info")) {
         a.verb = TastyVerb::Info;
-        if (argv.size() < 3) return fail(2);
-        if (!a.movie.assign(argv[2])) return fail(3);
+        if (argv.size() < 3)
+            return fail(2);
+        if (!a.movie.assign(argv[2]))
+            return fail(3);
         i = 3;
     } else if (eq(v0, "check")) {
         a.verb = TastyVerb::Check;
-        if (argv.size() < 3) return fail(2);
-        if (!a.movie.assign(argv[2])) return fail(3);
+        if (argv.size() < 3)
+            return fail(2);
+        if (!a.movie.assign(argv[2]))
+            return fail(3);
         i = 3;
     } else if (eq(v0, "status")) {
         a.verb = TastyVerb::Status;
     } else if (eq(v0, "stop")) {
         a.verb = TastyVerb::Stop;
     } else if (eq(v0, "rec")) {
-        if (argv.size() < 3) return fail(4);
+        if (argv.size() < 3)
+            return fail(4);
         std::string_view sub{argv[2]};
         if (eq(sub, "start")) {
             a.verb = TastyVerb::RecStart;
@@ -197,57 +209,72 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
     while (i < argv.size()) {
         std::string_view o{argv[i]};
         auto need = [&]() -> const char* {
-            if (i + 1 >= argv.size()) return nullptr;
+            if (i + 1 >= argv.size())
+                return nullptr;
             return argv[i + 1];
         };
         if (eq(o, "--rom")) {
             const char* p = need();
-            if (p == nullptr || !a.rom.assign(p)) return fail(10);
+            if (p == nullptr || !a.rom.assign(p))
+                return fail(10);
             i += 2;
         } else if (eq(o, "--core")) {
             const char* p = need();
-            if (p == nullptr || !a.core.assign(p)) return fail(11);
+            if (p == nullptr || !a.core.assign(p))
+                return fail(11);
             i += 2;
         } else if (eq(o, "--record")) {
             const char* p = need();
-            if (p == nullptr) return fail(12);
+            if (p == nullptr)
+                return fail(12);
             app::PathText path{};
-            if (!path.assign(p)) return fail(12);
+            if (!path.assign(p))
+                return fail(12);
             a.record = path;
             i += 2;
         } else if (eq(o, "--lead")) {
             const char* p = need();
-            if (p == nullptr) return fail(13);
+            if (p == nullptr)
+                return fail(13);
             const auto n = infra::parse_int<std::int32_t>(p);
-            if (!n) return fail(13);
+            if (!n)
+                return fail(13);
             a.lead = *n;
             i += 2;
         } else if (eq(o, "--phase")) {
             const char* p = need();
-            if (p == nullptr) return fail(18);
+            if (p == nullptr)
+                return fail(18);
             const auto n = infra::parse_int<std::uint32_t>(p);
-            if (!n) return fail(18);
+            if (!n)
+                return fail(18);
             a.phase_us = *n;
             i += 2;
         } else if (eq(o, "--stop-at")) {
             const char* p = need();
-            if (p == nullptr) return fail(16);
+            if (p == nullptr)
+                return fail(16);
             const auto n = infra::parse_int<std::uint32_t>(p);
-            if (!n || *n == 0) return fail(16);
+            if (!n || *n == 0)
+                return fail(16);
             a.stop_at = *n;
             i += 2;
         } else if (eq(o, "--linger") || eq(o, "--return-after")) {
             const char* p = need();
-            if (p == nullptr) return fail(14);
+            if (p == nullptr)
+                return fail(14);
             const auto n = infra::parse_int<std::uint32_t>(p);
-            if (!n) return fail(14);
+            if (!n)
+                return fail(14);
             a.return_after_s = *n;
             i += 2;
         } else if (eq(o, "--vsync-adjust")) {
             const char* p = need();
-            if (p == nullptr) return fail(15);
+            if (p == nullptr)
+                return fail(15);
             const auto n = infra::parse_int<std::uint32_t>(p);
-            if (!n || *n > 1) return fail(15);
+            if (!n || *n > 1)
+                return fail(15);
             a.vsync_adjust = static_cast<std::uint8_t>(*n);
             i += 2;
         } else if (eq(o, "--stay")) {
@@ -258,7 +285,8 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
             ++i;
         } else if (eq(o, "--ram-init")) {
             const char* p = need();
-            if (p == nullptr) return fail(17);
+            if (p == nullptr)
+                return fail(17);
             const std::string_view s{p};
             using Fill = cores::IMovieCodec::RamFill;
             if (s == "zero")
@@ -273,7 +301,8 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
         } else if (eq(o, "--save")) {
             const char* p = need();
             app::PathText save{};
-            if (p == nullptr || !save.assign(p)) return fail(32);
+            if (p == nullptr || !save.assign(p))
+                return fail(32);
             a.save = save;
             i += 2;
         } else if (eq(o, "--strict")) {
@@ -293,51 +322,60 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
         } else if (eq(o, "--codec")) {
             const char* p = need();
             const auto c = p != nullptr ? app::parse_rec_codec(p) : std::nullopt;
-            if (!c) return fail(22);
+            if (!c)
+                return fail(22);
             a.rec.codec = *c;
             rec_opt = true;
             i += 2;
         } else if (eq(o, "--motion")) {
             const char* p = need();
             const auto m = p != nullptr ? app::parse_rec_motion(p) : std::nullopt;
-            if (!m) return fail(30);
+            if (!m)
+                return fail(30);
             a.rec.motion = *m;
             rec_opt = true;
             i += 2;
         } else if (eq(o, "--scale")) {
             const char* p = need();
             const auto s = p != nullptr ? app::parse_rec_scale(p) : std::nullopt;
-            if (!s) return fail(23);
+            if (!s)
+                return fail(23);
             a.rec.scale = *s;
             rec_opt = true;
             i += 2;
         } else if (eq(o, "--every")) {
             const char* p = need();
             const auto n = p != nullptr ? app::parse_rec_every(p) : std::nullopt;
-            if (!n) return fail(24);
+            if (!n)
+                return fail(24);
             a.rec.every = *n;
             rec_opt = true;
             i += 2;
         } else if (eq(o, "--from")) {
             const char* p = need();
-            if (p == nullptr) return fail(25);
+            if (p == nullptr)
+                return fail(25);
             const auto n = infra::parse_int<std::int32_t>(p);
-            if (!n || *n < 0) return fail(25);
+            if (!n || *n < 0)
+                return fail(25);
             a.rec.from_frame = *n;
             rec_opt = true;
             i += 2;
         } else if (eq(o, "--to")) {
             const char* p = need();
-            if (p == nullptr) return fail(26);
+            if (p == nullptr)
+                return fail(26);
             const auto n = infra::parse_int<std::int32_t>(p);
-            if (!n || *n < 0) return fail(26);
+            if (!n || *n < 0)
+                return fail(26);
             a.rec.to_frame = *n;
             rec_opt = true;
             i += 2;
         } else if (eq(o, "--segment")) {
             const char* p = need();
             const auto n = p != nullptr ? app::parse_rec_size(p) : std::nullopt;
-            if (!n || *n == 0 || !app::rec_segment_ok(*n)) return fail(27);
+            if (!n || *n == 0 || !app::rec_segment_ok(*n))
+                return fail(27);
             a.rec.segment_bytes = *n;
             rec_opt = true;
             i += 2;
@@ -345,14 +383,18 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
             return fail(20);
         }
     }
-    if (!app::rec_bounds_ok(a.rec)) return fail(28);
-    if (!a.record && rec_opt) return fail(29);
+    if (!app::rec_bounds_ok(a.rec))
+        return fail(28);
+    if (!a.record && rec_opt)
+        return fail(29);
 
     if (a.verb == TastyVerb::RecStart && (a.rec.from_frame >= 0 || a.rec.to_frame >= 0))
         return fail(31);
-    if (a.verb == TastyVerb::Check && a.rom.empty()) return fail(21);
-    if (a.save && a.verb != TastyVerb::Play) return fail(33);
+    if (a.verb == TastyVerb::Check && a.rom.empty())
+        return fail(21);
+    if (a.save && a.verb != TastyVerb::Play)
+        return fail(33);
     return a;
 }
 
-}  // namespace mister::fw
+}

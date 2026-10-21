@@ -12,4 +12,4 @@ struct SaveStateDecl {
     std::uint32_t size;
 };
 
-}  // namespace mister::proto
+}

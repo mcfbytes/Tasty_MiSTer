@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/spsc_ring.h"
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
@@ -50,7 +51,8 @@ public:
     InputWire& operator=(const InputWire&) = delete;
 
     void publish_joy(svc::PlayerIndex player, svc::JoyMask mask, svc::JoyMask autofire) noexcept {
-        if (player.v >= svc::kMaxPlayers) return;
+        if (player.v >= svc::kMaxPlayers)
+            return;
         const std::uint64_t cell = (static_cast<std::uint64_t>(autofire.v) << 32) | mask.v;
         joy_[player.v].store(cell, std::memory_order_release);
     }
@@ -59,20 +61,27 @@ public:
         svc::JoyMask mask{};
         svc::JoyMask autofire{};
     };
+
     JoyCell joy(svc::PlayerIndex player) const noexcept {
-        if (player.v >= svc::kMaxPlayers) return JoyCell{};
+        if (player.v >= svc::kMaxPlayers)
+            return JoyCell{};
         const std::uint64_t cell = joy_[player.v].load(std::memory_order_acquire);
-        return JoyCell{svc::JoyMask{static_cast<std::uint32_t>(cell)},
-                       svc::JoyMask{static_cast<std::uint32_t>(cell >> 32)}};
+        return JoyCell{
+            svc::JoyMask{static_cast<std::uint32_t>(cell)},
+            svc::JoyMask{static_cast<std::uint32_t>(cell >> 32)}
+        };
     }
 
     bool push_ui_key(RawKeyEdge e) noexcept;
 
     std::optional<RawKeyEdge> pop_ui_key() noexcept { return ui_keys_.pop(); }
+
     std::size_t ui_keys_queued() const noexcept { return ui_keys_.size(); }
+
     std::uint32_t ui_keys_dropped() const noexcept {
         return ui_keys_dropped_.load(std::memory_order_relaxed);
     }
+
     std::uint32_t ui_keys_published() const noexcept {
         return ui_keys_pub_.load(std::memory_order_relaxed);
     }
@@ -90,9 +99,11 @@ public:
         bump(key_sweeps_, 1u);
         bump(keys_released_, released);
     }
+
     std::uint32_t key_sweeps() const noexcept {
         return key_sweeps_.load(std::memory_order_relaxed);
     }
+
     std::uint32_t keys_released() const noexcept {
         return keys_released_.load(std::memory_order_relaxed);
     }
@@ -105,13 +116,15 @@ public:
         char name[kCoreNameCap] = {};
         std::uint8_t len = 0;
         bool front_end = false;
+
         std::string_view view() const noexcept { return std::string_view(name, len); }
     };
 
     void publish_core_name(std::string_view name, bool front_end) noexcept {
         CoreNameCell c{};
         std::size_t n = name.size();
-        if (n > kCoreNameCap - 1u) n = kCoreNameCap - 1u;
+        if (n > kCoreNameCap - 1u)
+            n = kCoreNameCap - 1u;
         for (std::size_t i = 0; i < n; ++i)
             c.name[i] = name[i];
         c.name[n] = '\0';
@@ -127,11 +140,15 @@ public:
     svc::JoyPlan joy_plan() const noexcept { return plan_cell_.sample().value; }
 
     CaptureArmCell& capture_arm() noexcept { return capture_arm_; }
+
     const CaptureArmCell& capture_arm() const noexcept { return capture_arm_; }
+
     CaptureHitCell& capture_hit() noexcept { return capture_hit_; }
+
     const CaptureHitCell& capture_hit() const noexcept { return capture_hit_; }
 
     RumblePadsCell& rumble_pads_cell() noexcept { return rumble_pads_; }
+
     const RumblePadsCell& rumble_pads_cell() const noexcept { return rumble_pads_; }
 
     std::uint8_t rumble_pads() const noexcept { return rumble_pads_.sample().value; }
@@ -145,8 +162,10 @@ public:
     }
 
     void publish_edge_reset() noexcept {
-        edge_reset_.store(edge_reset_.load(std::memory_order_relaxed) + 1u,
-                          std::memory_order_release);
+        edge_reset_.store(
+            edge_reset_.load(std::memory_order_relaxed) + 1u,
+            std::memory_order_release
+        );
     }
 
     std::uint32_t edge_reset_seq() const noexcept {
@@ -158,12 +177,15 @@ public:
         g = (g | set) & ~clear;
         gates_.store(g, std::memory_order_release);
     }
+
     std::uint32_t gates() const noexcept { return gates_.load(std::memory_order_acquire); }
 
     void note_activity() noexcept { bump(activity_seq_, 1u); }
+
     std::uint32_t activity_seq() const noexcept override {
         return activity_seq_.load(std::memory_order_acquire);
     }
+
     bool input_grabbed() const noexcept override { return (gates() & kGateGrabbed) != 0u; }
 
     void update_osd_request(bool on) noexcept {
@@ -171,29 +193,42 @@ public:
         std::uint32_t next = 0;
         do {
             next = (cur & ~kReqOsdOn) | kReqOsdApply | (on ? kReqOsdOn : 0u);
-        } while (!req_.compare_exchange_weak(cur, next, std::memory_order_release,
-                                             std::memory_order_relaxed));
+        } while (!req_.compare_exchange_weak(
+            cur,
+            next,
+            std::memory_order_release,
+            std::memory_order_relaxed
+        ));
     }
 
     [[nodiscard]] std::optional<bool> take_osd_request() noexcept {
         std::uint32_t cur = req_.load(std::memory_order_acquire);
         std::uint32_t next = 0;
         do {
-            if ((cur & kReqOsdApply) == 0u) return std::nullopt;
+            if ((cur & kReqOsdApply) == 0u)
+                return std::nullopt;
             next = cur & ~kReqOsdApply;
-        } while (!req_.compare_exchange_weak(cur, next, std::memory_order_acq_rel,
-                                             std::memory_order_acquire));
+        } while (!req_.compare_exchange_weak(
+            cur,
+            next,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire
+        ));
         return (cur & kReqOsdOn) != 0u;
     }
 
     void request(std::uint32_t set) noexcept { req_.fetch_or(set, std::memory_order_release); }
+
     void clear_request(std::uint32_t clear) noexcept {
         req_.fetch_and(~clear, std::memory_order_release);
     }
+
     std::uint32_t requests() const noexcept { return req_.load(std::memory_order_acquire); }
 
     bool arm_kick() noexcept { return !kick_armed_.exchange(true, std::memory_order_acq_rel); }
+
     void consume_kick() noexcept { kick_armed_.store(false, std::memory_order_release); }
+
     bool kick_armed() const noexcept { return kick_armed_.load(std::memory_order_acquire); }
 
     [[nodiscard]] Ex<void> open_ctrl() noexcept;
@@ -204,19 +239,26 @@ public:
 
     void drain_ctrl() noexcept { ctrl_.drain(); }
 
-    void on_core_loaded(std::string_view core_name, bool front_end, const svc::JoyPlan& plan,
-                        const svc::IAnalogReshape* analog_reshape) noexcept;
+    void on_core_loaded(
+        std::string_view core_name,
+        bool front_end,
+        const svc::JoyPlan& plan,
+        infra::OptRef<const svc::IAnalogReshape> analog_reshape
+    ) noexcept;
     void on_core_detached() noexcept;
 
     void note_rebuild_refused() noexcept { bump(rebuilds_refused_, 1u); }
+
     void note_rebuild_done() noexcept { bump(rebuilds_done_, 1u); }
 
     static void bump(std::atomic<std::uint32_t>& c, std::uint32_t by) noexcept {
         c.store(c.load(std::memory_order_relaxed) + by, std::memory_order_relaxed);
     }
+
     std::uint32_t rebuilds_refused() const noexcept {
         return rebuilds_refused_.load(std::memory_order_relaxed);
     }
+
     std::uint32_t rebuilds_done() const noexcept {
         return rebuilds_done_.load(std::memory_order_relaxed);
     }
@@ -226,8 +268,10 @@ public:
 
     void publish_buttons(std::uint16_t level) noexcept {
         buttons_.store(level, std::memory_order_relaxed);
-        if (level != 0u) bump(button_samples_, 1u);
+        if (level != 0u)
+            bump(button_samples_, 1u);
     }
+
     std::uint16_t buttons() const noexcept {
         return static_cast<std::uint16_t>(buttons_.load(std::memory_order_relaxed));
     }
@@ -237,6 +281,7 @@ public:
     }
 
     void note_button_action() noexcept { bump(button_actions_, 1u); }
+
     std::uint32_t button_actions() const noexcept {
         return button_actions_.load(std::memory_order_relaxed);
     }
@@ -245,17 +290,23 @@ public:
         return core_edges_.load(std::memory_order_relaxed);
     }
 
-    static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
-                  "item: every joystick cell is one naturally-aligned "
-                  "64-bit atomic. ARMv7 has LDREXD/STREXD so this holds on the "
-                  "binding toolchain — but PROVE it here rather than assume it: "
-                  "a libatomic call on the T-RT drain is a lock on the RT path.");
-    static_assert(std::atomic<std::uint32_t>::is_always_lock_free,
-                  "the two gate words and every counter must be lock-free too");
-    static_assert(std::atomic<const svc::IAnalogReshape*>::is_always_lock_free,
-                  "the reshape cell is ONE pointer and is read on T-DIAG in "
-                  "the rebuild: a libatomic lock here would be a lock on the "
-                  "hotplug path");
+    static_assert(
+        std::atomic<std::uint64_t>::is_always_lock_free,
+        "item: every joystick cell is one naturally-aligned "
+        "64-bit atomic. ARMv7 has LDREXD/STREXD so this holds on the "
+        "binding toolchain — but PROVE it here rather than assume it: "
+        "a libatomic call on the T-RT drain is a lock on the RT path."
+    );
+    static_assert(
+        std::atomic<std::uint32_t>::is_always_lock_free,
+        "the two gate words and every counter must be lock-free too"
+    );
+    static_assert(
+        std::atomic<const svc::IAnalogReshape*>::is_always_lock_free,
+        "the reshape cell is ONE pointer and is read on T-DIAG in "
+        "the rebuild: a libatomic lock here would be a lock on the "
+        "hotplug path"
+    );
 
 private:
     std::atomic<std::uint64_t> joy_[svc::kMaxPlayers]{};
@@ -296,4 +347,4 @@ private:
     std::atomic<std::uint32_t> core_edges_{0};
 };
 
-}  // namespace mister::app
+}

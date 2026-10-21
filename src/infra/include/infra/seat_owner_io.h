@@ -9,4 +9,4 @@ struct Io {
     TASTY_SEAT_RESIDENT(Io);
 };
 
-}  // namespace mister::seat_owner
+}

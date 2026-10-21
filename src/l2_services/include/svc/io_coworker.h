@@ -15,10 +15,11 @@ public:
     [[nodiscard]] virtual bool idle() const noexcept = 0;
 
     virtual void on_pause() noexcept {}
+
     virtual void on_resume() noexcept {}
 
 protected:
     IIoCoworker() = default;
 };
 
-}  // namespace mister::svc
+}

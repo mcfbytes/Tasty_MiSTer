@@ -25,15 +25,15 @@
 namespace mister::xthread {
 struct RtStats;
 }
+
 namespace mister::app {
 class CmdFifo;
 template <SeatTag Producer>
 class EventQueue;
-class InputBuild;
 class MglPump;
 class VideoPump;
 class BtPump;
-}  // namespace mister::app
+}
 
 namespace mister::fw {
 
@@ -49,31 +49,52 @@ public:
         const std::atomic<bool>& transitioning;
     };
 
-    ThreadAssembly(const hal::ThreadMap& threads, xthread::RtStats& stats,
-                   app::EventQueue<SeatTag::RT>& events, RtEvidence& boot,
-                   xthread::WakeFlag& main_wake, const DiagWires& diag,
-                   const UiMain::Wires& ui_wires, const UiMain::Wiring& ui,
-                   const DiagSampler::Sources& diag_sources) noexcept;
+    ThreadAssembly(
+        const hal::ThreadMap& threads,
+        xthread::RtStats& stats,
+        app::EventQueue<SeatTag::RT>& events,
+        RtEvidence& boot,
+        xthread::WakeFlag& main_wake,
+        const DiagWires& diag,
+        const UiMain::Wires& ui_wires,
+        const UiMain::Wiring& ui,
+        const DiagSampler::Sources& diag_sources,
+        const DiagSampler::Services& diag_services
+    ) noexcept;
 
-    ThreadAssembly(const hal::ThreadMap&, xthread::RtStats&, app::EventQueue<SeatTag::RT>&,
-                   RtEvidence&&, xthread::WakeFlag&, const DiagWires&, const UiMain::Wires&,
-                   const UiMain::Wiring&, const DiagSampler::Sources&) = delete;
+    ThreadAssembly(
+        const hal::ThreadMap&,
+        xthread::RtStats&,
+        app::EventQueue<SeatTag::RT>&,
+        RtEvidence&&,
+        xthread::WakeFlag&,
+        const DiagWires&,
+        const UiMain::Wires&,
+        const UiMain::Wiring&,
+        const DiagSampler::Sources&,
+        const DiagSampler::Services&
+    ) = delete;
 
-    ThreadAssembly(xthread::RtStats& stats, app::EventQueue<SeatTag::RT>& events,
-                   const UiMain::Wiring& ui, const DiagSampler::Sources& diag) noexcept;
+    ThreadAssembly(
+        xthread::RtStats& stats,
+        app::EventQueue<SeatTag::RT>& events,
+        const UiMain::Wiring& ui,
+        const DiagSampler::Sources& diag,
+        const DiagSampler::Services& services = {}
+    ) noexcept;
     ~ThreadAssembly();
 
     ThreadAssembly(const ThreadAssembly&) = delete;
     ThreadAssembly& operator=(const ThreadAssembly&) = delete;
 
     DiagSampler& diag() noexcept { return diag_sampler_; }
+
     const DiagSampler& diag() const noexcept { return diag_sampler_; }
 
     UiMain* ui() noexcept { return ui_main_ ? &*ui_main_ : nullptr; }
 
     struct SeatMains {
         MainSlots mains{};
-        infra::OptRef<app::InputBuild> input_build{};
     };
 
     [[nodiscard]] Ex<void> spawn(RtMode mode, const SeatMains& mains);
@@ -120,8 +141,10 @@ public:
     [[nodiscard]] bool has_io_seat() const noexcept { return mains_.get<svc::IoMain>() != nullptr; }
 
 private:
-    static DiagSampler::Sources with_ui_cells_(DiagSampler::Sources s,
-                                               const UiMain::Wiring& ui) noexcept;
+    static DiagSampler::Sources with_ui_cells_(
+        DiagSampler::Sources s,
+        const UiMain::Wiring& ui
+    ) noexcept;
 
     void adopt_seat(SeatTag s) noexcept;
 
@@ -163,6 +186,7 @@ private:
         xthread::WakeFlag ui_wake;
         app::UartModeController::Handoffs uart_handoffs{ui_wake};
     };
+
     std::unique_ptr<OwnWires> own_wires_;
 
     std::atomic<bool> rt_exited_{false};
@@ -170,8 +194,11 @@ private:
     xthread::WakeFlag quiescing_;
     Ex<void> born_{};
 
-    void create_mains_(app::EventQueue<SeatTag::RT>& events, const UiMain::Wires& ui_wires,
-                       const UiMain::Wiring& ui) noexcept;
+    void create_mains_(
+        app::EventQueue<SeatTag::RT>& events,
+        const UiMain::Wires& ui_wires,
+        const UiMain::Wiring& ui
+    ) noexcept;
 
     void publish_evidence_() noexcept;
 
@@ -183,4 +210,4 @@ private:
     std::optional<UiMain> ui_main_;
 };
 
-}  // namespace mister::fw
+}

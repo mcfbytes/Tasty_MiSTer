@@ -26,17 +26,24 @@ public:
     };
 
     explicit BackdropJob(BackdropScaler& scaler) noexcept : scaler_(scaler) {}
+
     BackdropJob(const BackdropJob&) = delete;
     BackdropJob& operator=(const BackdropJob&) = delete;
 
     [[nodiscard]] Step step() const noexcept { return step_; }
+
     [[nodiscard]] bool busy() const noexcept { return step_ != Step::Idle; }
 
     [[nodiscard]] bool committed() const noexcept { return step_ != Step::Scale && whole_; }
+
     [[nodiscard]] std::uint8_t target() const noexcept { return slot_; }
 
-    BackdropSampler::Image read(BackdropSampler& sampler, std::int64_t now, const Canvas& c,
-                                bool reset) noexcept;
+    BackdropSampler::Image read(
+        BackdropSampler& sampler,
+        std::int64_t now,
+        const Canvas& c,
+        bool reset
+    ) noexcept;
 
     [[nodiscard]] HdRect scale_band() noexcept;
 
@@ -59,4 +66,4 @@ private:
     bool whole_ = true;
 };
 
-}  // namespace mister::app
+}

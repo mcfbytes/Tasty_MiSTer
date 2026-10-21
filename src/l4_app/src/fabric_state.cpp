@@ -21,4 +21,4 @@ void FabricStateView::refresh(const FabricCell& cell, std::int64_t now_ns) noexc
     }
 }
 
-}  // namespace mister::app
+}

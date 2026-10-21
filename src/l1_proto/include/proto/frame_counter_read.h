@@ -28,4 +28,4 @@ private:
     std::uint32_t reads_ = 0;
 };
 
-}  // namespace mister::proto
+}

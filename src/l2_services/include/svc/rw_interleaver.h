@@ -13,4 +13,4 @@ public:
     void shape(proto::Lba lba, std::span<std::byte, kCdFrameSize> frame) const noexcept override;
 };
 
-}  // namespace mister::svc
+}

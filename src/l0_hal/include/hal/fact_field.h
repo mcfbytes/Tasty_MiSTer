@@ -24,12 +24,17 @@ enum class FactField : std::uint8_t {
     ProgramQuantum,
     ProgramAlign,
     TimingLoadBudgetWords,
+    TimingStartAckTimeoutNs,
 };
 
-inline constexpr std::size_t kFactFieldCount =
-    static_cast<std::size_t>(FactField::TimingLoadBudgetWords) + 1;
+inline constexpr std::size_t kFactFieldCount = static_cast<std::size_t>(
+                                                   FactField::TimingStartAckTimeoutNs
+                                               )
+    + 1;
 
-constexpr std::uint32_t fact_ordinal(FactField f) noexcept { return static_cast<std::uint32_t>(f); }
+constexpr std::uint32_t fact_ordinal(FactField f) noexcept {
+    return static_cast<std::uint32_t>(f);
+}
 
 constexpr std::string_view fact_field_name(FactField f) noexcept {
     switch (f) {
@@ -65,8 +70,10 @@ constexpr std::string_view fact_field_name(FactField f) noexcept {
             return "program.align";
         case FactField::TimingLoadBudgetWords:
             return "timing.load_budget_words";
+        case FactField::TimingStartAckTimeoutNs:
+            return "timing.start_ack_timeout_ns";
     }
     return "?";
 }
 
-}  // namespace mister::hal
+}

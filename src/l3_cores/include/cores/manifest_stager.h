@@ -35,4 +35,4 @@ protected:
     IManifestStager& operator=(const IManifestStager&) = default;
 };
 
-}  // namespace mister::cores
+}

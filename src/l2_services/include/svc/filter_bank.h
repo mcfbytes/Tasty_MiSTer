@@ -15,4 +15,4 @@ struct FilterBank {
     std::array<FilterPhase, kFilterPhases> adaptive{};
 };
 
-}  // namespace mister::svc
+}

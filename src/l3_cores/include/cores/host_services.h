@@ -9,20 +9,24 @@ namespace mister::svc {
 class Vfs;
 class ChdPrefetch;
 class DiscReadService;
-}  // namespace mister::svc
+}
+
 namespace mister::hal {
 class ISpiTransport;
 }
+
 namespace mister::os {
 class IClock;
 }
+
 namespace mister::proto {
 class IImageSink;
 class SpiFioQueue;
-}  // namespace mister::proto
+}
 
 namespace mister::cores {
 
+class IDiskPort;
 class IMailboxPort;
 
 struct HostServices {
@@ -43,6 +47,8 @@ struct HostServices {
     infra::OptRef<IMailboxPort> mailbox{};
 
     infra::OptRef<const SaveCopyCell> save_copy{};
+
+    infra::OptRef<IDiskPort> disk{};
 };
 
-}  // namespace mister::cores
+}

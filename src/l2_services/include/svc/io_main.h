@@ -23,7 +23,7 @@ class IoMain final : public xthread::SeatMain<IoMain> {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    static constexpr std::size_t kMaxCoworkers = 6;
+    static constexpr std::size_t kMaxCoworkers = 7;
 
     explicit IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker = {}) noexcept;
     IoMain(const IoMain&) = delete;
@@ -37,19 +37,27 @@ public:
     [[nodiscard]] xthread::WakeFlag& wake() noexcept { return wake_; }
 
     void start() noexcept;
+
     void stop() noexcept { stop_.request(); }
 
     void serve() noexcept;
     [[nodiscard]] bool idle() const noexcept;
+
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
     [[nodiscard]] int park_ms() const noexcept { return kIoBlockForeverMs; }
+
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
+
     [[nodiscard]] bool paused() noexcept { return pause_.observe(pause_seen_, *this); }
+
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
+
     void settle() noexcept {}
 
     void on_pause() noexcept;
     void on_resume() noexcept;
+
     [[nodiscard]] bool quiescent() const noexcept { return idle(); }
 
     [[nodiscard]] xthread::PauseLatch& pause_latch() noexcept { return pause_; }
@@ -66,4 +74,4 @@ private:
 
 static_assert(xthread::SeatBody<IoMain>);
 
-}  // namespace mister::svc
+}

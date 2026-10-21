@@ -9,16 +9,22 @@ namespace mister::app {
 namespace {
 
 [[nodiscard]] bool stem_matches(std::string_view name, std::string_view prefix) noexcept {
-    if (name.size() <= prefix.size()) return false;
-    if (!infra::ieq(name.substr(0, prefix.size()), prefix)) return false;
+    if (name.size() <= prefix.size())
+        return false;
+    if (!infra::ieq(name.substr(0, prefix.size()), prefix))
+        return false;
     const char sep = name[prefix.size()];
     return sep == '.' || sep == '_';
 }
 
-}  // namespace
+}
 
-[[nodiscard]] Ex<std::string> resolve_rbf_name(const svc::Vfs& vfs, std::string_view dir,
-                                               std::string_view stem, bool arcade) {
+[[nodiscard]] Ex<std::string> resolve_rbf_name(
+    const svc::Vfs& vfs,
+    std::string_view dir,
+    std::string_view stem,
+    bool arcade
+) {
     if (stem.empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
@@ -29,7 +35,8 @@ namespace {
     filter.files = true;
     filter.zip_as_directory = false;
     auto entries = vfs.scan(dir, filter);
-    if (!entries) return std::unexpected(entries.error());
+    if (!entries)
+        return std::unexpected(entries.error());
 
     std::string arcade_stem;
     if (arcade) {
@@ -40,15 +47,21 @@ namespace {
 
     std::string_view best;
     for (const svc::DirEntry& e : *entries) {
-        if (e.is_dir) continue;
-        if (e.is_zip_member) continue;
+        if (e.is_dir)
+            continue;
+        if (e.is_zip_member)
+            continue;
         const std::string_view name = e.name;
-        if (name.size() <= 4) continue;
-        if (!infra::ieq(name.substr(name.size() - 4), ".rbf")) continue;
+        if (name.size() <= 4)
+            continue;
+        if (!infra::ieq(name.substr(name.size() - 4), ".rbf"))
+            continue;
 
-        if (!stem_matches(name, stem) && !(arcade && stem_matches(name, arcade_stem))) continue;
+        if (!stem_matches(name, stem) && !(arcade && stem_matches(name, arcade_stem)))
+            continue;
 
-        if (best.empty() || best.compare(name) < 0) best = name;
+        if (best.empty() || best.compare(name) < 0)
+            best = name;
     }
     if (best.empty()) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
@@ -56,4 +69,4 @@ namespace {
     return std::string(best);
 }
 
-}  // namespace mister::app
+}

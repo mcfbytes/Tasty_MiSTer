@@ -8,14 +8,20 @@ namespace mister::app {
 
 namespace {
 
-bool is_blank(char c) noexcept { return c == ' ' || c == '\t'; }
+bool is_blank(char c) noexcept {
+    return c == ' ' || c == '\t';
+}
 
-char lower(char c) noexcept { return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c; }
+char lower(char c) noexcept {
+    return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c;
+}
 
 bool iequals(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size()) return false;
+    if (a.size() != b.size())
+        return false;
     for (std::size_t i = 0; i < a.size(); ++i) {
-        if (lower(a[i]) != lower(b[i])) return false;
+        if (lower(a[i]) != lower(b[i]))
+            return false;
     }
     return true;
 }
@@ -28,7 +34,8 @@ std::string_view skip_blanks(std::string_view s) noexcept {
 
 std::optional<std::string_view> header_name(std::string_view line) noexcept {
     line = skip_blanks(line);
-    if (line.empty() || line.front() != '[') return std::nullopt;
+    if (line.empty() || line.front() != '[')
+        return std::nullopt;
     line.remove_prefix(1);
     return line.substr(0, line.find(']'));
 }
@@ -45,7 +52,8 @@ std::optional<ValueSpan> value_span(std::string_view line, std::string_view key)
     if (line.size() - i <= key.size() || !iequals(line.substr(i, key.size()), key))
         return std::nullopt;
     i += key.size();
-    if (line[i] != '=' && !is_blank(line[i])) return std::nullopt;
+    if (line[i] != '=' && !is_blank(line[i]))
+        return std::nullopt;
     while (i < line.size() && (line[i] == '=' || is_blank(line[i])))
         ++i;
     const std::size_t at = i;
@@ -54,14 +62,15 @@ std::optional<ValueSpan> value_span(std::string_view line, std::string_view key)
     return ValueSpan{at, i};
 }
 
-}  // namespace
+}
 
 std::string ini_set_key(std::string_view text, std::string_view key, std::string_view value) {
     const std::size_t first_nl = text.find('\n');
-    const std::string_view eol =
-        first_nl != std::string_view::npos && first_nl > 0 && text[first_nl - 1] == '\r'
-            ? std::string_view{"\r\n"}
-            : std::string_view{"\n"};
+    const std::string_view eol = first_nl != std::string_view::npos
+            && first_nl > 0
+            && text[first_nl - 1] == '\r'
+        ? std::string_view{"\r\n"}
+        : std::string_view{"\n"};
 
     std::string out;
     out.reserve(text.size() + key.size() + value.size() + 16);
@@ -75,16 +84,20 @@ std::string ini_set_key(std::string_view text, std::string_view key, std::string
     while (pos < text.size()) {
         const std::size_t nl = text.find('\n', pos);
         const std::size_t next = nl == std::string_view::npos ? text.size() : nl + 1;
-        std::string_view line =
-            text.substr(pos, (nl == std::string_view::npos ? text.size() : nl) - pos);
-        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        std::string_view line = text.substr(
+            pos,
+            (nl == std::string_view::npos ? text.size() : nl) - pos
+        );
+        if (!line.empty() && line.back() == '\r')
+            line.remove_suffix(1);
 
         std::string_view bare = line;
-        if (pos == 0 && bare.starts_with("\xEF\xBB\xBF")) bare.remove_prefix(3);
+        if (pos == 0 && bare.starts_with("\xEF\xBB\xBF"))
+            bare.remove_prefix(3);
 
         const std::optional<std::string_view> name = header_name(bare);
-        const std::optional<ValueSpan> span =
-            name || !in_section ? std::nullopt : value_span(line, key);
+        const std::optional<ValueSpan> span = name || !in_section ? std::nullopt
+                                                                  : value_span(line, key);
         if (name) {
             in_section = true;
             in_main = iequals(*name, "MiSTer");
@@ -98,7 +111,8 @@ std::string ini_set_key(std::string_view text, std::string_view key, std::string
                 insert_at = out.size();
             }
         } else if (span) {
-            if (in_main) main_has_key = true;
+            if (in_main)
+                main_has_key = true;
             out.append(text.substr(pos, span->at));
             out.append(value);
             out.append(text.substr(pos + span->end, next - pos - span->end));
@@ -108,7 +122,8 @@ std::string ini_set_key(std::string_view text, std::string_view key, std::string
         pos = next;
     }
 
-    if (main_has_key) return out;
+    if (main_has_key)
+        return out;
     std::string row{key};
     row += '=';
     row += value;
@@ -117,7 +132,8 @@ std::string ini_set_key(std::string_view text, std::string_view key, std::string
         out.insert(insert_at, row);
         return out;
     }
-    if (!out.empty() && out.back() != '\n') out.append(eol);
+    if (!out.empty() && out.back() != '\n')
+        out.append(eol);
     out += "[MiSTer]";
     out.append(eol);
     out += row;
@@ -125,4 +141,4 @@ std::string ini_set_key(std::string_view text, std::string_view key, std::string
     return out;
 }
 
-}  // namespace mister::app
+}

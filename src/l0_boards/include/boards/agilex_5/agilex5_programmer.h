@@ -21,4 +21,4 @@ public:
     bool programmed() const override;
 };
 
-}  // namespace mister::boards::agilex_5
+}

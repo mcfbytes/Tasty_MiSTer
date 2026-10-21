@@ -20,7 +20,9 @@ class SeatPark {
 
 public:
     SeatPark(WakeFlag& wake, const WakeFlag& stop, int extra = -1) noexcept
-        : wake_(wake), stop_(stop), extra_(extra) {
+        : wake_(wake),
+          stop_(stop),
+          extra_(extra) {
         if constexpr (kSeatChecksEnabled) {
             if (wake_.fd() < 0)
                 fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "SeatPark over a flag with no fd");
@@ -28,6 +30,7 @@ public:
                 fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "SeatPark over a stop with no fd");
         }
     }
+
     SeatPark(const SeatPark&) = delete;
     SeatPark& operator=(const SeatPark&) = delete;
     SeatPark(SeatPark&&) = delete;
@@ -36,21 +39,24 @@ public:
     void arm() noexcept { wake_.arm(); }
 
     void mute_extra(bool on) noexcept { extra_muted_ = on; }
+
     void disarm() noexcept { wake_.disarm(); }
 
     void wait(int ms) noexcept {
         ++waits_;
         extra_ready_ = false;
         const short extra_events = extra_muted_ ? short{0} : short{POLLIN};
-        pollfd fds[3] = {
-            {wake_.fd(), POLLIN, 0}, {stop_.fd(), POLLIN, 0}, {extra_, extra_events, 0}};
+        pollfd fds[3] =
+            {{wake_.fd(), POLLIN, 0}, {stop_.fd(), POLLIN, 0}, {extra_, extra_events, 0}};
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
         int left = ms;
         int n = 0;
         for (;;) {
             n = ::poll(fds, 3, left);
-            if (n >= 0 || errno != EINTR) break;
-            if (ms > 0) left = remaining_ms_(deadline);
+            if (n >= 0 || errno != EINTR)
+                break;
+            if (ms > 0)
+                left = remaining_ms_(deadline);
         }
         if (n == 0) {
             ++timeouts_;
@@ -58,8 +64,10 @@ public:
         }
         if constexpr (kSeatChecksEnabled) {
             if (n < 0)
-                fatal(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)},
-                      "SeatPark poll");
+                fatal(
+                    Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)},
+                    "SeatPark poll"
+                );
             for (const pollfd& f : fds)
                 if ((f.revents & POLLNVAL) != 0)
                     fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "SeatPark polls a closed fd");
@@ -72,7 +80,9 @@ public:
     }
 
     [[nodiscard]] std::uint32_t waits() const noexcept { return waits_; }
+
     [[nodiscard]] std::uint32_t wakes() const noexcept { return wakes_; }
+
     [[nodiscard]] std::uint32_t timeouts() const noexcept { return timeouts_; }
 
     [[nodiscard]] bool extra_ready() const noexcept { return extra_ready_; }
@@ -80,7 +90,8 @@ public:
 private:
     static int remaining_ms_(std::chrono::steady_clock::time_point deadline) noexcept {
         const auto left = std::chrono::ceil<std::chrono::milliseconds>(
-            deadline - std::chrono::steady_clock::now());
+            deadline - std::chrono::steady_clock::now()
+        );
         return left.count() > 0 ? static_cast<int>(left.count()) : 0;
     }
 
@@ -96,4 +107,4 @@ private:
 
 static_assert(ParkLike<SeatPark>);
 
-}  // namespace mister::xthread
+}

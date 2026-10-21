@@ -41,15 +41,19 @@ struct TransferRow {
     PostNotify notify{};
 };
 
-[[nodiscard]] constexpr Ex<std::uint32_t> row_address(const TransferRow& r,
-                                                      std::span<const CoreWindowDecl> windows,
-                                                      std::uint64_t aperture_base) {
-    if (r.window == kPhysicalAddr) return r.addr;
+[[nodiscard]] constexpr Ex<std::uint32_t> row_address(
+    const TransferRow& r,
+    std::span<const CoreWindowDecl> windows,
+    std::uint64_t aperture_base
+) {
+    if (r.window == kPhysicalAddr)
+        return r.addr;
     if (r.window >= windows.size())
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), r.window});
     const std::uint64_t a = aperture_base + windows[r.window].region.offset + r.addr;
-    if (a > 0xFFFF'FFFFu) return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), r.addr});
+    if (a > 0xFFFF'FFFFu)
+        return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), r.addr});
     return static_cast<std::uint32_t>(a);
 }
 
-}  // namespace mister::cores
+}

@@ -29,6 +29,7 @@ struct UartHandoff {
         UartMode mode = UartMode::None;
         std::uint8_t pad_[3]{};
     };
+
     struct MidiLink {
         static constexpr Kind kKind = Kind::MidiLink;
         MidiLinkMode mode = MidiLinkMode::FSynth;
@@ -40,7 +41,8 @@ struct UartHandoff {
     std::uint8_t pad_[3]{};
     alignas(4) std::array<std::byte, kStore> store{};
 };
+
 static_assert(infra::MessageSum<UartHandoff> && infra::alternatives_are_total<UartHandoff>());
 static_assert(sizeof(UartHandoff) == 140 && alignof(UartHandoff) == 4);
 
-}  // namespace mister::app
+}

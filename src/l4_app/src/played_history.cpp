@@ -31,11 +31,12 @@ std::string_view get_field(const char* p, std::size_t cap) {
     return std::string_view{p, ::strnlen(p, cap)};
 }
 
-}  // namespace
+}
 
 Ex<void> PlayedHistory::load() {
     TASTY_SEAT_BODY(PlayedHistory);
-    if (loaded_) return {};
+    if (loaded_)
+        return {};
     records_.clear();
 
     std::vector<std::byte> buf(kFileBytes, std::byte{0});
@@ -56,7 +57,8 @@ Ex<void> PlayedHistory::load() {
             ++errors_;
             return std::unexpected(n.error());
         }
-        if (*n == 0) break;
+        if (*n == 0)
+            break;
         off += *n;
     }
     ++loads_;
@@ -66,14 +68,16 @@ Ex<void> PlayedHistory::load() {
         loaded_ = true;
         return {};
     }
-    const auto h =
-        infra::load_native<Header>(std::span<const std::byte>(buf).first<sizeof(Header)>());
+    const auto h = infra::load_native<Header>(
+        std::span<const std::byte>(buf).first<sizeof(Header)>()
+    );
     if (h.magic != kMagic || h.version != kVersion) {
         ++rejected_;
         loaded_ = true;
         return {};
     }
-    if (h.count > kMax) clamped_ += static_cast<std::uint32_t>(h.count - kMax);
+    if (h.count > kMax)
+        clamped_ += static_cast<std::uint32_t>(h.count - kMax);
     const std::size_t count = std::min<std::size_t>(h.count, kMax);
     if (off < kHeaderBytes + count * sizeof(Stored)) {
         ++rejected_;
@@ -112,14 +116,17 @@ Ex<void> PlayedHistory::record(const Record& r) {
     }
 
     if (!loaded_) {
-        if (auto l = load(); !l) return l;
+        if (auto l = load(); !l)
+            return l;
     }
     const auto at = std::find_if(records_.begin(), records_.end(), [&r](const Record& have) {
         return have.core_image == r.core_image && have.path == r.path;
     });
-    if (at != records_.end()) records_.erase(at);
+    if (at != records_.end())
+        records_.erase(at);
     records_.insert(records_.begin(), r);
-    if (records_.size() > kMax) records_.resize(kMax);
+    if (records_.size() > kMax)
+        records_.resize(kMax);
     return save_();
 }
 
@@ -134,7 +141,8 @@ Ex<void> PlayedHistory::save_() {
             std::span<std::byte>(buf)
                 .subspan(kHeaderBytes + i * kRecordBytes + offsetof(Stored, unix_time))
                 .first<8>(),
-            r.unix_time);
+            r.unix_time
+        );
         put_field(std::span{rec + offsetof(Stored, core_image), kCoreImageCap}, r.core_image);
         put_field(std::span{rec + offsetof(Stored, core_name), kCoreNameCap}, r.core_name);
         put_field(std::span{rec + offsetof(Stored, path), kPathCap}, r.path);
@@ -151,4 +159,4 @@ Ex<void> PlayedHistory::save_() {
     return {};
 }
 
-}  // namespace mister::app
+}

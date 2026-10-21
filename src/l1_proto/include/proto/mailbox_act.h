@@ -25,6 +25,7 @@ struct MailboxAct {
     std::array<std::uint16_t, kMailboxCommandWords> words{};
     std::uint16_t len = 0;
 };
+
 static_assert(std::is_trivially_copyable_v<MailboxAct>);
 
-}  // namespace mister::proto
+}

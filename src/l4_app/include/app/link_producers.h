@@ -26,22 +26,30 @@ struct Unproduced {
     static constexpr std::string_view kOwedBy = OwedBy;
 };
 
-using LinkEventProducers =
-    std::tuple<LinkSession, proto::SpiIdentifyDecoder, proto::SpiConfStrDecoder, proto::SpiSampler,
-               proto::SpiBlockDecoder, proto::SpiPs2Decoder, proto::SpiOsdMaskDecoder,
-               proto::user_io::PollReader>;
+using LinkEventProducers = std::tuple<
+    LinkSession,
+    proto::SpiIdentifyDecoder,
+    proto::SpiConfStrDecoder,
+    proto::SpiSampler,
+    proto::SpiBlockDecoder,
+    proto::SpiPs2Decoder,
+    proto::SpiOsdMaskDecoder,
+    proto::user_io::PollReader>;
 
 namespace detail {
 template <class T>
 struct IsUnproduced : std::false_type {};
+
 template <proto::LinkEvent::Kind K, const std::string_view& O>
 struct IsUnproduced<Unproduced<K, O>> : std::true_type {};
-}  // namespace detail
+}
 
 template <class List>
 consteval bool producers_cover_each_kind_once() {
     std::array<unsigned, infra::ordinal(proto::LinkEvent::Kind::kCount)> seen{};
-    auto port = [&]<class... A>(std::tuple<A...>*) { (++seen[infra::ordinal(A::kKind)], ...); };
+    auto port = [&]<class... A>(std::tuple<A...>*) {
+        (++seen[infra::ordinal(A::kKind)], ...);
+    };
     auto one = [&]<class P>(P*) {
         if constexpr (detail::IsUnproduced<P>::value)
             ++seen[infra::ordinal(P::kKind)];
@@ -52,10 +60,14 @@ consteval bool producers_cover_each_kind_once() {
         (one(static_cast<P*>(nullptr)), ...);
     }(static_cast<List*>(nullptr));
     for (unsigned n : seen)
-        if (n != 1) return false;
+        if (n != 1)
+            return false;
     return true;
 }
-static_assert(producers_cover_each_kind_once<LinkEventProducers>(),
-              "every LinkEvent kind is in exactly one producer's Port or one Unproduced entry");
 
-}  // namespace mister::app
+static_assert(
+    producers_cover_each_kind_once<LinkEventProducers>(),
+    "every LinkEvent kind is in exactly one producer's Port or one Unproduced entry"
+);
+
+}

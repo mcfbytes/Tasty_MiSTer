@@ -6,6 +6,7 @@ namespace mister::hal {
 struct Unmeasured {
     explicit constexpr Unmeasured() = default;
 };
+
 inline constexpr Unmeasured kUnmeasured{};
 
-}  // namespace mister::hal
+}

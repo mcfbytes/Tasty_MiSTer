@@ -37,13 +37,17 @@ public:
     using Job = Chan::Job;
 
     ScreenshotQueue() noexcept
-        : chan_(xthread::Polled{}, xthread::Polled{}), ui_(chan_.owner()), diag_(chan_.worker()) {}
+        : chan_(xthread::Polled{}, xthread::Polled{}),
+          ui_(chan_.owner()),
+          diag_(chan_.worker()) {}
 
     [[nodiscard]] Pending arm() noexcept {
         auto p = ui_.acquire();
-        if (!p) drops_.add(1);
+        if (!p)
+            drops_.add(1);
         return p;
     }
+
     void submit(Pending&& p) noexcept { ui_.send(std::move(p)); }
 
     [[nodiscard]] Job take() noexcept { return diag_.take(); }
@@ -61,8 +65,11 @@ private:
     xthread::Counter drops_{};
 };
 
-inline std::vector<std::uint8_t> encode_png_rgb24(std::uint32_t w, std::uint32_t h,
-                                                  std::span<const std::uint8_t> rgb) {
+inline std::vector<std::uint8_t> encode_png_rgb24(
+    std::uint32_t w,
+    std::uint32_t h,
+    std::span<const std::uint8_t> rgb
+) {
     auto crc_step = [](std::uint32_t crc, std::uint8_t byte) noexcept {
         crc ^= byte;
         for (int k = 0; k < 8; ++k)
@@ -70,7 +77,8 @@ inline std::vector<std::uint8_t> encode_png_rgb24(std::uint32_t w, std::uint32_t
         return crc;
     };
     std::vector<std::uint8_t> out;
-    if (w == 0 || h == 0 || rgb.size() != static_cast<std::size_t>(w) * h * 3) return out;
+    if (w == 0 || h == 0 || rgb.size() != static_cast<std::size_t>(w) * h * 3)
+        return out;
 
     const std::size_t row = static_cast<std::size_t>(w) * 3 + 1;
     const std::size_t raw_len = row * h;
@@ -141,4 +149,4 @@ inline std::vector<std::uint8_t> encode_png_rgb24(std::uint32_t w, std::uint32_t
     return out;
 }
 
-}  // namespace mister::app
+}

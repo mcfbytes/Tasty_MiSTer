@@ -7,22 +7,31 @@ namespace mister::app {
 
 class ILinkTxReader;
 struct EncoderRoles;
-}  // namespace mister::app
+}
+
 namespace mister::proto {
 class IResetFence;
+}
+
+namespace mister::cores {
+class Core;
 }
 
 namespace mister::app {
 
 struct LinkOpCtx {
 
-    infra::OptRef<const ILinkTxReader> inbox{};
+    const ILinkTxReader& inbox;
     bool windows_closed = false;
     bool live = false;
 
-    infra::OptRef<proto::IResetFence> fence{};
+    bool starting = false;
+
+    proto::IResetFence& fence;
 
     infra::OptRef<const EncoderRoles> roles{};
+
+    infra::OptRef<cores::Core> core{};
 };
 
-}  // namespace mister::app
+}

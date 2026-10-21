@@ -25,7 +25,10 @@ struct ContentRequest {
     UiRequest::Kind asked{};
     CorrelationTag tag{};
 };
-static_assert(std::is_trivially_copyable_v<ContentRequest>,
-              "the path rides the request, never a PathId");
 
-}  // namespace mister::app
+static_assert(
+    std::is_trivially_copyable_v<ContentRequest>,
+    "the path rides the request, never a PathId"
+);
+
+}

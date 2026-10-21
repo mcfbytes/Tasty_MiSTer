@@ -29,4 +29,4 @@ static_assert(std::is_nothrow_default_constructible_v<HdOsdAsk>);
 
 using HdOsdAskCell = xthread::Telemetry<HdOsdAsk, SeatTag::Ui>;
 
-}  // namespace mister::app
+}

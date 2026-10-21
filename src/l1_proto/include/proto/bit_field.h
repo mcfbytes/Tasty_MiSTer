@@ -15,16 +15,20 @@ struct BitField {
     std::uint8_t width = 0;
 
     constexpr bool valid() const noexcept { return width != 0; }
+
     constexpr StatusBit end() const noexcept {
         return StatusBit{static_cast<std::uint8_t>(start.v + width - 1)};
     }
+
     constexpr std::uint32_t mask() const noexcept {
         return width >= 32 ? 0xFFFF'FFFFu : ((1u << width) - 1u);
     }
+
     friend constexpr bool operator==(BitField, BitField) = default;
 };
+
 static_assert(sizeof(BitField) == 2);
 
 [[nodiscard]] BitField decode_bit_ref(std::string_view spec, ExShift ex) noexcept;
 
-}  // namespace mister::proto
+}

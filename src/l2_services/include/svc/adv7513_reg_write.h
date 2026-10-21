@@ -38,4 +38,4 @@ std::array<RegWrite, 3> mode_table(const svc::Modeline& m, bool direct_video_men
 
 RegWrite power(bool on);
 
-}  // namespace mister::svc::adv7513
+}

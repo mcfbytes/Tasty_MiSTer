@@ -16,4 +16,4 @@ public:
     virtual void shape(proto::Lba lba, std::span<std::byte, kCdFrameSize> frame) const noexcept = 0;
 };
 
-}  // namespace mister::svc
+}

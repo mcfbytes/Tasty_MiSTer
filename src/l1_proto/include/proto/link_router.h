@@ -14,10 +14,15 @@ namespace mister::proto {
 class ILinkRouter {
 public:
     [[nodiscard]] virtual bool push(const LinkEvent& e) noexcept = 0;
-    [[nodiscard]] virtual bool can_intern(LinkEvent::Kind k, std::size_t bytes,
-                                          unsigned chunks) const noexcept = 0;
-    [[nodiscard]] virtual Ex<RxSlabId> intern(LinkEvent::Kind k,
-                                              std::span<const std::uint8_t> bytes) noexcept = 0;
+    [[nodiscard]] virtual bool can_intern(
+        LinkEvent::Kind k,
+        std::size_t bytes,
+        unsigned chunks
+    ) const noexcept = 0;
+    [[nodiscard]] virtual Ex<RxSlabId> intern(
+        LinkEvent::Kind k,
+        std::span<const std::uint8_t> bytes
+    ) noexcept = 0;
     static constexpr std::size_t kChunkBytes = 8192;
 
 protected:
@@ -25,4 +30,4 @@ protected:
     ~ILinkRouter() = default;
 };
 
-}  // namespace mister::proto
+}

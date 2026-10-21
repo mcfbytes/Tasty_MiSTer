@@ -37,6 +37,7 @@ public:
         std::uint8_t region = 0;
         std::uint32_t assets_loaded = 0;
         std::uint32_t rungs = 0;
+        std::uint32_t bios_missing = 0;
 
         std::uint64_t bytes_downloaded = 0;
     };
@@ -54,10 +55,16 @@ public:
     [[nodiscard]] virtual std::uint8_t pc() const noexcept = 0;
 
     [[nodiscard]] bool done() const noexcept { return pc() == kDone; }
+
     [[nodiscard]] const Report& report() const noexcept { return report_; }
 
     [[nodiscard]] virtual std::string_view next_last_dir() const noexcept { return image_dir_; }
+
     [[nodiscard]] virtual bool next_noreset() const noexcept { return false; }
+
+    [[nodiscard]] virtual std::span<const std::string> next_slot_paths() const noexcept {
+        return {};
+    }
 
 protected:
     BootLadder(const CoreProfile& profile, const LadderContext& ctx);
@@ -84,9 +91,14 @@ protected:
 
     [[nodiscard]] MountState mount_bounded(std::string_view path);
 
+    [[nodiscard]] MountState mount_slot_bounded(proto::SlotIndex slot, std::string_view path);
+
+    [[nodiscard]] bool mount_outstanding() const noexcept { return mount_gen_ != 0; }
+
     [[nodiscard]] const MountStatus& mount_answer() const noexcept { return mount_answer_; }
 
     [[nodiscard]] bool prepare_save(std::string_view path);
+
     [[nodiscard]] std::uint64_t save_size() const noexcept { return save_size_; }
 
     [[nodiscard]] bool order_mount_save(std::string_view path, bool bracketed);
@@ -100,6 +112,7 @@ protected:
 
     [[nodiscard]] bool order_set_index(WideIoIndex dest);
     [[nodiscard]] std::int64_t now_ns() const;
+
     [[nodiscard]] std::uint32_t next_gen() noexcept { return host_.next_generation(); }
 
     const CoreProfile& profile_;
@@ -140,4 +153,4 @@ private:
     MountStatus mount_answer_{};
 };
 
-}  // namespace mister::cores
+}

@@ -21,4 +21,4 @@ protected:
     ILinkPort& operator=(ILinkPort&&) = default;
 };
 
-}  // namespace mister::hal
+}

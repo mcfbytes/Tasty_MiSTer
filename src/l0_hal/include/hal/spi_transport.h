@@ -37,6 +37,7 @@ public:
     [[nodiscard]] virtual Ex<SpiWord> transfer(SpiWord out) = 0;
 
     virtual Width width() const noexcept { return Width::Byte; }
+
     virtual std::uint8_t io_version() const noexcept { return 0; }
 
     [[nodiscard]] virtual Ex<void> block_write(std::span<const std::uint8_t> data) = 0;
@@ -55,6 +56,10 @@ public:
     }
 
     [[nodiscard]] virtual bool posted() const noexcept { return false; }
+
+    virtual void widen_ack_bound() noexcept {}
+
+    virtual void restore_ack_bound() noexcept {}
 };
 
-}  // namespace mister::hal
+}

@@ -31,8 +31,8 @@ enum class RecVerdict : std::uint8_t {
     kCount,
 };
 
-inline constexpr std::array<const char*, 5> kRecStateNames{"idle", "probing", "armed", "recording",
-                                                           "closing"};
+inline constexpr std::array<const char*, 5>
+    kRecStateNames{"idle", "probing", "armed", "recording", "closing"};
 static_assert(kRecStateNames.size() == static_cast<std::size_t>(RecState::Closing) + 1);
 static_assert(infra::json_clean_names(kRecStateNames), "a name is rendered unescaped");
 
@@ -40,6 +40,7 @@ static_assert(infra::json_clean_names(kRecStateNames), "a name is rendered unesc
     const auto i = static_cast<std::size_t>(s);
     return i < kRecStateNames.size() ? kRecStateNames[i] : "?";
 }
+
 [[nodiscard]] const char* rec_verdict_name(RecVerdict v) noexcept;
 
 [[nodiscard]] const char* rec_verdict_remedy(RecVerdict v) noexcept;
@@ -111,8 +112,10 @@ using RecorderStatusCell = xthread::Telemetry<RecorderStatus, SeatTag::Capture>;
 
 using RecStatusText = FixedStr<640, StrFit::Clip>;
 
-static_assert(infra::json_worst_len<RecorderStatus>() <= RecStatusText::kCapacity,
-              "the status text never clips");
+static_assert(
+    infra::json_worst_len<RecorderStatus>() <= RecStatusText::kCapacity,
+    "the status text never clips"
+);
 [[nodiscard]] RecStatusText format_recorder_status(const RecorderStatus& s) noexcept;
 
-}  // namespace mister::app
+}

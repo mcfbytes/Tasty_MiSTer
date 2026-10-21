@@ -26,9 +26,13 @@ class SpiBus final : public ILinkPort {
 public:
     [[nodiscard]] static Ex<SpiBus> open(Mailbox mailbox, xthread::RtStats* stats = nullptr);
 
-    static SpiBus attach_registers(reg::Reg<reg::WO> gpo, reg::Reg<reg::RO> gpi,
-                                   ISpiOutputObserver* obs, const LinkTimingValues& timing,
-                                   xthread::RtStats* stats = nullptr) noexcept;
+    static SpiBus attach_registers(
+        reg::Reg<reg::WO> gpo,
+        reg::Reg<reg::RO> gpi,
+        ISpiOutputObserver* obs,
+        const LinkTimingValues& timing,
+        xthread::RtStats* stats = nullptr
+    ) noexcept;
 
     ~SpiBus() override = default;
     SpiBus(SpiBus&&) noexcept = default;
@@ -42,14 +46,17 @@ public:
     void select(ChipSelect cs) override;
     void deselect() override;
     [[nodiscard]] Ex<SpiWord> transfer(SpiWord out) override;
+
     Width width() const noexcept override {
         TASTY_SEAT_BODY(SpiBus);
         return width_;
     }
+
     std::uint8_t io_version() const noexcept override {
         TASTY_SEAT_BODY(SpiBus);
         return io_version_;
     }
+
     [[nodiscard]] Ex<void> block_write(std::span<const std::uint8_t> data) override;
     [[nodiscard]] Ex<void> block_read(std::span<std::uint8_t> data) override;
 
@@ -58,9 +65,20 @@ public:
     void abandon_post() noexcept override;
 
     [[nodiscard]] Ex<bool> transfer_or_post(SpiWord out) override;
+
     [[nodiscard]] bool posted() const noexcept override {
         TASTY_SEAT_BODY(SpiBus);
         return post_ != Post::None;
+    }
+
+    void widen_ack_bound() noexcept override {
+        TASTY_SEAT_BODY(SpiBus);
+        start_bound_ = true;
+    }
+
+    void restore_ack_bound() noexcept override {
+        TASTY_SEAT_BODY(SpiBus);
+        start_bound_ = false;
     }
 
     bool ready() const override;
@@ -73,9 +91,11 @@ public:
     public:
 #ifndef NDEBUG
         explicit Transaction(SpiBus& bus) : owner_(bus) { owner_.txn_enter(); }
+
         ~Transaction() { owner_.txn_exit(); }
 #else
         explicit Transaction(SpiBus& bus) { (void)bus; }
+
         ~Transaction() = default;
 #endif
         Transaction(const Transaction&) = delete;
@@ -125,6 +145,8 @@ private:
 
     unsigned ack_soft_spins_ = 0;
     std::uint64_t ack_timeout_ns_ = 0;
+    std::uint64_t start_ack_timeout_ns_ = 0;
+    bool start_bound_ = false;
 };
 
-}  // namespace mister::hal
+}

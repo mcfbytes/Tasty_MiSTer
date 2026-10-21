@@ -21,6 +21,7 @@
 namespace mister::app {
 
 namespace xml = svc::xml;
+
 namespace {
 
 using namespace std::chrono_literals;
@@ -38,20 +39,29 @@ void split_rbf(std::string_view want, std::string_view& dir, std::string_view& s
 
 std::string games_home(const svc::Vfs& vfs, std::string_view dir) {
     const svc::SearchPolicy prefixed{svc::search::kPrefixed, true};
-    if (auto p = vfs.resolve(dir, prefixed); p && vfs.dir_exists(*p)) return *p;
+    if (auto p = vfs.resolve(dir, prefixed); p && vfs.dir_exists(*p))
+        return *p;
     std::string games = "games/";
     games.append(dir);
-    if (auto p = vfs.resolve(games, prefixed); p && vfs.dir_exists(*p)) return *p;
+    if (auto p = vfs.resolve(games, prefixed); p && vfs.dir_exists(*p))
+        return *p;
     return games;
 }
 
-}  // namespace
+}
 
 MglPump::MglPump(const svc::Vfs& vfs, const os::IClock& clock, Wiring wiring) noexcept
-    : vfs_(vfs), identity_(wiring.identity), conf_cell_(wiring.conf), names_(wiring.names),
-      clock_(clock), info_(wiring.info), asks_(wiring.asks), diag_(wiring.diag),
-      player_(MglPlayer::Wiring{
-          .link_tx = wiring.link_tx, .asks = wiring.asks, .names = wiring.names}) {}
+    : vfs_(vfs),
+      identity_(wiring.identity),
+      conf_cell_(wiring.conf),
+      names_(wiring.names),
+      clock_(clock),
+      info_(wiring.info),
+      asks_(wiring.asks),
+      diag_(wiring.diag),
+      player_(
+          MglPlayer::Wiring{.link_tx = wiring.link_tx, .asks = wiring.asks, .names = wiring.names}
+      ) {}
 
 void MglPump::bind_homes() {
     SessionIdentity id{};
@@ -59,43 +69,59 @@ void MglPump::bind_homes() {
     if (bound) {
 
         const std::string file_home = games_home(vfs_, home_name(id));
-        const std::string image_home =
-            !id.cue_dir.empty() ? games_home(vfs_, id.cue_dir) : file_home;
+        const std::string image_home = !id.cue_dir.empty() ? games_home(vfs_, id.cue_dir)
+                                                           : file_home;
         bound = player_.set_homes(file_home, image_home);
     }
-    if (bound) return;
+    if (bound)
+        return;
 
     ++stats_.homes_unbound;
     diag_.appendf("{\"t\":\"ev\",\"k\":\"MglHomeUnbound\",\"n\":%u}", stats_.homes_unbound);
 }
 
 CoreScope MglPump::sample_scope() {
-    if (conf_cell_.sample_into(conf_scratch_) == 0) return {};
+    if (conf_cell_.sample_into(conf_scratch_) == 0)
+        return {};
     return CoreScope{conf_scratch_.gen};
 }
 
 void MglPump::latch_remember_() {
-    if (remember_ == MglRemember::Never) return;
+    if (remember_ == MglRemember::Never)
+        return;
 
-    if (player_.scope().gen.v == 0 || conf_scratch_.truncated) return;
-    const auto table =
-        proto::ItemTable::parse(std::string_view(conf_scratch_.text, conf_scratch_.len));
-    if (!table) return;
+    if (player_.scope().gen.v == 0 || conf_scratch_.truncated)
+        return;
+    const auto table = proto::ItemTable::parse(
+        std::string_view(conf_scratch_.text, conf_scratch_.len)
+    );
+    if (!table)
+        return;
     SessionIdentity id{};
-    const RememberedStem stem =
-        identity_.copy(id) ? id.stem : RememberedStem::of(table->core_name(), {});
+    const RememberedStem stem = identity_.copy(id) ? id.stem
+                                                   : RememberedStem::of(table->core_name(), {});
     const std::vector<proto::ConfStrEntry> slots = proto::ConfStr::slots_of(*table);
     for (std::uint8_t i = 0; i < player_.count(); ++i) {
         const auto ld = infra::as<MglItem::Load>(player_.item(i));
-        if (!ld) continue;
+        if (!ld)
+            continue;
         const bool file = ld->slot == MglItem::Slot::File;
-        const proto::FileSlotHit hit =
-            proto::ConfStr::find_slot_in(slots, file ? 'F' : 'S', ld->index);
+        const proto::FileSlotHit hit = proto::ConfStr::find_slot_in(
+            slots,
+            file ? 'F' : 'S',
+            ld->index
+        );
 
-        if (!hit.entry || !hit.entry->store_name) continue;
-        if (!file && hit.how != proto::FileSlotMatch::Exact) continue;
-        player_.remember(i, stem, file ? RememberedSlot::File : RememberedSlot::Mount,
-                         hit.entry->ioctl_index);
+        if (!hit.entry || !hit.entry->store_name)
+            continue;
+        if (!file && hit.how != proto::FileSlotMatch::Exact)
+            continue;
+        player_.remember(
+            i,
+            stem,
+            file ? RememberedSlot::File : RememberedSlot::Mount,
+            hit.entry->ioctl_index
+        );
     }
 }
 
@@ -109,7 +135,8 @@ bool MglPump::take_playlist(std::string_view path) noexcept {
     latch_[n] = '\0';
     latch_len_ = static_cast<std::uint16_t>(n);
 
-    if (pending_) ++stats_.superseded;
+    if (pending_)
+        ++stats_.superseded;
     pending_ = true;
     latched_doc_.reset();
     ++stats_.routed;
@@ -126,7 +153,8 @@ bool MglPump::take_parsed(const Mgl& doc) noexcept {
     }
     latched_doc_ = doc;
 
-    if (pending_) ++stats_.superseded;
+    if (pending_)
+        ++stats_.superseded;
     pending_ = true;
     ++stats_.routed;
     return true;
@@ -141,9 +169,11 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
         return;
     }
 
-    if (!load_tag_ || tag != load_tag_) return;
+    if (!load_tag_ || tag != load_tag_)
+        return;
     load_tag_ = kUncaused;
-    if (state_ != State::AwaitingCore) return;
+    if (state_ != State::AwaitingCore)
+        return;
 
     if (!mgl_capable) {
         abandon(InfoId::None, Errc::negotiation);
@@ -159,8 +189,14 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
         const auto slot = mgl.slot == Mgl::Slot::Image ? MglItem::Slot::Image : MglItem::Slot::File;
         doc = player_.adopt(
             infra::make<MglItem>(MglItem::Load{
-                .slot = slot, .index = mgl.index, .delay_s = mgl.delay_s, .path = mgl.path}),
-            MglPlayer::PathBase::Card, true);
+                .slot = slot,
+                .index = mgl.index,
+                .delay_s = mgl.delay_s,
+                .path = mgl.path
+            }),
+            MglPlayer::PathBase::Card,
+            true
+        );
     }
     if (!doc) {
         abandon(InfoId::CoreLoadFailed, doc.error().code);
@@ -196,7 +232,8 @@ void MglPump::on_session_over(CorrelationTag tag) {
         abandon(InfoId::CoreLoadFailed, Errc::core_load);
         return;
     }
-    if (!load_tag_ || tag != load_tag_) return;
+    if (!load_tag_ || tag != load_tag_)
+        return;
     load_tag_ = kUncaused;
     if (state_ == State::AwaitingCore) {
         abandon(InfoId::CoreLoadFailed, Errc::core_load);
@@ -212,8 +249,10 @@ void MglPump::on_request_refused(CorrelationTag tag, Errc why) {
         return;
     }
 
-    if (state_ != State::AwaitingCore) return;
-    if (!load_tag_ || tag != load_tag_) return;
+    if (state_ != State::AwaitingCore)
+        return;
+    if (!load_tag_ || tag != load_tag_)
+        return;
     load_tag_ = kUncaused;
 
     if (why == Errc::cancelled) {
@@ -231,14 +270,18 @@ void MglPump::on_request_refused(CorrelationTag tag, Errc why) {
 
 void MglPump::replay_busy_(CorrelationTag tag) {
     const bool first = !busy_since_;
-    if (first) busy_since_ = os::Deadline::in(clock_, std::chrono::milliseconds{kBusyBoundMs});
+    if (first)
+        busy_since_ = os::Deadline::in(clock_, std::chrono::milliseconds{kBusyBoundMs});
     if (!first && busy_since_->expired(clock_)) {
-        if (!player_.owns(tag)) return;
-        if (state_ == State::Idle) ++stats_.abandoned;
+        if (!player_.owns(tag))
+            return;
+        if (state_ == State::Idle)
+            ++stats_.abandoned;
         abandon(InfoId::CoreLoadFailed, Errc::timeout);
         return;
     }
-    if (!player_.replay_refused(tag, clock_)) return;
+    if (!player_.replay_refused(tag, clock_))
+        return;
     ++stats_.busy_replays;
     state_ = State::Playing;
     check_invariant();
@@ -246,7 +289,8 @@ void MglPump::replay_busy_(CorrelationTag tag) {
 
 void MglPump::enter(State s) noexcept {
 
-    if (s != State::Playing) player_.reset();
+    if (s != State::Playing)
+        player_.reset();
     state_ = s;
     check_invariant();
 }
@@ -254,8 +298,10 @@ void MglPump::enter(State s) noexcept {
 void MglPump::check_invariant() const noexcept {
 #ifndef NDEBUG
     if ((state_ == State::Playing) != !player_.done()) {
-        fatal(Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(state_)},
-              "MglPump: player_ non-Done and state_ == Playing must agree");
+        fatal(
+            Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(state_)},
+            "MglPump: player_ non-Done and state_ == Playing must agree"
+        );
     }
 #endif
 }
@@ -300,7 +346,8 @@ void MglPump::begin_read() {
     pending_ = false;
     const std::string_view path{latch_, latch_len_};
 
-    if (state_ != State::Idle) ++stats_.superseded;
+    if (state_ != State::Idle)
+        ++stats_.superseded;
     enter(State::Idle);
 
     load_tag_ = kUncaused;
@@ -312,14 +359,16 @@ void MglPump::begin_read() {
     armed_doc_ = std::move(latched_doc_);
     latched_doc_.reset();
     if (armed_doc_) {
-        if (!resolve_and_load(armed_doc_->rbf.view())) armed_doc_.reset();
+        if (!resolve_and_load(armed_doc_->rbf.view()))
+            armed_doc_.reset();
         return;
     }
 
     if (path.empty()) {
         ++stats_.read_failures;
         last_error_ = Errc::bad_format;
-        if (info_) info_->info(InfoId::CoreLoadFailed);
+        if (info_)
+            info_->info(InfoId::CoreLoadFailed);
         last_info_ = InfoId::CoreLoadFailed;
         return;
     }
@@ -328,7 +377,8 @@ void MglPump::begin_read() {
     if (!f) {
         ++stats_.read_failures;
         last_error_ = f.error().code;
-        if (info_) info_->info(InfoId::CoreLoadFailed);
+        if (info_)
+            info_->info(InfoId::CoreLoadFailed);
         last_info_ = InfoId::CoreLoadFailed;
         return;
     }
@@ -337,16 +387,20 @@ void MglPump::begin_read() {
 
         ++stats_.read_failures;
         last_error_ = sz ? Errc::bad_format : sz.error().code;
-        if (info_) info_->info(InfoId::CoreLoadFailed);
+        if (info_)
+            info_->info(InfoId::CoreLoadFailed);
         last_info_ = InfoId::CoreLoadFailed;
         return;
     }
     auto got = (*f)->read_at(
-        0, std::as_writable_bytes(std::span(doc_)).first(static_cast<std::size_t>(sz->v)));
+        0,
+        std::as_writable_bytes(std::span(doc_)).first(static_cast<std::size_t>(sz->v))
+    );
     if (!got || *got == 0) {
         ++stats_.read_failures;
         last_error_ = got ? Errc::io : got.error().code;
-        if (info_) info_->info(InfoId::CoreLoadFailed);
+        if (info_)
+            info_->info(InfoId::CoreLoadFailed);
         last_info_ = InfoId::CoreLoadFailed;
         return;
     }
@@ -360,7 +414,8 @@ bool MglPump::resolve_and_load(std::string_view want) {
 
         ++stats_.no_rbf;
         last_error_ = Errc::not_found;
-        if (info_) info_->info(InfoId::CoreNotFound);
+        if (info_)
+            info_->info(InfoId::CoreNotFound);
         last_info_ = InfoId::CoreNotFound;
         doc_len_ = 0;
         return false;
@@ -372,7 +427,8 @@ bool MglPump::resolve_and_load(std::string_view want) {
     if (auto r = resolve_rbf(std::string_view{want_, want_len_}); !r) {
         ++stats_.no_rbf;
         last_error_ = r.error().code;
-        if (info_) info_->info(InfoId::CoreNotFound);
+        if (info_)
+            info_->info(InfoId::CoreNotFound);
         last_info_ = InfoId::CoreNotFound;
         doc_len_ = 0;
         return false;
@@ -450,13 +506,18 @@ void MglPump::abandon(InfoId id, Errc code) {
     last_error_ = code;
     if (id != InfoId::None) {
         last_info_ = id;
-        if (info_) info_->info(id);
+        if (info_)
+            info_->info(id);
     }
 
-    diag_.appendf("{\"t\":\"ev\",\"k\":\"MglAbandoned\","
-                  "\"err\":%u,\"info\":%u,\"ab\":%u,\"fi\":%u}",
-                  static_cast<unsigned>(code), static_cast<unsigned>(id), stats_.abandoned,
-                  stats_.file_items);
+    diag_.appendf(
+        "{\"t\":\"ev\",\"k\":\"MglAbandoned\","
+        "\"err\":%u,\"info\":%u,\"ab\":%u,\"fi\":%u}",
+        static_cast<unsigned>(code),
+        static_cast<unsigned>(id),
+        stats_.abandoned,
+        stats_.file_items
+    );
 }
 
 Ex<void> MglPump::resolve_rbf(std::string_view want) {
@@ -465,7 +526,8 @@ Ex<void> MglPump::resolve_rbf(std::string_view want) {
     split_rbf(want, dir, stem);
 
     auto found = resolve_rbf_name(vfs_, dir, stem, false);
-    if (!found) return std::unexpected(found.error());
+    if (!found)
+        return std::unexpected(found.error());
     const std::string_view best = *found;
 
     std::size_t n = 0;
@@ -481,4 +543,4 @@ Ex<void> MglPump::resolve_rbf(std::string_view want) {
     return {};
 }
 
-}  // namespace mister::app
+}

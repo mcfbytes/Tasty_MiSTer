@@ -29,4 +29,4 @@ protected:
     ICdSectorEgress& operator=(const ICdSectorEgress&) = default;
 };
 
-}  // namespace mister::cores
+}

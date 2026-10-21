@@ -19,11 +19,16 @@ struct VideoSample {
     std::uint16_t flt_flags = 0;
 
     bool interlaced() const noexcept { return (res & 0x100u) != 0; }
+
     bool rotated() const noexcept { return (res & 0x200u) != 0; }
+
     bool arxy() const noexcept { return (arx_raw & 0x1000u) != 0; }
+
     std::uint16_t arx() const noexcept { return static_cast<std::uint16_t>(arx_raw & 0x0FFFu); }
+
     std::uint16_t ary() const noexcept { return static_cast<std::uint16_t>(ary_raw & 0x0FFFu); }
+
     bool fb_en() const noexcept { return (fb_fmt & 0x40u) != 0; }
 };
 
-}  // namespace mister::svc
+}

@@ -33,6 +33,7 @@ public:
     }
 
     int fd() const noexcept { return fd_.valid() ? fd_.get() : -1; }
+
     UioLine line() const noexcept { return line_; }
 
 private:
@@ -40,4 +41,4 @@ private:
     UioLine line_{};
 };
 
-}  // namespace mister::os
+}

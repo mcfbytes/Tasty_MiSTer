@@ -16,9 +16,11 @@ inline constexpr std::size_t kReplayPorts = 4;
 struct ReplayMsg {
     TASTY_SEAT_EXEMPT(component);
     enum class Kind : std::uint8_t { Arm, Input, End, kCount };
+
     struct Head {
         std::uint16_t gen = 0;
     };
+
     static constexpr std::size_t kStore = 24;
 
     enum class P0Parity : std::uint8_t { Any, Even, Odd, AfterSilence };
@@ -51,6 +53,7 @@ struct ReplayMsg {
         static constexpr Kind kKind = Kind::End;
         std::uint32_t frame = 0;
     };
+
     using Alternatives = std::tuple<Arm, Input, End>;
 
     Kind kind = Kind::Arm;
@@ -58,9 +61,13 @@ struct ReplayMsg {
     Head head{};
     alignas(4) std::array<std::byte, kStore> store{};
 };
-static_assert(infra::MessageSum<ReplayMsg> && infra::HasHead<ReplayMsg> &&
-              infra::alternatives_are_total<ReplayMsg>());
+
+static_assert(
+    infra::MessageSum<ReplayMsg>
+    && infra::HasHead<ReplayMsg>
+    && infra::alternatives_are_total<ReplayMsg>()
+);
 
 static_assert(sizeof(ReplayMsg) == 28, "kind, pad, head and a 24-byte store");
 
-}  // namespace mister::app
+}

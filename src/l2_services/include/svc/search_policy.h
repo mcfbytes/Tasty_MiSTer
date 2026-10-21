@@ -31,6 +31,6 @@ inline constexpr SearchDir kPrefixed[] = {
 };
 inline constexpr SearchDir kRootOnly[] = {SearchDir::CurrentRoot};
 inline constexpr SearchDir kSdRootOnly[] = {SearchDir::SdRoot};
-}  // namespace search
+}
 
-}  // namespace mister::svc
+}

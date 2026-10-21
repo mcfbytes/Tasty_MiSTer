@@ -28,8 +28,8 @@ class DiscReadService final : public IIoCoworker {
 public:
     using Chan = xthread::LoanChannel<DiscReadSlot, kDiscReadDepth, SeatTag::RT, SeatTag::Io>;
     using Loan = Chan::Loan;
-    using MountChan =
-        xthread::LoanChannel<DiscMountSlot, kDiscMountDepth, SeatTag::RT, SeatTag::Io>;
+    using MountChan = xthread::
+        LoanChannel<DiscMountSlot, kDiscMountDepth, SeatTag::RT, SeatTag::Io>;
     using GeomCell = xthread::Telemetry<DiscGeometry, SeatTag::Io>;
     using CountCell = xthread::Telemetry<DiscCounters, SeatTag::Io>;
 
@@ -45,13 +45,18 @@ public:
     DiscReadService(xthread::WakeFlag& io_wake, const Wiring& w) noexcept;
 
     [[nodiscard]] GeomCell& geometry_cell() noexcept { return geom_cell_; }
+
     [[nodiscard]] CountCell& counters_cell() noexcept { return count_cell_; }
 
     void set_generation(std::uint32_t g) noexcept;
+
     [[nodiscard]] std::uint32_t generation() const noexcept { return gen_; }
 
-    [[nodiscard]] DiscMountState arm_mount(DiscOp op, const CuePolicy* policy,
-                                           std::string_view path) noexcept;
+    [[nodiscard]] DiscMountState arm_mount(
+        DiscOp op,
+        const CuePolicy* policy,
+        std::string_view path
+    ) noexcept;
 
     void release() noexcept;
 
@@ -60,18 +65,26 @@ public:
     [[nodiscard]] const DiscGeometry& geometry() noexcept;
     [[nodiscard]] const DiscCounters& counters() noexcept;
 
-    [[nodiscard]] std::size_t take(DiscForm form, proto::Lba lba,
-                                   std::span<std::byte> dst) noexcept;
+    [[nodiscard]] std::size_t take(
+        DiscForm form,
+        proto::Lba lba,
+        std::span<std::byte> dst
+    ) noexcept;
 
     void hint(DiscForm form, proto::Lba lba) noexcept;
 
     [[nodiscard]] bool take_read_failed(DiscForm form, proto::Lba lba) noexcept;
 
     [[nodiscard]] std::uint32_t not_resident() const noexcept { return not_resident_.get(); }
+
     [[nodiscard]] std::uint32_t evictions() const noexcept { return evictions_.get(); }
+
     [[nodiscard]] std::uint32_t stale_drops() const noexcept { return stale_drops_.get(); }
+
     [[nodiscard]] std::uint32_t refusals() const noexcept { return refusals_.get(); }
+
     [[nodiscard]] std::uint32_t reads() const noexcept { return reads_.get(); }
+
     [[nodiscard]] std::uint32_t read_errors() const noexcept { return read_errors_.get(); }
 
     void serve() noexcept override;
@@ -111,8 +124,8 @@ private:
     CountCell::Reader count_rd_{};
     DiscGeometry geom_{};
     DiscCounters count_{};
-    IDiscReader* reader_;
-    IDiscMounter* mounter_;
+    infra::OptRef<IDiscReader> reader_;
+    infra::OptRef<IDiscMounter> mounter_;
 
     FixedStr<kDiscPathCap, StrFit::Reject> armed_path_{};
     DiscOp armed_op_ = DiscOp::Mount;
@@ -128,4 +141,4 @@ private:
     xthread::Counter not_resident_, stale_drops_, refusals_, reads_, read_errors_, evictions_;
 };
 
-}  // namespace mister::svc
+}

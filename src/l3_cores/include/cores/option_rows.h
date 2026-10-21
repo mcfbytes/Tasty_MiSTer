@@ -21,12 +21,10 @@ public:
 
     [[nodiscard]] virtual Ex<void> set_option(std::size_t row, std::uint8_t choice) = 0;
 
-    [[nodiscard]] virtual Ex<void> apply_armed_reset() = 0;
-
 protected:
     IOptionRows() = default;
     IOptionRows(const IOptionRows&) = default;
     IOptionRows& operator=(const IOptionRows&) = default;
 };
 
-}  // namespace mister::cores
+}

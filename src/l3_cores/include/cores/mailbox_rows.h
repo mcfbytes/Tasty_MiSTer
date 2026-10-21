@@ -15,4 +15,4 @@ protected:
     IMailboxRows& operator=(const IMailboxRows&) = default;
 };
 
-}  // namespace mister::cores
+}

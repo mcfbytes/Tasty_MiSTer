@@ -11,7 +11,7 @@ recorded on.
 
 The command-line tool is `tasty`.
 
-> **Status:** early and hungry. NES runs play frame-exact on a DE10-Nano, some SNES runs play to the end, and the
+> **Status (v0.4.0):** early and hungry. NES runs play frame-exact on a DE10-Nano, some SNES runs play to the end, and the
 > other systems are experimental.
 
 ## <img src="art/icons/cloche-48.png" width="24" alt=""> On the menu
@@ -31,41 +31,30 @@ The command-line tool is `tasty`.
 
 ## <img src="art/icons/taco-48.png" width="24" alt=""> Try it
 
-**Quick start.** On the MiSTer (SSH in as `root`), with your own Super Mario Bros. ROM somewhere under
-`/media/fat/games/NES`:
+**Install.** On the MiSTer (SSH in as `root`), one line installs `tasty` and the Tasty menu script into `Scripts`:
 
 ```sh
-ssh root@<your-mister>
+curl -fsSL https://raw.githubusercontent.com/mcfbytes/Tasty_MiSTer/main/install.sh | sh
+```
+
+Then pick **Scripts → Tasty** on the MiSTer: it lists the runs your own ROMs can play and plays the one you pick. Run
+the install again any time to update `tasty` and the catalogue. [`install.sh`](install.sh) is short; read it before you
+pipe it to a shell.
+
+**Or install and play a random run you can play**, in one go:
+
+```sh
 curl -fsSL https://raw.githubusercontent.com/mcfbytes/Tasty_MiSTer/main/test-tasty.sh | sh
 ```
 
-[`test-tasty.sh`](test-tasty.sh) is short; read it before you pipe it to a shell. It never downloads a ROM: it finds
-your copy, checks its checksum, and only then downloads `tasty` and the movie into `/media/fat/tasty`.
-
-It takes three steps and one command. The binary is on the [releases page](https://github.com/mcfbytes/Tasty_MiSTer/releases/latest).
-
-<img src="art/icons/donut-48.png" width="24" align="top" alt=""> Get `tasty` onto the SD card:
-
-```sh
-mkdir -p /media/fat/tasty && cd /media/fat/tasty
-curl -fLO https://github.com/mcfbytes/Tasty_MiSTer/releases/latest/download/tasty && chmod +x tasty
-```
-
-<img src="art/icons/pizza-48.png" width="24" align="top" alt=""> Get a movie, here klmz's Super Mario Bros. run from
-TASVideos. You also need your own dump of the game; the file names below are the No-Intro ones.
-
-```sh
-curl -fL -o 1330M.zip 'https://tasvideos.org/1330M?handler=Download' && unzip -o 1330M.zip
-```
-
-<img src="art/icons/onigiri-48.png" width="24" align="top" alt=""> Play it:
-
-```sh
-./tasty play klmz3-smb.fm2 --rom "/media/fat/games/NES/Super Mario Bros. (World).nes"
-```
+Neither ever downloads a ROM. Tasty looks for your own dumps under `games/` (on the SD card, a USB drive or a network
+share), loose or zipped, confirms each one by checksum, and only then downloads the movie from TASVideos. A zip is
+looked inside only when its name holds the game's title. The binary is also on the
+[releases page](https://github.com/mcfbytes/Tasty_MiSTer/releases/latest), and `tasty play <movie> --rom <file>` plays
+any movie by hand (see [Command line](#-command-line)).
 
 **What you'll see:** the MiSTer menu goes away (`tasty` needs the FPGA to itself, so it stops the running MiSTer
-binary), a short Tasty Kun splash, then the NES core boots and Mario runs the game in just under five minutes. If
+binary), a short Tasty Kun splash, then the core boots and the run plays. If
 your NES core settings differ from the movie's, `tasty` prints each one it uses for this run, such as
 `RAM Clear: using $00 for this run (your setting: No)`; your saved settings are not touched. 30 seconds after the
 last input it restarts `/media/fat/MiSTer` and you are back at the menu. `--linger <seconds>` changes that wait,
@@ -280,16 +269,20 @@ You need CMake 3.21, Ninja, g++ 15, zlib, and (optional) libminizip and liblzo2.
 need libchdr; the static armhf binary builds it from the same commit the MiSTer image uses, so PSX
 `.chd` discs work.
 
-A static armhf binary for a stock MiSTer SD image uses a Bootlin `armv7-eabihf` glibc GCC 15
-toolchain (`armv7-eabihf--glibc--stable-2026.08-1`, glibc 2.44). glibc is linked in whole, so the binary
-runs on any image whatever its own libc. Set `TASTY_TOOLCHAIN_ROOT` to that toolchain and
-`TASTY_STATIC_DEPS` to a prefix for static zlib-ng (compat), lzo, minizip, and libchdr, then:
+The release binary is fully static: no shared libraries, no dynamic loader. It is built with a Bootlin
+`armv7-eabihf` glibc GCC 15 toolchain (`armv7-eabihf--glibc--stable-2026.08-1`, glibc 2.44). glibc is linked in
+whole, so the binary runs on any image whatever its own libc. Set `TASTY_TOOLCHAIN_ROOT` to that toolchain and
+`TASTY_STATIC_DEPS` to a prefix for the static dependencies. `build-static-deps.py` fetches and builds zlib-ng
+(compat), lzo, minizip and libchdr (and the fonts) there, and `build-static-slint.sh` builds the static Slint
+archive, a build dependency (it needs a Rust toolchain; the script pins the version). Then:
 
 ```sh
 python3 src/tools/build-static-deps.py
+src/tools/build-static-slint.sh
 cmake --preset armhf-static
 cmake --build --preset armhf-static
-file build/armhf-static/src/firmware/tasty
+"$TASTY_TOOLCHAIN_ROOT"/bin/arm-buildroot-linux-gnueabihf-strip -o tasty build/armhf-static/src/firmware/MiSTer
+file tasty
 ```
 
 GitHub Actions builds the host tests on every push and uploads a static armhf artifact. A tag release job is
@@ -359,4 +352,5 @@ steps: [`tools/compare/README.md`](tools/compare/README.md).
   remastered by [baxysquare](https://github.com/baxysquare/mister_kun). The artwork here is derived from that
   remaster and shared on the same terms: use it and remix it freely, and credit the original creator where you can.
 - The code is released under the [GNU General Public License v3.0](LICENSE).
+- The release binary links third-party code statically; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and [`licenses/`](licenses/).
 - MiSTer Tasty is an independent community project, not affiliated with the MiSTer FPGA project.

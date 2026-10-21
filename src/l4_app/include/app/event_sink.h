@@ -17,4 +17,4 @@ protected:
     IEventSink& operator=(const IEventSink&) = default;
 };
 
-}  // namespace mister::app
+}

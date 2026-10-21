@@ -38,10 +38,14 @@ struct HdMetrics {
 };
 
 [[nodiscard]] constexpr std::int32_t hd_tier(std::uint32_t h) noexcept {
-    if (h < 400) return 240;
-    if (h < 520) return 480;
-    if (h < 660) return 540;
-    if (h < 900) return 720;
+    if (h < 400)
+        return 240;
+    if (h < 520)
+        return 480;
+    if (h < 660)
+        return 540;
+    if (h < 900)
+        return 720;
     return 1080;
 }
 
@@ -51,17 +55,23 @@ struct HdMetrics {
         std::int32_t hero, title, section, body, caption, small;
         std::int32_t radius_md, radius_sm;
     };
+
     constexpr Rung kLadder[] = {
-        {240, 14, 12, 11, 10, 9, 8, 2, 1},    {480, 22, 18, 17, 16, 14, 13, 3, 2},
-        {540, 24, 20, 18, 17, 15, 14, 4, 2},  {720, 29, 23, 21, 19, 17, 16, 6, 3},
+        {240, 14, 12, 11, 10, 9, 8, 2, 1},
+        {480, 22, 18, 17, 16, 14, 13, 3, 2},
+        {540, 24, 20, 18, 17, 15, 14, 4, 2},
+        {720, 29, 23, 21, 19, 17, 16, 6, 3},
         {1080, 43, 35, 31, 28, 26, 24, 8, 4},
     };
     HdMetrics m{};
     m.tier = hd_tier(h);
     Rung r = kLadder[3];
     for (const Rung& x : kLadder)
-        if (x.tier == m.tier) r = x;
-    const auto k = [t = m.tier](std::int32_t base720) { return (base720 * t + 360) / 720; };
+        if (x.tier == m.tier)
+            r = x;
+    const auto k = [t = m.tier](std::int32_t base720) {
+        return (base720 * t + 360) / 720;
+    };
     const auto ih = static_cast<std::int32_t>(h);
     m.font_hero = r.hero;
     m.font_title = r.title;
@@ -93,4 +103,4 @@ struct HdMetrics {
     return m;
 }
 
-}  // namespace mister::app
+}

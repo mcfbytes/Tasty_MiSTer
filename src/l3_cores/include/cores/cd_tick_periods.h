@@ -14,4 +14,4 @@ struct CdTickPeriods {
     std::uint32_t speed_us[4];
 };
 
-}  // namespace mister::cores
+}

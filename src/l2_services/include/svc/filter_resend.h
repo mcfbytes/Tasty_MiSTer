@@ -17,4 +17,4 @@ protected:
     IFilterResend& operator=(const IFilterResend&) = default;
 };
 
-}  // namespace mister::svc
+}

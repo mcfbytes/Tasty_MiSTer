@@ -16,7 +16,9 @@
 #define M_MMAP_MAX 0
 #endif
 
-inline int mallopt(int, int) { return 0; }
+inline int mallopt(int, int) {
+    return 0;
+}
 
 inline int pthread_attr_setaffinity_np(pthread_attr_t*, std::size_t, const cpu_set_t*) {
     return ENOSYS;
@@ -35,13 +37,16 @@ inline void set_stdout_file(std::FILE* f) noexcept {
 #else
 
     static int original = -1;
-    if (f == nullptr) return;
+    if (f == nullptr)
+        return;
     const int fd = ::fileno(f);
     if (fd == STDOUT_FILENO) {
-        if (original >= 0) (void)::dup2(original, STDOUT_FILENO);
+        if (original >= 0)
+            (void)::dup2(original, STDOUT_FILENO);
         return;
     }
-    if (original < 0) original = ::fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 3);
+    if (original < 0)
+        original = ::fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 3);
     (void)::dup2(fd, STDOUT_FILENO);
 #endif
 }

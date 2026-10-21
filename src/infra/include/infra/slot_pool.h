@@ -20,8 +20,10 @@ class SlotPool {
 public:
     struct Return {
         SlotPool* pool = nullptr;
+
         void operator()(Slot* s) const noexcept {
-            if (pool != nullptr) pool->give_back_(s);
+            if (pool != nullptr)
+                pool->give_back_(s);
         }
     };
 
@@ -32,34 +34,42 @@ public:
             free_[i] = static_cast<std::uint8_t>(i);
         free_count_ = N;
     }
+
     SlotPool(const SlotPool&) = delete;
     SlotPool& operator=(const SlotPool&) = delete;
 
     [[nodiscard]] Lease acquire() noexcept {
         const std::size_t n = free_count_.load(std::memory_order_relaxed);
-        if (n == 0) return Lease{nullptr, Return{this}};
+        if (n == 0)
+            return Lease{nullptr, Return{this}};
         const std::uint8_t idx = free_[n - 1];
         free_count_.store(n - 1, std::memory_order_relaxed);
         return Lease{&slots_[idx], Return{this}};
     }
 
     static constexpr std::uint8_t kNoIndex = 0xFF;
+
     [[nodiscard]] std::uint8_t index_of(const Slot* s) const noexcept {
-        if (s == nullptr) return kNoIndex;
+        if (s == nullptr)
+            return kNoIndex;
         return static_cast<std::uint8_t>(s - &slots_[0]);
     }
+
     [[nodiscard]] Slot& at(std::uint8_t idx) noexcept { return slots_[idx]; }
+
     [[nodiscard]] const Slot& at(std::uint8_t idx) const noexcept { return slots_[idx]; }
 
     [[nodiscard]] std::size_t available() const noexcept {
         return free_count_.load(std::memory_order_relaxed);
     }
+
     static constexpr std::size_t capacity() noexcept { return N; }
 
 private:
     void give_back_(Slot* s) noexcept {
         const std::size_t n = free_count_.load(std::memory_order_relaxed);
-        if (s == nullptr || n >= N) return;
+        if (s == nullptr || n >= N)
+            return;
         free_[n] = index_of(s);
         free_count_.store(n + 1, std::memory_order_relaxed);
     }
@@ -69,4 +79,4 @@ private:
     std::atomic<std::size_t> free_count_{0};
 };
 
-}  // namespace mister::xthread
+}

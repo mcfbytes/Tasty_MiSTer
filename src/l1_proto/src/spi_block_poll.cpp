@@ -12,18 +12,54 @@ namespace {
 constexpr hal::SpiWord kGetSdStat{0x16};
 constexpr hal::SpiWord kSetSdConf{0x19};
 
-constexpr std::uint8_t kCid[16] = {0x3e, 0x00, 0x00, 0x34, 0x38, 0x32, 0x44, 0x00,
-                                   0x00, 0x73, 0x2f, 0x6f, 0x93, 0x00, 0xc7, 0xcd};
-constexpr std::uint8_t kCsd[16] = {0xf1, 0x40, 0x40, 0x0a, 0x80, 0x7f, 0xe5, 0xe9,
-                                   0x00, 0x00, 0x59, 0x5b, 0x32, 0x00, 0x0e, 0x40};
+constexpr std::uint8_t kCid[16] = {
+    0x3e,
+    0x00,
+    0x00,
+    0x34,
+    0x38,
+    0x32,
+    0x44,
+    0x00,
+    0x00,
+    0x73,
+    0x2f,
+    0x6f,
+    0x93,
+    0x00,
+    0xc7,
+    0xcd
+};
+constexpr std::uint8_t kCsd[16] = {
+    0xf1,
+    0x40,
+    0x40,
+    0x0a,
+    0x80,
+    0x7f,
+    0xe5,
+    0xe9,
+    0x00,
+    0x00,
+    0x59,
+    0x5b,
+    0x32,
+    0x00,
+    0x0e,
+    0x40
+};
 
-[[nodiscard]] Ex<void> write_framed(hal::ISpiTransport& link, std::span<const std::uint8_t> bytes,
-                                    hal::Width width) {
+[[nodiscard]] Ex<void> write_framed(
+    hal::ISpiTransport& link,
+    std::span<const std::uint8_t> bytes,
+    hal::Width width
+) {
     if (width == hal::Width::Word) {
         for (std::size_t i = 0; i + 1 < bytes.size(); i += 2) {
             const auto w = static_cast<std::uint16_t>(
-                static_cast<std::uint16_t>(bytes[i]) |
-                static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[i + 1]) << 8));
+                static_cast<std::uint16_t>(bytes[i])
+                | static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[i + 1]) << 8)
+            );
             if (auto r = link.transfer(hal::SpiWord{w}); !r) {
                 return std::unexpected(r.error());
             }
@@ -44,10 +80,11 @@ constexpr std::uint8_t kCsd[16] = {0xf1, 0x40, 0x40, 0x0a, 0x80, 0x7f, 0xe5, 0xe
     return {};
 }
 
-}  // namespace
+}
 
 IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
-    if (!wiring_.roles || slot.v >= kBlockSlots) return nullptr;
+    if (!wiring_.roles || slot.v >= kBlockSlots)
+        return nullptr;
     const infra::OptRef<IBlockGeometry> g = (*wiring_.roles)[slot.v].geometry;
     return g ? &*g : nullptr;
 }
@@ -63,16 +100,22 @@ IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
     hal::Selected cs(link, hal::ChipSelect::Io);
 
     const hal::Width width = link.width();
-    if (auto r = link.transfer(kSetSdConf); !r) return std::unexpected(r.error());
-    if (auto r = write_framed(link, kCid, width); !r) return r;
-    if (auto r = write_framed(link, csd, width); !r) return r;
+    if (auto r = link.transfer(kSetSdConf); !r)
+        return std::unexpected(r.error());
+    if (auto r = write_framed(link, kCid, width); !r)
+        return r;
+    if (auto r = write_framed(link, csd, width); !r)
+        return r;
 
-    if (auto r = link.transfer(hal::SpiWord{1}); !r) return std::unexpected(r.error());
+    if (auto r = link.transfer(hal::SpiWord{1}); !r)
+        return std::unexpected(r.error());
     return {};
 }
 
-[[nodiscard]] Ex<SpiBlockPoll::Decode> SpiBlockPoll::poll(hal::ISpiTransport& link,
-                                                          std::optional<SdStatusWord> known) {
+[[nodiscard]] Ex<SpiBlockPoll::Decode> SpiBlockPoll::poll(
+    hal::ISpiTransport& link,
+    std::optional<SdStatusWord> known
+) {
     if (known.has_value() && (known->v & 0x8000u) == 0u) {
 
         known = std::nullopt;
@@ -90,21 +133,25 @@ IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
             c = known->v;
         } else {
             auto r0 = link.transfer(kGetSdStat);
-            if (!r0) return std::unexpected(r0.error());
+            if (!r0)
+                return std::unexpected(r0.error());
             c = r0->v;
         }
 
         if ((c & 0x8000u) != 0u) {
 
             auto w1 = link.transfer(hal::SpiWord{0});
-            if (!w1) return std::unexpected(w1.error());
+            if (!w1)
+                return std::unexpected(w1.error());
             auto w2 = link.transfer(hal::SpiWord{0});
-            if (!w2) return std::unexpected(w2.error());
+            if (!w2)
+                return std::unexpected(w2.error());
             auto w3 = link.transfer(hal::SpiWord{0});
-            if (!w3) return std::unexpected(w3.error());
+            if (!w3)
+                return std::unexpected(w3.error());
 
-            const std::uint32_t lba =
-                static_cast<std::uint32_t>(w2->v) | (static_cast<std::uint32_t>(w3->v) << 16);
+            const std::uint32_t lba = static_cast<std::uint32_t>(w2->v)
+                | (static_cast<std::uint32_t>(w3->v) << 16);
             const std::uint16_t op = c & 0x0003u;
             d.req.slot = SlotIndex{static_cast<std::uint8_t>((c >> 2) & 0x0Fu)};
             d.req.lba = Lba{lba};
@@ -116,7 +163,8 @@ IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
         } else {
 
             auto w1 = link.transfer(hal::SpiWord{0});
-            if (!w1) return std::unexpected(w1.error());
+            if (!w1)
+                return std::unexpected(w1.error());
             const std::uint16_t rq = w1->v;
             stock = true;
             d.block_size = 512;
@@ -124,11 +172,14 @@ IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
 
             if ((rq & 0x00F0u) == 0x0050u && (rq & 0x3F03u) != 0u) {
                 auto w2 = link.transfer(hal::SpiWord{0});
-                if (!w2) return std::unexpected(w2.error());
+                if (!w2)
+                    return std::unexpected(w2.error());
                 auto w3 = link.transfer(hal::SpiWord{0});
-                if (!w3) return std::unexpected(w3.error());
-                d.req.lba = Lba{static_cast<std::uint32_t>(w2->v) |
-                                (static_cast<std::uint32_t>(w3->v) << 16)};
+                if (!w3)
+                    return std::unexpected(w3.error());
+                d.req.lba = Lba{
+                    static_cast<std::uint32_t>(w2->v) | (static_cast<std::uint32_t>(w3->v) << 16)
+                };
 
                 config_request = ((rq & 0x000Cu) == 0x000Cu);
 
@@ -162,18 +213,21 @@ IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
             if (config_request) {
                 ++diag_.config_requests;
 
-                if (auto r = send_config(link); !r) return std::unexpected(r.error());
+                if (auto r = send_config(link); !r)
+                    return std::unexpected(r.error());
             }
         }
     }
 
-    if (!d.decoded) return d;
+    if (!d.decoded)
+        return d;
 
     BlockGeometry geo{d.block_size, 0};
     if (IBlockGeometry* const hook = geometry_for_(d.req.slot); hook != nullptr && !stock) {
         geo = hook->geometry_for(d.req.slot, d.req.lba, geo);
     }
-    if (geo.block_size == 0) geo.block_size = d.block_size;
+    if (geo.block_size == 0)
+        geo.block_size = d.block_size;
     if (geo.block_size > kBlockStagingBytes) {
         ++diag_.oversize_requests;
         geo.block_size = kBlockStagingBytes;
@@ -183,7 +237,8 @@ IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
     if (blks * geo.block_size > kBlockStagingBytes) {
         ++diag_.oversize_requests;
         blks = kBlockStagingBytes / geo.block_size;
-        if (blks == 0) blks = 1;
+        if (blks == 0)
+            blks = 1;
         d.req.block_count = BlockCount{blks};
     }
 
@@ -191,11 +246,12 @@ IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
     if (geo.window_blocks != 0 && geo.window_blocks < window_blocks) {
         window_blocks = geo.window_blocks;
     }
-    if (window_blocks < blks) window_blocks = blks;
+    if (window_blocks < blks)
+        window_blocks = blks;
 
     d.block_size = geo.block_size;
     d.window_blocks = window_blocks;
     return d;
 }
 
-}  // namespace mister::proto
+}

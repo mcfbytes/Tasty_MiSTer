@@ -8,8 +8,11 @@
 
 namespace mister::proto {
 
-Ex<ImageBracket> ImageBracket::open(IImageSink& sink, WideIoIndex index,
-                                    const SessionParams& params) {
+Ex<ImageBracket> ImageBracket::open(
+    IImageSink& sink,
+    WideIoIndex index,
+    const SessionParams& params
+) {
     ImageBracket b(sink);
     if (auto r = sink.begin(index, params); !r) {
         return std::unexpected(r.error());
@@ -19,7 +22,8 @@ Ex<ImageBracket> ImageBracket::open(IImageSink& sink, WideIoIndex index,
 }
 
 Ex<void> ImageBracket::end() {
-    if (!open_) return {};
+    if (!open_)
+        return {};
     open_ = false;
     return sink_->end();
 }
@@ -30,16 +34,19 @@ Ex<void> SpiImageSink::begin(WideIoIndex index, const SessionParams& params) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index.v});
     }
 
-    if (queue_ != nullptr && queue_->held()) {
+    if (queue_ && queue_->held()) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), index.v});
     }
     ds_.reset();
-    if (queue_ != nullptr) (void)queue_->flush();
+    if (queue_)
+        (void)queue_->flush();
     auto s = DownloadSession::begin(*link_, index, params);
-    if (!s) return std::unexpected(s.error());
+    if (!s)
+        return std::unexpected(s.error());
     ds_.emplace(std::move(*s));
 
-    if (queue_ != nullptr) queue_->hold();
+    if (queue_)
+        queue_->hold();
     return {};
 }
 
@@ -66,8 +73,9 @@ Ex<void> SpiImageSink::end() {
     }
     auto r = ds_->end();
     ds_.reset();
-    if (queue_ != nullptr) queue_->release();
+    if (queue_)
+        queue_->release();
     return r;
 }
 
-}  // namespace mister::proto
+}

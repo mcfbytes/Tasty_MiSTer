@@ -42,8 +42,12 @@ using Fnv1aHex = FixedStr<17, StrFit::Reject>;
 
 [[nodiscard]] Fnv1aHex fnv1a64_hex(std::string_view basename);
 
-[[nodiscard]] SavePath pick_disc_path(const svc::Vfs& vfs, const SavePath& own,
-                                      const SavePath& stock, std::uint64_t length);
+[[nodiscard]] SavePath pick_disc_path(
+    const svc::Vfs& vfs,
+    const SavePath& own,
+    const SavePath& stock,
+    std::uint64_t length
+);
 
 class NvramStore {
     TASTY_SEAT_RESIDENT(RT);
@@ -52,12 +56,16 @@ public:
     static constexpr std::size_t kMaxPartitions = 6;
     static constexpr std::size_t kMaxImageChars = 255;
 
-    [[nodiscard]] static Ex<NvramStore> load(NvramPolicy policy, std::string_view image_basename,
-                                             std::span<const SavePartition> declared);
+    [[nodiscard]] static Ex<NvramStore> load(
+        NvramPolicy policy,
+        std::string_view image_basename,
+        std::span<const SavePartition> declared
+    );
 
     [[nodiscard]] Ex<void> relayout(std::span<const std::uint32_t> lengths);
 
     std::string_view image() const noexcept { return image_.view(); }
+
     std::span<const SavePartition> partitions() const noexcept { return {table_, count_}; }
 
     [[nodiscard]] Ex<SavePath> path_for(std::string_view partition) const;
@@ -81,4 +89,4 @@ private:
     std::uint8_t count_ = 0;
 };
 
-}  // namespace mister::cores
+}

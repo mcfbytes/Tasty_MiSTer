@@ -24,13 +24,18 @@ public:
         std::uint32_t script_nonzero = 0;
         std::uint32_t handoff_misrouted = 0;
     };
+
     Stats stats() const noexcept {
-        return {script_spawns_.get(), script_failures_.get(), script_nonzero_.get(),
-                handoff_misrouted_.get()};
+        return {
+            script_spawns_.get(),
+            script_failures_.get(),
+            script_nonzero_.get(),
+            handoff_misrouted_.get()
+        };
     }
 
 private:
     xthread::Counter script_spawns_{}, script_failures_{}, script_nonzero_{}, handoff_misrouted_{};
 };
 
-}  // namespace mister::app
+}

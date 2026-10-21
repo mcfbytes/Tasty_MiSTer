@@ -30,4 +30,4 @@ struct DiscMountSlot {
 
 static_assert(std::is_trivially_copyable_v<DiscMountSlot>);
 
-}  // namespace mister::svc
+}

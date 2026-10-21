@@ -19,15 +19,19 @@ constexpr std::int64_t kMsNs = 1'000'000;
 
 constexpr std::size_t kMinChunkDepth = 4;
 
-}  // namespace
+}
 
-std::int64_t AviEncoder::now_() const noexcept { return w_.clock ? w_.clock->now().count() : 0; }
+std::int64_t AviEncoder::now_() const noexcept {
+    return w_.clock ? w_.clock->now().count() : 0;
+}
 
 std::int64_t AviEncoder::cpu_now_() const noexcept {
     return w_.cpu ? w_.cpu->now().count() : now_();
 }
 
-bool AviEncoder::take_dirty() noexcept { return std::exchange(dirty_, false); }
+bool AviEncoder::take_dirty() noexcept {
+    return std::exchange(dirty_, false);
+}
 
 RecPath AviEncoder::segment_path(const RecPath& sidecar, std::uint16_t index) noexcept {
     std::string_view base = sidecar.view();
@@ -39,8 +43,14 @@ RecPath AviEncoder::segment_path(const RecPath& sidecar, std::uint16_t index) no
         }
     }
     char buf[RecPath::kBufSize];
-    const int n = std::snprintf(buf, sizeof buf, "%.*s_%03u.avi", static_cast<int>(base.size()),
-                                base.data(), static_cast<unsigned>(index));
+    const int n = std::snprintf(
+        buf,
+        sizeof buf,
+        "%.*s_%03u.avi",
+        static_cast<int>(base.size()),
+        base.data(),
+        static_cast<unsigned>(index)
+    );
     RecPath out{};
     if (n > 0 && static_cast<std::size_t>(n) < sizeof buf)
         (void)out.assign(std::string_view(buf, static_cast<std::size_t>(n)));
@@ -52,7 +62,8 @@ bool AviEncoder::open(const RawFrameSlot& s) noexcept {
     flush_();
     pos_ = Position{};
     active_ = w_.out && s.mode == RecMode::Avi;
-    if (!active_) return true;
+    if (!active_)
+        return true;
     gen_ = s.gen;
     sidecar_ = s.path;
     opt_ = s.opt;
@@ -60,8 +71,8 @@ bool AviEncoder::open(const RawFrameSlot& s) noexcept {
     step_ = opt_.scale == RecScale::Auto;
     scale_ = opt_.scale == RecScale::Half ? 2 : 1;
     frame_mul_ = opt_.every == 0 ? 1 : opt_.every;
-    seg_limit_ =
-        opt_.segment_bytes != 0 ? std::min(opt_.segment_bytes, kRecSegmentMax) : lim_.segment_bytes;
+    seg_limit_ = opt_.segment_bytes != 0 ? std::min(opt_.segment_bytes, kRecSegmentMax)
+                                         : lim_.segment_bytes;
     broken_ = false;
     need_roll_ = false;
     seg_open_ = false;
@@ -84,12 +95,14 @@ bool AviEncoder::open(const RawFrameSlot& s) noexcept {
     st_.scale = scale_;
 
     const Reserve got = chunks_.bytes() == 0 ? reserve_chunks_(0) : Reserve::Ok;
-    if (got == Reserve::Busy) return false;
+    if (got == Reserve::Busy)
+        return false;
     if (got == Reserve::NoMemory) {
         broken_ = true;
         data_cap_ = 0;
         dirty_ = true;
-        if (!marker_(ChunkKind::Refuse, 0)) return false;
+        if (!marker_(ChunkKind::Refuse, 0))
+            return false;
         ++st_.errors;
         return true;
     }
@@ -102,9 +115,11 @@ bool AviEncoder::open(const RawFrameSlot& s) noexcept {
 
 bool AviEncoder::close(const RawFrameSlot& s) noexcept {
     TASTY_SEAT_BODY(AviEncoder);
-    if (!active_ || s.gen != gen_) return true;
+    if (!active_ || s.gen != gen_)
+        return true;
     flush_();
-    if (!marker_(ChunkKind::Close, 0)) return false;
+    if (!marker_(ChunkKind::Close, 0))
+        return false;
     active_ = false;
     seg_open_ = false;
     cscd_.end();
@@ -118,14 +133,19 @@ bool AviEncoder::close(const RawFrameSlot& s) noexcept {
 bool AviEncoder::kept_(std::uint64_t core, std::int32_t movie) const noexcept {
     const RecOptions& o = opt_;
     if (o.from_frame >= 0 || o.to_frame >= 0) {
-        if (movie < 0) return false;
-        if (o.from_frame >= 0 && movie < o.from_frame) return false;
-        if (o.to_frame >= 0 && movie >= o.to_frame) return false;
+        if (movie < 0)
+            return false;
+        if (o.from_frame >= 0 && movie < o.from_frame)
+            return false;
+        if (o.to_frame >= 0 && movie >= o.to_frame)
+            return false;
     }
     const std::uint32_t every = o.every == 0 ? 1u : o.every;
-    if (every <= 1) return true;
+    if (every <= 1)
+        return true;
 
-    if (o.from_frame >= 0) return static_cast<std::uint32_t>(movie - o.from_frame) % every == 0;
+    if (o.from_frame >= 0)
+        return static_cast<std::uint32_t>(movie - o.from_frame) % every == 0;
     return core % every == 0;
 }
 
@@ -139,8 +159,14 @@ IFrameCodec& AviEncoder::codec_for_(RecCodec c) noexcept {
     return cscd_;
 }
 
-bool AviEncoder::chunk_one_(IFrameCodec& codec, const RawFrameSlot& s, bool real,
-                            std::uint32_t cand, std::uint32_t run, bool stable) noexcept {
+bool AviEncoder::chunk_one_(
+    IFrameCodec& codec,
+    const RawFrameSlot& s,
+    bool real,
+    std::uint32_t cand,
+    std::uint32_t run,
+    bool stable
+) noexcept {
     const auto ow = static_cast<std::uint16_t>(scale_ == 2 ? s.width / 2u : s.width);
     const auto oh = static_cast<std::uint16_t>(scale_ == 2 ? s.height / 2u : s.height);
     if (ow == 0 || oh == 0) {
@@ -168,11 +194,14 @@ bool AviEncoder::chunk_one_(IFrameCodec& codec, const RawFrameSlot& s, bool real
         ++st_.rate_rolls;
     }
     const std::size_t pmax = codec.max_payload();
-    if (seg_open_ && size_roll_(pmax)) seg_open_ = false;
-    if (!seg_open_ && !open_segment_(roll_rate_ != 0 ? roll_rate_ : seg_rate_)) return false;
+    if (seg_open_ && size_roll_(pmax))
+        seg_open_ = false;
+    if (!seg_open_ && !open_segment_(roll_rate_ != 0 ? roll_rate_ : seg_rate_))
+        return false;
     roll_rate_ = 0;
     std::byte* const dst = reserve_(pmax);
-    if (dst == nullptr) return broken_;
+    if (dst == nullptr)
+        return broken_;
     const std::span<std::byte> out{dst, pmax};
     std::size_t n = 0;
     bool key = false;
@@ -185,10 +214,16 @@ bool AviEncoder::chunk_one_(IFrameCodec& codec, const RawFrameSlot& s, bool real
         std::size_t line = s.line;
         if (scale_ == 2) {
             const std::size_t bytes = std::size_t{ow} * 3u * oh;
-            if (half_.slot_bytes() < bytes && !half_.reserve(1, bytes)) src = nullptr;
+            if (half_.slot_bytes() < bytes && !half_.reserve(1, bytes))
+                src = nullptr;
             if (src != nullptr) {
-                CscdCodec::half_scale(s.pixels.data(), s.line, s.width, s.height,
-                                      half_.stripe(0).data());
+                CscdCodec::half_scale(
+                    s.pixels.data(),
+                    s.line,
+                    s.width,
+                    s.height,
+                    half_.stripe(0).data()
+                );
                 src = half_.stripe(0).data();
                 line = std::size_t{ow} * 3u;
             }
@@ -213,21 +248,28 @@ bool AviEncoder::chunk_one_(IFrameCodec& codec, const RawFrameSlot& s, bool real
             key = true;
         } else {
             const auto d = codec.dup();
-            if (d.empty() || d.size() > pmax) return true;
+            if (d.empty() || d.size() > pmax)
+                return true;
             std::memcpy(dst, d.data(), d.size());
             n = d.size();
             key = false;
         }
-        if (n == 0) return true;
+        if (n == 0)
+            return true;
         ++st_.dups;
     }
     commit_(n, key);
     cand_ = cand;
     cand_run_ = run;
-    if (seg_rate_ == 0 && stable) seg_rate_ = cand;
-    if (seg_rate_ != 0) loan_->vtime = seg_rate_;
+    if (seg_rate_ == 0 && stable)
+        seg_rate_ = cand;
+    if (seg_rate_ != 0)
+        loan_->vtime = seg_rate_;
     pos_ = Position{
-        .segment = st_.segment, .frame = static_cast<std::int32_t>(seg_frames_ - 1), .lost = lost};
+        .segment = st_.segment,
+        .frame = static_cast<std::int32_t>(seg_frames_ - 1),
+        .lost = lost
+    };
     if (key) {
         need_key_ = false;
         since_key_ = 0;
@@ -241,19 +283,27 @@ bool AviEncoder::chunk_one_(IFrameCodec& codec, const RawFrameSlot& s, bool real
     const bool full = w_.raw && queued >= depth;
     if (real)
         st_.queue_max = std::max<std::uint8_t>(st_.queue_max, static_cast<std::uint8_t>(queued));
-    if (step_ && real && !held_ && full && scale_ == 1) step_half_(true, now_());
+    if (step_ && real && !held_ && full && scale_ == 1)
+        step_half_(true, now_());
 
-    if (real && queued * 4 <= depth) held_ = false;
-    if (real && w_.raw) recover_(queued, depth, now_());
+    if (real && queued * 4 <= depth)
+        held_ = false;
+    if (real && w_.raw)
+        recover_(queued, depth, now_());
     dirty_ = true;
     return true;
 }
 
-bool AviEncoder::chunk(const RawFrameSlot& s, bool real, std::uint64_t core,
-                       std::int32_t movie) noexcept {
+bool AviEncoder::chunk(
+    const RawFrameSlot& s,
+    bool real,
+    std::uint64_t core,
+    std::int32_t movie
+) noexcept {
     TASTY_SEAT_BODY(AviEncoder);
     pos_ = Position{};
-    if (!active_ || s.gen != gen_ || broken_) return true;
+    if (!active_ || s.gen != gen_ || broken_)
+        return true;
 
     const bool plausible = avi::plausible_vtime(s.vtime);
     const bool same = plausible && cand_run_ != 0 && same_rate(s.vtime, cand_);
@@ -289,7 +339,8 @@ std::int64_t AviEncoder::frame_budget_ns_(std::uint32_t vtime) const noexcept {
 void AviEncoder::step_half_(bool behind, std::int64_t now) noexcept {
     scale_ = 2;
     need_roll_ = true;
-    if (st_.steps != UINT8_MAX) ++st_.steps;
+    if (st_.steps != UINT8_MAX)
+        ++st_.steps;
     st_.scale = 2;
     st_.fell_behind = behind ? 1 : 0;
     cause_ = behind && !too_soon_(now) ? HalfCause::Queue : HalfCause::Held;
@@ -302,18 +353,21 @@ bool AviEncoder::too_soon_(std::int64_t now) const noexcept {
 }
 
 void AviEncoder::recover_(std::size_t queued, std::size_t depth, std::int64_t now) noexcept {
-    if (scale_ != 2 || cause_ != HalfCause::Queue) return;
+    if (scale_ != 2 || cause_ != HalfCause::Queue)
+        return;
     if (queued * 4 > depth) {
         calm_ns_ = now;
         return;
     }
     const std::uint8_t doublings = std::min(st_.recovered, kRecoverDoublings);
-    if (now - calm_ns_ < (lim_.recover_ns << doublings)) return;
+    if (now - calm_ns_ < (lim_.recover_ns << doublings))
+        return;
     scale_ = 1;
     need_roll_ = true;
     cause_ = HalfCause::None;
     returned_ns_ = now;
-    if (st_.recovered != UINT8_MAX) ++st_.recovered;
+    if (st_.recovered != UINT8_MAX)
+        ++st_.recovered;
     st_.scale = 1;
 
     win_start_ = -1;
@@ -327,29 +381,34 @@ void AviEncoder::budget_(std::int64_t cpu_ns, std::int64_t now) noexcept {
     }
     win_cpu_ += cpu_ns;
     const std::int64_t span = now - win_start_;
-    if (span < lim_.budget_window_ns || span <= 0) return;
+    if (span < lim_.budget_window_ns || span <= 0)
+        return;
     st_.budget_pct = static_cast<std::uint32_t>(win_cpu_ * 100 / span);
     if (st_.budget_pct > lim_.budget_pct) {
-        if (win_over_ < kSustainWindows) ++win_over_;
+        if (win_over_ < kSustainWindows)
+            ++win_over_;
     } else {
         win_over_ = 0;
     }
-    if (step_ && scale_ == 1 && win_over_ >= kSustainWindows) step_half_(false, now);
+    if (step_ && scale_ == 1 && win_over_ >= kSustainWindows)
+        step_half_(false, now);
     win_start_ = now;
     win_cpu_ = 0;
 }
 
 bool AviEncoder::size_roll_(std::size_t payload_max) const noexcept {
-    if (seg_frames_ == 0) return false;
-    const std::uint64_t index =
-        avi::kChunkHead + avi::kIndexEntry * (std::uint64_t{seg_frames_} + 1u);
-    return seg_frames_ >= std::min(lim_.segment_frames, kSegmentFrames) ||
-           seg_bytes_ + avi::chunk_bytes(payload_max) + index > seg_limit_;
+    if (seg_frames_ == 0)
+        return false;
+    const std::uint64_t index = avi::kChunkHead
+        + avi::kIndexEntry * (std::uint64_t{seg_frames_} + 1u);
+    return seg_frames_ >= std::min(lim_.segment_frames, kSegmentFrames)
+        || seg_bytes_ + avi::chunk_bytes(payload_max) + index > seg_limit_;
 }
 
 bool AviEncoder::open_segment_(std::uint32_t vtime) noexcept {
     flush_();
-    if (!marker_(ChunkKind::Open, vtime)) return false;
+    if (!marker_(ChunkKind::Open, vtime))
+        return false;
     seg_open_ = true;
     seg_bytes_ = avi::kHeaderBytes;
     seg_frames_ = 0;
@@ -389,8 +448,10 @@ AviEncoder::Reserve AviEncoder::reserve_chunks_(std::size_t need) noexcept {
     const std::size_t stripe = kDescBytes + kMinSlotBytes + need;
     constexpr std::size_t kBudget = kChunkSlots * (kDescBytes + kMinSlotBytes);
     const std::size_t depth = std::clamp(kBudget / stripe, kMinChunkDepth, kChunkSlots);
-    if (!w_.out->set_live(static_cast<std::uint8_t>(depth))) return Reserve::Busy;
-    if (auto r = chunks_.reserve(depth, stripe); !r) return Reserve::NoMemory;
+    if (!w_.out->set_live(static_cast<std::uint8_t>(depth)))
+        return Reserve::Busy;
+    if (auto r = chunks_.reserve(depth, stripe); !r)
+        return Reserve::NoMemory;
     data_cap_ = chunks_.slot_bytes() - kDescBytes;
     st_.arena_kib = static_cast<std::uint32_t>(chunks_.bytes() / 1024u);
     dirty_ = true;
@@ -443,7 +504,8 @@ void AviEncoder::commit_(std::size_t payload, bool key) noexcept {
     std::byte* const at = data_.data() + loan_->used;
     const auto len = static_cast<std::uint32_t>(payload);
     avi::chunk_head(len, std::span<std::byte, avi::kChunkHead>(at, avi::kChunkHead));
-    if ((payload & 1u) != 0) at[avi::kChunkHead + payload] = std::byte{0};
+    if ((payload & 1u) != 0)
+        at[avi::kChunkHead + payload] = std::byte{0};
     ChunkSlot::set_desc_word(desc_, loan_->chunks++, len | (key ? ChunkSlot::kKey : 0u));
     const std::size_t bytes = avi::chunk_bytes(payload);
     loan_->used += static_cast<std::uint32_t>(bytes);
@@ -453,8 +515,10 @@ void AviEncoder::commit_(std::size_t payload, bool key) noexcept {
 }
 
 void AviEncoder::flush_() noexcept {
-    if (!loan_) return;
-    if (loan_->chunks != 0) w_.out->send(std::move(loan_));
+    if (!loan_)
+        return;
+    if (loan_->chunks != 0)
+        w_.out->send(std::move(loan_));
     loan_ = ChunkChannel::Loan{};
     data_ = {};
     desc_ = {};
@@ -467,12 +531,15 @@ bool AviEncoder::all_home_() const noexcept {
 
 void AviEncoder::tend() noexcept {
     TASTY_SEAT_BODY(AviEncoder);
-    if (!w_.out) return;
+    if (!w_.out)
+        return;
     for (std::size_t i = 0; i < kChunkSlots; ++i) {
         auto back = w_.out->reap();
-        if (!back) break;
+        if (!back)
+            break;
     }
-    if (loan_ && now_() - loan_ns_ >= kFlushNs) flush_();
+    if (loan_ && now_() - loan_ns_ >= kFlushNs)
+        flush_();
 
     if (!active_ && !loan_ && chunks_.bytes() != 0 && all_home_()) {
         chunks_.release();
@@ -491,4 +558,4 @@ void AviEncoder::release() noexcept {
     flush_();
 }
 
-}  // namespace mister::app
+}

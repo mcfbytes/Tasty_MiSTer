@@ -15,6 +15,7 @@ struct ItemProbe {
     std::uint8_t active_value = 0;
     friend constexpr bool operator==(ItemProbe, ItemProbe) = default;
 };
+
 static_assert(std::is_trivially_copyable_v<ItemProbe>);
 
-}  // namespace mister::proto
+}

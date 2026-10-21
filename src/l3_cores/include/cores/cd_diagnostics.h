@@ -22,4 +22,4 @@ protected:
     ICdDiagnostics& operator=(const ICdDiagnostics&) = default;
 };
 
-}  // namespace mister::cores
+}

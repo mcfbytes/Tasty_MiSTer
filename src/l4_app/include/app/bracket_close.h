@@ -15,4 +15,4 @@ protected:
     IBracketClose& operator=(const IBracketClose&) = default;
 };
 
-}  // namespace mister::app
+}

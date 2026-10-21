@@ -10,4 +10,4 @@ struct KernelContract {
     std::string_view sd_block;
 };
 
-}  // namespace mister::hal
+}

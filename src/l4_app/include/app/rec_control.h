@@ -31,4 +31,4 @@ static_assert(std::is_nothrow_default_constructible_v<RecControl>);
 
 using RecControlCell = xthread::Telemetry<RecControl, SeatTag::Ui>;
 
-}  // namespace mister::app
+}

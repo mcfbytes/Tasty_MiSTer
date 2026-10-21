@@ -16,6 +16,7 @@ class SubMap final : public IRegMap {
 
 public:
     SubMap() = default;
+
     SubMap(II2cAdapter& a, std::uint8_t addr) noexcept : a_(a), addr_(addr) {}
 
     [[nodiscard]] Ex<std::uint8_t> read(std::uint8_t reg) override {
@@ -25,6 +26,7 @@ public:
         }
         return a_->read(addr_, reg);
     }
+
     [[nodiscard]] Ex<void> write(std::uint8_t reg, std::uint8_t val) override {
         TASTY_SEAT_BODY(SubMap);
         if (!a_) {
@@ -40,4 +42,4 @@ private:
     std::uint8_t addr_ = 0;
 };
 
-}  // namespace mister::svc::adv7513
+}

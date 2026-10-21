@@ -4,22 +4,27 @@
 namespace mister::app {
 
 void CoreFrameCounter::sample_demand_() noexcept {
-    if (!w_.demand) return;
+    if (!w_.demand)
+        return;
     FrameDemand d{};
 
-    if (!demand_seen_.take_if_changed(*w_.demand, d)) return;
-    if (d.on == 0) based_ = false;
+    if (!demand_seen_.take_if_changed(*w_.demand, d))
+        return;
+    if (d.on == 0)
+        based_ = false;
     demand_ = d;
 }
 
 Ex<proto::FrameCount> CoreFrameCounter::read() noexcept {
     TASTY_SEAT_BODY(CoreFrameCounter);
     const auto r = counter_.read(w_.link);
-    if (!r) return r;
+    if (!r)
+        return r;
     read_this_round_ = true;
     const std::int64_t now = w_.clock.now().count();
     if (!r->supported) {
-        if (rec_.supported != 0) dirty_ = true;
+        if (rec_.supported != 0)
+            dirty_ = true;
         rec_.supported = 0;
         based_ = false;
         return r;
@@ -41,8 +46,11 @@ Ex<proto::FrameCount> CoreFrameCounter::read() noexcept {
     return r;
 }
 
-void CoreFrameCounter::settle(bool ready, std::uint32_t core_seq,
-                              std::int32_t movie_frame) noexcept {
+void CoreFrameCounter::settle(
+    bool ready,
+    std::uint32_t core_seq,
+    std::int32_t movie_frame
+) noexcept {
     TASTY_SEAT_BODY(CoreFrameCounter);
     sample_demand_();
 
@@ -56,13 +64,15 @@ void CoreFrameCounter::settle(bool ready, std::uint32_t core_seq,
         round_words_ += proto::FrameCounterRead::kReadWords;
     }
     read_this_round_ = false;
-    if (!demanded()) return;
+    if (!demanded())
+        return;
     if (movie_frame != rec_.movie_frame) {
         rec_.movie_frame = movie_frame;
         dirty_ = true;
     }
-    if (dirty_ && w_.out) w_.out->publish(rec_);
+    if (dirty_ && w_.out)
+        w_.out->publish(rec_);
     dirty_ = false;
 }
 
-}  // namespace mister::app
+}

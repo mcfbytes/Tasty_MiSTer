@@ -16,15 +16,23 @@ class ILoader {
 public:
     virtual ~ILoader() = default;
 
-    [[nodiscard]] virtual Ex<LoadPlan> plan(const LoadAsk& ask,
-                                            const proto::StatusWord& status) = 0;
+    [[nodiscard]] virtual Ex<LoadPlan> plan(
+        const LoadAsk& ask,
+        const proto::StatusWord& status
+    ) = 0;
 
-    virtual void shape(const TransferRow& row, std::span<std::uint8_t> piece,
-                       std::uint64_t off) = 0;
+    virtual void shape(
+        const TransferRow& row,
+        std::span<std::uint8_t> piece,
+        std::uint64_t off
+    ) = 0;
 
-    [[nodiscard]] virtual Ex<void> place(const TransferRow& row,
-                                         std::span<const std::uint8_t> piece, std::uint64_t off,
-                                         ICoreWindow& window);
+    [[nodiscard]] virtual Ex<void> place(
+        const TransferRow& row,
+        std::span<const std::uint8_t> piece,
+        std::uint64_t off,
+        ICoreWindow& window
+    );
 
     [[nodiscard]] virtual Ex<bool> conclude(const TransferRow& row, ICoreWindow& window);
 
@@ -38,10 +46,17 @@ protected:
     ILoader& operator=(const ILoader&) = default;
 };
 
-[[nodiscard]] inline Ex<void> ILoader::place(const TransferRow&, std::span<const std::uint8_t>,
-                                             std::uint64_t, ICoreWindow&) {
+[[nodiscard]] inline Ex<void> ILoader::place(
+    const TransferRow&,
+    std::span<const std::uint8_t>,
+    std::uint64_t,
+    ICoreWindow&
+) {
     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
 }
-[[nodiscard]] inline Ex<bool> ILoader::conclude(const TransferRow&, ICoreWindow&) { return false; }
 
-}  // namespace mister::cores
+[[nodiscard]] inline Ex<bool> ILoader::conclude(const TransferRow&, ICoreWindow&) {
+    return false;
+}
+
+}

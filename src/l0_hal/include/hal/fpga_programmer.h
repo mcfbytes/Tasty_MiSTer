@@ -33,12 +33,18 @@ public:
             return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
         }
         if (!infra::is_aligned(bitstream.data(), kWordAlign)) {
-            return std::unexpected(Error{
-                Errc::bad_format, ERR_SITE(),
-                static_cast<std::uint32_t>(infra::misalignment(bitstream.data(), kWordAlign))});
+            return std::unexpected(
+                Error{
+                    Errc::bad_format,
+                    ERR_SITE(),
+                    static_cast<std::uint32_t>(infra::misalignment(bitstream.data(), kWordAlign))
+                }
+            );
         }
-        if (auto r = to_rest_(program_begin()); !r) return r;
-        if (auto r = program_chunk(bitstream); !r) return r;
+        if (auto r = to_rest_(program_begin()); !r)
+            return r;
+        if (auto r = program_chunk(bitstream); !r)
+            return r;
         return to_rest_(program_end());
     }
 
@@ -50,14 +56,17 @@ public:
 
 protected:
     [[nodiscard]] Ex<void> to_rest_(Ex<bool> started) {
-        if (!started) return std::unexpected(started.error());
+        if (!started)
+            return std::unexpected(started.error());
         bool done = *started;
         for (std::uint32_t i = 0; !done && i < kProgramStepBudget; ++i) {
             auto s = program_step();
-            if (!s) return std::unexpected(s.error());
+            if (!s)
+                return std::unexpected(s.error());
             done = *s;
         }
-        if (!done) return std::unexpected(Error{Errc::timeout, ERR_SITE(), pending_stage()});
+        if (!done)
+            return std::unexpected(Error{Errc::timeout, ERR_SITE(), pending_stage()});
         return {};
     }
 
@@ -66,4 +75,4 @@ protected:
     IFpgaProgrammer& operator=(const IFpgaProgrammer&) = default;
 };
 
-}  // namespace mister::hal
+}

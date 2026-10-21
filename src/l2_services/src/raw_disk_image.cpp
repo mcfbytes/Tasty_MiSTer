@@ -26,9 +26,11 @@ Ex<std::size_t> RawDiskImage::write_at(std::uint64_t off, std::span<const std::b
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EROFS)});
     }
     auto n = file_->write_at(off, src);
-    if (!n) return n;
-    if (auto f = file_->flush(); !f) return std::unexpected(f.error());
+    if (!n)
+        return n;
+    if (auto f = file_->flush(); !f)
+        return std::unexpected(f.error());
     return n;
 }
 
-}  // namespace mister::svc
+}

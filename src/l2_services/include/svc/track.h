@@ -35,4 +35,4 @@ struct Track {
     bool pregap_declared = false;
 };
 
-}  // namespace mister::svc
+}

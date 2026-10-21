@@ -47,7 +47,8 @@ struct FioWindow {
     std::uint8_t pad_{};
     alignas(2) std::array<std::byte, kStore> store{};
 };
+
 static_assert(infra::MessageSum<FioWindow> && infra::alternatives_are_total<FioWindow>());
 static_assert(sizeof(FioWindow) == 6, "a queue element stays three words");
 
-}  // namespace mister::proto
+}

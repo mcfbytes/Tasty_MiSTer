@@ -12,4 +12,4 @@ namespace mister::os {
 
 bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept;
 
-}  // namespace mister::os
+}

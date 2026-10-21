@@ -47,17 +47,26 @@ inline constexpr std::size_t kMaxStartAssets = 5;
 
 inline constexpr svc::SearchDir kCoreHomeDir[] = {svc::SearchDir::CoreDir};
 
-consteval std::array<BootAsset, 5> stock_start_chain(std::string_view subdir,
-                                                     AssetAnchor anchor = AssetAnchor::Search) {
+consteval std::array<BootAsset, 5> stock_start_chain(
+    std::string_view subdir,
+    AssetAnchor anchor = AssetAnchor::Search
+) {
     const auto row = [subdir, anchor](std::string_view name, std::uint16_t dest) consteval {
-        return BootAsset{.name = name,
-                         .where = kCoreHomeDir,
-                         .anchor = anchor,
-                         .subdir = subdir,
-                         .dest = WideIoIndex{dest}};
+        return BootAsset{
+            .name = name,
+            .where = kCoreHomeDir,
+            .anchor = anchor,
+            .subdir = subdir,
+            .dest = WideIoIndex{dest}
+        };
     };
-    return {{row("boot0.rom", 0x00), row("boot1.rom", 0x40), row("boot2.rom", 0x80),
-             row("boot3.rom", 0xC0), row("boot.rom", 0x00)}};
+    return {
+        {row("boot0.rom", 0x00),
+         row("boot1.rom", 0x40),
+         row("boot2.rom", 0x80),
+         row("boot3.rom", 0xC0),
+         row("boot.rom", 0x00)}
+    };
 }
 
 inline constexpr auto kCoreHomeChain = stock_start_chain({}, AssetAnchor::CoreHome);
@@ -67,4 +76,4 @@ static_assert(kCoreHomeChain.size() <= kMaxStartAssets);
     return !(index0_taken && row.dest.v == 0);
 }
 
-}  // namespace mister::cores
+}

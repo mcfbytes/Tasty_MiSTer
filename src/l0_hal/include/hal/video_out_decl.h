@@ -17,4 +17,4 @@ struct VideoOutDecl {
     const char* vsync_device;
 };
 
-}  // namespace mister::hal
+}

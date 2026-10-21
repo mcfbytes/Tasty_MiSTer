@@ -23,4 +23,4 @@ protected:
     IStreamLoad& operator=(const IStreamLoad&) = default;
 };
 
-}  // namespace mister::cores
+}

@@ -7,9 +7,10 @@
 #include <string_view>
 
 #include "app/load_ladder.h"
-#include "app/load_window_counts.h"
 #include "app/load_window_map.h"
 #include "app/path_text.h"
+#include "app/rung.h"
+#include "app/window_tally.h"
 #include "cores/ladder_host.h"
 #include "cores/manifest_stager.h"
 #include "hal/phys_region.h"
@@ -19,7 +20,7 @@
 
 namespace mister::app {
 
-class ManifestLadder {
+class ManifestLadder final : public Rung {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
@@ -30,6 +31,7 @@ public:
 
     static constexpr std::int64_t kEchoFloorNs = 2'000'000'000;
     static constexpr std::int64_t kEchoNsPerMiB = 2'000'000'000;
+
     [[nodiscard]] static constexpr std::int64_t echo_bound_ns(std::uint64_t bytes) noexcept {
         return kEchoFloorNs + static_cast<std::int64_t>((bytes * kEchoNsPerMiB) >> 20);
     }
@@ -39,21 +41,31 @@ public:
         cores::ILadderHost& owner;
         ILoadWindowMap<seat_owner::Main>& map;
         hal::PhysRegion aperture;
-        LoadWindowCounts& windows;
+        WindowTally& windows;
         std::int64_t now_ns = 0;
     };
 
     ManifestLadder(std::unique_ptr<cores::IManifestStager> stager, PathText rel) noexcept
-        : acts_(std::move(stager)), rel_(rel) {}
+        : acts_(std::move(stager)),
+          rel_(rel) {}
 
     [[nodiscard]] Pass step(Host& h);
 
-    [[nodiscard]] bool wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
-                                  const FileTxLevelCell* level) const noexcept;
+    [[nodiscard]] bool wants_pass(
+        const LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell* level
+    ) const noexcept;
+
+    [[nodiscard]] bool wants_pass(
+        const LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell& level
+    ) const noexcept override;
+    [[nodiscard]] Rung::Pass step(const RungEdges& edges, cores::ILadderHost& owner) override;
 
     [[nodiscard]] Pc pc() const noexcept { return pc_; }
 
     [[nodiscard]] std::string_view error() const noexcept { return acts_->error(); }
+
     [[nodiscard]] cores::ManifestCounts counts() const noexcept { return acts_->counts(); }
 
     [[nodiscard]] Errc failure() const noexcept { return failure_; }
@@ -77,4 +89,4 @@ private:
     Errc failure_ = Errc::io;
 };
 
-}  // namespace mister::app
+}

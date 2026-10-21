@@ -38,17 +38,23 @@ public:
 
     void apply_deadzones() noexcept;
 
-    [[nodiscard]] Ex<void> load_maps_for(std::string_view core, bool front_end,
-                                         infra::OptRef<const IAnalogReshape> reshape = std::nullopt,
-                                         const JoyPlan& joy = JoyPlan{});
+    [[nodiscard]] Ex<void> load_maps_for(
+        std::string_view core,
+        bool front_end,
+        infra::OptRef<const IAnalogReshape> reshape = std::nullopt,
+        const JoyPlan& joy = JoyPlan{}
+    );
 
     [[nodiscard]] Ex<void> adopt(InputDevice&& dev);
 
     const DeviceTable& table() const noexcept { return table_; }
+
     DeviceTable& table() noexcept { return table_; }
+
     [[nodiscard]] DeviceTable take_table() noexcept;
 
     void set_input_dir(std::string_view dir) { input_dir_ = dir; }
+
     const std::string& input_dir() const noexcept { return input_dir_; }
 
     void set_cfg_no_merge_rules(std::span<const NoMergeRule> rows);
@@ -72,11 +78,14 @@ public:
         unsigned axis_range_zero = 0;
         unsigned rejected = 0;
     };
+
     const Stats& stats() const noexcept { return stats_; }
+
     unsigned rejected_nodes() const noexcept { return stats_.rejected; }
 
 private:
     InputEnumerator() = default;
+
     explicit InputEnumerator(const Vfs& storage) noexcept : maps_(storage) {}
 
     DeviceTable table_{};
@@ -92,4 +101,4 @@ private:
     Stats stats_{};
 };
 
-}  // namespace mister::svc
+}

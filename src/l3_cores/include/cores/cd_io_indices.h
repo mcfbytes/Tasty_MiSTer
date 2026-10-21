@@ -13,4 +13,4 @@ struct CdIoIndices {
     IoIndex info{};
 };
 
-}  // namespace mister::cores
+}

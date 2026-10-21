@@ -34,4 +34,4 @@ struct CpuMask {
     friend constexpr bool operator==(CpuMask, CpuMask) = default;
 };
 
-}  // namespace mister::os
+}

@@ -18,4 +18,4 @@ struct Toc {
     bool has_subcode = false;
 };
 
-}  // namespace mister::svc
+}

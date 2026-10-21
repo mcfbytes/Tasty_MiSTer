@@ -19,12 +19,14 @@ public:
     Evdev() = default;
 
     explicit Evdev(int fd) noexcept : fd_(fd) {}
+
     Evdev(Evdev&&) noexcept = default;
     Evdev& operator=(Evdev&&) noexcept = default;
     Evdev(const Evdev&) = delete;
     Evdev& operator=(const Evdev&) = delete;
 
     [[nodiscard]] bool valid() const noexcept { return fd_.valid(); }
+
     [[nodiscard]] int fd() const noexcept { return fd_.get(); }
 
     [[nodiscard]] ssize_t read(std::span<input_event> out) const noexcept;
@@ -50,4 +52,4 @@ private:
     UniqueFd fd_{};
 };
 
-}  // namespace mister::os
+}

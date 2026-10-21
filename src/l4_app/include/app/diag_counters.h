@@ -91,8 +91,11 @@ struct DiagCounters {
     std::uint32_t info_poll_pushes = 0;
 
     std::uint32_t fed_refusals = 0;
+
+    std::uint32_t open_saves_mounted = 0;
+    std::uint32_t open_save_refusals = 0;
 };
 
 using DiagCountersCell = xthread::Telemetry<DiagCounters, SeatTag::RT>;
 
-}  // namespace mister::app
+}

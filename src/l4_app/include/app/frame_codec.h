@@ -29,11 +29,15 @@ public:
     [[nodiscard]] virtual std::uint16_t width() const noexcept = 0;
     [[nodiscard]] virtual std::uint16_t height() const noexcept = 0;
     [[nodiscard]] virtual std::size_t max_payload() const noexcept = 0;
-    [[nodiscard]] virtual std::size_t encode(const std::byte* rgb, std::size_t line, bool key,
-                                             std::span<std::byte> out) noexcept = 0;
+    [[nodiscard]] virtual std::size_t encode(
+        const std::byte* rgb,
+        std::size_t line,
+        bool key,
+        std::span<std::byte> out
+    ) noexcept = 0;
     [[nodiscard]] virtual std::size_t rekey(std::span<std::byte> out) noexcept = 0;
 
     [[nodiscard]] virtual std::span<const std::byte> dup() noexcept = 0;
 };
 
-}  // namespace mister::app
+}

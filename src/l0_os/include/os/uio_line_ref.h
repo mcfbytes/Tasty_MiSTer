@@ -18,6 +18,7 @@ public:
     UioLineRef() = default;
 
     int fd() const noexcept { return fd_; }
+
     UioLine line() const noexcept { return line_; }
 
     [[nodiscard]] Ex<std::uint32_t> consume() const;
@@ -25,10 +26,11 @@ public:
 
 private:
     friend class UioHandle;
+
     UioLineRef(int fd, UioLine line) noexcept : fd_(fd), line_(line) {}
 
     int fd_ = -1;
     UioLine line_{};
 };
 
-}  // namespace mister::os
+}

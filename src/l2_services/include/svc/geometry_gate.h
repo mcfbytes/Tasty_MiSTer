@@ -17,4 +17,4 @@ struct GeometryGate {
     ScalingPolicy policy{};
 };
 
-}  // namespace mister::svc
+}

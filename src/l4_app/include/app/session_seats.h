@@ -19,15 +19,17 @@
 namespace mister::xthread {
 struct RtStats;
 class LogLane;
-}  // namespace mister::xthread
+}
 
 namespace mister::reactor {
 class Executive;
 struct CoreState;
-}  // namespace mister::reactor
+}
+
 namespace mister::os {
 class IClock;
 }
+
 namespace mister::proto {
 class IStorageChannel;
 }
@@ -35,8 +37,10 @@ class IStorageChannel;
 namespace mister::svc {
 class Vfs;
 class DiscReadService;
+class ChdPrefetch;
+class IStorageLifecycle;
 class InputEmitter;
-}  // namespace mister::svc
+}
 
 namespace mister::app {
 
@@ -49,8 +53,25 @@ template <SeatTag Consumer>
 class LinkRxChannel;
 class LinkRouter;
 class ICheatApply;
+class PcmRingFeeder;
+class MailboxRelay;
+class DiskRelay;
+class DurableWriteService;
+class WindowJobService;
 
 struct SupervisorParts {
+
+    struct Services {
+        infra::OptRef<PcmRingFeeder> feeder{};
+        infra::OptRef<svc::ChdPrefetch> prefetch{};
+        infra::OptRef<MailboxRelay> mailbox{};
+        infra::OptRef<DiskRelay> disks{};
+        infra::OptRef<svc::DiscReadService> discs{};
+        infra::OptRef<DurableWriteService> writes{};
+        infra::OptRef<WindowJobService> window_jobs{};
+        infra::OptRef<svc::IStorageLifecycle> storage_life{};
+    };
+
     VideoWire& video;
     InputWire& input;
     OsdWire& osd;
@@ -98,6 +119,7 @@ struct SupervisorParts {
     BoardOps board_ops{};
 
     infra::OptRef<const cores::SaveCopyCell> save_copy{};
+    Services services{};
 };
 
-}  // namespace mister::app
+}

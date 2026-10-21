@@ -16,6 +16,7 @@ struct FabricState {
     bool bridges_down = false;
     bool load_ok = false;
 };
+
 static_assert(std::is_trivially_copyable_v<FabricState>);
 static_assert(std::is_nothrow_default_constructible_v<FabricState>);
 
@@ -30,13 +31,17 @@ public:
     void refresh(const FabricCell& cell, std::int64_t now_ns) noexcept;
 
     [[nodiscard]] bool configured() const noexcept { return last_.configured && !stale_; }
+
     [[nodiscard]] bool stale() const noexcept { return stale_; }
 
     [[nodiscard]] bool unconfigured() const noexcept {
         return last_.bridges_down && !last_.load_ok;
     }
+
     [[nodiscard]] std::uint16_t cookie() const noexcept { return last_.cookie; }
+
     [[nodiscard]] std::uint32_t gen() const noexcept { return last_.gen; }
+
     [[nodiscard]] const FabricState& value() const noexcept { return last_; }
 
     [[nodiscard]] std::uint32_t expiries() const noexcept { return expiries_; }
@@ -52,4 +57,4 @@ private:
     bool stale_ = false;
 };
 
-}  // namespace mister::app
+}

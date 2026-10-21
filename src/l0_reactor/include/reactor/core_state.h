@@ -13,4 +13,4 @@ struct CoreState {
     infra::OptRef<ICoreToken> owner{};
 };
 
-}  // namespace mister::reactor
+}

@@ -26,6 +26,7 @@ public:
     };
 
     Step step() const noexcept { return step_; }
+
     [[nodiscard]] Ex<void> begin(const DeviceIdentity& id, MapKind kind);
     [[nodiscard]] Ex<Step> advance();
     void cancel();
@@ -34,7 +35,9 @@ public:
     void on_button(std::uint16_t code);
 
     const DeviceIdentity& device() const noexcept { return device_; }
+
     MapKind kind() const noexcept { return kind_; }
+
     std::optional<std::uint16_t> captured() const noexcept { return captured_; }
 
 private:
@@ -44,4 +47,4 @@ private:
     std::optional<std::uint16_t> captured_{};
 };
 
-}  // namespace mister::svc
+}

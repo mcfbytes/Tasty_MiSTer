@@ -15,4 +15,4 @@ protected:
     ISessionLive& operator=(const ISessionLive&) = default;
 };
 
-}  // namespace mister::proto
+}

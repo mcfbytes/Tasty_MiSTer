@@ -19,10 +19,14 @@ public:
 
     [[nodiscard]] virtual std::optional<StorageCompletion> reap() noexcept = 0;
 
-    [[nodiscard]] virtual std::span<const std::uint8_t> half(SlotIndex slot,
-                                                             ArenaHalf which) const noexcept = 0;
-    [[nodiscard]] virtual std::span<std::uint8_t> half_mut(SlotIndex slot,
-                                                           ArenaHalf which) noexcept = 0;
+    [[nodiscard]] virtual std::span<const std::uint8_t> half(
+        SlotIndex slot,
+        ArenaHalf which
+    ) const noexcept = 0;
+    [[nodiscard]] virtual std::span<std::uint8_t> half_mut(
+        SlotIndex slot,
+        ArenaHalf which
+    ) noexcept = 0;
 
 protected:
     IStorageChannel() = default;
@@ -30,4 +34,4 @@ protected:
     IStorageChannel& operator=(const IStorageChannel&) = default;
 };
 
-}  // namespace mister::proto
+}

@@ -11,4 +11,4 @@ inline constexpr std::size_t kSlotPathCap = 1024;
 
 using SlotPathText = FixedStr<kSlotPathCap, StrFit::Reject>;
 
-}  // namespace mister::svc
+}

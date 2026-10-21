@@ -53,4 +53,4 @@ private:
     std::uint64_t last_transition_ns_ = 0;
 };
 
-}  // namespace mister::app
+}

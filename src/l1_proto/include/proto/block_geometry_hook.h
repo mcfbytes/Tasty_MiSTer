@@ -20,4 +20,4 @@ protected:
     IBlockGeometry& operator=(const IBlockGeometry&) = default;
 };
 
-}  // namespace mister::proto
+}

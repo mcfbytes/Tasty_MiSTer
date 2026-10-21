@@ -18,9 +18,13 @@ struct PhysRegion {
     const char* name;
 };
 
-[[nodiscard]] constexpr os::PhysAddr to_phys(FabricAddr a) noexcept { return os::PhysAddr{a.v}; }
+[[nodiscard]] constexpr os::PhysAddr to_phys(FabricAddr a) noexcept {
+    return os::PhysAddr{a.v};
+}
+
 [[nodiscard]] constexpr std::optional<FabricAddr> to_fabric(os::PhysAddr a) noexcept {
-    if (a.v > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
+    if (a.v > std::numeric_limits<std::uint32_t>::max())
+        return std::nullopt;
     return FabricAddr{static_cast<std::uint32_t>(a.v)};
 }
 
@@ -30,4 +34,4 @@ constexpr bool span_fits(U off, U n, U len) noexcept {
     return n <= len && off <= len - n;
 }
 
-}  // namespace mister::hal
+}

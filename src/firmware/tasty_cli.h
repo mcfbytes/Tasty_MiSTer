@@ -54,4 +54,4 @@ struct TastyArgs {
 [[nodiscard]] const char* tasty_args_refusal(std::uint32_t detail) noexcept;
 void tasty_print_usage(std::FILE* out = stderr) noexcept;
 
-}  // namespace mister::fw
+}

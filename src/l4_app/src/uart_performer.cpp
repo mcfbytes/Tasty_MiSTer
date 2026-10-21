@@ -15,7 +15,7 @@ constexpr const char* kUartSpeedFile = "/tmp/UART_SPEED";
 constexpr const char* kCoreNameFile = "/tmp/CORENAME";
 constexpr const char* kRbfNameFile = "/tmp/RBFNAME";
 
-}  // namespace
+}
 
 void UartPerformer::on(const UartHandoff::MidiLink& a) {
     TASTY_SEAT_BODY(UartPerformer);
@@ -34,7 +34,9 @@ void UartPerformer::on(const UartHandoff::Mode& a) {
     char sp[16] = {};
     const int len = std::snprintf(sp, sizeof sp, "%u", a.baud);
     (void)proc::write_tmp_handoff(
-        kUartSpeedFile, std::string_view{sp, len < 0 ? 0u : static_cast<std::size_t>(len)});
+        kUartSpeedFile,
+        std::string_view{sp, len < 0 ? 0u : static_cast<std::size_t>(len)}
+    );
     script_spawns_.add(1);
     if (const auto r = proc::uartmode_script(static_cast<std::uint8_t>(a.mode)); !r) {
         script_failures_.add(1);
@@ -48,4 +50,4 @@ void UartPerformer::misrouted(const UartHandoff&) noexcept {
     handoff_misrouted_.add(1);
 }
 
-}  // namespace mister::app
+}

@@ -14,4 +14,4 @@ protected:
     IOwnerTick& operator=(const IOwnerTick&) = default;
 };
 
-}  // namespace mister::app
+}

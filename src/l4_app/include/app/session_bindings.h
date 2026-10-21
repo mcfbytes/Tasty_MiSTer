@@ -55,6 +55,7 @@ public:
         std::array<proto::IrqBinding, kDoorbellRows> rows{};
         std::uint8_t count = 0;
         std::uint8_t declared = 0;
+
         [[nodiscard]] std::span<const proto::IrqBinding> table() const noexcept {
             return {rows.data(), count};
         }
@@ -65,14 +66,18 @@ public:
         std::uint64_t size_bytes = 0;
     };
 
-    void bind_facts(const proto::LinkOp::BindFacts& op, const ILinkTxReader* inbox) noexcept;
-    void bind_identity(const proto::LinkOp::BindIdentity& op, const ILinkTxReader* inbox) noexcept;
-    void bind_uart(const proto::LinkOp::BindUart& op, const ILinkTxReader* inbox) noexcept;
-    void bind_doorbells(const proto::LinkOp::BindDoorbells& op,
-                        const ILinkTxReader* inbox) noexcept;
+    void bind_facts(const proto::LinkOp::BindFacts& op, const ILinkTxReader& inbox) noexcept;
+    void bind_identity(const proto::LinkOp::BindIdentity& op, const ILinkTxReader& inbox) noexcept;
+    void bind_uart(const proto::LinkOp::BindUart& op, const ILinkTxReader& inbox) noexcept;
+    void bind_doorbells(
+        const proto::LinkOp::BindDoorbells& op,
+        const ILinkTxReader& inbox
+    ) noexcept;
 
-    [[nodiscard]] static Ex<std::optional<Mount>> decode_mount(const proto::LinkOp::BindMount& op,
-                                                               const ILinkTxReader* inbox) noexcept;
+    [[nodiscard]] static Ex<std::optional<Mount>> decode_mount(
+        const proto::LinkOp::BindMount& op,
+        const ILinkTxReader& inbox
+    ) noexcept;
 
     void forget_core() noexcept {
         identity_.reset();
@@ -86,22 +91,29 @@ public:
     }
 
     void bind_generation(proto::BindGeneration g) noexcept { gen_ = g; }
+
     [[nodiscard]] const proto::BindGeneration& generation() const noexcept { return gen_; }
 
     [[nodiscard]] const MraFacts& facts() const noexcept { return facts_; }
+
     [[nodiscard]] const std::optional<Identity>& identity() const noexcept { return identity_; }
+
     [[nodiscard]] const Uart& uart() const noexcept { return uart_; }
+
     [[nodiscard]] const Doorbells& doorbells() const noexcept { return doorbells_; }
 
     [[nodiscard]] std::string_view core_name() const noexcept {
         return identity_.has_value() ? identity_->core_name.view() : std::string_view{};
     }
+
     [[nodiscard]] bool declares_cheats() const noexcept {
         return identity_.has_value() && identity_->declares_cheats;
     }
+
     [[nodiscard]] bool declares_turbo() const noexcept {
         return identity_.has_value() && identity_->declares_turbo;
     }
+
     [[nodiscard]] bool declares_info() const noexcept {
         return identity_.has_value() && identity_->declares_info;
     }
@@ -114,4 +126,4 @@ private:
     proto::BindGeneration gen_{};
 };
 
-}  // namespace mister::app
+}

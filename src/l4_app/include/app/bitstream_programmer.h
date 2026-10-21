@@ -16,7 +16,7 @@
 namespace mister::hal {
 class IBridgeSequencer;
 class IFpgaProgrammer;
-}  // namespace mister::hal
+}
 
 namespace mister::svc {
 class Vfs;
@@ -39,11 +39,18 @@ class BitstreamProgrammer {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
-    BitstreamProgrammer(hal::IFpgaProgrammer& programmer, hal::IBridgeSequencer& bridges,
-                        const svc::Vfs& vfs, const hal::ProgramGeometryValues& geometry) noexcept
-        : programmer_(&programmer), bridges_(&bridges), vfs_(&vfs),
-          chunk_bytes_(std::clamp(geometry.chunk_bytes, 1u,
-                                  static_cast<std::uint32_t>(kProgramBufferBytes))) {}
+    BitstreamProgrammer(
+        hal::IFpgaProgrammer& programmer,
+        hal::IBridgeSequencer& bridges,
+        const svc::Vfs& vfs,
+        const hal::ProgramGeometryValues& geometry
+    ) noexcept
+        : programmer_(&programmer),
+          bridges_(&bridges),
+          vfs_(&vfs),
+          chunk_bytes_(
+              std::clamp(geometry.chunk_bytes, 1u, static_cast<std::uint32_t>(kProgramBufferBytes))
+          ) {}
 
     BitstreamProgrammer(const BitstreamProgrammer&) = delete;
     BitstreamProgrammer& operator=(const BitstreamProgrammer&) = delete;
@@ -69,17 +76,24 @@ private:
 
 consteval bool program_geometry_fits_every_board() {
     return hal::every_measured(
-        &hal::BoardProfile::program, [](const hal::ProgramGeometry& p) consteval {
+        &hal::BoardProfile::program,
+        [](const hal::ProgramGeometry& p) consteval {
             const auto g = hal::ProgramGeometryValues::measured(p);
-            if (g.chunk_bytes == 0u || g.chunk_bytes > kProgramBufferBytes) return false;
-            if (g.quantum == 0u || g.chunk_bytes % g.quantum != 0u) return false;
+            if (g.chunk_bytes == 0u || g.chunk_bytes > kProgramBufferBytes)
+                return false;
+            if (g.quantum == 0u || g.chunk_bytes % g.quantum != 0u)
+                return false;
             return g.align != 0u && alignof(BitstreamProgrammer) % g.align == 0u;
-        });
+        }
+    );
 }
-static_assert(program_geometry_fits_every_board(),
-              "a board's program chunk must fit the buffer, keep its quantum and its alignment");
+
+static_assert(
+    program_geometry_fits_every_board(),
+    "a board's program chunk must fit the buffer, keep its quantum and its alignment"
+);
 static_assert(kProgramBufferBytes >= kContainerHeaderBytes);
 
 static_assert(sizeof(BitstreamProgrammer) < 128u * 1024u);
 
-}  // namespace mister::app
+}

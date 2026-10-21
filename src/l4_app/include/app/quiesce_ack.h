@@ -19,6 +19,7 @@ public:
     [[nodiscard]] bool asked() const noexcept { return asked_; }
 
     [[nodiscard]] bool parked() const noexcept { return parked_; }
+
     [[nodiscard]] std::uint32_t gen() const noexcept { return gen_; }
 
     [[nodiscard]] bool engaged() const noexcept { return asked_ || parked_; }
@@ -36,4 +37,4 @@ private:
     std::uint32_t drops_ = 0;
 };
 
-}  // namespace mister::app
+}

@@ -12,4 +12,4 @@ struct BlankRegion {
     std::span<const std::byte> bytes;
 };
 
-}  // namespace mister::cores
+}

@@ -12,6 +12,10 @@ struct ResetRow {
     bool toggle_reacts = false;
     bool button_reacts = false;
     bool toggle_ejects = false;
+    bool action_reacts = false;
+
+    bool ladders = false;
+    bool restore_boots = false;
 
     std::optional<proto::StatusBit> remapped{};
 
@@ -23,18 +27,24 @@ struct ResetRow {
                 return button_reacts;
             case proto::ResetSource::KbdCombo:
                 return button_reacts && !e.cold;
+            case proto::ResetSource::OptionAction:
+            case proto::ResetSource::OptionSettle:
+                return action_reacts;
         }
         return false;
     }
 
     [[nodiscard]] constexpr std::optional<proto::StatusBit> pulse(
-        const proto::ResetEdge& e) const noexcept {
-        if (e.source != proto::ResetSource::OsdToggle) return std::nullopt;
+        const proto::ResetEdge& e
+    ) const noexcept {
+        if (e.source != proto::ResetSource::OsdToggle)
+            return std::nullopt;
         return remapped == e.bit ? proto::StatusBit{0} : e.bit;
     }
+
     [[nodiscard]] constexpr bool ejects(const proto::ResetEdge& e) const noexcept {
         return toggle_ejects && e.toggles_reset_bit();
     }
 };
 
-}  // namespace mister::cores
+}

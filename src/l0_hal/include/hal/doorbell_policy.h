@@ -18,10 +18,12 @@ struct DoorbellPolicy {
     }
 
     [[nodiscard]] constexpr bool cause_in_aperture(LwOffset off, std::size_t len) const noexcept {
-        if (cause_span == 0 || len == 0 || len > cause_span) return false;
-        if (off.v < cause_base.v) return false;
+        if (cause_span == 0 || len == 0 || len > cause_span)
+            return false;
+        if (off.v < cause_base.v)
+            return false;
         return static_cast<std::size_t>(off.v - cause_base.v) <= cause_span - len;
     }
 };
 
-}  // namespace mister::hal
+}

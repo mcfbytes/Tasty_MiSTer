@@ -19,22 +19,36 @@ class InputPipeline {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
-    InputPipeline(InputDecode::Fds fds, InputWire& wire, InputBuild& build, InputEmit& emit,
-                  os::IClock& clock, InputDecode::Wiring decode_wiring) noexcept;
+    InputPipeline(
+        InputDecode::Fds fds,
+        InputWire& wire,
+        InputBuild& build,
+        InputEmit& emit,
+        os::IClock& clock,
+        InputDecode::Wiring decode_wiring
+    ) noexcept;
 
     InputPipeline(const InputPipeline&) = delete;
     InputPipeline& operator=(const InputPipeline&) = delete;
 
     InputWire& wire() noexcept { return wire_; }
+
     const InputWire& wire() const noexcept { return wire_; }
+
     InputBuild& build() noexcept { return build_; }
+
     const InputBuild& build() const noexcept { return build_; }
+
     InputDecode& decode() noexcept { return decode_; }
+
     const InputDecode& decode() const noexcept { return decode_; }
+
     InputEmit& emit() noexcept { return emit_; }
+
     const InputEmit& emit() const noexcept { return emit_; }
 
     svc::InputService& service() noexcept { return service_; }
+
     const svc::InputService& service() const noexcept { return service_; }
 
     void latch_cfg(std::span<const svc::DeadzoneRule> deadzones, bool rumble) noexcept;
@@ -98,4 +112,4 @@ struct InputStats {
 
 InputStats collect_input_stats(const InputSample& s, const InputBuild::Counts& b) noexcept;
 
-}  // namespace mister::app
+}

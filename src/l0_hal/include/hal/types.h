@@ -41,4 +41,4 @@ struct FrameSeq {
     friend constexpr auto operator<=>(FrameSeq, FrameSeq) = default;
 };
 
-}  // namespace mister::hal
+}

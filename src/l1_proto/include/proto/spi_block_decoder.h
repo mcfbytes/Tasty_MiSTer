@@ -31,14 +31,23 @@ public:
         std::uint16_t err_code = 0;
     };
 
-    SpiBlockDecoder(hal::ISpiTransport& link, ILinkRouter& router, BlockSlots& slots,
-                    const ISessionLive& live) noexcept
-        : link_(&link), slots_(&slots), live_(&live), out_(router) {}
+    SpiBlockDecoder(
+        hal::ISpiTransport& link,
+        ILinkRouter& router,
+        BlockSlots& slots,
+        const ISessionLive& live
+    ) noexcept
+        : link_(&link),
+          slots_(&slots),
+          live_(&live),
+          out_(router) {}
 
     void service();
+
     [[nodiscard]] bool active() const noexcept { return live_->session_live(); }
 
     void bind_budget(unsigned budget) noexcept { budget_ = budget; }
+
     [[nodiscard]] const Counters& counters() const noexcept { return counters_; }
 
     void bind_sector_floor(SectorFloor floor) noexcept { floor_ = floor; }
@@ -55,4 +64,4 @@ private:
     Counters counters_{};
 };
 
-}  // namespace mister::proto
+}

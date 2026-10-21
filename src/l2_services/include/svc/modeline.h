@@ -31,4 +31,4 @@ struct Modeline {
     Modeline direct_video_fix() const;
 };
 
-}  // namespace mister::svc
+}

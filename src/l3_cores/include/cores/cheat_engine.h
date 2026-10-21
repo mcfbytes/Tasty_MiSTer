@@ -15,4 +15,4 @@ protected:
     ICheatEngine& operator=(const ICheatEngine&) = default;
 };
 
-}  // namespace mister::cores
+}

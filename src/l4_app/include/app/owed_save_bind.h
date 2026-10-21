@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <utility>
 
 #include "app/link_rx_channel.h"
 #include "app/save_extent_cell.h"
 #include "cores/save_extent.h"
-#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -18,42 +19,34 @@ class OwedSaveBind {
 public:
     using Cell = SaveExtentCell;
 
-    OwedSaveBind() noexcept = default;
+    OwedSaveBind(Cell& cell, LinkRxChannel<SeatTag::Main>& rx) noexcept : cell_(cell), rx_(rx) {}
+
     OwedSaveBind(const OwedSaveBind&) = delete;
     OwedSaveBind& operator=(const OwedSaveBind&) = delete;
     OwedSaveBind(OwedSaveBind&&) = delete;
 
-    OwedSaveBind& operator=(OwedSaveBind&& other) noexcept {
-        if (this != &other) {
-            strand();
-            adopt_(other);
-        }
-        return *this;
-    }
     ~OwedSaveBind() { strand(); }
 
-    void bind(Cell& cell, LinkRxChannel<SeatTag::Main>* rx) noexcept {
-        strand();
-        cell_ = infra::opt_ref_of(&cell);
-        rx_ = infra::opt_ref_of(rx);
-    }
-
     [[nodiscard]] bool owed() const noexcept { return gen_ != 0; }
+
     [[nodiscard]] std::uint32_t generation() const noexcept { return gen_; }
 
     void arm(std::uint32_t generation, const cores::SaveExtent& on_strand) noexcept {
-        if (gen_ != 0 && gen_ != generation) strand();
+        if (gen_ != 0 && gen_ != generation)
+            strand();
         gen_ = generation;
         strand_body_ = on_strand;
     }
 
     void answer(cores::SaveVerdict v, const cores::SaveExtent& payload) noexcept {
-        if (gen_ == 0) return;
+        if (gen_ == 0)
+            return;
         publish_(std::exchange(gen_, 0u), v, payload);
     }
 
     void strand() noexcept {
-        if (gen_ == 0) return;
+        if (gen_ == 0)
+            return;
         publish_(std::exchange(gen_, 0u), cores::SaveVerdict::Declined, strand_body_);
     }
 
@@ -61,20 +54,24 @@ private:
     void publish_(std::uint32_t generation, cores::SaveVerdict v, cores::SaveExtent body) noexcept {
         set_verdict(body, v);
         body.generation = generation;
-        if (cell_) cell_->publish(body);
-        if (rx_) rx_->request_wake();
-    }
-    void adopt_(OwedSaveBind& other) noexcept {
-        cell_ = other.cell_;
-        rx_ = other.rx_;
-        strand_body_ = other.strand_body_;
-        gen_ = std::exchange(other.gen_, 0u);
+        cell_.publish(body);
+        rx_.request_wake();
     }
 
-    infra::OptRef<Cell> cell_{};
-    infra::OptRef<LinkRxChannel<SeatTag::Main>> rx_{};
+    Cell& cell_;
+    LinkRxChannel<SeatTag::Main>& rx_;
     cores::SaveExtent strand_body_{};
     std::uint32_t gen_ = 0;
 };
 
-}  // namespace mister::app
+template <std::size_t N>
+[[nodiscard]] std::array<OwedSaveBind, N> make_owed_saves(
+    SaveExtentCell& cell,
+    LinkRxChannel<SeatTag::Main>& rx
+) noexcept {
+    return [&]<std::size_t... I>(std::index_sequence<I...>) {
+        return std::array<OwedSaveBind, N>{((void)I, OwedSaveBind{cell, rx})...};
+    }(std::make_index_sequence<N>{});
+}
+
+}

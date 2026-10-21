@@ -15,4 +15,4 @@ struct LauncherFbAck {
 
 using LauncherFbAckCell = xthread::Telemetry<LauncherFbAck, SeatTag::Ui>;
 
-}  // namespace mister::app
+}

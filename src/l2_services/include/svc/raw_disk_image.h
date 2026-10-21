@@ -14,17 +14,21 @@
 namespace mister::svc {
 
 class RawDiskImage final : public IDiskImage {
-    TASTY_SEAT_RESIDENT(RT);
+    TASTY_SEAT_RESIDENT(Io);
 
 public:
     RawDiskImage(std::unique_ptr<IFile> file, FileSize size, bool writable) noexcept
-        : file_(std::move(file)), size_(size), writable_(writable) {}
+        : file_(std::move(file)),
+          size_(size),
+          writable_(writable) {}
 
     [[nodiscard]] FileSize size() const noexcept override;
     [[nodiscard]] bool writable() const noexcept override;
     [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override;
-    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t off,
-                                           std::span<const std::byte> src) override;
+    [[nodiscard]] Ex<std::size_t> write_at(
+        std::uint64_t off,
+        std::span<const std::byte> src
+    ) override;
 
 private:
     std::unique_ptr<IFile> file_;
@@ -32,4 +36,4 @@ private:
     bool writable_;
 };
 
-}  // namespace mister::svc
+}

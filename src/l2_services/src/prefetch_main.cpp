@@ -9,8 +9,9 @@ void PrefetchMain::start() noexcept {
 }
 
 void PrefetchMain::serve() noexcept {
-    if (stopping()) return;
+    if (stopping())
+        return;
     prefetch_.serve();
 }
 
-}  // namespace mister::svc
+}

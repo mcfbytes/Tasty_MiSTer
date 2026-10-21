@@ -8,4 +8,4 @@ struct RtSetup {
     int err = 0;
 };
 
-}  // namespace mister::fw
+}

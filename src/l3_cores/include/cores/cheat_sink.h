@@ -12,8 +12,10 @@ class ICheatSink {
 public:
     virtual ~ICheatSink() = default;
 
-    [[nodiscard]] virtual Ex<void> apply(std::span<const std::uint8_t> table,
-                                         std::uint32_t unit) = 0;
+    [[nodiscard]] virtual Ex<void> apply(
+        std::span<const std::uint8_t> table,
+        std::uint32_t unit
+    ) = 0;
 
 protected:
     ICheatSink() = default;
@@ -21,4 +23,4 @@ protected:
     ICheatSink& operator=(const ICheatSink&) = default;
 };
 
-}  // namespace mister::cores
+}

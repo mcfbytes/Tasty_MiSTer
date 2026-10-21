@@ -14,13 +14,17 @@ namespace {
 
 constexpr std::size_t kAlign = 64;
 
-constexpr std::size_t up(std::size_t n) noexcept { return (n + kAlign - 1) / kAlign * kAlign; }
+constexpr std::size_t up(std::size_t n) noexcept {
+    return (n + kAlign - 1) / kAlign * kAlign;
+}
 
-constexpr std::size_t dup_cap(std::size_t n) noexcept { return n / 64u + 256u; }
+constexpr std::size_t dup_cap(std::size_t n) noexcept {
+    return n / 64u + 256u;
+}
 
 constexpr std::size_t kWorkBytes = LZO1X_1_MEM_COMPRESS;
 
-}  // namespace
+}
 
 Ex<void> CscdCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
@@ -29,7 +33,8 @@ Ex<void> CscdCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     const std::size_t pic = picture_bytes(w, h);
     const std::size_t total = up(pic) * 2 + up(kWorkBytes) + up(dup_cap(pic));
-    if (auto r = arena_.reserve(1, total); !r) return r;
+    if (auto r = arena_.reserve(1, total); !r)
+        return r;
     const std::span<std::byte> stripe = arena_.stripe(0);
     prev_ = stripe.first(up(pic));
     delta_ = stripe.subspan(up(pic), up(pic));
@@ -40,10 +45,14 @@ Ex<void> CscdCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
 
     lzo_uint n = 0;
     std::byte* tmp = delta_.data();
-    if (lzo1x_1_compress(infra::byte_cast<const std::uint8_t>(prev_).data(), pic,
-                         infra::byte_cast<std::uint8_t>(delta_).data(), &n,
-                         work_.data()) != LZO_E_OK ||
-        kHeadBytes + n > dup_cap(pic)) {
+    if (lzo1x_1_compress(
+            infra::byte_cast<const std::uint8_t>(prev_).data(),
+            pic,
+            infra::byte_cast<std::uint8_t>(delta_).data(),
+            &n,
+            work_.data()
+        ) != LZO_E_OK
+        || kHeadBytes + n > dup_cap(pic)) {
         end();
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     }
@@ -68,18 +77,24 @@ std::span<const std::byte> CscdCodec::dup() noexcept {
     return dup_.first(dup_len_);
 }
 
-std::size_t CscdCodec::encode(const std::byte* rgb, std::size_t line, bool key,
-                              std::span<std::byte> out) noexcept {
+std::size_t CscdCodec::encode(
+    const std::byte* rgb,
+    std::size_t line,
+    bool key,
+    std::span<std::byte> out
+) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
-    if (!open() || rgb == nullptr || out.size() < payload_bound(width_, height_)) return 0;
+    if (!open() || rgb == nullptr || out.size() < payload_bound(width_, height_))
+        return 0;
     const std::size_t row = row_bytes(width_);
     const std::size_t w = width_;
     auto* const prev_bytes = infra::byte_cast<std::uint8_t>(prev_).data();
     auto* const delta_bytes = infra::byte_cast<std::uint8_t>(delta_).data();
     for (std::size_t y = 0; y < height_; ++y) {
-        const auto* s =
-            infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(rgb + y * line, w * 3u))
-                .data();
+        const auto* s = infra::byte_cast<const std::uint8_t>(
+                            std::span<const std::byte>(rgb + y * line, w * 3u)
+        )
+                            .data();
         const std::size_t at = (height_ - 1u - y) * row;
         auto* p = prev_bytes + at;
         auto* d = delta_bytes + at;
@@ -98,7 +113,8 @@ std::size_t CscdCodec::encode(const std::byte* rgb, std::size_t line, bool key,
 
 std::size_t CscdCodec::rekey(std::span<std::byte> out) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
-    if (!open() || out.size() < payload_bound(width_, height_)) return 0;
+    if (!open() || out.size() < payload_bound(width_, height_))
+        return 0;
     return pack_(prev_.data(), true, out);
 }
 
@@ -109,23 +125,34 @@ std::size_t CscdCodec::pack_(const std::byte* src, bool key, std::span<std::byte
     lzo_uint n = 0;
     const std::size_t pic = picture_bytes(width_, height_);
     if (lzo1x_1_compress(
-            infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(src, pic)).data(), pic,
-            infra::byte_cast<std::uint8_t>(out).data() + kHeadBytes, &n, work_.data()) != LZO_E_OK)
+            infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(src, pic)).data(),
+            pic,
+            infra::byte_cast<std::uint8_t>(out).data() + kHeadBytes,
+            &n,
+            work_.data()
+        )
+        != LZO_E_OK)
         return 0;
     return kHeadBytes + n;
 }
 
-void CscdCodec::half_scale(const std::byte* rgb, std::size_t line, std::uint16_t w, std::uint16_t h,
-                           std::byte* dst) noexcept {
+void CscdCodec::half_scale(
+    const std::byte* rgb,
+    std::size_t line,
+    std::uint16_t w,
+    std::uint16_t h,
+    std::byte* dst
+) noexcept {
     const std::size_t ow = w / 2u;
     const std::size_t oh = h / 2u;
-    auto* const out_bytes =
-        infra::byte_cast<std::uint8_t>(std::span<std::byte>(dst, oh * ow * 3u)).data();
+    auto* const out_bytes = infra::byte_cast<std::uint8_t>(std::span<std::byte>(dst, oh * ow * 3u))
+                                .data();
     for (std::size_t y = 0; y < oh; ++y) {
-        const auto* a =
-            infra::byte_cast<const std::uint8_t>(
-                std::span<const std::byte>(rgb + 2 * y * line, static_cast<std::size_t>(w) * 3u))
-                .data();
+        const auto* a = infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(
+                                                                 rgb + 2 * y * line,
+                                                                 static_cast<std::size_t>(w) * 3u
+                                                             ))
+                            .data();
         const auto* b = a + line;
         auto* o = out_bytes + y * ow * 3u;
         for (std::size_t x = 0; x < ow * 3u; ++x) {
@@ -136,4 +163,4 @@ void CscdCodec::half_scale(const std::byte* rgb, std::size_t line, std::uint16_t
     }
 }
 
-}  // namespace mister::app
+}

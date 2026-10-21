@@ -16,9 +16,11 @@ class OptRef {
 
 public:
     constexpr OptRef() noexcept = default;
+
     constexpr OptRef(std::nullopt_t) noexcept {}
 
     constexpr explicit OptRef(T& ref) noexcept : ptr_(__builtin_addressof(ref)) {}
+
     OptRef(T&&) = delete;
 
     constexpr OptRef& operator=(std::nullopt_t) noexcept {
@@ -27,9 +29,11 @@ public:
     }
 
     [[nodiscard]] constexpr bool has_value() const noexcept { return ptr_ != nullptr; }
+
     constexpr explicit operator bool() const noexcept { return ptr_ != nullptr; }
 
     [[nodiscard]] constexpr T& operator*() const noexcept { return *checked_(); }
+
     [[nodiscard]] constexpr T* operator->() const noexcept { return checked_(); }
 
     [[nodiscard]] constexpr T& value() const noexcept {
@@ -59,4 +63,4 @@ template <class T>
 static_assert(std::is_trivially_copyable_v<OptRef<int>>);
 static_assert(sizeof(OptRef<int>) == sizeof(int*), "one pointer wide");
 
-}  // namespace mister::infra
+}

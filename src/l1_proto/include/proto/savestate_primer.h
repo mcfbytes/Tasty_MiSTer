@@ -27,13 +27,18 @@ public:
         SaveStateEngine::ISlotMap& map;
     };
 
-    [[nodiscard]] Ex<void> begin(const Env& env, const SaveStateEngine::SaveTarget& target,
-                                 const SaveStateDecl& ss);
+    [[nodiscard]] Ex<void> begin(
+        const Env& env,
+        const SaveStateEngine::SaveTarget& target,
+        const SaveStateDecl& ss
+    );
 
     [[nodiscard]] Ex<bool> step(const Env& env);
+
     [[nodiscard]] bool priming() const noexcept { return slot_ < SaveStateEngine::kSlots; }
 
     void end() noexcept;
+
     [[nodiscard]] unsigned load_failures() const noexcept { return load_failures_; }
 
 private:
@@ -51,4 +56,4 @@ private:
     unsigned load_failures_ = 0;
 };
 
-}  // namespace mister::proto
+}

@@ -19,4 +19,4 @@ struct PcmFeedState {
     std::uint32_t attaches = 0;
 };
 
-}  // namespace mister::cores
+}

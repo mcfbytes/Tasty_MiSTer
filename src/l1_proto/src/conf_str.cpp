@@ -1,384 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/conf_str.h"
+#include "conf_str_detail.h"
 
 #include <cctype>
-#include <charconv>
 #include <optional>
 
 namespace mister::proto {
-
-namespace {
-
-struct Scan {
-    std::uint32_t value;
-    std::size_t pos;
-};
-
-[[nodiscard]] std::optional<std::uint32_t> parse_num(std::string_view s, unsigned base) {
-    if (s.starts_with("0x") || s.starts_with("0X")) {
-        s.remove_prefix(2);
-        base = 16;
-    }
-    const auto* first = s.data();
-    const auto* last = s.data() + s.size();
-    std::uint32_t out = 0;
-    auto [ptr, ec] = std::from_chars(first, last, out, static_cast<int>(base));
-    if (ec != std::errc{} || ptr != last || s.empty()) return std::nullopt;
-    return out;
-}
-
-bool starts_with_icase(std::string_view s, std::string_view prefix) {
-    if (s.size() < prefix.size()) return false;
-    for (std::size_t i = 0; i < prefix.size(); ++i) {
-        const auto a = static_cast<unsigned char>(s[i]);
-        const auto b = static_cast<unsigned char>(prefix[i]);
-        if (std::toupper(a) != std::toupper(b)) return false;
-    }
-    return true;
-}
-
-std::vector<std::string_view> split(std::string_view s, char sep) {
-    std::vector<std::string_view> out;
-    std::size_t start = 0;
-    while (start <= s.size()) {
-        const std::size_t pos = s.find(sep, start);
-        if (pos == std::string_view::npos) {
-            out.push_back(s.substr(start));
-            break;
-        }
-        out.push_back(s.substr(start, pos - start));
-        start = pos + 1;
-    }
-    return out;
-}
-
-std::optional<reactor::Cause> cause_from(std::string_view name) {
-    using reactor::Cause;
-    if (name == "BLK") return Cause::Blk;
-    if (name == "FIFO") return Cause::Fifo;
-    if (name == "RING") return Cause::Ring;
-    if (name == "TICK") return Cause::CoreTick;
-    return std::nullopt;
-}
-
-[[nodiscard]] Scan scan_hex(std::string_view s, std::size_t pos) {
-    std::uint32_t value = 0;
-    const auto [ptr, ec] = std::from_chars(s.data() + pos, s.data() + s.size(), value, 16);
-    if (ec != std::errc{} || ptr == s.data() + pos) return {0, pos};
-    return {value, static_cast<std::size_t>(ptr - s.data())};
-}
-
-[[nodiscard]] std::size_t scan_speed_list(std::string_view s, std::size_t pos) {
-    for (int entry = 0; entry < 10 && pos < s.size(); ++entry) {
-        std::uint32_t speed = 0;
-
-        const auto [ptr, ec] = std::from_chars(s.data() + pos, s.data() + s.size(), speed, 10);
-        (void)ec;
-        pos = static_cast<std::size_t>(ptr - s.data());
-        if (pos < s.size() && s[pos] == '(') {
-            ++pos;
-
-            while (pos < s.size() && s[pos] != ';' && s[pos] != ':' && s[pos] != ')' &&
-                   s[pos] != ',') {
-                ++pos;
-            }
-            if (pos < s.size() && s[pos] == ')') ++pos;
-        }
-        if (pos < s.size() && s[pos] == ':') ++pos;
-    }
-    return pos;
-}
-
-}  // namespace
-
-namespace {
-
-[[nodiscard]] std::optional<Scan> scan_u32(std::string_view s, std::size_t pos) {
-    std::size_t p = pos;
-    while (p < s.size() && std::isspace(static_cast<unsigned char>(s[p])))
-        ++p;
-    bool neg = false;
-    if (p < s.size() && (s[p] == '+' || s[p] == '-')) {
-        neg = (s[p] == '-');
-        ++p;
-    }
-    const std::size_t first_digit = p;
-    std::uint64_t acc = 0;
-    while (p < s.size() && s[p] >= '0' && s[p] <= '9') {
-        if (acc <= 0xFFFF'FFFFull) {
-            acc = acc * 10u + static_cast<std::uint64_t>(s[p] - '0');
-        }
-        ++p;
-    }
-    if (p == first_digit) return std::nullopt;
-    if (acc > 0xFFFF'FFFFull) acc = 0xFFFF'FFFFull;
-    std::uint32_t v = static_cast<std::uint32_t>(acc);
-    if (neg) v = 0u - v;
-    return Scan{v, p};
-}
-
-int base32_digit(char c) noexcept {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'A' && c <= 'V') return c - 'A' + 10;
-    return -1;
-}
-
-mister::proto::BitField decode_bits(std::string_view s, mister::proto::ExShift ex,
-                                    bool single) noexcept {
-    using mister::proto::BitField;
-    using mister::proto::ExShift;
-    using mister::proto::StatusBit;
-
-    std::uint32_t start = 0;
-    std::uint32_t end = 0;
-    bool sng = single;
-
-    if (!s.empty() && s[0] == '[') {
-        bool ranged = false;
-        if (!sng) {
-            const auto hi = scan_u32(s, 1);
-            if (hi && hi->pos < s.size() && s[hi->pos] == ':') {
-                if (const auto lo = scan_u32(s, hi->pos + 1)) {
-                    end = hi->value;
-                    start = lo->value;
-                    ranged = true;
-                }
-            }
-        }
-        if (ranged) {
-            if (start > 127 || end > 127 || end <= start) return {};
-        } else {
-
-            const auto only = scan_u32(s, 1);
-            if (!only) return {};
-            start = only->value;
-            if (start > 127) return {};
-            end = start;
-        }
-    } else {
-        const int d0 = s.empty() ? -1 : base32_digit(s[0]);
-        if (d0 < 0) return {};
-        start = static_cast<std::uint32_t>(d0);
-        const int d1 = (!sng && s.size() > 1) ? base32_digit(s[1]) : -1;
-        if (d1 >= 0) {
-            end = static_cast<std::uint32_t>(d1);
-        } else {
-            sng = true;
-            end = start;
-        }
-        if (ex == ExShift::Plus32) {
-            start += 32;
-            end += 32;
-        }
-        if (start > 127 || end > 127 || (!sng && end <= start)) return {};
-    }
-
-    if (end - start > 8) return {};
-    return BitField{StatusBit{static_cast<std::uint8_t>(start)},
-                    static_cast<std::uint8_t>(1 + end - start)};
-}
-
-bool head_matches(std::string_view field, const mister::proto::ItemRule& r) noexcept {
-    using mister::proto::HeadMatch;
-    switch (r.match) {
-        case HeadMatch::Letter:
-            return !field.empty() && field[0] == r.letter;
-        case HeadMatch::Exact:
-            return field == r.head;
-        case HeadMatch::Prefix:
-            return field.starts_with(r.head);
-        case HeadMatch::PrefixIcase: {
-            if (field.size() < r.head.size()) return false;
-            for (std::size_t i = 0; i < r.head.size(); ++i) {
-                if (std::toupper(static_cast<unsigned char>(field[i])) !=
-                    std::toupper(static_cast<unsigned char>(r.head[i]))) {
-                    return false;
-                }
-            }
-            return true;
-        }
-    }
-    return false;
-}
-
-const mister::proto::ItemRule* match_rule(std::string_view field,
-                                          mister::proto::MatchPhase phase) noexcept {
-    for (const mister::proto::ItemRule& r : mister::proto::kItemRules) {
-        if (r.phase != phase) continue;
-        if (head_matches(field, r)) return &r;
-    }
-    return nullptr;
-}
-
-char at(std::string_view s, std::size_t i) noexcept { return i < s.size() ? s[i] : '\0'; }
-
-}  // namespace
-
-BitField decode_bit_ref(std::string_view spec, ExShift ex) noexcept {
-    return decode_bits(spec, ex, false);
-}
-
-std::uint8_t decode_hd_selector(std::string_view after_letter) noexcept {
-    const BitField b = decode_bits(after_letter, ExShift::None, true);
-    return b.valid() ? b.start.v : 0;
-}
-
-Visibility evaluate(const Item& it, OsdMask hdmask) noexcept {
-    Visibility v;
-    for (std::uint8_t i = 0; i < it.cond_count && i < kMaxConds; ++i) {
-        const Cond& c = it.conds[i];
-
-        const bool set = c.bit < 16 && ((static_cast<unsigned>(hdmask.v) >> c.bit) & 1u) != 0u;
-        if (set != c.acts_when_set) continue;
-        if (c.effect == CondEffect::Hide)
-            v.hidden = true;
-        else
-            v.disabled = true;
-    }
-    return v;
-}
-
-std::string_view ItemTable::subfield(const Item& it, unsigned n) const noexcept {
-    if (n >= it.subfield_count) return {};
-    const std::size_t idx = static_cast<std::size_t>(it.subfield_first) + n;
-    if (idx >= spans_.size()) return {};
-    return text(spans_[idx]);
-}
-
-Ex<ItemTable> ItemTable::parse(std::string_view raw) {
-    ItemTable t;
-
-    if (raw.size() > 0xFFFFu) {
-        return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 0});
-    }
-    if (!raw.empty()) t.text_.assign(raw.data(), raw.size());
-    const std::string_view all{t.text_};
-
-    const auto fields = split(all, ';');
-    const auto span_of = [&](std::string_view v) {
-        return TextSpan{static_cast<std::uint16_t>(v.data() - all.data()),
-                        static_cast<std::uint16_t>(v.size())};
-    };
-    t.name_ = fields.empty() ? TextSpan{} : span_of(fields[0]);
-
-    for (std::size_t i = 2; i < fields.size(); ++i) {
-        const std::string_view f = fields[i];
-
-        if (f.empty()) {
-            t.terminated_early_ = true;
-            break;
-        }
-
-        Item it;
-        it.raw = span_of(f);
-        std::string_view p = f;
-
-        if (const ItemRule* pre = match_rule(f, MatchPhase::BeforePrefixes)) {
-            it.kind = pre->kind;
-            it.ex = pre->ex;
-        } else {
-
-            while (p.size() > 2) {
-                const CondRule* cr = nullptr;
-                for (const CondRule& c : kCondRules) {
-                    if (c.letter == p[0]) {
-                        cr = &c;
-                        break;
-                    }
-                }
-                if (!cr) break;
-                if (it.cond_count < kMaxConds) {
-                    it.conds[it.cond_count++] =
-                        Cond{cr->effect, cr->acts_when_set, decode_hd_selector(p.substr(1))};
-                } else {
-                    ++t.cond_overflows_;
-                }
-                p.remove_prefix(2);
-            }
-
-            if (!p.empty() && p[0] == 'P') {
-                const int n = at(p, 1) - '0';
-
-                const auto page_no = static_cast<std::uint8_t>(static_cast<unsigned>(n) & 0xFFu);
-                if (at(p, 2) != ',') {
-                    it.page = page_no;
-                    p.remove_prefix(p.size() >= 2 ? 2 : p.size());
-                } else {
-                    it.declares_page = true;
-                    it.declared_page = page_no;
-                }
-            }
-
-            if (const ItemRule* r = match_rule(p, MatchPhase::AfterPrefixes)) {
-                it.kind = r->kind;
-                it.ex = r->ex;
-            }
-        }
-        it.body = span_of(p);
-
-        const auto subs = split(p, ',');
-
-        if (subs.size() > 255 || t.spans_.size() + subs.size() > 0xFFFFu) {
-            return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 1});
-        }
-        it.subfield_first = static_cast<std::uint16_t>(t.spans_.size());
-        it.subfield_count = static_cast<std::uint8_t>(subs.size());
-        for (std::string_view s : subs)
-            t.spans_.push_back(span_of(s));
-
-        switch (it.kind) {
-            case ItemKind::Option:
-
-                it.hps_marker = (at(p, 1) == 'X');
-                {
-                    const std::size_t off = it.hps_marker ? 2u : 1u;
-                    it.bits = decode_bit_ref(p.substr(off < p.size() ? off : p.size()),
-                                             it.hps_marker ? ExShift::None : it.ex);
-                }
-                break;
-            case ItemKind::Toggle:
-            case ItemKind::ToggleClose:
-                it.bits = decode_bit_ref(p.substr(p.empty() ? 0 : 1), it.ex);
-                break;
-            case ItemKind::FileSlot:
-            case ItemKind::MountSlot: {
-
-                std::size_t idx = 1;
-                if (it.kind == ItemKind::FileSlot && at(p, idx) == 'S') {
-                    it.opensave = true;
-                    ++idx;
-                }
-                if (at(p, idx) == 'C') {
-                    it.store_name = true;
-                    ++idx;
-                }
-                const char d = at(p, idx);
-                if (d >= '0' && d <= '9') {
-                    it.digit = static_cast<std::uint8_t>(d - '0');
-                    it.has_digit = true;
-                }
-                break;
-            }
-            case ItemKind::Addon:
-            case ItemKind::JoyNames:
-            case ItemKind::Cheats:
-            case ItemKind::Info:
-            case ItemKind::Version:
-            case ItemKind::CfgVer:
-            case ItemKind::NoOsd:
-            case ItemKind::PageDecl:
-            case ItemKind::Separator:
-            case ItemKind::Dip:
-            case ItemKind::DefMra:
-            case ItemKind::Turbo:
-            case ItemKind::Unknown:
-            case ItemKind::kCount:
-                break;
-        }
-        t.items_.push_back(it);
-    }
-    return t;
-}
 
 Ex<ConfStr> ConfStr::parse(std::string_view raw, hal::PhysRegion aperture) {
     ConfStr c;
@@ -388,125 +15,22 @@ Ex<ConfStr> ConfStr::parse(std::string_view raw, hal::PhysRegion aperture) {
     }
     c.name_ = std::string(fields[0]);
 
-    auto try_ss = [&c, aperture](std::string_view f1, std::size_t pos) -> std::size_t {
-        if (!starts_with_icase(f1.substr(pos), "SS")) return pos;
-        std::size_t p = pos + 2;
-        const Scan base_scan = scan_hex(f1, p);
-        p = base_scan.pos;
-        const std::uint32_t base = base_scan.value;
-        std::uint32_t size = 0;
-
-        std::size_t next = p;
-        if (p < f1.size() && f1[p] == ':') {
-            ++p;
-            next = p;
-            const Scan size_scan = scan_hex(f1, p);
-            p = size_scan.pos;
-            size = size_scan.value;
-        }
-
-        const std::optional<hal::FabricAddr> at = hal::to_fabric(aperture.phys);
-        const std::uint32_t low = at ? at->v : 0u;
-        const auto end = static_cast<std::uint32_t>(low + aperture.len);
-        const bool valid = at.has_value() && size > 0 && size <= (128u * 1024u * 1024u) &&
-                           base >= low && base < end && (base + size) < end;
-        c.ss_ = valid ? std::optional<SaveStateDecl>(SaveStateDecl{hal::FabricAddr{base}, size})
-                      : std::nullopt;
-        c.caps_.push_back({Capability::Kind::SaveState, std::string(f1.substr(pos, p - pos))});
-        return next;
-    };
-    auto try_uart = [&c](std::string_view f1, std::size_t pos) -> std::size_t {
-        if (!starts_with_icase(f1.substr(pos), "UART")) return pos;
-        const std::size_t p = scan_speed_list(f1, pos + 4);
-        c.caps_.push_back({Capability::Kind::Uart, std::string(f1.substr(pos, p - pos))});
-        return p;
-    };
-    auto try_midi = [&c](std::string_view f1, std::size_t pos) -> std::size_t {
-        if (!starts_with_icase(f1.substr(pos), "MIDI")) return pos;
-        const std::size_t p = scan_speed_list(f1, pos + 4);
-        c.caps_.push_back({Capability::Kind::Midi, std::string(f1.substr(pos, p - pos))});
-        return p;
-    };
-
-    auto try_irq = [&c](std::string_view f1, std::size_t pos) -> Ex<std::size_t> {
-        if (!f1.substr(pos).starts_with("IRQ:")) return pos;
-        const std::size_t comma = f1.find(',', pos);
-        const std::size_t seg_end = comma == std::string_view::npos ? f1.size() : comma;
-        const std::string_view body = f1.substr(pos + 4, seg_end - (pos + 4));
-
-        const std::size_t eq = body.find('=');
-        if (eq == std::string_view::npos) {
-            return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 1});
-        }
-        const auto klass = cause_from(body.substr(0, eq));
-        std::string_view rest = body.substr(eq + 1);
-        std::string_view line_s = rest;
-        std::uint32_t cause_base = 0;
-        if (const std::size_t colon = rest.find(':'); colon != std::string_view::npos) {
-            line_s = rest.substr(0, colon);
-            const auto parsed_base = parse_num(rest.substr(colon + 1), 16);
-            if (!parsed_base) {
-                return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 2});
-            }
-            cause_base = *parsed_base;
-        }
-
-        const auto line = parse_num(line_s, 10);
-        if (!klass || !line || *line < kIrqPoolFirstLine || *line > kIrqOrdinalMax) {
-            return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 3});
-        }
-        c.irq_.push_back(IrqBinding{
-            *klass, static_cast<os::UioLine>(static_cast<std::uint8_t>(*line - kIrqPoolFirstLine)),
-            hal::LwOffset{cause_base}});
-        c.caps_.push_back({Capability::Kind::Irq, std::string(f1.substr(pos, seg_end - pos))});
-        return seg_end;
-    };
-    auto try_axi = [&c](std::string_view f1, std::size_t pos) -> Ex<std::size_t> {
-        if (!f1.substr(pos).starts_with("AXI:")) return pos;
-        const std::size_t comma = f1.find(',', pos);
-        const std::size_t seg_end = comma == std::string_view::npos ? f1.size() : comma;
-        const std::string_view body = f1.substr(pos + 4, seg_end - (pos + 4));
-
-        const auto parts = split(body, ':');
-
-        if (parts.size() < 2 || parts.size() > 3) {
-            return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 4});
-        }
-        const auto addr = parse_num(parts[0], 16);
-        const auto size = parse_num(parts[1], 16);
-        if (!addr || !size) {
-            return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 4});
-        }
-
-        if (parts.size() == 2) {
-
-            c.axi_unkinded_.push_back(AxiUnkindedDecl{AxiRawBase{*addr}, *size});
-        } else if (parts[2] == "LW") {
-            c.axi_lw_.push_back(AxiLwDecl{hal::LwOffset{*addr}, *size});
-        } else if (parts[2] == "DDR") {
-            c.axi_ddr_.push_back(AxiDdrDecl{hal::FabricAddr{*addr}, *size});
-        } else {
-
-            ++c.axi_unknown_kinds_;
-        }
-        c.caps_.push_back({Capability::Kind::Axi, std::string(f1.substr(pos, seg_end - pos))});
-        return seg_end;
-    };
-
     if (fields.size() >= 2) {
         const std::string_view f1 = fields[1];
         std::size_t pos = 0;
         while (pos < f1.size()) {
             const std::size_t seg_start = pos;
 
-            pos = try_ss(f1, pos);
-            pos = try_uart(f1, pos);
-            pos = try_midi(f1, pos);
-            const auto irq = try_irq(f1, pos);
-            if (!irq) return std::unexpected(irq.error());
+            pos = c.caps_.try_ss(f1, pos, aperture);
+            pos = c.caps_.try_uart(f1, pos);
+            pos = c.caps_.try_midi(f1, pos);
+            const auto irq = c.caps_.try_irq(f1, pos);
+            if (!irq)
+                return std::unexpected(irq.error());
             pos = *irq;
-            const auto axi = try_axi(f1, pos);
-            if (!axi) return std::unexpected(axi.error());
+            const auto axi = c.caps_.try_axi(f1, pos);
+            if (!axi)
+                return std::unexpected(axi.error());
             pos = *axi;
 
             const std::size_t comma = f1.find(',', pos);
@@ -514,8 +38,7 @@ Ex<ConfStr> ConfStr::parse(std::string_view raw, hal::PhysRegion aperture) {
 
                 const std::size_t unk_end = comma == std::string_view::npos ? f1.size() : comma;
                 if (unk_end > seg_start) {
-                    c.caps_.push_back({Capability::Kind::Unknown,
-                                       std::string(f1.substr(seg_start, unk_end - seg_start))});
+                    c.caps_.carry_unknown(f1.substr(seg_start, unk_end - seg_start));
                 }
             }
 
@@ -527,7 +50,8 @@ Ex<ConfStr> ConfStr::parse(std::string_view raw, hal::PhysRegion aperture) {
         c.items_.emplace_back(fields[i]);
     }
     auto ast = ItemTable::parse(raw);
-    if (!ast) return std::unexpected(ast.error());
+    if (!ast)
+        return std::unexpected(ast.error());
     c.ast_ = std::move(*ast);
     c.walk_items();
     return c;
@@ -537,7 +61,8 @@ std::string_view ConfStr::button_list(int type) const noexcept {
     for (const std::string& raw : items_) {
         const std::string_view p{raw};
 
-        if (p.empty()) break;
+        if (p.empty())
+            break;
 
         bool hit = false;
         if (type == 0) {
@@ -545,12 +70,15 @@ std::string_view ConfStr::button_list(int type) const noexcept {
         } else if (p.size() >= 2 && p[0] == 'j') {
             hit = (type == 1 && p[1] == 'n') || (type == 2 && p[1] == 'p');
         }
-        if (!hit) continue;
+        if (!hit)
+            continue;
 
         const std::size_t comma = p.find(',');
-        if (comma == std::string_view::npos) break;
+        if (comma == std::string_view::npos)
+            break;
         const std::string_view tail = p.substr(comma + 1);
-        if (tail.empty()) break;
+        if (tail.empty())
+            break;
         return tail;
     }
     return {};
@@ -558,35 +86,44 @@ std::string_view ConfStr::button_list(int type) const noexcept {
 
 namespace {
 
-std::uint8_t view_page(const Item& it) noexcept { return it.declares_page ? 0 : it.page; }
+std::uint8_t view_page(const Item& it) noexcept {
+    return it.declares_page ? 0 : it.page;
+}
 
 const Item* bound_addon(std::span<const Item> items, std::size_t row) noexcept {
     const std::uint8_t page = view_page(items[row]);
     for (std::size_t i = row; i-- > 0;) {
         const Item& it = items[i];
-        if (view_page(it) != page || evaluate(it, OsdMask{0}).hidden) continue;
-        if (it.kind == ItemKind::Addon) return &it;
-        if (it.kind == ItemKind::FileSlot || it.kind == ItemKind::MountSlot) return nullptr;
+        if (view_page(it) != page || evaluate(it, OsdMask{0}).hidden)
+            continue;
+        if (it.kind == ItemKind::Addon)
+            return &it;
+        if (it.kind == ItemKind::FileSlot || it.kind == ItemKind::MountSlot)
+            return nullptr;
     }
     return nullptr;
 }
 
 std::string_view addon_list(const ItemTable& ast, const Item* addon) noexcept {
-    if (addon == nullptr) return {};
+    if (addon == nullptr)
+        return {};
     const std::string_view body = ast.text(addon->body);
     const std::size_t comma = body.find(',');
     return comma == std::string_view::npos ? std::string_view{} : body.substr(comma + 1);
 }
 
 bool addon_after(const ItemTable& ast, const Item* addon) noexcept {
-    if (addon == nullptr) return false;
+    if (addon == nullptr)
+        return false;
     const std::string_view body = ast.text(addon->body);
     return body.size() >= 2 && body[1] == '1';
 }
 
-}  // namespace
+}
 
-void ConfStr::walk_items() { slots_ = slots_of(ast_); }
+void ConfStr::walk_items() {
+    slots_ = slots_of(ast_);
+}
 
 std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
     std::vector<ConfStrEntry> slots;
@@ -594,12 +131,15 @@ std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
     const std::span<const Item> items = ast.items();
     for (std::size_t n = 0; n < items.size(); ++n) {
         const Item& it = items[n];
-        if (evaluate(it, OsdMask{0}).hidden) continue;
+        if (evaluate(it, OsdMask{0}).hidden)
+            continue;
 
-        if (!it.declares_page && it.page != 0) continue;
+        if (!it.declares_page && it.page != 0)
+            continue;
 
         const Selectable sel = selectable_of(it.kind);
-        if (sel == Selectable::Never) continue;
+        if (sel == Selectable::Never)
+            continue;
 
         if (it.kind == ItemKind::FileSlot || it.kind == ItemKind::MountSlot) {
             ConfStrEntry fs{};
@@ -614,10 +154,11 @@ std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
                 fs.ext.assign(ext.data(), ext.size());
             }
 
-            fs.ioctl_index = fs.has_digit         ? fs.digit
-                             : (fs.letter == 'F') ? static_cast<std::uint8_t>(selentry + 1u)
-                                                  : static_cast<std::uint8_t>(0u);
-            if (fs.letter == 'F') fs.load_addr = parse_load_addr(ast.subfield(it, 3));
+            fs.ioctl_index = fs.has_digit ? fs.digit
+                : (fs.letter == 'F')      ? static_cast<std::uint8_t>(selentry + 1u)
+                                          : static_cast<std::uint8_t>(0u);
+            if (fs.letter == 'F')
+                fs.load_addr = parse_load_addr(ast.subfield(it, 3));
             const Item* addon = bound_addon(items, n);
             fs.addon = std::string{addon_list(ast, addon)};
             fs.addon_after = addon_after(ast, addon);
@@ -634,7 +175,8 @@ std::uint32_t parse_load_addr(std::string_view field) noexcept {
     while (i < field.size() && (field[i] == ' ' || (field[i] >= '\t' && field[i] <= '\r')))
         ++i;
     bool negate = false;
-    if (i < field.size() && (field[i] == '+' || field[i] == '-')) negate = field[i++] == '-';
+    if (i < field.size() && (field[i] == '+' || field[i] == '-'))
+        negate = field[i++] == '-';
     if (i + 1 < field.size() && field[i] == '0' && (field[i + 1] == 'x' || field[i + 1] == 'X'))
         i += 2;
     std::uint64_t v = 0;
@@ -650,7 +192,8 @@ std::uint32_t parse_load_addr(std::string_view field) noexcept {
         else
             break;
         v = (v << 4) | d;
-        if (v > 0xFFFF'FFFFu) return 0xFFFF'FFFFu;
+        if (v > 0xFFFF'FFFFu)
+            return 0xFFFF'FFFFu;
     }
     const auto u = static_cast<std::uint32_t>(v);
     return negate ? static_cast<std::uint32_t>(0u - u) : u;
@@ -660,16 +203,21 @@ FileSlotHit ConfStr::find_file_slot(char type, std::uint8_t index) const noexcep
     return find_slot_in(slots_, type, index);
 }
 
-FileSlotHit ConfStr::find_slot_in(std::span<const ConfStrEntry> slots, char type,
-                                  std::uint8_t index) noexcept {
+FileSlotHit ConfStr::find_slot_in(
+    std::span<const ConfStrEntry> slots,
+    char type,
+    std::uint8_t index
+) noexcept {
     const char want = (type >= 'a' && type <= 'z') ? static_cast<char>(type - 0x20) : type;
     const ConfStrEntry* hit = nullptr;
     for (const ConfStrEntry& s : slots) {
 
         const std::uint8_t num = s.has_digit ? s.digit : 0u;
-        if (s.letter == want && num == index) hit = &s;
+        if (s.letter == want && num == index)
+            hit = &s;
     }
-    if (hit != nullptr) return FileSlotHit{infra::opt_ref_of(hit), FileSlotMatch::Exact};
+    if (hit != nullptr)
+        return FileSlotHit{infra::opt_ref_of(hit), FileSlotMatch::Exact};
 
     for (const ConfStrEntry& s : slots) {
         if (s.selentry == 0 && s.letter == want)
@@ -684,25 +232,36 @@ FileSlotHit ConfStr::find_load_slot(FileSlotDigit digit) const noexcept {
 
 std::optional<ConfStrFileRow> ConfStr::menu_pick(ItemOrdinal item, IoIndex drawn) const noexcept {
     const auto items = ast_.items();
-    if (item.v >= items.size()) return std::nullopt;
+    if (item.v >= items.size())
+        return std::nullopt;
     const Item& it = items[item.v];
-    if (it.kind != ItemKind::FileSlot) return std::nullopt;
+    if (it.kind != ItemKind::FileSlot)
+        return std::nullopt;
 
     const Item* addon = bound_addon(items, item.v);
-    return ConfStrFileRow{ast_.subfield(it, 1),
-                          drawn.v,
-                          parse_load_addr(ast_.subfield(it, 3)),
-                          it.opensave,
-                          addon_list(ast_, addon),
-                          addon_after(ast_, addon)};
+    return ConfStrFileRow{
+        ast_.subfield(it, 1),
+        drawn.v,
+        parse_load_addr(ast_.subfield(it, 3)),
+        it.opensave,
+        addon_list(ast_, addon),
+        addon_after(ast_, addon)
+    };
 }
 
 std::vector<ConfStrFileRow> ConfStr::remembered_rows() const {
     std::vector<ConfStrFileRow> rows;
     for (const Item& it : ast_.items()) {
-        if (it.kind != ItemKind::FileSlot || !it.store_name || !it.has_digit) continue;
-        rows.push_back(ConfStrFileRow{ast_.subfield(it, 1), it.digit,
-                                      parse_load_addr(ast_.subfield(it, 3)), it.opensave});
+        if (it.kind != ItemKind::FileSlot || !it.store_name || !it.has_digit)
+            continue;
+        rows.push_back(
+            ConfStrFileRow{
+                ast_.subfield(it, 1),
+                it.digit,
+                parse_load_addr(ast_.subfield(it, 3)),
+                it.opensave
+            }
+        );
     }
     return rows;
 }
@@ -710,7 +269,8 @@ std::vector<ConfStrFileRow> ConfStr::remembered_rows() const {
 std::vector<IoIndex> ConfStr::remembered_mounts() const {
     std::vector<IoIndex> slots;
     for (const Item& it : ast_.items()) {
-        if (it.kind != ItemKind::MountSlot || !it.store_name || !it.has_digit) continue;
+        if (it.kind != ItemKind::MountSlot || !it.store_name || !it.has_digit)
+            continue;
         slots.push_back(IoIndex{it.digit});
     }
     return slots;
@@ -718,7 +278,8 @@ std::vector<IoIndex> ConfStr::remembered_mounts() const {
 
 std::uint8_t ConfStr::ext_subindex(std::string_view filename, std::string_view ext_list) noexcept {
     const std::size_t dot = filename.rfind('.');
-    if (dot == std::string_view::npos) return 0;
+    if (dot == std::string_view::npos)
+        return 0;
 
     char e[3] = {' ', ' ', ' '};
     for (std::size_t i = 0; i < 3 && dot + 1 + i < filename.size(); ++i) {
@@ -730,8 +291,10 @@ std::uint8_t ConfStr::ext_subindex(std::string_view filename, std::string_view e
         bool found = true;
         for (std::size_t i = 0; i < 3; ++i) {
             const char c = i < rest.size() ? rest[i] : ' ';
-            if (c == '*') break;
-            if (c == '?') continue;
+            if (c == '*')
+                break;
+            if (c == '?')
+                continue;
             const auto a = static_cast<unsigned char>(c);
             const auto b = static_cast<unsigned char>(e[i]);
             if (std::toupper(a) != std::toupper(b)) {
@@ -739,19 +302,14 @@ std::uint8_t ConfStr::ext_subindex(std::string_view filename, std::string_view e
                 break;
             }
         }
-        if (found) return idx;
-        if (rest.size() <= 3) break;
+        if (found)
+            return idx;
+        if (rest.size() <= 3)
+            break;
         ++idx;
         rest.remove_prefix(3);
     }
     return 0;
 }
 
-std::optional<os::UioLine> ConfStr::irq_line_for(reactor::Cause klass) const {
-    for (const IrqBinding& b : irq_) {
-        if (b.klass == klass) return b.line;
-    }
-    return std::nullopt;
 }
-
-}  // namespace mister::proto

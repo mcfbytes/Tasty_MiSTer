@@ -33,10 +33,12 @@ inline constexpr std::array<LauncherProfile, 1> kLaunchers{{
 
 constexpr const LauncherProfile* launcher_for_main(std::string_view cfg_main) noexcept {
     for (const LauncherProfile& p : kLaunchers) {
-        if (infra::ieq(cfg_main, p.main_value)) return &p;
-        if (cfg_main.size() > p.main_value.size() && cfg_main.front() == '/' &&
-            cfg_main[cfg_main.size() - p.main_value.size() - 1] == '/' &&
-            infra::ieq(cfg_main.substr(cfg_main.size() - p.main_value.size()), p.main_value))
+        if (infra::ieq(cfg_main, p.main_value))
+            return &p;
+        if (cfg_main.size() > p.main_value.size()
+            && cfg_main.front() == '/'
+            && cfg_main[cfg_main.size() - p.main_value.size() - 1] == '/'
+            && infra::ieq(cfg_main.substr(cfg_main.size() - p.main_value.size()), p.main_value))
             return &p;
     }
     return nullptr;
@@ -49,4 +51,4 @@ static_assert(launcher_for_main("xzaparoo/MiSTer_Zaparoo") == nullptr);
 static_assert(launcher_for_main("") == nullptr);
 static_assert(launcher_for_main("backup/zaparoo/MiSTer_Zaparoo") == nullptr);
 
-}  // namespace mister::app
+}

@@ -9,10 +9,12 @@ namespace mister::app {
 
 struct HdHelp {
     enum class Glyph : std::uint8_t { None, North, East, South, West, DpadLr };
+
     struct Item {
         Glyph glyph = Glyph::None;
         std::string_view label{};
     };
+
     static constexpr std::size_t kMaxItems = 4;
     std::array<Item, kMaxItems> items{};
     std::uint8_t count = 0;
@@ -36,7 +38,8 @@ struct HdHelp {
 [[nodiscard]] constexpr HdHelp hd_help(std::string_view footer, bool steps) noexcept {
     HdHelp out{};
     const auto push = [&out](HdHelp::Glyph g, std::string_view label) {
-        if (out.count < HdHelp::kMaxItems) out.items[out.count++] = HdHelp::Item{g, label};
+        if (out.count < HdHelp::kMaxItems)
+            out.items[out.count++] = HdHelp::Item{g, label};
     };
     const auto trim = [](std::string_view s) {
         while (!s.empty() && s.front() == ' ')
@@ -54,12 +57,13 @@ struct HdHelp {
         const std::size_t cut = rest.find("  ");
         const std::string_view item = rest.substr(0, cut);
         rest = cut == std::string_view::npos ? std::string_view{} : rest.substr(cut);
-        const HdHelp::Glyph g =
-            item.size() > 2 && item[1] == ' ' ? hd_help_glyph(item[0]) : HdHelp::Glyph::None;
+        const HdHelp::Glyph g = item.size() > 2 && item[1] == ' ' ? hd_help_glyph(item[0])
+                                                                  : HdHelp::Glyph::None;
         push(g, g == HdHelp::Glyph::None ? item : trim(item.substr(2)));
     }
-    if (steps) push(HdHelp::Glyph::DpadLr, "Change");
+    if (steps)
+        push(HdHelp::Glyph::DpadLr, "Change");
     return out;
 }
 
-}  // namespace mister::app
+}

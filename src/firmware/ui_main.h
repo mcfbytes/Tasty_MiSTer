@@ -33,7 +33,7 @@ class SaveStateAttach;
 class ScreenshotPump;
 class VideoPump;
 struct Event;
-}  // namespace mister::app
+}
 
 namespace mister::fw {
 
@@ -66,32 +66,45 @@ public:
         app::LinkRxChannel<SeatTag::Ui>& link_rx;
 
         infra::OptRef<app::SaveStateAttach> save_states{};
+
+        infra::OptRef<app::IOwnerTick> owner_tick{};
     };
 
-    UiMain(app::EventQueue<SeatTag::RT>& events, xthread::ParkFds fds,
-           app::UartModeController::Handoffs& handoffs, const Wiring& wiring,
-           xthread::WakeFlag& asker) noexcept;
+    UiMain(
+        app::EventQueue<SeatTag::RT>& events,
+        xthread::ParkFds fds,
+        app::UartModeController::Handoffs& handoffs,
+        const Wiring& wiring,
+        xthread::WakeFlag& asker
+    ) noexcept;
     UiMain(const UiMain&) = delete;
     UiMain& operator=(const UiMain&) = delete;
     UiMain(UiMain&&) = delete;
     UiMain& operator=(UiMain&&) = delete;
 
-    void set_owner_tick(app::IOwnerTick* tick) noexcept { owner_tick_ = infra::opt_ref_of(tick); }
-
     void start() noexcept;
+
     void stop() noexcept { stop_.request(); }
 
     void serve() noexcept;
+
     [[nodiscard]] bool idle() const noexcept { return uart_handoffs_.empty(); }
+
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
     [[nodiscard]] int park_ms() const noexcept { return kUiPollMs; }
+
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
+
     [[nodiscard]] bool paused() noexcept { return pause_.observe(pause_seen_, *this); }
+
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
+
     void settle() noexcept;
 
     void on_pause() noexcept;
     void on_resume() noexcept;
+
     [[nodiscard]] bool quiescent() const noexcept { return true; }
 
     [[nodiscard]] xthread::PauseLatch& pause_latch() noexcept { return pause_; }
@@ -135,4 +148,4 @@ private:
 
 static_assert(xthread::SeatBody<UiMain>);
 
-}  // namespace mister::fw
+}

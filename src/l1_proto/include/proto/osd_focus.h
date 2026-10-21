@@ -15,4 +15,4 @@ protected:
     IOsdFocus& operator=(const IOsdFocus&) = default;
 };
 
-}  // namespace mister::proto
+}

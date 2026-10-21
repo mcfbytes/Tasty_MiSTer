@@ -19,18 +19,23 @@ struct Lch {
 };
 
 Rgb unpack(std::uint32_t c) noexcept {
-    return {static_cast<std::uint8_t>(c >> 16), static_cast<std::uint8_t>(c >> 8),
-            static_cast<std::uint8_t>(c)};
+    return {
+        static_cast<std::uint8_t>(c >> 16),
+        static_cast<std::uint8_t>(c >> 8),
+        static_cast<std::uint8_t>(c)
+    };
 }
 
 std::uint32_t pack(Rgb c) noexcept {
-    return (static_cast<std::uint32_t>(c[0]) << 16) | (static_cast<std::uint32_t>(c[1]) << 8) |
-           c[2];
+    return (static_cast<std::uint32_t>(c[0]) << 16)
+        | (static_cast<std::uint32_t>(c[1]) << 8)
+        | c[2];
 }
 
 std::uint8_t mix_ch(std::uint8_t x, std::uint8_t y, float t) noexcept {
-    return static_cast<std::uint8_t>(static_cast<float>(x) * (1.f - t) + static_cast<float>(y) * t +
-                                     0.5f);
+    return static_cast<std::uint8_t>(
+        static_cast<float>(x) * (1.f - t) + static_cast<float>(y) * t + 0.5f
+    );
 }
 
 std::uint32_t mix(std::uint32_t a, std::uint32_t b, float t) noexcept {
@@ -78,9 +83,11 @@ std::array<double, 3> lch_to_linear(Lch x) noexcept {
     const double l3 = l * l * l;
     const double m3 = m * m * m;
     const double s3 = s * s * s;
-    return {4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3,
-            -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3,
-            -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3};
+    return {
+        4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3,
+        -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3,
+        -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3
+    };
 }
 
 bool in_gamut(const std::array<double, 3>& v) noexcept {
@@ -110,14 +117,20 @@ double shown_contrast(std::uint32_t a, std::uint32_t b) noexcept {
     return contrast_ratio(shown_565(a), shown_565(b));
 }
 
-std::uint32_t walk_lightness(std::uint32_t start, std::uint32_t bg, double floor,
-                             bool toward_light) noexcept {
-    if (shown_contrast(start, bg) >= floor) return start;
+std::uint32_t walk_lightness(
+    std::uint32_t start,
+    std::uint32_t bg,
+    double floor,
+    bool toward_light
+) noexcept {
+    if (shown_contrast(start, bg) >= floor)
+        return start;
     const Lch from = to_lch(start);
     constexpr double kStep = 0.002;
     for (double l = from.l; l >= 0.0 && l <= 1.0; l += toward_light ? kStep : -kStep) {
         const std::uint32_t c = from_lch(Lch{l, from.c, from.h});
-        if (shown_contrast(c, bg) >= floor) return c;
+        if (shown_contrast(c, bg) >= floor)
+            return c;
     }
     return shown_contrast(0xffffffu, bg) >= shown_contrast(0x000000u, bg) ? 0xffffffu : 0x000000u;
 }
@@ -126,12 +139,13 @@ std::uint32_t surface(const HdStyle& s, std::uint32_t accent, float t, float bia
     return mix(mix(s.primary, s.text, t), accent, bias);
 }
 
-}  // namespace
+}
 
 double contrast_ratio(std::uint32_t a, std::uint32_t b) noexcept {
     double la = luminance(a);
     double lb = luminance(b);
-    if (la < lb) std::swap(la, lb);
+    if (la < lb)
+        std::swap(la, lb);
     return (la + 0.05) / (lb + 0.05);
 }
 
@@ -140,9 +154,11 @@ std::uint32_t shown_565(std::uint32_t rgb) noexcept {
     const auto r = static_cast<std::uint8_t>(c[0] >> 3);
     const auto g = static_cast<std::uint8_t>(c[1] >> 2);
     const auto b = static_cast<std::uint8_t>(c[2] >> 3);
-    return pack({static_cast<std::uint8_t>((r << 3) | (r >> 2)),
-                 static_cast<std::uint8_t>((g << 2) | (g >> 4)),
-                 static_cast<std::uint8_t>((b << 3) | (b >> 2))});
+    return pack(
+        {static_cast<std::uint8_t>((r << 3) | (r >> 2)),
+         static_cast<std::uint8_t>((g << 2) | (g >> 4)),
+         static_cast<std::uint8_t>((b << 3) | (b >> 2))}
+    );
 }
 
 std::uint32_t settle_565(std::uint32_t rgb) noexcept {
@@ -179,16 +195,20 @@ HdTheme derive_theme(HdStyle style) noexcept {
     t.text_label = settle_565(mix(style.primary, style.text, 0.62f));
     const Lch a = to_lch(t.accent);
     t.selection_fill = from_lch(Lch{a.l, a.c * 0.7, a.h});
-    const std::uint32_t seed = shown_contrast(style.primary, t.selection_fill) >=
-                                       shown_contrast(style.text, t.selection_fill)
-                                   ? style.primary
-                                   : style.text;
-    t.on_accent =
-        walk_lightness(seed, t.selection_fill, 4.5, luminance(seed) >= luminance(t.selection_fill));
+    const std::uint32_t seed = shown_contrast(style.primary, t.selection_fill)
+            >= shown_contrast(style.text, t.selection_fill)
+        ? style.primary
+        : style.text;
+    t.on_accent = walk_lightness(
+        seed,
+        t.selection_fill,
+        4.5,
+        luminance(seed) >= luminance(t.selection_fill)
+    );
     t.cue_spent = walk_lightness(style.text, style.text, 3.0, !up);
     t.control_edge = settle_565(mix(mix(style.primary, style.text, 0.06f), t.accent, 0.54f));
     t.error = up ? 0xff4f91u : 0xc2185bu;
     return t;
 }
 
-}  // namespace mister::app
+}

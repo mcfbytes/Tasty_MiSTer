@@ -40,6 +40,7 @@ public:
 
         std::int64_t recover_ns = 4'000'000'000;
     };
+
     static constexpr std::uint32_t kSegmentFrames = kChunksPerSegment;
 
     static constexpr std::uint8_t kSustainWindows = 3;
@@ -50,7 +51,9 @@ public:
     static constexpr std::size_t kMinSlotBytes = 1024u * 1024u;
 
     explicit AviEncoder(const Wiring& w) noexcept : w_(w) {}
+
     AviEncoder(const Wiring& w, const Limits& l) noexcept : w_(w), lim_(l) {}
+
     AviEncoder(const AviEncoder&) = delete;
     AviEncoder& operator=(const AviEncoder&) = delete;
 
@@ -63,8 +66,13 @@ public:
     [[nodiscard]] bool open(const RawFrameSlot& s) noexcept;
     [[nodiscard]] bool close(const RawFrameSlot& s) noexcept;
 
-    [[nodiscard]] bool chunk(const RawFrameSlot& s, bool real, std::uint64_t core_frame,
-                             std::int32_t movie_frame) noexcept;
+    [[nodiscard]] bool chunk(
+        const RawFrameSlot& s,
+        bool real,
+        std::uint64_t core_frame,
+        std::int32_t movie_frame
+    ) noexcept;
+
     [[nodiscard]] Position position() const noexcept { return pos_; }
 
     void note_held() noexcept { held_ = true; }
@@ -75,6 +83,7 @@ public:
     void release() noexcept;
 
     [[nodiscard]] const EncodeStatus::Video& counts() const noexcept { return st_; }
+
     [[nodiscard]] bool take_dirty() noexcept;
 
     [[nodiscard]] static constexpr bool same_rate(std::uint32_t a, std::uint32_t b) noexcept {
@@ -106,8 +115,14 @@ private:
     [[nodiscard]] std::int64_t cpu_now_() const noexcept;
     [[nodiscard]] bool kept_(std::uint64_t core, std::int32_t movie) const noexcept;
     [[nodiscard]] IFrameCodec& codec_for_(RecCodec c) noexcept;
-    [[nodiscard]] bool chunk_one_(IFrameCodec& codec, const RawFrameSlot& s, bool real,
-                                  std::uint32_t cand, std::uint32_t run, bool stable) noexcept;
+    [[nodiscard]] bool chunk_one_(
+        IFrameCodec& codec,
+        const RawFrameSlot& s,
+        bool real,
+        std::uint32_t cand,
+        std::uint32_t run,
+        bool stable
+    ) noexcept;
 
     Wiring w_;
     Limits lim_{};
@@ -159,4 +174,4 @@ private:
     std::uint8_t win_over_ = 0;
 };
 
-}  // namespace mister::app
+}

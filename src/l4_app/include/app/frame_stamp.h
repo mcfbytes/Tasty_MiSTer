@@ -34,4 +34,4 @@ struct FrameStampRun {
     std::uint8_t pad_[2]{};
 };
 
-}  // namespace mister::app
+}

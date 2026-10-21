@@ -20,19 +20,24 @@ namespace {
 constexpr std::string_view kAfilterDir = "filters_audio";
 
 std::optional<std::int32_t> parse_line_int(std::string_view s) {
-    if (!s.empty() && s.front() == '+') s.remove_prefix(1);
-    if (s.empty()) return std::nullopt;
+    if (!s.empty() && s.front() == '+')
+        s.remove_prefix(1);
+    if (s.empty())
+        return std::nullopt;
     std::int32_t v = 0;
     const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v, 10);
-    if (ec != std::errc{} || ptr == s.data()) return std::nullopt;
+    if (ec != std::errc{} || ptr == s.data())
+        return std::nullopt;
     return v;
 }
 
 std::optional<double> parse_line_double(std::string_view s) {
-    if (s.empty()) return std::nullopt;
+    if (s.empty())
+        return std::nullopt;
     double v = 0;
     const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
-    if (ec != std::errc{} || ptr == s.data()) return std::nullopt;
+    if (ec != std::errc{} || ptr == s.data())
+        return std::nullopt;
     return v;
 }
 
@@ -44,8 +49,11 @@ std::string_view strip_leading(std::string_view s) {
 }
 
 bool is_v1_marker(std::string_view st) {
-    if (st.size() < 2) return false;
-    auto lower = [](char c) { return static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c); };
+    if (st.size() < 2)
+        return false;
+    auto lower = [](char c) {
+        return static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    };
     return lower(st[0]) == 'v' && lower(st[1]) == '1';
 }
 
@@ -55,30 +63,36 @@ bool is_v1_marker(std::string_view st) {
     for (;;) {
         const ssize_t n = ::read(fd.get(), chunk, sizeof chunk);
         if (n < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
         }
-        if (n == 0) break;
+        if (n == 0)
+            break;
         out.append(chunk, static_cast<std::size_t>(n));
     }
     return out;
 }
 
-}  // namespace
+}
 
-AudioService AudioService::create() noexcept { return AudioService(); }
+AudioService AudioService::create() noexcept {
+    return AudioService();
+}
 
 void AudioService::set_volume(proto::VolumeCmd kind, int arg) {
     vol_att_ &= kVolValidMask;
 
     switch (kind) {
         case proto::VolumeCmd::SetMute:
-            vol_att_ =
-                static_cast<std::uint8_t>((vol_att_ & kVolAttMask) | (arg != 0 ? kVolMuteBit : 0));
+            vol_att_ = static_cast<std::uint8_t>(
+                (vol_att_ & kVolAttMask) | (arg != 0 ? kVolMuteBit : 0)
+            );
             break;
         case proto::VolumeCmd::SetAtten:
-            vol_att_ = static_cast<std::uint8_t>((vol_att_ & kVolMuteBit) |
-                                                 (static_cast<unsigned>(arg) & kVolAttMask));
+            vol_att_ = static_cast<std::uint8_t>(
+                (vol_att_ & kVolMuteBit) | (static_cast<unsigned>(arg) & kVolAttMask)
+            );
             break;
         case proto::VolumeCmd::ToggleMute:
             vol_att_ ^= kVolMuteBit;
@@ -115,7 +129,8 @@ void AudioService::set_core_volume(int cmd) {
         if (cmd > 0) {
             if (boost != 0 || corevol_att_ == 0) {
                 boost += 0x20;
-                if (boost > kCoreBoostMax) boost = kCoreBoostMax;
+                if (boost > kCoreBoostMax)
+                    boost = kCoreBoostMax;
             } else if (corevol_att_ > 0) {
                 corevol_att_ = static_cast<std::uint8_t>(corevol_att_ - 1);
             }
@@ -133,7 +148,9 @@ void AudioService::set_core_volume(int cmd) {
     dirty_ = true;
 }
 
-Ex<bool> AudioService::probe_filter() { return has_filter_; }
+Ex<bool> AudioService::probe_filter() {
+    return has_filter_;
+}
 
 void AudioService::accept_probe_reply(std::uint8_t raw_reply, bool front_end) noexcept {
     has_filter_ = raw_reply != 0;
@@ -176,7 +193,8 @@ Ex<void> AudioService::load_filter(std::string_view name) {
 }
 
 Ex<void> AudioService::apply_filter(std::string_view contents) {
-    if (!has_filter_) return {};
+    if (!has_filter_)
+        return {};
 
     if (contents.empty()) {
 
@@ -194,19 +212,23 @@ Ex<void> AudioService::apply_filter(std::string_view contents) {
         while (pos < buf.size() && buf[pos] != '\n')
             ++pos;
         std::string_view raw_line(buf.data() + start, pos - start);
-        if (pos < buf.size()) ++pos;
+        if (pos < buf.size())
+            ++pos;
 
         const std::string_view st = strip_leading(raw_line);
-        if (st.empty() || st[0] == '#' || st[0] == ';') continue;
+        if (st.empty() || st[0] == '#' || st[0] == ';')
+            continue;
 
         if (line == 0) {
-            if (!is_v1_marker(st)) break;
+            if (!is_v1_marker(st))
+                break;
             ++line;
             continue;
         }
         if (line == 1 || line == 3 || line == 4 || line == 5) {
             const auto val = parse_line_int(st);
-            if (!val) continue;
+            if (!val)
+                continue;
             const auto u = static_cast<std::uint32_t>(*val);
             filter_words_[filter_word_count_++] = static_cast<std::uint16_t>(u);
             if (line == 1) {
@@ -217,7 +239,8 @@ Ex<void> AudioService::apply_filter(std::string_view contents) {
         }
         if (line == 2) {
             const auto val = parse_line_double(st);
-            if (!val) continue;
+            if (!val)
+                continue;
             const auto coeff = static_cast<std::int64_t>(0x8000000000LL * (*val));
             const auto u = static_cast<std::uint64_t>(coeff);
             filter_words_[filter_word_count_++] = static_cast<std::uint16_t>(u);
@@ -228,7 +251,8 @@ Ex<void> AudioService::apply_filter(std::string_view contents) {
         }
 
         const auto val = parse_line_double(st);
-        if (!val) continue;
+        if (!val)
+            continue;
         const auto coeff = static_cast<std::int32_t>(0x200000 * (*val));
         const auto u = static_cast<std::uint32_t>(coeff);
         filter_words_[filter_word_count_++] = static_cast<std::uint16_t>(u);
@@ -258,7 +282,8 @@ Ex<void> AudioService::flush() {
     hal::Selected cs(link, hal::ChipSelect::Io);
 
     auto op = link.transfer(hal::SpiWord{kUioSetAfilter});
-    if (!op) return std::unexpected(op.error());
+    if (!op)
+        return std::unexpected(op.error());
     return op->v;
 }
 
@@ -266,11 +291,12 @@ namespace {
 [[nodiscard]] Ex<void> write_bytes(hal::ISpiTransport& link, std::span<const std::uint8_t> b) {
     for (const std::uint8_t byte : b) {
         auto r = link.transfer(hal::SpiWord{byte});
-        if (!r) return std::unexpected(r.error());
+        if (!r)
+            return std::unexpected(r.error());
     }
     return {};
 }
-}  // namespace
+}
 
 [[nodiscard]] Ex<void> emit_afilter_volume(hal::ISpiTransport& link, std::uint8_t vol) {
     hal::Selected cs(link, hal::ChipSelect::Io);
@@ -286,4 +312,4 @@ namespace {
     return write_bytes(link, std::span<const std::uint8_t>(b, 2));
 }
 
-}  // namespace mister::svc
+}

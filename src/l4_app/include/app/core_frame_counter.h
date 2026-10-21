@@ -30,6 +30,7 @@ public:
     static constexpr std::uint32_t kMaxRoundWords = proto::FrameCounterRead::kReadWords;
 
     explicit CoreFrameCounter(const Wiring& w) noexcept : w_(w) {}
+
     CoreFrameCounter(const CoreFrameCounter&) = delete;
     CoreFrameCounter& operator=(const CoreFrameCounter&) = delete;
 
@@ -42,8 +43,11 @@ public:
         round_words_ = 0;
         return w;
     }
+
     [[nodiscard]] bool demanded() const noexcept { return demand_.on != 0; }
+
     [[nodiscard]] const CoreFrameRecord& record() const noexcept { return rec_; }
+
     [[nodiscard]] std::uint32_t reads() const noexcept { return counter_.reads(); }
 
 private:
@@ -62,4 +66,4 @@ private:
     std::uint32_t round_words_ = 0;
 };
 
-}  // namespace mister::app
+}

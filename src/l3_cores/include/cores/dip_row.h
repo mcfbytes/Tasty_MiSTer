@@ -23,4 +23,4 @@ struct DipRow {
     std::array<std::uint64_t, kMaxDipIds> val{};
 };
 
-}  // namespace mister::cores::mra
+}

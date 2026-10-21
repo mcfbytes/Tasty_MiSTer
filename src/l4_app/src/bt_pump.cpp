@@ -6,7 +6,8 @@
 namespace mister::app {
 
 void BtPump::tick() {
-    if (state_ == State::Spent) return;
+    if (state_ == State::Spent)
+        return;
 
     if (state_ == State::Unarmed) {
         due_ = clock_->now() + kDelay;
@@ -15,7 +16,8 @@ void BtPump::tick() {
         return;
     }
 
-    if (clock_->now() < due_) return;
+    if (clock_->now() < due_)
+        return;
 
     state_ = State::Spent;
 
@@ -40,11 +42,14 @@ void BtPump::tick() {
     }
 
     if (diag_) {
-        diag_->appendf("{\"t\":\"bt_oneshot\",\"outcome\":\"%s\","
-                       "\"delay_ms\":%u,\"detail\":%u}",
-                       outcome, static_cast<unsigned>(kDelay.count()),
-                       static_cast<unsigned>(detail));
+        diag_->appendf(
+            "{\"t\":\"bt_oneshot\",\"outcome\":\"%s\","
+            "\"delay_ms\":%u,\"detail\":%u}",
+            outcome,
+            static_cast<unsigned>(kDelay.count()),
+            static_cast<unsigned>(detail)
+        );
     }
 }
 
-}  // namespace mister::app
+}

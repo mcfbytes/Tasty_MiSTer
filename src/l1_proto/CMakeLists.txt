@@ -1,13 +1,17 @@
 add_library(mister_proto STATIC
   src/block_slots.cpp
   src/conf_str.cpp
+  src/conf_str_caps.cpp
   src/core_session.cpp
   src/download_session.cpp
   src/frame_counter_read.cpp
   src/image_sink.cpp
+  src/item_table.cpp
   src/joystick.cpp
   src/osd.cpp
-  src/ps2.cpp
+  src/ps2_keyboard.cpp
+  src/ps2_mouse.cpp
+  src/spi_ps2_decoder.cpp
   src/savestate_engine.cpp
   src/savestate_primer.cpp
   src/spi_block_decoder.cpp
@@ -31,8 +35,15 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/block_geometry.h
   proto/block_geometry_hook.h
   proto/block_slots.h
+  proto/disc_announce.h
   proto/late_answers.h
   proto/conf_str.h
+  proto/axi_ddr_decl.h
+  proto/axi_kind.h
+  proto/axi_lw_decl.h
+  proto/axi_unkinded_decl.h
+  proto/capability.h
+  proto/conf_str_caps.h
   proto/conf_switches.h
   proto/core_session.h
   proto/download_session.h
@@ -56,9 +67,12 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/osd_surface.h
   proto/osd_target.h
   proto/osd_transport.h
+  proto/ps2_command_port.h
   proto/ps2_keyboard.h
   proto/ps2_mouse.h
   proto/ps2_frame.h
+  proto/disk_act.h
+  proto/disk_poll_decl.h
   proto/mailbox_act.h
   proto/mailbox_frame.h
   proto/mailbox_frame_decl.h
@@ -72,6 +86,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/sector_floor.h
   proto/session_params.h
   proto/slot_attributes.h
+  proto/slot_record.h
   proto/slot_roles.h
   proto/spi_block_decoder.h
   proto/spi_block_poll.h
@@ -109,68 +124,3 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/user_io/poll_params.h
 )
 
-if(TASTY_BUILD_TESTS)
-  get_filename_component(TASTY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-  set(TASTY_TESTS_DIR "${TASTY_ROOT}/tests")
-
-  function(tasty_proto_suite tasty_name)
-    cmake_parse_arguments(A "HARNESS;REPLAY" "SOURCE;TEST;TIMEOUT" "" ${ARGN})
-    if(NOT A_SOURCE)
-      set(A_SOURCE "tests/${tasty_name}_unit.cpp")
-    endif()
-    if(NOT A_TEST)
-      set(A_TEST "tasty.proto_${tasty_name}")
-    endif()
-    if(NOT A_TIMEOUT)
-      set(A_TIMEOUT 120)
-    endif()
-
-    set(tasty_srcs "${A_SOURCE}")
-    if(A_HARNESS)
-      list(APPEND tasty_srcs "${TASTY_TESTS_DIR}/support/fakecore_transport.cpp")
-    endif()
-
-    tasty_unit_test(tasty_proto_${tasty_name}_unit
-      NAME ${A_TEST}
-      SOURCES ${tasty_srcs}
-      INCLUDES ${TASTY_TESTS_DIR}
-      DEFINES TASTY_CORPORA_DIR="${TASTY_ROOT}/../harness/corpora"
-        TASTY_CAPTURE_DIR="${TASTY_ROOT}/../harness/capture/captures"
-        TASTY_PROTO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
-        TASTY_BLK_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
-      LIBS mister_proto tasty_test_options
-      TIMEOUT ${A_TIMEOUT})
-    if(A_HARNESS)
-      target_link_libraries(tasty_proto_${tasty_name}_unit PRIVATE fakecore)
-    endif()
-    if(A_REPLAY)
-      target_link_libraries(tasty_proto_${tasty_name}_unit PRIVATE trace_replay fakecore)
-    endif()
-  endfunction()
-
-  foreach(tasty_mod IN ITEMS block_slots decoder_row download_session joystick link link_port osd ps2 save_request savestate spi_block_decoder spi_block_poll spi_conf_str_decoder spi_fio_queue spi_identify_decoder spi_osd_mask_decoder spi_sampler spi_status_decoder status_register poll_reader)
-    tasty_proto_suite(${tasty_mod})
-  endforeach()
-
-  tasty_proto_suite(conf_str SOURCE tests/confstr_parity.cpp)
-  tasty_proto_suite(conf_str_items SOURCE tests/conf_str_items.cpp
-                 TEST tasty.proto_conf_str_items)
-  tasty_proto_suite(standard_item)
-  tasty_unit_test(tasty_proto_standard_item_corpus
-    NAME tasty.proto_standard_item_corpus
-    SOURCES tests/standard_item_corpus.cpp
-    INCLUDES ${TASTY_TESTS_DIR}
-    DEFINES TASTY_CONFSTR_FIXTURE_DIR="${TASTY_TESTS_DIR}/fixtures/confstr"
-    LIBS mister_proto tasty_test_options
-    TIMEOUT 60)
-
-  tasty_proto_suite(core_session SOURCE tests/core_session_unit.cpp HARNESS)
-  tasty_proto_suite(frame_counter_read HARNESS)
-
-  tasty_proto_suite(block_slots_parity  SOURCE tests/block_slots_parity.cpp
-                 TEST tasty.proto_block_slots_parity  HARNESS REPLAY)
-  tasty_proto_suite(core_session_parity SOURCE tests/core_session_parity.cpp
-                 TEST tasty.proto_core_session_parity HARNESS REPLAY)
-  tasty_proto_suite(osd_parity          SOURCE tests/osd_capture_parity.cpp
-                 TEST tasty.proto_osd_parity          REPLAY)
-endif()

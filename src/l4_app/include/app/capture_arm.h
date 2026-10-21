@@ -10,4 +10,4 @@ struct CaptureArm {
     std::uint8_t armed = 0;
 };
 
-}  // namespace mister::app
+}

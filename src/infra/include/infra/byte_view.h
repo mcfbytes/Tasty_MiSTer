@@ -10,13 +10,15 @@
 
 namespace mister::infra {
 
-static_assert(std::is_same_v<std::uint8_t, unsigned char>,
-              "std::uint8_t must be unsigned char, or a uint8_t view would not alias");
+static_assert(
+    std::is_same_v<std::uint8_t, unsigned char>,
+    "std::uint8_t must be unsigned char, or a uint8_t view would not alias"
+);
 
 template <class T>
-concept ByteLike = std::is_same_v<std::remove_cv_t<T>, char> ||
-                   std::is_same_v<std::remove_cv_t<T>, unsigned char> ||
-                   std::is_same_v<std::remove_cv_t<T>, std::byte>;
+concept ByteLike = std::is_same_v<std::remove_cv_t<T>, char>
+    || std::is_same_v<std::remove_cv_t<T>, unsigned char>
+    || std::is_same_v<std::remove_cv_t<T>, std::byte>;
 
 template <ByteLike To, ByteLike From, std::size_t N>
     requires(std::is_const_v<To> || !std::is_const_v<From>)
@@ -56,4 +58,4 @@ template <class T>
     return misalignment(p, a) == 0;
 }
 
-}  // namespace mister::infra
+}

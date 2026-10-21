@@ -7,10 +7,12 @@ namespace mister::xthread {
 
 struct NeverPark {
     void arm() noexcept {}
+
     void wait(int) noexcept {}
+
     void disarm() noexcept {}
 };
 
 static_assert(ParkLike<NeverPark>);
 
-}  // namespace mister::xthread
+}

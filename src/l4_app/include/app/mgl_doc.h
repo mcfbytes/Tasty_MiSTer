@@ -22,4 +22,4 @@ struct Mgl final {
     }
 };
 
-}  // namespace mister::app
+}

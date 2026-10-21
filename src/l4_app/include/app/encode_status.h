@@ -70,4 +70,4 @@ constexpr void to_json(infra::JsonOut& o, const EncodeStatus::Video& v) noexcept
 
 using EncodeStatusCell = xthread::Telemetry<EncodeStatus, SeatTag::Encode>;
 
-}  // namespace mister::app
+}

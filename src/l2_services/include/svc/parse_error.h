@@ -21,4 +21,4 @@ struct ParseError {
     FixedStr<kParseErrorChars, StrFit::Clip> text{};
 };
 
-}  // namespace mister::svc
+}

@@ -11,9 +11,15 @@
 
 namespace mister::fw {
 
-ProcessMain::ProcessMain(app::SessionOwner& owner, const ThreadAssembly& assembly,
-                         xthread::ParkFds fds) noexcept
-    : owner_(owner), assembly_(assembly), stop_(fds.stop_wire()), park_(fds.wake(), stop_) {}
+ProcessMain::ProcessMain(
+    app::SessionOwner& owner,
+    const ThreadAssembly& assembly,
+    xthread::ParkFds fds
+) noexcept
+    : owner_(owner),
+      assembly_(assembly),
+      stop_(fds.stop_wire()),
+      park_(fds.wake(), stop_) {}
 
 void ProcessMain::start() noexcept {
     TASTY_SEAT_BODY(ProcessMain);
@@ -33,21 +39,28 @@ void ProcessMain::pass(app::SessionOwner& owner) noexcept {
     (void)owner.tick();
 }
 
-void ProcessMain::serve() noexcept { pass(owner_); }
+void ProcessMain::serve() noexcept {
+    pass(owner_);
+}
 
 bool ProcessMain::idle() const noexcept {
-    if (stopping()) return true;
-    if (owner_.rx().size() != 0 || owner_.ui_requests().size() != 0) return false;
+    if (stopping())
+        return true;
+    if (owner_.rx().size() != 0 || owner_.ui_requests().size() != 0)
+        return false;
 
-    if (owner_.reboot_owed()) return true;
+    if (owner_.reboot_owed())
+        return true;
     return owner_.park_acks_empty() && !owner_.program_owed() && !owner_.rung_pending();
 }
 
-int ProcessMain::park_ms() const noexcept { return owner_.wake_hint_ms(kSupervisorWakeMs); }
-
-bool ProcessMain::stopping() const noexcept {
-    return supervisor_verdict(stop_.ever_requested(), assembly_.rt_exited()) ==
-           SupervisorVerdict::Exit;
+int ProcessMain::park_ms() const noexcept {
+    return owner_.wake_hint_ms(kSupervisorWakeMs);
 }
 
-}  // namespace mister::fw
+bool ProcessMain::stopping() const noexcept {
+    return supervisor_verdict(stop_.ever_requested(), assembly_.rt_exited())
+        == SupervisorVerdict::Exit;
+}
+
+}

@@ -14,8 +14,13 @@ static_assert(InternedFile::kConfigSlots == cores::kMaxConfigSlots);
 static_assert(InternedFile::config_id(cores::kMaxConfigSlots - 1).v == InternedFile::kSlots - 1);
 static_assert(InternedFile::config_id(0).v > InternedFile::kRecycleSlots);
 
-static_assert(InternedFile::kMaxLiveFiles == cores::kMaxStartAssets + (MglPlayer::kMaxItems - 1) +
-                                                 cores::kMaxBootBuffers + InternedFile::kHeldOps);
+static_assert(
+    InternedFile::kMaxLiveFiles
+    == cores::kMaxStartAssets
+        + (MglPlayer::kMaxItems - 1)
+        + cores::kMaxBootBuffers
+        + InternedFile::kHeldOps
+);
 static_assert(InternedFile::kMaxLiveFiles <= InternedFile::kRecycleSlots);
 
 static_assert(InternedFile::kPieceBytes % cores::kFileTxChunkBytes == 0);
@@ -24,7 +29,8 @@ template <SeatTag P>
 void FileBytes<P>::reap_all_() noexcept {
     for (std::size_t n = 0; n < kPool; ++n) {
         const auto i = slab_.producer().reap();
-        if (!i) return;
+        if (!i)
+            return;
         std::vector<std::uint8_t>{}.swap(heap_[*i]);
     }
 }
@@ -33,7 +39,8 @@ template <SeatTag P>
 std::uint16_t FileBytes<P>::live_files_() const noexcept {
     std::uint16_t n = 0;
     for (const auto& h : heap_) {
-        if (!h.empty()) ++n;
+        if (!h.empty())
+            ++n;
     }
     return n;
 }
@@ -49,9 +56,11 @@ std::size_t FileBytes<P>::retained_bytes() const noexcept {
 template <SeatTag P>
 Ex<std::uint8_t> FileBytes<P>::stage_(std::string_view path) noexcept {
     const auto i = slab_.producer().stage();
-    if (!i) return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    if (!i)
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     const infra::OptRef<InternedFile> s = slab_.producer().staged(*i);
-    if (!s) return std::unexpected(Error{Errc::would_block, ERR_SITE(), *i});
+    if (!s)
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), *i});
     *s = InternedFile{};
     if (!s->path.assign(path)) {
         slab_.producer().unstage(*i);
@@ -61,10 +70,15 @@ Ex<std::uint8_t> FileBytes<P>::stage_(std::string_view path) noexcept {
 }
 
 template <SeatTag P>
-Ex<proto::FileId> FileBytes<P>::intern(std::vector<std::uint8_t>&& bytes, std::string_view ext,
-                                       std::string_view path, std::uint32_t load_addr,
-                                       std::uint32_t crc, std::uint64_t whole,
-                                       std::uint64_t offset) {
+Ex<proto::FileId> FileBytes<P>::intern(
+    std::vector<std::uint8_t>&& bytes,
+    std::string_view ext,
+    std::string_view path,
+    std::uint32_t load_addr,
+    std::uint32_t crc,
+    std::uint64_t whole,
+    std::uint64_t offset
+) {
 
     if (bytes.empty() && (whole == 0 || offset != whole)) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
@@ -74,9 +88,11 @@ Ex<proto::FileId> FileBytes<P>::intern(std::vector<std::uint8_t>&& bytes, std::s
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), InternedFile::kMaxLiveFiles});
     }
     const auto i = stage_(path);
-    if (!i) return std::unexpected(i.error());
+    if (!i)
+        return std::unexpected(i.error());
     const infra::OptRef<InternedFile> staged = slab_.producer().staged(*i);
-    if (!staged) return std::unexpected(Error{Errc::would_block, ERR_SITE(), *i});
+    if (!staged)
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), *i});
     InternedFile& s = *staged;
     if (!s.ext.assign(ext)) {
         slab_.producer().unstage(*i);
@@ -92,16 +108,22 @@ Ex<proto::FileId> FileBytes<P>::intern(std::vector<std::uint8_t>&& bytes, std::s
 }
 
 template <SeatTag P>
-Ex<proto::FileId> FileBytes<P>::intern_path(std::string_view path, std::uint64_t size_bytes,
-                                            std::uint32_t crc, std::uint32_t aux) {
+Ex<proto::FileId> FileBytes<P>::intern_path(
+    std::string_view path,
+    std::uint64_t size_bytes,
+    std::uint32_t crc,
+    std::uint32_t aux
+) {
     if (path.empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     reap_all_();
     const auto i = stage_(path);
-    if (!i) return std::unexpected(i.error());
+    if (!i)
+        return std::unexpected(i.error());
     const infra::OptRef<InternedFile> staged = slab_.producer().staged(*i);
-    if (!staged) return std::unexpected(Error{Errc::would_block, ERR_SITE(), *i});
+    if (!staged)
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), *i});
     InternedFile& s = *staged;
     s.size_bytes = size_bytes;
     s.crc = crc;
@@ -110,9 +132,13 @@ Ex<proto::FileId> FileBytes<P>::intern_path(std::string_view path, std::uint64_t
 }
 
 template <SeatTag P>
-Ex<proto::FileId> FileBytes<P>::intern_at(proto::FileId fid, std::vector<std::uint8_t>&& bytes,
-                                          std::string_view ext, std::string_view path,
-                                          std::uint32_t load_addr) {
+Ex<proto::FileId> FileBytes<P>::intern_at(
+    proto::FileId fid,
+    std::vector<std::uint8_t>&& bytes,
+    std::string_view ext,
+    std::string_view path,
+    std::uint32_t load_addr
+) {
     const std::uint16_t id = fid.v;
     if (id <= InternedFile::kRecycleSlots || id >= InternedFile::kSlots) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), id});
@@ -133,8 +159,10 @@ Ex<proto::FileId> FileBytes<P>::intern_at(proto::FileId fid, std::vector<std::ui
         s.ext.clear();
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), id});
     }
-    if (ext.empty()) s.ext.clear();
-    if (path.empty()) s.path.clear();
+    if (ext.empty())
+        s.ext.clear();
+    if (path.empty())
+        s.path.clear();
     s.load_addr = load_addr;
     s.size_bytes = n;
     s.crc = 0;
@@ -147,12 +175,13 @@ Ex<proto::FileId> FileBytes<P>::intern_at(proto::FileId fid, std::vector<std::ui
 template <SeatTag P>
 bool FileBytes<P>::stamp_save(proto::FileId file, proto::FileId save) noexcept {
     const std::uint16_t id = file.v;
-    if (id == InternedFile::kNone || id >= InternedFile::kSlots) return false;
-    infra::OptRef<InternedFile> s =
-        id <= InternedFile::kRecycleSlots
-            ? slab_.producer().staged(static_cast<std::uint8_t>(id - 1))
-            : infra::OptRef<InternedFile>{config_[id - InternedFile::kConfigBase]};
-    if (!s || s->bytes.empty()) return false;
+    if (id == InternedFile::kNone || id >= InternedFile::kSlots)
+        return false;
+    infra::OptRef<InternedFile> s = id <= InternedFile::kRecycleSlots
+        ? slab_.producer().staged(static_cast<std::uint8_t>(id - 1))
+        : infra::OptRef<InternedFile>{config_[id - InternedFile::kConfigBase]};
+    if (!s || s->bytes.empty())
+        return false;
     s->save = save;
     return true;
 }
@@ -160,12 +189,13 @@ bool FileBytes<P>::stamp_save(proto::FileId file, proto::FileId save) noexcept {
 template <SeatTag P>
 bool FileBytes<P>::stamp_edge(proto::FileId file, ContentEdge edge) noexcept {
     const std::uint16_t id = file.v;
-    if (id == InternedFile::kNone || id >= InternedFile::kSlots) return false;
-    infra::OptRef<InternedFile> s =
-        id <= InternedFile::kRecycleSlots
-            ? slab_.producer().staged(static_cast<std::uint8_t>(id - 1))
-            : infra::OptRef<InternedFile>{config_[id - InternedFile::kConfigBase]};
-    if (!s || s->bytes.empty()) return false;
+    if (id == InternedFile::kNone || id >= InternedFile::kSlots)
+        return false;
+    infra::OptRef<InternedFile> s = id <= InternedFile::kRecycleSlots
+        ? slab_.producer().staged(static_cast<std::uint8_t>(id - 1))
+        : infra::OptRef<InternedFile>{config_[id - InternedFile::kConfigBase]};
+    if (!s || s->bytes.empty())
+        return false;
     s->edge = edge;
     return true;
 }
@@ -179,7 +209,8 @@ const InternedFile* FileBytes<P>::get(proto::FileId fid) const noexcept {
     } else if (id > InternedFile::kRecycleSlots && id < InternedFile::kSlots) {
         s = infra::OptRef<const InternedFile>{config_[id - InternedFile::kConfigBase]};
     }
-    if (!s || (s->bytes.empty() && s->path.empty())) return nullptr;
+    if (!s || (s->bytes.empty() && s->path.empty()))
+        return nullptr;
     return &*s;
 }
 
@@ -187,4 +218,4 @@ template class FileBytes<SeatTag::Main>;
 template class FileBytes<SeatTag::Ui>;
 template class FileBytes<SeatTag::Input>;
 
-}  // namespace mister::app
+}

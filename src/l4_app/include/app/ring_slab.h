@@ -14,17 +14,23 @@
 
 namespace mister::app {
 
-template <class Body, std::size_t N, SeatTag ProducerSeat, SeatTag ConsumerSeat,
-          class Position = std::uint32_t>
+template <
+    class Body,
+    std::size_t N,
+    SeatTag ProducerSeat,
+    SeatTag ConsumerSeat,
+    class Position = std::uint32_t>
 class RingSlab {
     TASTY_SEAT_MEDIATOR(Any, Any);
     static_assert(std::is_trivially_copyable_v<Body>, "a slot is recycled in place");
     static_assert(
         (ProducerSeat == SeatTag::RT) != (ConsumerSeat == SeatTag::RT),
-        "exactly one side is T-RT: both ends poll, and only a T-RT pair may build Polled");
+        "exactly one side is T-RT: both ends poll, and only a T-RT pair may build Polled"
+    );
     static_assert(
         std::unsigned_integral<Position> && !std::same_as<Position, bool>,
-        "Position is the ring's own unsigned index type: the release test wraps at its width");
+        "Position is the ring's own unsigned index type: the release test wraps at its width"
+    );
 
 public:
     struct Cell {
@@ -51,8 +57,10 @@ public:
             const SeatScope wiring{ProducerSeat};
             live_ok_ = owner_.set_live(live);
         }
+
         Producer(const Producer&) = delete;
         Producer& operator=(const Producer&) = delete;
+
         ~Producer() {
             const SeatScope stands_in{ProducerSeat};
             for (auto& l : staged_)
@@ -63,30 +71,37 @@ public:
 
         [[nodiscard]] std::optional<Index> reap() noexcept {
             const Loan l = owner_.reap();
-            if (!l) return std::nullopt;
+            if (!l)
+                return std::nullopt;
             return owner_.index_of(l);
         }
 
         [[nodiscard]] std::optional<Index> stage() noexcept {
             Loan l = owner_.acquire();
-            if (!l) return std::nullopt;
+            if (!l)
+                return std::nullopt;
             const Index i = owner_.index_of(l);
             staged_[i] = std::move(l);
             return i;
         }
+
         [[nodiscard]] infra::OptRef<Body> staged(Index i) noexcept {
             seat_assert<ProducerSeat>(ERR_SITE(), "RingSlab::staged off the producer seat");
-            if (i >= N || !staged_[i]) return {};
+            if (i >= N || !staged_[i])
+                return {};
             return infra::OptRef<Body>{staged_[i]->body};
         }
+
         void unstage(Index i) noexcept {
             seat_assert<ProducerSeat>(ERR_SITE(), "RingSlab::unstage off the producer seat");
-            if (i < N) staged_[i] = Loan{};
+            if (i < N)
+                staged_[i] = Loan{};
         }
 
         void send_staged(std::same_as<Position> auto at) noexcept {
             for (auto& l : staged_) {
-                if (!l) continue;
+                if (!l)
+                    continue;
                 l->at = at;
                 owner_.send(std::move(l));
             }
@@ -108,8 +123,10 @@ public:
 
     public:
         explicit Consumer(typename Channel::Worker worker) noexcept : worker_(std::move(worker)) {}
+
         Consumer(const Consumer&) = delete;
         Consumer& operator=(const Consumer&) = delete;
+
         ~Consumer() {
             const SeatScope stands_in{ConsumerSeat};
             for (auto& j : hand_)
@@ -118,7 +135,8 @@ public:
 
         void release_before(std::same_as<Position> auto q) noexcept {
             seat_assert<ConsumerSeat>(ERR_SITE(), "RingSlab::release_before off the consumer seat");
-            if (held_ == 0) return;
+            if (held_ == 0)
+                return;
             for (auto& j : hand_) {
                 if (j && before_(j->at, q)) {
                     j = Job{};
@@ -130,15 +148,18 @@ public:
         void take_sent() noexcept {
             for (std::size_t n = 0; n < N; ++n) {
                 Job j = worker_.take();
-                if (!j) return;
+                if (!j)
+                    return;
                 const Index i = j.index();
                 hand_[i] = std::move(j);
                 ++held_;
             }
         }
+
         [[nodiscard]] infra::OptRef<const Body> held(Index i) const noexcept {
             seat_assert<ConsumerSeat>(ERR_SITE(), "RingSlab::held off the consumer seat");
-            if (i >= N || !hand_[i]) return {};
+            if (i >= N || !hand_[i])
+                return {};
             return infra::OptRef<const Body>{hand_[i]->body};
         }
 
@@ -153,7 +174,10 @@ public:
     };
 
     explicit RingSlab(std::uint8_t live) noexcept
-        : ch_(xthread::Polled{}), producer_(ch_.owner(), live), consumer_(ch_.worker()) {}
+        : ch_(xthread::Polled{}),
+          producer_(ch_.owner(), live),
+          consumer_(ch_.worker()) {}
+
     RingSlab(const RingSlab&) = delete;
     RingSlab& operator=(const RingSlab&) = delete;
     RingSlab(RingSlab&&) = delete;
@@ -161,8 +185,11 @@ public:
     ~RingSlab() = default;
 
     [[nodiscard]] Producer& producer() noexcept { return producer_; }
+
     [[nodiscard]] const Producer& producer() const noexcept { return producer_; }
+
     [[nodiscard]] Consumer& consumer() noexcept { return consumer_; }
+
     [[nodiscard]] const Consumer& consumer() const noexcept { return consumer_; }
 
 private:
@@ -171,4 +198,4 @@ private:
     Consumer consumer_;
 };
 
-}  // namespace mister::app
+}

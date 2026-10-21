@@ -24,4 +24,4 @@ struct LoadRequest {
     ReloadPolicy policy = ReloadPolicy::InProcess;
 };
 
-}  // namespace mister::app
+}

@@ -15,13 +15,14 @@ namespace mister::svc {
 class IArchive;
 class IFile;
 class Vfs;
-}  // namespace mister::svc
+}
 
 namespace mister::cores {
 
 struct MovieArchiveFormat {
     enum class Use : std::uint8_t { Skip, Lines, Json, Value, Presence, Log };
     enum class Naming : std::uint8_t { Exact, BizHawkLump };
+
     struct Rule {
         std::string_view stem;
         Use use = Use::Skip;
@@ -47,23 +48,34 @@ inline constexpr std::array<MovieArchiveFormat::Rule, 5> kBk2Rules{{
     {"Comments", MovieArchiveFormat::Use::Skip},
     {"Subtitles", MovieArchiveFormat::Use::Skip},
 }};
-inline constexpr MovieArchiveFormat kBk2Archive{.rules = kBk2Rules,
-                                                .others = MovieArchiveFormat::Use::Presence,
-                                                .naming = MovieArchiveFormat::Naming::BizHawkLump};
+inline constexpr MovieArchiveFormat kBk2Archive{
+    .rules = kBk2Rules,
+    .others = MovieArchiveFormat::Use::Presence,
+    .naming = MovieArchiveFormat::Naming::BizHawkLump
+};
 inline constexpr std::array<MovieArchiveFormat::Rule, 1> kLsmvRules{{
     {"input", MovieArchiveFormat::Use::Log},
 }};
-inline constexpr MovieArchiveFormat kLsmvArchive{.rules = kLsmvRules,
-                                                 .others = MovieArchiveFormat::Use::Value,
-                                                 .naming = MovieArchiveFormat::Naming::Exact};
+inline constexpr MovieArchiveFormat kLsmvArchive{
+    .rules = kLsmvRules,
+    .others = MovieArchiveFormat::Use::Value,
+    .naming = MovieArchiveFormat::Naming::Exact
+};
 
 [[nodiscard]] Ex<std::unique_ptr<svc::IFile>> open_movie_archive(
-    std::unique_ptr<svc::IArchive> archive, const MovieArchiveFormat& format);
-[[nodiscard]] Ex<std::unique_ptr<svc::IFile>> open_movie_archive(const svc::Vfs& vfs,
-                                                                 std::string_view path,
-                                                                 const MovieArchiveFormat& format);
+    std::unique_ptr<svc::IArchive> archive,
+    const MovieArchiveFormat& format
+);
+[[nodiscard]] Ex<std::unique_ptr<svc::IFile>> open_movie_archive(
+    const svc::Vfs& vfs,
+    std::string_view path,
+    const MovieArchiveFormat& format
+);
 
-[[nodiscard]] Ex<std::string> flatten_json(std::string_view json, std::string_view prefix,
-                                           std::size_t cap);
+[[nodiscard]] Ex<std::string> flatten_json(
+    std::string_view json,
+    std::string_view prefix,
+    std::size_t cap
+);
 
-}  // namespace mister::cores
+}

@@ -27,10 +27,9 @@ struct PassOutcome {
     bool used_video_section = false;
 };
 
-[[nodiscard]] Ex<PassOutcome> parse(std::string_view text, const PassNames& names,
-                                    ConfigSnapshot& into);
+PassOutcome parse(std::string_view text, const PassNames& names, ConfigSnapshot& into);
 
-[[nodiscard]] Ex<ConfigSnapshot> parse_two_pass(std::string_view text, const PassNames& names);
+[[nodiscard]] ConfigSnapshot parse_two_pass(std::string_view text, const PassNames& names);
 
 bool admits(char c);
 
@@ -38,6 +37,6 @@ std::int64_t clamp(const Option& o, std::int64_t v);
 
 SectionMatch match_section(std::string_view header, const PassNames& names);
 
-}  // namespace config_parser
+}
 
-}  // namespace mister::svc
+}

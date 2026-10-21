@@ -10,8 +10,7 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_CXX_COMPILER": "g++-15",
         "CMAKE_C_COMPILER": "gcc-15",
-        "TASTY_TESTS": "ON",
-        "TASTY_BUILD_TESTS": "OFF"
+        "TASTY_TESTS": "ON"
       }
     },
     {
@@ -22,8 +21,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "TASTY_TESTS": "OFF",
-        "TASTY_BUILD_TESTS": "OFF",
-        "TASTY_WERROR": "OFF"
+        "TASTY_WERROR": "OFF",
+        "TASTY_WITH_HDOSD": "ON"
       }
     }
   ],

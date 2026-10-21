@@ -10,7 +10,8 @@ namespace mister::fw {
 void BoardReset::board_reset() {
     TASTY_SEAT_BODY(BoardReset);
 
-    if (!bridges_.request_board_reset()) return;
+    if (!bridges_.request_board_reset())
+        return;
     if (sleeper_) {
         sleeper_->sleep_ms(kResetSettleMs);
         return;
@@ -20,4 +21,4 @@ void BoardReset::board_reset() {
     }
 }
 
-}  // namespace mister::fw
+}

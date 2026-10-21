@@ -10,4 +10,4 @@ struct CoreManifest {
     std::string_view text{};
 };
 
-}  // namespace mister::cores
+}

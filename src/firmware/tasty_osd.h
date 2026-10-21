@@ -13,4 +13,4 @@ public:
     void close_osd() noexcept override { TASTY_SEAT_BODY(NullOsdClose); }
 };
 
-}  // namespace mister::fw
+}

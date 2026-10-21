@@ -13,4 +13,4 @@ struct OptionRowView {
     std::string_view text{};
 };
 
-}  // namespace mister::cores
+}

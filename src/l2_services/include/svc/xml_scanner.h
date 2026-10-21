@@ -30,4 +30,4 @@ private:
     std::size_t pos_ = 0;
 };
 
-}  // namespace mister::svc::xml
+}

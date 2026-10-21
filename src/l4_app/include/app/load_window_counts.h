@@ -16,4 +16,4 @@ struct LoadWindowCounts {
     std::uint32_t cancelled = 0;
 };
 
-}  // namespace mister::app
+}

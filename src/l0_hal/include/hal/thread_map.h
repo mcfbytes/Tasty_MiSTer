@@ -35,16 +35,19 @@ inline constexpr std::size_t kCommRoleMax = 10;
 struct CommName {
     std::array<char, kCommNameMax + 1> text{};
 };
+
 constexpr CommName comm_name(std::string_view prefix, std::string_view role) noexcept {
     CommName out;
-    if (role.size() > kCommNameMax) role = role.substr(0, kCommNameMax);
+    if (role.size() > kCommNameMax)
+        role = role.substr(0, kCommNameMax);
     const std::size_t room = kCommNameMax - role.size();
     const std::size_t avail = room > 0 ? room - 1 : 0;
     const std::size_t keep = prefix.size() < avail ? prefix.size() : avail;
     std::size_t n = 0;
     for (std::size_t i = 0; i < keep; ++i)
         out.text[n++] = prefix[i];
-    if (keep > 0) out.text[n++] = ':';
+    if (keep > 0)
+        out.text[n++] = ':';
     for (const char c : role)
         out.text[n++] = c;
     return out;
@@ -146,7 +149,8 @@ constexpr bool has_row(SeatTag tag) noexcept {
 }
 
 constexpr std::size_t row_index(SeatTag tag) noexcept {
-    if (!has_row(tag)) __builtin_trap();
+    if (!has_row(tag))
+        __builtin_trap();
     return static_cast<std::size_t>(tag) - 1;
 }
 
@@ -163,17 +167,21 @@ constexpr std::size_t name_len(const char* s) noexcept {
 
 constexpr bool well_formed(const ThreadMap& m) noexcept {
     for (std::size_t i = 0; i < m.size(); ++i) {
-        if (static_cast<std::size_t>(m[i].seat) != i + 1) return false;
+        if (static_cast<std::size_t>(m[i].seat) != i + 1)
+            return false;
     }
     return true;
 }
 
 constexpr bool rt_holds_highest_fifo_prio(const ThreadMap& m) noexcept {
     const ThreadRole& rt = seat_of(m, SeatTag::RT);
-    if (rt.policy != SchedPolicy::Fifo) return false;
+    if (rt.policy != SchedPolicy::Fifo)
+        return false;
     for (const ThreadRole& r : m) {
-        if (r.seat == SeatTag::RT) continue;
-        if (r.policy == SchedPolicy::Fifo && r.prio >= rt.prio) return false;
+        if (r.seat == SeatTag::RT)
+            continue;
+        if (r.policy == SchedPolicy::Fifo && r.prio >= rt.prio)
+            return false;
     }
     return true;
 }
@@ -237,8 +245,9 @@ constexpr bool io_outranks_pcm(const ThreadMap& m) noexcept {
 
 constexpr bool recorder_off_rt_cpu(const ThreadMap& m) noexcept {
     const int rt = seat_of(m, SeatTag::RT).cpu;
-    return seat_of(m, SeatTag::Capture).cpu != rt && seat_of(m, SeatTag::Encode).cpu != rt &&
-           seat_of(m, SeatTag::RecWrite).cpu != rt;
+    return seat_of(m, SeatTag::Capture).cpu != rt
+        && seat_of(m, SeatTag::Encode).cpu != rt
+        && seat_of(m, SeatTag::RecWrite).cpu != rt;
 }
 
 constexpr bool launcher_off_rt_cpu(const ThreadMap& m) noexcept {
@@ -249,7 +258,8 @@ constexpr bool launcher_off_rt_cpu(const ThreadMap& m) noexcept {
 constexpr bool other_rows_off_rt_cpu(const ThreadMap& m) noexcept {
     const int rt = seat_of(m, SeatTag::RT).cpu;
     for (const ThreadRole& r : m) {
-        if (r.policy == SchedPolicy::Other && r.cpu == rt) return false;
+        if (r.policy == SchedPolicy::Other && r.cpu == rt)
+            return false;
     }
     return true;
 }
@@ -261,13 +271,19 @@ constexpr bool hdosd_is_other(const ThreadMap& m) noexcept {
 constexpr bool capture_outranks_only_prefetch(const ThreadMap& m) noexcept {
     const ThreadRole& cap = seat_of(m, SeatTag::Capture);
     const ThreadRole& pf = seat_of(m, SeatTag::Prefetch);
-    if (cap.policy != SchedPolicy::Fifo || pf.policy != SchedPolicy::Fifo) return false;
-    if (seat_of(m, SeatTag::Encode).policy != SchedPolicy::Other) return false;
-    if (seat_of(m, SeatTag::RecWrite).policy != SchedPolicy::Other) return false;
-    if (cap.prio <= pf.prio) return false;
+    if (cap.policy != SchedPolicy::Fifo || pf.policy != SchedPolicy::Fifo)
+        return false;
+    if (seat_of(m, SeatTag::Encode).policy != SchedPolicy::Other)
+        return false;
+    if (seat_of(m, SeatTag::RecWrite).policy != SchedPolicy::Other)
+        return false;
+    if (cap.prio <= pf.prio)
+        return false;
     for (const ThreadRole& r : m) {
-        if (r.seat == SeatTag::Capture || r.seat == SeatTag::Prefetch) continue;
-        if (r.policy == SchedPolicy::Fifo && r.prio <= cap.prio) return false;
+        if (r.seat == SeatTag::Capture || r.seat == SeatTag::Prefetch)
+            continue;
+        if (r.policy == SchedPolicy::Fifo && r.prio <= cap.prio)
+            return false;
     }
     return true;
 }
@@ -275,7 +291,8 @@ constexpr bool capture_outranks_only_prefetch(const ThreadMap& m) noexcept {
 constexpr bool policy_prio_consistent(const ThreadMap& m) noexcept {
     for (const ThreadRole& r : m) {
         if (r.policy == SchedPolicy::Fifo) {
-            if (r.prio < 1 || r.prio > 99) return false;
+            if (r.prio < 1 || r.prio > 99)
+                return false;
         } else if (r.prio != 0) {
             return false;
         }
@@ -285,10 +302,13 @@ constexpr bool policy_prio_consistent(const ThreadMap& m) noexcept {
 
 constexpr bool fifo_prios_all_distinct(const ThreadMap& m) noexcept {
     for (std::size_t i = 0; i < m.size(); ++i) {
-        if (m[i].policy != SchedPolicy::Fifo) continue;
+        if (m[i].policy != SchedPolicy::Fifo)
+            continue;
         for (std::size_t j = i + 1; j < m.size(); ++j) {
-            if (m[j].policy != SchedPolicy::Fifo) continue;
-            if (m[i].prio == m[j].prio) return false;
+            if (m[j].policy != SchedPolicy::Fifo)
+                continue;
+            if (m[i].prio == m[j].prio)
+                return false;
         }
     }
     return true;
@@ -296,8 +316,10 @@ constexpr bool fifo_prios_all_distinct(const ThreadMap& m) noexcept {
 
 constexpr bool spawn_stack_consistent(const ThreadMap& m) noexcept {
     for (const ThreadRole& r : m) {
-        if (r.spawn == SpawnKind::Create && r.stack_bytes == 0) return false;
-        if (r.spawn == SpawnKind::PromoteInPlace && r.stack_bytes != 0) return false;
+        if (r.spawn == SpawnKind::Create && r.stack_bytes == 0)
+            return false;
+        if (r.spawn == SpawnKind::PromoteInPlace && r.stack_bytes != 0)
+            return false;
     }
     return true;
 }
@@ -305,16 +327,20 @@ constexpr bool spawn_stack_consistent(const ThreadMap& m) noexcept {
 constexpr SeatTag highest_fifo_seat(const ThreadMap& m) noexcept {
     const ThreadRole* best = nullptr;
     for (const ThreadRole& r : m) {
-        if (r.policy != SchedPolicy::Fifo) continue;
-        if (best == nullptr || r.prio > best->prio) best = &r;
+        if (r.policy != SchedPolicy::Fifo)
+            continue;
+        if (best == nullptr || r.prio > best->prio)
+            best = &r;
     }
     return best != nullptr ? best->seat : m[0].seat;
 }
 
 constexpr bool names_fit_comm(const std::array<SeatNameRow, kSeatTagCount>& rows) noexcept {
     for (const SeatNameRow& r : rows) {
-        if (r.second == nullptr || name_len(r.second) == 0) return false;
-        if (name_len(r.second) > kCommRoleMax) return false;
+        if (r.second == nullptr || name_len(r.second) == 0)
+            return false;
+        if (name_len(r.second) > kCommRoleMax)
+            return false;
     }
     return true;
 }
@@ -322,22 +348,28 @@ constexpr bool names_fit_comm(const std::array<SeatNameRow, kSeatTagCount>& rows
 constexpr int max_cpu(const ThreadMap& m) noexcept {
     int hi = 0;
     for (const ThreadRole& r : m) {
-        if (r.cpu > hi) hi = r.cpu;
+        if (r.cpu > hi)
+            hi = r.cpu;
     }
     return hi;
 }
+
 constexpr bool cpus_within(const ThreadMap& m, long online_cpus) noexcept {
-    if (online_cpus <= 0) return false;
+    if (online_cpus <= 0)
+        return false;
     for (const ThreadRole& r : m) {
-        if (r.cpu < 0 || static_cast<long>(r.cpu) >= online_cpus) return false;
+        if (r.cpu < 0 || static_cast<long>(r.cpu) >= online_cpus)
+            return false;
     }
     return true;
 }
 
 constexpr bool main_off_rt_cpu(const ThreadMap& m, int main_cpu) noexcept {
-    if (main_cpu == seat_of(m, SeatTag::RT).cpu) return false;
+    if (main_cpu == seat_of(m, SeatTag::RT).cpu)
+        return false;
     for (const ThreadRole& r : m) {
-        if (r.cpu == main_cpu) return true;
+        if (r.cpu == main_cpu)
+            return true;
     }
     return false;
 }
@@ -348,4 +380,4 @@ bool widen_self_affinity() noexcept;
 
 bool restore_self_affinity() noexcept;
 
-}  // namespace mister::hal
+}

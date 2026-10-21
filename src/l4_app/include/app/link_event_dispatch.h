@@ -45,4 +45,4 @@ concept LinkEventInputSink = requires(S& s, const proto::LinkEvent& m) {
     s.misrouted(m);
 };
 
-}  // namespace mister::app
+}

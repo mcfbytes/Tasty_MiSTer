@@ -12,4 +12,4 @@ public:
     virtual void publish_core_identity() = 0;
 };
 
-}  // namespace mister::cores
+}

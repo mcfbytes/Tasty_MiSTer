@@ -11,4 +11,4 @@ public:
     virtual std::chrono::nanoseconds now() const = 0;
 };
 
-}  // namespace mister::os
+}

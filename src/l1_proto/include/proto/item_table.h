@@ -83,22 +83,25 @@ struct Item {
     std::uint8_t subfield_count = 0;
     friend constexpr bool operator==(const Item&, const Item&) = default;
 };
+
 static_assert(std::is_trivially_copyable_v<Item>);
 
 [[nodiscard]] Visibility evaluate(const Item& it, OsdMask hdmask) noexcept;
 
 class ItemTable {
-    TASTY_SEAT_EXEMPT(component);
+    TASTY_SEAT_EXEMPT(const_shared);
 
 public:
     [[nodiscard]] static Ex<ItemTable> parse(std::string_view raw);
 
     [[nodiscard]] std::span<const Item> items() const noexcept { return items_; }
+
     [[nodiscard]] std::string_view core_name() const noexcept { return text(name_); }
+
     [[nodiscard]] std::string_view text(TextSpan s) const noexcept {
         return (static_cast<std::size_t>(s.off) + s.len <= text_.size())
-                   ? std::string_view{text_}.substr(s.off, s.len)
-                   : std::string_view{};
+            ? std::string_view{text_}.substr(s.off, s.len)
+            : std::string_view{};
     }
 
     [[nodiscard]] std::string_view subfield(const Item& it, unsigned n) const noexcept;
@@ -106,7 +109,8 @@ public:
     [[nodiscard]] std::optional<std::size_t> info_row() const noexcept {
         for (std::size_t i = 0; i < items_.size(); ++i) {
             const std::string_view raw = text(items_[i].raw);
-            if (!raw.empty() && raw.front() == 'I') return i;
+            if (!raw.empty() && raw.front() == 'I')
+                return i;
         }
         return std::nullopt;
     }
@@ -126,4 +130,4 @@ private:
     bool terminated_early_ = false;
 };
 
-}  // namespace mister::proto
+}

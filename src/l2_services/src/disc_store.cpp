@@ -20,14 +20,16 @@ void DiscStore::publish_() noexcept {
 
 Ex<std::size_t> DiscStore::read_form(DiscForm form, proto::Lba lba, std::span<std::byte> dst) {
     TASTY_SEAT_BODY(DiscStore);
-    if (!engine_.has_value()) return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
-    Ex<std::size_t> r = form == DiscForm::Subcode     ? engine_->read_subcode(lba, dst)
-                        : form == DiscForm::UserData  ? engine_->read_user_data(lba, dst)
-                        : form == DiscForm::FullFrame ? engine_->read_full_frame(lba, dst)
-                                                      : engine_->read_raw_frame(lba, dst);
+    if (!engine_.has_value())
+        return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
+    Ex<std::size_t> r = form == DiscForm::Subcode ? engine_->read_subcode(lba, dst)
+        : form == DiscForm::UserData              ? engine_->read_user_data(lba, dst)
+        : form == DiscForm::FullFrame             ? engine_->read_full_frame(lba, dst)
+                                                  : engine_->read_raw_frame(lba, dst);
     if (form != DiscForm::Subcode) {
 
-        if (lba.v != next_lba_) engine_->advise_ahead(lba);
+        if (lba.v != next_lba_)
+            engine_->advise_ahead(lba);
         next_lba_ = lba.v + 1;
     }
 
@@ -60,7 +62,8 @@ bool DiscStore::ensure_engine_(infra::OptRef<const CuePolicy> policy) noexcept {
 
 bool DiscStore::mount(infra::OptRef<const CuePolicy> policy, std::string_view path) noexcept {
     TASTY_SEAT_BODY(DiscStore);
-    if (!ensure_engine_(policy)) return false;
+    if (!ensure_engine_(policy))
+        return false;
 
     if (path.empty()) {
         (void)engine_->unmount();
@@ -74,7 +77,8 @@ bool DiscStore::mount(infra::OptRef<const CuePolicy> policy, std::string_view pa
 
 bool DiscStore::unmount(infra::OptRef<const CuePolicy> policy) noexcept {
     TASTY_SEAT_BODY(DiscStore);
-    if (!ensure_engine_(policy)) return false;
+    if (!ensure_engine_(policy))
+        return false;
     (void)engine_->unmount();
     publish_();
     return false;
@@ -87,4 +91,4 @@ void DiscStore::release() noexcept {
     publish_();
 }
 
-}  // namespace mister::svc
+}

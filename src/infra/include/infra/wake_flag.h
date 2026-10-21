@@ -6,34 +6,29 @@
 
 #include <atomic>
 #include <cerrno>
-#include <concepts>
 #include <cstdint>
 
 #include "infra/error.h"
+#include "infra/kick_policy.h"
 #include "infra/unique_fd.h"
 #include "infra/seat.h"
 
 namespace mister::xthread {
 
-struct EventFdKick {
-    static constexpr bool kModel = false;
-};
-struct ModelKick {
-    static constexpr bool kModel = true;
-};
-template <class K>
-concept KickPolicy = std::same_as<K, EventFdKick> || std::same_as<K, ModelKick>;
-
 template <KickPolicy Kick = EventFdKick>
 class BasicWakeFlag {
     TASTY_SEAT_MEDIATOR(Any, Any);
     using Seq = std::uint32_t;
-    static_assert(std::atomic<Seq>::is_always_lock_free,
-                  "request() is reachable from a signal handler; "
-                  "[support.signal] admits only a lock-free atomic there");
-    static_assert(static_cast<Seq>(0) - static_cast<Seq>(1) > 0,
-                  "the counter must be UNSIGNED: wrap has to be defined, and "
-                  "signed overflow is UB, not a large number");
+    static_assert(
+        std::atomic<Seq>::is_always_lock_free,
+        "request() is reachable from a signal handler; "
+        "[support.signal] admits only a lock-free atomic there"
+    );
+    static_assert(
+        static_cast<Seq>(0) - static_cast<Seq>(1) > 0,
+        "the counter must be UNSIGNED: wrap has to be defined, and "
+        "signed overflow is UB, not a large number"
+    );
 
 public:
     BasicWakeFlag() = default;
@@ -41,7 +36,8 @@ public:
     BasicWakeFlag(BasicWakeFlag&& o) noexcept
         : seq_(o.seq_.load(std::memory_order_relaxed)),
           armed_(o.armed_.load(std::memory_order_relaxed)),
-          pending_(o.pending_.load(std::memory_order_relaxed)), fd_(std::move(o.fd_)) {}
+          pending_(o.pending_.load(std::memory_order_relaxed)),
+          fd_(std::move(o.fd_)) {}
 
     [[nodiscard]] Ex<void> open_fd() noexcept {
         if constexpr (Kick::kModel) {
@@ -50,7 +46,8 @@ public:
             const int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
             if (fd < 0) {
                 return std::unexpected(
-                    Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+                    Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)}
+                );
             }
             fd_.reset(fd);
             return {};
@@ -69,7 +66,8 @@ public:
             pending_.fetch_add(1, std::memory_order_release);
         } else {
             const int fd = fd_.get();
-            if (fd < 0) return;
+            if (fd < 0)
+                return;
             const int saved = errno;
             const std::uint64_t one = 1;
             ssize_t n = 0;
@@ -102,7 +100,8 @@ public:
 
     void kick_if_armed() noexcept {
         std::atomic_thread_fence(std::memory_order_seq_cst);
-        if (armed_.load(std::memory_order_acquire)) kick();
+        if (armed_.load(std::memory_order_acquire))
+            kick();
     }
 
     [[nodiscard]] std::uint32_t pending() const noexcept
@@ -125,7 +124,8 @@ public:
 
         [[nodiscard]] bool take(const BasicWakeFlag& w) noexcept {
             const Seq now = w.seq_.load(std::memory_order_acquire);
-            if (now == seen_) return false;
+            if (now == seen_)
+                return false;
             seen_ = now;
             return true;
         }
@@ -139,11 +139,13 @@ public:
 
     public:
         explicit Kicker(BasicWakeFlag& flag) noexcept : flag_(&flag) {}
+
         void kick() const noexcept { flag_->kick(); }
 
     private:
         BasicWakeFlag* flag_;
     };
+
     [[nodiscard]] Kicker kicker() noexcept { return Kicker{*this}; }
 
     void drain() noexcept {
@@ -151,7 +153,8 @@ public:
             pending_.exchange(0, std::memory_order_acquire);
         } else {
             const int fd = fd_.get();
-            if (fd < 0) return;
+            if (fd < 0)
+                return;
             std::uint64_t v = 0;
             ssize_t n = 0;
             do {
@@ -172,4 +175,4 @@ using WakeFlag = BasicWakeFlag<EventFdKick>;
 
 struct Polled {};
 
-}  // namespace mister::xthread
+}

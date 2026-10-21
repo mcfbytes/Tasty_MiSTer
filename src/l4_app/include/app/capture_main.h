@@ -16,24 +16,34 @@ class CaptureMain final : public xthread::SeatMain<CaptureMain> {
 
 public:
     CaptureMain(FrameCopier& copier, xthread::ParkFds fds) noexcept
-        : copier_(copier), wake_(fds.wake()), stop_(std::move(fds).take_stop()),
+        : copier_(copier),
+          wake_(fds.wake()),
+          stop_(std::move(fds).take_stop()),
           park_(wake_, stop_) {}
+
     CaptureMain(const CaptureMain&) = delete;
     CaptureMain& operator=(const CaptureMain&) = delete;
     CaptureMain(CaptureMain&&) = delete;
     CaptureMain& operator=(CaptureMain&&) = delete;
 
     void start() noexcept;
+
     void stop() noexcept { stop_.request(); }
 
     void serve() noexcept;
+
     [[nodiscard]] bool idle() const noexcept { return stopping() || copier_.idle(); }
+
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
     [[nodiscard]] int park_ms() const noexcept { return copier_.park_ms(); }
+
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept { return false; }
+
     [[nodiscard]] bool pause_pending() const noexcept { return false; }
+
     void settle() noexcept { copier_.release(); }
 
 private:
@@ -45,4 +55,4 @@ private:
 
 static_assert(xthread::SeatBody<CaptureMain>);
 
-}  // namespace mister::app
+}

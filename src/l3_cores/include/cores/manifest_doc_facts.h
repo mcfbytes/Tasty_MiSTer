@@ -14,4 +14,4 @@ struct ManifestDocFacts {
     bool setname_same_dir = false;
 };
 
-}  // namespace mister::cores
+}

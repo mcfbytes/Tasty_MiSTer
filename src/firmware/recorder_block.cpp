@@ -6,9 +6,11 @@
 namespace mister::fw {
 
 std::optional<hal::ScalerBuffers> RecorderBlock::map_scaler_buffers(
-    std::span<const hal::PhysRegion> regions) {
+    std::span<const hal::PhysRegion> regions
+) {
     std::optional<hal::ScalerBuffers> out;
-    if (regions.size() != hal::kRegionCount) return out;
+    if (regions.size() != hal::kRegionCount)
+        return out;
 
     auto m = hal::ScalerBuffers::map(regions[static_cast<std::size_t>(hal::RegionId::ScalerOut)]);
     if (m) {
@@ -19,31 +21,41 @@ std::optional<hal::ScalerBuffers> RecorderBlock::map_scaler_buffers(
     return out;
 }
 
-RecorderBlock::RecorderBlock(const BootParts& plat, DeviceBlock& device,
-                             const app::ReplayStatusCell& replay_status)
-    : copier_{app::FrameCopier::Wiring{.clock = device.clock_,
-                                       .delay = capture_delay_,
-                                       .control = rec_control_,
-                                       .status = rec_status_,
-                                       .demand = device.frame_demand_,
-                                       .frames = device.core_frames_,
-                                       .replay = replay_status,
-                                       .writer = rec_write_status_,
-                                       .avi_writer = avi_write_status_,
-                                       .video = device.video_pump_.geometry_cell(),
-                                       .channel = raw_frames_},
-              map_scaler_buffers(plat.regions)},
-      avi_encoder_{
-          app::AviEncoder::Wiring{.out = infra::OptRef<app::ChunkChannel>{chunks_},
-                                  .raw = infra::OptRef<const app::RawFrameChannel>{raw_frames_},
-                                  .clock = infra::OptRef<const os::IClock>{device.clock_},
-                                  .cpu = infra::OptRef<const os::IClock>{encode_cpu_}}},
-      hasher_{app::FrameHasher::Wiring{.channel = raw_frames_,
-                                       .out = sidecar_ring_,
-                                       .writer_wake = rec_write_wake_,
-                                       .status = encode_status_,
-                                       .clock = device.clock_,
-                                       .video = avi_encoder_}},
+RecorderBlock::RecorderBlock(
+    const BootParts& plat,
+    DeviceBlock& device,
+    const app::ReplayStatusCell& replay_status
+)
+    : copier_{
+          app::FrameCopier::Wiring{
+              .clock = device.clock_,
+              .delay = capture_delay_,
+              .control = rec_control_,
+              .status = rec_status_,
+              .demand = device.frame_demand_,
+              .frames = device.core_frames_,
+              .replay = replay_status,
+              .writer = rec_write_status_,
+              .avi_writer = avi_write_status_,
+              .video = device.video_pump_.geometry_cell(),
+              .channel = raw_frames_
+          },
+          map_scaler_buffers(plat.regions)
+      },
+      avi_encoder_{app::AviEncoder::Wiring{
+          .out = infra::OptRef<app::ChunkChannel>{chunks_},
+          .raw = infra::OptRef<const app::RawFrameChannel>{raw_frames_},
+          .clock = infra::OptRef<const os::IClock>{device.clock_},
+          .cpu = infra::OptRef<const os::IClock>{encode_cpu_}
+      }},
+      hasher_{app::FrameHasher::Wiring{
+          .channel = raw_frames_,
+          .out = sidecar_ring_,
+          .writer_wake = rec_write_wake_,
+          .status = encode_status_,
+          .clock = device.clock_,
+          .video = avi_encoder_
+      }},
       sidecar_writer_{app::SidecarWriter::Wiring{.in = sidecar_ring_, .status = rec_write_status_}},
       avi_writer_{app::AviWriter::Wiring{.in = chunks_, .status = avi_write_status_}},
       recorder_{app::RecorderControl::Wiring{
@@ -52,7 +64,8 @@ RecorderBlock::RecorderBlock(const BootParts& plat, DeviceBlock& device,
           .status = infra::OptRef<const app::RecorderStatusCell>{rec_status_},
           .writer = infra::OptRef<const app::RecWriteStatusCell>{rec_write_status_},
           .diag = infra::OptRef<xthread::DiagLog>{device.diag_log_},
-          .identity = infra::OptRef<const app::IdentityLatch>{device.session_.identity()}}} {}
+          .identity = infra::OptRef<const app::IdentityLatch>{device.session_.identity()}
+      }} {}
 
 void RecorderBlock::open_seats(ThreadAssembly::SeatMains& mains) noexcept {
     if (auto c = xthread::ParkFds::create(capture_wake_); !c) {
@@ -71,4 +84,4 @@ void RecorderBlock::open_seats(ThreadAssembly::SeatMains& mains) noexcept {
     }
 }
 
-}  // namespace mister::fw
+}

@@ -11,4 +11,4 @@ struct AnalogXy {
     friend constexpr bool operator==(AnalogXy, AnalogXy) = default;
 };
 
-}  // namespace mister::svc
+}

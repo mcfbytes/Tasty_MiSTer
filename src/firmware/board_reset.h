@@ -17,9 +17,13 @@ class BoardReset final : public app::IBoardReset {
 public:
     static constexpr unsigned kResetSettleMs = 5000;
 
-    explicit BoardReset(hal::IBridgeSequencer& bridges,
-                        infra::OptRef<app::ISleeper> sleeper = {}) noexcept
-        : bridges_(bridges), sleeper_(sleeper) {}
+    explicit BoardReset(
+        hal::IBridgeSequencer& bridges,
+        infra::OptRef<app::ISleeper> sleeper = {}
+    ) noexcept
+        : bridges_(bridges),
+          sleeper_(sleeper) {}
+
     BoardReset(const BoardReset&) = delete;
     BoardReset& operator=(const BoardReset&) = delete;
 
@@ -30,4 +34,4 @@ private:
     infra::OptRef<app::ISleeper> sleeper_{};
 };
 
-}  // namespace mister::fw
+}

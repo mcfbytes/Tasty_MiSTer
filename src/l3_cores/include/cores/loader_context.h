@@ -26,4 +26,4 @@ struct LoaderContext {
 
 using MakeLoader = std::unique_ptr<ILoader> (*)(const LoaderContext&);
 
-}  // namespace mister::cores
+}

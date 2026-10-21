@@ -31,9 +31,10 @@ private:
 
         std::optional<os::I2cDevice> dev{};
     };
+
     Slot* find(std::uint8_t addr) noexcept;
 
     std::array<Slot, 4> slots_{};
 };
 
-}  // namespace mister::svc::adv7513
+}

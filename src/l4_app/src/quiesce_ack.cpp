@@ -5,18 +5,22 @@ namespace mister::app {
 
 void QuiesceAck::poll(QuiesceChannel& ch) noexcept {
     TASTY_SEAT_BODY(QuiesceAck);
-    if (asked_ || parked_) return;
+    if (asked_ || parked_)
+        return;
     const auto q = ch.take_ask();
-    if (!q) return;
+    if (!q)
+        return;
     asked_ = true;
     gen_ = q->gen;
 }
 
 void QuiesceAck::step(QuiesceChannel& ch, bool held_back) noexcept {
     TASTY_SEAT_BODY(QuiesceAck);
-    if (!asked_) return;
+    if (!asked_)
+        return;
 
-    if (held_back) return;
+    if (held_back)
+        return;
     if (!ch.post_ack(Quiesced{gen_})) {
         ++drops_;
         return;
@@ -37,4 +41,4 @@ void QuiesceAck::release() noexcept {
     parked_ = false;
 }
 
-}  // namespace mister::app
+}

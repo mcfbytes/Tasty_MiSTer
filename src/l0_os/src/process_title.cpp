@@ -21,7 +21,7 @@ char* region_end(int argc, char** argv, char** env) noexcept {
     return end;
 }
 
-}  // namespace
+}
 
 Ex<ProcessTitle> ProcessTitle::create(int argc, char** argv, char**& env) noexcept {
     if (argc <= 0 || argv == nullptr || argv[0] == nullptr)
@@ -53,10 +53,27 @@ Ex<ProcessTitle> ProcessTitle::create(int argc, char** argv, char**& env) noexce
     return ProcessTitle{std::span<char>{start, static_cast<std::size_t>(end - start)}};
 }
 
+Ex<ProcessTitle> ProcessTitle::create(
+    int argc,
+    char** argv,
+    char**& env,
+    std::string_view title
+) noexcept {
+    Ex<ProcessTitle> t = create(argc, argv, env);
+    if (t)
+        t->write(title);
+    return t;
+}
+
 void ProcessTitle::set(std::string_view title) noexcept {
     TASTY_SEAT_BODY(ProcessTitle);
+    write(title);
+}
+
+void ProcessTitle::write(std::string_view title) noexcept {
     const std::size_t cap = region_.size();
-    if (cap == 0) return;
+    if (cap == 0)
+        return;
     std::size_t n = title.size();
     if (n + 1 > cap) {
         n = cap - 1;
@@ -67,4 +84,4 @@ void ProcessTitle::set(std::string_view title) noexcept {
     std::memset(region_.data() + n + 1, 0, cap - n - 1);
 }
 
-}  // namespace mister::os
+}

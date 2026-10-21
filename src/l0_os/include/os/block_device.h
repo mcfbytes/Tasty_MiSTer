@@ -20,4 +20,4 @@ private:
     int fd_ = -1;
 };
 
-}  // namespace mister::os
+}

@@ -21,4 +21,4 @@ constexpr void set_verdict(SaveExtent& level, SaveVerdict v) noexcept {
     level.answer = v == SaveVerdict::Known ? SaveAnswer::Known : SaveAnswer::Declined;
 }
 
-}  // namespace mister::cores
+}

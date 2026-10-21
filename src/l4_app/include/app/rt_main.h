@@ -15,7 +15,7 @@
 namespace mister::reactor {
 class Executive;
 class RoundTimer;
-}  // namespace mister::reactor
+}
 
 namespace mister::app {
 
@@ -46,12 +46,21 @@ public:
     };
 
     RtMain(reactor::Executive& exec, const hal::LinkTimingValues& timing, Wiring wiring) noexcept
-        : exec_(exec), session_(wiring.session), input_(wiring.input), osd_(wiring.osd),
-          timer_(wiring.timer), wire_(wiring.wire), park_(exec),
-          replay_((wiring.replay && wiring.replay_ring) ? wiring.replay
-                                                        : infra::OptRef<ReplayGate>{}),
-          replay_ring_(std::move(wiring.replay_ring)), frames_(wiring.frames),
-          scanout_(wiring.scanout), round_budget_words_(timing.round_budget_words) {}
+        : exec_(exec),
+          session_(wiring.session),
+          input_(wiring.input),
+          osd_(wiring.osd),
+          timer_(wiring.timer),
+          wire_(wiring.wire),
+          park_(exec),
+          replay_(
+              (wiring.replay && wiring.replay_ring) ? wiring.replay : infra::OptRef<ReplayGate>{}
+          ),
+          replay_ring_(std::move(wiring.replay_ring)),
+          frames_(wiring.frames),
+          scanout_(wiring.scanout),
+          round_budget_words_(timing.round_budget_words) {}
+
     RtMain(const RtMain&) = delete;
     RtMain& operator=(const RtMain&) = delete;
     RtMain(RtMain&&) = delete;
@@ -70,13 +79,19 @@ public:
     [[nodiscard]] Ex<void> result() const noexcept;
 
     void serve() noexcept;
+
     [[nodiscard]] bool idle() const noexcept { return true; }
+
     [[nodiscard]] bool stopping() const noexcept { return stopping_; }
+
     [[nodiscard]] int park_ms() const noexcept { return -1; }
+
     [[nodiscard]] RtPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept { return false; }
+
     [[nodiscard]] bool pause_pending() const noexcept { return false; }
+
     void settle() noexcept;
 
     static constexpr unsigned kLinkOpBudget = 8;
@@ -84,8 +99,12 @@ public:
 
 private:
     template <SeatTag Producer>
-    unsigned drain_(LinkTxChannel<Producer>& inbox, unsigned already, unsigned budget,
-                    bool windows_closed) noexcept;
+    unsigned drain_(
+        LinkTxChannel<Producer>& inbox,
+        unsigned already,
+        unsigned budget,
+        bool windows_closed
+    ) noexcept;
 
     bool drain_fio_() noexcept;
 
@@ -122,4 +141,4 @@ private:
 
 static_assert(xthread::SeatBody<RtMain>);
 
-}  // namespace mister::app
+}

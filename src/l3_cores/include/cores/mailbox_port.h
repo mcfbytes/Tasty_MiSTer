@@ -6,6 +6,7 @@
 namespace mister::hal {
 class ISpiTransport;
 }
+
 namespace mister::proto {
 class SpiFioQueue;
 }
@@ -16,8 +17,11 @@ class IMailboxPort {
 public:
     virtual ~IMailboxPort() = default;
 
-    virtual void service_rt(hal::ISpiTransport& link, proto::SpiFioQueue& queue,
-                            const proto::MailboxFrameDecl& frame) noexcept = 0;
+    virtual void service_rt(
+        hal::ISpiTransport& link,
+        proto::SpiFioQueue& queue,
+        const proto::MailboxFrameDecl& frame
+    ) noexcept = 0;
 
 protected:
     IMailboxPort() = default;
@@ -25,4 +29,4 @@ protected:
     IMailboxPort& operator=(const IMailboxPort&) = default;
 };
 
-}  // namespace mister::cores
+}

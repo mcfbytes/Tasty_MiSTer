@@ -42,4 +42,4 @@ inline constexpr CoreProfile kMegaDrive{
 
 std::unique_ptr<Core> make_megadrive(const CoreProfile& p, const CoreGrant& g);
 
-}  // namespace mister::cores::manifests
+}

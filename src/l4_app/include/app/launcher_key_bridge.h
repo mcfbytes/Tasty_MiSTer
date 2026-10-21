@@ -24,11 +24,14 @@ public:
     static constexpr std::size_t kPadSlots = 32;
 
     explicit LauncherKeyBridge(os::IKeyInjector& out) noexcept : out_(out) {}
+
     LauncherKeyBridge(const LauncherKeyBridge&) = delete;
     LauncherKeyBridge& operator=(const LauncherKeyBridge&) = delete;
 
     [[nodiscard]] bool set_active(bool on) noexcept;
+
     [[nodiscard]] bool active() const noexcept { return active_; }
+
     void key(std::uint16_t code, bool down) noexcept;
 
     void pad(std::size_t slot, std::uint32_t level) noexcept;
@@ -52,4 +55,4 @@ private:
     Counters n_{};
 };
 
-}  // namespace mister::app
+}

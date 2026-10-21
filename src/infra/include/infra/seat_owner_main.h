@@ -9,4 +9,4 @@ struct Main {
     TASTY_SEAT_RESIDENT(Main);
 };
 
-}  // namespace mister::seat_owner
+}

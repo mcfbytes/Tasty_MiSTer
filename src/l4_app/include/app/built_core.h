@@ -31,4 +31,4 @@ struct BuiltCore {
 
 using CoreBay = xthread::SlotPool<BuiltCore, kCoreBaySlots>;
 
-}  // namespace mister::app
+}

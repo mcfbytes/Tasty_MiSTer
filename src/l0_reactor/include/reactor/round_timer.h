@@ -27,7 +27,9 @@ public:
 
     std::int64_t end(std::int64_t t_end_ns) noexcept;
     void flush(std::int64_t now_ns) noexcept;
+
     [[nodiscard]] std::int64_t last_mark_ns() const noexcept { return last_mark_ns_; }
+
     [[nodiscard]] const RoundTimingCell& cell() const noexcept { return cell_; }
 
     void preload_all_steady(std::uint32_t rounds, std::uint64_t sum_ns) noexcept {
@@ -36,8 +38,11 @@ public:
     }
 
 private:
-    static std::size_t record_(RoundTiming::Dist& d, std::uint64_t ns,
-                               RoundTiming::Cause c) noexcept;
+    static std::size_t record_(
+        RoundTiming::Dist& d,
+        std::uint64_t ns,
+        RoundTiming::Cause c
+    ) noexcept;
     void close_epoch_(std::int64_t now_ns) noexcept;
 
     RoundTiming acc_{};
@@ -51,4 +56,4 @@ private:
     RoundTimingCell cell_{};
 };
 
-}  // namespace mister::reactor
+}

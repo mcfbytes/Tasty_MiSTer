@@ -23,8 +23,10 @@ public:
     [[nodiscard]] virtual bool writable() const noexcept = 0;
 
     [[nodiscard]] virtual Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) = 0;
-    [[nodiscard]] virtual Ex<std::size_t> write_at(std::uint64_t off,
-                                                   std::span<const std::byte> src) = 0;
+    [[nodiscard]] virtual Ex<std::size_t> write_at(
+        std::uint64_t off,
+        std::span<const std::byte> src
+    ) = 0;
 
 protected:
     IDiskImage() = default;
@@ -32,8 +34,11 @@ protected:
     IDiskImage& operator=(const IDiskImage&) = default;
 };
 
-[[nodiscard]] Ex<std::unique_ptr<IDiskImage>> open_disk_image(const Vfs& vfs, std::string_view path,
-                                                              std::span<const DiskFormatRow> rows,
-                                                              OpenMode mode);
+[[nodiscard]] Ex<std::unique_ptr<IDiskImage>> open_disk_image(
+    const Vfs& vfs,
+    std::string_view path,
+    std::span<const DiskFormatRow> rows,
+    OpenMode mode
+);
 
-}  // namespace mister::svc
+}

@@ -24,8 +24,10 @@ class DiagLog {
 public:
     static constexpr std::size_t kMaxLine = 4095;
     static_assert(kMaxLine + 1 <= PIPE_BUF, "one record must still be one atomic write");
-    static_assert(infra::JsonOut::kCapacity == kMaxLine - 1,
-                  "a JsonOut record is exactly what appendf keeps");
+    static_assert(
+        infra::JsonOut::kCapacity == kMaxLine - 1,
+        "a JsonOut record is exactly what appendf keeps"
+    );
 
     DiagLog() = default;
 
@@ -33,6 +35,7 @@ public:
         fd_ = UniqueFd(::open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644));
         return fd_.valid();
     }
+
     bool is_open() const noexcept { return fd_.valid(); }
 
     void set_echo_stderr(bool on) noexcept { echo_stderr_ = on; }
@@ -51,10 +54,16 @@ public:
         auto len = static_cast<std::size_t>(n);
         if (len > sizeof buf - 2) {
             truncations_.fetch_add(1, std::memory_order_relaxed);
-            n = std::snprintf(buf, sizeof buf - 1, "{\"t\":\"trunc\",\"need\":%u,\"max\":%u}",
-                              static_cast<unsigned>(len), static_cast<unsigned>(sizeof buf - 2));
+            n = std::snprintf(
+                buf,
+                sizeof buf - 1,
+                "{\"t\":\"trunc\",\"need\":%u,\"max\":%u}",
+                static_cast<unsigned>(len),
+                static_cast<unsigned>(sizeof buf - 2)
+            );
             len = (n < 0) ? 0u : static_cast<std::size_t>(n);
-            if (len > sizeof buf - 2) len = sizeof buf - 2;
+            if (len > sizeof buf - 2)
+                len = sizeof buf - 2;
         }
         buf[len] = '\n';
         emit_(buf, len + 1);
@@ -68,9 +77,13 @@ public:
         }
         truncations_.fetch_add(1, std::memory_order_relaxed);
         char buf[96];
-        const int n = std::snprintf(buf, sizeof buf - 1, "{\"t\":\"trunc\",\"need\":%u,\"max\":%u}",
-                                    static_cast<unsigned>(o.need()),
-                                    static_cast<unsigned>(infra::JsonOut::kCapacity));
+        const int n = std::snprintf(
+            buf,
+            sizeof buf - 1,
+            "{\"t\":\"trunc\",\"need\":%u,\"max\":%u}",
+            static_cast<unsigned>(o.need()),
+            static_cast<unsigned>(infra::JsonOut::kCapacity)
+        );
         const auto len = n < 0 ? 0u : static_cast<std::size_t>(n);
         buf[len] = '\n';
         emit_(buf, len + 1);
@@ -105,4 +118,4 @@ private:
     bool echo_stderr_ = false;
 };
 
-}  // namespace mister::xthread
+}

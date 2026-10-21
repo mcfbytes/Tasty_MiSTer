@@ -30,12 +30,13 @@ std::string_view stem_of(std::string_view name) {
 [[nodiscard]] Ex<SavePath> built(bool ok, const SavePath& out) {
     if (!ok) {
         return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(out.size())});
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(out.size())}
+        );
     }
     return out;
 }
 
-}  // namespace
+}
 
 Fnv1aHex fnv1a64_hex(std::string_view basename) {
     std::uint64_t h = 0xcbf29ce484222325ull;
@@ -54,23 +55,29 @@ Fnv1aHex fnv1a64_hex(std::string_view basename) {
     return out;
 }
 
-Ex<NvramStore> NvramStore::load(NvramPolicy policy, std::string_view image_basename,
-                                std::span<const SavePartition> declared) {
+Ex<NvramStore> NvramStore::load(
+    NvramPolicy policy,
+    std::string_view image_basename,
+    std::span<const SavePartition> declared
+) {
     if (declared.size() > kMaxPartitions) {
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(declared.size())});
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(declared.size())}
+        );
     }
     NvramStore s;
     s.policy_ = policy;
     if (!s.image_.assign(base_of(image_basename))) {
         return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(image_basename.size())});
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(image_basename.size())}
+        );
     }
     std::uint32_t offset = 0;
     for (std::size_t i = 0; i < declared.size(); ++i) {
         if (declared[i].length == 0 || declared[i].name.empty()) {
             return std::unexpected(
-                Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(i)});
+                Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(i)}
+            );
         }
         s.table_[i] = declared[i];
         s.table_[i].offset = offset;
@@ -83,7 +90,8 @@ Ex<NvramStore> NvramStore::load(NvramPolicy policy, std::string_view image_basen
 Ex<void> NvramStore::relayout(std::span<const std::uint32_t> lengths) {
     if (lengths.size() != count_) {
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(lengths.size())});
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(lengths.size())}
+        );
     }
     std::uint32_t offset = 0;
     for (std::uint8_t i = 0; i < count_; ++i) {
@@ -99,7 +107,8 @@ Ex<void> NvramStore::relayout(std::span<const std::uint32_t> lengths) {
 
 Ex<SavePartition> NvramStore::partition_view(std::string_view partition) const {
     for (std::uint8_t i = 0; i < count_; ++i) {
-        if (table_[i].name == partition) return table_[i];
+        if (table_[i].name == partition)
+            return table_[i];
     }
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), count_});
 }
@@ -116,7 +125,8 @@ Ex<PartitionHit> NvramStore::resolve(std::uint64_t absolute_offset) const {
 
 Ex<SavePath> NvramStore::path_for(std::string_view partition) const {
     auto p = partition_view(partition);
-    if (!p) return std::unexpected(p.error());
+    if (!p)
+        return std::unexpected(p.error());
     switch (policy_.naming) {
         case SaveNaming::PerDiscFnv1a:
             return per_disc_path(*p, false);
@@ -132,7 +142,8 @@ Ex<SavePath> NvramStore::path_for(std::string_view partition) const {
 
 Ex<SavePath> NvramStore::stock_path_for(std::string_view partition) const {
     auto p = partition_view(partition);
-    if (!p) return std::unexpected(p.error());
+    if (!p)
+        return std::unexpected(p.error());
     if (policy_.naming != SaveNaming::PerDiscFnv1a) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     }
@@ -157,7 +168,8 @@ Ex<SavePath> NvramStore::per_disc_path(const SavePartition&, bool stock) const {
 Ex<SavePath> NvramStore::per_core_path(const SavePartition& p, bool indexed) const {
     SavePath out;
     bool ok = out.assign(policy_.prefix);
-    if (indexed && p.index != 0) ok = ok && append_index(out, p.index);
+    if (indexed && p.index != 0)
+        ok = ok && append_index(out, p.index);
     ok = ok && out.append(".");
     ok = ok && out.append(policy_.extension);
     return built(ok, out);
@@ -177,14 +189,21 @@ Ex<SavePath> NvramStore::per_image_path(const SavePartition& p) const {
     return built(ok, out);
 }
 
-SavePath pick_disc_path(const svc::Vfs& vfs, const SavePath& own, const SavePath& stock,
-                        std::uint64_t length) {
-    if (vfs.file_exists(own.view()) || !vfs.file_exists(stock.view())) return own;
+SavePath pick_disc_path(
+    const svc::Vfs& vfs,
+    const SavePath& own,
+    const SavePath& stock,
+    std::uint64_t length
+) {
+    if (vfs.file_exists(own.view()) || !vfs.file_exists(stock.view()))
+        return own;
     auto f = vfs.open(stock.view(), svc::OpenMode::Read);
-    if (!f) return own;
+    if (!f)
+        return own;
     auto size = (*f)->size();
-    if (!size || size->v != length) return own;
+    if (!size || size->v != length)
+        return own;
     return stock;
 }
 
-}  // namespace mister::cores
+}

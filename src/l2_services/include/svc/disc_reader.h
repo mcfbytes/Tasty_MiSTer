@@ -20,11 +20,14 @@ public:
     IDiscReader(IDiscReader&&) = delete;
     IDiscReader& operator=(IDiscReader&&) = delete;
 
-    [[nodiscard]] virtual Ex<std::size_t> read_form(DiscForm form, proto::Lba lba,
-                                                    std::span<std::byte> dst) = 0;
+    [[nodiscard]] virtual Ex<std::size_t> read_form(
+        DiscForm form,
+        proto::Lba lba,
+        std::span<std::byte> dst
+    ) = 0;
 
 protected:
     IDiscReader() = default;
 };
 
-}  // namespace mister::svc
+}

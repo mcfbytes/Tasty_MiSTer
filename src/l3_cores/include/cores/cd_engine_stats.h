@@ -19,4 +19,4 @@ struct CdEngineStats {
     std::uint32_t busy_ticks = 0;
 };
 
-}  // namespace mister::cores
+}

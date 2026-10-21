@@ -25,8 +25,10 @@ class ProgramGeometryValues {
 public:
     ProgramGeometryValues() = delete;
 
-    [[nodiscard]] static Ex<ProgramGeometryValues> resolve(const ProgramGeometry& g,
-                                                           std::uint16_t site) noexcept;
+    [[nodiscard]] static Ex<ProgramGeometryValues> resolve(
+        const ProgramGeometry& g,
+        std::uint16_t site
+    ) noexcept;
 
     [[nodiscard]] static consteval ProgramGeometryValues measured(const ProgramGeometry& g) {
         return ProgramGeometryValues{g.chunk_bytes.value(), g.quantum.value(), g.align.value()};
@@ -38,7 +40,9 @@ public:
 
 private:
     constexpr ProgramGeometryValues(std::uint32_t chunk, std::uint32_t q, std::uint32_t a) noexcept
-        : chunk_bytes(chunk), quantum(q), align(a) {}
+        : chunk_bytes(chunk),
+          quantum(q),
+          align(a) {}
 };
 
-}  // namespace mister::hal
+}

@@ -16,10 +16,14 @@ class IStorageBackend {
 public:
     virtual ~IStorageBackend() = default;
 
-    [[nodiscard]] virtual Ex<std::size_t> read_at(std::uint64_t offset,
-                                                  std::span<std::uint8_t> dst) = 0;
-    [[nodiscard]] virtual Ex<std::size_t> write_at(std::uint64_t offset,
-                                                   std::span<const std::uint8_t> src) = 0;
+    [[nodiscard]] virtual Ex<std::size_t> read_at(
+        std::uint64_t offset,
+        std::span<std::uint8_t> dst
+    ) = 0;
+    [[nodiscard]] virtual Ex<std::size_t> write_at(
+        std::uint64_t offset,
+        std::span<const std::uint8_t> src
+    ) = 0;
 
     [[nodiscard]] virtual Ex<proto::FileSize> open_extent(std::span<const std::byte> order) = 0;
 
@@ -39,4 +43,4 @@ protected:
     IStorageBackend& operator=(const IStorageBackend&) = default;
 };
 
-}  // namespace mister::svc
+}

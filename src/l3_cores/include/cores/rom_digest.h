@@ -19,6 +19,7 @@ public:
     void update(std::span<const std::uint8_t> data) noexcept;
 
     [[nodiscard]] DigestValue finish() noexcept;
+
     [[nodiscard]] DigestKind kind() const noexcept { return kind_; }
 
 private:
@@ -33,4 +34,4 @@ private:
     std::array<std::uint8_t, 64> tail_{};
 };
 
-}  // namespace mister::cores
+}

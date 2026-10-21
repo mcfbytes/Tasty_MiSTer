@@ -21,4 +21,4 @@ protected:
     IPendingWrites() = default;
 };
 
-}  // namespace mister::svc
+}

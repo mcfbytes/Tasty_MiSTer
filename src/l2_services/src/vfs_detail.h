@@ -15,10 +15,13 @@
 namespace mister::svc::detail {
 
 constexpr std::size_t ifind(std::string_view hay, std::string_view needle) noexcept {
-    if (needle.empty()) return 0;
-    if (hay.size() < needle.size()) return std::string_view::npos;
+    if (needle.empty())
+        return 0;
+    if (hay.size() < needle.size())
+        return std::string_view::npos;
     for (std::size_t i = 0; i + needle.size() <= hay.size(); ++i) {
-        if (infra::ieq(hay.substr(i, needle.size()), needle)) return i;
+        if (infra::ieq(hay.substr(i, needle.size()), needle))
+            return i;
     }
     return std::string_view::npos;
 }
@@ -27,14 +30,17 @@ constexpr int icompare_n(std::string_view a, std::string_view b, std::size_t n) 
     for (std::size_t i = 0; i < n; ++i) {
         const char ca = (i < a.size()) ? infra::ascii_lower(a[i]) : '\0';
         const char cb = (i < b.size()) ? infra::ascii_lower(b[i]) : '\0';
-        if (ca != cb) return (ca < cb) ? -1 : 1;
-        if (ca == '\0') return 0;
+        if (ca != cb)
+            return (ca < cb) ? -1 : 1;
+        if (ca == '\0')
+            return 0;
     }
     return 0;
 }
 
 inline std::string compose(std::string_view root, std::string_view path) {
-    if (!path.empty() && path.front() == '/') return std::string(path);
+    if (!path.empty() && path.front() == '/')
+        return std::string(path);
     std::string out(root);
     while (out.size() > 1 && out.back() == '/')
         out.pop_back();
@@ -51,7 +57,8 @@ struct ZipSplit {
 
 constexpr ZipSplit zip_split(std::string_view path) noexcept {
     const std::size_t z = ifind(path, ".zip");
-    if (z == std::string_view::npos) return {};
+    if (z == std::string_view::npos)
+        return {};
     const std::size_t end = z + 4;
     ZipSplit s;
     s.zipped = true;
@@ -62,16 +69,22 @@ constexpr ZipSplit zip_split(std::string_view path) noexcept {
 
 constexpr bool has_nested_zip(std::string_view path) noexcept {
     const ZipSplit s = zip_split(path);
-    if (!s.zipped) return false;
+    if (!s.zipped)
+        return false;
     return ifind(path.substr(s.archive.size()), ".zip") != std::string_view::npos;
 }
 
-constexpr std::optional<std::string_view> relative_member(std::string_view folder,
-                                                          std::string_view path) noexcept {
-    if (folder.empty()) return path;
-    if (!infra::istarts_with(path, folder)) return std::nullopt;
+constexpr std::optional<std::string_view> relative_member(
+    std::string_view folder,
+    std::string_view path
+) noexcept {
+    if (folder.empty())
+        return path;
+    if (!infra::istarts_with(path, folder))
+        return std::nullopt;
     const std::string_view sub = path.substr(folder.size());
-    if (!sub.empty() && sub.front() == '/') return sub.substr(1);
+    if (!sub.empty() && sub.front() == '/')
+        return sub.substr(1);
     return std::nullopt;
 }
 
@@ -86,9 +99,12 @@ constexpr std::optional<std::uint32_t> scan_hex8(std::string_view f) noexcept {
         return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
     };
     const auto hex_val = [](char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        if (c >= '0' && c <= '9')
+            return c - '0';
+        if (c >= 'a' && c <= 'f')
+            return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F')
+            return c - 'A' + 10;
         return -1;
     };
 
@@ -105,7 +121,8 @@ constexpr std::optional<std::uint32_t> scan_hex8(std::string_view f) noexcept {
     }
 
     if (budget >= 2 && i + 1 < f.size() && f[i] == '0' && (f[i + 1] == 'x' || f[i + 1] == 'X')) {
-        if (budget < 3 || i + 2 >= f.size() || hex_val(f[i + 2]) < 0) return std::nullopt;
+        if (budget < 3 || i + 2 >= f.size() || hex_val(f[i + 2]) < 0)
+            return std::nullopt;
         i += 2;
         budget -= 2;
     }
@@ -114,13 +131,15 @@ constexpr std::optional<std::uint32_t> scan_hex8(std::string_view f) noexcept {
     std::size_t digits = 0;
     while (budget != 0 && i < f.size()) {
         const int d = hex_val(f[i]);
-        if (d < 0) break;
+        if (d < 0)
+            break;
         v = static_cast<std::uint32_t>(v * 16u + static_cast<std::uint32_t>(d));
         ++digits;
         ++i;
         --budget;
     }
-    if (digits == 0) return std::nullopt;
+    if (digits == 0)
+        return std::nullopt;
     return negate ? static_cast<std::uint32_t>(0u - v) : v;
 }
 
@@ -138,9 +157,12 @@ struct ZipMember {
     bool is_dir = false;
 };
 
-std::vector<DirEntry> zip_folder_entries(std::string_view folder,
-                                         std::span<const ZipMember> members, const ScanFilter& f);
+std::vector<DirEntry> zip_folder_entries(
+    std::string_view folder,
+    std::span<const ZipMember> members,
+    const ScanFilter& f
+);
 
 bool dirent_less(const DirEntry& a, const DirEntry& b) noexcept;
 
-}  // namespace mister::svc::detail
+}

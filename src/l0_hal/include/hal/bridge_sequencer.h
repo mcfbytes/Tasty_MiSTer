@@ -20,4 +20,4 @@ protected:
     IBridgeSequencer& operator=(const IBridgeSequencer&) = default;
 };
 
-}  // namespace mister::hal
+}

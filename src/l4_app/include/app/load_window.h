@@ -24,9 +24,12 @@ class LoadWindow final : public cores::ICoreWindow {
     TASTY_SEAT_FROM(Owner);
 
 public:
-    [[nodiscard]] static Ex<LoadWindow> open(ILoadWindowMap<Owner>& map,
-                                             const hal::PhysRegion& aperture, os::PhysAddr addr,
-                                             std::uint64_t len);
+    [[nodiscard]] static Ex<LoadWindow> open(
+        ILoadWindowMap<Owner>& map,
+        const hal::PhysRegion& aperture,
+        os::PhysAddr addr,
+        std::uint64_t len
+    );
 
     LoadWindow(LoadWindow&&) noexcept = default;
     LoadWindow& operator=(LoadWindow&&) noexcept = delete;
@@ -36,8 +39,11 @@ public:
     [[nodiscard]] Ex<std::size_t> write(std::size_t off, std::span<const std::byte> src) override;
     [[nodiscard]] Ex<std::size_t> read(std::size_t off, std::span<std::byte> dst) const override;
 
-    [[nodiscard]] Ex<std::size_t> write_lanes(std::size_t off, std::span<const std::byte> src,
-                                              std::size_t stride)
+    [[nodiscard]] Ex<std::size_t> write_lanes(
+        std::size_t off,
+        std::span<const std::byte> src,
+        std::size_t stride
+    )
         requires std::same_as<Owner, seat_owner::Main>;
     void publish() noexcept override;
     [[nodiscard]] std::size_t size() const noexcept override;
@@ -47,10 +53,11 @@ public:
 
 private:
     explicit LoadWindow(hal::FpgaMemory mem) noexcept : mem_(std::move(mem)) {}
+
     hal::FpgaMemory mem_;
 };
 
 extern template class LoadWindow<seat_owner::Main>;
 extern template class LoadWindow<seat_owner::Io>;
 
-}  // namespace mister::app
+}

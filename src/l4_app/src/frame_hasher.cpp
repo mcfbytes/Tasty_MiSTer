@@ -11,7 +11,8 @@ namespace mister::app {
 
 std::uint32_t FrameHasher::hash_rows(const RawFrameSlot& s) noexcept {
     uLong crc = ::crc32(0L, Z_NULL, 0);
-    if (s.pixels.empty()) return static_cast<std::uint32_t>(crc);
+    if (s.pixels.empty())
+        return static_cast<std::uint32_t>(crc);
     const std::size_t row = static_cast<std::size_t>(s.width) * 3u;
     const auto* p = infra::byte_cast<const std::uint8_t>(s.pixels).data();
     for (std::uint32_t y = 0; y < s.height; ++y)
@@ -19,12 +20,18 @@ std::uint32_t FrameHasher::hash_rows(const RawFrameSlot& s) noexcept {
     return static_cast<std::uint32_t>(crc);
 }
 
-bool FrameHasher::idle() const noexcept { return job_ || drained(); }
+bool FrameHasher::idle() const noexcept {
 
-bool FrameHasher::drained() const noexcept { return !job_ && w_.channel.outbound() == 0; }
+    return job_ || drained();
+}
+
+bool FrameHasher::drained() const noexcept {
+    return !job_ && w_.channel.outbound() == 0;
+}
 
 int FrameHasher::park_ms() const noexcept {
-    if (job_) return kHeldPollMs;
+    if (job_)
+        return kHeldPollMs;
     return w_.video.park_ms();
 }
 
@@ -35,7 +42,8 @@ void FrameHasher::release() noexcept {
 
 bool FrameHasher::push_(const SidecarMsg& m) noexcept {
     if (w_.out.push(m)) {
-        if (m.kind == SidecarKind::Row) ++st_.rows;
+        if (m.kind == SidecarKind::Row)
+            ++st_.rows;
         return true;
     }
     ++st_.ring_full;
@@ -45,7 +53,8 @@ bool FrameHasher::push_(const SidecarMsg& m) noexcept {
 
 bool FrameHasher::chunk_(const RawFrameSlot& s, bool real, SidecarMsg& m) noexcept {
     if (!chunked_) {
-        if (!w_.video.chunk(s, real, m.stamp.core_frame, m.stamp.movie_frame)) return false;
+        if (!w_.video.chunk(s, real, m.stamp.core_frame, m.stamp.movie_frame))
+            return false;
         chunked_ = true;
     }
     const AviEncoder::Position p = w_.video.position();
@@ -62,19 +71,20 @@ bool FrameHasher::emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept {
     for (std::uint8_t r = 0; r < s.runs; ++r) {
         const FrameStampRun& run = s.run[r];
         for (std::uint32_t i = 0; i < run.count; ++i, ++k) {
-            if (k < next_) continue;
+            if (k < next_)
+                continue;
             m.hash = prev_hash_;
             m.stamp = FrameStamp{};
             m.stamp.core_frame = run.first + i;
             m.stamp.header_ctr = static_cast<std::uint8_t>((run.first_ctr + i) & 0x7u);
             m.stamp.dup = run.why;
             if (s.stamp.movie_frame >= 0) {
-                const std::int64_t mf =
-                    static_cast<std::int64_t>(s.stamp.movie_frame) -
-                    static_cast<std::int64_t>(s.stamp.core_frame - m.stamp.core_frame);
+                const std::int64_t mf = static_cast<std::int64_t>(s.stamp.movie_frame)
+                    - static_cast<std::int64_t>(s.stamp.core_frame - m.stamp.core_frame);
                 m.stamp.movie_frame = static_cast<std::int32_t>(std::max<std::int64_t>(mf, -1));
             }
-            if (!chunk_(s, false, m) || !push_(m)) return false;
+            if (!chunk_(s, false, m) || !push_(m))
+                return false;
             ++next_;
             chunked_ = false;
         }
@@ -85,18 +95,22 @@ bool FrameHasher::emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept {
 bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
     SidecarMsg m{};
     m.gen = s.gen;
-    if (s.kind == RawKind::Close && !emit_runs_(s, m)) return false;
+    if (s.kind == RawKind::Close && !emit_runs_(s, m))
+        return false;
     if (s.kind != RawKind::Frame) {
         if (!chunked_) {
-            if (!(s.kind == RawKind::Open ? w_.video.open(s) : w_.video.close(s))) return false;
+            if (!(s.kind == RawKind::Open ? w_.video.open(s) : w_.video.close(s)))
+                return false;
         }
         chunked_ = true;
         m.kind = s.kind == RawKind::Open ? SidecarKind::Open : SidecarKind::Close;
         m.path = s.path;
-        if (s.kind == RawKind::Open) prev_hash_ = 0;
+        if (s.kind == RawKind::Open)
+            prev_hash_ = 0;
         return push_(m);
     }
-    if (!emit_runs_(s, m)) return false;
+    if (!emit_runs_(s, m))
+        return false;
     const bool real = s.stamp.dup == DupReason::None && !s.pixels.empty();
     if (real && !hashed_) {
         const std::int64_t t0 = w_.clock.now().count();
@@ -108,9 +122,11 @@ bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
     }
     m.stamp = s.stamp;
     m.hash = real ? cur_hash_ : prev_hash_;
-    if (!chunk_(s, real, m) || !push_(m)) return false;
+    if (!chunk_(s, real, m) || !push_(m))
+        return false;
 
-    if (!w_.video.position().lost) prev_hash_ = m.hash;
+    if (!w_.video.position().lost)
+        prev_hash_ = m.hash;
     return true;
 }
 
@@ -124,7 +140,8 @@ void FrameHasher::serve() noexcept {
             hashed_ = false;
             chunked_ = false;
         }
-        if (!job_) break;
+        if (!job_)
+            break;
         const bool done = emit_(*job_);
         w_.writer_wake.kick_if_armed();
         if (!done) {
@@ -139,8 +156,9 @@ void FrameHasher::serve() noexcept {
         st_.video = w_.video.counts();
         dirty_ = true;
     }
-    if (dirty_) w_.status.publish(st_);
+    if (dirty_)
+        w_.status.publish(st_);
     dirty_ = false;
 }
 
-}  // namespace mister::app
+}

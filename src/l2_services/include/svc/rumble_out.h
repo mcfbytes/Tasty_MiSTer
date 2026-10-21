@@ -12,8 +12,11 @@ enum class RumbleApply : std::uint8_t { NoDevice, Applied, Failed };
 class IRumbleOut {
 public:
     [[nodiscard]] virtual RumblePadSet rumble_pads() const noexcept = 0;
-    [[nodiscard]] virtual RumbleApply rumble(PlayerIndex player, std::uint16_t strong,
-                                             std::uint16_t weak) noexcept = 0;
+    [[nodiscard]] virtual RumbleApply rumble(
+        PlayerIndex player,
+        std::uint16_t strong,
+        std::uint16_t weak
+    ) noexcept = 0;
 
 protected:
     IRumbleOut() = default;
@@ -22,4 +25,4 @@ protected:
     ~IRumbleOut() = default;
 };
 
-}  // namespace mister::svc
+}

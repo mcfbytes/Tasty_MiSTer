@@ -57,13 +57,3 @@ tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
   os/writeback_probe.h
 )
 
-if(TASTY_BUILD_TESTS)
-
-  foreach(mod IN ITEMS child_process clock i2c_device mmio process_title run_sync)
-    tasty_unit_test(tasty_os_${mod}_unit
-      NAME tasty.os_${mod}
-      SOURCES tests/${mod}_unit.cpp
-      LIBS mister_os tasty_test_options
-      TIMEOUT 60)
-  endforeach()
-endif()

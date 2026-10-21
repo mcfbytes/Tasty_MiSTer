@@ -21,7 +21,9 @@ public:
     [[nodiscard]] bool contains(std::string_view s) const noexcept;
 
     [[nodiscard]] std::size_t size() const noexcept { return len_; }
+
     [[nodiscard]] bool empty() const noexcept { return len_ == 0; }
+
     [[nodiscard]] std::span<const char> raw() const noexcept { return {data_.data(), len_}; }
 
 private:
@@ -29,4 +31,4 @@ private:
     std::size_t len_ = 0;
 };
 
-}  // namespace mister::hal
+}

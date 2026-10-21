@@ -18,11 +18,19 @@ class SpiStatusDecoder {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    SpiStatusDecoder(hal::ISpiTransport& link, CoreSession& session, StatusCell& cell,
-                     const ISessionLive& live) noexcept
-        : link_(&link), session_(&session), cell_(&cell), live_(&live) {}
+    SpiStatusDecoder(
+        hal::ISpiTransport& link,
+        CoreSession& session,
+        StatusCell& cell,
+        const ISessionLive& live
+    ) noexcept
+        : link_(&link),
+          session_(&session),
+          cell_(&cell),
+          live_(&live) {}
 
     void service() noexcept;
+
     [[nodiscard]] bool active() const noexcept { return live_->session_live(); }
 
     [[nodiscard]] std::uint8_t last() const noexcept { return last_; }
@@ -40,4 +48,4 @@ private:
     StatusWord published_{};
 };
 
-}  // namespace mister::proto
+}

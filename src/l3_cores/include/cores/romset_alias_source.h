@@ -13,9 +13,13 @@ class IRomsetAliasSource {
 public:
     virtual ~IRomsetAliasSource() = default;
 
-    [[nodiscard]] virtual RomsetAlias query(IRomsetFiles& files, std::string_view dir,
-                                            std::string_view home, std::string_view entry,
-                                            std::string_view key) = 0;
+    [[nodiscard]] virtual RomsetAlias query(
+        IRomsetFiles& files,
+        std::string_view dir,
+        std::string_view home,
+        std::string_view entry,
+        std::string_view key
+    ) = 0;
 
 protected:
     IRomsetAliasSource() = default;
@@ -23,4 +27,4 @@ protected:
     IRomsetAliasSource& operator=(const IRomsetAliasSource&) = default;
 };
 
-}  // namespace mister::cores
+}

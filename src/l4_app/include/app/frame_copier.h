@@ -12,6 +12,7 @@
 #include "app/core_frame_record.h"
 #include "app/frame_arena.h"
 #include "app/frame_demand.h"
+#include "app/frame_numbering.h"
 #include "app/frame_stamp.h"
 #include "app/raw_frame_slot.h"
 #include "app/rec_control.h"
@@ -57,7 +58,9 @@ public:
     static constexpr std::int64_t kEpochWaitNs = 90'000'000'000;
 
     FrameCopier(const Wiring& w, std::optional<hal::ScalerBuffers> window) noexcept
-        : w_(w), window_(std::move(window)) {}
+        : w_(w),
+          window_(std::move(window)) {}
+
     FrameCopier(const FrameCopier&) = delete;
     FrameCopier& operator=(const FrameCopier&) = delete;
 
@@ -78,6 +81,7 @@ private:
         std::array<hal::ScalerHeader, hal::ScalerBuffers::kBuffers> h{};
         bool ok = false;
     };
+
     void sample_control_() noexcept;
     void answer_(std::uint16_t gen, RecVerdict v) noexcept;
     void begin_(const RecControl& c) noexcept;
@@ -95,7 +99,9 @@ private:
     [[nodiscard]] bool replay_before_epoch_() const noexcept;
 
     [[nodiscard]] Heads read_heads_() const noexcept;
-    [[nodiscard]] std::size_t base_(std::size_t buf) const noexcept { return buf * stride_; }
+
+    [[nodiscard]] std::size_t base_(std::size_t buf) const noexcept { return buf * gen_.stride; }
+
     void poll_triple_(std::int64_t now) noexcept;
 
     void track_(const Heads& hd, std::int64_t now) noexcept;
@@ -106,30 +112,32 @@ private:
 
     void follow_mode_(bool single, std::int64_t now) noexcept;
 
-    void on_complete_(std::size_t buf, std::uint8_t ctr, std::int64_t now, std::int64_t behind,
-                      std::uint32_t fields) noexcept;
+    void on_complete_(
+        std::size_t buf,
+        std::uint8_t ctr,
+        std::int64_t now,
+        std::int64_t behind,
+        std::uint32_t fields
+    ) noexcept;
 
-    [[nodiscard]] bool open_armed_(const FrameStamp& s, const CoreFrameRecord* cell,
-                                   std::uint32_t fields, std::int64_t now) noexcept;
-
-    [[nodiscard]] std::uint32_t frames_since_(std::uint8_t ctr, std::int64_t now,
-                                              const CoreFrameRecord* cell,
-                                              std::int64_t behind) noexcept;
-    [[nodiscard]] FrameStamp stamp_(std::uint8_t ctr, std::int64_t now, const CoreFrameRecord* cell,
-                                    std::int64_t lag) noexcept;
-
-    void anchor_(const CoreFrameRecord& cell, std::int64_t lag, bool vote) noexcept;
+    [[nodiscard]] bool open_armed_(
+        const FrameStamp& s,
+        const CoreFrameRecord* cell,
+        std::uint32_t fields,
+        std::int64_t now
+    ) noexcept;
 
     [[nodiscard]] std::int64_t lag_(std::int64_t behind) const noexcept {
-        return lowlat_ ? 0 : lag_steps_ + behind;
+        return gen_.lowlat ? 0 : gen_.lag_steps + behind;
     }
-    void rebase_(const CoreFrameRecord& cell, std::uint64_t core, std::int64_t lag) noexcept;
-    void cross_check_(const CoreFrameRecord& cell, std::uint64_t core, std::int64_t lag) noexcept;
-    [[nodiscard]] std::int32_t movie_of_(const CoreFrameRecord& cell,
-                                         std::uint64_t core) const noexcept;
+
     void attach_pending_(RawFrameSlot& slot) noexcept;
-    void defer_(std::uint64_t first, std::uint32_t count, std::uint8_t first_ctr,
-                DupReason why) noexcept;
+    void defer_(
+        std::uint64_t first,
+        std::uint32_t count,
+        std::uint8_t first_ctr,
+        DupReason why
+    ) noexcept;
     [[nodiscard]] bool geometry_ok_(const hal::ScalerHeader& h) const noexcept;
 
     [[nodiscard]] bool rate_is_ours_(std::uint32_t seq) const noexcept;
@@ -145,15 +153,35 @@ private:
     bool demand_on_ = false;
     FrameArena arena_{};
 
-    RecPath path_{};
-    RecMode mode_ = RecMode::Hash;
-    RecOptions opt_{};
-    bool from_arm_ = false;
-    bool open_sent_ = false;
-    bool close_sent_ = false;
-    std::size_t stride_ = 0;
-    bool lowlat_ = false;
-    std::size_t regrow_bytes_ = 0;
+    struct RecGeneration {
+        RecPath path{};
+        RecMode mode = RecMode::Hash;
+        RecOptions opt{};
+        bool from_arm = false;
+        bool open_sent = false;
+        bool close_sent = false;
+        std::size_t stride = 0;
+        bool lowlat = false;
+        std::size_t regrow_bytes = 0;
+
+        std::int64_t lag_steps = 1;
+        bool woven = false;
+        bool matched = true;
+        std::uint8_t npending = 0;
+        std::optional<CoreFrameRecord> last_cell{};
+        bool core_seq_known = false;
+
+        bool ll_waiting = false;
+        std::int64_t ll_push_ns = 0;
+
+        bool replay_running = false;
+        bool covers_zero = false;
+        std::int64_t epoch_wait_ns = -1;
+        std::uint32_t tail_left = 0;
+        bool tail_counting = false;
+    };
+
+    RecGeneration gen_{};
 
     hal::ScalerProbe probe_{};
     std::int64_t period_ns_ = kDefaultPeriodNs;
@@ -163,43 +191,15 @@ private:
     std::int64_t track_ns_ = 0;
     BufMask live_{};
 
-    struct LastCtr {
-        std::uint8_t ctr = 0;
-        std::int64_t seen_ns = 0;
-    };
-    std::optional<LastCtr> last_{};
-    std::uint64_t ext_ = 0;
-    std::int64_t anchor_off_ = 0;
-
-    static constexpr std::size_t kAnchorVotes = 8;
-    std::array<std::int64_t, kAnchorVotes> votes_{};
-    std::uint8_t nvotes_ = 0;
-    std::uint8_t vote_next_ = 0;
-
-    std::int64_t cell_off_ = 0;
-    std::uint32_t cell_epoch_ = 0;
-    bool core_seq_known_ = false;
+    FrameNumbering numbering_{};
     std::uint32_t core_seq_ = 0;
     std::array<FrameStampRun, RawFrameSlot::kMaxRuns> pending_{};
 
-    std::int64_t lag_steps_ = 1;
-    bool woven_ = false;
-    bool matched_ = true;
-    std::uint8_t npending_ = 0;
-    std::optional<CoreFrameRecord> last_cell_{};
-
-    bool ll_waiting_ = false;
     std::uint8_t ll_ctr_ = 0;
     std::int64_t ll_due_ns_ = 0;
-    std::int64_t ll_push_ns_ = 0;
     std::int64_t copy_ns_ = 1'000'000;
 
-    bool replay_running_ = false;
-    bool covers_zero_ = false;
-    std::int64_t epoch_wait_ns_ = -1;
     std::int64_t armed_ns_ = 0;
-    std::uint32_t tail_left_ = 0;
-    bool tail_counting_ = false;
 };
 
-}  // namespace mister::app
+}

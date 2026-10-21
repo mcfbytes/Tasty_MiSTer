@@ -18,9 +18,16 @@ class SpiIdentifyDecoder {
 public:
     using Port = LinkPort<LinkEvent::IdentityMatched, LinkEvent::IdentityMismatch>;
 
-    SpiIdentifyDecoder(hal::ICoreSignals& signals, CoreSession& session, ILinkRouter& router,
-                       const BindGeneration& gen) noexcept
-        : signals_(&signals), session_(&session), gen_(&gen), out_(router) {}
+    SpiIdentifyDecoder(
+        hal::ICoreSignals& signals,
+        CoreSession& session,
+        ILinkRouter& router,
+        const BindGeneration& gen
+    ) noexcept
+        : signals_(&signals),
+          session_(&session),
+          gen_(&gen),
+          out_(router) {}
 
     void service() noexcept;
 
@@ -35,4 +42,4 @@ private:
     Port out_;
 };
 
-}  // namespace mister::proto
+}

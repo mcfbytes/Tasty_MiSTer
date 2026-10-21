@@ -14,29 +14,35 @@ namespace {
 
 [[nodiscard]] Ex<std::vector<std::byte>> read_all(const svc::Vfs& vfs, std::string_view path) {
     auto f = vfs.open(path, svc::OpenMode::ReadWhole);
-    if (!f) return std::unexpected(f.error());
+    if (!f)
+        return std::unexpected(f.error());
     auto sz = (*f)->size();
-    if (!sz) return std::unexpected(sz.error());
+    if (!sz)
+        return std::unexpected(sz.error());
     std::vector<std::byte> buf(static_cast<std::size_t>(sz->v));
     std::size_t off = 0;
     while (off < buf.size()) {
         auto n = (*f)->read_at(off, std::span<std::byte>(buf).subspan(off));
-        if (!n) return std::unexpected(n.error());
+        if (!n)
+            return std::unexpected(n.error());
         if (*n == 0) {
             return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(off)});
+                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(off)}
+            );
         }
         off += *n;
     }
     return buf;
 }
 
-}  // namespace
+}
 
-[[nodiscard]] Ex<svc::ConfigSnapshot> parse_ini_for_core(const svc::Vfs* vfs,
-                                                         const svc::ConfigSnapshot& defaults,
-                                                         std::string_view conf_str_name,
-                                                         const MraFacts& facts) {
+[[nodiscard]] svc::ConfigSnapshot parse_ini_for_core(
+    const svc::Vfs* vfs,
+    const svc::ConfigSnapshot& defaults,
+    std::string_view conf_str_name,
+    const MraFacts& facts
+) {
     svc::ConfigSnapshot next = defaults;
     if (vfs == nullptr) {
         apply_vga_mode_fixup(next);
@@ -52,9 +58,7 @@ namespace {
         names.orig_core_name = conf_str_name;
         names.is_arcade = facts.is_arcade;
         names.arcade_vertical = facts.vertical;
-        auto parsed = svc::config_parser::parse_two_pass(text, names);
-        if (!parsed) return std::unexpected(parsed.error());
-        next = std::move(*parsed);
+        next = svc::config_parser::parse_two_pass(text, names);
     }
     apply_vga_mode_fixup(next);
     return next;
@@ -81,4 +85,4 @@ namespace {
     return conf_switches(svc::ConfigSnapshot{});
 }
 
-}  // namespace mister::app
+}

@@ -20,19 +20,21 @@ std::string ascii_upper(std::string_view s) {
     return out;
 }
 
-}  // namespace
+}
 
 FixedStr<48, StrFit::Clip> hd_crumb(std::string_view core_name, std::string_view title) {
     constexpr std::size_t kCapacity = FixedStr<48, StrFit::Clip>::kCapacity;
     FixedStr<48, StrFit::Clip> out;
-    if (core_name.empty()) core_name = "CORE";
+    if (core_name.empty())
+        core_name = "CORE";
     std::string tail(kSeparator);
     tail += ascii_upper(title);
     std::size_t keep = 0;
     if (tail.size() < kCapacity) {
         keep = std::min(core_name.size(), kCapacity - tail.size());
-        while (keep > 0 && keep < core_name.size() &&
-               (static_cast<unsigned char>(core_name[keep]) & 0xC0u) == 0x80u)
+        while (keep > 0
+               && keep < core_name.size()
+               && (static_cast<unsigned char>(core_name[keep]) & 0xC0u) == 0x80u)
             --keep;
     }
     std::string text = ascii_upper(core_name.substr(0, keep));
@@ -46,4 +48,4 @@ std::string_view hd_crumb_core(std::string_view crumb) noexcept {
     return cut == std::string_view::npos ? crumb : crumb.substr(0, cut);
 }
 
-}  // namespace mister::app
+}

@@ -25,16 +25,17 @@ bool emit(int fd, std::uint16_t type, std::uint16_t code, std::int32_t value) no
     return n == static_cast<ssize_t>(sizeof ev);
 }
 
-}  // namespace
+}
 
 Ex<void> UinputKeyboard::open() noexcept {
     TASTY_SEAT_BODY(UinputKeyboard);
-    if (fd_.valid()) return {};
+    if (fd_.valid())
+        return {};
     UniqueFd fd{::open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC)};
     if (!fd.valid())
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    if (::ioctl(fd.get(), UI_SET_EVBIT, EV_KEY) != 0 ||
-        ::ioctl(fd.get(), UI_SET_EVBIT, EV_SYN) != 0)
+    if (::ioctl(fd.get(), UI_SET_EVBIT, EV_KEY) != 0
+        || ::ioctl(fd.get(), UI_SET_EVBIT, EV_SYN) != 0)
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     for (int code = 1; code < 256; ++code)
         (void)::ioctl(fd.get(), UI_SET_KEYBIT, code);
@@ -49,8 +50,10 @@ Ex<void> UinputKeyboard::open() noexcept {
 
 void UinputKeyboard::key(std::uint16_t code, bool down) noexcept {
     TASTY_SEAT_BODY(UinputKeyboard);
-    if (!fd_.valid()) return;
-    if (emit(fd_.get(), EV_KEY, code, down ? 1 : 0)) (void)emit(fd_.get(), EV_SYN, SYN_REPORT, 0);
+    if (!fd_.valid())
+        return;
+    if (emit(fd_.get(), EV_KEY, code, down ? 1 : 0))
+        (void)emit(fd_.get(), EV_SYN, SYN_REPORT, 0);
 }
 
-}  // namespace mister::os
+}

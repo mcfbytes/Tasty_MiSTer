@@ -17,4 +17,4 @@ concept MglItemSink = requires(S& s, const MglItem& m) {
 
 using MglItemRoutes = infra::AllRouted;
 
-}  // namespace mister::app
+}

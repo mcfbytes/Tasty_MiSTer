@@ -10,8 +10,9 @@ void HdOsdMain::start() noexcept {
 }
 
 void HdOsdMain::serve() noexcept {
-    if (stopping()) return;
+    if (stopping())
+        return;
     renderer_.serve();
 }
 
-}  // namespace mister::app
+}

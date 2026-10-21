@@ -11,6 +11,7 @@
 #include "app/link_tx_channel.h"
 #include "app/load_key.h"
 #include "app/path_text.h"
+#include "app/rung.h"
 #include "cores/loader.h"
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -18,7 +19,7 @@
 
 namespace mister::app {
 
-class FileTxPieces {
+class FileTxPieces final : public Rung {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
@@ -31,27 +32,49 @@ public:
         bool shaped = false;
     };
 
-    [[nodiscard]] static Ex<FileTxPieces> start(std::unique_ptr<svc::IFile> file,
-                                                std::uint64_t total, std::uint8_t wire_index,
-                                                std::string_view path,
-                                                std::unique_ptr<cores::ILoader> loader = nullptr,
-                                                const cores::TransferRow& row = {});
+    [[nodiscard]] static Ex<FileTxPieces> start(
+        std::unique_ptr<svc::IFile> file,
+        std::uint64_t total,
+        std::uint8_t wire_index,
+        std::string_view path,
+        std::unique_ptr<cores::ILoader> loader = nullptr,
+        const cores::TransferRow& row = {}
+    );
 
-    [[nodiscard]] static Ex<FileTxPieces> resume(std::unique_ptr<svc::IFile> file,
-                                                 std::uint64_t total, std::uint8_t wire_index,
-                                                 std::string_view path, std::uint64_t from,
-                                                 std::uint32_t crc);
+    [[nodiscard]] static Ex<FileTxPieces> resume(
+        std::unique_ptr<svc::IFile> file,
+        std::uint64_t total,
+        std::uint8_t wire_index,
+        std::string_view path,
+        std::uint64_t from,
+        std::uint32_t crc
+    );
 
-    [[nodiscard]] Pass step(LinkTxChannel<SeatTag::Main>& inbox, const FileTxLevelCell& level,
-                            std::uint32_t act);
+    [[nodiscard]] Pass step(
+        LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell& level,
+        std::uint32_t act
+    );
 
-    [[nodiscard]] bool ready(const LinkTxChannel<SeatTag::Main>& inbox,
-                             const FileTxLevelCell& level) const noexcept;
+    [[nodiscard]] bool ready(
+        const LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell& level
+    ) const noexcept;
+
+    [[nodiscard]] bool wants_pass(
+        const LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell& level
+    ) const noexcept override;
+    [[nodiscard]] Rung::Pass step(const RungEdges& edges, cores::ILadderHost& owner) override;
 
     [[nodiscard]] std::uint64_t sent() const noexcept { return sent_; }
+
     [[nodiscard]] std::uint64_t total() const noexcept { return total_; }
+
     [[nodiscard]] std::uint8_t wire_index() const noexcept { return wire_index_; }
+
     [[nodiscard]] std::string_view path() const noexcept { return path_.view(); }
+
     [[nodiscard]] LastOp last_op() const noexcept { return last_; }
 
     [[nodiscard]] std::unique_ptr<svc::IFile> take_file() noexcept { return std::move(file_); }
@@ -61,9 +84,18 @@ public:
     [[nodiscard]] bool resumed() const noexcept { return crc_.has_value(); }
 
 private:
-    FileTxPieces(std::unique_ptr<svc::IFile> file, std::uint64_t total, std::uint8_t wire_index,
-                 std::unique_ptr<cores::ILoader> loader, const cores::TransferRow& row)
-        : file_(std::move(file)), loader_(std::move(loader)), row_(row), total_(total), key_(total),
+    FileTxPieces(
+        std::unique_ptr<svc::IFile> file,
+        std::uint64_t total,
+        std::uint8_t wire_index,
+        std::unique_ptr<cores::ILoader> loader,
+        const cores::TransferRow& row
+    )
+        : file_(std::move(file)),
+          loader_(std::move(loader)),
+          row_(row),
+          total_(total),
+          key_(total),
           wire_index_(wire_index) {}
 
     struct Outstanding {
@@ -99,4 +131,4 @@ private:
     PathText path_{};
 };
 
-}  // namespace mister::app
+}

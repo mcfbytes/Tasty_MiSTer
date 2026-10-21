@@ -11,4 +11,4 @@ struct StageWindow {
     std::uint32_t bytes = 0;
 };
 
-}  // namespace mister::cores
+}

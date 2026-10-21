@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/gzip_inflate.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 
@@ -8,12 +9,13 @@
 
 namespace mister::svc {
 
-[[nodiscard]] Ex<InflateResult> inflate_gzip(IFile& src, std::size_t cap) {
+[[nodiscard]] Ex<InflateResult> inflate_gzip(std::span<const std::uint8_t> src, std::size_t cap) {
     InflateResult result;
 
     z_stream strm{};
 
-    if (inflateInit2(&strm, MAX_WBITS | 16) != Z_OK) return result;
+    if (inflateInit2(&strm, MAX_WBITS | 16) != Z_OK)
+        return result;
 
     std::array<std::uint8_t, 16384> in{};
     std::array<std::uint8_t, 16384> chunk{};
@@ -22,16 +24,14 @@ namespace mister::svc {
     int ret = Z_OK;
 
     for (;;) {
-        auto got = src.read_at(off, std::as_writable_bytes(std::span(in)));
-        if (!got) {
-            inflateEnd(&strm);
-            return std::unexpected(got.error());
-        }
-        if (*got == 0) break;
-        off += *got;
+        if (off >= src.size())
+            break;
+        const std::size_t got = std::min(in.size(), src.size() - static_cast<std::size_t>(off));
+        std::memcpy(in.data(), src.data() + off, got);
+        off += got;
 
         strm.next_in = in.data();
-        strm.avail_in = static_cast<uInt>(*got);
+        strm.avail_in = static_cast<uInt>(got);
 
         do {
             strm.next_out = chunk.data();
@@ -40,7 +40,8 @@ namespace mister::svc {
 
             if (ret == Z_NEED_DICT || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) {
                 inflateEnd(&strm);
-                if (capped) return InflateResult{};
+                if (capped)
+                    return InflateResult{};
                 result.ok = true;
                 return result;
             }
@@ -54,13 +55,15 @@ namespace mister::svc {
             }
         } while (strm.avail_out == 0);
 
-        if (ret == Z_STREAM_END) break;
+        if (ret == Z_STREAM_END)
+            break;
     }
 
     inflateEnd(&strm);
-    if (capped) return InflateResult{};
+    if (capped)
+        return InflateResult{};
     result.ok = true;
     return result;
 }
 
-}  // namespace mister::svc
+}

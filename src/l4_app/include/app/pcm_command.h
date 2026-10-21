@@ -22,9 +22,11 @@ struct PcmCommand {
         std::uint8_t track = 0;
         bool loop = false;
     };
+
     struct Stop {
         static constexpr Kind kKind = Kind::Stop;
     };
+
     struct Resume {
         static constexpr Kind kKind = Kind::Resume;
     };
@@ -33,6 +35,7 @@ struct PcmCommand {
         static constexpr Kind kKind = Kind::AttachRing;
         std::uint8_t lease = 0;
     };
+
     struct AttachSource {
         static constexpr Kind kKind = Kind::AttachSource;
         std::uint8_t lease = 0;
@@ -44,7 +47,8 @@ struct PcmCommand {
     std::uint8_t pad_{};
     std::array<std::byte, kStore> store{};
 };
+
 static_assert(infra::MessageSum<PcmCommand> && infra::alternatives_are_total<PcmCommand>());
 static_assert(sizeof(PcmCommand) == 4, "the ring element stays one word");
 
-}  // namespace mister::app
+}

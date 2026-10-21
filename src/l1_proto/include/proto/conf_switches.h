@@ -27,12 +27,15 @@ public:
     };
 
     constexpr ConfSwitches& set(Bit b, bool on = true) noexcept {
-        if (on) bits_ = static_cast<std::uint16_t>(bits_ | static_cast<std::uint16_t>(b));
+        if (on)
+            bits_ = static_cast<std::uint16_t>(bits_ | static_cast<std::uint16_t>(b));
         return *this;
     }
+
     [[nodiscard]] constexpr bool has(Bit b) const noexcept {
         return (bits_ & static_cast<std::uint16_t>(b)) != 0;
     }
+
     [[nodiscard]] constexpr std::uint16_t word() const noexcept { return bits_; }
 
     friend constexpr bool operator==(ConfSwitches, ConfSwitches) = default;
@@ -43,4 +46,4 @@ private:
 
 static_assert(sizeof(ConfSwitches) == 2);
 
-}  // namespace mister::proto
+}

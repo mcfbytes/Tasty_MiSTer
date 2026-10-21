@@ -18,8 +18,9 @@ struct SaveStateFacts {
     std::uint32_t prime_aborts = 0;
     bool live = false;
 };
+
 static_assert(std::is_trivially_copyable_v<SaveStateFacts>);
 
 using SaveStateFactsCell = xthread::Telemetry<SaveStateFacts, SeatTag::Ui>;
 
-}  // namespace mister::app
+}

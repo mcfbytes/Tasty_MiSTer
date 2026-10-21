@@ -27,21 +27,27 @@ namespace {
 [[nodiscard]] Ex<void> walk(CoreInitContext& ctx, std::span<const CoreInitStep> rows) {
     const CoreTypeMask dialect = cores::dialect_bit(ctx.session.type());
     for (const CoreInitStep& step : rows) {
-        if (step.fn == nullptr) continue;
-        if (!cores::applies(step.applies_to, dialect)) continue;
+        if (step.fn == nullptr)
+            continue;
+        if (!cores::applies(step.applies_to, dialect))
+            continue;
         Ex<void> r = step.fn(ctx);
-        if (!r && step.on_error == OnError::Fail) return r;
+        if (!r && step.on_error == OnError::Fail)
+            return r;
         (void)r;
     }
     return {};
 }
 
-}  // namespace
+}
 
-[[nodiscard]] Ex<void> run_core_init(CoreInitContext& ctx,
-                                     std::span<const CoreInitStep> additions) {
-    if (auto r = walk(ctx, kCoreInitBase); !r) return r;
+[[nodiscard]] Ex<void> run_core_init(
+    CoreInitContext& ctx,
+    std::span<const CoreInitStep> additions
+) {
+    if (auto r = walk(ctx, kCoreInitBase); !r)
+        return r;
     return walk(ctx, additions);
 }
 
-}  // namespace mister::app
+}

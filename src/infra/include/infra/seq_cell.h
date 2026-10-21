@@ -14,9 +14,11 @@ namespace mister::xthread {
 template <class T>
 class SeqCell {
     TASTY_SEAT_MEDIATOR(Any, Any);
-    static_assert(std::is_trivially_copyable_v<T>,
-                  "the body crosses as its bytes, in words: a cell "
-                  "payload is a POD, never an owning type");
+    static_assert(
+        std::is_trivially_copyable_v<T>,
+        "the body crosses as its bytes, in words: a cell "
+        "payload is a POD, never an owning type"
+    );
     static_assert(std::is_nothrow_default_constructible_v<T>);
     static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
 
@@ -52,7 +54,8 @@ public:
 
     [[nodiscard]] Gen try_read(T& dst) const noexcept {
         const Gen g1 = gen_.load(std::memory_order_acquire);
-        if (g1 == 0) return 0;
+        if (g1 == 0)
+            return 0;
         auto* out = reinterpret_cast<unsigned char*>(&dst);
         const std::atomic<std::uint32_t>* const words = body_;
         for (std::size_t i = 0; i < kFull; ++i) {
@@ -78,4 +81,4 @@ private:
     std::atomic<std::uint32_t> body_[kFull + (kTail != 0 ? 1 : 0)]{};
 };
 
-}  // namespace mister::xthread
+}

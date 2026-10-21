@@ -98,4 +98,4 @@ struct CoreInitStep {
     std::string_view site;
 };
 
-}  // namespace mister::cores
+}

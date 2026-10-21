@@ -55,18 +55,21 @@ struct RawItem {
             d = static_cast<unsigned>(c - '0');
         else if (c >= 'a' && c <= 'f')
             d = static_cast<unsigned>(c - 'a' + 10);
-        if (d >= base) break;
+        if (d >= base)
+            break;
         any = true;
         v = v * base + d;
-        if (v > 0xFFFFFFFFull) v = 0xFFFFFFFFull;
+        if (v > 0xFFFFFFFFull)
+            v = 0xFFFFFFFFull;
     }
-    if (!any) return 0;
+    if (!any)
+        return 0;
 
     return neg ? static_cast<std::uint32_t>(0u - static_cast<std::uint32_t>(v))
                : static_cast<std::uint32_t>(v);
 }
 
-}  // namespace
+}
 
 void MglPlayer::reset() noexcept {
 
@@ -109,9 +112,11 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
             inside_mgl = !tag->closing;
             continue;
         }
-        if (tag->closing) continue;
+        if (tag->closing)
+            continue;
 
-        if (!inside_mgl || count_ >= kMaxItems) continue;
+        if (!inside_mgl || count_ >= kMaxItems)
+            continue;
 
         RawItem& it = raw[count_];
 
@@ -137,7 +142,8 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
                 } else if (ieq(a.name, "index")) {
                     n = parse_ul(a.value);
 
-                    if (n > 15u) continue;
+                    if (n > 15u)
+                        continue;
                     it.index = static_cast<std::uint8_t>(n);
                     valid |= 0x4u;
                 } else if (ieq(a.name, "path")) {
@@ -148,7 +154,11 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
 
             if (valid == 0xFu) {
                 items_[count_] = infra::make<MglItem>(MglItem::Load{
-                    .slot = it.slot, .index = it.index, .delay_s = it.delay_s, .path = it.path});
+                    .slot = it.slot,
+                    .index = it.index,
+                    .delay_s = it.delay_s,
+                    .path = it.path
+                });
                 ++count_;
             }
         } else if (ieq(tag->name, "reset")) {
@@ -167,8 +177,9 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
                 }
             }
             if (valid) {
-                items_[count_] =
-                    infra::make<MglItem>(MglItem::Reset{.delay_s = it.delay_s, .hold_s = it.index});
+                items_[count_] = infra::make<MglItem>(
+                    MglItem::Reset{.delay_s = it.delay_s, .hold_s = it.index}
+                );
                 ++count_;
             }
         }
@@ -181,9 +192,11 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
 Ex<void> MglPlayer::adopt(const MglItem& item, PathBase base, bool core_supports_mgl) {
     TASTY_SEAT_BODY(MglPlayer);
     reset();
-    if (!core_supports_mgl) return {};
+    if (!core_supports_mgl)
+        return {};
 
-    if (const auto ld = infra::as<MglItem::Load>(item); ld && ld->index > 15u) return {};
+    if (const auto ld = infra::as<MglItem::Load>(item); ld && ld->index > 15u)
+        return {};
 
     base_ = base;
     items_[0] = item;
@@ -193,21 +206,25 @@ Ex<void> MglPlayer::adopt(const MglItem& item, PathBase base, bool core_supports
 }
 
 bool MglPlayer::set_homes(std::string_view file_home, std::string_view image_home) noexcept {
-    if (file_home_.assign(file_home) && image_home_.assign(image_home)) return true;
+    if (file_home_.assign(file_home) && image_home_.assign(image_home))
+        return true;
     file_home_.clear();
     image_home_.clear();
     return false;
 }
 
 void MglPlayer::arm(const os::IClock& clock) {
-    if (armed_ || state_ == MglState::Done) return;
+    if (armed_ || state_ == MglState::Done)
+        return;
     armed_ = true;
     timer_ = os::Deadline::in(clock, std::chrono::seconds{delay_of_(0)});
 }
 
 std::uint16_t MglPlayer::delay_of_(std::uint8_t i) const noexcept {
-    if (const auto ld = infra::as<MglItem::Load>(items_[i]); ld) return ld->delay_s;
-    if (const auto rs = infra::as<MglItem::Reset>(items_[i]); rs) return rs->delay_s;
+    if (const auto ld = infra::as<MglItem::Load>(items_[i]); ld)
+        return ld->delay_s;
+    if (const auto rs = infra::as<MglItem::Reset>(items_[i]); rs)
+        return rs->delay_s;
     return 0;
 }
 
@@ -233,7 +250,9 @@ void MglPlayer::record_wire_publish(bool pushed) noexcept {
     }
 }
 
-void MglPlayer::dispatch_current() { infra::dispatch<MglItemRoutes>(items_[current_], *this); }
+void MglPlayer::dispatch_current() {
+    infra::dispatch<MglItemRoutes>(items_[current_], *this);
+}
 
 Ex<void> MglPlayer::publish_load_() {
     const auto ld = infra::as<MglItem::Load>(items_[current_]);
@@ -245,17 +264,26 @@ Ex<void> MglPlayer::publish_load_() {
     const PathText& home = ld->slot == MglItem::Slot::File ? file_home_ : image_home_;
     PathText path{};
     const bool fits = (p.front() == '/' || home.empty() || base_ == PathBase::Card)
-                          ? path.assign(p)
-                          : path.assign(home.view()) && path.append("/") && path.append(p);
+        ? path.assign(p)
+        : path.assign(home.view()) && path.append("/") && path.append(p);
     if (!fits) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), current_});
     }
-    const CorrelationTag tag =
-        ld->slot == MglItem::Slot::File
-            ? asks_.push(UiRequest::LoadFileByDigit{
-                  .digit = proto::FileSlotDigit{ld->index}, .scope = scope_, .path = path})
-            : asks_.push(UiRequest::MountImage{
-                  .index = proto::IoIndex{ld->index}, .scope = scope_, .path = path});
+    const CorrelationTag tag = ld->slot == MglItem::Slot::File
+        ? asks_.push(
+              UiRequest::LoadFileByDigit{
+                  .digit = proto::FileSlotDigit{ld->index},
+                  .scope = scope_,
+                  .path = path
+              }
+          )
+        : asks_.push(
+              UiRequest::MountImage{
+                  .index = proto::IoIndex{ld->index},
+                  .scope = scope_,
+                  .path = path
+              }
+          );
     record_publish(tag);
     tags_[current_] = tag;
 
@@ -268,25 +296,33 @@ Ex<void> MglPlayer::publish_load_() {
     return {};
 }
 
-void MglPlayer::remember(std::uint8_t i, const RememberedStem& stem, RememberedSlot slot,
-                         std::uint8_t ioctl_index) noexcept {
-    if (i >= count_) return;
+void MglPlayer::remember(
+    std::uint8_t i,
+    const RememberedStem& stem,
+    RememberedSlot slot,
+    std::uint8_t ioctl_index
+) noexcept {
+    if (i >= count_)
+        return;
     stem_ = stem;
     remember_[i] = RememberAt{slot, ioctl_index};
 }
 
 bool MglPlayer::owns(CorrelationTag tag) const noexcept {
     for (std::uint8_t i = 0; tag && i < count_; ++i)
-        if (tags_[i] == tag) return true;
+        if (tags_[i] == tag)
+            return true;
     return false;
 }
 
 bool MglPlayer::replay_refused(CorrelationTag tag, const os::IClock& clock) {
-    if (!tag) return false;
+    if (!tag)
+        return false;
     std::uint8_t i = 0;
     while (i < count_ && tags_[i] != tag)
         ++i;
-    if (i == count_) return false;
+    if (i == count_)
+        return false;
     for (std::uint8_t k = i; k < count_; ++k)
         tags_[k] = kUncaused;
     current_ = i;
@@ -297,13 +333,16 @@ bool MglPlayer::replay_refused(CorrelationTag tag, const os::IClock& clock) {
 }
 
 Ex<void> MglPlayer::advance(const os::IClock& clock) {
-    if (state_ == MglState::Done) return {};
-    if (!armed_) arm(clock);
+    if (state_ == MglState::Done)
+        return {};
+    if (!armed_)
+        arm(clock);
 
     switch (state_) {
         case MglState::Armed:
 
-            if (!timer_.expired(clock)) return {};
+            if (!timer_.expired(clock))
+                return {};
             dispatch_current();
             return {};
 
@@ -344,7 +383,8 @@ Ex<void> MglPlayer::advance(const os::IClock& clock) {
 
         case MglState::ResetRelease:
 
-            if (!timer_.expired(clock)) return {};
+            if (!timer_.expired(clock))
+                return {};
             state_ = MglState::Advancing;
             return {};
 
@@ -354,4 +394,4 @@ Ex<void> MglPlayer::advance(const os::IClock& clock) {
     return {};
 }
 
-}  // namespace mister::app
+}

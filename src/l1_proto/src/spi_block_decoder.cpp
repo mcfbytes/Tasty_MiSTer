@@ -12,7 +12,8 @@ void SpiBlockDecoder::service() {
             counters_.err_code = static_cast<std::uint16_t>(d.error().code);
             break;
         }
-        if (!d->decoded) break;
+        if (!d->decoded)
+            break;
         auto r = slots_->serve(*link_, *d);
         if (!r) {
             ++counters_.errors;
@@ -27,10 +28,12 @@ void SpiBlockDecoder::service() {
         const std::uint32_t bytes = d->req.block_count.v * d->block_size;
 
         (void)out_.push(
-            LinkEvent::BlockRequest{.slot = d->req.slot, .lba = d->req.lba, .bytes = bytes});
+            LinkEvent::BlockRequest{.slot = d->req.slot, .lba = d->req.lba, .bytes = bytes}
+        );
         ++counters_.served;
-        if (floor_.is_sector(bytes)) ++counters_.sectors;
+        if (floor_.is_sector(bytes))
+            ++counters_.sectors;
     }
 }
 
-}  // namespace mister::proto
+}

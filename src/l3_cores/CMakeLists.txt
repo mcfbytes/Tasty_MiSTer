@@ -6,7 +6,6 @@ set(TASTY_CORES_TASTY
   src/psx_ladder.cpp
   src/core_profile.cpp
   src/fio_cheat_sink.cpp
-  src/file_tx.cpp
   src/stream_load_bracket.cpp
   src/generic_core.cpp
   src/core_support.cpp
@@ -25,6 +24,7 @@ set(TASTY_CORES_TASTY
   src/msu_companion.cpp
   src/msu_data_loader.cpp
   src/mailbox_servants.cpp
+  src/disk_servant.cpp
   src/movie_archive.cpp
   src/movie_codec.cpp
   src/nes_movie_codec.cpp
@@ -40,7 +40,70 @@ set(TASTY_CORES_TASTY
   src/manifests/psx.cpp
   src/manifests/snes.cpp
 )
-add_library(mister_cores STATIC ${TASTY_CORES_TASTY})
+set(TASTY_CORES_EXTRA
+  src/acsi_servant.cpp
+  src/arcade_core.cpp
+  src/arcade_facts.cpp
+  src/arcade_manifest_role.cpp
+  src/cd_core.cpp
+  src/cd_cadence_gate.cpp
+  src/cd_disc_slot.cpp
+  src/cd_engine.cpp
+  src/cd_drive.cpp
+  src/cd_wire_port.cpp
+  src/cdwire.cpp
+  src/sega_cdd_engine.cpp
+  src/pce_scsi_engine.cpp
+  src/saturn_stock_toc.cpp
+  src/megacd_ladder.cpp
+  src/pcecd_ladder.cpp
+  src/threedo_ladder.cpp
+  src/saturn_ladder.cpp
+  src/neogeocd_ladder.cpp
+  src/cdi_ladder.cpp
+  src/electron_core.cpp
+  src/host_file_server.cpp
+  src/minimig_core.cpp
+  src/mra_doc.cpp
+  src/mra_stager.cpp
+  src/n64_cheat_engine.cpp
+  src/n64_core.cpp
+  src/n64_db_reader.cpp
+  src/n64_loader.cpp
+  src/n64_save_store.cpp
+  src/n64_saves.cpp
+  src/n64dd_disk_map.cpp
+  src/n64dd_expander.cpp
+  src/n64dd_ram_save.cpp
+  src/n64dd_system_area.cpp
+  src/neo_file.cpp
+  src/neogeo_alias_source.cpp
+  src/neogeo_loader.cpp
+  src/neogeo_core.cpp
+  src/neo_transform.cpp
+  src/rom_assembly.cpp
+  src/rom_bytes.cpp
+  src/cdi_core.cpp
+  src/cdi_block.cpp
+  src/romsets.cpp
+  src/st_config.cpp
+  src/st_core.cpp
+  src/st_media_ladder.cpp
+  src/st_option_row.cpp
+  src/threedo_cdd_engine.cpp
+  src/saturn_cdd_engine.cpp
+  src/uef.cpp
+  src/manifests/electron.cpp
+  src/manifests/megacd.cpp
+  src/manifests/n64.cpp
+  src/manifests/neogeo.cpp
+  src/manifests/pce.cpp
+  src/manifests/st.cpp
+  src/manifests/threedo.cpp
+  src/manifests/saturn.cpp
+  src/manifests/cdi.cpp
+)
+add_library(mister_cores STATIC ${TASTY_CORES_TASTY} ${TASTY_CORES_EXTRA})
 target_include_directories(mister_cores PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mister_cores
   PUBLIC mister_services
@@ -54,10 +117,12 @@ if(TASTY_CDDA_DUMP)
 endif()
 
 tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
-  cores/acsi_dma.h
   cores/addressed_load.h
   cores/generic_profile.h
-  cores/acsi_engine.h
+  cores/acsi_servant.h
+  cores/disk_port.h
+  cores/disk_servant.h
+  cores/slot_mount.h
   cores/arcade_core.h
   cores/arcade_facts.h
   cores/arcade_manifest_role.h
@@ -72,7 +137,10 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/button_override.h
   cores/cd_census_rows.h
   cores/cd_core.h
+  cores/cd_dialect_ports.h
   cores/cd_diagnostics.h
+  cores/cd_cadence_gate.h
+  cores/cd_disc_slot.h
   cores/cd_drive.h
   cores/cd_engine.h
   cores/cd_engine_stats.h
@@ -84,6 +152,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/cd_service_rows.h
   cores/cd_tick_periods.h
   cores/cd_transport.h
+  cores/cd_wire_port.h
   cores/ladder_context.h
   cores/ladder_host.h
   cores/mount_status.h
@@ -92,6 +161,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/stream_load.h
   cores/stream_load_bracket.h
   cores/stream_load_end.h
+  cores/stream_tx_record.h
   cores/load_ask.h
   cores/load_plan.h
   cores/loader.h
@@ -160,6 +230,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/n64_loader.h
   cores/n64_cpak.h
   cores/n64_db.h
+  cores/n64_db_reader.h
   cores/n64_db_tags.h
   cores/n64_ipl3.h
   cores/n64_ipl3_row.h
@@ -187,6 +258,11 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/neo_transform.h
   cores/nvram_store.h
   cores/pce_scsi_engine.h
+  cores/scsi_sense.h
+  cores/cdda_play_range.h
+  cores/saturn_slot_ring.h
+  cores/saturn_stock_toc.h
+  cores/saturn_pending.h
   cores/pcm_census_rows.h
   cores/pcm_extent.h
   cores/post_notify.h
@@ -206,6 +282,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/save_channel.h
   cores/save_partition.h
   cores/rom_node.h
+  cores/rom_bytes.h
   cores/rom_set_assembler.h
   cores/romset_alias.h
   cores/romset_alias_source.h
@@ -247,11 +324,14 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/snes_bk2_codec.h
   cores/megadrive_movie_codec.h
   cores/psx_movie_codec.h
+  cores/st_config.h
   cores/st_config_layout.h
   cores/st_core.h
+  cores/st_media_fact.h
+  cores/st_media_ladder.h
+  cores/st_option_row.h
   cores/st_sysctrl.h
   cores/stage_plan.h
-  cores/stwire.h
   cores/staging_core.h
   cores/staging_policy.h
   cores/switch_table.h
@@ -274,280 +354,3 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/manifests/cdi.h
 )
 
-if(TASTY_BUILD_TESTS)
-  tasty_unit_test(tasty_cores_nes_movie_codec_unit
-    NAME tasty.cores_nes_movie_codec
-    SOURCES tests/nes_movie_codec_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_nes_bk2_codec_unit
-    NAME tasty.cores_nes_bk2_codec
-    SOURCES tests/nes_bk2_codec_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-  target_include_directories(tasty_cores_nes_bk2_codec_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-
-  tasty_unit_test(tasty_cores_snes_movie_codec_unit
-    NAME tasty.cores_snes_movie_codec
-    SOURCES tests/snes_movie_codec_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_addressed_load_unit
-    NAME tasty.cores_addressed_load
-    SOURCES tests/addressed_load_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_ram_image_unit
-    NAME tasty.cores_ram_image
-    SOURCES tests/ram_image_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_megadrive_movie_codec_unit
-    NAME tasty.cores_megadrive_movie_codec
-    SOURCES tests/megadrive_movie_codec_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_psx_movie_codec_unit
-    NAME tasty.cores_psx_movie_codec
-    SOURCES tests/psx_movie_codec_unit.cpp
-    DEFINES TASTY_PSX_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/psx"
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_movie_archive_unit
-    NAME tasty.cores_movie_archive
-    SOURCES tests/movie_archive_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 300)
-  target_include_directories(tasty_cores_movie_archive_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-
-  foreach(mod IN ITEMS arcade cd cdi pce megacd neogeo psx saturn st threedo)
-
-    tasty_unit_test(tasty_cores_${mod}_unit
-      NAME tasty.cores_${mod}
-      SOURCES tests/${mod}_core_unit.cpp
-      DEFINES TASTY_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/goldens"
-      LIBS mister_cores tasty_test_options
-      TIMEOUT 60)
-  endforeach()
-
-  tasty_unit_test(tasty_cores_threedo_cue_unit
-    NAME tasty.cores_threedo_cue
-    SOURCES tests/threedo_cue_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_cheat_sink_unit
-    NAME tasty.cores_cheat_sink
-    SOURCES tests/cheat_sink_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_n64_rom_unit
-    NAME tasty.cores_n64_rom
-    SOURCES tests/n64_rom_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_n64_db_unit
-    NAME tasty.cores_n64_db
-    SOURCES tests/n64_db_unit.cpp
-    DEFINES TASTY_N64_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/n64"
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_core_adopt_unit
-    NAME tasty.cores_core_adopt
-    SOURCES tests/core_adopt_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_n64_unit
-    NAME tasty.cores_n64
-    SOURCES tests/n64_unit.cpp
-    DEFINES TASTY_CONFSTR_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/confstr"
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_n64dd_unit
-    NAME tasty.cores_n64dd
-    SOURCES tests/n64dd_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 120)
-
-  tasty_unit_test(tasty_cores_n64_cheat_unit
-    NAME tasty.cores_n64_cheat
-    SOURCES tests/n64_cheat_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_n64_saves_unit
-    NAME tasty.cores_n64_saves
-    SOURCES tests/n64_saves_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_n64_cpak_unit
-    NAME tasty.cores_n64_cpak
-    SOURCES tests/n64_cpak_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_nvram_store_unit
-    NAME tasty.cores_nvram_store
-    SOURCES tests/nvram_store_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_boot_ladder_unit
-    NAME tasty.cores_boot_ladder
-    SOURCES tests/boot_ladder_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_image_sink_unit
-    NAME tasty.cores_image_sink
-    SOURCES tests/image_sink_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_host_file_server_unit
-    NAME tasty.cores_host_file_server
-    SOURCES tests/host_file_server_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_mra_doc_unit
-    NAME tasty.cores_mra_doc
-    SOURCES tests/mra_doc_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_stock_scan_unit
-    NAME tasty.cores_stock_scan
-    SOURCES tests/stock_scan_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_romsets_unit
-    NAME tasty.cores_romsets
-    SOURCES tests/romsets_unit.cpp
-    DEFINES TASTY_NEOGEO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/neogeo"
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_neogeo_manifest_unit
-    NAME tasty.cores_neogeo_manifest
-    SOURCES tests/neogeo_manifest_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_neogeo_alias_source_unit
-    NAME tasty.cores_neogeo_alias_source
-    SOURCES tests/neogeo_alias_source_unit.cpp
-    DEFINES TASTY_NEOGEO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/neogeo"
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_neo_file_unit
-    NAME tasty.cores_neo_file
-    SOURCES tests/neo_file_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_neo_transform_unit
-    NAME tasty.cores_neo_transform
-    SOURCES tests/neo_transform_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_neogeo_loader_unit
-    NAME tasty.cores_neogeo_loader
-    SOURCES tests/neogeo_loader_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_rom_assembly_unit
-    NAME tasty.cores_rom_assembly
-    SOURCES tests/rom_assembly_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_config_blob_unit
-    NAME tasty.cores_config_blob
-    SOURCES tests/config_blob_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_config_slots_unit
-    NAME tasty.cores_config_slots
-    SOURCES tests/config_slots_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_option_rows_unit
-    NAME tasty.cores_option_rows
-    SOURCES tests/option_rows_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_snes_rom_unit
-    NAME tasty.cores_snes_rom
-    SOURCES tests/snes_rom_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_snes_msu_unit
-    NAME tasty.cores_snes_msu
-    SOURCES tests/snes_msu_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_snes_core_unit
-    NAME tasty.cores_snes_core
-    SOURCES tests/snes_core_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_uef_unit
-    NAME tasty.cores_uef
-    SOURCES tests/uef_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_generic_core_unit
-    NAME tasty.cores_generic_core
-    SOURCES tests/generic_core_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_megadrive_unit
-    NAME tasty.cores_megadrive
-    SOURCES tests/megadrive_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_mdp_cue_unit
-    NAME tasty.cores_mdp_cue
-    SOURCES tests/mdp_cue_unit.cpp
-    LIBS mister_cores tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_cores_electron_core_unit
-    NAME tasty.cores_electron_core
-    SOURCES tests/electron_core_unit.cpp
-    LIBS mister_cores tasty_test_options ZLIB::ZLIB
-    TIMEOUT 60)
-  find_package(ZLIB REQUIRED)
-
-  get_filename_component(TASTY_L3_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
-  target_link_libraries(tasty_cores_megacd_unit PRIVATE trace_replay)
-  target_compile_definitions(tasty_cores_megacd_unit PRIVATE
-    TASTY_CAPTURE_DIR="${TASTY_L3_REPO_ROOT}/harness/capture/captures")
-  set_tests_properties(tasty.cores_megacd PROPERTIES TIMEOUT 900)
-endif()

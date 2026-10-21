@@ -34,4 +34,4 @@ struct DeviceIdentity {
     std::optional<std::uint8_t> port_suffix;
 };
 
-}  // namespace mister::svc
+}

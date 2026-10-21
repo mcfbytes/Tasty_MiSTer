@@ -11,4 +11,4 @@ struct CauseReg {
     static constexpr std::size_t kSize = 4;
 };
 
-}  // namespace mister::hal
+}

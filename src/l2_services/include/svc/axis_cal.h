@@ -13,4 +13,4 @@ struct AxisCal {
     std::int32_t seen_max = 0;
 };
 
-}  // namespace mister::svc
+}

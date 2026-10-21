@@ -23,7 +23,7 @@ timespec to_timespec(std::chrono::nanoseconds ns) {
     ts.tv_nsec = static_cast<long>((ns - secs).count());
     return ts;
 }
-}  // namespace
+}
 
 std::chrono::nanoseconds MonotonicClock::now() const {
     timespec ts{};
@@ -38,7 +38,8 @@ std::chrono::nanoseconds ThreadCpuClock::now() const {
 }
 
 void NanosleepDelay::sleep_for(std::chrono::microseconds d) {
-    if (d <= std::chrono::microseconds::zero()) return;
+    if (d <= std::chrono::microseconds::zero())
+        return;
     timespec ts = to_timespec(std::chrono::duration_cast<std::chrono::nanoseconds>(d));
     while (::nanosleep(&ts, &ts) != 0 && errno == EINTR) {
     }
@@ -53,7 +54,8 @@ int sleep_until_raw(std::chrono::nanoseconds at) {
     ::clock_gettime(CLOCK_MONOTONIC, &mono_ts);
     const auto mono_deadline = at + (to_ns(mono_ts) - to_ns(raw_ts));
 
-    if (mono_deadline <= std::chrono::nanoseconds::zero()) return 0;
+    if (mono_deadline <= std::chrono::nanoseconds::zero())
+        return 0;
 
     const timespec abs_ts = to_timespec(mono_deadline);
 
@@ -63,9 +65,11 @@ int sleep_until_raw(std::chrono::nanoseconds at) {
     } while (rc == EINTR);
     return rc;
 }
-}  // namespace
+}
 
-void NanosleepDelay::sleep_until(std::chrono::nanoseconds at) { (void)sleep_until_raw(at); }
+void NanosleepDelay::sleep_until(std::chrono::nanoseconds at) {
+    (void)sleep_until_raw(at);
+}
 
 Ex<void> Deadline::sleep_until() const {
     if (const int rc = sleep_until_raw(at_); rc != 0) {
@@ -74,4 +78,4 @@ Ex<void> Deadline::sleep_until() const {
     return {};
 }
 
-}  // namespace mister::os
+}

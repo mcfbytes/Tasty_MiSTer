@@ -42,16 +42,19 @@ enum class Errc : std::uint16_t {
     busy,
 };
 
-static_assert(static_cast<std::uint16_t>(Errc::unimplemented) == 22 &&
-              static_cast<std::uint16_t>(Errc::aperture_range) == 23 &&
-              static_cast<std::uint16_t>(Errc::stale) == 24 &&
-              static_cast<std::uint16_t>(Errc::busy) == 25);
+static_assert(
+    static_cast<std::uint16_t>(Errc::unimplemented) == 22
+    && static_cast<std::uint16_t>(Errc::aperture_range) == 23
+    && static_cast<std::uint16_t>(Errc::stale) == 24
+    && static_cast<std::uint16_t>(Errc::busy) == 25
+);
 
 struct Error {
     Errc code;
     std::uint16_t site;
     std::uint32_t detail;
 };
+
 static_assert(std::is_trivially_copyable_v<Error> && sizeof(Error) == 8);
 
 template <class T>
@@ -65,4 +68,4 @@ inline std::unexpected<Error> unimplemented(std::uint16_t site) {
     return std::unexpected(Error{Errc::unimplemented, site, 0});
 }
 
-}  // namespace mister
+}

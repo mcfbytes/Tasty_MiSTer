@@ -50,13 +50,21 @@ class CoreSession {
 
 public:
     CoreSession(hal::ISpiTransport& link, hal::ICoreSignals& signals, IResetFence* fence = nullptr)
-        : link_(&link), signals_(&signals) {
+        : link_(&link),
+          signals_(&signals) {
         status_.fence_with(fence);
     }
 
-    CoreSession(hal::ISpiTransport& link, hal::ICoreSignals& signals, MemSizeCookie cookie,
-                IResetFence* fence = nullptr)
-        : link_(&link), signals_(&signals), phase_(SessionPhase::Start), cookie_(cookie) {
+    CoreSession(
+        hal::ISpiTransport& link,
+        hal::ICoreSignals& signals,
+        MemSizeCookie cookie,
+        IResetFence* fence = nullptr
+    )
+        : link_(&link),
+          signals_(&signals),
+          phase_(SessionPhase::Start),
+          cookie_(cookie) {
         status_.fence_with(fence);
     }
 
@@ -86,13 +94,17 @@ public:
     void refuse() noexcept { phase_ = SessionPhase::Failed; }
 
     CoreType type() const noexcept { return type_; }
+
     bool dual_sdram() const noexcept { return dual_sdram_; }
+
     const hal::CoreCapabilities& capabilities() const noexcept { return caps_; }
+
     StatusRegister& status() noexcept { return status_; }
 
     static constexpr std::size_t kConfStrCap = 10240;
 
     void set_suppress_status_wire(bool on) noexcept { suppress_status_wire_ = on; }
+
     [[nodiscard]] bool suppress_status_wire() const noexcept { return suppress_status_wire_; }
 
     [[nodiscard]] Ex<void> flush_status();
@@ -112,4 +124,4 @@ private:
     StatusRegister status_;
 };
 
-}  // namespace mister::proto
+}

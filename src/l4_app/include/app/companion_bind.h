@@ -30,6 +30,7 @@ struct CompanionBind {
         bool present = false;
         std::uint8_t pad_{};
     };
+
     static constexpr std::size_t kStore = std::max(sizeof(Attach), sizeof(Bind));
 
     using Alternatives = std::tuple<Attach, Bind>;
@@ -38,6 +39,7 @@ struct CompanionBind {
     std::uint8_t pad_{};
     alignas(alignof(Bind)) std::array<std::byte, kStore> store{};
 };
+
 static_assert(infra::MessageSum<CompanionBind> && infra::alternatives_are_total<CompanionBind>());
 
-}  // namespace mister::app
+}

@@ -24,30 +24,45 @@ public:
     static constexpr std::size_t kPool = std::bit_ceil(std::size_t{InternedFile::kRecycleSlots});
 
     FileBytes() noexcept : slab_(InternedFile::kRecycleSlots) {}
+
     FileBytes(const FileBytes&) = delete;
     FileBytes& operator=(const FileBytes&) = delete;
 
-    [[nodiscard]] Ex<proto::FileId> intern(std::vector<std::uint8_t>&& bytes, std::string_view ext,
-                                           std::string_view path, std::uint32_t load_addr,
-                                           std::uint32_t crc = 0, std::uint64_t whole = 0,
-                                           std::uint64_t offset = 0);
+    [[nodiscard]] Ex<proto::FileId> intern(
+        std::vector<std::uint8_t>&& bytes,
+        std::string_view ext,
+        std::string_view path,
+        std::uint32_t load_addr,
+        std::uint32_t crc = 0,
+        std::uint64_t whole = 0,
+        std::uint64_t offset = 0
+    );
 
     [[nodiscard]] bool stamp_save(proto::FileId file, proto::FileId save) noexcept;
 
     [[nodiscard]] bool stamp_edge(proto::FileId file, ContentEdge edge) noexcept;
 
-    [[nodiscard]] Ex<proto::FileId> intern_path(std::string_view path, std::uint64_t size_bytes,
-                                                std::uint32_t crc = 0, std::uint32_t aux = 0);
+    [[nodiscard]] Ex<proto::FileId> intern_path(
+        std::string_view path,
+        std::uint64_t size_bytes,
+        std::uint32_t crc = 0,
+        std::uint32_t aux = 0
+    );
 
-    [[nodiscard]] Ex<proto::FileId> intern_at(proto::FileId id, std::vector<std::uint8_t>&& bytes,
-                                              std::string_view ext, std::string_view path,
-                                              std::uint32_t load_addr);
+    [[nodiscard]] Ex<proto::FileId> intern_at(
+        proto::FileId id,
+        std::vector<std::uint8_t>&& bytes,
+        std::string_view ext,
+        std::string_view path,
+        std::uint32_t load_addr
+    );
 
     void send_staged(std::uint32_t at) noexcept { slab_.producer().send_staged(at); }
 
     [[nodiscard]] std::size_t retained_bytes() const noexcept;
 
     void release_before(std::uint32_t q) noexcept { slab_.consumer().release_before(q); }
+
     void take_sent() noexcept { slab_.consumer().take_sent(); }
 
     [[nodiscard]] const InternedFile* get(proto::FileId id) const noexcept;
@@ -69,4 +84,4 @@ extern template class FileBytes<SeatTag::Main>;
 extern template class FileBytes<SeatTag::Ui>;
 extern template class FileBytes<SeatTag::Input>;
 
-}  // namespace mister::app
+}

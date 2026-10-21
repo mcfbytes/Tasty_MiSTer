@@ -16,4 +16,4 @@ struct MountedPath {
     FileSize size_bytes{};
 };
 
-}  // namespace mister::cores
+}

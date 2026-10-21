@@ -21,10 +21,12 @@ namespace mister::app::proc {
 
     char n[8] = {};
     const int len = std::snprintf(n, sizeof n, "%u", static_cast<unsigned>(mode));
-    if (len <= 0) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    if (len <= 0)
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     const std::array<const char*, 2> argv{"uartmode", n};
     auto rc = os::run_sync(argv);
-    if (!rc) return std::unexpected(rc.error());
+    if (!rc)
+        return std::unexpected(rc.error());
 
     if (*rc == 127) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
@@ -32,11 +34,20 @@ namespace mister::app::proc {
     return *rc;
 }
 
-[[nodiscard]] Ex<void> mlinkutil_baud(std::uint32_t) { return unimplemented(ERR_SITE()); }
+[[nodiscard]] Ex<void> mlinkutil_baud(std::uint32_t) {
 
-[[nodiscard]] Ex<void> mlinkutil_soundfont(std::string_view) { return unimplemented(ERR_SITE()); }
+    return unimplemented(ERR_SITE());
+}
 
-[[nodiscard]] Ex<std::string> midilink_soundfont() { return unimplemented(ERR_SITE()); }
+[[nodiscard]] Ex<void> mlinkutil_soundfont(std::string_view) {
+
+    return unimplemented(ERR_SITE());
+}
+
+[[nodiscard]] Ex<std::string> midilink_soundfont() {
+
+    return unimplemented(ERR_SITE());
+}
 
 [[nodiscard]] Ex<void> bluetoothd_hcireset() {
 
@@ -48,8 +59,10 @@ namespace mister::app::proc {
 
     const std::array<const char*, 2> argv{"/bin/bluetoothd", "renew"};
     auto rc = os::run_sync(argv);
-    if (!rc) return std::unexpected(rc.error());
-    if (*rc == 127) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
+    if (!rc)
+        return std::unexpected(rc.error());
+    if (*rc == 127)
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
 
@@ -57,30 +70,42 @@ namespace mister::app::proc {
 
     const std::array<const char*, 3> argv{"hciconfig", "hci0", "reset"};
     auto rc = os::run_sync(argv);
-    if (!rc) return std::unexpected(rc.error());
-    if (*rc == 127) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
+    if (!rc)
+        return std::unexpected(rc.error());
+    if (*rc == 127)
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
 
-[[nodiscard]] Ex<void> btctl_disconnect(std::string_view) { return unimplemented(ERR_SITE()); }
+[[nodiscard]] Ex<void> btctl_disconnect(std::string_view) {
+
+    return unimplemented(ERR_SITE());
+}
 
 [[nodiscard]] Ex<void> killall_sigint_bt() {
 
     const std::array<const char*, 4> argv{"killall", "-SIGINT", "btpair", "btctl"};
     auto rc = os::run_sync(argv);
-    if (!rc) return std::unexpected(rc.error());
-    if (*rc == 127) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
+    if (!rc)
+        return std::unexpected(rc.error());
+    if (*rc == 127)
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
 
-[[nodiscard]] Ex<bool> bt_adapter_up() { return os::bluetooth_adapter_up(); }
+[[nodiscard]] Ex<bool> bt_adapter_up() {
+
+    return os::bluetooth_adapter_up();
+}
 
 [[nodiscard]] Ex<void> killall(const char* name) {
 
     const std::array<const char*, 2> argv{"killall", name};
     auto rc = os::run_sync(argv);
-    if (!rc) return std::unexpected(rc.error());
-    if (*rc == 127) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
+    if (!rc)
+        return std::unexpected(rc.error());
+    if (*rc == 127)
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
 
@@ -105,13 +130,15 @@ void restore_ui_affinity() noexcept {
     while (off < data.size()) {
         const ::ssize_t n = ::write(fd, data.data() + off, data.size() - off);
         if (n < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
         }
-        if (n == 0) break;
+        if (n == 0)
+            break;
         off += static_cast<std::size_t>(n);
     }
     return {};
 }
 
-}  // namespace mister::app::proc
+}

@@ -31,4 +31,4 @@ private:
     std::array<std::uint8_t, 64> tail_{};
 };
 
-}  // namespace mister::cores::mra
+}

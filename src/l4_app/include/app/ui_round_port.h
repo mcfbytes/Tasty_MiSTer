@@ -24,4 +24,4 @@ protected:
     IUiRoundPort& operator=(const IUiRoundPort&) = default;
 };
 
-}  // namespace mister::app
+}

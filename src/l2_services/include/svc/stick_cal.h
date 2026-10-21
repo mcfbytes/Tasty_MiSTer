@@ -8,4 +8,4 @@ struct StickCal {
     float max_range = 0.0f;
 };
 
-}  // namespace mister::svc
+}

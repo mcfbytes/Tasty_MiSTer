@@ -24,4 +24,4 @@ struct RomNode {
     int output = 0;
 };
 
-}  // namespace mister::cores::mra
+}

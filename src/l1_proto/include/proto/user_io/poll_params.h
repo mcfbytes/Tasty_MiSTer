@@ -18,4 +18,4 @@ protected:
     ~IPollParams() = default;
 };
 
-}  // namespace mister::proto::user_io
+}

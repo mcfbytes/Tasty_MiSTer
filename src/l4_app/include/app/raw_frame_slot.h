@@ -46,18 +46,24 @@ inline constexpr std::size_t kRawMinDepth = 4;
     const std::size_t n = frame_bytes == 0 ? 1 : (frame_bytes - 1) / kRawStripeGranule + 1;
     return n * kRawStripeGranule;
 }
+
 [[nodiscard]] constexpr std::size_t raw_depth(std::size_t stripe_bytes) noexcept {
-    if (stripe_bytes == 0) return kRawFrameSlots;
+    if (stripe_bytes == 0)
+        return kRawFrameSlots;
     return std::clamp(kRawArenaBudget / stripe_bytes, kRawMinDepth, kRawFrameSlots);
 }
+
 static_assert(raw_depth(raw_stripe(std::size_t{512} * 3 * 239)) == kRawFrameSlots);
-static_assert(raw_stripe(std::size_t{281} * 3 * 239) == raw_stripe(std::size_t{704} * 3 * 722),
-              "a PSX 240p stripe already holds the 480i switch's largest frame");
+static_assert(
+    raw_stripe(std::size_t{281} * 3 * 239) == raw_stripe(std::size_t{704} * 3 * 722),
+    "a PSX 240p stripe already holds the 480i switch's largest frame"
+);
 static_assert(raw_depth(raw_stripe(std::size_t{1920} * 3 * 1080)) == 10);
-static_assert(raw_stripe(kRawStripeGranule) == kRawStripeGranule &&
-              raw_stripe(1) == kRawStripeGranule);
+static_assert(
+    raw_stripe(kRawStripeGranule) == kRawStripeGranule && raw_stripe(1) == kRawStripeGranule
+);
 
-using RawFrameChannel =
-    xthread::LoanChannel<RawFrameSlot, kRawFrameSlots, SeatTag::Capture, SeatTag::Encode>;
+using RawFrameChannel = xthread::
+    LoanChannel<RawFrameSlot, kRawFrameSlots, SeatTag::Capture, SeatTag::Encode>;
 
-}  // namespace mister::app
+}

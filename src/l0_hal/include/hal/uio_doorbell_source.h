@@ -25,6 +25,7 @@ public:
         TASTY_SEAT_BODY(UioDoorbellSource);
         return os::UioHandle::open(line, lines_);
     }
+
     [[nodiscard]] Ex<RegisterWindow<CauseReg>> map_cause(LwOffset base) override {
         TASTY_SEAT_BODY(UioDoorbellSource);
         return RegisterWindow<CauseReg>::map(lw_, base);
@@ -35,4 +36,4 @@ private:
     os::UioLineSpace lines_{};
 };
 
-}  // namespace mister::hal
+}

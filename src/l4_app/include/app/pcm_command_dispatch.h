@@ -20,4 +20,4 @@ concept PcmCommandSink = requires(S& s, const PcmCommand& m) {
 
 using PcmCommandRoutes = infra::AllRouted;
 
-}  // namespace mister::app
+}

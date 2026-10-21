@@ -10,4 +10,4 @@ struct CheatRow {
     bool enabled = false;
 };
 
-}  // namespace mister::app
+}

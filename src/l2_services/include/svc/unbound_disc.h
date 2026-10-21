@@ -11,4 +11,4 @@ struct UnboundDisc {
     DiscReadService service{{.geometry = geometry, .counters = counters}};
 };
 
-}  // namespace mister::svc
+}

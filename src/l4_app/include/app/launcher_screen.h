@@ -29,6 +29,7 @@ public:
     };
 
     explicit LauncherScreen(const Wiring& w) noexcept : w_(w) {}
+
     LauncherScreen(const LauncherScreen&) = delete;
     LauncherScreen& operator=(const LauncherScreen&) = delete;
 
@@ -49,4 +50,4 @@ private:
     bool ack_owed_ = false;
 };
 
-}  // namespace mister::app
+}

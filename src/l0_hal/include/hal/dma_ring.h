@@ -24,11 +24,13 @@ public:
     void release(std::size_t n);
 
     std::size_t capacity() const noexcept { return mask_ + 1u; }
+
     std::size_t used() const;
     std::size_t space() const;
 
 private:
     explicit DmaRing(FpgaMemory& mem) noexcept : mem_(mem) {}
+
     void check_live() const;
 
     FpgaMemory& mem_;
@@ -40,4 +42,4 @@ private:
     std::uint32_t generation_ = 0;
 };
 
-}  // namespace mister::hal
+}

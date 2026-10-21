@@ -16,9 +16,11 @@ namespace mister::app::proc {
 
 [[nodiscard]] Ex<std::string> midilink_soundfont();
 
-static_assert(std::is_same_v<decltype(midilink_soundfont()), Ex<std::string>>,
-              "item: midilink_soundfont() must return an OWNING "
-              "Ex<std::string>, not a dangling Ex<std::string_view>");
+static_assert(
+    std::is_same_v<decltype(midilink_soundfont()), Ex<std::string>>,
+    "item: midilink_soundfont() must return an OWNING "
+    "Ex<std::string>, not a dangling Ex<std::string_view>"
+);
 
 [[nodiscard]] Ex<void> bluetoothd_hcireset();
 [[nodiscard]] Ex<void> bluetoothd_renew();
@@ -34,4 +36,4 @@ void restore_ui_affinity() noexcept;
 
 [[nodiscard]] Ex<void> write_tmp_handoff(const char* path, std::string_view contents);
 
-}  // namespace mister::app::proc
+}

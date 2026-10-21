@@ -39,31 +39,53 @@ public:
 
     using Window = LoadWindow<seat_owner::Io>;
 
-    WindowJobService(const svc::Vfs& vfs, ILoadWindowMap<seat_owner::Io>& map,
-                     hal::PhysRegion aperture) noexcept
-        : vfs_(&vfs), map_(&map), aperture_(aperture), chan_(xthread::Polled{}) {}
+    WindowJobService(
+        const svc::Vfs& vfs,
+        ILoadWindowMap<seat_owner::Io>& map,
+        hal::PhysRegion aperture
+    ) noexcept
+        : vfs_(&vfs),
+          map_(&map),
+          aperture_(aperture),
+          chan_(xthread::Polled{}) {}
 
-    WindowJobService(const svc::Vfs& vfs, ILoadWindowMap<seat_owner::Io>& map,
-                     hal::PhysRegion aperture, xthread::WakeFlag& io_wake) noexcept
-        : vfs_(&vfs), map_(&map), aperture_(aperture), chan_(io_wake) {}
+    WindowJobService(
+        const svc::Vfs& vfs,
+        ILoadWindowMap<seat_owner::Io>& map,
+        hal::PhysRegion aperture,
+        xthread::WakeFlag& io_wake
+    ) noexcept
+        : vfs_(&vfs),
+          map_(&map),
+          aperture_(aperture),
+          chan_(io_wake) {}
 
     ~WindowJobService() override = default;
 
     [[nodiscard]] bool arm_osd_open(cores::IWindowSave& role) noexcept;
-    [[nodiscard]] bool arm_reset_edge(cores::IWindowSave& role,
-                                      const proto::ResetEdge& edge) noexcept;
+    [[nodiscard]] bool arm_reset_edge(
+        cores::IWindowSave& role,
+        const proto::ResetEdge& edge
+    ) noexcept;
 
-    [[nodiscard]] bool hold_open(const cores::IWindowSave& role, proto::IoIndex index,
-                                 std::uint32_t act) noexcept;
+    [[nodiscard]] bool hold_open(
+        const cores::IWindowSave& role,
+        proto::IoIndex index,
+        std::uint32_t act
+    ) noexcept;
 
     [[nodiscard]] std::optional<std::uint32_t> service(cores::IWindowSave* role) noexcept;
 
     void forget_held() noexcept;
 
     [[nodiscard]] bool busy() const noexcept { return rt_.armed; }
+
     [[nodiscard]] std::uint32_t jobs_ok() const noexcept { return rt_.ok.get(); }
+
     [[nodiscard]] std::uint32_t jobs_failed() const noexcept { return rt_.failed.get(); }
+
     [[nodiscard]] std::uint32_t refusals() const noexcept { return rt_.refusals.get(); }
+
     [[nodiscard]] std::uint32_t flushes() const noexcept { return rt_.flushes.get(); }
 
     void serve() noexcept override;
@@ -102,4 +124,4 @@ private:
     Io io_{};
 };
 
-}  // namespace mister::app
+}

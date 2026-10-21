@@ -7,9 +7,15 @@
 namespace mister {
 
 [[noreturn]] void fatal(Error e, const char* what) {
-    std::fprintf(stderr, "FATAL: %s (code=%u site=%u detail=%u)\n", what,
-                 static_cast<unsigned>(e.code), e.site, e.detail);
+    std::fprintf(
+        stderr,
+        "FATAL: %s (code=%u site=%u detail=%u)\n",
+        what,
+        static_cast<unsigned>(e.code),
+        e.site,
+        e.detail
+    );
     std::abort();
 }
 
-}  // namespace mister
+}

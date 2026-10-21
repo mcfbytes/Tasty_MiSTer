@@ -20,11 +20,12 @@ struct FileTxLevel {
     std::uint32_t held_bytes = 0;
 
     [[nodiscard]] constexpr bool answers(std::uint32_t key) const noexcept {
-        if (held_act == key) return true;
+        if (held_act == key)
+            return true;
         return stream_act != 0 && static_cast<std::int32_t>(stream_act - key) >= 0;
     }
 };
 
 using FileTxLevelCell = xthread::Telemetry<FileTxLevel, SeatTag::RT>;
 
-}  // namespace mister::app
+}

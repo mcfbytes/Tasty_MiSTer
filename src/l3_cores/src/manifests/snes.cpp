@@ -26,66 +26,110 @@ std::unique_ptr<ICompanionLoad> make_msu_companion(const svc::Vfs& vfs) {
 }
 
 static_assert(kSnes.kind == CoreKind::Snes);
-static_assert(kSgbWindows[0].region.offset == kSnesWindows[0].region.offset &&
-                  kSgbWindows[0].region.len == kSnesWindows[0].region.len &&
-                  kSgbWindows[0].feeds_pcm == kSnesWindows[0].feeds_pcm,
-              "the two rows carry one MSU-1 data window: MsuCompanion writes the data base "
-              "through kSnesWindows while the walk places against the row's own");
-static_assert(kSgb.kind == CoreKind::Sgb);
-static_assert(kSgb.name == std::string_view{"SGB"},
-              "SGB.sv:152: hps_io CONF_STR field 0 is \"SGB\", the name stock's "
-              "is_sgb() compares (user_io.cpp:249-252)");
-static_assert(kSgb.services.size() == 1 && kSgb.services[0].impl == &kMailboxTick<kSgb> &&
-                  kSgb.services[0].period_ms == 0 &&
-                  kSgb.services[0].klass == kSnes.services[0].klass &&
-                  kSgb.services[0].cause == kSnes.services[0].cause &&
-                  kSgbMailboxFrame.poll_opcode == kSnesMailboxFrame.poll_opcode &&
-                  kSgbMailboxFrame.words == kSnesMailboxFrame.words,
-              "user_io.cpp:3223: snes_poll runs for is_snes() || is_sgb(), one cadence and frame");
-static_assert(kSgb.undeclared_start_mount == StartMount::Unmodelled,
-              "SgbCore forwards a mount to GenericCore, which arms none: no SC start mount");
-static_assert(kSnes.name == std::string_view{"SNES"},
-              "user_io.cpp:244: is_snes() is strcasecmp(orig_name, \"SNES\")");
-static_assert(kSnes.services.size() == 1 && kSnes.services[0].period_ms == 0 &&
-                  kSnes.services[0].klass == DeadlineClass::A,
-              "user_io.cpp:3223: snes_poll runs on every user_io_poll pass, ungated");
-static_assert(kSnesMailboxFrame.poll_opcode == msu::kCdGet && msu::kCdGet == 0x34 &&
-                  kSnesMailboxFrame.words == msu::kFrameWords &&
-                  proto::well_formed(kSnesMailboxFrame),
-              "snes.cpp:536-541: spi_uio_cmd_cont(UIO_CD_GET), then three spi_w(0)");
 static_assert(
-    msu::kCdSet == 0x35 && msu::kSetEnable == 1 && msu::kSetTrackSize == 2 &&
-        msu::kSetDataBase == 3,
-    "snes.cpp:471-473 + user_io.h:63: UIO_CD_SET with MSU_CD_SET/TRACK_MOUNTED/DATA_BASE");
-static_assert(msu::set_enable(true) == std::array<std::uint16_t, 3>{0x8001, 0, 0} &&
-                  msu::set_enable(false) == std::array<std::uint16_t, 3>{0x0001, 0, 0},
-              "snes.cpp:528: (has_cd << 15) | MSU_CD_SET, low word first (snes.cpp:481-488)");
-static_assert(msu::set_data_base(0x2060'0000u) == std::array<std::uint16_t, 3>{0x0003, 0, 0x2060},
-              "snes.cpp:524: (0x20600000ULL << 16) | MSU_DATA_BASE");
-static_assert(msu::set_track_size(0x0001'2345u) == std::array<std::uint16_t, 3>{0x0002, 0x2345, 1},
-              "snes.cpp:558: (f_audio.size << 16) | MSU_AUDIO_TRACK_MOUNTED");
-static_assert(msu::kSectorBytes == 1024 && msu::kAudioIndex == 2 && msu::kDataIndex == 3,
-              "snes.cpp:477,492,568: 1024-byte sectors on index 2; snes.cpp:525: the data on 3");
-static_assert(msu::kGapAt + 0x2060'0000u == 0x2200'0000u && msu::kGapBytes == 0x80'0000u &&
-                  msu::kGapAt % 0x40000u == 0,
-              "user_io.cpp:2882,2888: +0x800000 at 0x22000000, tested per 256 KiB chunk start");
-static_assert(msu::window_offset(msu::kGapAt - 1) == msu::kGapAt - 1 &&
-              msu::window_offset(msu::kGapAt) == msu::kGapAt + msu::kGapBytes);
-static_assert(kSnesWindows[0].region.offset + msu::kDataBound + msu::kGapBytes == 0x1F80'0000u &&
-                  msu::kStockDataBound == 0x1F20'0000u,
-              "SNES.sv:1411,1417: the data span ends where the save-state DDR at $3F80.0000 "
-              "starts; stock's snes.cpp:522 bound overruns it");
-static_assert(std::ranges::none_of(kSnes.slots,
-                                   [](const FileSlot& s) { return s.index.v == msu::kDataIndex; }),
-              "no content row loads on index 3: a window close there is the data track's");
-static_assert(!kSnes.blank_save.declared(),
-              "user_io.cpp:3474-3477: stock SNES has no blank-fill arm; a "
-              "fresh save reads back the generic 0xFF memset");
+    kSgbWindows[0].region.offset == kSnesWindows[0].region.offset
+        && kSgbWindows[0].region.len == kSnesWindows[0].region.len
+        && kSgbWindows[0].feeds_pcm == kSnesWindows[0].feeds_pcm,
+    "the two rows carry one MSU-1 data window: MsuCompanion writes the data base "
+    "through kSnesWindows while the walk places against the row's own"
+);
+static_assert(kSgb.kind == CoreKind::Sgb);
+static_assert(
+    kSgb.name == std::string_view{"SGB"},
+    "SGB.sv:152: hps_io CONF_STR field 0 is \"SGB\", the name stock's "
+    "is_sgb() compares (user_io.cpp:249-252)"
+);
+static_assert(
+    kSgb.services.size() == 1
+        && kSgb.services[0].impl == &kMailboxTick<kSgb>
+        && kSgb.services[0].period_ms == 0
+        && kSgb.services[0].klass == kSnes.services[0].klass
+        && kSgb.services[0].cause == kSnes.services[0].cause
+        && kSgbMailboxFrame.poll_opcode == kSnesMailboxFrame.poll_opcode
+        && kSgbMailboxFrame.words == kSnesMailboxFrame.words,
+    "user_io.cpp:3223: snes_poll runs for is_snes() || is_sgb(), one cadence and frame"
+);
+static_assert(
+    kSgb.undeclared_start_mount == StartMount::Unmodelled,
+    "SgbCore forwards a mount to GenericCore, which arms none: no SC start mount"
+);
+static_assert(
+    kSnes.name == std::string_view{"SNES"},
+    "user_io.cpp:244: is_snes() is strcasecmp(orig_name, \"SNES\")"
+);
+static_assert(
+    kSnes.services.size() == 1
+        && kSnes.services[0].period_ms == 0
+        && kSnes.services[0].klass == DeadlineClass::A,
+    "user_io.cpp:3223: snes_poll runs on every user_io_poll pass, ungated"
+);
+static_assert(
+    kSnesMailboxFrame.poll_opcode == msu::kCdGet
+        && msu::kCdGet == 0x34
+        && kSnesMailboxFrame.words == msu::kFrameWords
+        && proto::well_formed(kSnesMailboxFrame),
+    "snes.cpp:536-541: spi_uio_cmd_cont(UIO_CD_GET), then three spi_w(0)"
+);
+static_assert(
+    msu::kCdSet == 0x35
+        && msu::kSetEnable == 1
+        && msu::kSetTrackSize == 2
+        && msu::kSetDataBase == 3,
+    "snes.cpp:471-473 + user_io.h:63: UIO_CD_SET with MSU_CD_SET/TRACK_MOUNTED/DATA_BASE"
+);
+static_assert(
+    msu::set_enable(true) == std::array<std::uint16_t, 3>{0x8001, 0, 0}
+        && msu::set_enable(false) == std::array<std::uint16_t, 3>{0x0001, 0, 0},
+    "snes.cpp:528: (has_cd << 15) | MSU_CD_SET, low word first (snes.cpp:481-488)"
+);
+static_assert(
+    msu::set_data_base(0x2060'0000u) == std::array<std::uint16_t, 3>{0x0003, 0, 0x2060},
+    "snes.cpp:524: (0x20600000ULL << 16) | MSU_DATA_BASE"
+);
+static_assert(
+    msu::set_track_size(0x0001'2345u) == std::array<std::uint16_t, 3>{0x0002, 0x2345, 1},
+    "snes.cpp:558: (f_audio.size << 16) | MSU_AUDIO_TRACK_MOUNTED"
+);
+static_assert(
+    msu::kSectorBytes == 1024 && msu::kAudioIndex == 2 && msu::kDataIndex == 3,
+    "snes.cpp:477,492,568: 1024-byte sectors on index 2; snes.cpp:525: the data on 3"
+);
+static_assert(
+    msu::kGapAt + 0x2060'0000u == 0x2200'0000u
+        && msu::kGapBytes == 0x80'0000u
+        && msu::kGapAt % 0x40000u == 0,
+    "user_io.cpp:2882,2888: +0x800000 at 0x22000000, tested per 256 KiB chunk start"
+);
+static_assert(
+    msu::window_offset(msu::kGapAt - 1) == msu::kGapAt - 1
+    && msu::window_offset(msu::kGapAt) == msu::kGapAt + msu::kGapBytes
+);
+static_assert(
+    kSnesWindows[0].region.offset + msu::kDataBound + msu::kGapBytes == 0x1F80'0000u
+        && msu::kStockDataBound == 0x1F20'0000u,
+    "SNES.sv:1411,1417: the data span ends where the save-state DDR at $3F80.0000 "
+    "starts; stock's snes.cpp:522 bound overruns it"
+);
+static_assert(
+    std::ranges::none_of(
+        kSnes.slots,
+        [](const FileSlot& s) { return s.index.v == msu::kDataIndex; }
+    ),
+    "no content row loads on index 3: a window close there is the data track's"
+);
+static_assert(
+    !kSnes.blank_save.declared(),
+    "user_io.cpp:3474-3477: stock SNES has no blank-fill arm; a "
+    "fresh save reads back the generic 0xFF memset"
+);
 static_assert(
     kSnes.slots.empty(),
-    "SNES.sv: the power-on RAM image is the cartridge row's `f,RAM` file, no slot of its own");
-static_assert(kSnes.staging.order == StageOrder::None,
-              "no boot ladder: the save mount is the host-side opensave act "
-              "inside the ROM tx, not a staging rung");
+    "SNES.sv: the power-on RAM image is the cartridge row's `f,RAM` file, no slot of its own"
+);
+static_assert(
+    kSnes.staging.order == StageOrder::None,
+    "no boot ladder: the save mount is the host-side opensave act "
+    "inside the ROM tx, not a staging rung"
+);
 
-}  // namespace mister::cores::manifests
+}

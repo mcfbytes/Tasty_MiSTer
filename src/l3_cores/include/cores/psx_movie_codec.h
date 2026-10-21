@@ -50,6 +50,7 @@ public:
     static constexpr std::uint8_t kColTray = 0x43;
 
     enum class Emu : std::uint8_t { None, Octoshock, Nymashock };
+
     struct Layout {
         Emu emu = Emu::None;
         std::uint8_t firmware_region = 0;
@@ -76,8 +77,10 @@ public:
     [[nodiscard]] const MovieArchiveFormat* archive() const noexcept override;
     [[nodiscard]] bool starts_log(std::string_view line) const noexcept override;
     [[nodiscard]] bool ends_log(std::string_view line) const noexcept override;
-    [[nodiscard]] Ex<Facts> header_line(std::string_view line,
-                                        const Facts& so_far) const noexcept override;
+    [[nodiscard]] Ex<Facts> header_line(
+        std::string_view line,
+        const Facts& so_far
+    ) const noexcept override;
     [[nodiscard]] Ex<void> finish_header(const Facts& f) const noexcept override;
     [[nodiscard]] Ex<Frame> frame(std::string_view line, const Facts& f) const noexcept override;
     [[nodiscard]] SettingNeeds setting_needs(const Facts& f) const noexcept override;
@@ -85,25 +88,36 @@ public:
 
     [[nodiscard]] PowerOn power_on(const Facts& f) const noexcept override;
     [[nodiscard]] std::int32_t default_lead(const Facts& f) const noexcept override;
+
     [[nodiscard]] LeadRange lead_range() const noexcept override { return {kLeadMin, kLeadMax}; }
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
-        std::span<const std::uint8_t> head, std::uint64_t size) const noexcept override;
+        std::span<const std::uint8_t> head,
+        std::uint64_t size
+    ) const noexcept override;
 
-    [[nodiscard]] Ex<DigestSource> digest_source(const svc::Vfs& vfs,
-                                                 std::string_view rom) const override;
+    [[nodiscard]] Ex<DigestSource> digest_source(
+        const svc::Vfs& vfs,
+        std::string_view rom
+    ) const override;
+
     [[nodiscard]] std::string_view disc_images() const noexcept override {
         return "a Redump .cue/.bin or a chdman .chd of one";
     }
 
-    [[nodiscard]] std::optional<Companion> companion(std::string_view rom,
-                                                     const Facts& f) const override;
+    [[nodiscard]] std::optional<Companion> companion(
+        std::string_view rom,
+        const Facts& f
+    ) const override;
 
     [[nodiscard]] std::uint8_t rom_digit() const noexcept override { return 1; }
+
     [[nodiscard]] bool rom_is_disc() const noexcept override { return true; }
 
     [[nodiscard]] static Ex<std::vector<std::uint8_t>> toc_prefix(
-        std::string_view cue, std::span<const std::uint64_t> file_sizes);
+        std::string_view cue,
+        std::span<const std::uint64_t> file_sizes
+    );
 
     [[nodiscard]] static Ex<std::vector<std::uint8_t>> chd_key(svc::IChdSource& chd);
 
@@ -113,12 +127,16 @@ public:
 consteval bool psx_pad_bits_are_a_permutation() {
     unsigned seen = 0;
     for (const PsxMovieCodec::Button& b : PsxMovieCodec::kButtons) {
-        if (b.bit > 13) return false;
+        if (b.bit > 13)
+            return false;
         seen |= 1u << b.bit;
     }
     return seen == 0x3FFFu;
 }
-static_assert(psx_pad_bits_are_a_permutation(),
-              "the BK2 PSX pad map is a permutation of joy bits 0-13, never a Main-side bit");
 
-}  // namespace mister::cores
+static_assert(
+    psx_pad_bits_are_a_permutation(),
+    "the BK2 PSX pad map is a permutation of joy bits 0-13, never a Main-side bit"
+);
+
+}

@@ -15,4 +15,4 @@ struct FrameDemand {
 
 using FrameDemandCell = xthread::Telemetry<FrameDemand, SeatTag::Capture>;
 
-}  // namespace mister::app
+}

@@ -13,12 +13,17 @@ bool InputWire::push_ui_key(RawKeyEdge e) noexcept {
 }
 
 Ex<void> InputWire::open_ctrl() noexcept {
-    if (ctrl_.fd() >= 0) return {};
+    if (ctrl_.fd() >= 0)
+        return {};
     return ctrl_.open_fd();
 }
 
-void InputWire::on_core_loaded(std::string_view core_name, bool front_end, const svc::JoyPlan& plan,
-                               const svc::IAnalogReshape* analog_reshape) noexcept {
+void InputWire::on_core_loaded(
+    std::string_view core_name,
+    bool front_end,
+    const svc::JoyPlan& plan,
+    infra::OptRef<const svc::IAnalogReshape> analog_reshape
+) noexcept {
 
     buttons_.store(0u, std::memory_order_relaxed);
     bump(core_edges_, 1u);
@@ -26,7 +31,7 @@ void InputWire::on_core_loaded(std::string_view core_name, bool front_end, const
     publish_core_name(core_name, front_end);
 
     publish_joy_plan(plan);
-    publish_analog_reshape(analog_reshape);
+    publish_analog_reshape(analog_reshape ? &*analog_reshape : nullptr);
     publish_edge_reset();
     request(kReqHotplug);
     wake();
@@ -41,4 +46,4 @@ void InputWire::on_core_detached() noexcept {
     bump(core_edges_, 1u);
 }
 
-}  // namespace mister::app
+}

@@ -15,15 +15,16 @@ inline constexpr std::uint8_t kCecAddr = 0x3C;
 inline constexpr std::uint8_t kEdidAddr = 0x3F;
 inline constexpr std::uint8_t kSpdAddr = 0x38;
 
-}  // namespace mister::svc::adv7513
+}
 
 namespace mister::hal {
 class IHdmiInterrupt;
 }
+
 namespace mister::os {
 class IDelay;
 class IClock;
-}  // namespace mister::os
+}
 
 namespace mister::svc::adv7513 {
 
@@ -40,4 +41,4 @@ struct Io {
 
 inline constexpr Io kUnboundIo{};
 
-}  // namespace mister::svc::adv7513
+}

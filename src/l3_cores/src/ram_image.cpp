@@ -13,6 +13,7 @@ public:
         state_ += seed;
         step_();
     }
+
     [[nodiscard]] std::uint64_t draw() noexcept {
         const std::uint64_t hi = step_();
         return hi << 32 | step_();
@@ -26,6 +27,7 @@ private:
         const auto rotate = static_cast<std::uint32_t>(s >> 59);
         return xorshift >> rotate | xorshift << (-rotate & 31u);
     }
+
     static constexpr std::uint64_t kIncrement = 1;
     std::uint64_t state_ = 0;
 };
@@ -33,6 +35,7 @@ private:
 class Lfsr {
 public:
     explicit Lfsr(std::uint32_t seed) noexcept : iter_(seed) {}
+
     [[nodiscard]] std::uint8_t draw() noexcept {
         iter_ = iter_ >> 1 ^ (((iter_ & 1u) - 1u) & 0xedb88320u);
         return static_cast<std::uint8_t>(iter_);
@@ -48,22 +51,28 @@ std::vector<std::uint8_t> low_entropy_bytes(Pcg32& rng, std::uint32_t size) {
     const auto hibit = static_cast<std::uint32_t>((lobit + 8 + (rng.draw() & 3)) & 15);
     auto lovalue = static_cast<std::uint8_t>(rng.draw() & 255);
     auto hivalue = static_cast<std::uint8_t>(rng.draw() & 255);
-    if ((rng.draw() & 3) == 0) lovalue = 0;
-    if ((rng.draw() & 1) == 0) hivalue = static_cast<std::uint8_t>(~lovalue);
+    if ((rng.draw() & 3) == 0)
+        lovalue = 0;
+    if ((rng.draw() & 1) == 0)
+        hivalue = static_cast<std::uint8_t>(~lovalue);
     for (std::uint32_t address = 0; address < size; ++address) {
         auto value = (address & 1u << lobit) != 0 ? lovalue : hivalue;
-        if ((address & 1u << hibit) != 0) value = static_cast<std::uint8_t>(~value);
-        if ((rng.draw() & 511) == 0) value ^= static_cast<std::uint8_t>(1u << (rng.draw() & 7));
-        if ((rng.draw() & 2047) == 0) value ^= static_cast<std::uint8_t>(1u << (rng.draw() & 7));
+        if ((address & 1u << hibit) != 0)
+            value = static_cast<std::uint8_t>(~value);
+        if ((rng.draw() & 511) == 0)
+            value ^= static_cast<std::uint8_t>(1u << (rng.draw() & 7));
+        if ((rng.draw() & 2047) == 0)
+            value ^= static_cast<std::uint8_t>(1u << (rng.draw() & 7));
         data[address] = value;
     }
     return data;
 }
 
-}  // namespace
+}
 
 std::vector<std::uint8_t> expand(const RamImageRecipe& r) {
-    if (r.kind == RamImageRecipe::Kind::None) return {};
+    if (r.kind == RamImageRecipe::Kind::None)
+        return {};
     std::vector<std::uint8_t> out(r.size(), r.second_fill);
     std::uint8_t* first = out.data();
     switch (r.kind) {
@@ -101,4 +110,4 @@ std::vector<std::uint8_t> expand(const RamImageRecipe& r) {
     return out;
 }
 
-}  // namespace mister::cores
+}

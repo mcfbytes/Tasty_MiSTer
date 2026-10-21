@@ -23,30 +23,44 @@ struct PrefixRegion {
     const char* prefix;
     svc::DiscRegion region;
 };
+
 constexpr PrefixRegion kPrefixTable[] = {
-    {"SCES", svc::DiscRegion::Europe}, {"SLES", svc::DiscRegion::Europe},
-    {"SCUS", svc::DiscRegion::Usa},    {"SLUS", svc::DiscRegion::Usa},
-    {"SCPM", svc::DiscRegion::Japan},  {"SLPM", svc::DiscRegion::Japan},
-    {"SCPS", svc::DiscRegion::Japan},  {"SLPS", svc::DiscRegion::Japan},
-    {"SIPS", svc::DiscRegion::Japan},  {"PUPX", svc::DiscRegion::Usa},
-    {"PEPX", svc::DiscRegion::Europe}, {"PAPX", svc::DiscRegion::Japan},
-    {"PCPX", svc::DiscRegion::Japan},  {"SCZS", svc::DiscRegion::Japan},
-    {"SCED", svc::DiscRegion::Europe}, {"SLED", svc::DiscRegion::Europe},
+    {"SCES", svc::DiscRegion::Europe},
+    {"SLES", svc::DiscRegion::Europe},
+    {"SCUS", svc::DiscRegion::Usa},
+    {"SLUS", svc::DiscRegion::Usa},
+    {"SCPM", svc::DiscRegion::Japan},
+    {"SLPM", svc::DiscRegion::Japan},
+    {"SCPS", svc::DiscRegion::Japan},
+    {"SLPS", svc::DiscRegion::Japan},
+    {"SIPS", svc::DiscRegion::Japan},
+    {"PUPX", svc::DiscRegion::Usa},
+    {"PEPX", svc::DiscRegion::Europe},
+    {"PAPX", svc::DiscRegion::Japan},
+    {"PCPX", svc::DiscRegion::Japan},
+    {"SCZS", svc::DiscRegion::Japan},
+    {"SCED", svc::DiscRegion::Europe},
+    {"SLED", svc::DiscRegion::Europe},
 };
 
-std::span<const std::uint8_t> find_bytes(std::span<const std::uint8_t> hay,
-                                         std::string_view needle) {
+std::span<const std::uint8_t> find_bytes(
+    std::span<const std::uint8_t> hay,
+    std::string_view needle
+) {
     const auto* hit = static_cast<const std::uint8_t*>(
-        ::memmem(hay.data(), hay.size(), needle.data(), needle.size()));
-    if (hit == nullptr) return {};
+        ::memmem(hay.data(), hay.size(), needle.data(), needle.size())
+    );
+    if (hit == nullptr)
+        return {};
     return hay.subspan(static_cast<std::size_t>(hit - hay.data()));
 }
 
-}  // namespace
+}
 
 Ex<void> PsxCore::do_adopt(const CoreAdopt&) {
 
-    if (!host().discs) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    if (!host().discs)
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     discs_ = host().discs;
     geom_ = discs_->geometry();
     return {};
@@ -54,10 +68,14 @@ Ex<void> PsxCore::do_adopt(const CoreAdopt&) {
 
 MountState PsxCore::mount_disc(std::string_view path) {
     TASTY_SEAT_BODY(PsxCore);
-    const auto m =
-        mount(profile().staging.disc_slot, MountedPath{proto::PathId{}, path, proto::FileSize{}});
-    if (!m) return MountState::Failed;
-    if (path.empty()) return MountState::Done;
+    const auto m = mount(
+        profile().staging.disc_slot,
+        MountedPath{proto::PathId{}, path, proto::FileSize{}}
+    );
+    if (!m)
+        return MountState::Failed;
+    if (path.empty())
+        return MountState::Done;
 
     switch (refresh_disc_()) {
         case svc::DiscMountState::Pending:
@@ -71,10 +89,13 @@ MountState PsxCore::mount_disc(std::string_view path) {
     return MountState::Failed;
 }
 
-void PsxCore::set_region(std::uint8_t) { TASTY_SEAT_BODY(PsxCore); }
+void PsxCore::set_region(std::uint8_t) {
+    TASTY_SEAT_BODY(PsxCore);
+}
 
 Ex<void> PsxCore::on_mount(IoIndex slot, const MountedPath& p) {
-    if (slot.v != profile().staging.disc_slot.v) return {};
+    if (slot.v != profile().staging.disc_slot.v)
+        return {};
     if (!discs_) {
         return std::unexpected(Error{Errc::core_load, ERR_SITE(), 0});
     }
@@ -109,7 +130,8 @@ Ex<void> PsxCore::on_mount(IoIndex slot, const MountedPath& p) {
 }
 
 svc::DiscMountState PsxCore::refresh_disc_() noexcept {
-    if (!discs_) return svc::DiscMountState::Failed;
+    if (!discs_)
+        return svc::DiscMountState::Failed;
     const svc::DiscMountState st = discs_->mount_state();
     if (st != mount_seen_) {
         mount_seen_ = st;
@@ -119,8 +141,10 @@ svc::DiscMountState PsxCore::refresh_disc_() noexcept {
 }
 
 Ex<void> PsxCore::finish_mount_() {
-    if (refresh_disc_() != svc::DiscMountState::Mounted) return {};
-    if (!scan_disc_identity_()) return {};
+    if (refresh_disc_() != svc::DiscMountState::Mounted)
+        return {};
+    if (!scan_disc_identity_())
+        return {};
 
     const svc::Toc& toc = geom_.toc;
     plan_.data_first_track = toc.last != 0 && toc.tracks[0].type != svc::TrackType::Cdda;
@@ -130,7 +154,8 @@ Ex<void> PsxCore::finish_mount_() {
 }
 
 bool PsxCore::scan_disc_identity_() {
-    if (scan_done_) return true;
+    if (scan_done_)
+        return true;
     std::uint8_t sector[kSectorBytes];
     svc::DiscRegion prefix_region = scan_prefix_region_;
 
@@ -144,21 +169,28 @@ bool PsxCore::scan_disc_identity_() {
         std::span<const std::uint8_t> start{};
         for (const PrefixRegion& row : kPrefixTable) {
             prefix_region = row.region;
-            start = find_bytes(std::span<const std::uint8_t>{sector, kSectorBytes},
-                               std::string_view{row.prefix, 4});
-            if (!start.empty()) break;
+            start = find_bytes(
+                std::span<const std::uint8_t>{sector, kSectorBytes},
+                std::string_view{row.prefix, 4}
+            );
+            if (!start.empty())
+                break;
         }
-        if (start.empty()) continue;
+        if (start.empty())
+            continue;
         const std::span<const std::uint8_t> end = find_bytes(start, std::string_view{";1", 2});
-        if (end.empty()) continue;
+        if (end.empty())
+            continue;
 
         char id[12] = {};
         const std::size_t id_len = start.size() - end.size();
         std::size_t size = id_len;
-        if (size > 11) size = 11;
+        if (size > 11)
+            size = 11;
         std::memcpy(id, start.data(), size);
         if (id_len == 11) {
-            if (id[4] == '_') id[4] = '-';
+            if (id[4] == '_')
+                id[4] = '-';
             if (id[8] == '.') {
                 id[8] = id[9];
                 id[9] = id[10];
@@ -166,12 +198,14 @@ bool PsxCore::scan_disc_identity_() {
                 --size;
             }
         }
-        if (size > 10) size = 10;
+        if (size > 10)
+            size = 10;
         id[size] = '\0';
         (void)game_id_.assign(std::string_view{id, size});
         break;
     }
-    if (game_id_.view().empty()) prefix_region = svc::DiscRegion::Unknown;
+    if (game_id_.view().empty())
+        prefix_region = svc::DiscRegion::Unknown;
 
     if (!serve_sector_(kLicenseLba, std::span<std::uint8_t>{sector, kSectorBytes})) {
         scan_lba_ = kRootFolderLba + 25;
@@ -180,7 +214,8 @@ bool PsxCore::scan_disc_identity_() {
     }
     const std::span<const std::uint8_t> lic = find_bytes(
         std::span<const std::uint8_t>{sector, kSectorBytes},
-        std::string_view{"          Licensed  by          Sony Computer Entertainment ", 60});
+        std::string_view{"          Licensed  by          Sony Computer Entertainment ", 60}
+    );
     svc::DiscRegion region = svc::DiscRegion::Unknown;
     if (!lic.empty()) {
         const std::uint8_t* tail = lic.data() + 60;
@@ -204,7 +239,8 @@ Ex<void> PsxCore::stage_disc_payload(const proto::LinkOp::StageDiscPayload& op) 
     const svc::TocFrameMeta meta{region_, op.reset, op.libcrypt_mask};
     const auto frame = svc::build_toc_frame(geom_.toc, meta);
     auto ds = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{251});
-    if (!ds) return std::unexpected(ds.error());
+    if (!ds)
+        return std::unexpected(ds.error());
     if (auto w = ds->write(infra::byte_cast<const std::uint8_t>(std::span(frame))); !w) {
         return w;
     }
@@ -214,16 +250,19 @@ Ex<void> PsxCore::stage_disc_payload(const proto::LinkOp::StageDiscPayload& op) 
 void PsxCore::service_kick() noexcept {
     TASTY_SEAT_BODY(PsxCore);
 
-    if (discs_) (void)counts_.take_if_changed(discs_->counters_cell(), counters_);
+    if (discs_)
+        (void)counts_.take_if_changed(discs_->counters_cell(), counters_);
 
-    if (!image_path_.empty() && !scan_done_) (void)finish_mount_();
+    if (!image_path_.empty() && !scan_done_)
+        (void)finish_mount_();
 
     if (copy_in_flight_()) {
         ++held_kicks_;
         return;
     }
     hal::Selected cs(host().link, hal::ChipSelect::Io);
-    if (auto r = host().link.transfer(hal::SpiWord{cdwire::kUioCdGet}); !r) ++wire_faults_;
+    if (auto r = host().link.transfer(hal::SpiWord{cdwire::kUioCdGet}); !r)
+        ++wire_faults_;
     ++kicks_;
 }
 
@@ -236,8 +275,11 @@ proto::SlotAttributes PsxCore::attributes(proto::SlotIndex) const {
     return proto::SlotAttributes{};
 }
 
-Ex<std::size_t> PsxCore::read_at(proto::SlotIndex, std::uint64_t offset,
-                                 std::span<std::uint8_t> dst) {
+Ex<std::size_t> PsxCore::read_at(
+    proto::SlotIndex,
+    std::uint64_t offset,
+    std::span<std::uint8_t> dst
+) {
     TASTY_SEAT_BODY(PsxCore);
     const std::int64_t lba0 = static_cast<std::int64_t>(offset / kSectorBytes);
 
@@ -249,7 +291,8 @@ Ex<std::size_t> PsxCore::read_at(proto::SlotIndex, std::uint64_t offset,
 
         if (!serve_sector_(lba, dst.subspan(served, kSectorBytes))) {
             return std::unexpected(
-                Error{Errc::would_block, ERR_SITE(), static_cast<std::uint32_t>(lba)});
+                Error{Errc::would_block, ERR_SITE(), static_cast<std::uint32_t>(lba)}
+            );
         }
         served += kSectorBytes;
         ++lba;
@@ -257,16 +300,23 @@ Ex<std::size_t> PsxCore::read_at(proto::SlotIndex, std::uint64_t offset,
     return served;
 }
 
-Ex<std::size_t> PsxCore::write_at(proto::SlotIndex slot, std::uint64_t,
-                                  std::span<const std::uint8_t>) {
+Ex<std::size_t> PsxCore::write_at(
+    proto::SlotIndex slot,
+    std::uint64_t,
+    std::span<const std::uint8_t>
+) {
     TASTY_SEAT_BODY(PsxCore);
     return std::unexpected(Error{Errc::io, ERR_SITE(), slot.v});
 }
 
-proto::BlockGeometry PsxCore::geometry_for(proto::SlotIndex slot, proto::Lba,
-                                           proto::BlockGeometry wire) {
+proto::BlockGeometry PsxCore::geometry_for(
+    proto::SlotIndex slot,
+    proto::Lba,
+    proto::BlockGeometry wire
+) {
     TASTY_SEAT_BODY(PsxCore);
-    if (slot.v != profile().staging.disc_slot.v) return wire;
+    if (slot.v != profile().staging.disc_slot.v)
+        return wire;
     proto::BlockGeometry g{kSectorBytes, 0};
 
     const std::uint32_t hunk = geom_.chd_hunk_bytes();
@@ -278,17 +328,20 @@ proto::BlockGeometry PsxCore::geometry_for(proto::SlotIndex slot, proto::Lba,
 
 PsxCore::Answer PsxCore::classify_(std::int64_t lba) const noexcept {
     const svc::Toc* toc = geom_.mounted ? &geom_.toc : nullptr;
-    if (toc == nullptr || toc->last == 0 ||
-        lba < static_cast<std::int64_t>(toc->tracks[0].start.v)) {
+    if (toc == nullptr
+        || toc->last == 0
+        || lba < static_cast<std::int64_t>(toc->tracks[0].start.v)) {
         return Answer::Zeros;
     }
     const auto ti = geom_.track_for_lba(proto::Lba{static_cast<std::uint32_t>(lba)});
-    if (!ti.has_value()) return Answer::Filler;
+    if (!ti.has_value())
+        return Answer::Filler;
     if (ti->v + 1 < toc->last) {
         const svc::Track& next = toc->tracks[ti->v + 1];
 
-        if (next.pregap_declared && lba > static_cast<std::int64_t>(next.start.v) -
-                                              static_cast<std::int64_t>(next.pregap)) {
+        if (next.pregap_declared
+            && lba > static_cast<std::int64_t>(next.start.v)
+                    - static_cast<std::int64_t>(next.pregap)) {
             return Answer::Pregap;
         }
     }
@@ -296,10 +349,12 @@ PsxCore::Answer PsxCore::classify_(std::int64_t lba) const noexcept {
 }
 
 void PsxCore::warm_window_(std::int64_t lba0, std::size_t sectors) noexcept {
-    if (!discs_) return;
+    if (!discs_)
+        return;
     for (std::size_t i = 0; i < sectors; ++i) {
         const std::int64_t lba = lba0 + static_cast<std::int64_t>(i);
-        if (classify_(lba) != Answer::Engine) continue;
+        if (classify_(lba) != Answer::Engine)
+            continue;
         discs_->hint(svc::DiscForm::RawFrame, proto::Lba{static_cast<std::uint32_t>(lba)});
     }
 }
@@ -322,8 +377,11 @@ bool PsxCore::serve_sector_(std::int64_t lba, std::span<std::uint8_t> out) noexc
     }
     std::memset(out.data(), 0xAA, out.size());
     const proto::Lba at{static_cast<std::uint32_t>(lba)};
-    const std::size_t got =
-        discs_->take(svc::DiscForm::RawFrame, at, infra::byte_cast<std::byte>(out));
+    const std::size_t got = discs_->take(
+        svc::DiscForm::RawFrame,
+        at,
+        infra::byte_cast<std::byte>(out)
+    );
 
     discs_->hint(svc::DiscForm::RawFrame, proto::Lba{at.v + 1});
     if (got == 0) {
@@ -337,4 +395,4 @@ bool PsxCore::serve_sector_(std::int64_t lba, std::span<std::uint8_t> out) noexc
     return true;
 }
 
-}  // namespace mister::cores
+}

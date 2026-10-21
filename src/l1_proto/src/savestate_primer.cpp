@@ -7,12 +7,15 @@
 
 namespace mister::proto {
 
-Ex<void> SavePrimer::begin(const Env& env, const SaveStateEngine::SaveTarget& target,
-                           const SaveStateDecl& ss) {
+Ex<void> SavePrimer::begin(
+    const Env& env,
+    const SaveStateEngine::SaveTarget& target,
+    const SaveStateDecl& ss
+) {
     end();
     load_failures_ = 0;
-    const std::string_view subdir =
-        target.arcade ? SaveStateEngine::kArcadeSubdir : target.core_name;
+    const std::string_view subdir = target.arcade ? SaveStateEngine::kArcadeSubdir
+                                                  : target.core_name;
     std::string stem = SaveStateEngine::savestate_stem(target.rom_path);
     if (subdir.empty() || stem.empty()) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
@@ -47,7 +50,8 @@ void SavePrimer::end() noexcept {
 }
 
 Ex<bool> SavePrimer::step(const Env& env) {
-    if (!priming()) return false;
+    if (!priming())
+        return false;
     auto& mem = *regions_[slot_];
     const std::size_t len = static_cast<std::size_t>(window_.size);
     if (!loading_) {
@@ -74,8 +78,11 @@ Ex<bool> SavePrimer::step(const Env& env) {
 bool SavePrimer::load_step_(const Env& env, hal::FpgaMemory& mem) {
     const std::size_t len = static_cast<std::size_t>(window_.size);
     const std::size_t n = std::min(kStepBytes, len - off_);
-    auto r = env.files.read_at(SaveStateEngine::slot_file(subdir_, stem_, digit_), off_,
-                               mem.view(off_, n));
+    auto r = env.files.read_at(
+        SaveStateEngine::slot_file(subdir_, stem_, digit_),
+        off_,
+        mem.view(off_, n)
+    );
     if (!r && r.error().code == Errc::not_found && off_ == 0 && slot_ == 0 && digit_ != 0) {
 
         digit_ = 0;
@@ -83,11 +90,12 @@ bool SavePrimer::load_step_(const Env& env, hal::FpgaMemory& mem) {
     }
     if (!r) {
 
-        if (r.error().code != Errc::not_found || off_ != 0) ++load_failures_;
+        if (r.error().code != Errc::not_found || off_ != 0)
+            ++load_failures_;
         return true;
     }
     off_ += *r;
     return *r < n || off_ == len;
 }
 
-}  // namespace mister::proto
+}

@@ -14,4 +14,4 @@ struct FilterSet {
     std::array<std::uint8_t, kScalerSlots> modes{};
 };
 
-}  // namespace mister::svc
+}

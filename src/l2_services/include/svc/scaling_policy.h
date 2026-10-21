@@ -17,12 +17,14 @@ struct ScalingPolicy {
     bool front_end = false;
 
     std::uint64_t to_bits() const noexcept {
-        return static_cast<std::uint64_t>(scrw) | (static_cast<std::uint64_t>(scrh) << 16) |
-               (static_cast<std::uint64_t>(vscale_mode) << 32) |
-               (static_cast<std::uint64_t>(vscale_border) << 40) |
-               (static_cast<std::uint64_t>(filter_mode) << 48) |
-               (static_cast<std::uint64_t>(front_end ? 1u : 0u) << 56);
+        return static_cast<std::uint64_t>(scrw)
+            | (static_cast<std::uint64_t>(scrh) << 16)
+            | (static_cast<std::uint64_t>(vscale_mode) << 32)
+            | (static_cast<std::uint64_t>(vscale_border) << 40)
+            | (static_cast<std::uint64_t>(filter_mode) << 48)
+            | (static_cast<std::uint64_t>(front_end ? 1u : 0u) << 56);
     }
+
     static ScalingPolicy from_bits(std::uint64_t b) noexcept {
         ScalingPolicy p;
         p.scrw = static_cast<std::uint16_t>(b & 0xFFFFu);
@@ -35,4 +37,4 @@ struct ScalingPolicy {
     }
 };
 
-}  // namespace mister::svc
+}

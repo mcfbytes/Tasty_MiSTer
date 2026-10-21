@@ -11,4 +11,4 @@ protected:
     ~ICoreToken() = default;
 };
 
-}  // namespace mister::reactor
+}

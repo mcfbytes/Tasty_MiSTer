@@ -37,4 +37,4 @@ protected:
     IStagingCore& operator=(const IStagingCore&) = default;
 };
 
-}  // namespace mister::cores
+}

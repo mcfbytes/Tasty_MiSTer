@@ -33,4 +33,4 @@ struct WavData {
 
 [[nodiscard]] Ex<WavData> find_data_chunk(std::span<const std::byte> image) noexcept;
 
-}  // namespace mister::cores::wav
+}

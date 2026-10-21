@@ -17,9 +17,10 @@ Ex<void> VideoWire::publish(std::uint8_t opcode, std::span<const std::uint16_t> 
 
 Ex<void> VideoWire::stage(std::uint8_t opcode, std::span<const std::uint16_t> words) {
     if (words.empty() || words.size() > kWords) {
-        rejected_.fetch_add(1, std::memory_order_relaxed);
+        bump(staged_rejected_);
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size())});
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size())}
+        );
     }
 
     const std::uint32_t gen = (gen_ + 1u) != 0u ? gen_ + 1u : 1u;
@@ -34,7 +35,7 @@ Ex<void> VideoWire::stage(std::uint8_t opcode, std::span<const std::uint16_t> wo
     const proto::LinkOp::SetVideoMode mode{.block = static_cast<std::uint8_t>(slot), .gen = gen};
     if (!link_tx_.push(mode)) {
 
-        rejected_.fetch_add(1, std::memory_order_relaxed);
+        bump(staged_rejected_);
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), gen});
     }
     gen_ = gen;
@@ -42,8 +43,12 @@ Ex<void> VideoWire::stage(std::uint8_t opcode, std::span<const std::uint16_t> wo
     return {};
 }
 
-Ex<void> VideoWire::emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint32_t gen,
-                         proto::IResetFence* fence) {
+Ex<void> VideoWire::emit(
+    hal::ISpiTransport& link,
+    std::uint8_t slot,
+    std::uint32_t gen,
+    infra::OptRef<proto::IResetFence> fence
+) {
 
     if (prelude_running() && !pre_replaying_) {
         pre_parked_slot_ = slot;
@@ -53,20 +58,25 @@ Ex<void> VideoWire::emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint3
         return {};
     }
     if (slot >= kSlots) {
-        rejected_.fetch_add(1, std::memory_order_relaxed);
+        bump(emit_rejected_);
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot});
     }
 
     BlockPayload local{};
-    if (gen == 0u || table_[slot].try_read(local) != gen || local.count == 0u ||
-        local.count > kWords) {
+    if (gen == 0u
+        || table_[slot].try_read(local) != gen
+        || local.count == 0u
+        || local.count > kWords) {
         stale_.fetch_add(1, std::memory_order_relaxed);
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), gen});
     }
     const std::uint8_t opcode = local.opcode;
     const std::uint8_t count = local.count;
-    const auto r =
-        svc::emit_video_words(link, opcode, std::span<const std::uint16_t>(local.words, count));
+    const auto r = svc::emit_video_words(
+        link,
+        opcode,
+        std::span<const std::uint16_t>(local.words, count)
+    );
     if (!r) {
 
         partial_.fetch_add(1, std::memory_order_relaxed);
@@ -83,18 +93,26 @@ Ex<void> VideoWire::emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint3
     return {};
 }
 
-bool VideoWire::update_but_sw(hal::ISpiTransport& link, std::uint16_t buttons, bool osd_visible,
-                              proto::IResetFence* fence) noexcept {
+bool VideoWire::update_but_sw(
+    hal::ISpiTransport& link,
+    std::uint16_t buttons,
+    bool osd_visible,
+    infra::OptRef<proto::IResetFence> fence
+) noexcept {
 
     auto map = static_cast<std::uint16_t>(tail_but_sw_ & ~(kButton1 | kButton2));
-    if ((buttons & app::InputWire::kButtonOsd) != 0u) map |= kButton1;
-    if ((buttons & app::InputWire::kButtonUser) != 0u) map |= kButton2;
+    if ((buttons & app::InputWire::kButtonOsd) != 0u)
+        map |= kButton1;
+    if ((buttons & app::InputWire::kButtonUser) != 0u)
+        map |= kButton2;
 
     const std::uint16_t composed = map;
-    if (but_sw_seen_ && composed == but_sw_shadow_) return false;
+    if (but_sw_seen_ && composed == but_sw_shadow_)
+        return false;
 
     std::uint16_t wire = composed;
-    if (osd_visible) wire = static_cast<std::uint16_t>(wire & ~kButton2);
+    if (osd_visible)
+        wire = static_cast<std::uint16_t>(wire & ~kButton2);
     tail_but_sw_ = wire;
     ++but_sw_writes_;
     if (auto r = emit_but_sw_(link, wire, fence); !r) {
@@ -107,11 +125,16 @@ bool VideoWire::update_but_sw(hal::ISpiTransport& link, std::uint16_t buttons, b
     return true;
 }
 
-Ex<void> VideoWire::emit_but_sw_(hal::ISpiTransport& link, std::uint16_t word,
-                                 proto::IResetFence* fence) noexcept {
-    if (fence != nullptr) fence->before_buttons(but_sw_sent_, word);
+Ex<void> VideoWire::emit_but_sw_(
+    hal::ISpiTransport& link,
+    std::uint16_t word,
+    infra::OptRef<proto::IResetFence> fence
+) noexcept {
+    if (fence)
+        fence->before_buttons(but_sw_sent_, word);
     auto r = svc::emit_but_sw(link, word);
-    if (r) but_sw_sent_ = word;
+    if (r)
+        but_sw_sent_ = word;
     return r;
 }
 
@@ -121,7 +144,9 @@ VideoWire::Stats VideoWire::stats() const noexcept {
     s.emitted = emitted_.load(std::memory_order_relaxed);
     s.stale = stale_.load(std::memory_order_relaxed);
     s.partial = partial_.load(std::memory_order_relaxed);
-    s.rejected = rejected_.load(std::memory_order_relaxed);
+    s.staged_rejected = staged_rejected_.load(std::memory_order_relaxed);
+    s.emit_rejected = emit_rejected_.load(std::memory_order_relaxed);
+    s.rejected = s.staged_rejected + s.emit_rejected;
     s.arm_fail = arm_fail_.load(std::memory_order_relaxed);
     return s;
 }
@@ -130,24 +155,30 @@ namespace {
 constexpr std::int64_t kMs = 1'000'000;
 }
 
-void VideoWire::on_rt_round(hal::ISpiTransport& link, std::int64_t now_ns,
-                            proto::IResetFence* fence) {
+void VideoWire::on_rt_round(
+    hal::ISpiTransport& link,
+    std::int64_t now_ns,
+    infra::OptRef<proto::IResetFence> fence
+) {
     bump(geo_rounds_);
 
-    if (step_prelude(link, fence)) return;
+    if (step_prelude(link, fence))
+        return;
 
     if (fs_active_) {
         step_filter_stream(link);
         return;
     }
 
-    if (service_filter_publish(link)) return;
+    if (service_filter_publish(link))
+        return;
 
     if (geo_next_ns_ == 0) {
         geo_next_ns_ = now_ns + kGeoFirstPeriodMs * kMs;
         return;
     }
-    if (now_ns < geo_next_ns_) return;
+    if (now_ns < geo_next_ns_)
+        return;
 
     geo_next_ns_ += kGeoPeriodMs * kMs;
     if (geo_next_ns_ <= now_ns) {
@@ -174,8 +205,10 @@ void VideoWire::on_rt_round(hal::ISpiTransport& link, std::int64_t now_ns,
         return;
     }
     bump(geo_samples_);
-    if (pass->changed) bump(geo_changes_);
-    if (pass->resent) bump(geo_resends_);
+    if (pass->changed)
+        bump(geo_changes_);
+    if (pass->resent)
+        bump(geo_resends_);
 
     geo_cell_.publish(VideoGeoLatch{.sample = pass->sample, .core_seq = geo_core_seq_});
 }
@@ -193,7 +226,8 @@ void VideoWire::reset_geometry(std::uint32_t core_seq) noexcept {
 
 Ex<svc::VideoSample> VideoWire::sample(bool force) {
     bump(geo_reads_);
-    if (force) request_force();
+    if (force)
+        request_force();
 
     if (const auto s = geo_cell_.sample()) {
         sampled_seq_ = s.value.core_seq;
@@ -238,8 +272,9 @@ void VideoWire::arm_prelude() noexcept {
     bump(pre_arms_);
 }
 
-bool VideoWire::step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence) {
-    if (!prelude_running()) return false;
+bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IResetFence> fence) {
+    if (!prelude_running())
+        return false;
 
     switch (pre_step_) {
         case PreludeStep::Fbuf: {
@@ -253,21 +288,26 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence
 
             {
                 auto hi = svc::emit_hdmi_int_probe(link);
-                if (!hi) bump(pre_errors_);
+                if (!hi)
+                    bump(pre_errors_);
                 pre_hdmi_int_.store(hi ? *hi : 0u, std::memory_order_relaxed);
                 auto gm = svc::emit_gamma_probe(link);
-                if (!gm) bump(pre_errors_);
+                if (!gm)
+                    bump(pre_errors_);
                 pre_gamma_cap_.store(gm ? *gm : 0u, std::memory_order_relaxed);
             }
 
             {
                 const std::uint64_t bits = ar_cust_.load(std::memory_order_acquire);
-                const std::uint16_t arc[4] = {static_cast<std::uint16_t>(bits & 0xFFFFu),
-                                              static_cast<std::uint16_t>((bits >> 16) & 0xFFFFu),
-                                              static_cast<std::uint16_t>((bits >> 32) & 0xFFFFu),
-                                              static_cast<std::uint16_t>((bits >> 48) & 0xFFFFu)};
+                const std::uint16_t arc[4] = {
+                    static_cast<std::uint16_t>(bits & 0xFFFFu),
+                    static_cast<std::uint16_t>((bits >> 16) & 0xFFFFu),
+                    static_cast<std::uint16_t>((bits >> 32) & 0xFFFFu),
+                    static_cast<std::uint16_t>((bits >> 48) & 0xFFFFu)
+                };
                 auto a = svc::emit_ar_custom(link, std::span<const std::uint16_t>(arc, 4));
-                if (!a) bump(pre_errors_);
+                if (!a)
+                    bump(pre_errors_);
             }
             pre_step_ = PreludeStep::FltNum;
             break;
@@ -297,7 +337,8 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence
             }
             pre_flt_flags_.store(*f, std::memory_order_relaxed);
 
-            if (*f != 0) geo_gate_.last_flt_flags = *f;
+            if (*f != 0)
+                geo_gate_.last_flt_flags = *f;
             if (*f == 0) {
                 bump(pre_coeff_skips_);
                 pre_step_ = PreludeStep::Burst;
@@ -308,7 +349,8 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence
                 s.flt_flags = *f;
                 if (!arm_filter_stream(*f, select_slot(s), true, false, svc::ScalingWords{})) {
 
-                    if (auto e = svc::emit_filter_coeff_chunk(link, {}); !e) bump(pre_errors_);
+                    if (auto e = svc::emit_filter_coeff_chunk(link, {}); !e)
+                        bump(pre_errors_);
                     bump(pre_chunks_);
                     pre_step_ = PreludeStep::Burst;
                     break;
@@ -329,7 +371,8 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence
         case PreludeStep::FltCoef: {
 
             step_filter_stream(link);
-            if (!fs_active_) pre_step_ = PreludeStep::Burst;
+            if (!fs_active_)
+                pre_step_ = PreludeStep::Burst;
             break;
         }
 
@@ -338,7 +381,8 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence
             if (!pre_parked_) {
                 ++pre_barrier_;
                 bump(pre_barrier_waits_);
-                if (pre_barrier_ < kBarrierRounds) return true;
+                if (pre_barrier_ < kBarrierRounds)
+                    return true;
 
                 bump(pre_barrier_timeouts_);
                 pre_step_ = PreludeStep::ShadowMask;
@@ -361,7 +405,8 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence
 
             auto r = svc::emit_shadow_mask(
                 link,
-                static_cast<std::uint16_t>(shadow_mask_.load(std::memory_order_acquire) & 0xFFFFu));
+                static_cast<std::uint16_t>(shadow_mask_.load(std::memory_order_acquire) & 0xFFFFu)
+            );
             if (!r) {
                 bump(pre_errors_);
             } else {
@@ -443,7 +488,8 @@ void VideoWire::publish_filters(const svc::FilterSet& s) noexcept {
 
 bool VideoWire::consume_filters() {
     const std::uint32_t g = flt_cell_.sample_into(flt_local_);
-    if (g == 0u) return false;
+    if (g == 0u)
+        return false;
     flt_seen_gen_ = g;
     flt_have_ = true;
     bump(flt_consumed_);
@@ -451,35 +497,49 @@ bool VideoWire::consume_filters() {
 }
 
 std::size_t VideoWire::select_slot(const svc::VideoSample& s) const {
-    const bool enabled[4] = {flt_local_.modes[0] != 0, flt_local_.modes[1] != 0,
-                             flt_local_.modes[2] != 0, flt_local_.modes[3] != 0};
+    const bool enabled[4] = {
+        flt_local_.modes[0] != 0,
+        flt_local_.modes[1] != 0,
+        flt_local_.modes[2] != 0,
+        flt_local_.modes[3] != 0
+    };
     return static_cast<std::size_t>(
-        svc::VideoService::select_vfilter(s, std::span<const bool>(enabled, 4)));
+        svc::video_timing::select_vfilter(s, std::span<const bool>(enabled, 4))
+    );
 }
 
 bool VideoWire::service_filter_publish(hal::ISpiTransport& link) {
     const std::uint32_t g = flt_cell_.generation();
-    if (g == 0u || g == flt_seen_gen_) return false;
-    if (!consume_filters()) return false;
+    if (g == 0u || g == flt_seen_gen_)
+        return false;
+    if (!consume_filters())
+        return false;
 
     auto f = svc::emit_filter_mode(link, flt_local_.modes[0]);
     if (!f) {
         bump(flt_stream_errors_);
         return true;
     }
-    if (*f == 0) return true;
+    if (*f == 0)
+        return true;
     geo_gate_.last_flt_flags = *f;
     svc::VideoSample s = geo_gate_.last;
     s.flt_flags = *f;
     if (!arm_filter_stream(*f, select_slot(s), false, false, svc::ScalingWords{})) {
 
-        if (auto e = svc::emit_filter_coeff_chunk(link, {}); !e) bump(flt_stream_errors_);
+        if (auto e = svc::emit_filter_coeff_chunk(link, {}); !e)
+            bump(flt_stream_errors_);
     }
     return true;
 }
 
-bool VideoWire::arm_filter_stream(std::uint16_t flt_flags, std::size_t vert_slot, bool prelude,
-                                  bool tail, const svc::ScalingWords& tail_words) {
+bool VideoWire::arm_filter_stream(
+    std::uint16_t flt_flags,
+    std::size_t vert_slot,
+    bool prelude,
+    bool tail,
+    const svc::ScalingWords& tail_words
+) {
     const auto ver = static_cast<std::uint16_t>(flt_flags & 0xFu);
     const svc::FilterBank& h = flt_local_.banks[0];
     const svc::FilterBank& v = flt_local_.banks[vert_slot];
@@ -508,9 +568,11 @@ bool VideoWire::arm_filter_stream(std::uint16_t flt_flags, std::size_t vert_slot
 
 bool VideoWire::plan_filter_send(const svc::VideoSample& s, bool resend) {
 
-    if (!flt_have_) return false;
+    if (!flt_have_)
+        return false;
     svc::ScalingWords tw{};
-    if (resend) tw = svc::scaling_words(s, geo_gate_.policy);
+    if (resend)
+        tw = svc::scaling_words(s, geo_gate_.policy);
     return arm_filter_stream(s.flt_flags, select_slot(s), false, resend, tw);
 }
 
@@ -531,28 +593,35 @@ void VideoWire::step_filter_stream(hal::ISpiTransport& link) {
         const std::size_t remaining = total - fs_cursor_;
         n = remaining < kCoeffChunkWords ? remaining : kCoeffChunkWords;
         for (std::size_t i = 0; i < n; ++i) {
-            buf[i] = svc::filter_bank_word(std::span<const svc::FilterPhase>(ph), fs_ver_, seg.bank,
-                                           fs_cursor_ + i);
+            buf[i] = svc::filter_bank_word(
+                std::span<const svc::FilterPhase>(ph),
+                fs_ver_,
+                seg.bank,
+                fs_cursor_ + i
+            );
         }
     }
 
     if (auto r = svc::emit_filter_coeff_chunk(link, std::span<const std::uint16_t>(buf, n)); !r) {
 
         bump(flt_stream_errors_);
-        if (fs_prelude_) bump(pre_errors_);
+        if (fs_prelude_)
+            bump(pre_errors_);
         fs_active_ = false;
         fs_tail_ = false;
         return;
     }
     if (fs_prelude_) {
         bump(pre_chunks_);
-        pre_coeff_words_.store(pre_coeff_words_.load(std::memory_order_relaxed) +
-                                   static_cast<std::uint32_t>(n),
-                               std::memory_order_relaxed);
+        pre_coeff_words_.store(
+            pre_coeff_words_.load(std::memory_order_relaxed) + static_cast<std::uint32_t>(n),
+            std::memory_order_relaxed
+        );
     } else {
-        flt_stream_words_.store(flt_stream_words_.load(std::memory_order_relaxed) +
-                                    static_cast<std::uint32_t>(n),
-                                std::memory_order_relaxed);
+        flt_stream_words_.store(
+            flt_stream_words_.load(std::memory_order_relaxed) + static_cast<std::uint32_t>(n),
+            std::memory_order_relaxed
+        );
     }
 
     fs_cursor_ += n;
@@ -566,7 +635,8 @@ void VideoWire::step_filter_stream(hal::ISpiTransport& link) {
             done = fs_seg_i_ >= fs_plan_.count;
         }
     }
-    if (!done) return;
+    if (!done)
+        return;
 
     fs_active_ = false;
 
@@ -642,4 +712,4 @@ VideoWire::PreludeStats VideoWire::prelude_stats() const noexcept {
     return s;
 }
 
-}  // namespace mister::app
+}

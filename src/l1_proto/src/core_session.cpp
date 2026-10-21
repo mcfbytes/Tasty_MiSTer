@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/core_session.h"
 #include "hal/selected.h"
+#include "hal/start_ack_bound.h"
 
 #include <cerrno>
 #include <ctime>
@@ -15,7 +16,7 @@ constexpr hal::SpiWord kRtc{0x22};
 constexpr hal::SpiWord kTimestamp{0x24};
 
 constexpr StatusBit kResetBit{0};
-}  // namespace
+}
 
 Ex<void> CoreSession::fail(Error e) {
     phase_ = SessionPhase::Failed;
@@ -56,7 +57,8 @@ Ex<void> CoreSession::set_memory_size(MemSizeCookie cookie) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 1});
     }
     hal::Selected cs(*link_, hal::ChipSelect::Io);
-    if (auto r = link_->transfer(kSetMemSz); !r) return fail(r.error());
+    if (auto r = link_->transfer(kSetMemSz); !r)
+        return fail(r.error());
 
     if (auto r = link_->transfer(hal::SpiWord{cookie.v}); !r) {
         return fail(r.error());
@@ -66,7 +68,8 @@ Ex<void> CoreSession::set_memory_size(MemSizeCookie cookie) {
 }
 
 Ex<void> CoreSession::flush_status() {
-    if (suppress_status_wire_) return {};
+    if (suppress_status_wire_)
+        return {};
     return status_.flush(*link_);
 }
 
@@ -76,17 +79,20 @@ Ex<void> CoreSession::assert_reset() {
         return fail(Error{Errc::negotiation, ERR_SITE(), 0});
     }
     status_.set_bit(kResetBit, true);
-    if (auto r = flush_status(); !r) return fail(r.error());
+    if (auto r = flush_status(); !r)
+        return fail(r.error());
     phase_ = SessionPhase::HeldInReset;
     return {};
 }
 
 bool CoreSession::ladder_window_() const noexcept {
-    return phase_ == SessionPhase::HeldInReset ||
-           (phase_ == SessionPhase::Identified && type_ != CoreType::EightBit);
+    return phase_ == SessionPhase::HeldInReset
+        || (phase_ == SessionPhase::Identified && type_ != CoreType::EightBit);
 }
 
-bool CoreSession::conf_str_window_open() const noexcept { return ladder_window_(); }
+bool CoreSession::conf_str_window_open() const noexcept {
+    return ladder_window_();
+}
 
 Ex<void> CoreSession::accept_conf_str(const Ex<std::span<const std::uint8_t>>& body) {
 
@@ -95,9 +101,11 @@ Ex<void> CoreSession::accept_conf_str(const Ex<std::span<const std::uint8_t>>& b
     if (!ladder && !reread) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 0});
     }
-    if (!body) return fail(body.error());
+    if (!body)
+        return fail(body.error());
 
-    if (!reread) phase_ = SessionPhase::ConfStrRead;
+    if (!reread)
+        phase_ = SessionPhase::ConfStrRead;
     return {};
 }
 
@@ -112,7 +120,8 @@ Ex<void> CoreSession::load_saved_config() {
     }
 
     status_.set_bit(kResetBit, true);
-    if (auto r = flush_status(); !r) return fail(r.error());
+    if (auto r = flush_status(); !r)
+        return fail(r.error());
     return {};
 }
 
@@ -147,12 +156,13 @@ Ex<void> CoreSession::send_rtc_at(std::uint32_t unix_seconds) {
     if (utc_as_local == static_cast<std::time_t>(-1)) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
-    const std::int64_t shifted =
-        static_cast<std::int64_t>(t) +
-        (static_cast<std::int64_t>(t) - static_cast<std::int64_t>(utc_as_local));
+    const std::int64_t shifted = static_cast<std::int64_t>(t)
+        + (static_cast<std::int64_t>(t) - static_cast<std::int64_t>(utc_as_local));
     const auto stamp = static_cast<std::uint32_t>(static_cast<std::uint64_t>(shifted));
 
-    const auto bcd = [](int v) { return static_cast<std::uint8_t>((v % 10) | ((v / 10) << 4)); };
+    const auto bcd = [](int v) {
+        return static_cast<std::uint8_t>((v % 10) | ((v / 10) << 4));
+    };
     std::uint8_t rtc[8];
     rtc[0] = bcd(local.tm_sec);
     rtc[1] = bcd(local.tm_min);
@@ -164,7 +174,8 @@ Ex<void> CoreSession::send_rtc_at(std::uint32_t unix_seconds) {
     rtc[7] = 0x40;
     {
         hal::Selected cs(*link_, hal::ChipSelect::Io);
-        if (auto r = link_->transfer(kRtc); !r) return fail(r.error());
+        if (auto r = link_->transfer(kRtc); !r)
+            return fail(r.error());
         for (unsigned i = 0; i < 8; i += 2) {
             const auto w = static_cast<std::uint16_t>((rtc[i + 1] << 8) | rtc[i]);
             if (auto r = link_->transfer(hal::SpiWord{w}); !r) {
@@ -175,7 +186,8 @@ Ex<void> CoreSession::send_rtc_at(std::uint32_t unix_seconds) {
 
     {
         hal::Selected cs(*link_, hal::ChipSelect::Io);
-        if (auto r = link_->transfer(kTimestamp); !r) return fail(r.error());
+        if (auto r = link_->transfer(kTimestamp); !r)
+            return fail(r.error());
         if (auto r = link_->transfer(hal::SpiWord{static_cast<std::uint16_t>(stamp & 0xFFFFu)});
             !r) {
             return fail(r.error());
@@ -209,16 +221,23 @@ Ex<void> CoreSession::release_reset() {
 }
 
 Ex<void> CoreSession::configure_after_identity() {
-    if (phase_ != SessionPhase::Identified) return fail(Error{Errc::negotiation, ERR_SITE(), 0});
+    if (phase_ != SessionPhase::Identified)
+        return fail(Error{Errc::negotiation, ERR_SITE(), 0});
 
-    if (type_ != CoreType::EightBit) return {};
-    if (auto r = set_memory_size(cookie_); !r) return r;
+    if (type_ != CoreType::EightBit)
+        return {};
+
+    hal::StartAckBound widened(*link_);
+    if (auto r = set_memory_size(cookie_); !r)
+        return r;
     return assert_reset();
 }
 
 bool CoreSession::negotiating() const noexcept {
-    return phase_ == SessionPhase::Identified || phase_ == SessionPhase::MemSized ||
-           phase_ == SessionPhase::HeldInReset || phase_ == SessionPhase::ConfStrRead;
+    return phase_ == SessionPhase::Identified
+        || phase_ == SessionPhase::MemSized
+        || phase_ == SessionPhase::HeldInReset
+        || phase_ == SessionPhase::ConfStrRead;
 }
 
-}  // namespace mister::proto
+}

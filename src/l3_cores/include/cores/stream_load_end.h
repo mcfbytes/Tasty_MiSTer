@@ -14,4 +14,4 @@ struct StreamLoadEnd {
     bool ok = false;
 };
 
-}  // namespace mister::cores
+}

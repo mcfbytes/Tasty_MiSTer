@@ -23,10 +23,11 @@ void back_off() {
     } while (rc == EINTR);
 }
 
-}  // namespace
+}
 
 Ex<std::unique_ptr<FrameClock>> FrameClock::open(const char* fbdev_path) {
-    if (fbdev_path == nullptr) return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), 0});
+    if (fbdev_path == nullptr)
+        return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), 0});
     const int fb = ::open(fbdev_path, O_RDWR | O_CLOEXEC);
     if (fb < 0) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(errno)});
@@ -56,4 +57,4 @@ void FrameClock::wait_vsync() noexcept {
     frame_wake_.kick();
 }
 
-}  // namespace mister::reactor
+}

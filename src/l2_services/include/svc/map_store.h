@@ -43,25 +43,54 @@ struct MapKindSpec {
 
 inline constexpr MapKindSpec kMapKinds[] = {
 
-    {MapKind::Joystick, 128, true, "input_", StemSource::Id, true, "_v3.map",
+    {MapKind::Joystick,
+     128,
+     true,
+     "input_",
+     StemSource::Id,
+     true,
+     "_v3.map",
      PathPolicy::InputsThenConfig},
-    {MapKind::Advanced, 768, true, "advanced_input_", StemSource::Id, true, "_v1.map",
+    {MapKind::Advanced,
+     768,
+     true,
+     "advanced_input_",
+     StemSource::Id,
+     true,
+     "_v1.map",
      PathPolicy::InputsOnly},
     {MapKind::Keyboard, 256, false, "kbd_", StemSource::Id, false, ".map", PathPolicy::ConfigOnly},
-    {MapKind::Gun, 2048, true, "input_", StemSource::Id, false, "_jk.map",
+    {MapKind::Gun,
+     2048,
+     true,
+     "input_",
+     StemSource::Id,
+     false,
+     "_jk.map",
      PathPolicy::InputsThenConfig},
-    {MapKind::GunCal, 16, true, "gun_cal_", StemSource::VidPid, false, "_v2.cfg",
+    {MapKind::GunCal,
+     16,
+     true,
+     "gun_cal_",
+     StemSource::VidPid,
+     false,
+     "_v2.cfg",
      PathPolicy::ConfigOnly},
 };
 
-static_assert(std::size(kMapKinds) == static_cast<std::size_t>(MapKind::kCount),
-              "every MapKind needs exactly one kMapKinds row");
+static_assert(
+    std::size(kMapKinds) == static_cast<std::size_t>(MapKind::kCount),
+    "every MapKind needs exactly one kMapKinds row"
+);
+
 consteval bool map_kinds_are_indexed_by_enumerator() {
     for (std::size_t i = 0; i < std::size(kMapKinds); ++i) {
-        if (kMapKinds[i].kind != static_cast<MapKind>(i)) return false;
+        if (kMapKinds[i].kind != static_cast<MapKind>(i))
+            return false;
     }
     return true;
 }
+
 static_assert(map_kinds_are_indexed_by_enumerator());
 
 constexpr const MapKindSpec& map_spec(MapKind k) noexcept {
@@ -76,18 +105,30 @@ public:
 
     explicit MapStore(const Vfs& vfs) noexcept : vfs_(vfs) {}
 
-    static std::string filename(std::string_view core, const DeviceIdentity& id, MapKind kind,
-                                bool mod);
+    static std::string filename(
+        std::string_view core,
+        const DeviceIdentity& id,
+        MapKind kind,
+        bool mod
+    );
 
     infra::OptRef<const Vfs> storage() const noexcept { return vfs_; }
 
-    [[nodiscard]] Ex<ButtonMap> load(std::string_view core, const DeviceIdentity& id, MapKind kind,
-                                     bool mod) const;
-    [[nodiscard]] Ex<void> save(std::string_view core, const DeviceIdentity& id,
-                                const ButtonMap& map, bool mod) const;
+    [[nodiscard]] Ex<ButtonMap> load(
+        std::string_view core,
+        const DeviceIdentity& id,
+        MapKind kind,
+        bool mod
+    ) const;
+    [[nodiscard]] Ex<void> save(
+        std::string_view core,
+        const DeviceIdentity& id,
+        const ButtonMap& map,
+        bool mod
+    ) const;
 
 private:
     infra::OptRef<const Vfs> vfs_;
 };
 
-}  // namespace mister::svc
+}

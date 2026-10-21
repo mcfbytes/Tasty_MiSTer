@@ -33,18 +33,21 @@ constexpr std::int64_t kStatusPeriodNs = 250'000'000;
 constexpr unsigned kHideTries = 50;
 
 constexpr std::int32_t kResampleFrame = 60;
-}  // namespace
+}
 
 TastySession::TastySession(const Wiring& w, const TastyArgs& args) noexcept : w_(w), args_(args) {
     rec_only_ = args_.verb == TastyVerb::RecStart;
-    if (!args_.core.empty()) (void)core_path_.assign(args_.core.view());
+    if (!args_.core.empty())
+        (void)core_path_.assign(args_.core.view());
     std::string menu = std::string(w_.vfs.root_path()) + "/" + kMenuRbfName;
     (void)menu_path_.assign(menu);
     if (!args_.movie.empty()) {
-        if (auto s = cores::movie_system_for(w_.vfs, args_.movie.view())) sys_ = *s;
+        if (auto s = cores::movie_system_for(w_.vfs, args_.movie.view()))
+            sys_ = *s;
     }
-    if (core_path_.empty() && cores::movie_system_supported(sys_) &&
-        tasty_plays(sys_.conf_str_name)) {
+    if (core_path_.empty()
+        && cores::movie_system_supported(sys_)
+        && tasty_plays(sys_.conf_str_name)) {
         const std::string dir = std::string(w_.vfs.root_path()) + "/_Console";
         if (auto n = app::resolve_rbf_name(w_.vfs, dir, sys_.conf_str_name, false); n) {
             const std::string p = dir + "/" + *n;
@@ -54,10 +57,13 @@ TastySession::TastySession(const Wiring& w, const TastyArgs& args) noexcept : w_
 }
 
 bool TastySession::core_ready_() const noexcept {
-    if (w_.identity.generation() == id_gen_) return false;
+    if (w_.identity.generation() == id_gen_)
+        return false;
     app::SessionIdentity id{};
-    if (!w_.identity.copy(id)) return false;
-    if (sys_.conf_str_name.empty()) return true;
+    if (!w_.identity.copy(id))
+        return false;
+    if (sys_.conf_str_name.empty())
+        return true;
     return std::string_view{id.rbf} == sys_.conf_str_name;
 }
 
@@ -66,31 +72,40 @@ bool TastySession::video_reloaded_() const noexcept {
 }
 
 bool TastySession::menu_ready_() const noexcept {
-    if (id_gen_ != 0 && w_.identity.generation() == id_gen_) return false;
+    if (id_gen_ != 0 && w_.identity.generation() == id_gen_)
+        return false;
     app::SessionIdentity id{};
-    if (!w_.identity.copy(id)) return false;
+    if (!w_.identity.copy(id))
+        return false;
     return cores::profile_for(id.rbf).is_front_end;
 }
 
 void TastySession::ask_core_(std::string_view path) noexcept {
-    if (path.empty()) return;
+    if (path.empty())
+        return;
     id_gen_ = w_.identity.generation();
-    if (w_.video) video_edges_ = w_.video->stats().edges;
+    if (w_.video)
+        video_edges_ = w_.video->stats().edges;
     app::UiRequest::LoadCore req{};
     req.xml = app::XmlKind::Rbf;
-    if (!req.path.assign(path)) return;
+    if (!req.path.assign(path))
+        return;
     (void)w_.asks.push(req);
 }
 
 bool TastySession::copy_seed_() noexcept {
-    if (!args_.save) return false;
+    if (!args_.save)
+        return false;
     auto in = w_.vfs.open(args_.save->view(), svc::OpenMode::ReadWhole);
     const auto sz = in ? (*in)->size() : Ex<svc::FileSize>{std::unexpected(in.error())};
-    if (!sz || sz->v > kSeedMaxBytes) return false;
+    if (!sz || sz->v > kSeedMaxBytes)
+        return false;
     std::vector<std::byte> bytes(static_cast<std::size_t>(sz->v));
     const auto got = (*in)->read_at(0, bytes);
-    if (!got || *got != bytes.size()) return false;
-    if (!w_.vfs.ensure_dir(kTastySaveRoot)) return false;
+    if (!got || *got != bytes.size())
+        return false;
+    if (!w_.vfs.ensure_dir(kTastySaveRoot))
+        return false;
     return app::durable_write(w_.vfs, std::string(kTastySaveRoot) + "/seed.sav", bytes).has_value();
 }
 
@@ -109,77 +124,123 @@ void TastySession::fail_refusal_() noexcept {
     const bool offered = w_.replay.refusal_setting_offered();
     char buf[1400];
     if (std::strcmp(why, "setting") == 0 && offered && args_.strict) {
-        std::snprintf(buf, sizeof buf,
-                      "replay refused (--strict): the core's %.*s is not the movie's; without "
-                      "--strict tasty sets it for this run",
-                      static_cast<int>(set.size()), set.data());
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused (--strict): the core's %.*s is not the movie's; without "
+            "--strict tasty sets it for this run",
+            static_cast<int>(set.size()),
+            set.data()
+        );
     } else if (std::strcmp(why, "setting") == 0 && offered) {
-        std::snprintf(buf, sizeof buf,
-                      "replay refused: tasty could not set the core's %.*s for this run",
-                      static_cast<int>(set.size()), set.data());
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: tasty could not set the core's %.*s for this run",
+            static_cast<int>(set.size()),
+            set.data()
+        );
     } else if (std::strcmp(why, "setting") == 0) {
-        std::snprintf(buf, sizeof buf,
-                      "replay refused: this movie needs a %.*s this core does not offer",
-                      static_cast<int>(set.size()), set.data());
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: this movie needs a %.*s this core does not offer",
+            static_cast<int>(set.size()),
+            set.data()
+        );
     } else if (std::strcmp(why, "firmware") == 0 && !path.empty()) {
-        std::snprintf(buf, sizeof buf,
-                      "replay refused: the movie was recorded with another BIOS; it needs its own "
-                      "at %.*s",
-                      static_cast<int>(path.size()), path.data());
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: the movie was recorded with another BIOS; it needs its own "
+            "at %.*s",
+            static_cast<int>(path.size()),
+            path.data()
+        );
     } else if (std::strcmp(why, "firmware") == 0) {
-        std::snprintf(buf, sizeof buf,
-                      "replay refused: the movie was recorded with a BIOS; put it beside the disc "
-                      "image");
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: the movie was recorded with a BIOS; put it beside the disc "
+            "image"
+        );
     } else if (std::strcmp(why, "savestate") == 0) {
         const std::string_view movie = args_.movie.view();
-        std::snprintf(buf, sizeof buf,
-                      "replay refused: %.*s starts from a savestate or saved game, not from "
-                      "power-on",
-                      static_cast<int>(movie.size()), movie.data());
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: %.*s starts from a savestate or saved game, not from "
+            "power-on",
+            static_cast<int>(movie.size()),
+            movie.data()
+        );
     } else if (std::strcmp(why, "rom_kind") == 0) {
-        std::snprintf(buf, sizeof buf,
-                      "replay refused: this disc image cannot be hashed; use a Redump .cue/.bin "
-                      "or a chdman .chd of one");
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: this disc image cannot be hashed; use a Redump .cue/.bin "
+            "or a chdman .chd of one"
+        );
     } else if (std::strcmp(why, "rom_chd") == 0) {
-        std::snprintf(buf, sizeof buf,
-                      "replay refused: this build of tasty cannot read .chd disc images");
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: this build of tasty cannot read .chd disc images"
+        );
     } else if (std::strcmp(why, "checksum") == 0) {
-        std::snprintf(buf, sizeof buf,
-                      "replay refused: the ROM on the card is not the one the movie was recorded "
-                      "with");
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: the ROM on the card is not the one the movie was recorded "
+            "with"
+        );
     } else if (const char* plain = tasty_refusal_sentence(why); plain != nullptr) {
         std::snprintf(buf, sizeof buf, "replay refused: %s", plain);
     } else if (set.empty()) {
         std::snprintf(buf, sizeof buf, "replay refused: %s", why);
     } else {
-        std::snprintf(buf, sizeof buf, "replay refused: %s %.*s", why, static_cast<int>(set.size()),
-                      set.data());
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "replay refused: %s %.*s",
+            why,
+            static_cast<int>(set.size()),
+            set.data()
+        );
     }
     fail_(1, buf);
 }
 
 TastySession::Stage TastySession::after_hide_() const noexcept {
-    if (!args_.no_splash) return Stage::SplashMap;
+    if (!args_.no_splash)
+        return Stage::SplashMap;
     return rec_only_ ? Stage::Start : Stage::LoadCore;
 }
 
 std::optional<std::uint8_t> TastySession::direct_video_resolved_() const noexcept {
-    if (w_.video && !w_.video->ini_read()) return std::nullopt;
-    if (w_.direct_video_ini.generation() == 0) return std::nullopt;
+    if (w_.video && !w_.video->ini_read())
+        return std::nullopt;
+    if (w_.direct_video_ini.generation() == 0)
+        return std::nullopt;
     std::uint8_t was = 0;
     if (w_.video) {
         const std::uint8_t pump = w_.video->direct_video_ini();
-        if (pump > was) was = pump;
+        if (pump > was)
+            was = pump;
     }
     std::uint8_t cell = 0;
-    if (w_.direct_video_ini.sample_into(cell) != 0 && cell > was) was = cell;
+    if (w_.direct_video_ini.sample_into(cell) != 0 && cell > was)
+        was = cell;
     return was;
 }
 
 void TastySession::print_settings_() noexcept {
     if (!direct_video_line_ && !args_.strict && direct_video_was_ != 0) {
-        std::fprintf(stderr, "tasty: direct_video: using 0 for this run (your setting: %u)\n",
-                     static_cast<unsigned>(direct_video_was_));
+        std::fprintf(
+            stderr,
+            "tasty: direct_video: using 0 for this run (your setting: %u)\n",
+            static_cast<unsigned>(direct_video_was_)
+        );
         direct_video_line_ = true;
     }
     const std::size_t n = w_.replay.settings_set();
@@ -198,19 +259,26 @@ void TastySession::go_menu_() noexcept {
 
 bool TastySession::rec_only_over_() noexcept {
     app::RecorderStatus rec{};
-    if (w_.recstat.sample_into(rec) == 0) return false;
+    if (w_.recstat.sample_into(rec) == 0)
+        return false;
 
     if (rec.state != app::RecState::Idle) {
-        if (rec.state != app::RecState::Probing) rec_seen_ = true;
+        if (rec.state != app::RecState::Probing)
+            rec_seen_ = true;
         return false;
     }
-    if (rec.verdict == app::RecVerdict::Started) rec_seen_ = true;
-    const bool refused =
-        rec.verdict != app::RecVerdict::None && rec.verdict != app::RecVerdict::Started;
+    if (rec.verdict == app::RecVerdict::Started)
+        rec_seen_ = true;
+    const bool refused = rec.verdict != app::RecVerdict::None
+        && rec.verdict != app::RecVerdict::Started;
     if (refused && !rec_seen_) {
         char buf[160];
-        std::snprintf(buf, sizeof buf, "tasty: the recording did not start (%s)",
-                      app::rec_verdict_name(rec.verdict));
+        std::snprintf(
+            buf,
+            sizeof buf,
+            "tasty: the recording did not start (%s)",
+            app::rec_verdict_name(rec.verdict)
+        );
         tasty_say(buf);
         w_.exit_code.store(1, std::memory_order_relaxed);
     }
@@ -219,23 +287,31 @@ bool TastySession::rec_only_over_() noexcept {
 }
 
 void TastySession::sample_rec_failure_() noexcept {
-    if (!args_.record || args_.record->empty()) return;
+    if (!args_.record || args_.record->empty())
+        return;
     app::RecorderStatus rec{};
-    if (w_.recstat.sample_into(rec) == 0) return;
-    if (rec.state != app::RecState::Idle && rec.state != app::RecState::Probing) rec_seen_ = true;
+    if (w_.recstat.sample_into(rec) == 0)
+        return;
+    if (rec.state != app::RecState::Idle && rec.state != app::RecState::Probing)
+        rec_seen_ = true;
     note_rec_failure_(rec);
 }
 
 void TastySession::note_rec_failure_(const app::RecorderStatus& rec) noexcept {
-    if (rec_failure_said_ || !rec_seen_) return;
-    if (rec.state != app::RecState::Idle) return;
+    if (rec_failure_said_ || !rec_seen_)
+        return;
+    if (rec.state != app::RecState::Idle)
+        return;
     if (rec.verdict != app::RecVerdict::WriterFailed && rec.verdict != app::RecVerdict::NoMemory)
         return;
     rec_failure_said_ = true;
     char buf[192];
-    std::snprintf(buf, sizeof buf,
-                  "tasty: the recording failed after it started (%s): the AVI may be incomplete",
-                  app::rec_verdict_name(rec.verdict));
+    std::snprintf(
+        buf,
+        sizeof buf,
+        "tasty: the recording failed after it started (%s): the AVI may be incomplete",
+        app::rec_verdict_name(rec.verdict)
+    );
     tasty_say(buf);
     w_.exit_code.store(1, std::memory_order_relaxed);
 }
@@ -244,31 +320,38 @@ namespace {
 
 void say_scale_step(const app::EncodeStatus::Video& v) noexcept {
     const char* why = v.fell_behind == 0 ? "the encoder was using too much CPU"
-                      : v.held != 0      ? "the encoder fell behind again soon after catching up"
+        : v.held != 0                    ? "the encoder fell behind again soon after catching up"
                                          : "the encoder fell behind";
     const char* until = v.fell_behind != 0 && v.held == 0 ? " until it catches up" : "";
-    std::fprintf(stderr,
-                 "tasty: %s; the AVI continues at half size in a new segment%s (--scale native "
-                 "keeps full size and may repeat frames instead)\n",
-                 why, until);
+    std::fprintf(
+        stderr,
+        "tasty: %s; the AVI continues at half size in a new segment%s (--scale native "
+        "keeps full size and may repeat frames instead)\n",
+        why,
+        until
+    );
 }
 
 void say_scale_return() noexcept {
-    std::fprintf(stderr,
-                 "tasty: the encoder caught up; the AVI is back at full size in a new segment\n");
+    std::fprintf(
+        stderr,
+        "tasty: the encoder caught up; the AVI is back at full size in a new segment\n"
+    );
 }
 
-}  // namespace
+}
 
 bool TastySession::scaler_port_stuck_() const noexcept {
     app::RecorderStatus rec{};
-    if (w_.recstat.sample_into(rec) == 0) return false;
+    if (w_.recstat.sample_into(rec) == 0)
+        return false;
     return rec.verdict == app::RecVerdict::ScalerPortStuck;
 }
 
 void TastySession::write_status_(bool force) noexcept {
     const std::int64_t now = clock_.now().count();
-    if (!force && last_status_ns_ != 0 && now - last_status_ns_ < kStatusPeriodNs) return;
+    if (!force && last_status_ns_ != 0 && now - last_status_ns_ < kStatusPeriodNs)
+        return;
     app::ReplayStatus play{};
     app::RecorderStatus rec{};
     (void)w_.play.sample_into(play);
@@ -285,24 +368,38 @@ void TastySession::write_status_(bool force) noexcept {
     const bool returned = enc.video.recovered > said_recovered_;
     said_steps_ = enc.video.steps;
     said_recovered_ = enc.video.recovered;
-    if (returned && enc.video.scale == 2) say_scale_return();
-    if (stepped) say_scale_step(enc.video);
-    if (returned && enc.video.scale != 2) say_scale_return();
+    if (returned && enc.video.scale == 2)
+        say_scale_return();
+    if (stepped)
+        say_scale_step(enc.video);
+    if (returned && enc.video.scale != 2)
+        say_scale_return();
     const std::uint32_t total = w_.replay.movie_frames();
     const char* end = w_.replay.refused() ? "refused" : app::replay_end_name(play.end);
     char buf[768];
-    const int n =
-        std::snprintf(buf, sizeof buf,
-                      "{\"play\":\"%s\",\"end\":\"%s\",\"frame\":%d,\"frames\":%u,\"rec\":\"%s\","
-                      "\"rows\":%u,\"late\":%u,\"underruns\":%u,\"skipped\":%u,\"drops\":%u,"
-                      "\"missed\":%u,\"scale\":%u}\n",
-                      play.level == app::ReplayLevel::Running        ? "running"
-                      : play.level == app::ReplayLevel::AwaitPowerOn ? "arming"
-                                                                     : "idle",
-                      end, play.movie_frame, total, app::rec_state_name(rec.state), rec.rows,
-                      play.late, play.underruns, play.skipped_edges, play.pad_drops, rec.missed,
-                      static_cast<unsigned>(enc.video.scale));
-    if (n <= 0) return;
+    const int n = std::snprintf(
+        buf,
+        sizeof buf,
+        "{\"play\":\"%s\",\"end\":\"%s\",\"frame\":%d,\"frames\":%u,\"rec\":\"%s\","
+        "\"rows\":%u,\"late\":%u,\"underruns\":%u,\"skipped\":%u,\"drops\":%u,"
+        "\"missed\":%u,\"scale\":%u}\n",
+        play.level == app::ReplayLevel::Running            ? "running"
+            : play.level == app::ReplayLevel::AwaitPowerOn ? "arming"
+                                                           : "idle",
+        end,
+        play.movie_frame,
+        total,
+        app::rec_state_name(rec.state),
+        rec.rows,
+        play.late,
+        play.underruns,
+        play.skipped_edges,
+        play.pad_drops,
+        rec.missed,
+        static_cast<unsigned>(enc.video.scale)
+    );
+    if (n <= 0)
+        return;
     const unsigned un = static_cast<unsigned>(n);
     if (!force && un == last_status_n_ && std::memcmp(last_status_, buf, un) == 0) {
         last_status_ns_ = now;
@@ -319,9 +416,11 @@ void TastySession::tick() noexcept {
     TASTY_SEAT_BODY(TastySession);
     if (stage_ == Stage::HideOsd) {
 
-        const bool sent =
-            w_.link_tx.push(proto::LinkOp::SetOsdVisible{.show = proto::LinkOp::OsdShow::Off});
-        if (sent || ++hide_tries_ >= kHideTries) stage_ = after_hide_();
+        const bool sent = w_.link_tx.push(
+            proto::LinkOp::SetOsdVisible{.show = proto::LinkOp::OsdShow::Off}
+        );
+        if (sent || ++hide_tries_ >= kHideTries)
+            stage_ = after_hide_();
     }
     if (!w_.video && stage_ >= Stage::SplashMap && stage_ <= Stage::SplashHide) {
         stage_ = rec_only_ ? Stage::Start : Stage::LoadCore;
@@ -356,7 +455,8 @@ void TastySession::tick() noexcept {
             stage_ns_ = now;
             break;
         case Stage::SplashWait:
-            if (now - stage_ns_ >= TastySplash::kShowNs) stage_ = Stage::SplashHide;
+            if (now - stage_ns_ >= TastySplash::kShowNs)
+                stage_ = Stage::SplashHide;
             break;
         case Stage::SplashHide:
             (void)splash_.hide(*w_.video);
@@ -380,12 +480,15 @@ void TastySession::tick() noexcept {
             break;
         case Stage::Start: {
             const auto dv = direct_video_resolved_();
-            if (!dv) break;
+            if (!dv)
+                break;
             direct_video_was_ = *dv;
             if (args_.strict && direct_video_was_ != 0) {
-                fail_(1,
-                      "replay refused (--strict): direct_video is not off; without --strict tasty "
-                      "sets it for this run");
+                fail_(
+                    1,
+                    "replay refused (--strict): direct_video is not off; without --strict tasty "
+                    "sets it for this run"
+                );
                 break;
             }
             const app::RecMode mode = args_.hashes_only ? app::RecMode::Hash : app::RecMode::Avi;
@@ -393,10 +496,14 @@ void TastySession::tick() noexcept {
                 const std::string_view rec = args_.record->view();
                 if (!w_.rec.can_record(rec)) {
                     char why[app::kPathMax + 64];
-                    std::snprintf(why, sizeof why,
-                                  "cannot record to %.*s: a recording goes under %s",
-                                  static_cast<int>(rec.size()), rec.data(),
-                                  app::RecorderControl::kRoot.data());
+                    std::snprintf(
+                        why,
+                        sizeof why,
+                        "cannot record to %.*s: a recording goes under %s",
+                        static_cast<int>(rec.size()),
+                        rec.data(),
+                        app::RecorderControl::kRoot.data()
+                    );
                     fail_(1, why);
                     break;
                 }
@@ -412,14 +519,16 @@ void TastySession::tick() noexcept {
                     fail_(1, "replay refused: cannot copy the --save file");
                     break;
                 }
-                const PlayAsk ask{.movie = args_.movie.view(),
-                                  .rom = args_.rom.view(),
-                                  .lead = args_.lead,
-                                  .phase_us = args_.phase_us,
-                                  .stop_at = args_.stop_at,
-                                  .ram_fill = args_.ram_fill,
-                                  .seeded_save = seeded,
-                                  .set_settings = !args_.strict};
+                const PlayAsk ask{
+                    .movie = args_.movie.view(),
+                    .rom = args_.rom.view(),
+                    .lead = args_.lead,
+                    .phase_us = args_.phase_us,
+                    .stop_at = args_.stop_at,
+                    .ram_fill = args_.ram_fill,
+                    .seeded_save = seeded,
+                    .set_settings = !args_.strict
+                };
                 if (!w_.replay.take_play(ask)) {
                     fail_refusal_();
                     break;
@@ -437,7 +546,8 @@ void TastySession::tick() noexcept {
                 break;
             }
             if (rec_only_) {
-                if (rec_only_over_()) go_menu_();
+                if (rec_only_over_())
+                    go_menu_();
                 break;
             }
 
@@ -449,16 +559,23 @@ void TastySession::tick() noexcept {
             app::ReplayStatus play{};
             (void)w_.play.sample_into(play);
 
-            if (!resampled_ && args_.record && !args_.record->empty() && w_.video &&
-                play.level == app::ReplayLevel::Running && play.movie_frame >= kResampleFrame) {
+            if (!resampled_
+                && args_.record
+                && !args_.record->empty()
+                && w_.video
+                && play.level == app::ReplayLevel::Running
+                && play.movie_frame >= kResampleFrame) {
                 w_.video->resample_geometry();
                 resampled_ = true;
             }
             const auto end = play.end;
-            if (end == app::ReplayEnd::None || end == app::ReplayEnd::kCount) break;
-            if (end == app::ReplayEnd::EpochAmbiguous && w_.replay.active()) break;
+            if (end == app::ReplayEnd::None || end == app::ReplayEnd::kCount)
+                break;
+            if (end == app::ReplayEnd::EpochAmbiguous && w_.replay.active())
+                break;
             if (end == app::ReplayEnd::Finished && args_.loop) {
-                if (w_.replay.active()) break;
+                if (w_.replay.active())
+                    break;
                 settings_printed_ = 0;
                 direct_video_line_ = false;
                 stage_ = Stage::Start;
@@ -466,12 +583,17 @@ void TastySession::tick() noexcept {
             }
             if (end != app::ReplayEnd::Finished && end != app::ReplayEnd::Stopped) {
                 char buf[800];
-                std::snprintf(buf, sizeof buf, "tasty: %s",
-                              app::replay_end_sentence(end, play.epoch_fail));
+                std::snprintf(
+                    buf,
+                    sizeof buf,
+                    "tasty: %s",
+                    app::replay_end_sentence(end, play.epoch_fail)
+                );
                 tasty_say(buf);
                 w_.exit_code.store(1, std::memory_order_relaxed);
             }
-            if (args_.stay && end == app::ReplayEnd::Finished) break;
+            if (args_.stay && end == app::ReplayEnd::Finished)
+                break;
             if (end != app::ReplayEnd::Finished) {
                 go_menu_();
             } else {
@@ -483,8 +605,8 @@ void TastySession::tick() noexcept {
         case Stage::ReturnWait:
             sample_rec_failure_();
             write_status_();
-            if (now - stage_ns_ >=
-                static_cast<std::int64_t>(args_.return_after_s) * 1'000'000'000) {
+            if (now - stage_ns_
+                >= static_cast<std::int64_t>(args_.return_after_s) * 1'000'000'000) {
                 go_menu_();
             }
             break;
@@ -492,7 +614,8 @@ void TastySession::tick() noexcept {
             sample_rec_failure_();
             (void)w_.replay.take_stop();
             (void)w_.rec.take_stop();
-            if (!menu_path_.empty()) ask_core_(menu_path_.view());
+            if (!menu_path_.empty())
+                ask_core_(menu_path_.view());
             stage_ = Stage::WaitMenu;
             stage_ns_ = now;
             break;
@@ -503,10 +626,11 @@ void TastySession::tick() noexcept {
             }
             break;
         case Stage::Done:
-            if (!stop_sent_) w_.main_stop.request();
+            if (!stop_sent_)
+                w_.main_stop.request();
             stop_sent_ = true;
             break;
     }
 }
 
-}  // namespace mister::fw
+}

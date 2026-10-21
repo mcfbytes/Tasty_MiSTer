@@ -15,4 +15,4 @@ void EncodeMain::serve() noexcept {
         delay_.sleep_for(std::chrono::milliseconds(FrameHasher::kHeldPollMs));
 }
 
-}  // namespace mister::app
+}

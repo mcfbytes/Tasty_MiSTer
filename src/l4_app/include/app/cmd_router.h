@@ -38,9 +38,15 @@ public:
     };
 
     explicit CmdRouter(Wiring wiring) noexcept
-        : mgl_(wiring.mgl), video_(wiring.video), fb_(wiring.fb), shots_(wiring.shots),
-          replay_(wiring.replay), rec_(wiring.rec), ui_requests_(wiring.ui_requests),
-          stats_(wiring.stats), link_tx_(wiring.link_tx) {}
+        : mgl_(wiring.mgl),
+          video_(wiring.video),
+          fb_(wiring.fb),
+          shots_(wiring.shots),
+          replay_(wiring.replay),
+          rec_(wiring.rec),
+          ui_requests_(wiring.ui_requests),
+          stats_(wiring.stats),
+          link_tx_(wiring.link_tx) {}
 
     bool on(const CmdVerb::LoadCore& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
@@ -69,7 +75,8 @@ public:
 
     bool on(const CmdVerb::FbCmd& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        if (fb_) return fb_->take_fb_cmd(v.line);
+        if (fb_)
+            return fb_->take_fb_cmd(v.line);
         return video_.take_fb_cmd(v.line);
     }
 
@@ -80,7 +87,8 @@ public:
 
     bool on(const CmdVerb::Volume& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        if (!link_tx_.push(proto::LinkOp::SetVolume{.cmd = v.cmd, .arg = v.arg})) ++volume_drops_;
+        if (!link_tx_.push(proto::LinkOp::SetVolume{.cmd = v.cmd, .arg = v.arg}))
+            ++volume_drops_;
         return true;
     }
 
@@ -94,6 +102,7 @@ public:
         TASTY_SEAT_BODY(CmdRouter);
         return replay_.take_play(ReplayFeeder::Play{v.movie, v.rom, v.phase_us, v.lead});
     }
+
     bool on(const CmdVerb::TasStop&) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
         return replay_.take_stop();
@@ -103,14 +112,17 @@ public:
         TASTY_SEAT_BODY(CmdRouter);
         return rec_.take_start(v.path, v.mode, v.opt);
     }
+
     bool on(const CmdVerb::RecArm& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
         return rec_.take_arm(v.path, v.mode, v.opt);
     }
+
     bool on(const CmdVerb::RecStop&) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
         return rec_.take_stop();
     }
+
     bool on(const CmdVerb::RecDisarm&) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
         return rec_.take_disarm();
@@ -134,4 +146,4 @@ private:
     std::uint32_t load_core_drops_ = 0;
 };
 
-}  // namespace mister::app
+}

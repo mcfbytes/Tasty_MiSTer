@@ -39,29 +39,50 @@ public:
         std::uint16_t act = 0;
     };
 
-    [[nodiscard]] static Ex<PayloadPieces> of_file(std::unique_ptr<svc::IFile> file,
-                                                   std::uint64_t size, std::string_view ext,
-                                                   const Frame& frame);
+    [[nodiscard]] static Ex<PayloadPieces> of_file(
+        std::unique_ptr<svc::IFile> file,
+        std::uint64_t size,
+        std::string_view ext,
+        const Frame& frame
+    );
 
-    [[nodiscard]] static Ex<PayloadPieces> of_bytes(std::vector<std::uint8_t> bytes,
-                                                    std::string_view ext, const Frame& frame);
+    [[nodiscard]] static Ex<PayloadPieces> of_bytes(
+        std::vector<std::uint8_t> bytes,
+        std::string_view ext,
+        const Frame& frame
+    );
 
-    [[nodiscard]] static constexpr std::size_t piece_bytes(std::uint16_t chunk,
-                                                           std::size_t word_bytes = 1) noexcept {
+    [[nodiscard]] static constexpr std::size_t piece_bytes(
+        std::uint16_t chunk,
+        std::size_t word_bytes = 1
+    ) noexcept {
         const std::size_t cap = kPieceWords * (word_bytes == 2 ? 2u : 1u);
-        if (chunk == 0) return cap;
-        if (chunk >= cap) return chunk;
+        if (chunk == 0)
+            return cap;
+        if (chunk >= cap)
+            return chunk;
         return cap - cap % chunk;
     }
 
     [[nodiscard]] Pass step(ILadderHost& host);
+
     [[nodiscard]] std::uint64_t size() const noexcept { return size_; }
+
     [[nodiscard]] std::uint64_t sent() const noexcept { return sent_; }
 
 private:
-    PayloadPieces(std::unique_ptr<svc::IFile> file, std::vector<std::uint8_t> bytes,
-                  std::uint64_t size, std::string_view ext, const Frame& frame)
-        : file_(std::move(file)), bytes_(std::move(bytes)), size_(size), ext_(ext), frame_(frame) {}
+    PayloadPieces(
+        std::unique_ptr<svc::IFile> file,
+        std::vector<std::uint8_t> bytes,
+        std::uint64_t size,
+        std::string_view ext,
+        const Frame& frame
+    )
+        : file_(std::move(file)),
+          bytes_(std::move(bytes)),
+          size_(size),
+          ext_(ext),
+          frame_(frame) {}
 
     [[nodiscard]] bool stage_(std::size_t n);
     [[nodiscard]] Pass fail_(ILadderHost& host);
@@ -78,4 +99,4 @@ private:
     bool cut_owed_ = false;
 };
 
-}  // namespace mister::cores
+}

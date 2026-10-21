@@ -16,6 +16,7 @@ struct MailboxFrame {
     TASTY_SEAT_EXEMPT(component);
     std::array<std::uint16_t, kMailboxFrameWords> w{};
 };
+
 static_assert(std::is_trivially_copyable_v<MailboxFrame> && sizeof(MailboxFrame) == 8);
 
-}  // namespace mister::proto
+}

@@ -22,19 +22,21 @@ namespace {
 constexpr hal::SpiWord kSetUart{0x3B};
 
 bool file_exists(const char* path) noexcept {
-    struct stat st {};
+    struct stat st{};
     return ::stat(path, &st) == 0;
 }
 
 [[nodiscard]] Ex<std::size_t> copy_name(std::span<char> dst, std::string_view src) noexcept {
-    if (dst.empty()) return 0u;
+    if (dst.empty())
+        return 0u;
     const std::size_t n = src.size() < dst.size() - 1 ? src.size() : dst.size() - 1;
-    if (n != 0) std::memcpy(dst.data(), src.data(), n);
+    if (n != 0)
+        std::memcpy(dst.data(), src.data(), n);
     dst[n] = '\0';
     return n;
 }
 
-}  // namespace
+}
 
 UartPersist clamp_uart_modes(UartPersist p) noexcept {
 
@@ -54,8 +56,10 @@ UartPersist clamp_uart_modes(UartPersist p) noexcept {
     return p;
 }
 
-void parse_baud_token(std::string_view token,
-                      std::span<std::uint32_t, kBaudTableSize> out) noexcept {
+void parse_baud_token(
+    std::string_view token,
+    std::span<std::uint32_t, kBaudTableSize> out
+) noexcept {
     for (auto& v : out)
         v = 0;
 
@@ -67,11 +71,16 @@ void parse_baud_token(std::string_view token,
         auto lower = [](char c) {
             return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         };
-        const bool uart =
-            lower(k[0]) == 'u' && lower(k[1]) == 'a' && lower(k[2]) == 'r' && lower(k[3]) == 't';
-        const bool midi =
-            lower(k[0]) == 'm' && lower(k[1]) == 'i' && lower(k[2]) == 'd' && lower(k[3]) == 'i';
-        if (uart || midi) p = 4;
+        const bool uart = lower(k[0]) == 'u'
+            && lower(k[1]) == 'a'
+            && lower(k[2]) == 'r'
+            && lower(k[3]) == 't';
+        const bool midi = lower(k[0]) == 'm'
+            && lower(k[1]) == 'i'
+            && lower(k[2]) == 'd'
+            && lower(k[3]) == 'i';
+        if (uart || midi)
+            p = 4;
     }
 
     for (std::size_t i = 0; i < kBaudTokenMax && p < n; ++i) {
@@ -80,11 +89,13 @@ void parse_baud_token(std::string_view token,
         std::size_t k = 0;
         std::size_t q = p;
         while (q < n && (token[q] == ' ' || token[q] == '+' || token[q] == '-')) {
-            if (k + 1 < sizeof num) num[k++] = token[q];
+            if (k + 1 < sizeof num)
+                num[k++] = token[q];
             ++q;
         }
         while (q < n && std::isdigit(static_cast<unsigned char>(token[q]))) {
-            if (k + 1 < sizeof num) num[k++] = token[q];
+            if (k + 1 < sizeof num)
+                num[k++] = token[q];
             ++q;
         }
         out[i] = static_cast<std::uint32_t>(std::strtoul(num, nullptr, 10));
@@ -93,19 +104,27 @@ void parse_baud_token(std::string_view token,
         if (p < n && token[p] == '(') {
             ++p;
 
-            while (p < n && token[p] != ';' && token[p] != ':' && token[p] != ')' &&
-                   token[p] != ',') {
+            while (
+                p < n && token[p] != ';' && token[p] != ':' && token[p] != ')' && token[p] != ',') {
                 ++p;
             }
-            if (p < n && token[p] == ')') ++p;
+            if (p < n && token[p] == ')')
+                ++p;
         }
-        if (p < n && token[p] == ':') ++p;
+        if (p < n && token[p] == ':')
+            ++p;
     }
 }
 
-Ex<UartMode> UartModeController::probe_mode() const { return unimplemented(ERR_SITE()); }
+Ex<UartMode> UartModeController::probe_mode() const {
 
-Ex<MidiLinkMode> UartModeController::probe_midilink() const { return unimplemented(ERR_SITE()); }
+    return unimplemented(ERR_SITE());
+}
+
+Ex<MidiLinkMode> UartModeController::probe_midilink() const {
+
+    return unimplemented(ERR_SITE());
+}
 
 Ex<void> UartModeController::set_mode(hal::ISpiTransport& link, UartMode m) {
     seat_assert<SeatTag::RT>(ERR_SITE(), "UartModeController::set_mode off T-RT");
@@ -119,16 +138,17 @@ Ex<void> UartModeController::set_mode(hal::ISpiTransport& link, UartMode m) {
         if (auto r = link.transfer(kSetUart); !r) {
             return std::unexpected(r.error());
         }
-        const std::uint16_t wire =
-            (raw == 4 || raw == 5) ? std::uint16_t{1} : static_cast<std::uint16_t>(raw);
+        const std::uint16_t wire = (raw == 4 || raw == 5) ? std::uint16_t{1}
+                                                          : static_cast<std::uint16_t>(raw);
         if (auto r = link.transfer(hal::SpiWord{wire}); !r) {
             return std::unexpected(r.error());
         }
         if (auto r = link.transfer(hal::SpiWord{static_cast<std::uint16_t>(baud & 0xFFFFu)}); !r) {
             return std::unexpected(r.error());
         }
-        if (auto r =
-                link.transfer(hal::SpiWord{static_cast<std::uint16_t>((baud >> 16) & 0xFFFFu)});
+        if (auto r = link.transfer(
+                hal::SpiWord{static_cast<std::uint16_t>((baud >> 16) & 0xFFFFu)}
+            );
             !r) {
             return std::unexpected(r.error());
         }
@@ -159,10 +179,14 @@ Ex<void> UartModeController::set_midilink(MidiLinkMode ml) {
 }
 
 void UartModeController::post_(const UartHandoff& h) noexcept {
-    if (!inbox_ || !inbox_->push(h)) rt_.handoff_drops.add(1);
+    if (!inbox_ || !inbox_->push(h))
+        rt_.handoff_drops.add(1);
 }
 
-Ex<void> UartModeController::reset_uart(hal::ISpiTransport&) { return unimplemented(ERR_SITE()); }
+Ex<void> UartModeController::reset_uart(hal::ISpiTransport&) {
+
+    return unimplemented(ERR_SITE());
+}
 
 void UartModeController::bind_identity(std::string_view core, std::string_view rbf) noexcept {
     (void)copy_name(rt_.core_name, core);
@@ -174,16 +198,21 @@ void UartModeController::latch_usb_ser(bool present) noexcept {
     rt_.usb_ser_present = present;
 }
 
-Ex<void> UartModeController::load_for_core(hal::ISpiTransport& link, std::string_view core_name,
-                                           bool uart_capable, std::string_view uart_token,
-                                           std::string_view midi_token,
-                                           const UartPersistFiles* files) {
+Ex<void> UartModeController::load_for_core(
+    hal::ISpiTransport& link,
+    std::string_view core_name,
+    bool uart_capable,
+    std::string_view uart_token,
+    std::string_view midi_token,
+    const UartPersistFiles* files
+) {
 
     rt_.idx = {};
     parse_baud_token(uart_token, std::span<std::uint32_t, kBaudTableSize>(rt_.uart_table));
     parse_baud_token(midi_token, std::span<std::uint32_t, kBaudTableSize>(rt_.midi_table));
 
-    if (!midi_token.empty() && rt_.midi_table[0] == 0) rt_.midi_table[0] = 31250;
+    if (!midi_token.empty() && rt_.midi_table[0] == 0)
+        rt_.midi_table[0] = 31250;
     rt_.uart_capable = uart_capable;
     ++rt_.stats.loads;
 
@@ -193,12 +222,14 @@ Ex<void> UartModeController::load_for_core(hal::ISpiTransport& link, std::string
 
             rt_.uart_table[0] = cores::profile_for(core_name).default_uart_baud;
 
-            if (rt_.midi_table[0] == 0) rt_.midi_table[0] = 31250u;
+            if (rt_.midi_table[0] == 0)
+                rt_.midi_table[0] = 31250u;
         }
 
         std::array<std::uint32_t, 3> speeds{};
         if (files != nullptr && files->ready) {
-            if (files->have_mode) word = files->mode;
+            if (files->have_mode)
+                word = files->mode;
             if (files->have_speeds) {
                 speeds[0] = files->speeds[0];
                 speeds[1] = files->speeds[1];
@@ -214,7 +245,8 @@ Ex<void> UartModeController::load_for_core(hal::ISpiTransport& link, std::string
 
     Ex<void> first = {};
     auto keep = [&first](Ex<void> r) {
-        if (!r && first) first = std::unexpected(r.error());
+        if (!r && first)
+            first = std::unexpected(r.error());
     };
 
     keep(set_mode(link, UartMode::None));
@@ -232,7 +264,8 @@ Ex<void> UartModeController::save_for_core(std::string_view) const {
 }
 
 std::span<const std::uint32_t> UartModeController::baud_table(BaudSpace s) const {
-    if (s == BaudSpace::Mlink) return kMlinkSpeeds;
+    if (s == BaudSpace::Mlink)
+        return kMlinkSpeeds;
     const auto& t = (s == BaudSpace::Midi) ? rt_.midi_table : rt_.uart_table;
 
     std::size_t n = 0;
@@ -263,4 +296,4 @@ std::uint32_t UartModeController::baud_for(UartMode m) const noexcept {
     return i < bauds.size() ? bauds[i] : 0u;
 }
 
-}  // namespace mister::app
+}

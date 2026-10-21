@@ -54,25 +54,36 @@ public:
     using SaveChan = xthread::LoanChannel<SaveSlot, kSaveDepth, SeatTag::RT, SeatTag::Io>;
 
     explicit DurableWriteService(const svc::Vfs& vfs) noexcept
-        : vfs_(&vfs), chan_(xthread::Polled{}), save_chan_(xthread::Polled{}) {}
+        : vfs_(&vfs),
+          chan_(xthread::Polled{}),
+          save_chan_(xthread::Polled{}) {}
 
     DurableWriteService(const svc::Vfs& vfs, xthread::WakeFlag& io_wake) noexcept
-        : vfs_(&vfs), chan_(io_wake), save_chan_(io_wake) {}
+        : vfs_(&vfs),
+          chan_(io_wake),
+          save_chan_(io_wake) {}
 
-    [[nodiscard]] bool arm(std::string_view rel, std::span<const std::byte> bytes,
-                           WriteKind kind = WriteKind::Silent) noexcept;
+    [[nodiscard]] bool arm(
+        std::string_view rel,
+        std::span<const std::byte> bytes,
+        WriteKind kind = WriteKind::Silent
+    ) noexcept;
 
     struct WriteDone {
         WriteKind kind = WriteKind::Silent;
         bool ok = false;
     };
+
     [[nodiscard]] std::optional<WriteDone> reap() noexcept;
 
     [[nodiscard]] std::span<const std::byte> peek(std::string_view rel) const noexcept override;
 
     [[nodiscard]] std::uint32_t refusals() const noexcept { return rt_.refusals.get(); }
+
     [[nodiscard]] std::uint32_t failures() const noexcept { return rt_.failures.get(); }
+
     [[nodiscard]] std::uint32_t writes() const noexcept { return rt_.writes.get(); }
+
     [[nodiscard]] std::size_t in_flight() const noexcept;
 
     void serve() noexcept override;
@@ -105,4 +116,4 @@ private:
     SaveChan save_chan_;
 };
 
-}  // namespace mister::app
+}

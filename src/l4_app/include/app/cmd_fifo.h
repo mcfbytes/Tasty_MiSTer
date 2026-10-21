@@ -46,6 +46,7 @@ public:
     CmdFifo& operator=(const CmdFifo&) = delete;
 
     int fd() const noexcept { return fd_.get(); }
+
     std::string_view path() const noexcept;
 
     [[nodiscard]] Ex<unsigned> service();
@@ -74,4 +75,4 @@ private:
     std::uint32_t routed_ = 0;
 };
 
-}  // namespace mister::app
+}

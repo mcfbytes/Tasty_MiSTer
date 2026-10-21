@@ -17,11 +17,13 @@ namespace mister::app {
 struct Quiesce {
     std::uint32_t gen = 0;
 };
+
 static_assert(std::is_trivially_copyable_v<Quiesce>);
 
 struct Quiesced {
     std::uint32_t gen = 0;
 };
+
 static_assert(std::is_trivially_copyable_v<Quiesced>);
 static_assert(sizeof(Quiesced) <= 8, "one cache line holds the whole handshake");
 
@@ -34,6 +36,7 @@ public:
     QuiesceChannel() noexcept : ack_(xthread::Polled{}) {}
 
     explicit QuiesceChannel(xthread::WakeFlag& wake) noexcept : ack_(wake) {}
+
     QuiesceChannel(const QuiesceChannel&) = delete;
     QuiesceChannel& operator=(const QuiesceChannel&) = delete;
 
@@ -43,7 +46,8 @@ public:
 
     [[nodiscard]] std::optional<ParkReceipt> take_ack() noexcept {
         const auto q = ack_.pop();
-        if (!q) return std::nullopt;
+        if (!q)
+            return std::nullopt;
         return ParkReceipt{q->gen};
     }
 
@@ -58,4 +62,4 @@ private:
     xthread::Inbox<Quiesced, kQuiesceSlots> ack_;
 };
 
-}  // namespace mister::app
+}

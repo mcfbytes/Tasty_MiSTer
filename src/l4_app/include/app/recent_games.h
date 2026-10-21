@@ -16,6 +16,7 @@
 namespace mister::os {
 class IClock;
 }
+
 namespace mister::svc {
 class Vfs;
 }
@@ -51,24 +52,36 @@ public:
     static constexpr std::size_t kFiles = 32;
     static constexpr std::size_t kRecords = 64;
 
-    void refresh(const svc::Vfs& files, RecentsStore& recents, const Played& session,
-                 infra::OptRef<const os::IClock> clock = {},
-                 std::span<const PlayedHistory::Record> played = {});
+    void refresh(
+        const svc::Vfs& files,
+        RecentsStore& recents,
+        const Played& session,
+        infra::OptRef<const os::IClock> clock = {},
+        std::span<const PlayedHistory::Record> played = {}
+    );
 
-    void update(const svc::Vfs& files, RecentsStore& recents, const Played& session,
-                infra::OptRef<const os::IClock> clock = {},
-                std::span<const PlayedHistory::Record> played = {});
+    void update(
+        const svc::Vfs& files,
+        RecentsStore& recents,
+        const Played& session,
+        infra::OptRef<const os::IClock> clock = {},
+        std::span<const PlayedHistory::Record> played = {}
+    );
 
     [[nodiscard]] bool built() const noexcept { return built_; }
+
     [[nodiscard]] bool empty() const noexcept { return records_.empty(); }
+
     [[nodiscard]] std::span<const Record> records() const noexcept { return records_; }
 
     [[nodiscard]] std::uint32_t hidden() const noexcept { return hidden_; }
 
     [[nodiscard]] std::uint32_t files_read() const noexcept { return files_read_; }
+
     [[nodiscard]] std::uint32_t rereads() const noexcept { return rereads_; }
 
     [[nodiscard]] std::int64_t build_ns() const noexcept { return build_ns_; }
+
     [[nodiscard]] std::int64_t update_ns_max() const noexcept { return update_ns_max_; }
 
 private:
@@ -107,4 +120,4 @@ private:
 
 [[nodiscard]] std::string recent_rbf_prefix(std::string_view core_image);
 
-}  // namespace mister::app
+}

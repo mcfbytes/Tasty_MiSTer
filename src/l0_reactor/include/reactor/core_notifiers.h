@@ -20,14 +20,17 @@ class CoreNotifiers {
 
 public:
     explicit CoreNotifiers(Executive& exec) noexcept : exec_(exec) {}
+
     ~CoreNotifiers() { release(); }
 
     CoreNotifiers(const CoreNotifiers&) = delete;
     CoreNotifiers& operator=(const CoreNotifiers&) = delete;
 
     [[nodiscard]] Ex<NotifierSlot> bind_doorbell(
-        os::UioLineRef uio, Cause klass,
-        infra::OptRef<const hal::RegisterWindow<hal::CauseReg>> window);
+        os::UioLineRef uio,
+        Cause klass,
+        infra::OptRef<const hal::RegisterWindow<hal::CauseReg>> window
+    );
 
     void release() noexcept;
 
@@ -52,4 +55,4 @@ private:
     std::uint32_t release_failures_ = 0;
 };
 
-}  // namespace mister::reactor
+}

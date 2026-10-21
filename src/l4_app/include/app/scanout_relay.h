@@ -17,7 +17,9 @@ class ScanoutRelay {
 
 public:
     ScanoutRelay(hal::ISpiTransport& link, ScanoutChannel::Answerer channel) noexcept
-        : link_(link), channel_(std::move(channel)) {}
+        : link_(link),
+          channel_(std::move(channel)) {}
+
     ScanoutRelay(const ScanoutRelay&) = delete;
     ScanoutRelay& operator=(const ScanoutRelay&) = delete;
 
@@ -33,8 +35,11 @@ public:
         round_words_ = 0;
         return w;
     }
+
     [[nodiscard]] std::uint32_t bursts() const noexcept { return bursts_; }
+
     [[nodiscard]] std::uint32_t failures() const noexcept { return failures_; }
+
     [[nodiscard]] std::uint32_t refused() const noexcept { return refused_; }
 
 private:
@@ -51,4 +56,4 @@ private:
     std::uint32_t refused_ = 0;
 };
 
-}  // namespace mister::app
+}

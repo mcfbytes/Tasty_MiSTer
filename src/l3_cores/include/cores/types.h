@@ -10,6 +10,7 @@ struct CoreTypeMask {
     std::uint8_t v = 0;
     friend constexpr bool operator==(CoreTypeMask, CoreTypeMask) = default;
 };
+
 inline constexpr CoreTypeMask kAnyDialect{0xFF};
 
 [[nodiscard]] constexpr bool applies(CoreTypeMask row, CoreTypeMask dialect) noexcept {
@@ -32,4 +33,4 @@ struct WordId {
     friend constexpr bool operator==(WordId, WordId) = default;
 };
 
-}  // namespace mister::cores
+}

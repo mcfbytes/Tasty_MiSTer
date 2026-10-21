@@ -25,12 +25,14 @@ public:
     static constexpr std::size_t kPathCap = 1024;
 
     explicit MsuMachine(const svc::Vfs& vfs) noexcept : vfs_(&vfs) {}
+
     MsuMachine(const MsuMachine&) = delete;
     MsuMachine& operator=(const MsuMachine&) = delete;
 
     [[nodiscard]] proto::MailboxAct serve(
         const proto::MailboxFrame& frame,
-        std::span<std::uint8_t, proto::kMailboxActBytes> bytes) noexcept override;
+        std::span<std::uint8_t, proto::kMailboxActBytes> bytes
+    ) noexcept override;
     void begin_core() noexcept override;
     void rebind(std::string_view stem, bool present) noexcept override;
     void refill_one() noexcept override;
@@ -48,9 +50,13 @@ public:
         std::uint32_t read_errors = 0;
         std::uint32_t ignored = 0;
     };
+
     [[nodiscard]] const Counts& counts() const noexcept { return counts_; }
+
     [[nodiscard]] std::uint64_t cursor() const noexcept { return cursor_; }
+
     [[nodiscard]] std::string_view track_path() const noexcept { return path_.view(); }
+
     [[nodiscard]] bool track_open() const noexcept { return file_ != nullptr; }
 
 private:
@@ -62,7 +68,8 @@ private:
 
     [[nodiscard]] proto::MailboxAct track_(std::uint32_t track) noexcept;
     [[nodiscard]] proto::MailboxAct next_(
-        std::span<std::uint8_t, proto::kMailboxActBytes> bytes) noexcept;
+        std::span<std::uint8_t, proto::kMailboxActBytes> bytes
+    ) noexcept;
     void seek_(std::uint32_t sector) noexcept;
     void drop_ahead_(std::uint64_t from) noexcept;
     [[nodiscard]] std::size_t read_(std::uint64_t off, std::span<std::uint8_t> dst) noexcept;
@@ -85,4 +92,4 @@ private:
     Counts counts_{};
 };
 
-}  // namespace mister::cores
+}

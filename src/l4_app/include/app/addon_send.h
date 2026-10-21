@@ -10,6 +10,7 @@
 
 #include "app/link_tx_channel.h"
 #include "app/path_text.h"
+#include "app/rung.h"
 #include "cores/ladder_host.h"
 #include "cores/payload_pieces.h"
 #include "infra/seat.h"
@@ -21,7 +22,7 @@ class Vfs;
 
 namespace mister::app {
 
-class AddonSend {
+class AddonSend final : public Rung {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
@@ -35,24 +36,40 @@ public:
         PathText path{};
     };
 
-    [[nodiscard]] static AddonSend plan(std::string_view list, std::string_view pick,
-                                        std::uint8_t idx);
+    [[nodiscard]] static AddonSend plan(
+        std::string_view list,
+        std::string_view pick,
+        std::uint8_t idx
+    );
 
-    [[nodiscard]] static std::optional<PathText> path_of(std::string_view pick,
-                                                         std::string_view ext);
+    [[nodiscard]] static std::optional<PathText> path_of(
+        std::string_view pick,
+        std::string_view ext
+    );
 
     [[nodiscard]] bool take_image(std::vector<std::uint8_t> bytes);
 
     [[nodiscard]] Pass step(cores::ILadderHost& host, const svc::Vfs& vfs);
     [[nodiscard]] bool wants_pass(const LinkTxChannel<SeatTag::Main>& inbox) const noexcept;
 
+    [[nodiscard]] bool wants_pass(
+        const LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell& level
+    ) const noexcept override;
+    [[nodiscard]] Rung::Pass step(const RungEdges& edges, cores::ILadderHost& owner) override;
+
     [[nodiscard]] const std::vector<Entry>& entries() const noexcept { return entries_; }
+
     [[nodiscard]] bool empty() const noexcept { return entries_.empty(); }
+
     [[nodiscard]] std::uint32_t sent() const noexcept { return sent_; }
+
     [[nodiscard]] std::uint32_t missing() const noexcept { return missing_; }
+
     [[nodiscard]] std::uint32_t failed() const noexcept { return failed_; }
 
     [[nodiscard]] bool image_sent() const noexcept { return image_sent_; }
+
     [[nodiscard]] bool image_failed() const noexcept { return image_failed_; }
 
 private:
@@ -72,4 +89,4 @@ private:
     bool image_failed_ = false;
 };
 
-}  // namespace mister::app
+}

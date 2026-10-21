@@ -9,15 +9,20 @@
 
 namespace mister::app {
 
-bool AviWriter::idle() const noexcept { return w_.in.outbound() == 0; }
+bool AviWriter::idle() const noexcept {
+    return w_.in.outbound() == 0;
+}
 
-int AviWriter::park_ms() const noexcept { return -1; }
+int AviWriter::park_ms() const noexcept {
+    return -1;
+}
 
 void AviWriter::serve() noexcept {
     TASTY_SEAT_BODY(AviWriter);
     for (unsigned n = 0; n < kJobsPerPass; ++n) {
         auto job = w_.in.take();
-        if (!job) break;
+        if (!job)
+            break;
         switch (job->kind) {
             case ChunkKind::Open:
                 open_(*job);
@@ -29,8 +34,10 @@ void AviWriter::serve() noexcept {
                 refuse_(*job);
                 break;
             case ChunkKind::Close:
-                if (job->gen == st_.gen && fd_.valid()) finalize_();
-                if (job->gen == st_.gen) drop_unrated_();
+                if (job->gen == st_.gen && fd_.valid())
+                    finalize_();
+                if (job->gen == st_.gen)
+                    drop_unrated_();
                 if (job->gen == st_.gen && st_.state == RecWriteState::Open)
                     st_.state = RecWriteState::Closed;
                 index_.release();
@@ -39,7 +46,8 @@ void AviWriter::serve() noexcept {
         }
         job.complete();
     }
-    if (dirty_) w_.status.publish(st_);
+    if (dirty_)
+        w_.status.publish(st_);
     dirty_ = false;
 }
 
@@ -47,7 +55,8 @@ void AviWriter::release() noexcept {
     TASTY_SEAT_BODY(AviWriter);
     while (w_.in.outbound() != 0)
         serve();
-    if (fd_.valid()) finalize_();
+    if (fd_.valid())
+        finalize_();
     drop_unrated_();
     index_.release();
     w_.status.publish(st_);
@@ -55,7 +64,8 @@ void AviWriter::release() noexcept {
 
 void AviWriter::open_(const ChunkSlot& s) noexcept {
     if (s.gen != st_.gen) {
-        if (fd_.valid()) finalize_();
+        if (fd_.valid())
+            finalize_();
         drop_unrated_();
         st_ = AviWriteStatus{};
         st_.gen = s.gen;
@@ -63,17 +73,20 @@ void AviWriter::open_(const ChunkSlot& s) noexcept {
         return;
     } else if (fd_.valid()) {
         finalize_();
-        if (st_.state == RecWriteState::Failed) return;
+        if (st_.state == RecWriteState::Failed)
+            return;
     }
     dirty_ = true;
     st_.segment = s.segment;
 
     if (index_.bytes() == 0) {
-        if (auto r = index_.reserve(1, kMaxEntries * avi::kIndexEntry); !r) return fail_(ENOMEM);
+        if (auto r = index_.reserve(1, kMaxEntries * avi::kIndexEntry); !r)
+            return fail_(ENOMEM);
     }
 
     const int fd = ::open(s.path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
-    if (fd < 0) return fail_(errno);
+    if (fd < 0)
+        return fail_(errno);
     fd_.reset(fd);
     entries_ = 0;
     f_ = avi::Fields{};
@@ -84,17 +97,20 @@ void AviWriter::open_(const ChunkSlot& s) noexcept {
     frame_mul_ = s.frame_mul == 0 ? 1 : s.frame_mul;
     f_.scale = scaled_vtime_(avi::kDefaultVtime);
     rate_known_ = false;
-    if (avi::plausible_vtime(s.vtime)) learn_rate_(s.vtime);
+    if (avi::plausible_vtime(s.vtime))
+        learn_rate_(s.vtime);
     avi::Header h{};
     avi::header(f_, h);
-    if (!write_all_(h.data(), h.size())) return;
+    if (!write_all_(h.data(), h.size()))
+        return;
     pos_ = avi::kHeaderBytes;
     st_.state = RecWriteState::Open;
 }
 
 void AviWriter::refuse_(const ChunkSlot& s) noexcept {
     if (s.gen != st_.gen) {
-        if (fd_.valid()) finalize_();
+        if (fd_.valid())
+            finalize_();
         drop_unrated_();
         st_ = AviWriteStatus{};
         st_.gen = s.gen;
@@ -118,17 +134,23 @@ void AviWriter::data_(const ChunkSlot& s) noexcept {
         const std::uint32_t word = ChunkSlot::desc_word(s.desc, i);
         const std::uint32_t len = word & ~ChunkSlot::kKey;
         if (entries_ < kMaxEntries) {
-            avi::index_entry((word & ChunkSlot::kKey) != 0,
-                             static_cast<std::uint32_t>(at - avi::kMoviFourcc), len,
-                             std::span<std::byte, avi::kIndexEntry>(
-                                 idx + std::size_t{entries_} * avi::kIndexEntry, avi::kIndexEntry));
+            avi::index_entry(
+                (word & ChunkSlot::kKey) != 0,
+                static_cast<std::uint32_t>(at - avi::kMoviFourcc),
+                len,
+                std::span<std::byte, avi::kIndexEntry>(
+                    idx + std::size_t{entries_} * avi::kIndexEntry,
+                    avi::kIndexEntry
+                )
+            );
             ++entries_;
         }
         f_.max_chunk = std::max(f_.max_chunk, len);
         at += avi::chunk_bytes(len);
     }
 
-    if (!rate_known_ && avi::plausible_vtime(s.vtime)) learn_rate_(s.vtime);
+    if (!rate_known_ && avi::plausible_vtime(s.vtime))
+        learn_rate_(s.vtime);
     pos_ += s.used;
     f_.frames += s.chunks;
     f_.movi_bytes += s.used;
@@ -179,13 +201,16 @@ void AviWriter::learn_rate_(std::uint32_t vtime) noexcept {
         avi::header(u.f, h);
         std::size_t off = 0;
         while (off < h.size()) {
-            const ssize_t w =
-                ::pwrite(u.fd.get(), h.data() + off, h.size() - off, static_cast<off_t>(off));
-            if (w < 0 && errno == EINTR) continue;
-            if (w <= 0) break;
+            const ssize_t
+                w = ::pwrite(u.fd.get(), h.data() + off, h.size() - off, static_cast<off_t>(off));
+            if (w < 0 && errno == EINTR)
+                continue;
+            if (w <= 0)
+                break;
             off += static_cast<std::size_t>(w);
         }
-        if (off == h.size()) ++st_.header_rewrites;
+        if (off == h.size())
+            ++st_.header_rewrites;
     }
     drop_unrated_();
 }
@@ -193,7 +218,8 @@ void AviWriter::learn_rate_(std::uint32_t vtime) noexcept {
 void AviWriter::drop_unrated_() noexcept {
     for (std::size_t i = 0; i < nunrated_; ++i)
         unrated_[i] = Unrated{};
-    if (nunrated_ != 0) dirty_ = true;
+    if (nunrated_ != 0)
+        dirty_ = true;
     nunrated_ = 0;
 }
 
@@ -202,10 +228,12 @@ void AviWriter::write_header_() noexcept {
     avi::header(f_, h);
     std::size_t off = 0;
     while (off < h.size() && fd_.valid()) {
-        const ssize_t w =
-            ::pwrite(fd_.get(), h.data() + off, h.size() - off, static_cast<off_t>(off));
-        if (w < 0 && errno == EINTR) continue;
-        if (w <= 0) return fail_(w < 0 ? errno : EIO);
+        const ssize_t
+            w = ::pwrite(fd_.get(), h.data() + off, h.size() - off, static_cast<off_t>(off));
+        if (w < 0 && errno == EINTR)
+            continue;
+        if (w <= 0)
+            return fail_(w < 0 ? errno : EIO);
         off += static_cast<std::size_t>(w);
     }
     ++st_.header_rewrites;
@@ -213,7 +241,8 @@ void AviWriter::write_header_() noexcept {
 }
 
 void AviWriter::sync_() noexcept {
-    if (::fdatasync(fd_.get()) != 0 && errno != EINVAL) return fail_(errno);
+    if (::fdatasync(fd_.get()) != 0 && errno != EINVAL)
+        return fail_(errno);
     ++st_.syncs;
     dirty_ = true;
 }
@@ -222,7 +251,8 @@ bool AviWriter::write_all_(const std::byte* p, std::size_t n) noexcept {
     std::size_t off = 0;
     while (off < n && fd_.valid()) {
         const ssize_t w = ::write(fd_.get(), p + off, n - off);
-        if (w < 0 && errno == EINTR) continue;
+        if (w < 0 && errno == EINTR)
+            continue;
         if (w <= 0) {
             fail_(w < 0 ? errno : EIO);
             return false;
@@ -233,11 +263,12 @@ bool AviWriter::write_all_(const std::byte* p, std::size_t n) noexcept {
 }
 
 void AviWriter::fail_(int err) noexcept {
-    if (st_.err == 0) st_.err = err;
+    if (st_.err == 0)
+        st_.err = err;
     st_.state = RecWriteState::Failed;
     fd_.reset();
     entries_ = 0;
     dirty_ = true;
 }
 
-}  // namespace mister::app
+}

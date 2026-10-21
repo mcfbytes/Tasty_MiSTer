@@ -27,8 +27,12 @@ public:
 
     explicit SaveImageSource(const svc::Vfs& vfs) noexcept;
 
-    [[nodiscard]] bool bind(proto::SlotIndex slot, std::string_view path, bool manual = false,
-                            const cores::BlankSaveSpec& blank = {}) noexcept;
+    [[nodiscard]] bool bind(
+        proto::SlotIndex slot,
+        std::string_view path,
+        bool manual = false,
+        const cores::BlankSaveSpec& blank = {}
+    ) noexcept;
     std::string_view path_of(proto::SlotIndex slot) const;
 
     [[nodiscard]] bool manual(proto::SlotIndex slot) const noexcept;
@@ -67,6 +71,7 @@ private:
         bool close_owed = false;
         cores::BlankSaveSpec blank{};
     };
+
     Binding* find(proto::SlotIndex slot);
     const Binding* find(proto::SlotIndex slot) const;
 
@@ -75,4 +80,4 @@ private:
     svc::FileSlotBackend backends_[kSlots];
 };
 
-}  // namespace mister::app
+}

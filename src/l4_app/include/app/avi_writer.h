@@ -28,6 +28,7 @@ public:
     static constexpr std::size_t kMaxEntries = kChunksPerSegment;
 
     explicit AviWriter(const Wiring& w) noexcept : w_(w) {}
+
     AviWriter(const AviWriter&) = delete;
     AviWriter& operator=(const AviWriter&) = delete;
 
@@ -66,6 +67,7 @@ private:
         UniqueFd fd{};
         avi::Fields f{};
     };
+
     static constexpr std::size_t kUnrated = 4;
     std::array<Unrated, kUnrated> unrated_{};
     std::size_t nunrated_ = 0;
@@ -74,4 +76,4 @@ private:
     bool dirty_ = false;
 };
 
-}  // namespace mister::app
+}

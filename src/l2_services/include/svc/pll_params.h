@@ -12,4 +12,4 @@ struct PllParams {
     bool approximated = false;
 };
 
-}  // namespace mister::svc
+}

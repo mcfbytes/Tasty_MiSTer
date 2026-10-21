@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "cores/cd_diagnostics.h"
+#include "cores/cd_disc_slot.h"
 #include "cores/cd_engine.h"
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_flow_query.h"
@@ -16,6 +17,7 @@
 #include "cores/cd_sector_egress.h"
 #include "cores/cd_service_rows.h"
 #include "cores/cd_transport.h"
+#include "cores/cd_wire_port.h"
 #include "cores/core_support.h"
 #include "cores/staging_core.h"
 #include "infra/error.h"
@@ -53,13 +55,23 @@ public:
     [[nodiscard]] Ex<void> eject_for_cart();
 
     const CdProfile& cd_profile() const noexcept { return *cd_; }
+
     CdEngine* engine() noexcept { return engine_.get(); }
+
     [[nodiscard]] const CdEngine* engine() const noexcept { return engine_.get(); }
-    svc::DiscReadService* discs() noexcept { return discs_ ? &*discs_ : nullptr; }
-    [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return geom_; }
+
+    svc::DiscReadService* discs() noexcept {
+        const auto d = slot_.discs();
+        return d ? &*d : nullptr;
+    }
+
+    [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return slot_.geometry(); }
+
     ICdTransport& transport() noexcept { return *this; }
-    std::uint32_t wire_faults() const noexcept { return wire_faults_; }
-    [[nodiscard]] bool cdda_capture_armed() const noexcept { return cdda_cap_ != nullptr; }
+
+    std::uint32_t wire_faults() const noexcept { return wire_.wire_faults(); }
+
+    [[nodiscard]] bool cdda_capture_armed() const noexcept { return wire_.cdda_capture_armed(); }
 
     void service_command_edge() noexcept override;
     void service_tick() noexcept override;
@@ -70,13 +82,13 @@ public:
     [[nodiscard]] proto::IImageSink& image_sink() noexcept override;
 
 private:
-    [[nodiscard]] Ex<void> bracket_inline_(IoIndex io_index, std::span<const std::byte> payload);
-    [[nodiscard]] std::uint32_t egress_abandons_() const noexcept;
-    svc::DiscMountState refresh_disc_() noexcept;
+    [[nodiscard]] infra::OptRef<CdEngine> engine_ref_() noexcept {
+        return engine_ ? infra::OptRef<CdEngine>{*engine_} : infra::OptRef<CdEngine>{};
+    }
 
     [[nodiscard]] Ex<void> send_data(IoIndex io_index, std::span<const std::byte> payload) override;
     [[nodiscard]] Ex<void> send_status(std::uint64_t bcd_frame) override;
-    bool can_send_data(svc::TrackType type) override;
+    bool can_send_data(std::uint16_t selector) override;
     [[nodiscard]] bool egress_idle() const noexcept override;
     [[nodiscard]] Ex<void> submit_sector(const Act& act) override;
 
@@ -85,23 +97,13 @@ private:
     void set_region(std::uint8_t region) override;
     [[nodiscard]] Ex<void> deferred_reset() override;
 
-    struct CddaCapture;
-    std::unique_ptr<CddaCapture> cdda_cap_;
-
     Core* owner_;
     const CdProfile* cd_;
-    hal::ISpiTransport* link_;
-    const os::IClock* clock_;
     infra::OptRef<svc::DiscReadService> granted_discs_{};
-    proto::SpiFioQueue* fio_queue_;
-    std::uint32_t wire_faults_ = 0;
-    svc::DiscGeometry geom_{};
-    svc::DiscCounters counters_{};
-
-    infra::OptRef<svc::DiscReadService> discs_{};
-    svc::DiscMountState mount_seen_ = svc::DiscMountState::Idle;
+    CdWirePort wire_;
+    CdDiscSlot slot_;
 
     std::unique_ptr<CdEngine> engine_;
 };
 
-}  // namespace mister::cores
+}

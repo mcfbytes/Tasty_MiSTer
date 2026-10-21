@@ -19,13 +19,15 @@ public:
     using Port = LinkPort<LinkEvent::Ps2Control, LinkEvent::Ps2ControlEnded>;
 
     SpiPs2Decoder(hal::ISpiTransport& link, ILinkRouter& router) noexcept
-        : link_(&link), out_{router} {}
+        : link_(&link),
+          out_{router} {}
 
     void probe() noexcept;
 
     void service() noexcept;
 
     void forget() noexcept;
+
     [[nodiscard]] bool active() const noexcept { return true; }
 
     bool control_owned() const noexcept { return ps2_control_; }
@@ -47,4 +49,4 @@ private:
     std::atomic<std::uint32_t> errors_{0};
 };
 
-}  // namespace mister::proto
+}

@@ -22,6 +22,7 @@ struct MailboxSlot {
     proto::MailboxAct act{};
     std::array<std::uint8_t, proto::kMailboxActBytes> bytes{};
 };
+
 static_assert(std::is_trivially_copyable_v<MailboxSlot>);
 
-}  // namespace mister::app
+}

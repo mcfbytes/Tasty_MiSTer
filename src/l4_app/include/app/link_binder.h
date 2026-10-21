@@ -29,7 +29,7 @@
 namespace mister::cores {
 class Core;
 struct CoreProfile;
-}  // namespace mister::cores
+}
 
 namespace mister::app {
 
@@ -43,6 +43,8 @@ public:
         reactor::Executive& exec;
         reactor::CoreState& state;
         xthread::LogLane& log_lane;
+
+        infra::OptRef<PcmRingFeeder> feeder{};
     };
 
     LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept;
@@ -59,14 +61,18 @@ public:
 
     void release_feeder() noexcept;
 
-    void set_pcm_feeder(PcmRingFeeder* feeder) noexcept { feeder_ = infra::opt_ref_of(feeder); }
+    [[nodiscard]] Ex<void> bind_census(
+        std::span<const reactor::LinkDecoderDecl> rows,
+        cores::Core* owner
+    );
 
-    [[nodiscard]] Ex<void> bind_census(std::span<const reactor::LinkDecoderDecl> rows,
-                                       cores::Core* owner);
-
-    [[nodiscard]] Ex<void> bind_session(std::span<const reactor::LinkDecoderDecl> rows,
-                                        cores::Core* owner, std::span<const proto::IrqBinding> irqs,
-                                        std::uint32_t declared, const DoorbellLines& lines);
+    [[nodiscard]] Ex<void> bind_session(
+        std::span<const reactor::LinkDecoderDecl> rows,
+        cores::Core* owner,
+        std::span<const proto::IrqBinding> irqs,
+        std::uint32_t declared,
+        const DoorbellLines& lines
+    );
 
     [[nodiscard]] Ex<void> unbind_session();
 
@@ -75,6 +81,7 @@ public:
     void retry_release() noexcept { notifiers_.retry_release(); }
 
     [[nodiscard]] std::uint32_t doorbells_declared() const noexcept { return doorbells_declared_; }
+
     [[nodiscard]] std::size_t doorbells_bound() const noexcept { return notifiers_.size(); }
 
     [[nodiscard]] std::uint32_t doorbell_fallbacks() const noexcept { return fallbacks_; }
@@ -84,8 +91,11 @@ public:
     [[nodiscard]] DoorbellStats doorbell_stats() const noexcept;
 
 private:
-    void bind_doorbells_(std::span<const proto::IrqBinding> irqs, std::uint32_t declared,
-                         const DoorbellLines& lines) noexcept;
+    void bind_doorbells_(
+        std::span<const proto::IrqBinding> irqs,
+        std::uint32_t declared,
+        const DoorbellLines& lines
+    ) noexcept;
 
     void bind_one_doorbell(const proto::IrqBinding& b, const DoorbellLines::Line& line) noexcept;
     void fall_back(const proto::IrqBinding& b, Errc why) noexcept;
@@ -105,4 +115,4 @@ private:
     std::uint32_t fallbacks_ = 0;
 };
 
-}  // namespace mister::app
+}

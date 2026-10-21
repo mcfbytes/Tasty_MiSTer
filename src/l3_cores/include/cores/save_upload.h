@@ -23,4 +23,4 @@ protected:
     ISaveUpload& operator=(const ISaveUpload&) = default;
 };
 
-}  // namespace mister::cores
+}

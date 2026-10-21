@@ -19,11 +19,15 @@ class CoreWindow final : public cores::ICoreWindow {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    [[nodiscard]] static Ex<CoreWindow> open_row(const hal::FpgaAperture& aperture,
-                                                 const hal::FabricRegion& row);
+    [[nodiscard]] static Ex<CoreWindow> open_row(
+        const hal::FpgaAperture& aperture,
+        const hal::FabricRegion& row
+    );
 
-    [[nodiscard]] static Ex<hal::FpgaMemory> map_row(const hal::FpgaAperture& aperture,
-                                                     const hal::FabricRegion& row);
+    [[nodiscard]] static Ex<hal::FpgaMemory> map_row(
+        const hal::FpgaAperture& aperture,
+        const hal::FabricRegion& row
+    );
 
     explicit CoreWindow(hal::FpgaMemory window) noexcept;
 
@@ -43,4 +47,4 @@ private:
     hal::FpgaMemory window_;
 };
 
-}  // namespace mister::app
+}

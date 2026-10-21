@@ -20,4 +20,4 @@ struct CoreFrameRecord {
 
 using CoreFrameCell = xthread::Telemetry<CoreFrameRecord, SeatTag::RT>;
 
-}  // namespace mister::app
+}

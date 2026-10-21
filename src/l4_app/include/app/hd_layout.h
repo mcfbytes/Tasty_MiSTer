@@ -13,6 +13,7 @@ struct HdLayout {
         std::int32_t w = 0;
         std::int32_t h = 0;
     };
+
     Rect panel{};
     Rect game{};
     Rect cover{};
@@ -20,11 +21,14 @@ struct HdLayout {
 
 [[nodiscard]] constexpr HdLayout layout_for(std::uint32_t w, std::uint32_t h) noexcept {
     HdLayout L{};
-    if (h == 0 || w == 0) return L;
+    if (h == 0 || w == 0)
+        return L;
     const auto ih = static_cast<std::int32_t>(h);
     const auto iw = static_cast<std::int32_t>(w);
     const auto panel_w = static_cast<std::int32_t>(std::max<std::uint64_t>(
-        static_cast<std::uint64_t>(w) * 36u / 100u, static_cast<std::uint64_t>(h) * 60u / 100u));
+        static_cast<std::uint64_t>(w) * 36u / 100u,
+        static_cast<std::uint64_t>(h) * 60u / 100u
+    ));
     L.panel = {.x = 0, .y = 0, .w = panel_w, .h = ih};
     L.game = {.x = panel_w, .y = 0, .w = iw - panel_w, .h = ih};
     const std::int64_t gw = L.game.w;
@@ -44,11 +48,13 @@ struct HdLayout {
     const std::int64_t y0 = std::max(cy, static_cast<std::int64_t>(L.game.y));
     const std::int64_t x1 = std::min(cx + cw, static_cast<std::int64_t>(L.game.x) + gw);
     const std::int64_t y1 = std::min(cy + ch, static_cast<std::int64_t>(L.game.y) + gh);
-    L.cover = {.x = static_cast<std::int32_t>(x0),
-               .y = static_cast<std::int32_t>(y0),
-               .w = static_cast<std::int32_t>(x1 - x0),
-               .h = static_cast<std::int32_t>(y1 - y0)};
+    L.cover = {
+        .x = static_cast<std::int32_t>(x0),
+        .y = static_cast<std::int32_t>(y0),
+        .w = static_cast<std::int32_t>(x1 - x0),
+        .h = static_cast<std::int32_t>(y1 - y0)
+    };
     return L;
 }
 
-}  // namespace mister::app
+}

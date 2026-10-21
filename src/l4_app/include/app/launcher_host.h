@@ -67,16 +67,23 @@ public:
 
     private:
         friend class LauncherHost;
+
         explicit Fds(UniqueFd epoll) noexcept : epoll_(std::move(epoll)) {}
+
         UniqueFd epoll_;
     };
 
     LauncherHost(Fds fds, Wiring w, const Timing& t) noexcept
-        : w_(std::move(w)), t_(t), epoll_(std::move(fds.epoll_)) {}
+        : w_(std::move(w)),
+          t_(t),
+          epoll_(std::move(fds.epoll_)) {}
+
     LauncherHost(Fds fds, Wiring w) noexcept
         : LauncherHost(std::move(fds), std::move(w), Timing{}) {}
+
     LauncherHost(const LauncherHost&) = delete;
     LauncherHost& operator=(const LauncherHost&) = delete;
+
     [[nodiscard]] int poll_fd() const noexcept { return epoll_.get(); }
 
     void serve() noexcept;
@@ -90,13 +97,16 @@ public:
     [[nodiscard]] int park_ms() const noexcept;
 
     [[nodiscard]] const Counters& counters() const noexcept { return n_; }
+
     [[nodiscard]] bool child_running() const noexcept { return child_.has_value(); }
+
     [[nodiscard]] bool lease_open() const noexcept { return lease_.valid(); }
 
 private:
     using Ns = std::chrono::nanoseconds;
 
     [[nodiscard]] Ns now_() const noexcept { return w_.clock.now(); }
+
     void step_() noexcept;
     void take_demand_() noexcept;
     [[nodiscard]] bool wanted_() const noexcept;
@@ -148,4 +158,4 @@ private:
     Counters n_{};
 };
 
-}  // namespace mister::app
+}

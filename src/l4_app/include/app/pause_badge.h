@@ -12,18 +12,23 @@
 
 namespace mister::app {
 
-[[nodiscard]] constexpr HdOsdStatus::Badge pause_badge(std::optional<proto::ItemProbe> probe,
-                                                       cores::PauseOnOsd rule,
-                                                       const proto::StatusWord& status,
-                                                       bool core_sees_osd) noexcept {
-    if (!core_sees_osd) return HdOsdStatus::Badge::Unknown;
+[[nodiscard]] constexpr HdOsdStatus::Badge pause_badge(
+    std::optional<proto::ItemProbe> probe,
+    cores::PauseOnOsd rule,
+    const proto::StatusWord& status,
+    bool core_sees_osd
+) noexcept {
+    if (!core_sees_osd)
+        return HdOsdStatus::Badge::Unknown;
     switch (rule) {
         case cores::PauseOnOsd::Always:
             return HdOsdStatus::Badge::Paused;
         case cores::PauseOnOsd::Option: {
-            if (!probe) return HdOsdStatus::Badge::Unknown;
-            if (probe->width == 0 || probe->width > proto::ItemProbe::kMaxWidth ||
-                probe->lo.v + probe->width > 256u)
+            if (!probe)
+                return HdOsdStatus::Badge::Unknown;
+            if (probe->width == 0
+                || probe->width > proto::ItemProbe::kMaxWidth
+                || probe->lo.v + probe->width > 256u)
                 return HdOsdStatus::Badge::Unknown;
             unsigned value = 0;
             for (unsigned i = 0; i < probe->width; ++i) {
@@ -37,4 +42,4 @@ namespace mister::app {
     return HdOsdStatus::Badge::Unknown;
 }
 
-}  // namespace mister::app
+}

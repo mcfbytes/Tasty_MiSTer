@@ -10,4 +10,4 @@ struct NotifierSlot {
     friend constexpr bool operator==(NotifierSlot, NotifierSlot) = default;
 };
 
-}  // namespace mister::reactor
+}

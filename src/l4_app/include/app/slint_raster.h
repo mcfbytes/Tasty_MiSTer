@@ -19,8 +19,12 @@ public:
 
 private:
     bool open_(const HdTheme& theme, const HdLayout& layout) override;
-    HdRect render_(const PageDescription& page, const HdBadgeView& badge,
-                   std::span<std::uint16_t> panel, std::uint32_t stride_px) override;
+    HdRect render_(
+        const PageDescription& page,
+        const HdBadgeView& badge,
+        std::span<std::uint16_t> panel,
+        std::uint32_t stride_px
+    ) override;
     void close_() override;
     void relayout_(const HdLayout& layout) override;
 
@@ -28,4 +32,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace mister::app
+}

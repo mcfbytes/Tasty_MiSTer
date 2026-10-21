@@ -23,7 +23,7 @@ inline constexpr std::uint32_t kRing = 1u << 18;
 inline constexpr std::uint32_t kTick = 1u << 19;
 inline constexpr std::uint32_t kClasses = kBlk | kFifo | kRing | kTick;
 inline constexpr std::uint32_t kReserved = 0xFFF0'0000u;
-}  // namespace cause_word
+}
 
 struct CauseDecode {
     Cause cause = Cause::None;
@@ -32,15 +32,20 @@ struct CauseDecode {
 };
 
 constexpr CauseDecode decode_cause_checked(std::uint32_t word) noexcept {
-    if ((word & cause_word::kReserved) != 0u) return {Cause::None, true};
+    if ((word & cause_word::kReserved) != 0u)
+        return {Cause::None, true};
     const std::uint32_t classes = word & cause_word::kClasses;
     if (classes == 0u) {
         return {Cause::None, (word & cause_word::kPayload) != 0u};
     }
-    if ((classes & (classes - 1u)) != 0u) return {Cause::None, true};
-    if (classes == cause_word::kFifo) return {Cause::Fifo, false};
-    if (classes == cause_word::kBlk) return {Cause::Blk, false};
-    if (classes == cause_word::kRing) return {Cause::Ring, false};
+    if ((classes & (classes - 1u)) != 0u)
+        return {Cause::None, true};
+    if (classes == cause_word::kFifo)
+        return {Cause::Fifo, false};
+    if (classes == cause_word::kBlk)
+        return {Cause::Blk, false};
+    if (classes == cause_word::kRing)
+        return {Cause::Ring, false};
     return {Cause::CoreTick, false};
 }
 
@@ -53,7 +58,10 @@ class Notifier {
 
 public:
     [[nodiscard]] static Ex<Notifier> doorbell_adopt(
-        os::UioLineRef uio, const hal::RegisterWindow<hal::CauseReg>* cause, Cause klass);
+        os::UioLineRef uio,
+        const hal::RegisterWindow<hal::CauseReg>* cause,
+        Cause klass
+    );
 
     [[nodiscard]] static Ex<Notifier> ticker(std::chrono::nanoseconds period);
 
@@ -69,15 +77,23 @@ public:
     CauseSet delivers() const noexcept { return CauseSet{delivers_}; }
 
     CauseDecode drain_checked();
+
     Cause drain() { return drain_checked().cause; }
 
 private:
     enum class Kind : std::uint8_t { Doorbell, Ticker, Frame, Test };
     using CauseWindow = hal::RegisterWindow<hal::CauseReg>;
+
     Notifier(Kind k, UniqueFd fd, Cause delivers)
-        : kind_(k), fd_(static_cast<UniqueFd&&>(fd)), delivers_(delivers) {}
+        : kind_(k),
+          fd_(static_cast<UniqueFd&&>(fd)),
+          delivers_(delivers) {}
+
     Notifier(os::UioLineRef uio, infra::OptRef<const CauseWindow> cause, Cause klass)
-        : kind_(Kind::Doorbell), uio_(uio), cause_(cause), delivers_(klass) {}
+        : kind_(Kind::Doorbell),
+          uio_(uio),
+          cause_(cause),
+          delivers_(klass) {}
 
     Kind kind_;
     UniqueFd fd_;
@@ -86,4 +102,4 @@ private:
     Cause delivers_ = Cause::None;
 };
 
-}  // namespace mister::reactor
+}

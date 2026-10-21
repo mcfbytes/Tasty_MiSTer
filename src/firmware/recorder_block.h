@@ -35,8 +35,11 @@ class RecorderBlock {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
-    RecorderBlock(const BootParts& plat, DeviceBlock& device,
-                  const app::ReplayStatusCell& replay_status);
+    RecorderBlock(
+        const BootParts& plat,
+        DeviceBlock& device,
+        const app::ReplayStatusCell& replay_status
+    );
     RecorderBlock(const RecorderBlock&) = delete;
     RecorderBlock& operator=(const RecorderBlock&) = delete;
 
@@ -44,7 +47,8 @@ public:
 
 private:
     [[nodiscard]] static std::optional<hal::ScalerBuffers> map_scaler_buffers(
-        std::span<const hal::PhysRegion> regions);
+        std::span<const hal::PhysRegion> regions
+    );
 
 public:
     app::RecControlCell rec_control_{};
@@ -72,4 +76,4 @@ public:
     app::RecorderControl recorder_;
 };
 
-}  // namespace mister::fw
+}

@@ -22,4 +22,4 @@ public:
     void text(int vt) noexcept override;
 };
 
-}  // namespace mister::os
+}

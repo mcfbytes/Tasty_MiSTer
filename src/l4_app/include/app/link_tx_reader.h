@@ -15,7 +15,8 @@ inline constexpr std::size_t kLinkTxSlabBytes = 256;
 class ILinkTxReader {
 public:
     [[nodiscard]] virtual std::span<const std::uint8_t> bytes(
-        proto::TxSlabId id) const noexcept = 0;
+        proto::TxSlabId id
+    ) const noexcept = 0;
     [[nodiscard]] virtual const InternedFile* file(proto::FileId id) const noexcept = 0;
 
 protected:
@@ -25,4 +26,4 @@ protected:
     ILinkTxReader& operator=(const ILinkTxReader&) = default;
 };
 
-}  // namespace mister::app
+}

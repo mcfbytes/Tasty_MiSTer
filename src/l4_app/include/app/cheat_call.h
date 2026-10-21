@@ -14,4 +14,4 @@ struct CheatCall {
     bool fio_held = false;
 };
 
-}  // namespace mister::app
+}

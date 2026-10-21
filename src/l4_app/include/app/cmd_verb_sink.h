@@ -36,4 +36,4 @@ protected:
     ICmdVerbSink& operator=(const ICmdVerbSink&) = default;
 };
 
-}  // namespace mister::app
+}

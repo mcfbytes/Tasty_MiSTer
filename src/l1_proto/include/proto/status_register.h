@@ -30,6 +30,7 @@ public:
     [[nodiscard]] Ex<void> set_field(const char* spec, std::uint32_t value);
 
     void fence_with(IResetFence* fence) noexcept { fence_ = infra::opt_ref_of(fence); }
+
     [[nodiscard]] Ex<void> flush(hal::ISpiTransport& link);
 
     bool dirty() const noexcept { return dirty_; }
@@ -45,4 +46,4 @@ private:
     infra::OptRef<IResetFence> fence_{};
 };
 
-}  // namespace mister::proto
+}

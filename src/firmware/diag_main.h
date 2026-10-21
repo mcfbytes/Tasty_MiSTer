@@ -23,24 +23,34 @@ public:
     static constexpr SeatTag kSeat = SeatTag::Diag;
 
     DiagMain(DiagSampler& sampler, xthread::ParkFds fds) noexcept
-        : sampler_(sampler), wake_(fds.wake()), stop_(std::move(fds).take_stop()),
+        : sampler_(sampler),
+          wake_(fds.wake()),
+          stop_(std::move(fds).take_stop()),
           park_(wake_, stop_) {}
+
     DiagMain(const DiagMain&) = delete;
     DiagMain& operator=(const DiagMain&) = delete;
     DiagMain(DiagMain&&) = delete;
     DiagMain& operator=(DiagMain&&) = delete;
 
     void start() noexcept;
+
     void stop() noexcept { stop_.request(); }
 
     void serve() noexcept;
+
     [[nodiscard]] bool idle() const noexcept { return true; }
+
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
     [[nodiscard]] int park_ms() const noexcept { return static_cast<int>(rest_ms_); }
+
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept { return false; }
+
     [[nodiscard]] bool pause_pending() const noexcept { return false; }
+
     void settle() noexcept;
 
 private:
@@ -55,4 +65,4 @@ private:
 
 static_assert(xthread::SeatBody<DiagMain>);
 
-}  // namespace mister::fw
+}

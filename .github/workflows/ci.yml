@@ -47,22 +47,43 @@ jobs:
           echo "TASTY_TOOLCHAIN_ROOT=$HOME/toolchains/armv7-eabihf--glibc--stable-2026.08-1" >> "$GITHUB_ENV"
       - name: Static deps
         run: python3 src/tools/build-static-deps.py
+      # The static Slint archive is built once per Slint version, patch set and recipe, then reused.
+      - name: Static Slint (cached)
+        id: slint
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/toolchains/armv7-eabihf--glibc--stable-2026.08-1/opt/slint
+          key: slint-1.18.1-${{ hashFiles('src/tools/build-static-slint.sh', 'src/tools/slint/*.patch', 'cmake/arm-linux-gnueabihf-static.cmake') }}
+      - name: Static Slint (build)
+        if: steps.slint.outputs.cache-hit != 'true'
+        run: src/tools/build-static-slint.sh
       - name: Configure
         run: cmake --preset armhf-static -DTASTY_TOOLCHAIN_ROOT="$TASTY_TOOLCHAIN_ROOT" -DTASTY_STATIC_DEPS="$TASTY_TOOLCHAIN_ROOT/opt"
       - name: Build
         run: cmake --build --preset armhf-static
+      - name: Static check
+        run: |
+          READELF="$TASTY_TOOLCHAIN_ROOT/bin/arm-buildroot-linux-gnueabihf-readelf"
+          b=build/armhf-static/src/firmware/MiSTer
+          if "$READELF" -d "$b" | grep -q NEEDED || "$READELF" -l "$b" | grep -q INTERP; then
+            echo "$b is not static" >&2; exit 1
+          fi
+      # The release binary, shipped as `tasty`.
       - name: Strip
         run: |
-          BIN=build/armhf-static/src/firmware/tasty
+          BIN=build/armhf-static/src/firmware/MiSTer
           STRIP="$TASTY_TOOLCHAIN_ROOT/bin/arm-buildroot-linux-gnueabihf-strip"
           mkdir -p dist dist-debug
           cp "$BIN" dist-debug/tasty-armhf-static-debug
           "$STRIP" -o dist/tasty "$BIN"
+          (cd dist && sha256sum tasty >tasty.sha256)
           echo "stripped $(stat -c%s dist/tasty) bytes (unstripped $(stat -c%s dist-debug/tasty-armhf-static-debug))"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tasty-armhf-static
-          path: dist/tasty
+          path: |
+            dist/tasty
+            dist/tasty.sha256
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tasty-armhf-static-debug
@@ -82,5 +103,7 @@ jobs:
           path: dist
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          files: dist/tasty
+          files: |
+            dist/tasty
+            dist/tasty.sha256
           generate_release_notes: true

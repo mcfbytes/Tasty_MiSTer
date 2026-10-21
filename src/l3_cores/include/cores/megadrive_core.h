@@ -11,6 +11,7 @@
 #include "cores/pcm_source.h"
 #include "cores/pcm_wire_rows.h"
 #include "cores/stream_load.h"
+#include "cores/stream_tx_record.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 
@@ -38,23 +39,34 @@ public:
     [[nodiscard]] Ex<proto::SessionParams> stream_opening(IoIndex index) override;
     void stream_closed(const StreamLoadEnd& end) noexcept override;
 
-    [[nodiscard]] std::uint64_t bytes_sent() const noexcept { return bytes_sent_; }
+    [[nodiscard]] std::uint64_t bytes_sent() const noexcept { return tx_.bytes(); }
+
     [[nodiscard]] std::uint32_t transfers() const noexcept { return transfers_; }
+
     [[nodiscard]] std::uint32_t status_reads() const noexcept { return status_reads_; }
+
     [[nodiscard]] std::uint32_t acks() const noexcept { return acks_; }
+
     [[nodiscard]] std::uint32_t exchanges() const noexcept { return exchanges_; }
+
     [[nodiscard]] std::uint32_t wire_faults() const noexcept { return wire_faults_; }
+
     [[nodiscard]] std::uint32_t feed_arms() const noexcept { return feed_arms_; }
+
     [[nodiscard]] std::uint32_t feed_refusals() const noexcept { return feed_refusals_; }
 
     [[nodiscard]] std::uint32_t feed_deferrals() const noexcept { return feed_deferrals_; }
+
     [[nodiscard]] bool feed_rearm_pending() const noexcept { return feed_rearm_pending_; }
 
     [[nodiscard]] std::uint32_t play_refusals() const noexcept { return play_refusals_; }
+
     [[nodiscard]] std::uint32_t ack_timeouts() const noexcept { return ack_timeouts_; }
 
     [[nodiscard]] bool ack_pending() const noexcept { return ack_pending_; }
+
     [[nodiscard]] std::uint8_t current_track() const noexcept { return current_track_; }
+
     [[nodiscard]] bool paused() const noexcept { return paused_; }
 
 private:
@@ -68,10 +80,15 @@ private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     void on_set_pending_file_ext(std::string_view ext) noexcept override;
     void on_set_pending_file_path(std::string_view path) noexcept override;
+
     [[nodiscard]] IStreamLoad* on_stream_load() noexcept override { return this; }
+
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
-    [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return bytes_sent_; }
-    [[nodiscard]] std::uint32_t on_last_tx_crc() const noexcept override { return tx_crc_; }
+
+    [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return tx_.bytes(); }
+
+    [[nodiscard]] std::uint32_t on_last_tx_crc() const noexcept override { return tx_.crc(); }
+
     [[nodiscard]] IPcmWireRows* on_pcm_wire_rows() noexcept override { return this; }
 
     void service_pcm_tick() noexcept override;
@@ -90,10 +107,8 @@ private:
 
     void answer_no_play_() noexcept;
 
-    FixedStr<8, StrFit::Clip> ext_{};
+    StreamTxRecord tx_;
     FixedStr<1024, StrFit::Clip> path_{};
-    std::uint64_t bytes_sent_ = 0;
-    std::uint32_t tx_crc_ = 0;
     std::uint32_t transfers_ = 0;
     std::uint32_t status_reads_ = 0;
     std::uint32_t acks_ = 0;
@@ -120,4 +135,4 @@ private:
     std::uint32_t rearm_ticks_ = 0;
 };
 
-}  // namespace mister::cores
+}

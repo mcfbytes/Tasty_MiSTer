@@ -32,8 +32,10 @@ inline constexpr std::array<LogKindRow, infra::ordinal(LogRec::Kind::kCount)> kL
     {LogRec::Kind::DoorbellBound, LogSev::info},
     {LogRec::Kind::DoorbellPolling, LogSev::warn},
 }};
-static_assert(infra::rows_are_ordinal(kLogKindRows),
-              "kLogKindRows: exactly one row per LogRec::Kind, in enumerator order");
+static_assert(
+    infra::rows_are_ordinal(kLogKindRows),
+    "kLogKindRows: exactly one row per LogRec::Kind, in enumerator order"
+);
 
 [[nodiscard]] constexpr LogSev sev_of(LogRec::Kind k) noexcept {
     return kLogKindRows[infra::ordinal(k)].sev;
@@ -74,4 +76,4 @@ private:
     Counter loss_[infra::ordinal(LogRec::Kind::kCount)];
 };
 
-}  // namespace mister::xthread
+}

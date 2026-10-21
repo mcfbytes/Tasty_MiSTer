@@ -46,29 +46,48 @@ public:
     StorageService() noexcept : data_(xthread::Polled{}), ctl_(xthread::Polled{}) {}
 
     explicit StorageService(xthread::WakeFlag& io_wake) noexcept : data_(io_wake), ctl_(io_wake) {}
+
     ~StorageService() override;
 
     struct Work {
         std::span<std::uint8_t> data;
-        proto::StorageCompletion& answer;
+        proto::StorageCompletion answer{};
         infra::OptRef<IStorageBackend> backend{};
         std::uint32_t gen = 0;
         std::span<const std::byte> order{};
         bool performed = false;
     };
 
-    void on(const proto::StorageRequest::Read& a, const proto::StorageRequest::Head& h,
-            Work& w) noexcept;
-    void on(const proto::StorageRequest::Write& a, const proto::StorageRequest::Head& h,
-            Work& w) noexcept;
-    void on(const proto::StorageRequest::Create& a, const proto::StorageRequest::Head& h,
-            Work& w) noexcept;
-    void on(const proto::StorageRequest::Flush& a, const proto::StorageRequest::Head& h,
-            Work& w) noexcept;
-    void on(const proto::StorageRequest::Attach& a, const proto::StorageRequest::Head& h,
-            Work& w) noexcept;
-    void on(const proto::StorageRequest::Detach& a, const proto::StorageRequest::Head& h,
-            Work& w) noexcept;
+    void on(
+        const proto::StorageRequest::Read& a,
+        const proto::StorageRequest::Head& h,
+        Work& w
+    ) noexcept;
+    void on(
+        const proto::StorageRequest::Write& a,
+        const proto::StorageRequest::Head& h,
+        Work& w
+    ) noexcept;
+    void on(
+        const proto::StorageRequest::Create& a,
+        const proto::StorageRequest::Head& h,
+        Work& w
+    ) noexcept;
+    void on(
+        const proto::StorageRequest::Flush& a,
+        const proto::StorageRequest::Head& h,
+        Work& w
+    ) noexcept;
+    void on(
+        const proto::StorageRequest::Attach& a,
+        const proto::StorageRequest::Head& h,
+        Work& w
+    ) noexcept;
+    void on(
+        const proto::StorageRequest::Detach& a,
+        const proto::StorageRequest::Head& h,
+        Work& w
+    ) noexcept;
     void misrouted(const proto::StorageRequest& r, Work& w) noexcept;
 
     void serve() noexcept override;
@@ -84,13 +103,20 @@ public:
 
     [[nodiscard]] proto::StorageSeq submit(const proto::StorageRequest&) noexcept override;
     [[nodiscard]] std::optional<proto::StorageCompletion> reap() noexcept override;
-    [[nodiscard]] std::span<const std::uint8_t> half(proto::SlotIndex,
-                                                     proto::ArenaHalf) const noexcept override;
-    [[nodiscard]] std::span<std::uint8_t> half_mut(proto::SlotIndex,
-                                                   proto::ArenaHalf) noexcept override;
+    [[nodiscard]] std::span<const std::uint8_t> half(
+        proto::SlotIndex,
+        proto::ArenaHalf
+    ) const noexcept override;
+    [[nodiscard]] std::span<std::uint8_t> half_mut(
+        proto::SlotIndex,
+        proto::ArenaHalf
+    ) noexcept override;
 
-    [[nodiscard]] bool stage_backend(proto::SlotIndex, IStorageBackend&,
-                                     std::span<const std::byte> order) noexcept override;
+    [[nodiscard]] bool stage_backend(
+        proto::SlotIndex,
+        IStorageBackend&,
+        std::span<const std::byte> order
+    ) noexcept override;
     [[nodiscard]] bool release_slot(proto::SlotIndex) noexcept override;
     [[nodiscard]] bool quiesced() const noexcept override;
 
@@ -103,8 +129,10 @@ private:
 
     void perform_(const proto::StorageRequest& ask, Work& w) noexcept;
 
-    [[nodiscard]] infra::OptRef<IStorageBackend> live_(proto::SlotIndex slot,
-                                                       const Work& w) const noexcept;
+    [[nodiscard]] infra::OptRef<IStorageBackend> live_(
+        proto::SlotIndex slot,
+        const Work& w
+    ) const noexcept;
 
     void finish_(proto::StorageStatus st, Work& w, const proto::StorageCompletion& c) noexcept;
     Data data_;
@@ -120,11 +148,13 @@ private:
         std::uint32_t gen[kSlots]{};
         bool owned = false;
     };
+
     Rt rt_{};
 
     struct Io {
         std::uint32_t served[kSlots]{};
     };
+
     Io io_{};
 
     std::atomic<std::uint32_t> submits_{0};
@@ -136,8 +166,10 @@ private:
     std::atomic<std::uint32_t> abandoned_{0};
 };
 
-static_assert(sizeof(StorageService) > 512u * 1024u,
-              "the arena dominates; a later pass that quadruples the halves argues for it at "
-              "the point of change");
+static_assert(
+    sizeof(StorageService) > 512u * 1024u,
+    "the arena dominates; a later pass that quadruples the halves argues for it at "
+    "the point of change"
+);
 
-}  // namespace mister::svc
+}

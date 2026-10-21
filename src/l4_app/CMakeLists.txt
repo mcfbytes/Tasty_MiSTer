@@ -16,6 +16,7 @@ add_library(mister_app STATIC
   src/companion_host.cpp
   src/companion_walk.cpp
   src/config_apply.cpp
+  src/content_pick.cpp
   src/core_frame_counter.cpp
   src/core_init.cpp
   src/core_builder.cpp
@@ -33,6 +34,7 @@ add_library(mister_app STATIC
   src/file_tx_pieces.cpp
   src/frame_arena.cpp
   src/frame_copier.cpp
+  src/frame_numbering.cpp
   src/frame_hasher.cpp
   src/hd_crumb.cpp
   src/hd_dirty_ledger.cpp
@@ -47,9 +49,12 @@ add_library(mister_app STATIC
   src/info_decoder.cpp
   src/ini_parse.cpp
   src/input_decode.cpp
+  src/joy_level_emitter.cpp
+  src/mouse_divider.cpp
   src/input_main.cpp
   src/input_pipeline.cpp
   src/input_wire.cpp
+  src/intern_exact.cpp
   src/launcher_host.cpp
   src/launcher_key_bridge.cpp
   src/launcher_main.cpp
@@ -57,16 +62,25 @@ add_library(mister_app STATIC
   src/link_binder.cpp
   src/link_router.cpp
   src/link_session.cpp
+  src/nvram_upload.cpp
+  src/held_transfer.cpp
+  src/boot_arm.cpp
+  src/core_ini.cpp
+  src/reboot_answer.cpp
   src/load_key.cpp
   src/load_ladder.cpp
   src/load_walk.cpp
   src/manifest_ladder.cpp
   src/load_window.cpp
+  src/disk_relay.cpp
   src/mailbox_relay.cpp
   src/mgl.cpp
   src/mgl_pump.cpp
+  src/mount_queue.cpp
   src/name_config.cpp
+  src/negotiated_core.cpp
   src/osd_wire.cpp
+  src/owner_ladder.cpp
   src/pcm_main.cpp
   src/pcm_ring_feeder.cpp
   src/pending_load.cpp
@@ -81,7 +95,14 @@ add_library(mister_app STATIC
   src/recorder_control.cpp
   src/recorder_status.cpp
   src/remembered_path.cpp
+  src/hash_stage.cpp
+  src/play_refusal.cpp
   src/replay_feeder.cpp
+  src/replay_play.cpp
+  src/rom_hasher.cpp
+  src/run_stage.cpp
+  src/scan_stage.cpp
+  src/settle_stage.cpp
   src/replay_gate.cpp
   src/replay_status.cpp
   src/romset_alias_reader.cpp
@@ -95,6 +116,7 @@ add_library(mister_app STATIC
   src/screenshot_pump.cpp
   src/session_bindings.cpp
   src/session_machine.cpp
+  src/session_rows.cpp
   src/session_owner.cpp
   src/sidecar_writer.cpp
   src/spi_encoder.cpp
@@ -102,6 +124,8 @@ add_library(mister_app STATIC
   src/stream_io.cpp
   src/uart_mode.cpp
   src/uart_performer.cpp
+  src/adv7513_seat.cpp
+  src/video_ini.cpp
   src/video_pump.cpp
   src/video_wire.cpp
   src/window_job_service.cpp
@@ -161,6 +185,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/encode_status.h
   app/frame_arena.h
   app/frame_copier.h
+  app/frame_numbering.h
   app/frame_demand.h
   app/frame_hasher.h
   app/frame_stamp.h
@@ -170,6 +195,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/backdrop_job.h
   app/backdrop_sampler.h
   app/backdrop_scaler.h
+  app/bay_counts.h
   app/fb_view.h
   app/hd_dirty_ledger.h
   app/hd_flip_slot.h
@@ -197,6 +223,8 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/launcher_demand.h
   app/launcher_fb_ack.h
   app/launcher_host.h
+  app/intern_exact.h
+  app/launcher_latch.h
   app/launcher_key_bridge.h
   app/launcher_main.h
   app/launcher_profile.h
@@ -227,6 +255,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/mount_status_cell.h
   app/save_extent_cell.h
   app/core_init.h
+  app/core_option_cells.h
   app/core_window.h
   app/durable_write.h
   app/ini_key_edit.h
@@ -239,6 +268,10 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/park_receipt.h
   app/quiesce.h
   app/quiesce_ack.h
+  app/core_switch.h
+  app/slot_bindings.h
+  app/core_tenancy.h
+  app/held_transfer.h
   app/file_stream_service.h
   app/event_sink.h
   app/owner_tick.h
@@ -249,6 +282,10 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/device_table_channel.h
   app/input_build.h
   app/input_decode.h
+  app/input_decode_tally.h
+  app/joy_level_emitter.h
+  app/mouse_accumulator.h
+  app/mouse_divider.h
   app/input_main.h
   app/input_park.h
   app/input_emit.h
@@ -262,10 +299,13 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/name_config.h
   app/remembered_path.h
   app/osd_wire.h
+  app/ui_page_record.h
   app/path_text.h
   app/pcm_command.h
   app/pcm_ring_feeder.h
   app/mailbox_slot.h
+  app/disk_slot.h
+  app/disk_relay.h
   app/mailbox_relay.h
   app/companion_bind.h
   app/companion_host.h
@@ -281,7 +321,16 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/raw_key_edge.h
   app/rbf_resolve.h
   app/replay_control.h
+  app/hash_stage.h
+  app/play_refusal.h
   app/replay_feeder.h
+  app/replay_play.h
+  app/replay_stage.h
+  app/replay_wiring.h
+  app/rom_hasher.h
+  app/run_stage.h
+  app/scan_stage.h
+  app/settle_stage.h
   app/replay_gate.h
   app/replay_msg.h
   app/replay_ring.h
@@ -298,6 +347,10 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/identity_latch.h
   app/info_decoder.h
   app/rumble_relay.h
+  app/rung.h
+  app/rung_edges.h
+  app/rung_roster.h
+  app/window_tally.h
   app/ini_parse.h
   app/content_request.h
   app/file_bytes.h
@@ -329,6 +382,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/doorbell_lines.h
   app/session_identity.h
   app/session_machine.h
+  app/session_rows.h
   app/session_seats.h
   app/stream_io.h
   app/session_owner.h
@@ -342,405 +396,11 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/uart_modes.h
   app/uart_performer.h
   app/ui_request_ring.h
+  app/adv7513_seat.h
+  app/video_ini.h
   app/video_pump.h
+  app/video_pump_stats.h
+  app/video_geometry_record.h
   app/video_wire.h
 )
 
-if(TASTY_BUILD_TESTS)
-
-  tasty_unit_test(tasty_app_cheat_store_unit
-    NAME tasty.app_cheat_store
-    SOURCES tests/cheat_store_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_app_generic_cheats_unit
-    NAME tasty.app_generic_cheats
-    SOURCES tests/generic_cheats_unit.cpp
-    INCLUDES ${CMAKE_SOURCE_DIR}/tests
-    DEFINES TASTY_CONFSTR_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/fixtures/confstr"
-      TASTY_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/goldens"
-    LIBS mister_app mister_boards tasty_test_options
-    TIMEOUT 60
-    PROPERTIES RESOURCE_LOCK tmp-GAMEID)
-
-  tasty_unit_test(tasty_app_start_chain_cheats_unit
-    NAME tasty.app_start_chain_cheats
-    SOURCES tests/start_chain_cheats_unit.cpp
-    INCLUDES ${CMAKE_SOURCE_DIR}/tests
-    DEFINES TASTY_CONFSTR_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/confstr"
-      TASTY_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/goldens"
-    LIBS mister_app mister_boards tasty_test_options
-    TIMEOUT 60
-    PROPERTIES RESOURCE_LOCK tmp-GAMEID)
-  target_include_directories(tasty_app_cheat_store_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-
-  add_executable(tasty_launcher_fake_child tests/launcher_fake_child.cpp)
-  set(TASTY_FAKE_LAUNCHER_PATH "$<TARGET_FILE:tasty_launcher_fake_child>")
-
-  if(CMAKE_CROSSCOMPILING AND CMAKE_CROSSCOMPILING_EMULATOR)
-    set(_tasty_emu "${CMAKE_CROSSCOMPILING_EMULATOR}")
-    list(TRANSFORM _tasty_emu PREPEND "'")
-    list(TRANSFORM _tasty_emu APPEND "'")
-    list(JOIN _tasty_emu " " _tasty_emu)
-    set(TASTY_FAKE_LAUNCHER_PATH "${CMAKE_CURRENT_BINARY_DIR}/launcher_fake_child.sh")
-    file(GENERATE OUTPUT "${TASTY_FAKE_LAUNCHER_PATH}"
-      CONTENT "#!/bin/sh\nexec ${_tasty_emu} '$<TARGET_FILE:tasty_launcher_fake_child>' \"$@\"\n"
-      FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-                       WORLD_READ WORLD_EXECUTE)
-  endif()
-  tasty_unit_test(tasty_launcher_host_unit
-    NAME tasty.launcher_host
-    SOURCES tests/launcher_host_unit.cpp
-    DEFINES TASTY_FAKE_LAUNCHER="${TASTY_FAKE_LAUNCHER_PATH}"
-    LIBS mister_app tasty_test_options
-    TIMEOUT 120)
-  add_dependencies(tasty_launcher_host_unit tasty_launcher_fake_child)
-
-  tasty_unit_test(tasty_scanout_relay_unit
-    NAME tasty.scanout_relay
-    SOURCES tests/scanout_relay_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_launcher_ui_unit
-    NAME tasty.launcher_ui
-    SOURCES tests/launcher_ui_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_app_hd_theme_unit
-    NAME tasty.app_hd_theme
-    SOURCES tests/hd_theme_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_app_ini_key_edit_unit
-    NAME tasty.app_ini_key_edit
-    SOURCES tests/ini_key_edit_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_app_hd_window_unit
-    NAME tasty.app_hd_window
-    SOURCES tests/hd_window_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_hd_tick_pacer_unit
-    NAME tasty.hd_tick_pacer
-    SOURCES tests/hd_tick_pacer_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_hd_renderer_unit
-    NAME tasty.hd_renderer
-    SOURCES tests/hd_renderer_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_hd_dirty_ledger_unit
-    NAME tasty.hd_dirty_ledger
-    SOURCES tests/hd_dirty_ledger_unit.cpp
-    LIBS mister_app tasty_test_options)
-  if(TASTY_WITH_HDOSD)
-    tasty_unit_test(hd_slint_smoke
-      NAME hd_slint_smoke
-      SOURCES tests/hd_slint_smoke.cpp
-      LIBS mister_app tasty_test_options)
-  endif()
-  tasty_unit_test(tasty_backdrop_unit
-    NAME tasty.backdrop_unit
-    SOURCES tests/backdrop_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_pause_badge_unit
-    NAME tasty.pause_badge_unit
-    SOURCES tests/pause_badge_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_app_unit
-    NAME tasty.app_unit
-    SOURCES tests/app_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_link_channel_unit
-    NAME tasty.link_channel
-    SOURCES tests/link_channel_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_ring_slab_unit
-    NAME tasty.ring_slab
-    SOURCES tests/ring_slab_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_session_bindings_unit
-    NAME tasty.session_bindings
-    SOURCES tests/session_bindings_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_link_router_unit
-    NAME tasty.link_router
-    SOURCES tests/link_router_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_link_op_facts_unit
-    NAME tasty.link_op_facts
-    SOURCES tests/link_op_facts_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_link_op_unrouted_on_probe
-    NAME tasty.link_op_unrouted_on_probe
-    SOURCES tests/link_op_unrouted_on_probe.cpp
-    EXCLUDE_FROM_ALL
-    LIBS mister_app tasty_test_options
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target tasty_link_op_unrouted_on_probe
-    LABELS compile_probe
-    TIMEOUT 120
-    PROPERTIES PASS_REGULAR_EXPRESSION
-      "an on\\(\\) overload for an alternative this sink is not routed"
-      RUN_SERIAL
-      TRUE)
-
-  tasty_unit_test(tasty_spi_encoder_unit
-    NAME tasty.spi_encoder
-    SOURCES tests/spi_encoder_unit.cpp
-    INCLUDES ${CMAKE_SOURCE_DIR}/tests
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_core_init_unit
-    NAME tasty.core_init
-    SOURCES tests/core_init_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_app_fabric_crossing
-    NAME tasty.app_fabric_crossing
-    SOURCES tests/fabric_crossing_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 120)
-
-  tasty_unit_test(tasty_bitstream_programmer_unit
-    NAME tasty.bitstream_programmer
-    SOURCES tests/bitstream_programmer_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_app_idle_blank
-    NAME tasty.app_idle_blank
-    SOURCES tests/idle_blank_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_app_binder_unit
-    NAME tasty.app_binder
-    SOURCES tests/binder_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-  if(NOT CMAKE_CROSSCOMPILING)
-    set_tests_properties(tasty.app_binder PROPERTIES FAIL_REGULAR_EXPRESSION "NOT CHECKED:")
-  endif()
-
-  tasty_unit_test(tasty_app_core_builder_unit
-    NAME tasty.app_core_builder
-    SOURCES tests/core_builder_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-  if(NOT CMAKE_CROSSCOMPILING)
-    set_tests_properties(tasty.app_core_builder PROPERTIES FAIL_REGULAR_EXPRESSION "NOT CHECKED:")
-  endif()
-
-  tasty_unit_test(tasty_app_info_decoder_unit
-    NAME tasty.app_info_decoder
-    SOURCES tests/info_decoder_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_rumble_relay_unit
-    NAME tasty.rumble_relay_unit
-    SOURCES tests/rumble_relay_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_app_mailbox_relay_unit
-    NAME tasty.app_mailbox_relay
-    SOURCES tests/mailbox_relay_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_app_pcm_feeder_unit
-    NAME tasty.app_pcm_feeder
-    SOURCES tests/pcm_feeder_unit.cpp
-    LIBS mister_app tasty_test_options Threads::Threads
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_app_durable_write_service_unit
-    NAME tasty.app_durable_write_service
-    SOURCES tests/durable_write_service_unit.cpp
-    LIBS mister_app tasty_test_options Threads::Threads
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_app_window_job_service_unit
-    NAME tasty.app_window_job_service
-    SOURCES tests/window_job_service_unit.cpp
-    INCLUDES ${CMAKE_SOURCE_DIR}/tests
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_app_save_state_attach_unit
-    NAME tasty.app_save_state_attach
-    SOURCES tests/save_state_attach_unit.cpp
-    INCLUDES ${CMAKE_SOURCE_DIR}/tests
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_app_file_stream_service_unit
-    NAME tasty.app_file_stream_service
-    SOURCES tests/file_stream_service_unit.cpp
-    LIBS mister_app tasty_test_options Threads::Threads
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_app_cmd_unit
-    NAME tasty.app_cmd
-    SOURCES tests/cmd_unit.cpp
-    INCLUDES ${CMAKE_SOURCE_DIR}/tests
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  find_package(Threads REQUIRED)
-
-  tasty_unit_test(tasty_input_wire_unit
-    NAME tasty.input_wire_unit
-    SOURCES tests/input_wire_unit.cpp
-    LIBS mister_app tasty_test_options Threads::Threads
-    TIMEOUT 120)
-
-  tasty_unit_test(tasty_device_table_channel_unit
-    NAME tasty.device_table_channel_unit
-    SOURCES tests/device_table_channel_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_osd_wire_unit
-    NAME tasty.osd_wire_unit
-    SOURCES tests/osd_wire_unit.cpp
-    LIBS mister_app tasty_test_options Threads::Threads
-    TIMEOUT 120)
-
-  tasty_unit_test(tasty_scaler_frame_source_unit
-    NAME tasty.scaler_frame_source
-    SOURCES tests/scaler_frame_source_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_start_chain_unit
-    NAME tasty.start_chain
-    SOURCES tests/start_chain_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_session_owner_unit
-    NAME tasty.session_owner
-    SOURCES tests/session_owner_unit.cpp
-    DEFINES TASTY_CONFSTR_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/confstr"
-    LIBS mister_app tasty_test_options
-    PROPERTIES RESOURCE_LOCK tmp-GAMEID)
-  target_include_directories(tasty_session_owner_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-
-  tasty_unit_test(tasty_app_load_walk_unit
-    NAME tasty.app_load_walk
-    SOURCES tests/load_walk_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 120)
-  target_include_directories(tasty_app_load_walk_unit SYSTEM PRIVATE ${TASTY_MINIZIP_INCLUDE_DIR})
-
-  tasty_unit_test(tasty_app_neogeo_rows_unit
-    NAME tasty.app_neogeo_rows
-    SOURCES tests/neogeo_rows_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_pending_load_unit
-    NAME tasty.pending_load
-    SOURCES tests/pending_load_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_romset_alias_reader_unit
-    NAME tasty.romset_alias_reader
-    SOURCES tests/romset_alias_reader_unit.cpp
-    DEFINES TASTY_NEOGEO_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/neogeo"
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_store_unit
-    NAME tasty.store_unit
-    SOURCES tests/store_unit.cpp
-    LIBS mister_app tasty_test_options)
-
-  tasty_unit_test(tasty_app_recent_games_unit
-    NAME tasty.app_recent_games
-    SOURCES tests/recent_games_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_app_played_history_unit
-    NAME tasty.app_played_history
-    SOURCES tests/played_history_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_uart_proc_unit
-    NAME tasty.uart_proc
-    SOURCES tests/uart_proc_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60
-    PROPERTIES RESOURCE_LOCK tmp-uart-handoffs)
-
-  tasty_unit_test(tasty_mgl_pump_unit
-    NAME tasty.mgl_pump
-    SOURCES tests/mgl_pump_unit.cpp
-    LIBS mister_app tasty_test_options
-    TIMEOUT 60)
-
-  tasty_unit_test(tasty_app_session
-    NAME tasty.app_session
-    SOURCES tests/app_session.cpp
-      tests/session_cd_ladders.cpp
-      tests/session_goldens.cpp
-      tests/session_lifecycle.cpp
-      tests/session_long_wait.cpp
-      tests/session_manifest.cpp
-      tests/session_mount_save.cpp
-      tests/session_nvram_blank.cpp
-      tests/session_pcm_msu.cpp
-      tests/session_psx_menu.cpp
-      tests/session_recovery.cpp
-      tests/session_rt_drain.cpp
-      tests/session_switch_main.cpp
-      tests/session_window_n64.cpp
-    INCLUDES ${CMAKE_SOURCE_DIR}/tests
-    DEFINES TASTY_L4_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/src"
-      TASTY_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/goldens"
-      TASTY_CONFSTR_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/confstr"
-    LIBS mister_app mister_boards tasty_test_options
-    TIMEOUT 60
-    PROPERTIES RESOURCE_LOCK tmp-GAMEID)
-  set_source_files_properties(tests/session_switch_main.cpp PROPERTIES COMPILE_OPTIONS -Wno-array-bounds)
-
-  file(GLOB tasty_generic_sweep_sources CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/tests/generic_sweep_*.cpp")
-  list(SORT tasty_generic_sweep_sources)
-  foreach(tasty_sweep_src IN LISTS tasty_generic_sweep_sources)
-    get_filename_component(tasty_sweep_family "${tasty_sweep_src}" NAME_WE)
-    string(REGEX REPLACE "^generic_sweep_" "" tasty_sweep_family "${tasty_sweep_family}")
-    tasty_unit_test(tasty_app_generic_sweep_${tasty_sweep_family}_unit
-      NAME tasty.app_generic_sweep_${tasty_sweep_family}
-      SOURCES tests/generic_sweep_${tasty_sweep_family}.cpp
-      INCLUDES ${CMAKE_SOURCE_DIR}/tests
-      DEFINES TASTY_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/goldens"
-        TASTY_CONFSTR_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/confstr"
-      LIBS mister_app mister_boards tasty_test_options
-      TIMEOUT 60
-      PROPERTIES RESOURCE_LOCK tmp-GAMEID)
-  endforeach()
-
-  tasty_unit_test(tasty_corestate_via_supervisor_probe
-    NAME tasty.app_corestate_redef
-    SOURCES tests/corestate_via_supervisor_probe.cpp
-    EXCLUDE_FROM_ALL
-    LIBS mister_app tasty_test_options
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target tasty_corestate_via_supervisor_probe
-    LABELS compile_probe
-    TIMEOUT 120
-    PROPERTIES WILL_FAIL
-      TRUE
-
-      RUN_SERIAL
-      TRUE)
-endif()

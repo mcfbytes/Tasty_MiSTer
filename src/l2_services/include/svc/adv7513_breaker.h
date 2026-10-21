@@ -24,6 +24,7 @@ public:
     };
 
     explicit I2cBreaker(II2cAdapter& inner) noexcept : inner_(&inner) {}
+
     I2cBreaker(const I2cBreaker&) = delete;
     I2cBreaker& operator=(const I2cBreaker&) = delete;
 
@@ -33,14 +34,19 @@ public:
     [[nodiscard]] Ex<void> write(std::uint8_t addr, std::uint8_t reg, std::uint8_t val) override;
 
     void reset() noexcept;
+
     void hold() noexcept { open_ = true; }
 
     bool tripped() const noexcept { return open_; }
+
     std::uint32_t failures() const noexcept { return failures_; }
+
     std::uint32_t trips() const noexcept { return trips_; }
+
     std::uint32_t refused() const noexcept { return refused_; }
 
     const Failure& first() const noexcept { return first_; }
+
     std::uint16_t last_errno() const noexcept { return last_errno_; }
 
 private:
@@ -56,4 +62,4 @@ private:
     std::uint16_t last_errno_ = 0;
 };
 
-}  // namespace mister::svc::adv7513
+}

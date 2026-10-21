@@ -50,10 +50,13 @@ public:
     [[nodiscard]] Ex<void> record(const Record& r);
 
     [[nodiscard]] bool loaded() const noexcept { return loaded_; }
+
     [[nodiscard]] std::span<const Record> records() const noexcept { return records_; }
 
     [[nodiscard]] std::uint32_t loads() const noexcept { return loads_; }
+
     [[nodiscard]] std::uint32_t saves() const noexcept { return saves_; }
+
     [[nodiscard]] std::uint32_t errors() const noexcept { return errors_; }
 
     [[nodiscard]] std::uint32_t rejected() const noexcept { return rejected_; }
@@ -72,6 +75,7 @@ private:
         std::uint16_t version;
         std::uint16_t count;
     };
+
     struct Stored {
         std::int64_t unix_time;
         char core_image[kCoreImageCap];
@@ -81,10 +85,13 @@ private:
         std::uint8_t ioctl_index;
         char slot;
     };
+
     static_assert(sizeof(Header) == kHeaderBytes, "played.dat header size");
     static_assert(std::is_trivially_copyable_v<Stored>, "played.dat writes raw records");
-    static_assert(kPathCap == app::kPathMax + 1 && kCoreImageCap == app::kPathMax + 1,
-                  "played.dat path and image caps follow PathText");
+    static_assert(
+        kPathCap == app::kPathMax + 1 && kCoreImageCap == app::kPathMax + 1,
+        "played.dat path and image caps follow PathText"
+    );
 
     static_assert(sizeof(Stored) == kRecordBytes, "played.dat record size is the format");
 
@@ -93,9 +100,12 @@ private:
     }
 
     [[nodiscard]] static bool fields_fit(const Record& r) noexcept {
-        return r.core_image.size() < kCoreImageCap && r.core_name.size() < kCoreNameCap &&
-               r.path.size() < kPathCap && r.title.size() < kTitleCap;
+        return r.core_image.size() < kCoreImageCap
+            && r.core_name.size() < kCoreNameCap
+            && r.path.size() < kPathCap
+            && r.title.size() < kTitleCap;
     }
+
     [[nodiscard]] Ex<void> save_();
 
     const svc::Vfs* vfs_;
@@ -109,4 +119,4 @@ private:
     std::uint32_t clamped_ = 0;
 };
 
-}  // namespace mister::app
+}

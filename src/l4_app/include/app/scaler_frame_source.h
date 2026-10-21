@@ -38,14 +38,18 @@ public:
     ScalerFrameSource& operator=(const ScalerFrameSource&) = delete;
 
     [[nodiscard]] Ex<Frame> capture(bool scaled) override;
+
     [[nodiscard]] Counts counts() const noexcept override {
         TASTY_SEAT_BODY(ScalerFrameSource);
         return Counts{captures_, refusals(), torn_};
     }
 
     [[nodiscard]] std::uint32_t captures() const noexcept { return captures_; }
+
     [[nodiscard]] std::uint32_t torn() const noexcept { return torn_; }
+
     [[nodiscard]] std::uint32_t refusals() const noexcept;
+
     [[nodiscard]] std::uint32_t refusals(Refusal why) const noexcept {
         return refused_[static_cast<std::size_t>(why)];
     }
@@ -62,12 +66,15 @@ private:
     std::uint32_t refused_[kRefusalKinds] = {};
 };
 
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, ScalerFrameSource::kSeat).policy ==
-                         hal::SchedPolicy::Other;
-              }),
-              "the capture blocks; it cannot run under SCHED_FIFO");
-static_assert(ScalerFrameSource::kSeat == SeatTag::Diag,
-              "the drain that calls capture() is T-DIAG's; two seats would be two readers");
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::seat_of(m, ScalerFrameSource::kSeat).policy == hal::SchedPolicy::Other;
+    }),
+    "the capture blocks; it cannot run under SCHED_FIFO"
+);
+static_assert(
+    ScalerFrameSource::kSeat == SeatTag::Diag,
+    "the drain that calls capture() is T-DIAG's; two seats would be two readers"
+);
 
-}  // namespace mister::app
+}

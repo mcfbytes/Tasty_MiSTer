@@ -16,4 +16,4 @@ struct DirEntry {
     FileSize size{};
 };
 
-}  // namespace mister::svc
+}

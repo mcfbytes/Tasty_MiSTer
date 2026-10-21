@@ -34,7 +34,7 @@ std::size_t page_size() noexcept {
     return sz;
 }
 
-}  // namespace
+}
 
 [[nodiscard]] Ex<MappedRegs> map_registers(os::PhysAddr phys, std::size_t len) {
     if (len == 0) {
@@ -46,7 +46,8 @@ std::size_t page_size() noexcept {
     const os::PhysAddr aligned{phys.v - static_cast<std::uint32_t>(lead)};
 
     auto pages = os::MmioRegion::map(aligned, lead + len, os::MmioRegion::Attr::Device);
-    if (!pages) return std::unexpected(pages.error());
+    if (!pages)
+        return std::unexpected(pages.error());
     return MappedRegs{std::move(*pages), lead};
 }
 
@@ -65,8 +66,11 @@ std::size_t page_size() noexcept {
     return map_registers(os::PhysAddr{lw.phys.v + off.v}, len);
 }
 
-[[nodiscard]] Ex<MappedRegs> map_named(std::string_view uio_name, os::PhysAddr phys,
-                                       std::size_t len) {
+[[nodiscard]] Ex<MappedRegs> map_named(
+    std::string_view uio_name,
+    os::PhysAddr phys,
+    std::size_t len
+) {
     if (len == 0) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(phys)});
     }
@@ -78,33 +82,43 @@ std::size_t page_size() noexcept {
         if (w > 0 && static_cast<std::size_t>(w) < sizeof path) {
             const int fd = ::open(path, O_RDWR | O_CLOEXEC);
             if (fd >= 0) {
-                auto pages = os::MmioRegion::map_fd(fd, os::PhysAddr{0}, len,
-                                                    os::MmioRegion::Access::ReadWrite);
+                auto pages = os::MmioRegion::map_fd(
+                    fd,
+                    os::PhysAddr{0},
+                    len,
+                    os::MmioRegion::Access::ReadWrite
+                );
                 ::close(fd);
-                if (pages) return MappedRegs{std::move(*pages), 0, true};
+                if (pages)
+                    return MappedRegs{std::move(*pages), 0, true};
             }
         }
     }
 
     auto via_dev_mem = map_registers(phys, len);
-    if (!via_dev_mem) return std::unexpected(via_dev_mem.error());
+    if (!via_dev_mem)
+        return std::unexpected(via_dev_mem.error());
     via_dev_mem->via_uio = false;
     return via_dev_mem;
 }
 
 std::uint32_t regs_read(const volatile void* base, std::size_t byte_off) {
     return *reinterpret_cast<const volatile std::uint32_t*>(
-        reinterpret_cast<const volatile std::byte*>(base) + byte_off);
+        reinterpret_cast<const volatile std::byte*>(base) + byte_off
+    );
 }
 
 void regs_write(volatile void* base, std::size_t byte_off, std::uint32_t v) {
-    *reinterpret_cast<volatile std::uint32_t*>(reinterpret_cast<volatile std::byte*>(base) +
-                                               byte_off) = v;
+    *reinterpret_cast<volatile std::uint32_t*>(
+        reinterpret_cast<volatile std::byte*>(base) + byte_off
+    ) = v;
 }
 
-void regs_fence() noexcept { std::atomic_thread_fence(std::memory_order_seq_cst); }
+void regs_fence() noexcept {
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+}
 
-}  // namespace detail
+}
 
 namespace {
 
@@ -116,9 +130,11 @@ bool is_word_aligned(const std::byte* p) noexcept {
     return (reinterpret_cast<std::uintptr_t>(p) & 3u) == 0u;
 }
 
-bool is_power_of_two(std::size_t v) noexcept { return v != 0u && (v & (v - 1u)) == 0u; }
+bool is_power_of_two(std::size_t v) noexcept {
+    return v != 0u && (v & (v - 1u)) == 0u;
+}
 
-}  // namespace
+}
 
 namespace {
 
@@ -126,10 +142,12 @@ template <class T>
 std::optional<T> uio_map_attr(const char* root, int idx, const char* leaf) noexcept {
     char path[160];
     const int n = std::snprintf(path, sizeof path, "%s/uio%d/maps/map0/%s", root, idx, leaf);
-    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof path) return std::nullopt;
+    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof path)
+        return std::nullopt;
     std::array<char, 32> buf{};
     const auto got = os::read_small_file(path, std::span<char>(buf));
-    if (!got || *got == 0 || *got >= buf.size()) return std::nullopt;
+    if (!got || *got == 0 || *got >= buf.size())
+        return std::nullopt;
     std::string_view text = infra::trim_line_end(std::string_view(buf.data(), *got));
 
     if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
@@ -138,22 +156,27 @@ std::optional<T> uio_map_attr(const char* root, int idx, const char* leaf) noexc
     return infra::parse_int<T>(text, 16);
 }
 
-}  // namespace
+}
 
 ApertureChoice resolve_aperture(const char* sysfs_root, const PhysRegion& r) noexcept {
     ApertureChoice c;
-    if (r.len == 0) return c;
+    if (r.len == 0)
+        return c;
 
     const int idx = os::find_uio_node_under(sysfs_root, kApertureUioName);
-    if (idx < 0) return c;
+    if (idx < 0)
+        return c;
 
     const auto addr = uio_map_attr<std::uint32_t>(sysfs_root, idx, "addr");
     const auto size = uio_map_attr<std::uint32_t>(sysfs_root, idx, "size");
-    if (!addr || !size) return c;
+    if (!addr || !size)
+        return c;
 
-    if (os::PhysAddr{*addr} != kFpgaMemBase) return c;
+    if (os::PhysAddr{*addr} != kFpgaMemBase)
+        return c;
     const std::uint64_t off = r.phys.v - kFpgaMemBase.v;
-    if (off > *size || r.len > (*size - off)) return c;
+    if (off > *size || r.len > (*size - off))
+        return c;
 
     c.via_uio = true;
     c.node = idx;
@@ -172,7 +195,8 @@ Ex<FpgaMemory> FpgaMemory::map_aperture(PhysRegion r, os::MmioRegion::Access acc
             if (fd >= 0) {
                 auto mem = map_uio(fd, choice.node_base, r, access);
                 ::close(fd);
-                if (mem) return mem;
+                if (mem)
+                    return mem;
             }
         }
     }
@@ -186,7 +210,8 @@ Ex<FpgaMemory> FpgaMemory::map(PhysRegion r, os::MmioRegion::Access access) {
     }
 
     auto pages = os::MmioRegion::map(r.phys, r.len, os::MmioRegion::Attr::UncachedNormal, access);
-    if (!pages) return std::unexpected(pages.error());
+    if (!pages)
+        return std::unexpected(pages.error());
 
     FpgaMemory mem;
     mem.region_ = r;
@@ -203,8 +228,12 @@ struct UioMapping {
     std::size_t lead = 0;
 };
 
-[[nodiscard]] Ex<UioMapping> map_uio_pages(int fd, os::PhysAddr node_base, PhysRegion r,
-                                           os::MmioRegion::Access access) {
+[[nodiscard]] Ex<UioMapping> map_uio_pages(
+    int fd,
+    os::PhysAddr node_base,
+    PhysRegion r,
+    os::MmioRegion::Access access
+) {
     if (r.len == 0) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(r.phys)});
     }
@@ -220,16 +249,22 @@ struct UioMapping {
     const auto lead = static_cast<std::size_t>(gap);
 
     auto pages = os::MmioRegion::map_fd(fd, os::PhysAddr{0}, lead + r.len, access);
-    if (!pages) return std::unexpected(pages.error());
+    if (!pages)
+        return std::unexpected(pages.error());
     return UioMapping{std::move(*pages), lead};
 }
 
-}  // namespace
+}
 
-Ex<FpgaMemory> FpgaMemory::map_uio(int fd, os::PhysAddr node_base, PhysRegion r,
-                                   os::MmioRegion::Access access) {
+Ex<FpgaMemory> FpgaMemory::map_uio(
+    int fd,
+    os::PhysAddr node_base,
+    PhysRegion r,
+    os::MmioRegion::Access access
+) {
     auto m = map_uio_pages(fd, node_base, r, access);
-    if (!m) return std::unexpected(m.error());
+    if (!m)
+        return std::unexpected(m.error());
 
     FpgaMemory mem;
     mem.region_ = r;
@@ -249,7 +284,8 @@ Ex<void> FpgaMemory::rebind_uio(int fd, os::PhysAddr node_base, PhysRegion r) {
     ++generation_;
 
     auto m = map_uio_pages(fd, node_base, r, access_);
-    if (!m) return std::unexpected(m.error());
+    if (!m)
+        return std::unexpected(m.error());
     map_ = std::move(m->pages);
     base_ = bytes_of(*map_) + m->lead;
     region_ = r;
@@ -258,8 +294,12 @@ Ex<void> FpgaMemory::rebind_uio(int fd, os::PhysAddr node_base, PhysRegion r) {
 }
 
 FpgaMemory::FpgaMemory(FpgaMemory&& o) noexcept
-    : region_(o.region_), map_(std::move(o.map_)), base_(o.base_), generation_(o.generation_),
-      uio_bound_(o.uio_bound_), access_(o.access_) {
+    : region_(o.region_),
+      map_(std::move(o.map_)),
+      base_(o.base_),
+      generation_(o.generation_),
+      uio_bound_(o.uio_bound_),
+      access_(o.access_) {
     o.region_ = PhysRegion{};
     o.base_ = nullptr;
     o.uio_bound_ = false;
@@ -287,8 +327,10 @@ FpgaMemory& FpgaMemory::operator=(FpgaMemory&& o) noexcept {
 
 FpgaMemory FpgaMemory::borrow(std::span<std::byte> backing, PhysRegion r) {
     if (backing.size() < r.len || !is_word_aligned(backing.data())) {
-        fatal(Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(backing.size())},
-              "FpgaMemory::borrow");
+        fatal(
+            Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(backing.size())},
+            "FpgaMemory::borrow"
+        );
     }
     FpgaMemory mem;
     mem.region_ = r;
@@ -298,12 +340,16 @@ FpgaMemory FpgaMemory::borrow(std::span<std::byte> backing, PhysRegion r) {
 
 std::span<std::byte> FpgaMemory::view(std::size_t off, std::size_t len) {
     if (base_ == nullptr) {
-        fatal(Error{Errc::mmap_failed, ERR_SITE(), os::low32(region_.phys)},
-              "FpgaMemory::view unmapped");
+        fatal(
+            Error{Errc::mmap_failed, ERR_SITE(), os::low32(region_.phys)},
+            "FpgaMemory::view unmapped"
+        );
     }
     if (off > region_.len || len > region_.len - off) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)},
-              "FpgaMemory::view out of range");
+        fatal(
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)},
+            "FpgaMemory::view out of range"
+        );
     }
     return {base_ + off, len};
 }
@@ -314,9 +360,11 @@ Ex<std::size_t> FpgaMemory::write_at(std::size_t off, std::span<const std::byte>
     }
     if (!span_fits(off, src.size(), region_.len)) {
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)});
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)}
+        );
     }
-    if (!src.empty()) std::memcpy(base_ + off, src.data(), src.size());
+    if (!src.empty())
+        std::memcpy(base_ + off, src.data(), src.size());
 
     std::atomic_thread_fence(std::memory_order_release);
     return src.size();
@@ -328,15 +376,19 @@ Ex<std::size_t> FpgaMemory::read_at(std::size_t off, std::span<std::byte> dst) c
     }
     if (!span_fits(off, dst.size(), region_.len)) {
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)});
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)}
+        );
     }
 
     std::atomic_thread_fence(std::memory_order_acquire);
-    if (!dst.empty()) std::memcpy(dst.data(), base_ + off, dst.size());
+    if (!dst.empty())
+        std::memcpy(dst.data(), base_ + off, dst.size());
     return dst.size();
 }
 
-void FpgaMemory::publish() noexcept { std::atomic_thread_fence(std::memory_order_release); }
+void FpgaMemory::publish() noexcept {
+    std::atomic_thread_fence(std::memory_order_release);
+}
 
 void FpgaMemory::handoff() noexcept {
 #if defined(__arm__) || defined(__aarch64__)
@@ -359,7 +411,8 @@ Ex<void> FpgaMemory::rebind(PhysRegion r) {
     }
 
     auto pages = os::MmioRegion::map(r.phys, r.len, os::MmioRegion::Attr::UncachedNormal, access_);
-    if (!pages) return std::unexpected(pages.error());
+    if (!pages)
+        return std::unexpected(pages.error());
     map_ = std::move(*pages);
     base_ = bytes_of(*map_);
     region_ = r;
@@ -378,7 +431,8 @@ Ex<void> FpgaMemory::rebind(std::span<std::byte> backing, PhysRegion r) {
 
     if (backing.size() < r.len || !is_word_aligned(backing.data())) {
         return std::unexpected(
-            Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(backing.size())});
+            Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(backing.size())}
+        );
     }
     base_ = backing.data();
     region_ = r;
@@ -388,8 +442,10 @@ Ex<void> FpgaMemory::rebind(std::span<std::byte> backing, PhysRegion r) {
 void FpgaMemory::store_release(std::size_t word_off, std::uint32_t v) {
 
     if (base_ == nullptr || region_.len < 4u || word_off > (region_.len - 4u) / 4u) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(word_off)},
-              "FpgaMemory::store_release");
+        fatal(
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(word_off)},
+            "FpgaMemory::store_release"
+        );
     }
     auto* p = reinterpret_cast<volatile std::uint32_t*>(base_ + word_off * 4u);
 
@@ -399,8 +455,10 @@ void FpgaMemory::store_release(std::size_t word_off, std::uint32_t v) {
 
 std::uint32_t FpgaMemory::load_acquire(std::size_t word_off) const {
     if (base_ == nullptr || region_.len < 4u || word_off > (region_.len - 4u) / 4u) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(word_off)},
-              "FpgaMemory::load_acquire");
+        fatal(
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(word_off)},
+            "FpgaMemory::load_acquire"
+        );
     }
     const auto* p = reinterpret_cast<const volatile std::uint32_t*>(base_ + word_off * 4u);
     const std::uint32_t v = *p;
@@ -411,21 +469,25 @@ std::uint32_t FpgaMemory::load_acquire(std::size_t word_off) const {
 Ex<DmaRing> DmaRing::create(FpgaMemory& mem, std::size_t off, std::size_t len) {
     if ((off & 3u) != 0u) {
         return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(off)});
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(off)}
+        );
     }
     if (len < kHeaderBytes + kMinCapacity) {
         return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(len)});
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(len)}
+        );
     }
     const std::size_t cap = len - kHeaderBytes;
     if (!is_power_of_two(cap)) {
         return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(cap)});
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(cap)}
+        );
     }
     const PhysRegion& r = mem.region();
     if (off > r.len || len > r.len - off) {
         return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(off)});
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(off)}
+        );
     }
 
     DmaRing ring{mem};
@@ -442,8 +504,10 @@ Ex<DmaRing> DmaRing::create(FpgaMemory& mem, std::size_t off, std::size_t len) {
 
 void DmaRing::check_live() const {
     if (mem_.generation() != generation_) {
-        fatal(Error{Errc::mmap_failed, ERR_SITE(), generation_},
-              "DmaRing: region rebound under a live ring");
+        fatal(
+            Error{Errc::mmap_failed, ERR_SITE(), generation_},
+            "DmaRing: region rebound under a live ring"
+        );
     }
 }
 
@@ -454,17 +518,21 @@ std::size_t DmaRing::used() const {
     return (head - tail) & mask_;
 }
 
-std::size_t DmaRing::space() const { return mask_ - used(); }
+std::size_t DmaRing::space() const {
+    return mask_ - used();
+}
 
 std::span<std::byte> DmaRing::reserve(std::size_t n) {
     check_live();
-    if (n == 0) return {};
+    if (n == 0)
+        return {};
     const std::size_t head = static_cast<std::size_t>(mem_.load_acquire(head_word_)) & mask_;
     const std::size_t tail = static_cast<std::size_t>(mem_.load_acquire(tail_word_)) & mask_;
     const std::size_t free_bytes = mask_ - ((head - tail) & mask_);
     const std::size_t to_end = capacity() - head;
     const std::size_t avail = free_bytes < to_end ? free_bytes : to_end;
-    if (n > avail) return {};
+    if (n > avail)
+        return {};
     pending_ = n;
     return mem_.view(data_off_ + head, n);
 }
@@ -472,8 +540,10 @@ std::span<std::byte> DmaRing::reserve(std::size_t n) {
 void DmaRing::publish(std::size_t n) {
     check_live();
     if (n > pending_) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(n)},
-              "DmaRing::publish beyond reserve");
+        fatal(
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(n)},
+            "DmaRing::publish beyond reserve"
+        );
     }
     pending_ = 0;
     const std::size_t head = static_cast<std::size_t>(mem_.load_acquire(head_word_)) & mask_;
@@ -487,7 +557,8 @@ std::span<const std::byte> DmaRing::peek() {
     const std::size_t ready = (head - tail) & mask_;
     const std::size_t to_end = capacity() - tail;
     const std::size_t n = ready < to_end ? ready : to_end;
-    if (n == 0) return {};
+    if (n == 0)
+        return {};
     return mem_.view(data_off_ + tail, n);
 }
 
@@ -496,10 +567,12 @@ void DmaRing::release(std::size_t n) {
     const std::size_t head = static_cast<std::size_t>(mem_.load_acquire(head_word_)) & mask_;
     const std::size_t tail = static_cast<std::size_t>(mem_.load_acquire(tail_word_)) & mask_;
     if (n > ((head - tail) & mask_)) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(n)},
-              "DmaRing::release beyond peek");
+        fatal(
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(n)},
+            "DmaRing::release beyond peek"
+        );
     }
     mem_.store_release(tail_word_, static_cast<std::uint32_t>((tail + n) & mask_));
 }
 
-}  // namespace mister::hal
+}

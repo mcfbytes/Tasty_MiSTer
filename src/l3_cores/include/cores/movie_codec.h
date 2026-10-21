@@ -70,6 +70,7 @@ public:
         bool has_rerecords = false;
         std::uint32_t rerecords = 0;
     };
+
     struct Frame {
         std::uint8_t commands = 0;
         std::array<std::uint32_t, kPorts> mask{};
@@ -115,19 +116,25 @@ public:
         std::string_view name{};
         [[nodiscard]] unsigned value_in(const proto::StatusWord& live) const noexcept;
         [[nodiscard]] bool met_by(const proto::StatusWord& live) const noexcept;
+
         [[nodiscard]] bool settable() const noexcept { return ((allowed >> preferred) & 1u) != 0; }
     };
+
     static constexpr std::size_t kNeedsMax = 32;
 
     struct SettingNeeds {
         std::array<SettingNeed, kNeedsMax> rows{};
         std::size_t n = 0;
+
         void add(const SettingNeed& need) noexcept {
-            if (n < rows.size()) rows[n++] = need;
+            if (n < rows.size())
+                rows[n++] = need;
         }
+
         [[nodiscard]] std::span<const SettingNeed> view() const& noexcept {
             return {rows.data(), n};
         }
+
         std::span<const SettingNeed> view() const&& = delete;
     };
 
@@ -135,8 +142,10 @@ public:
 
     [[nodiscard]] virtual const MovieArchiveFormat* archive() const noexcept { return nullptr; }
 
-    [[nodiscard]] virtual Ex<std::unique_ptr<svc::IFile>> open_movie(const svc::Vfs& vfs,
-                                                                     std::string_view path) const {
+    [[nodiscard]] virtual Ex<std::unique_ptr<svc::IFile>> open_movie(
+        const svc::Vfs& vfs,
+        std::string_view path
+    ) const {
         return open_plain_or_archive(archive(), vfs, path);
     }
 
@@ -146,8 +155,11 @@ public:
         (void)line;
         return false;
     }
-    [[nodiscard]] virtual Ex<Facts> header_line(std::string_view line,
-                                                const Facts& so_far) const noexcept = 0;
+
+    [[nodiscard]] virtual Ex<Facts> header_line(
+        std::string_view line,
+        const Facts& so_far
+    ) const noexcept = 0;
 
     [[nodiscard]] virtual Ex<void> finish_header(const Facts& f) const noexcept = 0;
     [[nodiscard]] virtual Ex<Frame> frame(std::string_view line, const Facts& f) const noexcept = 0;
@@ -167,26 +179,36 @@ public:
     }
 
     [[nodiscard]] std::optional<SettingNeeds> setting_needs_for(
-        const Facts& f, std::optional<RamFill> fill) const noexcept;
-    [[nodiscard]] SettingVerdict check_settings(const proto::StatusWord& live,
-                                                const Facts& f) const noexcept;
+        const Facts& f,
+        std::optional<RamFill> fill
+    ) const noexcept;
+    [[nodiscard]] SettingVerdict check_settings(
+        const proto::StatusWord& live,
+        const Facts& f
+    ) const noexcept;
     [[nodiscard]] virtual Raster raster(const Facts& f) const noexcept = 0;
     [[nodiscard]] virtual PowerOn power_on(const Facts& f) const noexcept = 0;
 
     [[nodiscard]] virtual std::int32_t default_lead(const Facts& f) const noexcept = 0;
+
     [[nodiscard]] virtual LeadRange lead_range() const noexcept { return {}; }
 
-    [[nodiscard]] std::optional<std::uint32_t> power_on_ns(const proto::StatusWord& live,
-                                                           const Facts& f) const noexcept;
+    [[nodiscard]] std::optional<std::uint32_t> power_on_ns(
+        const proto::StatusWord& live,
+        const Facts& f
+    ) const noexcept;
 
     struct DigestSpan {
         std::uint64_t offset = 0;
         std::uint64_t length = 0;
     };
+
     static constexpr std::size_t kRomHead = 16;
 
     [[nodiscard]] virtual std::optional<DigestSpan> rom_digest_span(
-        std::span<const std::uint8_t> head, std::uint64_t size) const noexcept = 0;
+        std::span<const std::uint8_t> head,
+        std::uint64_t size
+    ) const noexcept = 0;
 
     [[nodiscard]] virtual bool rom_matches(const DigestValue& d, const Facts& f) const noexcept {
         return f.has_digest && d == f.digest;
@@ -208,8 +230,10 @@ public:
         std::optional<std::vector<std::uint8_t>> alt_prefix{};
     };
 
-    [[nodiscard]] virtual Ex<DigestSource> digest_source(const svc::Vfs& vfs,
-                                                         std::string_view rom) const {
+    [[nodiscard]] virtual Ex<DigestSource> digest_source(
+        const svc::Vfs& vfs,
+        std::string_view rom
+    ) const {
         return head_digest_source(vfs, rom);
     }
 
@@ -219,22 +243,33 @@ public:
         std::array<std::string, 2> paths{};
         std::uint64_t size = 0;
     };
-    [[nodiscard]] virtual std::optional<Companion> companion(std::string_view rom,
-                                                             const Facts& f) const {
+
+    [[nodiscard]] virtual std::optional<Companion> companion(
+        std::string_view rom,
+        const Facts& f
+    ) const {
         (void)rom;
         (void)f;
         return std::nullopt;
     }
 
 protected:
-    [[nodiscard]] static unsigned status_field(const proto::StatusWord& s, unsigned lo,
-                                               unsigned width) noexcept;
+    [[nodiscard]] static unsigned status_field(
+        const proto::StatusWord& s,
+        unsigned lo,
+        unsigned width
+    ) noexcept;
 
-    [[nodiscard]] Ex<DigestSource> head_digest_source(const svc::Vfs& vfs,
-                                                      std::string_view rom) const;
+    [[nodiscard]] Ex<DigestSource> head_digest_source(
+        const svc::Vfs& vfs,
+        std::string_view rom
+    ) const;
 
     [[nodiscard]] static Ex<std::unique_ptr<svc::IFile>> open_plain_or_archive(
-        const MovieArchiveFormat* container, const svc::Vfs& vfs, std::string_view path);
+        const MovieArchiveFormat* container,
+        const svc::Vfs& vfs,
+        std::string_view path
+    );
 
     IMovieCodec() = default;
     IMovieCodec(const IMovieCodec&) = default;
@@ -243,9 +278,11 @@ protected:
 
 void note_rerecords(std::string_view key, std::string_view val, IMovieCodec::Facts& f) noexcept;
 
-[[nodiscard]] const IMovieCodec* movie_codec_for(std::string_view conf_str_name,
-                                                 std::string_view movie_path) noexcept;
+[[nodiscard]] const IMovieCodec* movie_codec_for(
+    std::string_view conf_str_name,
+    std::string_view movie_path
+) noexcept;
 
 [[nodiscard]] const IMovieCodec* movie_codec_for_path(std::string_view movie_path) noexcept;
 
-}  // namespace mister::cores
+}

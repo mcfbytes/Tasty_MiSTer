@@ -7,12 +7,17 @@
 
 namespace mister::cores {
 
-std::optional<TransferRow> AddressedLoad::window_row(std::uint32_t addr, std::uint64_t bytes,
-                                                     proto::IoIndex index,
-                                                     const hal::PhysRegion& aperture) noexcept {
-    if (addr == 0 || bytes > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
+std::optional<TransferRow> AddressedLoad::window_row(
+    std::uint32_t addr,
+    std::uint64_t bytes,
+    proto::IoIndex index,
+    const hal::PhysRegion& aperture
+) noexcept {
+    if (addr == 0 || bytes > std::numeric_limits<std::uint32_t>::max())
+        return std::nullopt;
 
-    if (!hal::resolve_load_region(aperture, os::PhysAddr{addr}, 1)) return std::nullopt;
+    if (!hal::resolve_load_region(aperture, os::PhysAddr{addr}, 1))
+        return std::nullopt;
     TransferRow r{};
     r.dest = RowDest::Window;
     r.index = index;
@@ -50,4 +55,4 @@ std::unique_ptr<ILoader> make_addressed_load(const LoaderContext& ctx) {
     return std::make_unique<AddressedLoad>(ctx.aperture);
 }
 
-}  // namespace mister::cores
+}

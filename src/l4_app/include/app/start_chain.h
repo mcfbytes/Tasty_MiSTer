@@ -45,9 +45,11 @@ public:
     };
 
     [[nodiscard]] static StartChain plan(const Facts& f, const svc::Vfs& vfs);
+
     [[nodiscard]] std::span<const StartFile> files() const noexcept {
         return {files_.data(), count_};
     }
+
     [[nodiscard]] bool holds_reset() const noexcept { return hold_; }
 
     [[nodiscard]] std::span<const StartFile> boot_images() const noexcept {
@@ -62,9 +64,11 @@ private:
     [[nodiscard]] bool plan_composite_(std::string_view rbf, const svc::Vfs& vfs);
     void plan_boot_images_(bool slot0_held, std::string_view home, const svc::Vfs& vfs);
     void add_(std::string_view path, proto::WideIoIndex dest, std::uint64_t offset = 0);
-    [[nodiscard]] static std::optional<StartFile> file_(std::string_view path,
-                                                        proto::WideIoIndex dest,
-                                                        std::uint64_t offset);
+    [[nodiscard]] static std::optional<StartFile> file_(
+        std::string_view path,
+        proto::WideIoIndex dest,
+        std::uint64_t offset
+    );
 
     static constexpr std::size_t kBootImages = 5;
     std::array<StartFile, cores::kMaxStartAssets> files_{};
@@ -74,4 +78,4 @@ private:
     bool hold_ = false;
 };
 
-}  // namespace mister::app
+}

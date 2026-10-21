@@ -35,16 +35,23 @@ enum class FallbackNotice : std::uint8_t { Announce, Quiet };
 
 class BoardWindows {
 public:
-    [[nodiscard]] static Ex<BoardWindows> open(const BoardProfile& profile,
-                                               FallbackNotice notice = FallbackNotice::Announce);
+    [[nodiscard]] static Ex<BoardWindows> open(
+        const BoardProfile& profile,
+        FallbackNotice notice = FallbackNotice::Announce
+    );
 
-    [[nodiscard]] static Ex<BoardWindows> attach(const BoardProfile& profile,
-                                                 std::span<const WindowImage> images);
+    [[nodiscard]] static Ex<BoardWindows> attach(
+        const BoardProfile& profile,
+        std::span<const WindowImage> images
+    );
 
     BoardWindows(BoardWindows&& o) noexcept
-        : profile_(o.profile_), pages_(std::move(o.pages_)), lends_(std::exchange(o.lends_, {})),
+        : profile_(o.profile_),
+          pages_(std::move(o.pages_)),
+          lends_(std::exchange(o.lends_, {})),
           window_claims_(std::move(o.window_claims_)),
           mailbox_claims_(std::move(o.mailbox_claims_)) {}
+
     BoardWindows& operator=(BoardWindows&&) = delete;
     BoardWindows(const BoardWindows&) = delete;
     BoardWindows& operator=(const BoardWindows&) = delete;
@@ -54,9 +61,11 @@ public:
     template <class Layout>
     [[nodiscard]] Ex<TakenWindow<Layout>> take(WindowId id) {
         auto lead = lead_of(id, Layout::kSize);
-        if (!lead) return std::unexpected(lead.error());
+        if (!lead)
+            return std::unexpected(lead.error());
         auto claim = window_claims_->claim(id);
-        if (!claim) return std::unexpected(claim.error());
+        if (!claim)
+            return std::unexpected(claim.error());
         return TakenWindow<Layout>{RegisterWindow<Layout>::borrow(*lead), std::move(*claim)};
     }
 
@@ -65,6 +74,7 @@ public:
     [[nodiscard]] infra::ClaimSetCounts window_counts() const noexcept {
         return window_claims_->counts();
     }
+
     [[nodiscard]] infra::ClaimSetCounts mailbox_counts() const noexcept {
         return mailbox_claims_->counts();
     }
@@ -84,4 +94,4 @@ private:
     std::unique_ptr<MailboxClaims> mailbox_claims_ = std::make_unique<MailboxClaims>();
 };
 
-}  // namespace mister::hal
+}

@@ -23,11 +23,12 @@ class MegaDriveMovieCodec final : public IMovieCodec {
 public:
     static constexpr std::array<std::uint8_t, 12> kPadBit{3, 2, 1, 0, 4, 5, 6, 7, 9, 10, 11, 8};
     static constexpr std::string_view kPadMnemonic = "UDLRABCSXYZM";
-    static constexpr std::array<std::string_view, 12> kPadName{
-        "Up", "Down", "Left", "Right", "A", "B", "C", "Start", "X", "Y", "Z", "Mode"};
+    static constexpr std::array<std::string_view, 12>
+        kPadName{"Up", "Down", "Left", "Right", "A", "B", "C", "Start", "X", "Y", "Z", "Mode"};
 
     enum class Pad : std::uint8_t { None, Three, Six };
     enum class Sys : std::uint8_t { None, First, Last };
+
     struct Layout {
         Pad p1 = Pad::None;
         Pad p2 = Pad::None;
@@ -43,12 +44,16 @@ public:
     };
 
     [[nodiscard]] const MovieArchiveFormat* archive() const noexcept override;
-    [[nodiscard]] Ex<std::unique_ptr<svc::IFile>> open_movie(const svc::Vfs& vfs,
-                                                             std::string_view path) const override;
+    [[nodiscard]] Ex<std::unique_ptr<svc::IFile>> open_movie(
+        const svc::Vfs& vfs,
+        std::string_view path
+    ) const override;
     [[nodiscard]] bool starts_log(std::string_view line) const noexcept override;
     [[nodiscard]] bool ends_log(std::string_view line) const noexcept override;
-    [[nodiscard]] Ex<Facts> header_line(std::string_view line,
-                                        const Facts& so_far) const noexcept override;
+    [[nodiscard]] Ex<Facts> header_line(
+        std::string_view line,
+        const Facts& so_far
+    ) const noexcept override;
     [[nodiscard]] Ex<void> finish_header(const Facts& f) const noexcept override;
     [[nodiscard]] Ex<Frame> frame(std::string_view line, const Facts& f) const noexcept override;
     [[nodiscard]] SettingNeeds setting_needs(const Facts& f) const noexcept override;
@@ -60,10 +65,13 @@ public:
     [[nodiscard]] std::int32_t default_lead(const Facts& f) const noexcept override;
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
-        std::span<const std::uint8_t> head, std::uint64_t size) const noexcept override;
+        std::span<const std::uint8_t> head,
+        std::uint64_t size
+    ) const noexcept override;
     [[nodiscard]] bool rom_matches(const DigestValue& d, const Facts& f) const noexcept override;
 
     [[nodiscard]] std::uint8_t rom_digit() const noexcept override { return 1; }
+
     [[nodiscard]] std::string_view games_folder() const noexcept override { return "Genesis"; }
 };
 
@@ -72,13 +80,17 @@ public:
 consteval bool megadrive_pad_bits_are_a_permutation() {
     unsigned seen = 0;
     for (const std::uint8_t b : MegaDriveMovieCodec::kPadBit) {
-        if (b > 11) return false;
+        if (b > 11)
+            return false;
         seen |= 1u << b;
     }
     return seen == 0xFFFu;
 }
-static_assert(megadrive_pad_bits_are_a_permutation(),
-              "the BK2 Genesis pad map is a permutation of JoyMask bits 0-11");
+
+static_assert(
+    megadrive_pad_bits_are_a_permutation(),
+    "the BK2 Genesis pad map is a permutation of JoyMask bits 0-11"
+);
 static_assert(MegaDriveMovieCodec::kPadMnemonic.size() == MegaDriveMovieCodec::kPadBit.size());
 
-}  // namespace mister::cores
+}

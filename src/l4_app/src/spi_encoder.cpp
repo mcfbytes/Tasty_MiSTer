@@ -27,10 +27,21 @@
 
 namespace mister::app {
 
-SpiEncoder::SpiEncoder(hal::ISpiTransport& link, hal::ICoreSignals& signals,
-                       proto::CoreSession& session, OsdWire& osd, proto::BlockSlots& slots,
-                       VideoWire& video, svc::InputEmitter& em) noexcept
-    : link_(link), signals_(signals), session_(session), osd_(osd), slots_(slots), video_(video),
+SpiEncoder::SpiEncoder(
+    hal::ISpiTransport& link,
+    hal::ICoreSignals& signals,
+    proto::CoreSession& session,
+    OsdWire& osd,
+    proto::BlockSlots& slots,
+    VideoWire& video,
+    svc::InputEmitter& em
+) noexcept
+    : link_(link),
+      signals_(signals),
+      session_(session),
+      osd_(osd),
+      slots_(slots),
+      video_(video),
       em_(em) {}
 
 ILinkEncoder::Outcome SpiEncoder::encode(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept {
@@ -45,15 +56,19 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::HoldReset&, const Link
     return ILinkEncoder::Outcome::Encoded;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::ReleaseReset&,
-                                     const LinkOpCtx&) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::ReleaseReset&,
+    const LinkOpCtx&
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
     signals_.set_core_reset(false);
     return ILinkEncoder::Outcome::Encoded;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::WriteStatus& a,
-                                     const LinkOpCtx&) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::WriteStatus& a,
+    const LinkOpCtx&
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
     if (session_.type() != proto::CoreType::EightBit) {
         return ILinkEncoder::Outcome::Dropped;
@@ -64,8 +79,10 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::WriteStatus& a,
     }
     auto& st = session_.status();
     for (std::uint32_t i = 0; i < width; ++i) {
-        st.set_bit(proto::StatusBit{static_cast<std::uint8_t>(a.start.v + i)},
-                   ((a.value >> i) & 1u) != 0);
+        st.set_bit(
+            proto::StatusBit{static_cast<std::uint8_t>(a.start.v + i)},
+            ((a.value >> i) & 1u) != 0
+        );
     }
     if (auto r = session_.flush_status(); !r) {
         return ILinkEncoder::Outcome::Dropped;
@@ -73,8 +90,10 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::WriteStatus& a,
     return ILinkEncoder::Outcome::EncodedStatusChange;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::OsdFlush& a,
-                                     const LinkOpCtx& ctx) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::OsdFlush& a,
+    const LinkOpCtx& ctx
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
     if ((a.rows > 1) || a.row.v >= proto::OsdSurface::kMaxRows) {
         return ILinkEncoder::Outcome::Dropped;
@@ -87,12 +106,13 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::OsdFlush& a,
         if (osd_.surface().sample(row, sampled) == 0) {
             return ILinkEncoder::Outcome::Dropped;
         }
-        flushed =
-            osd.flush_row(link_, row, std::span<const std::uint8_t>(sampled.b, sizeof sampled.b));
-    } else if (!ctx.inbox) {
-        return ILinkEncoder::Outcome::Dropped;
+        flushed = osd.flush_row(
+            link_,
+            row,
+            std::span<const std::uint8_t>(sampled.b, sizeof sampled.b)
+        );
     } else {
-        const auto bytes = ctx.inbox->bytes(a.bytes);
+        const auto bytes = ctx.inbox.bytes(a.bytes);
         flushed = osd.flush_row(link_, row, bytes);
     }
     if (!flushed) {
@@ -126,8 +146,10 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::BindJoy& a, const Link
     return ILinkEncoder::Outcome::Encoded;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::JoyRelease& a,
-                                     const LinkOpCtx&) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::JoyRelease& a,
+    const LinkOpCtx&
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
     if (a.player.v >= proto::JoystickPort::kMaxPorts) {
         return ILinkEncoder::Outcome::Dropped;
@@ -157,8 +179,10 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SendRtc& a, const Link
     return ILinkEncoder::Outcome::Encoded;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::BlockAnswer& a,
-                                     const LinkOpCtx&) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::BlockAnswer& a,
+    const LinkOpCtx&
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
     if (a.slot.v >= proto::kBlockSlots) {
         return ILinkEncoder::Outcome::Dropped;
@@ -170,8 +194,10 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::BlockAnswer& a,
     return ILinkEncoder::Outcome::Encoded;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SaveUpload&,
-                                     const LinkOpCtx& ctx) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::SaveUpload&,
+    const LinkOpCtx& ctx
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
     if (!ctx.roles || !ctx.roles->saves) {
         return ILinkEncoder::Outcome::Dropped;
@@ -182,18 +208,22 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SaveUpload&,
     return ILinkEncoder::Outcome::Encoded;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SetVideoMode& a,
-                                     const LinkOpCtx& ctx) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::SetVideoMode& a,
+    const LinkOpCtx& ctx
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
-    if (!video_.emit(link_, a.block, a.gen, ctx.fence ? &*ctx.fence : nullptr)) {
+    if (!video_.emit(link_, a.block, a.gen, infra::OptRef<proto::IResetFence>{ctx.fence})) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::PulseOption& a,
-                                     const LinkOpCtx&) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::PulseOption& a,
+    const LinkOpCtx&
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
     if (session_.type() != proto::CoreType::EightBit) {
@@ -214,8 +244,10 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::PulseOption& a,
     return ILinkEncoder::Outcome::EncodedStatusChange;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::ApplyCheats&,
-                                     const LinkOpCtx& ctx) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::ApplyCheats&,
+    const LinkOpCtx& ctx
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
     if (!ctx.roles || !ctx.roles->cheats) {
@@ -227,41 +259,37 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::ApplyCheats&,
     return ILinkEncoder::Outcome::Encoded;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SetDip& a,
-                                     const LinkOpCtx& ctx) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::SetDip& a,
+    const LinkOpCtx& ctx
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
     if (!ctx.roles || !ctx.roles->acts) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    if (!ctx.roles->acts->set_dip_counted(a.row, a.choice)) {
+    if (!ctx.roles->acts->set_dip_counted(ctx.core, a.row, a.choice)) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SetCoreOption& a,
-                                     const LinkOpCtx& ctx) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::SetCoreOption& a,
+    const LinkOpCtx& ctx
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
     if (!ctx.roles || !ctx.roles->acts) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    const bool ok = ctx.roles->acts->set_option_counted(a.row, a.choice);
+    const bool ok = ctx.roles->acts->set_option_counted(ctx.core, a.row, a.choice);
     return ok ? ILinkEncoder::Outcome::Encoded : ILinkEncoder::Outcome::Dropped;
 }
 
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SettleCoreOptions&,
-                                     const LinkOpCtx& ctx) noexcept {
-    TASTY_SEAT_BODY(SpiEncoder);
-    if (!ctx.roles || !ctx.roles->acts) {
-        return ILinkEncoder::Outcome::Dropped;
-    }
-    const bool ok = ctx.roles->acts->settle_options_counted();
-    return ok ? ILinkEncoder::Outcome::Encoded : ILinkEncoder::Outcome::Dropped;
-}
-
-ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SetOsdVisible& a,
-                                     const LinkOpCtx&) noexcept {
+ILinkEncoder::Outcome SpiEncoder::on(
+    const proto::LinkOp::SetOsdVisible& a,
+    const LinkOpCtx&
+) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
     if (!osd_.set_show(a.show, a.target)) {
@@ -278,4 +306,4 @@ ILinkEncoder::Outcome SpiEncoder::misrouted(const proto::LinkOp&, const LinkOpCt
 
 static_assert(LinkOpWireSink<SpiEncoder>);
 
-}  // namespace mister::app
+}

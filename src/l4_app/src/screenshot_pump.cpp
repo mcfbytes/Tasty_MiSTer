@@ -10,7 +10,8 @@ bool ScreenshotPump::take(std::string_view path, bool scaled) noexcept {
     TASTY_SEAT_BODY(ScreenshotPump);
     auto shot = shots_.arm();
 
-    if (!shot) return true;
+    if (!shot)
+        return true;
     (void)shot->path.assign(path);
     shot->scaled = scaled ? 1 : 0;
     shot->ok = 0;
@@ -25,11 +26,17 @@ void ScreenshotPump::tick() noexcept {
 
         const bool wrote = res.completed() && res->ok != 0;
         ++reaped_;
-        if (!sink_) continue;
-        sink_->deliver(infra::make<Event>(
-            Event::InfoRequest{.id = wrote ? InfoId::ScreenshotWritten : InfoId::ScreenshotFailed},
-            Event::Head{EmitSite{ERR_SITE()}, {}, res->tag}));
+        if (!sink_)
+            continue;
+        sink_->deliver(
+            infra::make<Event>(
+                Event::InfoRequest{
+                    .id = wrote ? InfoId::ScreenshotWritten : InfoId::ScreenshotFailed
+                },
+                Event::Head{EmitSite{ERR_SITE()}, {}, res->tag}
+            )
+        );
     }
 }
 
-}  // namespace mister::app
+}

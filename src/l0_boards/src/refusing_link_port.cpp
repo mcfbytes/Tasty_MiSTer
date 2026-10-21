@@ -23,11 +23,17 @@ hal::CoreCapabilities RefusingLinkPort::latch_capabilities() {
     return {};
 }
 
-void RefusingLinkPort::set_core_reset(bool) { TASTY_SEAT_BODY(RefusingLinkPort); }
+void RefusingLinkPort::set_core_reset(bool) {
+    TASTY_SEAT_BODY(RefusingLinkPort);
+}
 
-void RefusingLinkPort::select(hal::ChipSelect) { TASTY_SEAT_BODY(RefusingLinkPort); }
+void RefusingLinkPort::select(hal::ChipSelect) {
+    TASTY_SEAT_BODY(RefusingLinkPort);
+}
 
-void RefusingLinkPort::deselect() { TASTY_SEAT_BODY(RefusingLinkPort); }
+void RefusingLinkPort::deselect() {
+    TASTY_SEAT_BODY(RefusingLinkPort);
+}
 
 Ex<hal::SpiWord> RefusingLinkPort::transfer(hal::SpiWord) {
     TASTY_SEAT_BODY(RefusingLinkPort);
@@ -54,4 +60,4 @@ Ex<bool> RefusingLinkPort::posted_done() {
     return unimplemented(ERR_SITE());
 }
 
-}  // namespace mister::boards
+}

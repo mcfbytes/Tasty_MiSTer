@@ -20,14 +20,16 @@ public:
     void service(reactor::CoreState& st) const override {
         TASTY_SEAT_BODY(WireTickRow);
         Core* c = bound_core(st);
-        if (c == nullptr || &c->profile() != &kProfile) return;
-        if (IPcmWireRows* r = c->pcm_wire_rows()) r->service_pcm_tick();
+        if (c == nullptr || &c->profile() != &kProfile)
+            return;
+        if (IPcmWireRows* r = c->pcm_wire_rows())
+            r->service_pcm_tick();
     }
 };
 
-}  // namespace detail
+}
 
 template <const CoreProfile& kProfile>
 inline constexpr detail::WireTickRow<kProfile> kPcmWireTick{};
 
-}  // namespace mister::cores
+}

@@ -38,7 +38,9 @@ public:
 
     [[nodiscard]] bool note_applies(std::uint32_t applies, std::int64_t now) noexcept;
     void restart(std::int64_t now) noexcept;
+
     [[nodiscard]] bool probing() const noexcept { return phase_ == Phase::Probe; }
+
     [[nodiscard]] bool poll_due(std::int64_t now) const noexcept;
     [[nodiscard]] int park_ms(std::int64_t now) const noexcept;
     Image poll(std::int64_t now, bool copy) noexcept;
@@ -72,4 +74,4 @@ private:
     std::vector<std::byte> prev_{};
 };
 
-}  // namespace mister::app
+}

@@ -9,14 +9,22 @@
 namespace mister::app {
 
 static_assert(cores::kCheatTableBytes == 2048, "req / req: CHEAT_SIZE is 128 * 16 bytes total");
-static_assert(cores::CheatGeometry{}.unit == 16 && cores::CheatGeometry{}.max_active == 128,
-              "req: 16-byte units, 128 active codes, by default");
-static_assert(cores::clamp_cheat_geometry(0, 0).unit == 16,
-              "req: a non-positive unit falls back to 16");
-static_assert(cores::clamp_cheat_geometry(32, 500).max_active == 64,
-              "req: max_active is clamped so max * unit <= CHEAT_SIZE");
-static_assert(sizeof(CheatBlob{}.bytes) == cores::kCheatTableBytes,
-              "req: the crossing carries the WHOLE table, never a window");
+static_assert(
+    cores::CheatGeometry{}.unit == 16 && cores::CheatGeometry{}.max_active == 128,
+    "req: 16-byte units, 128 active codes, by default"
+);
+static_assert(
+    cores::clamp_cheat_geometry(0, 0).unit == 16,
+    "req: a non-positive unit falls back to 16"
+);
+static_assert(
+    cores::clamp_cheat_geometry(32, 500).max_active == 64,
+    "req: max_active is clamped so max * unit <= CHEAT_SIZE"
+);
+static_assert(
+    sizeof(CheatBlob{}.bytes) == cores::kCheatTableBytes,
+    "req: the crossing carries the WHOLE table, never a window"
+);
 static_assert(TxDigest::kPathCap == 1024, "req: stock's own cheat path buffer is char[1024]");
 static_assert(CheatRecord::kNameCap == 256, "req: cheat_rec_t::name is char[256]");
 
@@ -31,7 +39,8 @@ bool name_less(const CheatRecord& a, const CheatRecord& b) noexcept {
         const auto cy = static_cast<unsigned char>(y[i]);
         const int lx = cx >= 'A' && cx <= 'Z' ? cx + ('a' - 'A') : cx;
         const int ly = cy >= 'A' && cy <= 'Z' ? cy + ('a' - 'A') : cy;
-        if (lx != ly) return lx < ly;
+        if (lx != ly)
+            return lx < ly;
     }
     return x.size() < y.size();
 }
@@ -39,11 +48,12 @@ bool name_less(const CheatRecord& a, const CheatRecord& b) noexcept {
 std::string compose_dir(std::string_view core, std::string_view suffix) {
     std::string d{"cheats/"};
     d.append(core);
-    if (!suffix.empty()) d.append(suffix);
+    if (!suffix.empty())
+        d.append(suffix);
     return d;
 }
 
-}  // namespace
+}
 
 void CheatStore::reset_() noexcept {
     TASTY_SEAT_BODY(CheatStore);
@@ -64,8 +74,11 @@ void CheatStore::sort_() noexcept {
     std::sort(recs_.begin(), recs_.end(), name_less);
 }
 
-Ex<void> CheatStore::open(const TxDigest& d, std::string_view core,
-                          const cores::CheatLookup& look) {
+Ex<void> CheatStore::open(
+    const TxDigest& d,
+    std::string_view core,
+    const cores::CheatLookup& look
+) {
     TASTY_SEAT_BODY(CheatStore);
     reset_();
     if (d.kind == TxDigest::Kind::None || core.empty()) {
@@ -84,7 +97,8 @@ Ex<void> CheatStore::open(const TxDigest& d, std::string_view core,
     q.cd_asset_dir = cd_dir;
     q.require_zip = true;
     auto found = vfs_->find_game_asset(q);
-    if (!found) return std::unexpected(found.error());
+    if (!found)
+        return std::unexpected(found.error());
 
     svc::ScanFilter f{};
     f.directories = false;
@@ -97,7 +111,8 @@ Ex<void> CheatStore::open(const TxDigest& d, std::string_view core,
 
     archive_ = *found;
     for (const svc::DirEntry& e : *members) {
-        if (e.is_dir) continue;
+        if (e.is_dir)
+            continue;
         CheatRecord r{};
         (void)r.name.assign(e.name);
         recs_.push_back(std::move(r));
@@ -110,10 +125,12 @@ Ex<void> CheatStore::open(const TxDigest& d, std::string_view core,
 void CheatStore::take(const CheatCatalog& cat) {
     TASTY_SEAT_BODY(CheatStore);
     reset_();
-    geom_ = cores::clamp_cheat_geometry(static_cast<std::int32_t>(cat.unit),
-                                        static_cast<std::int32_t>(cat.max_active));
-    const std::size_t rows =
-        cat.count <= CheatCatalog::kMaxRows ? cat.count : CheatCatalog::kMaxRows;
+    geom_ = cores::clamp_cheat_geometry(
+        static_cast<std::int32_t>(cat.unit),
+        static_cast<std::int32_t>(cat.max_active)
+    );
+    const std::size_t rows = cat.count <= CheatCatalog::kMaxRows ? cat.count
+                                                                 : CheatCatalog::kMaxRows;
     for (std::size_t i = 0; i < rows; ++i) {
         const CheatCatalog::Row& src = cat.rows[i];
         const std::size_t end = static_cast<std::size_t>(src.offset) + src.len;
@@ -137,7 +154,8 @@ void CheatStore::take(const CheatCatalog& cat) {
 
 CheatRow CheatStore::row(std::size_t i) const noexcept {
     TASTY_SEAT_BODY(CheatStore);
-    if (i >= recs_.size()) return CheatRow{};
+    if (i >= recs_.size())
+        return CheatRow{};
     return CheatRow{recs_[i].name.view(), recs_[i].enabled};
 }
 
@@ -150,7 +168,8 @@ void CheatStore::publish_() noexcept {
     TASTY_SEAT_BODY(CheatStore);
     std::size_t pos = 0;
     for (CheatRecord& r : recs_) {
-        if (!r.enabled) continue;
+        if (!r.enabled)
+            continue;
 
         if (!r.loaded) {
             r.enabled = false;
@@ -223,8 +242,9 @@ Ex<bool> CheatStore::toggle(std::size_t i) {
         }
     }
 
-    if (changed) publish_();
+    if (changed)
+        publish_();
     return changed;
 }
 
-}  // namespace mister::app
+}

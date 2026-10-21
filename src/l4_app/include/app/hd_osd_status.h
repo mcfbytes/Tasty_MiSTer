@@ -94,4 +94,4 @@ constexpr void to_json(infra::JsonOut& o, const HdOsdStatus& s) noexcept {
 
 using HdOsdStatusCell = xthread::Telemetry<HdOsdStatus, SeatTag::HdOsd>;
 
-}  // namespace mister::app
+}

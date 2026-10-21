@@ -10,4 +10,4 @@ struct Attr {
     std::string_view value;
 };
 
-}  // namespace mister::svc::xml
+}

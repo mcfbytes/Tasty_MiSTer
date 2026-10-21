@@ -9,6 +9,7 @@
 
 #include "app/load_ladder.h"
 #include "app/load_window_map.h"
+#include "app/rung.h"
 #include "cores/core_window_decl.h"
 #include "cores/ladder_host.h"
 #include "cores/payload_pieces.h"
@@ -22,7 +23,7 @@
 
 namespace mister::app {
 
-class LoadWalk {
+class LoadWalk final : public Rung {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
@@ -36,6 +37,7 @@ public:
 
     static constexpr std::int64_t kEchoFloorNs = 2'000'000'000;
     static constexpr std::int64_t kEchoNsPerMiB = 250'000'000;
+
     [[nodiscard]] static constexpr std::int64_t echo_bound_ns(std::uint64_t bytes) noexcept {
         return kEchoFloorNs + static_cast<std::int64_t>((bytes * kEchoNsPerMiB) >> 20);
     }
@@ -46,19 +48,30 @@ public:
         ILoadWindowMap<seat_owner::Main>* map;
         hal::PhysRegion aperture;
         const svc::Vfs& vfs;
-        std::span<const cores::CoreWindowDecl> windows;
         std::int64_t now_ns = 0;
     };
 
-    [[nodiscard]] static Ex<LoadWalk> start(std::unique_ptr<cores::ILoader> loader,
-                                            const cores::LoadPlan& plan);
+    [[nodiscard]] static Ex<LoadWalk> start(
+        std::unique_ptr<cores::ILoader> loader,
+        const cores::LoadPlan& plan,
+        std::span<const cores::CoreWindowDecl> windows
+    );
 
     [[nodiscard]] Pass step(Host& h);
 
-    [[nodiscard]] bool wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
-                                  const FileTxLevelCell* level) const noexcept;
+    [[nodiscard]] bool wants_pass(
+        const LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell* level
+    ) const noexcept;
+
+    [[nodiscard]] bool wants_pass(
+        const LinkTxChannel<SeatTag::Main>& inbox,
+        const FileTxLevelCell& level
+    ) const noexcept override;
+    [[nodiscard]] Rung::Pass step(const RungEdges& edges, cores::ILadderHost& owner) override;
 
     [[nodiscard]] Pc pc() const noexcept { return pc_; }
+
     [[nodiscard]] std::size_t row() const noexcept { return row_; }
 
     [[nodiscard]] bool refused() const noexcept { return plan_.frame.refused; }
@@ -66,16 +79,25 @@ public:
     [[nodiscard]] bool stalled() const noexcept { return stalled_; }
 
 private:
-    LoadWalk(std::unique_ptr<cores::ILoader> loader, const cores::LoadPlan& plan) noexcept
-        : loader_(std::move(loader)), plan_(plan) {}
+    LoadWalk(
+        std::unique_ptr<cores::ILoader> loader,
+        const cores::LoadPlan& plan,
+        std::span<const cores::CoreWindowDecl> windows
+    ) noexcept
+        : loader_(std::move(loader)),
+          plan_(plan),
+          windows_(windows) {}
 
     [[nodiscard]] Pass hold_(Host& h);
     [[nodiscard]] Pass row_step_(Host& h);
     [[nodiscard]] Pass window_(Host& h, const cores::TransferRow& r);
     [[nodiscard]] Pass payload_(Host& h, const cores::TransferRow& r);
     [[nodiscard]] Pass pieces_step_(Host& h);
-    [[nodiscard]] Pass send_(Host& h, std::span<const std::uint8_t> bytes,
-                             const cores::PostNotify& notify);
+    [[nodiscard]] Pass send_(
+        Host& h,
+        std::span<const std::uint8_t> bytes,
+        const cores::PostNotify& notify
+    );
     [[nodiscard]] std::uint16_t next_act_(Host& h);
     [[nodiscard]] Pass notify_(Host& h, const cores::PostNotify& n);
     [[nodiscard]] Pass rung_(Host& h);
@@ -90,6 +112,7 @@ private:
 
     std::unique_ptr<cores::ILoader> loader_;
     cores::LoadPlan plan_;
+    std::span<const cores::CoreWindowDecl> windows_;
     std::optional<LoadLadder> ladder_;
     std::optional<cores::PayloadPieces> pieces_;
     std::uint64_t echo_bytes_ = 0;
@@ -104,4 +127,4 @@ private:
     Pc pc_ = Pc::Hold;
 };
 
-}  // namespace mister::app
+}

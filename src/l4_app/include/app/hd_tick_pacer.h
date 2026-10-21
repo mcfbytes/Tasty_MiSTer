@@ -31,7 +31,8 @@ public:
     }
 
     constexpr void advance(std::uint64_t now) noexcept {
-        if (!due(now)) return;
+        if (!due(now))
+            return;
         if (next_ns_ == 0) {
             next_ns_ = now + period_ns_;
             return;
@@ -43,15 +44,19 @@ public:
     }
 
     [[nodiscard]] constexpr int park_ms(std::uint64_t now) const noexcept {
-        if (due(now)) return 0;
+        if (due(now))
+            return 0;
         const std::uint64_t left = next_ns_ - now;
         std::uint64_t ms = (left + 999'999ull) / 1'000'000ull;
-        if (ms > 1000ull) ms = 1000ull;
+        if (ms > 1000ull)
+            ms = 1000ull;
         return static_cast<int>(ms);
     }
 
     [[nodiscard]] constexpr std::uint64_t missed() const noexcept { return missed_; }
+
     [[nodiscard]] constexpr std::uint8_t fps() const noexcept { return fps_; }
+
     [[nodiscard]] constexpr std::uint64_t period_ns() const noexcept { return period_ns_; }
 
 private:
@@ -61,4 +66,4 @@ private:
     std::uint64_t missed_ = 0;
 };
 
-}  // namespace mister::app
+}

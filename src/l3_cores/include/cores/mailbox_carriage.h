@@ -14,15 +14,30 @@ class MailboxCarriage final : public IMailboxRows {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    MailboxCarriage(hal::ISpiTransport& link, IMailboxPort& port, proto::SpiFioQueue& queue,
-                    proto::MailboxFrameDecl frame) noexcept
-        : link_(link), port_(port), queue_(queue), frame_(frame) {}
+    MailboxCarriage(
+        hal::ISpiTransport& link,
+        IMailboxPort& port,
+        proto::SpiFioQueue& queue,
+        proto::MailboxFrameDecl frame
+    ) noexcept
+        : link_(link),
+          port_(port),
+          queue_(queue),
+          frame_(frame) {}
 
     [[nodiscard]] static std::optional<MailboxCarriage> granted(
-        const HostServices& h, proto::MailboxFrameDecl frame) noexcept {
-        if (!h.mailbox || !h.fio_queue) return std::nullopt;
-        return std::optional<MailboxCarriage>{std::in_place, h.link, *h.mailbox, *h.fio_queue,
-                                              frame};
+        const HostServices& h,
+        proto::MailboxFrameDecl frame
+    ) noexcept {
+        if (!h.mailbox || !h.fio_queue)
+            return std::nullopt;
+        return std::optional<MailboxCarriage>{
+            std::in_place,
+            h.link,
+            *h.mailbox,
+            *h.fio_queue,
+            frame
+        };
     }
 
     void service_mailbox_tick() noexcept override;
@@ -34,4 +49,4 @@ private:
     proto::MailboxFrameDecl frame_;
 };
 
-}  // namespace mister::cores
+}

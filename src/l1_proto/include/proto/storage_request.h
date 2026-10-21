@@ -31,6 +31,7 @@ struct StorageRequest {
         ArenaHalf half{};
         std::uint8_t pad_[3]{};
     };
+
     struct Write {
         static constexpr Kind kKind = Kind::Write;
         std::uint64_t offset = 0;
@@ -38,18 +39,22 @@ struct StorageRequest {
         ArenaHalf half{};
         std::uint8_t pad_[3]{};
     };
+
     struct Create {
         static constexpr Kind kKind = Kind::Create;
         std::uint32_t bytes = 0;
         ArenaHalf half{};
         std::uint8_t pad_[3]{};
     };
+
     struct Flush {
         static constexpr Kind kKind = Kind::Flush;
     };
+
     struct Attach {
         static constexpr Kind kKind = Kind::Attach;
     };
+
     struct Detach {
         static constexpr Kind kKind = Kind::Detach;
     };
@@ -65,4 +70,4 @@ struct StorageRequest {
 static_assert(infra::MessageSum<StorageRequest> && infra::alternatives_are_total<StorageRequest>());
 static_assert(sizeof(StorageRequest) == 32 && alignof(StorageRequest) == 8);
 
-}  // namespace mister::proto
+}

@@ -41,11 +41,13 @@ struct LinkEvent {
         static constexpr Kind kKind = Kind::ReadyEdge;
         bool ready = false;
     };
+
     struct ButtonLevel {
         static constexpr Kind kKind = Kind::ButtonLevel;
         bool osd = false;
         bool user = false;
     };
+
     struct BlockRequest {
         static constexpr Kind kKind = Kind::BlockRequest;
         SlotIndex slot{};
@@ -54,6 +56,7 @@ struct LinkEvent {
         std::uint32_t bytes = 0;
     };
     enum class ConfStrRead : std::uint8_t { Whole, Truncated, Refused };
+
     struct ConfStr {
         static constexpr Kind kKind = Kind::ConfStr;
         std::uint8_t chunks = 0;
@@ -64,6 +67,7 @@ struct LinkEvent {
         std::uint16_t bytes = 0;
         Errc err{};
     };
+
     struct SaveBytes {
         static constexpr Kind kKind = Kind::SaveBytes;
         SaveKind which{};
@@ -73,11 +77,13 @@ struct LinkEvent {
         std::uint8_t pad_[2]{};
         CorrelationTag tag{};
     };
+
     struct Ps2Control {
         static constexpr Kind kKind = Kind::Ps2Control;
         std::uint16_t keyboard = 0;
         std::uint16_t mouse = 0;
     };
+
     struct CoreMade {
         static constexpr Kind kKind = Kind::CoreMade;
         bool made = false;
@@ -87,6 +93,7 @@ struct LinkEvent {
         std::uint16_t bind_gen = 0;
         Errc err{};
     };
+
     struct IdentityMatched {
         static constexpr Kind kKind = Kind::IdentityMatched;
         bool dual_sdram = false;
@@ -95,6 +102,7 @@ struct LinkEvent {
         bool wide = false;
         std::uint8_t pad_{};
     };
+
     struct IdentityMismatch {
         static constexpr Kind kKind = Kind::IdentityMismatch;
         BindGeneration bind_gen{};
@@ -103,15 +111,18 @@ struct LinkEvent {
         bool at_accept = false;
         std::uint8_t pad_[3]{};
     };
+
     struct OsdMask {
         static constexpr Kind kKind = Kind::OsdMask;
         ::mister::proto::OsdMask mask{};
         bool front_end = false;
         std::uint8_t pad_{};
     };
+
     struct Ps2ControlEnded {
         static constexpr Kind kKind = Kind::Ps2ControlEnded;
     };
+
     struct StartRefused {
         static constexpr Kind kKind = Kind::StartRefused;
         BindGeneration bind_gen{};
@@ -133,10 +144,21 @@ struct LinkEvent {
         std::uint8_t pad_[2]{};
     };
 
-    using Alternatives =
-        std::tuple<ReadyEdge, ButtonLevel, BlockRequest, ConfStr, SaveBytes, Ps2Control, CoreMade,
-                   IdentityMatched, IdentityMismatch, OsdMask, Ps2ControlEnded, StartRefused,
-                   RebootQuiesced, PolledWord>;
+    using Alternatives = std::tuple<
+        ReadyEdge,
+        ButtonLevel,
+        BlockRequest,
+        ConfStr,
+        SaveBytes,
+        Ps2Control,
+        CoreMade,
+        IdentityMatched,
+        IdentityMismatch,
+        OsdMask,
+        Ps2ControlEnded,
+        StartRefused,
+        RebootQuiesced,
+        PolledWord>;
     Kind kind = Kind::ReadyEdge;
     std::uint8_t pad_[3]{};
     alignas(4) std::array<std::byte, kStore> store{};
@@ -149,4 +171,4 @@ static_assert(infra::ordinal(LinkEvent::Kind::kCount) == 14);
 inline constexpr std::size_t kLinkRxCapacity = 64;
 using LinkRxRing = xthread::SpscRing<LinkEvent, kLinkRxCapacity>;
 
-}  // namespace mister::proto
+}

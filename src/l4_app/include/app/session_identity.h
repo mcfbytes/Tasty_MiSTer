@@ -60,4 +60,4 @@ struct SessionIdentity {
 
 static_assert(RememberedStem::kMax == SessionIdentity::kMax, "the stem clips as `core` does");
 
-}  // namespace mister::app
+}

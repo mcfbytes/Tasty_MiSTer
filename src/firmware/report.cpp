@@ -18,9 +18,15 @@ void set_report_voice(const IReportVoice* voice) noexcept {
 
 void report(const char* what, const Error& e) {
     char buf[192];
-    std::snprintf(buf, sizeof buf, "mister: %s failed: Errc=%u site=%u detail=%u", what,
-                  static_cast<unsigned>(e.code), static_cast<unsigned>(e.site),
-                  static_cast<unsigned>(e.detail));
+    std::snprintf(
+        buf,
+        sizeof buf,
+        "mister: %s failed: Errc=%u site=%u detail=%u",
+        what,
+        static_cast<unsigned>(e.code),
+        static_cast<unsigned>(e.site),
+        static_cast<unsigned>(e.detail)
+    );
     if (const IReportVoice* const voice = g_report_voice.load(std::memory_order_acquire)) {
         voice->say(buf);
     } else {
@@ -28,4 +34,4 @@ void report(const char* what, const Error& e) {
     }
 }
 
-}  // namespace mister::fw
+}

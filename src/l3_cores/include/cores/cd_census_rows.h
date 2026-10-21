@@ -17,15 +17,16 @@ template <const CoreProfile& kProfile>
 class CommandEdgeRow final : public reactor::ILinkDecoder {
 public:
     void service(reactor::CoreState& st) const override {
-        if (ICdServiceRows* r = rows_for(st, kProfile)) r->service_command_edge();
+        if (ICdServiceRows* r = rows_for(st, kProfile))
+            r->service_command_edge();
     }
 };
 
-}  // namespace detail
+}
 
 template <const CoreProfile& kProfile>
 inline constexpr detail::CommandEdgeRow<kProfile> kCdCommandEdge{};
 template <const CoreProfile& kProfile>
 inline constexpr detail::ServiceTickRow<kProfile> kCdServiceTick{};
 
-}  // namespace mister::cores
+}

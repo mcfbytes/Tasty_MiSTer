@@ -27,7 +27,8 @@ UniqueFd open_rw(const char* path) noexcept {
 void write_all(int fd, std::string_view s) noexcept {
     while (!s.empty()) {
         const ssize_t n = ::write(fd, s.data(), s.size());
-        if (n <= 0) return;
+        if (n <= 0)
+            return;
         s.remove_prefix(static_cast<std::size_t>(n));
     }
 }
@@ -38,9 +39,11 @@ void vt_tty(char (&path)[16], int vt) noexcept {
 
 std::optional<int> active_op() noexcept {
     const UniqueFd fd = open_rw(kConsole);
-    if (!fd.valid()) return std::nullopt;
+    if (!fd.valid())
+        return std::nullopt;
     vt_stat st{};
-    if (::ioctl(fd.get(), VT_GETSTATE, &st) != 0) return std::nullopt;
+    if (::ioctl(fd.get(), VT_GETSTATE, &st) != 0)
+        return std::nullopt;
     return static_cast<int>(st.v_active);
 }
 
@@ -55,14 +58,16 @@ std::optional<int> active_op() noexcept {
 
 void blank_op(const char* tty) noexcept {
     const UniqueFd fd = open_rw(tty);
-    if (!fd.valid()) return;
+    if (!fd.valid())
+        return;
     constexpr std::string_view kBlank = "\033[0m\033[?25l\033[37m\033[40m\033[2J\033[H";
     write_all(fd.get(), kBlank);
 }
 
 void restore_text_op(const char* tty) noexcept {
     const UniqueFd fd = open_rw(tty);
-    if (!fd.valid()) return;
+    if (!fd.valid())
+        return;
     (void)::ioctl(fd.get(), KDSETMODE, KD_TEXT);
     (void)::ioctl(fd.get(), KDSKBMODE, K_XLATE);
     vt_mode mode{};
@@ -82,9 +87,11 @@ std::optional<bool> text_mode_op(int vt) noexcept {
     char path[16];
     vt_tty(path, vt);
     const UniqueFd fd = open_rw(path);
-    if (!fd.valid()) return std::nullopt;
+    if (!fd.valid())
+        return std::nullopt;
     int mode = 0;
-    if (::ioctl(fd.get(), KDGETMODE, &mode) != 0) return std::nullopt;
+    if (::ioctl(fd.get(), KDGETMODE, &mode) != 0)
+        return std::nullopt;
     return mode == KD_TEXT;
 }
 
@@ -92,7 +99,8 @@ void graphics_op(int vt) noexcept {
     char path[16];
     vt_tty(path, vt);
     const UniqueFd fd = open_rw(path);
-    if (!fd.valid()) return;
+    if (!fd.valid())
+        return;
     constexpr std::string_view kHide = "\033[0m\033[?25l";
     write_all(fd.get(), kHide);
     (void)::ioctl(fd.get(), KDSETMODE, KD_GRAPHICS);
@@ -102,13 +110,14 @@ void text_op(int vt) noexcept {
     char path[16];
     vt_tty(path, vt);
     const UniqueFd fd = open_rw(path);
-    if (!fd.valid()) return;
+    if (!fd.valid())
+        return;
     (void)::ioctl(fd.get(), KDSETMODE, KD_TEXT);
     constexpr std::string_view kShow = "\033[0m\033[?25h";
     write_all(fd.get(), kShow);
 }
 
-}  // namespace
+}
 
 std::optional<int> LinuxVtConsole::active() noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
@@ -180,4 +189,4 @@ void UiVtConsole::text(int vt) noexcept {
     text_op(vt);
 }
 
-}  // namespace mister::os
+}

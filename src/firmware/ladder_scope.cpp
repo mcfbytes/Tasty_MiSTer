@@ -12,7 +12,8 @@ namespace mister::fw {
 void LadderScope::relax() {
     TASTY_SEAT_BODY(LadderScope);
     transitioning_.store(true, std::memory_order_release);
-    if (timer_) timer_->note_lifecycle(reactor::RoundLifecycle::Rung);
+    if (timer_)
+        timer_->note_lifecycle(reactor::RoundLifecycle::Rung);
     if (::pthread_getschedparam(::pthread_self(), &saved_policy_, &saved_param_) != 0) {
         saved_policy_ = SCHED_OTHER;
         saved_param_ = sched_param{};
@@ -25,10 +26,13 @@ void LadderScope::restore() {
     TASTY_SEAT_BODY(LadderScope);
     if (::pthread_setschedparam(::pthread_self(), saved_policy_, &saved_param_) != 0) {
         const auto n = restore_failures_.fetch_add(1, std::memory_order_relaxed) + 1;
-        std::fprintf(stderr, "mister: RT restore after ladder rung FAILED (%u)\n",
-                     static_cast<unsigned>(n));
+        std::fprintf(
+            stderr,
+            "mister: RT restore after ladder rung FAILED (%u)\n",
+            static_cast<unsigned>(n)
+        );
     }
     transitioning_.store(false, std::memory_order_release);
 }
 
-}  // namespace mister::fw
+}

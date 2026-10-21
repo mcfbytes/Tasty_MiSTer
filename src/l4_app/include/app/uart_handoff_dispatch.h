@@ -20,4 +20,4 @@ using UartHandoffRoutes = infra::AllRouted;
 
 static_assert(UartHandoffSink<UartPerformer>);
 
-}  // namespace mister::app
+}

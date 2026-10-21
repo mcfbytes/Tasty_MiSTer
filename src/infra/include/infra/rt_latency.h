@@ -14,4 +14,4 @@ struct alignas(64) RtLatency {
     LatHist doorbell_wake[kMaxLines];
 };
 
-}  // namespace mister::xthread
+}

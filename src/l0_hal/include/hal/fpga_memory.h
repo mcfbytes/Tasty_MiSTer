@@ -30,14 +30,21 @@ class FpgaMemory {
 
 public:
     [[nodiscard]] static Ex<FpgaMemory> map(
-        PhysRegion r, os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite);
+        PhysRegion r,
+        os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite
+    );
 
     [[nodiscard]] static Ex<FpgaMemory> map_uio(
-        int fd, os::PhysAddr node_base, PhysRegion r,
-        os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite);
+        int fd,
+        os::PhysAddr node_base,
+        PhysRegion r,
+        os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite
+    );
 
     [[nodiscard]] static Ex<FpgaMemory> map_aperture(
-        PhysRegion r, os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite);
+        PhysRegion r,
+        os::MmioRegion::Access access = os::MmioRegion::Access::ReadWrite
+    );
 
     static FpgaMemory borrow(std::span<std::byte> backing, PhysRegion r);
 
@@ -85,4 +92,4 @@ private:
 
 void copy_to_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept;
 
-}  // namespace mister::hal
+}

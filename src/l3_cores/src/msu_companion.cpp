@@ -30,13 +30,15 @@ Ex<CompanionPlan> MsuCompanion::plan(const CompanionAsk& ask) {
             size = sz ? sz->v : 0;
         }
     }
-    TransferRow row{.dest = RowDest::Window,
-                    .index = proto::IoIndex{msu::kDataIndex},
-                    .addr = 0,
-                    .window = 0,
-                    .bracket = RowBracket::AroundWithLength,
-                    .source = data_.view(),
-                    .placed = true};
+    TransferRow row{
+        .dest = RowDest::Window,
+        .index = proto::IoIndex{msu::kDataIndex},
+        .addr = 0,
+        .window = 0,
+        .bracket = RowBracket::AroundWithLength,
+        .source = data_.view(),
+        .placed = true
+    };
     const auto base = row_address(row, manifests::kSnesWindows, ask.aperture_base);
     if (size != 0 && size <= msu::kDataBound && base) {
         const auto n = static_cast<std::uint32_t>(size);
@@ -57,4 +59,4 @@ std::unique_ptr<ILoader> MsuCompanion::loader() {
     return std::make_unique<MsuDataLoader>();
 }
 
-}  // namespace mister::cores
+}

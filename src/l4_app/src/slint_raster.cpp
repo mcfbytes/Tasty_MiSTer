@@ -46,16 +46,18 @@ struct Adapter : slint_plat::WindowAdapter {
     slint::PhysicalSize size_;
 
     Adapter(slint_plat::SoftwareRenderer::RepaintBufferType type, slint::PhysicalSize size)
-        : renderer_(type), size_(size) {}
+        : renderer_(type),
+          size_(size) {}
 
     slint_plat::AbstractRenderer& renderer() override { return renderer_; }
+
     slint::PhysicalSize size() override { return size_; }
 };
 
 struct Plat : slint_plat::Platform {
     infra::OptRef<Adapter> adapter{};
-    slint_plat::SoftwareRenderer::RepaintBufferType type =
-        slint_plat::SoftwareRenderer::RepaintBufferType::ReusedBuffer;
+    slint_plat::SoftwareRenderer::RepaintBufferType
+        type = slint_plat::SoftwareRenderer::RepaintBufferType::ReusedBuffer;
     slint::PhysicalSize size{};
 
     std::unique_ptr<slint_plat::WindowAdapter> create_window_adapter() override {
@@ -71,9 +73,12 @@ Plat*& shared_platform() {
 }
 
 [[nodiscard]] slint::Color color_of(std::uint32_t rgb) {
-    return slint::Color::from_argb_uint8(255, static_cast<std::uint8_t>(rgb >> 16),
-                                         static_cast<std::uint8_t>(rgb >> 8),
-                                         static_cast<std::uint8_t>(rgb));
+    return slint::Color::from_argb_uint8(
+        255,
+        static_cast<std::uint8_t>(rgb >> 16),
+        static_cast<std::uint8_t>(rgb >> 8),
+        static_cast<std::uint8_t>(rgb)
+    );
 }
 
 [[nodiscard]] MenuRow menu_row(const PageDescription::Row& row) {
@@ -89,10 +94,15 @@ Plat*& shared_platform() {
     return out;
 }
 
-[[nodiscard]] slint::SharedString shared(std::string_view s) { return slint::SharedString{s}; }
+[[nodiscard]] slint::SharedString shared(std::string_view s) {
+    return slint::SharedString{s};
+}
 
-[[nodiscard]] HdRect union_dirty(const slint_plat::SoftwareRenderer::PhysicalRegion& region,
-                                 std::int32_t panel_w, std::int32_t panel_h) {
+[[nodiscard]] HdRect union_dirty(
+    const slint_plat::SoftwareRenderer::PhysicalRegion& region,
+    std::int32_t panel_w,
+    std::int32_t panel_h
+) {
     bool any = false;
     std::int32_t x0 = 0;
     std::int32_t y0 = 0;
@@ -101,7 +111,8 @@ Plat*& shared_platform() {
     for (auto piece : region.rectangles()) {
         const auto pw = static_cast<std::int32_t>(piece.size.width);
         const auto ph = static_cast<std::int32_t>(piece.size.height);
-        if (pw <= 0 || ph <= 0) continue;
+        if (pw <= 0 || ph <= 0)
+            continue;
         const std::int32_t rx0 = piece.origin.x;
         const std::int32_t ry0 = piece.origin.y;
         const std::int32_t rx1 = piece.origin.x + pw;
@@ -119,16 +130,22 @@ Plat*& shared_platform() {
             y1 = std::max(y1, ry1);
         }
     }
-    if (!any) return {};
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (x1 > panel_w) x1 = panel_w;
-    if (y1 > panel_h) y1 = panel_h;
-    if (x1 <= x0 || y1 <= y0) return {};
+    if (!any)
+        return {};
+    if (x0 < 0)
+        x0 = 0;
+    if (y0 < 0)
+        y0 = 0;
+    if (x1 > panel_w)
+        x1 = panel_w;
+    if (y1 > panel_h)
+        y1 = panel_h;
+    if (x1 <= x0 || y1 <= y0)
+        return {};
     return HdRect{x0, y0, x1 - x0, y1 - y0};
 }
 
-}  // namespace
+}
 
 struct Scene {
     std::optional<slint::ComponentHandle<HdMenu>> ui{};
@@ -149,13 +166,17 @@ struct SlintRaster::Impl {
     std::unique_ptr<Scene> scene{};
 
     void drop_scene() {
-        if (plat) plat->adapter.reset();
+        if (plat)
+            plat->adapter.reset();
         scene.reset();
     }
 
     void push_theme() {
-        if (!scene || !scene->ui || !have_theme) return;
-        const auto px = [](std::int32_t v) { return static_cast<float>(v); };
+        if (!scene || !scene->ui || !have_theme)
+            return;
+        const auto px = [](std::int32_t v) {
+            return static_cast<float>(v);
+        };
         const HdMetrics& m = metrics;
         auto& tok = (*scene->ui)->global<Theme>();
         tok.set_primary(color_of(theme.primary));
@@ -203,15 +224,21 @@ struct SlintRaster::Impl {
     }
 
     void apply_size() {
-        if (!scene || !scene->ui || layout.panel.w <= 0 || layout.panel.h <= 0) return;
+        if (!scene || !scene->ui || layout.panel.w <= 0 || layout.panel.h <= 0)
+            return;
         const auto pw = static_cast<std::uint32_t>(layout.panel.w);
         const auto ph = static_cast<std::uint32_t>(layout.panel.h);
-        if (plat) plat->size = slint::PhysicalSize{{pw, ph}};
-        if (plat && plat->adapter) plat->adapter->size_ = plat->size;
+        if (plat)
+            plat->size = slint::PhysicalSize{{pw, ph}};
+        if (plat && plat->adapter)
+            plat->adapter->size_ = plat->size;
         auto& win = (*scene->ui)->window();
         win.dispatch_scale_factor_change_event(1.f);
-        win.dispatch_resize_event(slint::LogicalSize{
-            {static_cast<float>(layout.panel.w), static_cast<float>(layout.panel.h)}});
+        win.dispatch_resize_event(
+            slint::LogicalSize{
+                {static_cast<float>(layout.panel.w), static_cast<float>(layout.panel.h)}
+            }
+        );
     }
 
     void adopt_layout(const HdLayout& next) {
@@ -221,11 +248,14 @@ struct SlintRaster::Impl {
     }
 
     [[nodiscard]] bool ensure() {
-        if (!have_theme || layout.panel.w <= 0 || layout.panel.h <= 0) return have_theme;
+        if (!have_theme || layout.panel.w <= 0 || layout.panel.h <= 0)
+            return have_theme;
         if (shared_platform() == nullptr) {
             auto made = std::make_unique<Plat>();
-            made->size = slint::PhysicalSize{{static_cast<std::uint32_t>(layout.panel.w),
-                                              static_cast<std::uint32_t>(layout.panel.h)}};
+            made->size = slint::PhysicalSize{
+                {static_cast<std::uint32_t>(layout.panel.w),
+                 static_cast<std::uint32_t>(layout.panel.h)}
+            };
             shared_platform() = made.get();
             slint_plat::set_platform(std::move(made));
         }
@@ -241,8 +271,11 @@ struct SlintRaster::Impl {
     }
 
     template <class Row, class Bind>
-    static void put(std::shared_ptr<slint::VectorModel<Row>>& model, std::vector<Row> next,
-                    Bind bind) {
+    static void put(
+        std::shared_ptr<slint::VectorModel<Row>>& model,
+        std::vector<Row> next,
+        Bind bind
+    ) {
         if (!model || model->row_count() != next.size()) {
             model = std::make_shared<slint::VectorModel<Row>>(std::move(next));
             bind(model);
@@ -250,7 +283,8 @@ struct SlintRaster::Impl {
         }
         for (std::size_t i = 0; i < next.size(); ++i) {
             const auto cur = model->row_data(i);
-            if (!cur || !(*cur == next[i])) model->set_row_data(i, next[i]);
+            if (!cur || !(*cur == next[i]))
+                model->set_row_data(i, next[i]);
         }
     }
 
@@ -258,39 +292,61 @@ struct SlintRaster::Impl {
         auto& ui = *scene->ui;
         const HdPanelPlan plan = plan_panel(metrics, page);
         const auto set_if = [](auto cur, auto next, auto apply) {
-            if (cur != next) apply(next);
+            if (cur != next)
+                apply(next);
         };
-        set_if(ui->get_heading_text(), slint::SharedString{page.title.c_str()},
-               [&](const slint::SharedString& v) { ui->set_heading_text(v); });
-        set_if(ui->get_core_text(), shared(hd_crumb_core(page.crumb.view())),
-               [&](const slint::SharedString& v) { ui->set_core_text(v); });
-        set_if(ui->get_subtitle_text(), shared(page.subtitle.view()),
-               [&](const slint::SharedString& v) { ui->set_subtitle_text(v); });
+        set_if(
+            ui->get_heading_text(),
+            slint::SharedString{page.title.c_str()},
+            [&](const slint::SharedString& v) { ui->set_heading_text(v); }
+        );
+        set_if(
+            ui->get_core_text(),
+            shared(hd_crumb_core(page.crumb.view())),
+            [&](const slint::SharedString& v) { ui->set_core_text(v); }
+        );
+        set_if(
+            ui->get_subtitle_text(),
+            shared(page.subtitle.view()),
+            [&](const slint::SharedString& v) { ui->set_subtitle_text(v); }
+        );
         auto& tok = ui->global<Theme>();
         set_if(tok.get_row_h(), static_cast<float>(plan.row_h), [&](float v) { tok.set_row_h(v); });
         set_if(tok.get_sep_h(), static_cast<float>(plan.sep_h), [&](float v) { tok.set_sep_h(v); });
         const bool choice = page.shape == PageDescription::Shape::Choice;
         set_if(ui->get_choice_shape(), choice, [&](bool v) { ui->set_choice_shape(v); });
-        set_if(ui->get_choice_stacked(), plan.choice_stacked,
-               [&](bool v) { ui->set_choice_stacked(v); });
-        set_if(ui->get_main_h(), static_cast<float>(plan.main_h),
-               [&](float v) { ui->set_main_h(v); });
-        set_if(ui->get_pinned_y(), static_cast<float>(plan.pinned_y),
-               [&](float v) { ui->set_pinned_y(v); });
-        set_if(ui->get_pinned_h(), static_cast<float>(plan.pinned_h),
-               [&](float v) { ui->set_pinned_h(v); });
-        set_if(ui->get_choice_y(), static_cast<float>(plan.choice_y),
-               [&](float v) { ui->set_choice_y(v); });
-        set_if(ui->get_choice_h(), static_cast<float>(plan.choice_h),
-               [&](float v) { ui->set_choice_h(v); });
+        set_if(ui->get_choice_stacked(), plan.choice_stacked, [&](bool v) {
+            ui->set_choice_stacked(v);
+        });
+        set_if(ui->get_main_h(), static_cast<float>(plan.main_h), [&](float v) {
+            ui->set_main_h(v);
+        });
+        set_if(ui->get_pinned_y(), static_cast<float>(plan.pinned_y), [&](float v) {
+            ui->set_pinned_y(v);
+        });
+        set_if(ui->get_pinned_h(), static_cast<float>(plan.pinned_h), [&](float v) {
+            ui->set_pinned_h(v);
+        });
+        set_if(ui->get_choice_y(), static_cast<float>(plan.choice_y), [&](float v) {
+            ui->set_choice_y(v);
+        });
+        set_if(ui->get_choice_h(), static_cast<float>(plan.choice_h), [&](float v) {
+            ui->set_choice_h(v);
+        });
         set_if(ui->get_cue_shown(), plan.cue, [&](bool v) { ui->set_cue_shown(v); });
         set_if(ui->get_cue_up(), plan.cue_up, [&](bool v) { ui->set_cue_up(v); });
         set_if(ui->get_cue_down(), plan.cue_down, [&](bool v) { ui->set_cue_down(v); });
         char cue[24];
-        std::snprintf(cue, sizeof(cue), "%u / %u", static_cast<unsigned>(plan.cue_at),
-                      static_cast<unsigned>(plan.cue_total));
-        set_if(ui->get_cue_text(), slint::SharedString{cue},
-               [&](const slint::SharedString& v) { ui->set_cue_text(v); });
+        std::snprintf(
+            cue,
+            sizeof(cue),
+            "%u / %u",
+            static_cast<unsigned>(plan.cue_at),
+            static_cast<unsigned>(plan.cue_total)
+        );
+        set_if(ui->get_cue_text(), slint::SharedString{cue}, [&](const slint::SharedString& v) {
+            ui->set_cue_text(v);
+        });
 
         std::vector<MenuRow> main;
         std::vector<MenuRow> pinned;
@@ -317,9 +373,11 @@ struct SlintRaster::Impl {
     }
 
     void sync_badge(const HdBadgeView& badge) {
-        if (!scene || !scene->ui) return;
+        if (!scene || !scene->ui)
+            return;
         const int kind = static_cast<int>(badge.badge);
-        if (scene->badge_kind == kind) return;
+        if (scene->badge_kind == kind)
+            return;
         (*scene->ui)->set_badge_kind(kind);
         scene->badge_kind = kind;
     }
@@ -328,7 +386,8 @@ struct SlintRaster::Impl {
 SlintRaster::SlintRaster() : impl_(std::make_unique<Impl>()) {}
 
 SlintRaster::~SlintRaster() {
-    if (!impl_ || !impl_->scene) return;
+    if (!impl_ || !impl_->scene)
+        return;
     if (current_seat() != SeatTag::HdOsd) {
         (void)impl_->scene.release();
         return;
@@ -344,27 +403,37 @@ bool SlintRaster::open_(const HdTheme& theme, const HdLayout& layout) {
     return impl_->ensure();
 }
 
-HdRect SlintRaster::render_(const PageDescription& page, const HdBadgeView& badge,
-                            std::span<std::uint16_t> panel, std::uint32_t stride_px) {
-    if (!impl_->ensure()) return {};
+HdRect SlintRaster::render_(
+    const PageDescription& page,
+    const HdBadgeView& badge,
+    std::span<std::uint16_t> panel,
+    std::uint32_t stride_px
+) {
+    if (!impl_->ensure())
+        return {};
     const auto ph = impl_->layout.panel.h;
     const auto pw = impl_->layout.panel.w;
     const auto need = static_cast<std::size_t>(stride_px) * static_cast<std::size_t>(ph);
-    if (pw <= 0 || ph <= 0 || stride_px == 0 || panel.size() < need) return {};
+    if (pw <= 0 || ph <= 0 || stride_px == 0 || panel.size() < need)
+        return {};
     impl_->sync(page);
     impl_->sync_badge(badge);
     slint_plat::update_timers_and_animations();
     auto* pixels = reinterpret_cast<slint_plat::Rgb565Pixel*>(panel.data());
     const auto region = impl_->plat->adapter->renderer_.render(
-        std::span<slint_plat::Rgb565Pixel>{pixels, panel.size()}, stride_px);
+        std::span<slint_plat::Rgb565Pixel>{pixels, panel.size()},
+        stride_px
+    );
     const bool full = impl_->force_full;
     impl_->force_full = false;
-    if (full) return HdRect{0, 0, pw, ph};
+    if (full)
+        return HdRect{0, 0, pw, ph};
     return union_dirty(region, pw, ph);
 }
 
 void SlintRaster::close_() {
-    if (!impl_) return;
+    if (!impl_)
+        return;
     impl_->drop_scene();
 }
 
@@ -374,4 +443,4 @@ void SlintRaster::relayout_(const HdLayout& layout) {
     impl_->force_full = true;
 }
 
-}  // namespace mister::app
+}

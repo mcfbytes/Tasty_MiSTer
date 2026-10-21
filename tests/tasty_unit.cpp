@@ -30,7 +30,7 @@
 #include "svc/vfs.h"
 #include "tasty_cli.h"
 #include "tasty_ctl.h"
-#include "tasty_hub.h"
+#include "replay_mode.h"
 #include "tasty_osd.h"
 #include "tasty_registry.h"
 #include "tasty_session.h"
@@ -79,6 +79,7 @@ struct FakeReplay final : fw::TastySession::Replay {
     unsigned stops = 0;
     fw::TastySession::PlayAsk last{};
     std::vector<std::string> lines{};
+
     bool take_play(const fw::TastySession::PlayAsk& ask) noexcept override {
         TASTY_SEAT_BODY(FakeReplay);
         ++plays;
@@ -89,34 +90,50 @@ struct FakeReplay final : fw::TastySession::Replay {
         }
         return true;
     }
+
     void take_stop() noexcept override {
         TASTY_SEAT_BODY(FakeReplay);
         ++stops;
     }
+
     std::uint32_t frames() const noexcept override { return 12; }
+
     std::uint32_t movie_frames() const noexcept override { return 12; }
+
     bool refused() const noexcept override { return refuse_later; }
+
     bool active() const noexcept override { return feeding; }
+
     const char* refusal_why() const noexcept override { return why; }
+
     std::string_view setting{};
     std::string_view path{};
     bool offered = false;
+
     std::string_view refusal_setting() const noexcept override { return setting; }
+
     bool refusal_setting_offered() const noexcept override { return offered; }
+
     std::string_view refusal_path() const noexcept override { return path; }
+
     std::size_t settings_set() const noexcept override { return lines.size(); }
+
     std::string setting_line(std::size_t i) const override { return lines[i]; }
 };
 
 struct Tmp {
     std::string root;
+
     explicit Tmp(const char* tag) {
         root = std::string(std::getenv("TMPDIR") ? std::getenv("TMPDIR") : "/tmp") + tag;
         root += "XXXXXX";
-        if (::mkdtemp(root.data()) == nullptr) root.clear();
+        if (::mkdtemp(root.data()) == nullptr)
+            root.clear();
     }
+
     ~Tmp() {
-        if (root.empty()) return;
+        if (root.empty())
+            return;
         (void)::unlink((root + "/lock").c_str());
         (void)::unlink((root + "/pid").c_str());
         (void)::unlink((root + "/status").c_str());
@@ -130,10 +147,13 @@ struct Tmp {
         (void)::unlink((root + "/n64.bk2").c_str());
         (void)::rmdir(root.c_str());
     }
+
     std::string p(const char* n) const { return root + "/" + n; }
+
     bool put(const char* n, std::string_view b) const {
         std::FILE* f = std::fopen(p(n).c_str(), "wb");
-        if (f == nullptr) return false;
+        if (f == nullptr)
+            return false;
         const bool ok = std::fwrite(b.data(), 1, b.size(), f) == b.size();
         std::fclose(f);
         return ok;
@@ -142,8 +162,19 @@ struct Tmp {
 
 void publish_id(app::IdentityLatch& ident, std::string_view rbf) {
     const SeatScope rt{SeatTag::RT};
-    ident.publish(rbf, rbf, mister::app::RememberedStem::of(rbf, {}), svc::JoyPlan{}, "", false,
-                  false, {}, std::string_view{}, {}, {});
+    ident.publish(
+        rbf,
+        rbf,
+        mister::app::RememberedStem::of(rbf, {}),
+        svc::JoyPlan{},
+        "",
+        false,
+        false,
+        {},
+        std::string_view{},
+        {},
+        {}
+    );
 }
 
 void publish_end(app::ReplayStatusCell& cell, app::ReplayEnd end) {
@@ -175,7 +206,8 @@ struct Sess {
 
     static svc::Vfs open_tmp() {
         auto v = svc::Vfs::create_at("/tmp");
-        if (!v) std::abort();
+        if (!v)
+            std::abort();
         return std::move(*v);
     }
 
@@ -196,7 +228,8 @@ struct Sess {
         .capture_wake = infra::OptRef<xthread::WakeFlag>{rec_wake},
         .status = infra::OptRef<const app::RecorderStatusCell>{recstat},
         .writer = infra::OptRef<const app::RecWriteStatusCell>{rec_write},
-        .root = "/"}};
+        .root = "/"
+    }};
     xthread::WakeFlag main_stop{};
     xthread::Telemetry<std::uint8_t, SeatTag::Main> dv_ini{};
     std::atomic<int> stop{0};
@@ -208,6 +241,7 @@ struct Sess {
 
     explicit Sess(const svc::Vfs* vfs = nullptr, const std::atomic<int>* stop_flag = nullptr)
         : Sess(vfs, stop_flag, Binds{}) {}
+
     Sess(const svc::Vfs* vfs, const std::atomic<int>* stop_flag, Binds b)
         : w{.replay = replay,
             .rec = b.rec != nullptr ? *b.rec : rec,
@@ -229,6 +263,7 @@ struct Sess {
         }
         s.emplace(w, args);
     }
+
     void tick() { s->tick(); }
 
     std::optional<proto::LinkOp> wire_op() {
@@ -245,38 +280,51 @@ struct Sess {
 
 struct VresLink final : hal::ISpiTransport, hal::ICoreSignals {
     std::uint32_t vtime = 0;
+
     bool ready() const { return true; }
+
     Ex<hal::CoreIdentity> identify() override { return hal::CoreIdentity{}; }
+
     hal::CoreCapabilities latch_capabilities() override { return {}; }
+
     void set_core_reset(bool) override {}
+
     void select(hal::ChipSelect) override {
         open_ = true;
         first_ = true;
     }
+
     void deselect() override { open_ = false; }
+
     Ex<hal::SpiWord> transfer(hal::SpiWord w) override {
-        if (!open_) return hal::SpiWord{0};
+        if (!open_)
+            return hal::SpiWord{0};
         if (first_) {
             first_ = false;
             op_ = static_cast<std::uint8_t>(w.v & 0xFFu);
             cursor_ = 0;
             return hal::SpiWord{0};
         }
-        const std::uint16_t words[9] = {0x0001,
-                                        0x0500,
-                                        0x0000,
-                                        0x02d0,
-                                        0x0000,
-                                        0x2148,
-                                        0x0000,
-                                        static_cast<std::uint16_t>(vtime & 0xFFFFu),
-                                        static_cast<std::uint16_t>(vtime >> 16)};
+        const std::uint16_t words[9] = {
+            0x0001,
+            0x0500,
+            0x0000,
+            0x02d0,
+            0x0000,
+            0x2148,
+            0x0000,
+            static_cast<std::uint16_t>(vtime & 0xFFFFu),
+            static_cast<std::uint16_t>(vtime >> 16)
+        };
         std::uint16_t in = 0;
-        if (op_ == svc::kUioGetVres && cursor_ < 9) in = words[cursor_];
+        if (op_ == svc::kUioGetVres && cursor_ < 9)
+            in = words[cursor_];
         ++cursor_;
         return hal::SpiWord{in};
     }
+
     Ex<void> block_write(std::span<const std::uint8_t>) override { return {}; }
+
     Ex<void> block_read(std::span<std::uint8_t>) override { return {}; }
 
 private:
@@ -300,11 +348,17 @@ struct PumpRig {
     std::int64_t t = 0;
 
     PumpRig() {
-        if (auto v = svc::Vfs::create_at(root.root)) vfs.emplace(std::move(*v));
+        if (auto v = svc::Vfs::create_at(root.root))
+            vfs.emplace(std::move(*v));
         if (vfs)
-            pump.emplace(*vfs, clock, hal::board_by_id(hal::BoardId::De10Nano).video,
-                         infra::OptRef<svc::adv7513::II2cAdapter>{}, quiet.hdmi,
-                         app::VideoPump::Wiring{.activity = quiet.activity, .link_tx = tx});
+            pump.emplace(
+                *vfs,
+                clock,
+                hal::board_by_id(hal::BoardId::De10Nano).video,
+                infra::OptRef<svc::adv7513::II2cAdapter>{},
+                quiet.hdmi,
+                app::VideoPump::Wiring{.activity = quiet.activity, .link_tx = tx}
+            );
     }
 
     void core(std::uint32_t seq, std::uint32_t vtime) {
@@ -316,6 +370,7 @@ struct PumpRig {
             t += 600'000'000;
         }
     }
+
     app::VideoGeometryRecord tick() {
         const SeatScope ui{SeatTag::Ui};
         pump->tick();
@@ -337,13 +392,14 @@ void home(Sess& x) {
     x.tick();
 }
 
-}  // namespace
+}
 
 void test_cli_play() {
     const char* const av[] = {"tasty", "play", "/m/a.fm2", "--rom", "/r/a.nes", "--stay"};
     const auto a = fw::parse_tasty_args(std::span<const char* const>(av));
     CHECK(a.has_value());
-    if (!a) return;
+    if (!a)
+        return;
     CHECK(a->verb == fw::TastyVerb::Play);
     CHECK(a->movie.view() == "/m/a.fm2");
     CHECK(a->rom.view() == "/r/a.nes");
@@ -377,7 +433,8 @@ void test_cli_record_options() {
                               "20",    "--segment", "32M"};
     const auto a = fw::parse_tasty_args(std::span<const char* const>(av));
     CHECK(a.has_value());
-    if (!a) return;
+    if (!a)
+        return;
     CHECK(a->rec.codec == app::RecCodec::Zmbv);
     CHECK(a->rec.motion == app::RecMotion::Full);
     CHECK(a->rec.scale == app::RecScale::Half);
@@ -388,43 +445,50 @@ void test_cli_record_options() {
     const auto bc = fw::parse_tasty_args(std::span<const char* const>(bad_codec));
     CHECK(!bc.has_value());
     if (!bc)
-        CHECK(std::string_view(fw::tasty_args_refusal(bc.error().detail)) ==
-              "--codec is cscd or zmbv");
+        CHECK(
+            std::string_view(fw::tasty_args_refusal(bc.error().detail)) == "--codec is cscd or zmbv"
+        );
 
     const char* const no_record[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--codec", "zmbv"};
     const auto nr = fw::parse_tasty_args(std::span<const char* const>(no_record));
     CHECK(!nr.has_value());
     if (!nr)
-        CHECK(std::string_view(fw::tasty_args_refusal(nr.error().detail)) ==
-              "--codec, --scale, --motion, --every, --from, --to and --segment need --record");
+        CHECK(
+            std::string_view(fw::tasty_args_refusal(nr.error().detail))
+            == "--codec, --scale, --motion, --every, --from, --to and --segment need --record"
+        );
 
     const auto needs_record = [](const auto& argv) {
         const auto d = fw::parse_tasty_args(std::span<const char* const>(argv));
         CHECK(!d.has_value());
         if (!d)
-            CHECK(std::string_view(fw::tasty_args_refusal(d.error().detail))
-                      .ends_with("need --record"));
+            CHECK(
+                std::string_view(fw::tasty_args_refusal(d.error().detail))
+                    .ends_with("need --record")
+            );
     };
-    const char* const dflt_codec[] = {"tasty", "play",    "m.fm2", "--rom",
-                                      "r.nes", "--codec", "cscd"};
-    const char* const dflt_scale[] = {"tasty", "play",    "m.fm2", "--rom",
-                                      "r.nes", "--scale", "auto"};
+    const char* const dflt_codec[] =
+        {"tasty", "play", "m.fm2", "--rom", "r.nes", "--codec", "cscd"};
+    const char* const dflt_scale[] =
+        {"tasty", "play", "m.fm2", "--rom", "r.nes", "--scale", "auto"};
     const char* const dflt_every[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--every", "1"};
-    const char* const dflt_motion[] = {"tasty", "play",     "m.fm2", "--rom",
-                                       "r.nes", "--motion", "auto"};
+    const char* const dflt_motion[] =
+        {"tasty", "play", "m.fm2", "--rom", "r.nes", "--motion", "auto"};
     needs_record(dflt_codec);
     needs_record(dflt_scale);
     needs_record(dflt_every);
     needs_record(dflt_motion);
-    const char* const bad_motion[] = {"tasty",    "play", "m.fm2",    "--rom", "r.nes",
-                                      "--record", "/x",   "--motion", "nope"};
+    const char* const bad_motion[] =
+        {"tasty", "play", "m.fm2", "--rom", "r.nes", "--record", "/x", "--motion", "nope"};
     const auto bm = fw::parse_tasty_args(std::span<const char* const>(bad_motion));
     CHECK(!bm.has_value());
     if (!bm)
-        CHECK(std::string_view(fw::tasty_args_refusal(bm.error().detail)) ==
-              "--motion is auto, off, small or full");
-    const char* const bad_slice[] = {"tasty",  "play", "m.fm2", "--rom", "r.nes",
-                                     "--from", "8",    "--to",  "8"};
+        CHECK(
+            std::string_view(fw::tasty_args_refusal(bm.error().detail))
+            == "--motion is auto, off, small or full"
+        );
+    const char* const bad_slice[] =
+        {"tasty", "play", "m.fm2", "--rom", "r.nes", "--from", "8", "--to", "8"};
     CHECK(!fw::parse_tasty_args(std::span<const char* const>(bad_slice)).has_value());
     const char* const bad_every[] = {"tasty", "rec", "start", "--record", "/x", "--every", "0"};
     CHECK(!fw::parse_tasty_args(std::span<const char* const>(bad_every)).has_value());
@@ -437,28 +501,37 @@ void test_cli_record_options() {
         const auto rs = fw::parse_tasty_args(std::span<const char* const>(rec_slice));
         CHECK(!rs.has_value());
         if (!rs)
-            CHECK(std::string_view(fw::tasty_args_refusal(rs.error().detail)) ==
-                  "--from and --to count movie frames; use them with tasty play --record");
+            CHECK(
+                std::string_view(fw::tasty_args_refusal(rs.error().detail))
+                == "--from and --to count movie frames; use them with tasty play --record"
+            );
     }
     const char* const bad_ram[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--ram-init", "7"};
     const auto br = fw::parse_tasty_args(std::span<const char* const>(bad_ram));
     CHECK(!br.has_value());
     if (!br)
-        CHECK(std::string_view(fw::tasty_args_refusal(br.error().detail)) ==
-              "--ram-init is zero, ff or random");
+        CHECK(
+            std::string_view(fw::tasty_args_refusal(br.error().detail))
+            == "--ram-init is zero, ff or random"
+        );
 }
 
 void test_session_passes_record_options() {
     Tmp t("/tasty_tasty_recopt_");
     CHECK(!t.root.empty());
-    if (t.root.empty()) return;
+    if (t.root.empty())
+        return;
     const std::string media = t.p("media");
     const std::string fat = media + "/fat";
     CHECK(::mkdir(media.c_str(), 0755) == 0);
     CHECK(::mkdir(fat.c_str(), 0755) == 0);
     app::RecControlCell cell;
-    app::RecorderControl rec(app::RecorderControl::Wiring{
-        .control = infra::OptRef<app::RecControlCell>{cell}, .root = media});
+    app::RecorderControl rec(
+        app::RecorderControl::Wiring{
+            .control = infra::OptRef<app::RecControlCell>{cell},
+            .root = media
+        }
+    );
     Sess x{nullptr, nullptr, {.rec = &rec}};
     x.args.rec.codec = app::RecCodec::Zmbv;
     x.args.rec.motion = app::RecMotion::Full;
@@ -490,7 +563,20 @@ void test_cli_hashes() {
     CHECK(b.has_value() && b->hashes_only);
 }
 
-void test_boot_no_handoff() { CHECK(!fw::tasty_boot_calls_handoff()); }
+void test_boot_no_handoff() {
+    fw::ReplayMode mode{fw::TastyArgs{}};
+    const fw::SessionMode::Traits t = mode.traits();
+    CHECK(t.boot_args.size() == 2u);
+    if (t.boot_args.size() == 2u) {
+        CHECK(std::string_view{t.boot_args[0]} == "tasty");
+        CHECK(std::string_view{t.boot_args[1]}.empty());
+    }
+    CHECK(std::string_view{t.program} == "tasty");
+    CHECK(t.windows_notice == hal::FallbackNotice::Quiet);
+
+    CHECK(t.stop_ends_ladder);
+    CHECK(!t.not_ready_quits_clean);
+}
 
 void test_cli_play_needs_rom() {
     const char* const play[] = {"tasty", "play", "m.fm2"};
@@ -515,8 +601,10 @@ void test_cli_save_is_play_only() {
         const auto d = fw::parse_tasty_args(std::span<const char* const>(argv));
         CHECK(!d.has_value());
         if (!d)
-            CHECK(std::string_view(fw::tasty_args_refusal(d.error().detail)) ==
-                  "--save seeds a movie's battery save; use it with tasty play");
+            CHECK(
+                std::string_view(fw::tasty_args_refusal(d.error().detail))
+                == "--save seeds a movie's battery save; use it with tasty play"
+            );
     };
     const char* const info[] = {"tasty", "info", "m.fm2", "--save", "/s/a.sav"};
     const char* const check[] = {"tasty", "check", "m.fm2", "--rom", "r.nes", "--save", "/s/a.sav"};
@@ -569,6 +657,16 @@ void test_movie_system_path() {
     CHECK(cores::movie_system_plays("PSX"));
     CHECK(!cores::movie_system_plays("MENU"));
     CHECK(!cores::movie_system_plays("N64"));
+
+    bool saw_disk_core = false;
+    for (const cores::CoreFactory& f : cores::core_table()) {
+        if (f.profile == nullptr || f.profile->disk_formats.empty())
+            continue;
+        saw_disk_core = true;
+        CHECK(!cores::movie_system_plays(f.name));
+    }
+    CHECK(saw_disk_core);
+    CHECK(!cores::movie_system_plays("AtariST"));
 }
 
 void test_splash_pixel() {
@@ -622,7 +720,8 @@ void test_lock_unlink() {
     fw::tasty_set_ctl_paths(lock.c_str(), pid.c_str(), st.c_str());
     auto fd = fw::tasty_lock_owner();
     CHECK(fd.has_value());
-    if (!fd) return;
+    if (!fd)
+        return;
     CHECK(fw::tasty_write_pid(4242).has_value());
     CHECK(fw::tasty_write_status("x\n").has_value());
     CHECK(fw::tasty_read_pid() == 4242);
@@ -630,7 +729,8 @@ void test_lock_unlink() {
     CHECK(!fw::tasty_read_pid());
     auto fd2 = fw::tasty_lock_owner();
     CHECK(fd2.has_value());
-    if (fd2) fw::tasty_unlock(*fd2);
+    if (fd2)
+        fw::tasty_unlock(*fd2);
     fw::tasty_set_ctl_paths(fw::kTastyLockPath, fw::kTastyPidPath, fw::kTastyStatusPath);
 }
 
@@ -650,7 +750,8 @@ void test_prepare_record_stem() {
     CHECK(rec.assign(t.root));
     const auto out = fw::tasty_prepare_record(rec, "/media/fat/tas/klmz3-smb.fm2");
     CHECK(out.has_value());
-    if (!out) return;
+    if (!out)
+        return;
     CHECK(out->view().find("klmz3-smb") != std::string_view::npos);
     CHECK(out->view().find(t.root) != std::string_view::npos);
 }
@@ -663,11 +764,13 @@ void test_prepare_record_avi_stem() {
     CHECK(rec.assign(avi));
     const auto out = fw::tasty_prepare_record(rec, "/media/fat/tas/klmz3-smb.fm2");
     CHECK(out.has_value());
-    struct stat st {};
+    struct stat st{};
     const bool exists = ::stat(avi.c_str(), &st) == 0;
     CHECK(!exists || !S_ISDIR(st.st_mode));
-    if (out) CHECK(out->view().size() >= 4 && out->view().substr(out->view().size() - 4) == ".avi");
-    if (exists && S_ISDIR(st.st_mode)) (void)::rmdir(avi.c_str());
+    if (out)
+        CHECK(out->view().size() >= 4 && out->view().substr(out->view().size() - 4) == ".avi");
+    if (exists && S_ISDIR(st.st_mode))
+        (void)::rmdir(avi.c_str());
     CHECK(t.put("cap", "x"));
     app::PathText file{};
     CHECK(file.assign(t.p("cap")));
@@ -682,11 +785,13 @@ void test_prepare_record_avi_stem() {
     CHECK(bare.assign(caps));
     const auto dir = fw::tasty_prepare_record(bare, "klmz3-smb.fm2");
     CHECK(dir.has_value());
-    struct stat ds {};
+    struct stat ds{};
     CHECK(::stat(caps.c_str(), &ds) == 0 && S_ISDIR(ds.st_mode));
-    if (dir) CHECK(dir->view().find("klmz3-smb") != std::string_view::npos);
+    if (dir)
+        CHECK(dir->view().find("klmz3-smb") != std::string_view::npos);
     (void)::rmdir(caps.c_str());
-    if (::mkdir(avi.c_str(), 0755) != 0 && errno != EEXIST) CHECK(false);
+    if (::mkdir(avi.c_str(), 0755) != 0 && errno != EEXIST)
+        CHECK(false);
     app::PathText asdir{};
     CHECK(asdir.assign(avi));
     CHECK(!fw::tasty_prepare_record(asdir, "m.fm2").has_value());
@@ -716,33 +821,19 @@ void test_info_missing() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     CHECK(fw::tasty_info_movie(*vfs, "missing.fm2") == 1);
 }
 
 void test_manifest_doc_role_follows_the_core_set() {
-    CHECK(cores::manifest_doc_role() == nullptr);
-    Tmp t("/tasty_tasty_mra_");
-    CHECK(!t.root.empty());
-    CHECK(t.put("case.mra", "<misterromdescription></misterromdescription>"));
-    auto vfs = svc::Vfs::create_at(t.root);
-    CHECK(vfs.has_value());
-    if (vfs) {
-        app::LoadRequest req{};
-        CHECK(req.path.assign("case.mra"));
-        req.kind = app::XmlKind::Mra;
-        app::PendingLoad pending;
-        pending.arm(req);
-        const auto loaded = pending.load_manifest(*vfs);
-        CHECK(!loaded.has_value());
-        if (!loaded) CHECK(loaded.error().code == Errc::bad_format);
-    }
-    (void)::unlink(t.p("case.mra").c_str());
+    CHECK(cores::manifest_doc_role().has_value());
 }
 
 struct StdoutTo {
     Tmp t{"/tasty_tasty_out_"};
     int saved = -1;
+
     StdoutTo() {
         std::fflush(stdout);
         saved = ::dup(1);
@@ -752,6 +843,7 @@ struct StdoutTo {
             ::close(fd);
         }
     }
+
     std::string text() {
         std::fflush(stdout);
         if (saved >= 0) {
@@ -769,6 +861,7 @@ struct StdoutTo {
         }
         return out;
     }
+
     ~StdoutTo() { (void)text(); }
 };
 
@@ -777,10 +870,11 @@ void test_info_frames_and_rerecords() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
-    const std::string movie =
-        "version 3\nromChecksum base64:AAAAAAAAAAAAAAAAAAAAAA==\nrerecordCount 5\n"
-        "port0 1\nport1 0\nport2 0\n|0|........|||\n|0|........|||\n|0|.......A|||\n";
+    if (!vfs)
+        return;
+    const std::string
+        movie = "version 3\nromChecksum base64:AAAAAAAAAAAAAAAAAAAAAA==\nrerecordCount 5\n"
+                "port0 1\nport1 0\nport2 0\n|0|........|||\n|0|........|||\n|0|.......A|||\n";
     CHECK(t.put("m.fm2", movie));
     StdoutTo cap;
     const int rc = fw::tasty_info_movie(*vfs, "m.fm2");
@@ -796,7 +890,8 @@ void test_check_missing() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     CHECK(fw::tasty_check_movie(*vfs, "missing.fm2", "r.nes") == 1);
 }
 
@@ -839,7 +934,8 @@ void test_stop_owner_signaled() {
     if (fd >= 0) {
         const ssize_t n = ::read(fd, comm, sizeof comm - 1);
         ::close(fd);
-        if (n > 0 && comm[n - 1] == '\n') comm[n - 1] = '\0';
+        if (n > 0 && comm[n - 1] == '\n')
+            comm[n - 1] = '\0';
     }
     static char owner_comm[32];
     std::snprintf(owner_comm, sizeof owner_comm, "%s", comm);
@@ -867,7 +963,8 @@ void test_rec_start_checks_the_owner() {
     if (fd >= 0) {
         const ssize_t n = ::read(fd, comm, sizeof comm - 1);
         ::close(fd);
-        if (n > 0 && comm[n - 1] == '\n') comm[n - 1] = '\0';
+        if (n > 0 && comm[n - 1] == '\n')
+            comm[n - 1] = '\0';
     }
     fw::tasty_set_owner_comm(comm);
     CHECK(fw::tasty_rec_start_joins_owner());
@@ -894,7 +991,8 @@ void test_stop_stale_pid() {
 void test_load_edge_rereads_geometry() {
     PumpRig r;
     CHECK(r.pump.has_value());
-    if (!r.pump) return;
+    if (!r.pump)
+        return;
     app::IdentityLatch ident{};
     publish_id(ident, "NES");
     fw::TastySink sink{*r.pump, &ident};
@@ -925,7 +1023,8 @@ void test_load_edge_rereads_geometry() {
 void test_start_waits_for_video_edge() {
     PumpRig r;
     CHECK(r.pump.has_value());
-    if (!r.pump) return;
+    if (!r.pump)
+        return;
     fw::TastySink sink{*r.pump, nullptr};
     Sess x;
     x.w.video = infra::OptRef{*r.pump};
@@ -995,17 +1094,23 @@ void test_epoch_ambiguous_final_leaves() {
 }
 
 void test_replay_ends_leave() {
-    const app::ReplayEnd ends[] = {app::ReplayEnd::Finished,   app::ReplayEnd::Stopped,
-                                   app::ReplayEnd::Superseded, app::ReplayEnd::CoreSwitch,
-                                   app::ReplayEnd::RefLost,    app::ReplayEnd::NoReference,
-                                   app::ReplayEnd::Refused};
+    const app::ReplayEnd ends[] = {
+        app::ReplayEnd::Finished,
+        app::ReplayEnd::Stopped,
+        app::ReplayEnd::Superseded,
+        app::ReplayEnd::CoreSwitch,
+        app::ReplayEnd::RefLost,
+        app::ReplayEnd::NoReference,
+        app::ReplayEnd::Refused
+    };
     for (const auto end : ends) {
         Sess x;
         to_run(x);
         CHECK(x.replay.plays == 1);
         publish_end(x.play, end);
         x.tick();
-        if (end == app::ReplayEnd::Finished) x.tick();
+        if (end == app::ReplayEnd::Finished)
+            x.tick();
         home(x);
         CHECK(x.replay.stops >= 1);
         if (end != app::ReplayEnd::Finished && end != app::ReplayEnd::Stopped) {
@@ -1017,6 +1122,7 @@ void test_replay_ends_leave() {
 struct StderrTo {
     Tmp t{"/tasty_tasty_err_"};
     int saved = -1;
+
     StderrTo() {
         std::fflush(stderr);
         saved = ::dup(2);
@@ -1026,6 +1132,7 @@ struct StderrTo {
             ::close(fd);
         }
     }
+
     std::string text() {
         std::fflush(stderr);
         if (saved >= 0) {
@@ -1043,13 +1150,19 @@ struct StderrTo {
         }
         return out;
     }
+
     ~StderrTo() { (void)text(); }
 };
 
 void test_replay_end_sentences() {
-    const app::ReplayEnd ends[] = {app::ReplayEnd::Superseded,     app::ReplayEnd::CoreSwitch,
-                                   app::ReplayEnd::RefLost,        app::ReplayEnd::NoReference,
-                                   app::ReplayEnd::EpochAmbiguous, app::ReplayEnd::Refused};
+    const app::ReplayEnd ends[] = {
+        app::ReplayEnd::Superseded,
+        app::ReplayEnd::CoreSwitch,
+        app::ReplayEnd::RefLost,
+        app::ReplayEnd::NoReference,
+        app::ReplayEnd::EpochAmbiguous,
+        app::ReplayEnd::Refused
+    };
     for (const auto end : ends) {
         StderrTo err;
         Sess x;
@@ -1063,8 +1176,10 @@ void test_replay_end_sentences() {
         CHECK(text.find(app::replay_end_sentence(end)) != std::string::npos);
     }
 
-    const std::string untimed =
-        app::replay_end_sentence(app::ReplayEnd::EpochAmbiguous, app::EpochFail::Untimed);
+    const std::string untimed = app::replay_end_sentence(
+        app::ReplayEnd::EpochAmbiguous,
+        app::EpochFail::Untimed
+    );
     CHECK(untimed.find("--lead 0") != std::string::npos);
     for (const auto f : {app::EpochFail::None, app::EpochFail::Retry, app::EpochFail::Before}) {
         const std::string other = app::replay_end_sentence(app::ReplayEnd::EpochAmbiguous, f);
@@ -1276,7 +1391,8 @@ void test_rec_only_a_stopped_recording_after_it_started_is_clean() {
 void test_a_recorded_replay_reports_a_failure_while_it_runs() {
     Tmp t("/tasty_tasty_recrep_");
     CHECK(!t.root.empty());
-    if (t.root.empty()) return;
+    if (t.root.empty())
+        return;
     Sess x;
     app::PathText cap{};
     CHECK(cap.assign(t.p("cap")));
@@ -1313,7 +1429,8 @@ void test_a_recorded_replay_reports_a_failure_while_it_runs() {
 void test_a_recorded_replay_reports_a_failure_as_it_closes() {
     Tmp t("/tasty_tasty_recrepc_");
     CHECK(!t.root.empty());
-    if (t.root.empty()) return;
+    if (t.root.empty())
+        return;
     Sess x;
     app::PathText cap{};
     CHECK(cap.assign(t.p("cap")));
@@ -1415,9 +1532,10 @@ void test_the_verdict_line_names_the_remedy() {
     xthread::DiagLog diag;
     CHECK(diag.open(t.p("diag").c_str()));
     app::RecorderStatusCell status{};
-    app::RecorderControl rc{
-        app::RecorderControl::Wiring{.status = infra::OptRef<const app::RecorderStatusCell>{status},
-                                     .diag = infra::OptRef<xthread::DiagLog>{diag}}};
+    app::RecorderControl rc{app::RecorderControl::Wiring{
+        .status = infra::OptRef<const app::RecorderStatusCell>{status},
+        .diag = infra::OptRef<xthread::DiagLog>{diag}
+    }};
     {
         const SeatScope cap{SeatTag::Capture};
         app::RecorderStatus r{};
@@ -1465,7 +1583,8 @@ void test_stale_generation() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     Sess x{&*vfs};
     x.args = play_args();
     (void)x.args.movie.assign("m.fm2");
@@ -1484,7 +1603,8 @@ void test_stale_generation() {
 namespace {
 std::optional<std::string> slurp(const std::string& path) {
     std::FILE* f = std::fopen(path.c_str(), "rb");
-    if (f == nullptr) return std::nullopt;
+    if (f == nullptr)
+        return std::nullopt;
     std::string b;
     char buf[4096];
     for (std::size_t n; (n = std::fread(buf, 1, sizeof buf, f)) > 0;)
@@ -1504,7 +1624,8 @@ SeedRun seed_run(const Tmp& t, const char* save) {
     SeedRun out{};
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return out;
+    if (!vfs)
+        return out;
     Sess x{&*vfs};
     x.args.save.emplace();
     (void)x.args.save->assign(save);
@@ -1519,12 +1640,13 @@ SeedRun seed_run(const Tmp& t, const char* save) {
     (void)::rmdir(t.p("tasty").c_str());
     return out;
 }
-}  // namespace
+}
 
 void test_save_seed_copied() {
     Tmp t("/tasty_tasty_seed_");
     CHECK(!t.root.empty());
-    if (t.root.empty()) return;
+    if (t.root.empty())
+        return;
     std::string bytes(8192, '\0');
     for (std::size_t i = 0; i < bytes.size(); ++i)
         bytes[i] = static_cast<char>(i * 7u + 3u);
@@ -1548,7 +1670,8 @@ void test_save_seed_copied() {
 void test_save_seed_refusals() {
     Tmp t("/tasty_tasty_seedno_");
     CHECK(!t.root.empty());
-    if (t.root.empty()) return;
+    if (t.root.empty())
+        return;
     const SeedRun missing = seed_run(t, "absent.sav");
     CHECK_EQ(missing.plays, 0u);
     CHECK_EQ(missing.exit_code, 1);
@@ -1590,8 +1713,8 @@ void test_status_force() {
     const auto first = fw::tasty_read_status();
     CHECK(first.has_value());
     publish_end(x.play, app::ReplayEnd::Finished);
-    struct stat a {};
-    struct stat b {};
+    struct stat a{};
+    struct stat b{};
     CHECK(::stat(st.c_str(), &a) == 0);
     x.tick();
     CHECK(::stat(st.c_str(), &b) == 0);
@@ -1600,7 +1723,8 @@ void test_status_force() {
     home(x);
     auto last = fw::tasty_read_status();
     CHECK(last.has_value());
-    if (last) CHECK(last->find("finished") != std::string::npos);
+    if (last)
+        CHECK(last->find("finished") != std::string::npos);
     fw::tasty_set_ctl_paths(fw::kTastyLockPath, fw::kTastyPidPath, fw::kTastyStatusPath);
 }
 
@@ -1616,7 +1740,8 @@ void test_status_frames_total() {
     x.tick();
     const auto s = fw::tasty_read_status();
     CHECK(s.has_value());
-    if (s) CHECK(s->find("\"frames\":12") != std::string::npos);
+    if (s)
+        CHECK(s->find("\"frames\":12") != std::string::npos);
     home(x);
     fw::tasty_set_ctl_paths(fw::kTastyLockPath, fw::kTastyPidPath, fw::kTastyStatusPath);
 }
@@ -1624,7 +1749,8 @@ void test_status_frames_total() {
 void expect_scale_sentence(std::uint8_t fell, const char* warn, const char* needle) {
     Tmp t("/tasty_tasty_sc_");
     CHECK(!t.root.empty());
-    if (t.root.empty()) return;
+    if (t.root.empty())
+        return;
     const std::string lock = t.p("lock");
     const std::string pid = t.p("pid");
     const std::string st = t.p("status");
@@ -1648,7 +1774,8 @@ void expect_scale_sentence(std::uint8_t fell, const char* warn, const char* need
     }
     const auto s = fw::tasty_read_status();
     CHECK(s.has_value());
-    if (s) CHECK(s->find("\"scale\":2") != std::string::npos);
+    if (s)
+        CHECK(s->find("\"scale\":2") != std::string::npos);
     CHECK(err == warn);
     publish_end(x.play, app::ReplayEnd::Finished);
     std::string again;
@@ -1666,7 +1793,8 @@ void expect_scale_sentence(std::uint8_t fell, const char* warn, const char* need
 void test_status_scale_step_warns_per_recording() {
     Tmp t("/tasty_tasty_sg_");
     CHECK(!t.root.empty());
-    if (t.root.empty()) return;
+    if (t.root.empty())
+        return;
     const std::string lock = t.p("lock");
     const std::string pid = t.p("pid");
     const std::string st = t.p("status");
@@ -1710,14 +1838,18 @@ void test_status_scale_step_warns_per_recording() {
 
 void test_status_scale_step_warns_once() {
     const char* tail = " (--scale native keeps full size and may repeat frames instead)\n";
-    const std::string cpu =
-        std::string("tasty: the encoder was using too much CPU; the AVI continues at half size in "
-                    "a new segment") +
-        tail;
-    const std::string behind =
-        std::string("tasty: the encoder fell behind; the AVI continues at half size in a new "
-                    "segment until it catches up") +
-        tail;
+    const std::string
+        cpu = std::string(
+                  "tasty: the encoder was using too much CPU; the AVI continues at half size in "
+                  "a new segment"
+              )
+        + tail;
+    const std::string
+        behind = std::string(
+                     "tasty: the encoder fell behind; the AVI continues at half size in a new "
+                     "segment until it catches up"
+                 )
+        + tail;
     expect_scale_sentence(0, cpu.c_str(), "too much CPU");
     expect_scale_sentence(1, behind.c_str(), "fell behind");
 }
@@ -1725,7 +1857,8 @@ void test_status_scale_step_warns_once() {
 void test_status_scale_return_is_said() {
     Tmp t("/tasty_tasty_sr_");
     CHECK(!t.root.empty());
-    if (t.root.empty()) return;
+    if (t.root.empty())
+        return;
     const std::string lock = t.p("lock");
     const std::string pid = t.p("pid");
     const std::string st = t.p("status");
@@ -1742,11 +1875,11 @@ void test_status_scale_return_is_said() {
         body.video.held = held;
         enc.publish(body);
     };
-    const std::string back =
-        "tasty: the encoder caught up; the AVI is back at full size in a new segment\n";
+    const std::string
+        back = "tasty: the encoder caught up; the AVI is back at full size in a new segment\n";
     const auto ends_with = [](const std::string& text, const std::string& tail) {
-        return text.size() >= tail.size() &&
-               text.compare(text.size() - tail.size(), tail.size(), tail) == 0;
+        return text.size() >= tail.size()
+            && text.compare(text.size() - tail.size(), tail.size(), tail) == 0;
     };
     const auto said = [&] {
         ::usleep(260 * 1000);
@@ -1758,8 +1891,9 @@ void test_status_scale_return_is_said() {
     publish(1, 0);
     CHECK(said().find("fell behind") != std::string::npos);
     publish(1, 1);
-    CHECK(said() ==
-          "tasty: the encoder caught up; the AVI is back at full size in a new segment\n");
+    CHECK(
+        said() == "tasty: the encoder caught up; the AVI is back at full size in a new segment\n"
+    );
     CHECK(said().empty());
     publish(2, 1);
     CHECK(said().find("fell behind") != std::string::npos);
@@ -1791,7 +1925,8 @@ void test_check_exits() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     std::string gmv(64, '\0');
     std::memcpy(gmv.data(), "Gens Movie TEST", 15);
     gmv[0x0F] = 'A';
@@ -1817,22 +1952,24 @@ void test_check_exits() {
     static constexpr char k[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string b64 = "romChecksum base64:";
     for (std::size_t i = 0; i < 16; i += 3) {
-        const std::uint32_t n = (std::uint32_t{d[i]} << 16) |
-                                (i + 1 < 16 ? std::uint32_t{d[i + 1]} << 8 : 0u) |
-                                (i + 2 < 16 ? std::uint32_t{d[i + 2]} : 0u);
+        const std::uint32_t n = (std::uint32_t{d[i]} << 16)
+            | (i + 1 < 16 ? std::uint32_t{d[i + 1]} << 8 : 0u)
+            | (i + 2 < 16 ? std::uint32_t{d[i + 2]} : 0u);
         b64 += k[(n >> 18) & 63];
         b64 += k[(n >> 12) & 63];
         b64 += i + 1 < 16 ? k[(n >> 6) & 63] : '=';
         b64 += i + 2 < 16 ? k[n & 63] : '=';
     }
-    const std::string good = "version 3\n" + b64 +
-                             "\nromFilename x\nguid 1\nport0 1\nport1 0\nport2 0\n"
-                             "fourscore 0\nFDS 0\n|0|........|\n";
+    const std::string good = "version 3\n"
+        + b64
+        + "\nromFilename x\nguid 1\nport0 1\nport1 0\nport2 0\n"
+          "fourscore 0\nFDS 0\n|0|........|\n";
     CHECK(t.put("good.fm2", good));
     CHECK(fw::tasty_check_movie(*vfs, "good.fm2", "r.nes") == 0);
     rom[20] ^= 0xFF;
     CHECK(
-        t.put("bad.nes", std::string_view(reinterpret_cast<const char*>(rom.data()), rom.size())));
+        t.put("bad.nes", std::string_view(reinterpret_cast<const char*>(rom.data()), rom.size()))
+    );
     CHECK(fw::tasty_check_movie(*vfs, "good.fm2", "bad.nes") == 3);
 
     CHECK(t.put("r.chd", std::string(4096, 'x')));
@@ -1855,29 +1992,34 @@ void test_check_exits() {
 
 bool write_bk2_text(const std::string& path, const std::string& header, const std::string& log) {
     zipFile zf = ::zipOpen64(path.c_str(), APPEND_STATUS_CREATE);
-    if (zf == nullptr) return false;
+    if (zf == nullptr)
+        return false;
     const char* names[] = {"Header.txt", "Input Log.txt"};
     const std::string bodies[] = {header, log};
     bool ok = true;
     for (int i = 0; i < 2; ++i) {
-        if (::zipOpenNewFileInZip(zf, names[i], nullptr, nullptr, 0, nullptr, 0, nullptr, 0, 0) !=
-            ZIP_OK) {
+        if (::zipOpenNewFileInZip(zf, names[i], nullptr, nullptr, 0, nullptr, 0, nullptr, 0, 0)
+            != ZIP_OK) {
             ok = false;
             break;
         }
-        if (::zipWriteInFileInZip(zf, bodies[i].data(), static_cast<unsigned>(bodies[i].size())) !=
-            ZIP_OK)
+        if (::zipWriteInFileInZip(zf, bodies[i].data(), static_cast<unsigned>(bodies[i].size()))
+            != ZIP_OK)
             ok = false;
-        if (::zipCloseFileInZip(zf) != ZIP_OK) ok = false;
+        if (::zipCloseFileInZip(zf) != ZIP_OK)
+            ok = false;
     }
-    if (::zipClose(zf, nullptr) != ZIP_OK) ok = false;
+    if (::zipClose(zf, nullptr) != ZIP_OK)
+        ok = false;
     return ok;
 }
 
 bool write_bk2(const std::string& path, std::string_view platform) {
     return write_bk2_text(
-        path, "MovieVersion BizHawk v2.0.0\nPlatform " + std::string(platform) + "\nSHA1 ABC\n",
-        "[Input]\nLogKey:#Reset|\n|..|\n[/Input]\n");
+        path,
+        "MovieVersion BizHawk v2.0.0\nPlatform " + std::string(platform) + "\nSHA1 ABC\n",
+        "[Input]\nLogKey:#Reset|\n|..|\n[/Input]\n"
+    );
 }
 
 std::string upper_hex(const cores::DigestValue& d) {
@@ -1895,20 +2037,24 @@ void test_nes_bk2_check_header_forms() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     std::string body(64, '\0');
     for (std::size_t i = 0; i < body.size(); ++i)
         body[i] = static_cast<char>(i * 7u + 3u);
     const std::string ines1 = std::string("NES\x1a\x08\x00\x21", 7) + std::string(9, '\0');
-    const std::string nes2 =
-        std::string("NES\x1a\x08\x00\x21\x08\x20\x00\x00\x07\x00\x00\x00\x01", 16);
+    const std::string nes2 = std::string(
+        "NES\x1a\x08\x00\x21\x08\x20\x00\x00\x07\x00\x00\x00\x01",
+        16
+    );
     cores::RomDigest h{cores::DigestKind::Sha1};
     const std::string good = ines1 + body;
     h.update(std::span(reinterpret_cast<const std::uint8_t*>(good.data()), good.size()));
     const std::string log = "[Input]\nLogKey:#Power|Reset|#P1 Up|P1 Down|P1 Left|P1 Right|P1 "
                             "Start|P1 Select|P1 B|P1 A|\n|..|........|\n[/Input]\n";
-    const std::string head =
-        "MovieVersion BizHawk v2.0\nPlatform NES\nSHA1 " + upper_hex(h.finish()) + "\n";
+    const std::string head = "MovieVersion BizHawk v2.0\nPlatform NES\nSHA1 "
+        + upper_hex(h.finish())
+        + "\n";
     CHECK(write_bk2_text(t.p("nes.bk2"), head, log));
     CHECK(t.put("r.nes", nes2 + body));
     CHECK(fw::tasty_check_movie(*vfs, "nes.bk2", "r.nes") == 0);
@@ -1923,7 +2069,8 @@ void test_nes_bk2_check_header_forms() {
         CHECK(fw::tasty_check_movie(*vfs, "nes.bk2", "r.nes") == 1);
         CHECK_EQ_STR(
             cap.text(),
-            "tasty: this movie starts from a savestate or saved game, not from power-on\n");
+            "tasty: this movie starts from a savestate or saved game, not from power-on\n"
+        );
     }
     (void)::unlink(t.p("nes.bk2").c_str());
     (void)::unlink(t.p("r.nes").c_str());
@@ -1934,7 +2081,8 @@ void test_bk2_sniff() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     CHECK(write_bk2(t.p("snes.bk2"), "SNES"));
     CHECK(write_bk2(t.p("gen.bk2"), "GEN"));
     CHECK(write_bk2(t.p("psx.bk2"), "PSX"));
@@ -1962,9 +2110,11 @@ void test_bk2_sniff() {
         err = cap.text();
     }
     CHECK(rc == 1);
-    CHECK(err ==
-          "tasty: cannot hash disc image junk.cue; use a Redump .cue/.bin or a chdman .chd of "
-          "one\n");
+    CHECK(
+        err
+        == "tasty: cannot hash disc image junk.cue; use a Redump .cue/.bin or a chdman .chd of "
+           "one\n"
+    );
 
     CHECK(t.put("junk.chd", std::string(4096, 'x')));
     {
@@ -1973,9 +2123,11 @@ void test_bk2_sniff() {
         err = cap.text();
     }
     CHECK(rc == 1);
-    CHECK(err ==
-          "tasty: cannot hash disc image junk.chd; use a Redump .cue/.bin or a chdman .chd of "
-          "one\n");
+    CHECK(
+        err
+        == "tasty: cannot hash disc image junk.chd; use a Redump .cue/.bin or a chdman .chd of "
+           "one\n"
+    );
 }
 
 void test_bk2_unknown_platform_refused() {
@@ -1983,11 +2135,12 @@ void test_bk2_unknown_platform_refused() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     CHECK(write_bk2(t.p("n64.bk2"), "N64"));
     CHECK(t.put("r.nes", "xxxx"));
-    const char* want =
-        "tasty: this .bk2 is for N64; tasty plays NES, SNES, Genesis and PSX movies\n";
+    const char*
+        want = "tasty: this .bk2 is for N64; tasty plays NES, SNES, Genesis and PSX movies\n";
     {
         StderrTo cap;
         CHECK(fw::tasty_check_movie(*vfs, "n64.bk2", "r.nes") == 1);
@@ -2003,11 +2156,22 @@ void test_bk2_unknown_platform_refused() {
 }
 
 void test_cli_run_flags() {
-    const char* const av[] = {"tasty",     "play", "m.fm2",    "--rom", "r.nes",
-                              "--stop-at", "3600", "--linger", "0",     "--strict"};
+    const char* const av[] = {
+        "tasty",
+        "play",
+        "m.fm2",
+        "--rom",
+        "r.nes",
+        "--stop-at",
+        "3600",
+        "--linger",
+        "0",
+        "--strict"
+    };
     const auto a = fw::parse_tasty_args(std::span<const char* const>(av));
     CHECK(a.has_value());
-    if (!a) return;
+    if (!a)
+        return;
     CHECK(a->stop_at == std::optional<std::uint32_t>{3600});
     CHECK_EQ(a->return_after_s, 0u);
     CHECK(a->strict);
@@ -2028,8 +2192,10 @@ void test_cli_run_flags() {
     CHECK(!m.has_value());
     if (!m) {
         CHECK_EQ(m.error().detail, 18u);
-        CHECK(std::string_view(fw::tasty_args_refusal(m.error().detail)) ==
-              "--phase needs a whole number of microseconds");
+        CHECK(
+            std::string_view(fw::tasty_args_refusal(m.error().detail))
+            == "--phase needs a whole number of microseconds"
+        );
     }
     const char* const help[] = {"tasty", "--help"};
     const auto h = fw::parse_tasty_args(std::span<const char* const>(help));
@@ -2065,8 +2231,13 @@ void test_session_direct_video_force() {
         to_run(x);
         const std::string text = err.text();
         CHECK_EQ(x.replay.plays, 0u);
-        CHECK(text.find("tasty: replay refused (--strict): direct_video is not off; without "
-                        "--strict tasty sets it for this run\n") != std::string::npos);
+        CHECK(
+            text.find(
+                "tasty: replay refused (--strict): direct_video is not off; without "
+                "--strict tasty sets it for this run\n"
+            )
+            != std::string::npos
+        );
         CHECK(x.exit_code.load() == 1);
     }
     {
@@ -2078,8 +2249,10 @@ void test_session_direct_video_force() {
         x.tick();
         const std::string text = err.text();
         CHECK_EQ(x.replay.plays, 1u);
-        CHECK(text.find("tasty: direct_video: using 0 for this run (your setting: 1)\n") !=
-              std::string::npos);
+        CHECK(
+            text.find("tasty: direct_video: using 0 for this run (your setting: 1)\n")
+            != std::string::npos
+        );
         CHECK(x.exit_code.load() == 0);
     }
     {
@@ -2095,7 +2268,8 @@ void test_session_direct_video_force() {
     {
         PumpRig pump;
         CHECK(pump.pump.has_value());
-        if (!pump.pump) return;
+        if (!pump.pump)
+            return;
         const char* ini = "[MiSTer]\ndirect_video=1\nvideo_mode=8\n";
         CHECK(pump.root.put("MiSTer.ini", ini));
         pump.pump->arm_replay_ini(false);
@@ -2119,15 +2293,18 @@ void test_session_direct_video_force() {
         x.tick();
         const std::string text = err.text();
         CHECK_EQ(x.replay.plays, 1u);
-        CHECK(text.find("tasty: direct_video: using 0 for this run (your setting: 1)\n") !=
-              std::string::npos);
+        CHECK(
+            text.find("tasty: direct_video: using 0 for this run (your setting: 1)\n")
+            != std::string::npos
+        );
     }
 }
 
 void test_strict_rec_start_waits_for_the_ini() {
     PumpRig pump;
     CHECK(pump.pump.has_value());
-    if (!pump.pump) return;
+    if (!pump.pump)
+        return;
     CHECK(pump.root.put("MiSTer.ini", "[MiSTer]\ndirect_video=1\nvideo_mode=8\n"));
     pump.pump->arm_replay_ini(true);
     xthread::Telemetry<std::uint8_t, SeatTag::Main> cell{};
@@ -2155,8 +2332,9 @@ void test_strict_rec_start_waits_for_the_ini() {
     StderrTo err;
     x.tick();
     x.tick();
-    CHECK(err.text().find("replay refused (--strict): direct_video is not off") !=
-          std::string::npos);
+    CHECK(
+        err.text().find("replay refused (--strict): direct_video is not off") != std::string::npos
+    );
     CHECK(x.exit_code.load() == 1);
 }
 
@@ -2173,8 +2351,11 @@ void test_session_prints_settings_once() {
         x.tick();
         err = cap.text();
     }
-    CHECK(err == "tasty: System Type: using NTSC for this run (your setting: PAL)\n"
-                 "tasty: RAM Clear: using $00 for this run (your setting: No)\n");
+    CHECK(
+        err
+        == "tasty: System Type: using NTSC for this run (your setting: PAL)\n"
+           "tasty: RAM Clear: using $00 for this run (your setting: No)\n"
+    );
     CHECK(x.exit_code.load() == 0);
 }
 
@@ -2187,6 +2368,7 @@ void test_refusal_sentences() {
         bool offered;
         const char* want;
     };
+
     const Case cases[] = {
         {"setting",
          "RAM Clear",
@@ -2276,8 +2458,10 @@ void test_movie_refusal_tokens_have_sentences() {
         const char* tok = fw::tasty_movie_refusal_token(r);
         CHECK(tok != nullptr && fw::tasty_refusal_sentence(tok) != nullptr);
     }
-    CHECK_EQ_STR(fw::tasty_movie_refusal_token(static_cast<std::uint32_t>(R::Savestate)),
-                 "savestate");
+    CHECK_EQ_STR(
+        fw::tasty_movie_refusal_token(static_cast<std::uint32_t>(R::Savestate)),
+        "savestate"
+    );
     CHECK(fw::tasty_refusal_sentence("busy") == nullptr);
 }
 
@@ -2294,7 +2478,7 @@ void test_session_hides_the_osd_first() {
 void test_session_waits_for_the_osd_hide() {
     Sess x;
     unsigned filled = 0;
-    while (x.tx.push(proto::LinkOp::SettleCoreOptions{}))
+    while (x.tx.push(proto::LinkOp::SetCoreOption{}))
         ++filled;
     CHECK(filled > 0u);
     x.tick();
@@ -2305,7 +2489,8 @@ void test_session_waits_for_the_osd_hide() {
     bool hidden = false;
     while (const auto op = x.wire_op()) {
         const auto vis = infra::as<proto::LinkOp::SetOsdVisible>(*op);
-        if (vis && vis->show == proto::LinkOp::OsdShow::Off) hidden = true;
+        if (vis && vis->show == proto::LinkOp::OsdShow::Off)
+            hidden = true;
     }
     CHECK(hidden);
 }
@@ -2321,10 +2506,12 @@ void publish_running(app::ReplayStatusCell& cell, std::int32_t frame) {
 void test_recorded_replay_rereads_the_geometry() {
     PumpRig r;
     CHECK(r.pump.has_value());
-    if (!r.pump) return;
+    if (!r.pump)
+        return;
     Tmp t("/tasty_tasty_recgeo_");
     CHECK(!t.root.empty());
-    if (t.root.empty()) return;
+    if (t.root.empty())
+        return;
     fw::TastySink sink{*r.pump, nullptr};
     Sess x;
     x.w.video = infra::OptRef{*r.pump};
@@ -2370,7 +2557,8 @@ void test_recorded_replay_rereads_the_geometry() {
 void test_unrecorded_replay_leaves_the_geometry() {
     PumpRig r;
     CHECK(r.pump.has_value());
-    if (!r.pump) return;
+    if (!r.pump)
+        return;
     fw::TastySink sink{*r.pump, nullptr};
     Sess x;
     x.w.video = infra::OptRef{*r.pump};
@@ -2406,16 +2594,20 @@ bool mkdir_p(const std::string& path) {
     std::string cur;
     for (std::size_t i = 0; i < path.size(); ++i) {
         cur.push_back(path[i]);
-        if (path[i] != '/' && i + 1 != path.size()) continue;
-        if (cur.size() <= 1) continue;
-        if (::mkdir(cur.c_str(), 0755) != 0 && errno != EEXIST) return false;
+        if (path[i] != '/' && i + 1 != path.size())
+            continue;
+        if (cur.size() <= 1)
+            continue;
+        if (::mkdir(cur.c_str(), 0755) != 0 && errno != EEXIST)
+            return false;
     }
     return true;
 }
 
 bool put_file(const std::string& path, std::string_view body) {
     std::FILE* f = std::fopen(path.c_str(), "wb");
-    if (f == nullptr) return false;
+    if (f == nullptr)
+        return false;
     const bool ok = std::fwrite(body.data(), 1, body.size(), f) == body.size();
     std::fclose(f);
     return ok;
@@ -2424,7 +2616,8 @@ bool put_file(const std::string& path, std::string_view body) {
 bool put_nes_banks(const std::string& path, unsigned prg, unsigned chr) {
     const std::uint64_t span = std::uint64_t{prg} * 16384ull + std::uint64_t{chr} * 8192ull;
     const int fd = ::open(path.c_str(), O_CLOEXEC | O_CREAT | O_TRUNC | O_WRONLY, 0644);
-    if (fd < 0) return false;
+    if (fd < 0)
+        return false;
     unsigned char head[16]{};
     head[0] = 'N';
     head[1] = 'E';
@@ -2441,6 +2634,7 @@ bool put_nes_banks(const std::string& path, unsigned prg, unsigned chr) {
 struct Gone {
     std::vector<std::string> files;
     std::vector<std::string> dirs;
+
     ~Gone() {
         for (const std::string& f : files)
             (void)::unlink(f.c_str());
@@ -2451,15 +2645,19 @@ struct Gone {
 
 std::string nes_checksum_line(std::string_view body) {
     cores::RomDigest dig{cores::DigestKind::Md5};
-    dig.update(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(body.data()),
-                                             body.size()));
+    dig.update(
+        std::span<const std::uint8_t>(
+            reinterpret_cast<const std::uint8_t*>(body.data()),
+            body.size()
+        )
+    );
     const auto d = dig.finish();
     static constexpr char k[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out = "romChecksum base64:";
     for (std::size_t i = 0; i < 16; i += 3) {
-        const std::uint32_t n = (std::uint32_t{d.bytes[i]} << 16) |
-                                (i + 1 < 16 ? std::uint32_t{d.bytes[i + 1]} << 8 : 0u) |
-                                (i + 2 < 16 ? std::uint32_t{d.bytes[i + 2]} : 0u);
+        const std::uint32_t n = (std::uint32_t{d.bytes[i]} << 16)
+            | (i + 1 < 16 ? std::uint32_t{d.bytes[i + 1]} << 8 : 0u)
+            | (i + 2 < 16 ? std::uint32_t{d.bytes[i + 2]} : 0u);
         out += k[(n >> 18) & 63];
         out += k[(n >> 12) & 63];
         out += i + 1 < 16 ? k[(n >> 6) & 63] : '=';
@@ -2483,9 +2681,10 @@ std::string nes_rom_bytes() {
 }
 
 std::string nes_movie(std::string_view prg_chr) {
-    return "version 3\n" + nes_checksum_line(prg_chr) +
-           "\nrerecordCount 5\nport0 1\nport1 0\nport2 0\n"
-           "|0|........|||\n|0|........|||\n|0|.......A|||\n";
+    return "version 3\n"
+        + nes_checksum_line(prg_chr)
+        + "\nrerecordCount 5\nport0 1\nport1 0\nport2 0\n"
+          "|0|........|||\n|0|........|||\n|0|.......A|||\n";
 }
 
 void test_loop_with_record_is_refused() {
@@ -2493,7 +2692,8 @@ void test_loop_with_record_is_refused() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     fw::TastyArgs a{};
     CHECK(a.movie.assign("m.fm2"));
     app::PathText out{};
@@ -2525,7 +2725,8 @@ void test_ram_fill_is_the_codecs() {
     const auto* nes = cores::movie_codec_for("NES", "m.fm2");
     const auto* snes = cores::movie_codec_for("SNES", "m.lsmv");
     CHECK(nes != nullptr && snes != nullptr);
-    if (nes == nullptr || snes == nullptr) return;
+    if (nes == nullptr || snes == nullptr)
+        return;
     using Fill = cores::IMovieCodec::RamFill;
     CHECK(!snes->ram_fill_need(Fill::Zero).has_value());
     CHECK(!snes->setting_needs_for({}, Fill::Zero).has_value());
@@ -2533,10 +2734,12 @@ void test_ram_fill_is_the_codecs() {
     CHECK(ff.has_value() && ff->preferred == 2 && ff->allowed == (1u << 2));
     const auto needs = nes->setting_needs_for({}, Fill::Random);
     CHECK(needs.has_value());
-    if (!needs) return;
+    if (!needs)
+        return;
     unsigned rows = 0;
     for (const auto& n : needs->view()) {
-        if (n.name != ff->name) continue;
+        if (n.name != ff->name)
+            continue;
         ++rows;
         CHECK(n.preferred == 3 && n.allowed == (1u << 3));
     }
@@ -2548,7 +2751,8 @@ void test_prepare_play_lead_rom_and_ram() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     const std::string rom = nes_rom_bytes();
     const std::string movie = nes_movie(std::string_view(rom).substr(16));
     CHECK(t.put("m.fm2", movie));
@@ -2664,7 +2868,8 @@ void test_cli_record_empty() {
     const char* const av[] = {"tasty", "play", "m.fm2", "--record", ""};
     const auto a = fw::parse_tasty_args(std::span<const char* const>(av));
     CHECK(a.has_value());
-    if (!a) return;
+    if (!a)
+        return;
     CHECK(a->record.has_value() && a->record->empty());
     const char* const none[] = {"tasty", "play", "m.fm2"};
     const auto b = fw::parse_tasty_args(std::span<const char* const>(none));
@@ -2672,7 +2877,8 @@ void test_cli_record_empty() {
     const char* const rec[] = {"tasty", "rec", "start", "--record", ""};
     const auto c = fw::parse_tasty_args(std::span<const char* const>(rec));
     CHECK(c.has_value() && c->verb == fw::TastyVerb::RecStart && c->record && c->record->empty());
-    if (!c || !c->record) return;
+    if (!c || !c->record)
+        return;
     StderrTo err;
     CHECK(!fw::tasty_prepare_record(*c->record, {}).has_value());
     CHECK(err.text().find("that record path names no directory or file") != std::string::npos);
@@ -2683,7 +2889,8 @@ void test_rom_search_reads_every_subdir() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     const std::string rom = nes_rom_bytes();
     const std::string movie = nes_movie(std::string_view(rom).substr(16));
     CHECK(t.put("m.fm2", movie));
@@ -2710,22 +2917,26 @@ void test_rom_search_reads_every_subdir() {
     auto names = [](svc::Vfs& v) {
         std::vector<std::string> out;
         auto listing = v.scan("media/fat/games/NES", {});
-        if (!listing) return out;
+        if (!listing)
+            return out;
         for (const svc::DirEntry& e : *listing) {
-            if (e.is_dir && e.name != "." && e.name != "..") out.push_back(e.name);
+            if (e.is_dir && e.name != "." && e.name != "..")
+                out.push_back(e.name);
         }
         return out;
     };
     const std::vector<std::string> first = names(*vfs);
     CHECK(first.size() == kDirs);
-    if (first.size() != kDirs) return;
+    if (first.size() != kDirs)
+        return;
     const std::string last = first.back();
     const std::string match = nes + "/" + last + "/smb.nes";
     gone.files.push_back(match);
     CHECK(put_file(match, rom));
     const std::vector<std::string> second = names(*vfs);
     CHECK(!second.empty() && second.back() == last);
-    if (second.empty() || second.back() != last) return;
+    if (second.empty() || second.back() != last)
+        return;
     fw::TastyArgs a{};
     CHECK(a.movie.assign("m.fm2"));
     CHECK(fw::tasty_prepare_play(*vfs, a) == 0);
@@ -2745,7 +2956,8 @@ void test_rom_search_stops_at_the_hash_budget() {
     CHECK(!t.root.empty());
     auto vfs = svc::Vfs::create_at(t.root);
     CHECK(vfs.has_value());
-    if (!vfs) return;
+    if (!vfs)
+        return;
     const std::string rom = nes_rom_bytes();
     const std::string movie = nes_movie(std::string_view(rom).substr(16));
     CHECK(t.put("m.fm2", movie));
@@ -2790,7 +3002,8 @@ template <typename F>
 ChildEnd in_child(F fn) {
     const pid_t pid = ::fork();
     CHECK(pid >= 0);
-    if (pid < 0) return {};
+    if (pid < 0)
+        return {};
     if (pid == 0) {
         const int rc = fn();
         ::_exit(rc);
@@ -2798,8 +3011,10 @@ ChildEnd in_child(F fn) {
     int st = 0;
     for (;;) {
         const pid_t w = ::waitpid(pid, &st, 0);
-        if (w == pid) break;
-        if (w < 0 && errno == EINTR) continue;
+        if (w == pid)
+            break;
+        if (w < 0 && errno == EINTR)
+            continue;
         return {};
     }
     ChildEnd e;
@@ -2815,10 +3030,12 @@ ChildEnd in_child(F fn) {
 
 struct SharedInt {
     int* p = nullptr;
+
     SharedInt() {
         char path[] = "/tmp/tasty_tasty_sigXXXXXX";
         const int fd = ::mkstemp(path);
-        if (fd < 0) return;
+        if (fd < 0)
+            return;
         (void)::unlink(path);
         if (::ftruncate(fd, static_cast<off_t>(sizeof(int))) != 0) {
             ::close(fd);
@@ -2826,13 +3043,17 @@ struct SharedInt {
         }
         void* m = ::mmap(nullptr, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         ::close(fd);
-        if (m == MAP_FAILED) return;
+        if (m == MAP_FAILED)
+            return;
         p = static_cast<int*>(m);
         *p = 0;
     }
+
     ~SharedInt() {
-        if (p != nullptr) (void)::munmap(p, sizeof(int));
+        if (p != nullptr)
+            (void)::munmap(p, sizeof(int));
     }
+
     SharedInt(const SharedInt&) = delete;
     SharedInt& operator=(const SharedInt&) = delete;
 };
@@ -2847,9 +3068,12 @@ void test_owner_sighup_keeps_running() {
         const unsigned stops = x.replay.stops;
         ::raise(SIGHUP);
         x.tick();
-        if (fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) != 0) return 2;
-        if (x.replay.stops != stops) return 3;
-        if (x.load_asked()) return 4;
+        if (fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) != 0)
+            return 2;
+        if (x.replay.stops != stops)
+            return 3;
+        if (x.load_asked())
+            return 4;
         return 0;
     });
     CHECK(end.exited && end.code == 0);
@@ -2858,7 +3082,8 @@ void test_owner_sighup_keeps_running() {
 void test_owner_sigterm_ends_and_homes_once() {
     SharedInt n;
     CHECK(n.p != nullptr);
-    if (n.p == nullptr) return;
+    if (n.p == nullptr)
+        return;
     const ChildEnd end = in_child([&] {
         fw::ReturnHome home{};
         home.spawned = infra::opt_ref_of(n.p);
@@ -2869,11 +3094,15 @@ void test_owner_sigterm_ends_and_homes_once() {
         while (x.load_asked()) {
         }
         ::raise(SIGTERM);
-        if (*n.p != 0) return 2;
-        if (fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0) return 3;
+        if (*n.p != 0)
+            return 2;
+        if (fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0)
+            return 3;
         x.tick();
-        if (x.replay.stops < 1) return 4;
-        if (*n.p != 0) return 5;
+        if (x.replay.stops < 1)
+            return 4;
+        if (*n.p != 0)
+            return 5;
         return 0;
     });
     CHECK(end.exited && end.code == 0);
@@ -2884,9 +3113,11 @@ void test_owner_closed_stdio_survives() {
     const ChildEnd end = in_child([] {
         fw::tasty_arm_owner_signals();
         int fds[2] = {-1, -1};
-        if (::pipe(fds) != 0) return 2;
+        if (::pipe(fds) != 0)
+            return 2;
         ::close(fds[0]);
-        if (::dup2(fds[1], STDOUT_FILENO) < 0 || ::dup2(fds[1], STDERR_FILENO) < 0) return 3;
+        if (::dup2(fds[1], STDOUT_FILENO) < 0 || ::dup2(fds[1], STDERR_FILENO) < 0)
+            return 3;
         ::close(fds[1]);
         std::fprintf(stdout, "out\n");
         std::fflush(stdout);
@@ -2900,7 +3131,8 @@ void test_owner_closed_stdio_survives() {
         to_run(x);
         x.replay.lines.push_back("kept");
         x.tick();
-        if (x.replay.stops != 0) return 4;
+        if (x.replay.stops != 0)
+            return 4;
         return 0;
     });
     CHECK(end.exited && end.code == 0);
@@ -2909,7 +3141,8 @@ void test_owner_closed_stdio_survives() {
 void test_owner_second_sigterm_homes_and_exits() {
     SharedInt n;
     CHECK(n.p != nullptr);
-    if (n.p == nullptr) return;
+    if (n.p == nullptr)
+        return;
     const ChildEnd end = in_child([&] {
         (void)::alarm(2);
         fw::ReturnHome home{};
@@ -2917,8 +3150,10 @@ void test_owner_second_sigterm_homes_and_exits() {
         fw::tasty_owe_home();
         fw::tasty_arm_owner_signals();
         ::raise(SIGTERM);
-        if (*n.p != 0) return 2;
-        if (fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0) return 3;
+        if (*n.p != 0)
+            return 2;
+        if (fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0)
+            return 3;
         ::raise(SIGTERM);
         return 4;
     });
@@ -2929,9 +3164,10 @@ void test_owner_second_sigterm_homes_and_exits() {
 void test_owner_sigbus_homes() {
     SharedInt n;
     CHECK(n.p != nullptr);
-    if (n.p == nullptr) return;
+    if (n.p == nullptr)
+        return;
     const ChildEnd end = in_child([&] {
-        struct rlimit rl {};
+        struct rlimit rl{};
         rl.rlim_cur = 0;
         rl.rlim_max = 0;
         (void)::setrlimit(RLIMIT_CORE, &rl);
@@ -2943,37 +3179,45 @@ void test_owner_sigbus_homes() {
         ::raise(SIGBUS);
         return 5;
     });
-    const bool died =
-        (end.signaled && end.sig == SIGBUS) || (end.exited && end.code == 128 + SIGBUS);
+    const bool died = (end.signaled && end.sig == SIGBUS)
+        || (end.exited && end.code == 128 + SIGBUS);
     CHECK(died);
     CHECK(*n.p == 1);
 }
 
 const char* stock_comm() {
     static char name[16] = {};
-    if (name[0] == '\0') std::snprintf(name, sizeof name, "MiSTer%d", static_cast<int>(::getpid()));
+    if (name[0] == '\0')
+        std::snprintf(name, sizeof name, "MiSTer%d", static_cast<int>(::getpid()));
     return name;
 }
 
 int count_mister_comm() {
     DIR* d = ::opendir("/proc");
-    if (d == nullptr) return -1;
+    if (d == nullptr)
+        return -1;
     int n = 0;
     while (const dirent* e = ::readdir(d)) {
-        if (e->d_name[0] < '1' || e->d_name[0] > '9') continue;
+        if (e->d_name[0] < '1' || e->d_name[0] > '9')
+            continue;
         const int pid = std::atoi(e->d_name);
-        if (pid <= 0) continue;
+        if (pid <= 0)
+            continue;
         char path[64];
         std::snprintf(path, sizeof path, "/proc/%d/comm", pid);
         const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
-        if (fd < 0) continue;
+        if (fd < 0)
+            continue;
         char buf[32]{};
         const ssize_t got = ::read(fd, buf, sizeof buf - 1);
         ::close(fd);
-        if (got <= 0) continue;
+        if (got <= 0)
+            continue;
         std::string_view s{buf, static_cast<std::size_t>(got)};
-        if (!s.empty() && s.back() == '\n') s.remove_suffix(1);
-        if (s == stock_comm()) ++n;
+        if (!s.empty() && s.back() == '\n')
+            s.remove_suffix(1);
+        if (s == stock_comm())
+            ++n;
     }
     ::closedir(d);
     return n;
@@ -2981,7 +3225,8 @@ int count_mister_comm() {
 
 bool set_mister_comm() {
     const int fd = ::open("/proc/self/comm", O_WRONLY | O_CLOEXEC);
-    if (fd < 0) return false;
+    if (fd < 0)
+        return false;
     const std::size_t len = std::strlen(stock_comm());
     const ssize_t w = ::write(fd, stock_comm(), len);
     ::close(fd);
@@ -2992,11 +3237,13 @@ bool is_zombie(pid_t pid) {
     char path[64];
     std::snprintf(path, sizeof path, "/proc/%d/stat", static_cast<int>(pid));
     const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return false;
+    if (fd < 0)
+        return false;
     char buf[256];
     const ssize_t n = ::read(fd, buf, sizeof buf - 1);
     ::close(fd);
-    if (n <= 0) return false;
+    if (n <= 0)
+        return false;
     buf[n] = '\0';
     const char* r = std::strrchr(buf, ')');
     return r != nullptr && r[1] == ' ' && r[2] == 'Z';
@@ -3008,8 +3255,10 @@ struct MisterHold {
     MisterHold() = default;
     MisterHold(const MisterHold&) = delete;
     MisterHold& operator=(const MisterHold&) = delete;
+
     ~MisterHold() {
-        if (pid <= 0) return;
+        if (pid <= 0)
+            return;
         (void)::kill(pid, SIGKILL);
         if (reaper.joinable()) {
             reaper.join();
@@ -3025,21 +3274,33 @@ struct BoardShare {
     int home = 0;
     std::atomic<int> second_sent{0};
 };
+
 static_assert(std::atomic<int>::is_always_lock_free);
 
 struct ShareMap {
     BoardShare* p = nullptr;
+
     ShareMap() {
-        void* m = ::mmap(nullptr, sizeof(BoardShare), PROT_READ | PROT_WRITE,
-                         MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-        if (m == MAP_FAILED) return;
+        void* m = ::mmap(
+            nullptr,
+            sizeof(BoardShare),
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED | MAP_ANONYMOUS,
+            -1,
+            0
+        );
+        if (m == MAP_FAILED)
+            return;
         p = new (m) BoardShare();
     }
+
     ~ShareMap() {
-        if (p == nullptr) return;
+        if (p == nullptr)
+            return;
         p->~BoardShare();
         (void)::munmap(p, sizeof(BoardShare));
     }
+
     ShareMap(const ShareMap&) = delete;
     ShareMap& operator=(const ShareMap&) = delete;
 };
@@ -3047,16 +3308,19 @@ struct ShareMap {
 bool no_mister_yet() {
     fw::tasty_set_stock_comm(stock_comm());
     const int already = count_mister_comm();
-    if (already != 0) std::printf("stop test would signal %d process(es) named MiSTer\n", already);
+    if (already != 0)
+        std::printf("stop test would signal %d process(es) named MiSTer\n", already);
     CHECK(already == 0);
     return already == 0;
 }
 
 void test_second_sigterm_during_stop_homes_after_exit() {
-    if (!no_mister_yet()) return;
+    if (!no_mister_yet())
+        return;
     ShareMap share;
     CHECK(share.p != nullptr);
-    if (share.p == nullptr) return;
+    if (share.p == nullptr)
+        return;
     int ready[2] = {-1, -1};
     int gone[2] = {-1, -1};
     if (::pipe(ready) != 0 || ::pipe(gone) != 0) {
@@ -3066,22 +3330,26 @@ void test_second_sigterm_during_stop_homes_after_exit() {
     MisterHold hold;
     hold.pid = ::fork();
     CHECK(hold.pid >= 0);
-    if (hold.pid < 0) return;
+    if (hold.pid < 0)
+        return;
     if (hold.pid == 0) {
         ::close(ready[0]);
         ::close(gone[0]);
-        if (!set_mister_comm()) ::_exit(9);
-        struct sigaction ign {};
+        if (!set_mister_comm())
+            ::_exit(9);
+        struct sigaction ign{};
         ign.sa_handler = SIG_IGN;
         ::sigemptyset(&ign.sa_mask);
         (void)::sigaction(SIGTERM, &ign, nullptr);
         const char up = 1;
-        if (::write(ready[1], &up, 1) != 1) ::_exit(9);
+        if (::write(ready[1], &up, 1) != 1)
+            ::_exit(9);
         ::close(ready[1]);
         while (share.p->second_sent.load(std::memory_order_acquire) == 0)
             ::usleep(1000);
         ::usleep(300 * 1000);
-        if (::write(gone[1], &up, 1) != 1) ::_exit(10);
+        if (::write(gone[1], &up, 1) != 1)
+            ::_exit(10);
         ::_exit(0);
     }
     ::close(ready[1]);
@@ -3089,10 +3357,12 @@ void test_second_sigterm_during_stop_homes_after_exit() {
     char up = 0;
     CHECK(::read(ready[0], &up, 1) == 1);
     ::close(ready[0]);
-    if (up != 1) return;
+    if (up != 1)
+        return;
     const pid_t owner = ::fork();
     CHECK(owner >= 0);
-    if (owner < 0) return;
+    if (owner < 0)
+        return;
     if (owner == 0) {
         (void)::alarm(12);
         fw::tasty_arm_owner_signals();
@@ -3103,13 +3373,15 @@ void test_second_sigterm_during_stop_homes_after_exit() {
             ::usleep(100 * 1000);
             ::kill(::getpid(), SIGTERM);
             for (int i = 0;
-                 i < 200 && fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0; ++i)
+                 i < 200 && fw::tasty_owner_stop_flag().load(std::memory_order_seq_cst) == 0;
+                 ++i)
                 ::usleep(1000);
             ::kill(::getpid(), SIGTERM);
             board->second_sent.store(1, std::memory_order_release);
         });
         const int rc = fw::tasty_stop_and_owe();
-        if (poke.joinable()) poke.join();
+        if (poke.joinable())
+            poke.join();
         ::_exit(rc == 0 ? 4 : rc);
     }
     hold.reaper = std::thread([pid = hold.pid] {
@@ -3130,21 +3402,26 @@ void test_second_sigterm_during_stop_homes_after_exit() {
 }
 
 void test_stop_wait_timeout_launches_nothing() {
-    if (!no_mister_yet()) return;
+    if (!no_mister_yet())
+        return;
     SharedInt n;
     CHECK(n.p != nullptr);
-    if (n.p == nullptr) return;
+    if (n.p == nullptr)
+        return;
     const ChildEnd end = in_child([&] {
         const pid_t z = ::fork();
-        if (z < 0) return 2;
+        if (z < 0)
+            return 2;
         if (z == 0) {
-            if (!set_mister_comm()) ::_exit(9);
+            if (!set_mister_comm())
+                ::_exit(9);
             ::_exit(0);
         }
         struct Reap {
             pid_t pid;
             ~Reap() {
-                if (pid <= 0) return;
+                if (pid <= 0)
+                    return;
                 int st = 0;
                 (void)::kill(pid, SIGKILL);
                 while (::waitpid(pid, &st, 0) < 0 && errno == EINTR) {
@@ -3154,13 +3431,17 @@ void test_stop_wait_timeout_launches_nothing() {
         bool dead = false;
         for (int i = 0; i < 1000 && !dead; ++i) {
             dead = is_zombie(z);
-            if (!dead) ::usleep(1000);
+            if (!dead)
+                ::usleep(1000);
         }
-        if (!dead) return 3;
+        if (!dead)
+            return 3;
         int sp[2] = {-1, -1};
-        if (::pipe(sp) != 0) return 4;
+        if (::pipe(sp) != 0)
+            return 4;
         const int saved = ::dup(STDERR_FILENO);
-        if (::dup2(sp[1], STDERR_FILENO) < 0) return 5;
+        if (::dup2(sp[1], STDERR_FILENO) < 0)
+            return 5;
         int rc = 0;
         {
             fw::ReturnHome home{};
@@ -3175,10 +3456,14 @@ void test_stop_wait_timeout_launches_nothing() {
         char msg[200]{};
         const ssize_t nr = ::read(sp[0], msg, sizeof msg - 1);
         ::close(sp[0]);
-        if (nr < 0) return 8;
-        if (*n.p != 0) return 6;
-        if (rc != 1) return 7;
-        if (std::strstr(msg, "the menu was left running") == nullptr) return 8;
+        if (nr < 0)
+            return 8;
+        if (*n.p != 0)
+            return 6;
+        if (rc != 1)
+            return 7;
+        if (std::strstr(msg, "the menu was left running") == nullptr)
+            return 8;
         return 0;
     });
     CHECK(end.exited && end.code == 0);
@@ -3195,10 +3480,12 @@ extern "C" void note_term(int) {
 }
 
 void test_sigbus_during_stop_does_not_home() {
-    if (!no_mister_yet()) return;
+    if (!no_mister_yet())
+        return;
     SharedInt n;
     CHECK(n.p != nullptr);
-    if (n.p == nullptr) return;
+    if (n.p == nullptr)
+        return;
     int ready[2] = {-1, -1};
     if (::pipe(ready) != 0) {
         CHECK(false);
@@ -3212,18 +3499,21 @@ void test_sigbus_during_stop_does_not_home() {
     MisterHold hold;
     hold.pid = ::fork();
     CHECK(hold.pid >= 0);
-    if (hold.pid < 0) return;
+    if (hold.pid < 0)
+        return;
     if (hold.pid == 0) {
         ::close(ready[0]);
         ::close(termed[0]);
-        if (!set_mister_comm()) ::_exit(9);
+        if (!set_mister_comm())
+            ::_exit(9);
         g_termed_fd = termed[1];
-        struct sigaction note {};
+        struct sigaction note{};
         note.sa_handler = &note_term;
         ::sigemptyset(&note.sa_mask);
         (void)::sigaction(SIGTERM, &note, nullptr);
         const char up = 1;
-        if (::write(ready[1], &up, 1) != 1) ::_exit(9);
+        if (::write(ready[1], &up, 1) != 1)
+            ::_exit(9);
         ::close(ready[1]);
         for (;;)
             ::pause();
@@ -3245,7 +3535,7 @@ void test_sigbus_during_stop_does_not_home() {
     }
     if (owner == 0) {
         ::close(termed[0]);
-        struct rlimit rl {};
+        struct rlimit rl{};
         rl.rlim_cur = 0;
         rl.rlim_max = 0;
         (void)::setrlimit(RLIMIT_CORE, &rl);
@@ -3265,24 +3555,36 @@ void test_sigbus_during_stop_does_not_home() {
     int st = 0;
     while (::waitpid(owner, &st, 0) < 0 && errno == EINTR) {
     }
-    const bool died = (WIFSIGNALED(st) && WTERMSIG(st) == SIGBUS) ||
-                      (WIFEXITED(st) && WEXITSTATUS(st) == 128 + SIGBUS);
+    const bool died = (WIFSIGNALED(st) && WTERMSIG(st) == SIGBUS)
+        || (WIFEXITED(st) && WEXITSTATUS(st) == 128 + SIGBUS);
     CHECK(died);
     CHECK(*n.p == 0);
 }
 
 [[noreturn]] void write_signal_probe(const char* path) {
     FILE* out = std::fopen(path, "w");
-    if (out == nullptr) ::_exit(3);
+    if (out == nullptr)
+        ::_exit(3);
+
     struct Row {
         int sig;
         const char* name;
     };
-    const Row rows[] = {{SIGHUP, "hup"},   {SIGPIPE, "pipe"}, {SIGINT, "int"},   {SIGTERM, "term"},
-                        {SIGQUIT, "quit"}, {SIGSEGV, "segv"}, {SIGABRT, "abrt"}, {SIGBUS, "bus"},
-                        {SIGUSR1, "usr1"}, {SIGALRM, "alrm"}};
+
+    const Row rows[] = {
+        {SIGHUP, "hup"},
+        {SIGPIPE, "pipe"},
+        {SIGINT, "int"},
+        {SIGTERM, "term"},
+        {SIGQUIT, "quit"},
+        {SIGSEGV, "segv"},
+        {SIGABRT, "abrt"},
+        {SIGBUS, "bus"},
+        {SIGUSR1, "usr1"},
+        {SIGALRM, "alrm"}
+    };
     for (const Row& r : rows) {
-        struct sigaction sa {};
+        struct sigaction sa{};
         if (::sigaction(r.sig, nullptr, &sa) != 0) {
             std::fprintf(out, "%s err\n", r.name);
             continue;
@@ -3301,7 +3603,8 @@ void test_sigbus_during_stop_does_not_home() {
     } else {
         int blocked = 0;
         for (int sig = 1; sig < NSIG; ++sig) {
-            if (::sigismember(&set, sig) == 1) ++blocked;
+            if (::sigismember(&set, sig) == 1)
+                ++blocked;
         }
         std::fprintf(out, "mask %d\n", blocked);
     }
@@ -3311,22 +3614,27 @@ void test_sigbus_during_stop_does_not_home() {
 }
 
 bool self_exe(char* dst, std::size_t n) {
-    if (n == 0) return false;
+    if (n == 0)
+        return false;
     const ssize_t got = ::readlink("/proc/self/exe", dst, n - 1);
-    if (got <= 0 || static_cast<std::size_t>(got) >= n) return false;
+    if (got <= 0 || static_cast<std::size_t>(got) >= n)
+        return false;
     dst[got] = '\0';
     return true;
 }
 
 void test_home_exec_resets_signals() {
-    if (mister::testing::skipped_under_qemu("the re-exec'd probe never writes its file")) return;
+    if (mister::testing::skipped_under_qemu("the re-exec'd probe never writes its file"))
+        return;
     char exe[4096];
     CHECK(self_exe(exe, sizeof exe));
-    if (!self_exe(exe, sizeof exe)) return;
+    if (!self_exe(exe, sizeof exe))
+        return;
     char path[] = "/tmp/tasty_tasty_sigprobeXXXXXX";
     const int fd = ::mkstemp(path);
     CHECK(fd >= 0);
-    if (fd < 0) return;
+    if (fd < 0)
+        return;
     ::close(fd);
     ::unlink(path);
     char arg[4200];
@@ -3338,12 +3646,15 @@ void test_home_exec_resets_signals() {
         ::sigaddset(&block, SIGUSR1);
         ::sigaddset(&block, SIGTERM);
         ::sigaddset(&block, SIGALRM);
-        if (::sigprocmask(SIG_BLOCK, &block, nullptr) != 0) return 2;
+        if (::sigprocmask(SIG_BLOCK, &block, nullptr) != 0)
+            return 2;
         fw::tasty_set_home_image(exe, arg);
-        if (fw::tasty_spawn_stock() != 0) return 3;
+        if (fw::tasty_spawn_stock() != 0)
+            return 3;
         int st = 0;
         while (::waitpid(-1, &st, 0) < 0) {
-            if (errno != EINTR) return 4;
+            if (errno != EINTR)
+                return 4;
         }
         return 0;
     });
@@ -3355,14 +3666,18 @@ void test_home_exec_resets_signals() {
         if (rfd >= 0) {
             const ssize_t n = ::read(rfd, text, sizeof text - 1);
             ::close(rfd);
-            if (n > 0 && std::strstr(text, "mask ") != nullptr) got = true;
+            if (n > 0 && std::strstr(text, "mask ") != nullptr)
+                got = true;
         }
-        if (!got) ::usleep(20 * 1000);
+        if (!got)
+            ::usleep(20 * 1000);
     }
     ::unlink(path);
-    if (!got) std::printf("FAIL home probe missing (child %d)\n", end.code);
+    if (!got)
+        std::printf("FAIL home probe missing (child %d)\n", end.code);
     CHECK(got);
-    if (!got) return;
+    if (!got)
+        return;
 
     for (const char* name :
          {"hup ", "pipe ", "int ", "term ", "quit ", "segv ", "abrt ", "bus ", "usr1 ", "alrm "})
@@ -3383,7 +3698,8 @@ long long mono_ms(const timespec& a, const timespec& b) {
 }
 
 void test_signal_during_grace_does_not_kill_early() {
-    if (!no_mister_yet()) return;
+    if (!no_mister_yet())
+        return;
     int ready[2] = {-1, -1};
     if (::pipe(ready) != 0) {
         CHECK(false);
@@ -3399,15 +3715,19 @@ void test_signal_during_grace_does_not_kill_early() {
     if (mid == 0) {
         ::close(ready[0]);
         const pid_t gc = ::fork();
-        if (gc < 0) ::_exit(9);
-        if (gc > 0) ::_exit(0);
-        if (!set_mister_comm()) ::_exit(9);
-        struct sigaction ign {};
+        if (gc < 0)
+            ::_exit(9);
+        if (gc > 0)
+            ::_exit(0);
+        if (!set_mister_comm())
+            ::_exit(9);
+        struct sigaction ign{};
         ign.sa_handler = SIG_IGN;
         ::sigemptyset(&ign.sa_mask);
         (void)::sigaction(SIGTERM, &ign, nullptr);
         const int self = ::getpid();
-        if (::write(ready[1], &self, sizeof self) != static_cast<ssize_t>(sizeof self)) ::_exit(9);
+        if (::write(ready[1], &self, sizeof self) != static_cast<ssize_t>(sizeof self))
+            ::_exit(9);
         ::close(ready[1]);
         for (;;)
             ::pause();
@@ -3420,13 +3740,18 @@ void test_signal_during_grace_does_not_kill_early() {
     const ssize_t nr = ::read(ready[0], &stock, sizeof stock);
     ::close(ready[0]);
     CHECK(nr == static_cast<ssize_t>(sizeof stock) && stock > 0);
-    if (nr != static_cast<ssize_t>(sizeof stock) || stock <= 0) return;
+    if (nr != static_cast<ssize_t>(sizeof stock) || stock <= 0)
+        return;
+
     struct KillPid {
         int pid;
+
         ~KillPid() {
-            if (pid > 0) (void)::kill(pid, SIGKILL);
+            if (pid > 0)
+                (void)::kill(pid, SIGKILL);
         }
     } hold{stock};
+
     const ChildEnd end = in_child([] {
         (void)::alarm(8);
         fw::tasty_arm_owner_signals();
@@ -3444,15 +3769,22 @@ void test_signal_during_grace_does_not_kill_early() {
         const auto stopped = fw::tasty_stop_stock();
         (void)::clock_gettime(CLOCK_MONOTONIC, &t1);
         const long long ms = mono_ms(t0, t1);
-        if (poke.joinable()) poke.join();
-        if (ms < 1500) return 2;
-        if (!stopped || !*stopped) return 3;
+        if (poke.joinable())
+            poke.join();
+        if (ms < 1500)
+            return 2;
+        if (!stopped || !*stopped)
+            return 3;
         return 0;
     });
     if (!(end.exited && end.code == 0))
-        std::printf("FAIL grace exited=%d code=%d signaled=%d sig=%d\n",
-                    static_cast<int>(end.exited), end.code, static_cast<int>(end.signaled),
-                    end.sig);
+        std::printf(
+            "FAIL grace exited=%d code=%d signaled=%d sig=%d\n",
+            static_cast<int>(end.exited),
+            end.code,
+            static_cast<int>(end.signaled),
+            end.sig
+        );
     CHECK(end.exited && end.code == 0);
 }
 

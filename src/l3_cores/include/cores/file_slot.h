@@ -16,7 +16,7 @@ class IRomsetAliasSource;
 
 using proto::IoIndex;
 
-enum class SlotRole : std::uint8_t { Image, Disc, Save };
+enum class SlotRole : std::uint8_t { Image, Disc, Save, Ladder };
 
 enum class StartMount : std::uint8_t { Generic, AsPick, Unmodelled };
 
@@ -41,24 +41,35 @@ struct FileSlot {
 
 [[nodiscard]] constexpr bool walks_romset(std::span<const FileSlot> slots, IoIndex index) {
     for (const FileSlot& s : slots) {
-        if (s.index.v == (index.v & 0x3Fu) && s.romset_browse) return true;
+        if (s.index.v == (index.v & 0x3Fu) && s.romset_browse)
+            return true;
     }
     return false;
 }
 
-[[nodiscard]] constexpr bool is_load_row(const FileSlot& s) { return s.romset_browse; }
+[[nodiscard]] constexpr bool is_load_row(const FileSlot& s) {
+    return s.romset_browse;
+}
 
-[[nodiscard]] constexpr SlotRole role_of(std::span<const FileSlot> slots, IoIndex index,
-                                         SlotRole undeclared = SlotRole::Image) {
+[[nodiscard]] constexpr SlotRole role_of(
+    std::span<const FileSlot> slots,
+    IoIndex index,
+    SlotRole undeclared = SlotRole::Image
+) {
     for (const FileSlot& s : slots)
-        if (s.index == index && !is_load_row(s)) return s.role;
+        if (s.index == index && !is_load_row(s))
+            return s.role;
     return undeclared;
 }
 
-[[nodiscard]] constexpr StartMount start_mount_of(std::span<const FileSlot> slots, IoIndex index,
-                                                  StartMount undeclared = StartMount::Generic) {
+[[nodiscard]] constexpr StartMount start_mount_of(
+    std::span<const FileSlot> slots,
+    IoIndex index,
+    StartMount undeclared = StartMount::Generic
+) {
     for (const FileSlot& s : slots)
-        if (s.index == index && !is_load_row(s)) return s.start_mount;
+        if (s.index == index && !is_load_row(s))
+            return s.start_mount;
     return undeclared;
 }
 
@@ -69,13 +80,22 @@ struct FileSlot {
     return n;
 }
 
+[[nodiscard]] constexpr std::size_t ladder_rows(std::span<const FileSlot> slots) {
+    std::size_t n = 0;
+    for (const FileSlot& s : slots)
+        n += s.role == SlotRole::Ladder ? 1u : 0u;
+    return n;
+}
+
 void a_staging_profile_declares_exactly_one_disc_slot();
 
 consteval IoIndex disc_slot_of(std::span<const FileSlot> slots) {
-    if (disc_rows(slots) != 1) a_staging_profile_declares_exactly_one_disc_slot();
+    if (disc_rows(slots) != 1)
+        a_staging_profile_declares_exactly_one_disc_slot();
     for (const FileSlot& s : slots)
-        if (s.role == SlotRole::Disc) return s.index;
+        if (s.role == SlotRole::Disc)
+            return s.index;
     return IoIndex{};
 }
 
-}  // namespace mister::cores
+}

@@ -23,6 +23,7 @@ public:
         std::uint32_t unit_bytes = 0;
         std::uint32_t hunk_count = 0;
     };
+
     virtual Geometry geometry() const noexcept = 0;
 
     virtual std::optional<ChdMetaRow> track_metadata(std::uint32_t index) = 0;
@@ -49,4 +50,4 @@ struct ChdTrack {
 
 [[nodiscard]] Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file);
 
-}  // namespace mister::svc
+}

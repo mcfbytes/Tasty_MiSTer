@@ -22,4 +22,4 @@ struct RumbleMotors {
 static_assert(rumble_motors(0x0080) == RumbleMotors{.strong = 0x0000, .weak = 0x8080});
 static_assert(rumble_motors(0xFFFF) == RumbleMotors{.strong = 0xFFFF, .weak = 0xFFFF});
 
-}  // namespace mister::proto::user_io
+}

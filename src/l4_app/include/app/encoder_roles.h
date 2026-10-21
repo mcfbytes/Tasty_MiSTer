@@ -17,4 +17,4 @@ struct EncoderRoles {
     infra::OptRef<ICoreOptionActs> acts{};
 };
 
-}  // namespace mister::app
+}

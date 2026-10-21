@@ -53,10 +53,12 @@ private:
     Ui ui_{};
     xthread::Telemetry<Row> published_[kMaxRows]{};
 
-    static_assert(std::atomic<std::uint32_t>::is_always_lock_free,
-                  "item bound item 2: the publish counter must be a plain "
-                  "load/store on the binding toolchain. A libatomic call on "
-                  "T-RT's flush path is a lock on the RT path.");
+    static_assert(
+        std::atomic<std::uint32_t>::is_always_lock_free,
+        "item bound item 2: the publish counter must be a plain "
+        "load/store on the binding toolchain. A libatomic call on "
+        "T-RT's flush path is a lock on the RT path."
+    );
 };
 
-}  // namespace mister::proto
+}

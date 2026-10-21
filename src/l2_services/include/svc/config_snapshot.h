@@ -131,4 +131,4 @@ struct ConfigSnapshot {
     return c.direct_video == 2 ? std::uint8_t{0} : c.direct_video;
 }
 
-}  // namespace mister::svc
+}

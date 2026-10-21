@@ -29,4 +29,4 @@ private:
     UniqueFd fd_;
 };
 
-}  // namespace mister::os
+}

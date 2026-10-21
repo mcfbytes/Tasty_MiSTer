@@ -21,4 +21,4 @@ protected:
     IImageOpener& operator=(const IImageOpener&) = default;
 };
 
-}  // namespace mister::svc
+}

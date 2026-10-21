@@ -31,4 +31,4 @@ struct DeviceMatch {
     }
 };
 
-}  // namespace mister::svc
+}

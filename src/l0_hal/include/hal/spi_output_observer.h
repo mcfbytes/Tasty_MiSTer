@@ -17,4 +17,4 @@ protected:
     ISpiOutputObserver& operator=(const ISpiOutputObserver&) = default;
 };
 
-}  // namespace mister::hal
+}

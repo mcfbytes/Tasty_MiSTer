@@ -15,4 +15,4 @@ protected:
     IHdmiInterrupt& operator=(const IHdmiInterrupt&) = default;
 };
 
-}  // namespace mister::hal
+}

@@ -41,7 +41,8 @@ class InputBuild;
 struct InputSample;
 class ScreenshotQueue;
 class VideoWire;
-}  // namespace mister::app
+}
+
 namespace mister::svc {
 class ChdPrefetch;
 }
@@ -111,44 +112,56 @@ public:
         app::ScreenshotQueue& screenshots;
     };
 
-    DiagSampler(xthread::RtStats& stats, app::EventQueue<SeatTag::RT>& events,
-                const Main<RtEvidence>& ev, const xthread::WakeFlag& quiescing,
-                const std::atomic<bool>& transitioning, xthread::DiagLog& diag,
-                xthread::LogLane& rt_lane, const Sources& sources) noexcept;
+    struct Services {
+        infra::OptRef<app::IFrameSource> frame_source{};
+        infra::OptRef<const app::InputSample> input_sample{};
+        infra::OptRef<app::InputBuild> input_build{};
+        infra::OptRef<svc::ChdPrefetch> prefetch{};
+    };
+
+    DiagSampler(
+        xthread::RtStats& stats,
+        app::EventQueue<SeatTag::RT>& events,
+        const Main<RtEvidence>& ev,
+        const xthread::WakeFlag& quiescing,
+        const std::atomic<bool>& transitioning,
+        xthread::DiagLog& diag,
+        xthread::LogLane& rt_lane,
+        const Sources& sources,
+        const Services& services
+    ) noexcept;
 
     DiagSampler(const DiagSampler&) = delete;
     DiagSampler& operator=(const DiagSampler&) = delete;
 
-    void set_input_build(const infra::OptRef<app::InputBuild>& build) noexcept {
-        input_build_ = build;
-    }
-
-    void set_input_sample(const app::InputSample* s) noexcept { input_ = infra::opt_ref_of(s); }
-    void set_prefetch(svc::ChdPrefetch* pf) noexcept { prefetch_ = infra::opt_ref_of(pf); }
-
     bool open_diag(const char* path) noexcept { return diag_.open(path); }
+
     const xthread::DiagLog& diag() const noexcept { return diag_; }
 
     xthread::DiagLog& diag_sink() noexcept { return diag_; }
 
     xthread::LogLane* rt_log_lane() noexcept { return &lane_rt_; }
 
-    void set_frame_source(app::IFrameSource* s) noexcept { frame_src_ = infra::opt_ref_of(s); }
     void set_screenshot_dir(std::string dir) noexcept { shot_dir_ = std::move(dir); }
 
     void drain_screenshots() noexcept;
+
     std::uint32_t screenshots_written() const noexcept { return shots_written_; }
+
     std::uint32_t screenshots_failed() const noexcept { return shots_failed_; }
 
     void set_sample_period_ms(unsigned ms) noexcept { sample_ms_ = ms; }
+
     [[nodiscard]] unsigned sample_period_ms() const noexcept { return sample_ms_; }
 
     const DiagStats& stats() const noexcept { return diag_stats_; }
 
     static constexpr std::size_t kRtstatsWorstCase = 4064;
 
-    static constexpr std::size_t kSessWorstCase =
-        infra::json_record_worst(SessRecord::kKey, infra::json_worst_len<SessView>());
+    static constexpr std::size_t kSessWorstCase = infra::json_record_worst(
+        SessRecord::kKey,
+        infra::json_worst_len<SessView>()
+    );
 
     static constexpr std::size_t kDiagLineCeiling = xthread::DiagLog::kMaxLine - 1;
 
@@ -170,6 +183,7 @@ public:
     void on(const LogRec::DoorbellBound& a, const LogRec::Head& h) noexcept;
     void on(const LogRec::DoorbellPolling& a, const LogRec::Head& h) noexcept;
     void misrouted(const LogRec& r) noexcept;
+
     [[nodiscard]] std::uint32_t log_misrouted() const noexcept { return log_misrouted_; }
 
 private:
@@ -181,6 +195,7 @@ private:
         std::uint32_t seeks = 0, drops = 0, errors = 0;
         std::uint32_t decode_us = 0, evictions = 0;
     };
+
     CdInstruments cd_instruments() const noexcept;
 
     void render_records(const char* reason) noexcept;
@@ -253,4 +268,4 @@ private:
     unsigned sample_ms_ = 1000;
 };
 
-}  // namespace mister::fw
+}

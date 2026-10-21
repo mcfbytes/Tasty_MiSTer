@@ -18,4 +18,4 @@ struct ReplayControl {
 
 using ReplayControlCell = xthread::Telemetry<ReplayControl, SeatTag::Ui>;
 
-}  // namespace mister::app
+}

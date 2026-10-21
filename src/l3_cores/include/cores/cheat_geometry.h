@@ -13,8 +13,10 @@ struct CheatGeometry {
     std::uint16_t max_active = 128;
 };
 
-[[nodiscard]] constexpr CheatGeometry clamp_cheat_geometry(std::int32_t unit,
-                                                           std::int32_t max_active) noexcept {
+[[nodiscard]] constexpr CheatGeometry clamp_cheat_geometry(
+    std::int32_t unit,
+    std::int32_t max_active
+) noexcept {
     CheatGeometry g;
     g.unit = static_cast<std::uint32_t>(unit > 0 ? unit : 16);
 
@@ -26,4 +28,4 @@ struct CheatGeometry {
     return g;
 }
 
-}  // namespace mister::cores
+}

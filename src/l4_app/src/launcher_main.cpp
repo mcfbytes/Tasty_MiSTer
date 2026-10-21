@@ -8,4 +8,4 @@ void LauncherMain::start() noexcept {
     loop_();
 }
 
-}  // namespace mister::app
+}

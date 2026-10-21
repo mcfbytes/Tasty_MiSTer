@@ -36,11 +36,14 @@ void MsuMachine::close_() noexcept {
 
 proto::MailboxAct MsuMachine::serve(
     const proto::MailboxFrame& frame,
-    std::span<std::uint8_t, proto::kMailboxActBytes> bytes) noexcept {
+    std::span<std::uint8_t, proto::kMailboxActBytes> bytes
+) noexcept {
     TASTY_SEAT_BODY(MsuMachine);
-    if (!present_) return {};
+    if (!present_)
+        return {};
     const auto req = static_cast<std::uint8_t>(frame.w[0] & 0xFFu);
-    if (req == last_req_) return {};
+    if (req == last_req_)
+        return {};
     last_req_ = req;
     const std::uint16_t command = frame.w[1];
     const std::uint32_t data = frame.w[2] | (std::uint32_t{frame.w[3]} << 16);
@@ -66,9 +69,11 @@ proto::MailboxAct MsuMachine::track_(std::uint32_t track) noexcept {
     ++counts_.tracks;
     char num[12]{};
     const auto [end, ec] = std::to_chars(num, num + sizeof num, track);
-    const bool named = ec == std::errc{} && path_.assign(stem_.view()) && path_.append("-") &&
-                       path_.append(std::string_view(num, static_cast<std::size_t>(end - num))) &&
-                       path_.append(".pcm");
+    const bool named = ec == std::errc{}
+        && path_.assign(stem_.view())
+        && path_.append("-")
+        && path_.append(std::string_view(num, static_cast<std::size_t>(end - num)))
+        && path_.append(".pcm");
     if (named) {
         if (auto f = vfs_->open(path_.view(), svc::OpenMode::Read)) {
             const auto sz = (*f)->size();
@@ -80,7 +85,8 @@ proto::MailboxAct MsuMachine::track_(std::uint32_t track) noexcept {
             }
         }
     }
-    if (file_ == nullptr) ++counts_.missing;
+    if (file_ == nullptr)
+        ++counts_.missing;
     proto::MailboxAct act{};
     act.kind = proto::MailboxAct::Kind::Command;
     act.opcode = msu::kCdSet;
@@ -91,7 +97,8 @@ proto::MailboxAct MsuMachine::track_(std::uint32_t track) noexcept {
 void MsuMachine::seek_(std::uint32_t sector) noexcept {
     cursor_ = static_cast<std::uint32_t>(sector * static_cast<std::uint32_t>(msu::kSectorBytes));
     for (std::size_t k = 0; k < held_; ++k) {
-        if (ahead_[(head_ + k) % kAhead].off != cursor_) continue;
+        if (ahead_[(head_ + k) % kAhead].off != cursor_)
+            continue;
         head_ = (head_ + k) % kAhead;
         held_ -= k;
         return;
@@ -107,7 +114,8 @@ void MsuMachine::drop_ahead_(std::uint64_t from) noexcept {
 }
 
 proto::MailboxAct MsuMachine::next_(
-    std::span<std::uint8_t, proto::kMailboxActBytes> bytes) noexcept {
+    std::span<std::uint8_t, proto::kMailboxActBytes> bytes
+) noexcept {
     std::fill(bytes.begin(), bytes.end(), std::uint8_t{0});
     if (file_ != nullptr) {
         std::size_t n = 0;
@@ -141,7 +149,8 @@ bool MsuMachine::rest() const noexcept {
 
 void MsuMachine::refill_one() noexcept {
     TASTY_SEAT_BODY(MsuMachine);
-    if (rest()) return;
+    if (rest())
+        return;
     Sector& s = ahead_[(head_ + held_) % kAhead];
     s.bytes.fill(0);
     s.off = fill_at_;
@@ -150,7 +159,8 @@ void MsuMachine::refill_one() noexcept {
     ++held_;
     ++counts_.ahead_reads;
     fill_at_ += n;
-    if (n < msu::kSectorBytes) fill_done_ = true;
+    if (n < msu::kSectorBytes)
+        fill_done_ = true;
 }
 
 std::size_t MsuMachine::read_(std::uint64_t off, std::span<std::uint8_t> dst) noexcept {
@@ -161,10 +171,11 @@ std::size_t MsuMachine::read_(std::uint64_t off, std::span<std::uint8_t> dst) no
             ++counts_.read_errors;
             break;
         }
-        if (*r == 0) break;
+        if (*r == 0)
+            break;
         got += *r;
     }
     return got;
 }
 
-}  // namespace mister::cores
+}

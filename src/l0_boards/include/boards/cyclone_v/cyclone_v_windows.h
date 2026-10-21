@@ -17,4 +17,4 @@ static_assert(kWindowCount <= hal::kMaxWindows);
     return hal::WindowId{std::to_underlying(w)};
 }
 
-}  // namespace mister::boards::cyclone_v
+}

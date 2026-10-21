@@ -33,64 +33,91 @@ class PsxCore final : public Core,
 
 public:
     PsxCore(const CoreProfile& profile, const svc::CuePolicy& cue, const HostServices& host)
-        : Core(profile, host), cue_(&cue) {}
+        : Core(profile, host),
+          cue_(&cue) {}
 
     [[nodiscard]] std::optional<svc::DiscCounters> disc_counters() const noexcept override {
         TASTY_SEAT_BODY(PsxCore);
-        if (!discs_) return std::nullopt;
+        if (!discs_)
+            return std::nullopt;
         return counters_;
     }
+
     [[nodiscard]] std::optional<CdFlow> cd_flow() const noexcept override {
         TASTY_SEAT_BODY(PsxCore);
         return std::nullopt;
     }
 
     svc::DiscReadService* discs() noexcept { return discs_ ? &*discs_ : nullptr; }
+
     [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return geom_; }
 
     [[nodiscard]] std::string_view game_id() const noexcept { return game_id_.view(); }
+
     [[nodiscard]] svc::DiscRegion region() const noexcept { return region_; }
+
     [[nodiscard]] std::uint32_t kicks() const noexcept { return kicks_; }
+
     [[nodiscard]] std::uint32_t held_kicks() const noexcept { return held_kicks_; }
+
     [[nodiscard]] std::uint32_t wire_faults() const noexcept { return wire_faults_; }
+
     [[nodiscard]] std::uint32_t filler_sectors() const noexcept { return filler_sectors_; }
+
     [[nodiscard]] std::uint32_t pregap_zero_sectors() const noexcept {
         return pregap_zero_sectors_;
     }
 
     [[nodiscard]] MountState mount_disc(std::string_view path) override;
     void set_region(std::uint8_t region) override;
+
     [[nodiscard]] Ex<void> deferred_reset() override {
         TASTY_SEAT_BODY(PsxCore);
         return {};
     }
+
     [[nodiscard]] proto::IImageSink& image_sink() noexcept override {
         TASTY_SEAT_BODY(PsxCore);
         return Core::image_sink();
     }
+
     StagePlan stage_plan() noexcept override {
         TASTY_SEAT_BODY(PsxCore);
         return plan_;
     }
+
     [[nodiscard]] Ex<void> stage_disc_payload(const proto::LinkOp::StageDiscPayload& op) override;
 
     void service_kick() noexcept override;
 
     proto::SlotAttributes attributes(proto::SlotIndex slot) const override;
-    [[nodiscard]] Ex<std::size_t> read_at(proto::SlotIndex slot, std::uint64_t offset,
-                                          std::span<std::uint8_t> dst) override;
-    [[nodiscard]] Ex<std::size_t> write_at(proto::SlotIndex slot, std::uint64_t offset,
-                                           std::span<const std::uint8_t> src) override;
+    [[nodiscard]] Ex<std::size_t> read_at(
+        proto::SlotIndex slot,
+        std::uint64_t offset,
+        std::span<std::uint8_t> dst
+    ) override;
+    [[nodiscard]] Ex<std::size_t> write_at(
+        proto::SlotIndex slot,
+        std::uint64_t offset,
+        std::span<const std::uint8_t> src
+    ) override;
 
-    proto::BlockGeometry geometry_for(proto::SlotIndex slot, proto::Lba lba,
-                                      proto::BlockGeometry wire) override;
+    proto::BlockGeometry geometry_for(
+        proto::SlotIndex slot,
+        proto::Lba lba,
+        proto::BlockGeometry wire
+    ) override;
 
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
+
     [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return this; }
+
     [[nodiscard]] ISectorKick* on_sector_kick() noexcept override { return this; }
+
     [[nodiscard]] proto::IResidentImageSource* on_block_source() noexcept override { return this; }
+
     [[nodiscard]] proto::IBlockGeometry* on_block_geometry() noexcept override { return this; }
 
     [[nodiscard]] const ICdDiagnostics* on_cd_diagnostics() const noexcept override { return this; }
@@ -134,4 +161,4 @@ private:
     std::uint32_t pregap_zero_sectors_ = 0;
 };
 
-}  // namespace mister::cores
+}

@@ -45,16 +45,20 @@ enum class LoadHint : std::uint8_t { None, XmlManifest };
 
 [[nodiscard]] Ex<const CoreFactory*> find_core(std::string_view conf_str_name, LoadHint hint);
 
-const IManifestDocRole* manifest_doc_role();
+infra::OptRef<const IManifestDocRole> manifest_doc_role();
 
 const CoreProfile& profile_for(std::string_view conf_str_name);
 
-[[nodiscard]] constexpr MakeLoader loader_for(const CoreFactory* row,
-                                              std::uint32_t load_addr) noexcept {
-    if (row != nullptr && row->make_loader != nullptr) return row->make_loader;
+[[nodiscard]] constexpr MakeLoader loader_for(
+    const CoreFactory* row,
+    std::uint32_t load_addr
+) noexcept {
+    if (row != nullptr && row->make_loader != nullptr)
+        return row->make_loader;
     const CoreProfile& p = row != nullptr ? *row->profile : kGenericProfile;
-    if (load_addr == 0 || p.file_tx_whole) return nullptr;
+    if (load_addr == 0 || p.file_tx_whole)
+        return nullptr;
     return &make_addressed_load;
 }
 
-}  // namespace mister::cores
+}

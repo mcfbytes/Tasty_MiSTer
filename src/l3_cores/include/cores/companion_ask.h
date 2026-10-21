@@ -12,4 +12,4 @@ struct CompanionAsk {
     std::uint64_t aperture_base = 0;
 };
 
-}  // namespace mister::cores
+}

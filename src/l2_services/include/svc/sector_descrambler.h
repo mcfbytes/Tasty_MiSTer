@@ -24,6 +24,7 @@ consteval std::array<std::uint8_t, kCdDataSize - 12> make_sector_scramble() {
     }
     return t;
 }
+
 inline constexpr auto kSectorScramble = make_sector_scramble();
 
 class SectorDescrambler final : public IFrameShaper {
@@ -33,4 +34,4 @@ public:
     void shape(proto::Lba lba, std::span<std::byte, kCdFrameSize> frame) const noexcept override;
 };
 
-}  // namespace mister::svc
+}

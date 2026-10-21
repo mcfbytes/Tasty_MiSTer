@@ -28,4 +28,4 @@ struct SidecarMsg {
 inline constexpr std::size_t kSidecarRingRows = 512;
 using SidecarRing = xthread::SpscRing<SidecarMsg, kSidecarRingRows>;
 
-}  // namespace mister::app
+}

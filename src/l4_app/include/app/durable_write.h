@@ -13,7 +13,10 @@ class Vfs;
 
 namespace mister::app {
 
-[[nodiscard]] Ex<void> durable_write(const svc::Vfs& vfs, std::string_view rel,
-                                     std::span<const std::byte> bytes);
+[[nodiscard]] Ex<void> durable_write(
+    const svc::Vfs& vfs,
+    std::string_view rel,
+    std::span<const std::byte> bytes
+);
 
 }

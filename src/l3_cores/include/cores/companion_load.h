@@ -30,4 +30,4 @@ protected:
 
 using MakeCompanion = std::unique_ptr<ICompanionLoad> (*)(const svc::Vfs&);
 
-}  // namespace mister::cores
+}

@@ -19,4 +19,4 @@ protected:
     ILoadWindowMap& operator=(const ILoadWindowMap&) = default;
 };
 
-}  // namespace mister::app
+}

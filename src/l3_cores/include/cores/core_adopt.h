@@ -13,4 +13,4 @@ struct CoreAdopt {
     bool declares_turbo = false;
 };
 
-}  // namespace mister::cores
+}

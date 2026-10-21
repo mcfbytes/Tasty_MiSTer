@@ -20,4 +20,4 @@ protected:
     IRegMap& operator=(const IRegMap&) = default;
 };
 
-}  // namespace mister::svc::adv7513
+}

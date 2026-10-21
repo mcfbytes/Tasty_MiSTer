@@ -116,7 +116,11 @@ inline constexpr StagingPolicy kPsxStaging{
 };
 
 inline constexpr auto kPsxServices = std::to_array<LinkDecoderDecl>({
-    {"psx.sector_kick", reactor::Cause::Tick, &kSectorKick<kPsx>, 0, DeadlineClass::A,
+    {"psx.sector_kick",
+     reactor::Cause::Tick,
+     &kSectorKick<kPsx>,
+     0,
+     DeadlineClass::A,
      OsdBudget::Shared},
 });
 
@@ -147,4 +151,4 @@ std::unique_ptr<Core> make_psx(const CoreProfile& p, const CoreGrant& g);
 
 std::unique_ptr<BootLadder> make_psx_ladder(const CoreProfile& p, const LadderContext& ctx);
 
-}  // namespace mister::cores::manifests
+}

@@ -43,11 +43,16 @@ public:
     public:
         virtual ~ISaveStateFiles() = default;
 
-        [[nodiscard]] virtual Ex<std::size_t> read_at(std::string_view path, std::uint64_t offset,
-                                                      std::span<std::byte> dst) = 0;
+        [[nodiscard]] virtual Ex<std::size_t> read_at(
+            std::string_view path,
+            std::uint64_t offset,
+            std::span<std::byte> dst
+        ) = 0;
 
-        [[nodiscard]] virtual Ex<void> write_all_sync(std::string_view path,
-                                                      std::span<const std::byte> src) = 0;
+        [[nodiscard]] virtual Ex<void> write_all_sync(
+            std::string_view path,
+            std::span<const std::byte> src
+        ) = 0;
 
     protected:
         ISaveStateFiles() = default;
@@ -88,7 +93,9 @@ public:
     };
 
     SaveStateEngine(hal::PhysRegion aperture, const Environment& env) noexcept
-        : aperture_(aperture), env_(env) {}
+        : aperture_(aperture),
+          env_(env) {}
+
     SaveStateEngine(const SaveStateEngine&) = delete;
     SaveStateEngine& operator=(const SaveStateEngine&) = delete;
 
@@ -101,6 +108,7 @@ public:
 
     [[nodiscard]] Ex<void> arm(const SaveTarget& target);
     void disarm() noexcept;
+
     bool armed() const noexcept { return armed_; }
 
     [[nodiscard]] Ex<void> attach(const SaveStateDecl& ss);
@@ -122,9 +130,13 @@ public:
     static std::string slot_file(std::string_view subdir, std::string_view stem, unsigned digit);
 
     bool mapped() const noexcept { return mapped_; }
+
     const SaveStateDecl& window() const noexcept { return window_; }
+
     std::uint32_t shadow_counter(unsigned slot) const;
+
     unsigned saves_written() const noexcept { return saves_written_; }
+
     unsigned write_failures() const noexcept { return write_failures_; }
 
     std::uint32_t span_warnings() const noexcept { return span_warnings_; }
@@ -157,4 +169,4 @@ private:
     std::uint32_t span_warnings_ = 0;
 };
 
-}  // namespace mister::proto
+}

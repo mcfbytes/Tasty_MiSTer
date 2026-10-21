@@ -24,14 +24,17 @@ public:
 
     [[nodiscard]] Ex<void> read(std::span<std::uint8_t> data);
     [[nodiscard]] Ex<void> read(std::span<std::uint8_t> data, hal::Width w);
+
     [[nodiscard]] Ex<void> end() { return bracket_.end(); }
 
     bool active() const noexcept { return bracket_.active(); }
+
     WideIoIndex index() const noexcept { return WideIoIndex{bracket_.index()}; }
 
 private:
     explicit UploadSession(FioBracket&& b) noexcept : bracket_(std::move(b)) {}
+
     FioBracket bracket_;
 };
 
-}  // namespace mister::proto
+}

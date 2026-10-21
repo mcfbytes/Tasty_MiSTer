@@ -14,10 +14,13 @@
 
 namespace mister::cores {
 
-Ex<void> MegaDriveCore::do_adopt(const CoreAdopt&) { return {}; }
+Ex<void> MegaDriveCore::do_adopt(const CoreAdopt&) {
+
+    return {};
+}
 
 void MegaDriveCore::on_set_pending_file_ext(std::string_view ext) noexcept {
-    (void)ext_.assign(ext);
+    tx_.set_ext(ext);
 }
 
 void MegaDriveCore::on_set_pending_file_path(std::string_view path) noexcept {
@@ -31,36 +34,38 @@ IPcmFeed* MegaDriveCore::feed() noexcept {
 
 void MegaDriveCore::rearm_feed_() {
     IPcmFeed* fd = feed();
-    if (fd == nullptr) return;
+    if (fd == nullptr)
+        return;
     ++feed_arms_;
     ack_pending_ = false;
     paused_ = false;
     current_track_ = 0;
     rearm_ticks_ = 0;
 
-    pending_feed_ =
-        path_.empty() ? nullptr : std::make_unique<mdp::CueWavSource>(host().vfs, path_.view());
+    pending_feed_ = path_.empty() ? nullptr
+                                  : std::make_unique<mdp::CueWavSource>(host().vfs, path_.view());
     feed_rearm_pending_ = true;
     retry_feed_(*fd);
 }
 
 void MegaDriveCore::retry_feed_(IPcmFeed& fd) noexcept {
-    if (!feed_rearm_pending_) return;
+    if (!feed_rearm_pending_)
+        return;
     if (!fd.ready_for_source()) {
         ++feed_deferrals_;
         return;
     }
     feed_rearm_pending_ = false;
-    if (auto r = fd.set_source(std::move(pending_feed_)); !r) ++feed_refusals_;
+    if (auto r = fd.set_source(std::move(pending_feed_)); !r)
+        ++feed_refusals_;
     pending_feed_.reset();
 }
 
 Ex<proto::SessionParams> MegaDriveCore::stream_opening(IoIndex) {
     TASTY_SEAT_BODY(MegaDriveCore);
-    bytes_sent_ = 0;
-    tx_crc_ = 0;
+    tx_.opened();
     proto::SessionParams params{};
-    params.ext = ext_.view();
+    params.ext = tx_.ext();
     return params;
 }
 
@@ -68,14 +73,17 @@ void MegaDriveCore::stream_closed(const StreamLoadEnd& end) noexcept {
     TASTY_SEAT_BODY(MegaDriveCore);
     last_index_ = static_cast<std::uint16_t>(end.index.v);
     ++transfers_;
-    if (!end.ok) return;
-    bytes_sent_ = end.bytes;
-    tx_crc_ = end.crc;
+    tx_.closed(end);
+    if (!end.ok)
+        return;
 
     rearm_feed_();
 }
 
-Ex<void> MegaDriveCore::on_mount(IoIndex, const MountedPath&) { return unimplemented(ERR_SITE()); }
+Ex<void> MegaDriveCore::on_mount(IoIndex, const MountedPath&) {
+
+    return unimplemented(ERR_SITE());
+}
 
 bool MegaDriveCore::read_status_(Status& out) noexcept {
     hal::ISpiTransport& link = host().link;
@@ -106,8 +114,9 @@ void MegaDriveCore::send_ack_(std::uint8_t track, bool playing) noexcept {
         ++wire_faults_;
         return;
     }
-    const std::uint16_t word =
-        static_cast<std::uint16_t>((static_cast<unsigned>(track) << 8) | (playing ? 1u : 0u));
+    const std::uint16_t word = static_cast<std::uint16_t>(
+        (static_cast<unsigned>(track) << 8) | (playing ? 1u : 0u)
+    );
     if (auto r = link.transfer(hal::SpiWord{word}); !r) {
         ++wire_faults_;
         return;
@@ -117,7 +126,8 @@ void MegaDriveCore::send_ack_(std::uint8_t track, bool playing) noexcept {
 
 void MegaDriveCore::pump_(IPcmFeed& fd) noexcept {
     const PcmFeedState s = fd.state();
-    if (!s.playing || paused_) return;
+    if (!s.playing || paused_)
+        return;
     hal::ISpiTransport& link = host().link;
     std::uint16_t read_point = 0;
     {
@@ -140,9 +150,11 @@ void MegaDriveCore::pump_(IPcmFeed& fd) noexcept {
 }
 
 bool MegaDriveCore::settle_ack_(IPcmFeed& fd) noexcept {
-    if (!ack_pending_) return false;
+    if (!ack_pending_)
+        return false;
     const PcmFeedState s = fd.state();
-    if (s.served == served_before_ || !s.primed) return false;
+    if (s.served == served_before_ || !s.primed)
+        return false;
     current_track_ = s.playing ? ack_track_ : 0;
     ack_pending_ = false;
     send_ack_(current_track_, s.playing);
@@ -177,12 +189,14 @@ void MegaDriveCore::arm_play_(IPcmFeed& fd, std::uint8_t track, bool loop) noexc
 void MegaDriveCore::service_pcm_tick() noexcept {
     TASTY_SEAT_BODY(MegaDriveCore);
     IPcmFeed* fdp = feed();
-    if (fdp == nullptr) return;
+    if (fdp == nullptr)
+        return;
     IPcmFeed& fd = *fdp;
     retry_feed_(fd);
 
     Status st{};
-    if (!read_status_(st)) return;
+    if (!read_status_(st))
+        return;
 
     if (ack_pending_) {
         if (settle_ack_(fd)) {
@@ -205,7 +219,8 @@ void MegaDriveCore::service_pcm_tick() noexcept {
             return;
         }
 
-        if (feed_rearm_pending_ && ++rearm_ticks_ < kAckTicks) return;
+        if (feed_rearm_pending_ && ++rearm_ticks_ < kAckTicks)
+            return;
         arm_play_(fd, st.track, (st.flags & kFlagLoop) != 0);
         return;
     }
@@ -213,7 +228,8 @@ void MegaDriveCore::service_pcm_tick() noexcept {
 
         if (st.fade == 0) {
             paused_ = true;
-            if (auto r = fd.stop(); !r) paused_ = false;
+            if (auto r = fd.stop(); !r)
+                paused_ = false;
         }
     } else if ((st.flags & kFlagResume) != 0) {
         paused_ = false;
@@ -223,4 +239,4 @@ void MegaDriveCore::service_pcm_tick() noexcept {
     pump_(fd);
 }
 
-}  // namespace mister::cores
+}

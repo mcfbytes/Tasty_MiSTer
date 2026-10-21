@@ -14,4 +14,4 @@ struct SdRequest {
     BlockCount block_count;
 };
 
-}  // namespace mister::proto
+}

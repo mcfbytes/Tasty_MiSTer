@@ -26,4 +26,4 @@ struct BlockHalf {
 static_assert(std::is_trivially_copyable_v<BlockHalf>);
 static_assert(sizeof(BlockHalf) == 128u + proto::kBlockStagingBytes, "the half dominates");
 
-}  // namespace mister::svc
+}

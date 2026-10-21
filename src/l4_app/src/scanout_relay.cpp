@@ -7,17 +7,20 @@ namespace mister::app {
 
 bool ScanoutRelay::collect() noexcept {
     TASTY_SEAT_BODY(ScanoutRelay);
-    if (!ask_) ask_ = channel_.take_ask();
+    if (!ask_)
+        ask_ = channel_.take_ask();
     return ask_.has_value();
 }
 
 void ScanoutRelay::step(Wire wire) noexcept {
     TASTY_SEAT_BODY(ScanoutRelay);
     if (unsent_) {
-        if (!channel_.answer(*unsent_)) return;
+        if (!channel_.answer(*unsent_))
+            return;
         unsent_.reset();
     }
-    if (wire == Wire::Held || !collect()) return;
+    if (wire == Wire::Held || !collect())
+        return;
     const UioBurst ask = *ask_;
     ask_.reset();
     if (wire == Wire::CoreStarting || ask.count > UioBurst::kMaxWords) {
@@ -25,7 +28,8 @@ void ScanoutRelay::step(Wire wire) noexcept {
         return;
     }
     const UioBurst done = emit_(ask);
-    if (!channel_.answer(done)) unsent_ = done;
+    if (!channel_.answer(done))
+        unsent_ = done;
 }
 
 void ScanoutRelay::refuse_(const UioBurst& ask) noexcept {
@@ -33,7 +37,8 @@ void ScanoutRelay::refuse_(const UioBurst& ask) noexcept {
     UioBurst no = ask;
     no.ok = false;
     no.count = 0;
-    if (!channel_.answer(no)) unsent_ = no;
+    if (!channel_.answer(no))
+        unsent_ = no;
 }
 
 UioBurst ScanoutRelay::emit_(const UioBurst& ask) noexcept {
@@ -61,4 +66,4 @@ UioBurst ScanoutRelay::emit_(const UioBurst& ask) noexcept {
     return out;
 }
 
-}  // namespace mister::app
+}

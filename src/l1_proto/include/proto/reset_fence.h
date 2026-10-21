@@ -25,4 +25,4 @@ protected:
     IResetFence& operator=(IResetFence&&) = default;
 };
 
-}  // namespace mister::proto
+}

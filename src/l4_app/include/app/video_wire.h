@@ -9,6 +9,7 @@
 
 #include "app/link_tx_channel.h"
 #include "proto/conf_switches.h"
+#include "infra/opt_ref.h"
 #include "proto/reset_fence.h"
 #include "infra/error.h"
 #include "infra/telemetry.h"
@@ -41,6 +42,7 @@ struct BlockPayload {
     std::uint8_t opcode = 0;
     std::uint8_t count = 0;
 };
+
 static_assert(std::is_trivially_copyable_v<BlockPayload>);
 
 class VideoWire : public svc::VideoService::IVideoWireSink,
@@ -52,13 +54,15 @@ public:
     static constexpr std::size_t kSlots = proto::kLinkTxCapacity + 1;
     static constexpr std::size_t kWords = svc::kVideoWireWords;
 
-    static_assert(kSlots == proto::kLinkTxCapacity + 1,
-                  "item / video-rule: the block table is sized ONE LARGER than "
-                  "the ring the index rides, because xthread::SpscRing::pop frees "
-                  "the seat BEFORE emit() reads the block — the block outlives the "
-                  "op. Equal-sized re-opens the tear; smaller re-opens "
-                  "the aliasing gap. It is anchored to the ring the index actually "
-                  "rides, not to any other ring that happens to be the same size.");
+    static_assert(
+        kSlots == proto::kLinkTxCapacity + 1,
+        "item / video-rule: the block table is sized ONE LARGER than "
+        "the ring the index rides, because xthread::SpscRing::pop frees "
+        "the seat BEFORE emit() reads the block — the block outlives the "
+        "op. Equal-sized re-opens the tear; smaller re-opens "
+        "the aliasing gap. It is anchored to the ring the index actually "
+        "rides, not to any other ring that happens to be the same size."
+    );
     static_assert(kSlots <= 256, "LinkOp::slot is a uint8_t");
 
     using Block = xthread::SeqCell<BlockPayload>;
@@ -68,24 +72,34 @@ public:
     };
 
     explicit VideoWire(Wiring w) noexcept : link_tx_(w.link_tx) {}
+
     VideoWire(const VideoWire&) = delete;
     VideoWire& operator=(const VideoWire&) = delete;
 
-    [[nodiscard]] Ex<void> publish(std::uint8_t opcode,
-                                   std::span<const std::uint16_t> words) override;
+    [[nodiscard]] Ex<void> publish(
+        std::uint8_t opcode,
+        std::span<const std::uint16_t> words
+    ) override;
 
     [[nodiscard]] Ex<void> stage(std::uint8_t opcode, std::span<const std::uint16_t> words);
 
     std::uint32_t staged_generation() const noexcept { return gen_; }
 
-    [[nodiscard]] Ex<void> emit(hal::ISpiTransport& link, std::uint8_t slot, std::uint32_t gen,
-                                proto::IResetFence* fence = nullptr);
+    [[nodiscard]] Ex<void> emit(
+        hal::ISpiTransport& link,
+        std::uint8_t slot,
+        std::uint32_t gen,
+        infra::OptRef<proto::IResetFence> fence = {}
+    );
 
     static constexpr std::int64_t kGeoFirstPeriodMs = 1000;
     static constexpr std::int64_t kGeoPeriodMs = 500;
 
-    void on_rt_round(hal::ISpiTransport& link, std::int64_t now_ns,
-                     proto::IResetFence* fence = nullptr);
+    void on_rt_round(
+        hal::ISpiTransport& link,
+        std::int64_t now_ns,
+        infra::OptRef<proto::IResetFence> fence = {}
+    );
 
     [[nodiscard]] Ex<svc::VideoSample> sample(bool force) override;
 
@@ -94,6 +108,7 @@ public:
     void publish_policy(const svc::ScalingPolicy& p) noexcept {
         policy_.store(p.to_bits(), std::memory_order_release);
     }
+
     svc::ScalingPolicy policy() const noexcept {
         return svc::ScalingPolicy::from_bits(policy_.load(std::memory_order_acquire));
     }
@@ -127,16 +142,24 @@ public:
     [[nodiscard]] svc::AudioService& audio() noexcept { return audio_; }
 
     void set_key_map(proto::ConfSwitches conf) noexcept {
-        tail_but_sw_ =
-            static_cast<std::uint16_t>((tail_but_sw_ & (kButton1 | kButton2)) | conf.word());
+        tail_but_sw_ = static_cast<std::uint16_t>(
+            (tail_but_sw_ & (kButton1 | kButton2)) | conf.word()
+        );
     }
+
     std::uint16_t key_map() const noexcept { return tail_but_sw_; }
 
     static constexpr std::uint16_t kButton1 = 0x0001;
     static constexpr std::uint16_t kButton2 = 0x0002;
-    bool update_but_sw(hal::ISpiTransport& link, std::uint16_t buttons, bool osd_visible,
-                       proto::IResetFence* fence = nullptr) noexcept;
+    bool update_but_sw(
+        hal::ISpiTransport& link,
+        std::uint16_t buttons,
+        bool osd_visible,
+        infra::OptRef<proto::IResetFence> fence = {}
+    ) noexcept;
+
     std::uint32_t but_sw_writes() const noexcept { return but_sw_writes_; }
+
     std::uint32_t but_sw_errors() const noexcept { return but_sw_errors_; }
 
     bool prelude_running() const noexcept {
@@ -156,15 +179,22 @@ public:
         std::uint32_t stream_words = 0;
         std::uint32_t stream_errors = 0;
     };
+
     FilterStats filter_stats() const noexcept;
 
-    void publish_ar_custom(std::uint16_t a0, std::uint16_t a1, std::uint16_t a2,
-                           std::uint16_t a3) noexcept {
-        const std::uint64_t bits =
-            static_cast<std::uint64_t>(a0) | (static_cast<std::uint64_t>(a1) << 16) |
-            (static_cast<std::uint64_t>(a2) << 32) | (static_cast<std::uint64_t>(a3) << 48);
+    void publish_ar_custom(
+        std::uint16_t a0,
+        std::uint16_t a1,
+        std::uint16_t a2,
+        std::uint16_t a3
+    ) noexcept {
+        const std::uint64_t bits = static_cast<std::uint64_t>(a0)
+            | (static_cast<std::uint64_t>(a1) << 16)
+            | (static_cast<std::uint64_t>(a2) << 32)
+            | (static_cast<std::uint64_t>(a3) << 48);
         ar_cust_.store(bits, std::memory_order_release);
     }
+
     void publish_shadow_mask(std::uint16_t flag_word) noexcept {
         shadow_mask_.store(flag_word, std::memory_order_release);
     }
@@ -197,6 +227,7 @@ public:
         std::uint16_t tail_fail = 0;
         std::uint8_t step = 0;
     };
+
     PreludeStats prelude_stats() const noexcept;
 
     struct GeoStats {
@@ -210,6 +241,7 @@ public:
         std::uint32_t reads = 0;
         std::uint32_t torn = 0;
     };
+
     GeoStats geo_stats() const noexcept;
 
     static void bump(std::atomic<std::uint32_t>& c) noexcept {
@@ -222,18 +254,26 @@ public:
         std::uint32_t stale = 0;
         std::uint32_t partial = 0;
         std::uint32_t rejected = 0;
+        std::uint32_t staged_rejected = 0;
+        std::uint32_t emit_rejected = 0;
 
         std::uint32_t arm_fail = 0;
     };
+
     Stats stats() const noexcept;
 
 private:
-    bool step_prelude(hal::ISpiTransport& link, proto::IResetFence* fence);
+    bool step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IResetFence> fence);
 
     bool consume_filters();
     bool service_filter_publish(hal::ISpiTransport& link);
-    bool arm_filter_stream(std::uint16_t flt_flags, std::size_t vert_slot, bool prelude, bool tail,
-                           const svc::ScalingWords& tail_words);
+    bool arm_filter_stream(
+        std::uint16_t flt_flags,
+        std::size_t vert_slot,
+        bool prelude,
+        bool tail,
+        const svc::ScalingWords& tail_words
+    );
     void step_filter_stream(hal::ISpiTransport& link);
     std::size_t select_slot(const svc::VideoSample& s) const;
 
@@ -245,10 +285,12 @@ private:
     std::uint32_t geo_core_seq_ = 0;
     std::uint32_t sampled_seq_ = 0;
 
-    static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
-                  "item/item: policy_ is a naturally-aligned 64-bit atomic read on "
-                  "T-UI and written on T-RT with no lock — PROVE it here rather than "
-                  "assume it, exactly as input_wire.h does for its own 64-bit cells.");
+    static_assert(
+        std::atomic<std::uint64_t>::is_always_lock_free,
+        "item/item: policy_ is a naturally-aligned 64-bit atomic read on "
+        "T-UI and written on T-RT with no lock — PROVE it here rather than "
+        "assume it, exactly as input_wire.h does for its own 64-bit cells."
+    );
     std::atomic<std::uint64_t> policy_{0};
     std::atomic<std::uint32_t> force_seq_{0};
     std::uint32_t force_seen_ = 0;
@@ -273,7 +315,6 @@ private:
     std::uint8_t fs_vert_slot_ = 0;
     std::size_t fs_cursor_ = 0;
     svc::ScalingWords fs_tail_words_{};
-    std::uint32_t pre_flt_barrier_ = 0;
     std::atomic<std::uint32_t> flt_published_{0};
     std::atomic<std::uint32_t> flt_consumed_{0};
     std::atomic<std::uint32_t> flt_waits_{0};
@@ -284,6 +325,7 @@ private:
 
     PreludeStep pre_step_ = PreludeStep::Idle;
     std::uint32_t pre_barrier_ = 0;
+    std::uint32_t pre_flt_barrier_ = 0;
     std::uint8_t pre_parked_slot_ = 0;
     std::uint32_t pre_parked_gen_ = 0;
     bool pre_parked_ = false;
@@ -295,16 +337,21 @@ private:
     std::uint16_t tail_but_sw_ = 0;
     std::uint16_t but_sw_sent_ = 0;
 
-    [[nodiscard]] Ex<void> emit_but_sw_(hal::ISpiTransport& link, std::uint16_t word,
-                                        proto::IResetFence* fence) noexcept;
+    [[nodiscard]] Ex<void> emit_but_sw_(
+        hal::ISpiTransport& link,
+        std::uint16_t word,
+        infra::OptRef<proto::IResetFence> fence
+    ) noexcept;
 
     std::uint16_t but_sw_shadow_ = 0;
     bool but_sw_seen_ = false;
     std::uint32_t but_sw_writes_ = 0;
     std::uint32_t but_sw_errors_ = 0;
 
-    static_assert(std::atomic<std::uint64_t>::is_always_lock_free,
-                  "ar_cust_ (publish_ar_custom) must be lock-free too");
+    static_assert(
+        std::atomic<std::uint64_t>::is_always_lock_free,
+        "ar_cust_ (publish_ar_custom) must be lock-free too"
+    );
     std::atomic<std::uint64_t> ar_cust_{0};
     std::atomic<std::uint32_t> shadow_mask_{0};
     std::atomic<std::uint32_t> pre_arms_{0};
@@ -341,18 +388,22 @@ private:
     std::atomic<std::uint32_t> emitted_{0};
     std::atomic<std::uint32_t> stale_{0};
     std::atomic<std::uint32_t> partial_{0};
-    std::atomic<std::uint32_t> rejected_{0};
+    std::atomic<std::uint32_t> staged_rejected_{0};
+    std::atomic<std::uint32_t> emit_rejected_{0};
     std::atomic<std::uint32_t> arm_fail_{0};
 };
 
 consteval bool coeff_chunk_fits_every_board() {
     return hal::every_measured(&hal::BoardProfile::timing, [](const hal::LinkTiming& g) consteval {
         const std::int64_t beat_ns = hal::LinkTimingValues::measured(g).beat_ns;
-        return static_cast<std::int64_t>(VideoWire::kCoeffChunkWords + 1) * beat_ns <=
-               VideoWire::kRoundBudgetNs;
+        return static_cast<std::int64_t>(VideoWire::kCoeffChunkWords + 1) * beat_ns
+            <= VideoWire::kRoundBudgetNs;
     });
 }
-static_assert(coeff_chunk_fits_every_board(),
-              "S3 chunk must leave half the 1 ms executive round free");
 
-}  // namespace mister::app
+static_assert(
+    coeff_chunk_fits_every_board(),
+    "S3 chunk must leave half the 1 ms executive round free"
+);
+
+}

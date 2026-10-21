@@ -16,8 +16,9 @@ namespace mister::os {
 
 std::optional<std::uint64_t> BlockDevice::size_bytes() const noexcept {
     unsigned long long blksize = 0;
-    if (::ioctl(fd_, BLKGETSIZE64, &blksize) < 0) return std::nullopt;
+    if (::ioctl(fd_, BLKGETSIZE64, &blksize) < 0)
+        return std::nullopt;
     return static_cast<std::uint64_t>(blksize);
 }
 
-}  // namespace mister::os
+}

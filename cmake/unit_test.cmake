@@ -1,8 +1,4 @@
 set(_tasty_seat_main_tag_src ${CMAKE_CURRENT_LIST_DIR}/../tests/support/seat_main_tag.cpp)
-if(TASTY_BUILD_TESTS AND EXISTS ${_tasty_seat_main_tag_src})
-  add_library(tasty_seat_main_tag OBJECT ${_tasty_seat_main_tag_src})
-  target_link_libraries(tasty_seat_main_tag PUBLIC mister_infra PRIVATE tasty_test_options)
-endif()
 function(tasty_unit_test target)
   cmake_parse_arguments(PARSE_ARGV 1 A "EXCLUDE_FROM_ALL;NO_SEAT_MAIN"
     "NAME;TIMEOUT;WORKING_DIRECTORY" "SOURCES;LIBS;INCLUDES;DEFINES;LABELS;COMMAND;PROPERTIES")

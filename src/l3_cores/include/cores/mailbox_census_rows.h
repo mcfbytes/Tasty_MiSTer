@@ -20,14 +20,16 @@ public:
     void service(reactor::CoreState& st) const override {
         TASTY_SEAT_BODY(TickRow);
         Core* c = bound_core(st);
-        if (c == nullptr || &c->profile() != &kProfile) return;
-        if (IMailboxRows* r = c->mailbox_rows()) r->service_mailbox_tick();
+        if (c == nullptr || &c->profile() != &kProfile)
+            return;
+        if (IMailboxRows* r = c->mailbox_rows())
+            r->service_mailbox_tick();
     }
 };
 
-}  // namespace detail
+}
 
 template <const CoreProfile& kProfile>
 inline constexpr detail::TickRow<kProfile> kMailboxTick{};
 
-}  // namespace mister::cores
+}

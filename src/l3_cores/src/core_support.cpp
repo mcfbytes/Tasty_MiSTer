@@ -9,15 +9,18 @@ Ex<void> Core::adopt(const CoreAdopt& a) {
     if (adopted_) {
         fatal(Error{Errc::core_load, ERR_SITE(), 0}, "Core::adopt twice");
     }
-    if (auto r = pre_adopt_(a.session); !r) return r;
-    if (auto r = do_adopt(a); !r) return r;
+    if (auto r = pre_adopt_(a.session); !r)
+        return r;
+    if (auto r = do_adopt(a); !r)
+        return r;
     adopted_ = true;
     return {};
 }
 
 Ex<std::optional<proto::StatusBit>> Core::reset(const proto::ResetEdge& edge) {
     if (profile_->reset.reacts(edge)) {
-        if (auto r = do_reset(); !r) return std::unexpected(r.error());
+        if (auto r = do_reset(); !r)
+            return std::unexpected(r.error());
     }
     return profile_->reset.pulse(edge);
 }
@@ -26,7 +29,8 @@ Ex<void> Core::shutdown() {
     auto flushed = flush_dirty_state_();
     auto down = do_shutdown();
     adopted_ = false;
-    if (!flushed) return flushed;
+    if (!flushed)
+        return flushed;
     return down;
 }
 
@@ -35,20 +39,28 @@ Ex<void> Core::pre_adopt_(proto::CoreSession& s) {
     return {};
 }
 
-Ex<void> Core::flush_dirty_state_() { return {}; }
+Ex<void> Core::flush_dirty_state_() {
+    return {};
+}
 
 Ex<void> Core::mount(IoIndex slot, const MountedPath& p) {
-    const bool declared =
-        std::any_of(profile_->slots.begin(), profile_->slots.end(),
-                    [slot](const FileSlot& fs) { return fs.index == slot && !is_load_row(fs); });
+    const bool declared = std::any_of(
+        profile_->slots.begin(),
+        profile_->slots.end(),
+        [slot](const FileSlot& fs) { return fs.index == slot && !is_load_row(fs); }
+    );
     if (!declared && !profile_->slots.empty()) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
     }
     return on_mount(slot, p);
 }
 
-Ex<void> Core::file_tx(IoIndex index, svc::IFile& f) { return on_file_tx(index, f); }
+Ex<void> Core::file_tx(IoIndex index, std::span<const std::uint8_t> bytes) {
+    return on_file_tx(index, bytes);
+}
 
-Ex<void> Core::osd_closed() { return on_osd_closed(); }
+Ex<void> Core::osd_closed() {
+    return on_osd_closed();
+}
 
-}  // namespace mister::cores
+}

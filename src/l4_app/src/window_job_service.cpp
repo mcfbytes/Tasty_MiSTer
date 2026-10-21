@@ -5,7 +5,9 @@
 
 namespace mister::app {
 
-WindowJobService::Chan::Loan WindowJobService::acquire_() noexcept { return chan_.acquire(); }
+WindowJobService::Chan::Loan WindowJobService::acquire_() noexcept {
+    return chan_.acquire();
+}
 
 void WindowJobService::send_(Chan::Loan&& loan, const cores::IWindowJobKind* kind) noexcept {
     loan->kind = infra::opt_ref_of(kind);
@@ -22,13 +24,16 @@ bool WindowJobService::arm_osd_open(cores::IWindowSave& role) noexcept {
         return false;
     }
     const cores::IWindowJobKind* job = role.on_osd_open(std::span<std::byte>(loan->order));
-    if (job == nullptr) return false;
+    if (job == nullptr)
+        return false;
     send_(std::move(loan), job);
     return true;
 }
 
-bool WindowJobService::arm_reset_edge(cores::IWindowSave& role,
-                                      const proto::ResetEdge& edge) noexcept {
+bool WindowJobService::arm_reset_edge(
+    cores::IWindowSave& role,
+    const proto::ResetEdge& edge
+) noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "WindowJobService::arm_reset_edge off T-RT");
     auto loan = acquire_();
     if (!loan) {
@@ -36,15 +41,20 @@ bool WindowJobService::arm_reset_edge(cores::IWindowSave& role,
         return false;
     }
     const cores::IWindowJobKind* job = role.on_reset_edge(edge, std::span<std::byte>(loan->order));
-    if (job == nullptr) return false;
+    if (job == nullptr)
+        return false;
     send_(std::move(loan), job);
     return true;
 }
 
-bool WindowJobService::hold_open(const cores::IWindowSave& role, proto::IoIndex index,
-                                 std::uint32_t act) noexcept {
+bool WindowJobService::hold_open(
+    const cores::IWindowSave& role,
+    proto::IoIndex index,
+    std::uint32_t act
+) noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "WindowJobService::hold_open off T-RT");
-    if (rt_.held != Held::None || !role.owes_flush(index)) return false;
+    if (rt_.held != Held::None || !role.owes_flush(index))
+        return false;
     rt_.held = Held::Waiting;
     rt_.held_act = act;
     rt_.held_index = index;
@@ -65,13 +75,13 @@ std::optional<std::uint32_t> WindowJobService::service(cores::IWindowSave* role)
             return rt_.held_act;
         }
     }
-    if (rt_.held != Held::Waiting || rt_.armed) return std::nullopt;
+    if (rt_.held != Held::Waiting || rt_.armed)
+        return std::nullopt;
 
     auto loan = acquire_();
-    const cores::IWindowJobKind* job =
-        (loan && role != nullptr)
-            ? role->take_flush(rt_.held_index, std::span<std::byte>(loan->order))
-            : nullptr;
+    const cores::IWindowJobKind* job = (loan && role != nullptr)
+        ? role->take_flush(rt_.held_index, std::span<std::byte>(loan->order))
+        : nullptr;
     if (job == nullptr) {
         rt_.held = Held::None;
         return rt_.held_act;
@@ -103,11 +113,16 @@ void WindowJobService::finish_(bool ok, Error err) noexcept {
 void WindowJobService::serve() noexcept {
     if (!io_.job) {
         io_.job = chan_.take();
-        if (!io_.job) return;
+        if (!io_.job)
+            return;
         WindowJobSlot& slot = *io_.job;
-        io_.running.reset(slot.kind ? slot.kind->build(std::span<std::byte>(slot.arena),
-                                                       std::span<const std::byte>(slot.order))
-                                    : nullptr);
+        io_.running.reset(
+            slot.kind ? slot.kind->build(
+                            std::span<std::byte>(slot.arena),
+                            std::span<const std::byte>(slot.order)
+                        )
+                      : nullptr
+        );
         if (!io_.running) {
             finish_(false, Error{Errc::bad_format, ERR_SITE(), 0});
             return;
@@ -127,9 +142,12 @@ void WindowJobService::serve() noexcept {
         finish_(false, more.error());
         return;
     }
-    if (!*more) finish_(true, Error{Errc::io, 0, 0});
+    if (!*more)
+        finish_(true, Error{Errc::io, 0, 0});
 }
 
-bool WindowJobService::idle() const noexcept { return !io_.job && chan_.outbound() == 0; }
+bool WindowJobService::idle() const noexcept {
+    return !io_.job && chan_.outbound() == 0;
+}
 
-}  // namespace mister::app
+}

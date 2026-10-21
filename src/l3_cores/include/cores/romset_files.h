@@ -12,8 +12,10 @@ class IRomsetFiles {
 public:
     virtual ~IRomsetFiles() = default;
 
-    [[nodiscard]] virtual std::optional<std::string> read_prefix(std::string_view path,
-                                                                 std::uint64_t cap) = 0;
+    [[nodiscard]] virtual std::optional<std::string> read_prefix(
+        std::string_view path,
+        std::uint64_t cap
+    ) = 0;
 
 protected:
     IRomsetFiles() = default;
@@ -21,4 +23,4 @@ protected:
     IRomsetFiles& operator=(const IRomsetFiles&) = default;
 };
 
-}  // namespace mister::cores
+}

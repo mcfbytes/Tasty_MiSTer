@@ -16,4 +16,4 @@ public:
     virtual void key(std::uint16_t code, bool down) noexcept = 0;
 };
 
-}  // namespace mister::os
+}

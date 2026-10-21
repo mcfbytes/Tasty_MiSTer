@@ -34,15 +34,19 @@ inline constexpr std::chrono::milliseconds kPcmDrainMs{500};
 inline constexpr int kPcmIdlePollMs = 100;
 
 inline constexpr int kPcmParkedPollMs = -1;
-static_assert(kPcmParkedPollMs < 0,
-              "A parked feeder owns no ring and no source, so its main blocks "
-              "INDEFINITELY: every waker of one (the stop, request_park, "
-              "ready_for_source, set_source) is seen by rest() or the stop fd, and a timeout here "
-              "would wake an idle FIFO-22 seat ten times a second forever.");
+static_assert(
+    kPcmParkedPollMs < 0,
+    "A parked feeder owns no ring and no source, so its main blocks "
+    "INDEFINITELY: every waker of one (the stop, request_park, "
+    "ready_for_source, set_source) is seen by rest() or the stop fd, and a timeout here "
+    "would wake an idle FIFO-22 seat ten times a second forever."
+);
 
 inline constexpr std::size_t kPcmCommandDepth = 8;
-static_assert((kPcmCommandDepth & (kPcmCommandDepth - 1)) == 0,
-              "xthread::SpscRing requires a power-of-two capacity");
+static_assert(
+    (kPcmCommandDepth & (kPcmCommandDepth - 1)) == 0,
+    "xthread::SpscRing requires a power-of-two capacity"
+);
 
 inline constexpr std::size_t kPcmMediaLeases = 4;
 static_assert(kPcmMediaLeases < kPcmCommandDepth);
@@ -60,7 +64,9 @@ public:
     using Commands = xthread::Inbox<PcmCommand, kPcmCommandDepth>;
 
     PcmRingFeeder(const os::IClock& clock, Commands& commands) noexcept
-        : clock_(&clock), commands_(&commands) {}
+        : clock_(&clock),
+          commands_(&commands) {}
+
     ~PcmRingFeeder() override = default;
 
     PcmRingFeeder(const PcmRingFeeder&) = delete;
@@ -91,8 +97,10 @@ public:
 
     void request_park() noexcept;
 
-    [[nodiscard]] Ex<void> attach(hal::FpgaMemory ring,
-                                  std::unique_ptr<cores::IPcmSource> src) noexcept;
+    [[nodiscard]] Ex<void> attach(
+        hal::FpgaMemory ring,
+        std::unique_ptr<cores::IPcmSource> src
+    ) noexcept;
 
     [[nodiscard]] Ex<void> adopt_ring(hal::FpgaMemory&& ring) noexcept;
 
@@ -124,6 +132,7 @@ public:
     [[nodiscard]] std::uint32_t wakes() const noexcept {
         return wakes_.load(std::memory_order_relaxed);
     }
+
     [[nodiscard]] std::uint32_t command_drops() const noexcept {
         return drops_.load(std::memory_order_relaxed);
     }
@@ -131,6 +140,7 @@ public:
     [[nodiscard]] std::uint32_t command_discards() const noexcept {
         return discards_.load(std::memory_order_relaxed);
     }
+
     [[nodiscard]] std::uint32_t fill_passes() const noexcept {
         return passes_.load(std::memory_order_relaxed);
     }
@@ -188,12 +198,14 @@ private:
     bool ever_observed_ = false;
 
     using Lease = xthread::SlotPool<PcmMedia, kPcmMediaLeases>::Lease;
+
     struct Commander {
         TASTY_SEAT_RESIDENT(RT);
         Lease leases[kPcmMediaLeases]{};
         std::uint32_t lease_seq[kPcmMediaLeases]{};
         std::uint32_t sent = 0;
     };
+
     Commander cmd_{};
 
     std::optional<hal::FpgaMemory> ring_{};
@@ -215,6 +227,7 @@ private:
         std::uint32_t attaches = 0;
         bool swap_taken = false;
     };
+
     Worker work_{};
 
     std::uint32_t rp_seen_ = 0;
@@ -225,29 +238,37 @@ private:
     std::byte staging_[kPcmChunkBytes]{};
 };
 
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, SeatTag::Pcm).spawn == hal::SpawnKind::Create;
-              }),
-              "T-PCM is spawned, not promoted in place: PcmMain::start is a "
-              "thread body reached through ThreadAssembly::trampoline<PcmMain>, "
-              "the same shape as RtMain::start behind trampoline<RtMain>.");
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, SeatTag::Pcm).policy == hal::SchedPolicy::Fifo &&
-                         hal::seat_of(m, SeatTag::Pcm).prio < hal::seat_of(m, SeatTag::RT).prio;
-              }),
-              "arch RULE 2: this seat blocks on poll(2) and on file reads, "
-              "and it must never be able to preempt the sole GPO owner.");
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, SeatTag::Pcm).cpu != hal::seat_of(m, SeatTag::RT).cpu;
-              }),
-              "thread_map.h's pcm_off_rt_cpu, restated where the worker is: up "
-              "to 8 KiB of memcpy into uncached FPGA DDR per pass must not "
-              "contend for the CPU the executive's 5 ms cadence is measured "
-              "on.");
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, SeatTag::Pcm).stack_bytes == hal::kFifoStackBytes;
-              }),
-              "the staging buffer is a MEMBER, not a frame: the row's stack is "
-              "the FIFO stack every created RT seat takes, unchanged.");
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::seat_of(m, SeatTag::Pcm).spawn == hal::SpawnKind::Create;
+    }),
+    "T-PCM is spawned, not promoted in place: PcmMain::start is a "
+    "thread body reached through ThreadAssembly::trampoline<PcmMain>, "
+    "the same shape as RtMain::start behind trampoline<RtMain>."
+);
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::seat_of(m, SeatTag::Pcm).policy == hal::SchedPolicy::Fifo
+            && hal::seat_of(m, SeatTag::Pcm).prio < hal::seat_of(m, SeatTag::RT).prio;
+    }),
+    "arch RULE 2: this seat blocks on poll(2) and on file reads, "
+    "and it must never be able to preempt the sole GPO owner."
+);
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::seat_of(m, SeatTag::Pcm).cpu != hal::seat_of(m, SeatTag::RT).cpu;
+    }),
+    "thread_map.h's pcm_off_rt_cpu, restated where the worker is: up "
+    "to 8 KiB of memcpy into uncached FPGA DDR per pass must not "
+    "contend for the CPU the executive's 5 ms cadence is measured "
+    "on."
+);
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::seat_of(m, SeatTag::Pcm).stack_bytes == hal::kFifoStackBytes;
+    }),
+    "the staging buffer is a MEMBER, not a frame: the row's stack is "
+    "the FIFO stack every created RT seat takes, unchanged."
+);
 
-}  // namespace mister::app
+}

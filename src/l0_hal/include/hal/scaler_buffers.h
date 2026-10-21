@@ -39,15 +39,17 @@ public:
     [[nodiscard]] Ex<ScalerHeader> header(std::size_t off) const;
 
     [[nodiscard]] Ex<void> copy(std::size_t off, std::span<std::byte> dst);
+
     [[nodiscard]] std::size_t len() const noexcept { return mem_.region().len; }
 
     [[nodiscard]] bool uio_bound() const noexcept { return mem_.uio_bound(); }
 
 private:
     explicit ScalerBuffers(FpgaMemory m) noexcept : mem_(std::move(m)) {}
+
     FpgaMemory mem_;
 };
 
 void copy_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept;
 
-}  // namespace mister::hal
+}

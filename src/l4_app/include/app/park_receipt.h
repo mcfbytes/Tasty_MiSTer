@@ -11,9 +11,10 @@ public:
 
 private:
     friend class QuiesceChannel;
+
     explicit ParkReceipt(std::uint32_t at_gen) noexcept : gen_(at_gen) {}
 
     std::uint32_t gen_;
 };
 
-}  // namespace mister::app
+}

@@ -18,4 +18,4 @@ protected:
     IOutputGeometry() = default;
 };
 
-}  // namespace mister::app
+}

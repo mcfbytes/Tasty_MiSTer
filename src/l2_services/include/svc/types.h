@@ -57,4 +57,4 @@ struct Generation {
     friend constexpr auto operator<=>(Generation, Generation) = default;
 };
 
-}  // namespace mister::svc
+}

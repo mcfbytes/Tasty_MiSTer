@@ -36,7 +36,9 @@ public:
     using CountsCell = xthread::Telemetry<Counts, SeatTag::RT>;
 
     InputEmit(InputWire& wire, hal::ISpiTransport& link, proto::ILinkRouter& router) noexcept
-        : wire_(wire), ps2_(link, router) {}
+        : wire_(wire),
+          ps2_(link, router) {}
+
     InputEmit(const InputEmit&) = delete;
     InputEmit& operator=(const InputEmit&) = delete;
 
@@ -45,8 +47,11 @@ public:
     void apply_edge_reset();
 
     svc::InputEmitter& emitter() noexcept { return em_; }
+
     const svc::InputEmitter& emitter() const noexcept { return em_; }
+
     Counts counts() const noexcept;
+
     const CountsCell& counts_cell() const noexcept { return counts_cell_; }
 
 private:
@@ -66,34 +71,38 @@ private:
     std::atomic<std::uint32_t> n_edge_reset_{0};
 };
 
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::highest_fifo_seat(m) == InputEmit::kSeat;
-              }),
-              "item: this lane has no thread of its own. Its body is step "
-              "(3) of app::RtMain::round, whose serve() runs on T-RT — "
-              "the ONE row holding the strictly highest FIFO priority "
-              "(INVARIANT 1), so this join rejects every other seat. Seating "
-              "it elsewhere would mean the emitter runs on a thread that is "
-              "not the executive's, and every SPI write input makes would be "
-              "a SECOND writer of the GPO shadow word hal::SpiBus exists "
-              "to solely own (a CORRECTNESS requirement, not tuning).");
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, InputEmit::kSeat).policy == hal::SchedPolicy::Fifo &&
-                         hal::seat_of(m, InputEmit::kSeat).prio >
-                             hal::seat_of(m, InputDecode::kSeat).prio;
-              }),
-              "item: this lane DRAINS what the decode lane publishes, on "
-              "the round the executive owns. At or below the decode lane's "
-              "priority the decode lane could refill what this lane drains "
-              "faster than it is drained (arch §2).");
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, InputEmit::kSeat).cpu !=
-                         hal::seat_of(m, InputDecode::kSeat).cpu;
-              }),
-              "item: the producer and the consumer of InputWire sit on "
-              "DIFFERENT cores — that is what makes every cell's wait-free "
-              "single-writer discipline worth its cost, and what keeps "
-              "device-rate decode work off the RT core (arch's "
-              "prefetch_off_rt_cpu neighbourhood).");
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::highest_fifo_seat(m) == InputEmit::kSeat;
+    }),
+    "item: this lane has no thread of its own. Its body is step "
+    "(3) of app::RtMain::round, whose serve() runs on T-RT — "
+    "the ONE row holding the strictly highest FIFO priority "
+    "(INVARIANT 1), so this join rejects every other seat. Seating "
+    "it elsewhere would mean the emitter runs on a thread that is "
+    "not the executive's, and every SPI write input makes would be "
+    "a SECOND writer of the GPO shadow word hal::SpiBus exists "
+    "to solely own (a CORRECTNESS requirement, not tuning)."
+);
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::seat_of(m, InputEmit::kSeat).policy == hal::SchedPolicy::Fifo
+            && hal::seat_of(m, InputEmit::kSeat).prio > hal::seat_of(m, InputDecode::kSeat).prio;
+    }),
+    "item: this lane DRAINS what the decode lane publishes, on "
+    "the round the executive owns. At or below the decode lane's "
+    "priority the decode lane could refill what this lane drains "
+    "faster than it is drained (arch §2)."
+);
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::seat_of(m, InputEmit::kSeat).cpu != hal::seat_of(m, InputDecode::kSeat).cpu;
+    }),
+    "item: the producer and the consumer of InputWire sit on "
+    "DIFFERENT cores — that is what makes every cell's wait-free "
+    "single-writer discipline worth its cost, and what keeps "
+    "device-rate decode work off the RT core (arch's "
+    "prefetch_off_rt_cpu neighbourhood)."
+);
 
-}  // namespace mister::app
+}

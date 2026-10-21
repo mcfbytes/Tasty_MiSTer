@@ -39,4 +39,4 @@ private:
     std::string bound_[kMaxPlayers]{};
 };
 
-}  // namespace mister::svc
+}

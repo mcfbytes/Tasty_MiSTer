@@ -28,7 +28,8 @@ struct BlockCtl {
     infra::OptRef<IStorageBackend> stage{};
 };
 
-static_assert(std::is_trivially_copyable_v<BlockCtl> &&
-              sizeof(BlockCtl) <= 96u + kStorageOrderBytes);
+static_assert(
+    std::is_trivially_copyable_v<BlockCtl> && sizeof(BlockCtl) <= 96u + kStorageOrderBytes
+);
 
-}  // namespace mister::svc
+}

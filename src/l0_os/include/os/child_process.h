@@ -43,6 +43,7 @@ public:
     [[nodiscard]] ::pid_t pid() const noexcept { return pid_; }
 
     [[nodiscard]] int pidfd() const noexcept { return pidfd_; }
+
     [[nodiscard]] bool reaped() const noexcept { return pid_ <= 0; }
 
     [[nodiscard]] Ex<void> signal(int sig) noexcept;
@@ -51,10 +52,11 @@ public:
 
 private:
     ChildProcess(::pid_t pid, int pidfd) noexcept : pid_(pid), pidfd_(pidfd) {}
+
     void release_() noexcept;
 
     ::pid_t pid_ = -1;
     int pidfd_ = -1;
 };
 
-}  // namespace mister::os
+}

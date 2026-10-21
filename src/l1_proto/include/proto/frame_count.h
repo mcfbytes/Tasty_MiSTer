@@ -10,4 +10,4 @@ struct FrameCount {
     std::uint8_t count = 0;
 };
 
-}  // namespace mister::proto
+}

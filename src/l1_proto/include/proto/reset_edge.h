@@ -8,7 +8,13 @@
 
 namespace mister::proto {
 
-enum class ResetSource : std::uint8_t { OsdToggle = 1, UserButton = 2, KbdCombo = 3 };
+enum class ResetSource : std::uint8_t {
+    OsdToggle = 1,
+    UserButton = 2,
+    KbdCombo = 3,
+    OptionAction = 4,
+    OptionSettle = 5
+};
 
 struct ResetEdge {
     TASTY_SEAT_EXEMPT(component);
@@ -20,18 +26,30 @@ struct ResetEdge {
     [[nodiscard]] static constexpr ResetEdge osd_toggle(StatusBit b, bool ext) noexcept {
         return ResetEdge{.source = ResetSource::OsdToggle, .bit = b, .ex = ext};
     }
+
     [[nodiscard]] static constexpr ResetEdge user_button() noexcept {
         return ResetEdge{.source = ResetSource::UserButton};
     }
+
     [[nodiscard]] static constexpr ResetEdge kbd_combo(bool held_shift) noexcept {
         return ResetEdge{.source = ResetSource::KbdCombo, .cold = held_shift};
+    }
+
+    [[nodiscard]] static constexpr ResetEdge option_action(bool cold) noexcept {
+        return ResetEdge{.source = ResetSource::OptionAction, .cold = cold};
+    }
+
+    [[nodiscard]] static constexpr ResetEdge option_settle() noexcept {
+        return ResetEdge{.source = ResetSource::OptionSettle, .cold = true};
     }
 
     [[nodiscard]] constexpr bool toggles_reset_bit() const noexcept {
         return source == ResetSource::OsdToggle && bit == StatusBit{0};
     }
+
     friend constexpr bool operator==(ResetEdge, ResetEdge) = default;
 };
+
 static_assert(sizeof(ResetEdge) == 4);
 
-}  // namespace mister::proto
+}

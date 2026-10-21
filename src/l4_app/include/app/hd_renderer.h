@@ -67,7 +67,9 @@ public:
     void release() noexcept;
 
     [[nodiscard]] std::uint64_t ticks() const noexcept { return ticks_; }
+
     [[nodiscard]] const HdOsdStatus& status() const noexcept { return st_; }
+
     [[nodiscard]] BackdropJob::Step job_step() const noexcept { return job_.step(); }
 
 private:
@@ -138,4 +140,4 @@ private:
     std::uint64_t copy_ns_ = 0;
 };
 
-}  // namespace mister::app
+}

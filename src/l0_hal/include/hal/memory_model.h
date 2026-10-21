@@ -15,4 +15,4 @@ struct MemoryModel {
     Fact<WriteCombine> write_combine;
 };
 
-}  // namespace mister::hal
+}

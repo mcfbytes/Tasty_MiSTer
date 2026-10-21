@@ -11,4 +11,4 @@ struct CoreGrant {
     CoreManifest manifest{};
 };
 
-}  // namespace mister::cores
+}

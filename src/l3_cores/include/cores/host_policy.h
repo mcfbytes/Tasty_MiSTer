@@ -11,4 +11,4 @@ struct HostPolicy {
     PauseOnOsd pause = PauseOnOsd::Option;
 };
 
-}  // namespace mister::cores
+}

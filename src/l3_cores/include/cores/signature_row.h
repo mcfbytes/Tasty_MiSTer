@@ -15,4 +15,4 @@ struct SignatureRow {
     std::string_view why;
 };
 
-}  // namespace mister::cores
+}

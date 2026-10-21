@@ -39,6 +39,7 @@ struct CdProfile {
         std::uint32_t count;
         std::uint32_t latency_ticks;
     };
+
     std::span<const SeekFastPath> seek_fast_paths;
 
     std::span<const CdQuirkRow> quirks{};
@@ -46,4 +47,4 @@ struct CdProfile {
     proto::ResetTerms reset = proto::ResetTerms::framework();
 };
 
-}  // namespace mister::cores
+}

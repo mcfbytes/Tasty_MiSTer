@@ -12,4 +12,4 @@ public:
     [[nodiscard]] virtual SpiSample sample() const noexcept = 0;
 };
 
-}  // namespace mister::hal
+}

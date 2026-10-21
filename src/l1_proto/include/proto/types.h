@@ -140,8 +140,10 @@ struct FileId {
 struct CorrelationTag {
     std::uint32_t v = 0;
     friend constexpr bool operator==(CorrelationTag, CorrelationTag) = default;
+
     explicit constexpr operator bool() const noexcept { return v != 0; }
 };
+
 inline constexpr CorrelationTag kUncaused{0};
 
-}  // namespace mister::proto
+}

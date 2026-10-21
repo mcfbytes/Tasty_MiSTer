@@ -24,4 +24,4 @@ constexpr void set_verdict(MountStatus& level, MountVerdict v) noexcept {
     level.state = v == MountVerdict::Done ? MountState::Done : MountState::Failed;
 }
 
-}  // namespace mister::cores
+}

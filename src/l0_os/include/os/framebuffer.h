@@ -15,9 +15,11 @@ public:
     enum class Wait : std::uint8_t { Edge, Interrupted, Failed };
 
     Framebuffer() noexcept = default;
+
     explicit Framebuffer(int fd) noexcept : fd_(fd) {}
 
     [[nodiscard]] bool valid() const noexcept { return fd_.valid(); }
+
     [[nodiscard]] int fd() const noexcept { return fd_.get(); }
 
     [[nodiscard]] Wait wait_vsync() const noexcept;
@@ -26,4 +28,4 @@ private:
     UniqueFd fd_{};
 };
 
-}  // namespace mister::os
+}

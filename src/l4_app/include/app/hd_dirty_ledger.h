@@ -25,4 +25,4 @@ private:
     HdRect stale_[2][kRegions]{};
 };
 
-}  // namespace mister::app
+}

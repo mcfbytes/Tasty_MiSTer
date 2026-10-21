@@ -10,4 +10,4 @@ namespace mister::app {
 inline constexpr std::size_t kPathMax = 1024;
 using PathText = FixedStr<kPathMax, StrFit::Reject>;
 
-}  // namespace mister::app
+}

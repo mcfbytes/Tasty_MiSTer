@@ -10,6 +10,7 @@ struct RawKeyEdge {
     std::uint8_t pressed = 0;
     std::uint8_t reserved = 0;
 };
+
 static_assert(sizeof(RawKeyEdge) == 4, "the ring's slot size is load-bearing");
 
-}  // namespace mister::app
+}

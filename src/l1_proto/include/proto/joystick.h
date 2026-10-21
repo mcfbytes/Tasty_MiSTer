@@ -28,13 +28,17 @@ inline constexpr std::uint32_t kJoyL3 = 0x4000;
 inline constexpr std::uint32_t kJoyR3 = 0x8000;
 inline constexpr std::uint32_t kJoyMove = kJoyRight | kJoyLeft | kJoyUp | kJoyDown;
 
-static_assert(kJoyDown == 0x04 && kJoyUp == 0x08,
-              "video-rule: user_io.h:105-106 — DOWN is the LOWER bit. Transposing "
-              "them moves the menu cursor the wrong way with no diagnostic "
-              "anywhere, which is why this is a build error and not a comment.");
-static_assert(kJoyBtn3 == (kJoyBtn1 << 2),
-              "video-rule: the BTN1+BTN2 chord SYNTHESISES BTN3 (input.cpp:2424); "
-              "the three bits must stay in this relation");
+static_assert(
+    kJoyDown == 0x04 && kJoyUp == 0x08,
+    "video-rule: user_io.h:105-106 — DOWN is the LOWER bit. Transposing "
+    "them moves the menu cursor the wrong way with no diagnostic "
+    "anywhere, which is why this is a build error and not a comment."
+);
+static_assert(
+    kJoyBtn3 == (kJoyBtn1 << 2),
+    "video-rule: the BTN1+BTN2 chord SYNTHESISES BTN3 (input.cpp:2424); "
+    "the three bits must stay in this relation"
+);
 
 struct JoystickWire {
     bool analog_capable = false;
@@ -56,24 +60,47 @@ public:
     static constexpr std::uint32_t kMaxDigitalPushWords = 3 + 4;
 
     void configure(const JoystickWire& w) noexcept { wire_ = w; }
+
     const JoystickWire& wire() const noexcept { return wire_; }
 
-    [[nodiscard]] Ex<void> push_digital(hal::ISpiTransport& link, PlayerIndex player, JoyMask map,
-                                        bool new_dir);
+    [[nodiscard]] Ex<void> push_digital(
+        hal::ISpiTransport& link,
+        PlayerIndex player,
+        JoyMask map,
+        bool new_dir
+    );
 
-    [[nodiscard]] Ex<void> push_analog_l(hal::ISpiTransport& link, std::uint8_t index,
-                                         std::int8_t x, std::int8_t y);
-    [[nodiscard]] Ex<void> push_analog_r(hal::ISpiTransport& link, std::uint8_t index,
-                                         std::int8_t x, std::int8_t y);
+    [[nodiscard]] Ex<void> push_analog_l(
+        hal::ISpiTransport& link,
+        std::uint8_t index,
+        std::int8_t x,
+        std::int8_t y
+    );
+    [[nodiscard]] Ex<void> push_analog_r(
+        hal::ISpiTransport& link,
+        std::uint8_t index,
+        std::int8_t x,
+        std::int8_t y
+    );
 
-    [[nodiscard]] Ex<void> push_paddle(hal::ISpiTransport& link, PlayerIndex player,
-                                       std::uint8_t value);
+    [[nodiscard]] Ex<void> push_paddle(
+        hal::ISpiTransport& link,
+        PlayerIndex player,
+        std::uint8_t value
+    );
 
-    [[nodiscard]] Ex<void> push_spinner(hal::ISpiTransport& link, PlayerIndex player,
-                                        std::int8_t delta);
+    [[nodiscard]] Ex<void> push_spinner(
+        hal::ISpiTransport& link,
+        PlayerIndex player,
+        std::int8_t delta
+    );
 
-    [[nodiscard]] Ex<bool> submit(hal::ISpiTransport& link, PlayerIndex player, JoyMask buttons,
-                                  JoyMask autofire);
+    [[nodiscard]] Ex<bool> submit(
+        hal::ISpiTransport& link,
+        PlayerIndex player,
+        JoyMask buttons,
+        JoyMask autofire
+    );
 
     [[nodiscard]] Ex<bool> release(hal::ISpiTransport& link, PlayerIndex player, JoyMask composed);
 
@@ -87,19 +114,26 @@ public:
     }
 
     static constexpr std::uint8_t stick_index(PlayerIndex p) noexcept { return p.v; }
+
     static constexpr std::uint8_t paddle_index(PlayerIndex p) noexcept {
         return static_cast<std::uint8_t>((static_cast<unsigned>(p.v) << 4u) | 0x0Fu);
     }
+
     static constexpr std::uint8_t spinner_index(PlayerIndex p) noexcept {
         return static_cast<std::uint8_t>((static_cast<unsigned>(p.v) << 4u) | 0x8Fu);
     }
 
-    [[nodiscard]] static Ex<std::uint8_t> paddle_scale(std::int32_t raw, std::int32_t min,
-                                                       std::int32_t max);
+    [[nodiscard]] static Ex<std::uint8_t> paddle_scale(
+        std::int32_t raw,
+        std::int32_t min,
+        std::int32_t max
+    );
 
     static constexpr std::int8_t spinner_clamp(std::int32_t delta) noexcept {
-        if (delta < -128) return static_cast<std::int8_t>(-128);
-        if (delta > 127) return static_cast<std::int8_t>(127);
+        if (delta < -128)
+            return static_cast<std::int8_t>(-128);
+        if (delta > 127)
+            return static_cast<std::int8_t>(127);
         return static_cast<std::int8_t>(delta);
     }
 
@@ -111,12 +145,18 @@ public:
 
 private:
     std::uint8_t swapped(std::uint8_t port) const noexcept {
-        if (port > 1u || !wire_.joyswap) return port;
+        if (port > 1u || !wire_.joyswap)
+            return port;
         return static_cast<std::uint8_t>(port ^ 1u);
     }
 
-    [[nodiscard]] Ex<void> push_analog(hal::ISpiTransport& link, std::uint16_t opcode,
-                                       std::uint8_t index, std::uint8_t x, std::uint8_t y);
+    [[nodiscard]] Ex<void> push_analog(
+        hal::ISpiTransport& link,
+        std::uint16_t opcode,
+        std::uint8_t index,
+        std::uint8_t x,
+        std::uint8_t y
+    );
 
     JoystickWire wire_{};
 
@@ -125,4 +165,4 @@ private:
     JoyMask prev_[kMaxPorts]{};
 };
 
-}  // namespace mister::proto
+}

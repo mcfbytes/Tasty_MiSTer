@@ -1,0 +1,11 @@
+--- a/internal/core/Cargo.toml
++++ b/internal/core/Cargo.toml
+@@ -172,7 +172,7 @@
+ # The complex-scripts line-breaking dictionaries cost several MB, so leave them out of
+ # wasm binaries.
+ [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+-parley = { version = "0.11.1", optional = true, default-features = false, features = ["std", "complex-scripts"] }
++parley = { version = "0.11.1", optional = true, default-features = false, features = ["std"] }
+ 
+ [target.'cfg(target_arch = "wasm32")'.dependencies]
+ parley = { version = "0.11.1", optional = true }

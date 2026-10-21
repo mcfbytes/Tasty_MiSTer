@@ -39,4 +39,4 @@ protected:
     ISaveChannel& operator=(const ISaveChannel&) = default;
 };
 
-}  // namespace mister::cores
+}

@@ -16,4 +16,4 @@ struct SessionParams {
     std::string_view ext{};
 };
 
-}  // namespace mister::proto
+}

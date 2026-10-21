@@ -31,15 +31,16 @@ constexpr std::uint8_t kCoreTypeDualSdram = 0xA8;
 std::uint64_t now_ns() noexcept {
     timespec ts{};
     ::clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-    return static_cast<std::uint64_t>(ts.tv_sec) * 1'000'000'000ull +
-           static_cast<std::uint64_t>(ts.tv_nsec);
+    return static_cast<std::uint64_t>(ts.tv_sec) * 1'000'000'000ull
+        + static_cast<std::uint64_t>(ts.tv_nsec);
 }
 
-}  // namespace
+}
 
 void SpiBus::store_gpo(std::uint32_t v) noexcept {
     gpo_reg_.write(v);
-    if (obs_) obs_->on_store(v);
+    if (obs_)
+        obs_->on_store(v);
 }
 
 void SpiBus::commit_gpo(std::uint32_t v) noexcept {
@@ -47,7 +48,9 @@ void SpiBus::commit_gpo(std::uint32_t v) noexcept {
     store_gpo(v);
 }
 
-std::uint32_t SpiBus::read_gpi() const noexcept { return gpi_reg_.read(); }
+std::uint32_t SpiBus::read_gpi() const noexcept {
+    return gpi_reg_.read();
+}
 
 Ex<std::uint32_t> SpiBus::spin_ack(bool want, bool counts) noexcept {
     unsigned budget = ack_soft_spins_;
@@ -59,17 +62,20 @@ Ex<std::uint32_t> SpiBus::spin_ack(bool want, bool counts) noexcept {
 
             return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), gpi});
         }
-        if (((gpi & kAck) != 0u) == want) return gpi;
-        if (--budget != 0u) continue;
+        if (((gpi & kAck) != 0u) == want)
+            return gpi;
+        if (--budget != 0u)
+            continue;
         budget = ack_soft_spins_;
         const std::uint64_t now = now_ns();
         if (!armed) {
-            limit = now + ack_timeout_ns_;
+            limit = now + (start_bound_ ? start_ack_timeout_ns_ : ack_timeout_ns_);
             armed = true;
             continue;
         }
         if (now >= limit) {
-            if (counts && stats_) stats_->spin_timeouts.add();
+            if (counts && stats_)
+                stats_->spin_timeouts.add();
             return std::unexpected(Error{Errc::spi_timeout, ERR_SITE(), gpi});
         }
     }
@@ -77,7 +83,8 @@ Ex<std::uint32_t> SpiBus::spin_ack(bool want, bool counts) noexcept {
 
 Ex<SpiBus> SpiBus::open(Mailbox mailbox, xthread::RtStats* stats) {
 
-    if (!mailbox.held()) return std::unexpected(Error{Errc::busy, ERR_SITE(), 0});
+    if (!mailbox.held())
+        return std::unexpected(Error{Errc::busy, ERR_SITE(), 0});
     const LinkTimingValues& timing = mailbox.timing();
 
     SpiBus bus;
@@ -86,6 +93,7 @@ Ex<SpiBus> SpiBus::open(Mailbox mailbox, xthread::RtStats* stats) {
     bus.stats_ = infra::opt_ref_of(stats);
     bus.ack_soft_spins_ = timing.ack_soft_spins;
     bus.ack_timeout_ns_ = timing.ack_timeout_ns;
+    bus.start_ack_timeout_ns_ = timing.start_ack_timeout_ns;
 
     bus.mailbox_ = std::move(mailbox).consume();
 
@@ -93,9 +101,13 @@ Ex<SpiBus> SpiBus::open(Mailbox mailbox, xthread::RtStats* stats) {
     return bus;
 }
 
-SpiBus SpiBus::attach_registers(reg::Reg<reg::WO> gpo, reg::Reg<reg::RO> gpi,
-                                ISpiOutputObserver* obs, const LinkTimingValues& timing,
-                                xthread::RtStats* stats) noexcept {
+SpiBus SpiBus::attach_registers(
+    reg::Reg<reg::WO> gpo,
+    reg::Reg<reg::RO> gpi,
+    ISpiOutputObserver* obs,
+    const LinkTimingValues& timing,
+    xthread::RtStats* stats
+) noexcept {
     if (!gpo.bound() || !gpi.bound()) {
         fatal(Error{Errc::io, ERR_SITE(), 0}, "SpiBus::attach_registers");
     }
@@ -106,6 +118,7 @@ SpiBus SpiBus::attach_registers(reg::Reg<reg::WO> gpo, reg::Reg<reg::RO> gpi,
     bus.stats_ = infra::opt_ref_of(stats);
     bus.ack_soft_spins_ = timing.ack_soft_spins;
     bus.ack_timeout_ns_ = timing.ack_timeout_ns;
+    bus.start_ack_timeout_ns_ = timing.start_ack_timeout_ns;
     bus.commit_gpo(0);
     return bus;
 }
@@ -147,8 +160,10 @@ Ex<CoreIdentity> SpiBus::identify() {
 CoreCapabilities SpiBus::latch_capabilities() {
 
     if ((gpo_.v & kCoreEnable) == 0u) {
-        fatal(Error{Errc::negotiation, ERR_SITE(), gpo_.v},
-              "SpiBus::latch_capabilities() sampled with core-enable low");
+        fatal(
+            Error{Errc::negotiation, ERR_SITE(), gpo_.v},
+            "SpiBus::latch_capabilities() sampled with core-enable low"
+        );
     }
 
     const std::uint32_t gpi = read_gpi();
@@ -171,7 +186,9 @@ void SpiBus::set_core_reset(bool asserted) {
     commit_gpo(base | (asserted ? kCoreReset : kCoreEnable));
 }
 
-void SpiBus::clear_gpo() { commit_gpo(0); }
+void SpiBus::clear_gpo() {
+    commit_gpo(0);
+}
 
 void SpiBus::select(ChipSelect cs) {
 
@@ -199,7 +216,9 @@ void SpiBus::select(ChipSelect cs) {
     commit_gpo(v);
 }
 
-void SpiBus::deselect() { commit_gpo((gpo_.v | kCoreEnable) & ~kCsMask); }
+void SpiBus::deselect() {
+    commit_gpo((gpo_.v | kCoreEnable) & ~kCsMask);
+}
 
 #ifndef NDEBUG
 void SpiBus::txn_enter() noexcept {
@@ -214,28 +233,35 @@ void SpiBus::txn_exit() noexcept {
     --txn_depth_;
     const std::uint32_t cs_now = gpo_.v & kCsMask;
     if (cs_now != txn_cs_entry_) {
-        fatal(Error{Errc::negotiation, ERR_SITE(), cs_now},
-              "SpiBus: Transaction left the chip-select unbalanced");
+        fatal(
+            Error{Errc::negotiation, ERR_SITE(), cs_now},
+            "SpiBus: Transaction left the chip-select unbalanced"
+        );
     }
 }
 #endif
 
 Ex<void> SpiBus::refuse_if_posted_() const noexcept {
-    if (post_ == Post::None) return {};
+    if (post_ == Post::None)
+        return {};
     return std::unexpected(Error{Errc::would_block, ERR_SITE(), static_cast<std::uint32_t>(post_)});
 }
 
 Ex<SpiWord> SpiBus::transfer(SpiWord out) {
-    if (auto held = refuse_if_posted_(); !held) return std::unexpected(held.error());
+    if (auto held = refuse_if_posted_(); !held)
+        return std::unexpected(held.error());
     return handshake_(out, false);
 }
 
 Ex<bool> SpiBus::transfer_or_post(SpiWord out) {
     TASTY_SEAT_BODY(SpiBus);
-    if (auto held = refuse_if_posted_(); !held) return std::unexpected(held.error());
+    if (auto held = refuse_if_posted_(); !held)
+        return std::unexpected(held.error());
     auto r = handshake_(out, true);
-    if (r) return true;
-    if (post_ != Post::None) return false;
+    if (r)
+        return true;
+    if (post_ != Post::None)
+        return false;
     return std::unexpected(r.error());
 }
 
@@ -256,7 +282,8 @@ Ex<SpiWord> SpiBus::handshake_(SpiWord out, bool guarded) noexcept {
     commit_gpo(gpo);
     const auto sample = spin_ack(false, !guarded);
     if (!sample) {
-        if (guarded && sample.error().code == Errc::spi_timeout) post_ = Post::Falling;
+        if (guarded && sample.error().code == Errc::spi_timeout)
+            post_ = Post::Falling;
         return std::unexpected(sample.error());
     }
 
@@ -265,7 +292,8 @@ Ex<SpiWord> SpiBus::handshake_(SpiWord out, bool guarded) noexcept {
 
 Ex<void> SpiBus::post(SpiWord out) {
     TASTY_SEAT_BODY(SpiBus);
-    if (auto held = refuse_if_posted_(); !held) return held;
+    if (auto held = refuse_if_posted_(); !held)
+        return held;
     const std::uint32_t gpo = (gpo_.v & ~(kData | kStrobe)) | out.v;
     commit_gpo(gpo);
     commit_gpo(gpo | kStrobe);
@@ -275,10 +303,12 @@ Ex<void> SpiBus::post(SpiWord out) {
 
 Ex<bool> SpiBus::posted_done() {
     TASTY_SEAT_BODY(SpiBus);
-    if (post_ == Post::None) return true;
+    if (post_ == Post::None)
+        return true;
     std::uint32_t gpi = read_gpi();
     if (post_ == Post::Rising && (gpi & kNotReady) == 0u) {
-        if ((gpi & kAck) == 0u) return false;
+        if ((gpi & kAck) == 0u)
+            return false;
         commit_gpo(gpo_.v & ~kStrobe);
         post_ = Post::Falling;
         gpi = read_gpi();
@@ -287,27 +317,31 @@ Ex<bool> SpiBus::posted_done() {
         abandon_post();
         return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), gpi});
     }
-    if ((gpi & kAck) != 0u) return false;
+    if ((gpi & kAck) != 0u)
+        return false;
     post_ = Post::None;
     return true;
 }
 
 void SpiBus::abandon_post() noexcept {
     TASTY_SEAT_BODY(SpiBus);
-    if (post_ == Post::None) return;
+    if (post_ == Post::None)
+        return;
     commit_gpo(gpo_.v & ~kStrobe);
     post_ = Post::None;
 }
 
 Ex<void> SpiBus::block_write(std::span<const std::uint8_t> data) {
-    if (auto held = refuse_if_posted_(); !held) return held;
+    if (auto held = refuse_if_posted_(); !held)
+        return held;
     const std::uint32_t base = gpo_.v & ~(kData | kStrobe);
     std::uint32_t gpo = base;
     if (width_ == Width::Word) {
         const std::size_t n = data.size() / 2u;
         for (std::size_t i = 0; i < n; ++i) {
-            gpo = base | static_cast<std::uint32_t>(data[2u * i]) |
-                  (static_cast<std::uint32_t>(data[2u * i + 1u]) << 8);
+            gpo = base
+                | static_cast<std::uint32_t>(data[2u * i])
+                | (static_cast<std::uint32_t>(data[2u * i + 1u]) << 8);
             store_gpo(gpo);
             store_gpo(gpo | kStrobe);
         }
@@ -324,10 +358,12 @@ Ex<void> SpiBus::block_write(std::span<const std::uint8_t> data) {
 }
 
 Ex<void> SpiBus::block_read(std::span<std::uint8_t> data) {
-    if (auto held = refuse_if_posted_(); !held) return held;
+    if (auto held = refuse_if_posted_(); !held)
+        return held;
     const std::uint32_t gpo = gpo_.v & ~(kData | kStrobe);
     const std::size_t n = (width_ == Width::Word) ? data.size() / 2u : data.size();
-    if (n == 0) return {};
+    if (n == 0)
+        return {};
 
     if (width_ == Width::Word) {
         for (std::size_t i = 0; i < n; ++i) {
@@ -359,6 +395,8 @@ Ex<ButtonMask> SpiBus::buttons() {
     return ButtonMask{static_cast<std::uint16_t>((gpi >> 29) & 3u)};
 }
 
-void SpiBus::set_disk_led(bool on) { commit_gpo(on ? (gpo_.v | kDiskLed) : (gpo_.v & ~kDiskLed)); }
+void SpiBus::set_disk_led(bool on) {
+    commit_gpo(on ? (gpo_.v | kDiskLed) : (gpo_.v & ~kDiskLed));
+}
 
-}  // namespace mister::hal
+}

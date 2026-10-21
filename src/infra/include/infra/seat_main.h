@@ -23,7 +23,8 @@ template <class Derived>
 class SeatMain {
 public:
     void run_once() noexcept {
-        if (!self_().paused()) self_().serve();
+        if (!self_().paused())
+            self_().serve();
     }
 
 protected:
@@ -32,14 +33,18 @@ protected:
         bool stopping = false;
         bool paused = false;
         for (;;) {
-            if (!paused) d.serve();
+            if (!paused)
+                d.serve();
             paused = d.paused();
-            if (!stopping) stopping = d.stopping();
-            if (stopping && (paused || d.idle())) break;
+            if (!stopping)
+                stopping = d.stopping();
+            if (stopping && (paused || d.idle()))
+                break;
             if (paused || d.idle()) {
                 auto& p = d.park();
                 p.arm();
-                if (!d.pause_pending() && (paused || d.idle())) p.wait(d.park_ms());
+                if (!d.pause_pending() && (paused || d.idle()))
+                    p.wait(d.park_ms());
                 p.disarm();
             }
         }
@@ -50,4 +55,4 @@ private:
     Derived& self_() noexcept { return static_cast<Derived&>(*this); }
 };
 
-}  // namespace mister::xthread
+}

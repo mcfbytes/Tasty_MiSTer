@@ -14,4 +14,4 @@ struct InitOptions {
     bool has_hdmi_int = false;
 };
 
-}  // namespace mister::svc::adv7513
+}

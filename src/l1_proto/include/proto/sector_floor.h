@@ -13,4 +13,4 @@ struct SectorFloor {
     }
 };
 
-}  // namespace mister::proto
+}

@@ -6,6 +6,7 @@
 namespace mister::hal {
 class ISpiTransport;
 }
+
 namespace mister::proto {
 class CoreSession;
 }
@@ -22,4 +23,4 @@ struct CoreInitContext {
     infra::OptRef<Core> core{};
 };
 
-}  // namespace mister::cores
+}

@@ -35,11 +35,13 @@ struct RstMgr {
 
     static constexpr std::uint32_t kResetRequest = 0x1;
 };
+
 struct SysMgr {
     enum class Reg : std::uint32_t { FpgaIntfGrpModule = 0x28 };
     static constexpr std::size_t kSize = 0x100;
     static constexpr std::uint32_t kAllOff = 0x0;
 };
+
 struct Nic301 {
     enum class Reg : std::uint32_t { Remap = 0x00 };
     static constexpr std::size_t kSize = 0x100;
@@ -78,8 +80,12 @@ class Bridges final : public hal::IBridgeSequencer {
 public:
     [[nodiscard]] static Ex<Bridges> open(hal::BoardWindows& windows);
 
-    static Bridges over(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
-                        hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic);
+    static Bridges over(
+        hal::RegisterWindow<SdrCtl> sdr,
+        hal::RegisterWindow<RstMgr> rst,
+        hal::RegisterWindow<SysMgr> sys,
+        hal::RegisterWindow<Nic301> nic
+    );
 
     [[nodiscard]] Ex<void> pre_program() override;
     [[nodiscard]] Ex<void> post_program() override;
@@ -88,8 +94,12 @@ public:
 
 private:
     Bridges() = default;
-    Bridges(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
-            hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic);
+    Bridges(
+        hal::RegisterWindow<SdrCtl> sdr,
+        hal::RegisterWindow<RstMgr> rst,
+        hal::RegisterWindow<SysMgr> sys,
+        hal::RegisterWindow<Nic301> nic
+    );
     void apply(std::span<const BridgeStep> steps);
 
     hal::RegisterWindow<SdrCtl> sdr_;
@@ -100,4 +110,4 @@ private:
     std::array<hal::WindowClaim, 4> claims_{};
 };
 
-}  // namespace mister::boards::cyclone_v
+}

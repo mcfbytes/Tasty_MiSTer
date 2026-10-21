@@ -17,4 +17,4 @@ struct InputSample {
     infra::OptRef<const InputWire> wire;
 };
 
-}  // namespace mister::app
+}

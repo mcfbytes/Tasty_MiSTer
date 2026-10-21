@@ -12,7 +12,11 @@ class Vfs;
 
 namespace mister::app {
 
-[[nodiscard]] Ex<std::string> resolve_rbf_name(const svc::Vfs& vfs, std::string_view dir,
-                                               std::string_view stem, bool arcade);
+[[nodiscard]] Ex<std::string> resolve_rbf_name(
+    const svc::Vfs& vfs,
+    std::string_view dir,
+    std::string_view stem,
+    bool arcade
+);
 
 }

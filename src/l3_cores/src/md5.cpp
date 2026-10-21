@@ -33,17 +33,19 @@ constexpr std::array<int, 64> kMdS = {
     return (x << s) | (x >> (32 - s));
 }
 
-}  // namespace
+}
 
-Md5::Md5() noexcept { h_ = {0x67452301u, 0xefcdab89u, 0x98badcfeu, 0x10325476u}; }
+Md5::Md5() noexcept {
+    h_ = {0x67452301u, 0xefcdab89u, 0x98badcfeu, 0x10325476u};
+}
 
 void Md5::block(const std::uint8_t* p) noexcept {
     std::array<std::uint32_t, 16> m{};
     for (std::size_t i = 0; i < 16; ++i) {
-        m[i] = static_cast<std::uint32_t>(p[i * 4]) |
-               (static_cast<std::uint32_t>(p[i * 4 + 1]) << 8) |
-               (static_cast<std::uint32_t>(p[i * 4 + 2]) << 16) |
-               (static_cast<std::uint32_t>(p[i * 4 + 3]) << 24);
+        m[i] = static_cast<std::uint32_t>(p[i * 4])
+            | (static_cast<std::uint32_t>(p[i * 4 + 1]) << 8)
+            | (static_cast<std::uint32_t>(p[i * 4 + 2]) << 16)
+            | (static_cast<std::uint32_t>(p[i * 4 + 3]) << 24);
     }
     std::uint32_t a = h_[0];
     std::uint32_t b = h_[1];
@@ -85,7 +87,8 @@ void Md5::update(std::span<const std::uint8_t> data) noexcept {
         while (fill < 64 && i < data.size()) {
             tail_[fill++] = data[i++];
         }
-        if (fill < 64) return;
+        if (fill < 64)
+            return;
         block(tail_.data());
     }
     for (; i + 64 <= data.size(); i += 64) {
@@ -132,6 +135,8 @@ Md5Hex Md5::hex_str() noexcept {
     return hex;
 }
 
-std::string Md5::hex_digest() noexcept { return std::string(hex_str().view()); }
+std::string Md5::hex_digest() noexcept {
+    return std::string(hex_str().view());
+}
 
-}  // namespace mister::cores::mra
+}

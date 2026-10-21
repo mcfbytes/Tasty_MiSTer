@@ -18,8 +18,12 @@ class ReplayBlock {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
-    ReplayBlock(const BootParts& plat, DeviceBlock& device, app::ScreenshotPump& shots,
-                app::IOsdClose& osd);
+    ReplayBlock(
+        const BootParts& plat,
+        DeviceBlock& device,
+        app::ScreenshotPump& shots,
+        app::IOsdClose& osd
+    );
     ReplayBlock(const ReplayBlock&) = delete;
     ReplayBlock& operator=(const ReplayBlock&) = delete;
 
@@ -30,4 +34,4 @@ public:
     app::ReplayFeeder replay_feeder_;
 };
 
-}  // namespace mister::fw
+}

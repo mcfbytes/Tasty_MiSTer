@@ -26,4 +26,4 @@ protected:
     IPcmSource& operator=(const IPcmSource&) = default;
 };
 
-}  // namespace mister::cores
+}

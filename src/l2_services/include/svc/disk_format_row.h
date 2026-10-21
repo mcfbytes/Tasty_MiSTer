@@ -23,10 +23,13 @@ struct DiskFormatRow {
 
 inline constexpr std::size_t kDiskMagicProbeBytes = 64;
 
-[[nodiscard]] const DiskFormatRow* select_disk_format(std::span<const DiskFormatRow> rows,
-                                                      std::string_view path, proto::FileSize size,
-                                                      std::span<const std::byte> head) noexcept;
+[[nodiscard]] const DiskFormatRow* select_disk_format(
+    std::span<const DiskFormatRow> rows,
+    std::string_view path,
+    proto::FileSize size,
+    std::span<const std::byte> head
+) noexcept;
 
 [[nodiscard]] std::string_view disk_path_extension(std::string_view path) noexcept;
 
-}  // namespace mister::svc
+}

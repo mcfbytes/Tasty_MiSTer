@@ -23,10 +23,13 @@ class EdidStore {
 
 public:
     [[nodiscard]] Ex<void> refresh();
+
     const EdidBlock& current() const noexcept { return edid_; }
+
     Generation generation() const noexcept { return gen_; }
 
     explicit EdidStore(const adv7513::Io& io = adv7513::kUnboundIo) noexcept : io_(io) {}
+
     explicit EdidStore(const adv7513::Io&&) = delete;
 
     static constexpr std::uint32_t kReadyTimeoutMs = 500;
@@ -52,4 +55,4 @@ private:
     std::uint32_t ready_timeouts_ = 0;
 };
 
-}  // namespace mister::svc
+}

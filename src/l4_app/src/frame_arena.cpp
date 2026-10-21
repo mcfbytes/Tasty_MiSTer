@@ -18,7 +18,8 @@ Ex<void> FrameArena::reserve(std::size_t slots, std::size_t slot_bytes) noexcept
 
     if (!map_.resize(slots * stripe))
         return std::unexpected(
-            Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+            Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(errno)}
+        );
     slots_ = slots;
     slot_bytes_ = stripe;
     return {};
@@ -31,8 +32,9 @@ void FrameArena::release() noexcept {
 }
 
 std::span<std::byte> FrameArena::stripe(std::size_t i) const noexcept {
-    if (i >= slots_) return {};
+    if (i >= slots_)
+        return {};
     return map_.view().subspan(i * slot_bytes_, slot_bytes_);
 }
 
-}  // namespace mister::app
+}

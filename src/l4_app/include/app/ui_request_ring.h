@@ -37,6 +37,7 @@ public:
     UiRequestRing() noexcept : ring_(xthread::Polled{}) {}
 
     explicit UiRequestRing(xthread::WakeFlag& wake) noexcept : ring_(wake) {}
+
     UiRequestRing(const UiRequestRing&) = delete;
     UiRequestRing& operator=(const UiRequestRing&) = delete;
 
@@ -45,7 +46,8 @@ public:
     [[nodiscard]] CorrelationTag push(const A& alt) noexcept {
         const CorrelationTag tag{ui_.next_tag};
         ui_.next_tag = (ui_.next_tag == 0xFFFF'FFFFu) ? 1u : ui_.next_tag + 1u;
-        if (!ring_.push(infra::make<UiRequest>(alt, UiRequest::Head{tag}))) return kUncaused;
+        if (!ring_.push(infra::make<UiRequest>(alt, UiRequest::Head{tag})))
+            return kUncaused;
         if constexpr (std::is_same_v<A, UiRequest::LoadFile>) {
             ui_.last_load = alt.path;
             ++ui_.load_asks;
@@ -68,9 +70,11 @@ public:
     [[nodiscard]] std::uint32_t pending_evicted() const noexcept { return ui_.pending_evicted; }
 
     [[nodiscard]] std::string_view last_load_path() const noexcept { return ui_.last_load.view(); }
+
     [[nodiscard]] std::uint32_t load_asks() const noexcept { return ui_.load_asks; }
 
     [[nodiscard]] std::optional<UiRequest> pop() noexcept { return ring_.pop(); }
+
     [[nodiscard]] std::size_t size() const noexcept { return ring_.size(); }
 
 private:
@@ -90,17 +94,22 @@ private:
 };
 
 inline infra::OptRef<const UiRequestRing::Pending> UiRequestRing::pending(
-    CorrelationTag tag) const noexcept {
-    if (tag == kUncaused) return std::nullopt;
+    CorrelationTag tag
+) const noexcept {
+    if (tag == kUncaused)
+        return std::nullopt;
     for (const Pending& p : ui_.pending)
-        if (p.tag == tag) return infra::OptRef<const Pending>{p};
+        if (p.tag == tag)
+            return infra::OptRef<const Pending>{p};
     return std::nullopt;
 }
 
 inline void UiRequestRing::forget(CorrelationTag tag) noexcept {
-    if (tag == kUncaused) return;
+    if (tag == kUncaused)
+        return;
     for (Pending& p : ui_.pending)
-        if (p.tag == tag) p.tag = kUncaused;
+        if (p.tag == tag)
+            p.tag = kUncaused;
 }
 
 inline void UiRequestRing::note_(const Pending& p) noexcept {
@@ -110,10 +119,12 @@ inline void UiRequestRing::note_(const Pending& p) noexcept {
             at = &e;
             break;
         }
-        if (ui_.next_tag - e.tag.v > ui_.next_tag - at->tag.v) at = &e;
+        if (ui_.next_tag - e.tag.v > ui_.next_tag - at->tag.v)
+            at = &e;
     }
-    if (at->tag != kUncaused) ++ui_.pending_evicted;
+    if (at->tag != kUncaused)
+        ++ui_.pending_evicted;
     *at = p;
 }
 
-}  // namespace mister::app
+}

@@ -10,7 +10,8 @@ void InputMain::start() noexcept {
 
 void InputMain::serve() noexcept {
     (void)decode_.after_wait();
-    if (stopping()) return;
+    if (stopping())
+        return;
     decode_.before_wait();
 }
 
@@ -20,4 +21,4 @@ void InputMain::on_pause() noexcept {
     paused_link_drops_ += decode_.drop_link_events();
 }
 
-}  // namespace mister::app
+}

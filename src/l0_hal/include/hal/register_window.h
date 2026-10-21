@@ -24,30 +24,36 @@ public:
 
     [[nodiscard]] static Ex<RegisterWindow> map(PhysRegion lw_window, LwOffset lw_offset) {
         auto m = detail::map_lw_registers(lw_window, lw_offset, Layout::kSize);
-        if (!m) return std::unexpected(m.error());
+        if (!m)
+            return std::unexpected(m.error());
         return RegisterWindow(std::move(m->pages), m->lead);
     }
 
     [[nodiscard]] static Ex<RegisterWindow> map_phys(os::PhysAddr phys) {
         auto m = detail::map_registers(phys, Layout::kSize);
-        if (!m) return std::unexpected(m.error());
+        if (!m)
+            return std::unexpected(m.error());
         return RegisterWindow(std::move(m->pages), m->lead);
     }
 
     static RegisterWindow borrow(volatile void* base, std::size_t len) {
         if (base == nullptr || len < Layout::kSize) {
-            fatal(Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(len)},
-                  "RegisterWindow::borrow");
+            fatal(
+                Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(len)},
+                "RegisterWindow::borrow"
+            );
         }
         return RegisterWindow(base);
     }
 
     RegisterWindow(RegisterWindow&& o) noexcept
-        : pages_(std::move(o.pages_)), base_(std::exchange(o.base_, nullptr)) {
+        : pages_(std::move(o.pages_)),
+          base_(std::exchange(o.base_, nullptr)) {
 #ifndef NDEBUG
         depth_ = std::exchange(o.depth_, 0u);
 #endif
     }
+
     RegisterWindow& operator=(RegisterWindow&& o) noexcept {
         if (this != &o) {
             pages_ = std::move(o.pages_);
@@ -58,11 +64,13 @@ public:
         }
         return *this;
     }
+
     RegisterWindow(const RegisterWindow&) = delete;
     RegisterWindow& operator=(const RegisterWindow&) = delete;
     ~RegisterWindow() = default;
 
     std::uint32_t read(Reg r) const { return detail::regs_read(base_, offset_of(r)); }
+
     void write(Reg r, std::uint32_t v) { detail::regs_write(base_, offset_of(r), v); }
 
     class Transaction {
@@ -74,8 +82,10 @@ public:
         {
 #ifndef NDEBUG
             if (depth_ != 0) {
-                fatal(Error{Errc::bridge_state, ERR_SITE(), depth_},
-                      "RegisterWindow: nested Transaction");
+                fatal(
+                    Error{Errc::bridge_state, ERR_SITE(), depth_},
+                    "RegisterWindow: nested Transaction"
+                );
             }
             ++depth_;
 #else
@@ -83,12 +93,14 @@ public:
 #endif
             detail::regs_fence();
         }
+
         ~Transaction() {
             detail::regs_fence();
 #ifndef NDEBUG
             --depth_;
 #endif
         }
+
         Transaction(const Transaction&) = delete;
         Transaction& operator=(const Transaction&) = delete;
 
@@ -100,8 +112,11 @@ public:
 
 private:
     RegisterWindow() = default;
+
     RegisterWindow(os::MmioRegion pages, std::size_t lead)
-        : pages_(std::move(pages)), base_(detail::regs_advance(pages_->base(), lead)) {}
+        : pages_(std::move(pages)),
+          base_(detail::regs_advance(pages_->base(), lead)) {}
+
     explicit RegisterWindow(volatile void* base) : base_(base) {}
 
     static_assert(Layout::kSize >= 4, "a register window holds at least one dword");
@@ -138,4 +153,4 @@ private:
 #endif
 };
 
-}  // namespace mister::hal
+}

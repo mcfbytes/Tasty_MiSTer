@@ -108,8 +108,11 @@ public:
 
     [[nodiscard]] static Ex<Programmer> open_at(const char* manager_dir);
 
-    static Programmer over(hal::RegisterWindow<FpgaMgr> mgr, hal::RegisterWindow<FpgaMgrData> data,
-                           hal::FpgaMemory handoff);
+    static Programmer over(
+        hal::RegisterWindow<FpgaMgr> mgr,
+        hal::RegisterWindow<FpgaMgrData> data,
+        hal::FpgaMemory handoff
+    );
 
     Programmer(Programmer&& o) noexcept;
     Programmer& operator=(Programmer&&) = delete;
@@ -129,8 +132,10 @@ public:
         return this;
     }
 
-    [[nodiscard]] Ex<void> write_env(std::string_view core_name,
-                                     std::span<const std::byte> cfg) override;
+    [[nodiscard]] Ex<void> write_env(
+        std::string_view core_name,
+        std::span<const std::byte> cfg
+    ) override;
 
     [[nodiscard]] Ex<void> write_sdram_cfg(std::uint16_t cfg) override;
 
@@ -139,8 +144,11 @@ public:
     [[nodiscard]] Ex<void> write_reboot_flag(bool warm) override;
 
 private:
-    Programmer(hal::RegisterWindow<FpgaMgr> mgr, hal::RegisterWindow<FpgaMgrData> data,
-               std::optional<hal::FpgaMemory> handoff);
+    Programmer(
+        hal::RegisterWindow<FpgaMgr> mgr,
+        hal::RegisterWindow<FpgaMgrData> data,
+        std::optional<hal::FpgaMemory> handoff
+    );
 
     enum class StepPc : std::uint8_t {
         Idle,
@@ -158,6 +166,7 @@ private:
         bool hit;
         std::uint32_t left;
     };
+
     [[nodiscard]] Awaited await_(std::uint32_t polls);
 
     [[nodiscard]] bool rung_done_();
@@ -186,8 +195,9 @@ private:
     std::array<hal::WindowClaim, 2> claims_{};
 };
 
-static_assert(hal::IFpgaProgrammer::kProgramStepBudget * FpgaMgr::kPollsPerPass ==
-                  FpgaMgr::kTimeoutCount,
-              "program() must spend exactly stock's poll budget per wait");
+static_assert(
+    hal::IFpgaProgrammer::kProgramStepBudget * FpgaMgr::kPollsPerPass == FpgaMgr::kTimeoutCount,
+    "program() must spend exactly stock's poll budget per wait"
+);
 
-}  // namespace mister::boards::cyclone_v
+}

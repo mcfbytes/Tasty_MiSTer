@@ -9,4 +9,4 @@ enum class SaveKind : std::uint8_t { Dips = 1, Slot = 2, SlotNames = 3, Nvram = 
 
 enum class SaveStatus : std::uint8_t { Bytes = 0, Refused = 1, Nothing = 2 };
 
-}  // namespace mister::proto
+}

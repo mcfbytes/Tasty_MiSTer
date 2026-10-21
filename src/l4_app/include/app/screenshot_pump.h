@@ -19,6 +19,7 @@ public:
         ScreenshotQueue& queue;
         infra::OptRef<IEventSink> sink{};
     };
+
     explicit ScreenshotPump(Wiring w) noexcept : shots_(w.queue), sink_(w.sink) {}
 
     [[nodiscard]] bool take(std::string_view path, bool scaled) noexcept;
@@ -28,6 +29,7 @@ public:
         TASTY_SEAT_BODY(ScreenshotPump);
         return armed_;
     }
+
     std::uint32_t reaped() const noexcept {
         TASTY_SEAT_BODY(ScreenshotPump);
         return reaped_;
@@ -40,4 +42,4 @@ private:
     std::uint32_t reaped_ = 0;
 };
 
-}  // namespace mister::app
+}

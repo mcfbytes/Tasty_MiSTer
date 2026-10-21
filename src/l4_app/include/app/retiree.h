@@ -31,14 +31,16 @@ struct Retiree {
         sent = static_cast<std::uint16_t>(sent & from.sent);
         const auto from_gens = from.bay_gens();
         for (std::size_t i = 0; i < kCoreBaySlots; ++i)
-            if (from_gens[i] != 0) merged_gen[i] = from_gens[i];
+            if (from_gens[i] != 0)
+                merged_gen[i] = from_gens[i];
     }
 
     [[nodiscard]] std::array<std::uint16_t, kCoreBaySlots> bay_gens() const noexcept {
         std::array<std::uint16_t, kCoreBaySlots> out = merged_gen;
-        if (slot < kCoreBaySlots && gen != 0) out[slot] = gen;
+        if (slot < kCoreBaySlots && gen != 0)
+            out[slot] = gen;
         return out;
     }
 };
 
-}  // namespace mister::app
+}

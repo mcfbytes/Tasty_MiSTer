@@ -17,14 +17,19 @@ class EncodeMain final : public xthread::SeatMain<EncodeMain> {
 
 public:
     EncodeMain(FrameHasher& hasher, xthread::ParkFds fds, os::IDelay& delay) noexcept
-        : hasher_(hasher), wake_(fds.wake()), stop_(std::move(fds).take_stop()),
-          park_(wake_, stop_), delay_(delay) {}
+        : hasher_(hasher),
+          wake_(fds.wake()),
+          stop_(std::move(fds).take_stop()),
+          park_(wake_, stop_),
+          delay_(delay) {}
+
     EncodeMain(const EncodeMain&) = delete;
     EncodeMain& operator=(const EncodeMain&) = delete;
     EncodeMain(EncodeMain&&) = delete;
     EncodeMain& operator=(EncodeMain&&) = delete;
 
     void start() noexcept;
+
     void stop() noexcept { stop_.request(); }
 
     void serve() noexcept;
@@ -32,12 +37,17 @@ public:
     [[nodiscard]] bool idle() const noexcept {
         return stopping() ? hasher_.drained() : hasher_.idle();
     }
+
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
     [[nodiscard]] int park_ms() const noexcept { return hasher_.park_ms(); }
+
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept { return false; }
+
     [[nodiscard]] bool pause_pending() const noexcept { return false; }
+
     void settle() noexcept { hasher_.release(); }
 
 private:
@@ -50,4 +60,4 @@ private:
 
 static_assert(xthread::SeatBody<EncodeMain>);
 
-}  // namespace mister::app
+}

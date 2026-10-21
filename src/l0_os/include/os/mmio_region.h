@@ -19,11 +19,19 @@ public:
 
     enum class Access : std::uint8_t { ReadWrite, ReadOnly };
 
-    [[nodiscard]] static Ex<MmioRegion> map(PhysAddr phys, std::size_t len, Attr attr,
-                                            Access access = Access::ReadWrite);
+    [[nodiscard]] static Ex<MmioRegion> map(
+        PhysAddr phys,
+        std::size_t len,
+        Attr attr,
+        Access access = Access::ReadWrite
+    );
 
-    [[nodiscard]] static Ex<MmioRegion> map_fd(int fd, PhysAddr offset, std::size_t len,
-                                               Access access = Access::ReadWrite);
+    [[nodiscard]] static Ex<MmioRegion> map_fd(
+        int fd,
+        PhysAddr offset,
+        std::size_t len,
+        Access access = Access::ReadWrite
+    );
 
     Access access() const noexcept { return access_; }
 
@@ -34,6 +42,7 @@ public:
     MmioRegion& operator=(const MmioRegion&) = delete;
 
     volatile void* base() const noexcept { return base_; }
+
     std::size_t length() const noexcept { return len_; }
 
     [[nodiscard]] std::span<std::byte> plain_bytes() const noexcept {
@@ -47,4 +56,4 @@ private:
     Access access_ = Access::ReadWrite;
 };
 
-}  // namespace mister::os
+}

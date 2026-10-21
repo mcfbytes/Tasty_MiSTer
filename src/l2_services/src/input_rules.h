@@ -10,23 +10,13 @@
 
 #include "svc/button_map.h"
 #include "svc/deadzone_rule.h"
+#include "svc/device_facts.h"
 #include "svc/input_service.h"
 #include "svc/joy_plan.h"
 
 namespace mister::svc::rules {
 
-struct DeviceSlot {
-    std::string devname;
-    bool mouse = false;
-    std::string uniq;
-
-    std::string mac;
-    std::string sysfs;
-    DeviceIdentity id{};
-    QuirkId quirk = QuirkId::None;
-    std::uint8_t spinner_prediv = 0;
-    unsigned bind = 0;
-};
+using FactsSpan = std::span<DeviceFacts* const>;
 
 struct MergeStats {
     unsigned merged = 0;
@@ -42,6 +32,7 @@ struct SpinnerPolicy {
     Vid vid{};
     Pid pid{};
 };
+
 struct UniquePolicy {
     bool force = false;
     bool all = false;
@@ -51,24 +42,28 @@ struct UniquePolicy {
 
 std::uint32_t str_hash(std::string_view s, std::uint32_t seed = 5381u);
 
-void derive_idstr(DeviceSlot& slot);
+void derive_idstr(DeviceFacts& slot);
 
 bool wants_unique_mapping(const DeviceIdentity& id, const UniquePolicy& pol);
 std::string unique_mapping(const DeviceIdentity& id, const UniquePolicy& pol);
 
-unsigned apply_proc_devices(std::string_view proc_text, std::span<DeviceSlot> slots);
+unsigned apply_proc_devices(std::string_view proc_text, FactsSpan slots);
 
-bool bt_eligible(const DeviceSlot& slot) noexcept;
+bool bt_eligible(const DeviceFacts& slot) noexcept;
 
-void make_unique(std::span<DeviceSlot> slots, const DeviceMatch& match);
+void make_unique(FactsSpan slots, const DeviceMatch& match);
 
-void apply_no_merge(std::span<DeviceSlot> slots, std::span<const NoMergeRule> extra);
+void apply_no_merge(FactsSpan slots, std::span<const NoMergeRule> extra);
 
-MergeStats merge_by_id(std::span<DeviceSlot> slots);
-MergeStats fixup_mouse_nodes(std::span<DeviceSlot> slots, const SpinnerPolicy& spin);
+MergeStats merge_by_id(FactsSpan slots);
+MergeStats fixup_mouse_nodes(FactsSpan slots, const SpinnerPolicy& spin);
 
-MergeStats resolve_identities(std::span<DeviceSlot> slots, std::string_view proc_text,
-                              std::span<const NoMergeRule> extra, const SpinnerPolicy& spin);
+MergeStats resolve_identities(
+    FactsSpan slots,
+    std::string_view proc_text,
+    std::span<const NoMergeRule> extra,
+    const SpinnerPolicy& spin
+);
 
 bool is_mouse_node(std::string_view devname);
 
@@ -78,6 +73,7 @@ struct MapPaths {
     std::string primary;
     std::string fallback;
 };
+
 MapPaths map_paths(std::string_view name, MapKind kind);
 
 bool is_diagonal(AnalogXy in);
@@ -88,25 +84,43 @@ struct DeadzoneParams {
     float max_range = 0.0f;
     std::int32_t min_out = -127;
 };
+
 AnalogXy apply_deadzone(AnalogXy in, const DeadzoneParams& p);
 
 std::uint8_t deadzone_class(QuirkId quirk);
 
-bool deadzone_uid_matches(std::string_view uid, Vid vid, Pid pid, std::string_view id,
-                          std::string_view sysfs, std::string_view merge_id);
+bool deadzone_uid_matches(
+    std::string_view uid,
+    Vid vid,
+    Pid pid,
+    std::string_view id,
+    std::string_view sysfs,
+    std::string_view merge_id
+);
 
-std::uint8_t deadzone_for(QuirkId quirk, Vid vid, Pid pid, std::string_view id,
-                          std::string_view sysfs, std::string_view merge_id,
-                          std::span<const DeadzoneRule> cfg);
+std::uint8_t deadzone_for(
+    QuirkId quirk,
+    Vid vid,
+    Pid pid,
+    std::string_view id,
+    std::string_view sysfs,
+    std::string_view merge_id,
+    std::span<const DeadzoneRule> cfg
+);
 
 ButtonMap default_sys_map();
 
-ButtonMap derive_joy_map(std::span<const std::uint32_t> sys_map, bool axis_emu,
-                         const JoyPlan& plan = {});
+ButtonMap derive_joy_map(
+    std::span<const std::uint32_t> sys_map,
+    bool axis_emu,
+    const JoyPlan& plan = {}
+);
 
-std::array<std::uint32_t, 32> derive_menu_map(std::span<const std::uint32_t> sys_map,
-                                              bool axis_keys);
+std::array<std::uint32_t, 32> derive_menu_map(
+    std::span<const std::uint32_t> sys_map,
+    bool axis_keys
+);
 
 JoyMask mask_for(std::span<const std::uint32_t> joy_map, std::span<const std::uint64_t> down_bits);
 
-}  // namespace mister::svc::rules
+}

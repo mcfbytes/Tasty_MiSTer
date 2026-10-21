@@ -23,4 +23,4 @@ private:
     const PinLevelCell* cell_;
 };
 
-}  // namespace mister::hal
+}

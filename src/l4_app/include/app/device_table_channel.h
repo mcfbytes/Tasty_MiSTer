@@ -38,14 +38,17 @@ public:
 
     public:
         explicit Sender(DeviceTableChannel& ch) noexcept
-            : ch_(ch), live_(ch.mint_(kSenderMinted)) {}
+            : ch_(ch),
+              live_(ch.mint_(kSenderMinted)) {}
+
         Sender(const Sender&) = delete;
         Sender& operator=(const Sender&) = delete;
 
         void reap() noexcept {
             const std::uint32_t taken = ch_.taken_.load(std::memory_order_acquire);
             for (std::size_t i = 0; i < kTableLeases; ++i) {
-                if (!leases_[i] || static_cast<std::int32_t>(taken - lease_seq_[i]) < 0) continue;
+                if (!leases_[i] || static_cast<std::int32_t>(taken - lease_seq_[i]) < 0)
+                    continue;
                 *leases_[i] = svc::DeviceTable{};
                 leases_[i].reset();
             }
@@ -58,9 +61,11 @@ public:
 
         [[nodiscard]] Ex<void> send(svc::DeviceTable& t) noexcept {
             reap();
-            if (!live_) return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
+            if (!live_)
+                return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
             auto lease = ch_.pool_.acquire();
-            if (!lease) return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+            if (!lease)
+                return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
             std::swap(*lease, t);
             const std::uint8_t idx = ch_.pool_.index_of(lease.get());
             if (!ch_.ring_.push(TableHandoff{idx})) {
@@ -90,14 +95,18 @@ public:
 
     public:
         explicit Receiver(DeviceTableChannel& ch) noexcept
-            : ch_(ch), live_(ch.mint_(kReceiverMinted)) {}
+            : ch_(ch),
+              live_(ch.mint_(kReceiverMinted)) {}
+
         Receiver(const Receiver&) = delete;
         Receiver& operator=(const Receiver&) = delete;
 
         [[nodiscard]] infra::OptRef<svc::DeviceTable> next() noexcept {
-            if (!live_) return {};
+            if (!live_)
+                return {};
             const auto h = ch_.ring_.pop();
-            if (!h) return {};
+            if (!h)
+                return {};
 
             if (h->lease >= kTableLeases) {
                 fatal(Error{Errc::slot_range, ERR_SITE(), h->lease}, "DeviceTableChannel::next");
@@ -119,6 +128,7 @@ public:
 private:
     static constexpr std::uint8_t kSenderMinted = 1u << 0;
     static constexpr std::uint8_t kReceiverMinted = 1u << 1;
+
     [[nodiscard]] bool mint_(std::uint8_t bit) noexcept {
         return (minted_.fetch_or(bit, std::memory_order_relaxed) & bit) == 0u;
     }
@@ -129,4 +139,4 @@ private:
     std::atomic<std::uint8_t> minted_{0};
 };
 
-}  // namespace mister::app
+}

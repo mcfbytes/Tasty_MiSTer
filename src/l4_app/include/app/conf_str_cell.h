@@ -20,11 +20,14 @@ struct ConfStrText {
     bool truncated = false;
     char text[proto::CoreSession::kConfStrCap] = {};
 };
-static_assert(sizeof(ConfStrText::text) == proto::CoreSession::kConfStrCap,
-              "the cell and the acquisition bound are the same number, joined "
-              "here so they cannot drift");
+
+static_assert(
+    sizeof(ConfStrText::text) == proto::CoreSession::kConfStrCap,
+    "the cell and the acquisition bound are the same number, joined "
+    "here so they cannot drift"
+);
 static_assert(std::is_trivially_copyable_v<ConfStrText>);
 
 using ConfStrCell = xthread::Telemetry<ConfStrText, SeatTag::Main>;
 
-}  // namespace mister::app
+}

@@ -21,4 +21,4 @@ enum class ContentEdge : std::uint8_t {
     ChainEnd = 2,
 };
 
-}  // namespace mister::app
+}

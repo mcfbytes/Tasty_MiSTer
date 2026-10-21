@@ -17,25 +17,35 @@ class RecWriteMain final : public xthread::SeatMain<RecWriteMain> {
 
 public:
     RecWriteMain(SidecarWriter& writer, AviWriter& avi, xthread::ParkFds fds) noexcept
-        : writer_(writer), avi_(avi), wake_(fds.wake()), stop_(std::move(fds).take_stop()),
+        : writer_(writer),
+          avi_(avi),
+          wake_(fds.wake()),
+          stop_(std::move(fds).take_stop()),
           park_(wake_, stop_) {}
+
     RecWriteMain(const RecWriteMain&) = delete;
     RecWriteMain& operator=(const RecWriteMain&) = delete;
     RecWriteMain(RecWriteMain&&) = delete;
     RecWriteMain& operator=(RecWriteMain&&) = delete;
 
     void start() noexcept;
+
     void stop() noexcept { stop_.request(); }
 
     void serve() noexcept;
 
     [[nodiscard]] bool idle() const noexcept { return writer_.idle() && avi_.idle(); }
+
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
     [[nodiscard]] int park_ms() const noexcept;
+
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept { return false; }
+
     [[nodiscard]] bool pause_pending() const noexcept { return false; }
+
     void settle() noexcept {
         avi_.release();
         writer_.release();
@@ -51,4 +61,4 @@ private:
 
 static_assert(xthread::SeatBody<RecWriteMain>);
 
-}  // namespace mister::app
+}

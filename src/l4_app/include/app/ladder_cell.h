@@ -17,4 +17,4 @@ struct LadderCell {
 
 using LadderStateCell = xthread::Telemetry<LadderCell, SeatTag::Main>;
 
-}  // namespace mister::app
+}

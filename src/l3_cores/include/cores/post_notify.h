@@ -22,4 +22,4 @@ struct PostNotify {
     }
 };
 
-}  // namespace mister::cores
+}

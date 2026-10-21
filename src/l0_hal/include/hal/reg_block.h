@@ -25,11 +25,13 @@ public:
     }
 
     [[nodiscard]] static Block over(std::span<std::uint32_t> words) noexcept {
-        if (words.empty()) return Block{};
+        if (words.empty())
+            return Block{};
         return Block(reinterpret_cast<volatile std::byte*>(words.data()), words.size_bytes());
     }
 
     [[nodiscard]] bool lent() const noexcept { return base_ != nullptr; }
+
     [[nodiscard]] std::size_t size() const noexcept { return len_; }
 
     [[nodiscard]] Block first(std::size_t n) const noexcept {
@@ -38,12 +40,15 @@ public:
 
     template <Access A>
     [[nodiscard]] std::optional<Reg<A>> at(std::uint32_t byte_off) const noexcept {
-        if (base_ == nullptr || (byte_off & 3u) != 0u || len_ < sizeof(std::uint32_t) ||
-            static_cast<std::size_t>(byte_off) > len_ - sizeof(std::uint32_t)) {
+        if (base_ == nullptr
+            || (byte_off & 3u) != 0u
+            || len_ < sizeof(std::uint32_t)
+            || static_cast<std::size_t>(byte_off) > len_ - sizeof(std::uint32_t)) {
             return std::nullopt;
         }
         return Reg<A>(reinterpret_cast<volatile std::uint32_t*>(base_ + byte_off));
     }
+
     template <Access A, std::uint32_t Off>
     [[nodiscard]] std::optional<Reg<A>> at(Field<A, Off>) const noexcept {
         return at<A>(Off);
@@ -52,10 +57,11 @@ public:
 private:
     template <class Layout>
     friend class hal::RegisterWindow;
+
     Block(volatile std::byte* base, std::size_t len) noexcept : base_(base), len_(len) {}
 
     volatile std::byte* base_ = nullptr;
     std::size_t len_ = 0;
 };
 
-}  // namespace mister::hal::reg
+}

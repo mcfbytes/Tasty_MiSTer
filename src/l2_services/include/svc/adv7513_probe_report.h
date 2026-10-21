@@ -26,4 +26,4 @@ struct ProbeReport {
     std::uint32_t last_errno = 0;
 };
 
-}  // namespace mister::svc::adv7513
+}

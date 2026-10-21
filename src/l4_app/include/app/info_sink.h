@@ -21,4 +21,4 @@ protected:
     InfoSink& operator=(const InfoSink&) = default;
 };
 
-}  // namespace mister::app
+}

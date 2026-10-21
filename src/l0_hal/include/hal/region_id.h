@@ -22,4 +22,4 @@ inline constexpr std::size_t kRegionCount = static_cast<std::size_t>(RegionId::S
 
 static_assert(kRegionCount <= 7, "RegionId grew: a core window belongs on its manifest");
 
-}  // namespace mister::hal
+}

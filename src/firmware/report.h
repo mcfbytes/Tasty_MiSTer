@@ -19,4 +19,4 @@ void set_report_voice(const IReportVoice* voice) noexcept;
 
 void report(const char* what, const Error& e);
 
-}  // namespace mister::fw
+}

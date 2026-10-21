@@ -16,8 +16,10 @@ class ILinkEncoder {
 public:
     enum class Outcome : std::uint8_t { Dropped, Encoded, EncodedStatusChange };
 
-    [[nodiscard]] virtual Outcome encode(const proto::LinkOp& op,
-                                         const LinkOpCtx& ctx) noexcept = 0;
+    [[nodiscard]] virtual Outcome encode(
+        const proto::LinkOp& op,
+        const LinkOpCtx& ctx
+    ) noexcept = 0;
 
     ILinkEncoder(const ILinkEncoder&) = delete;
     ILinkEncoder& operator=(const ILinkEncoder&) = delete;
@@ -27,4 +29,4 @@ protected:
     ~ILinkEncoder() = default;
 };
 
-}  // namespace mister::app
+}

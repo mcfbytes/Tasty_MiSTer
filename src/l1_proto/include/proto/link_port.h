@@ -23,6 +23,7 @@ class LinkPort {
 
 public:
     using Emits = std::tuple<A...>;
+
     explicit LinkPort(ILinkRouter& r) noexcept : r_(&r) {}
 
     template <class X>
@@ -30,11 +31,13 @@ public:
     [[nodiscard]] bool push(const X& x) noexcept {
         return r_->push(infra::make<LinkEvent>(x));
     }
+
     template <class X>
         requires(std::same_as<X, A> || ...)
     [[nodiscard]] bool can_intern(std::size_t bytes, unsigned chunks) const noexcept {
         return r_->can_intern(X::kKind, bytes, chunks);
     }
+
     template <class X>
         requires(std::same_as<X, A> || ...)
     [[nodiscard]] Ex<RxSlabId> intern(std::span<const std::uint8_t> bytes) noexcept {
@@ -45,4 +48,4 @@ private:
     ILinkRouter* r_;
 };
 
-}  // namespace mister::proto
+}

@@ -34,4 +34,4 @@ private:
     T value_{};
 };
 
-}  // namespace mister::svc
+}

@@ -31,16 +31,31 @@ public:
     using CountCell = xthread::Telemetry<DiscCounters, SeatTag::Io>;
 
     DiscStore(const Vfs& vfs, GeomCell& geom, CountCell& counters, ChdPrefetch& prefetch) noexcept
-        : vfs_(vfs), geom_(geom), counters_(counters), prefetch_(prefetch) {}
+        : vfs_(vfs),
+          geom_(geom),
+          counters_(counters),
+          prefetch_(prefetch) {}
 
-    DiscStore(const IImageOpener& opener, GeomCell& geom, CountCell& counters,
-              ChdPrefetch& prefetch) noexcept
-        : opener_(opener), geom_(geom), counters_(counters), prefetch_(prefetch) {}
+    DiscStore(
+        const IImageOpener& opener,
+        GeomCell& geom,
+        CountCell& counters,
+        ChdPrefetch& prefetch
+    ) noexcept
+        : opener_(opener),
+          geom_(geom),
+          counters_(counters),
+          prefetch_(prefetch) {}
 
-    [[nodiscard]] Ex<std::size_t> read_form(DiscForm form, proto::Lba lba,
-                                            std::span<std::byte> dst) override;
-    [[nodiscard]] bool mount(infra::OptRef<const CuePolicy> policy,
-                             std::string_view path) noexcept override;
+    [[nodiscard]] Ex<std::size_t> read_form(
+        DiscForm form,
+        proto::Lba lba,
+        std::span<std::byte> dst
+    ) override;
+    [[nodiscard]] bool mount(
+        infra::OptRef<const CuePolicy> policy,
+        std::string_view path
+    ) noexcept override;
     [[nodiscard]] bool unmount(infra::OptRef<const CuePolicy> policy) noexcept override;
     void release() noexcept override;
 
@@ -62,4 +77,4 @@ private:
     std::optional<DiscEngine> engine_;
 };
 
-}  // namespace mister::svc
+}

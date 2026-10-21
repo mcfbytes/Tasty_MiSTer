@@ -13,8 +13,11 @@ class IStorageLifecycle {
 public:
     virtual ~IStorageLifecycle() = default;
 
-    [[nodiscard]] virtual bool stage_backend(proto::SlotIndex slot, IStorageBackend& backend,
-                                             std::span<const std::byte> order) noexcept = 0;
+    [[nodiscard]] virtual bool stage_backend(
+        proto::SlotIndex slot,
+        IStorageBackend& backend,
+        std::span<const std::byte> order
+    ) noexcept = 0;
 
     [[nodiscard]] virtual bool release_slot(proto::SlotIndex slot) noexcept = 0;
 
@@ -26,4 +29,4 @@ protected:
     IStorageLifecycle& operator=(const IStorageLifecycle&) = default;
 };
 
-}  // namespace mister::svc
+}

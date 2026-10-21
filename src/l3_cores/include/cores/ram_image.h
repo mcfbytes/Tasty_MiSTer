@@ -26,10 +26,11 @@ struct RamImageRecipe {
         return first_bytes + second_bytes;
     }
 };
+
 static_assert(std::is_trivially_copyable_v<RamImageRecipe>);
 
 inline constexpr std::string_view kRamImageAddon = "RAM";
 
 [[nodiscard]] std::vector<std::uint8_t> expand(const RamImageRecipe& r);
 
-}  // namespace mister::cores
+}

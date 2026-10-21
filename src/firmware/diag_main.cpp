@@ -29,8 +29,9 @@ void DiagMain::serve() noexcept {
 }
 
 void DiagMain::settle() noexcept {
-    if (!final_sampled_) sampler_.sample(true);
+    if (!final_sampled_)
+        sampler_.sample(true);
     sampler_.render_final();
 }
 
-}  // namespace mister::fw
+}

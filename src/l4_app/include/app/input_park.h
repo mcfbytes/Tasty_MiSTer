@@ -12,9 +12,13 @@ class InputPark {
 
 public:
     InputPark(InputDecode& decode, xthread::WakeFlag& pause_wake) noexcept
-        : decode_(decode), pause_wake_(pause_wake) {}
+        : decode_(decode),
+          pause_wake_(pause_wake) {}
+
     void arm() noexcept { pause_wake_.arm(); }
+
     void wait(int ms) noexcept { decode_.wait_events(ms); }
+
     void disarm() noexcept { pause_wake_.disarm(); }
 
 private:
@@ -24,4 +28,4 @@ private:
 
 static_assert(xthread::ParkLike<InputPark>);
 
-}  // namespace mister::app
+}

@@ -10,4 +10,4 @@ struct CoreWindowDecl {
     bool feeds_pcm = false;
 };
 
-}  // namespace mister::cores
+}

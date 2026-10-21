@@ -9,8 +9,13 @@
 
 namespace mister::app {
 
-void CheatLink::content_loaded(cores::Core* core, TxDigest::Kind kind, std::string_view path,
-                               std::uint32_t crc, bool same_game) noexcept {
+void CheatLink::content_loaded(
+    cores::Core* core,
+    TxDigest::Kind kind,
+    std::string_view path,
+    std::uint32_t crc,
+    bool same_game
+) noexcept {
     TASTY_SEAT_BODY(CheatLink);
     if (core != nullptr) {
         if (cores::ICheatSink* sink = core->cheat_sink(); sink != nullptr) {
@@ -50,10 +55,12 @@ bool CheatLink::apply_cheats_counted(const CheatCall& call) noexcept {
         return false;
     }
     const std::size_t n = blob_scratch_.len <= sizeof(blob_scratch_.bytes)
-                              ? blob_scratch_.len
-                              : sizeof(blob_scratch_.bytes);
-    if (auto r =
-            sink->apply(std::span<const std::uint8_t>(blob_scratch_.bytes, n), blob_scratch_.unit);
+        ? blob_scratch_.len
+        : sizeof(blob_scratch_.bytes);
+    if (auto r = sink->apply(
+            std::span<const std::uint8_t>(blob_scratch_.bytes, n),
+            blob_scratch_.unit
+        );
         !r) {
         ++refusals_;
         return false;
@@ -62,4 +69,4 @@ bool CheatLink::apply_cheats_counted(const CheatCall& call) noexcept {
     return true;
 }
 
-}  // namespace mister::app
+}

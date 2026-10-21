@@ -13,4 +13,4 @@ struct StagePlan {
     FixedStr<11, StrFit::Clip> game_id{};
 };
 
-}  // namespace mister::cores
+}

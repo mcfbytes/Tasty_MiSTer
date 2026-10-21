@@ -12,8 +12,9 @@ struct FilterSendPlan {
         bool adaptive = false;
         std::uint8_t bank = 0;
     };
+
     std::array<Seg, 3> segs{};
     std::uint8_t count = 0;
 };
 
-}  // namespace mister::svc
+}

@@ -59,4 +59,4 @@ enum class SectionMatch : std::uint8_t {
     NoMatch,
 };
 
-}  // namespace mister::svc
+}

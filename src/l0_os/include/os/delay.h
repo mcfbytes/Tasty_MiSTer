@@ -19,4 +19,4 @@ protected:
     IDelay& operator=(const IDelay&) = default;
 };
 
-}  // namespace mister::os
+}

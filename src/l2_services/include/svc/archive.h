@@ -37,4 +37,4 @@ protected:
     IArchive& operator=(const IArchive&) = default;
 };
 
-}  // namespace mister::svc
+}

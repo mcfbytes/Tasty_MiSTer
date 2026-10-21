@@ -13,32 +13,33 @@ Cpp11BracedListStyle: true
 
 AccessModifierOffset: -4
 NamespaceIndentation: None
-FixNamespaceComments: true
+FixNamespaceComments: false
 CompactNamespaces: false
 
 PointerAlignment: Left
 ReferenceAlignment: Left
 DerivePointerAlignment: false
 
-AlignAfterOpenBracket: Align
+AlignAfterOpenBracket: BlockIndent
 AlignConsecutiveDeclarations: None
 AlignConsecutiveAssignments: None
 AlignConsecutiveMacros: None
-AlignTrailingComments: true
-AlignEscapedNewlines: Left
-AlignOperands: Align
+AlignTrailingComments: 
+  Kind: Never
+AlignEscapedNewlines: DontAlign
+AlignOperands: DontAlign
 SpacesBeforeTrailingComments: 2
 
-AllowShortFunctionsOnASingleLine: All
-AllowShortLambdasOnASingleLine: All
-AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 AllowShortBlocksOnASingleLine: Never
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortEnumsOnASingleLine: true
 
-BinPackArguments: true
-BinPackParameters: true
+BinPackArguments: false
+BinPackParameters: false
 
 IndentCaseLabels: true
 IndentPPDirectives: None
@@ -58,3 +59,22 @@ PenaltyReturnTypeOnItsOwnLine: 1000
 AlwaysBreakTemplateDeclarations: Yes
 
 ReflowComments: false
+
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+PackConstructorInitializers: CurrentLine
+BreakConstructorInitializers: BeforeColon
+BreakBeforeBinaryOperators: NonAssignment
+PenaltyBreakAssignment: 1000
+
+MaxEmptyLinesToKeep: 1
+BreakBinaryOperations: RespectPrecedence
+BinPackLongBracedList: true
+RequiresClausePosition: OwnLine
+BreakBeforeConceptDeclarations: Always
+BreakAfterAttributes: Leave
+SeparateDefinitionBlocks: Always
+EmptyLineBeforeAccessModifier: LogicalBlock
+EmptyLineAfterAccessModifier: Never
+InsertNewlineAtEOF: true
+AlignArrayOfStructures: None

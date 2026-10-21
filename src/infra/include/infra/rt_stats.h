@@ -14,7 +14,7 @@ inline constexpr std::size_t kMaxServices = 24;
 inline constexpr std::size_t kMaxLines = 16;
 inline constexpr std::size_t kNumRings = 4;
 
-}  // namespace mister
+}
 
 namespace mister::xthread {
 
@@ -27,6 +27,7 @@ struct alignas(64) RtStats {
     std::atomic<std::uint64_t> heartbeat;
     std::atomic<std::uint32_t> dump_requests;
 };
+
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
 
-}  // namespace mister::xthread
+}

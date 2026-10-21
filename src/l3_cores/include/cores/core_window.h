@@ -13,8 +13,10 @@ class ICoreWindow {
 public:
     virtual ~ICoreWindow() = default;
 
-    [[nodiscard]] virtual Ex<std::size_t> write(std::size_t off,
-                                                std::span<const std::byte> src) = 0;
+    [[nodiscard]] virtual Ex<std::size_t> write(
+        std::size_t off,
+        std::span<const std::byte> src
+    ) = 0;
     [[nodiscard]] virtual Ex<std::size_t> read(std::size_t off, std::span<std::byte> dst) const = 0;
 
     virtual void publish() noexcept = 0;
@@ -29,4 +31,4 @@ protected:
     ICoreWindow& operator=(const ICoreWindow&) = default;
 };
 
-}  // namespace mister::cores
+}

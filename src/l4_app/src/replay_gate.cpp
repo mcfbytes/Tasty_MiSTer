@@ -10,10 +10,14 @@
 
 namespace mister::app {
 
-static_assert(ReplayGate::kMaxRoundWords <= proto::tightest_round_budget_words(),
-              "a replay round's own words never exceed the round budget they are taken from");
+static_assert(
+    ReplayGate::kMaxRoundWords <= proto::tightest_round_budget_words(),
+    "a replay round's own words never exceed the round budget they are taken from"
+);
 
-std::int64_t ReplayGate::now_ns_() const noexcept { return w_.clock.now().count(); }
+std::int64_t ReplayGate::now_ns_() const noexcept {
+    return w_.clock.now().count();
+}
 
 Ex<proto::FrameCount> ReplayGate::read_counter_() noexcept {
     round_words_ += proto::FrameCounterRead::kReadWords;
@@ -23,24 +27,30 @@ Ex<proto::FrameCount> ReplayGate::read_counter_() noexcept {
 void ReplayGate::sample_control_() noexcept {
     ReplayControl c{};
 
-    if (control_seen_.take_if_changed(w_.control, c)) ctrl_ = c;
+    if (control_seen_.take_if_changed(w_.control, c))
+        ctrl_ = c;
 }
 
-void ReplayGate::tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswers late,
-                      std::optional<std::uint32_t> queued) noexcept {
+void ReplayGate::tick(
+    bool ready,
+    std::uint32_t core_edge_seq,
+    proto::LateAnswers late,
+    std::optional<std::uint32_t> queued
+) noexcept {
     TASTY_SEAT_BODY(ReplayGate);
     sample_control_();
     queued_ = queued;
     blk_seen_ = late.count;
-    if (level_ == ReplayLevel::Running &&
-        (late.count - blk_base_ != status_.blk_late || late.max_us > status_.blk_late_max_us)) {
+    if (level_ == ReplayLevel::Running
+        && (late.count - blk_base_ != status_.blk_late || late.max_us > status_.blk_late_max_us)) {
         status_.blk_late = late.count - blk_base_;
         status_.blk_late_max_us = std::max(status_.blk_late_max_us, late.max_us);
         dirty_ = true;
     }
 
     if (release_ports_ != 0 && (core_edge_seq != edge_seq_ || ready)) {
-        if (core_edge_seq == edge_seq_) force_release_(release_ports_);
+        if (core_edge_seq == edge_seq_)
+            force_release_(release_ports_);
         release_ports_ = 0;
         dirty_ = true;
     }
@@ -50,12 +60,16 @@ void ReplayGate::tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswer
     }
     ready_ = ready;
 
-    if (core_edge_seq != edge_seq_) return disarm_(ReplayEnd::CoreSwitch, false);
-    if (ctrl_.gen != gen_) return disarm_(ReplayEnd::Superseded, true);
-    if (ctrl_.op != ReplayOp::Play) return disarm_(ReplayEnd::Stopped, true);
+    if (core_edge_seq != edge_seq_)
+        return disarm_(ReplayEnd::CoreSwitch, false);
+    if (ctrl_.gen != gen_)
+        return disarm_(ReplayEnd::Superseded, true);
+    if (ctrl_.op != ReplayOp::Play)
+        return disarm_(ReplayEnd::Stopped, true);
     now_ = now_ns_();
 
-    if (level_ == ReplayLevel::AwaitPowerOn) return;
+    if (level_ == ReplayLevel::AwaitPowerOn)
+        return;
     if (!ready) {
         ++status_.held_rounds;
         tick_ns_ = 0;
@@ -65,7 +79,8 @@ void ReplayGate::tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswer
     gap_ns_ = tick_ns_ != 0 ? now_ - tick_ns_ : 0;
     tick_ns_ = now_;
     note_gap_();
-    if (!sample_ref_()) return;
+    if (!sample_ref_())
+        return;
     if (!epoch_known_) {
         if (p0_ == ReplayMsg::P0Parity::AfterSilence && now_ - end_ns_ > kSilenceWindowNs)
             disarm_(ReplayEnd::EpochAmbiguous, true);
@@ -96,12 +111,14 @@ bool ReplayGate::sample_ref_() noexcept {
         raw = r->count;
     } else {
         reactor::FrameRecord rec{};
-        if (!w_.vsync || w_.vsync->sample_into(rec) == 0) return false;
+        if (!w_.vsync || w_.vsync->sample_into(rec) == 0)
+            return false;
         raw = rec.seq;
     }
     const std::int64_t prev_read = read_ns_;
     read_ns_ = now_;
-    if (raw == last_raw_) return true;
+    if (raw == last_raw_)
+        return true;
     last_sample_ns_ = now_;
     const std::uint32_t d = (raw - last_raw_) & wrap_mask_;
     last_raw_ = raw;
@@ -109,11 +126,14 @@ bool ReplayGate::sample_ref_() noexcept {
     std::int64_t edge = now_;
 
     if (epoch_known_ && prev_read != 0 && now_ - prev_read > kGapNs)
-        edge = std::min(now_,
-                        std::max(prev_read, edge_ns_ + static_cast<std::int64_t>(d) * period_ns_));
+        edge = std::min(
+            now_,
+            std::max(prev_read, edge_ns_ + static_cast<std::int64_t>(d) * period_ns_)
+        );
     edge_gap_ns_ = edge - edge_ns_;
     edge_ns_ = edge;
-    if (d > 1) status_.skipped_edges += d - 1;
+    if (d > 1)
+        status_.skipped_edges += d - 1;
     if (!epoch_known_) {
         if (p0_ == ReplayMsg::P0Parity::AfterSilence) {
             decide_silence_(d);
@@ -131,7 +151,8 @@ std::int64_t ceil_div(std::int64_t a, std::int64_t b) {
 }
 
 std::int64_t released(std::int64_t j, ReplayMsg::P0Parity p0, std::uint32_t first_count) {
-    if (p0 == ReplayMsg::P0Parity::Any || j < 0) return j;
+    if (p0 == ReplayMsg::P0Parity::Any || j < 0)
+        return j;
     const std::uint32_t want = p0 == ReplayMsg::P0Parity::Odd ? 1u : 0u;
     return ((first_count + static_cast<std::uint32_t>(j)) & 1u) == want ? j : j + 1;
 }
@@ -141,14 +162,22 @@ struct EpochPick {
     std::int64_t hi;
 };
 
-EpochPick epoch_at(std::int64_t delay, std::int64_t poweron_ns, std::int64_t period_ns,
-                   std::int64_t line0_ns, ReplayMsg::P0Parity p0, std::uint32_t first_count) {
+EpochPick epoch_at(
+    std::int64_t delay,
+    std::int64_t poweron_ns,
+    std::int64_t period_ns,
+    std::int64_t line0_ns,
+    ReplayMsg::P0Parity p0,
+    std::uint32_t first_count
+) {
     const std::int64_t x = poweron_ns + period_ns - line0_ns - delay;
-    return {released(ceil_div(x - ReplayGate::kEndSlackNs, period_ns), p0, first_count),
-            released(ceil_div(x + reactor::kTickNs, period_ns), p0, first_count)};
+    return {
+        released(ceil_div(x - ReplayGate::kEndSlackNs, period_ns), p0, first_count),
+        released(ceil_div(x + reactor::kTickNs, period_ns), p0, first_count)
+    };
 }
 
-}  // namespace
+}
 
 void ReplayGate::decide_epoch_(std::uint32_t delta) noexcept {
     const std::int64_t d = edge_ns_ - end_ns_;
@@ -160,12 +189,14 @@ void ReplayGate::decide_epoch_(std::uint32_t delta) noexcept {
 
     bool slipped = false;
     std::uint8_t slip = 0;
-    if ((untimed || p.j < 0) && p0_ == ReplayMsg::P0Parity::Any && late_frames_ != 0 &&
-        period_ns_ > 0) {
+    if ((untimed || p.j < 0)
+        && p0_ == ReplayMsg::P0Parity::Any
+        && late_frames_ != 0
+        && period_ns_ > 0) {
         for (std::uint8_t k = late_frames_; k != 0; --k) {
             const std::int64_t earlier = d - static_cast<std::int64_t>(k) * period_ns_;
-            const EpochPick s =
-                epoch_at(earlier, poweron_ns_, period_ns_, line0_ns_, p0_, last_raw_);
+            const EpochPick
+                s = epoch_at(earlier, poweron_ns_, period_ns_, line0_ns_, p0_, last_raw_);
             if (s.j == s.hi && s.j == static_cast<std::int64_t>(k)) {
                 slipped = true;
                 slip = k;
@@ -176,8 +207,8 @@ void ReplayGate::decide_epoch_(std::uint32_t delta) noexcept {
     if (!slipped && (delta != 1 || p.j < 0 || untimed || band)) {
 
         status_.epoch_fail = delta != 1 ? EpochFail::Retry
-                             : untimed  ? EpochFail::Untimed
-                             : p.j < 0  ? EpochFail::Before
+            : untimed                   ? EpochFail::Untimed
+            : p.j < 0                   ? EpochFail::Before
                                         : EpochFail::Retry;
         return disarm_(ReplayEnd::EpochAmbiguous, true);
     }
@@ -190,11 +221,14 @@ void ReplayGate::decide_epoch_(std::uint32_t delta) noexcept {
 void ReplayGate::decide_silence_(std::uint32_t delta) noexcept {
     const std::int64_t gap = edge_ns_ - prev_edge_ns_;
     prev_edge_ns_ = edge_ns_;
-    if (gap <= period_ns_ + kSilenceSlackNs) return;
+    if (gap <= period_ns_ + kSilenceSlackNs)
+        return;
 
-    if (delta != 1) return disarm_(ReplayEnd::EpochAmbiguous, true);
-    status_.epoch_delay_us =
-        static_cast<std::uint32_t>(std::max<std::int64_t>(0, edge_ns_ - end_ns_) / 1000);
+    if (delta != 1)
+        return disarm_(ReplayEnd::EpochAmbiguous, true);
+    status_.epoch_delay_us = static_cast<std::uint32_t>(
+        std::max<std::int64_t>(0, edge_ns_ - end_ns_) / 1000
+    );
     epoch_ = frames_;
     status_.epoch_edge = epoch_;
     epoch_known_ = true;
@@ -204,24 +238,30 @@ bool ReplayGate::pre_epoch_(std::uint32_t frame) const noexcept {
     return static_cast<std::int64_t>(frame) + lead_ < -static_cast<std::int64_t>(floor_back_);
 }
 
-bool ReplayGate::live_() const noexcept { return epoch_known_ && frames_ + floor_back_ >= epoch_; }
+bool ReplayGate::live_() const noexcept {
+    return epoch_known_ && frames_ + floor_back_ >= epoch_;
+}
 
 bool ReplayGate::due_(const ReplayMsg::Input& r) const noexcept {
 
-    if (!ready_ || level_ != ReplayLevel::Running || !live_()) return false;
+    if (!ready_ || level_ != ReplayLevel::Running || !live_())
+        return false;
     const auto first = static_cast<std::int64_t>(r.first);
     return first < mf_ || (first == mf_ && now_ - edge_ns_ >= offset_ns_);
 }
 
 void ReplayGate::note_late_(std::uint32_t first) noexcept {
     ++status_.late;
-    if (status_.first_late_frame >= 0) return;
+    if (status_.first_late_frame >= 0)
+        return;
     status_.first_late_frame = static_cast<std::int32_t>(first);
     status_.late_gap_us = static_cast<std::uint32_t>(gap_ns_ / 1000);
-    status_.late_into_us =
-        static_cast<std::uint32_t>(std::max<std::int64_t>(0, now_ - edge_ns_) / 1000);
-    status_.late_edge_us =
-        static_cast<std::uint32_t>(std::max<std::int64_t>(0, edge_gap_ns_) / 1000);
+    status_.late_into_us = static_cast<std::uint32_t>(
+        std::max<std::int64_t>(0, now_ - edge_ns_) / 1000
+    );
+    status_.late_edge_us = static_cast<std::uint32_t>(
+        std::max<std::int64_t>(0, edge_gap_ns_) / 1000
+    );
     status_.late_depth = queued_.value_or(0);
 }
 
@@ -233,7 +273,8 @@ void ReplayGate::note_gap_() noexcept {
 }
 
 void ReplayGate::note_depth_() noexcept {
-    if (!queued_ || end_seen_ || !live_()) return;
+    if (!queued_ || end_seen_ || !live_())
+        return;
     const auto depth = static_cast<std::int32_t>(*queued_ + (held_ ? 1u : 0u));
     if (status_.depth_min < 0 || depth < status_.depth_min) {
         status_.depth_min = depth;
@@ -260,7 +301,8 @@ void ReplayGate::apply_(const ReplayMsg::Input& r) noexcept {
         note_late_(r.first);
     } else {
         const auto us = static_cast<std::uint32_t>((now_ - edge_ns_) / 1000);
-        if (now_ - edge_ns_ - offset_ns_ > kSlipNs) ++status_.delayed;
+        if (now_ - edge_ns_ - offset_ns_ > kSlipNs)
+            ++status_.delayed;
         status_.apply_min_us = status_.on_time == 0 ? us : std::min(status_.apply_min_us, us);
         status_.apply_max_us = std::max(status_.apply_max_us, us);
         ++status_.on_time;
@@ -273,14 +315,22 @@ void ReplayGate::write_(const ReplayMsg::Input& r) noexcept {
     status_.applied_frame = static_cast<std::int32_t>(std::min<std::int64_t>(mf_, r.last));
 }
 
-void ReplayGate::write_masks_(const std::array<std::uint32_t, kReplayPorts>& mask,
-                              std::uint8_t ports) noexcept {
+void ReplayGate::write_masks_(
+    const std::array<std::uint32_t, kReplayPorts>& mask,
+    std::uint8_t ports
+) noexcept {
     proto::JoystickPort& joy = w_.emitter.joysticks();
     for (std::uint8_t p = 0; p < kReplayPorts; ++p) {
-        if ((ports & (1u << p)) == 0) continue;
-        const auto out = joy.submit(w_.link, joy.wire_port(proto::PlayerIndex{p}),
-                                    proto::JoyMask{mask[p]}, proto::JoyMask{});
-        if (!out || *out) round_words_ += proto::JoystickPort::kMaxDigitalPushWords;
+        if ((ports & (1u << p)) == 0)
+            continue;
+        const auto out = joy.submit(
+            w_.link,
+            joy.wire_port(proto::PlayerIndex{p}),
+            proto::JoyMask{mask[p]},
+            proto::JoyMask{}
+        );
+        if (!out || *out)
+            round_words_ += proto::JoystickPort::kMaxDigitalPushWords;
         if (!out) {
             ++status_.link_errors;
         } else if (*out) {
@@ -292,11 +342,14 @@ void ReplayGate::write_masks_(const std::array<std::uint32_t, kReplayPorts>& mas
 void ReplayGate::force_release_(std::uint8_t ports) noexcept {
     proto::JoystickPort& joy = w_.emitter.joysticks();
     for (std::uint8_t p = 0; p < kReplayPorts; ++p) {
-        if ((ports & (1u << p)) == 0) continue;
+        if ((ports & (1u << p)) == 0)
+            continue;
         const proto::PlayerIndex port = joy.wire_port(proto::PlayerIndex{p});
         auto out = joy.submit(w_.link, port, proto::JoyMask{}, proto::JoyMask{});
-        if (out && !*out) out = joy.release(w_.link, port, proto::JoyMask{~0u});
-        if (!out || *out) round_words_ += proto::JoystickPort::kMaxDigitalPushWords;
+        if (out && !*out)
+            out = joy.release(w_.link, port, proto::JoyMask{~0u});
+        if (!out || *out)
+            round_words_ += proto::JoystickPort::kMaxDigitalPushWords;
         if (!out) {
             ++status_.link_errors;
         } else if (*out) {
@@ -306,7 +359,8 @@ void ReplayGate::force_release_(std::uint8_t ports) noexcept {
 }
 
 bool ReplayGate::wants_record() const noexcept {
-    if (level_ == ReplayLevel::Idle) return true;
+    if (level_ == ReplayLevel::Idle)
+        return true;
     return !held_ && !end_seen_;
 }
 
@@ -315,8 +369,12 @@ void ReplayGate::on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept 
 
     sample_control_();
 
-    if (level_ != ReplayLevel::Idle || release_ports_ != 0 || ctrl_.op != ReplayOp::Play ||
-        ctrl_.gen != h.gen || a.ports == 0 || a.period_ns == 0) {
+    if (level_ != ReplayLevel::Idle
+        || release_ports_ != 0
+        || ctrl_.op != ReplayOp::Play
+        || ctrl_.gen != h.gen
+        || a.ports == 0
+        || a.period_ns == 0) {
         ++status_.stale;
         status_.gen = h.gen;
         status_.end = ReplayEnd::Refused;
@@ -367,7 +425,8 @@ void ReplayGate::on(const ReplayMsg::Input& r, const ReplayMsg::Head& h) noexcep
         dirty_ = true;
         return;
     }
-    if (due_(r)) return apply_(r);
+    if (due_(r))
+        return apply_(r);
     held_ = r;
 }
 
@@ -403,7 +462,8 @@ void ReplayGate::settle() noexcept {
         }
     }
 
-    if (level_ == ReplayLevel::Idle && (!dirty_ || release_ports_ != 0)) return;
+    if (level_ == ReplayLevel::Idle && (!dirty_ || release_ports_ != 0))
+        return;
     status_.level = level_;
     status_.movie_frame = static_cast<std::int32_t>(mf_);
     w_.status.publish(status_);
@@ -412,8 +472,10 @@ void ReplayGate::settle() noexcept {
 
 void ReplayGate::note_download_end(std::uint8_t wire_index) noexcept {
     TASTY_SEAT_BODY(ReplayGate);
-    if (level_ != ReplayLevel::AwaitPowerOn || event_ != ReplayMsg::PowerOnEvent::LoadEnd) return;
-    if (rom_index_ != 0xFF && (wire_index & 0x3Fu) != rom_index_) return;
+    if (level_ != ReplayLevel::AwaitPowerOn || event_ != ReplayMsg::PowerOnEvent::LoadEnd)
+        return;
+    if (rom_index_ != 0xFF && (wire_index & 0x3Fu) != rom_index_)
+        return;
     begin_run_();
 }
 
@@ -435,8 +497,10 @@ void ReplayGate::begin_run_() noexcept {
     } else {
         reactor::FrameRecord rec{};
 
-        if (!vsync_ok_ || p0_ != ReplayMsg::P0Parity::Any || !w_.vsync ||
-            w_.vsync->sample_into(rec) == 0) {
+        if (!vsync_ok_
+            || p0_ != ReplayMsg::P0Parity::Any
+            || !w_.vsync
+            || w_.vsync->sample_into(rec) == 0) {
             return disarm_(ReplayEnd::NoReference, false);
         }
         status_.ref = ReplayRef::Vsync;
@@ -456,7 +520,8 @@ void ReplayGate::begin_run_() noexcept {
 
 bool ReplayGate::suppresses(const proto::LinkOp& op) noexcept {
     TASTY_SEAT_BODY(ReplayGate);
-    if (level_ == ReplayLevel::Idle) return false;
+    if (level_ == ReplayLevel::Idle)
+        return false;
     proto::PlayerIndex player{};
     if (const auto e = infra::as<proto::LinkOp::JoyEmit>(op)) {
         player = e->player;
@@ -465,7 +530,8 @@ bool ReplayGate::suppresses(const proto::LinkOp& op) noexcept {
     } else {
         return false;
     }
-    if (player.v >= proto::JoystickPort::kMaxPorts) return false;
+    if (player.v >= proto::JoystickPort::kMaxPorts)
+        return false;
     ++status_.pad_drops;
     return true;
 }
@@ -485,4 +551,4 @@ void ReplayGate::disarm_(ReplayEnd why, bool release) noexcept {
     dirty_ = true;
 }
 
-}  // namespace mister::app
+}

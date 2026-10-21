@@ -30,10 +30,13 @@ namespace mister::reactor {
 inline constexpr std::uint64_t kSilenceSlackPeriods = 1;
 inline constexpr std::uint64_t kSilenceRounds = 2;
 
-constexpr bool raise_is_recent_ms(std::uint64_t now_ms, std::uint64_t last_ms,
-                                  std::uint32_t period_ms) noexcept {
-    return (now_ms - last_ms) <=
-           static_cast<std::uint64_t>(period_ms) * (1u + kSilenceSlackPeriods);
+constexpr bool raise_is_recent_ms(
+    std::uint64_t now_ms,
+    std::uint64_t last_ms,
+    std::uint32_t period_ms
+) noexcept {
+    return (now_ms - last_ms)
+        <= static_cast<std::uint64_t>(period_ms) * (1u + kSilenceSlackPeriods);
 }
 
 constexpr bool raise_is_recent_rounds(std::uint64_t now_round, std::uint64_t last_round) noexcept {
@@ -50,6 +53,7 @@ public:
         infra::OptRef<RoundTimer> round_timer{};
         infra::OptRef<xthread::LogLane> log_lane{};
     };
+
     [[nodiscard]] static Ex<Executive> create(xthread::RtStats& stats, const Wiring& wiring);
     [[nodiscard]] static Ex<Executive> create(xthread::RtStats& stats);
 
@@ -74,11 +78,13 @@ public:
     void service_round() noexcept;
 
     [[nodiscard]] bool osd_budget_open() const noexcept { return !fifo_this_round_; }
+
     void end_round(bool wrote) noexcept;
 
     void settle() noexcept;
 
     [[nodiscard]] Ex<void> fault() const noexcept { return fault_; }
+
     void stop() noexcept;
 
     void kick();
@@ -102,6 +108,7 @@ public:
     }
 
     int epoll_fd() const noexcept { return epfd_.get(); }
+
     std::size_t notifier_count() const noexcept { return notifier_count_; }
 
     CauseSet delivered_causes() const noexcept { return delivered_; }
@@ -109,16 +116,19 @@ public:
     CauseSet carried_causes() const noexcept;
 
     std::uint32_t doorbell_fallbacks() const noexcept { return fallbacks_total_; }
+
     std::uint32_t doorbell_retirements() const noexcept { return retirements_total_; }
 
     std::uint32_t row_fallbacks(std::size_t slot) const noexcept {
         return slot < service_count_ ? row_fallbacks_[slot] : 0u;
     }
+
     std::uint32_t row_retirements(std::size_t slot) const noexcept {
         return slot < service_count_ ? row_retirements_[slot] : 0u;
     }
 
     static constexpr std::uint8_t kClaimStreakMax = 4;
+
     std::uint32_t claim_yields() const noexcept { return claim_yields_; }
 
     Executive(Executive&&) noexcept;
@@ -128,7 +138,9 @@ public:
 
 private:
     Executive(xthread::RtStats& stats, const Wiring& wiring)
-        : stats_(&stats), log_lane_(wiring.log_lane), round_timer_(wiring.round_timer) {
+        : stats_(&stats),
+          log_lane_(wiring.log_lane),
+          round_timer_(wiring.round_timer) {
         for (auto& t : last_raise_)
             t = kNeverRaised;
         for (auto& t : line_raise_ms_)
@@ -194,4 +206,4 @@ private:
     xthread::WakeFlag::Cursor stop_seen_;
 };
 
-}  // namespace mister::reactor
+}

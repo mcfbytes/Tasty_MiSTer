@@ -35,4 +35,4 @@ constexpr void to_json(infra::JsonOut& o, const AviWriteStatus& a) noexcept {
 
 using AviWriteStatusCell = xthread::Telemetry<AviWriteStatus, SeatTag::RecWrite>;
 
-}  // namespace mister::app
+}

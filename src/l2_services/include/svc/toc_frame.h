@@ -20,7 +20,9 @@ struct TocFrameMeta {
     std::uint16_t libcrypt_mask = 0;
 };
 
-std::array<std::byte, kTocFrameBytes> build_toc_frame(const Toc& toc,
-                                                      const TocFrameMeta& meta) noexcept;
+std::array<std::byte, kTocFrameBytes> build_toc_frame(
+    const Toc& toc,
+    const TocFrameMeta& meta
+) noexcept;
 
-}  // namespace mister::svc
+}

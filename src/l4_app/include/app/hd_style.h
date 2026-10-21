@@ -28,4 +28,4 @@ inline constexpr std::array<HdStyle, 5> kHdPresets{
     HdStyle{.primary = 0x0d0d0du, .accent = 0xf83800u, .text = 0xfcfcfcu, .warning = 0xd6453du},
 };
 
-}  // namespace mister::app
+}

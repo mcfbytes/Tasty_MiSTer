@@ -26,10 +26,15 @@ public:
 
     [[nodiscard]] Ex<void> map(const hal::PhysRegion& fb) noexcept;
     [[nodiscard]] bool blit(std::uint32_t width, std::uint32_t height) noexcept;
-    [[nodiscard]] Ex<void> show(app::VideoPump& video, std::uint32_t width,
-                                std::uint32_t height) noexcept;
+    [[nodiscard]] Ex<void> show(
+        app::VideoPump& video,
+        std::uint32_t width,
+        std::uint32_t height
+    ) noexcept;
     [[nodiscard]] Ex<void> hide(app::VideoPump& video) noexcept;
+
     [[nodiscard]] bool mapped() const noexcept { return fb_.has_value(); }
+
     [[nodiscard]] static std::uint32_t pixel(std::uint32_t x, std::uint32_t y) noexcept;
 
 private:
@@ -37,4 +42,4 @@ private:
     hal::PhysRegion fb_region_{};
 };
 
-}  // namespace mister::fw
+}

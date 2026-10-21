@@ -43,12 +43,17 @@ public:
     RecentsStore(const svc::Vfs& vfs, bool enabled) noexcept : vfs_(&vfs), enabled_(enabled) {}
 
     bool enabled() const noexcept { return enabled_; }
+
     void set_enabled(bool e) noexcept { enabled_ = e; }
 
     std::vector<Entry> load(std::string_view core, ListId id);
 
-    [[nodiscard]] Ex<void> update(std::string_view core, ListId id, std::string_view full_path,
-                                  std::string_view label);
+    [[nodiscard]] Ex<void> update(
+        std::string_view core,
+        ListId id,
+        std::string_view full_path,
+        std::string_view label
+    );
 
     [[nodiscard]] Ex<void> clear(std::string_view core, ListId id);
 
@@ -57,7 +62,9 @@ public:
     static std::string join(std::string_view dir, std::string_view name);
 
     std::uint32_t loads() const noexcept { return loads_; }
+
     std::uint32_t updates() const noexcept { return updates_; }
+
     std::uint32_t errors() const noexcept { return errors_; }
 
 private:
@@ -70,4 +77,4 @@ private:
     std::uint32_t errors_ = 0;
 };
 
-}  // namespace mister::app
+}

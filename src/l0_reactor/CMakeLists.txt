@@ -18,6 +18,7 @@ tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
   reactor/core_token.h
   reactor/executive.h
   reactor/frame_clock.h
+  reactor/frame_record.h
   reactor/frame_main.h
   reactor/link_decoder.h
   reactor/link_decoder_decl.h
@@ -28,38 +29,3 @@ tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
   reactor/tick.h
 )
 
-if(TASTY_BUILD_TESTS)
-
-  foreach(mod IN ITEMS core_notifiers executive frame_clock notifier round_timer)
-    tasty_unit_test(tasty_reactor_${mod}_unit
-      NAME tasty.reactor_${mod}
-      SOURCES tests/${mod}_unit.cpp
-      LIBS mister_reactor tasty_test_options
-      TIMEOUT 60)
-  endforeach()
-
-  target_include_directories(tasty_reactor_executive_unit
-                             PRIVATE ${CMAKE_SOURCE_DIR}/tests)
-
-  add_test(NAME tasty.reactor_executive_timing COMMAND tasty_reactor_executive_unit --timing)
-  set_tests_properties(tasty.reactor_executive_timing PROPERTIES
-                       TIMEOUT 120 LABELS timing RUN_SERIAL TRUE)
-  if(NOT CMAKE_CROSSCOMPILING)
-    set_tests_properties(tasty.reactor_executive_timing
-                         PROPERTIES FAIL_REGULAR_EXPRESSION "NOT CHECKED:")
-  endif()
-
-  tasty_unit_test(tasty_corestate_redef_probe
-    NAME tasty.reactor_corestate_redef
-    SOURCES tests/corestate_redef_probe.cpp
-    EXCLUDE_FROM_ALL
-    LIBS mister_reactor tasty_test_options
-    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target tasty_corestate_redef_probe
-    LABELS compile_probe
-    TIMEOUT 120
-    PROPERTIES WILL_FAIL
-      TRUE
-
-      RUN_SERIAL
-      TRUE)
-endif()

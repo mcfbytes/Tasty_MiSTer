@@ -14,4 +14,4 @@ struct Field {
     static constexpr std::uint32_t kOffset = Off;
 };
 
-}  // namespace mister::hal::reg
+}

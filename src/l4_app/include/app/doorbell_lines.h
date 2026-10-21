@@ -32,4 +32,4 @@ struct DoorbellLines {
     std::size_t count = 0;
 };
 
-}  // namespace mister::app
+}

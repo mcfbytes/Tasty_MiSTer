@@ -7,21 +7,27 @@
 
 namespace mister::svc {
 
-Ex<std::unique_ptr<IDiskImage>> open_disk_image(const Vfs& vfs, std::string_view path,
-                                                std::span<const DiskFormatRow> rows,
-                                                OpenMode mode) {
+Ex<std::unique_ptr<IDiskImage>> open_disk_image(
+    const Vfs& vfs,
+    std::string_view path,
+    std::span<const DiskFormatRow> rows,
+    OpenMode mode
+) {
     auto file = vfs.open(path, mode);
-    if (!file) return std::unexpected(file.error());
+    if (!file)
+        return std::unexpected(file.error());
 
     auto size = (*file)->size();
-    if (!size) return std::unexpected(size.error());
+    if (!size)
+        return std::unexpected(size.error());
 
     std::array<std::byte, kDiskMagicProbeBytes> head{};
     auto got = (*file)->read_at(0, head);
-    if (!got) return std::unexpected(got.error());
+    if (!got)
+        return std::unexpected(got.error());
 
-    const DiskFormatRow* row =
-        select_disk_format(rows, path, *size, std::span<const std::byte>(head).first(*got));
+    const DiskFormatRow*
+        row = select_disk_format(rows, path, *size, std::span<const std::byte>(head).first(*got));
     if (row == nullptr) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
@@ -34,7 +40,8 @@ Ex<std::unique_ptr<IDiskImage>> open_disk_image(const Vfs& vfs, std::string_view
             break;
     }
     return std::unexpected(
-        Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(row->codec)});
+        Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(row->codec)}
+    );
 }
 
-}  // namespace mister::svc
+}

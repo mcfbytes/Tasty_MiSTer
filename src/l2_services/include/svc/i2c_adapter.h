@@ -24,4 +24,4 @@ protected:
     II2cAdapter& operator=(const II2cAdapter&) = default;
 };
 
-}  // namespace mister::svc::adv7513
+}

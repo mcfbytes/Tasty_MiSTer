@@ -13,11 +13,12 @@ namespace {
 std::optional<long> read_one(const char* path) noexcept {
     std::array<char, 32> buf{};
     const auto got = read_small_file(path, std::span<char>(buf));
-    if (!got) return std::nullopt;
+    if (!got)
+        return std::nullopt;
     return sysctl_value_from(std::string_view(buf.data(), *got));
 }
 
-}  // namespace
+}
 
 std::optional<long> sysctl_value_from(std::string_view text) noexcept {
     while (!text.empty() && (text.back() == '\n' || text.back() == ' '))
@@ -25,9 +26,11 @@ std::optional<long> sysctl_value_from(std::string_view text) noexcept {
     return infra::parse_int<long>(text);
 }
 
-VmCompaction read_vm_compaction(const char* unevictable_path,
-                                const char* proactiveness_path) noexcept {
+VmCompaction read_vm_compaction(
+    const char* unevictable_path,
+    const char* proactiveness_path
+) noexcept {
     return VmCompaction{read_one(unevictable_path), read_one(proactiveness_path)};
 }
 
-}  // namespace mister::os
+}

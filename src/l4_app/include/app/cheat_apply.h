@@ -17,8 +17,13 @@ class ICheatApply {
 public:
     virtual ~ICheatApply() = default;
 
-    virtual void content_loaded(cores::Core* core, TxDigest::Kind kind, std::string_view path,
-                                std::uint32_t crc, bool same_game) noexcept = 0;
+    virtual void content_loaded(
+        cores::Core* core,
+        TxDigest::Kind kind,
+        std::string_view path,
+        std::uint32_t crc,
+        bool same_game
+    ) noexcept = 0;
 
     [[nodiscard]] virtual bool apply_cheats_counted(const CheatCall& call) noexcept = 0;
 
@@ -28,4 +33,4 @@ protected:
     ICheatApply& operator=(const ICheatApply&) = default;
 };
 
-}  // namespace mister::app
+}

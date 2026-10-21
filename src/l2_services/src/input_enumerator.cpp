@@ -28,16 +28,19 @@ Error os_error(std::uint16_t site) {
 [[nodiscard]] Ex<std::string> read_all(std::string_view path) {
     std::string name(path);
     UniqueFd fd(::open(name.c_str(), O_RDONLY | O_CLOEXEC));
-    if (!fd.valid()) return std::unexpected(os_error(ERR_SITE()));
+    if (!fd.valid())
+        return std::unexpected(os_error(ERR_SITE()));
     std::string out;
     char buf[4096];
     while (true) {
         const ssize_t n = ::read(fd.get(), buf, sizeof buf);
         if (n < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             return std::unexpected(os_error(ERR_SITE()));
         }
-        if (n == 0) break;
+        if (n == 0)
+            break;
         out.append(buf, static_cast<std::size_t>(n));
     }
     return out;
@@ -46,20 +49,28 @@ Error os_error(std::uint16_t site) {
 constexpr std::size_t kJoyMapBytes = map_spec(MapKind::Joystick).bytes;
 
 bool is_psx_core(std::string_view core) noexcept {
-    if (core.size() != 3) return false;
+    if (core.size() != 3)
+        return false;
     static constexpr char kPsx[3] = {'P', 'S', 'X'};
     for (std::size_t i = 0; i < 3; ++i) {
         char c = core[i];
-        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - ('a' - 'A'));
-        if (c != kPsx[i]) return false;
+        if (c >= 'a' && c <= 'z')
+            c = static_cast<char>(c - ('a' - 'A'));
+        if (c != kPsx[i])
+            return false;
     }
     return true;
 }
 
-}  // namespace
+}
 
-InputEnumerator InputEnumerator::create() { return InputEnumerator(); }
-InputEnumerator InputEnumerator::create(const Vfs& storage) { return InputEnumerator(storage); }
+InputEnumerator InputEnumerator::create() {
+    return InputEnumerator();
+}
+
+InputEnumerator InputEnumerator::create(const Vfs& storage) {
+    return InputEnumerator(storage);
+}
 
 DeviceTable InputEnumerator::take_table() noexcept {
     DeviceTable out = std::move(table_);
@@ -78,12 +89,14 @@ Ex<void> InputEnumerator::enumerate() {
     stats_.devices = 0;
 
     DIR* dir = ::opendir(input_dir_.c_str());
-    if (dir == nullptr) return std::unexpected(os_error(ERR_SITE()));
+    if (dir == nullptr)
+        return std::unexpected(os_error(ERR_SITE()));
 
     unsigned seen = 0;
     while (const struct dirent* de = ::readdir(dir)) {
         const std::string_view name(de->d_name);
-        if (!name.starts_with("event") && !name.starts_with("mouse")) continue;
+        if (!name.starts_with("event") && !name.starts_with("mouse"))
+            continue;
         ++seen;
         if (table_.devices.size() >= kMaxDevices) {
 
@@ -94,12 +107,14 @@ Ex<void> InputEnumerator::enumerate() {
         path.push_back('/');
         path.append(name);
         auto dev = InputDevice::open(path);
-        if (!dev) continue;
+        if (!dev)
+            continue;
         (void)admit_and_adopt(std::move(*dev));
     }
     ::closedir(dir);
 
-    if (auto r = resolve_identities(); !r) return r;
+    if (auto r = resolve_identities(); !r)
+        return r;
 
     if (stats_.overflow != 0) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), seen});
@@ -108,8 +123,9 @@ Ex<void> InputEnumerator::enumerate() {
 }
 
 bool InputEnumerator::admit_and_adopt(InputDevice&& dev) {
-    const Admission adm =
-        admit_node(NodeFacts{dev.identity().vid, dev.identity().pid, dev.identity().name});
+    const Admission adm = admit_node(
+        NodeFacts{dev.identity().vid, dev.identity().pid, dev.identity().name}
+    );
     if (!adm.accept) {
         ++stats_.rejected;
         return false;
@@ -122,15 +138,12 @@ bool InputEnumerator::admit_and_adopt(InputDevice&& dev) {
 Ex<void> InputEnumerator::resolve_identities() {
 
     std::vector<InputDevice>& devices = table_.devices;
-    std::vector<rules::DeviceSlot> slots(devices.size());
-    for (std::size_t i = 0; i < devices.size(); ++i) {
-        slots[i].devname = devices[i].devnode();
-        slots[i].mouse = devices[i].is_mouse();
-        slots[i].uniq = devices[i].uniq();
-        slots[i].id = devices[i].identity();
+    std::vector<DeviceFacts*> slots;
+    slots.reserve(devices.size());
+    for (InputDevice& d : devices) {
 
-        slots[i].quirk = devices[i].quirk();
-        rules::derive_idstr(slots[i]);
+        rules::derive_idstr(d.facts());
+        slots.push_back(&d.facts());
     }
 
     std::string proc;
@@ -144,11 +157,8 @@ Ex<void> InputEnumerator::resolve_identities() {
     stats_.mouse_fixups = st.mouse_fixups;
     stats_.empty_id_skips = st.empty_id_skips;
 
-    for (std::size_t i = 0; i < devices.size(); ++i) {
-        devices[i].identity() = slots[i].id;
-        devices[i].identity().unique_filenames = rules::wants_unique_mapping(slots[i].id, unique);
-        devices[i].set_quirk(slots[i].quirk);
-        devices[i].set_bt_facts(slots[i].mac, slots[i].sysfs);
+    for (InputDevice& d : devices) {
+        d.identity().unique_filenames = rules::wants_unique_mapping(d.identity(), unique);
     }
     stats_.devices = static_cast<unsigned>(devices.size());
     apply_deadzones();
@@ -158,14 +168,26 @@ Ex<void> InputEnumerator::resolve_identities() {
 void InputEnumerator::apply_deadzones() noexcept {
     for (InputDevice& d : table_.devices) {
         const DeviceIdentity& id = d.identity();
-        d.set_deadzone(rules::deadzone_for(d.quirk(), id.vid, id.pid, id.id, d.sysfs(), id.merge_id,
-                                           cfg_deadzone_));
+        d.set_deadzone(
+            rules::deadzone_for(
+                d.quirk(),
+                id.vid,
+                id.pid,
+                id.id,
+                d.sysfs(),
+                id.merge_id,
+                cfg_deadzone_
+            )
+        );
     }
 }
 
-Ex<void> InputEnumerator::load_maps_for(std::string_view core_in, bool front_end,
-                                        infra::OptRef<const IAnalogReshape> reshape,
-                                        const JoyPlan& joy) {
+Ex<void> InputEnumerator::load_maps_for(
+    std::string_view core_in,
+    bool front_end,
+    infra::OptRef<const IAnalogReshape> reshape,
+    const JoyPlan& joy
+) {
 
     const std::string_view core = front_end ? std::string_view{} : core_in;
 
@@ -185,7 +207,8 @@ Ex<void> InputEnumerator::load_maps_for(std::string_view core_in, bool front_end
             sys_file = std::move(*m);
             sys = &sys_file;
         }
-        if (const auto w = sys->words()) d.install_sys_map(*w);
+        if (const auto w = sys->words())
+            d.install_sys_map(*w);
 
         d.set_reshape(reshape);
 
@@ -207,8 +230,10 @@ Ex<void> InputEnumerator::load_maps_for(std::string_view core_in, bool front_end
             }
         }
 
-        if (const auto w = wire->words()) d.install_joy_map(*w);
-        if (d.has_nonzero_joy_map()) ++mapped;
+        if (const auto w = wire->words())
+            d.install_joy_map(*w);
+        if (d.has_nonzero_joy_map())
+            ++mapped;
     }
     table_.mapped = mapped;
     reshape_ = reshape;
@@ -219,7 +244,8 @@ Ex<void> InputEnumerator::load_maps_for(std::string_view core_in, bool front_end
 Ex<void> InputEnumerator::adopt(InputDevice&& dev) {
     if (table_.devices.size() >= kMaxDevices) {
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(table_.devices.size())});
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(table_.devices.size())}
+        );
     }
     table_.devices.push_back(std::move(dev));
     stats_.devices = static_cast<unsigned>(table_.devices.size());
@@ -244,4 +270,4 @@ void InputEnumerator::set_unique_mapping(std::span<const std::uint32_t> rows) {
     unique_rows_.assign(rows.begin(), rows.end());
 }
 
-}  // namespace mister::svc
+}

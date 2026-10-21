@@ -15,4 +15,4 @@ protected:
     ISectorKick& operator=(const ISectorKick&) = default;
 };
 
-}  // namespace mister::cores
+}

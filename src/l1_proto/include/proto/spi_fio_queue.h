@@ -51,18 +51,25 @@ public:
         std::uint32_t resets = 0;
     };
 
-    explicit SpiFioQueue(hal::ISpiTransport& link,
-                         std::uint32_t piece_words = kPieceWords) noexcept;
+    explicit SpiFioQueue(
+        hal::ISpiTransport& link,
+        std::uint32_t piece_words = kPieceWords
+    ) noexcept;
     SpiFioQueue(const SpiFioQueue&) = delete;
     SpiFioQueue& operator=(const SpiFioQueue&) = delete;
 
-    [[nodiscard]] static constexpr std::size_t windows_for(std::size_t bytes,
-                                                           std::size_t piece_bytes) noexcept {
+    [[nodiscard]] static constexpr std::size_t windows_for(
+        std::size_t bytes,
+        std::size_t piece_bytes
+    ) noexcept {
         return 3u + (bytes == 0 ? 1u : (bytes + piece_bytes - 1u) / piece_bytes);
     }
 
-    [[nodiscard]] bool fits(std::size_t windows, std::size_t bytes,
-                            std::size_t brackets) const noexcept;
+    [[nodiscard]] bool fits(
+        std::size_t windows,
+        std::size_t bytes,
+        std::size_t brackets
+    ) const noexcept;
 
     [[nodiscard]] std::size_t bracket_windows(std::size_t bytes) const noexcept;
 
@@ -79,7 +86,9 @@ public:
     void abandon() noexcept;
 
     void hold() noexcept { held_ = true; }
+
     void release() noexcept { held_ = false; }
+
     [[nodiscard]] bool held() const noexcept { return held_; }
 
     void declare_resets(const ResetTerms& terms) noexcept;
@@ -92,10 +101,12 @@ public:
         TASTY_SEAT_BODY(SpiFioQueue);
         return head_ == size_;
     }
+
     [[nodiscard]] Stats stats() const noexcept {
         TASTY_SEAT_BODY(SpiFioQueue);
         return stats_;
     }
+
     [[nodiscard]] std::uint32_t piece_words() const noexcept { return piece_words_; }
 
 private:
@@ -136,7 +147,8 @@ private:
 consteval std::uint32_t tightest_round_budget_words() {
     std::uint32_t words = SpiFioQueue::kUnbudgeted;
     for (const hal::BoardProfile* p : hal::board_table()) {
-        if (!hal::all_measured(p->timing)) continue;
+        if (!hal::all_measured(p->timing))
+            continue;
         const std::uint32_t b = hal::LinkTimingValues::measured(p->timing).round_budget_words;
         words = b < words ? b : words;
     }
@@ -146,7 +158,8 @@ consteval std::uint32_t tightest_round_budget_words() {
 consteval std::uint32_t tightest_load_budget_words() {
     std::uint32_t words = SpiFioQueue::kUnbudgeted;
     for (const hal::BoardProfile* p : hal::board_table()) {
-        if (!hal::all_measured(p->timing)) continue;
+        if (!hal::all_measured(p->timing))
+            continue;
         const std::uint32_t b = hal::LinkTimingValues::measured(p->timing).load_budget_words;
         words = b < words ? b : words;
     }
@@ -156,22 +169,28 @@ consteval std::uint32_t tightest_load_budget_words() {
 consteval bool load_budget_fits_every_board() {
     return hal::every_measured(&hal::BoardProfile::timing, [](const hal::LinkTiming& g) consteval {
         const auto t = hal::LinkTimingValues::measured(g);
-        return t.load_budget_words >= t.round_budget_words &&
-               std::uint64_t{t.load_budget_words} * t.word_ns <= hal::kLoadWireNs;
+        return t.load_budget_words >= t.round_budget_words
+            && std::uint64_t{t.load_budget_words} * t.word_ns <= hal::kLoadWireNs;
     });
 }
-static_assert(load_budget_fits_every_board(),
-              "a load round holds a gameplay round, and its wire stays within about 10 ms");
+
+static_assert(
+    load_budget_fits_every_board(),
+    "a load round holds a gameplay round, and its wire stays within about 10 ms"
+);
 
 consteval bool fio_budget_fits_every_board() {
     return hal::every_measured(&hal::BoardProfile::timing, [](const hal::LinkTiming& g) consteval {
         const auto t = hal::LinkTimingValues::measured(g);
-        return 1 + SpiFioQueue::kPieceWords <= t.round_budget_words &&
-               hal::round_cost_ns(t.word_ns, t.base_round_ns, t.sleep_ns, t.round_budget_words) <
-                   static_cast<std::uint64_t>(reactor::kTickNs);
+        return 1 + SpiFioQueue::kPieceWords <= t.round_budget_words
+            && hal::round_cost_ns(t.word_ns, t.base_round_ns, t.sleep_ns, t.round_budget_words)
+            < static_cast<std::uint64_t>(reactor::kTickNs);
     });
 }
-static_assert(fio_budget_fits_every_board(),
-              "every Data window fits one round, and a budgeted round stays under 1 ms");
 
-}  // namespace mister::proto
+static_assert(
+    fio_budget_fits_every_board(),
+    "every Data window fits one round, and a budgeted round stays under 1 ms"
+);
+
+}

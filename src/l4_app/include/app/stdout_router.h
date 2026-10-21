@@ -24,12 +24,14 @@ public:
     StdoutRouter() noexcept = default;
 
     StdoutRouter(const char* null_path, const char* debug_path) noexcept
-        : null_path_(null_path), debug_path_(debug_path) {}
+        : null_path_(null_path),
+          debug_path_(debug_path) {}
 
     void set_paths(const char* null_path, const char* debug_path) noexcept {
         null_path_ = null_path;
         debug_path_ = debug_path;
     }
+
     ~StdoutRouter();
 
     StdoutRouter(const StdoutRouter&) = delete;
@@ -44,9 +46,11 @@ public:
 private:
     const char* null_path_ = "/dev/null";
     const char* debug_path_ = "/tmp/debug.txt";
+
     struct FileCloser {
         void operator()(std::FILE* f) const noexcept { (void)std::fclose(f); }
     };
+
     using OwnedFile = std::unique_ptr<std::FILE, FileCloser>;
 
     infra::OptRef<std::FILE> orig_{};
@@ -55,4 +59,4 @@ private:
     Sink sink_ = Sink::Original;
 };
 
-}  // namespace mister::app
+}

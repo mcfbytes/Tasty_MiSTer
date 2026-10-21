@@ -16,4 +16,4 @@ void LoadKey::feed(std::span<const std::uint8_t> bytes) noexcept {
     skip_ = 0;
 }
 
-}  // namespace mister::app
+}

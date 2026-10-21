@@ -31,16 +31,21 @@ inline constexpr std::uint32_t kStockDataBound = 0x1F20'0000u;
 inline constexpr std::uint32_t kDataBound = 0x1EA0'0000u;
 
 [[nodiscard]] constexpr std::array<std::uint16_t, 3> set_words(std::uint64_t v) noexcept {
-    return {static_cast<std::uint16_t>(v & 0xFFFFu),
-            static_cast<std::uint16_t>((v >> 16) & 0xFFFFu),
-            static_cast<std::uint16_t>((v >> 32) & 0xFFFFu)};
+    return {
+        static_cast<std::uint16_t>(v & 0xFFFFu),
+        static_cast<std::uint16_t>((v >> 16) & 0xFFFFu),
+        static_cast<std::uint16_t>((v >> 32) & 0xFFFFu)
+    };
 }
+
 [[nodiscard]] constexpr std::array<std::uint16_t, 3> set_enable(bool present) noexcept {
     return set_words((std::uint64_t{present ? 1u : 0u} << 15) | kSetEnable);
 }
+
 [[nodiscard]] constexpr std::array<std::uint16_t, 3> set_track_size(std::uint32_t size) noexcept {
     return set_words((std::uint64_t{size} << 16) | kSetTrackSize);
 }
+
 [[nodiscard]] constexpr std::array<std::uint16_t, 3> set_data_base(std::uint32_t base) noexcept {
     return set_words((std::uint64_t{base} << 16) | kSetDataBase);
 }
@@ -48,8 +53,9 @@ inline constexpr std::uint32_t kDataBound = 0x1EA0'0000u;
 [[nodiscard]] constexpr std::uint64_t window_offset(std::uint64_t file_off) noexcept {
     return file_off < kGapAt ? file_off : file_off + kGapBytes;
 }
+
 [[nodiscard]] constexpr std::uint32_t data_extent(std::uint32_t size) noexcept {
     return size > kGapAt ? size + kGapBytes : size;
 }
 
-}  // namespace mister::cores::msu
+}

@@ -1,34 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/link_binder.h"
 
+#include "app/log_clock.h"
 #include "app/pcm_ring_feeder.h"
 
-#include <ctime>
 #include <optional>
 #include <utility>
 
 #include "cores/core_support.h"
 
 namespace mister::app {
-namespace {
+LinkBinder::LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept
+    : fio_queue_(link),
+      spi_sink_(link, infra::OptRef<proto::SpiFioQueue>{fio_queue_}),
+      feeder_(w.feeder),
+      exec_(w.exec),
+      state_(w.state),
+      notifiers_(w.exec),
+      log_lane_(w.log_lane) {}
 
-std::uint64_t log_now_ns() noexcept {
-    timespec ts{};
-    (void)::clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<std::uint64_t>(ts.tv_sec) * 1'000'000'000ull +
-           static_cast<std::uint64_t>(ts.tv_nsec);
+proto::IImageSink& LinkBinder::grant_bulk() noexcept {
+    return progress_sink_;
 }
 
-}  // namespace
-
-LinkBinder::LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept
-    : fio_queue_(link), spi_sink_(link, &fio_queue_), exec_(w.exec), state_(w.state),
-      notifiers_(w.exec), log_lane_(w.log_lane) {}
-
-proto::IImageSink& LinkBinder::grant_bulk() noexcept { return progress_sink_; }
-
 void LinkBinder::release_feeder() noexcept {
-    if (feeder_granted_ && feeder_) feeder_->detach();
+    if (feeder_granted_ && feeder_)
+        feeder_->detach();
     feeder_granted_ = false;
 }
 
@@ -42,18 +39,24 @@ bool LinkBinder::adopt_fed_ring(hal::FpgaMemory&& ring) noexcept {
     return true;
 }
 
-Ex<void> LinkBinder::bind_census(std::span<const reactor::LinkDecoderDecl> rows,
-                                 cores::Core* owner) {
+Ex<void> LinkBinder::bind_census(
+    std::span<const reactor::LinkDecoderDecl> rows,
+    cores::Core* owner
+) {
 
     const infra::OptRef<reactor::ICoreToken> prev = state_.owner;
     state_.owner = infra::opt_ref_of<reactor::ICoreToken>(rows.empty() ? nullptr : owner);
     auto r = exec_.bind(rows, state_);
-    if (!r) state_.owner = prev;
+    if (!r)
+        state_.owner = prev;
     return r;
 }
 
-void LinkBinder::bind_doorbells_(std::span<const proto::IrqBinding> irqs, std::uint32_t declared,
-                                 const DoorbellLines& lines) noexcept {
+void LinkBinder::bind_doorbells_(
+    std::span<const proto::IrqBinding> irqs,
+    std::uint32_t declared,
+    const DoorbellLines& lines
+) noexcept {
     notifiers_.release();
     doorbells_declared_ = declared;
     bound_classes_ = reactor::CauseSet{};
@@ -67,18 +70,24 @@ void LinkBinder::bind_doorbells_(std::span<const proto::IrqBinding> irqs, std::u
     }
 }
 
-Ex<void> LinkBinder::bind_session(std::span<const reactor::LinkDecoderDecl> rows,
-                                  cores::Core* owner, std::span<const proto::IrqBinding> irqs,
-                                  std::uint32_t declared, const DoorbellLines& lines) {
+Ex<void> LinkBinder::bind_session(
+    std::span<const reactor::LinkDecoderDecl> rows,
+    cores::Core* owner,
+    std::span<const proto::IrqBinding> irqs,
+    std::uint32_t declared,
+    const DoorbellLines& lines
+) {
     for (const LinkRow& row : kLinkRows) {
-        if (row.phase != BindPhase::Bind) continue;
+        if (row.phase != BindPhase::Bind)
+            continue;
         switch (row.kind) {
             case LinkKind::ImageSink:
                 break;
             case LinkKind::CoreWindow:
                 break;
             case LinkKind::CensusRows: {
-                if (auto r = bind_census(rows, owner); !r) return r;
+                if (auto r = bind_census(rows, owner); !r)
+                    return r;
                 break;
             }
             case LinkKind::Doorbells:
@@ -93,33 +102,52 @@ Ex<void> LinkBinder::bind_session(std::span<const reactor::LinkDecoderDecl> rows
     return {};
 }
 
-void LinkBinder::bind_one_doorbell(const proto::IrqBinding& b,
-                                   const DoorbellLines::Line& line) noexcept {
+void LinkBinder::bind_one_doorbell(
+    const proto::IrqBinding& b,
+    const DoorbellLines::Line& line
+) noexcept {
 
-    if (!(line.binding == b)) return fall_back(b, Errc::stale);
+    if (!(line.binding == b))
+        return fall_back(b, Errc::stale);
 
-    if (line.gate) return fall_back(b, *line.gate);
+    if (line.gate)
+        return fall_back(b, *line.gate);
 
-    if (bound_classes_.has(b.klass)) return fall_back(b, Errc::negotiation);
+    if (bound_classes_.has(b.klass))
+        return fall_back(b, Errc::negotiation);
 
-    if (line.why) return fall_back(b, *line.why);
+    if (line.why)
+        return fall_back(b, *line.why);
 
-    auto slot = notifiers_.bind_doorbell(line.handle.borrow(), b.klass,
-                                         infra::opt_ref_of(line.cause ? &*line.cause : nullptr));
-    if (!slot) return fall_back(b, slot.error().code);
+    auto slot = notifiers_.bind_doorbell(
+        line.handle.borrow(),
+        b.klass,
+        line.cause ? infra::OptRef<const hal::RegisterWindow<hal::CauseReg>>{*line.cause}
+                   : infra::OptRef<const hal::RegisterWindow<hal::CauseReg>>{}
+    );
+    if (!slot)
+        return fall_back(b, slot.error().code);
     bound_classes_ |= reactor::CauseSet{b.klass};
-    (void)log_lane_.push(LogRec::DoorbellBound{.cause_base = b.cause_base.v,
-                                               .klass = static_cast<std::uint8_t>(b.klass),
-                                               .line = static_cast<std::uint8_t>(b.line)},
-                         log_now_ns());
+    (void)log_lane_.push(
+        LogRec::DoorbellBound{
+            .cause_base = b.cause_base.v,
+            .klass = static_cast<std::uint8_t>(b.klass),
+            .line = static_cast<std::uint8_t>(b.line)
+        },
+        log_now_ns()
+    );
 }
 
 void LinkBinder::fall_back(const proto::IrqBinding& b, Errc why) noexcept {
     ++fallbacks_;
-    (void)log_lane_.push(LogRec::DoorbellPolling{.why = why,
-                                                 .klass = static_cast<std::uint8_t>(b.klass),
-                                                 .line = static_cast<std::uint8_t>(b.line)},
-                         log_now_ns());
+    (void)log_lane_.push(
+        LogRec::DoorbellPolling{
+            .why = why,
+            .klass = static_cast<std::uint8_t>(b.klass),
+            .line = static_cast<std::uint8_t>(b.line)
+        },
+        log_now_ns()
+    );
 }
 
 DoorbellStats LinkBinder::doorbell_stats() const noexcept {
@@ -135,9 +163,11 @@ DoorbellStats LinkBinder::doorbell_stats() const noexcept {
 
 bool LinkBinder::bridge_windows_live() const noexcept {
 
-    if (notifiers_.size() != 0) return true;
+    if (notifiers_.size() != 0)
+        return true;
 
-    if (feeder_ && feeder_->attached()) return true;
+    if (feeder_ && feeder_->attached())
+        return true;
     return feeder_granted_;
 }
 
@@ -149,4 +179,4 @@ Ex<void> LinkBinder::unbind_session() {
     return r;
 }
 
-}  // namespace mister::app
+}

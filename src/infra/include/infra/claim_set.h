@@ -33,7 +33,9 @@ public:
 
     public:
         Claim() noexcept = default;
+
         Claim(Claim&& o) noexcept : set_(std::exchange(o.set_, nullptr)), id_(o.id_) {}
+
         Claim& operator=(Claim&& o) noexcept {
             if (this != &o) {
                 reset();
@@ -42,19 +44,24 @@ public:
             }
             return *this;
         }
+
         Claim(const Claim&) = delete;
         Claim& operator=(const Claim&) = delete;
+
         ~Claim() { reset(); }
 
         [[nodiscard]] explicit operator bool() const noexcept { return set_ != nullptr; }
+
         [[nodiscard]] Id id() const noexcept { return id_; }
 
         void reset() noexcept {
-            if (set_ != nullptr) std::exchange(set_, nullptr)->give_back_(id_);
+            if (set_ != nullptr)
+                std::exchange(set_, nullptr)->give_back_(id_);
         }
 
     private:
         friend class ClaimSet;
+
         Claim(ClaimSet* set, Id id) noexcept : set_(set), id_(id) {}
 
         ClaimSet* set_ = nullptr;
@@ -77,7 +84,8 @@ public:
         if (i >= N) {
             refused_.fetch_add(1, std::memory_order_relaxed);
             return std::unexpected(
-                Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(i)});
+                Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(i)}
+            );
         }
         const std::uint64_t bit = std::uint64_t{1} << i;
         std::uint64_t held = held_.load(std::memory_order_relaxed);
@@ -85,10 +93,15 @@ public:
             if ((held & bit) != 0u) {
                 refused_.fetch_add(1, std::memory_order_relaxed);
                 return std::unexpected(
-                    Error{Errc::busy, ERR_SITE(), static_cast<std::uint32_t>(i)});
+                    Error{Errc::busy, ERR_SITE(), static_cast<std::uint32_t>(i)}
+                );
             }
-            if (held_.compare_exchange_weak(held, held | bit, std::memory_order_acquire,
-                                            std::memory_order_relaxed))
+            if (held_.compare_exchange_weak(
+                    held,
+                    held | bit,
+                    std::memory_order_acquire,
+                    std::memory_order_relaxed
+                ))
                 break;
         }
         const std::uint32_t n = held_n_.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -103,20 +116,27 @@ public:
         const auto i = static_cast<std::size_t>(id);
         return i < N && (held_.load(std::memory_order_relaxed) & (std::uint64_t{1} << i)) != 0u;
     }
+
     [[nodiscard]] std::size_t held_count() const noexcept {
         return held_n_.load(std::memory_order_relaxed);
     }
+
     [[nodiscard]] ClaimSetCounts counts() const noexcept {
         return ClaimSetCounts{
-            claimed_.load(std::memory_order_relaxed), refused_.load(std::memory_order_relaxed),
-            returned_.load(std::memory_order_relaxed), high_water_.load(std::memory_order_relaxed)};
+            claimed_.load(std::memory_order_relaxed),
+            refused_.load(std::memory_order_relaxed),
+            returned_.load(std::memory_order_relaxed),
+            high_water_.load(std::memory_order_relaxed)
+        };
     }
+
     static constexpr std::size_t capacity() noexcept { return N; }
 
 private:
     void give_back_(Id id) noexcept {
         const std::uint64_t bit = std::uint64_t{1} << static_cast<std::size_t>(id);
-        if ((held_.fetch_and(~bit, std::memory_order_release) & bit) == 0u) return;
+        if ((held_.fetch_and(~bit, std::memory_order_release) & bit) == 0u)
+            return;
         held_n_.fetch_sub(1, std::memory_order_relaxed);
         returned_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -129,4 +149,4 @@ private:
     std::atomic<std::uint32_t> high_water_{0};
 };
 
-}  // namespace mister::infra
+}

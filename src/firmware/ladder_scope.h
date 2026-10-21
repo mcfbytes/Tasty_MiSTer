@@ -23,9 +23,13 @@ class LadderScope final : public app::IRtPriorityScope {
 public:
     static constexpr SeatTag kSeat = SeatTag::RT;
 
-    explicit LadderScope(std::atomic<bool>& transitioning,
-                         infra::OptRef<reactor::RoundTimer> timer = {}) noexcept
-        : transitioning_(transitioning), timer_(timer) {}
+    explicit LadderScope(
+        std::atomic<bool>& transitioning,
+        infra::OptRef<reactor::RoundTimer> timer = {}
+    ) noexcept
+        : transitioning_(transitioning),
+          timer_(timer) {}
+
     LadderScope(const LadderScope&) = delete;
     LadderScope& operator=(const LadderScope&) = delete;
 
@@ -40,12 +44,14 @@ private:
     std::atomic<std::uint32_t> restore_failures_{0};
 };
 
-static_assert(hal::every_thread_map([](const hal::ThreadMap& m) {
-                  return hal::seat_of(m, LadderScope::kSeat).policy == hal::SchedPolicy::Fifo;
-              }),
-              "item: this class exists to DEMOTE its seat for the duration "
-              "of a blocking ladder rung (arch §2's one named exception). "
-              "Point kSeat at a SCHED_OTHER row and relax()/restore() become "
-              "a pair of no-ops around work that never needed bracketing.");
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) {
+        return hal::seat_of(m, LadderScope::kSeat).policy == hal::SchedPolicy::Fifo;
+    }),
+    "item: this class exists to DEMOTE its seat for the duration "
+    "of a blocking ladder rung (arch §2's one named exception). "
+    "Point kSeat at a SCHED_OTHER row and relax()/restore() become "
+    "a pair of no-ops around work that never needed bracketing."
+);
 
-}  // namespace mister::fw
+}

@@ -24,4 +24,4 @@ struct Ipv4If {
 
 NetPresence net_presence_from_list(std::span<const Ipv4If> ifs) noexcept;
 
-}  // namespace mister::os
+}

@@ -12,4 +12,4 @@ namespace mister::os {
 
 [[nodiscard]] Ex<void> run_detached(std::span<const char* const> argv);
 
-}  // namespace mister::os
+}

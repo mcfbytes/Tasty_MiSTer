@@ -17,7 +17,8 @@ void PollReader::arm(bool declared, BindGeneration gen) noexcept {
     if (keeps_mirror(row)) {
 
         for (std::uint8_t p = 0; p < row.params; ++p) {
-            if (mirror_[p] != 0 && push_(row.shape, p, 0)) mirror_[p] = 0;
+            if (mirror_[p] != 0 && push_(row.shape, p, 0))
+                mirror_[p] = 0;
         }
     }
     armed_ = declared;
@@ -27,13 +28,15 @@ void PollReader::arm(bool declared, BindGeneration gen) noexcept {
 void PollReader::service() noexcept {
     TASTY_SEAT_BODY(PollReader);
     const PollShapeRow& row = poll_row(shape_);
-    if (row.cadence == Cadence::Census) issue_(row);
+    if (row.cadence == Cadence::Census)
+        issue_(row);
 }
 
 void PollReader::start_beat() noexcept {
     TASTY_SEAT_BODY(PollReader);
     const PollShapeRow& row = poll_row(shape_);
-    if (row.cadence == Cadence::SessionStart) issue_(row);
+    if (row.cadence == Cadence::SessionStart)
+        issue_(row);
 }
 
 void PollReader::issue_(const PollShapeRow& row) noexcept {
@@ -59,14 +62,17 @@ void PollReader::beat_(const PollShapeRow& row, std::uint8_t param) noexcept {
         }
         word = r->v;
     }
-    if (!guard_passes(row, word, mirror_[param])) return;
+    if (!guard_passes(row, word, mirror_[param]))
+        return;
 
-    if (push_(row.shape, param, word) && keeps_mirror(row)) mirror_[param] = word;
+    if (push_(row.shape, param, word) && keeps_mirror(row))
+        mirror_[param] = word;
 }
 
 bool PollReader::push_(PollShape shape, std::uint8_t param, std::uint16_t word) noexcept {
-    if (!out_.push(LinkEvent::PolledWord{
-            .shape = shape, .param = param, .word = word, .bind_gen = gen_})) {
+    if (!out_.push(
+            LinkEvent::PolledWord{.shape = shape, .param = param, .word = word, .bind_gen = gen_}
+        )) {
         ++declined_;
         return false;
     }
@@ -74,4 +80,4 @@ bool PollReader::push_(PollShape shape, std::uint8_t param, std::uint16_t word) 
     return true;
 }
 
-}  // namespace mister::proto::user_io
+}

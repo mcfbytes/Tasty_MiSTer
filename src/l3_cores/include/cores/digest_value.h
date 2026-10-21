@@ -31,7 +31,9 @@ struct DigestValue {
     return 0;
 }
 
-[[nodiscard]] std::optional<DigestValue> parse_hex_digest(std::string_view hex,
-                                                          DigestKind kind) noexcept;
+[[nodiscard]] std::optional<DigestValue> parse_hex_digest(
+    std::string_view hex,
+    DigestKind kind
+) noexcept;
 
-}  // namespace mister::cores
+}

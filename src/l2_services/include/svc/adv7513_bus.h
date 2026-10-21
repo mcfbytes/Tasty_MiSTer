@@ -41,10 +41,14 @@ SpdPacket build_standard_spd(std::string_view core_name);
 constexpr std::uint32_t reg_errno_detail(std::uint8_t reg, std::uint32_t err) noexcept {
     return static_cast<std::uint32_t>(reg) | (err << 8);
 }
+
 constexpr std::uint8_t detail_reg(std::uint32_t d) noexcept {
     return static_cast<std::uint8_t>(d & 0xFFu);
 }
-constexpr std::uint32_t detail_errno(std::uint32_t d) noexcept { return d >> 8; }
+
+constexpr std::uint32_t detail_errno(std::uint32_t d) noexcept {
+    return d >> 8;
+}
 
 class Adv7513Bus {
     TASTY_SEAT_RESIDENT(Ui);
@@ -56,8 +60,11 @@ public:
 
     Adv7513Bus& operator=(Adv7513Bus&&) = delete;
 
-    [[nodiscard]] static Ex<Adv7513Bus> attach(II2cAdapter& a, const hal::VideoOutDecl& board,
-                                               ProbeReport& out);
+    [[nodiscard]] static Ex<Adv7513Bus> attach(
+        II2cAdapter& a,
+        const hal::VideoOutDecl& board,
+        ProbeReport& out
+    );
 
     [[nodiscard]] Ex<void> configure(const InitOptions& o);
 
@@ -71,8 +78,12 @@ public:
 
     [[nodiscard]] Ex<void> set_mode(const Modeline& m, bool direct_video_menu);
 
-    [[nodiscard]] Ex<void> set_packet(std::uint8_t mask, std::uint8_t offset,
-                                      const std::uint8_t* data, std::size_t n);
+    [[nodiscard]] Ex<void> set_packet(
+        std::uint8_t mask,
+        std::uint8_t offset,
+        const std::uint8_t* data,
+        std::size_t n
+    );
 
     [[nodiscard]] Ex<void> spd_config(const SpdPacket& p);
     [[nodiscard]] Ex<void> spd_disable();
@@ -81,15 +92,19 @@ public:
         std::uint8_t r41 = 0, r17 = 0, r3b = 0, r3c = 0;
         bool matched = false;
     };
+
     [[nodiscard]] Ex<Verify> verify(const Modeline& m, bool direct_video_menu);
 
     unsigned bus() const noexcept { return bus_; }
+
     std::uint32_t writes() const noexcept { return writes_; }
+
     std::uint32_t errors() const noexcept { return errors_; }
 
     std::uint8_t fail_reg() const noexcept { return fail_reg_; }
 
     std::uint8_t spd_fail_reg() const noexcept { return spd_fail_reg_; }
+
     bool mode_cached() const noexcept { return last_vic_ != 0xFFu; }
 
 private:
@@ -110,4 +125,4 @@ private:
     std::uint8_t spd_fail_reg_ = 0;
 };
 
-}  // namespace mister::svc::adv7513
+}

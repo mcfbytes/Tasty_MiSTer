@@ -14,14 +14,17 @@ class DecoderRow final : public reactor::ILinkDecoder {
 
 public:
     explicit constexpr DecoderRow(D& d) noexcept : d_(&d) {}
+
     void service(reactor::CoreState&) const override {
         TASTY_SEAT_BODY(DecoderRow);
         d_->service();
     }
+
     constexpr bool active() const override {
         TASTY_SEAT_BODY(DecoderRow);
         return d_->active();
     }
+
     std::uint32_t osd_claims() const override {
         TASTY_SEAT_BODY(DecoderRow);
         if constexpr (requires { d_->osd_claims(); }) {
@@ -35,4 +38,4 @@ private:
     D* d_;
 };
 
-}  // namespace mister::proto
+}

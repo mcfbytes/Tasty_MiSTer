@@ -9,8 +9,9 @@ void FrameMain::start() noexcept {
 }
 
 void FrameMain::serve() noexcept {
-    if (stopping()) return;
+    if (stopping())
+        return;
     clock_.wait_vsync();
 }
 
-}  // namespace mister::reactor
+}

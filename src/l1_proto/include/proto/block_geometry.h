@@ -18,4 +18,4 @@ struct BlockGeometry {
     std::uint32_t window_blocks = 0;
 };
 
-}  // namespace mister::proto
+}

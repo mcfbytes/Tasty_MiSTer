@@ -16,4 +16,4 @@ struct Tag {
     std::uint8_t attrs_dropped = 0;
 };
 
-}  // namespace mister::svc::xml
+}

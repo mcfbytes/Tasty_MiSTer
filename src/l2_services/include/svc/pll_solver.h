@@ -25,6 +25,6 @@ std::optional<PllParams> solve(double f_out_mhz);
 
 double fpix_mhz(double f_out_mhz);
 
-}  // namespace pll
+}
 
-}  // namespace mister::svc
+}

@@ -15,7 +15,8 @@ struct UioBurst {
     bool ok = true;
     std::array<std::uint16_t, kMaxWords> words{};
 };
+
 static_assert(std::is_trivially_copyable_v<UioBurst>);
 static_assert(sizeof(UioBurst) <= 32, "half a cache line: the ask and its answer are one shape");
 
-}  // namespace mister::app
+}

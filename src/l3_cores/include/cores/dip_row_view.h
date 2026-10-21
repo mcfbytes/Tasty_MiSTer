@@ -12,4 +12,4 @@ struct DipRowView {
     std::uint8_t current = 0;
 };
 
-}  // namespace mister::cores
+}

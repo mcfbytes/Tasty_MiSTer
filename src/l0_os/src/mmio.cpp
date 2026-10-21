@@ -28,7 +28,8 @@ struct DevMem {
 
     DevMem() {
         fd = ::open("/dev/mem", kDevMemFlags);
-        if (fd < 0) open_errno = static_cast<std::uint32_t>(errno);
+        if (fd < 0)
+            open_errno = static_cast<std::uint32_t>(errno);
     }
 };
 
@@ -46,7 +47,8 @@ std::size_t page_size() {
 constexpr unsigned kMaxUioNodes = 64;
 
 [[nodiscard]] Ex<void> read_uio_name(const char* root, unsigned idx, std::span<char> out) {
-    if (out.empty()) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    if (out.empty())
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     char path[128];
     const int n = std::snprintf(path, sizeof path, "%s/uio%u/name", root, idx);
     if (n <= 0 || static_cast<std::size_t>(n) >= sizeof path) {
@@ -54,7 +56,8 @@ constexpr unsigned kMaxUioNodes = 64;
     }
 
     const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    if (fd < 0)
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     const ssize_t got = ::read(fd, out.data(), out.size() - 1);
     ::close(fd);
     if (got <= 0) {
@@ -68,18 +71,21 @@ constexpr unsigned kMaxUioNodes = 64;
     return {};
 }
 
-}  // namespace
+}
 
 int find_uio_node_under(const char* sysfs_root, std::string_view name) noexcept {
-    if (name.empty() || name.size() >= 48) return -1;
+    if (name.empty() || name.size() >= 48)
+        return -1;
     char want[48];
     std::memcpy(want, name.data(), name.size());
     want[name.size()] = '\0';
 
     for (unsigned i = 0; i < kMaxUioNodes; ++i) {
         char have[48];
-        if (!read_uio_name(sysfs_root, i, std::span(have))) continue;
-        if (std::string_view{have} == want) return static_cast<int>(i);
+        if (!read_uio_name(sysfs_root, i, std::span(have)))
+            continue;
+        if (std::string_view{have} == want)
+            return static_cast<int>(i);
     }
     return -1;
 }
@@ -92,13 +98,20 @@ namespace {
 
 int find_doorbell_uio_node(std::string_view prefix, unsigned line) {
     char want[48];
-    const int n = std::snprintf(want, sizeof want, "%.*s%u", static_cast<int>(prefix.size()),
-                                prefix.data(), line + 1);
-    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof want) return -1;
+    const int n = std::snprintf(
+        want,
+        sizeof want,
+        "%.*s%u",
+        static_cast<int>(prefix.size()),
+        prefix.data(),
+        line + 1
+    );
+    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof want)
+        return -1;
     return find_uio_node_under(kUioClassRoot, want);
 }
 
-}  // namespace
+}
 
 MmioRegion::~MmioRegion() {
     if (base_ != nullptr) {
@@ -108,12 +121,14 @@ MmioRegion::~MmioRegion() {
 }
 
 MmioRegion::MmioRegion(MmioRegion&& o) noexcept
-    : base_(std::exchange(o.base_, nullptr)), len_(std::exchange(o.len_, 0)),
+    : base_(std::exchange(o.base_, nullptr)),
+      len_(std::exchange(o.len_, 0)),
       access_(std::exchange(o.access_, Access::ReadWrite)) {}
 
 MmioRegion& MmioRegion::operator=(MmioRegion&& o) noexcept {
     if (this != &o) {
-        if (base_ != nullptr) ::munmap(const_cast<void*>(base_), len_);
+        if (base_ != nullptr)
+            ::munmap(const_cast<void*>(base_), len_);
         base_ = std::exchange(o.base_, nullptr);
         len_ = std::exchange(o.len_, 0);
         access_ = std::exchange(o.access_, Access::ReadWrite);
@@ -145,7 +160,8 @@ Ex<MmioRegion> MmioRegion::map_fd(int fd, PhysAddr offset, std::size_t len, Acce
     void* p = ::mmap(nullptr, len, prot, MAP_SHARED, fd, static_cast<off_t>(offset.v));
     if (p == MAP_FAILED) {
         return std::unexpected(
-            Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+            Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(errno)}
+        );
     }
 
     MmioRegion r;
@@ -177,7 +193,8 @@ Ex<UioHandle> UioHandle::open(UioLine line, const UioLineSpace& space) {
     const int fd = ::open(path, O_RDWR | O_CLOEXEC | O_NONBLOCK);
     if (fd < 0) {
         return std::unexpected(
-            Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+            Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(errno)}
+        );
     }
     return adopt(line, UniqueFd{fd});
 }
@@ -204,8 +221,13 @@ Ex<std::uint32_t> UioLineRef::consume() const {
     if (n < 0) {
         const int e = errno;
 
-        return std::unexpected(Error{e == EAGAIN ? Errc::would_block : Errc::io, ERR_SITE(),
-                                     static_cast<std::uint32_t>(e)});
+        return std::unexpected(
+            Error{
+                e == EAGAIN ? Errc::would_block : Errc::io,
+                ERR_SITE(),
+                static_cast<std::uint32_t>(e)
+            }
+        );
     }
     if (n != static_cast<ssize_t>(sizeof count)) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(n)});
@@ -225,4 +247,4 @@ Ex<void> UioLineRef::rearm() const {
     return {};
 }
 
-}  // namespace mister::os
+}

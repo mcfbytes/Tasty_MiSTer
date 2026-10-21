@@ -31,4 +31,4 @@ constexpr void to_json(infra::JsonOut& o, const RecWriteStatus& w) noexcept {
 
 using RecWriteStatusCell = xthread::Telemetry<RecWriteStatus, SeatTag::RecWrite>;
 
-}  // namespace mister::app
+}

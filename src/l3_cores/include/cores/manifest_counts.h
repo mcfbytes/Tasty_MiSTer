@@ -14,4 +14,4 @@ struct ManifestCounts {
     std::uint32_t nvram_loads = 0;
 };
 
-}  // namespace mister::cores
+}

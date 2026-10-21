@@ -4,8 +4,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 #include "infra/error.h"
 #include "svc/file.h"
@@ -18,14 +20,25 @@ struct StreamFile {
     std::uint64_t size = 0;
 };
 
-[[nodiscard]] Ex<StreamFile> stream_open(const svc::Vfs& vfs, std::string_view rel,
-                                         svc::OpenMode mode = svc::OpenMode::Read);
+[[nodiscard]] Ex<StreamFile> stream_open(
+    const svc::Vfs& vfs,
+    std::string_view rel,
+    svc::OpenMode mode = svc::OpenMode::Read
+);
 
 [[nodiscard]] Ex<void> stream_read(svc::IFile& f, std::uint64_t off, std::span<std::byte> dst);
 
-[[nodiscard]] Ex<void> stream_write(svc::IFile& f, std::uint64_t off,
-                                    std::span<const std::byte> src);
+[[nodiscard]] Ex<void> stream_write(
+    svc::IFile& f,
+    std::uint64_t off,
+    std::span<const std::byte> src
+);
 
 [[nodiscard]] Ex<void> stream_sync(svc::IFile& f);
 
-}  // namespace mister::app
+[[nodiscard]] std::optional<std::vector<std::uint8_t>> read_whole(
+    svc::IFile& f,
+    std::uint64_t size
+);
+
+}

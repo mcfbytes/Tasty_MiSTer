@@ -16,4 +16,4 @@ struct CoreCapabilities {
     std::uint8_t free_caps = 0;
 };
 
-}  // namespace mister::hal
+}

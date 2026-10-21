@@ -6,20 +6,25 @@
 namespace mister::svc {
 
 IoMain::IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker) noexcept
-    : wake_(fds.wake()), pause_(wake_, asker ? &*asker : nullptr),
-      stop_(std::move(fds).take_stop()), park_(wake_, stop_) {}
+    : wake_(fds.wake()),
+      pause_(wake_, asker ? &*asker : nullptr),
+      stop_(std::move(fds).take_stop()),
+      park_(wake_, stop_) {}
 
 bool IoMain::add_coworker(IIoCoworker* c) noexcept {
-    if (c == nullptr || n_coworkers_ >= kMaxCoworkers) return false;
+    if (c == nullptr || n_coworkers_ >= kMaxCoworkers)
+        return false;
     for (std::uint8_t i = 0; i < n_coworkers_; ++i)
-        if (coworkers_[i] == c) return false;
+        if (coworkers_[i] == c)
+            return false;
     coworkers_[n_coworkers_++] = c;
     return true;
 }
 
 void IoMain::remove_coworker(IIoCoworker* c) noexcept {
     for (std::uint8_t i = 0; i < n_coworkers_; ++i) {
-        if (coworkers_[i] != c) continue;
+        if (coworkers_[i] != c)
+            continue;
         coworkers_[i] = coworkers_[--n_coworkers_];
         coworkers_[n_coworkers_] = nullptr;
         return;
@@ -48,8 +53,9 @@ void IoMain::on_resume() noexcept {
 
 bool IoMain::idle() const noexcept {
     for (std::uint8_t i = 0; i < n_coworkers_; ++i)
-        if (!coworkers_[i]->idle()) return false;
+        if (!coworkers_[i]->idle())
+            return false;
     return true;
 }
 
-}  // namespace mister::svc
+}

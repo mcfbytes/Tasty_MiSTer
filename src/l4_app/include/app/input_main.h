@@ -21,33 +21,49 @@ class InputMain final : public xthread::SeatMain<InputMain> {
 public:
     static constexpr int kInputPollMs = 50;
 
-    InputMain(InputDecode& decode, xthread::ParkFds fds,
-              infra::OptRef<xthread::WakeFlag> asker = {}) noexcept
-        : decode_(decode), pause_wake_(fds.wake()), stop_(std::move(fds).take_stop()),
-          pause_(pause_wake_, asker ? &*asker : nullptr), park_(decode, pause_wake_) {}
+    InputMain(
+        InputDecode& decode,
+        xthread::ParkFds fds,
+        infra::OptRef<xthread::WakeFlag> asker = {}
+    ) noexcept
+        : decode_(decode),
+          pause_wake_(fds.wake()),
+          stop_(std::move(fds).take_stop()),
+          pause_(pause_wake_, asker ? &*asker : nullptr),
+          park_(decode, pause_wake_) {}
+
     InputMain(const InputMain&) = delete;
     InputMain& operator=(const InputMain&) = delete;
     InputMain(InputMain&&) = delete;
     InputMain& operator=(InputMain&&) = delete;
 
     void start() noexcept;
+
     void stop() noexcept { stop_.request(); }
 
     void serve() noexcept;
+
     [[nodiscard]] bool idle() const noexcept { return true; }
+
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
+
     [[nodiscard]] int park_ms() const noexcept { return kInputPollMs; }
+
     [[nodiscard]] InputPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept {
         (void)pause_.observe(pause_seen_, *this);
         return false;
     }
+
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
+
     void settle() noexcept {}
 
     void on_pause() noexcept;
+
     void on_resume() noexcept { decode_.mute(false); }
+
     [[nodiscard]] bool quiescent() const noexcept { return true; }
 
     [[nodiscard]] xthread::PauseLatch& pause_latch() noexcept { return pause_; }
@@ -66,4 +82,4 @@ private:
 
 static_assert(xthread::SeatBody<InputMain>);
 
-}  // namespace mister::app
+}

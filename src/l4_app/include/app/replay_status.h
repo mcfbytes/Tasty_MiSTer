@@ -71,8 +71,17 @@ struct ReplayStatus {
 };
 
 inline constexpr std::array<const char*, static_cast<std::size_t>(ReplayEnd::kCount)>
-    kReplayEndNames{"none",     "finished", "stopped", "superseded", "switch",
-                    "ref_lost", "no_ref",   "epoch",   "refused"};
+    kReplayEndNames{
+        "none",
+        "finished",
+        "stopped",
+        "superseded",
+        "switch",
+        "ref_lost",
+        "no_ref",
+        "epoch",
+        "refused"
+};
 static_assert(infra::json_clean_names(kReplayEndNames), "a name is rendered unescaped");
 
 [[nodiscard]] constexpr const char* replay_end_name(ReplayEnd e) noexcept {
@@ -120,11 +129,15 @@ constexpr void to_json(infra::JsonOut& o, const ReplayStatus& s) noexcept {
 using ReplayStatusCell = xthread::Telemetry<ReplayStatus, SeatTag::RT>;
 
 using ReplayStatusText = FixedStr<832, StrFit::Clip>;
-static_assert(infra::json_worst_len<ReplayStatus>() <= ReplayStatusText::kCapacity,
-              "the status text never clips");
+static_assert(
+    infra::json_worst_len<ReplayStatus>() <= ReplayStatusText::kCapacity,
+    "the status text never clips"
+);
 [[nodiscard]] ReplayStatusText format_replay_status(const ReplayStatus& s) noexcept;
 
-[[nodiscard]] const char* replay_end_sentence(ReplayEnd e,
-                                              EpochFail fail = EpochFail::None) noexcept;
+[[nodiscard]] const char* replay_end_sentence(
+    ReplayEnd e,
+    EpochFail fail = EpochFail::None
+) noexcept;
 
-}  // namespace mister::app
+}

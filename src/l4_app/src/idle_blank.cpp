@@ -4,16 +4,21 @@
 namespace mister::app {
 
 void IdleBlank::set_timeout_minutes(std::uint16_t m) noexcept {
-    if (m == minutes_) return;
+    if (m == minutes_)
+        return;
     minutes_ = m;
     armed_ = false;
 }
 
-std::optional<bool> IdleBlank::tick(std::int64_t now_ns, std::uint32_t activity,
-                                    bool grabbed) noexcept {
+std::optional<bool> IdleBlank::tick(
+    std::int64_t now_ns,
+    std::uint32_t activity,
+    bool grabbed
+) noexcept {
     if (minutes_ == 0) {
 
-        if (!blanked_) return std::nullopt;
+        if (!blanked_)
+            return std::nullopt;
         blanked_ = false;
         armed_ = false;
         ++wakes_;
@@ -43,4 +48,4 @@ std::optional<bool> IdleBlank::tick(std::int64_t now_ns, std::uint32_t activity,
     return std::nullopt;
 }
 
-}  // namespace mister::app
+}

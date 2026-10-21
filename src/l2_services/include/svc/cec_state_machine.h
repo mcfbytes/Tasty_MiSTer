@@ -30,16 +30,21 @@ class CecStateMachine {
 
 public:
     [[nodiscard]] Ex<void> poll_deadline();
+
     std::uint32_t max_rx_depth_seen() const noexcept { return max_rx_depth_; }
 
     explicit CecStateMachine(const adv7513::Io& io = adv7513::kUnboundIo) noexcept : io_(io) {}
+
     explicit CecStateMachine(const adv7513::Io&&) = delete;
+
     CecState state() const noexcept { return state_; }
+
     void set_state(CecState s) noexcept { state_ = s; }
 
     const std::optional<CecMessage>& last_message() const noexcept { return last_; }
 
     std::uint32_t rx_released() const noexcept { return rx_released_; }
+
     std::uint32_t rx_rejected() const noexcept { return rx_rejected_; }
 
     static constexpr std::uint32_t kReleasePulseUs = 200;
@@ -54,4 +59,4 @@ private:
     std::uint32_t rx_rejected_ = 0;
 };
 
-}  // namespace mister::svc
+}

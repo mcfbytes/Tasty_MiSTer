@@ -20,4 +20,4 @@ struct LauncherState {
 
 using LauncherStateCell = xthread::Telemetry<LauncherState, SeatTag::Launcher>;
 
-}  // namespace mister::app
+}

@@ -17,11 +17,13 @@ class MsuCompanion final : public ICompanionLoad {
 
 public:
     explicit MsuCompanion(const svc::Vfs& vfs) noexcept : vfs_(&vfs) {}
+
     MsuCompanion(const MsuCompanion&) = delete;
     MsuCompanion& operator=(const MsuCompanion&) = delete;
 
     [[nodiscard]] Ex<CompanionPlan> plan(const CompanionAsk& ask) override;
     [[nodiscard]] std::unique_ptr<ILoader> loader() override;
+
     [[nodiscard]] ServantId servant() const noexcept override {
         TASTY_SEAT_BODY(MsuCompanion);
         return ServantId::Msu1;
@@ -35,4 +37,4 @@ private:
     FixedStr<MsuMachine::kPathCap, StrFit::Reject> data_{};
 };
 
-}  // namespace mister::cores
+}

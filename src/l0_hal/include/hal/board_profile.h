@@ -32,7 +32,9 @@ enum class BoardId : std::uint8_t { De10Nano, De25Nano, Zynq7000, SpiSbc };
 inline constexpr std::size_t kBoardCount = 4;
 
 inline constexpr FpgaAperture kUnsourcedFpgaMem{
-    {os::PhysAddr{0u}, regions::kLenUnsourced, "unsourced"}, 0u};
+    {os::PhysAddr{0u}, regions::kLenUnsourced, "unsourced"},
+    0u
+};
 
 inline constexpr std::array<FpgaAperture, kBoardCount> kBoardApertures{{
     {{kFpgaMemBase, 0x2000'0000u, "fpga-ddr"}, kFpgaMemMask},
@@ -109,13 +111,16 @@ constexpr bool fact_measured(const BoardProfile& profile, FactField f) noexcept 
             return profile.program.align.measured();
         case FactField::TimingLoadBudgetWords:
             return profile.timing.load_budget_words.measured();
+        case FactField::TimingStartAckTimeoutNs:
+            return profile.timing.start_ack_timeout_ns.measured();
     }
     return false;
 }
 
 constexpr bool fully_measured(const BoardProfile& profile) noexcept {
     for (std::size_t i = 0; i < kFactFieldCount; ++i) {
-        if (!fact_measured(profile, static_cast<FactField>(i))) return false;
+        if (!fact_measured(profile, static_cast<FactField>(i)))
+            return false;
     }
     return true;
 }
@@ -144,4 +149,4 @@ inline constexpr const char* kCompatiblePath = "/proc/device-tree/compatible";
 
 [[nodiscard]] Ex<const BoardProfile*> select_board(const CompatibleBlob& blob);
 
-}  // namespace mister::hal
+}

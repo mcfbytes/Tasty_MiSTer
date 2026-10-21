@@ -21,10 +21,13 @@ struct ChunkSlot {
 
     static constexpr std::uint32_t kKey = 0x8000'0000u;
 
-    [[nodiscard]] static std::uint32_t desc_word(std::span<const std::byte> table,
-                                                 std::size_t i) noexcept {
+    [[nodiscard]] static std::uint32_t desc_word(
+        std::span<const std::byte> table,
+        std::size_t i
+    ) noexcept {
         return infra::load_le<std::uint32_t>(table.subspan(i * 4u).first<4>());
     }
+
     static void set_desc_word(std::span<std::byte> table, std::size_t i, std::uint32_t w) noexcept {
         infra::store_le<std::uint32_t>(table.subspan(i * 4u).first<4>(), w);
     }
@@ -49,7 +52,7 @@ struct ChunkSlot {
 inline constexpr std::size_t kChunkSlots = 32;
 
 inline constexpr std::uint32_t kChunksPerSegment = 65536;
-using ChunkChannel =
-    xthread::LoanChannel<ChunkSlot, kChunkSlots, SeatTag::Encode, SeatTag::RecWrite>;
+using ChunkChannel = xthread::
+    LoanChannel<ChunkSlot, kChunkSlots, SeatTag::Encode, SeatTag::RecWrite>;
 
-}  // namespace mister::app
+}

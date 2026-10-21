@@ -16,4 +16,4 @@ struct DeviceTable {
     std::uint32_t mapped = 0;
 };
 
-}  // namespace mister::svc
+}

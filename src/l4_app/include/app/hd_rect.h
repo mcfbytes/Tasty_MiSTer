@@ -12,4 +12,4 @@ struct HdRect {
     std::int32_t h = 0;
 };
 
-}  // namespace mister::app
+}

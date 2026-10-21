@@ -32,6 +32,7 @@ public:
         number_(seq, std::numeric_limits<std::uint32_t>::max());
         comma_ = true;
     }
+
     constexpr void end_record() noexcept { put_('}'); }
 
     constexpr void begin_object(JsonName key) noexcept {
@@ -39,15 +40,18 @@ public:
         put_('{');
         comma_ = false;
     }
+
     constexpr void end_object() noexcept {
         put_('}');
         comma_ = true;
     }
+
     constexpr void begin_array(JsonName key) noexcept {
         key_(key);
         put_('[');
         comma_ = false;
     }
+
     constexpr void end_array() noexcept {
         put_(']');
         comma_ = true;
@@ -58,6 +62,7 @@ public:
         key_(key);
         value_(v);
     }
+
     template <class E>
         requires std::is_enum_v<E>
     constexpr void field(JsonName key, E v) noexcept {
@@ -65,6 +70,7 @@ public:
         using U = std::underlying_type_t<E>;
         value_(static_cast<std::make_unsigned_t<U>>(static_cast<U>(v)));
     }
+
     template <std::integral I>
     constexpr void elem(I v) noexcept {
         comma_prefix_();
@@ -84,7 +90,9 @@ public:
     }
 
     [[nodiscard]] constexpr std::size_t need() const noexcept { return need_; }
+
     [[nodiscard]] constexpr bool overflowed() const noexcept { return overflow_; }
+
     [[nodiscard]] constexpr std::string_view view() const noexcept {
         return std::string_view(buf_.data(), len_);
     }
@@ -96,8 +104,10 @@ public:
 
 private:
     constexpr void comma_prefix_() noexcept {
-        if (comma_) put_(',');
+        if (comma_)
+            put_(',');
     }
+
     constexpr void key_(JsonName key) noexcept {
         comma_prefix_();
         put_('"');
@@ -106,9 +116,11 @@ private:
     }
 
     constexpr void put_(char c) noexcept { put_(std::string_view(&c, 1)); }
+
     constexpr void put_(std::string_view s) noexcept {
         need_ += s.size();
-        if (measure_ || overflow_) return;
+        if (measure_ || overflow_)
+            return;
         if (len_ + s.size() > kCapacity) {
             overflow_ = true;
             return;
@@ -126,12 +138,14 @@ private:
 
             const auto mag = neg ? static_cast<std::uint64_t>(0) - static_cast<std::uint64_t>(v)
                                  : static_cast<std::uint64_t>(v);
-            const auto worst = static_cast<std::uint64_t>(0) -
-                               static_cast<std::uint64_t>(std::numeric_limits<I>::min());
+            const auto worst = static_cast<std::uint64_t>(0)
+                - static_cast<std::uint64_t>(std::numeric_limits<I>::min());
             signed_number_(neg, mag, worst);
         } else {
-            number_(static_cast<std::uint64_t>(v),
-                    static_cast<std::uint64_t>(std::numeric_limits<I>::max()));
+            number_(
+                static_cast<std::uint64_t>(v),
+                static_cast<std::uint64_t>(std::numeric_limits<I>::max())
+            );
         }
         comma_ = true;
     }
@@ -141,9 +155,11 @@ private:
             need_ += 1 + digits_(worst_mag);
             return;
         }
-        if (neg) put_('-');
+        if (neg)
+            put_('-');
         digits_out_(mag);
     }
+
     constexpr void number_(std::uint64_t v, std::uint64_t worst) noexcept {
         if (measure_) {
             need_ += digits_(worst);
@@ -151,6 +167,7 @@ private:
         }
         digits_out_(v);
     }
+
     static constexpr std::size_t digits_(std::uint64_t v) noexcept {
         std::size_t n = 1;
         while (v >= 10) {
@@ -159,6 +176,7 @@ private:
         }
         return n;
     }
+
     constexpr void digits_out_(std::uint64_t v) noexcept {
         std::array<char, 20> rev{};
         std::size_t n = 0;
@@ -191,4 +209,4 @@ template <class T>
     return 6 + t.view().size() + 8 + 10 + (members == 0 ? 0 : members + 1) + 1;
 }
 
-}  // namespace mister::infra
+}

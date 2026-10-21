@@ -44,6 +44,7 @@ struct InternedFile {
     std::uint32_t aux = 0;
     ContentEdge edge = ContentEdge::Content;
 };
+
 static_assert(std::is_trivially_copyable_v<InternedFile>, "a pooled slot is recycled in place");
 
-}  // namespace mister::app
+}

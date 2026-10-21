@@ -19,4 +19,4 @@ protected:
     IActivitySource& operator=(const IActivitySource&) = default;
 };
 
-}  // namespace mister::app
+}

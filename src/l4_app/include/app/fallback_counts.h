@@ -14,4 +14,4 @@ struct FallbackCounts {
     std::uint32_t front_end_failed = 0;
 };
 
-}  // namespace mister::app
+}

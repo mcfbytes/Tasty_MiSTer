@@ -1,0 +1,33 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -165,7 +165,7 @@
+ wgpu-hal-30 = { package = "wgpu-hal", version = "30", default-features = false }
+ input = { version = "0.10.0", default-features = false }
+ tr = { version = "0.1", default-features = false }
+-fontique = { version = "0.11.1" }
++fontique = { version = "0.11.1", default-features = false, features = ["std"] }
+ # Pinned to match parley's version
+ read-fonts = { version = "0.41" }
+ # Pinned to match parley's version
+--- a/api/cpp/Cargo.toml
++++ b/api/cpp/Cargo.toml
+@@ -85,7 +85,7 @@
+ esp-println = { version = "0.18.0", default-features = false, features = ["auto", "log-04"], optional = true }
+ unicode-segmentation = { workspace = true }
+ # hdosd-bake: dlopen libfontconfig instead of linking it (the rig image has no fontconfig)
+-fontique = { workspace = true, features = ["fontconfig-dlopen"] }
++fontique = { workspace = true }
+ 
+ [target.'cfg(target_os = "android")'.dependencies]
+ i-slint-backend-android-activity = { workspace = true, features = ["native-activity", "aa-06"] }
+--- a/internal/core/Cargo.toml
++++ b/internal/core/Cargo.toml
+@@ -172,7 +172,7 @@
+ # The complex-scripts line-breaking dictionaries cost several MB, so leave them out of
+ # wasm binaries.
+ [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+-parley = { version = "0.11.1", optional = true, features = ["complex-scripts"] }
++parley = { version = "0.11.1", optional = true, default-features = false, features = ["std", "complex-scripts"] }
+ 
+ [target.'cfg(target_arch = "wasm32")'.dependencies]
+ parley = { version = "0.11.1", optional = true }

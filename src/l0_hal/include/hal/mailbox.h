@@ -26,14 +26,17 @@ class Mailbox {
 
 public:
     Mailbox(Mailbox&& o) noexcept
-        : regs_(std::exchange(o.regs_, MailboxRegs{})), timing_(o.timing_),
+        : regs_(std::exchange(o.regs_, MailboxRegs{})),
+          timing_(o.timing_),
           claim_(std::move(o.claim_)) {}
+
     Mailbox& operator=(Mailbox&&) = delete;
     Mailbox(const Mailbox&) = delete;
     Mailbox& operator=(const Mailbox&) = delete;
     ~Mailbox() = default;
 
     [[nodiscard]] reg::Reg<reg::WO> gpo() const noexcept { return regs_.gpo; }
+
     [[nodiscard]] reg::Reg<reg::RO> gpi() const noexcept { return regs_.gpi; }
 
     [[nodiscard]] const LinkTimingValues& timing() const noexcept { return timing_; }
@@ -47,12 +50,15 @@ public:
 
 private:
     friend class BoardWindows;
+
     Mailbox(MailboxRegs regs, const LinkTimingValues& timing, MailboxClaims::Claim claim) noexcept
-        : regs_(regs), timing_(timing), claim_(std::move(claim)) {}
+        : regs_(regs),
+          timing_(timing),
+          claim_(std::move(claim)) {}
 
     MailboxRegs regs_;
     LinkTimingValues timing_;
     MailboxClaims::Claim claim_;
 };
 
-}  // namespace mister::hal
+}

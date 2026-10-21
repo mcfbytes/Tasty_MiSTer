@@ -13,4 +13,4 @@ public:
     void sleep_until(std::chrono::nanoseconds at) override;
 };
 
-}  // namespace mister::os
+}

@@ -46,7 +46,8 @@ static_assert(kRecSegmentMax == (1ull << 31));
 }
 
 [[nodiscard]] inline bool rec_bounds_ok(const RecOptions& o) noexcept {
-    if (o.from_frame < -1 || o.to_frame < -1) return false;
+    if (o.from_frame < -1 || o.to_frame < -1)
+        return false;
     return o.from_frame < 0 || o.to_frame < 0 || o.to_frame > o.from_frame;
 }
 
@@ -63,4 +64,4 @@ static_assert(kRecSegmentMax == (1ull << 31));
 
 [[nodiscard]] FixedStr<160, StrFit::Reject> format_rec_options(const RecOptions& o) noexcept;
 
-}  // namespace mister::app
+}

@@ -16,16 +16,23 @@ class ImageBracket {
     TASTY_SEAT_EXEMPT(component);
 
 public:
-    [[nodiscard]] static Ex<ImageBracket> open(IImageSink& sink, WideIoIndex index,
-                                               const SessionParams& params = {});
+    [[nodiscard]] static Ex<ImageBracket> open(
+        IImageSink& sink,
+        WideIoIndex index,
+        const SessionParams& params = {}
+    );
 
     ~ImageBracket() {
-        if (open_) (void)sink_->end();
+        if (open_)
+            (void)sink_->end();
     }
+
     ImageBracket(ImageBracket&& o) noexcept : sink_(o.sink_), open_(o.open_) { o.open_ = false; }
+
     ImageBracket& operator=(ImageBracket&&) = delete;
 
     [[nodiscard]] Ex<void> write(std::span<const std::uint8_t> data) { return sink_->write(data); }
+
     [[nodiscard]] Ex<std::size_t> write_taken(std::span<const std::uint8_t> data) {
         return sink_->write_taken(data);
     }
@@ -36,8 +43,9 @@ public:
 
 private:
     explicit ImageBracket(IImageSink& sink) noexcept : sink_(&sink) {}
+
     IImageSink* sink_;
     bool open_ = false;
 };
 
-}  // namespace mister::proto
+}

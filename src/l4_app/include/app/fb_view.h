@@ -14,4 +14,4 @@ struct FbView {
     FbFormat format = FbFormat::Rgb565;
 };
 
-}  // namespace mister::app
+}

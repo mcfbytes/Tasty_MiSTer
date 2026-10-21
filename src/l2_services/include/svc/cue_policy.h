@@ -94,28 +94,30 @@ enum class CueAxis : std::uint32_t {
 };
 
 constexpr CueAxis unimplemented_axis(const CuePolicy& p) noexcept {
-    if (p.layout != CuePolicy::Layout::Console) return CueAxis::Layout;
+    if (p.layout != CuePolicy::Layout::Console)
+        return CueAxis::Layout;
 
-    if (p.track_close == CuePolicy::TrackClose::ProvisionalInclusive &&
-        p.pregap_model == CuePolicy::PregapModel::IndexTriple &&
-        p.post_load_shift == CuePolicy::PostLoadTocShift::FakeLeadInPregap150) {
+    if (p.track_close == CuePolicy::TrackClose::ProvisionalInclusive
+        && p.pregap_model == CuePolicy::PregapModel::IndexTriple
+        && p.post_load_shift == CuePolicy::PostLoadTocShift::FakeLeadInPregap150) {
         return CueAxis::None;
     }
 
-    if (p.track_close == CuePolicy::TrackClose::ProvisionalInclusive &&
-        p.pregap_model == CuePolicy::PregapModel::IndexPair &&
-        p.post_load_shift == CuePolicy::PostLoadTocShift::Uniform150) {
+    if (p.track_close == CuePolicy::TrackClose::ProvisionalInclusive
+        && p.pregap_model == CuePolicy::PregapModel::IndexPair
+        && p.post_load_shift == CuePolicy::PostLoadTocShift::Uniform150) {
         return CueAxis::None;
     }
 
-    if (p.track_close != CuePolicy::TrackClose::SentinelExclusive &&
-        p.track_close != CuePolicy::TrackClose::SentinelPregapRelative) {
+    if (p.track_close != CuePolicy::TrackClose::SentinelExclusive
+        && p.track_close != CuePolicy::TrackClose::SentinelPregapRelative) {
         return CueAxis::TrackClose;
     }
     if (p.pregap_model != CuePolicy::PregapModel::SingleAccumulator) {
         return CueAxis::PregapModel;
     }
-    if (p.post_load_shift != CuePolicy::PostLoadTocShift::None) return CueAxis::PostLoadShift;
+    if (p.post_load_shift != CuePolicy::PostLoadTocShift::None)
+        return CueAxis::PostLoadShift;
     return CueAxis::None;
 }
 
@@ -123,4 +125,4 @@ constexpr bool requires_data_track(const CuePolicy& p) noexcept {
     return p.layout == CuePolicy::Layout::Dosbox;
 }
 
-}  // namespace mister::svc
+}

@@ -17,8 +17,11 @@ public:
     std::optional<bool> tick(std::int64_t now_ns, std::uint32_t activity, bool grabbed) noexcept;
 
     bool blanked() const noexcept { return blanked_; }
+
     bool enabled() const noexcept { return minutes_ != 0; }
+
     std::uint32_t blanks() const noexcept { return blanks_; }
+
     std::uint32_t wakes() const noexcept { return wakes_; }
 
 private:
@@ -32,6 +35,6 @@ private:
     bool seen_ = false;
 };
 
-}  // namespace mister::app
+}
 
 #endif

@@ -10,4 +10,4 @@ struct ButtonOverride {
     std::string_view defaults;
 };
 
-}  // namespace mister::cores
+}

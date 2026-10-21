@@ -22,12 +22,21 @@ class SpiConfStrDecoder {
 public:
     using Port = LinkPort<LinkEvent::ConfStr>;
 
-    SpiConfStrDecoder(hal::ISpiTransport& link, CoreSession& session, ILinkRouter& router,
-                      const BindGeneration& gen) noexcept
-        : link_(&link), session_(&session), gen_(&gen), out_(router) {}
+    SpiConfStrDecoder(
+        hal::ISpiTransport& link,
+        CoreSession& session,
+        ILinkRouter& router,
+        const BindGeneration& gen
+    ) noexcept
+        : link_(&link),
+          session_(&session),
+          gen_(&gen),
+          out_(router) {}
 
     void service() noexcept;
+
     [[nodiscard]] bool active() const noexcept { return session_->conf_str_window_open(); }
+
     [[nodiscard]] std::uint32_t reads() const noexcept { return reads_; }
 
     [[nodiscard]] std::uint32_t intern_refusals() const noexcept { return intern_refusals_; }
@@ -51,4 +60,4 @@ private:
     std::uint32_t lost_ = 0;
 };
 
-}  // namespace mister::proto
+}

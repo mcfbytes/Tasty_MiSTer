@@ -17,6 +17,13 @@ class ProcessTitle {
 public:
     [[nodiscard]] static Ex<ProcessTitle> create(int argc, char** argv, char**& env) noexcept;
 
+    [[nodiscard]] static Ex<ProcessTitle> create(
+        int argc,
+        char** argv,
+        char**& env,
+        std::string_view title
+    ) noexcept;
+
     ProcessTitle(ProcessTitle&&) noexcept = default;
     ProcessTitle& operator=(ProcessTitle&&) = delete;
     ProcessTitle(const ProcessTitle&) = delete;
@@ -25,13 +32,16 @@ public:
     void set(std::string_view title) noexcept;
 
     [[nodiscard]] std::size_t capacity() const noexcept { return region_.size(); }
+
     [[nodiscard]] std::uint32_t truncations() const noexcept { return truncations_; }
 
 private:
     explicit ProcessTitle(std::span<char> region) noexcept : region_(region) {}
 
+    void write(std::string_view title) noexcept;
+
     std::span<char> region_{};
     std::uint32_t truncations_ = 0;
 };
 
-}  // namespace mister::os
+}

@@ -25,4 +25,4 @@ enum class MidiLinkMode : std::uint8_t {
     UsbSer = 6,
 };
 
-}  // namespace mister::app
+}

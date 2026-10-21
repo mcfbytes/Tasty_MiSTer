@@ -15,4 +15,4 @@ public:
     [[nodiscard]] Ex<void> request_board_reset() override;
 };
 
-}  // namespace mister::boards::agilex_5
+}

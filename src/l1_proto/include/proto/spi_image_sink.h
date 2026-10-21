@@ -6,6 +6,7 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
 #include "proto/download_session.h"
@@ -18,8 +19,9 @@ class SpiImageSink final : public IImageSink {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    explicit SpiImageSink(hal::ISpiTransport& link, SpiFioQueue* queue = nullptr) noexcept
-        : link_(&link), queue_(queue) {}
+    explicit SpiImageSink(hal::ISpiTransport& link, infra::OptRef<SpiFioQueue> queue = {}) noexcept
+        : link_(&link),
+          queue_(queue) {}
 
     [[nodiscard]] Ex<void> begin(WideIoIndex index, const SessionParams& params) override;
     [[nodiscard]] Ex<void> write(std::span<const std::uint8_t> data) override;
@@ -30,8 +32,8 @@ public:
 
 private:
     hal::ISpiTransport* link_;
-    SpiFioQueue* queue_;
+    infra::OptRef<SpiFioQueue> queue_;
     std::optional<DownloadSession> ds_;
 };
 
-}  // namespace mister::proto
+}

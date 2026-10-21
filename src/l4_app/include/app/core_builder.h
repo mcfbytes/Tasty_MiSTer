@@ -7,6 +7,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "app/bay_counts.h"
 #include "app/bay_releases.h"
 #include "app/built_core.h"
 #include "app/core_terms.h"
@@ -29,15 +30,6 @@ struct CoreProfile;
 
 namespace mister::app {
 
-struct BayCounts {
-    std::uint32_t builds = 0;
-    std::uint32_t bay_full = 0;
-    std::uint32_t frees = 0;
-    std::uint32_t window_refusals = 0;
-};
-static_assert(std::is_trivially_copyable_v<BayCounts>);
-using BayCountsCell = xthread::Telemetry<BayCounts, SeatTag::Main>;
-
 class CoreBuilder {
     TASTY_SEAT_RESIDENT(Main);
 
@@ -51,12 +43,20 @@ public:
     CoreBuilder(CoreBay& bay, const BayReleasesCell& releases, const CoreTerms& terms) noexcept
         : CoreBuilder(bay, releases, terms, infra::OptRef<hal::IDoorbellSource>{}) {}
 
-    CoreBuilder(CoreBay& bay, const BayReleasesCell& releases, const CoreTerms& terms,
-                hal::IDoorbellSource& src) noexcept
+    CoreBuilder(
+        CoreBay& bay,
+        const BayReleasesCell& releases,
+        const CoreTerms& terms,
+        hal::IDoorbellSource& src
+    ) noexcept
         : CoreBuilder(bay, releases, terms, infra::OptRef<hal::IDoorbellSource>{src}) {}
 
-    CoreBuilder(CoreBay& bay, const BayReleasesCell& releases, const CoreTerms& terms,
-                infra::OptRef<hal::IDoorbellSource> src) noexcept;
+    CoreBuilder(
+        CoreBay& bay,
+        const BayReleasesCell& releases,
+        const CoreTerms& terms,
+        infra::OptRef<hal::IDoorbellSource> src
+    ) noexcept;
     CoreBuilder(const CoreBuilder&) = delete;
     CoreBuilder& operator=(const CoreBuilder&) = delete;
     ~CoreBuilder();
@@ -69,21 +69,28 @@ public:
 
     void drop_windows(const ParkReceipt& receipt) noexcept;
 
-    [[nodiscard]] cores::CoreWindowGrant grant_windows(BuiltCore& into,
-                                                       const cores::CoreProfile& profile) noexcept;
+    [[nodiscard]] cores::CoreWindowGrant grant_windows(
+        BuiltCore& into,
+        const cores::CoreProfile& profile
+    ) noexcept;
 
-    static void open_doorbells(hal::IDoorbellSource& src, const hal::DoorbellPolicy& policy,
-                               std::span<const proto::IrqBinding> irqs,
-                               DoorbellLines& into) noexcept;
+    static void open_doorbells(
+        hal::IDoorbellSource& src,
+        const hal::DoorbellPolicy& policy,
+        std::span<const proto::IrqBinding> irqs,
+        DoorbellLines& into
+    ) noexcept;
 
     [[nodiscard]] std::uint32_t builds() const noexcept { return builds_; }
 
     [[nodiscard]] std::uint32_t bay_full() const noexcept { return bay_full_; }
+
     [[nodiscard]] std::uint32_t frees() const noexcept { return frees_; }
 
     [[nodiscard]] std::uint32_t window_refusals() const noexcept { return window_refusals_; }
 
     [[nodiscard]] std::uint32_t leased() const noexcept;
+
     [[nodiscard]] const BayCountsCell& counts_cell() const noexcept { return counts_cell_; }
 
 private:
@@ -108,4 +115,4 @@ private:
     BayCountsCell counts_cell_{};
 };
 
-}  // namespace mister::app
+}

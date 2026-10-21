@@ -29,4 +29,4 @@ concept UiRequestSink = requires(S& s, const UiRequest& m, const UiRequest::Head
 
 using UiRequestRoutes = infra::AllRouted;
 
-}  // namespace mister::app
+}

@@ -36,8 +36,11 @@ constexpr void store_native(std::span<std::byte, sizeof(T)> out, const T& v) noe
 }
 
 template <class T, ByteLike B>
-    requires(std::is_trivially_copyable_v<T> && !std::is_same_v<std::remove_cv_t<B>, std::byte> &&
-             !std::is_const_v<B>)
+    requires(
+        std::is_trivially_copyable_v<T>
+        && !std::is_same_v<std::remove_cv_t<B>, std::byte>
+        && !std::is_const_v<B>
+    )
 constexpr void store_native(std::span<B, sizeof(T)> out, const T& v) noexcept {
     store_native<T>(byte_cast<std::byte>(out), v);
 }
@@ -65,14 +68,16 @@ template <class T, ByteLike B>
 template <class T, ByteLike B>
     requires(std::integral<T> && !std::same_as<T, bool> && !std::is_const_v<B>)
 constexpr void store_le(std::span<B, sizeof(T)> out, T v) noexcept {
-    if constexpr (std::endian::native != std::endian::little) v = std::byteswap(v);
+    if constexpr (std::endian::native != std::endian::little)
+        v = std::byteswap(v);
     store_native<T>(out, v);
 }
 
 template <class T, ByteLike B>
     requires(std::integral<T> && !std::same_as<T, bool> && !std::is_const_v<B>)
 constexpr void store_be(std::span<B, sizeof(T)> out, T v) noexcept {
-    if constexpr (std::endian::native != std::endian::big) v = std::byteswap(v);
+    if constexpr (std::endian::native != std::endian::big)
+        v = std::byteswap(v);
     store_native<T>(out, v);
 }
 
@@ -102,4 +107,4 @@ void store_le_run(std::span<const T> words, std::span<B> bytes) noexcept {
     }
 }
 
-}  // namespace mister::infra
+}

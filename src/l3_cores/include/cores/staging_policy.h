@@ -30,4 +30,4 @@ struct StagingPolicy {
     std::string_view start_save_dir{};
 };
 
-}  // namespace mister::cores
+}

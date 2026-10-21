@@ -8,12 +8,17 @@ namespace mister::hal {
 class Selected {
 public:
     Selected(ISpiTransport& link, ChipSelect cs) : link_(&link) { link_->select(cs); }
+
     ~Selected() {
-        if (link_ != nullptr) link_->deselect();
+        if (link_ != nullptr)
+            link_->deselect();
     }
+
     Selected(const Selected&) = delete;
     Selected& operator=(const Selected&) = delete;
+
     Selected(Selected&& o) noexcept : link_(o.link_) { o.link_ = nullptr; }
+
     Selected& operator=(Selected&&) = delete;
 
     void release() noexcept {
@@ -27,4 +32,4 @@ private:
     ISpiTransport* link_;
 };
 
-}  // namespace mister::hal
+}

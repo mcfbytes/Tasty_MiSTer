@@ -34,12 +34,14 @@ void SpiOsdMaskDecoder::service() noexcept {
         }
         m = OsdMask{static_cast<std::uint16_t>(w->v)};
     }
-    if (seen_ && m == mask_) return;
+    if (seen_ && m == mask_)
+        return;
 
-    if (!out_.push(LinkEvent::OsdMask{.mask = m, .front_end = front_end_})) return;
+    if (!out_.push(LinkEvent::OsdMask{.mask = m, .front_end = front_end_}))
+        return;
     mask_ = m;
     seen_ = true;
     ++publishes_;
 }
 
-}  // namespace mister::proto
+}

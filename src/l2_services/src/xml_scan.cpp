@@ -22,8 +22,10 @@ std::string_view rbf_text(std::string_view xml) noexcept {
                 break;
             case Token::Kind::Start:
 
-                if (infra::ieq(t->tag.name, "rbf")) inside = true;
-                if (t->tag.self_closing) inside = false;
+                if (infra::ieq(t->tag.name, "rbf"))
+                    inside = true;
+                if (t->tag.self_closing)
+                    inside = false;
                 break;
             case Token::Kind::End:
             case Token::Kind::Markup:
@@ -40,4 +42,4 @@ std::string_view rbf_text(std::string_view xml) noexcept {
     return out;
 }
 
-}  // namespace mister::svc::xml
+}

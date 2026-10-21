@@ -14,10 +14,11 @@
 namespace mister::svc {
 class Vfs;
 }
+
 namespace mister::cores {
 struct FileSlot;
 class IRomsetAliasSource;
-}  // namespace mister::cores
+}
 
 namespace mister::app {
 
@@ -32,8 +33,12 @@ public:
 
     void bind(const cores::FileSlot& slot);
 
-    [[nodiscard]] RomsetAlias query(std::string_view dir, std::string_view home,
-                                    std::string_view entry, std::string_view key) override;
+    [[nodiscard]] RomsetAlias query(
+        std::string_view dir,
+        std::string_view home,
+        std::string_view entry,
+        std::string_view key
+    ) override;
 
     bool bound() const noexcept { return source_ != nullptr; }
 
@@ -44,4 +49,4 @@ private:
     std::unique_ptr<cores::IRomsetAliasSource> source_;
 };
 
-}  // namespace mister::app
+}

@@ -11,9 +11,11 @@ namespace mister::infra {
 }
 
 [[nodiscard]] constexpr bool ieq(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size()) return false;
+    if (a.size() != b.size())
+        return false;
     for (std::size_t i = 0; i < a.size(); ++i) {
-        if (ascii_lower(a[i]) != ascii_lower(b[i])) return false;
+        if (ascii_lower(a[i]) != ascii_lower(b[i]))
+            return false;
     }
     return true;
 }
@@ -26,4 +28,4 @@ namespace mister::infra {
     return s.size() >= p.size() && ieq(s.substr(s.size() - p.size()), p);
 }
 
-}  // namespace mister::infra
+}

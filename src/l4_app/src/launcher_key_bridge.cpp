@@ -31,7 +31,7 @@ constexpr std::array<PadKey, 12> kPadKeys{{
     {proto::kJoyR2, KEY_BACKSPACE},
 }};
 
-}  // namespace
+}
 
 bool LauncherKeyBridge::set_active(bool on) noexcept {
     TASTY_SEAT_BODY(LauncherKeyBridge);
@@ -43,9 +43,11 @@ bool LauncherKeyBridge::set_active(bool on) noexcept {
             on = false;
         }
     }
-    if (!on && active_) release_all_();
+    if (!on && active_)
+        release_all_();
 
-    if (on && !active_) pad_or_ = pad_any_();
+    if (on && !active_)
+        pad_or_ = pad_any_();
     active_ = on;
     return active_;
 }
@@ -58,20 +60,23 @@ std::uint32_t LauncherKeyBridge::pad_any_() const noexcept {
 }
 
 void LauncherKeyBridge::sync_(std::uint16_t code) noexcept {
-    if (code == 0 || code >= 256) return;
+    if (code == 0 || code >= 256)
+        return;
     const std::uint64_t bit = std::uint64_t{1} << (code % 64);
     bool want = (kbd_down_[code / 64] & bit) != 0;
     for (const PadKey& k : kPadKeys)
         want = want || (k.code == code && (pad_or_ & k.bit) != 0);
     std::uint64_t& sent = down_[code / 64];
-    if (((sent & bit) != 0) == want) return;
+    if (((sent & bit) != 0) == want)
+        return;
     sent = want ? (sent | bit) : (sent & ~bit);
     out_.key(code, want);
 }
 
 void LauncherKeyBridge::key(std::uint16_t code, bool down) noexcept {
     TASTY_SEAT_BODY(LauncherKeyBridge);
-    if (!active_ || code == 0 || code >= 256) return;
+    if (!active_ || code == 0 || code >= 256)
+        return;
     std::uint64_t& word = kbd_down_[code / 64];
     const std::uint64_t bit = std::uint64_t{1} << (code % 64);
     word = down ? (word | bit) : (word & ~bit);
@@ -81,14 +86,17 @@ void LauncherKeyBridge::key(std::uint16_t code, bool down) noexcept {
 
 void LauncherKeyBridge::pad(std::size_t slot, std::uint32_t level) noexcept {
     TASTY_SEAT_BODY(LauncherKeyBridge);
-    if (slot >= pad_level_.size()) return;
+    if (slot >= pad_level_.size())
+        return;
     pad_level_[slot] = level;
-    if (!active_) return;
+    if (!active_)
+        return;
     const std::uint32_t any = pad_any_();
     const std::uint32_t diff = any ^ pad_or_;
     pad_or_ = any;
     for (const PadKey& k : kPadKeys) {
-        if ((diff & k.bit) == 0) continue;
+        if ((diff & k.bit) == 0)
+            continue;
         sync_(k.code);
         ++n_.pad_keys;
     }
@@ -96,14 +104,17 @@ void LauncherKeyBridge::pad(std::size_t slot, std::uint32_t level) noexcept {
 
 void LauncherKeyBridge::reseat_pad(std::size_t slot, std::uint32_t level) noexcept {
     TASTY_SEAT_BODY(LauncherKeyBridge);
-    if (slot >= pad_level_.size()) return;
+    if (slot >= pad_level_.size())
+        return;
     pad_level_[slot] = level;
-    if (!active_) return;
+    if (!active_)
+        return;
     const std::uint32_t any = pad_any_();
     const std::uint32_t gone = pad_or_ & ~any;
     pad_or_ = any;
     for (const PadKey& k : kPadKeys)
-        if ((gone & k.bit) != 0) sync_(k.code);
+        if ((gone & k.bit) != 0)
+            sync_(k.code);
 }
 
 void LauncherKeyBridge::release_all_() noexcept {
@@ -118,4 +129,4 @@ void LauncherKeyBridge::release_all_() noexcept {
     }
 }
 
-}  // namespace mister::app
+}

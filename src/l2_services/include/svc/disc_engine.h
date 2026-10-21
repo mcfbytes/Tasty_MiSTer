@@ -13,13 +13,18 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "proto/types.h"
+#include "svc/chd_backing.h"
 #include "svc/chd_meta_row.h"
 #include "svc/chd_source.h"
 #include "svc/cue_policy.h"
+#include "svc/cue_program.h"
 #include "svc/disc_counters.h"
+#include "svc/disc_file_access.h"
+#include "svc/file_table_backing.h"
 #include "svc/disc_geometry.h"
 #include "svc/frame_shaper.h"
 #include "svc/image_opener.h"
+#include "svc/subcode_sidecar.h"
 #include "svc/toc.h"
 #include "svc/track.h"
 #include "svc/types.h"
@@ -31,21 +36,29 @@ namespace mister::svc {
 
 using proto::Lba;
 
-class DiscEngine {
+class DiscEngine final {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    [[nodiscard]] static Ex<DiscEngine> create(const Vfs& vfs, CuePolicy policy,
-                                               ChdPrefetch& prefetch);
+    [[nodiscard]] static Ex<DiscEngine> create(
+        const Vfs& vfs,
+        CuePolicy policy,
+        ChdPrefetch& prefetch
+    );
 
-    [[nodiscard]] static Ex<DiscEngine> create(const IImageOpener& opener, CuePolicy policy,
-                                               ChdPrefetch& prefetch);
+    [[nodiscard]] static Ex<DiscEngine> create(
+        const IImageOpener& opener,
+        CuePolicy policy,
+        ChdPrefetch& prefetch
+    );
 
     [[nodiscard]] Ex<void> mount(std::string_view image_path);
     [[nodiscard]] Ex<void> unmount();
 
-    [[nodiscard]] Ex<void> mount_chd(std::unique_ptr<IChdSource> source,
-                                     std::unique_ptr<IChdSource> prefetch_source = nullptr);
+    [[nodiscard]] Ex<void> mount_chd(
+        std::unique_ptr<IChdSource> source,
+        std::unique_ptr<IChdSource> prefetch_source = nullptr
+    );
 
     [[nodiscard]] Ex<std::size_t> read_sector(Lba lba, std::span<std::byte> dst);
 
@@ -57,9 +70,11 @@ public:
     [[nodiscard]] Ex<std::size_t> read_full_frame(Lba lba, std::span<std::byte> dst);
 
     static constexpr CddaOrder kWireCddaOrder = CddaOrder::LittleEndian;
+
     CddaOrder cdda_order() const noexcept { return cdda_order_; }
 
     const Toc& toc() const noexcept { return toc_; }
+
     bool mounted() const noexcept { return mounted_; }
 
     std::optional<TrackIndex> track_for_lba(Lba lba) const;
@@ -72,42 +87,33 @@ public:
 
     void advise_ahead(Lba lba) noexcept;
 
-    std::uint32_t chd_hunk_bytes() const noexcept {
-        return chd_ != nullptr ? static_cast<std::uint32_t>(hunk_bytes_) : 0;
-    }
+    std::uint32_t chd_hunk_bytes() const noexcept { return chd_.hunk_bytes(); }
 
     [[nodiscard]] DiscGeometry geometry() const noexcept {
         return DiscGeometry{.toc = toc_, .hunk_bytes = chd_hunk_bytes(), .mounted = mounted_};
     }
 
-    [[nodiscard]] DiscCounters counters() const noexcept {
-        return DiscCounters{.sync_decompress = sync_decompress_,
-                            .park_timeouts = park_timeouts_,
-                            .prefetch_refusals = prefetch_refusals_};
-    }
+    [[nodiscard]] DiscCounters counters() const noexcept { return chd_.counters(); }
 
-    std::uint32_t sync_decompress() const noexcept { return sync_decompress_; }
-    std::uint32_t park_timeouts() const noexcept { return park_timeouts_; }
-    std::uint32_t prefetch_refusals() const noexcept { return prefetch_refusals_; }
+    std::uint32_t sync_decompress() const noexcept { return chd_.sync_decompress(); }
+
+    std::uint32_t park_timeouts() const noexcept { return chd_.park_timeouts(); }
+
+    std::uint32_t prefetch_refusals() const noexcept { return chd_.prefetch_refusals(); }
 
 private:
-    DiscEngine(CuePolicy p, ChdPrefetch& prefetch, infra::OptRef<const Vfs> vfs,
-               infra::OptRef<const IImageOpener> opener);
+    DiscEngine(
+        CuePolicy p,
+        ChdPrefetch& prefetch,
+        infra::OptRef<const Vfs> vfs,
+        infra::OptRef<const IImageOpener> opener
+    );
 
     enum class Form : std::uint8_t { Native, UserData, RedBook };
 
-    Ex<std::unique_ptr<IFile>> open_file(std::string_view path) const;
-
-    [[nodiscard]] Ex<std::string> read_cue_text(std::string_view cue_path) const;
     [[nodiscard]] Ex<void> mount_cue(std::string_view cue_path);
 
-    [[nodiscard]] Ex<void> mount_cue_index_triple(std::string_view cue_path);
-
-    [[nodiscard]] Ex<void> mount_cue_index_pair(std::string_view cue_path);
-
     void open_sub_or_cdg_(std::string_view cue_path);
-
-    [[nodiscard]] Ex<std::size_t> read_cdg_subcode_(std::uint32_t at, std::span<std::byte> dst);
     [[nodiscard]] Ex<void> mount_iso(std::string_view iso_path);
 
     [[nodiscard]] Ex<void> declare_iso_2048(std::unique_ptr<IFile> f, FileSize sz);
@@ -119,44 +125,23 @@ private:
 
     std::optional<TrackIndex> source_track(Lba lba) const;
 
-    [[nodiscard]] Ex<void> load_hunk(std::uint32_t hunk);
-
     CuePolicy policy_;
+
+    std::unique_ptr<ICueProgram> cue_;
     Toc toc_{};
     bool mounted_ = false;
 
     CddaOrder cdda_order_ = kWireCddaOrder;
 
-    infra::OptRef<const Vfs> vfs_;
-    infra::OptRef<const IImageOpener> opener_;
+    DiscFileAccess files_io_;
 
-    std::unique_ptr<IFile> files_[kMaxTracks]{};
-    std::uint16_t file_count_ = 0;
-    std::unique_ptr<IFile> sub_;
-
-    std::uint32_t sub_origin_ = 0;
-    bool sub_cdg_ = false;
+    FileTableBacking table_;
+    SubcodeSidecar subcode_;
 
     std::unique_ptr<IFrameShaper> frame_shaper_;
     std::unique_ptr<IFrameShaper> sub_shaper_;
 
-    std::unique_ptr<IChdSource> chd_;
-    std::unique_ptr<std::byte[]> hunk_buf_;
-    std::size_t hunk_bytes_ = 0;
-    std::uint32_t sectors_per_hunk_ = 0;
-    std::uint32_t hunk_count_ = 0;
-    static constexpr std::uint32_t kNoHunk = 0xFFFFFFFFu;
-    std::uint32_t hunk_memo_ = kNoHunk;
-
-    std::span<const std::byte> hunk_view_{};
-
-    std::reference_wrapper<ChdPrefetch> prefetch_;
-
-    std::size_t prefetch_depth_ = 0;
-    std::uint32_t sync_decompress_ = 0;
-
-    std::uint32_t park_timeouts_ = 0;
-    std::uint32_t prefetch_refusals_ = 0;
+    ChdBacking chd_;
 };
 
-}  // namespace mister::svc
+}

@@ -16,16 +16,19 @@ public:
     static Deadline in(const IClock& c, std::chrono::nanoseconds d) {
         return Deadline{c.now() + d};
     }
+
     static Deadline immediate() { return Deadline{std::chrono::nanoseconds{0}}; }
 
     bool expired(const IClock& c) const { return c.now() >= at_; }
+
     std::chrono::nanoseconds at() const noexcept { return at_; }
 
     [[nodiscard]] Ex<void> sleep_until() const;
 
 private:
     explicit Deadline(std::chrono::nanoseconds at) : at_(at) {}
+
     std::chrono::nanoseconds at_;
 };
 
-}  // namespace mister::os
+}

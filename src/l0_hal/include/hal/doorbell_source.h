@@ -23,4 +23,4 @@ protected:
     IDoorbellSource& operator=(const IDoorbellSource&) = default;
 };
 
-}  // namespace mister::hal
+}

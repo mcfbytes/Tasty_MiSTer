@@ -11,6 +11,7 @@ struct NoMergeRule {
     DeviceMatch match;
     const char* why;
 };
+
 std::span<const NoMergeRule> no_merge_rules();
 
-}  // namespace mister::svc
+}

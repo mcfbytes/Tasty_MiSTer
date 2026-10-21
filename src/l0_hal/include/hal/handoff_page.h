@@ -14,4 +14,4 @@ struct HandoffPage {
     std::uint32_t reboot_flag = 0;
 };
 
-}  // namespace mister::hal
+}

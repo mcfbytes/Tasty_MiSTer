@@ -3,10 +3,16 @@
 
 namespace mister::boards::agilex_5 {
 
-Ex<void> Bridges::pre_program() { return unimplemented(ERR_SITE()); }
+Ex<void> Bridges::pre_program() {
+    return unimplemented(ERR_SITE());
+}
 
-Ex<void> Bridges::post_program() { return unimplemented(ERR_SITE()); }
+Ex<void> Bridges::post_program() {
+    return unimplemented(ERR_SITE());
+}
 
-Ex<void> Bridges::request_board_reset() { return unimplemented(ERR_SITE()); }
+Ex<void> Bridges::request_board_reset() {
+    return unimplemented(ERR_SITE());
+}
 
-}  // namespace mister::boards::agilex_5
+}

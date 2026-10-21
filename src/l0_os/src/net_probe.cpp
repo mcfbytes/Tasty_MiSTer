@@ -18,15 +18,18 @@ bool is_wlan(std::string_view name) noexcept {
     return name.size() >= 4 && name.substr(0, 4) == "wlan";
 }
 
-}  // namespace
+}
 
 NetPresence net_presence_from_list(std::span<const Ipv4If> ifs) noexcept {
     NetPresence out{};
     for (const auto& f : ifs) {
 
-        if (f.octet0 == 169 && f.octet1 == 254) continue;
-        if (f.name == "eth0") out.wired = true;
-        if (is_wlan(f.name)) out.wifi = true;
+        if (f.octet0 == 169 && f.octet1 == 254)
+            continue;
+        if (f.name == "eth0")
+            out.wired = true;
+        if (is_wlan(f.name))
+            out.wifi = true;
     }
     return out;
 }
@@ -39,11 +42,14 @@ NetPresence net_presence_from_list(std::span<const Ipv4If> ifs) noexcept {
 
     NetPresence out{};
     for (const ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == nullptr || ifa->ifa_name == nullptr) continue;
-        if (ifa->ifa_addr->sa_family != AF_INET) continue;
+        if (ifa->ifa_addr == nullptr || ifa->ifa_name == nullptr)
+            continue;
+        if (ifa->ifa_addr->sa_family != AF_INET)
+            continue;
         const auto* sin = reinterpret_cast<const sockaddr_in*>(ifa->ifa_addr);
-        const auto octets =
-            infra::byte_cast<const std::uint8_t>(infra::bytes_of(sin->sin_addr.s_addr));
+        const auto octets = infra::byte_cast<const std::uint8_t>(
+            infra::bytes_of(sin->sin_addr.s_addr)
+        );
         const Ipv4If one{std::string_view{ifa->ifa_name}, octets[0], octets[1]};
         const NetPresence p = net_presence_from_list(std::span<const Ipv4If>(&one, 1));
         out.wired = out.wired || p.wired;
@@ -53,4 +59,4 @@ NetPresence net_presence_from_list(std::span<const Ipv4If> ifs) noexcept {
     return out;
 }
 
-}  // namespace mister::os
+}

@@ -34,4 +34,4 @@ protected:
     IPcmFeed& operator=(const IPcmFeed&) = default;
 };
 
-}  // namespace mister::cores
+}

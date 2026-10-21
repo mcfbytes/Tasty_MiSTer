@@ -42,6 +42,7 @@ struct FileStreamSlot {
         struct Head {
             std::uint32_t gen = 0;
         };
+
         struct Open {
             static constexpr Kind kKind = Kind::Open;
             Rel rel{};
@@ -49,21 +50,25 @@ struct FileStreamSlot {
             svc::OpenMode out_mode = svc::OpenMode::Truncate;
             std::uint8_t pad_[3]{};
         };
+
         struct Read {
             static constexpr Kind kKind = Kind::Read;
             std::uint64_t offset = 0;
             std::uint32_t want = 0;
             std::uint8_t pad_[4]{};
         };
+
         struct Write {
             static constexpr Kind kKind = Kind::Write;
             std::uint64_t offset = 0;
             std::uint32_t want = 0;
             std::uint8_t pad_[4]{};
         };
+
         struct Sync {
             static constexpr Kind kKind = Kind::Sync;
         };
+
         struct Close {
             static constexpr Kind kKind = Kind::Close;
         };
@@ -85,8 +90,10 @@ struct FileStreamSlot {
 
     alignas(64) std::byte data[kStreamChunkBytes]{};
 };
-static_assert(infra::MessageSum<FileStreamSlot::Ask> &&
-              infra::alternatives_are_total<FileStreamSlot::Ask>());
+
+static_assert(
+    infra::MessageSum<FileStreamSlot::Ask> && infra::alternatives_are_total<FileStreamSlot::Ask>()
+);
 static_assert(sizeof(FileStreamSlot::Ask) == 2072 && alignof(FileStreamSlot::Ask) == 8);
 
 class FileStreamService final : public svc::IIoCoworker {
@@ -97,18 +104,24 @@ public:
     using Loan = Chan::Loan;
 
     explicit FileStreamService(infra::OptRef<const svc::Vfs> vfs = {}) noexcept
-        : vfs_(vfs), chan_(xthread::Polled{}) {}
+        : vfs_(vfs),
+          chan_(xthread::Polled{}) {}
 
     FileStreamService(xthread::WakeFlag& io_wake, infra::OptRef<const svc::Vfs> vfs) noexcept
-        : vfs_(vfs), chan_(io_wake) {}
+        : vfs_(vfs),
+          chan_(io_wake) {}
 
     void seal_boot_pump() noexcept { sealed_ = true; }
+
     [[nodiscard]] bool sealed() const noexcept { return sealed_; }
 
     [[nodiscard]] bool arm_open(std::string_view rel) noexcept;
 
-    [[nodiscard]] bool arm_open(std::string_view rel, std::string_view out_rel,
-                                svc::OpenMode out_mode) noexcept;
+    [[nodiscard]] bool arm_open(
+        std::string_view rel,
+        std::string_view out_rel,
+        svc::OpenMode out_mode
+    ) noexcept;
     [[nodiscard]] bool arm_step(std::uint64_t off, std::uint32_t want) noexcept;
 
     [[nodiscard]] bool arm_write(std::uint64_t off, std::span<const std::byte> bytes) noexcept;
@@ -123,6 +136,7 @@ public:
     [[nodiscard]] std::uint32_t generation() const noexcept { return rt_.gen; }
 
     [[nodiscard]] std::uint32_t refusals() const noexcept { return rt_.refusals.get(); }
+
     [[nodiscard]] std::uint32_t declines() const noexcept { return rt_.declines.get(); }
 
     [[nodiscard]] std::uint32_t sealed_pumps() const noexcept { return sealed_pumps_.get(); }
@@ -132,7 +146,9 @@ public:
     [[nodiscard]] std::uint32_t closes() const noexcept { return io_.closes.get(); }
 
     [[nodiscard]] std::uint32_t stales() const noexcept { return io_.stales.get(); }
+
     void count_decline() noexcept { rt_.declines.add(1); }
+
     [[nodiscard]] Chan::Census census() const noexcept { return chan_.census(); }
 
     void serve() noexcept override;
@@ -167,4 +183,4 @@ private:
     Chan chan_;
 };
 
-}  // namespace mister::app
+}

@@ -13,43 +13,66 @@ namespace mister::boards::cyclone_v {
 
 consteval bool de10_row_matches(Window w, std::string_view name, os::PhysAddr transcribed) {
     const hal::WindowDecl& d = hal::window(hal::kDe10Profile, cyclone_v::id(w));
-    return d.id == cyclone_v::id(w) && std::string_view(d.region.name) == name &&
-           d.region.phys == transcribed;
+    return d.id == cyclone_v::id(w)
+        && std::string_view(d.region.name) == name
+        && d.region.phys == transcribed;
 }
-static_assert(hal::kDe10Profile.windows.size() == cyclone_v::kWindowCount &&
-                  de10_row_matches(Window::FpgaMgr, "fpga-mgr", kFpgaMgrBase) &&
-                  de10_row_matches(Window::FpgaMgrData, "fpga-mgr-data", kFpgaMgrDataBase) &&
-                  de10_row_matches(Window::Sdr, "sdr-ctl", kSdrBase) &&
-                  de10_row_matches(Window::RstMgr, "rstmgr", kRstMgrBase) &&
-                  de10_row_matches(Window::SysMgr, "sysmgr", kSysMgrBase) &&
-                  de10_row_matches(Window::Nic301, "nic301", kNic301Base) &&
-                  de10_row_matches(Window::LwBridge, "lw-bridge", hal::kLwBridgeBase) &&
-                  hal::kDe10Profile.mailbox_window == cyclone_v::id(Window::FpgaMgr) &&
-                  hal::kDe10Profile.lw_window == cyclone_v::id(Window::LwBridge),
-              "the DE10 board row disagrees with the Cyclone V window names or bases");
 
-Bridges::Bridges(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
-                 hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic)
-    : sdr_(std::move(sdr)), rst_(std::move(rst)), sys_(std::move(sys)), nic_(std::move(nic)) {}
+static_assert(
+    hal::kDe10Profile.windows.size() == cyclone_v::kWindowCount
+        && de10_row_matches(Window::FpgaMgr, "fpga-mgr", kFpgaMgrBase)
+        && de10_row_matches(Window::FpgaMgrData, "fpga-mgr-data", kFpgaMgrDataBase)
+        && de10_row_matches(Window::Sdr, "sdr-ctl", kSdrBase)
+        && de10_row_matches(Window::RstMgr, "rstmgr", kRstMgrBase)
+        && de10_row_matches(Window::SysMgr, "sysmgr", kSysMgrBase)
+        && de10_row_matches(Window::Nic301, "nic301", kNic301Base)
+        && de10_row_matches(Window::LwBridge, "lw-bridge", hal::kLwBridgeBase)
+        && hal::kDe10Profile.mailbox_window == cyclone_v::id(Window::FpgaMgr)
+        && hal::kDe10Profile.lw_window == cyclone_v::id(Window::LwBridge),
+    "the DE10 board row disagrees with the Cyclone V window names or bases"
+);
+
+Bridges::Bridges(
+    hal::RegisterWindow<SdrCtl> sdr,
+    hal::RegisterWindow<RstMgr> rst,
+    hal::RegisterWindow<SysMgr> sys,
+    hal::RegisterWindow<Nic301> nic
+)
+    : sdr_(std::move(sdr)),
+      rst_(std::move(rst)),
+      sys_(std::move(sys)),
+      nic_(std::move(nic)) {}
 
 Ex<Bridges> Bridges::open(hal::BoardWindows& windows) {
     auto sdr = windows.take<SdrCtl>(cyclone_v::id(Window::Sdr));
-    if (!sdr) return std::unexpected(sdr.error());
+    if (!sdr)
+        return std::unexpected(sdr.error());
     auto rst = windows.take<RstMgr>(cyclone_v::id(Window::RstMgr));
-    if (!rst) return std::unexpected(rst.error());
+    if (!rst)
+        return std::unexpected(rst.error());
     auto sys = windows.take<SysMgr>(cyclone_v::id(Window::SysMgr));
-    if (!sys) return std::unexpected(sys.error());
+    if (!sys)
+        return std::unexpected(sys.error());
     auto nic = windows.take<Nic301>(cyclone_v::id(Window::Nic301));
-    if (!nic) return std::unexpected(nic.error());
-    Bridges b(std::move(sdr->regs), std::move(rst->regs), std::move(sys->regs),
-              std::move(nic->regs));
-    b.claims_ = {std::move(sdr->claim), std::move(rst->claim), std::move(sys->claim),
-                 std::move(nic->claim)};
+    if (!nic)
+        return std::unexpected(nic.error());
+    Bridges
+        b(std::move(sdr->regs), std::move(rst->regs), std::move(sys->regs), std::move(nic->regs));
+    b.claims_ = {
+        std::move(sdr->claim),
+        std::move(rst->claim),
+        std::move(sys->claim),
+        std::move(nic->claim)
+    };
     return b;
 }
 
-Bridges Bridges::over(hal::RegisterWindow<SdrCtl> sdr, hal::RegisterWindow<RstMgr> rst,
-                      hal::RegisterWindow<SysMgr> sys, hal::RegisterWindow<Nic301> nic) {
+Bridges Bridges::over(
+    hal::RegisterWindow<SdrCtl> sdr,
+    hal::RegisterWindow<RstMgr> rst,
+    hal::RegisterWindow<SysMgr> sys,
+    hal::RegisterWindow<Nic301> nic
+) {
     return Bridges(std::move(sdr), std::move(rst), std::move(sys), std::move(nic));
 }
 
@@ -99,4 +122,4 @@ Ex<void> Bridges::request_board_reset() {
     return {};
 }
 
-}  // namespace mister::boards::cyclone_v
+}

@@ -6,17 +6,20 @@
 
 namespace mister::app {
 
-static_assert(proto::user_io::poll_row(proto::user_io::PollShape::RumblePoll).params ==
-                  svc::kMaxPlayers,
-              "the rumble row issues one parameter per player");
+static_assert(
+    proto::user_io::poll_row(proto::user_io::PollShape::RumblePoll).params == svc::kMaxPlayers,
+    "the rumble row issues one parameter per player"
+);
 
 void RumbleRelay::refresh() noexcept {
     TASTY_SEAT_BODY(RumbleRelay);
     const svc::RumblePadSet now = out_.rumble_pads();
-    if (now == pads_seen_) return;
+    if (now == pads_seen_)
+        return;
     const bool players_moved = now.players != pads_seen_.players;
     for (std::uint8_t p = 0; p < last_.size(); ++p) {
-        if (now.pads[p] == pads_seen_.pads[p]) continue;
+        if (now.pads[p] == pads_seen_.pads[p])
+            continue;
 
         const std::uint16_t held = last_[p];
         last_[p] = 0;
@@ -26,7 +29,8 @@ void RumbleRelay::refresh() noexcept {
         }
     }
     pads_seen_ = now;
-    if (players_moved) pads_.publish(now.players);
+    if (players_moved)
+        pads_.publish(now.players);
 }
 
 void RumbleRelay::on(const proto::LinkEvent::PolledWord& w) noexcept {
@@ -54,11 +58,14 @@ void RumbleRelay::apply_(std::uint8_t player, std::uint16_t word) noexcept {
         case svc::RumbleApply::Failed:
 
             if (failures_++ == 0)
-                diag_.appendf("{\"t\":\"rumble_fail\",\"player\":%u,\"word\":%u}",
-                              static_cast<unsigned>(player), static_cast<unsigned>(word));
+                diag_.appendf(
+                    "{\"t\":\"rumble_fail\",\"player\":%u,\"word\":%u}",
+                    static_cast<unsigned>(player),
+                    static_cast<unsigned>(word)
+                );
             break;
     }
     last_[player] = word;
 }
 
-}  // namespace mister::app
+}

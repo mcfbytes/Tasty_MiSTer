@@ -15,4 +15,4 @@ struct Token {
     Tag tag;
 };
 
-}  // namespace mister::svc::xml
+}

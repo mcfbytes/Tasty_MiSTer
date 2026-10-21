@@ -15,4 +15,4 @@ protected:
     ISaveFlush& operator=(const ISaveFlush&) = default;
 };
 
-}  // namespace mister::app
+}

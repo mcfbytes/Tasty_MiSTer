@@ -28,21 +28,32 @@ public:
         LinkRxChannel<SeatTag::Ui>& ui;
         infra::OptRef<LinkRxChannel<SeatTag::Input>> input{};
     };
+
     explicit LinkRouter(const Channels& c) noexcept;
 
-    LinkRouter(LinkRxChannel<SeatTag::Main>& main, LinkRxChannel<SeatTag::Ui>& ui,
-               LinkRxChannel<SeatTag::Input>& input) noexcept
+    LinkRouter(
+        LinkRxChannel<SeatTag::Main>& main,
+        LinkRxChannel<SeatTag::Ui>& ui,
+        LinkRxChannel<SeatTag::Input>& input
+    ) noexcept
         : LinkRouter(Channels{main, ui, infra::OptRef<LinkRxChannel<SeatTag::Input>>{input}}) {}
+
     LinkRouter(const LinkRouter&) = delete;
     LinkRouter& operator=(const LinkRouter&) = delete;
 
     [[nodiscard]] bool push(const proto::LinkEvent& e) noexcept override;
-    [[nodiscard]] bool can_intern(proto::LinkEvent::Kind k, std::size_t bytes,
-                                  unsigned chunks) const noexcept override;
-    [[nodiscard]] Ex<proto::RxSlabId> intern(proto::LinkEvent::Kind k,
-                                             std::span<const std::uint8_t> bytes) noexcept override;
+    [[nodiscard]] bool can_intern(
+        proto::LinkEvent::Kind k,
+        std::size_t bytes,
+        unsigned chunks
+    ) const noexcept override;
+    [[nodiscard]] Ex<proto::RxSlabId> intern(
+        proto::LinkEvent::Kind k,
+        std::span<const std::uint8_t> bytes
+    ) noexcept override;
 
     [[nodiscard]] std::uint32_t drops() const noexcept { return drops_; }
+
     [[nodiscard]] std::uint32_t intern_refusals() const noexcept { return intern_refusals_; }
 
 private:
@@ -53,7 +64,9 @@ private:
     std::uint32_t intern_refusals_ = 0;
 };
 
-static_assert(infra::ordinal(EventSink::kCount) == 3,
-              "a new EventSink needs its channel in LinkRouter::Channels");
+static_assert(
+    infra::ordinal(EventSink::kCount) == 3,
+    "a new EventSink needs its channel in LinkRouter::Channels"
+);
 
-}  // namespace mister::app
+}

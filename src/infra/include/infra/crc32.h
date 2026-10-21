@@ -22,10 +22,12 @@ inline constexpr std::array<std::uint32_t, 256> kCrc32Table = [] {
     return t;
 }();
 
-}  // namespace detail
+}
 
-[[nodiscard]] constexpr std::uint32_t crc32_update(std::uint32_t crc,
-                                                   std::span<const std::uint8_t> data) noexcept {
+[[nodiscard]] constexpr std::uint32_t crc32_update(
+    std::uint32_t crc,
+    std::span<const std::uint8_t> data
+) noexcept {
     std::uint32_t c = ~crc;
     for (const std::uint8_t b : data) {
         c = detail::kCrc32Table[(c ^ b) & 0xFFu] ^ (c >> 8);
@@ -41,4 +43,4 @@ inline constexpr std::array<std::uint32_t, 256> kCrc32Table = [] {
     return total & 0x3FFu;
 }
 
-}  // namespace mister
+}

@@ -3,8 +3,11 @@
 
 namespace mister::app {
 
-[[nodiscard]] Ex<StreamFile> stream_open(const svc::Vfs& vfs, std::string_view rel,
-                                         svc::OpenMode mode) {
+[[nodiscard]] Ex<StreamFile> stream_open(
+    const svc::Vfs& vfs,
+    std::string_view rel,
+    svc::OpenMode mode
+) {
     if (!svc::opens_read_only(mode) && mode != svc::OpenMode::ReadWrite) {
 
         if (const std::size_t slash = rel.rfind('/');
@@ -14,9 +17,11 @@ namespace mister::app {
         }
     }
     auto f = vfs.open(rel, mode);
-    if (!f) return std::unexpected(f.error());
+    if (!f)
+        return std::unexpected(f.error());
     auto sz = (*f)->size();
-    if (!sz) return std::unexpected(sz.error());
+    if (!sz)
+        return std::unexpected(sz.error());
     return StreamFile{std::move(*f), sz->v};
 }
 
@@ -24,31 +29,52 @@ namespace mister::app {
     std::size_t done = 0;
     while (done < dst.size()) {
         auto n = f.read_at(off + done, dst.subspan(done));
-        if (!n) return std::unexpected(n.error());
+        if (!n)
+            return std::unexpected(n.error());
         if (*n == 0) {
             return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(off + done)});
+                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(off + done)}
+            );
         }
         done += *n;
     }
     return {};
 }
 
-[[nodiscard]] Ex<void> stream_write(svc::IFile& f, std::uint64_t off,
-                                    std::span<const std::byte> src) {
+[[nodiscard]] Ex<void> stream_write(
+    svc::IFile& f,
+    std::uint64_t off,
+    std::span<const std::byte> src
+) {
     std::size_t done = 0;
     while (done < src.size()) {
         auto n = f.write_at(off + done, src.subspan(done));
-        if (!n) return std::unexpected(n.error());
+        if (!n)
+            return std::unexpected(n.error());
         if (*n == 0) {
             return std::unexpected(
-                Error{Errc::short_write, ERR_SITE(), static_cast<std::uint32_t>(off + done)});
+                Error{Errc::short_write, ERR_SITE(), static_cast<std::uint32_t>(off + done)}
+            );
         }
         done += *n;
     }
     return {};
 }
 
-[[nodiscard]] Ex<void> stream_sync(svc::IFile& f) { return f.flush(); }
+[[nodiscard]] Ex<void> stream_sync(svc::IFile& f) {
+    return f.flush();
+}
 
-}  // namespace mister::app
+std::optional<std::vector<std::uint8_t>> read_whole(svc::IFile& f, std::uint64_t size) {
+    std::vector<std::uint8_t> buf(static_cast<std::size_t>(size));
+    std::size_t off = 0;
+    while (off < buf.size()) {
+        auto n = f.read_at(off, std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(off)));
+        if (!n || *n == 0)
+            return std::nullopt;
+        off += *n;
+    }
+    return buf;
+}
+
+}

@@ -7,18 +7,13 @@
 
 #include "infra/error.h"
 #include "infra/unique_fd.h"
-#include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "hal/types.h"
+#include "reactor/frame_record.h"
 #include "infra/seat.h"
 #include "os/framebuffer.h"
 
 namespace mister::reactor {
-
-struct FrameRecord {
-    std::uint32_t seq = 0;
-};
-using FrameCell = xthread::Telemetry<FrameRecord, SeatTag::Frame>;
 
 class FrameClock {
     TASTY_SEAT_RESIDENT(Frame);
@@ -29,6 +24,7 @@ public:
     hal::FrameSeq seq() const noexcept {
         return hal::FrameSeq{seq_.load(std::memory_order_acquire)};
     }
+
     int eventfd() const noexcept { return frame_wake_.fd(); }
 
     [[nodiscard]] const FrameCell& frame_cell() const noexcept { return cell_; }
@@ -43,4 +39,4 @@ private:
     xthread::WakeFlag frame_wake_{};
 };
 
-}  // namespace mister::reactor
+}

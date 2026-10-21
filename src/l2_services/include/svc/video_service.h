@@ -15,23 +15,28 @@
 #include "svc/adv7513_io.h"
 #include "svc/cec_state_machine.h"
 #include "svc/edid_store.h"
+#include "svc/geometry_gate.h"
+#include "svc/hdmi_link.h"
 #include "svc/modeline.h"
-
+#include "svc/parsed_mode.h"
 #include "svc/pll_solver.h"
 #include "svc/types.h"
 #include "svc/video_sample.h"
+#include "svc/video_timing.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
 
-struct GeometryGate;
 class IFilterResend;
 
 inline constexpr std::uint8_t kUioSetVideo = 0x20;
 inline constexpr std::size_t kVideoWireWords = 26;
 
-[[nodiscard]] Ex<void> emit_video_words(hal::ISpiTransport& link, std::uint8_t opcode,
-                                        std::span<const std::uint16_t> words);
+[[nodiscard]] Ex<void> emit_video_words(
+    hal::ISpiTransport& link,
+    std::uint8_t opcode,
+    std::span<const std::uint16_t> words
+);
 
 inline constexpr std::uint8_t kUioSetFbuf = 0x2F;
 inline constexpr std::uint8_t kUioSetArCust = 0x3A;
@@ -41,13 +46,17 @@ inline constexpr std::uint8_t kUioSetGamma = 0x32;
 
 [[nodiscard]] Ex<std::uint16_t> emit_fbuf(hal::ISpiTransport& link, std::uint16_t word);
 
-[[nodiscard]] Ex<void> emit_ar_custom(hal::ISpiTransport& link,
-                                      std::span<const std::uint16_t> words);
+[[nodiscard]] Ex<void> emit_ar_custom(
+    hal::ISpiTransport& link,
+    std::span<const std::uint16_t> words
+);
 
 [[nodiscard]] Ex<std::uint16_t> emit_filter_mode(hal::ISpiTransport& link, std::uint8_t mode);
 
-[[nodiscard]] Ex<void> emit_filter_coeff_chunk(hal::ISpiTransport& link,
-                                               std::span<const std::uint16_t> chunk);
+[[nodiscard]] Ex<void> emit_filter_coeff_chunk(
+    hal::ISpiTransport& link,
+    std::span<const std::uint16_t> chunk
+);
 
 [[nodiscard]] Ex<std::uint16_t> emit_shadow_mask(hal::ISpiTransport& link, std::uint16_t flag_word);
 
@@ -104,34 +113,19 @@ constexpr std::uint16_t filter_coeff_word(std::uint16_t ver, std::size_t i) noex
     }
     const std::size_t phase = iter * skip;
     const std::size_t hot = (phase < kFilterPhases / 2) ? 1u : 2u;
-    if (tap != hot) return 0;
+    if (tap != hot)
+        return 0;
 
     return full ? std::uint16_t{256} : std::uint16_t{128};
 }
 
-enum class ModeRequest : std::uint8_t {
-    PresetIndex,
-    Triple,
-    Nine,
-    Eleven,
-    RawModeline,
-};
-
-struct PresetMode {
-    std::uint32_t vpar[8];
-    double fpix_mhz;
-    std::uint8_t vic;
-    std::uint8_t pr;
-};
-
-inline constexpr std::size_t kNumVmodes = 15;
-inline constexpr std::size_t kNumTvmodes = 4;
-
-std::span<const PresetMode> vmodes() noexcept;
-std::span<const PresetMode> tvmodes() noexcept;
-
-Modeline calculate_cvt(std::uint32_t h_pixels, std::uint32_t v_lines, float refresh_rate,
-                       std::uint8_t reduced_blanking, bool supports_pr);
+Modeline calculate_cvt(
+    std::uint32_t h_pixels,
+    std::uint32_t v_lines,
+    float refresh_rate,
+    std::uint8_t reduced_blanking,
+    bool supports_pr
+);
 
 inline constexpr std::size_t kYcMaxEntries = 20;
 
@@ -143,20 +137,11 @@ struct YcMode {
 
 std::vector<YcMode> parse_yc(std::string_view text, std::string_view core_name);
 
-std::optional<std::int64_t> yc_lookup(std::span<const YcMode> table, std::string_view key,
-                                      std::string_view key_expanded);
-
-enum class VFilter : std::uint8_t { Horz = 0, Vert = 1, Scanlines = 2, Ilace = 3 };
-
-enum class VmodeFamily : std::uint8_t { Default = 0, Pal, Ntsc };
-
-inline constexpr std::uint32_t kPalVtimeTicks = 1'800'000;
-
-inline constexpr std::int64_t kScanlockMinVbp = 6;
-inline constexpr std::int64_t kScanlockVtotalMax = 4095;
-inline constexpr std::int64_t kScanlockRotMargin = 5;
-
-inline constexpr double kScanlockVtotalRoundCeiling = static_cast<double>(kScanlockVtotalMax) + 0.5;
+std::optional<std::int64_t> yc_lookup(
+    std::span<const YcMode> table,
+    std::string_view key,
+    std::string_view key_expanded
+);
 
 inline constexpr std::uint8_t kUioGetVres = 0x23;
 inline constexpr std::uint8_t kUioSetHeight = 0x27;
@@ -175,9 +160,12 @@ struct GeometryPass {
     bool yc_sent = false;
 };
 
-[[nodiscard]] Ex<GeometryPass> sample_video_geometry(hal::ISpiTransport& link, bool force,
-                                                     GeometryGate& gate,
-                                                     IFilterResend* filters = nullptr);
+[[nodiscard]] Ex<GeometryPass> sample_video_geometry(
+    hal::ISpiTransport& link,
+    bool force,
+    GeometryGate& gate,
+    IFilterResend* filters = nullptr
+);
 
 class VideoService {
     TASTY_SEAT_RESIDENT(Ui);
@@ -187,43 +175,30 @@ public:
 
     VideoService(const VideoService&) = delete;
     VideoService& operator=(const VideoService&) = delete;
-    explicit VideoService(Wiring w) noexcept;
-    [[nodiscard]] static VideoService create(Wiring w);
+
+    explicit VideoService(Wiring w, adv7513::Io io = adv7513::kUnboundIo) noexcept;
+    [[nodiscard]] static VideoService create(Wiring w, adv7513::Io io = adv7513::kUnboundIo);
     [[nodiscard]] static VideoService create();
 
-    struct ParsedMode {
-        Modeline mode{};
-        ModeRequest how = ModeRequest::PresetIndex;
-
-        std::uint32_t preset_index = 0;
-
-        std::optional<PllBlock> raw_pll{};
-    };
-    [[nodiscard]] Ex<ParsedMode> parse_mode(std::string_view spec) const;
-
-    struct StoredMode {
-        Modeline mode{};
-        bool explicitly_requested = false;
-        bool fully_custom = false;
-    };
-    static StoredMode store_mode(const ParsedMode& parsed, bool support_fhd, bool supports_pr);
-
-    static StoredMode preset_fallback(bool support_fhd, bool supports_pr);
+    [[nodiscard]] Ex<video_timing::ParsedMode> parse_mode(std::string_view spec) const;
 
     [[nodiscard]] Ex<void> apply(const Modeline& m, PllBlock pll, Modeline::WireOptions opt);
 
     [[nodiscard]] Ex<void> poll_resolution();
 
-    [[nodiscard]] Ex<void> poll_hotplug();
+    [[nodiscard]] Ex<void> poll_hotplug() { return hdmi_.poll_hotplug(); }
 
-    EdidStore& edid() noexcept { return edid_; }
-    CecStateMachine& cec() noexcept { return cec_; }
+    EdidStore& edid() noexcept { return hdmi_.edid(); }
+
+    CecStateMachine& cec() noexcept { return hdmi_.cec(); }
 
     class IVideoWireSink {
     public:
         virtual ~IVideoWireSink() = default;
-        [[nodiscard]] virtual Ex<void> publish(std::uint8_t opcode,
-                                               std::span<const std::uint16_t> words) = 0;
+        [[nodiscard]] virtual Ex<void> publish(
+            std::uint8_t opcode,
+            std::span<const std::uint16_t> words
+        ) = 0;
 
     protected:
         IVideoWireSink() = default;
@@ -247,98 +222,57 @@ public:
         infra::OptRef<IResolutionSampler> sampler{};
     };
 
-    void set_adv7513_io(const adv7513::Io& io) noexcept { io_ = io; }
+    void attach() noexcept { hdmi_.attach(); }
 
-    void set_hdmi_capable(bool v) noexcept { hdmi_capable_ = v; }
-    bool hdmi_capable() const noexcept { return hdmi_capable_; }
+    void set_hdmi_capable(bool v) noexcept { hdmi_.set_hdmi_capable(v); }
+
+    bool hdmi_capable() const noexcept { return hdmi_.hdmi_capable(); }
 
     void set_supports_pr(bool v) noexcept { supports_pr_ = v; }
+
     bool supports_pr() const noexcept { return supports_pr_; }
 
-    const VideoSample& info() const noexcept { return info_; }
+    const VideoSample& info() const noexcept { return gate_.last; }
+
     Generation resolution_generation() const noexcept { return res_gen_; }
 
-    [[nodiscard]] Ex<void> request_power(bool on);
-    bool power_requested() const noexcept { return power_requested_; }
+    [[nodiscard]] Ex<void> request_power(bool on) { return hdmi_.request_power(on); }
 
-    bool init_owed() const noexcept { return init_owed_; }
-    void clear_init_owed() noexcept { init_owed_ = false; }
+    bool power_requested() const noexcept { return hdmi_.power_requested(); }
 
-    Generation audio_generation() const noexcept { return audio_gen_; }
+    bool init_owed() const noexcept { return hdmi_.init_owed(); }
 
-    Generation hotplug_generation() const noexcept { return hpd_gen_; }
-    bool sink_powered() const noexcept { return sink_powered_; }
+    void clear_init_owed() noexcept { hdmi_.clear_init_owed(); }
 
-    static VFilter select_vfilter(const VideoSample& s, std::span<const bool> slot_enabled);
+    Generation audio_generation() const noexcept { return hdmi_.audio_generation(); }
+
+    Generation hotplug_generation() const noexcept { return hdmi_.hotplug_generation(); }
+
+    bool sink_powered() const noexcept { return hdmi_.sink_powered(); }
 
     VFilter vfilter() const noexcept { return vfilter_; }
 
     void set_filter_slots(std::span<const bool> enabled) noexcept;
 
-    static std::optional<double> estimate_fpix(const Modeline& m, std::uint32_t vtime,
-                                               double refresh_min, double refresh_max);
-
-    struct ScanrateLock {
-        std::uint32_t vfp = 0;
-        std::uint32_t vbp = 0;
-        std::uint32_t vtotal = 0;
-        double target_scanrate_hz = 0.0;
-        double actual_scanrate_hz = 0.0;
-    };
-
-    [[nodiscard]] static std::optional<ScanrateLock> lock_scanrate(const Modeline& m,
-                                                                   std::uint32_t vtime) noexcept;
-
-    [[nodiscard]] static bool rotation_needs_buffered_scaler(
-        const Modeline& m, const std::optional<ScanrateLock>& lock, const VideoSample& s) noexcept;
-
-    struct FamilyChoice {
-        VmodeFamily family = VmodeFamily::Default;
-        bool adjustable = false;
-    };
-    [[nodiscard]] static FamilyChoice select_family(std::uint32_t vtime, bool vsync_adjust,
-                                                    bool have_pal, bool have_ntsc) noexcept;
-
     void request_force_sample() noexcept { force_next_ = true; }
 
     void reset_resolution_gate() noexcept {
-        last_res_ = 0;
-        vi_seen_ = false;
-        last_fb_crc_ = 0;
-        last_flt_flags_ = 0;
-        info_ = VideoSample{};
+        gate_ = GeometryGate{};
         force_next_ = true;
     }
 
 private:
-    [[nodiscard]] Ex<void> apply_tmds_power(bool on);
-
-    [[nodiscard]] Ex<void> settle_and_publish();
-
-    adv7513::Io io_{};
-    EdidStore edid_{io_};
-    CecStateMachine cec_{io_};
+    HdmiLink hdmi_;
 
     infra::OptRef<IVideoWireSink> sink_{};
     infra::OptRef<IResolutionSampler> sampler_{};
 
-    VideoSample info_{};
+    GeometryGate gate_{};
     Generation res_gen_{};
-    Generation hpd_gen_{};
-    Generation audio_gen_{};
-    bool hdmi_capable_ = false;
-    bool power_requested_ = true;
-    bool init_owed_ = false;
     bool supports_pr_ = true;
-    bool sink_powered_ = false;
     bool force_next_ = true;
-    bool vi_seen_ = false;
-
-    std::uint16_t last_res_ = 0;
-    std::uint8_t last_fb_crc_ = 0;
-    std::uint16_t last_flt_flags_ = 0;
     VFilter vfilter_ = VFilter::Horz;
     std::array<bool, 4> filter_slots_{};
 };
 
-}  // namespace mister::svc
+}

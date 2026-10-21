@@ -10,4 +10,4 @@ struct LateAnswers {
     std::uint32_t max_us = 0;
 };
 
-}  // namespace mister::proto
+}

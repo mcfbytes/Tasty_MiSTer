@@ -19,4 +19,4 @@ struct CheatLookup {
     bool reset_on_mount = true;
 };
 
-}  // namespace mister::cores
+}

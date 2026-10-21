@@ -12,4 +12,4 @@ struct FillRun {
     std::vector<std::uint8_t> pattern;
 };
 
-}  // namespace mister::cores::mra
+}

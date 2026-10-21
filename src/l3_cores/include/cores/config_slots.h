@@ -24,7 +24,8 @@ public:
     [[nodiscard]] virtual std::uint8_t slot_count() const noexcept = 0;
 
     [[nodiscard]] virtual FixedStr<kConfigNameChars, StrFit::Clip> file_name(
-        ConfigSlot slot) const noexcept = 0;
+        ConfigSlot slot
+    ) const noexcept = 0;
     [[nodiscard]] virtual ConfigFit fit() const noexcept = 0;
 
     [[nodiscard]] virtual std::span<const std::byte> snapshot() noexcept = 0;
@@ -32,7 +33,8 @@ public:
     [[nodiscard]] virtual Ex<void> restore(ConfigBlob blob) = 0;
 
     [[nodiscard]] virtual FixedStr<kConfigPreviewChars, StrFit::Clip> preview(
-        ConfigBlob blob) const noexcept = 0;
+        ConfigBlob blob
+    ) const noexcept = 0;
 
 protected:
     IConfigSlots() = default;
@@ -40,4 +42,4 @@ protected:
     IConfigSlots& operator=(const IConfigSlots&) = default;
 };
 
-}  // namespace mister::cores
+}

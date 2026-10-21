@@ -17,4 +17,4 @@ struct LoadAsk {
     bool disc = false;
 };
 
-}  // namespace mister::cores
+}

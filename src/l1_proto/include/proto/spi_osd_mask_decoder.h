@@ -21,11 +21,17 @@ public:
 
     static constexpr unsigned kPollTicks = 50;
 
-    SpiOsdMaskDecoder(hal::ISpiTransport& link, ILinkRouter& router,
-                      const IOsdFocus& focus) noexcept
-        : link_(&link), focus_(&focus), out_(router) {}
+    SpiOsdMaskDecoder(
+        hal::ISpiTransport& link,
+        ILinkRouter& router,
+        const IOsdFocus& focus
+    ) noexcept
+        : link_(&link),
+          focus_(&focus),
+          out_(router) {}
 
     void service() noexcept;
+
     [[nodiscard]] bool active() const noexcept { return focus_->osd_focused(); }
 
     void forget(bool front_end) noexcept {
@@ -34,7 +40,9 @@ public:
     }
 
     [[nodiscard]] OsdMask mask() const noexcept { return mask_; }
+
     [[nodiscard]] std::uint32_t publishes() const noexcept { return publishes_; }
+
     [[nodiscard]] std::uint32_t errors() const noexcept { return errors_; }
 
 private:
@@ -49,4 +57,4 @@ private:
     std::uint32_t errors_ = 0;
 };
 
-}  // namespace mister::proto
+}

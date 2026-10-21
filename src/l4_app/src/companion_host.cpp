@@ -7,7 +7,9 @@
 
 namespace mister::app {
 
-void CompanionHost::install(cores::ServantSet set) noexcept { servants_ = std::move(set); }
+void CompanionHost::install(cores::ServantSet set) noexcept {
+    servants_ = std::move(set);
+}
 
 void CompanionHost::serve() noexcept {
     TASTY_SEAT_BODY(CompanionHost);
@@ -17,10 +19,12 @@ void CompanionHost::serve() noexcept {
 
 void CompanionHost::on(const CompanionBind::Attach& a) noexcept {
     TASTY_SEAT_BODY(CompanionHost);
-    if (held_) held_->release();
+    if (held_)
+        held_->release();
     const auto i = static_cast<std::size_t>(a.servant);
     held_ = infra::opt_ref_of(i < servants_.size() ? servants_[i].get() : nullptr);
-    if (held_) held_->begin_core();
+    if (held_)
+        held_->begin_core();
     bound_gen_ = 0;
     attaches_.add();
 }
@@ -36,24 +40,31 @@ void CompanionHost::on(const CompanionBind::Bind& b) noexcept {
     applied_.add();
 }
 
-void CompanionHost::misrouted(const CompanionBind&) noexcept { TASTY_SEAT_BODY(CompanionHost); }
+void CompanionHost::misrouted(const CompanionBind&) noexcept {
+    TASTY_SEAT_BODY(CompanionHost);
+}
 
 cores::IMailboxServant* CompanionHost::servant_for(std::uint16_t gen) noexcept {
     TASTY_SEAT_BODY(CompanionHost);
-    if (gen != bound_gen_ || !held_) serve();
+    if (gen != bound_gen_ || !held_)
+        serve();
     return (gen == bound_gen_ && gen != 0 && held_) ? &*held_ : nullptr;
 }
 
 void CompanionHost::refill_one() noexcept {
     TASTY_SEAT_BODY(CompanionHost);
-    if (held_) held_->refill_one();
+    if (held_)
+        held_->refill_one();
 }
 
-bool CompanionHost::rest() const noexcept { return binds_.empty() && (!held_ || held_->rest()); }
+bool CompanionHost::rest() const noexcept {
+    return binds_.empty() && (!held_ || held_->rest());
+}
 
 void CompanionHost::release() noexcept {
     TASTY_SEAT_BODY(CompanionHost);
-    if (held_) held_->release();
+    if (held_)
+        held_->release();
 }
 
-}  // namespace mister::app
+}

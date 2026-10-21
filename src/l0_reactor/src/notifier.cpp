@@ -15,19 +15,23 @@ namespace {
 ssize_t read_exact(int fd, void* buf, std::size_t n) {
     for (;;) {
         const ssize_t r = ::read(fd, buf, n);
-        if (r >= 0 || errno != EINTR) return r;
+        if (r >= 0 || errno != EINTR)
+            return r;
     }
 }
 
-}  // namespace
+}
 
-Ex<Notifier> Notifier::doorbell_adopt(os::UioLineRef uio,
-                                      const hal::RegisterWindow<hal::CauseReg>* cause,
-                                      Cause klass) {
+Ex<Notifier> Notifier::doorbell_adopt(
+    os::UioLineRef uio,
+    const hal::RegisterWindow<hal::CauseReg>* cause,
+    Cause klass
+) {
 
     if (uio.fd() < 0) {
         return std::unexpected(
-            Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(EBADF)});
+            Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(EBADF)}
+        );
     }
 
     (void)uio.consume();
@@ -88,25 +92,29 @@ CauseDecode Notifier::drain_checked() {
 
             std::uint64_t expirations = 0;
             const ssize_t n = read_exact(fd_.get(), &expirations, sizeof expirations);
-            if (n != static_cast<ssize_t>(sizeof expirations)) return {};
+            if (n != static_cast<ssize_t>(sizeof expirations))
+                return {};
             return {Cause::Tick, false};
         }
         case Kind::Frame: {
 
             std::uint64_t edges = 0;
             const ssize_t n = read_exact(fd_.get(), &edges, sizeof edges);
-            if (n != static_cast<ssize_t>(sizeof edges)) return {};
+            if (n != static_cast<ssize_t>(sizeof edges))
+                return {};
             return {Cause::Frame, false};
         }
         case Kind::Test: {
             std::uint64_t v = 0;
             const ssize_t n = read_exact(fd_.get(), &v, sizeof v);
-            if (n != static_cast<ssize_t>(sizeof v)) return {};
+            if (n != static_cast<ssize_t>(sizeof v))
+                return {};
             return {delivers_, false};
         }
         case Kind::Doorbell: {
 
-            if (!uio_.consume()) return {};
+            if (!uio_.consume())
+                return {};
             const std::uint32_t word = cause_ ? cause_->read(hal::CauseReg::Reg::Cause) : 0u;
             const CauseDecode d = decode_cause_checked(word);
 
@@ -121,4 +129,4 @@ CauseDecode Notifier::drain_checked() {
     return {};
 }
 
-}  // namespace mister::reactor
+}

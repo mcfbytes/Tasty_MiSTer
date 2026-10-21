@@ -9,14 +9,19 @@
 namespace mister::app {
 
 template <class Owner>
-Ex<LoadWindow<Owner>> LoadWindow<Owner>::open(ILoadWindowMap<Owner>& map,
-                                              const hal::PhysRegion& aperture, os::PhysAddr addr,
-                                              std::uint64_t len) {
+Ex<LoadWindow<Owner>> LoadWindow<Owner>::open(
+    ILoadWindowMap<Owner>& map,
+    const hal::PhysRegion& aperture,
+    os::PhysAddr addr,
+    std::uint64_t len
+) {
     TASTY_SEAT_BODY(SeatOwner);
     auto region = hal::resolve_load_region(aperture, addr, len);
-    if (!region) return std::unexpected(region.error());
+    if (!region)
+        return std::unexpected(region.error());
     auto mem = map.map(*region);
-    if (!mem) return std::unexpected(mem.error());
+    if (!mem)
+        return std::unexpected(mem.error());
     return LoadWindow(std::move(*mem));
 }
 
@@ -27,20 +32,26 @@ Ex<std::size_t> LoadWindow<Owner>::write(std::size_t off, std::span<const std::b
 }
 
 template <class Owner>
-Ex<std::size_t> LoadWindow<Owner>::write_lanes(std::size_t off, std::span<const std::byte> src,
-                                               std::size_t stride)
+Ex<std::size_t> LoadWindow<Owner>::write_lanes(
+    std::size_t off,
+    std::span<const std::byte> src,
+    std::size_t stride
+)
     requires std::same_as<Owner, seat_owner::Main>
 {
     TASTY_SEAT_BODY(SeatOwner);
     constexpr std::size_t kUnit = 2;
     const std::size_t units = src.size() / kUnit;
-    if (stride == 0) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    if (units == 0) return std::size_t{0};
+    if (stride == 0)
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    if (units == 0)
+        return std::size_t{0};
     const std::size_t len = kUnit * stride * (units - 1) + kUnit;
     const std::size_t size = mem_.region().len;
     if (off > size || len > size - off) {
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)});
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)}
+        );
     }
     const std::span<std::byte> dst = mem_.view(off, len);
     for (std::size_t i = 0; i < units; ++i)
@@ -78,4 +89,4 @@ void LoadWindow<Owner>::handoff() noexcept
 template class LoadWindow<seat_owner::Main>;
 template class LoadWindow<seat_owner::Io>;
 
-}  // namespace mister::app
+}

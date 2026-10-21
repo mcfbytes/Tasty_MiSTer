@@ -38,7 +38,8 @@ const char* rec_verdict_name(RecVerdict v) noexcept {
 }
 
 const char* rec_verdict_remedy(RecVerdict v) noexcept {
-    if (v != RecVerdict::ScalerPortStuck) return nullptr;
+    if (v != RecVerdict::ScalerPortStuck)
+        return nullptr;
     return "the scaler's memory port is stuck (its frames land early), so nothing can be "
            "recorded; reboot the MiSTer to clear it";
 }
@@ -51,4 +52,4 @@ RecStatusText format_recorder_status(const RecorderStatus& s) noexcept {
     return out;
 }
 
-}  // namespace mister::app
+}

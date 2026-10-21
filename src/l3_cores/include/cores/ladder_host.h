@@ -3,8 +3,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 #include "cores/mount_status.h"
 #include "cores/save_extent.h"
@@ -22,19 +24,25 @@ public:
     virtual ~ILadderHost() = default;
 
     [[nodiscard]] virtual bool order(const proto::LinkOp& op) = 0;
+
     template <class A>
         requires infra::AlternativeOf<A, proto::LinkOp>
     [[nodiscard]] bool order(const A& alt) {
         return order(infra::make<proto::LinkOp>(alt));
     }
 
-    [[nodiscard]] virtual Ex<proto::FileId> intern_bytes(std::span<const std::uint8_t> bytes,
-                                                         std::string_view ext,
-                                                         std::uint32_t load_addr) = 0;
+    [[nodiscard]] virtual Ex<proto::FileId> intern_bytes(
+        std::span<const std::uint8_t> bytes,
+        std::string_view ext,
+        std::uint32_t load_addr
+    ) = 0;
 
-    [[nodiscard]] virtual Ex<proto::FileId> intern_piece(std::span<const std::uint8_t> bytes,
-                                                         std::string_view ext, std::uint64_t,
-                                                         std::uint64_t) {
+    [[nodiscard]] virtual Ex<proto::FileId> intern_piece(
+        std::span<const std::uint8_t> bytes,
+        std::string_view ext,
+        std::uint64_t,
+        std::uint64_t
+    ) {
         return intern_bytes(bytes, ext, 0);
     }
 
@@ -42,8 +50,21 @@ public:
 
     [[nodiscard]] virtual std::size_t link_word_bytes() const noexcept { return 1; }
 
-    [[nodiscard]] virtual Ex<proto::FileId> intern_path(std::string_view path,
-                                                        std::uint64_t size_bytes) = 0;
+    [[nodiscard]] virtual Ex<proto::FileId> intern_whole(
+        std::vector<std::uint8_t>&&,
+        std::string_view
+    ) {
+        return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
+    }
+
+    [[nodiscard]] virtual std::optional<bool> file_tx_answer(std::uint32_t) { return std::nullopt; }
+
+    [[nodiscard]] virtual bool order_load_facts(std::span<const std::uint8_t>) { return false; }
+
+    [[nodiscard]] virtual Ex<proto::FileId> intern_path(
+        std::string_view path,
+        std::uint64_t size_bytes
+    ) = 0;
 
     [[nodiscard]] virtual std::uint32_t next_generation() noexcept = 0;
 
@@ -58,10 +79,9 @@ public:
     [[nodiscard]] virtual bool order_savestates(std::string_view, std::uint32_t) { return false; }
 
     [[nodiscard]] virtual std::uint32_t savestates_answered() { return 0; }
+
     [[nodiscard]] virtual SaveExtent save_extent() = 0;
     [[nodiscard]] virtual proto::StatusWord status_word() = 0;
-
-    virtual void bios_missing() = 0;
 
 protected:
     ILadderHost() = default;
@@ -69,4 +89,4 @@ protected:
     ILadderHost& operator=(const ILadderHost&) = default;
 };
 
-}  // namespace mister::cores
+}

@@ -14,6 +14,7 @@
 namespace mister::svc {
 class Vfs;
 }
+
 namespace mister::os {
 struct WritebackProbe;
 }
@@ -49,19 +50,32 @@ int tasty_spawn_stock() noexcept;
 void tasty_set_home_image(const char* exe, const char* arg) noexcept;
 [[nodiscard]] bool tasty_mkdir_p(std::string_view path) noexcept;
 [[nodiscard]] bool tasty_resolve_args(TastyArgs& a) noexcept;
-[[nodiscard]] std::optional<app::PathText> tasty_prepare_record(app::PathText record,
-                                                                std::string_view movie) noexcept;
+[[nodiscard]] std::optional<app::PathText> tasty_prepare_record(
+    app::PathText record,
+    std::string_view movie
+) noexcept;
 
-void warn_writeback_cpumask(const os::WritebackProbe& wb, int rt_cpu, const char* prog,
-                            std::FILE* out) noexcept;
+void warn_writeback_cpumask(
+    const os::WritebackProbe& wb,
+    int rt_cpu,
+    const char* prog,
+    std::FILE* out
+) noexcept;
 
 [[nodiscard]] std::string_view tasty_record_dir(std::string_view record) noexcept;
 
 void tasty_warn_record_writeback(std::string_view record, int rt_cpu) noexcept;
 
-void tasty_warn_record_writeback(std::string_view record, int rt_cpu, const char* cpumask_path,
-                                 const char* unbound_path, std::FILE* out) noexcept;
+void tasty_warn_record_writeback(
+    std::string_view record,
+    int rt_cpu,
+    const char* cpumask_path,
+    const char* unbound_path,
+    std::FILE* out
+) noexcept;
 void tasty_set_owner_comm(const char* comm) noexcept;
+
+void tasty_adopt_owner_comm() noexcept;
 
 void tasty_set_stock_comm(const char* comm) noexcept;
 
@@ -87,13 +101,19 @@ enum class TastyClientAct : std::uint8_t { Idle, Signaled, WroteFifo };
 [[nodiscard]] const char* tasty_movie_refusal_token(std::uint32_t codec_refusal) noexcept;
 
 [[nodiscard]] const char* tasty_refusal_sentence(std::string_view why) noexcept;
-[[nodiscard]] int tasty_check_movie(const svc::Vfs& vfs, std::string_view movie,
-                                    std::string_view rom);
-[[nodiscard]] int tasty_preflight_rom(const svc::Vfs& vfs, std::string_view movie,
-                                      std::string_view rom);
+[[nodiscard]] int tasty_check_movie(
+    const svc::Vfs& vfs,
+    std::string_view movie,
+    std::string_view rom
+);
+[[nodiscard]] int tasty_preflight_rom(
+    const svc::Vfs& vfs,
+    std::string_view movie,
+    std::string_view rom
+);
 
 [[nodiscard]] int tasty_prepare_play(const svc::Vfs& vfs, TastyArgs& a);
 [[nodiscard]] int tasty_info_movie(const svc::Vfs& vfs, std::string_view movie);
 void tasty_set_ctl_paths(const char* lock, const char* pid, const char* status) noexcept;
 
-}  // namespace mister::fw
+}

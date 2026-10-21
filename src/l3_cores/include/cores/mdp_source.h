@@ -33,8 +33,11 @@ public:
     void close() noexcept override;
 
     [[nodiscard]] std::string_view cue_path() const noexcept { return cue_.view(); }
+
     [[nodiscard]] std::string_view base_dir() const noexcept { return base_.view(); }
+
     [[nodiscard]] std::uint8_t track_count() const noexcept { return sheet_.track_count(); }
+
     [[nodiscard]] bool parsed() const noexcept { return parsed_; }
 
 private:
@@ -51,4 +54,4 @@ private:
     bool parsed_ = false;
 };
 
-}  // namespace mister::cores::mdp
+}

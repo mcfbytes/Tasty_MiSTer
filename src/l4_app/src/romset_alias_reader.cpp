@@ -21,19 +21,27 @@ void RomsetAliasReader::bind(const cores::FileSlot& slot) {
     source_ = (slot.romset_aliases != nullptr) ? slot.romset_aliases() : nullptr;
 }
 
-std::optional<std::string> RomsetAliasReader::read_prefix(std::string_view path,
-                                                          std::uint64_t cap) {
+std::optional<std::string> RomsetAliasReader::read_prefix(
+    std::string_view path,
+    std::uint64_t cap
+) {
     TASTY_SEAT_BODY(RomsetAliasReader);
     auto bytes = svc::read_bounded(*vfs_, path, cap);
-    if (!bytes) return std::nullopt;
+    if (!bytes)
+        return std::nullopt;
     return std::string(infra::as_text(std::span(*bytes)));
 }
 
-RomsetAlias RomsetAliasReader::query(std::string_view dir, std::string_view home,
-                                     std::string_view entry, std::string_view key) {
+RomsetAlias RomsetAliasReader::query(
+    std::string_view dir,
+    std::string_view home,
+    std::string_view entry,
+    std::string_view key
+) {
     TASTY_SEAT_BODY(RomsetAliasReader);
-    if (!source_) return {};
+    if (!source_)
+        return {};
     return source_->query(*this, dir, home, entry, key);
 }
 
-}  // namespace mister::app
+}

@@ -32,7 +32,8 @@ public:
     [[nodiscard]] constexpr bool assign(std::string_view s) noexcept {
         const bool over = s.size() > kCapacity;
         if constexpr (kFit == StrFit::Reject) {
-            if (over) return false;
+            if (over)
+                return false;
         }
         const std::size_t n = over ? kCapacity : s.size();
         std::copy_n(s.data(), n, buf_);
@@ -46,7 +47,8 @@ public:
         const std::size_t room = kCapacity - len_;
         const bool over = s.size() > room;
         if constexpr (kFit == StrFit::Reject) {
-            if (over) return false;
+            if (over)
+                return false;
         }
         const std::size_t n = over ? room : s.size();
         std::copy_n(s.data(), n, buf_ + len_);
@@ -67,7 +69,9 @@ public:
     }
 
     [[nodiscard]] constexpr const char* c_str() const noexcept { return buf_; }
+
     [[nodiscard]] constexpr std::size_t size() const noexcept { return len_; }
+
     [[nodiscard]] constexpr bool empty() const noexcept { return len_ == 0; }
 
     [[nodiscard]] constexpr bool clipped() const noexcept { return clipped_; }
@@ -88,4 +92,4 @@ static_assert(std::is_standard_layout_v<FixedStr<8, StrFit::Clip>>);
 static_assert(std::is_trivially_destructible_v<FixedStr<8, StrFit::Reject>>);
 static_assert(std::has_unique_object_representations_v<FixedStr<1024, StrFit::Reject>>);
 
-}  // namespace mister
+}

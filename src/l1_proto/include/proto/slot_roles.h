@@ -22,4 +22,4 @@ struct SlotRoles {
 
 using SlotRoleTable = std::array<SlotRoles, kBlockSlots>;
 
-}  // namespace mister::proto
+}

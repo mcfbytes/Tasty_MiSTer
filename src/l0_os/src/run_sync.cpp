@@ -24,14 +24,14 @@ constexpr long kPollMaxNs = 10'000'000;
 constexpr int kGraceMs = 500;
 
 void sleep_ns(long ns) noexcept {
-    struct timespec ts {
-        0, ns
-    };
+    struct timespec ts{0, ns};
     while (::clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &ts) == EINTR) {
     }
 }
 
-constexpr long ramp(long ns) noexcept { return ns >= kPollMaxNs / 2 ? kPollMaxNs : ns * 2; }
+constexpr long ramp(long ns) noexcept {
+    return ns >= kPollMaxNs / 2 ? kPollMaxNs : ns * 2;
+}
 
 struct Reaped {
     int rc;
@@ -42,7 +42,8 @@ struct Reaped {
     int status = 0;
     for (;;) {
         const ::pid_t r = ::waitpid(pid, &status, WNOHANG);
-        if (r < 0 && errno == EINTR) continue;
+        if (r < 0 && errno == EINTR)
+            continue;
         return Reaped{static_cast<int>(r), r > 0 ? status : 0};
     }
 }
@@ -56,14 +57,19 @@ std::vector<char*> to_argv(std::span<const char* const> argv) {
     return args;
 }
 
-int decode(int status) noexcept { return WIFEXITED(status) ? WEXITSTATUS(status) : -1; }
+int decode(int status) noexcept {
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
 
 constexpr const char* kShell = "/bin/sh";
 
-bool never_started(int e) noexcept { return e == EAGAIN || e == ENOMEM; }
+bool never_started(int e) noexcept {
+    return e == EAGAIN || e == ENOMEM;
+}
 
 std::string script_path(const char* file) {
-    if (std::strchr(file, '/') != nullptr) return file;
+    if (std::strchr(file, '/') != nullptr)
+        return file;
     const char* path = std::getenv("PATH");
     std::string_view rest{path != nullptr ? path : "/bin:/usr/bin"};
     for (;;) {
@@ -72,12 +78,14 @@ std::string script_path(const char* file) {
         std::string cand{dir.empty() ? std::string_view{"."} : dir};
         cand += '/';
         cand += file;
-        struct stat st {};
-        if (::stat(cand.c_str(), &st) == 0 && S_ISREG(st.st_mode) &&
-            ::access(cand.c_str(), X_OK) == 0) {
+        struct stat st{};
+        if (::stat(cand.c_str(), &st) == 0
+            && S_ISREG(st.st_mode)
+            && ::access(cand.c_str(), X_OK) == 0) {
             return cand;
         }
-        if (colon == std::string_view::npos) return {};
+        if (colon == std::string_view::npos)
+            return {};
         rest.remove_prefix(colon + 1);
     }
 }
@@ -85,24 +93,29 @@ std::string script_path(const char* file) {
 std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
     ::pid_t pid = -1;
     int e = ::posix_spawnp(&pid, args[0], nullptr, nullptr, args.data(), environ);
-    if (e == 0) return pid;
-    if (e != ENOEXEC) return std::unexpected(e);
+    if (e == 0)
+        return pid;
+    if (e != ENOEXEC)
+        return std::unexpected(e);
     std::string file = script_path(args[0]);
-    if (file.empty()) return std::unexpected(e);
+    if (file.empty())
+        return std::unexpected(e);
     std::vector<char*> sh;
     sh.reserve(args.size() + 1);
     sh.push_back(const_cast<char*>(kShell));
     sh.push_back(file.data());
     sh.insert(sh.end(), args.begin() + 1, args.end());
     e = ::posix_spawn(&pid, kShell, nullptr, nullptr, sh.data(), environ);
-    if (e != 0) return std::unexpected(e);
+    if (e != 0)
+        return std::unexpected(e);
     return pid;
 }
 
-}  // namespace
+}
 
 [[nodiscard]] Ex<int> run_sync(std::span<const char* const> argv, std::int32_t timeout_ms) {
-    if (argv.empty()) return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
+    if (argv.empty())
+        return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
 
     std::vector<char*> args = to_argv(argv);
 
@@ -121,10 +134,12 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
     if (timeout_ms <= 0) {
         for (;;) {
             const ::pid_t r = ::waitpid(pid, &status, 0);
-            if (r < 0 && errno == EINTR) continue;
+            if (r < 0 && errno == EINTR)
+                continue;
             if (r < 0) {
                 return std::unexpected(
-                    Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+                    Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)}
+                );
             }
             return decode(status);
         }
@@ -134,14 +149,16 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
     long ivl = kPollStartNs;
     for (std::int64_t waited_ns = 0; waited_ns < bound_ns; waited_ns += ivl, ivl = ramp(ivl)) {
         const Reaped re = try_reap(pid);
-        if (re.rc > 0) return decode(re.status);
+        if (re.rc > 0)
+            return decode(re.status);
         if (re.rc < 0) {
             return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
         }
         sleep_ns(ivl);
     }
 
-    if (const Reaped re = try_reap(pid); re.rc > 0) return decode(re.status);
+    if (const Reaped re = try_reap(pid); re.rc > 0)
+        return decode(re.status);
 
     (void)::kill(pid, SIGTERM);
     for (int waited = 0; waited < kGraceMs; waited += 10) {
@@ -154,7 +171,8 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
 
     for (;;) {
         const ::pid_t r = ::waitpid(pid, &status, 0);
-        if (r < 0 && errno == EINTR) continue;
+        if (r < 0 && errno == EINTR)
+            continue;
         break;
     }
     return std::unexpected(Error{Errc::timeout, ERR_SITE(), 0});
@@ -180,7 +198,8 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
     }
     ::pid_t mid = -1;
     int e = ::posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
-    if (e == 0) e = ::posix_spawn(&mid, kShell, nullptr, &attr, args.data(), environ);
+    if (e == 0)
+        e = ::posix_spawn(&mid, kShell, nullptr, &attr, args.data(), environ);
     (void)::posix_spawnattr_destroy(&attr);
     if (e != 0) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(e)});
@@ -189,7 +208,8 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
     int status = 0;
     for (;;) {
         const ::pid_t r = ::waitpid(mid, &status, 0);
-        if (r < 0 && errno == EINTR) continue;
+        if (r < 0 && errno == EINTR)
+            continue;
         if (r < 0) {
             return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
         }
@@ -202,4 +222,4 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
     return {};
 }
 
-}  // namespace mister::os
+}

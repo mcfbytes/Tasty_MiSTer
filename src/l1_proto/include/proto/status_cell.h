@@ -11,12 +11,14 @@
 
 namespace mister::proto {
 
-static_assert(sizeof(StatusWord) == StatusRegister::kWords * sizeof(std::uint16_t),
-              "the cell IS the register's word array; a padded or resized "
-              "payload would silently drop the high bits the cell exists for");
+static_assert(
+    sizeof(StatusWord) == StatusRegister::kWords * sizeof(std::uint16_t),
+    "the cell IS the register's word array; a padded or resized "
+    "payload would silently drop the high bits the cell exists for"
+);
 static_assert(StatusWord::kWords == StatusRegister::kWords);
 static_assert(std::is_trivially_copyable_v<StatusWord>);
 
 using StatusCell = xthread::Telemetry<StatusWord, SeatTag::RT>;
 
-}  // namespace mister::proto
+}

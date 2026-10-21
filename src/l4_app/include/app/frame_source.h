@@ -34,4 +34,4 @@ protected:
     IFrameSource& operator=(const IFrameSource&) = default;
 };
 
-}  // namespace mister::app
+}

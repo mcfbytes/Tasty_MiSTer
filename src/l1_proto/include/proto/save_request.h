@@ -25,8 +25,9 @@ struct SaveRequestWord {
     constexpr hal::SpiWord kChkUpload{0x3C};
     hal::Selected cs(link, hal::ChipSelect::Io);
     auto r = link.transfer(kChkUpload);
-    if (!r) return std::unexpected(r.error());
+    if (!r)
+        return std::unexpected(r.error());
     return SaveRequestWord{r->v};
 }
 
-}  // namespace mister::proto
+}

@@ -2,132 +2,48 @@
 #include "svc/disc_engine.h"
 
 #include "svc/chd_prefetch.h"
+#include "svc/index_pair_cue_program.h"
+#include "svc/index_triple_cue_program.h"
 #include "svc/rw_interleaver.h"
 #include "svc/sector_descrambler.h"
+#include "svc/sentinel_cue_program.h"
 
 #include "infra/byte_view.h"
 
-#include <algorithm>
-#include <charconv>
 #include <cstring>
 #include <string>
 
+#include "disc_lex.h"
 #include "vfs_detail.h"
-
-#include <libchdr/chd.h>
 
 namespace mister::svc {
 
+using namespace disc::detail;
+
 namespace {
-
-constexpr std::uint32_t kFramesPerSecond = 75;
-constexpr std::size_t kSubcodeBytes = 96;
-constexpr std::size_t kUserDataBytes = 2048;
-constexpr std::uint32_t kMode2Cooked = 2336;
-constexpr std::uint32_t kMaxCueTracks = 99;
-
-char lower(char c) noexcept {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-bool ends_with_ci(std::string_view s, std::string_view suffix) noexcept {
-    if (s.size() < suffix.size()) return false;
-    const std::size_t off = s.size() - suffix.size();
-    for (std::size_t i = 0; i < suffix.size(); ++i) {
-        if (lower(s[off + i]) != lower(suffix[i])) return false;
-    }
-    return true;
-}
-
-std::string_view dir_of(std::string_view path) noexcept {
-    const std::size_t slash = path.find_last_of("/\\");
-    return slash == std::string_view::npos ? std::string_view{} : path.substr(0, slash + 1);
-}
-
-std::string_view lstrip(std::string_view s) noexcept {
-    std::size_t i = 0;
-    while (i < s.size() && (s[i] == ' ' || s[i] == '\t'))
-        ++i;
-    return s.substr(i);
-}
-
-constexpr std::size_t kNoDigitLimit = 0;
-constexpr std::size_t kCueFieldDigits = 2;
-
-std::optional<std::uint32_t> take_uint(std::string_view& s,
-                                       std::size_t max_digits = kNoDigitLimit) noexcept {
-    s = lstrip(s);
-    const std::size_t span =
-        (max_digits == kNoDigitLimit) ? s.size() : std::min(s.size(), max_digits);
-    const char* first = s.data();
-    const char* last = s.data() + span;
-    std::uint32_t out = 0;
-    const auto r = std::from_chars(first, last, out);
-    if (r.ec != std::errc{} || r.ptr == first) return std::nullopt;
-    s.remove_prefix(static_cast<std::size_t>(r.ptr - first));
-    return out;
-}
-
-std::optional<std::uint32_t> take_msf(std::string_view s) noexcept {
-    const auto m = take_uint(s, kCueFieldDigits);
-    if (!m) return std::nullopt;
-    if (s.empty() || s.front() != ':') return std::nullopt;
-    s.remove_prefix(1);
-    const auto sec = take_uint(s, kCueFieldDigits);
-    if (!sec) return std::nullopt;
-    if (s.empty() || s.front() != ':') return std::nullopt;
-    s.remove_prefix(1);
-    const auto f = take_uint(s, kCueFieldDigits);
-    if (!f) return std::nullopt;
-    return *m * 60 * kFramesPerSecond + *sec * kFramesPerSecond + *f;
-}
 
 std::uint8_t bcd(std::uint32_t v) noexcept {
     return static_cast<std::uint8_t>((((v / 10) % 10) << 4) | (v % 10));
 }
-
-class LineReader {
-public:
-    explicit LineReader(std::string_view text) noexcept : text_(text) {}
-
-    [[nodiscard]] Ex<void> next(std::span<char> out) noexcept {
-        if (out.empty()) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-        do {
-            std::size_t n = 0;
-            out[0] = '\0';
-            while (pos_ < text_.size() && text_[pos_] != '\n') {
-                const char c = text_[pos_++];
-                if (c == '\r') continue;
-                if (n + 1 < out.size()) {
-                    out[n++] = c;
-                    out[n] = '\0';
-                }
-            }
-            if (pos_ < text_.size()) ++pos_;
-        } while (out[0] == '\0' && pos_ < text_.size());
-        if (out[0] == '\0') return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-        return {};
-    }
-
-private:
-    std::string_view text_;
-    std::size_t pos_ = 0;
-};
 
 struct ChdTypeRow {
     std::string_view name;
     std::uint32_t sector_size;
     TrackType type;
 };
+
 constexpr ChdTypeRow kChdTypes[] = {
-    {"MODE1_RAW", 2352, TrackType::Mode1}, {"MODE2_RAW", 2352, TrackType::Mode2},
-    {"MODE1", 2048, TrackType::Mode1},     {"MODE2", kMode2Cooked, TrackType::Mode2},
+    {"MODE1_RAW", 2352, TrackType::Mode1},
+    {"MODE2_RAW", 2352, TrackType::Mode2},
+    {"MODE1", 2048, TrackType::Mode1},
+    {"MODE2", kMode2Cooked, TrackType::Mode2},
     {"AUDIO", 2352, TrackType::Cdda},
 };
 
 bool take_key(std::string_view& s, std::string_view key) noexcept {
     s = lstrip(s);
-    if (!s.starts_with(key)) return false;
+    if (!s.starts_with(key))
+        return false;
     s.remove_prefix(key.size());
     return true;
 }
@@ -136,6 +52,7 @@ struct Taken {
     std::size_t written = 0;
     std::string_view rest;
 };
+
 [[nodiscard]] Taken take_token(std::span<char> out, std::string_view s) noexcept {
     s = lstrip(s);
     std::size_t n = 0;
@@ -143,56 +60,68 @@ struct Taken {
         out[n] = s[n];
         ++n;
     }
-    if (!out.empty()) out[n] = '\0';
+    if (!out.empty())
+        out[n] = '\0';
     s.remove_prefix(n);
     return Taken{n, s};
 }
 
-std::uint64_t cue_file_pos(const Track& t) noexcept {
-    const std::int64_t pos =
-        static_cast<std::int64_t>(t.start.v) * static_cast<std::int64_t>(t.sector_size) - t.offset;
-    return pos > 0 ? static_cast<std::uint64_t>(pos) : 0u;
 }
-
-}  // namespace
 
 std::optional<ChdTrack> parse_chd_track(const ChdMetaRow& row) noexcept {
     std::string_view s = row.text;
     ChdTrack out{};
     char pgsub[32]{};
-    if (!take_key(s, "TRACK:")) return std::nullopt;
+    if (!take_key(s, "TRACK:"))
+        return std::nullopt;
     const auto number = take_uint(s);
-    if (!number) return std::nullopt;
+    if (!number)
+        return std::nullopt;
     out.number = *number;
-    if (!take_key(s, "TYPE:")) return std::nullopt;
+    if (!take_key(s, "TYPE:"))
+        return std::nullopt;
     const Taken type = take_token(out.type, s);
-    if (type.written == 0) return std::nullopt;
+    if (type.written == 0)
+        return std::nullopt;
     s = type.rest;
-    if (!take_key(s, "SUBTYPE:")) return std::nullopt;
+    if (!take_key(s, "SUBTYPE:"))
+        return std::nullopt;
     const Taken subtype = take_token(out.subtype, s);
-    if (subtype.written == 0) return std::nullopt;
+    if (subtype.written == 0)
+        return std::nullopt;
     s = subtype.rest;
-    if (!take_key(s, "FRAMES:")) return std::nullopt;
+    if (!take_key(s, "FRAMES:"))
+        return std::nullopt;
     const auto frames = take_uint(s);
-    if (!frames) return std::nullopt;
+    if (!frames)
+        return std::nullopt;
     out.frames = *frames;
 
-    if (!row.v2) return out;
-    if (!take_key(s, "PREGAP:")) return std::nullopt;
+    if (!row.v2)
+        return out;
+    if (!take_key(s, "PREGAP:"))
+        return std::nullopt;
     const auto pregap = take_uint(s);
-    if (!pregap) return std::nullopt;
+    if (!pregap)
+        return std::nullopt;
     out.pregap = *pregap;
-    if (!take_key(s, "PGTYPE:")) return std::nullopt;
+    if (!take_key(s, "PGTYPE:"))
+        return std::nullopt;
     const Taken pgtype = take_token(out.pgtype, s);
-    if (pgtype.written == 0) return std::nullopt;
+    if (pgtype.written == 0)
+        return std::nullopt;
     s = pgtype.rest;
-    if (!take_key(s, "PGSUB:")) return std::nullopt;
+    if (!take_key(s, "PGSUB:"))
+        return std::nullopt;
     const Taken pgsub_tok = take_token(pgsub, s);
-    if (pgsub_tok.written == 0) return std::nullopt;
+    if (pgsub_tok.written == 0)
+        return std::nullopt;
     s = pgsub_tok.rest;
-    if (!take_key(s, "POSTGAP:")) return std::nullopt;
+    if (!take_key(s, "POSTGAP:"))
+        return std::nullopt;
     const auto postgap = take_uint(s);
-    if (!postgap) return std::nullopt;
+    if (!postgap)
+        return std::nullopt;
     out.postgap = *postgap;
     return out;
 }
@@ -205,9 +134,15 @@ std::optional<ChdTrack> parse_chd_track(const ChdMetaRow& row) noexcept {
     return {};
 }
 
-DiscEngine::DiscEngine(CuePolicy p, ChdPrefetch& prefetch, infra::OptRef<const Vfs> vfs,
-                       infra::OptRef<const IImageOpener> opener)
-    : policy_(p), vfs_(vfs), opener_(opener), prefetch_(prefetch) {
+DiscEngine::DiscEngine(
+    CuePolicy p,
+    ChdPrefetch& prefetch,
+    infra::OptRef<const Vfs> vfs,
+    infra::OptRef<const IImageOpener> opener
+)
+    : policy_(p),
+      files_io_(vfs, opener),
+      chd_(prefetch) {
     switch (p.frame_shaping) {
         case CuePolicy::FrameShaping::None:
             break;
@@ -215,30 +150,35 @@ DiscEngine::DiscEngine(CuePolicy p, ChdPrefetch& prefetch, infra::OptRef<const V
             frame_shaper_ = std::make_unique<SectorDescrambler>();
             break;
     }
+    switch (p.pregap_model) {
+        case CuePolicy::PregapModel::SingleAccumulator:
+            cue_ = std::make_unique<SentinelCueProgram>(p);
+            break;
+        case CuePolicy::PregapModel::IndexTriple:
+            cue_ = std::make_unique<IndexTripleCueProgram>();
+            break;
+        case CuePolicy::PregapModel::IndexPair:
+            cue_ = std::make_unique<IndexPairCueProgram>();
+            break;
+    }
 }
 
 Ex<DiscEngine> DiscEngine::create(const Vfs& vfs, CuePolicy policy, ChdPrefetch& prefetch) {
     auto ok = check_policy(policy, ERR_SITE());
-    if (!ok) return std::unexpected(ok.error());
+    if (!ok)
+        return std::unexpected(ok.error());
     return DiscEngine(policy, prefetch, infra::OptRef<const Vfs>{vfs}, {});
 }
 
-Ex<DiscEngine> DiscEngine::create(const IImageOpener& opener, CuePolicy policy,
-                                  ChdPrefetch& prefetch) {
+Ex<DiscEngine> DiscEngine::create(
+    const IImageOpener& opener,
+    CuePolicy policy,
+    ChdPrefetch& prefetch
+) {
     auto ok = check_policy(policy, ERR_SITE());
-    if (!ok) return std::unexpected(ok.error());
+    if (!ok)
+        return std::unexpected(ok.error());
     return DiscEngine(policy, prefetch, {}, infra::OptRef<const IImageOpener>{opener});
-}
-
-Ex<std::unique_ptr<IFile>> DiscEngine::open_file(std::string_view path) const {
-    Ex<std::unique_ptr<IFile>> f = std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    if (opener_) {
-        f = opener_->open_read(path);
-    } else if (vfs_) {
-        f = vfs_->open(path, OpenMode::Read);
-    }
-    if (f) (void)(*f)->advise(IFile::Access::Sequential, 0, 0);
-    return f;
 }
 
 Ex<void> DiscEngine::mount(std::string_view image_path) {
@@ -270,26 +210,24 @@ Ex<void> DiscEngine::mount(std::string_view image_path) {
         return r;
     }
 
-    if (chd_ == nullptr && toc_.last != 0) {
+    if (!chd_.attached() && toc_.last != 0) {
         const Track& t0 = toc_.tracks[0];
-        if (t0.backing < file_count_ && files_[t0.backing]) {
-            constexpr std::uint64_t kFirstWindowBytes = 1u * 1024u * 1024u;
-            (void)files_[t0.backing]->advise(IFile::Access::WillNeed, cue_file_pos(t0),
-                                             kFirstWindowBytes);
-        }
+        table_.advise_first_window(t0);
     }
 
-    if (policy_.sub_naming == CuePolicy::SubNaming::ImageSubOrCdg && chd_ == nullptr &&
-        ends_with_ci(image_path, ".cue")) {
+    if (policy_.sub_naming == CuePolicy::SubNaming::ImageSubOrCdg
+        && !chd_.attached()
+        && ends_with_ci(image_path, ".cue")) {
         open_sub_or_cdg_(image_path);
     }
-    if (image_named_sub && policy_.sub_naming == CuePolicy::SubNaming::ImageFilename &&
-        image_path.size() > 4) {
+    if (image_named_sub
+        && policy_.sub_naming == CuePolicy::SubNaming::ImageFilename
+        && image_path.size() > 4) {
         std::string sub_name(image_path.substr(0, image_path.size() - 4));
         sub_name.append(".sub");
-        auto s = open_file(sub_name);
+        auto s = files_io_.open_file(sub_name);
         if (s) {
-            sub_ = std::move(*s);
+            subcode_.attach(std::move(*s));
             toc_.has_subcode = true;
         }
     }
@@ -299,671 +237,35 @@ Ex<void> DiscEngine::mount(std::string_view image_path) {
 
 Ex<void> DiscEngine::unmount() {
 
-    if (!prefetch_.get().settle_park()) ++park_timeouts_;
-    for (auto& f : files_)
-        f.reset();
-    file_count_ = 0;
-    sub_.reset();
-    sub_origin_ = 0;
-    sub_cdg_ = false;
+    chd_.park();
+    table_.reset();
+    subcode_.reset();
     sub_shaper_.reset();
-    chd_.reset();
-    hunk_buf_.reset();
-    hunk_bytes_ = 0;
-    sectors_per_hunk_ = 0;
-    hunk_count_ = 0;
-    hunk_memo_ = kNoHunk;
-    hunk_view_ = {};
-    prefetch_depth_ = 0;
-    sync_decompress_ = 0;
+    chd_.release();
     toc_ = Toc{};
     mounted_ = false;
     return {};
 }
 
-Ex<std::string> DiscEngine::read_cue_text(std::string_view cue_path) const {
-    auto cue = open_file(cue_path);
-    if (!cue) return std::unexpected(cue.error());
-    auto cue_size = (*cue)->size();
-    if (!cue_size) return std::unexpected(cue_size.error());
-
-    constexpr std::uint64_t kMaxCueBytes = 100u * 1024u;
-    const std::size_t want =
-        static_cast<std::size_t>(std::min<std::uint64_t>(cue_size->v, kMaxCueBytes));
-    std::string text(want, '\0');
-    if (want != 0) {
-        auto rd = (*cue)->read_at(0, std::as_writable_bytes(std::span<char>(text.data(), want)));
-        if (!rd) return std::unexpected(rd.error());
-        text.resize(*rd);
-    }
-    return text;
-}
-
 Ex<void> DiscEngine::mount_cue(std::string_view cue_path) {
-    if (policy_.pregap_model == CuePolicy::PregapModel::IndexTriple) {
-        return mount_cue_index_triple(cue_path);
-    }
-    if (policy_.pregap_model == CuePolicy::PregapModel::IndexPair) {
-        return mount_cue_index_pair(cue_path);
-    }
-
-    cdda_order_ = CddaOrder::LittleEndian;
-
-    auto text_r = read_cue_text(cue_path);
-    if (!text_r) return std::unexpected(text_r.error());
-    const std::string text = std::move(*text_r);
-
-    const std::string_view base_dir = dir_of(cue_path);
-
-    std::uint32_t last = 0;
-    std::uint32_t pregap = 0;
-
-    std::uint32_t track_pregap = 0;
-    std::uint32_t hdr = 0;
-    std::string fname;
-    bool pending_open = false;
-    std::uint64_t pending_size = 0;
-    std::unique_ptr<IFile> pending_file;
-    std::uint16_t last_backing = 0;
-    bool track0_size_stated = false;
-    bool aborted = false;
-
-    std::uint32_t running_ss = 0;
-    const bool pregap_relative =
-        policy_.track_close == CuePolicy::TrackClose::SentinelPregapRelative;
-
-    LineReader reader(text);
-    char line[1024];
-    while (reader.next(std::span(line))) {
-        std::string_view sv = lstrip(std::string_view(line));
-
-        if (sv.starts_with("FILE")) {
-            std::string_view rest = lstrip(sv.substr(4));
-            std::string_view name;
-            if (!rest.empty() && rest.front() == '"') {
-                rest.remove_prefix(1);
-                const std::size_t q = rest.find('"');
-                name = rest.substr(0, q == std::string_view::npos ? rest.size() : q);
-                rest = (q == std::string_view::npos) ? std::string_view{} : rest.substr(q);
-            } else {
-                const std::size_t sp = rest.find(' ');
-                name = rest.substr(0, sp == std::string_view::npos ? rest.size() : sp);
-                rest = (sp == std::string_view::npos) ? std::string_view{} : rest.substr(sp);
-            }
-
-            fname.assign(base_dir);
-            fname.append(name);
-
-            auto f = open_file(fname);
-            if (!f) return std::unexpected(f.error());
-            auto sz = (*f)->size();
-            if (!sz) return std::unexpected(sz.error());
-
-            if (rest.find("BINARY") == std::string_view::npos &&
-                rest.find("MOTOROLA") == std::string_view::npos &&
-                rest.find("WAVE") == std::string_view::npos) {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-            }
-
-            pending_file = std::move(*f);
-            pending_size = sz->v;
-            pending_open = true;
-
-            hdr = (policy_.wav_header_skip && ends_with_ci(fname, ".wav")) ? 44u : 0u;
-            pregap = 0;
-
-            track_pregap = 0;
-            toc_.tracks[last].offset = 0;
-            continue;
-        }
-
-        if (sv.starts_with("TRACK")) {
-            std::string_view rest = sv.substr(5);
-            const auto number = take_uint(rest, kCueFieldDigits);
-            if (!number) continue;
-
-            if (*number != last + 1) {
-                aborted = true;
-                break;
-            }
-
-            track_pregap = 0;
-            Track& t = toc_.tracks[last];
-            if (policy_.type_detect == CuePolicy::TypeDetect::Track0Only) {
-
-                if (last == 0) {
-                    if (sv.find("MODE1/2048") != std::string_view::npos) {
-                        t.sector_size = 2048;
-                        t.type = TrackType::Mode1;
-                        track0_size_stated = true;
-                    } else if (sv.find("MODE1/2352") != std::string_view::npos) {
-                        t.sector_size = kCdDataSize;
-                        t.type = TrackType::Mode1;
-                        track0_size_stated = true;
-                    }
-                }
-            } else if (policy_.type_detect == CuePolicy::TypeDetect::PerTrackRunningSize) {
-
-                if (sv.find("MODE1/2048") != std::string_view::npos) {
-                    running_ss = 2048;
-                    t.type = TrackType::Mode1;
-                } else if (sv.find("MODE1/2352") != std::string_view::npos) {
-                    running_ss = kCdDataSize;
-                    t.type = TrackType::Mode1;
-                } else if (sv.find("MODE2/2352") != std::string_view::npos) {
-                    running_ss = kCdDataSize;
-                    t.type = TrackType::Mode2;
-                }
-                if (t.type != TrackType::Cdda) t.sector_size = running_ss;
-            } else {
-
-                if (sv.find("MODE1/2048") != std::string_view::npos) {
-                    t.sector_size = 2048;
-                    t.type = TrackType::Mode1;
-                    if (last == 0) track0_size_stated = true;
-                } else if (sv.find("MODE1/2352") != std::string_view::npos) {
-                    t.sector_size = kCdDataSize;
-                    t.type = TrackType::Mode1;
-                    if (last == 0) track0_size_stated = true;
-                } else if (sv.find("AUDIO") != std::string_view::npos) {
-                    t.sector_size = kCdDataSize;
-                    t.type = TrackType::Cdda;
-                }
-            }
-
-            if (last != 0 && !pending_open) toc_.tracks[last - 1].end = Lba{0};
-            continue;
-        }
-
-        if (sv.starts_with("PREGAP")) {
-            if (const auto frames = take_msf(sv.substr(6))) {
-                pregap += *frames;
-                track_pregap = *frames;
-            }
-            continue;
-        }
-
-        if (sv.starts_with("INDEX")) {
-            std::string_view rest = sv.substr(5);
-            const auto index = take_uint(rest, kCueFieldDigits);
-            if (!index) continue;
-            const auto frames = take_msf(rest);
-            if (!frames) continue;
-
-            if (*index == 0) {
-
-                if (last != 0 && toc_.tracks[last - 1].end == Lba{0}) {
-                    toc_.tracks[last - 1].end =
-                        pregap_relative ? Lba{pregap} : Lba{*frames + pregap};
-                }
-                continue;
-            }
-            if (*index != 1) continue;
-
-            Track& t = toc_.tracks[last];
-            t.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
-
-            const bool accumulate = (policy_.offset_op == CuePolicy::OffsetOp::Accumulate);
-            if (accumulate) {
-                t.offset +=
-                    static_cast<std::int64_t>(pregap) * static_cast<std::int64_t>(kCdDataSize);
-            }
-
-            if (!pending_open) {
-
-                if (file_count_ == 0) {
-                    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-                }
-                t.backing = last_backing;
-                t.start = Lba{*frames + pregap};
-                if (!accumulate) {
-                    t.offset = static_cast<std::int64_t>(pregap) *
-                                   static_cast<std::int64_t>(t.sector_size) -
-                               static_cast<std::int64_t>(hdr);
-                }
-                if (last != 0 && toc_.tracks[last - 1].end == Lba{0}) {
-                    toc_.tracks[last - 1].end =
-                        pregap_relative ? Lba{t.start.v - track_pregap} : t.start;
-                }
-            } else {
-
-                if (file_count_ >= kMaxTracks) {
-                    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), file_count_});
-                }
-                files_[file_count_] = std::move(pending_file);
-                last_backing = file_count_;
-                ++file_count_;
-                pending_open = false;
-                t.backing = last_backing;
-
-                t.start = Lba{toc_.end.v + pregap};
-
-                std::uint32_t ss = t.sector_size;
-                if (policy_.type_detect == CuePolicy::TypeDetect::Track0Only) {
-                    ss = (t.type != TrackType::Cdda) ? toc_.tracks[0].sector_size
-                                                     : static_cast<std::uint32_t>(kCdDataSize);
-                }
-                if (ss == 0) ss = static_cast<std::uint32_t>(kCdDataSize);
-
-                if (accumulate) {
-                    t.offset += static_cast<std::int64_t>(toc_.end.v) *
-                                static_cast<std::int64_t>(kCdDataSize);
-                } else {
-                    t.offset =
-                        static_cast<std::int64_t>(t.start.v) * static_cast<std::int64_t>(ss) -
-                        static_cast<std::int64_t>(hdr);
-                }
-
-                const std::uint64_t payload = (pending_size > hdr) ? pending_size - hdr : 0;
-                const std::uint64_t sectors = (payload + ss - 1) / ss;
-                t.end = Lba{t.start.v + static_cast<std::uint32_t>(sectors)};
-                t.start = Lba{t.start.v + *frames};
-                toc_.end = t.end;
-            }
-
-            ++last;
-            if (last == kMaxCueTracks) break;
-            continue;
-        }
-    }
-
-    if (aborted) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
-    }
-
-    if (last != 0 && toc_.tracks[last - 1].end == Lba{0}) {
-        toc_.end = Lba{toc_.end.v + pregap};
-        toc_.tracks[last - 1].end = toc_.end;
-    }
-    if (last == 0) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    }
-
-    toc_.last = static_cast<std::uint8_t>(last);
-    toc_.offset_unit = OffsetUnit::CueBytes;
-
-    if (policy_.type_detect == CuePolicy::TypeDetect::PerTrackRunningSize) {
-
-        toc_.sector_size = (running_ss != 0) ? running_ss : kCdDataSize;
-    } else if (track0_size_stated) {
-        toc_.sector_size = toc_.tracks[0].sector_size;
-    } else if (policy_.sniff_sega_disc_system && toc_.tracks[0].backing < file_count_) {
-        std::byte head[16]{};
-        IFile* f = files_[toc_.tracks[0].backing].get();
-        toc_.sector_size = kCdDataSize;
-        if (f != nullptr) {
-            auto rd = f->read_at(0, std::span<std::byte>(head, sizeof(head)));
-            if (rd && *rd == sizeof(head) && std::memcmp(head, "SEGADISCSYSTEM", 14) == 0) {
-                toc_.sector_size = 2048;
-            }
-        }
-    } else {
-        toc_.sector_size = kCdDataSize;
-    }
-
-    if (policy_.type_detect != CuePolicy::TypeDetect::PerTrack) {
-        for (std::uint32_t i = 0; i < last; ++i) {
-            if (toc_.tracks[i].type != TrackType::Cdda) {
-                toc_.tracks[i].sector_size = toc_.sector_size;
-            }
-        }
-    }
-
-    Track& lead_out = toc_.tracks[last];
-    lead_out.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
-    lead_out.type = TrackType::Cdda;
-    lead_out.start = toc_.end;
-    lead_out.end = toc_.end;
-
-    std::string sub_name;
-    if (policy_.sub_naming == CuePolicy::SubNaming::LastTrackFilename && fname.size() > 4) {
-        sub_name.assign(fname, 0, fname.size() - 4);
-    }
-    if (!sub_name.empty()) {
-        sub_name.append(".sub");
-        auto s = open_file(sub_name);
-        if (s) {
-            sub_ = std::move(*s);
-            toc_.has_subcode = true;
-        }
-    }
-    return {};
-}
-
-Ex<void> DiscEngine::mount_cue_index_triple(std::string_view cue_path) {
-    cdda_order_ = CddaOrder::LittleEndian;
-
-    auto text_r = read_cue_text(cue_path);
-    if (!text_r) return std::unexpected(text_r.error());
-    const std::string text = std::move(*text_r);
-
-    const std::string_view base_dir = dir_of(cue_path);
-
-    std::uint32_t last = 0;
-
-    std::uint32_t pregap = 0;
-    std::string fname;
-    bool pending_open = false;
-    std::uint64_t pending_size = 0;
-    std::unique_ptr<IFile> pending_file;
-
-    LineReader reader(text);
-    char line[1024];
-    while (reader.next(std::span(line))) {
-        std::string_view sv = lstrip(std::string_view(line));
-
-        if (sv.starts_with("FILE")) {
-            std::string_view rest = lstrip(sv.substr(4));
-            std::string_view name;
-            if (!rest.empty() && rest.front() == '"') {
-                rest.remove_prefix(1);
-                const std::size_t q = rest.find('"');
-                name = rest.substr(0, q == std::string_view::npos ? rest.size() : q);
-                rest = (q == std::string_view::npos) ? std::string_view{} : rest.substr(q);
-            } else {
-                const std::size_t sp = rest.find(' ');
-                name = rest.substr(0, sp == std::string_view::npos ? rest.size() : sp);
-                rest = (sp == std::string_view::npos) ? std::string_view{} : rest.substr(sp);
-            }
-            fname.assign(base_dir);
-            fname.append(name);
-
-            auto f = open_file(fname);
-            if (!f) return std::unexpected(f.error());
-            auto sz = (*f)->size();
-            if (!sz) return std::unexpected(sz.error());
-
-            if (rest.find("BINARY") == std::string_view::npos) {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
-            }
-            pending_file = std::move(*f);
-            pending_size = sz->v;
-            pending_open = true;
-            continue;
-        }
-
-        if (sv.starts_with("TRACK")) {
-            std::string_view rest = sv.substr(5);
-            const auto number = take_uint(rest, kCueFieldDigits);
-            if (!number) continue;
-            pregap = 0;
-
-            if (*number != last + 1) {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
-            }
-            Track& t = toc_.tracks[last];
-            if (sv.find("MODE1/2352") != std::string_view::npos ||
-                sv.find("MODE2/2352") != std::string_view::npos) {
-                t.sector_size = kCdDataSize;
-                t.type = TrackType::Mode1;
-
-                if (last == 0) toc_.end = Lba{static_cast<std::uint32_t>(kRedBookPregap)};
-            } else if (sv.find("AUDIO") != std::string_view::npos) {
-                t.sector_size = kCdDataSize;
-                t.type = TrackType::Cdda;
-            } else {
-
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
-            }
-            continue;
-        }
-
-        if (sv.starts_with("PREGAP")) {
-            if (const auto frames = take_msf(sv.substr(6))) {
-                pregap += *frames;
-                toc_.tracks[last].pregap_declared = true;
-            }
-            continue;
-        }
-
-        if (sv.starts_with("INDEX")) {
-            std::string_view rest = sv.substr(5);
-            const auto index = take_uint(rest, kCueFieldDigits);
-            if (!index) continue;
-            const auto frames = take_msf(rest);
-            if (!frames) continue;
-
-            if (*index == 0) {
-
-                if (!pending_open) pregap = *frames;
-                continue;
-            }
-            if (*index != 1) continue;
-
-            Track& t = toc_.tracks[last];
-            t.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
-
-            if (!pending_open) {
-
-                if (file_count_ == 0) {
-                    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
-                }
-                t.backing = toc_.tracks[0].backing;
-                std::uint32_t start = *frames;
-                if (t.pregap_declared) start += pregap;
-
-                std::int64_t file_base =
-                    static_cast<std::int64_t>(start) * static_cast<std::int64_t>(t.sector_size);
-                if (last != 0) {
-
-                    toc_.tracks[last - 1].end = Lba{start};
-                    if (pregap != 0) {
-                        t.pregap = start - pregap;
-                        if (!t.pregap_declared) {
-                            file_base -= static_cast<std::int64_t>(kCdDataSize) *
-                                         static_cast<std::int64_t>(t.pregap);
-                        } else {
-                            t.pregap = pregap;
-                        }
-                    }
-                } else if (t.type != TrackType::Cdda) {
-                    t.pregap = static_cast<std::uint32_t>(kRedBookPregap);
-                }
-                t.start = Lba{start};
-                t.offset =
-                    static_cast<std::int64_t>(start) * static_cast<std::int64_t>(t.sector_size) -
-                    file_base;
-            } else {
-
-                if (file_count_ >= kMaxTracks) {
-                    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), file_count_});
-                }
-                files_[file_count_] = std::move(pending_file);
-                t.backing = file_count_;
-                ++file_count_;
-                pending_open = false;
-
-                t.pregap = *frames;
-                if (t.type != TrackType::Cdda && last == 0) {
-                    t.pregap = static_cast<std::uint32_t>(kRedBookPregap);
-                }
-                t.start = toc_.end;
-                toc_.end =
-                    Lba{toc_.end.v + static_cast<std::uint32_t>(pending_size / t.sector_size)};
-                t.offset =
-                    static_cast<std::int64_t>(t.start.v) * static_cast<std::int64_t>(t.sector_size);
-            }
-
-            t.end = toc_.end;
-            ++last;
-            if (last >= kMaxCueTracks) break;
-            continue;
-        }
-    }
-
-    if (last == 0) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    }
-
-    toc_.last = static_cast<std::uint8_t>(last);
-    toc_.sector_size = toc_.tracks[0].sector_size;
-    toc_.offset_unit = OffsetUnit::CueBytes;
-
-    Track& lead_out = toc_.tracks[last];
-    lead_out.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
-    lead_out.type = TrackType::Cdda;
-    lead_out.start = toc_.end;
-    lead_out.end = toc_.end;
-    return {};
-}
-
-Ex<void> DiscEngine::mount_cue_index_pair(std::string_view cue_path) {
-    cdda_order_ = CddaOrder::LittleEndian;
-
-    auto text_r = read_cue_text(cue_path);
-    if (!text_r) return std::unexpected(text_r.error());
-    const std::string text = std::move(*text_r);
-    const std::string_view base_dir = dir_of(cue_path);
-
-    constexpr auto kLeadIn = static_cast<std::int64_t>(kRedBookPregap);
-    constexpr auto kSs = static_cast<std::int64_t>(kCdDataSize);
-    std::uint32_t last = 0;
-    std::int64_t index0 = 0;
-    std::int64_t index1 = 0;
-    std::int64_t disc_end = 0;
-    std::string fname;
-    bool pending_open = false;
-    std::uint64_t pending_size = 0;
-    std::unique_ptr<IFile> pending_file;
-
-    LineReader reader(text);
-    char line[1024];
-    while (reader.next(std::span(line))) {
-        std::string_view sv = lstrip(std::string_view(line));
-
-        if (sv.starts_with("FILE")) {
-            std::string_view rest = lstrip(sv.substr(4));
-            std::string_view name;
-            if (!rest.empty() && rest.front() == '"') {
-                rest.remove_prefix(1);
-                const std::size_t q = rest.find('"');
-                name = rest.substr(0, q == std::string_view::npos ? rest.size() : q);
-                rest = (q == std::string_view::npos) ? std::string_view{} : rest.substr(q);
-            } else {
-                const std::size_t sp = rest.find(' ');
-                name = rest.substr(0, sp == std::string_view::npos ? rest.size() : sp);
-                rest = (sp == std::string_view::npos) ? std::string_view{} : rest.substr(sp);
-            }
-            fname.assign(base_dir);
-            fname.append(name);
-            auto f = open_file(fname);
-            if (!f) return std::unexpected(f.error());
-            auto sz = (*f)->size();
-            if (!sz) return std::unexpected(sz.error());
-            if (rest.find("BINARY") == std::string_view::npos) {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
-            }
-            pending_file = std::move(*f);
-            pending_size = sz->v;
-            pending_open = true;
-            continue;
-        }
-
-        if (sv.starts_with("TRACK")) {
-            std::string_view rest = sv.substr(5);
-            const auto number = take_uint(rest, kCueFieldDigits);
-            if (!number) continue;
-            index0 = 0;
-            if (*number != last + 1) {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
-            }
-            Track& t = toc_.tracks[last];
-            t.sector_size = kCdDataSize;
-            if (last == 0) disc_end = kLeadIn;
-            if (sv.find("MODE1/2352") != std::string_view::npos) {
-                t.type = TrackType::Mode1;
-            } else if (sv.find("MODE2/2352") != std::string_view::npos ||
-                       sv.find("CDI/2352") != std::string_view::npos) {
-                t.type = TrackType::Mode2;
-            } else if (sv.find("AUDIO") != std::string_view::npos) {
-                t.type = TrackType::Cdda;
-            } else {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
-            }
-            continue;
-        }
-
-        if (sv.starts_with("INDEX")) {
-            std::string_view rest = sv.substr(5);
-            const auto index = take_uint(rest, kCueFieldDigits);
-            if (!index) continue;
-            const auto frames = take_msf(rest);
-            if (!frames) continue;
-            if (*index == 0) {
-                index0 = *frames;
-                continue;
-            }
-            if (*index != 1) continue;
-            index1 = *frames;
-
-            Track& t = toc_.tracks[last];
-            t.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
-            std::int64_t start = 0;
-            std::int64_t stock_offset = 0;
-            if (!pending_open) {
-
-                if (last == 0) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-                if (index0 == 0) index0 = index1;
-                start = index1 + kLeadIn;
-                stock_offset = index0 * kSs;
-                const std::int64_t pregap = index1 - index0;
-
-                toc_.tracks[last - 1].end = Lba{static_cast<std::uint32_t>(start - pregap)};
-
-                t.backing = stock_offset != 0 ? toc_.tracks[0].backing
-                                              : static_cast<std::uint16_t>(kMaxTracks);
-            } else {
-
-                if (file_count_ >= kMaxTracks) {
-                    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), file_count_});
-                }
-                files_[file_count_] = std::move(pending_file);
-                t.backing = file_count_;
-                ++file_count_;
-                pending_open = false;
-                start = disc_end + index0 + index1;
-                disc_end += static_cast<std::int64_t>(pending_size / kCdDataSize);
-            }
-            const std::int64_t pregap = index1 - index0;
-            t.start = Lba{static_cast<std::uint32_t>(start)};
-            t.pregap = static_cast<std::uint32_t>(pregap);
-
-            t.offset = (start - pregap) * kSs - stock_offset;
-            t.end = Lba{static_cast<std::uint32_t>(disc_end)};
-            ++last;
-            if (last >= kMaxCueTracks) break;
-            continue;
-        }
-    }
-
-    if (last == 0) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-
-    toc_.last = static_cast<std::uint8_t>(last);
-    toc_.end = Lba{static_cast<std::uint32_t>(disc_end)};
-    toc_.sector_size = kCdDataSize;
-    toc_.offset_unit = OffsetUnit::CueBytes;
-
-    Track& lead_out = toc_.tracks[last];
-    lead_out.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
-    lead_out.type = TrackType::Cdda;
-    lead_out.start = toc_.end;
-    lead_out.end = toc_.end;
-    return {};
+    return cue_->mount(cue_path, CueMount{files_io_, toc_, table_, subcode_, cdda_order_});
 }
 
 Ex<void> DiscEngine::mount_iso(std::string_view iso_path) {
 
-    if (policy_.iso_sizing == CuePolicy::IsoSizing::Declared2048 &&
-        !ends_with_ci(iso_path, ".iso")) {
+    if (policy_.iso_sizing == CuePolicy::IsoSizing::Declared2048
+        && !ends_with_ci(iso_path, ".iso")) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
     cdda_order_ = CddaOrder::LittleEndian;
 
-    auto f = open_file(iso_path);
-    if (!f) return std::unexpected(f.error());
+    auto f = files_io_.open_file(iso_path);
+    if (!f)
+        return std::unexpected(f.error());
     auto sz = (*f)->size();
-    if (!sz) return std::unexpected(sz.error());
+    if (!sz)
+        return std::unexpected(sz.error());
 
     if (policy_.iso_sizing == CuePolicy::IsoSizing::Declared2048) {
         return declare_iso_2048(std::move(*f), *sz);
@@ -973,6 +275,7 @@ Ex<void> DiscEngine::mount_iso(std::string_view iso_path) {
         std::uint32_t sector_size;
         bool mode2;
     };
+
     constexpr Probe kProbes[] = {
         {2048, false},
         {2352, false},
@@ -983,18 +286,23 @@ Ex<void> DiscEngine::mount_iso(std::string_view iso_path) {
     for (const Probe& p : kProbes) {
 
         std::uint64_t seek = 16ull * p.sector_size;
-        if (p.sector_size == 2352 && !p.mode2) seek += 16;
-        if (p.mode2) seek += 24;
+        if (p.sector_size == 2352 && !p.mode2)
+            seek += 16;
+        if (p.mode2)
+            seek += 24;
 
         std::byte pvd[kUserDataBytes]{};
         auto rd = (*f)->read_at(seek, std::span<std::byte>(pvd, sizeof(pvd)));
-        if (!rd || *rd != sizeof(pvd)) continue;
+        if (!rd || *rd != sizeof(pvd))
+            continue;
 
         const auto b = infra::byte_cast<const unsigned char>(std::span(pvd));
         const bool iso9660 = b[0] == 1 && std::memcmp(b.data() + 1, "CD001", 5) == 0 && b[6] == 1;
-        const bool high_sierra =
-            b[8] == 1 && std::memcmp(b.data() + 9, "CDROM", 5) == 0 && b[14] == 1;
-        if (!iso9660 && !high_sierra) continue;
+        const bool high_sierra = b[8] == 1
+            && std::memcmp(b.data() + 9, "CDROM", 5) == 0
+            && b[14] == 1;
+        if (!iso9660 && !high_sierra)
+            continue;
 
         Track& t = toc_.tracks[0];
         t.number = TrackNumber{1};
@@ -1005,8 +313,7 @@ Ex<void> DiscEngine::mount_iso(std::string_view iso_path) {
         t.offset = 0;
         t.backing = 0;
 
-        files_[0] = std::move(*f);
-        file_count_ = 1;
+        table_.hold_single(std::move(*f));
 
         toc_.last = 1;
         toc_.end = t.end;
@@ -1035,8 +342,7 @@ Ex<void> DiscEngine::declare_iso_2048(std::unique_ptr<IFile> f, FileSize sz) {
     t.offset = 0;
     t.backing = 0;
 
-    files_[0] = std::move(f);
-    file_count_ = 1;
+    table_.hold_single(std::move(f));
 
     toc_.last = 1;
     toc_.end = t.end;
@@ -1051,45 +357,27 @@ Ex<void> DiscEngine::declare_iso_2048(std::unique_ptr<IFile> f, FileSize sz) {
     return {};
 }
 
-Ex<void> DiscEngine::mount_chd(std::unique_ptr<IChdSource> source,
-                               std::unique_ptr<IChdSource> prefetch_source) {
-    if (!source) return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
+Ex<void> DiscEngine::mount_chd(
+    std::unique_ptr<IChdSource> source,
+    std::unique_ptr<IChdSource> prefetch_source
+) {
+    if (!source)
+        return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
     (void)unmount();
 
-    const IChdSource::Geometry geo = source->geometry();
-    if (geo.hunk_bytes == 0 || geo.hunk_bytes < geo.unit_bytes) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_bytes});
-    }
-
-    if (geo.unit_bytes != static_cast<std::uint32_t>(kCdFrameSize)) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.unit_bytes});
-    }
-    sectors_per_hunk_ = geo.hunk_bytes / geo.unit_bytes;
-    hunk_bytes_ = geo.hunk_bytes;
-    hunk_count_ = geo.hunk_count;
-
-    hunk_buf_ = std::make_unique<std::byte[]>(hunk_bytes_);
-    hunk_memo_ = kNoHunk;
-    hunk_view_ = {};
-    chd_ = std::move(source);
-
-    if (prefetch_source != nullptr) {
-        if (auto a = prefetch_.get().attach(std::move(prefetch_source),
-                                            static_cast<std::uint32_t>(hunk_bytes_), hunk_count_);
-            !a) {
-            ++prefetch_refusals_;
-        } else {
-            prefetch_depth_ = prefetch_.get().depth();
-        }
-    }
+    auto attached = chd_.attach(std::move(source), std::move(prefetch_source));
+    if (!attached)
+        return attached;
 
     std::uint32_t sector_cnt = 0;
     std::uint32_t count = 0;
     for (; count < kMaxCueTracks; ++count) {
-        const auto row = chd_->track_metadata(count);
-        if (!row) break;
+        const auto row = chd_.track_metadata(count);
+        if (!row)
+            break;
         const std::optional<ChdTrack> parsed = parse_chd_track(*row);
-        if (!parsed) break;
+        if (!parsed)
+            break;
         const ChdTrack& m = *parsed;
 
         Track& t = toc_.tracks[count];
@@ -1099,17 +387,20 @@ Ex<void> DiscEngine::mount_chd(std::unique_ptr<IChdSource> source,
         std::uint32_t pregap = m.pregap;
         if (count != 0) {
             Track& prev = toc_.tracks[count - 1];
-            if (!pregap_valid) prev.end = Lba{prev.end.v + pregap};
+            if (!pregap_valid)
+                prev.end = Lba{prev.end.v + pregap};
             toc_.end = prev.end;
             t.start = toc_.end;
-            if (pregap_valid) t.start = Lba{t.start.v + pregap};
+            if (pregap_valid)
+                t.start = Lba{t.start.v + pregap};
         } else {
             t.start = Lba{pregap_valid ? pregap : 0u};
         }
 
         t.pregap = pregap;
         t.index_num = 2;
-        if (!pregap_valid) pregap = 0;
+        if (!pregap_valid)
+            pregap = 0;
 
         t.sector_size = 0;
         t.type = TrackType::Cdda;
@@ -1130,13 +421,14 @@ Ex<void> DiscEngine::mount_chd(std::unique_ptr<IChdSource> source,
             toc_.has_subcode = true;
         }
 
-        t.offset = static_cast<std::int64_t>(sector_cnt) + static_cast<std::int64_t>(pregap) -
-                   static_cast<std::int64_t>(t.start.v);
+        t.offset = static_cast<std::int64_t>(sector_cnt)
+            + static_cast<std::int64_t>(pregap)
+            - static_cast<std::int64_t>(t.start.v);
         t.end = Lba{t.start.v + m.frames - pregap};
         toc_.end = Lba{t.end.v + m.postgap};
-        sector_cnt += ((m.frames + static_cast<std::uint32_t>(kChdTrackPadding) - 1) /
-                       static_cast<std::uint32_t>(kChdTrackPadding)) *
-                      static_cast<std::uint32_t>(kChdTrackPadding);
+        sector_cnt += ((m.frames + static_cast<std::uint32_t>(kChdTrackPadding) - 1)
+                       / static_cast<std::uint32_t>(kChdTrackPadding))
+            * static_cast<std::uint32_t>(kChdTrackPadding);
     }
 
     if (count == 0) {
@@ -1198,11 +490,14 @@ std::optional<TrackIndex> DiscEngine::track_for_lba(Lba lba) const {
 
 std::optional<TrackIndex> DiscEngine::source_track(Lba lba) const {
     const auto ti = track_for_lba(lba);
-    if (!ti) return std::nullopt;
+    if (!ti)
+        return std::nullopt;
 
-    if (chd_) return ti;
+    if (chd_.attached())
+        return ti;
 
-    if (policy_.pregap_model == CuePolicy::PregapModel::IndexPair) return ti;
+    if (policy_.pregap_model == CuePolicy::PregapModel::IndexPair)
+        return ti;
     const Track& t = toc_.tracks[ti->v];
 
     if (lba < t.start && t.number.v > 1) {
@@ -1211,35 +506,13 @@ std::optional<TrackIndex> DiscEngine::source_track(Lba lba) const {
     return ti;
 }
 
-Ex<void> DiscEngine::load_hunk(std::uint32_t hunk) {
-
-    if (const std::byte* p = prefetch_.get().take(hunk); p != nullptr) {
-        hunk_view_ = std::span<const std::byte>(p, hunk_bytes_);
-        return {};
-    }
-    if (hunk == hunk_memo_) {
-        hunk_view_ = std::span<const std::byte>(hunk_buf_.get(), hunk_bytes_);
-        return {};
-    }
-
-    ++sync_decompress_;
-    prefetch_.get().note_miss();
-    auto r = chd_->read_hunk(hunk, std::span<std::byte>(hunk_buf_.get(), hunk_bytes_));
-    if (!r) {
-        hunk_memo_ = kNoHunk;
-        hunk_view_ = {};
-        return std::unexpected(r.error());
-    }
-    hunk_memo_ = hunk;
-    hunk_view_ = std::span<const std::byte>(hunk_buf_.get(), hunk_bytes_);
-    return {};
-}
-
 Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form form) {
-    if (!mounted_) return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
+    if (!mounted_)
+        return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
 
     const auto ti = source_track(lba);
-    if (!ti) return std::unexpected(Error{Errc::not_found, ERR_SITE(), lba.v});
+    if (!ti)
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), lba.v});
     const Track& t = toc_.tracks[ti->v];
 
     const std::uint32_t ss = t.sector_size;
@@ -1262,7 +535,8 @@ Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form fo
 
             out_len = kUserDataBytes;
             len = kUserDataBytes;
-            if (ss != kUserDataBytes) s_off = (t.type == TrackType::Mode2) ? 24u : 16u;
+            if (ss != kUserDataBytes)
+                s_off = (t.type == TrackType::Mode2) ? 24u : 16u;
             if (static_cast<std::size_t>(s_off) + len > ss) {
                 return std::unexpected(Error{Errc::bad_format, ERR_SITE(), ss});
             }
@@ -1286,7 +560,8 @@ Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form fo
 
     if (dst.size() < out_len) {
         return std::unexpected(
-            Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(out_len)});
+            Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(out_len)}
+        );
     }
 
     if (form == Form::RedBook && ss != kCdDataSize) {
@@ -1306,41 +581,11 @@ Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form fo
         }
     }
 
-    if (chd_) {
-
-        const std::int64_t chd_lba64 = static_cast<std::int64_t>(lba.v) + t.offset;
-        if (chd_lba64 < 0) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba.v});
-        const std::uint32_t chd_lba = static_cast<std::uint32_t>(chd_lba64);
-        const std::uint32_t hunk = chd_lba / sectors_per_hunk_;
-        const std::uint32_t frame = chd_lba % sectors_per_hunk_;
-        auto h = load_hunk(hunk);
-        if (!h) return std::unexpected(h.error());
-
-        const std::size_t base = static_cast<std::size_t>(frame) * kCdFrameSize + s_off;
-        if (base + len > hunk_bytes_) {
-            return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(base)});
-        }
-        if (hunk_view_.empty()) {
-            return std::unexpected(Error{Errc::io, ERR_SITE(), hunk});
-        }
-        std::memcpy(dst.data() + dst_off, hunk_view_.data() + base, len);
-        normalize_cdda_(t, form, dst.subspan(dst_off, len));
-        return out_len;
-    }
-
-    IFile* f = (t.backing < file_count_) ? files_[t.backing].get() : nullptr;
-    if (f == nullptr) return std::unexpected(Error{Errc::not_found, ERR_SITE(), t.backing});
-
-    const std::int64_t pos = static_cast<std::int64_t>(lba.v) * static_cast<std::int64_t>(ss) -
-                             t.offset + static_cast<std::int64_t>(s_off);
-    if (pos < 0) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba.v});
-    auto rd = f->read_at(static_cast<std::uint64_t>(pos), dst.subspan(dst_off, len));
-    if (!rd) return std::unexpected(rd.error());
-    if (*rd != len) {
-        return std::unexpected(
-            Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(*rd)});
-    }
+    IDiscBacking& backing = chd_.attached() ? static_cast<IDiscBacking&>(chd_) : table_;
+    auto rd = backing.read_payload(lba, t, s_off, dst.subspan(dst_off, len));
+    if (!rd)
+        return std::unexpected(rd.error());
+    normalize_cdda_(t, form, dst.subspan(dst_off, len));
     return out_len;
 }
 
@@ -1352,12 +597,18 @@ Ex<std::size_t> DiscEngine::read_user_data(Lba lba, std::span<std::byte> dst) {
     return read_form(lba, dst, Form::UserData);
 }
 
-void DiscEngine::normalize_cdda_(const Track& t, Form form,
-                                 std::span<std::byte> frame) const noexcept {
+void DiscEngine::normalize_cdda_(
+    const Track& t,
+    Form form,
+    std::span<std::byte> frame
+) const noexcept {
 
-    if (form != Form::RedBook) return;
-    if (t.type != TrackType::Cdda) return;
-    if (cdda_order_ == kWireCddaOrder) return;
+    if (form != Form::RedBook)
+        return;
+    if (t.type != TrackType::Cdda)
+        return;
+    if (cdda_order_ == kWireCddaOrder)
+        return;
     for (std::size_t i = 0; i + 1 < frame.size(); i += 2) {
         const std::byte lo = frame[i];
         frame[i] = frame[i + 1];
@@ -1370,48 +621,25 @@ Ex<std::size_t> DiscEngine::read_raw_frame(Lba lba, std::span<std::byte> dst) {
 }
 
 Ex<std::size_t> DiscEngine::read_subcode(Lba lba, std::span<std::byte> dst) {
-    if (!mounted_) return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
+    if (!mounted_)
+        return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
     if (dst.size() < kSubcodeBytes) {
         return std::unexpected(
-            Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(dst.size())});
+            Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(dst.size())}
+        );
     }
 
-    if (sub_) {
+    if (subcode_.attached())
+        return subcode_.read(lba, dst);
 
-        const std::uint32_t at = lba.v > sub_origin_ ? lba.v - sub_origin_ : 0u;
-        if (sub_cdg_) return read_cdg_subcode_(at, dst);
-        auto rd = sub_->read_at(static_cast<std::uint64_t>(at) * kSubcodeBytes,
-                                dst.subspan(0, kSubcodeBytes));
-        if (!rd) return std::unexpected(rd.error());
-        if (*rd != kSubcodeBytes) {
-            return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(*rd)});
-        }
-        return kSubcodeBytes;
-    }
-
-    if (chd_) {
-        if (!toc_.has_subcode) return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+    if (chd_.attached()) {
+        if (!toc_.has_subcode)
+            return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 
         const auto ti = source_track(lba);
-        if (!ti) return std::unexpected(Error{Errc::not_found, ERR_SITE(), lba.v});
-        const std::int64_t chd_lba64 = static_cast<std::int64_t>(lba.v) + toc_.tracks[ti->v].offset;
-        if (chd_lba64 < 0) return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba.v});
-        const std::uint32_t chd_lba = static_cast<std::uint32_t>(chd_lba64);
-        auto h = load_hunk(chd_lba / sectors_per_hunk_);
-        if (!h) return std::unexpected(h.error());
-
-        const std::size_t base =
-            static_cast<std::size_t>(chd_lba % sectors_per_hunk_) * kCdFrameSize + kCdDataSize;
-        if (base + kSubcodeBytes > hunk_bytes_) {
-            return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(base)});
-        }
-        if (hunk_view_.empty()) {
-            return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
-        }
-        std::memcpy(dst.data(), hunk_view_.data() + base, kSubcodeBytes);
-        return kSubcodeBytes;
+        if (!ti)
+            return std::unexpected(Error{Errc::not_found, ERR_SITE(), lba.v});
+        return chd_.read_subcode(lba, toc_.tracks[ti->v], dst);
     }
 
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
@@ -1420,11 +648,13 @@ Ex<std::size_t> DiscEngine::read_subcode(Lba lba, std::span<std::byte> dst) {
 Ex<std::size_t> DiscEngine::read_full_frame(Lba lba, std::span<std::byte> dst) {
     if (dst.size() < kCdFrameSize) {
         return std::unexpected(
-            Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(dst.size())});
+            Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(dst.size())}
+        );
     }
     const std::span<std::byte, kCdFrameSize> frame = dst.first<kCdFrameSize>();
     auto r = read_raw_frame(lba, frame.first<kCdDataSize>());
-    if (!r) return std::unexpected(r.error());
+    if (!r)
+        return std::unexpected(r.error());
     const std::span<std::byte> tail = frame.subspan(kCdDataSize, kSubcodeBytes);
     std::memset(tail.data(), 0, tail.size());
 
@@ -1435,53 +665,18 @@ Ex<std::size_t> DiscEngine::read_full_frame(Lba lba, std::span<std::byte> dst) {
             sub_shaper_->shape(lba, frame);
         }
     }
-    if (frame_shaper_ != nullptr) frame_shaper_->shape(lba, frame);
+    if (frame_shaper_ != nullptr)
+        frame_shaper_->shape(lba, frame);
     return kCdFrameSize;
 }
 
-constexpr int kCdgColumnOffset[24] = {0,       18 - 24,  5 - 48,   23 - 72,  4 - 96,   2 - 120,
-                                      6 - 144, 7 - 168,  8,        9 - 24,   10 - 48,  11 - 72,
-                                      12 - 96, 13 - 120, 14 - 144, 15 - 168, 16,       17 - 24,
-                                      1 - 48,  19 - 72,  20 - 96,  21 - 120, 22 - 144, 3 - 168};
-
-constexpr std::uint32_t kCdgReach = 165;
-constexpr std::size_t kCdgSpan = 254;
-
-Ex<std::size_t> DiscEngine::read_cdg_subcode_(std::uint32_t at, std::span<std::byte> dst) {
-
-    const std::uint64_t want = static_cast<std::uint64_t>(at) * kSubcodeBytes;
-    const std::uint64_t base = want > kCdgReach ? want - kCdgReach : 0;
-    std::byte buf[kCdgSpan]{};
-    auto rd = sub_->read_at(base, std::span<std::byte>(buf, sizeof(buf)));
-    if (!rd) return std::unexpected(rd.error());
-    for (std::size_t pack = 0; pack < 4; ++pack) {
-        for (std::size_t col = 0; col < 24; ++col) {
-            const int rel =
-                static_cast<int>(pack * 24) + kCdgColumnOffset[col] + static_cast<int>(kCdgReach);
-            dst[pack * 24 + col] = buf[static_cast<std::size_t>(rel)];
-        }
-    }
-    return kSubcodeBytes;
-}
-
 void DiscEngine::open_sub_or_cdg_(std::string_view cue_path) {
-
-    if (cue_path.size() < 4) return;
-    std::string name(cue_path.substr(0, cue_path.size() - 4));
-    name.append(".sub");
-    auto s = open_file(name);
-    bool cdg = false;
-    if (!s) {
-        name.replace(name.size() - 4, 4, ".cdg");
-        s = open_file(name);
-        cdg = true;
-    }
-    if (!s) return;
-    sub_ = std::move(*s);
-    sub_cdg_ = cdg;
-    sub_origin_ = static_cast<std::uint32_t>(kRedBookPregap);
+    const SubcodeSidecar::Found found = subcode_.open_sub_or_cdg(cue_path, files_io_);
+    if (found == SubcodeSidecar::Found::None)
+        return;
     toc_.has_subcode = true;
-    if (!cdg) sub_shaper_ = std::make_unique<RwInterleaver>();
+    if (found == SubcodeSidecar::Found::Sub)
+        sub_shaper_ = std::make_unique<RwInterleaver>();
 }
 
 std::uint32_t DiscEngine::seek_ms(Lba from_lba, Lba to_lba) const {
@@ -1490,201 +685,51 @@ std::uint32_t DiscEngine::seek_ms(Lba from_lba, Lba to_lba) const {
 
 void DiscEngine::advise_ahead(Lba lba) noexcept {
 
-    if (chd_ || !mounted_) return;
+    if (chd_.attached() || !mounted_)
+        return;
     const auto ti = source_track(lba);
-    if (!ti) return;
+    if (!ti)
+        return;
     const Track& t = toc_.tracks[ti->v];
-    if (t.sector_size == 0) return;
-    IFile* const f = (t.backing < file_count_) ? files_[t.backing].get() : nullptr;
-    if (f == nullptr) return;
-    const std::int64_t pos =
-        static_cast<std::int64_t>(lba.v) * static_cast<std::int64_t>(t.sector_size) - t.offset;
-    if (pos < 0) return;
-    const std::uint64_t len = static_cast<std::uint64_t>(kAdviseAheadSectors) * t.sector_size;
-
-    (void)f->advise(IFile::Access::WillNeed, static_cast<std::uint64_t>(pos), len);
+    if (t.sector_size == 0)
+        return;
+    table_.advise_ahead(lba, t, kAdviseAheadSectors);
 }
 
 void DiscEngine::prefetch_hint(Lba lba) {
 
-    if (!chd_ || sectors_per_hunk_ == 0) return;
+    if (chd_.prefetch_off())
+        return;
 
     const auto ti = source_track(lba);
-    if (!ti) return;
-    const std::int64_t chd_lba = static_cast<std::int64_t>(lba.v) + toc_.tracks[ti->v].offset;
-    if (chd_lba < 0) return;
-    const std::uint32_t hunk = static_cast<std::uint32_t>(chd_lba) / sectors_per_hunk_;
-    if (hunk_count_ != 0 && hunk >= hunk_count_) return;
-    prefetch_.get().submit(hunk);
-}
-
-namespace {
-
-struct CoreFileBinding;
-
-std::uint64_t cf_fsize(core_file* f);
-std::size_t cf_fread(void* dst, std::size_t elem, std::size_t count, core_file* f);
-int cf_fclose(core_file* f);
-int cf_fseek(core_file* f, std::int64_t off, int whence);
-
-struct CoreFileBinding {
-    CoreFileBinding(IFile& source, std::uint64_t byte_size) noexcept
-        : file(&source), size(byte_size) {
-        cf.argp = this;
-        cf.fsize = &cf_fsize;
-        cf.fread = &cf_fread;
-        cf.fclose = &cf_fclose;
-        cf.fseek = &cf_fseek;
-    }
-    core_file cf{};
-    IFile* file;
-    std::uint64_t pos = 0;
-    std::uint64_t size;
-};
-
-std::uint64_t cf_fsize(core_file* f) {
-    auto* b = static_cast<CoreFileBinding*>(f->argp);
-    return b->size;
-}
-
-std::size_t cf_fread(void* dst, std::size_t elem, std::size_t count, core_file* f) {
-    auto* b = static_cast<CoreFileBinding*>(f->argp);
-    const std::uint64_t bytes = static_cast<std::uint64_t>(elem) * count;
-    if (elem == 0 || bytes == 0) return 0;
-    auto rd = b->file->read_at(b->pos, std::span<std::byte>(static_cast<std::byte*>(dst),
-                                                            static_cast<std::size_t>(bytes)));
-    if (!rd) return 0;
-    b->pos += *rd;
-    return *rd / elem;
-}
-
-int cf_fclose(core_file*) { return 0; }
-
-int cf_fseek(core_file* f, std::int64_t off, int whence) {
-    auto* b = static_cast<CoreFileBinding*>(f->argp);
-    std::int64_t base = 0;
-    if (whence == SEEK_CUR)
-        base = static_cast<std::int64_t>(b->pos);
-    else if (whence == SEEK_END)
-        base = static_cast<std::int64_t>(b->size);
-    const std::int64_t next = base + off;
-    if (next < 0) return -1;
-    b->pos = static_cast<std::uint64_t>(next);
-    return 0;
-}
-
-struct OpenedHandle {
-    chd_file* chd;
-    const chd_header* header;
-    std::uint32_t err;
-};
-
-[[nodiscard]] OpenedHandle open_handle(CoreFileBinding& b) noexcept {
-    chd_file* chd = nullptr;
-    const chd_error err = chd_open_core_file(&b.cf, CHD_OPEN_READ, nullptr, &chd);
-    if (err != CHDERR_NONE) {
-        return OpenedHandle{nullptr, nullptr, static_cast<std::uint32_t>(err)};
-    }
-    const chd_header* header = chd_get_header(chd);
-    if (header == nullptr) {
-        chd_close(chd);
-        return OpenedHandle{nullptr, nullptr, 0};
-    }
-    return OpenedHandle{chd, header, 0};
-}
-
-class LibChdrSource final : public IChdSource {
-    struct Key {};
-
-public:
-    [[nodiscard]] static Ex<std::unique_ptr<LibChdrSource>> open(std::unique_ptr<IFile> file,
-                                                                 std::uint64_t size) {
-        auto src = std::make_unique<LibChdrSource>(Key{}, std::move(file), size);
-        if (src->handle_.chd == nullptr) {
-            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), src->handle_.err});
-        }
-        return src;
-    }
-
-    LibChdrSource(Key, std::unique_ptr<IFile> file, std::uint64_t size) noexcept
-        : file_(std::move(file)), binding_(*file_, size), handle_(open_handle(binding_)) {}
-    ~LibChdrSource() override {
-        if (handle_.chd != nullptr) chd_close(handle_.chd);
-    }
-    LibChdrSource(const LibChdrSource&) = delete;
-    LibChdrSource& operator=(const LibChdrSource&) = delete;
-
-    Geometry geometry() const noexcept override {
-        return Geometry{handle_.header->hunkbytes, handle_.header->unitbytes,
-                        handle_.header->totalhunks};
-    }
-
-    std::optional<ChdMetaRow> track_metadata(std::uint32_t index) override {
-
-        if (chd_get_metadata(handle_.chd, CDROM_TRACK_METADATA2_TAG, index, meta_, sizeof(meta_),
-                             nullptr, nullptr, nullptr) == CHDERR_NONE) {
-            meta_[sizeof(meta_) - 1] = '\0';
-            return ChdMetaRow{std::string_view(meta_), true};
-        }
-        if (chd_get_metadata(handle_.chd, CDROM_TRACK_METADATA_TAG, index, meta_, sizeof(meta_),
-                             nullptr, nullptr, nullptr) == CHDERR_NONE) {
-            meta_[sizeof(meta_) - 1] = '\0';
-            return ChdMetaRow{std::string_view(meta_), false};
-        }
-        return std::nullopt;
-    }
-
-    [[nodiscard]] Ex<void> read_hunk(std::uint32_t hunk, std::span<std::byte> dst) override {
-        if (dst.size() < handle_.header->hunkbytes) {
-            return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(dst.size())});
-        }
-        const chd_error err = chd_read(handle_.chd, hunk, dst.data());
-        if (err != CHDERR_NONE) {
-            return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(err)});
-        }
-        return {};
-    }
-
-private:
-    std::unique_ptr<IFile> file_;
-    CoreFileBinding binding_;
-    OpenedHandle handle_;
-    char meta_[512]{};
-};
-
-}  // namespace
-
-Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file) {
-    if (!file) return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
-    auto sz = file->size();
-    if (!sz) return std::unexpected(sz.error());
-    auto src = LibChdrSource::open(std::move(file), sz->v);
-    if (!src) return std::unexpected(src.error());
-    return std::unique_ptr<IChdSource>(std::move(*src));
+    if (!ti)
+        return;
+    chd_.prefetch_hint(lba, toc_.tracks[ti->v]);
 }
 
 Ex<void> DiscEngine::mount_chd_path(std::string_view chd_path) {
-    auto f = open_file(chd_path);
-    if (!f) return std::unexpected(f.error());
+    auto f = files_io_.open_file(chd_path);
+    if (!f)
+        return std::unexpected(f.error());
 
     IFile* const primary_raw = f->get();
     auto src = open_chd(std::move(*f));
-    if (!src) return std::unexpected(src.error());
+    if (!src)
+        return std::unexpected(src.error());
 
     std::unique_ptr<IChdSource> second;
-    if (prefetch_.get().opened()) {
-        if (auto f2 = open_file(chd_path)) {
-            if (auto s2 = open_chd(std::move(*f2)); s2) second = std::move(*s2);
+    if (chd_.prefetch_opened()) {
+        if (auto f2 = files_io_.open_file(chd_path)) {
+            if (auto s2 = open_chd(std::move(*f2)); s2)
+                second = std::move(*s2);
         }
     }
     auto mounted = mount_chd(std::move(*src), std::move(second));
-    if (!mounted) return mounted;
+    if (!mounted)
+        return mounted;
 
-    const std::size_t depth = (prefetch_depth_ != 0) ? prefetch_depth_ : kPrefetchMinDepth;
-    (void)primary_raw->advise(IFile::Access::WillNeed, 0,
-                              static_cast<std::uint64_t>(hunk_bytes_) * depth);
+    chd_.advise_first_window(*primary_raw);
     return {};
 }
 
-}  // namespace mister::svc
+}

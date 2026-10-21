@@ -40,18 +40,21 @@ struct MglItem {
 
         FixedStr<kPathMax, StrFit::Clip> path{};
     };
+
     struct Reset {
         static constexpr Kind kKind = Kind::Reset;
         std::uint16_t delay_s = 0;
         std::uint8_t hold_s = 0;
         std::uint8_t pad_ = 0;
     };
+
     using Alternatives = std::tuple<Load, Reset>;
 
     Kind kind = Kind::Load;
     std::uint8_t pad_ = 0;
     alignas(2) std::array<std::byte, kStore> store{};
 };
+
 static_assert(infra::MessageSum<MglItem> && infra::alternatives_are_total<MglItem>());
 static_assert(sizeof(MglItem) == 2 + MglItem::kStore, "kind, pad and store");
 
@@ -89,11 +92,18 @@ public:
     [[nodiscard]] bool set_homes(std::string_view file_home, std::string_view image_home) noexcept;
 
     void set_scope(CoreScope s) noexcept { scope_ = s; }
+
     [[nodiscard]] CoreScope scope() const noexcept { return scope_; }
 
-    void remember(std::uint8_t i, const RememberedStem& stem, RememberedSlot slot,
-                  std::uint8_t ioctl_index) noexcept;
+    void remember(
+        std::uint8_t i,
+        const RememberedStem& stem,
+        RememberedSlot slot,
+        std::uint8_t ioctl_index
+    ) noexcept;
+
     [[nodiscard]] std::uint32_t remembered() const noexcept { return remembered_; }
+
     [[nodiscard]] std::uint32_t remember_failures() const noexcept { return remember_failures_; }
 
     void arm(const os::IClock& clock);
@@ -101,6 +111,7 @@ public:
     [[nodiscard]] Ex<void> advance(const os::IClock& clock);
 
     [[nodiscard]] std::uint32_t publishes() const noexcept { return publishes_; }
+
     [[nodiscard]] std::uint32_t drops() const noexcept { return drops_; }
 
     [[nodiscard]] CorrelationTag last_tag() const noexcept { return last_tag_; }
@@ -110,15 +121,20 @@ public:
     static constexpr unsigned kBusyReplayMs = 100;
 
     [[nodiscard]] bool done() const noexcept { return state_ == MglState::Done; }
+
     [[nodiscard]] MglState state() const noexcept { return state_; }
+
     [[nodiscard]] std::uint8_t count() const noexcept { return count_; }
+
     [[nodiscard]] std::uint8_t current() const noexcept { return current_; }
+
     [[nodiscard]] const MglItem& item(std::uint8_t i) const noexcept { return items_[i]; }
 
     void on(const MglItem::Load&) noexcept {
         TASTY_SEAT_BODY(MglPlayer);
         state_ = MglState::Dispatching;
     }
+
     void on(const MglItem::Reset&) noexcept {
         TASTY_SEAT_BODY(MglPlayer);
         state_ = MglState::ResetAssert;
@@ -145,6 +161,7 @@ private:
         RememberedSlot slot = RememberedSlot::File;
         std::uint8_t ioctl_index = 0;
     };
+
     std::array<std::optional<RememberAt>, kMaxItems> remember_{};
     RememberedStem stem_{};
     std::uint32_t remembered_ = 0;
@@ -166,4 +183,4 @@ private:
     os::Deadline timer_ = os::Deadline::immediate();
 };
 
-}  // namespace mister::app
+}

@@ -80,6 +80,7 @@ public:
     MglPump& operator=(const MglPump&) = delete;
 
     void set_remember(MglRemember r) noexcept { remember_ = r; }
+
     [[nodiscard]] MglRemember remember() const noexcept { return remember_; }
 
     [[nodiscard]] bool take_playlist(std::string_view path) noexcept;
@@ -97,9 +98,13 @@ public:
     [[nodiscard]] Stats stats() const noexcept { return cell_.sample().value; }
 
     [[nodiscard]] const MglPumpCell& stats_cell() const noexcept { return cell_; }
+
     [[nodiscard]] State state() const noexcept { return state_; }
+
     [[nodiscard]] InfoId last_info() const noexcept { return last_info_; }
+
     [[nodiscard]] std::optional<Errc> last_error() const noexcept { return last_error_; }
+
     [[nodiscard]] const MglPlayer& player() const noexcept { return player_; }
 
     [[nodiscard]] CorrelationTag load_tag() const noexcept { return load_tag_; }
@@ -160,10 +165,13 @@ private:
     Stats stats_{};
 
     MglPumpCell cell_{};
+
     struct PublishOnExit {
         MglPump* self;
+
         ~PublishOnExit() { self->cell_.publish(self->stats_); }
     };
+
     InfoId last_info_ = InfoId::None;
 
     std::optional<Errc> last_error_{};
@@ -193,4 +201,4 @@ private:
     std::optional<os::Deadline> busy_since_{};
 };
 
-}  // namespace mister::app
+}

@@ -13,18 +13,23 @@ namespace mister::svc {
 class Vfs;
 class ChdPrefetch;
 class DiscReadService;
-}  // namespace mister::svc
+}
+
 namespace mister::hal {
 class ISpiTransport;
 }
+
 namespace mister::os {
 class IClock;
 }
+
 namespace mister::proto {
 class IImageSink;
 class SpiFioQueue;
-}  // namespace mister::proto
+}
+
 namespace mister::cores {
+class IDiskPort;
 class IMailboxPort;
 }
 
@@ -43,6 +48,7 @@ struct CoreTerms {
     infra::OptRef<svc::DiscReadService> discs{};
     infra::OptRef<svc::ChdPrefetch> prefetch{};
     infra::OptRef<cores::IMailboxPort> mailbox{};
+    infra::OptRef<cores::IDiskPort> disk{};
     infra::OptRef<const cores::SaveCopyCell> save_copy{};
     infra::OptRef<PcmRingFeeder> feeder{};
     hal::FpgaAperture aperture{};
@@ -52,4 +58,4 @@ struct CoreTerms {
     os::UioLineSpace doorbell_nodes{};
 };
 
-}  // namespace mister::app
+}

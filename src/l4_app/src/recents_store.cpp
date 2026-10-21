@@ -33,11 +33,12 @@ int index_on_disk(RecentsStore::ListId id) noexcept {
     return -1;
 }
 
-}  // namespace
+}
 
 std::string RecentsStore::file_name(std::string_view core, ListId id) {
     const int idx = index_on_disk(id);
-    if (idx < 0) return "cores_recent.cfg";
+    if (idx < 0)
+        return "cores_recent.cfg";
     std::string n{core};
     n += "_recent_";
     n += std::to_string(idx);
@@ -46,7 +47,8 @@ std::string RecentsStore::file_name(std::string_view core, ListId id) {
 }
 
 std::string RecentsStore::join(std::string_view dir, std::string_view name) {
-    if (dir.empty()) return std::string{name};
+    if (dir.empty())
+        return std::string{name};
     std::string p{dir};
     p.push_back('/');
     p.append(name);
@@ -56,12 +58,15 @@ std::string RecentsStore::join(std::string_view dir, std::string_view name) {
 Ex<std::vector<std::byte>> RecentsStore::read_raw(std::string_view core, ListId id) {
     std::vector<std::byte> buf(kFileSize, std::byte{0});
     auto f = vfs_->open("config/" + file_name(core, id), svc::OpenMode::ReadWhole);
-    if (!f) return std::unexpected(f.error());
+    if (!f)
+        return std::unexpected(f.error());
     std::size_t off = 0;
     while (off < buf.size()) {
         auto n = (*f)->read_at(off, std::span{buf}.subspan(off));
-        if (!n) return std::unexpected(n.error());
-        if (*n == 0) break;
+        if (!n)
+            return std::unexpected(n.error());
+        if (*n == 0)
+            break;
         off += *n;
     }
     return buf;
@@ -70,15 +75,18 @@ Ex<std::vector<std::byte>> RecentsStore::read_raw(std::string_view core, ListId 
 std::vector<RecentsStore::Entry> RecentsStore::load(std::string_view core, ListId id) {
     TASTY_SEAT_BODY(RecentsStore);
     std::vector<Entry> out;
-    if (!enabled_) return out;
+    if (!enabled_)
+        return out;
     ++loads_;
     const auto raw = read_raw(core, id);
-    if (!raw) return out;
+    if (!raw)
+        return out;
 
     for (std::size_t i = 0; i < kMaxEntries; ++i) {
         const std::byte* rec = raw->data() + i * kRecordSize;
         const std::string_view name = get_field(rec + kDirCap, kNameCap);
-        if (name.empty()) break;
+        if (name.empty())
+            break;
         Entry e;
         e.dir = std::string{get_field(rec, kDirCap)};
         e.name = std::string{name};
@@ -89,17 +97,23 @@ std::vector<RecentsStore::Entry> RecentsStore::load(std::string_view core, ListI
     return out;
 }
 
-Ex<void> RecentsStore::update(std::string_view core, ListId id, std::string_view full_path,
-                              std::string_view label) {
+Ex<void> RecentsStore::update(
+    std::string_view core,
+    ListId id,
+    std::string_view full_path,
+    std::string_view label
+) {
     TASTY_SEAT_BODY(RecentsStore);
-    if (!enabled_ || full_path.empty()) return {};
+    if (!enabled_ || full_path.empty())
+        return {};
 
     const std::size_t slash = full_path.rfind('/');
-    const std::string_view dir =
-        (slash == std::string_view::npos) ? std::string_view{} : full_path.substr(0, slash);
-    const std::string_view name =
-        (slash == std::string_view::npos) ? full_path : full_path.substr(slash + 1);
-    if (label.empty()) label = name;
+    const std::string_view dir = (slash == std::string_view::npos) ? std::string_view{}
+                                                                   : full_path.substr(0, slash);
+    const std::string_view name = (slash == std::string_view::npos) ? full_path
+                                                                    : full_path.substr(slash + 1);
+    if (label.empty())
+        label = name;
 
     auto raw = read_raw(core, id);
     std::vector<std::byte> buf = raw ? static_cast<std::vector<std::byte>&&>(*raw)
@@ -135,8 +149,9 @@ Ex<void> RecentsStore::clear(std::string_view core, ListId id) {
     TASTY_SEAT_BODY(RecentsStore);
     const std::vector<std::byte> zeroed(kFileSize, std::byte{0});
     auto r = durable_write(*vfs_, "config/" + file_name(core, id), zeroed);
-    if (!r) ++errors_;
+    if (!r)
+        ++errors_;
     return r;
 }
 
-}  // namespace mister::app
+}

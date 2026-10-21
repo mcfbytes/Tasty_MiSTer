@@ -26,4 +26,4 @@ public:
     virtual void text(int vt) noexcept = 0;
 };
 
-}  // namespace mister::os
+}

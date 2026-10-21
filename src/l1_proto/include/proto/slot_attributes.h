@@ -13,4 +13,4 @@ struct SlotAttributes {
     std::uint64_t channel_bytes = 0;
 };
 
-}  // namespace mister::proto
+}

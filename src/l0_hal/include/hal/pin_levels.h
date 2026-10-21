@@ -15,9 +15,10 @@ struct PinLevels {
     bool user_button = false;
     bool hdmi_int = false;
 };
+
 static_assert(std::is_trivially_copyable_v<PinLevels>);
 static_assert(std::is_nothrow_default_constructible_v<PinLevels>);
 
 using PinLevelCell = xthread::Telemetry<PinLevels, SeatTag::RT>;
 
-}  // namespace mister::hal
+}

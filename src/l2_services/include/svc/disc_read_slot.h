@@ -42,4 +42,4 @@ struct DiscReadSlot {
 
 static_assert(std::is_trivially_copyable_v<DiscReadSlot>);
 
-}  // namespace mister::svc
+}

@@ -37,7 +37,8 @@ public:
 
     [[nodiscard]] static std::optional<Pick> pick_complete(
         const std::array<ScalerHeader, ScalerBuffers::kBuffers>& h,
-        const BufMask& live = kAllLive) noexcept;
+        const BufMask& live = kAllLive
+    ) noexcept;
 
     [[nodiscard]] static bool port_stuck(ScalerBuffers& window) noexcept;
 
@@ -53,4 +54,4 @@ private:
     std::int64_t start_ns_ = 0;
 };
 
-}  // namespace mister::hal
+}

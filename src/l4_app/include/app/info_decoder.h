@@ -19,13 +19,16 @@ class InfoDecoder {
 
 public:
     explicit InfoDecoder(const ConfStrCell& cell) noexcept : cell_(cell) {}
+
     InfoDecoder(const InfoDecoder&) = delete;
     InfoDecoder& operator=(const InfoDecoder&) = delete;
 
     [[nodiscard]] std::string_view decode(const proto::LinkEvent::PolledWord& w);
 
     [[nodiscard]] std::uint32_t decoded() const noexcept { return decoded_; }
+
     [[nodiscard]] std::uint32_t stale() const noexcept { return stale_; }
+
     [[nodiscard]] std::uint32_t unmapped() const noexcept { return unmapped_; }
 
 private:
@@ -43,4 +46,4 @@ private:
     std::uint32_t unmapped_ = 0;
 };
 
-}  // namespace mister::app
+}

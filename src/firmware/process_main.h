@@ -21,8 +21,11 @@ class ProcessMain final : public xthread::SeatMain<ProcessMain> {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
-    ProcessMain(app::SessionOwner& owner, const ThreadAssembly& assembly,
-                xthread::ParkFds fds) noexcept;
+    ProcessMain(
+        app::SessionOwner& owner,
+        const ThreadAssembly& assembly,
+        xthread::ParkFds fds
+    ) noexcept;
     ProcessMain(const ProcessMain&) = delete;
     ProcessMain& operator=(const ProcessMain&) = delete;
     ProcessMain(ProcessMain&&) = delete;
@@ -38,10 +41,13 @@ public:
     [[nodiscard]] bool idle() const noexcept;
     [[nodiscard]] bool stopping() const noexcept;
     [[nodiscard]] int park_ms() const noexcept;
+
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
     [[nodiscard]] bool paused() noexcept { return false; }
+
     [[nodiscard]] bool pause_pending() const noexcept { return false; }
+
     void settle() noexcept {}
 
 private:
@@ -53,4 +59,4 @@ private:
 
 static_assert(xthread::SeatBody<ProcessMain>);
 
-}  // namespace mister::fw
+}

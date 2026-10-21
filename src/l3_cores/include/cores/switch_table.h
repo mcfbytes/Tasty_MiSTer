@@ -16,4 +16,4 @@ struct SwitchTable {
     std::vector<DipRow> rows;
 };
 
-}  // namespace mister::cores::mra
+}

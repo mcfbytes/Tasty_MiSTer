@@ -24,4 +24,4 @@ struct CaptureHit {
     FixedStr<kCaptureIdCap, StrFit::Clip> id{};
 };
 
-}  // namespace mister::app
+}

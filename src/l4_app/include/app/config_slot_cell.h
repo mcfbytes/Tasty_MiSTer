@@ -17,9 +17,10 @@ struct ConfigSlotTable {
     std::uint16_t exists = 0;
     FixedStr<cores::kConfigPreviewChars, StrFit::Clip> preview[cores::kMaxConfigSlots] = {};
 };
+
 static_assert(std::is_trivially_copyable_v<ConfigSlotTable>);
 static_assert(cores::kMaxConfigSlots <= 16, "`exists` is a 16-bit mask");
 
 using ConfigSlotCell = xthread::Telemetry<ConfigSlotTable, SeatTag::RT>;
 
-}  // namespace mister::app
+}

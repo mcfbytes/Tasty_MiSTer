@@ -13,8 +13,8 @@ namespace mister::os {
 namespace {
 
 bool version_says_rt(std::string_view v) noexcept {
-    return v.find("PREEMPT_RT") != std::string_view::npos ||
-           v.find("PREEMPT RT") != std::string_view::npos;
+    return v.find("PREEMPT_RT") != std::string_view::npos
+        || v.find("PREEMPT RT") != std::string_view::npos;
 }
 
 std::string_view trim_tail(std::string_view f) noexcept {
@@ -24,15 +24,19 @@ std::string_view trim_tail(std::string_view f) noexcept {
     return f;
 }
 
-}  // namespace
+}
 
-KernelRt kernel_rt_from(std::optional<std::string_view> realtime_flag,
-                        std::optional<std::string_view> uname_version) noexcept {
+KernelRt kernel_rt_from(
+    std::optional<std::string_view> realtime_flag,
+    std::optional<std::string_view> uname_version
+) noexcept {
     if (realtime_flag) {
 
         const std::string_view f = trim_tail(*realtime_flag);
-        if (f == "1") return KernelRt::PreemptRt;
-        if (f == "0") return KernelRt::NotRt;
+        if (f == "1")
+            return KernelRt::PreemptRt;
+        if (f == "0")
+            return KernelRt::NotRt;
     }
     if (uname_version) {
         return version_says_rt(*uname_version) ? KernelRt::PreemptRt : KernelRt::NotRt;
@@ -49,9 +53,10 @@ KernelRt read_kernel_rt(const char* sysfs_path) noexcept {
 
     utsname u{};
     std::optional<std::string_view> version;
-    if (::uname(&u) == 0) version = std::string_view(u.version);
+    if (::uname(&u) == 0)
+        version = std::string_view(u.version);
 
     return kernel_rt_from(flag, version);
 }
 
-}  // namespace mister::os
+}

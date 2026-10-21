@@ -10,12 +10,12 @@
 namespace mister::hal {
 class ISpiTransport;
 class ICoreSignals;
-}  // namespace mister::hal
+}
 
 namespace mister::proto {
 class CoreSession;
 class BlockSlots;
-}  // namespace mister::proto
+}
 
 namespace mister::svc {
 class InputEmitter;
@@ -30,9 +30,15 @@ class SpiEncoder final : public ILinkEncoder {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    SpiEncoder(hal::ISpiTransport& link, hal::ICoreSignals& signals, proto::CoreSession& session,
-               OsdWire& osd, proto::BlockSlots& slots, VideoWire& video,
-               svc::InputEmitter& em) noexcept;
+    SpiEncoder(
+        hal::ISpiTransport& link,
+        hal::ICoreSignals& signals,
+        proto::CoreSession& session,
+        OsdWire& osd,
+        proto::BlockSlots& slots,
+        VideoWire& video,
+        svc::InputEmitter& em
+    ) noexcept;
 
     using Result = ILinkEncoder::Outcome;
 
@@ -41,6 +47,7 @@ public:
     Outcome on(const proto::LinkOp::HoldReset& a, const LinkOpCtx& ctx) noexcept;
 
     [[nodiscard]] std::uint32_t holds() const noexcept { return holds_; }
+
     Outcome on(const proto::LinkOp::ReleaseReset& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::WriteStatus& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::OsdFlush& a, const LinkOpCtx& ctx) noexcept;
@@ -57,8 +64,8 @@ public:
     Outcome on(const proto::LinkOp::ApplyCheats& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::SetDip& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::SetCoreOption& a, const LinkOpCtx& ctx) noexcept;
-    Outcome on(const proto::LinkOp::SettleCoreOptions& a, const LinkOpCtx& ctx) noexcept;
     Outcome misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept;
+
     [[nodiscard]] std::uint32_t link_op_misrouted() const noexcept { return link_op_misrouted_; }
 
 private:
@@ -73,4 +80,4 @@ private:
     std::uint32_t link_op_misrouted_ = 0;
 };
 
-}  // namespace mister::app
+}

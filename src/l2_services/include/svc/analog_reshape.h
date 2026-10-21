@@ -11,8 +11,11 @@ class IAnalogReshape {
 public:
     virtual ~IAnalogReshape() = default;
 
-    virtual AnalogXy reshape(AnalogXy in, const AxisCal& cal,
-                             const StickCal& stick) const noexcept = 0;
+    virtual AnalogXy reshape(
+        AnalogXy in,
+        const AxisCal& cal,
+        const StickCal& stick
+    ) const noexcept = 0;
 
 protected:
     IAnalogReshape() = default;
@@ -20,4 +23,4 @@ protected:
     IAnalogReshape& operator=(const IAnalogReshape&) = default;
 };
 
-}  // namespace mister::svc
+}

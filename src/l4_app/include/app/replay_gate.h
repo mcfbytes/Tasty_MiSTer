@@ -41,9 +41,8 @@ public:
 
     static constexpr unsigned kReplayBudget = 8;
 
-    static constexpr std::uint32_t kMaxRoundWords =
-        2 * proto::FrameCounterRead::kReadWords +
-        (kReplayBudget + 2) * kReplayPorts * proto::JoystickPort::kMaxDigitalPushWords;
+    static constexpr std::uint32_t kMaxRoundWords = 2 * proto::FrameCounterRead::kReadWords
+        + (kReplayBudget + 2) * kReplayPorts * proto::JoystickPort::kMaxDigitalPushWords;
 
     static constexpr std::uint32_t kAliasFrames = 200;
 
@@ -59,11 +58,16 @@ public:
     static constexpr std::int64_t kGapNs = 2 * reactor::kTickNs;
 
     explicit ReplayGate(const Wiring& w) noexcept : w_(w) {}
+
     ReplayGate(const ReplayGate&) = delete;
     ReplayGate& operator=(const ReplayGate&) = delete;
 
-    void tick(bool ready, std::uint32_t core_edge_seq, proto::LateAnswers late = {},
-              std::optional<std::uint32_t> queued = std::nullopt) noexcept;
+    void tick(
+        bool ready,
+        std::uint32_t core_edge_seq,
+        proto::LateAnswers late = {},
+        std::optional<std::uint32_t> queued = std::nullopt
+    ) noexcept;
     [[nodiscard]] bool wants_record() const noexcept;
 
     [[nodiscard]] std::uint32_t take_round_words() noexcept {
@@ -71,6 +75,7 @@ public:
         round_words_ = 0;
         return w;
     }
+
     void on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept;
     void on(const ReplayMsg::Input& r, const ReplayMsg::Head& h) noexcept;
     void on(const ReplayMsg::End& e, const ReplayMsg::Head& h) noexcept;
@@ -85,6 +90,7 @@ public:
     [[nodiscard]] bool suppresses(const proto::LinkOp& op) noexcept;
 
     [[nodiscard]] bool armed() const noexcept { return level_ != ReplayLevel::Idle; }
+
     [[nodiscard]] const ReplayStatus& status() const noexcept { return status_; }
 
 private:
@@ -96,8 +102,10 @@ private:
     [[nodiscard]] bool due_(const ReplayMsg::Input& r) const noexcept;
     void apply_(const ReplayMsg::Input& r) noexcept;
     void write_(const ReplayMsg::Input& r) noexcept;
-    void write_masks_(const std::array<std::uint32_t, kReplayPorts>& mask,
-                      std::uint8_t ports) noexcept;
+    void write_masks_(
+        const std::array<std::uint32_t, kReplayPorts>& mask,
+        std::uint8_t ports
+    ) noexcept;
     void force_release_(std::uint8_t ports) noexcept;
     void note_late_(std::uint32_t first) noexcept;
     void note_gap_() noexcept;
@@ -162,4 +170,4 @@ private:
     std::uint32_t end_frame_ = 0;
 };
 
-}  // namespace mister::app
+}

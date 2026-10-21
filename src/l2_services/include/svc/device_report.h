@@ -32,4 +32,4 @@ struct DeviceReport {
     std::array<KeyEdge, kMaxKeyEdges> keys{};
 };
 
-}  // namespace mister::svc
+}

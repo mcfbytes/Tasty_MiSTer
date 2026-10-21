@@ -14,6 +14,7 @@ namespace mister::app {
 
 struct OptionTable {
     TASTY_SEAT_EXEMPT(const_shared);
+
     struct Row {
         infra::OptRef<const cores::OptionRow> decl{};
         std::uint8_t current = 0;
@@ -22,13 +23,15 @@ struct OptionTable {
 
         FixedStr<16, StrFit::Clip> ext{};
     };
+
     std::uint8_t count = 0;
     Row rows[cores::kMaxOptionRows] = {};
 
     FixedStr<cores::kOptionTitleChars + 1, StrFit::Clip> page_title[cores::kMaxOptionPages] = {};
 };
+
 static_assert(std::is_trivially_copyable_v<OptionTable>);
 
 using OptionCell = xthread::Telemetry<OptionTable, SeatTag::RT>;
 
-}  // namespace mister::app
+}

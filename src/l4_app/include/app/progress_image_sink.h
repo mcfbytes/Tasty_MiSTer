@@ -21,24 +21,30 @@ class ProgressImageSink final : public proto::IImageSink {
 public:
     explicit ProgressImageSink(proto::SpiImageSink& inner) noexcept : inner_(&inner) {}
 
-    [[nodiscard]] Ex<void> begin(proto::WideIoIndex index,
-                                 const proto::SessionParams& params) override {
+    [[nodiscard]] Ex<void> begin(
+        proto::WideIoIndex index,
+        const proto::SessionParams& params
+    ) override {
         TASTY_SEAT_BODY(ProgressImageSink);
         return inner_->begin(index, params);
     }
+
     [[nodiscard]] Ex<void> write(std::span<const std::uint8_t> data) override {
         TASTY_SEAT_BODY(ProgressImageSink);
         auto r = inner_->write(data);
-        if (r) count(data.size());
+        if (r)
+            count(data.size());
         return r;
     }
 
     [[nodiscard]] Ex<std::size_t> write_taken(std::span<const std::uint8_t> data) override {
         TASTY_SEAT_BODY(ProgressImageSink);
         auto r = inner_->write_taken(data);
-        if (r) count(*r);
+        if (r)
+            count(*r);
         return r;
     }
+
     [[nodiscard]] Ex<void> end() override {
         TASTY_SEAT_BODY(ProgressImageSink);
         if (closing_) {
@@ -49,8 +55,11 @@ public:
         return inner_->end();
     }
 
-    void arm(cores::ILoadProgress& sink, std::uint64_t total,
-             IBracketClose* closing = nullptr) noexcept {
+    void arm(
+        cores::ILoadProgress& sink,
+        std::uint64_t total,
+        IBracketClose* closing = nullptr
+    ) noexcept {
         TASTY_SEAT_BODY(ProgressImageSink);
         sent_ = 0;
         armed_ = true;
@@ -61,18 +70,22 @@ public:
 
     void count(std::uint64_t n) noexcept {
         TASTY_SEAT_BODY(ProgressImageSink);
-        if (!armed_) return;
+        if (!armed_)
+            return;
         sent_ += n;
         tick_.advance(sent_);
     }
+
     void disarm() noexcept {
         TASTY_SEAT_BODY(ProgressImageSink);
         closing_.reset();
-        if (!armed_) return;
+        if (!armed_)
+            return;
         armed_ = false;
         tick_.finish();
         tick_.bind(nullptr);
     }
+
     [[nodiscard]] bool armed() const noexcept { return armed_; }
 
 private:
@@ -83,4 +96,4 @@ private:
     bool armed_ = false;
 };
 
-}  // namespace mister::app
+}

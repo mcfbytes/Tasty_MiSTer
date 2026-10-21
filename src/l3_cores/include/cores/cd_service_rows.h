@@ -16,4 +16,4 @@ protected:
     ICdServiceRows& operator=(const ICdServiceRows&) = default;
 };
 
-}  // namespace mister::cores
+}

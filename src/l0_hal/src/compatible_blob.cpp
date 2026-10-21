@@ -18,10 +18,11 @@ bool CompatibleBlob::contains(std::string_view s) const noexcept {
     std::size_t i = 0;
     while (i < len_) {
         const std::string_view entry{data_.data() + i};
-        if (entry == s) return true;
+        if (entry == s)
+            return true;
         i += entry.size() + 1;
     }
     return false;
 }
 
-}  // namespace mister::hal
+}

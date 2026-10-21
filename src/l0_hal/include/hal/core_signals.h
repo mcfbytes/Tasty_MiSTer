@@ -31,4 +31,4 @@ public:
     virtual void clear_gpo() {}
 };
 
-}  // namespace mister::hal
+}

@@ -15,6 +15,7 @@ public:
     explicit LoadKey(std::uint64_t total) noexcept;
 
     void feed(std::span<const std::uint8_t> bytes) noexcept;
+
     [[nodiscard]] std::uint32_t value() const noexcept { return crc_; }
 
 private:
@@ -22,4 +23,4 @@ private:
     std::uint32_t crc_ = 0;
 };
 
-}  // namespace mister::app
+}

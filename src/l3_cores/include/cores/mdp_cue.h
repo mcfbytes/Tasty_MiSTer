@@ -32,7 +32,8 @@ public:
     [[nodiscard]] std::uint8_t track_count() const noexcept { return num_tracks_; }
 
     [[nodiscard]] const Track* track(std::uint8_t n) const noexcept {
-        if (n < 1 || n > num_tracks_) return nullptr;
+        if (n < 1 || n > num_tracks_)
+            return nullptr;
         return &tracks_[n];
     }
 
@@ -41,4 +42,4 @@ private:
     std::uint8_t num_tracks_ = 0;
 };
 
-}  // namespace mister::cores::mdp
+}

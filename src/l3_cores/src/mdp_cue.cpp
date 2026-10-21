@@ -12,9 +12,11 @@ constexpr char lower(char c) noexcept {
 }
 
 [[nodiscard]] bool iprefix(std::string_view line, std::string_view lit) noexcept {
-    if (line.size() < lit.size()) return false;
+    if (line.size() < lit.size())
+        return false;
     for (std::size_t i = 0; i < lit.size(); ++i) {
-        if (lower(line[i]) != lower(lit[i])) return false;
+        if (lower(line[i]) != lower(lit[i]))
+            return false;
     }
     return true;
 }
@@ -33,8 +35,13 @@ constexpr char lower(char c) noexcept {
 [[nodiscard]] std::int32_t parse_int(std::string_view s) noexcept {
     constexpr std::int64_t kMax = 0x7FFFFFFF;
     std::size_t i = 0;
-    while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\v' ||
-                            s[i] == '\f' || s[i] == '\r')) {
+    while (i < s.size()
+           && (s[i] == ' '
+               || s[i] == '\t'
+               || s[i] == '\n'
+               || s[i] == '\v'
+               || s[i] == '\f'
+               || s[i] == '\r')) {
         ++i;
     }
     bool neg = false;
@@ -49,13 +56,17 @@ constexpr char lower(char c) noexcept {
     return static_cast<std::int32_t>(neg ? -v : v);
 }
 
-void join_into(FixedStr<CueSheet::kPathMax, StrFit::Clip>& out, std::string_view dir,
-               std::string_view name) noexcept {
+void join_into(
+    FixedStr<CueSheet::kPathMax, StrFit::Clip>& out,
+    std::string_view dir,
+    std::string_view name
+) noexcept {
     char buf[CueSheet::kPathMax];
     std::size_t n = 0;
     const auto put = [&](std::string_view s) noexcept {
         for (const char c : s) {
-            if (n + 1 < sizeof buf) buf[n++] = c;
+            if (n + 1 < sizeof buf)
+                buf[n++] = c;
         }
     };
     put(dir);
@@ -67,13 +78,14 @@ void join_into(FixedStr<CueSheet::kPathMax, StrFit::Clip>& out, std::string_view
 [[nodiscard]] std::string_view next_record(std::string_view& text) noexcept {
     std::size_t n = std::min(text.size(), CueSheet::kLineMax);
     const std::size_t nl = text.substr(0, n).find('\n');
-    if (nl != std::string_view::npos) n = nl + 1;
+    if (nl != std::string_view::npos)
+        n = nl + 1;
     const std::string_view rec = text.substr(0, n);
     text.remove_prefix(n);
     return rec;
 }
 
-}  // namespace
+}
 
 void CueSheet::parse(std::string_view text, std::string_view base_dir) noexcept {
     tracks_ = {};
@@ -84,13 +96,16 @@ void CueSheet::parse(std::string_view text, std::string_view base_dir) noexcept 
 
     while (!text.empty()) {
         const std::string_view line = trim(next_record(text));
-        if (line.empty()) continue;
+        if (line.empty())
+            continue;
 
         if (iprefix(line, "FILE ")) {
             const std::size_t q1 = line.find('"');
-            if (q1 == std::string_view::npos) continue;
+            if (q1 == std::string_view::npos)
+                continue;
             const std::size_t q2 = line.find('"', q1 + 1);
-            if (q2 == std::string_view::npos) continue;
+            if (q2 == std::string_view::npos)
+                continue;
             join_into(cur_file, base_dir, line.substr(q1 + 1, q2 - q1 - 1));
         } else if (iprefix(line, "TRACK ")) {
             const std::int32_t tn = parse_int(line.substr(6));
@@ -112,8 +127,8 @@ void CueSheet::parse(std::string_view text, std::string_view base_dir) noexcept 
                     tail.remove_prefix(1);
                 }
                 const bool digit = !tail.empty() && tail.front() >= '0' && tail.front() <= '9';
-                tracks_[cur_track].loop_sector =
-                    digit ? static_cast<std::uint32_t>(parse_int(tail)) : 0u;
+                tracks_[cur_track].loop_sector = digit ? static_cast<std::uint32_t>(parse_int(tail))
+                                                       : 0u;
             }
         } else if (iprefix(line, "INDEX 01") || iprefix(line, "INDEX 1 ")) {
             if (cur_track >= 1 && !cur_file.empty()) {
@@ -125,4 +140,4 @@ void CueSheet::parse(std::string_view text, std::string_view base_dir) noexcept 
     }
 }
 
-}  // namespace mister::cores::mdp
+}

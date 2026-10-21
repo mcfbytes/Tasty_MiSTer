@@ -85,4 +85,4 @@ std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g);
 
 std::unique_ptr<ICompanionLoad> make_msu_companion(const svc::Vfs& vfs);
 
-}  // namespace mister::cores::manifests
+}

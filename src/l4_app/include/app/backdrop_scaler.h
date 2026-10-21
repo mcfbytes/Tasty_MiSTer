@@ -17,20 +17,44 @@ class BackdropScaler {
 public:
     void open(const HdTheme& theme) noexcept;
 
-    [[nodiscard]] HdRect scale(std::span<const std::byte> rgb, std::uint16_t src_w,
-                               std::uint16_t src_h, std::uint16_t src_line,
-                               std::span<std::uint16_t> frame, std::uint32_t stride_px, HdRect game,
-                               HdRect cover, bool report) noexcept;
+    [[nodiscard]] HdRect scale(
+        std::span<const std::byte> rgb,
+        std::uint16_t src_w,
+        std::uint16_t src_h,
+        std::uint16_t src_line,
+        std::span<std::uint16_t> frame,
+        std::uint32_t stride_px,
+        HdRect game,
+        HdRect cover,
+        bool report
+    ) noexcept;
 
-    void scale_rows(std::span<const std::byte> rgb, std::uint16_t src_w, std::uint16_t src_h,
-                    std::uint16_t src_line, std::span<std::uint16_t> frame, std::uint32_t stride_px,
-                    HdRect game, HdRect cover, std::int32_t y0, std::int32_t y1) noexcept;
+    void scale_rows(
+        std::span<const std::byte> rgb,
+        std::uint16_t src_w,
+        std::uint16_t src_h,
+        std::uint16_t src_line,
+        std::span<std::uint16_t> frame,
+        std::uint32_t stride_px,
+        HdRect game,
+        HdRect cover,
+        std::int32_t y0,
+        std::int32_t y1
+    ) noexcept;
 
 private:
-    void paint_band_(std::span<const std::byte> rgb, std::uint16_t src_w, std::uint16_t src_h,
-                     std::uint16_t src_line, std::span<std::uint16_t> frame,
-                     std::uint32_t stride_px, HdRect game, HdRect cover, std::int32_t y0,
-                     std::int32_t y1) noexcept;
+    void paint_band_(
+        std::span<const std::byte> rgb,
+        std::uint16_t src_w,
+        std::uint16_t src_h,
+        std::uint16_t src_line,
+        std::span<std::uint16_t> frame,
+        std::uint32_t stride_px,
+        HdRect game,
+        HdRect cover,
+        std::int32_t y0,
+        std::int32_t y1
+    ) noexcept;
     void ensure_xmap_(std::uint16_t src_w, std::int32_t cover_w) noexcept;
 
     std::uint16_t primary_ = 0;
@@ -40,4 +64,4 @@ private:
     std::vector<std::uint16_t> row_px_{};
 };
 
-}  // namespace mister::app
+}

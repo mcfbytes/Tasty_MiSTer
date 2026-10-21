@@ -10,4 +10,4 @@ struct CoreScope {
     friend constexpr bool operator==(CoreScope, CoreScope) = default;
 };
 
-}  // namespace mister::app
+}

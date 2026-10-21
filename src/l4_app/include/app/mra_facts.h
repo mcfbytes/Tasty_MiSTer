@@ -20,14 +20,18 @@ struct MraFacts {
     bool setname_same_dir = false;
 };
 
-[[nodiscard]] inline std::string_view effective_name(std::string_view conf_str_name,
-                                                     const MraFacts& facts) noexcept {
+[[nodiscard]] inline std::string_view effective_name(
+    std::string_view conf_str_name,
+    const MraFacts& facts
+) noexcept {
     return facts.setname.empty() ? conf_str_name : std::string_view(facts.setname);
 }
 
 [[nodiscard]] inline std::string default_manifest_rel(std::string_view text) {
-    if (text.empty()) return {};
-    if (text.front() == '/') return std::string(text.substr(1));
+    if (text.empty())
+        return {};
+    if (text.front() == '/')
+        return std::string(text.substr(1));
     std::string rel = "_Arcades/";
     rel.append(text);
     return rel;
@@ -35,7 +39,8 @@ struct MraFacts {
 
 [[nodiscard]] inline GameId game_id_of(const MraFacts& facts, bool enabled) noexcept {
     GameId out{};
-    if (facts.setname.empty()) return out;
+    if (facts.setname.empty())
+        return out;
     (void)out.serial.assign(facts.setname);
     char name[GameId::kNameCap] = {};
     (void)std::snprintf(name, sizeof name, "%s.mra", out.serial.c_str());
@@ -44,4 +49,4 @@ struct MraFacts {
     return out;
 }
 
-}  // namespace mister::app
+}

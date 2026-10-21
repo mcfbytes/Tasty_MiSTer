@@ -19,6 +19,7 @@ public:
     using Receiver = Ring::Consumer;
 
     [[nodiscard]] Sender sender() noexcept { return ring_.producer(); }
+
     [[nodiscard]] Receiver receiver() noexcept { return ring_.consumer(); }
 
     [[nodiscard]] Ring& ring_for_test() noexcept { return ring_; }
@@ -27,4 +28,4 @@ private:
     Ring ring_{};
 };
 
-}  // namespace mister::app
+}

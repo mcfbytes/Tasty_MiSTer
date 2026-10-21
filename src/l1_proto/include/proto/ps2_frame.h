@@ -23,4 +23,4 @@ struct Ps2Frame {
     std::array<std::uint8_t, kPs2FrameBytes> bytes{};
 };
 
-}  // namespace mister::proto
+}

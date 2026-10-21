@@ -28,10 +28,12 @@ struct DiscGeometry {
     [[nodiscard]] std::optional<TrackIndex> track_for_lba(Lba lba) const noexcept {
         return svc::track_for_lba(toc, lba);
     }
+
     [[nodiscard]] std::uint32_t seek_ms(Lba from_lba, Lba to_lba) const noexcept {
         return svc::seek_ms(from_lba, to_lba);
     }
+
     [[nodiscard]] std::uint32_t chd_hunk_bytes() const noexcept { return hunk_bytes; }
 };
 
-}  // namespace mister::svc
+}

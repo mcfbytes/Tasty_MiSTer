@@ -15,4 +15,4 @@ struct DiscCounters {
 static_assert(std::is_trivially_copyable_v<DiscCounters>);
 static_assert(std::is_nothrow_default_constructible_v<DiscCounters>);
 
-}  // namespace mister::svc
+}

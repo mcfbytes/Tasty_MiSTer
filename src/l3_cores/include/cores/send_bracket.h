@@ -12,4 +12,4 @@ struct SendBracket {
     std::uint32_t aux = 0;
 };
 
-}  // namespace mister::cores
+}

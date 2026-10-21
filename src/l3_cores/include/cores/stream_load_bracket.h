@@ -19,8 +19,12 @@ class StreamLoadBracket {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    [[nodiscard]] static Ex<StreamLoadBracket> open(IStreamLoad& core, proto::IImageSink& sink,
-                                                    IoIndex index, std::uint32_t length = 0);
+    [[nodiscard]] static Ex<StreamLoadBracket> open(
+        IStreamLoad& core,
+        proto::IImageSink& sink,
+        IoIndex index,
+        std::uint32_t length = 0
+    );
 
     StreamLoadBracket(StreamLoadBracket&& o) noexcept;
     StreamLoadBracket& operator=(StreamLoadBracket&&) = delete;
@@ -36,7 +40,10 @@ public:
 
 private:
     StreamLoadBracket(IStreamLoad& core, IoIndex index, proto::ImageBracket&& b) noexcept
-        : core_(&core), index_(index), bracket_(std::move(b)) {}
+        : core_(&core),
+          index_(index),
+          bracket_(std::move(b)) {}
+
     void cut_() noexcept;
 
     IStreamLoad* core_;
@@ -44,4 +51,4 @@ private:
     std::optional<proto::ImageBracket> bracket_;
 };
 
-}  // namespace mister::cores
+}

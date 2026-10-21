@@ -22,8 +22,9 @@ struct TxDigest {
     std::uint32_t crc = 0;
     FixedStr<kPathCap, StrFit::Clip> path{};
 };
+
 static_assert(std::is_trivially_copyable_v<TxDigest>);
 
 using TxDigestCell = xthread::Telemetry<TxDigest, SeatTag::RT>;
 
-}  // namespace mister::app
+}

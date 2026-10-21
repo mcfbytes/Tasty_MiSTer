@@ -25,7 +25,8 @@ void HdOsdScreen::publish_ask_(bool is_open) noexcept {
 }
 
 void HdOsdScreen::retry_drop_() noexcept {
-    if (!drop_owed_) return;
+    if (!drop_owed_)
+        return;
     if (w_.fb.raised()) {
         drop_owed_ = false;
         ours_ = false;
@@ -33,7 +34,8 @@ void HdOsdScreen::retry_drop_() noexcept {
         sync_console_();
         return;
     }
-    if (!w_.fb.drop()) return;
+    if (!w_.fb.drop())
+        return;
     ours_ = false;
     drop_owed_ = false;
     shown_.reset();
@@ -74,18 +76,23 @@ void HdOsdScreen::sync_console_() noexcept {
 }
 
 void HdOsdScreen::capture_console_() noexcept {
-    if (!w_.vt || guarded_vt_ != 0) return;
+    if (!w_.vt || guarded_vt_ != 0)
+        return;
     const auto vt = w_.vt->active();
-    if (!vt) return;
+    if (!vt)
+        return;
     const auto mode = w_.vt->text_mode(*vt);
-    if (!mode || !*mode) return;
+    if (!mode || !*mode)
+        return;
     w_.vt->graphics(*vt);
     guarded_vt_ = *vt;
 }
 
 void HdOsdScreen::release_console_() noexcept {
-    if (guarded_vt_ == 0) return;
-    if (w_.vt) w_.vt->text(guarded_vt_);
+    if (guarded_vt_ == 0)
+        return;
+    if (w_.vt)
+        w_.vt->text(guarded_vt_);
     guarded_vt_ = 0;
 }
 
@@ -93,7 +100,8 @@ bool HdOsdScreen::try_open_() noexcept {
     const std::uint32_t ow = w_.video.output_width();
     const std::uint32_t oh = w_.video.output_height();
     const auto fit = fit_surface(w_.fb.region_bytes(), ow, oh);
-    if (!fit) return false;
+    if (!fit)
+        return false;
     surface_ = *fit;
     out_w_ = ow;
     out_h_ = oh;
@@ -106,11 +114,14 @@ bool HdOsdScreen::try_open_() noexcept {
 }
 
 bool HdOsdScreen::reraise_() noexcept {
-    if (!shown_) return false;
+    if (!shown_)
+        return false;
     const auto raised = w_.fb.raise_view((*shown_)->view);
-    if (w_.fb.raised()) ours_ = true;
+    if (w_.fb.raised())
+        ours_ = true;
     sync_console_();
-    if (!raised) return false;
+    if (!raised)
+        return false;
     covers_ = true;
     intends_ = true;
     return true;
@@ -118,7 +129,8 @@ bool HdOsdScreen::reraise_() noexcept {
 
 void HdOsdScreen::on_applies_() noexcept {
     const std::uint32_t applies = w_.video.stats().applies;
-    if (applies == applies_seen_) return;
+    if (applies == applies_seen_)
+        return;
     const std::uint32_t ow = w_.video.output_width();
     const std::uint32_t oh = w_.video.output_height();
     const bool sized = ow != out_w_ || oh != out_h_;
@@ -127,7 +139,8 @@ void HdOsdScreen::on_applies_() noexcept {
     applies_seen_ = applies;
     if (!sized) {
         publish_ask_(true);
-        if (shown_) reraise_owed_ = !reraise_();
+        if (shown_)
+            reraise_owed_ = !reraise_();
         return;
     }
     const auto fit = fit_surface(w_.fb.region_bytes(), ow, oh);
@@ -152,7 +165,8 @@ void HdOsdScreen::raise_job_(HdFlipChannel::Job job) noexcept {
         return;
     }
     const auto raised = w_.fb.raise_view(job->view);
-    if (w_.fb.raised()) ours_ = true;
+    if (w_.fb.raised())
+        ours_ = true;
     if (!raised) {
         owed_ = std::move(job);
         sync_console_();
@@ -170,14 +184,16 @@ void HdOsdScreen::take_jobs_() noexcept {
         auto job = std::move(*owed_);
         owed_.reset();
         if (!job || job->epoch != epoch_) {
-            if (job) ++stale_drops_;
+            if (job)
+                ++stale_drops_;
         } else {
             raise_job_(std::move(job));
         }
     }
     for (;;) {
         auto job = w_.flips.take();
-        if (!job) break;
+        if (!job)
+            break;
         if (job->epoch != epoch_) {
             ++stale_drops_;
             continue;
@@ -190,8 +206,8 @@ void HdOsdScreen::tick(const PageDescription* page, HdOsdStatus::Badge badge) no
     TASTY_SEAT_BODY(HdOsdScreen);
     retry_drop_();
     (void)status_seen_.take_if_changed(w_.status, status_);
-    const bool live =
-        status_.state == HdOsdStatus::State::Ready || status_.state == HdOsdStatus::State::Showing;
+    const bool live = status_.state == HdOsdStatus::State::Ready
+        || status_.state == HdOsdStatus::State::Showing;
     if (page == nullptr || !live) {
         close_();
         return;
@@ -202,14 +218,18 @@ void HdOsdScreen::tick(const PageDescription* page, HdOsdStatus::Badge badge) no
         close_();
         return;
     }
-    if (open_) on_applies_();
+    if (open_)
+        on_applies_();
     if (!open_) {
-        if (available()) (void)try_open_();
+        if (available())
+            (void)try_open_();
     } else if (page_ != page_sent_ || badge_ != badge_sent_) {
         publish_ask_(true);
     }
-    if (open_) take_jobs_();
-    if (reraise_owed_) reraise_owed_ = !reraise_();
+    if (open_)
+        take_jobs_();
+    if (reraise_owed_)
+        reraise_owed_ = !reraise_();
 }
 
 bool HdOsdScreen::intends_hdmi() const noexcept {
@@ -231,7 +251,8 @@ bool HdOsdScreen::available() const noexcept {
     TASTY_SEAT_BODY(HdOsdScreen);
     if (status_.state != HdOsdStatus::State::Ready && status_.state != HdOsdStatus::State::Showing)
         return false;
-    if (w_.fb.held()) return false;
+    if (w_.fb.held())
+        return false;
     return !w_.fb.raised() || ours_;
 }
 
@@ -240,4 +261,4 @@ std::uint32_t HdOsdScreen::stale_drops() const noexcept {
     return stale_drops_;
 }
 
-}  // namespace mister::app
+}

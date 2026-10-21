@@ -17,4 +17,4 @@ struct CheatRecord {
     bool loaded = false;
 };
 
-}  // namespace mister::app
+}

@@ -23,4 +23,4 @@ struct DeadzoneRule {
 
 [[nodiscard]] std::vector<DeadzoneRule> parse_deadzone_rules(const ConfigSnapshot& cfg);
 
-}  // namespace mister::svc
+}

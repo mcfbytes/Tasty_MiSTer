@@ -18,4 +18,4 @@ static_assert(static_cast<std::uint8_t>(HdOsdStatus::Badge::Paused) == 2);
 static_assert(std::is_trivially_copyable_v<HdBadgeView>);
 static_assert(std::is_nothrow_default_constructible_v<HdBadgeView>);
 
-}  // namespace mister::app
+}

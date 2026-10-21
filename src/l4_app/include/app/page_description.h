@@ -16,6 +16,7 @@ struct PageDescription {
     enum class Shape : std::uint8_t { List, Choice };
 
     enum class RowIcon : std::uint8_t { None, Folder, Archive, Up, Recent };
+
     struct Row {
         FixedStr<128, StrFit::Clip> label{};
         FixedStr<24, StrFit::Clip> value{};
@@ -27,6 +28,7 @@ struct PageDescription {
         std::uint8_t fill = 0;
         friend bool operator==(const Row&, const Row&) = default;
     };
+
     FixedStr<48, StrFit::Clip> title{};
     FixedStr<48, StrFit::Clip> crumb{};
 
@@ -43,4 +45,4 @@ struct PageDescription {
 
 static_assert(std::is_trivially_copyable_v<PageDescription>);
 
-}  // namespace mister::app
+}

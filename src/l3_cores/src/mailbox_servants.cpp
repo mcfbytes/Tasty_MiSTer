@@ -11,4 +11,4 @@ ServantSet make_servants(const svc::Vfs& vfs) {
     return set;
 }
 
-}  // namespace mister::cores
+}

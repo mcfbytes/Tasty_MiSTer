@@ -14,12 +14,14 @@ class RtPark {
 
 public:
     explicit RtPark(reactor::Executive& exec) noexcept : exec_(exec) {}
+
     RtPark(const RtPark&) = delete;
     RtPark& operator=(const RtPark&) = delete;
     RtPark(RtPark&&) = delete;
     RtPark& operator=(RtPark&&) = delete;
 
     void arm() noexcept {}
+
     void disarm() noexcept {}
 
     void wait(int ms) noexcept;
@@ -28,4 +30,4 @@ private:
     reactor::Executive& exec_;
 };
 
-}  // namespace mister::app
+}

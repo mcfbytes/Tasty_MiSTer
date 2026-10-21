@@ -18,7 +18,8 @@ public:
     [[nodiscard]] virtual std::size_t cheat_count() const noexcept = 0;
     [[nodiscard]] virtual std::string_view cheat_name(std::size_t i) const noexcept = 0;
     [[nodiscard]] virtual std::span<const std::uint8_t> cheat_bytes(
-        std::size_t i) const noexcept = 0;
+        std::size_t i
+    ) const noexcept = 0;
 
 protected:
     ICheatRecords() = default;
@@ -26,4 +27,4 @@ protected:
     ICheatRecords& operator=(const ICheatRecords&) = default;
 };
 
-}  // namespace mister::cores
+}

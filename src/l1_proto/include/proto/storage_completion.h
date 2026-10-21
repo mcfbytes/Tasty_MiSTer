@@ -41,6 +41,7 @@ struct StorageCompletion {
         ArenaHalf half{};
         std::uint8_t pad_[3]{};
     };
+
     struct Write {
         static constexpr Kind kKind = Kind::Write;
         std::uint64_t offset = 0;
@@ -48,6 +49,7 @@ struct StorageCompletion {
         ArenaHalf half{};
         std::uint8_t pad_[3]{};
     };
+
     struct Create {
         static constexpr Kind kKind = Kind::Create;
         std::uint64_t size = 0;
@@ -55,13 +57,16 @@ struct StorageCompletion {
         ArenaHalf half{};
         std::uint8_t pad_[3]{};
     };
+
     struct Flush {
         static constexpr Kind kKind = Kind::Flush;
     };
+
     struct Attach {
         static constexpr Kind kKind = Kind::Attach;
         std::uint64_t size = 0;
     };
+
     struct Detach {
         static constexpr Kind kKind = Kind::Detach;
     };
@@ -74,8 +79,9 @@ struct StorageCompletion {
     alignas(8) std::array<std::byte, kStore> store{};
 };
 
-static_assert(infra::MessageSum<StorageCompletion> &&
-              infra::alternatives_are_total<StorageCompletion>());
+static_assert(
+    infra::MessageSum<StorageCompletion> && infra::alternatives_are_total<StorageCompletion>()
+);
 static_assert(sizeof(StorageCompletion) == 32 && alignof(StorageCompletion) == 8);
 
-}  // namespace mister::proto
+}

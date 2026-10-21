@@ -15,4 +15,4 @@ struct SpiSample {
     bool hdmi = false;
 };
 
-}  // namespace mister::hal
+}

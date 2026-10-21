@@ -15,7 +15,10 @@ class Vfs;
 
 [[nodiscard]] Ex<std::vector<std::byte>> read_bounded(IFile& file, std::uint64_t cap);
 
-[[nodiscard]] Ex<std::vector<std::byte>> read_bounded(const Vfs& vfs, std::string_view path,
-                                                      std::uint64_t cap);
+[[nodiscard]] Ex<std::vector<std::byte>> read_bounded(
+    const Vfs& vfs,
+    std::string_view path,
+    std::uint64_t cap
+);
 
-}  // namespace mister::svc
+}

@@ -29,8 +29,10 @@ enum class SeatTag : std::uint8_t {
     kCount,
 };
 inline constexpr std::size_t kSeatTagCount = static_cast<std::size_t>(SeatTag::kCount);
-static_assert(static_cast<std::uint8_t>(SeatTag::Unbound) == 0,
-              "a thread_local SeatTag is zero-initialised, so 0 is Unbound");
+static_assert(
+    static_cast<std::uint8_t>(SeatTag::Unbound) == 0,
+    "a thread_local SeatTag is zero-initialised, so 0 is Unbound"
+);
 
 using SeatNameRow = std::pair<SeatTag, const char*>;
 
@@ -54,10 +56,12 @@ inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatNames{{
 
 consteval bool seat_name_rows_are_ordinal() {
     for (std::size_t i = 0; i < kSeatTagCount; ++i) {
-        if (static_cast<std::size_t>(kSeatNames[i].first) != i) return false;
+        if (static_cast<std::size_t>(kSeatNames[i].first) != i)
+            return false;
     }
     return true;
 }
+
 static_assert(seat_name_rows_are_ordinal(), "kSeatNames: row i names tag i, one row per tag");
 
 constexpr const char* seat_name(SeatTag t) noexcept {
@@ -85,10 +89,12 @@ inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatRoles{{
 
 consteval bool seat_role_rows_are_ordinal() {
     for (std::size_t i = 0; i < kSeatTagCount; ++i) {
-        if (static_cast<std::size_t>(kSeatRoles[i].first) != i) return false;
+        if (static_cast<std::size_t>(kSeatRoles[i].first) != i)
+            return false;
     }
     return true;
 }
+
 static_assert(seat_role_rows_are_ordinal(), "kSeatRoles: row i names tag i, one row per tag");
 
 constexpr const char* seat_role(SeatTag t) noexcept {
@@ -103,7 +109,9 @@ SeatTag adopt_seat_tag(SeatTag t) noexcept;
 class SeatScope {
 public:
     explicit SeatScope(SeatTag t) noexcept : prev_(adopt_seat_tag(t)) {}
+
     ~SeatScope() { (void)adopt_seat_tag(prev_); }
+
     SeatScope(const SeatScope&) = delete;
     SeatScope& operator=(const SeatScope&) = delete;
     SeatScope(SeatScope&&) = delete;
@@ -125,11 +133,13 @@ inline void check(SeatTag want, std::uint16_t site, const char* what) noexcept {
     }
 }
 
-}  // namespace seat::detail
+}
 
 template <SeatTag Want>
-inline void seat_assert([[maybe_unused]] std::uint16_t site,
-                        [[maybe_unused]] const char* what) noexcept {
+inline void seat_assert(
+    [[maybe_unused]] std::uint16_t site,
+    [[maybe_unused]] const char* what
+) noexcept {
     if constexpr (kSeatChecksEnabled && Want != SeatTag::Unbound) {
         seat::detail::check(Want, site, what);
     }
@@ -151,20 +161,20 @@ inline constexpr SeatTag RecWrite = SeatTag::RecWrite;
 inline constexpr SeatTag Launcher = SeatTag::Launcher;
 inline constexpr SeatTag HdOsd = SeatTag::HdOsd;
 inline constexpr SeatTag Main = SeatTag::Main;
-}  // namespace seat_arg
+}
 
 namespace seat_exempt {
 inline constexpr int component = 0;
 inline constexpr int const_shared = 1;
 inline constexpr int boot = 2;
-}  // namespace seat_exempt
+}
 
-}  // namespace mister
+}
 
 #define TASTY_SEAT_RESIDENT(tag) \
     static constexpr ::mister::SeatTag kSeatDecl = ::mister::SeatTag::tag
 
-#define TASTY_SEAT_MEDIATOR(a, b)                                              \
+#define TASTY_SEAT_MEDIATOR(a, b) \
     static constexpr ::mister::SeatTag kSeatMediatorA = ::mister::seat_arg::a; \
     static constexpr ::mister::SeatTag kSeatMediatorB = ::mister::seat_arg::b
 
@@ -178,11 +188,11 @@ inline constexpr int boot = 2;
 #define TASTY_SEAT_BODY_MEDIATOR(Type, Half) ((void)0)
 
 #define TASTY_SEAT_FROM(Owner) \
-    using SeatOwner = Owner;   \
+    using SeatOwner = Owner; \
     static constexpr bool kSeatFrom = true
 
 namespace mister::seat_owner {
 struct RT {
     TASTY_SEAT_RESIDENT(RT);
 };
-}  // namespace mister::seat_owner
+}

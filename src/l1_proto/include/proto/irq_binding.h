@@ -20,4 +20,4 @@ struct IrqBinding {
     friend constexpr bool operator==(const IrqBinding&, const IrqBinding&) = default;
 };
 
-}  // namespace mister::proto
+}

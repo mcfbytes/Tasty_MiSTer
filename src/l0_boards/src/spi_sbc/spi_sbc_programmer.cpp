@@ -3,16 +3,25 @@
 
 namespace mister::boards::spi_sbc {
 
-Ex<bool> Programmer::program_begin() { return unimplemented(ERR_SITE()); }
+Ex<bool> Programmer::program_begin() {
+    return unimplemented(ERR_SITE());
+}
 
 Ex<void> Programmer::program_chunk(std::span<const std::byte> chunk) {
     (void)chunk;
     return unimplemented(ERR_SITE());
 }
 
-Ex<bool> Programmer::program_end() { return unimplemented(ERR_SITE()); }
-Ex<bool> Programmer::program_step() { return unimplemented(ERR_SITE()); }
+Ex<bool> Programmer::program_end() {
+    return unimplemented(ERR_SITE());
+}
 
-bool Programmer::programmed() const { return false; }
+Ex<bool> Programmer::program_step() {
+    return unimplemented(ERR_SITE());
+}
 
-}  // namespace mister::boards::spi_sbc
+bool Programmer::programmed() const {
+    return false;
+}
+
+}

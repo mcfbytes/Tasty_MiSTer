@@ -16,6 +16,7 @@
 #include "svc/archive.h"
 #include "svc/dir_entry.h"
 #include "svc/file.h"
+#include "svc/memory_mounts.h"
 #include "svc/scan_filter.h"
 #include "svc/search_policy.h"
 #include "svc/types.h"
@@ -39,20 +40,28 @@ public:
     [[nodiscard]] static Ex<Vfs> create_at(std::string_view root_path);
 
     const std::string& root_path() const noexcept { return root_path_; }
+
     const StorageRoot& root() const noexcept { return root_; }
 
     [[nodiscard]] Ex<std::string> resolve(std::string_view rel, const SearchPolicy& policy) const;
 
     Ex<std::unique_ptr<IFile>> open(std::string_view path, OpenMode mode) const;
 
-    [[nodiscard]] Ex<std::unique_ptr<IFile>> open_zip_by_crc(std::string_view path,
-                                                             Crc32 crc) const;
+    [[nodiscard]] Ex<std::unique_ptr<IFile>> open_zip_by_crc(
+        std::string_view path,
+        Crc32 crc
+    ) const;
 
-    [[nodiscard]] Ex<std::unique_ptr<IArchive>> open_archive(std::string_view path,
-                                                             std::size_t max_entries) const;
+    [[nodiscard]] Ex<std::unique_ptr<IArchive>> open_archive(
+        std::string_view path,
+        std::size_t max_entries
+    ) const;
 
-    [[nodiscard]] Ex<void> mount_memory(std::string_view path, std::span<const std::byte> blob,
-                                        Crc32 crc = {});
+    [[nodiscard]] Ex<void> mount_memory(
+        std::string_view path,
+        std::span<const std::byte> blob,
+        Crc32 crc = {}
+    );
 
     [[nodiscard]] std::uint32_t memory_sequential_hints(std::string_view path) const noexcept;
 
@@ -76,6 +85,7 @@ public:
         std::uint64_t last_file_sync = 0;
         std::uint64_t last_rename = 0;
     };
+
     static DurabilityLog durability_log() noexcept;
 
     static bool extension_matches(std::string_view filename, std::string_view packed_extensions);
@@ -92,6 +102,7 @@ public:
 
         bool require_zip = false;
     };
+
     [[nodiscard]] Ex<std::string> find_game_asset(const AssetQuery& q) const;
 
 private:
@@ -100,16 +111,9 @@ private:
 
     Ex<std::unique_ptr<IFile>> open_backend_(std::string_view path, OpenMode mode) const;
 
-    struct MemoryBlob {
-        std::string path;
-        std::span<const std::byte> blob;
-        Crc32 crc{};
-        std::shared_ptr<std::atomic<std::uint32_t>> hints;
-    };
-
     StorageRoot root_{};
     std::string root_path_;
-    std::vector<MemoryBlob> memory_;
+    MemoryMounts memory_;
 };
 
-}  // namespace mister::svc
+}

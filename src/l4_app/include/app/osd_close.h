@@ -15,4 +15,4 @@ protected:
     IOsdClose& operator=(const IOsdClose&) = default;
 };
 
-}  // namespace mister::app
+}

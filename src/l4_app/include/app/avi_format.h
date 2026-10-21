@@ -35,6 +35,7 @@ inline constexpr std::uint32_t kDefaultVtime = 1'666'667;
 
 inline constexpr std::uint32_t kVtimeMin = kTickHz / 120;
 inline constexpr std::uint32_t kVtimeMax = kTickHz / 20;
+
 [[nodiscard]] constexpr bool plausible_vtime(std::uint32_t vtime) noexcept {
     return vtime >= kVtimeMin && vtime <= kVtimeMax;
 }
@@ -43,11 +44,17 @@ using Header = std::array<std::byte, kHeaderBytes>;
 void header(const Fields& f, Header& out) noexcept;
 
 void chunk_head(std::uint32_t payload, std::span<std::byte, kChunkHead> out) noexcept;
+
 [[nodiscard]] constexpr std::size_t chunk_bytes(std::size_t payload) noexcept {
     return kChunkHead + payload + (payload & 1u);
 }
-void index_head(std::uint32_t entries, std::span<std::byte, kChunkHead> out) noexcept;
-void index_entry(bool key, std::uint32_t offset, std::uint32_t payload,
-                 std::span<std::byte, kIndexEntry> out) noexcept;
 
-}  // namespace mister::app::avi
+void index_head(std::uint32_t entries, std::span<std::byte, kChunkHead> out) noexcept;
+void index_entry(
+    bool key,
+    std::uint32_t offset,
+    std::uint32_t payload,
+    std::span<std::byte, kIndexEntry> out
+) noexcept;
+
+}

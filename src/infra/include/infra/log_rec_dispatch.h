@@ -26,4 +26,4 @@ concept LogRecSink = requires(S& s, const LogRec& m, const LogRec::Head& h) {
 
 using LogRecRoutes = infra::AllRouted;
 
-}  // namespace mister
+}

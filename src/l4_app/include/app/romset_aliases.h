@@ -13,8 +13,12 @@ class IRomsetAliases {
 public:
     virtual ~IRomsetAliases() = default;
 
-    [[nodiscard]] virtual RomsetAlias query(std::string_view dir, std::string_view home,
-                                            std::string_view entry, std::string_view key) = 0;
+    [[nodiscard]] virtual RomsetAlias query(
+        std::string_view dir,
+        std::string_view home,
+        std::string_view entry,
+        std::string_view key
+    ) = 0;
 
 protected:
     IRomsetAliases() = default;
@@ -22,4 +26,4 @@ protected:
     IRomsetAliases& operator=(const IRomsetAliases&) = default;
 };
 
-}  // namespace mister::app
+}

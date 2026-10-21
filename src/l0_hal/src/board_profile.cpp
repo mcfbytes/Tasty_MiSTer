@@ -34,10 +34,11 @@ namespace mister::hal {
 [[nodiscard]] Ex<const BoardProfile*> select_board(const CompatibleBlob& blob) {
     for (const BoardProfile* p : kBoardTable) {
         for (const std::string_view s : p->compatible) {
-            if (blob.contains(s)) return p;
+            if (blob.contains(s))
+                return p;
         }
     }
     return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), 0});
 }
 
-}  // namespace mister::hal
+}

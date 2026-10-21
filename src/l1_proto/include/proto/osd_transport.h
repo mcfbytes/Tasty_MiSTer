@@ -30,15 +30,23 @@ public:
     static constexpr std::uint32_t kOsdEn = 1u << 19;
     static constexpr std::uint32_t kIoEn = 1u << 20;
 
-    [[nodiscard]] Ex<void> flush_row(hal::ISpiTransport& link, OsdRow r,
-                                     std::span<const std::uint8_t> bytes);
+    [[nodiscard]] Ex<void> flush_row(
+        hal::ISpiTransport& link,
+        OsdRow r,
+        std::span<const std::uint8_t> bytes
+    );
 
     [[nodiscard]] Ex<void> set_visible(hal::ISpiTransport& link, bool visible);
 
     [[nodiscard]] Ex<void> enable(hal::ISpiTransport& link, OsdMode mode);
 
-    [[nodiscard]] Ex<void> enable_info(hal::ISpiTransport& link, std::uint16_t x, std::uint16_t y,
-                                       std::uint16_t width, std::uint16_t height);
+    [[nodiscard]] Ex<void> enable_info(
+        hal::ISpiTransport& link,
+        std::uint16_t x,
+        std::uint16_t y,
+        std::uint16_t width,
+        std::uint16_t height
+    );
 
     [[nodiscard]] Ex<void> set_rotation(hal::ISpiTransport& link, OsdRotation rotate);
 
@@ -48,13 +56,16 @@ public:
         target_ = t;
         return {};
     }
+
     OsdTarget target() const noexcept { return target_; }
 
     static constexpr hal::SpiOutput select_mask(OsdTarget t) noexcept {
         const auto bits = static_cast<std::uint8_t>(t);
         std::uint32_t m = kOsdEn | kIoEn | kFpgaEn;
-        if ((bits & static_cast<std::uint8_t>(OsdTarget::Hdmi)) != 0u) m &= ~kFpgaEn;
-        if ((bits & static_cast<std::uint8_t>(OsdTarget::Vga)) != 0u) m &= ~kIoEn;
+        if ((bits & static_cast<std::uint8_t>(OsdTarget::Hdmi)) != 0u)
+            m &= ~kFpgaEn;
+        if ((bits & static_cast<std::uint8_t>(OsdTarget::Vga)) != 0u)
+            m &= ~kIoEn;
         return hal::SpiOutput{m};
     }
 
@@ -70,4 +81,4 @@ private:
     std::uint32_t unrouted_selects_ = 0;
 };
 
-}  // namespace mister::proto
+}

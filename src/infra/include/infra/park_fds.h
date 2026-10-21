@@ -17,19 +17,23 @@ class ParkFds {
 public:
     [[nodiscard]] static Ex<ParkFds> create(WakeFlag& wake) noexcept {
         if (wake.fd() < 0) {
-            if (auto r = wake.open_fd(); !r) return std::unexpected(r.error());
+            if (auto r = wake.open_fd(); !r)
+                return std::unexpected(r.error());
         }
         WakeFlag stop;
-        if (auto r = stop.open_fd(); !r) return std::unexpected(r.error());
+        if (auto r = stop.open_fd(); !r)
+            return std::unexpected(r.error());
         return ParkFds{wake, std::move(stop)};
     }
 
     [[nodiscard]] static Ex<ParkFds> create(WakeFlag& wake, WakeFlag& stop) noexcept {
         if (wake.fd() < 0) {
-            if (auto r = wake.open_fd(); !r) return std::unexpected(r.error());
+            if (auto r = wake.open_fd(); !r)
+                return std::unexpected(r.error());
         }
         if (stop.fd() < 0) {
-            if (auto r = stop.open_fd(); !r) return std::unexpected(r.error());
+            if (auto r = stop.open_fd(); !r)
+                return std::unexpected(r.error());
         }
         return ParkFds{wake, stop};
     }
@@ -57,6 +61,7 @@ public:
 
 private:
     ParkFds(WakeFlag& wake, WakeFlag&& stop) noexcept : wake_(&wake), stop_(std::move(stop)) {}
+
     ParkFds(WakeFlag& wake, WakeFlag& stop) noexcept : wake_(&wake), stop_wire_(stop) {}
 
     WakeFlag* wake_;
@@ -64,4 +69,4 @@ private:
     WakeFlag stop_{};
 };
 
-}  // namespace mister::xthread
+}

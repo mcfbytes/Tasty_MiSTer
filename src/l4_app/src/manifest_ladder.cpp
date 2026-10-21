@@ -10,6 +10,7 @@
 namespace mister::app {
 
 ManifestLadder::Pass ManifestLadder::step(Host& h) {
+    TASTY_SEAT_BODY(ManifestLadder);
     switch (pc_) {
         case Pc::Next:
             return next_(h);
@@ -25,8 +26,11 @@ ManifestLadder::Pass ManifestLadder::step(Host& h) {
     return Pass::Failed;
 }
 
-bool ManifestLadder::wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
-                                const FileTxLevelCell* level) const noexcept {
+bool ManifestLadder::wants_pass(
+    const LinkTxChannel<SeatTag::Main>& inbox,
+    const FileTxLevelCell* level
+) const noexcept {
+    TASTY_SEAT_BODY(ManifestLadder);
     switch (pc_) {
         case Pc::Next:
             return true;
@@ -47,37 +51,49 @@ bool ManifestLadder::wants_pass(const LinkTxChannel<SeatTag::Main>& inbox,
 ManifestLadder::Pass ManifestLadder::next_(Host& h) {
     std::optional<cores::ManifestAct> act = acts_->next();
     if (!act) {
-        if (const std::optional<Errc> why = acts_->refusal()) return fail_(*why);
+        if (const std::optional<Errc> why = acts_->refusal())
+            return fail_(*why);
         pc_ = Pc::Over;
         return Pass::Done;
     }
-    if (const auto* w = std::get_if<cores::StageWindow>(&*act)) return window_(h, *w);
+    if (const auto* w = std::get_if<cores::StageWindow>(&*act))
+        return window_(h, *w);
     bracket_.emplace(std::move(std::get<cores::SendBracket>(*act)));
     pc_ = Pc::Send;
     return Pass::Stepped;
 }
 
 ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& w) {
-    const auto planned =
-        cores::AddressedLoad::window_row(w.address, w.bytes, proto::IoIndex{w.index}, h.aperture);
+    const auto planned = cores::AddressedLoad::window_row(
+        w.address,
+        w.bytes,
+        proto::IoIndex{w.index},
+        h.aperture
+    );
     if (!planned) {
         refuse_window_(h, Errc::slot_range);
         return Pass::Stepped;
     }
-    auto win =
-        LoadWindow<seat_owner::Main>::open(h.map, h.aperture, os::PhysAddr{w.address}, w.bytes);
+    auto win = LoadWindow<seat_owner::Main>::open(
+        h.map,
+        h.aperture,
+        os::PhysAddr{w.address},
+        w.bytes
+    );
     if (!win) {
         refuse_window_(h, win.error().code);
         return Pass::Stepped;
     }
     cores::TransferRow r = *planned;
     r.bracket = cores::RowBracket::None;
-    LoadLadder::Job job{.loader = std::make_unique<cores::AddressedLoad>(h.aperture),
-                        .file = acts_->take_image(),
-                        .total = w.bytes,
-                        .wire_index = w.index,
-                        .act = h.owner.next_generation(),
-                        .row = r};
+    LoadLadder::Job job{
+        .loader = std::make_unique<cores::AddressedLoad>(h.aperture),
+        .file = acts_->take_image(),
+        .total = w.bytes,
+        .wire_index = w.index,
+        .act = h.owner.next_generation(),
+        .row = r
+    };
     auto l = LoadLadder::start(std::move(job), std::move(*win), rel_.view());
     if (!l) {
         refuse_window_(h, l.error().code);
@@ -89,8 +105,7 @@ ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& 
 }
 
 void ManifestLadder::refuse_window_(Host& h, Errc why) noexcept {
-    ++h.windows.refusals;
-    h.windows.refusal_code = static_cast<std::uint16_t>(why);
+    h.windows.refused(why);
     pc_ = Pc::Next;
 }
 
@@ -101,12 +116,11 @@ ManifestLadder::Pass ManifestLadder::rung_(Host& h) {
     }
     load_.reset();
     if (pass == LoadLadder::Pass::Done) {
-        ++h.windows.windows;
+        h.windows.opened();
         acts_->mark_staged();
     } else {
 
-        ++h.windows.refusals;
-        h.windows.refusal_code = static_cast<std::uint16_t>(Errc::io);
+        h.windows.refused(Errc::io);
         acts_->mark_torn();
     }
     pc_ = Pc::Next;
@@ -115,19 +129,22 @@ ManifestLadder::Pass ManifestLadder::rung_(Host& h) {
 
 ManifestLadder::Pass ManifestLadder::send_(Host& h) {
     LinkTxChannel<SeatTag::Main>& inbox = h.rung.inbox;
-    if (inbox.ring().size() >= proto::kLinkTxCapacity) return Pass::Waiting;
+    if (inbox.ring().size() >= proto::kLinkTxCapacity)
+        return Pass::Waiting;
     cores::SendBracket& b = *bracket_;
     const std::uint64_t bytes = b.bytes.size();
 
     auto id = b.bytes.empty() ? inbox.intern_file_path(rel_.view(), 0, 0, b.aux)
                               : inbox.intern_file(std::move(b.bytes), {}, rel_.view(), 0);
-    if (!id) return id.error().code == Errc::would_block ? Pass::Waiting : fail_(id.error().code);
+    if (!id)
+        return id.error().code == Errc::would_block ? Pass::Waiting : fail_(id.error().code);
     std::uint16_t act = 0;
     while (act == 0 || act == act_)
         act = static_cast<std::uint16_t>(h.owner.next_generation());
-    const proto::LinkOp::StagePayload op{
-        .payload = *id, .dest = proto::WideIoIndex{b.index}, .chunk = kSendChunk, .act = act};
-    if (!inbox.push(op)) return fail_(Errc::would_block);
+    const proto::LinkOp::StagePayload
+        op{.payload = *id, .dest = proto::WideIoIndex{b.index}, .chunk = kSendChunk, .act = act};
+    if (!inbox.push(op))
+        return fail_(Errc::would_block);
     act_ = act;
     bracket_.reset();
     echo_due_ns_ = h.now_ns + echo_bound_ns(bytes);
@@ -140,7 +157,8 @@ ManifestLadder::Pass ManifestLadder::echo_(Host& h) {
     if (!s || !s.value.payload || s.value.act != act_) {
         return h.now_ns < echo_due_ns_ ? Pass::Waiting : fail_(Errc::timeout);
     }
-    if (!s.value.open) return fail_(Errc::io);
+    if (!s.value.open)
+        return fail_(Errc::io);
     pc_ = Pc::Next;
     return Pass::Stepped;
 }
@@ -153,4 +171,35 @@ ManifestLadder::Pass ManifestLadder::fail_(Errc why) noexcept {
     return Pass::Failed;
 }
 
-}  // namespace mister::app
+bool ManifestLadder::wants_pass(
+    const LinkTxChannel<SeatTag::Main>& inbox,
+    const FileTxLevelCell& level
+) const noexcept {
+    TASTY_SEAT_BODY(ManifestLadder);
+    return wants_pass(inbox, &level);
+}
+
+Rung::Pass ManifestLadder::step(const RungEdges& edges, cores::ILadderHost& owner) {
+    TASTY_SEAT_BODY(ManifestLadder);
+    Host h{
+        .rung = LoadLadder::Host{edges.inbox, &edges.level, edges.events},
+        .owner = owner,
+        .map = edges.window_map,
+        .aperture = edges.aperture,
+        .windows = edges.windows,
+        .now_ns = edges.clock.now().count()
+    };
+    switch (step(h)) {
+        case Pass::Stepped:
+            return Rung::Pass::Moved;
+        case Pass::Waiting:
+            return Rung::Pass::Waiting;
+        case Pass::Done:
+            return Rung::Pass::Done;
+        case Pass::Failed:
+            return Rung::Pass::Failed;
+    }
+    return Rung::Pass::Failed;
+}
+
+}

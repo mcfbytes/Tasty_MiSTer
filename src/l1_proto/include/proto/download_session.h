@@ -22,16 +22,25 @@ class DownloadSession {
 public:
     [[nodiscard]] static Ex<DownloadSession> begin(hal::ISpiTransport& link, IoIndex index);
 
-    [[nodiscard]] static Ex<DownloadSession> begin(hal::ISpiTransport& link, IoIndex index,
-                                                   const SessionParams& params);
-    [[nodiscard]] static Ex<DownloadSession> begin(hal::ISpiTransport& link, WideIoIndex index,
-                                                   const SessionParams& params = {});
+    [[nodiscard]] static Ex<DownloadSession> begin(
+        hal::ISpiTransport& link,
+        IoIndex index,
+        const SessionParams& params
+    );
+    [[nodiscard]] static Ex<DownloadSession> begin(
+        hal::ISpiTransport& link,
+        WideIoIndex index,
+        const SessionParams& params = {}
+    );
 
     [[nodiscard]] static Ex<DownloadSession> open(hal::ISpiTransport& link, WideIoIndex index);
 
     ~DownloadSession();
+
     DownloadSession(DownloadSession&& o) noexcept
-        : bracket_(std::move(o.bracket_)), posted_(std::exchange(o.posted_, false)) {}
+        : bracket_(std::move(o.bracket_)),
+          posted_(std::exchange(o.posted_, false)) {}
+
     DownloadSession& operator=(DownloadSession&&) = delete;
 
     [[nodiscard]] Ex<void> write(std::span<const std::uint8_t> data);
@@ -46,6 +55,7 @@ public:
     [[nodiscard]] Ex<bool> settle(std::span<const std::uint16_t> tail);
 
     void abandon() noexcept;
+
     [[nodiscard]] bool posted() const noexcept { return posted_; }
 
     [[nodiscard]] static Ex<void> set_index(hal::ISpiTransport& link, IoIndex index);
@@ -53,16 +63,20 @@ public:
 
     [[nodiscard]] static Ex<void> send_file_info(hal::ISpiTransport& link, std::string_view ext);
 
-    [[nodiscard]] static Ex<void> send_cheats(hal::ISpiTransport& link,
-                                              std::span<const std::uint8_t> table);
+    [[nodiscard]] static Ex<void> send_cheats(
+        hal::ISpiTransport& link,
+        std::span<const std::uint8_t> table
+    );
 
     bool active() const noexcept { return bracket_.active(); }
+
     WideIoIndex index() const noexcept { return WideIoIndex{bracket_.index()}; }
 
 private:
     explicit DownloadSession(FioBracket&& b) noexcept : bracket_(std::move(b)) {}
+
     FioBracket bracket_;
     bool posted_ = false;
 };
 
-}  // namespace mister::proto
+}

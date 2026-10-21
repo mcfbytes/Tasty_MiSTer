@@ -28,6 +28,8 @@ struct OptionRow {
 
     enum class Host : std::uint8_t { None, JoySwap, kCount };
 
+    enum class ResetAct : std::uint8_t { None, Warm, Cold, kCount };
+
     std::string_view label{};
     std::uint8_t page = 0;
     Kind kind = Kind::Separator;
@@ -48,16 +50,22 @@ struct OptionRow {
 
     Host host = Host::None;
 
+    ResetAct reset_act = ResetAct::None;
+
     [[nodiscard]] constexpr std::uint8_t choice_count() const noexcept {
         return choices != 0 ? choices : static_cast<std::uint8_t>(values.size());
     }
 
-    [[nodiscard]] static constexpr OptionRow cycle(std::string_view label, std::uint8_t page,
-                                                   std::uint8_t id, WordId word,
-                                                   proto::BitField bits,
-                                                   std::span<const std::string_view> values,
-                                                   std::uint8_t choices = 0,
-                                                   bool arms_reset = false) noexcept {
+    [[nodiscard]] static constexpr OptionRow cycle(
+        std::string_view label,
+        std::uint8_t page,
+        std::uint8_t id,
+        WordId word,
+        proto::BitField bits,
+        std::span<const std::string_view> values,
+        std::uint8_t choices = 0,
+        bool arms_reset = false
+    ) noexcept {
         OptionRow r{};
         r.label = label;
         r.page = page;
@@ -70,10 +78,15 @@ struct OptionRow {
         r.arms_reset = arms_reset;
         return r;
     }
-    [[nodiscard]] static constexpr OptionRow file(std::string_view label, std::uint8_t page,
-                                                  std::uint8_t id, IoIndex slot,
-                                                  bool ejects_on_select,
-                                                  bool browse_unmount = false) noexcept {
+
+    [[nodiscard]] static constexpr OptionRow file(
+        std::string_view label,
+        std::uint8_t page,
+        std::uint8_t id,
+        IoIndex slot,
+        bool ejects_on_select,
+        bool browse_unmount = false
+    ) noexcept {
         OptionRow r{};
         r.label = label;
         r.page = page;
@@ -84,18 +97,29 @@ struct OptionRow {
         r.browse_unmount = browse_unmount;
         return r;
     }
-    [[nodiscard]] static constexpr OptionRow action(std::string_view label, std::uint8_t page,
-                                                    std::uint8_t id) noexcept {
+
+    [[nodiscard]] static constexpr OptionRow action(
+        std::string_view label,
+        std::uint8_t page,
+        std::uint8_t id,
+        ResetAct reset_act
+    ) noexcept {
         OptionRow r{};
         r.label = label;
         r.page = page;
         r.kind = Kind::Action;
         r.id = id;
+        r.reset_act = reset_act;
         return r;
     }
-    [[nodiscard]] static constexpr OptionRow to(std::string_view label, std::uint8_t page,
-                                                std::uint8_t id, Link link,
-                                                std::uint8_t link_page = 0) noexcept {
+
+    [[nodiscard]] static constexpr OptionRow to(
+        std::string_view label,
+        std::uint8_t page,
+        std::uint8_t id,
+        Link link,
+        std::uint8_t link_page = 0
+    ) noexcept {
         OptionRow r{};
         r.label = label;
         r.page = page;
@@ -105,9 +129,14 @@ struct OptionRow {
         r.link_page = link_page;
         return r;
     }
+
     [[nodiscard]] static constexpr OptionRow host_fact(
-        std::string_view label, std::uint8_t page, std::uint8_t id, Host host,
-        std::span<const std::string_view> values) noexcept {
+        std::string_view label,
+        std::uint8_t page,
+        std::uint8_t id,
+        Host host,
+        std::span<const std::string_view> values
+    ) noexcept {
         OptionRow r{};
         r.label = label;
         r.page = page;
@@ -117,6 +146,7 @@ struct OptionRow {
         r.values = values;
         return r;
     }
+
     [[nodiscard]] static constexpr OptionRow separator(std::uint8_t page) noexcept {
         OptionRow r{};
         r.page = page;
@@ -124,4 +154,4 @@ struct OptionRow {
     }
 };
 
-}  // namespace mister::cores
+}

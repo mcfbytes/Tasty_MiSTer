@@ -31,7 +31,7 @@ class RecorderControl;
 class ReplayFeeder;
 class UiRequestRing;
 class VideoPump;
-}  // namespace mister::app
+}
 
 namespace mister::svc {
 class Vfs;
@@ -62,16 +62,23 @@ public:
         virtual bool take_play(const PlayAsk& ask) noexcept = 0;
         virtual void take_stop() noexcept = 0;
         [[nodiscard]] virtual std::uint32_t frames() const noexcept = 0;
+
         [[nodiscard]] virtual std::uint32_t movie_frames() const noexcept { return frames(); }
+
         [[nodiscard]] virtual bool refused() const noexcept { return false; }
 
         [[nodiscard]] virtual bool active() const noexcept { return true; }
+
         [[nodiscard]] virtual const char* refusal_why() const noexcept { return "none"; }
+
         [[nodiscard]] virtual std::string_view refusal_setting() const noexcept { return {}; }
+
         [[nodiscard]] virtual bool refusal_setting_offered() const noexcept { return false; }
+
         [[nodiscard]] virtual std::string_view refusal_path() const noexcept { return {}; }
 
         [[nodiscard]] virtual std::size_t settings_set() const noexcept { return 0; }
+
         [[nodiscard]] virtual std::string setting_line(std::size_t i) const {
             (void)i;
             return {};
@@ -172,4 +179,4 @@ private:
     cores::MovieSystem sys_{};
 };
 
-}  // namespace mister::fw
+}

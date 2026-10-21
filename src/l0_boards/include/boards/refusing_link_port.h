@@ -32,4 +32,4 @@ public:
     [[nodiscard]] Ex<bool> posted_done() override;
 };
 
-}  // namespace mister::boards
+}

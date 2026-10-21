@@ -45,10 +45,16 @@ struct ScalerSeeds {
 };
 
 [[nodiscard]] std::array<ScalerSlot, kScalerSlots> decode_scaler_cfg(
-    std::span<const std::byte> blob, const ScalerSeeds& seeds);
+    std::span<const std::byte> blob,
+    const ScalerSeeds& seeds
+);
 
-void load_filter_set(const Vfs& vfs, std::string_view core, const ScalerSeeds& seeds,
-                     FilterSet& out);
+void load_filter_set(
+    const Vfs& vfs,
+    std::string_view core,
+    const ScalerSeeds& seeds,
+    FilterSet& out
+);
 
 [[nodiscard]] constexpr std::size_t filter_bank_word_count(std::uint16_t ver) noexcept {
     switch (ver & 0x3u) {
@@ -64,11 +70,19 @@ void load_filter_set(const Vfs& vfs, std::string_view core, const ScalerSeeds& s
     }
 }
 
-[[nodiscard]] std::uint16_t filter_bank_word(std::span<const FilterPhase> phases, std::uint16_t ver,
-                                             std::uint32_t bank, std::size_t i) noexcept;
+[[nodiscard]] std::uint16_t filter_bank_word(
+    std::span<const FilterPhase> phases,
+    std::uint16_t ver,
+    std::uint32_t bank,
+    std::size_t i
+) noexcept;
 
-[[nodiscard]] FilterSendPlan plan_filter_banks(const FilterBank& horiz, const FilterBank& vert,
-                                               std::uint16_t ver, bool send_horiz,
-                                               bool send_vert) noexcept;
+[[nodiscard]] FilterSendPlan plan_filter_banks(
+    const FilterBank& horiz,
+    const FilterBank& vert,
+    std::uint16_t ver,
+    bool send_horiz,
+    bool send_vert
+) noexcept;
 
-}  // namespace mister::svc
+}

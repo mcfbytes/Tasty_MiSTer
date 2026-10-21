@@ -12,4 +12,4 @@ public:
     std::chrono::nanoseconds now() const override;
 };
 
-}  // namespace mister::os
+}

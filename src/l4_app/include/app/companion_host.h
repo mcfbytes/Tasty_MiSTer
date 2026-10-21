@@ -21,6 +21,7 @@ public:
     using Binds = xthread::Inbox<CompanionBind, kBindDepth>;
 
     explicit CompanionHost(xthread::WakeFlag& servant_wake) noexcept : binds_(servant_wake) {}
+
     CompanionHost(const CompanionHost&) = delete;
     CompanionHost& operator=(const CompanionHost&) = delete;
 
@@ -41,7 +42,9 @@ public:
     void misrouted(const CompanionBind& m) noexcept;
 
     [[nodiscard]] std::uint32_t attaches() const noexcept { return attaches_.get(); }
+
     [[nodiscard]] std::uint32_t binds_applied() const noexcept { return applied_.get(); }
+
     [[nodiscard]] std::uint32_t binds_unheld() const noexcept { return unheld_.get(); }
 
 private:
@@ -52,4 +55,4 @@ private:
     xthread::Counter attaches_, applied_, unheld_;
 };
 
-}  // namespace mister::app
+}
