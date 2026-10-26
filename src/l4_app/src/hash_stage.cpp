@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "cores/rom_digest.h"
 #include "svc/file.h"
@@ -52,12 +53,13 @@ IReplayStage::Step HashStage::enter(Ctx ctx) noexcept {
     cores::RomDigest digest{play.facts.digest.kind};
     if (play.facts.has_digest)
         digest.update(src->prefix);
-    std::optional<cores::RomDigest> alt{};
-    if (play.facts.has_digest && src->alt_prefix.has_value()) {
-        alt.emplace(play.facts.digest.kind);
-        alt->update(*src->alt_prefix);
+    std::vector<cores::RomDigest> alts{};
+    if (play.facts.has_digest) {
+        for (const auto& prefix : src->alt_prefixes) {
+            alts.emplace_back(play.facts.digest.kind).update(prefix);
+        }
     }
-    hasher_.arm(std::move(*rom), rom_off, rom_end, std::move(digest), std::move(alt));
+    hasher_.arm(std::move(*rom), rom_off, rom_end, std::move(digest), std::move(alts));
     firmware_pass_ = false;
     return Step::stay();
 }
@@ -83,8 +85,10 @@ IReplayStage::Step HashStage::finish_rom_(Ctx ctx) noexcept {
         play.refusal_path.clear();
         return Step::enter(Step::Next::Settle);
     }
-    const bool alt = hasher_.alt() && play.codec->rom_matches(hasher_.alt()->finish(), play.facts);
-    hasher_.alt().reset();
+    bool alt = false;
+    for (auto& a : hasher_.alts())
+        alt = alt || play.codec->rom_matches(a.finish(), play.facts);
+    hasher_.alts().clear();
     if (!play.codec->rom_matches(hasher_.digest().finish(), play.facts) && !alt)
         return Step::refuse(Refusal::Checksum);
     const auto c = play.facts.has_firmware ? play.codec->companion(play.rom.view(), play.facts)

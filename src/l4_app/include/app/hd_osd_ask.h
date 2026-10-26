@@ -5,6 +5,7 @@
 #include <type_traits>
 
 #include "app/hd_osd_status.h"
+#include "app/hd_status_slots.h"
 #include "app/hd_surface.h"
 #include "app/page_description.h"
 #include "infra/seat.h"
@@ -22,6 +23,10 @@ struct HdOsdAsk {
     std::uint64_t stamp_ns = 0;
 
     HdOsdStatus::Badge badge = HdOsdStatus::Badge::Unknown;
+
+    HdStatusSlots slots{};
+
+    std::uint8_t theme = 0;
 };
 
 static_assert(std::is_trivially_copyable_v<HdOsdAsk>);

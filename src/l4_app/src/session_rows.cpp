@@ -19,6 +19,8 @@ SessionRows::SessionRows(const Wiring& w) noexcept
       input_(w.input),
       identify_decoder_(w.signals, session_, w.router, bindings_.generation()),
       status_decoder_(w.link, session_, status_cell_, w.live),
+      axi_status_decoder_(session_, status_cell_, w.live),
+      status_lw_(w.status_lw),
       conf_str_decoder_(w.link, session_, w.router, bindings_.generation()),
       block_decoder_(w.link, w.router, w.slots, w.live),
       info_poll_(
@@ -110,7 +112,9 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
 
     if (current.has_value() && session_.type() == proto::CoreType::EightBit) {
         const cores::CoreProfile& p = current->profile();
-        if (!p.is_front_end && p.block_service == cores::BlockService::Generic) {
+        if (!p.is_front_end
+            && p.block_service == cores::BlockService::Generic
+            && block_poll_ == BlockPollRoute::Link) {
             n = put_census_row_(
                 out,
                 n,
@@ -133,17 +137,21 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
     if (current.has_value()
         && session_.type() == proto::CoreType::EightBit
         && !cores::profile_for(conf_str_name()).is_front_end) {
+
         n = put_census_row_(
             out,
             n,
-            reactor::LinkDecoderDecl{
-                "link.status_poll",
-                reactor::Cause::Tick,
-                &status_row_,
-                0,
-                reactor::DeadlineClass::A,
-                reactor::OsdBudget::Shared
-            }
+            status_route_ == StatusRoute::Lw
+                ? reactor::
+                      LinkDecoderDecl{"link.status_lw", reactor::Cause::Tick, &axi_status_row_, 0, reactor::DeadlineClass::A, reactor::OsdBudget::Shared}
+                : reactor::LinkDecoderDecl{
+                      "link.status_poll",
+                      reactor::Cause::Tick,
+                      &status_row_,
+                      0,
+                      reactor::DeadlineClass::A,
+                      reactor::OsdBudget::Shared
+                  }
         );
 
         if (bindings_.declares_info())
@@ -152,6 +160,16 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
         n = put_census_row_(out, n, rumble_poll_.census_row(rumble_row_));
     }
     return std::span<const reactor::LinkDecoderDecl>(out.data(), n);
+}
+
+void SessionRows::bind_status_route(StatusRoute route, std::uint16_t gen) noexcept {
+    TASTY_SEAT_BODY(SessionRows);
+    status_route_ = status_lw_ ? route : StatusRoute::Link;
+    axi_status_decoder_.bind(
+        status_route_ == StatusRoute::Lw ? status_lw_
+                                         : infra::OptRef<const proto::StatusSnapshotCell>{},
+        gen
+    );
 }
 
 std::optional<bool> SessionRows::latch_osd_edge() {

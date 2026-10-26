@@ -42,21 +42,9 @@ HdSlotSheetPlan::HdSlotSheetPlan(const HdPlanInputs& in)
 }
 
 void HdSlotSheetPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) {
-    BuildEnv page0 = env;
-    page0.page = 0;
-    page0.flat = false;
-    env_ = SlotPickHost::Env{page0};
-    slot_ = {};
-    placer_.reset();
-    if (focus_ && !front_end_ && walk_model_.build(table, page0).has_value()) {
-        placer_.emplace(walk_model_, env_.slots, verbs_, PlaceFacts{});
-        for (const OptionItem* it : placer_->slots()) {
-            if (focus_of_(*it) == *focus_) {
-                slot_ = infra::OptRef<const OptionItem>{*it};
-                break;
-            }
-        }
-    }
+    page0_.run(table, env, focus_ && !front_end_, verbs_);
+    env_ = SlotPickHost::Env{HdPage0Walk::page0_of(env)};
+    slot_ = focus_ ? page0_.slot_row(*focus_) : infra::OptRef<const OptionItem>{};
     title_.clear();
     has_recent_ = false;
     if (!slot_)
@@ -76,13 +64,6 @@ void HdSlotSheetPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) 
         );
     }
     has_recent_ = picks_->has_recents(*slot_);
-}
-
-SlotFocus HdSlotSheetPlan::focus_of_(const OptionItem& it) const {
-    return SlotFocus{
-        it.mounts_image() ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
-        proto::IoIndex{it.ioctl_index}
-    };
 }
 
 bool HdSlotSheetPlan::ejectable_() const {

@@ -11,8 +11,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/confirm_host.h"
-#include "ui/options_model.h"
-#include "ui/placer.h"
+#include "ui/hd_page0_walk.h"
 #include "ui/slot_pick_host.h"
 
 namespace mister::ui {
@@ -50,8 +49,7 @@ private:
     PageContext& ctx_;
     std::string running_core_;
     SlotPickHost::Env env_;
-    OptionsModel walk_model_;
-    std::optional<Placer> placer_;
+    HdPage0Walk page0_;
     std::optional<SlotPickHost> picks_;
     bool front_end_ = false;
     std::uint32_t refusals_ = 0;

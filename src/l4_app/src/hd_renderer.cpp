@@ -9,8 +9,8 @@
 #include <utility>
 
 #include "app/hd_layout.h"
-#include "app/hd_style.h"
 #include "app/hd_theme.h"
+#include "app/hd_themes.h"
 #include "infra/byte_view.h"
 
 namespace mister::app {
@@ -90,6 +90,11 @@ void HdRenderer::set_fps(std::uint8_t fps) noexcept {
     st_.fps = pacer_.fps();
 }
 
+void HdRenderer::set_theme(std::uint8_t index) noexcept {
+    theme_index_ = hd_theme_index(index);
+    theme_ = derive_theme(hd_theme(theme_index_).style);
+}
+
 void HdRenderer::begin() noexcept {
     TASTY_SEAT_BODY(HdRenderer);
     up_ = true;
@@ -100,10 +105,9 @@ void HdRenderer::begin() noexcept {
         (slots_ && slots_->uio_bound() ? 1u : 0u) | (scaler_uio_ ? 2u : 0u)
     );
     if (raster_ || sampler_) {
-        const HdTheme theme = derive_theme(kHdPresets[0]);
-        scaler_.open(theme);
+        scaler_.open(theme_);
         if (raster_) {
-            if (!raster_->open(theme, layout_for(0, 0))) {
+            if (!raster_->open(theme_, HdLayout{})) {
                 st_.state = HdOsdStatus::State::Failed;
                 st_.fail = HdOsdStatus::Fail::RasterInit;
                 publish_();
@@ -132,8 +136,9 @@ void HdRenderer::serve() noexcept {
     if (reader_.take_if_changed(w_.ask, got)) {
         const bool opened = got.open && !ask_.open;
         const bool closed = !got.open && ask_.open;
+        const HdStatusSlots ask_prev_slots = ask_.slots;
         ask_ = got;
-        if (st_.badge != got.badge)
+        if (st_.badge != got.badge || ask_prev_slots != got.slots)
             panel_owed_ = true;
         st_.badge = got.badge;
         if (opened) {
@@ -143,6 +148,8 @@ void HdRenderer::serve() noexcept {
         }
         if (closed)
             close_job_();
+        if (hd_theme_index(got.theme) != theme_index_ && !retheme_(got.theme))
+            return;
         fresh_ask_ = got.open;
         sampled = true;
     }
@@ -389,12 +396,25 @@ void HdRenderer::close_job_() noexcept {
     fresh_ask_ = false;
 }
 
+bool HdRenderer::retheme_(std::uint8_t index) noexcept {
+    set_theme(index);
+    close_job_();
+    scaler_.open(theme_);
+    if (!raster_open_ || raster_->open(theme_, layout_))
+        return true;
+    raster_open_ = false;
+    st_.state = HdOsdStatus::State::Failed;
+    st_.fail = HdOsdStatus::Fail::RasterInit;
+    publish_();
+    return false;
+}
+
 void HdRenderer::start_epoch_(const HdLayout& layout) noexcept {
     epoch_seen_ = ask_.epoch;
     epoch_valid_ = true;
     layout_ = layout;
     ledger_.reset(box_of(layout.panel), box_of(layout.game));
-    const std::uint16_t fill = pack565(derive_theme(kHdPresets[0]).primary);
+    const std::uint16_t fill = pack565(theme_.primary);
     std::fill(frame_.begin(), frame_.end(), fill);
     job_.reset_canvas();
     seq_ = 0;
@@ -413,7 +433,7 @@ void HdRenderer::draw_(std::uint64_t now) noexcept {
     if (!ensure_frame_())
         return;
     const HdSurface& s = ask_.surface;
-    const HdLayout layout = layout_for(s.w, s.h);
+    const HdLayout layout = layout_for(s.w, s.h, hd_template_traits(kHdRasterTemplate).panel_pct);
     const std::uint32_t stride_px = s.stride / 2u;
     const std::size_t origin_i = static_cast<std::size_t>(layout.panel.y) * stride_px
         + static_cast<std::size_t>(layout.panel.x);
@@ -466,7 +486,7 @@ void HdRenderer::panel_step_(const HdLayout& layout, bool asked) noexcept {
     const std::size_t origin_i = static_cast<std::size_t>(layout.panel.y) * stride_px
         + static_cast<std::size_t>(layout.panel.x);
     const std::uint64_t t0 = now_ns_();
-    const HdBadgeView shown{st_.badge};
+    const HdBadgeView shown{st_.badge, ask_.slots};
     const HdRect dirty = raster_->render(
         ask_.page,
         shown,

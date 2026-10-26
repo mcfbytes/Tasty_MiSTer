@@ -98,7 +98,7 @@ Ex<void> PlayedHistory::load() {
         r.ioctl_index = s.ioctl_index;
         r.slot = s.slot;
         r.unix_time = s.unix_time;
-        if (!names_a_game(r)) {
+        if (!names_a_game(r) || !fields_fit(r)) {
             ++refusals_;
             continue;
         }

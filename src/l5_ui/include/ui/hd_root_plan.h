@@ -21,6 +21,7 @@
 #include "ui/hd_rows/hd_gated_row.h"
 #include "ui/hd_rows/hd_push_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
+#include "ui/hd_page0_walk.h"
 #include "ui/options_model.h"
 #include "ui/placer.h"
 #include "ui/slot_pick_host.h"
@@ -114,8 +115,7 @@ private:
     const bool front_end_;
     const bool table_settings_;
     SlotPickHost::Env env_;
-    OptionsModel walk_model_;
-    std::optional<Placer> placer_;
+    HdPage0Walk page0_;
     std::optional<SlotPickHost> picks_;
     infra::OptRef<const OptionItem> primary_{};
     std::string load_label_;

@@ -2,6 +2,7 @@
 #include "app/recent_games.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 
 #include "infra/ascii.h"
@@ -65,6 +66,15 @@ bool same_list(const RecentsStore::ListId& a, const RecentsStore::ListId& b) noe
     return a.kind == b.kind && a.slot == b.slot;
 }
 
+std::string datecode_of(std::string_view image) {
+    const std::size_t slash = image.rfind('/');
+    const std::string_view name = slash == std::string_view::npos ? image : image.substr(slash + 1);
+    std::string tail{name.substr(std::min(name.size(), recent_core_name(name).size()))};
+    for (char& ch : tail)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return tail;
+}
+
 }
 
 std::string recent_core_name(std::string_view path_or_name) {
@@ -107,14 +117,14 @@ const RecentGames::CoreName* RecentGames::core_named_(std::string_view stem) con
     return &*at;
 }
 
-void RecentGames::scan_cores_(const svc::Vfs& files) {
-    cores_.clear();
+auto RecentGames::scan_cores_(const svc::Vfs& files) -> std::vector<CoreName> {
+    std::vector<CoreName> cores;
     svc::ScanFilter dirs;
     dirs.directories = true;
     dirs.files = false;
     const auto top = files.scan("", dirs);
     if (!top)
-        return;
+        return cores;
     std::vector<std::string> folders;
     for (const svc::DirEntry& e : *top)
         if (e.is_dir && !e.name.empty() && e.name.front() == '_')
@@ -137,19 +147,30 @@ void RecentGames::scan_cores_(const svc::Vfs& files) {
                 continue;
             const std::string image = folder + "/" + e.name;
             auto at = std::lower_bound(
-                cores_.begin(),
-                cores_.end(),
+                cores.begin(),
+                cores.end(),
                 stem,
                 [](const CoreName& c, const std::string& s) noexcept { return iless(c.stem, s); }
             );
-            if (at != cores_.end() && ieq(at->stem, stem)) {
-                if (at->image < image)
+            if (at != cores.end() && ieq(at->stem, stem)) {
+
+                if (datecode_of(at->image) < datecode_of(image))
                     at->image = image;
             } else {
-                cores_.insert(at, CoreName{stem, image});
+                cores.insert(at, CoreName{stem, image});
             }
         }
     }
+    return cores;
+}
+
+std::string RecentGames::core_image_of(const svc::Vfs& files, std::string_view core_name) {
+    if (core_name.empty())
+        return {};
+    for (const CoreName& c : scan_cores_(files))
+        if (ieq(c.stem, core_name))
+            return c.image;
+    return {};
 }
 
 void RecentGames::read_sources_(const svc::Vfs& files, RecentsStore& recents) {
@@ -218,6 +239,8 @@ void RecentGames::reread_source_(
         session.slot == 'S' ? RecentsStore::ListId::Kind::Mount : RecentsStore::ListId::Kind::File,
         session.ioctl_index
     };
+
+    bool found = false;
     for (Source& s : sources_) {
         if (!ieq(s.core, core) || !same_list(s.id, id))
             continue;
@@ -226,6 +249,9 @@ void RecentGames::reread_source_(
         if (m)
             s.mtime = *m;
         ++rereads_;
+        found = true;
+    }
+    if (found) {
         sort_sources_();
         return;
     }
@@ -334,7 +360,7 @@ void RecentGames::refresh(
         return;
     built_ = true;
     const std::int64_t start = now_ns(clock);
-    scan_cores_(files);
+    cores_ = scan_cores_(files);
     read_sources_(files, recents);
     assemble_(session, played);
     build_ns_ = now_ns(clock) - start;

@@ -62,7 +62,6 @@ struct OwnerTally {
     std::uint32_t memsz_unmeasured = 0;
 
     std::uint32_t sdram_write_failures = 0;
-    std::uint32_t ops_posted = 0;
     std::uint32_t op_drops = 0;
     std::uint32_t identities_ok = 0;
     std::uint32_t identities_fail = 0;

@@ -17,6 +17,7 @@
 #include "ui/page_ask.h"
 #include "ui/page_context.h"
 #include "ui/place_facts.h"
+#include "ui/placement.h"
 
 namespace mister::ui {
 namespace {
@@ -90,36 +91,33 @@ HdRootPlan::HdRootPlan(const HdPlanInputs& in)
 }
 
 void HdRootPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) {
-    BuildEnv page0 = env;
-    page0.page = 0;
-    page0.flat = false;
+    const bool walked = page0_.run(table, env, !front_end_, verbs_);
+    const BuildEnv page0 = HdPage0Walk::page0_of(env);
     env_ = SlotPickHost::Env{page0};
     primary_ = std::nullopt;
     has_reset_ = has_cheats_ = has_settings_ = has_media_ = false;
-    placer_.reset();
-    const bool walked = !front_end_ && walk_model_.build(table, page0).has_value();
     if (!front_end_ && !walked)
         ++refusals_;
     if (walked) {
-        placer_.emplace(walk_model_, env_.slots, verbs_, PlaceFacts{});
+        const Placer& placer = page0_.placer();
 
-        const GameSlot& slot = placer_->game();
+        const GameSlot& slot = placer.game();
         const OptionItem* const pick = slot.disc_row() != nullptr ? slot.disc_row() : slot.row();
         if (pick != nullptr)
             primary_ = infra::OptRef<const OptionItem>{*pick};
-        for (const std::unique_ptr<OptionItem>& owned : walk_model_.items()) {
+        for (const std::unique_ptr<OptionItem>& owned : page0_.model().items()) {
             const OptionItem& it = *owned;
-            const Placement p = placer_->of(it);
+            const Placement p = placer.of(it);
             has_reset_ = has_reset_ || p == Placement::ResetGame;
             has_cheats_ = has_cheats_
-                || (p == Placement::Cheats
+                || (host_of(p) == PageId::Cheats
                     && it.page == 0
                     && offered(it)
                     && page0.cheats_available);
-            has_settings_ = has_settings_ || (p == Placement::CoreSettings && offered(it));
+            has_settings_ = has_settings_ || (host_of(p) == PageId::HdCoreSettings && offered(it));
         }
 
-        has_media_ = placer_->slots().size() > 1;
+        has_media_ = placer.slots().size() > 1;
     }
     if (primary_) {
         load_label_ = hd_label(primary_->label);

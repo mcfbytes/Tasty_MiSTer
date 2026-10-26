@@ -9,6 +9,7 @@
 #include "app/link_tx_channel.h"
 #include "app/osd_wire.h"
 #include "app/video_wire.h"
+#include "hal/reg_block.h"
 #include "app/save_flush.h"
 #include "app/cheat_apply.h"
 #include "app/core_option_acts.h"
@@ -126,7 +127,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::JoyEmit& a, const Link
     if (a.player.v >= proto::JoystickPort::kMaxPorts) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    const auto r = em_.joysticks().submit(link_, a.player, a.mask, a.autofire);
+    const auto r = em_.submit(link_, a.player, a.mask, a.autofire);
     if (!r || !*r) {
         return ILinkEncoder::Outcome::Dropped;
     }
@@ -146,6 +147,27 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::BindJoy& a, const Link
     return ILinkEncoder::Outcome::Encoded;
 }
 
+void SpiEncoder::bind_pads(infra::OptRef<const LwPads> granted) noexcept {
+    if (granted) {
+
+        em_.bind_pads(link_, hal::reg::Block::redeem(granted->regs.lend()), granted->block);
+    } else {
+        em_.bind_pads(link_);
+    }
+}
+
+void SpiEncoder::drop_pads() noexcept {
+    em_.hold_pads();
+}
+
+void SpiEncoder::trust_pads(bool ready) noexcept {
+    em_.trust_pads(ready);
+}
+
+bool SpiEncoder::pads_on_lw() const noexcept {
+    return em_.pads_on_lw();
+}
+
 ILinkEncoder::Outcome SpiEncoder::on(
     const proto::LinkOp::JoyRelease& a,
     const LinkOpCtx&
@@ -154,7 +176,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (a.player.v >= proto::JoystickPort::kMaxPorts) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    const auto r = em_.joysticks().release(link_, a.player, a.mask);
+    const auto r = em_.release(link_, a.player, a.mask);
     if (!r || !*r) {
         return ILinkEncoder::Outcome::Dropped;
     }

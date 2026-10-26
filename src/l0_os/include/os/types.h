@@ -22,6 +22,8 @@ enum class UioLine : std::uint8_t {};
 struct UioLineSpace {
     std::string_view node_prefix;
     std::uint32_t lines = 0;
+    std::string_view sysfs_root = "/sys/class/uio";
+    std::string_view dev_dir = "/dev";
 };
 
 struct KernelIrq {

@@ -3,6 +3,7 @@
 
 #include <array>
 
+#include "app/hd_themes.h"
 #include "app/ui_request.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/osd_style_preference.h"
@@ -32,7 +33,7 @@ HdDisplayPlan::HdDisplayPlan(const HdPlanInputs& in)
       style_(in.style),
       style_row_(style_spec(classic_, in.ctx.launches.confirm)) {
     TASTY_SEAT_BODY(HdDisplayPlan);
-    refs_ = {style_row_};
+    refs_ = {style_row_, theme_row_};
     if (!in.ctx.launches.confirm)
         ++refusals_;
 }
@@ -71,6 +72,35 @@ Transition HdDisplayPlan::ClassicAction::on_yes() {
         ++plan_.published_;
     }
     return Transition{Transition::Kind::CloseAll};
+}
+
+app::PageDescription::Row HdDisplayPlan::ThemeRow::describe() const {
+    TASTY_SEAT_BODY(ThemeRow);
+    app::PageDescription::Row r{};
+    r.kind = app::PageDescription::RowKind::Value;
+    r.steps = true;
+    (void)r.label.assign("Theme");
+    (void)r.value.assign(app::hd_theme(plan_.style_.theme()).name);
+    return r;
+}
+
+Transition HdDisplayPlan::ThemeRow::select() {
+    TASTY_SEAT_BODY(ThemeRow);
+    return step(1);
+}
+
+Transition HdDisplayPlan::ThemeRow::step(int delta) {
+    TASTY_SEAT_BODY(ThemeRow);
+    constexpr auto kCount = static_cast<unsigned>(app::kHdThemes.size());
+    const unsigned at = app::hd_theme_index(plan_.style_.theme());
+    const auto next = static_cast<std::uint8_t>((at + (delta < 0 ? kCount - 1u : 1u)) % kCount);
+    plan_.style_.choose_theme(next);
+    if (!push_ask(plan_.ctx_.ui_requests, app::UiRequest::SetHdTheme{.theme = next})) {
+        ++plan_.refusals_;
+    } else {
+        ++plan_.published_;
+    }
+    return Transition{};
 }
 
 }

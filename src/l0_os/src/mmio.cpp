@@ -96,19 +96,29 @@ int find_uio_node(std::string_view name) noexcept {
 
 namespace {
 
-int find_doorbell_uio_node(std::string_view prefix, unsigned line) {
+int find_doorbell_uio_node(const UioLineSpace& space, unsigned line) {
     char want[48];
     const int n = std::snprintf(
         want,
         sizeof want,
         "%.*s%u",
-        static_cast<int>(prefix.size()),
-        prefix.data(),
+        static_cast<int>(space.node_prefix.size()),
+        space.node_prefix.data(),
         line + 1
     );
     if (n <= 0 || static_cast<std::size_t>(n) >= sizeof want)
         return -1;
-    return find_uio_node_under(kUioClassRoot, want);
+    char root[128];
+    const int r = std::snprintf(
+        root,
+        sizeof root,
+        "%.*s",
+        static_cast<int>(space.sysfs_root.size()),
+        space.sysfs_root.data()
+    );
+    if (r <= 0 || static_cast<std::size_t>(r) >= sizeof root)
+        return -1;
+    return find_uio_node_under(root, want);
 }
 
 }
@@ -178,14 +188,21 @@ Ex<UioHandle> UioHandle::open(UioLine line, const UioLineSpace& space) {
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), n});
     }
 
-    const int idx = find_doorbell_uio_node(space.node_prefix, n);
+    const int idx = find_doorbell_uio_node(space, n);
     if (idx < 0) {
 
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), n});
     }
 
-    char path[32];
-    const int w = std::snprintf(path, sizeof path, "/dev/uio%d", idx);
+    char path[160];
+    const int w = std::snprintf(
+        path,
+        sizeof path,
+        "%.*s/uio%d",
+        static_cast<int>(space.dev_dir.size()),
+        space.dev_dir.data(),
+        idx
+    );
     if (w <= 0 || static_cast<std::size_t>(w) >= sizeof path) {
         return std::unexpected(Error{Errc::uio_open, ERR_SITE(), n});
     }

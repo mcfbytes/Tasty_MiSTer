@@ -5,11 +5,11 @@
 
 namespace mister::svc {
 
-IoMain::IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker) noexcept
+IoMain::IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker, int doorbells) noexcept
     : wake_(fds.wake()),
       pause_(wake_, asker ? &*asker : nullptr),
       stop_(std::move(fds).take_stop()),
-      park_(wake_, stop_) {}
+      park_(wake_, stop_, doorbells) {}
 
 bool IoMain::add_coworker(IIoCoworker* c) noexcept {
     if (c == nullptr || n_coworkers_ >= kMaxCoworkers)
@@ -49,6 +49,11 @@ void IoMain::on_pause() noexcept {
 void IoMain::on_resume() noexcept {
     for (std::uint8_t i = 0; i < n_coworkers_; ++i)
         coworkers_[i]->on_resume();
+}
+
+void IoMain::settle() noexcept {
+    for (std::uint8_t i = 0; i < n_coworkers_; ++i)
+        coworkers_[i]->on_stop();
 }
 
 bool IoMain::idle() const noexcept {

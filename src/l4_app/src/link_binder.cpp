@@ -95,6 +95,10 @@ Ex<void> LinkBinder::bind_session(
                 break;
             case LinkKind::BlockSlots:
                 break;
+            case LinkKind::Pads:
+                break;
+            case LinkKind::Sectors:
+                break;
             case LinkKind::kCount:
                 break;
         }

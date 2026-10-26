@@ -71,7 +71,7 @@ struct HdPanelPlan {
             ++p.main_seps;
         if (sep && i >= p.pinned_first && p.pinned_count != 0)
             ++p.pinned_seps;
-        if (page.rows[i].steps)
+        if (page.rows[i].selected && page.rows[i].steps)
             p.steps = true;
     }
 

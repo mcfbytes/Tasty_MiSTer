@@ -124,6 +124,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
 
 
 target_sources(mister_ui PRIVATE
+  src/free_space.cpp
   src/hd_about_plan.cpp
   src/hd_controllers_plan.cpp
   src/hd_core_about_plan.cpp
@@ -131,6 +132,7 @@ target_sources(mister_ui PRIVATE
   src/hd_focus_memory.cpp
   src/hd_list_page.cpp
   src/hd_media_plan.cpp
+  src/hd_page0_walk.cpp
   src/hd_recent_games_plan.cpp
   src/recent_launch.cpp
   src/recent_row.cpp
@@ -142,6 +144,7 @@ target_sources(mister_ui PRIVATE
 
 tasty_add_header_checks(tasty_ui_hd_list_header_checks LIB mister_ui HEADERS
   ui/core_verbs.h
+  ui/free_space.h
   ui/hd_about_plan.h
   ui/hd_controllers_plan.h
   ui/hd_core_about_plan.h
@@ -149,6 +152,7 @@ tasty_add_header_checks(tasty_ui_hd_list_header_checks LIB mister_ui HEADERS
   ui/hd_focus_memory.h
   ui/hd_list_page.h
   ui/hd_media_plan.h
+  ui/hd_page0_walk.h
   ui/hd_plan.h
   ui/hd_plan_inputs.h
   ui/hd_recent_games_plan.h

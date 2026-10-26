@@ -14,6 +14,7 @@
 #include "infra/seat.h"
 #include "ui/hd_plan.h"
 #include "ui/hd_rewalk.h"
+#include "ui/hd_page0_walk.h"
 #include "ui/options_model.h"
 #include "ui/placer.h"
 #include "ui/slot_focus.h"
@@ -95,16 +96,13 @@ private:
 
     [[nodiscard]] bool ejectable_() const;
 
-    [[nodiscard]] SlotFocus focus_of_(const OptionItem& it) const;
-
     PageContext& ctx_;
     const NowPlaying& now_playing_;
     const CoreVerbs& verbs_;
     const bool front_end_;
     const std::optional<SlotFocus> focus_;
     SlotPickHost::Env env_;
-    OptionsModel walk_model_;
-    std::optional<Placer> placer_;
+    HdPage0Walk page0_;
     std::optional<SlotPickHost> picks_;
     infra::OptRef<const OptionItem> slot_{};
     std::string title_;

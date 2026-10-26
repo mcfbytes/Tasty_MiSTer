@@ -8,15 +8,20 @@
 
 #include "cores/blank_region.h"
 #include "infra/byte_view.h"
+#include "infra/seat.h"
 
 namespace mister::cores {
 
 struct BlankSaveSpec {
+    TASTY_SEAT_EXEMPT(const_shared);
+
     std::byte fill{};
     std::span<const std::byte> header;
     std::span<const BlankRegion> regions{};
 
     bool generic_ff = false;
+
+    std::uint32_t lba_bytes = 512;
 
     constexpr bool declared() const noexcept { return !header.empty() || !regions.empty(); }
 };

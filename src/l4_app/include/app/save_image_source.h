@@ -49,9 +49,9 @@ public:
     void note_attached(proto::SlotIndex slot, bool exists, proto::FileSize size) noexcept override;
     void note_detached(proto::SlotIndex slot) noexcept override;
 
-    static constexpr std::uint32_t kBlankBlockBytes = 512;
-
     proto::FileSize size_of(proto::SlotIndex slot) const;
+
+    [[nodiscard]] bool exists(proto::SlotIndex slot) const noexcept;
 
     [[nodiscard]] Attach attach_state(proto::SlotIndex slot) const noexcept;
 

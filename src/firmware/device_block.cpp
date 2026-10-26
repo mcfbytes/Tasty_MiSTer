@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "app/sector_route.h"
 #include "cores/disk_servant.h"
 #include "cores/mailbox_servants.h"
 #include "infra/opt_ref.h"
@@ -153,6 +154,9 @@ DiagSampler::DeviceCells DeviceBlock::diag_sources(const BootParts& plat) noexce
 
         .frames = infra::opt_ref_of(frame_ != nullptr ? &frame_->frame_cell() : nullptr),
         .screenshots = shots_,
+        .sector_route = infra::OptRef<const app::SectorRouteCell>{sector_route_},
+        .osd_route = infra::OptRef<const app::OsdRouteCell>{osd_route_},
+        .sys_route = infra::OptRef<const app::SysRouteCell>{sys_route_},
     };
 }
 
@@ -232,7 +236,7 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
           companion_host_,
           main_wake_
       )),
-      io_main_(open_io_main(io_wake_, main_wake_)),
+      io_main_(open_io_main(io_wake_, main_wake_, io_doorbells_.get())),
       storage_(io_wake_),
       disc_store_{plat.vfs, disc_geometry_, disc_counters_, prefetch_},
       discs_(
@@ -242,12 +246,33 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
            .reader = infra::OptRef<svc::IDiscReader>{disc_store_},
            .mounter = infra::OptRef<svc::IDiscMounter>{disc_store_}}
       ),
+      lw_sector_(
+          app::LwSectorEndpoint::Wiring{
+              .grant = sector_grant_,
+              .route = sector_route_,
+              .geometry = disc_geometry_,
+              .discs = discs_,
+              .doorbells = io_doorbells_.get(),
+              .saves = infra::OptRef<const svc::ISaveFilesOnIo>{storage_}
+          }
+      ),
+      lw_sys_(
+          app::LwSysEndpoint::Wiring{
+              .grant = sys_grant_,
+              .route = sys_route_,
+              .snapshots = status_snapshots_,
+              .doorbells = io_doorbells_.get()
+          }
+      ),
       writes_(plat.vfs, io_wake_),
       window_jobs_(plat.vfs, io_window_map_, plat.fpga_mem.region, io_wake_),
       shots_(),
       frame_src_(open_frame_source_(plat)),
       surface_(),
       osd_wire_{surface_, plat.link},
+      lw_osd_(
+          app::LwOsdEndpoint::Wiring{.grant = osd_grant_, .route = osd_route_, .surface = surface_}
+      ),
       ladder_{transitioning_, infra::OptRef<reactor::RoundTimer>{plat.round_timer}},
       board_reset_{plat.bridges},
       parts_{
@@ -282,6 +307,11 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
           .fpga_mem = plat.fpga_mem,
           .lw_window = plat.lw_window,
           .doorbell_nodes = plat.doorbell_nodes,
+          .doorbell_cpus = hal::cpus_off_rt(plat.threads),
+
+          .status_snapshots = io_main_ && io_doorbells_.get() >= 0
+              ? infra::OptRef<const proto::StatusSnapshotCell>{status_snapshots_}
+              : infra::OptRef<const proto::StatusSnapshotCell>{},
 
           .storage_channel = infra::OptRef<proto::IStorageChannel>{storage_},
 
@@ -328,6 +358,20 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
               .companion_binds = pcm_main_
                   ? infra::OptRef<app::CompanionHost::Binds>{companion_host_.binds()}
                   : infra::OptRef<app::CompanionHost::Binds>{},
+
+              .sector_grant = io_main_ && io_doorbells_.get() >= 0
+                  ? infra::OptRef<app::SectorGrantCell>{sector_grant_}
+                  : infra::OptRef<app::SectorGrantCell>{},
+              .sector_route = infra::OptRef<const app::SectorRouteCell>{sector_route_},
+              .osd_grant = infra::OptRef<app::OsdGrantCell>{osd_grant_},
+              .osd_route = infra::OptRef<const app::OsdRouteCell>{osd_route_},
+
+              .sys_grant = io_main_ && io_doorbells_.get() >= 0
+                  ? infra::OptRef<app::SysGrantCell>{sys_grant_}
+                  : infra::OptRef<app::SysGrantCell>{},
+              .sys_route = infra::OptRef<const app::SysRouteCell>{sys_route_},
+              .io_wake = io_main_ ? infra::OptRef<xthread::WakeFlag>{io_wake_}
+                                  : infra::OptRef<xthread::WakeFlag>{},
               .aperture = plat.fpga_mem.region
           }
       },
@@ -339,7 +383,7 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
       }},
       vfs_(plat.vfs) {
 
-    static_assert(svc::IoMain::kMaxCoworkers >= 7);
+    static_assert(svc::IoMain::kMaxCoworkers >= 9);
 
     if (pcm_main_)
         companion_host_.install(cores::make_servants(vfs_));
@@ -392,13 +436,19 @@ std::optional<app::PcmMain> DeviceBlock::open_pcm_main(
 
 std::optional<svc::IoMain> DeviceBlock::open_io_main(
     xthread::WakeFlag& io_wake,
-    xthread::WakeFlag& main_wake
+    xthread::WakeFlag& main_wake,
+    int doorbells
 ) {
     if (auto fds = xthread::ParkFds::create(io_wake); !fds) {
         report("IoMain fds (degraded: no T-IO, saves reach no file)", fds.error());
         return std::nullopt;
     } else {
-        return std::optional<svc::IoMain>{std::in_place, std::move(*fds), infra::OptRef{main_wake}};
+        return std::optional<svc::IoMain>{
+            std::in_place,
+            std::move(*fds),
+            infra::OptRef{main_wake},
+            doorbells
+        };
     }
 }
 
@@ -463,6 +513,10 @@ void DeviceBlock::open_seats(const BootParts& plat, const Seats& seats) noexcept
     (void)rides_io_(writes_, "IoMain::add_coworker (degraded: no durable writes)");
 
     (void)rides_io_(discs_, "IoMain::add_coworker (degraded: no disc reads)");
+
+    (void)rides_io_(lw_sector_, "IoMain::add_coworker (degraded: CD sectors stay on SPI)");
+
+    (void)rides_io_(lw_sys_, "IoMain::add_coworker (degraded: the 0x29 status poll stays on SPI)");
 
     (void)rides_io_(file_streams_, "IoMain::add_coworker (degraded: no file streams)");
 

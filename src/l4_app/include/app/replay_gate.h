@@ -107,6 +107,7 @@ private:
         std::uint8_t ports
     ) noexcept;
     void force_release_(std::uint8_t ports) noexcept;
+    void count_write_(const Ex<bool>& out, std::uint32_t held_before) noexcept;
     void note_late_(std::uint32_t first) noexcept;
     void note_gap_() noexcept;
     void note_depth_() noexcept;

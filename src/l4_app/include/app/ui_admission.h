@@ -46,6 +46,7 @@ inline constexpr auto kUiAdmission = [] {
          .refuse_via = UiAdmission::Refusal::FileAsk},
         {.kind = K::SetOsdStyle},
         {.kind = K::SdramDetected},
+        {.kind = K::SetHdTheme},
     });
 }();
 static_assert(

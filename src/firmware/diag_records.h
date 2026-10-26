@@ -12,6 +12,7 @@
 #include "infra/json_out.h"
 #include "infra/telemetry.h"
 #include "rec_record.h"
+#include "rg_record.h"
 #include "record_ctx.h"
 #include "rnd_record.h"
 #include "tas_record.h"
@@ -107,6 +108,7 @@ struct SessRecord {
     }
 };
 
-using DiagRecords = std::tuple<SessRecord, BayRecord, RndRecord, TasRecord, RecRecord, HdRecord>;
+using DiagRecords = std::
+    tuple<SessRecord, BayRecord, RndRecord, TasRecord, RecRecord, HdRecord, RgRecord>;
 
 }

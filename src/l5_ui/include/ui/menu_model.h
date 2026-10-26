@@ -221,7 +221,9 @@ public:
 
     bool hd_root() const noexcept { return hd_root_; }
 
-    void set_osd_style(bool hd) noexcept { style_ = OsdStylePreference{hd}; }
+    void set_osd_style(bool hd) noexcept { style_.boot_hd(hd); }
+
+    void set_hd_theme(std::uint8_t theme) noexcept { style_.boot_theme(theme); }
 
     OsdStylePreference& style() noexcept { return style_; }
 

@@ -184,7 +184,10 @@ private:
     [[nodiscard]] proto::SlotRoles current_slot_roles_(infra::OptRef<cores::Core> core) noexcept;
 
     [[nodiscard]] cores::MountStatus mount_body_(infra::OptRef<cores::Core> core) noexcept;
-    [[nodiscard]] static cores::SaveExtent save_body_(std::uint64_t size_bytes) noexcept;
+    [[nodiscard]] static cores::SaveExtent save_body_(
+        std::uint64_t size_bytes,
+        bool exists = false
+    ) noexcept;
 
     [[nodiscard]] ILinkEncoder::Outcome perform_bound_mount_(
         const proto::LinkOp::BindMount& bm,
@@ -631,7 +634,10 @@ inline ILinkEncoder::Outcome SlotBindings::apply_save_bind_(
     }
     switch (*bound) {
         case SaveBind::Ready:
-            owed.answer(cores::SaveVerdict::Known, save_body_(save_extent_of_(si)));
+            owed.answer(
+                cores::SaveVerdict::Known,
+                save_body_(save_extent_of_(si), save_src_ != nullptr && save_src_->exists(si))
+            );
             break;
         case SaveBind::Waiting:
             break;
@@ -660,7 +666,7 @@ inline void SlotBindings::settle_save_binds_() noexcept {
         const bool known = state == Attach::Attached;
         owed_save_[i].answer(
             known ? cores::SaveVerdict::Known : cores::SaveVerdict::Declined,
-            save_body_(known ? save_extent_of_(si) : 0)
+            save_body_(known ? save_extent_of_(si) : 0, known && save_src_->exists(si))
         );
     }
 }
@@ -720,9 +726,10 @@ inline cores::MountStatus SlotBindings::mount_body_(infra::OptRef<cores::Core> c
     return body;
 }
 
-inline cores::SaveExtent SlotBindings::save_body_(std::uint64_t size_bytes) noexcept {
+inline cores::SaveExtent SlotBindings::save_body_(std::uint64_t size_bytes, bool exists) noexcept {
     cores::SaveExtent body{};
     body.size_bytes = size_bytes;
+    body.exists = exists;
     return body;
 }
 

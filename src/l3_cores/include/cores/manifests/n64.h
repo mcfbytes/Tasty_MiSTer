@@ -64,6 +64,7 @@ inline constexpr CoreProfile kN64{
     .start_assets = kN64StartAssets,
     .start = StartRule::Assets,
     .signatures = {},
+    .saves_by_channel = true,
 
     .analog_reshape = infra::OptRef<const svc::IAnalogReshape>{n64::kJoyEmu},
 

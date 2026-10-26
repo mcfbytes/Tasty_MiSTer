@@ -14,6 +14,7 @@
 
 #include "app/act_keys.h"
 #include "app/addon_send.h"
+#include "app/boot_restore.h"
 #include "app/companion_walk.h"
 #include "app/content_request.h"
 #include "app/core_scope.h"
@@ -29,6 +30,8 @@
 #include "app/load_window_map.h"
 #include "app/owner_tally.h"
 #include "app/path_text.h"
+#include "app/picked_load.h"
+#include "app/rung_set.h"
 #include "app/stream_io.h"
 #include "app/types.h"
 #include "app/ui_request.h"
@@ -67,13 +70,6 @@ class ContentPick {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
-    struct PickedLoad {
-        ContentRequest content{};
-        bool opensave = false;
-        UiRequest::SaveChoice choice = UiRequest::SaveChoice::User;
-        CorrelationTag tag{};
-    };
-
     struct ContentWatch {
         std::uint32_t act = 0;
         std::unique_ptr<svc::IFile> file{};
@@ -114,15 +110,6 @@ public:
         virtual ~Host() = default;
     };
 
-    struct Rungs {
-        std::optional<FileTxPieces>& pieces;
-        std::optional<LoadLadder>& load;
-        std::optional<LoadWalk>& walk;
-        const std::optional<CompanionWalk>& companion;
-        std::optional<AddonSend>& addons;
-        std::optional<AddonSend>& addons_after;
-    };
-
     struct Tally {
         std::uint32_t long_wait_resumes = 0;
         std::uint32_t long_wait_refusals = 0;
@@ -140,12 +127,12 @@ public:
         const NegotiatedCore& negotiated;
         const MountQueue& mounts;
         const OwnerLadder& ladder;
-        Rungs rungs;
+        RungSet& rungs;
         OwnerTally& owner_tally;
         Count& mgl_row0_cell;
         ActKeys& act_keys;
         const proto::StatusCell& status_cell;
-        const bool& boot_restore_owed;
+        const BootRestore& boot_restore;
         hal::PhysRegion aperture;
         WindowTally& windows;
     };
@@ -257,12 +244,12 @@ private:
     const NegotiatedCore& negotiated_;
     const MountQueue& mounts_;
     const OwnerLadder& ladder_;
-    Rungs rungs_;
+    RungSet& rungs_;
     OwnerTally& owner_tally_;
     Count& mgl_row0_cell_;
     ActKeys& act_keys_;
     const proto::StatusCell& status_cell_;
-    const bool& boot_restore_owed_;
+    const BootRestore& boot_restore_;
     const hal::PhysRegion aperture_;
     WindowTally& windows_;
     Owed content_owed_{};

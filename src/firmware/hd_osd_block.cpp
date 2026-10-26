@@ -25,7 +25,7 @@ hal::PhysRegion video_fb_region(std::span<const hal::PhysRegion> regions) noexce
 std::optional<app::HdRenderer::Frame> HdOsdBlock::map_frame_(const BootParts& plat) noexcept {
     std::unique_ptr<app::HdRaster> raster;
 #ifdef TASTY_HAVE_HDOSD
-    raster = std::make_unique<app::SlintRaster>();
+    raster = app::make_hd_raster(app::kHdRasterTemplate);
 #endif
     auto mem = hal::FpgaMemory::map_aperture(
         video_fb_region(plat.regions),
@@ -97,6 +97,7 @@ bool HdOsdBlock::open_seat(
         return false;
     }
     hd_renderer_.set_fps(c.hd_osd_fps);
+    hd_renderer_.set_theme(c.hd_theme);
     if (!hd_fds_) {
         report("HdOsdMain::open (degraded: classic OSD)", hd_fds_error_);
         return false;

@@ -21,8 +21,10 @@ inline constexpr std::uint32_t kBlk = 1u << 16;
 inline constexpr std::uint32_t kFifo = 1u << 17;
 inline constexpr std::uint32_t kRing = 1u << 18;
 inline constexpr std::uint32_t kTick = 1u << 19;
-inline constexpr std::uint32_t kClasses = kBlk | kFifo | kRing | kTick;
-inline constexpr std::uint32_t kReserved = 0xFFF0'0000u;
+inline constexpr std::uint32_t kSys = 1u << 20;
+inline constexpr std::uint32_t kClasses = kBlk | kFifo | kRing | kTick | kSys;
+
+inline constexpr std::uint32_t kReserved = ~(kPayload | kClasses);
 }
 
 struct CauseDecode {
@@ -46,6 +48,8 @@ constexpr CauseDecode decode_cause_checked(std::uint32_t word) noexcept {
         return {Cause::Blk, false};
     if (classes == cause_word::kRing)
         return {Cause::Ring, false};
+    if (classes == cause_word::kSys)
+        return {Cause::Sys, false};
     return {Cause::CoreTick, false};
 }
 

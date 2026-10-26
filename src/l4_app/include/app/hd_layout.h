@@ -19,15 +19,23 @@ struct HdLayout {
     Rect cover{};
 };
 
-[[nodiscard]] constexpr HdLayout layout_for(std::uint32_t w, std::uint32_t h) noexcept {
+[[nodiscard]] constexpr HdLayout layout_for(
+    std::uint32_t w,
+    std::uint32_t h,
+    std::uint8_t panel_pct
+) noexcept {
     HdLayout L{};
     if (h == 0 || w == 0)
         return L;
     const auto ih = static_cast<std::int32_t>(h);
     const auto iw = static_cast<std::int32_t>(w);
-    const auto panel_w = static_cast<std::int32_t>(std::max<std::uint64_t>(
-        static_cast<std::uint64_t>(w) * 36u / 100u,
-        static_cast<std::uint64_t>(h) * 60u / 100u
+    const auto pct = std::min<std::uint64_t>(panel_pct, 100u);
+    const auto panel_w = static_cast<std::int32_t>(std::min<std::uint64_t>(
+        w,
+        std::max<std::uint64_t>(
+            static_cast<std::uint64_t>(w) * pct / 100u,
+            static_cast<std::uint64_t>(h) * 60u / 100u
+        )
     ));
     L.panel = {.x = 0, .y = 0, .w = panel_w, .h = ih};
     L.game = {.x = panel_w, .y = 0, .w = iw - panel_w, .h = ih};

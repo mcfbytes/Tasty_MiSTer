@@ -35,7 +35,7 @@ bool BoardReboot::order_refusable_(const proto::LinkOp::RebootNow& op) noexcept 
 
 bool BoardReboot::repush_(const proto::LinkOp::RebootNow& op) noexcept {
     TASTY_SEAT_BODY(BoardReboot);
-    return push_posted(inbox_, owner_tally_, op);
+    return inbox_.push(op);
 }
 
 void BoardReboot::settle(bool cold) {

@@ -323,19 +323,14 @@ void ReplayGate::write_masks_(
     for (std::uint8_t p = 0; p < kReplayPorts; ++p) {
         if ((ports & (1u << p)) == 0)
             continue;
-        const auto out = joy.submit(
-            w_.link,
-            joy.wire_port(proto::PlayerIndex{p}),
-            proto::JoyMask{mask[p]},
-            proto::JoyMask{}
-        );
+        const proto::PlayerIndex port = joy.wire_port(proto::PlayerIndex{p});
+        const std::uint32_t words = w_.emitter.link_words_bound(port);
+        const std::uint32_t held = w_.emitter.pad_facts_held();
+        const auto out = w_.emitter
+                             .submit(w_.link, port, proto::JoyMask{mask[p]}, proto::JoyMask{});
         if (!out || *out)
-            round_words_ += proto::JoystickPort::kMaxDigitalPushWords;
-        if (!out) {
-            ++status_.link_errors;
-        } else if (*out) {
-            ++status_.writes;
-        }
+            round_words_ += words;
+        count_write_(out, held);
     }
 }
 
@@ -345,16 +340,24 @@ void ReplayGate::force_release_(std::uint8_t ports) noexcept {
         if ((ports & (1u << p)) == 0)
             continue;
         const proto::PlayerIndex port = joy.wire_port(proto::PlayerIndex{p});
-        auto out = joy.submit(w_.link, port, proto::JoyMask{}, proto::JoyMask{});
+        const std::uint32_t words = w_.emitter.link_words_bound(port);
+        const std::uint32_t held = w_.emitter.pad_facts_held();
+        auto out = w_.emitter.submit(w_.link, port, proto::JoyMask{}, proto::JoyMask{});
         if (out && !*out)
-            out = joy.release(w_.link, port, proto::JoyMask{~0u});
+            out = w_.emitter.release(w_.link, port, proto::JoyMask{~0u});
         if (!out || *out)
-            round_words_ += proto::JoystickPort::kMaxDigitalPushWords;
-        if (!out) {
-            ++status_.link_errors;
-        } else if (*out) {
-            ++status_.writes;
-        }
+            round_words_ += words;
+        count_write_(out, held);
+    }
+}
+
+void ReplayGate::count_write_(const Ex<bool>& out, std::uint32_t held_before) noexcept {
+    if (!out) {
+        ++status_.link_errors;
+    } else if (w_.emitter.pad_facts_held() != held_before) {
+        ++status_.pad_held;
+    } else if (*out) {
+        ++status_.writes;
     }
 }
 

@@ -18,6 +18,8 @@ public:
 
     virtual void on_resume() noexcept {}
 
+    virtual void on_stop() noexcept {}
+
 protected:
     IIoCoworker() = default;
 };

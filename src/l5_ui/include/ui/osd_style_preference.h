@@ -11,7 +11,9 @@ class OsdStylePreference final {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    explicit OsdStylePreference(bool hd) noexcept : hd_(hd) {}
+    explicit OsdStylePreference(bool hd, std::uint8_t theme = 0) noexcept
+        : hd_(hd),
+          theme_(theme) {}
 
     bool hd() const noexcept {
         TASTY_SEAT_BODY(OsdStylePreference);
@@ -39,15 +41,34 @@ public:
         return r;
     }
 
+    void boot_hd(bool hd) noexcept { hd_ = hd; }
+
+    void boot_theme(std::uint8_t theme) noexcept { theme_ = theme; }
+
+    std::uint8_t theme() const noexcept {
+        TASTY_SEAT_BODY(OsdStylePreference);
+        return theme_;
+    }
+
+    void choose_theme(std::uint8_t theme) noexcept {
+        TASTY_SEAT_BODY(OsdStylePreference);
+        theme_ = theme;
+        ++theme_choices_;
+    }
+
     std::uint32_t classic_choices() const noexcept { return classic_choices_; }
 
     std::uint32_t hd_choices() const noexcept { return hd_choices_; }
 
+    std::uint32_t theme_choices() const noexcept { return theme_choices_; }
+
 private:
     bool hd_;
+    std::uint8_t theme_;
     bool reopen_ = false;
     std::uint32_t classic_choices_ = 0;
     std::uint32_t hd_choices_ = 0;
+    std::uint32_t theme_choices_ = 0;
 };
 
 }

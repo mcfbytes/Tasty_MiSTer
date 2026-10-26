@@ -310,6 +310,11 @@ void DiscReadService::serve() noexcept {
     }
 }
 
+void DiscReadService::serve_on_io(DiscReadSlot& s) noexcept {
+    TASTY_SEAT_BODY_MEDIATOR(DiscReadService, B);
+    serve_(s);
+}
+
 bool DiscReadService::idle() const noexcept {
     return chan_.outbound() == 0 && mounts_.outbound() == 0;
 }

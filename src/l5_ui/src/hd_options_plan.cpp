@@ -10,6 +10,7 @@
 #include "ui/option_host.h"
 #include "ui/options_model.h"
 #include "ui/options_surface.h"
+#include "ui/placement.h"
 #include "ui/saved_baseline.h"
 
 namespace mister::ui {
@@ -108,8 +109,8 @@ HdOptionsPlan::HdOptionsPlan(IOptionsSurface& surface, const HdOptionsView::Spec
     for (const std::unique_ptr<OptionItem>& owned : walk.items()) {
         const OptionItem& it = *owned;
         const Placement p = placer_.of(it);
-        about = about || p == Placement::CoreAbout;
-        if (!it.screen_row || p != Placement::CoreSettings)
+        about = about || host_of(p) == PageId::HdCoreAbout;
+        if (!it.screen_row || host_of(p) != PageId::HdCoreSettings)
             continue;
 
         if (!it.selectable_index) {

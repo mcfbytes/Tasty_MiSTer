@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 
+#include "app/all_leases_home.h"
 #include "app/park_receipt.h"
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -55,9 +56,13 @@ public:
     BitstreamProgrammer(const BitstreamProgrammer&) = delete;
     BitstreamProgrammer& operator=(const BitstreamProgrammer&) = delete;
 
-    [[nodiscard]] Ex<void> program(const ParkReceipt& park, std::string_view rel);
+    [[nodiscard]] Ex<void> program(
+        const ParkReceipt& park,
+        AllLeasesHome home,
+        std::string_view rel
+    );
 
-    [[nodiscard]] Ex<void> program_at_boot(std::string_view rel);
+    [[nodiscard]] Ex<void> program_at_boot(AllLeasesHome home, std::string_view rel);
 
     [[nodiscard]] bool bridges_down() const noexcept { return bridges_down_; }
 

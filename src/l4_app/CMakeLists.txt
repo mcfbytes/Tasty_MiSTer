@@ -17,9 +17,17 @@ add_library(mister_app STATIC
   src/companion_walk.cpp
   src/config_apply.cpp
   src/content_pick.cpp
+  src/rung_set.cpp
+  src/bind_tail.cpp
+  src/config_saves.cpp
+  src/companion_slot.cpp
+  src/owner_push.cpp
   src/core_frame_counter.cpp
   src/core_init.cpp
   src/core_builder.cpp
+  src/lw_sector_endpoint.cpp
+  src/lw_osd_endpoint.cpp
+  src/lw_sys_endpoint.cpp
   src/core_window.cpp
   src/cscd_codec.cpp
   src/dev_mem_window_map.cpp
@@ -79,6 +87,7 @@ add_library(mister_app STATIC
   src/mount_queue.cpp
   src/name_config.cpp
   src/negotiated_core.cpp
+  src/osd_rows.cpp
   src/osd_wire.cpp
   src/owner_ladder.cpp
   src/pcm_main.cpp
@@ -150,8 +159,11 @@ if(TASTY_WITH_HDOSD)
                  "${_hdosd}/NotoSans-Regular.ttf" COPYONLY)
   configure_file("${TASTY_HDOSD_FONT_DIR}/NotoSans-Bold.ttf"
                  "${_hdosd}/NotoSans-Bold.ttf" COPYONLY)
-  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/slint/hd_menu.slint"
-                 "${_hdosd}/hd_menu.slint" COPYONLY)
+  file(GLOB _slint_files CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/slint/*.slint")
+  foreach(_slint_file IN LISTS _slint_files)
+    get_filename_component(_slint_name "${_slint_file}" NAME)
+    configure_file("${_slint_file}" "${_hdosd}/${_slint_name}" COPYONLY)
+  endforeach()
   target_sources(mister_app PRIVATE src/slint_raster.cpp)
   set_property(TARGET mister_app PROPERTY SLINT_EMBED_RESOURCES embed-files)
   slint_target_sources(mister_app "${_hdosd}/hd_menu.slint")
@@ -215,6 +227,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/hd_style.h
   app/hd_surface.h
   app/hd_theme.h
+  app/hd_themes.h
   app/hd_tick_pacer.h
   app/pause_badge.h
   app/hps_framebuffer.h
@@ -298,6 +311,9 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/mra_facts.h
   app/name_config.h
   app/remembered_path.h
+  app/link_osd_rows.h
+  app/osd_row_tally.h
+  app/osd_rows.h
   app/osd_wire.h
   app/ui_page_record.h
   app/path_text.h
@@ -350,6 +366,12 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/rung.h
   app/rung_edges.h
   app/rung_roster.h
+  app/rung_set.h
+  app/bind_tail.h
+  app/config_saves.h
+  app/companion_slot.h
+  app/rung_mask.h
+  app/picked_load.h
   app/window_tally.h
   app/ini_parse.h
   app/content_request.h
@@ -380,6 +402,19 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/link_binder.h
   app/link_rows.h
   app/doorbell_lines.h
+  app/lw_pads.h
+  app/lw_sector.h
+  app/lw_sector_endpoint.h
+  app/sector_grant.h
+  app/sector_route.h
+  app/lw_osd.h
+  app/lw_osd_endpoint.h
+  app/osd_grant.h
+  app/osd_route.h
+  app/lw_sys.h
+  app/lw_sys_endpoint.h
+  app/sys_grant.h
+  app/sys_route.h
   app/session_identity.h
   app/session_machine.h
   app/session_rows.h

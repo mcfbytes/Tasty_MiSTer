@@ -42,11 +42,12 @@ DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
             sources.fallbacks,
             sources.ini_write_failures
         },
-        BayRecord{sources.bay_counts},
+        BayRecord{sources.bay_counts, sources.sector_route, sources.osd_route, sources.sys_route},
         RndRecord{sources.round_timing},
         TasRecord{sources.replay},
         RecRecord{sources.rec_capture, sources.rec_encode, sources.rec_write, sources.rec_avi},
-        HdRecord{sources.hd}
+        HdRecord{sources.hd},
+        RgRecord{sources.ui_pages}
     };
 }
 
@@ -82,12 +83,37 @@ DiagSampler::DiagSampler(
       video_stats_(sources.video_stats),
       video_geo_(sources.video_geometry),
       diag_cell_(sources.diag),
+      rec_capture_(sources.rec_capture),
+      rec_encode_(sources.rec_encode),
       doorbell_cell_(sources.doorbell),
       round_timing_(sources.round_timing),
       ui_pages_(sources.ui_pages),
       diag_(diag),
       lane_rt_(rt_lane),
       records_(make_records(sources)) {}
+
+std::uint64_t DiagSampler::rss_ceiling_now() const noexcept {
+    app::RecorderStatus cap{};
+    app::EncodeStatus enc{};
+    const std::uint32_t cap_kib = rec_capture_.sample_into(cap) != 0 ? cap.arena_kib : 0;
+    const std::uint32_t chunk_kib = rec_encode_.sample_into(enc) != 0 ? enc.video.arena_kib : 0;
+    return rss_ceiling_bytes(cap_kib, chunk_kib);
+}
+
+void DiagSampler::observe_rss(std::uint64_t rss, std::uint64_t ceiling) noexcept {
+    diag_stats_.rss_bytes.store(rss, std::memory_order_relaxed);
+    rss_over_streak_ = rss > ceiling ? rss_over_streak_ + 1 : 0;
+
+    if (rss_over_streak_ == kRssOverSamples) {
+        diag_stats_.rss_over_ceiling.fetch_add(1, std::memory_order_relaxed);
+        std::fprintf(
+            stderr,
+            "memory use %llu bytes is over the expected ceiling %llu\n",
+            static_cast<unsigned long long>(rss),
+            static_cast<unsigned long long>(ceiling)
+        );
+    }
+}
 
 void DiagSampler::sample(bool stopping) noexcept {
 
@@ -112,22 +138,9 @@ void DiagSampler::sample(bool stopping) noexcept {
         unchanged_streak_ = 0;
     }
 
-    if (auto rss = read_vm_rss_bytes()) {
-        diag_stats_.rss_bytes.store(*rss, std::memory_order_relaxed);
-        const bool over = *rss > kRssSoftCeilingBytes;
-
-        if (over && !rss_over_now_) {
-            diag_stats_.rss_over_ceiling.fetch_add(1, std::memory_order_relaxed);
-            std::fprintf(
-                stderr,
-                "%s: RSS %llu over soft ceiling %llu\n",
-                seat_name(kSeat),
-                static_cast<unsigned long long>(*rss),
-                static_cast<unsigned long long>(kRssSoftCeilingBytes)
-            );
-        }
-        rss_over_now_ = over;
-    }
+    const std::uint64_t ceiling = rss_ceiling_now();
+    if (auto rss = read_vm_rss_bytes())
+        observe_rss(*rss, ceiling);
 
     if (prefetch_) {
         stats_.ring_drops[2].set(prefetch_->counters().drops);

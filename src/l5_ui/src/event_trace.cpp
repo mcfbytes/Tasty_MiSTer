@@ -31,6 +31,7 @@ constexpr RequestName kRequestNames[] = {
     {app::UiRequest::Kind::LoadRamImage, "LoadRamImage"},
     {app::UiRequest::Kind::SetOsdStyle, "SetOsdStyle"},
     {app::UiRequest::Kind::SdramDetected, "SdramDetected"},
+    {app::UiRequest::Kind::SetHdTheme, "SetHdTheme"},
 };
 
 consteval bool request_names_are_ordinal() {

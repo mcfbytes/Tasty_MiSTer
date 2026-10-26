@@ -10,6 +10,7 @@
 
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "hal/spi_transport.h"
 #include "proto/joystick.h"
 #include "svc/device_match.h"
 #include "svc/input_device.h"

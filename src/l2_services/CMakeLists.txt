@@ -182,6 +182,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/rw_interleaver.h
   svc/scan_filter.h
   svc/sector_descrambler.h
+  svc/sector_program.h
   svc/pending_writes.h
   svc/read_bounded.h
   svc/search_policy.h

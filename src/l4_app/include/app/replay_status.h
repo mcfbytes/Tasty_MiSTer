@@ -68,6 +68,7 @@ struct ReplayStatus {
     std::uint32_t late_depth = 0;
     std::int32_t depth_min = -1;
     std::int32_t depth_min_frame = -1;
+    std::uint32_t pad_held = 0;
 };
 
 inline constexpr std::array<const char*, static_cast<std::size_t>(ReplayEnd::kCount)>
@@ -124,6 +125,7 @@ constexpr void to_json(infra::JsonOut& o, const ReplayStatus& s) noexcept {
     o.field("late_depth", s.late_depth);
     o.field("depth_min", s.depth_min);
     o.field("depth_min_frame", s.depth_min_frame);
+    o.field("pad_held", s.pad_held);
 }
 
 using ReplayStatusCell = xthread::Telemetry<ReplayStatus, SeatTag::RT>;

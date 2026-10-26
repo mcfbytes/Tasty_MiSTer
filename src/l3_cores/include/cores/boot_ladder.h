@@ -150,6 +150,7 @@ private:
     std::uint32_t mount_gen_ = 0;
     std::uint32_t save_gen_ = 0;
     std::uint64_t save_size_ = 0;
+    bool save_exists_ = false;
     MountStatus mount_answer_{};
 };
 

@@ -230,6 +230,7 @@ inline constexpr Option kExtSchema[] = {
     {"SCANRATE_LOCK", OptionType::U8, 0, 1, 0, TASTY_CFG_OFF(scanrate_lock), 0, false},
     {"OSD_STYLE", OptionType::U8, 0, 1, 0, TASTY_CFG_OFF(osd_style), 0, false},
     {"HD_OSD_FPS", OptionType::U8, 1, 30, 10, TASTY_CFG_OFF(hd_osd_fps), 0, false},
+    {"HD_THEME", OptionType::U8, 0, 255, 0, TASTY_CFG_OFF(hd_theme), 0, false},
 };
 
 #undef TASTY_CFG_OFF

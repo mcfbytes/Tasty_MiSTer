@@ -45,12 +45,27 @@ private:
         HdDisplayPlan& plan_;
     };
 
+    class ThemeRow final : public IHdRow {
+        TASTY_SEAT_RESIDENT(Ui);
+
+    public:
+        explicit ThemeRow(HdDisplayPlan& plan) noexcept : plan_(plan) {}
+
+        app::PageDescription::Row describe() const override;
+        Transition select() override;
+        Transition step(int delta) override;
+
+    private:
+        HdDisplayPlan& plan_;
+    };
+
     PageContext& ctx_;
     OsdStylePreference& style_;
     std::uint32_t refusals_ = 0;
     std::uint32_t published_ = 0;
     ClassicAction classic_{*this};
     HdAskRow style_row_;
+    ThemeRow theme_row_{*this};
     std::vector<std::reference_wrapper<IHdRow>> refs_;
 };
 

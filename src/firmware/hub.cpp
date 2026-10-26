@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "infra/opt_ref.h"
+#include "infra/seat.h"
 #include "svc/config.h"
 #include "svc/config_snapshot.h"
 #include "svc/deadzone_rule.h"
@@ -40,6 +41,9 @@ DiagSampler::Sources Hub::diag_sources_(const BootParts& plat) noexcept {
         .rec_write = rec_.rec_write_status_,
         .rec_avi = rec_.avi_write_status_,
         .screenshots = d.screenshots,
+        .sector_route = d.sector_route,
+        .osd_route = d.osd_route,
+        .sys_route = d.sys_route,
     };
 }
 
@@ -109,7 +113,8 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .ui_round = face_parts_.ui_round,
               .link_rx = device_.ui_rx_,
               .save_states = face_parts_.save_states,
-              .owner_tick = tail_->owner_tick()
+              .owner_tick = tail_->owner_tick(),
+              .lw_osd = infra::OptRef<app::LwOsdEndpoint>{device_.lw_osd_}
           },
           diag_sources_(plat),
           device_.diag_services()
@@ -136,6 +141,9 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
 
 Hub::~Hub() {
     assembly_.stop_join_or_exit();
+
+    const SeatScope main_as_main{SeatTag::Main};
+    device_.owner_.retire_lw_at_exit();
 }
 
 Ex<void> Hub::open_process_main() noexcept {

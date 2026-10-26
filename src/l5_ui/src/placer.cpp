@@ -35,7 +35,7 @@ constexpr std::array<KindPlace, kKindRowCount> kKindPlaces{{
     {Kind::Separator, Placement::CoreSettings, false, false},
     {Kind::Addon, Placement::Hidden, false, false},
     {Kind::DefMra, Placement::Hidden, false, false},
-    {Kind::JoyNames, Placement::Controllers, false, false},
+    {Kind::JoyNames, Placement::Hidden, false, false},
     {Kind::Info, Placement::CoreAbout, false, false},
     {Kind::Version, Placement::CoreAbout, false, false},
     {Kind::CfgVer, Placement::CoreAbout, false, false},

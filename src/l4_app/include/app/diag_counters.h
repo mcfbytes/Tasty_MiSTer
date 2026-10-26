@@ -82,6 +82,9 @@ struct DiagCounters {
     std::uint8_t cd_drive_state = 0;
     bool cd_drive_is_data = true;
     std::uint32_t status_reply_refusals = 0;
+    std::uint32_t status_lw = 0;
+    std::uint32_t status_lw_adopts = 0;
+    std::uint32_t status_lw_stale = 0;
 
     std::uint32_t stale_owner_steps = 0;
     std::uint32_t start_answer_drops = 0;
@@ -91,6 +94,11 @@ struct DiagCounters {
     std::uint32_t info_poll_pushes = 0;
 
     std::uint32_t fed_refusals = 0;
+
+    std::uint32_t pads_on_lw = 0;
+
+    std::uint32_t osd_page_rows_link = 0;
+    std::uint32_t osd_status_rows_link = 0;
 
     std::uint32_t open_saves_mounted = 0;
     std::uint32_t open_save_refusals = 0;

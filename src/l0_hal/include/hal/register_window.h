@@ -10,10 +10,13 @@
 #include "hal/axi.h"
 #include "hal/phys_region.h"
 #include "hal/reg_block.h"
+#include "hal/reg_lend.h"
 #include "hal/types.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
+
+class LwSysWindow;
 
 template <class Layout>
 class RegisterWindow {
@@ -21,13 +24,6 @@ class RegisterWindow {
 
 public:
     using Reg = typename Layout::Reg;
-
-    [[nodiscard]] static Ex<RegisterWindow> map(PhysRegion lw_window, LwOffset lw_offset) {
-        auto m = detail::map_lw_registers(lw_window, lw_offset, Layout::kSize);
-        if (!m)
-            return std::unexpected(m.error());
-        return RegisterWindow(std::move(m->pages), m->lead);
-    }
 
     [[nodiscard]] static Ex<RegisterWindow> map_phys(os::PhysAddr phys) {
         auto m = detail::map_registers(phys, Layout::kSize);
@@ -111,6 +107,15 @@ public:
     };
 
 private:
+    friend class LwSysWindow;
+
+    [[nodiscard]] static Ex<RegisterWindow> map(PhysRegion lw_window, LwOffset lw_offset) {
+        auto m = detail::map_lw_registers(lw_window, lw_offset, Layout::kSize);
+        if (!m)
+            return std::unexpected(m.error());
+        return RegisterWindow(std::move(m->pages), m->lead);
+    }
+
     RegisterWindow() = default;
 
     RegisterWindow(os::MmioRegion pages, std::size_t lead)
@@ -134,7 +139,13 @@ private:
     }
 
 public:
-    static RegisterWindow borrow(reg::Block lend) { return borrow(lend.base_, lend.len_); }
+    static RegisterWindow borrow(reg::Block lease) { return borrow(lease.base_, lease.len_); }
+
+    [[nodiscard]] reg::Lend lend() const noexcept {
+        if (base_ == nullptr)
+            return reg::Lend{};
+        return reg::Lend(static_cast<volatile std::byte*>(base_), Layout::kSize);
+    }
 
     template <reg::Access A, std::uint32_t Off>
     [[nodiscard]] reg::Reg<A> field(reg::Field<A, Off>) const {

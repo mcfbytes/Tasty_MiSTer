@@ -87,7 +87,7 @@ row() { # row id plat title aliases rom kind hash layout [movie_sha1 [args]]
     row nu NES "Nu Nowhere" "" "Nu Nowhere.nes" md5 "$A_BODY" ines_body 1013M
 } >"$T/tasty/tas-catalog.tsv"
 
-run() { TASTY_ALLOW_FILE=1 TASTY_SHA_URL="${TASTY_SHA_URL:-file://$T/dl/none.sha256}" TASTY_DIR=$T/tasty TASTY_GAMES=$T/mister/games TASTY_UI=text TASTY_PLAY_ARGS="${PLAY_ARGS:-}" \
+run() { TASTY_ALLOW_FILE=1 TASTY_SHA_URL="${TASTY_SHA_URL:-file://$T/dl/none.sha256}" TASTY_CATALOG_URL="${TASTY_CATALOG_URL:-file://$T/dl/no-catalog}" TASTY_URL="${TASTY_URL:-file://$T/dl/no-binary}" TASTY_DIR=$T/tasty TASTY_GAMES=$T/mister/games TASTY_UI=text TASTY_PLAY_ARGS="${PLAY_ARGS:-}" \
     TASTY_BIN=$T/bin/tasty TASTY_MOVIE_URL_BASE="file://$T/dl" TMPDIR=$T "$SHELL_UNDER_TEST" "$SCRIPT" "$@"; }
 
 # --- scan -----------------------------------------------------------------------------------------------------
@@ -290,7 +290,7 @@ for hf in none bad upper; do
 done
 cp "$T/dl/tasty-new" "$T/bin/tasty"
 # https-only: without the test hook, file:// is refused
-TASTY_ALLOW_FILE=0 TASTY_DIR=$T/tasty TASTY_BIN=$T/bin/tasty TASTY_UI=text TASTY_URL="file://$T/dl/tasty-new" TMPDIR=$T \
+TASTY_ALLOW_FILE=0 TASTY_DIR=$T/tasty TASTY_BIN=$T/bin/tasty TASTY_UI=text TASTY_URL="file://$T/dl/tasty-new" TASTY_CATALOG_URL="file://$T/dl/cat-good" TASTY_SHA_URL="file://$T/dl/tasty.sha256" TMPDIR=$T \
     "$SHELL_UNDER_TEST" "$SCRIPT" update >/dev/null 2>"$T/upd2.err"
 expect "file:// downloads are refused outside the tests" has "$T/upd2.err" "could not update"
 

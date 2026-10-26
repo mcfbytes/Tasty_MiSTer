@@ -11,6 +11,7 @@
 #include "cores/staging_core.h"
 #include "cores/cd_core.h"
 #include "cores/core_support.h"
+#include "cores/psx_sector_map.h"
 #include "cores/sector_kick.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
@@ -125,9 +126,6 @@ private:
     [[nodiscard]] bool serve_sector_(std::int64_t lba, std::span<std::uint8_t> out) noexcept;
 
     void warm_window_(std::int64_t lba0, std::size_t sectors) noexcept;
-
-    enum class Answer : std::uint8_t { Zeros, Filler, Pregap, Engine };
-    [[nodiscard]] Answer classify_(std::int64_t lba) const noexcept;
 
     [[nodiscard]] bool scan_disc_identity_();
     svc::DiscMountState refresh_disc_() noexcept;

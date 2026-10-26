@@ -8,17 +8,21 @@
 #include <span>
 #include <string_view>
 
+#include "app/block_poll_route.h"
+#include "app/sys_grant.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/rt_stats.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "proto/axi_status_decoder.h"
 #include "proto/decoder_row.h"
 #include "proto/spi_block_decoder.h"
 #include "proto/spi_conf_str_decoder.h"
 #include "proto/spi_identify_decoder.h"
 #include "proto/spi_status_decoder.h"
 #include "proto/status_cell.h"
+#include "proto/status_snapshot.h"
 #include "proto/types.h"
 #include "proto/user_io/poll_params.h"
 #include "proto/user_io/poll_reader.h"
@@ -67,6 +71,8 @@ public:
         proto::BlockSlots& slots;
         OsdWire& osd;
         InputWire& input;
+
+        infra::OptRef<const proto::StatusSnapshotCell> status_lw{};
     };
 
     explicit SessionRows(const Wiring& w) noexcept;
@@ -79,6 +85,8 @@ public:
     );
 
     [[nodiscard]] Ex<void> rebind_pre_session(proto::BindGeneration gen, cores::Core* owner);
+
+    void bind_status_route(StatusRoute route, std::uint16_t gen) noexcept;
 
     [[nodiscard]] std::span<const reactor::LinkDecoderDecl> census_rows(
         std::array<reactor::LinkDecoderDecl, kMaxServices>& out,
@@ -93,6 +101,8 @@ public:
 
     void arm_session_polls(bool front_end) noexcept;
 
+    void bind_block_poll(BlockPollRoute route) noexcept { block_poll_ = route; }
+
     void bind_block_drain(infra::OptRef<cores::Core> current) noexcept;
 
     [[nodiscard]] proto::user_io::IPollParams& poll_params() noexcept { return *this; }
@@ -102,6 +112,12 @@ public:
     [[nodiscard]] const proto::SpiStatusDecoder& status_decoder() const noexcept {
         return status_decoder_;
     }
+
+    [[nodiscard]] const proto::AxiStatusDecoder& axi_status_decoder() const noexcept {
+        return axi_status_decoder_;
+    }
+
+    [[nodiscard]] StatusRoute status_route() const noexcept { return status_route_; }
 
     [[nodiscard]] const proto::SpiConfStrDecoder& conf_str_decoder() const noexcept {
         return conf_str_decoder_;
@@ -144,6 +160,10 @@ private:
     proto::DecoderRow<proto::SpiIdentifyDecoder> identify_row_{identify_decoder_};
     proto::SpiStatusDecoder status_decoder_;
     proto::DecoderRow<proto::SpiStatusDecoder> status_row_{status_decoder_};
+    proto::AxiStatusDecoder axi_status_decoder_;
+    proto::DecoderRow<proto::AxiStatusDecoder> axi_status_row_{axi_status_decoder_};
+    infra::OptRef<const proto::StatusSnapshotCell> status_lw_{};
+    StatusRoute status_route_ = StatusRoute::Link;
     proto::SpiConfStrDecoder conf_str_decoder_;
     proto::DecoderRow<proto::SpiConfStrDecoder> conf_str_row_{conf_str_decoder_};
     proto::SpiBlockDecoder block_decoder_;
@@ -155,6 +175,7 @@ private:
     xthread::Telemetry<std::uint8_t, SeatTag::Input>::Reader rumble_pads_reader_{};
     std::uint8_t rumble_pads_ = 0;
     proto::DecoderRow<proto::user_io::PollReader> rumble_row_{rumble_poll_};
+    BlockPollRoute block_poll_ = BlockPollRoute::Link;
 
     bool osd_visible_last_ = false;
     Tally tally_{};

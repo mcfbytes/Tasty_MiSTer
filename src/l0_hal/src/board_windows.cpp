@@ -30,7 +30,7 @@ Ex<BoardWindows> BoardWindows::open(const BoardProfile& profile, FallbackNotice 
         }
         const auto slot = static_cast<std::size_t>(d.id);
         const detail::MappedRegs& page = w.pages_[slot].emplace(std::move(*m));
-        w.lends_[slot] = reg::Block::of(page.pages, page.lead);
+        w.lends_[slot] = reg::Lend::of(page.pages, page.lead);
     }
     return w;
 }
@@ -54,7 +54,7 @@ Ex<BoardWindows> BoardWindows::attach(
             );
         }
 
-        w.lends_[slot] = reg::Block::over(img.words).first(profile.windows[slot].region.len);
+        w.lends_[slot] = reg::Lend::over(img.words).first(profile.windows[slot].region.len);
     }
     return w;
 }
@@ -71,7 +71,8 @@ Ex<reg::Block> BoardWindows::lead_of(WindowId id, std::size_t need) const {
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(need)}
         );
     }
-    return lends_[slot];
+
+    return reg::Block::redeem(lends_[slot]);
 }
 
 Ex<Mailbox> BoardWindows::take_mailbox() {

@@ -78,7 +78,7 @@ public:
         [[nodiscard]] virtual infra::OptRef<Rung> rung(RungSlot slot) noexcept = 0;
         [[nodiscard]] virtual infra::OptRef<const Rung> rung(RungSlot slot) const noexcept = 0;
 
-        virtual void settle(RungSlot slot, Rung::Pass pass, std::uint32_t pushed) = 0;
+        virtual void settle(RungSlot slot, Rung::Pass pass) = 0;
 
         virtual void step_held(RungSlot slot) = 0;
         [[nodiscard]] virtual Wait held_wait(RungSlot slot) const noexcept = 0;
@@ -104,13 +104,7 @@ public:
                     const infra::OptRef<Rung> live = host.rung(row.slot);
                     if (!live)
                         break;
-                    const std::uint32_t before = edges_.inbox.ring().pushed();
-                    const Rung::Pass pass = live->step(edges_, host);
-                    host.settle(
-                        row.slot,
-                        pass,
-                        static_cast<std::uint32_t>(edges_.inbox.ring().pushed() - before)
-                    );
+                    host.settle(row.slot, live->step(edges_, host));
                     break;
                 }
             }

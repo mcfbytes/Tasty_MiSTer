@@ -227,7 +227,7 @@ public:
         DigestSpan span{};
         std::vector<std::uint8_t> prefix{};
 
-        std::optional<std::vector<std::uint8_t>> alt_prefix{};
+        std::vector<std::vector<std::uint8_t>> alt_prefixes{};
     };
 
     [[nodiscard]] virtual Ex<DigestSource> digest_source(

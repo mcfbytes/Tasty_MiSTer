@@ -13,8 +13,7 @@
 #include "infra/seat.h"
 #include "ui/hd_plan.h"
 #include "ui/hd_rewalk.h"
-#include "ui/options_model.h"
-#include "ui/placer.h"
+#include "ui/hd_page0_walk.h"
 #include "ui/slot_focus.h"
 
 namespace mister::ui {
@@ -56,15 +55,16 @@ private:
 
     void walk_(const proto::ItemTable& table, const BuildEnv& env);
 
-    [[nodiscard]] const OptionItem& slot_(std::size_t at) const { return *placer_->slots()[at]; }
+    [[nodiscard]] const OptionItem& slot_(std::size_t at) const {
+        return *page0_.placer().slots()[at];
+    }
 
     [[nodiscard]] SlotFocus focus_at_(std::size_t at) const;
 
     const NowPlaying& now_playing_;
     const CoreVerbs& verbs_;
     const bool front_end_;
-    OptionsModel walk_model_;
-    std::optional<Placer> placer_;
+    HdPage0Walk page0_;
     std::vector<SlotRow> rows_;
     std::vector<std::reference_wrapper<IHdRow>> refs_;
 };

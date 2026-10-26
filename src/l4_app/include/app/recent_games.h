@@ -80,6 +80,11 @@ public:
 
     [[nodiscard]] std::uint32_t rereads() const noexcept { return rereads_; }
 
+    [[nodiscard]] static std::string core_image_of(
+        const svc::Vfs& files,
+        std::string_view core_name
+    );
+
     [[nodiscard]] std::int64_t build_ns() const noexcept { return build_ns_; }
 
     [[nodiscard]] std::int64_t update_ns_max() const noexcept { return update_ns_max_; }
@@ -97,7 +102,7 @@ private:
         std::string image;
     };
 
-    void scan_cores_(const svc::Vfs& files);
+    [[nodiscard]] static std::vector<CoreName> scan_cores_(const svc::Vfs& files);
     void read_sources_(const svc::Vfs& files, RecentsStore& recents);
 
     void reread_source_(const svc::Vfs& files, RecentsStore& recents, const Played& session);

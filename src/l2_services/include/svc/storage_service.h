@@ -15,6 +15,7 @@
 #include "svc/block_ctl.h"
 #include "svc/block_half.h"
 #include "svc/io_coworker.h"
+#include "svc/save_files_on_io.h"
 #include "svc/storage_backend.h"
 #include "svc/storage_lifecycle.h"
 
@@ -32,7 +33,8 @@ struct StorageCounters {
 
 class StorageService final : public proto::IStorageChannel,
                              public IStorageLifecycle,
-                             public IIoCoworker {
+                             public IIoCoworker,
+                             public ISaveFilesOnIo {
     TASTY_SEAT_MEDIATOR(Io, RT);
 
 public:
@@ -92,6 +94,8 @@ public:
 
     void serve() noexcept override;
     [[nodiscard]] bool idle() const noexcept override;
+
+    [[nodiscard]] ISaveFilesOnIo::Save save_on_io(proto::SlotIndex slot) const noexcept override;
 
     [[nodiscard]] StorageCounters counters() const noexcept;
 
@@ -153,6 +157,7 @@ private:
 
     struct Io {
         std::uint32_t served[kSlots]{};
+        ISaveFilesOnIo::Save saves[kSlots]{};
     };
 
     Io io_{};

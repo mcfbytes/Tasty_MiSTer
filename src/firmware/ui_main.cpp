@@ -6,6 +6,7 @@
 #include "app/event.h"
 #include "app/event_sink.h"
 #include "app/link_rx_channel.h"
+#include "app/lw_osd_endpoint.h"
 #include "app/mgl_pump.h"
 #include "app/launcher_screen.h"
 #include "app/owner_tick.h"
@@ -18,6 +19,8 @@
 #include "app/ui_round_port.h"
 #include "app/video_pump.h"
 #include "infra/message_sum.h"
+
+#include <optional>
 
 namespace mister::fw {
 
@@ -42,6 +45,7 @@ UiMain::UiMain(
       ui_sink_(wiring.ui_sink),
       ui_round_(wiring.ui_round),
       owner_tick_(wiring.owner_tick),
+      lw_osd_(wiring.lw_osd),
       ui_rx_(wiring.link_rx),
       save_states_(wiring.save_states),
       wake_(fds.wake()),
@@ -93,8 +97,14 @@ void UiMain::serve() noexcept {
         while (const auto h = uart_handoffs_.pop())
             infra::dispatch<app::UartHandoffRoutes>(*h, uart_performer_);
     }
-    if (ui_round_)
-        ui_round_->round(link_work);
+    const std::optional<app::UiRoundEdge> edge = ui_round_
+        ? std::optional{ui_round_->round(link_work)}
+        : std::nullopt;
+
+    if (lw_osd_)
+        lw_osd_->serve();
+    if (edge)
+        ui_round_->publish_edges(*edge);
     drain_events_();
 }
 
@@ -107,10 +117,14 @@ void UiMain::on_pause() noexcept {
     if (save_states_)
         save_states_->on_ui_pause();
     video_.on_pause();
+    if (lw_osd_)
+        lw_osd_->on_pause();
 }
 
 void UiMain::on_resume() noexcept {
     park_.mute_extra(false);
+    if (lw_osd_)
+        lw_osd_->on_resume();
     drain_events_();
 }
 
@@ -119,6 +133,8 @@ void UiMain::settle() noexcept {
     shots_.tick();
     if (ui_round_)
         ui_round_->settle();
+    if (lw_osd_)
+        lw_osd_->on_stop();
 }
 
 }

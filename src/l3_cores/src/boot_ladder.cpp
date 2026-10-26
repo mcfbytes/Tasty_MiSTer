@@ -349,6 +349,7 @@ bool BootLadder::prepare_save(std::string_view path) {
             break;
     }
     save_size_ = e.size_bytes;
+    save_exists_ = e.exists;
     save_gen_ = 0;
     return true;
 }
@@ -364,7 +365,9 @@ bool BootLadder::order_mount_save(std::string_view path, bool bracketed) {
         return host_.order(op);
     }
 
-    const std::uint64_t size = save_size_ != 0 ? save_size_ : profile_.staging.save_pre_bytes;
+    const StagingPolicy& sp = profile_.staging;
+    const bool pre = save_size_ == 0 && (!save_exists_ || sp.save_pre_on_empty);
+    const std::uint64_t size = pre ? sp.save_pre_bytes : save_size_;
     auto id = host_.intern_path(path, size);
     if (!id || *id == proto::FileId{})
         return false;

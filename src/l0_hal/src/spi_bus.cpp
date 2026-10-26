@@ -173,7 +173,8 @@ CoreCapabilities SpiBus::latch_capabilities() {
     caps.board_digital = ((gpi >> 28) & 1u) != 0u;
     caps.button_osd = ((gpi >> 29) & 1u) != 0u;
     caps.button_user = ((gpi >> 30) & 1u) != 0u;
-    caps.free_caps = static_cast<std::uint8_t>((gpi >> 21) & 0x7Fu);
+    caps.free_caps = static_cast<std::uint8_t>((gpi >> 21) & 0x3Fu);
+    caps.lw_directory = ((gpi >> 27) & 1u) != 0u;
 
     width_ = caps.width;
     io_version_ = caps.io_version;

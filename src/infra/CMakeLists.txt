@@ -28,6 +28,7 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/park_fds.h
   infra/park_like.h
   infra/parse_int.h
+  infra/lease_order.h
   infra/pause_latch.h
   infra/persist.h
   infra/posix_compat.h

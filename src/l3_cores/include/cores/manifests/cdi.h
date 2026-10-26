@@ -40,6 +40,7 @@ inline constexpr StagingPolicy kCdiStaging{
     .save_slot = IoIndex{1},
     .save_dest = WideIoIndex{},
     .save_pre_bytes = 8 * 1024,
+    .save_pre_on_empty = true,
     .start_save_dir = "games/CD-i",
 };
 

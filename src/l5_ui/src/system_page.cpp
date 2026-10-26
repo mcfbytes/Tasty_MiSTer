@@ -11,10 +11,12 @@
 #include "app/cmd_verb_sink.h"
 #include "app/hd_window.h"
 #include "app/page_description.h"
+#include "app/pending_load.h"
 #include "app/name_config.h"
 #include "app/recents_store.h"
 #include "app/ui_request_ring.h"
 #include "infra/opt_ref.h"
+#include "ui/free_space.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_ask.h"
 #include "ui/browse_source.h"
@@ -161,23 +163,9 @@ void SystemPage::for_each_row(Visit&& visit) const {
     }
     visit(std::uint8_t{3}, std::nullopt, storage, false);
 
-    constexpr std::uint64_t kTenGiB = 10ull * 1024 * 1024 * 1024;
-    if (facts_.avail_bytes < kTenGiB) {
-        std::snprintf(
-            s,
-            sizeof s,
-            "   Available space: %llumb",
-            static_cast<unsigned long long>(facts_.avail_bytes / (1024 * 1024))
-        );
-    } else {
-        std::snprintf(
-            s,
-            sizeof s,
-            "   Available space: %llugb",
-            static_cast<unsigned long long>(facts_.avail_bytes / (1024 * 1024 * 1024))
-        );
-    }
-    visit(std::uint8_t{4}, std::nullopt, std::string_view{s}, false);
+    const std::string space = "   Available space: "
+        + format_free_space(facts_.avail_bytes, FreeSpaceStyle::Classic);
+    visit(std::uint8_t{4}, std::nullopt, space, false);
     visit(std::uint8_t{5}, SystemItem::SwitchStorage, switch_to, switch_stippled);
 
     visit(std::uint8_t{6}, std::nullopt, std::string_view{}, false);
@@ -352,7 +340,7 @@ Transition SystemPage::reboot_release(const UiEvent& ev) {
         reboot_req_ = false;
         cold_sent_ = false;
         reboot_off_ = 0;
-        const app::CmdVerb::LoadCore menu{"menu.rbf", app::CmdVerb::RbfOrMra::Rbf};
+        const app::CmdVerb::LoadCore menu{app::kFrontEndImage, app::CmdVerb::RbfOrMra::Rbf};
         if (route_ && route_->on(menu)) {
             ++published_;
         } else {

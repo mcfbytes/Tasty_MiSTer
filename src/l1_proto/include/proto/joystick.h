@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include "infra/error.h"
-#include "hal/spi_transport.h"
+#include "proto/link_pad_encoder.h"
 #include "proto/types.h"
 #include "infra/seat.h"
 
@@ -64,45 +64,45 @@ public:
     const JoystickWire& wire() const noexcept { return wire_; }
 
     [[nodiscard]] Ex<void> push_digital(
-        hal::ISpiTransport& link,
+        ILinkPadEncoder& pads,
         PlayerIndex player,
         JoyMask map,
         bool new_dir
     );
 
     [[nodiscard]] Ex<void> push_analog_l(
-        hal::ISpiTransport& link,
+        ILinkPadEncoder& pads,
         std::uint8_t index,
         std::int8_t x,
         std::int8_t y
     );
     [[nodiscard]] Ex<void> push_analog_r(
-        hal::ISpiTransport& link,
+        ILinkPadEncoder& pads,
         std::uint8_t index,
         std::int8_t x,
         std::int8_t y
     );
 
     [[nodiscard]] Ex<void> push_paddle(
-        hal::ISpiTransport& link,
+        ILinkPadEncoder& pads,
         PlayerIndex player,
         std::uint8_t value
     );
 
     [[nodiscard]] Ex<void> push_spinner(
-        hal::ISpiTransport& link,
+        ILinkPadEncoder& pads,
         PlayerIndex player,
         std::int8_t delta
     );
 
     [[nodiscard]] Ex<bool> submit(
-        hal::ISpiTransport& link,
+        ILinkPadEncoder& pads,
         PlayerIndex player,
         JoyMask buttons,
         JoyMask autofire
     );
 
-    [[nodiscard]] Ex<bool> release(hal::ISpiTransport& link, PlayerIndex player, JoyMask composed);
+    [[nodiscard]] Ex<bool> release(ILinkPadEncoder& pads, PlayerIndex player, JoyMask composed);
 
     JoyMask previous(PlayerIndex player) const noexcept {
         return (player.v < kMaxPorts) ? prev_[player.v] : JoyMask{};
@@ -141,6 +141,10 @@ public:
         return PlayerIndex{swapped(player.v)};
     }
 
+    static constexpr std::uint16_t digital_opcode(std::uint8_t port) noexcept {
+        return static_cast<std::uint16_t>((port < 2) ? (0x02u + port) : (0x10u + port - 2u));
+    }
+
     bool wide() const noexcept { return use32_; }
 
 private:
@@ -151,7 +155,7 @@ private:
     }
 
     [[nodiscard]] Ex<void> push_analog(
-        hal::ISpiTransport& link,
+        ILinkPadEncoder& pads,
         std::uint16_t opcode,
         std::uint8_t index,
         std::uint8_t x,

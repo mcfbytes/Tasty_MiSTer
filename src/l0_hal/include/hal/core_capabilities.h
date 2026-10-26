@@ -14,6 +14,7 @@ struct CoreCapabilities {
     bool button_osd = false;
     bool button_user = false;
     std::uint8_t free_caps = 0;
+    bool lw_directory = false;
 };
 
 }

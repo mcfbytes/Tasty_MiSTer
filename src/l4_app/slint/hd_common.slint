@@ -1,0 +1,322 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+export global Theme {
+    in property <color> primary;
+    in property <color> accent;
+    in property <color> text;
+    in property <color> bg-bar;
+    in property <color> card;
+    in property <color> border-subtle;
+    in property <color> border-mid;
+    in property <color> text-label;
+    in property <color> selection-fill;
+    in property <color> on-accent;
+    in property <color> cue-spent;
+    in property <color> control-edge;
+
+    in property <string> family;
+    in property <string> subtitle-sep;
+    in property <int> weight-normal;
+    in property <int> weight-selected;
+    in property <int> weight-bold;
+
+    in property <length> font-title;
+    in property <length> font-body;
+    in property <length> font-caption;
+    in property <length> inset-x;
+    in property <length> inset-y;
+    in property <length> pad-right;
+    in property <length> header-gap;
+    in property <length> list-top;
+    in property <length> help-top;
+    in property <length> help-pad;
+    in property <length> gap;
+    in property <length> row-h;
+    in property <length> sep-h;
+    in property <length> row-pad;
+    in property <length> card-pad;
+    in property <length> radius-md;
+    in property <length> radius-sm;
+    in property <length> stroke;
+    in property <length> hair;
+    in property <length> focus-stroke;
+    in property <length> ring-w;
+    in property <length> press-edge;
+    in property <length> glyph;
+    in property <length> icon;
+    in property <length> button-h;
+    in property <length> track-h;
+}
+
+export struct MenuRow {
+    label: string,
+    value: string,
+    kind: int,
+    icon: int,
+    selected: bool,
+    enabled: bool,
+    steps: bool,
+    fill: int,
+}
+
+export struct HelpItem {
+    glyph: int,
+    label: string,
+}
+
+export component Chevron inherits Path {
+    in property <color> ink;
+    in property <int> dir;
+    width: Theme.icon;
+    height: Theme.icon;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: ink;
+    stroke-width: 2.2px * Theme.icon / 18px;
+    fill: transparent;
+    commands: dir == 0 ? "M 9 6 L 15 12 L 9 18" : dir == 1 ? "M 15 6 L 9 12 L 15 18" : dir == 2 ? "M 6 15 L 12 9 L 18 15" : "M 6 9 L 12 15 L 18 9";
+}
+
+component RowGlyph inherits Path {
+    in property <color> ink;
+    in property <int> icon;
+    width: Theme.icon;
+    height: Theme.icon;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke: ink;
+    stroke-width: 2.2px * Theme.icon / 18px;
+    fill: transparent;
+    commands: icon == 1 ? "M 3 19 L 3 6 L 9 6 L 11 8.5 L 21 8.5 L 21 19 Z" : icon == 2 ? "M 3 5 L 21 5 L 21 8 L 3 8 Z M 4.5 8 L 19.5 8 L 19.5 19.5 L 4.5 19.5 Z M 12 9.5 L 12 11.5 M 12 13.5 L 12 15.5 M 12 17.5 L 12 19" : icon == 4 ? "M 12 4.5 A 7.5 7.5 0 0 1 12 19.5 A 7.5 7.5 0 0 1 12 4.5 M 12 8 L 12 12 L 15.2 13.7" : "M 9 14 L 4 9 L 9 4 M 20 20 L 20 13 L 16 9 L 4 9";
+}
+
+component Dot inherits Rectangle {
+    in property <float> cx;
+    in property <float> cy;
+    in property <bool> lit;
+    in property <color> ink;
+    property <float> r: lit ? 3.6 : 3.0;
+    x: (cx - r) / 24 * Theme.glyph;
+    y: (cy - r) / 24 * Theme.glyph;
+    width: 2 * r / 24 * Theme.glyph;
+    height: self.width;
+    border-radius: self.width / 2;
+    background: lit ? ink : transparent;
+    border-width: lit ? 0 : max(1px, 1.4 / 24 * Theme.glyph);
+    border-color: ink.with-alpha(0.55);
+}
+
+export component HelpGlyph inherits Rectangle {
+    in property <int> glyph;
+    in property <color> ink;
+    width: Theme.glyph;
+    height: Theme.glyph;
+    if root.glyph >= 1 && root.glyph <= 4: Rectangle {
+        Dot { cx: 12; cy: 5; lit: root.glyph == 1; ink: root.ink; }
+        Dot { cx: 19; cy: 12; lit: root.glyph == 2; ink: root.ink; }
+        Dot { cx: 12; cy: 19; lit: root.glyph == 3; ink: root.ink; }
+        Dot { cx: 5; cy: 12; lit: root.glyph == 4; ink: root.ink; }
+    }
+    if root.glyph == 5: Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.ink.with-alpha(0.55);
+        stroke-width: 1.4px * Theme.glyph / 24px;
+        fill: transparent;
+        commands: "M 9 3 L 15 3 L 15 9 L 21 9 L 21 15 L 15 15 L 15 21 L 9 21 L 9 15 L 3 15 L 3 9 L 9 9 Z";
+    }
+    if root.glyph == 5: Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        fill: root.ink;
+        commands: "M 3 9 L 9 9 L 9 15 L 3 15 Z M 15 9 L 21 9 L 21 15 L 15 15 Z";
+    }
+}
+
+component MenuLine inherits Rectangle {
+    in property <MenuRow> entry;
+    property <bool> sel: root.entry.selected && root.entry.kind <= 2;
+    property <color> ink: root.sel ? Theme.on-accent : !root.entry.enabled ? Theme.cue-spent : root.entry.kind == 4 ? Theme.text-label : Theme.text;
+    property <color> sub-ink: root.sel ? Theme.on-accent : !root.entry.enabled ? Theme.cue-spent : Theme.text-label;
+    height: root.entry.kind == 3 ? Theme.sep-h : Theme.row-h;
+    border-radius: Theme.radius-sm;
+    background: root.sel ? Theme.selection-fill : transparent;
+    if root.entry.kind == 3: Rectangle {
+        x: Theme.row-pad;
+        y: (parent.height - Theme.hair) / 2;
+        width: parent.width - 2 * Theme.row-pad;
+        height: Theme.hair;
+        background: Theme.border-subtle;
+    }
+    if root.entry.kind == 5: Rectangle {
+        x: Theme.row-pad;
+        y: (parent.height - Theme.track-h) / 2;
+        width: parent.width - 2 * Theme.row-pad;
+        height: Theme.track-h;
+        border-radius: Theme.track-h / 2;
+        background: Theme.border-mid;
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width * clamp(root.entry.fill, 0, 100) / 100;
+            height: parent.height;
+            border-radius: parent.border-radius;
+            background: Theme.selection-fill;
+        }
+    }
+    if root.entry.kind != 3 && root.entry.kind != 5: HorizontalLayout {
+        padding-left: Theme.row-pad;
+        padding-right: Theme.row-pad;
+        spacing: Theme.gap / 2;
+        if root.entry.icon != 0: VerticalLayout {
+            alignment: center;
+            padding-right: Theme.gap / 2;
+            RowGlyph { ink: root.ink; icon: root.entry.icon; }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.entry.label;
+            color: root.ink;
+            font-family: Theme.family;
+            font-size: Theme.font-body;
+            font-weight: root.sel ? Theme.weight-selected : Theme.weight-normal;
+            vertical-alignment: center;
+            wrap: no-wrap;
+            overflow: elide;
+        }
+        if root.entry.steps && root.sel: VerticalLayout {
+            alignment: center;
+            Chevron { ink: root.sub-ink; dir: 1; }
+        }
+        if root.entry.value != "": Text {
+            horizontal-stretch: 0;
+            text: root.entry.value;
+            color: root.sub-ink;
+            font-family: Theme.family;
+            font-size: Theme.font-body;
+            font-weight: root.sel ? Theme.weight-selected : Theme.weight-normal;
+            vertical-alignment: center;
+            wrap: no-wrap;
+        }
+        if root.entry.steps && root.sel: VerticalLayout {
+            alignment: center;
+            Chevron { ink: root.sub-ink; dir: 0; }
+        }
+        if root.entry.kind == 1: VerticalLayout {
+            alignment: center;
+            Chevron { ink: root.sub-ink; dir: 0; }
+        }
+    }
+}
+
+export component Card inherits Rectangle {
+    in property <[MenuRow]> rows;
+    in property <bool> framed: true;
+    background: root.framed ? Theme.card : transparent;
+    border-width: root.framed ? Theme.stroke : 0;
+    border-color: Theme.border-mid;
+    border-radius: Theme.radius-md;
+    VerticalLayout {
+        padding: Theme.card-pad + Theme.stroke;
+        spacing: 0;
+        alignment: start;
+        for data in root.rows: MenuLine { entry: data; }
+    }
+}
+
+export component ChoiceButton inherits Rectangle {
+    in property <MenuRow> entry;
+    property <bool> focused: root.entry.selected;
+    height: Theme.button-h;
+    Rectangle {
+        y: Theme.press-edge;
+        width: parent.width;
+        height: parent.height - Theme.press-edge;
+        border-radius: Theme.radius-md;
+        background: Theme.control-edge;
+    }
+    Rectangle {
+        y: 0;
+        width: parent.width;
+        height: parent.height - Theme.press-edge;
+        border-radius: Theme.radius-md;
+        background: Theme.card;
+        border-width: Theme.stroke;
+        border-color: Theme.border-mid;
+        if root.focused: Rectangle {
+            x: Theme.focus-stroke;
+            y: Theme.focus-stroke;
+            width: parent.width - 2 * Theme.focus-stroke;
+            height: parent.height - 2 * Theme.focus-stroke;
+            border-radius: max(0px, Theme.radius-md - Theme.focus-stroke);
+            border-width: Theme.ring-w;
+            border-color: Theme.accent;
+            background: transparent;
+        }
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.entry.label;
+            color: root.focused ? Theme.text : root.entry.enabled ? Theme.text-label : Theme.cue-spent;
+            font-family: Theme.family;
+            font-size: Theme.font-body;
+            font-weight: root.focused ? Theme.weight-selected : Theme.weight-normal;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: no-wrap;
+            overflow: elide;
+        }
+    }
+}
+
+export component ListRegion {
+    in property <[MenuRow]> entries;
+    in property <[MenuRow]> pinned-entries;
+    in property <[MenuRow]> choices;
+    in property <bool> choice-shape;
+    in property <bool> choice-stacked;
+    in property <length> content-w;
+    in property <length> main-h;
+    in property <length> pinned-y;
+    in property <length> pinned-h;
+    in property <length> choice-y;
+    in property <length> choice-h;
+
+    if root.main-h > 0: Card {
+        x: Theme.inset-x;
+        y: Theme.list-top;
+        width: root.content-w;
+        height: root.main-h;
+        rows: root.entries;
+        framed: !root.choice-shape;
+    }
+
+    if root.pinned-h > 0: Card {
+        x: Theme.inset-x;
+        y: root.pinned-y;
+        width: root.content-w;
+        height: root.pinned-h;
+        rows: root.pinned-entries;
+    }
+
+    if root.choice-shape && !root.choice-stacked: HorizontalLayout {
+        x: Theme.inset-x;
+        y: root.choice-y;
+        width: root.content-w;
+        height: root.choice-h;
+        spacing: Theme.gap;
+        for data in root.choices: ChoiceButton { horizontal-stretch: 1; entry: data; }
+    }
+
+    if root.choice-shape && root.choice-stacked: VerticalLayout {
+        x: Theme.inset-x;
+        y: root.choice-y;
+        width: root.content-w;
+        height: root.choice-h;
+        spacing: Theme.gap;
+        for data in root.choices: ChoiceButton { entry: data; }
+    }
+}

@@ -15,6 +15,7 @@
 #include "hal/board_profile.h"
 #include "hal/mailbox.h"
 #include "hal/reg_block.h"
+#include "hal/reg_lend.h"
 #include "hal/register_window.h"
 #include "hal/window_decl.h"
 
@@ -66,7 +67,10 @@ public:
         auto claim = window_claims_->claim(id);
         if (!claim)
             return std::unexpected(claim.error());
-        return TakenWindow<Layout>{RegisterWindow<Layout>::borrow(*lead), std::move(*claim)};
+        return TakenWindow<Layout>{
+            RegisterWindow<Layout>::borrow(std::move(*lead)),
+            std::move(*claim)
+        };
     }
 
     [[nodiscard]] Ex<Mailbox> take_mailbox();
@@ -88,7 +92,7 @@ private:
 
     const BoardProfile* profile_;
     std::array<std::optional<detail::MappedRegs>, kMaxWindows> pages_{};
-    std::array<reg::Block, kMaxWindows> lends_{};
+    std::array<reg::Lend, kMaxWindows> lends_{};
 
     std::unique_ptr<WindowClaims> window_claims_ = std::make_unique<WindowClaims>();
     std::unique_ptr<MailboxClaims> mailbox_claims_ = std::make_unique<MailboxClaims>();

@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "ui/free_space.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/page_context.h"
 
@@ -19,14 +20,7 @@ constexpr std::string_view kStorageLabel = "Storage";
 std::string storage_word(const SystemFacts& f) {
     std::string s = f.storage_usb ? "USB" : (f.storage_sd_fallback ? "SD (fallback)" : "SD");
     s += ", ";
-    constexpr std::uint64_t kTenGiB = 10ull * 1024 * 1024 * 1024;
-    if (f.avail_bytes < kTenGiB) {
-        s += std::to_string(f.avail_bytes / (1024ull * 1024));
-        s += " MB";
-    } else {
-        s += std::to_string(f.avail_bytes / (1024ull * 1024 * 1024));
-        s += " GB";
-    }
+    s += format_free_space(f.avail_bytes, FreeSpaceStyle::Hd);
     return s;
 }
 

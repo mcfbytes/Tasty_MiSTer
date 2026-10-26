@@ -6,11 +6,13 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <limits>
 #include <optional>
 #include <utility>
 
+#include "app/all_leases_home.h"
 #include "app/bitstream_programmer.h"
 #include "app/board_reboot.h"
 #include "app/core_builder.h"
@@ -186,6 +188,8 @@ public:
 
     [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
 
+    [[nodiscard]] bool lease_holding() const noexcept { return lease_hold_.has_value(); }
+
     [[nodiscard]] const xthread::Telemetry<std::uint32_t, SeatTag::Main>&
     pause_expiries_cell() const noexcept {
         return pause_expiries_cell_;
@@ -205,6 +209,13 @@ private:
 
     static constexpr std::int64_t kPauseDeadlineNs = 1'000'000'000;
 
+    static constexpr std::int64_t kLeaseHoldWarnNs = 1'000'000'000;
+
+    struct LeaseHold {
+        os::Deadline since;
+        bool warned = false;
+    };
+
     static constexpr bool pauses_at_receipt(SeatTag s) noexcept { return s == SeatTag::Io; }
 
     [[nodiscard]] static proto::BindGeneration as_generation_(std::uint32_t gen) noexcept {
@@ -212,12 +223,15 @@ private:
     }
 
     void pause_seats_(std::uint32_t gen, bool at_receipt) noexcept;
+    [[nodiscard]] bool hold_on_lease_() noexcept;
     void resume_seats_() noexcept;
     [[nodiscard]] bool seats_paused_(std::uint32_t gen) const noexcept;
 
-    Programmed program_(const ParkReceipt& receipt, Host& host);
+    Programmed program_(const ParkReceipt& receipt, AllLeasesHome home, Host& host);
     void publish_refusal_(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept;
     void advise_switch_failed_(Errc code) noexcept;
+
+    void advise_switch_held_() noexcept;
     template <class A>
     void order_(const A& alt) noexcept;
     template <class A>
@@ -249,6 +263,7 @@ private:
 
     std::optional<proto::LinkOp> last_order_{};
     os::Deadline pause_due_ = os::Deadline::immediate();
+    std::optional<LeaseHold> lease_hold_{};
     xthread::Telemetry<std::uint32_t, SeatTag::Main> pause_expiries_cell_{};
 };
 
@@ -359,6 +374,7 @@ inline CoreSwitch::Asked CoreSwitch::ask(
 
     pause_seats_(gen_, false);
     receipt_.reset();
+    lease_hold_.reset();
     host.drop_core_acts();
     pending_ = req;
     pending_tag_ = tag;
@@ -373,6 +389,7 @@ template <class A>
 inline void CoreSwitch::end(A alt) noexcept {
     TASTY_SEAT_BODY(CoreSwitch);
     alt.tag = pending_tag_;
+    lease_hold_.reset();
     last_order_ = infra::make<proto::LinkOp>(alt);
 
     if (!push_last_order())
@@ -383,7 +400,7 @@ inline bool CoreSwitch::push_last_order() noexcept {
     TASTY_SEAT_BODY(CoreSwitch);
     if (!last_order_)
         return true;
-    if (!push_posted(inbox_, owner_tally_, *last_order_))
+    if (!inbox_.push(*last_order_))
         return false;
     last_order_.reset();
     switch_standing_ = false;
@@ -444,6 +461,13 @@ inline std::optional<std::uint32_t> CoreSwitch::try_program(Host& host) {
     if (!all && !pause_due_.expired(clock_))
         return std::nullopt;
 
+    if (hold_on_lease_())
+        return std::nullopt;
+
+    std::optional<AllLeasesHome> home = builder_.leases_home(*receipt_);
+    if (!home)
+        return std::nullopt;
+
     if (!all)
         pause_expiries_cell_.publish(++tally_.pause_expiries);
     const ParkReceipt r = *receipt_;
@@ -451,9 +475,7 @@ inline std::optional<std::uint32_t> CoreSwitch::try_program(Host& host) {
     (void)::unlink("/tmp/GAMEID");
 
     (void)::unlink("/tmp/CONFSTR");
-
-    builder_.drop_windows(r);
-    const Programmed p = program_(r, host);
+    const Programmed p = program_(r, std::move(*home), host);
     pending_step_arg_ = step_arg(p);
 
     if (p == Programmed::Ok) {
@@ -473,7 +495,43 @@ inline std::optional<std::uint32_t> CoreSwitch::try_program(Host& host) {
     return gen_;
 }
 
-inline CoreSwitch::Programmed CoreSwitch::program_(const ParkReceipt& receipt, Host& host) {
+inline bool CoreSwitch::hold_on_lease_() noexcept {
+
+    const bool sector_free = !builder_.sector_mapped()
+        || builder_.retire_sector(readiness_.fabric_configured());
+    const bool osd_free = !builder_.osd_mapped()
+        || builder_.retire_osd(readiness_.fabric_configured());
+    const bool sys_free = !builder_.sys_mapped() || builder_.retire_sys();
+    if (sector_free && osd_free && sys_free) {
+        lease_hold_.reset();
+        return false;
+    }
+    if (!lease_hold_) {
+        lease_hold_ = LeaseHold{
+            .since = os::Deadline::in(clock_, std::chrono::nanoseconds{kLeaseHoldWarnNs})
+        };
+        builder_.count_lease_hold(false);
+        return true;
+    }
+    if (!lease_hold_->warned && lease_hold_->since.expired(clock_)) {
+        lease_hold_->warned = true;
+        builder_.count_lease_hold(true);
+        std::fprintf(
+            stderr,
+            "mister: core switch %u held: an LW lease (T-IO's sector, T-UI's OSD) is "
+            "still out; the FPGA is not programmed while it is\n",
+            static_cast<unsigned>(gen_)
+        );
+        advise_switch_held_();
+    }
+    return true;
+}
+
+inline CoreSwitch::Programmed CoreSwitch::program_(
+    const ParkReceipt& receipt,
+    AllLeasesHome home,
+    Host& host
+) {
 
     if (pending_.path.empty())
         return Programmed::NotNeeded;
@@ -484,7 +542,7 @@ inline CoreSwitch::Programmed CoreSwitch::program_(const ParkReceipt& receipt, H
         return Programmed::Failed;
     }
     ++tally_.programs_run;
-    const bool ok = programmer_.program(receipt, *rel).has_value();
+    const bool ok = programmer_.program(receipt, std::move(home), *rel).has_value();
     if (!ok)
         ++tally_.programs_failed;
     host.programmed(ok);
@@ -500,8 +558,14 @@ inline CoreSwitch::Programmed CoreSwitch::program_at_boot(Host& host) {
         ++tally_.programs_failed;
         return Programmed::Failed;
     }
+
+    std::optional<AllLeasesHome> home = builder_.nothing_lent();
+    if (!home) {
+        ++tally_.programs_failed;
+        return Programmed::Failed;
+    }
     ++tally_.programs_run;
-    const bool ok = programmer_.program_at_boot(*rel).has_value();
+    const bool ok = programmer_.program_at_boot(std::move(*home), *rel).has_value();
     if (!ok)
         ++tally_.programs_failed;
     host.programmed(ok);
@@ -561,6 +625,15 @@ inline void CoreSwitch::publish_refusal_(
         infra::make<Event>(
             Event::RequestRefused{.which = which, .why = code},
             Event::Head{EmitSite{ERR_SITE()}, {}, tag}
+        )
+    );
+}
+
+inline void CoreSwitch::advise_switch_held_() noexcept {
+    (void)owner_events_.push(
+        infra::make<Event>(
+            Event::SessionAdvisory{.why = Errc::busy},
+            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
         )
     );
 }

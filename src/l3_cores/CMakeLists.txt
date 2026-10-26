@@ -15,6 +15,8 @@ set(TASTY_CORES_TASTY
   src/nvram_store.cpp
   src/wav_data.cpp
   src/psx_core.cpp
+  src/psx_sector_map.cpp
+  src/psx_sector_program.cpp
   src/addressed_load.cpp
   src/registry.cpp
   src/snes_core.cpp
@@ -271,6 +273,8 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/pcm_source.h
   cores/pcm_wire_rows.h
   cores/psx_core.h
+  cores/psx_sector_map.h
+  cores/psx_sector_program.h
   cores/cdi_core.h
   cores/cdi_block.h
   cores/rom.h

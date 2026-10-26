@@ -27,6 +27,8 @@ struct StagingPolicy {
 
     std::uint64_t save_pre_bytes = 0;
 
+    bool save_pre_on_empty = false;
+
     std::string_view start_save_dir{};
 };
 

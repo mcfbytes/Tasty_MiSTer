@@ -5,6 +5,7 @@
 #include "infra/seat.h"
 #include "hal/cause_reg.h"
 #include "hal/doorbell_source.h"
+#include "hal/lw_sys_window.h"
 #include "hal/phys_region.h"
 #include "hal/register_window.h"
 #include "hal/types.h"
@@ -28,7 +29,11 @@ public:
 
     [[nodiscard]] Ex<RegisterWindow<CauseReg>> map_cause(LwOffset base) override {
         TASTY_SEAT_BODY(UioDoorbellSource);
-        return RegisterWindow<CauseReg>::map(lw_, base);
+
+        auto win = LwSysWindow::discover(lw_, base, CauseReg::kSize);
+        if (!win)
+            return std::unexpected(win.error());
+        return win->map<CauseReg>(0);
     }
 
 private:

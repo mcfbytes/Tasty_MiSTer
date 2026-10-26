@@ -4,6 +4,8 @@
 #include <cstdint>
 
 #include "app/link_encoder.h"
+#include "app/lw_pads.h"
+#include "infra/opt_ref.h"
 #include "proto/link_op.h"
 #include "infra/seat.h"
 
@@ -65,6 +67,13 @@ public:
     Outcome on(const proto::LinkOp::SetDip& a, const LinkOpCtx& ctx) noexcept;
     Outcome on(const proto::LinkOp::SetCoreOption& a, const LinkOpCtx& ctx) noexcept;
     Outcome misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept;
+
+    void bind_pads(infra::OptRef<const LwPads> granted) noexcept;
+
+    void drop_pads() noexcept;
+
+    void trust_pads(bool ready) noexcept;
+    [[nodiscard]] bool pads_on_lw() const noexcept;
 
     [[nodiscard]] std::uint32_t link_op_misrouted() const noexcept { return link_op_misrouted_; }
 

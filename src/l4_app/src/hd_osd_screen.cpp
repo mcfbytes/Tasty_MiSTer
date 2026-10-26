@@ -10,13 +10,17 @@ void HdOsdScreen::publish_ask_(bool is_open) noexcept {
     HdOsdAsk ask{};
     ask.open = is_open;
     ask.epoch = epoch_;
+    ask.theme = theme_;
+    theme_sent_ = theme_;
     if (is_open) {
         ask.surface = surface_;
         ask.video_applies = applies_seen_;
         ask.page = page_;
         ask.badge = badge_;
+        ask.slots = slots_;
         page_sent_ = page_;
         badge_sent_ = badge_;
+        slots_sent_ = slots_;
     }
     const auto ns = w_.clock.now().count();
     ask.stamp_ns = ns < 0 ? 0 : static_cast<std::uint64_t>(ns);
@@ -48,6 +52,7 @@ void HdOsdScreen::close_() noexcept {
         publish_ask_(false);
     }
     badge_ = HdOsdStatus::Badge::Unknown;
+    slots_ = {};
     reraise_owed_ = false;
     owed_.reset();
     covers_ = false;
@@ -202,8 +207,14 @@ void HdOsdScreen::take_jobs_() noexcept {
     }
 }
 
-void HdOsdScreen::tick(const PageDescription* page, HdOsdStatus::Badge badge) noexcept {
+void HdOsdScreen::tick(
+    const PageDescription* page,
+    HdOsdStatus::Badge badge,
+    HdStatusSlots slots,
+    std::uint8_t theme
+) noexcept {
     TASTY_SEAT_BODY(HdOsdScreen);
+    theme_ = theme;
     retry_drop_();
     (void)status_seen_.take_if_changed(w_.status, status_);
     const bool live = status_.state == HdOsdStatus::State::Ready
@@ -214,6 +225,7 @@ void HdOsdScreen::tick(const PageDescription* page, HdOsdStatus::Badge badge) no
     }
     page_ = *page;
     badge_ = badge;
+    slots_ = slots;
     if (open_ && w_.fb.held()) {
         close_();
         return;
@@ -223,7 +235,12 @@ void HdOsdScreen::tick(const PageDescription* page, HdOsdStatus::Badge badge) no
     if (!open_) {
         if (available())
             (void)try_open_();
-    } else if (page_ != page_sent_ || badge_ != badge_sent_) {
+    } else if (
+        page_ != page_sent_
+        || badge_ != badge_sent_
+        || slots_ != slots_sent_
+        || theme_ != theme_sent_
+    ) {
         publish_ask_(true);
     }
     if (open_)

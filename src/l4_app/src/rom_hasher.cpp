@@ -17,13 +17,13 @@ void RomHasher::arm(
     std::uint64_t off,
     std::uint64_t end,
     cores::RomDigest digest,
-    std::optional<cores::RomDigest> alt
+    std::vector<cores::RomDigest> alts
 ) noexcept {
     file_ = std::move(file);
     off_ = off;
     end_ = end;
     digest_ = std::move(digest);
-    alt_ = std::move(alt);
+    alts_ = std::move(alts);
 }
 
 RomHasher::Pace RomHasher::step() noexcept {
@@ -38,8 +38,8 @@ RomHasher::Pace RomHasher::step() noexcept {
         if (!got || *got == 0 || *got > want)
             return Pace::ReadFailed;
         digest_.update(chunk.first(*got));
-        if (alt_)
-            alt_->update(chunk.first(*got));
+        for (auto& a : alts_)
+            a.update(chunk.first(*got));
         off_ += *got;
         spent += static_cast<std::uint32_t>(*got);
     }

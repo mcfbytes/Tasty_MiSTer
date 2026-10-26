@@ -2,10 +2,6 @@
 #include "app/session_owner.h"
 
 #include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#include <cerrno>
 
 #include <chrono>
 
@@ -14,7 +10,6 @@
 #include <cstring>
 #include <span>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -23,7 +18,6 @@
 #include "app/owner_push.h"
 #include "app/durable_write.h"
 #include "app/durable_write_service.h"
-#include "app/ini_key_edit.h"
 #include "app/ini_parse.h"
 #include "app/link_event_dispatch.h"
 #include "app/link_rows.h"
@@ -55,8 +49,6 @@
 
 namespace mister::app {
 namespace {
-
-constexpr unsigned kPushRetries = 50;
 
 [[nodiscard]] proto::BindGeneration as_generation(std::uint32_t gen) noexcept {
     return proto::BindGeneration{static_cast<std::uint16_t>(gen)};
@@ -108,6 +100,20 @@ SessionOwner::SessionOwner(QuiesceChannel& park, const Link& link) noexcept
       cell_(link.fabric_cell),
       aperture_(link.aperture),
       ops_(link.ops),
+      bind_(inbox_, tally_, vfs_, ops_.sleeper),
+      saves_(
+          ConfigSaves::Wiring{
+              .inbox = inbox_,
+              .rx = rx_,
+              .tally = tally_,
+              .owner_events = owner_events_,
+              .vfs = vfs_,
+              .status_cell = status_cell_,
+              .negotiated = negotiated_,
+              .sleeper = ops_.sleeper
+          }
+      ),
+      companion_(vfs_, negotiated_, tally_, aperture_.phys.v, link.companion_binds),
       window_map_(link.window_map),
       ftx_level_cell_(link.file_tx_level_cell),
       content_(
@@ -120,26 +126,35 @@ SessionOwner::SessionOwner(QuiesceChannel& park, const Link& link) noexcept
               .negotiated = negotiated_,
               .mounts = mounts_,
               .ladder = ladder_,
-              .rungs =
-                  {.pieces = pieces_,
-                   .load = load_,
-                   .walk = walk_,
-                   .companion = companion_walk_,
-                   .addons = addons_,
-                   .addons_after = addons_after_},
+              .rungs = rungs_,
               .owner_tally = tally_,
               .mgl_row0_cell = mgl_row0_cell_,
               .act_keys = act_keys_,
               .status_cell = status_cell_,
-              .boot_restore_owed = boot_restore_owed_,
+              .boot_restore = boot_restore_,
               .aperture = aperture_,
               .windows = windows_
           }
       ),
       save_state_asks_(link.save_state_asks),
       save_state_facts_(link.save_state_facts),
-      companion_binds_(link.companion_binds),
-      builder_(link.bay, link.bay_releases, link.core_terms, link.doorbell_source),
+      builder_(
+          link.bay,
+          link.bay_releases,
+          link.core_terms,
+          link.doorbell_source,
+          CoreBuilder::SectorCells{
+              .grant = link.sector_grant,
+              .route = link.sector_route,
+              .wake = link.io_wake
+          },
+          CoreBuilder::OsdCells{.grant = link.osd_grant, .route = link.osd_route},
+          CoreBuilder::SysCells{
+              .grant = link.sys_grant,
+              .route = link.sys_route,
+              .wake = link.io_wake
+          }
+      ),
       reboot_(clock_, inbox_, tally_, link.boot_handoff, link.ops.reset, link.ops.sleeper),
       switch_(
           CoreSwitch::Wiring{
@@ -263,7 +278,6 @@ unsigned SessionOwner::tick() {
 
     switch_.retry_held_load(*this);
 
-    ordered_in_step_ = 0;
     roster_.step_all(*this);
 
     const unsigned acks = switch_.take_park_acks();
@@ -271,6 +285,7 @@ unsigned SessionOwner::tick() {
         release_and_await_identity_(*gen);
 
     watch_start_();
+    watch_bridge_();
     fall_back_to_front_end_();
     if (const auto req = launcher_.swap_to_image(launcher_swap_held_(), launcher_swap_room_()))
         (void)switch_.ask(*req, kUncaused, *this);
@@ -321,31 +336,25 @@ void SessionOwner::on(const UiRequest::LoadCore& req, const UiRequest::Head& hea
 void SessionOwner::on(const UiRequest::SaveConfig& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    on_save_config_(head.tag);
+    saves_.save_config(head.tag);
 }
 
 void SessionOwner::on(const UiRequest::SaveDips& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    if (!order_save_ask_(proto::SaveKind::Dips, 0, head.tag)) {
-        publish_save_verdict_(false, head.tag);
-    }
+    saves_.save_dips(head.tag);
 }
 
 void SessionOwner::on(const UiRequest::SaveCoreConfig& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    slot_save_slot_ = req.slot.v;
-    if (!order_save_ask_(proto::SaveKind::Slot, req.slot.v, head.tag)) {
-        publish_save_verdict_(false, head.tag);
-    }
+    saves_.save_slot(req.slot.v, head.tag);
 }
 
 void SessionOwner::on(const UiRequest::LoadCoreConfig& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    slot_load_slot_ = req.slot.v;
-    (void)order_save_ask_(proto::SaveKind::SlotNames, req.slot.v, head.tag);
+    saves_.load_slot(req.slot.v, head.tag);
 }
 
 void SessionOwner::on(const UiRequest::LoadFile& req, const UiRequest::Head& head) {
@@ -412,28 +421,13 @@ void SessionOwner::on(const UiRequest::UnmountImage& req, const UiRequest::Head&
 void SessionOwner::on(const UiRequest::SetOsdStyle& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    constexpr std::string_view kIni = "MiSTer.ini";
-    std::string text;
-    auto f = vfs_.open(kIni, svc::OpenMode::ReadWhole);
-    if (f) {
-        const auto sz = (*f)->size();
-        const auto buf = sz ? read_whole(**f, sz->v) : std::nullopt;
-        if (!buf) {
-            iwf_cell_.publish(++tally_.ini_write_failures);
-            return;
-        }
-        text.assign(infra::as_text(std::span(*buf)));
-    } else if (
-        !(f.error().code == Errc::os && f.error().detail == ENOENT)
-        && f.error().code != Errc::not_found
-    ) {
-        iwf_cell_.publish(++tally_.ini_write_failures);
+    saves_.set_ini_key("osd_style", req.style != 0 ? "1" : "0");
+}
+
+void SessionOwner::on(const UiRequest::SetHdTheme& req, const UiRequest::Head& head) {
+    if (!admit_(req, head.tag))
         return;
-    }
-    const std::string out = ini_set_key(text, "osd_style", req.style != 0 ? "1" : "0");
-    if (!write_durably_(kIni, std::as_bytes(std::span<const char>(out.data(), out.size())))) {
-        iwf_cell_.publish(++tally_.ini_write_failures);
-    }
+    saves_.set_ini_key("hd_theme", std::to_string(req.theme));
 }
 
 void SessionOwner::on(const UiRequest::SdramDetected& req, const UiRequest::Head& head) {
@@ -528,14 +522,7 @@ void SessionOwner::misrouted(const UiRequest&) noexcept {
 
 bool SessionOwner::refuse_in_load_(UiRequest::Kind kind, CorrelationTag tag) noexcept {
     const bool rom_waits = mounts_.save_holds_load();
-    if (!pieces_
-        && !load_
-        && !walk_
-        && !companion_walk_
-        && !rom_waits
-        && !addons_
-        && !addons_after_
-        && !ss_hold_)
+    if (!rungs_.any_live(kLoadBelt) && !rom_waits)
         return false;
     ++tally_.loads_refused_busy;
     publish_refusal(kind, Errc::would_block, tag);
@@ -546,6 +533,25 @@ void SessionOwner::watch_start_() noexcept {
 
     if (start_watch_.bound_expired())
         give_up_start_(Errc::timeout);
+}
+
+void SessionOwner::watch_bridge_() noexcept {
+
+    if (switch_.switch_standing() || readiness_.recovering() || start_watch_.refused())
+        return;
+    if (builder_.bridge_refused())
+        end_bridge_session_();
+}
+
+void SessionOwner::end_bridge_session_() noexcept {
+    start_watch_.end_by_bridge(switch_.gen());
+    (void)owner_events_.push(
+        infra::make<Event>(
+            Event::SessionFailed{.why = Errc::bridge_state},
+            Event::Head{EmitSite{ERR_SITE()}, {}, switch_.pending_tag()}
+        )
+    );
+    start_watch_.owe_front_end_always(switch_.pending());
 }
 
 void SessionOwner::give_up_start_(Errc why) noexcept {
@@ -606,7 +612,7 @@ void SessionOwner::service_boot(const UiRequest::LoadCore& req) {
     );
     start_watch_.expect_conf_str(arg.loaded);
     if (negotiated_.facts_pending()) {
-        order_bind_facts_();
+        bind_.facts(negotiated_.pending_facts());
         negotiated_.facts_sent();
     }
 
@@ -640,27 +646,21 @@ void SessionOwner::run_load_(const PickedLoad& load) {
 }
 
 void SessionOwner::step_savestate_hold_() {
-    if (!ss_hold_)
+    if (!rungs_.ss_hold)
         return;
-    if (!savestates_answered_(ss_hold_->gen)) {
-        if (clock_.now().count() < ss_hold_->due_ns)
+    if (!savestates_answered_(rungs_.ss_hold->gen)) {
+        if (clock_.now().count() < rungs_.ss_hold->due_ns)
             return;
         ++tally_.savestate_hold_expiries;
     }
-    const PickedLoad load = ss_hold_->load;
-    ss_hold_.reset();
+    const PickedLoad load = rungs_.ss_hold->load;
+    rungs_.ss_hold.reset();
     after_content_(content_.run_attached_load(load, *this));
 }
 
 bool SessionOwner::content_ordered_() const noexcept {
     const bool rom_waits = mounts_.save_holds_load();
-    return !content_.picked_load()
-        && !ss_hold_
-        && !pieces_
-        && !load_
-        && !walk_
-        && !companion_walk_
-        && !rom_waits;
+    return !content_.picked_load() && !rungs_.any_live(kContentOwing) && !rom_waits;
 }
 
 std::optional<std::uint32_t> SessionOwner::attach_row_savestates(
@@ -683,7 +683,7 @@ void SessionOwner::hold_for_savestates(
     std::int64_t due_ns
 ) {
     TASTY_SEAT_BODY(SessionOwner);
-    ss_hold_ = SaveStateHold{.load = load, .gen = gen, .due_ns = due_ns};
+    rungs_.ss_hold = RungSet::SaveStateHold{.load = load, .gen = gen, .due_ns = due_ns};
 }
 
 bool SessionOwner::ask_savestates_(std::string_view rom, std::uint32_t gen) noexcept {
@@ -813,58 +813,18 @@ SessionOwner::Wait SessionOwner::rung_wait_() const noexcept {
     return roster_.wait(*this);
 }
 
-template <class Self>
-auto SessionOwner::rung_in_(Self& self, RungSlot slot) noexcept {
-    using R = std::conditional_t<std::is_const_v<Self>, const Rung, Rung>;
-    const auto live = [](auto& o) noexcept {
-        return o ? infra::OptRef<R>{*o} : infra::OptRef<R>{};
-    };
-    switch (slot) {
-        case RungSlot::Addons:
-            return live(self.addons_);
-        case RungSlot::Pieces:
-            return live(self.pieces_);
-        case RungSlot::Load:
-            return live(self.load_);
-        case RungSlot::Manifest:
-            return live(self.manifest_);
-        case RungSlot::Walk:
-            return live(self.walk_);
-        case RungSlot::Companion:
-            return live(self.companion_walk_);
-        case RungSlot::BootLadder:
-        case RungSlot::SavestateHold:
-        case RungSlot::SaveMount:
-        case RungSlot::AddonsAfter:
-        case RungSlot::Watch:
-        case RungSlot::kCount:
-            break;
-    }
-    return infra::OptRef<R>{};
-}
-
 infra::OptRef<Rung> SessionOwner::rung(RungSlot slot) noexcept {
     TASTY_SEAT_BODY(SessionOwner);
-    return rung_in_(*this, slot);
+    return rungs_.rung(slot);
 }
 
 infra::OptRef<const Rung> SessionOwner::rung(RungSlot slot) const noexcept {
     TASTY_SEAT_BODY(SessionOwner);
-    return rung_in_(*this, slot);
-}
-
-namespace {
-struct ClearOrdered {
-    std::uint32_t& n;
-
-    ~ClearOrdered() { n = 0; }
-};
+    return rungs_.rung(slot);
 }
 
 void SessionOwner::step_held(RungSlot slot) {
     TASTY_SEAT_BODY(SessionOwner);
-
-    const ClearOrdered clear_ordered{ordered_in_step_};
     switch (slot) {
         case RungSlot::BootLadder:
             step_ladder_();
@@ -878,9 +838,9 @@ void SessionOwner::step_held(RungSlot slot) {
             return;
         case RungSlot::AddonsAfter:
 
-            if (!addons_ && addons_after_ && content_ordered_()) {
-                addons_ = std::move(addons_after_);
-                addons_after_.reset();
+            if (!rungs_.addons && rungs_.addons_after && content_ordered_()) {
+                rungs_.addons = std::move(rungs_.addons_after);
+                rungs_.addons_after.reset();
             }
             return;
         case RungSlot::Watch:
@@ -905,13 +865,16 @@ RungRoster::Wait SessionOwner::held_wait(RungSlot slot) const noexcept {
     const bool room = inbox_.ring().size() < proto::kLinkTxCapacity;
     switch (slot) {
         case RungSlot::BootLadder:
-            return each(ladder_.live(), (ladder_.moved() || walk_answer_fresh_) && room);
+            return each(ladder_.live(), (ladder_.moved() || rungs_.walk_answer_fresh) && room);
         case RungSlot::SavestateHold:
-            return each(ss_hold_.has_value(), ss_hold_ && savestates_answered_(ss_hold_->gen));
+            return each(
+                rungs_.ss_hold.has_value(),
+                rungs_.ss_hold && savestates_answered_(rungs_.ss_hold->gen)
+            );
         case RungSlot::SaveMount:
             return each(mounts_.save_mount_live(), false);
         case RungSlot::AddonsAfter:
-            return each(!addons_ && addons_after_.has_value(), content_ordered_());
+            return each(!rungs_.addons && rungs_.addons_after.has_value(), content_ordered_());
         case RungSlot::Watch:
             return each(content_.content_watched(), content_.watch_answered() && room);
         case RungSlot::Addons:
@@ -926,117 +889,22 @@ RungRoster::Wait SessionOwner::held_wait(RungSlot slot) const noexcept {
     return Wait::None;
 }
 
-void SessionOwner::settle(RungSlot slot, Rung::Pass pass, std::uint32_t pushed) {
+void SessionOwner::settle(RungSlot slot, Rung::Pass pass) {
     TASTY_SEAT_BODY(SessionOwner);
-    tally_.ops_posted += pushed - ordered_in_step_;
-
-    const ClearOrdered clear_ordered{ordered_in_step_};
     switch (slot) {
-        case RungSlot::Addons: {
-            if (pass == Rung::Pass::Waiting)
-                return;
-            tally_.addons_sent += addons_->sent();
-            tally_.addons_missing += addons_->missing();
-            if (addons_->image_sent())
-                ++tally_.ram_images_sent;
-            if (addons_->image_failed()) {
-                ++tally_.ram_images_declined;
-                (void)owner_events_.push(
-                    infra::make<Event>(
-                        Event::RamImageDeclined{.why = Errc::io},
-                        Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
-                    )
-                );
-            }
-            addons_.reset();
-            if (auto& picked = content_.picked_load()) {
-                const PickedLoad load = *picked;
-                picked.reset();
-                run_load_(load);
-            }
-            return;
-        }
+        case RungSlot::Addons:
+            return settle_addons_(pass);
         case RungSlot::Pieces:
-            if (pass == Rung::Pass::Done) {
-                if (!pieces_->resumed()) {
-                    ++tally_.files_loaded;
-                    publish_done(content_.content_owed().which, content_.content_owed().tag);
-                }
-                content_.watch_last_piece();
-            } else if (pass == Rung::Pass::Failed) {
-                ++tally_.files_failed;
-            } else {
-                return;
-            }
-            pieces_.reset();
-            return;
+            return settle_pieces_(pass);
         case RungSlot::Load:
-            if (pass != Rung::Pass::Done && pass != Rung::Pass::Failed)
-                return;
-            load_.reset();
-            if (pass == Rung::Pass::Done) {
-                ++tally_.files_loaded;
-                windows_.opened();
-                publish_done(content_.content_owed().which, content_.content_owed().tag);
-            } else {
-                ++tally_.files_failed;
-            }
-            windows_.publish();
-            return;
+            return settle_load_(pass);
         case RungSlot::Manifest:
-            windows_.publish();
-            if (pass == Rung::Pass::Failed) {
-                const Errc why = manifest_->failure();
-                manifest_.reset();
-                give_up_start_(why);
-                return;
-            }
-            if (pass != Rung::Pass::Done)
-                return;
-
-            if (!manifest_->error().empty()) {
-                ++tally_.manifest_errors;
-                (void)owner_events_.push(
-                    infra::make<Event>(
-                        Event::InfoRequest{.id = InfoId::RomLoadFailed},
-                        Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
-                    )
-                );
-            }
-            manifest_.reset();
-            finish_core_made_();
-            return;
+            return settle_manifest_(pass);
         case RungSlot::Walk:
-            if (pass == Rung::Pass::Done) {
-                ++tally_.files_loaded;
-                publish_done(content_.content_owed().which, content_.content_owed().tag);
-            } else if (pass == Rung::Pass::Failed) {
-                ++tally_.files_failed;
-                if (walk_->refused() || walk_->stalled()) {
-                    (void)owner_events_.push(
-                        infra::make<Event>(
-                            Event::InfoRequest{.id = InfoId::RomLoadFailed},
-                            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
-                        )
-                    );
-                }
-            } else {
-                return;
-            }
-            if (walk_gen_ != 0) {
-                walk_answer_fresh_ = true;
-                walk_answer_ = cores::MountStatus{
-                    .generation = walk_gen_,
-                    .state = pass == Rung::Pass::Done ? cores::MountState::Done
-                                                      : cores::MountState::Failed
-                };
-                walk_gen_ = 0;
-            }
-            walk_.reset();
-            return;
+            return settle_walk_(pass);
         case RungSlot::Companion:
             if (pass == Rung::Pass::Done)
-                companion_walk_.reset();
+                rungs_.companion_walk.reset();
             return;
         case RungSlot::BootLadder:
         case RungSlot::SavestateHold:
@@ -1048,12 +916,122 @@ void SessionOwner::settle(RungSlot slot, Rung::Pass pass, std::uint32_t pushed) 
     }
 }
 
+void SessionOwner::settle_addons_(Rung::Pass pass) {
+    if (pass == Rung::Pass::Waiting)
+        return;
+    tally_.addons_sent += rungs_.addons->sent();
+    tally_.addons_missing += rungs_.addons->missing();
+    if (rungs_.addons->image_sent())
+        ++tally_.ram_images_sent;
+    if (rungs_.addons->image_failed()) {
+        ++tally_.ram_images_declined;
+        (void)owner_events_.push(
+            infra::make<Event>(
+                Event::RamImageDeclined{.why = Errc::io},
+                Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+            )
+        );
+    }
+    rungs_.addons.reset();
+    if (auto& picked = content_.picked_load()) {
+        const PickedLoad load = *picked;
+        picked.reset();
+        run_load_(load);
+    }
+    return;
+}
+
+void SessionOwner::settle_pieces_(Rung::Pass pass) {
+    if (pass == Rung::Pass::Done) {
+        if (!rungs_.pieces->resumed()) {
+            ++tally_.files_loaded;
+            publish_done(content_.content_owed().which, content_.content_owed().tag);
+        }
+        content_.watch_last_piece();
+    } else if (pass == Rung::Pass::Failed) {
+        ++tally_.files_failed;
+    } else {
+        return;
+    }
+    rungs_.pieces.reset();
+    return;
+}
+
+void SessionOwner::settle_load_(Rung::Pass pass) {
+    if (pass != Rung::Pass::Done && pass != Rung::Pass::Failed)
+        return;
+    rungs_.load.reset();
+    if (pass == Rung::Pass::Done) {
+        ++tally_.files_loaded;
+        windows_.opened();
+        publish_done(content_.content_owed().which, content_.content_owed().tag);
+    } else {
+        ++tally_.files_failed;
+    }
+    windows_.publish();
+    return;
+}
+
+void SessionOwner::settle_manifest_(Rung::Pass pass) {
+    windows_.publish();
+    if (pass == Rung::Pass::Failed) {
+        const Errc why = rungs_.manifest->failure();
+        rungs_.manifest.reset();
+        give_up_start_(why);
+        return;
+    }
+    if (pass != Rung::Pass::Done)
+        return;
+
+    if (!rungs_.manifest->error().empty()) {
+        ++tally_.manifest_errors;
+        (void)owner_events_.push(
+            infra::make<Event>(
+                Event::InfoRequest{.id = InfoId::RomLoadFailed},
+                Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+            )
+        );
+    }
+    rungs_.manifest.reset();
+    finish_core_made_();
+    return;
+}
+
+void SessionOwner::settle_walk_(Rung::Pass pass) {
+    if (pass == Rung::Pass::Done) {
+        ++tally_.files_loaded;
+        publish_done(content_.content_owed().which, content_.content_owed().tag);
+    } else if (pass == Rung::Pass::Failed) {
+        ++tally_.files_failed;
+        if (rungs_.walk->refused() || rungs_.walk->stalled()) {
+            (void)owner_events_.push(
+                infra::make<Event>(
+                    Event::InfoRequest{.id = InfoId::RomLoadFailed},
+                    Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+                )
+            );
+        }
+    } else {
+        return;
+    }
+    if (rungs_.walk_gen != 0) {
+        rungs_.walk_answer_fresh = true;
+        rungs_.walk_answer = cores::MountStatus{
+            .generation = rungs_.walk_gen,
+            .state = pass == Rung::Pass::Done ? cores::MountState::Done : cores::MountState::Failed
+        };
+        rungs_.walk_gen = 0;
+    }
+    rungs_.walk.reset();
+    return;
+}
+
 bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, std::uint32_t gen) {
     TASTY_SEAT_BODY(SessionOwner);
-    if (walk_ || pieces_ || load_ || addons_)
+    if (rungs_.any_live(kWalkBlockers))
         return false;
     content_.content_owed() = Owed{};
-    walk_answer_ = cores::MountStatus{.generation = gen, .state = cores::MountState::Failed};
+    rungs_.walk_answer = cores::MountStatus{.generation = gen, .state = cores::MountState::Failed};
     const auto row = cores::find_core(negotiated_.core_name().view());
     if (!row || (*row)->make_loader == nullptr)
         return true;
@@ -1070,86 +1048,37 @@ bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, std::u
         return true;
     }
     content_.forget_watch();
-    walk_.emplace(std::move(*w));
-    walk_gen_ = gen;
-    walk_answer_.state = cores::MountState::Pending;
+    rungs_.walk.emplace(std::move(*w));
+    rungs_.walk_gen = gen;
+    rungs_.walk_answer.state = cores::MountState::Pending;
     return true;
 }
 
 cores::MountStatus SessionOwner::walk_status() {
     TASTY_SEAT_BODY(SessionOwner);
-    return walk_answer_;
-}
-
-void SessionOwner::make_companion_() {
-    withdraw_companion_();
-    const auto hint = negotiated_.made_with_manifest() ? cores::LoadHint::XmlManifest
-                                                       : cores::LoadHint::None;
-    const auto row = cores::find_core(negotiated_.core_name().view(), hint);
-    if (!row || (*row)->make_companion == nullptr)
-        return;
-    companion_ = (*row)->make_companion(vfs_);
-    if (!companion_binds_ || companion_ == nullptr)
-        return;
-    companion_attached_ = companion_binds_->push(
-        infra::make<CompanionBind>(CompanionBind::Attach{.servant = companion_->servant()})
-    );
-    if (!companion_attached_)
-        ++tally_.companion_attach_refusals;
-}
-
-void SessionOwner::withdraw_companion_() noexcept {
-    companion_walk_.reset();
-    if (companion_ == nullptr)
-        return;
-    if (companion_attached_
-        && !companion_binds_->push(
-            infra::make<CompanionBind>(CompanionBind::Attach{.servant = cores::ServantId::None})
-        ))
-        ++tally_.companion_attach_refusals;
-    companion_attached_ = false;
-    companion_.reset();
+    return rungs_.walk_answer;
 }
 
 void SessionOwner::begin_companion(std::string_view path) {
     TASTY_SEAT_BODY(SessionOwner);
-    if (companion_ == nullptr)
+    if (!companion_.present())
         return;
-    if (companion_walk_) {
+    if (rungs_.companion_walk) {
         ++tally_.companion_skips;
         return;
     }
-    const cores::CompanionAsk ask{
-        .path = path,
-        .mailbox_live = companion_attached_,
-        .aperture_base = aperture_.phys.v
-    };
-    auto plan = companion_->plan(ask);
-    if (!plan) {
-        ++tally_.companion_skips;
-        return;
-    }
-    companion_gen_ = static_cast<std::uint16_t>(companion_gen_ + 1u);
-    if (companion_gen_ == 0)
-        companion_gen_ = 1;
-    auto w = CompanionWalk::start(
-        *plan,
-        companion_gen_,
-        plan->loads ? companion_->loader() : nullptr,
-        negotiated_.loaded_profile().windows,
-        companion_attached_ ? companion_binds_ : infra::OptRef<CompanionHost::Binds>{}
-    );
+    auto w = companion_.plan(path);
     if (!w) {
         ++tally_.companion_skips;
         return;
     }
     content_.forget_watch();
-    companion_walk_.emplace(std::move(*w));
+    rungs_.companion_walk.emplace(std::move(*w));
     ++tally_.companion_walks;
 
-    if (!companion_walk_->loads())
+    if (!rungs_.companion_walk->loads())
         step_companion_();
-    if (companion_walk_ && !companion_walk_->loads())
+    if (rungs_.companion_walk && !rungs_.companion_walk->loads())
         step_companion_();
 }
 
@@ -1159,12 +1088,9 @@ void SessionOwner::after_content_(const ContentPick::After& after) {
 }
 
 void SessionOwner::step_companion_() {
-    if (!companion_walk_)
+    if (!rungs_.companion_walk)
         return;
-    const std::uint32_t before = inbox_.ring().pushed();
-    ordered_in_step_ = 0;
-    const Rung::Pass pass = companion_walk_->step(roster_.edges(), *this);
-    settle(RungSlot::Companion, pass, inbox_.ring().pushed() - before);
+    settle(RungSlot::Companion, rungs_.companion_walk->step(roster_.edges(), *this));
 }
 
 std::uint32_t SessionOwner::next_generation() noexcept {
@@ -1174,10 +1100,7 @@ std::uint32_t SessionOwner::next_generation() noexcept {
 
 bool SessionOwner::order(const proto::LinkOp& op) {
     TASTY_SEAT_BODY(SessionOwner);
-    if (!push_dropping(inbox_, tally_, op))
-        return false;
-    ++ordered_in_step_;
-    return true;
+    return push_dropping(inbox_, tally_, op);
 }
 
 Ex<proto::FileId> SessionOwner::intern_bytes(
@@ -1297,7 +1220,7 @@ void SessionOwner::launch_content(const ContentRequest& cr) {
 }
 
 void SessionOwner::step_ladder_() {
-    walk_answer_fresh_ = false;
+    rungs_.walk_answer_fresh = false;
     const OwnerLadder::Step step = ladder_.step();
     if (step.bios_missing)
         bios_missing_();
@@ -1323,8 +1246,7 @@ void SessionOwner::finish_ladder_(const OwnerLadder::Ended& end) {
         reset_owed_.reset();
         (void)order_reset_(op, kUncaused);
     }
-    if (session_up_owed_) {
-        session_up_owed_ = false;
+    if (boot_restore_ == BootRestore::Laddered) {
         finish_boot_restore_();
         return;
     }
@@ -1334,15 +1256,17 @@ void SessionOwner::finish_ladder_(const OwnerLadder::Ended& end) {
 void SessionOwner::drop_ladder_() {
     ladder_.drop();
     mounts_.drop();
-    pieces_.reset();
+    rungs_.pieces.reset();
     content_.drop_watch();
-    addons_.reset();
+    rungs_.addons.reset();
     content_.picked_load().reset();
-    ss_hold_.reset();
-    addons_after_.reset();
-    manifest_.reset();
-    if (load_) {
-        load_.reset();
+    rungs_.ss_hold.reset();
+    rungs_.addons_after.reset();
+
+    rungs_.manifest.reset();
+    made_.reset();
+    if (rungs_.load) {
+        rungs_.load.reset();
         windows_.cancelled();
         windows_.publish();
         (void)owner_events_.push(
@@ -1352,162 +1276,23 @@ void SessionOwner::drop_ladder_() {
             )
         );
     }
-    walk_gen_ = 0;
-    if (walk_) {
-        walk_.reset();
+    rungs_.walk_gen = 0;
+    if (rungs_.walk) {
+        rungs_.walk.reset();
         windows_.cancelled();
         windows_.publish();
     }
     reset_owed_.reset();
-    session_up_owed_ = false;
+
+    if (boot_restore_ == BootRestore::Laddered)
+        boot_restore_ = BootRestore::Asked;
     negotiated_.clear_core_name();
 }
 
 void SessionOwner::forget_core_() noexcept {
-    withdraw_companion_();
+    rungs_.companion_walk.reset();
+    companion_.withdraw();
     negotiated_.forget();
-}
-
-bool SessionOwner::intern_rel_at_(proto::FileId id, std::string_view rel) {
-    std::vector<std::uint8_t> buf;
-    if (!rel.empty()) {
-        auto f = vfs_.open(rel, svc::OpenMode::ReadWhole);
-        if (f) {
-            auto sz = (*f)->size();
-            if (sz && sz->v != 0) {
-                buf.resize(static_cast<std::size_t>(sz->v));
-                std::size_t off = 0;
-                bool ok = true;
-                while (off < buf.size()) {
-                    auto n = (*f)->read_at(
-                        off,
-                        std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(off))
-                    );
-                    if (!n || *n == 0) {
-                        ok = false;
-                        break;
-                    }
-                    off += *n;
-                }
-                if (!ok)
-                    buf.clear();
-            }
-        }
-    }
-    const bool has_bytes = !buf.empty();
-    return inbox_.intern_file_at(id, std::move(buf), ".CFG", rel, 0).has_value() && has_bytes;
-}
-
-void SessionOwner::order_slot_previews_(const std::byte* pack, std::size_t len) {
-    if (pack == nullptr || len == 0)
-        return;
-    const auto count = std::to_integer<std::uint8_t>(pack[0]);
-    std::size_t off = 1;
-    for (std::uint8_t i = 0; i < count; ++i) {
-        if (off >= len)
-            break;
-        const auto nlen = std::to_integer<std::uint8_t>(pack[off++]);
-        if (off + nlen > len)
-            break;
-        const std::string_view name = infra::as_text(std::span(pack + off, nlen));
-        off += nlen;
-        std::string rel = "config/";
-        rel.append(name);
-        (void)intern_rel_at_(InternedFile::config_id(i), rel);
-    }
-    (void)push_dropping(inbox_, tally_, proto::LinkOp::BindSlotPreviews{.count = count});
-}
-
-bool SessionOwner::push_gating_op_(const proto::LinkOp& op) {
-    for (unsigned t = 0; t < kPushRetries; ++t) {
-        if (push_posted(inbox_, tally_, op))
-            return true;
-        sleep_ms_(1);
-    }
-    ++tally_.op_drops;
-    return false;
-}
-
-void SessionOwner::order_bind_identity_(const proto::ConfStr& conf) {
-    constexpr std::size_t kCap = kLinkTxSlabBytes;
-    std::string_view f[4] =
-        {conf.name(), conf.button_list(0), conf.button_list(1), conf.button_list(2)};
-    auto total = [&f]() noexcept {
-        return f[0].size() + f[1].size() + f[2].size() + f[3].size() + 3;
-    };
-
-    for (int i = 3; i >= 1 && total() > kCap; --i)
-        f[i] = {};
-    if (total() > kCap)
-        f[0] = f[0].substr(0, kCap - 3);
-    std::string blob;
-    for (unsigned i = 0; i < 4; ++i) {
-        blob.append(f[i]);
-        if (i != 3)
-            blob.push_back('\0');
-    }
-    const auto id = inbox_.intern(infra::text_bytes<const std::uint8_t>(blob));
-    if (!id) {
-        ++tally_.identity_intern_refusals;
-        return;
-    }
-    (void)push_gating_op_(
-        infra::make<proto::LinkOp>(proto::LinkOp::BindIdentity{
-            .blob = *id,
-            .declares_cheats = conf.declares_cheats(),
-            .declares_turbo = conf.declares_turbo(),
-            .declares_info = conf.declares_info()
-        })
-    );
-}
-
-void SessionOwner::order_bind_doorbells_(const proto::ConfStr& conf) {
-    const auto& irqs = conf.irq_bindings();
-
-    const std::size_t rows = std::min(irqs.size(), kMaxDoorbellRows);
-    proto::LinkOp::BindDoorbells op{
-        .declared = static_cast<std::uint8_t>(std::min<std::size_t>(irqs.size(), 0xFF))
-    };
-    if (rows != 0) {
-        std::array<std::uint8_t, kLinkTxSlabBytes> packed{};
-        std::memcpy(packed.data(), irqs.data(), rows * sizeof(proto::IrqBinding));
-        const auto id = inbox_.intern(
-            std::span<const std::uint8_t>(packed.data(), rows * sizeof(proto::IrqBinding))
-        );
-        if (id) {
-            op.table = *id;
-            op.rows = static_cast<std::uint8_t>(rows);
-        } else {
-            ++tally_.doorbell_intern_refusals;
-        }
-    }
-    (void)push_gating_op_(infra::make<proto::LinkOp>(op));
-}
-
-void SessionOwner::order_bind_joy_(std::string_view core_name) noexcept {
-
-    (void)push_gating_op_(
-        infra::make<proto::LinkOp>(proto::LinkOp::BindJoy{
-            .suppress_analog_followup = cores::profile_for(core_name).suppress_analog_followup
-        })
-    );
-}
-
-void SessionOwner::order_bind_facts_() noexcept {
-    const MraFacts& facts = negotiated_.pending_facts();
-    proto::LinkOp::BindFacts op{
-        .is_arcade = facts.is_arcade,
-        .vertical = facts.vertical,
-        .setname_same_dir = facts.setname_same_dir,
-        .rotation = facts.rotation
-    };
-    if (!facts.setname.empty()) {
-        const auto setname = infra::text_bytes<const std::uint8_t>(facts.setname);
-        const auto id = inbox_.intern(setname);
-        if (id)
-            op.setname = *id;
-    }
-    (void)push_gating_op_(infra::make<proto::LinkOp>(op));
 }
 
 std::string_view SessionOwner::make_core_rel_() const noexcept {
@@ -1517,12 +1302,17 @@ std::string_view SessionOwner::make_core_rel_() const noexcept {
     return negotiated_.defmra_rel();
 }
 
-void SessionOwner::order_make_core_() {
-    manifest_.reset();
-    post_make_core_();
+bool SessionOwner::build_has_manifest_(const proto::ConfStr& cs) const {
+    TASTY_SEAT_BODY(SessionOwner);
+    const UiRequest::LoadCore& pending = switch_.pending();
+    if (pending.xml == XmlKind::Mra && !pending.path.empty())
+        return true;
+    return !negotiated_.defmra_elected(cs.default_manifest(), pending).empty()
+        || !boot_companion_.view().empty();
 }
 
-void SessionOwner::post_make_core_() {
+void SessionOwner::order_make_core_(bool fabric) {
+    rungs_.manifest.reset();
     const std::string_view rel = make_core_rel_();
 
     const std::string built_from{rel.empty() ? boot_companion_.view() : rel};
@@ -1533,11 +1323,15 @@ void SessionOwner::post_make_core_() {
         CoreBuilder::Ask{
             .name = negotiated_.core_name().view(),
             .manifest = {.path = built_from, .text = negotiated_.manifest_text()},
-            .irqs = conf ? conf->irq_bindings() : std::span<const proto::IrqBinding>{}
+            .irqs = conf ? conf->irq_bindings() : std::span<const proto::IrqBinding>{},
+            .lw = conf ? conf->lw_windows() : std::span<const proto::AxiLwDecl>{},
+            .fabric = fabric,
+            .fabric_gen = fabric_gen_,
+            .mount_slots = conf ? conf->mount_slot_mask() : std::uint16_t{0}
         }
     );
 
-    if (!push_gating_op_(infra::make<proto::LinkOp>(op))) {
+    if (!push_gating(inbox_, tally_, ops_.sleeper, infra::make<proto::LinkOp>(op))) {
         builder_.forget(op);
         give_up_start_(Errc::would_block);
         return;
@@ -1554,43 +1348,6 @@ void SessionOwner::latch_boot_companion(std::string_view xml) noexcept {
     boot_companion_ = PathText{};
     if (svc::Vfs::extension_matches(xml, "MRA"))
         (void)boot_companion_.assign(xml);
-}
-
-void SessionOwner::order_bind_uart_(std::string_view core_name, const proto::ConfStr* conf) {
-    proto::LinkOp::BindUart op{.probe_usb_ser = true};
-    struct ::stat st{};
-    op.usb_ser = ::stat("/dev/ttyUSB0", &st) == 0;
-    if (conf != nullptr) {
-        std::string_view uart_raw, midi_raw;
-        for (const auto& cap : conf->capabilities()) {
-            if (cap.kind == proto::Capability::Kind::Uart) {
-                op.capable = true;
-                uart_raw = cap.raw;
-            } else if (cap.kind == proto::Capability::Kind::Midi) {
-                midi_raw = cap.raw;
-            }
-        }
-        if (!uart_raw.empty() || !midi_raw.empty()) {
-            std::string blob(uart_raw);
-            blob.push_back('\0');
-            blob.append(midi_raw);
-            if (blob.size() <= kLinkTxSlabBytes) {
-                const auto id = inbox_.intern(infra::text_bytes<const std::uint8_t>(blob));
-                if (id)
-                    op.tokens = *id;
-            }
-        }
-    }
-    if (!core_name.empty()) {
-        std::string rel = "config/uartmode.";
-        rel += core_name;
-        op.mode = intern_exact(vfs_, inbox_, rel, 4);
-        rel = "config/uartspeed.";
-        rel += core_name;
-        op.speeds = intern_exact(vfs_, inbox_, rel, 12);
-    }
-
-    (void)push_gating_op_(infra::make<proto::LinkOp>(op));
 }
 
 void SessionOwner::order_hold_reset_() noexcept {
@@ -1612,67 +1369,6 @@ void SessionOwner::order_bind_decoders_(
     std::uint32_t gen
 ) noexcept {
     (void)order_refusable_(proto::LinkOp::BindDecoders{.table = table, .gen = as_generation(gen)});
-}
-
-void SessionOwner::publish_save_verdict_(bool ok, CorrelationTag tag) noexcept {
-    (void)owner_events_.push(
-        infra::make<Event>(
-            Event::InfoRequest{.id = ok ? InfoId::SaveWritten : InfoId::SaveFailed},
-            Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-        )
-    );
-}
-
-void SessionOwner::order_save_upload_() noexcept {
-    (void)push_dropping(inbox_, tally_, proto::LinkOp::SaveUpload{});
-}
-
-bool SessionOwner::order_save_ask_(
-    proto::SaveKind kind,
-    std::uint8_t slot,
-    CorrelationTag tag,
-    bool gating
-) noexcept {
-    const proto::LinkOp op = infra::make<proto::LinkOp>(
-        proto::LinkOp::SaveAsk{.which = kind, .slot = slot, .tag = tag}
-    );
-    if (gating)
-        return push_gating_op_(op);
-    return push_dropping(inbox_, tally_, op);
-}
-
-bool SessionOwner::write_durably_(std::string_view rel, std::span<const std::byte> bytes) {
-    if (durable_write(vfs_, rel, bytes).has_value())
-        return true;
-    swf_cell_.publish(++tally_.save_write_failures);
-    return false;
-}
-
-void SessionOwner::on_save_config_(CorrelationTag tag) {
-    const PathText& stem = negotiated_.saved_cfg_stem();
-    if (stem.empty()) {
-        publish_save_verdict_(false, tag);
-        return;
-    }
-    const auto sample = status_cell_.sample();
-    if (sample.generation == 0) {
-
-        publish_save_verdict_(false, tag);
-        return;
-    }
-    std::byte bytes[16];
-    for (unsigned i = 0; i < proto::StatusRegister::kWords; ++i) {
-        const std::uint16_t w = sample.value.words[i];
-        bytes[2 * i] = static_cast<std::byte>(w & 0xFFu);
-        bytes[2 * i + 1] = static_cast<std::byte>((w >> 8) & 0xFFu);
-    }
-    std::string rel = "config/";
-    rel.append(stem.view());
-    rel.append(".CFG");
-    const bool ok = write_durably_(rel, std::span<const std::byte>(bytes));
-
-    order_save_upload_();
-    publish_save_verdict_(ok, tag);
 }
 
 void SessionOwner::publish_done(UiRequest::Kind which, CorrelationTag tag) noexcept {
@@ -1697,6 +1393,11 @@ void SessionOwner::publish_refusal(UiRequest::Kind which, Errc code, Correlation
     );
 }
 
+void SessionOwner::abort_start_(Errc why) noexcept {
+    switch_.end(proto::LinkOp::AbortSwitch{.why = why, .gen = as_generation(switch_.gen())});
+    order_bind_decoders_(proto::LinkOp::DecoderTable::Census, switch_.gen());
+}
+
 void SessionOwner::refuse_started_switch_(Errc why) noexcept {
 
     start_watch_.begin_refusal();
@@ -1706,8 +1407,7 @@ void SessionOwner::refuse_started_switch_(Errc why) noexcept {
             Event::Head{EmitSite{ERR_SITE()}, {}, switch_.pending_tag()}
         )
     );
-    switch_.end(proto::LinkOp::AbortSwitch{.why = why, .gen = as_generation(switch_.gen())});
-    order_bind_decoders_(proto::LinkOp::DecoderTable::Census, switch_.gen());
+    abort_start_(why);
 
     start_watch_.owe_front_end(switch_.pending());
 }
@@ -1720,26 +1420,37 @@ void SessionOwner::expect_boot_negotiate() noexcept {
 
 void SessionOwner::on_slot_names_(const proto::LinkEvent::SaveBytes& e) {
 
-    const CorrelationTag tag = e.tag;
-    const bool boot = !tag && boot_restore_owed_;
-    const bool refresh = !tag && !boot_restore_owed_;
+    const SlotAsker who = e.tag               ? SlotAsker::Load
+        : boot_restore_ == BootRestore::Asked ? SlotAsker::Boot
+                                              : SlotAsker::Refresh;
     if (e.status != proto::SaveStatus::Bytes) {
-        if (tag) {
-            publish_refusal(UiRequest::Kind::LoadCoreConfig, Errc::not_found, tag);
-        }
-        if (boot)
-            finish_boot_restore_();
+        refuse_slot_names_(who, e.tag);
         return;
     }
 
     const auto path = rx_.bytes(e.rel_path);
-    const auto pack = rx_.bytes(e.payload);
+    preview_slot_names_(rx_.bytes(e.payload));
+    if (who == SlotAsker::Refresh)
+        return;
+    bind_slot_answer_(who == SlotAsker::Boot, e.tag, infra::as_text(path));
+}
+
+void SessionOwner::refuse_slot_names_(SlotAsker who, CorrelationTag tag) {
+    if (who == SlotAsker::Load) {
+        publish_refusal(UiRequest::Kind::LoadCoreConfig, Errc::not_found, tag);
+    }
+    if (who == SlotAsker::Boot)
+        finish_boot_restore_();
+}
+
+void SessionOwner::preview_slot_names_(std::span<const std::uint8_t> pack) {
     if (!pack.empty()) {
         const std::span<const std::byte> previews = infra::byte_cast<const std::byte>(pack);
-        order_slot_previews_(previews.data(), previews.size());
+        saves_.order_slot_previews(previews.data(), previews.size());
     }
-    if (refresh)
-        return;
+}
+
+void SessionOwner::bind_slot_answer_(bool boot, CorrelationTag tag, std::string_view path) {
     const auto row = cores::find_core(negotiated_.core_name().view());
     const bool boots = row && (*row)->profile->reset.restore_boots;
 
@@ -1750,18 +1461,11 @@ void SessionOwner::on_slot_names_(const proto::LinkEvent::SaveBytes& e) {
             finish_boot_restore_();
         return;
     }
-    const std::uint8_t slot = boot ? 0 : slot_load_slot_;
-    proto::LinkOp::BindSlotConfig op{.slot = slot};
-    const auto id = InternedFile::config_id(slot);
-    if (intern_rel_at_(id, infra::as_text(path))) {
-        op.file = id;
-    }
-    const bool laddered = push_dropping(inbox_, tally_, op)
-        && boots
-        && arm_restore_ladder_(infra::as_text(path));
+    const std::uint8_t slot = boot ? 0 : saves_.load_slot_slot();
+    const bool laddered = saves_.bind_slot_config(slot, path) && boots && arm_restore_ladder_(path);
 
     if (boot && laddered) {
-        session_up_owed_ = true;
+        boot_restore_ = BootRestore::Laddered;
         return;
     }
     if (boot)
@@ -1776,38 +1480,18 @@ bool SessionOwner::arm_restore_ladder_(std::string_view config) {
 }
 
 void SessionOwner::finish_boot_restore_() noexcept {
-    boot_restore_owed_ = false;
+    boot_restore_ = BootRestore::None;
     order_session_up_();
 }
 
-void SessionOwner::on_save_bytes_(const proto::LinkEvent::SaveBytes& e) {
-    const proto::SaveKind kind = e.which;
-    const proto::SaveStatus status = e.status;
-    const CorrelationTag tag = e.tag;
-    if (status == proto::SaveStatus::Nothing)
+void SessionOwner::on(const proto::LinkEvent::SaveBytes& e) {
+    if (e.status == proto::SaveStatus::Nothing)
         return;
-    if (kind == proto::SaveKind::SlotNames) {
+    if (e.which == proto::SaveKind::SlotNames) {
         on_slot_names_(e);
         return;
     }
-    if (status != proto::SaveStatus::Bytes) {
-
-        if (tag)
-            publish_save_verdict_(false, tag);
-        return;
-    }
-    const auto path = rx_.bytes(e.rel_path);
-    const auto payload = rx_.bytes(e.payload);
-    const std::string_view rel = infra::as_text(path);
-    const bool ok = write_durably_(rel, std::as_bytes(payload));
-
-    if (tag && !ok)
-        publish_save_verdict_(false, tag);
-
-    if (tag && ok && kind == proto::SaveKind::Slot) {
-        ++tally_.config_saves;
-        (void)order_save_ask_(proto::SaveKind::SlotNames, slot_save_slot_, CorrelationTag{});
-    }
+    saves_.on_save_bytes(e);
 }
 
 void SessionOwner::on(const proto::LinkEvent::ReadyEdge&) noexcept {
@@ -1818,29 +1502,18 @@ void SessionOwner::on(const proto::LinkEvent::BlockRequest&) noexcept {
     ++tally_.link_event_unhandled;
 }
 
-void SessionOwner::on(const proto::LinkEvent::IdentityMatched& e) noexcept {
-    on_identity_matched_(e);
-}
-
-void SessionOwner::on(const proto::LinkEvent::IdentityMismatch& e) noexcept {
-    on_identity_mismatch_(e);
-}
-
-void SessionOwner::on(const proto::LinkEvent::ConfStr& e) {
-    on_conf_str_(e);
-}
-
-void SessionOwner::on(const proto::LinkEvent::SaveBytes& e) {
-    on_save_bytes_(e);
-}
-
-void SessionOwner::on(const proto::LinkEvent::CoreMade& e) noexcept {
-    on_core_made_(e);
-}
-
 void SessionOwner::on(const proto::LinkEvent::StartRefused& e) noexcept {
 
-    if (e.bind_gen != as_generation(switch_.gen()) || start_watch_.refused()) {
+    if (e.bind_gen != as_generation(switch_.gen())) {
+        ++tally_.stale_events;
+        return;
+    }
+
+    if (start_watch_.ended_by_bridge(switch_.gen())) {
+        abort_start_(e.err);
+        return;
+    }
+    if (start_watch_.refused()) {
         ++tally_.stale_events;
         return;
     }
@@ -1854,7 +1527,7 @@ void SessionOwner::misrouted(const proto::LinkEvent&) noexcept {
 
 static_assert(LinkEventMainSink<SessionOwner>);
 
-void SessionOwner::on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept {
+void SessionOwner::on(const proto::LinkEvent::CoreMade& m) noexcept {
     if (m.bind_gen != switch_.gen()) {
         ++tally_.stale_events;
         return;
@@ -1864,20 +1537,21 @@ void SessionOwner::on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept {
         return;
     }
     start_watch_.end_bound();
-    boot_restore_owed_ = false;
+    boot_restore_ = BootRestore::None;
     if (m.made)
         core_made_once_ = true;
     negotiated_.note_made(m.made);
-    if (m.made)
-        make_companion_();
+    if (m.made) {
+        rungs_.companion_walk.reset();
+        companion_.make();
+    }
     if (!m.made) {
 
         ++tally_.core_make_refusals;
         refuse_started_switch_(m.err);
         return;
     }
-    made_restore_owed_ = m.restore_owed;
-    made_cheat_records_ = m.cheat_records;
+    made_ = MadeFacts{.restore_owed = m.restore_owed, .cheat_records = m.cheat_records};
 
     if (arm_manifest_())
         return;
@@ -1885,7 +1559,7 @@ void SessionOwner::on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept {
 }
 
 bool SessionOwner::arm_manifest_() {
-    manifest_.reset();
+    rungs_.manifest.reset();
     if (!negotiated_.made_with_manifest())
         return false;
     const auto role = cores::manifest_doc_role();
@@ -1898,20 +1572,21 @@ bool SessionOwner::arm_manifest_() {
     );
     if (stager == nullptr)
         return false;
-    manifest_.emplace(std::move(stager), negotiated_.manifest_rel());
+    rungs_.manifest.emplace(std::move(stager), negotiated_.manifest_rel());
     return true;
 }
 
 void SessionOwner::finish_core_made_() noexcept {
 
     static constexpr CheatCatalog kNoCheats{};
-    cheat_catalog_cell_.publish(made_cheat_records_ ? negotiated_.cheats() : kNoCheats);
-    if (made_restore_owed_) {
+    const MadeFacts made = std::exchange(made_, std::nullopt).value_or(MadeFacts{});
+    cheat_catalog_cell_.publish(made.cheat_records ? negotiated_.cheats() : kNoCheats);
+    if (made.restore_owed) {
 
-        boot_restore_owed_ = true;
-        if (order_save_ask_(proto::SaveKind::SlotNames, 0, CorrelationTag{}, true))
+        boot_restore_ = BootRestore::Asked;
+        if (saves_.order_save_ask(proto::SaveKind::SlotNames, 0, CorrelationTag{}, true))
             return;
-        boot_restore_owed_ = false;
+        boot_restore_ = BootRestore::None;
     }
     order_session_up_();
 }
@@ -1923,7 +1598,18 @@ void SessionOwner::order_session_up_() noexcept {
         return f.row.ioctl_index == 0;
     });
 
-    (void)push_gating_op_(infra::make<proto::LinkOp>(proto::LinkOp::SessionUp{}));
+    builder_.raise_osd();
+
+    (void)push_gating(
+        inbox_,
+        tally_,
+        ops_.sleeper,
+        infra::make<proto::LinkOp>(proto::LinkOp::SessionUp{})
+    );
+
+    builder_.raise_sector();
+
+    builder_.raise_sys();
 
     const bool ladder = ladder_.arm_start(negotiated_.core_name(), index0_taken, *this);
     const std::string rbf = start_rbf_();
@@ -1934,11 +1620,11 @@ void SessionOwner::order_session_up_() noexcept {
         vfs_
     );
 
-    const bool held = chain.holds_reset() && order_reset_level_(true);
+    const bool held = chain.holds_reset() && bind_.reset_level(true);
     order_remembered_files_(remembered);
     order_start_chain_(chain);
     if (held)
-        (void)order_reset_level_(false);
+        (void)bind_.reset_level(false);
 
     mounts_.queue_boot_images(chain);
     mounts_.arm_next_mount(*this);
@@ -2087,21 +1773,10 @@ void SessionOwner::order_rbf_tail_(
         ++tally_.op_drops;
         return;
     }
-    ++tally_.ops_posted;
     ++tally_.files_loaded;
 }
 
-bool SessionOwner::order_reset_level_(bool asserted) {
-    return push_gating_op_(
-        infra::make<proto::LinkOp>(proto::LinkOp::WriteStatus{
-            .start = proto::StatusBit{0},
-            .width = 1,
-            .value = asserted ? 1u : 0u
-        })
-    );
-}
-
-void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
+void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
     if (c.bind_gen.v != switch_.gen()) {
         ++tally_.stale_events;
         return;
@@ -2133,9 +1808,21 @@ void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
     }
     const proto::ConfStr& cs = accepted->get();
     const std::string_view name = cs.name();
-    order_bind_identity_(cs);
-    order_bind_doorbells_(cs);
-    order_bind_joy_(name);
+    bind_.identity(cs);
+    const std::span<const proto::AxiLwDecl> lw = cs.lw_windows();
+
+    const bool manifest = build_has_manifest_(cs);
+    const bool fabric = CoreBuilder::fabric_route(name, manifest);
+    const std::optional<std::uint32_t> owned = fabric ? builder_.claim_sector(
+                                                            {.name = name,
+                                                             .manifest = manifest,
+                                                             .irqs = cs.irq_bindings(),
+                                                             .lw = lw,
+                                                             .fabric_gen = fabric_gen_}
+                                                        )
+                                                      : std::nullopt;
+    bind_.doorbells(cs, lw, owned);
+    bind_.joy(name);
 
     proto::LinkOp::BindConfig op{};
     CoreIni::Resolved ini = ini_.resolve(name, negotiated_.pending_facts());
@@ -2153,11 +1840,11 @@ void SessionOwner::on_conf_str_(const proto::LinkEvent::ConfStr& c) {
 
     op.cfg = negotiated_.key_names(cs, switch_.pending());
     op.savestate_dir_ready = cs.savestate().has_value();
-    (void)push_gating_op_(infra::make<proto::LinkOp>(op));
-    order_bind_facts_();
-    order_bind_uart_(effective_name(name, negotiated_.pending_facts()), &cs);
+    (void)push_gating(inbox_, tally_, ops_.sleeper, infra::make<proto::LinkOp>(op));
+    bind_.facts(negotiated_.pending_facts());
+    bind_.uart(effective_name(name, negotiated_.pending_facts()), &cs);
 
-    order_make_core_();
+    order_make_core_(fabric);
 }
 
 void SessionOwner::arm_replay_ini(bool strict) noexcept {
@@ -2175,7 +1862,7 @@ bool SessionOwner::launcher_swap_room_() const noexcept {
         && park_.ask_room();
 }
 
-void SessionOwner::on_identity_mismatch_(const proto::LinkEvent::IdentityMismatch& w) noexcept {
+void SessionOwner::on(const proto::LinkEvent::IdentityMismatch& w) noexcept {
     ++tally_.identities_fail;
     if (w.bind_gen.v != switch_.gen())
         return;
@@ -2196,7 +1883,7 @@ void SessionOwner::on_identity_mismatch_(const proto::LinkEvent::IdentityMismatc
         give_up_start_(w.err);
 }
 
-void SessionOwner::on_identity_matched_(const proto::LinkEvent::IdentityMatched& w) noexcept {
+void SessionOwner::on(const proto::LinkEvent::IdentityMatched& w) noexcept {
     ++tally_.identities_ok;
     if (w.bind_gen.v != switch_.gen())
         return;
@@ -2208,11 +1895,10 @@ void SessionOwner::on_identity_matched_(const proto::LinkEvent::IdentityMatched&
     }
 
     const BindOutcome bind = bind_link_rows(kLinkRows, inbox_, switch_.gen());
-    tally_.ops_posted += bind.posted;
     tally_.order_refusals += bind.decoders_refused;
     tally_.op_drops += bind.slots_refused;
     if (negotiated_.facts_pending()) {
-        order_bind_facts_();
+        bind_.facts(negotiated_.pending_facts());
         negotiated_.facts_sent();
     }
     switch_.end(
@@ -2263,6 +1949,23 @@ void SessionOwner::programmed(bool ok) {
         negotiated_.latch_mra_facts(switch_.pending());
 }
 
+void SessionOwner::retire_lw_at_exit() noexcept {
+    TASTY_SEAT_BODY(SessionOwner);
+    if (builder_.sector_mapped())
+        (void)builder_.retire_sector(readiness_.fabric_configured());
+    if (builder_.osd_mapped())
+        (void)builder_.retire_osd(readiness_.fabric_configured());
+    if (builder_.sys_mapped())
+        (void)builder_.retire_sys();
+}
+
+void SessionOwner::fabric_suspect() noexcept {
+    TASTY_SEAT_BODY(SessionOwner);
+    builder_.abandon_sector();
+    builder_.abandon_osd();
+    builder_.abandon_sys();
+}
+
 bool SessionOwner::ask_recovery_switch() {
     TASTY_SEAT_BODY(SessionOwner);
     switch_.ask_or_refuse(launcher_.alias(switch_.pending()), switch_.pending_tag(), *this);
@@ -2305,6 +2008,9 @@ int SessionOwner::wake_hint_ms(int floor_ms) const noexcept {
         floor_ms = until(*due, floor_ms);
     if (!switch_.receipt_held() || readiness_.recovering())
         return floor_ms;
+
+    if (switch_.lease_holding())
+        return std::min(floor_ms, kLastOrderRetryMs);
     return until(switch_.pause_due(), floor_ms);
 }
 
@@ -2316,14 +2022,6 @@ void SessionOwner::on(const proto::LinkEvent::RebootQuiesced& e) {
         return;
     }
     reboot_.finish();
-}
-
-void SessionOwner::sleep_ms_(unsigned ms) {
-    if (ops_.sleeper) {
-        ops_.sleeper->sleep_ms(ms);
-        return;
-    }
-    ::usleep(static_cast<::useconds_t>(ms) * 1000u);
 }
 
 }

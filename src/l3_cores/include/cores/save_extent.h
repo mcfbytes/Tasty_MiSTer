@@ -13,6 +13,7 @@ struct SaveExtent {
     std::uint32_t generation = 0;
     std::uint64_t size_bytes = 0;
     SaveAnswer answer = SaveAnswer::Pending;
+    bool exists = false;
 };
 
 enum class SaveVerdict : std::uint8_t { Known, Declined };

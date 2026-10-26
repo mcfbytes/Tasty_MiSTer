@@ -33,11 +33,11 @@ namespace mister::app {
     return PayloadWindow{kContainerHeaderBytes, declared};
 }
 
-Ex<void> BitstreamProgrammer::program(const ParkReceipt&, std::string_view rel) {
+Ex<void> BitstreamProgrammer::program(const ParkReceipt&, AllLeasesHome, std::string_view rel) {
     return run_(rel);
 }
 
-Ex<void> BitstreamProgrammer::program_at_boot(std::string_view rel) {
+Ex<void> BitstreamProgrammer::program_at_boot(AllLeasesHome, std::string_view rel) {
     return run_(rel);
 }
 

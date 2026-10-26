@@ -24,7 +24,7 @@ ContentPick::ContentPick(const Wiring& w) noexcept
       mgl_row0_cell_(w.mgl_row0_cell),
       act_keys_(w.act_keys),
       status_cell_(w.status_cell),
-      boot_restore_owed_(w.boot_restore_owed),
+      boot_restore_(w.boot_restore),
       aperture_(w.aperture),
       windows_(w.windows) {}
 
@@ -70,7 +70,7 @@ ContentPick::Out ContentPick::load_file(
 
     if (!negotiated_.core_live())
         return Out{.refuse = Errc::core_load};
-    if (!negotiated_.conf_str() || boot_restore_owed_)
+    if (!negotiated_.conf_str() || boot_restore_ != BootRestore::None)
         return Out{.refuse = Errc::negotiation};
     if (!row)
         return Out{.refuse = row.error().code};
@@ -257,7 +257,6 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
         ++owner_tally_.op_drops;
         return {};
     }
-    ++owner_tally_.ops_posted;
     ++owner_tally_.files_loaded;
     publish_done_(req.asked, req.tag);
     if (req.load_addr == 0)
@@ -304,7 +303,7 @@ void ContentPick::step_watch() {
         return;
     }
 
-    if (rungs_.pieces || rungs_.load || rungs_.walk || rungs_.companion) {
+    if (rungs_.any_live(kWatchCutters)) {
         forget_watch();
         return;
     }
@@ -330,7 +329,7 @@ void ContentPick::step_watch() {
         .phase = proto::LinkOp::FileTxPhase::Close,
         .total = static_cast<std::uint32_t>(w.total)
     };
-    if (!push_posted(inbox_, owner_tally_, cut))
+    if (!inbox_.push(cut))
         return;
     ++owner_tally_.files_failed;
     ++tally_.long_wait_refusals;
@@ -366,7 +365,7 @@ bool ContentPick::arm_loader(
         return false;
     const bool own = row != nullptr && row->make_loader != nullptr;
 
-    if (!own && (rungs_.load || rungs_.walk || rungs_.pieces)) {
+    if (!own && rungs_.any_live(kLoaderBusy)) {
         ++owner_tally_.files_failed;
         return true;
     }

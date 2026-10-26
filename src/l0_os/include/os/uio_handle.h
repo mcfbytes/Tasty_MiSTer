@@ -13,6 +13,7 @@
 namespace mister::os {
 
 inline constexpr const char* kUioClassRoot = "/sys/class/uio";
+static_assert(UioLineSpace{}.sysfs_root == std::string_view{kUioClassRoot});
 
 [[nodiscard]] int find_uio_node(std::string_view name) noexcept;
 

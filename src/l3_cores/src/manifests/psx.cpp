@@ -65,6 +65,10 @@ static_assert(
     kPsxBlankSave.header.size() == 8192 && kPsxBlankSave.regions.empty(),
     "psx.cpp:452-455: the whole mcdheader lands at image offset 0"
 );
+static_assert(
+    kPsxBlankSave.lba_bytes == 1024,
+    "psx.cpp:449-450: offset = lba * 1024, size = cnt * 1024"
+);
 
 static_assert(kPsx.kind == CoreKind::Psx);
 static_assert(
@@ -123,6 +127,14 @@ static_assert(
     kPsx.staging.reset_pulse_us == 0,
     "psx.cpp has no reset pulse: the reset request rides disc_t "
     "metadata bit 2, not status bit 0"
+);
+static_assert(
+    kPsx.staging.save_pre_bytes == 128 * 1024,
+    "psx.cpp:429,437: user_io_file_mount(buf, 2, 1, MCD_SIZE); user_io.cpp:2241-2246"
+);
+static_assert(
+    !kPsx.staging.save_pre_on_empty,
+    "user_io.cpp:2141,2245-2250: an existing empty card opens, so it announces its size, 0"
 );
 
 static_assert(

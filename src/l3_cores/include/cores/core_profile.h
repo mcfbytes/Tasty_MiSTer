@@ -27,6 +27,7 @@
 
 namespace mister::svc {
 class IAnalogReshape;
+class ISectorProgram;
 }
 
 namespace mister::cores {
@@ -102,6 +103,8 @@ struct CoreProfile {
     std::span<const SignatureRow> signatures;
     BlankSaveSpec blank_save{};
 
+    bool saves_by_channel = false;
+
     bool suppress_reset_status_write = false;
     bool skips_memsz = false;
 
@@ -147,6 +150,8 @@ struct CoreProfile {
     SlotRole undeclared_role = SlotRole::Image;
 
     HostPolicy host{};
+
+    infra::OptRef<const svc::ISectorProgram> sector_program{};
 };
 
 [[nodiscard]] constexpr StartMount start_mount_of(const CoreProfile& p, IoIndex index) {

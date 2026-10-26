@@ -23,9 +23,13 @@ class IoMain final : public xthread::SeatMain<IoMain> {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    static constexpr std::size_t kMaxCoworkers = 7;
+    static constexpr std::size_t kMaxCoworkers = 9;
 
-    explicit IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker = {}) noexcept;
+    explicit IoMain(
+        xthread::ParkFds fds,
+        infra::OptRef<xthread::WakeFlag> asker = {},
+        int doorbells = -1
+    ) noexcept;
     IoMain(const IoMain&) = delete;
     IoMain& operator=(const IoMain&) = delete;
     IoMain(IoMain&&) = delete;
@@ -53,7 +57,7 @@ public:
 
     [[nodiscard]] bool pause_pending() const noexcept { return pause_.pending(); }
 
-    void settle() noexcept {}
+    void settle() noexcept;
 
     void on_pause() noexcept;
     void on_resume() noexcept;

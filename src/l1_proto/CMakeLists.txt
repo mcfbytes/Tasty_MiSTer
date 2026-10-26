@@ -1,6 +1,10 @@
 add_library(mister_proto STATIC
+  src/axi_block_decl.cpp
+  src/sys_directory_image.cpp
+  src/axi_pad_encoder.cpp
   src/block_slots.cpp
   src/conf_str.cpp
+  src/held_pad_encoder.cpp
   src/conf_str_caps.cpp
   src/core_session.cpp
   src/download_session.cpp
@@ -9,6 +13,7 @@ add_library(mister_proto STATIC
   src/item_table.cpp
   src/joystick.cpp
   src/osd.cpp
+  src/pad_levels.cpp
   src/ps2_keyboard.cpp
   src/ps2_mouse.cpp
   src/spi_ps2_decoder.cpp
@@ -20,8 +25,10 @@ add_library(mister_proto STATIC
   src/spi_fio_queue.cpp
   src/spi_identify_decoder.cpp
   src/spi_osd_mask_decoder.cpp
+  src/spi_pad_encoder.cpp
   src/spi_sampler.cpp
   src/spi_status_decoder.cpp
+  src/axi_status_decoder.cpp
   src/status_register.cpp
   src/user_io/poll_reader.cpp
 )
@@ -38,9 +45,17 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/disc_announce.h
   proto/late_answers.h
   proto/conf_str.h
+  proto/axi_block_decl.h
+  proto/declared_line.h
+  proto/lane_block_decl.h
+  proto/sys_directory_image.h
+  proto/sector_block_decl.h
+  proto/osd_block_decl.h
+  proto/sys_block_decl.h
   proto/axi_ddr_decl.h
   proto/axi_kind.h
   proto/axi_lw_decl.h
+  proto/axi_pad_encoder.h
   proto/axi_unkinded_decl.h
   proto/capability.h
   proto/conf_str_caps.h
@@ -64,6 +79,10 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/link_router.h
   proto/save_ask.h
   proto/joystick.h
+  proto/link_pad_encoder.h
+  proto/held_pad_encoder.h
+  proto/pad_levels.h
+  proto/spi_pad_encoder.h
   proto/osd_surface.h
   proto/osd_target.h
   proto/osd_transport.h
@@ -101,6 +120,8 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/spi_ps2_decoder.h
   proto/spi_sampler.h
   proto/spi_status_decoder.h
+  proto/axi_status_decoder.h
+  proto/status_snapshot.h
   proto/standard_item.h
   proto/standard_item_row.h
   proto/status_register.h

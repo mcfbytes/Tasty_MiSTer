@@ -16,6 +16,10 @@
 #include "app/diag_counters.h"
 #include "app/fallback_counts.h"
 #include "app/core_builder.h"
+#include "app/sector_grant.h"
+#include "app/sector_route.h"
+#include "app/osd_route.h"
+#include "app/sys_route.h"
 #include "app/load_window_counts.h"
 #include "app/video_pump.h"
 #include "app/avi_write_status.h"
@@ -51,6 +55,14 @@ namespace mister::fw {
 
 inline constexpr std::uint64_t kRssSoftCeilingBytes = 96ull * 1024 * 1024;
 
+[[nodiscard]] constexpr std::uint64_t rss_ceiling_bytes(
+    std::uint32_t capture_arena_kib,
+    std::uint32_t chunk_arena_kib
+) noexcept {
+    return kRssSoftCeilingBytes
+        + (static_cast<std::uint64_t>(capture_arena_kib) + chunk_arena_kib) * 1024u;
+}
+
 struct DiagStats {
     std::atomic<std::uint64_t> drains{0};
     std::atomic<std::uint64_t> heartbeat_last{0};
@@ -82,6 +94,9 @@ public:
         const reactor::RoundTimingCell& round_timing;
         infra::OptRef<const reactor::FrameCell> frames{};
         app::ScreenshotQueue& screenshots;
+        infra::OptRef<const app::SectorRouteCell> sector_route{};
+        infra::OptRef<const app::OsdRouteCell> osd_route{};
+        infra::OptRef<const app::SysRouteCell> sys_route{};
     };
 
     struct Sources {
@@ -110,6 +125,9 @@ public:
         const app::RecWriteStatusCell& rec_write;
         const app::AviWriteStatusCell& rec_avi;
         app::ScreenshotQueue& screenshots;
+        infra::OptRef<const app::SectorRouteCell> sector_route{};
+        infra::OptRef<const app::OsdRouteCell> osd_route{};
+        infra::OptRef<const app::SysRouteCell> sys_route{};
     };
 
     struct Services {
@@ -170,6 +188,11 @@ public:
     void answer() noexcept;
 
     void render_final() noexcept;
+
+    [[nodiscard]] std::uint64_t rss_ceiling_now() const noexcept;
+
+    void observe_rss(std::uint64_t rss, std::uint64_t ceiling) noexcept;
+    static constexpr unsigned kRssOverSamples = 2;
 
     void on(const LogRec::DeadlineMiss& a, const LogRec::Head& h) noexcept;
     void on(const LogRec::SessionTransition& a, const LogRec::Head& h) noexcept;
@@ -243,6 +266,8 @@ private:
     const app::VideoStatsCell& video_stats_;
     const app::VideoGeometryCell& video_geo_;
     const app::DiagCountersCell& diag_cell_;
+    const app::RecorderStatusCell& rec_capture_;
+    const app::EncodeStatusCell& rec_encode_;
     const app::DoorbellStatsCell& doorbell_cell_;
     const reactor::RoundTimingCell& round_timing_;
     infra::OptRef<const app::UiPageCell> ui_pages_{};
@@ -259,7 +284,7 @@ private:
     std::uint32_t last_ev_loss_[app::EventQueue<SeatTag::RT>::kKinds] = {};
     std::uint32_t last_hb_stalls_ = 0;
     std::uint32_t last_rss_over_ = 0;
-    bool rss_over_now_ = false;
+    unsigned rss_over_streak_ = 0;
     std::uint32_t last_spin_ = 0;
     std::uint32_t last_ring_[kNumRings] = {};
     std::uint32_t last_dlm_ = 0;

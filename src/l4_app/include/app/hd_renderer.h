@@ -16,6 +16,8 @@
 #include "app/hd_osd_ask.h"
 #include "app/hd_osd_status.h"
 #include "app/hd_raster.h"
+#include "app/hd_theme.h"
+#include "app/hd_themes.h"
 #include "app/hd_tick_pacer.h"
 #include "app/hd_visible_stats.h"
 #include "hal/fpga_memory.h"
@@ -60,6 +62,8 @@ public:
 
     void set_fps(std::uint8_t fps) noexcept;
 
+    void set_theme(std::uint8_t index) noexcept;
+
     void begin() noexcept;
     void serve() noexcept;
     [[nodiscard]] bool idle() const noexcept;
@@ -71,6 +75,8 @@ public:
     [[nodiscard]] const HdOsdStatus& status() const noexcept { return st_; }
 
     [[nodiscard]] BackdropJob::Step job_step() const noexcept { return job_.step(); }
+
+    [[nodiscard]] std::uint8_t theme() const noexcept { return theme_index_; }
 
 private:
     static constexpr std::uint8_t kNoSlot = 0xFF;
@@ -87,6 +93,7 @@ private:
     [[nodiscard]] std::uint64_t wait_ns_(std::uint64_t now) const noexcept;
     [[nodiscard]] bool ensure_frame_() noexcept;
     void close_job_() noexcept;
+    [[nodiscard]] bool retheme_(std::uint8_t index) noexcept;
     void draw_(std::uint64_t now) noexcept;
     void start_epoch_(const HdLayout& layout) noexcept;
     void panel_step_(const HdLayout& layout, bool asked) noexcept;
@@ -115,6 +122,8 @@ private:
     std::uint32_t epoch_seen_ = 0;
     std::uint32_t seq_ = 0;
     HdOsdStatus st_{};
+    std::uint8_t theme_index_ = 0;
+    HdTheme theme_ = derive_theme(hd_theme(0).style);
 
     infra::OptRef<HdFlipChannel> flips_{};
     std::optional<hal::FpgaMemory> slots_{};

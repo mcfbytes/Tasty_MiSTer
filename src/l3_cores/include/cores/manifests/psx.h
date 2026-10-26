@@ -12,6 +12,7 @@
 #include "cores/cd_census_rows.h"
 #include "cores/cd_core.h"
 #include "cores/core_profile.h"
+#include "cores/psx_sector_program.h"
 #include "svc/disc_engine.h"
 
 namespace mister::cores::manifests {
@@ -58,6 +59,7 @@ inline constexpr BlankSaveSpec kPsxBlankSave{
     .fill = std::byte{0x00},
     .header = kPsxMcdHeader,
     .regions = {},
+    .lba_bytes = 1024,
 };
 
 inline constexpr svc::CuePolicy kPsxCuePolicy{
@@ -113,6 +115,7 @@ inline constexpr StagingPolicy kPsxStaging{
     .disc_slot = disc_slot_of(kPsxSlots),
     .save_slot = IoIndex{2},
     .save_dest = WideIoIndex{},
+    .save_pre_bytes = 128 * 1024,
 };
 
 inline constexpr auto kPsxServices = std::to_array<LinkDecoderDecl>({
@@ -145,6 +148,7 @@ inline constexpr CoreProfile kPsx{
 
     .cheats = {.reset_on_remount = true},
     .file_tx_whole = true,
+    .sector_program = infra::OptRef<const svc::ISectorProgram>{kPsxSectorProgram},
 };
 
 std::unique_ptr<Core> make_psx(const CoreProfile& p, const CoreGrant& g);

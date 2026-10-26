@@ -9,10 +9,12 @@
 #include <cstdio>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "app/hd_badge_view.h"
 #include "app/hd_crumb.h"
 #include "app/hd_help.h"
 #include "app/hd_metrics.h"
@@ -147,23 +149,29 @@ Plat*& shared_platform() {
 
 }
 
+template <class C>
 struct Scene {
-    std::optional<slint::ComponentHandle<HdMenu>> ui{};
+    std::optional<slint::ComponentHandle<C>> ui{};
     std::shared_ptr<slint::VectorModel<MenuRow>> rows{};
     std::shared_ptr<slint::VectorModel<MenuRow>> pinned{};
     std::shared_ptr<slint::VectorModel<MenuRow>> choices{};
     std::shared_ptr<slint::VectorModel<HelpItem>> help{};
-    int badge_kind = -1;
+    std::optional<HdOsdStatus::Badge> badge{};
+    std::string status_text;
 };
 
-struct SlintRaster::Impl {
+template <class C>
+struct SlintRasterOf<C>::Impl {
+    explicit Impl(const HdTemplateTraits& t) : traits(t) {}
+
+    HdTemplateTraits traits;
     HdTheme theme{};
     HdLayout layout{};
     HdMetrics metrics{};
     bool have_theme = false;
     bool force_full = false;
     infra::OptRef<Plat> plat{};
-    std::unique_ptr<Scene> scene{};
+    std::unique_ptr<Scene<C>> scene{};
 
     void drop_scene() {
         if (plat)
@@ -178,7 +186,7 @@ struct SlintRaster::Impl {
             return static_cast<float>(v);
         };
         const HdMetrics& m = metrics;
-        auto& tok = (*scene->ui)->global<Theme>();
+        auto& tok = (*scene->ui)->template global<Theme>();
         tok.set_primary(color_of(theme.primary));
         tok.set_accent(color_of(theme.accent));
         tok.set_text(color_of(theme.text));
@@ -191,7 +199,8 @@ struct SlintRaster::Impl {
         tok.set_on_accent(color_of(theme.on_accent));
         tok.set_cue_spent(color_of(theme.cue_spent));
         tok.set_control_edge(color_of(theme.control_edge));
-        tok.set_family(slint::SharedString{"Noto Sans"});
+        tok.set_family(shared(traits.family));
+        tok.set_subtitle_sep(shared(traits.subtitle_sep));
         tok.set_weight_normal(400);
         tok.set_weight_selected(500);
         tok.set_weight_bold(700);
@@ -261,8 +270,8 @@ struct SlintRaster::Impl {
         }
         plat = infra::opt_ref_of(shared_platform());
         if (!scene) {
-            scene = std::make_unique<Scene>();
-            scene->ui = HdMenu::create();
+            scene = std::make_unique<Scene<C>>();
+            scene->ui = C::create();
             (*scene->ui)->show();
             push_theme();
         }
@@ -310,7 +319,7 @@ struct SlintRaster::Impl {
             shared(page.subtitle.view()),
             [&](const slint::SharedString& v) { ui->set_subtitle_text(v); }
         );
-        auto& tok = ui->global<Theme>();
+        auto& tok = ui->template global<Theme>();
         set_if(tok.get_row_h(), static_cast<float>(plan.row_h), [&](float v) { tok.set_row_h(v); });
         set_if(tok.get_sep_h(), static_cast<float>(plan.sep_h), [&](float v) { tok.set_sep_h(v); });
         const bool choice = page.shape == PageDescription::Shape::Choice;
@@ -375,17 +384,28 @@ struct SlintRaster::Impl {
     void sync_badge(const HdBadgeView& badge) {
         if (!scene || !scene->ui)
             return;
-        const int kind = static_cast<int>(badge.badge);
-        if (scene->badge_kind == kind)
-            return;
-        (*scene->ui)->set_badge_kind(kind);
-        scene->badge_kind = kind;
+        if (scene->badge != badge.badge) {
+            (*scene->ui)->set_badge_text(shared(hd_badge_text(badge.badge)));
+            scene->badge = badge.badge;
+        }
+        std::string text;
+        if (badge.slots.bluetooth)
+            text = "BT";
+        if (badge.slots.rt)
+            text += text.empty() ? "RT" : "  RT";
+        if (scene->status_text != text) {
+            (*scene->ui)->set_status_text(shared(text));
+            scene->status_text = std::move(text);
+        }
     }
 };
 
-SlintRaster::SlintRaster() : impl_(std::make_unique<Impl>()) {}
+template <class C>
+SlintRasterOf<C>::SlintRasterOf(const HdTemplateTraits& traits)
+    : impl_(std::make_unique<Impl>(traits)) {}
 
-SlintRaster::~SlintRaster() {
+template <class C>
+SlintRasterOf<C>::~SlintRasterOf() {
     if (!impl_ || !impl_->scene)
         return;
     if (current_seat() != SeatTag::HdOsd) {
@@ -395,7 +415,8 @@ SlintRaster::~SlintRaster() {
     impl_->drop_scene();
 }
 
-bool SlintRaster::open_(const HdTheme& theme, const HdLayout& layout) {
+template <class C>
+bool SlintRasterOf<C>::open_(const HdTheme& theme, const HdLayout& layout) {
     impl_->theme = theme;
     impl_->adopt_layout(layout);
     impl_->have_theme = true;
@@ -403,7 +424,8 @@ bool SlintRaster::open_(const HdTheme& theme, const HdLayout& layout) {
     return impl_->ensure();
 }
 
-HdRect SlintRaster::render_(
+template <class C>
+HdRect SlintRasterOf<C>::render_(
     const PageDescription& page,
     const HdBadgeView& badge,
     std::span<std::uint16_t> panel,
@@ -431,16 +453,28 @@ HdRect SlintRaster::render_(
     return union_dirty(region, pw, ph);
 }
 
-void SlintRaster::close_() {
+template <class C>
+void SlintRasterOf<C>::close_() {
     if (!impl_)
         return;
     impl_->drop_scene();
 }
 
-void SlintRaster::relayout_(const HdLayout& layout) {
+template <class C>
+void SlintRasterOf<C>::relayout_(const HdLayout& layout) {
     impl_->adopt_layout(layout);
     impl_->drop_scene();
     impl_->force_full = true;
+}
+
+template class SlintRasterOf<HdTemplateZaparoo>;
+
+std::unique_ptr<HdRaster> make_hd_raster(HdTemplateId id) {
+    switch (id) {
+        case HdTemplateId::Zaparoo:
+            return std::make_unique<SlintRasterOf<HdTemplateZaparoo>>(hd_template_traits(id));
+    }
+    return nullptr;
 }
 
 }

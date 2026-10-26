@@ -42,8 +42,12 @@ static_assert(
     "cdi.cpp:25,497: TIMEKEEPER_SIZE (8 * 1024) is the pre_size"
 );
 static_assert(
+    kCdi.staging.save_pre_on_empty,
+    "CDi.sv:322 never writes a 0-size timekeeper: an empty file gets the pre-size too"
+);
+static_assert(
     kCdi.staging.start_save_dir == std::string_view{"games/CD-i"},
-    "cdi.cpp:1171: cdi_load_root_nvram's last_dir"
+    "stock cdi_load_root_nvram: its last_dir"
 );
 static_assert(
     kCdi.staging.save_dest == WideIoIndex{},

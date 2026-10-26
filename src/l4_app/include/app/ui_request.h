@@ -38,6 +38,7 @@ struct UiRequest {
         LoadRamImage,
         SetOsdStyle,
         SdramDetected,
+        SetHdTheme,
         kCount,
     };
 
@@ -136,6 +137,11 @@ struct UiRequest {
         std::uint16_t osd_mask = 0;
     };
 
+    struct SetHdTheme {
+        static constexpr Kind kKind = Kind::SetHdTheme;
+        std::uint8_t theme = 0;
+    };
+
     using Alternatives = std::tuple<
         LoadCore,
         SaveConfig,
@@ -150,7 +156,8 @@ struct UiRequest {
         LoadFileByDigit,
         LoadRamImage,
         SetOsdStyle,
-        SdramDetected>;
+        SdramDetected,
+        SetHdTheme>;
 
     Kind kind = Kind::LoadCore;
     std::uint8_t pad_[3]{};

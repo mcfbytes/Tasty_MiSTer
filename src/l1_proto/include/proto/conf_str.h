@@ -442,6 +442,8 @@ public:
 
     [[nodiscard]] std::vector<IoIndex> remembered_mounts() const;
 
+    [[nodiscard]] std::uint16_t mount_slot_mask() const noexcept;
+
     static std::uint8_t ext_subindex(std::string_view filename, std::string_view ext_list) noexcept;
 
     static std::uint16_t wire_index(ConfStrFileRow row, std::string_view filename) noexcept {

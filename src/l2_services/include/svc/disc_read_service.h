@@ -90,6 +90,8 @@ public:
     void serve() noexcept override;
     [[nodiscard]] bool idle() const noexcept override;
 
+    void serve_on_io(DiscReadSlot& s) noexcept;
+
     void pump_on_caller() noexcept;
 
     [[nodiscard]] Chan& channel_for_test() noexcept { return chan_; }

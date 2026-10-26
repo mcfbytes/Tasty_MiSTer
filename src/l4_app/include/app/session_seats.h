@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
+#include <span>
+
 #include "app/bay_releases.h"
 #include "app/board_ops.h"
 #include "app/built_core.h"
@@ -15,6 +18,7 @@
 #include "hal/fpga_aperture.h"
 #include "hal/pin_levels.h"
 #include "os/types.h"
+#include "proto/status_snapshot.h"
 
 namespace mister::xthread {
 struct RtStats;
@@ -112,7 +116,11 @@ struct SupervisorParts {
     hal::DoorbellPolicy doorbells{};
     hal::FpgaAperture fpga_mem{};
     hal::PhysRegion lw_window{};
+    std::span<std::uint32_t> lw_image{};
     os::UioLineSpace doorbell_nodes{};
+    os::CpuMask doorbell_cpus{};
+
+    infra::OptRef<const proto::StatusSnapshotCell> status_snapshots{};
 
     infra::OptRef<proto::IStorageChannel> storage_channel{};
 

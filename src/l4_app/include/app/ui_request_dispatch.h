@@ -24,6 +24,7 @@ concept UiRequestSink = requires(S& s, const UiRequest& m, const UiRequest::Head
     s.on(std::declval<const UiRequest::LoadRamImage&>(), h);
     s.on(std::declval<const UiRequest::SetOsdStyle&>(), h);
     s.on(std::declval<const UiRequest::SdramDetected&>(), h);
+    s.on(std::declval<const UiRequest::SetHdTheme&>(), h);
     s.misrouted(m);
 };
 

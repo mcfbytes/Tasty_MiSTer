@@ -326,54 +326,35 @@ proto::BlockGeometry PsxCore::geometry_for(
     return g;
 }
 
-PsxCore::Answer PsxCore::classify_(std::int64_t lba) const noexcept {
-    const svc::Toc* toc = geom_.mounted ? &geom_.toc : nullptr;
-    if (toc == nullptr
-        || toc->last == 0
-        || lba < static_cast<std::int64_t>(toc->tracks[0].start.v)) {
-        return Answer::Zeros;
-    }
-    const auto ti = geom_.track_for_lba(proto::Lba{static_cast<std::uint32_t>(lba)});
-    if (!ti.has_value())
-        return Answer::Filler;
-    if (ti->v + 1 < toc->last) {
-        const svc::Track& next = toc->tracks[ti->v + 1];
-
-        if (next.pregap_declared
-            && lba > static_cast<std::int64_t>(next.start.v)
-                    - static_cast<std::int64_t>(next.pregap)) {
-            return Answer::Pregap;
-        }
-    }
-    return Answer::Engine;
-}
-
 void PsxCore::warm_window_(std::int64_t lba0, std::size_t sectors) noexcept {
     if (!discs_)
         return;
     for (std::size_t i = 0; i < sectors; ++i) {
         const std::int64_t lba = lba0 + static_cast<std::int64_t>(i);
-        if (classify_(lba) != Answer::Engine)
+        if (PsxSectorMap{geom_}.classify(lba) != PsxSectorMap::Answer::Engine)
             continue;
         discs_->hint(svc::DiscForm::RawFrame, proto::Lba{static_cast<std::uint32_t>(lba)});
     }
 }
 
 bool PsxCore::serve_sector_(std::int64_t lba, std::span<std::uint8_t> out) noexcept {
-    switch (classify_(lba)) {
+    using Answer = PsxSectorMap::Answer;
+    const Answer a = PsxSectorMap{geom_}.classify(lba);
+    switch (a) {
         case Answer::Zeros:
-            std::memset(out.data(), 0, out.size());
-            return true;
+            break;
         case Answer::Filler:
-            std::memset(out.data(), 0xAA, out.size());
             ++filler_sectors_;
-            return true;
+            break;
         case Answer::Pregap:
-            std::memset(out.data(), 0, out.size());
             ++pregap_zero_sectors_;
-            return true;
+            break;
         case Answer::Engine:
             break;
+    }
+    if (a != Answer::Engine) {
+        std::memset(out.data(), PsxSectorMap::fill_byte(a), out.size());
+        return true;
     }
     std::memset(out.data(), 0xAA, out.size());
     const proto::Lba at{static_cast<std::uint32_t>(lba)};

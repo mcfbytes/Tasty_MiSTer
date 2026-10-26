@@ -64,6 +64,17 @@ public:
         start_refused_ = true;
     }
 
+    void end_by_bridge(std::uint32_t gen) noexcept {
+        TASTY_SEAT_BODY(StartWatch);
+        begin_refusal();
+        bridge_ended_gen_ = gen;
+    }
+
+    [[nodiscard]] bool ended_by_bridge(std::uint32_t gen) const noexcept {
+        TASTY_SEAT_BODY(StartWatch);
+        return start_refused_ && bridge_ended_gen_ == gen;
+    }
+
     void owe_front_end(const UiRequest::LoadCore& pending) noexcept {
         TASTY_SEAT_BODY(StartWatch);
         if (front_end_fallback_armed_) {
@@ -74,6 +85,16 @@ public:
             ++fallbacks_.front_end_failed;
             fallback_cell_.publish(fallbacks_);
         }
+    }
+
+    void owe_front_end_always(const UiRequest::LoadCore& pending) noexcept {
+        TASTY_SEAT_BODY(StartWatch);
+        if (!names_front_end_image(pending.path.view(), pending.xml)) {
+            front_end_owed_ = true;
+            return;
+        }
+        ++fallbacks_.front_end_failed;
+        fallback_cell_.publish(fallbacks_);
     }
 
     [[nodiscard]] bool front_end_askable(bool switch_busy) const noexcept {
@@ -250,6 +271,7 @@ private:
     os::Deadline start_due_ = os::Deadline::immediate();
     bool start_bounded_ = false;
     bool start_refused_ = false;
+    std::optional<std::uint32_t> bridge_ended_gen_{};
     bool front_end_fallback_armed_ = false;
     bool before_seats_ = false;
     bool front_end_owed_ = false;

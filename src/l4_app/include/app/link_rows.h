@@ -17,6 +17,8 @@ enum class LinkKind : std::uint8_t {
     CensusRows,
     Doorbells,
     BlockSlots,
+    Pads,
+    Sectors,
     kCount
 };
 
@@ -50,6 +52,14 @@ inline constexpr auto kLinkRows = std::to_array<LinkRow>({
      BindPhase::Bind,
      "",
      "the save-slot binding table, mounted by the kind nibble (item)"},
+    {LinkKind::Pads,
+     BindPhase::Grant,
+     "AXI:",
+     "MAIN grants a declared LW window's SYS1 PAD block; T-RT stores pads there, else the link"},
+    {LinkKind::Sectors,
+     BindPhase::Grant,
+     "AXI:",
+     "MAIN grants a SYS1 SECTOR block and its BLK row to T-IO; else the slot stays on the link"},
 });
 
 consteval bool link_rows_cover_each_kind_once() {
@@ -82,7 +92,6 @@ static_assert(
 );
 
 struct BindOutcome {
-    std::uint32_t posted = 0;
     std::uint32_t decoders_refused = 0;
     std::uint32_t slots_refused = 0;
 };
@@ -108,14 +117,13 @@ struct BindOutcome {
             case LinkKind::Doorbells:
             case LinkKind::ImageSink:
             case LinkKind::CoreWindow:
+            case LinkKind::Pads:
+            case LinkKind::Sectors:
             case LinkKind::kCount:
                 continue;
         }
-        if (tx.push(op)) {
-            ++out.posted;
-        } else {
+        if (!tx.push(op))
             ++out.slots_refused;
-        }
     }
     return out;
 }

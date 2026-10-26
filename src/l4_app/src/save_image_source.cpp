@@ -104,6 +104,11 @@ proto::FileSize SaveImageSource::size_of(proto::SlotIndex slot) const {
     return b->size;
 }
 
+bool SaveImageSource::exists(proto::SlotIndex slot) const noexcept {
+    const Binding* b = find(slot);
+    return b != nullptr && b->exists;
+}
+
 void SaveImageSource::note_attached(
     proto::SlotIndex slot,
     bool exists,
@@ -165,7 +170,7 @@ bool SaveImageSource::fill_blank(
     const Binding* b = find(slot);
     if (b == nullptr || !b->blank.declared())
         return false;
-    cores::render_blank(b->blank, static_cast<std::uint64_t>(lba.v) * kBlankBlockBytes, window);
+    cores::render_blank(b->blank, static_cast<std::uint64_t>(lba.v) * b->blank.lba_bytes, window);
     return true;
 }
 

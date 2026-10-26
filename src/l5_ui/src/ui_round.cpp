@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/ui_round.h"
 
+#include <algorithm>
+#include <cstdint>
+
 #include "app/hd_osd_screen.h"
 #include "app/page_description.h"
 #include "app/link_event_dispatch.h"
@@ -185,6 +188,9 @@ void UiRound::boot_witness() {
 }
 
 void UiRound::publish_page_record() {
+    const auto us_of = [](std::int64_t ns) noexcept {
+        return static_cast<std::uint32_t>(std::clamp<std::int64_t>(ns / 1000, 0, UINT32_MAX));
+    };
     const PageStack& st = model_.stack();
     app::UiPageRecord rec{
         static_cast<std::uint32_t>(st.depth()),
@@ -200,10 +206,13 @@ void UiRound::publish_page_record() {
     rec.button_injects = button_injects_;
     rec.button_core_resets = button_core_resets_;
     rec.last_hold_ms = last_hold_ms_;
+    const app::RecentGames& rg = model_.recent_games();
+    rec.recent_build_us = us_of(rg.build_ns());
+    rec.recent_update_us_max = us_of(rg.update_ns_max());
     page_cell_.publish(rec);
 }
 
-void UiRound::tick(bool link_work) {
+app::UiRoundEdge UiRound::compose_(bool link_work) {
     const PublishOnExit republish{this};
     ++ticks_;
 
@@ -251,30 +260,27 @@ void UiRound::tick(bool link_work) {
         const app::PageDescription* page = nullptr;
         if (model_.hd_tree() && model_.describe_top(described))
             page = &described;
-        hd_->tick(page, model_.pause_badge());
+        const app::HdStatusSlots slots{
+            .bluetooth = ctx_.status.bluetooth,
+            .rt = ctx_.sys.kernel == os::KernelRt::PreemptRt
+        };
+        hd_->tick(page, model_.pause_badge(), slots, model_.style().theme());
         model_.set_hd_root(hd_->available());
     }
-    const proto::OsdTarget target = hd_ && hd_->intends_hdmi() ? proto::OsdTarget::Vga
-                                                               : proto::OsdTarget::All;
-    if (idle) {
+    return app::UiRoundEdge{
+        .pumped = !idle,
+        .target = hd_ && hd_->intends_hdmi() ? proto::OsdTarget::Vga : proto::OsdTarget::All
+    };
+}
 
-        if (vis_unlatched_ || target != last_target_) {
-            const proto::LinkOp::OsdShow show = vis_unlatched_ ? model_.osd_show() : last_show_;
-            if (last_show_ == proto::LinkOp::OsdShow::Menu && show != last_show_)
-                decoder_.reset();
-            if (publish_visibility(show, target)) {
-                last_show_ = show;
-                last_target_ = target;
-                vis_unlatched_ = false;
-            } else {
-                vis_unlatched_ = true;
-            }
-        }
-        return;
-    }
+void UiRound::publish_edges_(const app::UiRoundEdge& edge) {
+    const std::uint32_t pubs = vis_pubs_;
+    const proto::OsdTarget target = edge.target;
 
-    const proto::LinkOp::OsdShow show = model_.osd_show();
-    if (show != last_show_ || target != last_target_) {
+    const bool owed = vis_unlatched_ || target != last_target_;
+    const proto::LinkOp::OsdShow show = edge.pumped || vis_unlatched_ ? model_.osd_show()
+                                                                      : last_show_;
+    if (edge.pumped ? (show != last_show_ || target != last_target_) : owed) {
 
         if (last_show_ == proto::LinkOp::OsdShow::Menu && show != last_show_)
             decoder_.reset();
@@ -286,6 +292,8 @@ void UiRound::tick(bool link_work) {
             vis_unlatched_ = true;
         }
     }
+    if (vis_pubs_ != pubs)
+        publish_page_record();
 }
 
 }

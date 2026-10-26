@@ -11,9 +11,13 @@
 #include <vector>
 
 #include "app/act_keys.h"
+#include "app/bind_tail.h"
 #include "app/board_ops.h"
 #include "app/board_reboot.h"
+#include "app/boot_restore.h"
 #include "app/cheat_catalog_cell.h"
+#include "app/companion_slot.h"
+#include "app/config_saves.h"
 #include "app/content_pick.h"
 #include "app/core_switch.h"
 #include "app/fabric_state.h"
@@ -30,9 +34,15 @@
 #include "app/owner_tally.h"
 #include "app/readiness_watch.h"
 #include "app/rung_roster.h"
+#include "app/rung_set.h"
 #include "app/save_extent_cell.h"
 #include "app/save_state_attach.h"
 #include "app/save_state_facts.h"
+#include "app/osd_grant.h"
+#include "app/osd_route.h"
+#include "app/sys_grant.h"
+#include "app/sys_route.h"
+#include "app/sector_route.h"
 #include "app/start_watch.h"
 #include "app/ui_request_ring.h"
 #include "app/window_tally.h"
@@ -82,6 +92,17 @@ public:
         const CoreTerms& core_terms;
         infra::OptRef<hal::IDoorbellSource> doorbell_source{};
         infra::OptRef<CompanionHost::Binds> companion_binds{};
+
+        infra::OptRef<SectorGrantCell> sector_grant{};
+        infra::OptRef<const SectorRouteCell> sector_route{};
+
+        infra::OptRef<OsdGrantCell> osd_grant{};
+        infra::OptRef<const OsdRouteCell> osd_route{};
+
+        infra::OptRef<SysGrantCell> sys_grant{};
+        infra::OptRef<const SysRouteCell> sys_route{};
+
+        infra::OptRef<xthread::WakeFlag> io_wake{};
         hal::PhysRegion aperture{os::PhysAddr{0}, 0, nullptr};
     };
     template <class T>
@@ -156,6 +177,7 @@ public:
     void on(const UiRequest::LoadRamImage& req, const UiRequest::Head& head);
     void on(const UiRequest::SetOsdStyle& req, const UiRequest::Head& head);
     void on(const UiRequest::SdramDetected& req, const UiRequest::Head& head);
+    void on(const UiRequest::SetHdTheme& req, const UiRequest::Head& head);
     void misrouted(const UiRequest& m) noexcept;
 
     void on(const proto::LinkEvent::ReadyEdge& e) noexcept;
@@ -188,6 +210,8 @@ public:
 
     [[nodiscard]] infra::OptRef<const LauncherProfile> launcher() const noexcept;
 
+    void retire_lw_at_exit() noexcept;
+
     [[nodiscard]] const CoreBuilder& core_builder() const noexcept { return builder_; }
 
     [[nodiscard]] const LadderStateCell& ladder_cell() const noexcept { return ladder_.cell(); }
@@ -199,9 +223,13 @@ public:
 
     [[nodiscard]] const Count& mgl_row0_cell() const noexcept { return mgl_row0_cell_; }
 
-    [[nodiscard]] const Count& save_write_failures_cell() const noexcept { return swf_cell_; }
+    [[nodiscard]] const Count& save_write_failures_cell() const noexcept {
+        return saves_.save_write_failures_cell();
+    }
 
-    [[nodiscard]] const Count& ini_write_failures_cell() const noexcept { return iwf_cell_; }
+    [[nodiscard]] const Count& ini_write_failures_cell() const noexcept {
+        return saves_.ini_write_failures_cell();
+    }
 
     [[nodiscard]] const Cell<FallbackCounts>& fallback_cell() const noexcept;
 
@@ -222,7 +250,6 @@ public:
 private:
     friend struct SessionOwnerTestAccess;
     using MountAsk = MountQueue::MountAsk;
-    using PickedLoad = ContentPick::PickedLoad;
     using Owed = ContentPick::Owed;
     using Wait = RungRoster::Wait;
 
@@ -266,9 +293,13 @@ private:
 
     [[nodiscard]] infra::OptRef<Rung> rung(RungSlot slot) noexcept override;
     [[nodiscard]] infra::OptRef<const Rung> rung(RungSlot slot) const noexcept override;
-    template <class Self>
-    [[nodiscard]] static auto rung_in_(Self& self, RungSlot slot) noexcept;
-    void settle(RungSlot slot, Rung::Pass pass, std::uint32_t pushed) override;
+    void settle(RungSlot slot, Rung::Pass pass) override;
+
+    void settle_addons_(Rung::Pass pass);
+    void settle_pieces_(Rung::Pass pass);
+    void settle_load_(Rung::Pass pass);
+    void settle_manifest_(Rung::Pass pass);
+    void settle_walk_(Rung::Pass pass);
     void step_held(RungSlot slot) override;
     [[nodiscard]] Wait held_wait(RungSlot slot) const noexcept override;
     [[nodiscard]] Wait rung_wait_() const noexcept;
@@ -305,6 +336,7 @@ private:
     void programmed(bool ok) override;
     [[nodiscard]] bool ask_recovery_switch() override;
     void parkless_teardown() override;
+    void fabric_suspect() noexcept override;
 
     [[nodiscard]] bool launcher_swap_held_() const noexcept;
     [[nodiscard]] bool launcher_swap_room_() const noexcept;
@@ -327,16 +359,15 @@ private:
     void order_hold_reset_() noexcept;
     void forget_core_() noexcept;
     void watch_start_() noexcept;
+
+    void watch_bridge_() noexcept;
+    void end_bridge_session_() noexcept;
     void give_up_start_(Errc why) noexcept;
     void fall_back_to_front_end_();
-    void sleep_ms_(unsigned ms);
-    bool push_gating_op_(const proto::LinkOp& op);
     [[nodiscard]] bool refuse_in_load_(UiRequest::Kind kind, CorrelationTag tag) noexcept;
 
     template <class A>
     [[nodiscard]] bool admit_(const A& req, CorrelationTag tag) noexcept;
-    void make_companion_();
-    void withdraw_companion_() noexcept;
     void step_companion_();
     [[nodiscard]] bool ask_savestates_(std::string_view rom, std::uint32_t gen) noexcept;
     [[nodiscard]] bool savestates_answered_(std::uint32_t gen) const noexcept;
@@ -344,11 +375,7 @@ private:
     void order_(const A& alt) noexcept;
     template <class A>
     bool order_refusable_(const A& alt) noexcept;
-    void on_identity_matched_(const proto::LinkEvent::IdentityMatched& w) noexcept;
-    void on_identity_mismatch_(const proto::LinkEvent::IdentityMismatch& w) noexcept;
-    void on_conf_str_(const proto::LinkEvent::ConfStr& c);
     void refuse_started_switch_(Errc why) noexcept;
-    void on_core_made_(const proto::LinkEvent::CoreMade& m) noexcept;
     void order_session_up_() noexcept;
 
     [[nodiscard]] bool arm_restore_ladder_(std::string_view config);
@@ -362,7 +389,6 @@ private:
     [[nodiscard]] std::string start_rbf_() const;
     void order_start_chain_(const StartChain& chain);
     void order_rbf_tail_(std::string_view path, proto::WideIoIndex dest, std::uint64_t offset);
-    [[nodiscard]] bool order_reset_level_(bool asserted);
 
     struct RememberedFile {
         proto::ConfStrFileRow row;
@@ -371,34 +397,21 @@ private:
 
     [[nodiscard]] std::vector<RememberedFile> read_remembered_files_() const;
     void order_remembered_files_(std::span<const RememberedFile> files);
-    void order_bind_identity_(const proto::ConfStr& conf);
-    void order_bind_doorbells_(const proto::ConfStr& conf);
-    void order_bind_joy_(std::string_view core_name) noexcept;
     void publish_fabric_();
     void step_savestate_hold_();
     [[nodiscard]] bool content_ordered_() const noexcept;
-    [[nodiscard]] bool intern_rel_at_(proto::FileId id, std::string_view rel);
-    void order_slot_previews_(const std::byte* pack, std::size_t len);
-    void order_bind_facts_() noexcept;
-    void order_make_core_();
+    void order_make_core_(bool fabric);
     [[nodiscard]] std::string_view make_core_rel_() const noexcept;
-    void post_make_core_();
+    [[nodiscard]] bool build_has_manifest_(const proto::ConfStr& cs) const;
     [[nodiscard]] bool arm_manifest_();
+    void abort_start_(Errc why) noexcept;
     void finish_core_made_() noexcept;
-    void order_bind_uart_(std::string_view core_name, const proto::ConfStr* conf = nullptr);
-    void on_save_config_(CorrelationTag tag);
-    [[nodiscard]] bool order_save_ask_(
-        proto::SaveKind kind,
-        std::uint8_t slot,
-        CorrelationTag tag,
-        bool gating = false
-    ) noexcept;
-    void on_save_bytes_(const proto::LinkEvent::SaveBytes& e);
+    enum class SlotAsker : std::uint8_t { Load, Boot, Refresh };
     void on_slot_names_(const proto::LinkEvent::SaveBytes& e);
+    void refuse_slot_names_(SlotAsker who, CorrelationTag tag);
+    void preview_slot_names_(std::span<const std::uint8_t> pack);
+    void bind_slot_answer_(bool boot, CorrelationTag tag, std::string_view path);
     void finish_boot_restore_() noexcept;
-    void order_save_upload_() noexcept;
-    void publish_save_verdict_(bool ok, CorrelationTag tag) noexcept;
-    [[nodiscard]] bool write_durably_(std::string_view rel, std::span<const std::byte> bytes);
 
     QuiesceChannel& park_;
     LinkTxChannel<SeatTag::Main>& inbox_;
@@ -419,10 +432,6 @@ private:
     RememberedFiles remembered_files_ = RememberedFiles::AsStock;
 
     ActKeys act_keys_{};
-    std::uint8_t slot_load_slot_ = 0;
-    std::uint8_t slot_save_slot_ = 0;
-    Count swf_cell_{};
-    Count iwf_cell_{};
     bool core_made_once_ = false;
     PathText front_end_image_{};
     BitstreamProgrammer& programmer_;
@@ -436,42 +445,27 @@ private:
     std::uint16_t cookie_ = 0;
     std::uint32_t fabric_gen_ = 0;
     const hal::PhysRegion aperture_;
-    bool boot_restore_owed_ = false;
-    bool session_up_owed_ = false;
+    BootRestore boot_restore_ = BootRestore::None;
     const BoardOps ops_{};
+    BindTail bind_;
+    ConfigSaves saves_;
     infra::OptRef<hal::IBootHandoff> handoff_{};
     Count mgl_row0_cell_{};
-    std::optional<AddonSend> addons_{};
-    std::optional<AddonSend> addons_after_{};
 
-    struct SaveStateHold {
-        PickedLoad load{};
-        std::uint32_t gen = 0;
-        std::int64_t due_ns = 0;
+    struct MadeFacts {
+        bool restore_owed = false;
+        bool cheat_records = false;
     };
 
-    std::optional<SaveStateHold> ss_hold_{};
-    std::optional<FileTxPieces> pieces_{};
-    std::optional<LoadLadder> load_{};
-    std::optional<ManifestLadder> manifest_{};
-    bool made_restore_owed_ = false;
-    bool made_cheat_records_ = false;
-    std::optional<LoadWalk> walk_{};
-    std::unique_ptr<cores::ICompanionLoad> companion_{};
-    bool companion_attached_ = false;
-    std::optional<CompanionWalk> companion_walk_{};
-    std::uint16_t companion_gen_ = 0;
-    std::uint32_t walk_gen_ = 0;
-    cores::MountStatus walk_answer_{};
-    std::uint32_t ordered_in_step_ = 0;
-    bool walk_answer_fresh_ = false;
+    std::optional<MadeFacts> made_{};
+    CompanionSlot companion_;
+    RungSet rungs_{};
     ILoadWindowMap<seat_owner::Main>& window_map_;
     const FileTxLevelCell& ftx_level_cell_;
     WindowTally windows_{};
     ContentPick content_;
     infra::OptRef<SaveStateAttach::AskInbox> save_state_asks_;
     infra::OptRef<const SaveStateFactsCell> save_state_facts_;
-    infra::OptRef<CompanionHost::Binds> companion_binds_;
     CoreBuilder builder_;
     BoardReboot reboot_;
     CoreSwitch switch_;

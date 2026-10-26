@@ -53,6 +53,7 @@ struct StorageRequest {
 
     struct Attach {
         static constexpr Kind kKind = Kind::Attach;
+        bool growable = false;
     };
 
     struct Detach {

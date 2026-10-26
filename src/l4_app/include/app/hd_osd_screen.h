@@ -7,6 +7,7 @@
 #include "app/hd_flip_slot.h"
 #include "app/hd_osd_ask.h"
 #include "app/hd_osd_status.h"
+#include "app/hd_status_slots.h"
 #include "app/hd_surface.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -39,7 +40,12 @@ public:
     HdOsdScreen(const HdOsdScreen&) = delete;
     HdOsdScreen& operator=(const HdOsdScreen&) = delete;
 
-    void tick(const PageDescription* page, HdOsdStatus::Badge badge) noexcept;
+    void tick(
+        const PageDescription* page,
+        HdOsdStatus::Badge badge,
+        HdStatusSlots slots = {},
+        std::uint8_t theme = 0
+    ) noexcept;
     [[nodiscard]] bool intends_hdmi() const noexcept;
     [[nodiscard]] bool covers_hdmi() const noexcept;
     [[nodiscard]] bool available() const noexcept;
@@ -69,6 +75,10 @@ private:
     PageDescription page_sent_{};
     HdOsdStatus::Badge badge_ = HdOsdStatus::Badge::Unknown;
     HdOsdStatus::Badge badge_sent_ = HdOsdStatus::Badge::Unknown;
+    HdStatusSlots slots_{};
+    HdStatusSlots slots_sent_{};
+    std::uint8_t theme_ = 0;
+    std::uint8_t theme_sent_ = 0;
     HdSurface surface_{};
     std::uint32_t epoch_ = 0;
     std::uint32_t applies_seen_ = 0;

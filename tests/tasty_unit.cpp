@@ -2062,6 +2062,19 @@ void test_nes_bk2_check_header_forms() {
     CHECK(fw::tasty_check_movie(*vfs, "nes.bk2", "r.nes") == 0);
     CHECK(t.put("r.nes", nes2 + body + "x"));
     CHECK(fw::tasty_check_movie(*vfs, "nes.bk2", "r.nes") == 3);
+
+    cores::RomDigest hb{cores::DigestKind::Sha1};
+    hb.update(std::span(reinterpret_cast<const std::uint8_t*>(body.data()), body.size()));
+    (void)::unlink(t.p("nes.bk2").c_str());
+    CHECK(write_bk2_text(
+        t.p("nes.bk2"),
+        "MovieVersion BizHawk v2.0\nPlatform NES\nSHA1 " + upper_hex(hb.finish()) + "\n",
+        log
+    ));
+    CHECK(t.put("r.nes", nes2 + body));
+    CHECK(fw::tasty_check_movie(*vfs, "nes.bk2", "r.nes") == 0);
+    (void)::unlink(t.p("nes.bk2").c_str());
+    CHECK(write_bk2_text(t.p("nes.bk2"), head, log));
     (void)::unlink(t.p("nes.bk2").c_str());
     CHECK(write_bk2_text(t.p("nes.bk2"), head + "StartsFromSavestate True\n", log));
     {

@@ -230,6 +230,19 @@ public:
         return facts_pending_;
     }
 
+    [[nodiscard]] std::string defmra_elected(
+        std::string_view text,
+        const UiRequest::LoadCore& pending
+    ) const {
+        TASTY_SEAT_BODY(NegotiatedCore);
+        if (pending.xml == XmlKind::Mra)
+            return {};
+        std::string rel = default_manifest_rel(text);
+        if (rel.empty() || !vfs_.file_exists(rel))
+            return {};
+        return rel;
+    }
+
     [[nodiscard]] std::string_view defmra_rel() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
         return defmra_rel_;
@@ -298,8 +311,8 @@ private:
             return;
         pending_facts_ = MraFacts{};
         intern_manifest_({});
-        const std::string rel = default_manifest_rel(text);
-        if (rel.empty() || !vfs_.file_exists(rel))
+        const std::string rel = defmra_elected(text, pending);
+        if (rel.empty())
             return;
         pending_facts_ = mra_facts_at(vfs_, rel);
         defmra_rel_ = rel;

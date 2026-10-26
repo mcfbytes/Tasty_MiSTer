@@ -16,6 +16,7 @@ enum class Cause : std::uint8_t {
     Ring,
     CoreTick,
     Test,
+    Sys,
     kCount,
 };
 
@@ -29,7 +30,7 @@ public:
     constexpr explicit CauseSet(Cause c) noexcept : bits_(bit(c)) {}
 
     constexpr CauseSet& operator|=(CauseSet o) noexcept {
-        bits_ = static_cast<std::uint8_t>(bits_ | o.bits_);
+        bits_ = static_cast<std::uint16_t>(bits_ | o.bits_);
         return *this;
     }
 
@@ -45,17 +46,17 @@ public:
     constexpr bool empty() const noexcept { return bits_ == 0u; }
 
 private:
-    static constexpr std::uint8_t bit(Cause c) noexcept {
-        return c == Cause::None ? std::uint8_t{0}
-                                : static_cast<std::uint8_t>(1u << static_cast<unsigned>(c));
+    static constexpr std::uint16_t bit(Cause c) noexcept {
+        return c == Cause::None ? std::uint16_t{0}
+                                : static_cast<std::uint16_t>(1u << static_cast<unsigned>(c));
     }
 
-    std::uint8_t bits_ = 0;
+    std::uint16_t bits_ = 0;
 };
 
 static_assert(
-    static_cast<unsigned>(Cause::kCount) <= 8,
-    "CauseSet packs one bit per Cause into a uint8_t. Keyed to the "
+    static_cast<unsigned>(Cause::kCount) <= 16,
+    "CauseSet packs one bit per Cause into a uint16_t. Keyed to the "
     "enum's OWN count, never to the last enumerator's name: a ninth "
     "Cause appended after Test left `Cause::Test < 8` true while its "
     "own bit shifted out of the byte and read false forever — a "

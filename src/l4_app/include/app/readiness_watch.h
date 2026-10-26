@@ -23,6 +23,8 @@ public:
 
         virtual void parkless_teardown() = 0;
 
+        virtual void fabric_suspect() noexcept = 0;
+
     protected:
         Host() = default;
         Host(const Host&) = default;
@@ -137,6 +139,8 @@ inline std::optional<ReadinessWatch::Reboot> ReadinessWatch::recover_session_(
     SwitchView sw,
     Host& host
 ) {
+
+    host.fabric_suspect();
 
     if (sw.standing) {
         recover_owed_ = !sw.programmed;

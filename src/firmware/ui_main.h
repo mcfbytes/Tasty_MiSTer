@@ -24,6 +24,7 @@ class IEventSink;
 class IOwnerTick;
 class IUiRoundPort;
 class LauncherScreen;
+class LwOsdEndpoint;
 class MglPump;
 template <SeatTag Seat>
 class LinkRxChannel;
@@ -68,6 +69,8 @@ public:
         infra::OptRef<app::SaveStateAttach> save_states{};
 
         infra::OptRef<app::IOwnerTick> owner_tick{};
+
+        infra::OptRef<app::LwOsdEndpoint> lw_osd{};
     };
 
     UiMain(
@@ -133,6 +136,7 @@ private:
     app::IEventSink& ui_sink_;
     const infra::OptRef<app::IUiRoundPort> ui_round_;
     infra::OptRef<app::IOwnerTick> owner_tick_{};
+    const infra::OptRef<app::LwOsdEndpoint> lw_osd_;
     app::LinkRxChannel<SeatTag::Ui>& ui_rx_;
     infra::OptRef<app::SaveStateAttach> save_states_;
     xthread::WakeFlag& wake_;

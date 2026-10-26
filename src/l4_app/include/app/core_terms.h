@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
+#include <span>
+
 #include "cores/save_copy_level.h"
 #include "hal/doorbell_policy.h"
 #include "hal/fpga_aperture.h"
+#include "hal/irq_pin.h"
 #include "hal/phys_region.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -55,7 +59,10 @@ struct CoreTerms {
 
     hal::DoorbellPolicy doorbells{};
     hal::PhysRegion lw_window{};
+    std::span<std::uint32_t> lw_image{};
     os::UioLineSpace doorbell_nodes{};
+    os::CpuMask doorbell_cpus{};
+    const char* proc_root = hal::kProcRoot;
 };
 
 }

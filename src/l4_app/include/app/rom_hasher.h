@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include <memory>
-#include <optional>
+#include <vector>
 
 #include "cores/rom_digest.h"
 #include "infra/seat.h"
@@ -29,21 +29,21 @@ public:
         std::uint64_t off,
         std::uint64_t end,
         cores::RomDigest digest,
-        std::optional<cores::RomDigest> alt = std::nullopt
+        std::vector<cores::RomDigest> alts = {}
     ) noexcept;
 
     [[nodiscard]] Pace step() noexcept;
 
     [[nodiscard]] cores::RomDigest& digest() noexcept { return digest_; }
 
-    [[nodiscard]] std::optional<cores::RomDigest>& alt() noexcept { return alt_; }
+    [[nodiscard]] std::vector<cores::RomDigest>& alts() noexcept { return alts_; }
 
 private:
     std::unique_ptr<svc::IFile> file_{};
     std::uint64_t off_ = 0;
     std::uint64_t end_ = 0;
     cores::RomDigest digest_{};
-    std::optional<cores::RomDigest> alt_{};
+    std::vector<cores::RomDigest> alts_{};
 };
 
 }

@@ -62,10 +62,16 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/spi_sample.h
   hal/spi_sample_source.h
   hal/spi_transport.h
+  hal/sector_block.h
+  hal/osd_block.h
+  hal/sys_block.h
+  hal/sys_directory.h
   hal/thread_map.h
   hal/types.h
   hal/unmeasured.h
   hal/uio_doorbell_source.h
+  hal/uio_frame_lane.h
+  hal/uio_reg_file.h
   hal/video_out_decl.h
   hal/window_decl.h
 )

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/block_slots.h"
+#include "proto/save_slot_rule.h"
 #include "proto/disc_announce.h"
 #include "hal/selected.h"
 #include "proto/storage_completion_dispatch.h"
@@ -369,9 +370,15 @@ bool BlockSlots::submit_attach(SlotIndex slot) noexcept {
         return false;
     if (records_[slot.v].gate.state != SlotGate::State::Idle)
         return false;
+
+    const IImageSource* const src = source_for(slot);
+    const bool growable = src != nullptr && src->attributes(slot).growable;
     return submit_lifecycle_(
         slot,
-        infra::make<StorageRequest>(StorageRequest::Attach{}, request_head_(slot))
+        infra::make<StorageRequest>(
+            StorageRequest::Attach{.growable = growable},
+            request_head_(slot)
+        )
     );
 }
 
@@ -808,14 +815,19 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
         return Pass::Answered;
     }
 
-    if (s.deferred_create) {
-
-        if (req.lba.v != 0) {
-            ++diag_.discarded_writes;
-            return Pass::Answered;
-        }
+    const SaveSlotRule rule{
+        .size = s.size_bytes,
+        .growable = s.growable,
+        .deferred_create = s.deferred_create
+    };
+    const SaveSlotRule::Plan plan = rule.plan_write(req.lba, block_size, sz);
+    if (plan.act == SaveSlotRule::Act::Discard) {
+        ++diag_.discarded_writes;
+        return Pass::Answered;
+    }
+    if (plan.act == SaveSlotRule::Act::Create) {
         if (res != nullptr) {
-            auto created = res->create(req.slot, chan_->half(req.slot, drain_half).first(sz));
+            auto created = res->create(req.slot, chan_->half(req.slot, drain_half).first(plan.len));
             if (!created) {
                 ++diag_.write_failures;
                 return Pass::Answered;
@@ -826,29 +838,12 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
             return Pass::Answered;
         }
 
-        if (!submit_create(req.slot, drain_half, sz))
+        if (!submit_create(req.slot, drain_half, plan.len))
             ++diag_.write_failures;
         return Pass::Answered;
     }
-
-    const std::uint64_t size_in_blocks = s.size_bytes.v / block_size;
-    if (sz == 0 || static_cast<std::uint64_t>(req.lba.v) > size_in_blocks) {
-        ++diag_.discarded_writes;
-        return Pass::Answered;
-    }
-    const std::uint64_t offset = static_cast<std::uint64_t>(req.lba.v) * block_size;
-    std::uint32_t len = sz;
-    if (!s.growable) {
-
-        const std::uint64_t rem = s.size_bytes.v > offset ? s.size_bytes.v - offset : 0;
-        if (rem < len)
-            len = static_cast<std::uint32_t>(rem);
-    }
-
-    if (len == 0) {
-        ++diag_.discarded_writes;
-        return Pass::Answered;
-    }
+    const std::uint64_t offset = plan.offset;
+    const std::uint32_t len = plan.len;
     if (res == nullptr) {
         if (!submit_write(req.slot, drain_half, offset, len))
             ++diag_.write_failures;
@@ -867,6 +862,11 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
 }
 
 Ex<BlockSlots::Pass> BlockSlots::serve(hal::ISpiTransport& link, const SpiBlockPoll::Decode& d) {
+
+    if (((static_cast<unsigned>(lw_slots_) >> d.req.slot.v) & 1u) != 0u) {
+        ++diag_.lw_slot_passes;
+        return Pass::Deferred;
+    }
 
     if (records_[d.req.slot.v].gate.state != SlotGate::State::Idle) {
         ++diag_.deferred_passes;

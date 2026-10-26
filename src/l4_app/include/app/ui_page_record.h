@@ -24,6 +24,9 @@ struct UiPageRecord {
     std::uint32_t button_injects = 0;
     std::uint32_t button_core_resets = 0;
     std::uint32_t last_hold_ms = 0;
+
+    std::uint32_t recent_build_us = 0;
+    std::uint32_t recent_update_us_max = 0;
 };
 
 using UiPageCell = xthread::Telemetry<UiPageRecord, SeatTag::Ui>;

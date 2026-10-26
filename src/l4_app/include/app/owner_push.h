@@ -3,21 +3,12 @@
 
 #include "app/link_tx_channel.h"
 #include "app/owner_tally.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::app {
 
-template <class Op>
-[[nodiscard]] inline bool push_posted(
-    LinkTxChannel<SeatTag::Main>& inbox,
-    OwnerTally& tally,
-    const Op& op
-) noexcept {
-    if (!inbox.push(op))
-        return false;
-    ++tally.ops_posted;
-    return true;
-}
+class ISleeper;
 
 template <class Op>
 [[nodiscard]] inline bool push_dropping(
@@ -25,7 +16,7 @@ template <class Op>
     OwnerTally& tally,
     const Op& op
 ) noexcept {
-    if (push_posted(inbox, tally, op))
+    if (inbox.push(op))
         return true;
     ++tally.op_drops;
     return false;
@@ -37,10 +28,19 @@ template <class Op>
     OwnerTally& tally,
     const Op& op
 ) noexcept {
-    if (push_posted(inbox, tally, op))
+    if (inbox.push(op))
         return true;
     ++tally.order_refusals;
     return false;
 }
+
+inline constexpr unsigned kPushRetries = 50;
+
+[[nodiscard]] bool push_gating(
+    LinkTxChannel<SeatTag::Main>& inbox,
+    OwnerTally& tally,
+    infra::OptRef<ISleeper> sleeper,
+    const proto::LinkOp& op
+);
 
 }

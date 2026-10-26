@@ -155,6 +155,7 @@ void MenuBlock::latch(const svc::ConfigSnapshot& c, ThreadAssembly::SeatMains& m
     stores_.latch(c);
 
     ui_model_.set_osd_style(c.osd_style == 1);
+    ui_model_.set_hd_theme(c.hd_theme);
     (void)hd_.open_seat(c, mains);
 }
 

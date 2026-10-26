@@ -606,6 +606,9 @@ DiagSampler::Sources ThreadAssembly::with_ui_cells_(
         .rec_write = s.rec_write,
         .rec_avi = s.rec_avi,
         .screenshots = s.screenshots,
+        .sector_route = s.sector_route,
+        .osd_route = s.osd_route,
+        .sys_route = s.sys_route,
     };
 }
 

@@ -18,6 +18,7 @@
 #include "app/page_description.h"
 #include "app/pause_badge.h"
 #include "app/ui_request_ring.h"
+#include "infra/ascii.h"
 #include "proto/standard_item.h"
 #include "proto/status_word.h"
 #include "ui/page_ask.h"
@@ -591,6 +592,11 @@ bool MenuModel::describe_top(app::PageDescription& out) {
         return false;
     if (remember)
         hd_window_first_[depth - 1] = out.first;
+
+    if (stack_.top_id() == PageId::CoreOptions
+        && !items_.core_name().empty()
+        && infra::ieq(out.title.view(), items_.core_name()))
+        (void)out.title.assign("Advanced");
     out.crumb = app::hd_crumb(items_.core_name(), out.title.view());
     if (now_playing_.game_loaded()) {
         (void)out.subtitle.assign(now_playing_.title());
@@ -617,9 +623,13 @@ void MenuModel::on_request_done(
 
     if (recorded && ctx.played) {
         const app::RecentGames::Played p = played_record_();
+        std::string image{p.core_image};
+
+        if (image.empty() && ctx.files.has_value())
+            image = app::RecentGames::core_image_of(*ctx.files, p.core_name);
         (void)ctx.played->record(
             app::PlayedHistory::Record{
-                .core_image = std::string{p.core_image},
+                .core_image = std::move(image),
                 .core_name = std::string{p.core_name},
                 .path = std::string{p.path},
                 .title = std::string{p.title},

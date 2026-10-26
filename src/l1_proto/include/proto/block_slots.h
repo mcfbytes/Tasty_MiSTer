@@ -63,11 +63,14 @@ public:
         std::uint32_t stale_completions = 0;
         std::uint32_t no_half_substitutes = 0;
         std::uint32_t late_answers = 0;
+        std::uint32_t lw_slot_passes = 0;
     };
 
     enum class Pass : std::uint8_t { Idle, Answered, Deferred };
 
     void set_storage_live(bool live) noexcept { storage_live_ = live; }
+
+    void bind_lw_slots(std::uint16_t mask) noexcept { lw_slots_ = mask; }
 
     void bind_roles(SlotIndex slot, const SlotRoles& roles) noexcept {
         if (slot.v >= kBlockSlots)
@@ -117,6 +120,7 @@ public:
             roles_[i] = SlotRoles{};
             records_[i].gate = SlotGate{};
         }
+        lw_slots_ = 0;
         invalidate_all();
     }
 
@@ -272,6 +276,7 @@ private:
     infra::OptRef<IStorageChannel> chan_;
     infra::OptRef<const os::IClock> clock_;
     bool storage_live_ = false;
+    std::uint16_t lw_slots_ = 0;
     std::uint32_t next_seq_ = 1;
     infra::OptRef<IImageSource> source_;
     SlotRoleTable roles_{};

@@ -9,25 +9,18 @@
 #include "infra/ascii.h"
 #include "ui/confirm_launch.h"
 #include "ui/confirm_page.h"
+#include "ui/hd_page0_walk.h"
 #include "ui/game_title.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/now_playing.h"
 #include "ui/options_page.h"
 #include "ui/page_context.h"
-#include "ui/place_facts.h"
 #include "ui/slot_focus.h"
 
 namespace mister::ui {
 namespace {
 
 constexpr std::array<std::string_view, 2> kYesNo{"Yes", "No"};
-
-BuildEnv page0_of(const BuildEnv& env) noexcept {
-    BuildEnv page0 = env;
-    page0.page = 0;
-    page0.flat = false;
-    return page0;
-}
 
 app::Mgl document_of(const app::RecentGames::Record& r) {
     app::Mgl doc;
@@ -44,16 +37,15 @@ app::Mgl document_of(const app::RecentGames::Record& r) {
 RecentLaunch::RecentLaunch(const HdPlanInputs& in)
     : ctx_(in.ctx),
       running_core_(app::recent_core_name(in.now_playing.core_image())),
-      env_(page0_of(in.env)),
+      env_(HdPage0Walk::page0_of(in.env)),
       front_end_(in.front_end) {
     TASTY_SEAT_BODY(RecentLaunch);
     if (front_end_)
         return;
-    if (!walk_model_.build(in.items, page0_of(in.env)).has_value()) {
+    if (!page0_.run(in.items, in.env, true, in.verbs)) {
         ++refusals_;
         return;
     }
-    placer_.emplace(walk_model_, env_.slots, in.verbs, PlaceFacts{});
     picks_.emplace(
         env_,
         SlotPickHost::Borrows{
@@ -75,21 +67,14 @@ bool RecentLaunch::asks_first(const app::RecentGames::Record& r) const {
 }
 
 infra::OptRef<const OptionItem> RecentLaunch::slot_for_(const app::RecentGames::Record& r) const {
-    if (!placer_ || !infra::ieq(r.core, running_core_))
+    if (!infra::ieq(r.core, running_core_))
         return {};
-    const SlotFocus want{
-        r.slot == 'S' ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
-        proto::IoIndex{r.ioctl_index}
-    };
-    for (const OptionItem* it : placer_->slots()) {
-        const SlotFocus at{
-            it->mounts_image() ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
-            proto::IoIndex{it->ioctl_index}
-        };
-        if (at == want)
-            return infra::OptRef<const OptionItem>{*it};
-    }
-    return {};
+    return page0_.slot_row(
+        SlotFocus{
+            r.slot == 'S' ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
+            proto::IoIndex{r.ioctl_index}
+        }
+    );
 }
 
 Transition RecentLaunch::launch(const app::RecentGames::Record& r) {

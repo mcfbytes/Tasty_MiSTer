@@ -205,7 +205,7 @@ void StorageService::on(const Req::Flush&, const Req::Head& h, Work& w) noexcept
     finish_(st, w, infra::make<Cmp>(Cmp::Flush{}, answer_head(h, st)));
 }
 
-void StorageService::on(const Req::Attach&, const Req::Head& h, Work& w) noexcept {
+void StorageService::on(const Req::Attach& a, const Req::Head& h, Work& w) noexcept {
     Cmp::Attach c{};
     proto::StorageStatus st = proto::StorageStatus::Ok;
     if (h.slot.v >= kSlots || !w.backend) {
@@ -218,6 +218,15 @@ void StorageService::on(const Req::Attach&, const Req::Head& h, Work& w) noexcep
         } else {
             st = status_of(e.error().code);
         }
+
+        ISaveFilesOnIo::Save& v = io_.saves[h.slot.v];
+        v = ISaveFilesOnIo::Save{
+            .file = w.backend,
+            .size = proto::FileSize{e ? e->v : 0},
+            .exists = e.has_value(),
+            .growable = a.growable,
+            .gen = v.gen + 1
+        };
     }
     finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
 }
@@ -237,6 +246,7 @@ void StorageService::on(const Req::Detach&, const Req::Head& h, Work& w) noexcep
 
         if (w.backend)
             w.backend->release();
+        io_.saves[h.slot.v] = ISaveFilesOnIo::Save{.gen = io_.saves[h.slot.v].gen + 1};
     }
     finish_(st, w, infra::make<Cmp>(Cmp::Detach{}, answer_head(h, st)));
 }
@@ -493,6 +503,13 @@ bool StorageService::quiesced() const noexcept {
     const auto d = data_.census();
     const auto c = ctl_.census();
     return d.idle + d.held_by_owner == d.live && c.idle + c.held_by_owner == c.live;
+}
+
+ISaveFilesOnIo::Save StorageService::save_on_io(proto::SlotIndex slot) const noexcept {
+    TASTY_SEAT_BODY_MEDIATOR(StorageService, A);
+    if (slot.v >= kSlots)
+        return {};
+    return io_.saves[slot.v];
 }
 
 StorageCounters StorageService::counters() const noexcept {

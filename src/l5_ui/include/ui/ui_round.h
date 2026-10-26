@@ -79,12 +79,17 @@ public:
     UiRound(const UiRound&) = delete;
     UiRound& operator=(const UiRound&) = delete;
 
-    void round(bool link_work) override {
+    [[nodiscard]] app::UiRoundEdge round(bool link_work) override {
         TASTY_SEAT_BODY(UiRound);
-        tick(link_work);
+        return compose_(link_work);
     }
 
-    void tick(bool link_work = false);
+    void publish_edges(const app::UiRoundEdge& edge) override {
+        TASTY_SEAT_BODY(UiRound);
+        publish_edges_(edge);
+    }
+
+    void tick(bool link_work = false) { publish_edges_(compose_(link_work)); }
 
     MenuModel& model() noexcept { return model_; }
 
@@ -157,6 +162,8 @@ public:
     std::uint32_t user_reset_refusals() const noexcept { return user_reset_refusals_; }
 
 private:
+    [[nodiscard]] app::UiRoundEdge compose_(bool link_work);
+    void publish_edges_(const app::UiRoundEdge& edge);
     [[nodiscard]] bool publish_visibility(proto::LinkOp::OsdShow show, proto::OsdTarget target);
     void publish_page_record();
 

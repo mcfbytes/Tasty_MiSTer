@@ -4,18 +4,20 @@
 #include <memory>
 
 #include "app/hd_raster.h"
+#include "app/hd_themes.h"
 
 namespace mister::app {
 
-class SlintRaster final : public HdRaster {
+template <class C>
+class SlintRasterOf final : public HdRaster {
     TASTY_SEAT_RESIDENT(HdOsd);
 
 public:
-    SlintRaster();
-    ~SlintRaster() override;
+    explicit SlintRasterOf(const HdTemplateTraits& traits);
+    ~SlintRasterOf() override;
 
-    SlintRaster(const SlintRaster&) = delete;
-    SlintRaster& operator=(const SlintRaster&) = delete;
+    SlintRasterOf(const SlintRasterOf&) = delete;
+    SlintRasterOf& operator=(const SlintRasterOf&) = delete;
 
 private:
     bool open_(const HdTheme& theme, const HdLayout& layout) override;
@@ -31,5 +33,7 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+[[nodiscard]] std::unique_ptr<HdRaster> make_hd_raster(HdTemplateId id);
 
 }

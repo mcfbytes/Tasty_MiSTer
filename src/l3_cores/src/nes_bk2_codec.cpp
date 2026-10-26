@@ -308,11 +308,11 @@ Ex<IMovieCodec::DigestSource> NesBk2Codec::digest_source(
     if (src->span.offset != 0 || *got != kRomHead || !is_ines(head))
         return src;
     const auto canon = ines1_header(head);
-    if (canon == head)
-        return src;
     src->span = DigestSpan{.offset = kRomHead, .length = src->span.length - kRomHead};
     src->prefix.assign(head.begin(), head.end());
-    src->alt_prefix.emplace(canon.begin(), canon.end());
+    if (canon != head)
+        src->alt_prefixes.emplace_back(canon.begin(), canon.end());
+    src->alt_prefixes.emplace_back();
     return src;
 }
 

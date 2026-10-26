@@ -237,7 +237,7 @@ enum class DigestFail : std::uint8_t { None, Open, Read, Short };
 
 struct Digested {
     std::optional<cores::DigestValue> value{};
-    std::optional<cores::DigestValue> alt{};
+    std::vector<cores::DigestValue> alts{};
     DigestFail fail = DigestFail::None;
 };
 
@@ -250,11 +250,11 @@ Digested digest_of(
     if (!f)
         return {.fail = DigestFail::Open};
     cores::RomDigest dig{kind};
-    cores::RomDigest alt{kind};
+    std::vector<cores::RomDigest> alts(src.alt_prefixes.size(), cores::RomDigest{kind});
     if (!src.prefix.empty())
         dig.update(std::span<const std::uint8_t>(src.prefix.data(), src.prefix.size()));
-    if (src.alt_prefix)
-        alt.update(std::span<const std::uint8_t>(src.alt_prefix->data(), src.alt_prefix->size()));
+    for (std::size_t i = 0; i < alts.size(); ++i)
+        alts[i].update(std::span<const std::uint8_t>(src.alt_prefixes[i]));
     std::vector<std::uint8_t> buf(64 * 1024);
     std::uint64_t off = src.span.offset;
     std::uint64_t left = src.span.length;
@@ -264,14 +264,15 @@ Digested digest_of(
         if (!got || *got == 0)
             return {.fail = got ? DigestFail::Short : DigestFail::Read};
         dig.update(std::span<const std::uint8_t>(buf.data(), *got));
-        if (src.alt_prefix)
-            alt.update(std::span<const std::uint8_t>(buf.data(), *got));
+        for (auto& a : alts)
+            a.update(std::span<const std::uint8_t>(buf.data(), *got));
         off += *got;
         left -= *got;
     }
-    if (!src.alt_prefix)
-        return {.value = dig.finish()};
-    return {.value = dig.finish(), .alt = alt.finish()};
+    Digested out{.value = dig.finish()};
+    for (auto& a : alts)
+        out.alts.push_back(a.finish());
+    return out;
 }
 
 bool digest_matches(
@@ -281,7 +282,11 @@ bool digest_matches(
 ) {
     if (d.value && codec.rom_matches(*d.value, facts))
         return true;
-    return d.alt && codec.rom_matches(*d.alt, facts);
+    for (const auto& a : d.alts) {
+        if (codec.rom_matches(a, facts))
+            return true;
+    }
+    return false;
 }
 
 int lookup_rom(
@@ -307,8 +312,9 @@ int lookup_rom(
         auto src = codec.digest_source(vfs, child);
         if (!src)
             return 0;
-        const std::uint64_t prefix_n = src->prefix.size()
-            + (src->alt_prefix ? src->alt_prefix->size() : 0);
+        std::uint64_t prefix_n = src->prefix.size();
+        for (const auto& a : src->alt_prefixes)
+            prefix_n += a.size();
         const std::uint64_t span_n = src->span.length;
 
         if (prefix_n > kRomHashBytes - hashed || span_n > kRomHashBytes - hashed - prefix_n) {

@@ -1,27 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/joystick.h"
-#include "hal/selected.h"
 
 namespace mister::proto {
 
 namespace {
 
-constexpr std::uint16_t kJoystick0 = 0x02;
-constexpr std::uint16_t kJoystick2 = 0x10;
 constexpr std::uint16_t kAstick = 0x1A;
 constexpr std::uint16_t kAstick2 = 0x3D;
-
-[[nodiscard]] Ex<void> put(hal::ISpiTransport& link, std::uint16_t w) {
-    auto r = link.transfer(hal::SpiWord{w});
-    if (!r)
-        return std::unexpected(r.error());
-    return {};
-}
 
 }
 
 Ex<void> JoystickPort::push_digital(
-    hal::ISpiTransport& link,
+    ILinkPadEncoder& pads,
     PlayerIndex player,
     JoyMask map,
     bool new_dir
@@ -34,31 +24,21 @@ Ex<void> JoystickPort::push_digital(
     if ((map.v >> 16) != 0u)
         use32_ = true;
 
-    const auto opcode = static_cast<std::uint16_t>(
-        (port < 2) ? (kJoystick0 + port) : (kJoystick2 + port - 2u)
-    );
+    const std::uint16_t opcode = digital_opcode(port);
 
-    {
-        hal::Selected cs(link, hal::ChipSelect::Io);
-        if (auto e = put(link, opcode); !e)
-            return e;
-        if (auto e = put(link, static_cast<std::uint16_t>(map.v & 0xFFFFu)); !e)
-            return e;
-
-        if (auto e = put(link, static_cast<std::uint16_t>(map.v >> 16)); !e)
-            return e;
-    }
+    if (auto e = pads.digital(opcode, map); !e)
+        return e;
 
     if (!wire_.suppress_analog_followup && wire_.joy_transl == 1 && new_dir) {
         const auto x = static_cast<std::int8_t>((map.v & 0x2u) ? -128 : ((map.v & 0x1u) ? 127 : 0));
         const auto y = static_cast<std::int8_t>((map.v & 0x8u) ? -128 : ((map.v & 0x4u) ? 127 : 0));
-        return push_analog_l(link, stick_index(player), x, y);
+        return push_analog_l(pads, stick_index(player), x, y);
     }
     return {};
 }
 
 Ex<void> JoystickPort::push_analog(
-    hal::ISpiTransport& link,
+    ILinkPadEncoder& pads,
     std::uint16_t opcode,
     std::uint8_t index,
     std::uint8_t x,
@@ -68,34 +48,17 @@ Ex<void> JoystickPort::push_analog(
     if (!wire_.analog_capable)
         return {};
 
-    hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto e = put(link, opcode); !e)
-        return e;
-    if (auto e = put(link, swapped(index)); !e)
-        return e;
-
-    if (wire_.analog_word) {
-
-        const auto w = static_cast<std::uint16_t>(
-            static_cast<std::uint16_t>(static_cast<std::uint16_t>(y) << 8)
-            | static_cast<std::uint16_t>(x)
-        );
-        return put(link, w);
-    }
-
-    if (auto e = put(link, x); !e)
-        return e;
-    return put(link, y);
+    return pads.stick(opcode, swapped(index), x, y);
 }
 
 Ex<void> JoystickPort::push_analog_l(
-    hal::ISpiTransport& link,
+    ILinkPadEncoder& pads,
     std::uint8_t index,
     std::int8_t x,
     std::int8_t y
 ) {
     return push_analog(
-        link,
+        pads,
         kAstick,
         index,
         static_cast<std::uint8_t>(x),
@@ -104,14 +67,14 @@ Ex<void> JoystickPort::push_analog_l(
 }
 
 Ex<void> JoystickPort::push_analog_r(
-    hal::ISpiTransport& link,
+    ILinkPadEncoder& pads,
     std::uint8_t index,
     std::int8_t x,
     std::int8_t y
 ) {
 
     return push_analog(
-        link,
+        pads,
         kAstick2,
         index,
         static_cast<std::uint8_t>(x),
@@ -119,31 +82,23 @@ Ex<void> JoystickPort::push_analog_r(
     );
 }
 
-Ex<void> JoystickPort::push_paddle(
-    hal::ISpiTransport& link,
-    PlayerIndex player,
-    std::uint8_t value
-) {
+Ex<void> JoystickPort::push_paddle(ILinkPadEncoder& pads, PlayerIndex player, std::uint8_t value) {
     if (player.v >= kMaxPorts) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
     }
-    return push_analog(link, kAstick, paddle_index(player), value, 0);
+    return push_analog(pads, kAstick, paddle_index(player), value, 0);
 }
 
-Ex<void> JoystickPort::push_spinner(
-    hal::ISpiTransport& link,
-    PlayerIndex player,
-    std::int8_t delta
-) {
+Ex<void> JoystickPort::push_spinner(ILinkPadEncoder& pads, PlayerIndex player, std::int8_t delta) {
     if (player.v >= kMaxPorts) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
     }
 
-    return push_analog(link, kAstick, spinner_index(player), static_cast<std::uint8_t>(delta), 0);
+    return push_analog(pads, kAstick, spinner_index(player), static_cast<std::uint8_t>(delta), 0);
 }
 
 Ex<bool> JoystickPort::submit(
-    hal::ISpiTransport& link,
+    ILinkPadEncoder& pads,
     PlayerIndex player,
     JoyMask buttons,
     JoyMask autofire
@@ -158,21 +113,21 @@ Ex<bool> JoystickPort::submit(
     if (composed == prev_[player.v])
         return false;
 
-    if (auto e = push_digital(link, player, composed, new_dir); !e) {
+    if (auto e = push_digital(pads, player, composed, new_dir); !e) {
         return std::unexpected(e.error());
     }
     prev_[player.v] = composed;
     return true;
 }
 
-Ex<bool> JoystickPort::release(hal::ISpiTransport& link, PlayerIndex player, JoyMask composed) {
+Ex<bool> JoystickPort::release(ILinkPadEncoder& pads, PlayerIndex player, JoyMask composed) {
     if (player.v >= kMaxPorts) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
     }
 
     if (composed.v == 0u)
         return false;
-    if (auto e = push_digital(link, player, JoyMask{0}, true); !e) {
+    if (auto e = push_digital(pads, player, JoyMask{0}, true); !e) {
         return std::unexpected(e.error());
     }
     return true;

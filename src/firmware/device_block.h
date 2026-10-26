@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <sys/epoll.h>
+
 #include <atomic>
 #include <memory>
 #include <optional>
@@ -33,8 +35,13 @@
 #include "app/link_rx_channel.h"
 #include "app/link_session.h"
 #include "app/link_tx_channel.h"
+#include "app/lw_osd_endpoint.h"
+#include "app/lw_sector_endpoint.h"
+#include "app/lw_sys_endpoint.h"
 #include "app/disk_relay.h"
 #include "app/mailbox_relay.h"
+#include "app/osd_grant.h"
+#include "app/osd_route.h"
 #include "app/osd_wire.h"
 #include "app/pcm_main.h"
 #include "app/pcm_ring_feeder.h"
@@ -42,6 +49,8 @@
 #include "app/save_state_facts.h"
 #include "app/scaler_frame_source.h"
 #include "app/screenshot_queue.h"
+#include "app/sector_grant.h"
+#include "app/sector_route.h"
 #include "app/session_owner.h"
 #include "app/session_seats.h"
 #include "app/video_pump.h"
@@ -55,6 +64,7 @@
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
 #include "infra/seat.h"
+#include "infra/unique_fd.h"
 #include "infra/wake_flag.h"
 #include "board_reset.h"
 #include "ladder_scope.h"
@@ -133,7 +143,8 @@ private:
     );
     static std::optional<svc::IoMain> open_io_main(
         xthread::WakeFlag& io_wake,
-        xthread::WakeFlag& main_wake
+        xthread::WakeFlag& main_wake,
+        int doorbells
     );
 
     [[nodiscard]] app::SupervisorParts::Services services_() noexcept;
@@ -164,6 +175,18 @@ public:
     std::atomic<bool> transitioning_{false};
 
     xthread::WakeFlag io_wake_;
+
+    UniqueFd io_doorbells_{::epoll_create1(EPOLL_CLOEXEC)};
+
+    app::SectorGrantCell sector_grant_{};
+    app::SectorRouteCell sector_route_{};
+
+    app::OsdGrantCell osd_grant_{};
+    app::OsdRouteCell osd_route_{};
+
+    app::SysGrantCell sys_grant_{};
+    app::SysRouteCell sys_route_{};
+    proto::StatusSnapshotCell status_snapshots_{};
 
     svc::DiscReadService::GeomCell disc_geometry_{};
     svc::DiscReadService::CountCell disc_counters_{};
@@ -226,6 +249,8 @@ public:
     svc::StorageService storage_;
     svc::DiscStore disc_store_;
     svc::DiscReadService discs_;
+    app::LwSectorEndpoint lw_sector_;
+    app::LwSysEndpoint lw_sys_;
     app::DurableWriteService writes_;
     app::DevMemWindowMap<seat_owner::Io> io_window_map_{};
     app::WindowJobService window_jobs_;
@@ -233,6 +258,7 @@ public:
     std::optional<app::ScalerFrameSource> frame_src_;
     proto::OsdSurface surface_;
     app::OsdWire osd_wire_;
+    app::LwOsdEndpoint lw_osd_;
     app::ConfigCell config_cell_;
     app::ConfStrCell conf_str_cell_;
 

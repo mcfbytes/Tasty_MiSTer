@@ -29,16 +29,11 @@ HdMediaPlan::HdMediaPlan(const HdPlanInputs& in)
 }
 
 void HdMediaPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) {
-    BuildEnv page0 = env;
-    page0.page = 0;
-    page0.flat = false;
     refs_.clear();
     rows_.clear();
-    placer_.reset();
-    if (!front_end_ && walk_model_.build(table, page0).has_value()) {
-        placer_.emplace(walk_model_, page0.slots, verbs_, PlaceFacts{});
-        rows_.reserve(placer_->slots().size());
-        for (std::size_t i = 0; i < placer_->slots().size(); ++i)
+    if (page0_.run(table, env, !front_end_, verbs_)) {
+        rows_.reserve(page0_.placer().slots().size());
+        for (std::size_t i = 0; i < page0_.placer().slots().size(); ++i)
             rows_.emplace_back(*this, i);
     }
     refs_.reserve(rows_.size());
@@ -47,11 +42,7 @@ void HdMediaPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) {
 }
 
 SlotFocus HdMediaPlan::focus_at_(std::size_t at) const {
-    const OptionItem& it = slot_(at);
-    return SlotFocus{
-        it.mounts_image() ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
-        proto::IoIndex{it.ioctl_index}
-    };
+    return page0_.focus_of(slot_(at));
 }
 
 infra::OptRef<IHdRewalk> HdMediaPlan::rewalker() {

@@ -276,6 +276,20 @@ std::vector<IoIndex> ConfStr::remembered_mounts() const {
     return slots;
 }
 
+std::uint16_t ConfStr::mount_slot_mask() const noexcept {
+    std::uint16_t mask = 0;
+    for (const Item& it : ast_.items()) {
+        if (it.kind != ItemKind::MountSlot)
+            continue;
+        const unsigned slot = it.has_digit ? it.digit : 0u;
+
+        if (slot >= 16u)
+            return 0xFFFFu;
+        mask = static_cast<std::uint16_t>(mask | (1u << slot));
+    }
+    return mask;
+}
+
 std::uint8_t ConfStr::ext_subindex(std::string_view filename, std::string_view ext_list) noexcept {
     const std::size_t dot = filename.rfind('.');
     if (dot == std::string_view::npos)

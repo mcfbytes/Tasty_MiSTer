@@ -467,6 +467,8 @@ private:
     std::uint32_t dropped_gen_ = 0;
     std::uint32_t holds_at_drop_ = 0;
 
+    void take_park_ask_() noexcept;
+
     void publish_fabric_();
 
     bool ever_running_ = false;

@@ -11,7 +11,7 @@ recorded on.
 
 The command-line tool is `tasty`.
 
-> **Status (v0.4.0):** early and hungry. NES runs play frame-exact on a DE10-Nano, some SNES runs play to the end, and the
+> **Status (v0.5.0):** early and hungry. NES runs play frame-exact on a DE10-Nano, some SNES runs play to the end, and the
 > other systems are experimental.
 
 ## <img src="art/icons/cloche-48.png" width="24" alt=""> On the menu
@@ -122,6 +122,7 @@ Played to the end, in sync, on a DE10-Nano with the stock cores. The last column
 | NES | Rush'n Attack | ["1 player" by peco_de_guile & aiqiyou](https://tasvideos.org/4884M) | 9:39 | `Rush'n Attack (USA).nes` | none; `--stay` to watch the ending and credits |
 | NES | Star Wars: The Empire Strikes Back | [by link_7777](https://tasvideos.org/6397M) | 10:42 | `Star Wars - The Empire Strikes Back (USA).nes` | none |
 | NES | Pac-Man (Tengen) | [by eien86](https://tasvideos.org/5231M) | 12:02 | `Pac-Man (USA) (Tengen).nes` | none |
+| NES | Battletoads | ["AI beats Battletoads" by bearsgaming-ui](https://github.com/bearsgaming-ui/AIBeatsBattletoads2) | 11:54 | `Battletoads (USA).nes` | none; play `battletoads_ai_11m54s_NesHawk.bk2` to Professor T. Bird's ending (the QuickNES file does not sync on the MiSTer core) |
 | SNES | Super Punch-Out!! | [by adelikat](https://tasvideos.org/4933M) | 15:52 | `Super Punch-Out!! (USA).sfc` | none |
 | SNES | Super Mario All-Stars: Super Mario Bros. | [by Niftski & HappyLee](https://tasvideos.org/6744M) | 5:03 | `Super Mario Collection (Japan).sfc` | `--lead -1` |
 | SNES | Contra III: The Alien Wars | ["2 players" by Mr_K & EZGames69](https://tasvideos.org/4363M) | 12:37 | `Contra III - The Alien Wars (USA).sfc` | none; `--stay` to watch the ending |
