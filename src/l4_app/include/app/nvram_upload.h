@@ -44,7 +44,7 @@ public:
     NvramUpload(
         hal::ISpiTransport& link,
         infra::OptRef<const svc::Vfs> vfs,
-        infra::OptRef<DurableWriteService> writes,
+        DurableWriteService& writes,
         infra::OptRef<ISleeper> sleeper,
         xthread::LogLane& log_lane
     ) noexcept
@@ -66,9 +66,7 @@ public:
 
     void settle_writes() noexcept;
 
-    [[nodiscard]] bool writes_settled() const noexcept {
-        return !writes_ || writes_->in_flight() == 0;
-    }
+    [[nodiscard]] bool writes_settled() const noexcept { return writes_.in_flight() == 0; }
 
     [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
 
@@ -77,14 +75,14 @@ public:
     void count_upload() noexcept { ++tally_.save_uploads; }
 
 private:
-    [[nodiscard]] Ex<void> arm_or_write_(std::string_view rel, std::span<const std::byte> bytes);
+    [[nodiscard]] Ex<void> arm_(std::string_view rel, std::span<const std::byte> bytes);
     [[nodiscard]] Ex<std::size_t> write_save_upload_(cores::ISaveUpload& up);
 
     void sleep_ms(unsigned ms);
 
     hal::ISpiTransport& link_;
     infra::OptRef<const svc::Vfs> vfs_{};
-    infra::OptRef<DurableWriteService> writes_{};
+    DurableWriteService& writes_;
     infra::OptRef<ISleeper> sleeper_{};
     xthread::LogLane& log_lane_;
     Tally tally_{};

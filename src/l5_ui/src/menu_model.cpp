@@ -593,6 +593,13 @@ bool MenuModel::describe_top(app::PageDescription& out) {
     if (remember)
         hd_window_first_[depth - 1] = out.first;
 
+    if (depth > 1) {
+        out.hub = {};
+        const Page* hub = stack_.bottom();
+        if (hub != nullptr && hub->describe_hub(out))
+            out.hub.depth = static_cast<std::uint8_t>(std::min<std::size_t>(depth - 1, 0xFF));
+    }
+
     if (stack_.top_id() == PageId::CoreOptions
         && !items_.core_name().empty()
         && infra::ieq(out.title.view(), items_.core_name()))
@@ -868,9 +875,15 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
         Page* top = stack_.top();
         if (routed)
             top = nullptr;
+
+        const HdKeyRemap::Axis axis = top != nullptr ? remap_.axis(*this, buttons)
+                                                     : HdKeyRemap::Axis{};
+        const bool across = axis.move != HdKeyRemap::Axis::Move::None;
         if (top != nullptr) {
             bool moved = false;
-            if ((buttons & UiEvent::Up) != 0) {
+            if (across) {
+                moved = remap_.apply(axis, nav_);
+            } else if ((buttons & UiEvent::Up) != 0) {
                 moved = nav_.move(Navigator::Direction::Up);
             } else if ((buttons & UiEvent::Down) != 0) {
                 moved = nav_.move(Navigator::Direction::Down);
@@ -883,7 +896,8 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
 
         if (top != nullptr) {
             UiEvent forwarded = *ev;
-            forwarded.buttons = buttons;
+            constexpr std::uint16_t kSides = UiEvent::Left | UiEvent::Right;
+            forwarded.buttons = across ? static_cast<std::uint16_t>(buttons & ~kSides) : buttons;
 
             const HdKeyRemap::Refresh rw = remap_.refresh(*this, forwarded);
             Transition t = top->handle(rw.ev);

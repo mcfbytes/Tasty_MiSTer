@@ -141,6 +141,7 @@ inline constexpr CoreProfile kPsx{
     .signatures = {},
     .blank_save = kPsxBlankSave,
     .staging = kPsxStaging,
+    .suppress_stick_dpad = true,
 
     .block_drain_budget = 1,
     .block_sector_floor = {.bytes = static_cast<std::uint32_t>(svc::kCdDataSize)},

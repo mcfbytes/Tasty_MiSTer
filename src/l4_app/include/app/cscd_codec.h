@@ -47,7 +47,9 @@ public:
 
     void restart(const RecOptions&) noexcept override { TASTY_SEAT_BODY(CscdCodec); }
 
-    void arm(const os::IClock*, std::int64_t) noexcept override { TASTY_SEAT_BODY(CscdCodec); }
+    void arm(infra::OptRef<const os::IClock>, std::int64_t) noexcept override {
+        TASTY_SEAT_BODY(CscdCodec);
+    }
 
     [[nodiscard]] Search search() const noexcept override {
         TASTY_SEAT_BODY(CscdCodec);

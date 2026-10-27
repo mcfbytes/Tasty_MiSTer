@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "recorder_block.h"
 
-#include "report.h"
+#include "open_verdict.h"
 
 namespace mister::fw {
 
 std::optional<hal::ScalerBuffers> RecorderBlock::map_scaler_buffers(
-    std::span<const hal::PhysRegion> regions
+    std::span<const hal::PhysRegion> regions,
+    OpenVerdict& verdict
 ) {
     std::optional<hal::ScalerBuffers> out;
-    if (regions.size() != hal::kRegionCount)
-        return out;
 
-    auto m = hal::ScalerBuffers::map(regions[static_cast<std::size_t>(hal::RegionId::ScalerOut)]);
-    if (m) {
+    const auto region = hal::declared_region(regions, hal::RegionId::ScalerOut);
+    if (!region)
+        return out;
+    if (auto m = hal::ScalerBuffers::map(*region); m) {
         out.emplace(std::move(*m));
     } else {
-        report("ScalerBuffers::map (degraded: every rec_start answers no_window)", m.error());
+        verdict.refuse("T-CAPTURE: ScalerBuffers::map", m.error());
     }
     return out;
 }
@@ -40,7 +41,7 @@ RecorderBlock::RecorderBlock(
               .video = device.video_pump_.geometry_cell(),
               .channel = raw_frames_
           },
-          map_scaler_buffers(plat.regions)
+          map_scaler_buffers(plat.regions, device.verdict())
       },
       avi_encoder_{app::AviEncoder::Wiring{
           .out = infra::OptRef<app::ChunkChannel>{chunks_},
@@ -65,23 +66,26 @@ RecorderBlock::RecorderBlock(
           .writer = infra::OptRef<const app::RecWriteStatusCell>{rec_write_status_},
           .diag = infra::OptRef<xthread::DiagLog>{device.diag_log_},
           .identity = infra::OptRef<const app::IdentityLatch>{device.session_.identity()}
-      }} {}
+      }} {
 
-void RecorderBlock::open_seats(ThreadAssembly::SeatMains& mains) noexcept {
+    OpenVerdict& verdict = device.verdict();
     if (auto c = xthread::ParkFds::create(capture_wake_); !c) {
-        report("CaptureMain::open (degraded: no recorder)", c.error());
+        verdict.refuse("T-CAPTURE: ParkFds::create", c.error());
     } else if (auto e = xthread::ParkFds::create(encode_wake_); !e) {
-        report("EncodeMain::open (degraded: no recorder)", e.error());
+        verdict.refuse("T-ENCODE: ParkFds::create", e.error());
     } else if (auto w = xthread::ParkFds::create(rec_write_wake_); !w) {
-        report("RecWriteMain::open (degraded: no recorder)", w.error());
+        verdict.refuse("T-RECWRITE: ParkFds::create", w.error());
     } else {
         capture_main_.emplace(copier_, std::move(*c));
         encode_main_.emplace(hasher_, std::move(*e), encode_delay_);
         rec_write_main_.emplace(sidecar_writer_, avi_writer_, std::move(*w));
-        mains.mains.bind(&*capture_main_);
-        mains.mains.bind(&*encode_main_);
-        mains.mains.bind(&*rec_write_main_);
     }
+}
+
+void RecorderBlock::open_seats(ThreadAssembly::SeatMains& mains) noexcept {
+    mains.mains.bind(&seated(capture_main_, "T-CAPTURE bound past a refused open"));
+    mains.mains.bind(&seated(encode_main_, "T-ENCODE bound past a refused open"));
+    mains.mains.bind(&seated(rec_write_main_, "T-RECWRITE bound past a refused open"));
 }
 
 }

@@ -47,7 +47,8 @@ public:
 
 private:
     [[nodiscard]] static std::optional<hal::ScalerBuffers> map_scaler_buffers(
-        std::span<const hal::PhysRegion> regions
+        std::span<const hal::PhysRegion> regions,
+        OpenVerdict& verdict
     );
 
 public:

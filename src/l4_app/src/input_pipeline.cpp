@@ -149,8 +149,7 @@ bool InputBuild::rebind_round() {
 
         const InputWire::CoreNameCell core = wire_.core_name();
 
-        const svc::IAnalogReshape* r = wire_.analog_reshape();
-        const auto reshape = infra::opt_ref_of(r);
+        const auto reshape = wire_.analog_reshape();
         (void)en_.load_maps_for(core.view(), core.front_end, reshape, wire_.joy_plan());
     }
     if (!hand_over_()) {

@@ -5,9 +5,13 @@
 #include <cstdint>
 #include <span>
 
+#include "infra/seat.h"
+
 namespace mister::hal {
 
 struct ScalerHeader {
+    TASTY_SEAT_EXEMPT(component);
+
     static constexpr std::size_t kBytes = 16;
     static constexpr std::uint8_t kTypeImage = 1;
     static constexpr std::uint8_t kFormatRgb24 = 1;
@@ -57,6 +61,8 @@ struct ScalerHeader {
     }
 
     [[nodiscard]] constexpr bool interlaced() const noexcept { return (attributes & 0x0001u) != 0; }
+
+    [[nodiscard]] constexpr bool operator==(const ScalerHeader&) const noexcept = default;
 };
 
 }

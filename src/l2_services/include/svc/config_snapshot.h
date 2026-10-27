@@ -120,6 +120,10 @@ struct ConfigSnapshot {
     std::uint8_t osd_style = 0;
     std::uint8_t hd_osd_fps = 10;
     std::uint8_t hd_theme = 0;
+    std::uint8_t hd_layout = 0xFF;
+    std::uint8_t hd_colors = 0xFF;
+    std::uint8_t hd_game_display = 0;
+    std::uint8_t hd_menu_opacity = 85;
 
     std::uint8_t alt_ini = 0;
     bool second_pass_ran = false;

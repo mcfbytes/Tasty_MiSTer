@@ -63,12 +63,12 @@ public:
 
     [[nodiscard]] Ex<void> bind_census(
         std::span<const reactor::LinkDecoderDecl> rows,
-        cores::Core* owner
+        infra::OptRef<cores::Core> owner
     );
 
     [[nodiscard]] Ex<void> bind_session(
         std::span<const reactor::LinkDecoderDecl> rows,
-        cores::Core* owner,
+        infra::OptRef<cores::Core> owner,
         std::span<const proto::IrqBinding> irqs,
         std::uint32_t declared,
         const DoorbellLines& lines

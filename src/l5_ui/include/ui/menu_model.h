@@ -88,6 +88,8 @@ public:
 
     const HdKeyRemap& key_remap() const noexcept { return remap_; }
 
+    HdKeyRemap& key_remap() noexcept { return remap_; }
+
     HdFocusMemory& hd_focus() noexcept { return hd_focus_; }
 
     const HdFocusMemory& hd_focus() const noexcept { return hd_focus_; }
@@ -223,7 +225,7 @@ public:
 
     void set_osd_style(bool hd) noexcept { style_.boot_hd(hd); }
 
-    void set_hd_theme(std::uint8_t theme) noexcept { style_.boot_theme(theme); }
+    void set_hd_look(app::HdLook look) noexcept { style_.boot_look(look); }
 
     OsdStylePreference& style() noexcept { return style_; }
 

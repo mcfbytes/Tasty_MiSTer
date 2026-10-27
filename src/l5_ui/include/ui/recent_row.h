@@ -20,7 +20,11 @@ class RecentRow final : public IHdRow, public IConfirmHost {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    RecentRow(RecentLaunch& launch, app::RecentGames::Record record);
+    RecentRow(
+        RecentLaunch& launch,
+        app::RecentGames::Record record,
+        app::RowTier tier = app::RowTier::Place
+    );
 
     bool shown() const override;
     std::optional<RowKey> key() const override;
@@ -36,6 +40,7 @@ public:
 private:
     RecentLaunch& launch_;
     app::RecentGames::Record record_;
+    app::RowTier tier_;
     std::string title_;
 
     std::array<std::string, 2> ask_text_{};

@@ -31,7 +31,7 @@ public:
 
     void serve() noexcept;
 
-    [[nodiscard]] cores::IMailboxServant* servant_for(std::uint16_t gen) noexcept;
+    [[nodiscard]] infra::OptRef<cores::IMailboxServant> servant_for(std::uint16_t gen) noexcept;
     void refill_one() noexcept;
     [[nodiscard]] bool rest() const noexcept;
 

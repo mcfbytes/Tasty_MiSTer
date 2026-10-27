@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "device_block.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <string>
 #include <utility>
@@ -11,59 +12,49 @@
 #include "infra/opt_ref.h"
 #include "os/bt_probe.h"
 #include "reactor/notifier.h"
-#include "report.h"
 
 namespace mister::fw {
 
 using namespace mister;
 
 bool DeviceBlock::rides_io_(svc::IIoCoworker& lane, const char* what) noexcept {
-    if (!io_main_)
-        return false;
-    if (io_main_->add_coworker(&lane))
+    if (seated(io_main_, "T-IO bound past a refused open").add_coworker(&lane))
         return true;
-    report(
+    opened_.refuse(
         what,
         Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(svc::IoMain::kMaxCoworkers)}
     );
     return false;
 }
 
-std::optional<app::CmdFifo> DeviceBlock::open_cmd_fifo(app::ICmdVerbSink& route) {
-    std::optional<app::CmdFifo> fifo;
-    if (auto f = app::CmdFifo::open(app::kCmdFifoPath, route); f) {
-        fifo.emplace(std::move(*f));
-    } else {
-        report("CmdFifo::open (degraded: no /dev/MiSTer_cmd)", f.error());
+std::optional<app::CmdFifo> DeviceBlock::open_cmd_fifo(
+    const BootParts& plat,
+    app::ICmdVerbSink& route
+) noexcept {
+    auto f = app::CmdFifo::open(plat.cmd_fifo_path, route);
+    if (!f) {
+        opened_.refuse("T-UI: CmdFifo::open", f.error());
+        return std::nullopt;
     }
-    return fifo;
-}
-
-Ex<hal::FpgaMemory> DeviceBlock::map_scaler_out(std::span<const hal::PhysRegion> regions) {
-
-    if (regions.size() != hal::kRegionCount) {
-        return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), 0});
-    }
-
-    return hal::FpgaMemory::map(
-        regions[static_cast<std::size_t>(hal::RegionId::ScalerOut)],
-        os::MmioRegion::Access::ReadOnly
-    );
+    return std::optional<app::CmdFifo>{std::in_place, std::move(*f)};
 }
 
 std::optional<app::ScalerFrameSource> DeviceBlock::open_frame_source_(
     const BootParts& plat
 ) noexcept {
-    if (auto w = map_scaler_out(plat.regions); w) {
-        return std::optional<app::ScalerFrameSource>{
-            std::in_place,
-            std::move(*w),
-            video_pump_.geometry_cell()
-        };
-    } else {
-        report("FpgaMemory::map(scaler-out) (degraded: no screenshots)", w.error());
+    const auto region = hal::declared_region(plat.regions, hal::RegionId::ScalerOut);
+    if (!region)
+        return std::nullopt;
+    auto w = hal::FpgaMemory::map(*region, os::MmioRegion::Access::ReadOnly);
+    if (!w) {
+        opened_.refuse("screenshot: FpgaMemory::map(scaler-out)", w.error());
         return std::nullopt;
     }
+    return std::optional<app::ScalerFrameSource>{
+        std::in_place,
+        std::move(*w),
+        video_pump_.geometry_cell()
+    };
 }
 
 std::optional<app::InputPipeline> DeviceBlock::open_input_pipeline_(
@@ -71,7 +62,7 @@ std::optional<app::InputPipeline> DeviceBlock::open_input_pipeline_(
 ) noexcept {
     auto fds = app::InputDecode::Fds::create(input_wire_);
     if (!fds) {
-        report("InputPipeline::open (degraded: input unavailable)", fds.error());
+        opened_.refuse("T-INPUT: InputDecode::Fds::create", fds.error());
         return std::nullopt;
     }
     return std::optional<app::InputPipeline>{
@@ -98,11 +89,11 @@ std::optional<app::InputMain> DeviceBlock::open_input_main_() noexcept {
         return std::nullopt;
     auto park = xthread::ParkFds::create(input_wake_);
     if (!park) {
-        report("InputMain::open (degraded: input unavailable)", park.error());
+        opened_.refuse("T-INPUT: ParkFds::create", park.error());
         return std::nullopt;
     }
     if (auto w = input_pipeline_->decode().watch(*park); !w) {
-        report("InputMain::open (degraded: input unavailable)", w.error());
+        opened_.refuse("T-INPUT: InputDecode::watch", w.error());
         return std::nullopt;
     }
     return std::optional<app::InputMain>{
@@ -115,25 +106,25 @@ std::optional<app::InputMain> DeviceBlock::open_input_main_() noexcept {
 
 std::unique_ptr<reactor::FrameClock> DeviceBlock::open_frame_clock(
     const char* vsync_device,
-    reactor::Executive& exec
+    reactor::Executive& exec,
+    OpenVerdict& verdict
 ) {
     std::unique_ptr<reactor::FrameClock> frame;
     if (vsync_device == nullptr) {
         std::fprintf(stderr, "mister: this board row names no vsync device: no T-FRAME\n");
         return frame;
     }
-    if (auto fc = reactor::FrameClock::open(vsync_device); fc) {
-        frame = std::move(*fc);
-        if (auto nf = reactor::Notifier::frame(frame->eventfd()); nf) {
-            if (auto a = exec.add_notifier(std::move(*nf)); !a) {
-                report("Executive::add_notifier(frame)", a.error());
-            }
-        } else {
-            report("Notifier::frame", nf.error());
-        }
-    } else {
+    auto fc = reactor::FrameClock::open(vsync_device);
+    if (!fc) {
         std::fprintf(stderr, "mister: vsync device %s\n", vsync_device);
-        report("FrameClock::open (degraded: no T-FRAME)", fc.error());
+        verdict.refuse("T-FRAME: FrameClock::open", fc.error());
+        return frame;
+    }
+    frame = std::move(*fc);
+    if (auto nf = reactor::Notifier::frame(frame->eventfd()); !nf) {
+        verdict.refuse("T-FRAME: Notifier::frame", nf.error());
+    } else if (auto a = exec.add_notifier(std::move(*nf)); !a) {
+        verdict.refuse("T-FRAME: Executive::add_notifier", a.error());
     }
     return frame;
 }
@@ -184,8 +175,11 @@ void DeviceBlock::grant_latched_(
     (grant_if_latched_<Rows>(mains), ...);
 }
 
-void DeviceBlock::grant_pauses(const ThreadAssembly::SeatMains& mains, UiMain* ui) noexcept {
-    if (ui != nullptr)
+void DeviceBlock::grant_pauses(
+    const ThreadAssembly::SeatMains& mains,
+    infra::OptRef<UiMain> ui
+) noexcept {
+    if (ui)
         grant_pause(SeatTag::Ui, ui->pause_latch());
     static_assert(
         HasPauseLatch<app::InputMain>
@@ -222,9 +216,9 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
       input_build_{plat.vfs, input_wire_},
       input_pipeline_(open_input_pipeline_(plat)),
       input_main_(open_input_main_()),
-      frame_(open_frame_clock(plat.video.vsync_device, plat.exec)),
+      frame_(open_frame_clock(plat.video.vsync_device, plat.exec, opened_)),
       prefetch_(),
-      prefetch_main_(open_prefetch_main(prefetch_, main_wake_)),
+      prefetch_main_(open_prefetch_main(prefetch_, main_wake_, opened_)),
       pcm_feeder_{clock_, pcm_commands_},
       mailbox_relay_{pcm_wake_},
       companion_host_{pcm_wake_},
@@ -234,9 +228,10 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
           pcm_commands_,
           mailbox_relay_,
           companion_host_,
-          main_wake_
+          main_wake_,
+          opened_
       )),
-      io_main_(open_io_main(io_wake_, main_wake_, io_doorbells_.get())),
+      io_main_(open_io_main(io_wake_, main_wake_, io_doorbells_.get(), opened_)),
       storage_(io_wake_),
       disc_store_{plat.vfs, disc_geometry_, disc_counters_, prefetch_},
       discs_(
@@ -308,10 +303,7 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
           .lw_window = plat.lw_window,
           .doorbell_nodes = plat.doorbell_nodes,
           .doorbell_cpus = hal::cpus_off_rt(plat.threads),
-
-          .status_snapshots = io_main_ && io_doorbells_.get() >= 0
-              ? infra::OptRef<const proto::StatusSnapshotCell>{status_snapshots_}
-              : infra::OptRef<const proto::StatusSnapshotCell>{},
+          .status_snapshots = infra::OptRef<const proto::StatusSnapshotCell>{status_snapshots_},
 
           .storage_channel = infra::OptRef<proto::IStorageChannel>{storage_},
 
@@ -355,23 +347,14 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
               .bay = bay_,
               .bay_releases = bay_releases_,
               .core_terms = session_.core_terms(),
-              .companion_binds = pcm_main_
-                  ? infra::OptRef<app::CompanionHost::Binds>{companion_host_.binds()}
-                  : infra::OptRef<app::CompanionHost::Binds>{},
-
-              .sector_grant = io_main_ && io_doorbells_.get() >= 0
-                  ? infra::OptRef<app::SectorGrantCell>{sector_grant_}
-                  : infra::OptRef<app::SectorGrantCell>{},
+              .companion_binds = infra::OptRef<app::CompanionHost::Binds>{companion_host_.binds()},
+              .sector_grant = infra::OptRef<app::SectorGrantCell>{sector_grant_},
               .sector_route = infra::OptRef<const app::SectorRouteCell>{sector_route_},
               .osd_grant = infra::OptRef<app::OsdGrantCell>{osd_grant_},
               .osd_route = infra::OptRef<const app::OsdRouteCell>{osd_route_},
-
-              .sys_grant = io_main_ && io_doorbells_.get() >= 0
-                  ? infra::OptRef<app::SysGrantCell>{sys_grant_}
-                  : infra::OptRef<app::SysGrantCell>{},
+              .sys_grant = infra::OptRef<app::SysGrantCell>{sys_grant_},
               .sys_route = infra::OptRef<const app::SysRouteCell>{sys_route_},
-              .io_wake = io_main_ ? infra::OptRef<xthread::WakeFlag>{io_wake_}
-                                  : infra::OptRef<xthread::WakeFlag>{},
+              .io_wake = infra::OptRef<xthread::WakeFlag>{io_wake_},
               .aperture = plat.fpga_mem.region
           }
       },
@@ -384,22 +367,22 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
       vfs_(plat.vfs) {
 
     static_assert(svc::IoMain::kMaxCoworkers >= 9);
-
-    if (pcm_main_)
-        companion_host_.install(cores::make_servants(vfs_));
-
-    if (io_main_)
-        disk_relay_.install(cores::make_disk_servant(vfs_));
+    if (!io_doorbells_.valid()) {
+        opened_.refuse("T-IO: epoll_create1(doorbells)", Error{Errc::os, ERR_SITE(), 0});
+    }
+    companion_host_.install(cores::make_servants(vfs_));
+    disk_relay_.install(cores::make_disk_servant(vfs_));
 }
 
 std::optional<svc::PrefetchMain> DeviceBlock::open_prefetch_main(
     svc::ChdPrefetch& prefetch,
-    xthread::WakeFlag& main_wake
+    xthread::WakeFlag& main_wake,
+    OpenVerdict& verdict
 ) {
     if (auto po = prefetch.open(); !po) {
-        report("ChdPrefetch::open (degraded: CHD decode stays inline on T-IO)", po.error());
+        verdict.refuse("T-PREFETCH: ChdPrefetch::open", po.error());
     } else if (auto fds = xthread::ParkFds::create(prefetch.wake()); !fds) {
-        report("PrefetchMain::open (degraded: CHD decode stays inline on T-IO)", fds.error());
+        verdict.refuse("T-PREFETCH: ParkFds::create", fds.error());
     } else {
         return std::optional<svc::PrefetchMain>{
             std::in_place,
@@ -417,10 +400,11 @@ std::optional<app::PcmMain> DeviceBlock::open_pcm_main(
     app::PcmRingFeeder::Commands& commands,
     app::MailboxRelay& relay,
     app::CompanionHost& host,
-    xthread::WakeFlag& main_wake
+    xthread::WakeFlag& main_wake,
+    OpenVerdict& verdict
 ) {
     if (auto fds = xthread::ParkFds::create(pcm_wake); !fds) {
-        report("PcmMain::open (degraded: no T-PCM, so no fed window)", fds.error());
+        verdict.refuse("T-PCM: ParkFds::create", fds.error());
         return std::nullopt;
     } else {
         return std::optional<app::PcmMain>{
@@ -437,10 +421,11 @@ std::optional<app::PcmMain> DeviceBlock::open_pcm_main(
 std::optional<svc::IoMain> DeviceBlock::open_io_main(
     xthread::WakeFlag& io_wake,
     xthread::WakeFlag& main_wake,
-    int doorbells
+    int doorbells,
+    OpenVerdict& verdict
 ) {
     if (auto fds = xthread::ParkFds::create(io_wake); !fds) {
-        report("IoMain fds (degraded: no T-IO, saves reach no file)", fds.error());
+        verdict.refuse("T-IO: ParkFds::create", fds.error());
         return std::nullopt;
     } else {
         return std::optional<svc::IoMain>{
@@ -453,24 +438,15 @@ std::optional<svc::IoMain> DeviceBlock::open_io_main(
 }
 
 app::SupervisorParts::Services DeviceBlock::services_() noexcept {
-    using app::SupervisorParts;
-    const bool io = io_main_.has_value();
-    return SupervisorParts::Services{
-        .feeder = pcm_main_ ? infra::OptRef<app::PcmRingFeeder>{pcm_feeder_}
-                            : infra::OptRef<app::PcmRingFeeder>{},
-        .prefetch = prefetch_main_ ? infra::OptRef<svc::ChdPrefetch>{prefetch_}
-                                   : infra::OptRef<svc::ChdPrefetch>{},
-        .mailbox = pcm_main_ ? infra::OptRef<app::MailboxRelay>{mailbox_relay_}
-                             : infra::OptRef<app::MailboxRelay>{},
-        .disks = io ? infra::OptRef<app::DiskRelay>{disk_relay_} : infra::OptRef<app::DiskRelay>{},
-        .discs = io ? infra::OptRef<svc::DiscReadService>{discs_}
-                    : infra::OptRef<svc::DiscReadService>{},
-        .writes = io ? infra::OptRef<app::DurableWriteService>{writes_}
-                     : infra::OptRef<app::DurableWriteService>{},
-        .window_jobs = io ? infra::OptRef<app::WindowJobService>{window_jobs_}
-                          : infra::OptRef<app::WindowJobService>{},
-        .storage_life = io ? infra::OptRef<svc::IStorageLifecycle>{storage_}
-                           : infra::OptRef<svc::IStorageLifecycle>{},
+    return app::SupervisorParts::Services{
+        .feeder = pcm_feeder_,
+        .prefetch = prefetch_,
+        .mailbox = mailbox_relay_,
+        .disks = disk_relay_,
+        .discs = discs_,
+        .writes = writes_,
+        .window_jobs = window_jobs_,
+        .storage_life = infra::OptRef<svc::IStorageLifecycle>{storage_},
     };
 }
 
@@ -488,8 +464,13 @@ DiagSampler::Services DeviceBlock::diag_services() noexcept {
     };
 }
 
-void DeviceBlock::open_wires() noexcept {
-    (void)diag_log_.open(kDiagPath);
+void DeviceBlock::open_wires(const BootParts& plat) noexcept {
+    if (!diag_log_.open(plat.diag_path)) {
+        opened_.refuse(
+            "diag sink: DiagLog::open",
+            Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)}
+        );
+    }
     diag_log_.set_echo_stderr(true);
 }
 
@@ -502,38 +483,32 @@ void DeviceBlock::open_seats(const BootParts& plat, const Seats& seats) noexcept
         seats.mains.mains.bind(&*frame_main_);
     }
 
-    if (input_main_)
-        seats.mains.mains.bind(&*input_main_);
+    seats.mains.mains.bind(&seated(input_main_, "T-INPUT bound past a refused open"));
+    seats.mains.mains.bind(&seated(prefetch_main_, "T-PREFETCH bound past a refused open"));
+    seats.mains.mains.bind(&seated(pcm_main_, "T-PCM bound past a refused open"));
 
-    if (prefetch_main_)
-        seats.mains.mains.bind(&*prefetch_main_);
-    if (pcm_main_)
-        seats.mains.mains.bind(&*pcm_main_);
+    (void)rides_io_(writes_, "T-IO: add_coworker(writes)");
 
-    (void)rides_io_(writes_, "IoMain::add_coworker (degraded: no durable writes)");
+    (void)rides_io_(discs_, "T-IO: add_coworker(discs)");
 
-    (void)rides_io_(discs_, "IoMain::add_coworker (degraded: no disc reads)");
+    (void)rides_io_(lw_sector_, "T-IO: add_coworker(lw_sector)");
 
-    (void)rides_io_(lw_sector_, "IoMain::add_coworker (degraded: CD sectors stay on SPI)");
+    (void)rides_io_(lw_sys_, "T-IO: add_coworker(lw_sys)");
 
-    (void)rides_io_(lw_sys_, "IoMain::add_coworker (degraded: the 0x29 status poll stays on SPI)");
+    (void)rides_io_(file_streams_, "T-IO: add_coworker(file_streams)");
 
-    (void)rides_io_(file_streams_, "IoMain::add_coworker (degraded: no file streams)");
+    (void)rides_io_(window_jobs_, "T-IO: add_coworker(window_jobs)");
 
-    (void)rides_io_(window_jobs_, "IoMain::add_coworker (degraded: no window jobs)");
+    (void)rides_io_(disk_relay_, "T-IO: add_coworker(disk_relay)");
 
-    (void)rides_io_(disk_relay_, "IoMain::add_coworker (degraded: no disk acts)");
-
-    if (seats.save_states
-        && rides_io_(*seats.save_states, "IoMain::add_coworker (degraded: no save states)")) {
+    if (seats.save_states && rides_io_(*seats.save_states, "T-IO: add_coworker(save_states)")) {
         const mister::SeatScope publishes_as_ui{mister::SeatTag::Ui};
         seats.save_states->start();
     }
 
-    (void)rides_io_(storage_, "IoMain::add_coworker (degraded: saves reach no file)");
+    (void)rides_io_(storage_, "T-IO: add_coworker(storage)");
 
-    if (io_main_)
-        seats.mains.mains.bind(&*io_main_);
+    seats.mains.mains.bind(&seated(io_main_, "T-IO bound past a refused open"));
 
     if (hal::IBootHandoff* page = plat.programmer.boot_handoff()) {
         owner_.set_boot_cookie(page->handoff()->sdram_cfg);

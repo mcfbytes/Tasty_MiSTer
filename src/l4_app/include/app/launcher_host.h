@@ -58,6 +58,8 @@ public:
     };
 
     class Fds {
+        TASTY_SEAT_EXEMPT(component);
+
     public:
         [[nodiscard]] static Ex<Fds> create() noexcept;
         Fds(Fds&&) noexcept = default;

@@ -6,6 +6,7 @@
 
 #include "app/conf_str_cell.h"
 #include "app/replay_stage.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/status_word.h"
 
@@ -31,7 +32,7 @@ private:
         Ctx ctx,
         const proto::StatusWord& live,
         const cores::IMovieCodec::SettingNeeds& needs,
-        const proto::ItemTable* labels
+        infra::OptRef<const proto::ItemTable> labels
     ) noexcept;
     [[nodiscard]] std::optional<std::uint8_t> rom_slot_(Ctx ctx) noexcept;
     static void load_checkpoints_(Ctx ctx) noexcept;

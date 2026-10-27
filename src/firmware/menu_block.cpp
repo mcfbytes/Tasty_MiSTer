@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "menu_block.h"
 
+#include "app/hd_look_ini.h"
 #include "infra/opt_ref.h"
 #include "os/process_title.h"
 
@@ -34,7 +35,8 @@ MenuBlock::MenuBlock(
     LauncherBlock& launcher,
     infra::OptRef<os::ProcessTitle> title
 )
-    : bt_{device.bt_pump_},
+    : diag_path_{plat.diag_path},
+      bt_{device.bt_pump_},
       trace_{device.events_},
       stores_{plat, device.cheat_blob_},
       mgl_pump_{
@@ -87,7 +89,7 @@ MenuBlock::MenuBlock(
           .conf_str = device.conf_str_cell_,
           .title = title
       }},
-      hd_{plat, device.clock_, hps_fb_, device.video_pump_},
+      hd_{plat, device.clock_, hps_fb_, device.video_pump_, device.verdict()},
       ui_round_{
           device.osd_wire_,
           device.input_wire_,
@@ -142,7 +144,7 @@ SessionMode::Face::Parts MenuBlock::parts() noexcept {
 }
 
 void MenuBlock::open() noexcept {
-    (void)trace_.open(DeviceBlock::kDiagPath);
+    (void)trace_.open(diag_path_);
 }
 
 void MenuBlock::route_pages_to(app::ICmdVerbSink& route) noexcept {
@@ -155,7 +157,7 @@ void MenuBlock::latch(const svc::ConfigSnapshot& c, ThreadAssembly::SeatMains& m
     stores_.latch(c);
 
     ui_model_.set_osd_style(c.osd_style == 1);
-    ui_model_.set_hd_theme(c.hd_theme);
+    ui_model_.set_hd_look(app::hd_look_from_ini(c));
     (void)hd_.open_seat(c, mains);
 }
 

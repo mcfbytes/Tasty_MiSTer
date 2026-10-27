@@ -21,18 +21,19 @@ namespace {
 }
 
 int region_index(HdDirtyLedger::Region region) noexcept {
-    return region == HdDirtyLedger::Region::Game ? 0 : 1;
+    return static_cast<int>(region);
 }
 
 }
 
-void HdDirtyLedger::reset(HdRect panel, HdRect game) noexcept {
-    stale_[0][0] = stale_[1][0] = game;
-    stale_[0][1] = stale_[1][1] = panel;
+void HdDirtyLedger::reset(HdRect panel, HdRect band, HdRect game) noexcept {
+    stale_[0][region_index(Region::Game)] = stale_[1][region_index(Region::Game)] = game;
+    stale_[0][region_index(Region::Panel)] = stale_[1][region_index(Region::Panel)] = panel;
+    stale_[0][region_index(Region::Band)] = stale_[1][region_index(Region::Band)] = band;
 }
 
-void HdDirtyLedger::invalidate(HdRect panel, HdRect game) noexcept {
-    reset(panel, game);
+void HdDirtyLedger::invalidate(HdRect panel, HdRect band, HdRect game) noexcept {
+    reset(panel, band, game);
 }
 
 void HdDirtyLedger::mark(Region region, HdRect dirty) noexcept {

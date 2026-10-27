@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { Theme, MenuRow, HelpItem, Chevron, HelpGlyph, ListRegion } from "hd_common.slint";
+import { Theme, MenuRow, HelpItem, ListScreen } from "hd_common.slint";
 
 export component HdTemplateZaparoo inherits Window {
     in property <[MenuRow]> entries;
@@ -22,110 +22,29 @@ export component HdTemplateZaparoo inherits Window {
     in property <bool> cue-up;
     in property <bool> cue-down;
     in property <string> cue-text;
+    in property <bool> across;
+    in property <int> list-first;
+    in property <int> list-total;
+    in property <int> rail-at;
+    in property <string> rail-text;
+    in property <int> badge-state;
+    in property <string> caption-text;
+    in property <string> above-text;
+    in property <string> below-text;
+    in property <string> above-count;
+    in property <string> below-count;
+    in property <string> shelf-caption-text;
+    in property <string> strip-caption-text;
+    in property <[MenuRow]> hub-entries;
+    in property <int> hub-at;
+    in property <bool> band-lit;
+    in property <bool> band-focus;
+    in property <length> band-h;
+    in property <length> card-w;
 
-    property <length> content-w: self.width - Theme.inset-x - Theme.pad-right;
+    background: Theme.ground;
 
-    background: Theme.primary;
-
-    VerticalLayout {
-        x: Theme.inset-x;
-        y: Theme.inset-y;
-        width: root.content-w;
-        height: Theme.list-top - Theme.inset-y - Theme.gap;
-        spacing: Theme.header-gap;
-        alignment: start;
-        HorizontalLayout {
-            height: Theme.font-caption * 1.4;
-            spacing: Theme.gap / 2;
-            Text {
-                horizontal-stretch: 0;
-                max-width: root.content-w / 2;
-                text: root.core-text;
-                color: Theme.text-label;
-                font-family: Theme.family;
-                font-size: Theme.font-caption;
-                font-weight: Theme.weight-normal;
-                vertical-alignment: center;
-                wrap: no-wrap;
-                overflow: elide;
-            }
-            Text {
-                horizontal-stretch: 1;
-                text: root.subtitle-text == "" ? "" : Theme.subtitle-sep + root.subtitle-text;
-                color: Theme.text;
-                font-family: Theme.family;
-                font-size: Theme.font-caption;
-                font-weight: Theme.weight-normal;
-                vertical-alignment: center;
-                wrap: no-wrap;
-                overflow: elide;
-            }
-            Text {
-                horizontal-stretch: 0;
-                text: root.status-text;
-                color: Theme.text-label;
-                font-family: Theme.family;
-                font-size: Theme.font-caption;
-                font-weight: Theme.weight-normal;
-                vertical-alignment: center;
-                horizontal-alignment: right;
-                wrap: no-wrap;
-            }
-        }
-        Text {
-            height: Theme.font-title * 1.4;
-            text: root.heading-text;
-            color: Theme.text;
-            font-family: Theme.family;
-            font-size: Theme.font-title;
-            font-weight: Theme.weight-bold;
-            vertical-alignment: center;
-            wrap: no-wrap;
-            overflow: elide;
-        }
-        HorizontalLayout {
-            height: Theme.font-caption * 1.4;
-            spacing: Theme.gap / 3;
-            Text {
-                horizontal-stretch: 1;
-                text: root.badge-text;
-                color: Theme.text-label;
-                font-family: Theme.family;
-                font-size: Theme.font-caption;
-                font-weight: Theme.weight-normal;
-                vertical-alignment: center;
-                wrap: no-wrap;
-            }
-            if root.cue-shown: VerticalLayout {
-                alignment: center;
-                Chevron { ink: root.cue-up ? Theme.text : Theme.cue-spent; dir: 2; }
-            }
-            if root.cue-shown: VerticalLayout {
-                alignment: center;
-                Chevron { ink: root.cue-down ? Theme.text : Theme.cue-spent; dir: 3; }
-            }
-            if root.cue-shown: Text {
-                horizontal-stretch: 0;
-                text: root.cue-text;
-                color: Theme.text-label;
-                font-family: Theme.family;
-                font-size: Theme.font-caption;
-                font-weight: Theme.weight-normal;
-                vertical-alignment: center;
-                wrap: no-wrap;
-            }
-        }
-    }
-
-    Rectangle {
-        x: Theme.inset-x;
-        y: Theme.list-top - Theme.gap;
-        width: root.content-w;
-        height: Theme.hair;
-        background: Theme.border-subtle;
-    }
-
-    ListRegion {
+    ListScreen {
         x: 0;
         y: 0;
         width: root.width;
@@ -133,49 +52,22 @@ export component HdTemplateZaparoo inherits Window {
         entries: root.entries;
         pinned-entries: root.pinned-entries;
         choices: root.choices;
+        help: root.help;
+        core-text: root.core-text;
+        subtitle-text: root.subtitle-text;
+        heading-text: root.heading-text;
+        badge-text: root.badge-text;
+        status-text: root.status-text;
         choice-shape: root.choice-shape;
         choice-stacked: root.choice-stacked;
-        content-w: root.content-w;
         main-h: root.main-h;
         pinned-y: root.pinned-y;
         pinned-h: root.pinned-h;
         choice-y: root.choice-y;
         choice-h: root.choice-h;
-    }
-
-    Rectangle {
-        x: 0;
-        y: Theme.help-top;
-        width: root.width;
-        height: root.height - Theme.help-top;
-        background: Theme.bg-bar;
-        Rectangle {
-            x: 0;
-            y: 0;
-            width: parent.width;
-            height: Theme.hair;
-            background: Theme.border-subtle;
-        }
-        HorizontalLayout {
-            x: Theme.inset-x;
-            y: Theme.help-pad;
-            width: root.content-w;
-            height: Theme.glyph;
-            spacing: Theme.gap * 2;
-            alignment: center;
-            for item in root.help: HorizontalLayout {
-                spacing: Theme.gap * 2 / 3;
-                if item.glyph != 0: HelpGlyph { glyph: item.glyph; ink: Theme.text; }
-                Text {
-                    text: item.label;
-                    color: Theme.text;
-                    font-family: Theme.family;
-                    font-size: Theme.font-caption;
-                    font-weight: Theme.weight-normal;
-                    vertical-alignment: center;
-                    wrap: no-wrap;
-                }
-            }
-        }
+        cue-shown: root.cue-shown;
+        cue-up: root.cue-up;
+        cue-down: root.cue-down;
+        cue-text: root.cue-text;
     }
 }

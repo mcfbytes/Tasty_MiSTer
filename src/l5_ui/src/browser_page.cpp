@@ -260,7 +260,17 @@ bool BrowserPage::describe(app::PageDescription& out) const {
 
     if (!session_.filter().empty())
         (void)out.footer.assign(session_.filter());
+    out.letter = session_.selected_group();
     return true;
+}
+
+bool BrowserPage::back_is_idle() const {
+    TASTY_SEAT_BODY(BrowserPage);
+    const BrowserPolicy& policy = session_.request().policy;
+    return !session_.recents_active()
+        && session_.filter().empty()
+        && !policy.eject_on_backspace
+        && !policy.clear_on_backspace;
 }
 
 Transition BrowserPage::handle(const UiEvent& ev) {
@@ -326,12 +336,12 @@ Transition BrowserPage::handle(const UiEvent& ev) {
         return Transition{};
     }
 
-    if ((ev.buttons & UiEvent::Left) != 0) {
+    if ((ev.buttons & UiEvent::Left) != 0 || is_make(ev.raw.v, KEY_PAGEUP)) {
         session_.note_navigation();
         session_.view().prev_page();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Right) != 0) {
+    if ((ev.buttons & UiEvent::Right) != 0 || is_make(ev.raw.v, KEY_PAGEDOWN)) {
         session_.note_navigation();
         session_.view().next_page();
         return Transition{};
@@ -410,11 +420,11 @@ Transition BrowserPage::handle_recents(const UiEvent& ev) {
         session_.view().end();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Left) != 0) {
+    if ((ev.buttons & UiEvent::Left) != 0 || is_make(ev.raw.v, KEY_PAGEUP)) {
         session_.view().prev_page();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Right) != 0) {
+    if ((ev.buttons & UiEvent::Right) != 0 || is_make(ev.raw.v, KEY_PAGEDOWN)) {
         session_.view().next_page();
         return Transition{};
     }

@@ -48,6 +48,7 @@ public:
     void latch(const svc::ConfigSnapshot& c, ThreadAssembly::SeatMains& mains) noexcept override;
 
 private:
+    const char* diag_path_;
     infra::OptRef<app::BtPump> bt_;
     ui::EventTrace trace_;
     StoresBlock stores_;

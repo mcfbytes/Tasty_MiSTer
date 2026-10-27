@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <span>
 
@@ -22,7 +23,9 @@ public:
         std::span<std::uint16_t> frame{};
         std::uint32_t stride_px = 0;
         HdRect game{};
-        HdRect cover{};
+        HdRect picture{};
+        std::array<BackdropScalerTarget, 2> targets{};
+        HdRect glass{};
     };
 
     explicit BackdropJob(BackdropScaler& scaler) noexcept : scaler_(scaler) {}

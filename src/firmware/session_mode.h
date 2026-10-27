@@ -94,6 +94,9 @@ public:
             const BootParts& plat,
             DeviceBlock& device
         ) = 0;
+
+        virtual void open_seat_fds(DeviceBlock& device) noexcept { (void)device; }
+
         virtual void latch(DeviceBlock& device, ThreadAssembly::SeatMains& mains) noexcept = 0;
     };
 
@@ -164,7 +167,8 @@ public:
     virtual void arm_stop_signals() noexcept = 0;
     virtual void disarm_stop_signals() noexcept = 0;
     virtual void storage_ready(svc::Vfs& vfs) = 0;
-    virtual void before_boot(app::LinkSession& session) = 0;
+
+    [[nodiscard]] virtual Ex<void> before_boot(app::LinkSession& session) = 0;
 
     [[nodiscard]] virtual infra::OptRef<const std::string> boot_handoff(
         const app::SessionOwner& owner

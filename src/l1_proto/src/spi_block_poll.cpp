@@ -82,11 +82,10 @@ constexpr std::uint8_t kCsd[16] = {
 
 }
 
-IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
+infra::OptRef<IBlockGeometry> SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
     if (!wiring_.roles || slot.v >= kBlockSlots)
-        return nullptr;
-    const infra::OptRef<IBlockGeometry> g = (*wiring_.roles)[slot.v].geometry;
-    return g ? &*g : nullptr;
+        return {};
+    return (*wiring_.roles)[slot.v].geometry;
 }
 
 [[nodiscard]] Ex<void> SpiBlockPoll::send_config(hal::ISpiTransport& link) {
@@ -223,7 +222,7 @@ IBlockGeometry* SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
         return d;
 
     BlockGeometry geo{d.block_size, 0};
-    if (IBlockGeometry* const hook = geometry_for_(d.req.slot); hook != nullptr && !stock) {
+    if (const auto hook = geometry_for_(d.req.slot); hook && !stock) {
         geo = hook->geometry_for(d.req.slot, d.req.lba, geo);
     }
     if (geo.block_size == 0)

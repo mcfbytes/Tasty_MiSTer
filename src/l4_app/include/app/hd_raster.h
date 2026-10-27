@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <span>
 
 #include "app/hd_badge_view.h"
+#include "app/hd_dirty.h"
 #include "app/hd_layout.h"
 #include "app/hd_rect.h"
 #include "app/hd_theme.h"
+#include "app/hd_themes.h"
 #include "app/page_description.h"
 #include "infra/seat.h"
 
@@ -24,7 +28,7 @@ public:
         return open_(theme, layout);
     }
 
-    HdRect render(
+    HdDirty render(
         const PageDescription& page,
         const HdBadgeView& badge,
         std::span<std::uint16_t> panel,
@@ -46,7 +50,7 @@ public:
 
 private:
     virtual bool open_(const HdTheme& theme, const HdLayout& layout) = 0;
-    virtual HdRect render_(
+    virtual HdDirty render_(
         const PageDescription& page,
         const HdBadgeView& badge,
         std::span<std::uint16_t> panel,
@@ -55,5 +59,7 @@ private:
     virtual void close_() = 0;
     virtual void relayout_(const HdLayout& layout) = 0;
 };
+
+using HdRasters = std::array<std::unique_ptr<HdRaster>, kHdTemplateCount>;
 
 }

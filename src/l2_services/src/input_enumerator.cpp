@@ -48,20 +48,6 @@ Error os_error(std::uint16_t site) {
 
 constexpr std::size_t kJoyMapBytes = map_spec(MapKind::Joystick).bytes;
 
-bool is_psx_core(std::string_view core) noexcept {
-    if (core.size() != 3)
-        return false;
-    static constexpr char kPsx[3] = {'P', 'S', 'X'};
-    for (std::size_t i = 0; i < 3; ++i) {
-        char c = core[i];
-        if (c >= 'a' && c <= 'z')
-            c = static_cast<char>(c - ('a' - 'A'));
-        if (c != kPsx[i])
-            return false;
-    }
-    return true;
-}
-
 }
 
 InputEnumerator InputEnumerator::create() {
@@ -191,7 +177,7 @@ Ex<void> InputEnumerator::load_maps_for(
 
     const std::string_view core = front_end ? std::string_view{} : core_in;
 
-    const bool axis_emu = !is_psx_core(core_in);
+    const bool axis_emu = joy.stick_dpad;
 
     const ButtonMap fallback_sys = rules::default_sys_map();
     ButtonMap zero_map;

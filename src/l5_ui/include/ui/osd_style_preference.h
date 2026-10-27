@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "app/hd_look.h"
 #include "infra/seat.h"
 
 namespace mister::ui {
@@ -11,9 +12,7 @@ class OsdStylePreference final {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    explicit OsdStylePreference(bool hd, std::uint8_t theme = 0) noexcept
-        : hd_(hd),
-          theme_(theme) {}
+    explicit OsdStylePreference(bool hd, app::HdLook look = {}) noexcept : hd_(hd), look_(look) {}
 
     bool hd() const noexcept {
         TASTY_SEAT_BODY(OsdStylePreference);
@@ -43,32 +42,32 @@ public:
 
     void boot_hd(bool hd) noexcept { hd_ = hd; }
 
-    void boot_theme(std::uint8_t theme) noexcept { theme_ = theme; }
+    void boot_look(app::HdLook look) noexcept { look_ = look; }
 
-    std::uint8_t theme() const noexcept {
+    app::HdLook look() const noexcept {
         TASTY_SEAT_BODY(OsdStylePreference);
-        return theme_;
+        return look_;
     }
 
-    void choose_theme(std::uint8_t theme) noexcept {
+    void choose_look(app::HdLookField field, std::uint8_t value) noexcept {
         TASTY_SEAT_BODY(OsdStylePreference);
-        theme_ = theme;
-        ++theme_choices_;
+        look_ = app::hd_look_with(look_, field, value);
+        ++look_choices_;
     }
 
     std::uint32_t classic_choices() const noexcept { return classic_choices_; }
 
     std::uint32_t hd_choices() const noexcept { return hd_choices_; }
 
-    std::uint32_t theme_choices() const noexcept { return theme_choices_; }
+    std::uint32_t look_choices() const noexcept { return look_choices_; }
 
 private:
     bool hd_;
-    std::uint8_t theme_;
+    app::HdLook look_;
     bool reopen_ = false;
     std::uint32_t classic_choices_ = 0;
     std::uint32_t hd_choices_ = 0;
-    std::uint32_t theme_choices_ = 0;
+    std::uint32_t look_choices_ = 0;
 };
 
 }

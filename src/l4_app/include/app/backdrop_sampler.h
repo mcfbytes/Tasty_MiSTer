@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
 #include "hal/scaler_buffers.h"
+#include "hal/scaler_header.h"
 #include "hal/scaler_probe.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -48,6 +51,10 @@ public:
 private:
     enum class Phase : std::uint8_t { Probe, Run, Idle };
 
+    using Marks = std::array<std::optional<hal::ScalerHeader>, hal::ScalerBuffers::kBuffers>;
+
+    void run_(hal::ScalerProbe::Verdict verdict, bool still) noexcept;
+    [[nodiscard]] Marks marks_() const noexcept;
     Image image_(bool fresh) const noexcept;
     [[nodiscard]] bool copy_frame_() noexcept;
 
@@ -58,18 +65,21 @@ private:
     bool have_applies_ = false;
     bool lowlat_ = false;
     bool stuck_ = false;
+    bool still_ = false;
     bool live_ = false;
     bool have_prev_ = false;
     bool same_ = false;
     std::uint32_t applies_ = 0;
     std::uint32_t torn_ = 0;
     std::size_t stride_ = 0;
+    std::optional<std::size_t> known_stride_{};
     std::uint8_t stride_mib_ = 0;
     std::int64_t next_poll_ = 0;
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;
     std::uint16_t line_ = 0;
     std::size_t view_n_ = 0;
+    Marks still_marks_{};
     std::vector<std::byte> cache_{};
     std::vector<std::byte> prev_{};
 };

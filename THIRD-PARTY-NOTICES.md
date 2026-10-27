@@ -9,6 +9,7 @@ own code is GPL-3.0-or-later (`LICENSE`).
 | Rust crates under Slint | see the list | MIT, Apache-2.0, BSD, Zlib, and others | `licenses/slint-crates.md` |
 | Rust standard library (core, alloc, std, compiler_builtins) | 1.97.0 | MIT OR Apache-2.0 | `licenses/rust-LICENSE-MIT.txt`, `licenses/rust-LICENSE-APACHE.txt`, `licenses/rust-COPYRIGHT.txt` |
 | Noto Sans Regular and Bold | 2.015 | OFL-1.1 | `licenses/NotoSans-OFL.txt` |
+| Pixel Operator 8 Regular and Bold (Jayvee Enaguas) | 2018 | CC0-1.0 | `licenses/PixelOperator-CC0.txt`; the faces are `src/l4_app/fonts/pixel-operator/` |
 | GNU C Library (glibc) | 2.44-36-g2d5421ff (Bootlin armv7-eabihf glibc stable-2026.08-1) | LGPL-2.1-or-later | `licenses/glibc-LGPL-2.1.txt`, `licenses/glibc-LICENSES.txt`; see "glibc" below |
 | libstdc++, libgcc | the same toolchain | GPL-3.0 with the GCC Runtime Library Exception | https://gcc.gnu.org |
 | zlib-ng (zlib-compatible) | 2.3.3 | Zlib | https://github.com/zlib-ng/zlib-ng |

@@ -10,8 +10,8 @@ void HdOsdScreen::publish_ask_(bool is_open) noexcept {
     HdOsdAsk ask{};
     ask.open = is_open;
     ask.epoch = epoch_;
-    ask.theme = theme_;
-    theme_sent_ = theme_;
+    ask.look = look_;
+    look_sent_ = look_;
     if (is_open) {
         ask.surface = surface_;
         ask.video_applies = applies_seen_;
@@ -78,6 +78,29 @@ void HdOsdScreen::sync_console_() noexcept {
     } else {
         release_console_();
     }
+    if (!open_ && guarded_vt_ == 0)
+        show_cursor_();
+}
+
+void HdOsdScreen::hide_cursor_() noexcept {
+    if (!w_.vt || hushed_vt_ != 0)
+        return;
+    const auto vt = w_.vt->active();
+    if (!vt)
+        return;
+    const auto mode = w_.vt->text_mode(*vt);
+    if (!mode || !*mode)
+        return;
+    w_.vt->cursor(*vt, false);
+    hushed_vt_ = *vt;
+}
+
+void HdOsdScreen::show_cursor_() noexcept {
+    if (hushed_vt_ == 0)
+        return;
+    if (w_.vt)
+        w_.vt->cursor(hushed_vt_, true);
+    hushed_vt_ = 0;
 }
 
 void HdOsdScreen::capture_console_() noexcept {
@@ -91,6 +114,8 @@ void HdOsdScreen::capture_console_() noexcept {
         return;
     w_.vt->graphics(*vt);
     guarded_vt_ = *vt;
+    if (hushed_vt_ == 0)
+        hushed_vt_ = *vt;
 }
 
 void HdOsdScreen::release_console_() noexcept {
@@ -114,6 +139,7 @@ bool HdOsdScreen::try_open_() noexcept {
     ++epoch_;
     open_ = true;
     intends_ = true;
+    hide_cursor_();
     publish_ask_(true);
     return true;
 }
@@ -211,10 +237,10 @@ void HdOsdScreen::tick(
     const PageDescription* page,
     HdOsdStatus::Badge badge,
     HdStatusSlots slots,
-    std::uint8_t theme
+    HdLook look
 ) noexcept {
     TASTY_SEAT_BODY(HdOsdScreen);
-    theme_ = theme;
+    look_ = look;
     retry_drop_();
     (void)status_seen_.take_if_changed(w_.status, status_);
     const bool live = status_.state == HdOsdStatus::State::Ready
@@ -236,10 +262,7 @@ void HdOsdScreen::tick(
         if (available())
             (void)try_open_();
     } else if (
-        page_ != page_sent_
-        || badge_ != badge_sent_
-        || slots_ != slots_sent_
-        || theme_ != theme_sent_
+        page_ != page_sent_ || badge_ != badge_sent_ || slots_ != slots_sent_ || look_ != look_sent_
     ) {
         publish_ask_(true);
     }
@@ -262,6 +285,7 @@ bool HdOsdScreen::covers_hdmi() const noexcept {
 void HdOsdScreen::release_console() noexcept {
     TASTY_SEAT_BODY(HdOsdScreen);
     release_console_();
+    show_cursor_();
 }
 
 bool HdOsdScreen::available() const noexcept {

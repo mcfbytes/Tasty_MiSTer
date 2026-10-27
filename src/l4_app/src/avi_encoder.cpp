@@ -322,7 +322,7 @@ bool AviEncoder::chunk(
         }
         return true;
     }
-    codec_->arm(w_.clock ? &*w_.clock : nullptr, frame_budget_ns_(s.vtime));
+    codec_->arm(w_.clock, frame_budget_ns_(s.vtime));
     const bool ok = chunk_one_(*codec_, s, real, cand, run, stable);
     const IFrameCodec::Search se = codec_->search();
     st_.me_rad = se.radius;

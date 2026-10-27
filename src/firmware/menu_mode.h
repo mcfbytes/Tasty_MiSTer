@@ -57,7 +57,7 @@ public:
 
     void disarm_stop_signals() noexcept override;
     void storage_ready(svc::Vfs& vfs) override;
-    void before_boot(app::LinkSession& session) override;
+    [[nodiscard]] Ex<void> before_boot(app::LinkSession& session) override;
     [[nodiscard]] infra::OptRef<const std::string> boot_handoff(
         const app::SessionOwner& owner
     ) const noexcept override;
@@ -87,6 +87,7 @@ private:
             const BootParts& plat,
             DeviceBlock& device
         ) override;
+        void open_seat_fds(DeviceBlock& device) noexcept override;
         void latch(DeviceBlock& device, ThreadAssembly::SeatMains& mains) noexcept override;
 
     private:

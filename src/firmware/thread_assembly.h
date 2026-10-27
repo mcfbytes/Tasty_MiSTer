@@ -91,7 +91,11 @@ public:
 
     const DiagSampler& diag() const noexcept { return diag_sampler_; }
 
-    UiMain* ui() noexcept { return ui_main_ ? &*ui_main_ : nullptr; }
+    [[nodiscard]] Ex<void> born() const noexcept { return born_; }
+
+    infra::OptRef<UiMain> ui() noexcept {
+        return ui_main_ ? infra::OptRef<UiMain>{*ui_main_} : infra::OptRef<UiMain>{};
+    }
 
     struct SeatMains {
         MainSlots mains{};

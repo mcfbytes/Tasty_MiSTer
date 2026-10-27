@@ -10,6 +10,7 @@ add_library(mister_fw_assembly STATIC
   diag_sampler.cpp
   hub.cpp
   ladder_scope.cpp
+  open_verdict.cpp
   process_main.cpp
   process_standup.cpp
   recorder_block.cpp

@@ -64,6 +64,7 @@
 #include "svc/config_snapshot.h"
 #include "proto/save_request.h"
 #include "proto/spi_fio_queue.h"
+#include "proto/spi_frame.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -110,23 +111,23 @@ Ex<void> StdoutRouter::route(std::uint8_t debug) {
         orig_ = infra::opt_ref_of(stdout);
     const Sink target = sink_for(debug);
 
-    std::FILE* to = nullptr;
+    infra::OptRef<std::FILE> to{};
     switch (target) {
         case Sink::Null:
-            to = null_.get();
+            to = infra::opt_ref_of(null_.get());
             break;
         case Sink::Original:
-            to = orig_ ? &*orig_ : nullptr;
+            to = orig_;
             break;
         case Sink::DebugFile:
-            to = dbg_.get();
+            to = infra::opt_ref_of(dbg_.get());
             break;
     }
 
-    if (to == nullptr) {
+    if (!to) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(target)});
     }
-    set_stdout_file(to);
+    set_stdout_file(&*to);
     sink_ = target;
     return {};
 }
@@ -138,16 +139,8 @@ LinkBinder::Wiring binder_wiring(const SupervisorParts& parts) noexcept {
         .exec = parts.exec,
         .state = parts.core_state,
         .log_lane = parts.log_lane,
-        .feeder = parts.services.feeder,
+        .feeder = infra::OptRef<PcmRingFeeder>{parts.services.feeder},
     };
-}
-
-infra::OptRef<cores::IMailboxPort> mailbox_port(infra::OptRef<MailboxRelay> r) noexcept {
-    return r ? infra::OptRef<cores::IMailboxPort>{*r} : infra::OptRef<cores::IMailboxPort>{};
-}
-
-infra::OptRef<cores::IDiskPort> disk_port(infra::OptRef<DiskRelay> r) noexcept {
-    return r ? infra::OptRef<cores::IDiskPort>{*r} : infra::OptRef<cores::IDiskPort>{};
 }
 
 }
@@ -192,7 +185,7 @@ LinkSession::LinkSession(
           RebootAnswer::Wiring{
               .signals = fenced_signals_,
               .nvram = nvram_,
-              .window_jobs = parts.services.window_jobs,
+              .window_jobs = infra::OptRef{parts.services.window_jobs},
               .storage_life = parts.services.storage_life
           }
       ),
@@ -212,12 +205,12 @@ LinkSession::LinkSession(
           .fio_queue = binder_.fio_queue(),
           .unbound_discs = parts.unbound_discs,
           .vfs = parts.vfs,
-          .discs = parts.services.discs,
-          .prefetch = parts.services.prefetch,
-          .mailbox = mailbox_port(parts.services.mailbox),
-          .disk = disk_port(parts.services.disks),
+          .discs = infra::OptRef{parts.services.discs},
+          .prefetch = infra::OptRef{parts.services.prefetch},
+          .mailbox = infra::OptRef<cores::IMailboxPort>{parts.services.mailbox},
+          .disk = infra::OptRef<cores::IDiskPort>{parts.services.disks},
           .save_copy = parts.save_copy,
-          .feeder = parts.services.feeder,
+          .feeder = infra::OptRef{parts.services.feeder},
           .aperture = parts.fpga_mem,
           .doorbells = parts.doorbells,
           .lw_window = parts.lw_window,
@@ -240,7 +233,7 @@ LinkSession::LinkSession(
               .log_lane = log_lane_,
               .vfs = parts.vfs,
               .storage_life = parts.services.storage_life,
-              .prefetch = parts.services.prefetch,
+              .prefetch = infra::OptRef{parts.services.prefetch},
               .storage_channel = parts.storage_channel
           }
       ),
@@ -280,9 +273,9 @@ LinkSession::LinkSession(
               .session_tally = tally_,
               .log_lane = log_lane_,
               .storage_life = parts.services.storage_life,
-              .mailbox = parts.services.mailbox,
-              .disks = parts.services.disks,
-              .discs = parts.services.discs
+              .mailbox = infra::OptRef{parts.services.mailbox},
+              .disks = infra::OptRef{parts.services.disks},
+              .discs = infra::OptRef{parts.services.discs}
           }
       ),
       streams_(parts.streams),
@@ -308,7 +301,7 @@ LinkSession::LinkSession(
               .slot_bindings = slot_bindings_,
               .tenancy = tenancy_,
               .session_tally = tally_,
-              .window_jobs = parts.services.window_jobs
+              .window_jobs = infra::OptRef{parts.services.window_jobs}
           }
       ) {
 
@@ -375,6 +368,7 @@ void LinkSession::publish_identity() {
         );
         j_names = lists.j;
     }
+    joy.stick_dpad = !cores::profile_for(name).suppress_stick_dpad;
 
     identity_.publish(
         eff,
@@ -469,10 +463,10 @@ void LinkSession::tick(RoundEntry entry) {
     const bool live_at_entry = entry.live;
 
     nvram_.drain_write_verdicts();
-    if (window_jobs_) {
+    {
         const infra::OptRef<cores::Core> current = tenancy_.core();
         cores::IWindowSave* role = current.has_value() ? current->window_save() : nullptr;
-        if (const auto act = window_jobs_->service(role))
+        if (const auto act = window_jobs_.service(role))
             held_.publish_ftx_level(*act, true);
     }
 
@@ -525,11 +519,11 @@ void LinkSession::deliver(
     bool windows_closed
 ) noexcept {
 
-    cores::Core* const live_core = core_ptr_();
+    const infra::OptRef<cores::Core> live_core = tenancy_.core();
     const EncoderRoles roles{
         .saves = infra::OptRef<ISaveFlush>{*this},
         .cheats = infra::OptRef<ICheatApply>{cheats_},
-        .cheat_call = {.core = infra::opt_ref_of(live_core), .fio_held = held_.fio_held()},
+        .cheat_call = {.core = live_core, .fio_held = held_.fio_held()},
         .acts = infra::OptRef<ICoreOptionActs>{options_}
     };
     const LinkOpCtx ctx{
@@ -539,7 +533,7 @@ void LinkSession::deliver(
         .starting = start_.on(),
         .fence = binder_.fio_queue(),
         .roles = infra::OptRef<const EncoderRoles>{roles},
-        .core = infra::opt_ref_of(live_core)
+        .core = live_core
     };
     const auto kind = infra::kind_of(op);
     ILinkEncoder::Outcome r = ILinkEncoder::Outcome::Dropped;
@@ -604,7 +598,7 @@ ILinkEncoder::Outcome LinkSession::on(
             if (auto r = rows_.rebind_census(
                     dead ? std::span<const reactor::LinkDecoderDecl>{}
                          : rows_.census_rows(rows, tenancy_.core()),
-                    core_ptr_()
+                    tenancy_.core()
                 );
                 !r) {
                 return ILinkEncoder::Outcome::Dropped;
@@ -612,7 +606,7 @@ ILinkEncoder::Outcome LinkSession::on(
             return ILinkEncoder::Outcome::Encoded;
         }
         case proto::LinkOp::DecoderTable::PreSession:
-            if (auto r = rows_.rebind_pre_session(a.gen, core_ptr_()); !r) {
+            if (auto r = rows_.rebind_pre_session(a.gen, tenancy_.core()); !r) {
                 return ILinkEncoder::Outcome::Dropped;
             }
             return ILinkEncoder::Outcome::Encoded;
@@ -629,10 +623,8 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::DropCore& a, const Li
         holds_at_drop_ = encoder_.holds();
     }
     ++core_edge_seq_;
-    if (mailbox_)
-        mailbox_->forget();
-    if (disks_)
-        disks_->forget();
+    mailbox_.forget();
+    disks_.forget();
     RtRelaxScope scope(ops_);
     if (const auto r = detach(); !r) {
         tally_.last_error = r.error();
@@ -677,8 +669,7 @@ ILinkEncoder::Outcome LinkSession::on(
         queued = q.append_command(w).has_value();
     }
     (void)q.flush();
-    if (mailbox_)
-        mailbox_->bind(a.poll, a.gen);
+    mailbox_.bind(a.poll, a.gen);
     if (!queued) {
         ++tally_.mailbox_write_drops;
         return ILinkEncoder::Outcome::Dropped;
@@ -873,8 +864,8 @@ ILinkEncoder::Outcome LinkSession::on(
     const auto pulse = current->reset(a.edge);
     if (!pulse)
         return ILinkEncoder::Outcome::Dropped;
-    if (cores::IWindowSave* role = current->window_save(); role != nullptr && window_jobs_) {
-        (void)window_jobs_->arm_reset_edge(*role, a.edge);
+    if (cores::IWindowSave* role = current->window_save(); role != nullptr) {
+        (void)window_jobs_.arm_reset_edge(*role, a.edge);
     }
     if (!*pulse)
         return ILinkEncoder::Outcome::Encoded;
@@ -932,7 +923,7 @@ Ex<std::optional<UiRequest::LoadCore>> LinkSession::boot(std::span<const char* c
     publish_fabric_();
     adopt_programmed_core_();
 
-    if (auto r = rows_.rebind_pre_session(proto::BindGeneration{kBootGen}, core_ptr_()); !r) {
+    if (auto r = rows_.rebind_pre_session(proto::BindGeneration{kBootGen}, tenancy_.core()); !r) {
         machine_.transition(SessionState::Running);
         return std::unexpected(r.error());
     }
@@ -1028,7 +1019,7 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
     osd_.on_fabric_reprogrammed();
     machine_.transition(SessionState::Running);
     const bool front_end = cores::profile_for(conf_str_name()).is_front_end;
-    cores::CoreInitContext init_ctx{link_, session_, *this, infra::opt_ref_of(core_ptr_())};
+    cores::CoreInitContext init_ctx{link_, session_, *this, tenancy_.core()};
     const infra::OptRef<cores::Core> current = tenancy_.core();
     (void)run_core_init(
         init_ctx,
@@ -1147,8 +1138,7 @@ Ex<void> LinkSession::detach() {
 
 void LinkSession::seal_boot_pump() noexcept {
     streams_.seal_boot_pump();
-    if (disks_)
-        disks_->seal_boot_pump();
+    disks_.seal_boot_pump();
 }
 
 void LinkSession::settle_boot_slot_mount() noexcept {
@@ -1296,9 +1286,9 @@ void LinkSession::on_osd_visibility_edge(bool visible) {
         nvram_.count_upload();
     }
     const infra::OptRef<cores::Core> current = tenancy_.core();
-    if (visible && current.has_value() && window_jobs_) {
+    if (visible && current.has_value()) {
         if (cores::IWindowSave* role = current->window_save(); role != nullptr) {
-            (void)window_jobs_->arm_osd_open(*role);
+            (void)window_jobs_.arm_osd_open(*role);
         }
     }
     if (visible || !current.has_value())
@@ -1333,7 +1323,7 @@ Ex<void> LinkSession::raise_session_() {
         const BuiltCore& built = tenancy_.bay().at(tenancy_.adopted_slot());
         if (auto r = binder_.bind_session(
                 rows_.census_rows(rows, tenancy_.core()),
-                core_ptr_(),
+                tenancy_.core(),
                 db.table(),
                 db.declared,
                 built.lines
@@ -1341,7 +1331,7 @@ Ex<void> LinkSession::raise_session_() {
             !r) {
             return r;
         }
-    } else if (auto r = rows_.rebind_census({}, core_ptr_()); !r) {
+    } else if (auto r = rows_.rebind_census({}, tenancy_.core()); !r) {
         return r;
     }
 
@@ -1371,7 +1361,8 @@ Ex<void> LinkSession::raise_session_() {
         }
         bindings_.spend_uart_files();
 
-        (void)uart_.load_for_core(link_, eff, uart_capable, uart_token, midi_token, &files);
+        proto::SpiFrame frame{link_};
+        (void)uart_.load_for_core(frame, eff, uart_capable, uart_token, midi_token, &files);
     }
 
     f12_mod_poll_.arm(true, bindings_.generation());

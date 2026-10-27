@@ -33,7 +33,7 @@ HdDisplayPlan::HdDisplayPlan(const HdPlanInputs& in)
       style_(in.style),
       style_row_(style_spec(classic_, in.ctx.launches.confirm)) {
     TASTY_SEAT_BODY(HdDisplayPlan);
-    refs_ = {style_row_, theme_row_};
+    refs_ = {style_row_, layout_row_, colors_row_, display_row_, opacity_row_};
     if (!in.ctx.launches.confirm)
         ++refusals_;
 }
@@ -74,28 +74,32 @@ Transition HdDisplayPlan::ClassicAction::on_yes() {
     return Transition{Transition::Kind::CloseAll};
 }
 
-app::PageDescription::Row HdDisplayPlan::ThemeRow::describe() const {
-    TASTY_SEAT_BODY(ThemeRow);
+app::PageDescription::Row HdDisplayPlan::LookRow::describe() const {
+    TASTY_SEAT_BODY(LookRow);
     app::PageDescription::Row r{};
     r.kind = app::PageDescription::RowKind::Value;
     r.steps = true;
-    (void)r.label.assign("Theme");
-    (void)r.value.assign(app::hd_theme(plan_.style_.theme()).name);
+    (void)r.label.assign(label_);
+    (void)r.value.assign(app::hd_look_choice_name(field_, plan_.style_.look()));
     return r;
 }
 
-Transition HdDisplayPlan::ThemeRow::select() {
-    TASTY_SEAT_BODY(ThemeRow);
+Transition HdDisplayPlan::LookRow::select() {
+    TASTY_SEAT_BODY(LookRow);
     return step(1);
 }
 
-Transition HdDisplayPlan::ThemeRow::step(int delta) {
-    TASTY_SEAT_BODY(ThemeRow);
-    constexpr auto kCount = static_cast<unsigned>(app::kHdThemes.size());
-    const unsigned at = app::hd_theme_index(plan_.style_.theme());
-    const auto next = static_cast<std::uint8_t>((at + (delta < 0 ? kCount - 1u : 1u)) % kCount);
-    plan_.style_.choose_theme(next);
-    if (!push_ask(plan_.ctx_.ui_requests, app::UiRequest::SetHdTheme{.theme = next})) {
+Transition HdDisplayPlan::LookRow::step(int delta) {
+    TASTY_SEAT_BODY(LookRow);
+    const app::HdLook look = plan_.style_.look();
+    const std::uint8_t next = app::hd_look_step(field_, look, delta);
+    if (next == app::hd_look_get(look, field_))
+        return Transition{};
+    plan_.style_.choose_look(field_, next);
+    if (!push_ask(
+            plan_.ctx_.ui_requests,
+            app::UiRequest::SetHdLook{.field = field_, .value = next}
+        )) {
         ++plan_.refusals_;
     } else {
         ++plan_.published_;

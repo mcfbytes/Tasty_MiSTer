@@ -26,9 +26,16 @@ using RowKind = app::PageDescription::RowKind;
 
 constexpr std::array<std::string_view, 2> kYesNo{"Yes", "No"};
 
-Row row_of(RowKind kind, std::string_view label) {
+Row row_of(
+    RowKind kind,
+    std::string_view label,
+    app::RowTier tier = app::RowTier::Place,
+    app::PageDescription::RowIcon icon = app::PageDescription::RowIcon::None
+) {
     Row r{};
     r.kind = kind;
+    r.tier = tier;
+    r.icon = icon;
     (void)r.label.assign(label);
     return r;
 }
@@ -37,7 +44,7 @@ Row row_of(RowKind kind, std::string_view label) {
 
 Row HdPushRow::describe() const {
     TASTY_SEAT_BODY(HdPushRow);
-    return row_of(RowKind::Submenu, spec_.label);
+    return row_of(RowKind::Submenu, spec_.label, spec_.tier, spec_.icon);
 }
 
 std::optional<RowKey> HdPushRow::key() const {
@@ -54,7 +61,7 @@ Transition HdPushRow::select() {
 
 Row HdCloseRow::describe() const {
     TASTY_SEAT_BODY(HdCloseRow);
-    return row_of(RowKind::Action, spec_.label);
+    return row_of(RowKind::Action, spec_.label, spec_.tier);
 }
 
 Transition HdCloseRow::select() {
@@ -91,7 +98,7 @@ bool HdAskRow::shown() const {
 
 Row HdAskRow::describe() const {
     TASTY_SEAT_BODY(HdAskRow);
-    Row r = row_of(RowKind::Action, spec_.label);
+    Row r = row_of(RowKind::Action, spec_.label, spec_.tier);
     r.value = spec_.value;
     return r;
 }
@@ -147,7 +154,12 @@ bool HdPairRow::shown() const {
 
 Row HdPairRow::describe() const {
     TASTY_SEAT_BODY(HdPairRow);
-    return row_of(RowKind::Action, "Pair Bluetooth controller");
+    return row_of(
+        RowKind::Action,
+        "Pair Bluetooth controller",
+        tier_,
+        app::PageDescription::RowIcon::Bluetooth
+    );
 }
 
 Transition HdPairRow::select() {

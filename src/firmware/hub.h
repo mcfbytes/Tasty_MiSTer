@@ -14,6 +14,7 @@
 #include "boot_parts.h"
 #include "device_block.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "process_main.h"
 #include "recorder_block.h"
@@ -27,7 +28,11 @@ class Hub {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
-    Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode);
+    [[nodiscard]] static Ex<std::unique_ptr<Hub>> create(
+        const BootParts& plat,
+        app::IStopSignal& stop,
+        SessionMode& mode
+    );
 
     ~Hub();
     Hub(const Hub&) = delete;
@@ -45,13 +50,15 @@ public:
 
     app::RtMain& rt_main() noexcept { return rt_main_; }
 
-    [[nodiscard]] Ex<void> open_process_main() noexcept;
-
-    ProcessMain* process_main() noexcept { return process_main_ ? &*process_main_ : nullptr; }
+    ProcessMain& process_main() noexcept {
+        return seated(process_main_, "MAIN's main read past a refused open");
+    }
 
     const ThreadAssembly::SeatMains& seat_mains() const noexcept { return seat_mains_; }
 
 private:
+    Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode);
+
     [[nodiscard]] DiagSampler::Sources diag_sources_(const BootParts& plat) noexcept;
 
     std::unique_ptr<SessionMode::Front> front_;

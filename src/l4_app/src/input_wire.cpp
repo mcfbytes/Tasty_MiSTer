@@ -31,7 +31,7 @@ void InputWire::on_core_loaded(
     publish_core_name(core_name, front_end);
 
     publish_joy_plan(plan);
-    publish_analog_reshape(analog_reshape ? &*analog_reshape : nullptr);
+    publish_analog_reshape(analog_reshape);
     publish_edge_reset();
     request(kReqHotplug);
     wake();
@@ -39,7 +39,7 @@ void InputWire::on_core_loaded(
 
 void InputWire::on_core_detached() noexcept {
 
-    publish_analog_reshape(nullptr);
+    publish_analog_reshape(std::nullopt);
     publish_edge_reset();
 
     buttons_.store(0u, std::memory_order_relaxed);

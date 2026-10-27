@@ -50,8 +50,8 @@ private:
     [[nodiscard]] Ex<void> on_file_tx(IoIndex index, std::span<const std::uint8_t> bytes) override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
 
-    [[nodiscard]] IMailboxRows* on_mailbox_rows() noexcept override {
-        return mailbox_ ? &*mailbox_ : nullptr;
+    [[nodiscard]] infra::OptRef<IMailboxRows> on_mailbox_rows() noexcept override {
+        return mailbox_ ? infra::OptRef<IMailboxRows>{*mailbox_} : infra::OptRef<IMailboxRows>{};
     }
 
     [[nodiscard]] IStreamLoad* on_window_load() noexcept override { return &data_host_; }

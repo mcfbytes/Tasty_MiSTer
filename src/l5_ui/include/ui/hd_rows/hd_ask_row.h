@@ -30,6 +30,7 @@ public:
         std::uint8_t initial = 1;
 
         decltype(app::PageDescription::Row::value) value{};
+        app::RowTier tier = app::RowTier::Place;
     };
 
     explicit HdAskRow(const Spec& spec) noexcept : spec_(spec) {}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/input_service.h"
-#include "hal/selected.h"
+#include "hal/spi_transport.h"
 
 #include "input_rules.h"
 
@@ -248,16 +248,13 @@ Ex<void> InputService::adopt(InputDevice&& dev) {
     return {};
 }
 
-[[nodiscard]] Ex<void> emit_but_sw(hal::ISpiTransport& link, std::uint16_t map) {
-    hal::Selected cs(link, hal::ChipSelect::Io);
+[[nodiscard]] Ex<void> emit_but_sw(proto::ILinkFrame& frame, std::uint16_t map) {
 
-    if (auto r = link.transfer(hal::SpiWord{kUioButSw}); !r) {
-        return std::unexpected(r.error());
-    }
-    if (auto r = link.transfer(hal::SpiWord{map}); !r) {
-        return std::unexpected(r.error());
-    }
-    return {};
+    if (auto r = frame.begin(proto::FrameSel::Uio, kUioButSw); !r)
+        return r;
+    if (auto r = frame.word(map); !r)
+        return r;
+    return frame.end();
 }
 
 }

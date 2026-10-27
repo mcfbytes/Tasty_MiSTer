@@ -186,14 +186,14 @@ private:
         std::uint32_t block_size,
         std::uint32_t window_blocks,
         std::uint16_t ack,
-        IResidentImageSource* res
+        infra::OptRef<IResidentImageSource> res
     );
     [[nodiscard]] Ex<Pass> serve_write(
         hal::ISpiTransport& link,
         const SdRequest& req,
         std::uint32_t block_size,
         std::uint16_t ack,
-        IResidentImageSource* res
+        infra::OptRef<IResidentImageSource> res
     );
 
     [[nodiscard]] Ex<void> emit_read_data_phase_(
@@ -256,17 +256,17 @@ private:
             records_[i].drop_window();
     }
 
-    IImageSource* source_for(SlotIndex s) const noexcept {
+    infra::OptRef<IImageSource> source_for(SlotIndex s) const noexcept {
         const SlotRoles& r = roles_[s.v];
         if (r.descriptor)
-            return &*r.descriptor;
+            return r.descriptor;
         if (r.resident)
-            return &*r.resident;
-        return source_ ? &*source_ : nullptr;
+            return infra::OptRef<IImageSource>{*r.resident};
+        return source_;
     }
 
-    IResidentImageSource* resident_for(SlotIndex s) const noexcept {
-        return roles_[s.v].resident ? &*roles_[s.v].resident : nullptr;
+    infra::OptRef<IResidentImageSource> resident_for(SlotIndex s) const noexcept {
+        return roles_[s.v].resident;
     }
 
     SlotRecord records_[kBlockSlots]{};

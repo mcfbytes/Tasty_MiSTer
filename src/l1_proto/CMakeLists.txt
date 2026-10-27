@@ -23,6 +23,7 @@ add_library(mister_proto STATIC
   src/spi_block_poll.cpp
   src/spi_conf_str_decoder.cpp
   src/spi_fio_queue.cpp
+  src/spi_frame.cpp
   src/spi_identify_decoder.cpp
   src/spi_osd_mask_decoder.cpp
   src/spi_pad_encoder.cpp
@@ -48,6 +49,8 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/axi_block_decl.h
   proto/declared_line.h
   proto/lane_block_decl.h
+  proto/link_frame.h
+  proto/spi_frame.h
   proto/sys_directory_image.h
   proto/sector_block_decl.h
   proto/osd_block_decl.h

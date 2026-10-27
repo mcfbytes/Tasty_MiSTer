@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "app/hd_flip_slot.h"
+#include "app/hd_look.h"
 #include "app/hd_osd_ask.h"
 #include "app/hd_osd_status.h"
 #include "app/hd_status_slots.h"
@@ -44,7 +45,7 @@ public:
         const PageDescription* page,
         HdOsdStatus::Badge badge,
         HdStatusSlots slots = {},
-        std::uint8_t theme = 0
+        HdLook look = {}
     ) noexcept;
     [[nodiscard]] bool intends_hdmi() const noexcept;
     [[nodiscard]] bool covers_hdmi() const noexcept;
@@ -65,6 +66,8 @@ private:
     void sync_console_() noexcept;
     void capture_console_() noexcept;
     void release_console_() noexcept;
+    void hide_cursor_() noexcept;
+    void show_cursor_() noexcept;
 
     Wiring w_;
     HdOsdStatusCell::Reader status_seen_{};
@@ -77,8 +80,8 @@ private:
     HdOsdStatus::Badge badge_sent_ = HdOsdStatus::Badge::Unknown;
     HdStatusSlots slots_{};
     HdStatusSlots slots_sent_{};
-    std::uint8_t theme_ = 0;
-    std::uint8_t theme_sent_ = 0;
+    HdLook look_{};
+    HdLook look_sent_{};
     HdSurface surface_{};
     std::uint32_t epoch_ = 0;
     std::uint32_t applies_seen_ = 0;
@@ -86,6 +89,7 @@ private:
     std::uint32_t out_h_ = 0;
     std::uint32_t stale_drops_ = 0;
     int guarded_vt_ = 0;
+    int hushed_vt_ = 0;
     bool open_ = false;
     bool intends_ = false;
     bool covers_ = false;

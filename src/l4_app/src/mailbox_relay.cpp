@@ -106,8 +106,8 @@ void MailboxRelay::write_(proto::SpiFioQueue& queue, const MailboxSlot& s) noexc
 void MailboxRelay::serve_worker(CompanionHost& host) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, B);
     while (Chan::Job job = chan_.take()) {
-        cores::IMailboxServant* s = host.servant_for(job->gen);
-        job->act = s != nullptr ? s->serve(job->frame, std::span(job->bytes)) : proto::MailboxAct{};
+        const auto s = host.servant_for(job->gen);
+        job->act = s ? s->serve(job->frame, std::span(job->bytes)) : proto::MailboxAct{};
         job.complete();
     }
 }

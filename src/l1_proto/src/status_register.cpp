@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/status_register.h"
-#include "hal/selected.h"
 
 #include <charconv>
 #include <optional>
@@ -9,7 +8,7 @@
 namespace mister::proto {
 
 namespace {
-constexpr hal::SpiWord kSetStatus2{0x1E};
+constexpr std::uint16_t kSetStatus2 = 0x1E;
 
 constexpr unsigned kMaxFieldSpan = 8;
 
@@ -141,18 +140,18 @@ Ex<void> StatusRegister::set_field(const char* spec, std::uint32_t value) {
     return {};
 }
 
-Ex<void> StatusRegister::flush(hal::ISpiTransport& link) {
+Ex<void> StatusRegister::flush(ILinkFrame& frame) {
     const StatusWord next = value();
     if (fence_)
         fence_->before_status(sent_, next);
-    hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(kSetStatus2); !r)
-        return std::unexpected(r.error());
+    if (auto r = frame.begin(FrameSel::Uio, kSetStatus2); !r)
+        return r;
     for (unsigned i = 0; i < kWords; ++i) {
-        if (auto r = link.transfer(hal::SpiWord{words_[i]}); !r) {
-            return std::unexpected(r.error());
-        }
+        if (auto r = frame.word(words_[i]); !r)
+            return r;
     }
+    if (auto r = frame.end(); !r)
+        return r;
     dirty_ = false;
     sent_ = next;
     return {};

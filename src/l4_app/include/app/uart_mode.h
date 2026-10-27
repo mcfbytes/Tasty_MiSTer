@@ -15,8 +15,8 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 
-namespace mister::hal {
-class ISpiTransport;
+namespace mister::proto {
+class ILinkFrame;
 }
 
 namespace mister::app {
@@ -131,14 +131,14 @@ public:
     [[nodiscard]] Ex<UartMode> probe_mode() const;
     [[nodiscard]] Ex<MidiLinkMode> probe_midilink() const;
 
-    [[nodiscard]] Ex<void> set_mode(hal::ISpiTransport& link, UartMode m);
+    [[nodiscard]] Ex<void> set_mode(proto::ILinkFrame& frame, UartMode m);
     [[nodiscard]] Ex<void> set_midilink(MidiLinkMode ml);
-    [[nodiscard]] Ex<void> reset_uart(hal::ISpiTransport& link);
+    [[nodiscard]] Ex<void> reset_uart(proto::ILinkFrame& frame);
 
     void bind_identity(std::string_view core, std::string_view rbf) noexcept;
 
     [[nodiscard]] Ex<void> load_for_core(
-        hal::ISpiTransport& link,
+        proto::ILinkFrame& frame,
         std::string_view core_name,
         bool uart_capable,
         std::string_view uart_token,

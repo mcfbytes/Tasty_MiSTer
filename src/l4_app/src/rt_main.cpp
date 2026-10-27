@@ -257,10 +257,8 @@ Ex<void> RtMain::pump_boot() {
         drain_ops();
 
         s.streams().pump_on_caller();
-        if (const infra::OptRef<DiskRelay> d = s.disks()) {
-            d->pump_on_caller();
-            s.settle_boot_slot_mount();
-        }
+        s.disks().pump_on_caller();
+        s.settle_boot_slot_mount();
         s.binder().service_on_caller(s.clock().now().count());
         if (s.session_starting()) {
             return std::unexpected(

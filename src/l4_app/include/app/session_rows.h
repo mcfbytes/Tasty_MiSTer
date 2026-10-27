@@ -81,10 +81,13 @@ public:
 
     [[nodiscard]] Ex<void> rebind_census(
         std::span<const reactor::LinkDecoderDecl> rows,
-        cores::Core* owner
+        infra::OptRef<cores::Core> owner
     );
 
-    [[nodiscard]] Ex<void> rebind_pre_session(proto::BindGeneration gen, cores::Core* owner);
+    [[nodiscard]] Ex<void> rebind_pre_session(
+        proto::BindGeneration gen,
+        infra::OptRef<cores::Core> owner
+    );
 
     void bind_status_route(StatusRoute route, std::uint16_t gen) noexcept;
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/video_wire.h"
 #include "hal/selected.h"
+#include "proto/spi_frame.h"
 
 #include <atomic>
 #include <cstring>
@@ -132,7 +133,8 @@ Ex<void> VideoWire::emit_but_sw_(
 ) noexcept {
     if (fence)
         fence->before_buttons(but_sw_sent_, word);
-    auto r = svc::emit_but_sw(link, word);
+    proto::SpiFrame frame{link};
+    auto r = svc::emit_but_sw(frame, word);
     if (r)
         but_sw_sent_ = word;
     return r;

@@ -106,6 +106,10 @@ std::unique_ptr<SessionMode::Face> MenuMode::Launcher::face(
     return std::make_unique<MenuBlock>(plat, device, launcher_, title_);
 }
 
+void MenuMode::Launcher::open_seat_fds(DeviceBlock& device) noexcept {
+    launcher_.open_fds(device.verdict());
+}
+
 void MenuMode::Launcher::latch(DeviceBlock& device, ThreadAssembly::SeatMains& mains) noexcept {
     if (device.owner_.launcher())
         launcher_.open_seat(device, mains);
@@ -217,12 +221,11 @@ void MenuMode::StderrVoice::kernel(os::KernelRt kernel) const {
     );
 }
 
-void MenuMode::before_boot(app::LinkSession& session) {
-    if (app::StdoutRouter* router = session.boot_stdout_router()) {
-        if (auto r = router->install_initial_silence(); !r) {
-            session.note_stdout_open_failed(r.error().code);
-        }
-    }
+Ex<void> MenuMode::before_boot(app::LinkSession& session) {
+    app::StdoutRouter* router = session.boot_stdout_router();
+    if (router == nullptr)
+        return {};
+    return router->install_initial_silence();
 }
 
 infra::OptRef<const std::string> MenuMode::boot_handoff(

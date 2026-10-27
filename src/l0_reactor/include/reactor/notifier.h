@@ -63,7 +63,7 @@ class Notifier {
 public:
     [[nodiscard]] static Ex<Notifier> doorbell_adopt(
         os::UioLineRef uio,
-        const hal::RegisterWindow<hal::CauseReg>* cause,
+        infra::OptRef<const hal::RegisterWindow<hal::CauseReg>> cause,
         Cause klass
     );
 

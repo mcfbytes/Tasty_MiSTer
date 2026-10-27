@@ -8,7 +8,7 @@
 
 #include "cores/disk_port.h"
 #include "cores/st_media_fact.h"
-#include "hal/selected.h"
+#include "proto/spi_frame.h"
 #include "proto/download_session.h"
 #include "proto/image_bracket.h"
 
@@ -16,7 +16,7 @@ namespace mister::cores {
 
 namespace {
 
-constexpr hal::SpiWord kSetStatus2{0x1E};
+constexpr std::uint16_t kSetStatus2 = 0x1E;
 
 constexpr auto kBlankCart = [] {
     std::array<std::uint8_t, StCore::kCartBytes> a{};
@@ -29,9 +29,9 @@ constexpr auto kBlankCart = [] {
 StCore::StCore(const CoreProfile& p, const HostServices& h) : Core(p, h) {}
 
 Ex<void> StCore::push_control_() {
-    hal::Selected cs(host().link, hal::ChipSelect::Io);
-    if (auto r = host().link.transfer(kSetStatus2); !r)
-        return std::unexpected(r.error());
+    proto::SpiFrame frame{host().link};
+    if (auto r = frame.begin(proto::FrameSel::Uio, kSetStatus2); !r)
+        return r;
     const std::uint16_t payload[4] = {
         static_cast<std::uint16_t>(cfg_.system_ctrl & 0xFFFFu),
         static_cast<std::uint16_t>((cfg_.system_ctrl >> 16) & 0xFFFFu),
@@ -39,10 +39,11 @@ Ex<void> StCore::push_control_() {
         static_cast<std::uint16_t>((cfg_.ext_ctrl >> 16) & 0xFFFFu),
     };
     for (const std::uint16_t w : payload) {
-        if (auto r = host().link.transfer(hal::SpiWord{w}); !r) {
-            return std::unexpected(r.error());
-        }
+        if (auto r = frame.word(w); !r)
+            return r;
     }
+    if (auto r = frame.end(); !r)
+        return r;
     ++control_pushes_;
     return {};
 }

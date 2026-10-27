@@ -18,6 +18,7 @@ bool BackdropSampler::note_applies(std::uint32_t applies, std::int64_t now) noex
         return false;
     have_applies_ = true;
     applies_ = applies;
+    known_stride_.reset();
     restart(now);
     return true;
 }
@@ -29,6 +30,7 @@ void BackdropSampler::restart(std::int64_t now) noexcept {
     next_poll_ = 0;
     lowlat_ = false;
     stuck_ = false;
+    still_ = false;
     live_ = false;
     have_prev_ = false;
     same_ = false;
@@ -61,19 +63,53 @@ BackdropSampler::Image BackdropSampler::poll(std::int64_t now, bool copy) noexce
         next_poll_ = now + kPollNs;
         const auto verdict = probe_.decide(now);
         if (verdict == hal::ScalerProbe::Verdict::Dead) {
-            phase_ = Phase::Idle;
-            stuck_ = hal::ScalerProbe::port_stuck(window_);
+            if (const auto held = hal::ScalerProbe::still(window_, known_stride_)) {
+                run_(*held, true);
+            } else {
+                phase_ = Phase::Idle;
+                stuck_ = hal::ScalerProbe::port_stuck(window_);
+            }
         } else if (verdict != hal::ScalerProbe::Verdict::Pending) {
-            phase_ = Phase::Run;
-            lowlat_ = verdict == hal::ScalerProbe::Verdict::LargeLowlat;
-            stride_ = verdict == hal::ScalerProbe::Verdict::Small
-                ? hal::ScalerBuffers::kStrideSmall
-                : hal::ScalerBuffers::kStrideLarge;
-            stride_mib_ = static_cast<std::uint8_t>(stride_ >> 20);
+            run_(verdict, false);
         }
     }
-    const bool fresh = copy && phase_ == Phase::Run && copy_frame_();
-    return image_(fresh);
+    if (!copy || phase_ != Phase::Run)
+        return image_(false);
+    if (still_) {
+
+        if (marks_() != still_marks_) {
+            restart(now);
+            return image_(false);
+        }
+        if (have_prev_) {
+            same_ = true;
+            return image_(false);
+        }
+    }
+    return image_(copy_frame_());
+}
+
+void BackdropSampler::run_(hal::ScalerProbe::Verdict verdict, bool still) noexcept {
+    phase_ = Phase::Run;
+    lowlat_ = verdict == hal::ScalerProbe::Verdict::LargeLowlat;
+    stride_ = verdict == hal::ScalerProbe::Verdict::Small ? hal::ScalerBuffers::kStrideSmall
+                                                          : hal::ScalerBuffers::kStrideLarge;
+    stride_mib_ = static_cast<std::uint8_t>(stride_ >> 20);
+    still_ = still;
+    if (still)
+        still_marks_ = marks_();
+    else
+        known_stride_ = stride_;
+}
+
+BackdropSampler::Marks BackdropSampler::marks_() const noexcept {
+    Marks out{};
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const auto h = window_.header(i * stride_);
+        if (h && h->supported())
+            out[i] = *h;
+    }
+    return out;
 }
 
 BackdropSampler::Image BackdropSampler::image_(bool fresh) const noexcept {
@@ -107,7 +143,7 @@ bool BackdropSampler::copy_frame_() noexcept {
         header = load(0);
     } else {
         std::array<hal::ScalerHeader, hal::ScalerBuffers::kBuffers> hs{};
-        auto live = probe_.moved(stride_);
+        auto live = still_ ? hal::ScalerProbe::kAllLive : probe_.moved(stride_);
         for (std::size_t i = 0; i < hs.size(); ++i) {
             if (!live[i])
                 continue;

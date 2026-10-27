@@ -113,8 +113,15 @@ void text_op(int vt) noexcept {
     if (!fd.valid())
         return;
     (void)::ioctl(fd.get(), KDSETMODE, KD_TEXT);
-    constexpr std::string_view kShow = "\033[0m\033[?25h";
-    write_all(fd.get(), kShow);
+}
+
+void cursor_op(int vt, bool shown) noexcept {
+    char path[16];
+    vt_tty(path, vt);
+    const UniqueFd fd = open_rw(path);
+    if (!fd.valid())
+        return;
+    write_all(fd.get(), shown ? std::string_view{"\033[?25h"} : std::string_view{"\033[?25l"});
 }
 
 }
@@ -154,6 +161,11 @@ void LinuxVtConsole::text(int vt) noexcept {
     text_op(vt);
 }
 
+void LinuxVtConsole::cursor(int vt, bool shown) noexcept {
+    TASTY_SEAT_BODY(LinuxVtConsole);
+    cursor_op(vt, shown);
+}
+
 std::optional<int> UiVtConsole::active() noexcept {
     TASTY_SEAT_BODY(UiVtConsole);
     return active_op();
@@ -187,6 +199,11 @@ void UiVtConsole::graphics(int vt) noexcept {
 void UiVtConsole::text(int vt) noexcept {
     TASTY_SEAT_BODY(UiVtConsole);
     text_op(vt);
+}
+
+void UiVtConsole::cursor(int vt, bool shown) noexcept {
+    TASTY_SEAT_BODY(UiVtConsole);
+    cursor_op(vt, shown);
 }
 
 }

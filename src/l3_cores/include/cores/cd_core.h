@@ -44,7 +44,9 @@ public:
 
     [[nodiscard]] const CdEngine* engine() const noexcept { return drive_.engine(); }
 
-    svc::DiscReadService* discs() noexcept { return drive_.discs(); }
+    [[nodiscard]] infra::OptRef<svc::DiscReadService> discs() const noexcept {
+        return drive_.discs();
+    }
 
     [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return drive_.geometry(); }
 

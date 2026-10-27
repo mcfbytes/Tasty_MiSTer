@@ -24,6 +24,8 @@ public:
     virtual void graphics(int vt) noexcept = 0;
 
     virtual void text(int vt) noexcept = 0;
+
+    virtual void cursor(int vt, bool shown) noexcept = 0;
 };
 
 }

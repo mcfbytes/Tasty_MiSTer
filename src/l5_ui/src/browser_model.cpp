@@ -443,6 +443,16 @@ void BrowserSession::next_group() {
     }
 }
 
+char BrowserSession::selected_group() const noexcept {
+    if (recents_mode_)
+        return '\0';
+    const BrowserEntry* e = view_.selected();
+    if (e == nullptr || e->recent)
+        return '\0';
+    const char c = group_char(*e, req_.scan.cores_only);
+    return c >= 'A' && c <= 'Z' ? c : '#';
+}
+
 void BrowserSession::prev_group() {
     if (entries_.empty() || recents_mode_)
         return;

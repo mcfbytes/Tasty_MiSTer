@@ -153,11 +153,11 @@ public:
 
     std::uint8_t rumble_pads() const noexcept { return rumble_pads_.sample().value; }
 
-    void publish_analog_reshape(const svc::IAnalogReshape* r) noexcept {
+    void publish_analog_reshape(infra::OptRef<const svc::IAnalogReshape> r) noexcept {
         reshape_.store(r, std::memory_order_release);
     }
 
-    const svc::IAnalogReshape* analog_reshape() const noexcept {
+    infra::OptRef<const svc::IAnalogReshape> analog_reshape() const noexcept {
         return reshape_.load(std::memory_order_acquire);
     }
 
@@ -295,14 +295,14 @@ public:
         "item: every joystick cell is one naturally-aligned "
         "64-bit atomic. ARMv7 has LDREXD/STREXD so this holds on the "
         "binding toolchain — but PROVE it here rather than assume it: "
-        "a libatomic call on the T-RT drain is a lock on the RT path."
+        "a libatomic call here would be a lock on a real-time seat."
     );
     static_assert(
         std::atomic<std::uint32_t>::is_always_lock_free,
         "the two gate words and every counter must be lock-free too"
     );
     static_assert(
-        std::atomic<const svc::IAnalogReshape*>::is_always_lock_free,
+        std::atomic<infra::OptRef<const svc::IAnalogReshape>>::is_always_lock_free,
         "the reshape cell is ONE pointer and is read on T-DIAG in "
         "the rebuild: a libatomic lock here would be a lock on the "
         "hotplug path"
@@ -321,7 +321,7 @@ private:
 
     xthread::Telemetry<svc::JoyPlan, SeatTag::Ui> plan_cell_{};
 
-    std::atomic<const svc::IAnalogReshape*> reshape_{nullptr};
+    std::atomic<infra::OptRef<const svc::IAnalogReshape>> reshape_{};
 
     CaptureArmCell capture_arm_{};
     CaptureHitCell capture_hit_{};

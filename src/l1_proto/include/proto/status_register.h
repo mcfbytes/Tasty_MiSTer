@@ -6,8 +6,9 @@
 #include <span>
 
 #include "infra/error.h"
+#include "hal/types.h"
 #include "infra/opt_ref.h"
-#include "hal/spi_transport.h"
+#include "proto/link_frame.h"
 #include "proto/reset_fence.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
@@ -31,7 +32,7 @@ public:
 
     void fence_with(IResetFence* fence) noexcept { fence_ = infra::opt_ref_of(fence); }
 
-    [[nodiscard]] Ex<void> flush(hal::ISpiTransport& link);
+    [[nodiscard]] Ex<void> flush(ILinkFrame& frame);
 
     bool dirty() const noexcept { return dirty_; }
 

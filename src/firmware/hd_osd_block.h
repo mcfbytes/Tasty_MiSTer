@@ -14,6 +14,7 @@
 #include "infra/park_fds.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
+#include "open_verdict.h"
 #include "os/clock.h"
 #include "os/ui_vt_console.h"
 #include "svc/config_snapshot.h"
@@ -29,7 +30,8 @@ public:
         const BootParts& plat,
         const os::IClock& clock,
         app::HpsFramebuffer& fb,
-        const app::VideoPump& video
+        const app::VideoPump& video,
+        OpenVerdict& verdict
     );
     HdOsdBlock(const HdOsdBlock&) = delete;
     HdOsdBlock& operator=(const HdOsdBlock&) = delete;
@@ -45,22 +47,20 @@ public:
     app::HdOsdStatusCell hd_status_{};
     xthread::WakeFlag hd_wake_{};
     std::optional<xthread::ParkFds> hd_fds_{};
-    Error hd_fds_error_{};
     app::HdFlipChannel hd_flips_{xthread::Polled{}, xthread::Polled{}};
 
     bool hd_raster_ = false;
-    bool hd_fb_failed_ = false;
-    Error hd_fb_error_{};
     app::HdRenderer hd_renderer_;
 
     os::UiVtConsole hd_vt_console_{};
     app::HdOsdScreen hd_screen_;
     std::optional<app::HdOsdMain> hd_main_;
-    bool hd_scaler_failed_ = false;
-    Error hd_scaler_error_{};
 
 private:
-    std::optional<app::HdRenderer::Frame> map_frame_(const BootParts& plat) noexcept;
+    std::optional<app::HdRenderer::Frame> map_frame_(
+        const BootParts& plat,
+        OpenVerdict& verdict
+    ) noexcept;
 };
 
 }

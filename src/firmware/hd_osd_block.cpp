@@ -1,54 +1,52 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "hd_osd_block.h"
 
+#include <algorithm>
 #include <memory>
 
+#include "app/hd_look_ini.h"
 #include "hal/fpga_memory.h"
 #include "hal/scaler_buffers.h"
 #include "infra/park_fds.h"
-#include "report.h"
 #ifdef TASTY_HAVE_HDOSD
 #include "app/slint_raster.h"
 #endif
 
 namespace mister::fw {
 
-namespace {
-
-hal::PhysRegion video_fb_region(std::span<const hal::PhysRegion> regions) noexcept {
-    if (regions.size() != hal::kRegionCount)
-        return hal::PhysRegion{};
-    return regions[static_cast<std::size_t>(hal::RegionId::VideoFb)];
-}
-}
-
-std::optional<app::HdRenderer::Frame> HdOsdBlock::map_frame_(const BootParts& plat) noexcept {
-    std::unique_ptr<app::HdRaster> raster;
+std::optional<app::HdRenderer::Frame> HdOsdBlock::map_frame_(
+    const BootParts& plat,
+    OpenVerdict& verdict
+) noexcept {
+    app::HdRasters rasters{};
 #ifdef TASTY_HAVE_HDOSD
-    raster = app::make_hd_raster(app::kHdRasterTemplate);
+    rasters = app::make_hd_rasters();
 #endif
-    auto mem = hal::FpgaMemory::map_aperture(
-        video_fb_region(plat.regions),
-        os::MmioRegion::Access::ReadWrite
-    );
-    if (!mem) {
-        hd_fb_failed_ = true;
-        hd_fb_error_ = mem.error();
+    if (!std::ranges::all_of(rasters, [](const auto& r) { return r != nullptr; })) {
         return std::nullopt;
     }
-    hd_raster_ = raster != nullptr;
-    return app::HdRenderer::Frame{hd_flips_, std::move(*mem), std::move(raster)};
+    const auto region = hal::declared_region(plat.regions, hal::RegionId::VideoFb);
+    if (!region)
+        return std::nullopt;
+    auto mem = hal::FpgaMemory::map_aperture(*region, os::MmioRegion::Access::ReadWrite);
+    if (!mem) {
+        verdict.refuse("T-HDOSD: FpgaMemory::map(video-fb)", mem.error());
+        return std::nullopt;
+    }
+    hd_raster_ = true;
+    return app::HdRenderer::Frame{hd_flips_, std::move(*mem), std::move(rasters)};
 }
 
 HdOsdBlock::HdOsdBlock(
     const BootParts& plat,
     const os::IClock& clock,
     app::HpsFramebuffer& fb,
-    const app::VideoPump& video
+    const app::VideoPump& video,
+    OpenVerdict& verdict
 )
     : hd_renderer_{
           app::HdRenderer::Wiring{.clock = clock, .ask = hd_ask_, .status = hd_status_},
-          map_frame_(plat)
+          map_frame_(plat, verdict)
       },
       hd_screen_{app::HdOsdScreen::Wiring{
           .ask = hd_ask_,
@@ -61,20 +59,18 @@ HdOsdBlock::HdOsdBlock(
           .vt = infra::OptRef<os::IVtConsole>{hd_vt_console_}
       }} {
 
+    if (!hd_raster_)
+        return;
     if (auto fds = xthread::ParkFds::create(hd_wake_)) {
         hd_fds_.emplace(std::move(*fds));
     } else {
-        hd_fds_error_ = fds.error();
+        verdict.refuse("T-HDOSD: ParkFds::create", fds.error());
     }
-    if (plat.regions.size() == hal::kRegionCount) {
-        auto sc = hal::ScalerBuffers::map(
-            plat.regions[static_cast<std::size_t>(hal::RegionId::ScalerOut)]
-        );
-        if (sc) {
+    if (const auto scaler = hal::declared_region(plat.regions, hal::RegionId::ScalerOut)) {
+        if (auto sc = hal::ScalerBuffers::map(*scaler); sc) {
             hd_renderer_.bind_scaler(std::move(*sc));
         } else {
-            hd_scaler_failed_ = true;
-            hd_scaler_error_ = sc.error();
+            verdict.refuse("T-HDOSD: ScalerBuffers::map", sc.error());
         }
     }
 }
@@ -83,26 +79,11 @@ bool HdOsdBlock::open_seat(
     const svc::ConfigSnapshot& c,
     ThreadAssembly::SeatMains& mains
 ) noexcept {
-
-    const bool asked = c.osd_style == 1;
-    if (asked && hd_fb_failed_) {
-        report("FpgaMemory::map(video-fb) (degraded: classic OSD)", hd_fb_error_);
-    }
-    if (asked && hd_scaler_failed_) {
-        report("ScalerBuffers::map (degraded: HD backdrop absent)", hd_scaler_error_);
-    }
-    if (!hd_raster_) {
-        if (asked)
-            report("HD OSD (degraded: classic OSD)", Error{Errc::dt_missing, ERR_SITE(), 0});
+    if (!hd_raster_)
         return false;
-    }
     hd_renderer_.set_fps(c.hd_osd_fps);
-    hd_renderer_.set_theme(c.hd_theme);
-    if (!hd_fds_) {
-        report("HdOsdMain::open (degraded: classic OSD)", hd_fds_error_);
-        return false;
-    }
-    hd_main_.emplace(hd_renderer_, std::move(*hd_fds_));
+    hd_renderer_.set_look(app::hd_look_from_ini(c));
+    hd_main_.emplace(hd_renderer_, std::move(seated(hd_fds_, "T-HDOSD bound past a refused open")));
     mains.mains.bind(&*hd_main_);
     return true;
 }

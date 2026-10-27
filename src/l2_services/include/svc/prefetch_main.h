@@ -23,7 +23,7 @@ public:
         infra::OptRef<xthread::WakeFlag> asker = {}
     ) noexcept
         : prefetch_(prefetch),
-          pause_(fds.wake(), asker ? &*asker : nullptr),
+          pause_(fds.wake(), asker),
           stop_(std::move(fds).take_stop()),
           park_(prefetch_.wake(), stop_) {}
 

@@ -22,7 +22,7 @@ public:
         Core* c = bound_core(st);
         if (c == nullptr || &c->profile() != &kProfile)
             return;
-        if (IMailboxRows* r = c->mailbox_rows())
+        if (const auto r = c->mailbox_rows())
             r->service_mailbox_tick();
     }
 };

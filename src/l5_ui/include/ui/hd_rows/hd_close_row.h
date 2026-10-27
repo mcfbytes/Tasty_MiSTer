@@ -3,6 +3,7 @@
 
 #include <string_view>
 
+#include "app/page_description.h"
 #include "infra/seat.h"
 #include "ui/hd_row.h"
 
@@ -14,6 +15,7 @@ class HdCloseRow final : public IHdRow {
 public:
     struct Spec {
         std::string_view label;
+        app::RowTier tier = app::RowTier::Place;
     };
 
     explicit HdCloseRow(const Spec& spec) noexcept : spec_(spec) {}

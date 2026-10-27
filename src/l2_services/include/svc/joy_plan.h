@@ -29,6 +29,8 @@ struct JoyPlan {
     std::array<std::int8_t, kWords> src = all_none();
     std::int8_t paddle_idx = kNone;
     bool present = false;
+
+    bool stick_dpad = true;
 };
 
 JoyPlan build_joy_plan(

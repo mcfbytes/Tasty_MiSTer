@@ -42,6 +42,11 @@ public:
 
     [[nodiscard]] static bool port_stuck(ScalerBuffers& window) noexcept;
 
+    [[nodiscard]] static std::optional<Verdict> still(
+        const ScalerBuffers& window,
+        std::optional<std::size_t> known = std::nullopt
+    ) noexcept;
+
 private:
     struct ProbeSide {
         std::array<std::uint8_t, ScalerBuffers::kBuffers> first{};

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "app/hd_look.h"
 #include "app/hd_osd_status.h"
 #include "app/hd_status_slots.h"
 #include "app/hd_surface.h"
@@ -26,7 +27,7 @@ struct HdOsdAsk {
 
     HdStatusSlots slots{};
 
-    std::uint8_t theme = 0;
+    HdLook look{};
 };
 
 static_assert(std::is_trivially_copyable_v<HdOsdAsk>);

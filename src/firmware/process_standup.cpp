@@ -423,7 +423,11 @@ ProcessStandup::Exit ProcessStandup::assemble_hub() {
     );
 
     static_assert(__cpp_aligned_new >= 201606L);
-    hub_ = std::make_unique<fw::Hub>(*boot_parts_, stop_signal_, mode_);
+
+    auto hub = fw::Hub::create(*boot_parts_, stop_signal_, mode_);
+    if (!hub)
+        return exit_.fail();
+    hub_ = std::move(*hub);
     app::LinkSession& session = hub_->link_session();
     app::SessionOwner& owner = hub_->owner();
 
@@ -441,7 +445,10 @@ ProcessStandup::Exit ProcessStandup::run_boot_ladder() {
 
         const std::span<const char* const> boot_args = mode_.traits().boot_args;
 
-        mode_.before_boot(session);
+        if (const Ex<void> silenced = mode_.before_boot(session); !silenced) {
+            report("MAIN: StdoutRouter::install_initial_silence", silenced.error());
+            return exit_.fail();
+        }
         const auto b = session.boot(boot_args);
         if (!b) {
             report("LinkSession::boot", b.error());
@@ -534,17 +541,10 @@ ProcessStandup::Exit ProcessStandup::spawn_seats() {
 
     exit_ = ExitPath{link, session, owner.board_reboot(), IoSeat::Running, mode_};
 
-    if (assembly.has_io_seat())
-        session.seal_boot_pump();
+    session.seal_boot_pump();
 
-    const char* rt_step = "ProcessMain::open";
-    Ex<void> rt_up = hub_->open_process_main();
-    if (rt_up) {
-        rt_step = "ThreadAssembly::spawn_rt(FIFO 40)";
-        rt_up = assembly.spawn_rt(fw::RtMode::Required, hub_->rt_main());
-    }
-    if (!rt_up) {
-        report(rt_step, rt_up.error());
+    if (auto rt_up = assembly.spawn_rt(fw::RtMode::Required, hub_->rt_main()); !rt_up) {
+        report("ThreadAssembly::spawn_rt(FIFO 40)", rt_up.error());
 
         assembly.mark_quiescing();
         const int rc = exit_.fail();
@@ -560,7 +560,7 @@ ProcessStandup::Exit ProcessStandup::spawn_seats() {
 
 Ex<void> ProcessStandup::supervise() {
     fw::ThreadAssembly& assembly = hub_->threads();
-    fw::ProcessMain& process_main = *hub_->process_main();
+    fw::ProcessMain& process_main = hub_->process_main();
 
     g_process_main.store(&process_main, std::memory_order_seq_cst);
     if (g_stop_requested.load(std::memory_order_seq_cst) != 0)

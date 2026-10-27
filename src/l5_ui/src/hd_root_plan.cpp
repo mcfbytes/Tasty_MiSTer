@@ -42,31 +42,38 @@ HdRootPlan::HdRootPlan(const HdPlanInputs& in)
       front_end_(in.front_end),
       table_settings_(in.classic == PageId::CoreSettings),
       env_(in.env),
-      resume_row_(HdCloseRow::Spec{.label = "Resume"}),
-      media_row_(HdPushRow::Spec{.label = "Media", .page = PageId::HdMedia}),
-      recent_row_(HdPushRow::Spec{.label = "Recent games", .page = PageId::HdRecentGames}),
-      cheats_row_(HdPushRow::Spec{.label = "Cheats", .page = PageId::Cheats}),
+      resume_row_(HdCloseRow::Spec{.label = "Resume", .tier = kTier}),
+      media_row_(HdPushRow::Spec{.label = "Media", .page = PageId::HdMedia, .tier = kTier}),
+      recent_row_(
+          HdPushRow::Spec{.label = "Recent games", .page = PageId::HdRecentGames, .tier = kTier}
+      ),
+      cheats_row_(HdPushRow::Spec{.label = "Cheats", .page = PageId::Cheats, .tier = kTier}),
       reset_row_(
           HdAskRow::Spec{
               .label = "Reset game",
               .body = kResetBody,
               .action = reset_action_,
-              .confirm = in.ctx.launches.confirm
+              .confirm = in.ctx.launches.confirm,
+              .tier = kTier
           }
       ),
       core_settings_row_(
           HdPushRow::Spec{
               .label = "Core settings",
-              .page = table_settings_ ? PageId::CoreSettings : PageId::HdCoreSettings
+              .page = table_settings_ ? PageId::CoreSettings : PageId::HdCoreSettings,
+              .tier = kTier
           }
       ),
-      settings_row_(HdPushRow::Spec{.label = "Settings", .page = PageId::HdSettings}),
+      settings_row_(
+          HdPushRow::Spec{.label = "Settings", .page = PageId::HdSettings, .tier = kTier}
+      ),
       main_menu_row_(
           HdAskRow::Spec{
               .label = "Return to main menu",
               .body = kMainMenuBody,
               .action = main_menu_action_,
-              .confirm = in.ctx.launches.confirm
+              .confirm = in.ctx.launches.confirm,
+              .tier = kTier
           }
       ) {
     TASTY_SEAT_BODY(HdRootPlan);
@@ -174,6 +181,11 @@ bool HdRootPlan::remembers_focus() const noexcept {
     return false;
 }
 
+bool HdRootPlan::hub() const noexcept {
+    TASTY_SEAT_BODY(HdRootPlan);
+    return true;
+}
+
 void HdRootPlan::refresh(const SystemFacts& facts) {
     TASTY_SEAT_BODY(HdRootPlan);
     (void)facts;
@@ -209,6 +221,7 @@ app::PageDescription::Row HdRootPlan::LoadRow::describe() const {
     TASTY_SEAT_BODY(LoadRow);
     app::PageDescription::Row r{};
     r.kind = app::PageDescription::RowKind::Submenu;
+    r.tier = kTier;
     (void)r.label.assign(plan_.load_label_);
     return r;
 }

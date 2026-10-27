@@ -41,11 +41,12 @@ bool LinkBinder::adopt_fed_ring(hal::FpgaMemory&& ring) noexcept {
 
 Ex<void> LinkBinder::bind_census(
     std::span<const reactor::LinkDecoderDecl> rows,
-    cores::Core* owner
+    infra::OptRef<cores::Core> owner
 ) {
 
     const infra::OptRef<reactor::ICoreToken> prev = state_.owner;
-    state_.owner = infra::opt_ref_of<reactor::ICoreToken>(rows.empty() ? nullptr : owner);
+    state_.owner = (rows.empty() || !owner) ? infra::OptRef<reactor::ICoreToken>{}
+                                            : infra::OptRef<reactor::ICoreToken>{*owner};
     auto r = exec_.bind(rows, state_);
     if (!r)
         state_.owner = prev;
@@ -72,7 +73,7 @@ void LinkBinder::bind_doorbells_(
 
 Ex<void> LinkBinder::bind_session(
     std::span<const reactor::LinkDecoderDecl> rows,
-    cores::Core* owner,
+    infra::OptRef<cores::Core> owner,
     std::span<const proto::IrqBinding> irqs,
     std::uint32_t declared,
     const DoorbellLines& lines
@@ -176,7 +177,7 @@ bool LinkBinder::bridge_windows_live() const noexcept {
 }
 
 Ex<void> LinkBinder::unbind_session() {
-    auto r = bind_census({}, nullptr);
+    auto r = bind_census({}, {});
     notifiers_.release();
     doorbells_declared_ = 0;
     bound_classes_ = reactor::CauseSet{};

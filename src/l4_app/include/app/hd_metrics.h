@@ -103,4 +103,42 @@ struct HdMetrics {
     return m;
 }
 
+[[nodiscard]] constexpr HdMetrics hd_under_band(HdMetrics m, std::int32_t band_h) noexcept {
+    if (band_h <= 0)
+        return m;
+    m.list_top = m.list_top - m.inset_y + m.gap;
+    m.inset_y = m.gap;
+    m.help_top -= band_h;
+    return m;
+}
+
+[[nodiscard]] constexpr HdMetrics hd_snap_type(HdMetrics m, std::uint8_t em) noexcept {
+    if (em == 0)
+        return m;
+    const std::int32_t e = em;
+    const auto snap = [e](std::int32_t v) {
+        const std::int32_t q = v / e + (2 * (v % e) > e ? 1 : 0);
+        return std::max<std::int32_t>(1, q) * e;
+    };
+    const std::int32_t body_up = std::max<std::int32_t>(1, (m.font_body + e - 1) / e);
+    const std::int32_t body_fits = std::max<std::int32_t>(1, m.row_h * 3 / 4 / e);
+    m.font_hero = snap(m.font_hero);
+    m.font_section = snap(m.font_section);
+    m.font_body = std::min(body_up, body_fits) * e;
+    m.font_title = m.font_body + e;
+    m.font_caption = snap(m.font_caption);
+    m.font_small = snap(m.font_small);
+    return m;
+}
+
+[[nodiscard]] constexpr std::int32_t hd_art_pixel(
+    const HdMetrics& snapped,
+    std::uint8_t em
+) noexcept {
+    if (em == 0)
+        return 1;
+    const std::int32_t frame = (snapped.card_pad + snapped.stroke) / 3;
+    return std::max<std::int32_t>(1, std::min<std::int32_t>(snapped.font_body / em, frame));
+}
+
 }

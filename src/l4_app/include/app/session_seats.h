@@ -66,13 +66,14 @@ class WindowJobService;
 struct SupervisorParts {
 
     struct Services {
-        infra::OptRef<PcmRingFeeder> feeder{};
-        infra::OptRef<svc::ChdPrefetch> prefetch{};
-        infra::OptRef<MailboxRelay> mailbox{};
-        infra::OptRef<DiskRelay> disks{};
-        infra::OptRef<svc::DiscReadService> discs{};
-        infra::OptRef<DurableWriteService> writes{};
-        infra::OptRef<WindowJobService> window_jobs{};
+        PcmRingFeeder& feeder;
+        svc::ChdPrefetch& prefetch;
+        MailboxRelay& mailbox;
+        DiskRelay& disks;
+        svc::DiscReadService& discs;
+        DurableWriteService& writes;
+        WindowJobService& window_jobs;
+
         infra::OptRef<svc::IStorageLifecycle> storage_life{};
     };
 
@@ -127,7 +128,7 @@ struct SupervisorParts {
     BoardOps board_ops{};
 
     infra::OptRef<const cores::SaveCopyCell> save_copy{};
-    Services services{};
+    Services services;
 };
 
 }

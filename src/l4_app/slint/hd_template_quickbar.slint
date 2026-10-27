@@ -1,0 +1,567 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { Theme, MenuRow, HelpItem, Chevron, RowGlyph, ListScreen, ScreenHeader, HelpBar } from "hd_common.slint";
+
+component Ring inherits Rectangle {
+    x: Theme.focus-stroke;
+    y: Theme.focus-stroke;
+    border-radius: max(0px, Theme.radius-md - Theme.focus-stroke);
+    border-width: Theme.ring-w;
+    border-color: Theme.accent;
+    background: transparent;
+}
+
+component ShelfCard inherits Rectangle {
+    in property <MenuRow> entry;
+    in property <length> slot;
+    in property <length> card-h;
+    property <bool> shown: root.entry.tier == 2;
+    property <bool> focused: root.entry.selected;
+    property <length> card-w: root.width - Theme.gap;
+    property <length> edge: 2 * Theme.focus-stroke + Theme.ring-w;
+    property <length> art-w: root.card-w - 2 * root.edge;
+    property <length> line-h: ceil(Theme.font-body * 1.45 / 1px) * 1px;
+    property <length> label-h: 2 * root.line-h + Theme.row-pad;
+    property <length> art-h: floor(min(root.card-h - root.label-h - 2 * root.edge, root.art-w * 4 / 3) / 1px) * 1px;
+    min-width: 0px;
+    preferred-width: root.shown ? root.slot : 0px;
+    max-width: root.shown ? root.slot : 0px;
+    horizontal-stretch: 1;
+    height: root.shown ? root.art-h + root.label-h + 2 * root.edge : 0px;
+    if root.shown: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.card-w;
+        height: root.height;
+        border-radius: Theme.radius-md;
+        background: Theme.plate;
+        border-width: Theme.stroke;
+        border-color: root.focused ? Theme.accent : Theme.border-mid;
+        Rectangle {
+            x: root.edge;
+            y: root.edge;
+            width: root.art-w;
+            height: root.art-h;
+            border-radius: Theme.radius-sm;
+            background: root.entry.enabled ? root.entry.tint : Theme.border-mid;
+            Text {
+                x: Theme.row-pad;
+                width: parent.width - 2 * Theme.row-pad;
+                height: parent.height;
+                text: root.entry.value;
+                color: root.entry.enabled ? root.entry.tint-ink : Theme.on-accent;
+                font-family: Theme.family;
+                font-size: Theme.font-title * 1.6;
+                font-weight: Theme.weight-bold;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+        }
+        Text {
+            x: root.edge + Theme.row-pad / 2;
+            y: root.edge + root.art-h + Theme.row-pad / 2;
+            width: root.art-w - Theme.row-pad;
+            height: 2 * root.line-h;
+            text: root.entry.label;
+            color: root.entry.enabled ? Theme.text : Theme.cue-spent;
+            font-family: Theme.family;
+            font-size: Theme.font-body;
+            font-weight: root.focused ? Theme.weight-selected : Theme.weight-normal;
+            vertical-alignment: top;
+            wrap: word-wrap;
+            overflow: elide;
+        }
+        if root.focused: Ring {
+            width: parent.width - 2 * Theme.focus-stroke;
+            height: parent.height - 2 * Theme.focus-stroke;
+        }
+    }
+}
+
+component Tile inherits Rectangle {
+    in property <MenuRow> entry;
+    property <bool> focused: root.entry.selected;
+    property <color> ink: root.entry.enabled ? Theme.text : Theme.cue-spent;
+    Rectangle {
+        y: Theme.press-edge;
+        width: parent.width;
+        height: parent.height - Theme.press-edge;
+        border-radius: Theme.radius-md;
+        background: Theme.control-edge;
+    }
+    Rectangle {
+        y: 0;
+        width: parent.width;
+        height: parent.height - Theme.press-edge;
+        border-radius: Theme.radius-md;
+        background: Theme.plate;
+        border-width: Theme.stroke;
+        border-color: root.focused ? Theme.accent : Theme.border-mid;
+        HorizontalLayout {
+            padding-left: Theme.row-pad + Theme.focus-stroke + Theme.ring-w;
+            padding-right: Theme.row-pad + Theme.focus-stroke + Theme.ring-w;
+            spacing: Theme.gap / 2;
+            if root.entry.icon != 0: VerticalLayout {
+                alignment: center;
+                RowGlyph {
+                    width: Theme.glyph;
+                    height: Theme.glyph;
+                    ink: root.ink;
+                    icon: root.entry.icon;
+                }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.entry.label;
+                color: root.ink;
+                font-family: Theme.family;
+                font-size: Theme.font-body;
+                font-weight: root.focused ? Theme.weight-selected : Theme.weight-normal;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                overflow: elide;
+            }
+            if root.entry.kind == 1: VerticalLayout {
+                alignment: center;
+                Chevron { ink: root.ink; dir: 0; }
+            }
+        }
+        if root.focused: Ring {
+            width: parent.width - 2 * Theme.focus-stroke;
+            height: parent.height - 2 * Theme.focus-stroke;
+        }
+    }
+}
+
+component Caption inherits Text {
+    color: Theme.accent;
+    font-family: Theme.family;
+    font-size: Theme.font-caption;
+    font-weight: Theme.weight-bold;
+    vertical-alignment: center;
+    wrap: no-wrap;
+    overflow: elide;
+}
+
+component StripRule inherits Rectangle {
+    in property <length> tile-h;
+    min-width: Theme.gap;
+    max-width: Theme.gap;
+    horizontal-stretch: 0;
+    height: root.tile-h;
+    Rectangle {
+        x: 0;
+        y: floor(root.tile-h / 5 / 1px) * 1px;
+        width: Theme.hair;
+        height: floor(root.tile-h * 3 / 5 / 1px) * 1px;
+        background: Theme.border-mid;
+    }
+}
+
+component StripItem inherits Rectangle {
+    in property <MenuRow> entry;
+    in property <length> slot;
+    in property <length> tile-h;
+    property <bool> rule: root.entry.kind == 3;
+    property <bool> tile: !root.rule && root.entry.tier != 2;
+    min-width: root.rule ? Theme.gap : 0px;
+    preferred-width: root.tile ? root.slot : root.rule ? Theme.gap : 0px;
+    max-width: self.preferred-width;
+    horizontal-stretch: root.tile ? 1 : 0;
+    height: root.tile || root.rule ? root.tile-h : 0px;
+    if root.tile: Tile {
+        x: 0;
+        y: 0;
+        width: root.width - Theme.gap;
+        height: root.tile-h;
+        entry: root.entry;
+    }
+    if root.rule: StripRule { x: 0; y: 0; tile-h: root.tile-h; }
+}
+
+component BandTile inherits Rectangle {
+    in property <MenuRow> entry;
+    in property <bool> lit;
+    property <bool> open: root.entry.selected && !root.lit;
+    property <color> ink: root.open ? Theme.on-accent : root.entry.enabled ? Theme.text : Theme.cue-spent;
+    Rectangle {
+        y: Theme.press-edge;
+        width: parent.width;
+        height: parent.height - Theme.press-edge;
+        border-radius: Theme.radius-md;
+        background: Theme.control-edge;
+    }
+    Rectangle {
+        y: 0;
+        width: parent.width;
+        height: parent.height - Theme.press-edge;
+        border-radius: Theme.radius-md;
+        background: root.open ? Theme.selection-fill : Theme.plate;
+        border-width: Theme.stroke;
+        border-color: root.lit || root.open ? Theme.accent : Theme.border-mid;
+        HorizontalLayout {
+            padding-left: Theme.row-pad + Theme.focus-stroke + Theme.ring-w;
+            padding-right: Theme.row-pad + Theme.focus-stroke + Theme.ring-w;
+            spacing: Theme.gap / 2;
+            alignment: center;
+            if root.entry.icon != 0: VerticalLayout {
+                alignment: center;
+                RowGlyph { ink: root.ink; icon: root.entry.icon; }
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.entry.label;
+                color: root.ink;
+                font-family: Theme.family;
+                font-size: Theme.font-body;
+                font-weight: root.lit || root.open ? Theme.weight-selected : Theme.weight-normal;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                overflow: elide;
+            }
+        }
+        if root.lit: Ring {
+            width: parent.width - 2 * Theme.focus-stroke;
+            height: parent.height - 2 * Theme.focus-stroke;
+        }
+    }
+}
+
+
+component Band {
+    in property <[MenuRow]> hub;
+    in property <int> at;
+    in property <bool> lit;
+    in property <length> safe-top;
+    property <length> content-w: self.width - 2 * Theme.inset-x;
+    property <length> slot: ceil(root.content-w / 5 / 1px) * 1px;
+    property <length> room: root.height - root.safe-top - Theme.gap;
+    property <length> tile-h: floor(min(Theme.button-h * 1.5, root.room) / 1px) * 1px;
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: Theme.band;
+    }
+    Rectangle {
+        x: 0;
+        y: root.height - Theme.hair;
+        width: root.width;
+        height: Theme.hair;
+        background: Theme.border-subtle;
+    }
+    Rectangle {
+        x: Theme.inset-x;
+        y: 0;
+        width: root.content-w;
+        height: root.height;
+        clip: true;
+        for e[i] in root.hub: BandTile {
+            x: (i - root.at + 1) * root.slot;
+            y: root.safe-top + floor((root.room - root.tile-h) / 2 / 1px) * 1px;
+            width: root.slot - Theme.gap;
+            height: root.tile-h;
+            entry: e;
+            lit: root.lit && e.selected;
+        }
+    }
+}
+
+
+component FocusCard inherits Rectangle {
+    in property <MenuRow> entry;
+    in property <length> content-w;
+    property <color> ink: root.entry.enabled ? Theme.text : Theme.cue-spent;
+    visible: root.entry.selected;
+    x: Theme.inset-x;
+    y: Theme.list-top;
+    width: root.content-w;
+    height: min(Theme.help-top - Theme.gap - Theme.list-top, body.preferred-height);
+    border-radius: Theme.radius-md;
+    background: Theme.plate;
+    border-width: Theme.stroke;
+    border-color: Theme.border-mid;
+    body := VerticalLayout {
+        padding: Theme.row-pad * 2;
+        spacing: Theme.gap;
+        alignment: center;
+        if root.entry.icon != 0: HorizontalLayout {
+            alignment: center;
+            RowGlyph {
+                width: Theme.glyph * 2;
+                height: Theme.glyph * 2;
+                ink: root.ink;
+                icon: root.entry.icon;
+            }
+        }
+        Text {
+            text: root.entry.label;
+            color: root.ink;
+            font-family: Theme.family;
+            font-size: Theme.font-title;
+            font-weight: Theme.weight-bold;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
+
+
+component BandFocus {
+    in property <[MenuRow]> entries;
+    in property <[MenuRow]> pinned-entries;
+    in property <length> content-w;
+    for e in root.entries: FocusCard { entry: e; content-w: root.content-w; }
+    for e in root.pinned-entries: FocusCard { entry: e; content-w: root.content-w; }
+}
+
+
+component HomeScreen {
+    in property <[MenuRow]> entries;
+    in property <[MenuRow]> pinned-entries;
+    in property <[HelpItem]> help;
+    in property <string> core-text;
+    in property <string> subtitle-text;
+    in property <string> heading-text;
+    in property <string> badge-text;
+    in property <string> status-text;
+    in property <string> shelf-caption-text;
+    in property <string> strip-caption-text;
+
+    property <length> content-w: self.width - 2 * Theme.inset-x;
+    property <length> card-slot: ceil((root.content-w + Theme.gap) / 5 / 1px) * 1px;
+    property <length> tile-slot: ceil(root.content-w / 4 / 1px) * 1px;
+    property <length> tile-h: floor(Theme.button-h * 1.5 / 1px) * 1px;
+    property <length> cap-h: floor(Theme.font-caption * 1.6 / 1px) * 1px;
+    property <length> cap-gap: floor(Theme.gap / 2 / 1px) * 1px;
+    property <length> area-h: Theme.help-top - Theme.gap - Theme.list-top;
+    property <bool> shelved: root.shelf-caption-text != "";
+    property <length> strip-block: root.cap-h + root.cap-gap + root.tile-h;
+    property <length> card-h: root.area-h - root.strip-block - root.cap-h - root.cap-gap - 2 * Theme.gap;
+
+    ScreenHeader {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        content-w: root.content-w;
+        core-text: root.core-text;
+        subtitle-text: root.subtitle-text;
+        heading-text: root.heading-text;
+        badge-text: root.badge-text;
+        status-text: root.status-text;
+    }
+
+    if root.shelved: VerticalLayout {
+        x: Theme.inset-x;
+        y: Theme.list-top;
+        width: root.content-w + Theme.gap;
+        height: root.cap-h + root.cap-gap + root.card-h;
+        spacing: 0;
+        alignment: start;
+        Caption {
+            height: root.cap-h;
+            text: root.shelf-caption-text;
+        }
+        Rectangle { height: root.cap-gap; }
+        HorizontalLayout {
+            spacing: 0;
+            alignment: start;
+            for e in root.entries: ShelfCard { entry: e; slot: root.card-slot; card-h: root.card-h; }
+        }
+    }
+
+    VerticalLayout {
+        x: Theme.inset-x;
+        y: Theme.list-top + floor((root.area-h - root.strip-block) / (root.shelved ? 1 : 2) / 1px) * 1px;
+        width: root.content-w + Theme.gap;
+        height: root.strip-block;
+        spacing: 0;
+        alignment: start;
+        Caption {
+            height: root.cap-h;
+            text: root.strip-caption-text;
+        }
+        Rectangle { height: root.cap-gap; }
+        HorizontalLayout {
+            spacing: 0;
+            alignment: start;
+            for e in root.entries: StripItem { entry: e; slot: root.tile-slot; tile-h: root.tile-h; }
+            if root.pinned-entries.length > 0: StripRule { tile-h: root.tile-h; }
+            for e in root.pinned-entries: StripItem { entry: e; slot: root.tile-slot; tile-h: root.tile-h; }
+        }
+    }
+
+    HelpBar {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        help: root.help;
+        content-w: root.content-w;
+    }
+}
+
+export component HdTemplateQuickBar inherits Window {
+    in property <[MenuRow]> entries;
+    in property <[MenuRow]> pinned-entries;
+    in property <[MenuRow]> choices;
+    in property <[HelpItem]> help;
+    in property <string> core-text;
+    in property <string> subtitle-text;
+    in property <string> heading-text;
+    in property <string> badge-text;
+    in property <string> status-text;
+    in property <bool> choice-shape;
+    in property <bool> choice-stacked;
+    in property <length> main-h;
+    in property <length> pinned-y;
+    in property <length> pinned-h;
+    in property <length> choice-y;
+    in property <length> choice-h;
+    in property <bool> cue-shown;
+    in property <bool> cue-up;
+    in property <bool> cue-down;
+    in property <string> cue-text;
+    in property <bool> across;
+    in property <int> list-first;
+    in property <int> list-total;
+    in property <int> rail-at;
+    in property <string> rail-text;
+    in property <int> badge-state;
+    in property <string> caption-text;
+    in property <string> above-text;
+    in property <string> below-text;
+    in property <string> above-count;
+    in property <string> below-count;
+    in property <string> shelf-caption-text;
+    in property <string> strip-caption-text;
+    in property <[MenuRow]> hub-entries;
+    in property <int> hub-at;
+    in property <bool> band-lit;
+    in property <bool> band-focus;
+    in property <length> band-h;
+    in property <length> card-w;
+
+    property <bool> banded: root.band-h > 0px;
+
+    background: Theme.ground;
+
+    if root.banded: Band {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.band-h;
+        hub: root.hub-entries;
+        at: root.hub-at;
+        lit: root.band-lit;
+        safe-top: round(root.height / 1px * 5 / 100) * 1px;
+    }
+
+    if root.banded && !root.band-focus: ListScreen {
+        x: 0;
+        y: root.band-h;
+        width: root.card-w;
+        height: root.height - root.band-h;
+        entries: root.entries;
+        pinned-entries: root.pinned-entries;
+        choices: root.choices;
+        help: root.help;
+        core-text: root.core-text;
+        subtitle-text: root.subtitle-text;
+        heading-text: root.heading-text;
+        badge-text: root.badge-text;
+        status-text: root.status-text;
+        choice-shape: root.choice-shape;
+        choice-stacked: root.choice-stacked;
+        main-h: root.main-h;
+        pinned-y: root.pinned-y;
+        pinned-h: root.pinned-h;
+        choice-y: root.choice-y;
+        choice-h: root.choice-h;
+        cue-shown: root.cue-shown;
+        cue-up: root.cue-up;
+        cue-down: root.cue-down;
+        cue-text: root.cue-text;
+    }
+
+    if root.banded && root.band-focus: ScreenHeader {
+        x: 0;
+        y: root.band-h;
+        width: root.card-w;
+        height: root.height - root.band-h;
+        content-w: root.card-w - Theme.inset-x - Theme.pad-right;
+        core-text: root.core-text;
+        subtitle-text: root.subtitle-text;
+        heading-text: root.heading-text;
+        badge-text: root.badge-text;
+        status-text: root.status-text;
+    }
+
+    if root.banded && root.band-focus: BandFocus {
+        x: 0;
+        y: root.band-h;
+        width: root.card-w;
+        height: root.height - root.band-h;
+        entries: root.entries;
+        pinned-entries: root.pinned-entries;
+        content-w: root.card-w - Theme.inset-x - Theme.pad-right;
+    }
+
+    if root.banded && root.band-focus: HelpBar {
+        x: 0;
+        y: root.band-h;
+        width: root.card-w;
+        height: root.height - root.band-h;
+        help: root.help;
+        content-w: root.card-w - Theme.inset-x - Theme.pad-right;
+    }
+
+    if !root.banded && !root.across: ListScreen {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        entries: root.entries;
+        pinned-entries: root.pinned-entries;
+        choices: root.choices;
+        help: root.help;
+        core-text: root.core-text;
+        subtitle-text: root.subtitle-text;
+        heading-text: root.heading-text;
+        badge-text: root.badge-text;
+        status-text: root.status-text;
+        choice-shape: root.choice-shape;
+        choice-stacked: root.choice-stacked;
+        main-h: root.main-h;
+        pinned-y: root.pinned-y;
+        pinned-h: root.pinned-h;
+        choice-y: root.choice-y;
+        choice-h: root.choice-h;
+        cue-shown: root.cue-shown;
+        cue-up: root.cue-up;
+        cue-down: root.cue-down;
+        cue-text: root.cue-text;
+    }
+
+    if !root.banded && root.across: HomeScreen {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        entries: root.entries;
+        pinned-entries: root.pinned-entries;
+        help: root.help;
+        core-text: root.core-text;
+        subtitle-text: root.subtitle-text;
+        heading-text: root.heading-text;
+        badge-text: root.badge-text;
+        status-text: root.status-text;
+        shelf-caption-text: root.shelf-caption-text;
+        strip-caption-text: root.strip-caption-text;
+    }
+}

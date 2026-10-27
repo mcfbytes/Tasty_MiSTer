@@ -25,11 +25,11 @@ namespace {
 using Refusal = PlayRefusal::Why;
 
 std::string value_label(
-    const proto::ItemTable* table,
+    infra::OptRef<const proto::ItemTable> table,
     const cores::IMovieCodec::SettingNeed& need,
     unsigned value
 ) {
-    if (table != nullptr) {
+    if (table) {
         for (const proto::Item& it : table->items()) {
             if (it.kind != proto::ItemKind::Option
                 || it.bits.start.v != need.lo
@@ -46,9 +46,9 @@ std::string value_label(
 
 cores::IMovieCodec::SettingNeeds where_the_core_has(
     cores::IMovieCodec::SettingNeeds needs,
-    const proto::ItemTable* table
+    infra::OptRef<const proto::ItemTable> table
 ) {
-    if (table == nullptr)
+    if (!table)
         return needs;
     for (std::size_t i = 0; i < needs.n; ++i) {
         cores::IMovieCodec::SettingNeed& n = needs.rows[i];
@@ -110,7 +110,8 @@ IReplayStage::Step SettleStage::settle_(Ctx ctx) noexcept {
             table = std::move(*t);
         }
     }
-    const proto::ItemTable* rows = table ? &*table : nullptr;
+    const auto rows = table ? infra::OptRef<const proto::ItemTable>{*table}
+                            : infra::OptRef<const proto::ItemTable>{};
     const auto asked = play.codec->setting_needs_for(play.facts, play.ram_fill);
     if (!asked) {
         play.last_setting = "RAM init";
@@ -200,7 +201,7 @@ bool SettleStage::set_unmet_(
     Ctx ctx,
     const proto::StatusWord& live,
     const cores::IMovieCodec::SettingNeeds& needs,
-    const proto::ItemTable* labels
+    infra::OptRef<const proto::ItemTable> labels
 ) noexcept {
     ReplayPlay& play = ctx.play;
     for (const auto& n : needs.view()) {

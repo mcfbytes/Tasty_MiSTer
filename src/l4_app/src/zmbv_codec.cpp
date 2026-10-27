@@ -389,9 +389,9 @@ void ZmbvCodec::restart(const RecOptions& opt) noexcept {
     }
 }
 
-void ZmbvCodec::arm(const os::IClock* clock, std::int64_t budget_ns) noexcept {
+void ZmbvCodec::arm(infra::OptRef<const os::IClock> clock, std::int64_t budget_ns) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
-    clock_ = infra::opt_ref_of(clock);
+    clock_ = clock;
     threshold_ns_ = budget_ns > 0 ? budget_ns : 0;
     std::int64_t room = threshold_ns_ - post_ns_;
     if (room < kMeSearchFloorNs)

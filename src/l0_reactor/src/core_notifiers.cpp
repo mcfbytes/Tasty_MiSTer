@@ -18,9 +18,7 @@ Ex<NotifierSlot> CoreNotifiers::bind_doorbell(
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(kMaxLines)}
         );
     }
-    const hal::RegisterWindow<hal::CauseReg>* cause = window ? &*window : nullptr;
-
-    auto n = Notifier::doorbell_adopt(uio, cause, klass);
+    auto n = Notifier::doorbell_adopt(uio, window, klass);
     if (!n)
         return std::unexpected(n.error());
     auto s = exec_.add_notifier(std::move(*n));

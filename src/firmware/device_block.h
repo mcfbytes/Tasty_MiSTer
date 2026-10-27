@@ -68,6 +68,7 @@
 #include "infra/wake_flag.h"
 #include "board_reset.h"
 #include "ladder_scope.h"
+#include "open_verdict.h"
 #include "os/clock.h"
 #include "proto/osd_surface.h"
 #include "reactor/core_state.h"
@@ -103,17 +104,15 @@ public:
         infra::OptRef<app::SaveStateAttach> save_states{};
     };
 
-    static constexpr const char* kDiagPath = "/tmp/MiSTer_diag";
-
     DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Front& front);
     DeviceBlock(const DeviceBlock&) = delete;
     DeviceBlock& operator=(const DeviceBlock&) = delete;
 
-    void open_wires() noexcept;
+    void open_wires(const BootParts& plat) noexcept;
 
     void open_seats(const BootParts& plat, const Seats& seats) noexcept;
 
-    void grant_pauses(const ThreadAssembly::SeatMains& mains, UiMain* ui) noexcept;
+    void grant_pauses(const ThreadAssembly::SeatMains& mains, infra::OptRef<UiMain> ui) noexcept;
 
     void grant_pause(SeatTag seat, xthread::PauseLatch& latch) noexcept;
 
@@ -121,17 +120,26 @@ public:
 
     [[nodiscard]] DiagSampler::Services diag_services() noexcept;
 
-    static std::optional<app::CmdFifo> open_cmd_fifo(app::ICmdVerbSink& route);
+    OpenVerdict& verdict() noexcept { return opened_; }
+
+    [[nodiscard]] const OpenVerdict& verdict() const noexcept { return opened_; }
+
+    std::optional<app::CmdFifo> open_cmd_fifo(
+        const BootParts& plat,
+        app::ICmdVerbSink& route
+    ) noexcept;
 
 private:
     static std::unique_ptr<reactor::FrameClock> open_frame_clock(
         const char* vsync_device,
-        reactor::Executive& exec
+        reactor::Executive& exec,
+        OpenVerdict& verdict
     );
 
     static std::optional<svc::PrefetchMain> open_prefetch_main(
         svc::ChdPrefetch& prefetch,
-        xthread::WakeFlag& main_wake
+        xthread::WakeFlag& main_wake,
+        OpenVerdict& verdict
     );
     static std::optional<app::PcmMain> open_pcm_main(
         xthread::WakeFlag& pcm_wake,
@@ -139,19 +147,17 @@ private:
         app::PcmRingFeeder::Commands& commands,
         app::MailboxRelay& relay,
         app::CompanionHost& host,
-        xthread::WakeFlag& main_wake
+        xthread::WakeFlag& main_wake,
+        OpenVerdict& verdict
     );
     static std::optional<svc::IoMain> open_io_main(
         xthread::WakeFlag& io_wake,
         xthread::WakeFlag& main_wake,
-        int doorbells
+        int doorbells,
+        OpenVerdict& verdict
     );
 
     [[nodiscard]] app::SupervisorParts::Services services_() noexcept;
-
-    [[nodiscard]] static Ex<hal::FpgaMemory> map_scaler_out(
-        std::span<const hal::PhysRegion> regions
-    );
 
     [[nodiscard]] std::optional<app::ScalerFrameSource> open_frame_source_(
         const BootParts& plat
@@ -168,6 +174,7 @@ private:
     void grant_latched_(const ThreadAssembly::SeatMains& mains, SeatList<Rows...>) noexcept;
 
 public:
+    OpenVerdict opened_{};
     const Front front_;
 
     xthread::DiagLog diag_log_;

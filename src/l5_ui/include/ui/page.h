@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "infra/opt_ref.h"
 #include "ui/page_id.h"
@@ -14,6 +15,7 @@ class ItemTable;
 
 namespace mister::app {
 struct PageDescription;
+enum class RowTier : std::uint8_t;
 }
 
 namespace mister::ui {
@@ -59,6 +61,8 @@ public:
 
     virtual bool describe(app::PageDescription&) const { return false; }
 
+    virtual bool describe_hub(app::PageDescription&) const { return false; }
+
     virtual Transition handle(const UiEvent&) = 0;
 
     virtual void on_facts(const struct SystemFacts&) {}
@@ -83,6 +87,16 @@ public:
 
     virtual RowIndex selection() const { return RowIndex{}; }
 
+    struct TierRun {
+        app::RowTier tier;
+        MenuMask rows;
+    };
+
+    virtual std::optional<TierRun> tier_run(RowIndex at) const {
+        (void)at;
+        return std::nullopt;
+    }
+
     virtual RowCount osd_height() const { return RowCount{16}; }
 
     virtual bool has_title_strip() const { return true; }
@@ -102,6 +116,8 @@ public:
     virtual bool bt_pairing_active() const { return false; }
 
     virtual bool runs_a_process() const { return false; }
+
+    virtual bool back_is_idle() const { return false; }
 
     virtual std::uint32_t refusals() const noexcept { return 0; }
 

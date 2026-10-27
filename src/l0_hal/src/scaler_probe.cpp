@@ -160,6 +160,40 @@ std::optional<ScalerProbe::Pick> ScalerProbe::pick_complete(
     return Pick{.buf = done, .lag = 1, .woven = false, .prev = holding(ctr_minus(ctr(done), 1))};
 }
 
+std::optional<ScalerProbe::Verdict> ScalerProbe::still(
+    const ScalerBuffers& window,
+    std::optional<std::size_t> known
+) noexcept {
+    const auto head = window.header(0);
+    if (!head || !plausible(*head))
+        return std::nullopt;
+    if (!head->triple_buffered())
+        return Verdict::LargeLowlat;
+    const bool small_first = known == ScalerBuffers::kStrideSmall;
+    const std::array<std::size_t, 2> order = small_first
+        ? std::array{ScalerBuffers::kStrideSmall, ScalerBuffers::kStrideLarge}
+        : std::array{ScalerBuffers::kStrideLarge, ScalerBuffers::kStrideSmall};
+    for (const std::size_t stride : order) {
+        std::array<ScalerHeader, ScalerBuffers::kBuffers> hs{};
+        bool whole = true;
+        for (std::size_t i = 0; i < hs.size() && whole; ++i) {
+            const auto h = window.header(i * stride);
+            whole = h
+                && plausible(*h)
+                && h->triple_buffered()
+                && h->width == head->width
+                && h->height == head->height
+                && h->line == head->line
+                && h->header_size == head->header_size;
+            if (whole)
+                hs[i] = *h;
+        }
+        if (whole && pick_complete(hs))
+            return stride == ScalerBuffers::kStrideLarge ? Verdict::Large : Verdict::Small;
+    }
+    return std::nullopt;
+}
+
 bool ScalerProbe::port_stuck(ScalerBuffers& window) noexcept {
     static constexpr std::size_t kBeat = 16;
     static constexpr std::size_t kMaxShort = 255 * kBeat;

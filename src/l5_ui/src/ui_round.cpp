@@ -264,7 +264,7 @@ app::UiRoundEdge UiRound::compose_(bool link_work) {
             .bluetooth = ctx_.status.bluetooth,
             .rt = ctx_.sys.kernel == os::KernelRt::PreemptRt
         };
-        hd_->tick(page, model_.pause_badge(), slots, model_.style().theme());
+        hd_->tick(page, model_.pause_badge(), slots, model_.style().look());
         model_.set_hd_root(hd_->available());
     }
     return app::UiRoundEdge{

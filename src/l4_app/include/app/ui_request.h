@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "app/core_scope.h"
+#include "app/hd_look.h"
 #include "app/xml_kind.h"
 #include "app/path_text.h"
 #include "app/types.h"
@@ -38,7 +39,7 @@ struct UiRequest {
         LoadRamImage,
         SetOsdStyle,
         SdramDetected,
-        SetHdTheme,
+        SetHdLook,
         kCount,
     };
 
@@ -137,9 +138,10 @@ struct UiRequest {
         std::uint16_t osd_mask = 0;
     };
 
-    struct SetHdTheme {
-        static constexpr Kind kKind = Kind::SetHdTheme;
-        std::uint8_t theme = 0;
+    struct SetHdLook {
+        static constexpr Kind kKind = Kind::SetHdLook;
+        HdLookField field = HdLookField::Layout;
+        std::uint8_t value = 0;
     };
 
     using Alternatives = std::tuple<
@@ -157,7 +159,7 @@ struct UiRequest {
         LoadRamImage,
         SetOsdStyle,
         SdramDetected,
-        SetHdTheme>;
+        SetHdLook>;
 
     Kind kind = Kind::LoadCore;
     std::uint8_t pad_[3]{};

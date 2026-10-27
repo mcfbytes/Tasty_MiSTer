@@ -51,6 +51,7 @@ public:
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
     std::uint8_t pinned() const noexcept override;
     bool remembers_focus() const noexcept override;
+    bool hub() const noexcept override;
     void refresh(const SystemFacts& facts) override;
     infra::OptRef<IHdRewalk> rewalker() override;
     void rewalk(const proto::ItemTable& table, const BuildEnv& env) override;
@@ -62,6 +63,8 @@ public:
     static_assert(kRows + kReserved <= app::PageDescription::kMaxRows);
 
     static constexpr std::uint8_t kPinned = 3;
+
+    static constexpr app::RowTier kTier = app::RowTier::Verb;
 
 private:
     class LoadRow final : public IHdRow {

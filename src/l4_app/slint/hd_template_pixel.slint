@@ -1,0 +1,470 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { Theme, MenuRow, HelpItem, RowGlyph, HelpGlyph } from "hd_common.slint";
+
+component PixelText inherits Text {
+    color: Theme.text;
+    font-family: Theme.family;
+    font-size: Theme.font-body;
+    font-weight: Theme.weight-normal;
+    vertical-alignment: center;
+    wrap: no-wrap;
+}
+
+component Px inherits Rectangle {
+    in property <float> px;
+    in property <float> py;
+    in property <float> pw;
+    in property <float> ph;
+    x: Theme.pixel * root.px;
+    y: Theme.pixel * root.py;
+    width: Theme.pixel * root.pw;
+    height: Theme.pixel * root.ph;
+}
+
+
+component PixelWindow inherits Rectangle {
+    property <float> aw: floor(root.width / Theme.pixel);
+    property <float> ah: floor(root.height / Theme.pixel);
+    property <color> edge: Theme.window.darker(2.0);
+    property <length> fill-h: root.height - 6 * Theme.pixel;
+    for band in 8: Rectangle {
+        x: 3 * Theme.pixel;
+        y: 3 * Theme.pixel + floor(root.fill-h * band / 8 / 1px) * 1px;
+        width: root.width - 6 * Theme.pixel;
+        height: floor(root.fill-h * (band + 1) / 8 / 1px) * 1px - floor(root.fill-h * band / 8 / 1px) * 1px;
+        background: Theme.window.brighter(0.6 * (7 - band) / 7);
+    }
+    Px { px: 2; py: 0; pw: root.aw - 4; ph: 1; background: root.edge; }
+    Px { px: 2; py: root.ah - 1; pw: root.aw - 4; ph: 1; background: root.edge; }
+    Px { px: 0; py: 2; pw: 1; ph: root.ah - 4; background: root.edge; }
+    Px { px: root.aw - 1; py: 2; pw: 1; ph: root.ah - 4; background: root.edge; }
+    Px { px: 1; py: 1; pw: 1; ph: 1; background: root.edge; }
+    Px { px: root.aw - 2; py: 1; pw: 1; ph: 1; background: root.edge; }
+    Px { px: 1; py: root.ah - 2; pw: 1; ph: 1; background: root.edge; }
+    Px { px: root.aw - 2; py: root.ah - 2; pw: 1; ph: 1; background: root.edge; }
+    Px { px: 2; py: 1; pw: root.aw - 4; ph: 1; background: Theme.text; }
+    Px { px: 2; py: root.ah - 2; pw: root.aw - 4; ph: 1; background: Theme.text; }
+    Px { px: 1; py: 2; pw: 1; ph: root.ah - 4; background: Theme.text; }
+    Px { px: root.aw - 2; py: 2; pw: 1; ph: root.ah - 4; background: Theme.text; }
+    Px { px: 2; py: 2; pw: root.aw - 4; ph: 1; background: Theme.border-mid; }
+    Px { px: 2; py: root.ah - 3; pw: root.aw - 4; ph: 1; background: Theme.border-mid; }
+    Px { px: 2; py: 3; pw: 1; ph: root.ah - 6; background: Theme.border-mid; }
+    Px { px: root.aw - 3; py: 3; pw: 1; ph: root.ah - 6; background: Theme.border-mid; }
+}
+
+component Hand {
+    width: 16 * Theme.pixel;
+    height: 9 * Theme.pixel;
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 16;
+        viewbox-height: 9;
+        fill: Theme.window;
+        commands: "M 2 0 H 9 V 1 H 2 Z M 1 1 H 2 V 2 H 1 Z M 9 1 H 15 V 2 H 9 Z M 0 2 H 1 V 7 H 0 Z M 15 2 H 16 V 3 H 15 Z M 7 3 H 15 V 4 H 7 Z M 10 4 H 11 V 5 H 10 Z M 7 5 H 10 V 6 H 7 Z M 10 6 H 11 V 7 H 10 Z M 1 7 H 2 V 8 H 1 Z M 7 7 H 10 V 8 H 7 Z M 2 8 H 7 V 9 H 2 Z";
+    }
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 16;
+        viewbox-height: 9;
+        fill: Theme.window-hand;
+        commands: "M 2 1 H 9 V 2 H 2 Z M 1 2 H 15 V 3 H 1 Z M 1 3 H 7 V 4 H 1 Z M 1 4 H 10 V 5 H 1 Z M 1 5 H 7 V 6 H 1 Z M 1 6 H 10 V 7 H 1 Z M 2 7 H 7 V 8 H 2 Z";
+    }
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 16;
+        viewbox-height: 9;
+        fill: Theme.border-mid;
+        commands: "M 3 3 H 4 V 7 H 3 Z";
+    }
+}
+
+
+component Tri inherits Path {
+    in property <int> dir;
+    in property <color> ink;
+    width: (root.dir <= 1 ? 4 : 7) * Theme.pixel;
+    height: (root.dir <= 1 ? 7 : 4) * Theme.pixel;
+    viewbox-width: root.dir <= 1 ? 4 : 7;
+    viewbox-height: root.dir <= 1 ? 7 : 4;
+    fill: root.ink;
+    commands: root.dir == 0 ? "M 0 0 H 1 V 1 H 2 V 2 H 3 V 3 H 4 V 4 H 3 V 5 H 2 V 6 H 1 V 7 H 0 Z" : root.dir == 1 ? "M 4 0 V 7 H 3 V 6 H 2 V 5 H 1 V 4 H 0 V 3 H 1 V 2 H 2 V 1 H 3 V 0 Z" : root.dir == 2 ? "M 3 0 H 4 V 1 H 5 V 2 H 6 V 3 H 7 V 4 H 0 V 3 H 1 V 2 H 2 V 1 H 3 Z" : "M 0 0 H 7 V 1 H 6 V 2 H 5 V 3 H 4 V 4 H 3 V 3 H 2 V 2 H 1 V 1 H 0 Z";
+}
+
+
+component PixelLine inherits Rectangle {
+    in property <MenuRow> entry;
+    property <bool> sel: root.entry.selected && root.entry.kind <= 2;
+    property <color> ink: root.sel ? Theme.on-window-focus : !root.entry.enabled ? Theme.cue-spent : root.entry.kind == 4 ? Theme.text-label : Theme.text;
+    property <color> sub-ink: root.sel ? Theme.on-window-focus : !root.entry.enabled ? Theme.cue-spent : Theme.text-label;
+    property <length> lead: 2 * Theme.pixel;
+    property <length> lead-end: root.lead + 19 * Theme.pixel;
+    property <length> mark-gap: Theme.font-body / 2;
+    property <length> label-x: root.lead-end + (root.entry.icon != 0 ? Theme.icon + floor(Theme.gap / 2 / 1px) * 1px : 0px);
+    property <length> right: root.width - Theme.row-pad;
+    property <bool> marks: root.sel && root.entry.steps;
+    property <bool> opens: root.entry.kind == 1 && !root.marks;
+    property <length> tri-w: 4 * Theme.pixel;
+    property <length> pitch: 2 * Theme.pixel;
+    property <length> end: root.opens ? root.right - root.tri-w - 2 * Theme.pixel : root.right;
+    property <length> value-right: root.marks ? root.right - root.tri-w - root.mark-gap : root.end;
+    property <length> value-w: root.entry.value == "" ? 0px : min(value.preferred-width, floor(root.width / 2 / 1px) * 1px);
+    property <length> value-x: root.value-right - root.value-w;
+    property <length> label-right: root.entry.value == "" ? root.end : root.value-x - (root.marks ? root.tri-w + root.mark-gap + 2 * Theme.pixel : 2 * Theme.pixel);
+    height: root.entry.kind == 3 ? Theme.sep-h : Theme.row-h;
+
+    if root.sel: Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        background: Theme.window-focus;
+    }
+    if root.sel: Hand {
+        x: root.lead;
+        y: floor((parent.height - 9 * Theme.pixel) / 2 / 1px) * 1px;
+    }
+    if root.entry.kind == 3: Rectangle {
+        x: 0;
+        y: floor((parent.height - Theme.pixel) / 2 / 1px) * 1px;
+        width: parent.width;
+        height: Theme.pixel;
+        for dot in floor((root.width - root.label-x - Theme.row-pad) / root.pitch): Rectangle {
+            x: root.label-x + dot * root.pitch;
+            y: 0;
+            width: Theme.pixel;
+            height: Theme.pixel;
+            background: Theme.border-mid;
+        }
+    }
+    if root.entry.kind == 5: Rectangle {
+        x: root.label-x;
+        y: floor((parent.height - 3 * Theme.pixel) / 2 / 1px) * 1px;
+        width: root.right - root.label-x;
+        height: 3 * Theme.pixel;
+        background: Theme.border-mid;
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: floor(parent.width * clamp(root.entry.fill, 0, 100) / 100 / 1px) * 1px;
+            height: parent.height;
+            background: Theme.accent;
+        }
+    }
+    if root.entry.kind != 3 && root.entry.kind != 5 && root.entry.icon != 0: RowGlyph {
+        x: root.lead-end;
+        y: floor((parent.height - Theme.icon) / 2 / 1px) * 1px;
+        ink: root.sel ? Theme.on-window-focus : !root.entry.enabled ? Theme.cue-spent : Theme.text;
+        icon: root.entry.icon;
+    }
+    if root.entry.kind != 3 && root.entry.kind != 5: PixelText {
+        x: root.label-x;
+        y: 0;
+        width: max(0px, root.label-right - root.label-x);
+        height: parent.height;
+        text: root.entry.label;
+        color: root.ink;
+        overflow: elide;
+    }
+    value := PixelText {
+        x: root.value-x;
+        y: 0;
+        width: root.value-w;
+        height: parent.height;
+        visible: root.entry.kind != 3 && root.entry.kind != 5 && root.entry.value != "";
+        text: root.entry.value;
+        color: root.sub-ink;
+        overflow: elide;
+    }
+    if root.marks: Tri {
+        x: root.value-x - root.mark-gap - root.tri-w;
+        y: floor((parent.height - 7 * Theme.pixel) / 2 / 1px) * 1px;
+        dir: 1;
+        ink: Theme.on-window-focus;
+    }
+    if root.marks: Tri {
+        x: root.right - root.tri-w;
+        y: floor((parent.height - 7 * Theme.pixel) / 2 / 1px) * 1px;
+        dir: 0;
+        ink: Theme.on-window-focus;
+    }
+    if root.opens: Tri {
+        x: root.right - root.tri-w;
+        y: floor((parent.height - 7 * Theme.pixel) / 2 / 1px) * 1px;
+        dir: 0;
+        ink: root.sub-ink;
+    }
+}
+
+component PixelList inherits PixelWindow {
+    in property <[MenuRow]> rows;
+    property <length> frame: Theme.card-pad + Theme.stroke;
+    VerticalLayout {
+        x: root.frame;
+        y: root.frame;
+        width: root.width - 2 * root.frame;
+        height: root.height - 2 * root.frame;
+        spacing: 0;
+        alignment: start;
+        for data in root.rows: PixelLine { entry: data; }
+    }
+}
+
+
+component PixelHeader inherits PixelWindow {
+    in property <string> core-text;
+    in property <string> subtitle-text;
+    in property <string> heading-text;
+    in property <string> badge-text;
+    in property <string> status-text;
+    in property <bool> cue-shown;
+    in property <string> cue-text;
+    property <length> pad: 3 * Theme.pixel + Theme.row-pad;
+    property <length> inner-w: root.width - 2 * root.pad;
+    property <length> bevel: 3 * Theme.pixel;
+    property <length> cap-h: Theme.font-caption;
+
+    property <length> title-h: root.height - 2 * root.bevel - 2 * root.cap-h >= Theme.font-title ? Theme.font-title : Theme.font-body;
+    property <length> lead: floor(max(0px, root.height - 2 * root.bevel - 2 * root.cap-h - root.title-h) / 4 / 1px) * 1px;
+    property <length> y1: root.bevel + root.lead;
+    property <length> y2: root.y1 + root.cap-h + root.lead;
+    property <length> y3: root.y2 + root.cap-h + root.lead;
+    property <length> half: floor(root.inner-w / 2 / 1px) * 1px;
+    property <length> core-w: max(0px, min(core.preferred-width, root.half));
+    property <length> status-w: root.status-text == "" ? 0px : min(status.preferred-width, root.half);
+    property <length> status-gap: root.status-w > 0 ? Theme.gap : 0px;
+    property <length> cue-w: root.cue-shown ? cue.preferred-width : 0px;
+
+    core := PixelText {
+        x: root.pad;
+        y: root.y1;
+        width: root.core-w;
+        height: root.cap-h;
+        text: root.core-text;
+        color: Theme.text-label;
+        font-size: Theme.font-caption;
+        overflow: elide;
+    }
+    PixelText {
+        x: root.pad + root.core-w;
+        y: root.y1;
+        width: max(0px, root.inner-w - root.core-w);
+        height: root.cap-h;
+        text: root.subtitle-text == "" ? "" : Theme.subtitle-sep + root.subtitle-text;
+        color: Theme.text-label;
+        font-size: Theme.font-caption;
+        overflow: elide;
+    }
+    PixelText {
+        x: root.pad;
+        y: root.y2;
+        width: max(0px, root.inner-w - root.status-w - root.status-gap);
+        height: root.cap-h;
+        text: root.badge-text;
+        color: Theme.text-label;
+        font-size: Theme.font-caption;
+        overflow: elide;
+    }
+    status := PixelText {
+        x: root.pad + root.inner-w - root.status-w;
+        y: root.y2;
+        width: root.status-w;
+        height: root.cap-h;
+        text: root.status-text;
+        color: Theme.text-label;
+        font-size: Theme.font-caption;
+    }
+    PixelText {
+        x: root.pad;
+        y: root.y3;
+        width: max(0px, root.inner-w - root.cue-w - (root.cue-shown ? Theme.gap : 0px));
+        height: root.title-h;
+        text: root.heading-text;
+        color: Theme.accent;
+        font-size: root.title-h;
+        font-weight: Theme.weight-bold;
+        overflow: elide;
+    }
+    cue := PixelText {
+        x: root.pad + root.inner-w - root.cue-w;
+        y: root.y3;
+        width: root.cue-w;
+        height: root.title-h;
+        visible: root.cue-shown;
+        text: root.cue-text;
+        color: Theme.text-label;
+        font-size: Theme.font-caption;
+    }
+}
+
+component PixelChoice inherits Rectangle {
+    in property <MenuRow> entry;
+    property <bool> focused: root.entry.selected;
+    if root.focused: Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        background: Theme.window-focus;
+    }
+    if root.focused: Hand {
+        x: 2 * Theme.pixel;
+        y: floor((parent.height - 9 * Theme.pixel) / 2 / 1px) * 1px;
+    }
+    PixelText {
+        x: 21 * Theme.pixel;
+        y: 0;
+        width: max(0px, root.width - 21 * Theme.pixel - Theme.row-pad);
+        height: root.height;
+        text: root.entry.label;
+        color: root.focused ? Theme.on-window-focus : root.entry.enabled ? Theme.text : Theme.cue-spent;
+        overflow: elide;
+    }
+}
+
+component PixelChoices inherits PixelWindow {
+    in property <[MenuRow]> choices;
+    in property <bool> stacked;
+    property <length> frame: 3 * Theme.pixel + Theme.pixel;
+    property <length> inner-w: root.width - 2 * root.frame;
+    property <length> inner-h: root.height - 2 * root.frame;
+    property <int> n: max(1, root.choices.length);
+    property <length> cell-w: floor((root.inner-w - Theme.gap * (root.n - 1)) / root.n / 1px) * 1px;
+    property <length> cell-h: floor((root.inner-h - Theme.gap * (root.n - 1)) / root.n / 1px) * 1px;
+    for data[i] in root.choices: PixelChoice {
+        x: root.frame + (root.stacked ? 0px : i * (root.cell-w + Theme.gap));
+        y: root.frame + (root.stacked ? i * (root.cell-h + Theme.gap) : 0px);
+        width: root.stacked ? root.inner-w : root.cell-w;
+        height: root.stacked ? root.cell-h : root.inner-h;
+        entry: data;
+    }
+}
+
+component PixelHelp inherits PixelWindow {
+    in property <[HelpItem]> help;
+    row := HorizontalLayout {
+        x: floor((root.width - self.preferred-width) / 2 / 1px) * 1px;
+        y: floor((root.height - Theme.glyph) / 2 / 1px) * 1px;
+        width: self.preferred-width;
+        height: Theme.glyph;
+        spacing: Theme.gap * 2;
+        for item in root.help: HorizontalLayout {
+            spacing: floor(Theme.gap * 2 / 3 / 1px) * 1px;
+            if item.glyph != 0: HelpGlyph { glyph: item.glyph; ink: Theme.text; }
+            PixelText {
+                text: item.label;
+                font-size: Theme.font-caption;
+            }
+        }
+    }
+}
+
+export component HdTemplatePixel inherits Window {
+    in property <[MenuRow]> entries;
+    in property <[MenuRow]> pinned-entries;
+    in property <[MenuRow]> choices;
+    in property <[HelpItem]> help;
+    in property <string> core-text;
+    in property <string> subtitle-text;
+    in property <string> heading-text;
+    in property <string> badge-text;
+    in property <string> status-text;
+    in property <bool> choice-shape;
+    in property <bool> choice-stacked;
+    in property <length> main-h;
+    in property <length> pinned-y;
+    in property <length> pinned-h;
+    in property <length> choice-y;
+    in property <length> choice-h;
+    in property <bool> cue-shown;
+    in property <bool> cue-up;
+    in property <bool> cue-down;
+    in property <string> cue-text;
+    in property <bool> across;
+    in property <int> list-first;
+    in property <int> list-total;
+    in property <int> rail-at;
+    in property <string> rail-text;
+    in property <int> badge-state;
+    in property <string> caption-text;
+    in property <string> above-text;
+    in property <string> below-text;
+    in property <string> above-count;
+    in property <string> below-count;
+    in property <string> shelf-caption-text;
+    in property <string> strip-caption-text;
+    in property <[MenuRow]> hub-entries;
+    in property <int> hub-at;
+    in property <bool> band-lit;
+    in property <bool> band-focus;
+    in property <length> band-h;
+    in property <length> card-w;
+
+    property <length> content-w: self.width - Theme.inset-x - Theme.pad-right;
+    property <length> tri-x: Theme.inset-x + floor((root.content-w - 7 * Theme.pixel) / 2 / 1px) * 1px;
+
+    background: Theme.ground;
+
+    PixelHeader {
+        x: Theme.inset-x;
+        y: Theme.inset-y;
+        width: root.content-w;
+        height: Theme.list-top - Theme.gap - Theme.inset-y;
+        core-text: root.core-text;
+        subtitle-text: root.subtitle-text;
+        heading-text: root.heading-text;
+        badge-text: root.badge-text;
+        status-text: root.status-text;
+        cue-shown: root.cue-shown;
+        cue-text: root.cue-text;
+    }
+
+    if root.main-h > 0: PixelList {
+        x: Theme.inset-x;
+        y: Theme.list-top;
+        width: root.content-w;
+        height: root.main-h;
+        rows: root.entries;
+    }
+
+    if root.main-h > 0 && root.cue-up: Tri {
+        x: root.tri-x;
+        y: Theme.list-top - 2 * Theme.pixel;
+        dir: 2;
+        ink: Theme.text;
+    }
+
+    if root.main-h > 0 && root.cue-down: Tri {
+        x: root.tri-x;
+        y: Theme.list-top + root.main-h - 2 * Theme.pixel;
+        dir: 3;
+        ink: Theme.text;
+    }
+
+    if root.pinned-h > 0: PixelList {
+        x: Theme.inset-x;
+        y: root.pinned-y;
+        width: root.content-w;
+        height: root.pinned-h;
+        rows: root.pinned-entries;
+    }
+
+    if root.choice-shape && root.choice-h > 0: PixelChoices {
+        x: Theme.inset-x;
+        y: root.choice-y;
+        width: root.content-w;
+        height: root.choice-h;
+        choices: root.choices;
+        stacked: root.choice-stacked;
+    }
+
+    PixelHelp {
+        x: Theme.inset-x;
+        y: Theme.help-top;
+        width: root.content-w;
+        height: root.height - Theme.inset-y - Theme.help-top;
+        help: root.help;
+    }
+}

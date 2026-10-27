@@ -39,8 +39,8 @@ private:
         return file_host_.mount(slot, p);
     }
 
-    [[nodiscard]] IMailboxRows* on_mailbox_rows() noexcept override {
-        return mailbox_ ? &*mailbox_ : nullptr;
+    [[nodiscard]] infra::OptRef<IMailboxRows> on_mailbox_rows() noexcept override {
+        return mailbox_ ? infra::OptRef<IMailboxRows>{*mailbox_} : infra::OptRef<IMailboxRows>{};
     }
 
     GenericCore file_host_;

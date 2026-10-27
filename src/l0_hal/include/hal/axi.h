@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -86,6 +87,18 @@ constexpr bool regions_well_formed(std::span<const PhysRegion> r) noexcept {
         }
     }
     return true;
+}
+
+constexpr std::optional<PhysRegion> declared_region(
+    std::span<const PhysRegion> r,
+    RegionId id
+) noexcept {
+    if (r.size() != kRegionCount)
+        return std::nullopt;
+    const PhysRegion& p = r[static_cast<std::size_t>(id)];
+    if (p.len == regions::kLenUnsourced)
+        return std::nullopt;
+    return p;
 }
 
 inline constexpr os::PhysAddr kLwBridgeBase{0xFF20'0000u};

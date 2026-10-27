@@ -53,7 +53,7 @@ public:
     [[nodiscard]] Ex<void> send_config(hal::ISpiTransport& link);
 
 private:
-    [[nodiscard]] IBlockGeometry* geometry_for_(SlotIndex slot) const noexcept;
+    [[nodiscard]] infra::OptRef<IBlockGeometry> geometry_for_(SlotIndex slot) const noexcept;
 
     Wiring wiring_{};
     DecodeCounters diag_{};

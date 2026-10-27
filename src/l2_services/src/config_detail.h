@@ -231,6 +231,10 @@ inline constexpr Option kExtSchema[] = {
     {"OSD_STYLE", OptionType::U8, 0, 1, 0, TASTY_CFG_OFF(osd_style), 0, false},
     {"HD_OSD_FPS", OptionType::U8, 1, 30, 10, TASTY_CFG_OFF(hd_osd_fps), 0, false},
     {"HD_THEME", OptionType::U8, 0, 255, 0, TASTY_CFG_OFF(hd_theme), 0, false},
+    {"HD_LAYOUT", OptionType::U8, 0, 255, 255, TASTY_CFG_OFF(hd_layout), 0, false},
+    {"HD_COLORS", OptionType::U8, 0, 255, 255, TASTY_CFG_OFF(hd_colors), 0, false},
+    {"HD_GAME_DISPLAY", OptionType::U8, 0, 1, 0, TASTY_CFG_OFF(hd_game_display), 0, false},
+    {"HD_MENU_OPACITY", OptionType::U8, 50, 100, 85, TASTY_CFG_OFF(hd_menu_opacity), 0, false},
 };
 
 #undef TASTY_CFG_OFF

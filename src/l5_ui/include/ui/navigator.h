@@ -30,6 +30,10 @@ public:
 
     bool move(Direction d) noexcept;
 
+    bool move_tier(Direction d, MenuMask run) noexcept;
+
+    bool move_strip(Direction d, MenuMask run) noexcept;
+
     bool selectable(RowIndex i) const noexcept;
 
 private:

@@ -34,6 +34,18 @@ namespace {
     );
 }
 
+[[nodiscard]] HdRect join(HdRect a, HdRect b) noexcept {
+    if (b.w <= 0 || b.h <= 0)
+        return a;
+    if (a.w <= 0 || a.h <= 0)
+        return b;
+    const std::int32_t x0 = a.x < b.x ? a.x : b.x;
+    const std::int32_t y0 = a.y < b.y ? a.y : b.y;
+    const std::int32_t x1 = a.x + a.w > b.x + b.w ? a.x + a.w : b.x + b.w;
+    const std::int32_t y1 = a.y + a.h > b.y + b.h ? a.y + a.h : b.y + b.h;
+    return HdRect{x0, y0, x1 - x0, y1 - y0};
+}
+
 }
 
 BackdropSampler::Image BackdropJob::read(
@@ -56,8 +68,8 @@ BackdropSampler::Image BackdropJob::read(
         return img;
     img_ = img;
     canvas_ = c;
-    box_ = game;
-    next_row_ = game.y;
+    box_ = join(game, c.glass);
+    next_row_ = box_.y;
     step_ = Step::Scale;
     return img;
 }
@@ -76,10 +88,21 @@ HdRect BackdropJob::scale_band() noexcept {
         canvas_.frame,
         canvas_.stride_px,
         canvas_.game,
-        canvas_.cover,
+        canvas_.picture,
         next_row_,
         y1
     );
+    for (const BackdropScalerTarget& t : canvas_.targets)
+        scaler_.scale_target_rows(
+            img_.rgb,
+            img_.width,
+            img_.height,
+            img_.line,
+            canvas_.picture,
+            t,
+            next_row_,
+            y1
+        );
     next_row_ = y1;
     if (next_row_ < end)
         return {};

@@ -48,6 +48,7 @@
 #include "proto/download_session.h"
 #include "proto/image_bracket.h"
 #include "proto/link_op.h"
+#include "proto/spi_frame.h"
 #include "proto/storage_channel.h"
 #include "proto/types.h"
 #include "svc/chd_prefetch.h"
@@ -284,7 +285,8 @@ inline ILinkEncoder::Outcome SlotBindings::on(
         return ILinkEncoder::Outcome::Dropped;
     }
 
-    if (auto r = announce_.flag_form(link_, a.loaded); !r) {
+    proto::SpiFrame frame{link_};
+    if (auto r = announce_.flag_form(frame, a.loaded); !r) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -759,7 +761,8 @@ inline cores::SaveExtent SlotBindings::save_body_(std::uint64_t size_bytes, bool
     proto::SlotIndex slot,
     proto::FileSize size
 ) {
-    return announce_.mount_disc(slots_, link_, slot, size);
+    proto::SpiFrame frame{link_};
+    return announce_.mount_disc(slots_, frame, slot, size);
 }
 
 inline proto::SlotRoles SlotBindings::current_slot_roles_(

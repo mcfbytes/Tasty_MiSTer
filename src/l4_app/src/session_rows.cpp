@@ -44,7 +44,7 @@ std::string_view SessionRows::conf_str_name() const noexcept {
 
 [[nodiscard]] Ex<void> SessionRows::rebind_census(
     std::span<const reactor::LinkDecoderDecl> rows,
-    cores::Core* owner
+    infra::OptRef<cores::Core> owner
 ) {
     TASTY_SEAT_BODY(SessionRows);
     return binder_.bind_census(rows, owner);
@@ -52,7 +52,7 @@ std::string_view SessionRows::conf_str_name() const noexcept {
 
 [[nodiscard]] Ex<void> SessionRows::rebind_pre_session(
     proto::BindGeneration gen,
-    cores::Core* owner
+    infra::OptRef<cores::Core> owner
 ) {
     TASTY_SEAT_BODY(SessionRows);
     bindings_.bind_generation(gen);

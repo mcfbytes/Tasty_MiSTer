@@ -86,6 +86,8 @@ public:
     void next_group();
     void prev_group();
 
+    [[nodiscard]] char selected_group() const noexcept;
+
     void enter_recents(std::vector<BrowserEntry> rows);
     [[nodiscard]] Ex<void> exit_recents();
 

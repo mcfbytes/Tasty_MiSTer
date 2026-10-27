@@ -29,7 +29,7 @@ public:
         : decode_(decode),
           pause_wake_(fds.wake()),
           stop_(std::move(fds).take_stop()),
-          pause_(pause_wake_, asker ? &*asker : nullptr),
+          pause_(pause_wake_, asker),
           park_(decode, pause_wake_) {}
 
     InputMain(const InputMain&) = delete;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/core_session.h"
-#include "hal/selected.h"
 #include "hal/start_ack_bound.h"
+#include "proto/spi_frame.h"
 
 #include <cerrno>
 #include <ctime>
@@ -11,9 +11,9 @@ namespace mister::proto {
 
 namespace {
 
-constexpr hal::SpiWord kSetMemSz{0x31};
-constexpr hal::SpiWord kRtc{0x22};
-constexpr hal::SpiWord kTimestamp{0x24};
+constexpr std::uint16_t kSetMemSz = 0x31;
+constexpr std::uint16_t kRtc = 0x22;
+constexpr std::uint16_t kTimestamp = 0x24;
 
 constexpr StatusBit kResetBit{0};
 }
@@ -56,13 +56,14 @@ Ex<void> CoreSession::set_memory_size(MemSizeCookie cookie) {
     if (type_ != CoreType::EightBit) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 1});
     }
-    hal::Selected cs(*link_, hal::ChipSelect::Io);
-    if (auto r = link_->transfer(kSetMemSz); !r)
+    SpiFrame frame{*link_};
+    if (auto r = frame.begin(FrameSel::Uio, kSetMemSz); !r)
         return fail(r.error());
 
-    if (auto r = link_->transfer(hal::SpiWord{cookie.v}); !r) {
+    if (auto r = frame.word(cookie.v); !r)
         return fail(r.error());
-    }
+    if (auto r = frame.end(); !r)
+        return fail(r.error());
     phase_ = SessionPhase::MemSized;
     return {};
 }
@@ -70,7 +71,8 @@ Ex<void> CoreSession::set_memory_size(MemSizeCookie cookie) {
 Ex<void> CoreSession::flush_status() {
     if (suppress_status_wire_)
         return {};
-    return status_.flush(*link_);
+    SpiFrame frame{*link_};
+    return status_.flush(frame);
 }
 
 Ex<void> CoreSession::assert_reset() {
@@ -172,30 +174,26 @@ Ex<void> CoreSession::send_rtc_at(std::uint32_t unix_seconds) {
     rtc[5] = static_cast<std::uint8_t>((local.tm_year % 10) | (((local.tm_year / 10) % 10) << 4));
     rtc[6] = static_cast<std::uint8_t>(local.tm_wday);
     rtc[7] = 0x40;
-    {
-        hal::Selected cs(*link_, hal::ChipSelect::Io);
-        if (auto r = link_->transfer(kRtc); !r)
+    SpiFrame frame{*link_};
+    if (auto r = frame.begin(FrameSel::Uio, kRtc); !r)
+        return fail(r.error());
+    for (unsigned i = 0; i < 8; i += 2) {
+        const auto w = static_cast<std::uint16_t>((rtc[i + 1] << 8) | rtc[i]);
+        if (auto r = frame.word(w); !r)
             return fail(r.error());
-        for (unsigned i = 0; i < 8; i += 2) {
-            const auto w = static_cast<std::uint16_t>((rtc[i + 1] << 8) | rtc[i]);
-            if (auto r = link_->transfer(hal::SpiWord{w}); !r) {
-                return fail(r.error());
-            }
-        }
     }
+    if (auto r = frame.end(); !r)
+        return fail(r.error());
 
-    {
-        hal::Selected cs(*link_, hal::ChipSelect::Io);
-        if (auto r = link_->transfer(kTimestamp); !r)
-            return fail(r.error());
-        if (auto r = link_->transfer(hal::SpiWord{static_cast<std::uint16_t>(stamp & 0xFFFFu)});
-            !r) {
-            return fail(r.error());
-        }
-        if (auto r = link_->transfer(hal::SpiWord{static_cast<std::uint16_t>(stamp >> 16)}); !r) {
-            return fail(r.error());
-        }
+    if (auto r = frame.begin(FrameSel::Uio, kTimestamp); !r)
+        return fail(r.error());
+    if (auto r = frame.word(static_cast<std::uint16_t>(stamp & 0xFFFFu)); !r) {
+        return fail(r.error());
     }
+    if (auto r = frame.word(static_cast<std::uint16_t>(stamp >> 16)); !r)
+        return fail(r.error());
+    if (auto r = frame.end(); !r)
+        return fail(r.error());
     return {};
 }
 

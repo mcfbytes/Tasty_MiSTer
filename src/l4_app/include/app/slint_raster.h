@@ -21,7 +21,7 @@ public:
 
 private:
     bool open_(const HdTheme& theme, const HdLayout& layout) override;
-    HdRect render_(
+    HdDirty render_(
         const PageDescription& page,
         const HdBadgeView& badge,
         std::span<std::uint16_t> panel,
@@ -35,5 +35,6 @@ private:
 };
 
 [[nodiscard]] std::unique_ptr<HdRaster> make_hd_raster(HdTemplateId id);
+[[nodiscard]] HdRasters make_hd_rasters();
 
 }

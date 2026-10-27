@@ -177,7 +177,7 @@ public:
     void on(const UiRequest::LoadRamImage& req, const UiRequest::Head& head);
     void on(const UiRequest::SetOsdStyle& req, const UiRequest::Head& head);
     void on(const UiRequest::SdramDetected& req, const UiRequest::Head& head);
-    void on(const UiRequest::SetHdTheme& req, const UiRequest::Head& head);
+    void on(const UiRequest::SetHdLook& req, const UiRequest::Head& head);
     void misrouted(const UiRequest& m) noexcept;
 
     void on(const proto::LinkEvent::ReadyEdge& e) noexcept;

@@ -19,6 +19,7 @@ public:
     [[nodiscard]] std::optional<bool> text_mode(int vt) noexcept override;
     void graphics(int vt) noexcept override;
     void text(int vt) noexcept override;
+    void cursor(int vt, bool shown) noexcept override;
 };
 
 }

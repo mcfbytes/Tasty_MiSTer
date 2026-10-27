@@ -47,6 +47,17 @@ DiagSampler::Sources Hub::diag_sources_(const BootParts& plat) noexcept {
     };
 }
 
+Ex<std::unique_ptr<Hub>> Hub::create(
+    const BootParts& plat,
+    app::IStopSignal& stop,
+    SessionMode& mode
+) {
+    std::unique_ptr<Hub> hub{new Hub{plat, stop, mode}};
+    if (auto v = hub->device_.verdict().result(); !v)
+        return std::unexpected(v.error());
+    return hub;
+}
+
 Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
     : front_{mode.front(plat)},
       device_{plat, stop, front_->device_front()},
@@ -69,7 +80,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
           .stats = plat.stats,
           .link_tx = device_.ui_inbox_
       }},
-      fifo_(DeviceBlock::open_cmd_fifo(router_)),
+      fifo_(device_.open_cmd_fifo(plat, router_)),
       rt_main_{
           plat.exec,
           plat.link_timing,
@@ -121,9 +132,22 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
       } {
 
     face_->open();
-    device_.open_wires();
+    device_.open_wires(plat);
 
     face_->route_pages_to(router_);
+    front_->open_seat_fds(device_);
+
+    if (const Ex<void> born = assembly_.born(); !born) {
+        device_.verdict().refuse("T-DIAG/T-UI: ParkFds::create", born.error());
+    }
+    if (auto fds = xthread::ParkFds::create(device_.main_wake_, device_.main_stop_); !fds) {
+        device_.verdict().refuse("MAIN: ParkFds::create", fds.error());
+    } else {
+        process_main_.emplace(device_.owner_, assembly_, std::move(*fds));
+    }
+
+    if (!device_.verdict().ok())
+        return;
 
     device_.open_seats(
         plat,
@@ -146,16 +170,6 @@ Hub::~Hub() {
     device_.owner_.retire_lw_at_exit();
 }
 
-Ex<void> Hub::open_process_main() noexcept {
-    if (process_main_)
-        return {};
-    auto fds = xthread::ParkFds::create(device_.main_wake_, device_.main_stop_);
-    if (!fds)
-        return std::unexpected(fds.error());
-    process_main_.emplace(device_.owner_, assembly_, std::move(*fds));
-    return {};
-}
-
 void Hub::latch_boot_config() noexcept {
 
     auto c = std::make_unique<svc::ConfigSnapshot>();
@@ -164,8 +178,8 @@ void Hub::latch_boot_config() noexcept {
 
     const auto deadzones = svc::parse_deadzone_rules(*c);
     device_.input_build_.set_cfg_deadzone_rules(deadzones);
-    if (device_.input_pipeline_)
-        device_.input_pipeline_->latch_cfg(deadzones, c->rumble != 0);
+    seated(device_.input_pipeline_, "T-INPUT latched past a refused open")
+        .latch_cfg(deadzones, c->rumble != 0);
 
     front_->latch(device_, seat_mains_);
     face_->latch(*c, seat_mains_);

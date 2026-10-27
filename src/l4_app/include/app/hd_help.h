@@ -9,6 +9,7 @@ namespace mister::app {
 
 struct HdHelp {
     enum class Glyph : std::uint8_t { None, North, East, South, West, DpadLr };
+    enum class Lr : std::uint8_t { None, Change, Move };
 
     struct Item {
         Glyph glyph = Glyph::None;
@@ -35,7 +36,7 @@ struct HdHelp {
     }
 }
 
-[[nodiscard]] constexpr HdHelp hd_help(std::string_view footer, bool steps) noexcept {
+[[nodiscard]] constexpr HdHelp hd_help(std::string_view footer, HdHelp::Lr lr) noexcept {
     HdHelp out{};
     const auto push = [&out](HdHelp::Glyph g, std::string_view label) {
         if (out.count < HdHelp::kMaxItems)
@@ -61,8 +62,10 @@ struct HdHelp {
                                                                   : HdHelp::Glyph::None;
         push(g, g == HdHelp::Glyph::None ? item : trim(item.substr(2)));
     }
-    if (steps)
+    if (lr == HdHelp::Lr::Change)
         push(HdHelp::Glyph::DpadLr, "Change");
+    if (lr == HdHelp::Lr::Move)
+        push(HdHelp::Glyph::DpadLr, "Move");
     return out;
 }
 

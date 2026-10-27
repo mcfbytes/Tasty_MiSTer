@@ -48,6 +48,7 @@ add_library(mister_app STATIC
   src/hd_dirty_ledger.cpp
   src/hd_osd_main.cpp
   src/hd_osd_screen.cpp
+  src/hd_glass.cpp
   src/hd_renderer.cpp
   src/backdrop_job.cpp
   src/hd_theme.cpp
@@ -159,6 +160,10 @@ if(TASTY_WITH_HDOSD)
                  "${_hdosd}/NotoSans-Regular.ttf" COPYONLY)
   configure_file("${TASTY_HDOSD_FONT_DIR}/NotoSans-Bold.ttf"
                  "${_hdosd}/NotoSans-Bold.ttf" COPYONLY)
+  foreach(_face PixelOperator8.ttf PixelOperator8-Bold.ttf)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/fonts/pixel-operator/${_face}"
+                   "${_hdosd}/${_face}" COPYONLY)
+  endforeach()
   file(GLOB _slint_files CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/slint/*.slint")
   foreach(_slint_file IN LISTS _slint_files)
     get_filename_component(_slint_name "${_slint_file}" NAME)
@@ -213,6 +218,8 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/hd_flip_slot.h
   app/hd_help.h
   app/hd_layout.h
+  app/hd_look.h
+  app/hd_look_ini.h
   app/hd_metrics.h
   app/hd_osd_ask.h
   app/hd_osd_main.h
@@ -222,6 +229,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/hd_raster.h
   app/slint_raster.h
   app/hd_rect.h
+  app/hd_glass.h
   app/hd_renderer.h
   app/hd_visible_stats.h
   app/hd_style.h

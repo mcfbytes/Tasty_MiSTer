@@ -27,6 +27,8 @@ public:
     PageId id() const override;
     void render(OsdRenderer& out) const override;
     bool describe(app::PageDescription& out) const override;
+
+    bool describe_hub(app::PageDescription& out) const override;
     Transition handle(const UiEvent& ev) override;
     void on_facts(const SystemFacts& facts) override;
 
@@ -37,6 +39,8 @@ public:
     MenuMask mask() const override;
     void set_selection(RowIndex i) override;
     RowIndex selection() const override;
+
+    std::optional<TierRun> tier_run(RowIndex at) const override;
 
     [[nodiscard]] bool empty() const;
     std::uint32_t refusals() const noexcept override;

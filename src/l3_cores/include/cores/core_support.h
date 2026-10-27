@@ -15,6 +15,7 @@
 #include "cores/host_services.h"
 #include "cores/save_channel.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "os/clock.h"
 #include "reactor/core_state.h"
 #include "reactor/core_token.h"
@@ -93,7 +94,7 @@ public:
 
     [[nodiscard]] IPcmWireRows* pcm_wire_rows() noexcept { return on_pcm_wire_rows(); }
 
-    [[nodiscard]] IMailboxRows* mailbox_rows() noexcept { return on_mailbox_rows(); }
+    [[nodiscard]] infra::OptRef<IMailboxRows> mailbox_rows() noexcept { return on_mailbox_rows(); }
 
     [[nodiscard]] const ICdDiagnostics* cd_diagnostics() const noexcept {
         return on_cd_diagnostics();
@@ -185,7 +186,7 @@ private:
 
     [[nodiscard]] virtual IPcmWireRows* on_pcm_wire_rows() noexcept { return nullptr; }
 
-    [[nodiscard]] virtual IMailboxRows* on_mailbox_rows() noexcept { return nullptr; }
+    [[nodiscard]] virtual infra::OptRef<IMailboxRows> on_mailbox_rows() noexcept { return {}; }
 
     [[nodiscard]] virtual const ICdDiagnostics* on_cd_diagnostics() const noexcept {
         return nullptr;

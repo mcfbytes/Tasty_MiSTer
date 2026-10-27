@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "infra/opt_ref.h"
-#include "report.h"
+#include "open_verdict.h"
 
 namespace mister::fw {
 
@@ -25,30 +25,39 @@ app::ScanoutChannel::Answerer LauncherBlock::mint_answerer_() noexcept {
     return a;
 }
 
-void LauncherBlock::open_seat(DeviceBlock& device, ThreadAssembly::SeatMains& mains) noexcept {
+void LauncherBlock::open_fds(OpenVerdict& verdict) noexcept {
     if (auto host = app::LauncherHost::Fds::create(); !host) {
-        report("LauncherMain::open (degraded: no launcher)", host.error());
+        verdict.refuse("T-LAUNCHER: LauncherHost::Fds::create", host.error());
     } else if (auto fds = xthread::ParkFds::create(launcher_wake_); !fds) {
-        report("LauncherMain::open (degraded: no launcher)", fds.error());
+        verdict.refuse("T-LAUNCHER: ParkFds::create", fds.error());
     } else {
-        app::ScanoutChannel::Asker asker = scanout_channel_.asker();
-        if (!asker)
-            fatal(Error{Errc::busy, ERR_SITE(), 0}, "scanout asker minted twice");
-        launcher_host_.emplace(
-            std::move(*host),
-            app::LauncherHost::Wiring{
-                .demand = launcher_demand_,
-                .state = launcher_state_,
-                .fb_ack = launcher_fb_ack_,
-                .scanout = std::move(asker),
-                .console = vt_console_,
-                .clock = device.clock_
-            }
-        );
-        launcher_main_.emplace(*launcher_host_, std::move(*fds), infra::OptRef{device.main_wake_});
-        mains.mains.bind(&*launcher_main_);
-        device.grant_pause(SeatTag::Launcher, launcher_main_->pause_latch());
+        host_fds_.emplace(std::move(*host));
+        launcher_fds_.emplace(std::move(*fds));
     }
+}
+
+void LauncherBlock::open_seat(DeviceBlock& device, ThreadAssembly::SeatMains& mains) noexcept {
+    app::ScanoutChannel::Asker asker = scanout_channel_.asker();
+    if (!asker)
+        fatal(Error{Errc::busy, ERR_SITE(), 0}, "scanout asker minted twice");
+    launcher_host_.emplace(
+        std::move(seated(host_fds_, "T-LAUNCHER bound past a refused open")),
+        app::LauncherHost::Wiring{
+            .demand = launcher_demand_,
+            .state = launcher_state_,
+            .fb_ack = launcher_fb_ack_,
+            .scanout = std::move(asker),
+            .console = vt_console_,
+            .clock = device.clock_
+        }
+    );
+    launcher_main_.emplace(
+        *launcher_host_,
+        std::move(seated(launcher_fds_, "T-LAUNCHER bound past a refused open")),
+        infra::OptRef{device.main_wake_}
+    );
+    mains.mains.bind(&*launcher_main_);
+    device.grant_pause(SeatTag::Launcher, launcher_main_->pause_latch());
 }
 
 }

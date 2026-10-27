@@ -47,7 +47,7 @@ PcmMain::PcmMain(
       wake_(fds.wake()),
       stop_(std::move(fds).take_stop()),
       cmds_(commands),
-      pause_(wake_, asker ? &*asker : nullptr),
+      pause_(wake_, asker),
       park_(wake_, stop_) {}
 
 void PcmMain::start() noexcept {

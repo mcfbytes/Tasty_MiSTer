@@ -12,16 +12,16 @@ class HdDirtyLedger {
     TASTY_SEAT_EXEMPT(component);
 
 public:
-    enum class Region : std::uint8_t { Game, Panel };
+    enum class Region : std::uint8_t { Game, Panel, Band };
 
-    void reset(HdRect panel, HdRect game) noexcept;
-    void invalidate(HdRect panel, HdRect game) noexcept;
+    void reset(HdRect panel, HdRect band, HdRect game) noexcept;
+    void invalidate(HdRect panel, HdRect band, HdRect game) noexcept;
     void mark(Region region, HdRect dirty) noexcept;
     [[nodiscard]] HdRect peek(std::uint8_t slot, Region region) const noexcept;
     [[nodiscard]] HdRect take(std::uint8_t slot, Region region) noexcept;
 
 private:
-    static constexpr int kRegions = 2;
+    static constexpr int kRegions = 3;
     HdRect stale_[2][kRegions]{};
 };
 

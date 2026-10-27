@@ -126,4 +126,63 @@ struct HdPanelPlan {
     return p;
 }
 
+struct HdFit {
+    PageDescription page;
+    std::uint16_t top = 0;
+};
+
+[[nodiscard]] constexpr HdFit hd_fit_rows(
+    const HdMetrics& m,
+    const PageDescription& page,
+    std::int32_t pitch,
+    std::uint16_t top
+) noexcept {
+    using Kind = PageDescription::RowKind;
+    HdFit out{page, page.first};
+    if (page.shape != PageDescription::Shape::List)
+        return out;
+    const HdPanelPlan whole = plan_panel(m, page);
+    const std::uint8_t body = whole.main_count;
+    if (whole.row_h >= pitch || body <= 1)
+        return out;
+    const auto n = static_cast<std::uint8_t>(
+        std::min<std::size_t>(page.row_count, PageDescription::kMaxRows)
+    );
+    std::int32_t sel = -1;
+    for (std::uint8_t i = 0; i < body; ++i)
+        if (page.rows[i].selected)
+            sel = i;
+    for (auto k = static_cast<std::uint8_t>(body - 1); k >= 1; --k) {
+        std::int32_t s = std::clamp<std::int32_t>(std::int32_t{top} - page.first, 0, body - k);
+        if (sel >= 0 && sel < s)
+            s = sel;
+        if (sel >= 0 && sel >= s + k)
+            s = sel - k + 1;
+        std::int32_t e = s + k;
+        const auto rule = [&](std::int32_t i) {
+            return page.rows[static_cast<std::size_t>(i)].kind == Kind::Separator;
+        };
+        while (e - s > 1 && rule(s))
+            ++s;
+        while (e - s > 1 && rule(e - 1))
+            --e;
+        const auto kept = static_cast<std::uint8_t>(e - s);
+        PageDescription cut = page;
+        for (std::uint8_t i = 0; i < kept; ++i)
+            cut.rows[i] = page.rows[static_cast<std::size_t>(s) + i];
+        for (std::uint8_t i = body; i < n; ++i)
+            cut.rows[static_cast<std::size_t>(kept + i - body)] = page.rows[i];
+        cut.row_count = static_cast<std::uint8_t>(kept + n - body);
+        for (std::uint8_t i = cut.row_count; i < n; ++i)
+            cut.rows[i] = {};
+        cut.first = static_cast<std::uint16_t>(page.first + s);
+        if (k == 1 || plan_panel(m, cut).row_h >= pitch) {
+            out.page = cut;
+            out.top = cut.first;
+            return out;
+        }
+    }
+    return out;
+}
+
 }

@@ -5,7 +5,6 @@
 
 #include "app/config_rel.h"
 #include "app/log_clock.h"
-#include "app/durable_write.h"
 #include "cores/core_support.h"
 #include "cores/save_upload.h"
 #include "infra/log_rec.h"
@@ -21,13 +20,10 @@ void NvramUpload::sleep_ms(unsigned ms) {
     ::usleep(static_cast<::useconds_t>(ms) * 1000u);
 }
 
-Ex<void> NvramUpload::arm_or_write_(std::string_view rel, std::span<const std::byte> bytes) {
+Ex<void> NvramUpload::arm_(std::string_view rel, std::span<const std::byte> bytes) {
     if (!vfs_)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-
-    if (!writes_)
-        return durable_write(*vfs_, rel, bytes);
-    if (!writes_->arm(rel, bytes, WriteKind::Save)) {
+    if (!writes_.arm(rel, bytes, WriteKind::Save)) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
     return {};
@@ -35,9 +31,7 @@ Ex<void> NvramUpload::arm_or_write_(std::string_view rel, std::span<const std::b
 
 void NvramUpload::drain_write_verdicts() {
     TASTY_SEAT_BODY(NvramUpload);
-    if (!writes_)
-        return;
-    while (const auto d = writes_->reap()) {
+    while (const auto d = writes_.reap()) {
 
         switch (d->kind) {
             case WriteKind::Silent:
@@ -57,12 +51,10 @@ constexpr unsigned kSaveSettleTries = 2000;
 
 void NvramUpload::settle_save_lane() {
     TASTY_SEAT_BODY(NvramUpload);
-    if (!writes_)
-        return;
 
-    for (unsigned i = 0; i < kSaveSettleTries && writes_->in_flight() != 0; ++i) {
+    for (unsigned i = 0; i < kSaveSettleTries && writes_.in_flight() != 0; ++i) {
         drain_write_verdicts();
-        if (writes_->in_flight() == 0)
+        if (writes_.in_flight() == 0)
             break;
         sleep_ms(1);
     }
@@ -70,9 +62,7 @@ void NvramUpload::settle_save_lane() {
 
 void NvramUpload::settle_writes() noexcept {
     TASTY_SEAT_BODY(NvramUpload);
-    if (!writes_)
-        return;
-    writes_->drain_on_caller();
+    writes_.drain_on_caller();
     drain_write_verdicts();
 }
 
@@ -84,7 +74,7 @@ Ex<std::size_t> NvramUpload::write_save_upload_(cores::ISaveUpload& up) {
     if (rel.empty())
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 1});
 
-    if (auto r = arm_or_write_(rel.view(), std::as_bytes(*img)); !r) {
+    if (auto r = arm_(rel.view(), std::as_bytes(*img)); !r) {
         return std::unexpected(r.error());
     }
     return img->size();

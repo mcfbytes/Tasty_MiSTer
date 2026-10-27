@@ -49,8 +49,6 @@ public:
         return std::nullopt;
     }
 
-    svc::DiscReadService* discs() noexcept { return discs_ ? &*discs_ : nullptr; }
-
     [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return geom_; }
 
     [[nodiscard]] std::string_view game_id() const noexcept { return game_id_.view(); }

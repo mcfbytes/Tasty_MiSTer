@@ -162,6 +162,31 @@ RowIndex HdListPage::selection() const {
     return sel_;
 }
 
+std::optional<Page::TierRun> HdListPage::tier_run(RowIndex at) const {
+    TASTY_SEAT_BODY(HdListPage);
+    const std::uint64_t m = mask().v;
+    if (at.v >= kMaxRows || ((m >> at.v) & 1u) == 0)
+        return std::nullopt;
+    const Slots s = slots_();
+    const app::RowTier tier = row_(s, at.v).describe().tier;
+    std::uint64_t run = std::uint64_t{1} << at.v;
+    for (std::size_t i = at.v + 1; i < kMaxRows; ++i) {
+        if (((m >> i) & 1u) == 0)
+            continue;
+        if (row_(s, i).describe().tier != tier)
+            break;
+        run |= std::uint64_t{1} << i;
+    }
+    for (std::size_t i = at.v; i-- > 0;) {
+        if (((m >> i) & 1u) == 0)
+            continue;
+        if (row_(s, i).describe().tier != tier)
+            break;
+        run |= std::uint64_t{1} << i;
+    }
+    return TierRun{.tier = tier, .rows = MenuMask{run}};
+}
+
 bool HdListPage::empty() const {
     TASTY_SEAT_BODY(HdListPage);
     return !first_focusable_from_(0).has_value();
@@ -211,7 +236,29 @@ bool HdListPage::describe(app::PageDescription& out) const {
         d.selected = d.kind != RowKind::Separator && w.slot[k] == sel_.v;
         out.rows[k] = d;
     }
+    (void)describe_hub(out);
     return true;
+}
+
+bool HdListPage::describe_hub(app::PageDescription& out) const {
+    TASTY_SEAT_BODY(HdListPage);
+    out.hub = {};
+    if (!plan_->hub())
+        return false;
+    const Slots s = slots_();
+    for (std::size_t i = 0; i < s.body + s.pinned && out.hub.count < out.hub.items.size(); ++i) {
+        if (!focusable_(i))
+            continue;
+        const app::PageDescription::Row d = row_(s, i).describe();
+        app::PageDescription::Hub::Item& item = out.hub.items[out.hub.count];
+        (void)item.label.assign(d.label.view());
+        item.icon = d.icon;
+        item.enabled = d.enabled;
+        if (i == sel_.v)
+            out.hub.open = out.hub.count;
+        ++out.hub.count;
+    }
+    return out.hub.count != 0;
 }
 
 Transition HdListPage::handle(const UiEvent& ev) {

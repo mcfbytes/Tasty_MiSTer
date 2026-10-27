@@ -5,6 +5,9 @@ export global Theme {
     in property <color> text;
     in property <color> bg-bar;
     in property <color> card;
+    in property <color> ground;
+    in property <color> plate;
+    in property <color> band;
     in property <color> border-subtle;
     in property <color> border-mid;
     in property <color> text-label;
@@ -12,6 +15,10 @@ export global Theme {
     in property <color> on-accent;
     in property <color> cue-spent;
     in property <color> control-edge;
+    in property <color> window;
+    in property <color> window-focus;
+    in property <color> on-window-focus;
+    in property <color> window-hand;
 
     in property <string> family;
     in property <string> subtitle-sep;
@@ -45,6 +52,7 @@ export global Theme {
     in property <length> icon;
     in property <length> button-h;
     in property <length> track-h;
+    in property <length> pixel;
 }
 
 export struct MenuRow {
@@ -56,6 +64,9 @@ export struct MenuRow {
     enabled: bool,
     steps: bool,
     fill: int,
+    tier: int,
+    tint: color,
+    tint-ink: color,
 }
 
 export struct HelpItem {
@@ -76,7 +87,7 @@ export component Chevron inherits Path {
     commands: dir == 0 ? "M 9 6 L 15 12 L 9 18" : dir == 1 ? "M 15 6 L 9 12 L 15 18" : dir == 2 ? "M 6 15 L 12 9 L 18 15" : "M 6 9 L 12 15 L 18 9";
 }
 
-component RowGlyph inherits Path {
+export component RowGlyph inherits Path {
     in property <color> ink;
     in property <int> icon;
     width: Theme.icon;
@@ -86,7 +97,7 @@ component RowGlyph inherits Path {
     stroke: ink;
     stroke-width: 2.2px * Theme.icon / 18px;
     fill: transparent;
-    commands: icon == 1 ? "M 3 19 L 3 6 L 9 6 L 11 8.5 L 21 8.5 L 21 19 Z" : icon == 2 ? "M 3 5 L 21 5 L 21 8 L 3 8 Z M 4.5 8 L 19.5 8 L 19.5 19.5 L 4.5 19.5 Z M 12 9.5 L 12 11.5 M 12 13.5 L 12 15.5 M 12 17.5 L 12 19" : icon == 4 ? "M 12 4.5 A 7.5 7.5 0 0 1 12 19.5 A 7.5 7.5 0 0 1 12 4.5 M 12 8 L 12 12 L 15.2 13.7" : "M 9 14 L 4 9 L 9 4 M 20 20 L 20 13 L 16 9 L 4 9";
+    commands: icon == 1 ? "M 3 19 L 3 6 L 9 6 L 11 8.5 L 21 8.5 L 21 19 Z" : icon == 2 ? "M 3 5 L 21 5 L 21 8 L 3 8 Z M 4.5 8 L 19.5 8 L 19.5 19.5 L 4.5 19.5 Z M 12 9.5 L 12 11.5 M 12 13.5 L 12 15.5 M 12 17.5 L 12 19" : icon == 4 ? "M 12 4.5 A 7.5 7.5 0 0 1 12 19.5 A 7.5 7.5 0 0 1 12 4.5 M 12 8 L 12 12 L 15.2 13.7" : icon == 5 ? "M 4 4 L 10 4 L 10 10 L 4 10 Z M 14 4 L 20 4 L 20 10 L 14 10 Z M 4 14 L 10 14 L 10 20 L 4 20 Z M 14 14 L 20 14 L 20 20 L 14 20 Z" : icon == 6 ? "M 6.5 7.5 L 17 16.5 L 12 21 L 12 3 L 17 7.5 L 6.5 16.5" : icon == 7 ? "M 4 6 L 20 6 M 4 12 L 20 12 M 4 18 L 20 18 M 9 3.5 L 9 8.5 M 15 9.5 L 15 14.5 M 7 15.5 L 7 20.5" : "M 9 14 L 4 9 L 9 4 M 20 20 L 20 13 L 16 9 L 4 9";
 }
 
 component Dot inherits Rectangle {
@@ -136,17 +147,24 @@ export component HelpGlyph inherits Rectangle {
     }
 }
 
-component MenuLine inherits Rectangle {
+export component MenuLine inherits Rectangle {
     in property <MenuRow> entry;
+    in property <color> sel-fill: Theme.selection-fill;
+    in property <color> sel-ink: Theme.on-accent;
+    in property <int> sel-weight: Theme.weight-selected;
+    in property <color> bar-fill: Theme.selection-fill;
+    in property <length> row-radius: Theme.radius-sm;
+    in property <length> sep-y: (root.height - Theme.hair) / 2;
+    in property <bool> glyph-sub-ink: false;
     property <bool> sel: root.entry.selected && root.entry.kind <= 2;
-    property <color> ink: root.sel ? Theme.on-accent : !root.entry.enabled ? Theme.cue-spent : root.entry.kind == 4 ? Theme.text-label : Theme.text;
-    property <color> sub-ink: root.sel ? Theme.on-accent : !root.entry.enabled ? Theme.cue-spent : Theme.text-label;
+    property <color> ink: root.sel ? root.sel-ink : !root.entry.enabled ? Theme.cue-spent : root.entry.kind == 4 ? Theme.text-label : Theme.text;
+    property <color> sub-ink: root.sel ? root.sel-ink : !root.entry.enabled ? Theme.cue-spent : Theme.text-label;
     height: root.entry.kind == 3 ? Theme.sep-h : Theme.row-h;
-    border-radius: Theme.radius-sm;
-    background: root.sel ? Theme.selection-fill : transparent;
+    border-radius: root.row-radius;
+    background: root.sel ? root.sel-fill : transparent;
     if root.entry.kind == 3: Rectangle {
         x: Theme.row-pad;
-        y: (parent.height - Theme.hair) / 2;
+        y: root.sep-y;
         width: parent.width - 2 * Theme.row-pad;
         height: Theme.hair;
         background: Theme.border-subtle;
@@ -164,7 +182,7 @@ component MenuLine inherits Rectangle {
             width: parent.width * clamp(root.entry.fill, 0, 100) / 100;
             height: parent.height;
             border-radius: parent.border-radius;
-            background: Theme.selection-fill;
+            background: root.bar-fill;
         }
     }
     if root.entry.kind != 3 && root.entry.kind != 5: HorizontalLayout {
@@ -174,7 +192,7 @@ component MenuLine inherits Rectangle {
         if root.entry.icon != 0: VerticalLayout {
             alignment: center;
             padding-right: Theme.gap / 2;
-            RowGlyph { ink: root.ink; icon: root.entry.icon; }
+            RowGlyph { ink: root.glyph-sub-ink ? root.sub-ink : root.ink; icon: root.entry.icon; }
         }
         Text {
             horizontal-stretch: 1;
@@ -182,7 +200,7 @@ component MenuLine inherits Rectangle {
             color: root.ink;
             font-family: Theme.family;
             font-size: Theme.font-body;
-            font-weight: root.sel ? Theme.weight-selected : Theme.weight-normal;
+            font-weight: root.sel ? root.sel-weight : Theme.weight-normal;
             vertical-alignment: center;
             wrap: no-wrap;
             overflow: elide;
@@ -197,7 +215,7 @@ component MenuLine inherits Rectangle {
             color: root.sub-ink;
             font-family: Theme.family;
             font-size: Theme.font-body;
-            font-weight: root.sel ? Theme.weight-selected : Theme.weight-normal;
+            font-weight: root.sel ? root.sel-weight : Theme.weight-normal;
             vertical-alignment: center;
             wrap: no-wrap;
         }
@@ -215,7 +233,7 @@ component MenuLine inherits Rectangle {
 export component Card inherits Rectangle {
     in property <[MenuRow]> rows;
     in property <bool> framed: true;
-    background: root.framed ? Theme.card : transparent;
+    background: root.framed ? Theme.plate : transparent;
     border-width: root.framed ? Theme.stroke : 0;
     border-color: Theme.border-mid;
     border-radius: Theme.radius-md;
@@ -243,7 +261,7 @@ export component ChoiceButton inherits Rectangle {
         width: parent.width;
         height: parent.height - Theme.press-edge;
         border-radius: Theme.radius-md;
-        background: Theme.card;
+        background: Theme.plate;
         border-width: Theme.stroke;
         border-color: Theme.border-mid;
         if root.focused: Rectangle {
@@ -318,5 +336,226 @@ export component ListRegion {
         height: root.choice-h;
         spacing: Theme.gap;
         for data in root.choices: ChoiceButton { entry: data; }
+    }
+}
+
+export component ScreenHeader {
+    in property <length> content-w;
+    in property <string> core-text;
+    in property <string> subtitle-text;
+    in property <string> heading-text;
+    in property <string> badge-text;
+    in property <string> status-text;
+    in property <bool> cue-shown;
+    in property <bool> cue-up;
+    in property <bool> cue-down;
+    in property <string> cue-text;
+
+    VerticalLayout {
+        x: Theme.inset-x;
+        y: Theme.inset-y;
+        width: root.content-w;
+        height: Theme.list-top - Theme.inset-y - Theme.gap;
+        spacing: Theme.header-gap;
+        alignment: start;
+        HorizontalLayout {
+            height: Theme.font-caption * 1.4;
+            spacing: Theme.gap / 2;
+            Text {
+                horizontal-stretch: 0;
+                max-width: root.content-w / 2;
+                text: root.core-text;
+                color: Theme.text-label;
+                font-family: Theme.family;
+                font-size: Theme.font-caption;
+                font-weight: Theme.weight-normal;
+                vertical-alignment: center;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+            Text {
+                horizontal-stretch: 1;
+                text: root.subtitle-text == "" ? "" : Theme.subtitle-sep + root.subtitle-text;
+                color: Theme.text;
+                font-family: Theme.family;
+                font-size: Theme.font-caption;
+                font-weight: Theme.weight-normal;
+                vertical-alignment: center;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+            Text {
+                horizontal-stretch: 0;
+                text: root.status-text;
+                color: Theme.text-label;
+                font-family: Theme.family;
+                font-size: Theme.font-caption;
+                font-weight: Theme.weight-normal;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                wrap: no-wrap;
+            }
+        }
+        Text {
+            height: Theme.font-title * 1.4;
+            text: root.heading-text;
+            color: Theme.text;
+            font-family: Theme.family;
+            font-size: Theme.font-title;
+            font-weight: Theme.weight-bold;
+            vertical-alignment: center;
+            wrap: no-wrap;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            height: Theme.font-caption * 1.4;
+            spacing: Theme.gap / 3;
+            Text {
+                horizontal-stretch: 1;
+                text: root.badge-text;
+                color: Theme.text-label;
+                font-family: Theme.family;
+                font-size: Theme.font-caption;
+                font-weight: Theme.weight-normal;
+                vertical-alignment: center;
+                wrap: no-wrap;
+            }
+            if root.cue-shown: VerticalLayout {
+                alignment: center;
+                Chevron { ink: root.cue-up ? Theme.text : Theme.cue-spent; dir: 2; }
+            }
+            if root.cue-shown: VerticalLayout {
+                alignment: center;
+                Chevron { ink: root.cue-down ? Theme.text : Theme.cue-spent; dir: 3; }
+            }
+            if root.cue-shown: Text {
+                horizontal-stretch: 0;
+                text: root.cue-text;
+                color: Theme.text-label;
+                font-family: Theme.family;
+                font-size: Theme.font-caption;
+                font-weight: Theme.weight-normal;
+                vertical-alignment: center;
+                wrap: no-wrap;
+            }
+        }
+    }
+
+    Rectangle {
+        x: Theme.inset-x;
+        y: Theme.list-top - Theme.gap;
+        width: root.content-w;
+        height: Theme.hair;
+        background: Theme.border-subtle;
+    }
+}
+
+export component HelpBar {
+    in property <[HelpItem]> help;
+    in property <length> content-w;
+
+    Rectangle {
+        x: 0;
+        y: Theme.help-top;
+        width: root.width;
+        height: root.height - Theme.help-top;
+        background: Theme.bg-bar;
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: Theme.hair;
+            background: Theme.border-subtle;
+        }
+        HorizontalLayout {
+            x: Theme.inset-x;
+            y: Theme.help-pad;
+            width: root.content-w;
+            height: Theme.glyph;
+            spacing: Theme.gap * 2;
+            alignment: center;
+            for item in root.help: HorizontalLayout {
+                spacing: Theme.gap * 2 / 3;
+                if item.glyph != 0: HelpGlyph { glyph: item.glyph; ink: Theme.text; }
+                Text {
+                    text: item.label;
+                    color: Theme.text;
+                    font-family: Theme.family;
+                    font-size: Theme.font-caption;
+                    font-weight: Theme.weight-normal;
+                    vertical-alignment: center;
+                    wrap: no-wrap;
+                }
+            }
+        }
+    }
+}
+
+export component ListScreen {
+    in property <[MenuRow]> entries;
+    in property <[MenuRow]> pinned-entries;
+    in property <[MenuRow]> choices;
+    in property <[HelpItem]> help;
+    in property <string> core-text;
+    in property <string> subtitle-text;
+    in property <string> heading-text;
+    in property <string> badge-text;
+    in property <string> status-text;
+    in property <bool> choice-shape;
+    in property <bool> choice-stacked;
+    in property <length> main-h;
+    in property <length> pinned-y;
+    in property <length> pinned-h;
+    in property <length> choice-y;
+    in property <length> choice-h;
+    in property <bool> cue-shown;
+    in property <bool> cue-up;
+    in property <bool> cue-down;
+    in property <string> cue-text;
+
+    property <length> content-w: self.width - Theme.inset-x - Theme.pad-right;
+
+    ScreenHeader {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        content-w: root.content-w;
+        core-text: root.core-text;
+        subtitle-text: root.subtitle-text;
+        heading-text: root.heading-text;
+        badge-text: root.badge-text;
+        status-text: root.status-text;
+        cue-shown: root.cue-shown;
+        cue-up: root.cue-up;
+        cue-down: root.cue-down;
+        cue-text: root.cue-text;
+    }
+
+    ListRegion {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        entries: root.entries;
+        pinned-entries: root.pinned-entries;
+        choices: root.choices;
+        choice-shape: root.choice-shape;
+        choice-stacked: root.choice-stacked;
+        content-w: root.content-w;
+        main-h: root.main-h;
+        pinned-y: root.pinned-y;
+        pinned-h: root.pinned-h;
+        choice-y: root.choice-y;
+        choice-h: root.choice-h;
+    }
+
+    HelpBar {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        help: root.help;
+        content-w: root.content-w;
     }
 }

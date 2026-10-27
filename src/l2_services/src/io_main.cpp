@@ -7,7 +7,7 @@ namespace mister::svc {
 
 IoMain::IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker, int doorbells) noexcept
     : wake_(fds.wake()),
-      pause_(wake_, asker ? &*asker : nullptr),
+      pause_(wake_, asker),
       stop_(std::move(fds).take_stop()),
       park_(wake_, stop_, doorbells) {}
 

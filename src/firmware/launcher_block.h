@@ -13,6 +13,7 @@
 #include "app/scanout_relay.h"
 #include "boot_parts.h"
 #include "device_block.h"
+#include "infra/park_fds.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "os/clock.h"
@@ -33,6 +34,8 @@ public:
 
     [[nodiscard]] DeviceBlock::Front device_front(bool grants_uart) noexcept;
 
+    void open_fds(OpenVerdict& verdict) noexcept;
+
     void open_seat(DeviceBlock& device, ThreadAssembly::SeatMains& mains) noexcept;
 
     app::LauncherStateCell launcher_state_{};
@@ -44,6 +47,8 @@ public:
     app::ScanoutChannel scanout_channel_{launcher_wake_};
     app::ScanoutRelay scanout_relay_;
     os::LinuxVtConsole vt_console_{};
+    std::optional<app::LauncherHost::Fds> host_fds_;
+    std::optional<xthread::ParkFds> launcher_fds_;
     std::optional<app::LauncherHost> launcher_host_;
     std::optional<app::LauncherMain> launcher_main_;
 

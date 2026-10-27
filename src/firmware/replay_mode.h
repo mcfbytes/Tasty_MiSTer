@@ -70,7 +70,7 @@ public:
 
     void storage_ready(svc::Vfs&) override {}
 
-    void before_boot(app::LinkSession&) override {}
+    [[nodiscard]] Ex<void> before_boot(app::LinkSession&) override { return {}; }
 
     [[nodiscard]] infra::OptRef<const std::string> boot_handoff(
         const app::SessionOwner&

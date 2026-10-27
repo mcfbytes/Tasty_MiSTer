@@ -5,9 +5,10 @@
 
 namespace mister::ui {
 
-RecentRow::RecentRow(RecentLaunch& launch, app::RecentGames::Record record)
+RecentRow::RecentRow(RecentLaunch& launch, app::RecentGames::Record record, app::RowTier tier)
     : launch_(launch),
-      record_(static_cast<app::RecentGames::Record&&>(record)) {
+      record_(static_cast<app::RecentGames::Record&&>(record)),
+      tier_(tier) {
     TASTY_SEAT_BODY(RecentRow);
 
     title_ = record_.title.empty() ? game_title(record_.path) : record_.title;
@@ -40,6 +41,7 @@ app::PageDescription::Row RecentRow::describe() const {
     TASTY_SEAT_BODY(RecentRow);
     app::PageDescription::Row out{};
     out.kind = app::PageDescription::RowKind::Action;
+    out.tier = tier_;
     (void)out.label.assign(title_);
     (void)out.value.assign(record_.core);
     return out;

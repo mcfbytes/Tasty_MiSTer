@@ -1,0 +1,442 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+import { Theme, MenuRow, HelpItem, Chevron, HelpBar, MenuLine } from "hd_common.slint";
+
+component GuideLine inherits MenuLine {
+    sel-fill: Theme.text;
+    sel-ink: Theme.primary;
+    sel-weight: Theme.weight-bold;
+    bar-fill: Theme.accent;
+    row-radius: Theme.radius-md;
+    sep-y: floor((root.height - Theme.hair) / 2 / 1px) * 1px;
+    glyph-sub-ink: true;
+}
+
+component GuideChoice inherits Rectangle {
+    in property <MenuRow> entry;
+    property <bool> focused: root.entry.selected;
+    height: Theme.button-h;
+    border-radius: Theme.radius-md;
+    background: root.focused ? Theme.text : Theme.plate;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.entry.label;
+        color: root.focused ? Theme.primary : root.entry.enabled ? Theme.text-label : Theme.cue-spent;
+        font-family: Theme.family;
+        font-size: Theme.font-body;
+        font-weight: root.focused ? Theme.weight-bold : Theme.weight-normal;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        wrap: no-wrap;
+        overflow: elide;
+    }
+}
+
+component CueText inherits Text {
+    color: Theme.text-label;
+    font-family: Theme.family;
+    font-size: Theme.font-caption;
+    font-weight: Theme.weight-normal;
+    vertical-alignment: center;
+    wrap: no-wrap;
+}
+
+
+component GuideCue {
+    in property <bool> up;
+    in property <bool> down;
+    in property <string> above;
+    in property <string> below;
+    HorizontalLayout {
+        spacing: Theme.gap / 3;
+        alignment: end;
+        VerticalLayout {
+            alignment: center;
+            Chevron { ink: root.up ? Theme.text : Theme.cue-spent; dir: 2; }
+        }
+        CueText { text: root.above; }
+        Rectangle { width: Theme.gap / 2; }
+        VerticalLayout {
+            alignment: center;
+            Chevron { ink: root.down ? Theme.text : Theme.cue-spent; dir: 3; }
+        }
+        CueText { text: root.below; }
+    }
+}
+
+
+component GuideHeader {
+    in property <length> content-w;
+    in property <string> core-text;
+    in property <string> subtitle-text;
+    in property <string> heading-text;
+    in property <string> caption-text;
+    in property <string> badge-text;
+    in property <int> badge-state;
+    in property <string> status-text;
+    in property <bool> cue-shown;
+    in property <bool> cue-up;
+    in property <bool> cue-down;
+    in property <string> above-text;
+    in property <string> below-text;
+    in property <string> above-count;
+    in property <string> below-count;
+
+    property <length> line-h: Theme.font-caption * 1.4;
+    property <length> band-y: Theme.inset-y + root.line-h + Theme.header-gap;
+    property <length> band-h: Theme.list-top - Theme.gap - root.band-y;
+    property <length> dot: floor(Theme.font-caption * 0.5 / 1px) * 1px;
+    property <bool> playing: root.subtitle-text != "";
+
+    HorizontalLayout {
+        x: Theme.inset-x;
+        y: Theme.inset-y;
+        width: root.content-w;
+        height: root.line-h;
+        spacing: Theme.gap / 2;
+        Text {
+            horizontal-stretch: 0;
+            max-width: root.content-w / 2;
+            text: root.playing ? root.heading-text : root.core-text;
+            color: root.playing ? Theme.text : Theme.text-label;
+            font-family: Theme.family;
+            font-size: Theme.font-caption;
+            font-weight: Theme.weight-normal;
+            vertical-alignment: center;
+            wrap: no-wrap;
+            overflow: elide;
+        }
+        if root.badge-state == 1 || root.badge-state == 2: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: root.dot;
+                height: root.dot;
+                border-radius: root.dot / 2;
+                background: root.badge-state == 1 ? Theme.accent : Theme.cue-spent;
+            }
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.badge-text;
+            color: Theme.text-label;
+            font-family: Theme.family;
+            font-size: Theme.font-caption;
+            font-weight: Theme.weight-normal;
+            vertical-alignment: center;
+            wrap: no-wrap;
+            overflow: elide;
+        }
+        Text {
+            horizontal-stretch: 0;
+            text: root.status-text;
+            color: Theme.text-label;
+            font-family: Theme.family;
+            font-size: Theme.font-caption;
+            font-weight: Theme.weight-normal;
+            vertical-alignment: center;
+            horizontal-alignment: right;
+            wrap: no-wrap;
+        }
+    }
+
+    if root.playing: Rectangle {
+        x: Theme.inset-x;
+        y: root.band-y;
+        width: root.content-w;
+        height: root.band-h;
+        border-radius: Theme.radius-md;
+        background: Theme.plate;
+        VerticalLayout {
+            padding-left: Theme.row-pad;
+            padding-right: Theme.row-pad;
+            padding-top: Theme.card-pad;
+            padding-bottom: Theme.card-pad;
+            spacing: 0;
+            alignment: center;
+            HorizontalLayout {
+                height: root.line-h;
+                spacing: Theme.gap / 2;
+                Text {
+                    horizontal-stretch: 1;
+                    min-width: min(self.preferred-width, root.content-w / 2);
+                    text: root.caption-text;
+                    color: Theme.text-label;
+                    font-family: Theme.family;
+                    font-size: Theme.font-caption;
+                    font-weight: Theme.weight-normal;
+                    vertical-alignment: center;
+                    wrap: no-wrap;
+                    overflow: elide;
+                }
+
+                if root.cue-shown: GuideCue {
+                    horizontal-stretch: 0;
+                    up: root.cue-up;
+                    down: root.cue-down;
+                    above: root.above-count;
+                    below: root.below-count;
+                }
+            }
+            Text {
+                height: Theme.font-title * 1.4;
+                text: root.subtitle-text;
+                color: Theme.text;
+                font-family: Theme.family;
+                font-size: Theme.font-title;
+                font-weight: Theme.weight-bold;
+                vertical-alignment: center;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+        }
+    }
+
+    if !root.playing: HorizontalLayout {
+        x: Theme.inset-x;
+        y: root.band-y;
+        width: root.content-w;
+        height: Theme.font-title * 1.4;
+        spacing: Theme.gap / 2;
+        Text {
+            horizontal-stretch: 1;
+            text: root.heading-text;
+            color: Theme.text;
+            font-family: Theme.family;
+            font-size: Theme.font-title;
+            font-weight: Theme.weight-bold;
+            vertical-alignment: center;
+            wrap: no-wrap;
+            overflow: elide;
+        }
+        if root.cue-shown: GuideCue {
+            up: root.cue-up;
+            down: root.cue-down;
+            above: root.above-text;
+            below: root.below-text;
+        }
+    }
+}
+
+component GuideGutter {
+    in property <length> gutter-x;
+    in property <length> list-y;
+    in property <length> list-h;
+    in property <int> list-first;
+    in property <int> list-total;
+    in property <int> shown;
+    in property <bool> scrolled;
+    in property <int> rail-at;
+    in property <string> rail-text;
+
+    property <length> rail-h: Theme.help-top - Theme.gap - Theme.list-top;
+    property <length> pitch: root.rail-h / 27;
+    property <length> dot: max(2px, floor(Theme.icon / 4 / 1px) * 1px);
+    property <length> track-w: max(2px, floor(Theme.icon / 6 / 1px) * 1px);
+    property <bool> scrolls: root.rail-at == 0 && root.scrolled && root.list-h > 0;
+    property <length> thumb-h: max(Theme.icon, floor(root.list-h * root.shown / max(1, root.list-total) / 1px) * 1px);
+    property <length> thumb-y: floor((root.list-h - root.thumb-h) * root.list-first / max(1, root.list-total - root.shown) / 1px) * 1px;
+
+    if root.rail-at > 0: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        for slot in 27: Rectangle {
+            x: root.gutter-x + floor((Theme.icon - root.dot) / 2 / 1px) * 1px;
+            y: Theme.list-top + floor((root.pitch * (slot + 0.5) - root.dot / 2) / 1px) * 1px;
+            width: root.dot;
+            height: root.dot;
+            border-radius: root.dot / 2;
+            background: Theme.cue-spent;
+        }
+        Rectangle {
+            x: root.gutter-x;
+            y: Theme.list-top + floor((root.pitch * (root.rail-at - 0.5) - Theme.icon / 2) / 1px) * 1px;
+            width: Theme.icon;
+            height: Theme.icon;
+            border-radius: Theme.icon / 2;
+            background: Theme.accent;
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.rail-text;
+                color: Theme.primary;
+                font-family: Theme.family;
+                font-size: floor(Theme.font-caption * 0.75 / 1px) * 1px;
+                font-weight: Theme.weight-bold;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                wrap: no-wrap;
+            }
+        }
+    }
+
+    if root.scrolls: Rectangle {
+        x: root.gutter-x + floor((Theme.icon - root.track-w) / 2 / 1px) * 1px;
+        y: root.list-y;
+        width: root.track-w;
+        height: root.list-h;
+        border-radius: root.track-w / 2;
+        background: Theme.border-subtle;
+        Rectangle {
+            x: 0;
+            y: clamp(root.thumb-y, 0px, root.list-h - root.thumb-h);
+            width: parent.width;
+            height: root.thumb-h;
+            border-radius: parent.border-radius;
+            background: Theme.accent;
+        }
+    }
+}
+
+export component HdTemplateGuide inherits Window {
+    in property <[MenuRow]> entries;
+    in property <[MenuRow]> pinned-entries;
+    in property <[MenuRow]> choices;
+    in property <[HelpItem]> help;
+    in property <string> core-text;
+    in property <string> subtitle-text;
+    in property <string> heading-text;
+    in property <string> badge-text;
+    in property <string> status-text;
+    in property <bool> choice-shape;
+    in property <bool> choice-stacked;
+    in property <length> main-h;
+    in property <length> pinned-y;
+    in property <length> pinned-h;
+    in property <length> choice-y;
+    in property <length> choice-h;
+    in property <bool> cue-shown;
+    in property <bool> cue-up;
+    in property <bool> cue-down;
+    in property <string> cue-text;
+    in property <bool> across;
+    in property <int> list-first;
+    in property <int> list-total;
+    in property <int> rail-at;
+    in property <string> rail-text;
+    in property <int> badge-state;
+    in property <string> caption-text;
+    in property <string> above-text;
+    in property <string> below-text;
+    in property <string> above-count;
+    in property <string> below-count;
+    in property <string> shelf-caption-text;
+    in property <string> strip-caption-text;
+    in property <[MenuRow]> hub-entries;
+    in property <int> hub-at;
+    in property <bool> band-lit;
+    in property <bool> band-focus;
+    in property <length> band-h;
+    in property <length> card-w;
+
+    property <length> content-w: self.width - Theme.inset-x - Theme.pad-right;
+    property <length> row-w: root.content-w - Theme.icon;
+    property <length> frame: Theme.card-pad + Theme.stroke;
+
+    background: Theme.ground;
+
+    GuideHeader {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        content-w: root.content-w;
+        core-text: root.core-text;
+        subtitle-text: root.subtitle-text;
+        heading-text: root.heading-text;
+        badge-text: root.badge-text;
+        badge-state: root.badge-state;
+        status-text: root.status-text;
+        caption-text: root.caption-text;
+        cue-shown: root.cue-shown;
+        cue-up: root.cue-up;
+        cue-down: root.cue-down;
+        above-text: root.above-text;
+        below-text: root.below-text;
+        above-count: root.above-count;
+        below-count: root.below-count;
+    }
+
+    if root.main-h > 0: VerticalLayout {
+        x: Theme.inset-x;
+        y: Theme.list-top + root.frame;
+        width: root.row-w;
+        height: root.main-h - 2 * root.frame;
+        spacing: 0;
+        alignment: start;
+        for data in root.entries: GuideLine { entry: data; }
+    }
+
+    if root.pinned-h > 0: Rectangle {
+        x: Theme.inset-x;
+        y: root.pinned-y;
+        width: root.row-w;
+        height: Theme.hair;
+        background: Theme.border-subtle;
+    }
+
+    if root.pinned-h > 0: VerticalLayout {
+        x: Theme.inset-x;
+        y: root.pinned-y + root.frame;
+        width: root.row-w;
+        height: root.pinned-h - 2 * root.frame;
+        spacing: 0;
+        alignment: start;
+        for data in root.pinned-entries: GuideLine { entry: data; }
+    }
+
+    if root.choice-shape && !root.choice-stacked: HorizontalLayout {
+        x: Theme.inset-x;
+        y: root.choice-y;
+        width: root.row-w;
+        height: root.choice-h;
+        spacing: Theme.gap;
+        for data in root.choices: GuideChoice {
+            width: (root.row-w - Theme.gap * max(0, root.choices.length - 1)) / max(1, root.choices.length);
+            entry: data;
+        }
+    }
+
+    if root.choice-shape && root.choice-stacked: VerticalLayout {
+        x: Theme.inset-x;
+        y: root.choice-y;
+        width: root.row-w;
+        height: root.choice-h;
+        spacing: Theme.gap;
+        for data in root.choices: GuideChoice { entry: data; }
+    }
+
+    GuideGutter {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        gutter-x: Theme.inset-x + root.row-w;
+        list-y: Theme.list-top + root.frame;
+        list-h: max(0px, root.main-h - 2 * root.frame);
+        list-first: root.list-first;
+        list-total: root.list-total;
+        shown: root.entries.length + root.pinned-entries.length;
+        scrolled: root.cue-shown;
+        rail-at: root.rail-at;
+        rail-text: root.rail-text;
+    }
+
+    Rectangle {
+        x: root.width - Theme.hair;
+        y: 0;
+        width: Theme.hair;
+        height: root.height;
+        background: Theme.border-subtle;
+    }
+
+    HelpBar {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        help: root.help;
+        content-w: root.content-w;
+    }
+}

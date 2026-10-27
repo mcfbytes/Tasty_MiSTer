@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "app/hd_look.h"
 #include "infra/seat.h"
 #include "ui/hd_plan.h"
 #include "ui/hd_rows/hd_action.h"
@@ -45,11 +46,14 @@ private:
         HdDisplayPlan& plan_;
     };
 
-    class ThemeRow final : public IHdRow {
+    class LookRow final : public IHdRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
-        explicit ThemeRow(HdDisplayPlan& plan) noexcept : plan_(plan) {}
+        LookRow(HdDisplayPlan& plan, app::HdLookField field, std::string_view label) noexcept
+            : plan_(plan),
+              field_(field),
+              label_(label) {}
 
         app::PageDescription::Row describe() const override;
         Transition select() override;
@@ -57,6 +61,8 @@ private:
 
     private:
         HdDisplayPlan& plan_;
+        app::HdLookField field_;
+        std::string_view label_;
     };
 
     PageContext& ctx_;
@@ -65,7 +71,10 @@ private:
     std::uint32_t published_ = 0;
     ClassicAction classic_{*this};
     HdAskRow style_row_;
-    ThemeRow theme_row_{*this};
+    LookRow layout_row_{*this, app::HdLookField::Layout, "Layout"};
+    LookRow colors_row_{*this, app::HdLookField::Colors, "Colors"};
+    LookRow display_row_{*this, app::HdLookField::GameDisplay, "Game display"};
+    LookRow opacity_row_{*this, app::HdLookField::Opacity, "Menu opacity"};
     std::vector<std::reference_wrapper<IHdRow>> refs_;
 };
 

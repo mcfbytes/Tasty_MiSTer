@@ -24,7 +24,7 @@ ssize_t read_exact(int fd, void* buf, std::size_t n) {
 
 Ex<Notifier> Notifier::doorbell_adopt(
     os::UioLineRef uio,
-    const hal::RegisterWindow<hal::CauseReg>* cause,
+    infra::OptRef<const hal::RegisterWindow<hal::CauseReg>> cause,
     Cause klass
 ) {
 
@@ -38,7 +38,7 @@ Ex<Notifier> Notifier::doorbell_adopt(
     if (auto armed = uio.rearm(); !armed) {
         return std::unexpected(Error{Errc::uio_open, ERR_SITE(), armed.error().detail});
     }
-    return Notifier{uio, infra::opt_ref_of(cause), klass};
+    return Notifier{uio, cause, klass};
 }
 
 Ex<Notifier> Notifier::ticker(std::chrono::nanoseconds period) {

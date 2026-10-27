@@ -153,7 +153,7 @@ public:
 
     const proto::SpiOsdMaskDecoder& osd_mask_decoder() const noexcept { return osd_mask_decoder_; }
 
-    [[nodiscard]] infra::OptRef<svc::DiscReadService> discs() noexcept { return discs_; }
+    [[nodiscard]] svc::DiscReadService& discs() noexcept { return discs_; }
 
     [[nodiscard]] const CoreTerms& core_terms() const noexcept { return terms_; }
 
@@ -229,7 +229,7 @@ public:
 
     void seal_boot_pump() noexcept;
 
-    [[nodiscard]] infra::OptRef<DiskRelay> disks() noexcept { return disks_; }
+    [[nodiscard]] DiskRelay& disks() noexcept { return disks_; }
 
     void settle_boot_slot_mount() noexcept;
 
@@ -286,8 +286,6 @@ public:
 
     [[nodiscard]] StdoutRouter* boot_stdout_router() noexcept { return boot_.boot_stdout_router(); }
 
-    void note_stdout_open_failed(Errc why) { push(Event::SessionAdvisory{.why = why}); }
-
     struct RoundEntry {
         bool live = false;
     };
@@ -316,7 +314,7 @@ public:
 
     [[nodiscard]] std::uint32_t core_edge_seq() const noexcept { return core_edge_seq_; }
 
-    [[nodiscard]] cores::Core* live_core() noexcept { return core_ptr_(); }
+    [[nodiscard]] infra::OptRef<cores::Core> live_core() noexcept { return tenancy_.core(); }
 
     [[nodiscard]] Ex<std::optional<UiRequest::LoadCore>> boot(std::span<const char* const> argv);
 
@@ -414,12 +412,12 @@ private:
     SessionMachine machine_;
 
     infra::OptRef<const svc::Vfs> vfs_{};
-    infra::OptRef<svc::DiscReadService> discs_{};
+    svc::DiscReadService& discs_;
     svc::DiscReadService& unbound_discs_;
-    infra::OptRef<MailboxRelay> mailbox_{};
-    infra::OptRef<DiskRelay> disks_{};
+    MailboxRelay& mailbox_;
+    DiskRelay& disks_;
     NvramUpload nvram_;
-    infra::OptRef<WindowJobService> window_jobs_{};
+    WindowJobService& window_jobs_;
     LinkTxChannel<SeatTag::Main>& link_inbox_;
     LinkTxChannel<SeatTag::Ui>& ui_inbox_;
     LinkTxChannel<SeatTag::Input>& input_inbox_;
@@ -517,11 +515,6 @@ private:
     proto::user_io::PollReader f12_mod_poll_;
 
     CoreTenancy tenancy_;
-
-    [[nodiscard]] cores::Core* core_ptr_() const noexcept {
-        const infra::OptRef<cores::Core> c = tenancy_.core();
-        return c ? &*c : nullptr;
-    }
 
     FileStreamService& streams_;
 

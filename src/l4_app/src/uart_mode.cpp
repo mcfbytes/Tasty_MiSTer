@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/uart_mode.h"
-#include "hal/selected.h"
+#include "proto/link_frame.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -13,13 +13,12 @@
 #include <vector>
 
 #include "cores/registry.h"
-#include "hal/spi_transport.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
 namespace {
 
-constexpr hal::SpiWord kSetUart{0x3B};
+constexpr std::uint16_t kSetUart = 0x3B;
 
 bool file_exists(const char* path) noexcept {
     struct stat st{};
@@ -126,7 +125,7 @@ Ex<MidiLinkMode> UartModeController::probe_midilink() const {
     return unimplemented(ERR_SITE());
 }
 
-Ex<void> UartModeController::set_mode(hal::ISpiTransport& link, UartMode m) {
+Ex<void> UartModeController::set_mode(proto::ILinkFrame& frame, UartMode m) {
     seat_assert<SeatTag::RT>(ERR_SITE(), "UartModeController::set_mode off T-RT");
 
     const auto raw = static_cast<std::uint8_t>(static_cast<std::uint8_t>(m) & 0x0Fu);
@@ -134,24 +133,18 @@ Ex<void> UartModeController::set_mode(hal::ISpiTransport& link, UartMode m) {
     const std::uint32_t baud = baud_for(masked);
 
     {
-        hal::Selected cs(link, hal::ChipSelect::Io);
-        if (auto r = link.transfer(kSetUart); !r) {
-            return std::unexpected(r.error());
-        }
+        if (auto r = frame.begin(proto::FrameSel::Uio, kSetUart); !r)
+            return r;
         const std::uint16_t wire = (raw == 4 || raw == 5) ? std::uint16_t{1}
                                                           : static_cast<std::uint16_t>(raw);
-        if (auto r = link.transfer(hal::SpiWord{wire}); !r) {
-            return std::unexpected(r.error());
-        }
-        if (auto r = link.transfer(hal::SpiWord{static_cast<std::uint16_t>(baud & 0xFFFFu)}); !r) {
-            return std::unexpected(r.error());
-        }
-        if (auto r = link.transfer(
-                hal::SpiWord{static_cast<std::uint16_t>((baud >> 16) & 0xFFFFu)}
-            );
-            !r) {
-            return std::unexpected(r.error());
-        }
+        if (auto r = frame.word(wire); !r)
+            return r;
+        if (auto r = frame.word(static_cast<std::uint16_t>(baud & 0xFFFFu)); !r)
+            return r;
+        if (auto r = frame.word(static_cast<std::uint16_t>((baud >> 16) & 0xFFFFu)); !r)
+            return r;
+        if (auto r = frame.end(); !r)
+            return r;
     }
     rt_.mode = masked;
     ++rt_.stats.mode_writes;
@@ -183,7 +176,7 @@ void UartModeController::post_(const UartHandoff& h) noexcept {
         rt_.handoff_drops.add(1);
 }
 
-Ex<void> UartModeController::reset_uart(hal::ISpiTransport&) {
+Ex<void> UartModeController::reset_uart(proto::ILinkFrame&) {
 
     return unimplemented(ERR_SITE());
 }
@@ -199,7 +192,7 @@ void UartModeController::latch_usb_ser(bool present) noexcept {
 }
 
 Ex<void> UartModeController::load_for_core(
-    hal::ISpiTransport& link,
+    proto::ILinkFrame& frame,
     std::string_view core_name,
     bool uart_capable,
     std::string_view uart_token,
@@ -249,12 +242,12 @@ Ex<void> UartModeController::load_for_core(
             first = std::unexpected(r.error());
     };
 
-    keep(set_mode(link, UartMode::None));
+    keep(set_mode(frame, UartMode::None));
 
     const UartPersist p = clamp_uart_modes(unpack_uart_persist(word));
 
     keep(set_midilink(p.midilink));
-    keep(set_mode(link, p.mode));
+    keep(set_mode(frame, p.mode));
     return first;
 }
 

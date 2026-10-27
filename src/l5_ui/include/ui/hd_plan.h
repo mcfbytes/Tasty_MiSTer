@@ -34,6 +34,8 @@ public:
 
     [[nodiscard]] virtual std::uint32_t refusals() const noexcept { return 0; }
 
+    [[nodiscard]] virtual bool hub() const noexcept { return false; }
+
 protected:
     IHdPlan() = default;
     IHdPlan(const IHdPlan&) = default;

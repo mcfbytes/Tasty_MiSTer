@@ -27,6 +27,7 @@ target_compile_options(tasty_options INTERFACE
   -Wswitch-enum
   -fno-exceptions
   -fno-rtti
+  -ftrivial-auto-var-init=zero
 )
 
 add_library(tasty_test_options INTERFACE)

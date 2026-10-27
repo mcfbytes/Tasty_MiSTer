@@ -63,6 +63,8 @@ public:
         return height_;
     }
 
+    bool back_is_idle() const override;
+
     BrowserSession& session() noexcept { return session_; }
 
     const BrowserSession& session() const noexcept { return session_; }

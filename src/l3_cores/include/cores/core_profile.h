@@ -116,6 +116,8 @@ struct CoreProfile {
 
     infra::OptRef<const svc::IAnalogReshape> analog_reshape{};
 
+    bool suppress_stick_dpad = false;
+
     bool is_front_end = false;
 
     BlockService block_service = BlockService::Generic;

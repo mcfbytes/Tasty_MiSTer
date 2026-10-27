@@ -60,9 +60,8 @@ public:
 
     [[nodiscard]] const CdEngine* engine() const noexcept { return engine_.get(); }
 
-    svc::DiscReadService* discs() noexcept {
-        const auto d = slot_.discs();
-        return d ? &*d : nullptr;
+    [[nodiscard]] infra::OptRef<svc::DiscReadService> discs() const noexcept {
+        return slot_.discs();
     }
 
     [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return slot_.geometry(); }

@@ -17,6 +17,7 @@
 #include "app/conf_str_cell.h"
 #include "app/owner_push.h"
 #include "app/durable_write.h"
+#include "app/hd_look.h"
 #include "app/durable_write_service.h"
 #include "app/ini_parse.h"
 #include "app/link_event_dispatch.h"
@@ -424,10 +425,13 @@ void SessionOwner::on(const UiRequest::SetOsdStyle& req, const UiRequest::Head& 
     saves_.set_ini_key("osd_style", req.style != 0 ? "1" : "0");
 }
 
-void SessionOwner::on(const UiRequest::SetHdTheme& req, const UiRequest::Head& head) {
+void SessionOwner::on(const UiRequest::SetHdLook& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    saves_.set_ini_key("hd_theme", std::to_string(req.theme));
+    const std::string_view key = hd_look_ini_key(req.field);
+    if (key.empty())
+        return;
+    saves_.set_ini_key(key, std::to_string(req.value));
 }
 
 void SessionOwner::on(const UiRequest::SdramDetected& req, const UiRequest::Head& head) {

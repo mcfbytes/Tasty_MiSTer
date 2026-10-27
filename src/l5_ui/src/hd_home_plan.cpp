@@ -20,9 +20,23 @@ HdHomePlan::HdHomePlan(const HdPlanInputs& in)
     : ctx_(in.ctx),
       cores_(make_system_page(in.ctx.sys)),
       launch_(in),
-      pair_(in.ctx),
-      all_row_(HdPushRow::Spec{.label = "All recent games", .page = PageId::HdRecentGames}),
-      settings_(HdPushRow::Spec{.label = "Settings", .page = PageId::HdSettings}) {
+      pair_(in.ctx, app::RowTier::Verb),
+      all_row_(
+          HdPushRow::Spec{
+              .label = "All recent games",
+              .page = PageId::HdRecentGames,
+              .tier = app::RowTier::Verb,
+              .icon = app::PageDescription::RowIcon::Recent
+          }
+      ),
+      settings_(
+          HdPushRow::Spec{
+              .label = "Settings",
+              .page = PageId::HdSettings,
+              .tier = app::RowTier::Verb,
+              .icon = app::PageDescription::RowIcon::Settings
+          }
+      ) {
     TASTY_SEAT_BODY(HdHomePlan);
     cores_->on_enter(ctx_);
     const std::span<const app::RecentGames::Record> records = in.recent_games.records();
@@ -31,7 +45,7 @@ HdHomePlan::HdHomePlan(const HdPlanInputs& in)
     played_.reserve(shown);
     refs_.reserve(shown + 5);
     for (std::size_t i = 0; i < shown; ++i) {
-        played_.emplace_back(launch_, records[i]);
+        played_.emplace_back(launch_, records[i], app::RowTier::Shelf);
         refs_.emplace_back(played_.back());
     }
     refs_.emplace_back(all_gate_);
@@ -82,6 +96,8 @@ app::PageDescription::Row HdHomePlan::BrowseRow::describe() const {
     TASTY_SEAT_BODY(BrowseRow);
     app::PageDescription::Row r{};
     r.kind = app::PageDescription::RowKind::Submenu;
+    r.tier = app::RowTier::Verb;
+    r.icon = app::PageDescription::RowIcon::Cores;
     (void)r.label.assign("Browse cores");
     return r;
 }

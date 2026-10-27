@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstdint>
 
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 
@@ -19,7 +20,7 @@ class BasicPauseLatch {
 public:
     explicit BasicPauseLatch(
         BasicWakeFlag<Kick>& seat_wake,
-        BasicWakeFlag<Kick>* asker_wake = nullptr
+        infra::OptRef<BasicWakeFlag<Kick>> asker_wake = {}
     ) noexcept
         : seat_wake_(&seat_wake),
           asker_wake_(asker_wake) {}
@@ -77,7 +78,7 @@ public:
         }
         if (a != p && (a == 0 || b.quiescent())) {
             paused_.store(a, std::memory_order_release);
-            if (asker_wake_ != nullptr)
+            if (asker_wake_)
                 asker_wake_->kick_if_armed();
         }
         return a != 0 && paused_.load(std::memory_order_relaxed) == a;
@@ -89,7 +90,7 @@ public:
 
 private:
     BasicWakeFlag<Kick>* seat_wake_;
-    BasicWakeFlag<Kick>* asker_wake_;
+    infra::OptRef<BasicWakeFlag<Kick>> asker_wake_;
     std::atomic<PauseGen> ask_{0};
     alignas(64) std::atomic<PauseGen> paused_{0};
 };

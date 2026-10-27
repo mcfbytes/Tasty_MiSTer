@@ -13,6 +13,7 @@
 #include "app/hd_dirty_ledger.h"
 #include "app/hd_layout.h"
 #include "app/hd_flip_slot.h"
+#include "app/hd_glass.h"
 #include "app/hd_osd_ask.h"
 #include "app/hd_osd_status.h"
 #include "app/hd_raster.h"
@@ -46,7 +47,7 @@ public:
     struct Frame {
         HdFlipChannel& flips;
         hal::FpgaMemory mem;
-        std::unique_ptr<HdRaster> raster;
+        HdRasters rasters;
     };
 
     explicit HdRenderer(const Wiring& w, std::uint8_t fps = 10) noexcept
@@ -62,7 +63,7 @@ public:
 
     void set_fps(std::uint8_t fps) noexcept;
 
-    void set_theme(std::uint8_t index) noexcept;
+    void set_look(HdLook look) noexcept;
 
     void begin() noexcept;
     void serve() noexcept;
@@ -76,10 +77,15 @@ public:
 
     [[nodiscard]] BackdropJob::Step job_step() const noexcept { return job_.step(); }
 
-    [[nodiscard]] std::uint8_t theme() const noexcept { return theme_index_; }
+    [[nodiscard]] HdLook look() const noexcept { return look_; }
 
 private:
     static constexpr std::uint8_t kNoSlot = 0xFF;
+
+    static constexpr std::array<HdDirtyLedger::Region, 2> kCards{
+        HdDirtyLedger::Region::Panel,
+        HdDirtyLedger::Region::Band
+    };
 
     void publish_() noexcept;
     [[nodiscard]] std::uint64_t now_ns_() const noexcept;
@@ -87,17 +93,22 @@ private:
     void reap_(bool hold, std::uint64_t now) noexcept;
     [[nodiscard]] bool owned_(std::uint8_t slot, std::uint64_t now) const noexcept;
     [[nodiscard]] bool stale_(std::uint8_t slot) const noexcept;
+    [[nodiscard]] bool cards_stale_(std::uint8_t slot) const noexcept;
+    [[nodiscard]] bool spills_(const HdDirty& dirty, const HdLayout& layout) const noexcept;
     [[nodiscard]] std::uint8_t flip_target_(std::uint64_t now) const noexcept;
     [[nodiscard]] bool flip_wanted_() const noexcept;
     [[nodiscard]] bool can_progress_(std::uint64_t now) const noexcept;
     [[nodiscard]] std::uint64_t wait_ns_(std::uint64_t now) const noexcept;
     [[nodiscard]] bool ensure_frame_() noexcept;
     void close_job_() noexcept;
-    [[nodiscard]] bool retheme_(std::uint8_t index) noexcept;
+    [[nodiscard]] std::unique_ptr<HdRaster>& raster_() noexcept;
+    [[nodiscard]] bool retheme_(HdLook look) noexcept;
     void draw_(std::uint64_t now) noexcept;
     void start_epoch_(const HdLayout& layout) noexcept;
     void panel_step_(const HdLayout& layout, bool asked) noexcept;
-    void place_(std::uint64_t now) noexcept;
+    void place_(std::uint64_t now, bool wrote = false) noexcept;
+    [[nodiscard]] std::int64_t in_place_px_() const noexcept;
+    [[nodiscard]] bool copy_stale_(std::uint64_t now) noexcept;
     bool flip_(std::uint64_t now) noexcept;
     [[nodiscard]] bool slice_(std::uint64_t now) noexcept;
     [[nodiscard]] bool read_(std::uint64_t now) noexcept;
@@ -118,19 +129,21 @@ private:
     bool bd_reset_ = false;
     bool pending_ = false;
     bool deadline_ = false;
+    bool canvas_fresh_ = false;
     std::uint64_t ticks_ = 0;
     std::uint32_t epoch_seen_ = 0;
     std::uint32_t seq_ = 0;
     HdOsdStatus st_{};
-    std::uint8_t theme_index_ = 0;
-    HdTheme theme_ = derive_theme(hd_theme(0).style);
+    HdLook look_{};
+    HdTheme theme_ = hd_theme_tokens(HdLook{});
 
     infra::OptRef<HdFlipChannel> flips_{};
     std::optional<hal::FpgaMemory> slots_{};
-    std::unique_ptr<HdRaster> raster_{};
+    HdRasters rasters_{};
     std::optional<BackdropSampler> sampler_{};
     BackdropScaler scaler_{};
     BackdropJob job_{scaler_};
+    HdGlass glass_{};
     HdDirtyLedger ledger_{};
     HdVisibleStats vis_{};
     std::vector<std::uint16_t> frame_{};

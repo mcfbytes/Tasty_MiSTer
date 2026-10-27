@@ -74,7 +74,7 @@ public:
     [[nodiscard]] std::span<const std::byte> dup() noexcept override;
 
     void restart(const RecOptions& opt) noexcept override;
-    void arm(const os::IClock* clock, std::int64_t budget_ns) noexcept override;
+    void arm(infra::OptRef<const os::IClock> clock, std::int64_t budget_ns) noexcept override;
 
     [[nodiscard]] Search search() const noexcept override {
         TASTY_SEAT_BODY(ZmbvCodec);

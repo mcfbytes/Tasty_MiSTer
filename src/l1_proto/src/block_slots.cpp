@@ -2,6 +2,7 @@
 #include "proto/block_slots.h"
 #include "proto/save_slot_rule.h"
 #include "proto/disc_announce.h"
+#include "proto/spi_frame.h"
 #include "hal/selected.h"
 #include "proto/storage_completion_dispatch.h"
 
@@ -15,8 +16,8 @@ namespace {
 
 constexpr std::uint16_t kSectorRd = 0x17;
 constexpr std::uint16_t kSectorWr = 0x18;
-constexpr hal::SpiWord kSetSdStat = DiscAnnounce::kSetSdStat;
-constexpr hal::SpiWord kSetSdInfo = DiscAnnounce::kSetSdInfo;
+constexpr std::uint16_t kSetSdStat = DiscAnnounce::kSetSdStat;
+constexpr std::uint16_t kSetSdInfo = DiscAnnounce::kSetSdInfo;
 
 constexpr std::array<std::uint8_t, kBlockStagingBytes> kZeroPage{};
 constexpr std::array<std::uint8_t, kBlockStagingBytes> kFfPage = [] {
@@ -25,12 +26,10 @@ constexpr std::array<std::uint8_t, kBlockStagingBytes> kFfPage = [] {
     return a;
 }();
 
-[[nodiscard]] Ex<void> write32_byte(hal::ISpiTransport& link, std::uint32_t v) {
+[[nodiscard]] Ex<void> write32_byte(ILinkFrame& frame, std::uint32_t v) {
     for (unsigned shift = 0; shift < 32; shift += 8) {
-        const auto b = static_cast<std::uint16_t>((v >> shift) & 0xFFu);
-        if (auto r = link.transfer(hal::SpiWord{b}); !r) {
-            return std::unexpected(r.error());
-        }
+        if (auto r = frame.word(static_cast<std::uint16_t>((v >> shift) & 0xFFu)); !r)
+            return r;
     }
     return {};
 }
@@ -61,36 +60,35 @@ Ex<void> BlockSlots::announce(
     if (auto r = block_poll_.send_config(link); !r)
         return r;
 
-    {
-        hal::Selected cs(link, hal::ChipSelect::Io);
-        if (auto r = link.transfer(kSetSdInfo); !r)
-            return std::unexpected(r.error());
-        const auto lo = static_cast<std::uint32_t>(size_bytes.v & 0xFFFFFFFFu);
-        const auto hi = static_cast<std::uint32_t>(size_bytes.v >> 32);
-        if (link.io_version() != 0) {
-            if (auto r = DiscAnnounce::write32_word(link, lo); !r)
-                return r;
-            if (auto r = DiscAnnounce::write32_word(link, hi); !r)
-                return r;
-        } else {
-            if (auto r = write32_byte(link, lo); !r)
-                return r;
-            if (auto r = write32_byte(link, hi); !r)
-                return r;
-        }
+    SpiFrame frame{link};
+    if (auto r = frame.begin(FrameSel::Uio, kSetSdInfo); !r)
+        return r;
+    const auto lo = static_cast<std::uint32_t>(size_bytes.v & 0xFFFFFFFFu);
+    const auto hi = static_cast<std::uint32_t>(size_bytes.v >> 32);
+    if (link.io_version() != 0) {
+        if (auto r = DiscAnnounce::write32_word(frame, lo); !r)
+            return r;
+        if (auto r = DiscAnnounce::write32_word(frame, hi); !r)
+            return r;
+    } else {
+        if (auto r = write32_byte(frame, lo); !r)
+            return r;
+        if (auto r = write32_byte(frame, hi); !r)
+            return r;
     }
+    if (auto r = frame.end(); !r)
+        return r;
 
     if (slot.v > kMaxAnnounceableSlot) {
         ++diag_.unencodable_announce;
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
     }
     const auto parm = static_cast<std::uint16_t>((1u << slot.v) | (writable ? 0u : 0x80u));
-    hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(kSetSdStat); !r)
-        return std::unexpected(r.error());
-    if (auto r = link.transfer(hal::SpiWord{parm}); !r)
-        return std::unexpected(r.error());
-    return {};
+    if (auto r = frame.begin(FrameSel::Uio, kSetSdStat); !r)
+        return r;
+    if (auto r = frame.word(parm); !r)
+        return r;
+    return frame.end();
 }
 
 Ex<void> BlockSlots::mount(
@@ -103,8 +101,8 @@ Ex<void> BlockSlots::mount(
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
     }
 
-    IImageSource* const src = source_for(slot);
-    const SlotAttributes attr = src != nullptr ? src->attributes(slot) : SlotAttributes{};
+    const infra::OptRef<IImageSource> src = source_for(slot);
+    const SlotAttributes attr = src ? src->attributes(slot) : SlotAttributes{};
 
     Slot& s = records_[slot.v].slot;
     s.state = Slot::State::Mounted;
@@ -141,8 +139,8 @@ Ex<void> BlockSlots::install_disc(SlotIndex slot, FileSize size_bytes) {
     if (size_bytes.v == 0) {
         records_[slot.v].slot = Slot{};
     } else {
-        IImageSource* const src = source_for(slot);
-        const SlotAttributes attr = src != nullptr ? src->attributes(slot) : SlotAttributes{};
+        const infra::OptRef<IImageSource> src = source_for(slot);
+        const SlotAttributes attr = src ? src->attributes(slot) : SlotAttributes{};
         Slot& s = records_[slot.v].slot;
         s.state = Slot::State::Mounted;
         s.block_size = 512;
@@ -258,7 +256,7 @@ bool BlockSlots::submit_fill(
     const Slot& s = records_[slot.v].slot;
     if (s.state != Slot::State::Mounted || s.size_bytes.v == 0)
         return false;
-    if (!storage_live_ || !chan_ || source_for(slot) == nullptr)
+    if (!storage_live_ || !chan_ || !source_for(slot))
         return false;
     SlotGate& p = records_[slot.v].gate;
     if (p.state != SlotGate::State::Idle)
@@ -297,7 +295,7 @@ bool BlockSlots::submit_fill(
 
 StorageRequest::Head BlockSlots::request_head_(SlotIndex slot) const noexcept {
     StorageRequest::Head h{StorageSeq{next_seq_}, slot, 0, {}};
-    if (const IImageSource* src = source_for(slot); src != nullptr)
+    if (const auto src = source_for(slot))
         h.tag = src->request_tag(slot);
     return h;
 }
@@ -371,8 +369,8 @@ bool BlockSlots::submit_attach(SlotIndex slot) noexcept {
     if (records_[slot.v].gate.state != SlotGate::State::Idle)
         return false;
 
-    const IImageSource* const src = source_for(slot);
-    const bool growable = src != nullptr && src->attributes(slot).growable;
+    const infra::OptRef<IImageSource> src = source_for(slot);
+    const bool growable = src && src->attributes(slot).growable;
     return submit_lifecycle_(
         slot,
         infra::make<StorageRequest>(
@@ -509,7 +507,7 @@ void BlockSlots::on(
     const StorageCompletion::Head& h,
     SlotIndex slot
 ) noexcept {
-    if (IImageSource* src = source_for(slot); src != nullptr) {
+    if (const auto src = source_for(slot)) {
         const bool ok = h.status == StorageStatus::Ok;
         src->note_attached(slot, ok, FileSize{ok ? a.size : 0});
     }
@@ -523,7 +521,7 @@ void BlockSlots::on(
     const StorageCompletion::Head& h,
     SlotIndex slot
 ) noexcept {
-    if (IImageSource* src = source_for(slot); src != nullptr)
+    if (const auto src = source_for(slot))
         src->note_detached(slot);
     if (stale_(slot, h))
         return;
@@ -621,8 +619,8 @@ BlockSlots::Blank BlockSlots::substitute_blank(SlotIndex slot, Lba lba) {
     if (window.empty())
         return Blank::NoBuffer;
     if (records_[slot.v].slot.deferred_create) {
-        IImageSource* const src = source_for(slot);
-        if (src != nullptr && src->fill_blank(slot, lba, window))
+        const infra::OptRef<IImageSource> src = source_for(slot);
+        if (src && src->fill_blank(slot, lba, window))
             return Blank::Filled;
         std::memset(window.data(), 0xFF, window.size());
         return Blank::Filled;
@@ -697,7 +695,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
     std::uint32_t block_size,
     std::uint32_t window_blocks,
     std::uint16_t ack,
-    IResidentImageSource* res
+    infra::OptRef<IResidentImageSource> res
 ) {
     const std::uint32_t blks = req.block_count.v;
     const std::uint32_t sz = block_size * blks;
@@ -713,7 +711,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
     Blank blank = Blank::Filled;
     if (hit) {
         offset = (req.lba.v - w.base.v) * block_size;
-    } else if (res != nullptr) {
+    } else if (res) {
         const Refill r = refill_resident(req.slot, req.lba, block_size, *res, true);
         cached = r == Refill::Hit;
         if (r == Refill::Defer)
@@ -757,7 +755,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
         - records_[req.slot.v].window.base.v;
     if (consumed == window_blocks) {
         const Lba next{req.lba.v + blks};
-        if (res != nullptr) {
+        if (res) {
 
             if (refill_resident(req.slot, next, block_size, *res, false) != Refill::Hit) {
                 if (chan_) {
@@ -779,7 +777,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
     const SdRequest& req,
     std::uint32_t block_size,
     std::uint16_t ack,
-    IResidentImageSource* res
+    infra::OptRef<IResidentImageSource> res
 ) {
     const std::uint32_t sz = block_size * req.block_count.v;
 
@@ -809,8 +807,8 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
     }
 
     Slot& s = records_[req.slot.v].slot;
-    IImageSource* const src = source_for(req.slot);
-    if (src == nullptr || s.state != Slot::State::Mounted) {
+    const infra::OptRef<IImageSource> src = source_for(req.slot);
+    if (!src || s.state != Slot::State::Mounted) {
         ++diag_.write_failures;
         return Pass::Answered;
     }
@@ -826,7 +824,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
         return Pass::Answered;
     }
     if (plan.act == SaveSlotRule::Act::Create) {
-        if (res != nullptr) {
+        if (res) {
             auto created = res->create(req.slot, chan_->half(req.slot, drain_half).first(plan.len));
             if (!created) {
                 ++diag_.write_failures;
@@ -844,7 +842,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
     }
     const std::uint64_t offset = plan.offset;
     const std::uint32_t len = plan.len;
-    if (res == nullptr) {
+    if (!res) {
         if (!submit_write(req.slot, drain_half, offset, len))
             ++diag_.write_failures;
         return Pass::Answered;
@@ -873,7 +871,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve(hal::ISpiTransport& link, const SpiBlockP
         return Pass::Deferred;
     }
 
-    IResidentImageSource* const res = resident_for(d.req.slot);
+    const infra::OptRef<IResidentImageSource> res = resident_for(d.req.slot);
 
     auto pass = d.req.write ? serve_write(link, d.req, d.block_size, d.ack, res)
                             : serve_read(link, d.req, d.block_size, d.window_blocks, d.ack, res);

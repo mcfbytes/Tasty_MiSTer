@@ -30,6 +30,8 @@ public:
         return pages_.empty() ? PageId::None : pages_.front()->id();
     }
 
+    const Page* bottom() const noexcept { return pages_.empty() ? nullptr : pages_.front().get(); }
+
     PageId beneath_top_id() const noexcept {
         return pages_.size() < 2 ? PageId::None : pages_[pages_.size() - 2]->id();
     }

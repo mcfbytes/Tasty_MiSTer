@@ -3,6 +3,7 @@
 #include "ui/key_decoder.h"
 #include "ui/ui_event.h"
 
+#include <bit>
 #include <cstddef>
 #include <linux/input-event-codes.h>
 
@@ -62,6 +63,40 @@ bool Navigator::move(Direction d) noexcept {
 
     index_ = RowIndex{idx};
     return idx != before;
+}
+
+bool Navigator::move_tier(Direction d, MenuMask run) noexcept {
+    const std::uint64_t out = mask_.v & ~run.v;
+    if (out == 0 || run.v == 0)
+        return false;
+    const std::uint32_t before = index_.v;
+    const int top = 63 - std::countl_zero(run.v);
+    const int bottom = std::countr_zero(run.v);
+    std::uint64_t past = 0;
+    if (d == Direction::Down) {
+        past = top < 63 ? out & ~((std::uint64_t{2} << top) - 1) : 0;
+        index_ = RowIndex{static_cast<std::uint32_t>(std::countr_zero(past != 0 ? past : out))};
+    } else {
+        past = out & ((std::uint64_t{1} << bottom) - 1);
+        index_ = RowIndex{
+            static_cast<std::uint32_t>(63 - std::countl_zero(past != 0 ? past : out))
+        };
+    }
+    return index_.v != before;
+}
+
+bool Navigator::move_strip(Direction d, MenuMask run) noexcept {
+    const std::uint64_t in = mask_.v & run.v;
+    const std::uint32_t at = index_.v;
+    if (at >= 64)
+        return false;
+    const std::uint64_t side = d == Direction::Down ? in & ~((std::uint64_t{2} << at) - 1)
+                                                    : in & ((std::uint64_t{1} << at) - 1);
+    if (side == 0)
+        return false;
+    const int to = d == Direction::Down ? std::countr_zero(side) : 63 - std::countl_zero(side);
+    index_ = RowIndex{static_cast<std::uint32_t>(to)};
+    return true;
 }
 
 namespace {

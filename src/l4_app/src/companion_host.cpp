@@ -44,11 +44,13 @@ void CompanionHost::misrouted(const CompanionBind&) noexcept {
     TASTY_SEAT_BODY(CompanionHost);
 }
 
-cores::IMailboxServant* CompanionHost::servant_for(std::uint16_t gen) noexcept {
+infra::OptRef<cores::IMailboxServant> CompanionHost::servant_for(std::uint16_t gen) noexcept {
     TASTY_SEAT_BODY(CompanionHost);
     if (gen != bound_gen_ || !held_)
         serve();
-    return (gen == bound_gen_ && gen != 0 && held_) ? &*held_ : nullptr;
+    if (gen == bound_gen_ && gen != 0)
+        return held_;
+    return {};
 }
 
 void CompanionHost::refill_one() noexcept {

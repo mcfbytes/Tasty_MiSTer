@@ -3,6 +3,7 @@
 
 #include <span>
 
+#include "app/cmd_fifo.h"
 #include "hal/bridge_sequencer.h"
 #include "hal/doorbell_policy.h"
 #include "hal/fpga_aperture.h"
@@ -26,6 +27,8 @@
 namespace mister::fw {
 
 struct RtEvidence;
+
+inline constexpr const char* kDiagPath = "/tmp/MiSTer_diag";
 
 struct BootParts {
     hal::ILinkPort& link;
@@ -53,6 +56,9 @@ struct BootParts {
 
     hal::LinkTimingValues link_timing;
     hal::ProgramGeometryValues program;
+
+    const char* cmd_fifo_path = app::kCmdFifoPath;
+    const char* diag_path = kDiagPath;
 };
 
 template <class End>

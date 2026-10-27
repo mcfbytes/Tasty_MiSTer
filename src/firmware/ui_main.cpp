@@ -50,7 +50,7 @@ UiMain::UiMain(
       save_states_(wiring.save_states),
       wake_(fds.wake()),
       stop_(std::move(fds).take_stop()),
-      pause_(wake_, &asker),
+      pause_(wake_, infra::OptRef<xthread::WakeFlag>{asker}),
       uart_handoffs_(handoffs),
       park_(wake_, stop_, fifo_ ? fifo_->fd() : -1) {}
 
