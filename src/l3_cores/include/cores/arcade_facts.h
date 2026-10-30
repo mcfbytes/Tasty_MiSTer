@@ -9,6 +9,7 @@
 
 #include "cores/mra_cheat_records.h"
 #include "cores/mra_doc.h"
+#include "infra/error.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
@@ -38,6 +39,12 @@ struct ArcadeDocument {
     std::vector<mra::NvramDecl> nvrams;
     ArcadeFacts facts;
 };
+
+[[nodiscard]] Ex<std::string> manifest_document(
+    std::string_view text,
+    std::string_view path,
+    const svc::Vfs& vfs
+);
 
 [[nodiscard]] ArcadeDocument read_arcade_document(
     std::string_view text,

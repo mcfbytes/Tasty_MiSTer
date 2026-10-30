@@ -86,8 +86,8 @@ static_assert(
     "round; tasty binds it to every executive round"
 );
 static_assert(
-    kPsxSectorKick.osd_budget == OsdBudget::Shared,
-    "an every-round row never pins the OSD budget"
+    kPsxSectorKick.round_claim == RoundClaim::Never,
+    "an every-round row never claims its round"
 );
 static_assert(
     kPsxSectorKick.impl == &kSectorKick<kPsx>,

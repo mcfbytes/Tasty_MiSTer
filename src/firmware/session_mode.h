@@ -36,6 +36,7 @@ class SaveStateAttach;
 class ScanoutRelay;
 class SessionOwner;
 class IUiRoundPort;
+class UiWriteLane;
 }
 
 namespace mister::fw {
@@ -65,6 +66,7 @@ public:
             infra::OptRef<app::LauncherScreen> launcher_screen{};
             infra::OptRef<app::IUiRoundPort> ui_round{};
             infra::OptRef<app::SaveStateAttach> save_states{};
+            infra::OptRef<app::UiWriteLane> ui_writes{};
             infra::OptRef<const app::UiPageCell> ui_pages{};
             infra::OptRef<const app::HdOsdStatusCell> hd{};
         };

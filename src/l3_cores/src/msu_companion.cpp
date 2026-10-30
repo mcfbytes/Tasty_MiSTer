@@ -32,7 +32,7 @@ Ex<CompanionPlan> MsuCompanion::plan(const CompanionAsk& ask) {
     }
     TransferRow row{
         .dest = RowDest::Window,
-        .index = proto::IoIndex{msu::kDataIndex},
+        .index = proto::WideIoIndex{msu::kDataIndex},
         .addr = 0,
         .window = 0,
         .bracket = RowBracket::AroundWithLength,

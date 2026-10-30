@@ -6,7 +6,6 @@
 #include "app/osd_wire.h"
 #include "app/session_bindings.h"
 #include "cores/core_support.h"
-#include "cores/registry.h"
 #include "proto/core_session.h"
 
 namespace mister::app {
@@ -38,10 +37,6 @@ SessionRows::SessionRows(const Wiring& w) noexcept
           proto::user_io::PollShape::RumblePoll
       ) {}
 
-std::string_view SessionRows::conf_str_name() const noexcept {
-    return bindings_.core_name();
-}
-
 [[nodiscard]] Ex<void> SessionRows::rebind_census(
     std::span<const reactor::LinkDecoderDecl> rows,
     infra::OptRef<cores::Core> owner
@@ -57,18 +52,8 @@ std::string_view SessionRows::conf_str_name() const noexcept {
     TASTY_SEAT_BODY(SessionRows);
     bindings_.bind_generation(gen);
     const std::array<reactor::LinkDecoderDecl, 2> rows{
-        {{"link.identify",
-          reactor::Cause::Tick,
-          &identify_row_,
-          0,
-          reactor::DeadlineClass::A,
-          reactor::OsdBudget::Shared},
-         {"link.conf_str",
-          reactor::Cause::Tick,
-          &conf_str_row_,
-          0,
-          reactor::DeadlineClass::A,
-          reactor::OsdBudget::Shared}}
+        {{"link.identify", reactor::Cause::Tick, &identify_row_, 0, reactor::RoundClaim::Never},
+         {"link.conf_str", reactor::Cause::Tick, &conf_str_row_, 0, reactor::RoundClaim::Never}}
     };
     return rebind_census(rows, owner);
 }
@@ -123,8 +108,7 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
                     reactor::Cause::Tick,
                     &block_row_,
                     0,
-                    reactor::DeadlineClass::A,
-                    reactor::OsdBudget::Claimed
+                    reactor::RoundClaim::OnWork
                 }
             );
         }
@@ -136,21 +120,20 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
 
     if (current.has_value()
         && session_.type() == proto::CoreType::EightBit
-        && !cores::profile_for(conf_str_name()).is_front_end) {
+        && !bindings_.record().identity.front_end) {
 
         n = put_census_row_(
             out,
             n,
             status_route_ == StatusRoute::Lw
                 ? reactor::
-                      LinkDecoderDecl{"link.status_lw", reactor::Cause::Tick, &axi_status_row_, 0, reactor::DeadlineClass::A, reactor::OsdBudget::Shared}
+                      LinkDecoderDecl{"link.status_lw", reactor::Cause::Tick, &axi_status_row_, 0, reactor::RoundClaim::Never}
                 : reactor::LinkDecoderDecl{
                       "link.status_poll",
                       reactor::Cause::Tick,
                       &status_row_,
                       0,
-                      reactor::DeadlineClass::A,
-                      reactor::OsdBudget::Shared
+                      reactor::RoundClaim::Never
                   }
         );
 

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 
+#include "infra/counter.h"
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -99,9 +99,7 @@ public:
 
     [[nodiscard]] StorageCounters counters() const noexcept;
 
-    [[nodiscard]] std::uint32_t abandoned() const noexcept {
-        return abandoned_.load(std::memory_order_relaxed);
-    }
+    [[nodiscard]] std::uint32_t abandoned() const noexcept { return abandoned_.get(); }
 
     [[nodiscard]] Data& data_channel_for_test() noexcept { return data_; }
 
@@ -162,13 +160,8 @@ private:
 
     Io io_{};
 
-    std::atomic<std::uint32_t> submits_{0};
-    std::atomic<std::uint32_t> completions_{0};
-    std::atomic<std::uint32_t> errors_{0};
-    std::atomic<std::uint32_t> refusals_{0};
-    std::atomic<std::uint32_t> depth_max_{0};
-    std::atomic<std::uint32_t> request_misrouted_{0};
-    std::atomic<std::uint32_t> abandoned_{0};
+    xthread::Counter submits_, completions_, errors_, refusals_, depth_max_, request_misrouted_;
+    xthread::Counter abandoned_{};
 };
 
 static_assert(

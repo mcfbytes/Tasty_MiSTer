@@ -281,35 +281,26 @@ Ex<void> AudioService::flush() {
 [[nodiscard]] Ex<std::uint16_t> emit_afilter_probe(hal::ISpiTransport& link) {
     hal::Selected cs(link, hal::ChipSelect::Io);
 
-    auto op = link.transfer(hal::SpiWord{kUioSetAfilter});
+    auto op = link.transfer(proto::word(proto::UioOp::SetAfilter));
     if (!op)
         return std::unexpected(op.error());
     return op->v;
 }
 
-namespace {
-[[nodiscard]] Ex<void> write_bytes(hal::ISpiTransport& link, std::span<const std::uint8_t> b) {
-    for (const std::uint8_t byte : b) {
-        auto r = link.transfer(hal::SpiWord{byte});
-        if (!r)
-            return std::unexpected(r.error());
-    }
-    return {};
-}
-}
+[[nodiscard]] Ex<void> emit_afilter_volume(proto::ILinkFrame& frame, std::uint8_t vol) {
 
-[[nodiscard]] Ex<void> emit_afilter_volume(hal::ISpiTransport& link, std::uint8_t vol) {
-    hal::Selected cs(link, hal::ChipSelect::Io);
-
-    const std::uint8_t b[2] = {kUioSetAfilter, vol};
-    return write_bytes(link, std::span<const std::uint8_t>(b, 2));
+    const std::uint16_t words[1] = {vol};
+    return proto::send_frame(
+        frame,
+        proto::UioOp::SetAfilter,
+        std::span<const std::uint16_t>(words, 1)
+    );
 }
 
-[[nodiscard]] Ex<void> emit_audvol(hal::ISpiTransport& link, std::uint8_t vol) {
-    hal::Selected cs(link, hal::ChipSelect::Io);
+[[nodiscard]] Ex<void> emit_audvol(proto::ILinkFrame& frame, std::uint8_t vol) {
 
-    const std::uint8_t b[2] = {kUioAudVol, vol};
-    return write_bytes(link, std::span<const std::uint8_t>(b, 2));
+    const std::uint16_t words[1] = {vol};
+    return proto::send_frame(frame, proto::UioOp::AudVol, std::span<const std::uint16_t>(words, 1));
 }
 
 }

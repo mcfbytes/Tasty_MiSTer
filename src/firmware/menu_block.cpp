@@ -38,7 +38,8 @@ MenuBlock::MenuBlock(
     : diag_path_{plat.diag_path},
       bt_{device.bt_pump_},
       trace_{device.events_},
-      stores_{plat, device.cheat_blob_},
+      ui_writes_{plat.vfs, device.io_wake_},
+      stores_{plat, device.cheat_blob_, ui_writes_},
       mgl_pump_{
           plat.vfs,
           device.clock_,
@@ -103,6 +104,7 @@ MenuBlock::MenuBlock(
               .osd_file = ui_sink_,
               .conf_str = device.conf_str_cell_,
               .hd = hd_.screen(),
+              .writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
           }
       },
       save_states_{app::SaveStateAttach::Wiring{
@@ -138,6 +140,7 @@ SessionMode::Face::Parts MenuBlock::parts() noexcept {
         .launcher_screen = infra::OptRef{launcher_screen_},
         .ui_round = infra::OptRef<app::IUiRoundPort>{ui_round_},
         .save_states = infra::OptRef<app::SaveStateAttach>{save_states_},
+        .ui_writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
         .ui_pages = infra::OptRef{ui_round_.page_cell()},
         .hd = infra::OptRef<const app::HdOsdStatusCell>{hd_.hd_status_},
     };

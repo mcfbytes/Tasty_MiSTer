@@ -27,7 +27,7 @@ public:
     [[nodiscard]] static std::optional<TransferRow> window_row(
         std::uint32_t addr,
         std::uint64_t bytes,
-        proto::IoIndex index,
+        proto::WideIoIndex index,
         const hal::PhysRegion& aperture
     ) noexcept;
 

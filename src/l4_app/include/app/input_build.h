@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <span>
 #include <string_view>
 
-#include "app/device_table_channel.h"
 #include "app/input_decode.h"
 #include "app/input_wire.h"
 #include "hal/boards_table.h"
 #include "svc/input_enumerator.h"
 #include "svc/vfs.h"
+#include "infra/counter.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -40,21 +39,21 @@ public:
 
     const svc::InputEnumerator& enumerator() const noexcept { return en_; }
 
-    DeviceTableChannel& tables() noexcept { return tables_; }
+    DeviceTableLoans& tables() noexcept { return tables_; }
 
-    void note_watch_failure() noexcept { InputWire::bump(n_enum_fail_, 1); }
+    void note_watch_failure() noexcept { n_enum_fail_.add(1); }
 
     Counts counts() const noexcept;
 
 private:
-    bool hand_over_();
+    void hand_over_(DeviceTableLoans::Loan loan);
 
     InputWire& wire_;
     svc::InputEnumerator en_;
-    DeviceTableChannel tables_{};
-    DeviceTableChannel::Sender tx_{tables_};
+    DeviceTableLoans tables_{xthread::Polled{}, xthread::Polled{}};
+    DeviceTableLoans::Owner tx_{tables_.owner()};
 
-    std::atomic<std::uint32_t> n_enum_fail_{0};
+    xthread::Counter n_enum_fail_{};
 };
 
 static_assert(

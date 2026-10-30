@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "hal/spi_transport.h"
 #include "infra/seat.h"
@@ -20,9 +21,11 @@ public:
     SpiFrame(const SpiFrame&) = delete;
     SpiFrame& operator=(const SpiFrame&) = delete;
 
+    using ILinkFrame::begin;
     [[nodiscard]] Ex<void> begin(FrameSel sel, std::uint16_t op) override;
     [[nodiscard]] Ex<void> word(std::uint16_t w) override;
     [[nodiscard]] Ex<void> end() override;
+    [[nodiscard]] std::optional<std::uint16_t> opcode_reply() const noexcept override;
 
 private:
     [[nodiscard]] Ex<void> put_(std::uint16_t w);
@@ -30,6 +33,7 @@ private:
 
     hal::ISpiTransport& link_;
     bool open_ = false;
+    std::optional<std::uint16_t> reply_{};
 };
 
 }

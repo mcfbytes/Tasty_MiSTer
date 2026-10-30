@@ -326,8 +326,7 @@ void ReplayGate::write_masks_(
         const proto::PlayerIndex port = joy.wire_port(proto::PlayerIndex{p});
         const std::uint32_t words = w_.emitter.link_words_bound(port);
         const std::uint32_t held = w_.emitter.pad_facts_held();
-        const auto out = w_.emitter
-                             .submit(w_.link, port, proto::JoyMask{mask[p]}, proto::JoyMask{});
+        const auto out = w_.emitter.submit(frame_, port, proto::JoyMask{mask[p]}, proto::JoyMask{});
         if (!out || *out)
             round_words_ += words;
         count_write_(out, held);
@@ -342,9 +341,9 @@ void ReplayGate::force_release_(std::uint8_t ports) noexcept {
         const proto::PlayerIndex port = joy.wire_port(proto::PlayerIndex{p});
         const std::uint32_t words = w_.emitter.link_words_bound(port);
         const std::uint32_t held = w_.emitter.pad_facts_held();
-        auto out = w_.emitter.submit(w_.link, port, proto::JoyMask{}, proto::JoyMask{});
+        auto out = w_.emitter.submit(frame_, port, proto::JoyMask{}, proto::JoyMask{});
         if (out && !*out)
-            out = w_.emitter.release(w_.link, port, proto::JoyMask{~0u});
+            out = w_.emitter.release(frame_, port, proto::JoyMask{~0u});
         if (!out || *out)
             round_words_ += words;
         count_write_(out, held);

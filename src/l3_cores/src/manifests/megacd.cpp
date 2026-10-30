@@ -125,13 +125,9 @@ static_assert(
     "period is the fallback the executive retires under a live line"
 );
 static_assert(
-    kMegaCdServices[0].osd_budget == OsdBudget::Shared
-        && kMegaCdServices[1].osd_budget == OsdBudget::Pinned,
-    "the every-round edge shares the OSD budget; the CD-DA tick pins it"
-);
-static_assert(
-    kMegaCdServices[0].klass == DeadlineClass::A && kMegaCdServices[1].klass == DeadlineClass::A,
-    "3.4: both MegaCD services are Class A (T-RT)"
+    kMegaCdServices[0].round_claim == RoundClaim::Never
+        && kMegaCdServices[1].round_claim == RoundClaim::Always,
+    "the every-round edge never claims its round; the CD-DA tick claims each it runs (no OSD row)"
 );
 
 static_assert(

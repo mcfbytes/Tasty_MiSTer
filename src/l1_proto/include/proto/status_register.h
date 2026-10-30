@@ -10,6 +10,7 @@
 #include "infra/opt_ref.h"
 #include "proto/link_frame.h"
 #include "proto/reset_fence.h"
+#include "proto/status_edit.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
 #include "infra/seat.h"
@@ -23,12 +24,12 @@ public:
     static constexpr unsigned kBits = 128;
     static constexpr unsigned kWords = 8;
 
+    void write(const StatusEdit& edit) noexcept;
+
     void set_bit(StatusBit bit, bool value);
     bool get_bit(StatusBit bit) const;
 
     void adopt(std::span<const std::uint16_t, kWords> words) noexcept;
-
-    [[nodiscard]] Ex<void> set_field(const char* spec, std::uint32_t value);
 
     void fence_with(IResetFence* fence) noexcept { fence_ = infra::opt_ref_of(fence); }
 

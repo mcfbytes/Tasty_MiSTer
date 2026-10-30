@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 
+#include "infra/counter.h"
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
 #include "proto/link_event.h"
@@ -32,21 +32,17 @@ public:
 
     bool control_owned() const noexcept { return ps2_control_; }
 
-    [[nodiscard]] std::uint32_t errors() const noexcept {
-        return errors_.load(std::memory_order_relaxed);
-    }
+    [[nodiscard]] std::uint32_t errors() const noexcept { return errors_.get(); }
 
 private:
-    void count_error_() noexcept {
-        errors_.store(errors_.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
-    }
+    void count_error_() noexcept { errors_.add(1); }
 
     hal::ISpiTransport* link_;
     Port out_;
     bool ps2_control_ = false;
     static constexpr std::uint16_t kLedPollTicks = 100;
     std::uint16_t led_poll_div_ = 0;
-    std::atomic<std::uint32_t> errors_{0};
+    xthread::Counter errors_{};
 };
 
 }

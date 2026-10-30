@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/joystick.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
-
-namespace {
-
-constexpr std::uint16_t kAstick = 0x1A;
-constexpr std::uint16_t kAstick2 = 0x3D;
-
-}
 
 Ex<void> JoystickPort::push_digital(
     ILinkPadEncoder& pads,
@@ -59,7 +53,7 @@ Ex<void> JoystickPort::push_analog_l(
 ) {
     return push_analog(
         pads,
-        kAstick,
+        static_cast<std::uint16_t>(UioOp::Astick),
         index,
         static_cast<std::uint8_t>(x),
         static_cast<std::uint8_t>(y)
@@ -75,7 +69,7 @@ Ex<void> JoystickPort::push_analog_r(
 
     return push_analog(
         pads,
-        kAstick2,
+        static_cast<std::uint16_t>(UioOp::Astick2),
         index,
         static_cast<std::uint8_t>(x),
         static_cast<std::uint8_t>(y)
@@ -86,7 +80,13 @@ Ex<void> JoystickPort::push_paddle(ILinkPadEncoder& pads, PlayerIndex player, st
     if (player.v >= kMaxPorts) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
     }
-    return push_analog(pads, kAstick, paddle_index(player), value, 0);
+    return push_analog(
+        pads,
+        static_cast<std::uint16_t>(UioOp::Astick),
+        paddle_index(player),
+        value,
+        0
+    );
 }
 
 Ex<void> JoystickPort::push_spinner(ILinkPadEncoder& pads, PlayerIndex player, std::int8_t delta) {
@@ -94,7 +94,13 @@ Ex<void> JoystickPort::push_spinner(ILinkPadEncoder& pads, PlayerIndex player, s
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
     }
 
-    return push_analog(pads, kAstick, spinner_index(player), static_cast<std::uint8_t>(delta), 0);
+    return push_analog(
+        pads,
+        static_cast<std::uint16_t>(UioOp::Astick),
+        spinner_index(player),
+        static_cast<std::uint8_t>(delta),
+        0
+    );
 }
 
 Ex<bool> JoystickPort::submit(

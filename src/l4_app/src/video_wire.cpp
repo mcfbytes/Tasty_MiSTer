@@ -3,22 +3,21 @@
 #include "hal/selected.h"
 #include "proto/spi_frame.h"
 
-#include <atomic>
 #include <cstring>
 
 #include "svc/audio_service.h"
-#include "svc/input_service.h"
+#include "svc/but_sw_wire.h"
 #include "app/input_wire.h"
 
 namespace mister::app {
 
-Ex<void> VideoWire::publish(std::uint8_t opcode, std::span<const std::uint16_t> words) {
+Ex<void> VideoWire::publish(proto::UioOp opcode, std::span<const std::uint16_t> words) {
     return stage(opcode, words);
 }
 
-Ex<void> VideoWire::stage(std::uint8_t opcode, std::span<const std::uint16_t> words) {
+Ex<void> VideoWire::stage(proto::UioOp opcode, std::span<const std::uint16_t> words) {
     if (words.empty() || words.size() > kWords) {
-        bump(staged_rejected_);
+        staged_rejected_.add();
         return std::unexpected(
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size())}
         );
@@ -36,11 +35,11 @@ Ex<void> VideoWire::stage(std::uint8_t opcode, std::span<const std::uint16_t> wo
     const proto::LinkOp::SetVideoMode mode{.block = static_cast<std::uint8_t>(slot), .gen = gen};
     if (!link_tx_.push(mode)) {
 
-        bump(staged_rejected_);
+        staged_rejected_.add();
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), gen});
     }
     gen_ = gen;
-    staged_.fetch_add(1, std::memory_order_relaxed);
+    staged_.add();
     return {};
 }
 
@@ -55,11 +54,12 @@ Ex<void> VideoWire::emit(
         pre_parked_slot_ = slot;
         pre_parked_gen_ = gen;
         pre_parked_ = true;
-        bump(pre_parked_n_);
+        ++pre_.parked;
+        publish_prelude();
         return {};
     }
     if (slot >= kSlots) {
-        bump(emit_rejected_);
+        emit_rejected_.add();
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot});
     }
 
@@ -68,27 +68,27 @@ Ex<void> VideoWire::emit(
         || table_[slot].try_read(local) != gen
         || local.count == 0u
         || local.count > kWords) {
-        stale_.fetch_add(1, std::memory_order_relaxed);
+        stale_.add();
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), gen});
     }
-    const std::uint8_t opcode = local.opcode;
     const std::uint8_t count = local.count;
+    proto::SpiFrame frame{link};
     const auto r = svc::emit_video_words(
-        link,
-        opcode,
+        frame,
+        local.opcode,
         std::span<const std::uint16_t>(local.words, count)
     );
     if (!r) {
 
-        partial_.fetch_add(1, std::memory_order_relaxed);
+        partial_.add();
         return r;
     }
-    emitted_.fetch_add(1, std::memory_order_relaxed);
+    emitted_.add();
 
     if (!pre_in_block_) {
         if (auto arm = emit_but_sw_(link, tail_but_sw_, fence); !arm) {
 
-            bump(arm_fail_);
+            arm_fail_.add();
         }
     }
     return {};
@@ -142,14 +142,14 @@ Ex<void> VideoWire::emit_but_sw_(
 
 VideoWire::Stats VideoWire::stats() const noexcept {
     Stats s{};
-    s.staged = staged_.load(std::memory_order_relaxed);
-    s.emitted = emitted_.load(std::memory_order_relaxed);
-    s.stale = stale_.load(std::memory_order_relaxed);
-    s.partial = partial_.load(std::memory_order_relaxed);
-    s.staged_rejected = staged_rejected_.load(std::memory_order_relaxed);
-    s.emit_rejected = emit_rejected_.load(std::memory_order_relaxed);
+    s.staged = staged_.get();
+    s.emitted = emitted_.get();
+    s.stale = stale_.get();
+    s.partial = partial_.get();
+    s.staged_rejected = staged_rejected_.get();
+    s.emit_rejected = emit_rejected_.get();
     s.rejected = s.staged_rejected + s.emit_rejected;
-    s.arm_fail = arm_fail_.load(std::memory_order_relaxed);
+    s.arm_fail = arm_fail_.get();
     return s;
 }
 
@@ -162,7 +162,14 @@ void VideoWire::on_rt_round(
     std::int64_t now_ns,
     infra::OptRef<proto::IResetFence> fence
 ) {
-    bump(geo_rounds_);
+    geo_rounds_.add();
+
+    if (auto v = policy_seen_.take_if_changed(policy_))
+        policy_bits_ = *v;
+    if (auto v = ar_cust_seen_.take_if_changed(ar_cust_))
+        ar_cust_bits_ = *v;
+    if (auto v = shadow_seen_.take_if_changed(shadow_mask_))
+        shadow_mask_word_ = *v;
 
     if (step_prelude(link, fence))
         return;
@@ -185,15 +192,10 @@ void VideoWire::on_rt_round(
     geo_next_ns_ += kGeoPeriodMs * kMs;
     if (geo_next_ns_ <= now_ns) {
         geo_next_ns_ = now_ns + kGeoPeriodMs * kMs;
-        bump(geo_late_);
+        geo_late_.add();
     }
 
-    const std::uint32_t fseq = force_seq_.load(std::memory_order_acquire);
-    bool force = false;
-    if (fseq != force_seen_) {
-        force_seen_ = fseq;
-        force = true;
-    }
+    bool force = force_seen_.take(force_);
 
     if (geo_force_next_) {
         geo_force_next_ = false;
@@ -203,14 +205,14 @@ void VideoWire::on_rt_round(
     geo_gate_.policy = policy();
     auto pass = svc::sample_video_geometry(link, force, geo_gate_, this);
     if (!pass) {
-        bump(geo_errors_);
+        geo_errors_.add();
         return;
     }
-    bump(geo_samples_);
+    geo_samples_.add();
     if (pass->changed)
-        bump(geo_changes_);
+        geo_changes_.add();
     if (pass->resent)
-        bump(geo_resends_);
+        geo_resends_.add();
 
     geo_cell_.publish(VideoGeoLatch{.sample = pass->sample, .core_seq = geo_core_seq_});
 }
@@ -227,7 +229,7 @@ void VideoWire::reset_geometry(std::uint32_t core_seq) noexcept {
 }
 
 Ex<svc::VideoSample> VideoWire::sample(bool force) {
-    bump(geo_reads_);
+    geo_reads_.add();
     if (force)
         request_force();
 
@@ -241,14 +243,14 @@ Ex<svc::VideoSample> VideoWire::sample(bool force) {
 
 VideoWire::GeoStats VideoWire::geo_stats() const noexcept {
     GeoStats s;
-    s.rounds = geo_rounds_.load(std::memory_order_relaxed);
-    s.samples = geo_samples_.load(std::memory_order_relaxed);
-    s.changes = geo_changes_.load(std::memory_order_relaxed);
-    s.resends = geo_resends_.load(std::memory_order_relaxed);
-    s.errors = geo_errors_.load(std::memory_order_relaxed);
-    s.late = geo_late_.load(std::memory_order_relaxed);
+    s.rounds = geo_rounds_.get();
+    s.samples = geo_samples_.get();
+    s.changes = geo_changes_.get();
+    s.resends = geo_resends_.get();
+    s.errors = geo_errors_.get();
+    s.late = geo_late_.get();
     s.generation = geo_cell_.generation();
-    s.reads = geo_reads_.load(std::memory_order_relaxed);
+    s.reads = geo_reads_.get();
     s.torn = geo_cell_.refusals();
     return s;
 }
@@ -259,10 +261,10 @@ void VideoWire::arm_prelude() noexcept {
     pre_flt_barrier_ = 0;
 
     pre_parked_ = false;
-    pre_hdmi_int_.store(0, std::memory_order_relaxed);
-    pre_gamma_cap_.store(0, std::memory_order_relaxed);
-    pre_af_flags_.store(0, std::memory_order_relaxed);
-    pre_tail_fail_.store(0, std::memory_order_relaxed);
+    pre_.hdmi_int = 0;
+    pre_.gamma_cap = 0;
+    pre_.af_flags = 0;
+    pre_.tail_fail = 0;
 
     fs_active_ = false;
     fs_tail_ = false;
@@ -271,7 +273,8 @@ void VideoWire::arm_prelude() noexcept {
     flt_seen_gen_ = flt_cell_.generation();
     sent_horiz_ = svc::FilterBank{};
     sent_vert_ = svc::FilterBank{};
-    bump(pre_arms_);
+    ++pre_.arms;
+    publish_prelude();
 }
 
 bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IResetFence> fence) {
@@ -281,35 +284,36 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IRes
     switch (pre_step_) {
         case PreludeStep::Fbuf: {
 
-            auto r = svc::emit_fbuf(link, 0x0000);
+            proto::SpiFrame frame{link};
+            auto r = svc::emit_fbuf(frame, 0x0000);
             if (!r) {
-                bump(pre_errors_);
+                ++pre_.errors;
             } else {
-                pre_fb_ack_.store(*r, std::memory_order_relaxed);
+                pre_.fb_ack = static_cast<std::uint16_t>(*r);
             }
 
             {
                 auto hi = svc::emit_hdmi_int_probe(link);
                 if (!hi)
-                    bump(pre_errors_);
-                pre_hdmi_int_.store(hi ? *hi : 0u, std::memory_order_relaxed);
+                    ++pre_.errors;
+                pre_.hdmi_int = static_cast<std::uint16_t>(hi ? *hi : 0u);
                 auto gm = svc::emit_gamma_probe(link);
                 if (!gm)
-                    bump(pre_errors_);
-                pre_gamma_cap_.store(gm ? *gm : 0u, std::memory_order_relaxed);
+                    ++pre_.errors;
+                pre_.gamma_cap = static_cast<std::uint16_t>(gm ? *gm : 0u);
             }
 
             {
-                const std::uint64_t bits = ar_cust_.load(std::memory_order_acquire);
+                const std::uint64_t bits = ar_cust_bits_;
                 const std::uint16_t arc[4] = {
                     static_cast<std::uint16_t>(bits & 0xFFFFu),
                     static_cast<std::uint16_t>((bits >> 16) & 0xFFFFu),
                     static_cast<std::uint16_t>((bits >> 32) & 0xFFFFu),
                     static_cast<std::uint16_t>((bits >> 48) & 0xFFFFu)
                 };
-                auto a = svc::emit_ar_custom(link, std::span<const std::uint16_t>(arc, 4));
+                auto a = svc::emit_ar_custom(frame, std::span<const std::uint16_t>(arc, 4));
                 if (!a)
-                    bump(pre_errors_);
+                    ++pre_.errors;
             }
             pre_step_ = PreludeStep::FltNum;
             break;
@@ -321,10 +325,10 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IRes
             if (g == 0u || g == flt_seen_gen_) {
                 if (pre_flt_barrier_ < kBarrierRounds) {
                     ++pre_flt_barrier_;
-                    bump(flt_waits_);
+                    flt_waits_.add();
                     return true;
                 }
-                bump(flt_wait_timeouts_);
+                flt_wait_timeouts_.add();
             } else if (!consume_filters()) {
                 return true;
             }
@@ -333,16 +337,16 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IRes
             auto f = svc::emit_filter_mode(link, mode);
             if (!f) {
 
-                bump(pre_errors_);
+                ++pre_.errors;
                 pre_step_ = PreludeStep::Burst;
                 break;
             }
-            pre_flt_flags_.store(*f, std::memory_order_relaxed);
+            pre_.flt_flags = static_cast<std::uint16_t>(*f);
 
             if (*f != 0)
                 geo_gate_.last_flt_flags = *f;
             if (*f == 0) {
-                bump(pre_coeff_skips_);
+                ++pre_.coeff_skips;
                 pre_step_ = PreludeStep::Burst;
                 break;
             }
@@ -351,9 +355,10 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IRes
                 s.flt_flags = *f;
                 if (!arm_filter_stream(*f, select_slot(s), true, false, svc::ScalingWords{})) {
 
-                    if (auto e = svc::emit_filter_coeff_chunk(link, {}); !e)
-                        bump(pre_errors_);
-                    bump(pre_chunks_);
+                    proto::SpiFrame frame{link};
+                    if (auto e = svc::emit_filter_coeff_chunk(frame, {}); !e)
+                        ++pre_.errors;
+                    ++pre_.chunks;
                     pre_step_ = PreludeStep::Burst;
                     break;
                 }
@@ -382,11 +387,13 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IRes
 
             if (!pre_parked_) {
                 ++pre_barrier_;
-                bump(pre_barrier_waits_);
-                if (pre_barrier_ < kBarrierRounds)
+                ++pre_.barrier_waits;
+                if (pre_barrier_ < kBarrierRounds) {
+                    publish_prelude();
                     return true;
+                }
 
-                bump(pre_barrier_timeouts_);
+                ++pre_.barrier_timeouts;
                 pre_step_ = PreludeStep::ShadowMask;
                 break;
             }
@@ -407,12 +414,12 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IRes
 
             auto r = svc::emit_shadow_mask(
                 link,
-                static_cast<std::uint16_t>(shadow_mask_.load(std::memory_order_acquire) & 0xFFFFu)
+                static_cast<std::uint16_t>(shadow_mask_word_.v & 0xFFFFu)
             );
             if (!r) {
-                bump(pre_errors_);
+                ++pre_.errors;
             } else {
-                pre_sm_cap_.store(*r, std::memory_order_relaxed);
+                pre_.sm_cap = static_cast<std::uint16_t>(*r);
             }
 
             pre_step_ = PreludeStep::Tail;
@@ -424,43 +431,44 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IRes
             std::uint16_t tf = 0;
             std::uint16_t af = 0;
             if (auto p = svc::emit_afilter_probe(link); !p) {
-                bump(pre_errors_);
+                ++pre_.errors;
                 tf |= static_cast<std::uint16_t>(kTailFailProbe);
             } else {
                 af = *p;
             }
-            pre_af_flags_.store(af, std::memory_order_relaxed);
+            pre_.af_flags = af;
 
             audio_.accept_probe_reply(static_cast<std::uint8_t>(af), policy().front_end);
             if (auto f = audio_.flush(); !f) {
-                bump(pre_errors_);
+                ++pre_.errors;
                 tf |= static_cast<std::uint16_t>(kTailFailFlush);
             }
             const std::uint8_t push_vol = audio_.core_volume_byte();
             const std::uint8_t audvol = audio_.audvol_wire_byte();
+            proto::SpiFrame frame{link};
 
             if (af != 0) {
-                if (auto r = svc::emit_afilter_volume(link, push_vol); !r) {
-                    bump(pre_errors_);
+                if (auto r = svc::emit_afilter_volume(frame, push_vol); !r) {
+                    ++pre_.errors;
                     tf |= static_cast<std::uint16_t>(kTailFailPush);
                 }
             } else {
-                bump(pre_afilter_skips_);
+                ++pre_.afilter_skips;
             }
 
-            if (auto r = svc::emit_audvol(link, audvol); !r) {
-                bump(pre_errors_);
+            if (auto r = svc::emit_audvol(frame, audvol); !r) {
+                ++pre_.errors;
                 tf |= static_cast<std::uint16_t>(kTailFailVol);
             }
             if (auto r = emit_but_sw_(link, tail_but_sw_, fence); !r) {
-                bump(pre_errors_);
+                ++pre_.errors;
                 tf |= static_cast<std::uint16_t>(kTailFailButSw);
             }
-            pre_tail_fail_.store(tf, std::memory_order_relaxed);
+            pre_.tail_fail = tf;
 
             pre_step_ = PreludeStep::Done;
 
-            bump(pre_completions_);
+            ++pre_.completions;
 
             if (pre_parked_) {
                 const std::uint8_t slot = pre_parked_slot_;
@@ -479,13 +487,14 @@ bool VideoWire::step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IRes
             return false;
     }
 
-    bump(pre_steps_);
+    ++pre_.steps;
+    publish_prelude();
     return true;
 }
 
 void VideoWire::publish_filters(const svc::FilterSet& s) noexcept {
     flt_cell_.publish(s);
-    bump(flt_published_);
+    flt_published_.add();
 }
 
 bool VideoWire::consume_filters() {
@@ -494,7 +503,7 @@ bool VideoWire::consume_filters() {
         return false;
     flt_seen_gen_ = g;
     flt_have_ = true;
-    bump(flt_consumed_);
+    flt_consumed_.add();
     return true;
 }
 
@@ -519,7 +528,7 @@ bool VideoWire::service_filter_publish(hal::ISpiTransport& link) {
 
     auto f = svc::emit_filter_mode(link, flt_local_.modes[0]);
     if (!f) {
-        bump(flt_stream_errors_);
+        flt_stream_errors_.add();
         return true;
     }
     if (*f == 0)
@@ -529,8 +538,9 @@ bool VideoWire::service_filter_publish(hal::ISpiTransport& link) {
     s.flt_flags = *f;
     if (!arm_filter_stream(*f, select_slot(s), false, false, svc::ScalingWords{})) {
 
-        if (auto e = svc::emit_filter_coeff_chunk(link, {}); !e)
-            bump(flt_stream_errors_);
+        proto::SpiFrame frame{link};
+        if (auto e = svc::emit_filter_coeff_chunk(frame, {}); !e)
+            flt_stream_errors_.add();
     }
     return true;
 }
@@ -564,7 +574,7 @@ bool VideoWire::arm_filter_stream(
     fs_tail_ = tail;
     fs_tail_words_ = tail_words;
     fs_active_ = true;
-    bump(flt_streams_);
+    flt_streams_.add();
     return true;
 }
 
@@ -579,6 +589,7 @@ bool VideoWire::plan_filter_send(const svc::VideoSample& s, bool resend) {
 }
 
 void VideoWire::step_filter_stream(hal::ISpiTransport& link) {
+    proto::SpiFrame frame{link};
     std::uint16_t buf[kCoeffChunkWords];
     std::size_t n = 0;
     const std::size_t total = fs_generated_ ? svc::filter_coeff_word_count(fs_ver_)
@@ -604,26 +615,20 @@ void VideoWire::step_filter_stream(hal::ISpiTransport& link) {
         }
     }
 
-    if (auto r = svc::emit_filter_coeff_chunk(link, std::span<const std::uint16_t>(buf, n)); !r) {
+    if (auto r = svc::emit_filter_coeff_chunk(frame, std::span<const std::uint16_t>(buf, n)); !r) {
 
-        bump(flt_stream_errors_);
+        flt_stream_errors_.add();
         if (fs_prelude_)
-            bump(pre_errors_);
+            ++pre_.errors;
         fs_active_ = false;
         fs_tail_ = false;
         return;
     }
     if (fs_prelude_) {
-        bump(pre_chunks_);
-        pre_coeff_words_.store(
-            pre_coeff_words_.load(std::memory_order_relaxed) + static_cast<std::uint32_t>(n),
-            std::memory_order_relaxed
-        );
+        ++pre_.chunks;
+        pre_.coeff_words += static_cast<std::uint32_t>(n);
     } else {
-        flt_stream_words_.store(
-            flt_stream_words_.load(std::memory_order_relaxed) + static_cast<std::uint32_t>(n),
-            std::memory_order_relaxed
-        );
+        flt_stream_words_.add(static_cast<std::uint32_t>(n));
     }
 
     fs_cursor_ += n;
@@ -655,23 +660,23 @@ void VideoWire::step_filter_stream(hal::ISpiTransport& link) {
 
         {
             hal::Selected cs(link, hal::ChipSelect::Io);
-            if (auto r = link.transfer(hal::SpiWord{svc::kUioSetHeight}); !r) {
-                bump(flt_stream_errors_);
+            if (auto r = link.transfer(proto::word(proto::UioOp::SetHeight)); !r) {
+                flt_stream_errors_.add();
                 return;
             }
             if (auto r = link.transfer(hal::SpiWord{fs_tail_words_.height}); !r) {
-                bump(flt_stream_errors_);
+                flt_stream_errors_.add();
                 return;
             }
         }
         {
             hal::Selected cs(link, hal::ChipSelect::Io);
-            if (auto r = link.transfer(hal::SpiWord{svc::kUioSetWidth}); !r) {
-                bump(flt_stream_errors_);
+            if (auto r = link.transfer(proto::word(proto::UioOp::SetWidth)); !r) {
+                flt_stream_errors_.add();
                 return;
             }
             if (auto r = link.transfer(hal::SpiWord{fs_tail_words_.width}); !r) {
-                bump(flt_stream_errors_);
+                flt_stream_errors_.add();
                 return;
             }
         }
@@ -680,38 +685,23 @@ void VideoWire::step_filter_stream(hal::ISpiTransport& link) {
 
 VideoWire::FilterStats VideoWire::filter_stats() const noexcept {
     FilterStats s;
-    s.published = flt_published_.load(std::memory_order_relaxed);
-    s.consumed = flt_consumed_.load(std::memory_order_relaxed);
-    s.waits = flt_waits_.load(std::memory_order_relaxed);
-    s.wait_timeouts = flt_wait_timeouts_.load(std::memory_order_relaxed);
-    s.streams = flt_streams_.load(std::memory_order_relaxed);
-    s.stream_words = flt_stream_words_.load(std::memory_order_relaxed);
-    s.stream_errors = flt_stream_errors_.load(std::memory_order_relaxed);
+    s.published = flt_published_.get();
+    s.consumed = flt_consumed_.get();
+    s.waits = flt_waits_.get();
+    s.wait_timeouts = flt_wait_timeouts_.get();
+    s.streams = flt_streams_.get();
+    s.stream_words = flt_stream_words_.get();
+    s.stream_errors = flt_stream_errors_.get();
     return s;
 }
 
-VideoWire::PreludeStats VideoWire::prelude_stats() const noexcept {
-    PreludeStats s;
-    s.arms = pre_arms_.load(std::memory_order_relaxed);
-    s.completions = pre_completions_.load(std::memory_order_relaxed);
-    s.steps = pre_steps_.load(std::memory_order_relaxed);
-    s.chunks = pre_chunks_.load(std::memory_order_relaxed);
-    s.coeff_words = pre_coeff_words_.load(std::memory_order_relaxed);
-    s.parked = pre_parked_n_.load(std::memory_order_relaxed);
-    s.barrier_waits = pre_barrier_waits_.load(std::memory_order_relaxed);
-    s.barrier_timeouts = pre_barrier_timeouts_.load(std::memory_order_relaxed);
-    s.errors = pre_errors_.load(std::memory_order_relaxed);
-    s.coeff_skips = pre_coeff_skips_.load(std::memory_order_relaxed);
-    s.afilter_skips = pre_afilter_skips_.load(std::memory_order_relaxed);
-    s.flt_flags = static_cast<std::uint16_t>(pre_flt_flags_.load(std::memory_order_relaxed));
-    s.fb_ack = static_cast<std::uint16_t>(pre_fb_ack_.load(std::memory_order_relaxed));
-    s.sm_cap = static_cast<std::uint16_t>(pre_sm_cap_.load(std::memory_order_relaxed));
-    s.hdmi_int = static_cast<std::uint16_t>(pre_hdmi_int_.load(std::memory_order_relaxed));
-    s.gamma_cap = static_cast<std::uint16_t>(pre_gamma_cap_.load(std::memory_order_relaxed));
-    s.af_flags = static_cast<std::uint16_t>(pre_af_flags_.load(std::memory_order_relaxed));
-    s.tail_fail = static_cast<std::uint16_t>(pre_tail_fail_.load(std::memory_order_relaxed));
-    s.step = static_cast<std::uint8_t>(pre_step_);
-    return s;
+void VideoWire::publish_prelude() noexcept {
+    pre_.step = static_cast<std::uint8_t>(pre_step_);
+    prelude_cell_.publish(pre_);
+}
+
+PreludeStats VideoWire::prelude_stats() const noexcept {
+    return prelude_cell_.sample().value;
 }
 
 }

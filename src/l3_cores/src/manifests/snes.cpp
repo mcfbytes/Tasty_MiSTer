@@ -43,7 +43,6 @@ static_assert(
     kSgb.services.size() == 1
         && kSgb.services[0].impl == &kMailboxTick<kSgb>
         && kSgb.services[0].period_ms == 0
-        && kSgb.services[0].klass == kSnes.services[0].klass
         && kSgb.services[0].cause == kSnes.services[0].cause
         && kSgbMailboxFrame.poll_opcode == kSnesMailboxFrame.poll_opcode
         && kSgbMailboxFrame.words == kSnesMailboxFrame.words,
@@ -58,9 +57,7 @@ static_assert(
     "user_io.cpp:244: is_snes() is strcasecmp(orig_name, \"SNES\")"
 );
 static_assert(
-    kSnes.services.size() == 1
-        && kSnes.services[0].period_ms == 0
-        && kSnes.services[0].klass == DeadlineClass::A,
+    kSnes.services.size() == 1 && kSnes.services[0].period_ms == 0,
     "user_io.cpp:3223: snes_poll runs on every user_io_poll pass, ungated"
 );
 static_assert(

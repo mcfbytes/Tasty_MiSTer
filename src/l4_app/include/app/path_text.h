@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstddef>
-
-#include "infra/fixed_str.h"
+#include "infra/path_text.h"
 
 namespace mister::app {
 
-inline constexpr std::size_t kPathMax = 1024;
-using PathText = FixedStr<kPathMax, StrFit::Reject>;
+using infra::kPathMax;
+using infra::PathText;
 
 }

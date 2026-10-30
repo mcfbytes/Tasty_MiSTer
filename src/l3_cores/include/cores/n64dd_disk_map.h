@@ -30,7 +30,7 @@ public:
 
     static constexpr std::size_t kMaxSteps = 2u * 2u * kTracksPerHead;
 
-    [[nodiscard]] Ex<void> build(const SystemArea& area) noexcept;
+    [[nodiscard]] static Ex<void> build_into(DiskMap& out, const SystemArea& area) noexcept;
 
     [[nodiscard]] std::span<const Step> steps() const noexcept { return {steps_.data(), count_}; }
 

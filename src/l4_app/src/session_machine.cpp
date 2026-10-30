@@ -6,23 +6,21 @@
 namespace mister::app {
 
 SessionMachine::SessionMachine(EventQueue<SeatTag::RT>& events, xthread::LogLane& lane) noexcept
-    : events_(events),
-      log_lane_(lane),
+    : events_(events.producer()),
+      log_lane_(lane.producer()),
       last_transition_ns_(log_now_ns()) {}
 
 void SessionMachine::transition(SessionState to) {
     const SessionState from = state_;
     state_ = to;
     if (to == SessionState::Failed) {
-        (void)events_.push(
-            infra::make<Event>(Event::SessionEnded{}, Event::Head{EmitSite{ERR_SITE()}, {}, tag_})
-        );
+        events_.push(Event::SessionEnded{}, Event::Head{EmitSite{ERR_SITE()}, {}, tag_});
     }
 
     const std::uint64_t now = log_now_ns();
     const std::uint64_t dwell_us = (now - last_transition_ns_) / 1000u;
     last_transition_ns_ = now;
-    (void)log_lane_.push(
+    log_lane_.push(
         LogRec::SessionTransition{
             .dwell_us = dwell_us > 0xFFFFFFFFull ? 0xFFFFFFFFu
                                                  : static_cast<std::uint32_t>(dwell_us),
@@ -34,35 +32,35 @@ void SessionMachine::transition(SessionState to) {
 }
 
 void SessionMachine::advise(const Event::SessionAdvisory& a, EmitSite site) {
-    (void)events_.push(infra::make<Event>(a, Event::Head{site, {}, kUncaused}));
+    events_.push(a, Event::Head{site, {}, kUncaused});
 }
 
 void SessionMachine::advise(const Event::InfoRequest& a, EmitSite site) {
-    (void)events_.push(infra::make<Event>(a, Event::Head{site, {}, kUncaused}));
+    events_.push(a, Event::Head{site, {}, kUncaused});
 }
 
 void SessionMachine::advise(const Event::SdActivity& a, EmitSite site) {
-    (void)events_.push(infra::make<Event>(a, Event::Head{site, {}, kUncaused}));
+    events_.push(a, Event::Head{site, {}, kUncaused});
 }
 
 void SessionMachine::advise(const Event::ProgressUpdate& a, EmitSite site) {
-    (void)events_.push(infra::make<Event>(a, Event::Head{site, {}, kUncaused}));
+    events_.push(a, Event::Head{site, {}, kUncaused});
 }
 
 void SessionMachine::close(const Event::SessionFailed& a, EmitSite site) {
-    (void)events_.push(infra::make<Event>(a, Event::Head{site, {}, tag_}));
+    events_.push(a, Event::Head{site, {}, tag_});
 }
 
 void SessionMachine::close(const Event::CoreLoaded& a, EmitSite site) {
-    (void)events_.push(infra::make<Event>(a, Event::Head{site, {}, tag_}));
+    events_.push(a, Event::Head{site, {}, tag_});
 }
 
 void SessionMachine::close(const Event::ConfStrOnlySession& a, EmitSite site) {
-    (void)events_.push(infra::make<Event>(a, Event::Head{site, {}, tag_}));
+    events_.push(a, Event::Head{site, {}, tag_});
 }
 
 void SessionMachine::echo(const Event::InfoRequest& a, EmitSite site, CorrelationTag tag) {
-    (void)events_.push(infra::make<Event>(a, Event::Head{site, {}, tag}));
+    events_.push(a, Event::Head{site, {}, tag});
 }
 
 }

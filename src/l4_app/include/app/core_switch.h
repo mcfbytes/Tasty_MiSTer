@@ -22,9 +22,8 @@
 #include "app/owner_tally.h"
 #include "app/park_receipt.h"
 #include "app/pending_load.h"
-#include "app/quiesce.h"
+#include "app/switch_park.h"
 #include "app/readiness_watch.h"
-#include "app/start_watch.h"
 #include "app/types.h"
 #include "app/ui_request.h"
 #include "hal/thread_map.h"
@@ -56,6 +55,8 @@ public:
 
         virtual void programmed(bool ok) = 0;
 
+        virtual void pause_wedged() noexcept = 0;
+
     protected:
         Host() = default;
         Host(const Host&) = default;
@@ -74,10 +75,8 @@ public:
         std::uint32_t switch_belt_refusals = 0;
 
         std::uint32_t switches_asked = 0;
-        std::uint32_t ask_refusals = 0;
 
         std::uint32_t load_core_refusals = 0;
-        std::uint32_t stale_acks = 0;
 
         std::uint32_t programs_run = 0;
         std::uint32_t programs_failed = 0;
@@ -95,7 +94,7 @@ public:
     static_assert(proto::kLinkTxCapacity >= kTeardownOps);
 
     struct Wiring {
-        QuiesceChannel& park;
+        SwitchPark& park;
         LinkTxChannel<SeatTag::Main>& inbox;
         const os::IClock& clock;
         BitstreamProgrammer& programmer;
@@ -103,7 +102,6 @@ public:
         CoreBuilder& builder;
         ReadinessWatch& readiness;
         const BoardReboot& reboot;
-        StartWatch& start_watch;
         EventQueue<SeatTag::Main>& events;
         OwnerTally& owner_tally;
     };
@@ -117,16 +115,16 @@ public:
           builder_(w.builder),
           readiness_(w.readiness),
           reboot_(w.reboot),
-          start_watch_(w.start_watch),
-          owner_events_(w.events),
+          owner_events_(w.events.producer()),
           owner_tally_(w.owner_tally) {}
 
     CoreSwitch(const CoreSwitch&) = delete;
     CoreSwitch& operator=(const CoreSwitch&) = delete;
 
-    void grant_pause(SeatTag s, xthread::PauseLatch& latch) noexcept {
+    void grant_pause(const hal::ThreadRole& row, xthread::PauseLatch& latch) noexcept {
         TASTY_SEAT_BODY(CoreSwitch);
-        pauses_[hal::row_index(s)] = &latch;
+        pauses_[hal::row_index(row.seat)] = &latch;
+        ddr_[hal::row_index(row.seat)] = row.ddr;
     }
 
     void on_load_core(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host);
@@ -144,6 +142,8 @@ public:
     bool push_last_order() noexcept;
 
     unsigned take_park_acks();
+
+    [[nodiscard]] bool receipt_owed() const noexcept;
 
     [[nodiscard]] std::optional<std::uint32_t> try_program(Host& host);
 
@@ -186,6 +186,11 @@ public:
 
     [[nodiscard]] const os::Deadline& pause_due() const noexcept { return pause_due_; }
 
+    [[nodiscard]] bool drop_receipt() noexcept {
+        TASTY_SEAT_BODY(CoreSwitch);
+        return std::exchange(receipt_, std::nullopt).has_value();
+    }
+
     [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
 
     [[nodiscard]] bool lease_holding() const noexcept { return lease_hold_.has_value(); }
@@ -226,6 +231,7 @@ private:
     [[nodiscard]] bool hold_on_lease_() noexcept;
     void resume_seats_() noexcept;
     [[nodiscard]] bool seats_paused_(std::uint32_t gen) const noexcept;
+    [[nodiscard]] bool mapping_owner_late_(std::uint32_t gen) const noexcept;
 
     Programmed program_(const ParkReceipt& receipt, AllLeasesHome home, Host& host);
     void publish_refusal_(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept;
@@ -237,7 +243,7 @@ private:
     template <class A>
     [[nodiscard]] bool order_refusable_(const A& alt) noexcept;
 
-    QuiesceChannel& park_;
+    SwitchPark& park_;
     LinkTxChannel<SeatTag::Main>& inbox_;
     const os::IClock& clock_;
     BitstreamProgrammer& programmer_;
@@ -245,8 +251,7 @@ private:
     CoreBuilder& builder_;
     ReadinessWatch& readiness_;
     const BoardReboot& reboot_;
-    StartWatch& start_watch_;
-    EventQueue<SeatTag::Main>& owner_events_;
+    EventQueue<SeatTag::Main>::Producer owner_events_;
     OwnerTally& owner_tally_;
     Tally tally_{};
     StepArg pending_step_arg_{};
@@ -259,7 +264,10 @@ private:
 
     std::array<xthread::PauseLatch*, hal::kThreadSeats> pauses_{};
 
+    std::array<hal::DdrMapping, hal::kThreadSeats> ddr_{};
+
     std::optional<ParkReceipt> receipt_{};
+    std::uint32_t minted_ = 0;
 
     std::optional<proto::LinkOp> last_order_{};
     os::Deadline pause_due_ = os::Deadline::immediate();
@@ -316,7 +324,7 @@ inline void CoreSwitch::retry_held_load(Host& host) {
     TASTY_SEAT_BODY(CoreSwitch);
     if (!held_load_ || switch_standing_ || readiness_.recovering())
         return;
-    if (proto::kLinkTxCapacity - inbox_.ring().size() < kTeardownOps || !park_.ask_room())
+    if (proto::kLinkTxCapacity - inbox_.ring().size() < kTeardownOps)
         return;
     const HeldLoad h = *held_load_;
     held_load_.reset();
@@ -358,10 +366,7 @@ inline CoreSwitch::Asked CoreSwitch::ask(
 
     const std::uint32_t next = (gen_ >= kMaxGen) ? 1u : gen_ + 1u;
     ++tally_.switches_asked;
-    if (!park_.post_ask(Quiesce{next})) {
-        ++tally_.ask_refusals;
-        return Asked::NoRoom;
-    }
+    park_.ask(next);
     gen_ = next;
 
     host.switch_minted(req);
@@ -374,6 +379,7 @@ inline CoreSwitch::Asked CoreSwitch::ask(
 
     pause_seats_(gen_, false);
     receipt_.reset();
+    minted_ = 0;
     lease_hold_.reset();
     host.drop_core_acts();
     pending_ = req;
@@ -405,6 +411,7 @@ inline bool CoreSwitch::push_last_order() noexcept {
     last_order_.reset();
     switch_standing_ = false;
     resume_seats_();
+    park_.end();
     return true;
 }
 
@@ -430,27 +437,40 @@ inline bool CoreSwitch::seats_paused_(std::uint32_t gen) const noexcept {
     return true;
 }
 
+inline bool CoreSwitch::mapping_owner_late_(std::uint32_t gen) const noexcept {
+    for (std::size_t i = 0; i < pauses_.size(); ++i) {
+        if (pauses_[i] != nullptr
+            && ddr_[i] == hal::DdrMapping::Owner
+            && !pauses_[i]->paused_at(gen))
+            return true;
+    }
+    return false;
+}
+
 inline bool CoreSwitch::program_owed() const noexcept {
     TASTY_SEAT_BODY(CoreSwitch);
     return receipt_.has_value() && !readiness_.recovering() && seats_paused_(gen_);
 }
 
+inline bool CoreSwitch::receipt_owed() const noexcept {
+    TASTY_SEAT_BODY(CoreSwitch);
+    return switch_standing_ && minted_ != gen_ && park_.answered(gen_).has_value();
+}
+
 inline unsigned CoreSwitch::take_park_acks() {
     TASTY_SEAT_BODY(CoreSwitch);
-    unsigned taken = 0;
-    while (const auto receipt = park_.take_ack()) {
-        ++taken;
-        if (receipt->gen() != gen_) {
-            ++tally_.stale_acks;
-            continue;
-        }
+    if (!switch_standing_ || minted_ == gen_)
+        return 0;
+    auto receipt = park_.answered(gen_);
+    if (!receipt)
+        return 0;
+    minted_ = gen_;
 
-        receipt_.emplace(*receipt);
+    receipt_.emplace(std::move(*receipt));
 
-        pause_seats_(gen_, true);
-        pause_due_ = os::Deadline::in(clock_, std::chrono::nanoseconds{kPauseDeadlineNs});
-    }
-    return taken;
+    pause_seats_(gen_, true);
+    pause_due_ = os::Deadline::in(clock_, std::chrono::nanoseconds{kPauseDeadlineNs});
+    return 1;
 }
 
 inline std::optional<std::uint32_t> CoreSwitch::try_program(Host& host) {
@@ -461,6 +481,13 @@ inline std::optional<std::uint32_t> CoreSwitch::try_program(Host& host) {
     if (!all && !pause_due_.expired(clock_))
         return std::nullopt;
 
+    if (!all && mapping_owner_late_(gen_)) {
+        pause_expiries_cell_.publish(++tally_.pause_expiries);
+        receipt_.reset();
+        host.pause_wedged();
+        return std::nullopt;
+    }
+
     if (hold_on_lease_())
         return std::nullopt;
 
@@ -470,7 +497,7 @@ inline std::optional<std::uint32_t> CoreSwitch::try_program(Host& host) {
 
     if (!all)
         pause_expiries_cell_.publish(++tally_.pause_expiries);
-    const ParkReceipt r = *receipt_;
+    const ParkReceipt r = std::move(*receipt_);
     receipt_.reset();
     (void)::unlink("/tmp/GAMEID");
 
@@ -482,10 +509,7 @@ inline std::optional<std::uint32_t> CoreSwitch::try_program(Host& host) {
         switch_programmed_ = true;
         readiness_.clear_owed();
     }
-
-    start_watch_.arm_bound();
     if (p == Programmed::Failed) {
-        start_watch_.no_identity_wait();
         end(proto::LinkOp::ApplyCore{
             .loaded = pending_step_arg_.loaded,
             .gen = as_generation_(gen_)
@@ -621,30 +645,24 @@ inline void CoreSwitch::publish_refusal_(
     Errc code,
     CorrelationTag tag
 ) noexcept {
-    (void)owner_events_.push(
-        infra::make<Event>(
-            Event::RequestRefused{.which = which, .why = code},
-            Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-        )
+    owner_events_.push(
+        Event::RequestRefused{.which = which, .why = code},
+        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
     );
 }
 
 inline void CoreSwitch::advise_switch_held_() noexcept {
-    (void)owner_events_.push(
-        infra::make<Event>(
-            Event::SessionAdvisory{.why = Errc::busy},
-            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
-        )
+    owner_events_.push(
+        Event::SessionAdvisory{.why = Errc::busy},
+        Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
     );
 }
 
 inline void CoreSwitch::advise_switch_failed_(Errc code) noexcept {
 
-    (void)owner_events_.push(
-        infra::make<Event>(
-            Event::SessionAdvisory{.why = code},
-            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
-        )
+    owner_events_.push(
+        Event::SessionAdvisory{.why = code},
+        Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
     );
 }
 

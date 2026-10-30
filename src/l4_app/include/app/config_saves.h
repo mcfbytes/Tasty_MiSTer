@@ -78,7 +78,7 @@ private:
     LinkTxChannel<SeatTag::Main>& inbox_;
     const LinkRxChannel<SeatTag::Main>& rx_;
     OwnerTally& tally_;
-    EventQueue<SeatTag::Main>& owner_events_;
+    EventQueue<SeatTag::Main>::Producer owner_events_;
     const svc::Vfs& vfs_;
     const proto::StatusCell& status_cell_;
     const NegotiatedCore& negotiated_;

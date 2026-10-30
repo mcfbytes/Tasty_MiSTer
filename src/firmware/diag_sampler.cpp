@@ -2,6 +2,7 @@
 #include "diag_sampler.h"
 
 #include "assembly.h"
+#include "boot_parts.h"
 #include "rt_evidence.h"
 #include "infra/seat.h"
 #include "rtstats_format.h"
@@ -58,7 +59,7 @@ DiagSampler::DiagSampler(
     app::EventQueue<SeatTag::RT>& events,
     const xthread::Telemetry<RtEvidence, SeatTag::Main>& ev,
     const xthread::WakeFlag& quiescing,
-    const std::atomic<bool>& transitioning,
+    const xthread::Telemetry<bool, SeatTag::RT>& transitioning,
     xthread::DiagLog& diag,
     xthread::LogLane& rt_lane,
     const Sources& sources,
@@ -90,6 +91,15 @@ DiagSampler::DiagSampler(
       ui_pages_(sources.ui_pages),
       diag_(diag),
       lane_rt_(rt_lane),
+      log_rx_(wired_end(rt_lane.consumer(), "T-DIAG: RT log lane consumer minted twice")),
+      lane_main_(sources.main_log),
+      main_rx_(
+          sources.main_log ? wired_end(
+                                 sources.main_log->consumer(),
+                                 "T-DIAG: MAIN log lane consumer minted twice"
+                             )
+                           : xthread::MainLogLane::Consumer{}
+      ),
       records_(make_records(sources)) {}
 
 std::uint64_t DiagSampler::rss_ceiling_now() const noexcept {
@@ -101,11 +111,11 @@ std::uint64_t DiagSampler::rss_ceiling_now() const noexcept {
 }
 
 void DiagSampler::observe_rss(std::uint64_t rss, std::uint64_t ceiling) noexcept {
-    diag_stats_.rss_bytes.store(rss, std::memory_order_relaxed);
+    diag_stats_.rss_bytes.publish(rss);
     rss_over_streak_ = rss > ceiling ? rss_over_streak_ + 1 : 0;
 
     if (rss_over_streak_ == kRssOverSamples) {
-        diag_stats_.rss_over_ceiling.fetch_add(1, std::memory_order_relaxed);
+        diag_stats_.rss_over_ceiling.add();
         std::fprintf(
             stderr,
             "memory use %llu bytes is over the expected ceiling %llu\n",
@@ -118,15 +128,17 @@ void DiagSampler::observe_rss(std::uint64_t rss, std::uint64_t ceiling) noexcept
 void DiagSampler::sample(bool stopping) noexcept {
 
     const std::uint64_t hb = stats_.heartbeat.load(std::memory_order_relaxed);
-    const std::uint64_t prev = diag_stats_.heartbeat_last.exchange(hb, std::memory_order_relaxed);
+    const std::uint64_t prev = heartbeat_prev_;
+    diag_stats_.heartbeat_last.publish(hb);
+    heartbeat_prev_ = hb;
 
     if (!stopping
         && !quiescing_.ever_requested()
-        && !transitioning_.load(std::memory_order_acquire)
+        && !transitioning_.sample().value
         && hb != 0
         && hb == prev) {
         if (++unchanged_streak_ >= 2) {
-            diag_stats_.heartbeat_stalls.fetch_add(1, std::memory_order_relaxed);
+            diag_stats_.heartbeat_stalls.add();
             std::fprintf(
                 stderr,
                 "%s: executive heartbeat stalled at %llu\n",
@@ -146,14 +158,14 @@ void DiagSampler::sample(bool stopping) noexcept {
         stats_.ring_drops[2].set(prefetch_->counters().drops);
     }
 
-    stats_.ring_drops[3].set(lane_rt_.total_losses());
+    stats_.ring_drops[3].set(lane_rt_.losses().total());
 
-    diag_stats_.drains.fetch_add(1, std::memory_order_relaxed);
+    diag_stats_.drains.add();
 
     if (diag_.is_open()) {
 
         for (std::size_t k = 0; k < app::EventQueue<SeatTag::RT>::kKinds; ++k) {
-            const std::uint32_t l = events_.losses(static_cast<app::Event::Kind>(k));
+            const std::uint32_t l = events_.losses().of(static_cast<app::Event::Kind>(k));
             if (l != last_ev_loss_[k]) {
                 diag_.appendf(
                     "{\"t\":\"drops\",\"src\":\"event\","
@@ -168,8 +180,8 @@ void DiagSampler::sample(bool stopping) noexcept {
         drain_log_lane();
 
         bool alarm = false;
-        const std::uint32_t hs = diag_stats_.heartbeat_stalls.load(std::memory_order_relaxed);
-        const std::uint32_t ro = diag_stats_.rss_over_ceiling.load(std::memory_order_relaxed);
+        const std::uint32_t hs = diag_stats_.heartbeat_stalls.get();
+        const std::uint32_t ro = diag_stats_.rss_over_ceiling.get();
         if (hs != last_hb_stalls_) {
             last_hb_stalls_ = hs;
             alarm = true;
@@ -194,10 +206,10 @@ void DiagSampler::sample(bool stopping) noexcept {
             const std::uint32_t n = stats_.deadline_miss[i].get();
             dlm = (dlm > 0xFFFFFFFFu - n) ? 0xFFFFFFFFu : dlm + n;
         }
-        if (dlm != last_dlm_) {
-            last_dlm_ = dlm;
+
+        if (dlm > last_dlm_)
             alarm = true;
-        }
+        last_dlm_ = dlm;
         if (alarm)
             render_records("alarm");
 
@@ -346,6 +358,21 @@ void DiagSampler::on(const LogRec::DoorbellPolling& a, const LogRec::Head& h) no
     );
 }
 
+void DiagSampler::on(const LogRec::PhaseTolerated& a, const LogRec::Head& h) noexcept {
+    line_(a.kKind, h, a.stimulus, (static_cast<std::uint32_t>(a.phase) << 8) | a.under);
+}
+
+void DiagSampler::on(const LogRec::ConfStrArrived& a, const LogRec::Head& h) noexcept {
+    line_(
+        a.kKind,
+        h,
+        a.bind_gen,
+        (static_cast<std::uint32_t>(a.phase) << 16)
+            | (static_cast<std::uint32_t>(a.under) << 8)
+            | a.awaited
+    );
+}
+
 static_assert(LogRecSink<DiagSampler>);
 
 void DiagSampler::misrouted(const LogRec&) noexcept {
@@ -355,17 +382,39 @@ void DiagSampler::misrouted(const LogRec&) noexcept {
 
 void DiagSampler::drain_log_lane() noexcept {
     for (std::size_t n = 0; n < xthread::kLogLaneCap; ++n) {
-        const std::optional<LogRec> r = lane_rt_.pop();
+        const std::optional<LogRec> r = log_rx_.pop();
         if (!r)
             break;
         render_log_rec(*r);
     }
+    voice_log_losses_(lane_rt_.losses().per_kind, last_log_loss_, "log");
+    if (lane_main_) {
+        for (std::size_t n = 0; n < xthread::kMainLogLaneCap; ++n) {
+            const std::optional<LogRec> r = main_rx_.pop();
+            if (!r)
+                break;
+            render_log_rec(*r);
+        }
+        voice_log_losses_(lane_main_->losses().per_kind, last_main_loss_, "log_main");
+    }
+
+    if (log_misrouted_ != last_log_misrouted_) {
+        last_log_misrouted_ = log_misrouted_;
+        diag_.appendf("{\"t\":\"drops\",\"src\":\"log_misrouted\",\"n\":%u}", log_misrouted_);
+    }
+}
+
+void DiagSampler::voice_log_losses_(
+    const LossCounts& losses,
+    LossCounts& last,
+    const char* src
+) noexcept {
     for (std::size_t k = 0; k < infra::ordinal(LogRec::Kind::kCount); ++k) {
         const auto lost = static_cast<LogRec::Kind>(k);
-        const std::uint32_t l = lane_rt_.losses(lost);
-        if (l == last_log_loss_[k])
+        const std::uint32_t l = losses[k];
+        if (l == last[k])
             continue;
-        last_log_loss_[k] = l;
+        last[k] = l;
 
         render_log_rec(
             infra::make<LogRec>(
@@ -374,15 +423,11 @@ void DiagSampler::drain_log_lane() noexcept {
             )
         );
         diag_.appendf(
-            "{\"t\":\"drops\",\"src\":\"log\",\"kind\":%u,\"n\":%u}",
+            "{\"t\":\"drops\",\"src\":\"%s\",\"kind\":%u,\"n\":%u}",
+            src,
             static_cast<unsigned>(k),
             l
         );
-    }
-
-    if (log_misrouted_ != last_log_misrouted_) {
-        last_log_misrouted_ = log_misrouted_;
-        diag_.appendf("{\"t\":\"drops\",\"src\":\"log_misrouted\",\"n\":%u}", log_misrouted_);
     }
 }
 
@@ -471,8 +516,9 @@ void DiagSampler::emit_(const R& r, const RecordCtx& ctx) noexcept {
 void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc) noexcept {
 
     const app::DoorbellStats db = doorbell_cell_.sample().value;
-    const std::uint32_t ev_lost_edge = events_.losses(app::Delivery::Edge);
-    const std::uint32_t ev_lost = events_.losses(app::Delivery::Hint) + ev_lost_edge;
+    const std::uint32_t ev_lost_edge = app::delivery_losses(events_.losses(), app::Delivery::Edge);
+    const std::uint32_t ev_lost = app::delivery_losses(events_.losses(), app::Delivery::Hint)
+        + ev_lost_edge;
     const app::CmdFifoStats fs = (fifo_stats_) ? fifo_stats_->sample().value : app::CmdFifoStats{};
     const CdInstruments cd = cd_instruments();
     const app::IFrameSource::Counts shot = (frame_src_) ? frame_src_->counts()
@@ -482,7 +528,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
     const app::VideoGeometryRecord gr = video_geo_.sample().value;
     const app::VideoWire::Stats ws = video_wire_.stats();
     const app::VideoWire::GeoStats gs = video_wire_.geo_stats();
-    const app::VideoWire::PreludeStats ps = video_wire_.prelude_stats();
+    const app::PreludeStats ps = video_wire_.prelude_stats();
 
     const unsigned rf_bits = (vs.solve_failures != 0u ? 1u : 0u)
         | (vs.zero_divider != 0u ? 2u : 0u)
@@ -540,10 +586,10 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         diag_seq_,
         reason,
         static_cast<unsigned long long>(stats_.heartbeat.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(diag_stats_.drains.load(std::memory_order_relaxed)),
-        static_cast<unsigned long long>(diag_stats_.rss_bytes.load(std::memory_order_relaxed)),
-        diag_stats_.heartbeat_stalls.load(std::memory_order_relaxed),
-        diag_stats_.rss_over_ceiling.load(std::memory_order_relaxed),
+        static_cast<unsigned long long>(diag_stats_.drains.get()),
+        static_cast<unsigned long long>(diag_stats_.rss_bytes.sample().value),
+        diag_stats_.heartbeat_stalls.get(),
+        diag_stats_.rss_over_ceiling.get(),
         stats_.ring_drops[0].get(),
         stats_.ring_drops[1].get(),
         stats_.ring_drops[2].get(),
@@ -626,7 +672,6 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         ips.key_sweeps,
         ips.keys_released,
         ips.mouse_packets,
-        ips.joy_transactions,
         ips.kicks,
         ips.rebuilds_done,
         ips.rebuilds_refused,

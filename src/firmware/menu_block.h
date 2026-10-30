@@ -51,6 +51,8 @@ private:
     const char* diag_path_;
     infra::OptRef<app::BtPump> bt_;
     ui::EventTrace trace_;
+
+    app::UiWriteLane ui_writes_;
     StoresBlock stores_;
     app::MglPump mgl_pump_;
     app::HpsFramebuffer hps_fb_;

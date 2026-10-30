@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/uart_mode.h"
 #include "proto/link_frame.h"
+#include "proto/uio_opcodes.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -12,13 +13,10 @@
 #include <string>
 #include <vector>
 
-#include "cores/registry.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
 namespace {
-
-constexpr std::uint16_t kSetUart = 0x3B;
 
 bool file_exists(const char* path) noexcept {
     struct stat st{};
@@ -133,7 +131,11 @@ Ex<void> UartModeController::set_mode(proto::ILinkFrame& frame, UartMode m) {
     const std::uint32_t baud = baud_for(masked);
 
     {
-        if (auto r = frame.begin(proto::FrameSel::Uio, kSetUart); !r)
+        if (auto r = frame.begin(
+                proto::FrameSel::Uio,
+                static_cast<std::uint16_t>(proto::UioOp::SetUart)
+            );
+            !r)
             return r;
         const std::uint16_t wire = (raw == 4 || raw == 5) ? std::uint16_t{1}
                                                           : static_cast<std::uint16_t>(raw);
@@ -193,11 +195,11 @@ void UartModeController::latch_usb_ser(bool present) noexcept {
 
 Ex<void> UartModeController::load_for_core(
     proto::ILinkFrame& frame,
-    std::string_view core_name,
     bool uart_capable,
     std::string_view uart_token,
     std::string_view midi_token,
-    const UartPersistFiles* files
+    const UartPersistFiles* files,
+    std::uint32_t default_baud
 ) {
 
     rt_.idx = {};
@@ -213,7 +215,7 @@ Ex<void> UartModeController::load_for_core(
     if (uart_capable) {
         if (rt_.uart_table[0] == 0) {
 
-            rt_.uart_table[0] = cores::profile_for(core_name).default_uart_baud;
+            rt_.uart_table[0] = default_baud;
 
             if (rt_.midi_table[0] == 0)
                 rt_.midi_table[0] = 31250u;

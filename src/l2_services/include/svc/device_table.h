@@ -11,6 +11,8 @@ namespace mister::svc {
 
 struct DeviceTable {
     TASTY_SEAT_MEDIATOR(Any, Any);
+
+    static constexpr bool kResetOnReap = true;
     std::vector<InputDevice> devices;
 
     std::uint32_t mapped = 0;

@@ -4,13 +4,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 
-#include "infra/counter.h"
+#include "infra/counted_lane.h"
 #include "infra/log_rec.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
-#include "infra/spsc_ring.h"
 
 namespace mister::xthread {
 
@@ -31,6 +29,8 @@ inline constexpr std::array<LogKindRow, infra::ordinal(LogRec::Kind::kCount)> kL
     {LogRec::Kind::RingLoss, LogSev::alarm},
     {LogRec::Kind::DoorbellBound, LogSev::info},
     {LogRec::Kind::DoorbellPolling, LogSev::warn},
+    {LogRec::Kind::PhaseTolerated, LogSev::warn},
+    {LogRec::Kind::ConfStrArrived, LogSev::info},
 }};
 static_assert(
     infra::rows_are_ordinal(kLogKindRows),
@@ -43,37 +43,16 @@ static_assert(
 
 inline constexpr std::size_t kLogLaneCap = 256;
 
-class LogLane {
-    TASTY_SEAT_MEDIATOR(Any, Diag);
-
-public:
+struct LogLaneHead {
     template <class A>
-        requires infra::AlternativeOf<A, LogRec>
-    bool push(const A& alt, std::uint64_t t_ns) noexcept {
-        if (ring_.push(infra::make<LogRec>(alt, LogRec::Head{sev_of(A::kKind), {}, t_ns})))
-            return true;
-        loss_[infra::ordinal(A::kKind)].add();
-        return false;
+    static constexpr LogRec::Head head(std::uint64_t t_ns) noexcept {
+        return {sev_of(A::kKind), {}, t_ns};
     }
-
-    [[nodiscard]] std::optional<LogRec> pop() noexcept { return ring_.pop(); }
-
-    [[nodiscard]] std::uint32_t losses(LogRec::Kind k) const noexcept {
-        return loss_[infra::ordinal(k)].get();
-    }
-
-    [[nodiscard]] std::uint32_t total_losses() const noexcept {
-        std::uint32_t sum = 0;
-        for (const Counter& c : loss_) {
-            const std::uint32_t n = c.get();
-            sum = (sum > 0xFFFFFFFFu - n) ? 0xFFFFFFFFu : sum + n;
-        }
-        return sum;
-    }
-
-private:
-    SpscRing<LogRec, kLogLaneCap> ring_;
-    Counter loss_[infra::ordinal(LogRec::Kind::kCount)];
 };
+
+using LogLane = CountedLane<LogRec, kLogLaneCap, SeatTag::RT, SeatTag::Diag, LogLaneHead>;
+
+inline constexpr std::size_t kMainLogLaneCap = 64;
+using MainLogLane = CountedLane<LogRec, kMainLogLaneCap, SeatTag::Main, SeatTag::Diag, LogLaneHead>;
 
 }

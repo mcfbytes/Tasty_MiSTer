@@ -221,7 +221,7 @@ private:
     const EmitSite advise_site_;
     SessionTally& session_tally_;
     CoreOptionCells& options_;
-    xthread::LogLane& log_lane_;
+    xthread::LogLane::Producer log_lane_;
     infra::OptRef<const svc::Vfs> vfs_;
     infra::OptRef<svc::IStorageLifecycle> storage_life_;
     infra::OptRef<svc::ChdPrefetch> prefetch_;
@@ -257,7 +257,7 @@ inline SlotBindings::SlotBindings(const Wiring& g) noexcept
       advise_site_(g.advise_site),
       session_tally_(g.session_tally),
       options_(g.options),
-      log_lane_(g.log_lane),
+      log_lane_(g.log_lane.producer()),
       vfs_(g.vfs),
       storage_life_(g.storage_life),
       prefetch_(g.prefetch),
@@ -849,7 +849,7 @@ inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::
             continue;
         }
         channel_slots_ = static_cast<std::uint16_t>(channel_slots_ | (1u << si.v));
-        (void)log_lane_.push(LogRec::Mount{si.v}, log_now_ns());
+        log_lane_.push(LogRec::Mount{si.v}, log_now_ns());
     }
 }
 
@@ -866,7 +866,7 @@ inline void SlotBindings::unmount_save_channel() {
                 proto::PathId{}
             );
             r)
-            (void)log_lane_.push(LogRec::Unmount{si.v}, log_now_ns());
+            log_lane_.push(LogRec::Unmount{si.v}, log_now_ns());
     }
     channel_slots_ = 0;
 }

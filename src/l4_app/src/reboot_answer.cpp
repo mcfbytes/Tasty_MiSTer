@@ -12,10 +12,11 @@ RebootAnswer::After RebootAnswer::on_reboot_now(const proto::LinkOp::RebootNow& 
     TASTY_SEAT_BODY(RebootAnswer);
     if (a.quiesce) {
 
-        signals_.set_core_reset(true);
         rebooting_ = true;
         reboot_answered_ = false;
+        reset_held_ = false;
         reboot_seq_ = a.seq;
+        hold_reset_once_saved_();
 
         return After::EndStartAndFail;
     }
@@ -24,15 +25,26 @@ RebootAnswer::After RebootAnswer::on_reboot_now(const proto::LinkOp::RebootNow& 
 
 void RebootAnswer::answer_reboot(Host& host) noexcept {
     TASTY_SEAT_BODY(RebootAnswer);
-    if (!rebooting_ || reboot_answered_ || !io_settled_())
+    if (!rebooting_ || reboot_answered_)
+        return;
+    hold_reset_once_saved_();
+    if (!reset_held_ || !io_settled_())
         return;
 
     reboot_answered_ = host.reboot_push_quiesced(reboot_seq_);
 }
 
+void RebootAnswer::hold_reset_once_saved_() {
+    if (reset_held_ || !nvram_.saves_drained())
+        return;
+    signals_.set_core_reset(true);
+    reset_held_ = true;
+}
+
 bool RebootAnswer::io_settled_() const noexcept {
     return (!storage_life_ || storage_life_->quiesced())
         && nvram_.writes_settled()
+        && nvram_.saves_drained()
         && (!window_jobs_ || !window_jobs_->busy());
 }
 

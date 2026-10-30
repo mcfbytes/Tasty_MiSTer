@@ -5,6 +5,7 @@
 #include <string_view>
 #include <utility>
 
+#include "cores/arcade_facts.h"
 #include "cores/mra_cheat_records.h"
 #include "cores/mra_doc.h"
 #include "cores/mra_stager.h"
@@ -26,8 +27,22 @@ ManifestDocFacts ArcadeManifestRole::facts_of(std::string_view doc) const {
         .vertical = parsed.vertical,
         .rotation = parsed.rotation,
         .setname = std::move(parsed.setname),
-        .setname_same_dir = parsed.setname_same_dir
+        .setname_same_dir = parsed.setname_same_dir,
+        .buttons_names = std::move(parsed.buttons_names),
+        .buttons_default = std::move(parsed.buttons_default)
     };
+}
+
+ManifestDocFacts ArcadeManifestRole::facts_at(
+    std::string_view text,
+    std::string_view path,
+    const svc::Vfs& vfs
+) const {
+
+    const auto doc = manifest_document(text, path, vfs);
+    if (!doc || doc->empty())
+        return {};
+    return facts_of(*doc);
 }
 
 std::unique_ptr<ICheatRecords> ArcadeManifestRole::cheats_of(std::string_view doc) const {

@@ -3,27 +3,27 @@
 
 #include <cstdint>
 
-#include "hal/spi_transport.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/joystick.h"
+#include "proto/link_frame.h"
 #include "proto/link_pad_encoder.h"
 
 namespace mister::proto {
 
-class SpiPadEncoder final : public ILinkPadEncoder {
+class FramePadEncoder final : public ILinkPadEncoder {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    SpiPadEncoder(hal::ISpiTransport& link, const JoystickPort& port) noexcept
-        : link_(link),
+    FramePadEncoder(ILinkFrame& frame, const JoystickPort& port) noexcept
+        : frame_(frame),
           port_(port) {}
 
-    explicit SpiPadEncoder(const JoystickPort& port) noexcept : port_(port) {}
+    explicit FramePadEncoder(const JoystickPort& port) noexcept : port_(port) {}
 
-    void over(hal::ISpiTransport& link) noexcept {
-        link_ = infra::OptRef<hal::ISpiTransport>{link};
-    }
+    void over(ILinkFrame& frame) noexcept { frame_ = infra::OptRef<ILinkFrame>{frame}; }
+
+    void clear_frame() noexcept { frame_.reset(); }
 
     [[nodiscard]] Ex<void> digital(std::uint16_t opcode, JoyMask map) override;
     [[nodiscard]] Ex<void> stick(
@@ -38,7 +38,7 @@ public:
     ) const noexcept override;
 
 private:
-    infra::OptRef<hal::ISpiTransport> link_{};
+    infra::OptRef<ILinkFrame> frame_{};
     const JoystickPort& port_;
 };
 

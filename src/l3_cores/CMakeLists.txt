@@ -293,6 +293,8 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/romset_files.h
   cores/romsets.h
   cores/registry.h
+  cores/save_image.h
+  cores/save_servant.h
   cores/save_upload.h
   cores/sector_kick.h
   cores/sector_kick_row.h

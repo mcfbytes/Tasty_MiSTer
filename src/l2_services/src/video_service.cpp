@@ -339,7 +339,10 @@ Ex<void> VideoService::apply(const Modeline& m, PllBlock pll, Modeline::WireOpti
     opt.vsync_align = opt.vsync_align && (m.fpix_mhz > 0.0);
 
     const std::array<std::uint16_t, 26> words = m.to_wire(pll, opt);
-    return sink_->publish(kUioSetVideo, std::span<const std::uint16_t>(words.data(), words.size()));
+    return sink_->publish(
+        proto::UioOp::SetVideo,
+        std::span<const std::uint16_t>(words.data(), words.size())
+    );
 }
 
 void VideoService::set_filter_slots(std::span<const bool> enabled) noexcept {

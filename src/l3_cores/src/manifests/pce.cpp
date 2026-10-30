@@ -96,13 +96,10 @@ static_assert(
     "3.4: the CD service tick stays a ticker"
 );
 static_assert(
-    kPceCdServices[0].osd_budget == OsdBudget::Shared
-        && kPceCdServices[1].osd_budget == OsdBudget::Pinned,
-    "the every-round edge shares the OSD budget; the service tick pins it"
-);
-static_assert(
-    kPceCdServices[0].klass == DeadlineClass::A && kPceCdServices[1].klass == DeadlineClass::A,
-    "3.4: both pcecd services are Class A (T-RT)"
+    kPceCdServices[0].round_claim == RoundClaim::Never
+        && kPceCdServices[1].round_claim == RoundClaim::Always,
+    "the every-round edge never claims its round; the service tick claims each it runs "
+    "(no OSD row)"
 );
 
 static_assert(

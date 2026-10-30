@@ -3,16 +3,9 @@
 
 #include "hal/selected.h"
 #include "proto/ps2_wire.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
-namespace {
-
-constexpr hal::SpiWord kKeyboard{0x05};
-constexpr hal::SpiWord kMouse{0x04};
-constexpr hal::SpiWord kGetKbdLed{0x1F};
-constexpr hal::SpiWord kPs2Ctl{0x21};
-
-}
 
 [[nodiscard]] Ex<void> write_ps2_frame(hal::ISpiTransport& link, const Ps2Frame& f) {
     if (f.len == 0 || f.len > kPs2FrameBytes) {
@@ -24,24 +17,26 @@ constexpr hal::SpiWord kPs2Ctl{0x21};
         return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), f.len});
     }
     hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(mouse ? kMouse : kKeyboard); !r) {
+    if (auto r = link.transfer(mouse ? word(UioOp::Mouse) : word(UioOp::Keyboard)); !r) {
         return std::unexpected(r.error());
     }
     if (f.stream == Ps2Stream::MousePacket) {
         for (std::uint8_t i = 0; i + 1u < f.len; i = static_cast<std::uint8_t>(i + 2u)) {
-            const auto word = static_cast<std::uint16_t>(
+            const auto payload = static_cast<std::uint16_t>(
                 static_cast<std::uint16_t>(f.bytes[i])
                 | static_cast<std::uint16_t>(static_cast<std::uint16_t>(f.bytes[i + 1]) << 8)
             );
-            if (auto r = link.transfer(hal::SpiWord{word}); !r) {
+            if (auto r = link.transfer(hal::SpiWord{payload}); !r) {
                 return std::unexpected(r.error());
             }
         }
         return {};
     }
     for (std::uint8_t i = 0; i < f.len; ++i) {
-        const auto word = static_cast<std::uint16_t>(reply ? (0xFF00u | f.bytes[i]) : f.bytes[i]);
-        if (auto r = link.transfer(hal::SpiWord{word}); !r) {
+        const auto payload = static_cast<std::uint16_t>(
+            reply ? (0xFF00u | f.bytes[i]) : f.bytes[i]
+        );
+        if (auto r = link.transfer(hal::SpiWord{payload}); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -57,7 +52,7 @@ void SpiPs2Decoder::probe() noexcept {
     }
     led_poll_div_ = kLedPollTicks - 1;
     hal::Selected cs(*link_, hal::ChipSelect::Io);
-    if (auto r = link_->transfer(kGetKbdLed); !r)
+    if (auto r = link_->transfer(word(UioOp::GetKbdLed)); !r)
         return count_error_();
     auto w = link_->transfer(hal::SpiWord{0});
     if (!w)
@@ -78,7 +73,7 @@ void SpiPs2Decoder::service() noexcept {
         return;
 
     hal::Selected cs(*link_, hal::ChipSelect::Io);
-    if (auto r = link_->transfer(kPs2Ctl); !r)
+    if (auto r = link_->transfer(word(UioOp::Ps2Ctl)); !r)
         return count_error_();
     auto w0 = link_->transfer(hal::SpiWord{0});
     if (!w0)

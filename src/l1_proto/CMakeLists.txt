@@ -16,6 +16,7 @@ add_library(mister_proto STATIC
   src/pad_levels.cpp
   src/ps2_keyboard.cpp
   src/ps2_mouse.cpp
+  src/rtc_image.cpp
   src/spi_ps2_decoder.cpp
   src/savestate_engine.cpp
   src/savestate_primer.cpp
@@ -26,7 +27,7 @@ add_library(mister_proto STATIC
   src/spi_frame.cpp
   src/spi_identify_decoder.cpp
   src/spi_osd_mask_decoder.cpp
-  src/spi_pad_encoder.cpp
+  src/frame_pad_encoder.cpp
   src/spi_sampler.cpp
   src/spi_status_decoder.cpp
   src/axi_status_decoder.cpp
@@ -85,7 +86,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/link_pad_encoder.h
   proto/held_pad_encoder.h
   proto/pad_levels.h
-  proto/spi_pad_encoder.h
+  proto/frame_pad_encoder.h
   proto/osd_surface.h
   proto/osd_target.h
   proto/osd_transport.h
@@ -94,6 +95,8 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/ps2_mouse.h
   proto/ps2_frame.h
   proto/disk_act.h
+  proto/fio_tenant.h
+  proto/save_act.h
   proto/disk_poll_decl.h
   proto/mailbox_act.h
   proto/mailbox_frame.h
@@ -128,6 +131,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/standard_item.h
   proto/standard_item_row.h
   proto/status_register.h
+  proto/status_edit.h
   proto/status_word.h
   proto/status_cell.h
   proto/storage_channel.h
@@ -136,12 +140,14 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/storage_request.h
   proto/storage_request_dispatch.h
   proto/types.h
+  proto/uio_opcodes.h
   proto/upload_session.h
   proto/volume_cmd.h
   proto/rotation_dir.h
   proto/reset_edge.h
   proto/reset_fence.h
   proto/reset_terms.h
+  proto/rtc_image.h
   proto/user_io/poll_shape.h
   proto/user_io/poll_reader.h
   proto/user_io/rumble_poll.h

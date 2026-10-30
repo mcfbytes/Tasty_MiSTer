@@ -27,6 +27,10 @@ struct UiPageRecord {
 
     std::uint32_t recent_build_us = 0;
     std::uint32_t recent_update_us_max = 0;
+
+    std::uint32_t lane_refusals = 0;
+    std::uint32_t lane_failures = 0;
+    std::uint32_t store_errors = 0;
 };
 
 using UiPageCell = xthread::Telemetry<UiPageRecord, SeatTag::Ui>;

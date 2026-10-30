@@ -446,13 +446,17 @@ public:
 
     static std::uint8_t ext_subindex(std::string_view filename, std::string_view ext_list) noexcept;
 
-    static std::uint16_t wire_index(ConfStrFileRow row, std::string_view filename) noexcept {
-        return static_cast<std::uint16_t>(
-            (static_cast<std::uint16_t>(ext_subindex(filename, row.ext)) << 6) | row.ioctl_index
-        );
+    [[nodiscard]] static WideIoIndex wire_index(
+        ConfStrFileRow row,
+        std::string_view filename
+    ) noexcept {
+        return WideIoIndex::of(IoIndex{row.ioctl_index}, ext_subindex(filename, row.ext));
     }
 
-    static std::uint16_t wire_index(const ConfStrEntry& slot, std::string_view filename) noexcept {
+    [[nodiscard]] static WideIoIndex wire_index(
+        const ConfStrEntry& slot,
+        std::string_view filename
+    ) noexcept {
         return wire_index(row_of(slot), filename);
     }
 

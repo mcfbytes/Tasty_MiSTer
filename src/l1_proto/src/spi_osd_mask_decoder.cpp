@@ -2,12 +2,9 @@
 #include "proto/spi_osd_mask_decoder.h"
 
 #include "hal/selected.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
-
-namespace {
-constexpr std::uint16_t kUioGetOsdMask = 0x2E;
-}
 
 void SpiOsdMaskDecoder::service() noexcept {
     if (!active()) {
@@ -23,7 +20,7 @@ void SpiOsdMaskDecoder::service() noexcept {
     OsdMask m{};
     {
         hal::Selected cs(*link_, hal::ChipSelect::Io);
-        if (auto r = link_->transfer(hal::SpiWord{kUioGetOsdMask}); !r) {
+        if (auto r = link_->transfer(word(UioOp::GetOsdMask)); !r) {
             ++errors_;
             return;
         }

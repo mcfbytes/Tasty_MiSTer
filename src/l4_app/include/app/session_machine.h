@@ -44,12 +44,12 @@ public:
     void echo(const Event::InfoRequest& a, EmitSite site, CorrelationTag tag);
 
 private:
-    EventQueue<SeatTag::RT>& events_;
+    EventQueue<SeatTag::RT>::Producer events_;
     SessionState state_ = SessionState::Boot;
 
     CorrelationTag tag_{};
 
-    xthread::LogLane& log_lane_;
+    xthread::LogLane::Producer log_lane_;
     std::uint64_t last_transition_ns_ = 0;
 };
 

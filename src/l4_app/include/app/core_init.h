@@ -122,7 +122,7 @@ inline constexpr std::array<CoreInitStep, kCoreInitStepCount> kCoreInitBase{{
         kEightBitOnly,
         nullptr,
         OnError::Ignore,
-        "CoreSession::send_rtc (0x22), 4 words, EightBit only"
+        "CoreSession::send_rtc_image (0x22), 4 words, EightBit only"
     },
     CoreInitStep{
         "apply.timestamp",
@@ -132,7 +132,7 @@ inline constexpr std::array<CoreInitStep, kCoreInitStepCount> kCoreInitBase{{
         kEightBitOnly,
         nullptr,
         OnError::Ignore,
-        "CoreSession::send_rtc (0x24), 2 words, EightBit only"
+        "CoreSession::send_rtc_image (0x24), 2 words, EightBit only"
     },
     CoreInitStep{
         "apply.uart_mode",

@@ -172,7 +172,7 @@ LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
             .loader = std::move(loader_),
             .file = std::move(file),
             .total = r.file_len,
-            .wire_index = r.index.v,
+            .wire_index = r.index,
             .act = act,
             .row = quiet,
             .mirror = std::move(mirror)
@@ -240,7 +240,7 @@ LoadWalk::Pass LoadWalk::payload_(Host& h, const cores::TransferRow& r) {
     auto p = cores::PayloadPieces::of_bytes(
         std::move(raw),
         {},
-        {.dest = proto::WideIoIndex{r.index.v}, .chunk = chunk, .act = next_act_(h)}
+        {.dest = r.index, .chunk = chunk, .act = next_act_(h)}
     );
     if (!p)
         return fail_(h);

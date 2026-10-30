@@ -47,7 +47,7 @@ Ex<void> HpsFramebuffer::publish_(
         static_cast<std::uint16_t>(vmax),
         static_cast<std::uint16_t>(stride),
     };
-    return wire_.publish(svc::kUioSetFbuf, words);
+    return wire_.publish(proto::UioOp::SetFbuf, words);
 }
 
 void HpsFramebuffer::write_mode_param_(
@@ -132,7 +132,7 @@ Ex<void> HpsFramebuffer::drop() noexcept {
     if (held_)
         return {};
     const std::array<std::uint16_t, 1> off{0};
-    return wire_.publish(svc::kUioSetFbuf, off);
+    return wire_.publish(proto::UioOp::SetFbuf, off);
 }
 
 bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {

@@ -11,13 +11,13 @@
 
 namespace mister::app {
 LinkBinder::LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept
-    : fio_queue_(link),
+    : fio_queue_(link, proto::SpiFioQueue::kPieceWords, w.tenant),
       spi_sink_(link, infra::OptRef<proto::SpiFioQueue>{fio_queue_}),
       feeder_(w.feeder),
       exec_(w.exec),
       state_(w.state),
       notifiers_(w.exec),
-      log_lane_(w.log_lane) {}
+      log_lane_(w.log_lane.producer()) {}
 
 proto::IImageSink& LinkBinder::grant_bulk() noexcept {
     return progress_sink_;
@@ -133,7 +133,7 @@ void LinkBinder::bind_one_doorbell(
     if (!slot)
         return fall_back(b, slot.error().code);
     bound_classes_ |= reactor::CauseSet{b.klass};
-    (void)log_lane_.push(
+    log_lane_.push(
         LogRec::DoorbellBound{
             .cause_base = b.cause_base.v,
             .klass = static_cast<std::uint8_t>(b.klass),
@@ -145,7 +145,7 @@ void LinkBinder::bind_one_doorbell(
 
 void LinkBinder::fall_back(const proto::IrqBinding& b, Errc why) noexcept {
     ++fallbacks_;
-    (void)log_lane_.push(
+    log_lane_.push(
         LogRec::DoorbellPolling{
             .why = why,
             .klass = static_cast<std::uint8_t>(b.klass),

@@ -19,6 +19,9 @@ namespace mister::xthread {
 template <SeatTag S>
 concept SeatMayBlock = (S != SeatTag::RT);
 
+template <class Slot>
+concept ResetsOnReap = requires { requires Slot::kResetOnReap; };
+
 template <class Slot, std::size_t N, SeatTag OwnerSeat, SeatTag WorkerSeat>
 class LoanChannel {
     TASTY_SEAT_MEDIATOR(Any, Any);
@@ -31,13 +34,13 @@ class LoanChannel {
     static_assert(N > 0 && N <= 128, "a handoff indexes with a uint8_t and 0xFF is kNoIndex");
     static_assert((N & (N - 1)) == 0, "SpscRing requires a power-of-two capacity");
     static_assert(
-        std::is_trivially_copyable_v<Slot>,
-        "a slot is recycled IN PLACE and never destroyed between uses: an owning "
-        "member would be released once, at teardown, on whichever seat tears the "
-        "channel down"
+        std::is_trivially_copyable_v<Slot> || ResetsOnReap<Slot>,
+        "a slot is recycled IN PLACE and never destroyed between uses: a slot that "
+        "owns a member declares `static constexpr bool kResetOnReap = true;`, so the "
+        "owner seat releases it on every return to the pool, never at teardown"
     );
 
-    using Pool = SlotPool<Slot, N>;
+    using Pool = SlotPool<Slot, N, OwnerSeat>;
     using Lease = typename Pool::Lease;
 
 public:
@@ -111,6 +114,7 @@ public:
                 return;
             seat_assert<OwnerSeat>(ERR_SITE(), "a Loan died off the owner seat");
             bump_(ch_->loans_, -1);
+            reset_(*lease_);
             lease_.reset();
         }
 
@@ -324,6 +328,11 @@ public:
     LoanChannel(LoanChannel&&) = delete;
     LoanChannel& operator=(LoanChannel&&) = delete;
 
+    ~LoanChannel() {
+        for (auto& r : reserved_)
+            (void)r.release();
+    }
+
     [[nodiscard]] Owner owner() noexcept { return mint_(kOwnerMinted) ? Owner{this} : Owner{}; }
 
     [[nodiscard]] Worker worker() noexcept {
@@ -331,7 +340,7 @@ public:
     }
 
     [[nodiscard]] std::uint32_t breaches() const noexcept {
-        return breaches_.load(std::memory_order_relaxed);
+        return breaches_.load(std::memory_order_relaxed) + pool_.refused_returns();
     }
 
     [[nodiscard]] Loan acquire() noexcept {
@@ -351,6 +360,7 @@ public:
         bump_(loans_, -1);
         if (!out_.push(Handoff{pool_.index_of(s), 0})) {
             breaches_.fetch_add(1, std::memory_order_relaxed);
+            reset_(*s);
             (void)Lease{s, typename Pool::Return{&pool_}};
             return;
         }
@@ -421,12 +431,14 @@ public:
             const auto h = back_.pop();
             if (!h)
                 break;
+            reset_(pool_.at(h->index));
             (void)Lease{&pool_.at(h->index), typename Pool::Return{&pool_}};
         }
         for (std::size_t i = 0; i < N; ++i) {
             const auto h = out_.pop();
             if (!h)
                 break;
+            reset_(pool_.at(h->index));
             (void)Lease{&pool_.at(h->index), typename Pool::Return{&pool_}};
         }
         jobs_.store(0, std::memory_order_relaxed);
@@ -461,7 +473,7 @@ public:
             jobs_.load(std::memory_order_relaxed),
             static_cast<std::uint8_t>(back_.size()),
             live_,
-            breaches_.load(std::memory_order_relaxed)
+            breaches()
         };
     }
 
@@ -485,6 +497,11 @@ private:
             return false;
         minted_ = static_cast<std::uint8_t>(minted_ | side);
         return true;
+    }
+
+    static void reset_([[maybe_unused]] Slot& s) noexcept {
+        if constexpr (ResetsOnReap<Slot>)
+            s = Slot{};
     }
 
     static void bump_(std::atomic<std::uint8_t>& a, int d) noexcept {

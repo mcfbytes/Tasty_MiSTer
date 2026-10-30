@@ -25,31 +25,38 @@ std::uint64_t saved_dips(const svc::Vfs& vfs, std::string_view name, std::uint64
     return v;
 }
 
-struct Read {
-    std::string text;
-    std::string error;
-};
+}
 
-Read read_text(const svc::Vfs& vfs, std::string_view path) {
+[[nodiscard]] Ex<std::string> manifest_document(
+    std::string_view text,
+    std::string_view path,
+    const svc::Vfs& vfs
+) {
+    if (path.empty())
+        return std::string{};
+    if (!text.empty()) {
+        if (text.size() > mra::kMraDocMax) {
+            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+        }
+        return std::string(text);
+    }
     auto f = vfs.open(path, svc::OpenMode::Read);
     if (!f)
-        return {.text = {}, .error = std::string(path) + "\nmanifest not found"};
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     const auto sz = (*f)->size();
     if (!sz || sz->v == 0 || sz->v > mra::kMraDocMax) {
-        return {.text = {}, .error = std::string(path) + "\nmanifest unreadable"};
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-    std::string text(static_cast<std::size_t>(sz->v), '\0');
+    std::string doc(static_cast<std::size_t>(sz->v), '\0');
     std::size_t got = 0;
-    while (got < text.size()) {
-        auto r = (*f)->read_at(got, std::as_writable_bytes(std::span<char>(text).subspan(got)));
+    while (got < doc.size()) {
+        auto r = (*f)->read_at(got, std::as_writable_bytes(std::span<char>(doc).subspan(got)));
         if (!r || *r == 0)
             break;
         got += *r;
     }
-    text.resize(got);
-    return {.text = std::move(text), .error = {}};
-}
-
+    doc.resize(got);
+    return doc;
 }
 
 ArcadeDocument read_arcade_document(
@@ -63,19 +70,14 @@ ArcadeDocument read_arcade_document(
     ArcadeFacts& f = out.facts;
     f.dip_name = mra::sibling_name(path, ".dip");
     f.nvm_name = mra::sibling_name(path, ".nvm");
-    std::string owned;
-    if (text.empty()) {
-        Read r = read_text(vfs, path);
-        if (!r.error.empty()) {
-            f.error = std::move(r.error);
-            return out;
-        }
-        owned = std::move(r.text);
-        text = owned;
-    } else if (text.size() > mra::kMraDocMax) {
-        f.error = std::string(path) + "\nmanifest unreadable";
+    auto read = manifest_document(text, path, vfs);
+    if (!read) {
+        const bool missing = read.error().code == Errc::not_found;
+        f.error = std::string(path) + (missing ? "\nmanifest not found" : "\nmanifest unreadable");
         return out;
     }
+    const std::string owned = std::move(*read);
+    text = owned;
     out.rbf = svc::xml::rbf_text(text);
     mra::MraDoc doc;
     doc.parse(text);

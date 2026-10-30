@@ -1,22 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdio>
 #include <string>
 #include <string_view>
 
 #include "app/game_id.h"
+#include "infra/fixed_str.h"
 #include "proto/rotation_dir.h"
 
 namespace mister::app {
 
 struct MraFacts {
 
+    static constexpr std::size_t kSetnameCap = 64;
+
     bool is_arcade = false;
     bool vertical = false;
 
     proto::RotationDir rotation = proto::RotationDir::None;
-    std::string setname;
+    FixedStr<kSetnameCap, StrFit::Clip> setname{};
     bool setname_same_dir = false;
 };
 
@@ -24,7 +28,7 @@ struct MraFacts {
     std::string_view conf_str_name,
     const MraFacts& facts
 ) noexcept {
-    return facts.setname.empty() ? conf_str_name : std::string_view(facts.setname);
+    return facts.setname.empty() ? conf_str_name : facts.setname.view();
 }
 
 [[nodiscard]] inline std::string default_manifest_rel(std::string_view text) {
@@ -41,7 +45,7 @@ struct MraFacts {
     GameId out{};
     if (facts.setname.empty())
         return out;
-    (void)out.serial.assign(facts.setname);
+    (void)out.serial.assign(facts.setname.view());
     char name[GameId::kNameCap] = {};
     (void)std::snprintf(name, sizeof name, "%s.mra", out.serial.c_str());
     (void)out.file.assign(name);

@@ -139,11 +139,11 @@ public:
 
     [[nodiscard]] Ex<void> load_for_core(
         proto::ILinkFrame& frame,
-        std::string_view core_name,
         bool uart_capable,
         std::string_view uart_token,
         std::string_view midi_token,
-        const UartPersistFiles* files = nullptr
+        const UartPersistFiles* files,
+        std::uint32_t default_baud
     );
 
     void latch_usb_ser(bool present) noexcept;

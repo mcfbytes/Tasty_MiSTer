@@ -9,7 +9,7 @@
 namespace mister::cores {
 
 struct LoadAsk {
-    proto::IoIndex index{};
+    proto::WideIoIndex index{};
     std::string_view path{};
     std::uint64_t size = 0;
     std::uint32_t load_addr = 0;

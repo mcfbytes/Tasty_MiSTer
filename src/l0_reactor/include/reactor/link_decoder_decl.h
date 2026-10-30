@@ -9,20 +9,14 @@ namespace mister::reactor {
 
 class ILinkDecoder;
 
-enum class DeadlineClass : std::uint8_t {
-    A,
-    B,
-};
-
-enum class OsdBudget : std::uint8_t { Shared, Pinned, Claimed };
+enum class RoundClaim : std::uint8_t { Never, Always, OnWork };
 
 struct LinkDecoderDecl {
     const char* name;
     Cause cause;
     const ILinkDecoder* impl;
     std::uint16_t period_ms;
-    DeadlineClass klass;
-    OsdBudget osd_budget;
+    RoundClaim round_claim;
 };
 
 }

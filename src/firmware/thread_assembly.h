@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 
+#include "app/event.h"
 #include "rt_evidence.h"
 #include "seat_set.h"
 #include "hal/thread_map.h"
@@ -28,8 +29,6 @@ struct RtStats;
 
 namespace mister::app {
 class CmdFifo;
-template <SeatTag Producer>
-class EventQueue;
 class MglPump;
 class VideoPump;
 class BtPump;
@@ -46,7 +45,7 @@ public:
     struct DiagWires {
         xthread::DiagLog& log;
         xthread::LogLane& rt_lane;
-        const std::atomic<bool>& transitioning;
+        const xthread::Telemetry<bool, SeatTag::RT>& transitioning;
     };
 
     ThreadAssembly(
@@ -186,7 +185,7 @@ private:
     struct OwnWires {
         xthread::DiagLog log;
         xthread::LogLane rt_lane;
-        std::atomic<bool> transitioning{false};
+        xthread::Telemetry<bool, SeatTag::RT> transitioning{};
         xthread::WakeFlag ui_wake;
         app::UartModeController::Handoffs uart_handoffs{ui_wake};
     };

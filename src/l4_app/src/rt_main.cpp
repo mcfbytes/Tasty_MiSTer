@@ -10,6 +10,7 @@
 #include "app/core_frame_counter.h"
 #include "app/disk_relay.h"
 #include "app/replay_gate.h"
+#include "app/save_upload_relay.h"
 #include "app/scanout_relay.h"
 #include "infra/message_sum.h"
 #include "proto/spi_fio_queue.h"
@@ -28,6 +29,14 @@ static_assert(
     DiskRelay::kMaxRoundWords + CoreFrameCounter::kMaxRoundWords + ScanoutRelay::kMaxRoundWords
         <= proto::tightest_round_budget_words(),
     "a disk act's words and the frame reader's and scanout relay's fit the round budget"
+);
+
+static_assert(
+    SaveUploadRelay::kMaxRoundWords
+            + CoreFrameCounter::kMaxRoundWords
+            + ScanoutRelay::kMaxRoundWords
+        <= proto::tightest_round_budget_words(),
+    "a save act's words and the frame reader's and scanout relay's fit the round budget"
 );
 
 void RtMain::start() noexcept {
@@ -67,7 +76,7 @@ void RtMain::serve() noexcept {
 
     const bool drained = drain_fio_();
     const bool wrote = !drained
-        && exec_.osd_budget_open()
+        && exec_.round_unclaimed()
         && osd_
         && !switch_window_()
         && osd_->flush_one();
@@ -87,11 +96,15 @@ bool RtMain::drain_fio_() noexcept {
         spent += scanout_->take_round_words();
     if (!session_)
         return false;
+
+    spent += session_->saves().take_round_words();
     proto::SpiFioQueue& q = session_->binder().fio_queue();
     if (session_->park().engaged()) {
         q.abandon();
         return false;
     }
+    session_->service_saves(round_budget_words_ - std::min(spent, round_budget_words_));
+    spent += session_->saves().take_round_words();
     return q.drain(round_budget_words_ - std::min(spent, round_budget_words_)) != 0;
 }
 
@@ -136,11 +149,15 @@ void RtMain::drain_ops() noexcept {
     if (!session_)
         return;
 
+    const bool save_window = session_->saves().holds_fio();
+
     bool closed = session_->park().engaged();
     unsigned n = 0;
-    n += drain_(session_->link_inbox(), n, kLinkOpBudget, closed);
-    closed = closed || session_->park().engaged();
-    n += drain_(session_->ui_inbox(), n, kLinkOpBudget, closed);
+    if (!save_window) {
+        n += drain_(session_->link_inbox(), n, kLinkOpBudget, closed);
+        closed = closed || session_->park().engaged();
+        n += drain_(session_->ui_inbox(), n, kLinkOpBudget, closed);
+    }
 
     if (wire_)
         wire_->consume_kick();

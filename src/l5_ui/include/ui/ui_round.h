@@ -24,6 +24,7 @@
 
 namespace mister::app {
 class HdOsdScreen;
+class UiWriteLane;
 }
 
 namespace mister::ui {
@@ -45,6 +46,8 @@ public:
         const app::ConfStrCell& conf_str;
 
         infra::OptRef<app::HdOsdScreen> hd{};
+
+        infra::OptRef<app::UiWriteLane> writes{};
     };
 
     UiRound(
@@ -65,7 +68,8 @@ public:
           clock_(clock),
           sampler_(w.sampler),
           osd_file_(w.osd_file),
-          info_(w.conf_str) {
+          info_(w.conf_str),
+          writes_(w.writes) {
         ctx_.keys = infra::OptRef<KeyDecoder>{decoder_};
         ctx_.clock = infra::OptRef<const os::IClock>{clock};
         ctx_.launches.browser = infra::OptRef<BrowserLaunch>{launch_};
@@ -221,6 +225,7 @@ private:
     IHostSampler& sampler_;
     IOsdVisibleFile& osd_file_;
     app::InfoDecoder info_;
+    infra::OptRef<app::UiWriteLane> writes_;
     std::uint32_t samples_ = 0;
     proto::LinkOp::OsdShow last_show_ = proto::LinkOp::OsdShow::Off;
     proto::OsdTarget last_target_ = proto::OsdTarget::All;

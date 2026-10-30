@@ -3,42 +3,37 @@
 
 namespace mister::app {
 
-void QuiesceAck::poll(QuiesceChannel& ch) noexcept {
+void QuiesceAck::poll(SwitchPark& sp) noexcept {
     TASTY_SEAT_BODY(QuiesceAck);
-    if (asked_ || parked_)
+    if (parked())
         return;
-    const auto q = ch.take_ask();
-    if (!q)
-        return;
-    asked_ = true;
-    gen_ = q->gen;
+    ParkBody b{.taken = seen_.taken(), .gen = gen_, .quiet = false};
+    (void)sp.observe(seen_, b);
+
+    const std::uint32_t g = seen_.taken();
+    if (!engaged() && g != 0 && g != over_)
+        gen_ = g;
 }
 
-void QuiesceAck::step(QuiesceChannel& ch, bool held_back) noexcept {
+void QuiesceAck::step(SwitchPark& sp, bool held_back) noexcept {
     TASTY_SEAT_BODY(QuiesceAck);
-    if (!asked_)
+    if (!asked())
         return;
 
-    if (held_back)
-        return;
-    if (!ch.post_ack(Quiesced{gen_})) {
-        ++drops_;
-        return;
-    }
-    asked_ = false;
-    parked_ = true;
+    ParkBody b{.taken = seen_.taken(), .gen = gen_, .quiet = !held_back};
+    if (sp.observe(seen_, b) && seen_.taken() == gen_)
+        acked_ = gen_;
 }
 
 void QuiesceAck::withdraw() noexcept {
     TASTY_SEAT_BODY(QuiesceAck);
 
-    asked_ = false;
-    parked_ = false;
+    over_ = gen_;
 }
 
 void QuiesceAck::release() noexcept {
     TASTY_SEAT_BODY(QuiesceAck);
-    parked_ = false;
+    over_ = gen_;
 }
 
 }

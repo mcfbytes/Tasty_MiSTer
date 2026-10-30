@@ -2,18 +2,13 @@
 #include "proto/core_session.h"
 #include "hal/start_ack_bound.h"
 #include "proto/spi_frame.h"
+#include "proto/uio_opcodes.h"
 
-#include <cerrno>
-#include <ctime>
 #include <string_view>
 
 namespace mister::proto {
 
 namespace {
-
-constexpr std::uint16_t kSetMemSz = 0x31;
-constexpr std::uint16_t kRtc = 0x22;
-constexpr std::uint16_t kTimestamp = 0x24;
 
 constexpr StatusBit kResetBit{0};
 }
@@ -57,7 +52,7 @@ Ex<void> CoreSession::set_memory_size(MemSizeCookie cookie) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 1});
     }
     SpiFrame frame{*link_};
-    if (auto r = frame.begin(FrameSel::Uio, kSetMemSz); !r)
+    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetMemSz)); !r)
         return fail(r.error());
 
     if (auto r = frame.word(cookie.v); !r)
@@ -75,13 +70,52 @@ Ex<void> CoreSession::flush_status() {
     return status_.flush(frame);
 }
 
+void CoreSession::stage(const StatusEdit& edit) noexcept {
+    status_.write(edit);
+}
+
+Ex<void> CoreSession::apply(const StatusEdit& edit) {
+    status_.write(edit);
+    return flush_status();
+}
+
+void CoreSession::post(const StatusEdit& edit) noexcept {
+    if (!apply(edit))
+        ++deferred_bursts_;
+}
+
+Ex<void> CoreSession::pulse(StatusBit bit) {
+    if (bit.v >= StatusRegister::kBits) {
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), bit.v});
+    }
+    if (auto r = apply(StatusEdit::bit(bit, true)); !r)
+        return r;
+    return apply(StatusEdit::bit(bit, false));
+}
+
+Ex<void> CoreSession::pulse_reset() {
+    return pulse(kResetBit);
+}
+
+Ex<void> CoreSession::adopt_from_core(const StatusWord& core) {
+
+    const StatusWord echo = StatusEdit::bit(kResetBit, false).over(core);
+    status_.adopt(echo.words);
+    return flush_status();
+}
+
+Ex<void> CoreSession::flush_owed() {
+    if (!status_.dirty())
+        return {};
+    return flush_status();
+}
+
 Ex<void> CoreSession::assert_reset() {
 
     if (phase_ != SessionPhase::MemSized) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 0});
     }
-    status_.set_bit(kResetBit, true);
-    if (auto r = flush_status(); !r)
+    if (auto r = apply(StatusEdit::bit(kResetBit, true)); !r)
         return fail(r.error());
     phase_ = SessionPhase::HeldInReset;
     return {};
@@ -121,21 +155,12 @@ Ex<void> CoreSession::load_saved_config() {
         return fail(Error{Errc::negotiation, ERR_SITE(), 1});
     }
 
-    status_.set_bit(kResetBit, true);
-    if (auto r = flush_status(); !r)
+    if (auto r = apply(StatusEdit::bit(kResetBit, true)); !r)
         return fail(r.error());
     return {};
 }
 
-Ex<void> CoreSession::send_rtc() {
-    const std::time_t t = std::time(nullptr);
-    if (t == static_cast<std::time_t>(-1)) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    }
-    return send_rtc_at(static_cast<std::uint32_t>(static_cast<std::uint64_t>(t)));
-}
-
-Ex<void> CoreSession::send_rtc_at(std::uint32_t unix_seconds) {
+Ex<void> CoreSession::send_rtc_image(const RtcImage& image) {
 
     if (phase_ != SessionPhase::ConfStrRead && phase_ != SessionPhase::Running) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 0});
@@ -144,54 +169,25 @@ Ex<void> CoreSession::send_rtc_at(std::uint32_t unix_seconds) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 1});
     }
 
-    const std::time_t t = static_cast<std::time_t>(unix_seconds);
-    std::tm local{};
-    if (::localtime_r(&t, &local) == nullptr) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    }
-
-    std::tm utc{};
-    if (::gmtime_r(&t, &utc) == nullptr) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    }
-    const std::time_t utc_as_local = std::mktime(&utc);
-    if (utc_as_local == static_cast<std::time_t>(-1)) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    }
-    const std::int64_t shifted = static_cast<std::int64_t>(t)
-        + (static_cast<std::int64_t>(t) - static_cast<std::int64_t>(utc_as_local));
-    const auto stamp = static_cast<std::uint32_t>(static_cast<std::uint64_t>(shifted));
-
-    const auto bcd = [](int v) {
-        return static_cast<std::uint8_t>((v % 10) | ((v / 10) << 4));
-    };
-    std::uint8_t rtc[8];
-    rtc[0] = bcd(local.tm_sec);
-    rtc[1] = bcd(local.tm_min);
-    rtc[2] = bcd(local.tm_hour);
-    rtc[3] = bcd(local.tm_mday);
-    rtc[4] = bcd(local.tm_mon + 1);
-    rtc[5] = static_cast<std::uint8_t>((local.tm_year % 10) | (((local.tm_year / 10) % 10) << 4));
-    rtc[6] = static_cast<std::uint8_t>(local.tm_wday);
-    rtc[7] = 0x40;
     SpiFrame frame{*link_};
-    if (auto r = frame.begin(FrameSel::Uio, kRtc); !r)
+    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::Rtc)); !r)
         return fail(r.error());
     for (unsigned i = 0; i < 8; i += 2) {
-        const auto w = static_cast<std::uint16_t>((rtc[i + 1] << 8) | rtc[i]);
+        const auto w = static_cast<std::uint16_t>((image.rtc[i + 1] << 8) | image.rtc[i]);
         if (auto r = frame.word(w); !r)
             return fail(r.error());
     }
     if (auto r = frame.end(); !r)
         return fail(r.error());
 
-    if (auto r = frame.begin(FrameSel::Uio, kTimestamp); !r)
+    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::Timestamp)); !r)
         return fail(r.error());
-    if (auto r = frame.word(static_cast<std::uint16_t>(stamp & 0xFFFFu)); !r) {
+    if (auto r = frame.word(static_cast<std::uint16_t>(image.stamp & 0xFFFFu)); !r) {
         return fail(r.error());
     }
-    if (auto r = frame.word(static_cast<std::uint16_t>(stamp >> 16)); !r)
+    if (auto r = frame.word(static_cast<std::uint16_t>(image.stamp >> 16)); !r) {
         return fail(r.error());
+    }
     if (auto r = frame.end(); !r)
         return fail(r.error());
     return {};
@@ -205,12 +201,12 @@ Ex<void> CoreSession::release_reset() {
     if (type_ == CoreType::Unknown) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 1});
     }
-    status_.set_bit(kResetBit, false);
+    stage(StatusEdit::bit(kResetBit, false));
 
     if (type_ == CoreType::EightBit) {
         if (auto r = flush_status(); !r) {
 
-            status_.set_bit(kResetBit, true);
+            stage(StatusEdit::bit(kResetBit, true));
             return fail(r.error());
         }
     }

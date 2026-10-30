@@ -101,8 +101,8 @@ MountState CdiCore::finish_mount_() {
         return MountState::Pending;
     audio_cd_ = std::memcmp(block.data(), cdi::kBootHeader.data(), cdi::kBootHeader.size()) != 0;
     if (session_) {
-        session_->status().set_bit(kServoAudioCd, audio_cd_);
-        (void)session_->flush_status();
+
+        session_->post(proto::StatusEdit::bit(kServoAudioCd, audio_cd_));
     }
     disc_type_ = cdi::disc_type(geom_.toc, disc_type_);
     toc_count_ = cdi::build_toc(geom_.toc, disc_type_, toc_);

@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "app/write_verdict.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 
@@ -16,7 +17,9 @@ class Vfs;
 
 namespace mister::app {
 
-class RecentsStore {
+class UiWriteLane;
+
+class RecentsStore final : public IWriteVerdict {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -40,7 +43,10 @@ public:
         bool exists = false;
     };
 
-    RecentsStore(const svc::Vfs& vfs, bool enabled) noexcept : vfs_(&vfs), enabled_(enabled) {}
+    RecentsStore(const svc::Vfs& vfs, UiWriteLane& writes, bool enabled) noexcept
+        : vfs_(&vfs),
+          writes_(&writes),
+          enabled_(enabled) {}
 
     bool enabled() const noexcept { return enabled_; }
 
@@ -67,10 +73,13 @@ public:
 
     std::uint32_t errors() const noexcept { return errors_; }
 
+    void on_written(bool durable) noexcept override;
+
 private:
     [[nodiscard]] Ex<std::vector<std::byte>> read_raw(std::string_view core, ListId id);
 
     const svc::Vfs* vfs_;
+    UiWriteLane* writes_;
     bool enabled_;
     std::uint32_t loads_ = 0;
     std::uint32_t updates_ = 0;

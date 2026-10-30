@@ -6,9 +6,11 @@
 #include <string>
 #include <utility>
 
+#include "app/flat_save_servant.h"
 #include "app/sector_route.h"
 #include "cores/disk_servant.h"
 #include "cores/mailbox_servants.h"
+#include "hal/boards_table.h"
 #include "infra/opt_ref.h"
 #include "os/bt_probe.h"
 #include "reactor/notifier.h"
@@ -148,15 +150,30 @@ DiagSampler::DeviceCells DeviceBlock::diag_sources(const BootParts& plat) noexce
         .sector_route = infra::OptRef<const app::SectorRouteCell>{sector_route_},
         .osd_route = infra::OptRef<const app::OsdRouteCell>{osd_route_},
         .sys_route = infra::OptRef<const app::SysRouteCell>{sys_route_},
+        .main_log = infra::OptRef<xthread::MainLogLane>{main_log_lane_},
     };
 }
 
 void DeviceBlock::grant_pause(SeatTag seat, xthread::PauseLatch& latch) noexcept {
-    owner_.grant_pause(seat, latch);
+    owner_.grant_pause(hal::seat_of(threads_, seat), latch);
 }
 
 template <class M>
 concept HasPauseLatch = requires(M& m) { m.pause_latch(); };
+
+template <class... Rows>
+consteval bool owners_park(SeatList<Rows...>, const hal::ThreadMap& m) {
+    return (
+        (hal::seat_of(m, Rows::seat).ddr != hal::DdrMapping::Owner
+         || HasPauseLatch<typename Rows::Main>)
+        && ...
+    );
+}
+
+static_assert(
+    hal::every_thread_map([](const hal::ThreadMap& m) { return owners_park(SeatMainList{}, m); }),
+    "every DdrMapping::Owner seat's main serves a pause latch"
+);
 
 template <class Row>
 void DeviceBlock::grant_if_latched_(const ThreadAssembly::SeatMains& mains) noexcept {
@@ -193,6 +210,7 @@ void DeviceBlock::grant_pauses(
 
 DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Front& front)
     : front_(front),
+      threads_(plat.threads),
       file_streams_{io_wake_, infra::OptRef<const svc::Vfs>{plat.vfs}},
       events_(),
       owner_events_(),
@@ -277,6 +295,7 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
           .link_inbox = main_inbox_,
           .link_rx = main_rx_,
           .config_cell = config_cell_,
+          .identity_record_cell = identity_record_cell_,
           .ui_inbox = ui_inbox_,
           .input_inbox = input_inbox_,
           .router = link_router_,
@@ -316,11 +335,12 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
       session_{plat.link, plat.link, plat.link, plat.fpga_mem.region, events_, parts_},
       bitstream_{plat.programmer, plat.bridges, plat.vfs, plat.program},
       owner_{
-          session_.quiesce_channel(),
+          session_.switch_park(),
           app::SessionOwner::Link{
               .inbox = main_inbox_,
               .rx = main_rx_,
               .config_cell = config_cell_,
+              .identity_record_cell = identity_record_cell_,
               .owner_events = owner_events_,
               .conf_str_cell = conf_str_cell_,
               .cheat_catalog_cell = cheat_catalog_,
@@ -355,6 +375,7 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
               .sys_grant = infra::OptRef<app::SysGrantCell>{sys_grant_},
               .sys_route = infra::OptRef<const app::SysRouteCell>{sys_route_},
               .io_wake = infra::OptRef<xthread::WakeFlag>{io_wake_},
+              .log_lane = infra::OptRef<xthread::MainLogLane>{main_log_lane_},
               .aperture = plat.fpga_mem.region
           }
       },
@@ -366,12 +387,13 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
       }},
       vfs_(plat.vfs) {
 
-    static_assert(svc::IoMain::kMaxCoworkers >= 9);
+    static_assert(svc::IoMain::kMaxCoworkers >= 11);
     if (!io_doorbells_.valid()) {
         opened_.refuse("T-IO: epoll_create1(doorbells)", Error{Errc::os, ERR_SITE(), 0});
     }
     companion_host_.install(cores::make_servants(vfs_));
     disk_relay_.install(cores::make_disk_servant(vfs_));
+    save_relay_.install(std::make_unique<app::FlatSaveServant>(vfs_));
 }
 
 std::optional<svc::PrefetchMain> DeviceBlock::open_prefetch_main(
@@ -443,6 +465,7 @@ app::SupervisorParts::Services DeviceBlock::services_() noexcept {
         .prefetch = prefetch_,
         .mailbox = mailbox_relay_,
         .disks = disk_relay_,
+        .saves = save_relay_,
         .discs = discs_,
         .writes = writes_,
         .window_jobs = window_jobs_,
@@ -501,10 +524,15 @@ void DeviceBlock::open_seats(const BootParts& plat, const Seats& seats) noexcept
 
     (void)rides_io_(disk_relay_, "T-IO: add_coworker(disk_relay)");
 
+    (void)rides_io_(save_relay_, "T-IO: add_coworker(save_relay)");
+
     if (seats.save_states && rides_io_(*seats.save_states, "T-IO: add_coworker(save_states)")) {
         const mister::SeatScope publishes_as_ui{mister::SeatTag::Ui};
         seats.save_states->start();
     }
+
+    if (seats.ui_writes)
+        (void)rides_io_(*seats.ui_writes, "T-IO: add_coworker(ui_writes)");
 
     (void)rides_io_(storage_, "T-IO: add_coworker(storage)");
 

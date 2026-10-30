@@ -78,14 +78,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (static_cast<std::uint32_t>(a.start.v) + width > proto::StatusRegister::kBits) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    auto& st = session_.status();
-    for (std::uint32_t i = 0; i < width; ++i) {
-        st.set_bit(
-            proto::StatusBit{static_cast<std::uint8_t>(a.start.v + i)},
-            ((a.value >> i) & 1u) != 0
-        );
-    }
-    if (auto r = session_.flush_status(); !r) {
+    if (auto r = session_.apply(proto::StatusEdit::field(a.start, width, a.value)); !r) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::EncodedStatusChange;
@@ -127,7 +120,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::JoyEmit& a, const Link
     if (a.player.v >= proto::JoystickPort::kMaxPorts) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    const auto r = em_.submit(link_, a.player, a.mask, a.autofire);
+    const auto r = em_.submit(frame_, a.player, a.mask, a.autofire);
     if (!r || !*r) {
         return ILinkEncoder::Outcome::Dropped;
     }
@@ -150,9 +143,9 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::BindJoy& a, const Link
 void SpiEncoder::bind_pads(infra::OptRef<const LwPads> granted) noexcept {
     if (granted) {
 
-        em_.bind_pads(link_, hal::reg::Block::redeem(granted->regs.lend()), granted->block);
+        em_.bind_pads(frame_, hal::reg::Block::redeem(granted->regs.lend()), granted->block);
     } else {
-        em_.bind_pads(link_);
+        em_.bind_pads(frame_);
     }
 }
 
@@ -176,7 +169,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (a.player.v >= proto::JoystickPort::kMaxPorts) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    const auto r = em_.release(link_, a.player, a.mask);
+    const auto r = em_.release(frame_, a.player, a.mask);
     if (!r || !*r) {
         return ILinkEncoder::Outcome::Dropped;
     }
@@ -194,7 +187,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::Ps2Frame& a, const Lin
 
 ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::SendRtc& a, const LinkOpCtx&) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
-    const auto r = a.unix_seconds == 0 ? session_.send_rtc() : session_.send_rtc_at(a.unix_seconds);
+    const auto r = session_.send_rtc_image(a.image);
     if (!r) {
         return ILinkEncoder::Outcome::Dropped;
     }
@@ -254,15 +247,8 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (a.bit.v >= proto::StatusRegister::kBits) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    auto& st = session_.status();
-    st.set_bit(a.bit, true);
-    if (auto r = session_.flush_status(); !r) {
+    if (auto r = session_.pulse(a.bit); !r)
         return ILinkEncoder::Outcome::Dropped;
-    }
-    st.set_bit(a.bit, false);
-    if (auto r = session_.flush_status(); !r) {
-        return ILinkEncoder::Outcome::Dropped;
-    }
     return ILinkEncoder::Outcome::EncodedStatusChange;
 }
 

@@ -80,7 +80,6 @@ VideoPump::VideoPump(
       activity_(wiring.activity) {
 
     video_->set_hdmi_capable(false);
-    publish_scaling_policy();
 }
 
 Adv7513Seat::Host VideoPump::seat_host() noexcept {

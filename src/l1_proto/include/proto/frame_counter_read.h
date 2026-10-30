@@ -14,8 +14,6 @@ class FrameCounterRead {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr std::uint16_t kOpcode = 0x42;
-
     static constexpr std::uint32_t kWrapMask = 0xFFu;
 
     static constexpr std::uint32_t kReadWords = 1;

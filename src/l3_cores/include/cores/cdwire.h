@@ -6,12 +6,13 @@
 #include <optional>
 #include <span>
 
+#include "proto/uio_opcodes.h"
 #include "svc/disc_engine.h"
 
 namespace mister::cores::cdwire {
 
-inline constexpr std::uint8_t kUioCdGet = 0x34;
-inline constexpr std::uint8_t kUioCdSet = 0x35;
+inline constexpr std::uint8_t kUioCdGet = static_cast<std::uint8_t>(proto::UioOp::CdGet);
+inline constexpr std::uint8_t kUioCdSet = static_cast<std::uint8_t>(proto::UioOp::CdSet);
 
 inline constexpr std::uint16_t kCddGetCmd = 0;
 inline constexpr std::uint16_t kCddGetSendData = 1;

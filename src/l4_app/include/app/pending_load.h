@@ -2,13 +2,13 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <string_view>
 
 #include "app/load_request.h"
 #include "app/mra_facts.h"
 #include "app/ui_request.h"
+#include "cores/manifest_doc_facts.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 
@@ -30,20 +30,17 @@ public:
 
     [[nodiscard]] std::string_view path() const noexcept { return req_.path.view(); }
 
-    [[nodiscard]] Ex<std::string> resolve(const svc::Vfs& vfs) const;
-
-    [[nodiscard]] Ex<void> load_manifest(const svc::Vfs& vfs);
-
-    [[nodiscard]] Ex<void> validate(const svc::Vfs& vfs);
-
 private:
-    [[nodiscard]] Ex<std::string> resolve_mra_(const svc::Vfs& vfs) const;
-
     LoadRequest req_{};
-    std::optional<std::string> doc_;
 };
 
 [[nodiscard]] MraFacts mra_facts_at(const svc::Vfs& vfs, std::string_view rel);
+
+[[nodiscard]] cores::ManifestDocFacts build_doc_facts(
+    const svc::Vfs& vfs,
+    std::string_view text,
+    std::string_view path
+);
 
 [[nodiscard]] Ex<std::string> resolve_bitstream(
     const svc::Vfs& vfs,

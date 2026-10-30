@@ -13,13 +13,13 @@ namespace mister::app {
 ContentPick::ContentPick(const Wiring& w) noexcept
     : inbox_(w.inbox),
       ftx_level_cell_(w.ftx_level_cell),
-      owner_events_(w.events),
+      owner_events_(w.events.producer()),
       vfs_(w.vfs),
       window_map_(w.window_map),
       negotiated_(w.negotiated),
       mounts_(w.mounts),
       ladder_(w.ladder),
-      rungs_(w.rungs),
+      belt_(w.belt),
       owner_tally_(w.owner_tally),
       mgl_row0_cell_(w.mgl_row0_cell),
       act_keys_(w.act_keys),
@@ -83,13 +83,13 @@ ContentPick::Out ContentPick::load_file(
     if constexpr (requires { req.save; })
         choice = req.save;
     const PickedLoad load{.content = *cr, .opensave = row->opensave, .choice = choice, .tag = tag};
-    plan_addons_(*row, req.path.view(), load, ram_image);
+    BeltOrders orders = plan_addons_(*row, req.path.view(), load, ram_image);
     if (!picked_load_)
-        return Out{.run = load};
-    return {};
+        return Out{.run = load, .orders = std::move(orders)};
+    return Out{.orders = std::move(orders)};
 }
 
-void ContentPick::plan_addons_(
+BeltOrders ContentPick::plan_addons_(
     const proto::ConfStrFileRow& row,
     std::string_view pick,
     const PickedLoad& load,
@@ -98,27 +98,28 @@ void ContentPick::plan_addons_(
     AddonSend addons = AddonSend::plan(row.addon, pick, load.content.slot);
     if (image.size() != 0 && !addons.take_image(cores::expand(image))) {
         ++owner_tally_.ram_images_declined;
-        (void)owner_events_.push(
-            infra::make<Event>(
-                Event::RamImageDeclined{.why = Errc::negotiation},
-                Event::Head{EmitSite{ERR_SITE()}, {}, load.tag}
-            )
+        owner_events_.push(
+            Event::RamImageDeclined{.why = Errc::negotiation},
+            Event::Head{EmitSite{ERR_SITE()}, {}, load.tag}
         );
     }
     if (addons.empty())
-        return;
-    if (row.addon_after) {
-        rungs_.addons_after.emplace(std::move(addons));
-        return;
-    }
-    rungs_.addons.emplace(std::move(addons));
+        return {};
+    if (row.addon_after)
+        return BeltOrders{.addons_after = std::move(addons)};
     picked_load_ = load;
+    return BeltOrders{.addons = std::move(addons)};
 }
 
 ContentPick::After ContentPick::run_attached_load(const PickedLoad& load, Host& host) {
     TASTY_SEAT_BODY(ContentPick);
-    if (negotiated_.owns_loader() && arm_loader(load.content))
-        return {};
+    if (negotiated_.owns_loader()) {
+        Armed a = arm_loader(load.content);
+        if (a.busy)
+            host.refuse_busy(load.content.asked, load.content.tag);
+        if (a.taken)
+            return After{.orders = std::move(a.orders)};
+    }
     return order_row_content(load.content, load.opensave, load.choice, load.tag, host);
 }
 
@@ -130,10 +131,10 @@ std::optional<ContentRequest> ContentPick::content_for(
     ContentRequest cr{};
     if (!cr.path.assign(path))
         return std::nullopt;
-    cr.slot = static_cast<std::uint8_t>(proto::ConfStr::wire_index(row, path));
+    cr.slot = proto::ConfStr::wire_index(row, path);
     if (const auto member = zip_member_(row, path)) {
         cr.path = *member;
-        cr.slot = static_cast<std::uint8_t>(proto::ConfStr::wire_index(row, member->view()));
+        cr.slot = proto::ConfStr::wire_index(row, member->view());
     }
     cr.load_addr = row.load_addr;
     return cr;
@@ -154,9 +155,12 @@ ContentPick::After ContentPick::order_row_content(
 
 ContentPick::After ContentPick::launch_content(const ContentRequest& cr) {
     TASTY_SEAT_BODY(ContentPick);
-    if (negotiated_.owns_loader() || !arm_loader(cr))
+    if (negotiated_.owns_loader())
         return perform_content(cr);
-    return {};
+    Armed a = arm_loader(cr);
+    if (!a.taken)
+        return perform_content(cr);
+    return After{.orders = std::move(a.orders)};
 }
 
 bool ContentPick::wants_zip_member(std::string_view path, std::string_view exts) {
@@ -221,8 +225,7 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
             return {};
         }
         forget_watch();
-        rungs_.pieces.emplace(std::move(*p));
-        return {};
+        return After{.orders = {.pieces = std::move(*p)}};
     }
     auto buf = read_whole(**f, sz->v);
     if (!buf) {
@@ -267,7 +270,11 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
 bool ContentPick::order_content_tx(proto::FileId file, ContentWatch watch) {
     TASTY_SEAT_BODY(ContentPick);
     watch.act = act_keys_.next();
-    const proto::LinkOp::FileTx op{.wire_index = watch.wire_index, .file = file, .act = watch.act};
+    const proto::LinkOp::FileTx op{
+        .wire_index = watch.wire_index.fio_byte(),
+        .file = file,
+        .act = watch.act
+    };
     if (!inbox_.push(op))
         return false;
     watch_.emplace(std::move(watch));
@@ -290,22 +297,22 @@ void ContentPick::forget_watch() noexcept {
     ++tally_.long_wait_drops;
 }
 
-void ContentPick::step_watch() {
+BeltOrders ContentPick::step_watch() {
     TASTY_SEAT_BODY(ContentPick);
     if (!watch_)
-        return;
+        return {};
     const auto s = ftx_level_cell_.sample();
     if (!s || !s.value.answers(watch_->act))
-        return;
+        return {};
     const FileTxLevel& l = s.value;
     if (l.held_act != watch_->act) {
         watch_.reset();
-        return;
+        return {};
     }
 
-    if (rungs_.any_live(kWatchCutters)) {
+    if (belt_.any_live(kWatchCutters)) {
         forget_watch();
-        return;
+        return {};
     }
     ContentWatch& w = *watch_;
     if (!w.cut_on_hold && w.file) {
@@ -318,42 +325,42 @@ void ContentPick::step_watch() {
             w.crc
         );
         if (p) {
-            rungs_.pieces.emplace(std::move(*p));
             ++tally_.long_wait_resumes;
             watch_.reset();
-            return;
+            return BeltOrders{.pieces = std::move(*p)};
         }
     }
     const proto::LinkOp::FileTx cut{
-        .wire_index = w.wire_index,
+        .wire_index = w.wire_index.fio_byte(),
         .phase = proto::LinkOp::FileTxPhase::Close,
         .total = static_cast<std::uint32_t>(w.total)
     };
     if (!inbox_.push(cut))
-        return;
+        return {};
     ++owner_tally_.files_failed;
     ++tally_.long_wait_refusals;
     watch_.reset();
+    return {};
 }
 
-void ContentPick::watch_last_piece() {
+void ContentPick::watch_last_piece(FileTxPieces& pieces) {
     TASTY_SEAT_BODY(ContentPick);
-    const FileTxPieces::LastOp l = rungs_.pieces->last_op();
+    const FileTxPieces::LastOp l = pieces.last_op();
     ContentWatch w{
         .act = l.act,
-        .file = rungs_.pieces->take_file(),
-        .total = rungs_.pieces->total(),
+        .file = pieces.take_file(),
+        .total = pieces.total(),
         .crc = l.crc,
-        .wire_index = rungs_.pieces->wire_index(),
+        .wire_index = pieces.wire_index(),
         .from = l.from,
         .cut_on_hold = l.shaped
     };
-    if (!w.path.assign(rungs_.pieces->path()))
+    if (!w.path.assign(pieces.path()))
         w.file.reset();
     watch_.emplace(std::move(w));
 }
 
-bool ContentPick::arm_loader(
+ContentPick::Armed ContentPick::arm_loader(
     const ContentRequest& req,
     std::string_view save,
     std::uint64_t save_bytes
@@ -362,15 +369,17 @@ bool ContentPick::arm_loader(
     const cores::CoreFactory* row = negotiated_.load_row();
     const cores::MakeLoader make = cores::loader_for(row, req.load_addr);
     if (make == nullptr)
-        return false;
+        return {};
     const bool own = row != nullptr && row->make_loader != nullptr;
 
-    if (!own && rungs_.any_live(kLoaderBusy)) {
+    if (own && belt_.any_live(kLoaderBusy))
+        return Armed{.taken = true, .busy = true};
+    if (!own && belt_.any_live(kLoaderBusy)) {
         ++owner_tally_.files_failed;
-        return true;
+        return Armed{.taken = true};
     }
     content_owed_ = Owed{req.asked, req.tag};
-    if (own && cores::walks_romset(row->profile->slots, proto::IoIndex{req.slot})) {
+    if (own && cores::walks_romset(row->profile->slots, req.slot.io())) {
         return arm_walk_(req, *row);
     }
     const cores::CoreProfile& profile = row != nullptr
@@ -381,36 +390,31 @@ bool ContentPick::arm_loader(
     const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
     if (!sz) {
         ++owner_tally_.files_failed;
-        return true;
+        return Armed{.taken = true};
     }
     const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
     auto loader = make(cores::LoaderContext{vfs_, profile, turbo, loader_memo_, aperture_});
-    const cores::LoadAsk ask{
-        .index = proto::IoIndex{req.slot},
-        .path = path,
-        .size = sz->v,
-        .load_addr = req.load_addr
-    };
+    const cores::LoadAsk
+        ask{.index = req.slot, .path = path, .size = sz->v, .load_addr = req.load_addr};
     const auto plan = loader->plan(ask, status_cell_.sample().value);
     if (!plan || plan->count == 0) {
         ++owner_tally_.files_failed;
-        return true;
+        return Armed{.taken = true};
     }
 
     if (plan->count > 1) {
         auto w = LoadWalk::start(std::move(loader), *plan, profile.windows);
         if (!w) {
             ++owner_tally_.files_failed;
-            return true;
+            return Armed{.taken = true};
         }
         forget_watch();
-        rungs_.walk.emplace(std::move(*w));
-        return true;
+        return Armed{.taken = true, .orders = {.walk = std::move(*w)}};
     }
     const cores::TransferRow& r = plan->rows[0];
     const bool plain = !r.shaped && !r.placed;
     if (plain && r.dest != cores::RowDest::Window)
-        return false;
+        return {};
     if (r.dest == cores::RowDest::Window) {
         const std::uint64_t extent = std::max<std::uint64_t>(sz->v, r.extent);
         auto w = LoadWindow<seat_owner::Main>::open(
@@ -446,45 +450,46 @@ bool ContentPick::arm_loader(
             };
             if (!job.save.assign(save)) {
                 ++owner_tally_.files_failed;
-                return true;
+                return Armed{.taken = true};
             }
             auto l = LoadLadder::start(std::move(job), std::move(*w), path);
             if (!l) {
                 ++owner_tally_.files_failed;
-                return true;
+                return Armed{.taken = true};
             }
             forget_watch();
-            rungs_.load.emplace(std::move(*l));
-            return true;
+            return Armed{.taken = true, .orders = {.load = std::move(*l)}};
         }
         windows_.refused(w.error().code);
         windows_.publish();
 
         if (r.placed || r.mirror != 0) {
             ++owner_tally_.files_failed;
-            return true;
+            return Armed{.taken = true};
         }
 
         if (plain)
-            return false;
+            return {};
     }
     auto p = FileTxPieces::start(std::move(*f), sz->v, req.slot, path, std::move(loader), r);
     if (!p) {
         ++owner_tally_.files_failed;
-        return true;
+        return Armed{.taken = true};
     }
     forget_watch();
-    rungs_.pieces.emplace(std::move(*p));
-    return true;
+    return Armed{.taken = true, .orders = {.pieces = std::move(*p)}};
 }
 
-bool ContentPick::arm_walk_(const ContentRequest& req, const cores::CoreFactory& row) {
+ContentPick::Armed ContentPick::arm_walk_(
+    const ContentRequest& req,
+    const cores::CoreFactory& row
+) {
     const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
     auto loader = row.make_loader(
         cores::LoaderContext{vfs_, *row.profile, turbo, loader_memo_, aperture_}
     );
     const cores::LoadAsk ask{
-        .index = proto::IoIndex{req.slot},
+        .index = req.slot,
         .path = req.path.view(),
         .load_addr = req.load_addr
     };
@@ -493,11 +498,10 @@ bool ContentPick::arm_walk_(const ContentRequest& req, const cores::CoreFactory&
                   : Ex<LoadWalk>{std::unexpected(plan.error())};
     if (!w) {
         ++owner_tally_.files_failed;
-        return true;
+        return Armed{.taken = true};
     }
     forget_watch();
-    rungs_.walk.emplace(std::move(*w));
-    return true;
+    return Armed{.taken = true, .orders = {.walk = std::move(*w)}};
 }
 
 template ContentPick::Out ContentPick::load_file(
@@ -524,11 +528,9 @@ bool ContentPick::no_mount_in_flight_() const noexcept {
 void ContentPick::publish_done_(UiRequest::Kind which, CorrelationTag tag) noexcept {
     if (tag == kUncaused)
         return;
-    (void)owner_events_.push(
-        infra::make<Event>(
-            Event::RequestDone{.which = which},
-            Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-        )
+    owner_events_.push(
+        Event::RequestDone{.which = which},
+        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
     );
 }
 

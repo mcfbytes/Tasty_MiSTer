@@ -37,6 +37,10 @@ Ex<void> SpiImageSink::begin(WideIoIndex index, const SessionParams& params) {
     if (queue_ && queue_->held()) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), index.v});
     }
+
+    if (queue_ && queue_->tenant_holds_fio()) {
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), index.v});
+    }
     ds_.reset();
     if (queue_)
         (void)queue_->flush();

@@ -11,7 +11,6 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "proto/joystick.h"
-#include "proto/link_frame.h"
 #include "svc/device_match.h"
 #include "svc/input_device.h"
 #include "svc/deadzone_rule.h"
@@ -140,8 +139,5 @@ private:
     JoyMask joy_mask_[kMaxPlayers]{};
     InputCounters counters_{};
 };
-
-inline constexpr std::uint8_t kUioButSw = 0x01;
-[[nodiscard]] Ex<void> emit_but_sw(proto::ILinkFrame& frame, std::uint16_t map);
 
 }

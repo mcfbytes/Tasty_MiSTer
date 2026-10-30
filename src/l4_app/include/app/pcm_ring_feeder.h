@@ -13,6 +13,7 @@
 #include "cores/pcm_feed.h"
 #include "cores/pcm_feed_state.h"
 #include "cores/pcm_source.h"
+#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/inbox.h"
 #include "infra/seat.h"
@@ -129,25 +130,15 @@ public:
     [[nodiscard]] std::size_t size() const noexcept override;
     [[nodiscard]] cores::IPcmFeed* pcm_feed() noexcept override;
 
-    [[nodiscard]] std::uint32_t wakes() const noexcept {
-        return wakes_.load(std::memory_order_relaxed);
-    }
+    [[nodiscard]] std::uint32_t wakes() const noexcept { return wakes_.get(); }
 
-    [[nodiscard]] std::uint32_t command_drops() const noexcept {
-        return drops_.load(std::memory_order_relaxed);
-    }
+    [[nodiscard]] std::uint32_t command_drops() const noexcept { return drops_.get(); }
 
-    [[nodiscard]] std::uint32_t command_discards() const noexcept {
-        return discards_.load(std::memory_order_relaxed);
-    }
+    [[nodiscard]] std::uint32_t command_discards() const noexcept { return discards_.get(); }
 
-    [[nodiscard]] std::uint32_t fill_passes() const noexcept {
-        return passes_.load(std::memory_order_relaxed);
-    }
+    [[nodiscard]] std::uint32_t fill_passes() const noexcept { return passes_.get(); }
 
-    [[nodiscard]] std::uint32_t command_misrouted() const noexcept {
-        return misrouted_.load(std::memory_order_relaxed);
-    }
+    [[nodiscard]] std::uint32_t command_misrouted() const noexcept { return misrouted_.get(); }
 
 private:
     void wake_main_() noexcept;
@@ -188,24 +179,33 @@ private:
     std::atomic<Park> park_{Park::Idle};
     std::atomic<bool> parked_{true};
 
-    std::atomic<std::uint32_t> wakes_{0}, drops_{0}, discards_{0}, passes_{0}, misrouted_{0};
+    xthread::Counter wakes_{}, drops_{}, discards_{}, passes_{}, misrouted_{};
 
     std::atomic<std::uint32_t> visible_len_{0};
 
-    xthread::SlotPool<PcmMedia, kPcmMediaLeases> media_{};
+    xthread::SlotPool<PcmMedia, kPcmMediaLeases, kSeatMediatorB> media_{};
 
     std::uint32_t last_observed_ = 0;
     bool ever_observed_ = false;
 
-    using Lease = xthread::SlotPool<PcmMedia, kPcmMediaLeases>::Lease;
+    using Lease = xthread::SlotPool<PcmMedia, kPcmMediaLeases, kSeatMediatorB>::Lease;
 
     struct Commander {
         TASTY_SEAT_RESIDENT(RT);
         Lease leases[kPcmMediaLeases]{};
         std::uint32_t lease_seq[kPcmMediaLeases]{};
         std::uint32_t sent = 0;
+
+        ~Commander() {
+            for (auto& l : leases)
+                (void)l.release();
+        }
     };
 
+    static_assert(
+        decltype(media_)::owner_seat() == Commander::kSeatDecl,
+        "the seat that holds the leases is the seat the pool checks"
+    );
     Commander cmd_{};
 
     std::optional<hal::FpgaMemory> ring_{};
@@ -258,7 +258,7 @@ static_assert(
     hal::every_thread_map([](const hal::ThreadMap& m) {
         return hal::seat_of(m, SeatTag::Pcm).cpu != hal::seat_of(m, SeatTag::RT).cpu;
     }),
-    "thread_map.h's pcm_off_rt_cpu, restated where the worker is: up "
+    "thread_map.h's rt_cpu_reserved, restated where the worker is: up "
     "to 8 KiB of memcpy into uncached FPGA DDR per pass must not "
     "contend for the CPU the executive's 5 ms cadence is measured "
     "on."

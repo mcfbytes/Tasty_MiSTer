@@ -19,6 +19,10 @@ Ex<void> FioCheatSink::apply(std::span<const std::uint8_t> table, std::uint32_t 
     TASTY_SEAT_BODY(FioCheatSink);
 
     (void)unit;
+
+    if (queue_ && queue_->tenant_holds_fio()) {
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    }
     if (queue_)
         (void)queue_->flush();
     if (auto r = proto::DownloadSession::send_cheats(*link_, table); !r)

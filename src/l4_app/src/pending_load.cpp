@@ -6,7 +6,6 @@
 #include <cstring>
 #include <span>
 #include <string>
-#include <utility>
 
 #include "app/rbf_resolve.h"
 #include "cores/registry.h"
@@ -75,7 +74,7 @@ void fill_facts(MraFacts& facts, std::string_view doc) {
     cores::ManifestDocFacts parsed = role->facts_of(doc);
     facts.vertical = parsed.vertical;
     facts.rotation = parsed.rotation;
-    facts.setname = std::move(parsed.setname);
+    (void)facts.setname.assign(parsed.setname);
     facts.setname_same_dir = parsed.setname_same_dir;
 }
 
@@ -83,18 +82,6 @@ void fill_facts(MraFacts& facts, std::string_view doc) {
 
 void PendingLoad::arm(const LoadRequest& req) noexcept {
     req_ = req;
-
-    doc_.reset();
-}
-
-Ex<void> PendingLoad::load_manifest(const svc::Vfs& vfs) {
-    if (req_.kind != XmlKind::Mra || doc_)
-        return {};
-    auto r = read_manifest_at(vfs, path(), svc::OpenMode::Read);
-    if (!r)
-        return std::unexpected(r.error());
-    doc_ = std::move(*r);
-    return {};
 }
 
 bool same_image_name(std::string_view rel, std::string_view image) noexcept {
@@ -153,18 +140,6 @@ bool validate_load(const svc::Vfs& vfs, const UiRequest::LoadCore& req) {
     return f.has_value();
 }
 
-Ex<std::string> PendingLoad::resolve(const svc::Vfs& vfs) const {
-    if (req_.kind == XmlKind::Mra)
-        return resolve_mra_(vfs);
-    const std::string_view rel = path();
-    const std::size_t slash = rel.rfind('/');
-    const std::string_view base = slash == std::string_view::npos ? rel : rel.substr(slash + 1);
-    const svc::SearchPolicy policy = ieq(base, kFrontEndImage)
-        ? svc::SearchPolicy{svc::search::kSdRootOnly, true}
-        : svc::SearchPolicy{svc::search::kRootOnly, true};
-    return vfs.resolve(rel, policy);
-}
-
 MraFacts mra_facts_at(const svc::Vfs& vfs, std::string_view rel) {
     MraFacts facts{};
     facts.is_arcade = true;
@@ -175,43 +150,13 @@ MraFacts mra_facts_at(const svc::Vfs& vfs, std::string_view rel) {
     return facts;
 }
 
-Ex<std::string> PendingLoad::resolve_mra_(const svc::Vfs& vfs) const {
-    const std::string_view rel = path();
-    if (!doc_)
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    const std::string_view doc = *doc_;
-
-    const std::string_view frag = svc::xml::rbf_text(doc);
-    if (frag.empty()) {
-
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    }
-
-    std::string dir(manifest_root_of(rel));
-    if (!dir.empty())
-        dir.push_back('/');
-    dir.append("cores");
-
-    auto name = resolve_rbf_name(vfs, dir, frag, true);
-    if (!name)
-        return std::unexpected(name.error());
-    dir.push_back('/');
-    dir.append(*name);
-    return vfs.resolve(dir, svc::SearchPolicy{svc::search::kRootOnly, true});
-}
-
-Ex<void> PendingLoad::validate(const svc::Vfs& vfs) {
-    if (req_.path.empty())
-        return {};
-    if (auto m = load_manifest(vfs); !m)
-        return std::unexpected(m.error());
-    auto p = resolve(vfs);
-    if (!p)
-        return std::unexpected(p.error());
-    auto f = vfs.open(*p, svc::OpenMode::Read);
-    if (!f)
-        return std::unexpected(f.error());
-    return {};
+cores::ManifestDocFacts build_doc_facts(
+    const svc::Vfs& vfs,
+    std::string_view text,
+    std::string_view path
+) {
+    const auto role = cores::manifest_doc_role();
+    return role ? role->facts_at(text, path, vfs) : cores::ManifestDocFacts{};
 }
 
 }

@@ -119,12 +119,7 @@ inline constexpr StagingPolicy kPsxStaging{
 };
 
 inline constexpr auto kPsxServices = std::to_array<LinkDecoderDecl>({
-    {"psx.sector_kick",
-     reactor::Cause::Tick,
-     &kSectorKick<kPsx>,
-     0,
-     DeadlineClass::A,
-     OsdBudget::Shared},
+    {"psx.sector_kick", reactor::Cause::Tick, &kSectorKick<kPsx>, 0, RoundClaim::Never},
 });
 
 inline constexpr const LinkDecoderDecl& kPsxSectorKick = kPsxServices[0];

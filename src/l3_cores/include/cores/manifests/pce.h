@@ -28,16 +28,14 @@ inline constexpr auto kPceCdServices = std::to_array<LinkDecoderDecl>({
         &kCdCommandEdge<kPceCd>,
 
         0,
-        DeadlineClass::A,
-        OsdBudget::Shared,
+        RoundClaim::Never,
     },
     {
         "pcecd.service_tick",
         reactor::Cause::Tick,
         &kCdServiceTick<kPceCd>,
         13,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
 });
 

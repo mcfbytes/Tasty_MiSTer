@@ -64,13 +64,13 @@ InputDecode::InputDecode(
     Fds fds,
     InputWire& wire,
     svc::InputService& svc,
-    DeviceTableChannel& tables,
+    DeviceTableLoans& tables,
     os::IClock& clock,
     Wiring w
 ) noexcept
     : wire_(wire),
       svc_(svc),
-      tables_rx_(tables),
+      tables_rx_(tables.worker()),
       diag_(w.diag),
       inbox_(w.inbox),
       link_rx_(w.link_rx),
@@ -82,7 +82,11 @@ InputDecode::InputDecode(
       mouse_divider_(clock),
       joy_(wire, svc, w.inbox, tally_),
       epfd_(std::move(fds.epfd_)) {
-    (void)take_tables_();
+    {
+
+        const SeatScope stands_in_for_input{kSeat};
+        (void)take_tables_();
+    }
     rebuild_registrations(Reseat::Skip);
 }
 
@@ -184,10 +188,14 @@ void InputDecode::rebuild_registrations(Reseat bridge) {
 
 unsigned InputDecode::take_tables_() noexcept {
     unsigned n = 0;
-    while (const auto t = tables_rx_.next()) {
+    while (auto job = tables_rx_.take()) {
+
+        if (job.index() >= kTableLeases) {
+            fatal(Error{Errc::slot_range, ERR_SITE(), job.index()}, "DeviceTableLoans::take");
+        }
         deregister_devices_();
-        svc_.install(*t);
-        tables_rx_.taken();
+        svc_.install(*job);
+        job.complete();
         ++n;
     }
     return n;

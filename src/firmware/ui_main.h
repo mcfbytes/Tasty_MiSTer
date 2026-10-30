@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "app/event.h"
 #include "app/uart_mode.h"
 #include "app/uart_performer.h"
 #include "infra/error.h"
@@ -18,8 +19,6 @@
 namespace mister::app {
 class BtPump;
 class CmdFifo;
-template <SeatTag Producer>
-class EventQueue;
 class IEventSink;
 class IOwnerTick;
 class IUiRoundPort;
@@ -32,6 +31,7 @@ class RecorderControl;
 class ReplayFeeder;
 class SaveStateAttach;
 class ScreenshotPump;
+class UiWriteLane;
 class VideoPump;
 struct Event;
 }
@@ -67,6 +67,8 @@ public:
         app::LinkRxChannel<SeatTag::Ui>& link_rx;
 
         infra::OptRef<app::SaveStateAttach> save_states{};
+
+        infra::OptRef<app::UiWriteLane> ui_writes{};
 
         infra::OptRef<app::IOwnerTick> owner_tick{};
 
@@ -121,8 +123,8 @@ public:
 private:
     void drain_events_() noexcept;
 
-    app::EventQueue<SeatTag::RT>& events_;
-    app::EventQueue<SeatTag::Main>& owner_events_;
+    app::EventQueue<SeatTag::RT>::Consumer events_;
+    app::EventQueue<SeatTag::Main>::Consumer owner_events_;
     const infra::OptRef<app::CmdFifo> fifo_;
     const infra::OptRef<app::MglPump> mgl_;
     app::VideoPump& video_;
@@ -139,6 +141,7 @@ private:
     const infra::OptRef<app::LwOsdEndpoint> lw_osd_;
     app::LinkRxChannel<SeatTag::Ui>& ui_rx_;
     infra::OptRef<app::SaveStateAttach> save_states_;
+    infra::OptRef<app::UiWriteLane> ui_writes_;
     xthread::WakeFlag& wake_;
     xthread::WakeFlag stop_;
     xthread::PauseLatch pause_;

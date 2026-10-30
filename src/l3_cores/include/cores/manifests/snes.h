@@ -21,8 +21,7 @@ inline constexpr auto kSnesServices = std::to_array<LinkDecoderDecl>({
         reactor::Cause::Tick,
         &kMailboxTick<kSnes>,
         0,
-        DeadlineClass::A,
-        OsdBudget::Shared,
+        RoundClaim::Never,
     },
 });
 
@@ -56,8 +55,7 @@ inline constexpr auto kSgbServices = std::to_array<LinkDecoderDecl>({
         reactor::Cause::Tick,
         &kMailboxTick<kSgb>,
         0,
-        DeadlineClass::A,
-        OsdBudget::Shared,
+        RoundClaim::Never,
     },
 });
 

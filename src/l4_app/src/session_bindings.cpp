@@ -32,7 +32,7 @@ void SessionBindings::bind_facts(
     facts_.rotation = op.rotation;
     if (op.setname != proto::TxSlabId{}) {
         const auto bytes = inbox.bytes(op.setname);
-        facts_.setname.assign(infra::as_text(bytes));
+        (void)facts_.setname.assign(infra::as_text(bytes));
     }
 }
 
@@ -107,6 +107,22 @@ void SessionBindings::bind_doorbells(
         );
     }
     doorbells_.count = static_cast<std::uint8_t>(n);
+}
+
+Ex<void> SessionBindings::bind_record(
+    const IdentityRecordCell& cell,
+    const proto::LinkOp::AdoptCore& op
+) noexcept {
+
+    if (cell.sample_into(record_) == 0) {
+        record_ = no_record_;
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
+    }
+    if (record_.stamp.v == 0 || record_.stamp != op.identity) {
+        record_ = no_record_;
+        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), op.identity.v});
+    }
+    return {};
 }
 
 Ex<std::optional<SessionBindings::Mount>> SessionBindings::decode_mount(

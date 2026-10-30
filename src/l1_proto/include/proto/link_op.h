@@ -15,6 +15,7 @@
 #include "proto/ps2_frame.h"
 #include "proto/reset_edge.h"
 #include "proto/rotation_dir.h"
+#include "proto/rtc_image.h"
 #include "proto/save_ask.h"
 #include "proto/types.h"
 #include "proto/osd_target.h"
@@ -118,7 +119,7 @@ struct LinkOp {
 
     struct SendRtc {
         static constexpr Kind kKind = Kind::SendRtc;
-        std::uint32_t unix_seconds = 0;
+        RtcImage image{};
     };
 
     struct BlockAnswer {
@@ -298,11 +299,12 @@ struct LinkOp {
         Built outcome = Built::Refused;
         std::uint16_t gen = 0;
         Errc err{};
-        std::uint8_t pad_[2]{};
+        IdentityStamp identity{};
     };
 
     struct SessionUp {
         static constexpr Kind kKind = Kind::SessionUp;
+        RtcImage rtc{};
     };
 
     struct StageMount {

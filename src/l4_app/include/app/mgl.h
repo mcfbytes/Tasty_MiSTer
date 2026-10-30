@@ -16,6 +16,7 @@
 #include "infra/fixed_str.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/path_text.h"
 #include "os/clock.h"
 #include "os/deadline.h"
 #include "infra/seat.h"
@@ -29,7 +30,7 @@ struct MglItem {
     enum class Kind : std::uint8_t { Load, Reset, kCount };
     enum class Slot : std::uint8_t { File, Image };
 
-    static constexpr std::size_t kPathMax = 1024;
+    static constexpr std::size_t kPathMax = infra::kPathMax;
     static constexpr std::size_t kStore = kPathMax + 8;
 
     struct Load {

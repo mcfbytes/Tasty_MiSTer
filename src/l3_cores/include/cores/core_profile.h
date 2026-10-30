@@ -32,8 +32,7 @@ class ISectorProgram;
 
 namespace mister::cores {
 
-using reactor::DeadlineClass;
-using reactor::OsdBudget;
+using reactor::RoundClaim;
 using reactor::LinkDecoderDecl;
 
 enum class CoreKind : std::uint8_t {

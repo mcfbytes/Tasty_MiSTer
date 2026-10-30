@@ -152,13 +152,13 @@ Ex<void> TastySplash::show(
         static_cast<std::uint16_t>(h - 1),
         static_cast<std::uint16_t>(w * 4),
     };
-    return video.wire().publish(svc::kUioSetFbuf, words);
+    return video.wire().publish(proto::UioOp::SetFbuf, words);
 }
 
 Ex<void> TastySplash::hide(app::VideoPump& video) noexcept {
     TASTY_SEAT_BODY(TastySplash);
     const std::array<std::uint16_t, 1> words{0};
-    return video.wire().publish(svc::kUioSetFbuf, words);
+    return video.wire().publish(proto::UioOp::SetFbuf, words);
 }
 
 }

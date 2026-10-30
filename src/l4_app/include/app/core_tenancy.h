@@ -80,7 +80,7 @@ public:
           clock_(g.clock),
           slots_(g.slots),
           session_tally_(g.session_tally),
-          log_lane_(g.log_lane),
+          log_lane_(g.log_lane.producer()),
           storage_life_(g.storage_life),
           mailbox_(g.mailbox),
           disks_(g.disks),
@@ -231,7 +231,7 @@ public:
         if (retire_logs_) {
             retire_logs_ = false;
             const LogRec::CoreUnload unloaded{sat_u32((log_now_ns() - retire_t0_) / 1'000'000u)};
-            (void)log_lane_.push(unloaded, log_now_ns());
+            log_lane_.push(unloaded, log_now_ns());
         }
     }
 
@@ -319,7 +319,7 @@ private:
     const os::IClock& clock_;
     proto::BlockSlots& slots_;
     SessionTally& session_tally_;
-    xthread::LogLane& log_lane_;
+    xthread::LogLane::Producer log_lane_;
     const infra::OptRef<svc::IStorageLifecycle> storage_life_;
     const infra::OptRef<MailboxRelay> mailbox_;
     const infra::OptRef<DiskRelay> disks_;

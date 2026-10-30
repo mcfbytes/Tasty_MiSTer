@@ -233,7 +233,7 @@ void ChdPrefetch::serve() noexcept {
 
             tracking_ = want;
             next_ = want;
-            seeks_.fetch_add(1, std::memory_order_relaxed);
+            seeks_.add();
         } else {
 
             tracking_ = want;
@@ -264,18 +264,15 @@ void ChdPrefetch::serve() noexcept {
     std::byte* dst = slab_.get() + static_cast<std::size_t>(job.index()) * worker_hunk_bytes_;
     const std::int64_t t0 = decode_now_ns();
     auto r = src_->read_hunk(h, std::span<std::byte>(dst, worker_hunk_bytes_));
-    decode_us_.fetch_add(
-        static_cast<std::uint32_t>((decode_now_ns() - t0) / 1000),
-        std::memory_order_relaxed
-    );
+    decode_us_.add(static_cast<std::uint32_t>((decode_now_ns() - t0) / 1000));
     if (!r) {
-        errors_.fetch_add(1, std::memory_order_relaxed);
+        errors_.add();
 
         held_ = std::move(job);
         disabled_ = true;
         return;
     }
-    decodes_.fetch_add(1, std::memory_order_relaxed);
+    decodes_.add();
     job->hunk = h;
     job.complete();
     job = Chan::Job{};
@@ -330,7 +327,7 @@ std::size_t ChdPrefetch::evict_(std::uint32_t current) noexcept {
     }
     resident_count_ = w;
     if (released != 0)
-        evictions_.fetch_add(static_cast<std::uint32_t>(released), std::memory_order_relaxed);
+        evictions_.add(static_cast<std::uint32_t>(released));
     return released;
 }
 
@@ -364,7 +361,7 @@ const std::byte* ChdPrefetch::take(std::uint32_t hunk) noexcept {
 
     for (std::size_t i = 0; i < resident_count_; ++i) {
         if (resident_hunk_[i] == hunk) {
-            hits_.fetch_add(1, std::memory_order_relaxed);
+            hits_.add();
             return slab_.get()
                 + static_cast<std::size_t>(chan_.index_of(resident_[i])) * hunk_bytes_;
         }
@@ -374,16 +371,16 @@ const std::byte* ChdPrefetch::take(std::uint32_t hunk) noexcept {
 
 PrefetchCounters ChdPrefetch::counters() const noexcept {
     PrefetchCounters c;
-    c.hits = hits_.load(std::memory_order_relaxed);
-    c.misses = misses_.load(std::memory_order_relaxed);
-    c.decodes = decodes_.load(std::memory_order_relaxed);
-    c.seeks = seeks_.load(std::memory_order_relaxed);
+    c.hits = hits_.get();
+    c.misses = misses_.get();
+    c.decodes = decodes_.get();
+    c.seeks = seeks_.get();
 
     c.drops = chan_.breaches();
-    c.errors = errors_.load(std::memory_order_relaxed);
+    c.errors = errors_.get();
     c.state = !opened() ? 0u : (parked() ? 1u : 2u);
-    c.decode_us = decode_us_.load(std::memory_order_relaxed);
-    c.evictions = evictions_.load(std::memory_order_relaxed);
+    c.decode_us = decode_us_.get();
+    c.evictions = evictions_.get();
     return c;
 }
 

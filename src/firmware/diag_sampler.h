@@ -30,6 +30,7 @@
 #include "app/hd_osd_status.h"
 #include "diag_records.h"
 #include "rt_evidence.h"
+#include "infra/counter.h"
 #include "infra/diag_log.h"
 #include "infra/log_lane.h"
 #include "infra/opt_ref.h"
@@ -64,11 +65,11 @@ inline constexpr std::uint64_t kRssSoftCeilingBytes = 96ull * 1024 * 1024;
 }
 
 struct DiagStats {
-    std::atomic<std::uint64_t> drains{0};
-    std::atomic<std::uint64_t> heartbeat_last{0};
-    std::atomic<std::uint32_t> heartbeat_stalls{0};
-    std::atomic<std::uint64_t> rss_bytes{0};
-    std::atomic<std::uint32_t> rss_over_ceiling{0};
+    xthread::Counter drains{};
+    xthread::Telemetry<std::uint64_t, SeatTag::Diag> heartbeat_last{};
+    xthread::Counter heartbeat_stalls{};
+    xthread::Telemetry<std::uint64_t, SeatTag::Diag> rss_bytes{};
+    xthread::Counter rss_over_ceiling{};
 };
 
 class DiagSampler {
@@ -97,6 +98,7 @@ public:
         infra::OptRef<const app::SectorRouteCell> sector_route{};
         infra::OptRef<const app::OsdRouteCell> osd_route{};
         infra::OptRef<const app::SysRouteCell> sys_route{};
+        infra::OptRef<xthread::MainLogLane> main_log{};
     };
 
     struct Sources {
@@ -128,6 +130,7 @@ public:
         infra::OptRef<const app::SectorRouteCell> sector_route{};
         infra::OptRef<const app::OsdRouteCell> osd_route{};
         infra::OptRef<const app::SysRouteCell> sys_route{};
+        infra::OptRef<xthread::MainLogLane> main_log{};
     };
 
     struct Services {
@@ -142,7 +145,7 @@ public:
         app::EventQueue<SeatTag::RT>& events,
         const Main<RtEvidence>& ev,
         const xthread::WakeFlag& quiescing,
-        const std::atomic<bool>& transitioning,
+        const xthread::Telemetry<bool, SeatTag::RT>& transitioning,
         xthread::DiagLog& diag,
         xthread::LogLane& rt_lane,
         const Sources& sources,
@@ -174,7 +177,7 @@ public:
 
     const DiagStats& stats() const noexcept { return diag_stats_; }
 
-    static constexpr std::size_t kRtstatsWorstCase = 4064;
+    static constexpr std::size_t kRtstatsWorstCase = 4047;
 
     static constexpr std::size_t kSessWorstCase = infra::json_record_worst(
         SessRecord::kKey,
@@ -205,6 +208,8 @@ public:
     void on(const LogRec::RingLoss& a, const LogRec::Head& h) noexcept;
     void on(const LogRec::DoorbellBound& a, const LogRec::Head& h) noexcept;
     void on(const LogRec::DoorbellPolling& a, const LogRec::Head& h) noexcept;
+    void on(const LogRec::PhaseTolerated& a, const LogRec::Head& h) noexcept;
+    void on(const LogRec::ConfStrArrived& a, const LogRec::Head& h) noexcept;
     void misrouted(const LogRec& r) noexcept;
 
     [[nodiscard]] std::uint32_t log_misrouted() const noexcept { return log_misrouted_; }
@@ -233,6 +238,9 @@ private:
 
     void drain_log_lane() noexcept;
 
+    using LossCounts = std::array<std::uint32_t, infra::ordinal(LogRec::Kind::kCount)>;
+    void voice_log_losses_(const LossCounts& losses, LossCounts& last, const char* src) noexcept;
+
     std::uint64_t rt_evidence_mask() const noexcept;
     unsigned rt_name_mask() const noexcept;
     unsigned rt_first_errno() const noexcept;
@@ -245,7 +253,7 @@ private:
 
     RtEvidence ev_{};
     const xthread::WakeFlag& quiescing_;
-    const std::atomic<bool>& transitioning_;
+    const xthread::Telemetry<bool, SeatTag::RT>& transitioning_;
 
     app::VideoWire& video_wire_;
     infra::OptRef<app::InputBuild> input_build_{};
@@ -273,8 +281,12 @@ private:
     infra::OptRef<const app::UiPageCell> ui_pages_{};
     xthread::DiagLog& diag_;
     xthread::LogLane& lane_rt_;
+    xthread::LogLane::Consumer log_rx_;
+    infra::OptRef<xthread::MainLogLane> lane_main_{};
+    xthread::MainLogLane::Consumer main_rx_;
 
-    std::uint32_t last_log_loss_[infra::ordinal(LogRec::Kind::kCount)] = {};
+    LossCounts last_log_loss_{};
+    LossCounts last_main_loss_{};
     std::uint32_t log_misrouted_ = 0;
     std::uint32_t last_log_misrouted_ = 0;
     std::uint32_t diag_seq_ = 0;
@@ -282,6 +294,7 @@ private:
     unsigned unchanged_streak_ = 0;
     std::uint32_t last_dump_ = 0;
     std::uint32_t last_ev_loss_[app::EventQueue<SeatTag::RT>::kKinds] = {};
+    std::uint64_t heartbeat_prev_ = 0;
     std::uint32_t last_hb_stalls_ = 0;
     std::uint32_t last_rss_over_ = 0;
     unsigned rss_over_streak_ = 0;

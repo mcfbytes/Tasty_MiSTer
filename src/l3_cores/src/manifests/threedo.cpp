@@ -66,13 +66,9 @@ static_assert(
     "announces: a plain ticker, as PCE-CD's is"
 );
 static_assert(
-    kThreeDoServices[0].osd_budget == OsdBudget::Pinned
-        && kThreeDoServices[1].osd_budget == OsdBudget::Pinned,
-    "both 3 ms rows pin the OSD budget"
-);
-static_assert(
-    kThreeDoServices[0].klass == DeadlineClass::A && kThreeDoServices[1].klass == DeadlineClass::A,
-    "3.4: both 3DO services are Class A (T-RT)"
+    kThreeDoServices[0].round_claim == RoundClaim::Always
+        && kThreeDoServices[1].round_claim == RoundClaim::Always,
+    "both 3 ms rows claim each round they run (no OSD row)"
 );
 static_assert(
     kThreeDoServices[0].period_ms == 3 && kThreeDoServices[1].period_ms == 3,

@@ -100,7 +100,7 @@ Ex<void> PsxCore::on_mount(IoIndex slot, const MountedPath& p) {
         return std::unexpected(Error{Errc::core_load, ERR_SITE(), 0});
     }
 
-    if (mount_seen_ == svc::DiscMountState::Mounted && image_path_ == p.display) {
+    if (mount_seen_ == svc::DiscMountState::Mounted && image_path_.view() == p.display) {
         return {};
     }
     plan_ = StagePlan{};
@@ -125,7 +125,7 @@ Ex<void> PsxCore::on_mount(IoIndex slot, const MountedPath& p) {
     if (st == svc::DiscMountState::Failed) {
         return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
     }
-    image_path_.assign(p.display);
+    (void)image_path_.assign(p.display);
     return finish_mount_();
 }
 

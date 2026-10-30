@@ -9,11 +9,13 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "hal/boards_table.h"
 #include "hal/link_timing.h"
 #include "hal/spi_transport.h"
 #include "proto/download_session.h"
+#include "proto/fio_tenant.h"
 #include "proto/fio_window.h"
 #include "proto/reset_fence.h"
 #include "proto/reset_terms.h"
@@ -53,7 +55,8 @@ public:
 
     explicit SpiFioQueue(
         hal::ISpiTransport& link,
-        std::uint32_t piece_words = kPieceWords
+        std::uint32_t piece_words = kPieceWords,
+        infra::OptRef<IFioTenant> tenant = {}
     ) noexcept;
     SpiFioQueue(const SpiFioQueue&) = delete;
     SpiFioQueue& operator=(const SpiFioQueue&) = delete;
@@ -90,6 +93,11 @@ public:
     void release() noexcept { held_ = false; }
 
     [[nodiscard]] bool held() const noexcept { return held_; }
+
+    [[nodiscard]] bool tenant_holds_fio() const noexcept {
+        TASTY_SEAT_BODY(SpiFioQueue);
+        return tenant_ && tenant_->holds_fio();
+    }
 
     void declare_resets(const ResetTerms& terms) noexcept;
 
@@ -142,6 +150,7 @@ private:
     Stats stats_{};
     ResetTerms terms_ = ResetTerms::framework();
     bool held_ = false;
+    infra::OptRef<IFioTenant> tenant_{};
 };
 
 consteval std::uint32_t tightest_round_budget_words() {

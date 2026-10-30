@@ -34,6 +34,7 @@
 #include "app/fabric_state.h"
 #include "app/quiesce_ack.h"
 #include "app/identity_latch.h"
+#include "app/identity_record.h"
 #include "app/pending_load.h"
 #include "app/fenced_core_signals.h"
 #include "app/link_binder.h"
@@ -95,6 +96,7 @@ class InputWire;
 class DurableWriteService;
 class MailboxRelay;
 class DiskRelay;
+class SaveUploadRelay;
 class WindowJobService;
 template <SeatTag Consumer>
 class LinkRxChannel;
@@ -176,6 +178,10 @@ public:
         return config_cell_;
     }
 
+    [[nodiscard]] IdentityRecordCell& identity_record_cell() noexcept {
+        return identity_record_cell_;
+    }
+
     [[nodiscard]] std::uint8_t last_download_index() const noexcept {
         return held_.last_download_index();
     }
@@ -231,6 +237,8 @@ public:
 
     [[nodiscard]] DiskRelay& disks() noexcept { return disks_; }
 
+    [[nodiscard]] SaveUploadRelay& saves() noexcept { return saves_; }
+
     void settle_boot_slot_mount() noexcept;
 
     [[nodiscard]] const FileStreamService& streams() const noexcept { return streams_; }
@@ -239,7 +247,7 @@ public:
 
     void settle_writes() noexcept { nvram_.settle_writes(); }
 
-    [[nodiscard]] const NvramUpload::Tally& nvram_tally() const noexcept { return nvram_.tally(); }
+    [[nodiscard]] NvramUpload::Tally nvram_tally() const noexcept { return nvram_.tally(); }
 
     using Identity = SessionIdentity;
 
@@ -298,6 +306,8 @@ public:
 
     void reap_storage() noexcept;
 
+    void service_saves(std::uint32_t budget_words) noexcept;
+
     void poll_osd_mask();
 
     void publish_doorbell_stats() noexcept;
@@ -347,7 +357,7 @@ public:
 
     [[nodiscard]] const FabricStateView& fabric() const noexcept { return fabric_; }
 
-    [[nodiscard]] QuiesceChannel& quiesce_channel() noexcept { return quiesce_; }
+    [[nodiscard]] SwitchPark& switch_park() noexcept { return switch_park_; }
 
     [[nodiscard]] const QuiesceAck& park() const noexcept { return park_; }
 
@@ -366,7 +376,7 @@ private:
 
     [[nodiscard]] Ex<void> detach();
 
-    [[nodiscard]] Ex<void> raise_session_();
+    [[nodiscard]] Ex<void> raise_session_(const proto::RtcImage& rtc);
 
     void arm_request(const LoadRequest& req);
 
@@ -394,6 +404,8 @@ private:
 
     void fail_machine_() noexcept;
 
+    [[nodiscard]] bool fio_free_() noexcept;
+
     void push(const Event::SessionAdvisory& a);
 
     [[nodiscard]] std::string_view conf_str_name() const noexcept;
@@ -416,6 +428,7 @@ private:
     svc::DiscReadService& unbound_discs_;
     MailboxRelay& mailbox_;
     DiskRelay& disks_;
+    SaveUploadRelay& saves_;
     NvramUpload nvram_;
     WindowJobService& window_jobs_;
     LinkTxChannel<SeatTag::Main>& link_inbox_;
@@ -426,6 +439,8 @@ private:
     Port out_;
     proto::SpiSampler sampler_;
     const xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>& config_cell_;
+
+    IdentityRecordCell& identity_record_cell_;
 
     BootArm boot_;
 
@@ -459,11 +474,13 @@ private:
 
     FabricCell fabric_cell_{};
     FabricStateView fabric_{};
-    QuiesceChannel quiesce_;
+    SwitchPark switch_park_;
     QuiesceAck park_{};
 
     std::uint32_t dropped_gen_ = 0;
     std::uint32_t holds_at_drop_ = 0;
+    std::uint16_t torn_gen_ = 0;
+    std::uint16_t torn_done_ = 0;
 
     void take_park_ask_() noexcept;
 
@@ -480,7 +497,7 @@ private:
 
     bool core_ready_ = true;
 
-    xthread::LogLane& log_lane_;
+    xthread::LogLane::Producer log_lane_;
     std::uint64_t load_start_ns_ = 0;
 
     const LadderStateCell& ladder_cell_;

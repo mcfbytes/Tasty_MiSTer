@@ -7,12 +7,13 @@
 
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
+#include "infra/path_text.h"
 #include "infra/seat.h"
 #include "svc/disc_mounter.h"
 
 namespace mister::svc {
 
-inline constexpr std::size_t kDiscPathCap = 1024;
+inline constexpr std::size_t kDiscPathCap = infra::kPathMax;
 
 inline constexpr std::size_t kDiscMountDepth = 2;
 

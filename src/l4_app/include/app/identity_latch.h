@@ -43,6 +43,8 @@ public:
         cores::PauseOnOsd pause = cores::PauseOnOsd::Option
     ) noexcept;
 
+    void publish(const SessionIdentity& id) noexcept;
+
     [[nodiscard]] bool copy(SessionIdentity& out) const noexcept;
 
     [[nodiscard]] std::uint32_t generation() const noexcept { return cell_.generation(); }

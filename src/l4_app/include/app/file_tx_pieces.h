@@ -15,6 +15,7 @@
 #include "cores/loader.h"
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 #include "svc/file.h"
 
 namespace mister::app {
@@ -35,7 +36,7 @@ public:
     [[nodiscard]] static Ex<FileTxPieces> start(
         std::unique_ptr<svc::IFile> file,
         std::uint64_t total,
-        std::uint8_t wire_index,
+        proto::WideIoIndex wire_index,
         std::string_view path,
         std::unique_ptr<cores::ILoader> loader = nullptr,
         const cores::TransferRow& row = {}
@@ -44,7 +45,7 @@ public:
     [[nodiscard]] static Ex<FileTxPieces> resume(
         std::unique_ptr<svc::IFile> file,
         std::uint64_t total,
-        std::uint8_t wire_index,
+        proto::WideIoIndex wire_index,
         std::string_view path,
         std::uint64_t from,
         std::uint32_t crc
@@ -71,7 +72,7 @@ public:
 
     [[nodiscard]] std::uint64_t total() const noexcept { return total_; }
 
-    [[nodiscard]] std::uint8_t wire_index() const noexcept { return wire_index_; }
+    [[nodiscard]] proto::WideIoIndex wire_index() const noexcept { return wire_index_; }
 
     [[nodiscard]] std::string_view path() const noexcept { return path_.view(); }
 
@@ -87,7 +88,7 @@ private:
     FileTxPieces(
         std::unique_ptr<svc::IFile> file,
         std::uint64_t total,
-        std::uint8_t wire_index,
+        proto::WideIoIndex wire_index,
         std::unique_ptr<cores::ILoader> loader,
         const cores::TransferRow& row
     )
@@ -120,7 +121,7 @@ private:
     std::uint64_t keyed_to_ = 0;
     LoadKey key_;
     std::optional<std::uint32_t> crc_{};
-    std::uint8_t wire_index_;
+    proto::WideIoIndex wire_index_;
     bool cut_owed_ = false;
     bool facts_sent_ = false;
     std::uint32_t pieces_ = 0;

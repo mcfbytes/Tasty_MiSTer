@@ -10,6 +10,7 @@
 #include "hal/boards_table.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/telemetry.h"
 
 namespace mister::reactor {
 class RoundTimer;
@@ -24,7 +25,7 @@ public:
     static constexpr SeatTag kSeat = SeatTag::RT;
 
     explicit LadderScope(
-        std::atomic<bool>& transitioning,
+        xthread::Telemetry<bool, SeatTag::RT>& transitioning,
         infra::OptRef<reactor::RoundTimer> timer = {}
     ) noexcept
         : transitioning_(transitioning),
@@ -37,7 +38,7 @@ public:
     void restore() override;
 
 private:
-    std::atomic<bool>& transitioning_;
+    xthread::Telemetry<bool, SeatTag::RT>& transitioning_;
     infra::OptRef<reactor::RoundTimer> timer_{};
     int saved_policy_ = SCHED_OTHER;
     sched_param saved_param_{};

@@ -85,7 +85,7 @@ void N64Core::stream_closed(const StreamLoadEnd& end) noexcept {
     }
 
     if (route == n64::FileRoute::Ipl)
-        (void)session_->flush_status();
+        session_->post(proto::StatusEdit{});
 }
 
 Ex<void> N64Core::on_apply_load_facts(std::span<const std::uint8_t> facts) {
@@ -102,12 +102,7 @@ Ex<void> N64Core::on_apply_load_facts(std::span<const std::uint8_t> facts) {
         );
     }
     const auto f = infra::load_native<n64::LoadFacts>(facts.first<sizeof(n64::LoadFacts)>());
-    proto::StatusRegister& st = session_->status();
-    for (unsigned bit = 0; bit < proto::StatusWord::kBits; ++bit) {
-        const proto::StatusBit b{static_cast<std::uint8_t>(bit)};
-        if (f.mask.get_bit(b))
-            st.set_bit(b, f.bits.get_bit(b));
-    }
+    session_->stage(proto::StatusEdit{.bits = f.bits, .mask = f.mask});
     crc32_ = f.crc32;
     if (f.kind == n64::FactsKind::IplPreload)
         return {};
@@ -182,21 +177,15 @@ std::uint32_t N64Core::read_(n64::StatusField f) const noexcept {
     return v;
 }
 
-void N64Core::write_(n64::StatusField f, std::uint32_t v) noexcept {
-    proto::StatusRegister& st = session_->status();
-    for (std::uint8_t i = 0; i < f.width; ++i) {
-        st.set_bit(proto::StatusBit{static_cast<std::uint8_t>(f.lo + i)}, ((v >> i) & 1u) != 0u);
-    }
-}
-
 bool N64Core::cheats_enabled_() const noexcept {
     return read_(n64::opt::kCheats) == 0;
 }
 
 void N64Core::disable_cheats_() noexcept {
-    write_(n64::opt::kCheats, 1);
 
-    (void)session_->flush_status();
+    session_->post(
+        proto::StatusEdit::field(proto::StatusBit{n64::opt::kCheats.lo}, n64::opt::kCheats.width, 1)
+    );
 }
 
 std::uint32_t N64Core::save_offset(std::size_t idx) const noexcept {

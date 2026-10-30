@@ -20,24 +20,9 @@ namespace mister::proto::user_io {
 
 using reactor::LinkDecoderDecl;
 inline constexpr auto kHostPollRows = std::to_array<LinkDecoderDecl>({
-    {"link.info_poll",
-     reactor::Cause::Tick,
-     nullptr,
-     100,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Shared},
-    {"link.rumble_poll",
-     reactor::Cause::Tick,
-     nullptr,
-     0,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Shared},
-    {"link.f12_mod_poll",
-     reactor::Cause::None,
-     nullptr,
-     0,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Shared},
+    {"link.info_poll", reactor::Cause::Tick, nullptr, 100, reactor::RoundClaim::Never},
+    {"link.rumble_poll", reactor::Cause::Tick, nullptr, 0, reactor::RoundClaim::Never},
+    {"link.f12_mod_poll", reactor::Cause::None, nullptr, 0, reactor::RoundClaim::Never},
 });
 static_assert(kHostPollRows.size() == kPollShapes.size(), "one census row per poll shape");
 

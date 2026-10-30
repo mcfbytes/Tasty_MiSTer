@@ -39,7 +39,7 @@ public:
     [[nodiscard]] static AddonSend plan(
         std::string_view list,
         std::string_view pick,
-        std::uint8_t idx
+        proto::WideIoIndex idx
     );
 
     [[nodiscard]] static std::optional<PathText> path_of(

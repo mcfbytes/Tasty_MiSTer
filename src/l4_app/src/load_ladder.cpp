@@ -104,7 +104,7 @@ LoadLadder::Pass LoadLadder::open_(Host& h) {
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : Pass::Failed;
     const proto::LinkOp::FileTx op{
-        .wire_index = job_.wire_index,
+        .wire_index = job_.wire_index.fio_byte(),
         .phase = proto::LinkOp::FileTxPhase::WindowOpen,
         .file = *id,
         .total = bracket_length_(),
@@ -273,7 +273,7 @@ LoadLadder::Pass LoadLadder::close_(Host& h) {
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
     const proto::LinkOp::FileTx op{
-        .wire_index = job_.wire_index,
+        .wire_index = job_.wire_index.fio_byte(),
         .phase = proto::LinkOp::FileTxPhase::WindowClose,
         .file = *id,
         .total = bracket_length_()
@@ -320,7 +320,7 @@ LoadLadder::Pass LoadLadder::cut_(Host& h) {
         return Pass::Failed;
     }
     const proto::LinkOp::FileTx op{
-        .wire_index = job_.wire_index,
+        .wire_index = job_.wire_index.fio_byte(),
         .phase = proto::LinkOp::FileTxPhase::WindowClose,
         .total = static_cast<std::uint32_t>(job_.total)
     };
@@ -342,11 +342,9 @@ void LoadLadder::progress_(Host& h, bool edge) noexcept {
         max = cores::kProgressSteps;
         cur = static_cast<std::uint16_t>(off_ * cores::kProgressSteps / job_.total);
     }
-    (void)h.events.push(
-        infra::make<Event>(
-            Event::ProgressUpdate{.cur = cur, .max = max},
-            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
-        )
+    h.events.push(
+        Event::ProgressUpdate{.cur = cur, .max = max},
+        Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
     );
 }
 

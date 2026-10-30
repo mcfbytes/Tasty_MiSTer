@@ -9,6 +9,7 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/ascii.h
   infra/byte_view.h
   infra/claim_set.h
+  infra/counted_lane.h
   infra/counter.h
   infra/crc32.h
   infra/endian.h
@@ -28,6 +29,7 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/park_fds.h
   infra/park_like.h
   infra/parse_int.h
+  infra/path_text.h
   infra/lease_order.h
   infra/pause_latch.h
   infra/persist.h

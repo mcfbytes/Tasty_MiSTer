@@ -14,6 +14,7 @@
 #include "cores/stream_tx_record.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::cores {
 
@@ -26,8 +27,8 @@ public:
     static constexpr std::size_t kChunkBytes = 4096;
 
     static constexpr std::uint16_t kCmdStatus = 0x60;
-    static constexpr std::uint16_t kCmdAck = 0x61;
-    static constexpr std::uint16_t kCmdAudio = 0x62;
+    static constexpr std::uint16_t kCmdAck = static_cast<std::uint16_t>(proto::UioOp::DmaWrite);
+    static constexpr std::uint16_t kCmdAudio = static_cast<std::uint16_t>(proto::UioOp::DmaRead);
     static constexpr std::uint8_t kFlagPlay = 0x01;
     static constexpr std::uint8_t kFlagStop = 0x02;
     static constexpr std::uint8_t kFlagResume = 0x04;

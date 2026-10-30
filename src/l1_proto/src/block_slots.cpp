@@ -5,6 +5,7 @@
 #include "proto/spi_frame.h"
 #include "hal/selected.h"
 #include "proto/storage_completion_dispatch.h"
+#include "proto/uio_opcodes.h"
 
 #include <algorithm>
 #include <array>
@@ -13,11 +14,6 @@
 namespace mister::proto {
 
 namespace {
-
-constexpr std::uint16_t kSectorRd = 0x17;
-constexpr std::uint16_t kSectorWr = 0x18;
-constexpr std::uint16_t kSetSdStat = DiscAnnounce::kSetSdStat;
-constexpr std::uint16_t kSetSdInfo = DiscAnnounce::kSetSdInfo;
 
 constexpr std::array<std::uint8_t, kBlockStagingBytes> kZeroPage{};
 constexpr std::array<std::uint8_t, kBlockStagingBytes> kFfPage = [] {
@@ -61,7 +57,7 @@ Ex<void> BlockSlots::announce(
         return r;
 
     SpiFrame frame{link};
-    if (auto r = frame.begin(FrameSel::Uio, kSetSdInfo); !r)
+    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetSdInfo)); !r)
         return r;
     const auto lo = static_cast<std::uint32_t>(size_bytes.v & 0xFFFFFFFFu);
     const auto hi = static_cast<std::uint32_t>(size_bytes.v >> 32);
@@ -84,7 +80,7 @@ Ex<void> BlockSlots::announce(
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
     }
     const auto parm = static_cast<std::uint16_t>((1u << slot.v) | (writable ? 0u : 0x80u));
-    if (auto r = frame.begin(FrameSel::Uio, kSetSdStat); !r)
+    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetSdStat)); !r)
         return r;
     if (auto r = frame.word(parm); !r)
         return r;
@@ -640,7 +636,8 @@ BlockSlots::Blank BlockSlots::substitute_blank(SlotIndex slot, Lba lba) {
     bool count_blocks
 ) {
     hal::Selected cs(link, hal::ChipSelect::Io);
-    const auto cmd = static_cast<std::uint16_t>(kSectorRd | ack);
+
+    const auto cmd = static_cast<std::uint16_t>(static_cast<std::uint16_t>(UioOp::SectorRd) | ack);
     if (auto r = link.transfer(hal::SpiWord{cmd}); !r) {
         return std::unexpected(r.error());
     }
@@ -793,7 +790,10 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
     records_[req.slot.v].window = Window{};
     {
         hal::Selected cs(link, hal::ChipSelect::Io);
-        const auto cmd = static_cast<std::uint16_t>(kSectorWr | ack);
+
+        const auto cmd = static_cast<std::uint16_t>(
+            static_cast<std::uint16_t>(UioOp::SectorWr) | ack
+        );
         if (auto r = link.transfer(hal::SpiWord{cmd}); !r) {
             return std::unexpected(r.error());
         }

@@ -157,7 +157,7 @@ Ex<void> RamSaveJob::open_(ICoreWindow& window, const svc::Vfs& vfs) {
     if (!area)
         return std::unexpected(area.error());
     w.area = *area;
-    if (auto m = w.map.build(w.area); !m)
+    if (auto m = DiskMap::build_into(w.map, w.area); !m)
         return std::unexpected(m.error());
     total_ = w.map.ram_bytes();
 

@@ -37,6 +37,8 @@ public:
 
     enum class IoSeat : std::uint8_t { Stopped, Running };
 
+    enum class ColdRebootCause : std::uint8_t { UnconfiguredFabric, ExecFailed };
+
     class StopSignals {
     public:
         StopSignals() noexcept;
@@ -71,7 +73,7 @@ public:
                   io_(io),
                   mode_(mode) {}
 
-            void reboot_at_exit() const;
+            void reboot_at_exit(ColdRebootCause why) const;
 
             void warn_if_unconfigured() const;
 

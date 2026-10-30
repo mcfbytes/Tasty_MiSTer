@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 
 #include "app/input_decode.h"
@@ -12,6 +11,7 @@
 #include "proto/link_router.h"
 #include "proto/spi_ps2_decoder.h"
 #include "svc/input_emitter.h"
+#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/telemetry.h"
 #include "infra/seat.h"
@@ -20,7 +20,6 @@ namespace mister::app {
 
 struct InputEmitCounts {
     std::uint32_t rt_rounds = 0;
-    std::uint32_t joy_transactions = 0;
     std::uint32_t rt_errors = 0;
     std::uint32_t edge_resets = 0;
 };
@@ -61,14 +60,13 @@ private:
 
     proto::SpiPs2Decoder ps2_;
 
-    std::uint32_t wm_reset_seq_ = 0;
+    xthread::WakeFlag::Cursor reset_seen_{};
 
     std::uint32_t wm_core_edge_seq_ = 0;
 
     CountsCell counts_cell_{};
-    std::atomic<std::uint32_t> n_rt_rounds_{0};
-    std::atomic<std::uint32_t> n_joy_tx_{0};
-    std::atomic<std::uint32_t> n_edge_reset_{0};
+    xthread::Counter n_rt_rounds_{};
+    xthread::Counter n_edge_reset_{};
 };
 
 static_assert(
@@ -102,7 +100,7 @@ static_assert(
     "DIFFERENT cores — that is what makes every cell's wait-free "
     "single-writer discipline worth its cost, and what keeps "
     "device-rate decode work off the RT core (arch's "
-    "prefetch_off_rt_cpu neighbourhood)."
+    "rt_cpu_reserved neighbourhood)."
 );
 
 }

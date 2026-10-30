@@ -337,126 +337,28 @@ static_assert(
 );
 
 static_assert(
-    every_thread_map([](const ThreadMap& m) { return prefetch_off_rt_cpu(m); }),
-    "brief §4b / item INVARIANT 2: T-PREFETCH and T-RT must be on "
-    "DIFFERENT CPUs. A 3.1-11.0 ms LZMA hunk decode sharing a CPU "
-    "with the FIFO-40 executive is the entire failure the prefetch "
-    "design exists to prevent; co-locating them reintroduces it "
-    "with no other symptom than missed CD deadlines."
+    every_thread_map([](const ThreadMap& m) { return fifo_order_holds(m); }),
+    "item INVARIANTS 3 and 4: exactly the kFifoOrder seats are SCHED_FIFO, at strictly "
+    "falling priority (T-RT, T-FRAME, T-INPUT, T-IO, T-PCM, T-CAPTURE, T-PREFETCH), and "
+    "every other seat is SCHED_OTHER. Deadline-monotonic: each edge is a deadline, and "
+    "inverting one queues the shorter deadline behind the longer. A tie is the "
+    "kernel's run-queue accident; a seat moved to SCHED_OTHER loses the bounded wake it "
+    "exists to buy. Change the order and the row together, never the number alone."
 );
 
 static_assert(
-    every_thread_map([](const ThreadMap& m) { return input_outranks_prefetch(m); }),
-    "brief §4b-i / arch amendment 2026-08-20 / item INVARIANT 3: "
-    "T-INPUT must rank ABOVE T-PREFETCH. Deadline-monotonic: input "
-    "is microseconds of work against a one-frame deadline, a hunk is "
-    "milliseconds of work against ~640 ms of ring slack. Reverting "
-    "this restores the pre-2026-08-20 map, in which a post-seek "
-    "refill (one ring, 8 hunks, ~56 ms of continuous decode) blocks "
-    "input for multiple frames."
+    every_thread_map([](const ThreadMap& m) { return rt_cpu_reserved(m); }),
+    "item INVARIANT 2: only the kRtCpuSeats seats (T-RT, T-FRAME) are pinned to T-RT's "
+    "CPU, at any policy. Every other seat does blocking I/O, payload-sized copies or "
+    "SCHED_OTHER work, and on that core it contends with the round the executive's 5 ms "
+    "cadence is measured on; a SCHED_OTHER thread there is unthrottled contention."
 );
 
 static_assert(
-    every_thread_map([](const ThreadMap& m) { return pcm_off_rt_cpu(m); }),
-    "INVARIANT 2, second seat: T-PCM and T-RT must be on DIFFERENT "
-    "CPUs. T-PCM does blocking file reads and up to 8 KiB of memcpy "
-    "into FPGA DDR per pass; on T-RT's CPU it would preempt nothing (it "
-    "ranks below T-RT) but it would contend for the one core the "
-    "executive's 5 ms cadence is measured on. Same rule as "
-    "T-PREFETCH, same reason, stated separately so removing one seat "
-    "cannot silently delete the other's guarantee."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return input_outranks_pcm(m); }),
-    "INVARIANT 3, extended: T-INPUT must rank ABOVE T-PCM. "
-    "Deadline-monotonic: input is microseconds of work against a "
-    "one-frame deadline; a PCM pass is <= 8192 bytes against the "
-    "46.4 ms that much audio plays for (44100 Hz x 2 ch x 2 B). "
-    "Inverting this lets a ring top-up delay a button by a frame to "
-    "buy slack nothing needs."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return pcm_outranks_prefetch(m); }),
-    "INVARIANT 3, other end: T-PCM must rank ABOVE T-PREFETCH. Same "
-    "assignment read the other way — a PCM pass owes its bytes in "
-    "46.4 ms, a CHD hunk is wanted in ~640 ms, and the two share "
-    "one CPU. Tie or invert this and one 3.1-11.0 ms LZMA decode sits "
-    "in front of an audio ring with 5.81 ms of slack at the "
-    "watermark."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return io_off_rt_cpu(m); }),
-    "INVARIANT 2, third seat: T-IO and T-RT must be on DIFFERENT CPUs. "
-    "T-IO does blocking file I/O — pread, pwrite, fsync — for milliseconds "
-    "at a time; on T-RT's CPU it would preempt nothing (it ranks far below T-RT) "
-    "but it would contend for the one core the executive's 5 ms cadence is "
-    "measured on. Same rule as T-PREFETCH and T-PCM, same reason, stated "
-    "separately so removing one seat cannot silently delete another's "
-    "guarantee. The seat itself is arch section 2's."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return input_outranks_io(m); }),
-    "INVARIANT 3, extended: T-INPUT must rank ABOVE T-IO, the upper edge of "
-    "the band arch section 3 declares. Deadline-monotonic: input is "
-    "microseconds of work against a one-frame 16.7 ms deadline with NO "
-    "fallback, while a late storage fill costs one declined pass and a "
-    "re-presented request, which is COUNTED. A dropped button is counted "
-    "nowhere."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return io_outranks_pcm(m); }),
-    "INVARIANT 3, extended: T-IO must rank ABOVE T-PCM, the LOWER edge of "
-    "the same band. Same yardstick as the two rows above: the storage "
-    "seat's tightest consumer is a 13.3 ms CD-DA sector (Red Book 75 Hz), "
-    "and a PCM pass owes <= 8192 bytes against the 46.4 ms that much audio "
-    "plays for. Invert or tie this and a read a core is STALLED on sits "
-    "behind an audio top-up with three times the slack. T-IO above "
-    "T-PREFETCH follows from this plus pcm_outranks_prefetch and is not "
-    "written twice."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return recorder_off_rt_cpu(m); }),
-    "INVARIANT 2, the recorder's seats: T-CAPTURE, T-ENCODE and T-RECWRITE copy, hash "
-    "and write payload-sized bytes; none may share T-RT's CPU, at any policy."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return launcher_off_rt_cpu(m); }),
-    "T-LAUNCHER hosts an external program that inherits its CPU and policy: it is "
-    "SCHED_OTHER and off T-RT's CPU, so nothing it spawns can run on T-RT's core."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return other_rows_off_rt_cpu(m); }),
-    "no SCHED_OTHER seat shares T-RT's CPU: a SCHED_OTHER thread there is contention "
-    "the SPI and RT round is measured against."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return hdosd_is_other(m); }),
-    "T-HDOSD is SCHED_OTHER: a raster tick is not a deadline seat and takes no FIFO slot."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return capture_outranks_only_prefetch(m); }),
-    "T-CAPTURE is FIFO above T-PREFETCH alone: its copy has one frame, a CHD hunk has "
-    "the read-ahead ring; it stays below input, audio, storage and T-RT; T-ENCODE and "
-    "T-RECWRITE are SCHED_OTHER."
-);
-
-static_assert(
-    every_thread_map([](const ThreadMap& m) { return fifo_prios_all_distinct(m); }),
-    "item INVARIANT 4: every SCHED_FIFO seat must have a DISTINCT "
-    "priority, so the ladder is a total order. Two seats at the same "
-    "priority are ordered by the kernel's run queue, i.e. by "
-    "accident — and the accident is invisible until it is a missed "
-    "deadline on a rig."
+    every_thread_map([](const ThreadMap& m) { return ddr_owners_are(m); }),
+    "every board's DdrMapping::Owner rows are exactly kDdrMappingOwners: a late owner "
+    "refuses the program, so an unmarked seat holding a DDR mapping would be programmed "
+    "under, and a marked seat that never parks would wedge every switch."
 );
 
 static_assert(

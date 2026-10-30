@@ -77,10 +77,14 @@ Ex<void> SpiFioQueue::Emitter::misrouted(const FioWindow&) noexcept {
     return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), 0});
 }
 
-SpiFioQueue::SpiFioQueue(hal::ISpiTransport& link, std::uint32_t piece_words) noexcept
+SpiFioQueue::SpiFioQueue(
+    hal::ISpiTransport& link,
+    std::uint32_t piece_words,
+    infra::OptRef<IFioTenant> tenant
+) noexcept
     : link_(&link),
-      piece_words_(std::clamp<std::uint32_t>(piece_words, 1u, tightest_round_budget_words() - 1u)) {
-}
+      piece_words_(std::clamp<std::uint32_t>(piece_words, 1u, tightest_round_budget_words() - 1u)),
+      tenant_(tenant) {}
 
 std::uint32_t SpiFioQueue::cost_(const FioWindow& w) const noexcept {
     Cost c{link_->width()};
@@ -199,7 +203,7 @@ Ex<void> SpiFioQueue::place_(std::span<const Bracket> act) {
 std::uint32_t SpiFioQueue::drain(std::uint32_t budget_words) noexcept {
     TASTY_SEAT_BODY(SpiFioQueue);
     std::uint32_t used = 0;
-    if (held_)
+    if (held_ || (tenant_ && tenant_->holds_fio()))
         return used;
     while (head_ != size_) {
         const FioWindow& w = q_[head_];
@@ -230,6 +234,8 @@ std::uint32_t SpiFioQueue::flush() noexcept {
 
 void SpiFioQueue::abandon() noexcept {
     TASTY_SEAT_BODY(SpiFioQueue);
+    if (tenant_)
+        tenant_->yield_to_reset();
     abandon_();
 }
 
@@ -269,6 +275,8 @@ void SpiFioQueue::before_reset_line() noexcept {
 }
 
 void SpiFioQueue::reset_abandon_() noexcept {
+    if (tenant_)
+        tenant_->yield_to_reset();
     if (head_ == size_ && !wire_.open)
         return;
     ++stats_.resets;

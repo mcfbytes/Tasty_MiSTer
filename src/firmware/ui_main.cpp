@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui_main.h"
 
+#include "boot_parts.h"
 #include "app/bt_pump.h"
 #include "app/cmd_fifo.h"
 #include "app/event.h"
@@ -17,6 +18,7 @@
 #include "app/uart_handoff_dispatch.h"
 #include "app/uart_mode.h"
 #include "app/ui_round_port.h"
+#include "app/ui_write_lane.h"
 #include "app/video_pump.h"
 #include "infra/message_sum.h"
 
@@ -31,8 +33,10 @@ UiMain::UiMain(
     const Wiring& wiring,
     xthread::WakeFlag& asker
 ) noexcept
-    : events_(events),
-      owner_events_(wiring.owner_events),
+    : events_(wired_end(events.consumer(), "T-UI: RT event lane consumer minted twice")),
+      owner_events_(
+          wired_end(wiring.owner_events.consumer(), "T-UI: MAIN event lane consumer minted twice")
+      ),
       fifo_(wiring.fifo),
       mgl_(wiring.mgl),
       video_(wiring.video),
@@ -48,6 +52,7 @@ UiMain::UiMain(
       lw_osd_(wiring.lw_osd),
       ui_rx_(wiring.link_rx),
       save_states_(wiring.save_states),
+      ui_writes_(wiring.ui_writes),
       wake_(fds.wake()),
       stop_(std::move(fds).take_stop()),
       pause_(wake_, infra::OptRef<xthread::WakeFlag>{asker}),
@@ -62,9 +67,9 @@ void UiMain::start() noexcept {
 }
 
 void UiMain::drain_events_() noexcept {
-    while (auto e = events_.take())
+    while (auto e = events_.pop())
         ui_sink_.deliver(*e);
-    while (auto e = owner_events_.take())
+    while (auto e = owner_events_.pop())
         ui_sink_.deliver(*e);
 }
 
@@ -91,6 +96,8 @@ void UiMain::serve() noexcept {
     recorder_.tick();
     if (save_states_)
         save_states_->tick();
+    if (ui_writes_)
+        ui_writes_->tick();
     if (owner_tick_)
         owner_tick_->tick();
     if (uart_) {
@@ -131,6 +138,8 @@ void UiMain::on_resume() noexcept {
 void UiMain::settle() noexcept {
     drain_events_();
     shots_.tick();
+    if (ui_writes_)
+        ui_writes_->tick();
     if (ui_round_)
         ui_round_->settle();
     if (lw_osd_)

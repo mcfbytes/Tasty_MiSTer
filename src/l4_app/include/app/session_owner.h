@@ -21,9 +21,12 @@
 #include "app/content_pick.h"
 #include "app/core_switch.h"
 #include "app/fabric_state.h"
+#include "app/fallback_counts.h"
+#include "app/identity_record.h"
 #include "app/core_ini.h"
 #include "app/ini_parse.h"
 #include "app/ladder_cell.h"
+#include "app/ladder_host_adapter.h"
 #include "app/launcher_latch.h"
 #include "app/link_rx_channel.h"
 #include "app/manifest_ladder.h"
@@ -33,8 +36,8 @@
 #include "app/owner_ladder.h"
 #include "app/owner_tally.h"
 #include "app/readiness_watch.h"
-#include "app/rung_roster.h"
-#include "app/rung_set.h"
+#include "app/load_belt.h"
+#include "app/main_pass.h"
 #include "app/save_extent_cell.h"
 #include "app/save_state_attach.h"
 #include "app/save_state_facts.h"
@@ -43,22 +46,23 @@
 #include "app/sys_grant.h"
 #include "app/sys_route.h"
 #include "app/sector_route.h"
-#include "app/start_watch.h"
+#include "app/switch_phase.h"
 #include "app/ui_request_ring.h"
 #include "app/window_tally.h"
 #include "cores/boot_ladder.h"
 #include "cores/companion_load.h"
+#include "infra/log_lane.h"
 #include "os/monotonic_clock.h"
 #include "proto/status_cell.h"
 
 namespace mister::app {
 
-class SessionOwner : private RungRoster::Host,
+class SessionOwner : private LoadBelt::Host,
                      private MountQueue::Host,
                      private ContentPick::Host,
                      private CoreSwitch::Host,
                      private ReadinessWatch::Host,
-                     private virtual cores::ILadderHost {
+                     private LadderHostAdapter::Acts {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
@@ -66,6 +70,8 @@ public:
         LinkTxChannel<SeatTag::Main>& inbox;
         LinkRxChannel<SeatTag::Main>& rx;
         ConfigCell& config_cell;
+
+        IdentityRecordCell& identity_record_cell;
         EventQueue<SeatTag::Main>& owner_events;
         ConfStrCell& conf_str_cell;
         CheatCatalogCell& cheat_catalog_cell;
@@ -103,17 +109,16 @@ public:
         infra::OptRef<const SysRouteCell> sys_route{};
 
         infra::OptRef<xthread::WakeFlag> io_wake{};
+        infra::OptRef<xthread::MainLogLane> log_lane{};
         hal::PhysRegion aperture{os::PhysAddr{0}, 0, nullptr};
     };
     template <class T>
     using Cell = xthread::Telemetry<T, SeatTag::Main>;
     using Count = Cell<std::uint32_t>;
 
-    SessionOwner(QuiesceChannel& park, const Link& link) noexcept;
+    SessionOwner(SwitchPark& park, const Link& link) noexcept;
     SessionOwner(const SessionOwner&) = delete;
     SessionOwner& operator=(const SessionOwner&) = delete;
-
-    [[nodiscard]] const StartWatch& start_watch() const noexcept { return start_watch_; }
 
     [[nodiscard]] const ReadinessWatch& readiness() const noexcept { return readiness_; }
 
@@ -128,6 +133,8 @@ public:
     [[nodiscard]] BoardReboot& board_reboot() noexcept { return reboot_; }
 
     [[nodiscard]] const BoardReboot& board_reboot() const noexcept { return reboot_; }
+
+    static constexpr std::uint32_t kStartBoundMs = 5000;
 
     void set_identity_poll_budget(std::uint32_t n) noexcept;
     void set_start_bound_ms(std::uint32_t ms) noexcept;
@@ -147,7 +154,7 @@ public:
 
     void latch_boot_companion(std::string_view xml) noexcept;
 
-    void grant_pause(SeatTag s, xthread::PauseLatch& latch) noexcept;
+    void grant_pause(const hal::ThreadRole& row, xthread::PauseLatch& latch) noexcept;
 
     void service_boot(const UiRequest::LoadCore& req);
 
@@ -202,7 +209,7 @@ public:
 
     [[nodiscard]] UiRequestRing& ui_requests() noexcept { return ui_requests_; }
 
-    [[nodiscard]] bool park_acks_empty() const noexcept { return park_.ack_empty(); }
+    [[nodiscard]] bool park_acks_empty() const noexcept { return !switch_.receipt_owed(); }
 
     [[nodiscard]] bool boot_config_parsed() const noexcept { return ini_.boot_parsed(); }
 
@@ -233,6 +240,8 @@ public:
 
     [[nodiscard]] const Cell<FallbackCounts>& fallback_cell() const noexcept;
 
+    [[nodiscard]] const FallbackCounts& fallbacks() const noexcept { return fallbacks_; }
+
     [[nodiscard]] const Cell<LoadWindowCounts>& window_cell() const noexcept {
         return windows_.cell();
     }
@@ -247,62 +256,34 @@ public:
     [[nodiscard]] const RememberedStem& remembered_stem() const noexcept;
     [[nodiscard]] bool ladder_live() const noexcept;
 
+    [[nodiscard]] const phase::SwitchPhase& switch_phase() const noexcept { return phase_; }
+
 private:
     friend struct SessionOwnerTestAccess;
+    friend struct SessionOwnerTestDrive;
     using MountAsk = MountQueue::MountAsk;
     using Owed = ContentPick::Owed;
-    using Wait = RungRoster::Wait;
+    using Wait = LoadBelt::Wait;
 
-    [[nodiscard]] bool order(const proto::LinkOp& op) override;
-    using cores::ILadderHost::order;
-    [[nodiscard]] Ex<proto::FileId> intern_bytes(
-        std::span<const std::uint8_t> bytes,
-        std::string_view ext,
-        std::uint32_t load_addr
-    ) override;
-    [[nodiscard]] Ex<proto::FileId> intern_path(
-        std::string_view path,
-        std::uint64_t size_bytes
-    ) override;
-    [[nodiscard]] Ex<proto::FileId> intern_piece(
-        std::span<const std::uint8_t> bytes,
-        std::string_view ext,
-        std::uint64_t whole,
-        std::uint64_t offset
-    ) override;
-    [[nodiscard]] Ex<proto::FileId> intern_whole(
-        std::vector<std::uint8_t>&& bytes,
-        std::string_view path
-    ) override;
-    [[nodiscard]] std::optional<bool> file_tx_answer(std::uint32_t act) override;
-    [[nodiscard]] bool order_load_facts(std::span<const std::uint8_t> facts) override;
-    [[nodiscard]] std::size_t link_in_flight() const noexcept override;
-    [[nodiscard]] std::size_t link_word_bytes() const noexcept override;
-    [[nodiscard]] std::uint32_t next_generation() noexcept override;
-    [[nodiscard]] cores::MountStatus mount_status() override;
     [[nodiscard]] bool order_walk(
         proto::IoIndex slot,
         std::string_view path,
         std::uint32_t gen
     ) override;
-    [[nodiscard]] cores::MountStatus walk_status() override;
     [[nodiscard]] bool order_savestates(std::string_view image, std::uint32_t gen) override;
-    [[nodiscard]] std::uint32_t savestates_answered() override;
-    [[nodiscard]] cores::SaveExtent save_extent() override;
-    [[nodiscard]] proto::StatusWord status_word() override;
 
-    [[nodiscard]] infra::OptRef<Rung> rung(RungSlot slot) noexcept override;
-    [[nodiscard]] infra::OptRef<const Rung> rung(RungSlot slot) const noexcept override;
-    void settle(RungSlot slot, Rung::Pass pass) override;
+    [[nodiscard]] cores::ILadderHost& ladder_host() noexcept override;
 
-    void settle_addons_(Rung::Pass pass);
-    void settle_pieces_(Rung::Pass pass);
-    void settle_load_(Rung::Pass pass);
-    void settle_manifest_(Rung::Pass pass);
-    void settle_walk_(Rung::Pass pass);
     void step_held(RungSlot slot) override;
     [[nodiscard]] Wait held_wait(RungSlot slot) const noexcept override;
     [[nodiscard]] Wait rung_wait_() const noexcept;
+    void content_loaded() override;
+    void addons_closed() override;
+    void last_piece_sent(FileTxPieces& pieces) override;
+    void manifest_failed(Errc why) override;
+    void manifest_done() override;
+
+    void offer_(BeltOrders&& orders);
 
     [[nodiscard]] bool arm_loader(
         const ContentRequest& req,
@@ -311,15 +292,16 @@ private:
     ) override;
     void perform_content(const ContentRequest& req) override;
     void launch_content(const ContentRequest& cr) override;
+    void refuse_busy(UiRequest::Kind asked, CorrelationTag tag) noexcept override;
     [[nodiscard]] bool arm_open_save(
         const ContentRequest& cr,
         UiRequest::SaveChoice choice,
         CorrelationTag tag
     ) override;
 
-    void finish_pick_(UiRequest::Kind asked, CorrelationTag tag, const ContentPick::Out& out);
+    void finish_pick_(UiRequest::Kind asked, CorrelationTag tag, ContentPick::Out&& out);
     void run_load_(const PickedLoad& load);
-    void after_content_(const ContentPick::After& after);
+    void after_content_(ContentPick::After&& after);
     void publish_refusal(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept;
     void publish_done(UiRequest::Kind which, CorrelationTag tag) noexcept;
     void refuse_file_ask(UiRequest::Kind asked, CorrelationTag tag, Errc code) noexcept;
@@ -334,6 +316,7 @@ private:
     void drop_core_acts() override;
     void forget_core() noexcept override;
     void programmed(bool ok) override;
+    void pause_wedged() noexcept override;
     [[nodiscard]] bool ask_recovery_switch() override;
     void parkless_teardown() override;
     void fabric_suspect() noexcept override;
@@ -358,11 +341,19 @@ private:
     void order_bind_decoders_(proto::LinkOp::DecoderTable table, std::uint32_t gen) noexcept;
     void order_hold_reset_() noexcept;
     void forget_core_() noexcept;
+
+    [[nodiscard]] std::optional<unsigned> run_(MainPassStep::Step step);
+    void program_();
+    void swap_launcher_();
+    void watch_readiness_();
     void watch_start_() noexcept;
 
     void watch_bridge_() noexcept;
     void end_bridge_session_() noexcept;
-    void give_up_start_(Errc why) noexcept;
+    void give_up_start_(Errc why, phase::Stimulus on) noexcept;
+
+    [[nodiscard]] bool owe_front_end_(const UiRequest::LoadCore& pending) noexcept;
+    [[nodiscard]] bool owe_front_end_always_(const UiRequest::LoadCore& pending) noexcept;
     void fall_back_to_front_end_();
     [[nodiscard]] bool refuse_in_load_(UiRequest::Kind kind, CorrelationTag tag) noexcept;
 
@@ -375,7 +366,7 @@ private:
     void order_(const A& alt) noexcept;
     template <class A>
     bool order_refusable_(const A& alt) noexcept;
-    void refuse_started_switch_(Errc why) noexcept;
+    void refuse_started_switch_(Errc why, phase::Stimulus on) noexcept;
     void order_session_up_() noexcept;
 
     [[nodiscard]] bool arm_restore_ladder_(std::string_view config);
@@ -400,7 +391,7 @@ private:
     void publish_fabric_();
     void step_savestate_hold_();
     [[nodiscard]] bool content_ordered_() const noexcept;
-    void order_make_core_(bool fabric);
+    void order_make_core_(bool fabric, bool identity_bound, const svc::ConfigSnapshot& cfg);
     [[nodiscard]] std::string_view make_core_rel_() const noexcept;
     [[nodiscard]] bool build_has_manifest_(const proto::ConfStr& cs) const;
     [[nodiscard]] bool arm_manifest_();
@@ -413,11 +404,25 @@ private:
     void bind_slot_answer_(bool boot, CorrelationTag tag, std::string_view path);
     void finish_boot_restore_() noexcept;
 
-    QuiesceChannel& park_;
+    void phase_edge_(phase::Stimulus on, Errc why = Errc::negotiation) noexcept;
+    void phase_after_watch_(bool reboot) noexcept;
+
+    void judge_(const phase::SwitchPhase::Taken& t, phase::Stimulus on) noexcept;
+
+    [[nodiscard]] bool rebooting_() const noexcept;
+    void end_rebooting_switch_() noexcept;
+    void refuse_rebooting_(phase::Stimulus on) noexcept;
+    void log_conf_str_(const proto::LinkEvent::ConfStr& c) noexcept;
+    [[nodiscard]] std::uint64_t log_now_ns_() const noexcept;
+
+    [[nodiscard]] bool failed_apply_() const noexcept;
+
+    SwitchPark& park_;
     LinkTxChannel<SeatTag::Main>& inbox_;
     LinkRxChannel<SeatTag::Main>& rx_;
+    IdentityRecordCell& identity_record_cell_;
     CoreIni ini_;
-    EventQueue<SeatTag::Main>& owner_events_;
+    EventQueue<SeatTag::Main>::Producer owner_events_;
     CheatCatalogCell& cheat_catalog_cell_;
     UiRequestRing ui_requests_;
     const proto::StatusCell& status_cell_;
@@ -425,14 +430,22 @@ private:
     const SaveExtentCell& save_extent_cell_;
     os::MonotonicClock default_clock_{};
     const os::IClock& clock_;
-    StartWatch start_watch_;
+    std::uint32_t identity_poll_budget_ = 0;
+    std::uint32_t start_bound_ms_ = kStartBoundMs;
+
+    bool before_seats_ = false;
+
+    bool front_end_armed_ = false;
+    FallbackCounts fallbacks_{};
+    Cell<FallbackCounts> fallback_cell_{};
     std::optional<proto::LinkOp::CoreReset> reset_owed_{};
     OwnerTally tally_{};
     FixedStr<64, StrFit::Reject> replay_save_root_{};
     RememberedFiles remembered_files_ = RememberedFiles::AsStock;
 
     ActKeys act_keys_{};
-    bool core_made_once_ = false;
+
+    IdentityRecord::Stamp identity_stamp_{};
     PathText front_end_image_{};
     BitstreamProgrammer& programmer_;
     ReadinessWatch readiness_;
@@ -459,18 +472,21 @@ private:
 
     std::optional<MadeFacts> made_{};
     CompanionSlot companion_;
-    RungSet rungs_{};
     ILoadWindowMap<seat_owner::Main>& window_map_;
     const FileTxLevelCell& ftx_level_cell_;
     WindowTally windows_{};
+    LoadBelt belt_;
     ContentPick content_;
     infra::OptRef<SaveStateAttach::AskInbox> save_state_asks_;
     infra::OptRef<const SaveStateFactsCell> save_state_facts_;
+    LadderHostAdapter ladder_host_;
     CoreBuilder builder_;
     BoardReboot reboot_;
     CoreSwitch switch_;
-    RungRoster roster_;
     PathText boot_companion_{};
+    phase::SwitchPhase phase_{};
+    phase::Stimulus ask_cause_ = phase::Stimulus::LoadCore;
+    std::optional<xthread::MainLogLane::Producer> log_{};
 };
 
 }

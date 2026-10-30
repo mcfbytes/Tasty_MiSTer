@@ -51,6 +51,10 @@ void IdentityLatch::publish(
     cell_.publish(scratch_);
 }
 
+void IdentityLatch::publish(const SessionIdentity& id) noexcept {
+    cell_.publish(id);
+}
+
 bool IdentityLatch::copy(SessionIdentity& out) const noexcept {
 
     SessionIdentity scratch{};

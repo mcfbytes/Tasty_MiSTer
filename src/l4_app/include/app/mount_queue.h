@@ -43,8 +43,10 @@ public:
         std::optional<std::uint8_t> index_word{};
     };
 
-    class Host : public virtual cores::ILadderHost {
+    class Host {
     public:
+        [[nodiscard]] virtual cores::ILadderHost& ladder_host() noexcept = 0;
+
         [[nodiscard]] virtual bool arm_loader(
             const ContentRequest& req,
             std::string_view save,
@@ -57,7 +59,7 @@ public:
         Host() = default;
         Host(const Host&) = default;
         Host& operator=(const Host&) = default;
-        ~Host() override = default;
+        virtual ~Host() = default;
     };
 
     enum class RememberedFiles : std::uint8_t { AsStock, Ignore };
@@ -143,7 +145,7 @@ private:
 
     const svc::Vfs& vfs_;
     LinkTxChannel<SeatTag::Main>& inbox_;
-    EventQueue<SeatTag::Main>& owner_events_;
+    EventQueue<SeatTag::Main>::Producer owner_events_;
     const os::IClock& clock_;
     OwnerLadder& ladder_;
     const NegotiatedCore& negotiated_;

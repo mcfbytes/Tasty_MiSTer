@@ -4,19 +4,16 @@
 #include <span>
 
 #include "hal/selected.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
-
-namespace {
-constexpr hal::SpiWord kGetString{0x14};
-}
 
 static_assert(CoreSession::kConfStrCap <= 0xFFFFu, "ConfStr.bytes is 16 bits");
 
 Ex<std::size_t> SpiConfStrDecoder::read_() noexcept {
     std::size_t n = 0;
     hal::Selected cs(*link_, hal::ChipSelect::Io);
-    if (auto r = link_->transfer(kGetString); !r)
+    if (auto r = link_->transfer(word(UioOp::GetString)); !r)
         return std::unexpected(r.error());
     while (n < buf_.size()) {
         auto r = link_->transfer(hal::SpiWord{0});

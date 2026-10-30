@@ -22,29 +22,30 @@ void InputEmitter::hold_pads() noexcept {
     lw_.reset();
 }
 
-void InputEmitter::bind_pads(hal::ISpiTransport& link) noexcept {
+void InputEmitter::bind_pads(proto::ILinkFrame& frame) noexcept {
     if (!held_)
         hold_pads();
-    route_ = &spi_;
-    release_held_(link);
+    route_ = &framed_;
+    release_held_(frame);
 }
 
 void InputEmitter::bind_pads(
-    hal::ISpiTransport& link,
+    proto::ILinkFrame& frame,
     hal::reg::Block pad,
     proto::AxiBlockDecl block
 ) noexcept {
     if (!held_)
         hold_pads();
     pad_block_ = block;
-    lw_.emplace(std::move(pad), pad_block_, spi_);
+    lw_.emplace(std::move(pad), pad_block_, framed_);
     route_ = &*lw_;
-    release_held_(link);
+    release_held_(frame);
 }
 
-void InputEmitter::release_held_(hal::ISpiTransport& link) noexcept {
-    spi_.over(link);
+void InputEmitter::release_held_(proto::ILinkFrame& frame) noexcept {
+    framed_.over(frame);
     (void)held_->release(*route_);
+    framed_.clear_frame();
     held_.reset();
 }
 
@@ -62,17 +63,17 @@ std::uint32_t InputEmitter::link_words_bound(PlayerIndex player) const noexcept 
 }
 
 Ex<bool> InputEmitter::submit(
-    hal::ISpiTransport& link,
+    proto::ILinkFrame& frame,
     PlayerIndex player,
     JoyMask buttons,
     JoyMask autofire
 ) {
-    spi_.over(link);
+    framed_.over(frame);
     return joy_.submit(*route_, player, buttons, autofire);
 }
 
-Ex<bool> InputEmitter::release(hal::ISpiTransport& link, PlayerIndex player, JoyMask composed) {
-    spi_.over(link);
+Ex<bool> InputEmitter::release(proto::ILinkFrame& frame, PlayerIndex player, JoyMask composed) {
+    framed_.over(frame);
     return joy_.release(*route_, player, composed);
 }
 
@@ -106,13 +107,13 @@ JoyMask InputEmitter::autofire_mask(PlayerIndex player) const noexcept {
     return autofire_[player.v];
 }
 
-Ex<unsigned> InputEmitter::service_joysticks(hal::ISpiTransport& link, bool local_walk) {
+Ex<unsigned> InputEmitter::service_joysticks(proto::ILinkFrame& frame, bool local_walk) {
     unsigned pushed = 0;
 
     if (local_walk && grabbed_) {
         for (std::uint8_t i = 0; i < kMaxPlayersEmit; ++i) {
             const PlayerIndex p{i};
-            auto sent = submit(link, p, joy_mask_[i], autofire_[i]);
+            auto sent = submit(frame, p, joy_mask_[i], autofire_[i]);
             if (!sent)
                 return std::unexpected(sent.error());
             if (*sent)
@@ -128,7 +129,7 @@ Ex<unsigned> InputEmitter::service_joysticks(hal::ISpiTransport& link, bool loca
                                             : joy_mask_[i];
             if (!zero_armed_[i])
                 continue;
-            auto sent = release(link, p, tested);
+            auto sent = release(frame, p, tested);
             if (!sent)
                 return std::unexpected(sent.error());
 
@@ -141,7 +142,7 @@ Ex<unsigned> InputEmitter::service_joysticks(hal::ISpiTransport& link, bool loca
 }
 
 Ex<bool> InputEmitter::push_paddle(
-    hal::ISpiTransport& link,
+    proto::ILinkFrame& frame,
     PlayerIndex player,
     std::int32_t raw,
     const AxisCal& cal
@@ -159,7 +160,7 @@ Ex<bool> InputEmitter::push_paddle(
         ++axis_range_zero_;
         return std::unexpected(byte.error());
     }
-    spi_.over(link);
+    framed_.over(frame);
     if (const Ex<void> r = joy_.push_paddle(*route_, player, *byte); !r) {
         return std::unexpected(r.error());
     }
@@ -167,7 +168,7 @@ Ex<bool> InputEmitter::push_paddle(
 }
 
 Ex<bool> InputEmitter::push_spinner(
-    hal::ISpiTransport& link,
+    proto::ILinkFrame& frame,
     PlayerIndex player,
     std::int32_t delta
 ) {
@@ -177,7 +178,7 @@ Ex<bool> InputEmitter::push_spinner(
     if (osd_visible_)
         return false;
     const std::int8_t clamped = proto::JoystickPort::spinner_clamp(delta);
-    spi_.over(link);
+    framed_.over(frame);
     if (const Ex<void> r = joy_.push_spinner(*route_, player, clamped); !r) {
         return std::unexpected(r.error());
     }

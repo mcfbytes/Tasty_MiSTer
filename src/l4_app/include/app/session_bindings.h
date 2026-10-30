@@ -9,6 +9,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "app/identity_record.h"
 #include "app/link_tx_reader.h"
 #include "app/mra_facts.h"
 #include "infra/error.h"
@@ -32,6 +33,10 @@ public:
     static constexpr std::size_t kCapTokenCap = 96;
 
     static constexpr std::size_t kDoorbellRows = kLinkTxSlabBytes / sizeof(proto::IrqBinding);
+    static_assert(
+        MraFacts::kSetnameCap == kIdentityNameCap,
+        "the setname and the latched identity name clip at one width"
+    );
 
     struct Identity {
         FixedStr<kIdentityNameCap, StrFit::Clip> core_name{};
@@ -79,10 +84,16 @@ public:
         const ILinkTxReader& inbox
     ) noexcept;
 
+    [[nodiscard]] Ex<void> bind_record(
+        const IdentityRecordCell& cell,
+        const proto::LinkOp::AdoptCore& op
+    ) noexcept;
+
     void forget_core() noexcept {
         identity_.reset();
         uart_ = Uart{};
         doorbells_ = Doorbells{};
+        record_ = no_record_;
     }
 
     void spend_uart_files() noexcept {
@@ -95,6 +106,8 @@ public:
     [[nodiscard]] const proto::BindGeneration& generation() const noexcept { return gen_; }
 
     [[nodiscard]] const MraFacts& facts() const noexcept { return facts_; }
+
+    [[nodiscard]] const IdentityRecord& record() const noexcept { return record_; }
 
     [[nodiscard]] const std::optional<Identity>& identity() const noexcept { return identity_; }
 
@@ -121,6 +134,9 @@ public:
 private:
     MraFacts facts_{};
     std::optional<Identity> identity_{};
+
+    IdentityRecord no_record_{build_identity_record({}, MraFacts{})};
+    IdentityRecord record_{no_record_};
     Uart uart_{};
     Doorbells doorbells_{};
     proto::BindGeneration gen_{};

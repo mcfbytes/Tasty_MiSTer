@@ -5,6 +5,7 @@
 #include <array>
 #include <cctype>
 #include <cstring>
+#include <utility>
 
 #include "svc/gzip_inflate.h"
 
@@ -43,26 +44,24 @@ Ex<void> ElectronCore::on_file_tx(IoIndex index, std::span<const std::uint8_t> b
     return tx_raw_(index, bytes);
 }
 
-Ex<bool> ElectronCore::materialize_(std::span<const std::uint8_t> bytes) {
-    image_.clear();
+Ex<std::span<const std::uint8_t>> ElectronCore::materialize_(std::span<const std::uint8_t> bytes) {
     const std::uint64_t total = bytes.size();
     if (total < 2)
-        return false;
+        return std::span<const std::uint8_t>{};
 
     if (bytes[0] == 0x1F && bytes[1] == 0x8B) {
         auto inflated = svc::inflate_gzip(bytes, kMaxImageBytes);
         if (!inflated)
             return std::unexpected(inflated.error());
         if (!inflated->ok)
-            return false;
+            return std::span<const std::uint8_t>{};
         image_ = std::move(inflated->data);
-        return true;
+        return std::span<const std::uint8_t>{image_};
     }
 
     if (total > kMaxImageBytes)
-        return false;
-    image_.assign(bytes.begin(), bytes.end());
-    return true;
+        return std::span<const std::uint8_t>{};
+    return bytes;
 }
 
 Ex<void> ElectronCore::tx_uef_(IoIndex index, std::span<const std::uint8_t> bytes) {
@@ -78,11 +77,12 @@ Ex<void> ElectronCore::tx_uef_(IoIndex index, std::span<const std::uint8_t> byte
     auto materialized = materialize_(bytes);
     if (!materialized)
         return std::unexpected(materialized.error());
-    if (!*materialized || !uef::valid_header(image_)) {
+    const std::span<const std::uint8_t> image = *materialized;
+    if (image.empty() || !uef::valid_header(image)) {
         return session->end();
     }
 
-    const std::uint32_t numbits = uef::total_bits(image_);
+    const std::uint32_t numbits = uef::total_bits(image);
     last_numbits_ = numbits;
     const std::uint32_t size = (numbits + 7) / 8;
 
@@ -95,7 +95,7 @@ Ex<void> ElectronCore::tx_uef_(IoIndex index, std::span<const std::uint8_t> byte
             for (unsigned bit = 0; bit < 8; ++bit) {
                 val = static_cast<std::uint8_t>(val << 1);
                 val = static_cast<std::uint8_t>(
-                    val | uef::bit_at(image_, cache, ((addr + p) << 3) + bit)
+                    val | uef::bit_at(image, cache, ((addr + p) << 3) + bit)
                 );
             }
             buf_[p] = val;

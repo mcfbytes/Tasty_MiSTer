@@ -32,6 +32,8 @@ struct LogRec {
         RingLoss,
         DoorbellBound,
         DoorbellPolling,
+        PhaseTolerated,
+        ConfStrArrived,
         kCount,
     };
     static constexpr std::size_t kStore = 8;
@@ -112,6 +114,24 @@ struct LogRec {
         std::uint8_t line = 0;
     };
 
+    struct PhaseTolerated {
+        static constexpr Kind kKind = Kind::PhaseTolerated;
+        std::uint32_t gen = 0;
+        std::uint8_t phase = 0;
+        std::uint8_t under = 0;
+        std::uint8_t stimulus = 0;
+        std::uint8_t pad_[1]{};
+    };
+
+    struct ConfStrArrived {
+        static constexpr Kind kKind = Kind::ConfStrArrived;
+        std::uint16_t bind_gen = 0;
+        std::uint8_t phase = 0;
+        std::uint8_t under = 0;
+        std::uint8_t awaited = 0;
+        std::uint8_t pad_[3]{};
+    };
+
     using Alternatives = std::tuple<
         DeadlineMiss,
         SessionTransition,
@@ -123,7 +143,9 @@ struct LogRec {
         Refusal,
         RingLoss,
         DoorbellBound,
-        DoorbellPolling>;
+        DoorbellPolling,
+        PhaseTolerated,
+        ConfStrArrived>;
 
     Kind kind = Kind::DeadlineMiss;
     std::uint8_t pad_[7]{};

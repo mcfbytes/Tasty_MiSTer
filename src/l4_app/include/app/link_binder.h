@@ -45,6 +45,8 @@ public:
         xthread::LogLane& log_lane;
 
         infra::OptRef<PcmRingFeeder> feeder{};
+
+        infra::OptRef<proto::IFioTenant> tenant{};
     };
 
     LinkBinder(hal::ISpiTransport& link, const Wiring& w) noexcept;
@@ -110,7 +112,7 @@ private:
     reactor::Executive& exec_;
     reactor::CoreState& state_;
     reactor::CoreNotifiers notifiers_;
-    xthread::LogLane& log_lane_;
+    xthread::LogLane::Producer log_lane_;
     std::uint32_t doorbells_declared_ = 0;
     std::uint32_t fallbacks_ = 0;
 };

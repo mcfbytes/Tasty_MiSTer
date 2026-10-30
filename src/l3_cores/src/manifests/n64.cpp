@@ -22,12 +22,12 @@ static_assert(
     "n64.cpp is reached through is_n64(), user_io.cpp's strcasecmp against \"N64\""
 );
 static_assert(
-    kN64.services[0].osd_budget == OsdBudget::Pinned,
-    "the cheat tick pins the OSD budget"
+    kN64.services[0].round_claim == RoundClaim::Always,
+    "the cheat tick claims each round it runs (no OSD row)"
 );
 static_assert(
-    kN64.services.size() == 1 && kN64.services[0].klass == DeadlineClass::A,
-    "ONE Class-A row: the cheat engine, which is the whole of n64_poll that "
+    kN64.services.size() == 1,
+    "ONE census row: the cheat engine, which is the whole of n64_poll that "
     "is not 64DD"
 );
 static_assert(

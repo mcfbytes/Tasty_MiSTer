@@ -1,18 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/input_service.h"
-#include "hal/spi_transport.h"
 
 #include "input_rules.h"
 
 namespace mister::svc {
-
-namespace {
-
-constexpr hal::SpiWord kGetKbdLed{0x1F};
-constexpr hal::SpiWord kPs2Ctl{0x21};
-constexpr std::uint16_t kLedPollTicks = 100;
-
-}
 
 namespace {
 
@@ -246,15 +237,6 @@ Ex<void> InputService::adopt(InputDevice&& dev) {
     table_.devices.push_back(std::move(dev));
     ++devices_gen_;
     return {};
-}
-
-[[nodiscard]] Ex<void> emit_but_sw(proto::ILinkFrame& frame, std::uint16_t map) {
-
-    if (auto r = frame.begin(proto::FrameSel::Uio, kUioButSw); !r)
-        return r;
-    if (auto r = frame.word(map); !r)
-        return r;
-    return frame.end();
 }
 
 }

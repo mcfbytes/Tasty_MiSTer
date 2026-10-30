@@ -184,9 +184,10 @@ void SaveStateAttach::on_ui_pause() noexcept {
     if (ui_.out) {
         ui_.stale = true;
         abort_.publish(++ui_.abort_level);
-    } else {
-        ui_.engine.disarm();
     }
+
+    ui_.engine.disarm();
+    (void)ui_.engine.detach();
 
     std::uint32_t dropped = 0;
     while (const auto ask = asks_.pop()) {

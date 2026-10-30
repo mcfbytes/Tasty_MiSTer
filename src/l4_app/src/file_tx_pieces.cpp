@@ -21,7 +21,7 @@ std::string_view ext_of(std::string_view path) noexcept {
 Ex<FileTxPieces> FileTxPieces::start(
     std::unique_ptr<svc::IFile> file,
     std::uint64_t total,
-    std::uint8_t wire_index,
+    proto::WideIoIndex wire_index,
     std::string_view path,
     std::unique_ptr<cores::ILoader> loader,
     const cores::TransferRow& row
@@ -38,7 +38,7 @@ Ex<FileTxPieces> FileTxPieces::start(
 Ex<FileTxPieces> FileTxPieces::resume(
     std::unique_ptr<svc::IFile> file,
     std::uint64_t total,
-    std::uint8_t wire_index,
+    proto::WideIoIndex wire_index,
     std::string_view path,
     std::uint64_t from,
     std::uint32_t crc
@@ -176,7 +176,7 @@ FileTxPieces::Pass FileTxPieces::step(
     }
     staged_.reset();
     const proto::LinkOp::FileTx op{
-        .wire_index = wire_index_,
+        .wire_index = wire_index_.fio_byte(),
         .phase = phase,
         .file = *id,
         .total = static_cast<std::uint32_t>(total_),
@@ -204,7 +204,7 @@ FileTxPieces::Pass FileTxPieces::fail_(LinkTxChannel<SeatTag::Main>& inbox) {
 
 FileTxPieces::Pass FileTxPieces::cut_(LinkTxChannel<SeatTag::Main>& inbox) {
     const proto::LinkOp::FileTx op{
-        .wire_index = wire_index_,
+        .wire_index = wire_index_.fio_byte(),
         .phase = proto::LinkOp::FileTxPhase::Close,
         .total = static_cast<std::uint32_t>(total_)
     };

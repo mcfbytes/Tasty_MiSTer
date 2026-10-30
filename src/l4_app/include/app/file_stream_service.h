@@ -15,13 +15,14 @@
 #include "infra/loan_channel.h"
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
+#include "infra/path_text.h"
 #include "infra/seat.h"
 #include "svc/file.h"
 #include "svc/io_coworker.h"
 
 namespace mister::app {
 
-inline constexpr std::size_t kStreamRelCap = 1024;
+inline constexpr std::size_t kStreamRelCap = infra::kPathMax;
 
 inline constexpr std::size_t kStreamChunkBytes = 64u * 1024u;
 static_assert(kStreamChunkBytes % 32u == 0u);

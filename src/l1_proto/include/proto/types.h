@@ -31,9 +31,36 @@ struct ItemOrdinal {
 };
 
 struct WideIoIndex {
+    TASTY_SEAT_EXEMPT(component);
     std::uint16_t v = 0;
+
+    [[nodiscard]] constexpr IoIndex io() const noexcept {
+        return IoIndex{static_cast<std::uint8_t>(v & 0x3Fu)};
+    }
+
+    [[nodiscard]] constexpr std::uint8_t sub() const noexcept {
+        return static_cast<std::uint8_t>(v >> 6);
+    }
+
+    [[nodiscard]] constexpr std::uint8_t fio_byte() const noexcept {
+        return static_cast<std::uint8_t>(v);
+    }
+
+    [[nodiscard]] static constexpr WideIoIndex of(IoIndex io, std::uint8_t sub) noexcept {
+        return WideIoIndex{
+            static_cast<std::uint16_t>((static_cast<std::uint16_t>(sub) << 6) | io.v)
+        };
+    }
+
     friend constexpr bool operator==(WideIoIndex, WideIoIndex) = default;
 };
+
+static_assert(WideIoIndex::of(IoIndex{0x2A}, 3).io() == IoIndex{0x2A});
+static_assert(WideIoIndex::of(IoIndex{0x2A}, 3).sub() == 3);
+static_assert(WideIoIndex::of(IoIndex{2}, 2).v == 0x82);
+static_assert(WideIoIndex::of(IoIndex{2}, 4).fio_byte() == 0x02);
+static_assert(WideIoIndex{0x82}.sub() == 2);
+static_assert(WideIoIndex{0x82}.io() == IoIndex{2});
 
 struct PathId {
     std::uint16_t v = 0;
@@ -135,6 +162,11 @@ struct TxSlabId {
 struct FileId {
     std::uint16_t v = 0;
     friend constexpr bool operator==(FileId, FileId) = default;
+};
+
+struct IdentityStamp {
+    std::uint16_t v = 0;
+    friend constexpr bool operator==(IdentityStamp, IdentityStamp) = default;
 };
 
 struct CorrelationTag {

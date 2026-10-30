@@ -5,10 +5,10 @@ namespace mister::app {
 
 bool InputWire::push_ui_key(RawKeyEdge e) noexcept {
     if (ui_keys_.push(e)) {
-        bump(ui_keys_pub_, 1u);
+        ui_keys_pub_.add(1u);
         return true;
     }
-    bump(ui_keys_dropped_, 1u);
+    ui_keys_dropped_.add(1u);
     return false;
 }
 
@@ -26,7 +26,7 @@ void InputWire::on_core_loaded(
 ) noexcept {
 
     buttons_.store(0u, std::memory_order_relaxed);
-    bump(core_edges_, 1u);
+    core_edges_.add(1u);
 
     publish_core_name(core_name, front_end);
 
@@ -43,7 +43,7 @@ void InputWire::on_core_detached() noexcept {
     publish_edge_reset();
 
     buttons_.store(0u, std::memory_order_relaxed);
-    bump(core_edges_, 1u);
+    core_edges_.add(1u);
 }
 
 }

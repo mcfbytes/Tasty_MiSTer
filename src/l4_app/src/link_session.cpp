@@ -4,6 +4,7 @@
 #include "app/log_clock.h"
 #include "app/disk_relay.h"
 #include "app/mailbox_relay.h"
+#include "app/save_upload_relay.h"
 #include "infra/byte_view.h"
 #include "infra/posix_compat.h"
 
@@ -56,7 +57,6 @@
 #include "cores/staging_core.h"
 #include "cores/mounted_path.h"
 #include "cores/generic_core.h"
-#include "cores/registry.h"
 #include "reactor/executive.h"
 #include "svc/audio_service.h"
 #include "svc/config.h"
@@ -140,6 +140,7 @@ LinkBinder::Wiring binder_wiring(const SupervisorParts& parts) noexcept {
         .state = parts.core_state,
         .log_lane = parts.log_lane,
         .feeder = infra::OptRef<PcmRingFeeder>{parts.services.feeder},
+        .tenant = infra::OptRef<proto::IFioTenant>{parts.services.saves},
     };
 }
 
@@ -164,7 +165,15 @@ LinkSession::LinkSession(
       unbound_discs_(parts.unbound_discs),
       mailbox_(parts.services.mailbox),
       disks_(parts.services.disks),
-      nvram_(link, parts.vfs, parts.services.writes, parts.board_ops.sleeper, parts.log_lane),
+      saves_(parts.services.saves),
+      nvram_(
+          link,
+          parts.vfs,
+          parts.services.writes,
+          saves_,
+          parts.board_ops.sleeper,
+          parts.log_lane
+      ),
       window_jobs_(parts.services.window_jobs),
       link_inbox_(parts.link_inbox),
       ui_inbox_(parts.ui_inbox),
@@ -174,6 +183,7 @@ LinkSession::LinkSession(
       out_{router_},
       sampler_(samples, router_, static_cast<const proto::ISessionLive&>(*this), parts.pin_levels),
       config_cell_(parts.config_cell),
+      identity_record_cell_(parts.identity_record_cell),
       boot_(machine_, fenced_signals_),
       config_(config_cell_, boot_),
       video_(parts.video),
@@ -189,10 +199,11 @@ LinkSession::LinkSession(
               .storage_life = parts.services.storage_life
           }
       ),
-      quiesce_(parts.main_wake),
-      session_(link, fenced_signals_),
+      switch_park_(parts.main_wake),
+
+      session_(link, fenced_signals_, &binder_.fio_queue()),
       uart_(parts.uart_handoffs),
-      log_lane_(parts.log_lane),
+      log_lane_(parts.log_lane.producer()),
       ladder_cell_(parts.ladder_cell),
       cheats_(parts.cheats),
       save_copy_(parts.save_copy),
@@ -230,7 +241,7 @@ LinkSession::LinkSession(
               .advise_site = kAdviseSite,
               .session_tally = tally_,
               .options = options_,
-              .log_lane = log_lane_,
+              .log_lane = parts.log_lane,
               .vfs = parts.vfs,
               .storage_life = parts.services.storage_life,
               .prefetch = infra::OptRef{parts.services.prefetch},
@@ -271,7 +282,7 @@ LinkSession::LinkSession(
               .clock = clock_,
               .slots = slot_bindings_.slots(),
               .session_tally = tally_,
-              .log_lane = log_lane_,
+              .log_lane = parts.log_lane,
               .storage_life = parts.services.storage_life,
               .mailbox = infra::OptRef{parts.services.mailbox},
               .disks = infra::OptRef{parts.services.disks},
@@ -304,8 +315,6 @@ LinkSession::LinkSession(
               .window_jobs = infra::OptRef{parts.services.window_jobs}
           }
       ) {
-
-    session_.status().fence_with(&binder_.fio_queue());
     if (parts.stdout_routing)
         enable_stdout_routing();
 }
@@ -320,8 +329,7 @@ bool LinkSession::core_supports_mgl() const noexcept {
 
     if (session_.type() == proto::CoreType::SharpMz)
         return false;
-    const cores::CoreProfile& p = cores::profile_for(conf_str_name());
-    return !p.is_front_end && !p.suppresses_mgl;
+    return bindings_.record().mgl_playable;
 }
 
 void LinkSession::reset_video_geometry() {
@@ -343,51 +351,7 @@ bool LinkSession::declares_turbo() const noexcept {
 
 void LinkSession::publish_identity() {
 
-    const std::string_view name = bindings_.core_name();
-    const std::string_view eff = effective_name(name, bindings_.facts());
-
-    svc::JoyPlan joy{};
-    std::string_view j_names{};
-    const infra::OptRef<cores::Core> current = tenancy_.core();
-    if (const auto& bound = bindings_.identity(); bound.has_value()) {
-
-        const cores::ButtonOverride ovr = current.has_value() ? current->button_override()
-                                                              : cores::ButtonOverride{};
-        const svc::ButtonLists lists = svc::choose_button_lists(
-            ovr.names,
-            ovr.defaults,
-            bound->j.view(),
-            bound->jn.view(),
-            bound->jp.view()
-        );
-        joy = svc::build_joy_plan(
-            lists.j,
-            lists.jn,
-            lists.jp,
-            config() != nullptr && config()->gamepad_defaults != 0
-        );
-        j_names = lists.j;
-    }
-    joy.stick_dpad = !cores::profile_for(name).suppress_stick_dpad;
-
-    identity_.publish(
-        eff,
-        name,
-        RememberedStem::of(name, bindings_.facts()),
-        joy,
-        j_names,
-        cores::profile_for(name).is_front_end,
-        current.has_value() && current->profile().suppress_analog_followup,
-        current.has_value() ? current->profile().analog_reshape
-                            : infra::OptRef<const svc::IAnalogReshape>{},
-        cores::profile_for(name).cue_browse_dir,
-        infra::OptRef<const cores::CheatLookup>{cores::profile_for(name).cheats},
-        cores::profile_for(name).slots,
-        game_id_of(bindings_.facts(), config() != nullptr && config()->log_file_entry != 0),
-        bindings_.facts().setname_same_dir,
-        cores::profile_for(name).image_rows_no_zip,
-        cores::profile_for(name).host.pause
-    );
+    identity_.publish(bindings_.record().identity);
 }
 
 void LinkSession::push(const Event::SessionAdvisory& a) {
@@ -396,7 +360,7 @@ void LinkSession::push(const Event::SessionAdvisory& a) {
 
 void LinkSession::take_park_ask_() noexcept {
     const bool was = park_.engaged();
-    park_.poll(quiesce_);
+    park_.poll(switch_park_);
     if (!was && park_.engaged())
         encoder_.drop_pads();
 }
@@ -501,13 +465,11 @@ void LinkSession::tick(RoundEntry entry) {
             binder_.retry_release();
         const bool torn_down = dropped_gen_ == park_.gen() && encoder_.holds() != holds_at_drop_;
 
-        park_.step(
-            quiesce_,
-            !torn_down
-                || binder_.bridge_windows_live()
-                || encoder_.pads_on_lw()
-                || tenancy_.drop_owed()
-        );
+        const bool held_back = !torn_down
+            || binder_.bridge_windows_live()
+            || encoder_.pads_on_lw()
+            || tenancy_.drop_owed();
+        park_.step(switch_park_, held_back);
     }
 
     publish_diag();
@@ -592,6 +554,10 @@ ILinkEncoder::Outcome LinkSession::on(
 ) noexcept {
     switch (a.table) {
         case proto::LinkOp::DecoderTable::Census: {
+
+            const bool seen = a.gen.v == torn_done_
+                || a.gen.v == static_cast<std::uint16_t>(park_.gen());
+            torn_gen_ = seen ? 0 : a.gen.v;
             std::array<reactor::LinkDecoderDecl, kMaxServices> rows{};
 
             const bool dead = machine_.state() == SessionState::Failed;
@@ -625,6 +591,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::DropCore& a, const Li
     ++core_edge_seq_;
     mailbox_.forget();
     disks_.forget();
+    saves_.forget();
     RtRelaxScope scope(ops_);
     if (const auto r = detach(); !r) {
         tally_.last_error = r.error();
@@ -681,6 +648,8 @@ ILinkEncoder::Outcome LinkSession::on(
     const proto::LinkOp::AdoptCore& a,
     const LinkOpCtx&
 ) noexcept {
+    if (!bindings_.bind_record(identity_record_cell_, a))
+        ++tally_.identity_record_refusals;
     const auto made = tenancy_.adopt(a);
 
     const std::uint8_t at = tenancy_.adopted_slot();
@@ -781,14 +750,9 @@ ILinkEncoder::Outcome LinkSession::on(
     if (a.cfg != proto::TxSlabId{} && session_.type() == proto::CoreType::EightBit) {
         const auto bytes = ctx.inbox.bytes(a.cfg);
         if (bytes.size() == 16) {
-            auto& st = session_.status();
-            for (unsigned bit = 0; bit < proto::StatusRegister::kBits; ++bit) {
-                const auto byte_v = bytes[bit / 8];
-                st.set_bit(
-                    proto::StatusBit{static_cast<std::uint8_t>(bit)},
-                    ((byte_v >> (bit % 8)) & 1u) != 0
-                );
-            }
+            session_.stage(
+                proto::StatusEdit::whole(proto::StatusWord::from_bytes(bytes.first<16>()))
+            );
         }
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -839,10 +803,21 @@ ILinkEncoder::Outcome LinkSession::on(
 
     if (park_.engaged() && a.gen.v == static_cast<std::uint16_t>(park_.gen())) {
         park_.withdraw();
+        torn_gen_ = 0;
+        torn_done_ = a.gen.v;
         push(Event::SessionAdvisory{.why = a.why});
         return ILinkEncoder::Outcome::Encoded;
     }
     if (!start_.on() || a.gen != start_.gen()) {
+
+        if (torn_gen_ != 0
+            && a.gen.v == torn_gen_
+            && a.gen.v != static_cast<std::uint16_t>(park_.gen())) {
+            torn_gen_ = 0;
+            torn_done_ = a.gen.v;
+            push(Event::SessionAdvisory{.why = a.why});
+            return ILinkEncoder::Outcome::Encoded;
+        }
         ++tally_.stale_owner_steps;
         return ILinkEncoder::Outcome::Encoded;
     }
@@ -894,7 +869,7 @@ static_assert(LinkOpSessionSink<LinkSession>);
 
 template <class A>
 void LinkSession::log_edge(const A& alt) noexcept {
-    (void)log_lane_.push(alt, log_now_ns());
+    log_lane_.push(alt, log_now_ns());
 }
 
 Ex<std::optional<UiRequest::LoadCore>> LinkSession::boot(std::span<const char* const> argv) {
@@ -945,16 +920,12 @@ Ex<void> LinkSession::reset_core() {
             Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(session_.type())}
         );
     }
-    auto& st = session_.status();
-    st.set_bit(proto::StatusBit{0}, true);
-    if (auto r = session_.flush_status(); !r)
-        return r;
-    st.set_bit(proto::StatusBit{0}, false);
-    return session_.flush_status();
+    return session_.pulse_reset();
 }
 
 void LinkSession::apply_core_(const proto::LinkOp::ApplyCore& a) {
     const proto::BindGeneration gen = a.gen;
+    torn_gen_ = 0;
 
     const bool at_boot = gen.v == kBootGen;
     if (!at_boot && (!park_.parked() || gen.v != static_cast<std::uint16_t>(park_.gen()))) {
@@ -1005,7 +976,7 @@ void LinkSession::adopt_programmed_core_() {
 }
 
 Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
-    if (const auto r = raise_session_(); !r) {
+    if (const auto r = raise_session_(op.rtc); !r) {
 
         encoder_.drop_pads();
         (void)binder_.unbind_session();
@@ -1018,7 +989,7 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
     start_.end(op);
     osd_.on_fabric_reprogrammed();
     machine_.transition(SessionState::Running);
-    const bool front_end = cores::profile_for(conf_str_name()).is_front_end;
+    const bool front_end = bindings_.record().identity.front_end;
     cores::CoreInitContext init_ctx{link_, session_, *this, tenancy_.core()};
     const infra::OptRef<cores::Core> current = tenancy_.core();
     (void)run_core_init(
@@ -1053,7 +1024,7 @@ Ex<ExitReboot> LinkSession::shutdown() {
         ~PublishOnExit() { self->publish_diag(); }
     } publish_on_exit{this};
 
-    nvram_.settle_save_lane();
+    nvram_.settle_save_lane(fio_free_());
     const auto d = detach();
 
     if (tenancy_.drop_owed())
@@ -1064,13 +1035,6 @@ Ex<ExitReboot> LinkSession::shutdown() {
     release_bus();
 
     if (fpga_unconfigured() && ever_running_) {
-        std::fprintf(
-            stderr,
-            "mister: FPGA left unconfigured by a failed bitstream "
-            "program; the bridges stay down (raising them over an "
-            "unconfigured fabric is unsafe) and no userland write can "
-            "make this board bootable — rebooting now (cold)\n"
-        );
         boot_.hold_for_reboot();
         fail_machine_();
         return ExitReboot::Cold;
@@ -1108,12 +1072,6 @@ Ex<void> LinkSession::detach() {
 
     binder_.fio_queue().abandon();
 
-    if (auto r = flush_save_upload(); !r) {
-        nvram_.count_error();
-    } else if (*r != 0) {
-        nvram_.count_upload();
-    }
-
     slot_bindings_.drop_bindings();
 
     encoder_.drop_pads();
@@ -1149,6 +1107,14 @@ void LinkSession::reap_storage() noexcept {
     (void)slot_bindings_.slots().install_completions();
     tenancy_.settle_retire(CoreTenancy::RetireEnd::Round);
     slot_bindings_.settle(tenancy_.core());
+}
+
+void LinkSession::service_saves(std::uint32_t budget_words) noexcept {
+    TASTY_SEAT_BODY(LinkSession);
+    const std::uint32_t drops = saves_.liveness_drops();
+    saves_.service_rt(link_, budget_words, fio_free_());
+    if (saves_.liveness_drops() != drops)
+        log_edge(LogRec::Refusal{Errc::timeout, ERR_SITE()});
 }
 
 void LinkSession::gather_diag(DiagCounters& out) const noexcept {
@@ -1282,8 +1248,6 @@ void LinkSession::on_osd_visibility_edge(bool visible) {
     if (auto r = flush_save_upload(); !r) {
         nvram_.count_error();
         log_edge(LogRec::Refusal{r.error().code, r.error().site});
-    } else if (*r != 0) {
-        nvram_.count_upload();
     }
     const infra::OptRef<cores::Core> current = tenancy_.core();
     if (visible && current.has_value()) {
@@ -1300,8 +1264,8 @@ void LinkSession::on_osd_visibility_edge(bool visible) {
     }
 }
 
-Ex<void> LinkSession::raise_session_() {
-    const std::string name{conf_str_name()};
+Ex<void> LinkSession::raise_session_(const proto::RtcImage& rtc) {
+    const std::string_view name = conf_str_name();
 
     const std::string_view eff = effective_name(name, bindings_.facts());
 
@@ -1310,7 +1274,7 @@ Ex<void> LinkSession::raise_session_() {
         if (auto r = session_.load_saved_config(); !r)
             return r;
 
-        if (auto r = session_.send_rtc(); !r)
+        if (auto r = session_.send_rtc_image(rtc); !r)
             return r;
     }
 
@@ -1362,7 +1326,14 @@ Ex<void> LinkSession::raise_session_() {
         bindings_.spend_uart_files();
 
         proto::SpiFrame frame{link_};
-        (void)uart_.load_for_core(frame, eff, uart_capable, uart_token, midi_token, &files);
+        (void)uart_.load_for_core(
+            frame,
+            uart_capable,
+            uart_token,
+            midi_token,
+            &files,
+            bindings_.record().uart_default_baud
+        );
     }
 
     f12_mod_poll_.arm(true, bindings_.generation());
@@ -1417,6 +1388,11 @@ NvramUpload::SaveCtx LinkSession::save_ctx_() noexcept {
         .core = core,
         .fenced = core.has_value() && held_.save_pull_fenced(tenancy_.core())
     };
+}
+
+bool LinkSession::fio_free_() noexcept {
+    proto::SpiFioQueue& q = binder_.fio_queue();
+    return !held_.fio_held() && q.idle() && !q.held();
 }
 
 void LinkSession::fail_machine_() noexcept {

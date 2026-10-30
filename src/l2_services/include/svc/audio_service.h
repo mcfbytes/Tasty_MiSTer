@@ -9,12 +9,11 @@
 #include "infra/error.h"
 #include "hal/spi_transport.h"
 #include "infra/seat.h"
+#include "proto/link_frame.h"
+#include "proto/uio_opcodes.h"
 #include "proto/volume_cmd.h"
 
 namespace mister::svc {
-
-inline constexpr std::uint8_t kUioSetAfilter = 0x39;
-inline constexpr std::uint8_t kUioAudVol = 0x26;
 
 inline constexpr std::uint8_t kVolAttMask = 0x07;
 inline constexpr std::uint8_t kVolMuteBit = 0x10;
@@ -82,8 +81,8 @@ private:
 
 [[nodiscard]] Ex<std::uint16_t> emit_afilter_probe(hal::ISpiTransport& link);
 
-[[nodiscard]] Ex<void> emit_afilter_volume(hal::ISpiTransport& link, std::uint8_t vol);
+[[nodiscard]] Ex<void> emit_afilter_volume(proto::ILinkFrame& frame, std::uint8_t vol);
 
-[[nodiscard]] Ex<void> emit_audvol(hal::ISpiTransport& link, std::uint8_t vol);
+[[nodiscard]] Ex<void> emit_audvol(proto::ILinkFrame& frame, std::uint8_t vol);
 
 }

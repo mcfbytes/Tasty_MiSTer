@@ -25,7 +25,7 @@ public:
         return d_->active();
     }
 
-    std::uint32_t osd_claims() const override {
+    std::uint32_t claim_count() const override {
         TASTY_SEAT_BODY(DecoderRow);
         if constexpr (requires { d_->osd_claims(); }) {
             return d_->osd_claims();

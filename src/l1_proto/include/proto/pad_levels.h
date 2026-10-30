@@ -10,6 +10,7 @@
 #include "infra/seat.h"
 #include "proto/joystick.h"
 #include "proto/link_pad_encoder.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
@@ -23,8 +24,6 @@ public:
         std::uint8_t index;
     };
 
-    static constexpr std::uint16_t kAstick = 0x1A;
-    static constexpr std::uint16_t kAstick2 = 0x3D;
     static constexpr std::size_t kPorts = JoystickPort::kMaxPorts;
     static constexpr std::size_t kCount = 4 * kPorts;
 
@@ -63,9 +62,18 @@ inline constexpr std::array<PadLevels::Reg, PadLevels::kCount> PadLevels::kRegs 
     std::array<Reg, kCount> r{};
     for (std::uint8_t p = 0; p < kPorts; ++p) {
         r[p] = Reg{JoystickPort::digital_opcode(p), 0};
-        r[kPorts + p] = Reg{kAstick, JoystickPort::stick_index(PlayerIndex{p})};
-        r[2 * kPorts + p] = Reg{kAstick, JoystickPort::paddle_index(PlayerIndex{p})};
-        r[3 * kPorts + p] = Reg{kAstick2, JoystickPort::stick_index(PlayerIndex{p})};
+        r[kPorts + p] = Reg{
+            static_cast<std::uint16_t>(UioOp::Astick),
+            JoystickPort::stick_index(PlayerIndex{p})
+        };
+        r[2 * kPorts + p] = Reg{
+            static_cast<std::uint16_t>(UioOp::Astick),
+            JoystickPort::paddle_index(PlayerIndex{p})
+        };
+        r[3 * kPorts + p] = Reg{
+            static_cast<std::uint16_t>(UioOp::Astick2),
+            JoystickPort::stick_index(PlayerIndex{p})
+        };
     }
     return r;
 }();

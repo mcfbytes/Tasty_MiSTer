@@ -24,7 +24,7 @@ ConfigSaves::ConfigSaves(const Wiring& w) noexcept
     : inbox_(w.inbox),
       rx_(w.rx),
       tally_(w.tally),
-      owner_events_(w.owner_events),
+      owner_events_(w.owner_events.producer()),
       vfs_(w.vfs),
       status_cell_(w.status_cell),
       negotiated_(w.negotiated),
@@ -139,11 +139,9 @@ bool ConfigSaves::bind_slot_config(std::uint8_t slot, std::string_view path) {
 }
 
 void ConfigSaves::publish_save_verdict_(bool ok, CorrelationTag tag) noexcept {
-    (void)owner_events_.push(
-        infra::make<Event>(
-            Event::InfoRequest{.id = ok ? InfoId::SaveWritten : InfoId::SaveFailed},
-            Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-        )
+    owner_events_.push(
+        Event::InfoRequest{.id = ok ? InfoId::SaveWritten : InfoId::SaveFailed},
+        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
     );
 }
 

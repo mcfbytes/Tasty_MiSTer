@@ -73,7 +73,6 @@ struct InputStats {
     std::uint32_t keys_published = 0;
     std::uint32_t keys_emitted = 0;
     std::uint32_t mouse_packets = 0;
-    std::uint32_t joy_transactions = 0;
     std::uint32_t kicks = 0;
     std::uint32_t enumerate_failures = 0;
     std::uint32_t rt_errors = 0;

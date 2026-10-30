@@ -86,9 +86,7 @@ public:
         return nvm_name_;
     }
 
-    [[nodiscard]] Ex<std::span<const std::uint8_t>> pull_save() override;
-
-    [[nodiscard]] std::uint32_t nvram_saves() const noexcept { return nvram_saves_; }
+    [[nodiscard]] SaveImage save_image() const noexcept override;
 
     [[nodiscard]] std::string_view nvram_file_name() const noexcept { return nvm_name_; }
 
@@ -130,8 +128,6 @@ private:
     std::uint64_t dip_saved_ = 0;
     int nvram_index_ = 0;
     int nvram_size_ = 0;
-    std::uint32_t nvram_saves_ = 0;
-    std::vector<std::uint8_t> nvm_image_;
 };
 
 std::unique_ptr<Core> make_arcade(const CoreProfile& p, const CoreGrant& g);

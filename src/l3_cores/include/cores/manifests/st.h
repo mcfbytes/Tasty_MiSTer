@@ -26,8 +26,7 @@ inline constexpr auto kAtariStServices = std::to_array<LinkDecoderDecl>({
         reactor::Cause::Tick,
         &kSectorKick<kAtariSt>,
         1,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
 });
 

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -11,8 +10,10 @@
 #include "proto/conf_switches.h"
 #include "infra/opt_ref.h"
 #include "proto/reset_fence.h"
+#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/telemetry.h"
+#include "infra/wake_flag.h"
 #include "hal/boards_table.h"
 #include "hal/link_timing.h"
 #include "hal/spi_transport.h"
@@ -39,11 +40,43 @@ struct VideoGeoLatch {
 
 struct BlockPayload {
     std::uint16_t words[svc::kVideoWireWords]{};
-    std::uint8_t opcode = 0;
+    proto::UioOp opcode{};
     std::uint8_t count = 0;
 };
 
 static_assert(std::is_trivially_copyable_v<BlockPayload>);
+
+struct ShadowMaskWord {
+    std::uint32_t v = 0;
+    friend constexpr bool operator==(ShadowMaskWord, ShadowMaskWord) = default;
+};
+
+static_assert(std::is_trivially_copyable_v<ShadowMaskWord>);
+
+struct PreludeStats {
+    std::uint32_t arms = 0;
+    std::uint32_t completions = 0;
+    std::uint32_t steps = 0;
+    std::uint32_t chunks = 0;
+    std::uint32_t coeff_words = 0;
+    std::uint32_t parked = 0;
+    std::uint32_t barrier_waits = 0;
+    std::uint32_t barrier_timeouts = 0;
+    std::uint32_t errors = 0;
+    std::uint32_t coeff_skips = 0;
+    std::uint32_t afilter_skips = 0;
+    std::uint16_t flt_flags = 0;
+    std::uint16_t fb_ack = 0;
+    std::uint16_t hdmi_int = 0;
+    std::uint16_t gamma_cap = 0;
+    std::uint16_t af_flags = 0;
+    std::uint16_t sm_cap = 0;
+
+    std::uint16_t tail_fail = 0;
+    std::uint8_t step = 0;
+};
+
+static_assert(std::is_trivially_copyable_v<PreludeStats>);
 
 class VideoWire : public svc::VideoService::IVideoWireSink,
                   public svc::VideoService::IResolutionSampler,
@@ -77,11 +110,11 @@ public:
     VideoWire& operator=(const VideoWire&) = delete;
 
     [[nodiscard]] Ex<void> publish(
-        std::uint8_t opcode,
+        proto::UioOp opcode,
         std::span<const std::uint16_t> words
     ) override;
 
-    [[nodiscard]] Ex<void> stage(std::uint8_t opcode, std::span<const std::uint16_t> words);
+    [[nodiscard]] Ex<void> stage(proto::UioOp opcode, std::span<const std::uint16_t> words);
 
     std::uint32_t staged_generation() const noexcept { return gen_; }
 
@@ -105,18 +138,13 @@ public:
 
     [[nodiscard]] std::uint32_t sampled_core_seq() const noexcept { return sampled_seq_; }
 
-    void publish_policy(const svc::ScalingPolicy& p) noexcept {
-        policy_.store(p.to_bits(), std::memory_order_release);
-    }
+    void publish_policy(const svc::ScalingPolicy& p) noexcept { policy_.publish(p.to_bits()); }
 
     svc::ScalingPolicy policy() const noexcept {
-        return svc::ScalingPolicy::from_bits(policy_.load(std::memory_order_acquire));
+        return svc::ScalingPolicy::from_bits(policy_bits_);
     }
 
-    void request_force() noexcept {
-        ++force_pub_;
-        force_seq_.store(force_pub_, std::memory_order_release);
-    }
+    void request_force() noexcept { force_.request(); }
 
     void reset_geometry(std::uint32_t core_seq) noexcept;
 
@@ -192,11 +220,11 @@ public:
             | (static_cast<std::uint64_t>(a1) << 16)
             | (static_cast<std::uint64_t>(a2) << 32)
             | (static_cast<std::uint64_t>(a3) << 48);
-        ar_cust_.store(bits, std::memory_order_release);
+        ar_cust_.publish(bits);
     }
 
     void publish_shadow_mask(std::uint16_t flag_word) noexcept {
-        shadow_mask_.store(flag_word, std::memory_order_release);
+        shadow_mask_.publish(ShadowMaskWord{flag_word});
     }
 
     static constexpr std::uint16_t kTailFailProbe = 1u << 0;
@@ -204,29 +232,6 @@ public:
     static constexpr std::uint16_t kTailFailPush = 1u << 2;
     static constexpr std::uint16_t kTailFailVol = 1u << 3;
     static constexpr std::uint16_t kTailFailButSw = 1u << 4;
-
-    struct PreludeStats {
-        std::uint32_t arms = 0;
-        std::uint32_t completions = 0;
-        std::uint32_t steps = 0;
-        std::uint32_t chunks = 0;
-        std::uint32_t coeff_words = 0;
-        std::uint32_t parked = 0;
-        std::uint32_t barrier_waits = 0;
-        std::uint32_t barrier_timeouts = 0;
-        std::uint32_t errors = 0;
-        std::uint32_t coeff_skips = 0;
-        std::uint32_t afilter_skips = 0;
-        std::uint16_t flt_flags = 0;
-        std::uint16_t fb_ack = 0;
-        std::uint16_t hdmi_int = 0;
-        std::uint16_t gamma_cap = 0;
-        std::uint16_t af_flags = 0;
-        std::uint16_t sm_cap = 0;
-
-        std::uint16_t tail_fail = 0;
-        std::uint8_t step = 0;
-    };
 
     PreludeStats prelude_stats() const noexcept;
 
@@ -244,10 +249,6 @@ public:
 
     GeoStats geo_stats() const noexcept;
 
-    static void bump(std::atomic<std::uint32_t>& c) noexcept {
-        c.store(c.load(std::memory_order_relaxed) + 1u, std::memory_order_relaxed);
-    }
-
     struct Stats {
         std::uint32_t staged = 0;
         std::uint32_t emitted = 0;
@@ -264,6 +265,8 @@ public:
 
 private:
     bool step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IResetFence> fence);
+
+    void publish_prelude() noexcept;
 
     bool consume_filters();
     bool service_filter_publish(hal::ISpiTransport& link);
@@ -285,16 +288,17 @@ private:
     std::uint32_t geo_core_seq_ = 0;
     std::uint32_t sampled_seq_ = 0;
 
-    static_assert(
-        std::atomic<std::uint64_t>::is_always_lock_free,
-        "item/item: policy_ is a naturally-aligned 64-bit atomic read on "
-        "T-UI and written on T-RT with no lock — PROVE it here rather than "
-        "assume it, exactly as input_wire.h does for its own 64-bit cells."
-    );
-    std::atomic<std::uint64_t> policy_{0};
-    std::atomic<std::uint32_t> force_seq_{0};
-    std::uint32_t force_seen_ = 0;
-    std::uint32_t force_pub_ = 0;
+    xthread::Telemetry<std::uint64_t, SeatTag::Ui> policy_{};
+    xthread::Telemetry<std::uint64_t, SeatTag::Ui> ar_cust_{};
+    xthread::Telemetry<ShadowMaskWord, SeatTag::Ui> shadow_mask_{};
+    xthread::Telemetry<std::uint64_t, SeatTag::Ui>::Reader policy_seen_{};
+    xthread::Telemetry<std::uint64_t, SeatTag::Ui>::Reader ar_cust_seen_{};
+    xthread::Telemetry<ShadowMaskWord, SeatTag::Ui>::Reader shadow_seen_{};
+    std::uint64_t policy_bits_ = 0;
+    std::uint64_t ar_cust_bits_ = 0;
+    ShadowMaskWord shadow_mask_word_{};
+    xthread::WakeFlag force_{};
+    xthread::WakeFlag::Cursor force_seen_{};
 
     svc::GeometryGate geo_gate_{};
 
@@ -315,13 +319,13 @@ private:
     std::uint8_t fs_vert_slot_ = 0;
     std::size_t fs_cursor_ = 0;
     svc::ScalingWords fs_tail_words_{};
-    std::atomic<std::uint32_t> flt_published_{0};
-    std::atomic<std::uint32_t> flt_consumed_{0};
-    std::atomic<std::uint32_t> flt_waits_{0};
-    std::atomic<std::uint32_t> flt_wait_timeouts_{0};
-    std::atomic<std::uint32_t> flt_streams_{0};
-    std::atomic<std::uint32_t> flt_stream_words_{0};
-    std::atomic<std::uint32_t> flt_stream_errors_{0};
+    xthread::Counter flt_published_{};
+    xthread::Counter flt_consumed_{};
+    xthread::Counter flt_waits_{};
+    xthread::Counter flt_wait_timeouts_{};
+    xthread::Counter flt_streams_{};
+    xthread::Counter flt_stream_words_{};
+    xthread::Counter flt_stream_errors_{};
 
     PreludeStep pre_step_ = PreludeStep::Idle;
     std::uint32_t pre_barrier_ = 0;
@@ -348,49 +352,26 @@ private:
     std::uint32_t but_sw_writes_ = 0;
     std::uint32_t but_sw_errors_ = 0;
 
-    static_assert(
-        std::atomic<std::uint64_t>::is_always_lock_free,
-        "ar_cust_ (publish_ar_custom) must be lock-free too"
-    );
-    std::atomic<std::uint64_t> ar_cust_{0};
-    std::atomic<std::uint32_t> shadow_mask_{0};
-    std::atomic<std::uint32_t> pre_arms_{0};
-    std::atomic<std::uint32_t> pre_completions_{0};
-    std::atomic<std::uint32_t> pre_steps_{0};
-    std::atomic<std::uint32_t> pre_chunks_{0};
-    std::atomic<std::uint32_t> pre_coeff_words_{0};
-    std::atomic<std::uint32_t> pre_parked_n_{0};
-    std::atomic<std::uint32_t> pre_barrier_waits_{0};
-    std::atomic<std::uint32_t> pre_barrier_timeouts_{0};
-    std::atomic<std::uint32_t> pre_errors_{0};
-    std::atomic<std::uint32_t> pre_coeff_skips_{0};
-    std::atomic<std::uint32_t> pre_flt_flags_{0};
-    std::atomic<std::uint32_t> pre_fb_ack_{0};
-    std::atomic<std::uint32_t> pre_sm_cap_{0};
-
-    std::atomic<std::uint32_t> pre_hdmi_int_{0};
-    std::atomic<std::uint32_t> pre_gamma_cap_{0};
-    std::atomic<std::uint32_t> pre_af_flags_{0};
-    std::atomic<std::uint32_t> pre_afilter_skips_{0};
-    std::atomic<std::uint32_t> pre_tail_fail_{0};
+    PreludeStats pre_{};
+    xthread::Telemetry<PreludeStats, SeatTag::RT> prelude_cell_{};
     std::int64_t geo_next_ns_ = 0;
 
     bool geo_force_next_ = true;
-    std::atomic<std::uint32_t> geo_rounds_{0};
-    std::atomic<std::uint32_t> geo_samples_{0};
-    std::atomic<std::uint32_t> geo_changes_{0};
-    std::atomic<std::uint32_t> geo_resends_{0};
-    std::atomic<std::uint32_t> geo_errors_{0};
-    std::atomic<std::uint32_t> geo_late_{0};
-    std::atomic<std::uint32_t> geo_reads_{0};
+    xthread::Counter geo_rounds_{};
+    xthread::Counter geo_samples_{};
+    xthread::Counter geo_changes_{};
+    xthread::Counter geo_resends_{};
+    xthread::Counter geo_errors_{};
+    xthread::Counter geo_late_{};
+    xthread::Counter geo_reads_{};
 
-    std::atomic<std::uint32_t> staged_{0};
-    std::atomic<std::uint32_t> emitted_{0};
-    std::atomic<std::uint32_t> stale_{0};
-    std::atomic<std::uint32_t> partial_{0};
-    std::atomic<std::uint32_t> staged_rejected_{0};
-    std::atomic<std::uint32_t> emit_rejected_{0};
-    std::atomic<std::uint32_t> arm_fail_{0};
+    xthread::Counter staged_{};
+    xthread::Counter emitted_{};
+    xthread::Counter stale_{};
+    xthread::Counter partial_{};
+    xthread::Counter staged_rejected_{};
+    xthread::Counter emit_rejected_{};
+    xthread::Counter arm_fail_{};
 };
 
 consteval bool coeff_chunk_fits_every_board() {

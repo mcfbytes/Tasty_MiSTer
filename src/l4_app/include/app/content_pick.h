@@ -31,7 +31,7 @@
 #include "app/owner_tally.h"
 #include "app/path_text.h"
 #include "app/picked_load.h"
-#include "app/rung_set.h"
+#include "app/load_belt.h"
 #include "app/stream_io.h"
 #include "app/types.h"
 #include "app/ui_request.h"
@@ -75,7 +75,7 @@ public:
         std::unique_ptr<svc::IFile> file{};
         std::uint64_t total = 0;
         std::uint32_t crc = 0;
-        std::uint8_t wire_index = 0;
+        proto::WideIoIndex wire_index{};
         PathText path{};
         std::uint64_t from = 0;
         bool cut_on_hold = false;
@@ -89,10 +89,18 @@ public:
     struct Out {
         std::optional<Errc> refuse{};
         std::optional<PickedLoad> run{};
+        BeltOrders orders{};
     };
 
     struct After {
+        BeltOrders orders{};
         std::optional<PathText> companion{};
+    };
+
+    struct Armed {
+        bool taken = false;
+        BeltOrders orders{};
+        bool busy = false;
     };
 
     class Host {
@@ -102,6 +110,8 @@ public:
             UiRequest::SaveChoice choice,
             CorrelationTag tag
         ) = 0;
+
+        virtual void refuse_busy(UiRequest::Kind asked, CorrelationTag tag) noexcept = 0;
 
     protected:
         Host() = default;
@@ -127,7 +137,7 @@ public:
         const NegotiatedCore& negotiated;
         const MountQueue& mounts;
         const OwnerLadder& ladder;
-        RungSet& rungs;
+        const LoadBelt& belt;
         OwnerTally& owner_tally;
         Count& mgl_row0_cell;
         ActKeys& act_keys;
@@ -163,7 +173,7 @@ public:
     [[nodiscard]] After launch_content(const ContentRequest& cr);
     [[nodiscard]] After perform_content(const ContentRequest& req);
 
-    [[nodiscard]] bool arm_loader(
+    [[nodiscard]] Armed arm_loader(
         const ContentRequest& req,
         std::string_view save = {},
         std::uint64_t save_bytes = 0
@@ -182,11 +192,11 @@ public:
 
     [[nodiscard]] bool order_content_tx(proto::FileId file, ContentWatch watch);
 
-    void step_watch();
+    [[nodiscard]] BeltOrders step_watch();
 
     void forget_watch() noexcept;
 
-    void watch_last_piece();
+    void watch_last_piece(FileTxPieces& pieces);
     [[nodiscard]] bool watch_answered() const noexcept;
 
     void drop_watch() noexcept {
@@ -216,14 +226,14 @@ private:
     [[nodiscard]] Ex<proto::ConfStrFileRow> resolve_load_(const UiRequest::LoadFile& r) const;
     [[nodiscard]] Ex<proto::ConfStrFileRow> resolve_load_(const UiRequest::LoadFileByDigit& r);
 
-    void plan_addons_(
+    [[nodiscard]] BeltOrders plan_addons_(
         const proto::ConfStrFileRow& row,
         std::string_view pick,
         const PickedLoad& load,
         const cores::RamImageRecipe& image
     );
 
-    [[nodiscard]] bool arm_walk_(const ContentRequest& req, const cores::CoreFactory& row);
+    [[nodiscard]] Armed arm_walk_(const ContentRequest& req, const cores::CoreFactory& row);
 
     [[nodiscard]] std::optional<PathText> zip_member_(
         const proto::ConfStrFileRow& row,
@@ -238,13 +248,13 @@ private:
     void publish_done_(UiRequest::Kind which, CorrelationTag tag) noexcept;
     LinkTxChannel<SeatTag::Main>& inbox_;
     const FileTxLevelCell& ftx_level_cell_;
-    EventQueue<SeatTag::Main>& owner_events_;
+    EventQueue<SeatTag::Main>::Producer owner_events_;
     const svc::Vfs& vfs_;
     ILoadWindowMap<seat_owner::Main>& window_map_;
     const NegotiatedCore& negotiated_;
     const MountQueue& mounts_;
     const OwnerLadder& ladder_;
-    RungSet& rungs_;
+    const LoadBelt& belt_;
     OwnerTally& owner_tally_;
     Count& mgl_row0_cell_;
     ActKeys& act_keys_;

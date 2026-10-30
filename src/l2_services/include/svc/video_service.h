@@ -12,6 +12,7 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "hal/spi_transport.h"
+#include "proto/link_frame.h"
 #include "svc/adv7513_io.h"
 #include "svc/cec_state_machine.h"
 #include "svc/edid_store.h"
@@ -24,37 +25,31 @@
 #include "svc/video_sample.h"
 #include "svc/video_timing.h"
 #include "infra/seat.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::svc {
 
 class IFilterResend;
 
-inline constexpr std::uint8_t kUioSetVideo = 0x20;
 inline constexpr std::size_t kVideoWireWords = 26;
 
 [[nodiscard]] Ex<void> emit_video_words(
-    hal::ISpiTransport& link,
-    std::uint8_t opcode,
+    proto::ILinkFrame& frame,
+    proto::UioOp opcode,
     std::span<const std::uint16_t> words
 );
 
-inline constexpr std::uint8_t kUioSetFbuf = 0x2F;
-inline constexpr std::uint8_t kUioSetArCust = 0x3A;
-inline constexpr std::uint8_t kUioShadowMask = 0x3E;
-inline constexpr std::uint8_t kUioHdmiInt = 0x44;
-inline constexpr std::uint8_t kUioSetGamma = 0x32;
-
-[[nodiscard]] Ex<std::uint16_t> emit_fbuf(hal::ISpiTransport& link, std::uint16_t word);
+[[nodiscard]] Ex<std::uint16_t> emit_fbuf(proto::ILinkFrame& frame, std::uint16_t word);
 
 [[nodiscard]] Ex<void> emit_ar_custom(
-    hal::ISpiTransport& link,
+    proto::ILinkFrame& frame,
     std::span<const std::uint16_t> words
 );
 
 [[nodiscard]] Ex<std::uint16_t> emit_filter_mode(hal::ISpiTransport& link, std::uint8_t mode);
 
 [[nodiscard]] Ex<void> emit_filter_coeff_chunk(
-    hal::ISpiTransport& link,
+    proto::ILinkFrame& frame,
     std::span<const std::uint16_t> chunk
 );
 
@@ -143,14 +138,6 @@ std::optional<std::int64_t> yc_lookup(
     std::string_view key_expanded
 );
 
-inline constexpr std::uint8_t kUioGetVres = 0x23;
-inline constexpr std::uint8_t kUioSetHeight = 0x27;
-inline constexpr std::uint8_t kUioSetFltCoef = 0x2A;
-inline constexpr std::uint8_t kUioSetFltNum = 0x2B;
-inline constexpr std::uint8_t kUioSetWidth = 0x37;
-inline constexpr std::uint8_t kUioGetFbPar = 0x40;
-inline constexpr std::uint8_t kUioSetYcPar = 0x41;
-
 struct GeometryPass {
     VideoSample sample{};
     bool res_changed = false;
@@ -196,7 +183,7 @@ public:
     public:
         virtual ~IVideoWireSink() = default;
         [[nodiscard]] virtual Ex<void> publish(
-            std::uint8_t opcode,
+            proto::UioOp opcode,
             std::span<const std::uint16_t> words
         ) = 0;
 

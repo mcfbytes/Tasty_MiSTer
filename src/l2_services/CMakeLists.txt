@@ -161,6 +161,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/input_emitter.h
   svc/input_enumerator.h
   svc/input_service.h
+  svc/but_sw_wire.h
   svc/rumble_out.h
   svc/joy_plan.h
   svc/key_edge.h

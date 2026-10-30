@@ -86,6 +86,8 @@ public:
 
     [[nodiscard]] bool live() const noexcept { return ui_.facts.live; }
 
+    [[nodiscard]] bool maps_slots() const noexcept { return ui_.engine.mapped(); }
+
     void serve() noexcept override;
     [[nodiscard]] bool idle() const noexcept override;
 

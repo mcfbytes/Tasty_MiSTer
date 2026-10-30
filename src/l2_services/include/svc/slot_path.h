@@ -3,12 +3,12 @@
 
 #include <cstddef>
 
-#include "infra/fixed_str.h"
+#include "infra/path_text.h"
 
 namespace mister::svc {
 
-inline constexpr std::size_t kSlotPathCap = 1024;
+inline constexpr std::size_t kSlotPathCap = infra::kPathMax;
 
-using SlotPathText = FixedStr<kSlotPathCap, StrFit::Reject>;
+using SlotPathText = infra::PathText;
 
 }

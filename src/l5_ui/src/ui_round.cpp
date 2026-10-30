@@ -7,6 +7,8 @@
 #include "app/hd_osd_screen.h"
 #include "app/page_description.h"
 #include "app/link_event_dispatch.h"
+#include "app/recents_store.h"
+#include "app/ui_write_lane.h"
 #include "ui/host_sampler.h"
 #include "ui/key_decoder.h"
 #include "ui/osd_visible_file.h"
@@ -209,6 +211,10 @@ void UiRound::publish_page_record() {
     const app::RecentGames& rg = model_.recent_games();
     rec.recent_build_us = us_of(rg.build_ns());
     rec.recent_update_us_max = us_of(rg.update_ns_max());
+
+    rec.lane_refusals = writes_ ? writes_->refusals() : 0;
+    rec.lane_failures = writes_ ? writes_->failures() : 0;
+    rec.store_errors = ctx_.recents ? ctx_.recents->errors() : 0;
     page_cell_.publish(rec);
 }
 

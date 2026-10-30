@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/spi_block_poll.h"
 #include "hal/selected.h"
+#include "proto/uio_opcodes.h"
 
 #include <cstring>
 #include <span>
@@ -8,9 +9,6 @@
 namespace mister::proto {
 
 namespace {
-
-constexpr hal::SpiWord kGetSdStat{0x16};
-constexpr hal::SpiWord kSetSdConf{0x19};
 
 constexpr std::uint8_t kCid[16] = {
     0x3e,
@@ -99,7 +97,7 @@ infra::OptRef<IBlockGeometry> SpiBlockPoll::geometry_for_(SlotIndex slot) const 
     hal::Selected cs(link, hal::ChipSelect::Io);
 
     const hal::Width width = link.width();
-    if (auto r = link.transfer(kSetSdConf); !r)
+    if (auto r = link.transfer(word(UioOp::SetSdConf)); !r)
         return std::unexpected(r.error());
     if (auto r = write_framed(link, kCid, width); !r)
         return r;
@@ -131,7 +129,7 @@ infra::OptRef<IBlockGeometry> SpiBlockPoll::geometry_for_(SlotIndex slot) const 
         if (known.has_value()) {
             c = known->v;
         } else {
-            auto r0 = link.transfer(kGetSdStat);
+            auto r0 = link.transfer(word(UioOp::GetSdStat));
             if (!r0)
                 return std::unexpected(r0.error());
             c = r0->v;

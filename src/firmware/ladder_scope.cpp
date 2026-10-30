@@ -11,7 +11,7 @@ namespace mister::fw {
 
 void LadderScope::relax() {
     TASTY_SEAT_BODY(LadderScope);
-    transitioning_.store(true, std::memory_order_release);
+    transitioning_.publish(true);
     if (timer_)
         timer_->note_lifecycle(reactor::RoundLifecycle::Rung);
     if (::pthread_getschedparam(::pthread_self(), &saved_policy_, &saved_param_) != 0) {
@@ -32,7 +32,7 @@ void LadderScope::restore() {
             static_cast<unsigned>(n)
         );
     }
-    transitioning_.store(false, std::memory_order_release);
+    transitioning_.publish(false);
 }
 
 }

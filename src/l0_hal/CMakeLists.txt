@@ -27,7 +27,6 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/core_capabilities.h
   hal/core_identity.h
   hal/core_signals.h
-  hal/dma_ring.h
   hal/doorbell_policy.h
   hal/doorbell_source.h
   hal/fact.h

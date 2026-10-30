@@ -7,6 +7,7 @@
 #include <optional>
 #include <string_view>
 
+#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/spsc_ring.h"
@@ -78,35 +79,25 @@ public:
 
     std::size_t ui_keys_queued() const noexcept { return ui_keys_.size(); }
 
-    std::uint32_t ui_keys_dropped() const noexcept {
-        return ui_keys_dropped_.load(std::memory_order_relaxed);
-    }
+    std::uint32_t ui_keys_dropped() const noexcept { return ui_keys_dropped_.get(); }
 
-    std::uint32_t ui_keys_published() const noexcept {
-        return ui_keys_pub_.load(std::memory_order_relaxed);
-    }
+    std::uint32_t ui_keys_published() const noexcept { return ui_keys_pub_.get(); }
 
-    std::uint32_t keys_dropped() const noexcept {
-        return keys_dropped_.load(std::memory_order_relaxed);
-    }
+    std::uint32_t keys_dropped() const noexcept { return keys_dropped_.get(); }
 
     void note_key_drop(unsigned n) noexcept {
-        bump(keys_dropped_, n);
+        keys_dropped_.add(n);
         publish_gates(kGateKeysDropped, 0u);
     }
 
     void note_key_sweep(unsigned released) noexcept {
-        bump(key_sweeps_, 1u);
-        bump(keys_released_, released);
+        key_sweeps_.add(1u);
+        keys_released_.add(released);
     }
 
-    std::uint32_t key_sweeps() const noexcept {
-        return key_sweeps_.load(std::memory_order_relaxed);
-    }
+    std::uint32_t key_sweeps() const noexcept { return key_sweeps_.get(); }
 
-    std::uint32_t keys_released() const noexcept {
-        return keys_released_.load(std::memory_order_relaxed);
-    }
+    std::uint32_t keys_released() const noexcept { return keys_released_.get(); }
 
     static constexpr std::size_t kCoreNameCap = 32;
 
@@ -154,23 +145,16 @@ public:
     std::uint8_t rumble_pads() const noexcept { return rumble_pads_.sample().value; }
 
     void publish_analog_reshape(infra::OptRef<const svc::IAnalogReshape> r) noexcept {
-        reshape_.store(r, std::memory_order_release);
+        reshape_.publish(r);
     }
 
     infra::OptRef<const svc::IAnalogReshape> analog_reshape() const noexcept {
-        return reshape_.load(std::memory_order_acquire);
+        return reshape_.sample().value;
     }
 
-    void publish_edge_reset() noexcept {
-        edge_reset_.store(
-            edge_reset_.load(std::memory_order_relaxed) + 1u,
-            std::memory_order_release
-        );
-    }
+    void publish_edge_reset() noexcept { edge_reset_.request(); }
 
-    std::uint32_t edge_reset_seq() const noexcept {
-        return edge_reset_.load(std::memory_order_acquire);
-    }
+    const xthread::WakeFlag& edge_reset() const noexcept { return edge_reset_; }
 
     void publish_gates(std::uint32_t set, std::uint32_t clear) noexcept {
         std::uint32_t g = gates_.load(std::memory_order_relaxed);
@@ -180,11 +164,9 @@ public:
 
     std::uint32_t gates() const noexcept { return gates_.load(std::memory_order_acquire); }
 
-    void note_activity() noexcept { bump(activity_seq_, 1u); }
+    void note_activity() noexcept { activity_seq_.add(1u); }
 
-    std::uint32_t activity_seq() const noexcept override {
-        return activity_seq_.load(std::memory_order_acquire);
-    }
+    std::uint32_t activity_seq() const noexcept override { return activity_seq_.get(); }
 
     bool input_grabbed() const noexcept override { return (gates() & kGateGrabbed) != 0u; }
 
@@ -247,21 +229,17 @@ public:
     ) noexcept;
     void on_core_detached() noexcept;
 
-    void note_rebuild_refused() noexcept { bump(rebuilds_refused_, 1u); }
+    void note_rebuild_refused() noexcept { rebuilds_refused_.add(1u); }
 
-    void note_rebuild_done() noexcept { bump(rebuilds_done_, 1u); }
+    void note_rebuild_done() noexcept { rebuilds_done_.add(1u); }
 
     static void bump(std::atomic<std::uint32_t>& c, std::uint32_t by) noexcept {
         c.store(c.load(std::memory_order_relaxed) + by, std::memory_order_relaxed);
     }
 
-    std::uint32_t rebuilds_refused() const noexcept {
-        return rebuilds_refused_.load(std::memory_order_relaxed);
-    }
+    std::uint32_t rebuilds_refused() const noexcept { return rebuilds_refused_.get(); }
 
-    std::uint32_t rebuilds_done() const noexcept {
-        return rebuilds_done_.load(std::memory_order_relaxed);
-    }
+    std::uint32_t rebuilds_done() const noexcept { return rebuilds_done_.get(); }
 
     static constexpr std::uint16_t kButtonOsd = 1u << 0;
     static constexpr std::uint16_t kButtonUser = 1u << 1;
@@ -280,15 +258,11 @@ public:
         return button_samples_.load(std::memory_order_relaxed);
     }
 
-    void note_button_action() noexcept { bump(button_actions_, 1u); }
+    void note_button_action() noexcept { button_actions_.add(1u); }
 
-    std::uint32_t button_actions() const noexcept {
-        return button_actions_.load(std::memory_order_relaxed);
-    }
+    std::uint32_t button_actions() const noexcept { return button_actions_.get(); }
 
-    std::uint32_t core_edges() const noexcept {
-        return core_edges_.load(std::memory_order_relaxed);
-    }
+    std::uint32_t core_edges() const noexcept { return core_edges_.get(); }
 
     static_assert(
         std::atomic<std::uint64_t>::is_always_lock_free,
@@ -301,27 +275,21 @@ public:
         std::atomic<std::uint32_t>::is_always_lock_free,
         "the two gate words and every counter must be lock-free too"
     );
-    static_assert(
-        std::atomic<infra::OptRef<const svc::IAnalogReshape>>::is_always_lock_free,
-        "the reshape cell is ONE pointer and is read on T-DIAG in "
-        "the rebuild: a libatomic lock here would be a lock on the "
-        "hotplug path"
-    );
 
 private:
     std::atomic<std::uint64_t> joy_[svc::kMaxPlayers]{};
 
     xthread::SpscRing<RawKeyEdge, kUiKeyRingSlots> ui_keys_{};
-    std::atomic<std::uint32_t> ui_keys_dropped_{0};
-    std::atomic<std::uint32_t> ui_keys_pub_{0};
+    xthread::Counter ui_keys_dropped_{};
+    xthread::Counter ui_keys_pub_{};
 
-    std::atomic<std::uint32_t> edge_reset_{0};
+    xthread::WakeFlag edge_reset_{};
 
     xthread::Telemetry<CoreNameCell, SeatTag::Ui> name_cell_{};
 
     xthread::Telemetry<svc::JoyPlan, SeatTag::Ui> plan_cell_{};
 
-    std::atomic<infra::OptRef<const svc::IAnalogReshape>> reshape_{};
+    xthread::Telemetry<infra::OptRef<const svc::IAnalogReshape>, SeatTag::Ui> reshape_{};
 
     CaptureArmCell capture_arm_{};
     CaptureHitCell capture_hit_{};
@@ -331,20 +299,20 @@ private:
 
     std::atomic<std::uint32_t> gates_{0};
 
-    std::atomic<std::uint32_t> activity_seq_{0};
+    xthread::Counter activity_seq_{};
     std::atomic<std::uint32_t> req_{0};
     std::atomic<bool> kick_armed_{false};
 
-    std::atomic<std::uint32_t> keys_dropped_{0};
-    std::atomic<std::uint32_t> key_sweeps_{0};
-    std::atomic<std::uint32_t> keys_released_{0};
-    std::atomic<std::uint32_t> rebuilds_refused_{0};
-    std::atomic<std::uint32_t> rebuilds_done_{0};
+    xthread::Counter keys_dropped_{};
+    xthread::Counter key_sweeps_{};
+    xthread::Counter keys_released_{};
+    xthread::Counter rebuilds_refused_{};
+    xthread::Counter rebuilds_done_{};
 
     std::atomic<std::uint32_t> buttons_{0};
     std::atomic<std::uint32_t> button_samples_{0};
-    std::atomic<std::uint32_t> button_actions_{0};
-    std::atomic<std::uint32_t> core_edges_{0};
+    xthread::Counter button_actions_{};
+    xthread::Counter core_edges_{};
 };
 
 }

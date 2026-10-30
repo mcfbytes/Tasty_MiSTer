@@ -6,6 +6,7 @@
 #include "infra/error.h"
 #include "hal/selected.h"
 #include "hal/spi_transport.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
@@ -22,9 +23,8 @@ struct SaveRequestWord {
 };
 
 [[nodiscard]] inline Ex<SaveRequestWord> read_save_request(hal::ISpiTransport& link) {
-    constexpr hal::SpiWord kChkUpload{0x3C};
     hal::Selected cs(link, hal::ChipSelect::Io);
-    auto r = link.transfer(kChkUpload);
+    auto r = link.transfer(word(UioOp::ChkUpload));
     if (!r)
         return std::unexpected(r.error());
     return SaveRequestWord{r->v};

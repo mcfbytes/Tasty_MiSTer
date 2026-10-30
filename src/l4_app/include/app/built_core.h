@@ -38,6 +38,6 @@ struct BuiltCore {
     std::uint16_t gen = 0;
 };
 
-using CoreBay = xthread::SlotPool<BuiltCore, kCoreBaySlots>;
+using CoreBay = xthread::SlotPool<BuiltCore, kCoreBaySlots, SeatTag::Main>;
 
 }

@@ -6,8 +6,8 @@
 namespace mister::cores::manifests {
 
 static_assert(
-    kMegaDriveServices[0].osd_budget == OsdBudget::Pinned,
-    "the 5 ms PCM tick pins the OSD budget"
+    kMegaDriveServices[0].round_claim == RoundClaim::Always,
+    "the 5 ms PCM tick claims each round it runs (no OSD row)"
 );
 
 std::unique_ptr<Core> make_megadrive(const CoreProfile& p, const CoreGrant& g) {

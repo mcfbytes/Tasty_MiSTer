@@ -10,7 +10,7 @@ namespace mister::cores {
 std::optional<TransferRow> AddressedLoad::window_row(
     std::uint32_t addr,
     std::uint64_t bytes,
-    proto::IoIndex index,
+    proto::WideIoIndex index,
     const hal::PhysRegion& aperture
 ) noexcept {
     if (addr == 0 || bytes > std::numeric_limits<std::uint32_t>::max())

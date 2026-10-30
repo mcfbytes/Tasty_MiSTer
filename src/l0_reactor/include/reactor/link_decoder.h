@@ -13,7 +13,7 @@ public:
 
     virtual constexpr bool active() const { return true; }
 
-    virtual std::uint32_t osd_claims() const { return 0; }
+    virtual std::uint32_t claim_count() const { return 0; }
 
     ILinkDecoder(const ILinkDecoder&) = delete;
     ILinkDecoder& operator=(const ILinkDecoder&) = delete;

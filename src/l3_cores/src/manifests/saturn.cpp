@@ -61,10 +61,6 @@ static_assert(
     "the CD_GET edge is a RING doorbell; sat.cpp:48's pass is a ticker"
 );
 static_assert(
-    kSaturnServices[0].klass == DeadlineClass::A && kSaturnServices[1].klass == DeadlineClass::A,
-    "3.4: both Saturn services are Class A (T-RT)"
-);
-static_assert(
     kSaturnServices[0].period_ms == 1 && kSaturnServices[1].period_ms == 1,
     "one row period quantises the pass; 1 ms lands stock's 7/7/6 dither"
 );

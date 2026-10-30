@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "hal/axi.h"
 
-#include "hal/dma_ring.h"
 #include "hal/fpga_memory.h"
 #include "os/small_file.h"
 #include "os/uio_handle.h"
@@ -128,10 +127,6 @@ std::byte* bytes_of(const os::MmioRegion& m) noexcept {
 
 bool is_word_aligned(const std::byte* p) noexcept {
     return (reinterpret_cast<std::uintptr_t>(p) & 3u) == 0u;
-}
-
-bool is_power_of_two(std::size_t v) noexcept {
-    return v != 0u && (v & (v - 1u)) == 0u;
 }
 
 }
@@ -275,36 +270,16 @@ Ex<FpgaMemory> FpgaMemory::map_uio(
     return mem;
 }
 
-Ex<void> FpgaMemory::rebind_uio(int fd, os::PhysAddr node_base, PhysRegion r) {
-
-    map_.reset();
-    base_ = nullptr;
-    region_ = PhysRegion{};
-    uio_bound_ = false;
-    ++generation_;
-
-    auto m = map_uio_pages(fd, node_base, r, access_);
-    if (!m)
-        return std::unexpected(m.error());
-    map_ = std::move(m->pages);
-    base_ = bytes_of(*map_) + m->lead;
-    region_ = r;
-    uio_bound_ = true;
-    return {};
-}
-
 FpgaMemory::FpgaMemory(FpgaMemory&& o) noexcept
     : region_(o.region_),
       map_(std::move(o.map_)),
       base_(o.base_),
-      generation_(o.generation_),
       uio_bound_(o.uio_bound_),
       access_(o.access_) {
     o.region_ = PhysRegion{};
     o.base_ = nullptr;
     o.uio_bound_ = false;
     o.access_ = os::MmioRegion::Access::ReadWrite;
-    ++o.generation_;
 }
 
 FpgaMemory& FpgaMemory::operator=(FpgaMemory&& o) noexcept {
@@ -314,13 +289,10 @@ FpgaMemory& FpgaMemory::operator=(FpgaMemory&& o) noexcept {
         base_ = o.base_;
         uio_bound_ = o.uio_bound_;
         access_ = o.access_;
-
-        ++generation_;
         o.region_ = PhysRegion{};
         o.base_ = nullptr;
         o.uio_bound_ = false;
         o.access_ = os::MmioRegion::Access::ReadWrite;
-        ++o.generation_;
     }
     return *this;
 }
@@ -398,47 +370,6 @@ void FpgaMemory::handoff() noexcept {
 #endif
 }
 
-Ex<void> FpgaMemory::rebind(PhysRegion r) {
-    const bool was_uio = uio_bound_;
-    map_.reset();
-    base_ = nullptr;
-    region_ = PhysRegion{};
-    uio_bound_ = false;
-    ++generation_;
-
-    if (was_uio) {
-        return std::unexpected(Error{Errc::unimplemented, ERR_SITE(), os::low32(r.phys)});
-    }
-
-    auto pages = os::MmioRegion::map(r.phys, r.len, os::MmioRegion::Attr::UncachedNormal, access_);
-    if (!pages)
-        return std::unexpected(pages.error());
-    map_ = std::move(*pages);
-    base_ = bytes_of(*map_);
-    region_ = r;
-    return {};
-}
-
-Ex<void> FpgaMemory::rebind(std::span<std::byte> backing, PhysRegion r) {
-
-    map_.reset();
-    base_ = nullptr;
-    region_ = PhysRegion{};
-
-    uio_bound_ = false;
-    access_ = os::MmioRegion::Access::ReadWrite;
-    ++generation_;
-
-    if (backing.size() < r.len || !is_word_aligned(backing.data())) {
-        return std::unexpected(
-            Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(backing.size())}
-        );
-    }
-    base_ = backing.data();
-    region_ = r;
-    return {};
-}
-
 void FpgaMemory::store_release(std::size_t word_off, std::uint32_t v) {
 
     if (base_ == nullptr || region_.len < 4u || word_off > (region_.len - 4u) / 4u) {
@@ -464,115 +395,6 @@ std::uint32_t FpgaMemory::load_acquire(std::size_t word_off) const {
     const std::uint32_t v = *p;
     std::atomic_thread_fence(std::memory_order_acquire);
     return v;
-}
-
-Ex<DmaRing> DmaRing::create(FpgaMemory& mem, std::size_t off, std::size_t len) {
-    if ((off & 3u) != 0u) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(off)}
-        );
-    }
-    if (len < kHeaderBytes + kMinCapacity) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(len)}
-        );
-    }
-    const std::size_t cap = len - kHeaderBytes;
-    if (!is_power_of_two(cap)) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(cap)}
-        );
-    }
-    const PhysRegion& r = mem.region();
-    if (off > r.len || len > r.len - off) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(off)}
-        );
-    }
-
-    DmaRing ring{mem};
-    ring.data_off_ = off + kHeaderBytes;
-    ring.mask_ = cap - 1u;
-    ring.head_word_ = off / 4u;
-    ring.tail_word_ = off / 4u + 1u;
-    ring.generation_ = mem.generation();
-
-    mem.store_release(ring.head_word_, 0);
-    mem.store_release(ring.tail_word_, 0);
-    return ring;
-}
-
-void DmaRing::check_live() const {
-    if (mem_.generation() != generation_) {
-        fatal(
-            Error{Errc::mmap_failed, ERR_SITE(), generation_},
-            "DmaRing: region rebound under a live ring"
-        );
-    }
-}
-
-std::size_t DmaRing::used() const {
-    check_live();
-    const std::size_t head = static_cast<std::size_t>(mem_.load_acquire(head_word_)) & mask_;
-    const std::size_t tail = static_cast<std::size_t>(mem_.load_acquire(tail_word_)) & mask_;
-    return (head - tail) & mask_;
-}
-
-std::size_t DmaRing::space() const {
-    return mask_ - used();
-}
-
-std::span<std::byte> DmaRing::reserve(std::size_t n) {
-    check_live();
-    if (n == 0)
-        return {};
-    const std::size_t head = static_cast<std::size_t>(mem_.load_acquire(head_word_)) & mask_;
-    const std::size_t tail = static_cast<std::size_t>(mem_.load_acquire(tail_word_)) & mask_;
-    const std::size_t free_bytes = mask_ - ((head - tail) & mask_);
-    const std::size_t to_end = capacity() - head;
-    const std::size_t avail = free_bytes < to_end ? free_bytes : to_end;
-    if (n > avail)
-        return {};
-    pending_ = n;
-    return mem_.view(data_off_ + head, n);
-}
-
-void DmaRing::publish(std::size_t n) {
-    check_live();
-    if (n > pending_) {
-        fatal(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(n)},
-            "DmaRing::publish beyond reserve"
-        );
-    }
-    pending_ = 0;
-    const std::size_t head = static_cast<std::size_t>(mem_.load_acquire(head_word_)) & mask_;
-    mem_.store_release(head_word_, static_cast<std::uint32_t>((head + n) & mask_));
-}
-
-std::span<const std::byte> DmaRing::peek() {
-    check_live();
-    const std::size_t head = static_cast<std::size_t>(mem_.load_acquire(head_word_)) & mask_;
-    const std::size_t tail = static_cast<std::size_t>(mem_.load_acquire(tail_word_)) & mask_;
-    const std::size_t ready = (head - tail) & mask_;
-    const std::size_t to_end = capacity() - tail;
-    const std::size_t n = ready < to_end ? ready : to_end;
-    if (n == 0)
-        return {};
-    return mem_.view(data_off_ + tail, n);
-}
-
-void DmaRing::release(std::size_t n) {
-    check_live();
-    const std::size_t head = static_cast<std::size_t>(mem_.load_acquire(head_word_)) & mask_;
-    const std::size_t tail = static_cast<std::size_t>(mem_.load_acquire(tail_word_)) & mask_;
-    if (n > ((head - tail) & mask_)) {
-        fatal(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(n)},
-            "DmaRing::release beyond peek"
-        );
-    }
-    mem_.store_release(tail_word_, static_cast<std::uint32_t>((tail + n) & mask_));
 }
 
 }

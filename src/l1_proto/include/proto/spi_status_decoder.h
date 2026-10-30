@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
 
 #include "infra/seat.h"
@@ -9,7 +8,6 @@
 #include "proto/core_session.h"
 #include "proto/session_live.h"
 #include "proto/status_cell.h"
-#include "proto/status_register.h"
 #include "proto/status_word.h"
 
 namespace mister::proto {
@@ -44,7 +42,7 @@ private:
     const ISessionLive* live_;
     std::uint8_t last_ = 0;
     std::uint32_t flush_refusals_ = 0;
-    std::array<std::uint16_t, StatusRegister::kWords> words_{};
+    StatusWord words_{};
     StatusWord published_{};
 };
 

@@ -44,19 +44,12 @@ public:
 
     RegisterWindow(RegisterWindow&& o) noexcept
         : pages_(std::move(o.pages_)),
-          base_(std::exchange(o.base_, nullptr)) {
-#ifndef NDEBUG
-        depth_ = std::exchange(o.depth_, 0u);
-#endif
-    }
+          base_(std::exchange(o.base_, nullptr)) {}
 
     RegisterWindow& operator=(RegisterWindow&& o) noexcept {
         if (this != &o) {
             pages_ = std::move(o.pages_);
             base_ = std::exchange(o.base_, nullptr);
-#ifndef NDEBUG
-            depth_ = std::exchange(o.depth_, 0u);
-#endif
         }
         return *this;
     }
@@ -71,39 +64,15 @@ public:
 
     class Transaction {
     public:
-        explicit Transaction(RegisterWindow& w)
-#ifndef NDEBUG
-            : depth_(w.depth_)
-#endif
-        {
-#ifndef NDEBUG
-            if (depth_ != 0) {
-                fatal(
-                    Error{Errc::bridge_state, ERR_SITE(), depth_},
-                    "RegisterWindow: nested Transaction"
-                );
-            }
-            ++depth_;
-#else
+        explicit Transaction(RegisterWindow& w) {
             (void)w;
-#endif
             detail::regs_fence();
         }
 
-        ~Transaction() {
-            detail::regs_fence();
-#ifndef NDEBUG
-            --depth_;
-#endif
-        }
+        ~Transaction() { detail::regs_fence(); }
 
         Transaction(const Transaction&) = delete;
         Transaction& operator=(const Transaction&) = delete;
-
-#ifndef NDEBUG
-    private:
-        std::uint32_t& depth_;
-#endif
     };
 
 private:
@@ -159,9 +128,6 @@ public:
 private:
     std::optional<os::MmioRegion> pages_;
     volatile void* base_ = nullptr;
-#ifndef NDEBUG
-    std::uint32_t depth_ = 0;
-#endif
 };
 
 }

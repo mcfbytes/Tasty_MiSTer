@@ -93,7 +93,7 @@ Ex<LoadPlan> NeoGeoLoader::plan(const LoadAsk& ask, const proto::StatusWord& sta
     TASTY_SEAT_BODY(NeoGeoLoader);
     if (ask.disc)
         return plan_cd_(ask.path, status);
-    if (profile_ != nullptr && walks_romset(profile_->slots, ask.index))
+    if (profile_ != nullptr && walks_romset(profile_->slots, ask.index.io()))
         return plan_cart_(ask.path, status);
     LoadPlan p{};
     p.count = 1;
@@ -437,7 +437,7 @@ Ex<void> NeoGeoLoader::add_notify_(LoadPlan& p, const PostNotify& n) {
     auto r = add_row_(p, {}, RowDest::Notify);
     if (!r)
         return std::unexpected(r.error());
-    (*r)->index = proto::IoIndex{PostNotify::kIndex};
+    (*r)->index = proto::WideIoIndex{PostNotify::kIndex};
     (*r)->notify = n;
     return {};
 }
@@ -501,7 +501,7 @@ Ex<std::uint32_t> NeoGeoLoader::add_crom_(LoadPlan& p, const neogeo::RomEntry& e
     TransferRow& row = **r;
     row.shaped = true;
     row.shape = static_cast<std::uint8_t>(neogeo::Shape::Crom);
-    row.index = proto::IoIndex{e.index};
+    row.index = proto::WideIoIndex{e.index};
     row.addr = neogeo::crom_offset(e.index);
     row.stride = 2;
     row.lane = neogeo::crom_lane(e.index);
@@ -530,7 +530,7 @@ Ex<std::uint32_t> NeoGeoLoader::add_rom_(
     const neogeo::RomPlace place = neogeo::rom_place(e.index, concat);
     row.shaped = shape != neogeo::Shape::None;
     row.shape = static_cast<std::uint8_t>(shape);
-    row.index = proto::IoIndex{e.index};
+    row.index = proto::WideIoIndex{e.index};
     row.window = place.window;
     row.addr = place.offset;
     row.fill = row.shaped ? 0u : neogeo::rom_fill(e.index);
@@ -545,7 +545,7 @@ Ex<void> NeoGeoLoader::add_fill_(LoadPlan& p) {
     if (!r)
         return std::unexpected(r.error());
     TransferRow& row = **r;
-    row.index = proto::IoIndex{neogeo::kFillIndex};
+    row.index = proto::WideIoIndex{neogeo::kFillIndex};
     row.fill = neogeo::kFillPattern;
     row.extent = neogeo::kFillBytes;
     row.notify = neogeo::make_notify(neogeo::kFillIndex, neogeo::kFillBytes, true);
@@ -561,7 +561,7 @@ Ex<bool> NeoGeoLoader::add_lo_rom_(LoadPlan& p, std::string_view home) {
     if (!r)
         return std::unexpected(r.error());
     TransferRow& row = **r;
-    row.index = proto::IoIndex{neogeo::kLoRomIndex};
+    row.index = proto::WideIoIndex{neogeo::kLoRomIndex};
     row.byte_words = true;
     row.file_len = static_cast<std::uint32_t>(
         std::min<std::uint64_t>(s->rest, neogeo::kLoRomBytes)

@@ -45,3 +45,8 @@ target_compile_options(tasty_test_options INTERFACE
   -Wsuggest-override
   -Wextra-semi
 )
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
+  target_compile_options(tasty_options INTERFACE -Wno-psabi)
+  target_compile_options(tasty_test_options INTERFACE -Wno-psabi)
+endif()

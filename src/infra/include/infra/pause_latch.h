@@ -12,6 +12,8 @@ namespace mister::xthread {
 
 using PauseGen = std::uint32_t;
 
+struct Observed {};
+
 template <KickPolicy Kick = EventFdKick>
 class BasicPauseLatch {
     TASTY_SEAT_MEDIATOR(Any, Any);
@@ -22,8 +24,11 @@ public:
         BasicWakeFlag<Kick>& seat_wake,
         infra::OptRef<BasicWakeFlag<Kick>> asker_wake = {}
     ) noexcept
-        : seat_wake_(&seat_wake),
+        : seat_wake_(seat_wake),
           asker_wake_(asker_wake) {}
+
+    BasicPauseLatch(Observed, infra::OptRef<BasicWakeFlag<Kick>> asker_wake) noexcept
+        : asker_wake_(asker_wake) {}
 
     BasicPauseLatch(const BasicPauseLatch&) = delete;
     BasicPauseLatch& operator=(const BasicPauseLatch&) = delete;
@@ -32,12 +37,14 @@ public:
 
     void pause(PauseGen g) noexcept {
         ask_.store(g, std::memory_order_release);
-        seat_wake_->kick_if_armed();
+        if (seat_wake_)
+            seat_wake_->kick_if_armed();
     }
 
     void resume() noexcept {
         ask_.store(0, std::memory_order_release);
-        seat_wake_->kick_if_armed();
+        if (seat_wake_)
+            seat_wake_->kick_if_armed();
     }
 
     [[nodiscard]] bool paused_at(PauseGen g) const noexcept {
@@ -89,7 +96,7 @@ public:
     }
 
 private:
-    BasicWakeFlag<Kick>* seat_wake_;
+    infra::OptRef<BasicWakeFlag<Kick>> seat_wake_;
     infra::OptRef<BasicWakeFlag<Kick>> asker_wake_;
     std::atomic<PauseGen> ask_{0};
     alignas(64) std::atomic<PauseGen> paused_{0};

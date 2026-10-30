@@ -252,15 +252,15 @@ void StorageService::on(const Req::Detach&, const Req::Head& h, Work& w) noexcep
 }
 
 void StorageService::misrouted(const Req&, Work&) noexcept {
-    request_misrouted_.fetch_add(1, std::memory_order_relaxed);
+    request_misrouted_.add();
 }
 
 void StorageService::finish_(proto::StorageStatus st, Work& w, const Cmp& c) noexcept {
     if (st != proto::StorageStatus::Ok)
-        errors_.fetch_add(1, std::memory_order_relaxed);
+        errors_.add();
     w.answer = c;
     w.performed = true;
-    completions_.fetch_add(1, std::memory_order_relaxed);
+    completions_.add();
 }
 
 void StorageService::perform_(const Req& ask, Work& w) noexcept {
@@ -337,7 +337,7 @@ proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexc
     const Admit a = infra::dispatch<proto::StorageRequestRoutes>(req, reader);
 
     if (!a.known || a.head.slot.v >= kSlots || a.half.v >= kHalves || a.head.seq.v == 0) {
-        refusals_.fetch_add(1, std::memory_order_relaxed);
+        refusals_.add();
         return proto::StorageSeq{0};
     }
     own_all_();
@@ -346,7 +346,7 @@ proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexc
     if (a.data) {
         Data::Loan& l = rt_.data_hands[s][a.half.v];
         if (!l) {
-            refusals_.fetch_add(1, std::memory_order_relaxed);
+            refusals_.add();
             return proto::StorageSeq{0};
         }
         l->ask = req;
@@ -356,7 +356,7 @@ proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexc
     } else {
         Ctl::Loan& l = rt_.ctl_hands[s];
         if (!l) {
-            refusals_.fetch_add(1, std::memory_order_relaxed);
+            refusals_.add();
             return proto::StorageSeq{0};
         }
         l->ask = req;
@@ -385,10 +385,10 @@ proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexc
         l->gen = rt_.gen[s];
         ctl_.send(std::move(l));
     }
-    submits_.fetch_add(1, std::memory_order_relaxed);
+    submits_.add();
     const auto depth = static_cast<std::uint32_t>(data_.outbound() + ctl_.outbound());
-    if (depth > depth_max_.load(std::memory_order_relaxed))
-        depth_max_.store(depth, std::memory_order_relaxed);
+    if (depth > depth_max_.get())
+        depth_max_.set(depth);
     return a.head.seq;
 }
 
@@ -418,7 +418,7 @@ std::optional<proto::StorageCompletion> StorageService::reap() noexcept {
             return std::nullopt;
         }
         if (!completed) {
-            abandoned_.fetch_add(1, std::memory_order_relaxed);
+            abandoned_.add(1);
             continue;
         }
         return c;
@@ -458,7 +458,7 @@ bool StorageService::stage_backend(
 ) noexcept {
 
     if (slot.v >= kSlots || !home_(slot.v) || order.size() > kStorageOrderBytes) {
-        refusals_.fetch_add(1, std::memory_order_relaxed);
+        refusals_.add();
         return false;
     }
     own_all_();
@@ -470,7 +470,7 @@ bool StorageService::stage_backend(
         return true;
     }
     if (staged) {
-        refusals_.fetch_add(1, std::memory_order_relaxed);
+        refusals_.add();
         return false;
     }
     staged = infra::OptRef<IStorageBackend>{backend};
@@ -488,7 +488,7 @@ bool StorageService::release_slot(proto::SlotIndex slot) noexcept {
     if (slot.v >= kSlots)
         return false;
     if (!home_(slot.v)) {
-        refusals_.fetch_add(1, std::memory_order_relaxed);
+        refusals_.add();
         return false;
     }
     if (rt_.owned) {
@@ -514,13 +514,13 @@ ISaveFilesOnIo::Save StorageService::save_on_io(proto::SlotIndex slot) const noe
 
 StorageCounters StorageService::counters() const noexcept {
     StorageCounters c{};
-    c.submits = submits_.load(std::memory_order_relaxed);
-    c.completions = completions_.load(std::memory_order_relaxed);
-    c.errors = errors_.load(std::memory_order_relaxed);
-    c.refusals = refusals_.load(std::memory_order_relaxed);
-    c.depth_max = depth_max_.load(std::memory_order_relaxed);
+    c.submits = submits_.get();
+    c.completions = completions_.get();
+    c.errors = errors_.get();
+    c.refusals = refusals_.get();
+    c.depth_max = depth_max_.get();
     c.state = quiesced() ? 1u : 2u;
-    c.misrouted = request_misrouted_.load(std::memory_order_relaxed);
+    c.misrouted = request_misrouted_.get();
     return c;
 }
 

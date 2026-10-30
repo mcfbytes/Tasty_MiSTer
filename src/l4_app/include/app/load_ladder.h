@@ -45,14 +45,14 @@ public:
     struct Host {
         LinkTxChannel<SeatTag::Main>& inbox;
         const FileTxLevelCell* level;
-        EventQueue<SeatTag::Main>& events;
+        EventQueue<SeatTag::Main>::Producer events;
     };
 
     struct Job {
         std::unique_ptr<cores::ILoader> loader;
         std::unique_ptr<svc::IFile> file;
         std::uint64_t total = 0;
-        std::uint8_t wire_index = 0;
+        proto::WideIoIndex wire_index{};
         std::uint32_t act = 0;
 
         cores::TransferRow row{};

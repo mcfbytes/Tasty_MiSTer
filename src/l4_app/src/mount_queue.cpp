@@ -16,7 +16,7 @@ namespace mister::app {
 MountQueue::MountQueue(const Wiring& w) noexcept
     : vfs_(w.vfs),
       inbox_(w.inbox),
-      owner_events_(w.events),
+      owner_events_(w.events.producer()),
       clock_(w.clock),
       ladder_(w.ladder),
       negotiated_(w.negotiated),
@@ -99,13 +99,12 @@ std::optional<std::uint8_t> MountQueue::pick_index_word_(
             row = &e;
     if (row == nullptr)
         return std::nullopt;
-    return static_cast<std::uint8_t>(
-        (proto::ConfStr::ext_subindex(path, row->ext) << 6) | (row->selentry + 1)
-    );
+    const proto::IoIndex entry{static_cast<std::uint8_t>(row->selentry + 1)};
+    return proto::WideIoIndex::of(entry, proto::ConfStr::ext_subindex(path, row->ext)).fio_byte();
 }
 
 void MountQueue::arm_ladder_(Host& host, const MountAsk& ask, const cores::CoreFactory& row) {
-    if (!ladder_.arm(ask, row, host)) {
+    if (!ladder_.arm(ask, row, host.ladder_host())) {
         publish_refusal_(ask.which, Errc::core_load, ask.tag);
         ++tally_.mounts_refused;
         return;
@@ -127,11 +126,9 @@ void MountQueue::arm_plain_mount_(Host& host, const MountAsk& ask) {
 
             ++owner_tally_.files_failed;
             ++tally_.mounts_refused;
-            (void)owner_events_.push(
-                infra::make<Event>(
-                    Event::InfoRequest{.id = InfoId::ImageMountFailed},
-                    Event::Head{EmitSite{ERR_SITE()}, {}, ask.tag}
-                )
+            owner_events_.push(
+                Event::InfoRequest{.id = InfoId::ImageMountFailed},
+                Event::Head{EmitSite{ERR_SITE()}, {}, ask.tag}
             );
             return;
         }
@@ -139,7 +136,7 @@ void MountQueue::arm_plain_mount_(Host& host, const MountAsk& ask) {
         ++owner_tally_.images_sized;
     }
     ++tally_.mounts_armed;
-    if (host.order(op))
+    if (host.ladder_host().order(op))
         publish_done_(ask.which, ask.tag);
 }
 
@@ -152,7 +149,7 @@ void MountQueue::step_save_mount(Host& host) {
     const std::string_view path = m.ask.path.view();
 
     if (m.gen != 0) {
-        const cores::SaveExtent e = host.save_extent();
+        const cores::SaveExtent e = host.ladder_host().save_extent();
         if (e.generation == m.gen && e.answer == cores::SaveAnswer::Declined)
             m.gen = 0;
         if (e.generation == m.gen && e.answer == cores::SaveAnswer::Known) {
@@ -168,7 +165,7 @@ void MountQueue::step_save_mount(Host& host) {
                     return;
                 }
 
-                if (const auto id = host.intern_path(path, e.size_bytes);
+                if (const auto id = host.ladder_host().intern_path(path, e.size_bytes);
                     id && *id != proto::FileId{}) {
                     ContentRequest load = *m.then_load;
                     load.save = *id;
@@ -177,10 +174,10 @@ void MountQueue::step_save_mount(Host& host) {
                     return;
                 }
             } else {
-                const auto id = host.intern_path(path, e.size_bytes);
+                const auto id = host.ladder_host().intern_path(path, e.size_bytes);
                 if (id
                     && *id != proto::FileId{}
-                    && host.order(
+                    && host.ladder_host().order(
                         proto::LinkOp::BindSlot{
                             .slot = slot,
                             .bind = proto::LinkOp::SlotBind::Mount,
@@ -199,11 +196,11 @@ void MountQueue::step_save_mount(Host& host) {
     if (clock_.now().count() >= m.due_ns) {
 
         if (!path.empty() && m.gen != 0)
-            (void)host.order(
+            (void)host.ladder_host().order(
                 proto::LinkOp::BindSlot{
                     .slot = slot,
                     .bind = proto::LinkOp::SlotBind::Detach,
-                    .act_gen = host.next_generation()
+                    .act_gen = host.ladder_host().next_generation()
                 }
             );
         if (m.then_load) {
@@ -222,7 +219,7 @@ void MountQueue::step_save_mount(Host& host) {
     if (path.empty()) {
 
         if (!m.unmounted) {
-            if (!host.order(
+            if (!host.ladder_host().order(
                     proto::LinkOp::BindSlot{
                         .slot = slot,
                         .bind = proto::LinkOp::SlotBind::Unmount,
@@ -234,8 +231,8 @@ void MountQueue::step_save_mount(Host& host) {
                 return;
             m.unmounted = true;
         }
-        const std::uint32_t g = host.next_generation();
-        if (!host.order(
+        const std::uint32_t g = host.ladder_host().next_generation();
+        if (!host.ladder_host().order(
                 proto::LinkOp::BindSlot{
                     .slot = slot,
                     .bind = proto::LinkOp::SlotBind::Detach,
@@ -246,12 +243,12 @@ void MountQueue::step_save_mount(Host& host) {
         m.gen = g;
         return;
     }
-    const auto id = host.intern_path(path, 0);
+    const auto id = host.ladder_host().intern_path(path, 0);
     if (!id || *id == proto::FileId{})
         return;
-    const std::uint32_t g = host.next_generation();
+    const std::uint32_t g = host.ladder_host().next_generation();
 
-    if (!host.order(
+    if (!host.ladder_host().order(
             proto::LinkOp::BindSlot{
                 .slot = slot,
                 .bind = proto::LinkOp::SlotBind::Attach,
@@ -274,19 +271,15 @@ void MountQueue::finish_save_mount_(Host& host, bool ok, bool quiet) {
     save_mount_.reset();
     if (ok && !quiet) {
         ++tally_.save_mounts_done;
-        (void)owner_events_.push(
-            infra::make<Event>(
-                Event::SdActivity{.slot = slot},
-                Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
-            )
+        owner_events_.push(
+            Event::SdActivity{.slot = slot},
+            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
         );
         publish_done_(which, tag);
     } else if (!quiet) {
-        (void)owner_events_.push(
-            infra::make<Event>(
-                Event::InfoRequest{.id = InfoId::ImageMountFailed},
-                Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-            )
+        owner_events_.push(
+            Event::InfoRequest{.id = InfoId::ImageMountFailed},
+            Event::Head{EmitSite{ERR_SITE()}, {}, tag}
         );
     }
     arm_next_mount(host);
@@ -384,9 +377,11 @@ bool MountQueue::read_remembered_mounts(RememberedFiles files) {
             .index = proto::IoIndex{it.digit},
             .tag = kUncaused
         };
-        ask.index_word = static_cast<std::uint8_t>(
-            (proto::ConfStr::ext_subindex(path, items.subfield(it, 1)) << 6) | it.digit
-        );
+        ask.index_word = proto::WideIoIndex::of(
+                             proto::IoIndex{it.digit},
+                             proto::ConfStr::ext_subindex(path, items.subfield(it, 1))
+        )
+                             .fio_byte();
         if (!ask.path.assign(path)) {
             ++tally_.remembered_mounts_skipped;
             continue;
@@ -402,10 +397,10 @@ void MountQueue::queue_boot_images(const StartChain& chain) {
     for (const StartFile& f : chain.boot_images()) {
         MountAsk ask{
             .which = UiRequest::Kind::MountImage,
-            .index = proto::IoIndex{static_cast<std::uint8_t>(f.dest.v >> 6)},
+            .index = proto::IoIndex{f.dest.sub()},
             .path = f.path,
             .tag = kUncaused,
-            .index_word = static_cast<std::uint8_t>(f.dest.v)
+            .index_word = f.dest.fio_byte()
         };
         boot_images_.push_back(ask);
     }
@@ -455,22 +450,18 @@ void MountQueue::ladder_ended() noexcept {
 }
 
 void MountQueue::publish_refusal_(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept {
-    (void)owner_events_.push(
-        infra::make<Event>(
-            Event::RequestRefused{.which = which, .why = code},
-            Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-        )
+    owner_events_.push(
+        Event::RequestRefused{.which = which, .why = code},
+        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
     );
 }
 
 void MountQueue::publish_done_(UiRequest::Kind which, CorrelationTag tag) noexcept {
     if (tag == kUncaused)
         return;
-    (void)owner_events_.push(
-        infra::make<Event>(
-            Event::RequestDone{.which = which},
-            Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-        )
+    owner_events_.push(
+        Event::RequestDone{.which = which},
+        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
     );
 }
 

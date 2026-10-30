@@ -16,7 +16,7 @@ namespace mister::app {
 struct ContentRequest {
     TASTY_SEAT_EXEMPT(component);
     PathText path{};
-    std::uint8_t slot = 0;
+    proto::WideIoIndex slot{};
     std::uint32_t load_addr = 0;
     proto::FileId save{};
     bool whole = false;

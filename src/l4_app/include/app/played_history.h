@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "app/path_text.h"
+#include "app/write_verdict.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 
@@ -19,7 +20,9 @@ class Vfs;
 
 namespace mister::app {
 
-class PlayedHistory {
+class UiWriteLane;
+
+class PlayedHistory final : public IWriteVerdict {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -43,11 +46,15 @@ public:
     static constexpr std::uint32_t kMagic = 0x594C5047u;
     static constexpr std::uint16_t kVersion = 2;
 
-    explicit PlayedHistory(const svc::Vfs& vfs) noexcept : vfs_(&vfs) {}
+    PlayedHistory(const svc::Vfs& vfs, UiWriteLane& writes) noexcept
+        : vfs_(&vfs),
+          writes_(&writes) {}
 
     [[nodiscard]] Ex<void> load();
 
     [[nodiscard]] Ex<void> record(const Record& r);
+
+    void on_written(bool durable) noexcept override;
 
     [[nodiscard]] bool loaded() const noexcept { return loaded_; }
 
@@ -109,6 +116,7 @@ private:
     [[nodiscard]] Ex<void> save_();
 
     const svc::Vfs* vfs_;
+    UiWriteLane* writes_;
     std::vector<Record> records_;
     bool loaded_ = false;
     std::uint32_t loads_ = 0;

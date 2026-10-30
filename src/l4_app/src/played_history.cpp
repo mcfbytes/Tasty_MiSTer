@@ -6,7 +6,7 @@
 #include <cstring>
 #include <span>
 
-#include "app/durable_write.h"
+#include "app/ui_write_lane.h"
 #include "infra/byte_view.h"
 #include "infra/endian.h"
 #include "svc/vfs.h"
@@ -150,13 +150,19 @@ Ex<void> PlayedHistory::save_() {
         rec[offsetof(Stored, ioctl_index)] = static_cast<char>(r.ioctl_index);
         rec[offsetof(Stored, slot)] = r.slot;
     }
-    const auto r = durable_write(*vfs_, kRel, buf);
-    if (!r) {
+    const auto r = writes_->arm(kRel, buf, infra::OptRef<IWriteVerdict>{*this});
+    if (!r)
         ++errors_;
-        return r;
+    return r;
+}
+
+void PlayedHistory::on_written(bool durable) noexcept {
+    TASTY_SEAT_BODY(PlayedHistory);
+    if (durable) {
+        ++saves_;
+    } else {
+        ++errors_;
     }
-    ++saves_;
-    return {};
 }
 
 }

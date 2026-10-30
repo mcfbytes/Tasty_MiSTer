@@ -60,7 +60,7 @@ void InputPipeline::latch_cfg(std::span<const svc::DeadzoneRule> deadzones, bool
 void InputEmit::on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live) {
 
     TASTY_SEAT_BODY(InputEmit);
-    InputWire::bump(n_rt_rounds_, 1);
+    n_rt_rounds_.add(1);
 
     const std::uint32_t gates = wire_.gates();
     const bool grabbed = (gates & InputWire::kGateGrabbed) != 0u;
@@ -82,20 +82,18 @@ void InputEmit::on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live) {
 
 void InputEmit::apply_edge_reset() {
     TASTY_SEAT_BODY(InputEmit);
-    if (const std::uint32_t rs = wire_.edge_reset_seq(); rs != wm_reset_seq_) {
-        wm_reset_seq_ = rs;
+    if (reset_seen_.take(wire_.edge_reset())) {
         em_.joysticks().reset_edges();
-        InputWire::bump(n_edge_reset_, 1);
+        n_edge_reset_.add(1);
         counts_cell_.publish(counts());
     }
 }
 
 InputEmit::Counts InputEmit::counts() const noexcept {
     Counts c{};
-    c.rt_rounds = n_rt_rounds_.load(std::memory_order_relaxed);
-    c.joy_transactions = n_joy_tx_.load(std::memory_order_relaxed);
+    c.rt_rounds = n_rt_rounds_.get();
     c.rt_errors = ps2_.errors();
-    c.edge_resets = n_edge_reset_.load(std::memory_order_relaxed);
+    c.edge_resets = n_edge_reset_.get();
     return c;
 }
 
@@ -106,12 +104,16 @@ InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view in
         en_.set_input_dir(input_dir);
 
     if (auto e = en_.enumerate(); !e) {
-        InputWire::bump(n_enum_fail_, 1);
+        n_enum_fail_.add(1);
     }
 
     (void)en_.load_maps_for(std::string_view{}, false);
 
-    (void)hand_over_();
+    {
+        const SeatScope stands_in_for_diag{kSeat};
+        if (auto loan = tx_.acquire())
+            hand_over_(std::move(loan));
+    }
 
     wire_.publish_gates(
         svc::InputService::kBornGrabbed ? InputWire::kGateGrabbed : 0u,
@@ -123,19 +125,23 @@ void InputBuild::set_cfg_deadzone_rules(std::span<const svc::DeadzoneRule> rows)
     en_.set_cfg_deadzone_rules(rows);
 }
 
-bool InputBuild::hand_over_() {
+void InputBuild::hand_over_(DeviceTableLoans::Loan loan) {
     svc::DeviceTable t = en_.take_table();
-    return tx_.send(t).has_value();
+    std::swap(*loan, t);
+    tx_.send(std::move(loan));
 }
 
 bool InputBuild::rebind_round() {
 
     TASTY_SEAT_BODY(InputBuild);
-    tx_.reap();
+
+    while (tx_.reap()) {
+    }
     if ((wire_.requests() & InputWire::kReqHotplug) == 0u)
         return false;
 
-    if (!tx_.ready()) {
+    auto loan = tx_.acquire();
+    if (!loan) {
         wire_.note_rebuild_refused();
         return false;
     }
@@ -143,7 +149,7 @@ bool InputBuild::rebind_round() {
     wire_.clear_request(InputWire::kReqHotplug);
 
     if (auto e = en_.enumerate(); !e) {
-        InputWire::bump(n_enum_fail_, 1);
+        n_enum_fail_.add(1);
     }
     {
 
@@ -152,11 +158,7 @@ bool InputBuild::rebind_round() {
         const auto reshape = wire_.analog_reshape();
         (void)en_.load_maps_for(core.view(), core.front_end, reshape, wire_.joy_plan());
     }
-    if (!hand_over_()) {
-        wire_.request(InputWire::kReqHotplug);
-        wire_.note_rebuild_refused();
-        return false;
-    }
+    hand_over_(std::move(loan));
     wire_.note_rebuild_done();
     wire_.wake();
     return true;
@@ -164,7 +166,7 @@ bool InputBuild::rebind_round() {
 
 InputBuild::Counts InputBuild::counts() const noexcept {
     Counts c{};
-    c.enumerate_failures = n_enum_fail_.load(std::memory_order_relaxed);
+    c.enumerate_failures = n_enum_fail_.get();
     c.devices = en_.stats().devices;
     c.rejected = en_.rejected_nodes();
     return c;
@@ -204,7 +206,6 @@ InputStats collect_input_stats(const InputSample& s, const InputBuild::Counts& b
     if (s.emit) {
         const InputEmit::Counts e = s.emit->sample().value;
         out.rt_rounds = e.rt_rounds;
-        out.joy_transactions = e.joy_transactions;
         out.rt_errors = e.rt_errors;
         out.edge_resets = e.edge_resets;
     }

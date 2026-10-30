@@ -23,7 +23,7 @@ struct TransferRow {
     bool shaped = false;
     std::uint8_t shape = 0;
     bool byte_words = false;
-    proto::IoIndex index{};
+    proto::WideIoIndex index{};
     std::uint32_t addr = 0;
     std::uint8_t window = kPhysicalAddr;
     RowBracket bracket = RowBracket::AroundWithLength;

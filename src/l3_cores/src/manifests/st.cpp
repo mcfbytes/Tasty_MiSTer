@@ -63,12 +63,8 @@ static_assert(
     "doorbell for it today (polling-census.md:62 names it a BLK candidate)"
 );
 static_assert(
-    kAtariSt.services[0].osd_budget == OsdBudget::Pinned,
-    "the ACSI poll pins the OSD budget"
-);
-static_assert(
-    kAtariSt.services[0].klass == DeadlineClass::A,
-    "an ACSI command is a live DMA the guest is blocked on: T-RT, inline"
+    kAtariSt.services[0].round_claim == RoundClaim::Always,
+    "the ACSI poll claims each round it runs (no OSD row)"
 );
 static_assert(
     kAtariSt.services[0].period_ms == 1,
@@ -158,7 +154,8 @@ static_assert(
         && kAtariSt.reset.restore_boots
         && kAtariSt.reset.button_reacts,
     "menu.cpp:4784/:4792 and :5051 reset through tos_reset, and tos_config_load's "
-    "caller cold-boots (st_tos.cpp:593-597); the USER release runs tos_reset(0) (user_io.cpp:3077)"
+    "caller cold-boots (st_tos.cpp:593-597); the USER release runs tos_reset(0) "
+    "(user_io.cpp:3077)"
 );
 static_assert(
     !kAtariSt.blank_save.declared(),

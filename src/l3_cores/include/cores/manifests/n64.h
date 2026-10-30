@@ -49,8 +49,7 @@ inline constexpr auto kN64Services = std::to_array<LinkDecoderDecl>({
         reactor::Cause::Tick,
         &kCheatEngineTick<kN64>,
         16,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
 });
 

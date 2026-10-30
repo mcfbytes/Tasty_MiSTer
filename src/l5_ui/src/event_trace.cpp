@@ -104,7 +104,7 @@ void EventTrace::write_(
     const app::Event::Head& h
 ) noexcept {
     const auto depth = static_cast<unsigned>(queue_->depth());
-    const auto lost = queue_->losses(k);
+    const auto lost = queue_->losses().of(k);
     log_.appendf(
         "{\"t\":\"ev\",\"k\":\"%s\",%s"
         "\"site\":%u,\"tag\":%u,\"depth\":%u,\"lost\":%u,"

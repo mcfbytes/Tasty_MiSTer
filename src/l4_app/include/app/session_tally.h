@@ -21,6 +21,8 @@ struct SessionTally {
 
     std::uint32_t core_made_drops = 0;
 
+    std::uint32_t identity_record_refusals = 0;
+
     std::uint32_t resets_pulsed = 0;
 
     std::uint32_t load_facts_refusals = 0;

@@ -14,14 +14,12 @@
 #include "hal/sys_block.h"
 #include "hal/uio_reg_file.h"
 #include "proto/irq_binding.h"
+#include "proto/uio_opcodes.h"
 #include "reactor/notifier.h"
 
 namespace mister::proto {
 
 namespace {
-
-constexpr std::uint16_t kJoystick0 = 0x02;
-constexpr std::uint16_t kJoystick1 = 0x03;
 
 AxiBlockDecl read_entry(const SysDirectoryImage& dir, std::uint32_t i) {
     AxiBlockDecl d{};
@@ -82,7 +80,9 @@ bool block_fits(const AxiBlockDecl& d, std::size_t need, std::uint32_t window_si
     if (!block_fits(*d, hal::UioRegFile::kSize, window_size)) {
         return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), d->offset});
     }
-    for (const std::uint16_t op : {kJoystick0, kJoystick1}) {
+    for (const std::uint16_t op :
+         {static_cast<std::uint16_t>(UioOp::Joystick0),
+          static_cast<std::uint16_t>(UioOp::Joystick1)}) {
         if (!d->honours(op))
             return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), op});
     }

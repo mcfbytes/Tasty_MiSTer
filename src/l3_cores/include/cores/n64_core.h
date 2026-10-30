@@ -106,7 +106,6 @@ private:
     void plan_saves_();
 
     [[nodiscard]] std::uint32_t read_(n64::StatusField f) const noexcept;
-    void write_(n64::StatusField f, std::uint32_t v) noexcept;
 
     [[nodiscard]] bool cheats_enabled_() const noexcept;
     void disable_cheats_() noexcept;

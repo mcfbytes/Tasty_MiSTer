@@ -26,16 +26,14 @@ inline constexpr auto kNeoGeoServices = std::to_array<LinkDecoderDecl>({
         reactor::Cause::Ring,
         &kCdCommandEdge<kNeoGeo>,
         0,
-        DeadlineClass::A,
-        OsdBudget::Shared,
+        RoundClaim::Never,
     },
     {
         "neogeo.service_tick",
         reactor::Cause::Tick,
         &kCdServiceTick<kNeoGeo>,
         1,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
 });
 

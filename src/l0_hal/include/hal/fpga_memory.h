@@ -63,18 +63,11 @@ public:
 
     void handoff() noexcept;
 
-    [[nodiscard]] Ex<void> rebind(PhysRegion r);
-    [[nodiscard]] Ex<void> rebind(std::span<std::byte> backing, PhysRegion r);
-
-    [[nodiscard]] Ex<void> rebind_uio(int fd, os::PhysAddr node_base, PhysRegion r);
-
     bool uio_bound() const noexcept { return uio_bound_; }
 
     os::MmioRegion::Access access() const noexcept { return access_; }
 
     const PhysRegion& region() const noexcept { return region_; }
-
-    std::uint32_t generation() const noexcept { return generation_; }
 
     void store_release(std::size_t word_off, std::uint32_t v);
     std::uint32_t load_acquire(std::size_t word_off) const;
@@ -85,7 +78,6 @@ private:
 
     std::optional<os::MmioRegion> map_;
     std::byte* base_ = nullptr;
-    std::uint32_t generation_ = 0;
     bool uio_bound_ = false;
     os::MmioRegion::Access access_ = os::MmioRegion::Access::ReadWrite;
 };

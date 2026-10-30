@@ -43,7 +43,9 @@ private:
     [[nodiscard]] Ex<void> tx_uef_(IoIndex index, std::span<const std::uint8_t> bytes);
     [[nodiscard]] Ex<void> tx_raw_(IoIndex index, std::span<const std::uint8_t> bytes);
 
-    [[nodiscard]] Ex<bool> materialize_(std::span<const std::uint8_t> bytes);
+    [[nodiscard]] Ex<std::span<const std::uint8_t>> materialize_(
+        std::span<const std::uint8_t> bytes
+    );
 
     FixedStr<8, StrFit::Clip> ext_{};
     std::uint64_t bytes_sent_ = 0;

@@ -11,12 +11,11 @@
 #include "proto/spi_frame.h"
 #include "proto/download_session.h"
 #include "proto/image_bracket.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::cores {
 
 namespace {
-
-constexpr std::uint16_t kSetStatus2 = 0x1E;
 
 constexpr auto kBlankCart = [] {
     std::array<std::uint8_t, StCore::kCartBytes> a{};
@@ -30,7 +29,11 @@ StCore::StCore(const CoreProfile& p, const HostServices& h) : Core(p, h) {}
 
 Ex<void> StCore::push_control_() {
     proto::SpiFrame frame{host().link};
-    if (auto r = frame.begin(proto::FrameSel::Uio, kSetStatus2); !r)
+    if (auto r = frame.begin(
+            proto::FrameSel::Uio,
+            static_cast<std::uint16_t>(proto::UioOp::SetStatus2)
+        );
+        !r)
         return r;
     const std::uint16_t payload[4] = {
         static_cast<std::uint16_t>(cfg_.system_ctrl & 0xFFFFu),

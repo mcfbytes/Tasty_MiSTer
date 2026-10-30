@@ -26,13 +26,20 @@ static_assert(
 Ex<void> SpiFrame::begin(FrameSel sel, std::uint16_t op) {
     TASTY_SEAT_BODY(SpiFrame);
     close_();
+    reply_.reset();
     const auto i = static_cast<std::size_t>(sel);
     if (i >= kSelectOf.size()) {
         return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), static_cast<std::uint32_t>(i)});
     }
     link_.select(kSelectOf[i]);
     open_ = true;
-    return put_(op);
+    auto r = link_.transfer(hal::SpiWord{op});
+    if (!r) {
+        close_();
+        return std::unexpected(r.error());
+    }
+    reply_ = r->v;
+    return {};
 }
 
 Ex<void> SpiFrame::word(std::uint16_t w) {
@@ -46,6 +53,11 @@ Ex<void> SpiFrame::end() {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     close_();
     return {};
+}
+
+std::optional<std::uint16_t> SpiFrame::opcode_reply() const noexcept {
+    TASTY_SEAT_BODY(SpiFrame);
+    return reply_;
 }
 
 Ex<void> SpiFrame::put_(std::uint16_t w) {

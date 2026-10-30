@@ -20,6 +20,8 @@ struct OwnerTally {
 
     std::uint32_t loads_refused_busy = 0;
 
+    std::uint32_t belt_offers_refused = 0;
+
     std::uint32_t savestate_refusals = 0;
 
     std::uint32_t savestate_hold_expiries = 0;

@@ -5,10 +5,12 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "proto/uio_opcodes.h"
+
 namespace mister::cores::msu {
 
-inline constexpr std::uint16_t kCdGet = 0x34;
-inline constexpr std::uint8_t kCdSet = 0x35;
+inline constexpr std::uint16_t kCdGet = static_cast<std::uint16_t>(proto::UioOp::CdGet);
+inline constexpr std::uint8_t kCdSet = static_cast<std::uint8_t>(proto::UioOp::CdSet);
 inline constexpr std::uint8_t kFrameWords = 4;
 
 inline constexpr std::uint16_t kSetEnable = 1;

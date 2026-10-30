@@ -195,7 +195,7 @@ int ProcessStandup::ExitPath::fail() const {
             }
         }
         if (owed == app::ExitReboot::Cold)
-            session_->reboot_at_exit();
+            session_->reboot_at_exit(ColdRebootCause::UnconfiguredFabric);
         {
 
             const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
@@ -219,10 +219,20 @@ const ProcessStandup::ExitPath::SessionStage& ProcessStandup::ExitPath::session(
     return *session_;
 }
 
-void ProcessStandup::ExitPath::SessionStage::reboot_at_exit() const {
+void ProcessStandup::ExitPath::SessionStage::reboot_at_exit(ColdRebootCause why) const {
     {
 
         const mister::SeatScope main_as_main{mister::SeatTag::Main};
+
+        if (why == ColdRebootCause::UnconfiguredFabric) {
+            std::fprintf(
+                stderr,
+                "mister: FPGA left unconfigured by a failed bitstream "
+                "program; the bridges stay down (raising them over an "
+                "unconfigured fabric is unsafe) and no userland write can "
+                "make this board bootable — rebooting now (cold)\n"
+            );
+        }
         if (auto r = reboot_.get().reboot(true); !r)
             report("BoardReboot::reboot", r.error());
     }
@@ -340,7 +350,7 @@ ProcessStandup::Exit ProcessStandup::open_platform() {
     auto exec = reactor::Executive::create(
         stats,
         {.round_timer = infra::OptRef<reactor::RoundTimer>{round_timer},
-         .log_lane = infra::OptRef<xthread::LogLane>{rt_lane}}
+         .log_lane = rt_lane.producer()}
     );
     if (!exec) {
         report("Executive::create", exec.error());
@@ -485,7 +495,7 @@ ProcessStandup::Exit ProcessStandup::run_boot_ladder() {
                         }
 
                         if (failed == app::ExitReboot::Cold) {
-                            exit_.session().reboot_at_exit();
+                            exit_.session().reboot_at_exit(ColdRebootCause::ExecFailed);
                         }
                         ::_exit(1);
                     }
@@ -594,7 +604,7 @@ int ProcessStandup::shut_down(const Ex<void>& ran) {
         }
     }
     if (exit_owed == app::ExitReboot::Cold)
-        exit_.session().reboot_at_exit();
+        exit_.session().reboot_at_exit(ColdRebootCause::UnconfiguredFabric);
 
     exit_.session().warn_if_unconfigured();
     assembly.stop();

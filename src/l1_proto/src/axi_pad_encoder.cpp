@@ -2,6 +2,7 @@
 #include "proto/axi_pad_encoder.h"
 
 #include "hal/uio_reg_file.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
@@ -41,11 +42,11 @@ void AxiPadEncoder::trust(bool ready) noexcept {
 
 std::uint32_t AxiPadEncoder::link_words(std::uint16_t opcode, bool follow_up) const noexcept {
     TASTY_SEAT_BODY(AxiPadEncoder);
-    constexpr std::uint16_t kAstick = 0x1A;
     constexpr std::uint32_t kStickWords = 4;
     if (!block_.honours(opcode))
         return otherwise_.link_words(opcode, follow_up);
-    return (follow_up && !block_.honours(kAstick)) ? kStickWords : 0u;
+    return (follow_up && !block_.honours(static_cast<std::uint16_t>(UioOp::Astick))) ? kStickWords
+                                                                                     : 0u;
 }
 
 Ex<void> AxiPadEncoder::level_(std::size_t slot, std::uint32_t word) {

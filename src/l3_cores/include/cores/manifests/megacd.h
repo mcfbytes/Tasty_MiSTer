@@ -28,16 +28,14 @@ inline constexpr auto kMegaCdServices = std::to_array<LinkDecoderDecl>({
         &kCdCommandEdge<kMegaCd>,
         0,
 
-        DeadlineClass::A,
-        OsdBudget::Shared,
+        RoundClaim::Never,
     },
     {
         "megacd.service_tick",
         reactor::Cause::Blk,
         &kCdServiceTick<kMegaCd>,
         10,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
 });
 

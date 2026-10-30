@@ -20,19 +20,24 @@
 
 namespace mister::app {
 
-void BindTail::identity(const proto::ConfStr& conf) {
-    TASTY_SEAT_BODY(BindTail);
+std::array<std::string_view, 4> bind_identity_fields(const proto::ConfStr& conf) noexcept {
     constexpr std::size_t kCap = kLinkTxSlabBytes;
-    std::string_view f[4] =
+    std::array<std::string_view, 4> f =
         {conf.name(), conf.button_list(0), conf.button_list(1), conf.button_list(2)};
     auto total = [&f]() noexcept {
         return f[0].size() + f[1].size() + f[2].size() + f[3].size() + 3;
     };
 
-    for (int i = 3; i >= 1 && total() > kCap; --i)
+    for (std::size_t i = 3; i >= 1 && total() > kCap; --i)
         f[i] = {};
     if (total() > kCap)
         f[0] = f[0].substr(0, kCap - 3);
+    return f;
+}
+
+bool BindTail::identity(const proto::ConfStr& conf) {
+    TASTY_SEAT_BODY(BindTail);
+    const std::array<std::string_view, 4> f = bind_identity_fields(conf);
     std::string blob;
     for (unsigned i = 0; i < 4; ++i) {
         blob.append(f[i]);
@@ -42,9 +47,9 @@ void BindTail::identity(const proto::ConfStr& conf) {
     const auto id = inbox_.intern(infra::text_bytes<const std::uint8_t>(blob));
     if (!id) {
         ++tally_.identity_intern_refusals;
-        return;
+        return false;
     }
-    (void)push_gating(
+    return push_gating(
         inbox_,
         tally_,
         sleeper_,
@@ -109,7 +114,7 @@ void BindTail::facts(const MraFacts& facts) noexcept {
         .rotation = facts.rotation
     };
     if (!facts.setname.empty()) {
-        const auto setname = infra::text_bytes<const std::uint8_t>(facts.setname);
+        const auto setname = infra::text_bytes<const std::uint8_t>(facts.setname.view());
         const auto id = inbox_.intern(setname);
         if (id)
             op.setname = *id;

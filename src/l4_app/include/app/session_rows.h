@@ -148,7 +148,6 @@ private:
         std::size_t n,
         const reactor::LinkDecoderDecl& row
     ) noexcept;
-    [[nodiscard]] std::string_view conf_str_name() const noexcept;
 
     proto::CoreSession& session_;
     SessionBindings& bindings_;

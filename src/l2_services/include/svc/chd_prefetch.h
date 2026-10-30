@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/inbox.h"
 #include "infra/rt_stats.h"
@@ -173,7 +174,7 @@ public:
 
     void submit(std::uint32_t hunk) noexcept;
 
-    void note_miss() noexcept { misses_.fetch_add(1, std::memory_order_relaxed); }
+    void note_miss() noexcept { misses_.add(); }
 
     [[nodiscard]] PrefetchCounters counters() const noexcept;
 
@@ -210,21 +211,28 @@ private:
 
     xthread::Inbox<ChdAttach, kChdAttachDepth> attaches_{wake_};
     std::atomic<std::uint32_t> attaches_taken_{0};
-    xthread::SlotPool<ChdMedia, kChdMediaLeases> media_{};
+    xthread::SlotPool<ChdMedia, kChdMediaLeases, kSeatMediatorB> media_{};
 
-    std::atomic<std::uint32_t> hits_{0}, misses_{0}, decodes_{0};
-    std::atomic<std::uint32_t> decode_us_{0}, evictions_{0};
-    std::atomic<std::uint32_t> seeks_{0}, errors_{0};
+    xthread::Counter hits_, misses_, decodes_, decode_us_, evictions_, seeks_, errors_;
 
-    using Lease = xthread::SlotPool<ChdMedia, kChdMediaLeases>::Lease;
+    using Lease = xthread::SlotPool<ChdMedia, kChdMediaLeases, kSeatMediatorB>::Lease;
 
     struct Commander {
         TASTY_SEAT_RESIDENT(Io);
         Lease leases[kChdMediaLeases]{};
         std::uint32_t lease_seq[kChdMediaLeases]{};
         std::uint32_t sent = 0;
+
+        ~Commander() {
+            for (auto& l : leases)
+                (void)l.release();
+        }
     };
 
+    static_assert(
+        decltype(media_)::owner_seat() == Commander::kSeatDecl,
+        "the seat that holds the leases is the seat the pool checks"
+    );
     Commander cmd_{};
 
     std::unique_ptr<IChdSource> src_{};

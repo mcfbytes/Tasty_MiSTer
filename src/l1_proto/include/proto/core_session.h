@@ -10,7 +10,10 @@
 #include "hal/core_signals.h"
 #include "hal/spi_transport.h"
 #include "proto/reset_fence.h"
+#include "proto/rtc_image.h"
+#include "proto/status_edit.h"
 #include "proto/status_register.h"
+#include "proto/status_word.h"
 #include "proto/types.h"
 #include "infra/seat.h"
 
@@ -85,9 +88,8 @@ public:
     [[nodiscard]] bool conf_str_window_open() const noexcept;
 
     [[nodiscard]] Ex<void> load_saved_config();
-    [[nodiscard]] Ex<void> send_rtc();
 
-    [[nodiscard]] Ex<void> send_rtc_at(std::uint32_t unix_seconds);
+    [[nodiscard]] Ex<void> send_rtc_image(const RtcImage& image);
 
     [[nodiscard]] Ex<void> release_reset();
 
@@ -99,7 +101,23 @@ public:
 
     const hal::CoreCapabilities& capabilities() const noexcept { return caps_; }
 
-    StatusRegister& status() noexcept { return status_; }
+    const StatusRegister& status() const noexcept { return status_; }
+
+    void stage(const StatusEdit& edit) noexcept;
+
+    [[nodiscard]] Ex<void> apply(const StatusEdit& edit);
+
+    void post(const StatusEdit& edit) noexcept;
+
+    [[nodiscard]] std::uint32_t deferred_bursts() const noexcept { return deferred_bursts_; }
+
+    [[nodiscard]] Ex<void> pulse(StatusBit bit);
+
+    [[nodiscard]] Ex<void> pulse_reset();
+
+    [[nodiscard]] Ex<void> adopt_from_core(const StatusWord& core);
+
+    [[nodiscard]] Ex<void> flush_owed();
 
     static constexpr std::size_t kConfStrCap = 10240;
 
@@ -120,6 +138,7 @@ private:
     CoreType type_ = CoreType::Unknown;
     bool dual_sdram_ = false;
     bool suppress_status_wire_ = false;
+    std::uint32_t deferred_bursts_ = 0;
     hal::CoreCapabilities caps_{};
     StatusRegister status_;
 };

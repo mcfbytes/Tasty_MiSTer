@@ -54,7 +54,7 @@ N64Loader::Shape N64Loader::shape_of(const TransferRow& row) noexcept {
 
 Ex<LoadPlan> N64Loader::plan(const LoadAsk& ask, const proto::StatusWord& status) {
     TASTY_SEAT_BODY(N64Loader);
-    const n64::FileRoute r = n64::file_route(ask.index);
+    const n64::FileRoute r = n64::file_route(ask.index.io());
     if (ask.size != 0 && r == n64::FileRoute::DiskImage)
         return plan_disk_(ask, status);
     if (ask.size != 0 && r == n64::FileRoute::Ipl) {
@@ -136,7 +136,7 @@ Ex<LoadPlan> N64Loader::plan_disk_(const LoadAsk& ask, const proto::StatusWord& 
     if (!area)
         return std::unexpected(area.error());
     d->area = *area;
-    if (auto m = d->map.build(d->area); !m)
+    if (auto m = n64dd::DiskMap::build_into(d->map, d->area); !m)
         return std::unexpected(m.error());
     d->expander.start(d->map);
     if (!d->path.assign(ask.path))
@@ -202,7 +202,7 @@ void N64Loader::plan_autoload_(LoadPlan& p) {
 
         if (!plan_ipl_row_(row, ipl_path_.view(), !cart))
             return;
-        row.index = cart ? n64::kDdIplPreloadIndex : n64::kDdIplIndex;
+        row.index = proto::WideIoIndex{(cart ? n64::kDdIplPreloadIndex : n64::kDdIplIndex).v};
         row.addr = manifests::kDdIplLoadAddr;
         row.source = ipl_path_.view();
         ++p.count;
@@ -219,7 +219,7 @@ void N64Loader::plan_autoload_(LoadPlan& p) {
     row.dest = RowDest::Window;
     row.shaped = true;
     row.shape = raw(Shape::Rom);
-    row.index = n64::kRomIndex;
+    row.index = proto::WideIoIndex{n64::kRomIndex.v};
     row.addr = manifests::kRomLoadAddr;
     row.source = cart_path_.view();
     row.file_len = static_cast<std::uint32_t>(size->v);

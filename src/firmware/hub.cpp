@@ -44,6 +44,7 @@ DiagSampler::Sources Hub::diag_sources_(const BootParts& plat) noexcept {
         .sector_route = d.sector_route,
         .osd_route = d.osd_route,
         .sys_route = d.sys_route,
+        .main_log = d.main_log,
     };
 }
 
@@ -124,6 +125,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .ui_round = face_parts_.ui_round,
               .link_rx = device_.ui_rx_,
               .save_states = face_parts_.save_states,
+              .ui_writes = face_parts_.ui_writes,
               .owner_tick = tail_->owner_tick(),
               .lw_osd = infra::OptRef<app::LwOsdEndpoint>{device_.lw_osd_}
           },
@@ -154,7 +156,8 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
         DeviceBlock::Seats{
             .mains = seat_mains_,
             .diag = assembly_.diag(),
-            .save_states = face_parts_.save_states
+            .save_states = face_parts_.save_states,
+            .ui_writes = face_parts_.ui_writes
         }
     );
 

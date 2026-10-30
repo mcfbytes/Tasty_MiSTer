@@ -12,24 +12,14 @@
 namespace mister::svc {
 
 [[nodiscard]] Ex<void> emit_video_words(
-    hal::ISpiTransport& link,
-    std::uint8_t opcode,
+    proto::ILinkFrame& frame,
+    proto::UioOp opcode,
     std::span<const std::uint16_t> words
 ) {
     if (words.empty() || words.size() > kVideoWireWords) {
         return err(Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size()));
     }
-
-    hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(hal::SpiWord{opcode}); !r) {
-        return std::unexpected(r.error());
-    }
-    for (const std::uint16_t w : words) {
-        if (auto r = link.transfer(hal::SpiWord{w}); !r) {
-            return std::unexpected(r.error());
-        }
-    }
-    return {};
+    return proto::send_frame(frame, opcode, words);
 }
 
 namespace {
@@ -65,41 +55,34 @@ namespace {
 
 }
 
-[[nodiscard]] Ex<std::uint16_t> emit_fbuf(hal::ISpiTransport& link, std::uint16_t word) {
-    hal::Selected cs(link, hal::ChipSelect::Io);
+[[nodiscard]] Ex<std::uint16_t> emit_fbuf(proto::ILinkFrame& frame, std::uint16_t word) {
 
-    auto op = link.transfer(hal::SpiWord{kUioSetFbuf});
-    if (!op)
-        return std::unexpected(op.error());
-    if (auto r = link.transfer(hal::SpiWord{word}); !r) {
+    const std::uint16_t words[1] = {word};
+    if (auto r = proto::send_frame(
+            frame,
+            proto::UioOp::SetFbuf,
+            std::span<const std::uint16_t>(words, 1)
+        );
+        !r) {
         return std::unexpected(r.error());
     }
 
-    return op->v;
+    return frame.opcode_reply().value_or(0);
 }
 
 [[nodiscard]] Ex<void> emit_ar_custom(
-    hal::ISpiTransport& link,
+    proto::ILinkFrame& frame,
     std::span<const std::uint16_t> words
 ) {
     if (words.size() != 4) {
         return err(Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(words.size()));
     }
-    hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(hal::SpiWord{kUioSetArCust}); !r) {
-        return std::unexpected(r.error());
-    }
-    for (const std::uint16_t w : words) {
-        if (auto r = link.transfer(hal::SpiWord{w}); !r) {
-            return std::unexpected(r.error());
-        }
-    }
-    return {};
+    return proto::send_frame(frame, proto::UioOp::SetArCust, words);
 }
 
 [[nodiscard]] Ex<std::uint16_t> emit_filter_mode(hal::ISpiTransport& link, std::uint8_t mode) {
     hal::Selected cs(link, hal::ChipSelect::Io);
-    auto op = link.transfer(hal::SpiWord{kUioSetFltNum});
+    auto op = link.transfer(proto::word(proto::UioOp::SetFltNum));
     if (!op)
         return std::unexpected(op.error());
 
@@ -114,23 +97,14 @@ namespace {
 }
 
 [[nodiscard]] Ex<void> emit_filter_coeff_chunk(
-    hal::ISpiTransport& link,
+    proto::ILinkFrame& frame,
     std::span<const std::uint16_t> chunk
 ) {
 
     if (chunk.size() > kFilterCoeffWords) {
         return err(Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(chunk.size()));
     }
-    hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(hal::SpiWord{kUioSetFltCoef}); !r) {
-        return std::unexpected(r.error());
-    }
-    for (const std::uint16_t w : chunk) {
-        if (auto r = link.transfer(hal::SpiWord{w}); !r) {
-            return std::unexpected(r.error());
-        }
-    }
-    return {};
+    return proto::send_frame(frame, proto::UioOp::SetFltCoef, chunk);
 }
 
 [[nodiscard]] Ex<std::uint16_t> emit_shadow_mask(
@@ -138,7 +112,7 @@ namespace {
     std::uint16_t flag_word
 ) {
     hal::Selected cs(link, hal::ChipSelect::Io);
-    auto op = link.transfer(hal::SpiWord{kUioShadowMask});
+    auto op = link.transfer(proto::word(proto::UioOp::ShadowMask));
     if (!op)
         return std::unexpected(op.error());
 
@@ -156,7 +130,7 @@ namespace {
 
 [[nodiscard]] Ex<std::uint16_t> emit_hdmi_int_probe(hal::ISpiTransport& link) {
     hal::Selected cs(link, hal::ChipSelect::Io);
-    auto op = link.transfer(hal::SpiWord{kUioHdmiInt});
+    auto op = link.transfer(proto::word(proto::UioOp::HdmiInt));
     if (!op)
         return std::unexpected(op.error());
     return op->v;
@@ -164,7 +138,7 @@ namespace {
 
 [[nodiscard]] Ex<std::uint16_t> emit_gamma_probe(hal::ISpiTransport& link) {
     hal::Selected cs(link, hal::ChipSelect::Io);
-    auto op = link.transfer(hal::SpiWord{kUioSetGamma});
+    auto op = link.transfer(proto::word(proto::UioOp::SetGamma));
     if (!op)
         return std::unexpected(op.error());
     return op->v;
@@ -187,7 +161,7 @@ namespace {
     {
         hal::Selected cs(link, hal::ChipSelect::Io);
 
-        if (auto r = link.transfer(hal::SpiWord{kUioGetVres}); !r) {
+        if (auto r = link.transfer(proto::word(proto::UioOp::GetVres)); !r) {
             return std::unexpected(r.error());
         }
         auto res = read_word(link);
@@ -256,7 +230,7 @@ namespace {
     {
         hal::Selected cs(link, hal::ChipSelect::Io);
 
-        auto op = link.transfer(hal::SpiWord{kUioGetFbPar});
+        auto op = link.transfer(proto::word(proto::UioOp::GetFbPar));
         if (!op)
             return std::unexpected(op.error());
         const auto crc = static_cast<std::uint8_t>(op->v & 0xFFu);
@@ -291,7 +265,7 @@ namespace {
 
     if (pass.changed || force) {
         hal::Selected cs(link, hal::ChipSelect::Io);
-        const std::uint8_t b[2] = {kUioSetYcPar, 0x00};
+        const std::uint8_t b[2] = {proto::byte(proto::UioOp::SetYcPar), 0x00};
         if (auto r = write_bytes(link, std::span<const std::uint8_t>(b, 2)); !r) {
             return std::unexpected(r.error());
         }
@@ -302,7 +276,7 @@ namespace {
     bool vfilter_gate_open = false;
     {
         hal::Selected cs(link, hal::ChipSelect::Io);
-        auto op = link.transfer(hal::SpiWord{kUioSetFltNum});
+        auto op = link.transfer(proto::word(proto::UioOp::SetFltNum));
         if (!op)
             return std::unexpected(op.error());
         pass.sample.flt_flags = op->v;
@@ -324,7 +298,7 @@ namespace {
 
     if (vfilter_gate_open && !tail_deferred) {
         hal::Selected cs(link, hal::ChipSelect::Io);
-        if (auto r = link.transfer(hal::SpiWord{kUioSetFltCoef}); !r) {
+        if (auto r = link.transfer(proto::word(proto::UioOp::SetFltCoef)); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -337,7 +311,7 @@ namespace {
 
         {
             hal::Selected cs(link, hal::ChipSelect::Io);
-            if (auto r = link.transfer(hal::SpiWord{kUioSetHeight}); !r) {
+            if (auto r = link.transfer(proto::word(proto::UioOp::SetHeight)); !r) {
                 return std::unexpected(r.error());
             }
             if (auto r = link.transfer(hal::SpiWord{hpay}); !r) {
@@ -346,7 +320,7 @@ namespace {
         }
         {
             hal::Selected cs(link, hal::ChipSelect::Io);
-            if (auto r = link.transfer(hal::SpiWord{kUioSetWidth}); !r) {
+            if (auto r = link.transfer(proto::word(proto::UioOp::SetWidth)); !r) {
                 return std::unexpected(r.error());
             }
             if (auto r = link.transfer(hal::SpiWord{wpay}); !r) {

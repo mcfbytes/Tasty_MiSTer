@@ -317,7 +317,7 @@ struct VresLink final : hal::ISpiTransport, hal::ICoreSignals {
             static_cast<std::uint16_t>(vtime >> 16)
         };
         std::uint16_t in = 0;
-        if (op_ == svc::kUioGetVres && cursor_ < 9)
+        if (op_ == proto::byte(proto::UioOp::GetVres) && cursor_ < 9)
             in = words[cursor_];
         ++cursor_;
         return hal::SpiWord{in};

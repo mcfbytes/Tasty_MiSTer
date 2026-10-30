@@ -16,6 +16,7 @@
 #include "proto/joystick.h"
 #include "proto/late_answers.h"
 #include "proto/link_op.h"
+#include "proto/spi_frame.h"
 #include "reactor/frame_clock.h"
 #include "reactor/tick.h"
 
@@ -119,6 +120,8 @@ private:
     [[nodiscard]] Ex<proto::FrameCount> read_counter_() noexcept;
 
     Wiring w_;
+
+    proto::SpiFrame frame_{w_.link};
     ReplayControlCell::Reader control_seen_{};
     ReplayControl ctrl_{};
     ReplayStatus status_{};

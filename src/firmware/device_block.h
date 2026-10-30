@@ -3,7 +3,6 @@
 
 #include <sys/epoll.h>
 
-#include <atomic>
 #include <memory>
 #include <optional>
 #include <span>
@@ -28,6 +27,7 @@
 #include "app/frame_demand.h"
 #include "app/input_main.h"
 #include "app/input_pipeline.h"
+#include "app/identity_record.h"
 #include "app/ini_parse.h"
 #include "app/launcher_demand.h"
 #include "app/launcher_state.h"
@@ -39,6 +39,7 @@
 #include "app/lw_sector_endpoint.h"
 #include "app/lw_sys_endpoint.h"
 #include "app/disk_relay.h"
+#include "app/save_upload_relay.h"
 #include "app/mailbox_relay.h"
 #include "app/osd_grant.h"
 #include "app/osd_route.h"
@@ -53,17 +54,20 @@
 #include "app/sector_route.h"
 #include "app/session_owner.h"
 #include "app/session_seats.h"
+#include "app/ui_write_lane.h"
 #include "app/video_pump.h"
 #include "app/window_job_service.h"
 #include "boot_parts.h"
 #include "cores/save_copy_level.h"
 #include "hal/fpga_memory.h"
 #include "hal/hdmi_int_level.h"
+#include "hal/thread_map.h"
 #include "infra/diag_log.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
 #include "infra/seat.h"
+#include "infra/telemetry.h"
 #include "infra/unique_fd.h"
 #include "infra/wake_flag.h"
 #include "board_reset.h"
@@ -102,6 +106,8 @@ public:
         DiagSampler& diag;
 
         infra::OptRef<app::SaveStateAttach> save_states{};
+
+        infra::OptRef<app::UiWriteLane> ui_writes{};
     };
 
     DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Front& front);
@@ -177,9 +183,11 @@ public:
     OpenVerdict opened_{};
     const Front front_;
 
+    const hal::ThreadMap& threads_;
+
     xthread::DiagLog diag_log_;
 
-    std::atomic<bool> transitioning_{false};
+    xthread::Telemetry<bool, SeatTag::RT> transitioning_{};
 
     xthread::WakeFlag io_wake_;
 
@@ -203,6 +211,8 @@ public:
     app::FileStreamService file_streams_;
 
     app::DiskRelay disk_relay_{io_wake_};
+
+    app::SaveUploadRelay save_relay_{io_wake_};
 
     hal::PinLevelCell pin_levels_{};
 
@@ -267,6 +277,8 @@ public:
     app::OsdWire osd_wire_;
     app::LwOsdEndpoint lw_osd_;
     app::ConfigCell config_cell_;
+
+    app::IdentityRecordCell identity_record_cell_;
     app::ConfStrCell conf_str_cell_;
 
     app::LadderStateCell ladder_cell_{};
@@ -287,6 +299,8 @@ public:
     LadderScope ladder_;
 
     BoardReset board_reset_;
+
+    xthread::MainLogLane main_log_lane_{};
     const app::SupervisorParts parts_;
     app::LinkSession session_;
 

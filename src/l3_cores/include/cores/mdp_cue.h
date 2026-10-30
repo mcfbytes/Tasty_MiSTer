@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "infra/fixed_str.h"
+#include "infra/path_text.h"
 #include "infra/seat.h"
 
 namespace mister::cores::mdp {
@@ -16,7 +17,7 @@ class CueSheet {
 public:
     static constexpr std::uint8_t kMaxTracks = 99;
 
-    static constexpr std::size_t kPathMax = 1024;
+    static constexpr std::size_t kPathMax = infra::kPathMax;
 
     static constexpr std::size_t kLineMax = 1023;
 

@@ -67,7 +67,7 @@ ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& 
     const auto planned = cores::AddressedLoad::window_row(
         w.address,
         w.bytes,
-        proto::IoIndex{w.index},
+        proto::WideIoIndex{w.index},
         h.aperture
     );
     if (!planned) {
@@ -90,7 +90,7 @@ ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& 
         .loader = std::make_unique<cores::AddressedLoad>(h.aperture),
         .file = acts_->take_image(),
         .total = w.bytes,
-        .wire_index = w.index,
+        .wire_index = proto::WideIoIndex{w.index},
         .act = h.owner.next_generation(),
         .row = r
     };

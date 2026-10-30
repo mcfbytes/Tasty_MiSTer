@@ -21,6 +21,8 @@ concept LogRecSink = requires(S& s, const LogRec& m, const LogRec::Head& h) {
     s.on(std::declval<const LogRec::RingLoss&>(), h);
     s.on(std::declval<const LogRec::DoorbellBound&>(), h);
     s.on(std::declval<const LogRec::DoorbellPolling&>(), h);
+    s.on(std::declval<const LogRec::PhaseTolerated&>(), h);
+    s.on(std::declval<const LogRec::ConfStrArrived&>(), h);
     s.misrouted(m);
 };
 

@@ -195,6 +195,9 @@ struct SlintRasterOf<C>::Impl {
     std::unique_ptr<Scene<C>> scene{};
 
     void drop_scene() {
+
+        if (scene && scene->ui)
+            (*scene->ui)->hide();
         if (plat)
             plat->adapter.reset();
         scene.reset();

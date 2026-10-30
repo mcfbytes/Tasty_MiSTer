@@ -144,7 +144,7 @@ private:
 
     svc::DiscGeometry geom_{};
 
-    std::string image_path_;
+    FixedStr<1024, StrFit::Reject> image_path_{};
 
     StagePlan plan_{};
     FixedStr<11, StrFit::Clip> game_id_{};

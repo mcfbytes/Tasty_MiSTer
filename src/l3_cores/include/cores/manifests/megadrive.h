@@ -19,8 +19,7 @@ inline constexpr auto kMegaDriveServices = std::to_array<LinkDecoderDecl>({
         reactor::Cause::Tick,
         &kPcmWireTick<kMegaDrive>,
         5,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
 });
 

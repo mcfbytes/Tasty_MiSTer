@@ -7,6 +7,7 @@
 #include "app/lw_pads.h"
 #include "infra/opt_ref.h"
 #include "proto/link_op.h"
+#include "proto/spi_frame.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
@@ -80,6 +81,8 @@ public:
 private:
     std::uint32_t holds_ = 0;
     hal::ISpiTransport& link_;
+
+    proto::SpiFrame frame_{link_};
     hal::ICoreSignals& signals_;
     proto::CoreSession& session_;
     OsdWire& osd_;

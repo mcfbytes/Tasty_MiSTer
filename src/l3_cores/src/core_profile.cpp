@@ -19,7 +19,7 @@ namespace mister::cores {
         const LinkDecoderDecl& b = census_rows[i];
         const bool same_name = (a.name == b.name)
             || (a.name && b.name && std::strcmp(a.name, b.name) == 0);
-        if (!same_name || a.cause != b.cause || a.period_ms != b.period_ms || a.klass != b.klass) {
+        if (!same_name || a.cause != b.cause || a.period_ms != b.period_ms) {
             return std::unexpected(
                 Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(i)}
             );

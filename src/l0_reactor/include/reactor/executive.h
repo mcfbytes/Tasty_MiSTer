@@ -51,7 +51,8 @@ public:
 
     struct Wiring {
         infra::OptRef<RoundTimer> round_timer{};
-        infra::OptRef<xthread::LogLane> log_lane{};
+
+        std::optional<xthread::LogLane::Producer> log_lane{};
     };
 
     [[nodiscard]] static Ex<Executive> create(xthread::RtStats& stats, const Wiring& wiring);
@@ -77,7 +78,7 @@ public:
 
     void service_round() noexcept;
 
-    [[nodiscard]] bool osd_budget_open() const noexcept { return !fifo_this_round_; }
+    [[nodiscard]] bool round_unclaimed() const noexcept { return !round_claimed_; }
 
     void end_round(bool wrote) noexcept;
 
@@ -189,11 +190,11 @@ private:
     std::uint64_t tick_count_ = 0;
     std::uint64_t round_count_ = 0;
     std::int64_t deadline_ns_ = 0;
-    infra::OptRef<xthread::LogLane> log_lane_;
+    std::optional<xthread::LogLane::Producer> log_lane_;
     infra::OptRef<RoundTimer> round_timer_;
     bool bound_in_round_ = false;
 
-    bool fifo_this_round_ = false;
+    bool round_claimed_ = false;
     bool swept_ = false;
     std::int64_t t_wake_ = 0;
     static constexpr int kMaxEvents = 16;

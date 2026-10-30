@@ -22,7 +22,7 @@ struct RungEdges {
 
     LinkTxChannel<SeatTag::Main>& inbox;
     const FileTxLevelCell& level;
-    EventQueue<SeatTag::Main>& events;
+    EventQueue<SeatTag::Main>::Producer events;
     ILoadWindowMap<seat_owner::Main>& window_map;
     hal::PhysRegion aperture;
     const svc::Vfs& vfs;

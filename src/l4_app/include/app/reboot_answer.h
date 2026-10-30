@@ -56,6 +56,7 @@ public:
 private:
     [[nodiscard]] After perform_reboot_() const noexcept;
     [[nodiscard]] bool io_settled_() const noexcept;
+    void hold_reset_once_saved_();
 
     FencedCoreSignals& signals_;
     const NvramUpload& nvram_;
@@ -63,6 +64,7 @@ private:
     infra::OptRef<svc::IStorageLifecycle> storage_life_{};
     bool rebooting_ = false;
     bool reboot_answered_ = false;
+    bool reset_held_ = false;
     std::uint16_t reboot_seq_ = 0;
 };
 

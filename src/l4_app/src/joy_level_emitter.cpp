@@ -10,8 +10,7 @@ void JoyLevelEmitter::publish(bool muted) {
     std::uint32_t seen = tally_.joy_seen();
     std::uint32_t players = tally_.joy_players();
 
-    if (const std::uint32_t rs = wire_.edge_reset_seq(); rs != wm_edge_reset_) {
-        wm_edge_reset_ = rs;
+    if (reset_seen_.take(wire_.edge_reset())) {
         for (std::uint32_t& v : last_joy_posted_)
             v = 0u;
     }

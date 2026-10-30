@@ -130,6 +130,10 @@ public:
             return true;
         }
 
+        [[nodiscard]] bool peek(const BasicWakeFlag& w) const noexcept {
+            return w.seq_.load(std::memory_order_acquire) != seen_;
+        }
+
     private:
         Seq seen_ = 0;
     };

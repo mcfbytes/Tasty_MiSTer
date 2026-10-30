@@ -11,7 +11,7 @@ recorded on.
 
 The command-line tool is `tasty`.
 
-> **Status (v0.5.1):** early and hungry. NES runs play frame-exact on a DE10-Nano, some SNES runs play to the end, and the
+> **Status (v0.5.2):** early and hungry. NES runs play frame-exact on a DE10-Nano, some SNES runs play to the end, and the
 > other systems are experimental.
 
 ## <img src="art/icons/cloche-48.png" width="24" alt=""> On the menu

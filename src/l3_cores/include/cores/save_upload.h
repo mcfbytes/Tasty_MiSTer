@@ -2,10 +2,9 @@
 #pragma once
 
 #include <cstdint>
-#include <span>
 #include <string_view>
 
-#include "infra/error.h"
+#include "cores/save_image.h"
 
 namespace mister::cores {
 
@@ -15,7 +14,7 @@ public:
 
     [[nodiscard]] virtual std::string_view save_file_name() const noexcept = 0;
 
-    [[nodiscard]] virtual Ex<std::span<const std::uint8_t>> pull_save() = 0;
+    [[nodiscard]] virtual SaveImage save_image() const noexcept = 0;
 
 protected:
     ISaveUpload() = default;

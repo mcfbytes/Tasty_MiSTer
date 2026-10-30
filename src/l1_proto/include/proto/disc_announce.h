@@ -9,6 +9,7 @@
 #include "proto/block_slots.h"
 #include "proto/link_frame.h"
 #include "proto/types.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
@@ -20,7 +21,7 @@ struct DiscAnnounce {
         SlotIndex slot,
         FileSize size_bytes
     ) const {
-        if (auto r = frame.begin(FrameSel::Uio, kSetSdInfo); !r)
+        if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetSdInfo)); !r)
             return r;
         if (auto r = write32_word(frame, static_cast<std::uint32_t>(size_bytes.v & 0xFFFFFFFFu));
             !r)
@@ -33,7 +34,7 @@ struct DiscAnnounce {
             return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
         }
         const auto parm = static_cast<std::uint16_t>((1u << slot.v) | 0x80u);
-        if (auto r = frame.begin(FrameSel::Uio, kSetSdStat); !r)
+        if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetSdStat)); !r)
             return r;
         if (auto r = frame.word(parm); !r)
             return r;
@@ -41,13 +42,13 @@ struct DiscAnnounce {
     }
 
     [[nodiscard]] Ex<void> flag_form(ILinkFrame& frame, bool loaded) const {
-        if (auto r = frame.begin(FrameSel::Uio, kSetSdInfo); !r)
+        if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetSdInfo)); !r)
             return r;
         if (auto r = frame.word(static_cast<std::uint16_t>(loaded ? 1 : 0)); !r)
             return r;
         if (auto r = frame.end(); !r)
             return r;
-        if (auto r = frame.begin(FrameSel::Uio, kSetSdStat); !r)
+        if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetSdStat)); !r)
             return r;
         if (auto r = frame.word(1); !r)
             return r;
@@ -68,9 +69,6 @@ struct DiscAnnounce {
         }
         return r;
     }
-
-    static constexpr std::uint16_t kSetSdStat = 0x1C;
-    static constexpr std::uint16_t kSetSdInfo = 0x1D;
 
     [[nodiscard]] static Ex<void> write32_word(ILinkFrame& frame, std::uint32_t v) {
         if (auto r = frame.word(static_cast<std::uint16_t>(v & 0xFFFFu)); !r)

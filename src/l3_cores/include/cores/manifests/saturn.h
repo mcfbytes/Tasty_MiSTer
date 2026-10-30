@@ -29,16 +29,14 @@ inline constexpr auto kSaturnServices = std::to_array<LinkDecoderDecl>({
         reactor::Cause::Ring,
         &kCdCommandEdge<kSaturn>,
         1,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
     {
         "saturn.service_tick",
         reactor::Cause::Tick,
         &kCdServiceTick<kSaturn>,
         1,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
 });
 

@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <initializer_list>
 
-#include "app/rung_roster.h"
+#include "app/rung_rows.h"
 #include "infra/seat.h"
 
 namespace mister::app {

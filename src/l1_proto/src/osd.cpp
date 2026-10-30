@@ -3,18 +3,14 @@
 
 #include "proto/osd_transport.h"
 #include "hal/selected.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
 namespace {
 
-constexpr std::uint16_t kCmdWrite = 0x20;
-constexpr std::uint16_t kCmdDisable = 0x40;
-constexpr std::uint16_t kCmdEnable = 0x41;
-constexpr std::uint16_t kOsdInfoBit = 0x04;
 constexpr std::uint16_t kRowMask = 0x1F;
 constexpr std::uint16_t kModeMask = 0x0A;
-constexpr std::uint16_t kMenuLatchRow = 8;
 
 [[nodiscard]] Ex<void> put(hal::ISpiTransport& link, std::uint16_t w) {
     auto r = link.transfer(hal::SpiWord{w});
@@ -120,7 +116,9 @@ Ex<void> OsdTransport::flush_row(
         );
     }
     hal::Selected cs = begin(link);
-    const auto cmd = static_cast<std::uint16_t>(kCmdWrite | (r.v & kRowMask));
+    const auto cmd = static_cast<std::uint16_t>(
+        static_cast<std::uint16_t>(UioOp::OsdWrite) | (r.v & kRowMask)
+    );
     if (auto e = put(link, cmd); !e)
         return e;
     for (const std::uint8_t b : bytes) {
@@ -131,14 +129,18 @@ Ex<void> OsdTransport::flush_row(
 }
 
 Ex<void> OsdTransport::set_visible(hal::ISpiTransport& link, bool visible) {
-    return visible ? enable(link, OsdMode::DisableKeyboard) : command(link, kCmdDisable);
+    return visible ? enable(link, OsdMode::DisableKeyboard)
+                   : command(link, static_cast<std::uint16_t>(UioOp::OsdDisable));
 }
 
 Ex<void> OsdTransport::enable(hal::ISpiTransport& link, OsdMode mode) {
 
     const auto bits = static_cast<std::uint16_t>(mode);
     const auto m = static_cast<std::uint16_t>(bits & kModeMask);
-    return command(link, static_cast<std::uint16_t>(kCmdEnable | m));
+    return command(
+        link,
+        static_cast<std::uint16_t>(static_cast<std::uint16_t>(UioOp::OsdEnable) | m)
+    );
 }
 
 Ex<void> OsdTransport::enable_info(
@@ -149,9 +151,8 @@ Ex<void> OsdTransport::enable_info(
     std::uint16_t height
 ) {
 
-    constexpr auto kCmdInfo = static_cast<std::uint16_t>(kCmdEnable | kOsdInfoBit);
     hal::Selected cs = begin(link);
-    if (auto e = put(link, kCmdInfo); !e)
+    if (auto e = put(link, static_cast<std::uint16_t>(UioOp::OsdEnableInfo)); !e)
         return e;
     if (auto e = put(link, x); !e)
         return e;
@@ -165,7 +166,7 @@ Ex<void> OsdTransport::enable_info(
 Ex<void> OsdTransport::set_rotation(hal::ISpiTransport& link, OsdRotation rotate) {
 
     hal::Selected cs = begin(link);
-    if (auto e = put(link, kCmdDisable); !e)
+    if (auto e = put(link, static_cast<std::uint16_t>(UioOp::OsdDisable)); !e)
         return e;
     for (int i = 0; i < 4; ++i) {
         if (auto e = put(link, 0); !e)
@@ -177,11 +178,10 @@ Ex<void> OsdTransport::set_rotation(hal::ISpiTransport& link, OsdRotation rotate
 Ex<void> OsdTransport::menu_ctl(hal::ISpiTransport& link, bool enable_menu) {
 
     if (!enable_menu)
-        return command(link, kCmdDisable);
-    constexpr auto kDoorbell = static_cast<std::uint16_t>(kCmdWrite | kMenuLatchRow);
-    if (auto e = command(link, kDoorbell); !e)
+        return command(link, static_cast<std::uint16_t>(UioOp::OsdDisable));
+    if (auto e = command(link, static_cast<std::uint16_t>(UioOp::OsdWriteLatch)); !e)
         return e;
-    return command(link, kCmdEnable);
+    return command(link, static_cast<std::uint16_t>(UioOp::OsdEnable));
 }
 
 }

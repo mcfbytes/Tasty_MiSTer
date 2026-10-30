@@ -93,7 +93,7 @@ Executive::Executive(Executive&& o) noexcept
       log_lane_(o.log_lane_),
       round_timer_(o.round_timer_),
       bound_in_round_(o.bound_in_round_),
-      fifo_this_round_(o.fifo_this_round_),
+      round_claimed_(o.round_claimed_),
       swept_(o.swept_),
       t_wake_(o.t_wake_),
       n_ready_(o.n_ready_),
@@ -133,10 +133,7 @@ Ex<void> Executive::bind(std::span<const LinkDecoderDecl> services, CoreState& s
 
     std::size_t n = 0;
     for (std::size_t i = 0; i < services.size(); ++i) {
-        if (services[i].klass != DeadlineClass::A)
-            continue;
-
-        const bool pinned_every_round = services[i].osd_budget == OsdBudget::Pinned
+        const bool pinned_every_round = services[i].round_claim == RoundClaim::Always
             && services[i].period_ms == 0;
         if (services[i].impl == nullptr || pinned_every_round) {
             return std::unexpected(
@@ -150,11 +147,12 @@ Ex<void> Executive::bind(std::span<const LinkDecoderDecl> services, CoreState& s
         }
         ++n;
     }
+    const std::size_t previous = service_count_;
     std::size_t slot = 0;
     for (const LinkDecoderDecl& s : services) {
-        if (s.klass != DeadlineClass::A)
-            continue;
         services_[slot] = s;
+
+        stats_->deadline_miss[slot].set(0);
 
         next_due_[slot] = tick_count_ + s.period_ms;
 
@@ -165,6 +163,9 @@ Ex<void> Executive::bind(std::span<const LinkDecoderDecl> services, CoreState& s
         ++slot;
     }
     service_count_ = slot;
+
+    for (std::size_t i = slot; i < previous; ++i)
+        stats_->deadline_miss[i].set(0);
     core_state_ = infra::OptRef<CoreState>{state};
 
     bound_in_round_ = true;
@@ -345,7 +346,7 @@ bool Executive::dispatch_ready() noexcept {
     t_wake_ = now_ns();
     if (round_timer_)
         round_timer_->begin(t_wake_);
-    fifo_this_round_ = false;
+    round_claimed_ = false;
     swept_ = false;
 
     for (int i = 0; i < n_ready_; ++i) {
@@ -505,21 +506,21 @@ void Executive::run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment
     if (!s.impl->active())
         return;
 
-    if (s.osd_budget == OsdBudget::Pinned)
-        fifo_this_round_ = true;
-    const bool claims = s.osd_budget == OsdBudget::Claimed;
+    if (s.round_claim == RoundClaim::Always)
+        round_claimed_ = true;
+    const bool claims = s.round_claim == RoundClaim::OnWork;
     if (claims && claim_streak_[slot] >= kClaimStreakMax) {
 
         claim_streak_[slot] = 0;
         ++claim_yields_;
         return;
     }
-    const std::uint32_t claimed = claims ? s.impl->osd_claims() : 0u;
+    const std::uint32_t claimed = claims ? s.impl->claim_count() : 0u;
     s.impl->service(*core_state_);
     if (claims) {
-        const bool claim = s.impl->osd_claims() != claimed;
+        const bool claim = s.impl->claim_count() != claimed;
         if (claim)
-            fifo_this_round_ = true;
+            round_claimed_ = true;
         claim_streak_[slot] = claim ? static_cast<std::uint8_t>(claim_streak_[slot] + 1u) : 0u;
     }
     const std::int64_t t_done = now_ns();
@@ -542,7 +543,7 @@ void Executive::run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment
                 const std::uint32_t over_sat = over > static_cast<std::int64_t>(0xFFFFFFFFu)
                     ? 0xFFFFFFFFu
                     : static_cast<std::uint32_t>(over);
-                (void)log_lane_->push(
+                log_lane_->push(
                     LogRec::DeadlineMiss{
                         .over_ns = over_sat,
                         .slot = static_cast<std::uint16_t>(slot)

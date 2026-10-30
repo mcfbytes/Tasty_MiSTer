@@ -5,9 +5,7 @@
 #include <memory>
 #include <span>
 #include <utility>
-#include <vector>
 
-#include "proto/download_session.h"
 #include "proto/image_bracket.h"
 #include "proto/image_sink.h"
 
@@ -44,26 +42,14 @@ bool ArcadeCore::nvram_declared_() const noexcept {
     return nvram_declared(nvram_index_, nvram_size_);
 }
 
-Ex<std::span<const std::uint8_t>> ArcadeCore::pull_save() {
+SaveImage ArcadeCore::save_image() const noexcept {
     TASTY_SEAT_BODY(ArcadeCore);
-
     if (!nvram_declared_())
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    nvm_image_.assign(static_cast<std::size_t>(nvram_size_), 0);
-
-    auto session = proto::UploadSession::begin(
-        host().link,
-        proto::WideIoIndex{static_cast<std::uint8_t>(nvram_index_)}
-    );
-    if (!session)
-        return std::unexpected(session.error());
-    if (auto r = session->read(std::span<std::uint8_t>(nvm_image_)); !r) {
-        return std::unexpected(r.error());
-    }
-    if (auto r = session->end(); !r)
-        return std::unexpected(r.error());
-    ++nvram_saves_;
-    return std::span<const std::uint8_t>(nvm_image_);
+        return {};
+    return SaveImage{
+        .index = proto::WideIoIndex{static_cast<std::uint8_t>(nvram_index_)},
+        .size = static_cast<std::uint32_t>(nvram_size_)
+    };
 }
 
 std::uint8_t ArcadeCore::current_choice_(const mra::DipRow& d) const noexcept {

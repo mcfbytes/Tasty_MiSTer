@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -20,6 +21,10 @@ class Vfs;
 
 namespace mister::app {
 
+[[nodiscard]] std::array<std::string_view, 4> bind_identity_fields(
+    const proto::ConfStr& conf
+) noexcept;
+
 class BindTail {
     TASTY_SEAT_RESIDENT(Main);
 
@@ -35,7 +40,7 @@ public:
           vfs_(vfs),
           sleeper_(sleeper) {}
 
-    void identity(const proto::ConfStr& conf);
+    [[nodiscard]] bool identity(const proto::ConfStr& conf);
     void doorbells(
         const proto::ConfStr& conf,
         std::span<const proto::AxiLwDecl> lw,

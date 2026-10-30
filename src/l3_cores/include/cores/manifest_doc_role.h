@@ -20,6 +20,12 @@ public:
     ) const noexcept = 0;
     [[nodiscard]] virtual ManifestDocFacts facts_of(std::string_view doc) const = 0;
 
+    [[nodiscard]] virtual ManifestDocFacts facts_at(
+        std::string_view text,
+        std::string_view path,
+        const svc::Vfs& vfs
+    ) const = 0;
+
     [[nodiscard]] virtual std::unique_ptr<ICheatRecords> cheats_of(std::string_view doc) const = 0;
 
     [[nodiscard]] virtual std::unique_ptr<IManifestStager> stager_of(

@@ -3,7 +3,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <span>
 #include <string_view>
 
 #include "app/board_ops.h"
@@ -26,6 +25,8 @@ class ISaveUpload;
 
 namespace mister::app {
 
+class SaveUploadRelay;
+
 class NvramUpload {
     TASTY_SEAT_RESIDENT(RT);
 
@@ -45,14 +46,16 @@ public:
         hal::ISpiTransport& link,
         infra::OptRef<const svc::Vfs> vfs,
         DurableWriteService& writes,
+        SaveUploadRelay& saves,
         infra::OptRef<ISleeper> sleeper,
         xthread::LogLane& log_lane
     ) noexcept
         : link_(link),
           vfs_(vfs),
           writes_(writes),
+          saves_(saves),
           sleeper_(sleeper),
-          log_lane_(log_lane) {}
+          log_lane_(log_lane.producer()) {}
 
     [[nodiscard]] Ex<std::size_t> flush_save_upload(const SaveCtx& ctx);
 
@@ -62,20 +65,19 @@ public:
 
     void drain_write_verdicts();
 
-    void settle_save_lane();
+    void settle_save_lane(bool fio_free);
 
     void settle_writes() noexcept;
 
     [[nodiscard]] bool writes_settled() const noexcept { return writes_.in_flight() == 0; }
 
-    [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
+    [[nodiscard]] bool saves_drained() const noexcept;
+
+    [[nodiscard]] Tally tally() const noexcept;
 
     void count_error() noexcept { ++tally_.save_upload_errors; }
 
-    void count_upload() noexcept { ++tally_.save_uploads; }
-
 private:
-    [[nodiscard]] Ex<void> arm_(std::string_view rel, std::span<const std::byte> bytes);
     [[nodiscard]] Ex<std::size_t> write_save_upload_(cores::ISaveUpload& up);
 
     void sleep_ms(unsigned ms);
@@ -83,8 +85,9 @@ private:
     hal::ISpiTransport& link_;
     infra::OptRef<const svc::Vfs> vfs_{};
     DurableWriteService& writes_;
+    SaveUploadRelay& saves_;
     infra::OptRef<ISleeper> sleeper_{};
-    xthread::LogLane& log_lane_;
+    xthread::LogLane::Producer log_lane_;
     Tally tally_{};
 };
 

@@ -6,12 +6,12 @@
 
 #include "infra/error.h"
 #include "hal/reg_block.h"
-#include "hal/spi_transport.h"
 #include "proto/axi_block_decl.h"
 #include "proto/axi_pad_encoder.h"
+#include "proto/frame_pad_encoder.h"
 #include "proto/held_pad_encoder.h"
 #include "proto/joystick.h"
-#include "proto/spi_pad_encoder.h"
+#include "proto/link_frame.h"
 #include "svc/types.h"
 #include "infra/seat.h"
 
@@ -50,9 +50,9 @@ public:
 
     void hold_pads() noexcept;
 
-    void bind_pads(hal::ISpiTransport& link) noexcept;
+    void bind_pads(proto::ILinkFrame& frame) noexcept;
     void bind_pads(
-        hal::ISpiTransport& link,
+        proto::ILinkFrame& frame,
         hal::reg::Block pad,
         proto::AxiBlockDecl block
     ) noexcept;
@@ -71,22 +71,22 @@ public:
     [[nodiscard]] std::uint32_t link_words_bound(PlayerIndex player) const noexcept;
 
     [[nodiscard]] Ex<bool> submit(
-        hal::ISpiTransport& link,
+        proto::ILinkFrame& frame,
         PlayerIndex player,
         JoyMask buttons,
         JoyMask autofire
     );
-    [[nodiscard]] Ex<bool> release(hal::ISpiTransport& link, PlayerIndex player, JoyMask composed);
+    [[nodiscard]] Ex<bool> release(proto::ILinkFrame& frame, PlayerIndex player, JoyMask composed);
 
-    [[nodiscard]] Ex<unsigned> service_joysticks(hal::ISpiTransport& link, bool local_walk = true);
+    [[nodiscard]] Ex<unsigned> service_joysticks(proto::ILinkFrame& frame, bool local_walk = true);
     [[nodiscard]] Ex<bool> push_paddle(
-        hal::ISpiTransport& link,
+        proto::ILinkFrame& frame,
         PlayerIndex player,
         std::int32_t raw,
         const AxisCal& cal
     );
     [[nodiscard]] Ex<bool> push_spinner(
-        hal::ISpiTransport& link,
+        proto::ILinkFrame& frame,
         PlayerIndex player,
         std::int32_t delta
     );
@@ -94,15 +94,15 @@ public:
     unsigned axis_range_zero() const noexcept { return axis_range_zero_; }
 
 private:
-    void release_held_(hal::ISpiTransport& link) noexcept;
+    void release_held_(proto::ILinkFrame& frame) noexcept;
 
     proto::JoystickPort joy_{};
 
-    proto::SpiPadEncoder spi_{joy_};
+    proto::FramePadEncoder framed_{joy_};
     std::optional<proto::HeldPadEncoder> held_{};
     proto::AxiBlockDecl pad_block_{};
     std::optional<proto::AxiPadEncoder> lw_{};
-    proto::ILinkPadEncoder* route_ = &spi_;
+    proto::ILinkPadEncoder* route_ = &framed_;
     JoyMask joy_mask_[kMaxPlayersEmit]{};
     JoyMask autofire_[kMaxPlayersEmit]{};
 

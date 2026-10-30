@@ -8,10 +8,12 @@
 #include "app/board_ops.h"
 #include "app/built_core.h"
 #include "app/file_stream_service.h"
+#include "app/identity_record.h"
 #include "app/ini_parse.h"
 #include "app/ladder_cell.h"
 #include "app/uart_mode.h"
 #include "cores/save_copy_level.h"
+#include "infra/log_lane.h"
 #include "infra/opt_ref.h"
 #include "infra/wake_flag.h"
 #include "hal/doorbell_policy.h"
@@ -22,7 +24,6 @@
 
 namespace mister::xthread {
 struct RtStats;
-class LogLane;
 }
 
 namespace mister::reactor {
@@ -60,6 +61,7 @@ class ICheatApply;
 class PcmRingFeeder;
 class MailboxRelay;
 class DiskRelay;
+class SaveUploadRelay;
 class DurableWriteService;
 class WindowJobService;
 
@@ -70,6 +72,7 @@ struct SupervisorParts {
         svc::ChdPrefetch& prefetch;
         MailboxRelay& mailbox;
         DiskRelay& disks;
+        SaveUploadRelay& saves;
         svc::DiscReadService& discs;
         DurableWriteService& writes;
         WindowJobService& window_jobs;
@@ -84,6 +87,8 @@ struct SupervisorParts {
     LinkTxChannel<SeatTag::Main>& link_inbox;
     LinkRxChannel<SeatTag::Main>& link_rx;
     const ConfigCell& config_cell;
+
+    IdentityRecordCell& identity_record_cell;
     LinkTxChannel<SeatTag::Ui>& ui_inbox;
 
     LinkTxChannel<SeatTag::Input>& input_inbox;

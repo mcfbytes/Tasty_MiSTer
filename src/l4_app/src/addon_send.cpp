@@ -47,7 +47,7 @@ std::optional<PathText> AddonSend::path_of(std::string_view pick, std::string_vi
     return out;
 }
 
-AddonSend AddonSend::plan(std::string_view list, std::string_view pick, std::uint8_t idx) {
+AddonSend AddonSend::plan(std::string_view list, std::string_view pick, proto::WideIoIndex idx) {
     AddonSend s;
     for (std::size_t i = 1; !list.empty() && i <= kMaxEntries; ++i) {
         const std::size_t comma = list.find(',');
@@ -58,7 +58,9 @@ AddonSend AddonSend::plan(std::string_view list, std::string_view pick, std::uin
             s.entries_.push_back(
                 Entry{
                     .ext = std::string{ext},
-                    .dest = proto::WideIoIndex{static_cast<std::uint16_t>((i << 8) | idx)},
+                    .dest = proto::WideIoIndex{static_cast<std::uint16_t>(
+                        (i << 8) | idx.fio_byte()
+                    )},
                     .path = *path
                 }
             );

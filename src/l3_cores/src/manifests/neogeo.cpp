@@ -117,10 +117,6 @@ static_assert(
     kNeoGeoCdTicks.caller_us == kNeoGeoServices[1].period_ms * 1000u,
     "caller_us must BE the service row's own period_ms"
 );
-static_assert(
-    kNeoGeoServices[0].klass == DeadlineClass::A && kNeoGeoServices[1].klass == DeadlineClass::A,
-    "3.4: both CD services are Class A (T-RT)"
-);
 
 static_assert(
     kNeoGeo.staging.order == StageOrder::NeoGeoCd && kNeoGeo.staging.disc_slot == IoIndex{1},

@@ -10,6 +10,7 @@
 #include "app/recents_store.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/path_text.h"
 #include "infra/seat.h"
 #include "ui/browser_entry.h"
 #include "ui/list_view.h"
@@ -64,7 +65,7 @@ public:
         infra::OptRef<app::IRomsetAliases> aliases{};
     };
 
-    static constexpr std::size_t kPathMax = 1024;
+    static constexpr std::size_t kPathMax = infra::kPathMax;
     static constexpr std::size_t kPathBudget = kPathMax - 100;
     static constexpr std::size_t kFilterMax = 255;
     static constexpr std::size_t kRememberMax = 127;

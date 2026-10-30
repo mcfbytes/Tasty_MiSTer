@@ -33,7 +33,7 @@ public:
     void publish(bool muted);
 
     [[nodiscard]] bool owes_publish() const noexcept {
-        return wire_.edge_reset_seq() != wm_edge_reset_ || wire_.gates() != wm_gates_;
+        return reset_seen_.peek(wire_.edge_reset()) || wire_.gates() != wm_gates_;
     }
 
 private:
@@ -45,7 +45,7 @@ private:
     bool zero_armed_[svc::kMaxPlayers]{true, true, true, true, true, true};
     std::uint32_t armed_mask_[svc::kMaxPlayers]{};
     std::uint32_t armed_autofire_[svc::kMaxPlayers]{};
-    std::uint32_t wm_edge_reset_ = 0;
+    xthread::WakeFlag::Cursor reset_seen_{};
     std::uint32_t wm_gates_ = 0;
 };
 

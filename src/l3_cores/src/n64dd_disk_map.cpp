@@ -5,12 +5,12 @@
 
 namespace mister::cores::n64dd {
 
-Ex<void> DiskMap::build(const SystemArea& area) noexcept {
-    count_ = 0;
-    ram_count_ = 0;
-    ram_ok_ = false;
-    ram_bytes_ = 0;
-    disk_type_ = area.disk_type;
+Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
+    m.count_ = 0;
+    m.ram_count_ = 0;
+    m.ram_ok_ = false;
+    m.ram_bytes_ = 0;
+    m.disk_type_ = area.disk_type;
     if (area.disk_type >= kDiskTypes) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), area.disk_type});
     }
@@ -29,7 +29,7 @@ Ex<void> DiskMap::build(const SystemArea& area) noexcept {
         for (std::uint32_t d = defect_start; d < defect_stop; ++d) {
 
             if (0x20u + d >= sys.size()) {
-                count_ = 0;
+                m.count_ = 0;
                 return std::unexpected(Error{Errc::bad_format, ERR_SITE(), d});
             }
             const std::uint32_t t = sys[0x20 + d];
@@ -45,7 +45,7 @@ Ex<void> DiskMap::build(const SystemArea& area) noexcept {
             const std::uint32_t zone_track = zone.head != 0 ? zone.tracks - 1u - zti : zti;
             const std::uint32_t track = zone.track_offset + zone_track;
             if (bad_track[zone_track]) {
-                steps_[count_++] = Step{
+                m.steps_[m.count_++] = Step{
                     .track = static_cast<std::uint16_t>(track),
                     .head = zone.head,
                     .zone_bytes = static_cast<std::uint8_t>(zone.sector_bytes)
@@ -54,12 +54,12 @@ Ex<void> DiskMap::build(const SystemArea& area) noexcept {
             }
             for (std::uint32_t block = 0; block < 2; ++block) {
                 if (lba >= kLbaCount) {
-                    count_ = 0;
+                    m.count_ = 0;
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba});
                 }
                 const bool dev_system = area.development
                     && (lba == 2 || lba == 3 || lba == 10 || lba == 11);
-                steps_[count_++] = Step{
+                m.steps_[m.count_++] = Step{
                     .track = static_cast<std::uint16_t>(track),
                     .lba = static_cast<std::uint16_t>(lba),
                     .head = zone.head,
@@ -78,23 +78,22 @@ Ex<void> DiskMap::build(const SystemArea& area) noexcept {
         }
     }
     if (lba != kLbaCount || source != kNddBytes) {
-        count_ = 0;
+        m.count_ = 0;
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba});
     }
 
     std::uint64_t ram = 0;
-    ram_count_ = 0;
-    for (std::size_t i = 0; i < count_; ++i) {
-        const Step& s = steps_[i];
+    for (std::size_t i = 0; i < m.count_; ++i) {
+        const Step& s = m.steps_[i];
         if (!s.good || s.lba < kRamStartLba[area.disk_type])
             continue;
-        ram_step_[ram_count_] = static_cast<std::uint16_t>(i);
-        ram_base_[ram_count_] = static_cast<std::uint32_t>(ram);
-        ++ram_count_;
+        m.ram_step_[m.ram_count_] = static_cast<std::uint16_t>(i);
+        m.ram_base_[m.ram_count_] = static_cast<std::uint32_t>(ram);
+        ++m.ram_count_;
         ram += std::uint64_t{s.zone_bytes} * kSectorsPerBlock;
     }
-    ram_bytes_ = kRamBytes[area.disk_type];
-    ram_ok_ = ram_bytes_ != 0 && ram == ram_bytes_;
+    m.ram_bytes_ = kRamBytes[area.disk_type];
+    m.ram_ok_ = m.ram_bytes_ != 0 && ram == m.ram_bytes_;
     return {};
 }
 

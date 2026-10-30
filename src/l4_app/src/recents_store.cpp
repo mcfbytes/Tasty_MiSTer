@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
-#include "app/durable_write.h"
+#include "app/ui_write_lane.h"
 #include "infra/byte_view.h"
 #include "svc/vfs.h"
 
@@ -56,8 +56,18 @@ std::string RecentsStore::join(std::string_view dir, std::string_view name) {
 }
 
 Ex<std::vector<std::byte>> RecentsStore::read_raw(std::string_view core, ListId id) {
+    static_assert(UiWriteLane::kShadowBytes >= kFileSize, "a recents file fits the lane's shadow");
+    const std::string rel = "config/" + file_name(core, id);
+
+    auto armed = writes_->peek(rel);
+    if (!armed)
+        return std::unexpected(armed.error());
     std::vector<std::byte> buf(kFileSize, std::byte{0});
-    auto f = vfs_->open("config/" + file_name(core, id), svc::OpenMode::ReadWhole);
+    if (!armed->empty()) {
+        std::memcpy(buf.data(), armed->data(), std::min(armed->size(), buf.size()));
+        return buf;
+    }
+    auto f = vfs_->open(rel, svc::OpenMode::ReadWhole);
     if (!f)
         return std::unexpected(f.error());
     std::size_t off = 0;
@@ -136,22 +146,36 @@ Ex<void> RecentsStore::update(
     put_field(front + kDirCap, kNameCap, name);
     put_field(front + kDirCap + kNameCap, kLabelCap, label);
 
-    auto r = durable_write(*vfs_, "config/" + file_name(core, id), buf);
-    if (!r) {
+    const auto r = writes_->arm(
+        "config/" + file_name(core, id),
+        buf,
+        infra::OptRef<IWriteVerdict>{*this}
+    );
+    if (!r)
         ++errors_;
-        return r;
-    }
-    ++updates_;
-    return {};
+    return r;
 }
 
 Ex<void> RecentsStore::clear(std::string_view core, ListId id) {
     TASTY_SEAT_BODY(RecentsStore);
     const std::vector<std::byte> zeroed(kFileSize, std::byte{0});
-    auto r = durable_write(*vfs_, "config/" + file_name(core, id), zeroed);
+    const auto r = writes_->arm(
+        "config/" + file_name(core, id),
+        zeroed,
+        infra::OptRef<IWriteVerdict>{*this}
+    );
     if (!r)
         ++errors_;
     return r;
+}
+
+void RecentsStore::on_written(bool durable) noexcept {
+    TASTY_SEAT_BODY(RecentsStore);
+    if (durable) {
+        ++updates_;
+    } else {
+        ++errors_;
+    }
 }
 
 }

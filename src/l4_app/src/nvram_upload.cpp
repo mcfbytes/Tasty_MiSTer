@@ -5,10 +5,12 @@
 
 #include "app/config_rel.h"
 #include "app/log_clock.h"
+#include "app/save_upload_relay.h"
 #include "cores/core_support.h"
 #include "cores/save_upload.h"
 #include "infra/log_rec.h"
 #include "proto/save_request.h"
+#include "proto/spi_fio_queue.h"
 
 namespace mister::app {
 
@@ -20,37 +22,39 @@ void NvramUpload::sleep_ms(unsigned ms) {
     ::usleep(static_cast<::useconds_t>(ms) * 1000u);
 }
 
-Ex<void> NvramUpload::arm_(std::string_view rel, std::span<const std::byte> bytes) {
-    if (!vfs_)
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    if (!writes_.arm(rel, bytes, WriteKind::Save)) {
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
-    }
-    return {};
+NvramUpload::Tally NvramUpload::tally() const noexcept {
+    return Tally{
+        .save_uploads = tally_.save_uploads + saves_.saved(),
+        .save_upload_errors = tally_.save_upload_errors
+            + saves_.failed()
+            + saves_.wire_faults()
+            + saves_.liveness_drops()
+    };
+}
+
+bool NvramUpload::saves_drained() const noexcept {
+    return saves_.drained();
 }
 
 void NvramUpload::drain_write_verdicts() {
     TASTY_SEAT_BODY(NvramUpload);
-    while (const auto d = writes_.reap()) {
 
-        switch (d->kind) {
-            case WriteKind::Silent:
-                break;
-            case WriteKind::Save:
-
-                if (!d->ok) {
-                    ++tally_.save_upload_errors;
-                    (void)log_lane_.push(LogRec::Refusal{Errc::io, ERR_SITE()}, log_now_ns());
-                }
-                break;
-        }
+    while (writes_.reap()) {
     }
 }
 
-constexpr unsigned kSaveSettleTries = 2000;
+constexpr unsigned kSaveSettleTries = 8192;
 
-void NvramUpload::settle_save_lane() {
+void NvramUpload::settle_save_lane(bool fio_free) {
     TASTY_SEAT_BODY(NvramUpload);
+
+    for (unsigned i = 0; i < kSaveSettleTries && !saves_.settled(); ++i) {
+
+        if (!fio_free && !saves_.holds_fio())
+            break;
+        saves_.service_rt(link_, proto::SpiFioQueue::kUnbudgeted, fio_free);
+        sleep_ms(1);
+    }
 
     for (unsigned i = 0; i < kSaveSettleTries && writes_.in_flight() != 0; ++i) {
         drain_write_verdicts();
@@ -67,17 +71,15 @@ void NvramUpload::settle_writes() noexcept {
 }
 
 Ex<std::size_t> NvramUpload::write_save_upload_(cores::ISaveUpload& up) {
-    auto img = up.pull_save();
-    if (!img)
-        return std::unexpected(img.error());
     const auto rel = config_rel("config/nvram/", up.save_file_name());
     if (rel.empty())
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 1});
 
-    if (auto r = arm_(rel.view(), std::as_bytes(*img)); !r) {
-        return std::unexpected(r.error());
+    const cores::SaveImage image = up.save_image();
+    if (!saves_.order(image, rel.view())) {
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-    return img->size();
+    return image.size;
 }
 
 Ex<std::size_t> NvramUpload::flush_save_upload(const SaveCtx& ctx) {
@@ -110,11 +112,9 @@ bool NvramUpload::save_upload_counted(const SaveCtx& ctx) noexcept {
     auto s = save_upload_now(ctx);
     if (!s) {
         ++tally_.save_upload_errors;
-        (void)log_lane_.push(LogRec::Refusal{s.error().code, s.error().site}, log_now_ns());
+        log_lane_.push(LogRec::Refusal{s.error().code, s.error().site}, log_now_ns());
         return false;
     }
-    if (*s != 0)
-        ++tally_.save_uploads;
     return true;
 }
 

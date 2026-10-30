@@ -17,7 +17,8 @@ add_library(mister_app STATIC
   src/companion_walk.cpp
   src/config_apply.cpp
   src/content_pick.cpp
-  src/rung_set.cpp
+  src/load_belt.cpp
+  src/ladder_host_adapter.cpp
   src/bind_tail.cpp
   src/config_saves.cpp
   src/companion_slot.cpp
@@ -35,7 +36,6 @@ add_library(mister_app STATIC
   src/ini_key_edit.cpp
   src/durable_write_service.cpp
   src/encode_main.cpp
-  src/event.cpp
   src/fabric_state.cpp
   src/file_bytes.cpp
   src/file_stream_service.cpp
@@ -54,6 +54,7 @@ add_library(mister_app STATIC
   src/hd_theme.cpp
   src/hps_framebuffer.cpp
   src/identity_latch.cpp
+  src/identity_record.cpp
   src/idle_blank.cpp
   src/info_decoder.cpp
   src/ini_parse.cpp
@@ -82,6 +83,8 @@ add_library(mister_app STATIC
   src/manifest_ladder.cpp
   src/load_window.cpp
   src/disk_relay.cpp
+  src/flat_save_servant.cpp
+  src/save_upload_relay.cpp
   src/mailbox_relay.cpp
   src/mgl.cpp
   src/mgl_pump.cpp
@@ -101,6 +104,7 @@ add_library(mister_app STATIC
   src/rec_write_main.cpp
   src/recents_store.cpp
   src/played_history.cpp
+  src/ui_write_lane.cpp
   src/recent_games.cpp
   src/recorder_control.cpp
   src/recorder_status.cpp
@@ -287,7 +291,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/event.h
   app/fabric_state.h
   app/park_receipt.h
-  app/quiesce.h
+  app/switch_park.h
   app/quiesce_ack.h
   app/core_switch.h
   app/slot_bindings.h
@@ -300,7 +304,6 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/frame_source.h
   app/game_id.h
   app/info_sink.h
-  app/device_table_channel.h
   app/input_build.h
   app/input_decode.h
   app/input_decode_tally.h
@@ -330,6 +333,9 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/mailbox_slot.h
   app/disk_slot.h
   app/disk_relay.h
+  app/flat_save_servant.h
+  app/save_slot.h
+  app/save_upload_relay.h
   app/mailbox_relay.h
   app/companion_bind.h
   app/companion_host.h
@@ -338,6 +344,8 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/recents_store.h
   app/recent_games.h
   app/played_history.h
+  app/ui_write_lane.h
+  app/write_verdict.h
   app/mgl_doc.h
   app/romset_alias_reader.h
   app/romset_aliases.h
@@ -369,12 +377,16 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/start_chain.h
   app/cmd_router.h
   app/identity_latch.h
+  app/identity_record.h
   app/info_decoder.h
   app/rumble_relay.h
   app/rung.h
   app/rung_edges.h
-  app/rung_roster.h
-  app/rung_set.h
+  app/rung_rows.h
+  app/load_belt.h
+  app/ladder_host_adapter.h
+  app/answered.h
+  app/belt_orders.h
   app/bind_tail.h
   app/config_saves.h
   app/companion_slot.h
@@ -429,6 +441,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/session_seats.h
   app/stream_io.h
   app/session_owner.h
+  app/main_pass.h
   app/link_session.h
   app/load_key.h
   app/spi_encoder.h

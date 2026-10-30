@@ -16,132 +16,52 @@ struct DocCensus {
 };
 
 inline constexpr auto kMegaCdDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"megacd.cmd_edge",
-     reactor::Cause::Ring,
-     nullptr,
-     0,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Shared},
-    {"megacd.service_tick",
-     reactor::Cause::Blk,
-     nullptr,
-     10,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
+    {"megacd.cmd_edge", reactor::Cause::Ring, nullptr, 0, reactor::RoundClaim::Never},
+    {"megacd.service_tick", reactor::Cause::Blk, nullptr, 10, reactor::RoundClaim::Always},
 });
 
 inline constexpr auto kPceCdDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"pcecd.cmd_edge",
-     reactor::Cause::Ring,
-     nullptr,
-     0,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Shared},
-    {"pcecd.service_tick",
-     reactor::Cause::Tick,
-     nullptr,
-     13,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
+    {"pcecd.cmd_edge", reactor::Cause::Ring, nullptr, 0, reactor::RoundClaim::Never},
+    {"pcecd.service_tick", reactor::Cause::Tick, nullptr, 13, reactor::RoundClaim::Always},
 });
 
 inline constexpr auto kPsxDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"psx.sector_kick",
-     reactor::Cause::Tick,
-     nullptr,
-     0,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Shared},
+    {"psx.sector_kick", reactor::Cause::Tick, nullptr, 0, reactor::RoundClaim::Never},
 });
 
 inline constexpr auto kAtariStDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"st.acsi_poll",
-     reactor::Cause::Tick,
-     nullptr,
-     1,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
+    {"st.acsi_poll", reactor::Cause::Tick, nullptr, 1, reactor::RoundClaim::Always},
 });
 
 inline constexpr auto kThreeDoDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"3do.cmd_edge",
-     reactor::Cause::Ring,
-     nullptr,
-     3,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
-    {"3do.service_tick",
-     reactor::Cause::Tick,
-     nullptr,
-     3,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
+    {"3do.cmd_edge", reactor::Cause::Ring, nullptr, 3, reactor::RoundClaim::Always},
+    {"3do.service_tick", reactor::Cause::Tick, nullptr, 3, reactor::RoundClaim::Always},
 });
 
 inline constexpr auto kSnesDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"snes.mailbox",
-     reactor::Cause::Tick,
-     nullptr,
-     0,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Shared},
+    {"snes.mailbox", reactor::Cause::Tick, nullptr, 0, reactor::RoundClaim::Never},
 });
 
 inline constexpr auto kSgbDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"sgb.mailbox",
-     reactor::Cause::Tick,
-     nullptr,
-     0,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Shared},
+    {"sgb.mailbox", reactor::Cause::Tick, nullptr, 0, reactor::RoundClaim::Never},
 });
 
 inline constexpr auto kMegaDriveDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"megadrive.mdp_tick",
-     reactor::Cause::Tick,
-     nullptr,
-     5,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
+    {"megadrive.mdp_tick", reactor::Cause::Tick, nullptr, 5, reactor::RoundClaim::Always},
 });
 
 inline constexpr auto kN64DocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"n64.cheat_tick",
-     reactor::Cause::Tick,
-     nullptr,
-     16,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
+    {"n64.cheat_tick", reactor::Cause::Tick, nullptr, 16, reactor::RoundClaim::Always},
 });
 
 inline constexpr auto kSaturnDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"saturn.cmd_edge",
-     reactor::Cause::Ring,
-     nullptr,
-     1,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
-    {"saturn.service_tick",
-     reactor::Cause::Tick,
-     nullptr,
-     1,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
+    {"saturn.cmd_edge", reactor::Cause::Ring, nullptr, 1, reactor::RoundClaim::Always},
+    {"saturn.service_tick", reactor::Cause::Tick, nullptr, 1, reactor::RoundClaim::Always},
 });
 
 inline constexpr auto kNeoGeoDocRows = std::to_array<reactor::LinkDecoderDecl>({
-    {"neogeo.cmd_edge",
-     reactor::Cause::Ring,
-     nullptr,
-     0,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Shared},
-    {"neogeo.service_tick",
-     reactor::Cause::Tick,
-     nullptr,
-     1,
-     reactor::DeadlineClass::A,
-     reactor::OsdBudget::Pinned},
+    {"neogeo.cmd_edge", reactor::Cause::Ring, nullptr, 0, reactor::RoundClaim::Never},
+    {"neogeo.service_tick", reactor::Cause::Tick, nullptr, 1, reactor::RoundClaim::Always},
 });
 
 inline constexpr auto kDocCensus = std::to_array<DocCensus>({

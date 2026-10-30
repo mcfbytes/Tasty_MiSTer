@@ -28,16 +28,14 @@ inline constexpr auto kThreeDoServices = std::to_array<LinkDecoderDecl>({
         reactor::Cause::Ring,
         &kCdCommandEdge<kThreeDo>,
         3,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
     {
         "3do.service_tick",
         reactor::Cause::Tick,
         &kCdServiceTick<kThreeDo>,
         3,
-        DeadlineClass::A,
-        OsdBudget::Pinned,
+        RoundClaim::Always,
     },
 });
 

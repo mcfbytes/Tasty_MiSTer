@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <utility>
 
-#include "app/device_table_channel.h"
 #include "app/input_decode_tally.h"
 #include "app/input_wire.h"
 #include "app/joy_level_emitter.h"
@@ -18,6 +17,7 @@
 #include "app/mouse_divider.h"
 #include "app/rumble_relay.h"
 #include "infra/error.h"
+#include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
 #include "infra/telemetry.h"
@@ -29,6 +29,7 @@
 #include "infra/unique_fd.h"
 #include "infra/wake_flag.h"
 #include "hal/boards_table.h"
+#include "svc/device_table.h"
 #include "svc/input_service.h"
 #include "infra/seat.h"
 
@@ -42,6 +43,10 @@ template <SeatTag Seat>
 class LinkTxChannel;
 template <SeatTag Seat>
 class LinkRxChannel;
+
+inline constexpr std::size_t kTableLeases = 2;
+using DeviceTableLoans = xthread::
+    LoanChannel<svc::DeviceTable, kTableLeases, SeatTag::Diag, SeatTag::Input>;
 
 struct InputDecodeCounts {
     std::uint32_t rounds = 0;
@@ -108,7 +113,7 @@ public:
         Fds fds,
         InputWire& wire,
         svc::InputService& svc,
-        DeviceTableChannel& tables,
+        DeviceTableLoans& tables,
         os::IClock& clock,
         Wiring w
     ) noexcept;
@@ -181,7 +186,7 @@ private:
 
     InputWire& wire_;
     svc::InputService& svc_;
-    DeviceTableChannel::Receiver tables_rx_;
+    DeviceTableLoans::Worker tables_rx_;
     xthread::DiagLog& diag_;
     LinkTxChannel<SeatTag::Input>& inbox_;
     LinkRxChannel<SeatTag::Input>& link_rx_;
@@ -263,7 +268,7 @@ static_assert(
         return hal::seat_of(m, InputDecode::kSeat).prio > hal::seat_of(m, SeatTag::Prefetch).prio;
     }),
     "item: this is the INPUT half of arch's "
-    "input_outranks_prefetch rule — a decode round must PREEMPT a "
+    "kFifoOrder T-INPUT > T-PREFETCH edge — a decode round must PREEMPT a "
     "CHD hunk decode (measured 3.1-11.0 ms), never queue behind "
     "one."
 );

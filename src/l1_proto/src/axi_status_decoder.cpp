@@ -18,12 +18,10 @@ void AxiStatusDecoder::bind(
 
 void AxiStatusDecoder::service() noexcept {
     TASTY_SEAT_BODY(AxiStatusDecoder);
-    StatusRegister& shadow = session_->status();
-    if (shadow.dirty()) {
-        if (!session_->flush_status()) {
-            ++flush_refusals_;
-            return;
-        }
+
+    if (!session_->flush_owed()) {
+        ++flush_refusals_;
+        return;
     }
     if (!src_ || gen_ == 0 || !reader_.take_if_changed(*src_, scratch_))
         return;
@@ -32,13 +30,11 @@ void AxiStatusDecoder::service() noexcept {
         return;
     }
     last_ = hal::SysBlock::flag(scratch_.stflg);
-    words_ = scratch_.words;
-    words_[0] = static_cast<std::uint16_t>(words_[0] & ~1u);
-    shadow.adopt(words_);
-    if (!session_->flush_status())
+    words_.words = scratch_.words;
+    if (!session_->adopt_from_core(words_))
         ++flush_refusals_;
     ++adopted_;
-    published_ = shadow.value();
+    published_ = session_->status().value();
     cell_->publish(published_);
 }
 

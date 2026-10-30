@@ -12,6 +12,9 @@ struct ManifestDocFacts {
     proto::RotationDir rotation = proto::RotationDir::None;
     std::string setname;
     bool setname_same_dir = false;
+
+    std::string buttons_names;
+    std::string buttons_default;
 };
 
 }

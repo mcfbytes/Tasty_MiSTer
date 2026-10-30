@@ -11,7 +11,7 @@ constexpr std::size_t kAlignMask = static_cast<std::size_t>(kPcmSampleAlign) - 1
 }
 
 void PcmRingFeeder::wake_main_() noexcept {
-    wakes_.fetch_add(1, std::memory_order_relaxed);
+    wakes_.add();
     commands_->kick_if_armed();
 }
 
@@ -119,7 +119,7 @@ Ex<void> PcmRingFeeder::set_source(std::unique_ptr<cores::IPcmSource> src) {
 
     parked_.store(false, std::memory_order_release);
 
-    wakes_.fetch_add(1, std::memory_order_relaxed);
+    wakes_.add();
     commands_->kick();
     return {};
 }
@@ -189,7 +189,7 @@ Ex<void> PcmRingFeeder::hand_over_(PcmMedia& media) noexcept {
     *lease = std::move(media);
     const std::uint8_t idx = media_.index_of(lease.get());
     if (!commands_->push(infra::make<PcmCommand>(Alt{idx}))) {
-        drops_.fetch_add(1, std::memory_order_relaxed);
+        drops_.add();
         media = std::move(*lease);
         *lease = PcmMedia{};
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
@@ -202,14 +202,14 @@ Ex<void> PcmRingFeeder::hand_over_(PcmMedia& media) noexcept {
 
 Ex<void> PcmRingFeeder::submit_(const PcmCommand& c) noexcept {
     if (parked() || park_.load(std::memory_order_acquire) != Park::Idle) {
-        discards_.fetch_add(1, std::memory_order_relaxed);
+        discards_.add();
         return {};
     }
     if (!commands_->push(c)) {
-        drops_.fetch_add(1, std::memory_order_relaxed);
+        drops_.add();
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-    wakes_.fetch_add(1, std::memory_order_relaxed);
+    wakes_.add();
     return {};
 }
 
@@ -356,7 +356,7 @@ void PcmRingFeeder::on(const PcmCommand::AttachSource& a) noexcept {
 }
 
 void PcmRingFeeder::misrouted(const PcmCommand&) noexcept {
-    misrouted_.fetch_add(1, std::memory_order_relaxed);
+    misrouted_.add();
 }
 
 void PcmRingFeeder::fill_pass() noexcept {
@@ -529,7 +529,7 @@ void PcmRingFeeder::fill_() noexcept {
         return;
     wr_ = static_cast<std::uint32_t>((wr_ + n) & ring_mask_);
     position_ += n;
-    passes_.fetch_add(1, std::memory_order_relaxed);
+    passes_.add();
 }
 
 void PcmRingFeeder::publish_state_() noexcept {
