@@ -29,6 +29,7 @@
 #include "proto/block_slots.h"
 #include "proto/core_session.h"
 #include "proto/link_op.h"
+#include "proto/no_block_roles.h"
 #include "proto/types.h"
 #include "svc/disc_read_service.h"
 #include "svc/storage_lifecycle.h"
@@ -255,12 +256,14 @@ private:
     }
 
     [[nodiscard]] bool poll_retiree_(Retiree& r) noexcept {
+
+        proto::NoBlockRoles none;
         for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
             const auto bit = static_cast<std::uint16_t>(1u << i);
             if ((r.mask & bit) == 0u)
                 continue;
             const proto::SlotIndex si{i};
-            if ((r.sent & bit) == 0u && slots_.submit_detach(si)) {
+            if ((r.sent & bit) == 0u && slots_.submit_detach(si, none)) {
                 r.sent = static_cast<std::uint16_t>(r.sent | bit);
                 continue;
             }

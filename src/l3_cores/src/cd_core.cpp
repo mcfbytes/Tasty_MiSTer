@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/cd_core.h"
 
+#include "cores/mounted_path.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 
@@ -9,7 +10,6 @@ namespace mister::cores {
 CdCore::CdCore(const CoreProfile& profile, const CdProfile& cd, const HostServices& host)
     : Core(profile, host),
       drive_(
-          *this,
           cd,
           host,
           profile.windows.empty() ? nullptr : host.windows.named(profile.windows[0].region.name)
@@ -17,6 +17,17 @@ CdCore::CdCore(const CoreProfile& profile, const CdProfile& cd, const HostServic
 
 Ex<void> CdCore::do_adopt(const CoreAdopt&) {
     return drive_.adopt();
+}
+
+MountState CdCore::mount_disc(std::string_view path) {
+    TASTY_SEAT_BODY(CdCore);
+    if (!mount(
+            profile().staging.disc_slot,
+            MountedPath{proto::PathId{}, path, proto::FileSize{}}
+        )) {
+        return MountState::Failed;
+    }
+    return drive_.disc_mount_state();
 }
 
 Ex<void> CdCore::on_mount(IoIndex, const MountedPath& p) {

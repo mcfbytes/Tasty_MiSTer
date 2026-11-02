@@ -202,6 +202,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (a.slot.v >= proto::kBlockSlots) {
         return ILinkEncoder::Outcome::Dropped;
     }
+
     const auto r = slots_.answer_read(link_, a.slot, a.lba, a.bytes, a.ack);
     if (!r || !*r) {
         return ILinkEncoder::Outcome::Dropped;

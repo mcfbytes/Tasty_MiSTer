@@ -63,18 +63,18 @@ void SaturnCddEngine::reset_status_() noexcept {
     );
 }
 
-Ex<void> SaturnCddEngine::do_accept(std::span<const std::uint16_t> words) {
+Ex<void> SaturnCddEngine::do_accept(std::span<const std::uint16_t> words, CdDialectPorts& p) {
 
     for (std::size_t i = 0; i < 6; ++i) {
         comm_[2 * i] = static_cast<std::uint8_t>(words[i] & 0xFFu);
         comm_[2 * i + 1] = static_cast<std::uint8_t>(words[i] >> 8);
     }
-    command_exec_();
+    command_exec_(p.geom);
     return {};
 }
 
-void SaturnCddEngine::command_exec_() noexcept {
-    const svc::Toc& toc = ports_.geom.toc;
+void SaturnCddEngine::command_exec_(const svc::DiscGeometry& geom) noexcept {
+    const svc::Toc& toc = geom.toc;
     const std::int32_t last = toc.last;
     std::int32_t cmd_fad = (static_cast<std::int32_t>(comm_[1]) << 16)
         | (static_cast<std::int32_t>(comm_[2]) << 8)
@@ -88,13 +88,13 @@ void SaturnCddEngine::command_exec_() noexcept {
         cmd_tno += 1;
         cmd_fad = start_of_(cmd_tno - 1) + kFad;
     }
-    const std::int32_t fad = cmd_fad + offset_by_index_(cmd_tno, cmd_idx);
+    const std::int32_t fad = cmd_fad + offset_by_index_(cmd_tno, cmd_idx, geom);
     const std::int32_t speed = comm_[10] == 1 ? 1 : 2;
 
     switch (comm_[0]) {
         case kCommSeekRing:
             seek_lba_ = fad - kFad;
-            track_ = track_by_lba_(seek_lba_);
+            track_ = track_by_lba_(seek_lba_, geom);
             index_ = index_by_lba_(track_, seek_lba_);
             pend_.seek_ring = true;
             pend_.read_pend = false;
@@ -114,7 +114,7 @@ void SaturnCddEngine::command_exec_() noexcept {
             const std::int32_t lba_old = lba_;
             seek_lba_ = fad - kFad - saturn::kReadHeadLead;
             lba_ = seek_lba_;
-            track_ = track_by_lba_(seek_lba_);
+            track_ = track_by_lba_(seek_lba_, geom);
             index_ = index_by_lba_(track_, seek_lba_);
             pend_.read_pend = true;
             pend_.seek_pend = true;
@@ -122,15 +122,15 @@ void SaturnCddEngine::command_exec_() noexcept {
             seek_delay_ = static_cast<std::int32_t>(saturn::seek_delay_ticks(
                 from,
                 fad - kFad,
-                static_cast<std::uint32_t>(track_by_lba_(from)),
-                static_cast<std::uint32_t>(track_by_lba_(fad - kFad))
+                static_cast<std::uint32_t>(track_by_lba_(from, geom)),
+                static_cast<std::uint32_t>(track_by_lba_(fad - kFad, geom))
             ));
             pend_.pause_pend = false;
             speed_ = speed;
             audio_first_ = true;
             if (read_skips_seek_)
                 pend_.seek_pend = false;
-            prime_();
+            prime_(geom);
             break;
         }
         case kCommPause:
@@ -142,21 +142,21 @@ void SaturnCddEngine::command_exec_() noexcept {
             const std::int32_t lba_old = lba_;
             seek_lba_ = fad - kFad;
             lba_ = seek_lba_;
-            track_ = track_by_lba_(seek_lba_);
+            track_ = track_by_lba_(seek_lba_, geom);
             index_ = index_by_lba_(track_, seek_lba_);
             pend_.seek_pend = true;
             const std::int32_t from = lba_old - saturn::kSeekOriginLead;
             seek_delay_ = static_cast<std::int32_t>(saturn::seek_delay_ticks(
                 from,
                 fad - kFad,
-                static_cast<std::uint32_t>(track_by_lba_(from)),
-                static_cast<std::uint32_t>(track_by_lba_(fad - kFad))
+                static_cast<std::uint32_t>(track_by_lba_(from, geom)),
+                static_cast<std::uint32_t>(track_by_lba_(fad - kFad, geom))
             ));
             pend_.final_read = pend_.read_pend;
             pend_.read_pend = false;
             pend_.pause_pend = false;
             speed_ = speed;
-            prime_();
+            prime_(geom);
             break;
         }
         case kCommNop:
@@ -175,28 +175,33 @@ void SaturnCddEngine::command_exec_() noexcept {
         ++stats_.crc_faults;
 }
 
-Ex<void> SaturnCddEngine::do_tick() {
+Ex<void> SaturnCddEngine::do_tick(CdDialectPorts& p) {
 
-    if (header_owed_ && take_header_()) {
+    if (header_owed_ && take_header_(p.geom)) {
         header_owed_ = false;
-        if (auto r = ports_.tx.send_data(
-                ports_.profile.io.info,
+        if (auto r = p.link.send_data(
+                facts_.profile.io.info,
                 std::as_bytes(std::span<const std::uint8_t>(header_))
             );
             !r) {
             return r;
         }
     }
-    process_();
-    auto status = ports_.tx.send_status(0);
-    auto upd = update_();
+    process_(p.geom);
+    auto status = send_frame_words_(0, p.link);
+    auto upd = update_(p);
     if (!status)
         return status;
     return upd;
 }
 
-void SaturnCddEngine::fill_position_(std::uint8_t code, std::uint8_t q, bool pause_msf) noexcept {
-    const svc::Toc& toc = ports_.geom.toc;
+void SaturnCddEngine::fill_position_(
+    std::uint8_t code,
+    std::uint8_t q,
+    bool pause_msf,
+    const svc::DiscGeometry& geom
+) noexcept {
+    const svc::Toc& toc = geom.toc;
     const StockMsf amsf = stock_msf(lba_ + kFad);
     const std::int32_t rel = lba_ - start_of_(track_);
     StockMsf msf{};
@@ -218,11 +223,12 @@ void SaturnCddEngine::fill_position_(std::uint8_t code, std::uint8_t q, bool pau
     stat_[10] = stock_bcd(amsf.f);
 }
 
-void SaturnCddEngine::process_() noexcept {
+void SaturnCddEngine::process_(const svc::DiscGeometry& geom) noexcept {
 
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = geom.toc;
     const std::int32_t last = toc.last;
-    std::uint8_t q = lba_ < static_cast<std::int32_t>(toc.end.v) && is_data_(track_) ? 0x40 : 0x00;
+    std::uint8_t q = lba_ < static_cast<std::int32_t>(toc.end.v) && is_data_(track_, geom) ? 0x40
+                                                                                           : 0x00;
 
     if (lid_open_) {
         state_ = State::Open;
@@ -235,10 +241,10 @@ void SaturnCddEngine::process_() noexcept {
         if (toc_pos_ < 0x100) {
             std::int32_t at = start_of_(toc_pos_) + kFad;
             if (toc_at_index1_)
-                at += offset_by_index_(toc_pos_ + 1, 1);
+                at += offset_by_index_(toc_pos_ + 1, 1, geom);
             msf = stock_msf(at);
             idx = stock_bcd(toc_pos_ + 1);
-            q = is_data_(toc_pos_ & 0xFF) ? 0x40 : 0x00;
+            q = is_data_(toc_pos_ & 0xFF, geom) ? 0x40 : 0x00;
             ++toc_pos_;
             if (toc_pos_ >= last)
                 toc_pos_ = 0x100;
@@ -246,11 +252,11 @@ void SaturnCddEngine::process_() noexcept {
             if (toc_pos_ == 0x100) {
                 msf = {1, 0, 0};
                 idx = 0xA0;
-                q = is_data_(0) ? 0x40 : 0x00;
+                q = is_data_(0, geom) ? 0x40 : 0x00;
             } else if (toc_pos_ == 0x101) {
                 msf = {static_cast<std::uint8_t>(last), 0, 0};
                 idx = 0xA1;
-                q = is_data_(last - 1) ? 0x40 : 0x00;
+                q = is_data_(last - 1, geom) ? 0x40 : 0x00;
             } else if (toc_pos_ == 0x102) {
                 msf = stock_msf(static_cast<std::int32_t>(toc.end.v) + kFad);
                 idx = 0xA2;
@@ -272,7 +278,7 @@ void SaturnCddEngine::process_() noexcept {
         stat_[10] = stock_bcd(msf.f);
     } else if (pend_.seek_pend) {
         state_ = pend_.final_read ? State::Read : State::Seek;
-        fill_position_(kStatSeek, q, false);
+        fill_position_(kStatSeek, q, false, geom);
         --seek_delay_;
         if (seek_delay_ <= 0) {
             seek_delay_ = 0;
@@ -308,10 +314,10 @@ void SaturnCddEngine::process_() noexcept {
         }
     } else if (pend_.read_pend) {
         state_ = State::Read;
-        fill_position_(kStatData, q, false);
+        fill_position_(kStatData, q, false, geom);
     } else if (pend_.pause_pend) {
         state_ = State::Idle;
-        fill_position_(kStatIdle, q, true);
+        fill_position_(kStatIdle, q, true, geom);
         pend_.pause_pend = false;
     } else if (pend_.stop_pend) {
         state_ = State::Stop;
@@ -320,63 +326,64 @@ void SaturnCddEngine::process_() noexcept {
         pend_.stop_pend = false;
     } else {
         state_ = State::Idle;
-        fill_position_(kStatIdle, q, true);
+        fill_position_(kStatIdle, q, true, geom);
     }
     stat_[11] = saturn::frame_checksum(
         std::span<const std::uint8_t, saturn::kFrameSumBytes>(stat_, saturn::kFrameSumBytes)
     );
 }
 
-Ex<void> SaturnCddEngine::update_() {
+Ex<void> SaturnCddEngine::update_(CdDialectPorts& p) {
 
     switch (state_) {
         case State::Idle:
             ++lba_;
             if (lba_ > seek_lba_ + 4)
                 lba_ -= 4;
-            retrack_();
+            retrack_(p.geom);
             break;
         case State::Open:
         case State::ReadToc:
             break;
         case State::Read: {
-            auto r = read_pass_();
+            auto r = read_pass_(p);
             if (!r)
                 return std::unexpected(r.error());
             return {};
         }
         case State::Pause:
         case State::Stop:
-            retrack_();
+            retrack_(p.geom);
             break;
         case State::Seek:
         case State::SeekRead:
             if (!pend_.seek_pend)
                 lba_ = seek_lba_;
-            retrack_();
+            retrack_(p.geom);
             break;
         case State::SeekRing:
             lba_ = seek_lba_;
-            retrack_();
+            retrack_(p.geom);
             break;
     }
     ++stats_.idle_ticks;
     return {};
 }
 
-Ex<SaturnCddEngine::Sent> SaturnCddEngine::read_pass_() {
-    const svc::Toc& toc = ports_.geom.toc;
+Ex<SaturnCddEngine::Sent> SaturnCddEngine::read_pass_(CdDialectPorts& p) {
+    const svc::Toc& toc = p.geom.toc;
     Ex<Sent> sent = Sent::Yes;
     if (lba_ >= static_cast<std::int32_t>(toc.end.v)) {
-        auto r = ring_sector_send_();
+        auto r = ring_sector_send_(p);
         if (!r)
             sent = std::unexpected(r.error());
-    } else if (is_data_(track_)) {
+    } else if (is_data_(track_, p.geom)) {
 
-        const bool synth = sector_size_(track_) == kUserData || lba_ - start_of_(track_) < 0;
-        sent = data_sector_send_(synth);
+        const bool synth = sector_size_(track_, p.geom) == kUserData
+            || lba_ - start_of_(track_) < 0;
+        sent = data_sector_send_(synth, p);
     } else {
-        sent = audio_sector_send_();
+        sent = audio_sector_send_(p);
         if (sent && *sent == Sent::Yes)
             audio_first_ = false;
     }
@@ -385,22 +392,22 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::read_pass_() {
         return sent;
     }
     ++lba_;
-    retrack_();
+    retrack_(p.geom);
     seek_lba_ = lba_;
-    prime_();
+    prime_(p.geom);
     return sent;
 }
 
-Ex<SaturnCddEngine::Sent> SaturnCddEngine::data_sector_send_(bool synth_header) {
+Ex<SaturnCddEngine::Sent> SaturnCddEngine::data_sector_send_(bool synth_header, CdDialectPorts& p) {
     const std::int32_t at = lba_ >= 0 ? lba_ : 0;
-    const bool cooked = sector_size_(track_) == kUserData;
+    const bool cooked = sector_size_(track_, p.geom) == kUserData;
     const svc::DiscForm form = cooked ? svc::DiscForm::UserData : svc::DiscForm::RawFrame;
     const std::span<std::uint8_t> dst = cooked
         ? std::span<std::uint8_t>(sec_ + kHeaderBytes, kUserData)
         : std::span<std::uint8_t>(sec_);
     const svc::Lba lba{static_cast<std::uint32_t>(at)};
-    if (ports_.disc.take(form, lba, std::as_writable_bytes(dst)) == 0) {
-        if (!ports_.disc.take_read_failed(form, lba))
+    if (facts_.disc.take(form, lba, std::as_writable_bytes(dst)) == 0) {
+        if (!facts_.disc.take_read_failed(form, lba))
             return Sent::Declined;
         ++stats_.substitutes;
     }
@@ -461,12 +468,12 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::data_sector_send_(bool synth_header) 
         | (read_slot << 12)
     );
     ++stats_.data_sectors;
-    if (auto r = send_mode_(mode); !r)
+    if (auto r = send_mode_(mode, p.link); !r)
         return std::unexpected(r.error());
     return Sent::Yes;
 }
 
-Ex<SaturnCddEngine::Sent> SaturnCddEngine::audio_sector_send_() {
+Ex<SaturnCddEngine::Sent> SaturnCddEngine::audio_sector_send_(CdDialectPorts& p) {
 
     const bool first = audio_first_;
     const std::size_t count = first ? 2 : 1;
@@ -478,8 +485,8 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::audio_sector_send_() {
         if (want >= 0) {
             const svc::Lba at{static_cast<std::uint32_t>(want)};
             const std::span<std::uint8_t> dst(aud_[k]);
-            if (ports_.disc.take(svc::DiscForm::RawFrame, at, std::as_writable_bytes(dst)) == 0) {
-                if (!ports_.disc.take_read_failed(svc::DiscForm::RawFrame, at))
+            if (facts_.disc.take(svc::DiscForm::RawFrame, at, std::as_writable_bytes(dst)) == 0) {
+                if (!facts_.disc.take_read_failed(svc::DiscForm::RawFrame, at))
                     return Sent::Declined;
                 ++stats_.substitutes;
             }
@@ -508,12 +515,12 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::audio_sector_send_() {
     const std::uint8_t read_slot = audio_ring_.take_read();
     const auto mode = static_cast<std::uint16_t>(0x0202 | (read_slot << 4) | (read_slot << 12));
     stats_.cdda_sectors += static_cast<std::uint32_t>(count);
-    if (auto r = send_mode_(mode); !r)
+    if (auto r = send_mode_(mode, p.link); !r)
         return std::unexpected(r.error());
     return Sent::Yes;
 }
 
-Ex<void> SaturnCddEngine::ring_sector_send_() {
+Ex<void> SaturnCddEngine::ring_sector_send_(CdDialectPorts& p) {
 
     const StockMsf msf = stock_msf(lba_ + kFad);
     const std::uint8_t header[kRingHeaderBytes] = {
@@ -543,30 +550,31 @@ Ex<void> SaturnCddEngine::ring_sector_send_() {
         return std::unexpected(w.error());
     }
     ++stats_.data_sectors;
-    return send_mode_(static_cast<std::uint16_t>((speed_ == 2 ? 0x0101 : 0x0000) | 0x0404));
+    return send_mode_(static_cast<std::uint16_t>((speed_ == 2 ? 0x0101 : 0x0000) | 0x0404), p.link);
 }
 
-Ex<void> SaturnCddEngine::send_mode_(std::uint16_t mode) {
+Ex<void> SaturnCddEngine::send_mode_(std::uint16_t mode, ICdLink& link) {
 
     const std::uint8_t bytes[2] = {
         static_cast<std::uint8_t>(mode & 0xFFu),
         static_cast<std::uint8_t>(mode >> 8)
     };
-    return ports_.tx.send_data(
-        ports_.profile.io.data,
+    return link.send_data(
+        facts_.profile.io.data,
         std::as_bytes(std::span<const std::uint8_t>(bytes))
     );
 }
 
-void SaturnCddEngine::prime_() noexcept {
+void SaturnCddEngine::prime_(const svc::DiscGeometry& geom) noexcept {
 
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = geom.toc;
     if (lba_ >= static_cast<std::int32_t>(toc.end.v))
         return;
-    if (is_data_(track_)) {
+    if (is_data_(track_, geom)) {
         const std::int32_t at = lba_ >= 0 ? lba_ : 0;
-        ports_.disc.hint(
-            sector_size_(track_) == kUserData ? svc::DiscForm::UserData : svc::DiscForm::RawFrame,
+        facts_.disc.hint(
+            sector_size_(track_, geom) == kUserData ? svc::DiscForm::UserData
+                                                    : svc::DiscForm::RawFrame,
             svc::Lba{static_cast<std::uint32_t>(at)}
         );
         return;
@@ -574,43 +582,46 @@ void SaturnCddEngine::prime_() noexcept {
     const std::int32_t first = audio_first_ ? lba_ : lba_ + 1;
     for (std::int32_t at = first; at <= lba_ + 1; ++at) {
         if (at >= 0)
-            ports_.disc.hint(svc::DiscForm::RawFrame, svc::Lba{static_cast<std::uint32_t>(at)});
+            facts_.disc.hint(svc::DiscForm::RawFrame, svc::Lba{static_cast<std::uint32_t>(at)});
     }
 }
 
-bool SaturnCddEngine::take_header_() noexcept {
+bool SaturnCddEngine::take_header_(const svc::DiscGeometry& geom) noexcept {
 
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = geom.toc;
     if (toc.last == 0)
         return false;
     const bool cooked = toc.tracks[0].sector_size == kUserData;
     const svc::DiscForm form = cooked ? svc::DiscForm::UserData : svc::DiscForm::RawFrame;
     const std::span<std::uint8_t> dst = cooked ? std::span<std::uint8_t>(sec_, kUserData)
                                                : std::span<std::uint8_t>(sec_);
-    if (ports_.disc.take(form, svc::Lba{0}, std::as_writable_bytes(dst)) == 0) {
-        if (!ports_.disc.take_read_failed(form, svc::Lba{0}))
+    if (facts_.disc.take(form, svc::Lba{0}, std::as_writable_bytes(dst)) == 0) {
+        if (!facts_.disc.take_read_failed(form, svc::Lba{0}))
             return false;
         ++stats_.substitutes;
         std::memset(sec_, 0, sizeof sec_);
     }
     std::memcpy(header_, sec_ + (cooked ? 0 : kHeaderBytes), kBootHeaderBytes);
     const std::span<const std::uint8_t> h(header_);
-    toc_at_index1_ = quirk_matches(ports_.profile.quirks, CdQuirk::TocStartsAtIndex1, h);
-    read_skips_seek_ = quirk_matches(ports_.profile.quirks, CdQuirk::ReadSkipsSeek, h);
+    toc_at_index1_ = quirk_matches(facts_.profile.quirks, CdQuirk::TocStartsAtIndex1, h);
+    read_skips_seek_ = quirk_matches(facts_.profile.quirks, CdQuirk::ReadSkipsSeek, h);
     return true;
 }
 
-Ex<std::size_t> SaturnCddEngine::do_disc_descriptor(std::span<std::byte> out) {
+Ex<std::size_t> SaturnCddEngine::do_disc_descriptor(
+    std::span<std::byte> out,
+    const svc::DiscGeometry& geom
+) {
 
-    if (!ports_.geom.mounted)
+    if (!geom.mounted)
         return std::unexpected(Error{Errc::core_load, ERR_SITE(), 0});
     if (out.size() < kBootHeaderBytes)
         return std::unexpected(Error{Errc::core_load, ERR_SITE(), 1});
-    if (!take_header_()) {
+    if (!take_header_(geom)) {
         header_owed_ = true;
-        ports_.disc.hint(
-            ports_.geom.toc.tracks[0].sector_size == kUserData ? svc::DiscForm::UserData
-                                                               : svc::DiscForm::RawFrame,
+        facts_.disc.hint(
+            geom.toc.tracks[0].sector_size == kUserData ? svc::DiscForm::UserData
+                                                        : svc::DiscForm::RawFrame,
             svc::Lba{0}
         );
         return std::size_t{0};
@@ -620,22 +631,22 @@ Ex<std::size_t> SaturnCddEngine::do_disc_descriptor(std::span<std::byte> out) {
     return kBootHeaderBytes;
 }
 
-Ex<void> SaturnCddEngine::do_notify_disc(bool loaded) {
+Ex<void> SaturnCddEngine::do_notify_disc(bool loaded, const svc::DiscGeometry& geom) {
 
     toc_at_index1_ = false;
     read_skips_seek_ = false;
     header_owed_ = false;
-    stock_toc_.learn(ports_.geom);
+    stock_toc_.learn(geom);
     if (!loaded) {
         do_reset_machine();
         return {};
     }
     lid_open_ = false;
     pend_.stop_pend = true;
-    if (ports_.geom.toc.last != 0) {
-        ports_.disc.hint(
-            ports_.geom.toc.tracks[0].sector_size == kUserData ? svc::DiscForm::UserData
-                                                               : svc::DiscForm::RawFrame,
+    if (geom.toc.last != 0) {
+        facts_.disc.hint(
+            geom.toc.tracks[0].sector_size == kUserData ? svc::DiscForm::UserData
+                                                        : svc::DiscForm::RawFrame,
             svc::Lba{0}
         );
     }
@@ -656,7 +667,7 @@ void SaturnCddEngine::do_reset_machine() noexcept {
     reset_status_();
 }
 
-bool SaturnCddEngine::do_streaming() const noexcept {
+bool SaturnCddEngine::do_streaming(const svc::DiscGeometry&) const noexcept {
 
     return !lid_open_
         && !pend_.read_toc
@@ -666,13 +677,13 @@ bool SaturnCddEngine::do_streaming() const noexcept {
         && pend_.read_pend;
 }
 
-CdEngine::DriveView SaturnCddEngine::do_drive_view() const noexcept {
+CdEngine::DriveView SaturnCddEngine::do_drive_view(const svc::DiscGeometry& geom) const noexcept {
     return DriveView{
         static_cast<std::uint8_t>(state_),
         static_cast<std::uint32_t>(track_),
         lba_,
         lba_,
-        is_data_(track_)
+        is_data_(track_, geom)
     };
 }
 
@@ -687,14 +698,17 @@ std::size_t SaturnCddEngine::do_status_words(
     return 6;
 }
 
-void SaturnCddEngine::retrack_() noexcept {
-    track_ = track_by_lba_(lba_);
+void SaturnCddEngine::retrack_(const svc::DiscGeometry& geom) noexcept {
+    track_ = track_by_lba_(lba_, geom);
     index_ = index_by_lba_(track_, lba_);
 }
 
-std::int32_t SaturnCddEngine::track_by_lba_(std::int32_t lba) const noexcept {
+std::int32_t SaturnCddEngine::track_by_lba_(
+    std::int32_t lba,
+    const svc::DiscGeometry& geom
+) const noexcept {
 
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = geom.toc;
     std::int32_t i = 0;
     while (i < toc.last && static_cast<std::int64_t>(toc.tracks[i].end.v) <= lba)
         ++i;
@@ -706,9 +720,13 @@ std::int32_t SaturnCddEngine::index_by_lba_(std::int32_t track, std::int32_t lba
     return lba - start_of_(track) < 0 ? 0 : 1;
 }
 
-std::int32_t SaturnCddEngine::offset_by_index_(std::int32_t tno, std::int32_t idx) const noexcept {
+std::int32_t SaturnCddEngine::offset_by_index_(
+    std::int32_t tno,
+    std::int32_t idx,
+    const svc::DiscGeometry& geom
+) const noexcept {
 
-    const std::int32_t last = ports_.geom.toc.last;
+    const std::int32_t last = geom.toc.last;
     std::int32_t t = tno - 1;
     if (t < 0)
         t = 0;
@@ -727,13 +745,16 @@ std::int32_t SaturnCddEngine::start_of_(std::int32_t track) const noexcept {
     return stock_toc_.start_of(track);
 }
 
-bool SaturnCddEngine::is_data_(std::int32_t track) const noexcept {
-    const svc::Toc& toc = ports_.geom.toc;
+bool SaturnCddEngine::is_data_(std::int32_t track, const svc::DiscGeometry& geom) const noexcept {
+    const svc::Toc& toc = geom.toc;
     return track >= 0 && track < toc.last && toc.tracks[track].type != svc::TrackType::Cdda;
 }
 
-std::uint32_t SaturnCddEngine::sector_size_(std::int32_t track) const noexcept {
-    const svc::Toc& toc = ports_.geom.toc;
+std::uint32_t SaturnCddEngine::sector_size_(
+    std::int32_t track,
+    const svc::DiscGeometry& geom
+) const noexcept {
+    const svc::Toc& toc = geom.toc;
     return track >= 0 && track < toc.last ? toc.tracks[track].sector_size : 0u;
 }
 

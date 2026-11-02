@@ -4,10 +4,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
+#include "cores/cd_command_words.h"
 #include "cores/cd_profile.h"
-#include "cores/cd_sector_egress.h"
+#include "cores/cd_sector_act.h"
 #include "cores/core_profile.h"
 #include "cores/host_services.h"
 #include "hal/spi_transport.h"
@@ -46,9 +48,9 @@ public:
     bool can_send_data(std::uint16_t selector);
     [[nodiscard]] bool egress_idle() const noexcept;
     [[nodiscard]] std::uint32_t egress_abandons() const noexcept;
-    [[nodiscard]] Ex<void> submit_sector(const ICdSectorEgress::Act& act);
+    [[nodiscard]] Ex<void> submit_sector(const CdSectorAct& act);
 
-    void service_command_edge(CdEngine& eng) noexcept;
+    [[nodiscard]] std::optional<CdCommandWords> read_command_edge(CdEngine& eng) noexcept;
 
     void count_fault() noexcept { ++wire_faults_; }
 

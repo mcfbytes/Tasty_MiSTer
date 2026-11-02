@@ -340,10 +340,15 @@ inline void CoreOptionCells::publish_config_slots(infra::OptRef<cores::Core> cor
 
 inline void CoreOptionCells::publish_option_table(infra::OptRef<cores::Core> core) noexcept {
     TASTY_SEAT_BODY(CoreOptionCells);
-    cores::IOptionRows* rows = core.has_value() ? core->options() : nullptr;
     option_scratch_ = OptionTable{};
-    if (rows != nullptr) {
+    if (core.has_value()) {
+
         const cores::CoreProfile& p = core->profile();
+        cores::IOptionRows* rows = core->options();
+        if (rows == nullptr) {
+            option_cell_.publish(option_scratch_);
+            return;
+        }
         const auto decls = rows->option_rows();
         const std::size_t cap = std::size(option_scratch_.rows);
         const std::size_t n = decls.size() < cap ? decls.size() : cap;

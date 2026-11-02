@@ -19,8 +19,8 @@ class TickRow final : public reactor::ILinkDecoder {
 public:
     void service(reactor::CoreState& st) const override {
         TASTY_SEAT_BODY(TickRow);
-        Core* c = bound_core(st);
-        if (c == nullptr || &c->profile() != &kProfile)
+        Core* c = bound_core<kProfile>(st);
+        if (c == nullptr)
             return;
         if (const auto r = c->mailbox_rows())
             r->service_mailbox_tick();

@@ -3,13 +3,12 @@
 
 #include <cstdint>
 
+#include "cores/cd_dialect_facts.h"
 #include "cores/cd_dialect_ports.h"
 #include "cores/cd_engine.h"
 #include "cores/cdda_play_range.h"
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
-#include "cores/cd_sector_egress.h"
-#include "cores/cd_transport.h"
 #include "cores/scsi_sense.h"
 
 namespace mister::cores {
@@ -18,9 +17,9 @@ class PceScsiEngine final : public CdEngine {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    PceScsiEngine(const CdDialectPorts& ports, const os::IClock& c)
-        : CdEngine(ports.profile.ticks, c, 0),
-          ports_(ports) {}
+    PceScsiEngine(const CdDialectFacts& facts, const os::IClock& c)
+        : CdEngine(facts.profile.ticks, c, 0),
+          facts_(facts) {}
 
     void grant_read_ack() noexcept { st_.can_read_next = true; }
 
@@ -46,7 +45,7 @@ public:
         };
     }
 
-    [[nodiscard]] Ex<bool> drain_pending();
+    [[nodiscard]] Ex<bool> drain_pending(ICdLink& link);
 
 private:
     bool do_cart_load_ejects() const noexcept override { return true; }
@@ -77,14 +76,17 @@ private:
         std::int32_t subc_lba = -1;
     };
 
-    [[nodiscard]] Ex<void> do_accept(std::span<const std::uint16_t> words) override;
-    [[nodiscard]] Ex<void> do_tick() override;
-    [[nodiscard]] Ex<void> do_push_sector() override;
-    [[nodiscard]] Ex<void> do_notify_disc(bool loaded) override;
+    [[nodiscard]] Ex<void> do_accept(
+        std::span<const std::uint16_t> words,
+        CdDialectPorts& p
+    ) override;
+    [[nodiscard]] Ex<void> do_tick(CdDialectPorts& p) override;
+    [[nodiscard]] Ex<void> do_push_sector(CdDialectPorts& p) override;
+    [[nodiscard]] Ex<void> do_notify_disc(bool loaded, const svc::DiscGeometry& geom) override;
     void do_reset_machine() noexcept override;
-    bool do_streaming() const noexcept override;
+    bool do_streaming(const svc::DiscGeometry& geom) const noexcept override;
 
-    DriveView do_drive_view() const noexcept override {
+    DriveView do_drive_view(const svc::DiscGeometry&) const noexcept override {
         return DriveView{st_.state, st_.track, st_.lba, st_.lba, st_.is_data};
     }
 
@@ -105,19 +107,23 @@ private:
 
     [[nodiscard]] CdEngineStats do_stats() const noexcept override { return stats_; }
 
-    [[nodiscard]] Ex<void> update_();
-    [[nodiscard]] Ex<void> read_send_();
-    [[nodiscard]] Ex<void> command_exec_();
-    [[nodiscard]] Ex<void> send_status_(std::uint16_t status);
-    [[nodiscard]] Ex<void> send_data_request_();
-    void build_subcode_frame_(std::int32_t lba);
-    std::uint32_t track_by_lba_(std::int32_t lba) const;
-    std::uint32_t seek_ticks_(std::int32_t from, std::int32_t to) const;
+    [[nodiscard]] Ex<void> update_(CdDialectPorts& p);
+    [[nodiscard]] Ex<void> read_send_(CdDialectPorts& p);
+    [[nodiscard]] Ex<void> command_exec_(CdDialectPorts& p);
+    [[nodiscard]] Ex<void> send_status_(std::uint16_t status, ICdLink& link);
+    [[nodiscard]] Ex<void> send_data_request_(ICdLink& link);
+    void build_subcode_frame_(std::int32_t lba, const svc::DiscGeometry& geom);
+    std::uint32_t track_by_lba_(std::int32_t lba, const svc::DiscGeometry& geom) const;
+    std::uint32_t seek_ticks_(
+        std::int32_t from,
+        std::int32_t to,
+        const svc::DiscGeometry& geom
+    ) const;
 
-    void hint_at_(std::int32_t lba, bool doubled = false) noexcept;
-    void pump_pipeline_() noexcept;
+    void hint_at_(std::int32_t lba, bool doubled, const svc::DiscGeometry& geom) noexcept;
+    void pump_pipeline_(const svc::DiscGeometry& geom) noexcept;
 
-    CdDialectPorts ports_;
+    CdDialectFacts facts_;
     CdEngineStats stats_{};
 
     std::uint8_t sec_buf_[2352 + 2352] = {};

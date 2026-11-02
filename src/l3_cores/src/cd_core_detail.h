@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <span>
 
-#include "cores/cd_transport.h"
+#include "cores/cd_link.h"
 #include "cores/cdwire.h"
 #include "infra/error.h"
 #include "svc/disc_engine.h"
@@ -15,11 +15,11 @@ namespace mister::cores {
 namespace {
 
 [[nodiscard]] inline Ex<void> send_frame(
-    ICdTransport& tx,
+    ICdLink& link,
     IoIndex idx,
     std::span<const std::uint8_t> f
 ) {
-    return tx.send_data(idx, std::as_bytes(f));
+    return link.send_data(idx, std::as_bytes(f));
 }
 
 constexpr std::size_t kUserData = 2048;

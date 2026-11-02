@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/spi_block_poll.h"
 #include "hal/selected.h"
+#include "proto/block_server.h"
 #include "proto/uio_opcodes.h"
 
 #include <cstring>
@@ -80,12 +81,6 @@ constexpr std::uint8_t kCsd[16] = {
 
 }
 
-infra::OptRef<IBlockGeometry> SpiBlockPoll::geometry_for_(SlotIndex slot) const noexcept {
-    if (!wiring_.roles || slot.v >= kBlockSlots)
-        return {};
-    return (*wiring_.roles)[slot.v].geometry;
-}
-
 [[nodiscard]] Ex<void> SpiBlockPoll::send_config(hal::ISpiTransport& link) {
     std::uint8_t csd[sizeof(kCsd)];
     std::memcpy(csd, kCsd, sizeof(csd));
@@ -111,6 +106,8 @@ infra::OptRef<IBlockGeometry> SpiBlockPoll::geometry_for_(SlotIndex slot) const 
 
 [[nodiscard]] Ex<SpiBlockPoll::Decode> SpiBlockPoll::poll(
     hal::ISpiTransport& link,
+    IBlockRoles& roles,
+    const std::array<SlotServer, kBlockSlots>& servers,
     std::optional<SdStatusWord> known
 ) {
     if (known.has_value() && (known->v & 0x8000u) == 0u) {
@@ -220,8 +217,11 @@ infra::OptRef<IBlockGeometry> SpiBlockPoll::geometry_for_(SlotIndex slot) const 
         return d;
 
     BlockGeometry geo{d.block_size, 0};
-    if (const auto hook = geometry_for_(d.req.slot); hook && !stock) {
-        geo = hook->geometry_for(d.req.slot, d.req.lba, geo);
+    if (!stock) {
+        const BlockBacking backing = roles.resolve(slot_server_of(servers, d.req.slot));
+        if (backing.kind == SlotServer::CoreBlock && backing.server) {
+            geo = backing.server->geometry_for(d.req.slot, d.req.lba, geo);
+        }
     }
     if (geo.block_size == 0)
         geo.block_size = d.block_size;

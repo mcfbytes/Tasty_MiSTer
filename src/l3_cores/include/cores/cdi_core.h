@@ -15,17 +15,14 @@
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
-#include "proto/block_geometry_hook.h"
+#include "proto/block_server.h"
 #include "proto/core_session.h"
 #include "svc/cue_policy.h"
 #include "svc/disc_read_service.h"
 
 namespace mister::cores {
 
-class CdiCore final : public Core,
-                      public IStagingCore,
-                      public proto::IResidentImageSource,
-                      public proto::IBlockGeometry {
+class CdiCore final : public Core, public IStagingCore, public proto::IBlockServer {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
@@ -52,11 +49,6 @@ public:
     [[nodiscard]] Ex<void> deferred_reset() override {
         TASTY_SEAT_BODY(CdiCore);
         return {};
-    }
-
-    [[nodiscard]] proto::IImageSink& image_sink() noexcept override {
-        TASTY_SEAT_BODY(CdiCore);
-        return Core::image_sink();
     }
 
     StagePlan stage_plan() noexcept override {
@@ -88,9 +80,7 @@ private:
 
     [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return this; }
 
-    [[nodiscard]] proto::IResidentImageSource* on_block_source() noexcept override { return this; }
-
-    [[nodiscard]] proto::IBlockGeometry* on_block_geometry() noexcept override { return this; }
+    [[nodiscard]] proto::IBlockServer* on_block_server() noexcept override { return this; }
 
     enum class Answer : std::uint8_t { TocArea, Track, LeadOut };
     [[nodiscard]] Answer classify_(std::int32_t lba) const noexcept;

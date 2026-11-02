@@ -7,6 +7,7 @@
 #include <span>
 #include <string_view>
 
+#include "cores/cd_command_round.h"
 #include "cores/cd_engine.h"
 #include "cores/cd_flow.h"
 #include "cores/mounted_path.h"
@@ -15,63 +16,27 @@
 
 namespace mister::cores {
 
-Ex<void> CdDrive::send_data(IoIndex io_index, std::span<const std::byte> payload) {
-    TASTY_SEAT_BODY(CdDrive);
-    return wire_.send_data(io_index, payload, owner_->image_sink());
-}
-
-bool CdDrive::egress_idle() const noexcept {
-    TASTY_SEAT_BODY(CdDrive);
-    return wire_.egress_idle();
-}
-
-Ex<void> CdDrive::submit_sector(const Act& act) {
-    TASTY_SEAT_BODY(CdDrive);
-    return wire_.submit_sector(act);
-}
-
-bool CdDrive::can_send_data(std::uint16_t selector) {
-    TASTY_SEAT_BODY(CdDrive);
-    return wire_.can_send_data(selector);
-}
-
-Ex<void> CdDrive::send_status(std::uint64_t bcd_frame) {
-    TASTY_SEAT_BODY(CdDrive);
-    if (!engine_) {
-
-        return std::unexpected(Error{Errc::core_load, ERR_SITE(), 0});
-    }
-    std::uint16_t words[CdEngine::kMaxStatusWords] = {};
-    const std::size_t n = engine_->status_words(bcd_frame, std::span{words});
-    return wire_.send_status(std::span<const std::uint16_t>(words, n));
-}
-
-void CdDrive::service_command_edge() noexcept {
+void CdDrive::service_command_edge(proto::IImageSink& sink) noexcept {
     TASTY_SEAT_BODY(CdDrive);
     if (!engine_)
         return;
-    wire_.service_command_edge(*engine_);
+    run_command_round(wire_, *engine_, slot_.geometry(), sink);
 }
 
-void CdDrive::service_tick() noexcept {
+void CdDrive::service_tick(proto::IImageSink& sink) noexcept {
     TASTY_SEAT_BODY(CdDrive);
     if (!engine_)
         return;
 
     (void)slot_.refresh(engine_ref_());
-    if (auto r = engine_->on_tick(); !r)
+    CdWireLink link{wire_, sink};
+    CdDialectPorts p{slot_.geometry(), link};
+    if (auto r = engine_->on_tick(p); !r)
         wire_.count_fault();
 }
 
-MountState CdDrive::mount_disc(std::string_view path) {
+MountState CdDrive::disc_mount_state() {
     TASTY_SEAT_BODY(CdDrive);
-
-    const auto m = owner_->mount(
-        owner_->profile().staging.disc_slot,
-        MountedPath{proto::PathId{}, path, proto::FileSize{}}
-    );
-    if (!m)
-        return MountState::Failed;
     switch (slot_.refresh(engine_ref_())) {
         case svc::DiscMountState::Pending:
             return MountState::Pending;
@@ -84,19 +49,21 @@ MountState CdDrive::mount_disc(std::string_view path) {
     return MountState::Failed;
 }
 
-Ex<void> CdDrive::stage_disc_payload(const proto::LinkOp::StageDiscPayload&) {
+Ex<void> CdDrive::stage_disc_payload(
+    const proto::LinkOp::StageDiscPayload&,
+    proto::IImageSink& sink
+) {
     TASTY_SEAT_BODY(CdDrive);
     if (engine_ == nullptr)
         return {};
     std::byte frame[CdEngine::kMaxDescriptorBytes]{};
-    auto n = engine_->disc_descriptor(frame);
+    auto n = engine_->disc_descriptor(frame, slot_.geometry());
     if (!n)
         return std::unexpected(n.error());
     if (*n == 0)
         return {};
 
-    return wire_
-        .bracket_inline(cd_->io.info, std::span<const std::byte>(frame, *n), owner_->image_sink());
+    return wire_.bracket_inline(cd_->io.info, std::span<const std::byte>(frame, *n), sink);
 }
 
 void CdDrive::set_region(std::uint8_t region) {
@@ -110,11 +77,6 @@ Ex<void> CdDrive::deferred_reset() {
     return reset();
 }
 
-proto::IImageSink& CdDrive::image_sink() noexcept {
-    TASTY_SEAT_BODY(CdDrive);
-    return owner_->image_sink();
-}
-
 std::optional<svc::DiscCounters> CdDrive::disc_counters() const noexcept {
     TASTY_SEAT_BODY(CdDrive);
     return slot_.counters();
@@ -125,7 +87,7 @@ std::optional<CdFlow> CdDrive::cd_flow() const noexcept {
     const CdEngine* e = engine();
     if (e == nullptr || !slot_.bound())
         return std::nullopt;
-    const CdEngine::DriveView d = e->drive_view();
+    const CdEngine::DriveView d = e->drive_view(slot_.geometry());
     const CdEngineStats c = e->stats();
     return CdFlow{
         c.flow_waits,
@@ -146,27 +108,15 @@ std::optional<CdFlow> CdDrive::cd_flow() const noexcept {
     };
 }
 
-CdDrive::CdDrive(Core& owner, const CdProfile& cd, const HostServices& host, ICoreWindow* window)
-    : owner_(&owner),
-      cd_(&cd),
+CdDrive::CdDrive(const CdProfile& cd, const HostServices& host, ICoreWindow* window)
+    : cd_(&cd),
       granted_discs_(host.discs),
       wire_(cd, host) {
 
     if (!granted_discs_)
         return;
 
-    ICdSectorEgress* const egress = wire_.queued() ? this : nullptr;
-
-    if (auto e = make_cd_engine(
-            *cd_,
-            *granted_discs_,
-            slot_.geometry(),
-            transport(),
-            host.clock,
-            this,
-            egress,
-            window
-        )) {
+    if (auto e = make_cd_engine(*cd_, *granted_discs_, host.clock, window)) {
         engine_ = std::move(*e);
     }
 }
@@ -208,7 +158,7 @@ Ex<void> CdDrive::arm_disc(const MountedPath& p) {
     const auto op = p.display.empty() ? svc::DiscOp::Unmount : svc::DiscOp::Mount;
     const svc::DiscMountState st = slot_.arm_mount(op, &cd_->cue, p.display);
     if (st == svc::DiscMountState::Failed) {
-        (void)engine_->notify_disc(false);
+        (void)engine_->notify_disc(false, slot_.geometry());
         return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
     }
     (void)slot_.refresh(engine_ref_());
@@ -222,7 +172,7 @@ Ex<void> CdDrive::eject_for_cart() {
         return {};
     (void)slot_.arm_mount(svc::DiscOp::Unmount, &cd_->cue, std::string_view{});
     (void)slot_.refresh(engine_ref_());
-    if (auto n = engine_->notify_disc(false); !n)
+    if (auto n = engine_->notify_disc(false, slot_.geometry()); !n)
         return std::unexpected(n.error());
 
     if (auto r = engine_->reset(); !r)

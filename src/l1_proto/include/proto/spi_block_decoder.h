@@ -5,6 +5,7 @@
 
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
+#include "proto/block_roles.h"
 #include "proto/block_slots.h"
 #include "proto/link_event.h"
 #include "proto/link_port.h"
@@ -42,7 +43,7 @@ public:
           live_(&live),
           out_(router) {}
 
-    void service();
+    void service(IBlockRoles& roles);
 
     [[nodiscard]] bool active() const noexcept { return live_->session_live(); }
 

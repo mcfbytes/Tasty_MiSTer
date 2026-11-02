@@ -23,7 +23,7 @@ svc::DiscMountState CdDiscSlot::refresh(infra::OptRef<CdEngine> engine) noexcept
         if (st == svc::DiscMountState::Mounted || st == svc::DiscMountState::Failed) {
             geom_ = discs_->geometry();
             if (engine) {
-                (void)engine->notify_disc(st == svc::DiscMountState::Mounted);
+                (void)engine->notify_disc(st == svc::DiscMountState::Mounted, geom_);
             }
         }
     }

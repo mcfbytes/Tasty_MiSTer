@@ -6,11 +6,11 @@
 #include <optional>
 #include <span>
 
+#include "cores/cd_dialect_facts.h"
+#include "cores/cd_dialect_ports.h"
 #include "cores/cd_engine.h"
 #include "cores/cd_engine_stats.h"
-#include "cores/cd_dialect_ports.h"
 #include "cores/cd_profile.h"
-#include "cores/cd_transport.h"
 #include "cores/core_window.h"
 #include "cores/saturn_stock_toc.h"
 #include "cores/saturn_pending.h"
@@ -33,9 +33,9 @@ public:
 
     static constexpr std::size_t kBootHeaderBytes = 256;
 
-    SaturnCddEngine(const CdDialectPorts& ports, const os::IClock& c, ICoreWindow* window)
-        : CdEngine(ports.profile.ticks, c, 255),
-          ports_(ports),
+    SaturnCddEngine(const CdDialectFacts& facts, const os::IClock& c, ICoreWindow* window)
+        : CdEngine(facts.profile.ticks, c, 255),
+          facts_(facts),
           window_(window) {
         reset_status_();
     }
@@ -67,15 +67,18 @@ private:
 
     enum class Sent : std::uint8_t { Yes, Declined };
 
-    [[nodiscard]] Ex<void> do_accept(std::span<const std::uint16_t> words) override;
-    [[nodiscard]] Ex<void> do_tick() override;
+    [[nodiscard]] Ex<void> do_accept(
+        std::span<const std::uint16_t> words,
+        CdDialectPorts& p
+    ) override;
+    [[nodiscard]] Ex<void> do_tick(CdDialectPorts& p) override;
 
-    [[nodiscard]] Ex<void> do_push_sector() override { return {}; }
+    [[nodiscard]] Ex<void> do_push_sector(CdDialectPorts&) override { return {}; }
 
-    [[nodiscard]] Ex<void> do_notify_disc(bool loaded) override;
+    [[nodiscard]] Ex<void> do_notify_disc(bool loaded, const svc::DiscGeometry& geom) override;
     void do_reset_machine() noexcept override;
-    bool do_streaming() const noexcept override;
-    DriveView do_drive_view() const noexcept override;
+    bool do_streaming(const svc::DiscGeometry& geom) const noexcept override;
+    DriveView do_drive_view(const svc::DiscGeometry& geom) const noexcept override;
 
     std::size_t do_command_word_count() const noexcept override { return 6; }
 
@@ -96,30 +99,48 @@ private:
         return static_cast<std::uint8_t>(speed_);
     }
 
-    [[nodiscard]] Ex<std::size_t> do_disc_descriptor(std::span<std::byte> out) override;
+    [[nodiscard]] Ex<std::size_t> do_disc_descriptor(
+        std::span<std::byte> out,
+        const svc::DiscGeometry& geom
+    ) override;
 
     void reset_status_() noexcept;
-    void command_exec_() noexcept;
-    void process_() noexcept;
-    void fill_position_(std::uint8_t code, std::uint8_t q, bool pause_msf) noexcept;
-    [[nodiscard]] Ex<void> update_();
-    [[nodiscard]] Ex<Sent> read_pass_();
-    [[nodiscard]] Ex<Sent> data_sector_send_(bool synth_header);
-    [[nodiscard]] Ex<Sent> audio_sector_send_();
-    [[nodiscard]] Ex<void> ring_sector_send_();
-    [[nodiscard]] Ex<void> send_mode_(std::uint16_t mode);
-    [[nodiscard]] bool take_header_() noexcept;
-    void prime_() noexcept;
-    void retrack_() noexcept;
+    void command_exec_(const svc::DiscGeometry& geom) noexcept;
+    void process_(const svc::DiscGeometry& geom) noexcept;
+    void fill_position_(
+        std::uint8_t code,
+        std::uint8_t q,
+        bool pause_msf,
+        const svc::DiscGeometry& geom
+    ) noexcept;
+    [[nodiscard]] Ex<void> update_(CdDialectPorts& p);
+    [[nodiscard]] Ex<Sent> read_pass_(CdDialectPorts& p);
+    [[nodiscard]] Ex<Sent> data_sector_send_(bool synth_header, CdDialectPorts& p);
+    [[nodiscard]] Ex<Sent> audio_sector_send_(CdDialectPorts& p);
+    [[nodiscard]] Ex<void> ring_sector_send_(CdDialectPorts& p);
+    [[nodiscard]] Ex<void> send_mode_(std::uint16_t mode, ICdLink& link);
+    [[nodiscard]] bool take_header_(const svc::DiscGeometry& geom) noexcept;
+    void prime_(const svc::DiscGeometry& geom) noexcept;
+    void retrack_(const svc::DiscGeometry& geom) noexcept;
 
-    [[nodiscard]] std::int32_t track_by_lba_(std::int32_t lba) const noexcept;
+    [[nodiscard]] std::int32_t track_by_lba_(
+        std::int32_t lba,
+        const svc::DiscGeometry& geom
+    ) const noexcept;
     [[nodiscard]] std::int32_t index_by_lba_(std::int32_t track, std::int32_t lba) const noexcept;
-    [[nodiscard]] std::int32_t offset_by_index_(std::int32_t tno, std::int32_t idx) const noexcept;
+    [[nodiscard]] std::int32_t offset_by_index_(
+        std::int32_t tno,
+        std::int32_t idx,
+        const svc::DiscGeometry& geom
+    ) const noexcept;
     [[nodiscard]] std::int32_t start_of_(std::int32_t track) const noexcept;
-    [[nodiscard]] bool is_data_(std::int32_t track) const noexcept;
-    [[nodiscard]] std::uint32_t sector_size_(std::int32_t track) const noexcept;
+    [[nodiscard]] bool is_data_(std::int32_t track, const svc::DiscGeometry& geom) const noexcept;
+    [[nodiscard]] std::uint32_t sector_size_(
+        std::int32_t track,
+        const svc::DiscGeometry& geom
+    ) const noexcept;
 
-    CdDialectPorts ports_;
+    CdDialectFacts facts_;
 
     ICoreWindow* window_;
     CdEngineStats stats_{};

@@ -59,9 +59,10 @@ struct DiscAnnounce {
         BlockSlots& slots,
         ILinkFrame& frame,
         SlotIndex slot,
-        FileSize size_bytes
+        FileSize size_bytes,
+        IBlockRoles& roles
     ) const {
-        if (auto r = slots.install_disc(slot, size_bytes); !r)
+        if (auto r = slots.install_disc(slot, size_bytes, roles); !r)
             return r;
         auto r = two_word_form(frame, slot, size_bytes);
         if (!r && r.error().code == Errc::negotiation && slot.v > kMaxAnnounceableSlot) {

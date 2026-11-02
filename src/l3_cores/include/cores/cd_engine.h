@@ -8,12 +8,10 @@
 #include <span>
 
 #include "cores/cd_cadence_gate.h"
+#include "cores/cd_link.h"
 #include "cores/cd_engine_stats.h"
-#include "cores/cd_flow_query.h"
 #include "cores/cd_profile.h"
-#include "cores/cd_sector_egress.h"
 #include "cores/cd_tick_periods.h"
-#include "cores/cd_transport.h"
 #include "cores/core_window.h"
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -21,6 +19,8 @@
 #include "svc/disc_read_service.h"
 
 namespace mister::cores {
+
+struct CdDialectPorts;
 
 class CdEngine {
     TASTY_SEAT_RESIDENT(RT);
@@ -38,9 +38,9 @@ public:
 
     [[nodiscard]] Ex<void> on_command_edge(std::uint8_t req);
 
-    [[nodiscard]] Ex<void> on_tick();
+    [[nodiscard]] Ex<void> on_tick(CdDialectPorts& p);
 
-    [[nodiscard]] Ex<void> push_sector();
+    [[nodiscard]] Ex<void> push_sector(CdDialectPorts& p);
 
     [[nodiscard]] Ex<void> reset();
 
@@ -58,7 +58,7 @@ public:
 
     bool command_wanted() const noexcept { return command_wanted_; }
 
-    [[nodiscard]] Ex<void> accept_command(std::span<const std::uint16_t> words);
+    [[nodiscard]] Ex<void> accept_command(std::span<const std::uint16_t> words, CdDialectPorts& p);
 
     void seed_edge_memo(std::uint8_t req) noexcept {
         last_req_ = req;
@@ -69,9 +69,9 @@ public:
 
     void set_region(bool region) noexcept { do_set_region(region); }
 
-    [[nodiscard]] Ex<void> notify_disc(bool loaded);
+    [[nodiscard]] Ex<void> notify_disc(bool loaded, const svc::DiscGeometry& geom);
 
-    bool streaming() const noexcept { return do_streaming(); }
+    bool streaming(const svc::DiscGeometry& geom) const noexcept { return do_streaming(geom); }
 
     CdEngineStats stats() const noexcept { return do_stats(); }
 
@@ -112,10 +112,15 @@ public:
         bool is_data = true;
     };
 
-    DriveView drive_view() const noexcept { return do_drive_view(); }
+    DriveView drive_view(const svc::DiscGeometry& geom) const noexcept {
+        return do_drive_view(geom);
+    }
 
-    [[nodiscard]] Ex<std::size_t> disc_descriptor(std::span<std::byte> out) {
-        return do_disc_descriptor(out);
+    [[nodiscard]] Ex<std::size_t> disc_descriptor(
+        std::span<std::byte> out,
+        const svc::DiscGeometry& geom
+    ) {
+        return do_disc_descriptor(out, geom);
     }
 
 protected:
@@ -123,14 +128,23 @@ protected:
         : cadence_(ticks, c),
           last_req_(req_seed) {}
 
+    [[nodiscard]] Ex<void> send_frame_words_(std::uint64_t frame, ICdLink& link) {
+        std::uint16_t words[kMaxStatusWords] = {};
+        const std::size_t n = status_words(frame, std::span<std::uint16_t, kMaxStatusWords>(words));
+        return link.send_status(std::span<const std::uint16_t>(words, n));
+    }
+
 private:
-    [[nodiscard]] virtual Ex<void> do_accept(std::span<const std::uint16_t> words) = 0;
-    [[nodiscard]] virtual Ex<void> do_tick() = 0;
-    [[nodiscard]] virtual Ex<void> do_push_sector() = 0;
-    [[nodiscard]] virtual Ex<void> do_notify_disc(bool loaded) = 0;
+    [[nodiscard]] virtual Ex<void> do_accept(
+        std::span<const std::uint16_t> words,
+        CdDialectPorts& p
+    ) = 0;
+    [[nodiscard]] virtual Ex<void> do_tick(CdDialectPorts& p) = 0;
+    [[nodiscard]] virtual Ex<void> do_push_sector(CdDialectPorts& p) = 0;
+    [[nodiscard]] virtual Ex<void> do_notify_disc(bool loaded, const svc::DiscGeometry& geom) = 0;
     virtual void do_reset_machine() noexcept = 0;
-    virtual bool do_streaming() const noexcept = 0;
-    virtual DriveView do_drive_view() const noexcept = 0;
+    virtual bool do_streaming(const svc::DiscGeometry& geom) const noexcept = 0;
+    virtual DriveView do_drive_view(const svc::DiscGeometry& geom) const noexcept = 0;
     virtual std::size_t do_command_word_count() const noexcept = 0;
     virtual std::optional<std::uint16_t> do_command_selector() const noexcept = 0;
     virtual void do_after_command_round() noexcept = 0;
@@ -145,7 +159,10 @@ private:
 
     virtual void do_set_region(bool) noexcept {}
 
-    [[nodiscard]] virtual Ex<std::size_t> do_disc_descriptor(std::span<std::byte>) {
+    [[nodiscard]] virtual Ex<std::size_t> do_disc_descriptor(
+        std::span<std::byte>,
+        const svc::DiscGeometry&
+    ) {
         return std::size_t{0};
     }
 
@@ -160,11 +177,7 @@ private:
 Ex<std::unique_ptr<CdEngine>> make_cd_engine(
     const CdProfile& profile,
     svc::DiscReadService& disc,
-    const svc::DiscGeometry& geom,
-    ICdTransport& transport,
     const os::IClock& clock,
-    ICdFlowQuery* flow,
-    ICdSectorEgress* egress = nullptr,
     ICoreWindow* window = nullptr
 );
 

@@ -4,6 +4,7 @@
 #include <memory>
 #include <span>
 
+#include "cores/cd_dialect_facts.h"
 #include "cores/cd_dialect_ports.h"
 #include "cores/pce_scsi_engine.h"
 #include "cores/saturn_cdd_engine.h"
@@ -17,24 +18,20 @@ namespace mister::cores {
 Ex<std::unique_ptr<CdEngine>> make_cd_engine(
     const CdProfile& profile,
     svc::DiscReadService& disc,
-    const svc::DiscGeometry& geom,
-    ICdTransport& transport,
     const os::IClock& clock,
-    ICdFlowQuery* flow,
-    ICdSectorEgress* egress,
     ICoreWindow* window
 ) {
-    const CdDialectPorts ports{profile, disc, geom, transport, infra::opt_ref_of(egress)};
+    const CdDialectFacts facts{profile, disc};
     switch (profile.dialect) {
         case CdDialect::SegaBcdNibble:
-            return std::unique_ptr<CdEngine>(std::make_unique<SegaCddEngine>(ports, clock, flow));
+            return std::unique_ptr<CdEngine>(std::make_unique<SegaCddEngine>(facts, clock));
         case CdDialect::PceScsi:
-            return std::unique_ptr<CdEngine>(std::make_unique<PceScsiEngine>(ports, clock));
+            return std::unique_ptr<CdEngine>(std::make_unique<PceScsiEngine>(facts, clock));
         case CdDialect::ThreeDo:
-            return std::unique_ptr<CdEngine>(std::make_unique<ThreeDoCddEngine>(ports, clock));
+            return std::unique_ptr<CdEngine>(std::make_unique<ThreeDoCddEngine>(facts, clock));
         case CdDialect::SaturnRing:
             return std::unique_ptr<CdEngine>(
-                std::make_unique<SaturnCddEngine>(ports, clock, window)
+                std::make_unique<SaturnCddEngine>(facts, clock, window)
             );
 
         case CdDialect::SectorServed:
@@ -56,7 +53,7 @@ Ex<void> CdEngine::on_command_edge(std::uint8_t req) {
     return {};
 }
 
-Ex<void> CdEngine::accept_command(std::span<const std::uint16_t> words) {
+Ex<void> CdEngine::accept_command(std::span<const std::uint16_t> words, CdDialectPorts& p) {
     if (!command_wanted_) {
 
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
@@ -67,21 +64,21 @@ Ex<void> CdEngine::accept_command(std::span<const std::uint16_t> words) {
             Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(words.size())}
         );
     }
-    return do_accept(words);
+    return do_accept(words, p);
 }
 
-Ex<void> CdEngine::on_tick() {
+Ex<void> CdEngine::on_tick(CdDialectPorts& p) {
 
-    const bool active = streaming();
+    const bool active = streaming(p.geom);
 
     if (!cadence_.admit(active, do_speed_index()))
         return {};
-    return do_tick();
+    return do_tick(p);
 }
 
-Ex<void> CdEngine::push_sector() {
+Ex<void> CdEngine::push_sector(CdDialectPorts& p) {
 
-    return do_push_sector();
+    return do_push_sector(p);
 }
 
 Ex<void> CdEngine::reset() {
@@ -98,8 +95,8 @@ bool CdEngine::apply_pending_reset() noexcept {
     return true;
 }
 
-Ex<void> CdEngine::notify_disc(bool loaded) {
-    return do_notify_disc(loaded);
+Ex<void> CdEngine::notify_disc(bool loaded, const svc::DiscGeometry& geom) {
+    return do_notify_disc(loaded, geom);
 }
 
 }

@@ -10,6 +10,7 @@
 
 #include "app/config_apply.h"
 
+#include "app/core_block_roles.h"
 #include "app/core_init.h"
 
 #include "svc/chd_prefetch.h"
@@ -29,6 +30,7 @@
 #include "app/cheat_apply.h"
 #include "app/encoder_roles.h"
 #include "proto/image_bracket.h"
+#include "proto/no_block_roles.h"
 #include "proto/osd_surface.h"
 
 #include <fcntl.h>
@@ -1087,7 +1089,9 @@ Ex<void> LinkSession::detach() {
 
     tenancy_.drop(t0, slot_bindings_.channel_borrows());
     slot_bindings_.forget_channel_borrows();
-    (void)slot_bindings_.slots().install_completions();
+
+    proto::NoBlockRoles none;
+    (void)slot_bindings_.slots().install_completions(none);
     tenancy_.settle_retire(CoreTenancy::RetireEnd::Poll);
 
     session_ = proto::CoreSession(link_, fenced_signals_, &binder_.fio_queue());
@@ -1104,7 +1108,15 @@ void LinkSession::settle_boot_slot_mount() noexcept {
 }
 
 void LinkSession::reap_storage() noexcept {
-    (void)slot_bindings_.slots().install_completions();
+
+    const infra::OptRef<cores::Core> live = tenancy_.core();
+    if (live.has_value()) {
+        CoreBlockRoles roles{*live};
+        (void)slot_bindings_.slots().install_completions(roles);
+    } else {
+        proto::NoBlockRoles none;
+        (void)slot_bindings_.slots().install_completions(none);
+    }
     tenancy_.settle_retire(CoreTenancy::RetireEnd::Round);
     slot_bindings_.settle(tenancy_.core());
 }

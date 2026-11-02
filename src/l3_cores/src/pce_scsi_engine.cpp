@@ -84,7 +84,7 @@ constexpr Msf8 lba_to_msf_rel(std::int32_t lba) noexcept {
 
 }
 
-Ex<void> PceScsiEngine::do_notify_disc(bool loaded) {
+Ex<void> PceScsiEngine::do_notify_disc(bool loaded, const svc::DiscGeometry&) {
 
     st_.loaded = loaded;
     st_.state = loaded ? kPceStateIdle : kPceStateNoDisc;
@@ -93,16 +93,16 @@ Ex<void> PceScsiEngine::do_notify_disc(bool loaded) {
     return {};
 }
 
-bool PceScsiEngine::do_streaming() const noexcept {
+bool PceScsiEngine::do_streaming(const svc::DiscGeometry&) const noexcept {
 
     return st_.latency == 0 && st_.state == kPceStateRead;
 }
 
-Ex<void> PceScsiEngine::do_push_sector() {
-    if (st_.state != kPceStateRead || st_.latency != 0 || st_.track >= ports_.geom.toc.last) {
+Ex<void> PceScsiEngine::do_push_sector(CdDialectPorts& p) {
+    if (st_.state != kPceStateRead || st_.latency != 0 || st_.track >= p.geom.toc.last) {
         return {};
     }
-    return read_send_();
+    return read_send_(p);
 }
 
 std::size_t PceScsiEngine::do_status_words(
@@ -115,7 +115,7 @@ std::size_t PceScsiEngine::do_status_words(
     return 2;
 }
 
-Ex<void> PceScsiEngine::do_accept(std::span<const std::uint16_t> w) {
+Ex<void> PceScsiEngine::do_accept(std::span<const std::uint16_t> w, CdDialectPorts& p) {
 
     switch (w[6] & 0xFFu) {
         case 0:
@@ -124,10 +124,10 @@ Ex<void> PceScsiEngine::do_accept(std::span<const std::uint16_t> w) {
                 st_.comm[2 * i] = static_cast<std::uint8_t>(w[i] & 0xFFu);
                 st_.comm[2 * i + 1] = static_cast<std::uint8_t>(w[i] >> 8);
             }
-            return command_exec_();
+            return command_exec_(p);
         case 1:
 
-            return send_status_(0);
+            return send_status_(0, p.link);
         case 2:
             st_.can_read_next = true;
             break;
@@ -138,46 +138,52 @@ Ex<void> PceScsiEngine::do_accept(std::span<const std::uint16_t> w) {
     return {};
 }
 
-Ex<void> PceScsiEngine::send_status_(std::uint16_t status) {
+Ex<void> PceScsiEngine::send_status_(std::uint16_t status, ICdLink& link) {
     const auto w = cdwire::pce_set_words(status, st_.region, false);
-    return ports_.tx.send_status(
-        static_cast<std::uint64_t>(w[0]) | (static_cast<std::uint64_t>(w[1]) << 16)
+    return send_frame_words_(
+        static_cast<std::uint64_t>(w[0]) | (static_cast<std::uint64_t>(w[1]) << 16),
+        link
     );
 }
 
-Ex<void> PceScsiEngine::send_data_request_() {
+Ex<void> PceScsiEngine::send_data_request_(ICdLink& link) {
     const auto w = cdwire::pce_set_words(0, st_.region, true);
-    return ports_.tx.send_status(
-        static_cast<std::uint64_t>(w[0]) | (static_cast<std::uint64_t>(w[1]) << 16)
+    return send_frame_words_(
+        static_cast<std::uint64_t>(w[0]) | (static_cast<std::uint64_t>(w[1]) << 16),
+        link
     );
 }
 
-std::uint32_t PceScsiEngine::track_by_lba_(std::int32_t lba) const {
-    return track_scan(ports_.geom.toc, lba);
+std::uint32_t PceScsiEngine::track_by_lba_(std::int32_t lba, const svc::DiscGeometry& geom) const {
+    return track_scan(geom.toc, lba);
 }
 
-std::uint32_t PceScsiEngine::seek_ticks_(std::int32_t from, std::int32_t to) const {
+std::uint32_t PceScsiEngine::seek_ticks_(
+    std::int32_t from,
+    std::int32_t to,
+    const svc::DiscGeometry& geom
+) const {
 
     if (from < 0 || to < 0)
         return 0;
-    const std::uint32_t ms = ports_.geom.seek_ms(
+    const std::uint32_t ms = geom.seek_ms(
         Lba{static_cast<std::uint32_t>(from)},
         Lba{static_cast<std::uint32_t>(to)}
     );
     return static_cast<std::uint32_t>(static_cast<float>(ms) / 13.33f);
 }
 
-Ex<bool> PceScsiEngine::drain_pending() {
+Ex<bool> PceScsiEngine::drain_pending(ICdLink& link) {
 
     auto& m = st_;
     if (m.has_status && m.latency == 0) {
-        if (auto r = send_status_(m.stat); !r)
+        if (auto r = send_status_(m.stat, link); !r)
             return std::unexpected(r.error());
         m.has_status = false;
         return true;
     }
     if (m.data_req && m.latency == 0) {
-        if (auto r = send_data_request_(); !r)
+        if (auto r = send_data_request_(link); !r)
             return std::unexpected(r.error());
         m.data_req = false;
         return true;
@@ -185,22 +191,26 @@ Ex<bool> PceScsiEngine::drain_pending() {
     return false;
 }
 
-Ex<void> PceScsiEngine::do_tick() {
+Ex<void> PceScsiEngine::do_tick(CdDialectPorts& p) {
 
-    if (auto r = drain_pending(); !r)
+    if (auto r = drain_pending(p.link); !r)
         return std::unexpected(r.error());
-    return update_();
+    return update_(p);
 }
 
-void PceScsiEngine::hint_at_(std::int32_t lba, bool doubled) noexcept {
+void PceScsiEngine::hint_at_(
+    std::int32_t lba,
+    bool doubled,
+    const svc::DiscGeometry& geom
+) noexcept {
     if (lba < 0)
         return;
-    const svc::Toc& toc = ports_.geom.toc;
-    const std::uint32_t tr = track_by_lba_(lba);
+    const svc::Toc& toc = geom.toc;
+    const std::uint32_t tr = track_by_lba_(lba, geom);
     const bool data = tr < toc.last && toc.tracks[tr].type != TrackType::Cdda;
 
     prime_head(
-        ports_.disc,
+        facts_.disc,
         lba,
         {.form = data ? svc::DiscForm::UserData : svc::DiscForm::RawFrame,
          .pair = doubled && !data,
@@ -208,20 +218,20 @@ void PceScsiEngine::hint_at_(std::int32_t lba, bool doubled) noexcept {
     );
 }
 
-void PceScsiEngine::build_subcode_frame_(std::int32_t lba) {
+void PceScsiEngine::build_subcode_frame_(std::int32_t lba, const svc::DiscGeometry& geom) {
 
     auto& m = st_;
     if (lba != m.subc_lba && m.latency == 0) {
         bool have = false;
         if (lba >= 0) {
             const Lba at{static_cast<std::uint32_t>(lba)};
-            have = ports_.disc.take(
+            have = facts_.disc.take(
                        svc::DiscForm::Subcode,
                        at,
                        std::as_writable_bytes(std::span(m.subc, kSubBytes))
                    )
                 != 0;
-            ports_.disc.hint(svc::DiscForm::Subcode, Lba{at.v + 1});
+            facts_.disc.hint(svc::DiscForm::Subcode, Lba{at.v + 1});
         }
         if (!have) {
             if (lba >= 0)
@@ -232,7 +242,7 @@ void PceScsiEngine::build_subcode_frame_(std::int32_t lba) {
             m.subc[12] = 1;
             m.subc[13] = bcd(m.track + 1);
             m.subc[14] = 1;
-            const svc::Toc& toc = ports_.geom.toc;
+            const svc::Toc& toc = geom.toc;
 
             const auto base = static_cast<std::int32_t>(toc.tracks[m.track].start.v);
 
@@ -266,14 +276,14 @@ void PceScsiEngine::build_subcode_frame_(std::int32_t lba) {
         sub_buf_[4 + i] = il[i];
 }
 
-Ex<void> PceScsiEngine::read_send_() {
+Ex<void> PceScsiEngine::read_send_(CdDialectPorts& p) {
 
     auto& m = st_;
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = p.geom.toc;
     if (!m.can_read_next)
         return {};
 
-    if (ports_.egress_busy()) {
+    if (p.egress_busy()) {
         ++stats_.busy_ticks;
         return {};
     }
@@ -285,7 +295,7 @@ Ex<void> PceScsiEngine::read_send_() {
         sec_buf_[1] = 0x08 | 0x80;
         if (m.lba >= 0) {
             const Lba at{static_cast<std::uint32_t>(m.lba)};
-            if (ports_.disc.take(
+            if (facts_.disc.take(
                     svc::DiscForm::UserData,
                     at,
                     std::as_writable_bytes(std::span(sec_buf_ + 2, kUserData))
@@ -293,13 +303,9 @@ Ex<void> PceScsiEngine::read_send_() {
                 == 0) {
                 ++stats_.substitutes;
             }
-            ports_.disc.hint(svc::DiscForm::UserData, Lba{at.v + 1});
+            facts_.disc.hint(svc::DiscForm::UserData, Lba{at.v + 1});
         }
-        if (auto r = send_frame(
-                ports_.tx,
-                ports_.profile.io.data,
-                std::span(sec_buf_, kUserData + 2)
-            );
+        if (auto r = send_frame(p.link, facts_.profile.io.data, std::span(sec_buf_, kUserData + 2));
             !r) {
             return r;
         }
@@ -322,26 +328,26 @@ Ex<void> PceScsiEngine::read_send_() {
     return {};
 }
 
-void PceScsiEngine::pump_pipeline_() noexcept {
+void PceScsiEngine::pump_pipeline_(const svc::DiscGeometry& geom) noexcept {
     auto& m = st_;
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = geom.toc;
     if (toc.last == 0 || m.lba < 0)
         return;
-    const std::uint32_t tr = track_by_lba_(m.lba);
+    const std::uint32_t tr = track_by_lba_(m.lba, geom);
     const bool data = tr < toc.last && toc.tracks[tr].type != TrackType::Cdda;
 
     prime_head(
-        ports_.disc,
+        facts_.disc,
         m.lba,
         {.form = data ? svc::DiscForm::UserData : svc::DiscForm::RawFrame, .subcode = true}
     );
 }
 
-Ex<void> PceScsiEngine::update_() {
+Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
     auto& m = st_;
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = p.geom.toc;
 
-    pump_pipeline_();
+    pump_pipeline_(p.geom);
 
     m.subq[0] = 0x0A;
     m.subq[1] = 0x00 | 0x80;
@@ -377,7 +383,7 @@ Ex<void> PceScsiEngine::update_() {
             m.state = kPceStateIdle;
             return {};
         }
-        return read_send_();
+        return read_send_(p);
     }
     if (m.state == kPceStatePlay) {
         bool skip = false;
@@ -387,12 +393,12 @@ Ex<void> PceScsiEngine::update_() {
         } else if (m.audio_delay > 0) {
             --m.audio_delay;
             skip = true;
-        } else if (ports_.egress_busy()) {
+        } else if (p.egress_busy()) {
             ++stats_.busy_ticks;
             skip = true;
         }
         if (!skip) {
-            m.track = track_by_lba_(m.lba);
+            m.track = track_by_lba_(m.lba, p.geom);
 
             const std::uint8_t rounds = m.cdda_first;
             for (std::uint8_t i = 0; i <= rounds; ++i) {
@@ -402,7 +408,7 @@ Ex<void> PceScsiEngine::update_() {
                     sec_buf_[1] = 0x09;
                     if (m.lba >= 0) {
                         const Lba at{static_cast<std::uint32_t>(m.lba)};
-                        if (ports_.disc.take(
+                        if (facts_.disc.take(
                                 svc::DiscForm::RawFrame,
                                 at,
                                 std::as_writable_bytes(std::span(sec_buf_ + 2, kRawFrame))
@@ -410,21 +416,21 @@ Ex<void> PceScsiEngine::update_() {
                             == 0) {
                             ++stats_.substitutes;
                         }
-                        ports_.disc.hint(svc::DiscForm::RawFrame, Lba{at.v + 1});
+                        facts_.disc.hint(svc::DiscForm::RawFrame, Lba{at.v + 1});
                     }
                     if (auto r = send_frame(
-                            ports_.tx,
-                            ports_.profile.io.cdda,
+                            p.link,
+                            facts_.profile.io.cdda,
                             std::span(sec_buf_, kRawFrame + 2)
                         );
                         !r) {
                         return r;
                     }
                     ++stats_.cdda_sectors;
-                    build_subcode_frame_(m.lba);
+                    build_subcode_frame_(m.lba, p.geom);
                     if (auto r = send_frame(
-                            ports_.tx,
-                            ports_.profile.io.subcode,
+                            p.link,
+                            facts_.profile.io.subcode,
                             std::span(sub_buf_, 100)
                         );
                         !r) {
@@ -440,12 +446,12 @@ Ex<void> PceScsiEngine::update_() {
             if (past_end || data_hit || m.track > toc.last) {
                 if (m.cdda_mode == kPceCddaModeLoop) {
                     m.lba = m.cdda.start();
-                    hint_at_(m.lba);
+                    hint_at_(m.lba, false, p.geom);
                 } else {
                     m.state = kPceStateIdle;
                 }
                 if (m.int_pend) {
-                    if (auto r = send_status_(kPceStatusGood); !r)
+                    if (auto r = send_status_(kPceStatusGood, p.link); !r)
                         return r;
                 }
                 m.int_pend = false;
@@ -459,9 +465,8 @@ Ex<void> PceScsiEngine::update_() {
         subq_send = m.subq_pend;
         m.subq_pend = false;
 
-        build_subcode_frame_(m.lba);
-        if (auto r = send_frame(ports_.tx, ports_.profile.io.subcode, std::span(sub_buf_, 100));
-            !r) {
+        build_subcode_frame_(m.lba, p.geom);
+        if (auto r = send_frame(p.link, facts_.profile.io.subcode, std::span(sub_buf_, 100)); !r) {
             return r;
         }
         if (m.latency > 0)
@@ -473,10 +478,10 @@ Ex<void> PceScsiEngine::update_() {
 
     if (subq_send) {
 
-        if (auto r = send_frame(ports_.tx, ports_.profile.io.data, std::span(m.subq, 12)); !r) {
+        if (auto r = send_frame(p.link, facts_.profile.io.data, std::span(m.subq, 12)); !r) {
             return r;
         }
-        return send_status_(kPceStatusGood);
+        return send_status_(kPceStatusGood, p.link);
     }
     return {};
 }
@@ -500,10 +505,10 @@ void PceScsiEngine::do_reset_machine() noexcept {
     m.stat = 0;
 }
 
-Ex<void> PceScsiEngine::command_exec_() {
+Ex<void> PceScsiEngine::command_exec_(CdDialectPorts& p) {
 
     auto& m = st_;
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = p.geom.toc;
     m.int_pend = false;
 
     const auto decode_target = [&](bool clamp_track) -> std::int32_t {
@@ -544,9 +549,9 @@ Ex<void> PceScsiEngine::command_exec_() {
         case kPceCommTestUnit:
             if (m.state == kPceStateNoDisc) {
                 m.sense.raise(kSenseNotReady, kNseNoDisc);
-                return send_status_(kPceStatusCheckCond);
+                return send_status_(kPceStatusCheckCond, p.link);
             }
-            return send_status_(kPceStatusGood);
+            return send_status_(kPceStatusGood, p.link);
 
         case kPceCommRequestSense: {
 
@@ -560,10 +565,10 @@ Ex<void> PceScsiEngine::command_exec_() {
             buf[14] = sense.asc;
             buf[15] = sense.ascq;
             buf[16] = sense.fru;
-            if (auto r = send_frame(ports_.tx, ports_.profile.io.data, std::span(buf, 20)); !r) {
+            if (auto r = send_frame(p.link, facts_.profile.io.data, std::span(buf, 20)); !r) {
                 return r;
             }
-            return send_status_(kPceStatusGood);
+            return send_status_(kPceStatusGood, p.link);
         }
 
         case kPceCommGetDirInfo: {
@@ -604,10 +609,10 @@ Ex<void> PceScsiEngine::command_exec_() {
                     buf[5] = 0;
                     break;
             }
-            if (auto r = send_frame(ports_.tx, ports_.profile.io.data, std::span(buf, 6)); !r) {
+            if (auto r = send_frame(p.link, facts_.profile.io.data, std::span(buf, 6)); !r) {
                 return r;
             }
-            return send_status_(kPceStatusGood);
+            return send_status_(kPceStatusGood, p.link);
         }
 
         case kPceCommRead6: {
@@ -618,10 +623,10 @@ Ex<void> PceScsiEngine::command_exec_() {
                 & 0x1FFFFFu
             );
             const std::uint32_t cnt = m.comm[4] ? m.comm[4] : 256u;
-            m.track = track_by_lba_(new_lba);
+            m.track = track_by_lba_(new_lba, p.geom);
 
             bool matched = false;
-            for (const auto& fp : ports_.profile.seek_fast_paths) {
+            for (const auto& fp : facts_.profile.seek_fast_paths) {
                 if (m.lba == new_lba && cnt == fp.count) {
                     m.latency = fp.latency_ticks;
                     matched = true;
@@ -632,12 +637,12 @@ Ex<void> PceScsiEngine::command_exec_() {
                 if (m.comm[13] & 0x80u) {
                     m.latency = 0;
                 } else {
-                    m.latency = seek_ticks_(m.lba, new_lba);
+                    m.latency = seek_ticks_(m.lba, new_lba, p.geom);
                     m.audio_delay = 0;
                 }
             }
             m.lba = new_lba;
-            hint_at_(m.lba);
+            hint_at_(m.lba, false, p.geom);
             m.cnt = cnt;
             m.can_read_next = true;
             m.state = kPceStateRead;
@@ -648,7 +653,7 @@ Ex<void> PceScsiEngine::command_exec_() {
             if (m.comm[4]) {
                 m.data_req = true;
             } else {
-                return send_status_(kPceStatusGood);
+                return send_status_(kPceStatusGood, p.link);
             }
             break;
 
@@ -659,7 +664,7 @@ Ex<void> PceScsiEngine::command_exec_() {
                 m.audio_delay = 0;
             } else {
 
-                const std::uint32_t seek = seek_ticks_(m.lba, new_lba);
+                const std::uint32_t seek = seek_ticks_(m.lba, new_lba, p.geom);
                 m.audio_delay = static_cast<std::uint32_t>(220.0f / 13.33f);
                 if (seek > m.audio_delay) {
                     m.latency = seek - m.audio_delay;
@@ -669,8 +674,8 @@ Ex<void> PceScsiEngine::command_exec_() {
                 }
             }
             m.lba = new_lba;
-            hint_at_(m.lba, true);
-            m.track = track_by_lba_(new_lba);
+            hint_at_(m.lba, true, p.geom);
+            m.track = track_by_lba_(new_lba, p.geom);
             m.cdda.play(new_lba, static_cast<std::int32_t>(toc.end.v));
             m.cdda_mode = m.comm[1];
             m.cdda_first = 1;
@@ -688,14 +693,14 @@ Ex<void> PceScsiEngine::command_exec_() {
             if (m.cdda_mode == kPceCddaModeInterrupt) {
                 m.int_pend = true;
             } else {
-                return send_status_(kPceStatusGood);
+                return send_status_(kPceStatusGood, p.link);
             }
             break;
         }
 
         case kPceCommPause:
             m.state = kPceStatePause;
-            return send_status_(kPceStatusGood);
+            return send_status_(kPceStatusGood, p.link);
 
         case kPceCommReadSubq:
             m.subq_pend = true;
@@ -704,7 +709,7 @@ Ex<void> PceScsiEngine::command_exec_() {
         default:
             m.sense.raise(kSenseIllegalRequest, kNseInvalidCommand);
             m.has_status = false;
-            return send_status_(kPceStatusCheckCond);
+            return send_status_(kPceStatusCheckCond, p.link);
     }
     return {};
 }

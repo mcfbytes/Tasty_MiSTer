@@ -294,6 +294,9 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/switch_park.h
   app/quiesce_ack.h
   app/core_switch.h
+  app/core_block_roles.h
+  app/core_block_row.h
+  app/save_channel_roles.h
   app/slot_bindings.h
   app/core_tenancy.h
   app/held_transfer.h

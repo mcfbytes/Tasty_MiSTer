@@ -138,7 +138,10 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/boot_ladder.h
   cores/button_override.h
   cores/cd_census_rows.h
+  cores/cd_command_round.h
+  cores/cd_command_words.h
   cores/cd_core.h
+  cores/cd_dialect_facts.h
   cores/cd_dialect_ports.h
   cores/cd_diagnostics.h
   cores/cd_cadence_gate.h
@@ -147,13 +150,14 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/cd_engine.h
   cores/cd_engine_stats.h
   cores/cd_flow.h
-  cores/cd_flow_query.h
   cores/cd_head_prime.h
   cores/cd_io_indices.h
+  cores/cd_link.h
   cores/cd_profile.h
+  cores/cd_sector_act.h
   cores/cd_service_rows.h
   cores/cd_tick_periods.h
-  cores/cd_transport.h
+  cores/cd_wire_link.h
   cores/cd_wire_port.h
   cores/ladder_context.h
   cores/ladder_host.h

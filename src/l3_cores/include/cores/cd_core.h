@@ -13,11 +13,8 @@
 #include "cores/cd_engine.h"
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_flow.h"
-#include "cores/cd_flow_query.h"
 #include "cores/cd_profile.h"
-#include "cores/cd_sector_egress.h"
 #include "cores/cd_service_rows.h"
-#include "cores/cd_transport.h"
 #include "cores/core_support.h"
 #include "cores/stream_load.h"
 #include "cores/stream_tx_record.h"
@@ -30,7 +27,7 @@
 
 namespace mister::cores {
 
-class CdCore : public Core, public IStreamLoad {
+class CdCore : public Core, public IStreamLoad, public IStagingCore, public ICdServiceRows {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
@@ -50,11 +47,32 @@ public:
 
     [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return drive_.geometry(); }
 
-    ICdTransport& transport() noexcept { return drive_.transport(); }
+    [[nodiscard]] MountState mount_disc(std::string_view path) override;
 
-    void service_command_edge() noexcept { drive_.service_command_edge(); }
+    void set_region(std::uint8_t region) override {
+        TASTY_SEAT_BODY(CdCore);
+        drive_.set_region(region);
+    }
 
-    void service_tick() noexcept { drive_.service_tick(); }
+    [[nodiscard]] Ex<void> deferred_reset() override {
+        TASTY_SEAT_BODY(CdCore);
+        return drive_.deferred_reset();
+    }
+
+    [[nodiscard]] Ex<void> stage_disc_payload(const proto::LinkOp::StageDiscPayload& op) override {
+        TASTY_SEAT_BODY(CdCore);
+        return drive_.stage_disc_payload(op, image_sink());
+    }
+
+    void service_command_edge() noexcept override {
+        TASTY_SEAT_BODY(CdCore);
+        drive_.service_command_edge(image_sink());
+    }
+
+    void service_tick() noexcept override {
+        TASTY_SEAT_BODY(CdCore);
+        drive_.service_tick(image_sink());
+    }
 
     std::uint32_t wire_faults() const noexcept { return drive_.wire_faults(); }
 
@@ -67,9 +85,9 @@ private:
 
     [[nodiscard]] Ex<void> do_reset() override { return drive_.reset(); }
 
-    [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return &drive_; }
+    [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return this; }
 
-    [[nodiscard]] ICdServiceRows* on_cd_service_rows() noexcept override { return &drive_; }
+    [[nodiscard]] ICdServiceRows* on_cd_service_rows() noexcept override { return this; }
 
     [[nodiscard]] const ICdDiagnostics* on_cd_diagnostics() const noexcept override {
         return &drive_;

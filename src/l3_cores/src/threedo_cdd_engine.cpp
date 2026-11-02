@@ -45,17 +45,17 @@ constexpr std::int32_t blocks_from_command(std::span<const std::uint8_t, 8> c) n
 
 }
 
-Ex<void> ThreeDoCddEngine::do_accept(std::span<const std::uint16_t> words) {
+Ex<void> ThreeDoCddEngine::do_accept(std::span<const std::uint16_t> words, CdDialectPorts& p) {
 
     for (std::size_t i = 0; i < 4; ++i) {
         comm_[2 * i] = static_cast<std::uint8_t>(words[i] & 0xFFu);
         comm_[2 * i + 1] = static_cast<std::uint8_t>(words[i] >> 8);
     }
-    command_exec_();
+    command_exec_(p.geom);
     return {};
 }
 
-void ThreeDoCddEngine::command_exec_() {
+void ThreeDoCddEngine::command_exec_(const svc::DiscGeometry& geom) {
     const std::span<const std::uint8_t, 8> c{comm_};
     const std::int32_t cmd_lba = lba_from_command(c);
     const std::int32_t cmd_blocks = blocks_from_command(c);
@@ -64,8 +64,8 @@ void ThreeDoCddEngine::command_exec_() {
             break;
         case kCommRead:
             lba_ = cmd_lba - kRedBookPregap;
-            hint_at_(lba_);
-            track_ = track_by_lba_(lba_);
+            hint_at_(lba_, geom);
+            track_ = track_by_lba_(lba_, geom);
             read_pend_ = true;
             block_reads_ = cmd_blocks;
             break;
@@ -80,11 +80,11 @@ void ThreeDoCddEngine::command_exec_() {
     }
 }
 
-Ex<void> ThreeDoCddEngine::do_tick() {
+Ex<void> ThreeDoCddEngine::do_tick(CdDialectPorts& p) {
 
-    if (read_pend_ && ports_.egress_busy()) {
+    if (read_pend_ && p.egress_busy()) {
         ++stats_.busy_ticks;
-        return ports_.tx.send_status(0);
+        return send_frame_words_(0, p.link);
     }
     if (read_pend_) {
         state_ = State::Read;
@@ -92,17 +92,17 @@ Ex<void> ThreeDoCddEngine::do_tick() {
     } else {
         state_ = State::Idle;
     }
-    if (auto r = ports_.tx.send_status(0); !r)
+    if (auto r = send_frame_words_(0, p.link); !r)
         return r;
-    return update_();
+    return update_(p);
 }
 
-Ex<void> ThreeDoCddEngine::update_() {
-    const svc::Toc& toc = ports_.geom.toc;
+Ex<void> ThreeDoCddEngine::update_(CdDialectPorts& p) {
+    const svc::Toc& toc = p.geom.toc;
     if (state_ != State::Read) {
 
         if (state_ != State::Open)
-            track_ = track_by_lba_(lba_);
+            track_ = track_by_lba_(lba_, p.geom);
         ++stats_.idle_ticks;
         return {};
     }
@@ -122,21 +122,24 @@ Ex<void> ThreeDoCddEngine::update_() {
             header[13] = bcd(msf.s);
             header[14] = bcd(msf.f);
             header[15] = static_cast<std::uint8_t>(tk.type != svc::TrackType::Cdda);
-            sent = data_sector_send_(std::span<const std::uint8_t>(header));
+            sent = data_sector_send_(std::span<const std::uint8_t>(header), p);
         } else {
-            sent = data_sector_send_({});
+            sent = data_sector_send_({}, p);
         }
     }
 
     ++lba_;
-    track_ = track_by_lba_(lba_);
+    track_ = track_by_lba_(lba_, p.geom);
     --block_reads_;
     return sent;
 }
 
-Ex<void> ThreeDoCddEngine::data_sector_send_(std::span<const std::uint8_t> header) {
+Ex<void> ThreeDoCddEngine::data_sector_send_(
+    std::span<const std::uint8_t> header,
+    CdDialectPorts& p
+) {
 
-    read_data_();
+    read_data_(p.geom);
     if (!header.empty())
         std::memcpy(sec_buf_, header.data(), header.size());
 
@@ -148,67 +151,73 @@ Ex<void> ThreeDoCddEngine::data_sector_send_(std::span<const std::uint8_t> heade
     sec_buf_[kHeaderBytes + kUserData + 1] = static_cast<std::uint8_t>(crc >> 8);
 
     ++stats_.data_sectors;
-    return ports_.tx.send_data(
-        ports_.profile.io.data,
+    return p.link.send_data(
+        facts_.profile.io.data,
         std::as_bytes(
             std::span<const std::uint8_t>(sec_buf_ + kHeaderBytes, kUserData + kChecksumBytes)
         )
     );
 }
 
-void ThreeDoCddEngine::hint_at_(std::int32_t lba) noexcept {
+void ThreeDoCddEngine::hint_at_(std::int32_t lba, const svc::DiscGeometry& geom) noexcept {
     if (lba < 0)
         return;
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = geom.toc;
 
     prime_head(
-        ports_.disc,
+        facts_.disc,
         lba,
         {.form = toc.sector_size == kUserData ? svc::DiscForm::UserData : svc::DiscForm::RawFrame}
     );
 }
 
-void ThreeDoCddEngine::read_data_() {
+void ThreeDoCddEngine::read_data_(const svc::DiscGeometry& geom) {
 
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = geom.toc;
     if (track_ >= toc.last || toc.tracks[track_].type != svc::TrackType::Mode1)
         return;
     const svc::Lba at{static_cast<std::uint32_t>(lba_ > 0 ? lba_ : 0)};
 
     const bool got = toc.sector_size == kUserData
-        ? ports_.disc.take(
+        ? facts_.disc.take(
               svc::DiscForm::UserData,
               at,
               std::as_writable_bytes(std::span<std::uint8_t>(sec_buf_ + kHeaderBytes, kUserData))
           ) != 0
-        : ports_.disc.take(
+        : facts_.disc.take(
               svc::DiscForm::RawFrame,
               at,
               std::as_writable_bytes(std::span<std::uint8_t>(sec_buf_, kRawFrame))
           ) != 0;
     if (!got)
         ++stats_.substitutes;
-    ports_.disc.hint(
+    facts_.disc.hint(
         toc.sector_size == kUserData ? svc::DiscForm::UserData : svc::DiscForm::RawFrame,
         svc::Lba{at.v + 1}
     );
 }
 
-std::uint32_t ThreeDoCddEngine::track_by_lba_(std::int32_t lba) const noexcept {
+std::uint32_t ThreeDoCddEngine::track_by_lba_(
+    std::int32_t lba,
+    const svc::DiscGeometry& geom
+) const noexcept {
 
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = geom.toc;
     std::uint32_t i = 0;
     while (i < toc.last && static_cast<std::int64_t>(toc.tracks[i].end.v) <= lba)
         ++i;
     return i;
 }
 
-Ex<void> ThreeDoCddEngine::build_disc_info(std::span<std::byte, kDiscInfoBytes> out) {
+Ex<void> ThreeDoCddEngine::build_disc_info(
+    std::span<std::byte, kDiscInfoBytes> out,
+    const svc::DiscGeometry& geom
+) {
 
-    if (!ports_.geom.mounted)
+    if (!geom.mounted)
         return std::unexpected(Error{Errc::core_load, ERR_SITE(), 0});
 
-    const svc::Toc& toc = ports_.geom.toc;
+    const svc::Toc& toc = geom.toc;
     std::memset(out.data(), 0x00, out.size());
     auto* b = infra::byte_cast<std::uint8_t>(out).data();
 
@@ -234,33 +243,36 @@ Ex<void> ThreeDoCddEngine::build_disc_info(std::span<std::byte, kDiscInfoBytes> 
     }
 
     lba_ = 0;
-    hint_at_(lba_);
-    read_data_();
+    hint_at_(lba_, geom);
+    read_data_(geom);
     std::memcpy(b + kInfoTailOffset, sec_buf_, kInfoTailBytes);
     return {};
 }
 
-Ex<std::size_t> ThreeDoCddEngine::do_disc_descriptor(std::span<std::byte> out) {
+Ex<std::size_t> ThreeDoCddEngine::do_disc_descriptor(
+    std::span<std::byte> out,
+    const svc::DiscGeometry& geom
+) {
     if (out.size() < kDiscInfoBytes) {
         return std::unexpected(Error{Errc::core_load, ERR_SITE(), 1});
     }
-    if (auto r = build_disc_info(out.subspan<0, kDiscInfoBytes>()); !r) {
+    if (auto r = build_disc_info(out.subspan<0, kDiscInfoBytes>(), geom); !r) {
         return std::unexpected(r.error());
     }
     return kDiscInfoBytes;
 }
 
-Ex<void> ThreeDoCddEngine::do_push_sector() {
+Ex<void> ThreeDoCddEngine::do_push_sector(CdDialectPorts&) {
 
     return {};
 }
 
-Ex<void> ThreeDoCddEngine::do_notify_disc(bool loaded) {
+Ex<void> ThreeDoCddEngine::do_notify_disc(bool loaded, const svc::DiscGeometry& geom) {
 
     loaded_ = loaded;
 
     if (loaded)
-        hint_at_(0);
+        hint_at_(0, geom);
 
     if (!loaded)
         do_reset_machine();
@@ -275,13 +287,13 @@ void ThreeDoCddEngine::do_reset_machine() noexcept {
     lba_ = 0;
 }
 
-bool ThreeDoCddEngine::do_streaming() const noexcept {
+bool ThreeDoCddEngine::do_streaming(const svc::DiscGeometry&) const noexcept {
 
     return read_pend_ || block_reads_ > 0;
 }
 
-CdEngine::DriveView ThreeDoCddEngine::do_drive_view() const noexcept {
-    const svc::Toc& toc = ports_.geom.toc;
+CdEngine::DriveView ThreeDoCddEngine::do_drive_view(const svc::DiscGeometry& geom) const noexcept {
+    const svc::Toc& toc = geom.toc;
     const bool is_data = track_ < toc.last && toc.tracks[track_].type != svc::TrackType::Cdda;
 
     return DriveView{static_cast<std::uint8_t>(state_), track_, lba_, lba_, is_data};

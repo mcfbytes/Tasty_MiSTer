@@ -18,7 +18,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "cores/cd_diagnostics.h"
-#include "proto/block_geometry_hook.h"
+#include "proto/block_server.h"
 #include "svc/disc_read_service.h"
 #include "svc/toc_frame.h"
 
@@ -28,8 +28,7 @@ class PsxCore final : public Core,
                       public IStagingCore,
                       public ISectorKick,
                       public ICdDiagnostics,
-                      public proto::IResidentImageSource,
-                      public proto::IBlockGeometry {
+                      public proto::IBlockServer {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
@@ -75,11 +74,6 @@ public:
         return {};
     }
 
-    [[nodiscard]] proto::IImageSink& image_sink() noexcept override {
-        TASTY_SEAT_BODY(PsxCore);
-        return Core::image_sink();
-    }
-
     StagePlan stage_plan() noexcept override {
         TASTY_SEAT_BODY(PsxCore);
         return plan_;
@@ -115,9 +109,7 @@ private:
 
     [[nodiscard]] ISectorKick* on_sector_kick() noexcept override { return this; }
 
-    [[nodiscard]] proto::IResidentImageSource* on_block_source() noexcept override { return this; }
-
-    [[nodiscard]] proto::IBlockGeometry* on_block_geometry() noexcept override { return this; }
+    [[nodiscard]] proto::IBlockServer* on_block_server() noexcept override { return this; }
 
     [[nodiscard]] const ICdDiagnostics* on_cd_diagnostics() const noexcept override { return this; }
 

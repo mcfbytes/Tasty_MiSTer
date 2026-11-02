@@ -178,7 +178,7 @@ std::uint32_t CdWirePort::egress_abandons() const noexcept {
     return fio_queue_ ? fio_queue_->stats().abandons : 0u;
 }
 
-Ex<void> CdWirePort::submit_sector(const ICdSectorEgress::Act& act) {
+Ex<void> CdWirePort::submit_sector(const CdSectorAct& act) {
     TASTY_SEAT_BODY(CdWirePort);
     const auto q = fio_queue_;
     if (!q)
@@ -238,11 +238,11 @@ Ex<void> CdWirePort::send_status(std::span<const std::uint16_t> words) {
     return {};
 }
 
-void CdWirePort::service_command_edge(CdEngine& eng) noexcept {
+std::optional<CdCommandWords> CdWirePort::read_command_edge(CdEngine& eng) noexcept {
     TASTY_SEAT_BODY(CdWirePort);
     const std::size_t nwords = eng.command_word_count();
 
-    std::uint16_t words[CdEngine::kMaxCommandWords] = {};
+    CdCommandWords out{};
     bool wanted = false;
     bool failed = false;
     {
@@ -272,19 +272,16 @@ void CdWirePort::service_command_edge(CdEngine& eng) noexcept {
                         failed = true;
                         break;
                     }
-                    words[i] = r->v;
+                    out.words[i] = r->v;
                 }
             }
         }
     }
 
-    if (wanted && !failed) {
-        if (auto r = eng.accept_command(std::span<const std::uint16_t>(words, nwords)); !r) {
-            ++wire_faults_;
-        }
-    }
-
-    eng.after_command_round();
+    if (!wanted || failed)
+        return std::nullopt;
+    out.count = nwords;
+    return out;
 }
 
 void CdWirePort::declare_resets(const proto::ResetTerms& terms) noexcept {

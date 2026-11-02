@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "app/block_poll_route.h"
+#include "app/core_block_row.h"
 #include "app/sys_grant.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
@@ -169,7 +170,8 @@ private:
     proto::SpiConfStrDecoder conf_str_decoder_;
     proto::DecoderRow<proto::SpiConfStrDecoder> conf_str_row_{conf_str_decoder_};
     proto::SpiBlockDecoder block_decoder_;
-    proto::DecoderRow<proto::SpiBlockDecoder> block_row_{block_decoder_};
+
+    CoreBlockRow block_row_{block_decoder_};
     proto::user_io::PollReader info_poll_;
     proto::DecoderRow<proto::user_io::PollReader> info_row_{info_poll_};
     proto::user_io::PollReader rumble_poll_;

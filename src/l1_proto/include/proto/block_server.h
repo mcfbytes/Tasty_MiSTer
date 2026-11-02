@@ -6,12 +6,13 @@
 #include <span>
 
 #include "infra/error.h"
+#include "proto/block_geometry.h"
 #include "proto/image_source.h"
 #include "proto/types.h"
 
 namespace mister::proto {
 
-class IResidentImageSource : public IImageSource {
+class IBlockServer : public IImageSource {
 public:
     [[nodiscard]] virtual Ex<std::size_t> read_at(
         SlotIndex slot,
@@ -28,10 +29,14 @@ public:
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), slot.v});
     }
 
+    [[nodiscard]] virtual BlockGeometry geometry_for(SlotIndex, Lba, BlockGeometry wire) {
+        return wire;
+    }
+
 protected:
-    IResidentImageSource() = default;
-    IResidentImageSource(const IResidentImageSource&) = default;
-    IResidentImageSource& operator=(const IResidentImageSource&) = default;
+    IBlockServer() = default;
+    IBlockServer(const IBlockServer&) = default;
+    IBlockServer& operator=(const IBlockServer&) = default;
 };
 
 }

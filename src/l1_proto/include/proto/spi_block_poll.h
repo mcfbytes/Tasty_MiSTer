@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 
@@ -8,10 +9,10 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
+#include "proto/block_backing.h"
 #include "proto/block_geometry.h"
-#include "proto/block_geometry_hook.h"
+#include "proto/block_roles.h"
 #include "proto/sd_request.h"
-#include "proto/slot_roles.h"
 #include "proto/types.h"
 
 namespace mister::proto {
@@ -28,7 +29,6 @@ class SpiBlockPoll {
 public:
     struct Wiring {
         infra::OptRef<const std::uint64_t> slot0_file_bytes{};
-        infra::OptRef<const SlotRoleTable> roles{};
     };
 
     SpiBlockPoll() noexcept = default;
@@ -45,6 +45,8 @@ public:
 
     [[nodiscard]] Ex<Decode> poll(
         hal::ISpiTransport& link,
+        IBlockRoles& roles,
+        const std::array<SlotServer, kBlockSlots>& servers,
         std::optional<SdStatusWord> known = std::nullopt
     );
 
@@ -53,8 +55,6 @@ public:
     [[nodiscard]] Ex<void> send_config(hal::ISpiTransport& link);
 
 private:
-    [[nodiscard]] infra::OptRef<IBlockGeometry> geometry_for_(SlotIndex slot) const noexcept;
-
     Wiring wiring_{};
     DecodeCounters diag_{};
 };

@@ -10,6 +10,7 @@
 
 #include "app/board_ops.h"
 #include "app/cheat_apply.h"
+#include "app/core_block_roles.h"
 #include "app/core_option_cells.h"
 #include "app/event.h"
 #include "app/interned_file.h"
@@ -24,6 +25,7 @@
 #include "app/owed_mount.h"
 #include "app/owed_save_bind.h"
 #include "app/rt_relax_scope.h"
+#include "app/save_channel_roles.h"
 #include "app/save_extent_cell.h"
 #include "app/save_image_source.h"
 #include "app/session_bindings.h"
@@ -48,6 +50,7 @@
 #include "proto/download_session.h"
 #include "proto/image_bracket.h"
 #include "proto/link_op.h"
+#include "proto/no_block_roles.h"
 #include "proto/spi_frame.h"
 #include "proto/storage_channel.h"
 #include "proto/types.h"
@@ -64,6 +67,8 @@ public:
     struct Tally {
 
         std::uint32_t stage_refusals = 0;
+
+        std::uint32_t save_mount_collisions = 0;
 
         std::uint32_t channel_release_refusals = 0;
 
@@ -143,7 +148,8 @@ public:
         proto::SlotIndex slot,
         proto::LinkOp::SlotBind kind,
         proto::FileSize size,
-        proto::PathId path_id
+        proto::PathId path_id,
+        proto::IBlockRoles& roles
     );
 
 private:
@@ -175,14 +181,15 @@ private:
         proto::SlotIndex slot,
         proto::LinkOp::SlotBind kind,
         proto::FileSize size,
-        proto::PathId path_id
+        proto::PathId path_id,
+        proto::IBlockRoles& roles
     );
 
-    [[nodiscard]] Ex<void> announce_disc_(proto::SlotIndex slot, proto::FileSize size);
-
-    void apply_bind_slot_roles_(proto::SlotIndex slot, const proto::SlotRoles& roles) noexcept;
-
-    [[nodiscard]] proto::SlotRoles current_slot_roles_(infra::OptRef<cores::Core> core) noexcept;
+    [[nodiscard]] Ex<void> announce_disc_(
+        proto::SlotIndex slot,
+        proto::FileSize size,
+        proto::IBlockRoles& roles
+    );
 
     [[nodiscard]] cores::MountStatus mount_body_(infra::OptRef<cores::Core> core) noexcept;
     [[nodiscard]] static cores::SaveExtent save_body_(
@@ -305,12 +312,15 @@ inline ILinkEncoder::Outcome SlotBindings::on(
         return ILinkEncoder::Outcome::Dropped;
     }
 
-    if (ctx.core.has_value()) {
-        apply_bind_slot_roles_(
-            proto::SlotIndex{ctx.core->profile().staging.disc_slot.v},
-            current_slot_roles_(ctx.core)
-        );
-    }
+    bind_core_roles(ctx.core);
+
+    proto::NoBlockRoles none;
+    std::optional<CoreBlockRoles> core_roles;
+    if (ctx.core.has_value())
+        core_roles.emplace(*ctx.core);
+    proto::IBlockRoles& roles = core_roles.has_value()
+        ? static_cast<proto::IBlockRoles&>(*core_roles)
+        : none;
 
     const proto::LinkOp::SlotBind kind = a.bind;
     if (kind == proto::LinkOp::SlotBind::Mount && a.path == proto::FileId{}) {
@@ -330,19 +340,23 @@ inline ILinkEncoder::Outcome SlotBindings::on(
             if (auto r = proto::DownloadSession::set_index(link_, proto::IoIndex{a.index_word}); !r)
                 return ILinkEncoder::Outcome::Dropped;
         }
-        if (auto r = apply_bind_slot_(si, kind, size, path_id); !r) {
+        if (auto r = apply_bind_slot_(si, kind, size, path_id, roles); !r) {
             return ILinkEncoder::Outcome::Dropped;
         }
         return ILinkEncoder::Outcome::Encoded;
     }
 
-    cores::IStagingCore* const sd = ctx.core.has_value() ? ctx.core->staging_core() : nullptr;
-    if (sd == nullptr)
+    if (!ctx.core.has_value())
         return ILinkEncoder::Outcome::Dropped;
-    auto frame = proto::ImageBracket::open(sd->image_sink(), ctx.core->profile().staging.save_dest);
+    const proto::WideIoIndex save_dest = ctx.core->profile().staging.save_dest;
+    if (ctx.core->staging_core() == nullptr)
+        return ILinkEncoder::Outcome::Dropped;
+
+    CoreBlockRoles bracketed_roles{roles.resolve(slots_.server(si))};
+    auto frame = proto::ImageBracket::open(ctx.core->image_sink(), save_dest);
     if (!frame)
         return ILinkEncoder::Outcome::Dropped;
-    const auto bound = apply_bind_slot_(si, kind, size, path_id);
+    const auto bound = apply_bind_slot_(si, kind, size, path_id, bracketed_roles);
     const auto closed = frame->end();
     if (!bound || !closed)
         return ILinkEncoder::Outcome::Dropped;
@@ -463,11 +477,18 @@ inline void SlotBindings::forget_channel_borrows() noexcept {
 
 inline void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
     TASTY_SEAT_BODY(SlotBindings);
-    if (core.has_value()) {
-        apply_bind_slot_roles_(
-            proto::SlotIndex{core->profile().staging.disc_slot.v},
-            current_slot_roles_(core)
-        );
+    if (!core.has_value())
+        return;
+    const proto::SlotIndex slot{core->profile().staging.disc_slot.v};
+
+    if (slots_.server(slot) == proto::SlotServer::CoreDescriptor)
+        return;
+    if (core->block_server() != nullptr) {
+
+        slots_.bind_server(slot, proto::SlotServer::CoreBlock);
+    } else if (slots_.server(slot) == proto::SlotServer::CoreBlock) {
+
+        slots_.bind_server(slot, proto::SlotServer::Session);
     }
 }
 
@@ -475,10 +496,11 @@ inline void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexc
     proto::SlotIndex slot,
     proto::LinkOp::SlotBind kind,
     proto::FileSize size,
-    proto::PathId path_id
+    proto::PathId path_id,
+    proto::IBlockRoles& roles
 ) {
     TASTY_SEAT_BODY(SlotBindings);
-    return apply_bind_slot_(slot, kind, size, path_id);
+    return apply_bind_slot_(slot, kind, size, path_id, roles);
 }
 
 [[nodiscard]] inline Ex<SlotBindings::SaveBind> SlotBindings::bind_save_(
@@ -523,7 +545,9 @@ inline void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexc
 
     if (!storage_life_->stage_backend(si, *backend, save_src_->order(si)))
         return SaveBind::Declined;
-    if (!slots_.submit_attach(si)) {
+
+    proto::NoBlockRoles none;
+    if (!slots_.submit_attach(si, none)) {
         ++tally_.stage_refusals;
         save_src_->note_attached(si, false, proto::FileSize{});
         return SaveBind::Ready;
@@ -554,7 +578,8 @@ inline void SlotBindings::begin_detach_(proto::SlotIndex si) noexcept {
         return;
     }
 
-    if (!slots_.submit_detach(si)) {
+    proto::NoBlockRoles none;
+    if (!slots_.submit_detach(si, none)) {
         ++tally_.stage_refusals;
         return;
     }
@@ -739,15 +764,16 @@ inline cores::SaveExtent SlotBindings::save_body_(std::uint64_t size_bytes, bool
     proto::SlotIndex slot,
     proto::LinkOp::SlotBind kind,
     proto::FileSize size,
-    proto::PathId path_id
+    proto::PathId path_id,
+    proto::IBlockRoles& roles
 ) {
     switch (kind) {
         case proto::LinkOp::SlotBind::Mount:
-            return slots_.mount(link_, slot, size, path_id);
+            return slots_.mount(link_, slot, size, path_id, roles);
         case proto::LinkOp::SlotBind::Unmount:
             return slots_.unmount(link_, slot);
         case proto::LinkOp::SlotBind::MountCd:
-            return announce_disc_(slot, size);
+            return announce_disc_(slot, size, roles);
         case proto::LinkOp::SlotBind::Attach:
         case proto::LinkOp::SlotBind::Detach:
             break;
@@ -759,30 +785,11 @@ inline cores::SaveExtent SlotBindings::save_body_(std::uint64_t size_bytes, bool
 
 [[nodiscard]] inline Ex<void> SlotBindings::announce_disc_(
     proto::SlotIndex slot,
-    proto::FileSize size
+    proto::FileSize size,
+    proto::IBlockRoles& roles
 ) {
     proto::SpiFrame frame{link_};
-    return announce_.mount_disc(slots_, frame, slot, size);
-}
-
-inline proto::SlotRoles SlotBindings::current_slot_roles_(
-    infra::OptRef<cores::Core> core
-) noexcept {
-    proto::IResidentImageSource* const resident = core->block_source();
-    proto::IBlockGeometry* const geometry = core->block_geometry();
-    return proto::SlotRoles{
-        .resident = resident != nullptr ? infra::OptRef<proto::IResidentImageSource>{*resident}
-                                        : infra::OptRef<proto::IResidentImageSource>{},
-        .geometry = geometry != nullptr ? infra::OptRef<proto::IBlockGeometry>{*geometry}
-                                        : infra::OptRef<proto::IBlockGeometry>{}
-    };
-}
-
-inline void SlotBindings::apply_bind_slot_roles_(
-    proto::SlotIndex slot,
-    const proto::SlotRoles& roles
-) noexcept {
-    slots_.bind_roles(slot, roles);
+    return announce_.mount_disc(slots_, frame, slot, size, roles);
 }
 
 inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::uint16_t poisoned) {
@@ -792,6 +799,8 @@ inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::
     const auto count = channel.claim_mount_plan();
     if (!count)
         return;
+
+    SaveChannelRoles roles{channel};
     const std::uint16_t previous = channel_slots_;
     unmount_save_channel();
 
@@ -815,6 +824,12 @@ inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::
             continue;
         const proto::SlotIndex si{mounts[i].slot.v};
 
+        if (slots_.server(si) == proto::SlotServer::CoreBlock) {
+            ++tally_.save_mount_collisions;
+            session_tally_.last_error = Error{Errc::busy, ERR_SITE(), si.v};
+            continue;
+        }
+
         if ((poisoned & (1u << si.v)) != 0u) {
             ++tally_.stage_refusals;
             session_tally_.last_error = Error{Errc::would_block, ERR_SITE(), si.v};
@@ -828,23 +843,22 @@ inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::
                 && storage_life_->stage_backend(si, *b, channel.order(i));
             if (staged)
                 channel_borrows_ = static_cast<std::uint16_t>(channel_borrows_ | (1u << si.v));
-            if (!staged || !slots_.submit_attach(si)) {
+            if (!staged || !slots_.submit_attach(si, roles)) {
                 ++tally_.stage_refusals;
                 channel.descriptor().note_attached(si, false, proto::FileSize{});
             }
         }
-        apply_bind_slot_roles_(
-            si,
-            proto::SlotRoles{.descriptor = infra::OptRef<proto::IImageSource>{channel.descriptor()}}
-        );
+
+        slots_.bind_server(si, proto::SlotServer::CoreDescriptor);
         if (auto r = apply_bind_slot_(
                 si,
                 proto::LinkOp::SlotBind::Mount,
                 mounts[i].size,
-                proto::PathId{0}
+                proto::PathId{0},
+                roles
             );
             !r) {
-            apply_bind_slot_roles_(si, proto::SlotRoles{});
+            slots_.bind_server(si, proto::SlotServer::Session);
             session_tally_.last_error = r.error();
             continue;
         }
@@ -854,16 +868,18 @@ inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::
 }
 
 inline void SlotBindings::unmount_save_channel() {
+    proto::NoBlockRoles none;
     for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
         if ((channel_slots_ & (1u << i)) == 0u)
             continue;
         const proto::SlotIndex si{i};
-        apply_bind_slot_roles_(si, proto::SlotRoles{});
+        slots_.bind_server(si, proto::SlotServer::Session);
         if (auto r = apply_bind_slot_(
                 si,
                 proto::LinkOp::SlotBind::Unmount,
                 proto::FileSize{},
-                proto::PathId{}
+                proto::PathId{},
+                none
             );
             r)
             log_lane_.push(LogRec::Unmount{si.v}, log_now_ns());
@@ -872,13 +888,15 @@ inline void SlotBindings::unmount_save_channel() {
 }
 
 inline void SlotBindings::release_channel_slots_(std::uint16_t mask, std::size_t keep) noexcept {
-    (void)slots_.install_completions();
+
+    proto::NoBlockRoles none;
+    (void)slots_.install_completions(none);
     for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
         if ((mask & (1u << i)) == 0u)
             continue;
         const proto::SlotIndex si{i};
         if (i >= keep && storage_life_) {
-            if (!slots_.submit_detach(si))
+            if (!slots_.submit_detach(si, none))
                 ++tally_.stage_refusals;
             continue;
         }

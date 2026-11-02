@@ -19,8 +19,7 @@
 #include "os/clock.h"
 #include "reactor/core_state.h"
 #include "reactor/core_token.h"
-#include "proto/block_geometry_hook.h"
-#include "proto/resident_image_source.h"
+#include "proto/block_server.h"
 #include "proto/core_session.h"
 #include "proto/image_sink.h"
 #include "proto/spi_image_sink.h"
@@ -120,11 +119,9 @@ public:
 
     [[nodiscard]] ICheatEngine* cheat_engine() noexcept { return on_cheat_engine(); }
 
-    [[nodiscard]] proto::IResidentImageSource* block_source() noexcept { return on_block_source(); }
+    [[nodiscard]] proto::IBlockServer* block_server() noexcept { return on_block_server(); }
 
     [[nodiscard]] ISaveChannel* save_channel() noexcept { return on_save_channel(); }
-
-    [[nodiscard]] proto::IBlockGeometry* block_geometry() noexcept { return on_block_geometry(); }
 
     [[nodiscard]] IWindowSave* window_save() noexcept { return on_window_save(); }
 
@@ -212,13 +209,9 @@ private:
 
     [[nodiscard]] virtual ICheatEngine* on_cheat_engine() noexcept { return nullptr; }
 
-    [[nodiscard]] virtual proto::IResidentImageSource* on_block_source() noexcept {
-        return nullptr;
-    }
+    [[nodiscard]] virtual proto::IBlockServer* on_block_server() noexcept { return nullptr; }
 
     [[nodiscard]] virtual ISaveChannel* on_save_channel() noexcept { return nullptr; }
-
-    [[nodiscard]] virtual proto::IBlockGeometry* on_block_geometry() noexcept { return nullptr; }
 
     [[nodiscard]] virtual IWindowSave* on_window_save() noexcept { return nullptr; }
 
@@ -234,6 +227,12 @@ private:
 
 [[nodiscard]] inline Core* bound_core(reactor::CoreState& st) noexcept {
     return st.owner ? static_cast<Core*>(st.owner.operator->()) : nullptr;
+}
+
+template <const CoreProfile& kProfile>
+[[nodiscard]] inline Core* bound_core(reactor::CoreState& st) noexcept {
+    Core* c = bound_core(st);
+    return (c != nullptr && &c->profile() == &kProfile) ? c : nullptr;
 }
 
 }

@@ -42,10 +42,13 @@ target_link_libraries(mister_proto
 tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/bit_field.h
   proto/block_geometry.h
-  proto/block_geometry_hook.h
+  proto/block_backing.h
+  proto/block_roles.h
+  proto/block_server.h
   proto/block_slots.h
   proto/disc_announce.h
   proto/late_answers.h
+  proto/no_block_roles.h
   proto/conf_str.h
   proto/axi_block_decl.h
   proto/declared_line.h
@@ -71,7 +74,6 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/image_bracket.h
   proto/image_sink.h
   proto/image_source.h
-  proto/resident_image_source.h
   proto/irq_binding.h
   proto/item_probe.h
   proto/item_table.h
@@ -112,7 +114,6 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/session_params.h
   proto/slot_attributes.h
   proto/slot_record.h
-  proto/slot_roles.h
   proto/spi_block_decoder.h
   proto/spi_block_poll.h
   proto/spi_conf_str_decoder.h

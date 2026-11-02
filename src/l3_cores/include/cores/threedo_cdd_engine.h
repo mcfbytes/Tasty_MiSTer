@@ -6,12 +6,11 @@
 #include <optional>
 #include <span>
 
+#include "cores/cd_dialect_facts.h"
+#include "cores/cd_dialect_ports.h"
 #include "cores/cd_engine.h"
 #include "cores/cd_engine_stats.h"
-#include "cores/cd_dialect_ports.h"
 #include "cores/cd_profile.h"
-#include "cores/cd_sector_egress.h"
-#include "cores/cd_transport.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "os/clock.h"
@@ -25,24 +24,30 @@ class ThreeDoCddEngine final : public CdEngine {
 public:
     static constexpr std::size_t kDiscInfoBytes = 2048;
 
-    ThreeDoCddEngine(const CdDialectPorts& ports, const os::IClock& c)
-        : CdEngine(ports.profile.ticks, c, 255),
-          ports_(ports) {}
+    ThreeDoCddEngine(const CdDialectFacts& facts, const os::IClock& c)
+        : CdEngine(facts.profile.ticks, c, 255),
+          facts_(facts) {}
 
-    [[nodiscard]] Ex<void> build_disc_info(std::span<std::byte, kDiscInfoBytes> out);
+    [[nodiscard]] Ex<void> build_disc_info(
+        std::span<std::byte, kDiscInfoBytes> out,
+        const svc::DiscGeometry& geom
+    );
 
     [[nodiscard]] bool disc_loaded() const noexcept { return loaded_; }
 
 private:
     enum class State : std::uint8_t { Idle, Open, Read, Pause, Stop };
 
-    [[nodiscard]] Ex<void> do_accept(std::span<const std::uint16_t> words) override;
-    [[nodiscard]] Ex<void> do_tick() override;
-    [[nodiscard]] Ex<void> do_push_sector() override;
-    [[nodiscard]] Ex<void> do_notify_disc(bool loaded) override;
+    [[nodiscard]] Ex<void> do_accept(
+        std::span<const std::uint16_t> words,
+        CdDialectPorts& p
+    ) override;
+    [[nodiscard]] Ex<void> do_tick(CdDialectPorts& p) override;
+    [[nodiscard]] Ex<void> do_push_sector(CdDialectPorts&) override;
+    [[nodiscard]] Ex<void> do_notify_disc(bool loaded, const svc::DiscGeometry& geom) override;
     void do_reset_machine() noexcept override;
-    bool do_streaming() const noexcept override;
-    DriveView do_drive_view() const noexcept override;
+    bool do_streaming(const svc::DiscGeometry& geom) const noexcept override;
+    DriveView do_drive_view(const svc::DiscGeometry& geom) const noexcept override;
 
     std::size_t do_command_word_count() const noexcept override { return 4; }
 
@@ -59,17 +64,26 @@ private:
 
     [[nodiscard]] CdEngineStats do_stats() const noexcept override { return stats_; }
 
-    [[nodiscard]] Ex<std::size_t> do_disc_descriptor(std::span<std::byte> out) override;
+    [[nodiscard]] Ex<std::size_t> do_disc_descriptor(
+        std::span<std::byte> out,
+        const svc::DiscGeometry& geom
+    ) override;
 
-    void command_exec_();
-    [[nodiscard]] Ex<void> update_();
-    void hint_at_(std::int32_t lba) noexcept;
-    void read_data_();
+    void command_exec_(const svc::DiscGeometry& geom);
+    [[nodiscard]] Ex<void> update_(CdDialectPorts& p);
+    void hint_at_(std::int32_t lba, const svc::DiscGeometry& geom) noexcept;
+    void read_data_(const svc::DiscGeometry& geom);
 
-    [[nodiscard]] Ex<void> data_sector_send_(std::span<const std::uint8_t> header);
-    [[nodiscard]] std::uint32_t track_by_lba_(std::int32_t lba) const noexcept;
+    [[nodiscard]] Ex<void> data_sector_send_(
+        std::span<const std::uint8_t> header,
+        CdDialectPorts& p
+    );
+    [[nodiscard]] std::uint32_t track_by_lba_(
+        std::int32_t lba,
+        const svc::DiscGeometry& geom
+    ) const noexcept;
 
-    CdDialectPorts ports_;
+    CdDialectFacts facts_;
     CdEngineStats stats_{};
 
     std::uint8_t sec_buf_[2352] = {};

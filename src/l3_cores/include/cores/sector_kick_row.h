@@ -15,8 +15,8 @@ template <const CoreProfile& kProfile>
 class SectorKickRow final : public reactor::ILinkDecoder {
 public:
     void service(reactor::CoreState& st) const override {
-        Core* c = bound_core(st);
-        if (c == nullptr || &c->profile() != &kProfile)
+        Core* c = bound_core<kProfile>(st);
+        if (c == nullptr)
             return;
         if (ISectorKick* k = c->sector_kick())
             k->service_kick();

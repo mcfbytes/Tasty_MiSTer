@@ -13,6 +13,7 @@
 #include "app/board_ops.h"
 #include "app/bracket_close.h"
 #include "app/cheat_apply.h"
+#include "app/core_block_roles.h"
 #include "app/core_tenancy.h"
 #include "app/event.h"
 #include "app/file_tx_level.h"
@@ -43,9 +44,11 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/block_roles.h"
 #include "proto/download_session.h"
 #include "proto/image_bracket.h"
 #include "proto/link_op.h"
+#include "proto/no_block_roles.h"
 #include "proto/osd_surface.h"
 #include "proto/spi_fio_queue.h"
 #include "proto/types.h"
@@ -186,7 +189,7 @@ private:
 
     void before_close() noexcept override;
 
-    void announce_open_save() noexcept;
+    void announce_open_save(proto::IBlockRoles& roles) noexcept;
 
     [[nodiscard]] bool stream_file_tx_(
         const proto::LinkOp::FileTx& a,
@@ -268,13 +271,13 @@ inline ILinkEncoder::Outcome HeldTransfer::on(
     using Phase = proto::LinkOp::StagePhase;
     const bool opens = a.phase == Phase::Whole || a.phase == Phase::Open;
     const bool closes = a.phase == Phase::Whole || a.phase == Phase::Close;
-    cores::IStagingCore* cd = ctx.core.has_value() ? ctx.core->staging_core() : nullptr;
+    const bool has_staging = ctx.core.has_value() && ctx.core->staging_core() != nullptr;
 
     std::optional<RtRelaxScope> relaxed;
     if (a.copy_word == 0 || a.phase != Phase::Whole)
         relaxed.emplace(ops_);
 
-    if (!ctx.core.has_value() || (cd == nullptr && proto::sets_region(a))) {
+    if (!ctx.core.has_value() || (!has_staging && proto::sets_region(a))) {
         return drop_stage_();
     }
     const InternedFile* file = nullptr;
@@ -307,8 +310,7 @@ inline ILinkEncoder::Outcome HeldTransfer::on(
             params.ext = file->ext.view();
             params.aux = proto::AuxValue{file->aux};
         }
-        proto::IImageSink& sink = cd != nullptr ? cd->image_sink() : ctx.core->image_sink();
-        auto ds = proto::ImageBracket::open(sink, a.dest, params);
+        auto ds = proto::ImageBracket::open(ctx.core->image_sink(), a.dest, params);
         if (!ds)
             return ILinkEncoder::Outcome::Dropped;
         stage_open_.emplace(std::move(*ds));
@@ -328,8 +330,12 @@ inline ILinkEncoder::Outcome HeldTransfer::on(
     stage_open_.reset();
     if (!ended)
         return ILinkEncoder::Outcome::Dropped;
-    if (proto::sets_region(a) && cd != nullptr)
-        cd->set_region(a.region);
+
+    if (proto::sets_region(a)) {
+        if (cores::IStagingCore* cd = ctx.core->staging_core(); cd != nullptr) {
+            cd->set_region(a.region);
+        }
+    }
     return ILinkEncoder::Outcome::Encoded;
 }
 
@@ -404,7 +410,7 @@ inline void HeldTransfer::arm_open_save_(
     };
 }
 
-inline void HeldTransfer::announce_open_save() noexcept {
+inline void HeldTransfer::announce_open_save(proto::IBlockRoles& roles) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
     if (!open_save_)
         return;
@@ -414,7 +420,8 @@ inline void HeldTransfer::announce_open_save() noexcept {
             proto::SlotIndex{0},
             proto::LinkOp::SlotBind::Mount,
             s.size,
-            s.path
+            s.path,
+            roles
         )) {
         ++tally_.open_save_refusals;
         return;
@@ -424,7 +431,14 @@ inline void HeldTransfer::announce_open_save() noexcept {
 
 inline void HeldTransfer::before_close() noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
-    announce_open_save();
+    proto::NoBlockRoles none;
+    std::optional<CoreBlockRoles> core_roles;
+    if (auto core = tenancy_.core())
+        core_roles.emplace(*core);
+    proto::IBlockRoles& roles = core_roles.has_value()
+        ? static_cast<proto::IBlockRoles&>(*core_roles)
+        : none;
+    announce_open_save(roles);
     if (!tenancy_.core())
         return;
     if (cores::ISaveChannel* ch = tenancy_.core()->save_channel())

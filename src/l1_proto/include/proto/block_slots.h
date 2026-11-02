@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -10,13 +11,13 @@
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "hal/spi_transport.h"
+#include "proto/block_backing.h"
 #include "proto/block_geometry.h"
-#include "proto/block_geometry_hook.h"
+#include "proto/block_roles.h"
+#include "proto/block_server.h"
 #include "proto/image_source.h"
 #include "proto/late_answers.h"
-#include "proto/resident_image_source.h"
 #include "proto/slot_record.h"
-#include "proto/slot_roles.h"
 #include "proto/spi_block_poll.h"
 #include "proto/storage_channel.h"
 #include "proto/storage_completion.h"
@@ -72,22 +73,27 @@ public:
 
     void bind_lw_slots(std::uint16_t mask) noexcept { lw_slots_ = mask; }
 
-    void bind_roles(SlotIndex slot, const SlotRoles& roles) noexcept {
+    void bind_server(SlotIndex slot, SlotServer server) noexcept {
         if (slot.v >= kBlockSlots)
             return;
         records_[slot.v].window = Window{};
-        roles_[slot.v] = roles;
+        server_[slot.v] = server;
+    }
+
+    [[nodiscard]] SlotServer server(SlotIndex slot) const noexcept {
+        return slot.v < kBlockSlots ? server_[slot.v] : SlotServer::Session;
     }
 
     [[nodiscard]] Ex<void> mount(
         hal::ISpiTransport& link,
         SlotIndex slot,
         FileSize size_bytes,
-        PathId path_id
+        PathId path_id,
+        IBlockRoles& roles
     );
     [[nodiscard]] Ex<void> unmount(hal::ISpiTransport& link, SlotIndex slot);
 
-    [[nodiscard]] Ex<void> install_disc(SlotIndex slot, FileSize size_bytes);
+    [[nodiscard]] Ex<void> install_disc(SlotIndex slot, FileSize size_bytes, IBlockRoles& roles);
 
     void count_unencodable_announce() noexcept { ++diag_.unencodable_announce; }
 
@@ -99,12 +105,22 @@ public:
         std::uint16_t ack
     );
 
-    [[nodiscard]] Ex<Pass> serve(hal::ISpiTransport& link, const SpiBlockPoll::Decode& d);
+    [[nodiscard]] Ex<Pass> serve(
+        hal::ISpiTransport& link,
+        const SpiBlockPoll::Decode& d,
+        IBlockRoles& roles
+    );
 
-    unsigned install_completions() noexcept;
+    [[nodiscard]] Ex<SpiBlockPoll::Decode> poll_block(
+        hal::ISpiTransport& link,
+        IBlockRoles& roles,
+        std::optional<SdStatusWord> known = std::nullopt
+    );
 
-    [[nodiscard]] bool submit_attach(SlotIndex slot) noexcept;
-    [[nodiscard]] bool submit_detach(SlotIndex slot) noexcept;
+    unsigned install_completions(IBlockRoles& roles) noexcept;
+
+    [[nodiscard]] bool submit_attach(SlotIndex slot, IBlockRoles& roles) noexcept;
+    [[nodiscard]] bool submit_detach(SlotIndex slot, IBlockRoles& roles) noexcept;
 
     [[nodiscard]] bool slot_busy(SlotIndex slot) const noexcept {
         return slot.v < kBlockSlots && records_[slot.v].gate.state != SlotGate::State::Idle;
@@ -117,7 +133,7 @@ public:
     void reset_all() noexcept {
         for (unsigned i = 0; i < kBlockSlots; ++i) {
             records_[i].slot = Slot{};
-            roles_[i] = SlotRoles{};
+            server_[i] = SlotServer::Session;
             records_[i].gate = SlotGate{};
         }
         lw_slots_ = 0;
@@ -127,34 +143,40 @@ public:
     void on(
         const StorageCompletion::Read& a,
         const StorageCompletion::Head& h,
-        SlotIndex slot
+        SlotIndex slot,
+        IBlockRoles& roles
     ) noexcept;
     void on(
         const StorageCompletion::Write& a,
         const StorageCompletion::Head& h,
-        SlotIndex slot
+        SlotIndex slot,
+        IBlockRoles& roles
     ) noexcept;
     void on(
         const StorageCompletion::Create& a,
         const StorageCompletion::Head& h,
-        SlotIndex slot
+        SlotIndex slot,
+        IBlockRoles& roles
     ) noexcept;
     void on(
         const StorageCompletion::Flush& a,
         const StorageCompletion::Head& h,
-        SlotIndex slot
+        SlotIndex slot,
+        IBlockRoles& roles
     ) noexcept;
     void on(
         const StorageCompletion::Attach& a,
         const StorageCompletion::Head& h,
-        SlotIndex slot
+        SlotIndex slot,
+        IBlockRoles& roles
     ) noexcept;
     void on(
         const StorageCompletion::Detach& a,
         const StorageCompletion::Head& h,
-        SlotIndex slot
+        SlotIndex slot,
+        IBlockRoles& roles
     ) noexcept;
-    void misrouted(const StorageCompletion& c, SlotIndex slot) noexcept;
+    void misrouted(const StorageCompletion& c, SlotIndex slot, IBlockRoles& roles) noexcept;
 
     const Diagnostics& diagnostics() const noexcept { return diag_; }
 
@@ -186,14 +208,14 @@ private:
         std::uint32_t block_size,
         std::uint32_t window_blocks,
         std::uint16_t ack,
-        infra::OptRef<IResidentImageSource> res
+        const BlockBacking& backing
     );
     [[nodiscard]] Ex<Pass> serve_write(
         hal::ISpiTransport& link,
         const SdRequest& req,
         std::uint32_t block_size,
         std::uint16_t ack,
-        infra::OptRef<IResidentImageSource> res
+        const BlockBacking& backing
     );
 
     [[nodiscard]] Ex<void> emit_read_data_phase_(
@@ -213,7 +235,7 @@ private:
         SlotIndex slot,
         Lba base,
         std::uint32_t block_size,
-        IResidentImageSource& src,
+        IBlockServer& src,
         bool answer_owed
     );
 
@@ -221,15 +243,22 @@ private:
         SlotIndex slot,
         Lba base,
         std::uint32_t block_size,
-        bool answer_owed
+        bool answer_owed,
+        const BlockBacking& backing
     ) noexcept;
 
-    [[nodiscard]] bool submit_create(SlotIndex slot, ArenaHalf half, std::uint32_t len) noexcept;
+    [[nodiscard]] bool submit_create(
+        SlotIndex slot,
+        ArenaHalf half,
+        std::uint32_t len,
+        const BlockBacking& backing
+    ) noexcept;
     [[nodiscard]] bool submit_write(
         SlotIndex slot,
         ArenaHalf half,
         std::uint64_t offset,
-        std::uint32_t len
+        std::uint32_t len,
+        const BlockBacking& backing
     ) noexcept;
 
     void gate_commit_(
@@ -240,15 +269,18 @@ private:
         std::uint32_t len
     ) noexcept;
     [[nodiscard]] bool submit_lifecycle_(SlotIndex slot, const StorageRequest& r) noexcept;
-    [[nodiscard]] StorageRequest::Head request_head_(SlotIndex slot) const noexcept;
-    void apply_completion(SlotIndex slot, const StorageCompletion& c) noexcept;
+    [[nodiscard]] StorageRequest::Head request_head_(
+        SlotIndex slot,
+        const BlockBacking& backing
+    ) const noexcept;
+    void apply_completion(SlotIndex slot, const StorageCompletion& c, IBlockRoles& roles) noexcept;
 
     [[nodiscard]] bool stale_(SlotIndex slot, const StorageCompletion::Head& h) noexcept;
     void expire(SlotIndex slot) noexcept;
     [[nodiscard]] std::int64_t now_ns() const noexcept;
 
     enum class Blank : std::uint8_t { Filled, NoBuffer, Deferred, Static };
-    [[nodiscard]] Blank substitute_blank(SlotIndex slot, Lba lba);
+    [[nodiscard]] Blank substitute_blank(SlotIndex slot, Lba lba, const BlockBacking& backing);
     [[nodiscard]] Blank no_half_answer(SlotIndex slot) noexcept;
 
     void invalidate_all() noexcept {
@@ -256,20 +288,27 @@ private:
             records_[i].drop_window();
     }
 
-    infra::OptRef<IImageSource> source_for(SlotIndex s) const noexcept {
-        const SlotRoles& r = roles_[s.v];
-        if (r.descriptor)
-            return r.descriptor;
-        if (r.resident)
-            return infra::OptRef<IImageSource>{*r.resident};
+    [[nodiscard]] BlockBacking backing_(IBlockRoles& roles, SlotIndex slot) const noexcept {
+        if (slot.v >= kBlockSlots)
+            return {};
+        return roles.resolve(slot_server_of(server_, slot));
+    }
+
+    [[nodiscard]] infra::OptRef<IImageSource> source_of_(const BlockBacking& b) const noexcept {
+        if (b.kind == SlotServer::CoreBlock && b.server)
+            return infra::OptRef<IImageSource>{*b.server};
+        if (b.kind == SlotServer::CoreDescriptor && b.descriptor)
+            return b.descriptor;
         return source_;
     }
 
-    infra::OptRef<IResidentImageSource> resident_for(SlotIndex s) const noexcept {
-        return roles_[s.v].resident;
+    [[nodiscard]] static infra::OptRef<IBlockServer> server_of_(const BlockBacking& b) noexcept {
+        return b.kind == SlotServer::CoreBlock ? b.server : infra::OptRef<IBlockServer>{};
     }
 
     SlotRecord records_[kBlockSlots]{};
+
+    std::array<SlotServer, kBlockSlots> server_{};
     std::uint32_t late_max_us_ = 0;
     void note_answer_wait_(std::int64_t waited_ns) noexcept;
 
@@ -279,11 +318,9 @@ private:
     std::uint16_t lw_slots_ = 0;
     std::uint32_t next_seq_ = 1;
     infra::OptRef<IImageSource> source_;
-    SlotRoleTable roles_{};
 
     SpiBlockPoll block_poll_{SpiBlockPoll::Wiring{
-        .slot0_file_bytes = infra::OptRef<const std::uint64_t>{records_[0].slot.file_bytes.v},
-        .roles = infra::OptRef<const SlotRoleTable>{roles_}
+        .slot0_file_bytes = infra::OptRef<const std::uint64_t>{records_[0].slot.file_bytes.v}
     }};
     Diagnostics diag_{};
 };
