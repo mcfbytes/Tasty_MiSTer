@@ -734,6 +734,7 @@ update_binary() {
 update_script() {
     [ "${TASTY_SELF_UPDATE:-1}" = 1 ] || return 0
     [ -f "$SELF" ] && [ -w "$SELF" ] || return 0
+    say "updating Tasty.sh"
     new=$SELF.new
     rm -f "$new"
     if ! fetch "$TASTY_SCRIPT_URL" "$new"; then rm -f "$new"; return 1; fi
@@ -757,7 +758,6 @@ update_script() {
 update() {
     mkdir -p "$TASTY_DIR" "$MOVIES" || return 1
     upd_rc=0
-    say "updating Tasty.sh"
     update_script || { warn "could not update Tasty.sh (the old one is kept)"; upd_rc=1; }
     say "updating the catalogue"
     install_download "$TASTY_CATALOG_URL" "$CATALOG" catalog || { warn "could not update the catalogue (the old one is kept)"; upd_rc=1; }
