@@ -72,6 +72,22 @@ card; cp "$T/rom.bin" "$T/card/games/NES/untestedone.nes"
 try "$T/card"; rc=$?
 expect "only unverified entries: still plays one" test $rc -eq 0
 
+# a run known to desync is never picked at random, not even when it is all that is ready
+{ cat_head; cat_row untestedone untested; cat_row desyncone desync; } >"$DL/tas-catalog.tsv"
+card; cp "$T/movie.fm2" "$T/card/tasty/movies/desyncone-m.fm2"
+for i in untestedone desyncone; do cp "$T/rom.bin" "$T/card/games/NES/$i.nes"; done
+for n in 1 2 3 4 5 6; do
+    try "$T/card"; rc=$?
+    expect "desync: exits 0 ($n)" test $rc -eq 0
+    if grep -q "playing NES: desyncone" "$T/out"; then bad "desync: a known desync was chosen ($n)"; else ok; fi
+done
+{ cat_head; cat_row desyncone desync; } >"$DL/tas-catalog.tsv"
+card; cp "$T/movie.fm2" "$T/card/tasty/movies/desyncone-m.fm2"; cp "$T/rom.bin" "$T/card/games/NES/desyncone.nes"
+try "$T/card"; rc=$?
+expect "only desync runs: exits non-zero" test $rc -ne 0
+expect "only desync runs: points at the menu" has "$T/out" "known to desync"
+expect "only desync runs: plays nothing" not has "$T/out" "playing"
+
 # a failing scan: the scan-failed message and no play
 cat >"$DL/stub.sh" <<'STUB'
 #!/bin/sh

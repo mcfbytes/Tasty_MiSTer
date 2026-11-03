@@ -37,7 +37,9 @@ The command-line tool is `tasty`.
 curl -fsSL https://raw.githubusercontent.com/mcfbytes/Tasty_MiSTer/main/install.sh | sh
 ```
 
-Then pick **Scripts → Tasty** on the MiSTer: it lists the runs your own ROMs can play and plays the one you pick. Run
+Then pick **Scripts → Tasty** on the MiSTer: it lists the runs your own ROMs can play, in three lists (the
+[known-good runs](#-known-good-runs), the [candidates](#-candidates), and the runs [known to desync](#-known-to-desync),
+there to watch how far they get), and plays the one you pick. Run
 the install again any time to update `tasty` and the catalogue. [`install.sh`](install.sh) is short; read it before you
 pipe it to a shell.
 
@@ -48,8 +50,11 @@ curl -fsSL https://raw.githubusercontent.com/mcfbytes/Tasty_MiSTer/main/test-tas
 ```
 
 Neither ever downloads a ROM. Tasty looks for your own dumps under `games/` (on the SD card, a USB drive or a network
-share), loose or zipped, confirms each one by checksum, and only then downloads the movie from TASVideos. A zip is
-looked inside only when its name holds the game's title. The binary is also on the
+share), loose or zipped, confirms each one by checksum, and only then downloads the movie from TASVideos (the AI runs
+come from their authors' GitHub releases, at a fixed commit). A zip is looked inside only when its name holds the
+game's title. Tasty remembers each ROM it has confirmed, so later visits only check that the file is unchanged instead
+of searching again (**Rescan my ROMs** searches from scratch), and each movie is downloaded once, checked against its
+SHA-1 and kept in `tasty/movies/`. The binary is also on the
 [releases page](https://github.com/mcfbytes/Tasty_MiSTer/releases/latest), and `tasty play <movie> --rom <file>` plays
 any movie by hand (see [Command line](#-command-line)).
 
@@ -112,6 +117,7 @@ Played to the end, in sync, on a DE10-Nano with the stock cores. The last column
 | NES | Super Mario Bros. | ["warps" by klmz](https://tasvideos.org/1330M) | 4:57 | `Super Mario Bros. (World).nes` | none |
 | NES | Super Mario Bros. | ["warps" by HappyLee](https://tasvideos.org/1715M) | 4:57 | `Super Mario Bros. (World).nes` | none |
 | NES | Mike Tyson's Punch-Out!! | [by adelikat](https://tasvideos.org/1695M) | 17:47 | `Mike Tyson's Punch-Out!! (Japan, USA) (En) (Rev 1).nes` | none |
+| NES | Mike Tyson's Punch-Out!! | [by McHazard](https://tasvideos.org/4226M), BizHawk | 17:38 | `Mike Tyson's Punch-Out!! (Japan, USA) (En) (Rev 1).nes` | none; Tyson's third knockdown (a TKO) lands just after the last input |
 | NES | Tetris | ["playaround" by Baxter](https://tasvideos.org/1502M) | 2:17 | `Tetris (USA).nes` | none |
 | NES | Tetris | ["maximum score" by r57shell & Archanfel](https://tasvideos.org/4853M) | 2:53 | `Tetris (USA).nes` | none; 999999 lands just after the last input, so add `--stay` to see it |
 | NES | Castlevania | [by Challenger & eien86](https://tasvideos.org/4840M), console-verified | 10:12 | `Castlevania (USA).nes` | none |
@@ -122,6 +128,8 @@ Played to the end, in sync, on a DE10-Nano with the stock cores. The last column
 | NES | Rush'n Attack | ["1 player" by peco_de_guile & aiqiyou](https://tasvideos.org/4884M) | 9:39 | `Rush'n Attack (USA).nes` | none; `--stay` to watch the ending and credits |
 | NES | Star Wars: The Empire Strikes Back | [by link_7777](https://tasvideos.org/6397M) | 10:42 | `Star Wars - The Empire Strikes Back (USA).nes` | none |
 | NES | Pac-Man (Tengen) | [by eien86](https://tasvideos.org/5231M) | 12:02 | `Pac-Man (USA) (Tengen).nes` | none |
+| NES | Prince of Persia | [by eien86](https://tasvideos.org/4651M) | 15:20 | `Prince of Persia (USA).nes` | none; the princess is reached just after the last input |
+| NES | Adventure Island 3 | [by J.Y](https://tasvideos.org/4462M) | 18:20 | `Adventure Island 3 (USA).nes` | none |
 | NES | Battletoads | ["AI beats Battletoads" by bearsgaming-ui](https://github.com/bearsgaming-ui/AIBeatsBattletoads2) | 11:54 | `Battletoads (USA).nes` | none; play `battletoads_ai_11m54s_NesHawk.bk2` to Professor T. Bird's ending (the QuickNES file does not sync on the MiSTer core) |
 | SNES | Super Punch-Out!! | [by adelikat](https://tasvideos.org/4933M) | 15:52 | `Super Punch-Out!! (USA).sfc` | none |
 | SNES | Super Mario All-Stars: Super Mario Bros. | [by Niftski & HappyLee](https://tasvideos.org/6744M) | 5:03 | `Super Mario Collection (Japan).sfc` | `--lead -1` |
@@ -129,20 +137,11 @@ Played to the end, in sync, on a DE10-Nano with the stock cores. The last column
 | SNES | Beethoven: The Ultimate Canine Caper! | [by TASeditor](https://tasvideos.org/4688M) | 4:24 | `Beethoven - The Ultimate Canine Caper! (USA).sfc` | none; `--stay` to watch the credits |
 | SNES | The Chessmaster | ["Newcomer 1" by thegugafá & Walgrey](https://tasvideos.org/7176M) | 0:20 | `Chessmaster, The (USA).sfc` | none |
 
-**Probably good:** Mike Tyson's Punch-Out!! [4226M by McHazard](https://tasvideos.org/4226M) (BizHawk, `Mike Tyson's
-Punch-Out!! (Japan, USA) (En) (Rev 1).nes`, no options). Tyson is going down on the last frame; the count was not recorded.
-
 ### <img src="art/icons/dumpling-48.png" width="24" alt=""> Candidates
 
-Not yet played to the end. Each stayed in sync for its first 60 seconds and was stopped there, so it
-may still desync later; a report either way is welcome.
-
-| system | game | movie | length | ROM (No-Intro) | needed |
-|---|---|---|---|---|---|
-| NES | Prince of Persia | [by eien86](https://tasvideos.org/4651M) | 15:20 | `Prince of Persia (USA).nes` | none |
-| NES | Adventure Island 3 | [by J.Y](https://tasvideos.org/4462M) | 18:20 | `Adventure Island 3 (USA).nes` | none |
-| NES | Mega Man 2 | [by Shinryuu](https://tasvideos.org/4410M) | 23:39 | `Rockman 2 - Dr. Wily no Nazo (Japan).nes` | none |
-| NES | Mega Man 3 | [by Pike & Tiancaiwhr](https://tasvideos.org/2439M) | 30:21 | `Rockman 3 - Dr. Wily no Saigo! (Japan).nes` | none |
+Runs that stay in sync as far as anyone has watched but have not yet been played to the end. None right now: every
+run in the catalogue has been played either to the end or to where it goes wrong. The Tasty menu keeps a list for
+them, and new catalogue entries start there.
 
 ### <img src="art/icons/toast-48.png" width="24" alt=""> Known to desync
 
@@ -153,8 +152,15 @@ hardware, a faithful core goes its own way; console-verified movies are the best
 |---|---|---|---|
 | NES | Super Mario Bros. 3 | ["warps" by Lord_Tom, Maru & Tompa](https://tasvideos.org/3922M), console-verified | about nine minutes, then one frame behind during World 8's tank fight (see "For core developers") |
 | NES | Rockman / Mega Man | [2601M](https://tasvideos.org/2601M) | desyncs |
+| NES | Mega Man 2 | [by Shinryuu](https://tasvideos.org/4410M) | about a minute in |
+| NES | Mega Man 3 | [by Pike & Tiancaiwhr](https://tasvideos.org/2439M) | about four minutes in |
 | NES | Kiwi Kraze | [4438M](https://tasvideos.org/4438M) | desyncs |
+| NES | Castlevania | ["pacifist minimalist" by Challenger & eien86](https://tasvideos.org/5034M) | near the end of stage 17 |
 | NES | Castlevania III | ["Grant path, warp glitch" 7006M](https://tasvideos.org/7006M) | early: game over within three minutes |
+| NES | Contra | ["AI beats Contra" by bearsgaming-ui](https://github.com/bearsgaming-ui/AI-Beats-Contra), BizHawk NesHawk | frame-exact at the start (the medals appear on frame 594, as in BizHawk), then goes wrong around the end of stage 1, about 75 seconds in, where the movie's lag frames cluster |
+| NES | Ninja Gaiden | ["AI beats Ninja Gaiden" by bearsgaming-ui](https://github.com/bearsgaming-ui/AIPlaysNinjaGaiden), BizHawk NesHawk | out of step by Act 4: at 4:40 the Start that skips a cutscene in BizHawk lands in play and pauses the game |
+| NES | The Legend of Zelda | ["AI beats Zelda" by bearsgaming-ui](https://github.com/bearsgaming-ui/AIBeatsZelda), BizHawk QuickNES | within the first minute: Link never picks up the sword |
+| NES | Battletoads | ["AI beats Battletoads", first run (12:23)](https://github.com/bearsgaming-ui/AIBeatsBattletoads), BizHawk QuickNES | never gets past the title screen; play the NesHawk run above instead |
 | SNES | Super Mario All-Stars: The Lost Levels | ["warpless, Mario" by HappyLee](https://tasvideos.org/3456M), console-verified, `--lead -1` | Worlds 1 to 5, about 14 minutes, then goes wrong in World 6 |
 | SNES | The Magical Quest Starring Mickey Mouse | [by Tompa](https://tasvideos.org/4486M) | five worlds without a life lost, about 13:30 of 14:48, then Mickey loses a life in 6-2 and the movie ends before Pete |
 | SNES | Mega Man X / Rockman X | [3151M](https://tasvideos.org/3151M), ["100%" 3197M](https://tasvideos.org/3197M), ["X-Buster only" 6658M](https://tasvideos.org/6658M) | the intro and Chill Penguin, then all three go wrong just after that boss, identically with and without the emulator's power-on RAM |

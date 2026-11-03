@@ -1,7 +1,9 @@
 #!/bin/sh
 # MiSTer Tasty menu: finds the ROMs you already own (loose or zipped), checks them by hash against the TAS
-# catalogue, and plays the movies you can run. It never downloads a ROM; only tasvideos.org movie files.
-# Run it from the MiSTer Scripts menu, or from ssh: Tasty.sh [menu|scan|list|play <id>|stop|update|help]
+# catalogue, and plays the movies you can run. It never downloads a ROM; only movie files (from tasvideos.org, or
+# a pinned GitHub file for the few runs published there), each checked against the catalogue's SHA-1.
+# Run it from the MiSTer Scripts menu, or from ssh: Tasty.sh [menu|scan|rescan|list|play <id>|stop|update|help]
+# A ROM once found is remembered in the scan cache; later scans only check that file is unchanged and look for the rest.
 # Concurrent runs share a scan cache and are not supported.
 # For testing: TASTY_DIR, TASTY_GAMES (newline-separated roots), TASTY_UI=text, TASTY_PLAY_ARGS,
 # TASTY_URL (tasty binary), TASTY_SHA_URL (its published sha256), TASTY_CATALOG_URL, TASTY_MOVIE_URL_BASE override the defaults.
@@ -190,9 +192,9 @@ function titled(s,   i) { s = norm(s); for (i = 1; i <= nn; i++) if (index(s, nm
 '
 
 # zip_members <files-list> <platform>: "zip<US>size<US>mtime<US>member<US>msize" for every zip whose name holds a
-# catalogue title for <platform>; only those zips are opened, and listings are cached by zip path+size+mtime
+# title still wanted (want.tsv) for <platform>; only those zips are opened, and listings are cached by zip path+size+mtime
 zip_members() {
-    awk -F"$US" -v plat="$2" -v catf="$WORK/cat.tsv" "$NORM"'
+    awk -F"$US" -v plat="$2" -v catf="$WORK/want.tsv" "$NORM"'
         BEGIN { load_titles(catf, plat) }
         tolower($1) ~ /\.zip$/ && titled(stem($1))' "$1" >"$WORK/zips.tsv"
     [ -s "$WORK/zips.tsv" ] || return 0
@@ -219,9 +221,10 @@ zip_members() {
 }
 
 # name_match <platform>: reads files.tsv/zipmem.tsv, writes "id<US>path<US>member<US>size<US>mtime" name matches
+# for the rows still wanted (want.tsv)
 name_match() {
     exts=$(plat_exts "$1")
-    awk -F"$US" -v OFS="$US" -v plat="$1" -v exts="$exts" -v catf="$WORK/cat.tsv" "$NORM"'
+    awk -F"$US" -v OFS="$US" -v plat="$1" -v exts="$exts" -v catf="$WORK/want.tsv" "$NORM"'
         function ext(p) { if (match(p, /\.[^.\/]*$/)) return tolower(substr(p, RSTART + 1)); return "" }
         function isrom(p,   i) { for (i = 1; i <= ne; i++) if (ext(p) == el[i]) return 1; return 0 }
         function try(path, member, size, mtime, n1, n2,   i) {
@@ -249,6 +252,7 @@ hsum() {
     case $1 in
         md5) md5sum ;;
         sha1) sha1sum ;;
+        sha256) sha256sum ;;
         *) cat >/dev/null ;;
     esac | cut -d' ' -f1
 }
@@ -263,6 +267,10 @@ rom_variants() {
             skip=0
             case $rem in 128 | 512) skip=$rem ;; esac
             src "$rp" "$rmem" | tail -c +$((skip + 1)) | hsum "$kind"
+            ;;
+        lsnes)
+            # lsnes hashes the image past any header that is not a whole KiB
+            src "$rp" "$rmem" | tail -c +$((rs % 1024 + 1)) | hsum "$kind"
             ;;
         ines_body)
             # shellcheck disable=SC2046
@@ -297,6 +305,8 @@ rom_variants() {
             fi
             src "$rp" "$rmem" | tail -c +$((skip + 1)) | hsum "$kind"
             if [ $# -ge 16 ] && [ "$1 $2 $3 $4" = "78 69 83 26" ]; then
+                # BizHawk also names a ROM by everything after the iNES header (the Battletoads run does)
+                src "$rp" "$rmem" | tail -c +17 | hsum "$kind"
                 id=$(($8 & 12))
                 archaic=0
                 if [ $id -eq 4 ] || [ $id -eq 12 ]; then archaic=1; fi
@@ -331,8 +341,9 @@ rom_hashes() {
     printf '%s\n' "$out"
 }
 
-# cache_version: a cache written by an older Tasty.sh is dropped and rebuilt
-CACHE_VERSION='#tasty-scan-cache 2'
+# cache_version: a cache written by an older Tasty.sh is dropped and rebuilt (3: the lsnes and sha256 digests, and
+# the header-less body digest of an iNES file, which older caches lack)
+CACHE_VERSION='#tasty-scan-cache 3'
 cache_version() {
     [ -f "$CACHE" ] && [ "$(head -n 1 "$CACHE")" = "$CACHE_VERSION" ] && return 0
     printf '%s\n' "$CACHE_VERSION" >"$CACHE"
@@ -349,44 +360,137 @@ prune_cache() {
         cat "$WORK/cache.new" >"$CACHE"
 }
 
-# scan: writes ready.tsv ("id<US>path<US>member") and missing.tsv (ids)
+# Found ROMs are cached as "F<US>path<US>member<US>size<US>mtime<US>id<US>rom_hash" (size and mtime are the file's,
+# or the zip's for a member). A row is trusted while the file is unchanged and the catalogue still wants that hash.
+file_sig() { stat -c "%s${US}%Y" "$1" 2>/dev/null; }
+
+# known_found: copy the still-valid found rows into ready.tsv, and drop the stale ones from the cache.
+# One awk pass and one stat call for all of them, so a scan of ROMs already found costs next to nothing.
+known_found() {
+    [ -s "$CACHE" ] || return 0
+    grep "^F$US" "$CACHE" >"$WORK/found.tsv" || return 0
+    awk -F"$US" 'FILENAME == ARGV[1] { if (!($1 in h)) h[$1] = $8; next } ($6 in h) && h[$6] == $7 && !seen[$6]++' \
+        "$WORK/cat.tsv" "$WORK/found.tsv" >"$WORK/found.want"
+    : >"$WORK/found.stat"
+    set --
+    while IFS=$US read -r _ fp _; do set -- "$@" "$fp"; done <"$WORK/found.want"
+    # the paths are absolute, so none is taken for an option
+    [ $# -gt 0 ] && stat -c "%n${US}%s${US}%Y" "$@" >"$WORK/found.stat" 2>/dev/null
+    awk -F"$US" 'FILENAME == ARGV[1] { s[$1] = $2 FS $3; next } ($2 in s) && s[$2] == $4 FS $5' \
+        "$WORK/found.stat" "$WORK/found.want" >"$WORK/found.ok"
+    awk -F"$US" -v OFS="$US" '{ print $6, $2, $3 }' "$WORK/found.ok" >>"$WORK/ready.tsv"
+    cmp -s "$WORK/found.tsv" "$WORK/found.ok" && return 0
+    grep -v "^F$US" "$CACHE" >"$WORK/cache.new"
+    cat "$WORK/found.ok" >>"$WORK/cache.new"
+    cat "$WORK/cache.new" >"$CACHE"
+}
+
+# forget_found: a full rescan looks for every ROM again (file hashes stay cached, so it is still quick)
+forget_found() {
+    [ -s "$CACHE" ] || return 0
+    grep -v "^F$US" "$CACHE" >"$WORK/cache.new"
+    cat "$WORK/cache.new" >"$CACHE"
+}
+
+# cached_matches: reads match.tsv, ready.tsv, cat.tsv and the cache. Candidates whose digests are already cached (an
+# empty digest list is not trusted: rom_hashes computes it again, as it always has) are
+# settled here in one pass: "R<US>id<US>path<US>member" for a match. The rest, for ids still unmatched, come out as
+# "U<US>id<US>path<US>member<US>size<US>mtime" for the shell to hash.
+cached_matches() {
+    [ -f "$CACHE" ] || : >"$CACHE"
+    awk -F"$US" -v OFS="$US" '
+        FILENAME == ARGV[1] { done[$1] = 1; next }
+        FILENAME == ARGV[2] { if (!($1 in want)) { lay[$1] = $9; kind[$1] = $7; want[$1] = $8 }; next }
+        FILENAME == ARGV[3] { if ($1 == "H" && $8 != "") hs[$2 FS $3 FS $4 FS $5 FS $6 FS $7] = $8; next }
+        !($1 in want) || ($1 in done) { next }
+        {
+            k = $2 FS $3 FS $4 FS $5 FS lay[$1] FS kind[$1]
+            if (!(k in hs)) { u[++nu] = $0; next }
+            n = split(hs[k], h, " ")
+            for (i = 1; i <= n; i++) if (h[i] == want[$1]) { done[$1] = 1; print "R", $1, $2, $3; next }
+        }
+        END { for (i = 1; i <= nu; i++) { split(u[i], c, FS); if (!(c[1] in done)) print "U", u[i] } }
+    ' "$WORK/ready.tsv" "$WORK/cat.tsv" "$CACHE" "$WORK/match.tsv"
+}
+
+# remember_found <id> <path> <member> <hash>: ready now, and found without a search next time
+remember_found() {
+    printf '%s%s%s%s%s\n' "$1" "$US" "$2" "$US" "$3" >>"$WORK/ready.tsv"
+    sig=$(file_sig "$2") || return 0
+    printf 'F%s%s%s%s%s%s%s%s%s%s\n' "$US" "$2" "$US" "$3" "$US" "$sig" "$US" "$1" "$US" "$4" >>"$CACHE"
+}
+
+# scan [full]: writes ready.tsv ("id<US>path<US>member") and missing.tsv (ids), then labels them (label_rows).
+# ROMs found before are checked by size and mtime only; a platform whose ROMs are all found is not searched at all.
 scan() {
     cache_version
     load_catalog || { warn "no catalogue at $CATALOG (run: $SELF update)"; return 1; }
     : >"$WORK/ready.tsv"
     : >"$WORK/missing.tsv"
+    [ "${1:-}" = full ] && forget_found
+    known_found
     # shellcheck disable=SC2013
     for plat in $(cut -d"$US" -f2 "$WORK/cat.tsv" | sort -u); do
         if [ -z "$(plat_exts "$plat")" ]; then continue; fi
+        awk -F"$US" -v plat="$plat" 'FILENAME == ARGV[1] { got[$1] = 1; next } $2 == plat && !($1 in got)' \
+            "$WORK/ready.tsv" "$WORK/cat.tsv" >"$WORK/want.tsv"
+        [ -s "$WORK/want.tsv" ] || continue
         progress "scanning $plat games..."
         list_files "$plat" >"$WORK/files.tsv"
         zip_members "$WORK/files.tsv" "$plat" >"$WORK/zipmem.tsv"
         name_match "$plat" >"$WORK/match.tsv"
-        while IFS=$US read -r mid mp mm ms mt; do
-            grep -q "^$mid$US" "$WORK/ready.tsv" && continue
+        cached_matches >"$WORK/cands.tsv"
+        while IFS=$US read -r tag mid mp mm ms mt; do
             cat_row "$mid" || continue
+            if [ "$tag" = R ]; then
+                remember_found "$mid" "$mp" "$mm" "$ROW_HASH"
+                continue
+            fi
+            grep -q "^$mid$US" "$WORK/ready.tsv" && continue
             hashes=$(rom_hashes "$mp" "$mm" "$ms" "$mt" "$ROW_LAYOUT" "$ROW_KIND")
             for h in $hashes; do
                 if [ "$h" = "$ROW_HASH" ]; then
-                    printf '%s%s%s%s%s\n' "$mid" "$US" "$mp" "$US" "$mm" >>"$WORK/ready.tsv"
+                    remember_found "$mid" "$mp" "$mm" "$ROW_HASH"
                     break
                 fi
             done
-        done <"$WORK/match.tsv"
+        done <"$WORK/cands.tsv"
     done
     prune_cache
-    cut -d"$US" -f1 "$WORK/cat.tsv" | while IFS= read -r i; do
-        grep -q "^$i$US" "$WORK/ready.tsv" || printf '%s\n' "$i" >>"$WORK/missing.tsv"
-    done
+    awk -F"$US" 'FILENAME == ARGV[1] { got[$1] = 1; next } !($1 in got) { print $1 }' \
+        "$WORK/ready.tsv" "$WORK/cat.tsv" >"$WORK/missing.tsv"
+    label_rows
     return 0
+}
+
+# LABEL: awk functions for a catalogue row split into c[]: its menu section and its one-line label. The note's first
+# clause tells two runs of one game apart ("Warps by klmz").
+LABEL='
+function section(st) { return st == "verified" ? "good" : st == "desync" ? "desync" : "candidate" }
+function label(c,   s, n) {
+    s = c[2] ": " c[3]
+    if (c[5] != "") s = s " (" c[5] ")"
+    n = c[16]; sub(/;.*/, "", n)
+    if (n != "") s = s " - " n
+    if (c[15] != "verified") s = s " [" c[15] "]"
+    return s
+}
+'
+
+# label_rows: ready.lab ("id<US>path<US>member<US>section<US>label") and missing.lab ("id<US>label<US>rom_name")
+label_rows() {
+    : >"$WORK/missing.lab"
+    awk -F"$US" -v OFS="$US" -v catf="$WORK/cat.tsv" -v mout="$WORK/missing.lab" "$LABEL"'
+        BEGIN { while ((getline line < catf) > 0) { split(line, c, "\037"); if (!(c[1] in row)) row[c[1]] = line } }
+        { if (!($1 in row)) next; split(row[$1], c, "\037") }
+        FILENAME == ARGV[1] { print $1, $2, $3, section(c[15]), label(c) }
+        FILENAME == ARGV[2] { print $1, label(c), c[6] > mout }
+    ' "$WORK/ready.tsv" "$WORK/missing.tsv" >"$WORK/ready.lab"
 }
 
 describe() {
     cat_row "$1" || return 1
-    r=
-    [ -n "$ROW_REGION" ] && r=" ($ROW_REGION)"
-    printf '%s: %s%s' "$ROW_PLAT" "$ROW_TITLE" "$r"
-    [ "$ROW_STATUS" = verified ] || printf ' [%s]' "$ROW_STATUS"
+    awk -F"$US" -v id="$1" "$LABEL"'$1 == id { split($0, c, "\037"); printf "%s", label(c); exit }' "$WORK/cat.tsv"
 }
 
 # ---------------------------------------------------------------- movies
@@ -418,10 +522,14 @@ movie_ext() {
     return 1
 }
 
-# ensure_movie: sets MOVIE_FILE to the verified movie, downloading it from tasvideos.org when needed
+# ensure_movie: sets MOVIE_FILE to the verified movie, downloading it when needed. movie_url is a tasvideos.org
+# download, or a raw.githubusercontent.com file (pin the commit); "#<member>" picks the movie inside a zip, and a URL
+# ending in a movie extension is the movie itself. Whatever arrives must match the catalogue's movie SHA-1.
 ensure_movie() {
     MOVIE_FILE=
-    tv=${ROW_PAGE##*/}
+    # the stored name starts with the page's last part (1330M, a GitHub repo name), kept to plain characters
+    tv=$(printf '%s' "${ROW_PAGE##*/}" | tr -c 'A-Za-z0-9._-' '_')
+    [ -n "$tv" ] || tv=$(printf '%s' "$ROW_ID" | tr -c 'A-Za-z0-9._-' '_')
     case $ROW_MSHA in
         *[!0-9a-f]* | '') warn "$ROW_ID has no movie SHA-1 in the catalogue; not playing it"; return 1 ;;
     esac
@@ -434,38 +542,53 @@ ensure_movie() {
             return 0
         fi
     done
-    say "downloading the movie ($tv) from tasvideos.org"
+    url=${ROW_URL%%#*}
+    want=
+    case $ROW_URL in *'#'*) want=${ROW_URL#*#} ;; esac
+    case $url in
+        https://tasvideos.org/*) host=tasvideos.org ;;
+        https://raw.githubusercontent.com/*) host=GitHub ;;
+        *) warn "$ROW_ID: the movie URL is not on tasvideos.org or raw.githubusercontent.com; not downloading it"; return 1 ;;
+    esac
+    say "downloading the movie ($tv) from $host"
     dl=$WORK/dl
     rm -rf "$dl"
     mkdir -p "$dl"
-    url=$ROW_URL
-    case $url in
-        https://tasvideos.org/*) ;;
-        *) warn "$ROW_ID: the movie URL is not on tasvideos.org; not downloading it"; return 1 ;;
-    esac
+    direct=0
+    [ -z "$want" ] && movie_ext "$url" && direct=1
     [ -n "${TASTY_MOVIE_URL_BASE:-}" ] && url=$TASTY_MOVIE_URL_BASE/$tv
     fetch "$url" "$dl/movie.bin" || { warn "could not download $url"; return 1; }
-    [ "$(head -c 2 "$dl/movie.bin")" = PK ] || { warn "the movie download is not a zip file"; return 1; }
-    [ "$HAVE_UNZIP" = 1 ] || { warn "unzip is missing"; return 1; }
-    list_zip "$dl/movie.bin" >"$dl/members.tsv"
-    mem=
-    mext=
-    while IFS=$US read -r msz name; do
-        movie_ext "$name" || continue
-        [ "$msz" -le 67108864 ] 2>/dev/null || continue
-        mem=$name
-        mext=$(printf '%s' "$name" | sed 's/^.*\.//' | tr '[:upper:]' '[:lower:]')
-        break
-    done <"$dl/members.tsv"
-    [ -n "$mem" ] || { warn "the download holds no movie file"; return 1; }
-    found=$dl/movie.$mext
-    src "$dl/movie.bin" "$mem" >"$found" || { warn "could not unpack the movie"; return 1; }
+    if [ "$direct" = 1 ]; then
+        mem=${ROW_URL##*/}
+        found=$dl/movie.$(printf '%s' "$mem" | sed 's/^.*\.//' | tr '[:upper:]' '[:lower:]')
+        mv "$dl/movie.bin" "$found" || return 1
+    else
+        [ "$(head -c 2 "$dl/movie.bin")" = PK ] || { warn "the movie download is not a zip file"; return 1; }
+        [ "$HAVE_UNZIP" = 1 ] || { warn "unzip is missing"; return 1; }
+        list_zip "$dl/movie.bin" >"$dl/members.tsv"
+        mem=
+        mext=
+        while IFS=$US read -r msz name; do
+            [ -z "$want" ] || [ "$name" = "$want" ] || continue
+            movie_ext "$name" || continue
+            [ "$msz" -le 67108864 ] 2>/dev/null || continue
+            mem=$name
+            mext=$(printf '%s' "$name" | sed 's/^.*\.//' | tr '[:upper:]' '[:lower:]')
+            break
+        done <"$dl/members.tsv"
+        if [ -z "$mem" ]; then
+            if [ -n "$want" ]; then warn "the download does not hold $want"; else warn "the download holds no movie file"; fi
+            return 1
+        fi
+        found=$dl/movie.$mext
+        src "$dl/movie.bin" "$mem" >"$found" || { warn "could not unpack the movie"; return 1; }
+    fi
     [ -s "$found" ] || { warn "the unpacked movie is empty"; return 1; }
     if [ "$(sha1sum <"$found" | cut -d' ' -f1)" != "$ROW_MSHA" ]; then
         warn "the downloaded movie does not match the catalogue (TASVideos may have replaced it); not playing it"
         return 1
     fi
-    MOVIE_FILE=$MOVIES/$tv-$(basename "$mem")
+    MOVIE_FILE=$MOVIES/$tv-${mem##*/}
     cp "$found" "$MOVIE_FILE" || return 1
     return 0
 }
@@ -506,7 +629,7 @@ play_row() {
     rom=$rp
     if [ -n "$rm_" ]; then
         mkdir -p "$WORK/rom" || return 1
-        rom=$WORK/rom/$(basename "$rm_")
+        rom=$WORK/rom/${rm_##*/}
         src "$rp" "$rm_" >"$rom" || { warn "could not unpack the ROM from $rp"; return 1; }
     fi
     set -f
@@ -617,29 +740,40 @@ update() {
 # ---------------------------------------------------------------- commands
 
 cmd_scan() {
-    scan || return 1
-    while IFS=$US read -r i p m; do
+    scan "${1:-}" || return 1
+    while IFS=$US read -r i p m _ lab; do
         t=$p
         [ -n "$m" ] && t="$p::$m"
-        printf 'ready\t%s\t%s\t%s\n' "$i" "$(describe "$i")" "$t"
-    done <"$WORK/ready.tsv"
-    while IFS= read -r i; do
-        cat_row "$i" || continue
-        printf 'missing\t%s\t%s\t%s\n' "$i" "$(describe "$i")" "$ROW_ROM"
-    done <"$WORK/missing.tsv"
+        printf 'ready\t%s\t%s\t%s\n' "$i" "$lab" "$t"
+    done <"$WORK/ready.lab"
+    while IFS=$US read -r i lab rom; do
+        printf 'missing\t%s\t%s\t%s\n' "$i" "$lab" "$rom"
+    done <"$WORK/missing.lab"
+}
+
+# section_items <section>: the ready movies of one section (good, candidate or desync) as menu items, sorted by name
+section_items() {
+    awk -F"$US" -v OFS="$US" -v sec="$1" '$4 == sec { print $1, $5 }' "$WORK/ready.lab" | sort -t"$US" -k2 >"$WORK/items"
 }
 
 menu_play() {
-    : >"$WORK/items"
-    while IFS=$US read -r i p m; do
-        printf '%s%s%s\n' "$i" "$US" "$(describe "$i")" >>"$WORK/items"
-    done <"$WORK/ready.tsv"
+    section_items "$1"
     if [ ! -s "$WORK/items" ]; then
-        ui_msg "None of the catalogue's movies can be played yet: no matching ROM was found. See 'Not found'."
+        if awk -F"$US" -v sec="$1" "$LABEL"'section($15) == sec { found = 1; exit } END { exit !found }' "$WORK/cat.tsv"; then
+            ui_msg "No movie in this list can be played yet: no matching ROM was found. See 'Not found'."
+        else
+            ui_msg "No run is in this list right now."
+        fi
         return
     fi
-    ui_menu "Pick a movie to play" "$WORK/items"
+    case $1 in
+        good) title="Known-good runs: played to the end in sync" ;;
+        candidate) title="Candidates: in sync as far as anyone has watched; may still desync" ;;
+        desync) title="Known to desync: each goes out of sync partway (see the note when it starts)" ;;
+    esac
+    ui_menu "$title" "$WORK/items"
     [ -n "$CHOICE" ] || return
+    if [ "$1" = desync ] && cat_row "$CHOICE" && [ -n "$ROW_NOTE" ]; then say "known to desync: $ROW_NOTE"; fi
     play_row "$CHOICE"
     printf 'press enter to continue '
     read -r _ || true
@@ -649,10 +783,9 @@ menu_missing() {
     : >"$WORK/missing.txt"
     say "Your own ROM is needed for these; put it under games/<system> (a zip is fine)." >"$WORK/missing.txt"
     say "" >>"$WORK/missing.txt"
-    while IFS= read -r i; do
-        cat_row "$i" || continue
-        printf '%s\n    ROM: %s\n' "$(describe "$i")" "$ROW_ROM" >>"$WORK/missing.txt"
-    done <"$WORK/missing.tsv"
+    while IFS=$US read -r _ lab rom; do
+        printf '%s\n    ROM: %s\n' "$lab" "$rom" >>"$WORK/missing.txt"
+    done <"$WORK/missing.lab"
     ui_text "Not found" "$WORK/missing.txt"
 }
 
@@ -665,10 +798,19 @@ cmd_menu() {
     say "scanning your ROMs..."
     scan || return 1
     while :; do
-        np=$(wc -l <"$WORK/ready.tsv" | tr -d ' ')
+        ng=0 nc=0 nd=0
+        while IFS=$US read -r _ _ _ sec _; do
+            case $sec in
+                good) ng=$((ng + 1)) ;;
+                desync) nd=$((nd + 1)) ;;
+                *) nc=$((nc + 1)) ;;
+            esac
+        done <"$WORK/ready.lab"
         nm=$(wc -l <"$WORK/missing.tsv" | tr -d ' ')
         {
-            printf 'play%sPlay a TAS (%s ready)\n' "$US" "$np"
+            printf 'good%sKnown-good runs (%s ready)\n' "$US" "$ng"
+            printf 'candidate%sCandidates, not yet played to the end (%s ready)\n' "$US" "$nc"
+            printf 'desync%sKnown to desync (%s ready)\n' "$US" "$nd"
             printf 'missing%sNot found (%s)\n' "$US" "$nm"
             printf 'rescan%sRescan my ROMs\n' "$US"
             printf 'stop%sStop playback\n' "$US"
@@ -677,9 +819,9 @@ cmd_menu() {
         } >"$WORK/top"
         ui_menu "MiSTer Tasty" "$WORK/top"
         case $CHOICE in
-            play) menu_play ;;
+            good | candidate | desync) menu_play "$CHOICE" ;;
             missing) menu_missing ;;
-            rescan) say "scanning your ROMs..."; scan ;;
+            rescan) say "scanning all your ROMs again..."; scan full ;;
             stop) stop_play ;;
             update) update; load_catalog; scan ;;
             quit | '') return 0 ;;
@@ -688,12 +830,14 @@ cmd_menu() {
 }
 
 usage() {
-    say "usage: $SELF [menu|scan|list|play <id>|stop|update|help]"
+    say "usage: $SELF [menu|scan|rescan|list|play <id>|stop|update|help]"
+    say "  scan/list: what is ready and what is missing; rescan: the same, looking for every ROM again"
 }
 
 case ${1:-menu} in
     menu) cmd_menu ;;
     scan | list) cmd_scan ;;
+    rescan) cmd_scan full ;;
     play)
         [ -n "${2:-}" ] || { usage; exit 2; }
         load_catalog && scan && play_row "$2"
