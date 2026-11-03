@@ -6,7 +6,8 @@
 # A ROM once found is remembered in the scan cache; later scans only check that file is unchanged and look for the rest.
 # Concurrent runs share a scan cache and are not supported.
 # For testing: TASTY_DIR, TASTY_GAMES (newline-separated roots), TASTY_UI=text, TASTY_PLAY_ARGS,
-# TASTY_URL (tasty binary), TASTY_SHA_URL (its published sha256), TASTY_CATALOG_URL, TASTY_MOVIE_URL_BASE override the defaults.
+# TASTY_URL (tasty binary), TASTY_SHA_URL (its published sha256), TASTY_CATALOG_URL, TASTY_SCRIPT_URL (this script),
+# TASTY_MOVIE_URL_BASE override the defaults; TASTY_SELF_UPDATE=0 keeps "update" from replacing this script.
 
 TASTY_DIR=${TASTY_DIR:-/media/fat/tasty}
 BIN=${TASTY_BIN:-$TASTY_DIR/tasty}
@@ -17,6 +18,8 @@ CACHE=$TASTY_DIR/scan-cache.tsv
 TASTY_URL=${TASTY_URL:-https://github.com/mcfbytes/Tasty_MiSTer/releases/latest/download/tasty}
 TASTY_SHA_URL=${TASTY_SHA_URL:-https://github.com/mcfbytes/Tasty_MiSTer/releases/latest/download/tasty.sha256}
 TASTY_CATALOG_URL=${TASTY_CATALOG_URL:-https://raw.githubusercontent.com/mcfbytes/Tasty_MiSTer/main/data/tas-catalog.tsv}
+TASTY_SCRIPT_URL=${TASTY_SCRIPT_URL:-https://raw.githubusercontent.com/mcfbytes/Tasty_MiSTer/main/scripts/Tasty.sh}
+SCRIPT_UPDATED=0
 US=$(printf '\037')
 SELF=$0
 
@@ -73,7 +76,7 @@ ui_menu() {
 # ui_text <title> <file>
 ui_text() {
     if [ "$UI" = dialog ]; then
-        dialog --title "$1" --exitlabel Back --textbox "$2" 22 76
+        dialog --title "$1" --exit-label Back --textbox "$2" 22 76
     else
         say ""
         say "== $1"
@@ -726,9 +729,36 @@ update_binary() {
     install_download "$TASTY_URL" "$BIN" elf "$want"
 }
 
+# update_script: replace this script with the published one when it differs, with install.sh's checks. The running
+# shell keeps reading the old file (mv swaps in a new one), and the menu restarts into the new script afterwards.
+update_script() {
+    [ "${TASTY_SELF_UPDATE:-1}" = 1 ] || return 0
+    [ -f "$SELF" ] && [ -w "$SELF" ] || return 0
+    new=$SELF.new
+    rm -f "$new"
+    if ! fetch "$TASTY_SCRIPT_URL" "$new"; then rm -f "$new"; return 1; fi
+    if [ "$(head -n 1 "$new")" != '#!/bin/sh' ] || ! grep -q -F -- '# MiSTer Tasty menu:' "$new"; then
+        rm -f "$new"
+        return 1
+    fi
+    if cmp -s "$new" "$SELF"; then
+        rm -f "$new"
+        say "Tasty.sh is up to date"
+        return 0
+    fi
+    if ! chmod 755 "$new" || ! mv "$new" "$SELF"; then
+        rm -f "$new"
+        return 1
+    fi
+    say "Tasty.sh updated"
+    SCRIPT_UPDATED=1
+}
+
 update() {
     mkdir -p "$TASTY_DIR" "$MOVIES" || return 1
     upd_rc=0
+    say "updating Tasty.sh"
+    update_script || { warn "could not update Tasty.sh (the old one is kept)"; upd_rc=1; }
     say "updating the catalogue"
     install_download "$TASTY_CATALOG_URL" "$CATALOG" catalog || { warn "could not update the catalogue (the old one is kept)"; upd_rc=1; }
     say "updating tasty"
@@ -823,7 +853,17 @@ cmd_menu() {
             missing) menu_missing ;;
             rescan) say "scanning all your ROMs again..."; scan full ;;
             stop) stop_play ;;
-            update) update; load_catalog; scan ;;
+            update)
+                update
+                if [ "$SCRIPT_UPDATED" = 1 ]; then
+                    say "starting the new Tasty.sh..."
+                    cleanup
+                    trap - EXIT INT TERM HUP
+                    exec sh "$SELF" menu
+                fi
+                load_catalog
+                scan
+                ;;
             quit | '') return 0 ;;
         esac
     done

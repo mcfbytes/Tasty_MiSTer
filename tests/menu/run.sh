@@ -6,6 +6,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 SCRIPT=$HERE/../../scripts/Tasty.sh
 SHELL_UNDER_TEST=${1:-sh}
 T=$(mktemp -d "${TMPDIR:-/tmp}/tasty-menu-test.XXXXXX") || exit 1
+# "update" would otherwise replace the script under test with the published one; one test below turns it back on
+TASTY_SELF_UPDATE=0; export TASTY_SELF_UPDATE
 trap '[ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT
 fails=0
 checks=0
@@ -374,6 +376,26 @@ cp "$T/dl/tasty-new" "$T/bin/tasty"
 TASTY_ALLOW_FILE=0 TASTY_DIR=$T/tasty TASTY_BIN=$T/bin/tasty TASTY_UI=text TASTY_URL="file://$T/dl/tasty-new" TASTY_CATALOG_URL="file://$T/dl/cat-good" TASTY_SHA_URL="file://$T/dl/tasty.sha256" TMPDIR=$T \
     "$SHELL_UNDER_TEST" "$SCRIPT" update >/dev/null 2>"$T/upd2.err"
 expect "file:// downloads are refused outside the tests" has "$T/upd2.err" "could not update"
+
+# --- update replaces Tasty.sh itself (a copy here), after the same checks install.sh makes --------------------------
+mkdir -p "$T/self"
+cp "$SCRIPT" "$T/self/Tasty.sh"
+{ cat "$SCRIPT"; printf '# a newer version\n'; } >"$T/dl/Tasty-new.sh"
+printf '#!/bin/sh\necho not the menu\n' >"$T/dl/Tasty-bad.sh"
+selfrun() { TASTY_SELF_UPDATE=1 TASTY_SCRIPT_URL=$1 TASTY_ALLOW_FILE=1 TASTY_DIR=$T/tasty TASTY_BIN=$T/bin/tasty TASTY_UI=text \
+    TASTY_URL="file://$T/dl/tasty-new" TASTY_CATALOG_URL="file://$T/dl/cat-good" TASTY_SHA_URL="file://$T/dl/tasty.sha256" TMPDIR=$T \
+    "$SHELL_UNDER_TEST" "$T/self/Tasty.sh" update; }
+selfrun "file://$T/dl/Tasty-bad.sh" >"$T/self1.out" 2>&1
+expect "a download that is not the Tasty menu script is refused" cmp -s "$T/self/Tasty.sh" "$SCRIPT"
+expect "and says so" has "$T/self1.out" "could not update Tasty.sh"
+selfrun "file://$T/self/Tasty.sh" >"$T/self2.out" 2>&1
+expect "the same script is left alone" has "$T/self2.out" "Tasty.sh is up to date"
+selfrun "file://$T/dl/Tasty-new.sh" >"$T/self3.out" 2>&1
+expect "a newer script replaces this one" cmp -s "$T/self/Tasty.sh" "$T/dl/Tasty-new.sh"
+expect "and says so" has "$T/self3.out" "Tasty.sh updated"
+expect "it stays executable" test -x "$T/self/Tasty.sh"
+expect "no .new file is left" test ! -e "$T/self/Tasty.sh.new"
+expect "the script under test was never touched" test "$(head -c 9 "$SCRIPT")" = '#!/bin/sh'
 
 # --- busybox unzip: no "--", a different listing footer; a stale cache from an older script is dropped -------
 mkdir -p "$T/bb"
