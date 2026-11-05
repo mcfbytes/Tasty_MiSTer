@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -43,14 +45,15 @@ public:
         next_ns_ += (skipped + 1ull) * period_ns_;
     }
 
-    [[nodiscard]] constexpr int park_ms(std::uint64_t now) const noexcept {
+    [[nodiscard]] constexpr infra::ParkTimeout park_ms(std::uint64_t now) const noexcept {
         if (due(now))
-            return 0;
-        const std::uint64_t left = next_ns_ - now;
-        std::uint64_t ms = (left + 999'999ull) / 1'000'000ull;
-        if (ms > 1000ull)
-            ms = 1000ull;
-        return static_cast<int>(ms);
+            return infra::kNoWait;
+        constexpr infra::ParkTimeout kCeil{1000};
+        using Ms = std::chrono::duration<std::uint64_t, std::milli>;
+        const Ms ms = std::chrono::ceil<Ms>(
+            std::chrono::duration<std::uint64_t, std::nano>{next_ns_ - now}
+        );
+        return ms > kCeil ? kCeil : std::chrono::duration_cast<infra::ParkTimeout>(ms);
     }
 
     [[nodiscard]] constexpr std::uint64_t missed() const noexcept { return missed_; }

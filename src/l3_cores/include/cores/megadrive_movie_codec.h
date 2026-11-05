@@ -66,7 +66,7 @@ public:
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
         std::span<const std::uint8_t> head,
-        std::uint64_t size
+        proto::FileSize size
     ) const noexcept override;
     [[nodiscard]] bool rom_matches(const DigestValue& d, const Facts& f) const noexcept override;
 

@@ -6,6 +6,7 @@
 #include "hal/register_window.h"
 #include "hal/sys_directory.h"
 #include "infra/error.h"
+#include "proto/declared_line.h"
 #include "proto/sys_directory_image.h"
 #include "os/types.h"
 

@@ -6,6 +6,7 @@
 #include "cores/load_progress.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -17,14 +18,14 @@ class ProgressTicker {
 public:
     void bind(ILoadProgress* sink) noexcept { sink_ = infra::opt_ref_of(sink); }
 
-    void begin(std::uint64_t total) noexcept {
+    void begin(proto::FileSize total) noexcept {
         step_ = 0;
-        per_step_ = total / kProgressSteps;
+        per_step_ = total.v / kProgressSteps;
         if (per_step_ == 0)
             per_step_ = 1;
         next_at_ = per_step_;
         if (sink_)
-            sink_->on_load_progress(0, 0);
+            sink_->on_load_progress(Progress{});
     }
 
     void advance(std::uint64_t offset) noexcept {
@@ -38,12 +39,12 @@ public:
             return;
         step_ = static_cast<std::uint16_t>(reached);
         next_at_ = (reached + 1) * per_step_;
-        sink_->on_load_progress(step_, kProgressSteps);
+        sink_->on_load_progress(Progress{.done = step_, .total = kProgressSteps});
     }
 
     void finish() noexcept {
         if (sink_)
-            sink_->on_load_progress(0, 0);
+            sink_->on_load_progress(Progress{});
     }
 
 private:

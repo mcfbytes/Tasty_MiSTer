@@ -9,6 +9,7 @@ add_library(mister_ui STATIC
   src/core_pick_host.cpp
   src/core_settings_page.cpp
   src/dips_page.cpp
+  src/draw_classic.cpp
   src/event_trace.cpp
   src/game_slot.cpp
   src/hd_key_remap.cpp
@@ -22,13 +23,18 @@ add_library(mister_ui STATIC
   src/option_items.cpp
   src/options_page.cpp
   src/osd_renderer.cpp
+  src/page.cpp
+  src/page_deadlines.cpp
   src/progress_page.cpp
   src/script_policy.cpp
   src/script_pick_host.cpp
   src/script_run_page.cpp
   src/script_runner.cpp
+  src/sdram_latch.cpp
+  src/show_edge_latch.cpp
   src/slot_pick_host.cpp
   src/system_page.cpp
+  src/transfer_tracker.cpp
   src/ui_round.cpp
 )
 target_include_directories(mister_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -56,6 +62,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/core_settings_page.h
   ui/cheats_page.h
   ui/dips_page.h
+  ui/draw_classic.h
   ui/event_trace.h
   ui/fb_terminal_host.h
   ui/game_slot.h
@@ -98,9 +105,14 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/page.h
   ui/page_ask.h
   ui/page_context.h
+  ui/page_deadlines.h
+  ui/page_facts.h
+  ui/page_home.h
   ui/page_launches.h
   ui/page_id.h
+  ui/page_row.h
   ui/page_stack.h
+  ui/page_walk.h
   ui/script_file_policy.h
   ui/script_kind.h
   ui/script_launch.h
@@ -108,6 +120,8 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/script_policy.h
   ui/script_run_page.h
   ui/script_runner.h
+  ui/sdram_latch.h
+  ui/show_edge_latch.h
   ui/shell_bt_ops.h
   ui/slot_pick_host.h
   ui/slot_labels.h
@@ -115,6 +129,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/status_view.h
   ui/system_facts.h
   ui/system_page.h
+  ui/transfer_tracker.h
   ui/transition.h
   ui/types.h
   ui/ui_event.h

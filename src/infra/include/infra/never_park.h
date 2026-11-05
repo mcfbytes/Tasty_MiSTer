@@ -8,7 +8,7 @@ namespace mister::xthread {
 struct NeverPark {
     void arm() noexcept {}
 
-    void wait(int) noexcept {}
+    void wait(infra::ParkTimeout) noexcept {}
 
     void disarm() noexcept {}
 };

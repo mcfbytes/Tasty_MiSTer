@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/spi_fio_queue.h"
+#include "proto/spi_frame.h"
 
 #include <algorithm>
 #include <cstring>
@@ -8,35 +9,10 @@
 
 namespace mister::proto {
 
-namespace {
-
-[[nodiscard]] std::uint32_t beats(std::size_t bytes, hal::Width w) noexcept {
-    return static_cast<std::uint32_t>(w == hal::Width::Word ? (bytes + 1u) / 2u : bytes);
-}
-
-}
-
-struct SpiFioQueue::Cost {
-    TASTY_SEAT_RESIDENT(RT);
-    using Result = std::uint32_t;
-    hal::Width width;
-
-    std::uint32_t on(const FioWindow::Index&) const noexcept { return 2; }
-
-    std::uint32_t on(const FioWindow::Open&) const noexcept { return 2; }
-
-    std::uint32_t on(const FioWindow::Data& d) const noexcept { return 1 + beats(d.len, width); }
-
-    std::uint32_t on(const FioWindow::Close&) const noexcept { return 2; }
-
-    std::uint32_t on(const FioWindow::IoCommand& c) const noexcept { return c.words; }
-
-    std::uint32_t misrouted(const FioWindow&) const noexcept { return 0; }
-};
-
 Ex<void> SpiFioQueue::Emitter::on(const FioWindow::Index& i) noexcept {
     latched = i.index;
-    return DownloadSession::set_index(*link, WideIoIndex{i.index});
+    SpiFrame frame{*link};
+    return DownloadSession::set_index(frame, WideIoIndex{i.index});
 }
 
 Ex<void> SpiFioQueue::Emitter::on(const FioWindow::Open&) noexcept {

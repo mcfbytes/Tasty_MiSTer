@@ -22,51 +22,50 @@ namespace mister::app {
     auto sz = (*f)->size();
     if (!sz)
         return std::unexpected(sz.error());
-    return StreamFile{std::move(*f), sz->v};
+    return StreamFile{std::move(*f), *sz};
 }
 
-[[nodiscard]] Ex<void> stream_read(svc::IFile& f, std::uint64_t off, std::span<std::byte> dst) {
-    std::size_t done = 0;
-    while (done < dst.size()) {
-        auto n = f.read_at(off + done, dst.subspan(done));
+namespace {
+
+template <class Buf, class Io>
+[[nodiscard]] Ex<void> pump(proto::FileSize off, Buf buf, Errc stalled, Io io) {
+    proto::FileSize at = off;
+    while (!buf.empty()) {
+        auto n = io(at.v, buf);
         if (!n)
             return std::unexpected(n.error());
         if (*n == 0) {
-            return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(off + done)}
-            );
+            return std::unexpected(Error{stalled, ERR_SITE(), static_cast<std::uint32_t>(at.v)});
         }
-        done += *n;
+        buf = buf.subspan(*n);
+        at += proto::FileSize{*n};
     }
     return {};
+}
+}
+
+[[nodiscard]] Ex<void> stream_read(svc::IFile& f, proto::FileSize off, std::span<std::byte> dst) {
+    return pump(off, dst, Errc::short_read, [&f](auto at, auto rest) {
+        return f.read_at(at, rest);
+    });
 }
 
 [[nodiscard]] Ex<void> stream_write(
     svc::IFile& f,
-    std::uint64_t off,
+    proto::FileSize off,
     std::span<const std::byte> src
 ) {
-    std::size_t done = 0;
-    while (done < src.size()) {
-        auto n = f.write_at(off + done, src.subspan(done));
-        if (!n)
-            return std::unexpected(n.error());
-        if (*n == 0) {
-            return std::unexpected(
-                Error{Errc::short_write, ERR_SITE(), static_cast<std::uint32_t>(off + done)}
-            );
-        }
-        done += *n;
-    }
-    return {};
+    return pump(off, src, Errc::short_write, [&f](auto at, auto rest) {
+        return f.write_at(at, rest);
+    });
 }
 
 [[nodiscard]] Ex<void> stream_sync(svc::IFile& f) {
     return f.flush();
 }
 
-std::optional<std::vector<std::uint8_t>> read_whole(svc::IFile& f, std::uint64_t size) {
-    std::vector<std::uint8_t> buf(static_cast<std::size_t>(size));
+std::optional<std::vector<std::uint8_t>> read_whole(svc::IFile& f, proto::FileSize size) {
+    std::vector<std::uint8_t> buf(static_cast<std::size_t>(size.v));
     std::size_t off = 0;
     while (off < buf.size()) {
         auto n = f.read_at(off, std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(off)));

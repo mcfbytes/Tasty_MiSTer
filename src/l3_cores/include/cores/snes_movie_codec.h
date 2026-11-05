@@ -68,7 +68,7 @@ protected:
     [[nodiscard]] static KeyValue split(std::string_view line) noexcept;
     [[nodiscard]] static std::string_view trim(std::string_view s) noexcept;
 
-    [[nodiscard]] static Error refuse(Refusal r, std::uint16_t site) noexcept {
+    [[nodiscard]] static Error refuse(Refusal r, infra::ErrorSite site) noexcept {
         return Error{Errc::bad_format, site, static_cast<std::uint32_t>(r)};
     }
 

@@ -29,9 +29,9 @@ public:
 
     ~OwedMount() { strand(); }
 
-    [[nodiscard]] bool owed() const noexcept { return gen_ != 0; }
+    [[nodiscard]] bool owed() const noexcept { return static_cast<bool>(gen_); }
 
-    [[nodiscard]] std::uint32_t generation() const noexcept { return gen_; }
+    [[nodiscard]] proto::ActKey generation() const noexcept { return gen_; }
 
     [[nodiscard]] std::string_view path() const noexcept { return path_.view(); }
 
@@ -44,14 +44,14 @@ public:
     [[nodiscard]] std::int64_t quiesce_deadline_ns() const noexcept { return quiesce_deadline_ns_; }
 
     void arm(
-        std::uint32_t generation,
+        proto::ActKey generation,
         const cores::MountStatus& on_strand,
         proto::SlotIndex slot,
         std::string_view path,
         bool parked,
         std::int64_t quiesce_deadline_ns
     ) noexcept {
-        if (gen_ != 0 && gen_ != generation)
+        if (gen_ && gen_ != generation)
             strand();
         gen_ = generation;
         strand_body_ = on_strand;
@@ -62,22 +62,22 @@ public:
     }
 
     void answer(cores::MountVerdict v, const cores::MountStatus& payload) noexcept {
-        if (gen_ == 0)
+        if (!gen_)
             return;
-        publish_(std::exchange(gen_, 0u), v, payload);
+        publish_(std::exchange(gen_, proto::ActKey{}), v, payload);
         forget_();
     }
 
     void strand() noexcept {
-        if (gen_ == 0)
+        if (!gen_)
             return;
-        publish_(std::exchange(gen_, 0u), cores::MountVerdict::Failed, strand_body_);
+        publish_(std::exchange(gen_, proto::ActKey{}), cores::MountVerdict::Failed, strand_body_);
         forget_();
     }
 
 private:
     void publish_(
-        std::uint32_t generation,
+        proto::ActKey generation,
         cores::MountVerdict v,
         cores::MountStatus body
     ) noexcept {
@@ -99,7 +99,7 @@ private:
     cores::MountStatus strand_body_{};
     FixedStr<kPathMax, StrFit::Clip> path_{};
     std::int64_t quiesce_deadline_ns_ = 0;
-    std::uint32_t gen_ = 0;
+    proto::ActKey gen_{};
     proto::SlotIndex slot_{};
     bool parked_ = false;
 };

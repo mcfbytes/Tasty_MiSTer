@@ -11,10 +11,13 @@
 #include "cores/disk_port.h"
 #include "cores/disk_servant.h"
 #include "infra/counter.h"
+#include "infra/indexed_array.h"
+#include "infra/opt_ref.h"
 #include "infra/loan_channel.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "proto/spi_fio_queue.h"
+#include "proto/types.h"
 #include "svc/io_coworker.h"
 
 namespace mister::app {
@@ -41,12 +44,12 @@ public:
 
     void seal_boot_pump() noexcept { sealed_ = true; }
 
-    void service_rt(hal::ISpiTransport& link, const proto::DiskPollDecl& poll) noexcept override;
-    void order_bind(std::uint8_t unit, std::string_view path) noexcept override;
-    [[nodiscard]] cores::MountState bind_answer(std::uint8_t unit) noexcept override;
+    void service_rt(proto::Link& link, const proto::DiskPollDecl& poll) noexcept override;
+    void order_bind(proto::DiskUnit unit, std::string_view path) noexcept override;
+    [[nodiscard]] cores::MountState bind_answer(proto::DiskUnit unit) noexcept override;
 
     void abandon_command() noexcept override;
-    void abandon_command_on(std::uint8_t unit) noexcept override;
+    void abandon_command_on(proto::DiskUnit unit) noexcept override;
 
     void forget() noexcept;
 
@@ -61,27 +64,27 @@ public:
         const DiskSlot::Ask::Bind& a,
         const DiskSlot::Ask::Head& h,
         Loan& l,
-        hal::ISpiTransport* link
+        proto::Link* link
     ) noexcept;
     void on(
         const DiskSlot::Ask::Command& a,
         const DiskSlot::Ask::Head& h,
         Loan& l,
-        hal::ISpiTransport* link
+        proto::Link* link
     ) noexcept;
     void on(
         const DiskSlot::Ask::Resume& a,
         const DiskSlot::Ask::Head& h,
         Loan& l,
-        hal::ISpiTransport* link
+        proto::Link* link
     ) noexcept;
     void on(
         const DiskSlot::Ask::Release& a,
         const DiskSlot::Ask::Head& h,
         Loan& l,
-        hal::ISpiTransport* link
+        proto::Link* link
     ) noexcept;
-    void misrouted(const DiskSlot::Ask& m, Loan& l, hal::ISpiTransport* link) noexcept;
+    void misrouted(const DiskSlot::Ask& m, Loan& l, proto::Link* link) noexcept;
 
     void on(const DiskSlot::Ask::Bind& a, const DiskSlot::Ask::Head& h, Job& job) noexcept;
     void on(const DiskSlot::Ask::Command& a, const DiskSlot::Ask::Head& h, Job& job) noexcept;
@@ -120,16 +123,12 @@ private:
         bool sent = false;
     };
 
-    void land_(Chan::Loan&& l, hal::ISpiTransport* link) noexcept;
-    [[nodiscard]] bool write_(
-        hal::ISpiTransport& link,
-        const proto::DiskAct& a,
-        DiskSlot& s
-    ) noexcept;
+    void land_(Chan::Loan&& l, proto::Link* link) noexcept;
+    [[nodiscard]] bool write_(proto::Link& link, const proto::DiskAct& a, DiskSlot& s) noexcept;
 
     [[nodiscard]] bool send_orders_() noexcept;
-    void poll_(hal::ISpiTransport& link, const proto::DiskPollDecl& poll) noexcept;
-    void act_(const DiskSlot::Ask::Head& h, Loan& l, hal::ISpiTransport* link) noexcept;
+    void poll_(proto::Link& link, const proto::DiskPollDecl& poll) noexcept;
+    void act_(const DiskSlot::Ask::Head& h, Loan& l, proto::Link* link) noexcept;
     void close_command_() noexcept;
 
     void begin_(const DiskSlot::Ask::Head& h) noexcept;
@@ -138,9 +137,9 @@ private:
         std::uint16_t gen = 1;
         std::uint16_t epoch = 1;
         bool command_open = false;
-        std::uint8_t open_unit = proto::kNoDiskUnit;
+        std::optional<proto::DiskUnit> open_unit{};
         bool release_owed = false;
-        std::array<Order, kUnits> orders{};
+        infra::IndexedArray<Order, kUnits, proto::DiskUnit> orders{};
         xthread::Counter polls{}, lent{}, declines{}, acts{}, stale{}, wire_faults{}, abandoned{};
     };
 

@@ -8,7 +8,9 @@
 #include <tuple>
 
 #include "app/types.h"
+#include "infra/error.h"
 #include "app/ui_request.h"
+#include "cores/progress.h"
 #include "infra/counted_lane.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
@@ -58,7 +60,7 @@ struct Event {
     enum class ConfStrOnlyCause : std::uint8_t { RegistryMiss, NoStorage };
 
     struct Head {
-        EmitSite site{};
+        infra::ErrorSite site{};
         std::uint8_t pad_[2]{};
 
         CorrelationTag tag{};
@@ -90,8 +92,7 @@ struct Event {
 
     struct ProgressUpdate {
         static constexpr Kind kKind = Kind::ProgressUpdate;
-        std::uint16_t cur = 0;
-        std::uint16_t max = 0;
+        cores::Progress progress{};
     };
 
     struct DeadlineMiss {

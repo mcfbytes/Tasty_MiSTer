@@ -22,20 +22,29 @@ struct SysBlock {
 
     static constexpr std::uint32_t kCauseStatus = 1u << 0;
 
+    enum Layout : std::uint32_t { kWordBytes = 4 };
+
     static constexpr Reg status(std::uint32_t i) noexcept {
-        return static_cast<Reg>(static_cast<std::uint32_t>(Reg::Status0) + 4u * i);
+        return static_cast<Reg>(static_cast<std::uint32_t>(Reg::Status0) + kWordBytes * i);
     }
 
+    enum StflgBits : std::uint32_t {
+        kHeadMask = 0xFF,
+        kFlagMask = 0x0F,
+        kMarkMask = 0xFFF0,
+        kMark = 0xA0
+    };
+
     static constexpr std::uint8_t head(std::uint32_t stflg) noexcept {
-        return static_cast<std::uint8_t>(stflg & 0xFFu);
+        return static_cast<std::uint8_t>(stflg & kHeadMask);
     }
 
     static constexpr bool stflg_valid(std::uint32_t stflg) noexcept {
-        return (stflg & 0x0000'FFF0u) == 0xA0u;
+        return (stflg & kMarkMask) == kMark;
     }
 
     static constexpr std::uint8_t flag(std::uint32_t stflg) noexcept {
-        return static_cast<std::uint8_t>(stflg & 0x0Fu);
+        return static_cast<std::uint8_t>(stflg & kFlagMask);
     }
 };
 

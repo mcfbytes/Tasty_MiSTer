@@ -3,13 +3,15 @@
 
 #include <cstdint>
 
+#include "proto/types.h"
+
 namespace mister::ui {
 
 class ISlotLabels {
 public:
     virtual ~ISlotLabels() = default;
 
-    virtual bool has_label(std::uint32_t v) const noexcept = 0;
+    virtual bool has_label(proto::FieldValue v) const noexcept = 0;
 
 protected:
     ISlotLabels() = default;

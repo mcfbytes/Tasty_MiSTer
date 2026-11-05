@@ -70,7 +70,11 @@ void StartChain::plan_boot_images_(bool slot0_held, std::string_view home, const
         path.append(name);
         if (!vfs.file_exists(path) || image_count_ >= images_.size())
             return;
-        if (auto s = file_(path, proto::WideIoIndex{static_cast<std::uint16_t>(slot << 6)}, 0))
+        if (auto s = file_(
+                path,
+                proto::WideIoIndex{static_cast<std::uint16_t>(slot << 6)},
+                proto::FileSize{}
+            ))
             images_[image_count_++] = *s;
     };
     for (unsigned i = slot0_held ? 1u : 0u; i < 4; ++i) {
@@ -100,21 +104,21 @@ std::string StartChain::core_home(std::string_view name, const svc::Vfs& vfs) {
 
 bool StartChain::plan_composite_(std::string_view rbf, const svc::Vfs& vfs) {
     auto src = stream_open(vfs, rbf, svc::OpenMode::Read);
-    if (!src || src->size < kContainerHeaderBytes)
+    if (!src || src->size < kContainerHeader)
         return false;
     std::byte hdr[kContainerHeaderBytes];
-    if (!stream_read(*src->f, 0, std::span<std::byte>(hdr, sizeof(hdr))))
+    if (!stream_read(*src->f, proto::FileSize{}, std::span<std::byte>(hdr, sizeof(hdr))))
         return false;
     const auto w = container_window(std::span<const std::byte>(hdr, sizeof(hdr)), src->size);
-    if (!w || w->base != kContainerHeaderBytes)
+    if (!w || w->base != kContainerHeader)
         return false;
-    const std::uint64_t tail = w->base + w->length;
+    const proto::FileSize tail = w->base + w->length;
     if (tail < src->size)
         add_(rbf, proto::WideIoIndex{0}, tail);
     return true;
 }
 
-void StartChain::add_(std::string_view path, proto::WideIoIndex dest, std::uint64_t offset) {
+void StartChain::add_(std::string_view path, proto::WideIoIndex dest, proto::FileSize offset) {
     if (count_ >= files_.size())
         return;
     if (auto s = file_(path, dest, offset))
@@ -124,7 +128,7 @@ void StartChain::add_(std::string_view path, proto::WideIoIndex dest, std::uint6
 std::optional<StartFile> StartChain::file_(
     std::string_view path,
     proto::WideIoIndex dest,
-    std::uint64_t offset
+    proto::FileSize offset
 ) {
     StartFile s{};
     if (!s.path.assign(path))

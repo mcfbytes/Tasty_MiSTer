@@ -24,11 +24,11 @@ namespace mister::app {
 
 struct WindowJobSlot {
     TASTY_SEAT_MEDIATOR(Any, Any);
-    infra::OptRef<const cores::IWindowJobKind> kind{};
-    Error err{Errc::io, 0, 0};
-    std::uint8_t ok = 0;
-    std::byte order[cores::kWindowOrderBytes];
-    alignas(cores::kWindowJobAlign) std::byte arena[cores::kWindowJobBytes];
+    cores::WindowJobBuild build = nullptr;
+    Error err{Errc::io, infra::kNoSite, 0};
+    bool ok = false;
+    cores::WindowJobOrder order;
+    cores::JobArena arena;
 };
 
 class WindowJobService final : public svc::IIoCoworker {
@@ -71,10 +71,12 @@ public:
     [[nodiscard]] bool hold_open(
         const cores::IWindowSave& role,
         proto::IoIndex index,
-        std::uint32_t act
+        proto::ActKey act
     ) noexcept;
 
-    [[nodiscard]] std::optional<std::uint32_t> service(cores::IWindowSave* role) noexcept;
+    [[nodiscard]] std::optional<proto::ActKey> service(
+        infra::OptRef<cores::IWindowSave> role
+    ) noexcept;
 
     void forget_held() noexcept;
 
@@ -99,13 +101,13 @@ private:
     };
 
     [[nodiscard]] Chan::Loan acquire_() noexcept;
-    void send_(Chan::Loan&& loan, const cores::IWindowJobKind* kind) noexcept;
+    void send_(Chan::Loan&& loan, cores::WindowJobBuild kind) noexcept;
     void finish_(bool ok, Error err) noexcept;
 
     struct Rt {
         bool armed = false;
         Held held = Held::None;
-        std::uint32_t held_act = 0;
+        proto::ActKey held_act{};
         proto::IoIndex held_index{};
         xthread::Counter ok{}, failed{}, refusals{}, flushes{};
     };

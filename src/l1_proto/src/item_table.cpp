@@ -249,7 +249,9 @@ Ex<ItemTable> ItemTable::parse(std::string_view raw) {
             if (!p.empty() && p[0] == 'P') {
                 const int n = at(p, 1) - '0';
 
-                const auto page_no = static_cast<std::uint8_t>(static_cast<unsigned>(n) & 0xFFu);
+                const SubmenuNo page_no{
+                    static_cast<std::uint8_t>(static_cast<unsigned>(n) & 0xFFu)
+                };
                 if (at(p, 2) != ',') {
                     it.page = page_no;
                     p.remove_prefix(p.size() >= 2 ? 2 : p.size());

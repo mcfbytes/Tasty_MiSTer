@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 
 #include "cores/core_window.h"
 #include "cores/pcm_feed.h"
@@ -15,7 +16,10 @@
 #include "cores/pcm_source.h"
 #include "infra/counter.h"
 #include "infra/error.h"
+#include "infra/fixed_str.h"
 #include "infra/inbox.h"
+#include "infra/opt_ref.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/slot_pool.h"
 #include "infra/telemetry.h"
@@ -23,6 +27,10 @@
 #include "os/clock.h"
 #include "hal/fpga_memory.h"
 #include "hal/boards_table.h"
+
+namespace mister::svc {
+class Vfs;
+}
 
 namespace mister::app {
 
@@ -32,14 +40,14 @@ inline constexpr std::uint32_t kPcmSampleAlign = 4;
 
 inline constexpr std::chrono::milliseconds kPcmDrainMs{500};
 
-inline constexpr int kPcmIdlePollMs = 100;
+inline constexpr infra::ParkTimeout kPcmIdlePollMs{100};
 
-inline constexpr int kPcmParkedPollMs = -1;
+inline constexpr infra::ParkTimeout kPcmParkedPollMs = infra::kForever;
 static_assert(
-    kPcmParkedPollMs < 0,
+    kPcmParkedPollMs == infra::kForever,
     "A parked feeder owns no ring and no source, so its main blocks "
     "INDEFINITELY: every waker of one (the stop, request_park, "
-    "ready_for_source, set_source) is seen by rest() or the stop fd, and a timeout here "
+    "ready_for_source, set_sheet) is seen by rest() or the stop fd, and a timeout here "
     "would wake an idle FIFO-22 seat ten times a second forever."
 );
 
@@ -55,7 +63,8 @@ static_assert(kPcmMediaLeases < kPcmCommandDepth);
 struct PcmMedia {
     TASTY_SEAT_MEDIATOR(Any, Any);
     std::optional<hal::FpgaMemory> ring{};
-    std::unique_ptr<cores::IPcmSource> src{};
+
+    FixedStr<1024, StrFit::Clip> sheet{};
 };
 
 class PcmRingFeeder final : public cores::ICoreWindow, public cores::IPcmFeed {
@@ -64,8 +73,13 @@ class PcmRingFeeder final : public cores::ICoreWindow, public cores::IPcmFeed {
 public:
     using Commands = xthread::Inbox<PcmCommand, kPcmCommandDepth>;
 
-    PcmRingFeeder(const os::IClock& clock, Commands& commands) noexcept
+    PcmRingFeeder(
+        const os::IClock& clock,
+        Commands& commands,
+        infra::OptRef<const svc::Vfs> vfs
+    ) noexcept
         : clock_(&clock),
+          vfs_(vfs),
           commands_(&commands) {}
 
     ~PcmRingFeeder() override = default;
@@ -90,7 +104,7 @@ public:
     void fill_pass() noexcept;
 
     [[nodiscard]] bool rest() const noexcept;
-    [[nodiscard]] int rest_ms() const noexcept;
+    [[nodiscard]] infra::ParkTimeout rest_ms() const noexcept;
 
     void release() noexcept;
 
@@ -98,10 +112,7 @@ public:
 
     void request_park() noexcept;
 
-    [[nodiscard]] Ex<void> attach(
-        hal::FpgaMemory ring,
-        std::unique_ptr<cores::IPcmSource> src
-    ) noexcept;
+    [[nodiscard]] Ex<void> attach(hal::FpgaMemory ring, std::string_view sheet) noexcept;
 
     [[nodiscard]] Ex<void> adopt_ring(hal::FpgaMemory&& ring) noexcept;
 
@@ -113,7 +124,7 @@ public:
         return visible_len_.load(std::memory_order_acquire) != 0;
     }
 
-    [[nodiscard]] Ex<void> play(std::uint8_t track, bool loop) override;
+    [[nodiscard]] Ex<void> play(svc::TrackNumber track, bool loop) override;
     [[nodiscard]] Ex<void> stop() override;
     [[nodiscard]] Ex<void> resume() override;
     void observe_read_point(std::uint32_t off) noexcept override;
@@ -122,7 +133,7 @@ public:
 
     [[nodiscard]] bool ready_for_source() noexcept override;
 
-    [[nodiscard]] Ex<void> set_source(std::unique_ptr<cores::IPcmSource> src) override;
+    [[nodiscard]] Ex<void> set_sheet(std::string_view sheet) override;
 
     [[nodiscard]] Ex<std::size_t> write(std::size_t off, std::span<const std::byte> src) override;
     [[nodiscard]] Ex<std::size_t> read(std::size_t off, std::span<std::byte> dst) const override;
@@ -165,6 +176,8 @@ private:
 
     const os::IClock* clock_;
 
+    infra::OptRef<const svc::Vfs> vfs_{};
+
     Commands* const commands_;
     xthread::Telemetry<std::uint32_t, SeatTag::RT> read_point_{};
     xthread::Telemetry<cores::PcmFeedState, SeatTag::Pcm> state_{};
@@ -190,15 +203,19 @@ private:
 
     using Lease = xthread::SlotPool<PcmMedia, kPcmMediaLeases, kSeatMediatorB>::Lease;
 
+    struct HeldLease {
+        Lease lease{};
+        std::uint32_t home_at = 0;
+    };
+
     struct Commander {
         TASTY_SEAT_RESIDENT(RT);
-        Lease leases[kPcmMediaLeases]{};
-        std::uint32_t lease_seq[kPcmMediaLeases]{};
+        HeldLease held[kPcmMediaLeases]{};
         std::uint32_t sent = 0;
 
         ~Commander() {
-            for (auto& l : leases)
-                (void)l.release();
+            for (auto& h : held)
+                (void)h.lease.release();
         }
     };
 

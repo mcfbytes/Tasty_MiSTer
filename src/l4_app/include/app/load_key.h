@@ -5,6 +5,7 @@
 #include <span>
 
 #include "infra/seat.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -16,11 +17,11 @@ public:
 
     void feed(std::span<const std::uint8_t> bytes) noexcept;
 
-    [[nodiscard]] std::uint32_t value() const noexcept { return crc_; }
+    [[nodiscard]] svc::Crc32 value() const noexcept { return crc_; }
 
 private:
     std::uint64_t skip_;
-    std::uint32_t crc_ = 0;
+    svc::Crc32 crc_{};
 };
 
 }

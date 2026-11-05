@@ -32,19 +32,26 @@ struct ScalerHeader {
         auto b = [raw](std::size_t i) constexpr noexcept {
             return static_cast<std::uint8_t>(raw[i]);
         };
+        constexpr unsigned kByteBits = 8;
         auto be16 = [b](std::size_t i) constexpr noexcept {
-            return static_cast<std::uint16_t>(static_cast<std::uint16_t>(b(i) << 8) | b(i + 1));
+            return static_cast<std::uint16_t>(
+                static_cast<std::uint16_t>(b(i) << kByteBits) | b(i + 1)
+            );
         };
+
+        constexpr std::size_t kAtType = 0, kAtFormat = 1, kAtHeaderSize = 2, kAtAttributes = 4,
+                              kAtWidth = 6, kAtHeight = 8, kAtLine = 10, kAtOutputWidth = 12,
+                              kAtOutputHeight = 14;
         return ScalerHeader{
-            .type = b(0),
-            .format = b(1),
-            .header_size = be16(2),
-            .attributes = be16(4),
-            .width = be16(6),
-            .height = be16(8),
-            .line = be16(10),
-            .output_width = be16(12),
-            .output_height = be16(14)
+            .type = b(kAtType),
+            .format = b(kAtFormat),
+            .header_size = be16(kAtHeaderSize),
+            .attributes = be16(kAtAttributes),
+            .width = be16(kAtWidth),
+            .height = be16(kAtHeight),
+            .line = be16(kAtLine),
+            .output_width = be16(kAtOutputWidth),
+            .output_height = be16(kAtOutputHeight)
         };
     }
 
@@ -53,14 +60,20 @@ struct ScalerHeader {
     }
 
     [[nodiscard]] constexpr std::uint8_t frame_counter() const noexcept {
-        return static_cast<std::uint8_t>((attributes >> 5) & 0x7u);
+        constexpr unsigned kFrameCounterShift = 5;
+        constexpr std::uint16_t kFrameCounterMask = 0x7;
+        return static_cast<std::uint8_t>((attributes >> kFrameCounterShift) & kFrameCounterMask);
     }
 
     [[nodiscard]] constexpr bool triple_buffered() const noexcept {
-        return (attributes & 0x0010u) != 0;
+        constexpr std::uint16_t kAttrTriple = 0x0010;
+        return (attributes & kAttrTriple) != 0;
     }
 
-    [[nodiscard]] constexpr bool interlaced() const noexcept { return (attributes & 0x0001u) != 0; }
+    [[nodiscard]] constexpr bool interlaced() const noexcept {
+        constexpr std::uint16_t kAttrInterlaced = 0x0001;
+        return (attributes & kAttrInterlaced) != 0;
+    }
 
     [[nodiscard]] constexpr bool operator==(const ScalerHeader&) const noexcept = default;
 };

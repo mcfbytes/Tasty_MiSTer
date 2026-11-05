@@ -8,6 +8,7 @@
 #include "infra/seat.h"
 #include "proto/ps2_command_port.h"
 #include "proto/ps2_frame.h"
+#include "proto/types.h"
 
 namespace mister::proto {
 
@@ -15,7 +16,7 @@ class Ps2Mouse {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
-    [[nodiscard]] Ex<void> motion(int dx, int dy, int dz, std::uint8_t buttons);
+    [[nodiscard]] Ex<void> motion(int dx, int dy, int dz, MouseButtons buttons);
 
     [[nodiscard]] bool next_frame(Ps2Frame& out) noexcept;
 

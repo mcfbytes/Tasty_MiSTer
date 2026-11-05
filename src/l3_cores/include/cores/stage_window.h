@@ -3,10 +3,12 @@
 
 #include <cstdint>
 
+#include "proto/types.h"
+
 namespace mister::cores {
 
 struct StageWindow {
-    std::uint8_t index = 0;
+    proto::WideIoIndex index{};
     std::uint32_t address = 0;
     std::uint32_t bytes = 0;
 };

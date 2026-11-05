@@ -8,6 +8,7 @@
 
 #include "app/link_tx_channel.h"
 #include "proto/conf_switches.h"
+#include "hal/types.h"
 #include "infra/opt_ref.h"
 #include "proto/reset_fence.h"
 #include "infra/counter.h"
@@ -16,7 +17,7 @@
 #include "infra/wake_flag.h"
 #include "hal/boards_table.h"
 #include "hal/link_timing.h"
-#include "hal/spi_transport.h"
+#include "proto/link.h"
 #include "reactor/tick.h"
 #include "svc/filter_bank.h"
 #include "svc/filter_resend.h"
@@ -119,7 +120,7 @@ public:
     std::uint32_t staged_generation() const noexcept { return gen_; }
 
     [[nodiscard]] Ex<void> emit(
-        hal::ISpiTransport& link,
+        proto::Link& link,
         std::uint8_t slot,
         std::uint32_t gen,
         infra::OptRef<proto::IResetFence> fence = {}
@@ -129,7 +130,7 @@ public:
     static constexpr std::int64_t kGeoPeriodMs = 500;
 
     void on_rt_round(
-        hal::ISpiTransport& link,
+        proto::Link& link,
         std::int64_t now_ns,
         infra::OptRef<proto::IResetFence> fence = {}
     );
@@ -180,8 +181,8 @@ public:
     static constexpr std::uint16_t kButton1 = 0x0001;
     static constexpr std::uint16_t kButton2 = 0x0002;
     bool update_but_sw(
-        hal::ISpiTransport& link,
-        std::uint16_t buttons,
+        proto::Link& link,
+        hal::ButtonMask buttons,
         bool osd_visible,
         infra::OptRef<proto::IResetFence> fence = {}
     ) noexcept;
@@ -264,21 +265,21 @@ public:
     Stats stats() const noexcept;
 
 private:
-    bool step_prelude(hal::ISpiTransport& link, infra::OptRef<proto::IResetFence> fence);
+    bool step_prelude(proto::Link& link, infra::OptRef<proto::IResetFence> fence);
 
     void publish_prelude() noexcept;
 
     bool consume_filters();
-    bool service_filter_publish(hal::ISpiTransport& link);
+    bool service_filter_publish(proto::Link& link);
     bool arm_filter_stream(
         std::uint16_t flt_flags,
-        std::size_t vert_slot,
+        svc::VFilter vert_slot,
         bool prelude,
         bool tail,
         const svc::ScalingWords& tail_words
     );
-    void step_filter_stream(hal::ISpiTransport& link);
-    std::size_t select_slot(const svc::VideoSample& s) const;
+    void step_filter_stream(proto::Link& link);
+    svc::VFilter select_slot(const svc::VideoSample& s) const;
 
     LinkTxChannel<SeatTag::Ui>& link_tx_;
     std::uint32_t gen_ = 0;
@@ -316,7 +317,7 @@ private:
     std::uint16_t fs_ver_ = 0;
     svc::FilterSendPlan fs_plan_{};
     std::uint8_t fs_seg_i_ = 0;
-    std::uint8_t fs_vert_slot_ = 0;
+    svc::VFilter fs_vert_slot_ = svc::VFilter::Horz;
     std::size_t fs_cursor_ = 0;
     svc::ScalingWords fs_tail_words_{};
     xthread::Counter flt_published_{};
@@ -342,7 +343,7 @@ private:
     std::uint16_t but_sw_sent_ = 0;
 
     [[nodiscard]] Ex<void> emit_but_sw_(
-        hal::ISpiTransport& link,
+        proto::Link& link,
         std::uint16_t word,
         infra::OptRef<proto::IResetFence> fence
     ) noexcept;

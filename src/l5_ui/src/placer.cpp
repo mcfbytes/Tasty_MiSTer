@@ -58,7 +58,7 @@ class PulseProbe final : public IOptionHost {
 public:
     void refuse() override {}
 
-    void write_status(proto::BitField, std::uint32_t) override {}
+    void write_status(proto::BitField, proto::FieldValue) override {}
 
     void toggle(proto::BitField bits, bool ex) override {
         pulsed = true;
@@ -111,7 +111,7 @@ Placement Placer::of(const OptionItem& item) const {
 }
 
 bool Placer::resets_the_game_(const OptionItem& it) const {
-    if (it.page != 0 || !it.screen_row || !it.selectable_index || it.disabled)
+    if (it.page != proto::kRootSubmenu || !it.screen_row || !it.selectable_index || it.disabled)
         return false;
     PulseProbe probe;
     (void)it.activate(OptionItem::Press{.select = true, .at_root = true}, probe);
@@ -121,7 +121,8 @@ bool Placer::resets_the_game_(const OptionItem& it) const {
 Placement Placer::classify_(const OptionItem& it, const CoreVerbs& verbs, PlaceFacts facts) const {
     const KindPlace& row = kKindPlaces[static_cast<std::size_t>(it.kind)];
     if (row.slot) {
-        return it.page == 0 && it.screen_row ? Placement::Slot : Placement::CoreSettings;
+        return it.page == proto::kRootSubmenu && it.screen_row ? Placement::Slot
+                                                               : Placement::CoreSettings;
     }
     if (!row.pulse)
         return row.base;

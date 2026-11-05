@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/electron_core.h"
+#include "cores/core_adopt.h"
 
 #include <algorithm>
 #include <array>

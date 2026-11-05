@@ -8,7 +8,10 @@
 
 namespace mister::hal {
 
-Ex<LinkTimingValues> LinkTimingValues::resolve(const LinkTiming& t, std::uint16_t site) noexcept {
+Ex<LinkTimingValues> LinkTimingValues::resolve(
+    const LinkTiming& t,
+    infra::ErrorSite site
+) noexcept {
     const auto word = t.word_ns.resolve(site, fact_ordinal(FactField::TimingWordNs));
     if (!word)
         return std::unexpected(word.error());
@@ -63,7 +66,7 @@ Ex<LinkTimingValues> LinkTimingValues::resolve(const LinkTiming& t, std::uint16_
 
 Ex<ProgramGeometryValues> ProgramGeometryValues::resolve(
     const ProgramGeometry& g,
-    std::uint16_t site
+    infra::ErrorSite site
 ) noexcept {
     const auto chunk = g.chunk_bytes.resolve(site, fact_ordinal(FactField::ProgramChunkBytes));
     if (!chunk)

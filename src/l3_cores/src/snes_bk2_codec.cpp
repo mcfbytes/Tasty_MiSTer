@@ -230,10 +230,11 @@ Ex<IMovieCodec::Frame> SnesBk2Codec::frame(std::string_view line, const Facts& f
 
 std::optional<IMovieCodec::DigestSpan> SnesBk2Codec::rom_digest_span(
     std::span<const std::uint8_t>,
-    std::uint64_t size
+    proto::FileSize size
 ) const noexcept {
-    const std::uint64_t rem = size % 1024u;
-    return past_header(size, rem == 128u || rem == 512u ? rem : 0u);
+    const std::uint64_t bytes = size.v;
+    const std::uint64_t rem = bytes % 1024u;
+    return past_header(bytes, rem == 128u || rem == 512u ? rem : 0u);
 }
 
 RamImageRecipe SnesBk2Codec::do_recorder_ram(const Facts& f) const noexcept {

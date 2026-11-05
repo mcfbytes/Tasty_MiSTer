@@ -5,6 +5,8 @@
 
 #include "infra/seat.h"
 #include "proto/conf_str.h"
+#include "proto/status_word.h"
+#include "proto/types.h"
 
 namespace mister::ui {
 
@@ -14,9 +16,9 @@ struct StatusView {
 
     TASTY_SEAT_RESIDENT(Ui);
 
-    std::uint16_t w[8] = {};
+    proto::StatusWord status{};
 
-    std::uint32_t field(BitField b) const noexcept;
+    proto::FieldValue field(BitField b) const noexcept;
 };
 
 }

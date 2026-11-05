@@ -21,6 +21,7 @@
 #include "cores/core_adopt.h"
 #include "cores/core_support.h"
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "infra/log_lane.h"
 #include "infra/log_rec.h"
 #include "infra/opt_ref.h"
@@ -58,7 +59,7 @@ public:
         proto::CoreSession& session;
         const SessionBindings& bindings;
         SessionMachine& machine;
-        EmitSite advise_site;
+        infra::ErrorSite advise_site;
         const os::IClock& clock;
         proto::BlockSlots& slots;
         SessionTally& session_tally;
@@ -92,16 +93,16 @@ public:
 
     [[nodiscard]] infra::OptRef<cores::Core> core() const noexcept { return current_; }
 
-    [[nodiscard]] std::uint8_t adopted_slot() const noexcept { return adopted_slot_; }
+    [[nodiscard]] proto::CoreBaySlot adopted_slot() const noexcept { return adopted_slot_; }
 
     [[nodiscard]] bool retiring() const noexcept { return retiring_.gen != 0; }
 
     [[nodiscard]] bool drop_owed() const noexcept { return drop_owed_; }
 
-    [[nodiscard]] std::uint16_t poisoned_slots() const noexcept {
-        std::uint16_t m = 0;
+    [[nodiscard]] proto::BlockSlotMask poisoned_slots() const noexcept {
+        proto::BlockSlotMask m{};
         for (const Retiree& a : abandoned_)
-            m = static_cast<std::uint16_t>(m | a.mask);
+            m = m.united(a.mask);
         return m;
     }
 
@@ -130,34 +131,35 @@ public:
 
                 machine_.close(
                     Event::ConfStrOnlySession{.cause = Event::ConfStrOnlyCause::NoStorage},
-                    EmitSite{ERR_SITE()}
+                    ERR_SITE()
                 );
                 return {};
             case Built::RegistryMiss:
                 machine_.close(
                     Event::ConfStrOnlySession{.cause = Event::ConfStrOnlyCause::RegistryMiss},
-                    EmitSite{ERR_SITE()}
+                    ERR_SITE()
                 );
                 return {};
             case Built::Refused:
                 return std::unexpected(Error{a.err, ERR_SITE(), 0});
         }
 
-        if (a.slot >= kCoreBaySlots || bay_.at(a.slot).gen != a.gen || !bay_.at(a.slot).core) {
+        const proto::CoreBaySlot slot = a.slot;
+        if (!in_bay(slot) || bay_.at(slot).gen != a.gen || !bay_.at(slot).core) {
             ++tally_.stale_adopts;
-            release_(a.slot, a.gen);
-            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), a.slot});
+            release_(slot, a.gen);
+            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
         }
 
         if (current_) {
 
-            if (a.slot != adopted_slot_)
-                release_(a.slot, a.gen);
+            if (slot != adopted_slot_)
+                release_(slot, a.gen);
             return std::unexpected(Error{Errc::core_load, ERR_SITE(), 1});
         }
-        BuiltCore& built = bay_.at(a.slot);
+        BuiltCore& built = bay_.at(slot);
         current_ = infra::OptRef<cores::Core>{*built.core};
-        adopted_slot_ = a.slot;
+        adopted_slot_ = slot;
         adopted_gen_ = a.gen;
 
         if (built.fed_ring.has_value())
@@ -174,7 +176,7 @@ public:
         return {};
     }
 
-    void drop(std::uint64_t t0, std::uint16_t channel_borrows) {
+    void drop(std::uint64_t t0, proto::BlockSlotMask channel_borrows) {
         TASTY_SEAT_BODY(CoreTenancy);
         if (current_.has_value()) {
 
@@ -191,8 +193,8 @@ public:
                 .slot = adopted_slot_,
                 .gen = adopted_gen_,
                 .seat = storage_life_,
-                .mask = storage_life_ ? channel_borrows : std::uint16_t{0},
-                .sent = 0
+                .mask = storage_life_ ? channel_borrows : proto::BlockSlotMask{},
+                .sent = {}
             };
             current_.reset();
             adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
@@ -231,7 +233,8 @@ public:
         binder_.release_feeder();
         if (retire_logs_) {
             retire_logs_ = false;
-            const LogRec::CoreUnload unloaded{sat_u32((log_now_ns() - retire_t0_) / 1'000'000u)};
+            constexpr std::uint64_t kNsPerMs = 1'000'000;
+            const LogRec::CoreUnload unloaded{sat_u32((log_now_ns() - retire_t0_) / kNsPerMs)};
             log_lane_.push(unloaded, log_now_ns());
         }
     }
@@ -248,10 +251,10 @@ private:
         adopted_gen_ = 0;
     }
 
-    void release_(std::uint8_t slot, std::uint16_t gen) noexcept {
-        if (slot >= released_.released_gen.size() || gen == 0)
+    void release_(proto::CoreBaySlot slot, std::uint16_t gen) noexcept {
+        if (!in_bay(slot) || gen == 0)
             return;
-        released_.released_gen[slot] = gen;
+        infra::at_index(released_.released_gen, slot) = gen;
         releases_.publish(released_);
     }
 
@@ -259,26 +262,24 @@ private:
 
         proto::NoBlockRoles none;
         for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
-            const auto bit = static_cast<std::uint16_t>(1u << i);
-            if ((r.mask & bit) == 0u)
-                continue;
             const proto::SlotIndex si{i};
-            if ((r.sent & bit) == 0u && slots_.submit_detach(si, none)) {
-                r.sent = static_cast<std::uint16_t>(r.sent | bit);
+            if (!r.mask.has(si))
+                continue;
+            if (!r.sent.has(si) && slots_.submit_detach(si, none)) {
+                r.sent = r.sent.with(si);
                 continue;
             }
 
-            if (!r.seat || r.seat->release_slot(si)) {
-                r.mask = static_cast<std::uint16_t>(r.mask & ~bit);
-            }
+            if (!r.seat || r.seat->release_slot(si))
+                r.mask = r.mask.without(si);
         }
-        return r.mask == 0u;
+        return r.mask.empty();
     }
 
     void abandon_retiring_(bool counted) noexcept {
         if (counted) {
             ++tally_.core_abandons;
-            session_tally_.last_error = Error{Errc::timeout, ERR_SITE(), retiring_.mask};
+            session_tally_.last_error = Error{Errc::timeout, ERR_SITE(), retiring_.mask.v};
         }
         for (Retiree& a : abandoned_) {
             if (a.gen != 0)
@@ -294,17 +295,17 @@ private:
     }
 
     void release_retiree_(const Retiree& r) noexcept {
-        const auto gens = r.bay_gens();
-        for (std::size_t i = 0; i < kCoreBaySlots; ++i)
-            if (gens[i] != 0)
-                release_(static_cast<std::uint8_t>(i), gens[i]);
+        const BayGens gens = r.bay_gens();
+        for (const proto::CoreBaySlot s : kAllBaySlots)
+            if (infra::at_index(gens, s) != 0)
+                release_(s, infra::at_index(gens, s));
     }
 
     void settle_abandoned_() noexcept {
         for (Retiree& a : abandoned_) {
             if (a.gen == 0)
                 continue;
-            if (a.mask != 0u && !poll_retiree_(a))
+            if (!a.mask.empty() && !poll_retiree_(a))
                 continue;
             release_retiree_(a);
             a = Retiree{};
@@ -318,7 +319,7 @@ private:
     proto::CoreSession& session_;
     const SessionBindings& bindings_;
     SessionMachine& machine_;
-    const EmitSite advise_site_;
+    const infra::ErrorSite advise_site_;
     const os::IClock& clock_;
     proto::BlockSlots& slots_;
     SessionTally& session_tally_;
@@ -329,7 +330,7 @@ private:
     const infra::OptRef<svc::DiscReadService> discs_;
 
     infra::OptRef<cores::Core> current_{};
-    std::uint8_t adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
+    proto::CoreBaySlot adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
     std::uint16_t adopted_gen_ = 0;
 
     Retiree retiring_{};

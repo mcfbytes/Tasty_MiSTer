@@ -46,7 +46,7 @@ main() {
     mkdir -p "$ROOT/tasty" || die "cannot create $ROOT/tasty"
     FAILED=0
     TASTY_DIR=$ROOT/tasty TASTY_BIN=$ROOT/tasty/tasty TASTY_URL=$TASTY_URL TASTY_SHA_URL=$TASTY_SHA_URL TASTY_CATALOG_URL=$TASTY_CATALOG_URL \
-        TASTY_ALLOW_FILE=${TASTY_ALLOW_FILE:-} TASTY_SELF_UPDATE=0 sh "$DEST" update || FAILED=1
+        TASTY_ALLOW_FILE=${TASTY_ALLOW_FILE:-} sh "$DEST" update || FAILED=1
 
     [ -x "$ROOT/tasty/tasty" ] && [ -s "$ROOT/tasty/tas-catalog.tsv" ] ||
         die "tasty or the catalogue could not be downloaded; run the install again, or: sh $DEST update"

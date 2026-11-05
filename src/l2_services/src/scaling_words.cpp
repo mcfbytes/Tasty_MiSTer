@@ -7,13 +7,20 @@ namespace mister::svc {
 
 ScalingWords scaling_words(const VideoSample& s, const ScalingPolicy& pol) noexcept {
     ScalingWords out{};
-    if (pol.vscale_mode >= 4)
+    if (pol.scales_by_resolution())
         return out;
-    const std::uint32_t height = s.rotated() ? s.width : s.height;
+    const std::uint32_t height = s.rotated() ? s.active.width : s.active.height;
     if (pol.scrh != 0) {
         std::uint32_t scrh = pol.scrh;
-        if (pol.vscale_mode != 0 && height != 0) {
-            const std::uint32_t div = 1u << (pol.vscale_mode - 1u);
+        if (pol.steps_height() && height != 0) {
+
+            constexpr std::uint32_t kHalfStep = 2;
+            constexpr std::uint32_t kQuarterStep = 4;
+            std::uint32_t div = 1;
+            if (pol.vscale_mode == VscaleMode::HalfStep)
+                div = kHalfStep;
+            if (pol.vscale_mode == VscaleMode::QuarterStep)
+                div = kQuarterStep;
             const std::uint32_t mag = (scrh * div) / height;
             scrh = (height * mag) / div;
             out.height = static_cast<std::uint16_t>(scrh);
@@ -26,7 +33,7 @@ ScalingWords scaling_words(const VideoSample& s, const ScalingPolicy& pol) noexc
         }
     }
     if (pol.scrw != 0) {
-        if (pol.vscale_border != 0 && !(pol.vscale_mode != 0 && height != 0)) {
+        if (pol.vscale_border != 0 && !(pol.steps_height() && height != 0)) {
             std::uint32_t scrw = pol.scrw;
             std::uint32_t border = pol.vscale_border * 2u;
             if ((border + 100u) > scrw)

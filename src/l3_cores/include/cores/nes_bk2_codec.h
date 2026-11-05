@@ -9,6 +9,7 @@
 
 #include "cores/movie_archive.h"
 #include "cores/nes_movie_codec.h"
+#include "cores/types.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
@@ -52,7 +53,7 @@ public:
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
         std::span<const std::uint8_t> head,
-        std::uint64_t size
+        proto::FileSize size
     ) const noexcept override;
 
     [[nodiscard]] Ex<DigestSource> digest_source(
@@ -62,7 +63,7 @@ public:
 
     struct PadName {
         std::string_view name;
-        std::uint8_t bit;
+        JoyBit bit;
     };
 
     static constexpr std::array<PadName, 8> kPadNames{
@@ -82,11 +83,11 @@ public:
 consteval bool nes_bk2_pad_bits_are_a_permutation() {
     unsigned seen = 0;
     for (const NesBk2Codec::PadName& p : NesBk2Codec::kPadNames) {
-        if (p.bit > 7)
+        if (p.bit.v > 7)
             return false;
-        if ((seen & (1u << p.bit)) != 0)
+        if ((seen & (1u << p.bit.v)) != 0)
             return false;
-        seen |= 1u << p.bit;
+        seen |= 1u << p.bit.v;
     }
     return seen == 0xFFu;
 }

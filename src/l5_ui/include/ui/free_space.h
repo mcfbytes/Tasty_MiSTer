@@ -4,10 +4,12 @@
 #include <cstdint>
 #include <string>
 
+#include "proto/types.h"
+
 namespace mister::ui {
 
 enum class FreeSpaceStyle : std::uint8_t { Classic, Hd };
 
-[[nodiscard]] std::string format_free_space(std::uint64_t avail_bytes, FreeSpaceStyle style);
+[[nodiscard]] std::string format_free_space(proto::FileSize avail, FreeSpaceStyle style);
 
 }

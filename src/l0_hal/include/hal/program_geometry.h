@@ -27,7 +27,7 @@ public:
 
     [[nodiscard]] static Ex<ProgramGeometryValues> resolve(
         const ProgramGeometry& g,
-        std::uint16_t site
+        infra::ErrorSite site
     ) noexcept;
 
     [[nodiscard]] static consteval ProgramGeometryValues measured(const ProgramGeometry& g) {

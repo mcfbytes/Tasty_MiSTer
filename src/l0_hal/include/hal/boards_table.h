@@ -69,7 +69,7 @@ consteval bool de10_sources_every_region() {
     for (std::size_t i = 0; i < kRegionCount; ++i) {
         const PhysRegion& want = regions::kCatalog[i];
         const PhysRegion& have = kDe10Regions[i];
-        if (have.phys.v != want.phys.v || have.len != want.len)
+        if (have.phys != want.phys || have.len != want.len)
             return false;
     }
     return true;
@@ -233,7 +233,7 @@ consteval bool boards_carry_the_published_aperture() {
     for (std::size_t i = 0; i < kBoardTable.size(); ++i) {
         const FpgaAperture& have = kBoardTable[i]->fpga_mem;
         const FpgaAperture& want = kBoardApertures[i];
-        if (have.region.phys.v != want.region.phys.v
+        if (have.region.phys != want.region.phys
             || have.region.len != want.region.len
             || have.mask != want.mask) {
             return false;

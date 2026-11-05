@@ -64,13 +64,12 @@ public:
 
     [[nodiscard]] std::size_t mapped_bytes() const noexcept { return arena_.bytes(); }
 
-    [[nodiscard]] std::size_t encode(
-        const std::byte* rgb,
-        std::size_t line,
+    [[nodiscard]] std::span<const std::byte> encode(
+        RgbRows rgb,
         bool key,
         std::span<std::byte> out
     ) noexcept override;
-    [[nodiscard]] std::size_t rekey(std::span<std::byte> out) noexcept override;
+    [[nodiscard]] std::span<const std::byte> rekey(std::span<std::byte> out) noexcept override;
     [[nodiscard]] std::span<const std::byte> dup() noexcept override;
 
     void restart(const RecOptions& opt) noexcept override;

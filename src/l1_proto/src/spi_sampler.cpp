@@ -7,8 +7,8 @@ namespace {
 hal::PinLevels decoded(const hal::SpiSample& g) noexcept {
     return hal::PinLevels{
         .core_ready = g.ready,
-        .menu_button = (g.buttons & hal::SpiSample::kMenuButton) != 0u,
-        .user_button = (g.buttons & hal::SpiSample::kUserButton) != 0u,
+        .menu_button = g.buttons.has(hal::SpiSample::kMenuButton),
+        .user_button = g.buttons.has(hal::SpiSample::kUserButton),
         .hdmi_int = g.hdmi,
     };
 }

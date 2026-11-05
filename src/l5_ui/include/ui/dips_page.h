@@ -28,16 +28,13 @@ public:
     }
 
     void on_enter(PageContext& ctx) override;
-    void render(OsdRenderer& out) const override;
-    bool describe(app::PageDescription& out) const override;
+
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
 
     MenuMask mask() const override {
         TASTY_SEAT_BODY(DipsPage);
-        const std::uint64_t n = static_cast<std::uint64_t>(table_->count) + 1;
-        if (n >= 64)
-            return MenuMask{~std::uint64_t{0}};
-        return MenuMask{(std::uint64_t{1} << n) - 1};
+        return dense_mask(reset_row().before() + kOneRow);
     }
 
     void set_selection(RowIndex i) override {
@@ -59,6 +56,8 @@ public:
     std::uint32_t commands_published() const noexcept { return published_; }
 
 private:
+    RowIndex reset_row() const noexcept { return row_after(RowCount::of(table_->count)); }
+
     void save_dips();
     template <class A>
     void push_op(const A& op);

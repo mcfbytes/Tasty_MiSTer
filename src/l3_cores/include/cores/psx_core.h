@@ -67,7 +67,7 @@ public:
     }
 
     [[nodiscard]] MountState mount_disc(std::string_view path) override;
-    void set_region(std::uint8_t region) override;
+    void set_region(proto::RegionCode region) override;
 
     [[nodiscard]] Ex<void> deferred_reset() override {
         TASTY_SEAT_BODY(PsxCore);
@@ -105,13 +105,21 @@ private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
 
-    [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IStagingCore> on_staging_core() noexcept override {
+        return infra::OptRef<IStagingCore>{*this};
+    }
 
-    [[nodiscard]] ISectorKick* on_sector_kick() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<ISectorKick> on_sector_kick() noexcept override {
+        return infra::OptRef<ISectorKick>{*this};
+    }
 
-    [[nodiscard]] proto::IBlockServer* on_block_server() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<proto::IBlockServer> on_block_server() noexcept override {
+        return infra::OptRef<proto::IBlockServer>{*this};
+    }
 
-    [[nodiscard]] const ICdDiagnostics* on_cd_diagnostics() const noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<const ICdDiagnostics> on_cd_diagnostics() const noexcept override {
+        return infra::OptRef<const ICdDiagnostics>{*this};
+    }
 
     [[nodiscard]] bool serve_sector_(std::int64_t lba, std::span<std::uint8_t> out) noexcept;
 

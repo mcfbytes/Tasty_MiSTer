@@ -9,6 +9,7 @@
 
 #include "app/path_text.h"
 #include "app/rec_options.h"
+#include "app/types.h"
 #include "cores/movie_codec.h"
 #include "infra/error.h"
 
@@ -25,6 +26,40 @@ enum class TastyVerb : std::uint8_t {
     RecStop,
 };
 
+struct TastyRefusal {
+    enum Code : std::uint32_t {
+        NoVerb = 1,
+        NoMovie,
+        MovieTooLong,
+        NoRecAction,
+        BadRecAction,
+        UnknownVerb,
+        BadRom = 10,
+        BadCore,
+        BadRecord,
+        BadLead,
+        BadLinger,
+        BadVsyncAdjust,
+        BadStopAt,
+        BadRamInit,
+        BadPhase,
+        UnknownOption = 20,
+        CheckNoRom,
+        BadCodec,
+        BadScale,
+        BadEvery,
+        BadFrom,
+        BadTo,
+        BadSegment,
+        BadRecBounds,
+        RecOptionsWithoutRecord,
+        BadMotion,
+        SliceOnRecStart,
+        BadSave,
+        SaveNotPlay,
+    };
+};
+
 struct TastyArgs {
     TastyVerb verb = TastyVerb::Play;
     app::PathText movie{};
@@ -39,7 +74,7 @@ struct TastyArgs {
 
     std::optional<app::PathText> save{};
     std::uint32_t return_after_s = 30;
-    std::uint8_t vsync_adjust = 0;
+    app::VsyncAdjust vsync_adjust = app::VsyncAdjust::Off;
     bool stay = false;
     bool strict = false;
     bool no_splash = false;

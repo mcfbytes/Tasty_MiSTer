@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -10,12 +11,14 @@
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "hal/fpga_memory.h"
 #include "hal/phys_region.h"
 #include "proto/conf_str.h"
+#include "proto/state_slot.h"
 
 namespace mister::proto {
 
@@ -23,13 +26,13 @@ class SaveStateEngine {
     TASTY_SEAT_EXEMPT(component);
 
 public:
-    static constexpr unsigned kSlots = 4;
+    static constexpr unsigned kSlots = kStateSlots.size();
 
     static constexpr std::uint32_t kMaxSlotBytes = 128u * 1024u * 1024u;
 
     static constexpr std::size_t kHeaderBytes = 8;
-    static constexpr std::uint32_t kCounterWord = 0;
-    static constexpr std::uint32_t kSizeWord = 1;
+    static constexpr hal::WordOffset kCounterWord{0};
+    static constexpr hal::WordOffset kSizeWord{1};
 
     static constexpr std::uint32_t kSentinel = 0xFFFF'FFFFu;
 
@@ -64,7 +67,7 @@ public:
     public:
         virtual ~ISaveToast() = default;
 
-        virtual void on_save(unsigned slot) = 0;
+        virtual void on_save(StateSlot slot) = 0;
 
     protected:
         ISaveToast() = default;
@@ -123,17 +126,17 @@ public:
 
     static std::string savestate_dir(const SaveTarget& target);
     static std::string savestate_stem(std::string_view rom_path);
-    static std::string savestate_path(const SaveTarget& target, unsigned slot);
+    static std::string savestate_path(const SaveTarget& target, StateSlot slot);
     static std::string savestate_path_stock(const SaveTarget& target);
 
-    static hal::PhysRegion region_for(const SaveStateDecl& ss, unsigned slot);
+    static hal::PhysRegion region_for(const SaveStateDecl& ss, StateSlot slot);
     static std::string slot_file(std::string_view subdir, std::string_view stem, unsigned digit);
 
     bool mapped() const noexcept { return mapped_; }
 
     const SaveStateDecl& window() const noexcept { return window_; }
 
-    std::uint32_t shadow_counter(unsigned slot) const;
+    std::uint32_t shadow_counter(StateSlot slot) const;
 
     unsigned saves_written() const noexcept { return saves_written_; }
 
@@ -147,14 +150,26 @@ private:
     [[nodiscard]] Ex<void> map_slots(const SaveStateDecl& ss, bool remap);
     [[nodiscard]] Ex<void> scan_slots();
     void drop_slots() noexcept;
-    std::string path_for(unsigned slot) const;
+    std::string path_for(StateSlot slot) const;
 
     hal::PhysRegion aperture_;
     Environment env_;
     SaveStateDecl window_{};
 
-    std::optional<hal::FpgaMemory> regions_[kSlots];
-    std::uint32_t ss_cnt_[kSlots]{};
+    struct Shadow {
+        TASTY_SEAT_EXEMPT(component);
+        std::optional<hal::FpgaMemory> region;
+        std::uint32_t counter = 0;
+
+        void rearm() noexcept { counter = kSentinel; }
+
+        void drop() noexcept {
+            region.reset();
+            rearm();
+        }
+    };
+
+    infra::IndexedArray<Shadow, kSlots, StateSlot> shadows_{};
 
     std::string subdir_;
     std::string stem_;

@@ -6,9 +6,11 @@
 #include "app/event.h"
 #include "app/uart_mode.h"
 #include "app/uart_performer.h"
+#include "app/verdict_sinks.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
+#include "infra/park_timeout.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
@@ -38,7 +40,7 @@ struct Event;
 
 namespace mister::fw {
 
-inline constexpr int kUiPollMs = 10;
+inline constexpr infra::ParkTimeout kUiPollMs{10};
 
 class UiMain final : public xthread::SeatMain<UiMain> {
     TASTY_SEAT_RESIDENT(Ui);
@@ -70,6 +72,8 @@ public:
 
         infra::OptRef<app::UiWriteLane> ui_writes{};
 
+        app::VerdictSinks verdicts{};
+
         infra::OptRef<app::IOwnerTick> owner_tick{};
 
         infra::OptRef<app::LwOsdEndpoint> lw_osd{};
@@ -97,7 +101,7 @@ public:
 
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
 
-    [[nodiscard]] int park_ms() const noexcept { return kUiPollMs; }
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return kUiPollMs; }
 
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
@@ -142,6 +146,7 @@ private:
     app::LinkRxChannel<SeatTag::Ui>& ui_rx_;
     infra::OptRef<app::SaveStateAttach> save_states_;
     infra::OptRef<app::UiWriteLane> ui_writes_;
+    const app::VerdictSinks verdicts_;
     xthread::WakeFlag& wake_;
     xthread::WakeFlag stop_;
     xthread::PauseLatch pause_;

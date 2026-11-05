@@ -2,11 +2,11 @@
 #pragma once
 
 #include "infra/error.h"
-#include "hal/spi_transport.h"
+#include "proto/link_frame.h"
 #include "proto/ps2_frame.h"
 
 namespace mister::proto {
 
-[[nodiscard]] Ex<void> write_ps2_frame(hal::ISpiTransport& link, const Ps2Frame& f);
+[[nodiscard]] Ex<void> write_ps2_frame(ILinkFrame& frame, const Ps2Frame& f);
 
 }

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "proto/user_io/rumble_poll.h"
 #include "svc/types.h"
 
 namespace mister::svc {
@@ -14,8 +15,7 @@ public:
     [[nodiscard]] virtual RumblePadSet rumble_pads() const noexcept = 0;
     [[nodiscard]] virtual RumbleApply rumble(
         PlayerIndex player,
-        std::uint16_t strong,
-        std::uint16_t weak
+        proto::user_io::RumbleMotors motors
     ) noexcept = 0;
 
 protected:

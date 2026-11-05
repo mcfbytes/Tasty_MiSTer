@@ -7,6 +7,7 @@
 
 #include "app/backdrop_sampler.h"
 #include "app/backdrop_scaler.h"
+#include "app/flip_buffer.h"
 #include "app/hd_rect.h"
 #include "infra/seat.h"
 
@@ -39,7 +40,7 @@ public:
 
     [[nodiscard]] bool committed() const noexcept { return step_ != Step::Scale && whole_; }
 
-    [[nodiscard]] std::uint8_t target() const noexcept { return slot_; }
+    [[nodiscard]] FlipBuffer target() const noexcept { return target_; }
 
     BackdropSampler::Image read(
         BackdropSampler& sampler,
@@ -50,7 +51,7 @@ public:
 
     [[nodiscard]] HdRect scale_band() noexcept;
 
-    void begin_copy(std::uint8_t slot, HdRect box, const Canvas& c) noexcept;
+    void begin_copy(FlipBuffer buffer, HdRect box, const Canvas& c) noexcept;
 
     [[nodiscard]] HdRect copy_band() noexcept;
 
@@ -65,7 +66,7 @@ private:
     Canvas canvas_{};
     HdRect box_{};
     std::int32_t next_row_ = 0;
-    std::uint8_t slot_ = 0;
+    FlipBuffer target_{};
     bool whole_ = true;
 };
 

@@ -8,13 +8,10 @@
 #include "ui/transition.h"
 #include "ui/types.h"
 
-namespace mister::app {
-struct PageDescription;
-}
-
 namespace mister::ui {
 
-class OsdRenderer;
+struct PageWalk;
+
 struct UiEvent;
 
 class IOptionsView {
@@ -25,17 +22,16 @@ public:
 
     [[nodiscard]] virtual BuildEnv walk_env(const BuildEnv& env) const = 0;
 
-    virtual void on_walk() = 0;
+    virtual void on_model_rebuilt() = 0;
 
-    virtual void render(OsdRenderer& out) const = 0;
-    virtual bool describe(app::PageDescription& out) const = 0;
+    virtual bool walk(PageWalk& out) const = 0;
     virtual Transition handle(const UiEvent& ev) = 0;
 
     [[nodiscard]] virtual MenuMask mask() const = 0;
     virtual void set_selection(RowIndex i) = 0;
     [[nodiscard]] virtual RowIndex selection() const = 0;
 
-    [[nodiscard]] virtual std::uint32_t first_row() const noexcept = 0;
+    [[nodiscard]] virtual RowIndex first_row() const noexcept = 0;
 
     [[nodiscard]] virtual bool empty() const = 0;
 

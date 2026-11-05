@@ -17,11 +17,16 @@ inline constexpr bool kNeoGeoCdReadyProbeSkipsMode1 = false;
 inline constexpr bool kNeoGeoCdStreamOnDataTrack = true;
 
 inline constexpr CdTickPeriods kNeoGeoCdTicks{
-    .idle_us = 10'000,
-    .stream_us = 10'000,
-    .caller_us = 1'000,
+    .idle = std::chrono::microseconds{10'000},
+    .stream = std::chrono::microseconds{10'000},
+    .caller = std::chrono::microseconds{1'000},
     .speeds = 4,
-    .speed_us = {10'000, 5'000, 4'000, 2'000},
+    .speed = {
+        std::chrono::microseconds{10'000},
+        std::chrono::microseconds{5'000},
+        std::chrono::microseconds{4'000},
+        std::chrono::microseconds{2'000}
+    },
 };
 
 static_assert(
@@ -45,18 +50,18 @@ static_assert(
     "neogeocd.cpp:97-108 is the tree's only speed-indexed cadence"
 );
 static_assert(
-    kNeoGeoCdTicks.speed_us[0] == kNeoGeoCdTicks.idle_us
-        && kNeoGeoCdTicks.speed_us[0] == kNeoGeoCdTicks.stream_us,
+    kNeoGeoCdTicks.speed[0] == kNeoGeoCdTicks.idle
+        && kNeoGeoCdTicks.speed[0] == kNeoGeoCdTicks.stream,
     "neogeocd.cpp:90: `interval = 10` is the default AND the speed-0 entry"
 );
 static_assert(
-    kNeoGeoCdTicks.speed_us[0] > kNeoGeoCdTicks.speed_us[1]
-        && kNeoGeoCdTicks.speed_us[1] > kNeoGeoCdTicks.speed_us[2]
-        && kNeoGeoCdTicks.speed_us[2] > kNeoGeoCdTicks.speed_us[3],
+    kNeoGeoCdTicks.speed[0] > kNeoGeoCdTicks.speed[1]
+        && kNeoGeoCdTicks.speed[1] > kNeoGeoCdTicks.speed[2]
+        && kNeoGeoCdTicks.speed[2] > kNeoGeoCdTicks.speed[3],
     "neogeocd.cpp:97-108: a higher speed index is a shorter interval"
 );
 static_assert(
-    kNeoGeoCdTicks.caller_us < kNeoGeoCdTicks.speed_us[3],
+    kNeoGeoCdTicks.caller < kNeoGeoCdTicks.speed[3],
     "the row must run faster than the 2 ms pass, or the gate aliases it"
 );
 

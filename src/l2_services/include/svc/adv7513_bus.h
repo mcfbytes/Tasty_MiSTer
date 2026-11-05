@@ -5,11 +5,13 @@
 #include <span>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 #include "hal/video_out_decl.h"
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "os/types.h"
 
 namespace mister::svc {
 struct Modeline;
@@ -24,11 +26,11 @@ struct RegWrite;
 
 inline constexpr bool kAdvModeWrite = true;
 
-inline constexpr std::uint8_t kRegPacketEnable = 0x40;
+inline constexpr os::I2cReg kRegPacketEnable{0x40};
 inline constexpr std::uint8_t kPacketMaskSpd = 0x40;
-inline constexpr std::uint8_t kPacketOffsetSpd = 0x00;
+inline constexpr os::I2cReg kPacketOffsetSpd{0x00};
 
-inline constexpr std::uint8_t kPacketUpdateOff = 0x1F;
+inline constexpr os::I2cReg kPacketUpdateOff{0x1F};
 inline constexpr std::size_t kSpdPacketBytes = 31;
 
 struct SpdPacket {
@@ -38,12 +40,12 @@ struct SpdPacket {
 
 SpdPacket build_standard_spd(std::string_view core_name);
 
-constexpr std::uint32_t reg_errno_detail(std::uint8_t reg, std::uint32_t err) noexcept {
-    return static_cast<std::uint32_t>(reg) | (err << 8);
+constexpr std::uint32_t reg_errno_detail(os::I2cReg reg, std::uint32_t err) noexcept {
+    return static_cast<std::uint32_t>(reg.v) | (err << 8);
 }
 
-constexpr std::uint8_t detail_reg(std::uint32_t d) noexcept {
-    return static_cast<std::uint8_t>(d & 0xFFu);
+constexpr os::I2cReg detail_reg(std::uint32_t d) noexcept {
+    return os::I2cReg{static_cast<std::uint8_t>(d & 0xFFu)};
 }
 
 constexpr std::uint32_t detail_errno(std::uint32_t d) noexcept {
@@ -80,9 +82,8 @@ public:
 
     [[nodiscard]] Ex<void> set_packet(
         std::uint8_t mask,
-        std::uint8_t offset,
-        const std::uint8_t* data,
-        std::size_t n
+        os::I2cReg first_reg,
+        std::optional<std::span<const std::uint8_t>> payload
     );
 
     [[nodiscard]] Ex<void> spd_config(const SpdPacket& p);
@@ -101,9 +102,9 @@ public:
 
     std::uint32_t errors() const noexcept { return errors_; }
 
-    std::uint8_t fail_reg() const noexcept { return fail_reg_; }
+    os::I2cReg fail_reg() const noexcept { return fail_reg_; }
 
-    std::uint8_t spd_fail_reg() const noexcept { return spd_fail_reg_; }
+    os::I2cReg spd_fail_reg() const noexcept { return spd_fail_reg_; }
 
     bool mode_cached() const noexcept { return last_vic_ != 0xFFu; }
 
@@ -121,8 +122,8 @@ private:
 
     std::uint32_t writes_ = 0;
     std::uint32_t errors_ = 0;
-    std::uint8_t fail_reg_ = 0;
-    std::uint8_t spd_fail_reg_ = 0;
+    os::I2cReg fail_reg_{};
+    os::I2cReg spd_fail_reg_{};
 };
 
 }

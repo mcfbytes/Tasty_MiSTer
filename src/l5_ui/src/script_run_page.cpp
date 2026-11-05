@@ -7,8 +7,11 @@
 
 #include "app/page_description.h"
 #include "ui/bt_ops.h"
+#include "ui/draw_classic.h"
 #include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
+#include "ui/page_row.h"
+#include "ui/page_walk.h"
 #include "ui/script_launch.h"
 #include "ui/script_policy.h"
 #include "ui/page_context.h"
@@ -17,8 +20,9 @@
 namespace mister::ui {
 
 namespace {
-constexpr std::uint32_t kRows = 16;
-constexpr std::uint32_t kOutputRows = kRows - 2;
+
+constexpr std::size_t kRows = 16;
+constexpr std::size_t kOutputRows = kRows - 2;
 }
 
 ScriptRunPage::ScriptRunPage(ScriptKind kind, std::string argv0, bool bt_reset) noexcept
@@ -38,62 +42,88 @@ void ScriptRunPage::on_enter(PageContext& ctx) {
         ++refusals_;
 }
 
-void ScriptRunPage::render(OsdRenderer& out) const {
+bool ScriptRunPage::walk(PageWalk& out) const {
     TASTY_SEAT_BODY(ScriptRunPage);
-    out.set_title(runner_.title());
-
-    if (phase_ != Phase::Run) {
-
-        for (std::uint32_t i = 0; i < kRows - 1; ++i) {
-            out.text(
-                proto::OsdRow{static_cast<std::uint8_t>(i)},
-                i == 7 ? std::string_view{"   Delete all pairings..."} : std::string_view{}
-            );
-        }
-        out.text(proto::OsdRow{static_cast<std::uint8_t>(kRows - 1)}, "           Finish", true);
-        return;
-    }
-
-    const auto lines = runner_.lines();
-    const std::size_t total = lines.size();
-    const std::size_t first = total > kOutputRows ? total - kOutputRows : 0;
-    for (std::uint32_t i = 0; i < kOutputRows; ++i) {
-        const std::size_t idx = first + i;
-        out.text(
-            proto::OsdRow{static_cast<std::uint8_t>(i)},
-            idx < total ? std::string_view{lines[idx]} : std::string_view{}
-        );
-    }
-    out.text(proto::OsdRow{static_cast<std::uint8_t>(kOutputRows)}, "");
-
-    const std::string_view footer = runner_.finished() ? std::string_view{"             OK"}
-                                                       : policy_.running_footer();
-    out.text(proto::OsdRow{static_cast<std::uint8_t>(kRows - 1)}, footer, true);
-}
-
-bool ScriptRunPage::describe(app::PageDescription& out) const {
-    TASTY_SEAT_BODY(ScriptRunPage);
-    out = {};
-    (void)out.title.assign(runner_.title());
+    (void)out.page.title.assign(runner_.title());
+    out.title_arrow = OsdRenderer::kArrowNone;
+    out.count = 0;
 
     const std::span<const std::string> lines = runner_.lines();
-    const std::uint16_t total = static_cast<std::uint16_t>(lines.size());
-    constexpr std::uint16_t kMax = static_cast<std::uint16_t>(app::PageDescription::kMaxRows);
-    const std::uint16_t count = total < kMax ? total : kMax;
-    const std::uint16_t first = static_cast<std::uint16_t>(total - count);
-    out.first = first;
-    out.row_count = static_cast<std::uint8_t>(count);
-    out.total = total;
-    for (std::uint8_t i = 0; i < static_cast<std::uint8_t>(count); ++i) {
-        app::PageDescription::Row& row = out.rows[i];
-        row.kind = app::PageDescription::RowKind::Text;
-        (void)row.label.assign(lines[static_cast<std::size_t>(first) + i]);
-    }
+    const std::size_t line_count = lines.size();
+    const std::size_t hd_count = line_count < app::PageDescription::kMaxRows
+        ? line_count
+        : app::PageDescription::kMaxRows;
+    const std::size_t hd_first = line_count - hd_count;
+    out.page.first = static_cast<std::uint16_t>(hd_first);
+    out.page.total = static_cast<std::uint16_t>(line_count);
+
     std::string_view word = runner_.finished() ? std::string_view{"OK"} : policy_.running_footer();
     word.remove_prefix(std::min(word.find_first_not_of(' '), word.size()));
     std::string legend{"A "};
     legend += word;
-    (void)out.footer.assign(legend);
+    (void)out.page.footer.assign(legend);
+
+    const bool notice = phase_ != Phase::Run;
+    const std::size_t first = line_count > kOutputRows ? line_count - kOutputRows : 0;
+
+    for (std::size_t i = 0; i < hd_count; ++i) {
+        const std::size_t idx = hd_first + i;
+        PageRow& r = out.rows[out.count++];
+        r.has_hd = true;
+        r.hd.kind = app::PageDescription::RowKind::Text;
+        (void)r.hd.label.assign(lines[idx]);
+
+        if (notice)
+            continue;
+        const std::size_t vr = idx - first;
+        if (vr >= kOutputRows)
+            continue;
+        r.classic = classic_row(
+            OsdRow::of(vr),
+            lines[idx],
+            false,
+            false,
+            std::nullopt,
+            OsdRenderer::kArrowNone
+        );
+    }
+
+    if (notice) {
+
+        for (std::size_t i = 0; i < kRows; ++i) {
+            const bool finish = i + 1 == kRows;
+            out.rows[out.count++].classic = classic_row(
+                OsdRow::of(i),
+                finish
+                    ? std::string_view{"           Finish"}
+                    : (i == 7 ? std::string_view{"   Delete all pairings..."} : std::string_view{}),
+                finish,
+                false,
+                std::nullopt,
+                OsdRenderer::kArrowNone
+            );
+        }
+        return true;
+    }
+
+    for (std::size_t i = 0; i < kOutputRows; ++i) {
+        const std::size_t idx = first + i;
+        if (idx < line_count && idx >= hd_first)
+            continue;
+        out.rows[out.count++].classic = classic_row(
+            OsdRow::of(i),
+            idx < line_count ? std::string_view{lines[idx]} : std::string_view{},
+            false,
+            false,
+            std::nullopt,
+            OsdRenderer::kArrowNone
+        );
+    }
+    out.rows[out.count++].classic = classic_row(OsdRow::of(kOutputRows), std::string_view{});
+
+    const std::string_view footer = runner_.finished() ? std::string_view{"             OK"}
+                                                       : policy_.running_footer();
+    out.rows[out.count++].classic = classic_row(OsdRow::of(kRows - 1), footer, true);
     return true;
 }
 
@@ -101,7 +131,7 @@ Transition ScriptRunPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(ScriptRunPage);
     if (phase_ == Phase::RenewPaint)
         return Transition{};
-    if ((ev.buttons & (UiEvent::Select | UiEvent::Menu | UiEvent::Back)) == 0) {
+    if (!ev.buttons.has_any({UiEvent::Select | UiEvent::Menu | UiEvent::Back})) {
         return Transition{};
     }
 
@@ -110,7 +140,7 @@ Transition ScriptRunPage::handle(const UiEvent& ev) {
     if (runner_.finished())
         return Transition{};
 
-    if (policy_.renews_on_back() && (ev.buttons & UiEvent::Back) != 0) {
+    if (policy_.renews_on_back() && ev.buttons.has_any({UiEvent::Back})) {
         (void)runner_.cancel();
         phase_ = Phase::RenewPaint;
         return Transition{};

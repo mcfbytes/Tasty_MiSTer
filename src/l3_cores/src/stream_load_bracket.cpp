@@ -12,6 +12,7 @@ Ex<StreamLoadBracket> StreamLoadBracket::open(
     IStreamLoad& core,
     proto::IImageSink& sink,
     IoIndex index,
+    StreamLoadKind kind,
     std::uint32_t length
 ) {
     auto params = core.stream_opening(index);
@@ -22,26 +23,30 @@ Ex<StreamLoadBracket> StreamLoadBracket::open(
     auto b = proto::ImageBracket::open(sink, proto::WideIoIndex{index.v}, *params);
     if (!b)
         return std::unexpected(b.error());
-    return StreamLoadBracket(core, index, std::move(*b));
+    return StreamLoadBracket(index, kind, std::move(*b));
 }
 
 StreamLoadBracket::StreamLoadBracket(StreamLoadBracket&& o) noexcept
-    : core_(o.core_),
-      index_(o.index_),
+    : index_(o.index_),
+      kind_(o.kind_),
       bracket_(std::move(o.bracket_)) {
     o.bracket_.reset();
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+
 StreamLoadBracket::~StreamLoadBracket() {
     cut_();
 }
+
+#pragma GCC diagnostic pop
 
 void StreamLoadBracket::cut_() noexcept {
     if (!bracket_)
         return;
     (void)bracket_->end();
     bracket_.reset();
-    core_->stream_closed(StreamLoadEnd{.index = index_});
 }
 
 Ex<void> StreamLoadBracket::write(std::span<const std::uint8_t> piece) {
@@ -74,17 +79,33 @@ Ex<std::size_t> StreamLoadBracket::write_taken(std::span<const std::uint8_t> pie
     return taken;
 }
 
-Ex<void> StreamLoadBracket::close(std::uint64_t bytes, std::uint32_t crc) {
+Ex<void> StreamLoadBracket::close(
+    infra::OptRef<IStreamLoad> live,
+    proto::FileSize bytes,
+    svc::Crc32 crc
+) {
     TASTY_SEAT_BODY(StreamLoadBracket);
     if (!bracket_)
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_.v});
     auto r = bracket_->end();
     bracket_.reset();
-    core_->stream_closed(
-        r ? StreamLoadEnd{.index = index_, .bytes = bytes, .crc = crc, .ok = true}
-          : StreamLoadEnd{.index = index_}
-    );
+    if (live) {
+        live->stream_closed(
+            r ? StreamLoadEnd{.index = index_, .bytes = bytes, .crc = crc, .ok = true}
+              : StreamLoadEnd{.index = index_}
+        );
+    }
     return r;
+}
+
+void StreamLoadBracket::cut(infra::OptRef<IStreamLoad> live) noexcept {
+    TASTY_SEAT_BODY(StreamLoadBracket);
+    if (!bracket_)
+        return;
+    (void)bracket_->end();
+    bracket_.reset();
+    if (live)
+        live->stream_closed(StreamLoadEnd{.index = index_});
 }
 
 }

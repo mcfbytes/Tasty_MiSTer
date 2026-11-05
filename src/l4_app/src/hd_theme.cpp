@@ -7,10 +7,36 @@
 #include <cstdlib>
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <span>
 
 namespace mister::app {
 namespace {
+
+[[nodiscard]] Rgb888 unpack_565(std::uint16_t px) noexcept {
+    constexpr unsigned kRedPlace = 11;
+    constexpr unsigned kGreenPlace = 5;
+    constexpr unsigned kGreenBits = 0x3F;
+    constexpr unsigned kBlueBits = 0x1F;
+    constexpr unsigned kRedUp = 3;
+    constexpr unsigned kGreenUp = 2;
+    constexpr unsigned kBlueUp = 3;
+    constexpr unsigned kRedRepeat = 2;
+    constexpr unsigned kGreenRepeat = 4;
+    constexpr unsigned kBlueRepeat = 2;
+    const unsigned r = px >> kRedPlace;
+    const unsigned g = (px >> kGreenPlace) & kGreenBits;
+    const unsigned b = px & kBlueBits;
+    return rgb_from_channels(
+        {static_cast<std::uint8_t>((r << kRedUp) | (r >> kRedRepeat)),
+         static_cast<std::uint8_t>((g << kGreenUp) | (g >> kGreenRepeat)),
+         static_cast<std::uint8_t>((b << kBlueUp) | (b >> kBlueRepeat))}
+    );
+}
+
+[[nodiscard]] Rgb888 grey_of(std::uint8_t level) noexcept {
+    return rgb_from_channels({level, level, level});
+}
 
 using Rgb = std::array<std::uint8_t, 3>;
 
@@ -20,18 +46,49 @@ struct Lch {
     double h = 0.0;
 };
 
-Rgb unpack(std::uint32_t c) noexcept {
-    return {
-        static_cast<std::uint8_t>(c >> 16),
-        static_cast<std::uint8_t>(c >> 8),
-        static_cast<std::uint8_t>(c)
-    };
+using Matrix3 = std::array<std::array<double, 3>, 3>;
+
+constexpr double kByteMax = 255.0;
+
+constexpr double kSrgbToLinearKnee = 0.04045;
+constexpr double kSrgbFromLinearKnee = 0.0031308;
+constexpr double kSrgbLinearSlope = 12.92;
+constexpr double kSrgbOffset = 0.055;
+constexpr double kSrgbScale = 1.055;
+constexpr double kSrgbGamma = 2.4;
+constexpr double kRoundHalf = 0.5;
+
+constexpr std::array<double, 3> kLuma{0.2126, 0.7152, 0.0722};
+
+constexpr Matrix3 kLmsOfLinear{
+    {{0.4122214708, 0.5363325363, 0.0514459929},
+     {0.2119034982, 0.6806995451, 0.1073969566},
+     {0.0883024619, 0.2817188376, 0.6299787005}}
+};
+constexpr Matrix3 kLabOfLms{
+    {{0.2104542553, 0.7936177850, -0.0040720468},
+     {1.9779984951, -2.4285922050, 0.4505937099},
+     {0.0259040371, 0.7827717662, -0.8086757660}}
+};
+constexpr std::array<double, 2> kLmsLOfAb{0.3963377774, 0.2158037573};
+constexpr std::array<double, 2> kLmsMOfAb{-0.1055613458, -0.0638541728};
+constexpr std::array<double, 2> kLmsSOfAb{-0.0894841775, -1.2914855480};
+constexpr Matrix3 kLinearOfLms3{
+    {{4.0767416621, -3.3077115913, 0.2309699292},
+     {-1.2684380046, 2.6097574011, -0.3413193965},
+     {-0.0041960863, -0.7034186147, 1.7076147010}}
+};
+constexpr double kGamutEps = 1e-6;
+
+constexpr Rgb888 kBlack{0x000000u};
+constexpr Rgb888 kWhite{0xffffffu};
+
+Rgb unpack(Rgb888 c) noexcept {
+    return c.channels();
 }
 
-std::uint32_t pack(Rgb c) noexcept {
-    return (static_cast<std::uint32_t>(c[0]) << 16)
-        | (static_cast<std::uint32_t>(c[1]) << 8)
-        | c[2];
+Rgb888 pack(Rgb c) noexcept {
+    return rgb_from_channels(c);
 }
 
 std::uint8_t mix_ch(std::uint8_t x, std::uint8_t y, float t) noexcept {
@@ -40,69 +97,77 @@ std::uint8_t mix_ch(std::uint8_t x, std::uint8_t y, float t) noexcept {
     );
 }
 
-std::uint32_t mix(std::uint32_t a, std::uint32_t b, float t) noexcept {
+Rgb888 mix(Rgb888 a, Rgb888 b, float t) noexcept {
     const Rgb x = unpack(a);
     const Rgb y = unpack(b);
     return pack({mix_ch(x[0], y[0], t), mix_ch(x[1], y[1], t), mix_ch(x[2], y[2], t)});
 }
 
 double to_linear(std::uint8_t v) noexcept {
-    const double s = static_cast<double>(v) / 255.0;
-    return s <= 0.04045 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+    const double s = static_cast<double>(v) / kByteMax;
+    return s <= kSrgbToLinearKnee ? s / kSrgbLinearSlope
+                                  : std::pow((s + kSrgbOffset) / kSrgbScale, kSrgbGamma);
 }
 
 std::uint8_t from_linear(double v) noexcept {
     const double c = std::clamp(v, 0.0, 1.0);
-    const double s = c <= 0.0031308 ? c * 12.92 : 1.055 * std::pow(c, 1.0 / 2.4) - 0.055;
-    return static_cast<std::uint8_t>(s * 255.0 + 0.5);
+    const double s = c <= kSrgbFromLinearKnee
+        ? c * kSrgbLinearSlope
+        : kSrgbScale * std::pow(c, 1.0 / kSrgbGamma) - kSrgbOffset;
+    return static_cast<std::uint8_t>(s * kByteMax + kRoundHalf);
 }
 
-double luminance(std::uint32_t rgb) noexcept {
+double luminance(Rgb888 rgb) noexcept {
     const Rgb c = unpack(rgb);
-    return 0.2126 * to_linear(c[0]) + 0.7152 * to_linear(c[1]) + 0.0722 * to_linear(c[2]);
+    return kLuma[0] * to_linear(c[0]) + kLuma[1] * to_linear(c[1]) + kLuma[2] * to_linear(c[2]);
 }
 
-Lch to_lch(std::uint32_t rgb) noexcept {
+Lch to_lch(Rgb888 rgb) noexcept {
     const Rgb c = unpack(rgb);
     const double r = to_linear(c[0]);
     const double g = to_linear(c[1]);
     const double b = to_linear(c[2]);
-    const double l = std::cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
-    const double m = std::cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
-    const double s = std::cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-    const double ok_l = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
-    const double ok_a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
-    const double ok_b = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    const auto& m = kLmsOfLinear;
+    const double l = std::cbrt(m[0][0] * r + m[0][1] * g + m[0][2] * b);
+    const double mm = std::cbrt(m[1][0] * r + m[1][1] * g + m[1][2] * b);
+    const double s = std::cbrt(m[2][0] * r + m[2][1] * g + m[2][2] * b);
+    const auto& k = kLabOfLms;
+    const double ok_l = k[0][0] * l + k[0][1] * mm + k[0][2] * s;
+    const double ok_a = k[1][0] * l + k[1][1] * mm + k[1][2] * s;
+    const double ok_b = k[2][0] * l + k[2][1] * mm + k[2][2] * s;
     return {ok_l, std::hypot(ok_a, ok_b), std::atan2(ok_b, ok_a)};
 }
 
 std::array<double, 3> lch_to_linear(Lch x) noexcept {
     const double ok_a = x.c * std::cos(x.h);
     const double ok_b = x.c * std::sin(x.h);
-    const double l = x.l + 0.3963377774 * ok_a + 0.2158037573 * ok_b;
-    const double m = x.l - 0.1055613458 * ok_a - 0.0638541728 * ok_b;
-    const double s = x.l - 0.0894841775 * ok_a - 1.2914855480 * ok_b;
+    const double l = x.l + kLmsLOfAb[0] * ok_a + kLmsLOfAb[1] * ok_b;
+    const double m = x.l + kLmsMOfAb[0] * ok_a + kLmsMOfAb[1] * ok_b;
+    const double s = x.l + kLmsSOfAb[0] * ok_a + kLmsSOfAb[1] * ok_b;
     const double l3 = l * l * l;
     const double m3 = m * m * m;
     const double s3 = s * s * s;
+    const auto& k = kLinearOfLms3;
     return {
-        4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3,
-        -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3,
-        -0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3
+        k[0][0] * l3 + k[0][1] * m3 + k[0][2] * s3,
+        k[1][0] * l3 + k[1][1] * m3 + k[1][2] * s3,
+        k[2][0] * l3 + k[2][1] * m3 + k[2][2] * s3
     };
 }
 
 bool in_gamut(const std::array<double, 3>& v) noexcept {
-    constexpr double kEps = 1e-6;
-    return std::all_of(v.begin(), v.end(), [](double c) { return c >= -kEps && c <= 1.0 + kEps; });
+    return std::all_of(v.begin(), v.end(), [](double c) {
+        return c >= -kGamutEps && c <= 1.0 + kGamutEps;
+    });
 }
 
-std::uint32_t from_lch(Lch x) noexcept {
+Rgb888 from_lch(Lch x) noexcept {
+    constexpr int kChromaBisections = 24;
     x.l = std::clamp(x.l, 0.0, 1.0);
     if (!in_gamut(lch_to_linear(x))) {
         double lo = 0.0;
         double hi = x.c;
-        for (int i = 0; i < 24; ++i) {
+        for (int i = 0; i < kChromaBisections; ++i) {
             const double mid = (lo + hi) / 2.0;
             if (in_gamut(lch_to_linear(Lch{x.l, mid, x.h})))
                 lo = mid;
@@ -115,29 +180,24 @@ std::uint32_t from_lch(Lch x) noexcept {
     return pack({from_linear(v[0]), from_linear(v[1]), from_linear(v[2])});
 }
 
-double shown_contrast(std::uint32_t a, std::uint32_t b) noexcept {
+double shown_contrast(Rgb888 a, Rgb888 b) noexcept {
     return contrast_ratio(shown_565(a), shown_565(b));
 }
 
-std::uint32_t walk_lightness(
-    std::uint32_t start,
-    std::uint32_t bg,
-    double floor,
-    bool toward_light
-) noexcept {
+Rgb888 walk_lightness(Rgb888 start, Rgb888 bg, double floor, bool toward_light) noexcept {
     if (shown_contrast(start, bg) >= floor)
         return start;
     const Lch from = to_lch(start);
     constexpr double kStep = 0.002;
     for (double l = from.l; l >= 0.0 && l <= 1.0; l += toward_light ? kStep : -kStep) {
-        const std::uint32_t c = from_lch(Lch{l, from.c, from.h});
+        const Rgb888 c = from_lch(Lch{l, from.c, from.h});
         if (shown_contrast(c, bg) >= floor)
             return c;
     }
-    return shown_contrast(0xffffffu, bg) >= shown_contrast(0x000000u, bg) ? 0xffffffu : 0x000000u;
+    return shown_contrast(kWhite, bg) >= shown_contrast(kBlack, bg) ? kWhite : kBlack;
 }
 
-std::uint32_t surface(const HdStyle& s, std::uint32_t accent, float t, float bias) noexcept {
+Rgb888 surface(const HdStyle& s, Rgb888 accent, float t, float bias) noexcept {
     return mix(mix(s.primary, s.text, t), accent, bias);
 }
 
@@ -163,7 +223,7 @@ std::uint8_t slint_quantize(float c) noexcept {
     return static_cast<std::uint8_t>(x);
 }
 
-Hsv to_hsv(std::uint32_t rgb) noexcept {
+Hsv to_hsv(Rgb888 rgb) noexcept {
     const Rgb c = unpack(rgb);
     const float r = static_cast<float>(c[0]) / 255.f;
     const float g = static_cast<float>(c[1]) / 255.f;
@@ -182,7 +242,7 @@ Hsv to_hsv(std::uint32_t rgb) noexcept {
     return {rem_euclid(60.f * sector, 360.f), hi == 0.f ? 0.f : chroma / hi, hi};
 }
 
-std::uint32_t from_hsv(Hsv x) noexcept {
+Rgb888 from_hsv(Hsv x) noexcept {
     const float chroma = x.s * x.v;
     const float hue = rem_euclid(x.h, 360.f);
     const float mid = chroma * (1.f - std::fabs(std::fmod(hue / 60.f, 2.f) - 1.f));
@@ -201,13 +261,13 @@ std::uint32_t from_hsv(Hsv x) noexcept {
     return pack({slint_quantize(c[0] + m), slint_quantize(c[1] + m), slint_quantize(c[2] + m)});
 }
 
-std::uint32_t slint_brighter(std::uint32_t rgb, float factor) noexcept {
+Rgb888 slint_brighter(Rgb888 rgb, float factor) noexcept {
     Hsv x = to_hsv(rgb);
     x.v *= 1.f + factor;
     return from_hsv(x);
 }
 
-std::uint32_t slint_darker(std::uint32_t rgb, float factor) noexcept {
+Rgb888 slint_darker(Rgb888 rgb, float factor) noexcept {
     Hsv x = to_hsv(rgb);
     x.v /= 1.f + factor;
     return from_hsv(x);
@@ -217,13 +277,14 @@ constexpr float kFocusLift = 1.4f;
 constexpr float kWindowFloorValue = 0.30f;
 constexpr float kWindowStep = 0.01f;
 constexpr float kGreyChroma = 0.04f;
+constexpr float kGreyLiftSaturation = 0.5f;
 constexpr double kFocusVsBand = 1.4;
 constexpr double kGraphicFloor = 3.0;
 constexpr double kTextFloor = 4.5;
 
-bool inks_read_on_bands(std::uint32_t window, std::initializer_list<std::uint32_t> inks) noexcept {
+bool inks_read_on_bands(Rgb888 window, std::initializer_list<Rgb888> inks) noexcept {
     for (int band = 0; band < kWindowBands; ++band)
-        for (const std::uint32_t ink : inks)
+        for (const Rgb888 ink : inks)
             if (shown_contrast(ink, window_band(window, band)) < kTextFloor)
                 return false;
     return true;
@@ -235,20 +296,20 @@ void derive_window(const HdStyle& style, HdTheme& t) noexcept {
     if (authored.s * authored.v < kGreyChroma) {
         const Hsv a = to_hsv(t.accent);
         lift.h = a.h;
-        lift.s = a.s * 0.5f;
+        lift.s = a.s * kGreyLiftSaturation;
     }
     const auto inks = {t.text, t.text_label, t.accent};
-    std::uint32_t window = style.primary;
+    Rgb888 window = style.primary;
     for (float v = std::max(authored.v, kWindowFloorValue); v > authored.v; v -= kWindowStep) {
-        const std::uint32_t c = from_hsv(Hsv{lift.h, lift.s, v});
+        const Rgb888 c = from_hsv(Hsv{lift.h, lift.s, v});
         if (inks_read_on_bands(c, inks)) {
             window = c;
             break;
         }
     }
     t.window = window;
-    const std::uint32_t top = window_band(window, 0);
-    const std::uint32_t lit = slint_brighter(window, kFocusLift);
+    const Rgb888 top = window_band(window, 0);
+    const Rgb888 lit = slint_brighter(window, kFocusLift);
     if (shown_contrast(lit, top) >= kFocusVsBand && shown_contrast(t.accent, lit) >= kTextFloor) {
         t.window_focus = lit;
         t.on_window_focus = t.accent;
@@ -262,32 +323,28 @@ void derive_window(const HdStyle& style, HdTheme& t) noexcept {
 
 constexpr float kWindowShade = 0.5f;
 
-std::uint32_t replicate_565(std::uint16_t c) noexcept {
-    const auto r = static_cast<std::uint32_t>(c >> 11);
-    const auto g = static_cast<std::uint32_t>((c >> 5) & 0x3Fu);
-    const auto b = static_cast<std::uint32_t>(c & 0x1Fu);
-    return (((r << 3) | (r >> 2)) << 16) | (((g << 2) | (g >> 4)) << 8) | ((b << 3) | (b >> 2));
-}
-
 std::uint16_t under_grey(std::uint8_t v, std::uint16_t q8) noexcept {
-    const auto c = static_cast<std::uint32_t>((static_cast<std::uint32_t>(v) * q8) >> 8);
-    return hd_pack565((c << 16) | (c << 8) | c);
+    constexpr unsigned kQ8Shift = 8;
+    const unsigned c = (static_cast<unsigned>(v) * q8) >> kQ8Shift;
+    return hd_pack565(grey_of(static_cast<std::uint8_t>(c)));
 }
 
 struct GlassPair {
-    std::uint32_t ink = 0;
+    Rgb888 ink{};
     std::uint16_t fill_pre = 0;
     double floor = 0.0;
 };
 
 bool glass_holds(std::span<const GlassPair> pairs, std::uint16_t q8) noexcept {
     for (const GlassPair& p : pairs) {
-        const std::uint32_t ink = shown_565(p.ink);
+        const Rgb888 ink = shown_565(p.ink);
         const auto at = [&](std::uint8_t v) {
-            return replicate_565(static_cast<std::uint16_t>(p.fill_pre + under_grey(v, q8)));
+            return unpack_565(static_cast<std::uint16_t>(p.fill_pre + under_grey(v, q8)));
         };
-        const std::uint32_t dark = at(0);
-        const std::uint32_t light = at(255);
+        constexpr std::uint8_t kDarkest = 0;
+        constexpr std::uint8_t kLightest = 255;
+        const Rgb888 dark = at(kDarkest);
+        const Rgb888 light = at(kLightest);
         if ((luminance(ink) > luminance(dark)) != (luminance(ink) > luminance(light)))
             return false;
         if (contrast_ratio(ink, dark) < p.floor || contrast_ratio(ink, light) < p.floor)
@@ -296,11 +353,18 @@ bool glass_holds(std::span<const GlassPair> pairs, std::uint16_t q8) noexcept {
     return true;
 }
 
-std::uint32_t pick_key(std::uint32_t fill, std::span<const std::uint16_t> taken) noexcept {
-    constexpr std::array<std::uint32_t, 7>
-        kFlips{0x000008u, 0x000400u, 0x080000u, 0x000408u, 0x080008u, 0x080400u, 0x080408u};
-    for (const std::uint32_t flip : kFlips) {
-        const std::uint32_t key = fill ^ flip;
+Rgb888 pick_key(Rgb888 fill, std::span<const std::uint16_t> taken) noexcept {
+
+    constexpr std::array<Rgb, 7> kFlips{
+        {{0, 0, 8}, {0, 4, 0}, {8, 0, 0}, {0, 4, 8}, {8, 0, 8}, {8, 4, 0}, {8, 4, 8}}
+    };
+    const Rgb base = unpack(fill);
+    for (const Rgb& flip : kFlips) {
+        const Rgb888 key = pack(
+            {static_cast<std::uint8_t>(base[0] ^ flip[0]),
+             static_cast<std::uint8_t>(base[1] ^ flip[1]),
+             static_cast<std::uint8_t>(base[2] ^ flip[2])}
+        );
         if (std::ranges::find(taken, hd_pack565(key)) == taken.end())
             return key;
     }
@@ -309,44 +373,43 @@ std::uint32_t pick_key(std::uint32_t fill, std::span<const std::uint16_t> taken)
 
 }
 
-double contrast_ratio(std::uint32_t a, std::uint32_t b) noexcept {
+double contrast_ratio(Rgb888 a, Rgb888 b) noexcept {
+    constexpr double kFlare = 0.05;
     double la = luminance(a);
     double lb = luminance(b);
     if (la < lb)
         std::swap(la, lb);
-    return (la + 0.05) / (lb + 0.05);
+    return (la + kFlare) / (lb + kFlare);
 }
 
-std::uint32_t shown_565(std::uint32_t rgb) noexcept {
-    const Rgb c = unpack(rgb);
-    const auto r = static_cast<std::uint8_t>(c[0] >> 3);
-    const auto g = static_cast<std::uint8_t>(c[1] >> 2);
-    const auto b = static_cast<std::uint8_t>(c[2] >> 3);
-    return pack(
-        {static_cast<std::uint8_t>((r << 3) | (r >> 2)),
-         static_cast<std::uint8_t>((g << 2) | (g >> 4)),
-         static_cast<std::uint8_t>((b << 3) | (b >> 2))}
-    );
+Rgb888 shown_565(Rgb888 rgb) noexcept {
+    return unpack_565(hd_pack565(rgb));
 }
 
-std::uint32_t window_band(std::uint32_t window, int band) noexcept {
+Rgb888 window_band(Rgb888 window, int band) noexcept {
+    constexpr float kBandSpread = 0.6f;
     const int up = kWindowBands - 1 - std::clamp(band, 0, kWindowBands - 1);
     return slint_brighter(
         window,
-        0.6f * static_cast<float>(up) / static_cast<float>(kWindowBands - 1)
+        kBandSpread * static_cast<float>(up) / static_cast<float>(kWindowBands - 1)
     );
 }
 
-std::uint32_t settle_565(std::uint32_t rgb) noexcept {
+Rgb888 settle_565(Rgb888 rgb) noexcept {
+    constexpr int kGreenMax6 = 63;
+    constexpr int kGreenDrop = 2;
+    constexpr int kGreenRepeat = 4;
+    constexpr int kGreenWeight = 2;
+    constexpr int kWorst = std::numeric_limits<int>::max();
     const Rgb src = unpack(rgb);
     const Rgb on = unpack(shown_565(rgb));
-    const int want = 2 * src[1] - src[0] - src[2];
-    const int g6 = src[1] >> 2;
+    const int want = kGreenWeight * src[1] - src[0] - src[2];
+    const int g6 = src[1] >> kGreenDrop;
     int best_g = on[1];
-    int best_err = 1 << 30;
-    for (int g = std::max(0, g6 - 1); g <= std::min(63, g6 + 1); ++g) {
-        const int shown_g = (g << 2) | (g >> 4);
-        const int err = std::abs(2 * shown_g - on[0] - on[2] - want);
+    int best_err = kWorst;
+    for (int g = std::max(0, g6 - 1); g <= std::min(kGreenMax6, g6 + 1); ++g) {
+        const int shown_g = (g << kGreenDrop) | (g >> kGreenRepeat);
+        const int err = std::abs(kGreenWeight * shown_g - on[0] - on[2] - want);
         if (err < best_err) {
             best_err = err;
             best_g = shown_g;
@@ -356,55 +419,74 @@ std::uint32_t settle_565(std::uint32_t rgb) noexcept {
 }
 
 HdTheme derive_theme(HdStyle style) noexcept {
+    constexpr float kBarMix = 0.35f;
+    constexpr float kPanelTint = 0.05f;
+    constexpr float kPanelBias = 0.04f;
+    constexpr float kCardTint = 0.08f;
+    constexpr float kCardBias = 0.05f;
+    constexpr float kSubtleTint = 0.14f;
+    constexpr float kSubtleBias = 0.03f;
+    constexpr float kMidTint = 0.32f;
+    constexpr float kMidBias = 0.05f;
+    constexpr float kLabelMix = 0.62f;
+    constexpr float kEdgeTint = 0.06f;
+    constexpr float kEdgeBias = 0.54f;
+    constexpr double kSelectionChroma = 0.7;
+    constexpr Rgb888 kErrorOnDark{0xff4f91u};
+    constexpr Rgb888 kErrorOnLight{0xc2185bu};
     HdTheme t{};
     const bool up = luminance(style.text) > luminance(style.primary);
-    const std::uint32_t ink = up ? 0x000000u : 0xffffffu;
+    const Rgb888 ink = up ? kBlack : kWhite;
     t.primary = style.primary;
     t.text = style.text;
     t.warning = style.warning;
-    t.accent = walk_lightness(style.accent, style.primary, 4.5, up);
-    t.bg_bar = settle_565(mix(style.primary, ink, 0.35f));
-    t.panel = settle_565(surface(style, t.accent, 0.05f, 0.04f));
-    t.card = settle_565(surface(style, t.accent, 0.08f, 0.05f));
-    t.border_subtle = settle_565(surface(style, t.accent, 0.14f, 0.03f));
-    t.border_mid = settle_565(surface(style, t.accent, 0.32f, 0.05f));
-    t.text_label = settle_565(mix(style.primary, style.text, 0.62f));
+    t.accent = walk_lightness(style.accent, style.primary, kTextFloor, up);
+    t.bg_bar = settle_565(mix(style.primary, ink, kBarMix));
+    t.panel = settle_565(surface(style, t.accent, kPanelTint, kPanelBias));
+    t.card = settle_565(surface(style, t.accent, kCardTint, kCardBias));
+    t.border_subtle = settle_565(surface(style, t.accent, kSubtleTint, kSubtleBias));
+    t.border_mid = settle_565(surface(style, t.accent, kMidTint, kMidBias));
+    t.text_label = settle_565(mix(style.primary, style.text, kLabelMix));
     const Lch a = to_lch(t.accent);
-    t.selection_fill = from_lch(Lch{a.l, a.c * 0.7, a.h});
-    const std::uint32_t seed = shown_contrast(style.primary, t.selection_fill)
+    t.selection_fill = from_lch(Lch{a.l, a.c * kSelectionChroma, a.h});
+    const Rgb888 seed = shown_contrast(style.primary, t.selection_fill)
             >= shown_contrast(style.text, t.selection_fill)
         ? style.primary
         : style.text;
     t.on_accent = walk_lightness(
         seed,
         t.selection_fill,
-        4.5,
+        kTextFloor,
         luminance(seed) >= luminance(t.selection_fill)
     );
-    t.cue_spent = walk_lightness(style.text, style.text, 3.0, !up);
-    t.control_edge = settle_565(mix(mix(style.primary, style.text, 0.06f), t.accent, 0.54f));
-    t.error = up ? 0xff4f91u : 0xc2185bu;
+    t.cue_spent = walk_lightness(style.text, style.text, kGraphicFloor, !up);
+    t.control_edge = settle_565(
+        mix(mix(style.primary, style.text, kEdgeTint), t.accent, kEdgeBias)
+    );
+    t.error = up ? kErrorOnDark : kErrorOnLight;
     derive_window(style, t);
     t.glass = hd_glass_keys(t, HdGround::Primary, 100);
     return t;
 }
 
-std::uint32_t hd_ground_fill(const HdTheme& t, HdGround ground) noexcept {
+Rgb888 hd_ground_fill(const HdTheme& t, HdGround ground) noexcept {
     return ground == HdGround::WindowShade ? slint_darker(t.window, kWindowShade) : t.primary;
 }
 
 HdThemeGlass hd_glass_keys(const HdTheme& t, HdGround ground, std::uint8_t opacity) noexcept {
+    constexpr std::size_t kTakenRoles = 32;
     HdThemeGlass g{};
     g.ground = hd_ground_fill(t, ground);
     g.plate = t.card;
     g.ground_key = g.ground;
     g.plate_key = g.plate;
-    if (opacity >= 100)
+    constexpr std::uint8_t kPercentFull = 100;
+    if (opacity >= kPercentFull)
         return g;
     g.opacity = opacity;
-    std::array<std::uint16_t, 32> taken{};
+    std::array<std::uint16_t, kTakenRoles> taken{};
     std::size_t n = 0;
-    for (const std::uint32_t c :
+    for (const Rgb888 c :
          {t.primary,
           t.accent,
           t.text,
@@ -435,7 +517,7 @@ HdThemeGlass hd_glass_keys(const HdTheme& t, HdGround ground, std::uint8_t opaci
 
     const std::uint16_t ground_pre = hd_scale_565(hd_pack565(g.ground), opacity);
     const std::uint16_t plate_pre = hd_scale_565(hd_pack565(g.plate), opacity);
-    const auto floor_of = [](std::uint32_t ink, std::uint32_t fill, double want) {
+    const auto floor_of = [](Rgb888 ink, Rgb888 fill, double want) {
         return std::min(want, shown_contrast(ink, fill));
     };
     const std::array<GlassPair, 4> pairs{{
@@ -445,9 +527,9 @@ HdThemeGlass hd_glass_keys(const HdTheme& t, HdGround ground, std::uint8_t opaci
         {t.text_label, plate_pre, floor_of(t.text_label, g.plate, kGraphicFloor)},
     }};
     g.under_dim = 0;
-    for (int d = 100; d > 0; --d) {
-        if (glass_holds(pairs, hd_under_q8(opacity, static_cast<std::uint8_t>(d)))) {
-            g.under_dim = static_cast<std::uint8_t>(d);
+    for (std::uint8_t d = kPercentFull; d > 0; --d) {
+        if (glass_holds(pairs, hd_under_q8(opacity, d))) {
+            g.under_dim = d;
             break;
         }
     }
@@ -456,25 +538,35 @@ HdThemeGlass hd_glass_keys(const HdTheme& t, HdGround ground, std::uint8_t opaci
 
 HdTint hd_core_tint(const HdTheme& theme, std::string_view core) noexcept {
     constexpr std::uint32_t kHues = 7;
-    constexpr double kHueStep = 15.0 * 3.14159265358979323846 / 180.0;
+    constexpr double kPi = 3.14159265358979323846;
+    constexpr double kHueStepDegrees = 15.0;
+    constexpr double kHalfTurnDegrees = 180.0;
+    constexpr double kHueStep = kHueStepDegrees * kPi / kHalfTurnDegrees;
     constexpr double kDarker = 0.08;
-    std::uint32_t h = 2166136261u;
+
+    constexpr std::uint32_t kFnvBasis = 2166136261u;
+    constexpr std::uint32_t kFnvPrime = 16777619u;
+    constexpr std::uint32_t kMixMulA = 0x85ebca6bu;
+    constexpr std::uint32_t kMixMulB = 0xc2b2ae35u;
+    constexpr unsigned kMixShiftA = 16;
+    constexpr unsigned kMixShiftB = 13;
+    constexpr unsigned kSlotShift = 8;
+    std::uint32_t h = kFnvBasis;
     for (const char c : core)
-        h = (h ^ static_cast<std::uint8_t>(c)) * 16777619u;
-    h ^= h >> 16;
-    h *= 0x85ebca6bu;
-    h ^= h >> 13;
-    h *= 0xc2b2ae35u;
-    h ^= h >> 16;
-    const std::uint32_t slot = (h >> 8) % (2 * kHues);
+        h = (h ^ static_cast<std::uint8_t>(c)) * kFnvPrime;
+    h ^= h >> kMixShiftA;
+    h *= kMixMulA;
+    h ^= h >> kMixShiftB;
+    h *= kMixMulB;
+    h ^= h >> kMixShiftA;
+    const std::uint32_t slot = (h >> kSlotShift) % (2 * kHues);
     const Lch a = to_lch(theme.accent);
     const auto turn = static_cast<double>(
         static_cast<int>(slot % kHues) - static_cast<int>(kHues / 2)
     );
     const double dl = slot < kHues ? 0.0 : -kDarker;
-    const std::uint32_t seed = from_lch(Lch{a.l + dl, a.c, a.h + turn * kHueStep});
-    const std::uint32_t ink = shown_contrast(theme.primary, seed)
-            >= shown_contrast(theme.text, seed)
+    const Rgb888 seed = from_lch(Lch{a.l + dl, a.c, a.h + turn * kHueStep});
+    const Rgb888 ink = shown_contrast(theme.primary, seed) >= shown_contrast(theme.text, seed)
         ? theme.primary
         : theme.text;
     return HdTint{walk_lightness(seed, ink, kTextFloor, luminance(ink) < luminance(seed)), ink};

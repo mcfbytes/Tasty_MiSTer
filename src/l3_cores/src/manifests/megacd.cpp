@@ -4,6 +4,8 @@
 
 namespace mister::cores::manifests {
 
+using namespace std::chrono_literals;
+
 static_assert(kMegaCdIoIndices.data == IoIndex{2}, "megacd.h:38: MCD_DATA_IO_INDEX == 2");
 static_assert(
     kMegaCdIoIndices.cdda == IoIndex{4},
@@ -45,22 +47,22 @@ static_assert(
 );
 
 static_assert(
-    kMegaCdTicks.stream_us == 10'000,
+    kMegaCdTicks.stream == 10'000us,
     "megacd.cpp:32-35: the CD-DA audio-fill cadence is a fixed 10 ms"
 );
 static_assert(
-    kMegaCdTicks.idle_us == 13'333,
+    kMegaCdTicks.idle == 13'333us,
     "megacd.cpp:37-38: 13 + (!adj ? 1 : 0) walks 14/13/13 — the "
     "13.333 ms Red Book average (req)"
 );
 static_assert(
-    kMegaCdTicks.stream_us < kMegaCdTicks.idle_us,
+    kMegaCdTicks.stream < kMegaCdTicks.idle,
     "req: streaming must be the tighter of the two budgets"
 );
 
 static_assert(
-    kMegaCdTicks.caller_us == kMegaCdServices[1].period_ms * 1000u,
-    "caller_us must BE the service row's own period_ms"
+    kMegaCdTicks.caller == kMegaCdServices[1].period,
+    "caller must BE the service row's own period"
 );
 
 static_assert(kMegaCdTicks.speeds == 0, "MegaCD engages no speed-indexed override");
@@ -131,13 +133,13 @@ static_assert(
 );
 
 static_assert(
-    kMegaCdServices[0].period_ms == 0,
+    kMegaCdServices[0].period == reactor::kEveryRound,
     "the command edge runs EVERY ROUND: Cause::Ring never "
     "dispatches, and stock reads UIO_CD_GET ungated"
 );
 static_assert(
-    kMegaCdServices[1].period_ms != 0,
-    "3.3/3.4: period_ms == 0 is an ARGUED escape hatch, not a "
+    kMegaCdServices[1].period != reactor::kEveryRound,
+    "3.3/3.4: period == kEveryRound is an ARGUED escape hatch, not a "
     "default -- it costs an SPI transaction every T-RT round"
 );
 

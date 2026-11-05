@@ -148,7 +148,7 @@ class StOptionRowHdd final : public StOptionRow {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    constexpr StOptionRowHdd(StOption id, std::uint8_t target) noexcept
+    constexpr StOptionRowHdd(StOption id, AcsiTarget target) noexcept
         : StOptionRow(id),
           target_(target) {}
 
@@ -158,7 +158,7 @@ private:
         std::span<char> text
     ) const noexcept override;
 
-    std::uint8_t target_;
+    AcsiTarget target_;
 };
 
 class StOptionRowTos final : public StOptionRow {

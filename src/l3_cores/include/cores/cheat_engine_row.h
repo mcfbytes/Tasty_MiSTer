@@ -22,7 +22,7 @@ public:
         Core* c = bound_core<kProfile>(st);
         if (c == nullptr)
             return;
-        if (ICheatEngine* e = c->cheat_engine())
+        if (const auto e = c->cheat_engine())
             e->service_cheat_tick();
     }
 };

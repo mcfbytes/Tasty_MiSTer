@@ -19,7 +19,7 @@ public:
 
     struct Failure {
         std::uint8_t op = 0;
-        std::uint8_t reg = 0;
+        os::I2cReg reg{};
         std::uint16_t err = 0;
     };
 
@@ -28,10 +28,10 @@ public:
     I2cBreaker(const I2cBreaker&) = delete;
     I2cBreaker& operator=(const I2cBreaker&) = delete;
 
-    [[nodiscard]] Ex<std::uint8_t> probe(unsigned bus, std::uint8_t addr) override;
-    [[nodiscard]] Ex<void> open(unsigned bus, std::uint8_t addr) override;
-    [[nodiscard]] Ex<std::uint8_t> read(std::uint8_t addr, std::uint8_t reg) override;
-    [[nodiscard]] Ex<void> write(std::uint8_t addr, std::uint8_t reg, std::uint8_t val) override;
+    [[nodiscard]] Ex<std::uint8_t> probe(unsigned bus, os::I2cAddr addr) override;
+    [[nodiscard]] Ex<void> open(unsigned bus, os::I2cAddr addr) override;
+    [[nodiscard]] Ex<std::uint8_t> read(os::I2cAddr addr, os::I2cReg reg) override;
+    [[nodiscard]] Ex<void> write(os::I2cAddr addr, os::I2cReg reg, std::uint8_t val) override;
 
     void reset() noexcept;
 
@@ -50,7 +50,7 @@ public:
     std::uint16_t last_errno() const noexcept { return last_errno_; }
 
 private:
-    void note(bool ok, std::uint8_t op, std::uint8_t reg, const Error* e) noexcept;
+    void note(bool ok, std::uint8_t op, os::I2cReg reg, const Error* e) noexcept;
 
     II2cAdapter* inner_;
     bool open_ = false;

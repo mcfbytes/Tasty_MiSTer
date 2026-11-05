@@ -3,11 +3,14 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 
 #include "hal/register_window.h"
 #include "hal/sys_directory.h"
 #include "infra/error.h"
+#include "proto/declared_line.h"
 #include "proto/sys_directory_image.h"
+#include "proto/uio_opcodes.h"
 #include "infra/seat.h"
 
 namespace mister::proto {
@@ -30,8 +33,11 @@ struct AxiBlockDecl {
     std::array<std::uint32_t, 12> ops{};
     DeclaredLine line{};
 
-    [[nodiscard]] constexpr bool honours(std::uint16_t op) const noexcept {
-        return op < 256u && ((ops[op / 32u] >> (op % 32u)) & 1u) != 0u;
+    [[nodiscard]] constexpr bool honours(UioOp op) const noexcept {
+        const auto o = proto::word(op).v;
+        constexpr std::uint32_t kWordBits = std::numeric_limits<std::uint32_t>::digits;
+        return o <= std::numeric_limits<std::uint8_t>::max()
+            && ((ops[o / kWordBits] >> (o % kWordBits)) & 1u) != 0u;
     }
 };
 

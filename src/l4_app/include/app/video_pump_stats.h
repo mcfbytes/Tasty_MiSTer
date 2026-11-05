@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "app/types.h"
+
 namespace mister::app {
 
 enum class VideoI2cOutcome : std::uint8_t {
@@ -16,8 +18,8 @@ enum class VideoI2cOutcome : std::uint8_t {
     Failed,
 };
 
-inline constexpr std::uint8_t kVideoModeNever = 0xFFu;
-inline constexpr std::uint8_t kVideoModeCustom = 0xFEu;
+inline constexpr std::uint8_t kVideoModeNever = kVideoModeIndexNever.v;
+inline constexpr std::uint8_t kVideoModeCustom = kVideoModeIndexCustom.v;
 
 struct VideoPumpStats {
     std::uint32_t edges = 0;
@@ -35,7 +37,7 @@ struct VideoPumpStats {
     std::uint32_t approximated = 0;
     std::uint32_t stage_failures = 0;
 
-    std::uint8_t last_mode_index = kVideoModeNever;
+    VideoModeIndex last_mode_index = kVideoModeIndexNever;
     std::uint32_t last_fpix_khz = 0;
 
     VideoI2cOutcome i2c = VideoI2cOutcome::Unwired;

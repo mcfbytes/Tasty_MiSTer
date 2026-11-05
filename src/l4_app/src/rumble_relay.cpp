@@ -23,14 +23,14 @@ void RumbleRelay::refresh() noexcept {
 
         const std::uint16_t held = last_[p];
         last_[p] = 0;
-        if (held != 0 && (now.players & (1u << p)) != 0u) {
+        if (held != 0 && now.players.has(proto::PlayerIndex{p})) {
             ++reapplied_;
             apply_(p, held);
         }
     }
     pads_seen_ = now;
     if (players_moved)
-        pads_.publish(now.players);
+        pads_.publish(now.players.v);
 }
 
 void RumbleRelay::on(const proto::LinkEvent::PolledWord& w) noexcept {
@@ -48,7 +48,7 @@ void RumbleRelay::on(const proto::LinkEvent::PolledWord& w) noexcept {
 
 void RumbleRelay::apply_(std::uint8_t player, std::uint16_t word) noexcept {
     const proto::user_io::RumbleMotors m = proto::user_io::rumble_motors(word);
-    switch (out_.rumble(svc::PlayerIndex{player}, m.strong, m.weak)) {
+    switch (out_.rumble(svc::PlayerIndex{player}, m)) {
         case svc::RumbleApply::NoDevice:
             ++no_device_;
             return;

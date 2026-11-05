@@ -3,13 +3,15 @@
 
 #include <cstdint>
 
+#include "hal/types.h"
+
 namespace mister::hal {
 
 class ISpiOutputObserver {
 public:
     virtual ~ISpiOutputObserver() = default;
 
-    virtual void on_store(std::uint32_t output) noexcept = 0;
+    virtual void on_store(SpiOutput output) noexcept = 0;
 
 protected:
     ISpiOutputObserver() = default;

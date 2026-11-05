@@ -27,24 +27,24 @@ inline constexpr auto kThreeDoServices = std::to_array<LinkDecoderDecl>({
         "3do.cmd_edge",
         reactor::Cause::Ring,
         &kCdCommandEdge<kThreeDo>,
-        3,
+        std::chrono::milliseconds{3},
         RoundClaim::Always,
     },
     {
         "3do.service_tick",
         reactor::Cause::Tick,
         &kCdServiceTick<kThreeDo>,
-        3,
+        std::chrono::milliseconds{3},
         RoundClaim::Always,
     },
 });
 
 inline constexpr CdTickPeriods kThreeDoTicks{
-    .idle_us = 3'000,
-    .stream_us = 3'000,
-    .caller_us = 3'000,
+    .idle = std::chrono::microseconds{3'000},
+    .stream = std::chrono::microseconds{3'000},
+    .caller = std::chrono::microseconds{3'000},
     .speeds = 0,
-    .speed_us = {0, 0, 0, 0},
+    .speed = {},
 };
 
 inline constexpr CdIoIndices kThreeDoIoIndices{

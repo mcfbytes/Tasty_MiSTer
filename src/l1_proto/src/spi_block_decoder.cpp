@@ -6,7 +6,7 @@ namespace mister::proto {
 void SpiBlockDecoder::service(IBlockRoles& roles) {
     ++counters_.passes;
     for (unsigned i = 0; i < budget_; ++i) {
-        auto d = slots_->poll_block(*link_, roles, std::nullopt);
+        auto d = slots_->poll_block(roles, std::nullopt);
         if (!d) {
             ++counters_.errors;
             counters_.err_code = static_cast<std::uint16_t>(d.error().code);
@@ -14,7 +14,7 @@ void SpiBlockDecoder::service(IBlockRoles& roles) {
         }
         if (!d->decoded)
             break;
-        auto r = slots_->serve(*link_, *d, roles);
+        auto r = slots_->serve(*d, roles);
         if (!r) {
             ++counters_.errors;
             counters_.err_code = static_cast<std::uint16_t>(r.error().code);
@@ -25,7 +25,7 @@ void SpiBlockDecoder::service(IBlockRoles& roles) {
             ++counters_.deferred;
             break;
         }
-        const std::uint32_t bytes = d->req.block_count.v * d->block_size;
+        const std::uint32_t bytes = d->req.block_count.v * d->block_size.v;
 
         (void)out_.push(
             LinkEvent::BlockRequest{.slot = d->req.slot, .lba = d->req.lba, .bytes = bytes}

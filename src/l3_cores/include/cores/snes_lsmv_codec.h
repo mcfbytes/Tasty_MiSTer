@@ -58,7 +58,7 @@ public:
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
         std::span<const std::uint8_t> head,
-        std::uint64_t size
+        proto::FileSize size
     ) const noexcept override;
 
 private:

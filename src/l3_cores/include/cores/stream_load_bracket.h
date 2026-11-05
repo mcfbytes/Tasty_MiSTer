@@ -8,10 +8,12 @@
 
 #include "cores/stream_load.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/image_bracket.h"
 #include "proto/image_sink.h"
 #include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 
@@ -23,6 +25,7 @@ public:
         IStreamLoad& core,
         proto::IImageSink& sink,
         IoIndex index,
+        StreamLoadKind kind = StreamLoadKind::Stream,
         std::uint32_t length = 0
     );
 
@@ -36,18 +39,26 @@ public:
 
     [[nodiscard]] Ex<std::size_t> write_taken(std::span<const std::uint8_t> piece);
 
-    [[nodiscard]] Ex<void> close(std::uint64_t bytes, std::uint32_t crc);
+    [[nodiscard]] Ex<void> close(
+        infra::OptRef<IStreamLoad> live,
+        proto::FileSize bytes,
+        svc::Crc32 crc
+    );
+
+    void cut(infra::OptRef<IStreamLoad> live) noexcept;
+
+    [[nodiscard]] StreamLoadKind kind() const noexcept { return kind_; }
 
 private:
-    StreamLoadBracket(IStreamLoad& core, IoIndex index, proto::ImageBracket&& b) noexcept
-        : core_(&core),
-          index_(index),
+    StreamLoadBracket(IoIndex index, StreamLoadKind kind, proto::ImageBracket&& b) noexcept
+        : index_(index),
+          kind_(kind),
           bracket_(std::move(b)) {}
 
     void cut_() noexcept;
 
-    IStreamLoad* core_;
     IoIndex index_;
+    StreamLoadKind kind_;
     std::optional<proto::ImageBracket> bracket_;
 };
 

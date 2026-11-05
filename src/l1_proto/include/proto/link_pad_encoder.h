@@ -4,7 +4,9 @@
 #include <cstdint>
 
 #include "infra/error.h"
+#include "proto/stick_pos.h"
 #include "proto/types.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
@@ -12,19 +14,11 @@ class ILinkPadEncoder {
 public:
     virtual ~ILinkPadEncoder() = default;
 
-    [[nodiscard]] virtual Ex<void> digital(std::uint16_t opcode, JoyMask map) = 0;
+    [[nodiscard]] virtual Ex<void> digital(UioOp opcode, JoyMask map) = 0;
 
-    [[nodiscard]] virtual Ex<void> stick(
-        std::uint16_t opcode,
-        std::uint8_t index,
-        std::uint8_t x,
-        std::uint8_t y
-    ) = 0;
+    [[nodiscard]] virtual Ex<void> stick(UioOp opcode, std::uint8_t index, StickPos pos) = 0;
 
-    [[nodiscard]] virtual std::uint32_t link_words(
-        std::uint16_t opcode,
-        bool follow_up
-    ) const noexcept = 0;
+    [[nodiscard]] virtual std::uint32_t link_words(UioOp opcode, bool follow_up) const noexcept = 0;
 
 protected:
     ILinkPadEncoder() = default;

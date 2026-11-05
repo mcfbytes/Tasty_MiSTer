@@ -13,6 +13,7 @@
 #include "app/osd_close.h"
 #include "app/owner_tick.h"
 #include "app/ui_page_record.h"
+#include "app/verdict_sinks.h"
 #include "device_block.h"
 #include "hal/board_profile.h"
 #include "hal/board_windows.h"
@@ -67,6 +68,8 @@ public:
             infra::OptRef<app::IUiRoundPort> ui_round{};
             infra::OptRef<app::SaveStateAttach> save_states{};
             infra::OptRef<app::UiWriteLane> ui_writes{};
+
+            app::VerdictSinks verdicts{};
             infra::OptRef<const app::UiPageCell> ui_pages{};
             infra::OptRef<const app::HdOsdStatusCell> hd{};
         };
@@ -89,7 +92,7 @@ public:
 
     public:
         virtual ~Front() = default;
-        [[nodiscard]] virtual DeviceBlock::Front device_front() noexcept = 0;
+        [[nodiscard]] virtual DeviceBlock::Parts::Frontend device_front() noexcept = 0;
         [[nodiscard]] virtual infra::OptRef<app::ScanoutRelay> scanout() noexcept = 0;
 
         [[nodiscard]] virtual std::unique_ptr<Face> face(

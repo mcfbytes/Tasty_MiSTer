@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "app/types.h"
 #include "hal/register_window.h"
 #include "hal/sys_block.h"
 #include "infra/seat.h"
@@ -17,7 +18,7 @@ struct LwSys {
     os::UioHandle line{};
     proto::SysBlockDecl block{};
     std::uint16_t gen = 0;
-    std::uint32_t fabric_gen = 0;
+    FabricGeneration fabric_gen{};
     bool fabric_lost = false;
 };
 

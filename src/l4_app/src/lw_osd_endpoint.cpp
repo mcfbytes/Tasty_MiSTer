@@ -2,8 +2,11 @@
 #include "app/lw_osd_endpoint.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <span>
 
+#include "infra/endian.h"
 #include "infra/lease_order.h"
 #include "proto/types.h"
 
@@ -11,7 +14,16 @@ namespace mister::app {
 
 namespace {
 
-constexpr unsigned kLowresRows = 8;
+constexpr proto::OsdRowCount kLowresRows{8};
+
+using ImageRow = std::array<hal::OsdBlock::Reg, hal::OsdBlock::kRowWords>;
+constexpr proto::OsdRowCells<ImageRow, hal::OsdBlock::kImageRows> kImageRegs = [] {
+    proto::OsdRowCells<ImageRow, hal::OsdBlock::kImageRows> regs{};
+    for (std::size_t row = 0; row < regs.size(); ++row)
+        for (std::uint32_t w = 0; w < hal::OsdBlock::kRowWords; ++w)
+            regs[row][w] = hal::OsdBlock::image(row, w);
+    return regs;
+}();
 
 }
 
@@ -54,7 +66,7 @@ void LwOsdEndpoint::bind_(const OsdGrant& g, std::uint32_t gen) noexcept {
         block_.emplace(hal::reg::Block::redeem(g.block));
     if (!lease_())
         return;
-    for (std::uint32_t r = 0; r < kRows; ++r)
+    for (proto::OsdRow r{}; kRows.covers(r); r += proto::kOneOsdRow)
         (void)store_row_(r);
     const std::uint32_t ctrl = ctrl_();
     port_().write(hal::OsdBlock::Reg::Ctrl, ctrl);
@@ -79,17 +91,17 @@ void LwOsdEndpoint::unbind_() noexcept {
 }
 
 void LwOsdEndpoint::store_frame_() noexcept {
-    const std::uint32_t n = bound_rows_();
+    const proto::OsdRowCount n = bound_rows_();
     const std::uint32_t ctrl = ctrl_();
     bool dirty = ctrl != ctrl_stored_;
-    for (std::uint32_t r = 0; r < n && !dirty; ++r)
-        dirty = w_.surface.seq(proto::OsdRow{static_cast<std::uint8_t>(r)}) != stored_[r];
+    for (proto::OsdRow r{}; n.covers(r) && !dirty; r += proto::kOneOsdRow)
+        dirty = w_.surface.seq(r) != proto::row_cell(stored_, r);
     if (!dirty)
         return;
     if (!lease_())
         return;
-    for (std::uint32_t r = 0; r < n; ++r) {
-        if (w_.surface.seq(proto::OsdRow{static_cast<std::uint8_t>(r)}) != stored_[r])
+    for (proto::OsdRow r{}; n.covers(r); r += proto::kOneOsdRow) {
+        if (w_.surface.seq(r) != proto::row_cell(stored_, r))
             (void)store_row_(r);
     }
     if (ctrl != ctrl_stored_) {
@@ -103,8 +115,7 @@ void LwOsdEndpoint::store_frame_() noexcept {
     publish_();
 }
 
-bool LwOsdEndpoint::store_row_(std::uint32_t row) noexcept {
-    const proto::OsdRow r{static_cast<std::uint8_t>(row)};
+bool LwOsdEndpoint::store_row_(proto::OsdRow r) noexcept {
     std::uint32_t g = w_.surface.seq(r);
     if (g == 0) {
         row_ = proto::OsdSurface::Row{};
@@ -114,21 +125,24 @@ bool LwOsdEndpoint::store_row_(std::uint32_t row) noexcept {
             return false;
     }
     Port& port = port_();
+    constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
+    const std::span<const std::uint8_t> bytes{row_.b};
+    const ImageRow& regs = proto::row_cell(kImageRegs, r);
     for (std::uint32_t i = 0; i < hal::OsdBlock::kRowWords; ++i) {
-        const std::uint8_t* b = row_.b + 4u * i;
-        const std::uint32_t w = std::uint32_t{b[0]}
-            | (std::uint32_t{b[1]} << 8)
-            | (std::uint32_t{b[2]} << 16)
-            | (std::uint32_t{b[3]} << 24);
-        port.write(hal::OsdBlock::image(row, i), w);
+        const auto w = infra::load_le<std::uint32_t>(
+            bytes.subspan(kWordBytes * i).first<kWordBytes>()
+        );
+        port.write(regs[i], w);
     }
-    stored_[row] = g;
+    proto::row_cell(stored_, r) = g;
     ++tally_.rows;
     return true;
 }
 
-std::uint32_t LwOsdEndpoint::bound_rows_() const noexcept {
-    return std::min<std::uint32_t>(kRows, w_.surface.visible_rows());
+proto::OsdRowCount LwOsdEndpoint::bound_rows_() const noexcept {
+    const proto::OsdRowCount visible = w_.surface.visible_rows();
+    constexpr proto::OsdRowCount page = kRows;
+    return visible < page ? visible : page;
 }
 
 std::uint32_t LwOsdEndpoint::ctrl_() const noexcept {

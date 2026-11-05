@@ -54,7 +54,7 @@ bool ProcessMain::idle() const noexcept {
     return owner_.park_acks_empty() && !owner_.program_owed() && !owner_.rung_pending();
 }
 
-int ProcessMain::park_ms() const noexcept {
+infra::ParkTimeout ProcessMain::park_ms() const noexcept {
     return owner_.wake_hint_ms(kSupervisorWakeMs);
 }
 

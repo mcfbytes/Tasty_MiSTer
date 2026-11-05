@@ -2,11 +2,11 @@
 #pragma once
 
 #include <cstdint>
-#include <memory>
+#include <string_view>
 
 #include "cores/pcm_feed_state.h"
-#include "cores/pcm_source.h"
 #include "infra/error.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 
@@ -14,7 +14,7 @@ class IPcmFeed {
 public:
     virtual ~IPcmFeed() = default;
 
-    [[nodiscard]] virtual Ex<void> play(std::uint8_t track, bool loop) = 0;
+    [[nodiscard]] virtual Ex<void> play(svc::TrackNumber track, bool loop) = 0;
     [[nodiscard]] virtual Ex<void> stop() = 0;
     [[nodiscard]] virtual Ex<void> resume() = 0;
 
@@ -26,7 +26,7 @@ public:
 
     [[nodiscard]] virtual bool ready_for_source() noexcept = 0;
 
-    [[nodiscard]] virtual Ex<void> set_source(std::unique_ptr<IPcmSource> src) = 0;
+    [[nodiscard]] virtual Ex<void> set_sheet(std::string_view sheet) = 0;
 
 protected:
     IPcmFeed() = default;

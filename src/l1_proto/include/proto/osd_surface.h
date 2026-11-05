@@ -15,9 +15,11 @@ class OsdSurface {
     TASTY_SEAT_MEDIATOR(Ui, RT);
 
 public:
-    static constexpr unsigned kMaxRows = 19;
+    static constexpr OsdRowCount kMaxRows{19};
     static constexpr unsigned kRowBytes = 256;
-    static constexpr unsigned kPageRows = 16;
+    static constexpr OsdRowCount kPageRows{16};
+
+    static constexpr OsdRow kStatusRow = kPageRows.end();
 
     struct Row {
         std::uint8_t b[kRowBytes];
@@ -36,22 +38,22 @@ public:
 
     void clear() noexcept;
 
-    void set_visible_rows(unsigned n) noexcept;
+    void set_visible_rows(OsdRowCount n) noexcept;
 
-    unsigned visible_rows() const noexcept;
+    OsdRowCount visible_rows() const noexcept;
 
 private:
     struct VisibleRows {
-        std::uint8_t n;
+        OsdRowCount n;
     };
 
     struct Ui {
-        std::uint8_t rows[kMaxRows][kRowBytes]{};
+        OsdRowCells<std::array<std::uint8_t, kRowBytes>, kMaxRows.size()> rows{};
     };
 
     xthread::Telemetry<VisibleRows> visible_rows_{};
     Ui ui_{};
-    xthread::Telemetry<Row> published_[kMaxRows]{};
+    OsdRowCells<xthread::Telemetry<Row>, kMaxRows.size()> published_{};
 
     static_assert(
         std::atomic<std::uint32_t>::is_always_lock_free,

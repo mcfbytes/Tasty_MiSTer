@@ -192,16 +192,16 @@ void Adv7513Seat::sync_counters(VideoPumpStats& stats) noexcept {
     stats.i2c_writes = writes_base_ + adv_->writes();
     stats.i2c_errors = errors_base_ + adv_->errors();
     if (stats.i2c_fail_reg == 0)
-        stats.i2c_fail_reg = adv_->fail_reg();
+        stats.i2c_fail_reg = adv_->fail_reg().v;
     if (stats.spd_fail_reg == 0)
-        stats.spd_fail_reg = adv_->spd_fail_reg();
+        stats.spd_fail_reg = adv_->spd_fail_reg().v;
 }
 
 void Adv7513Seat::report(VideoPumpStats& stats) noexcept {
     sync_counters(stats);
     const auto& f = breaker_.first();
     stats.i2c_first_op = f.op;
-    stats.i2c_first_reg = f.reg;
+    stats.i2c_first_reg = f.reg.v;
     stats.i2c_first_errno = f.err;
     stats.i2c_last_errno = breaker_.last_errno();
     stats.i2c_trips = breaker_.trips();

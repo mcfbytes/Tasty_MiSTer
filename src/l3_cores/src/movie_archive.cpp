@@ -21,7 +21,7 @@ using CR = IMovieCodec::Refusal;
 
 constexpr std::string_view kBom = "\xEF\xBB\xBF";
 
-std::unexpected<Error> refuse(CR r, std::uint16_t site) {
+std::unexpected<Error> refuse(CR r, infra::ErrorSite site) {
     return std::unexpected(Error{Errc::bad_format, site, static_cast<std::uint32_t>(r)});
 }
 
@@ -104,7 +104,7 @@ bool readable(const svc::ArchiveEntry& e) noexcept {
     }
     const auto bytes = std::as_bytes(std::span(out));
     const std::span<const std::uint8_t> u = infra::byte_cast<const std::uint8_t>(bytes);
-    if (crc32_update(0, u) != e.crc)
+    if (svc::crc32_extend({}, u) != e.crc)
         return refuse(CR::Archive, ERR_SITE());
     return out;
 }
@@ -333,7 +333,7 @@ private:
         if (at > crc_pos_ || at + b.size() <= crc_pos_)
             return;
         b = b.subspan(static_cast<std::size_t>(crc_pos_ - at));
-        crc_ = crc32_update(crc_, infra::byte_cast<const std::uint8_t>(b));
+        crc_ = svc::crc32_extend(crc_, infra::byte_cast<const std::uint8_t>(b));
         crc_pos_ += b.size();
     }
 
@@ -344,8 +344,8 @@ private:
     std::unique_ptr<svc::IFile> log_;
     std::uint64_t member_size_ = 0;
     std::uint64_t base_ = 0;
-    std::uint32_t crc_want_ = 0;
-    std::uint32_t crc_ = 0;
+    svc::Crc32 crc_want_{};
+    svc::Crc32 crc_{};
     std::uint64_t crc_pos_ = 0;
     bool bad_ = false;
 };

@@ -10,6 +10,7 @@
 
 #include <cerrno>
 #include <ctime>
+#include <limits>
 #include <utility>
 
 namespace mister::reactor {
@@ -27,7 +28,7 @@ std::int64_t now_ns() noexcept {
 enum class FdKind : std::uint32_t { Tick = 1, Kick = 2, Doorbell = 3, Borrowed = 4 };
 
 constexpr std::uint64_t ep_tag(FdKind k, std::uint32_t idx) noexcept {
-    return (static_cast<std::uint64_t>(k) << 32) | idx;
+    return (static_cast<std::uint64_t>(k) << std::numeric_limits<std::uint32_t>::digits) | idx;
 }
 
 int ep_add(int epfd, int fd, std::uint64_t tag) noexcept {
@@ -45,7 +46,7 @@ int ep_del(int epfd, int fd) noexcept {
 constexpr int kFreeSlot = -1;
 
 constexpr std::uint32_t bumped(std::uint32_t c) noexcept {
-    return c == 0xFFFF'FFFFu ? c : c + 1u;
+    return c == std::numeric_limits<std::uint32_t>::max() ? c : c + 1u;
 }
 
 }
@@ -105,8 +106,8 @@ Executive::Executive(Executive&& o) noexcept
     fallbacks_total_ = o.fallbacks_total_;
     retirements_total_ = o.retirements_total_;
     claim_yields_ = o.claim_yields_;
-    for (std::size_t i = 0; i < notifier_count_; ++i)
-        notifiers_[i] = std::move(o.notifiers_[i]);
+    for (std::size_t i = 0; i < kMaxLines; ++i)
+        lines_[NotifierSlot{i}] = std::move(o.lines_[NotifierSlot{i}]);
     for (std::size_t i = 0; i < service_count_; ++i) {
         services_[i] = o.services_[i];
         next_due_[i] = o.next_due_[i];
@@ -119,10 +120,6 @@ Executive::Executive(Executive&& o) noexcept
         borrowed_[i] = o.borrowed_[i];
     for (int i = 0; i < kMaxEvents; ++i)
         evs_[i] = o.evs_[i];
-    for (std::size_t i = 0; i < kMaxLines; ++i) {
-        line_raise_ms_[i] = o.line_raise_ms_[i];
-        line_raise_round_[i] = o.line_raise_round_[i];
-    }
     for (std::size_t i = 0; i < static_cast<std::size_t>(Cause::kCount); ++i) {
         last_raise_[i] = o.last_raise_[i];
         last_raise_round_[i] = o.last_raise_round_[i];
@@ -134,8 +131,9 @@ Ex<void> Executive::bind(std::span<const LinkDecoderDecl> services, CoreState& s
     std::size_t n = 0;
     for (std::size_t i = 0; i < services.size(); ++i) {
         const bool pinned_every_round = services[i].round_claim == RoundClaim::Always
-            && services[i].period_ms == 0;
-        if (services[i].impl == nullptr || pinned_every_round) {
+            && services[i].period == kEveryRound;
+        const bool negative_period = services[i].period.count() < 0;
+        if (services[i].impl == nullptr || pinned_every_round || negative_period) {
             return std::unexpected(
                 Error{Errc::core_load, ERR_SITE(), static_cast<std::uint32_t>(i)}
             );
@@ -154,7 +152,7 @@ Ex<void> Executive::bind(std::span<const LinkDecoderDecl> services, CoreState& s
 
         stats_->deadline_miss[slot].set(0);
 
-        next_due_[slot] = tick_count_ + s.period_ms;
+        next_due_[slot] = tick_count_ + static_cast<std::uint64_t>(s.period.count());
 
         row_carried_[slot] = false;
         row_fallbacks_[slot] = 0;
@@ -181,7 +179,7 @@ Ex<NotifierSlot> Executive::add_notifier(Notifier n) {
 
     std::size_t slot = kMaxLines;
     for (std::size_t i = 0; i < notifier_count_; ++i) {
-        if (!notifiers_[i].has_value()) {
+        if (!lines_[NotifierSlot{i}].bound()) {
             slot = i;
             break;
         }
@@ -194,36 +192,32 @@ Ex<NotifierSlot> Executive::add_notifier(Notifier n) {
         }
         slot = notifier_count_;
     }
-    notifiers_[slot] = std::move(n);
-
-    line_raise_ms_[slot] = kNeverRaised;
-    line_raise_round_[slot] = 0;
+    const NotifierSlot key{slot};
+    lines_[key].bind(std::move(n));
     if (const int
             e = ep_add(epfd_.get(), fd, ep_tag(FdKind::Doorbell, static_cast<std::uint32_t>(slot)));
         e != 0) {
-        notifiers_[slot].reset();
+        lines_[key].unbind();
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(e)});
     }
     if (slot == notifier_count_)
         ++notifier_count_;
     recompute_delivered();
-    return NotifierSlot{slot};
+    return key;
 }
 
 Ex<void> Executive::remove_notifier(NotifierSlot slot) {
-    if (slot.v >= notifier_count_ || !notifiers_[slot.v].has_value()) {
+    if (slot.v >= notifier_count_ || !lines_[slot].bound()) {
         return std::unexpected(
             Error{Errc::not_found, ERR_SITE(), static_cast<std::uint32_t>(slot.v)}
         );
     }
 
-    if (const int e = ep_del(epfd_.get(), notifiers_[slot.v]->fd());
+    if (const int e = ep_del(epfd_.get(), lines_[slot].notifier().fd());
         e != 0 && e != ENOENT && e != EBADF) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(e)});
     }
-    notifiers_[slot.v].reset();
-    line_raise_ms_[slot.v] = kNeverRaised;
-    line_raise_round_[slot.v] = 0;
+    lines_[slot].unbind();
     recompute_delivered();
     return {};
 }
@@ -231,8 +225,9 @@ Ex<void> Executive::remove_notifier(NotifierSlot slot) {
 void Executive::recompute_delivered() noexcept {
     CauseSet s;
     for (std::size_t i = 0; i < notifier_count_; ++i) {
-        if (notifiers_[i].has_value())
-            s |= notifiers_[i]->delivers();
+        const Line& line = lines_[NotifierSlot{i}];
+        if (line.bound())
+            s |= line.notifier().delivers();
     }
     delivered_ = s;
 
@@ -245,13 +240,12 @@ void Executive::recompute_raise(Cause c) noexcept {
     std::uint64_t ms = kNeverRaised;
     std::uint64_t round = 0;
     for (std::size_t i = 0; i < notifier_count_; ++i) {
-        if (!notifiers_[i].has_value() || !notifiers_[i]->delivers().has(c))
+        const Line& line = lines_[NotifierSlot{i}];
+        if (!line.delivers(c) || !line.has_evidence())
             continue;
-        if (line_raise_ms_[i] == kNeverRaised)
-            continue;
-        if (ms == kNeverRaised || line_raise_ms_[i] > ms) {
-            ms = line_raise_ms_[i];
-            round = line_raise_round_[i];
+        if (ms == kNeverRaised || line.stamp().ms > ms) {
+            ms = line.stamp().ms;
+            round = line.stamp().round;
         }
     }
     last_raise_[ci] = ms;
@@ -350,7 +344,9 @@ bool Executive::dispatch_ready() noexcept {
     swept_ = false;
 
     for (int i = 0; i < n_ready_; ++i) {
-        const auto kind = static_cast<FdKind>(evs_[i].data.u64 >> 32);
+        const auto kind = static_cast<FdKind>(
+            evs_[i].data.u64 >> std::numeric_limits<std::uint32_t>::digits
+        );
         const auto idx = static_cast<std::uint32_t>(evs_[i].data.u64);
         switch (kind) {
             case FdKind::Tick: {
@@ -377,8 +373,9 @@ bool Executive::dispatch_ready() noexcept {
                 wake_.drain();
                 break;
             case FdKind::Doorbell: {
-                if (idx < notifier_count_ && notifiers_[idx].has_value()) {
-                    const CauseDecode d = notifiers_[idx]->drain_checked();
+                const NotifierSlot line{idx};
+                if (idx < notifier_count_ && lines_[line].bound()) {
+                    const CauseDecode d = lines_[line].notifier().drain_checked();
 
                     if (d.refused)
                         stats_->spurious_causes.add();
@@ -386,7 +383,7 @@ bool Executive::dispatch_ready() noexcept {
                     if (d.cause == Cause::Tick)
                         swept_ = true;
                     else
-                        dispatch_cause(d.cause, idx, t_wake_);
+                        dispatch_cause(d.cause, line, t_wake_);
                 }
                 break;
             }
@@ -430,14 +427,12 @@ void Executive::settle() noexcept {
     [[maybe_unused]] int r = ::timerfd_settime(tick_fd_.get(), 0, &disarm, nullptr);
 }
 
-void Executive::dispatch_cause(Cause c, std::size_t line, std::int64_t wake_ns) {
+void Executive::dispatch_cause(Cause c, NotifierSlot line, std::int64_t wake_ns) {
 
     if (c == Cause::None || c == Cause::Tick)
         return;
-    if (line < kMaxLines) {
-        line_raise_ms_[line] = tick_count_;
-        line_raise_round_[line] = round_count_;
-    }
+    if (const auto l = lines_.find(line))
+        l->raised(RaiseStamp{tick_count_, round_count_});
     last_raise_[static_cast<std::size_t>(c)] = tick_count_;
     last_raise_round_[static_cast<std::size_t>(c)] = round_count_;
 
@@ -446,15 +441,21 @@ void Executive::dispatch_cause(Cause c, std::size_t line, std::int64_t wake_ns) 
             run_service(i, wake_ns, RoundSegment::RowDoorbell);
 }
 
+static_assert(kTickNs == 1'000'000);
+
 bool Executive::notifier_carries(const LinkDecoderDecl& s) const noexcept {
     if (s.cause == Cause::Tick || !delivered_.has(s.cause))
         return false;
     const std::size_t ci = static_cast<std::size_t>(s.cause);
     if (last_raise_[ci] == kNeverRaised)
         return false;
-    if (s.period_ms == 0)
+    if (s.period == kEveryRound)
         return raise_is_recent_rounds(round_count_, last_raise_round_[ci]);
-    return raise_is_recent_ms(tick_count_, last_raise_[ci], s.period_ms);
+    return raise_is_recent(
+        std::chrono::milliseconds{static_cast<std::int64_t>(tick_count_)},
+        std::chrono::milliseconds{static_cast<std::int64_t>(last_raise_[ci])},
+        s.period
+    );
 }
 
 CauseSet Executive::carried_causes() const noexcept {
@@ -491,7 +492,7 @@ void Executive::service_round(bool swept, std::int64_t wake_ns) {
         }
         if (carried)
             continue;
-        if (s.period_ms == 0) {
+        if (s.period == kEveryRound) {
             run_service(i, wake_ns, RoundSegment::RowSwept);
         } else if (swept && tick_count_ >= next_due_[i]) {
             run_service(i, wake_ns, RoundSegment::RowSwept);
@@ -531,17 +532,18 @@ void Executive::run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment
         d = 0;
     latency_.service_latency[slot].record(std::chrono::nanoseconds{d});
 
-    if (s.period_ms != 0) {
-        const std::int64_t budget_ns = static_cast<std::int64_t>(s.period_ms) * 1'000'000;
+    if (s.period != kEveryRound) {
+        const std::int64_t budget_ns = std::chrono::nanoseconds{s.period}.count();
         if (d > budget_ns) {
-            if (stats_->deadline_miss[slot].get() != 0xFFFFFFFFu) {
+            if (stats_->deadline_miss[slot].get() != std::numeric_limits<std::uint32_t>::max()) {
                 stats_->deadline_miss[slot].add();
             }
 
             if (log_lane_) {
                 const std::int64_t over = d - budget_ns;
-                const std::uint32_t over_sat = over > static_cast<std::int64_t>(0xFFFFFFFFu)
-                    ? 0xFFFFFFFFu
+                constexpr std::uint32_t kSat = std::numeric_limits<std::uint32_t>::max();
+                const std::uint32_t over_sat = over > std::int64_t{kSat}
+                    ? kSat
                     : static_cast<std::uint32_t>(over);
                 log_lane_->push(
                     LogRec::DeadlineMiss{
@@ -554,8 +556,8 @@ void Executive::run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment
         }
     }
 
-    if (s.period_ms != 0)
-        next_due_[slot] = tick_count_ + s.period_ms;
+    if (s.period != kEveryRound)
+        next_due_[slot] = tick_count_ + static_cast<std::uint64_t>(s.period.count());
 }
 
 void Executive::stop() noexcept {

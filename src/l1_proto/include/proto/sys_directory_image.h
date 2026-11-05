@@ -4,13 +4,15 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 #include "hal/register_window.h"
 #include "hal/sys_directory.h"
 #include "infra/seat.h"
-#include "proto/declared_line.h"
 
 namespace mister::proto {
+
+struct AxiBlockDecl;
 
 class SysDirectoryImage {
 public:
@@ -36,18 +38,23 @@ public:
                                                           : hal::SysDirectory::kMaxEntries;
     }
 
-    [[nodiscard]] std::uint32_t entry_word(std::uint32_t i, std::uint32_t w) const noexcept {
-        return words_
-            [(hal::SysDirectory::kEntryBase / 4) + (hal::SysDirectory::kEntryStride / 4) * i + w];
-    }
-
-    [[nodiscard]] DeclaredLine line(std::uint32_t i) const noexcept {
-        return DeclaredLine::of(entry_word(i, kLineWord));
-    }
-
-    static constexpr std::uint32_t kLineWord = 15;
+    [[nodiscard]] AxiBlockDecl entry(std::uint32_t i) const noexcept;
 
 private:
+    enum class EntryWord : std::uint32_t { Kind, Version, Offset, Size, Ops, Line = 15 };
+
+    [[nodiscard]] std::uint32_t entry_word(
+        std::uint32_t i,
+        EntryWord first,
+        std::uint32_t w = 0
+    ) const noexcept {
+        return words_
+            [(hal::SysDirectory::kEntryBase / 4)
+             + (hal::SysDirectory::kEntryStride / 4) * i
+             + std::to_underlying(first)
+             + w];
+    }
+
     explicit SysDirectoryImage(const std::array<std::uint32_t, kWords>& w) noexcept : words_(w) {}
 
     std::array<std::uint32_t, kWords> words_{};

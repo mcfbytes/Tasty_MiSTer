@@ -11,6 +11,7 @@
 #include <array>
 #include <cerrno>
 #include <climits>
+#include <limits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -364,7 +365,7 @@ bool LauncherHost::quiescent() const noexcept {
     return !child_ && !claiming_ && !lease_.valid() && !burst_in_flight_;
 }
 
-int LauncherHost::park_ms() const noexcept {
+infra::ParkTimeout LauncherHost::park_ms() const noexcept {
     std::optional<Ns> due{};
     const auto consider = [&due](const std::optional<Ns>& d) noexcept {
         if (d && (!due || *d < *due))
@@ -383,12 +384,13 @@ int LauncherHost::park_ms() const noexcept {
         consider(settle);
     }
     if (!due)
-        return -1;
+        return infra::kForever;
     const Ns left = *due - now_();
     if (left.count() <= 0)
-        return 0;
-    const auto ms = std::chrono::ceil<milliseconds>(left).count();
-    return ms > INT_MAX ? INT_MAX : static_cast<int>(ms);
+        return infra::kNoWait;
+    const auto ms = std::chrono::ceil<milliseconds>(left);
+    constexpr milliseconds kCeil{std::numeric_limits<std::int32_t>::max()};
+    return std::chrono::duration_cast<infra::ParkTimeout>(std::min(ms, kCeil));
 }
 
 void LauncherHost::sweep_stale_() noexcept {

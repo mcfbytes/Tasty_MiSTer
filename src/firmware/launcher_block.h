@@ -32,7 +32,7 @@ public:
     LauncherBlock(const LauncherBlock&) = delete;
     LauncherBlock& operator=(const LauncherBlock&) = delete;
 
-    [[nodiscard]] DeviceBlock::Front device_front(bool grants_uart) noexcept;
+    [[nodiscard]] DeviceBlock::Parts::Frontend device_front(bool grants_uart) noexcept;
 
     void open_fds(OpenVerdict& verdict) noexcept;
 

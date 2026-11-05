@@ -18,6 +18,7 @@
 #include "cores/signature_row.h"
 #include "cores/staging_policy.h"
 #include "cores/start_rule.h"
+#include "cores/types.h"
 #include "infra/error.h"
 #include "proto/sector_floor.h"
 #include "reactor/link_decoder_decl.h"
@@ -119,6 +120,8 @@ struct CoreProfile {
 
     bool is_front_end = false;
 
+    bool tasty_playable = false;
+
     BlockService block_service = BlockService::Generic;
     std::uint8_t block_drain_budget = 4;
 
@@ -126,7 +129,7 @@ struct CoreProfile {
 
     bool suppresses_mgl = false;
 
-    std::uint32_t default_uart_baud = 115200;
+    BaudRate default_uart_baud{115200};
 
     std::string_view cue_browse_dir{};
 

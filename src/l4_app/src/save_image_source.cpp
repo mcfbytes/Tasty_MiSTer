@@ -170,7 +170,7 @@ bool SaveImageSource::fill_blank(
     const Binding* b = find(slot);
     if (b == nullptr || !b->blank.declared())
         return false;
-    cores::render_blank(b->blank, static_cast<std::uint64_t>(lba.v) * b->blank.lba_bytes, window);
+    cores::render_blank(b->blank, static_cast<std::uint64_t>(lba.v) * b->blank.lba_bytes.v, window);
     return true;
 }
 

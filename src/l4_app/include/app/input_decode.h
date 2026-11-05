@@ -20,6 +20,7 @@
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
+#include "infra/park_timeout.h"
 #include "infra/telemetry.h"
 #include "os/clock.h"
 #include "proto/link_event.h"
@@ -139,7 +140,7 @@ public:
     unsigned drop_link_events() noexcept;
 
     void before_wait();
-    void wait_events(int timeout_ms) noexcept;
+    void wait_events(infra::ParkTimeout timeout) noexcept;
     unsigned after_wait();
 
     unsigned decode_round(int timeout_ms);
@@ -222,7 +223,7 @@ private:
     UniqueFd epfd_;
 
     std::atomic<std::uint32_t> registered_{0};
-    std::uint32_t seen_gen_ = 0;
+    svc::Generation seen_gen_{};
 
     static constexpr std::uint32_t kEvictRearmCredit = 4;
     std::uint32_t rearm_credit_ = kEvictRearmCredit;

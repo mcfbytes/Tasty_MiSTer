@@ -9,6 +9,7 @@
 
 #include "app/frame_stamp.h"
 #include "app/rec_control.h"
+#include "app/types.h"
 #include "infra/loan_channel.h"
 #include "infra/seat.h"
 
@@ -24,7 +25,7 @@ struct RawFrameSlot {
     RawKind kind = RawKind::Frame;
     std::uint8_t runs = 0;
     std::uint8_t depth = 0;
-    std::uint16_t gen = 0;
+    ControlGeneration gen{};
     std::array<FrameStampRun, kMaxRuns> run{};
     FrameStamp stamp{};
     std::uint16_t width = 0;

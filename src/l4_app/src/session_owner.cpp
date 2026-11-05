@@ -78,9 +78,9 @@ namespace {
 
 }
 
-constexpr int kLastOrderRetryMs = 1;
+constexpr infra::ParkTimeout kLastOrderRetryMs{1};
 
-constexpr int kPieceRetryMs = 5;
+constexpr infra::ParkTimeout kPieceRetryMs{5};
 
 static_assert(
     cores::PayloadPieces::kAhead + InternedFile::kHeldOps + 1 < InternedFile::kMaxLiveFiles
@@ -458,13 +458,13 @@ void SessionOwner::on(const UiRequest::SaveDips& req, const UiRequest::Head& hea
 void SessionOwner::on(const UiRequest::SaveCoreConfig& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    saves_.save_slot(req.slot.v, head.tag);
+    saves_.save_slot(req.slot, head.tag);
 }
 
 void SessionOwner::on(const UiRequest::LoadCoreConfig& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    saves_.load_slot(req.slot.v, head.tag);
+    saves_.load_slot(req.slot, head.tag);
 }
 
 void SessionOwner::on(const UiRequest::LoadFile& req, const UiRequest::Head& head) {
@@ -500,7 +500,7 @@ void SessionOwner::on(const UiRequest::LoadRamImage& req, const UiRequest::Head&
         ++tally_.ram_images_declined;
         owner_events_.push(
             Event::RamImageDeclined{.why = Errc::bad_format},
-            Event::Head{EmitSite{ERR_SITE()}, {}, head.tag}
+            Event::Head{ERR_SITE(), {}, head.tag}
         );
         return;
     }
@@ -544,11 +544,11 @@ void SessionOwner::on(const UiRequest::SetHdLook& req, const UiRequest::Head& he
 void SessionOwner::on(const UiRequest::SdramDetected& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    const std::uint8_t code = sdram_size_code(req.osd_mask);
+    const SdramSizeCode code = sdram_size_code(req.osd_mask);
 
-    if (handoff_ && !handoff_->write_sdram_cfg(code))
+    if (handoff_ && !handoff_->write_sdram_cfg(sdram_word(code, false)))
         ++tally_.sdram_write_failures;
-    set_boot_cookie(static_cast<std::uint16_t>(kSdramCookieMeasured | code));
+    set_boot_cookie(sdram_word(code, true));
 }
 
 void SessionOwner::set_boot_cookie(std::uint16_t c) {
@@ -559,7 +559,7 @@ void SessionOwner::set_boot_cookie(std::uint16_t c) {
 void SessionOwner::note_memsz_(const UiRequest::LoadCore& req) noexcept {
     if (req.path.empty() || names_front_end_image(req.path.view(), req.xml))
         return;
-    if ((cookie_ & kSdramCookieMeasured) == 0)
+    if (!proto::OsdMask{cookie_}.has(kSdramCookieMeasured))
         ++tally_.memsz_unmeasured;
 }
 
@@ -672,7 +672,7 @@ void SessionOwner::watch_bridge_() noexcept {
 void SessionOwner::end_bridge_session_() noexcept {
     owner_events_.push(
         Event::SessionFailed{.why = Errc::bridge_state},
-        Event::Head{EmitSite{ERR_SITE()}, {}, switch_.pending_tag()}
+        Event::Head{ERR_SITE(), {}, switch_.pending_tag()}
     );
 
     phase::Facts f = facts_of(switch_, negotiated_, reboot_, Errc::bridge_state);
@@ -794,7 +794,11 @@ void SessionOwner::finish_pick_(UiRequest::Kind asked, CorrelationTag tag, Conte
 
 void SessionOwner::run_load_(const PickedLoad& load) {
     if (const auto gen = attach_row_savestates(load.opensave, load.content.path.view())) {
-        hold_for_savestates(load, *gen, clock_.now().count() + cores::kSaveStateHoldBoundNs);
+        hold_for_savestates(
+            load,
+            *gen,
+            clock_.now() + std::chrono::nanoseconds{cores::kSaveStateHoldBoundNs}
+        );
         return;
     }
     after_content_(content_.run_attached_load(load, *this));
@@ -805,7 +809,7 @@ void SessionOwner::step_savestate_hold_() {
     if (!hold)
         return;
     if (!savestates_answered_(hold->gen)) {
-        if (clock_.now().count() < hold->due_ns)
+        if (clock_.now() < hold->due)
             return;
         ++tally_.savestate_hold_expiries;
     }
@@ -818,7 +822,7 @@ bool SessionOwner::content_ordered_() const noexcept {
     return !content_.picked_load() && !belt_.any_live(kContentOwing) && !rom_waits;
 }
 
-std::optional<std::uint32_t> SessionOwner::attach_row_savestates(
+std::optional<proto::ActKey> SessionOwner::attach_row_savestates(
     bool opensave,
     std::string_view rom
 ) {
@@ -826,7 +830,7 @@ std::optional<std::uint32_t> SessionOwner::attach_row_savestates(
     const auto& conf = negotiated_.conf_str();
     if (!opensave || !conf || !conf->savestate().has_value())
         return std::nullopt;
-    const std::uint32_t gen = ladder_host_.next_generation();
+    const proto::ActKey gen = ladder_host_.next_generation();
     if (!ask_savestates_(rom, gen))
         return std::nullopt;
     return gen;
@@ -834,14 +838,14 @@ std::optional<std::uint32_t> SessionOwner::attach_row_savestates(
 
 void SessionOwner::hold_for_savestates(
     const PickedLoad& load,
-    std::uint32_t gen,
-    std::int64_t due_ns
+    proto::ActKey gen,
+    std::chrono::nanoseconds due
 ) {
     TASTY_SEAT_BODY(SessionOwner);
-    belt_.hold(LoadBelt::SaveStateHold{.load = load, .gen = gen, .due_ns = due_ns});
+    belt_.hold(LoadBelt::SaveStateHold{.load = load, .gen = gen, .due = due});
 }
 
-bool SessionOwner::ask_savestates_(std::string_view rom, std::uint32_t gen) noexcept {
+bool SessionOwner::ask_savestates_(std::string_view rom, proto::ActKey gen) noexcept {
     const bool service = save_state_asks_
         && save_state_facts_
         && save_state_facts_->generation() != 0;
@@ -858,14 +862,13 @@ bool SessionOwner::ask_savestates_(std::string_view rom, std::uint32_t gen) noex
     return true;
 }
 
-bool SessionOwner::savestates_answered_(std::uint32_t gen) const noexcept {
+bool SessionOwner::savestates_answered_(proto::ActKey gen) const noexcept {
     if (!save_state_facts_)
         return true;
-    const std::uint32_t answered = save_state_facts_->sample().value.answered;
-    return static_cast<std::int32_t>(answered - gen) >= 0;
+    return save_state_facts_->sample().value.answered.at_or_past(gen);
 }
 
-bool SessionOwner::order_savestates(std::string_view image, std::uint32_t gen) {
+bool SessionOwner::order_savestates(std::string_view image, proto::ActKey gen) {
     TASTY_SEAT_BODY(SessionOwner);
     const auto& conf = negotiated_.conf_str();
     if (!conf || !conf->savestate().has_value())
@@ -944,7 +947,7 @@ bool SessionOwner::prime_replay_save_(std::string_view path, bool seeded) {
         const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
         if (!sz)
             return false;
-        auto buf = read_whole(**f, sz->v);
+        auto buf = read_whole(**f, *sz);
         if (!buf)
             return false;
         seed = std::move(*buf);
@@ -1063,7 +1066,7 @@ void SessionOwner::offer_(BeltOrders&& orders) {
     (void)log_->push(LogRec::Refusal{Errc::busy, ERR_SITE()}, log_now_ns_());
 }
 
-bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, std::uint32_t gen) {
+bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, proto::ActKey gen) {
     TASTY_SEAT_BODY(SessionOwner);
     if (belt_.any_live(kWalkBlockers))
         return false;
@@ -1126,7 +1129,7 @@ void SessionOwner::bios_missing_() {
 
     owner_events_.push(
         Event::InfoRequest{.id = InfoId::CdBiosMissing},
-        Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+        Event::Head{ERR_SITE(), {}, kUncaused}
     );
 }
 
@@ -1167,10 +1170,10 @@ void SessionOwner::step_ladder_() {
 
 void SessionOwner::finish_ladder_(const OwnerLadder::Ended& end) {
     mounts_.ladder_ended();
-    const Event::Head head{EmitSite{ERR_SITE()}, {}, kUncaused};
+    const Event::Head head{ERR_SITE(), {}, kUncaused};
     if (end.ok) {
         if (end.touched)
-            owner_events_.push(Event::SdActivity{.slot = end.slot}, head);
+            owner_events_.push(Event::SdActivity{.slot = end.index.v}, head);
         publish_done(end.owed.which, end.owed.tag);
     } else {
         owner_events_.push(Event::InfoRequest{.id = InfoId::ImageMountFailed}, head);
@@ -1243,8 +1246,8 @@ void SessionOwner::order_make_core_(
             .irqs = conf ? conf->irq_bindings() : std::span<const proto::IrqBinding>{},
             .lw = conf ? conf->lw_windows() : std::span<const proto::AxiLwDecl>{},
             .fabric = fabric,
-            .fabric_gen = fabric_gen_,
-            .mount_slots = conf ? conf->mount_slot_mask() : std::uint16_t{0}
+            .fabric_gen = FabricGeneration{fabric_gen_},
+            .mount_slots = conf ? conf->mount_slot_mask() : proto::BlockSlotMask{}
         }
     );
 
@@ -1309,17 +1312,14 @@ void SessionOwner::publish_done(UiRequest::Kind which, CorrelationTag tag) noexc
     TASTY_SEAT_BODY(SessionOwner);
     if (tag == kUncaused)
         return;
-    owner_events_.push(
-        Event::RequestDone{.which = which},
-        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-    );
+    owner_events_.push(Event::RequestDone{.which = which}, Event::Head{ERR_SITE(), {}, tag});
 }
 
 void SessionOwner::publish_refusal(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept {
     TASTY_SEAT_BODY(SessionOwner);
     owner_events_.push(
         Event::RequestRefused{.which = which, .why = code},
-        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
+        Event::Head{ERR_SITE(), {}, tag}
     );
 }
 
@@ -1332,7 +1332,7 @@ void SessionOwner::refuse_started_switch_(Errc why, phase::Stimulus on) noexcept
 
     owner_events_.push(
         Event::SessionFailed{.why = why},
-        Event::Head{EmitSite{ERR_SITE()}, {}, switch_.pending_tag()}
+        Event::Head{ERR_SITE(), {}, switch_.pending_tag()}
     );
     abort_start_(why);
 
@@ -1392,7 +1392,7 @@ void SessionOwner::bind_slot_answer_(bool boot, CorrelationTag tag, std::string_
             finish_boot_restore_();
         return;
     }
-    const std::uint8_t slot = boot ? 0 : saves_.load_slot_slot();
+    const cores::ConfigSlot slot = boot ? cores::ConfigSlot{} : saves_.load_slot_slot();
     const bool laddered = saves_.bind_slot_config(slot, path) && boots && arm_restore_ladder_(path);
 
     if (boot && laddered) {
@@ -1518,7 +1518,12 @@ void SessionOwner::finish_core_made_() noexcept {
     if (made.restore_owed) {
 
         boot_restore_ = BootRestore::Asked;
-        if (saves_.order_save_ask(proto::SaveKind::SlotNames, 0, CorrelationTag{}, true))
+        if (saves_.order_save_ask(
+                proto::SaveKind::SlotNames,
+                cores::ConfigSlot{},
+                CorrelationTag{},
+                true
+            ))
             return;
         boot_restore_ = BootRestore::None;
     }
@@ -1662,7 +1667,7 @@ void SessionOwner::order_start_chain_(const StartChain& chain) {
         const StartFile& f = files[i];
         const std::uint32_t failed = tally_.files_failed;
         const std::uint32_t drops = tally_.op_drops;
-        if (f.offset != 0) {
+        if (f.offset != proto::FileSize{}) {
             order_rbf_tail_(f.path.view(), f.dest, f.offset);
         } else {
             ContentRequest cr{};
@@ -1681,7 +1686,7 @@ void SessionOwner::order_start_chain_(const StartChain& chain) {
 void SessionOwner::order_rbf_tail_(
     std::string_view path,
     proto::WideIoIndex dest,
-    std::uint64_t offset
+    proto::FileSize offset
 ) {
     auto src = stream_open(vfs_, path, svc::OpenMode::ReadWhole);
     if (!src || src->size < offset) {
@@ -1692,7 +1697,7 @@ void SessionOwner::order_rbf_tail_(
         ++tally_.files_failed;
         return;
     }
-    std::vector<std::uint8_t> buf(static_cast<std::size_t>(src->size - offset));
+    std::vector<std::uint8_t> buf(static_cast<std::size_t>((src->size - offset).v));
     if (!stream_read(*src->f, offset, std::as_writable_bytes(std::span<std::uint8_t>(buf)))) {
         ++tally_.files_failed;
         return;
@@ -1712,7 +1717,7 @@ void SessionOwner::order_rbf_tail_(
     if (!content_.order_content_tx(
             *id,
             ContentPick::ContentWatch{
-                .total = src->size - offset,
+                .total = (src->size - offset).v,
                 .crc = key.value(),
                 .wire_index = dest,
                 .cut_on_hold = true
@@ -1771,14 +1776,15 @@ void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
 
     const bool manifest = build_has_manifest_(cs);
     const bool fabric = CoreBuilder::fabric_route(name, manifest);
-    const std::optional<std::uint32_t> owned = fabric ? builder_.claim_sector(
-                                                            {.name = name,
-                                                             .manifest = manifest,
-                                                             .irqs = cs.irq_bindings(),
-                                                             .lw = lw,
-                                                             .fabric_gen = fabric_gen_}
-                                                        )
-                                                      : std::nullopt;
+    const std::optional<std::uint32_t> owned = fabric
+        ? builder_.claim_sector(
+              {.name = name,
+               .manifest = manifest,
+               .irqs = cs.irq_bindings(),
+               .lw = lw,
+               .fabric_gen = FabricGeneration{fabric_gen_}}
+          )
+        : std::nullopt;
     bind_.doorbells(cs, lw, owned);
     bind_.joy(name);
 
@@ -1964,17 +1970,19 @@ bool SessionOwner::program_owed() const noexcept {
     return switch_.program_owed();
 }
 
-int SessionOwner::wake_hint_ms(int floor_ms) const noexcept {
-    const auto until = [this](const os::Deadline& d, int floor) noexcept {
-        const std::int64_t left_ns = (d.at() - clock_.now()).count();
+infra::ParkTimeout SessionOwner::wake_hint_ms(infra::ParkTimeout floor_ms) const noexcept {
+    using Wide = std::chrono::duration<std::int64_t, std::milli>;
+    const auto until = [this](const os::Deadline& d, infra::ParkTimeout floor) noexcept {
+        const std::int64_t left_ns = d.remaining(clock_.now()).count();
         if (left_ns <= 0)
-            return 0;
-        const std::int64_t ms = (left_ns + 999'999) / 1'000'000;
-        return ms < floor ? static_cast<int>(ms) : floor;
+            return infra::kNoWait;
+        const Wide ms = std::chrono::ceil<Wide>(std::chrono::nanoseconds{left_ns});
+        return ms < floor ? std::chrono::duration_cast<infra::ParkTimeout>(ms) : floor;
     };
 
     if (const auto& owed = reboot_.owed()) {
-        const int f = owed->ordered ? floor_ms : std::min(floor_ms, kLastOrderRetryMs);
+        const infra::ParkTimeout f = owed->ordered ? floor_ms
+                                                   : std::min(floor_ms, kLastOrderRetryMs);
         return until(reboot_.due(), f);
     }
     const bool owed = switch_.load_held() || (phase_.front_end_owed() && !before_seats_);
@@ -2063,7 +2071,7 @@ void SessionOwner::end_rebooting_switch_() noexcept {
         refuse_rebooting_(phase::Stimulus::ParkComplete);
     owner_events_.push(
         Event::SessionFailed{.why = Errc::negotiation},
-        Event::Head{EmitSite{ERR_SITE()}, {}, switch_.pending_tag()}
+        Event::Head{ERR_SITE(), {}, switch_.pending_tag()}
     );
     abort_start_(Errc::negotiation);
 }

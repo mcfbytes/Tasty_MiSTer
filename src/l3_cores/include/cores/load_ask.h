@@ -11,7 +11,7 @@ namespace mister::cores {
 struct LoadAsk {
     proto::WideIoIndex index{};
     std::string_view path{};
-    std::uint64_t size = 0;
+    proto::FileSize size{};
     std::uint32_t load_addr = 0;
 
     bool disc = false;

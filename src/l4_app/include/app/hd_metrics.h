@@ -2,7 +2,10 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
+#include <array>
 #include <cstdint>
+#include <utility>
 
 namespace mister::app {
 
@@ -38,15 +41,14 @@ struct HdMetrics {
 };
 
 [[nodiscard]] constexpr std::int32_t hd_tier(std::uint32_t h) noexcept {
-    if (h < 400)
-        return 240;
-    if (h < 520)
-        return 480;
-    if (h < 660)
-        return 540;
-    if (h < 900)
-        return 720;
-    return 1080;
+    constexpr std::array<std::pair<std::uint32_t, std::int32_t>, 4> kCeilings{
+        {{400, 240}, {520, 480}, {660, 540}, {900, 720}}
+    };
+    constexpr std::int32_t kTop = 1080;
+    for (const auto& [below, tier] : kCeilings)
+        if (h < below)
+            return tier;
+    return kTop;
 }
 
 [[nodiscard]] constexpr HdMetrics hd_metrics(std::uint32_t w, std::uint32_t h) noexcept {
@@ -63,14 +65,25 @@ struct HdMetrics {
         {720, 29, 23, 21, 19, 17, 16, 6, 3},
         {1080, 43, 35, 31, 28, 26, 24, 8, 4},
     };
+    constexpr std::size_t kDefaultRung = 3;
+
+    constexpr std::int32_t kBaseTier = 720, kHalf = 2;
+
+    constexpr std::int32_t kPadRight = 28, kHeaderGap = 4, kListTop = 116, kHelpPad = 16,
+                           kHelpBar = 56, kGap = 12, kRowH = 42, kRowPad = 12, kCardPad = 7,
+                           kGlyph = 24, kIcon = 18, kButtonH = 56, kTrackH = 8;
+
+    constexpr std::uint64_t kInsetPct = 5, kPct = 100, kInsetRound = kPct / 2;
+    constexpr std::int32_t kMille = 1000, kMilleRound = kMille / 2, kStrokeMille = 2,
+                           kFocusMille = 4, kRingMille = 6, kPressMille = 8;
     HdMetrics m{};
     m.tier = hd_tier(h);
-    Rung r = kLadder[3];
+    Rung r = kLadder[kDefaultRung];
     for (const Rung& x : kLadder)
         if (x.tier == m.tier)
             r = x;
     const auto k = [t = m.tier](std::int32_t base720) {
-        return (base720 * t + 360) / 720;
+        return (base720 * t + kBaseTier / kHalf) / kBaseTier;
     };
     const auto ih = static_cast<std::int32_t>(h);
     m.font_hero = r.hero;
@@ -81,25 +94,25 @@ struct HdMetrics {
     m.font_small = r.small;
     m.radius_md = r.radius_md;
     m.radius_sm = r.radius_sm;
-    m.inset_x = static_cast<std::int32_t>((static_cast<std::uint64_t>(w) * 5u + 50u) / 100u);
-    m.inset_y = static_cast<std::int32_t>((static_cast<std::uint64_t>(h) * 5u + 50u) / 100u);
-    m.pad_right = k(28);
-    m.header_gap = k(4);
-    m.list_top = m.inset_y + k(116);
-    m.help_pad = k(16);
-    m.help_top = ih - (m.inset_y + k(56));
-    m.gap = k(12);
-    m.row_h = k(42);
-    m.row_pad = k(12);
-    m.card_pad = k(7);
-    m.stroke = std::max<std::int32_t>(1, (ih * 2 + 500) / 1000);
-    m.focus_stroke = std::max<std::int32_t>(1, (ih * 4 + 500) / 1000);
-    m.ring_w = std::max<std::int32_t>(1, (ih * 6 + 500) / 1000);
-    m.press_edge = std::max<std::int32_t>(1, (ih * 8 + 500) / 1000);
-    m.glyph = k(24);
-    m.icon = k(18);
-    m.button_h = k(56);
-    m.track_h = k(8);
+    m.inset_x = static_cast<std::int32_t>((std::uint64_t{w} * kInsetPct + kInsetRound) / kPct);
+    m.inset_y = static_cast<std::int32_t>((std::uint64_t{h} * kInsetPct + kInsetRound) / kPct);
+    m.pad_right = k(kPadRight);
+    m.header_gap = k(kHeaderGap);
+    m.list_top = m.inset_y + k(kListTop);
+    m.help_pad = k(kHelpPad);
+    m.help_top = ih - (m.inset_y + k(kHelpBar));
+    m.gap = k(kGap);
+    m.row_h = k(kRowH);
+    m.row_pad = k(kRowPad);
+    m.card_pad = k(kCardPad);
+    m.stroke = std::max<std::int32_t>(1, (ih * kStrokeMille + kMilleRound) / kMille);
+    m.focus_stroke = std::max<std::int32_t>(1, (ih * kFocusMille + kMilleRound) / kMille);
+    m.ring_w = std::max<std::int32_t>(1, (ih * kRingMille + kMilleRound) / kMille);
+    m.press_edge = std::max<std::int32_t>(1, (ih * kPressMille + kMilleRound) / kMille);
+    m.glyph = k(kGlyph);
+    m.icon = k(kIcon);
+    m.button_h = k(kButtonH);
+    m.track_h = k(kTrackH);
     return m;
 }
 
@@ -116,12 +129,16 @@ struct HdMetrics {
     if (em == 0)
         return m;
     const std::int32_t e = em;
+    constexpr std::int32_t kHalves = 2, kBodyRowNum = 3, kBodyRowDen = 4;
     const auto snap = [e](std::int32_t v) {
-        const std::int32_t q = v / e + (2 * (v % e) > e ? 1 : 0);
+        const std::int32_t q = v / e + (kHalves * (v % e) > e ? 1 : 0);
         return std::max<std::int32_t>(1, q) * e;
     };
     const std::int32_t body_up = std::max<std::int32_t>(1, (m.font_body + e - 1) / e);
-    const std::int32_t body_fits = std::max<std::int32_t>(1, m.row_h * 3 / 4 / e);
+    const std::int32_t body_fits = std::max<std::int32_t>(
+        1,
+        m.row_h * kBodyRowNum / kBodyRowDen / e
+    );
     m.font_hero = snap(m.font_hero);
     m.font_section = snap(m.font_section);
     m.font_body = std::min(body_up, body_fits) * e;
@@ -135,9 +152,10 @@ struct HdMetrics {
     const HdMetrics& snapped,
     std::uint8_t em
 ) noexcept {
+    constexpr std::int32_t kBevelThirds = 3;
     if (em == 0)
         return 1;
-    const std::int32_t frame = (snapped.card_pad + snapped.stroke) / 3;
+    const std::int32_t frame = (snapped.card_pad + snapped.stroke) / kBevelThirds;
     return std::max<std::int32_t>(1, std::min<std::int32_t>(snapped.font_body / em, frame));
 }
 

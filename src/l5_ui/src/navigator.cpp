@@ -192,12 +192,12 @@ std::int64_t ms_ns(unsigned ms) noexcept {
 
 }
 
-std::uint16_t KeyDecoder::decode(std::uint32_t code, bool ini_select) noexcept {
-    return ini_select ? lookup(kIniSelectTable, code) : lookup(kFullTable, code);
+UiButtonMask KeyDecoder::decode(proto::KeyCode code, bool ini_select) noexcept {
+    return UiButtonMask{ini_select ? lookup(kIniSelectTable, code.v) : lookup(kFullTable, code.v)};
 }
 
-bool KeyDecoder::repeatable(std::uint32_t code) noexcept {
-    return ascii_printable(code) || is_cursor(code);
+bool KeyDecoder::repeatable(proto::KeyCode code) noexcept {
+    return ascii_printable(code.v) || is_cursor(code.v);
 }
 
 void KeyDecoder::push_raw(proto::KeyCode code) noexcept {
@@ -215,8 +215,7 @@ void KeyDecoder::enqueue(proto::KeyCode code, bool synth) noexcept {
         ++dropped_;
     }
     const unsigned tail = (head_ + count_) % kQueue;
-    slots_[tail] = code.v;
-    synth_[tail] = synth;
+    queue_[tail] = QueuedKey{.code = code.v, .synth = synth};
     ++count_;
 }
 
@@ -246,7 +245,7 @@ std::optional<UiEvent> KeyDecoder::deliver_(
         repeat_at_ns_ = now + ms_ns(kRepeatDelayMs);
     } else if (now >= repeat_at_ns_) {
         repeat_at_ns_ = now + ms_ns(kRepeatRateMs);
-        if (repeatable(code) || repeat_all_) {
+        if (repeatable(proto::KeyCode{code}) || repeat_all_) {
             c = code;
             ++hold_cnt_;
         }
@@ -257,7 +256,7 @@ std::optional<UiEvent> KeyDecoder::deliver_(
     UiEvent ev{};
     ev.kind = UiEvent::Kind::Key;
     ev.raw = proto::KeyCode{c};
-    ev.buttons = decode(c, ini_select_);
+    ev.buttons = decode(proto::KeyCode{c}, ini_select_);
     ev.repeat_depth = hold_cnt_;
     return ev;
 }
@@ -277,8 +276,7 @@ std::optional<UiEvent> KeyDecoder::pop() noexcept {
         db_at_ns_ = 0;
 
         if (held_make(bounced) && count_ == 0) {
-            slots_[head_] = bounced;
-            synth_[head_] = false;
+            queue_[head_] = QueuedKey{.code = bounced, .synth = false};
             count_ = 1;
         }
         if (bounced != last_seen_)
@@ -287,10 +285,10 @@ std::optional<UiEvent> KeyDecoder::pop() noexcept {
     if (count_ == 0)
         return std::nullopt;
 
-    if (!synth_[head_] && now < db_at_ns_) {
+    if (!queue_[head_].synth && now < db_at_ns_) {
         bool swallowed = false;
-        while (count_ != 0 && !synth_[head_]) {
-            const std::uint32_t c = slots_[head_];
+        while (count_ != 0 && !queue_[head_].synth) {
+            const std::uint32_t c = queue_[head_].code;
             if (!swallowed && count_ == 1 && held_make(c) && c == last_seen_)
                 break;
             db_pending_ = c;
@@ -304,8 +302,8 @@ std::optional<UiEvent> KeyDecoder::pop() noexcept {
 
     std::optional<UiEvent> ev;
     for (;;) {
-        const std::uint32_t c1 = slots_[head_];
-        if (synth_[head_]) {
+        const std::uint32_t c1 = queue_[head_].code;
+        if (queue_[head_].synth) {
             ev = deliver_(c1, now, true);
         } else if (c1 != last_seen_) {
             ev = accept_(c1, now);

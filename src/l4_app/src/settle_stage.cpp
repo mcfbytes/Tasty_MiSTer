@@ -29,13 +29,14 @@ std::string value_label(
     const cores::IMovieCodec::SettingNeed& need,
     unsigned value
 ) {
+    constexpr unsigned kFirstLabelSubfield = 2;
     if (table) {
         for (const proto::Item& it : table->items()) {
             if (it.kind != proto::ItemKind::Option
                 || it.bits.start.v != need.lo
                 || it.bits.width != need.width)
                 continue;
-            const std::string_view label = table->subfield(it, 2 + value);
+            const std::string_view label = table->subfield(it, kFirstLabelSubfield + value);
             if (!label.empty())
                 return std::string(label);
             break;
@@ -48,6 +49,8 @@ cores::IMovieCodec::SettingNeeds where_the_core_has(
     cores::IMovieCodec::SettingNeeds needs,
     infra::OptRef<const proto::ItemTable> table
 ) {
+    constexpr unsigned kFirstLabelSubfield = 2;
+    constexpr unsigned kMaxOptionBits = 8;
     if (!table)
         return needs;
     for (std::size_t i = 0; i < needs.n; ++i) {
@@ -65,9 +68,9 @@ cores::IMovieCodec::SettingNeeds where_the_core_has(
         if (at == nullptr)
             continue;
 
-        if (at->bits.width > 8
+        if (at->bits.width > kMaxOptionBits
             || n.preferred >= (1u << at->bits.width)
-            || n.preferred + 2u >= at->subfield_count) {
+            || n.preferred + kFirstLabelSubfield >= at->subfield_count) {
             n.allowed = 0;
             continue;
         }
@@ -100,6 +103,8 @@ IReplayStage::Step SettleStage::tick(Ctx ctx) noexcept {
 }
 
 IReplayStage::Step SettleStage::settle_(Ctx ctx) noexcept {
+    constexpr std::uint8_t kNoRomIndex = 0xFF;
+    constexpr std::uint32_t kNsPerUs = 1000;
     ReplayPlay& play = ctx.play;
     proto::StatusWord live{};
     if (ctx.w.core_status.sample_into(live) == 0)
@@ -166,7 +171,7 @@ IReplayStage::Step SettleStage::settle_(Ctx ctx) noexcept {
         ? ReplayMsg::PowerOnEvent::ResetPulse
         : ReplayMsg::PowerOnEvent::LoadEnd;
 
-    play.rom_index = 0xFF;
+    play.rom_index = kNoRomIndex;
     if (play.event == ReplayMsg::PowerOnEvent::LoadEnd) {
         const auto slot = rom_slot_(ctx);
         if (!slot)
@@ -178,11 +183,11 @@ IReplayStage::Step SettleStage::settle_(Ctx ctx) noexcept {
         "{\"t\":\"tas\",\"k\":\"armed\",\"frames\":%u,\"ports\":%u,\"lead\":%d,"
         "\"phase_us\":%u,\"poweron_us\":%u,\"vsync_ok\":%u,\"checks\":%u,\"status\":"
         "\"%04x%04x%04x%04x%04x%04x%04x%04x\"}",
-        play.frames,
+        play.scanned,
         static_cast<unsigned>(play.facts.ports),
         static_cast<int>(play.lead),
         play.offset_us,
-        play.poweron_ns / 1000u,
+        play.poweron_ns / kNsPerUs,
         play.vsync_ok ? 1u : 0u,
         static_cast<unsigned>(play.n_checks),
         live.words[7],
@@ -260,6 +265,7 @@ bool SettleStage::set_unmet_(
 }
 
 void SettleStage::load_checkpoints_(Ctx ctx) noexcept {
+    constexpr unsigned kDecimal = 10;
     ReplayPlay& play = ctx.play;
     play.n_checks = 0;
     play.next_check = 0;
@@ -288,13 +294,13 @@ void SettleStage::load_checkpoints_(Ctx ctx) noexcept {
     for (std::size_t i = 0; i <= *got && play.n_checks < ReplayPlay::kCheckpoints; ++i) {
         const char c = i < *got ? static_cast<char>(buf[i]) : ' ';
         if (c >= '0' && c <= '9') {
-            v = v * 10 + static_cast<unsigned>(c - '0');
+            v = v * kDecimal + static_cast<unsigned>(c - '0');
             in = v <= ReplayPlay::kMaxFrames;
             if (!in)
                 v = ReplayPlay::kMaxFrames + 1;
         } else {
             if (in)
-                play.checks[play.n_checks++] = static_cast<std::uint32_t>(v);
+                play.checks[play.n_checks++] = movie_frame_from_wire(static_cast<std::uint32_t>(v));
             v = 0;
             in = false;
         }

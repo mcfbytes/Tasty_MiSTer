@@ -8,6 +8,7 @@
 #include "infra/diag_log.h"
 #include "infra/seat.h"
 #include "proto/link_event.h"
+#include "proto/types.h"
 #include "svc/rumble_out.h"
 
 namespace mister::app {
@@ -28,8 +29,8 @@ public:
 
     void on(const proto::LinkEvent::PolledWord& w) noexcept;
 
-    [[nodiscard]] std::uint16_t last_applied(std::uint8_t player) const noexcept {
-        return player < last_.size() ? last_[player] : std::uint16_t{0};
+    [[nodiscard]] std::uint16_t last_applied(proto::PlayerIndex player) const noexcept {
+        return player.v < last_.size() ? last_[player.v] : std::uint16_t{0};
     }
 
     [[nodiscard]] std::uint32_t applied() const noexcept { return applied_; }

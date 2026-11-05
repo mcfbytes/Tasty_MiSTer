@@ -28,15 +28,11 @@ class ConfStrCaps {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
-    [[nodiscard]] std::size_t try_ss(
-        std::string_view f1,
-        std::size_t pos,
-        hal::PhysRegion aperture
-    );
-    [[nodiscard]] std::size_t try_uart(std::string_view f1, std::size_t pos);
-    [[nodiscard]] std::size_t try_midi(std::string_view f1, std::size_t pos);
-    [[nodiscard]] Ex<std::size_t> try_irq(std::string_view f1, std::size_t pos);
-    [[nodiscard]] Ex<std::size_t> try_axi(std::string_view f1, std::size_t pos);
+    [[nodiscard]] std::string_view try_ss(std::string_view rest, hal::PhysRegion aperture);
+    [[nodiscard]] std::string_view try_uart(std::string_view rest);
+    [[nodiscard]] std::string_view try_midi(std::string_view rest);
+    [[nodiscard]] Ex<std::string_view> try_irq(std::string_view rest);
+    [[nodiscard]] Ex<std::string_view> try_axi(std::string_view rest);
 
     void carry_unknown(std::string_view run);
 

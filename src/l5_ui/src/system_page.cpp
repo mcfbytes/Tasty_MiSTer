@@ -6,7 +6,6 @@
 #include <iterator>
 #include <optional>
 #include <string_view>
-#include <vector>
 
 #include "app/cmd_verb_sink.h"
 #include "app/hd_window.h"
@@ -16,9 +15,12 @@
 #include "app/recents_store.h"
 #include "app/ui_request_ring.h"
 #include "infra/opt_ref.h"
+#include "ui/draw_classic.h"
 #include "ui/free_space.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_ask.h"
+#include "ui/page_row.h"
+#include "ui/page_walk.h"
 #include "ui/browse_source.h"
 #include "ui/browser_entry.h"
 #include "ui/browser_host.h"
@@ -134,18 +136,44 @@ void SystemPage::on_enter(PageContext& ctx) {
     core_pick_.bind({.route = ctx.route, .recents = ctx.recents});
 }
 
+namespace {
+
+enum ClassicLine : std::uint8_t {
+    kLineCore,
+    kLineVersion,
+    kLineGapTop,
+    kLineStorage,
+    kLineSpace,
+    kLineSwitch,
+    kLineGapMid,
+    kLineRemap,
+    kLineJoystick,
+    kLineScripts,
+    kLineHelp,
+    kLineSave,
+    kLineReboot,
+    kLineKernel,
+    kLineUseHd,
+    kLineExit,
+};
+
+constexpr std::string_view kColdHead = " Cold";
+constexpr RowIndex kConfirmCancel{0};
+constexpr RowIndex kConfirmRememberScripts{2};
+}
+
 template <class Visit>
 void SystemPage::for_each_row(Visit&& visit) const {
     char s[40];
-    visit(std::uint8_t{0}, SystemItem::Core, std::string_view{kRowCore}, false);
+    visit(kLineCore, SystemItem::Core, std::string_view{kRowCore}, false);
 
     if (facts_.os_version[0] != '\0') {
         std::snprintf(s, sizeof s, " MiSTer v%s,  OS v%s", facts_.version, facts_.os_version);
     } else {
         std::snprintf(s, sizeof s, "       MiSTer v%s", facts_.version);
     }
-    visit(std::uint8_t{1}, std::nullopt, std::string_view{s}, false);
-    visit(std::uint8_t{2}, std::nullopt, std::string_view{}, false);
+    visit(kLineVersion, std::nullopt, std::string_view{s}, false);
+    visit(kLineGapTop, std::nullopt, std::string_view{}, false);
 
     std::string_view storage;
     std::string_view switch_to;
@@ -161,20 +189,20 @@ void SystemPage::for_each_row(Visit&& visit) const {
         switch_to = "        Switch to USB";
         switch_stippled = !facts_.usb_mounted;
     }
-    visit(std::uint8_t{3}, std::nullopt, storage, false);
+    visit(kLineStorage, std::nullopt, storage, false);
 
     const std::string space = "   Available space: "
-        + format_free_space(facts_.avail_bytes, FreeSpaceStyle::Classic);
-    visit(std::uint8_t{4}, std::nullopt, space, false);
-    visit(std::uint8_t{5}, SystemItem::SwitchStorage, switch_to, switch_stippled);
+        + format_free_space(facts_.avail, FreeSpaceStyle::Classic);
+    visit(kLineSpace, std::nullopt, space, false);
+    visit(kLineSwitch, SystemItem::SwitchStorage, switch_to, switch_stippled);
 
-    visit(std::uint8_t{6}, std::nullopt, std::string_view{}, false);
-    visit(std::uint8_t{7}, SystemItem::RemapKeyboard, std::string_view{kRowRemap}, false);
-    visit(std::uint8_t{8}, SystemItem::DefineJoystick, std::string_view{kRowJoy}, false);
-    visit(std::uint8_t{9}, SystemItem::Scripts, std::string_view{kRowScripts}, false);
-    visit(std::uint8_t{10}, SystemItem::Help, std::string_view{kRowHelp}, false);
+    visit(kLineGapMid, std::nullopt, std::string_view{}, false);
+    visit(kLineRemap, SystemItem::RemapKeyboard, std::string_view{kRowRemap}, false);
+    visit(kLineJoystick, SystemItem::DefineJoystick, std::string_view{kRowJoy}, false);
+    visit(kLineScripts, SystemItem::Scripts, std::string_view{kRowScripts}, false);
+    visit(kLineHelp, SystemItem::Help, std::string_view{kRowHelp}, false);
     visit(
-        std::uint8_t{11},
+        kLineSave,
         SystemItem::SaveSettings,
         facts_.core_loaded ? std::string_view{kRowSave} : std::string_view{},
         false
@@ -182,89 +210,106 @@ void SystemPage::for_each_row(Visit&& visit) const {
 
     if (reboot_req_) {
         std::snprintf(s, sizeof s, " Cold Reboot");
-        visit(std::uint8_t{12}, SystemItem::Reboot, std::string_view{s + 5 - reboot_off_}, false);
+        visit(
+            kLineReboot,
+            SystemItem::Reboot,
+            std::string_view{s + kColdHead.size() - reboot_off_},
+            false
+        );
     } else {
-        visit(std::uint8_t{12}, SystemItem::Reboot, std::string_view{kRowReboot}, false);
+        visit(kLineReboot, SystemItem::Reboot, std::string_view{kRowReboot}, false);
     }
-    visit(std::uint8_t{13}, std::nullopt, std::string_view{kernel_row(facts_.kernel)}, false);
+    visit(kLineKernel, std::nullopt, std::string_view{kernel_row(facts_.kernel)}, false);
 
     if (facts_.hd_switchable) {
-        visit(std::uint8_t{14}, SystemItem::UseHd, std::string_view{kRowUseHd}, false);
+        visit(kLineUseHd, SystemItem::UseHd, std::string_view{kRowUseHd}, false);
     } else {
-        visit(std::uint8_t{14}, std::nullopt, std::string_view{}, false);
+        visit(kLineUseHd, std::nullopt, std::string_view{}, false);
     }
-    visit(std::uint8_t{15}, SystemItem::Exit, std::string_view{kStdExit}, false);
+    visit(kLineExit, SystemItem::Exit, std::string_view{kStdExit}, false);
 }
 
-void SystemPage::render_row(
-    OsdRenderer& out,
-    std::uint8_t row,
-    std::optional<SystemItem> item,
-    std::string_view text,
-    bool stippled
-) const {
-    out.text(OsdRow{row}, text, item.has_value() && item_selected(*item), stippled);
-}
-
-void SystemPage::render(OsdRenderer& out) const {
+bool SystemPage::walk(PageWalk& out) const {
     TASTY_SEAT_BODY(SystemPage);
-    out.set_title(kTitle, OsdRenderer::kArrowLeft);
+    (void)out.page.title.assign(kTitle);
+    out.title_arrow = OsdRenderer::kArrowLeft;
+    out.count = 0;
+
+    std::uint16_t total = 0;
+    std::uint16_t selected = 0;
+    for_each_row([&](std::uint8_t, std::optional<SystemItem> item, std::string_view text, bool) {
+        if (text.empty())
+            return;
+        if (item.has_value() && item_selected(*item))
+            selected = total;
+        ++total;
+    });
+
+    const app::HdWindow win = app::hd_window(selected, total, out.page.first);
+    out.page.total = total;
+    out.page.first = win.first;
+
+    std::uint16_t at = 0;
     for_each_row([&](std::uint8_t row,
                      std::optional<SystemItem> item,
                      std::string_view text,
-                     bool stippled) { render_row(out, row, item, text, stippled); });
-}
-
-bool SystemPage::describe(app::PageDescription& out) const {
-    TASTY_SEAT_BODY(SystemPage);
-    const std::uint16_t hint = out.first;
-    out = {};
-    (void)out.title.assign(kTitle);
-
-    std::vector<app::PageDescription::Row> all;
-    std::uint16_t selected = 0;
-    for_each_row(
-        [&](std::uint8_t, std::optional<SystemItem> item, std::string_view text, bool stippled) {
-            if (text.empty())
-                return;
-            app::PageDescription::Row row;
-            if (item == SystemItem::Reboot) {
-                (void)row.label.assign(kHdRebootLabel);
-                (void)row.value.assign(kHdRebootValue);
-            } else {
-                (void)row.label.assign(plain_label(text));
-            }
-            row.kind = system_row_kind(item);
-            row.enabled = !stippled;
-            if (item.has_value() && item_selected(*item)) {
-                row.selected = true;
-                selected = static_cast<std::uint16_t>(all.size());
-            }
-            all.push_back(row);
+                     bool stippled) {
+        if (text.empty())
+            return;
+        const std::uint16_t index = at++;
+        if (index < win.first || index >= win.first + win.count)
+            return;
+        PageRow& r = out.rows[out.count++];
+        r.classic = classic_row(
+            OsdRow{row},
+            text,
+            item.has_value() && item_selected(*item),
+            stippled
+        );
+        r.has_hd = true;
+        if (item == SystemItem::Reboot) {
+            (void)r.hd.label.assign(kHdRebootLabel);
+            (void)r.hd.value.assign(kHdRebootValue);
+        } else {
+            (void)r.hd.label.assign(plain_label(text));
         }
-    );
+        r.hd.kind = system_row_kind(item);
+        r.hd.enabled = !stippled;
+        r.hd.selected = item.has_value() && item_selected(*item);
+    });
 
-    const std::uint16_t total = static_cast<std::uint16_t>(all.size());
-    const app::HdWindow win = app::hd_window(selected, total, hint);
-    out.first = win.first;
-    out.row_count = win.count;
-    out.total = total;
-    for (std::uint8_t i = 0; i < win.count; ++i) {
-        out.rows[i] = all[static_cast<std::size_t>(win.first) + i];
-    }
+    at = 0;
+    for_each_row([&](std::uint8_t row,
+                     std::optional<SystemItem> item,
+                     std::string_view text,
+                     bool stippled) {
+        if (!text.empty()) {
+            const std::uint16_t index = at++;
+            if (index >= win.first && index < win.first + win.count)
+                return;
+        }
+        PageRow& r = out.rows[out.count++];
+        r.classic = classic_row(
+            OsdRow{row},
+            text,
+            item.has_value() && item_selected(*item),
+            stippled
+        );
+        r.has_hd = false;
+    });
     return true;
 }
 
 Transition SystemPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(SystemPage);
 
-    if ((ev.buttons & UiEvent::Menu) != 0) {
+    if (ev.buttons.has_any({UiEvent::Menu})) {
         if (facts_.front_end && !facts_.in_hd_tree)
             return open_core_browser(false);
         return Transition{Transition::Kind::CloseAll};
     }
 
-    if ((ev.buttons & UiEvent::Left) != 0) {
+    if (ev.buttons.has_any({UiEvent::Left})) {
         (void)reboot_release(ev);
 
         if (facts_.front_end)
@@ -272,10 +317,10 @@ Transition SystemPage::handle(const UiEvent& ev) {
         return Transition{Transition::Kind::Replace, PageId::CoreOptions};
     }
 
-    if ((ev.buttons & UiEvent::Recent) != 0 && item_selected(SystemItem::Core)) {
+    if (ev.buttons.has_any({UiEvent::Recent}) && item_selected(SystemItem::Core)) {
         return open_core_browser(true);
     }
-    if ((ev.buttons & UiEvent::Select) == 0)
+    if (!ev.buttons.has_any({UiEvent::Select}))
         return reboot_release(ev);
 
     const auto item = system_item_from_raw(sel_.v);
@@ -308,8 +353,9 @@ Transition SystemPage::handle(const UiEvent& ev) {
         case SystemItem::Reboot: {
 
             reboot_req_ = true;
-            const unsigned off = ev.repeat_depth / 3;
-            if (off > 5) {
+            constexpr unsigned kRepeatsPerSlide = 3;
+            const unsigned off = ev.repeat_depth / kRepeatsPerSlide;
+            if (off > kColdHead.size()) {
 
                 if (!cold_sent_ && ask_reboot_())
                     cold_sent_ = true;
@@ -443,11 +489,11 @@ Transition SystemPage::open_core_browser(bool recents_first) {
     return Transition{Transition::Kind::Push, PageId::Browser};
 }
 
-Transition SystemPage::on_confirm(std::uint8_t choice) {
+Transition SystemPage::on_confirm(RowIndex choice) {
     TASTY_SEAT_BODY(SystemPage);
-    if (choice == 0)
+    if (choice == kConfirmCancel)
         return Transition{Transition::Kind::Pop};
-    if (choice == 2) {
+    if (choice == kConfirmRememberScripts) {
 
         if (!names_ || !names_->remember_scripts_confirm())
             ++refusals_;
@@ -485,9 +531,9 @@ const char* system_row_text(SystemRow r) noexcept {
     return "";
 }
 
-std::uint8_t system_item_row(SystemItem it) noexcept {
+OsdRow system_item_row(SystemItem it) noexcept {
     const auto i = static_cast<unsigned>(it);
-    return (i < std::size(kItemRow)) ? kItemRow[i] : std::uint8_t{0};
+    return OsdRow{(i < std::size(kItemRow)) ? kItemRow[i] : std::uint8_t{0}};
 }
 
 }

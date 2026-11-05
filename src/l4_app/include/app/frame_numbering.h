@@ -24,7 +24,7 @@ public:
     static constexpr std::size_t kAnchorVotes = 8;
 
     struct Gap {
-        std::uint32_t n = 0;
+        std::uint32_t frames = 0;
         bool estimated = false;
     };
 
@@ -68,7 +68,7 @@ public:
         bool anchored,
         std::int64_t lag
     ) noexcept;
-    [[nodiscard]] std::int32_t movie_of(
+    [[nodiscard]] MovieFrame movie_of(
         const CoreFrameRecord& cell,
         std::uint64_t core
     ) const noexcept;

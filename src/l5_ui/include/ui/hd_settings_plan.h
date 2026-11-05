@@ -34,7 +34,7 @@ public:
     std::string_view title() const override;
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
     void refresh(const SystemFacts& facts) override;
-    std::uint8_t pinned() const noexcept override;
+    RowCount pinned() const noexcept override;
     std::uint32_t refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 

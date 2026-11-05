@@ -28,26 +28,36 @@ struct SectorBlock {
     static constexpr std::uint32_t kId = 0x31434553u;
     static constexpr std::uint32_t kIdV2 = 0x32434553u;
     static constexpr std::uint32_t kDataBase = 0x1000;
-    static constexpr std::uint32_t kMaxFrameWords = (kSize - kDataBase) / 4u;
+
+    enum Layout : std::uint32_t {
+        kWordBytes = 4,
+        kCardSlots = 4,
+        kCtrlCardShift = 4,
+        kBeginSlotBase = 0x40,
+        kWackSlotBase = 0x50,
+        kLbaSlotBase = 0x60,
+    };
+
+    static constexpr std::uint32_t kMaxFrameWords = (kSize - kDataBase) / kWordBytes;
 
     static constexpr std::uint32_t kReqPending = 1u << 31;
     static constexpr std::uint32_t kCtrlEnable = 1u << 0;
     static constexpr std::uint32_t kCtrlAbort = 1u << 1;
 
     static constexpr std::uint32_t ctrl_enable_slot(std::uint8_t slot) noexcept {
-        return slot < 4u ? 1u << (4u + slot) : 0u;
+        return slot < kCardSlots ? 1u << (kCtrlCardShift + slot) : 0u;
     }
 
     static constexpr Reg begin_slot(std::uint8_t s) noexcept {
-        return static_cast<Reg>(0x40u + 4u * (s & 3u));
+        return static_cast<Reg>(kBeginSlotBase + kWordBytes * (s & (kCardSlots - 1u)));
     }
 
     static constexpr Reg wack_slot(std::uint8_t s) noexcept {
-        return static_cast<Reg>(0x50u + 4u * (s & 3u));
+        return static_cast<Reg>(kWackSlotBase + kWordBytes * (s & (kCardSlots - 1u)));
     }
 
     static constexpr Reg lba_slot(std::uint8_t s) noexcept {
-        return static_cast<Reg>(0x60u + 4u * (s & 3u));
+        return static_cast<Reg>(kLbaSlotBase + kWordBytes * (s & (kCardSlots - 1u)));
     }
 
     struct SdStat {
@@ -59,26 +69,39 @@ struct SectorBlock {
         bool rd = false;
     };
 
+    enum SdBits : std::uint32_t {
+        kSdValid = 0x8000,
+        kSdCountShift = 9,
+        kSdCountMask = 0x3F,
+        kSdBlkszShift = 6,
+        kSdBlkszMask = 7,
+        kSdSlotShift = 2,
+        kSdSlotMask = 0xF,
+        kSdOpMask = 3,
+        kSdWr = 2,
+        kSdRd = 1,
+    };
+
     static constexpr SdStat sdstat(std::uint32_t w) noexcept {
         return SdStat{
-            .valid = (w & 0x8000u) != 0u,
-            .count = static_cast<std::uint8_t>((w >> 9) & 0x3Fu),
-            .blksz = static_cast<std::uint8_t>((w >> 6) & 7u),
-            .slot = static_cast<std::uint8_t>((w >> 2) & 0xFu),
-            .wr = (w & 2u) != 0u,
-            .rd = (w & 1u) != 0u
+            .valid = (w & kSdValid) != 0u,
+            .count = static_cast<std::uint8_t>((w >> kSdCountShift) & kSdCountMask),
+            .blksz = static_cast<std::uint8_t>((w >> kSdBlkszShift) & kSdBlkszMask),
+            .slot = static_cast<std::uint8_t>((w >> kSdSlotShift) & kSdSlotMask),
+            .wr = (w & kSdWr) != 0u,
+            .rd = (w & kSdRd) != 0u
         };
     }
 
     static constexpr bool sdstat_reads(std::uint32_t w, std::uint8_t slot) noexcept {
-        return (w & 0x8000u) != 0u
-            && ((w >> 2) & 0xFu) == (slot & 0xFu)
-            && (w & 3u) == 1u
-            && ((w >> 9) & 0x3Fu) == 0u;
+        return (w & kSdValid) != 0u
+            && ((w >> kSdSlotShift) & kSdSlotMask) == (slot & kSdSlotMask)
+            && (w & kSdOpMask) == kSdRd
+            && ((w >> kSdCountShift) & kSdCountMask) == 0u;
     }
 
     static constexpr Reg data(std::uint32_t i) noexcept {
-        return static_cast<Reg>(kDataBase + 4u * i);
+        return static_cast<Reg>(kDataBase + kWordBytes * i);
     }
 
     struct Accept {
@@ -87,11 +110,17 @@ struct SectorBlock {
         std::uint16_t first_drop = 0;
     };
 
+    enum AcceptBits : std::uint32_t {
+        kAcceptOkShift = 31,
+        kAcceptDropsShift = 16,
+        kAcceptDropMask = 0x3FF
+    };
+
     static constexpr Accept accept(std::uint32_t w) noexcept {
         return Accept{
-            .ok = (w >> 31) != 0u,
-            .drops = static_cast<std::uint16_t>((w >> 16) & 0x3FFu),
-            .first_drop = static_cast<std::uint16_t>(w & 0x3FFu)
+            .ok = (w >> kAcceptOkShift) != 0u,
+            .drops = static_cast<std::uint16_t>((w >> kAcceptDropsShift) & kAcceptDropMask),
+            .first_drop = static_cast<std::uint16_t>(w & kAcceptDropMask)
         };
     }
 };

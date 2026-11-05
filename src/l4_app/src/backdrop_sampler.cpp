@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/backdrop_sampler.h"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <optional>
@@ -45,14 +47,16 @@ bool BackdropSampler::poll_due(std::int64_t now) const noexcept {
     return phase_ == Phase::Probe && (next_poll_ == 0 || now >= next_poll_);
 }
 
-int BackdropSampler::park_ms(std::int64_t now) const noexcept {
+infra::ParkTimeout BackdropSampler::park_ms(std::int64_t now) const noexcept {
+    constexpr std::chrono::milliseconds kProbeCeil{4};
+    constexpr infra::ParkTimeout kIdlePoll{1000};
     if (phase_ != Phase::Probe)
-        return 1000;
+        return kIdlePoll;
     if (next_poll_ == 0 || now >= next_poll_)
-        return 0;
+        return infra::kNoWait;
     const std::int64_t left = next_poll_ - now;
-    const std::int64_t ms = (left + 999'999) / 1'000'000;
-    return ms > 4 ? 4 : static_cast<int>(ms);
+    const auto ms = std::chrono::ceil<std::chrono::milliseconds>(std::chrono::nanoseconds{left});
+    return std::chrono::duration_cast<infra::ParkTimeout>(std::min(ms, kProbeCeil));
 }
 
 BackdropSampler::Image BackdropSampler::poll(std::int64_t now, bool copy) noexcept {
@@ -90,11 +94,12 @@ BackdropSampler::Image BackdropSampler::poll(std::int64_t now, bool copy) noexce
 }
 
 void BackdropSampler::run_(hal::ScalerProbe::Verdict verdict, bool still) noexcept {
+    constexpr unsigned kMibShift = 20;
     phase_ = Phase::Run;
     lowlat_ = verdict == hal::ScalerProbe::Verdict::LargeLowlat;
     stride_ = verdict == hal::ScalerProbe::Verdict::Small ? hal::ScalerBuffers::kStrideSmall
                                                           : hal::ScalerBuffers::kStrideLarge;
-    stride_mib_ = static_cast<std::uint8_t>(stride_ >> 20);
+    stride_mib_ = static_cast<std::uint8_t>(stride_ >> kMibShift);
     still_ = still;
     if (still)
         still_marks_ = marks_();
@@ -129,11 +134,12 @@ BackdropSampler::Image BackdropSampler::image_(bool fresh) const noexcept {
 }
 
 bool BackdropSampler::copy_frame_() noexcept {
+    constexpr unsigned kRgbBytes = 3;
     const auto load = [this](std::size_t buf) -> std::optional<hal::ScalerHeader> {
         const auto h = window_.header(buf * stride_);
         if (!h || !h->supported() || h->width == 0 || h->height == 0)
             return std::nullopt;
-        if (static_cast<unsigned>(h->width) * 3u > h->line)
+        if (unsigned{h->width} * kRgbBytes > h->line)
             return std::nullopt;
         return *h;
     };
@@ -160,8 +166,7 @@ bool BackdropSampler::copy_frame_() noexcept {
     }
     if (!header)
         return false;
-    const std::size_t nbytes = static_cast<std::size_t>(header->line)
-        * static_cast<std::size_t>(header->height);
+    const std::size_t nbytes = std::size_t{header->line} * header->height;
     if (nbytes == 0 || header->header_size > stride_ || nbytes > stride_ - header->header_size)
         return false;
     if (cache_.size() < nbytes)

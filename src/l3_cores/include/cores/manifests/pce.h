@@ -27,24 +27,24 @@ inline constexpr auto kPceCdServices = std::to_array<LinkDecoderDecl>({
         reactor::Cause::Ring,
         &kCdCommandEdge<kPceCd>,
 
-        0,
+        reactor::kEveryRound,
         RoundClaim::Never,
     },
     {
         "pcecd.service_tick",
         reactor::Cause::Tick,
         &kCdServiceTick<kPceCd>,
-        13,
+        std::chrono::milliseconds{13},
         RoundClaim::Always,
     },
 });
 
 inline constexpr CdTickPeriods kPceCdTicks{
-    .idle_us = 13'333,
-    .stream_us = 16'000,
-    .caller_us = 13'000,
+    .idle = std::chrono::microseconds{13'333},
+    .stream = std::chrono::microseconds{16'000},
+    .caller = std::chrono::microseconds{13'000},
     .speeds = 0,
-    .speed_us = {0, 0, 0, 0},
+    .speed = {},
 };
 
 inline constexpr CdIoIndices kPceCdIoIndices{
@@ -100,7 +100,7 @@ inline constexpr std::array<std::byte, 26> kPceUsBiosSig{
 inline constexpr auto kPceCdSignatures = std::to_array<SignatureRow>({
     {.offset = 262144 - 26,
      .magic = kPceUsBiosSig,
-     .region = 1,
+     .region = proto::RegionCode{1},
      .why = "pcecd.cpp:128-151 us_sig sniff: present => bit-swapped US BIOS, "
             "region bit set (SetRegion, pcecd.cpp:188)"},
 });

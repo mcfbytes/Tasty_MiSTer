@@ -63,9 +63,9 @@ void HdSettingsPlan::refresh(const SystemFacts& facts) {
         sys_->on_facts(facts);
 }
 
-std::uint8_t HdSettingsPlan::pinned() const noexcept {
+RowCount HdSettingsPlan::pinned() const noexcept {
     TASTY_SEAT_BODY(HdSettingsPlan);
-    return 1;
+    return RowCount{1};
 }
 
 std::uint32_t HdSettingsPlan::refusals() const noexcept {

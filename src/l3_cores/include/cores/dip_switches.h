@@ -8,6 +8,7 @@
 
 #include "cores/dip_row_view.h"
 #include "infra/error.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -16,13 +17,13 @@ public:
     virtual ~IDipSwitches() = default;
 
     [[nodiscard]] virtual std::size_t dip_count() const noexcept = 0;
-    [[nodiscard]] virtual DipRowView dip_row(std::size_t row) const noexcept = 0;
+    [[nodiscard]] virtual DipRowView dip_row(proto::DipRowIndex row) const noexcept = 0;
     [[nodiscard]] virtual std::string_view dip_choice(
-        std::size_t row,
-        std::size_t choice
+        proto::DipRowIndex row,
+        proto::DipChoice choice
     ) const noexcept = 0;
 
-    [[nodiscard]] virtual Ex<void> set_dip(std::size_t row, std::size_t choice) = 0;
+    [[nodiscard]] virtual Ex<void> set_dip(proto::DipRowIndex row, proto::DipChoice choice) = 0;
 
     [[nodiscard]] virtual std::string_view dip_file_name() const noexcept = 0;
     [[nodiscard]] virtual std::array<std::uint8_t, 8> dip_bytes() const noexcept = 0;

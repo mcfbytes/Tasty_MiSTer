@@ -21,12 +21,12 @@ public:
     std::optional<PlayerIndex> slot_of(const DeviceIdentity& id) const;
     [[nodiscard]] Ex<void> assign(const DeviceIdentity& id, PlayerIndex player);
 
-    std::optional<PlayerIndex> first_free(std::uint32_t live_mask) const;
+    std::optional<PlayerIndex> first_free(PlayerMask live_mask) const;
 
     static std::string_view key_of(const DeviceIdentity& id) noexcept;
 
-    std::string_view key_at(std::uint8_t player) const noexcept {
-        return player < kMaxPlayers ? std::string_view(bound_[player]) : std::string_view{};
+    std::string_view key_at(PlayerIndex player) const noexcept {
+        return player.v < kMaxPlayers ? std::string_view(bound_[player.v]) : std::string_view{};
     }
 
     PlayerSlots() {

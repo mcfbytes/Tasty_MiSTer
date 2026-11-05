@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/config_slots_page.h"
 
+#include <array>
 #include <string>
-#include <vector>
+#include <utility>
 
 #include "app/hd_window.h"
+#include "ui/draw_classic.h"
 #include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_ask.h"
 #include "ui/page_context.h"
+#include "ui/page_row.h"
+#include "ui/page_walk.h"
 #include "ui/ui_event.h"
 
 namespace mister::ui {
@@ -90,13 +94,14 @@ std::uint32_t ConfigSlotsPage::slot_at(std::uint32_t row) const noexcept {
     return slot < slot_count() ? slot : kNoSlot;
 }
 
-bool ConfigSlotsPage::row_stippled(std::uint32_t row) const noexcept {
-    const std::uint32_t slot = slot_at(row);
+bool ConfigSlotsPage::row_stippled(OsdRow at) const noexcept {
+    const std::uint32_t slot = slot_at(at.v);
     return slot != kNoSlot && !selectable(slot);
 }
 
-std::string ConfigSlotsPage::row_text(std::uint32_t row) const {
+std::string ConfigSlotsPage::row_text(OsdRow at) const {
     TASTY_SEAT_BODY(ConfigSlotsPage);
+    const std::uint32_t row = at.v;
     const std::uint32_t rows = osd_height().v;
     if (rows == 0)
         return {};
@@ -115,75 +120,103 @@ std::string ConfigSlotsPage::row_text(std::uint32_t row) const {
     return std::string{"  "} + std::string(table_->preview[slot].view());
 }
 
-void ConfigSlotsPage::render(OsdRenderer& out) const {
+bool ConfigSlotsPage::walk(PageWalk& out) const {
     TASTY_SEAT_BODY(ConfigSlotsPage);
-    out.set_title(mode_ == Mode::Load ? "Load Config" : "Save Config");
-    const std::uint32_t rows = osd_height().v;
-    if (rows == 0)
-        return;
-    const std::uint32_t n = slot_count();
-
-    for (std::uint32_t r = 0; r < rows; ++r) {
-        const std::uint32_t slot = slot_at(r);
-        const bool selected = (r + 1 == rows) ? sel_.v == n : (slot != kNoSlot && sel_.v == slot);
-        out.set_arrow(OsdRenderer::kArrowNone);
-        out.text(OsdRow{static_cast<std::uint8_t>(r)}, row_text(r), selected, row_stippled(r), 0);
-    }
-}
-
-bool ConfigSlotsPage::describe(app::PageDescription& out) const {
-    TASTY_SEAT_BODY(ConfigSlotsPage);
-    const std::uint16_t hint = out.first;
-    out = {};
-    (void)out.title.assign(mode_ == Mode::Load ? "Load Config" : "Save Config");
-    (void)out.footer.assign(mode_ == Mode::Load ? "A Load" : "A Save");
+    (void)out.page.title.assign(mode_ == Mode::Load ? "Load Config" : "Save Config");
+    (void)out.page.footer.assign(mode_ == Mode::Load ? "A Load" : "A Save");
+    out.title_arrow = OsdRenderer::kArrowNone;
+    out.count = 0;
 
     const std::uint32_t rows = osd_height().v;
     const std::uint32_t n = slot_count();
-    std::vector<app::PageDescription::Row> all;
+
+    struct Drawn {
+        std::uint32_t row;
+        std::string text;
+        std::uint32_t slot;
+    };
+
+    std::array<Drawn, kMaxPageRows> drawn{};
+    std::uint8_t drawn_n = 0;
     std::uint16_t selected = 0;
     for (std::uint32_t r = 0; r < rows; ++r) {
-        const std::string text = row_text(r);
+        std::string text = row_text(OsdRow::of(r));
         if (blank_text(text))
             continue;
-        const std::uint32_t slot = slot_at(r);
-        app::PageDescription::Row row;
-        (void)row.label.assign(plain_label(text));
-        if (slot != kNoSlot) {
-            row.kind = app::PageDescription::RowKind::Action;
-            if (sel_.v == slot) {
-                row.selected = true;
-                selected = static_cast<std::uint16_t>(all.size());
-            }
-        } else if (r + 1 == rows) {
-            row.kind = app::PageDescription::RowKind::Action;
-            if (sel_.v == n) {
-                row.selected = true;
-                selected = static_cast<std::uint16_t>(all.size());
-            }
-        } else {
-            row.kind = app::PageDescription::RowKind::Text;
-        }
-        all.push_back(row);
+        Drawn& d = drawn[drawn_n];
+        d.row = r;
+        d.text = std::move(text);
+        d.slot = slot_at(r);
+        if (d.slot != kNoSlot && sel_.v == d.slot)
+            selected = drawn_n;
+        if (d.slot == kNoSlot && r + 1 == rows && sel_.v == n)
+            selected = drawn_n;
+        ++drawn_n;
     }
 
-    const std::uint16_t total = static_cast<std::uint16_t>(all.size());
-    const app::HdWindow win = app::hd_window(selected, total, hint);
-    out.first = win.first;
-    out.row_count = win.count;
-    out.total = total;
+    const app::HdWindow win = app::hd_window(selected, drawn_n, out.page.first);
+    out.page.first = win.first;
+    out.page.total = drawn_n;
+
+    const auto inverted = [&](std::uint32_t row) {
+        if (row + 1 == rows)
+            return sel_.v == n;
+        const std::uint32_t slot = slot_at(row);
+        return slot != kNoSlot && sel_.v == slot;
+    };
+
     for (std::uint8_t i = 0; i < win.count; ++i) {
-        out.rows[i] = all[static_cast<std::size_t>(win.first) + i];
+        const std::uint8_t at = static_cast<std::uint8_t>(win.first + i);
+        const Drawn& d = drawn[at];
+        PageRow& r = out.rows[out.count++];
+        r.has_hd = true;
+        (void)r.hd.label.assign(plain_label(d.text));
+        if (d.slot != kNoSlot) {
+            r.hd.kind = app::PageDescription::RowKind::Action;
+            r.hd.selected = sel_.v == d.slot;
+        } else if (d.row + 1 == rows) {
+            r.hd.kind = app::PageDescription::RowKind::Action;
+            r.hd.selected = sel_.v == n;
+        } else {
+            r.hd.kind = app::PageDescription::RowKind::Text;
+        }
+        r.classic = classic_row(
+            OsdRow::of(d.row),
+            d.text,
+            inverted(d.row),
+            row_stippled(OsdRow::of(d.row)),
+            std::nullopt,
+            OsdRenderer::kArrowNone
+        );
+    }
+
+    std::uint8_t di = 0;
+    for (std::uint32_t r = 0; r < rows; ++r) {
+        const bool drawn_here = di < drawn_n && drawn[di].row == r;
+        if (drawn_here && di >= win.first && di < win.first + win.count) {
+            ++di;
+            continue;
+        }
+        if (drawn_here)
+            ++di;
+        out.rows[out.count++].classic = classic_row(
+            OsdRow::of(r),
+            row_text(OsdRow::of(r)),
+            inverted(r),
+            row_stippled(OsdRow::of(r)),
+            std::nullopt,
+            OsdRenderer::kArrowNone
+        );
     }
     return true;
 }
 
 Transition ConfigSlotsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(ConfigSlotsPage);
-    if ((ev.buttons & (UiEvent::Menu | UiEvent::Left | UiEvent::Back)) != 0) {
+    if (ev.buttons.has_any({UiEvent::Menu | UiEvent::Left | UiEvent::Back})) {
         return Transition{Transition::Kind::Pop};
     }
-    if ((ev.buttons & UiEvent::Select) == 0)
+    if (!ev.buttons.has_any({UiEvent::Select}))
         return Transition{};
 
     const std::uint32_t n = slot_count();

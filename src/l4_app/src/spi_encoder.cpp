@@ -28,6 +28,14 @@
 
 namespace mister::app {
 
+namespace {
+
+constexpr proto::OsdRow kOsdRowLimit = proto::OsdSurface::kMaxRows.end();
+constexpr proto::PlayerIndex kPlayerLimit{proto::JoystickPort::kMaxPorts};
+constexpr proto::SlotIndex kBlockSlotLimit{proto::kBlockSlots};
+constexpr proto::StatusBit kStatusBitLimit{proto::StatusRegister::kBits};
+}
+
 SpiEncoder::SpiEncoder(
     hal::ISpiTransport& link,
     hal::ICoreSignals& signals,
@@ -78,7 +86,10 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (static_cast<std::uint32_t>(a.start.v) + width > proto::StatusRegister::kBits) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    if (auto r = session_.apply(proto::StatusEdit::field(a.start, width, a.value)); !r) {
+    if (auto r = session_.apply(
+            proto::StatusEdit::field(a.start, width, proto::FieldValue{a.value})
+        );
+        !r) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::EncodedStatusChange;
@@ -89,10 +100,11 @@ ILinkEncoder::Outcome SpiEncoder::on(
     const LinkOpCtx& ctx
 ) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
-    if ((a.rows > 1) || a.row.v >= proto::OsdSurface::kMaxRows) {
+    if ((a.rows > 1) || a.row >= kOsdRowLimit) {
         return ILinkEncoder::Outcome::Dropped;
     }
     proto::OsdTransport osd;
+    proto::Link link{link_};
     const proto::OsdRow row = a.row;
     Ex<void> flushed;
     if (a.bytes == proto::TxSlabId{}) {
@@ -101,13 +113,13 @@ ILinkEncoder::Outcome SpiEncoder::on(
             return ILinkEncoder::Outcome::Dropped;
         }
         flushed = osd.flush_row(
-            link_,
+            link,
             row,
             std::span<const std::uint8_t>(sampled.b, sizeof sampled.b)
         );
     } else {
         const auto bytes = ctx.inbox.bytes(a.bytes);
-        flushed = osd.flush_row(link_, row, bytes);
+        flushed = osd.flush_row(link, row, bytes);
     }
     if (!flushed) {
         return ILinkEncoder::Outcome::Dropped;
@@ -117,7 +129,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
 
 ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::JoyEmit& a, const LinkOpCtx&) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
-    if (a.player.v >= proto::JoystickPort::kMaxPorts) {
+    if (a.player >= kPlayerLimit) {
         return ILinkEncoder::Outcome::Dropped;
     }
     const auto r = em_.submit(frame_, a.player, a.mask, a.autofire);
@@ -135,7 +147,7 @@ ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::BindJoy& a, const Link
     jw.joy_transl = a.joy_transl;
 
     jw.analog_capable = session_.type() == proto::CoreType::EightBit;
-    jw.analog_word = session_.capabilities().io_version != 0;
+    jw.analog_word = session_.capabilities().io_version != hal::IoVersion{0};
     em_.joysticks().configure(jw);
     return ILinkEncoder::Outcome::Encoded;
 }
@@ -166,7 +178,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
     const LinkOpCtx&
 ) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
-    if (a.player.v >= proto::JoystickPort::kMaxPorts) {
+    if (a.player >= kPlayerLimit) {
         return ILinkEncoder::Outcome::Dropped;
     }
     const auto r = em_.release(frame_, a.player, a.mask);
@@ -179,7 +191,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
 ILinkEncoder::Outcome SpiEncoder::on(const proto::LinkOp::Ps2Frame& a, const LinkOpCtx&) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
     const proto::Ps2Frame& frame = a.frame;
-    if (frame.len == 0 || !proto::write_ps2_frame(link_, frame)) {
+    if (frame.len == 0 || !proto::write_ps2_frame(frame_, frame)) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -199,11 +211,11 @@ ILinkEncoder::Outcome SpiEncoder::on(
     const LinkOpCtx&
 ) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
-    if (a.slot.v >= proto::kBlockSlots) {
+    if (a.slot >= kBlockSlotLimit) {
         return ILinkEncoder::Outcome::Dropped;
     }
 
-    const auto r = slots_.answer_read(link_, a.slot, a.lba, a.bytes, a.ack);
+    const auto r = slots_.answer_read(a.slot, a.lba, a.bytes, a.ack);
     if (!r || !*r) {
         return ILinkEncoder::Outcome::Dropped;
     }
@@ -218,7 +230,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (!ctx.roles || !ctx.roles->saves) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    if (!ctx.roles->saves->save_upload_counted()) {
+    if (!ctx.roles->saves->counted()) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -230,7 +242,8 @@ ILinkEncoder::Outcome SpiEncoder::on(
 ) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
 
-    if (!video_.emit(link_, a.block, a.gen, infra::OptRef<proto::IResetFence>{ctx.fence})) {
+    proto::Link link{link_};
+    if (!video_.emit(link, a.block, a.gen, infra::OptRef<proto::IResetFence>{ctx.fence})) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -245,7 +258,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (session_.type() != proto::CoreType::EightBit) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    if (a.bit.v >= proto::StatusRegister::kBits) {
+    if (a.bit >= kStatusBitLimit) {
         return ILinkEncoder::Outcome::Dropped;
     }
     if (auto r = session_.pulse(a.bit); !r)

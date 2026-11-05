@@ -11,8 +11,11 @@ namespace mister::app {
 
 static_assert(InternedFile::kConfigSlots == cores::kMaxConfigSlots);
 
-static_assert(InternedFile::config_id(cores::kMaxConfigSlots - 1).v == InternedFile::kSlots - 1);
-static_assert(InternedFile::config_id(0).v > InternedFile::kRecycleSlots);
+static_assert(
+    InternedFile::config_id(cores::ConfigSlot{cores::kMaxConfigSlots - 1}).v
+    == InternedFile::kSlots - 1
+);
+static_assert(InternedFile::config_id({}).v > InternedFile::kRecycleSlots);
 
 static_assert(
     InternedFile::kMaxLiveFiles
@@ -75,7 +78,7 @@ Ex<proto::FileId> FileBytes<P>::intern(
     std::string_view ext,
     std::string_view path,
     std::uint32_t load_addr,
-    std::uint32_t crc,
+    svc::Crc32 crc,
     std::uint64_t whole,
     std::uint64_t offset
 ) {
@@ -111,7 +114,7 @@ template <SeatTag P>
 Ex<proto::FileId> FileBytes<P>::intern_path(
     std::string_view path,
     std::uint64_t size_bytes,
-    std::uint32_t crc,
+    svc::Crc32 crc,
     std::uint32_t aux
 ) {
     if (path.empty()) {
@@ -165,7 +168,7 @@ Ex<proto::FileId> FileBytes<P>::intern_at(
         s.path.clear();
     s.load_addr = load_addr;
     s.size_bytes = n;
-    s.crc = 0;
+    s.crc = {};
     s.save = {};
     s.aux = 0;
     s.edge = ContentEdge::Content;

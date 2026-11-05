@@ -106,6 +106,7 @@ struct LinkOp {
         static constexpr Kind kKind = Kind::OsdFlush;
         OsdRow row{};
         std::uint8_t rows = 0;
+        std::byte pad_{};
         TxSlabId bytes{};
     };
 
@@ -147,7 +148,7 @@ struct LinkOp {
         FileId path{};
         bool sends_index = false;
         std::uint8_t index_word = 0;
-        std::uint32_t act_gen = 0;
+        ActKey act_gen{};
     };
 
     enum class FileTxPhase : std::uint8_t {
@@ -165,7 +166,7 @@ struct LinkOp {
         FileTxPhase phase = FileTxPhase::Whole;
         FileId file{};
         std::uint32_t total = 0;
-        std::uint32_t act = 0;
+        ActKey act{};
     };
 
     struct BindFacts {
@@ -294,8 +295,8 @@ struct LinkOp {
 
     struct AdoptCore {
         static constexpr Kind kKind = Kind::AdoptCore;
-        static constexpr std::uint8_t kNoSlot = 0xFF;
-        std::uint8_t slot = kNoSlot;
+        static constexpr CoreBaySlot kNoSlot = kNoBaySlot;
+        CoreBaySlot slot = kNoSlot;
         Built outcome = Built::Refused;
         std::uint16_t gen = 0;
         Errc err{};
@@ -312,7 +313,7 @@ struct LinkOp {
         SlotIndex slot{};
         bool same_game = false;
         FileId path{};
-        std::uint32_t act_gen = 0;
+        ActKey act_gen{};
     };
 
     enum class StagePhase : std::uint8_t { Whole = 0, Open = 1, Piece = 2, Close = 3 };
@@ -321,14 +322,13 @@ struct LinkOp {
         static constexpr Kind kKind = Kind::StagePayload;
         FileId payload{};
         WideIoIndex dest{};
-        static constexpr std::uint8_t kNoRegion = 0xFF;
-        std::uint8_t region = kNoRegion;
+        RegionCode region = RegionCode::kNone;
         bool progress = false;
         StagePhase phase = StagePhase::Whole;
 
         std::uint8_t copy_word = 0;
         std::uint16_t chunk = 0;
-        std::uint16_t act = 0;
+        ActKey16 act{};
     };
 
     struct StageReset {
@@ -373,15 +373,15 @@ struct LinkOp {
 
     struct SetDip {
         static constexpr Kind kKind = Kind::SetDip;
-        std::uint8_t row = 0;
-        std::uint8_t pad_[3]{};
-        std::uint32_t choice = 0;
+        DipRowIndex row{};
+        DipChoice choice{};
     };
 
     struct SetCoreOption {
         static constexpr Kind kKind = Kind::SetCoreOption;
-        std::uint8_t row = 0;
-        std::uint8_t choice = 0;
+        OptionRowIndex row{};
+        std::uint8_t pad_[3]{};
+        FieldValue choice{};
     };
 
     struct SetVolume {
@@ -468,15 +468,15 @@ struct LinkOp {
         MailboxWrite>;
     Kind kind = Kind::HoldReset;
     std::uint8_t pad_[3]{};
-    alignas(4) std::array<std::byte, kStore> store{};
+    alignas(std::uint32_t) std::array<std::byte, kStore> store{};
 };
 
 static_assert(infra::MessageSum<LinkOp> && infra::alternatives_are_total<LinkOp>());
-static_assert(sizeof(LinkOp) == 16 && alignof(LinkOp) == 4);
+static_assert(sizeof(LinkOp) == 16 && alignof(LinkOp) == alignof(std::uint32_t));
 static_assert(infra::ordinal(LinkOp::Kind::kCount) == 46);
 
 [[nodiscard]] constexpr bool sets_region(const LinkOp::StagePayload& a) noexcept {
-    return a.region != LinkOp::StagePayload::kNoRegion;
+    return a.region != RegionCode::kNone;
 }
 
 inline constexpr std::size_t kLinkTxCapacity = 64;

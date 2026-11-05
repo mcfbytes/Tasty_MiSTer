@@ -22,6 +22,7 @@
 #include "hal/boards_table.h"
 #include "hal/core_signals.h"
 #include "hal/spi_transport.h"
+#include "proto/link.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "os/clock.h"
@@ -96,7 +97,7 @@ struct FakeReplay final : fw::TastySession::Replay {
         ++stops;
     }
 
-    std::uint32_t frames() const noexcept override { return 12; }
+    app::FrameCount frames() const noexcept override { return app::FrameCount{12}; }
 
     std::uint32_t movie_frames() const noexcept override { return 12; }
 
@@ -181,7 +182,7 @@ void publish_end(app::ReplayStatusCell& cell, app::ReplayEnd end) {
     const SeatScope rt{SeatTag::RT};
     app::ReplayStatus s{};
     s.end = end;
-    s.movie_frame = 3;
+    s.movie_frame = app::MovieFrame{3};
     cell.publish(s);
 }
 
@@ -279,6 +280,8 @@ struct Sess {
 };
 
 struct VresLink final : hal::ISpiTransport, hal::ICoreSignals {
+
+    proto::Link view{*this};
     std::uint32_t vtime = 0;
 
     bool ready() const { return true; }
@@ -366,7 +369,7 @@ struct PumpRig {
         link.vtime = vtime;
         pump->wire().reset_geometry(seq);
         for (int i = 0; i < 3; ++i) {
-            pump->wire().on_rt_round(link, t);
+            pump->wire().on_rt_round(link.view, t);
             t += 600'000'000;
         }
     }
@@ -405,13 +408,13 @@ void test_cli_play() {
     CHECK(a->rom.view() == "/r/a.nes");
     CHECK(a->stay);
     CHECK(a->return_after_s == 30);
-    CHECK(a->vsync_adjust == 0);
+    CHECK(a->vsync_adjust == app::VsyncAdjust::Off);
 }
 
 void test_cli_vsync() {
     const char* const av[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--vsync-adjust", "1"};
     const auto a = fw::parse_tasty_args(std::span<const char* const>(av));
-    CHECK(a.has_value() && a->vsync_adjust == 1);
+    CHECK(a.has_value() && a->vsync_adjust == app::VsyncAdjust::Match);
     const char* const bad[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--vsync-adjust", "2"};
     CHECK(!fw::parse_tasty_args(std::span<const char* const>(bad)).has_value());
 }
@@ -423,7 +426,7 @@ void test_cli_rec() {
     CHECK(a->record && a->record->view() == "/media/fat/cap");
     CHECK(a->rec.codec == app::RecCodec::Cscd && a->rec.every == 1);
     CHECK(a->rec.motion == app::RecMotion::Auto);
-    CHECK(a->rec.from_frame == -1 && a->rec.to_frame == -1);
+    CHECK(a->rec.from_frame == app::MovieFrame{-1} && a->rec.to_frame == app::MovieFrame{-1});
 }
 
 void test_cli_record_options() {
@@ -439,7 +442,7 @@ void test_cli_record_options() {
     CHECK(a->rec.motion == app::RecMotion::Full);
     CHECK(a->rec.scale == app::RecScale::Half);
     CHECK(a->rec.every == 4);
-    CHECK(a->rec.from_frame == 10 && a->rec.to_frame == 20);
+    CHECK(a->rec.from_frame == app::MovieFrame{10} && a->rec.to_frame == app::MovieFrame{20});
     CHECK(a->rec.segment_bytes == 32ull << 20);
     const char* const bad_codec[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--codec", "ffv1"};
     const auto bc = fw::parse_tasty_args(std::span<const char* const>(bad_codec));
@@ -536,8 +539,8 @@ void test_session_passes_record_options() {
     x.args.rec.codec = app::RecCodec::Zmbv;
     x.args.rec.motion = app::RecMotion::Full;
     x.args.rec.every = 3;
-    x.args.rec.from_frame = 4;
-    x.args.rec.to_frame = 9;
+    x.args.rec.from_frame = app::MovieFrame{4};
+    x.args.rec.to_frame = app::MovieFrame{9};
     x.args.record.emplace();
     (void)x.args.record->assign(fat + "/cap");
     x.s.emplace(x.w, x.args);
@@ -549,7 +552,7 @@ void test_session_passes_record_options() {
     CHECK(got.opt.codec == app::RecCodec::Zmbv);
     CHECK(got.opt.motion == app::RecMotion::Full);
     CHECK(got.opt.every == 3);
-    CHECK(got.opt.from_frame == 4 && got.opt.to_frame == 9);
+    CHECK(got.opt.from_frame == app::MovieFrame{4} && got.opt.to_frame == app::MovieFrame{9});
     (void)::rmdir(fat.c_str());
     (void)::rmdir(media.c_str());
 }
@@ -626,6 +629,16 @@ void test_registry() {
     CHECK(fw::tasty_plays("MENU"));
     CHECK(!fw::tasty_plays("AO486"));
     CHECK(!fw::tasty_plays("N64"));
+
+    std::size_t tagged = 0;
+    for (const cores::CoreFactory& f : cores::core_table()) {
+        if (!f.profile->tasty_playable)
+            continue;
+        ++tagged;
+        CHECK(fw::tasty_plays(f.name));
+    }
+    CHECK(tagged == 4);
+    CHECK(!fw::tasty_plays("SGB"));
 }
 
 void test_codec_path() {
@@ -1306,7 +1319,7 @@ void test_rec_only_leaves_when_its_recording_ends() {
         const auto rec = [&x](app::RecState st, app::RecVerdict v) {
             const SeatScope cap{SeatTag::Capture};
             app::RecorderStatus r{};
-            r.gen = 1;
+            r.gen = app::ControlGeneration{1};
             r.state = st;
             r.verdict = v;
             x.recstat.publish(r);
@@ -1337,7 +1350,7 @@ void test_rec_only_reports_a_failure_after_it_started() {
     const auto rec = [&x](app::RecState st, app::RecVerdict v) {
         const SeatScope cap{SeatTag::Capture};
         app::RecorderStatus r{};
-        r.gen = 1;
+        r.gen = app::ControlGeneration{1};
         r.state = st;
         r.verdict = v;
         x.recstat.publish(r);
@@ -1369,7 +1382,7 @@ void test_rec_only_a_stopped_recording_after_it_started_is_clean() {
     const auto rec = [&x](app::RecState st, app::RecVerdict v) {
         const SeatScope cap{SeatTag::Capture};
         app::RecorderStatus r{};
-        r.gen = 1;
+        r.gen = app::ControlGeneration{1};
         r.state = st;
         r.verdict = v;
         x.recstat.publish(r);
@@ -1401,7 +1414,7 @@ void test_a_recorded_replay_reports_a_failure_while_it_runs() {
     const auto rec = [&x](app::RecState st, app::RecVerdict v) {
         const SeatScope s{SeatTag::Capture};
         app::RecorderStatus r{};
-        r.gen = 1;
+        r.gen = app::ControlGeneration{1};
         r.state = st;
         r.verdict = v;
         x.recstat.publish(r);
@@ -1439,7 +1452,7 @@ void test_a_recorded_replay_reports_a_failure_as_it_closes() {
     const auto rec = [&x](app::RecState st, app::RecVerdict v) {
         const SeatScope s{SeatTag::Capture};
         app::RecorderStatus r{};
-        r.gen = 1;
+        r.gen = app::ControlGeneration{1};
         r.state = st;
         r.verdict = v;
         x.recstat.publish(r);
@@ -1471,8 +1484,8 @@ void test_rec_only_probe_refusal_fails_the_run() {
         const auto rec = [&x](app::RecState st, app::RecVerdict verdict) {
             const SeatScope cap{SeatTag::Capture};
             app::RecorderStatus r{};
-            r.gen = 1;
-            r.answered = 1;
+            r.gen = app::ControlGeneration{1};
+            r.answered = app::ControlGeneration{1};
             r.state = st;
             r.verdict = verdict;
             x.recstat.publish(r);
@@ -1507,8 +1520,8 @@ void test_a_stuck_port_ends_a_replay() {
     {
         const SeatScope cap{SeatTag::Capture};
         app::RecorderStatus r{};
-        r.gen = 1;
-        r.answered = 1;
+        r.gen = app::ControlGeneration{1};
+        r.answered = app::ControlGeneration{1};
         r.state = app::RecState::Idle;
         r.verdict = app::RecVerdict::ScalerPortStuck;
         x.recstat.publish(r);
@@ -1539,8 +1552,8 @@ void test_the_verdict_line_names_the_remedy() {
     {
         const SeatScope cap{SeatTag::Capture};
         app::RecorderStatus r{};
-        r.gen = 1;
-        r.answered = 1;
+        r.gen = app::ControlGeneration{1};
+        r.answered = app::ControlGeneration{1};
         r.verdict = app::RecVerdict::ScalerPortStuck;
         status.publish(r);
     }
@@ -1575,7 +1588,7 @@ void test_record_path_outside_the_root_is_refused() {
     home(x);
     CHECK(x.exit_code.load() == 1);
     CHECK(err.text().find("cannot record to /proc/") != std::string::npos);
-    CHECK(rc.generation() == 0);
+    CHECK(rc.generation() == app::ControlGeneration{});
 }
 
 void test_stale_generation() {
@@ -1805,7 +1818,7 @@ void test_status_scale_step_warns_per_recording() {
         {
             const SeatScope cap{SeatTag::Capture};
             app::RecorderStatus r{};
-            r.gen = gen;
+            r.gen = app::ControlGeneration{gen};
             x.recstat.publish(r);
         }
         const SeatScope enc_seat{SeatTag::Encode};
@@ -2204,7 +2217,7 @@ void test_cli_run_flags() {
     const auto m = fw::parse_tasty_args(std::span<const char* const>(miss));
     CHECK(!m.has_value());
     if (!m) {
-        CHECK_EQ(m.error().detail, 18u);
+        CHECK_EQ(m.error().detail, std::uint32_t{fw::TastyRefusal::BadPhase});
         CHECK(
             std::string_view(fw::tasty_args_refusal(m.error().detail))
             == "--phase needs a whole number of microseconds"
@@ -2512,7 +2525,7 @@ void publish_running(app::ReplayStatusCell& cell, std::int32_t frame) {
     const SeatScope rt{SeatTag::RT};
     app::ReplayStatus s{};
     s.level = app::ReplayLevel::Running;
-    s.movie_frame = frame;
+    s.movie_frame = app::MovieFrame{frame};
     cell.publish(s);
 }
 
@@ -2546,7 +2559,7 @@ void test_recorded_replay_rereads_the_geometry() {
     const auto passes = [&r](int n) {
         const SeatScope rt{SeatTag::RT};
         for (int i = 0; i < n; ++i) {
-            r.pump->wire().on_rt_round(r.link, r.t);
+            r.pump->wire().on_rt_round(r.link.view, r.t);
             r.t += 600'000'000;
         }
     };
@@ -2589,7 +2602,7 @@ void test_unrecorded_replay_leaves_the_geometry() {
     const auto passes = [&r](int n) {
         const SeatScope rt{SeatTag::RT};
         for (int i = 0; i < n; ++i) {
-            r.pump->wire().on_rt_round(r.link, r.t);
+            r.pump->wire().on_rt_round(r.link.view, r.t);
             r.t += 600'000'000;
         }
     };

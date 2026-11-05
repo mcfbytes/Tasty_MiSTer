@@ -36,29 +36,46 @@ std::span<const PresetMode> vmodes() noexcept {
 
 namespace video_timing {
 
+void assign_timings(Modeline& m, std::span<const std::uint32_t, 8> t) noexcept {
+    m.hact = t[0];
+    m.hfp = t[1];
+    m.hs = t[2];
+    m.hbp = t[3];
+    m.vact = t[4];
+    m.vfp = t[5];
+    m.vs = t[6];
+    m.vbp = t[7];
+}
+
+Modeline preset_modeline(const PresetMode& p) noexcept {
+    Modeline m{};
+    assign_timings(m, p.vpar);
+    m.vic = p.vic;
+    m.pixel_repeat = (p.pr != 0);
+    m.fpix_mhz = p.fpix_mhz;
+    return m;
+}
+
 namespace {
 
+constexpr double kFabricClockMhz = 100.0;
+constexpr double kFabricClockHz = 100'000'000.0;
+constexpr float kFabricClockHzF = 100'000'000.0f;
+constexpr double kHzPerMhz = 1'000'000.0;
+
 StoredMode apply_preset(std::uint32_t mode, bool supports_pr) {
+    constexpr std::uint32_t kPresetDefault = 0;
+    constexpr std::uint32_t kPreset1080p60 = 8;
     if (mode >= kNumVmodes)
-        mode = 0;
+        mode = kPresetDefault;
 
     if (kVmodes[mode].pr == 1 && !supports_pr)
-        mode = 8;
+        mode = kPreset1080p60;
 
     const PresetMode& p = kVmodes[mode];
     StoredMode out{};
-    out.mode.hact = p.vpar[0];
-    out.mode.hfp = p.vpar[1];
-    out.mode.hs = p.vpar[2];
-    out.mode.hbp = p.vpar[3];
-    out.mode.vact = p.vpar[4];
-    out.mode.vfp = p.vpar[5];
-    out.mode.vs = p.vpar[6];
-    out.mode.vbp = p.vpar[7];
-    out.mode.vic = p.vic;
-    out.mode.pixel_repeat = (p.pr != 0);
+    out.mode = preset_modeline(p);
     out.mode.rb = 1;
-    out.mode.fpix_mhz = p.fpix_mhz;
     return out;
 }
 
@@ -83,7 +100,9 @@ StoredMode store_mode(const ParsedMode& parsed, bool support_fhd, bool supports_
 }
 
 StoredMode preset_fallback(bool support_fhd, bool supports_pr) {
-    StoredMode out = apply_preset(support_fhd ? 8u : 0u, supports_pr);
+    constexpr std::uint32_t kPresetDefault = 0;
+    constexpr std::uint32_t kPreset1080p60 = 8;
+    StoredMode out = apply_preset(support_fhd ? kPreset1080p60 : kPresetDefault, supports_pr);
     out.explicitly_requested = false;
     return out;
 }
@@ -94,10 +113,11 @@ VFilter select_vfilter(const VideoSample& s, std::span<const bool> slot_enabled)
         const auto i = static_cast<std::size_t>(f);
         return i < slot_enabled.size() && slot_enabled[i];
     };
+    constexpr std::uint32_t kFltScanlinesMask = 0x30;
     if (s.interlaced()) {
         return has(VFilter::Ilace) ? VFilter::Ilace : VFilter::Horz;
     }
-    if ((s.flt_flags & 0x30u) && has(VFilter::Scanlines))
+    if ((s.flt_flags & kFltScanlinesMask) && has(VFilter::Scanlines))
         return VFilter::Scanlines;
     if (has(VFilter::Vert))
         return VFilter::Vert;
@@ -115,13 +135,13 @@ std::optional<double> estimate_fpix(
         return std::nullopt;
     const double htotal = static_cast<double>(m.hact + m.hfp + m.hs + m.hbp);
     const double vtotal = static_cast<double>(m.vact + m.vfp + m.vs + m.vbp);
-    double fpix = 100.0 * htotal * vtotal;
+    double fpix = kFabricClockMhz * htotal * vtotal;
     fpix /= static_cast<double>(vtime);
 
     if (fpix < kFpixMinMhz || fpix > kFpixMaxMhz)
         return std::nullopt;
 
-    const float hz = 100000000.0f / static_cast<float>(vtime);
+    const float hz = kFabricClockHzF / static_cast<float>(vtime);
     if (refresh_min != 0.0 && hz < static_cast<float>(refresh_min))
         return std::nullopt;
     if (refresh_max != 0.0 && hz > static_cast<float>(refresh_max))
@@ -142,7 +162,7 @@ std::optional<ScanrateLock> lock_scanrate(const Modeline& m, std::uint32_t vtime
 
     const double vtotal_real = m.fpix_mhz
         * static_cast<double>(vtime)
-        / (static_cast<double>(htotal) * 100.0);
+        / (static_cast<double>(htotal) * kFabricClockMhz);
 
     if (!(vtotal_real >= 0.0 && vtotal_real < kScanlockVtotalRoundCeiling))
         return std::nullopt;
@@ -157,9 +177,9 @@ std::optional<ScanrateLock> lock_scanrate(const Modeline& m, std::uint32_t vtime
     out.vfp = static_cast<std::uint32_t>(vfp);
     out.vbp = static_cast<std::uint32_t>(vblank - vfp);
     out.vtotal = static_cast<std::uint32_t>(vtotal);
-    out.target_scanrate_hz = (m.fpix_mhz * 1000000.0) / static_cast<double>(htotal);
+    out.target_scanrate_hz = (m.fpix_mhz * kHzPerMhz) / static_cast<double>(htotal);
     out.actual_scanrate_hz = static_cast<double>(vtotal)
-        * (100000000.0 / static_cast<double>(vtime));
+        * (kFabricClockHz / static_cast<double>(vtime));
     return out;
 }
 

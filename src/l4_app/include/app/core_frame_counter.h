@@ -36,7 +36,7 @@ public:
 
     [[nodiscard]] Ex<proto::FrameCount> read() noexcept;
 
-    void settle(bool ready, std::uint32_t core_seq, std::int32_t movie_frame) noexcept;
+    void settle(bool ready, std::uint32_t core_seq, MovieFrame movie_frame) noexcept;
 
     [[nodiscard]] std::uint32_t take_round_words() noexcept {
         const std::uint32_t w = round_words_;

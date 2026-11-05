@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
 #include "infra/never_park.h"
@@ -32,7 +33,7 @@ public:
 
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
 
-    [[nodiscard]] int park_ms() const noexcept { return -1; }
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return infra::kForever; }
 
     [[nodiscard]] xthread::NeverPark& park() noexcept { return park_; }
 

@@ -12,6 +12,7 @@
 #include "cores/types.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/disk_act.h"
@@ -43,7 +44,7 @@ public:
         std::string_view serial
     ) noexcept;
 
-    [[nodiscard]] MountState bind(std::uint8_t unit, std::string_view path) noexcept override;
+    [[nodiscard]] MountState bind(proto::DiskUnit unit, std::string_view path) noexcept override;
     [[nodiscard]] proto::DiskAct start(
         std::span<const std::byte, proto::kDiskStateBytes> state,
         std::span<std::byte, proto::kDiskActBytes> bytes
@@ -67,6 +68,7 @@ public:
 
 private:
     struct Slot {
+        std::unique_ptr<svc::IDiskImage> owned{};
         infra::OptRef<svc::IDiskImage> image{};
         FixedStr<kInquiryNameBytes + 1, StrFit::Clip> name{};
         std::uint8_t asc = 0;
@@ -90,14 +92,13 @@ private:
 
     infra::OptRef<const svc::Vfs> vfs_;
     std::span<const svc::DiskFormatRow> formats_;
-    std::array<std::unique_ptr<svc::IDiskImage>, kTargets> owned_{};
-    std::array<Slot, kTargets> slot_{};
+    infra::IndexedArray<Slot, kTargets, AcsiTarget> slot_{};
     FixedStr<kInquirySerialBytes + 1, StrFit::Clip> serial_{};
     std::array<std::byte, proto::kDiskStateBytes> state_{};
     std::array<std::byte, kReplyBytes> reply_{};
     std::array<std::byte, kChunkBytes> chunk_{};
 
-    std::uint8_t target_ = 0;
+    AcsiTarget target_{};
     Transfer transfer_ = Transfer::None;
     std::uint64_t lba_ = 0;
     std::uint32_t length_ = 0;

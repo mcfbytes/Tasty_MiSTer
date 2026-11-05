@@ -49,9 +49,9 @@ public:
 
     [[nodiscard]] MountState mount_disc(std::string_view path) override;
 
-    void set_region(std::uint8_t region) override {
+    void set_region(proto::RegionCode region) override {
         TASTY_SEAT_BODY(CdCore);
-        drive_.set_region(region);
+        drive_.set_region(region.v);
     }
 
     [[nodiscard]] Ex<void> deferred_reset() override {
@@ -85,12 +85,16 @@ private:
 
     [[nodiscard]] Ex<void> do_reset() override { return drive_.reset(); }
 
-    [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IStagingCore> on_staging_core() noexcept override {
+        return infra::OptRef<IStagingCore>{*this};
+    }
 
-    [[nodiscard]] ICdServiceRows* on_cd_service_rows() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<ICdServiceRows> on_cd_service_rows() noexcept override {
+        return infra::OptRef<ICdServiceRows>{*this};
+    }
 
-    [[nodiscard]] const ICdDiagnostics* on_cd_diagnostics() const noexcept override {
-        return &drive_;
+    [[nodiscard]] infra::OptRef<const ICdDiagnostics> on_cd_diagnostics() const noexcept override {
+        return infra::OptRef<const ICdDiagnostics>{drive_};
     }
 
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
@@ -98,13 +102,15 @@ private:
     [[nodiscard]] Ex<proto::SessionParams> stream_opening(IoIndex index) override;
     void stream_closed(const StreamLoadEnd& end) noexcept override;
 
-    [[nodiscard]] IStreamLoad* on_stream_load() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
+        return infra::OptRef<IStreamLoad>{*this};
+    }
 
     void on_set_pending_file_ext(std::string_view ext) noexcept override { tx_.set_ext(ext); }
 
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return tx_.bytes(); }
 
-    [[nodiscard]] std::uint32_t on_last_tx_crc() const noexcept override { return tx_.crc(); }
+    [[nodiscard]] svc::Crc32 on_last_tx_crc() const noexcept override { return tx_.crc(); }
 
     StreamTxRecord tx_;
     CdDrive drive_;

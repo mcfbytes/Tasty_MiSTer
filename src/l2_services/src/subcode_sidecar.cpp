@@ -12,13 +12,10 @@ using namespace disc::detail;
 
 Ex<std::size_t> SubcodeSidecar::read(Lba lba, std::span<std::byte> dst) {
 
-    const std::uint32_t at = lba.v > sub_origin_ ? lba.v - sub_origin_ : 0u;
+    const std::uint32_t at = lba > sub_origin_ ? (lba - sub_origin_).v : 0u;
     if (sub_cdg_)
         return read_cdg_subcode_(at, dst);
-    auto rd = sub_->read_at(
-        static_cast<std::uint64_t>(at) * kSubcodeBytes,
-        dst.subspan(0, kSubcodeBytes)
-    );
+    auto rd = sub_->read_at(std::uint64_t{at} * kSubcodeBytes, dst.subspan(0, kSubcodeBytes));
     if (!rd)
         return std::unexpected(rd.error());
     if (*rd != kSubcodeBytes) {
@@ -29,28 +26,30 @@ Ex<std::size_t> SubcodeSidecar::read(Lba lba, std::span<std::byte> dst) {
     return kSubcodeBytes;
 }
 
-constexpr int kCdgColumnOffset[24] = {0,       18 - 24,  5 - 48,   23 - 72,  4 - 96,   2 - 120,
-                                      6 - 144, 7 - 168,  8,        9 - 24,   10 - 48,  11 - 72,
-                                      12 - 96, 13 - 120, 14 - 144, 15 - 168, 16,       17 - 24,
-                                      1 - 48,  19 - 72,  20 - 96,  21 - 120, 22 - 144, 3 - 168};
+constexpr int kCdgColumnOffset[] = {0,       18 - 24,  5 - 48,   23 - 72,  4 - 96,   2 - 120,
+                                    6 - 144, 7 - 168,  8,        9 - 24,   10 - 48,  11 - 72,
+                                    12 - 96, 13 - 120, 14 - 144, 15 - 168, 16,       17 - 24,
+                                    1 - 48,  19 - 72,  20 - 96,  21 - 120, 22 - 144, 3 - 168};
 
 constexpr std::uint32_t kCdgReach = 165;
 constexpr std::size_t kCdgSpan = 254;
 
 Ex<std::size_t> SubcodeSidecar::read_cdg_subcode_(std::uint32_t at, std::span<std::byte> dst) {
+    constexpr std::size_t kCdgColumns = std::size(kCdgColumnOffset);
+    constexpr std::size_t kCdgPacks = kSubcodeBytes / kCdgColumns;
 
-    const std::uint64_t want = static_cast<std::uint64_t>(at) * kSubcodeBytes;
+    const std::uint64_t want = std::uint64_t{at} * kSubcodeBytes;
     const std::uint64_t base = want > kCdgReach ? want - kCdgReach : 0;
     std::byte buf[kCdgSpan]{};
     auto rd = sub_->read_at(base, std::span<std::byte>(buf, sizeof(buf)));
     if (!rd)
         return std::unexpected(rd.error());
-    for (std::size_t pack = 0; pack < 4; ++pack) {
-        for (std::size_t col = 0; col < 24; ++col) {
-            const int rel = static_cast<int>(pack * 24)
+    for (std::size_t pack = 0; pack < kCdgPacks; ++pack) {
+        for (std::size_t col = 0; col < kCdgColumns; ++col) {
+            const std::ptrdiff_t rel = static_cast<std::ptrdiff_t>(pack * kCdgColumns)
                 + kCdgColumnOffset[col]
-                + static_cast<int>(kCdgReach);
-            dst[pack * 24 + col] = buf[static_cast<std::size_t>(rel)];
+                + static_cast<std::ptrdiff_t>(kCdgReach);
+            dst[pack * kCdgColumns + col] = buf[static_cast<std::size_t>(rel)];
         }
     }
     return kSubcodeBytes;
@@ -61,14 +60,14 @@ SubcodeSidecar::Found SubcodeSidecar::open_sub_or_cdg(
     const DiscFileAccess& io
 ) {
 
-    if (cue_path.size() < 4)
+    if (cue_path.size() < kExtCue.size())
         return Found::None;
-    std::string name(cue_path.substr(0, cue_path.size() - 4));
-    name.append(".sub");
+    std::string name(cue_path.substr(0, cue_path.size() - kExtCue.size()));
+    name.append(kExtSub);
     auto s = io.open_file(name);
     bool cdg = false;
     if (!s) {
-        name.replace(name.size() - 4, 4, ".cdg");
+        name.replace(name.size() - kExtSub.size(), kExtSub.size(), kExtCdg);
         s = io.open_file(name);
         cdg = true;
     }
@@ -76,7 +75,7 @@ SubcodeSidecar::Found SubcodeSidecar::open_sub_or_cdg(
         return Found::None;
     sub_ = std::move(*s);
     sub_cdg_ = cdg;
-    sub_origin_ = static_cast<std::uint32_t>(kRedBookPregap);
+    sub_origin_ = Lba{0} + kRedBookPregap;
     return cdg ? Found::Cdg : Found::Sub;
 }
 

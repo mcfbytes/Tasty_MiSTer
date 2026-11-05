@@ -546,34 +546,140 @@ template <std::size_t... I>
 }
 
 [[nodiscard]] constexpr std::optional<Gen> gen_of(const Arm& p) noexcept {
-    return std::visit(
-        [](const auto& a) -> std::optional<Gen> {
-            if constexpr (requires { a.gen; }) {
-                return a.gen;
-            } else {
-                return std::nullopt;
-            }
-        },
-        p
-    );
+    using K = PhaseKind;
+    switch (kind(p)) {
+        case K::Idle:
+        case K::Rebooting:
+        case K::kCount:
+            return std::nullopt;
+        case K::Asked:
+            return std::get<Asked>(p).gen;
+        case K::Parking:
+            return std::get<Parking>(p).gen;
+        case K::Programming:
+            return std::get<Programming>(p).gen;
+        case K::AwaitIdentity:
+            return std::get<AwaitIdentity>(p).gen;
+        case K::AwaitConfStr:
+            return std::get<AwaitConfStr>(p).gen;
+        case K::Building:
+            return std::get<Building>(p).gen;
+        case K::Tail:
+            return std::get<Tail>(p).gen;
+        case K::Up:
+            return std::get<Up>(p).gen;
+        case K::Refused:
+            return std::get<Refused>(p).gen;
+        case K::Recovering:
+            return std::get<Recovering>(p).gen;
+    }
+    return std::nullopt;
+}
+template <class T>
+inline constexpr bool kHasGen = requires(T a) { a.gen; };
+static_assert(
+    []<std::size_t... I>(std::index_sequence<I...>) {
+        return (
+            (kHasGen<std::variant_alternative_t<I, Arm>>
+             == gen_of(Arm{std::in_place_index<I>}).has_value())
+            && ...
+        );
+    }(std::make_index_sequence<kPhases>{}),
+    "gen_of reads the generation of every arm that carries one, and of no other"
+);
+
+inline constexpr PhaseSet kBounded{
+    .bits = static_cast<std::uint16_t>(
+        (1u << static_cast<unsigned>(PhaseKind::AwaitIdentity))
+        | (1u << static_cast<unsigned>(PhaseKind::AwaitConfStr))
+        | (1u << static_cast<unsigned>(PhaseKind::Building))
+    )
+};
+template <class T>
+inline constexpr bool kHasBound = requires(T a) { a.bound; };
+static_assert(
+    []<std::size_t... I>(std::index_sequence<I...>) {
+        return (
+            (kHasBound<std::variant_alternative_t<I, Arm>>
+             == kBounded.has(static_cast<PhaseKind>(I)))
+            && ...
+        );
+    }(std::make_index_sequence<kPhases>{}),
+    "kBounded names every arm that carries a bound, and no other"
+);
+
+template <class V>
+[[nodiscard]] constexpr std::optional<os::Deadline> bound_of(const V& v) noexcept {
+    if (const auto* a = std::get_if<AwaitIdentity>(&v))
+        return a->bound;
+    if (const auto* c = std::get_if<AwaitConfStr>(&v))
+        return c->bound;
+    if (const auto* b = std::get_if<Building>(&v))
+        return b->bound;
+    return std::nullopt;
+}
+
+template <class V>
+[[nodiscard]] constexpr V with_bound(V v, const std::optional<os::Deadline>& due) noexcept {
+    if (auto* a = std::get_if<AwaitIdentity>(&v)) {
+        a->bound = due;
+    } else if (auto* c = std::get_if<AwaitConfStr>(&v)) {
+        c->bound = due;
+    } else if (auto* b = std::get_if<Building>(&v)) {
+        b->bound = due;
+    }
+    return v;
+}
+
+static_assert(
+    []<std::size_t... I>(std::index_sequence<I...>) {
+        return (
+            std::is_same_v<std::variant_alternative_t<I, Stage>, std::variant_alternative_t<I, Arm>>
+            && ...
+        );
+    }(std::make_index_sequence<kStages>{}),
+    "Stage is Arm's leading arms, in order"
+);
+
+template <class To, class From, std::size_t... I>
+[[nodiscard]] constexpr To reindex(const From& v, std::index_sequence<I...>) noexcept {
+    To out{};
+    ((v.index() == I ? (void)out.template emplace<I>(*std::get_if<I>(&v)) : (void)0), ...);
+    return out;
 }
 
 [[nodiscard]] constexpr Arm arm_of_stage(const Stage& s) noexcept {
-    return std::visit([](const auto& a) -> Arm { return a; }, s);
+    return reindex<Arm>(s, std::make_index_sequence<kStages>{});
 }
 
 [[nodiscard]] constexpr Stage stage_of(const Arm& p) noexcept {
-    return std::visit(
-        [](const auto& a) -> Stage {
-            if constexpr (kOverlay<std::decay_t<decltype(a)>>) {
-                return a.under;
-            } else {
-                return a;
-            }
-        },
-        p
-    );
+    if (const auto* r = std::get_if<Recovering>(&p))
+        return r->under;
+    if (const auto* b = std::get_if<Rebooting>(&p))
+        return b->under;
+    return reindex<Stage>(p, std::make_index_sequence<kStages>{});
 }
+
+[[nodiscard]] constexpr Arm with_under(Arm a, const Stage& under) noexcept {
+    if (auto* r = std::get_if<Recovering>(&a)) {
+        r->under = under;
+    } else if (auto* b = std::get_if<Rebooting>(&a)) {
+        b->under = under;
+    }
+    return a;
+}
+template <class T>
+inline constexpr bool kHasUnder = requires(T a) { a.under; };
+static_assert(
+    []<std::size_t... I>(std::index_sequence<I...>) {
+        return (
+            (kHasUnder<std::variant_alternative_t<I, Arm>>
+             == kOverlay<std::variant_alternative_t<I, Arm>>)
+            && ...
+        );
+    }(std::make_index_sequence<kPhases>{}),
+    "the two overlays, and no other arm, carry the stage they interrupt"
+);
 
 struct Step {
     Arm next;
@@ -586,14 +692,8 @@ struct Step {
     if (!r.to)
         return Step{.next = now, .row = i};
     Arm next = make(*r.to, f);
-    std::visit(
-        [](const auto& from, auto& to) {
-            if constexpr (requires { from.bound; } && requires { to.bound; })
-                to.bound = from.bound;
-        },
-        now,
-        next
-    );
+    if (kBounded.has(kind(now)) && kBounded.has(kind(next)))
+        next = with_bound(next, bound_of(now));
     return Step{.next = next, .row = i};
 }
 
@@ -626,13 +726,7 @@ struct Step {
         && kTransitions[step.row].origin != Origin::Refusal;
     const Stage stage = moves ? stage_after(stage_of(now), s, f) : stage_of(now);
     const bool was_overlay = kind(now) >= PhaseKind::Recovering;
-    std::visit(
-        [&](auto& a) {
-            if constexpr (kOverlay<std::decay_t<decltype(a)>>)
-                a.under = stage;
-        },
-        step.next
-    );
+    step.next = with_under(step.next, stage);
     if (was_overlay && kind(step.next) == kind(stage))
         step.next = arm_of_stage(stage);
     return step;
@@ -654,15 +748,7 @@ static_assert(
 );
 
 [[nodiscard]] constexpr Arm over(PhaseKind o, const Stage& under, const Facts& f) noexcept {
-    Arm a = make(o, f);
-    std::visit(
-        [&](auto& v) {
-            if constexpr (kOverlay<std::decay_t<decltype(v)>>)
-                v.under = under;
-        },
-        a
-    );
-    return a;
+    return with_under(make(o, f), under);
 }
 
 [[nodiscard]] consteval bool overlay_moves_stage_by_rows(std::size_t pair) {
@@ -780,35 +866,28 @@ struct SwitchPhase {
     }
 
     [[nodiscard]] constexpr std::optional<os::Deadline> bound() const noexcept {
-        std::optional<os::Deadline> out{};
-        visit_stage_([&](const auto& a) {
-            if constexpr (requires { a.bound; })
-                out = a.bound;
-        });
-        return out;
+        return bound_of(stage());
     }
 
     constexpr void rebound(const os::Deadline& due) noexcept {
-        visit_stage_([&](auto& a) {
-            if constexpr (requires { a.bound; })
-                if (a.bound)
-                    a.bound = due;
-        });
+        Stage s = stage();
+        if (bound_of(s))
+            s = with_bound(s, due);
+        put_stage_(s);
     }
 
     constexpr void end_bound() noexcept {
-        visit_stage_([](auto& a) {
-            if constexpr (requires { a.bound; })
-                a.bound.reset();
-        });
+        Stage s = stage();
+        s = with_bound(s, std::nullopt);
+        put_stage_(s);
     }
 
     [[nodiscard]] constexpr bool spend_identity_try(std::uint32_t budget) noexcept {
+        Stage s = stage();
         bool spent = false;
-        visit_stage_([&](auto& a) {
-            if constexpr (std::is_same_v<std::decay_t<decltype(a)>, AwaitIdentity>)
-                spent = budget != 0 && ++a.tries > budget;
-        });
+        if (auto* a = std::get_if<AwaitIdentity>(&s))
+            spent = budget != 0 && ++a->tries > budget;
+        put_stage_(s);
         return spent;
     }
 
@@ -818,10 +897,10 @@ struct SwitchPhase {
     }
 
     constexpr void drop_front_end() noexcept {
-        visit_stage_([](auto& a) {
-            if constexpr (std::is_same_v<std::decay_t<decltype(a)>, Refused>)
-                a.front_end = false;
-        });
+        Stage s = stage();
+        if (auto* r = std::get_if<Refused>(&s))
+            r->front_end = false;
+        put_stage_(s);
     }
 
     constexpr void wedge() noexcept {
@@ -840,24 +919,9 @@ struct SwitchPhase {
     }
 
 private:
-    template <class F>
-    constexpr void visit_stage_(F&& f) const noexcept {
-        const Stage s = stage();
-        std::visit(f, s);
-    }
-
-    template <class F>
-    constexpr void visit_stage_(F&& f) noexcept {
-        Stage s = stage();
-        std::visit(f, s);
-        put_stage_(s);
-    }
-
     constexpr void put_stage_(const Stage& s) noexcept {
-        if (auto* r = std::get_if<Recovering>(&now)) {
-            r->under = s;
-        } else if (auto* b = std::get_if<Rebooting>(&now)) {
-            b->under = s;
+        if (kind(now) >= PhaseKind::Recovering) {
+            now = with_under(now, s);
         } else {
             now = arm_of_stage(s);
         }

@@ -31,7 +31,7 @@ public:
 
     void reset() noexcept {
         sub_.reset();
-        sub_origin_ = 0;
+        sub_origin_ = proto::Lba{};
         sub_cdg_ = false;
     }
 
@@ -40,7 +40,7 @@ private:
 
     std::unique_ptr<IFile> sub_;
 
-    std::uint32_t sub_origin_ = 0;
+    proto::Lba sub_origin_{};
     bool sub_cdg_ = false;
 };
 

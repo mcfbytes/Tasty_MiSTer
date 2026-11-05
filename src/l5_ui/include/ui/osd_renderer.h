@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -25,6 +26,14 @@ enum class Glyph : std::uint8_t {
     BarEmpty = 0x8C,
 };
 
+[[nodiscard]] constexpr unsigned char glyph_code(Glyph g) noexcept {
+    return static_cast<unsigned char>(g);
+}
+
+[[nodiscard]] constexpr char glyph_char(Glyph g) noexcept {
+    return static_cast<char>(g);
+}
+
 inline constexpr unsigned kOsdColumns = 32;
 
 inline constexpr unsigned kSideStripeBytes = 22;
@@ -43,12 +52,16 @@ public:
 
     void set_height(RowCount rows) noexcept { height_ = rows; }
 
-    void set_visible_rows(unsigned n) noexcept {
+    void set_visible_rows(proto::OsdRowCount n) noexcept {
         if (surface_ != nullptr)
             surface_->set_visible_rows(n);
     }
 
     RowCount height() const noexcept { return height_; }
+
+    [[nodiscard]] bool in_height(OsdRow row) const noexcept {
+        return row_index_of(row).before() < height_;
+    }
 
     enum Arrow : std::uint8_t { kArrowNone = 0, kArrowLeft = 1, kArrowRight = 2 };
 
@@ -67,7 +80,7 @@ public:
         std::string_view s,
         bool inverted = false,
         bool stippled = false,
-        std::uint8_t leftchar = 0
+        std::optional<Glyph> leftchar = std::nullopt
     );
     void key_value(OsdRow row, std::string_view name, std::string_view value);
     void glyph(OsdRow row, unsigned col, Glyph g);
@@ -94,13 +107,13 @@ private:
         std::string_view s,
         bool inverted,
         bool stippled,
-        std::uint8_t leftchar
+        std::optional<Glyph> leftchar
     );
     void stage_from_surface(OsdRow row);
     void commit(OsdRow row);
 
     proto::OsdSurface* surface_;
-    RowCount height_{16};
+    RowCount height_ = kFullOsdRows;
     std::uint8_t scratch_[proto::OsdSurface::kRowBytes]{};
     std::uint8_t title_[256]{};
     Arrow arrow_ = kArrowNone;

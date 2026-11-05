@@ -10,6 +10,8 @@
 #include "cores/save_upload.h"
 #include "infra/log_rec.h"
 #include "proto/save_request.h"
+#include "proto/link.h"
+#include "proto/link_ops.h"
 #include "proto/spi_fio_queue.h"
 
 namespace mister::app {
@@ -52,7 +54,7 @@ void NvramUpload::settle_save_lane(bool fio_free) {
 
         if (!fio_free && !saves_.holds_fio())
             break;
-        saves_.service_rt(link_, proto::SpiFioQueue::kUnbudgeted, fio_free);
+        saves_.service_rt(proto::SpiFioQueue::kUnbudgeted, fio_free);
         sleep_ms(1);
     }
 
@@ -90,8 +92,8 @@ Ex<std::size_t> NvramUpload::flush_save_upload(const SaveCtx& ctx) {
     if (ctx.fenced)
         return std::size_t{0};
 
-    cores::ISaveUpload* up = current->save_upload();
-    if (up == nullptr)
+    const auto up = current->save_upload();
+    if (!up)
         return std::size_t{0};
     if (!vfs_) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
@@ -99,7 +101,9 @@ Ex<std::size_t> NvramUpload::flush_save_upload(const SaveCtx& ctx) {
     if (up->save_file_name().empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-    auto req = proto::read_save_request(link_);
+    proto::Link link{link_};
+    proto::LinkOps ops{link};
+    auto req = ops.read_save_request();
     if (!req)
         return std::unexpected(req.error());
     if (!req->requested())
@@ -125,8 +129,8 @@ Ex<std::size_t> NvramUpload::save_upload_now(const SaveCtx& ctx) {
         return std::size_t{0};
     if (ctx.fenced)
         return std::size_t{0};
-    cores::ISaveUpload* up = current->save_upload();
-    if (up == nullptr)
+    const auto up = current->save_upload();
+    if (!up)
         return std::size_t{0};
     if (!vfs_)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});

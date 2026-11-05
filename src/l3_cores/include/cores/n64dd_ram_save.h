@@ -42,7 +42,7 @@ public:
     static constexpr std::size_t kStepBytes = 256u * 1024u;
 
     struct Order {
-        std::uint32_t load_addr = 0;
+        hal::FabricAddr load_addr{};
         std::uint16_t path_len = 0;
         std::uint8_t core_len = 0;
         std::uint8_t pad = 0;
@@ -50,25 +50,15 @@ public:
         char core_dir[32];
     };
 
-    static_assert(std::is_trivially_copyable_v<Order> && sizeof(Order) <= kWindowOrderBytes);
-
-    class Kind final : public IWindowJobKind {
-        TASTY_SEAT_RESIDENT(Io);
-
-    public:
-        [[nodiscard]] IWindowJob* build(
-            std::span<std::byte> arena,
-            std::span<const std::byte> order
-        ) const noexcept override;
-    };
+    static_assert(std::is_trivially_copyable_v<Order> && WindowJobOrder::fits<Order>);
 
     RamSaveJob(
-        std::uint32_t load_addr,
+        hal::FabricAddr load_addr,
         std::string_view disk_path,
         std::string_view core_dir
     ) noexcept;
 
-    [[nodiscard]] std::uint32_t window_addr() const noexcept override;
+    [[nodiscard]] hal::FabricAddr window_addr() const noexcept override;
     [[nodiscard]] std::uint32_t window_len() const noexcept override;
     [[nodiscard]] Ex<bool> step(ICoreWindow& window, const svc::Vfs& vfs) override;
 
@@ -98,7 +88,7 @@ private:
     [[nodiscard]] Ex<void> write_step_(ICoreWindow& window, const svc::Vfs& vfs);
     [[nodiscard]] Ex<void> clear_(ICoreWindow& window);
 
-    std::uint32_t addr_;
+    hal::FabricAddr addr_;
     SavePath disk_path_{};
     FixedStr<32, StrFit::Reject> core_dir_{};
     bool path_ok_ = false;
@@ -111,11 +101,13 @@ private:
     std::optional<Work> work_{};
 };
 
-extern const RamSaveJob::Kind kRamSaveKind;
+[[nodiscard]] IWindowJob* build_ram_save_job(JobArena& arena, const WindowJobOrder& order) noexcept;
+
+extern const WindowJobBuild kRamSaveKind;
 
 [[nodiscard]] bool write_ram_save_order(
-    std::span<std::byte> order,
-    std::uint32_t load_addr,
+    WindowJobOrder& order,
+    hal::FabricAddr load_addr,
     std::string_view disk_path,
     std::string_view core_dir
 ) noexcept;

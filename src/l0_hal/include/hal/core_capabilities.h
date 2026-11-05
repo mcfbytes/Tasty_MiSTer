@@ -9,7 +9,7 @@ namespace mister::hal {
 
 struct CoreCapabilities {
     Width width = Width::Byte;
-    std::uint8_t io_version = 0;
+    IoVersion io_version{};
     bool board_digital = false;
     bool button_osd = false;
     bool button_user = false;

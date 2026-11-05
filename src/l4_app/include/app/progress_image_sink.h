@@ -65,7 +65,7 @@ public:
         armed_ = true;
         closing_ = infra::opt_ref_of(closing);
         tick_.bind(&sink);
-        tick_.begin(total);
+        tick_.begin(proto::FileSize{total});
     }
 
     void count(std::uint64_t n) noexcept {

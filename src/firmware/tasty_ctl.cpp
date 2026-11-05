@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <array>
 #include <limits>
 #include <optional>
@@ -32,7 +33,9 @@
 #include "cores/movie_codec.h"
 #include "cores/movie_system.h"
 #include "cores/rom_digest.h"
+#include "infra/ascii.h"
 #include "infra/error.h"
+#include "infra/message_sum.h"
 #include "infra/parse_int.h"
 #include "infra/persist.h"
 #include "os/writeback_probe.h"
@@ -203,14 +206,10 @@ bool is_dir(const char* p) noexcept {
     return ::stat(p, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+constexpr std::string_view kAviSuffix = ".avi";
+
 bool ends_with_avi(std::string_view s) noexcept {
-    if (s.size() < 4)
-        return false;
-    const auto e = s.substr(s.size() - 4);
-    auto low = [](char c) noexcept {
-        return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-    };
-    return low(e[0]) == '.' && low(e[1]) == 'a' && low(e[2]) == 'v' && low(e[3]) == 'i';
+    return infra::iends_with(s, kAviSuffix);
 }
 
 bool is_file(const char* p) noexcept {
@@ -255,7 +254,8 @@ Digested digest_of(
         dig.update(std::span<const std::uint8_t>(src.prefix.data(), src.prefix.size()));
     for (std::size_t i = 0; i < alts.size(); ++i)
         alts[i].update(std::span<const std::uint8_t>(src.alt_prefixes[i]));
-    std::vector<std::uint8_t> buf(64 * 1024);
+    constexpr std::size_t kDigestChunk = 64 * 1024;
+    std::vector<std::uint8_t> buf(kDigestChunk);
     std::uint64_t off = src.span.offset;
     std::uint64_t left = src.span.length;
     while (left != 0) {
@@ -394,7 +394,8 @@ LogCount count_log_frames(
     auto f = codec.open_movie(vfs, movie);
     if (!f)
         return {};
-    std::vector<char> buf(4096);
+    constexpr std::size_t kLineChunk = 4096;
+    std::vector<char> buf(kLineChunk);
     std::string line;
     std::uint64_t off = 0;
     std::uint32_t n = 0;
@@ -485,7 +486,11 @@ void tasty_set_home_image(const char* exe, const char* arg) noexcept {
 }
 
 [[nodiscard]] Ex<int> tasty_lock_owner() noexcept {
-    const int fd = ::open(g_lock_path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    const int fd = ::open(
+        g_lock_path,
+        O_RDWR | O_CREAT | O_CLOEXEC,
+        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH
+    );
     if (fd < 0)
         return std::unexpected(os_err());
     if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
@@ -553,7 +558,11 @@ int tasty_launch_home() noexcept {
 }
 
 [[nodiscard]] Ex<void> tasty_write_pid(int pid, std::string_view movie) noexcept {
-    const int fd = ::open(g_pid_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    const int fd = ::open(
+        g_pid_path,
+        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH
+    );
     if (fd < 0)
         return std::unexpected(os_err());
     char buf[app::kPathMax + 48];
@@ -637,32 +646,34 @@ std::string tasty_busy_text() noexcept {
         return std::unexpected(os_err());
     int pids[16]{};
     unsigned n = 0;
-    const int self = static_cast<int>(::getpid());
+    const int self = ::getpid();
     while (const dirent* e = ::readdir(d)) {
         if (e->d_name[0] < '1' || e->d_name[0] > '9')
             continue;
         const int pid = infra::parse_int<int>(e->d_name).value_or(0);
         if (pid <= 0 || pid == self || !comm_is_mister(pid))
             continue;
-        if (n < 16)
+        if (n < std::size(pids))
             pids[n++] = pid;
     }
     ::closedir(d);
     for (unsigned i = 0; i < n; ++i)
         (void)::kill(pids[i], SIGTERM);
+    constexpr unsigned kTermGraceSeconds = 2;
+    constexpr unsigned kKillGraceSeconds = 3;
     if (n != 0)
-        sleep_grace(2);
+        sleep_grace(kTermGraceSeconds);
     for (unsigned i = 0; i < n; ++i) {
         if (::kill(pids[i], 0) == 0)
             (void)::kill(pids[i], SIGKILL);
     }
-    if (const std::optional<timespec> deadline = mono_deadline(3)) {
+    if (const std::optional<timespec> deadline = mono_deadline(kKillGraceSeconds)) {
         for (unsigned i = 0; i < n; ++i) {
             while (::kill(pids[i], 0) == 0 && !deadline_passed(*deadline))
                 sleep_poll_slice(*deadline);
         }
     } else {
-        sleep_remaining(3);
+        sleep_remaining(kKillGraceSeconds);
     }
     for (unsigned i = 0; i < n; ++i) {
         if (::kill(pids[i], 0) == 0)
@@ -694,7 +705,11 @@ std::string tasty_busy_text() noexcept {
 }
 
 [[nodiscard]] Ex<void> tasty_write_status(std::string_view json) noexcept {
-    const int fd = ::open(g_status_tmp_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    const int fd = ::open(
+        g_status_tmp_path,
+        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
+        S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH
+    );
     if (fd < 0)
         return std::unexpected(os_err());
     const ssize_t w = ::write(fd, json.data(), json.size());
@@ -715,7 +730,8 @@ std::string tasty_busy_text() noexcept {
     if (fd < 0)
         return std::unexpected(os_err());
     std::string s;
-    s.resize(1024);
+    constexpr std::size_t kStatusReadMax = 1024;
+    s.resize(kStatusReadMax);
     const ssize_t n = ::read(fd, s.data(), s.size());
     ::close(fd);
     if (n < 0)
@@ -749,8 +765,8 @@ int tasty_spawn_stock() noexcept {
     if (n >= 0) {
         (void)::dup2(n, 0);
         (void)::dup2(n, 1);
-        (void)::dup2(n, 2);
-        if (n > 2)
+        (void)::dup2(n, STDERR_FILENO);
+        if (n > STDERR_FILENO)
             ::close(n);
     }
 
@@ -808,7 +824,7 @@ int tasty_run_client(TastyVerb v) noexcept {
 
 const char* tasty_movie_refusal_token(std::uint32_t codec_refusal) noexcept {
     using R = cores::IMovieCodec::Refusal;
-    if (codec_refusal >= static_cast<std::uint32_t>(R::kCount))
+    if (codec_refusal >= infra::ordinal(R::kCount))
         return "movie";
     switch (static_cast<R>(codec_refusal)) {
         case R::NotAMovie:
@@ -988,8 +1004,9 @@ int tasty_check_movie(const svc::Vfs& vfs, std::string_view movie, std::string_v
         std::printf("rom matches\n");
         return 0;
     }
+    constexpr int kExitRomMismatch = 3;
     std::printf("rom mismatch\n");
-    return 3;
+    return kExitRomMismatch;
 }
 
 int tasty_prepare_play(const svc::Vfs& vfs, TastyArgs& a) {
@@ -1115,7 +1132,8 @@ bool tasty_mkdir_p(std::string_view path) noexcept {
             if (cur.size() > 1 || (!cur.empty() && cur[0] != '/'))
                 cur += '/';
             cur += part;
-            if (::mkdir(cur.c_str(), 0755) != 0 && errno != EEXIST)
+            if (::mkdir(cur.c_str(), S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0
+                && errno != EEXIST)
                 return false;
         }
         if (slash == std::string::npos)
@@ -1184,9 +1202,9 @@ std::optional<app::PathText> tasty_prepare_record(
             );
         const auto slash = path.rfind('/');
         const std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
-        if (base.size() <= 4)
+        if (base.size() <= kAviSuffix.size())
             return refuse("that .avi name has no file stem; pass a name before .avi", path);
-        path.replace(path.size() - 4, 4, ".avi");
+        path.replace(path.size() - kAviSuffix.size(), kAviSuffix.size(), kAviSuffix);
         if (slash != std::string::npos && slash > 0 && !tasty_mkdir_p(path.substr(0, slash)))
             return refuse("cannot create the directory for that record", path);
         if (!record.assign(path))
@@ -1221,14 +1239,16 @@ void warn_writeback_cpumask(
     if (!wb.fs_magic || !os::is_network_fs(*wb.fs_magic))
         return;
     const auto cpus = os::effective_writeback_cpus(wb);
-    if (!cpus || rt_cpu < 0 || rt_cpu >= 64)
+    if (!cpus || rt_cpu < 0 || rt_cpu >= std::numeric_limits<std::uint64_t>::digits)
         return;
     const std::uint64_t rt_bit = std::uint64_t{1} << rt_cpu;
     if ((*cpus & rt_bit) == 0)
         return;
     std::uint64_t fix = *wb.cpumask & ~rt_bit;
+    constexpr std::uint64_t kCpu0 = std::uint64_t{1} << 0;
+    constexpr std::uint64_t kCpu1 = std::uint64_t{1} << 1;
     if (fix == 0)
-        fix = rt_cpu == 0 ? 2u : 1u;
+        fix = rt_cpu == 0 ? kCpu1 : kCpu0;
     std::fprintf(
         out,
         "%s: warning: writeback cpumask=%llx: flushing to a network share may run on "

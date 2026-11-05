@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "os/kernel_rt.h"
+#include "proto/types.h"
 
 namespace mister::ui {
 
@@ -12,7 +13,7 @@ using KernelRt = os::KernelRt;
 struct SystemFacts {
     char version[16] = {};
     char os_version[8] = {};
-    std::uint64_t avail_bytes = 0;
+    proto::FileSize avail{};
     bool storage_usb = false;
     bool storage_sd_fallback = false;
     bool usb_mounted = false;

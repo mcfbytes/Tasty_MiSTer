@@ -20,9 +20,9 @@ Ex<void> FileTableBacking::do_read_payload(
     std::uint32_t s_off,
     std::span<std::byte> out
 ) {
-    IFile* f = (t.backing < file_count_) ? files_[t.backing].get() : nullptr;
+    IFile* f = resident_(t.backing);
     if (f == nullptr)
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), t.backing});
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), t.backing.v});
     const std::int64_t pos = static_cast<std::int64_t>(lba.v)
             * static_cast<std::int64_t>(t.sector_size)
         - t.offset
@@ -41,15 +41,14 @@ Ex<void> FileTableBacking::do_read_payload(
 }
 
 void FileTableBacking::advise_first_window(const Track& t0) noexcept {
-    if (t0.backing < file_count_ && files_[t0.backing]) {
+    if (IFile* const f = resident_(t0.backing)) {
         constexpr std::uint64_t kFirstWindowBytes = 1u * 1024u * 1024u;
-        (void)files_[t0.backing]
-            ->advise(IFile::Access::WillNeed, cue_file_pos(t0), kFirstWindowBytes);
+        (void)f->advise(IFile::Access::WillNeed, cue_file_pos(t0), kFirstWindowBytes);
     }
 }
 
 void FileTableBacking::advise_ahead(Lba lba, const Track& t, std::uint32_t sectors) noexcept {
-    IFile* const f = (t.backing < file_count_) ? files_[t.backing].get() : nullptr;
+    IFile* const f = resident_(t.backing);
     if (f == nullptr)
         return;
     const std::int64_t pos = static_cast<std::int64_t>(lba.v)

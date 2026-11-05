@@ -5,6 +5,10 @@
 #include <cstdint>
 #include <string_view>
 
+#include "cores/save_partition.h"
+#include "cores/types.h"
+#include "proto/types.h"
+
 namespace mister::cores::n64 {
 
 enum class MemoryType : std::uint32_t {
@@ -39,21 +43,54 @@ enum class MemoryType : std::uint32_t {
     return 0;
 }
 
+[[nodiscard]] constexpr std::string_view save_suffix(MemoryType t) noexcept;
+
+struct SaveRowCount {
+    std::uint8_t v = 0;
+
+    template <std::integral I>
+    [[nodiscard]] static constexpr SaveRowCount of(I rows) noexcept {
+        return SaveRowCount{static_cast<std::uint8_t>(rows)};
+    }
+
+    [[nodiscard]] constexpr bool none() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
+
+    [[nodiscard]] constexpr SaveRow end() const noexcept { return SaveRow{v}; }
+
+    [[nodiscard]] constexpr SaveRow last() const noexcept {
+        return SaveRow{static_cast<std::uint8_t>(v - 1u)};
+    }
+
+    [[nodiscard]] constexpr bool fits() const noexcept;
+    friend constexpr bool operator==(SaveRowCount, SaveRowCount) = default;
+};
+
+[[nodiscard]] constexpr SavePartition save_partition(std::string_view name, MemoryType t) noexcept {
+    return SavePartition{
+        .name = name,
+        .suffix = save_suffix(t),
+        .length = static_cast<std::uint32_t>(save_size(t))
+    };
+}
+
 [[nodiscard]] constexpr std::uint32_t save_offset(
-    std::size_t idx,
+    SaveRowCount before,
     MemoryType cart,
     bool tpak
 ) noexcept {
+    std::size_t idx = before.size();
     std::uint32_t off = 0;
     if (idx != 0 && cart != MemoryType::None) {
-        off += static_cast<std::uint32_t>(save_size(cart));
+        off += save_partition({}, cart).length;
         --idx;
     }
     if (idx != 0 && tpak) {
-        off += static_cast<std::uint32_t>(save_size(MemoryType::Tpak));
+        off += save_partition({}, MemoryType::Tpak).length;
         --idx;
     }
-    off += static_cast<std::uint32_t>(save_size(MemoryType::Cpak) * idx);
+    off += static_cast<std::uint32_t>(save_partition({}, MemoryType::Cpak).length * idx);
     return off;
 }
 
@@ -101,53 +138,12 @@ enum class MemoryType : std::uint32_t {
 
 inline constexpr std::size_t kMaxSaveRows = 5;
 
-inline constexpr std::uint8_t kLayoutCartMask = 0x07;
-inline constexpr std::uint8_t kLayoutTpakBit = 0x08;
-inline constexpr unsigned kLayoutCountShift = 4;
-
-[[nodiscard]] constexpr std::uint8_t save_layout_key(
-    MemoryType cart,
-    bool tpak,
-    std::size_t rows
-) noexcept {
-    const auto raw = static_cast<std::uint32_t>(cart);
-
-    const auto c = static_cast<std::uint8_t>(
-        raw <= static_cast<std::uint32_t>(MemoryType::Flash128k) ? raw : 0u
-    );
-    const auto n = static_cast<std::uint8_t>(rows > kMaxSaveRows ? 0u : rows);
-    return static_cast<std::uint8_t>(
-        c | (tpak ? kLayoutTpakBit : 0u) | static_cast<std::uint8_t>(n << kLayoutCountShift)
-    );
+constexpr bool SaveRowCount::fits() const noexcept {
+    return v <= kMaxSaveRows;
 }
 
-struct SaveLayout {
-    std::uint32_t offset[kMaxSaveRows]{};
-    std::uint32_t length[kMaxSaveRows]{};
-    std::uint8_t count = 0;
-
-    bool valid = false;
-};
-
-[[nodiscard]] constexpr SaveLayout expand_save_layout(std::uint8_t key) noexcept {
-    SaveLayout out{};
-    const auto cart = static_cast<MemoryType>(key & kLayoutCartMask);
-    const bool tpak = (key & kLayoutTpakBit) != 0;
-    const auto n = static_cast<std::size_t>(key >> kLayoutCountShift);
-    if (n == 0 || n > kMaxSaveRows)
-        return out;
-    std::uint32_t prev = save_offset(0, cart, tpak);
-    for (std::size_t i = 0; i < n; ++i) {
-        const std::uint32_t next = save_offset(i + 1, cart, tpak);
-        if (next <= prev)
-            return SaveLayout{};
-        out.offset[i] = prev;
-        out.length[i] = next - prev;
-        prev = next;
-    }
-    out.count = static_cast<std::uint8_t>(n);
-    out.valid = true;
-    return out;
+[[nodiscard]] constexpr SaveRowCount rows_through(SaveRow row) noexcept {
+    return SaveRowCount::of(row.v + 1u);
 }
 
 [[nodiscard]] constexpr bool needs_byteswap(MemoryType t) noexcept {

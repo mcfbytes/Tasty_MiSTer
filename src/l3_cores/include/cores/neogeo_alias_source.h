@@ -5,13 +5,14 @@
 #include <string>
 #include <string_view>
 
-#include "cores/romset_alias_source.h"
 #include "cores/romsets.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
 
-class NeoGeoAliasSource final : public IRomsetAliasSource {
+class IRomsetFiles;
+
+class NeoGeoAliasSource final {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -23,7 +24,7 @@ public:
         std::string_view home,
         std::string_view entry,
         std::string_view key
-    ) override;
+    );
 
     std::uint32_t index_scans() const noexcept { return scans_; }
 

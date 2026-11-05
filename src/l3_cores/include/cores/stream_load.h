@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
+
 #include "cores/stream_load_end.h"
 #include "infra/error.h"
 #include "proto/session_params.h"
@@ -9,6 +11,8 @@
 namespace mister::cores {
 
 using proto::IoIndex;
+
+enum class StreamLoadKind : std::uint8_t { Stream, Window };
 
 class IStreamLoad {
 public:

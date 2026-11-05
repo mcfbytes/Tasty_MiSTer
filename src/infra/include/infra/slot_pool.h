@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "infra/counter.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 
 namespace mister::xthread {
@@ -67,6 +68,16 @@ public:
 
     [[nodiscard]] const Slot& at(std::uint8_t idx) const noexcept { return slots_[idx]; }
 
+    template <infra::ArrayIndex Index>
+    [[nodiscard]] Slot& at(Index i) noexcept {
+        return slots_[static_cast<std::size_t>(i.v)];
+    }
+
+    template <infra::ArrayIndex Index>
+    [[nodiscard]] const Slot& at(Index i) const noexcept {
+        return slots_[static_cast<std::size_t>(i.v)];
+    }
+
     [[nodiscard]] std::size_t available() const noexcept {
         return free_count_.load(std::memory_order_relaxed);
     }
@@ -79,7 +90,7 @@ public:
 
 private:
     static void on_owner_(
-        [[maybe_unused]] std::uint16_t site,
+        [[maybe_unused]] infra::ErrorSite site,
         [[maybe_unused]] const char* what
     ) noexcept {
         if constexpr (kSeatChecksEnabled) {

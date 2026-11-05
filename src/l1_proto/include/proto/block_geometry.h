@@ -13,9 +13,11 @@ inline constexpr std::uint32_t kBlockStagingBytes = 16384;
 
 inline constexpr unsigned kMaxAnnounceableSlot = 6;
 
+enum : std::uint32_t { kDefaultBlockBytes = 512 };
+
 struct BlockGeometry {
-    std::uint32_t block_size = 512;
-    std::uint32_t window_blocks = 0;
+    BlockSize block_size{kDefaultBlockBytes};
+    BlockCount window_blocks{};
 };
 
 }

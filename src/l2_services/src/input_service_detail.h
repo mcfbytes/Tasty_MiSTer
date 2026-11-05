@@ -10,7 +10,7 @@ namespace mister::svc {
 
 namespace {
 
-Error os_error(std::uint16_t site) {
+Error os_error(infra::ErrorSite site) {
     return Error{Errc::os, site, static_cast<std::uint32_t>(errno)};
 }
 

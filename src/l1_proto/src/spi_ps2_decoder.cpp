@@ -3,11 +3,13 @@
 
 #include "hal/selected.h"
 #include "proto/ps2_wire.h"
+
+#include <span>
 #include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
-[[nodiscard]] Ex<void> write_ps2_frame(hal::ISpiTransport& link, const Ps2Frame& f) {
+[[nodiscard]] Ex<void> write_ps2_frame(ILinkFrame& frame, const Ps2Frame& f) {
     if (f.len == 0 || f.len > kPs2FrameBytes) {
         return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), f.len});
     }
@@ -16,31 +18,25 @@ namespace mister::proto {
     if (f.stream == Ps2Stream::MousePacket && (f.len % 2u) != 0u) {
         return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), f.len});
     }
-    hal::Selected cs(link, hal::ChipSelect::Io);
-    if (auto r = link.transfer(mouse ? word(UioOp::Mouse) : word(UioOp::Keyboard)); !r) {
-        return std::unexpected(r.error());
-    }
+    std::uint16_t words[kPs2FrameBytes];
+    std::size_t n = 0;
     if (f.stream == Ps2Stream::MousePacket) {
         for (std::uint8_t i = 0; i + 1u < f.len; i = static_cast<std::uint8_t>(i + 2u)) {
-            const auto payload = static_cast<std::uint16_t>(
+            words[n++] = static_cast<std::uint16_t>(
                 static_cast<std::uint16_t>(f.bytes[i])
                 | static_cast<std::uint16_t>(static_cast<std::uint16_t>(f.bytes[i + 1]) << 8)
             );
-            if (auto r = link.transfer(hal::SpiWord{payload}); !r) {
-                return std::unexpected(r.error());
-            }
         }
-        return {};
-    }
-    for (std::uint8_t i = 0; i < f.len; ++i) {
-        const auto payload = static_cast<std::uint16_t>(
-            reply ? (0xFF00u | f.bytes[i]) : f.bytes[i]
-        );
-        if (auto r = link.transfer(hal::SpiWord{payload}); !r) {
-            return std::unexpected(r.error());
+    } else {
+        for (std::uint8_t i = 0; i < f.len; ++i) {
+            words[n++] = static_cast<std::uint16_t>(reply ? (0xFF00u | f.bytes[i]) : f.bytes[i]);
         }
     }
-    return {};
+    return send_frame(
+        frame,
+        mouse ? UioOp::Mouse : UioOp::Keyboard,
+        std::span<const std::uint16_t>(words, n)
+    );
 }
 
 void SpiPs2Decoder::probe() noexcept {

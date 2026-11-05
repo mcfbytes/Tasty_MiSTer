@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "tasty_session.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -28,11 +29,14 @@
 
 namespace mister::fw {
 namespace {
+
+constexpr std::chrono::nanoseconds kCoreLoadTimeout{std::chrono::seconds{30}};
+constexpr std::chrono::nanoseconds kMenuLoadTimeout{std::chrono::seconds{20}};
 constexpr std::int64_t kStatusPeriodNs = 250'000'000;
 
 constexpr unsigned kHideTries = 50;
 
-constexpr std::int32_t kResampleFrame = 60;
+constexpr app::MovieFrame kResampleFrame{60};
 }
 
 TastySession::TastySession(const Wiring& w, const TastyArgs& args) noexcept : w_(w), args_(args) {
@@ -98,7 +102,7 @@ bool TastySession::copy_seed_() noexcept {
         return false;
     auto in = w_.vfs.open(args_.save->view(), svc::OpenMode::ReadWhole);
     const auto sz = in ? (*in)->size() : Ex<svc::FileSize>{std::unexpected(in.error())};
-    if (!sz || sz->v > kSeedMaxBytes)
+    if (!sz || *sz > kSeedMax)
         return false;
     std::vector<std::byte> bytes(static_cast<std::size_t>(sz->v));
     const auto got = (*in)->read_at(0, bytes);
@@ -358,8 +362,8 @@ void TastySession::write_status_(bool force) noexcept {
     (void)w_.recstat.sample_into(rec);
     app::EncodeStatus enc{};
     (void)w_.encstat.sample_into(enc);
-    if (said_gen_ != rec.gen + 1u) {
-        said_gen_ = rec.gen + 1u;
+    if (said_gen_ != rec.gen) {
+        said_gen_ = rec.gen;
         said_steps_ = 0;
         said_recovered_ = 0;
     }
@@ -380,22 +384,22 @@ void TastySession::write_status_(bool force) noexcept {
     const int n = std::snprintf(
         buf,
         sizeof buf,
-        "{\"play\":\"%s\",\"end\":\"%s\",\"frame\":%d,\"frames\":%u,\"rec\":\"%s\","
-        "\"rows\":%u,\"late\":%u,\"underruns\":%u,\"skipped\":%u,\"drops\":%u,"
-        "\"missed\":%u,\"scale\":%u}\n",
+        "{\"play\":\"%s\",\"end\":\"%s\",\"frame\":%s,\"frames\":%u,\"rec\":\"%s\","
+        "\"rows\":%s,\"late\":%u,\"underruns\":%u,\"skipped\":%u,\"drops\":%u,"
+        "\"missed\":%s,\"scale\":%u}\n",
         play.level == app::ReplayLevel::Running            ? "running"
             : play.level == app::ReplayLevel::AwaitPowerOn ? "arming"
                                                            : "idle",
         end,
-        play.movie_frame,
+        play.movie_frame.text().c_str(),
         total,
         app::rec_state_name(rec.state),
-        rec.rows,
+        rec.rows.text().c_str(),
         play.late,
         play.underruns,
         play.skipped_edges,
         play.pad_drops,
-        rec.missed,
+        rec.missed.text().c_str(),
         static_cast<unsigned>(enc.video.scale)
     );
     if (n <= 0)
@@ -474,7 +478,7 @@ void TastySession::tick() noexcept {
         case Stage::WaitId:
             if (core_ready_() && video_reloaded_()) {
                 stage_ = Stage::Start;
-            } else if (now - stage_ns_ > 30'000'000'000) {
+            } else if (now - stage_ns_ > kCoreLoadTimeout.count()) {
                 fail_(1, "core load timed out");
             }
             break;
@@ -606,7 +610,7 @@ void TastySession::tick() noexcept {
             sample_rec_failure_();
             write_status_();
             if (now - stage_ns_
-                >= static_cast<std::int64_t>(args_.return_after_s) * 1'000'000'000) {
+                >= std::chrono::nanoseconds{std::chrono::seconds{args_.return_after_s}}.count()) {
                 go_menu_();
             }
             break;
@@ -620,7 +624,7 @@ void TastySession::tick() noexcept {
             stage_ns_ = now;
             break;
         case Stage::WaitMenu:
-            if (menu_ready_() || now - stage_ns_ > 20'000'000'000) {
+            if (menu_ready_() || now - stage_ns_ > kMenuLoadTimeout.count()) {
                 write_status_(true);
                 stage_ = Stage::Done;
             }

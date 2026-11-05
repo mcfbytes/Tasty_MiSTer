@@ -24,7 +24,7 @@ SeatTag adopt_seat_tag(SeatTag t) noexcept {
 
 namespace seat::detail {
 
-[[noreturn]] void violation(SeatTag want, SeatTag got, std::uint16_t site, const char* what) {
+[[noreturn]] void violation(SeatTag want, SeatTag got, infra::ErrorSite site, const char* what) {
     const auto detail = static_cast<std::uint32_t>(
         (static_cast<std::uint32_t>(want) << 8) | static_cast<std::uint32_t>(got)
     );

@@ -118,7 +118,7 @@ void HdRootPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) {
             has_reset_ = has_reset_ || p == Placement::ResetGame;
             has_cheats_ = has_cheats_
                 || (host_of(p) == PageId::Cheats
-                    && it.page == 0
+                    && it.page == proto::kRootSubmenu
                     && offered(it)
                     && page0.cheats_available);
             has_settings_ = has_settings_ || (host_of(p) == PageId::HdCoreSettings && offered(it));
@@ -171,9 +171,9 @@ std::span<const std::reference_wrapper<IHdRow>> HdRootPlan::rows() const {
     return refs_;
 }
 
-std::uint8_t HdRootPlan::pinned() const noexcept {
+RowCount HdRootPlan::pinned() const noexcept {
     TASTY_SEAT_BODY(HdRootPlan);
-    return kPinned;
+    return RowCount{kPinned};
 }
 
 bool HdRootPlan::remembers_focus() const noexcept {

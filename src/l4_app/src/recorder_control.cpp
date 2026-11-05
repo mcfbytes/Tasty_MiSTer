@@ -85,9 +85,8 @@ bool RecorderControl::publish_(
     if (!w_.control)
         return false;
     RecControl c{};
-    c.gen = ++gen_;
-    if (gen_ == 0)
-        c.gen = gen_ = 1;
+    gen_ = gen_.next_live();
+    c.gen = gen_;
     c.op = op;
     c.mode = mode;
     c.opt = opt;
@@ -164,9 +163,9 @@ void RecorderControl::tick() noexcept {
         logged_answer_ = s.answered;
         const char* remedy = rec_verdict_remedy(s.verdict);
         w_.diag->appendf(
-            "{\"t\":\"rec\",\"k\":\"verdict\",\"gen\":%u,\"v\":\"%s\",\"stride_mib\":%u,"
+            "{\"t\":\"rec\",\"k\":\"verdict\",\"gen\":%s,\"v\":\"%s\",\"stride_mib\":%u,"
             "\"lowlat\":%u%s%s%s}",
-            static_cast<unsigned>(s.answered),
+            s.answered.text().c_str(),
             rec_verdict_name(s.verdict),
             static_cast<unsigned>(s.stride_mib),
             static_cast<unsigned>(s.lowlat),
@@ -181,8 +180,8 @@ void RecorderControl::tick() noexcept {
         if (w_.writer)
             (void)w_.writer->sample_into(ws);
         w_.diag->appendf(
-            "{\"t\":\"rec\",\"k\":\"end\",\"gen\":%u,\"why\":\"%s\",%s,\"werr\":%d}",
-            static_cast<unsigned>(s.gen),
+            "{\"t\":\"rec\",\"k\":\"end\",\"gen\":%s,\"why\":\"%s\",%s,\"werr\":%d}",
+            s.gen.text().c_str(),
             rec_verdict_name(s.end),
             format_recorder_status(s).c_str(),
             static_cast<int>(ws.err)

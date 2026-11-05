@@ -44,6 +44,7 @@ proto::StorageStatus status_of(Errc e) noexcept {
         case Errc::aperture_range:
         case Errc::stale:
         case Errc::busy:
+        case Errc::seat_absent:
             return proto::StorageStatus::Refused;
     }
 
@@ -115,7 +116,8 @@ infra::OptRef<IStorageBackend> StorageService::live_(
     proto::SlotIndex slot,
     const Work& w
 ) const noexcept {
-    if (slot.v >= kSlots || w.gen != io_.served[slot.v])
+    const auto served = io_.slots.find(slot);
+    if (!served || !served->serves(w.gen))
         return {};
     return w.backend;
 }
@@ -208,36 +210,30 @@ void StorageService::on(const Req::Flush&, const Req::Head& h, Work& w) noexcept
 void StorageService::on(const Req::Attach& a, const Req::Head& h, Work& w) noexcept {
     Cmp::Attach c{};
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (h.slot.v >= kSlots || !w.backend) {
+    const auto served = io_.slots.find(h.slot);
+    if (!served || !w.backend) {
         st = proto::StorageStatus::Refused;
     } else {
-        io_.served[h.slot.v] = w.gen;
-        auto e = w.backend->open_extent(w.order);
+        served->serve(w.gen);
+        auto e = w.backend->open_extent(h.slot, w.order);
         if (e) {
             c.size = e->v;
         } else {
             st = status_of(e.error().code);
         }
-
-        ISaveFilesOnIo::Save& v = io_.saves[h.slot.v];
-        v = ISaveFilesOnIo::Save{
-            .file = w.backend,
-            .size = proto::FileSize{e ? e->v : 0},
-            .exists = e.has_value(),
-            .growable = a.growable,
-            .gen = v.gen + 1
-        };
+        served->attached(w.backend, proto::FileSize{e ? e->v : 0}, e.has_value(), a.growable);
     }
     finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
 }
 
 void StorageService::on(const Req::Detach&, const Req::Head& h, Work& w) noexcept {
     proto::StorageStatus st = proto::StorageStatus::Ok;
-    if (h.slot.v >= kSlots) {
+    const auto served = io_.slots.find(h.slot);
+    if (!served) {
         st = proto::StorageStatus::Refused;
     } else {
 
-        io_.served[h.slot.v] = w.gen;
+        served->serve(w.gen);
 
         if (w.backend) {
             if (auto e = w.backend->flush(); !e)
@@ -245,8 +241,8 @@ void StorageService::on(const Req::Detach&, const Req::Head& h, Work& w) noexcep
         }
 
         if (w.backend)
-            w.backend->release();
-        io_.saves[h.slot.v] = ISaveFilesOnIo::Save{.gen = io_.saves[h.slot.v].gen + 1};
+            w.backend->release(h.slot);
+        served->detached();
     }
     finish_(st, w, infra::make<Cmp>(Cmp::Detach{}, answer_head(h, st)));
 }
@@ -270,13 +266,7 @@ void StorageService::perform_(const Req& ask, Work& w) noexcept {
 void StorageService::serve() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(StorageService, A);
     if (Ctl::Job j = ctl_.take()) {
-        Work w{
-            {},
-            j->answer,
-            j->backend,
-            j->gen,
-            std::span<const std::byte>{j->order, j->order_len}
-        };
+        Work w{{}, j->answer, j->backend, j->gen, j->order.view()};
         perform_(j->ask, w);
         if (w.performed) {
             j->answer = w.answer;
@@ -301,11 +291,8 @@ bool StorageService::idle() const noexcept {
 StorageService::~StorageService() {
 
     const SeatScope as_rt{SeatTag::RT};
-    for (auto& slot : rt_.data_hands)
-        for (auto& l : slot)
-            l = Data::Loan{};
-    for (auto& l : rt_.ctl_hands)
-        l = Ctl::Loan{};
+    for (auto& slot : rt_.slots)
+        slot.drop_hands();
 }
 
 void StorageService::own_all_() noexcept {
@@ -314,47 +301,49 @@ void StorageService::own_all_() noexcept {
     rt_.owned = true;
     for (std::size_t n = 0; n < Data::capacity(); ++n) {
         Data::Loan l = data_.acquire();
-        const std::uint8_t i = data_.index_of(l);
-        if (i < kSlots * kHalves)
-            rt_.data_hands[i / kHalves][i % kHalves] = std::move(l);
+        const DataHand hand{data_.index_of(l)};
+        if (hand.exists()) {
+            const HandAt at = HandAt::of(hand);
+            rt_.slots[at.slot].hand(at.half) = std::move(l);
+        }
     }
     for (std::size_t n = 0; n < Ctl::capacity(); ++n) {
         Ctl::Loan l = ctl_.acquire();
         const std::uint8_t i = ctl_.index_of(l);
         if (i < kSlots)
-            rt_.ctl_hands[i] = std::move(l);
+            rt_.slots[proto::SlotIndex{i}].ctl() = std::move(l);
     }
 }
 
-bool StorageService::home_(unsigned slot) const noexcept {
+bool StorageService::home_(proto::SlotIndex slot) const noexcept {
     if (!rt_.owned)
         return true;
-    return rt_.data_hands[slot][0] && rt_.data_hands[slot][1] && rt_.ctl_hands[slot];
+    return rt_.slots[slot].home();
 }
 
 proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexcept {
     AdmitReader reader{};
     const Admit a = infra::dispatch<proto::StorageRequestRoutes>(req, reader);
 
-    if (!a.known || a.head.slot.v >= kSlots || a.half.v >= kHalves || a.head.seq.v == 0) {
+    if (!a.known || !rt_.slots.find(a.head.slot) || a.half.v >= kHalves || a.head.seq.v == 0) {
         refusals_.add();
         return proto::StorageSeq{0};
     }
     own_all_();
-    const unsigned s = a.head.slot.v;
+    Rt::Slot& bind = rt_.slots[a.head.slot];
 
     if (a.data) {
-        Data::Loan& l = rt_.data_hands[s][a.half.v];
+        Data::Loan& l = bind.hand(a.half);
         if (!l) {
             refusals_.add();
             return proto::StorageSeq{0};
         }
         l->ask = req;
-        l->backend = rt_.bound[s];
-        l->gen = rt_.gen[s];
+        l->backend = bind.bound();
+        l->gen = bind.gen();
         data_.send(std::move(l));
     } else {
-        Ctl::Loan& l = rt_.ctl_hands[s];
+        Ctl::Loan& l = bind.ctl();
         if (!l) {
             refusals_.add();
             return proto::StorageSeq{0};
@@ -365,24 +354,22 @@ proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexc
 
                 l->backend = l->stage;
                 if (l->stage) {
-                    rt_.bound[s] = l->stage;
-                    ++rt_.gen[s];
+                    bind.bind(l->stage);
                     l->stage.reset();
                 }
                 break;
             case Stamp::Unbind:
 
-                l->backend = rt_.bound[s];
+                l->backend = bind.bound();
                 l->stage.reset();
-                l->order_len = 0;
-                rt_.bound[s].reset();
-                ++rt_.gen[s];
+                l->order.clear();
+                bind.unbind();
                 break;
             case Stamp::Bound:
-                l->backend = rt_.bound[s];
+                l->backend = bind.bound();
                 break;
         }
-        l->gen = rt_.gen[s];
+        l->gen = bind.gen();
         ctl_.send(std::move(l));
     }
     submits_.add();
@@ -396,24 +383,23 @@ std::optional<proto::StorageCompletion> StorageService::reap() noexcept {
     own_all_();
 
     for (std::size_t n = 0; n < Ctl::capacity() + Data::capacity(); ++n) {
-        unsigned slot = 0;
         bool completed = false;
         Cmp c{};
         if (Ctl::Loan l = ctl_.reap()) {
-            slot = ctl_.index_of(l);
+
+            const proto::SlotIndex slot{ctl_.index_of(l)};
             completed = l.completed();
             if (completed)
                 c = l->answer;
             l->backend.reset();
-            rt_.ctl_hands[slot] = std::move(l);
+            rt_.slots[slot].ctl() = std::move(l);
         } else if (Data::Loan d = data_.reap()) {
-            const std::uint8_t i = data_.index_of(d);
-            slot = i / kHalves;
+            const HandAt at = HandAt::of(DataHand{data_.index_of(d)});
             completed = d.completed();
             if (completed)
                 c = d->answer;
             d->backend.reset();
-            rt_.data_hands[slot][i % kHalves] = std::move(d);
+            rt_.slots[at.slot].hand(at.half) = std::move(d);
         } else {
             return std::nullopt;
         }
@@ -430,9 +416,9 @@ std::span<const std::uint8_t> StorageService::half(
     proto::SlotIndex slot,
     proto::ArenaHalf which
 ) const noexcept {
-    if (slot.v >= kSlots || which.v >= kHalves || !rt_.owned)
+    if (!rt_.slots.find(slot) || which.v >= kHalves || !rt_.owned)
         return {};
-    const Data::Loan& l = rt_.data_hands[slot.v][which.v];
+    const Data::Loan& l = rt_.slots[slot].hand(which);
     if (!l)
         return {};
     return std::span<const std::uint8_t>{l->data, kHalfBytes};
@@ -442,10 +428,10 @@ std::span<std::uint8_t> StorageService::half_mut(
     proto::SlotIndex slot,
     proto::ArenaHalf which
 ) noexcept {
-    if (slot.v >= kSlots || which.v >= kHalves)
+    if (!rt_.slots.find(slot) || which.v >= kHalves)
         return {};
     own_all_();
-    const Data::Loan& l = rt_.data_hands[slot.v][which.v];
+    const Data::Loan& l = rt_.slots[slot].hand(which);
     if (!l)
         return {};
     return std::span<std::uint8_t>{l->data, kHalfBytes};
@@ -457,12 +443,12 @@ bool StorageService::stage_backend(
     std::span<const std::byte> order
 ) noexcept {
 
-    if (slot.v >= kSlots || !home_(slot.v) || order.size() > kStorageOrderBytes) {
+    if (!rt_.slots.find(slot) || !home_(slot) || order.size() > kStorageOrderBytes) {
         refusals_.add();
         return false;
     }
     own_all_();
-    BlockCtl& hand = *rt_.ctl_hands[slot.v];
+    BlockCtl& hand = *rt_.slots[slot].ctl();
     infra::OptRef<IStorageBackend>& staged = hand.stage;
 
     if (staged && &*staged == &backend) {
@@ -479,23 +465,22 @@ bool StorageService::stage_backend(
 }
 
 void StorageService::set_order_(BlockCtl& hand, std::span<const std::byte> order) noexcept {
-    hand.order_len = static_cast<std::uint16_t>(order.size());
-    if (!order.empty())
-        std::memcpy(hand.order, order.data(), order.size());
+    (void)hand.order.set(order);
 }
 
 bool StorageService::release_slot(proto::SlotIndex slot) noexcept {
-    if (slot.v >= kSlots)
+    if (!rt_.slots.find(slot))
         return false;
-    if (!home_(slot.v)) {
+    if (!home_(slot)) {
         refusals_.add();
         return false;
     }
+    Rt::Slot& bind = rt_.slots[slot];
     if (rt_.owned) {
-        rt_.ctl_hands[slot.v]->stage.reset();
-        rt_.ctl_hands[slot.v]->order_len = 0;
+        bind.ctl()->stage.reset();
+        bind.ctl()->order.clear();
     }
-    rt_.bound[slot.v].reset();
+    bind.forget();
     return true;
 }
 
@@ -507,9 +492,10 @@ bool StorageService::quiesced() const noexcept {
 
 ISaveFilesOnIo::Save StorageService::save_on_io(proto::SlotIndex slot) const noexcept {
     TASTY_SEAT_BODY_MEDIATOR(StorageService, A);
-    if (slot.v >= kSlots)
+    const auto served = io_.slots.find(slot);
+    if (!served)
         return {};
-    return io_.saves[slot.v];
+    return served->save();
 }
 
 StorageCounters StorageService::counters() const noexcept {

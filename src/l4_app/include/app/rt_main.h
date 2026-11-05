@@ -6,9 +6,11 @@
 
 #include "app/replay_ring.h"
 #include "app/rt_park.h"
+#include "app/types.h"
 #include "hal/link_timing.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
 
@@ -84,7 +86,7 @@ public:
 
     [[nodiscard]] bool stopping() const noexcept { return stopping_; }
 
-    [[nodiscard]] int park_ms() const noexcept { return -1; }
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return infra::kForever; }
 
     [[nodiscard]] RtPark& park() noexcept { return park_; }
 
@@ -116,7 +118,7 @@ private:
     [[nodiscard]] bool replay_ready_() const noexcept;
     [[nodiscard]] bool switch_window_() const noexcept;
     void note_switch_() const noexcept;
-    [[nodiscard]] std::uint32_t core_edge_seq_() const noexcept;
+    [[nodiscard]] CoreEdgeSeq core_edge_seq_() const noexcept;
     [[nodiscard]] bool session_live_() const noexcept;
     [[nodiscard]] bool wire_held_() const noexcept;
 

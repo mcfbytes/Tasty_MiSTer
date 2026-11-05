@@ -84,8 +84,8 @@ struct FileStreamSlot {
 
     Ask ask{};
 
-    std::uint64_t size = 0;
-    Error err{Errc::io, 0, 0};
+    proto::FileSize size{};
+    Error err{Errc::io, infra::kNoSite, 0};
     std::uint32_t got = 0;
     std::uint8_t ok = 0;
 

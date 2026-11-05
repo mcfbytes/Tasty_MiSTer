@@ -9,12 +9,14 @@
 #include "svc/sentinel_cue_program.h"
 
 #include "infra/byte_view.h"
+#include "infra/endian.h"
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
 #include "disc_lex.h"
-#include "vfs_detail.h"
+#include "svc/asset_name.h"
 
 namespace mister::svc {
 
@@ -22,8 +24,25 @@ using namespace disc::detail;
 
 namespace {
 
-std::uint8_t bcd(std::uint32_t v) noexcept {
-    return static_cast<std::uint8_t>((((v / 10) % 10) << 4) | (v % 10));
+using proto::BlockCount;
+
+constexpr std::string_view kIso9660Magic = "CD001";
+constexpr std::string_view kHighSierraMagic = "CDROM";
+constexpr TrackNumber kIsoLeadOutNumber{2};
+
+std::uint32_t bcd(std::uint32_t v) noexcept {
+    constexpr std::uint32_t kRadix = 10;
+    constexpr unsigned kNibbleBits = 4;
+    return (((v / kRadix) % kRadix) << kNibbleBits) | (v % kRadix);
+}
+
+[[nodiscard]] bool has_descriptor(
+    std::span<const unsigned char> b,
+    std::string_view magic
+) noexcept {
+    return b[0] == 1
+        && std::memcmp(b.data() + 1, magic.data(), magic.size()) == 0
+        && b[1 + magic.size()] == 1;
 }
 
 struct ChdTypeRow {
@@ -33,11 +52,11 @@ struct ChdTypeRow {
 };
 
 constexpr ChdTypeRow kChdTypes[] = {
-    {"MODE1_RAW", 2352, TrackType::Mode1},
-    {"MODE2_RAW", 2352, TrackType::Mode2},
-    {"MODE1", 2048, TrackType::Mode1},
+    {"MODE1_RAW", kCdDataSize, TrackType::Mode1},
+    {"MODE2_RAW", kCdDataSize, TrackType::Mode2},
+    {"MODE1", kUserDataBytes, TrackType::Mode1},
     {"MODE2", kMode2Cooked, TrackType::Mode2},
-    {"AUDIO", 2352, TrackType::Cdda},
+    {"AUDIO", kCdDataSize, TrackType::Cdda},
 };
 
 bool take_key(std::string_view& s, std::string_view key) noexcept {
@@ -126,7 +145,7 @@ std::optional<ChdTrack> parse_chd_track(const ChdMetaRow& row) noexcept {
     return out;
 }
 
-[[nodiscard]] static Ex<void> check_policy(const CuePolicy& policy, std::uint16_t site) {
+[[nodiscard]] static Ex<void> check_policy(const CuePolicy& policy, infra::ErrorSite site) {
     const CueAxis axis = unimplemented_axis(policy);
     if (axis != CueAxis::None) {
         return std::unexpected(Error{Errc::unimplemented, site, static_cast<std::uint32_t>(axis)});
@@ -186,7 +205,7 @@ Ex<void> DiscEngine::mount(std::string_view image_path) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
-    if (detail::zip_split(image_path).zipped) {
+    if (asset_name::zip_split(image_path).zipped) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
@@ -222,8 +241,8 @@ Ex<void> DiscEngine::mount(std::string_view image_path) {
     }
     if (image_named_sub
         && policy_.sub_naming == CuePolicy::SubNaming::ImageFilename
-        && image_path.size() > 4) {
-        std::string sub_name(image_path.substr(0, image_path.size() - 4));
+        && image_path.size() > kExtSub.size()) {
+        std::string sub_name(image_path.substr(0, image_path.size() - kExtSub.size()));
         sub_name.append(".sub");
         auto s = files_io_.open_file(sub_name);
         if (s) {
@@ -277,41 +296,43 @@ Ex<void> DiscEngine::mount_iso(std::string_view iso_path) {
     };
 
     constexpr Probe kProbes[] = {
-        {2048, false},
-        {2352, false},
+        {kUserDataBytes, false},
+        {kCdDataSize, false},
         {kMode2Cooked, true},
-        {2352, true},
+        {kCdDataSize, true},
     };
 
     for (const Probe& p : kProbes) {
 
-        std::uint64_t seek = 16ull * p.sector_size;
-        if (p.sector_size == 2352 && !p.mode2)
-            seek += 16;
+        constexpr std::uint64_t kFirstDescriptorSector = 16;
+        constexpr std::size_t kRawHeaderMode1 = 16;
+        constexpr std::size_t kRawHeaderMode2 = 24;
+        std::uint64_t seek = kFirstDescriptorSector * p.sector_size;
+        if (p.sector_size == kCdDataSize && !p.mode2)
+            seek += kRawHeaderMode1;
         if (p.mode2)
-            seek += 24;
+            seek += kRawHeaderMode2;
 
         std::byte pvd[kUserDataBytes]{};
         auto rd = (*f)->read_at(seek, std::span<std::byte>(pvd, sizeof(pvd)));
         if (!rd || *rd != sizeof(pvd))
             continue;
 
+        constexpr std::size_t kHighSierraOffset = 8;
         const auto b = infra::byte_cast<const unsigned char>(std::span(pvd));
-        const bool iso9660 = b[0] == 1 && std::memcmp(b.data() + 1, "CD001", 5) == 0 && b[6] == 1;
-        const bool high_sierra = b[8] == 1
-            && std::memcmp(b.data() + 9, "CDROM", 5) == 0
-            && b[14] == 1;
-        if (!iso9660 && !high_sierra)
+        if (!has_descriptor(b, kIso9660Magic)
+            && !has_descriptor(b.subspan(kHighSierraOffset), kHighSierraMagic)) {
             continue;
+        }
 
         Track& t = toc_.tracks[0];
         t.number = TrackNumber{1};
         t.type = p.mode2 ? TrackType::Mode2 : TrackType::Mode1;
         t.sector_size = p.sector_size;
         t.start = Lba{0};
-        t.end = Lba{static_cast<std::uint32_t>(sz->v / p.sector_size)};
+        t.end = proto::end_lba(*sz, proto::BlockSize{p.sector_size});
         t.offset = 0;
-        t.backing = 0;
+        t.backing = OpenFileId{0};
 
         table_.hold_single(std::move(*f));
 
@@ -321,7 +342,7 @@ Ex<void> DiscEngine::mount_iso(std::string_view iso_path) {
         toc_.offset_unit = OffsetUnit::CueBytes;
 
         Track& lead_out = toc_.tracks[1];
-        lead_out.number = TrackNumber{2};
+        lead_out.number = kIsoLeadOutNumber;
         lead_out.type = TrackType::Cdda;
         lead_out.start = t.end;
         lead_out.end = t.end;
@@ -331,26 +352,24 @@ Ex<void> DiscEngine::mount_iso(std::string_view iso_path) {
 }
 
 Ex<void> DiscEngine::declare_iso_2048(std::unique_ptr<IFile> f, FileSize sz) {
-    constexpr std::uint32_t kDeclared = 2048;
-
     Track& t = toc_.tracks[0];
     t.number = TrackNumber{1};
     t.type = TrackType::Mode1;
-    t.sector_size = kDeclared;
+    t.sector_size = kUserDataBytes;
     t.start = Lba{0};
-    t.end = Lba{static_cast<std::uint32_t>(sz.v / kDeclared)};
+    t.end = proto::end_lba(sz, proto::BlockSize{kUserDataBytes});
     t.offset = 0;
-    t.backing = 0;
+    t.backing = OpenFileId{0};
 
     table_.hold_single(std::move(f));
 
     toc_.last = 1;
     toc_.end = t.end;
-    toc_.sector_size = kDeclared;
+    toc_.sector_size = kUserDataBytes;
     toc_.offset_unit = OffsetUnit::CueBytes;
 
     Track& lead_out = toc_.tracks[1];
-    lead_out.number = TrackNumber{2};
+    lead_out.number = kIsoLeadOutNumber;
     lead_out.type = TrackType::Cdda;
     lead_out.start = t.end;
     lead_out.end = t.end;
@@ -369,7 +388,7 @@ Ex<void> DiscEngine::mount_chd(
     if (!attached)
         return attached;
 
-    std::uint32_t sector_cnt = 0;
+    BlockCount sector_cnt{0};
     std::uint32_t count = 0;
     for (; count < kMaxCueTracks; ++count) {
         const auto row = chd_.track_metadata(count);
@@ -381,26 +400,27 @@ Ex<void> DiscEngine::mount_chd(
         const ChdTrack& m = *parsed;
 
         Track& t = toc_.tracks[count];
-        t.number = TrackNumber{static_cast<std::uint8_t>(count + 1)};
+        t.number = TrackNumber::of(count + 1);
 
         const bool pregap_valid = (m.pgtype[0] == 'V');
-        std::uint32_t pregap = m.pregap;
+        BlockCount pregap{m.pregap};
         if (count != 0) {
             Track& prev = toc_.tracks[count - 1];
             if (!pregap_valid)
-                prev.end = Lba{prev.end.v + pregap};
+                prev.end += pregap;
             toc_.end = prev.end;
             t.start = toc_.end;
             if (pregap_valid)
-                t.start = Lba{t.start.v + pregap};
+                t.start += pregap;
         } else {
-            t.start = Lba{pregap_valid ? pregap : 0u};
+            t.start = Lba{0} + (pregap_valid ? pregap : BlockCount{0});
         }
 
         t.pregap = pregap;
-        t.index_num = 2;
+        constexpr std::uint32_t kChdIndexCount = 2;
+        t.index_num = kChdIndexCount;
         if (!pregap_valid)
-            pregap = 0;
+            pregap = BlockCount{0};
 
         t.sector_size = 0;
         t.type = TrackType::Cdda;
@@ -421,14 +441,12 @@ Ex<void> DiscEngine::mount_chd(
             toc_.has_subcode = true;
         }
 
-        t.offset = static_cast<std::int64_t>(sector_cnt)
-            + static_cast<std::int64_t>(pregap)
-            - static_cast<std::int64_t>(t.start.v);
-        t.end = Lba{t.start.v + m.frames - pregap};
-        toc_.end = Lba{t.end.v + m.postgap};
-        sector_cnt += ((m.frames + static_cast<std::uint32_t>(kChdTrackPadding) - 1)
-                       / static_cast<std::uint32_t>(kChdTrackPadding))
-            * static_cast<std::uint32_t>(kChdTrackPadding);
+        t.offset = std::int64_t{sector_cnt.v} + std::int64_t{pregap.v} - std::int64_t{t.start.v};
+        t.end = t.start + BlockCount{m.frames} - pregap;
+        toc_.end = t.end + BlockCount{m.postgap};
+        sector_cnt += BlockCount{
+            ((m.frames + kChdTrackPadding - 1) / kChdTrackPadding) * kChdTrackPadding
+        };
     }
 
     if (count == 0) {
@@ -444,38 +462,36 @@ Ex<void> DiscEngine::mount_chd(
     toc_.offset_unit = OffsetUnit::ChdSectors;
 
     if (policy_.post_load_shift == CuePolicy::PostLoadTocShift::FakeLeadInPregap150) {
-        const auto lead_in = static_cast<std::uint32_t>(kRedBookPregap);
         for (std::uint32_t i = 0; i < count; ++i) {
             Track& t = toc_.tracks[i];
             if (i == 0) {
 
-                t.pregap = lead_in;
-                t.start = Lba{lead_in};
-                t.end = Lba{t.end.v + lead_in};
+                t.pregap = kRedBookPregap;
+                t.start = Lba{0} + kRedBookPregap;
+                t.end += kRedBookPregap;
             } else {
 
-                const std::uint32_t frame_cnt = (t.end.v - t.start.v) + t.pregap;
+                const BlockCount frame_cnt = (t.end - t.start) + t.pregap;
                 t.start = toc_.tracks[i - 1].end;
-                t.end = Lba{t.start.v + frame_cnt};
+                t.end = t.start + frame_cnt;
             }
-            t.offset -= static_cast<std::int64_t>(lead_in);
+            t.offset -= std::int64_t{kRedBookPregap.v};
         }
         toc_.end = toc_.tracks[count - 1].end;
     }
 
     if (policy_.post_load_shift == CuePolicy::PostLoadTocShift::Uniform150) {
-        const auto lead_in = static_cast<std::uint32_t>(kRedBookPregap);
         for (std::uint32_t i = 0; i < count; ++i) {
             Track& t = toc_.tracks[i];
-            t.start = Lba{t.start.v + lead_in};
-            t.end = Lba{t.end.v + lead_in};
-            t.offset -= static_cast<std::int64_t>(lead_in);
+            t.start += kRedBookPregap;
+            t.end += kRedBookPregap;
+            t.offset -= std::int64_t{kRedBookPregap.v};
         }
-        toc_.end = Lba{toc_.end.v + lead_in};
+        toc_.end += kRedBookPregap;
     }
 
     Track& lead_out = toc_.tracks[count];
-    lead_out.number = TrackNumber{static_cast<std::uint8_t>(count + 1)};
+    lead_out.number = TrackNumber::of(count + 1);
     lead_out.type = TrackType::Cdda;
     lead_out.start = toc_.end;
     lead_out.end = toc_.end;
@@ -501,7 +517,8 @@ std::optional<TrackIndex> DiscEngine::source_track(Lba lba) const {
     const Track& t = toc_.tracks[ti->v];
 
     if (lba < t.start && t.number.v > 1) {
-        return TrackIndex{static_cast<std::uint8_t>(t.number.v - 2)};
+        constexpr std::uint8_t kPrevTrackBias = 2;
+        return TrackIndex::of(t.number.v - kPrevTrackBias);
     }
     return ti;
 }
@@ -515,6 +532,8 @@ Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form fo
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), lba.v});
     const Track& t = toc_.tracks[ti->v];
 
+    constexpr std::uint32_t kRawHeaderMode1 = 16;
+    constexpr std::uint32_t kRawHeaderMode2 = 24;
     const std::uint32_t ss = t.sector_size;
     if (ss == 0) {
 
@@ -536,8 +555,8 @@ Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form fo
             out_len = kUserDataBytes;
             len = kUserDataBytes;
             if (ss != kUserDataBytes)
-                s_off = (t.type == TrackType::Mode2) ? 24u : 16u;
-            if (static_cast<std::size_t>(s_off) + len > ss) {
+                s_off = (t.type == TrackType::Mode2) ? kRawHeaderMode2 : kRawHeaderMode1;
+            if (s_off + len > ss) {
                 return std::unexpected(Error{Errc::bad_format, ERR_SITE(), ss});
             }
             break;
@@ -547,10 +566,10 @@ Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form fo
             if (ss == kCdDataSize) {
                 len = kCdDataSize;
             } else if (ss == kMode2Cooked) {
-                dst_off = 16;
+                dst_off = kRawHeaderMode1;
                 len = kMode2Cooked;
             } else if (ss == kUserDataBytes) {
-                dst_off = 16;
+                dst_off = kRawHeaderMode1;
                 len = kUserDataBytes;
             } else {
                 return std::unexpected(Error{Errc::bad_format, ERR_SITE(), ss});
@@ -569,15 +588,25 @@ Ex<std::size_t> DiscEngine::read_form(Lba lba, std::span<std::byte> dst, Form fo
         std::memset(dst.data(), 0, kCdDataSize);
         if (ss == kUserDataBytes) {
 
+            constexpr std::size_t kSyncBytes = 12;
+            constexpr std::size_t kSyncMiddleBytes = kSyncBytes - 2;
+            constexpr unsigned char kSyncFill = 0xFF;
+            constexpr std::uint32_t kSecondsPerMinute = 60;
+            constexpr unsigned kSecondShift = 8;
+            constexpr unsigned kFrameShift = 16;
+            constexpr unsigned kModeShift = 24;
+            constexpr std::uint32_t kSectorModeOne = 1;
             auto b = infra::byte_cast<unsigned char>(dst);
-            b[0] = 0x00;
-            std::memset(b.data() + 1, 0xff, 10);
-            b[11] = 0x00;
-            const std::uint32_t f_lba = lba.v + static_cast<std::uint32_t>(kRedBookPregap);
-            b[12] = bcd(f_lba / (kFramesPerSecond * 60));
-            b[13] = bcd((f_lba / kFramesPerSecond) % 60);
-            b[14] = bcd(f_lba % kFramesPerSecond);
-            b[15] = 0x01;
+            b[0] = 0;
+            std::memset(b.data() + 1, kSyncFill, kSyncMiddleBytes);
+            b[kSyncBytes - 1] = 0;
+
+            const std::uint32_t f_lba = (lba + kRedBookPregap).v;
+            const std::uint32_t header = bcd(f_lba / (kFramesPerSecond * kSecondsPerMinute))
+                | (bcd((f_lba / kFramesPerSecond) % kSecondsPerMinute) << kSecondShift)
+                | (bcd(f_lba % kFramesPerSecond) << kFrameShift)
+                | (kSectorModeOne << kModeShift);
+            infra::store_le<std::uint32_t>(b.subspan(kSyncBytes).first<sizeof(header)>(), header);
         }
     }
 
@@ -609,10 +638,9 @@ void DiscEngine::normalize_cdda_(
         return;
     if (cdda_order_ == kWireCddaOrder)
         return;
-    for (std::size_t i = 0; i + 1 < frame.size(); i += 2) {
-        const std::byte lo = frame[i];
-        frame[i] = frame[i + 1];
-        frame[i + 1] = lo;
+    constexpr std::size_t kCddaSampleBytes = 2;
+    for (std::size_t i = 0; i + kCddaSampleBytes <= frame.size(); i += kCddaSampleBytes) {
+        std::ranges::reverse(frame.subspan(i, kCddaSampleBytes));
     }
 }
 
@@ -679,8 +707,8 @@ void DiscEngine::open_sub_or_cdg_(std::string_view cue_path) {
         sub_shaper_ = std::make_unique<RwInterleaver>();
 }
 
-std::uint32_t DiscEngine::seek_ms(Lba from_lba, Lba to_lba) const {
-    return svc::seek_ms(from_lba, to_lba);
+SeekTime DiscEngine::seek_time(Lba from_lba, Lba to_lba) const {
+    return svc::seek_time(from_lba, to_lba);
 }
 
 void DiscEngine::advise_ahead(Lba lba) noexcept {

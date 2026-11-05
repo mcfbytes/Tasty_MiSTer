@@ -207,7 +207,7 @@ Ex<AssetWait> BootLadder::load_row(const BootAsset& row) {
         auto f = vfs_.open(load_path_.view(), svc::OpenMode::ReadWhole);
         const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
 
-        if (!sz || (row.exact_size != 0 && sz->v != row.exact_size)) {
+        if (!sz || (row.exact_size.v != 0 && sz->v != row.exact_size.v)) {
             load_path_.clear();
             return AssetWait::Miss;
         }
@@ -272,11 +272,11 @@ Ex<std::string> BootLadder::save_path_for(std::string_view image) {
 }
 
 MountState BootLadder::mount_bounded(std::string_view path) {
-    return mount_slot_bounded(proto::SlotIndex{profile_.staging.disc_slot.v}, path);
+    return mount_slot_bounded(profile_.staging.disc_slot.block_slot(), path);
 }
 
 MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_view path) {
-    if (mount_gen_ == 0) {
+    if (!mount_gen_) {
         proto::FileId id{};
         if (!path.empty()) {
             auto r = host_.intern_path(path, 0);
@@ -284,7 +284,7 @@ MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_vie
                 return MountState::Failed;
             id = *r;
         }
-        const std::uint32_t g = next_gen();
+        const proto::ActKey g = next_gen();
 
         if (!host_.order(
                 proto::LinkOp::StageMount{
@@ -303,13 +303,13 @@ MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_vie
     const MountStatus s = host_.mount_status();
     if (s.generation == mount_gen_ && s.state != MountState::Pending) {
         mount_answer_ = s;
-        mount_gen_ = 0;
+        mount_gen_ = {};
         mount_due_ns_ = 0;
         return s.state;
     }
 
     if (now_ns() >= mount_due_ns_) {
-        mount_gen_ = 0;
+        mount_gen_ = {};
         mount_due_ns_ = 0;
         return MountState::Failed;
     }
@@ -317,14 +317,14 @@ MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_vie
 }
 
 bool BootLadder::prepare_save(std::string_view path) {
-    if (save_gen_ == 0) {
+    if (!save_gen_) {
         auto id = host_.intern_path(path, 0);
         if (!id || *id == proto::FileId{})
             return false;
-        const std::uint32_t g = next_gen();
+        const proto::ActKey g = next_gen();
         if (!host_.order(
                 proto::LinkOp::BindSlot{
-                    .slot = proto::SlotIndex{profile_.staging.save_slot.v},
+                    .slot = profile_.staging.save_slot.block_slot(),
                     .bind = proto::LinkOp::SlotBind::Attach,
                     .path = *id,
                     .act_gen = g
@@ -343,20 +343,20 @@ bool BootLadder::prepare_save(std::string_view path) {
             return false;
         case SaveAnswer::Declined:
 
-            save_gen_ = 0;
+            save_gen_ = {};
             return false;
         case SaveAnswer::Known:
             break;
     }
     save_size_ = e.size_bytes;
     save_exists_ = e.exists;
-    save_gen_ = 0;
+    save_gen_ = {};
     return true;
 }
 
 bool BootLadder::order_mount_save(std::string_view path, bool bracketed) {
     proto::LinkOp::BindSlot op{
-        .slot = proto::SlotIndex{profile_.staging.save_slot.v},
+        .slot = profile_.staging.save_slot.block_slot(),
         .bracketed = bracketed
     };
     if (path.empty()) {
@@ -378,7 +378,7 @@ bool BootLadder::order_mount_save(std::string_view path, bool bracketed) {
 
 bool BootLadder::order_announce_disc(std::uint64_t size_bytes) {
     proto::LinkOp::BindSlot op{
-        .slot = proto::SlotIndex{profile_.staging.disc_slot.v},
+        .slot = profile_.staging.disc_slot.block_slot(),
         .bind = proto::LinkOp::SlotBind::MountCd
     };
     if (size_bytes != 0) {
@@ -393,7 +393,7 @@ bool BootLadder::order_announce_disc(std::uint64_t size_bytes) {
 bool BootLadder::order_notify_mount(bool loaded) {
     return host_.order(
         proto::LinkOp::AnnounceMount{
-            .slot = proto::SlotIndex{profile_.staging.disc_slot.v},
+            .slot = profile_.staging.disc_slot.block_slot(),
             .loaded = loaded
         }
     );

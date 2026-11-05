@@ -32,14 +32,8 @@ public:
         std::uint16_t err_code = 0;
     };
 
-    SpiBlockDecoder(
-        hal::ISpiTransport& link,
-        ILinkRouter& router,
-        BlockSlots& slots,
-        const ISessionLive& live
-    ) noexcept
-        : link_(&link),
-          slots_(&slots),
+    SpiBlockDecoder(ILinkRouter& router, BlockSlots& slots, const ISessionLive& live) noexcept
+        : slots_(&slots),
           live_(&live),
           out_(router) {}
 
@@ -56,7 +50,6 @@ public:
     [[nodiscard]] std::uint32_t osd_claims() const noexcept { return counters_.sectors; }
 
 private:
-    hal::ISpiTransport* link_;
     BlockSlots* slots_;
     const ISessionLive* live_;
     Port out_;

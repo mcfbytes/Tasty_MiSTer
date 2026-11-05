@@ -6,6 +6,7 @@
 #include "app/link_encoder.h"
 #include "app/lw_pads.h"
 #include "infra/opt_ref.h"
+#include "proto/link.h"
 #include "proto/link_op.h"
 #include "proto/spi_frame.h"
 #include "infra/seat.h"

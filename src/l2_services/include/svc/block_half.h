@@ -10,6 +10,7 @@
 #include "proto/storage_completion.h"
 #include "proto/storage_request.h"
 #include "svc/storage_backend.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -18,7 +19,7 @@ struct BlockHalf {
 
     proto::StorageRequest ask{};
     proto::StorageCompletion answer{};
-    std::uint32_t gen = 0;
+    Generation gen{};
     infra::OptRef<IStorageBackend> backend{};
     alignas(64) std::uint8_t data[proto::kBlockStagingBytes]{};
 };

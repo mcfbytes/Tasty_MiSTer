@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <span>
@@ -20,6 +21,25 @@
 namespace mister::boards::cyclone_v {
 namespace {
 
+enum : unsigned {
+    kDetailObservedShift = 8,
+    kCellByteBits = 8,
+    kCellByteMask = 0xFF,
+    kObservedExtShift = 4,
+    kExtPortaMask = 0xF,
+    kBurstBytes = 32,
+    kWordBytes = 4,
+    kCdRatioFieldMask = 3,
+    kMselWideBit = 8,
+    kMselRungMask = 3,
+    kMselRung0 = 0,
+    kMselRung1 = 1,
+    kMselRung2 = 2,
+    kCellHighByte = 2,
+    kCellLowByte = 3,
+    kEnvTrailerBytes = 2,
+};
+
 constexpr std::uint32_t kStageResetPhase = 1;
 constexpr std::uint32_t kStageCfgPhase = 2;
 constexpr std::uint32_t kStageConfigError = 3;
@@ -30,11 +50,11 @@ constexpr std::uint32_t kStageDclkExit = 7;
 constexpr std::uint32_t kStageUserMode = 8;
 
 constexpr std::uint32_t detail_of(std::uint32_t stage, std::uint32_t observed) noexcept {
-    return stage | (observed << 8);
+    return stage | (observed << kDetailObservedShift);
 }
 
 constexpr std::uint32_t observed_of(std::uint32_t mode, std::uint32_t ext) noexcept {
-    return (mode & FpgaMgr::kStatModeMask) | ((ext & 0xFu) << 4);
+    return (mode & FpgaMgr::kStatModeMask) | ((ext & kExtPortaMask) << kObservedExtShift);
 }
 
 }
@@ -119,7 +139,7 @@ void Programmer::ctrl_update(std::uint32_t clear, std::uint32_t set) {
 }
 
 void Programmer::set_cd_ratio(std::uint32_t ratio) {
-    ctrl_update(FpgaMgr::kCtrlCdRatioMask, (ratio & 0x3u) << FpgaMgr::kCtrlCdRatioLsb);
+    ctrl_update(FpgaMgr::kCtrlCdRatioMask, (ratio & kCdRatioFieldMask) << FpgaMgr::kCtrlCdRatioLsb);
 }
 
 std::uint32_t Programmer::mode() {
@@ -127,7 +147,7 @@ std::uint32_t Programmer::mode() {
 }
 
 std::uint32_t Programmer::ext_nibble() {
-    return mgr_.read(FpgaMgr::Reg::GpioExtPorta) & 0xFu;
+    return mgr_.read(FpgaMgr::Reg::GpioExtPorta) & kExtPortaMask;
 }
 
 void Programmer::dclk_arm_(std::uint32_t count) {
@@ -188,22 +208,22 @@ Ex<bool> Programmer::program_begin() {
     const std::uint32_t msel = (mgr_.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatMselMask)
         >> FpgaMgr::kStatMselLsb;
 
-    if ((msel & 0x8u) != 0u) {
+    if ((msel & kMselWideBit) != 0u) {
         ctrl_update(0, FpgaMgr::kCtrlCfgWdth);
-        if ((msel & 0x3u) == 0x0u) {
+        if ((msel & kMselRungMask) == kMselRung0) {
             set_cd_ratio(FpgaMgr::kCdRatio1);
-        } else if ((msel & 0x3u) == 0x1u) {
+        } else if ((msel & kMselRungMask) == kMselRung1) {
             set_cd_ratio(FpgaMgr::kCdRatio4);
-        } else if ((msel & 0x3u) == 0x2u) {
+        } else if ((msel & kMselRungMask) == kMselRung2) {
             set_cd_ratio(FpgaMgr::kCdRatio8);
         }
     } else {
         ctrl_update(FpgaMgr::kCtrlCfgWdth, 0);
-        if ((msel & 0x3u) == 0x0u) {
+        if ((msel & kMselRungMask) == kMselRung0) {
             set_cd_ratio(FpgaMgr::kCdRatio1);
-        } else if ((msel & 0x3u) == 0x1u) {
+        } else if ((msel & kMselRungMask) == kMselRung1) {
             set_cd_ratio(FpgaMgr::kCdRatio2);
-        } else if ((msel & 0x3u) == 0x2u) {
+        } else if ((msel & kMselRungMask) == kMselRung2) {
             set_cd_ratio(FpgaMgr::kCdRatio4);
         }
     }
@@ -218,20 +238,27 @@ Ex<bool> Programmer::program_begin() {
 void Programmer::program_write(std::span<const std::byte> image) {
 
     const std::byte* src = image.data();
-    const std::size_t loops32 = image.size() / 32u;
-    const std::size_t rem = image.size() % 32u;
-    const std::size_t loops4 = rem / 4u;
-    const std::size_t tail = rem % 4u;
+    const std::size_t loops32 = image.size() / kBurstBytes;
+    const std::size_t rem = image.size() % kBurstBytes;
+    const std::size_t loops4 = rem / kWordBytes;
+    const std::size_t tail = rem % kWordBytes;
 
     for (std::size_t g = 0; g < loops32; ++g) {
         for (std::size_t k = 0; k < FpgaMgrData::kBurstWords; ++k) {
-            const auto w = infra::load_le<std::uint32_t>(std::span<const std::byte, 4>(src, 4));
+            const auto w = infra::load_le<std::uint32_t>(
+                std::span<const std::byte, kWordBytes>(src, kWordBytes)
+            );
             src += sizeof w;
-            data_.write(static_cast<FpgaMgrData::Reg>(static_cast<std::uint32_t>(k * 4u)), w);
+            data_.write(
+                static_cast<FpgaMgrData::Reg>(static_cast<std::uint32_t>(k * kWordBytes)),
+                w
+            );
         }
     }
     for (std::size_t n = 0; n < loops4; ++n) {
-        const auto w = infra::load_le<std::uint32_t>(std::span<const std::byte, 4>(src, 4));
+        const auto w = infra::load_le<std::uint32_t>(
+            std::span<const std::byte, kWordBytes>(src, kWordBytes)
+        );
         src += sizeof w;
         data_.write(FpgaMgrData::Reg::Data, w);
     }
@@ -400,7 +427,7 @@ Ex<void> Programmer::program_chunk(std::span<const std::byte> chunk) {
         );
     }
     program_write(chunk);
-    tail_seen_ = (chunk.size() % 32u) != 0u;
+    tail_seen_ = (chunk.size() % kBurstBytes) != 0u;
     return {};
 }
 
@@ -447,31 +474,32 @@ Ex<hal::HandoffPage> Programmer::handoff() {
     );
 
     hal::HandoffPage out{};
-    out.env_valid = raw[0] == kHandoffEnvCookie[0]
-        && raw[1] == kHandoffEnvCookie[1]
-        && raw[2] == kHandoffEnvCookie[2]
-        && raw[3] == kHandoffEnvCookie[3];
+    out.env_valid = std::equal(
+        std::begin(kHandoffEnvCookie),
+        std::end(kHandoffEnvCookie),
+        raw.begin()
+    );
 
     const auto sd = raw.subspan(kHandoffSdramOffset);
     if (sd[0] == kHandoffSdramCookie[0] && sd[1] == kHandoffSdramCookie[1]) {
         out.sdram_valid = true;
         out.sdram_cfg = static_cast<std::uint16_t>(
             kHandoffSdramPresent
-            | (static_cast<std::uint32_t>(sd[2]) << 8)
-            | static_cast<std::uint32_t>(sd[3])
+            | (static_cast<std::uint32_t>(sd[kCellHighByte]) << kCellByteBits)
+            | static_cast<std::uint32_t>(sd[kCellLowByte])
         );
     }
 
     const auto al = raw.subspan(kHandoffAltCfgOffset);
     if (al[0] == kHandoffAltCfgCookie[0]
         && al[1] == kHandoffAltCfgCookie[1]
-        && al[2] == kHandoffAltCfgCookie[2]) {
+        && al[kCellHighByte] == kHandoffAltCfgCookie[kCellHighByte]) {
         out.altcfg_valid = true;
-        out.altcfg = al[3];
+        out.altcfg = al[kCellLowByte];
     }
 
     out.reboot_flag = infra::load_native<std::uint32_t>(
-        std::span<const std::byte, 4>(page + kHandoffRebootOffset, 4)
+        std::span<const std::byte, kWordBytes>(page + kHandoffRebootOffset, kWordBytes)
     );
     return out;
 }
@@ -484,7 +512,10 @@ Ex<void> Programmer::write_env(std::string_view core_name, std::span<const std::
     }
 
     static constexpr char kCoreEq[] = {'c', 'o', 'r', 'e', '=', '"'};
-    const std::size_t header = sizeof kHandoffEnvCookie + sizeof kCoreEq + core_name.size() + 2u;
+    const std::size_t header = sizeof kHandoffEnvCookie
+        + sizeof kCoreEq
+        + core_name.size()
+        + kEnvTrailerBytes;
 
     if (header > kHandoffEnvLimit || cfg.size() > kHandoffEnvLimit - header) {
         const std::size_t needed = header + cfg.size();
@@ -521,8 +552,8 @@ Ex<void> Programmer::write_sdram_cfg(std::uint16_t cfg) {
                     .subspan(kHandoffSdramOffset);
     cell[0] = kHandoffSdramCookie[0];
     cell[1] = kHandoffSdramCookie[1];
-    cell[2] = static_cast<std::uint8_t>(cfg >> 8);
-    cell[3] = static_cast<std::uint8_t>(cfg & 0xFFu);
+    cell[kCellHighByte] = static_cast<std::uint8_t>(cfg >> kCellByteBits);
+    cell[kCellLowByte] = static_cast<std::uint8_t>(cfg & kCellByteMask);
     return {};
 }
 
@@ -536,8 +567,8 @@ Ex<void> Programmer::write_altcfg(std::uint8_t alt) {
                     .subspan(kHandoffAltCfgOffset);
     cell[0] = kHandoffAltCfgCookie[0];
     cell[1] = kHandoffAltCfgCookie[1];
-    cell[2] = kHandoffAltCfgCookie[2];
-    cell[3] = alt;
+    cell[kCellHighByte] = kHandoffAltCfgCookie[kCellHighByte];
+    cell[kCellLowByte] = alt;
     return {};
 }
 
@@ -549,7 +580,7 @@ Ex<void> Programmer::write_reboot_flag(bool warm) {
     }
     const std::uint32_t flag = warm ? kHandoffRebootWarm : 0u;
     infra::store_native<std::uint32_t>(
-        std::span<std::byte, 4>(page + kHandoffRebootOffset, 4),
+        std::span<std::byte, kWordBytes>(page + kHandoffRebootOffset, kWordBytes),
         flag
     );
     return {};

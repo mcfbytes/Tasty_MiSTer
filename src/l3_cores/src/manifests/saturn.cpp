@@ -8,6 +8,8 @@
 
 namespace mister::cores::manifests {
 
+using namespace std::chrono_literals;
+
 static_assert(kSaturnIoIndices.data == IoIndex{8}, "saturn.h:117: CD_DATA_IO_INDEX == 0x8");
 static_assert(kSaturnIoIndices.info == IoIndex{0xC}, "saturn.h:118: BOOT_IO_INDEX == 0xC");
 static_assert(
@@ -36,21 +38,21 @@ static_assert(
 
 static_assert(
     kSaturnTicks.speeds == 3
-        && kSaturnTicks.speed_us[0] == 16'667
-        && kSaturnTicks.speed_us[1] == 13'333
-        && kSaturnTicks.speed_us[2] == 6'667,
+        && kSaturnTicks.speed[0] == 16'667us
+        && kSaturnTicks.speed[1] == 13'333us
+        && kSaturnTicks.speed[2] == 6'667us,
     "sat.cpp:35,:29,:23 — 16.7, 13.3 and 6.6 ms, speed 0, 1 and 2"
 );
 static_assert(
-    kSaturnTicks.idle_us == kSaturnTicks.speed_us[1],
+    kSaturnTicks.idle == kSaturnTicks.speed[1],
     "saturncdd.cpp:717-976: every arm but read_pend sets time_mode 1"
 );
 static_assert(
-    kSaturnTicks.caller_us == kSaturnServices[1].period_ms * 1000u,
-    "caller_us must BE the service row's own period_ms"
+    kSaturnTicks.caller == kSaturnServices[1].period,
+    "caller must BE the service row's own period"
 );
 static_assert(
-    kSaturnTicks.caller_us < kSaturnTicks.speed_us[2],
+    kSaturnTicks.caller < kSaturnTicks.speed[2],
     "the row must run faster than the fastest pass, or the gate aliases it"
 );
 
@@ -61,7 +63,7 @@ static_assert(
     "the CD_GET edge is a RING doorbell; sat.cpp:48's pass is a ticker"
 );
 static_assert(
-    kSaturnServices[0].period_ms == 1 && kSaturnServices[1].period_ms == 1,
+    kSaturnServices[0].period == 1ms && kSaturnServices[1].period == 1ms,
     "one row period quantises the pass; 1 ms lands stock's 7/7/6 dither"
 );
 static_assert(

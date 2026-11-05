@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "app/uart_modes.h"
+#include "cores/types.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 
@@ -23,7 +24,7 @@ struct UartHandoff {
 
     struct Mode {
         static constexpr Kind kKind = Kind::Mode;
-        std::uint32_t baud = 0;
+        cores::BaudRate baud{};
         char core[kUartNameMax] = {};
         char rbf[kUartNameMax] = {};
         UartMode mode = UartMode::None;

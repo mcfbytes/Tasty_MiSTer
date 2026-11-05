@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 
+#include "cores/types.h"
 #include "proto/block_geometry.h"
 #include "svc/toc.h"
 
@@ -63,10 +64,10 @@ void widen_rw(
 
 std::size_t build_toc(
     const svc::Toc& toc,
-    std::uint8_t disc_type,
+    DiscType disc_type,
     std::span<TocEntry, kTocEntries> out
 ) noexcept;
 
-[[nodiscard]] std::uint8_t disc_type(const svc::Toc& toc, std::uint8_t previous) noexcept;
+[[nodiscard]] DiscType disc_type(const svc::Toc& toc, DiscType previous) noexcept;
 
 }

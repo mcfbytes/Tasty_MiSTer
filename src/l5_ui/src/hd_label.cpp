@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/hd_label.h"
 
+#include <array>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -18,43 +19,48 @@ bool digit(char c) noexcept {
     return c >= '0' && c <= '9';
 }
 
+bool take_function_key(std::string_view& v) noexcept {
+    constexpr std::size_t kDecimalBase = 10;
+    constexpr std::size_t kFirstFunctionKey = 1;
+    constexpr std::size_t kLastFunctionKey = 12;
+    if (v.empty() || v.front() != 'F')
+        return false;
+    v.remove_prefix(1);
+    if (v.empty() || !digit(v.front()))
+        return false;
+    std::size_t n = 0;
+    while (!v.empty() && digit(v.front())) {
+        n = n * kDecimalBase + static_cast<std::size_t>(v.front() - '0');
+        v.remove_prefix(1);
+    }
+    return n >= kFirstFunctionKey && n <= kLastFunctionKey;
+}
+
 bool is_key(std::string_view s) noexcept {
-    if (s.size() >= 2 && s[0] == 'F' && digit(s[1])) {
-        std::size_t n = 0;
-        std::size_t i = 1;
-        while (i < s.size() && digit(s[i])) {
-            n = n * 10 + static_cast<std::size_t>(s[i] - '0');
-            ++i;
-        }
-        if (n >= 1 && n <= 12) {
-            const std::string_view rest = s.substr(i);
-            if (rest.empty())
-                return true;
-            if (rest.size() >= 3 && rest[0] == '-' && rest[1] == 'F' && digit(rest[2])) {
-                std::size_t m = 0;
-                std::size_t k = 2;
-                while (k < rest.size() && digit(rest[k])) {
-                    m = m * 10 + static_cast<std::size_t>(rest[k] - '0');
-                    ++k;
-                }
-                return k == rest.size() && m >= 1 && m <= 12;
-            }
+    std::string_view rest = s;
+    if (take_function_key(rest)) {
+        if (rest.empty())
+            return true;
+        if (rest.front() != '-')
             return false;
-        }
+        rest.remove_prefix(1);
+        return take_function_key(rest) && rest.empty();
     }
     return s.size() == 1 && alnum(s[0]);
 }
+
+constexpr std::array<std::string_view, 4> kModifiers{"Alt", "Win", "Ctrl", "Shift"};
 
 bool is_key_chord(std::string_view s) noexcept {
     std::size_t i = 0;
     for (;;) {
         std::size_t m = 0;
-        if (s.compare(i, 3, "Alt") == 0 || s.compare(i, 3, "Win") == 0)
-            m = 3;
-        else if (s.compare(i, 4, "Ctrl") == 0)
-            m = 4;
-        else if (s.compare(i, 5, "Shift") == 0)
-            m = 5;
+        for (const std::string_view mod : kModifiers) {
+            if (s.substr(i).starts_with(mod)) {
+                m = mod.size();
+                break;
+            }
+        }
         if (m == 0 || i + m >= s.size() || (s[i + m] != '-' && s[i + m] != '+'))
             break;
         i += m + 1;
@@ -62,11 +68,14 @@ bool is_key_chord(std::string_view s) noexcept {
     return is_key(s.substr(i));
 }
 
+constexpr std::string_view kMaskLead = " *.";
+constexpr std::string_view kEmptyHint = "()";
+
 std::size_t mask_keep_len(std::string_view s) noexcept {
-    const std::size_t star = s.rfind(" *.");
+    const std::size_t star = s.rfind(kMaskLead);
     if (star == kNone)
         return kNone;
-    const std::string_view ext = s.substr(star + 3);
+    const std::string_view ext = s.substr(star + kMaskLead.size());
     if (ext.empty())
         return kNone;
     std::size_t i = 0;
@@ -87,12 +96,14 @@ std::size_t mask_keep_len(std::string_view s) noexcept {
 }
 
 std::size_t hint_keep_len(std::string_view s) noexcept {
-    if (s.size() < 2 || s.back() != ')')
+    if (s.size() < kEmptyHint.size() || s.back() != ')')
         return kNone;
     const std::size_t open = s.rfind('(');
     if (open == kNone)
         return kNone;
-    if (!is_key_chord(s.substr(open + 1, s.size() - open - 2)))
+    std::string_view inner = s.substr(open + 1);
+    inner.remove_suffix(1);
+    if (!is_key_chord(inner))
         return kNone;
     return open;
 }

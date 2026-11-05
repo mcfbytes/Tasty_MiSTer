@@ -20,6 +20,18 @@ inline constexpr std::size_t kUserDataBytes = 2048;
 inline constexpr std::uint32_t kMode2Cooked = 2336;
 inline constexpr std::uint32_t kMaxCueTracks = 99;
 
+inline constexpr std::string_view kKwFile = "FILE";
+inline constexpr std::string_view kKwTrack = "TRACK";
+inline constexpr std::string_view kKwPregap = "PREGAP";
+inline constexpr std::string_view kKwIndex = "INDEX";
+inline constexpr std::string_view kExtCue = ".cue";
+inline constexpr std::string_view kExtSub = ".sub";
+inline constexpr std::string_view kExtCdg = ".cdg";
+
+[[nodiscard]] constexpr std::string_view past(std::string_view line, std::string_view kw) noexcept {
+    return line.substr(kw.size());
+}
+
 inline char lower(char c) noexcept {
     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
 }
@@ -83,7 +95,8 @@ inline std::optional<std::uint32_t> take_msf(std::string_view s) noexcept {
     const auto f = take_uint(s, kCueFieldDigits);
     if (!f)
         return std::nullopt;
-    return *m * 60 * kFramesPerSecond + *sec * kFramesPerSecond + *f;
+    constexpr std::uint32_t kSecondsPerMinute = 60;
+    return *m * kSecondsPerMinute * kFramesPerSecond + *sec * kFramesPerSecond + *f;
 }
 
 class LineReader {

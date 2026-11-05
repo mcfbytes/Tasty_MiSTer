@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "cores/types.h"
+
 namespace mister::cores::mra {
 
 inline constexpr std::size_t kMaxDipIds = 32;
@@ -18,9 +20,9 @@ struct DipRow {
     int size = 0;
     int num = 0;
     bool has_val = false;
-    std::uint64_t mask = 0;
+    DipWord mask{};
     std::vector<std::string> ids;
-    std::array<std::uint64_t, kMaxDipIds> val{};
+    std::array<DipWord, kMaxDipIds> val{};
 };
 
 }

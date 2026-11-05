@@ -10,17 +10,15 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
-#include <cstdio>
 #include <cstring>
 #include <optional>
 #include <set>
 #include <type_traits>
 #include <utility>
 
-#include "infra/persist.h"
 #include "infra/unique_fd.h"
 #include "os/block_device.h"
-#include "game_asset_finder.h"
+#include "svc/game_asset_finder.h"
 #include "vfs_detail.h"
 #include "vfs_stat.h"
 #include "vfs_zip.h"
@@ -34,30 +32,17 @@ using detail::ifind;
 using detail::path_exists;
 using detail::path_is_dir;
 using detail::path_is_regular;
-using detail::ZipSplit;
 using detail::zip_archive_opens;
 using detail::zip_list;
 using detail::zip_make_archive;
 using detail::zip_open_member;
 using detail::zip_open_member_by_crc;
 
-using infra::ascii_lower;
 using infra::iends_with;
 using infra::ieq;
 using infra::istarts_with;
 
 namespace {
-
-std::atomic<std::uint64_t> g_dura_ticket TASTY_PERSIST(proc, vfs_dura_ticket){0};
-std::atomic<std::uint64_t> g_dura_file_syncs TASTY_PERSIST(proc, vfs_dura_file_syncs){0};
-std::atomic<std::uint64_t> g_dura_dir_syncs TASTY_PERSIST(proc, vfs_dura_dir_syncs){0};
-std::atomic<std::uint64_t> g_dura_renames TASTY_PERSIST(proc, vfs_dura_renames){0};
-std::atomic<std::uint64_t> g_dura_last_file_sync TASTY_PERSIST(proc, vfs_dura_last_file_sync){0};
-std::atomic<std::uint64_t> g_dura_last_rename TASTY_PERSIST(proc, vfs_dura_last_rename){0};
-
-std::uint64_t dura_ticket() noexcept {
-    return g_dura_ticket.fetch_add(1, std::memory_order_relaxed) + 1;
-}
 
 constexpr std::string_view kSdRoot = "/media/fat";
 constexpr std::string_view kMediaDir = "/media";
@@ -140,6 +125,9 @@ std::optional<std::string> fold_case_lookup(std::string_view base, std::string_v
     return cur;
 }
 
+}
+
+namespace detail {
 class PosixFile final : public IFile {
 public:
     PosixFile(
@@ -229,8 +217,7 @@ public:
 
     [[nodiscard]] Ex<void> flush() override {
 
-        g_dura_last_file_sync.store(dura_ticket(), std::memory_order_relaxed);
-        g_dura_file_syncs.fetch_add(1, std::memory_order_relaxed);
+        DurableWrite::note_file_sync();
         if (::fsync(fd_.get()) != 0) {
             const auto e = static_cast<std::uint32_t>(errno);
 
@@ -265,6 +252,9 @@ private:
 
     static_assert(std::is_trivially_copyable_v<decltype(fixed_size_)>);
 };
+}
+
+namespace {
 
 int open_flags(OpenMode m) {
     switch (m) {
@@ -351,7 +341,7 @@ Admit admit_entry(std::string_view name, bool is_dir, bool at_root, const ScanFi
         if (f.zip_as_directory && f.directories && iends_with(name, ".zip")) {
             return Admit::KeepDir;
         }
-        if (!Vfs::extension_matches(name, f.extensions))
+        if (!asset_name::extension_matches(name, f.extensions))
             return Admit::Reject;
     }
     return f.files ? Admit::KeepFile : Admit::Reject;
@@ -460,19 +450,12 @@ bool dirent_less(const DirEntry& a, const DirEntry& b) noexcept {
 }
 
 Ex<Vfs> Vfs::create(StorageRoot root) {
-    Vfs v;
-    if (!root.usb) {
-        v.root_ = StorageRoot{false, 0};
-        v.root_path_ = std::string(kSdRoot);
-        return v;
-    }
+    if (!root.usb)
+        return Vfs{StorageRoot{false, 0}, std::string(kSdRoot)};
 
     for (std::uint8_t i = 0; i < kUsbRootSlots; ++i) {
-        if (usb_mounted(i)) {
-            v.root_ = StorageRoot{true, i};
-            v.root_path_ = usb_path(i);
-            return v;
-        }
+        if (usb_mounted(i))
+            return Vfs{StorageRoot{true, i}, usb_path(i)};
     }
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 }
@@ -481,17 +464,15 @@ Ex<Vfs> Vfs::create_at(std::string_view root_path) {
     if (root_path.empty() || root_path.front() != '/') {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(EINVAL)});
     }
-    Vfs v;
-    v.root_ = StorageRoot{false, 0};
-    v.root_path_ = std::string(root_path);
-    while (v.root_path_.size() > 1 && v.root_path_.back() == '/')
-        v.root_path_.pop_back();
-    if (!path_is_dir(v.root_path_)) {
+    std::string path(root_path);
+    while (path.size() > 1 && path.back() == '/')
+        path.pop_back();
+    if (!path_is_dir(path)) {
         return std::unexpected(
             Error{Errc::not_found, ERR_SITE(), static_cast<std::uint32_t>(ENOENT)}
         );
     }
-    return v;
+    return Vfs{StorageRoot{false, 0}, std::move(path)};
 }
 
 Ex<std::string> Vfs::resolve(std::string_view rel, const SearchPolicy& policy) const {
@@ -570,7 +551,7 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
         return memory_.open(full);
     }
 
-    const ZipSplit zs = detail::zip_split(full);
+    const asset_name::ZipSplit zs = asset_name::zip_split(full);
     if (zs.zipped) {
 
         if (!opens_read_only(mode)) {
@@ -618,7 +599,7 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
 
     const bool unlink_at_close = (kind == FileKind::Shm) && mode_creates(mode);
     return std::unique_ptr<IFile>(
-        new PosixFile(static_cast<UniqueFd&&>(fd), kind, fixed, full, unlink_at_close)
+        new detail::PosixFile(static_cast<UniqueFd&&>(fd), kind, fixed, full, unlink_at_close)
     );
 }
 
@@ -637,7 +618,7 @@ std::uint32_t Vfs::memory_sequential_hints(std::string_view path) const noexcept
 Ex<std::unique_ptr<IFile>> Vfs::open_zip_by_crc(std::string_view path, Crc32 crc) const {
     if (crc.v != 0) {
         const std::string full = compose(root_path_, path);
-        const ZipSplit zs = detail::zip_split(full);
+        const asset_name::ZipSplit zs = asset_name::zip_split(full);
         if (zs.zipped && !zs.member.empty() && !detail::has_nested_zip(full)) {
 
             const std::string prefix = std::string(zs.archive) + "/";
@@ -683,7 +664,7 @@ Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) c
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
-    const ZipSplit zs = detail::zip_split(full);
+    const asset_name::ZipSplit zs = asset_name::zip_split(full);
     if (zs.zipped) {
         auto listing = zip_list(std::string(zs.archive));
         if (!listing)
@@ -793,7 +774,7 @@ Ex<void> Vfs::ensure_dir(std::string_view rel) const {
         cur.append(comp);
 
         if (::mkdir(cur.c_str(), kCreateMode) == 0) {
-            sync_dir_of_(cur);
+            durable_.sync_dir_of_(cur);
         } else if (errno != EEXIST) {
             const auto e = static_cast<std::uint32_t>(errno);
             return std::unexpected(Error{Errc::os, ERR_SITE(), e});
@@ -802,111 +783,8 @@ Ex<void> Vfs::ensure_dir(std::string_view rel) const {
     return {};
 }
 
-Ex<void> Vfs::replace(std::string_view tmp_rel, std::string_view final_rel) const {
-    const std::string from = compose(root_path_, tmp_rel);
-    const std::string to = compose(root_path_, final_rel);
-    if (::rename(from.c_str(), to.c_str()) != 0) {
-        const auto e = static_cast<std::uint32_t>(errno);
-        return std::unexpected(Error{Errc::os, ERR_SITE(), e});
-    }
-    g_dura_last_rename.store(dura_ticket(), std::memory_order_relaxed);
-    g_dura_renames.fetch_add(1, std::memory_order_relaxed);
-
-    sync_dir_of_(to);
-    return {};
-}
-
-void Vfs::sync_parent_dir(std::string_view rel) const noexcept {
-    sync_dir_of_(compose(root_path_, rel));
-}
-
-void Vfs::sync_dir_of_(const std::string& to) noexcept {
-    std::string dir = to;
-    const std::size_t slash = dir.rfind('/');
-    dir = (slash == std::string::npos) ? std::string(".")
-        : (slash == 0)                 ? std::string("/")
-                                       : dir.substr(0, slash);
-    if (const int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC); dfd >= 0) {
-        const bool ok = ::fsync(dfd) == 0 || errno == EINVAL || errno == EROFS;
-        (void)::close(dfd);
-        if (ok)
-            g_dura_dir_syncs.fetch_add(1, std::memory_order_relaxed);
-    }
-}
-
 Vfs::DurabilityLog Vfs::durability_log() noexcept {
-    DurabilityLog out;
-    out.file_syncs = g_dura_file_syncs.load(std::memory_order_relaxed);
-    out.dir_syncs = g_dura_dir_syncs.load(std::memory_order_relaxed);
-    out.renames = g_dura_renames.load(std::memory_order_relaxed);
-    out.last_file_sync = g_dura_last_file_sync.load(std::memory_order_relaxed);
-    out.last_rename = g_dura_last_rename.load(std::memory_order_relaxed);
-    return out;
-}
-
-bool Vfs::extension_matches(std::string_view filename, std::string_view packed_extensions) {
-
-    const std::size_t dot = filename.rfind('.');
-    if (dot == std::string_view::npos)
-        return false;
-    const std::string_view fext = filename.substr(dot + 1);
-
-    std::size_t pos = 0;
-    while (pos < packed_extensions.size()) {
-
-        char e[4] = {'\0', '\0', '\0', '\0'};
-        const std::size_t avail = packed_extensions.size() - pos;
-        const std::size_t n = (avail < 3) ? avail : 3;
-        for (std::size_t k = 0; k < n; ++k)
-            e[k] = packed_extensions[pos + k];
-        if (e[2] == ' ') {
-            e[2] = '\0';
-            if (e[1] == ' ')
-                e[1] = '\0';
-        }
-
-        bool found = true;
-        for (std::size_t i = 0; i < 4; ++i) {
-            if (e[i] == '*')
-                break;
-            const char c = (i < fext.size()) ? fext[i] : '\0';
-            if (e[i] == '?' && c != '\0')
-                continue;
-            if (ascii_lower(e[i]) != ascii_lower(c))
-                found = false;
-
-            if (e[i] == '\0' || !found)
-                break;
-        }
-        if (found)
-            return true;
-
-        if (avail < 3)
-            break;
-        pos += 3;
-    }
-    return false;
-}
-
-std::optional<Crc32> Vfs::parse_crc_name(std::string_view filename, std::string_view ext) {
-
-    const std::size_t len = filename.size();
-    const std::size_t extlen = ext.size();
-    if (len < 10 + extlen)
-        return std::nullopt;
-    if (!iends_with(filename, ext))
-        return std::nullopt;
-
-    const std::size_t bracket = len - 10 - extlen;
-    if (filename[bracket] != '[')
-        return std::nullopt;
-    if (filename[len - extlen - 1] != ']')
-        return std::nullopt;
-
-    const auto v = detail::scan_hex8(filename.substr(bracket + 1, 8));
-    if (!v)
-        return std::nullopt;
-    return Crc32{*v};
+    return DurableWrite::log();
 }
 
 Ex<std::string> Vfs::find_game_asset(const AssetQuery& q) const {

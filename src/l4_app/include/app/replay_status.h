@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "app/types.h"
 #include "infra/fixed_str.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
@@ -32,14 +33,14 @@ enum class ReplayRef : std::uint8_t { None, Counter, Vsync };
 enum class EpochFail : std::uint8_t { None = 0, Retry = 1, Untimed = 2, Before = 3 };
 
 struct ReplayStatus {
-    std::uint16_t gen = 0;
+    ControlGeneration gen{};
     ReplayLevel level = ReplayLevel::Idle;
     ReplayEnd end = ReplayEnd::None;
     ReplayRef ref = ReplayRef::None;
     EpochFail epoch_fail = EpochFail::None;
     std::uint8_t pad_[2]{};
-    std::int32_t movie_frame = -1;
-    std::int32_t applied_frame = -1;
+    MovieFrame movie_frame = kNoMovieFrame;
+    MovieFrame applied_frame = kNoMovieFrame;
     std::uint32_t writes = 0;
     std::uint32_t on_time = 0;
     std::uint32_t late = 0;
@@ -50,8 +51,8 @@ struct ReplayStatus {
     std::uint32_t pad_drops = 0;
     std::uint32_t stale = 0;
     std::uint32_t link_errors = 0;
-    std::int32_t first_late_frame = -1;
-    std::int32_t first_underrun_frame = -1;
+    MovieFrame first_late_frame = kNoMovieFrame;
+    MovieFrame first_underrun_frame = kNoMovieFrame;
     std::uint32_t apply_min_us = 0;
     std::uint32_t apply_max_us = 0;
     std::uint32_t epoch_delay_us = 0;
@@ -61,13 +62,13 @@ struct ReplayStatus {
     std::uint32_t lost = 0;
     std::uint32_t delayed = 0;
     std::uint32_t gap_max_us = 0;
-    std::int32_t gap_frame = -1;
+    MovieFrame gap_frame = kNoMovieFrame;
     std::uint32_t late_gap_us = 0;
     std::uint32_t late_into_us = 0;
     std::uint32_t late_edge_us = 0;
     std::uint32_t late_depth = 0;
     std::int32_t depth_min = -1;
-    std::int32_t depth_min_frame = -1;
+    MovieFrame depth_min_frame = kNoMovieFrame;
     std::uint32_t pad_held = 0;
 };
 

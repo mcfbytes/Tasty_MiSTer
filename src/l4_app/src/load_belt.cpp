@@ -40,7 +40,7 @@ void LoadBelt::offer(CompanionWalk&& c) {
     companion_walk_.emplace(std::move(c));
 }
 
-void LoadBelt::offer(LoadWalk&& w, std::uint32_t gen) {
+void LoadBelt::offer(LoadWalk&& w, proto::ActKey gen) {
     TASTY_SEAT_BODY(LoadBelt);
     walk_.emplace(std::move(w));
     walk_gen_ = gen;
@@ -52,7 +52,7 @@ void LoadBelt::hold(const SaveStateHold& h) {
     ss_hold_ = h;
 }
 
-void LoadBelt::refuse_walk(std::uint32_t gen) noexcept {
+void LoadBelt::refuse_walk(proto::ActKey gen) noexcept {
     TASTY_SEAT_BODY(LoadBelt);
     walk_status_ = cores::MountStatus{.generation = gen, .state = cores::MountState::Failed};
 }
@@ -145,9 +145,9 @@ void LoadBelt::cancel() noexcept {
         edges_.windows.cancelled();
         edges_.windows.publish();
         auto events = edges_.events;
-        events.push(Event::ProgressUpdate{}, Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused});
+        events.push(Event::ProgressUpdate{}, Event::Head{ERR_SITE(), {}, kUncaused});
     }
-    walk_gen_ = 0;
+    walk_gen_ = {};
     walk_answered_.reset();
     walk_status_ = cores::MountStatus{};
     if (walk_) {
@@ -265,7 +265,7 @@ void LoadBelt::close_addons_(Rung::Pass pass, Host& host) {
         auto events = edges_.events;
         events.push(
             Event::RamImageDeclined{.why = Errc::io},
-            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+            Event::Head{ERR_SITE(), {}, kUncaused}
         );
     }
     addons_.reset();
@@ -317,7 +317,7 @@ void LoadBelt::close_manifest_(Rung::Pass pass, Host& host) {
         auto events = edges_.events;
         events.push(
             Event::InfoRequest{.id = InfoId::RomLoadFailed},
-            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+            Event::Head{ERR_SITE(), {}, kUncaused}
         );
     }
     manifest_.reset();
@@ -334,19 +334,19 @@ void LoadBelt::close_walk_(Rung::Pass pass, Host& host) {
             auto events = edges_.events;
             events.push(
                 Event::InfoRequest{.id = InfoId::RomLoadFailed},
-                Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+                Event::Head{ERR_SITE(), {}, kUncaused}
             );
         }
     } else {
         return;
     }
-    if (walk_gen_ != 0) {
+    if (walk_gen_) {
         walk_status_ = cores::MountStatus{
             .generation = walk_gen_,
             .state = pass == Rung::Pass::Done ? cores::MountState::Done : cores::MountState::Failed
         };
         walk_answered_ = Answered<cores::MountStatus>{.gen = walk_gen_, .value = walk_status_};
-        walk_gen_ = 0;
+        walk_gen_ = {};
     }
     walk_.reset();
 }

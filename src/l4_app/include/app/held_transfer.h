@@ -29,6 +29,7 @@
 #include "app/session_machine.h"
 #include "app/session_tally.h"
 #include "app/slot_bindings.h"
+#include "proto/spi_frame.h"
 #include "app/tx_digest_cell.h"
 #include "app/types.h"
 #include "app/window_job_service.h"
@@ -92,7 +93,7 @@ public:
         LinkBinder& binder;
 
         SessionMachine& machine;
-        EmitSite advise_site;
+        infra::ErrorSite advise_site;
         const SessionBindings& bindings;
         ICheatApply& cheats;
         OsdWire& osd;
@@ -124,13 +125,17 @@ public:
     HeldTransfer& operator=(const HeldTransfer&) = delete;
     ~HeldTransfer() override = default;
 
-    using Result = ILinkEncoder::Outcome;
+    using Result = Delivered;
     Result on(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::StagePayload& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::StageDiscPayload& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::StageReset& a, const LinkOpCtx& ctx) noexcept;
     Result on(const proto::LinkOp::SetWideIndex& a, const LinkOpCtx& ctx) noexcept;
     Result misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept;
+
+    Result on(const proto::LinkOp::FileTx& a, const LinkOpCtx& ctx, AnswerOnly) noexcept;
+    Result on(const proto::LinkOp::StagePayload& a, const LinkOpCtx& ctx, AnswerOnly) noexcept;
+    Result misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx, AnswerOnly) noexcept;
 
     [[nodiscard]] bool hold_wire(bool park_asked) noexcept;
 
@@ -141,16 +146,16 @@ public:
 
     void cut_all() noexcept;
 
-    void publish_ftx_level(std::uint32_t act, bool open, bool payload = false) noexcept;
+    void publish_ftx_level(proto::ActKey act, bool open, bool payload = false) noexcept;
 
     void publish_stream(
-        std::uint32_t act,
+        proto::ActKey act,
         bool served,
         std::optional<std::uint32_t> held = std::nullopt
     ) noexcept;
 
     void after_file_tx(
-        std::uint8_t slot,
+        proto::IoIndex index,
         std::string_view path,
         ContentEdge edge,
         cores::Core& current
@@ -185,7 +190,7 @@ public:
     [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
 
 private:
-    void on_load_progress(std::uint16_t cur, std::uint16_t max) noexcept override;
+    void on_load_progress(cores::Progress progress) noexcept override;
 
     void before_close() noexcept override;
 
@@ -200,18 +205,30 @@ private:
     [[nodiscard]] Ex<void> perform_file_tx_(
         std::span<const std::uint8_t> bytes,
         std::string_view path,
-        std::uint8_t slot,
+        proto::IoIndex index,
         ContentEdge edge,
         cores::Core& current
     );
 
-    void cut_file_tx_() noexcept;
+    void cut_file_tx_(infra::OptRef<cores::Core> current) noexcept;
+
+    [[nodiscard]] infra::OptRef<cores::IStreamLoad> live_load_(
+        cores::Core& core,
+        cores::StreamLoadKind kind
+    ) noexcept;
 
     [[nodiscard]] ILinkEncoder::Outcome stage_copy_(
         const proto::LinkOp::StagePayload& a,
         std::span<const std::uint8_t> bytes
     ) noexcept;
     void end_copy_(bool ok) noexcept;
+
+    [[nodiscard]] ILinkEncoder::Outcome stage_payload_(
+        const proto::LinkOp::StagePayload& a,
+        const LinkOpCtx& ctx
+    ) noexcept;
+
+    void echo_payload_act_(const proto::LinkOp::StagePayload& a, bool encoded) noexcept;
 
     [[nodiscard]] bool drain_payload_(
         std::span<const std::uint8_t> bytes,
@@ -226,7 +243,7 @@ private:
     hal::ISpiTransport& link_;
     LinkBinder& binder_;
     SessionMachine& machine_;
-    const EmitSite advise_site_;
+    const infra::ErrorSite advise_site_;
     const SessionBindings& bindings_;
     ICheatApply& cheats_;
     OsdWire& osd_;
@@ -254,7 +271,7 @@ private:
     std::optional<proto::DownloadSession> copy_ds_{};
     std::array<std::uint16_t, kCopyWordsMax> copy_tail_{};
     std::uint8_t copy_tail_n_ = 0;
-    std::uint16_t copy_act_ = 0;
+    proto::ActKey copy_act_{};
 
     cores::ProgressTicker stage_tick_{};
 
@@ -263,15 +280,32 @@ private:
     std::optional<proto::ImageBracket> stage_open_{};
 };
 
-inline ILinkEncoder::Outcome HeldTransfer::on(
+inline Delivered HeldTransfer::on(
     const proto::LinkOp::StagePayload& a,
     const LinkOpCtx& ctx
 ) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
+    const ILinkEncoder::Outcome r = stage_payload_(a, ctx);
+    echo_payload_act_(a, r != ILinkEncoder::Outcome::Dropped);
+    return Delivered{r, a.payload != proto::FileId{} && a.copy_word == 0};
+}
+
+inline void HeldTransfer::echo_payload_act_(
+    const proto::LinkOp::StagePayload& a,
+    bool encoded
+) noexcept {
+    if (a.act && !copy_posted())
+        publish_ftx_level(a.act.widen(), encoded, true);
+}
+
+inline ILinkEncoder::Outcome HeldTransfer::stage_payload_(
+    const proto::LinkOp::StagePayload& a,
+    const LinkOpCtx& ctx
+) noexcept {
     using Phase = proto::LinkOp::StagePhase;
     const bool opens = a.phase == Phase::Whole || a.phase == Phase::Open;
     const bool closes = a.phase == Phase::Whole || a.phase == Phase::Close;
-    const bool has_staging = ctx.core.has_value() && ctx.core->staging_core() != nullptr;
+    const bool has_staging = ctx.core.has_value() && ctx.core->staging_core();
 
     std::optional<RtRelaxScope> relaxed;
     if (a.copy_word == 0 || a.phase != Phase::Whole)
@@ -304,7 +338,7 @@ inline ILinkEncoder::Outcome HeldTransfer::on(
     }
     if (opens) {
         cut_stage_();
-        cut_file_tx_();
+        cut_file_tx_(ctx.core);
         proto::SessionParams params{};
         if (file != nullptr) {
             params.ext = file->ext.view();
@@ -315,7 +349,7 @@ inline ILinkEncoder::Outcome HeldTransfer::on(
             return ILinkEncoder::Outcome::Dropped;
         stage_open_.emplace(std::move(*ds));
         stage_tick_.bind(a.progress ? this : nullptr);
-        stage_tick_.begin(file != nullptr ? file->size_bytes : 0);
+        stage_tick_.begin(proto::FileSize{file != nullptr ? file->size_bytes : 0});
     } else if (!stage_open_) {
         return drop_stage_();
     }
@@ -332,64 +366,63 @@ inline ILinkEncoder::Outcome HeldTransfer::on(
         return ILinkEncoder::Outcome::Dropped;
 
     if (proto::sets_region(a)) {
-        if (cores::IStagingCore* cd = ctx.core->staging_core(); cd != nullptr) {
+        if (const auto cd = ctx.core->staging_core()) {
             cd->set_region(a.region);
         }
     }
     return ILinkEncoder::Outcome::Encoded;
 }
 
-inline ILinkEncoder::Outcome HeldTransfer::on(
+inline Delivered HeldTransfer::on(
     const proto::LinkOp::StageDiscPayload& a,
     const LinkOpCtx& ctx
 ) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
-    cores::IStagingCore* cd = ctx.core.has_value() ? ctx.core->staging_core() : nullptr;
-    if (cd == nullptr)
-        return ILinkEncoder::Outcome::Dropped;
+    const auto cd = ctx.core.has_value() ? ctx.core->staging_core()
+                                         : infra::OptRef<cores::IStagingCore>{};
+    if (!cd)
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
     RtRelaxScope scope(ops_);
-    if (auto r = cd->stage_disc_payload(a); !r)
-        return ILinkEncoder::Outcome::Dropped;
-    return ILinkEncoder::Outcome::Encoded;
+    if (auto r = cd->stage_disc_payload(a); !r) {
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
+    }
+    return Delivered{ILinkEncoder::Outcome::Encoded, false};
 }
 
-inline ILinkEncoder::Outcome HeldTransfer::on(
-    const proto::LinkOp::StageReset&,
-    const LinkOpCtx& ctx
-) noexcept {
+inline Delivered HeldTransfer::on(const proto::LinkOp::StageReset&, const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
-    cores::IStagingCore* cd = ctx.core.has_value() ? ctx.core->staging_core() : nullptr;
-    if (cd == nullptr)
-        return ILinkEncoder::Outcome::Dropped;
+    const auto cd = ctx.core.has_value() ? ctx.core->staging_core()
+                                         : infra::OptRef<cores::IStagingCore>{};
+    if (!cd)
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
     if (auto r = cd->deferred_reset(); !r)
-        return ILinkEncoder::Outcome::Dropped;
-    return ILinkEncoder::Outcome::Encoded;
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
+    return Delivered{ILinkEncoder::Outcome::Encoded, false};
 }
 
-inline ILinkEncoder::Outcome HeldTransfer::on(
+inline Delivered HeldTransfer::on(
     const proto::LinkOp::SetWideIndex& a,
     const LinkOpCtx& ctx
 ) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
-    cores::IStagingCore* cd = ctx.core.has_value() ? ctx.core->staging_core() : nullptr;
+    const auto cd = ctx.core.has_value() ? ctx.core->staging_core()
+                                         : infra::OptRef<cores::IStagingCore>{};
 
-    if (cd == nullptr) {
-        return ILinkEncoder::Outcome::Dropped;
+    if (!cd) {
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
     }
     (void)binder_.fio_queue().flush();
-    if (auto r = proto::DownloadSession::set_index(link_, a.dest); !r) {
-        return ILinkEncoder::Outcome::Dropped;
+    proto::SpiFrame frame{link_};
+    if (auto r = proto::DownloadSession::set_index(frame, a.dest); !r) {
+        return Delivered{ILinkEncoder::Outcome::Dropped, false};
     }
-    return ILinkEncoder::Outcome::Encoded;
+    return Delivered{ILinkEncoder::Outcome::Encoded, false};
 }
 
-inline ILinkEncoder::Outcome HeldTransfer::misrouted(
-    const proto::LinkOp&,
-    const LinkOpCtx&
-) noexcept {
+inline Delivered HeldTransfer::misrouted(const proto::LinkOp&, const LinkOpCtx&) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
     ++tally_.link_op_misrouted;
-    return ILinkEncoder::Outcome::Dropped;
+    return Delivered{ILinkEncoder::Outcome::Dropped, false};
 }
 
 inline void HeldTransfer::arm_open_save_(
@@ -404,10 +437,7 @@ inline void HeldTransfer::arm_open_save_(
         ++tally_.open_save_refusals;
         return;
     }
-    open_save_ = OpenSave{
-        .path = proto::PathId{file->save.v},
-        .size = proto::FileSize{save->size_bytes}
-    };
+    open_save_ = OpenSave{.path = file->save.path(), .size = proto::FileSize{save->size_bytes}};
 }
 
 inline void HeldTransfer::announce_open_save(proto::IBlockRoles& roles) noexcept {
@@ -441,7 +471,7 @@ inline void HeldTransfer::before_close() noexcept {
     announce_open_save(roles);
     if (!tenancy_.core())
         return;
-    if (cores::ISaveChannel* ch = tenancy_.core()->save_channel())
+    if (const auto ch = tenancy_.core()->save_channel())
         slot_bindings_.mount_save_channel(*ch, tenancy_.poisoned_slots());
 }
 
@@ -452,6 +482,8 @@ inline bool HeldTransfer::stream_file_tx_(
 ) {
     using Phase = proto::LinkOp::FileTxPhase;
 
+    const infra::OptRef<cores::Core> here{current};
+
     const bool window = a.phase == Phase::WindowOpen || a.phase == Phase::WindowClose;
     const bool opens = a.phase == Phase::Whole
         || a.phase == Phase::Open
@@ -461,7 +493,7 @@ inline bool HeldTransfer::stream_file_tx_(
         || a.phase == Phase::WindowClose;
     if (opens) {
         if (ftx_open_)
-            cut_file_tx_();
+            cut_file_tx_(here);
         if (file == nullptr || (!window && file->bytes.empty())) {
             if (a.phase != Phase::Whole)
                 ++tally_.file_tx_piece_drops;
@@ -482,11 +514,20 @@ inline bool HeldTransfer::stream_file_tx_(
                 a.phase == Phase::Whole ? file->bytes.size() : a.total
             );
         }
-        cores::IStreamLoad& load = window ? *current.window_load() : *current.stream_load();
+        const auto load = window ? current.window_load() : current.stream_load();
+        if (!load) {
+            if (window) {
+                publish_ftx_level(a.act, false);
+            } else {
+                binder_.file_progress().disarm();
+            }
+            return false;
+        }
         auto b = cores::StreamLoadBracket::open(
-            load,
+            *load,
             current.image_sink(),
             proto::IoIndex{a.wire_index},
+            window ? cores::StreamLoadKind::Window : cores::StreamLoadKind::Stream,
             window ? a.total : 0
         );
         if (!b) {
@@ -500,8 +541,8 @@ inline bool HeldTransfer::stream_file_tx_(
         ftx_open_.emplace(std::move(*b));
         if (window) {
 
-            cores::IWindowSave* role = current.window_save();
-            if (role != nullptr
+            const auto role = current.window_save();
+            if (role
                 && window_jobs_
                 && window_jobs_->hold_open(*role, proto::IoIndex{a.wire_index}, a.act)) {
                 return true;
@@ -515,21 +556,21 @@ inline bool HeldTransfer::stream_file_tx_(
     }
 
     if ((a.phase == Phase::Close || a.phase == Phase::WindowClose) && file == nullptr) {
-        cut_file_tx_();
+        cut_file_tx_(here);
         return true;
     }
     if (!window) {
 
         if (file == nullptr) {
             ++tally_.file_tx_piece_drops;
-            cut_file_tx_();
+            cut_file_tx_(here);
             return false;
         }
         const auto taken = file->bytes.empty() ? Ex<std::size_t>{0u}
                                                : ftx_open_->write_taken(file->bytes);
         if (!taken) {
             ++tally_.file_tx_piece_drops;
-            cut_file_tx_();
+            cut_file_tx_(here);
             return false;
         }
 
@@ -545,27 +586,33 @@ inline bool HeldTransfer::stream_file_tx_(
 
     before_close();
     const std::uint64_t total = a.phase == Phase::Whole ? file->bytes.size() : a.total;
-    const bool ok = ftx_open_->close(total, file->crc).has_value();
+    const bool ok = ftx_open_
+                        ->close(
+                            live_load_(current, ftx_open_->kind()),
+                            proto::FileSize{total},
+                            file->crc
+                        )
+                        .has_value();
     ftx_open_.reset();
     if (!window)
         binder_.file_progress().disarm();
     if (!ok)
         return false;
 
-    if (!window || current.stream_load() != nullptr)
-        after_file_tx(a.wire_index, file->path.view(), file->edge, current);
+    if (!window || current.stream_load())
+        after_file_tx(proto::IoIndex{a.wire_index}, file->path.view(), file->edge, current);
     return true;
 }
 
 inline void HeldTransfer::after_file_tx(
-    std::uint8_t slot,
+    proto::IoIndex index,
     std::string_view path,
     ContentEdge edge,
     cores::Core& current
 ) {
     TASTY_SEAT_BODY(HeldTransfer);
     ++tally_.downloads_closed;
-    ftx_index_ = slot;
+    ftx_index_ = index.v;
     ftx_bytes_ = current.last_tx_bytes();
 
     if (bindings_.declares_cheats() && edge != ContentEdge::Silent) {
@@ -577,13 +624,13 @@ inline void HeldTransfer::after_file_tx(
             false
         );
     }
-    machine_.advise(Event::SdActivity{.slot = slot}, advise_site_);
-    if (cores::ISaveChannel* ch = current.save_channel()) {
+    machine_.advise(Event::SdActivity{.slot = index.v}, advise_site_);
+    if (const auto ch = current.save_channel()) {
         slot_bindings_.mount_save_channel(*ch, tenancy_.poisoned_slots());
     }
 }
 
-inline void HeldTransfer::publish_ftx_level(std::uint32_t act, bool open, bool payload) noexcept {
+inline void HeldTransfer::publish_ftx_level(proto::ActKey act, bool open, bool payload) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
     ftx_level_scratch_.act = act;
     ftx_level_scratch_.open = open;
@@ -592,12 +639,12 @@ inline void HeldTransfer::publish_ftx_level(std::uint32_t act, bool open, bool p
 }
 
 inline void HeldTransfer::publish_stream(
-    std::uint32_t act,
+    proto::ActKey act,
     bool served,
     std::optional<std::uint32_t> held
 ) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
-    if (act == 0)
+    if (!act)
         return;
     ftx_level_scratch_.stream_act = act;
     ftx_level_scratch_.stream_served = served;
@@ -610,15 +657,25 @@ inline void HeldTransfer::publish_stream(
 
 inline bool HeldTransfer::save_pull_fenced(infra::OptRef<cores::Core> current) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
-    if ((!ftx_open_ && !stage_open_) || current->save_upload() == nullptr)
+    if ((!ftx_open_ && !stage_open_) || !current->save_upload())
         return false;
     ++tally_.save_pulls_fenced;
     return true;
 }
 
-inline void HeldTransfer::cut_file_tx_() noexcept {
+inline infra::OptRef<cores::IStreamLoad> HeldTransfer::live_load_(
+    cores::Core& core,
+    cores::StreamLoadKind kind
+) noexcept {
+    return kind == cores::StreamLoadKind::Window ? core.window_load() : core.stream_load();
+}
+
+inline void HeldTransfer::cut_file_tx_(infra::OptRef<cores::Core> current) noexcept {
     if (!ftx_open_)
         return;
+
+    if (current)
+        ftx_open_->cut(live_load_(*current, ftx_open_->kind()));
     ftx_open_.reset();
     ++tally_.file_tx_cuts;
     binder_.file_progress().disarm();
@@ -646,7 +703,7 @@ inline ILinkEncoder::Outcome HeldTransfer::stage_copy_(
     copy_tail_n_ = static_cast<std::uint8_t>(n - a.copy_word);
     for (std::size_t i = 0; i < copy_tail_n_; ++i)
         copy_tail_[i] = w[a.copy_word + i];
-    copy_act_ = a.act;
+    copy_act_ = a.act.widen();
     copy_ds_.emplace(std::move(*ds));
     return ILinkEncoder::Outcome::Encoded;
 }
@@ -686,11 +743,11 @@ inline bool HeldTransfer::hold_wire(bool park_asked) noexcept {
 
 inline void HeldTransfer::end_copy_(bool ok) noexcept {
     copy_ds_.reset();
-    if (copy_act_ != 0)
+    if (copy_act_)
         publish_ftx_level(copy_act_, ok, true);
     if (!ok)
         ++session_tally_.link_op_drops;
-    copy_act_ = 0;
+    copy_act_ = {};
     copy_tail_n_ = 0;
 }
 
@@ -706,7 +763,7 @@ inline void HeldTransfer::cut_all() noexcept {
         ++tally_.file_tx_hold_abandons;
     }
 
-    cut_file_tx_();
+    cut_file_tx_(tenancy_.core());
     cut_stage_();
     if (window_jobs_)
         window_jobs_->forget_held();
@@ -750,10 +807,12 @@ inline void HeldTransfer::cut_stage_() noexcept {
     stage_tick_.finish();
 }
 
-inline void HeldTransfer::on_load_progress(std::uint16_t cur, std::uint16_t max) noexcept {
+inline void HeldTransfer::on_load_progress(cores::Progress progress) noexcept {
     TASTY_SEAT_BODY(HeldTransfer);
+    const std::uint16_t cur = progress.done;
+    const std::uint16_t max = progress.total;
 
-    machine_.advise(Event::ProgressUpdate{.cur = cur, .max = max}, advise_site_);
+    machine_.advise(Event::ProgressUpdate{.progress = {.done = cur, .total = max}}, advise_site_);
 
     if (link_.posted())
         return;
@@ -768,7 +827,8 @@ inline void HeldTransfer::on_load_progress(std::uint16_t cur, std::uint16_t max)
         (void)osd_.set_show(proto::LinkOp::OsdShow::Off);
     }
 
-    for (unsigned i = 0; i < proto::OsdSurface::kMaxRows && osd_.flush_one(); ++i) {
+    for (proto::OsdRow r{}; proto::OsdSurface::kMaxRows.covers(r) && osd_.flush_one();
+         r += proto::kOneOsdRow) {
     }
 }
 

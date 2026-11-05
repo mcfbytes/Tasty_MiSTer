@@ -16,14 +16,15 @@ using namespace mister;
 
 DiagSampler::Sources Hub::diag_sources_(const BootParts& plat) noexcept {
     const DiagSampler::DeviceCells d = device_.diag_sources(plat);
+    const DeviceBlock::Parts p = device_.parts();
     const SessionMode::Face::Parts& f = face_parts_;
     return DiagSampler::Sources{
         .mgl_row0 = d.mgl_row0,
         .window_counts = d.window_counts,
         .bay_counts = d.bay_counts,
-        .video_stats = device_.video_pump_.stats_cell(),
-        .video_geometry = device_.video_pump_.geometry_cell(),
-        .video_wire = device_.video_pump_.wire(),
+        .video_stats = p.wires.video.stats_cell(),
+        .video_geometry = p.wires.video.geometry_cell(),
+        .video_wire = p.wires.video.wire(),
         .diag = d.diag,
         .pause_expiries = d.pause_expiries,
         .recover_polls = d.recover_polls,
@@ -67,8 +68,8 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
       shot_pump_{
           app::ScreenshotPump::Wiring{.queue = device_.shots_, .sink = face_parts_.shot_sink}
       },
-      replay_{plat, device_, shot_pump_, face_parts_.osd_close},
-      rec_{plat, device_, replay_.replay_status_},
+      replay_{plat, device_.parts(), shot_pump_, face_parts_.osd_close},
+      rec_{plat, device_.parts(), device_.verdict(), replay_.replay_status_},
       tail_{mode.tail(plat, device_, replay_, rec_)},
       router_{app::CmdRouter::Wiring{
           .mgl = face_parts_.mgl,
@@ -126,12 +127,15 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .link_rx = device_.ui_rx_,
               .save_states = face_parts_.save_states,
               .ui_writes = face_parts_.ui_writes,
+              .verdicts = face_parts_.verdicts,
               .owner_tick = tail_->owner_tick(),
               .lw_osd = infra::OptRef<app::LwOsdEndpoint>{device_.lw_osd_}
           },
           diag_sources_(plat),
           device_.diag_services()
       } {
+
+    const DeviceBlock::Parts p = device_.parts();
 
     face_->open();
     device_.open_wires(plat);
@@ -142,10 +146,10 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
     if (const Ex<void> born = assembly_.born(); !born) {
         device_.verdict().refuse("T-DIAG/T-UI: ParkFds::create", born.error());
     }
-    if (auto fds = xthread::ParkFds::create(device_.main_wake_, device_.main_stop_); !fds) {
+    if (auto fds = xthread::ParkFds::create(p.wires.main_wake, p.wires.main_stop); !fds) {
         device_.verdict().refuse("MAIN: ParkFds::create", fds.error());
     } else {
-        process_main_.emplace(device_.owner_, assembly_, std::move(*fds));
+        process_main_.emplace(p.session.owner, assembly_, std::move(*fds));
     }
 
     if (!device_.verdict().ok())
@@ -153,7 +157,7 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
 
     device_.open_seats(
         plat,
-        DeviceBlock::Seats{
+        DeviceBlock::Parts::Seats{
             .mains = seat_mains_,
             .diag = assembly_.diag(),
             .save_states = face_parts_.save_states,
@@ -170,13 +174,15 @@ Hub::~Hub() {
     assembly_.stop_join_or_exit();
 
     const SeatScope main_as_main{SeatTag::Main};
-    device_.owner_.retire_lw_at_exit();
+    const DeviceBlock::Parts p = device_.parts();
+    p.session.owner.retire_lw_at_exit();
 }
 
 void Hub::latch_boot_config() noexcept {
+    const DeviceBlock::Parts p = device_.parts();
 
     auto c = std::make_unique<svc::ConfigSnapshot>();
-    if (device_.config_cell_.sample_into(*c) == 0)
+    if (p.cells.config.sample_into(*c) == 0)
         c = std::make_unique<svc::ConfigSnapshot>();
 
     const auto deadzones = svc::parse_deadzone_rules(*c);

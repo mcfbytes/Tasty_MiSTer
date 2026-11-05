@@ -8,7 +8,6 @@
 #include <string>
 #include <string_view>
 
-#include "app/activity_source.h"
 #include "app/adv7513_seat.h"
 #include "infra/opt_ref.h"
 #include "app/event.h"
@@ -35,6 +34,8 @@ class Vfs;
 
 namespace mister::app {
 
+class InputWire;
+
 using VideoStatsCell = xthread::Telemetry<VideoPumpStats, SeatTag::Ui>;
 
 class VideoPump : public IOutputGeometry {
@@ -44,7 +45,7 @@ public:
     static constexpr std::size_t kSpecMax = 1024;
 
     struct Wiring {
-        const IActivitySource& activity;
+        const InputWire& activity;
         LinkTxChannel<SeatTag::Ui>& link_tx;
     };
 
@@ -91,7 +92,7 @@ public:
 
     void publish_scaling_policy() noexcept;
 
-    void set_vscale(std::uint8_t mode, std::uint8_t border) noexcept {
+    void set_vscale(svc::VscaleMode mode, std::uint8_t border) noexcept {
         vscale_mode_ = mode;
         vscale_border_ = border;
         publish_scaling_policy();
@@ -99,11 +100,11 @@ public:
 
     void set_support_fhd(bool v) noexcept { support_fhd_ = v; }
 
-    void force_vsync_adjust(std::uint8_t v) noexcept;
+    void force_vsync_adjust(VsyncAdjust v) noexcept;
 
     void arm_replay_ini(bool strict) noexcept;
 
-    [[nodiscard]] std::uint8_t vsync_adjust() const noexcept { return ini_.vsync_adjust; }
+    [[nodiscard]] VsyncAdjust vsync_adjust() const noexcept { return ini_.vsync_adjust; }
 
     [[nodiscard]] bool direct_video() const noexcept { return ini_.direct_video; }
 
@@ -242,7 +243,7 @@ private:
     bool override_latched_ = false;
     bool support_fhd_ = false;
     bool mode_pending_ = false;
-    const IActivitySource& activity_;
+    const InputWire& activity_;
     IdleBlank idle_{};
     std::uint32_t emit_watermark_ = 0;
     std::int64_t stage_ns_ = 0;
@@ -254,7 +255,7 @@ private:
     std::uint32_t geo_gen_seen_ = 0;
     std::uint16_t scrw_ = 0;
     std::uint16_t scrh_ = 0;
-    std::uint8_t vscale_mode_ = 0;
+    svc::VscaleMode vscale_mode_ = svc::VscaleMode::Fit;
     std::uint8_t vscale_border_ = 0;
     bool front_end_ = false;
 

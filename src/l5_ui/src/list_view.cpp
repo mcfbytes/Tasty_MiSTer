@@ -10,29 +10,27 @@ Viewport Viewport::centre(
     ViewportPolicy p
 ) noexcept {
     Viewport v{};
-    if (count.v == 0 || height.v == 0)
+    if (count.empty() || height.empty())
         return v;
 
-    std::uint32_t sel = selected.v;
-    if (sel >= count.v)
-        sel = count.v - 1u;
-    v.selected = RowIndex{sel};
+    const RowIndex sel = selected >= row_after(count) ? last_row(count) : selected;
+    v.selected = sel;
 
-    const std::uint32_t max_first = (count.v > height.v) ? (count.v - height.v) : 0u;
+    const RowCount max_first = saturating_sub(count, height);
 
-    std::uint32_t first = 0;
+    RowIndex first{};
     if (p.lookahead) {
 
-        const std::uint32_t half = height.v / 2u;
-        first = (sel > half) ? (sel - half) : 0u;
+        const RowCount half = height.half();
+        first = (sel.before() > half) ? sel - half : RowIndex{};
     } else {
 
-        first = (sel >= height.v) ? (sel - height.v + 1u) : 0u;
+        first = (sel.before() >= height) ? sel - height + kOneRow : RowIndex{};
     }
 
-    if (first > max_first)
-        first = max_first;
-    v.first = RowIndex{first};
+    if (first.before() > max_first)
+        first = row_after(max_first);
+    v.first = first;
     return v;
 }
 

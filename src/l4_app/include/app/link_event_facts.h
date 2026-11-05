@@ -92,10 +92,4 @@ template <class A>
     return i < kLinkEventFacts.size() ? kLinkEventFacts[i].sink : EventSink::kCount;
 }
 
-[[nodiscard]] inline EventSink sink_for(const proto::LinkEvent& e) noexcept {
-    if (const auto w = infra::as<proto::LinkEvent::PolledWord>(e))
-        return poll_sink(w->shape);
-    return sink_for(infra::kind_of(e));
-}
-
 }

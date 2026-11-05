@@ -2,9 +2,11 @@
 #include "report.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdio>
 
 #include "infra/persist.h"
+#include "infra/seat.h"
 
 namespace mister::fw {
 
@@ -18,7 +20,7 @@ void set_report_voice(const IReportVoice* voice) noexcept {
 
 void report(const char* what, const Error& e) {
     char buf[192];
-    std::snprintf(
+    const int n = std::snprintf(
         buf,
         sizeof buf,
         "mister: %s failed: Errc=%u site=%u detail=%u",
@@ -27,6 +29,15 @@ void report(const char* what, const Error& e) {
         static_cast<unsigned>(e.site),
         static_cast<unsigned>(e.detail)
     );
+
+    if (e.code == Errc::seat_absent && n > 0 && static_cast<std::size_t>(n) < sizeof buf) {
+        std::snprintf(
+            buf + n,
+            sizeof buf - static_cast<std::size_t>(n),
+            " seat=%s",
+            seat_name(static_cast<SeatTag>(e.detail))
+        );
+    }
     if (const IReportVoice* const voice = g_report_voice.load(std::memory_order_acquire)) {
         voice->say(buf);
     } else {

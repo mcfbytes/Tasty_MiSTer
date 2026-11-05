@@ -12,6 +12,7 @@
 #include "app/link_tx_channel.h"
 #include "app/negotiated_core.h"
 #include "app/owner_tally.h"
+#include "cores/types.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -48,22 +49,22 @@ public:
 
     void save_config(CorrelationTag tag);
     void save_dips(CorrelationTag tag) noexcept;
-    void save_slot(std::uint8_t slot, CorrelationTag tag) noexcept;
-    void load_slot(std::uint8_t slot, CorrelationTag tag) noexcept;
+    void save_slot(cores::ConfigSlot slot, CorrelationTag tag) noexcept;
+    void load_slot(cores::ConfigSlot slot, CorrelationTag tag) noexcept;
     void set_ini_key(std::string_view key, std::string_view value);
 
     void on_save_bytes(const proto::LinkEvent::SaveBytes& e);
 
     [[nodiscard]] bool order_save_ask(
         proto::SaveKind kind,
-        std::uint8_t slot,
+        cores::ConfigSlot slot,
         CorrelationTag tag,
         bool gating = false
     ) noexcept;
     void order_slot_previews(const std::byte* pack, std::size_t len);
-    [[nodiscard]] bool bind_slot_config(std::uint8_t slot, std::string_view path);
+    [[nodiscard]] bool bind_slot_config(cores::ConfigSlot slot, std::string_view path);
 
-    [[nodiscard]] std::uint8_t load_slot_slot() const noexcept { return slot_load_slot_; }
+    [[nodiscard]] cores::ConfigSlot load_slot_slot() const noexcept { return slot_load_slot_; }
 
     [[nodiscard]] const Count& save_write_failures_cell() const noexcept { return swf_cell_; }
 
@@ -83,8 +84,8 @@ private:
     const proto::StatusCell& status_cell_;
     const NegotiatedCore& negotiated_;
     infra::OptRef<ISleeper> sleeper_;
-    std::uint8_t slot_load_slot_ = 0;
-    std::uint8_t slot_save_slot_ = 0;
+    cores::ConfigSlot slot_load_slot_{};
+    cores::ConfigSlot slot_save_slot_{};
     Count swf_cell_{};
     Count iwf_cell_{};
 };

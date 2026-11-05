@@ -128,7 +128,7 @@ void MountQueue::arm_plain_mount_(Host& host, const MountAsk& ask) {
             ++tally_.mounts_refused;
             owner_events_.push(
                 Event::InfoRequest{.id = InfoId::ImageMountFailed},
-                Event::Head{EmitSite{ERR_SITE()}, {}, ask.tag}
+                Event::Head{ERR_SITE(), {}, ask.tag}
             );
             return;
         }
@@ -148,10 +148,10 @@ void MountQueue::step_save_mount(Host& host) {
     const proto::SlotIndex slot{m.ask.index.v};
     const std::string_view path = m.ask.path.view();
 
-    if (m.gen != 0) {
+    if (m.gen) {
         const cores::SaveExtent e = host.ladder_host().save_extent();
         if (e.generation == m.gen && e.answer == cores::SaveAnswer::Declined)
-            m.gen = 0;
+            m.gen = {};
         if (e.generation == m.gen && e.answer == cores::SaveAnswer::Known) {
             if (path.empty()) {
                 finish_save_mount_(host, true);
@@ -195,7 +195,7 @@ void MountQueue::step_save_mount(Host& host) {
     }
     if (clock_.now().count() >= m.due_ns) {
 
-        if (!path.empty() && m.gen != 0)
+        if (!path.empty() && m.gen)
             (void)host.ladder_host().order(
                 proto::LinkOp::BindSlot{
                     .slot = slot,
@@ -214,7 +214,7 @@ void MountQueue::step_save_mount(Host& host) {
         finish_save_mount_(host, false);
         return;
     }
-    if (m.gen != 0)
+    if (m.gen)
         return;
     if (path.empty()) {
 
@@ -231,7 +231,7 @@ void MountQueue::step_save_mount(Host& host) {
                 return;
             m.unmounted = true;
         }
-        const std::uint32_t g = host.ladder_host().next_generation();
+        const proto::ActKey g = host.ladder_host().next_generation();
         if (!host.ladder_host().order(
                 proto::LinkOp::BindSlot{
                     .slot = slot,
@@ -246,7 +246,7 @@ void MountQueue::step_save_mount(Host& host) {
     const auto id = host.ladder_host().intern_path(path, 0);
     if (!id || *id == proto::FileId{})
         return;
-    const std::uint32_t g = host.ladder_host().next_generation();
+    const proto::ActKey g = host.ladder_host().next_generation();
 
     if (!host.ladder_host().order(
             proto::LinkOp::BindSlot{
@@ -271,15 +271,12 @@ void MountQueue::finish_save_mount_(Host& host, bool ok, bool quiet) {
     save_mount_.reset();
     if (ok && !quiet) {
         ++tally_.save_mounts_done;
-        owner_events_.push(
-            Event::SdActivity{.slot = slot},
-            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
-        );
+        owner_events_.push(Event::SdActivity{.slot = slot}, Event::Head{ERR_SITE(), {}, kUncaused});
         publish_done_(which, tag);
     } else if (!quiet) {
         owner_events_.push(
             Event::InfoRequest{.id = InfoId::ImageMountFailed},
-            Event::Head{EmitSite{ERR_SITE()}, {}, tag}
+            Event::Head{ERR_SITE(), {}, tag}
         );
     }
     arm_next_mount(host);
@@ -452,17 +449,14 @@ void MountQueue::ladder_ended() noexcept {
 void MountQueue::publish_refusal_(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept {
     owner_events_.push(
         Event::RequestRefused{.which = which, .why = code},
-        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
+        Event::Head{ERR_SITE(), {}, tag}
     );
 }
 
 void MountQueue::publish_done_(UiRequest::Kind which, CorrelationTag tag) noexcept {
     if (tag == kUncaused)
         return;
-    owner_events_.push(
-        Event::RequestDone{.which = which},
-        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-    );
+    owner_events_.push(Event::RequestDone{.which = which}, Event::Head{ERR_SITE(), {}, tag});
 }
 
 }

@@ -100,7 +100,7 @@ BeltOrders ContentPick::plan_addons_(
         ++owner_tally_.ram_images_declined;
         owner_events_.push(
             Event::RamImageDeclined{.why = Errc::negotiation},
-            Event::Head{EmitSite{ERR_SITE()}, {}, load.tag}
+            Event::Head{ERR_SITE(), {}, load.tag}
         );
     }
     if (addons.empty())
@@ -227,7 +227,7 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
         forget_watch();
         return After{.orders = {.pieces = std::move(*p)}};
     }
-    auto buf = read_whole(**f, sz->v);
+    auto buf = read_whole(**f, *sz);
     if (!buf) {
         ++owner_tally_.files_failed;
         return {};
@@ -395,7 +395,7 @@ ContentPick::Armed ContentPick::arm_loader(
     const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
     auto loader = make(cores::LoaderContext{vfs_, profile, turbo, loader_memo_, aperture_});
     const cores::LoadAsk
-        ask{.index = req.slot, .path = path, .size = sz->v, .load_addr = req.load_addr};
+        ask{.index = req.slot, .path = path, .size = *sz, .load_addr = req.load_addr};
     const auto plan = loader->plan(ask, status_cell_.sample().value);
     if (!plan || plan->count == 0) {
         ++owner_tally_.files_failed;
@@ -528,10 +528,7 @@ bool ContentPick::no_mount_in_flight_() const noexcept {
 void ContentPick::publish_done_(UiRequest::Kind which, CorrelationTag tag) noexcept {
     if (tag == kUncaused)
         return;
-    owner_events_.push(
-        Event::RequestDone{.which = which},
-        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
-    );
+    owner_events_.push(Event::RequestDone{.which = which}, Event::Head{ERR_SITE(), {}, tag});
 }
 
 }

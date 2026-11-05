@@ -10,7 +10,9 @@
 #include "app/backdrop_job.h"
 #include "app/backdrop_sampler.h"
 #include "app/backdrop_scaler.h"
+#include "app/canvas_gen.h"
 #include "app/hd_dirty_ledger.h"
+#include "app/flip_buffer.h"
 #include "app/hd_layout.h"
 #include "app/hd_flip_slot.h"
 #include "app/hd_glass.h"
@@ -22,7 +24,9 @@
 #include "app/hd_tick_pacer.h"
 #include "app/hd_visible_stats.h"
 #include "hal/fpga_memory.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 
@@ -68,7 +72,7 @@ public:
     void begin() noexcept;
     void serve() noexcept;
     [[nodiscard]] bool idle() const noexcept;
-    [[nodiscard]] int park_ms() const noexcept;
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
     void release() noexcept;
 
     [[nodiscard]] std::uint64_t ticks() const noexcept { return ticks_; }
@@ -80,7 +84,11 @@ public:
     [[nodiscard]] HdLook look() const noexcept { return look_; }
 
 private:
-    static constexpr std::uint8_t kNoSlot = 0xFF;
+    struct FlipHold {
+        HdFlipChannel::Loan loan{};
+        std::uint64_t free_at = 0;
+        CanvasGen gen{};
+    };
 
     static constexpr std::array<HdDirtyLedger::Region, 2> kCards{
         HdDirtyLedger::Region::Panel,
@@ -91,11 +99,11 @@ private:
     [[nodiscard]] std::uint64_t now_ns_() const noexcept;
     [[nodiscard]] bool ask_moved_() const noexcept;
     void reap_(bool hold, std::uint64_t now) noexcept;
-    [[nodiscard]] bool owned_(std::uint8_t slot, std::uint64_t now) const noexcept;
-    [[nodiscard]] bool stale_(std::uint8_t slot) const noexcept;
-    [[nodiscard]] bool cards_stale_(std::uint8_t slot) const noexcept;
+    [[nodiscard]] bool owned_(FlipBuffer buffer, std::uint64_t now) const noexcept;
+    [[nodiscard]] bool stale_(FlipBuffer buffer) const noexcept;
+    [[nodiscard]] bool cards_stale_(FlipBuffer buffer) const noexcept;
     [[nodiscard]] bool spills_(const HdDirty& dirty, const HdLayout& layout) const noexcept;
-    [[nodiscard]] std::uint8_t flip_target_(std::uint64_t now) const noexcept;
+    [[nodiscard]] std::optional<FlipBuffer> flip_target_(std::uint64_t now) const noexcept;
     [[nodiscard]] bool flip_wanted_() const noexcept;
     [[nodiscard]] bool can_progress_(std::uint64_t now) const noexcept;
     [[nodiscard]] std::uint64_t wait_ns_(std::uint64_t now) const noexcept;
@@ -114,7 +122,7 @@ private:
     [[nodiscard]] bool read_(std::uint64_t now) noexcept;
     void visible_(std::uint64_t now, bool by_flip) noexcept;
     [[nodiscard]] BackdropJob::Canvas canvas_() noexcept;
-    void copy_rect_(std::uint8_t slot, HdRect rect) noexcept;
+    void copy_rect_(FlipBuffer buffer, HdRect rect) noexcept;
 
     Wiring w_;
     HdTickPacer pacer_;
@@ -148,13 +156,11 @@ private:
     HdVisibleStats vis_{};
     std::vector<std::uint16_t> frame_{};
     HdLayout layout_{};
-    std::array<HdFlipChannel::Loan, 2> own_{};
-    std::array<std::uint64_t, 2> free_at_{};
-    std::array<std::uint32_t, 2> slot_gen_{};
-    std::uint8_t last_sent_ = kNoSlot;
-    std::uint32_t canvas_gen_ = 0;
-    std::uint32_t fill_gen_ = 0;
-    std::uint32_t shown_gen_ = 0;
+    infra::IndexedArray<FlipHold, 2, FlipBuffer> holds_{};
+    std::optional<FlipBuffer> last_sent_{};
+    CanvasGen canvas_gen_{};
+    CanvasGen fill_gen_{};
+    CanvasGen shown_gen_{};
     std::uint64_t pending_stamp_ = 0;
     std::uint64_t job_started_ = 0;
     std::uint64_t gen_started_ = 0;

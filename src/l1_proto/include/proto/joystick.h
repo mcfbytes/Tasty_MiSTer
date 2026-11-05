@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <limits>
 
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "proto/link_pad_encoder.h"
+#include "proto/stick_pos.h"
 #include "proto/types.h"
 #include "infra/seat.h"
 
@@ -56,6 +61,14 @@ class JoystickPort {
 
 public:
     static constexpr std::uint8_t kMaxPorts = 6;
+    static constexpr std::array<UioOp, kMaxPorts> kDigitalOpcode{
+        UioOp::Joystick0,
+        UioOp::Joystick1,
+        UioOp::Joystick2,
+        UioOp::Joystick3,
+        UioOp::Joystick4,
+        UioOp::Joystick5
+    };
 
     static constexpr std::uint32_t kMaxDigitalPushWords = 3 + 4;
 
@@ -70,18 +83,8 @@ public:
         bool new_dir
     );
 
-    [[nodiscard]] Ex<void> push_analog_l(
-        ILinkPadEncoder& pads,
-        std::uint8_t index,
-        std::int8_t x,
-        std::int8_t y
-    );
-    [[nodiscard]] Ex<void> push_analog_r(
-        ILinkPadEncoder& pads,
-        std::uint8_t index,
-        std::int8_t x,
-        std::int8_t y
-    );
+    [[nodiscard]] Ex<void> push_analog_l(ILinkPadEncoder& pads, std::uint8_t index, StickPos pos);
+    [[nodiscard]] Ex<void> push_analog_r(ILinkPadEncoder& pads, std::uint8_t index, StickPos pos);
 
     [[nodiscard]] Ex<void> push_paddle(
         ILinkPadEncoder& pads,
@@ -105,7 +108,9 @@ public:
     [[nodiscard]] Ex<bool> release(ILinkPadEncoder& pads, PlayerIndex player, JoyMask composed);
 
     JoyMask previous(PlayerIndex player) const noexcept {
-        return (player.v < kMaxPorts) ? prev_[player.v] : JoyMask{};
+        if (const auto mask = prev_.find(player))
+            return *mask;
+        return JoyMask{};
     }
 
     void reset_edges() noexcept {
@@ -130,10 +135,12 @@ public:
     );
 
     static constexpr std::int8_t spinner_clamp(std::int32_t delta) noexcept {
-        if (delta < -128)
-            return static_cast<std::int8_t>(-128);
-        if (delta > 127)
-            return static_cast<std::int8_t>(127);
+        constexpr std::int32_t lo = std::numeric_limits<std::int8_t>::min();
+        constexpr std::int32_t hi = std::numeric_limits<std::int8_t>::max();
+        if (delta < lo)
+            return std::numeric_limits<std::int8_t>::min();
+        if (delta > hi)
+            return std::numeric_limits<std::int8_t>::max();
         return static_cast<std::int8_t>(delta);
     }
 
@@ -141,8 +148,8 @@ public:
         return PlayerIndex{swapped(player.v)};
     }
 
-    static constexpr std::uint16_t digital_opcode(std::uint8_t port) noexcept {
-        return static_cast<std::uint16_t>((port < 2) ? (0x02u + port) : (0x10u + port - 2u));
+    static constexpr UioOp digital_opcode(std::uint8_t port) noexcept {
+        return kDigitalOpcode[port];
     }
 
     bool wide() const noexcept { return use32_; }
@@ -156,17 +163,16 @@ private:
 
     [[nodiscard]] Ex<void> push_analog(
         ILinkPadEncoder& pads,
-        std::uint16_t opcode,
+        UioOp opcode,
         std::uint8_t index,
-        std::uint8_t x,
-        std::uint8_t y
+        StickPos pos
     );
 
     JoystickWire wire_{};
 
     bool use32_ = false;
 
-    JoyMask prev_[kMaxPorts]{};
+    infra::IndexedArray<JoyMask, kMaxPorts, PlayerIndex> prev_{};
 };
 
 }

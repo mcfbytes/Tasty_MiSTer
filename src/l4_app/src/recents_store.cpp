@@ -146,11 +146,7 @@ Ex<void> RecentsStore::update(
     put_field(front + kDirCap, kNameCap, name);
     put_field(front + kDirCap + kNameCap, kLabelCap, label);
 
-    const auto r = writes_->arm(
-        "config/" + file_name(core, id),
-        buf,
-        infra::OptRef<IWriteVerdict>{*this}
-    );
+    const auto r = writes_->arm("config/" + file_name(core, id), buf, VerdictSink::Recents);
     if (!r)
         ++errors_;
     return r;
@@ -159,11 +155,7 @@ Ex<void> RecentsStore::update(
 Ex<void> RecentsStore::clear(std::string_view core, ListId id) {
     TASTY_SEAT_BODY(RecentsStore);
     const std::vector<std::byte> zeroed(kFileSize, std::byte{0});
-    const auto r = writes_->arm(
-        "config/" + file_name(core, id),
-        zeroed,
-        infra::OptRef<IWriteVerdict>{*this}
-    );
+    const auto r = writes_->arm("config/" + file_name(core, id), zeroed, VerdictSink::Recents);
     if (!r)
         ++errors_;
     return r;

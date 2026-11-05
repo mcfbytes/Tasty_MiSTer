@@ -7,7 +7,6 @@
 #include <string_view>
 
 #include "infra/error.h"
-#include "hal/spi_transport.h"
 #include "infra/seat.h"
 #include "proto/link_frame.h"
 #include "proto/uio_opcodes.h"
@@ -78,8 +77,6 @@ private:
     std::uint8_t filter_word_count_ = 0;
     std::uint8_t pending_audvol_ = 0;
 };
-
-[[nodiscard]] Ex<std::uint16_t> emit_afilter_probe(hal::ISpiTransport& link);
 
 [[nodiscard]] Ex<void> emit_afilter_volume(proto::ILinkFrame& frame, std::uint8_t vol);
 

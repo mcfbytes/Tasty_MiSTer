@@ -62,6 +62,7 @@ private:
     [[nodiscard]] DiagSampler::Sources diag_sources_(const BootParts& plat) noexcept;
 
     std::unique_ptr<SessionMode::Front> front_;
+
     DeviceBlock device_;
 
     std::unique_ptr<SessionMode::Face> face_;

@@ -64,20 +64,31 @@ ZmbvCodec::~ZmbvCodec() {
 }
 
 Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
+    constexpr std::size_t kBgr0Bytes = 4;
+    constexpr std::size_t kMvBytesPerBlock = 2;
+    constexpr std::size_t kMvAlignMask = 3;
+    constexpr std::size_t kKeyHeaderBytes = 7;
+    constexpr std::size_t kStripePlanes = 2;
+    constexpr std::size_t kDeflateStreamSlack = 8;
     TASTY_SEAT_BODY(ZmbvCodec);
     end();
     if (w == 0 || h == 0)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     bx_ = (static_cast<int>(w) + kBlock - 1) / kBlock;
     by_ = (static_cast<int>(h) + kBlock - 1) / kBlock;
-    const std::size_t pic = std::size_t{w} * h * 4u;
-    const std::size_t mv = (std::size_t(bx_) * static_cast<std::size_t>(by_) * 2u + 3u)
-        & ~std::size_t{3};
-    const std::size_t hist_n = std::size_t(bx_) * static_cast<std::size_t>(by_) * 2u;
+    const std::size_t pic = std::size_t{w} * h * kBgr0Bytes;
+    const std::size_t mv = (std::size_t(bx_) * static_cast<std::size_t>(by_) * kMvBytesPerBlock
+                            + kMvAlignMask)
+        & ~kMvAlignMask;
+    const std::size_t hist_n = std::size_t(bx_) * static_cast<std::size_t>(by_) * kMvBytesPerBlock;
     const std::size_t worst = mv + pic;
 
     const std::size_t bound = worst + ((worst + 7) >> 3) + ((worst + 63) >> 6) + 64u + 16u;
-    const std::size_t total = up(pic) * 2 + up(worst) + up(bound + 8) + up(mv) + up(hist_n);
+    const std::size_t total = up(pic) * kStripePlanes
+        + up(worst)
+        + up(bound + kDeflateStreamSlack)
+        + up(mv)
+        + up(hist_n);
     if (auto r = arena_.reserve(1, total); !r)
         return r;
     std::span<std::byte> rest = arena_.stripe(0);
@@ -89,7 +100,7 @@ Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     prev_ = carve(up(pic));
     cur_ = carve(up(pic));
     plain_ = carve(up(worst));
-    pkt_ = carve(up(bound + 8));
+    pkt_ = carve(up(bound + kDeflateStreamSlack));
     dup_plain_ = carve(up(mv));
     dup_plain_len_ = mv;
     const std::span<std::byte> hist = carve(up(hist_n));
@@ -97,7 +108,7 @@ Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     std::fill(hist_.begin(), hist_.end(), std::byte{0});
     width_ = w;
     height_ = h;
-    max_payload_ = 7 + bound;
+    max_payload_ = kKeyHeaderBytes + bound;
     z_ = z_stream{};
     if (::deflateInit(&z_, kLevel) != Z_OK) {
         end();
@@ -133,8 +144,9 @@ std::size_t ZmbvCodec::deflate_sync_(
     std::byte* dst,
     std::size_t cap
 ) noexcept {
+    constexpr std::size_t kInt31Max = 0x7FFF'FFFFu;
     TASTY_SEAT_BODY(ZmbvCodec);
-    if (!z_ready_ || cap > 0x7FFFFFFFu || n > 0x7FFFFFFFu)
+    if (!z_ready_ || cap > kInt31Max || n > kInt31Max)
         return 0;
     z_stream* z = &z_;
     z->next_in = const_cast<Bytef*>(
@@ -150,13 +162,15 @@ std::size_t ZmbvCodec::deflate_sync_(
 }
 
 void ZmbvCodec::to_bgr0_(const std::byte* rgb, std::size_t line) noexcept {
+    constexpr std::size_t kRgbBytes = 3;
+    constexpr std::size_t kBgr0Bytes = 4;
     TASTY_SEAT_BODY(ZmbvCodec);
     auto* dst = infra::byte_cast<std::uint8_t>(cur_).data();
     for (std::uint16_t y = 0; y < height_; ++y) {
         const auto* s = infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(
                                                                  rgb + std::size_t{y} * line,
                                                                  static_cast<std::size_t>(width_)
-                                                                     * 3u
+                                                                     * kRgbBytes
                                                              ))
                             .data();
         for (std::uint16_t x = 0; x < width_; ++x) {
@@ -164,13 +178,15 @@ void ZmbvCodec::to_bgr0_(const std::byte* rgb, std::size_t line) noexcept {
             dst[1] = s[1];
             dst[2] = s[0];
             dst[3] = 0;
-            s += 3;
-            dst += 4;
+            s += kRgbBytes;
+            dst += kBgr0Bytes;
         }
     }
 }
 
 std::size_t ZmbvCodec::emit_key_(const std::byte* bgr0, std::span<std::byte> out) noexcept {
+    constexpr std::size_t kBgr0Bytes = 4;
+    constexpr std::size_t kKeyHeaderBytes = 7;
     TASTY_SEAT_BODY(ZmbvCodec);
     if (out.size() < max_payload_ || !z_ready_)
         return 0;
@@ -183,9 +199,10 @@ std::size_t ZmbvCodec::emit_key_(const std::byte* bgr0, std::span<std::byte> out
     out[4] = std::byte{8};
     out[5] = std::byte{static_cast<unsigned char>(kBlock)};
     out[6] = std::byte{static_cast<unsigned char>(kBlock)};
-    const std::size_t pic = std::size_t{width_} * height_ * 4u;
-    const std::size_t n = deflate_sync_(bgr0, pic, out.data() + 7, out.size() - 7);
-    return n == 0 ? 0 : 7 + n;
+    const std::size_t pic = std::size_t{width_} * height_ * kBgr0Bytes;
+    const std::size_t
+        n = deflate_sync_(bgr0, pic, out.data() + kKeyHeaderBytes, out.size() - kKeyHeaderBytes);
+    return n == 0 ? 0 : kKeyHeaderBytes + n;
 }
 
 std::size_t ZmbvCodec::emit_inter_(
@@ -193,18 +210,32 @@ std::size_t ZmbvCodec::emit_inter_(
     std::size_t n,
     std::span<std::byte> out
 ) noexcept {
+    constexpr std::size_t kInterHeaderBytes = 1;
     TASTY_SEAT_BODY(ZmbvCodec);
     if (out.size() < max_payload_ || !z_ready_ || n == 0)
         return 0;
     out[0] = std::byte{0};
-    const std::size_t got = deflate_sync_(plain, n, out.data() + 1, out.size() - 1);
-    return got == 0 ? 0 : 1 + got;
+    const std::size_t got = deflate_sync_(
+        plain,
+        n,
+        out.data() + kInterHeaderBytes,
+        out.size() - kInterHeaderBytes
+    );
+    return got == 0 ? 0 : kInterHeaderBytes + got;
 }
 
 std::size_t ZmbvCodec::build_inter_() noexcept {
+    constexpr std::size_t kBgr0Bytes = 4;
+    constexpr int kBgr0Lanes = 4;
+    constexpr std::size_t kMvBytesPerBlock = 2;
+    constexpr std::size_t kMvAlignMask = 3;
+    constexpr std::uint32_t kSadNoStop = 0xFFFF'FFFFu;
     TASTY_SEAT_BODY(ZmbvCodec);
-    const std::size_t mv_bytes = (std::size_t(bx_) * static_cast<std::size_t>(by_) * 2u + 3u)
-        & ~std::size_t{3};
+    const std::size_t mv_bytes = (std::size_t(bx_)
+                                      * static_cast<std::size_t>(by_)
+                                      * kMvBytesPerBlock
+                                  + kMvAlignMask)
+        & ~kMvAlignMask;
     std::memset(plain_.data(), 0, mv_bytes);
     std::byte* mv = plain_.data();
     auto* const plain_bytes = infra::byte_cast<std::uint8_t>(plain_).data();
@@ -232,9 +263,10 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
                 ++sad_calls_;
                 std::uint32_t s = 0;
                 for (int j = 0; j < bh; ++j) {
-                    const auto* a = cur.data() + std::size_t(((y + j) * W + x) * 4);
-                    const auto* b = prev.data() + std::size_t(((y + dy + j) * W + (x + dx)) * 4);
-                    for (int i = 0; i < bw * 4; ++i) {
+                    const auto* a = cur.data() + std::size_t((y + j) * W + x) * kBgr0Bytes;
+                    const auto* b = prev.data()
+                        + std::size_t((y + dy + j) * W + (x + dx)) * kBgr0Bytes;
+                    for (int i = 0; i < bw * kBgr0Lanes; ++i) {
                         const int d = int{a[i]} - int{b[i]};
                         s += static_cast<std::uint32_t>(d < 0 ? -d : d);
                         if (s >= stop)
@@ -245,7 +277,7 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
             };
             int dx = 0;
             int dy = 0;
-            std::uint32_t best = sad(0, 0, 0xFFFFFFFFu);
+            std::uint32_t best = sad(0, 0, kSadNoStop);
             const bool hunt = motion_ != RecMotion::Off && !cut && best != 0;
             if (hunt && radius_ <= 1) {
                 for (int i = 0; i < kSmallCands && best != 0; ++i) {
@@ -306,11 +338,12 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
                 continue;
             for (int j = 0; j < bh; ++j) {
                 for (int i = 0; i < bw; ++i) {
-                    const auto* a = cur.data() + std::size_t(((y + j) * W + x + i) * 4);
-                    const auto* b = prev.data() + std::size_t(((y + dy + j) * W + x + dx + i) * 4);
-                    for (int k = 0; k < 4; ++k)
+                    const auto* a = cur.data() + std::size_t((y + j) * W + x + i) * kBgr0Bytes;
+                    const auto* b = prev.data()
+                        + std::size_t((y + dy + j) * W + x + dx + i) * kBgr0Bytes;
+                    for (int k = 0; k < kBgr0Lanes; ++k)
                         xor_at[k] = static_cast<std::uint8_t>(a[k] ^ b[k]);
-                    xor_at += 4;
+                    xor_at += kBgr0Bytes;
                 }
             }
         }
@@ -322,21 +355,22 @@ std::size_t ZmbvCodec::build_inter_() noexcept {
     return static_cast<std::size_t>(xor_at - plain_bytes);
 }
 
-std::size_t ZmbvCodec::encode(
-    const std::byte* rgb,
-    std::size_t line,
+std::span<const std::byte> ZmbvCodec::encode(
+    RgbRows rgb,
     bool key,
     std::span<std::byte> out
 ) noexcept {
+    constexpr std::size_t kBgr0Bytes = 4;
     TASTY_SEAT_BODY(ZmbvCodec);
-    if (!open() || rgb == nullptr)
-        return 0;
+    if (!open()
+        || !rgb.covers(RowBytes{std::size_t{width_} * kRgbPixelBytes}, PictureRows{height_}))
+        return {};
     sad_calls_ = 0;
     cut_frame_ = false;
     const bool watch = clock_.has_value() && motion_ != RecMotion::Off && search_budget_ns_ > 0;
     if (watch)
         frame_t0_ = clock_->now().count();
-    to_bgr0_(rgb, line);
+    to_bgr0_(rgb.bytes.data(), rgb.stride.v);
     std::int64_t post0 = 0;
     std::size_t n;
     if (key) {
@@ -347,7 +381,7 @@ std::size_t ZmbvCodec::encode(
             post0 = clock_->now().count();
         n = emit_inter_(plain_.data(), plain_n, out);
     }
-    std::memcpy(prev_.data(), cur_.data(), std::size_t{width_} * height_ * 4u);
+    std::memcpy(prev_.data(), cur_.data(), std::size_t{width_} * height_ * kBgr0Bytes);
     if (watch) {
         const std::int64_t t1 = clock_->now().count();
         if (key) {
@@ -359,7 +393,7 @@ std::size_t ZmbvCodec::encode(
         if (motion_ == RecMotion::Auto)
             note_(t1 - frame_t0_, cut_frame_);
     }
-    return n;
+    return out.first(n);
 }
 
 void ZmbvCodec::restart(const RecOptions& opt) noexcept {
@@ -402,19 +436,22 @@ void ZmbvCodec::arm(infra::OptRef<const os::IClock> clock, std::int64_t budget_n
 }
 
 void ZmbvCodec::note_post_(std::int64_t post) noexcept {
+    constexpr std::int64_t kPostWeightOld = 3;
+    constexpr std::int64_t kPostWeightSum = 4;
     TASTY_SEAT_BODY(ZmbvCodec);
     if (post <= 0)
         return;
-    post_ns_ = post_set_ ? (post_ns_ * 3 + post) / 4 : post;
+    post_ns_ = post_set_ ? (post_ns_ * kPostWeightOld + post) / kPostWeightSum : post;
     post_set_ = true;
 }
 
 void ZmbvCodec::note_(std::int64_t spent, bool cut) noexcept {
+    constexpr std::int64_t kPercent = 100;
     TASTY_SEAT_BODY(ZmbvCodec);
     if (spent < 0)
         spent = 0;
-    const std::int64_t widen = threshold_ns_ * kMeWidenPct / 100;
-    const std::int64_t narrow = threshold_ns_ * kMeNarrowPct / 100;
+    const std::int64_t widen = threshold_ns_ * kMeWidenPct / kPercent;
+    const std::int64_t narrow = threshold_ns_ * kMeNarrowPct / kPercent;
     if (cut || spent > narrow) {
         widen_run_ = 0;
         step_(-1);
@@ -446,11 +483,11 @@ void ZmbvCodec::step_(int dir) noexcept {
     radius_ = kMeRung[idx];
 }
 
-std::size_t ZmbvCodec::rekey(std::span<std::byte> out) noexcept {
+std::span<const std::byte> ZmbvCodec::rekey(std::span<std::byte> out) noexcept {
     TASTY_SEAT_BODY(ZmbvCodec);
     if (!open())
-        return 0;
-    return emit_key_(prev_.data(), out);
+        return {};
+    return out.first(emit_key_(prev_.data(), out));
 }
 
 std::span<const std::byte> ZmbvCodec::dup() noexcept {

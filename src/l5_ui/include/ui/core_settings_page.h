@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -29,7 +30,7 @@ public:
     struct Spec {
 
         const app::OptionTable* table;
-        std::uint8_t page = 0;
+        proto::SubmenuNo page{};
         std::string title;
 
         bool mt32_available = false;
@@ -48,23 +49,22 @@ public:
         return PageId::CoreSettings;
     }
 
-    std::uint8_t page() const noexcept { return page_; }
+    proto::SubmenuNo page() const noexcept { return page_; }
 
-    bool empty_page() const noexcept { return selectable_ == 0; }
+    bool empty_page() const noexcept { return selectable_.empty(); }
 
     void on_enter(PageContext& ctx) override;
-    void render(OsdRenderer& out) const override;
 
-    bool describe(app::PageDescription& out) const override;
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
 
-    [[nodiscard]] std::string row_text(std::uint32_t drawn) const;
+    [[nodiscard]] std::string row_text(RowIndex drawn) const;
 
-    [[nodiscard]] std::uint32_t drawn_rows() const noexcept { return exit_drawn() + 1; }
+    [[nodiscard]] RowCount drawn_rows() const noexcept { return exit_drawn().before() + kOneRow; }
 
-    [[nodiscard]] std::uint32_t selectable_rows() const noexcept { return selectable_; }
+    [[nodiscard]] RowCount selectable_rows() const noexcept { return selectable_; }
 
-    [[nodiscard]] std::uint32_t first_row() const noexcept { return first_row_; }
+    [[nodiscard]] RowIndex first_row() const noexcept { return first_row_; }
 
     MenuMask mask() const override;
 
@@ -94,7 +94,7 @@ public:
 
 private:
     struct Line {
-        std::uint32_t ordinal = 0;
+        RowIndex ordinal{};
         std::uint8_t index = 0;
         bool selectable = false;
     };
@@ -112,25 +112,36 @@ private:
 
     [[nodiscard]] std::string compose(const Line& l) const;
 
+    [[nodiscard]] app::PageDescription::Row hd_row(
+        const Line* line,
+        std::string_view text,
+        bool stippled
+    ) const;
+
+    [[nodiscard]] std::optional<Glyph> leftchar_of(proto::OsdRow row, bool ring) const noexcept;
+
     [[nodiscard]] std::string cycle_value(const app::OptionTable::Row& r) const;
 
     [[nodiscard]] std::string value_label(const cores::OptionRow& d, std::uint32_t slot) const;
     [[nodiscard]] std::uint32_t drawn_choice(const app::OptionTable::Row& r) const;
-    [[nodiscard]] const Line* line_for_ordinal(std::uint32_t o) const noexcept;
-    [[nodiscard]] std::uint32_t exit_drawn() const noexcept;
+    [[nodiscard]] const Line* line_for_ordinal(RowIndex o) const noexcept;
+    [[nodiscard]] RowIndex exit_drawn() const noexcept;
+
+    [[nodiscard]] RowIndex exit_ordinal() const noexcept { return row_after(selectable_); }
+
     [[nodiscard]] BrowserSession::Request browser_request(const app::OptionTable::Row& r);
     Transition open_browser(const app::OptionTable::Row& r, bool recents_first);
     Transition leave();
 
     const app::OptionTable* table_;
-    std::uint8_t page_;
+    proto::SubmenuNo page_;
     std::string title_;
     bool mt32_available_;
     bool joyswap_;
     std::string_view arc_[2]{};
 
     std::vector<Line> lines_;
-    std::uint32_t selectable_ = 0;
+    RowCount selectable_{};
 
     infra::OptRef<app::UiRequestRing> asks_{};
     proto::BindGeneration conf_gen_{};
@@ -140,7 +151,7 @@ private:
     std::string core_dir_;
 
     RowIndex sel_{};
-    std::uint32_t first_row_ = 0;
+    RowIndex first_row_{};
     bool armed_ = false;
     std::uint8_t pending_slot_ = 0;
     std::uint32_t refusals_ = 0;

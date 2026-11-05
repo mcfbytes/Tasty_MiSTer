@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/event_trace.h"
 
+#include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <iterator>
@@ -35,10 +36,10 @@ constexpr RequestName kRequestNames[] = {
 };
 
 consteval bool request_names_are_ordinal() {
-    if (std::size(kRequestNames) != static_cast<std::size_t>(app::UiRequest::Kind::kCount))
+    if (std::size(kRequestNames) != infra::ordinal(app::UiRequest::Kind::kCount))
         return false;
     for (std::size_t i = 0; i < std::size(kRequestNames); ++i) {
-        if (static_cast<std::size_t>(kRequestNames[i].kind) != i)
+        if (infra::ordinal(kRequestNames[i].kind) != i)
             return false;
     }
     return true;
@@ -53,11 +54,11 @@ constexpr const char* kErrcNames[] = {
     "negotiation",  "mmap_failed", "uio_open",       "dt_missing",
     "bridge_state", "os",          "core_load",      "cancelled",
     "would_block",  "timeout",     "unimplemented",  "aperture_range",
-    "stale",        "busy",
+    "stale",        "busy",        "seat_absent",
 };
 constexpr std::size_t kErrcCount = sizeof(kErrcNames) / sizeof(kErrcNames[0]);
 static_assert(
-    kErrcCount == static_cast<std::size_t>(Errc::busy) + 1,
+    kErrcCount == infra::ordinal(Errc::seat_absent) + 1,
     "Errc grew: name it here (item)"
 );
 
@@ -66,7 +67,7 @@ const char* name_or(const char* const* table, std::size_t count, std::size_t idx
 }
 
 const char* errc_name(Errc c) noexcept {
-    return name_or(kErrcNames, kErrcCount, static_cast<std::size_t>(c));
+    return name_or(kErrcNames, kErrcCount, infra::ordinal(c));
 }
 
 const char* request_name(app::UiRequest::Kind k) noexcept {
@@ -75,17 +76,15 @@ const char* request_name(app::UiRequest::Kind k) noexcept {
 }
 
 std::int64_t monotonic_ns() noexcept {
-    timespec ts{};
-    ::clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<std::int64_t>(ts.tv_sec) * 1'000'000'000
-        + static_cast<std::int64_t>(ts.tv_nsec);
+    return std::chrono::steady_clock::now().time_since_epoch().count();
 }
 
 }
 
 bool EventTrace::admit_() noexcept {
     const std::int64_t now = monotonic_ns();
-    if (now - window_start_ns_ >= 1'000'000'000) {
+    constexpr std::int64_t kWindowNs = std::chrono::nanoseconds{std::chrono::seconds{1}}.count();
+    if (now - window_start_ns_ >= kWindowNs) {
         window_start_ns_ = now;
         window_count_ = 0;
     }
@@ -111,7 +110,7 @@ void EventTrace::write_(
         "\"suppressed\":%u,\"seq\":%u}",
         name,
         fields,
-        static_cast<unsigned>(h.site.v),
+        static_cast<unsigned>(h.site),
         static_cast<unsigned>(h.tag.v),
         depth,
         static_cast<unsigned>(lost),
@@ -168,8 +167,8 @@ void EventTrace::record(const app::Event::ProgressUpdate& a, const app::Event::H
         f,
         sizeof f,
         "\"cur\":%u,\"max\":%u,",
-        static_cast<unsigned>(a.cur),
-        static_cast<unsigned>(a.max)
+        static_cast<unsigned>(a.progress.done),
+        static_cast<unsigned>(a.progress.total)
     );
     write_("ProgressUpdate", f, app::Event::ProgressUpdate::kKind, h);
 }

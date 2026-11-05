@@ -53,7 +53,7 @@ public:
         std::unique_ptr<svc::IFile> file;
         std::uint64_t total = 0;
         proto::WideIoIndex wire_index{};
-        std::uint32_t act = 0;
+        proto::ActKey act{};
 
         cores::TransferRow row{};
 

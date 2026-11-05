@@ -7,10 +7,12 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 
 #include <sys/epoll.h>
 
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "infra/log_lane.h"
 #include "infra/opt_ref.h"
 #include "infra/rt_latency.h"
@@ -30,13 +32,12 @@ namespace mister::reactor {
 inline constexpr std::uint64_t kSilenceSlackPeriods = 1;
 inline constexpr std::uint64_t kSilenceRounds = 2;
 
-constexpr bool raise_is_recent_ms(
-    std::uint64_t now_ms,
-    std::uint64_t last_ms,
-    std::uint32_t period_ms
+constexpr bool raise_is_recent(
+    std::chrono::milliseconds now,
+    std::chrono::milliseconds last,
+    std::chrono::milliseconds period
 ) noexcept {
-    return (now_ms - last_ms)
-        <= static_cast<std::uint64_t>(period_ms) * (1u + kSilenceSlackPeriods);
+    return (now - last) <= period * static_cast<std::int64_t>(1u + kSilenceSlackPeriods);
 }
 
 constexpr bool raise_is_recent_rounds(std::uint64_t now_round, std::uint64_t last_round) noexcept {
@@ -144,11 +145,10 @@ private:
           round_timer_(wiring.round_timer) {
         for (auto& t : last_raise_)
             t = kNeverRaised;
-        for (auto& t : line_raise_ms_)
-            t = kNeverRaised;
     }
 
-    void dispatch_cause(Cause c, std::size_t line, std::int64_t wake_ns);
+    static constexpr std::uint64_t kNeverRaised = ~std::uint64_t{0};
+    void dispatch_cause(Cause c, NotifierSlot line, std::int64_t wake_ns);
     bool notifier_carries(const LinkDecoderDecl& s) const noexcept;
     void service_round(bool swept, std::int64_t wake_ns);
     void run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment seg);
@@ -162,13 +162,52 @@ private:
     UniqueFd tick_fd_;
 
     xthread::WakeFlag wake_;
-    std::optional<Notifier> notifiers_[kMaxLines];
+
+    struct RaiseStamp {
+        TASTY_SEAT_RESIDENT(RT);
+        std::uint64_t ms = kNeverRaised;
+        std::uint64_t round = 0;
+    };
+
+    class Line {
+        TASTY_SEAT_RESIDENT(RT);
+
+    public:
+        [[nodiscard]] bool bound() const noexcept { return notifier_.has_value(); }
+
+        void bind(Notifier n) noexcept {
+            notifier_ = std::move(n);
+            clear_evidence_();
+        }
+
+        void unbind() noexcept {
+            notifier_.reset();
+            clear_evidence_();
+        }
+
+        [[nodiscard]] Notifier& notifier() noexcept { return *notifier_; }
+
+        [[nodiscard]] const Notifier& notifier() const noexcept { return *notifier_; }
+
+        [[nodiscard]] bool delivers(Cause c) const noexcept {
+            return notifier_.has_value() && notifier_->delivers().has(c);
+        }
+
+        [[nodiscard]] bool has_evidence() const noexcept { return stamp_.ms != kNeverRaised; }
+
+        void raised(const RaiseStamp& at) noexcept { stamp_ = at; }
+
+        [[nodiscard]] const RaiseStamp& stamp() const noexcept { return stamp_; }
+
+    private:
+        void clear_evidence_() noexcept { stamp_ = RaiseStamp{}; }
+
+        std::optional<Notifier> notifier_{};
+        RaiseStamp stamp_{};
+    };
+
     std::size_t notifier_count_ = 0;
     CauseSet delivered_;
-
-    static constexpr std::uint64_t kNeverRaised = ~std::uint64_t{0};
-    std::uint64_t line_raise_ms_[kMaxLines] = {};
-    std::uint64_t line_raise_round_[kMaxLines] = {};
 
     std::uint64_t last_raise_[static_cast<std::size_t>(Cause::kCount)] = {};
     std::uint64_t last_raise_round_[static_cast<std::size_t>(Cause::kCount)] = {};
@@ -205,6 +244,8 @@ private:
     std::uint32_t caller_pass_refusals_ = 0;
 
     xthread::WakeFlag::Cursor stop_seen_;
+
+    infra::IndexedArray<Line, kMaxLines, NotifierSlot> lines_{};
 };
 
 }

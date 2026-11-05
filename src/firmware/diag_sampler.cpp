@@ -10,12 +10,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <concepts>
 #include <cstdio>
 #include <ctime>
+#include <limits>
 #include <optional>
 #include <tuple>
 
 #include "app/event.h"
+#include "app/log_clock.h"
 #include "infra/log_rec_dispatch.h"
 #include "infra/message_sum.h"
 #include "app/frame_source.h"
@@ -27,11 +30,16 @@ namespace mister::fw {
 
 namespace {
 
-std::uint64_t mono_now_ns() noexcept {
-    timespec ts{};
-    (void)::clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<std::uint64_t>(ts.tv_sec) * 1'000'000'000ull
-        + static_cast<std::uint64_t>(ts.tv_nsec);
+enum RingSlot : std::size_t { kRingCmd, kRingEvent, kRingPrefetch, kRingLog };
+
+static_assert(kRingLog + 1 == kNumRings);
+
+template <std::same_as<std::uint8_t>... Bytes>
+[[nodiscard]] constexpr std::uint32_t pack_bytes(Bytes... bytes) noexcept {
+    constexpr unsigned kByteBits = std::numeric_limits<std::uint8_t>::digits;
+    std::uint32_t word = 0;
+    ((word = (word << kByteBits) | bytes), ...);
+    return word;
 }
 
 DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
@@ -137,7 +145,8 @@ void DiagSampler::sample(bool stopping) noexcept {
         && !transitioning_.sample().value
         && hb != 0
         && hb == prev) {
-        if (++unchanged_streak_ >= 2) {
+        constexpr std::uint32_t kStallStreak = 2;
+        if (++unchanged_streak_ >= kStallStreak) {
             diag_stats_.heartbeat_stalls.add();
             std::fprintf(
                 stderr,
@@ -155,10 +164,10 @@ void DiagSampler::sample(bool stopping) noexcept {
         observe_rss(*rss, ceiling);
 
     if (prefetch_) {
-        stats_.ring_drops[2].set(prefetch_->counters().drops);
+        stats_.ring_drops[kRingPrefetch].set(prefetch_->counters().drops);
     }
 
-    stats_.ring_drops[3].set(lane_rt_.losses().total());
+    stats_.ring_drops[kRingLog].set(lane_rt_.losses().total());
 
     diag_stats_.drains.add();
 
@@ -204,7 +213,7 @@ void DiagSampler::sample(bool stopping) noexcept {
         std::uint32_t dlm = 0;
         for (std::size_t i = 0; i < kMaxServices; ++i) {
             const std::uint32_t n = stats_.deadline_miss[i].get();
-            dlm = (dlm > 0xFFFFFFFFu - n) ? 0xFFFFFFFFu : dlm + n;
+            dlm = app::sat_u32(std::uint64_t{dlm} + n);
         }
 
         if (dlm > last_dlm_)
@@ -258,7 +267,7 @@ void DiagSampler::drain_screenshots() noexcept {
                         : name.substr(cut + 1);
                     if (!shot_dir_.empty() && base != "." && base != "..") {
 
-                        (void)::mkdir(shot_dir_.c_str(), 0777);
+                        (void)::mkdir(shot_dir_.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
                         path = shot_dir_ + "/";
                         if (base.empty()) {
                             char stamp[32];
@@ -284,7 +293,7 @@ void DiagSampler::drain_screenshots() noexcept {
         } else {
             ++shots_failed_;
         }
-        req->ok = static_cast<std::uint8_t>(ok ? 1 : 0);
+        req->ok = ok;
         req.complete();
     }
 }
@@ -314,7 +323,7 @@ void DiagSampler::on(const LogRec::DeadlineMiss& a, const LogRec::Head& h) noexc
 }
 
 void DiagSampler::on(const LogRec::SessionTransition& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.dwell_us, (static_cast<std::uint32_t>(a.from) << 8) | a.to);
+    line_(a.kKind, h, a.dwell_us, pack_bytes(a.from, a.to));
 }
 
 void DiagSampler::on(const LogRec::StagingRung& a, const LogRec::Head& h) noexcept {
@@ -338,7 +347,14 @@ void DiagSampler::on(const LogRec::Unmount& a, const LogRec::Head& h) noexcept {
 }
 
 void DiagSampler::on(const LogRec::Refusal& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, static_cast<std::uint32_t>(a.code), a.site);
+    diag_.appendf(
+        "{\"t\":\"log\",\"k\":%u,\"sev\":%u,\"ts\":%llu,\"a\":%u,\"b\":%u}",
+        static_cast<unsigned>(a.kKind),
+        static_cast<unsigned>(h.sev),
+        static_cast<unsigned long long>(h.t_ns),
+        static_cast<unsigned>(a.code),
+        static_cast<unsigned>(a.site)
+    );
 }
 
 void DiagSampler::on(const LogRec::RingLoss& a, const LogRec::Head& h) noexcept {
@@ -346,31 +362,19 @@ void DiagSampler::on(const LogRec::RingLoss& a, const LogRec::Head& h) noexcept 
 }
 
 void DiagSampler::on(const LogRec::DoorbellBound& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.cause_base, (static_cast<std::uint32_t>(a.klass) << 8) | a.line);
+    line_(a.kKind, h, a.cause_base, pack_bytes(a.klass, a.line));
 }
 
 void DiagSampler::on(const LogRec::DoorbellPolling& a, const LogRec::Head& h) noexcept {
-    line_(
-        a.kKind,
-        h,
-        static_cast<std::uint32_t>(a.why),
-        (static_cast<std::uint32_t>(a.klass) << 8) | a.line
-    );
+    line_(a.kKind, h, static_cast<std::uint32_t>(a.why), pack_bytes(a.klass, a.line));
 }
 
 void DiagSampler::on(const LogRec::PhaseTolerated& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.stimulus, (static_cast<std::uint32_t>(a.phase) << 8) | a.under);
+    line_(a.kKind, h, a.stimulus, pack_bytes(a.phase, a.under));
 }
 
 void DiagSampler::on(const LogRec::ConfStrArrived& a, const LogRec::Head& h) noexcept {
-    line_(
-        a.kKind,
-        h,
-        a.bind_gen,
-        (static_cast<std::uint32_t>(a.phase) << 16)
-            | (static_cast<std::uint32_t>(a.under) << 8)
-            | a.awaited
-    );
+    line_(a.kKind, h, a.bind_gen, pack_bytes(a.phase, a.under, a.awaited));
 }
 
 static_assert(LogRecSink<DiagSampler>);
@@ -419,7 +423,7 @@ void DiagSampler::voice_log_losses_(
         render_log_rec(
             infra::make<LogRec>(
                 LogRec::RingLoss{.losses = l, .lost = lost},
-                LogRec::Head{xthread::sev_of(LogRec::Kind::RingLoss), {}, mono_now_ns()}
+                LogRec::Head{xthread::sev_of(LogRec::Kind::RingLoss), {}, app::log_now_ns()}
             )
         );
         diag_.appendf(
@@ -439,10 +443,7 @@ DiagSampler::CdInstruments DiagSampler::cd_instruments() const noexcept {
             continue;
         c.deadline_slots |= (1u << i);
 
-        if (c.deadline_misses > 0xFFFFFFFFu - n)
-            c.deadline_misses = 0xFFFFFFFFu;
-        else
-            c.deadline_misses += n;
+        c.deadline_misses = app::sat_u32(std::uint64_t{c.deadline_misses} + n);
     }
     if (prefetch_) {
         const svc::PrefetchCounters p = prefetch_->counters();
@@ -530,15 +531,24 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
     const app::VideoWire::GeoStats gs = video_wire_.geo_stats();
     const app::PreludeStats ps = video_wire_.prelude_stats();
 
-    const unsigned rf_bits = (vs.solve_failures != 0u ? 1u : 0u)
-        | (vs.zero_divider != 0u ? 2u : 0u)
-        | (vs.stage_failures != 0u ? 4u : 0u)
-        | (ws.stale != 0u ? 8u : 0u)
-        | (ws.partial != 0u ? 16u : 0u)
-        | (ws.rejected != 0u ? 32u : 0u)
-        | (vs.parse_fallbacks != 0u ? 64u : 0u)
-        | (vs.empty_specs != 0u ? 128u : 0u)
-        | (vs.fb_cmds_dropped != 0u ? 256u : 0u);
+    constexpr unsigned kRfSolve = 1u << 0;
+    constexpr unsigned kRfZeroDivider = 1u << 1;
+    constexpr unsigned kRfStage = 1u << 2;
+    constexpr unsigned kRfStale = 1u << 3;
+    constexpr unsigned kRfPartial = 1u << 4;
+    constexpr unsigned kRfRejected = 1u << 5;
+    constexpr unsigned kRfParseFallback = 1u << 6;
+    constexpr unsigned kRfEmptySpec = 1u << 7;
+    constexpr unsigned kRfFbCmdsDropped = 1u << 8;
+    const unsigned rf_bits = (vs.solve_failures != 0u ? kRfSolve : 0u)
+        | (vs.zero_divider != 0u ? kRfZeroDivider : 0u)
+        | (vs.stage_failures != 0u ? kRfStage : 0u)
+        | (ws.stale != 0u ? kRfStale : 0u)
+        | (ws.partial != 0u ? kRfPartial : 0u)
+        | (ws.rejected != 0u ? kRfRejected : 0u)
+        | (vs.parse_fallbacks != 0u ? kRfParseFallback : 0u)
+        | (vs.empty_specs != 0u ? kRfEmptySpec : 0u)
+        | (vs.fb_cmds_dropped != 0u ? kRfFbCmdsDropped : 0u);
 
     const unsigned long long refused_wide = static_cast<unsigned long long>(vs.solve_failures)
         + vs.zero_divider
@@ -547,9 +557,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         + ws.partial
         + ws.rejected
         + vs.empty_specs;
-    const unsigned video_refused = refused_wide > 0xFFFFFFFFull
-        ? 0xFFFFFFFFu
-        : static_cast<unsigned>(refused_wide);
+    const unsigned video_refused = app::sat_u32(refused_wide);
 
     static_assert(
         DiagSampler::kRtstatsWorstCase <= DiagSampler::kDiagLineCeiling,
@@ -560,7 +568,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
     );
 
     static_assert(reactor::round_bucket_edge_us(reactor::kRoundBuckets - 1) == 536871u);
-    static_assert(static_cast<unsigned>(reactor::RoundSegment::kCount) - 1 == 4u);
+    static_assert(infra::ordinal(reactor::RoundSegment::kCount) - 1 == 4u);
     static_assert(kMaxServices - 1 == 23u);
     static_assert(reactor::kRoundLifecycleAll == 7u);
 
@@ -572,6 +580,9 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         have_input ? *input_ : app::InputSample{},
         build_counts
     );
+    constexpr std::uint64_t kNsPerUs = 1000;
+    static_assert(svc::kMaxPlayers == 6);
+    const auto& [hash0, hash1, hash2, hash3, hash4, hash5] = ips.slot_hash;
     const app::MglPumpStats ms = (mgl_stats_) ? mgl_stats_->sample().value : app::MglPumpStats{};
     const std::uint32_t mgl_row0 = mgl_row0_.sample().value;
 
@@ -590,10 +601,10 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         static_cast<unsigned long long>(diag_stats_.rss_bytes.sample().value),
         diag_stats_.heartbeat_stalls.get(),
         diag_stats_.rss_over_ceiling.get(),
-        stats_.ring_drops[0].get(),
-        stats_.ring_drops[1].get(),
-        stats_.ring_drops[2].get(),
-        stats_.ring_drops[3].get(),
+        stats_.ring_drops[kRingCmd].get(),
+        stats_.ring_drops[kRingEvent].get(),
+        stats_.ring_drops[kRingPrefetch].get(),
+        stats_.ring_drops[kRingLog].get(),
         stats_.spin_timeouts.get(),
         stats_.spurious_causes.get(),
         static_cast<unsigned>(events_.depth()),
@@ -617,7 +628,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         ws.arm_fail,
         video_refused,
         rf_bits,
-        static_cast<unsigned>(vs.last_mode_index),
+        static_cast<unsigned>(vs.last_mode_index.v),
         vs.last_fpix_khz,
         static_cast<unsigned>(ps.fb_ack),
         static_cast<unsigned>(gr.fb_en),
@@ -682,7 +693,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         ips.registered,
         ips.mapped,
         ips.slotted,
-        ips.gates,
+        ips.gates.v,
         ips.mask_changes,
         ips.joy_seen,
         ips.joy_players,
@@ -697,12 +708,12 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         ips.button_actions,
         ips.slot_live,
         ips.slot_ghosts,
-        ips.slot_hash[0],
-        ips.slot_hash[1],
-        ips.slot_hash[2],
-        ips.slot_hash[3],
-        ips.slot_hash[4],
-        ips.slot_hash[5],
+        hash0,
+        hash1,
+        hash2,
+        hash3,
+        hash4,
+        hash5,
         ms.file_items,
         ms.abandoned,
         ms.armed,
@@ -746,7 +757,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         rt_first_errno(),
 
         rnd.epoch,
-        reactor::round_us(rnd.epoch_ns / 1000),
+        reactor::round_us(rnd.epoch_ns / kNsPerUs),
         rnd.steady.n,
         reactor::round_us(rnd.steady.min_ns),
         reactor::round_us(rnd.steady.max_ns),
@@ -821,7 +832,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         up.button_injects,
         up.button_core_resets,
         up.last_hold_ms,
-        fr.seq,
+        fr.seq.v,
         shots_.drops(),
         shots_.result_drops(),
         shots_written_,

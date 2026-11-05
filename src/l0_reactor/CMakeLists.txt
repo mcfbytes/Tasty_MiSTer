@@ -21,6 +21,7 @@ tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
   reactor/frame_record.h
   reactor/frame_main.h
   reactor/link_decoder.h
+  reactor/types.h
   reactor/link_decoder_decl.h
   reactor/notifier.h
   reactor/notifier_slot.h

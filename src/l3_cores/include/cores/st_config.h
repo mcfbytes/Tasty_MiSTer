@@ -9,7 +9,9 @@
 
 #include "cores/config_slots.h"
 #include "cores/st_config_layout.h"
+#include "cores/types.h"
 #include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
@@ -23,7 +25,7 @@ struct StConfig {
     std::uint32_t system_ctrl = 0;
     std::uint32_t ext_ctrl = 0;
     Path tos_img{};
-    std::array<Path, kAcsiTargets> acsi_img{};
+    infra::IndexedArray<Path, kAcsiTargets, AcsiTarget> acsi_img{};
 
     [[nodiscard]] static StConfig defaults() noexcept;
 

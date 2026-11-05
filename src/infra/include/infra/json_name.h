@@ -9,11 +9,13 @@ namespace mister::infra {
 
 inline void json_name_not_clean() noexcept {}
 
+enum : int { kJsonPrintableFirst = 0x20, kJsonPrintableLast = 0x7e };
+
 class JsonName {
 public:
     consteval JsonName(const char* s) : s_(s) {
         for (const char* p = s; *p != '\0'; ++p) {
-            if (*p < 0x20 || *p > 0x7e || *p == '"' || *p == '\\')
+            if (*p < kJsonPrintableFirst || *p > kJsonPrintableLast || *p == '"' || *p == '\\')
                 json_name_not_clean();
         }
     }
@@ -30,7 +32,7 @@ template <std::size_t N>
         if (n == nullptr)
             return false;
         for (const char* p = n; *p != '\0'; ++p) {
-            if (*p < 0x20 || *p > 0x7e || *p == '"' || *p == '\\')
+            if (*p < kJsonPrintableFirst || *p > kJsonPrintableLast || *p == '"' || *p == '\\')
                 return false;
         }
     }

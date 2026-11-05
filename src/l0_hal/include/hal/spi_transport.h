@@ -38,7 +38,7 @@ public:
 
     virtual Width width() const noexcept { return Width::Byte; }
 
-    virtual std::uint8_t io_version() const noexcept { return 0; }
+    virtual IoVersion io_version() const noexcept { return IoVersion{}; }
 
     [[nodiscard]] virtual Ex<void> block_write(std::span<const std::uint8_t> data) = 0;
     [[nodiscard]] virtual Ex<void> block_read(std::span<std::uint8_t> data) = 0;

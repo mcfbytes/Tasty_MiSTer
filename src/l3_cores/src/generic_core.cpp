@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/generic_core.h"
 
-#include "cores/file_tx.h"
-
-#include <algorithm>
-#include <cstring>
+#include <array>
+#include <memory>
 
 namespace mister::cores {
 
@@ -28,36 +26,14 @@ const CoreProfile kGenericProfile{
     .undeclared_role = SlotRole::Save,
 };
 
-void GenericCore::set_pending_ext(std::string_view ext) noexcept {
-    tx_.set_ext(ext);
-}
-
 Ex<void> GenericCore::do_adopt(const CoreAdopt&) {
 
     return {};
 }
 
-Ex<proto::SessionParams> GenericCore::stream_opening(IoIndex) {
-    TASTY_SEAT_BODY(GenericCore);
-    tx_.opened();
-    proto::SessionParams params{};
-    params.ext = tx_.ext();
-    return params;
-}
+Ex<void> GenericCore::on_mount(IoIndex slot, const MountedPath& p) {
 
-void GenericCore::stream_closed(const StreamLoadEnd& end) noexcept {
-    TASTY_SEAT_BODY(GenericCore);
-    last_index_ = static_cast<std::uint16_t>(end.index.v);
-    ++transfers_;
-    chunks_ += static_cast<std::uint32_t>((end.bytes + kChunkBytes - 1) / kChunkBytes);
-    tx_.closed(end);
-}
-
-Ex<void> GenericCore::on_mount(IoIndex slot, const MountedPath&) {
-
-    ++mount_refusals_;
-    (void)slot;
-    return unimplemented(ERR_SITE());
+    return stream_.mount(slot, p);
 }
 
 std::unique_ptr<Core> make_generic(const CoreProfile& p, const CoreGrant& g) {

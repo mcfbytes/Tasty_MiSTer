@@ -10,8 +10,8 @@ namespace mister::app {
 [[nodiscard]] inline HdLook hd_look_from_ini(const svc::ConfigSnapshot& c) noexcept {
     const HdThemeDecl& old = hd_theme(c.hd_theme);
     return HdLook{
-        .layout = c.hd_layout != kHdLookUnset ? c.hd_layout : old.layout,
-        .colors = c.hd_colors != kHdLookUnset ? c.hd_colors : old.colors,
+        .layout = c.hd_layout != kHdLookUnset ? HdLayoutIndex{c.hd_layout} : old.layout,
+        .colors = c.hd_colors != kHdLookUnset ? HdColors{c.hd_colors} : old.colors,
         .display = c.hd_game_display,
         .opacity = c.hd_menu_opacity
     };

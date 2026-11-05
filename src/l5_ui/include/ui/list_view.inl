@@ -6,36 +6,52 @@ namespace mister::ui {
 template <class T>
 RowCount ListView<T>::page_step() const noexcept {
 
-    if (height_.v == 0)
-        return RowCount{1};
-    if (policy_.browse_expand && height_.v > 1)
-        return RowCount{height_.v - 1u};
+    if (height_.empty())
+        return kOneRow;
+    if (policy_.browse_expand && height_ > kOneRow)
+        return height_ - kOneRow;
     return height_;
 }
 
 template <class T>
 void ListView<T>::recentre() noexcept {
-    view_ = Viewport::centre(
-        view_.selected,
-        RowCount{static_cast<std::uint32_t>(items_.size())},
-        height_,
-        policy_
-    );
+    view_ = Viewport::centre(view_.selected, items_.size(), height_, policy_);
 }
 
 template <class T>
 void ListView<T>::select(RowIndex i) noexcept {
-    const auto n = static_cast<std::uint32_t>(items_.size());
-    view_.selected = RowIndex{n == 0 ? 0u : (i.v >= n ? n - 1u : i.v)};
+    const RowCount n = items_.size();
+    view_.selected = n.empty() ? RowIndex{} : (i >= row_after(n) ? last_row(n) : i);
     recentre();
+}
+
+template <class T>
+template <class Pred>
+bool ListView<T>::select_next(Pred&& pred, Wrap wrap) noexcept {
+    const RowIndex end = row_after(items_.size());
+    for (RowIndex i = view_.selected + kOneRow; i < end; i += kOneRow) {
+        if (pred(items_[i])) {
+            select(i);
+            return true;
+        }
+    }
+    if (wrap == Wrap::No)
+        return false;
+    for (const RowIndex i : rows(items_.size())) {
+        if (pred(items_[i])) {
+            select(i);
+            return true;
+        }
+    }
+    return false;
 }
 
 template <class T>
 void ListView<T>::next() noexcept {
     if (items_.empty())
         return;
-    const auto last = static_cast<std::uint32_t>(items_.size() - 1);
-    view_.selected = (view_.selected.v >= last) ? RowIndex{0} : RowIndex{view_.selected.v + 1u};
+    const RowIndex last = last_row(items_.size());
+    view_.selected = (view_.selected >= last) ? RowIndex{} : view_.selected + kOneRow;
     recentre();
 }
 
@@ -43,11 +59,11 @@ template <class T>
 void ListView<T>::prev() noexcept {
     if (items_.empty())
         return;
-    if (view_.selected.v == 0) {
+    if (view_.selected == RowIndex{}) {
         end();
         return;
     }
-    view_.selected = RowIndex{view_.selected.v - 1u};
+    view_.selected = view_.selected - kOneRow;
     recentre();
 }
 
@@ -55,10 +71,9 @@ template <class T>
 void ListView<T>::next_page() noexcept {
     if (items_.empty())
         return;
-    const auto last = static_cast<std::uint32_t>(items_.size() - 1);
-    const std::uint32_t step = page_step().v;
-    view_.selected = (last - view_.selected.v < step) ? RowIndex{last}
-                                                      : RowIndex{view_.selected.v + step};
+    const RowIndex last = last_row(items_.size());
+    const RowCount step = page_step();
+    view_.selected = (last - view_.selected < step) ? last : view_.selected + step;
     recentre();
 }
 
@@ -66,8 +81,8 @@ template <class T>
 void ListView<T>::prev_page() noexcept {
     if (items_.empty())
         return;
-    const std::uint32_t step = page_step().v;
-    view_.selected = (view_.selected.v < step) ? RowIndex{0} : RowIndex{view_.selected.v - step};
+    const RowCount step = page_step();
+    view_.selected = (view_.selected.before() < step) ? RowIndex{} : view_.selected - step;
     recentre();
 }
 
@@ -75,7 +90,7 @@ template <class T>
 void ListView<T>::home() noexcept {
     if (items_.empty())
         return;
-    view_.selected = RowIndex{0};
+    view_.selected = RowIndex{};
     recentre();
 }
 
@@ -83,7 +98,7 @@ template <class T>
 void ListView<T>::end() noexcept {
     if (items_.empty())
         return;
-    view_.selected = RowIndex{static_cast<std::uint32_t>(items_.size() - 1)};
+    view_.selected = last_row(items_.size());
     recentre();
 }
 

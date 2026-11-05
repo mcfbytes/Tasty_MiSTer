@@ -3,6 +3,7 @@
 
 #include <cstring>
 
+#include "cores/core_adopt.h"
 #include "cores/mounted_path.h"
 #include "infra/ascii.h"
 #include "infra/byte_view.h"
@@ -119,7 +120,7 @@ CdiCore::Answer CdiCore::classify_(std::int32_t lba) const noexcept {
     for (std::uint8_t i = 0; i < toc.last; ++i) {
         const svc::Track& t = toc.tracks[i];
         const std::int64_t lo = static_cast<std::int64_t>(t.start.v)
-            - static_cast<std::int32_t>(t.pregap);
+            - static_cast<std::int32_t>(t.pregap.v);
         const std::int64_t hi = static_cast<std::int64_t>(t.end.v) - 1;
         if (lba >= lo && lba <= hi)
             return Answer::Track;
@@ -226,7 +227,10 @@ proto::BlockGeometry CdiCore::geometry_for(
     if (slot.v != profile().staging.disc_slot.v)
         return wire;
 
-    return proto::BlockGeometry{kBlock, cdi::hunk_window(geom_.chd_hunk_bytes())};
+    return proto::BlockGeometry{
+        proto::BlockSize{kBlock},
+        proto::BlockCount{cdi::hunk_window(geom_.chd_hunk_bytes())}
+    };
 }
 
 }

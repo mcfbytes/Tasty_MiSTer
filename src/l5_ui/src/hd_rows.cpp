@@ -49,8 +49,13 @@ Row HdPushRow::describe() const {
 
 std::optional<RowKey> HdPushRow::key() const {
     TASTY_SEAT_BODY(HdPushRow);
+    constexpr std::uint32_t kPushKeyBase = 0x2'0000u;
+    constexpr unsigned kPushPageShift = 8;
+    constexpr std::uint32_t kPushFocusMask = 0xFFu;
     return RowKey{
-        0x2'0000u | (static_cast<std::uint32_t>(spec_.page) << 8) | (spec_.focus.v & 0xFFu)
+        kPushKeyBase
+        | (static_cast<std::uint32_t>(spec_.page) << kPushPageShift)
+        | (spec_.focus.v & kPushFocusMask)
     };
 }
 
@@ -117,9 +122,9 @@ Transition HdAskRow::select() {
     return Transition{Transition::Kind::Push, PageId::Confirm};
 }
 
-Transition HdAskRow::on_confirm(std::uint8_t choice) {
+Transition HdAskRow::on_confirm(RowIndex choice) {
     TASTY_SEAT_BODY(HdAskRow);
-    return choice == 0 ? spec_.action.on_yes() : Transition{Transition::Kind::Pop};
+    return choice == RowIndex{0} ? spec_.action.on_yes() : Transition{Transition::Kind::Pop};
 }
 
 bool HdGatedRow::shown() const {

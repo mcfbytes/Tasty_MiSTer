@@ -6,6 +6,7 @@
 #include <span>
 
 #include "app/rec_options.h"
+#include "app/rgb_rows.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "os/clock.h"
@@ -30,13 +31,13 @@ public:
     [[nodiscard]] virtual std::uint16_t width() const noexcept = 0;
     [[nodiscard]] virtual std::uint16_t height() const noexcept = 0;
     [[nodiscard]] virtual std::size_t max_payload() const noexcept = 0;
-    [[nodiscard]] virtual std::size_t encode(
-        const std::byte* rgb,
-        std::size_t line,
+
+    [[nodiscard]] virtual std::span<const std::byte> encode(
+        RgbRows rgb,
         bool key,
         std::span<std::byte> out
     ) noexcept = 0;
-    [[nodiscard]] virtual std::size_t rekey(std::span<std::byte> out) noexcept = 0;
+    [[nodiscard]] virtual std::span<const std::byte> rekey(std::span<std::byte> out) noexcept = 0;
 
     [[nodiscard]] virtual std::span<const std::byte> dup() noexcept = 0;
 };

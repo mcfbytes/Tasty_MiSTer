@@ -13,6 +13,9 @@ namespace mister::app {
 
 namespace {
 
+constexpr std::string_view kRecentTag = "_recent_";
+constexpr std::string_view kDateTag = "_20";
+
 using infra::ieq;
 
 bool iless(std::string_view a, std::string_view b) noexcept {
@@ -36,26 +39,33 @@ struct RecentsFile {
 };
 
 RecentsFile parse_recents_name(std::string_view name) {
+    constexpr std::size_t kExtLen = 4;
+    constexpr std::size_t kMaxRecentDigits = 3;
+    constexpr unsigned kDecimal = 10;
+    constexpr unsigned kMountIndexBase = 500;
     RecentsFile out;
-    if (name.size() <= 5 || !ieq(name.substr(name.size() - 4), ".cfg"))
+    if (name.size() <= kExtLen + 1 || !ieq(name.substr(name.size() - kExtLen), ".cfg"))
         return out;
-    const std::string_view stem = name.substr(0, name.size() - 4);
-    const std::size_t at = stem.rfind("_recent_");
+    const std::string_view stem = name.substr(0, name.size() - kExtLen);
+    const std::size_t at = stem.rfind(kRecentTag);
     if (at == std::string_view::npos || at == 0)
         return out;
-    const std::string_view digits = stem.substr(at + 8);
-    if (digits.empty() || digits.size() > 3)
+    const std::string_view digits = stem.substr(at + kRecentTag.size());
+    if (digits.empty() || digits.size() > kMaxRecentDigits)
         return out;
     unsigned idx = 0;
     for (const char c : digits) {
         if (c < '0' || c > '9')
             return out;
-        idx = idx * 10 + static_cast<unsigned>(c - '0');
+        idx = idx * kDecimal + static_cast<unsigned>(c - '0');
     }
     out.core = std::string{stem.substr(0, at)};
-    const auto slot = static_cast<std::uint8_t>(idx >= 500 ? idx - 500 : idx);
+    const auto slot = static_cast<std::uint8_t>(
+        idx >= kMountIndexBase ? idx - kMountIndexBase : idx
+    );
     out.id = RecentsStore::ListId{
-        idx >= 500 ? RecentsStore::ListId::Kind::Mount : RecentsStore::ListId::Kind::File,
+        idx >= kMountIndexBase ? RecentsStore::ListId::Kind::Mount
+                               : RecentsStore::ListId::Kind::File,
         slot
     };
     out.ok = true;
@@ -78,17 +88,19 @@ std::string datecode_of(std::string_view image) {
 }
 
 std::string recent_core_name(std::string_view path_or_name) {
+    constexpr std::size_t kExtLen = 4;
+    constexpr std::size_t kMinDateTail = 6;
     const std::size_t slash = path_or_name.rfind('/');
     std::string_view name = slash == std::string_view::npos ? path_or_name
                                                             : path_or_name.substr(slash + 1);
-    if (name.size() > 4) {
-        const std::string_view ext = name.substr(name.size() - 4);
+    if (name.size() > kExtLen) {
+        const std::string_view ext = name.substr(name.size() - kExtLen);
         if (ieq(ext, ".rbf") || ieq(ext, ".cfg"))
-            name = name.substr(0, name.size() - 4);
+            name = name.substr(0, name.size() - kExtLen);
     }
 
-    const std::size_t p = name.find("_20");
-    if (p != std::string_view::npos && name.size() - p - 3 >= 6)
+    const std::size_t p = name.find(kDateTag);
+    if (p != std::string_view::npos && name.size() - p - kDateTag.size() >= kMinDateTail)
         name = name.substr(0, p);
     return std::string{name};
 }

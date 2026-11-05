@@ -16,7 +16,7 @@ std::array<RegWrite, kInitTableSize> init_table(const InitOptions& o) {
     const std::uint8_t reg57 = static_cast<std::uint8_t>(
         (o.hdmi_game_mode ? 0x80u : 0x00u)
         | ((o.ypbpr || o.hdmi_limited) ? 0x04u
-               : o.hdr_mode            ? 0x68u
+               : o.hdr != HdrMode::Off ? 0x68u
                                        : 0x08u)
     );
 

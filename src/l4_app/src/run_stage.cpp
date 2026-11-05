@@ -49,19 +49,17 @@ void RunStage::publish_(Ctx ctx, ReplayOp op) noexcept {
 
 IReplayStage::Step RunStage::arm_(Ctx ctx) noexcept {
     ReplayPlay& play = ctx.play;
-    ++play.gen;
-    if (play.gen == 0)
-        play.gen = 1;
+    play.gen = play.gen.next_live();
     next_run_ = 0;
     end_pushed_ = false;
-    play.frames = 0;
+    play.pushed = FrameCount{};
 
     publish_(ctx, ReplayOp::Play);
     const cores::IMovieCodec::Raster r = play.codec->raster(play.facts);
     const ReplayMsg::Arm a{
         .ports = play.facts.ports,
         .rom_index = play.rom_index,
-        .vsync_ok = static_cast<std::uint8_t>(play.vsync_ok ? 1 : 0),
+        .vsync_ok = play.vsync_ok,
         .p0 = play.p0,
         .lead = static_cast<std::int16_t>(play.lead),
         .event = play.event,
@@ -86,12 +84,12 @@ void RunStage::stream_(Ctx ctx) noexcept {
         const ReplayMsg::Input& run = play.runs[next_run_];
         if (!ctx.w.ring.push(infra::make<ReplayMsg>(run, ReplayMsg::Head{play.gen})))
             return;
-        play.frames = run.last + 1;
+        play.pushed = run.last - MovieFrame{} + FrameCount{1};
         ++next_run_;
     }
     end_pushed_ = ctx.w.ring.push(
         infra::make<ReplayMsg>(
-            ReplayMsg::End{.frame = play.movie_frames},
+            ReplayMsg::End{.frame = movie_frame_from_wire(play.movie_frames)},
             ReplayMsg::Head{play.gen}
         )
     );
@@ -198,15 +196,15 @@ void RunStage::checkpoints_(Ctx ctx, const ReplayStatus& s) noexcept {
     if (s.gen != play.gen)
         return;
     while (play.next_check < play.n_checks
-           && s.movie_frame >= 0
-           && static_cast<std::uint32_t>(s.movie_frame) >= play.checks[play.next_check]) {
+           && s.movie_frame >= MovieFrame{}
+           && s.movie_frame >= play.checks[play.next_check]) {
         char name[48];
         const int n = std::snprintf(
             name,
             sizeof name,
-            "tas-%u-%u.png",
-            static_cast<unsigned>(play.gen),
-            play.checks[play.next_check]
+            "tas-%s-%s.png",
+            play.gen.text().c_str(),
+            play.checks[play.next_check].text().c_str()
         );
         if (n > 0)
             (void)ctx.w.shots.take(std::string_view(name, static_cast<std::size_t>(n)), false);

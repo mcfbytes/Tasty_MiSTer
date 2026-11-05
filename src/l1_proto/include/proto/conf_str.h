@@ -416,7 +416,9 @@ public:
             if (it.kind != ItemKind::DefMra)
                 continue;
             const std::string_view f = ast_.text(it.body);
-            out = f.size() > 7 ? f.substr(7) : std::string_view{};
+            constexpr std::string_view kDefMraToken = "DEFMRA,";
+            out = f.size() > kDefMraToken.size() ? f.substr(kDefMraToken.size())
+                                                 : std::string_view{};
         }
         return out;
     }
@@ -442,7 +444,7 @@ public:
 
     [[nodiscard]] std::vector<IoIndex> remembered_mounts() const;
 
-    [[nodiscard]] std::uint16_t mount_slot_mask() const noexcept;
+    [[nodiscard]] BlockSlotMask mount_slot_mask() const noexcept;
 
     static std::uint8_t ext_subindex(std::string_view filename, std::string_view ext_list) noexcept;
 

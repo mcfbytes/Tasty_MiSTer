@@ -7,6 +7,7 @@
 
 #include "infra/seat.h"
 #include "os/key_injector.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -34,9 +35,9 @@ public:
 
     void key(std::uint16_t code, bool down) noexcept;
 
-    void pad(std::size_t slot, std::uint32_t level) noexcept;
+    void pad(std::size_t slot, proto::JoyMask level) noexcept;
 
-    void reseat_pad(std::size_t slot, std::uint32_t level) noexcept;
+    void reseat_pad(std::size_t slot, proto::JoyMask level) noexcept;
 
     [[nodiscard]] const Counters& counters() const noexcept { return n_; }
 

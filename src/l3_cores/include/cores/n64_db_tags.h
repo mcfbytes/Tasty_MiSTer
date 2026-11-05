@@ -11,7 +11,7 @@
 
 #include "cores/n64_patch_table.h"
 #include "cores/n64_rom.h"
-#include "cores/n64_save_type.h"
+#include "cores/n64_memory_type.h"
 
 namespace mister::cores::n64 {
 

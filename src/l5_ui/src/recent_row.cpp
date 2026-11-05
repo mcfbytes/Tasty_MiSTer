@@ -29,11 +29,13 @@ bool RecentRow::shown() const {
 std::optional<RowKey> RecentRow::key() const {
     TASTY_SEAT_BODY(RecentRow);
 
-    std::uint32_t h = 2166136261u;
+    constexpr std::uint32_t kFnvBasis = 2166136261u;
+    constexpr std::uint32_t kFnvPrime = 16777619u;
+    std::uint32_t h = kFnvBasis;
     for (const char c : record_.core)
-        h = (h ^ static_cast<std::uint8_t>(c)) * 16777619u;
+        h = (h ^ static_cast<std::uint8_t>(c)) * kFnvPrime;
     for (const char c : record_.path)
-        h = (h ^ static_cast<std::uint8_t>(c)) * 16777619u;
+        h = (h ^ static_cast<std::uint8_t>(c)) * kFnvPrime;
     return RowKey{kKeySpace | (h & ~kKeySpaceMask)};
 }
 
@@ -56,9 +58,9 @@ Transition RecentRow::select() {
     return Transition{Transition::Kind::Push, PageId::Confirm};
 }
 
-Transition RecentRow::on_confirm(std::uint8_t choice) {
+Transition RecentRow::on_confirm(RowIndex choice) {
     TASTY_SEAT_BODY(RecentRow);
-    if (choice != 0)
+    if (choice != RowIndex{0})
         return Transition{Transition::Kind::Pop};
     return launch_.launch(record_);
 }

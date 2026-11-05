@@ -166,10 +166,11 @@ std::uint32_t PceScsiEngine::seek_ticks_(
 
     if (from < 0 || to < 0)
         return 0;
-    const std::uint32_t ms = geom.seek_ms(
-        Lba{static_cast<std::uint32_t>(from)},
-        Lba{static_cast<std::uint32_t>(to)}
-    );
+    const std::uint32_t ms = geom.seek_time(
+                                     Lba{static_cast<std::uint32_t>(from)},
+                                     Lba{static_cast<std::uint32_t>(to)}
+    )
+                                 .count();
     return static_cast<std::uint32_t>(static_cast<float>(ms) / 13.33f);
 }
 

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 
 #include "infra/counter.h"
+#include "infra/indexed_array.h"
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -55,7 +57,7 @@ public:
         std::span<std::uint8_t> data;
         proto::StorageCompletion answer{};
         infra::OptRef<IStorageBackend> backend{};
-        std::uint32_t gen = 0;
+        Generation gen{};
         std::span<const std::byte> order{};
         bool performed = false;
     };
@@ -123,11 +125,29 @@ public:
     [[nodiscard]] bool quiesced() const noexcept override;
 
 private:
+    struct DataHand {
+        std::uint8_t v = 0;
+
+        [[nodiscard]] constexpr bool exists() const noexcept { return v < kSlots * kHalves; }
+
+        friend constexpr bool operator==(DataHand, DataHand) = default;
+    };
+
+    struct HandAt {
+        TASTY_SEAT_RESIDENT(RT);
+        proto::SlotIndex slot;
+        proto::ArenaHalf half;
+
+        [[nodiscard]] static constexpr HandAt of(DataHand hand) noexcept {
+            return HandAt{proto::SlotIndex::of(hand.v / kHalves), proto::ArenaHalf::of(hand.v)};
+        }
+    };
+
     void own_all_() noexcept;
 
     static void set_order_(BlockCtl& hand, std::span<const std::byte> order) noexcept;
 
-    [[nodiscard]] bool home_(unsigned slot) const noexcept;
+    [[nodiscard]] bool home_(proto::SlotIndex slot) const noexcept;
 
     void perform_(const proto::StorageRequest& ask, Work& w) noexcept;
 
@@ -142,20 +162,98 @@ private:
 
     struct Rt {
 
-        Data::Loan data_hands[kSlots][kHalves]{};
-        Ctl::Loan ctl_hands[kSlots]{};
+        class Slot {
+            TASTY_SEAT_RESIDENT(RT);
 
-        infra::OptRef<IStorageBackend> bound[kSlots]{};
+        public:
+            [[nodiscard]] Data::Loan& hand(proto::ArenaHalf half) noexcept {
+                return data_hands_[half];
+            }
 
-        std::uint32_t gen[kSlots]{};
+            [[nodiscard]] const Data::Loan& hand(proto::ArenaHalf half) const noexcept {
+                return data_hands_[half];
+            }
+
+            [[nodiscard]] Ctl::Loan& ctl() noexcept { return ctl_hand_; }
+
+            [[nodiscard]] const Ctl::Loan& ctl() const noexcept { return ctl_hand_; }
+
+            [[nodiscard]] bool home() const noexcept {
+                for (const Data::Loan& l : data_hands_)
+                    if (!l)
+                        return false;
+                return static_cast<bool>(ctl_hand_);
+            }
+
+            void drop_hands() noexcept {
+                for (auto& l : data_hands_)
+                    l = Data::Loan{};
+                ctl_hand_ = Ctl::Loan{};
+            }
+
+            [[nodiscard]] infra::OptRef<IStorageBackend> bound() const noexcept { return bound_; }
+
+            [[nodiscard]] Generation gen() const noexcept { return gen_; }
+
+            void bind(infra::OptRef<IStorageBackend> stage) noexcept {
+                bound_ = stage;
+                gen_ = gen_.next();
+            }
+
+            void unbind() noexcept {
+                bound_.reset();
+                gen_ = gen_.next();
+            }
+
+            void forget() noexcept { bound_.reset(); }
+
+        private:
+            infra::IndexedArray<Data::Loan, kHalves, proto::ArenaHalf> data_hands_{};
+            Ctl::Loan ctl_hand_{};
+            infra::OptRef<IStorageBackend> bound_{};
+            Generation gen_{};
+        };
+
+        infra::IndexedArray<Slot, kSlots, proto::SlotIndex> slots{};
         bool owned = false;
     };
 
     Rt rt_{};
 
     struct Io {
-        std::uint32_t served[kSlots]{};
-        ISaveFilesOnIo::Save saves[kSlots]{};
+        class Slot {
+            TASTY_SEAT_RESIDENT(Io);
+
+        public:
+            [[nodiscard]] bool serves(Generation gen) const noexcept { return gen == served_; }
+
+            void serve(Generation gen) noexcept { served_ = gen; }
+
+            void attached(
+                infra::OptRef<IStorageBackend> file,
+                proto::FileSize size,
+                bool exists,
+                bool growable
+            ) noexcept {
+                save_ = ISaveFilesOnIo::Save{
+                    .file = file,
+                    .size = size,
+                    .exists = exists,
+                    .growable = growable,
+                    .gen = save_.gen + 1
+                };
+            }
+
+            void detached() noexcept { save_ = ISaveFilesOnIo::Save{.gen = save_.gen + 1}; }
+
+            [[nodiscard]] const ISaveFilesOnIo::Save& save() const noexcept { return save_; }
+
+        private:
+            Generation served_{};
+            ISaveFilesOnIo::Save save_{};
+        };
+
+        infra::IndexedArray<Slot, kSlots, proto::SlotIndex> slots{};
     };
 
     Io io_{};

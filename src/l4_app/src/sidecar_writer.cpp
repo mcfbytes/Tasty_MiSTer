@@ -15,8 +15,8 @@ bool SidecarWriter::idle() const noexcept {
     return w_.in.size() == 0;
 }
 
-int SidecarWriter::park_ms() const noexcept {
-    return -1;
+infra::ParkTimeout SidecarWriter::park_ms() const noexcept {
+    return infra::kForever;
 }
 
 void SidecarWriter::serve() noexcept {
@@ -94,13 +94,12 @@ void SidecarWriter::row_(const SidecarMsg& m) noexcept {
     const int len = std::snprintf(
         line,
         sizeof line,
-        "%" PRIu64 "\t%u\t%" PRId64 "\t%s\t%" PRId32 "\t%08" PRIx32 "\t%u\t%u\t%" PRId32
-        "\t%" PRId32 "\n",
+        "%" PRIu64 "\t%u\t%" PRId64 "\t%s\t%s\t%08" PRIx32 "\t%u\t%u\t%" PRId32 "\t%" PRId32 "\n",
         m.stamp.core_frame,
         static_cast<unsigned>(m.stamp.header_ctr),
         m.stamp.capture_ns,
         dup_reason_name(m.stamp.dup),
-        m.stamp.movie_frame,
+        m.stamp.movie_frame.text().c_str(),
         m.hash,
         static_cast<unsigned>(m.width),
         static_cast<unsigned>(m.height),

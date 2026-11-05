@@ -3,35 +3,40 @@
 
 namespace mister::svc::adv7513 {
 
-Ex<std::uint8_t> I2cBreaker::probe(unsigned bus, std::uint8_t addr) {
+Ex<std::uint8_t> I2cBreaker::probe(unsigned bus, os::I2cAddr addr) {
     TASTY_SEAT_BODY(I2cBreaker);
     return inner_->probe(bus, addr);
 }
 
-Ex<void> I2cBreaker::open(unsigned bus, std::uint8_t addr) {
+Ex<void> I2cBreaker::open(unsigned bus, os::I2cAddr addr) {
     TASTY_SEAT_BODY(I2cBreaker);
     return inner_->open(bus, addr);
 }
 
-Ex<std::uint8_t> I2cBreaker::read(std::uint8_t addr, std::uint8_t reg) {
+Ex<std::uint8_t> I2cBreaker::read(os::I2cAddr addr, os::I2cReg reg) {
     TASTY_SEAT_BODY(I2cBreaker);
     if (open_) {
         ++refused_;
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), addr});
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), addr.v});
     }
     auto r = inner_->read(addr, reg);
-    note(r.has_value(), addr, reg, r ? nullptr : &r.error());
+    note(r.has_value(), addr.v, reg, r ? nullptr : &r.error());
     return r;
 }
 
-Ex<void> I2cBreaker::write(std::uint8_t addr, std::uint8_t reg, std::uint8_t val) {
+Ex<void> I2cBreaker::write(os::I2cAddr addr, os::I2cReg reg, std::uint8_t val) {
     TASTY_SEAT_BODY(I2cBreaker);
     if (open_) {
         ++refused_;
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), addr});
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), addr.v});
     }
     auto r = inner_->write(addr, reg, val);
-    note(r.has_value(), static_cast<std::uint8_t>(addr | kOpWrite), reg, r ? nullptr : &r.error());
+    note(
+        r.has_value(),
+        static_cast<std::uint8_t>(addr.v | kOpWrite),
+        reg,
+        r ? nullptr : &r.error()
+    );
     return r;
 }
 
@@ -40,7 +45,7 @@ void I2cBreaker::reset() noexcept {
     run_ = 0;
 }
 
-void I2cBreaker::note(bool ok, std::uint8_t op, std::uint8_t reg, const Error* e) noexcept {
+void I2cBreaker::note(bool ok, std::uint8_t op, os::I2cReg reg, const Error* e) noexcept {
     if (ok) {
         run_ = 0;
         return;

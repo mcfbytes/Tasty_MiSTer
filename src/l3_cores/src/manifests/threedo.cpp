@@ -9,6 +9,8 @@
 
 namespace mister::cores::manifests {
 
+using namespace std::chrono_literals;
+
 static_assert(kThreeDoIoIndices.data == IoIndex{8}, "3do.h:78: CD_DATA_IO_INDEX == 0x8");
 static_assert(kThreeDoIoIndices.info == IoIndex{0xC}, "3do.h:79: CD_INFO_IO_INDEX == 0xC");
 static_assert(
@@ -39,18 +41,18 @@ static_assert(
 );
 
 static_assert(
-    kThreeDoTicks.idle_us == 3'000 && kThreeDoTicks.stream_us == 3'000,
+    kThreeDoTicks.idle == 3'000us && kThreeDoTicks.stream == 3'000us,
     "3do.cpp:23,:43: `poll_timer += 3` gates the WHOLE pass, and "
     "3DO has no second state to speed up for"
 );
 static_assert(
-    kThreeDoTicks.stream_us == kThreeDoTicks.idle_us,
+    kThreeDoTicks.stream == kThreeDoTicks.idle,
     "the one family with no two-arm cadence: do not 'fix' this to "
     "match MegaCD's `stream < idle` or PCE's inversion"
 );
 static_assert(
-    kThreeDoTicks.caller_us == kThreeDoServices[1].period_ms * 1000u,
-    "caller_us must BE the service row's own period_ms"
+    kThreeDoTicks.caller == kThreeDoServices[1].period,
+    "caller must BE the service row's own period"
 );
 
 static_assert(kThreeDoTicks.speeds == 0, "3DO engages no speed-indexed override");
@@ -71,7 +73,7 @@ static_assert(
     "both 3 ms rows claim each round they run (no OSD row)"
 );
 static_assert(
-    kThreeDoServices[0].period_ms == 3 && kThreeDoServices[1].period_ms == 3,
+    kThreeDoServices[0].period == 3ms && kThreeDoServices[1].period == 3ms,
     "3do.cpp:23: the edge read is INSIDE the 3 ms gate, so the edge "
     "row is NOT the period-0 every-round row MegaCD and PCE ship"
 );

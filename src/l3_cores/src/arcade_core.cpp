@@ -13,7 +13,6 @@ namespace mister::cores {
 
 ArcadeCore::ArcadeCore(const CoreProfile& profile, const HostServices& host, ArcadeFacts facts)
     : Core(profile, host),
-      file_host_(kGenericProfile, host),
       btn_names_(std::move(facts.btn_names)),
       btn_defaults_(std::move(facts.btn_defaults)),
       dip_name_(std::move(facts.dip_name)),
@@ -32,7 +31,7 @@ Ex<void> ArcadeCore::send_dips_() {
     auto session = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{kDipIndex});
     if (!session)
         return std::unexpected(session.error());
-    const std::array<std::uint8_t, 8> pack = dip_bytes();
+    const mra::DipWord::Bytes pack = dip_bytes();
     if (auto r = session->write(std::span<const std::uint8_t>(pack)); !r)
         return r;
     return session->end();
@@ -52,13 +51,22 @@ SaveImage ArcadeCore::save_image() const noexcept {
     };
 }
 
-std::uint8_t ArcadeCore::current_choice_(const mra::DipRow& d) const noexcept {
-    const std::uint64_t status = dip_cur_ & d.mask;
-    for (int n = 0; n < d.num; ++n) {
-        if (status == d.val[static_cast<std::size_t>(n)])
-            return static_cast<std::uint8_t>(n);
+namespace {
+
+proto::DipChoiceCount choices_of(const mra::DipRow& d) noexcept {
+    return d.num <= 0 ? proto::DipChoiceCount{} : proto::DipChoiceCount::of(d.num);
+}
+
+}
+
+proto::DipChoice ArcadeCore::current_choice_(const mra::DipRow& d) const noexcept {
+    const mra::DipWord status = dip_cur_.masked(d.mask);
+    const proto::DipChoiceCount choices = choices_of(d);
+    for (proto::DipChoice n{}; n.within(choices); n = n.after()) {
+        if (status == n.pick(d.val))
+            return n;
     }
-    return 0;
+    return {};
 }
 
 std::size_t ArcadeCore::dip_count() const noexcept {
@@ -66,48 +74,51 @@ std::size_t ArcadeCore::dip_count() const noexcept {
     return switches_.rows.size();
 }
 
-DipRowView ArcadeCore::dip_row(std::size_t row) const noexcept {
+DipRowView ArcadeCore::dip_row(proto::DipRowIndex row) const noexcept {
     TASTY_SEAT_BODY(ArcadeCore);
-    if (row >= switches_.rows.size())
+    if (!row.indexes(switches_.rows))
         return {};
-    const mra::DipRow& d = switches_.rows[row];
+    const mra::DipRow& d = row.pick(switches_.rows);
     DipRowView v;
     v.name = d.name;
-    v.choices = static_cast<std::uint8_t>(d.num < 0 ? 0 : d.num);
+    v.choices = choices_of(d);
     v.current = current_choice_(d);
     return v;
 }
 
-std::string_view ArcadeCore::dip_choice(std::size_t row, std::size_t choice) const noexcept {
+std::string_view ArcadeCore::dip_choice(
+    proto::DipRowIndex row,
+    proto::DipChoice choice
+) const noexcept {
     TASTY_SEAT_BODY(ArcadeCore);
-    if (row >= switches_.rows.size())
+    if (!row.indexes(switches_.rows))
         return {};
-    const mra::DipRow& d = switches_.rows[row];
-    if (choice >= d.ids.size())
+    const mra::DipRow& d = row.pick(switches_.rows);
+    if (!choice.indexes(d.ids))
         return {};
-    return d.ids[choice];
+    return choice.pick(d.ids);
 }
 
-Ex<void> ArcadeCore::set_dip(std::size_t row, std::size_t choice) {
+Ex<void> ArcadeCore::set_dip(proto::DipRowIndex row, proto::DipChoice choice) {
     TASTY_SEAT_BODY(ArcadeCore);
-    if (row >= switches_.rows.size()) {
+    if (!row.indexes(switches_.rows)) {
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(row)}
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(row.v)}
         );
     }
-    const mra::DipRow& d = switches_.rows[row];
-    if (d.num <= 0 || choice >= static_cast<std::size_t>(d.num)) {
+    const mra::DipRow& d = row.pick(switches_.rows);
+    if (!choice.within(choices_of(d))) {
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(choice)}
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(choice.v)}
         );
     }
-    dip_cur_ = (dip_cur_ & ~d.mask) | d.val[choice];
+    dip_cur_ = dip_cur_.with(d.mask, choice.pick(d.val));
     return send_dips_();
 }
 
 std::array<std::uint8_t, 8> ArcadeCore::dip_bytes() const noexcept {
     TASTY_SEAT_BODY(ArcadeCore);
-    return dip_pack(dip_cur_);
+    return dip_cur_.le_bytes();
 }
 
 bool ArcadeCore::dips_dirty() const noexcept {
@@ -116,19 +127,19 @@ bool ArcadeCore::dips_dirty() const noexcept {
 }
 
 Ex<void> ArcadeCore::on_mount(IoIndex slot, const MountedPath& p) {
-    return file_host_.mount(slot, p);
+    return stream_.mount(slot, p);
 }
 
 void ArcadeCore::on_set_pending_file_ext(std::string_view ext) noexcept {
-    file_host_.set_pending_ext(ext);
+    stream_.set_pending_ext(ext);
 }
 
 std::uint64_t ArcadeCore::on_last_tx_bytes() const noexcept {
-    return file_host_.bytes_sent();
+    return stream_.bytes();
 }
 
-std::uint32_t ArcadeCore::on_last_tx_crc() const noexcept {
-    return file_host_.tx_crc();
+svc::Crc32 ArcadeCore::on_last_tx_crc() const noexcept {
+    return stream_.crc();
 }
 
 std::string_view ArcadeCore::cheat_name(std::size_t i) const noexcept {

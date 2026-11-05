@@ -150,7 +150,7 @@ Ex<void> PlayedHistory::save_() {
         rec[offsetof(Stored, ioctl_index)] = static_cast<char>(r.ioctl_index);
         rec[offsetof(Stored, slot)] = r.slot;
     }
-    const auto r = writes_->arm(kRel, buf, infra::OptRef<IWriteVerdict>{*this});
+    const auto r = writes_->arm(kRel, buf, VerdictSink::Played);
     if (!r)
         ++errors_;
     return r;

@@ -6,12 +6,13 @@
 
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
 struct SaveStateFacts {
     TASTY_SEAT_EXEMPT(const_shared);
-    std::uint32_t answered = 0;
+    proto::ActKey answered{};
     std::uint32_t saves_written = 0;
     std::uint32_t refusals = 0;
     std::uint32_t write_failures = 0;

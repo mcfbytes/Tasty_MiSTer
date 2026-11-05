@@ -6,7 +6,7 @@
 
 #include "infra/error.h"
 #include "infra/seat.h"
-#include "svc/vfs.h"
+#include "svc/asset_query.h"
 
 namespace mister::svc {
 
@@ -16,7 +16,7 @@ class GameAssetFinder {
 public:
     explicit GameAssetFinder(std::string_view root_path) noexcept : root_path_(root_path) {}
 
-    [[nodiscard]] Ex<std::string> find(const Vfs::AssetQuery& q) const;
+    [[nodiscard]] Ex<std::string> find(const AssetQuery& q) const;
 
 private:
     std::string_view root_path_;

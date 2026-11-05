@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -52,7 +53,9 @@ public:
 
     std::span<const std::string> lines() const noexcept;
 
-    static bool quiesce_closes(int timeout_ms = 5000) noexcept;
+    static bool quiesce_closes(
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{5000}
+    ) noexcept;
 
 private:
     void push_line(std::string_view s);

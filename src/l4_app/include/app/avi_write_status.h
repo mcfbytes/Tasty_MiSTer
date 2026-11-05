@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "app/rec_write_status.h"
+#include "app/types.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -11,7 +12,7 @@
 namespace mister::app {
 
 struct AviWriteStatus {
-    std::uint16_t gen = 0;
+    ControlGeneration gen{};
     RecWriteState state = RecWriteState::Idle;
     std::uint8_t pad_ = 0;
     std::int32_t err = 0;

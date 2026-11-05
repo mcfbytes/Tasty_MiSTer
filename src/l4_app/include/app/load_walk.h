@@ -98,7 +98,7 @@ private:
         std::span<const std::uint8_t> bytes,
         const cores::PostNotify& notify
     );
-    [[nodiscard]] std::uint16_t next_act_(Host& h);
+    [[nodiscard]] proto::ActKey16 next_act_(Host& h);
     [[nodiscard]] Pass notify_(Host& h, const cores::PostNotify& n);
     [[nodiscard]] Pass rung_(Host& h);
     [[nodiscard]] Pass echo_(Host& h);
@@ -117,8 +117,8 @@ private:
     std::optional<cores::PayloadPieces> pieces_;
     std::uint64_t echo_bytes_ = 0;
     std::size_t row_ = 0;
-    std::uint16_t act_ = 0;
-    std::uint32_t save_gen_ = 0;
+    proto::ActKey16 act_{};
+    proto::ActKey save_gen_{};
     std::int64_t save_due_ns_ = 0;
     std::int64_t echo_due_ns_ = 0;
     bool failed_ = false;

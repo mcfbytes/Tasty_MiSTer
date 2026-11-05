@@ -8,6 +8,7 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
+#include "infra/park_timeout.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
@@ -19,7 +20,7 @@ class InputMain final : public xthread::SeatMain<InputMain> {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
-    static constexpr int kInputPollMs = 50;
+    static constexpr infra::ParkTimeout kInputPollMs{50};
 
     InputMain(
         InputDecode& decode,
@@ -47,7 +48,7 @@ public:
 
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
 
-    [[nodiscard]] int park_ms() const noexcept { return kInputPollMs; }
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return kInputPollMs; }
 
     [[nodiscard]] InputPark& park() noexcept { return park_; }
 

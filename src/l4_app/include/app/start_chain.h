@@ -24,7 +24,7 @@ namespace mister::app {
 struct StartFile {
     PathText path{};
     proto::WideIoIndex dest{};
-    std::uint64_t offset = 0;
+    proto::FileSize offset{};
 };
 
 class StartChain {
@@ -63,11 +63,11 @@ private:
     void plan_chain_(const Facts& f, const svc::Vfs& vfs);
     [[nodiscard]] bool plan_composite_(std::string_view rbf, const svc::Vfs& vfs);
     void plan_boot_images_(bool slot0_held, std::string_view home, const svc::Vfs& vfs);
-    void add_(std::string_view path, proto::WideIoIndex dest, std::uint64_t offset = 0);
+    void add_(std::string_view path, proto::WideIoIndex dest, proto::FileSize offset = {});
     [[nodiscard]] static std::optional<StartFile> file_(
         std::string_view path,
         proto::WideIoIndex dest,
-        std::uint64_t offset
+        proto::FileSize offset
     );
 
     static constexpr std::size_t kBootImages = 5;

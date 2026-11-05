@@ -13,15 +13,20 @@ namespace mister::svc {
 namespace {
 
 std::optional<std::uint32_t> parse_u32_base0(std::string_view s) {
+    constexpr int kBaseDecimal = 10;
+    constexpr int kBaseOctal = 8;
+    constexpr int kBaseHex = 16;
+    constexpr std::size_t kPrefix0xLen = 2;
+    constexpr std::size_t kPrefix0Len = 1;
     if (s.empty())
         return std::nullopt;
-    int base = 10;
-    if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
-        base = 16;
-        s.remove_prefix(2);
-    } else if (s.size() > 1 && s[0] == '0') {
-        base = 8;
-        s.remove_prefix(1);
+    int base = kBaseDecimal;
+    if (s.size() > kPrefix0xLen && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        base = kBaseHex;
+        s.remove_prefix(kPrefix0xLen);
+    } else if (s.size() > kPrefix0Len && s[0] == '0') {
+        base = kBaseOctal;
+        s.remove_prefix(kPrefix0Len);
     }
     const auto* first = s.data();
     const auto* last = s.data() + s.size();
@@ -45,6 +50,11 @@ std::optional<double> parse_double_all(std::string_view s) {
 }
 
 std::int64_t strtoull_prefix(std::string_view s) {
+    constexpr unsigned kBaseDecimal = 10;
+    constexpr unsigned kBaseOctal = 8;
+    constexpr unsigned kBaseHex = 16;
+    constexpr std::size_t kPrefix0xLen = 2;
+    constexpr unsigned kLetterDigitBase = 10;
     std::size_t i = 0;
     while (i < s.size() && (s[i] == ' ' || s[i] == '\t'))
         ++i;
@@ -53,12 +63,12 @@ std::int64_t strtoull_prefix(std::string_view s) {
         neg = (s[i] == '-');
         ++i;
     }
-    unsigned base = 10;
+    unsigned base = kBaseDecimal;
     if (i + 1 < s.size() && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
-        base = 16;
-        i += 2;
+        base = kBaseHex;
+        i += kPrefix0xLen;
     } else if (i < s.size() && s[i] == '0') {
-        base = 8;
+        base = kBaseOctal;
         ++i;
     }
     std::uint64_t v = 0;
@@ -68,9 +78,9 @@ std::int64_t strtoull_prefix(std::string_view s) {
         if (c >= '0' && c <= '9')
             digit = static_cast<unsigned>(c - '0');
         else if (c >= 'a' && c <= 'f')
-            digit = static_cast<unsigned>(c - 'a') + 10u;
+            digit = static_cast<unsigned>(c - 'a') + kLetterDigitBase;
         else if (c >= 'A' && c <= 'F')
-            digit = static_cast<unsigned>(c - 'A') + 10u;
+            digit = static_cast<unsigned>(c - 'A') + kLetterDigitBase;
         else
             break;
         if (digit >= base)
@@ -195,6 +205,25 @@ VideoService VideoService::create() {
 }
 
 Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) const {
+
+    constexpr std::size_t kTokPllFirst = 9;
+    constexpr std::size_t kTokDocumentedForm = 21;
+    constexpr std::size_t kTokHpol = 21;
+    constexpr std::size_t kTokVpol = 22;
+    constexpr std::size_t kTokVic = 23;
+    constexpr std::size_t kTokRb = 24;
+    constexpr std::size_t kTokPixelRepeat = 25;
+    constexpr std::uint32_t kByteMask = 0xFF;
+    constexpr std::size_t kTokPresetForm = 1;
+    constexpr std::size_t kTokRetryForm = 2;
+    constexpr std::size_t kTokTripleForm = 3;
+    constexpr std::size_t kTokNineForm = 9;
+    constexpr std::size_t kTokElevenForm = 11;
+    constexpr std::size_t kTokPresetIndex = 0, kTokWidth = 0, kTokHeight = 1, kTokRate = 2;
+    constexpr std::size_t kTokPixelClockKhz = 8;
+    constexpr std::size_t kTokNineHpol = 9, kTokNineVpol = 10;
+    constexpr double kKhzPerMhz = 1000.0;
+    constexpr std::size_t kTimings = 8;
     if (spec.empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
@@ -215,7 +244,7 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
         val[cnt] = *parsed;
     }
 
-    if (cnt == 2 && token_cnt > 2) {
+    if (cnt == kTokRetryForm && token_cnt > kTokRetryForm) {
         if (const auto parsed = parse_double_all(tokens.items[cnt])) {
             valf = *parsed;
             ++cnt;
@@ -249,70 +278,68 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
         }
     }
 
-    if (cnt == 1) {
+    if (cnt == kTokPresetForm) {
 
         out.how = ModeRequest::PresetIndex;
-        out.preset_index = val[0];
+        out.preset_index = val[kTokPresetIndex];
         return out;
     }
 
-    if (cnt == 3) {
+    if (cnt == kTokTripleForm) {
 
-        const double rate = (valf != 0.0) ? valf : static_cast<double>(val[2]);
+        const double rate = (valf != 0.0) ? valf : static_cast<double>(val[kTokRate]);
 
         const bool hpol = m.hpol;
         const bool vpol = m.vpol;
-        out.mode = calculate_cvt(val[0], val[1], static_cast<float>(rate), m.rb, supports_pr_);
+        out.mode = calculate_cvt(
+            val[kTokWidth],
+            val[kTokHeight],
+            static_cast<float>(rate),
+            m.rb,
+            supports_pr_
+        );
         out.mode.hpol = hpol;
         out.mode.vpol = vpol;
         out.how = ModeRequest::Triple;
         return out;
     }
 
-    if (cnt >= 21) {
+    if (cnt >= kTokDocumentedForm) {
 
-        m.hact = val[1];
-        m.hfp = val[2];
-        m.hs = val[3];
-        m.hbp = val[4];
-        m.vact = val[5];
-        m.vfp = val[6];
-        m.vs = val[7];
-        m.vbp = val[8];
+        video_timing::assign_timings(
+            m,
+            std::span<const std::uint32_t, kTimings>(val.data() + 1, kTimings)
+        );
         PllBlock pll{};
         for (std::size_t i = 0; i < pll.size(); ++i)
-            pll[i] = val[9 + i];
+            pll[i] = val[kTokPllFirst + i];
         out.raw_pll = pll;
-        if (cnt > 21)
-            m.hpol = (val[21] != 0);
-        if (cnt > 22)
-            m.vpol = (val[22] != 0);
-        if (cnt > 23)
-            m.vic = static_cast<std::uint8_t>(val[23] & 0xFFu);
-        if (cnt > 24)
-            m.rb = static_cast<std::uint8_t>(val[24] & 0xFFu);
-        if (cnt > 25)
-            m.pixel_repeat = (val[25] != 0);
+        if (cnt > kTokHpol)
+            m.hpol = (val[kTokHpol] != 0);
+        if (cnt > kTokVpol)
+            m.vpol = (val[kTokVpol] != 0);
+        if (cnt > kTokVic)
+            m.vic = static_cast<std::uint8_t>(val[kTokVic] & kByteMask);
+        if (cnt > kTokRb)
+            m.rb = static_cast<std::uint8_t>(val[kTokRb] & kByteMask);
+        if (cnt > kTokPixelRepeat)
+            m.pixel_repeat = (val[kTokPixelRepeat] != 0);
 
         out.how = ModeRequest::RawModeline;
         return out;
     }
 
-    if (cnt == 9 || cnt == 11) {
-        m.hact = val[0];
-        m.hfp = val[1];
-        m.hs = val[2];
-        m.hbp = val[3];
-        m.vact = val[4];
-        m.vfp = val[5];
-        m.vs = val[6];
-        m.vbp = val[7];
+    if (cnt == kTokNineForm || cnt == kTokElevenForm) {
+        video_timing::assign_timings(
+            m,
+            std::span<const std::uint32_t, kTimings>(val.data(), kTimings)
+        );
 
-        m.fpix_mhz = static_cast<double>(val[8]) / 1000.0;
-        if (cnt == 11) {
+        m.fpix_mhz = static_cast<double>(val[kTokPixelClockKhz]) / kKhzPerMhz;
+        if (cnt == kTokElevenForm) {
 
-            m.hpol = (val[9] != 0);
-            m.vpol = (val[10] != 0);
+            m.hpol = (val[kTokNineHpol] != 0);
+            m.vpol = (val[kTokNineVpol] != 0);
             out.how = ModeRequest::Eleven;
         } else {
             out.how = ModeRequest::Nine;
@@ -374,7 +401,7 @@ Ex<void> VideoService::poll_resolution() {
 
     const bool changed = gate_.vi_seen && (res_changed || fb_changed);
     if (changed)
-        ++res_gen_.v;
+        res_gen_ = res_gen_.next();
 
     const bool flt_force = changed;
     if (s->flt_flags != 0 && (flt_force || gate_.last_flt_flags != s->flt_flags)) {

@@ -37,7 +37,7 @@ public:
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
         std::span<const std::uint8_t> head,
-        std::uint64_t size
+        proto::FileSize size
     ) const noexcept override;
 
     [[nodiscard]] std::uint8_t rom_digit() const noexcept override { return 0; }

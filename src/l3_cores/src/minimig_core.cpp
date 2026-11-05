@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/minimig_core.h"
+#include "cores/core_adopt.h"
 
 #include <array>
 

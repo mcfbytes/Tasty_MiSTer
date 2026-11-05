@@ -21,11 +21,8 @@ main() {
 
     export TASTY_UI=text TASTY_DIR="$ROOT/tasty"
     sh "$ROOT/Scripts/Tasty.sh" scan >"$W/scan" || die "the ROM scan failed"
-    awk -F'\t' '$1 == "ready"' "$W/scan" >"$W/all"
-    [ -s "$W/all" ] || die "no ROM Tasty knows was found. Put your own dumps under games/ and run this again, or open Scripts, Tasty to see which ROMs are wanted"
-    # a run known to desync is never picked at random; the Tasty menu still offers them
-    awk -F'\t' '$3 !~ /\[desync\]$/' "$W/all" >"$W/ready"
-    [ -s "$W/ready" ] || die "your ROMs only match runs known to desync. Open Scripts, Tasty to watch one anyway, or add more of your own dumps under games/"
+    awk -F'\t' '$1 == "ready"' "$W/scan" >"$W/ready"
+    [ -s "$W/ready" ] || die "no ROM Tasty knows was found. Put your own dumps under games/ and run this again, or open Scripts, Tasty to see which ROMs are wanted"
     awk -F'\t' '$3 !~ /\[(untested|reported)\]$/' "$W/ready" >"$W/best"
     [ -s "$W/best" ] || cp "$W/ready" "$W/best"
     pick=$(awk 'BEGIN { srand() } { l[NR] = $0 } END { print l[int(rand() * NR) + 1] }' "$W/best")

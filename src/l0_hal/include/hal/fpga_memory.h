@@ -10,6 +10,7 @@
 #include "infra/error.h"
 #include "os/mmio_region.h"
 #include "hal/phys_region.h"
+#include "hal/types.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
@@ -69,8 +70,8 @@ public:
 
     const PhysRegion& region() const noexcept { return region_; }
 
-    void store_release(std::size_t word_off, std::uint32_t v);
-    std::uint32_t load_acquire(std::size_t word_off) const;
+    void store_release(WordOffset at, std::uint32_t v);
+    std::uint32_t load_acquire(WordOffset at) const;
 
 private:
     FpgaMemory() = default;

@@ -4,10 +4,6 @@
 
 namespace mister::proto {
 
-namespace {
-constexpr std::uint16_t kSetStatus2 = 0x1E;
-}
-
 void StatusRegister::set_bit(StatusBit bit, bool value) {
     if (bit.v >= kBits) {
         fatal(Error{Errc::slot_range, ERR_SITE(), bit.v}, "status bit");
@@ -58,7 +54,7 @@ Ex<void> StatusRegister::flush(ILinkFrame& frame) {
     const StatusWord next = value();
     if (fence_)
         fence_->before_status(sent_, next);
-    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetStatus2)); !r)
+    if (auto r = frame.begin(UioOp::SetStatus2); !r)
         return r;
     for (unsigned i = 0; i < kWords; ++i) {
         if (auto r = frame.word(words_[i]); !r)

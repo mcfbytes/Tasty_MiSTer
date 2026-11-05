@@ -129,7 +129,7 @@ public:
 
     [[nodiscard]] std::uint8_t current() const noexcept { return current_; }
 
-    [[nodiscard]] const MglItem& item(std::uint8_t i) const noexcept { return items_[i]; }
+    [[nodiscard]] const MglItem& item(std::uint8_t i) const noexcept { return entries_[i].item; }
 
     void on(const MglItem::Load&) noexcept {
         TASTY_SEAT_BODY(MglPlayer);
@@ -163,12 +163,17 @@ private:
         std::uint8_t ioctl_index = 0;
     };
 
-    std::array<std::optional<RememberAt>, kMaxItems> remember_{};
+    struct PlaylistEntry {
+        MglItem item{};
+        std::optional<RememberAt> remember{};
+        CorrelationTag tag{};
+    };
+
     RememberedStem stem_{};
     std::uint32_t remembered_ = 0;
     std::uint32_t remember_failures_ = 0;
     CoreScope scope_{};
-    std::array<MglItem, kMaxItems> items_{};
+    std::array<PlaylistEntry, kMaxItems> entries_{};
     PathText file_home_{};
     PathText image_home_{};
     PathBase base_ = PathBase::Home;
@@ -177,7 +182,6 @@ private:
     std::uint32_t publishes_ = 0;
     std::uint32_t drops_ = 0;
     CorrelationTag last_tag_{};
-    std::array<CorrelationTag, kMaxItems> tags_{};
     bool armed_ = false;
     MglState state_ = MglState::Done;
 

@@ -397,7 +397,7 @@ struct ZipEntries {
             .name = zip_current_name(*uf, fi),
             .size = static_cast<std::uint64_t>(fi.uncompressed_size),
             .packed = static_cast<std::uint64_t>(fi.compressed_size),
-            .crc = static_cast<std::uint32_t>(fi.crc),
+            .crc = Crc32{static_cast<std::uint32_t>(fi.crc)},
             .method = static_cast<std::uint16_t>(fi.compression_method),
             .encrypted = (fi.flag & 1u) != 0u,
             .plausible = zip_size_is_possible(fi)

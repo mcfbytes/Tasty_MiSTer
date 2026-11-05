@@ -7,6 +7,7 @@
 #include "app/input_wire.h"
 #include "app/osd_wire.h"
 #include "app/link_session.h"
+#include "app/link_op_facts.h"
 #include "app/core_frame_counter.h"
 #include "app/disk_relay.h"
 #include "app/replay_gate.h"
@@ -183,7 +184,7 @@ unsigned RtMain::drain_(
             continue;
         const std::uint32_t ends = session_->held().tally().downloads_closed;
         const std::uint32_t resets = session_->tally().resets_pulsed;
-        session_->deliver(*op, inbox, windows_closed);
+        const Delivered d = session_->deliver(*op, inbox, windows_closed);
 
         if (replay_ && session_->held().tally().downloads_closed != ends) {
             replay_->note_download_end(session_->last_download_index());
@@ -191,12 +192,8 @@ unsigned RtMain::drain_(
 
         if (replay_ && session_->tally().resets_pulsed != resets)
             replay_->note_core_reset();
-        const auto ftx = infra::as<proto::LinkOp::FileTx>(*op);
 
-        if (ftx && ftx->phase != proto::LinkOp::FileTxPhase::Whole)
-            break;
-        const auto sp = infra::as<proto::LinkOp::StagePayload>(*op);
-        if (sp && sp->payload != proto::FileId{} && sp->copy_word == 0)
+        if (d.round_spent && round_cost_for(infra::kind_of(*op)) == RoundCost::Payload)
             break;
     }
     return got;
@@ -232,7 +229,7 @@ void RtMain::replay_step_() noexcept {
     const proto::LateAnswers late = session_ ? session_->take_late_answers() : proto::LateAnswers{};
     replay_->tick(
         replay_ready_(),
-        core_edge_seq_(),
+        core_edge_seq_().v,
         late,
         static_cast<std::uint32_t>(replay_ring_.size())
     );
@@ -248,8 +245,10 @@ void RtMain::replay_step_() noexcept {
 void RtMain::frames_step_() noexcept {
     if (!frames_)
         return;
-    const std::int32_t movie = replay_ && replay_->armed() ? replay_->status().movie_frame : -1;
-    frames_->settle(replay_ready_(), core_edge_seq_(), movie);
+    MovieFrame movie = kNoMovieFrame;
+    if (replay_ && replay_->armed())
+        movie = replay_->status().movie_frame;
+    frames_->settle(replay_ready_(), core_edge_seq_().v, movie);
 }
 
 Ex<void> RtMain::pump_boot() {
@@ -298,8 +297,8 @@ bool RtMain::session_live_() const noexcept {
     return !session_ || session_->liveness().session_live();
 }
 
-std::uint32_t RtMain::core_edge_seq_() const noexcept {
-    return session_ ? session_->core_edge_seq() : 0u;
+CoreEdgeSeq RtMain::core_edge_seq_() const noexcept {
+    return session_ ? session_->core_edge_seq() : CoreEdgeSeq{};
 }
 
 void RtMain::note_switch_() const noexcept {

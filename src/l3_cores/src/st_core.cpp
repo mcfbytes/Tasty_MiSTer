@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/st_core.h"
+#include "cores/core_adopt.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -8,6 +9,7 @@
 
 #include "cores/disk_port.h"
 #include "cores/st_media_fact.h"
+#include "proto/link.h"
 #include "proto/spi_frame.h"
 #include "proto/download_session.h"
 #include "proto/image_bracket.h"
@@ -23,17 +25,29 @@ constexpr auto kBlankCart = [] {
     return a;
 }();
 
+[[nodiscard]] constexpr AcsiTarget target_of(std::uint8_t slot) noexcept {
+    return AcsiTarget{static_cast<std::uint8_t>(slot & 1u)};
+}
+
+[[nodiscard]] constexpr AcsiTarget target_of(proto::IoIndex slot) noexcept {
+    return target_of(slot.v);
+}
+
+[[nodiscard]] constexpr AcsiTarget target_of(proto::SlotIndex slot) noexcept {
+    return target_of(slot.v);
+}
+
+[[nodiscard]] constexpr proto::DiskUnit unit_of(AcsiTarget target) noexcept {
+    return proto::DiskUnit{target.v};
+}
+
 }
 
 StCore::StCore(const CoreProfile& p, const HostServices& h) : Core(p, h) {}
 
 Ex<void> StCore::push_control_() {
     proto::SpiFrame frame{host().link};
-    if (auto r = frame.begin(
-            proto::FrameSel::Uio,
-            static_cast<std::uint16_t>(proto::UioOp::SetStatus2)
-        );
-        !r)
+    if (auto r = frame.begin(proto::UioOp::SetStatus2); !r)
         return r;
     const std::uint16_t payload[4] = {
         static_cast<std::uint16_t>(cfg_.system_ctrl & 0xFFFFu),
@@ -190,19 +204,18 @@ Ex<void> StCore::insert_disk_(IoIndex slot, std::string_view path) {
 
     if (!path.empty())
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
-    return eject_hdd_(static_cast<std::uint8_t>(slot.v & 1u));
+    return eject_hdd_(target_of(slot));
 }
 
-Ex<void> StCore::eject_hdd_(std::uint8_t target) {
+Ex<void> StCore::eject_hdd_(AcsiTarget target) {
     if (host().disk)
-        host().disk->abandon_command_on(target);
+        host().disk->abandon_command_on(unit_of(target));
     (void)cfg_.acsi_img[target].assign({});
-    cfg_.system_ctrl &= ~(st_ctrl::kAcsi0Enable << target);
-    hdd_bound_[target] = false;
-    bind_out_[target] = false;
+    cfg_.system_ctrl &= ~(st_ctrl::kAcsi0Enable << target.v);
+    acsi_[target] = AcsiBind{};
     auto pushed = push_control_();
     if (host().disk)
-        host().disk->order_bind(target, {});
+        host().disk->order_bind(unit_of(target), {});
     return pushed;
 }
 
@@ -210,23 +223,22 @@ MountState StCore::mount_slot(proto::SlotIndex slot, std::string_view path) {
     TASTY_SEAT_BODY(StCore);
     if (slot.v != kAcsiSlot0.v && slot.v != kAcsiSlot1.v)
         return MountState::Failed;
-    const auto target = static_cast<std::uint8_t>(slot.v & 1u);
+    const AcsiTarget target = target_of(slot);
     if (!host().disk)
         return MountState::Failed;
     IDiskPort& disk = *host().disk;
-    if (!bind_out_[target] || cfg_.acsi_img[target].view() != path) {
+    if (!acsi_[target].out || cfg_.acsi_img[target].view() != path) {
         (void)cfg_.acsi_img[target].assign(path);
-        hdd_bound_[target] = false;
-        bind_out_[target] = true;
-        disk.order_bind(target, path);
+        acsi_[target] = AcsiBind{.bound = false, .out = true};
+        disk.order_bind(unit_of(target), path);
     }
-    const MountState answer = disk.bind_answer(target);
+    const MountState answer = disk.bind_answer(unit_of(target));
     if (answer == MountState::Pending)
         return MountState::Pending;
-    bind_out_[target] = false;
-    const std::uint32_t enable = st_ctrl::kAcsi0Enable << target;
-    hdd_bound_[target] = answer == MountState::Done && !path.empty();
-    if (hdd_bound_[target]) {
+    acsi_[target].out = false;
+    const std::uint32_t enable = st_ctrl::kAcsi0Enable << target.v;
+    acsi_[target].bound = answer == MountState::Done && !path.empty();
+    if (acsi_[target].bound) {
         cfg_.system_ctrl |= enable;
     } else {
         cfg_.system_ctrl &= ~enable;
@@ -316,8 +328,9 @@ Ex<void> StCore::push_word_(WordId w, std::uint32_t v) {
     return w == WordId{0} ? update_sysctrl_(v) : set_ext_ctrl(v);
 }
 
-OptionRowView StCore::option_view(std::size_t row) noexcept {
+OptionRowView StCore::option_view(proto::OptionRowIndex index) noexcept {
     TASTY_SEAT_BODY(StCore);
+    const std::size_t row = index.v;
     const auto rows = profile().option_rows;
     if (row >= rows.size())
         return {};
@@ -350,15 +363,16 @@ StOptionRow::Facts StCore::facts_() const noexcept {
         .ext_ctrl = cfg_.ext_ctrl,
         .floppy_in = floppy_inserted_,
         .floppy = {floppy_img_[0].view(), floppy_img_[1].view()},
-        .hdd_bound = hdd_bound_,
-        .acsi = {cfg_.acsi_img[0].view(), cfg_.acsi_img[1].view()},
+        .hdd_bound = {acsi_[AcsiTarget{0}].bound, acsi_[AcsiTarget{1}].bound},
+        .acsi = {cfg_.acsi_img[AcsiTarget{0}].view(), cfg_.acsi_img[AcsiTarget{1}].view()},
         .tos = cfg_.tos_img.view(),
         .cart = cart_img_.view()
     };
 }
 
-Ex<void> StCore::set_option(std::size_t row, std::uint8_t choice) {
+Ex<void> StCore::set_option(proto::OptionRowIndex index, proto::FieldValue choice) {
     TASTY_SEAT_BODY(StCore);
+    const std::size_t row = index.v;
     const auto rows = profile().option_rows;
     if (row >= rows.size()) {
         return std::unexpected(
@@ -369,24 +383,27 @@ Ex<void> StCore::set_option(std::size_t row, std::uint8_t choice) {
     const auto o = static_cast<StOption>(r.id);
     switch (r.kind) {
         case OptionRow::Kind::Cycle: {
-            if (choice >= r.choice_count()) {
+            const std::uint32_t pick = choice.v;
+            if (pick >= r.choice_count()) {
                 return std::unexpected(
                     Error{
                         Errc::slot_range,
                         ERR_SITE(),
-                        (static_cast<std::uint32_t>(choice) << 8) | static_cast<std::uint32_t>(row)
+                        (pick << 8) | static_cast<std::uint32_t>(row)
                     }
                 );
             }
             if (!r.bits.valid()) {
-                const auto w = StOptionRow::of(o).cycle_set(facts_(), choice);
+                const auto w = StOptionRow::of(o).cycle_set(
+                    facts_(),
+                    static_cast<std::uint8_t>(pick)
+                );
                 if (!w)
                     return std::unexpected(w.error());
                 return apply_write_(*w);
             }
             const std::uint32_t field = r.bits.mask() << r.bits.start.v;
-            const std::uint32_t v = (word_(r.word) & ~field)
-                | ((static_cast<std::uint32_t>(choice) << r.bits.start.v) & field);
+            const std::uint32_t v = (word_(r.word) & ~field) | ((pick << r.bits.start.v) & field);
             return push_word_(r.word, v);
         }
         case OptionRow::Kind::Action:
@@ -412,16 +429,18 @@ Ex<void> StCore::apply_write_(const StOptionRow::Write& w) {
 
 void StCore::service_kick() noexcept {
     TASTY_SEAT_BODY(StCore);
-    if (host().disk)
-        host().disk->service_rt(host().link, kAcsiPoll);
+    if (host().disk) {
+        proto::Link link{host().link};
+        host().disk->service_rt(link, kAcsiPoll);
+    }
 }
 
-bool StCore::acsi_bound(std::uint8_t target) const noexcept {
-    return target < kAcsiTargets && hdd_bound_[target];
+bool StCore::acsi_bound(AcsiTarget target) const noexcept {
+    return target.v < kAcsiTargets && acsi_[target].bound;
 }
 
-std::string_view StCore::acsi_path(std::uint8_t target) const noexcept {
-    return target < kAcsiTargets ? cfg_.acsi_img[target].view() : std::string_view{};
+std::string_view StCore::acsi_path(AcsiTarget target) const noexcept {
+    return target.v < kAcsiTargets ? cfg_.acsi_img[target].view() : std::string_view{};
 }
 
 }

@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "app/rec_options.h"
+#include "app/types.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -19,7 +20,7 @@ enum class RecMode : std::uint8_t { Hash, Avi };
 using RecPath = FixedStr<256, StrFit::Reject>;
 
 struct RecControl {
-    std::uint16_t gen = 0;
+    ControlGeneration gen{};
     RecOp op = RecOp::None;
     RecMode mode = RecMode::Hash;
     RecPath path{};

@@ -12,6 +12,7 @@
 #include "hal/scaler_header.h"
 #include "hal/scaler_probe.h"
 #include "infra/opt_ref.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 
@@ -45,7 +46,7 @@ public:
     [[nodiscard]] bool probing() const noexcept { return phase_ == Phase::Probe; }
 
     [[nodiscard]] bool poll_due(std::int64_t now) const noexcept;
-    [[nodiscard]] int park_ms(std::int64_t now) const noexcept;
+    [[nodiscard]] infra::ParkTimeout park_ms(std::int64_t now) const noexcept;
     Image poll(std::int64_t now, bool copy) noexcept;
 
 private:

@@ -8,6 +8,7 @@
 
 #include "app/stream_io.h"
 #include "hal/bridge_sequencer.h"
+#include "infra/endian.h"
 #include "hal/fpga_programmer.h"
 #include "svc/vfs.h"
 
@@ -15,22 +16,23 @@ namespace mister::app {
 
 [[nodiscard]] Ex<PayloadWindow> container_window(
     std::span<const std::byte> hdr,
-    std::uint64_t fsz
+    proto::FileSize fsz
 ) {
     static constexpr char kMagic[6] = {'M', 'i', 'S', 'T', 'e', 'r'};
-    if (fsz < kContainerHeaderBytes
+    static constexpr std::size_t kDeclaredAt = 12;
+    if (fsz < kContainerHeader
         || hdr.size() < kContainerHeaderBytes
         || std::memcmp(hdr.data(), kMagic, sizeof(kMagic)) != 0) {
-        return PayloadWindow{0, fsz};
+        return PayloadWindow{proto::FileSize{}, fsz};
     }
-    const auto b = [hdr](std::size_t i) {
-        return static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(hdr[i]));
-    };
-    const std::uint32_t declared = b(12) | (b(13) << 8) | (b(14) << 16) | (b(15) << 24);
-    if (declared > fsz - kContainerHeaderBytes) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), declared});
+    const auto word = infra::load_le<std::uint32_t>(
+        hdr.subspan<kDeclaredAt, sizeof(std::uint32_t)>()
+    );
+    const proto::FileSize declared{word};
+    if (declared > fsz - kContainerHeader) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), word});
     }
-    return PayloadWindow{kContainerHeaderBytes, declared};
+    return PayloadWindow{kContainerHeader, declared};
 }
 
 Ex<void> BitstreamProgrammer::program(const ParkReceipt&, AllLeasesHome, std::string_view rel) {
@@ -50,10 +52,12 @@ Ex<void> BitstreamProgrammer::run_(std::string_view rel) {
     if (!src)
         return std::unexpected(src.error());
 
-    PayloadWindow win{0, src->size};
-    if (src->size >= kContainerHeaderBytes) {
+    PayloadWindow win{proto::FileSize{}, src->size};
+    if (src->size >= kContainerHeader) {
         std::byte hdr[kContainerHeaderBytes];
-        if (auto r = stream_read(*src->f, 0, std::span<std::byte>(hdr, sizeof(hdr))); !r) {
+        if (auto
+                r = stream_read(*src->f, proto::FileSize{}, std::span<std::byte>(hdr, sizeof(hdr)));
+            !r) {
             return std::unexpected(r.error());
         }
         auto w = container_window(std::span<const std::byte>(hdr, sizeof(hdr)), src->size);
@@ -62,7 +66,7 @@ Ex<void> BitstreamProgrammer::run_(std::string_view rel) {
         win = *w;
     }
 
-    if (win.length == 0) {
+    if (win.length == proto::FileSize{}) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
@@ -73,17 +77,16 @@ Ex<void> BitstreamProgrammer::run_(std::string_view rel) {
         return std::unexpected(r.error());
     }
 
-    for (std::uint64_t pos = 0; pos < win.length;) {
-        const auto n = static_cast<std::size_t>(
-            std::min<std::uint64_t>(chunk_bytes_, win.length - pos)
-        );
+    for (proto::FileSize pos{}; pos < win.length;) {
+        const auto left = std::min(win.length - pos, proto::FileSize{chunk_bytes_});
+        const auto n = static_cast<std::size_t>(left.v);
         if (auto r = stream_read(*src->f, win.base + pos, std::span<std::byte>(buf_, n)); !r) {
             return std::unexpected(r.error());
         }
         if (auto r = programmer_->program_chunk(std::span<const std::byte>(buf_, n)); !r) {
             return std::unexpected(r.error());
         }
-        pos += n;
+        pos += proto::FileSize{n};
     }
 
     if (auto r = programmer_->drive_to_rest(programmer_->program_end()); !r) {

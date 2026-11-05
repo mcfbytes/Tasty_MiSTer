@@ -8,6 +8,7 @@
 
 #include "svc/adv7513_init_options.h"
 #include "svc/config_snapshot.h"
+#include "app/types.h"
 #include "svc/modeline.h"
 
 namespace mister::app {
@@ -17,7 +18,7 @@ struct VideoIni {
     struct Force {
         bool replay = false;
         bool strict_direct_video = false;
-        std::optional<std::uint8_t> vsync{};
+        std::optional<VsyncAdjust> vsync{};
     };
 
     svc::Modeline::WireOptions wire{};
@@ -28,7 +29,7 @@ struct VideoIni {
 
     std::string spec_pal{};
     std::string spec_ntsc{};
-    std::uint8_t vsync_adjust = 0;
+    VsyncAdjust vsync_adjust = VsyncAdjust::Off;
     double refresh_min = 0.0;
     double refresh_max = 0.0;
     bool direct_video = false;

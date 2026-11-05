@@ -10,17 +10,18 @@ namespace mister::svc {
 namespace {
 
 std::int64_t decode_now_ns() noexcept {
+    constexpr std::int64_t kNsPerSecond = 1'000'000'000;
     timespec ts{};
     ::clock_gettime(CLOCK_MONOTONIC, &ts);
-    return static_cast<std::int64_t>(ts.tv_sec) * 1'000'000'000
+    return static_cast<std::int64_t>(ts.tv_sec) * kNsPerSecond
         + static_cast<std::int64_t>(ts.tv_nsec);
 }
 }
 
 namespace {
 
-constexpr int kRunningPollMs = 100;
-constexpr int kParkedPollMs = -1;
+constexpr infra::ParkTimeout kRunningPollMs{100};
+constexpr infra::ParkTimeout kParkedPollMs = infra::kForever;
 }
 
 Ex<void> ChdPrefetch::open() {
@@ -35,7 +36,7 @@ Ex<void> ChdPrefetch::open() {
     return wake_.open_fd();
 }
 
-void ChdPrefetch::rest_(int ms, std::uint32_t want, bool watch_free) noexcept {
+void ChdPrefetch::rest_(infra::ParkTimeout ms, std::uint32_t want, bool watch_free) noexcept {
     rests_ = true;
     rest_parked_ = false;
     rest_ms_ = ms;
@@ -262,9 +263,10 @@ void ChdPrefetch::serve() noexcept {
 
     const std::uint32_t h = next_;
     std::byte* dst = slab_.get() + static_cast<std::size_t>(job.index()) * worker_hunk_bytes_;
+    constexpr std::int64_t kNsPerMicrosecond = 1000;
     const std::int64_t t0 = decode_now_ns();
     auto r = src_->read_hunk(h, std::span<std::byte>(dst, worker_hunk_bytes_));
-    decode_us_.add(static_cast<std::uint32_t>((decode_now_ns() - t0) / 1000));
+    decode_us_.add(static_cast<std::uint32_t>((decode_now_ns() - t0) / kNsPerMicrosecond));
     if (!r) {
         errors_.add();
 
@@ -279,7 +281,7 @@ void ChdPrefetch::serve() noexcept {
     ++next_;
 
     if (!sprinting_())
-        rest_(kPrefetchTopUpMs, want, false);
+        rest_(infra::ParkTimeout{kPrefetchTopUpMs}, want, false);
 }
 
 void ChdPrefetch::release() noexcept {
@@ -378,7 +380,10 @@ PrefetchCounters ChdPrefetch::counters() const noexcept {
 
     c.drops = chan_.breaches();
     c.errors = errors_.get();
-    c.state = !opened() ? 0u : (parked() ? 1u : 2u);
+    constexpr std::uint32_t kClosed = 0;
+    constexpr std::uint32_t kParked = 1;
+    constexpr std::uint32_t kRunning = 2;
+    c.state = !opened() ? kClosed : (parked() ? kParked : kRunning);
     c.decode_us = decode_us_.get();
     c.evictions = evictions_.get();
     return c;

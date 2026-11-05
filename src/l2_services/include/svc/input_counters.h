@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "infra/counter.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "svc/device_report.h"
 #include "svc/types.h"
@@ -31,13 +32,14 @@ public:
 
     void set_mapped(std::uint32_t n) noexcept { n_mapped_.set(n); }
 
-    void set_bound(std::uint32_t bound, std::uint32_t live) noexcept {
+    void set_bound(std::uint32_t bound, PlayerMask live) noexcept {
         n_slotted_.set(bound);
-        n_live_mask_.set(live);
+        n_live_mask_.set(live.v);
     }
 
-    void set_slot_hash(std::uint8_t player, std::uint32_t h) noexcept {
-        n_slot_hash_[player].set(h);
+    void set_slot_hash(PlayerIndex player, std::uint32_t h) noexcept {
+        if (const auto c = n_slot_hash_.find(player))
+            c->set(h);
     }
 
     void set_ghosts(std::uint32_t n) noexcept { n_ghost_.set(n); }
@@ -58,10 +60,13 @@ public:
 
     std::uint32_t grab_failures() const noexcept { return n_grab_fail_.get(); }
 
-    std::uint32_t live_slot_mask() const noexcept { return n_live_mask_.get(); }
+    PlayerMask live_slot_mask() const noexcept {
+        return PlayerMask{static_cast<std::uint8_t>(n_live_mask_.get())};
+    }
 
-    std::uint32_t slot_key_hash(std::uint8_t player) const noexcept {
-        return player < kMaxPlayers ? n_slot_hash_[player].get() : 0u;
+    std::uint32_t slot_key_hash(PlayerIndex player) const noexcept {
+        const auto c = n_slot_hash_.find(player);
+        return c ? c->get() : 0u;
     }
 
     std::uint32_t ghost_slots() const noexcept { return n_ghost_.get(); }
@@ -76,7 +81,7 @@ private:
     xthread::Counter n_quirk_drops_{};
     xthread::Counter n_grab_fail_{};
     xthread::Counter n_live_mask_{};
-    xthread::Counter n_slot_hash_[kMaxPlayers]{};
+    infra::IndexedArray<xthread::Counter, kMaxPlayers, PlayerIndex> n_slot_hash_{};
     xthread::Counter n_ghost_{};
 };
 

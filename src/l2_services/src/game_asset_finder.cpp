@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "game_asset_finder.h"
+#include "svc/game_asset_finder.h"
 
 #include <dirent.h>
 
@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "infra/ascii.h"
+#include "svc/asset_name.h"
 #include "vfs_detail.h"
 #include "vfs_stat.h"
 #include "vfs_zip.h"
@@ -71,7 +72,7 @@ std::optional<std::string> asset_by_crc(Crc32 crc, std::string_view ext, const s
         const std::string_view name(de->d_name);
         if (de->d_type != DT_REG && de->d_type != DT_UNKNOWN)
             continue;
-        const auto parsed = Vfs::parse_crc_name(name, ext);
+        const auto parsed = asset_name::parse_crc_name(name, ext);
         if (!parsed || !(*parsed == crc))
             continue;
         if (!best.empty() && !(name < std::string_view(best)))
@@ -98,7 +99,7 @@ std::string retarget_extension(std::string p, std::string_view infix, std::strin
 
 }
 
-Ex<std::string> GameAssetFinder::find(const Vfs::AssetQuery& q) const {
+Ex<std::string> GameAssetFinder::find(const AssetQuery& q) const {
 
     const bool cd_layout = !q.cd_asset_dir.empty();
 

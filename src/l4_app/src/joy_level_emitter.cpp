@@ -11,40 +11,39 @@ void JoyLevelEmitter::publish(bool muted) {
     std::uint32_t players = tally_.joy_players();
 
     if (reset_seen_.take(wire_.edge_reset())) {
-        for (std::uint32_t& v : last_joy_posted_)
-            v = 0u;
+        for (PlayerLevel& level : levels_)
+            level.posted = {};
     }
-    const std::uint32_t gates = wire_.gates();
-    wm_gates_ = gates;
-    const bool grabbed = (gates & InputWire::kGateGrabbed) != 0u;
-    const bool osd_visible = (gates & InputWire::kGateOsdVisible) != 0u;
-    std::uint32_t autofire[svc::kMaxPlayers]{};
+    wm_gates_ = wire_.gates();
+    const bool grabbed = InputWire::has(wm_gates_, InputWire::kGateGrabbed);
+    const bool osd_visible = InputWire::has(wm_gates_, InputWire::kGateOsdVisible);
 
     for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
         const svc::PlayerIndex p{i};
+        PlayerLevel& level = levels_[p];
         const svc::JoyMask mask = svc_.joy_mask(p);
         if (mask.v != 0u) {
             seen |= mask.v;
             players |= (1u << i);
         }
-        autofire[i] = wire_.joy(p).autofire.v;
+        level.autofire = wire_.joy(p).autofire;
 
         wire_.publish_joy(p, mask, wire_.joy(p).autofire);
-        if (mask.v != armed_mask_[i] || autofire[i] != armed_autofire_[i]) {
-            armed_mask_[i] = mask.v;
-            armed_autofire_[i] = autofire[i];
-            zero_armed_[i] = true;
+        if (mask != level.armed_mask || level.autofire != level.armed_autofire) {
+            level.armed_mask = mask;
+            level.armed_autofire = level.autofire;
+            level.zero_armed = true;
         }
-        if (!muted && grabbed && mask.v != last_joy_posted_[i]) {
+        if (!muted && grabbed && mask != level.posted) {
 
             if (inbox_.push(
                     proto::LinkOp::JoyEmit{
                         .player = proto::PlayerIndex{i},
                         .mask = mask,
-                        .autofire = proto::JoyMask{autofire[i]}
+                        .autofire = level.autofire
                     }
                 )) {
-                last_joy_posted_[i] = mask.v;
+                level.posted = mask;
                 wire_.note_activity();
             }
         }
@@ -52,16 +51,17 @@ void JoyLevelEmitter::publish(bool muted) {
 
     if (!grabbed || osd_visible) {
         for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
-            if (!zero_armed_[i])
+            PlayerLevel& level = levels_[svc::PlayerIndex{i}];
+            if (!level.zero_armed)
                 continue;
             const proto::LinkOp::JoyRelease rel{
                 .player = proto::PlayerIndex{i},
-                .mask = proto::JoyMask{grabbed ? (armed_mask_[i] | autofire[i]) : armed_mask_[i]}
+                .mask = grabbed ? level.armed_mask | level.autofire : level.armed_mask
             };
             if (!muted && inbox_.push(rel))
                 wire_.note_activity();
 
-            zero_armed_[i] = false;
+            level.zero_armed = false;
         }
     }
     tally_.store_joy(seen, players);

@@ -10,6 +10,7 @@
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
@@ -46,7 +47,7 @@ using Fnv1aHex = FixedStr<17, StrFit::Reject>;
     const svc::Vfs& vfs,
     const SavePath& own,
     const SavePath& stock,
-    std::uint64_t length
+    proto::FileSize length
 );
 
 class NvramStore {

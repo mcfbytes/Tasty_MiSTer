@@ -21,7 +21,6 @@
 #include "infra/ascii.h"
 #include "proto/standard_item.h"
 #include "proto/status_word.h"
-#include "ui/page_ask.h"
 #include "ui/browser_launch.h"
 #include "ui/browser_page.h"
 #include "ui/bt_ops.h"
@@ -123,7 +122,7 @@ bool PageStack::any_takes_focus() const noexcept {
 
 const Page* PageStack::focus_top() const noexcept {
     for (auto it = pages_.rbegin(); it != pages_.rend(); ++it) {
-        if ((*it)->takes_input_focus())
+        if ((*it)->facts().takes_input_focus)
             return it->get();
     }
     return nullptr;
@@ -131,31 +130,32 @@ const Page* PageStack::focus_top() const noexcept {
 
 bool MenuModel::global_hotkeys_allowed() const noexcept {
     const Page* p = stack_.focus_top();
-    return p == nullptr || p->allows_global_hotkeys();
+    return p == nullptr || p->facts().allows_global_hotkeys;
 }
 
 bool MenuModel::popups_visible() const noexcept {
     const Page* top = stack_.top();
     if (top == nullptr)
         return true;
-    return top->allows_popups();
+    return top->facts().allows_popups;
 }
 
 bool MenuModel::menu_present() const noexcept {
     const Page* top = stack_.top();
-    return top != nullptr && top->counts_as_menu_present();
+    return top != nullptr && top->facts().counts_as_menu_present;
 }
 
 bool MenuModel::allow_cfg_switch() const {
     const Page* top = stack_.top();
-    return top != nullptr && top->allows_cfg_switch();
+    return top != nullptr && top->facts().allows_cfg_switch;
 }
 
 namespace {
 
-constexpr std::int64_t kStatusPeriodNs = 1'000'000'000;
-
-std::optional<std::string_view> declared_title(const proto::ItemTable& items, std::uint8_t page) {
+std::optional<std::string_view> declared_title(
+    const proto::ItemTable& items,
+    proto::SubmenuNo page
+) {
     for (const proto::Item& it : items.items()) {
         if (it.declares_page && it.declared_page == page)
             return items.subfield(it, 1);
@@ -176,14 +176,7 @@ void MenuModel::seed_navigator() noexcept {
 }
 
 void MenuModel::arm_auto_pop(const PageContext& ctx) noexcept {
-    auto_pop_at_ns_ = 0;
-    const Page* top = stack_.top();
-    if (top == nullptr || !ctx.clock)
-        return;
-    const std::uint32_t ms = top->auto_pop_ms();
-    if (ms == 0)
-        return;
-    auto_pop_at_ns_ = ctx.clock->now().count() + static_cast<std::int64_t>(ms) * 1000000;
+    deadlines_.arm(infra::opt_ref_of<const Page>(stack_.top()), ctx.clock);
 }
 
 std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext& ctx) {
@@ -191,10 +184,10 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
         case PageId::System:
             return make_system_page(page_facts_(ctx.sys));
         case PageId::CoreOptions: {
-            const auto page = static_cast<std::uint8_t>(focus.v & 0xFFu);
+            const proto::SubmenuNo page = focus.submenu();
 
             std::string_view title = items_.core_name();
-            if (page != 0)
+            if (page != proto::kRootSubmenu)
                 title = declared_title(items_, page).value_or(title);
             auto p = std::make_unique<CoreOptionsPage>(
                 items_,
@@ -243,7 +236,10 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
                     ++bt_refusals_;
                     return nullptr;
                 case IScriptPolicy::OpenGate::NoAdapter:
-                    return make_info_page(app::InfoId::BluetoothUnavailable, 0);
+                    return make_info_page(
+                        app::InfoId::BluetoothUnavailable,
+                        std::chrono::milliseconds{0}
+                    );
                 case IScriptPolicy::OpenGate::Proceed:
                     break;
             }
@@ -263,8 +259,8 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
         }
         case PageId::CoreSettings: {
 
-            const auto page = static_cast<std::uint8_t>(focus.v & 0xFFu);
-            if (mirror_.option_table().count == 0 || page >= cores::kMaxOptionPages) {
+            const proto::SubmenuNo page = focus.submenu();
+            if (mirror_.option_table().count == 0 || page.v >= cores::kMaxOptionPages) {
                 ++root_refusals_;
                 return nullptr;
             }
@@ -272,10 +268,10 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             spec.table = &mirror_.option_table();
             spec.page = page;
 
-            const std::string_view declared = mirror_.option_table().page_title[page].view();
+            const std::string_view declared = mirror_.option_table().page_title[page.v].view();
             spec.title = !declared.empty()
                 ? std::string(declared)
-                : (page == 0 ? std::string(items_.core_name()) : std::string{});
+                : (page == proto::kRootSubmenu ? std::string(items_.core_name()) : std::string{});
             spec.mt32_available = (hd_mask_.v & 1u) != 0;
 
             const BuildEnv env = build_env(page);
@@ -348,9 +344,9 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             return make_hd_list_(std::make_unique<HdRootPlan>(plan_inputs_(ctx, focus)), focus);
 
         case PageId::HdCoreSettings: {
-            const auto page = static_cast<std::uint8_t>(focus.v & 0xFFu);
+            const proto::SubmenuNo page = focus.submenu();
             std::string title{"Core settings"};
-            if (page != 0) {
+            if (page != proto::kRootSubmenu) {
                 const std::optional<std::string_view> declared = declared_title(items_, page);
                 title = declared ? hd_label(*declared) : std::string{};
             }
@@ -421,21 +417,12 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
         case PageId::UartMode:
         case PageId::UartBaud:
         case PageId::FbTerminal:
-        case PageId::AtariCart:
         case PageId::KbdMap:
         case PageId::LightGunCal:
         case PageId::AdvancedMapList:
         case PageId::AdvancedMapEdit:
         case PageId::AdvancedMapButtons:
         case PageId::AdvancedMapCapture:
-        case PageId::MinimigMain:
-        case PageId::MinimigDisk:
-        case PageId::MinimigChipset:
-        case PageId::MinimigVideo:
-        case PageId::MinimigCd32Cdtv:
-        case PageId::MinimigLoadConfig:
-        case PageId::MinimigSaveConfig:
-        case PageId::ArchieMain:
         case PageId::Mt32Pi:
         case PageId::kCount:
 
@@ -456,7 +443,7 @@ HdPlanInputs MenuModel::plan_inputs_(PageContext& ctx, ItemId focus) {
         .verbs = verbs_,
         .now_playing = now_playing_,
         .recent_games = recent_games_,
-        .env = build_env(0),
+        .env = build_env(proto::kRootSubmenu),
         .focus = focus,
         .classic = hd_classic_,
         .front_end = binding_.front_end(),
@@ -608,7 +595,7 @@ bool MenuModel::describe_top(app::PageDescription& out) {
     if (now_playing_.game_loaded()) {
         (void)out.subtitle.assign(now_playing_.title());
     } else if (!binding_.front_end()) {
-        (void)out.subtitle.assign(now_playing_.idle_line(items_, build_env(0)));
+        (void)out.subtitle.assign(now_playing_.idle_line(items_, build_env(proto::kRootSubmenu)));
     }
     return true;
 }
@@ -670,11 +657,11 @@ void MenuModel::forget_hd_window_(std::size_t depth0) noexcept {
         hd_window_first_[depth0] = 0;
 }
 
-bool MenuModel::show_progress(PageContext& ctx, std::uint16_t cur, std::uint16_t max) {
+bool MenuModel::show_progress(PageContext& ctx, cores::Progress progress) {
     Page* top = stack_.top();
     IProgressView* view = top != nullptr ? top->progress_view() : nullptr;
-    if (max == 0) {
-        in_transfer_ = false;
+    if (progress.total == 0) {
+        transfers_.clear();
         if (view == nullptr)
             return false;
         stack_.pop();
@@ -685,12 +672,9 @@ bool MenuModel::show_progress(PageContext& ctx, std::uint16_t cur, std::uint16_t
         repaint_ = true;
         return true;
     }
-    if (!in_transfer_) {
-        in_transfer_ = true;
-        take_transfer_name_(ctx);
-    }
+    transfers_.begin(ctx);
     if (view != nullptr) {
-        view->set_progress(cur, max);
+        view->set_progress(progress);
 
         arm_auto_pop(ctx);
         repaint_ = true;
@@ -701,11 +685,11 @@ bool MenuModel::show_progress(PageContext& ctx, std::uint16_t cur, std::uint16_t
         ++progress_masked_;
         return false;
     }
-    auto p = make_progress_page(std::string_view(transfer_name_, transfer_name_len_));
+    auto p = make_progress_page(transfers_.name());
     if (p == nullptr)
         return false;
     if (IProgressView* v = p->progress_view(); v != nullptr)
-        v->set_progress(cur, max);
+        v->set_progress(progress);
     place_overlay(static_cast<std::unique_ptr<Page>&&>(p));
     if (Page* t = stack_.top())
         t->on_enter(ctx);
@@ -715,20 +699,9 @@ bool MenuModel::show_progress(PageContext& ctx, std::uint16_t cur, std::uint16_t
     return true;
 }
 
-void MenuModel::take_transfer_name_(const PageContext& ctx) noexcept {
-    transfer_name_len_ = 0;
-    const infra::OptRef<app::UiRequestRing> asks = ctx.ui_requests;
-    if (!asks || asks->load_asks() == load_asks_seen_)
-        return;
-    load_asks_seen_ = asks->load_asks();
-    const std::string_view leaf = progress_leaf(asks->last_load_path());
-    std::copy(leaf.begin(), leaf.end(), transfer_name_);
-    transfer_name_len_ = static_cast<std::uint8_t>(leaf.size());
-}
-
 void MenuModel::place_overlay(std::unique_ptr<Page> p) {
     const Page* top = stack_.top();
-    if (top != nullptr && !top->takes_input_focus()) {
+    if (top != nullptr && !top->facts().takes_input_focus) {
         stack_.replace(static_cast<std::unique_ptr<Page>&&>(p));
     } else {
         stack_.push(static_cast<std::unique_ptr<Page>&&>(p));
@@ -737,7 +710,7 @@ void MenuModel::place_overlay(std::unique_ptr<Page> p) {
 }
 
 bool MenuModel::push_info(PageContext& ctx, app::InfoId id) {
-    auto p = make_info_page(id, 0);
+    auto p = make_info_page(id, std::chrono::milliseconds{0});
     if (p == nullptr)
         return false;
     place_overlay(static_cast<std::unique_ptr<Page>&&>(p));
@@ -778,7 +751,7 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
         }
 
         out.set_visible_rows(
-            binding_.front_end() ? proto::OsdSurface::kMaxRows : top->osd_height().v
+            binding_.front_end() ? proto::OsdSurface::kMaxRows : osd_rows_of(top->osd_height())
         );
     }
 
@@ -789,15 +762,14 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
         if (t.kind != Transition::Kind::Stay) {
             apply(t, ctx);
             did = true;
-        } else if (top->wake_every_round()) {
+        } else if (top->facts().wake_every_round) {
 
             repaint_ = true;
         }
     }
 
-    if (auto_pop_at_ns_ != 0 && ctx.clock && ctx.clock->now().count() >= auto_pop_at_ns_) {
-        auto_pop_at_ns_ = 0;
-        ++auto_pops_;
+    if (ctx.clock && deadlines_.fired(ctx.clock->now())) {
+        deadlines_.consume_pop();
         if (!stack_.empty()) {
             stack_.set_pending_focus(kNoItem);
             (void)stack_.pop();
@@ -826,7 +798,7 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
             ++bootcore_cancels_;
         }
 
-        const std::uint16_t buttons = ev->buttons;
+        const UiButtonMask buttons = ev->buttons;
 
         constexpr std::uint16_t kRearm = UiEvent::Menu
             | UiEvent::Select
@@ -836,21 +808,21 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
             | UiEvent::Right
             | UiEvent::Plus
             | UiEvent::Minus;
-        if ((buttons & kRearm) != 0) {
+        if (buttons.has_any({kRearm})) {
             ++help_rearms_;
             if (ctx.clock) {
-                help_rearm_at_ns_ = ctx.clock->now().count();
+                deadlines_.rearm_help(ctx.clock->now());
             }
         }
 
         if (!menu_has_focus()) {
-            if ((buttons & UiEvent::Menu) != 0) {
+            if (buttons.has_any({UiEvent::Menu})) {
                 if (osd_open()) {
 
                     stack_.clear();
                     seed_navigator();
                     arm_auto_pop(ctx);
-                    osd_was_open_ = false;
+                    show_latch_.mark_closed();
                     ++overlay_trades_;
                 }
                 open_root(ctx);
@@ -883,9 +855,9 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
             bool moved = false;
             if (across) {
                 moved = remap_.apply(axis, nav_);
-            } else if ((buttons & UiEvent::Up) != 0) {
+            } else if (buttons.has_any({UiEvent::Up})) {
                 moved = nav_.move(Navigator::Direction::Up);
-            } else if ((buttons & UiEvent::Down) != 0) {
+            } else if (buttons.has_any({UiEvent::Down})) {
                 moved = nav_.move(Navigator::Direction::Down);
             }
             if (moved) {
@@ -897,7 +869,7 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
         if (top != nullptr) {
             UiEvent forwarded = *ev;
             constexpr std::uint16_t kSides = UiEvent::Left | UiEvent::Right;
-            forwarded.buttons = across ? static_cast<std::uint16_t>(buttons & ~kSides) : buttons;
+            forwarded.buttons = across ? buttons.without({kSides}) : buttons;
 
             const HdKeyRemap::Refresh rw = remap_.refresh(*this, forwarded);
             Transition t = top->handle(rw.ev);
@@ -917,17 +889,12 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
         }
     }
 
-    const bool open_now = osd_open();
-    if (open_now != osd_was_open_) {
-        osd_was_open_ = open_now;
-        if (open_now) {
-            ++show_edges_;
+    if (show_latch_.on_open(osd_open())) {
 
-            if (!cleared_this_round) {
-                ++invalidations_;
-                out.clear();
-                repaint_ = true;
-            }
+        if (!cleared_this_round) {
+            ++invalidations_;
+            out.clear();
+            repaint_ = true;
         }
     }
 
@@ -936,7 +903,7 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
         if (Page* top = stack_.top()) {
             out.set_height(top->osd_height());
 
-            const bool strip = top->has_title_strip() || menu_has_focus();
+            const bool strip = top->facts().has_title_strip || menu_has_focus();
             out.set_stripe(strip ? OsdRenderer::Stripe::Title : OsdRenderer::Stripe::Blank);
             static_cast<const Page*>(top)->render(out);
             did = true;
@@ -944,13 +911,10 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
     }
 
     if (binding_.front_end() && ctx.clock) {
-        const std::int64_t now = ctx.clock->now().count();
-        if (now >= status_due_ns_) {
-            status_due_ns_ = now + kStatusPeriodNs;
+        if (deadlines_.take_status_tick(ctx.clock->now())) {
 
-            ctx.status.sdram_cfg = sdram_cfg_;
+            ctx.status.sdram_cfg = sdram_latch_.cfg();
             out.composite_status_bar(ctx.status);
-            ++status_paints_;
             did = true;
         }
     }
@@ -981,17 +945,7 @@ void MenuModel::on_hd_mask(HdMask m, bool front_end, infra::OptRef<app::UiReques
 
     sync_cells();
 
-    if (front_end && sdram_cfg_ == 0 && (m.v & 0x8000u) != 0) {
-        sdram_cfg_ = static_cast<std::uint16_t>(m.v);
-    }
-
-    if (front_end && sdram_cfg_ != 0 && !sdram_reported_) {
-        if (push_ask(asks, app::UiRequest::SdramDetected{.osd_mask = sdram_cfg_})) {
-            sdram_reported_ = true;
-        } else {
-            ++sdram_ask_refusals_;
-        }
-    }
+    sdram_latch_.on_mask(m, front_end, asks);
 
     if (!(m == hd_mask_)) {
         hd_mask_ = m;
@@ -1018,7 +972,7 @@ void MenuModel::on_info(app::InfoId id, PageContext& ctx) {
     (void)push_info(ctx, id);
 }
 
-void MenuModel::on_progress(std::uint16_t cur, std::uint16_t max, PageContext& ctx) {
+void MenuModel::on_progress(cores::Progress progress, PageContext& ctx) {
 
     sync_cells();
 
@@ -1026,7 +980,7 @@ void MenuModel::on_progress(std::uint16_t cur, std::uint16_t max, PageContext& c
         ++progress_refusals_;
         return;
     }
-    (void)show_progress(ctx, cur, max);
+    (void)show_progress(ctx, progress);
 }
 
 namespace {
@@ -1053,7 +1007,7 @@ inline constexpr std::array<RootRow, static_cast<std::size_t>(RootArm::kCount)> 
      PageId::CoreSettings,
      "menu.cpp:1621 — MENU_NONE2 routes a core with its own hardcoded tree "
      "BEFORE the generic arm; the predicate is `the core declared option "
-     "rows`, never a core name (mandate 3)"},
+     "rows`, never a core name"},
     {RootArm::CoreOptions,
      PageId::CoreOptions,
      "req / menu.cpp:1644-1648 — MENU_NONE2's UNCONDITIONAL else arm "
@@ -1086,13 +1040,10 @@ void MenuModel::latch_browse_home() noexcept {
 }
 
 app::HdOsdStatus::Badge MenuModel::pause_badge() const noexcept {
-    proto::StatusWord word{};
-    for (std::size_t i = 0; i < std::size(word.words); ++i)
-        word.words[i] = mirror_.status_words().w[i];
     return app::pause_badge(
         pause_probe_,
         binding_.pause_rule(),
-        word,
+        mirror_.status_words().status,
         osd_show() == proto::LinkOp::OsdShow::Menu
     );
 }
@@ -1133,7 +1084,7 @@ void MenuModel::sync_cells() {
 void MenuModel::drop_pages_() noexcept {
     stack_.clear();
     seed_navigator();
-    auto_pop_at_ns_ = 0;
+    deadlines_.disarm();
     repaint_ = true;
 }
 
@@ -1170,7 +1121,7 @@ void MenuModel::set_status_words(StatusView s) noexcept {
         repaint_ = true;
 }
 
-BuildEnv MenuModel::build_env(std::uint8_t page) const noexcept {
+BuildEnv MenuModel::build_env(proto::SubmenuNo page) const noexcept {
     BuildEnv env;
 
     env.hdmask = proto::OsdMask{static_cast<std::uint16_t>(hd_mask_.v & 0xFFFFu)};
@@ -1199,7 +1150,7 @@ BuildEnv MenuModel::build_env(std::uint8_t page) const noexcept {
 
 bool MenuModel::core_options_available() const {
     OptionsModel probe;
-    (void)probe.build(items_, build_env(0));
+    (void)probe.build(items_, build_env(proto::kRootSubmenu));
     return probe.selectable_count().v != 0 && !probe.empty_page();
 }
 

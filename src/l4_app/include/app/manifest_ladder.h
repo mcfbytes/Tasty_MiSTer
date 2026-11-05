@@ -84,7 +84,7 @@ private:
     Pc pc_ = Pc::Next;
     std::optional<LoadLadder> load_{};
     std::optional<cores::SendBracket> bracket_{};
-    std::uint16_t act_ = 0;
+    proto::ActKey16 act_{};
     std::int64_t echo_due_ns_ = 0;
     Errc failure_ = Errc::io;
 };

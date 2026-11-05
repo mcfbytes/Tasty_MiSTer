@@ -34,7 +34,7 @@ namespace mister::app::proc {
     return *rc;
 }
 
-[[nodiscard]] Ex<void> mlinkutil_baud(std::uint32_t) {
+[[nodiscard]] Ex<void> mlinkutil_baud(cores::BaudRate) {
 
     return unimplemented(ERR_SITE());
 }

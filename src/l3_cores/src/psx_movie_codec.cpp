@@ -5,6 +5,7 @@
 #include <charconv>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "cores/manifests/psx.h"
@@ -25,8 +26,16 @@ namespace {
 using CR = IMovieCodec::Refusal;
 using Emu = PsxMovieCodec::Emu;
 using Layout = PsxMovieCodec::Layout;
+using FirmwareRegion = PsxMovieCodec::FirmwareRegion;
 
-Error refuse(CR r, std::uint16_t site) {
+constexpr std::array<FirmwareRegion, 4> kRegionByCode{
+    FirmwareRegion::None,
+    FirmwareRegion::Usa,
+    FirmwareRegion::Japan,
+    FirmwareRegion::Europe
+};
+
+Error refuse(CR r, infra::ErrorSite site) {
     return Error{Errc::bad_format, site, static_cast<std::uint32_t>(r)};
 }
 
@@ -93,7 +102,7 @@ std::optional<std::uint8_t> column_role(std::string_view name) {
     name.remove_prefix(3);
     for (const PsxMovieCodec::Button& b : PsxMovieCodec::kButtons) {
         if (name == b.octoshock || name == b.nymashock)
-            return b.bit;
+            return b.bit.v;
     }
     return std::nullopt;
 }
@@ -256,9 +265,11 @@ std::vector<std::uint8_t> toc_bytes(std::span<const TocTrack> tracks, std::int64
     const bool xa = std::any_of(tracks.begin(), tracks.end(), [](const TocTrack& t) {
         return t.mode2;
     });
-    add(
-        le32x3(xa ? PsxMovieCodec::kSessionFormat : 0, tracks.front().number, tracks.back().number)
-    );
+    add(le32x3(
+        std::to_underlying(xa ? DiscType::CdRomXa : DiscType::CdRom),
+        tracks.front().number,
+        tracks.back().number
+    ));
     for (std::size_t i = 1; i <= 100; ++i) {
         if (i <= tracks.size()) {
             const TocTrack& t = tracks[i - 1];
@@ -317,7 +328,7 @@ constexpr WideIoIndex kBiosDest{0xC0};
 Layout Layout::of(std::uint16_t b) noexcept {
     Layout l{};
     l.emu = static_cast<Emu>(b & 0x3u);
-    l.firmware_region = static_cast<std::uint8_t>((b >> 2) & 0x3u);
+    l.firmware_region = kRegionByCode[(b >> 2) & 0x3u];
     l.platform = ((b >> 4) & 1u) != 0;
     l.log_key = ((b >> 5) & 1u) != 0;
     l.pad_digital = ((b >> 6) & 1u) != 0;
@@ -328,7 +339,7 @@ Layout Layout::of(std::uint16_t b) noexcept {
 std::uint16_t Layout::bits() const noexcept {
     return static_cast<std::uint16_t>(
         static_cast<unsigned>(emu)
-        | unsigned{firmware_region & 0x3u} << 2
+        | (std::to_underlying(firmware_region) & 0x3u) << 2
         | unsigned{platform} << 4
         | unsigned{log_key} << 5
         | unsigned{pad_digital} << 6
@@ -417,7 +428,7 @@ Ex<IMovieCodec::Facts> PsxMovieCodec::header_line(
             return std::unexpected(refuse(CR::Checksum, ERR_SITE()));
         f.firmware = *d;
         f.has_firmware = true;
-        l.firmware_region = static_cast<std::uint8_t>(code + 1);
+        l.firmware_region = kRegionByCode[code + 1];
         f.region = r == "E" ? Region::Pal : Region::Ntsc;
     } else if (key.starts_with("SyncSettings.")) {
         std::string_view k = key.substr(13);
@@ -543,7 +554,7 @@ IMovieCodec::SettingNeeds PsxMovieCodec::setting_needs(const Facts& f) const noe
         );
     }
 
-    const auto region = static_cast<std::uint8_t>(Layout::of(f.layout).firmware_region);
+    const auto region = std::to_underlying(Layout::of(f.layout).firmware_region);
     out.add(
         {.lo = kSystemTypeLo,
          .width = 2,
@@ -571,7 +582,7 @@ std::int32_t PsxMovieCodec::default_lead(const Facts&) const noexcept {
 
 std::optional<IMovieCodec::DigestSpan> PsxMovieCodec::rom_digest_span(
     std::span<const std::uint8_t>,
-    std::uint64_t
+    proto::FileSize
 ) const noexcept {
     return std::nullopt;
 }
@@ -752,7 +763,7 @@ std::optional<IMovieCodec::Companion> PsxMovieCodec::companion(
     for (const BootAsset& row : manifests::kPsxBootAssets) {
         if (n == c.paths.size() || row.dest != kBiosDest)
             continue;
-        c.size = row.exact_size;
+        c.size = row.exact_size.v;
         if (row.anchor == AssetAnchor::ImageDir && !dir.empty()) {
             c.paths[n++] = std::string(dir) + std::string(row.name);
         } else if (

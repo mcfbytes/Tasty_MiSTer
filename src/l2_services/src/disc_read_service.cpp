@@ -22,16 +22,14 @@ DiscReadService::DiscReadService(xthread::WakeFlag& io_wake, const Wiring& w) no
       reader_(w.reader),
       mounter_(w.mounter) {}
 
-void DiscReadService::set_generation(std::uint32_t g) noexcept {
+void DiscReadService::set_generation(Generation g) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiscReadService, A);
     if (g == gen_)
         return;
     gen_ = g;
 
-    for (std::size_t i = 0; i < kDiscReadDepth; ++i) {
-        resident_[i] = Loan{};
-        resident_at_[i] = 0;
-    }
+    for (Resident& r : resident_)
+        r.drop();
     for (auto& f : inflight_)
         f.live = false;
     failed_ = FailedRead{};
@@ -44,7 +42,7 @@ void DiscReadService::drain_() noexcept {
             return;
         const DiscReadSlot& s = *l;
         for (auto& f : inflight_) {
-            if (f.live && f.lba == s.lba && f.form == s.form) {
+            if (f.live && f.lba == s.lba.v && f.form == s.form) {
                 f.live = false;
                 break;
             }
@@ -53,16 +51,15 @@ void DiscReadService::drain_() noexcept {
             stale_drops_.add(1);
             continue;
         }
-        if (s.ok == 0) {
-            failed_ = FailedRead{s.lba, s.form, true};
+        if (!s.ok) {
+            failed_ = FailedRead{s.lba.v, s.form, true};
             continue;
         }
 
-        static_assert(sizeof(resident_) / sizeof(resident_[0]) == kDiscReadDepth);
-        for (std::size_t i = 0; i < kDiscReadDepth; ++i) {
-            if (!resident_[i]) {
-                resident_[i] = std::move(l);
-                resident_at_[i] = ++arrivals_;
+        for (Resident& r : resident_) {
+            if (!r.held()) {
+                arrivals_ = arrivals_.next();
+                r.place(std::move(l), arrivals_);
                 break;
             }
         }
@@ -78,22 +75,16 @@ bool DiscReadService::in_flight_(DiscForm form, std::uint32_t lba) const noexcep
 }
 
 bool DiscReadService::evict_oldest_resident_() noexcept {
-    std::size_t victim = kDiscReadDepth;
-    std::uint32_t oldest = 0;
-    for (std::size_t i = 0; i < kDiscReadDepth; ++i) {
-        if (!resident_[i])
+    Resident* victim = nullptr;
+    for (Resident& r : resident_) {
+        if (!r.held())
             continue;
-
-        const std::uint32_t age = arrivals_ - resident_at_[i];
-        if (victim == kDiscReadDepth || age > oldest) {
-            victim = i;
-            oldest = age;
-        }
+        if (!victim || r.older_than(*victim, arrivals_))
+            victim = &r;
     }
-    if (victim == kDiscReadDepth)
+    if (!victim)
         return false;
-    resident_[victim] = Loan{};
-    resident_at_[victim] = 0;
+    victim->drop();
     evictions_.add(1);
     return true;
 }
@@ -114,11 +105,11 @@ bool DiscReadService::issue_(DiscForm form, std::uint32_t lba) noexcept {
     }
     DiscReadSlot& s = *l;
     s.gen = gen_;
-    s.lba = lba;
+    s.lba = proto::Lba{lba};
     s.form = form;
     s.want = static_cast<std::uint16_t>(disc_form_bytes(form));
     s.got = 0;
-    s.ok = 0;
+    s.ok = false;
     for (auto& f : inflight_) {
         if (!f.live) {
             f = Inflight{lba, form, true};
@@ -136,16 +127,13 @@ std::size_t DiscReadService::take(
 ) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiscReadService, A);
     drain_();
-    for (std::size_t i = 0; i < kDiscReadDepth; ++i) {
-        if (!resident_[i])
+    for (Resident& r : resident_) {
+        if (!r.matches(form, lba))
             continue;
-        const DiscReadSlot& s = *resident_[i];
-        if (s.lba != lba.v || s.form != form)
-            continue;
+        const DiscReadSlot& s = r.read();
         const std::size_t n = std::min<std::size_t>(s.got, dst.size());
         std::memcpy(dst.data(), s.data, n);
-        resident_[i] = Loan{};
-        resident_at_[i] = 0;
+        r.drop();
         return n;
     }
     not_resident_.add(1);
@@ -164,8 +152,8 @@ bool DiscReadService::take_read_failed(DiscForm form, proto::Lba lba) noexcept {
 void DiscReadService::hint(DiscForm form, proto::Lba lba) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiscReadService, A);
     drain_();
-    for (const auto& r : resident_) {
-        if (r && (*r).lba == lba.v && (*r).form == form)
+    for (const Resident& r : resident_) {
+        if (r.matches(form, lba))
             return;
     }
     (void)issue_(form, lba.v);
@@ -173,7 +161,7 @@ void DiscReadService::hint(DiscForm form, proto::Lba lba) noexcept {
 
 void DiscReadService::serve_(DiscReadSlot& s) noexcept {
     s.got = 0;
-    s.ok = 0;
+    s.ok = false;
     if (!reader_)
         return;
     auto r = reader_->read_form(s.form, proto::Lba{s.lba}, std::span<std::byte>(s.data, s.want));
@@ -183,7 +171,7 @@ void DiscReadService::serve_(DiscReadSlot& s) noexcept {
         return;
     }
     s.got = static_cast<std::uint16_t>(*r);
-    s.ok = 1;
+    s.ok = true;
 }
 
 DiscMountState DiscReadService::arm_mount(
@@ -209,7 +197,7 @@ DiscMountState DiscReadService::arm_mount(
         return DiscMountState::Pending;
     }
 
-    set_generation(gen_ + 1);
+    set_generation(gen_.next());
     if (!armed_path_.assign(path)) {
         refusals_.add(1);
         return DiscMountState::Failed;
@@ -220,8 +208,8 @@ DiscMountState DiscReadService::arm_mount(
     m.policy = infra::opt_ref_of(policy);
     m.gen = gen_;
     m.op = op;
-    m.mounted = 0;
-    m.done = 0;
+    m.mounted = false;
+    m.done = false;
     mount_live_ = true;
     mount_state_ = DiscMountState::Pending;
     mounts_.send(std::move(l));
@@ -237,14 +225,14 @@ void DiscReadService::release() noexcept {
         m.policy.reset();
         m.gen = gen_;
         m.op = DiscOp::Release;
-        m.mounted = 0;
-        m.done = 0;
+        m.mounted = false;
+        m.done = false;
         mounts_.send(std::move(l));
     } else {
         refusals_.add(1);
     }
 
-    set_generation(gen_ + 1);
+    set_generation(gen_.next());
     armed_path_.clear();
     armed_op_ = DiscOp::Mount;
     mount_state_ = DiscMountState::Idle;
@@ -262,7 +250,7 @@ void DiscReadService::poll_mounts_() noexcept {
         if (m.gen != gen_)
             continue;
         mount_live_ = false;
-        mount_state_ = m.mounted != 0 ? DiscMountState::Mounted : DiscMountState::Failed;
+        mount_state_ = m.mounted ? DiscMountState::Mounted : DiscMountState::Failed;
     }
 }
 
@@ -292,8 +280,8 @@ void DiscReadService::serve_mounts_io_() noexcept {
         if (!j)
             return;
         DiscMountSlot& m = *j;
-        m.mounted = (mounter_ && mounter_->apply(m.op, m.policy, m.path.view())) ? 1 : 0;
-        m.done = 1;
+        m.mounted = (mounter_ && mounter_->apply(m.op, m.policy, m.path.view()));
+        m.done = true;
         j.complete();
     }
 }

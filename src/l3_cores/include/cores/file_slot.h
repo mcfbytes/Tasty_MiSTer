@@ -12,7 +12,7 @@
 
 namespace mister::cores {
 
-class IRomsetAliasSource;
+class NeoGeoAliasSource;
 
 using proto::IoIndex;
 
@@ -32,7 +32,7 @@ struct FileSlot {
     bool romset_browse = false;
     bool no_enter = false;
 
-    std::unique_ptr<IRomsetAliasSource> (*romset_aliases)() = nullptr;
+    std::unique_ptr<NeoGeoAliasSource> (*romset_aliases)() = nullptr;
 
     bool opens_zip = false;
 

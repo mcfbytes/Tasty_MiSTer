@@ -20,11 +20,13 @@ struct IrqPin {
 
 inline constexpr std::size_t kMaxIrqPins = 4;
 
+enum : unsigned { kLastCpuBit = 31 };
+
 constexpr bool irq_pins_well_formed(std::span<const IrqPin> pins, const ThreadMap& m) noexcept {
     if (pins.size() > kMaxIrqPins)
         return false;
     const auto hi = static_cast<unsigned>(max_cpu(m));
-    const std::uint32_t known = hi >= 31u ? 0xFFFF'FFFFu : (2u << hi) - 1u;
+    const std::uint32_t known = hi >= kLastCpuBit ? ~0u : (1u << (hi + 1u)) - 1u;
     const std::uint32_t rt = 1u << static_cast<unsigned>(seat_of(m, SeatTag::RT).cpu);
     for (const IrqPin& p : pins) {
         if (p.action.empty())
@@ -39,7 +41,7 @@ constexpr bool irq_pins_well_formed(std::span<const IrqPin> pins, const ThreadMa
 
 constexpr os::CpuMask cpus_off_rt(const ThreadMap& m) noexcept {
     const auto hi = static_cast<unsigned>(max_cpu(m));
-    const std::uint32_t known = hi >= 31u ? 0xFFFF'FFFFu : (2u << hi) - 1u;
+    const std::uint32_t known = hi >= kLastCpuBit ? ~0u : (1u << (hi + 1u)) - 1u;
     const std::uint32_t rt = 1u << static_cast<unsigned>(seat_of(m, SeatTag::RT).cpu);
     return os::CpuMask{known & ~rt};
 }

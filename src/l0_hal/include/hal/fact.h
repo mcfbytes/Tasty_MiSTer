@@ -34,7 +34,10 @@ public:
         return v_;
     }
 
-    [[nodiscard]] constexpr Ex<T> resolve(std::uint16_t site, std::uint32_t field) const noexcept {
+    [[nodiscard]] constexpr Ex<T> resolve(
+        infra::ErrorSite site,
+        std::uint32_t field
+    ) const noexcept {
         if (!measured_)
             return std::unexpected(Error{Errc::unimplemented, site, field});
         return v_;

@@ -43,7 +43,8 @@ HdHomePlan::HdHomePlan(const HdPlanInputs& in)
     has_any_ = !records.empty();
     const std::size_t shown = std::min(kInlineRecent, records.size());
     played_.reserve(shown);
-    refs_.reserve(shown + 5);
+    constexpr std::size_t kFixedRows = 5;
+    refs_.reserve(shown + kFixedRows);
     for (std::size_t i = 0; i < shown; ++i) {
         played_.emplace_back(launch_, records[i], app::RowTier::Shelf);
         refs_.emplace_back(played_.back());
@@ -72,9 +73,9 @@ std::span<const std::reference_wrapper<IHdRow>> HdHomePlan::rows() const {
     return refs_;
 }
 
-std::uint8_t HdHomePlan::pinned() const noexcept {
+RowCount HdHomePlan::pinned() const noexcept {
     TASTY_SEAT_BODY(HdHomePlan);
-    return 1;
+    return RowCount{1};
 }
 
 bool HdHomePlan::remembers_focus() const noexcept {

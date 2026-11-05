@@ -9,7 +9,10 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
-#include "proto/spi_fio_queue.h"
+
+namespace mister::proto {
+class SpiFioQueue;
+}
 
 namespace mister::cores {
 

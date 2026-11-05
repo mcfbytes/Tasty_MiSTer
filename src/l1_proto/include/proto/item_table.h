@@ -68,8 +68,8 @@ struct Item {
     ExShift ex = ExShift::None;
     bool hps_marker = false;
     bool declares_page = false;
-    std::uint8_t page = 0;
-    std::uint8_t declared_page = 0;
+    SubmenuNo page{};
+    SubmenuNo declared_page{};
     BitField bits{};
     std::uint8_t digit = 0;
     bool has_digit = false;

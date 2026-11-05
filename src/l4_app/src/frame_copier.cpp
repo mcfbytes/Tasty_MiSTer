@@ -21,12 +21,14 @@ constexpr std::int64_t kMsNs = 1'000'000;
 constexpr std::int64_t kLowlatGuardNs = 2 * kMsNs;
 
 constexpr std::uint8_t ctr_plus(std::uint8_t c, std::uint32_t n) noexcept {
-    return static_cast<std::uint8_t>((c + n) & 0x7u);
+    constexpr std::uint8_t kCtrMask = 0x7;
+    return static_cast<std::uint8_t>((c + n) & kCtrMask);
 }
 
 constexpr std::array<std::uint16_t, 8> key_of(const ScalerHeader& h) noexcept {
+    constexpr unsigned kByteBits = 8;
     return {
-        static_cast<std::uint16_t>(h.type << 8 | h.format),
+        static_cast<std::uint16_t>(h.type << kByteBits | h.format),
         h.header_size,
         h.attributes,
         h.width,
@@ -38,9 +40,11 @@ constexpr std::array<std::uint16_t, 8> key_of(const ScalerHeader& h) noexcept {
 }
 
 constexpr ScalerHeader header_of(const std::array<std::uint16_t, 8>& k) noexcept {
+    constexpr unsigned kByteBits = 8;
+    constexpr std::uint16_t kByteMask = 0xFF;
     return {
-        .type = static_cast<std::uint8_t>(k[0] >> 8),
-        .format = static_cast<std::uint8_t>(k[0] & 0xFFu),
+        .type = static_cast<std::uint8_t>(k[0] >> kByteBits),
+        .format = static_cast<std::uint8_t>(k[0] & kByteMask),
         .header_size = k[1],
         .attributes = k[2],
         .width = k[3],
@@ -115,18 +119,21 @@ bool FrameCopier::idle() const noexcept {
     return !control_moved;
 }
 
-int FrameCopier::park_ms() const noexcept {
+infra::ParkTimeout FrameCopier::park_ms() const noexcept {
     if (st_.state == RecState::Idle)
-        return -1;
+        return infra::kForever;
     const bool live = st_.state == RecState::Armed || st_.state == RecState::Recording;
     if (live && gen_.lowlat && gen_.ll_waiting) {
         const std::int64_t left = ll_due_ns_ - w_.clock.now().count();
 
-        if (left <= 0)
-            return 0;
         if (left < kMsNs)
-            return 0;
-        return static_cast<int>(std::min<std::int64_t>(left / kMsNs, kPollMs));
+            return infra::kNoWait;
+        const auto whole = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::nanoseconds{left}
+        );
+        return std::chrono::duration_cast<infra::ParkTimeout>(
+            std::min(whole, std::chrono::milliseconds{kPollMs})
+        );
     }
     return kPollMs;
 }
@@ -171,7 +178,7 @@ void FrameCopier::sample_control_() noexcept {
     }
 }
 
-void FrameCopier::answer_(std::uint16_t gen, RecVerdict v) noexcept {
+void FrameCopier::answer_(ControlGeneration gen, RecVerdict v) noexcept {
     st_.answered = gen;
     st_.verdict = v;
     dirty_ = true;
@@ -182,7 +189,7 @@ void FrameCopier::begin_(const RecControl& c) noexcept {
         return answer_(c.gen, RecVerdict::NoWindow);
     if (c.mode == RecMode::Avi && c.opt.codec != RecCodec::Zmbv && !CscdCodec::kAvailable)
         return answer_(c.gen, RecVerdict::NoCodec);
-    const std::uint16_t answered = st_.answered;
+    const ControlGeneration answered = st_.answered;
     st_ = RecorderStatus{};
     st_.answered = answered;
     st_.gen = c.gen;
@@ -235,6 +242,7 @@ bool FrameCopier::all_home_() const noexcept {
 }
 
 void FrameCopier::probe_step_(std::int64_t now) noexcept {
+    constexpr unsigned kMibShift = 20;
 
     if (ReplayStatus rs{}; gen_.from_arm && w_.replay.sample_into(rs) != 0)
         note_replay_(rs);
@@ -256,7 +264,7 @@ void FrameCopier::probe_step_(std::int64_t now) noexcept {
     gen_.lowlat = d == hal::ScalerProbe::Verdict::LargeLowlat;
     gen_.stride = d == hal::ScalerProbe::Verdict::Small ? ScalerBuffers::kStrideSmall
                                                         : ScalerBuffers::kStrideLarge;
-    st_.stride_mib = static_cast<std::uint8_t>(gen_.stride >> 20);
+    st_.stride_mib = static_cast<std::uint8_t>(gen_.stride >> kMibShift);
     st_.lowlat = gen_.lowlat ? 1 : 0;
     dirty_ = true;
 
@@ -325,7 +333,7 @@ void FrameCopier::attach_pending_(RawFrameSlot& slot) noexcept {
     std::uint64_t end = 0;
     for (std::uint8_t i = 0; i < gen_.npending; ++i) {
         slot.run[i] = pending_[i];
-        end = pending_[i].first + pending_[i].count;
+        end = pending_[i].after().core_frame;
         st_.rows += pending_[i].count;
     }
     gen_.npending = 0;
@@ -350,6 +358,7 @@ bool FrameCopier::regrow_() noexcept {
 }
 
 bool FrameCopier::reserve_arena_(std::size_t frame_bytes) noexcept {
+    constexpr std::size_t kBytesPerKib = 1024;
     const std::size_t slot_bytes = raw_stripe(frame_bytes);
     const std::size_t want = raw_depth(slot_bytes);
     const std::size_t depth = w_.channel.set_live(static_cast<std::uint8_t>(want))
@@ -357,7 +366,7 @@ bool FrameCopier::reserve_arena_(std::size_t frame_bytes) noexcept {
         : w_.channel.live();
     if (auto r = arena_.reserve(depth, slot_bytes); !r)
         return false;
-    st_.arena_kib = static_cast<std::uint32_t>(arena_.bytes() / 1024u);
+    st_.arena_kib = static_cast<std::uint32_t>(arena_.bytes() / kBytesPerKib);
     st_.depth = static_cast<std::uint8_t>(depth);
     dirty_ = true;
     return true;
@@ -417,7 +426,7 @@ void FrameCopier::watch_step_() noexcept {
 
 void FrameCopier::note_replay_(const ReplayStatus& r) noexcept {
 
-    if (r.level != ReplayLevel::Running || r.movie_frame < 0)
+    if (r.level != ReplayLevel::Running || r.movie_frame < MovieFrame{})
         gen_.covers_zero = true;
 }
 
@@ -446,6 +455,10 @@ FrameCopier::Heads FrameCopier::read_heads_() const noexcept {
 }
 
 void FrameCopier::poll_triple_(std::int64_t now) noexcept {
+    constexpr std::size_t kLiveBuffersForOrder = 2;
+    constexpr std::uint8_t kReorderGap = 2;
+    constexpr std::uint32_t kWovenGap = 2;
+    constexpr std::uint32_t kPlainGap = 1;
     const Heads hd = read_heads_();
     if (!hd.ok) {
         ++st_.bad_header;
@@ -470,7 +483,7 @@ void FrameCopier::poll_triple_(std::int64_t now) noexcept {
     const auto pick = hal::ScalerProbe::pick_complete(hd.h, live_);
     if (!pick) {
 
-        if (nlive < 2)
+        if (nlive < kLiveBuffersForOrder)
             return;
         if (gen_.matched) {
             ++st_.unmatched;
@@ -488,7 +501,7 @@ void FrameCopier::poll_triple_(std::int64_t now) noexcept {
     if (!pick->woven
         && pick->prev != ScalerBuffers::kBuffers
         && numbering_.last()
-        && ctr_minus(ctr, numbering_.last()->ctr) >= 2) {
+        && ctr_minus(ctr, numbering_.last()->ctr) >= kReorderGap) {
         on_complete_(pick->prev, ctr_minus(ctr, 1), now, 1, 1);
 
         if (st_.state != RecState::Armed && st_.state != RecState::Recording)
@@ -497,7 +510,7 @@ void FrameCopier::poll_triple_(std::int64_t now) noexcept {
             return;
     }
 
-    on_complete_(pick->buf, ctr, now, 0, pick->woven ? 2u : 1u);
+    on_complete_(pick->buf, ctr, now, 0, pick->woven ? kWovenGap : kPlainGap);
     if (gen_.woven != pick->woven) {
         gen_.woven = pick->woven;
         st_.interlaced = gen_.woven ? 1 : 0;
@@ -509,16 +522,16 @@ void FrameCopier::track_(const Heads& hd, std::int64_t now) noexcept {
 
     if (now - track_ns_ > period_ns_)
         for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i)
-            seen_ns_[i] = now;
+            watch_[i].seen = std::chrono::nanoseconds{now};
     track_ns_ = now;
     bool odd = false;
     bool parked = false;
     for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
         const ScalerHeader& h = hd.h[i];
         const auto key = key_of(h);
-        if (key != seen_key_[i]) {
+        if (key != watch_[i].key) {
 
-            const ScalerHeader was = header_of(seen_key_[i]);
+            const ScalerHeader was = header_of(watch_[i].key);
 
             odd = odd
                 || (live_[i]
@@ -526,11 +539,14 @@ void FrameCopier::track_(const Heads& hd, std::int64_t now) noexcept {
                     && was.supported()
                     && !h.interlaced()
                     && (ctr_minus(h.frame_counter(), was.frame_counter()) & 1u) != 0);
-            seen_key_[i] = key;
-            seen_ns_[i] = now;
+            watch_[i].key = key;
+            watch_[i].seen = std::chrono::nanoseconds{now};
 
             live_[i] = live_[i] || h.supported();
-        } else if (now - seen_ns_[i] > kParkPeriods * period_ns_) {
+        } else if (
+            std::chrono::nanoseconds{now} - watch_[i].seen
+            > kParkPeriods * std::chrono::nanoseconds{period_ns_}
+        ) {
             live_[i] = false;
         }
         parked = parked || !live_[i];
@@ -542,15 +558,15 @@ void FrameCopier::track_(const Heads& hd, std::int64_t now) noexcept {
         if (live_[i] || !hd.h[i].supported())
             continue;
         live_[i] = true;
-        seen_ns_[i] = now;
+        watch_[i].seen = std::chrono::nanoseconds{now};
     }
 }
 
 void FrameCopier::track_reset_(const BufMask& live, std::int64_t now) noexcept {
     for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
         const auto h = window_->header(base_(i));
-        seen_key_[i] = key_of(h ? *h : ScalerHeader{});
-        seen_ns_[i] = now;
+        watch_[i].key = key_of(h ? *h : ScalerHeader{});
+        watch_[i].seen = std::chrono::nanoseconds{now};
         live_[i] = live[i];
     }
     track_ns_ = now;
@@ -573,7 +589,7 @@ void FrameCopier::poll_lowlat_(std::int64_t now) noexcept {
         if (gen_.ll_push_ns != 0) {
             const std::int64_t k = (now - gen_.ll_push_ns + period_ns_ / 2) / period_ns_;
             const std::int64_t predicted = gen_.ll_push_ns + k * period_ns_;
-            if (predicted <= now && now - predicted < kPollMs * kMsNs)
+            if (predicted <= now && std::chrono::nanoseconds{now - predicted} < kPollMs)
                 push = predicted;
         }
         gen_.ll_push_ns = push;
@@ -612,20 +628,23 @@ bool FrameCopier::open_armed_(
     std::int64_t now
 ) noexcept {
 
-    if (cell == nullptr || cell->movie_frame < 0)
+    if (cell == nullptr || cell->movie_frame < MovieFrame{})
         return false;
-    if (s.movie_frame + static_cast<std::int32_t>(fields) - 1 < 0)
+    const WideMovieFrame last_field = wide_frame(s.movie_frame) + MovieSpan{fields} - MovieSpan{1};
+    if (last_field < WideMovieFrame{})
         return false;
     if (!open_segment_())
         return false;
-    std::int64_t owed = gen_.covers_zero ? s.movie_frame : 0;
+    const MovieSpan since_zero = gen_.covers_zero ? wide_frame(s.movie_frame) - WideMovieFrame{}
+                                                  : MovieSpan{};
 
-    owed = std::min<std::int64_t>(owed, (now - armed_ns_) / std::max<std::int64_t>(period_ns_, 1));
-    if (owed > 0) {
-        const auto n = static_cast<std::uint32_t>(owed);
+    const MovieSpan since_arm{(now - armed_ns_) / std::max<std::int64_t>(period_ns_, 1)};
+    if (const MovieSpan owed = std::min(since_zero, since_arm); owed > MovieSpan{}) {
+        const CoreFrameCount n = owed.core_frames();
+        const FrameStamp from = n.before(s);
         st_.missed += n;
-        st_.first_core_frame = s.core_frame - n;
-        defer_(st_.first_core_frame, n, ctr_minus(s.header_ctr, n), DupReason::Missed);
+        st_.first_core_frame = from.core_frame;
+        defer_(from.run(n, DupReason::Missed));
     }
     return true;
 }
@@ -654,14 +673,14 @@ void FrameCopier::on_complete_(
         st_.anchored != 0,
         period_ns_
     );
-    const std::uint32_t n = gap.n;
+    const std::uint32_t n = gap.frames;
     if (gap.estimated)
         ++st_.gap_estimated;
     numbering_.advance(n);
 
     if (have
         && (st_.anchored == 0 || st_.state == RecState::Armed)
-        && st_.rows == 0
+        && st_.rows == CoreFrameCount{}
         && gen_.npending == 0) {
         if (numbering_.anchor(rec, lag, behind == 0, st_.anchored != 0)) {
             st_.anchored = 1;
@@ -682,64 +701,61 @@ void FrameCopier::on_complete_(
     } else if (n > 1) {
 
         const std::uint32_t woven = gen_.woven ? 1u : 0u;
-        const std::uint32_t missed = n - 1 - woven;
+        const CoreFrameCount missed{n - 1 - woven};
         if (woven != 0) {
 
-            const std::uint64_t at = s.core_frame - (n - 1);
+            FrameStampRun field = CoreFrameCount{n - 1}.before(s).run(
+                CoreFrameCount{1},
+                DupReason::Woven
+            );
             const FrameStampRun* last = gen_.npending > 0 ? &pending_[gen_.npending - 1] : nullptr;
-            const bool held = last != nullptr && last->first + last->count == at;
+            const bool held = last != nullptr && last->precedes(field);
+            if (held)
+                field.why = last->why;
             if (!held)
                 ++st_.woven;
-            defer_(at, 1, ctr_minus(ctr, n - 1), held ? last->why : DupReason::Woven);
+            defer_(field);
         }
-        if (missed != 0) {
+        if (missed != CoreFrameCount{}) {
             st_.missed += missed;
-            defer_(s.core_frame - missed, missed, ctr_minus(ctr, missed), DupReason::Missed);
+            defer_(missed.before(s).run(missed, DupReason::Missed));
         }
     }
-    if (st_.rows == 0 && gen_.npending == 0)
+    if (st_.rows == CoreFrameCount{} && gen_.npending == 0)
         st_.first_core_frame = s.core_frame;
     const auto h = window_->header(base_(buf));
     if (!h || !geometry_ok_(*h)) {
         ++st_.bad_header;
         dirty_ = true;
-        return defer_(s.core_frame, 1, ctr, DupReason::Missed);
+        return defer_(s.run(CoreFrameCount{1}, DupReason::Missed));
     }
     deliver_(buf, *h, s);
 }
 
 bool FrameCopier::geometry_ok_(const ScalerHeader& h) const noexcept {
+    constexpr std::size_t kRgbBytes = 3;
     const std::size_t line = h.line;
     if (!h.supported() || h.width == 0 || h.height == 0)
         return false;
-    if (line < static_cast<std::size_t>(h.width) * 3u || h.header_size < ScalerHeader::kBytes)
+    if (line < static_cast<std::size_t>(h.width) * kRgbBytes
+        || h.header_size < ScalerHeader::kBytes)
         return false;
     return h.header_size + line * h.height <= gen_.stride;
 }
 
-void FrameCopier::defer_(
-    std::uint64_t first,
-    std::uint32_t count,
-    std::uint8_t first_ctr,
-    DupReason why
-) noexcept {
-    if (count == 0)
+void FrameCopier::defer_(const FrameStampRun& run) noexcept {
+    if (run.count == CoreFrameCount{})
         return;
     if (gen_.npending > 0) {
         FrameStampRun& last = pending_[gen_.npending - 1];
-        const bool adjacent = last.first + last.count == first;
 
-        if ((adjacent && last.why == why) || gen_.npending == RawFrameSlot::kMaxRuns) {
-            last.count += count;
+        if ((last.precedes(run) && last.why == run.why)
+            || gen_.npending == RawFrameSlot::kMaxRuns) {
+            last.count += run.count;
             return;
         }
     }
-    pending_[gen_.npending++] = FrameStampRun{
-        .first = first,
-        .count = count,
-        .first_ctr = first_ctr,
-        .why = why
-    };
+    pending_[gen_.npending++] = run;
 }
 
 bool FrameCopier::rate_is_ours_(std::uint32_t seq) const noexcept {
@@ -756,11 +772,14 @@ void FrameCopier::deliver_(
     const ScalerHeader& h,
     const FrameStamp& stamp
 ) noexcept {
+    constexpr std::int64_t kNsPerUs = 1000;
+    constexpr std::int64_t kSmoothOld = 3;
+    constexpr std::int64_t kSmoothSum = 4;
     auto loan = w_.channel.acquire();
     if (!loan) {
         ++st_.backpressure;
         dirty_ = true;
-        return defer_(stamp.core_frame, 1, stamp.header_ctr, DupReason::Backpressure);
+        return defer_(stamp.run(CoreFrameCount{1}, DupReason::Backpressure));
     }
     FrameStamp s = stamp;
     RawFrameSlot& slot = *loan;
@@ -769,7 +788,7 @@ void FrameCopier::deliver_(
     slot.gen = st_.gen;
     slot.runs = gen_.npending;
     slot.depth = st_.depth;
-    std::uint32_t rows = 1;
+    CoreFrameCount rows{1};
     for (std::uint8_t i = 0; i < gen_.npending; ++i) {
         slot.run[i] = pending_[i];
         rows += pending_[i].count;
@@ -792,8 +811,8 @@ void FrameCopier::deliver_(
         const auto r = window_->copy(base_(buf) + h.header_size, stripe.first(bytes));
         const std::int64_t t1 = w_.clock.now().count();
         const auto after = window_->header(base_(buf));
-        copy_ns_ = (3 * copy_ns_ + (t1 - t0)) / 4;
-        st_.copy_us_last = static_cast<std::uint32_t>((t1 - t0) / 1000);
+        copy_ns_ = (kSmoothOld * copy_ns_ + (t1 - t0)) / kSmoothSum;
+        st_.copy_us_last = static_cast<std::uint32_t>((t1 - t0) / kNsPerUs);
         st_.copy_us_max = std::max(st_.copy_us_max, st_.copy_us_last);
 
         if (!r || !after || after->frame_counter() != s.header_ctr) {
@@ -812,8 +831,8 @@ void FrameCopier::deliver_(
     st_.height = h.height;
     dirty_ = true;
     if (gen_.tail_counting) {
-        gen_.tail_left = rows >= gen_.tail_left ? 0 : gen_.tail_left - rows;
-        if (gen_.tail_left == 0)
+        gen_.tail_left = rows >= gen_.tail_left ? CoreFrameCount{} : gen_.tail_left - rows;
+        if (gen_.tail_left == CoreFrameCount{})
             end_(RecVerdict::ReplayEnded);
     }
 }

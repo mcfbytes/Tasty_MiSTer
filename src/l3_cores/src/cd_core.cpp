@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/cd_core.h"
 
+#include "cores/core_adopt.h"
 #include "cores/mounted_path.h"
 #include "infra/error.h"
 #include "infra/seat.h"

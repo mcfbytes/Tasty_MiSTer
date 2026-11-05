@@ -7,16 +7,19 @@
 #include <span>
 #include <string_view>
 
+#include "cores/n64_save_attach.h"
 #include "cores/n64_save_layout.h"
+#include "cores/n64_save_extent.h"
+#include "cores/n64_save_layout_key.h"
 #include "cores/n64_save_order.h"
-#include "cores/n64_save_port.h"
+#include "cores/n64_save_plan.h"
 #include "cores/n64_save_store.h"
-#include "cores/n64_save_type.h"
+#include "cores/n64_memory_type.h"
 #include "cores/nvram_store.h"
 #include "cores/save_channel.h"
+#include "cores/types.h"
 #include "infra/error.h"
-#include "infra/fixed_str.h"
-#include "infra/opt_ref.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "proto/image_source.h"
 #include "svc/storage_backend.h"
@@ -29,8 +32,9 @@ class SaveChannel final : public ISaveChannel, public proto::IImageSource {
 
 public:
     static constexpr std::size_t kMaxPartitionBytes = SaveChannelStore::kMaxPartitionBytes;
-
     static constexpr std::size_t kPakBytes = 0x8000;
+
+    static constexpr SaveRow kCartRow{0};
     static constexpr std::size_t kPathChars = SavePath::kCapacity;
 
     explicit SaveChannel(const svc::Vfs& vfs) noexcept;
@@ -43,6 +47,8 @@ public:
         std::string_view core_dir,
         std::span<const SavePartition> declared
     );
+
+    void note_layout(const ISaveLayout& live) noexcept;
     void clear() noexcept;
 
     [[nodiscard]] std::uint64_t channel_bytes() const noexcept;
@@ -55,11 +61,15 @@ public:
 
     [[nodiscard]] SaveChannelStore& store() noexcept { return io_; }
 
-    [[nodiscard]] std::optional<std::size_t> claim_mount_plan() noexcept override;
-    [[nodiscard]] Ex<Mount> mount_at(std::size_t i) override;
-    [[nodiscard]] svc::IStorageBackend* backend(std::size_t i) noexcept override;
+    [[nodiscard]] Ex<Mount> mount_at(SaveRow row);
 
-    [[nodiscard]] std::span<const std::byte> order(std::size_t i) noexcept override;
+    [[nodiscard]] std::optional<MountPlan> claim_mount_plan() override;
+    [[nodiscard]] svc::IStorageBackend& backend() noexcept override;
+
+    [[nodiscard]] std::span<const std::byte> compose_order(
+        SaveRow row,
+        OrderPart part
+    ) noexcept override;
 
     [[nodiscard]] proto::IImageSource& descriptor() noexcept override {
         TASTY_SEAT_BODY(SaveChannel);
@@ -68,18 +78,17 @@ public:
 
     [[nodiscard]] proto::SlotAttributes attributes(proto::SlotIndex) const override;
 
-    [[nodiscard]] std::uint8_t request_tag(proto::SlotIndex) const noexcept override;
+    [[nodiscard]] proto::ImageTag request_tag(proto::SlotIndex) const noexcept override;
     void note_attached(proto::SlotIndex, bool exists, proto::FileSize) noexcept override;
 
 private:
-    [[nodiscard]] static constexpr std::size_t blank_cap(std::size_t i) noexcept {
-        return i == 0 ? kMaxPartitionBytes : kPakBytes;
+    [[nodiscard]] static constexpr std::size_t create_cap(SaveRow row) noexcept {
+        return row == kCartRow ? kMaxPartitionBytes : kPakBytes;
     }
 
-    infra::OptRef<const ISaveLayout> live_{};
+    SaveLayoutKey layout_key_{};
+    bool layout_set_ = false;
     std::optional<NvramStore> store_{};
-    SavePath paths_[kMaxSaveRows]{};
-    SavePath stock_path_{};
     std::uint64_t total_ = 0;
 
     std::optional<std::size_t> pending_plan_{};
@@ -87,11 +96,10 @@ private:
     std::uint32_t opens_ = 0;
     std::uint32_t open_failures_ = 0;
 
-    SaveOrder orders_[kMaxSaveRows]{};
-    std::uint32_t declared_[kMaxSaveRows]{};
-    bool byteswap_[kMaxSaveRows]{};
+    infra::IndexedArray<SaveOrder, kMaxSaveRows, SaveRow> orders_{};
+    SavePlan plan_{};
+    SaveAttach::Planned outbox_{};
     SaveChannelStore io_;
-    SavePort ports_[kMaxSaveRows];
 };
 
 }

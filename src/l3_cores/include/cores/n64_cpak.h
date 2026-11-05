@@ -11,7 +11,7 @@
 #include <span>
 #include <string_view>
 
-#include "cores/n64_save_type.h"
+#include "cores/n64_memory_type.h"
 #include "infra/error.h"
 #include "infra/unique_fd.h"
 

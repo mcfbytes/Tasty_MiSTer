@@ -15,12 +15,12 @@ void RecWriteMain::serve() noexcept {
     writer_.serve();
 }
 
-int RecWriteMain::park_ms() const noexcept {
-    const int a = avi_.park_ms();
-    const int b = writer_.park_ms();
-    if (a < 0)
+infra::ParkTimeout RecWriteMain::park_ms() const noexcept {
+    const infra::ParkTimeout a = avi_.park_ms();
+    const infra::ParkTimeout b = writer_.park_ms();
+    if (a == infra::kForever)
         return b;
-    return b < 0 ? a : std::min(a, b);
+    return b == infra::kForever ? a : std::min(a, b);
 }
 
 }

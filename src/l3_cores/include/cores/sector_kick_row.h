@@ -18,7 +18,7 @@ public:
         Core* c = bound_core<kProfile>(st);
         if (c == nullptr)
             return;
-        if (ISectorKick* k = c->sector_kick())
+        if (const auto k = c->sector_kick())
             k->service_kick();
     }
 };

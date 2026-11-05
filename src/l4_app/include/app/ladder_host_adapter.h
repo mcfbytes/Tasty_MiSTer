@@ -34,9 +34,9 @@ public:
         [[nodiscard]] virtual bool order_walk(
             proto::IoIndex slot,
             std::string_view path,
-            std::uint32_t gen
+            proto::ActKey gen
         ) = 0;
-        [[nodiscard]] virtual bool order_savestates(std::string_view image, std::uint32_t gen) = 0;
+        [[nodiscard]] virtual bool order_savestates(std::string_view image, proto::ActKey gen) = 0;
 
     protected:
         Acts() = default;
@@ -84,20 +84,20 @@ public:
         std::vector<std::uint8_t>&& bytes,
         std::string_view path
     ) override;
-    [[nodiscard]] std::optional<bool> file_tx_answer(std::uint32_t act) override;
+    [[nodiscard]] std::optional<bool> file_tx_answer(proto::ActKey act) override;
     [[nodiscard]] bool order_load_facts(std::span<const std::uint8_t> facts) override;
     [[nodiscard]] std::size_t link_in_flight() const noexcept override;
     [[nodiscard]] std::size_t link_word_bytes() const noexcept override;
-    [[nodiscard]] std::uint32_t next_generation() noexcept override;
+    [[nodiscard]] proto::ActKey next_generation() noexcept override;
     [[nodiscard]] cores::MountStatus mount_status() override;
     [[nodiscard]] bool order_walk(
         proto::IoIndex slot,
         std::string_view path,
-        std::uint32_t gen
+        proto::ActKey gen
     ) override;
     [[nodiscard]] cores::MountStatus walk_status() override;
-    [[nodiscard]] bool order_savestates(std::string_view image, std::uint32_t gen) override;
-    [[nodiscard]] std::uint32_t savestates_answered() override;
+    [[nodiscard]] bool order_savestates(std::string_view image, proto::ActKey gen) override;
+    [[nodiscard]] proto::ActKey savestates_answered() override;
     [[nodiscard]] cores::SaveExtent save_extent() override;
     [[nodiscard]] proto::StatusWord status_word() override;
 

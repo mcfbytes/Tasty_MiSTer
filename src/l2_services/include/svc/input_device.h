@@ -12,9 +12,11 @@
 #include <type_traits>
 
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/evdev.h"
+#include "proto/user_io/rumble_poll.h"
 #include "svc/analog_xy.h"
 #include "svc/axis_cal.h"
 #include "svc/button_map.h"
@@ -23,6 +25,7 @@
 #include "svc/device_report.h"
 #include "svc/quirk_id.h"
 #include "svc/stick_cal.h"
+#include "svc/stick_state.h"
 #include "svc/types.h"
 
 namespace mister::svc {
@@ -47,8 +50,7 @@ static_assert(
 [[nodiscard]] ff_effect make_rumble_effect(
     QuirkId quirk,
     std::int16_t id,
-    std::uint16_t strong,
-    std::uint16_t weak
+    proto::user_io::RumbleMotors motors
 ) noexcept;
 
 class InputDevice {
@@ -120,7 +122,7 @@ public:
 
     std::int32_t deadzone() const noexcept { return deadzone_; }
 
-    StickCal stick_cal(int stick) const noexcept;
+    StickCal stick_cal(StickIndex stick) const noexcept;
 
     void set_reshape(infra::OptRef<const IAnalogReshape> r) noexcept { reshape_ = r; }
 
@@ -134,7 +136,7 @@ public:
 
     bool has_rumble() const noexcept { return rumble_; }
 
-    [[nodiscard]] Ex<void> set_rumble(std::uint16_t strong, std::uint16_t weak);
+    [[nodiscard]] Ex<void> set_rumble(proto::user_io::RumbleMotors motors);
 
     [[nodiscard]] bool release_for_handover() noexcept;
 
@@ -170,7 +172,7 @@ private:
     std::int16_t rumble_id_ = -1;
     std::int32_t deadzone_ = 0;
     infra::OptRef<const IAnalogReshape> reshape_;
-    std::uint8_t mouse_buttons_ = 0;
+    proto::MouseButtons mouse_buttons_{};
     std::uint8_t osd_combo_ = 0;
     bool keys_changed_ = false;
 
@@ -183,10 +185,7 @@ private:
     AxisTable axes_{};
     std::array<std::uint64_t, kDownWords> down_{};
     std::array<std::uint8_t, kAxisCount> axis_edge_{};
-    AnalogXy raw_[2]{};
-    AnalogXy prev_stick_[2]{};
-    float max_cardinal_[2]{0.0f, 0.0f};
-    float max_range_sq_[2]{0.0f, 0.0f};
+    infra::IndexedArray<StickState, kSticks.size(), StickIndex> sticks_{};
     JoyMask joy_prev_{};
     JoyMask menu_prev_{};
     DeviceReport report_{};

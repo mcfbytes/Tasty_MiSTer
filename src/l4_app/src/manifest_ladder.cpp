@@ -40,7 +40,7 @@ bool ManifestLadder::wants_pass(
             return inbox.ring().size() < proto::kLinkTxCapacity;
         case Pc::Echo: {
             const auto s = level != nullptr ? level->sample() : FileTxLevelCell::Sample{};
-            return s && s.value.payload && s.value.act == act_;
+            return s && s.value.payload && s.value.act == act_.widen();
         }
         case Pc::Over:
             break;
@@ -64,12 +64,7 @@ ManifestLadder::Pass ManifestLadder::next_(Host& h) {
 }
 
 ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& w) {
-    const auto planned = cores::AddressedLoad::window_row(
-        w.address,
-        w.bytes,
-        proto::WideIoIndex{w.index},
-        h.aperture
-    );
+    const auto planned = cores::AddressedLoad::window_row(w.address, w.bytes, w.index, h.aperture);
     if (!planned) {
         refuse_window_(h, Errc::slot_range);
         return Pass::Stepped;
@@ -90,7 +85,7 @@ ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& 
         .loader = std::make_unique<cores::AddressedLoad>(h.aperture),
         .file = acts_->take_image(),
         .total = w.bytes,
-        .wire_index = proto::WideIoIndex{w.index},
+        .wire_index = w.index,
         .act = h.owner.next_generation(),
         .row = r
     };
@@ -134,15 +129,15 @@ ManifestLadder::Pass ManifestLadder::send_(Host& h) {
     cores::SendBracket& b = *bracket_;
     const std::uint64_t bytes = b.bytes.size();
 
-    auto id = b.bytes.empty() ? inbox.intern_file_path(rel_.view(), 0, 0, b.aux)
+    auto id = b.bytes.empty() ? inbox.intern_file_path(rel_.view(), 0, svc::Crc32{}, b.aux)
                               : inbox.intern_file(std::move(b.bytes), {}, rel_.view(), 0);
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : fail_(id.error().code);
-    std::uint16_t act = 0;
-    while (act == 0 || act == act_)
-        act = static_cast<std::uint16_t>(h.owner.next_generation());
+    proto::ActKey16 act{};
+    while (!act || act == act_)
+        act = h.owner.next_generation().narrow();
     const proto::LinkOp::StagePayload
-        op{.payload = *id, .dest = proto::WideIoIndex{b.index}, .chunk = kSendChunk, .act = act};
+        op{.payload = *id, .dest = b.index, .chunk = kSendChunk, .act = act};
     if (!inbox.push(op))
         return fail_(Errc::would_block);
     act_ = act;
@@ -154,7 +149,7 @@ ManifestLadder::Pass ManifestLadder::send_(Host& h) {
 
 ManifestLadder::Pass ManifestLadder::echo_(Host& h) {
     const auto s = h.rung.level != nullptr ? h.rung.level->sample() : FileTxLevelCell::Sample{};
-    if (!s || !s.value.payload || s.value.act != act_) {
+    if (!s || !s.value.payload || s.value.act != act_.widen()) {
         return h.now_ns < echo_due_ns_ ? Pass::Waiting : fail_(Errc::timeout);
     }
     if (!s.value.open)

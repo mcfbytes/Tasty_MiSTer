@@ -6,12 +6,14 @@
 #include <span>
 #include <string_view>
 
+#include "proto/types.h"
+
 namespace mister::cores {
 
 struct SignatureRow {
     std::uint32_t offset;
     std::span<const std::byte> magic;
-    std::uint8_t region;
+    proto::RegionCode region;
     std::string_view why;
 };
 

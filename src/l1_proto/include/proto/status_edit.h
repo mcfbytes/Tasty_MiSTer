@@ -14,13 +14,13 @@ struct StatusEdit {
     StatusWord mask{};
 
     [[nodiscard]] static constexpr StatusEdit bit(StatusBit b, bool value) noexcept {
-        return field(b, 1, value ? 1u : 0u);
+        return field(b, 1, FieldValue{value ? 1u : 0u});
     }
 
     [[nodiscard]] static constexpr StatusEdit field(
         StatusBit start,
         unsigned width,
-        std::uint32_t value
+        FieldValue value
     ) noexcept {
         StatusEdit e{};
         if (width == 0)
@@ -32,7 +32,7 @@ struct StatusEdit {
             const unsigned n = start.v + i;
             const auto m = static_cast<std::uint16_t>(1u << (n % 16u));
             e.mask.words[n / 16u] = static_cast<std::uint16_t>(e.mask.words[n / 16u] | m);
-            if (i < 32u && ((value >> i) & 1u) != 0u) {
+            if (i < 32u && ((value.v >> i) & 1u) != 0u) {
                 e.bits.words[n / 16u] = static_cast<std::uint16_t>(e.bits.words[n / 16u] | m);
             }
         }

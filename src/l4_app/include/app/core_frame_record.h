@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "app/types.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -13,7 +14,7 @@ struct CoreFrameRecord {
     std::int64_t edge_ns = 0;
     std::uint32_t epoch = 0;
     std::uint32_t core_seq = 0;
-    std::int32_t movie_frame = -1;
+    MovieFrame movie_frame = kNoMovieFrame;
     std::uint8_t supported = 0;
     std::uint8_t pad_[3]{};
 };

@@ -34,8 +34,8 @@ constinit const StOptionRowAspect kAspect{};
 constinit const StOptionRowVideoCrop kVideoCrop{};
 constinit const StOptionRowFloppy kFloppyA{StOption::FloppyA, 0};
 constinit const StOptionRowFloppy kFloppyB{StOption::FloppyB, 1};
-constinit const StOptionRowHdd kHdd0{StOption::Hdd0, 0};
-constinit const StOptionRowHdd kHdd1{StOption::Hdd1, 1};
+constinit const StOptionRowHdd kHdd0{StOption::Hdd0, AcsiTarget{0}};
+constinit const StOptionRowHdd kHdd1{StOption::Hdd1, AcsiTarget{1}};
 constinit const StOptionRowTos kTos{};
 constinit const StOptionRowCartridge kCartridge{};
 
@@ -137,7 +137,7 @@ OptionRowView StOptionRowFloppy::on_file_view(const Facts& f, std::span<char> te
 }
 
 OptionRowView StOptionRowHdd::on_file_view(const Facts& f, std::span<char>) const noexcept {
-    const std::uint8_t t = target_;
+    const std::uint8_t t = target_.v;
     return {
         static_cast<std::uint8_t>(f.hdd_bound[t] ? 1 : 0),
         false,

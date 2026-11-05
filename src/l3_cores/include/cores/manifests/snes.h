@@ -20,7 +20,7 @@ inline constexpr auto kSnesServices = std::to_array<LinkDecoderDecl>({
         "snes.mailbox",
         reactor::Cause::Tick,
         &kMailboxTick<kSnes>,
-        0,
+        reactor::kEveryRound,
         RoundClaim::Never,
     },
 });
@@ -43,6 +43,7 @@ inline constexpr CoreProfile kSnes{
     .start_assets = kSnesStartAssets,
     .start = StartRule::Assets,
     .signatures = {},
+    .tasty_playable = true,
     .windows = kSnesWindows,
     .file_tx_whole = true,
 };
@@ -54,7 +55,7 @@ inline constexpr auto kSgbServices = std::to_array<LinkDecoderDecl>({
         "sgb.mailbox",
         reactor::Cause::Tick,
         &kMailboxTick<kSgb>,
-        0,
+        reactor::kEveryRound,
         RoundClaim::Never,
     },
 });
@@ -81,6 +82,6 @@ std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g);
 
 std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g);
 
-std::unique_ptr<ICompanionLoad> make_msu_companion(const svc::Vfs& vfs);
+std::unique_ptr<MsuCompanion> make_msu_companion(const svc::Vfs& vfs);
 
 }

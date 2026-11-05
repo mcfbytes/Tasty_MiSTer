@@ -195,9 +195,10 @@ Ex<IMovieCodec::Frame> SnesLsmvCodec::frame(std::string_view line, const Facts& 
 
 std::optional<IMovieCodec::DigestSpan> SnesLsmvCodec::rom_digest_span(
     std::span<const std::uint8_t>,
-    std::uint64_t size
+    proto::FileSize size
 ) const noexcept {
-    return past_header(size, size % 1024u);
+    const std::uint64_t bytes = size.v;
+    return past_header(bytes, bytes % 1024u);
 }
 
 }

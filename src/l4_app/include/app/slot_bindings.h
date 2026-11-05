@@ -85,7 +85,7 @@ public:
         ICheatApply& cheats;
         LinkRxChannel<SeatTag::Main>& link_rx;
         SessionMachine& machine;
-        EmitSite advise_site;
+        infra::ErrorSite advise_site;
         SessionTally& session_tally;
         CoreOptionCells& options;
         xthread::LogLane& log_lane;
@@ -118,7 +118,7 @@ public:
         return save_extent_cell_;
     }
 
-    [[nodiscard]] std::uint16_t channel_borrows() const noexcept { return channel_borrows_; }
+    [[nodiscard]] proto::BlockSlotMask channel_borrows() const noexcept { return channel_borrows_; }
 
     [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
 
@@ -130,7 +130,7 @@ public:
     Result on(const proto::LinkOp::StageCheats& a, const LinkOpCtx& ctx) noexcept;
     Result misrouted(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept;
 
-    void mount_save_channel(cores::ISaveChannel& channel, std::uint16_t poisoned);
+    void mount_save_channel(cores::ISaveChannel& channel, proto::BlockSlotMask poisoned);
 
     void settle(infra::OptRef<cores::Core> core) noexcept;
 
@@ -154,8 +154,6 @@ public:
 
 private:
     static constexpr std::int64_t kQuiesceBudgetNs = 250'000'000;
-
-    static constexpr std::size_t kMaxChannelSlots = proto::kMaxAnnounceableSlot + 1;
 
     static constexpr unsigned kOffSlot = SaveImageSource::kSlots;
 
@@ -225,7 +223,7 @@ private:
 
     ICheatApply& cheats_;
     SessionMachine& machine_;
-    const EmitSite advise_site_;
+    const infra::ErrorSite advise_site_;
     SessionTally& session_tally_;
     CoreOptionCells& options_;
     xthread::LogLane::Producer log_lane_;
@@ -250,7 +248,7 @@ private:
 
     std::uint16_t channel_slots_ = 0;
 
-    std::uint16_t channel_borrows_ = 0;
+    proto::BlockSlotMask channel_borrows_{};
     Tally tally_{};
 };
 
@@ -273,6 +271,7 @@ inline SlotBindings::SlotBindings(const Wiring& g) noexcept
       save_src_(vfs_ ? std::make_unique<SaveImageSource>(*vfs_) : nullptr),
       slots_(
           proto::BlockSlots::Wiring{
+              .link = link_,
               .source = save_src_ ? infra::OptRef<proto::IImageSource>{*save_src_}
                                   : infra::OptRef<proto::IImageSource>{},
               .clock = infra::OptRef<const os::IClock>{clock_},
@@ -337,7 +336,8 @@ inline ILinkEncoder::Outcome SlotBindings::on(
     if (!a.bracketed) {
         if (a.sends_index && kind != proto::LinkOp::SlotBind::MountCd) {
             (void)binder_.fio_queue().flush();
-            if (auto r = proto::DownloadSession::set_index(link_, proto::IoIndex{a.index_word}); !r)
+            proto::SpiFrame frame{link_};
+            if (auto r = proto::DownloadSession::set_index(frame, proto::IoIndex{a.index_word}); !r)
                 return ILinkEncoder::Outcome::Dropped;
         }
         if (auto r = apply_bind_slot_(si, kind, size, path_id, roles); !r) {
@@ -349,7 +349,7 @@ inline ILinkEncoder::Outcome SlotBindings::on(
     if (!ctx.core.has_value())
         return ILinkEncoder::Outcome::Dropped;
     const proto::WideIoIndex save_dest = ctx.core->profile().staging.save_dest;
-    if (ctx.core->staging_core() == nullptr)
+    if (!ctx.core->staging_core())
         return ILinkEncoder::Outcome::Dropped;
 
     CoreBlockRoles bracketed_roles{roles.resolve(slots_.server(si))};
@@ -380,8 +380,8 @@ inline ILinkEncoder::Outcome SlotBindings::on(
     const LinkOpCtx& ctx
 ) noexcept {
     TASTY_SEAT_BODY(SlotBindings);
-    const bool slot_mount = ctx.core.has_value() && ctx.core->slot_mount() != nullptr;
-    const bool staged = ctx.core.has_value() && ctx.core->staging_core() != nullptr;
+    const bool slot_mount = ctx.core.has_value() && ctx.core->slot_mount();
+    const bool staged = ctx.core.has_value() && ctx.core->staging_core();
     const InternedFile* const file = a.path == proto::FileId{} ? nullptr : ctx.inbox.file(a.path);
     const std::string_view path = file == nullptr ? std::string_view{} : file->path.view();
 
@@ -420,7 +420,13 @@ inline ILinkEncoder::Outcome SlotBindings::on(
     const InternedFile* const file = ctx.inbox.file(a.path);
     if (file == nullptr)
         return ILinkEncoder::Outcome::Dropped;
-    cheats_.content_loaded(&*ctx.core, TxDigest::Kind::Mount, file->path.view(), 0, a.same_game);
+    cheats_.content_loaded(
+        &*ctx.core,
+        TxDigest::Kind::Mount,
+        file->path.view(),
+        svc::Crc32{},
+        a.same_game
+    );
     return ILinkEncoder::Outcome::Encoded;
 }
 
@@ -441,7 +447,7 @@ inline void SlotBindings::settle(infra::OptRef<cores::Core> core) noexcept {
 
 inline void SlotBindings::settle_slot_mount(infra::OptRef<cores::Core> core) noexcept {
     TASTY_SEAT_BODY(SlotBindings);
-    if (core.has_value() && core->slot_mount() != nullptr)
+    if (core.has_value() && core->slot_mount())
         settle_stage_mount_(core);
 }
 
@@ -472,18 +478,18 @@ inline void SlotBindings::note_drop_park() noexcept {
 
 inline void SlotBindings::forget_channel_borrows() noexcept {
     TASTY_SEAT_BODY(SlotBindings);
-    channel_borrows_ = 0;
+    channel_borrows_ = {};
 }
 
 inline void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexcept {
     TASTY_SEAT_BODY(SlotBindings);
     if (!core.has_value())
         return;
-    const proto::SlotIndex slot{core->profile().staging.disc_slot.v};
+    const proto::SlotIndex slot = core->profile().staging.disc_slot.block_slot();
 
     if (slots_.server(slot) == proto::SlotServer::CoreDescriptor)
         return;
-    if (core->block_server() != nullptr) {
+    if (core->block_server()) {
 
         slots_.bind_server(slot, proto::SlotServer::CoreBlock);
     } else if (slots_.server(slot) == proto::SlotServer::CoreBlock) {
@@ -731,10 +737,10 @@ inline cores::MountState SlotBindings::present_mount_(
 ) noexcept {
     if (!core.has_value())
         return cores::MountState::Failed;
-    if (cores::ISlotMount* sm = core->slot_mount(); sm != nullptr)
+    if (const auto sm = core->slot_mount())
         return sm->mount_slot(slot, path);
-    cores::IStagingCore* cd = core->staging_core();
-    return cd == nullptr ? cores::MountState::Failed : cd->mount_disc(path);
+    const auto cd = core->staging_core();
+    return !cd ? cores::MountState::Failed : cd->mount_disc(path);
 }
 
 inline void SlotBindings::after_mount_answer_(infra::OptRef<cores::Core> core) noexcept {
@@ -743,8 +749,8 @@ inline void SlotBindings::after_mount_answer_(infra::OptRef<cores::Core> core) n
 
 inline cores::MountStatus SlotBindings::mount_body_(infra::OptRef<cores::Core> core) noexcept {
     cores::MountStatus body{};
-    if (cores::IStagingCore* cd = core.has_value() ? core->staging_core() : nullptr;
-        cd != nullptr) {
+    const auto cd = core.has_value() ? core->staging_core() : infra::OptRef<cores::IStagingCore>{};
+    if (cd) {
         const cores::StagePlan plan = cd->stage_plan();
         body.disc_size_bytes = plan.disc_size_bytes;
         body.data_first_track = plan.data_first_track;
@@ -769,9 +775,9 @@ inline cores::SaveExtent SlotBindings::save_body_(std::uint64_t size_bytes, bool
 ) {
     switch (kind) {
         case proto::LinkOp::SlotBind::Mount:
-            return slots_.mount(link_, slot, size, path_id, roles);
+            return slots_.mount(slot, size, path_id, roles);
         case proto::LinkOp::SlotBind::Unmount:
-            return slots_.unmount(link_, slot);
+            return slots_.unmount(slot);
         case proto::LinkOp::SlotBind::MountCd:
             return announce_disc_(slot, size, roles);
         case proto::LinkOp::SlotBind::Attach:
@@ -792,37 +798,33 @@ inline cores::SaveExtent SlotBindings::save_body_(std::uint64_t size_bytes, bool
     return announce_.mount_disc(slots_, frame, slot, size, roles);
 }
 
-inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::uint16_t poisoned) {
+inline void SlotBindings::mount_save_channel(
+    cores::ISaveChannel& channel,
+    proto::BlockSlotMask poisoned
+) {
     TASTY_SEAT_BODY(SlotBindings);
     if (!vfs_)
         return;
-    const auto count = channel.claim_mount_plan();
-    if (!count)
+    const auto plan = channel.claim_mount_plan();
+    if (!plan)
         return;
 
     SaveChannelRoles roles{channel};
     const std::uint16_t previous = channel_slots_;
     unmount_save_channel();
 
-    release_channel_slots_(previous, *count);
-
-    cores::ISaveChannel::Mount mounts[kMaxChannelSlots]{};
-    bool planned[kMaxChannelSlots]{};
-    const std::size_t n = *count < kMaxChannelSlots ? *count : kMaxChannelSlots;
-    for (std::size_t i = 0; i < n; ++i) {
-        auto m = channel.mount_at(i);
-        if (!m) {
+    release_channel_slots_(previous, plan->mounts().size());
+    for (const auto& m : plan->mounts()) {
+        if (!m)
             session_tally_.last_error = m.error();
-            continue;
-        }
-        mounts[i] = *m;
-        planned[i] = true;
     }
 
-    for (std::size_t i = 0; i < n; ++i) {
-        if (!planned[i])
+    using Part = cores::ISaveChannel::OrderPart;
+    Part part = Part::RowAndPlan;
+    for (const auto& m : plan->mounts()) {
+        if (!m)
             continue;
-        const proto::SlotIndex si{mounts[i].slot.v};
+        const proto::SlotIndex si = m->slot();
 
         if (slots_.server(si) == proto::SlotServer::CoreBlock) {
             ++tally_.save_mount_collisions;
@@ -830,7 +832,7 @@ inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::
             continue;
         }
 
-        if ((poisoned & (1u << si.v)) != 0u) {
+        if (poisoned.has(si)) {
             ++tally_.stage_refusals;
             session_tally_.last_error = Error{Errc::would_block, ERR_SITE(), si.v};
             continue;
@@ -838,14 +840,18 @@ inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::
         if (!storage_life_) {
             channel.descriptor().note_attached(si, false, proto::FileSize{});
         } else {
-            svc::IStorageBackend* const b = channel.backend(i);
-            const bool staged = b != nullptr
-                && storage_life_->stage_backend(si, *b, channel.order(i));
+            const bool staged = storage_life_->stage_backend(
+                si,
+                channel.backend(),
+                channel.compose_order(m->row, part)
+            );
             if (staged)
-                channel_borrows_ = static_cast<std::uint16_t>(channel_borrows_ | (1u << si.v));
+                channel_borrows_ = channel_borrows_.with(si);
             if (!staged || !slots_.submit_attach(si, roles)) {
                 ++tally_.stage_refusals;
                 channel.descriptor().note_attached(si, false, proto::FileSize{});
+            } else {
+                part = Part::RowOnly;
             }
         }
 
@@ -853,7 +859,7 @@ inline void SlotBindings::mount_save_channel(cores::ISaveChannel& channel, std::
         if (auto r = apply_bind_slot_(
                 si,
                 proto::LinkOp::SlotBind::Mount,
-                mounts[i].size,
+                m->size,
                 proto::PathId{0},
                 roles
             );
@@ -903,7 +909,7 @@ inline void SlotBindings::release_channel_slots_(std::uint16_t mask, std::size_t
         if (!storage_life_)
             continue;
         if (storage_life_->release_slot(si)) {
-            channel_borrows_ = static_cast<std::uint16_t>(channel_borrows_ & ~(1u << i));
+            channel_borrows_ = channel_borrows_.without(si);
         } else {
             ++tally_.channel_release_refusals;
         }

@@ -83,7 +83,7 @@ struct InputStats {
     std::uint32_t registered = 0;
     std::uint32_t mapped = 0;
     std::uint32_t slotted = 0;
-    std::uint32_t gates = 0;
+    InputGateBits gates{};
     std::uint32_t mask_changes = 0;
     std::uint32_t joy_seen = 0;
     std::uint32_t joy_players = 0;

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <utility>
 
 #include "infra/counter.h"
 #include "infra/loan_channel.h"
@@ -48,9 +50,9 @@ public:
 
     [[nodiscard]] CountCell& counters_cell() noexcept { return count_cell_; }
 
-    void set_generation(std::uint32_t g) noexcept;
+    void set_generation(Generation g) noexcept;
 
-    [[nodiscard]] std::uint32_t generation() const noexcept { return gen_; }
+    [[nodiscard]] Generation generation() const noexcept { return gen_; }
 
     [[nodiscard]] DiscMountState arm_mount(
         DiscOp op,
@@ -133,13 +135,54 @@ private:
     DiscOp armed_op_ = DiscOp::Mount;
     DiscMountState mount_state_ = DiscMountState::Idle;
     bool mount_live_ = false;
-    Loan resident_[kDiscReadDepth]{};
 
-    std::uint32_t resident_at_[kDiscReadDepth]{};
-    std::uint32_t arrivals_ = 0;
+    struct Arrival {
+        TASTY_SEAT_RESIDENT(RT);
+        std::uint32_t v = 0;
+
+        [[nodiscard]] constexpr Arrival next() const noexcept { return Arrival{v + 1}; }
+
+        [[nodiscard]] constexpr bool before(Arrival other, Arrival now) const noexcept {
+            return (now.v - v) > (now.v - other.v);
+        }
+    };
+
+    class Resident {
+        TASTY_SEAT_RESIDENT(RT);
+
+    public:
+        [[nodiscard]] bool held() const noexcept { return static_cast<bool>(loan_); }
+
+        void place(Loan l, Arrival arrival) noexcept {
+            loan_ = std::move(l);
+            arrival_ = arrival;
+        }
+
+        void drop() noexcept {
+            loan_ = Loan{};
+            arrival_ = Arrival{};
+        }
+
+        [[nodiscard]] const DiscReadSlot& read() const noexcept { return *loan_; }
+
+        [[nodiscard]] bool matches(DiscForm form, proto::Lba lba) const noexcept {
+            return loan_ && (*loan_).lba == lba && (*loan_).form == form;
+        }
+
+        [[nodiscard]] bool older_than(const Resident& other, Arrival now) const noexcept {
+            return arrival_.before(other.arrival_, now);
+        }
+
+    private:
+        Loan loan_{};
+        Arrival arrival_{};
+    };
+
+    std::array<Resident, kDiscReadDepth> resident_{};
+    Arrival arrivals_{};
     Inflight inflight_[kDiscReadDepth]{};
     FailedRead failed_{};
-    std::uint32_t gen_ = 0;
+    Generation gen_{};
     xthread::Counter not_resident_, stale_drops_, refusals_, reads_, read_errors_, evictions_;
 };
 

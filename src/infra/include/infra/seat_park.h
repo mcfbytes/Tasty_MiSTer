@@ -10,6 +10,7 @@
 
 #include "infra/error.h"
 #include "infra/park_like.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 
@@ -42,7 +43,8 @@ public:
 
     void disarm() noexcept { wake_.disarm(); }
 
-    void wait(int ms) noexcept {
+    void wait(infra::ParkTimeout timeout) noexcept {
+        const int ms = timeout.count();
         ++waits_;
         extra_ready_ = false;
         const short extra_events = extra_muted_ ? short{0} : short{POLLIN};

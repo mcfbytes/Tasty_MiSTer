@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "proto/types.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
@@ -17,7 +18,7 @@ namespace mister::app {
 
 struct StreamFile {
     std::unique_ptr<svc::IFile> f;
-    std::uint64_t size = 0;
+    proto::FileSize size{};
 };
 
 [[nodiscard]] Ex<StreamFile> stream_open(
@@ -26,11 +27,11 @@ struct StreamFile {
     svc::OpenMode mode = svc::OpenMode::Read
 );
 
-[[nodiscard]] Ex<void> stream_read(svc::IFile& f, std::uint64_t off, std::span<std::byte> dst);
+[[nodiscard]] Ex<void> stream_read(svc::IFile& f, proto::FileSize off, std::span<std::byte> dst);
 
 [[nodiscard]] Ex<void> stream_write(
     svc::IFile& f,
-    std::uint64_t off,
+    proto::FileSize off,
     std::span<const std::byte> src
 );
 
@@ -38,7 +39,7 @@ struct StreamFile {
 
 [[nodiscard]] std::optional<std::vector<std::uint8_t>> read_whole(
     svc::IFile& f,
-    std::uint64_t size
+    proto::FileSize size
 );
 
 }

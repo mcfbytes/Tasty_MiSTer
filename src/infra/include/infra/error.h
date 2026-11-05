@@ -40,6 +40,7 @@ enum class Errc : std::uint16_t {
     aperture_range,
     stale,
     busy,
+    seat_absent,
 };
 
 static_assert(
@@ -47,11 +48,24 @@ static_assert(
     && static_cast<std::uint16_t>(Errc::aperture_range) == 23
     && static_cast<std::uint16_t>(Errc::stale) == 24
     && static_cast<std::uint16_t>(Errc::busy) == 25
+    && static_cast<std::uint16_t>(Errc::seat_absent) == 26
 );
+
+namespace infra {
+
+enum class ErrorSite : std::uint16_t {};
+
+inline constexpr ErrorSite kNoSite{};
+
+[[nodiscard]] constexpr ErrorSite site_at_line(int line) noexcept {
+    return static_cast<ErrorSite>(line);
+}
+
+}
 
 struct Error {
     Errc code;
-    std::uint16_t site;
+    infra::ErrorSite site;
     std::uint32_t detail;
 };
 
@@ -60,11 +74,11 @@ static_assert(std::is_trivially_copyable_v<Error> && sizeof(Error) == 8);
 template <class T>
 using Ex = std::expected<T, Error>;
 
-#define ERR_SITE() (static_cast<std::uint16_t>(__LINE__))
+#define ERR_SITE() (::mister::infra::site_at_line(__LINE__))
 
 [[noreturn]] void fatal(Error e, const char* what);
 
-inline std::unexpected<Error> unimplemented(std::uint16_t site) {
+inline std::unexpected<Error> unimplemented(infra::ErrorSite site) {
     return std::unexpected(Error{Errc::unimplemented, site, 0});
 }
 

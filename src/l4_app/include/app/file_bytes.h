@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "svc/types.h"
 #include "app/interned_file.h"
 #include "app/ring_slab.h"
 #include "app/types.h"
@@ -33,7 +34,7 @@ public:
         std::string_view ext,
         std::string_view path,
         std::uint32_t load_addr,
-        std::uint32_t crc = 0,
+        svc::Crc32 crc = {},
         std::uint64_t whole = 0,
         std::uint64_t offset = 0
     );
@@ -45,7 +46,7 @@ public:
     [[nodiscard]] Ex<proto::FileId> intern_path(
         std::string_view path,
         std::uint64_t size_bytes,
-        std::uint32_t crc = 0,
+        svc::Crc32 crc = {},
         std::uint32_t aux = 0
     );
 

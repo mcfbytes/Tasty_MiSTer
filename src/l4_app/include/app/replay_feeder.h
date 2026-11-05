@@ -65,7 +65,7 @@ public:
 
     [[nodiscard]] Stage stage() const noexcept { return stage_; }
 
-    [[nodiscard]] std::uint16_t gen() const noexcept { return play_.gen; }
+    [[nodiscard]] ControlGeneration gen() const noexcept { return play_.gen; }
 
     [[nodiscard]] Refusal last_refusal() const noexcept { return last_refusal_; }
 
@@ -79,7 +79,9 @@ public:
 
     [[nodiscard]] std::uint32_t refusals() const noexcept { return refusals_; }
 
-    [[nodiscard]] std::uint32_t frames() const noexcept { return play_.frames; }
+    [[nodiscard]] std::uint32_t scanned() const noexcept { return play_.scanned; }
+
+    [[nodiscard]] FrameCount pushed() const noexcept { return play_.pushed; }
 
     [[nodiscard]] std::uint32_t movie_frames() const noexcept { return play_.movie_frames; }
 

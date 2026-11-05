@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/core_frame_counter.h"
 
+#include "proto/link.h"
+
 namespace mister::app {
 
 void CoreFrameCounter::sample_demand_() noexcept {
@@ -17,7 +19,8 @@ void CoreFrameCounter::sample_demand_() noexcept {
 
 Ex<proto::FrameCount> CoreFrameCounter::read() noexcept {
     TASTY_SEAT_BODY(CoreFrameCounter);
-    const auto r = counter_.read(w_.link);
+    proto::Link link{w_.link};
+    const auto r = counter_.read(link);
     if (!r)
         return r;
     read_this_round_ = true;
@@ -46,11 +49,7 @@ Ex<proto::FrameCount> CoreFrameCounter::read() noexcept {
     return r;
 }
 
-void CoreFrameCounter::settle(
-    bool ready,
-    std::uint32_t core_seq,
-    std::int32_t movie_frame
-) noexcept {
+void CoreFrameCounter::settle(bool ready, std::uint32_t core_seq, MovieFrame movie_frame) noexcept {
     TASTY_SEAT_BODY(CoreFrameCounter);
     sample_demand_();
 

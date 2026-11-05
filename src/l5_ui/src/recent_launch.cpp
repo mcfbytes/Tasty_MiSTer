@@ -108,7 +108,7 @@ bool RecentLaunch::ask(
     spec.body = body;
     spec.choices = kYesNo;
     spec.host = infra::OptRef<IConfirmHost>{host};
-    spec.initial = 1;
+    spec.initial = RowIndex{1};
     ctx_.launches.confirm->pending = spec;
     return true;
 }

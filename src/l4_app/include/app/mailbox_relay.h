@@ -12,6 +12,7 @@
 #include "infra/loan_channel.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
+#include "proto/link.h"
 #include "proto/mailbox_frame.h"
 #include "proto/mailbox_poll.h"
 
@@ -31,7 +32,7 @@ public:
     MailboxRelay& operator=(const MailboxRelay&) = delete;
 
     void service_rt(
-        hal::ISpiTransport& link,
+        proto::Link& link,
         proto::SpiFioQueue& queue,
         const proto::MailboxFrameDecl& frame
     ) noexcept override;

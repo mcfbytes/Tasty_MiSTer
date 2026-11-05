@@ -6,13 +6,17 @@
 #include <type_traits>
 
 #include "app/built_core.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 #include "infra/telemetry.h"
 
 namespace mister::app {
 
+using BayGens = std::array<std::uint16_t, kCoreBaySlots>;
+
 struct BayReleases {
-    std::array<std::uint16_t, kCoreBaySlots> released_gen{};
+    BayGens released_gen{};
 };
 
 static_assert(std::is_trivially_copyable_v<BayReleases>);

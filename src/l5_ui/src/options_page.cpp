@@ -26,23 +26,23 @@ using proto::OsdRow;
 
 }
 
-std::uint32_t StatusView::field(BitField b) const noexcept {
+proto::FieldValue StatusView::field(BitField b) const noexcept {
     if (!b.valid())
-        return 0;
+        return {};
     std::uint32_t out = 0;
     for (unsigned i = 0; i < b.width; ++i) {
         const unsigned bit = b.start.v + i;
         if (bit >= 128)
             break;
-        if (((w[bit / 16] >> (bit % 16)) & 1u) != 0u)
+        if (status.get_bit(proto::StatusBit{static_cast<std::uint8_t>(bit)}))
             out |= (1u << i);
     }
-    return out;
+    return proto::FieldValue{out};
 }
 
-std::uint32_t cycle_value(
+proto::FieldValue cycle_value(
     BitField bits,
-    std::uint32_t current,
+    proto::FieldValue current,
     int dir,
     const ISlotLabels* labels
 ) {
@@ -50,11 +50,13 @@ std::uint32_t cycle_value(
         return current;
     const std::uint32_t m = bits.mask();
     const bool forward = dir >= 0;
-    std::uint32_t v = forward ? ((current + 1u) & m) : ((current - 1u) & m);
+
+    std::uint32_t raw = (current.v + (forward ? 1u : ~0u)) & m;
+    proto::FieldValue v{raw};
 
     if (forward) {
         if (labels != nullptr && !labels->has_label(v))
-            v = 0;
+            v = proto::FieldValue{};
         return v;
     }
 
@@ -62,7 +64,8 @@ std::uint32_t cycle_value(
     for (std::uint64_t i = 0; i < slots; ++i) {
         if (labels == nullptr || labels->has_label(v))
             return v;
-        v = (v - 1u) & m;
+        raw = (raw - 1u) & m;
+        v = proto::FieldValue{raw};
     }
     return current;
 }
@@ -71,7 +74,7 @@ Ex<void> OptionsModel::build(const ItemTable& table, const BuildEnv& env) {
     items_.clear();
     selectable_ = RowCount{};
     drawn_ = RowCount{};
-    beyond_mask_ = 0;
+    beyond_mask_ = RowCount{};
     page_ = env.page;
     flat_ = env.flat;
 
@@ -79,12 +82,12 @@ Ex<void> OptionsModel::build(const ItemTable& table, const BuildEnv& env) {
 
     const auto emit = [&](std::unique_ptr<OptionItem> it) {
         if (kind_draws(it->kind)) {
-            it->screen_row = OsdRow{static_cast<std::uint8_t>(drawn_.v)};
-            drawn_.v += 1;
+            it->screen_row = osd_row_at(drawn_);
+            drawn_ += kOneRow;
         }
         if (kind_selects(it->kind)) {
-            it->selectable_index = RowIndex{selectable_.v};
-            selectable_.v += 1;
+            it->selectable_index = row_after(selectable_);
+            selectable_ += kOneRow;
         }
         items_.push_back(std::move(it));
     };
@@ -100,12 +103,12 @@ Ex<void> OptionsModel::build(const ItemTable& table, const BuildEnv& env) {
     for (const Item& src : all) {
         const OptionItem::Kind kind = kind_of(src.kind);
         const proto::Visibility vis = proto::evaluate(src, env.hdmask);
-        bool inpage = (env.page == 0);
+        bool inpage = (env.page == proto::kRootSubmenu);
         std::unique_ptr<OptionItem> it;
 
         if (src.kind == proto::ItemKind::Dip) {
 
-            if (env.page == 0 && env.dip_count != 0) {
+            if (env.page == proto::kRootSubmenu && env.dip_count != 0) {
                 emit(synthesise(OptionItem::Kind::Dip, false));
             }
             continue;
@@ -115,16 +118,16 @@ Ex<void> OptionsModel::build(const ItemTable& table, const BuildEnv& env) {
         if (src.kind != proto::ItemKind::DefMra) {
 
             if (src.declares_page) {
-                if (env.flat && env.page == 0 && !carry.last_space) {
+                if (env.flat && env.page == proto::kRootSubmenu && !carry.last_space) {
                     emit(synthesise(OptionItem::Kind::Separator, vis.disabled));
                 }
-            } else if (src.page != 0) {
-                if (env.page != 0 && env.page == src.page)
+            } else if (src.page != proto::kRootSubmenu) {
+                if (env.page != proto::kRootSubmenu && env.page == src.page)
                     inpage = true;
-                if (env.page == 0 && !env.flat)
+                if (env.page == proto::kRootSubmenu && !env.flat)
                     inpage = false;
 
-                if (env.flat && env.page == 0 && it->hidden_in_flat_root()) {
+                if (env.flat && env.page == proto::kRootSubmenu && it->hidden_in_flat_root()) {
                     inpage = false;
                 }
             }
@@ -148,26 +151,21 @@ Ex<void> OptionsModel::build(const ItemTable& table, const BuildEnv& env) {
         emit(std::move(it));
     }
 
-    if (drawn_.v != 0) {
+    if (!drawn_.empty()) {
         std::unique_ptr<OptionItem> it = synthesise(OptionItem::Kind::Exit, false);
 
-        const std::uint32_t last = (env.osd_rows == 0)
-            ? 0u
-            : static_cast<std::uint32_t>(env.osd_rows - 1);
-        drawn_.v = std::max(drawn_.v, last);
+        const RowCount last = env.osd_rows.empty() ? RowCount{} : env.osd_rows - kOneRow;
+        drawn_ = std::max(drawn_, last);
         emit(std::move(it));
     }
 
-    if (selectable_.v > 64)
-        beyond_mask_ = selectable_.v - 64;
+    if (selectable_ > menu_mask_rows())
+        beyond_mask_ = selectable_ - menu_mask_rows();
     return {};
 }
 
 MenuMask OptionsModel::mask() const noexcept {
-    const std::uint32_t n = selectable_.v;
-    if (n >= 64)
-        return MenuMask{~0ull};
-    return MenuMask{(1ull << n) - 1ull};
+    return dense_mask(selectable_);
 }
 
 const OptionItem* OptionsModel::at_selectable(RowIndex index) const {
@@ -210,14 +208,14 @@ CoreOptionsPage::~CoreOptionsPage() = default;
 void CoreOptionsPage::first_walk_(const ItemTable& table, const BuildEnv& env) {
     TASTY_SEAT_BODY(CoreOptionsPage);
     (void)model_.build(table, view_->walk_env(env));
-    view_->on_walk();
+    view_->on_model_rebuilt();
 }
 
 void CoreOptionsPage::rebuild(const ItemTable& table, const BuildEnv& env) {
     TASTY_SEAT_BODY(CoreOptionsPage);
     env_ = SlotPickHost::Env{env};
     (void)model_.build(table, view_->walk_env(env));
-    view_->on_walk();
+    view_->on_model_rebuilt();
 }
 
 void CoreOptionsPage::on_enter(PageContext& ctx) {
@@ -246,24 +244,9 @@ std::string CoreOptionsPage::compose(const OptionItem& it) const {
     return it.compose(OptionItem::Look{.flat = model_.flat(), .value = status_field(it.bits)});
 }
 
-void CoreOptionsPage::render(OsdRenderer& out) const {
-    TASTY_SEAT_BODY(CoreOptionsPage);
-    view_->render(out);
-}
-
-bool CoreOptionsPage::describe(app::PageDescription& out) const {
-    TASTY_SEAT_BODY(CoreOptionsPage);
-    return view_->describe(out);
-}
-
 Transition CoreOptionsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(CoreOptionsPage);
     return view_->handle(ev);
-}
-
-const OptionsModel& CoreOptionsPage::walk() const {
-    TASTY_SEAT_BODY(CoreOptionsPage);
-    return model_;
 }
 
 std::string_view CoreOptionsPage::heading() const {
@@ -271,7 +254,7 @@ std::string_view CoreOptionsPage::heading() const {
     return title_;
 }
 
-std::uint32_t CoreOptionsPage::field(BitField bits) const {
+proto::FieldValue CoreOptionsPage::field(BitField bits) const {
     TASTY_SEAT_BODY(CoreOptionsPage);
     return status_field(bits);
 }
@@ -304,9 +287,9 @@ void CoreOptionsPage::refuse() {
     ++refusals_;
 }
 
-void CoreOptionsPage::write_status(BitField bits, std::uint32_t value) {
+void CoreOptionsPage::write_status(BitField bits, proto::FieldValue value) {
     TASTY_SEAT_BODY(CoreOptionsPage);
-    push_op(proto::LinkOp::WriteStatus{.start = bits.start, .width = bits.width, .value = value});
+    push_op(proto::LinkOp::WriteStatus{.start = bits.start, .width = bits.width, .value = value.v});
 }
 
 void CoreOptionsPage::toggle(BitField bits, bool ex) {

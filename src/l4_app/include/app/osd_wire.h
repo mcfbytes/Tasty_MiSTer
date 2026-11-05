@@ -27,12 +27,11 @@ public:
     OsdWire(const OsdWire&) = delete;
     OsdWire& operator=(const OsdWire&) = delete;
 
-    bool flush_one() noexcept { return rows_->flush_one(); }
-
-    void bind_rows(OsdPageRoute r) noexcept {
-        route_ = r;
-        rows_ = r == OsdPageRoute::Lw ? static_cast<ILinkOsdRows*>(&lw_rows_) : &link_rows_;
+    bool flush_one() noexcept {
+        return route_ == OsdPageRoute::Lw ? lw_rows_.flush_one() : link_rows_.flush_one();
     }
+
+    void bind_rows(OsdPageRoute r) noexcept { route_ = r; }
 
     [[nodiscard]] OsdPageRoute page_route() const noexcept { return route_; }
 
@@ -72,7 +71,9 @@ public:
 
     bool has_focus() const noexcept { return show_ == proto::LinkOp::OsdShow::Menu; }
 
-    unsigned backlog() const noexcept { return rows_->backlog(); }
+    proto::OsdRowCount backlog() const noexcept {
+        return route_ == OsdPageRoute::Lw ? lw_rows_.backlog() : link_rows_.backlog();
+    }
 
     proto::OsdSurface& surface() noexcept { return *surface_; }
 
@@ -80,9 +81,8 @@ private:
     proto::OsdSurface* surface_;
     hal::ISpiTransport* link_;
     OsdRowTally tally_{};
-    SpiOsdRows<0> link_rows_;
-    SpiOsdRows<proto::OsdSurface::kPageRows> lw_rows_;
-    ILinkOsdRows* rows_ = &link_rows_;
+    SpiOsdRows<proto::OsdRow{}> link_rows_;
+    SpiOsdRows<proto::OsdSurface::kStatusRow> lw_rows_;
     OsdPageRoute route_ = OsdPageRoute::Link;
     proto::OsdTransport osd_{};
     std::uint32_t vis_writes_ = 0;

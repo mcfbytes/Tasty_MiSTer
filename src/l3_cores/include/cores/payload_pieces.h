@@ -33,10 +33,10 @@ public:
 
     struct Frame {
         proto::WideIoIndex dest{};
-        std::uint8_t region = proto::LinkOp::StagePayload::kNoRegion;
+        proto::RegionCode region = proto::RegionCode::kNone;
         std::uint16_t chunk = 0;
         bool progress = false;
-        std::uint16_t act = 0;
+        proto::ActKey16 act{};
     };
 
     [[nodiscard]] static Ex<PayloadPieces> of_file(

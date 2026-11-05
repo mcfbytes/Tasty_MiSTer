@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "app/frame_stamp.h"
+#include "app/types.h"
 #include "infra/fixed_str.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
@@ -46,8 +48,8 @@ static_assert(infra::json_clean_names(kRecStateNames), "a name is rendered unesc
 [[nodiscard]] const char* rec_verdict_remedy(RecVerdict v) noexcept;
 
 struct RecorderStatus {
-    std::uint16_t gen = 0;
-    std::uint16_t answered = 0;
+    ControlGeneration gen{};
+    ControlGeneration answered{};
     RecState state = RecState::Idle;
     RecVerdict verdict = RecVerdict::None;
     RecVerdict end = RecVerdict::None;
@@ -59,9 +61,9 @@ struct RecorderStatus {
     std::uint8_t depth = 0;
     std::uint16_t width = 0;
     std::uint16_t height = 0;
-    std::uint32_t rows = 0;
+    CoreFrameCount rows{};
     std::uint32_t captured = 0;
-    std::uint32_t missed = 0;
+    CoreFrameCount missed{};
     std::uint32_t torn = 0;
     std::uint32_t backpressure = 0;
     std::uint32_t resize = 0;

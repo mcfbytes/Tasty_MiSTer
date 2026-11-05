@@ -7,6 +7,8 @@
 #include <span>
 #include <string>
 
+#include "infra/endian.h"
+
 namespace mister::cores::mra {
 namespace {
 
@@ -23,14 +25,15 @@ constexpr std::array<std::uint32_t, 64> kMdK = {
     0xeb86d391u,
 };
 
-constexpr std::array<int, 64> kMdS = {
+constexpr std::array<unsigned, 64> kMdS = {
     7,  12, 17, 22, 7,  12, 17, 22, 7,  12, 17, 22, 7,  12, 17, 22, 5,  9,  14, 20, 5,  9,
     14, 20, 5,  9,  14, 20, 5,  9,  14, 20, 4,  11, 16, 23, 4,  11, 16, 23, 4,  11, 16, 23,
     4,  11, 16, 23, 6,  10, 15, 21, 6,  10, 15, 21, 6,  10, 15, 21, 6,  10, 15, 21,
 };
 
-[[nodiscard]] constexpr std::uint32_t rotl(std::uint32_t x, int s) noexcept {
-    return (x << s) | (x >> (32 - s));
+[[nodiscard]] constexpr std::uint32_t rotl(std::uint32_t x, unsigned s) noexcept {
+    constexpr unsigned kWordBits = 32;
+    return (x << s) | (x >> (kWordBits - s));
 }
 
 }
@@ -40,32 +43,42 @@ Md5::Md5() noexcept {
 }
 
 void Md5::block(const std::uint8_t* p) noexcept {
-    std::array<std::uint32_t, 16> m{};
-    for (std::size_t i = 0; i < 16; ++i) {
-        m[i] = static_cast<std::uint32_t>(p[i * 4])
-            | (static_cast<std::uint32_t>(p[i * 4 + 1]) << 8)
-            | (static_cast<std::uint32_t>(p[i * 4 + 2]) << 16)
-            | (static_cast<std::uint32_t>(p[i * 4 + 3]) << 24);
+    constexpr std::size_t kBlockWords = 16;
+    constexpr std::size_t kRounds = 64;
+    constexpr std::size_t kRoundsPerStage = 16;
+    constexpr std::size_t kStage3Begin = 2 * kRoundsPerStage;
+    constexpr std::size_t kStage4Begin = 3 * kRoundsPerStage;
+    constexpr std::size_t kStage2Mul = 5;
+    constexpr std::size_t kStage2Add = 1;
+    constexpr std::size_t kStage3Mul = 3;
+    constexpr std::size_t kStage3Add = 5;
+    constexpr std::size_t kStage4Mul = 7;
+    std::array<std::uint32_t, kBlockWords> m{};
+    for (std::size_t i = 0; i < kBlockWords; ++i) {
+        m[i] = infra::load_le<std::uint32_t>(std::span<const std::uint8_t, sizeof(std::uint32_t)>(
+            p + i * sizeof(std::uint32_t),
+            sizeof(std::uint32_t)
+        ));
     }
     std::uint32_t a = h_[0];
     std::uint32_t b = h_[1];
     std::uint32_t c = h_[2];
     std::uint32_t d = h_[3];
-    for (std::size_t i = 0; i < 64; ++i) {
+    for (std::size_t i = 0; i < kRounds; ++i) {
         std::uint32_t f = 0;
         std::size_t g = 0;
-        if (i < 16) {
+        if (i < kRoundsPerStage) {
             f = (b & c) | (~b & d);
             g = i;
-        } else if (i < 32) {
+        } else if (i < kStage3Begin) {
             f = (d & b) | (~d & c);
-            g = (5 * i + 1) % 16;
-        } else if (i < 48) {
+            g = (kStage2Mul * i + kStage2Add) % kBlockWords;
+        } else if (i < kStage4Begin) {
             f = b ^ c ^ d;
-            g = (3 * i + 5) % 16;
+            g = (kStage3Mul * i + kStage3Add) % kBlockWords;
         } else {
             f = c ^ (b | ~d);
-            g = (7 * i) % 16;
+            g = (kStage4Mul * i) % kBlockWords;
         }
         const std::uint32_t tmp = d;
         d = c;
@@ -80,18 +93,19 @@ void Md5::block(const std::uint8_t* p) noexcept {
 }
 
 void Md5::update(std::span<const std::uint8_t> data) noexcept {
-    std::size_t fill = static_cast<std::size_t>(total_ % 64);
+    constexpr std::size_t kBlockBytes = 64;
+    std::size_t fill = static_cast<std::size_t>(total_ % kBlockBytes);
     total_ += data.size();
     std::size_t i = 0;
     if (fill != 0) {
-        while (fill < 64 && i < data.size()) {
+        while (fill < kBlockBytes && i < data.size()) {
             tail_[fill++] = data[i++];
         }
-        if (fill < 64)
+        if (fill < kBlockBytes)
             return;
         block(tail_.data());
     }
-    for (; i + 64 <= data.size(); i += 64) {
+    for (; i + kBlockBytes <= data.size(); i += kBlockBytes) {
         block(data.data() + i);
     }
     const std::size_t rest = data.size() - i;
@@ -101,34 +115,47 @@ void Md5::update(std::span<const std::uint8_t> data) noexcept {
 }
 
 std::array<std::uint8_t, 16> Md5::digest() noexcept {
-    const std::uint64_t bits = total_ * 8;
-    std::array<std::uint8_t, 64> pad{};
-    pad[0] = 0x80;
-    const std::size_t fill = static_cast<std::size_t>(total_ % 64);
-    const std::size_t padlen = (fill < 56) ? (56 - fill) : (120 - fill);
+    constexpr unsigned kByteBits = 8;
+    constexpr std::size_t kBlockBytes = 64;
+    constexpr std::size_t kLengthAt = 56;
+    constexpr std::size_t kLengthBytes = 8;
+    constexpr std::size_t kTwoBlockLengthAt = kBlockBytes + kLengthAt;
+    constexpr std::uint8_t kPadMarker = 0x80;
+    constexpr std::size_t kStateWords = 4;
+    constexpr std::size_t kDigestBytes = 16;
+    const std::uint64_t bits = total_ * kByteBits;
+    std::array<std::uint8_t, kBlockBytes> pad{};
+    pad[0] = kPadMarker;
+    const std::size_t fill = static_cast<std::size_t>(total_ % kBlockBytes);
+    const std::size_t padlen = (fill < kLengthAt) ? (kLengthAt - fill) : (kTwoBlockLengthAt - fill);
     update({pad.data(), padlen});
-    std::array<std::uint8_t, 8> lenb{};
-    for (std::size_t i = 0; i < 8; ++i) {
-        lenb[i] = static_cast<std::uint8_t>(bits >> (8 * i));
-    }
-    update({lenb.data(), 8});
-    std::array<std::uint8_t, 16> out{};
-    for (std::size_t i = 0; i < 4; ++i) {
-        for (std::size_t j = 0; j < 4; ++j) {
-            out[i * 4 + j] = static_cast<std::uint8_t>(h_[i] >> (8 * j));
-        }
+    std::array<std::uint8_t, kLengthBytes> lenb{};
+    infra::store_le<std::uint64_t>(std::span(lenb), bits);
+    update({lenb.data(), lenb.size()});
+    std::array<std::uint8_t, kDigestBytes> out{};
+    for (std::size_t i = 0; i < kStateWords; ++i) {
+        infra::store_le<std::uint32_t>(
+            std::span<std::uint8_t, sizeof(std::uint32_t)>(
+                out.data() + i * sizeof(std::uint32_t),
+                sizeof(std::uint32_t)
+            ),
+            h_[i]
+        );
     }
     return out;
 }
 
 Md5Hex Md5::hex_str() noexcept {
+    constexpr std::size_t kDigestBytes = 16;
+    constexpr unsigned kNibbleBits = 4;
+    constexpr unsigned kNibbleMask = 0xF;
     static constexpr char kHex[] = "0123456789abcdef";
-    const std::array<std::uint8_t, 16> d = digest();
+    const std::array<std::uint8_t, kDigestBytes> d = digest();
     char out[Md5Hex::kCapacity];
     std::size_t n = 0;
     for (const std::uint8_t b : d) {
-        out[n++] = kHex[b >> 4];
-        out[n++] = kHex[b & 0xF];
+        out[n++] = kHex[b >> kNibbleBits];
+        out[n++] = kHex[b & kNibbleMask];
     }
     Md5Hex hex;
     (void)hex.assign(std::string_view(out, n));

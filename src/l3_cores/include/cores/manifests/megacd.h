@@ -26,7 +26,7 @@ inline constexpr auto kMegaCdServices = std::to_array<LinkDecoderDecl>({
         "megacd.cmd_edge",
         reactor::Cause::Ring,
         &kCdCommandEdge<kMegaCd>,
-        0,
+        reactor::kEveryRound,
 
         RoundClaim::Never,
     },
@@ -34,17 +34,17 @@ inline constexpr auto kMegaCdServices = std::to_array<LinkDecoderDecl>({
         "megacd.service_tick",
         reactor::Cause::Blk,
         &kCdServiceTick<kMegaCd>,
-        10,
+        std::chrono::milliseconds{10},
         RoundClaim::Always,
     },
 });
 
 inline constexpr CdTickPeriods kMegaCdTicks{
-    .idle_us = 13'333,
-    .stream_us = 10'000,
-    .caller_us = 10'000,
+    .idle = std::chrono::microseconds{13'333},
+    .stream = std::chrono::microseconds{10'000},
+    .caller = std::chrono::microseconds{10'000},
     .speeds = 0,
-    .speed_us = {0, 0, 0, 0},
+    .speed = {},
 };
 
 inline constexpr CdIoIndices kMegaCdIoIndices{
@@ -101,7 +101,7 @@ inline constexpr std::array<std::byte, 14> kSegaDiscSystem{
 inline constexpr auto kMegaCdSignatures = std::to_array<SignatureRow>({
     {.offset = 0,
      .magic = kSegaDiscSystem,
-     .region = 0,
+     .region = proto::RegionCode{0},
      .why = "req sector-size sniff (megacdd.cpp:285-296): "
             "present => 2048, absent => 2352"},
 });

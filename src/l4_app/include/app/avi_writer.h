@@ -9,6 +9,7 @@
 #include "app/avi_write_status.h"
 #include "app/chunk_slot.h"
 #include "app/frame_arena.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 
@@ -34,7 +35,7 @@ public:
 
     void serve() noexcept;
     [[nodiscard]] bool idle() const noexcept;
-    [[nodiscard]] int park_ms() const noexcept;
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
 
     void release() noexcept;
 

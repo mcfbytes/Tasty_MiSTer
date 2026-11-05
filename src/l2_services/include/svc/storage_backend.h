@@ -25,7 +25,10 @@ public:
         std::span<const std::uint8_t> src
     ) = 0;
 
-    [[nodiscard]] virtual Ex<proto::FileSize> open_extent(std::span<const std::byte> order) = 0;
+    [[nodiscard]] virtual Ex<proto::FileSize> open_extent(
+        proto::SlotIndex slot,
+        std::span<const std::byte> order
+    ) = 0;
 
     [[nodiscard]] virtual Ex<proto::FileSize> create(std::span<const std::uint8_t>) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
@@ -33,9 +36,9 @@ public:
 
     [[nodiscard]] virtual Ex<void> flush() { return {}; }
 
-    virtual void note_tag(std::uint8_t) noexcept {}
+    virtual void note_tag(proto::ImageTag) noexcept {}
 
-    virtual void release() noexcept = 0;
+    virtual void release(proto::SlotIndex slot) noexcept = 0;
 
 protected:
     IStorageBackend() = default;

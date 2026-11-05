@@ -12,6 +12,7 @@
 #include "infra/ascii.h"
 
 namespace mister::cores::mra {
+namespace {}
 
 RomSetAssembler::RomSetAssembler(const svc::Vfs& vfs, std::string_view mame_root)
     : vfs_(vfs),
@@ -62,9 +63,10 @@ AssembledRom RomSetAssembler::assemble(const Rom& rom) {
 }
 
 void RomSetAssembler::part_node(const Rom& rom, const RomNode& n) {
+    constexpr std::uint32_t kMaxUnitLen = 8;
 
     if (!inside_ilv_ && n.map != 0) {
-        const std::uint32_t digits = (n.map_digits > 8u) ? 8u : n.map_digits;
+        const std::uint32_t digits = (n.map_digits > kMaxUnitLen) ? kMaxUnitLen : n.map_digits;
         unitlen_ = static_cast<int>(digits);
         for (std::size_t i = 1; i < kRomLanes; ++i) {
             romlen_[i] = romlen_[0];
@@ -106,7 +108,7 @@ void RomSetAssembler::file_part(const Rom& rom, const RomNode& n) {
         const std::string_view zip = (bar == std::string_view::npos) ? rest : rest.substr(0, bar);
         fname = part_path(zip, n.name);
         for (int i = 0; i < n.repeat; ++i) {
-            result = stream_file(fname, n.crc, n.offset, length, n.map);
+            result = stream_file(fname, n.crc.v, n.offset, length, n.map);
             if (result == 0)
                 break;
         }
@@ -244,16 +246,21 @@ void RomSetAssembler::patch_node(const RomNode& n) {
 }
 
 void RomSetAssembler::interleave_start(const RomNode& n) noexcept {
+    constexpr std::uint32_t kMaxUnitLen = 8;
+    constexpr int kByteBits = 8;
+    constexpr int kMaxUnitLenInt = static_cast<int>(kMaxUnitLen);
+    constexpr int kByteBitsMask = kByteBits - 1;
+    constexpr int kMaxOutputBits = 64;
     inside_ilv_ = true;
     bool valid = true;
-    if (n.input != 8)
+    if (n.input != kByteBits)
         valid = false;
-    if (n.output < 8 || n.output > 64 || (n.output & 7) != 0)
+    if (n.output < kByteBits || n.output > kMaxOutputBits || (n.output & kByteBitsMask) != 0)
         valid = false;
     if (n.output < n.input)
         valid = false;
     unitlen_ = (n.input != 0) ? n.output / n.input : 1;
-    if (unitlen_ < 0 || unitlen_ > 8)
+    if (unitlen_ < 0 || unitlen_ > kMaxUnitLenInt)
         valid = false;
     if (!valid)
         unitlen_ = 1;
@@ -309,6 +316,8 @@ bool RomSetAssembler::refuse_size() {
 }
 
 int RomSetAssembler::scatter(const std::uint8_t* src, int chunk, std::uint32_t map) {
+    constexpr unsigned kNibbleBits = 4;
+    constexpr std::uint32_t kNibbleMask = 0xF;
 
     md5_.update(std::span<const std::uint8_t>(src, static_cast<std::size_t>(chunk)));
     if (map == 0)
@@ -316,9 +325,9 @@ int RomSetAssembler::scatter(const std::uint8_t* src, int chunk, std::uint32_t m
     std::size_t idx = 0;
     std::uint32_t map_reg = map;
     for (int i = 0; i < unitlen_; ++i) {
-        if ((map_reg & 0xFu) != 0)
+        if ((map_reg & kNibbleMask) != 0)
             break;
-        map_reg >>= 4;
+        map_reg >>= kNibbleBits;
         ++idx;
     }
     if (idx >= static_cast<std::size_t>(unitlen_))
@@ -334,16 +343,16 @@ int RomSetAssembler::scatter(const std::uint8_t* src, int chunk, std::uint32_t m
     bool first = true;
     int gaps = 0;
     for (int i = 0; i < unitlen_; ++i) {
-        if ((map_reg & 0xFu) != 0) {
+        if ((map_reg & kNibbleMask) != 0) {
             offsets[static_cast<std::size_t>(bytes_in_iter)] = static_cast<std::uint8_t>(
-                static_cast<int>(idx) + static_cast<int>(map_reg & 0xFu) - 1 + gaps
+                static_cast<int>(idx) + static_cast<int>(map_reg & kNibbleMask) - 1 + gaps
             );
             ++bytes_in_iter;
             first = false;
         } else if (!first) {
             ++gaps;
         }
-        map_reg >>= 4;
+        map_reg >>= kNibbleBits;
     }
     if (chunk > 0) {
 

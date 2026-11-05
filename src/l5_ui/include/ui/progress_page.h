@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstddef>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string_view>
@@ -30,19 +31,14 @@ public:
         return PageId::Progress;
     }
 
-    bool allows_popups() const override {
+    PageFacts facts() const override {
         TASTY_SEAT_BODY(ProgressPage);
-        return true;
-    }
-
-    bool counts_as_menu_present() const override {
-        TASTY_SEAT_BODY(ProgressPage);
-        return true;
-    }
-
-    bool takes_input_focus() const override {
-        TASTY_SEAT_BODY(ProgressPage);
-        return false;
+        PageFacts f{};
+        f.osd_rows = RowCount{8};
+        f.auto_pop = std::chrono::milliseconds{10000};
+        f.takes_input_focus = false;
+        f.allows_popups = true;
+        return f;
     }
 
     MenuMask mask() const override {
@@ -55,7 +51,12 @@ public:
         return this;
     }
 
-    void set_progress(std::uint16_t cur, std::uint16_t max) noexcept override;
+    void set_progress(cores::Progress progress) noexcept override;
+
+    bool walk(PageWalk&) const override {
+        TASTY_SEAT_BODY(ProgressPage);
+        return false;
+    }
 
     void render(OsdRenderer& out) const override;
 
@@ -66,23 +67,12 @@ public:
         return Transition{};
     }
 
-    RowCount osd_height() const override {
-        TASTY_SEAT_BODY(ProgressPage);
-        return RowCount{8};
-    }
-
-    std::uint32_t auto_pop_ms() const override {
-        TASTY_SEAT_BODY(ProgressPage);
-        return 10000;
-    }
-
 private:
     char name_[kProgressNameMax]{};
     std::uint8_t name_len_ = 0;
     std::uint8_t step_ = 0;
 
-    std::uint16_t cur_ = 0;
-    std::uint16_t max_ = 0;
+    cores::Progress last_{};
 };
 
 std::unique_ptr<Page> make_progress_page(std::string_view name);

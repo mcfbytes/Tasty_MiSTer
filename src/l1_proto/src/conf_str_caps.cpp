@@ -9,10 +9,19 @@ namespace mister::proto {
 
 namespace {
 
+constexpr std::string_view kHexPrefixLower = "0x";
+constexpr std::string_view kHexPrefixUpper = "0X";
+constexpr std::string_view kSsToken = "SS";
+constexpr std::string_view kUartToken = "UART";
+constexpr std::string_view kMidiToken = "MIDI";
+constexpr std::string_view kIrqToken = "IRQ:";
+constexpr std::string_view kAxiToken = "AXI:";
+
 [[nodiscard]] std::optional<std::uint32_t> parse_num(std::string_view s, unsigned base) {
-    if (s.starts_with("0x") || s.starts_with("0X")) {
-        s.remove_prefix(2);
-        base = 16;
+    constexpr int kHexRadix = 16;
+    if (s.starts_with(kHexPrefixLower) || s.starts_with(kHexPrefixUpper)) {
+        s.remove_prefix(kHexPrefixLower.size());
+        base = kHexRadix;
     }
     const auto* first = s.data();
     const auto* last = s.data() + s.size();
@@ -49,18 +58,26 @@ std::optional<reactor::Cause> cause_from(std::string_view name) {
 }
 
 [[nodiscard]] Scan scan_hex(std::string_view s, std::size_t pos) {
+    constexpr int kHexRadix = 16;
     std::uint32_t value = 0;
-    const auto [ptr, ec] = std::from_chars(s.data() + pos, s.data() + s.size(), value, 16);
+    const auto [ptr, ec] = std::from_chars(s.data() + pos, s.data() + s.size(), value, kHexRadix);
     if (ec != std::errc{} || ptr == s.data() + pos)
         return {0, pos};
     return {value, static_cast<std::size_t>(ptr - s.data())};
 }
 
 [[nodiscard]] std::size_t scan_speed_list(std::string_view s, std::size_t pos) {
-    for (int entry = 0; entry < 10 && pos < s.size(); ++entry) {
+    constexpr int kDecimalRadix = 10;
+    constexpr int kMaxSpeedEntries = 10;
+    for (int entry = 0; entry < kMaxSpeedEntries && pos < s.size(); ++entry) {
         std::uint32_t speed = 0;
 
-        const auto [ptr, ec] = std::from_chars(s.data() + pos, s.data() + s.size(), speed, 10);
+        const auto [ptr, ec] = std::from_chars(
+            s.data() + pos,
+            s.data() + s.size(),
+            speed,
+            kDecimalRadix
+        );
         (void)ec;
         pos = static_cast<std::size_t>(ptr - s.data());
         if (pos < s.size() && s[pos] == '(') {
@@ -84,20 +101,21 @@ std::optional<reactor::Cause> cause_from(std::string_view name) {
 
 }
 
-std::size_t ConfStrCaps::try_ss(std::string_view f1, std::size_t pos, hal::PhysRegion aperture) {
-    if (!starts_with_icase(f1.substr(pos), "SS"))
-        return pos;
-    std::size_t p = pos + 2;
-    const Scan base_scan = scan_hex(f1, p);
+std::string_view ConfStrCaps::try_ss(std::string_view rest, hal::PhysRegion aperture) {
+    if (!starts_with_icase(rest, kSsToken))
+        return rest;
+    constexpr std::uint32_t kMaxSaveStateBytes = 128u * 1024u * 1024u;
+    std::size_t p = kSsToken.size();
+    const Scan base_scan = scan_hex(rest, p);
     p = base_scan.pos;
     const std::uint32_t base = base_scan.value;
     std::uint32_t size = 0;
 
     std::size_t next = p;
-    if (p < f1.size() && f1[p] == ':') {
+    if (p < rest.size() && rest[p] == ':') {
         ++p;
         next = p;
-        const Scan size_scan = scan_hex(f1, p);
+        const Scan size_scan = scan_hex(rest, p);
         p = size_scan.pos;
         size = size_scan.value;
     }
@@ -107,59 +125,65 @@ std::size_t ConfStrCaps::try_ss(std::string_view f1, std::size_t pos, hal::PhysR
     const auto end = static_cast<std::uint32_t>(low + aperture.len);
     const bool valid = at.has_value()
         && size > 0
-        && size <= (128u * 1024u * 1024u)
+        && size <= kMaxSaveStateBytes
         && base >= low
         && base < end
         && (base + size) < end;
     ss_ = valid ? std::optional<SaveStateDecl>(SaveStateDecl{hal::FabricAddr{base}, size})
                 : std::nullopt;
-    caps_.push_back({Capability::Kind::SaveState, std::string(f1.substr(pos, p - pos))});
-    return next;
+    caps_.push_back({Capability::Kind::SaveState, std::string(rest.substr(0, p))});
+    return rest.substr(next);
 }
 
-std::size_t ConfStrCaps::try_uart(std::string_view f1, std::size_t pos) {
-    if (!starts_with_icase(f1.substr(pos), "UART"))
-        return pos;
-    const std::size_t p = scan_speed_list(f1, pos + 4);
-    caps_.push_back({Capability::Kind::Uart, std::string(f1.substr(pos, p - pos))});
-    return p;
+std::string_view ConfStrCaps::try_uart(std::string_view rest) {
+    if (!starts_with_icase(rest, kUartToken))
+        return rest;
+    const std::size_t p = scan_speed_list(rest, kUartToken.size());
+    caps_.push_back({Capability::Kind::Uart, std::string(rest.substr(0, p))});
+    return rest.substr(p);
 }
 
-std::size_t ConfStrCaps::try_midi(std::string_view f1, std::size_t pos) {
-    if (!starts_with_icase(f1.substr(pos), "MIDI"))
-        return pos;
-    const std::size_t p = scan_speed_list(f1, pos + 4);
-    caps_.push_back({Capability::Kind::Midi, std::string(f1.substr(pos, p - pos))});
-    return p;
+std::string_view ConfStrCaps::try_midi(std::string_view rest) {
+    if (!starts_with_icase(rest, kMidiToken))
+        return rest;
+    const std::size_t p = scan_speed_list(rest, kMidiToken.size());
+    caps_.push_back({Capability::Kind::Midi, std::string(rest.substr(0, p))});
+    return rest.substr(p);
 }
 
-Ex<std::size_t> ConfStrCaps::try_irq(std::string_view f1, std::size_t pos) {
-    if (!f1.substr(pos).starts_with("IRQ:"))
-        return pos;
-    const std::size_t comma = f1.find(',', pos);
-    const std::size_t seg_end = comma == std::string_view::npos ? f1.size() : comma;
-    const std::string_view body = f1.substr(pos + 4, seg_end - (pos + 4));
+Ex<std::string_view> ConfStrCaps::try_irq(std::string_view rest) {
+    constexpr int kHexRadix = 16;
+    constexpr int kDecimalRadix = 10;
+
+    constexpr std::uint32_t kFaultNoEquals = 1;
+    constexpr std::uint32_t kFaultBadBase = 2;
+    constexpr std::uint32_t kFaultBadLine = 3;
+    if (!rest.starts_with(kIrqToken))
+        return rest;
+    const std::size_t comma = rest.find(',');
+    const std::size_t seg_end = comma == std::string_view::npos ? rest.size() : comma;
+    const std::string_view body = rest.substr(kIrqToken.size(), seg_end - kIrqToken.size());
 
     const std::size_t eq = body.find('=');
     if (eq == std::string_view::npos) {
-        return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 1});
+        return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), kFaultNoEquals});
     }
     const auto klass = cause_from(body.substr(0, eq));
-    std::string_view rest = body.substr(eq + 1);
-    std::string_view line_s = rest;
+    std::string_view tail = body.substr(eq + 1);
+    std::string_view line_s = tail;
     std::uint32_t cause_base = 0;
-    if (const std::size_t colon = rest.find(':'); colon != std::string_view::npos) {
-        line_s = rest.substr(0, colon);
-        const auto parsed_base = parse_num(rest.substr(colon + 1), 16);
+    if (const std::size_t colon = tail.find(':'); colon != std::string_view::npos) {
+        line_s = tail.substr(0, colon);
+        const auto parsed_base = parse_num(tail.substr(colon + 1), kHexRadix);
         if (!parsed_base) {
-            return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 2});
+            return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), kFaultBadBase});
         }
         cause_base = *parsed_base;
     }
 
-    const auto line = parse_num(line_s, 10);
+    const auto line = parse_num(line_s, kDecimalRadix);
     if (!klass || !line || *line < kIrqPoolFirstLine || *line > kIrqOrdinalMax) {
-        return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 3});
+        return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), kFaultBadLine});
     }
     irq_.push_back(
         IrqBinding{
@@ -168,41 +192,46 @@ Ex<std::size_t> ConfStrCaps::try_irq(std::string_view f1, std::size_t pos) {
             hal::LwOffset{cause_base}
         }
     );
-    caps_.push_back({Capability::Kind::Irq, std::string(f1.substr(pos, seg_end - pos))});
-    return seg_end;
+    caps_.push_back({Capability::Kind::Irq, std::string(rest.substr(0, seg_end))});
+    return rest.substr(seg_end);
 }
 
-Ex<std::size_t> ConfStrCaps::try_axi(std::string_view f1, std::size_t pos) {
-    if (!f1.substr(pos).starts_with("AXI:"))
-        return pos;
-    const std::size_t comma = f1.find(',', pos);
-    const std::size_t seg_end = comma == std::string_view::npos ? f1.size() : comma;
-    const std::string_view body = f1.substr(pos + 4, seg_end - (pos + 4));
+Ex<std::string_view> ConfStrCaps::try_axi(std::string_view rest) {
+    constexpr int kHexRadix = 16;
+    constexpr std::size_t kAxiMinParts = 2;
+    constexpr std::size_t kAxiMaxParts = 3;
+    constexpr std::size_t kAxiKindIndex = 2;
+    constexpr std::uint32_t kFaultBadAxi = 4;
+    if (!rest.starts_with(kAxiToken))
+        return rest;
+    const std::size_t comma = rest.find(',');
+    const std::size_t seg_end = comma == std::string_view::npos ? rest.size() : comma;
+    const std::string_view body = rest.substr(kAxiToken.size(), seg_end - kAxiToken.size());
 
     const auto parts = split(body, ':');
 
-    if (parts.size() < 2 || parts.size() > 3) {
-        return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 4});
+    if (parts.size() < kAxiMinParts || parts.size() > kAxiMaxParts) {
+        return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), kFaultBadAxi});
     }
-    const auto addr = parse_num(parts[0], 16);
-    const auto size = parse_num(parts[1], 16);
+    const auto addr = parse_num(parts[0], kHexRadix);
+    const auto size = parse_num(parts[1], kHexRadix);
     if (!addr || !size) {
-        return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 4});
+        return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), kFaultBadAxi});
     }
 
-    if (parts.size() == 2) {
+    if (parts.size() == kAxiMinParts) {
 
         axi_unkinded_.push_back(AxiUnkindedDecl{AxiRawBase{*addr}, *size});
-    } else if (parts[2] == "LW") {
+    } else if (parts[kAxiKindIndex] == "LW") {
         axi_lw_.push_back(AxiLwDecl{hal::LwOffset{*addr}, *size});
-    } else if (parts[2] == "DDR") {
+    } else if (parts[kAxiKindIndex] == "DDR") {
         axi_ddr_.push_back(AxiDdrDecl{hal::FabricAddr{*addr}, *size});
     } else {
 
         ++axi_unknown_kinds_;
     }
-    caps_.push_back({Capability::Kind::Axi, std::string(f1.substr(pos, seg_end - pos))});
-    return seg_end;
+    caps_.push_back({Capability::Kind::Axi, std::string(rest.substr(0, seg_end))});
+    return rest.substr(seg_end);
 }
 
 void ConfStrCaps::carry_unknown(std::string_view run) {

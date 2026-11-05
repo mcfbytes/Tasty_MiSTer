@@ -7,12 +7,23 @@ namespace mister::proto {
 
 namespace {
 
-constexpr const char* kSlotNames[SaveStateEngine::kSlots] = {
-    "savestate-0",
-    "savestate-1",
-    "savestate-2",
-    "savestate-3",
+enum : std::size_t { kPathSlack = 8 };
+
+enum : std::uint64_t {
+    kHeaderWords = 2,
+    kDwordBytes = 4,
 };
+
+constexpr infra::IndexedArray<const char*, SaveStateEngine::kSlots, StateSlot> make_slot_names() {
+    infra::IndexedArray<const char*, SaveStateEngine::kSlots, StateSlot> names{};
+    constexpr const char* kText[] = {"savestate-0", "savestate-1", "savestate-2", "savestate-3"};
+    std::size_t i = 0;
+    for (const StateSlot slot : kStateSlots)
+        names[slot] = kText[i++];
+    return names;
+}
+
+constexpr auto kSlotNames = make_slot_names();
 
 bool exceeds_four_slot_span(const SaveStateDecl& ss, hal::PhysRegion aperture) noexcept {
     const std::uint64_t span = hal::to_phys(ss.base).v
@@ -23,7 +34,7 @@ bool exceeds_four_slot_span(const SaveStateDecl& ss, hal::PhysRegion aperture) n
 
 std::string compose_path(std::string_view subdir, std::string_view stem, unsigned digit) {
     std::string out;
-    out.reserve(SaveStateEngine::kDir.size() + subdir.size() + stem.size() + 8u);
+    out.reserve(SaveStateEngine::kDir.size() + subdir.size() + stem.size() + kPathSlack);
     out.append(SaveStateEngine::kDir);
     out.push_back('/');
     out.append(subdir);
@@ -79,12 +90,12 @@ std::string SaveStateEngine::savestate_stem(std::string_view rom_path) {
     return std::string(base);
 }
 
-std::string SaveStateEngine::savestate_path(const SaveTarget& target, unsigned slot) {
-    if (slot >= kSlots) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), slot}, "savestate slot");
+std::string SaveStateEngine::savestate_path(const SaveTarget& target, StateSlot slot) {
+    if (!slot.valid()) {
+        fatal(Error{Errc::slot_range, ERR_SITE(), slot.digit()}, "savestate slot");
     }
     const std::string_view subdir = target.arcade ? kArcadeSubdir : target.core_name;
-    return compose_path(subdir, savestate_stem(target.rom_path), slot + 1u);
+    return compose_path(subdir, savestate_stem(target.rom_path), slot.digit());
 }
 
 std::string SaveStateEngine::savestate_path_stock(const SaveTarget& target) {
@@ -109,43 +120,42 @@ void SaveStateEngine::disarm() noexcept {
     armed_ = false;
 }
 
-std::uint32_t SaveStateEngine::shadow_counter(unsigned slot) const {
-    if (slot >= kSlots) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), slot}, "savestate slot");
+std::uint32_t SaveStateEngine::shadow_counter(StateSlot slot) const {
+    const auto shadow = shadows_.find(slot);
+    if (!shadow) {
+        fatal(Error{Errc::slot_range, ERR_SITE(), slot.digit()}, "savestate slot");
     }
-    return ss_cnt_[slot];
+    return shadow->counter;
 }
 
-std::string SaveStateEngine::path_for(unsigned slot) const {
-    return compose_path(subdir_, stem_, slot + 1u);
+std::string SaveStateEngine::path_for(StateSlot slot) const {
+    return compose_path(subdir_, stem_, slot.digit());
 }
 
-hal::PhysRegion SaveStateEngine::region_for(const SaveStateDecl& ss, unsigned slot) {
+hal::PhysRegion SaveStateEngine::region_for(const SaveStateDecl& ss, StateSlot slot) {
 
-    const hal::FabricAddr at{ss.base.v + static_cast<std::uint32_t>(slot) * ss.size};
+    const hal::FabricAddr at{ss.base.v + slot.offset(ss.size)};
     return hal::PhysRegion{hal::to_phys(at), static_cast<std::size_t>(ss.size), kSlotNames[slot]};
 }
 
 Ex<void> SaveStateEngine::map_slots(const SaveStateDecl& ss, bool remap) {
-    for (unsigned i = 0; i < kSlots; ++i) {
+    for (const StateSlot slot : kStateSlots) {
         if (remap)
-            regions_[i].reset();
-        auto m = env_.map.map(region_for(ss, i));
+            shadows_[slot].region.reset();
+        auto m = env_.map.map(region_for(ss, slot));
         if (!m) {
 
             drop_slots();
             return std::unexpected(m.error());
         }
-        regions_[i] = std::move(*m);
+        shadows_[slot].region = std::move(*m);
     }
     return {};
 }
 
 void SaveStateEngine::drop_slots() noexcept {
-    for (unsigned i = 0; i < kSlots; ++i) {
-        regions_[i].reset();
-        ss_cnt_[i] = kSentinel;
-    }
+    for (auto& shadow : shadows_)
+        shadow.drop();
     mapped_ = false;
 
     window_ = SaveStateDecl{};
@@ -171,8 +181,8 @@ Ex<void> SaveStateEngine::attach(const SaveStateDecl& ss) {
         return m;
     window_ = ss;
     mapped_ = true;
-    for (auto& c : ss_cnt_)
-        c = kSentinel;
+    for (auto& shadow : shadows_)
+        shadow.rearm();
     ever_attached_ = true;
     return {};
 }
@@ -191,35 +201,36 @@ Ex<void> SaveStateEngine::rebind(const SaveStateDecl& ss) {
         return m;
     window_ = ss;
     mapped_ = true;
-    for (auto& c : ss_cnt_)
-        c = kSentinel;
+    for (auto& shadow : shadows_)
+        shadow.rearm();
     return {};
 }
 
 Ex<void> SaveStateEngine::scan_slots() {
     std::optional<Error> first_error;
 
-    for (unsigned i = 0; i < kSlots; ++i) {
-        auto& mem = *regions_[i];
+    for (const StateSlot slot : kStateSlots) {
+        Shadow& shadow = shadows_[slot];
+        auto& mem = *shadow.region;
 
         const std::uint32_t curcnt = mem.load_acquire(kCounterWord);
         const std::uint32_t dwords = mem.load_acquire(kSizeWord);
-        if (curcnt == ss_cnt_[i])
+        if (curcnt == shadow.counter)
             continue;
 
-        ss_cnt_[i] = curcnt;
+        shadow.counter = curcnt;
         if (dwords == 0u)
             continue;
 
-        const std::uint64_t bytes = (std::uint64_t{dwords} + 2u) * 4u;
+        const std::uint64_t bytes = (std::uint64_t{dwords} + kHeaderWords) * kDwordBytes;
         if (bytes > std::uint64_t{window_.size})
             continue;
 
         if (env_.toast)
-            env_.toast->on_save(i);
+            env_.toast->on_save(slot);
 
         const auto payload = mem.view(0, static_cast<std::size_t>(bytes));
-        auto w = env_.files.write_all_sync(path_for(i), payload);
+        auto w = env_.files.write_all_sync(path_for(slot), payload);
         if (!w) {
 
             ++write_failures_;

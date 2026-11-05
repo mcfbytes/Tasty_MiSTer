@@ -79,14 +79,13 @@ public:
         return payload_bound(width_, height_);
     }
 
-    [[nodiscard]] std::size_t encode(
-        const std::byte* rgb,
-        std::size_t line,
+    [[nodiscard]] std::span<const std::byte> encode(
+        RgbRows rgb,
         bool key,
         std::span<std::byte> out
     ) noexcept override;
 
-    [[nodiscard]] std::size_t rekey(std::span<std::byte> out) noexcept override;
+    [[nodiscard]] std::span<const std::byte> rekey(std::span<std::byte> out) noexcept override;
 
     [[nodiscard]] std::span<const std::byte> dup() noexcept override;
 

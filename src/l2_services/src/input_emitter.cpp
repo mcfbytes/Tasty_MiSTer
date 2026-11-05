@@ -77,34 +77,28 @@ Ex<bool> InputEmitter::release(proto::ILinkFrame& frame, PlayerIndex player, Joy
     return joy_.release(*route_, player, composed);
 }
 
-void InputEmitter::set_joy_mask(PlayerIndex player, JoyMask mask) noexcept {
-    if (player.v >= kMaxPlayersEmit)
-        return;
+JoyMask InputEmitter::PlayerMasks::composed(bool grabbed) const noexcept {
+    return grabbed ? JoyMask{joy_.v | autofire_.v} : joy_;
+}
 
-    if (!(mask == joy_mask_[player.v]))
-        zero_armed_[player.v] = true;
-    joy_mask_[player.v] = mask;
+void InputEmitter::set_joy_mask(PlayerIndex player, JoyMask mask) noexcept {
+    if (const auto m = masks_.find(player))
+        m->set_joy(mask);
 }
 
 JoyMask InputEmitter::joy_mask(PlayerIndex player) const noexcept {
-    if (player.v >= kMaxPlayersEmit)
-        return JoyMask{};
-    return joy_mask_[player.v];
+    const auto m = masks_.find(player);
+    return m ? m->joy() : JoyMask{};
 }
 
 void InputEmitter::set_autofire_mask(PlayerIndex player, JoyMask mask) noexcept {
-    if (player.v >= kMaxPlayersEmit)
-        return;
-
-    if (!(mask == autofire_[player.v]))
-        zero_armed_[player.v] = true;
-    autofire_[player.v] = mask;
+    if (const auto m = masks_.find(player))
+        m->set_autofire(mask);
 }
 
 JoyMask InputEmitter::autofire_mask(PlayerIndex player) const noexcept {
-    if (player.v >= kMaxPlayersEmit)
-        return JoyMask{};
-    return autofire_[player.v];
+    const auto m = masks_.find(player);
+    return m ? m->autofire() : JoyMask{};
 }
 
 Ex<unsigned> InputEmitter::service_joysticks(proto::ILinkFrame& frame, bool local_walk) {
@@ -113,7 +107,7 @@ Ex<unsigned> InputEmitter::service_joysticks(proto::ILinkFrame& frame, bool loca
     if (local_walk && grabbed_) {
         for (std::uint8_t i = 0; i < kMaxPlayersEmit; ++i) {
             const PlayerIndex p{i};
-            auto sent = submit(frame, p, joy_mask_[i], autofire_[i]);
+            auto sent = submit(frame, p, masks_[p].joy(), masks_[p].autofire());
             if (!sent)
                 return std::unexpected(sent.error());
             if (*sent)
@@ -124,16 +118,15 @@ Ex<unsigned> InputEmitter::service_joysticks(proto::ILinkFrame& frame, bool loca
     if (local_walk && (!grabbed_ || osd_visible_)) {
         for (std::uint8_t i = 0; i < kMaxPlayersEmit; ++i) {
             const PlayerIndex p{i};
-
-            const JoyMask tested = grabbed_ ? JoyMask{joy_mask_[i].v | autofire_[i].v}
-                                            : joy_mask_[i];
-            if (!zero_armed_[i])
+            PlayerMasks& masks = masks_[p];
+            if (!masks.zero_armed())
                 continue;
-            auto sent = release(frame, p, tested);
+
+            auto sent = release(frame, p, masks.composed(grabbed_));
             if (!sent)
                 return std::unexpected(sent.error());
 
-            zero_armed_[i] = false;
+            masks.disarm();
             if (*sent)
                 ++pushed;
         }

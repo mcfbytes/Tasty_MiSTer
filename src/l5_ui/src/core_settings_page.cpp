@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/core_settings_page.h"
 
+#include <algorithm>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "app/hd_window.h"
 #include "ui/arc_label.h"
 #include "ui/browser_launch.h"
+#include "ui/draw_classic.h"
 #include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_ask.h"
@@ -86,7 +89,7 @@ std::uint32_t CoreSettingsPage::drawn_choice(const app::OptionTable::Row& r) con
 
 void CoreSettingsPage::rebuild() {
     lines_.clear();
-    selectable_ = 0;
+    selectable_ = RowCount{};
     if (table_ == nullptr)
         return;
     const std::size_t n = table_->count;
@@ -103,20 +106,22 @@ void CoreSettingsPage::rebuild() {
         Line l;
         l.index = static_cast<std::uint8_t>(i);
         l.selectable = row.decl->kind != cores::OptionRow::Kind::Separator;
-        if (l.selectable)
-            l.ordinal = selectable_++;
+        if (l.selectable) {
+            l.ordinal = row_after(selectable_);
+            selectable_ += kOneRow;
+        }
         lines_.push_back(l);
     }
 }
 
-std::uint32_t CoreSettingsPage::exit_drawn() const noexcept {
-    const std::uint32_t rows = osd_height().v;
-    const auto content = static_cast<std::uint32_t>(lines_.size());
+RowIndex CoreSettingsPage::exit_drawn() const noexcept {
+    const RowCount rows = osd_height();
+    const RowCount content = RowCount::of(lines_.size());
 
-    return (content + 1 <= rows && rows != 0) ? rows - 1 : content;
+    return (content + kOneRow <= rows) ? row_after(rows - kOneRow) : row_after(content);
 }
 
-const CoreSettingsPage::Line* CoreSettingsPage::line_for_ordinal(std::uint32_t o) const noexcept {
+const CoreSettingsPage::Line* CoreSettingsPage::line_for_ordinal(RowIndex o) const noexcept {
     for (const Line& l : lines_) {
         if (l.selectable && l.ordinal == o)
             return &l;
@@ -158,10 +163,7 @@ void CoreSettingsPage::push_op(const A& op) {
 
 MenuMask CoreSettingsPage::mask() const {
     TASTY_SEAT_BODY(CoreSettingsPage);
-    const std::uint64_t n = static_cast<std::uint64_t>(selectable_) + 1;
-    if (n >= 64)
-        return MenuMask{~std::uint64_t{0}};
-    return MenuMask{(std::uint64_t{1} << n) - 1};
+    return dense_mask(selectable_ + kOneRow);
 }
 
 std::string CoreSettingsPage::compose(const Line& l) const {
@@ -201,153 +203,192 @@ std::string CoreSettingsPage::compose(const Line& l) const {
     return s;
 }
 
-std::string CoreSettingsPage::row_text(std::uint32_t drawn) const {
+std::string CoreSettingsPage::row_text(RowIndex at) const {
     TASTY_SEAT_BODY(CoreSettingsPage);
-    if (drawn < lines_.size())
-        return compose(lines_[drawn]);
-    if (drawn == exit_drawn())
-        return page_ == 0 ? kStdExit : kStdBack;
+    if (const infra::OptRef<const Line> line = RowSpan<const Line>{lines_}.find(at)) {
+        return compose(*line);
+    }
+    if (at == exit_drawn())
+        return page_ == proto::kRootSubmenu ? kStdExit : kStdBack;
     return {};
 }
 
 template <class Visit>
 void CoreSettingsPage::for_each_row(Visit&& visit) const {
-    const std::uint32_t exit_row = exit_drawn();
-    const auto content = static_cast<std::uint32_t>(lines_.size());
-    const std::uint32_t last = content > exit_row + 1 ? content : exit_row + 1;
-    for (std::uint32_t drawn = 0; drawn < last; ++drawn) {
-        const Line* line = drawn < content ? &lines_[drawn] : nullptr;
+    const RowIndex exit_row = exit_drawn();
+    const RowCount content = RowCount::of(lines_.size());
+    const RowIndex last = std::max(row_after(content), exit_row + kOneRow);
+    const RowSpan<const Line> lines{lines_};
+    for (RowIndex drawn{}; drawn < last; drawn += kOneRow) {
+        const Line* line = drawn < row_after(content) ? &lines[drawn] : nullptr;
         bool selected = false;
         bool stippled = false;
         if (line != nullptr) {
-            selected = line->selectable && sel_.v == line->ordinal;
+            selected = line->selectable && sel_ == line->ordinal;
             stippled = table_->rows[line->index].dimmed;
         } else if (drawn == exit_row) {
-            selected = sel_.v == selectable_;
+            selected = sel_ == exit_ordinal();
         }
         const std::string text = row_text(drawn);
         visit(drawn, line, std::string_view{text}, selected, stippled);
     }
 }
 
-void CoreSettingsPage::render(OsdRenderer& out) const {
-    TASTY_SEAT_BODY(CoreSettingsPage);
-    out.set_title(title_);
-    const std::uint32_t rows = osd_height().v;
-    if (rows == 0)
-        return;
-    const bool at_root = page_ == 0;
-    const std::uint32_t exit_row = exit_drawn();
-    const bool scrolls = exit_row + 1 > rows;
-
-    std::vector<std::string> composed(rows);
-    std::vector<std::uint8_t> marks(rows);
-    for_each_row(
-        [&](std::uint32_t drawn, const Line*, std::string_view text, bool selected, bool stippled) {
-            if (drawn < first_row_ || drawn - first_row_ >= rows)
-                return;
-            const std::uint32_t r = drawn - first_row_;
-            composed[r].assign(text);
-            marks[r] = static_cast<std::uint8_t>((selected ? 1u : 0u) | (stippled ? 2u : 0u));
-        }
-    );
-
-    for (std::uint32_t r = 0; r < rows; ++r) {
-        const std::uint32_t drawn = r + first_row_;
-
-        const bool ring = at_root && drawn == exit_row;
-        out.set_arrow(
-            ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight) : OsdRenderer::kArrowNone
-        );
-
-        std::uint8_t leftchar = 0;
-        if (scrolls) {
-            if (r == 0 && first_row_ != 0) {
-                leftchar = 17;
-            } else if (r + 1 == rows && !ring) {
-                leftchar = 16;
-            }
-        }
-        out.text(
-            OsdRow{static_cast<std::uint8_t>(r)},
-            composed[r],
-            (marks[r] & 1u) != 0,
-            (marks[r] & 2u) != 0,
-            leftchar
-        );
+app::PageDescription::Row CoreSettingsPage::hd_row(
+    const Line* line,
+    std::string_view text,
+    bool stippled
+) const {
+    app::PageDescription::Row row;
+    row.enabled = !stippled;
+    if (line == nullptr) {
+        row.kind = app::PageDescription::RowKind::Action;
+        (void)row.label.assign(plain_label(text));
+        return row;
     }
+    const app::OptionTable::Row& tr = table_->rows[line->index];
+    const cores::OptionRow& d = *tr.decl;
+    row.kind = row_kind_of(d.kind);
+    (void)row.label.assign(plain_label(d.label));
+    if (d.kind == cores::OptionRow::Kind::Cycle) {
+        row.steps = true;
+        (void)row.value.assign(cycle_value(tr));
+    }
+    return row;
 }
 
-bool CoreSettingsPage::describe(app::PageDescription& out) const {
-    TASTY_SEAT_BODY(CoreSettingsPage);
-    const std::uint16_t hint = out.first;
-    out = {};
-    (void)out.title.assign(title_);
+std::optional<Glyph> CoreSettingsPage::leftchar_of(OsdRow row, bool ring) const noexcept {
+    const RowCount rows = osd_height();
+    if (rows.empty() || exit_drawn() < row_after(rows))
+        return std::nullopt;
+    if (row == proto::OsdRow{} && first_row_ != RowIndex{})
+        return Glyph::ArrowUp;
+    if (row == last_osd_row(rows) && !ring)
+        return Glyph::ArrowDown;
+    return std::nullopt;
+}
 
-    const std::uint32_t exit_row = exit_drawn();
-    std::vector<app::PageDescription::Row> all;
-    std::uint16_t selected = 0;
+bool CoreSettingsPage::walk(PageWalk& out) const {
+    TASTY_SEAT_BODY(CoreSettingsPage);
+    (void)out.page.title.assign(title_);
+    out.title_arrow = OsdRenderer::kArrowNone;
+    out.count = 0;
+
+    const RowCount rows = osd_height();
+    if (rows.empty())
+        return false;
+    const bool at_root = page_ == proto::kRootSubmenu;
+    const RowIndex exit_row = exit_drawn();
+
+    struct Drawn {
+        RowIndex drawn;
+        const Line* line;
+        std::string text;
+        bool selected;
+        bool stippled;
+        bool in_window = false;
+    };
+
+    std::vector<Drawn> drawn_rows;
     for_each_row(
-        [&](std::uint32_t drawn, const Line* line, std::string_view text, bool sel, bool stippled) {
-            if (line == nullptr && drawn != exit_row)
-                return;
-            app::PageDescription::Row row;
-            row.enabled = !stippled;
-            if (line == nullptr) {
-                row.kind = app::PageDescription::RowKind::Action;
-                (void)row.label.assign(plain_label(text));
-            } else {
-                const app::OptionTable::Row& tr = table_->rows[line->index];
-                const cores::OptionRow& d = *tr.decl;
-                row.kind = row_kind_of(d.kind);
-                (void)row.label.assign(plain_label(d.label));
-                if (d.kind == cores::OptionRow::Kind::Cycle) {
-                    row.steps = true;
-                    (void)row.value.assign(cycle_value(tr));
-                }
-            }
-            if (sel) {
-                row.selected = true;
-                selected = static_cast<std::uint16_t>(all.size());
-            }
-            all.push_back(row);
+        [&](RowIndex drawn, const Line* line, std::string_view text, bool selected, bool stippled) {
+            drawn_rows.push_back(Drawn{drawn, line, std::string{text}, selected, stippled});
         }
     );
 
-    const std::uint16_t total = static_cast<std::uint16_t>(all.size());
-    const app::HdWindow win = app::hd_window(selected, total, hint);
-    out.first = win.first;
-    out.row_count = win.count;
-    out.total = total;
-    for (std::uint8_t i = 0; i < win.count; ++i) {
-        out.rows[i] = all[static_cast<std::size_t>(win.first) + i];
+    const auto is_hd = [&](const Drawn& d) {
+        return d.line != nullptr || d.drawn == exit_row;
+    };
+    std::uint16_t total = 0;
+    std::uint16_t selected = 0;
+    for (const Drawn& d : drawn_rows) {
+        if (!is_hd(d))
+            continue;
+        if (d.selected)
+            selected = total;
+        ++total;
+    }
+    const app::HdWindow win = app::hd_window(selected, total, out.page.first);
+    out.page.first = win.first;
+    out.page.total = total;
+
+    std::uint16_t at = 0;
+    for (std::size_t i = 0; i < drawn_rows.size(); ++i) {
+        const Drawn& d = drawn_rows[i];
+        if (!is_hd(d))
+            continue;
+        const std::uint16_t index = at++;
+        if (index < win.first || index >= win.first + win.count)
+            continue;
+        drawn_rows[i].in_window = true;
+        if (out.count >= out.rows.size())
+            break;
+        PageRow& r = out.rows[out.count++];
+        r.has_hd = true;
+        r.hd = hd_row(d.line, d.text, d.stippled);
+        r.hd.selected = d.selected;
+        if (d.drawn < first_row_ || d.drawn - first_row_ >= rows)
+            continue;
+        const OsdRow row = osd_row_at(d.drawn - first_row_);
+
+        const bool ring = at_root && d.drawn == exit_row;
+        r.classic = classic_row(
+            row,
+            d.text,
+            d.selected,
+            d.stippled,
+            leftchar_of(row, ring),
+            ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight) : OsdRenderer::kArrowNone
+        );
+    }
+
+    for (RowCount r{}; r < rows; r += kOneRow) {
+        const infra::OptRef<const Drawn> found = RowSpan<const Drawn>{drawn_rows}.find(
+            first_row_ + r
+        );
+        if ((found && found->in_window) || out.count >= out.rows.size())
+            continue;
+
+        const bool ring = at_root && found && found->drawn == exit_row;
+        const OsdRow row = osd_row_at(r);
+        PageRow& pr = out.rows[out.count++];
+        pr.has_hd = false;
+        pr.classic = classic_row(
+            row,
+            found ? found->text : std::string{},
+            found && found->selected,
+            found && found->stippled,
+            leftchar_of(row, ring),
+            ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight) : OsdRenderer::kArrowNone
+        );
     }
     return true;
 }
 
 void CoreSettingsPage::track_viewport() noexcept {
     TASTY_SEAT_BODY(CoreSettingsPage);
-    const std::uint32_t rows = osd_height().v;
-    if (rows == 0)
+    const RowCount rows = osd_height();
+    if (rows.empty())
         return;
-    const std::uint32_t exit_row = exit_drawn();
-    if (exit_row + 1 <= rows) {
-        first_row_ = 0;
+    const RowIndex exit_row = exit_drawn();
+    if (exit_row < row_after(rows)) {
+        first_row_ = RowIndex{};
         return;
     }
-    if (sel_.v == 0)
-        first_row_ = 0;
-    std::uint32_t drawn = exit_row;
-    if (sel_.v != selectable_) {
-        const Line* l = line_for_ordinal(sel_.v);
+
+    if (sel_ == RowIndex{})
+        first_row_ = RowIndex{};
+    RowIndex drawn = exit_row;
+    if (sel_ != exit_ordinal()) {
+        const Line* l = line_for_ordinal(sel_);
         if (l == nullptr)
             return;
-        drawn = static_cast<std::uint32_t>(l - lines_.data());
+        drawn = RowIndex::of(l - lines_.data());
     }
     if (drawn < first_row_) {
         first_row_ = drawn;
     } else if (drawn >= first_row_ + rows) {
-        first_row_ = drawn - rows + 1;
+        first_row_ = drawn - rows + kOneRow;
     }
 }
 
@@ -408,18 +449,18 @@ Transition CoreSettingsPage::open_browser(const app::OptionTable::Row& r, bool r
 
 Transition CoreSettingsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(CoreSettingsPage);
-    const bool at_root = page_ == 0;
+    const bool at_root = page_ == proto::kRootSubmenu;
 
-    if ((ev.buttons & UiEvent::Menu) != 0)
+    if (ev.buttons.has_any({UiEvent::Menu}))
         return Transition{Transition::Kind::CloseAll};
 
-    const bool select = (ev.buttons & UiEvent::Select) != 0;
-    const bool plus = (ev.buttons & UiEvent::Plus) != 0;
-    const bool minus = (ev.buttons & UiEvent::Minus) != 0;
-    const bool back = (ev.buttons & UiEvent::Back) != 0;
-    const bool left = (ev.buttons & UiEvent::Left) != 0;
-    const bool right = (ev.buttons & UiEvent::Right) != 0;
-    const bool recent = (ev.buttons & UiEvent::Recent) != 0;
+    const bool select = ev.buttons.has_any({UiEvent::Select});
+    const bool plus = ev.buttons.has_any({UiEvent::Plus});
+    const bool minus = ev.buttons.has_any({UiEvent::Minus});
+    const bool back = ev.buttons.has_any({UiEvent::Back});
+    const bool left = ev.buttons.has_any({UiEvent::Left});
+    const bool right = ev.buttons.has_any({UiEvent::Right});
+    const bool recent = ev.buttons.has_any({UiEvent::Recent});
 
     if (!at_root && (back || left))
         return leave();
@@ -434,12 +475,12 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
     if (!select && !plus && !minus && !recent)
         return Transition{};
 
-    if (sel_.v == selectable_) {
+    if (sel_ == exit_ordinal()) {
         if (!select)
             return Transition{};
         return at_root ? Transition{Transition::Kind::Leave} : leave();
     }
-    const Line* l = line_for_ordinal(sel_.v);
+    const Line* l = line_for_ordinal(sel_);
     if (l == nullptr || table_ == nullptr || !table_->rows[l->index].decl) {
         ++refusals_;
         return Transition{};
@@ -487,8 +528,12 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
                 if (value_label(d, next).empty())
                     next = cur;
             }
-            const auto choice = static_cast<std::uint8_t>(next);
-            push_op(proto::LinkOp::SetCoreOption{.row = l->index, .choice = choice});
+            push_op(
+                proto::LinkOp::SetCoreOption{
+                    .row = proto::OptionRowIndex{l->index},
+                    .choice = proto::FieldValue{next}
+                }
+            );
             if (d.arms_reset)
                 armed_ = true;
             return Transition{};
@@ -514,7 +559,7 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
                     return Transition{
                         Transition::Kind::Push,
                         PageId::CoreSettings,
-                        ItemId{d.link_page}
+                        ItemId{d.link_page.v}
                     };
                 case cores::OptionRow::Link::LoadConfig:
                     return Transition{Transition::Kind::Push, PageId::ConfigSlots, ItemId{0}};

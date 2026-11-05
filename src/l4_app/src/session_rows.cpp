@@ -21,7 +21,7 @@ SessionRows::SessionRows(const Wiring& w) noexcept
       axi_status_decoder_(session_, status_cell_, w.live),
       status_lw_(w.status_lw),
       conf_str_decoder_(w.link, session_, w.router, bindings_.generation()),
-      block_decoder_(w.link, w.router, w.slots, w.live),
+      block_decoder_(w.router, w.slots, w.live),
       info_poll_(
           w.link,
           w.router,
@@ -52,8 +52,16 @@ SessionRows::SessionRows(const Wiring& w) noexcept
     TASTY_SEAT_BODY(SessionRows);
     bindings_.bind_generation(gen);
     const std::array<reactor::LinkDecoderDecl, 2> rows{
-        {{"link.identify", reactor::Cause::Tick, &identify_row_, 0, reactor::RoundClaim::Never},
-         {"link.conf_str", reactor::Cause::Tick, &conf_str_row_, 0, reactor::RoundClaim::Never}}
+        {{"link.identify",
+          reactor::Cause::Tick,
+          &identify_row_,
+          reactor::kEveryRound,
+          reactor::RoundClaim::Never},
+         {"link.conf_str",
+          reactor::Cause::Tick,
+          &conf_str_row_,
+          reactor::kEveryRound,
+          reactor::RoundClaim::Never}}
     };
     return rebind_census(rows, owner);
 }
@@ -107,7 +115,7 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
                     "link.block",
                     reactor::Cause::Tick,
                     &block_row_,
-                    0,
+                    reactor::kEveryRound,
                     reactor::RoundClaim::OnWork
                 }
             );
@@ -127,12 +135,12 @@ std::span<const reactor::LinkDecoderDecl> SessionRows::census_rows(
             n,
             status_route_ == StatusRoute::Lw
                 ? reactor::
-                      LinkDecoderDecl{"link.status_lw", reactor::Cause::Tick, &axi_status_row_, 0, reactor::RoundClaim::Never}
+                      LinkDecoderDecl{"link.status_lw", reactor::Cause::Tick, &axi_status_row_, reactor::kEveryRound, reactor::RoundClaim::Never}
                 : reactor::LinkDecoderDecl{
                       "link.status_poll",
                       reactor::Cause::Tick,
                       &status_row_,
-                      0,
+                      reactor::kEveryRound,
                       reactor::RoundClaim::Never
                   }
         );

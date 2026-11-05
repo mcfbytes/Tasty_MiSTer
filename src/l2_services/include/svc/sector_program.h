@@ -3,8 +3,10 @@
 
 #include <cstdint>
 
+#include "proto/types.h"
 #include "svc/disc_geometry.h"
 #include "svc/disc_reader.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -15,7 +17,7 @@ public:
         std::uint8_t fill = 0;
     };
 
-    [[nodiscard]] virtual std::uint8_t slot() const noexcept = 0;
+    [[nodiscard]] virtual proto::SlotIndex slot() const noexcept = 0;
     [[nodiscard]] virtual std::uint32_t frame_bytes() const noexcept = 0;
     [[nodiscard]] virtual DiscForm form() const noexcept = 0;
     [[nodiscard]] virtual Source answer(

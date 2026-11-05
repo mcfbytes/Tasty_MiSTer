@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -28,7 +27,7 @@ struct ArcadeFacts {
     std::string nvm_name;
     int nvram_index = 0;
     int nvram_size = 0;
-    std::uint64_t dip_cur = 0;
+    mra::DipWord dip_cur{};
     std::string error;
 };
 
@@ -53,7 +52,5 @@ struct ArcadeDocument {
 );
 
 [[nodiscard]] bool nvram_declared(int index, int size) noexcept;
-
-[[nodiscard]] std::array<std::uint8_t, 8> dip_pack(std::uint64_t dip) noexcept;
 
 }

@@ -35,7 +35,7 @@ public:
 
     [[nodiscard]] Ex<bool> step(const Env& env);
 
-    [[nodiscard]] bool priming() const noexcept { return slot_ < SaveStateEngine::kSlots; }
+    [[nodiscard]] bool priming() const noexcept { return slot_.has_value(); }
 
     void end() noexcept;
 
@@ -45,11 +45,12 @@ private:
     [[nodiscard]] bool load_step_(const Env& env, hal::FpgaMemory& mem);
 
     SaveStateDecl window_{};
-    std::optional<hal::FpgaMemory> regions_[SaveStateEngine::kSlots];
+    infra::IndexedArray<std::optional<hal::FpgaMemory>, SaveStateEngine::kSlots, StateSlot>
+        regions_{};
     std::string subdir_;
     std::string stem_;
 
-    unsigned slot_ = SaveStateEngine::kSlots;
+    std::optional<StateSlot> slot_;
     bool loading_ = false;
     unsigned digit_ = 0;
     std::size_t off_ = 0;

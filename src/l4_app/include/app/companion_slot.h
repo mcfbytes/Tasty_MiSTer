@@ -9,7 +9,7 @@
 #include "app/companion_walk.h"
 #include "app/negotiated_core.h"
 #include "app/owner_tally.h"
-#include "cores/companion_load.h"
+#include "cores/msu_companion.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 
@@ -52,7 +52,7 @@ private:
     OwnerTally& tally_;
     std::uint64_t aperture_base_;
     infra::OptRef<CompanionHost::Binds> binds_;
-    std::unique_ptr<cores::ICompanionLoad> companion_{};
+    std::unique_ptr<cores::MsuCompanion> companion_{};
     bool attached_ = false;
     std::uint16_t gen_ = 0;
 };

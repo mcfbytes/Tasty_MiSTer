@@ -31,41 +31,42 @@ hal::PhysRegion video_fb_region(std::span<const hal::PhysRegion> regions) noexce
 
 MenuBlock::MenuBlock(
     const BootParts& plat,
-    DeviceBlock& device,
+    const DeviceBlock::Parts& parts,
+    OpenVerdict& verdict,
     LauncherBlock& launcher,
     infra::OptRef<os::ProcessTitle> title
 )
     : diag_path_{plat.diag_path},
-      bt_{device.bt_pump_},
-      trace_{device.events_},
-      ui_writes_{plat.vfs, device.io_wake_},
-      stores_{plat, device.cheat_blob_, ui_writes_},
+      bt_{parts.wires.bt},
+      trace_{parts.wires.events},
+      ui_writes_{plat.vfs, parts.wires.io_wake},
+      stores_{plat, parts.cells.cheat_blob, ui_writes_},
       mgl_pump_{
           plat.vfs,
-          device.clock_,
+          parts.wires.clock,
           app::MglPump::Wiring{
-              .link_tx = device.ui_inbox_,
-              .asks = device.owner_.ui_requests(),
-              .identity = device.session_.identity(),
-              .conf = device.conf_str_cell_,
+              .link_tx = parts.wires.ui_inbox,
+              .asks = parts.session.owner.ui_requests(),
+              .identity = parts.session.link.identity(),
+              .conf = parts.cells.conf_str,
               .names = stores_.names_,
-              .diag = device.diag_log_
+              .diag = parts.wires.diag
           }
       },
-      hps_fb_{device.video_pump_.wire(), device.video_pump_, video_fb_region(plat.regions)},
+      hps_fb_{parts.wires.video.wire(), parts.wires.video, video_fb_region(plat.regions)},
       browse_source_{plat.vfs},
 
       ui_model_{ui::MenuModel::Wiring{
-          .conf_str = device.conf_str_cell_,
-          .status = device.session_.status_cell(),
-          .dip = device.session_.dip_cell(),
-          .option = device.session_.option_cell(),
+          .conf_str = parts.cells.conf_str,
+          .status = parts.session.link.status_cell(),
+          .dip = parts.session.link.dip_cell(),
+          .option = parts.session.link.option_cell(),
           .launcher = launcher.launcher_state_,
-          .config_slot = device.session_.config_slot_cell(),
-          .tx_digest = device.cheat_link_.tx_digest_cell(),
-          .cheat_catalog = device.cheat_catalog_,
+          .config_slot = parts.session.link.config_slot_cell(),
+          .tx_digest = parts.cells.cheat_link.tx_digest_cell(),
+          .cheat_catalog = parts.cells.cheat_catalog,
           .cheats = stores_.cheats_,
-          .identity = device.session_.identity(),
+          .identity = parts.session.link.identity(),
       }},
 
       ui_context_{
@@ -73,50 +74,50 @@ MenuBlock::MenuBlock(
           .names = infra::OptRef<app::NameConfig>{stores_.names_},
           .played = infra::OptRef<app::PlayedHistory>{stores_.played_},
           .cheats = infra::OptRef<app::CheatStore>{stores_.cheats_},
-          .ui_requests = infra::OptRef<app::UiRequestRing>{device.owner_.ui_requests()},
+          .ui_requests = infra::OptRef<app::UiRequestRing>{parts.session.owner.ui_requests()},
           .bt = infra::OptRef<ui::IBtOps>{bt_ops_},
           .files = infra::OptRef<const svc::Vfs>{plat.vfs},
-          .identity = infra::OptRef<const app::IdentityLatch>{device.session_.identity()}
+          .identity = infra::OptRef<const app::IdentityLatch>{parts.session.link.identity()}
       },
-      host_facts_{plat.vfs, device.clock_, ui_model_, plat.kernel_rt},
+      host_facts_{plat.vfs, parts.wires.clock, ui_model_, plat.kernel_rt},
       ui_sink_{UiSink::Wiring{
           .menu = infra::OptRef{ui_model_},
           .ctx = ui_context_,
           .trace = trace_,
           .mgl = mgl_pump_,
-          .video = device.video_pump_,
-          .input = device.input_wire_,
-          .identity = device.session_.identity(),
-          .conf_str = device.conf_str_cell_,
+          .video = parts.wires.video,
+          .input = parts.wires.input,
+          .identity = parts.session.link.identity(),
+          .conf_str = parts.cells.conf_str,
           .title = title
       }},
-      hd_{plat, device.clock_, hps_fb_, device.video_pump_, device.verdict()},
+      hd_{plat, parts.wires.clock, hps_fb_, parts.wires.video, verdict},
       ui_round_{
-          device.osd_wire_,
-          device.input_wire_,
-          device.clock_,
+          parts.wires.osd,
+          parts.wires.input,
+          parts.wires.clock,
           ui_model_,
           ui_context_,
           ui::UiRound::Wiring{
               .browse = browse_source_,
-              .link_tx = device.ui_inbox_,
+              .link_tx = parts.wires.ui_inbox,
               .sampler = host_facts_,
               .osd_file = ui_sink_,
-              .conf_str = device.conf_str_cell_,
+              .conf_str = parts.cells.conf_str,
               .hd = hd_.screen(),
               .writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
           }
       },
       save_states_{app::SaveStateAttach::Wiring{
-          .asks = device.save_state_asks_,
-          .facts = device.save_state_facts_,
-          .copy = device.save_copy_,
+          .asks = parts.cells.states_asks,
+          .facts = parts.cells.states_facts,
+          .copy = parts.cells.save_copy,
           .vfs = plat.vfs,
-          .map = device.io_window_map_,
-          .ui_map = device.ui_window_map_,
+          .map = parts.cells.io_windows,
+          .ui_map = parts.cells.ui_windows,
           .aperture = plat.fpga_mem.region,
-          .clock = device.clock_,
-          .io_wake = device.io_wake_,
+          .clock = parts.wires.clock,
+          .io_wake = parts.wires.io_wake,
           .toast = infra::OptRef<app::IEventSink>{ui_sink_}
       }},
       launcher_screen_{app::LauncherScreen::Wiring{
@@ -124,7 +125,7 @@ MenuBlock::MenuBlock(
           .fb_ack = launcher.launcher_fb_ack_,
           .launcher_wake = launcher.launcher_wake_,
           .fb = hps_fb_,
-          .video = device.video_pump_,
+          .video = parts.wires.video,
           .osd = ui_model_
       }} {}
 
@@ -141,6 +142,11 @@ SessionMode::Face::Parts MenuBlock::parts() noexcept {
         .ui_round = infra::OptRef<app::IUiRoundPort>{ui_round_},
         .save_states = infra::OptRef<app::SaveStateAttach>{save_states_},
         .ui_writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
+        .verdicts =
+            app::VerdictSinks{
+                .played = infra::OptRef<app::IWriteVerdict>{stores_.played_},
+                .recents = infra::OptRef<app::IWriteVerdict>{stores_.recents_}
+            },
         .ui_pages = infra::OptRef{ui_round_.page_cell()},
         .hd = infra::OptRef<const app::HdOsdStatusCell>{hd_.hd_status_},
     };

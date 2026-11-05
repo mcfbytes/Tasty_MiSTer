@@ -2,41 +2,52 @@
 #include "cores/neo_file.h"
 
 #include "infra/byte_view.h"
+#include "infra/endian.h"
 
 namespace mister::cores::neogeo {
 
 namespace {
 
 std::uint32_t get_u32(std::span<const std::uint8_t> b, std::size_t off) noexcept {
-    return static_cast<std::uint32_t>(b[off])
-        | (static_cast<std::uint32_t>(b[off + 1]) << 8)
-        | (static_cast<std::uint32_t>(b[off + 2]) << 16)
-        | (static_cast<std::uint32_t>(b[off + 3]) << 24);
+    return infra::load_le<std::uint32_t>(b.subspan(off).first<sizeof(std::uint32_t)>());
 }
 
 }
 
 std::optional<NeoHeader> parse_neo_header(std::span<const std::uint8_t> buf) noexcept {
+    constexpr std::size_t kVersionAt = 3;
+    constexpr std::size_t kPSizeAt = 4;
+    constexpr std::size_t kSSizeAt = 8;
+    constexpr std::size_t kMSizeAt = 12;
+    constexpr std::size_t kV1SizeAt = 16;
+    constexpr std::size_t kV2SizeAt = 20;
+    constexpr std::size_t kCSizeAt = 24;
+    constexpr std::size_t kYearAt = 28;
+    constexpr std::size_t kGenreAt = 32;
+    constexpr std::size_t kScreenshotAt = 36;
+    constexpr std::size_t kNghAt = 40;
+    constexpr std::size_t kNameAt = 44;
+    constexpr std::size_t kManuAt = 77;
     if (buf.size() < kNeoHeaderBytes)
         return std::nullopt;
 
     NeoHeader h{};
     h.magic = {buf[0], buf[1], buf[2]};
-    h.version = buf[3];
-    h.p_size = get_u32(buf, 4);
-    h.s_size = get_u32(buf, 8);
-    h.m_size = get_u32(buf, 12);
-    h.v1_size = get_u32(buf, 16);
-    h.v2_size = get_u32(buf, 20);
-    h.c_size = get_u32(buf, 24);
-    h.year = get_u32(buf, 28);
-    h.genre = get_u32(buf, 32);
-    h.screenshot = get_u32(buf, 36);
-    h.ngh = get_u32(buf, 40);
+    h.version = buf[kVersionAt];
+    h.p_size = get_u32(buf, kPSizeAt);
+    h.s_size = get_u32(buf, kSSizeAt);
+    h.m_size = get_u32(buf, kMSizeAt);
+    h.v1_size = get_u32(buf, kV1SizeAt);
+    h.v2_size = get_u32(buf, kV2SizeAt);
+    h.c_size = get_u32(buf, kCSizeAt);
+    h.year = get_u32(buf, kYearAt);
+    h.genre = get_u32(buf, kGenreAt);
+    h.screenshot = get_u32(buf, kScreenshotAt);
+    h.ngh = get_u32(buf, kNghAt);
     for (std::size_t i = 0; i < h.name.size(); ++i)
-        h.name[i] = buf[44 + i];
+        h.name[i] = buf[kNameAt + i];
     for (std::size_t i = 0; i < h.manu.size(); ++i)
-        h.manu[i] = buf[77 + i];
+        h.manu[i] = buf[kManuAt + i];
     return h;
 }
 
@@ -68,6 +79,20 @@ const std::array<NeoQuirk, kNeoQuirkCount> kNeoQuirks{{
 }};
 
 NeoCartConfig resolve_quirks(const NeoHeader& hdr) noexcept {
+    constexpr std::uint32_t kNghKof99 = 0x0251;
+    constexpr std::uint32_t kNghGarou = 0x0253;
+    constexpr std::uint32_t kNghMslug3 = 0x0256;
+    constexpr std::uint32_t kNghMslug4 = 0x0263;
+    constexpr std::uint32_t kNghMslug5 = 0x0268;
+    constexpr std::uint32_t kNghSvc = 0x0269;
+    constexpr std::uint32_t kNghKof2003 = 0x0271;
+    constexpr std::uint32_t kSize9M = 9437184;
+    constexpr std::uint32_t kSize8M = 8388608;
+    constexpr std::uint32_t kSize5M = 5242880;
+    constexpr std::uint32_t kSize512K = 524288;
+    constexpr std::size_t kGarouhNameAt = 27;
+    constexpr std::size_t kSvcsplusNameAt = 15;
+    constexpr std::uint8_t kSmaGarouh = 3;
     NeoCartConfig cfg{};
 
     for (const NeoQuirk& q : kNeoQuirks) {
@@ -76,45 +101,45 @@ NeoCartConfig resolve_quirks(const NeoHeader& hdr) noexcept {
 
         bool skip = false;
         switch (hdr.ngh) {
-            case 0x0251:
-                if (hdr.p_size != 9437184)
+            case kNghKof99:
+                if (hdr.p_size != kSize9M)
                     skip = true;
                 break;
-            case 0x0253:
-                if (hdr.p_size != 9437184)
+            case kNghGarou:
+                if (hdr.p_size != kSize9M)
                     skip = true;
-                if (hdr.name[27] == 'A') {
-                    cfg.sma = 3;
+                if (hdr.name[kGarouhNameAt] == 'A') {
+                    cfg.sma = kSmaGarouh;
                     cfg.cmc = 1;
                     cfg.vrom_mirror = false;
                     skip = true;
                 }
                 break;
-            case 0x0256:
-                if (hdr.p_size != 9437184)
+            case kNghMslug3:
+                if (hdr.p_size != kSize9M)
                     skip = true;
                 break;
-            case 0x0263:
-                if (hdr.s_size != 524288)
+            case kNghMslug4:
+                if (hdr.s_size != kSize512K)
                     skip = true;
                 break;
-            case 0x0268:
-                if (hdr.p_size == 5242880)
+            case kNghMslug5:
+                if (hdr.p_size == kSize5M)
                     cfg.ms5p = 1;
-                if (hdr.p_size != 8388608)
+                if (hdr.p_size != kSize8M)
                     skip = true;
                 break;
-            case 0x0269:
-                if (hdr.p_size != 8388608)
+            case kNghSvc:
+                if (hdr.p_size != kSize8M)
                     skip = true;
-                if (hdr.name[15] == 'S') {
+                if (hdr.name[kSvcsplusNameAt] == 'S') {
                     cfg.cmc = 0;
                     cfg.pvc = 1;
                     skip = true;
                 }
                 break;
-            case 0x0271:
-                if (hdr.p_size != 9437184)
+            case kNghKof2003:
+                if (hdr.p_size != kSize9M)
                     skip = true;
                 break;
             default:

@@ -20,7 +20,7 @@ class ReplayBlock {
 public:
     ReplayBlock(
         const BootParts& plat,
-        DeviceBlock& device,
+        const DeviceBlock::Parts& parts,
         app::ScreenshotPump& shots,
         app::IOsdClose& osd
     );

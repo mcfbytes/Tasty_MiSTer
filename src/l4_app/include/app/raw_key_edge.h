@@ -7,7 +7,7 @@ namespace mister::app {
 
 struct RawKeyEdge {
     std::uint16_t code = 0;
-    std::uint8_t pressed = 0;
+    bool pressed = false;
     std::uint8_t reserved = 0;
 };
 

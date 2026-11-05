@@ -112,11 +112,9 @@ const AxisCal& InputDevice::axis(unsigned code) const {
     return axes_[code];
 }
 
-StickCal InputDevice::stick_cal(int stick) const noexcept {
-    if (stick < 0 || stick > 1)
-        return StickCal{};
-    const auto i = static_cast<std::size_t>(stick);
-    return StickCal{max_cardinal_[i], std::sqrt(max_range_sq_[i])};
+StickCal InputDevice::stick_cal(StickIndex stick) const noexcept {
+    const auto s = sticks_.find(stick);
+    return s ? s->cal() : StickCal{};
 }
 
 void InputDevice::install_sys_map(const JoyWords& words) noexcept {
@@ -166,24 +164,23 @@ Ex<void> InputDevice::set_grabbed(bool on) {
 ff_effect make_rumble_effect(
     QuirkId quirk,
     std::int16_t id,
-    std::uint16_t strong,
-    std::uint16_t weak
+    proto::user_io::RumbleMotors motors
 ) noexcept {
     ff_effect e{};
     e.type = FF_RUMBLE;
     e.id = id;
     e.direction = quirk == QuirkId::Wheel ? 0x4000 : 0x0000;
-    e.u.rumble.strong_magnitude = strong;
-    e.u.rumble.weak_magnitude = weak;
+    e.u.rumble.strong_magnitude = motors.strong;
+    e.u.rumble.weak_magnitude = motors.weak;
     e.replay.length = kRumbleLengthMs;
     e.replay.delay = 0;
     return e;
 }
 
-Ex<void> InputDevice::set_rumble(std::uint16_t strong, std::uint16_t weak) {
+Ex<void> InputDevice::set_rumble(proto::user_io::RumbleMotors motors) {
     if (!rumble_ || !ev_.valid())
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    if (strong == 0 && weak == 0) {
+    if (motors.strong == 0 && motors.weak == 0) {
         if (rumble_id_ == -1)
             return {};
         const bool removed = ev_.erase_effect(static_cast<int>(rumble_id_));
@@ -192,7 +189,7 @@ Ex<void> InputDevice::set_rumble(std::uint16_t strong, std::uint16_t weak) {
             return std::unexpected(os_error(ERR_SITE()));
         return {};
     }
-    ff_effect e = make_rumble_effect(facts_.quirk, rumble_id_, strong, weak);
+    ff_effect e = make_rumble_effect(facts_.quirk, rumble_id_, motors);
     if (!ev_.upload_effect(e))
         return std::unexpected(os_error(ERR_SITE()));
     rumble_id_ = e.id;
@@ -341,20 +338,20 @@ std::int32_t normalize_axis(std::int32_t value, const AxisCal& cal) {
 }
 
 struct StickAxis {
-    int stick;
+    StickIndex stick;
     bool is_y;
 };
 
 std::optional<StickAxis> stick_of(std::uint16_t code) {
     switch (code) {
         case ABS_X:
-            return StickAxis{0, false};
+            return StickAxis{kLeftStick, false};
         case ABS_Y:
-            return StickAxis{0, true};
+            return StickAxis{kLeftStick, true};
         case ABS_RX:
-            return StickAxis{1, false};
+            return StickAxis{kRightStick, false};
         case ABS_RY:
-            return StickAxis{1, true};
+            return StickAxis{kRightStick, true};
         default:
             return std::nullopt;
     }
@@ -371,28 +368,30 @@ Ex<unsigned> InputDevice::drain() {
     report_.menu_buttons = menu_prev_;
     report_.mouse_buttons = mouse_buttons_;
 
-    report_.stick[0] = prev_stick_[0];
-    report_.stick[1] = prev_stick_[1];
+    for (const StickIndex i : kSticks)
+        report_.stick[i] = sticks_[i].published;
     unsigned decoded = 0;
     keys_changed_ = false;
 
     struct input_event evs[32];
     bool more = true;
     while (more) {
-        const ssize_t n = ev_.read(evs);
-        if (n < 0) {
+        const Ex<std::size_t> got = ev_.read(evs);
+        if (!got) {
 
-            if (errno == EINTR)
+            const auto err = static_cast<int>(got.error().detail);
+            if (err == EINTR)
                 continue;
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            if (err == EAGAIN || err == EWOULDBLOCK)
                 break;
-            return std::unexpected(os_error(ERR_SITE()));
+            return std::unexpected(got.error());
         }
+        const std::size_t n = *got;
         if (n == 0)
             break;
-        const auto whole = static_cast<std::size_t>(n) / sizeof(struct input_event);
+        const auto whole = n / sizeof(struct input_event);
 
-        const std::size_t rem = static_cast<std::size_t>(n) - whole * sizeof(struct input_event);
+        const std::size_t rem = n - whole * sizeof(struct input_event);
         if (rem != 0) {
             const std::uint32_t sum = static_cast<std::uint32_t>(report_.mouse_remainder)
                 + static_cast<std::uint32_t>(rem);
@@ -438,10 +437,10 @@ Ex<unsigned> InputDevice::drain() {
                     if (code >= BTN_LEFT && code <= BTN_MIDDLE) {
                         const auto bit = static_cast<std::uint8_t>(1u << (code - BTN_LEFT));
                         if (pressed)
-                            report_.mouse_buttons |= bit;
+                            report_.mouse_buttons.v |= bit;
                         else
-                            report_.mouse_buttons = static_cast<std::uint8_t>(
-                                report_.mouse_buttons & ~bit
+                            report_.mouse_buttons.v = static_cast<std::uint8_t>(
+                                report_.mouse_buttons.v & ~bit
                             );
                         report_.mouse_changed = true;
                     }
@@ -467,44 +466,35 @@ Ex<unsigned> InputDevice::drain() {
                         synth_axis(static_cast<std::uint16_t>(ev.code), ev.value, cal);
                         break;
                     }
-                    const int stick = sa->stick;
+                    const StickIndex stick = sa->stick;
                     const bool is_y = sa->is_y;
+                    StickState& st = sticks_[stick];
                     const std::int32_t v = normalize_axis(ev.value, cal);
                     if (is_y)
-                        raw_[stick].y = v;
+                        st.raw.y = v;
                     else
-                        raw_[stick].x = v;
+                        st.raw.x = v;
 
-                    const std::int32_t ax = raw_[stick].x < 0 ? -raw_[stick].x : raw_[stick].x;
-                    const std::int32_t ay = raw_[stick].y < 0 ? -raw_[stick].y : raw_[stick].y;
-                    const auto card = static_cast<float>(ax > ay ? ax : ay);
-                    if (card > max_cardinal_[stick])
-                        max_cardinal_[stick] = card;
-
-                    if (rules::is_diagonal(raw_[stick])) {
-                        const auto rr = static_cast<float>(ax) * static_cast<float>(ax)
-                            + static_cast<float>(ay) * static_cast<float>(ay);
-                        if (rr > max_range_sq_[stick])
-                            max_range_sq_[stick] = rr;
-                    }
+                    st.learn(rules::is_diagonal(st.raw));
                     if (ev.code < kAxisCount) {
-                        const std::int32_t seen = is_y ? ay : ax;
+                        const std::int32_t axis = is_y ? st.raw.y : st.raw.x;
+                        const std::int32_t seen = axis < 0 ? -axis : axis;
                         if (seen > axes_[ev.code].seen_max)
                             axes_[ev.code].seen_max = seen;
                     }
 
-                    const StickCal sc = stick_cal(stick);
+                    const StickCal sc = st.cal();
                     rules::DeadzoneParams dp{};
                     dp.deadzone = deadzone_;
                     dp.max_cardinal = sc.max_cardinal;
                     dp.max_range = sc.max_range;
-                    AnalogXy xy = rules::apply_deadzone(raw_[stick], dp);
+                    AnalogXy xy = rules::apply_deadzone(st.raw, dp);
 
                     if (reshape_)
                         xy = reshape_->reshape(xy, cal, sc);
-                    if (!(xy == prev_stick_[stick])) {
+                    if (!(xy == st.published)) {
                         report_.stick_changed[stick] = true;
-                        prev_stick_[stick] = xy;
+                        st.published = xy;
                     }
                     report_.stick[stick] = xy;
 

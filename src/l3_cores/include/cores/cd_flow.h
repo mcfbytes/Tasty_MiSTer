@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "svc/types.h"
+
 namespace mister::cores {
 
 struct CdFlow {
@@ -14,7 +16,7 @@ struct CdFlow {
 
     std::uint32_t gated_ticks = 0;
     std::uint8_t drive_state = 0;
-    std::uint32_t drive_track = 0;
+    svc::TrackIndex drive_track{};
     std::int32_t drive_lba = 0;
 
     std::int32_t drive_audio_lba = 0;

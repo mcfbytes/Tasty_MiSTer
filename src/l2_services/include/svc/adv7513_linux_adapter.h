@@ -20,19 +20,19 @@ public:
     LinuxAdapter(const LinuxAdapter&) = delete;
     LinuxAdapter& operator=(const LinuxAdapter&) = delete;
 
-    [[nodiscard]] Ex<std::uint8_t> probe(unsigned bus, std::uint8_t addr) override;
-    [[nodiscard]] Ex<void> open(unsigned bus, std::uint8_t addr) override;
-    [[nodiscard]] Ex<std::uint8_t> read(std::uint8_t addr, std::uint8_t reg) override;
-    [[nodiscard]] Ex<void> write(std::uint8_t addr, std::uint8_t reg, std::uint8_t val) override;
+    [[nodiscard]] Ex<std::uint8_t> probe(unsigned bus, os::I2cAddr addr) override;
+    [[nodiscard]] Ex<void> open(unsigned bus, os::I2cAddr addr) override;
+    [[nodiscard]] Ex<std::uint8_t> read(os::I2cAddr addr, os::I2cReg reg) override;
+    [[nodiscard]] Ex<void> write(os::I2cAddr addr, os::I2cReg reg, std::uint8_t val) override;
 
 private:
     struct Slot {
-        std::uint8_t addr = 0;
+        os::I2cAddr addr{};
 
         std::optional<os::I2cDevice> dev{};
     };
 
-    Slot* find(std::uint8_t addr) noexcept;
+    Slot* find(os::I2cAddr addr) noexcept;
 
     std::array<Slot, 4> slots_{};
 };

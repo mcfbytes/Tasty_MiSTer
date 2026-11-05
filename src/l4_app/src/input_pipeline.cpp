@@ -57,15 +57,16 @@ void InputPipeline::latch_cfg(std::span<const svc::DeadzoneRule> deadzones, bool
     service_.set_cfg_rumble(rumble);
 }
 
-void InputEmit::on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live) {
+void InputEmit::on_rt_round(bool tick, CoreEdgeSeq core_edge_seq, bool live) {
 
     TASTY_SEAT_BODY(InputEmit);
     n_rt_rounds_.add(1);
 
-    const std::uint32_t gates = wire_.gates();
-    const bool grabbed = (gates & InputWire::kGateGrabbed) != 0u;
-    const bool osd = (gates & InputWire::kGateOsdVisible) != 0u;
-    em_.set_gates(grabbed, osd);
+    const InputGateBits gates = wire_.gates();
+    em_.set_gates(
+        InputWire::has(gates, InputWire::kGateGrabbed),
+        InputWire::has(gates, InputWire::kGateOsdVisible)
+    );
 
     if (core_edge_seq != wm_core_edge_seq_) {
         wm_core_edge_seq_ = core_edge_seq;
@@ -116,7 +117,7 @@ InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view in
     }
 
     wire_.publish_gates(
-        svc::InputService::kBornGrabbed ? InputWire::kGateGrabbed : 0u,
+        svc::InputService::kBornGrabbed ? InputWire::kGateGrabbed : InputGateBits{},
         InputWire::kGateOsdVisible
     );
 }
@@ -137,7 +138,7 @@ bool InputBuild::rebind_round() {
 
     while (tx_.reap()) {
     }
-    if ((wire_.requests() & InputWire::kReqHotplug) == 0u)
+    if (!wire_.requested(InputWire::kReqHotplug))
         return false;
 
     auto loan = tx_.acquire();

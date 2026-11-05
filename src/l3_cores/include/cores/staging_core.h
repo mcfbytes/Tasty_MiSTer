@@ -7,6 +7,7 @@
 #include "cores/stage_plan.h"
 #include "infra/error.h"
 #include "proto/link_op.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -19,7 +20,7 @@ public:
     virtual ~IStagingCore() = default;
 
     [[nodiscard]] virtual MountState mount_disc(std::string_view path) = 0;
-    virtual void set_region(std::uint8_t region) = 0;
+    virtual void set_region(proto::RegionCode region) = 0;
     [[nodiscard]] virtual Ex<void> deferred_reset() = 0;
 
     virtual StagePlan stage_plan() noexcept { return {}; }

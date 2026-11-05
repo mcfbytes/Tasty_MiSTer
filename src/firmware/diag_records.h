@@ -6,6 +6,7 @@
 #include <tuple>
 
 #include "app/diag_counters.h"
+#include "infra/error.h"
 #include "app/fallback_counts.h"
 #include "bay_record.h"
 #include "hd_record.h"
@@ -26,7 +27,7 @@ struct SessView {
     std::uint8_t stage_status_change = 0;
     std::uint32_t status_reply_refusals = 0;
     std::uint16_t last_error_code = 0;
-    std::uint16_t last_error_site = 0;
+    infra::ErrorSite last_error_site{};
     std::uint32_t last_error_detail = 0;
     std::uint32_t prefetch_park_timeouts = 0;
     std::uint32_t pause_expiries = 0;

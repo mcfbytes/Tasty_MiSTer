@@ -100,6 +100,8 @@ public:
         MainSlots mains{};
     };
 
+    void set_seat_contract(SeatContract contract) noexcept { contract_ = contract; }
+
     [[nodiscard]] Ex<void> spawn(RtMode mode, const SeatMains& mains);
 
     [[nodiscard]] bool any_live() const noexcept;
@@ -167,6 +169,10 @@ private:
     void stop_one_() noexcept;
 
     MainSlots mains_{};
+
+    SeatContract contract_ = SeatContract::Any;
+
+    [[nodiscard]] Ex<void> check_presence_() const noexcept;
 
     RtEvidence own_ev_{};
     RtEvidence& ev_;

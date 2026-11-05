@@ -27,31 +27,31 @@ public:
 
     ~OwedSaveBind() { strand(); }
 
-    [[nodiscard]] bool owed() const noexcept { return gen_ != 0; }
+    [[nodiscard]] bool owed() const noexcept { return static_cast<bool>(gen_); }
 
-    [[nodiscard]] std::uint32_t generation() const noexcept { return gen_; }
+    [[nodiscard]] proto::ActKey generation() const noexcept { return gen_; }
 
-    void arm(std::uint32_t generation, const cores::SaveExtent& on_strand) noexcept {
-        if (gen_ != 0 && gen_ != generation)
+    void arm(proto::ActKey generation, const cores::SaveExtent& on_strand) noexcept {
+        if (gen_ && gen_ != generation)
             strand();
         gen_ = generation;
         strand_body_ = on_strand;
     }
 
     void answer(cores::SaveVerdict v, const cores::SaveExtent& payload) noexcept {
-        if (gen_ == 0)
+        if (!gen_)
             return;
-        publish_(std::exchange(gen_, 0u), v, payload);
+        publish_(std::exchange(gen_, proto::ActKey{}), v, payload);
     }
 
     void strand() noexcept {
-        if (gen_ == 0)
+        if (!gen_)
             return;
-        publish_(std::exchange(gen_, 0u), cores::SaveVerdict::Declined, strand_body_);
+        publish_(std::exchange(gen_, proto::ActKey{}), cores::SaveVerdict::Declined, strand_body_);
     }
 
 private:
-    void publish_(std::uint32_t generation, cores::SaveVerdict v, cores::SaveExtent body) noexcept {
+    void publish_(proto::ActKey generation, cores::SaveVerdict v, cores::SaveExtent body) noexcept {
         set_verdict(body, v);
         body.generation = generation;
         cell_.publish(body);
@@ -61,7 +61,7 @@ private:
     Cell& cell_;
     LinkRxChannel<SeatTag::Main>& rx_;
     cores::SaveExtent strand_body_{};
-    std::uint32_t gen_ = 0;
+    proto::ActKey gen_{};
 };
 
 template <std::size_t N>

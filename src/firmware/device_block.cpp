@@ -60,7 +60,8 @@ std::optional<app::ScalerFrameSource> DeviceBlock::open_frame_source_(
 }
 
 std::optional<app::InputPipeline> DeviceBlock::open_input_pipeline_(
-    const BootParts& plat
+    const BootParts& plat,
+    const Parts::Frontend& front
 ) noexcept {
     auto fds = app::InputDecode::Fds::create(input_wire_);
     if (!fds) {
@@ -79,8 +80,8 @@ std::optional<app::InputPipeline> DeviceBlock::open_input_pipeline_(
             .inbox = input_inbox_,
             .link_rx = input_rx_,
             .rt_wake = plat.exec.kicker(),
-            .cell = front_.launcher_state,
-            .keys = front_.launcher_keys,
+            .cell = front.launcher_state,
+            .keys = front.launcher_keys,
             .ui_wake = infra::OptRef<xthread::WakeFlag>{ui_wake_},
         }
     };
@@ -208,10 +209,15 @@ void DeviceBlock::grant_pauses(
     grant_latched_(mains, SeatMainList{});
 }
 
-DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Front& front)
-    : front_(front),
-      threads_(plat.threads),
+DeviceBlock::DeviceBlock(
+    const BootParts& plat,
+    app::IStopSignal& stop,
+    const Parts::Frontend& front
+)
+    : threads_(plat.threads),
       file_streams_{io_wake_, infra::OptRef<const svc::Vfs>{plat.vfs}},
+
+      save_relay_{plat.link, io_wake_},
       events_(),
       owner_events_(),
       clock_(),
@@ -232,12 +238,12 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
       link_router_{main_rx_, ui_rx_, input_rx_},
       input_emit_{input_wire_, plat.link, link_router_},
       input_build_{plat.vfs, input_wire_},
-      input_pipeline_(open_input_pipeline_(plat)),
+      input_pipeline_(open_input_pipeline_(plat, front)),
       input_main_(open_input_main_()),
       frame_(open_frame_clock(plat.video.vsync_device, plat.exec, opened_)),
       prefetch_(),
       prefetch_main_(open_prefetch_main(prefetch_, main_wake_, opened_)),
-      pcm_feeder_{clock_, pcm_commands_},
+      pcm_feeder_{clock_, pcm_commands_, infra::OptRef<const svc::Vfs>{plat.vfs}},
       mailbox_relay_{pcm_wake_},
       companion_host_{pcm_wake_},
       pcm_main_(open_pcm_main(
@@ -396,6 +402,42 @@ DeviceBlock::DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Fr
     save_relay_.install(std::make_unique<app::FlatSaveServant>(vfs_));
 }
 
+DeviceBlock::Parts DeviceBlock::parts() noexcept {
+    return Parts{
+        .wires =
+            {.diag = diag_log_,
+             .clock = clock_,
+             .main_wake = main_wake_,
+             .main_stop = main_stop_,
+             .ui_wake = ui_wake_,
+             .io_wake = io_wake_,
+             .ui_inbox = ui_inbox_,
+             .video = video_pump_,
+             .input = input_wire_,
+             .osd = osd_wire_,
+             .events = events_,
+             .bt = bt_pump_,
+             .frames = frame_counter_,
+             .input_emit = input_emit_,
+
+             .vsync = infra::opt_ref_of(frame_ ? &frame_->frame_cell() : nullptr)},
+        .cells =
+            {.config = config_cell_,
+             .conf_str = conf_str_cell_,
+             .cheat_blob = cheat_blob_,
+             .cheat_catalog = cheat_catalog_,
+             .cheat_link = cheat_link_,
+             .states_asks = save_state_asks_,
+             .states_facts = save_state_facts_,
+             .save_copy = save_copy_,
+             .io_windows = io_window_map_,
+             .ui_windows = ui_window_map_,
+             .frame_demand = frame_demand_,
+             .core_frames = core_frames_},
+        .session = {.link = session_, .owner = owner_},
+    };
+}
+
 std::optional<svc::PrefetchMain> DeviceBlock::open_prefetch_main(
     svc::ChdPrefetch& prefetch,
     xthread::WakeFlag& main_wake,
@@ -497,7 +539,7 @@ void DeviceBlock::open_wires(const BootParts& plat) noexcept {
     diag_log_.set_echo_stderr(true);
 }
 
-void DeviceBlock::open_seats(const BootParts& plat, const Seats& seats) noexcept {
+void DeviceBlock::open_seats(const BootParts& plat, const Parts::Seats& seats) noexcept {
 
     seats.diag.set_screenshot_dir(std::string(plat.vfs.root_path()) + "/screenshots");
 

@@ -15,10 +15,10 @@
 #include "cores/core_support.h"
 #include "cores/cheat_records.h"
 #include "cores/dip_switches.h"
-#include "cores/generic_core.h"
 #include "cores/mra_cheat_records.h"
 #include "cores/mra_doc.h"
 #include "cores/save_upload.h"
+#include "cores/stream_load_host.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 
@@ -46,12 +46,12 @@ public:
     ArcadeCore(const CoreProfile& profile, const HostServices& host, ArcadeFacts facts);
 
     [[nodiscard]] std::size_t dip_count() const noexcept override;
-    [[nodiscard]] DipRowView dip_row(std::size_t row) const noexcept override;
+    [[nodiscard]] DipRowView dip_row(proto::DipRowIndex row) const noexcept override;
     [[nodiscard]] std::string_view dip_choice(
-        std::size_t row,
-        std::size_t choice
+        proto::DipRowIndex row,
+        proto::DipChoice choice
     ) const noexcept override;
-    [[nodiscard]] Ex<void> set_dip(std::size_t row, std::size_t choice) override;
+    [[nodiscard]] Ex<void> set_dip(proto::DipRowIndex row, proto::DipChoice choice) override;
 
     [[nodiscard]] std::string_view dip_file_name() const noexcept override {
         TASTY_SEAT_BODY(ArcadeCore);
@@ -93,30 +93,38 @@ public:
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt&) override { return {}; }
 
-    [[nodiscard]] IStreamLoad* on_stream_load() noexcept override { return &file_host_; }
+    [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
+        return infra::OptRef<IStreamLoad>{stream_};
+    }
 
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
     void on_set_pending_file_ext(std::string_view ext) noexcept override;
     std::uint64_t on_last_tx_bytes() const noexcept override;
-    std::uint32_t on_last_tx_crc() const noexcept override;
+    svc::Crc32 on_last_tx_crc() const noexcept override;
 
     ButtonOverride on_button_override() const noexcept override {
         return {btn_names_, btn_defaults_};
     }
 
-    IDipSwitches* on_dip_switches() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IDipSwitches> on_dip_switches() noexcept override {
+        return infra::OptRef<IDipSwitches>{*this};
+    }
 
-    ISaveUpload* on_save_upload() noexcept override { return nvram_declared_() ? this : nullptr; }
+    [[nodiscard]] infra::OptRef<ISaveUpload> on_save_upload() noexcept override {
+        return nvram_declared_() ? infra::OptRef<ISaveUpload>{*this} : infra::OptRef<ISaveUpload>{};
+    }
 
-    ICheatRecords* on_cheat_records() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<ICheatRecords> on_cheat_records() noexcept override {
+        return infra::OptRef<ICheatRecords>{*this};
+    }
 
     [[nodiscard]] Ex<void> on_osd_closed() override { return {}; }
 
     [[nodiscard]] Ex<void> send_dips_();
     [[nodiscard]] bool nvram_declared_() const noexcept;
-    [[nodiscard]] std::uint8_t current_choice_(const mra::DipRow& d) const noexcept;
+    [[nodiscard]] proto::DipChoice current_choice_(const mra::DipRow& d) const noexcept;
 
-    GenericCore file_host_;
+    StreamLoadHost stream_;
     std::string btn_names_;
     std::string btn_defaults_;
     std::string dip_name_;
@@ -124,8 +132,8 @@ private:
     mra::SwitchTable switches_{};
     mra::MraCheatRecords cheats_{};
     std::uint32_t cheats_dropped_ = 0;
-    std::uint64_t dip_cur_ = 0;
-    std::uint64_t dip_saved_ = 0;
+    mra::DipWord dip_cur_{};
+    mra::DipWord dip_saved_{};
     int nvram_index_ = 0;
     int nvram_size_ = 0;
 };

@@ -12,7 +12,7 @@ namespace mister::cores::mra {
 inline constexpr std::size_t kMaxDipRows = 63;
 
 struct SwitchTable {
-    std::uint64_t dip_def = 0;
+    DipWord dip_def{};
     std::vector<DipRow> rows;
 };
 

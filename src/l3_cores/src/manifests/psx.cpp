@@ -66,7 +66,7 @@ static_assert(
     "psx.cpp:452-455: the whole mcdheader lands at image offset 0"
 );
 static_assert(
-    kPsxBlankSave.lba_bytes == 1024,
+    kPsxBlankSave.lba_bytes.v == 1024,
     "psx.cpp:449-450: offset = lba * 1024, size = cnt * 1024"
 );
 
@@ -81,7 +81,7 @@ static_assert(
     "one census obligation: the SectorServed kick, nothing else"
 );
 static_assert(
-    kPsxSectorKick.cause == reactor::Cause::Tick && kPsxSectorKick.period_ms == 0,
+    kPsxSectorKick.cause == reactor::Cause::Tick && kPsxSectorKick.period == reactor::kEveryRound,
     "psx.cpp:804-807 + user_io.cpp:3825: one bare kick per poll "
     "round; tasty binds it to every executive round"
 );
@@ -165,7 +165,7 @@ static_assert(
     "psx.cpp:681: the generic file-tx arm, not the PCE loader"
 );
 static_assert(
-    kPsxBootAssets[0].exact_size == 512 * 1024 && kPsxBootAssets[1].exact_size == 512 * 1024,
+    kPsxBootAssets[0].exact_size.v == 512 * 1024 && kPsxBootAssets[1].exact_size.v == 512 * 1024,
     "psx.cpp:680: `if (sz != 512*1024) return 0` — wrong size means "
     "no wire act and the next candidate is tried"
 );

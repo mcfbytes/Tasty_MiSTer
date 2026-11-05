@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 #include "app/hd_layout.h"
@@ -68,15 +69,17 @@ static_assert(
     static_cast<std::size_t>(HdTemplateId::Pixel) + 1 == kHdTemplateCount,
     "one traits row per template, in HdTemplateId order"
 );
+
 static_assert(
     std::ranges::all_of(
         kHdTemplateTraits,
         [](const HdTemplateTraits& t) {
+            constexpr std::uint8_t kPanelPctMax = 100;
             return !t.family.empty()
                 && t.panel_pct > 0
-                && t.panel_pct <= 100
+                && t.panel_pct <= kPanelPctMax
                 && t.strip_panel_pct > 0
-                && t.strip_panel_pct <= 100;
+                && t.strip_panel_pct <= kPanelPctMax;
         }
     ),
     "every traits row names a family and a panel width of 1-100%"
@@ -85,7 +88,8 @@ static_assert(
     std::ranges::all_of(
         kHdTemplateTraits,
         [](const HdTemplateTraits& t) {
-            return t.backdrop_ramp_pct > 0 && t.backdrop_ramp_pct <= 100;
+            constexpr std::uint8_t kRampPctMax = 100;
+            return t.backdrop_ramp_pct > 0 && t.backdrop_ramp_pct <= kRampPctMax;
         }
     ),
     "a backdrop ramp is 1-100% of the theme's dim"
@@ -94,7 +98,8 @@ static_assert(
     std::ranges::all_of(
         kHdTemplateTraits,
         [](const HdTemplateTraits& t) {
-            return t.pixel_em <= 16 && (t.pixel_em & (t.pixel_em - 1)) == 0;
+            constexpr std::uint8_t kPixelEmMax = 16;
+            return t.pixel_em <= kPixelEmMax && (t.pixel_em & (t.pixel_em - 1)) == 0;
         }
     ),
     "a pixel em is 0 or a power of two up to 16"
@@ -121,8 +126,10 @@ static_assert(
     std::ranges::all_of(
         kHdTemplateTraits,
         [](const HdTemplateTraits& t) {
+            constexpr std::uint8_t kBandPctMax = 50;
             return t.band_pct == 0
-                || (t.band_pct <= 50 && (t.horizontal_tiers & tier_bit(RowTier::Verb)) != 0);
+                || (t.band_pct <= kBandPctMax
+                    && (t.horizontal_tiers & tier_bit(RowTier::Verb)) != 0);
         }
     ),
     "a band draws the hub's verb rows across, at most half the output high"
@@ -179,14 +186,14 @@ struct HdLayoutDecl {
     std::string_view name;
     HdTemplateId tmpl = HdTemplateId::Zaparoo;
 
-    std::uint8_t default_palette = 0;
+    HdPaletteIndex default_palette{};
 };
 
 inline constexpr std::array<HdLayoutDecl, 4> kHdLayouts{{
-    {.name = "Standard", .tmpl = HdTemplateId::Zaparoo, .default_palette = 0},
-    {.name = "Quick Bar", .tmpl = HdTemplateId::QuickBar, .default_palette = 0},
-    {.name = "Guide", .tmpl = HdTemplateId::Guide, .default_palette = 5},
-    {.name = "16-Bit", .tmpl = HdTemplateId::Pixel, .default_palette = 6},
+    {.name = "Standard", .tmpl = HdTemplateId::Zaparoo, .default_palette = HdPaletteIndex{0}},
+    {.name = "Quick Bar", .tmpl = HdTemplateId::QuickBar, .default_palette = HdPaletteIndex{0}},
+    {.name = "Guide", .tmpl = HdTemplateId::Guide, .default_palette = HdPaletteIndex{5}},
+    {.name = "16-Bit", .tmpl = HdTemplateId::Pixel, .default_palette = HdPaletteIndex{6}},
 }};
 
 struct HdPaletteDecl {
@@ -219,7 +226,7 @@ static_assert(
     std::ranges::all_of(
         kHdLayouts,
         [](const HdLayoutDecl& l) {
-            return l.default_palette < kHdPalettes.size() && !l.name.empty();
+            return l.default_palette.within(kHdPalettes) && !l.name.empty();
         }
     ),
     "every layout names itself and a palette of the table"
@@ -239,10 +246,10 @@ static_assert(
 );
 
 [[nodiscard]] constexpr HdLook hd_look_index(HdLook look) noexcept {
-    if (look.layout >= kHdLayouts.size())
-        look.layout = 0;
-    if (look.colors > kHdPalettes.size())
-        look.colors = 0;
+    if (!look.layout.within(kHdLayouts))
+        look.layout = HdLayoutIndex{};
+    if (!look.colors.within(kHdPalettes))
+        look.colors = HdColors{};
     if (look.display >= kHdGameDisplays.size())
         look.display = 0;
     if (look.opacity < kHdOpacityMin || look.opacity > kHdOpacityMax)
@@ -273,8 +280,8 @@ inline constexpr auto kHdOpacityNames = [] {
     return names;
 }();
 
-[[nodiscard]] constexpr const HdLayoutDecl& hd_layout_decl(std::uint8_t layout) noexcept {
-    return kHdLayouts[hd_look_index(HdLook{.layout = layout}).layout];
+[[nodiscard]] constexpr const HdLayoutDecl& hd_layout_decl(HdLayoutIndex layout) noexcept {
+    return hd_look_index(HdLook{.layout = layout}).layout.in(kHdLayouts);
 }
 
 static_assert(
@@ -290,8 +297,8 @@ static_assert(
 
 [[nodiscard]] constexpr const HdPaletteDecl& hd_palette(HdLook look) noexcept {
     const HdLook at = hd_look_index(look);
-    return at.colors == 0 ? kHdPalettes[hd_layout_decl(at.layout).default_palette]
-                          : kHdPalettes[at.colors - 1u];
+    const std::optional<HdPaletteIndex> chosen = at.colors.palette();
+    return (chosen ? *chosen : hd_layout_decl(at.layout).default_palette).in(kHdPalettes);
 }
 
 [[nodiscard]] inline HdTheme hd_theme_tokens(HdLook look) noexcept {
@@ -303,7 +310,7 @@ static_assert(
     return t;
 }
 
-[[nodiscard]] constexpr std::uint8_t hd_horizontal_tiers(std::uint8_t layout) noexcept {
+[[nodiscard]] constexpr std::uint8_t hd_horizontal_tiers(HdLayoutIndex layout) noexcept {
     return hd_template_traits(hd_layout_decl(layout).tmpl).horizontal_tiers;
 }
 
@@ -325,9 +332,11 @@ static_assert(
     const HdLook at = hd_look_index(look);
     switch (f) {
         case HdLookField::Layout:
-            return kHdLayouts[at.layout].name;
-        case HdLookField::Colors:
-            return at.colors == 0 ? kHdColorsAuto : kHdPalettes[at.colors - 1u].name;
+            return at.layout.in(kHdLayouts).name;
+        case HdLookField::Colors: {
+            const std::optional<HdPaletteIndex> chosen = at.colors.palette();
+            return chosen ? chosen->in(kHdPalettes).name : kHdColorsAuto;
+        }
         case HdLookField::GameDisplay:
             return kHdGameDisplays[at.display];
         case HdLookField::Opacity: {
@@ -355,19 +364,19 @@ static_assert(
 }
 
 struct HdThemeDecl {
-    std::uint8_t layout = 0;
-    std::uint8_t colors = 0;
+    HdLayoutIndex layout{};
+    HdColors colors{};
 };
 
 inline constexpr std::array<HdThemeDecl, 8> kHdThemes{{
-    {.layout = 0, .colors = 0},
-    {.layout = 0, .colors = 2},
-    {.layout = 0, .colors = 3},
-    {.layout = 0, .colors = 4},
-    {.layout = 0, .colors = 5},
-    {.layout = 1, .colors = 0},
-    {.layout = 2, .colors = 0},
-    {.layout = 3, .colors = 0},
+    {.layout = HdLayoutIndex{0}, .colors = HdColors{0}},
+    {.layout = HdLayoutIndex{0}, .colors = HdColors{2}},
+    {.layout = HdLayoutIndex{0}, .colors = HdColors{3}},
+    {.layout = HdLayoutIndex{0}, .colors = HdColors{4}},
+    {.layout = HdLayoutIndex{0}, .colors = HdColors{5}},
+    {.layout = HdLayoutIndex{1}, .colors = HdColors{0}},
+    {.layout = HdLayoutIndex{2}, .colors = HdColors{0}},
+    {.layout = HdLayoutIndex{3}, .colors = HdColors{0}},
 }};
 
 [[nodiscard]] constexpr const HdThemeDecl& hd_theme(std::uint8_t index) noexcept {

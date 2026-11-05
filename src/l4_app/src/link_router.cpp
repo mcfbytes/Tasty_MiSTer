@@ -3,6 +3,7 @@
 
 #include <expected>
 
+#include "app/link_event_dispatch.h"
 #include "app/link_rx_channel.h"
 
 namespace mister::app {

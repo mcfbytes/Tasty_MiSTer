@@ -5,6 +5,7 @@
 
 #include "app/input_decode_tally.h"
 #include "app/input_wire.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "svc/input_service.h"
 
@@ -41,12 +42,18 @@ private:
     svc::InputService& svc_;
     LinkTxChannel<SeatTag::Input>& inbox_;
     InputDecodeTally& tally_;
-    std::uint32_t last_joy_posted_[svc::kMaxPlayers]{};
-    bool zero_armed_[svc::kMaxPlayers]{true, true, true, true, true, true};
-    std::uint32_t armed_mask_[svc::kMaxPlayers]{};
-    std::uint32_t armed_autofire_[svc::kMaxPlayers]{};
+
+    struct PlayerLevel {
+        svc::JoyMask posted{};
+        bool zero_armed = true;
+        svc::JoyMask armed_mask{};
+        svc::JoyMask armed_autofire{};
+        svc::JoyMask autofire{};
+    };
+
+    infra::IndexedArray<PlayerLevel, svc::kMaxPlayers, svc::PlayerIndex> levels_{};
     xthread::WakeFlag::Cursor reset_seen_{};
-    std::uint32_t wm_gates_ = 0;
+    InputGateBits wm_gates_{};
 };
 
 }

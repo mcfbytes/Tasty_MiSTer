@@ -13,6 +13,7 @@
 #include "app/rec_control.h"
 #include "app/zmbv_codec.h"
 #include "infra/opt_ref.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 
@@ -70,7 +71,7 @@ public:
         const RawFrameSlot& s,
         bool real,
         std::uint64_t core_frame,
-        std::int32_t movie_frame
+        MovieFrame movie_frame
     ) noexcept;
 
     [[nodiscard]] Position position() const noexcept { return pos_; }
@@ -78,7 +79,7 @@ public:
     void note_held() noexcept { held_ = true; }
 
     void tend() noexcept;
-    [[nodiscard]] int park_ms() const noexcept;
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
 
     void release() noexcept;
 
@@ -113,7 +114,7 @@ private:
     [[nodiscard]] std::int64_t frame_budget_ns_(std::uint32_t vtime) const noexcept;
     [[nodiscard]] std::int64_t now_() const noexcept;
     [[nodiscard]] std::int64_t cpu_now_() const noexcept;
-    [[nodiscard]] bool kept_(std::uint64_t core, std::int32_t movie) const noexcept;
+    [[nodiscard]] bool kept_(std::uint64_t core, MovieFrame movie) const noexcept;
     [[nodiscard]] IFrameCodec& codec_for_(RecCodec c) noexcept;
     [[nodiscard]] bool chunk_one_(
         IFrameCodec& codec,
@@ -140,7 +141,7 @@ private:
     bool dirty_ = false;
 
     bool active_ = false;
-    std::uint16_t gen_ = 0;
+    ControlGeneration gen_{};
     RecPath sidecar_{};
     std::uint8_t scale_ = 1;
     bool need_roll_ = false;

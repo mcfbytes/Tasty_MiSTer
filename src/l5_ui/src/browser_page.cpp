@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,10 @@
 #include "svc/vfs.h"
 #include "ui/browse_source.h"
 #include "ui/browser_host.h"
+#include "ui/draw_classic.h"
+#include "ui/page_row.h"
+#include "ui/page_window.h"
+#include "ui/page_walk.h"
 #include "ui/key_decoder.h"
 #include "ui/menu_model.h"
 #include "ui/navigator.h"
@@ -27,50 +32,74 @@ namespace mister::ui {
 
 namespace {
 
-bool is_make(std::uint32_t code, std::uint32_t key) noexcept {
-    return (code & KeyDecoder::kUpstroke) == 0 && (code & 0xFFFFu) == key;
+proto::KeyCode scancode(proto::KeyCode code) noexcept {
+    return proto::KeyCode{code.v & std::numeric_limits<std::uint16_t>::max()};
+}
+
+bool is_make(proto::KeyCode code, std::uint32_t key) noexcept {
+    return (code.v & KeyDecoder::kUpstroke) == 0 && scancode(code) == proto::KeyCode{key};
 }
 
 constexpr char kMoreMarker = 22;
 
+std::string blank_row() {
+    constexpr std::size_t kBrowserRowWidth = 32;
+    return std::string(kBrowserRowWidth, ' ');
+}
+
 }
 
 std::string display_name(const BrowserEntry& e, bool cores) {
-    std::string s(32, ' ');
+    constexpr std::size_t kNameCol = 1;
+    constexpr std::size_t kNameTrimAt = 28;
+    constexpr std::size_t kNameTrimmed = 27;
+    constexpr std::size_t kUpTagCol = 19;
+    constexpr std::size_t kDatecodeCol = 19;
+    constexpr std::size_t kKindTagCol = 22;
+    constexpr std::size_t kZipSuffix = 4;
+    constexpr std::size_t kDatecodeMarkAt = 19;
+    constexpr std::string_view kUpTag = " <UP-DIR>";
+    constexpr std::string_view kZipTag = " <ZIP>";
+    constexpr std::string_view kDirTag = " <DIR>";
+    std::string s = blank_row();
     std::size_t len = e.altname.size();
-    if (len > 28) {
-        len = 27;
-        s[28] = kMoreMarker;
+    if (len > kNameTrimAt) {
+        len = kNameTrimmed;
+        s[kNameTrimAt] = kMoreMarker;
     }
     if (e.is_dir && cores && !e.altname.empty() && e.altname[0] == '_') {
-        std::memcpy(s.data() + 1, e.altname.data() + 1, len - 1);
-    } else if (e.from_zip && len > 4) {
-        std::memcpy(s.data() + 1, e.altname.data(), len - 4);
+        std::memcpy(s.data() + kNameCol, e.altname.data() + 1, len - 1);
+    } else if (e.from_zip && len > kZipSuffix) {
+        std::memcpy(s.data() + kNameCol, e.altname.data(), len - kZipSuffix);
     } else {
-        std::memcpy(s.data() + 1, e.altname.data(), len);
+        std::memcpy(s.data() + kNameCol, e.altname.data(), len);
     }
     if (e.is_dir) {
         if (e.altname == "..") {
-            std::memcpy(s.data() + 19, " <UP-DIR>", 9);
+            std::memcpy(s.data() + kUpTagCol, kUpTag.data(), kUpTag.size());
         } else if (e.from_zip) {
-            std::memcpy(s.data() + 22, " <ZIP>", 6);
+            std::memcpy(s.data() + kKindTagCol, kZipTag.data(), kZipTag.size());
         } else {
-            std::memcpy(s.data() + 22, " <DIR>", 6);
+            std::memcpy(s.data() + kKindTagCol, kDirTag.data(), kDirTag.size());
         }
     } else if (!e.datecode.empty()) {
-        char* d = s.data() + 19;
+
+        const auto digit = [&](std::size_t i) {
+            return e.datecode.size() > i ? e.datecode[i] : ' ';
+        };
+        char* d = s.data() + kDatecodeCol;
         *d++ = ' ';
         *d++ = e.datecode[0];
-        *d++ = e.datecode.size() > 1 ? e.datecode[1] : ' ';
+        *d++ = digit(1);
         *d++ = '.';
-        *d++ = e.datecode.size() > 2 ? e.datecode[2] : ' ';
-        *d++ = e.datecode.size() > 3 ? e.datecode[3] : ' ';
+        *d++ = digit(2);
+        *d++ = digit(3);
         *d++ = '.';
-        *d++ = e.datecode.size() > 4 ? e.datecode[4] : ' ';
-        *d = e.datecode.size() > 5 ? e.datecode[5] : ' ';
-        if (e.altname.size() >= 19) {
-            s[19] = kMoreMarker;
-            s[28] = ' ';
+        *d++ = digit(4);
+        *d = digit(5);
+        if (e.altname.size() >= kDatecodeMarkAt) {
+            s[kDatecodeMarkAt] = kMoreMarker;
+            s[kNameTrimAt] = ' ';
         }
     }
     return s;
@@ -91,10 +120,12 @@ std::string hd_entry_label(const BrowserEntry& e, bool cores) {
 namespace {
 
 std::string_view utf8_prefix(std::string_view s, std::size_t cap) noexcept {
+    constexpr unsigned kUtf8ContinuationMask = 0xC0u;
+    constexpr unsigned kUtf8Continuation = 0x80u;
     if (s.size() <= cap)
         return s;
     std::size_t n = cap;
-    while (n > 0 && (static_cast<unsigned char>(s[n]) & 0xC0u) == 0x80u)
+    while (n > 0 && (static_cast<unsigned char>(s[n]) & kUtf8ContinuationMask) == kUtf8Continuation)
         --n;
     return s.substr(0, n);
 }
@@ -118,8 +149,9 @@ std::string hd_date_value(const std::string& datecode) {
     const auto at = [&](std::size_t i) {
         return i < datecode.size() ? datecode[i] : ' ';
     };
+    constexpr std::size_t kDateValueWidth = 8;
     std::string s;
-    s.reserve(8);
+    s.reserve(kDateValueWidth);
     s.push_back(at(0));
     s.push_back(at(1));
     s.push_back('.');
@@ -135,10 +167,10 @@ std::string hd_date_value(const std::string& datecode) {
 
 }
 
-char browser_ascii_key(std::uint32_t code) noexcept {
-    if ((code & KeyDecoder::kUpstroke) != 0)
+char browser_ascii_key(proto::KeyCode code) noexcept {
+    if ((code.v & KeyDecoder::kUpstroke) != 0)
         return 0;
-    const std::uint32_t k = code & 0xFFFFu;
+    const std::uint32_t k = scancode(code).v;
     if (k >= KEY_1 && k <= KEY_9)
         return static_cast<char>('1' + (k - KEY_1));
     if (k == KEY_0)
@@ -166,101 +198,81 @@ void BrowserPage::on_enter(PageContext& ctx) {
         (void)open_recents_list();
 }
 
-void BrowserPage::render(OsdRenderer& out) const {
+bool BrowserPage::walk(PageWalk& out) const {
     TASTY_SEAT_BODY(BrowserPage);
-    const bool cores = session_.request().scan.cores_only;
-    if (session_.recents_active()) {
-        out.set_title(cores ? "Recent Cores" : "Recent Files");
-
-        const auto& rows = session_.entries();
-        const std::uint32_t height = height_.v;
-        const std::uint32_t first = session_.view().viewport().first.v;
-        const std::uint32_t selected = session_.view().viewport().selected.v;
-        for (std::uint32_t i = 0; i < height; ++i) {
-            std::string s(32, ' ');
-            std::uint8_t leftchar = 0;
-            bool stippled = false;
-            const std::uint32_t k = first + i;
-            if (k < rows.size()) {
-                s = display_name(rows[k], false);
-                if (i == 0 && k != 0)
-                    leftchar = 17;
-                if (i == height - 1 && k + 1 < rows.size())
-                    leftchar = 16;
-                stippled = rows[k].stippled;
-            }
-            out.text(
-                proto::OsdRow{static_cast<std::uint8_t>(i)},
-                std::string_view{s.data(), 32},
-                k < rows.size() && k == selected,
-                stippled,
-                leftchar
-            );
-        }
-        return;
-    }
-    const auto& entries = session_.entries();
-    const std::uint32_t rows = height_.v;
-    const std::uint32_t first = session_.view().viewport().first.v;
-    const std::uint32_t selected = session_.view().viewport().selected.v;
-    out.set_title(cores ? "Cores" : "Select");
-
-    for (std::uint32_t i = 0; i < rows; ++i) {
-        std::string s(32, ' ');
-        const std::uint32_t k = first + i;
-        if (k < entries.size())
-            s = display_name(entries[k], cores);
-        out.text(
-            proto::OsdRow{static_cast<std::uint8_t>(i)},
-            std::string_view{s.data(), 32},
-            k < entries.size() && k == selected,
-            false
-        );
-    }
-}
-
-bool BrowserPage::describe(app::PageDescription& out) const {
-    TASTY_SEAT_BODY(BrowserPage);
-    const std::uint16_t hint = out.first;
-    out = {};
     const bool cores = session_.request().scan.cores_only;
     const bool recents = session_.recents_active();
-    (void)out.title.assign(
+    (void)out.page.title.assign(
         recents ? (cores ? "Recent Cores" : "Recent Files") : (cores ? "Cores" : "Select")
     );
+    out.title_arrow = OsdRenderer::kArrowNone;
+    out.count = 0;
 
-    const std::vector<BrowserEntry>& entries = session_.entries();
-    const std::uint32_t count = static_cast<std::uint32_t>(entries.size());
-    const std::uint32_t selected = session_.view().viewport().selected.v;
-    const app::HdWindow win = app::hd_window(
-        static_cast<std::uint16_t>(selected),
-        static_cast<std::uint16_t>(count),
-        hint
-    );
-    const std::uint32_t first = win.first;
-    const std::uint32_t last = first + win.count;
-    out.first = static_cast<std::uint16_t>(first);
-    out.row_count = static_cast<std::uint8_t>(last - first);
-    out.total = static_cast<std::uint16_t>(count);
-    for (std::uint32_t at = first; at < last; ++at) {
-        app::PageDescription::Row& row = out.rows[at - first];
-        const BrowserEntry& e = entries[at];
-        (void)row.label.assign(
-            utf8_prefix(hd_entry_label(e, cores), decltype(row.label)::kCapacity)
-        );
-        row.kind = e.is_dir ? app::PageDescription::RowKind::Submenu
-                            : app::PageDescription::RowKind::Action;
-        row.icon = icon_of(e);
-        row.enabled = !e.stippled;
-        row.selected = at == selected;
+    const RowSpan<const BrowserEntry> entries{session_.entries()};
+    const RowCount count = entries.size();
+    const RowIndex end = row_after(count);
+    const RowCount height = height_;
+    const RowIndex first = session_.view().viewport().first;
+    const RowIndex selected = session_.view().viewport().selected;
 
-        if (!e.is_dir && !e.datecode.empty())
-            (void)row.value.assign(hd_date_value(e.datecode));
-    }
+    const app::HdWindow win = window_page(out.page, selected, count);
+    const RowRange hd_rows = rows(RowIndex::of(win.first), RowCount::of(win.count));
 
     if (!session_.filter().empty())
-        (void)out.footer.assign(session_.filter());
-    out.letter = session_.selected_group();
+        (void)out.page.footer.assign(session_.filter());
+    out.page.letter = session_.selected_group();
+
+    const auto classic_at = [&](RowCount i) {
+        std::string s = blank_row();
+        std::optional<Glyph> leftchar;
+        bool stippled = false;
+        const RowIndex k = first + i;
+        if (k < end) {
+            s = display_name(entries[k], recents ? false : cores);
+            if (recents) {
+                if (i.empty() && k != RowIndex{})
+                    leftchar = Glyph::ArrowUp;
+                if (i + kOneRow == height && k + kOneRow < end)
+                    leftchar = Glyph::ArrowDown;
+                stippled = entries[k].stippled;
+            }
+        }
+        return classic_row(
+            osd_row_at(i),
+            s,
+            k < end && k == selected,
+            stippled,
+            leftchar,
+            OsdRenderer::kArrowNone
+        );
+    };
+
+    for (const RowIndex at : hd_rows) {
+        const BrowserEntry& e = entries[at];
+        PageRow& r = out.rows[out.count++];
+        r.has_hd = true;
+        (void)r.hd.label.assign(
+            utf8_prefix(hd_entry_label(e, cores), decltype(r.hd.label)::kCapacity)
+        );
+        r.hd.kind = e.is_dir ? app::PageDescription::RowKind::Submenu
+                             : app::PageDescription::RowKind::Action;
+        r.hd.icon = icon_of(e);
+        r.hd.enabled = !e.stippled;
+        r.hd.selected = at == selected;
+
+        if (!e.is_dir && !e.datecode.empty())
+            (void)r.hd.value.assign(hd_date_value(e.datecode));
+        if (at < first || at - first >= height)
+            continue;
+        r.classic = classic_at(at - first);
+    }
+
+    for (const RowIndex line : rows(height)) {
+        const RowIndex k = first + line.before();
+        if (k < end && hd_rows.contains(k))
+            continue;
+        out.rows[out.count++].classic = classic_at(line.before());
+    }
     return true;
 }
 
@@ -279,11 +291,11 @@ Transition BrowserPage::handle(const UiEvent& ev) {
         return handle_recents(ev);
     const infra::OptRef<IBrowserHost> host = session_.request().host;
 
-    if ((ev.buttons & UiEvent::Menu) != 0) {
+    if (ev.buttons.has_any({UiEvent::Menu})) {
         return host ? host->on_cancel() : Transition{Transition::Kind::Pop};
     }
 
-    if ((ev.buttons & UiEvent::Back) != 0) {
+    if (ev.buttons.has_any({UiEvent::Back})) {
         const BrowserPolicy& policy = session_.request().policy;
         if (session_.filter().empty() && (policy.eject_on_backspace || policy.clear_on_backspace)) {
             if (policy.eject_on_backspace && host)
@@ -304,15 +316,15 @@ Transition BrowserPage::handle(const UiEvent& ev) {
         return Transition{};
     }
 
-    if ((ev.buttons & UiEvent::Recent) != 0)
+    if (ev.buttons.has_any({UiEvent::Recent}))
         return open_recents_list();
 
-    if (is_make(ev.raw.v, KEY_HOME)) {
+    if (is_make(ev.raw, KEY_HOME)) {
         session_.note_navigation();
         (void)session_.rescan();
         return Transition{};
     }
-    if (is_make(ev.raw.v, KEY_TAB)) {
+    if (is_make(ev.raw, KEY_TAB)) {
 
         session_.note_navigation();
         (void)session_.rescan();
@@ -323,53 +335,53 @@ Transition BrowserPage::handle(const UiEvent& ev) {
             && session_.entries().size() > 1
             && session_.entries()[1].is_dir
             && session_.entries()[1].name == "..") {
-            session_.view().select(RowIndex{1});
+            session_.view().select(RowIndex{} + kOneRow);
             return select_current();
         }
         if (e != nullptr && e->is_dir && e->name == "..")
             return select_current();
         return Transition{};
     }
-    if (is_make(ev.raw.v, KEY_END)) {
+    if (is_make(ev.raw, KEY_END)) {
         session_.note_navigation();
         session_.view().end();
         return Transition{};
     }
 
-    if ((ev.buttons & UiEvent::Left) != 0 || is_make(ev.raw.v, KEY_PAGEUP)) {
+    if (ev.buttons.has_any({UiEvent::Left}) || is_make(ev.raw, KEY_PAGEUP)) {
         session_.note_navigation();
         session_.view().prev_page();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Right) != 0 || is_make(ev.raw.v, KEY_PAGEDOWN)) {
+    if (ev.buttons.has_any({UiEvent::Right}) || is_make(ev.raw, KEY_PAGEDOWN)) {
         session_.note_navigation();
         session_.view().next_page();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Down) != 0) {
+    if (ev.buttons.has_any({UiEvent::Down})) {
         session_.note_navigation();
         session_.view().next();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Up) != 0) {
+    if (ev.buttons.has_any({UiEvent::Up})) {
         session_.note_navigation();
         session_.view().prev();
         return Transition{};
     }
 
-    if ((ev.buttons & UiEvent::Plus) != 0) {
+    if (ev.buttons.has_any({UiEvent::Plus})) {
         session_.next_group();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Minus) != 0) {
+    if (ev.buttons.has_any({UiEvent::Minus})) {
         session_.prev_group();
         return Transition{};
     }
 
-    if ((ev.buttons & UiEvent::Select) != 0)
+    if (ev.buttons.has_any({UiEvent::Select}))
         return select_current();
 
-    if (const char c = browser_ascii_key(ev.raw.v); c != 0) {
+    if (const char c = browser_ascii_key(ev.raw); c != 0) {
         session_.type_ahead(c, now_ns());
     }
     return Transition{};
@@ -401,42 +413,42 @@ Transition BrowserPage::open_recents_list() {
 Transition BrowserPage::handle_recents(const UiEvent& ev) {
     const infra::OptRef<IBrowserHost> host = session_.request().host;
 
-    if ((ev.buttons & (UiEvent::Menu | UiEvent::Recent)) != 0) {
+    if (ev.buttons.has_any({UiEvent::Menu | UiEvent::Recent})) {
         if (session_.request().recents_first) {
             return host ? host->on_cancel() : Transition{Transition::Kind::Pop};
         }
         (void)session_.exit_recents();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Back) != 0) {
+    if (ev.buttons.has_any({UiEvent::Back})) {
         ++refusals_;
         return Transition{};
     }
-    if (is_make(ev.raw.v, KEY_HOME)) {
-        session_.view().select(RowIndex{0});
+    if (is_make(ev.raw, KEY_HOME)) {
+        session_.view().select(RowIndex{});
         return Transition{};
     }
-    if (is_make(ev.raw.v, KEY_END)) {
+    if (is_make(ev.raw, KEY_END)) {
         session_.view().end();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Left) != 0 || is_make(ev.raw.v, KEY_PAGEUP)) {
+    if (ev.buttons.has_any({UiEvent::Left}) || is_make(ev.raw, KEY_PAGEUP)) {
         session_.view().prev_page();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Right) != 0 || is_make(ev.raw.v, KEY_PAGEDOWN)) {
+    if (ev.buttons.has_any({UiEvent::Right}) || is_make(ev.raw, KEY_PAGEDOWN)) {
         session_.view().next_page();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Down) != 0) {
+    if (ev.buttons.has_any({UiEvent::Down})) {
         session_.view().next();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Up) != 0) {
+    if (ev.buttons.has_any({UiEvent::Up})) {
         session_.view().prev();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Select) != 0) {
+    if (ev.buttons.has_any({UiEvent::Select})) {
         const BrowserEntry* e = session_.view().selected();
 
         if (e == nullptr || e->stippled) {

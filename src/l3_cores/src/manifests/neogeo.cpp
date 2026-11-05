@@ -11,7 +11,9 @@
 
 namespace mister::cores::manifests {
 
-std::unique_ptr<IRomsetAliasSource> make_neogeo_alias_source() {
+using namespace std::chrono_literals;
+
+std::unique_ptr<NeoGeoAliasSource> make_neogeo_alias_source() {
     return std::make_unique<NeoGeoAliasSource>();
 }
 
@@ -106,16 +108,17 @@ static_assert(
     "sharing MegaCD's machine must not share its identity"
 );
 static_assert(
-    kNeoGeoServices[0].cause == reactor::Cause::Ring && kNeoGeoServices[0].period_ms == 0,
+    kNeoGeoServices[0].cause == reactor::Cause::Ring
+        && kNeoGeoServices[0].period == reactor::kEveryRound,
     "neogeocd.cpp:54: the UIO_CD_GET edge is read on every poll, ungated"
 );
 static_assert(
-    kNeoGeoServices[1].cause == reactor::Cause::Tick && kNeoGeoServices[1].period_ms == 1,
+    kNeoGeoServices[1].cause == reactor::Cause::Tick && kNeoGeoServices[1].period == 1ms,
     "the gated pass's caller, below the 2 ms fastest arm (neogeocd.cpp:105-108)"
 );
 static_assert(
-    kNeoGeoCdTicks.caller_us == kNeoGeoServices[1].period_ms * 1000u,
-    "caller_us must BE the service row's own period_ms"
+    kNeoGeoCdTicks.caller == kNeoGeoServices[1].period,
+    "caller must BE the service row's own period"
 );
 
 static_assert(

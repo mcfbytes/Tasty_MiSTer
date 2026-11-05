@@ -19,7 +19,7 @@ HdOptionsView::HdOptionsView(IOptionsSurface& surface, const Spec& spec) noexcep
 HdOptionsView::~HdOptionsView() = default;
 
 std::unique_ptr<HdListPage> HdOptionsView::make_list_() const {
-    const ItemId key{surface_.walk().page()};
+    const ItemId key{surface_.model().page().v};
     return std::make_unique<HdListPage>(
         std::make_unique<HdOptionsPlan>(surface_, spec_),
         key,
@@ -39,20 +39,15 @@ BuildEnv HdOptionsView::walk_env(const BuildEnv& env) const {
     return out;
 }
 
-void HdOptionsView::on_walk() {
+void HdOptionsView::on_model_rebuilt() {
     TASTY_SEAT_BODY(HdOptionsView);
     retired_refusals_ += list_->refusals();
     list_ = make_list_();
 }
 
-void HdOptionsView::render(OsdRenderer& out) const {
+bool HdOptionsView::walk(PageWalk& out) const {
     TASTY_SEAT_BODY(HdOptionsView);
-    list_->render(out);
-}
-
-bool HdOptionsView::describe(app::PageDescription& out) const {
-    TASTY_SEAT_BODY(HdOptionsView);
-    return list_->describe(out);
+    return list_->walk(out);
 }
 
 Transition HdOptionsView::handle(const UiEvent& ev) {
@@ -75,9 +70,9 @@ RowIndex HdOptionsView::selection() const {
     return list_->selection();
 }
 
-std::uint32_t HdOptionsView::first_row() const noexcept {
+RowIndex HdOptionsView::first_row() const noexcept {
     TASTY_SEAT_BODY(HdOptionsView);
-    return 0;
+    return RowIndex{};
 }
 
 bool HdOptionsView::empty() const {

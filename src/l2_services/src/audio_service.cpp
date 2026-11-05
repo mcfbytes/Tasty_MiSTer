@@ -278,15 +278,6 @@ Ex<void> AudioService::flush() {
     return {};
 }
 
-[[nodiscard]] Ex<std::uint16_t> emit_afilter_probe(hal::ISpiTransport& link) {
-    hal::Selected cs(link, hal::ChipSelect::Io);
-
-    auto op = link.transfer(proto::word(proto::UioOp::SetAfilter));
-    if (!op)
-        return std::unexpected(op.error());
-    return op->v;
-}
-
 [[nodiscard]] Ex<void> emit_afilter_volume(proto::ILinkFrame& frame, std::uint8_t vol) {
 
     const std::uint16_t words[1] = {vol};

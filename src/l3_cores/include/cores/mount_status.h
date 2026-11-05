@@ -6,12 +6,13 @@
 #include "cores/staging_core.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
 struct MountStatus {
     TASTY_SEAT_EXEMPT(const_shared);
-    std::uint32_t generation = 0;
+    proto::ActKey generation{};
     MountState state = MountState::Pending;
     bool data_first_track = false;
     std::uint64_t disc_size_bytes = 0;

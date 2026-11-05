@@ -57,19 +57,19 @@ public:
 
     [[nodiscard]] std::uint32_t facts_refusals() const noexcept { return facts_refusals_; }
 
-    [[nodiscard]] bool disk_bound() const noexcept { return disk_addr_ != 0; }
+    [[nodiscard]] bool disk_bound() const noexcept { return disk_addr_ != hal::FabricAddr{}; }
 
     [[nodiscard]] std::string_view disk_path() const noexcept { return disk_path_.view(); }
 
-    [[nodiscard]] const IWindowJobKind* on_osd_open(std::span<std::byte> order) noexcept override;
-    [[nodiscard]] const IWindowJobKind* on_reset_edge(
+    [[nodiscard]] WindowJobBuild on_osd_open(WindowJobOrder& order) noexcept override;
+    [[nodiscard]] WindowJobBuild on_reset_edge(
         const proto::ResetEdge& edge,
-        std::span<std::byte> order
+        WindowJobOrder& order
     ) noexcept override;
     [[nodiscard]] bool owes_flush(proto::IoIndex index) const noexcept override;
-    [[nodiscard]] const IWindowJobKind* take_flush(
+    [[nodiscard]] WindowJobBuild take_flush(
         proto::IoIndex index,
-        std::span<std::byte> order
+        WindowJobOrder& order
     ) noexcept override;
 
 private:
@@ -78,30 +78,38 @@ private:
 
     [[nodiscard]] ICheatSink* on_cheat_sink() noexcept override { return &cheats_; }
 
-    [[nodiscard]] ICheatEngine* on_cheat_engine() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<ICheatEngine> on_cheat_engine() noexcept override {
+        return infra::OptRef<ICheatEngine>{*this};
+    }
 
+    void on_status_changed() noexcept override;
     void on_set_pending_file_ext(std::string_view ext) noexcept override;
     void on_set_pending_file_path(std::string_view path) noexcept override;
 
-    [[nodiscard]] IStreamLoad* on_stream_load() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
+        return infra::OptRef<IStreamLoad>{*this};
+    }
 
     [[nodiscard]] Ex<proto::SessionParams> stream_opening(IoIndex index) override;
     void stream_closed(const StreamLoadEnd& end) noexcept override;
 
     [[nodiscard]] Ex<void> on_apply_load_facts(std::span<const std::uint8_t> facts) override;
 
-    [[nodiscard]] ISaveChannel* on_save_channel() noexcept override { return &saves_; }
+    [[nodiscard]] infra::OptRef<ISaveChannel> on_save_channel() noexcept override {
+        return infra::OptRef<ISaveChannel>{saves_};
+    }
 
-    [[nodiscard]] IWindowSave* on_window_save() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IWindowSave> on_window_save() noexcept override {
+        return infra::OptRef<IWindowSave>{*this};
+    }
 
-    [[nodiscard]] const IWindowJobKind* order_ram_save_(std::span<std::byte> order) noexcept;
+    [[nodiscard]] WindowJobBuild order_ram_save_(WindowJobOrder& order) noexcept;
 
-    [[nodiscard]] std::uint32_t save_offset(std::size_t idx) const noexcept override;
-    [[nodiscard]] std::uint8_t layout_key(std::size_t rows) const noexcept override;
+    [[nodiscard]] n64::SaveLayoutKey layout_key(std::size_t rows) const noexcept override;
 
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return bytes_sent_; }
 
-    [[nodiscard]] std::uint32_t on_last_tx_crc() const noexcept override { return crc32_; }
+    [[nodiscard]] svc::Crc32 on_last_tx_crc() const noexcept override { return crc32_; }
 
     void plan_saves_();
 
@@ -116,13 +124,13 @@ private:
     FixedStr<8, StrFit::Clip> ext_{};
 
     FixedStr<n64::SaveChannel::kPathChars + 1, StrFit::Clip> rom_path_{};
-    std::uint32_t crc32_ = 0;
+    svc::Crc32 crc32_{};
     std::uint64_t bytes_sent_ = 0;
     std::uint32_t transfers_ = 0;
     std::uint16_t last_index_ = 0;
     std::uint32_t save_plan_errors_ = 0;
     std::uint32_t facts_refusals_ = 0;
-    std::uint32_t disk_addr_ = 0;
+    hal::FabricAddr disk_addr_{};
     FixedStr<n64::SaveChannel::kPathChars + 1, StrFit::Clip> disk_path_{};
     bool loaded_ = false;
     n64::CheatEngine cheats_;

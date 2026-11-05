@@ -109,11 +109,11 @@ private:
     ) noexcept;
     void force_release_(std::uint8_t ports) noexcept;
     void count_write_(const Ex<bool>& out, std::uint32_t held_before) noexcept;
-    void note_late_(std::uint32_t first) noexcept;
+    void note_late_(MovieFrame first) noexcept;
     void note_gap_() noexcept;
     void note_depth_() noexcept;
     void disarm_(ReplayEnd why, bool release) noexcept;
-    [[nodiscard]] bool pre_epoch_(std::uint32_t frame) const noexcept;
+    [[nodiscard]] bool pre_epoch_(MovieFrame frame) const noexcept;
     [[nodiscard]] bool live_() const noexcept;
     [[nodiscard]] std::int64_t now_ns_() const noexcept;
 
@@ -128,7 +128,7 @@ private:
     bool dirty_ = false;
 
     ReplayLevel level_ = ReplayLevel::Idle;
-    std::uint16_t gen_ = 0;
+    ControlGeneration gen_{};
     std::uint8_t ports_ = 0;
 
     std::uint8_t release_ports_ = 0;
@@ -166,12 +166,12 @@ private:
     std::optional<std::uint32_t> queued_{};
     std::int64_t tick_ns_ = 0;
     std::int64_t gap_ns_ = 0;
-    std::int64_t mf_ = -1;
-    std::int64_t covered_ = -1;
-    std::int64_t underrun_at_ = -1;
+    WideMovieFrame mf_ = kNoWideMovieFrame;
+    WideMovieFrame covered_ = kNoWideMovieFrame;
+    WideMovieFrame underrun_at_ = kNoWideMovieFrame;
     std::optional<ReplayMsg::Input> held_{};
     bool end_seen_ = false;
-    std::uint32_t end_frame_ = 0;
+    MovieFrame end_frame_{};
 };
 
 }

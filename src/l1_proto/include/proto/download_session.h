@@ -10,6 +10,7 @@
 #include "infra/seat.h"
 #include "hal/spi_transport.h"
 #include "proto/fio_bracket.h"
+#include "proto/link_frame.h"
 #include "proto/upload_session.h"
 #include "proto/session_params.h"
 #include "proto/types.h"
@@ -58,10 +59,10 @@ public:
 
     [[nodiscard]] bool posted() const noexcept { return posted_; }
 
-    [[nodiscard]] static Ex<void> set_index(hal::ISpiTransport& link, IoIndex index);
-    [[nodiscard]] static Ex<void> set_index(hal::ISpiTransport& link, WideIoIndex index);
+    [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, IoIndex index);
+    [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, WideIoIndex index);
 
-    [[nodiscard]] static Ex<void> send_file_info(hal::ISpiTransport& link, std::string_view ext);
+    [[nodiscard]] static Ex<void> send_file_info(ILinkFrame& frame, std::string_view ext);
 
     [[nodiscard]] static Ex<void> send_cheats(
         hal::ISpiTransport& link,

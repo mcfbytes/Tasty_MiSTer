@@ -23,7 +23,7 @@ class SelectProbe final : public IOptionHost {
 public:
     void refuse() override { refused = true; }
 
-    void write_status(proto::BitField, std::uint32_t) override {}
+    void write_status(proto::BitField, proto::FieldValue) override {}
 
     void toggle(proto::BitField, bool) override {}
 
@@ -54,14 +54,18 @@ OptionItem::Press HdOptionRow::press_(bool select, bool minus) const {
     return OptionItem::Press{
         .select = select,
         .minus = minus,
-        .at_root = host_.walk().page() == 0,
+        .at_root = host_.model().page() == proto::kRootSubmenu,
         .value = host_.field(item_.bits)
     };
 }
 
 Row HdOptionRow::describe() const {
     TASTY_SEAT_BODY(HdOptionRow);
-    Row r = item_.describe(look_());
+
+    const std::optional<Row> own = item_.describe(look_());
+    if (!own)
+        return Row{};
+    Row r = *own;
     (void)r.label.assign(hd_label(r.label.view()));
     return r;
 }
@@ -78,7 +82,8 @@ Transition HdOptionRow::step(int delta) {
 
 std::optional<RowKey> HdSaveRow::key() const {
     TASTY_SEAT_BODY(HdSaveRow);
-    return RowKey{0x1'0000u};
+    constexpr std::uint32_t kSaveKey = 0x1'0000u;
+    return RowKey{kSaveKey};
 }
 
 Row HdSaveRow::describe() const {
@@ -99,11 +104,11 @@ Transition HdSaveRow::select() {
 
 HdOptionsPlan::HdOptionsPlan(IOptionsSurface& surface, const HdOptionsView::Spec& spec)
     : surface_(surface),
-      placer_(surface.walk(), spec.slots, spec.verbs, spec.facts),
+      placer_(surface.model(), spec.slots, spec.verbs, spec.facts),
       save_(surface, spec.baseline),
       about_(HdPushRow::Spec{.label = "About this core", .page = PageId::HdCoreAbout}) {
     TASTY_SEAT_BODY(HdOptionsPlan);
-    const OptionsModel& walk = surface_.walk();
+    const OptionsModel& walk = surface_.model();
     bool gap = false;
     bool about = false;
     for (const std::unique_ptr<OptionItem>& owned : walk.items()) {
@@ -125,7 +130,7 @@ HdOptionsPlan::HdOptionsPlan(IOptionsSurface& surface, const HdOptionsView::Spec
         rows_.push_back(std::make_unique<HdOptionRow>(it, surface_));
         refs_.emplace_back(*rows_.back());
     }
-    if (walk.page() != 0)
+    if (walk.page() != proto::kRootSubmenu)
         return;
     if (!refs_.empty())
         refs_.emplace_back(separator_());
@@ -133,7 +138,7 @@ HdOptionsPlan::HdOptionsPlan(IOptionsSurface& surface, const HdOptionsView::Spec
     pinned_ = 1;
     if (about) {
         refs_.emplace_back(about_);
-        pinned_ = 2;
+        ++pinned_;
     }
 }
 
@@ -165,9 +170,9 @@ std::span<const std::reference_wrapper<IHdRow>> HdOptionsPlan::rows() const {
     return refs_;
 }
 
-std::uint8_t HdOptionsPlan::pinned() const noexcept {
+RowCount HdOptionsPlan::pinned() const noexcept {
     TASTY_SEAT_BODY(HdOptionsPlan);
-    return pinned_;
+    return RowCount{pinned_};
 }
 
 }

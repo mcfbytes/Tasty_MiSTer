@@ -229,7 +229,7 @@ Ex<bool> PsxLadder::on_step() {
                 sub_ = host_.order_savestates(image_, ss_gen_) ? 1 : 2;
             }
             if (sub_ == 1) {
-                if (static_cast<std::int32_t>(host_.savestates_answered() - ss_gen_) < 0) {
+                if (!host_.savestates_answered().at_or_past(ss_gen_)) {
                     if (now_ns() < ss_due_ns_)
                         return false;
                     report_.savestate_hold_expired = true;

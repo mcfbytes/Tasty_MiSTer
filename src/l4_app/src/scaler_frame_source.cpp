@@ -25,7 +25,7 @@ std::uint32_t ScalerFrameSource::refusals() const noexcept {
     return n;
 }
 
-std::unexpected<Error> ScalerFrameSource::refuse(Refusal why, std::uint16_t site) noexcept {
+std::unexpected<Error> ScalerFrameSource::refuse(Refusal why, infra::ErrorSite site) noexcept {
     ++refused_[static_cast<std::size_t>(why)];
     return std::unexpected(Error{Errc::bad_format, site, static_cast<std::uint32_t>(why)});
 }
@@ -36,7 +36,9 @@ Ex<IFrameSource::Frame> ScalerFrameSource::capture(bool scaled) {
     std::byte raw[ScalerHeader::kBytes]{};
     if (auto r = window_.read_at(0, std::span<std::byte>(raw)); !r)
         return refuse(Refusal::Aperture, ERR_SITE());
-    const ScalerHeader head = ScalerHeader::decode(std::span<const std::byte, 16>(raw));
+    const ScalerHeader head = ScalerHeader::decode(
+        std::span<const std::byte, ScalerHeader::kBytes>(raw)
+    );
     if (!head.supported())
         return refuse(Refusal::Unsupported, ERR_SITE());
 
@@ -98,7 +100,9 @@ Ex<IFrameSource::Frame> ScalerFrameSource::capture(bool scaled) {
 
     std::byte again[ScalerHeader::kBytes]{};
     if (auto r = window_.read_at(0, std::span<std::byte>(again)); r) {
-        const ScalerHeader after = ScalerHeader::decode(std::span<const std::byte, 16>(again));
+        const ScalerHeader after = ScalerHeader::decode(
+            std::span<const std::byte, ScalerHeader::kBytes>(again)
+        );
         if (after.frame_counter() != head.frame_counter())
             ++torn_;
     }

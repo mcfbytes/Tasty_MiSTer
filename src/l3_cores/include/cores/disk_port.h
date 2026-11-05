@@ -6,9 +6,10 @@
 
 #include "cores/staging_core.h"
 #include "proto/disk_poll_decl.h"
+#include "proto/types.h"
 
-namespace mister::hal {
-class ISpiTransport;
+namespace mister::proto {
+class Link;
 }
 
 namespace mister::cores {
@@ -17,15 +18,15 @@ class IDiskPort {
 public:
     virtual ~IDiskPort() = default;
 
-    virtual void service_rt(hal::ISpiTransport& link, const proto::DiskPollDecl& poll) noexcept = 0;
+    virtual void service_rt(proto::Link& link, const proto::DiskPollDecl& poll) noexcept = 0;
 
-    virtual void order_bind(std::uint8_t unit, std::string_view path) noexcept = 0;
+    virtual void order_bind(proto::DiskUnit unit, std::string_view path) noexcept = 0;
 
-    [[nodiscard]] virtual MountState bind_answer(std::uint8_t unit) noexcept = 0;
+    [[nodiscard]] virtual MountState bind_answer(proto::DiskUnit unit) noexcept = 0;
 
     virtual void abandon_command() noexcept = 0;
 
-    virtual void abandon_command_on(std::uint8_t unit) noexcept = 0;
+    virtual void abandon_command_on(proto::DiskUnit unit) noexcept = 0;
 
 protected:
     IDiskPort() = default;

@@ -58,7 +58,7 @@ Ex<AssetWait> PceCdLadder::load_pce_bios(const BootAsset& row) {
         size = kPceBiosCap;
 
         for (const auto& srow : profile_.signatures) {
-            if (srow.region == 0 || srow.magic.empty())
+            if (srow.region.v == 0 || srow.magic.empty())
                 continue;
             std::byte probe[64];
             const std::size_t n = srow.magic.size() > sizeof(probe) ? sizeof(probe)
@@ -67,7 +67,7 @@ Ex<AssetWait> PceCdLadder::load_pce_bios(const BootAsset& row) {
             if (!rd)
                 break;
             if (*rd == n && std::memcmp(probe, srow.magic.data(), n) == 0) {
-                swap = srow.region;
+                swap = srow.region.v;
             }
             break;
         }

@@ -25,7 +25,7 @@ inline constexpr auto kAtariStServices = std::to_array<LinkDecoderDecl>({
         "st.acsi_poll",
         reactor::Cause::Tick,
         &kSectorKick<kAtariSt>,
-        1,
+        std::chrono::milliseconds{1},
         RoundClaim::Always,
     },
 });
@@ -94,8 +94,8 @@ inline constexpr auto kStYesNo = std::to_array<std::string_view>({"No", "Yes"});
 
 inline constexpr WordId kStSystemCtrl{0};
 inline constexpr WordId kStExtCtrl{1};
-inline constexpr std::uint8_t kStMainPage = 0;
-inline constexpr std::uint8_t kStConfigPage = 1;
+inline constexpr proto::SubmenuNo kStMainPage{0};
+inline constexpr proto::SubmenuNo kStConfigPage{1};
 
 [[nodiscard]] constexpr std::uint8_t st_id(StOption o) noexcept {
     return static_cast<std::uint8_t>(o);
@@ -273,7 +273,7 @@ inline constexpr CoreProfile kAtariSt{
 
     .suppress_reset_status_write = true,
     .suppresses_mgl = true,
-    .default_uart_baud = 19200,
+    .default_uart_baud = BaudRate{19200},
     .disk_formats = kAtariStDiskFormats,
     .option_rows = kStOptionRows,
     .option_pages = kStOptionPages,

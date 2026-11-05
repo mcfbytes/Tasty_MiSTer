@@ -139,8 +139,8 @@ void StMediaLadder::restore_() {
     std::array<std::byte, st_cfg::kBytes> img{};
     c.overlay(std::as_bytes(std::span<const std::uint8_t>(blob)), paths_[kCart], img);
     paths_[kTos].assign(c.tos_img.view());
-    for (std::size_t t = 0; t < StConfig::kAcsiTargets; ++t)
-        paths_[kAcsi0 + t].assign(c.acsi_img[t].view());
+    for (std::uint8_t t = 0; t < StConfig::kAcsiTargets; ++t)
+        paths_[kAcsi0 + t].assign(c.acsi_img[AcsiTarget{t}].view());
     if (const auto cart = StConfig::cart_of(img); !cart.empty())
         paths_[kCart].assign(cart);
 }
@@ -247,7 +247,7 @@ Ex<bool> StMediaLadder::intern_(std::uint8_t index, std::vector<std::uint8_t>&& 
 }
 
 Ex<bool> StMediaLadder::order_file_(std::uint8_t index, Rung answer) {
-    const std::uint32_t act = next_gen();
+    const proto::ActKey act = next_gen();
     if (!host_.order(
             proto::LinkOp::FileTx{
                 .wire_index = index,
@@ -268,11 +268,11 @@ Ex<bool> StMediaLadder::await_file_(Rung next) {
     const auto served = host_.file_tx_answer(act_);
     if (!served) {
         if (now_ns() >= due_ns_)
-            return std::unexpected(Error{Errc::timeout, ERR_SITE(), act_});
+            return std::unexpected(Error{Errc::timeout, ERR_SITE(), act_.v});
         return false;
     }
     if (!*served)
-        return std::unexpected(Error{Errc::io, ERR_SITE(), act_});
+        return std::unexpected(Error{Errc::io, ERR_SITE(), act_.v});
     rung_ = next;
     return false;
 }

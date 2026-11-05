@@ -8,6 +8,7 @@
 #include "cores/switch_table.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -16,8 +17,8 @@ struct DipTable {
 
     struct Row {
         char name[cores::mra::kDipTextChars + 1] = {};
-        std::uint8_t choices = 0;
-        std::uint8_t current = 0;
+        proto::DipChoiceCount choices{};
+        proto::DipChoice current{};
         char ids[cores::mra::kMaxDipIds][cores::mra::kDipTextChars + 1] = {};
     };
 

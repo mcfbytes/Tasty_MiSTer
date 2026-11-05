@@ -12,7 +12,7 @@
 
 namespace mister::ui {
 
-char browser_ascii_key(std::uint32_t code) noexcept;
+char browser_ascii_key(proto::KeyCode code) noexcept;
 
 [[nodiscard]] std::string display_name(const BrowserEntry& e, bool cores);
 
@@ -39,8 +39,8 @@ public:
     }
 
     void on_enter(PageContext& ctx) override;
-    void render(OsdRenderer& out) const override;
-    bool describe(app::PageDescription& out) const override;
+
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
 
     MenuMask mask() const override {
@@ -58,9 +58,11 @@ public:
         session_.view().select(i);
     }
 
-    RowCount osd_height() const override {
+    PageFacts facts() const override {
         TASTY_SEAT_BODY(BrowserPage);
-        return height_;
+        PageFacts f{};
+        f.osd_rows = height_;
+        return f;
     }
 
     bool back_is_idle() const override;
@@ -86,7 +88,7 @@ private:
     BrowserSession session_{};
     const IBrowseSource* src_;
     BrowserSession::Request req_{};
-    RowCount height_{16};
+    RowCount height_{kFullOsdRows};
     infra::OptRef<const os::IClock> clock_;
 
     infra::OptRef<app::RecentsStore> recents_{};

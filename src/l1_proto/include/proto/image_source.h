@@ -21,7 +21,7 @@ public:
 
     virtual void note_detached(SlotIndex) noexcept {}
 
-    virtual std::uint8_t request_tag(SlotIndex) const noexcept { return 0; }
+    virtual ImageTag request_tag(SlotIndex) const noexcept { return {}; }
 
 protected:
     IImageSource() = default;

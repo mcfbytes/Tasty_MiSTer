@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "app/types.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -12,7 +13,7 @@ namespace mister::app {
 enum class RecWriteState : std::uint8_t { Idle, Open, Failed, Closed };
 
 struct RecWriteStatus {
-    std::uint16_t gen = 0;
+    ControlGeneration gen{};
     RecWriteState state = RecWriteState::Idle;
     std::uint8_t pad_ = 0;
     std::int32_t err = 0;

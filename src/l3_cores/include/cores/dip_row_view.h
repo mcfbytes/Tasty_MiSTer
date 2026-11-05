@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
 #include <string_view>
+
+#include "proto/types.h"
 
 namespace mister::cores {
 
 struct DipRowView {
     std::string_view name;
-    std::uint8_t choices = 0;
-    std::uint8_t current = 0;
+    proto::DipChoiceCount choices{};
+    proto::DipChoice current{};
 };
 
 }

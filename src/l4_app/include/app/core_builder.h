@@ -12,6 +12,7 @@
 #include "app/all_leases_home.h"
 #include "app/bay_counts.h"
 #include "app/bay_releases.h"
+#include "app/types.h"
 #include "app/block_poll_route.h"
 #include "app/built_core.h"
 #include "app/core_terms.h"
@@ -33,6 +34,7 @@
 #include "hal/lw_sys_window.h"
 #include "hal/sys_directory.h"
 #include "hal/uio_doorbell_source.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -62,8 +64,8 @@ public:
         std::span<const proto::AxiLwDecl> lw{};
 
         bool fabric = false;
-        std::uint32_t fabric_gen = 0;
-        std::uint16_t mount_slots = 0;
+        FabricGeneration fabric_gen{};
+        proto::BlockSlotMask mount_slots{};
     };
 
     CoreBuilder(CoreBay& bay, const BayReleasesCell& releases, const CoreTerms& terms) noexcept
@@ -139,7 +141,7 @@ public:
         bool manifest = false;
         std::span<const proto::IrqBinding> irqs{};
         std::span<const proto::AxiLwDecl> lw{};
-        std::uint32_t fabric_gen = 0;
+        FabricGeneration fabric_gen{};
     };
 
     [[nodiscard]] std::optional<std::uint32_t> claim_sector(const Claim& c) noexcept;
@@ -218,7 +220,7 @@ public:
     [[nodiscard]] static bool card_admitted(
         const cores::CoreProfile& profile,
         const proto::SectorBlockDecl::Card& card,
-        std::uint8_t block_slot
+        proto::SlotIndex block_slot
     ) noexcept;
 
     [[nodiscard]] std::uint32_t lease_holds() const noexcept { return lease_holds_; }
@@ -258,15 +260,14 @@ public:
     ) noexcept;
 
     [[nodiscard]] static BlockPollRoute block_poll_route(
-        std::uint16_t declared,
-        std::uint16_t lw_slots
+        proto::BlockSlotMask declared,
+        proto::BlockSlotMask lw_slots
     ) noexcept {
-        return lw_slots != 0 && (declared & static_cast<std::uint16_t>(~lw_slots)) == 0
-            ? BlockPollRoute::Retired
-            : BlockPollRoute::Link;
+        return !lw_slots.empty() && declared.minus(lw_slots).empty() ? BlockPollRoute::Retired
+                                                                     : BlockPollRoute::Link;
     }
 
-    [[nodiscard]] static std::uint16_t profile_slot_mask(
+    [[nodiscard]] static proto::BlockSlotMask profile_slot_mask(
         const cores::CoreProfile& profile
     ) noexcept;
 
@@ -348,7 +349,7 @@ public:
 
 private:
     void drop_windows(const ParkReceipt& receipt) noexcept;
-    void free_(std::uint8_t slot) noexcept;
+    void free_(proto::CoreBaySlot slot) noexcept;
     void publish_counts_() noexcept;
 
     [[nodiscard]] hal::IDoorbellSource& doorbell_source_() noexcept;
@@ -363,7 +364,7 @@ private:
         std::span<const proto::IrqBinding> irqs,
         std::span<const proto::AxiLwDecl> lw,
         const cores::CoreProfile& profile,
-        std::uint32_t fabric_gen
+        FabricGeneration fabric_gen
     ) noexcept;
     void grant_cards_(LwSector& into, const cores::CoreProfile& profile) noexcept;
     [[nodiscard]] Ex<hal::PhysRegion> card_region_(
@@ -377,7 +378,7 @@ private:
     void grant_osd_(
         std::span<const proto::AxiLwDecl> lw,
         const cores::CoreProfile& profile,
-        std::uint32_t fabric_gen,
+        FabricGeneration fabric_gen,
         std::uint16_t gen
     ) noexcept;
     [[nodiscard]] bool osd_leased_() const noexcept;
@@ -385,7 +386,7 @@ private:
     void grant_sys_(
         std::span<const proto::IrqBinding> irqs,
         std::span<const proto::AxiLwDecl> lw,
-        std::uint32_t fabric_gen,
+        FabricGeneration fabric_gen,
         std::uint16_t gen
     ) noexcept;
 
@@ -400,7 +401,7 @@ private:
     hal::IDoorbellSource& doorbells_;
     BayReleasesCell::Reader released_{};
     BayReleases levels_{};
-    std::array<CoreBay::Lease, kCoreBaySlots> held_{};
+    infra::IndexedArray<CoreBay::Lease, kCoreBaySlots, proto::CoreBaySlot> held_{};
     std::uint16_t gen_ = 0;
     std::uint32_t builds_ = 0;
     std::uint32_t bay_full_ = 0;

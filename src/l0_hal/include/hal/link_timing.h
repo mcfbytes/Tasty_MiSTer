@@ -29,7 +29,7 @@ public:
 
     [[nodiscard]] static Ex<LinkTimingValues> resolve(
         const LinkTiming& t,
-        std::uint16_t site
+        infra::ErrorSite site
     ) noexcept;
 
     [[nodiscard]] static consteval LinkTimingValues measured(const LinkTiming& t) {

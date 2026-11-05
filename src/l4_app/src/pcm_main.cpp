@@ -5,28 +5,6 @@
 
 namespace mister::app {
 
-namespace {
-
-struct DrainSink {
-    TASTY_SEAT_EXEMPT(component);
-    PcmRingFeeder& feeder;
-    std::uint32_t discarded = 0;
-
-    void on(const PcmCommand::Play&) noexcept { ++discarded; }
-
-    void on(const PcmCommand::Stop&) noexcept { ++discarded; }
-
-    void on(const PcmCommand::Resume&) noexcept { ++discarded; }
-
-    void on(const PcmCommand::AttachRing& a) noexcept { feeder.on(a); }
-
-    void on(const PcmCommand::AttachSource& a) noexcept { feeder.on(a); }
-
-    void misrouted(const PcmCommand& c) noexcept { feeder.misrouted(c); }
-};
-
-}
-
 std::uint32_t PcmMain::drain_() noexcept {
     DrainSink sink{.feeder = feeder_};
     while (const auto c = cmds_.pop())

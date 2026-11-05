@@ -33,18 +33,19 @@ struct HdLayout {
 }
 
 [[nodiscard]] constexpr HdLayout::Rect hd_contain_4x3(HdLayout::Rect r) noexcept {
+    constexpr std::int64_t kPictureAspectW = 4, kPictureAspectH = 3, kCentre = 2;
     if (r.w <= 0 || r.h <= 0)
         return {};
     const std::int64_t rw = r.w;
     const std::int64_t rh = r.h;
-    const bool wide = rw * 3 >= rh * 4;
-    const std::int64_t pw = wide ? rh * 4 / 3 : rw;
-    const std::int64_t ph = wide ? rh : rw * 3 / 4;
+    const bool wide = rw * kPictureAspectH >= rh * kPictureAspectW;
+    const std::int64_t pw = wide ? rh * kPictureAspectW / kPictureAspectH : rw;
+    const std::int64_t ph = wide ? rh : rw * kPictureAspectH / kPictureAspectW;
     if (pw <= 0 || ph <= 0)
         return {};
     return {
-        .x = static_cast<std::int32_t>(r.x + (rw - pw) / 2),
-        .y = static_cast<std::int32_t>(r.y + (rh - ph) / 2),
+        .x = static_cast<std::int32_t>(r.x + (rw - pw) / kCentre),
+        .y = static_cast<std::int32_t>(r.y + (rh - ph) / kCentre),
         .w = static_cast<std::int32_t>(pw),
         .h = static_cast<std::int32_t>(ph)
     };
@@ -65,21 +66,23 @@ struct HdLayout {
     HdGameDisplay display,
     std::uint8_t band_pct = 0
 ) noexcept {
+
+    constexpr std::uint64_t kLayoutPercent = 100, kMinPanelPctOfHeight = 60, kMaxBandPct = 50;
     HdLayout L{};
     if (h == 0 || w == 0)
         return L;
     const auto ih = static_cast<std::int32_t>(h);
     const auto iw = static_cast<std::int32_t>(w);
-    const auto pct = std::min<std::uint64_t>(panel_pct, 100u);
+    const auto pct = std::min<std::uint64_t>(panel_pct, kLayoutPercent);
     const auto panel_w = static_cast<std::int32_t>(std::min<std::uint64_t>(
         w,
         std::max<std::uint64_t>(
-            static_cast<std::uint64_t>(w) * pct / 100u,
-            static_cast<std::uint64_t>(h) * 60u / 100u
+            std::uint64_t{w} * pct / kLayoutPercent,
+            std::uint64_t{h} * kMinPanelPctOfHeight / kLayoutPercent
         )
     ));
     const auto band_h = static_cast<std::int32_t>(
-        static_cast<std::uint64_t>(h) * std::min<std::uint64_t>(band_pct, 50u) / 100u
+        std::uint64_t{h} * std::min<std::uint64_t>(band_pct, kMaxBandPct) / kLayoutPercent
     );
     L.surface = {.x = 0, .y = 0, .w = iw, .h = ih};
     if (band_h > 0)

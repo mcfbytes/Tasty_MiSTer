@@ -16,14 +16,6 @@ namespace {
     );
 }
 
-[[nodiscard]] std::uint16_t pack565_rgb(std::uint32_t rgb) noexcept {
-    return pack565(
-        static_cast<std::uint8_t>(rgb >> 16),
-        static_cast<std::uint8_t>(rgb >> 8),
-        static_cast<std::uint8_t>(rgb)
-    );
-}
-
 [[nodiscard]] HdRect clip_box(HdRect r, std::int32_t w, std::int32_t h) noexcept {
     if (r.w <= 0 || r.h <= 0)
         return {};
@@ -58,7 +50,7 @@ namespace {
 
 void BackdropScaler::open(const HdTheme& theme) noexcept {
     TASTY_SEAT_BODY(BackdropScaler);
-    primary_ = pack565_rgb(theme.primary);
+    primary_ = hd_pack565(theme.primary);
     const float d = theme.backdrop_dim < 0.f ? 0.f : theme.backdrop_dim;
     const auto q = static_cast<std::uint32_t>(d * 256.f + 0.5f);
     q8_ = q > 256u ? static_cast<std::uint16_t>(256) : static_cast<std::uint16_t>(q);

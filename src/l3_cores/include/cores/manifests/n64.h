@@ -48,7 +48,7 @@ inline constexpr auto kN64Services = std::to_array<LinkDecoderDecl>({
         "n64.cheat_tick",
         reactor::Cause::Tick,
         &kCheatEngineTick<kN64>,
-        16,
+        std::chrono::milliseconds{16},
         RoundClaim::Always,
     },
 });

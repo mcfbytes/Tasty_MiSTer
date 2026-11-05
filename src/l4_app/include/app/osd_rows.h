@@ -2,9 +2,9 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
-#include "app/link_osd_rows.h"
 #include "app/osd_row_tally.h"
 #include "hal/spi_transport.h"
 #include "infra/seat.h"
@@ -13,20 +13,19 @@
 
 namespace mister::app {
 
-template <unsigned First>
-class SpiOsdRows final : public ILinkOsdRows {
+template <proto::OsdRow First>
+class SpiOsdRows final {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr unsigned kFirstRow = First;
-    static constexpr unsigned kRows = proto::OsdSurface::kMaxRows - First;
+    static constexpr proto::OsdRow kFirstRow = First;
     static_assert(
-        First == 0 || First == proto::OsdSurface::kPageRows,
+        First == proto::OsdRow{} || First == proto::OsdSurface::kStatusRow,
         "the link's whole range, or the status rows past the page"
     );
 
-    [[nodiscard]] static constexpr bool reaches(unsigned row) noexcept {
-        return row >= First && row < proto::OsdSurface::kMaxRows;
+    [[nodiscard]] static constexpr bool reaches(proto::OsdRow row) noexcept {
+        return row >= First && proto::OsdSurface::kMaxRows.covers(row);
     }
 
     SpiOsdRows(
@@ -41,8 +40,8 @@ public:
     SpiOsdRows(const SpiOsdRows&) = delete;
     SpiOsdRows& operator=(const SpiOsdRows&) = delete;
 
-    bool flush_one() noexcept override;
-    [[nodiscard]] unsigned backlog() const noexcept override;
+    bool flush_one() noexcept;
+    [[nodiscard]] proto::OsdRowCount backlog() const noexcept;
 
 private:
     const proto::OsdSurface* surface_;
@@ -51,15 +50,19 @@ private:
     proto::OsdTransport rows_{};
     proto::OsdSurface::Row scratch_{};
 
-    std::array<std::uint32_t, kRows> seen_{};
+    proto::OsdRowCells<std::uint32_t, proto::OsdSurface::kMaxRows.size()> seen_{};
 };
 
-extern template class SpiOsdRows<0>;
-extern template class SpiOsdRows<proto::OsdSurface::kPageRows>;
+extern template class SpiOsdRows<proto::OsdRow{}>;
+extern template class SpiOsdRows<proto::OsdSurface::kStatusRow>;
 
-static_assert(SpiOsdRows<proto::OsdSurface::kPageRows>::kFirstRow == 16);
 static_assert(
-    !SpiOsdRows<proto::OsdSurface::kPageRows>::reaches(proto::OsdSurface::kPageRows - 1),
+    SpiOsdRows<proto::OsdSurface::kStatusRow>::kFirstRow == proto::OsdSurface::kPageRows.end()
+);
+static_assert(
+    !SpiOsdRows<proto::OsdSurface::kStatusRow>::reaches(
+        proto::OsdSurface::kPageRows.end() - proto::kOneOsdRow
+    ),
     "a bridge core's sink cannot form a page-row word"
 );
 

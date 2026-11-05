@@ -6,10 +6,10 @@
 #include <span>
 #include <string_view>
 
+#include "app/verdict_sinks.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/loan_channel.h"
-#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "svc/io_coworker.h"
@@ -19,8 +19,6 @@ class Vfs;
 }
 
 namespace mister::app {
-
-class IWriteVerdict;
 
 class UiWriteLane final : public svc::IIoCoworker {
     TASTY_SEAT_MEDIATOR(Ui, Io);
@@ -37,7 +35,7 @@ public:
         TASTY_SEAT_MEDIATOR(Any, Any);
         FixedStr<kRelCap, StrFit::Reject> rel{};
         std::uint32_t len = 0;
-        std::uint8_t ok = 0;
+        bool ok = false;
         std::byte data[kBytes]{};
     };
 
@@ -60,10 +58,10 @@ public:
     [[nodiscard]] Ex<void> arm(
         std::string_view rel,
         std::span<const std::byte> bytes,
-        infra::OptRef<IWriteVerdict> verdict = {}
+        VerdictSink sink = VerdictSink::None
     ) noexcept;
 
-    void tick() noexcept;
+    void tick(VerdictSinks sinks) noexcept;
 
     [[nodiscard]] Ex<std::span<const std::byte>> peek(std::string_view rel) const noexcept;
 
@@ -85,7 +83,7 @@ private:
         std::uint32_t seq = 0;
         bool live = false;
         bool held = false;
-        infra::OptRef<IWriteVerdict> verdict{};
+        VerdictSink sink = VerdictSink::None;
         std::byte data[kShadowBytes]{};
     };
 

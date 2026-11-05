@@ -61,9 +61,9 @@ public:
         virtual ~Replay() = default;
         virtual bool take_play(const PlayAsk& ask) noexcept = 0;
         virtual void take_stop() noexcept = 0;
-        [[nodiscard]] virtual std::uint32_t frames() const noexcept = 0;
 
-        [[nodiscard]] virtual std::uint32_t movie_frames() const noexcept { return frames(); }
+        [[nodiscard]] virtual app::FrameCount frames() const noexcept = 0;
+        [[nodiscard]] virtual std::uint32_t movie_frames() const noexcept = 0;
 
         [[nodiscard]] virtual bool refused() const noexcept { return false; }
 
@@ -140,7 +140,7 @@ private:
     void fail_(int rc, const char* why) noexcept;
 
     [[nodiscard]] bool copy_seed_() noexcept;
-    static constexpr std::uint64_t kSeedMaxBytes = 1u << 20;
+    static constexpr proto::FileSize kSeedMax{1u << 20};
     void fail_refusal_() noexcept;
     void go_menu_() noexcept;
     void print_settings_() noexcept;
@@ -170,7 +170,7 @@ private:
     bool direct_video_line_ = false;
     bool resampled_ = false;
 
-    std::uint32_t said_gen_ = 0;
+    std::optional<app::ControlGeneration> said_gen_{};
     std::uint8_t said_steps_ = 0;
     std::uint8_t said_recovered_ = 0;
     unsigned hide_tries_ = 0;

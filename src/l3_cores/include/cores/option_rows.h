@@ -8,6 +8,7 @@
 #include "cores/option_row.h"
 #include "cores/option_row_view.h"
 #include "infra/error.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -17,9 +18,12 @@ public:
 
     [[nodiscard]] virtual std::span<const OptionRow> option_rows() const noexcept = 0;
 
-    [[nodiscard]] virtual OptionRowView option_view(std::size_t row) noexcept = 0;
+    [[nodiscard]] virtual OptionRowView option_view(proto::OptionRowIndex row) noexcept = 0;
 
-    [[nodiscard]] virtual Ex<void> set_option(std::size_t row, std::uint8_t choice) = 0;
+    [[nodiscard]] virtual Ex<void> set_option(
+        proto::OptionRowIndex row,
+        proto::FieldValue choice
+    ) = 0;
 
 protected:
     IOptionRows() = default;

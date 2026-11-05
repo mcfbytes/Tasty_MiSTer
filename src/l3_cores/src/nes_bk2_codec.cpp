@@ -13,7 +13,7 @@
 namespace mister::cores {
 namespace {
 
-Error refuse(IMovieCodec::Refusal r, std::uint16_t site) {
+Error refuse(IMovieCodec::Refusal r, infra::ErrorSite site) {
     return Error{Errc::bad_format, site, static_cast<std::uint32_t>(r)};
 }
 
@@ -111,7 +111,7 @@ Ex<std::uint8_t> NesBk2Codec::column_of(std::string_view name) noexcept {
             continue;
         if (port > 1)
             return std::unexpected(refuse(Refusal::Multitap, ERR_SITE()));
-        return static_cast<std::uint8_t>(kColPad | port << 4 | p.bit);
+        return static_cast<std::uint8_t>(kColPad | port << 4 | p.bit.v);
     }
     return std::unexpected(refuse(Refusal::PortType, ERR_SITE()));
 }
@@ -280,15 +280,16 @@ Ex<IMovieCodec::Frame> NesBk2Codec::frame(std::string_view line, const Facts& f)
 
 std::optional<IMovieCodec::DigestSpan> NesBk2Codec::rom_digest_span(
     std::span<const std::uint8_t> head,
-    std::uint64_t size
+    proto::FileSize size
 ) const noexcept {
-    if (is_ines(head) && size <= kRomHead)
+    const std::uint64_t bytes = size.v;
+    if (is_ines(head) && bytes <= kRomHead)
         return std::nullopt;
 
-    const std::uint64_t skip = size % 1024 == 128 || size % 1024 == 512 ? size % 1024 : 0;
-    if (size <= skip)
+    const std::uint64_t skip = bytes % 1024 == 128 || bytes % 1024 == 512 ? bytes % 1024 : 0;
+    if (bytes <= skip)
         return std::nullopt;
-    return DigestSpan{.offset = skip, .length = size - skip};
+    return DigestSpan{.offset = skip, .length = bytes - skip};
 }
 
 Ex<IMovieCodec::DigestSource> NesBk2Codec::digest_source(

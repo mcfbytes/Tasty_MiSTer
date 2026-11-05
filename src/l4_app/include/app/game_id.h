@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <string_view>
 
+#include "svc/types.h"
 #include "infra/fixed_str.h"
 
 namespace mister::app {
@@ -18,7 +19,7 @@ struct GameId {
 
     Name file{};
     Name serial{};
-    std::uint32_t crc = 0;
+    svc::Crc32 crc{};
     bool enabled = false;
 
     [[nodiscard]] bool writes() const noexcept {
@@ -53,8 +54,8 @@ struct GameId {
         const auto room = [&]() noexcept {
             return sizeof buf - n;
         };
-        if (crc != 0) {
-            const int w = std::snprintf(buf + n, room(), "CRC32: %08X\n", crc);
+        if (crc.v != 0) {
+            const int w = std::snprintf(buf + n, room(), "CRC32: %08X\n", crc.v);
             if (w > 0)
                 n += static_cast<std::size_t>(w) < room() ? static_cast<std::size_t>(w)
                                                           : room() - 1;

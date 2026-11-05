@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "diag_main.h"
 
+#include <chrono>
+
 namespace mister::fw {
 
 void DiagMain::start() noexcept {
@@ -17,14 +19,17 @@ void DiagMain::serve() noexcept {
             return;
         }
         if (period == 0) {
-            rest_ms_ = 0;
+            rest_ms_ = infra::kNoWait;
             return;
         }
     }
     sampler_.answer();
     const unsigned slept = slice_ * kDiagSliceMs;
     const unsigned left = period > slept ? period - slept : 0u;
-    rest_ms_ = left < kDiagSliceMs ? left : kDiagSliceMs;
+    using Slice = std::chrono::duration<unsigned, std::milli>;
+    rest_ms_ = std::chrono::duration_cast<infra::ParkTimeout>(
+        Slice{left < kDiagSliceMs ? left : kDiagSliceMs}
+    );
     slice_ = slept + kDiagSliceMs >= period ? 0u : slice_ + 1u;
 }
 

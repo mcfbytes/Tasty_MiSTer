@@ -10,58 +10,60 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 
 namespace mister::proto {
 
 namespace {
 
+enum : std::uint8_t { kFillByte = 0xFF };
+
 constexpr std::array<std::uint8_t, kBlockStagingBytes> kZeroPage{};
 constexpr std::array<std::uint8_t, kBlockStagingBytes> kFfPage = [] {
     std::array<std::uint8_t, kBlockStagingBytes> a{};
-    a.fill(0xFF);
+    a.fill(kFillByte);
     return a;
 }();
 
+enum : std::uint32_t { kReadOnlyBit = 0x80 };
+
+enum : std::int64_t { kNsPerUs = 1000, kMaxLateUs = 0xFFFF'FFFF };
+
 [[nodiscard]] Ex<void> write32_byte(ILinkFrame& frame, std::uint32_t v) {
-    for (unsigned shift = 0; shift < 32; shift += 8) {
-        if (auto r = frame.word(static_cast<std::uint16_t>((v >> shift) & 0xFFu)); !r)
+    constexpr unsigned kWordBits = std::numeric_limits<std::uint32_t>::digits;
+    constexpr unsigned kByteBits = std::numeric_limits<std::uint8_t>::digits;
+    for (unsigned shift = 0; shift < kWordBits; shift += kByteBits) {
+        const std::uint32_t byte = (v >> shift) & std::numeric_limits<std::uint8_t>::max();
+        if (auto r = frame.word(static_cast<std::uint16_t>(byte)); !r)
             return r;
     }
     return {};
 }
 
-struct SlotOf {
-    using Result = SlotIndex;
-
-    template <class A>
-    SlotIndex on(const A&, const StorageCompletion::Head& h) const noexcept {
-        return h.slot;
-    }
-
-    SlotIndex misrouted(const StorageCompletion&) const noexcept { return SlotIndex{kBlockSlots}; }
-};
-
 }
 
-BlockSlots::BlockSlots() noexcept : BlockSlots(Wiring{}) {}
+BlockSlots::BlockSlots(hal::ISpiTransport& link) noexcept : BlockSlots(Wiring{.link = link}) {}
 
-BlockSlots::BlockSlots(Wiring w) noexcept : chan_(w.channel), clock_(w.clock), source_(w.source) {}
+BlockSlots::BlockSlots(Wiring w) noexcept
+    : link_(w.link),
+      chan_(w.channel),
+      clock_(w.clock),
+      source_(w.source) {}
 
-Ex<void> BlockSlots::announce(
-    hal::ISpiTransport& link,
-    SlotIndex slot,
-    FileSize size_bytes,
-    bool writable
-) {
-    if (auto r = block_poll_.send_config(link); !r)
+Ex<void> BlockSlots::announce(SlotIndex slot, FileSize size_bytes, bool writable) {
+    hal::ISpiTransport& link = link_;
+    if (auto r = block_poll_.send_config(); !r)
         return r;
 
     SpiFrame frame{link};
-    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetSdInfo)); !r)
+    if (auto r = frame.begin(UioOp::SetSdInfo); !r)
         return r;
-    const auto lo = static_cast<std::uint32_t>(size_bytes.v & 0xFFFFFFFFu);
-    const auto hi = static_cast<std::uint32_t>(size_bytes.v >> 32);
-    if (link.io_version() != 0) {
+    constexpr unsigned kHalfBits = std::numeric_limits<std::uint32_t>::digits;
+    const auto lo = static_cast<std::uint32_t>(
+        size_bytes.v & std::numeric_limits<std::uint32_t>::max()
+    );
+    const auto hi = static_cast<std::uint32_t>(size_bytes.v >> kHalfBits);
+    if (link.io_version() != hal::IoVersion{0}) {
         if (auto r = DiscAnnounce::write32_word(frame, lo); !r)
             return r;
         if (auto r = DiscAnnounce::write32_word(frame, hi); !r)
@@ -79,8 +81,8 @@ Ex<void> BlockSlots::announce(
         ++diag_.unencodable_announce;
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
     }
-    const auto parm = static_cast<std::uint16_t>((1u << slot.v) | (writable ? 0u : 0x80u));
-    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetSdStat)); !r)
+    const auto parm = static_cast<std::uint16_t>((1u << slot.v) | (writable ? 0u : kReadOnlyBit));
+    if (auto r = frame.begin(UioOp::SetSdStat); !r)
         return r;
     if (auto r = frame.word(parm); !r)
         return r;
@@ -88,22 +90,21 @@ Ex<void> BlockSlots::announce(
 }
 
 Ex<void> BlockSlots::mount(
-    hal::ISpiTransport& link,
     SlotIndex slot,
     FileSize size_bytes,
     PathId path_id,
     IBlockRoles& roles
 ) {
-    if (slot.v >= kBlockSlots) {
+    if (!slot.below<kBlockSlots>()) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
     }
 
     const infra::OptRef<IImageSource> src = source_of_(backing_(roles, slot));
     const SlotAttributes attr = src ? src->attributes(slot) : SlotAttributes{};
 
-    Slot& s = records_[slot.v].slot;
+    Slot& s = records_[slot].slot;
     s.state = Slot::State::Mounted;
-    s.block_size = 512;
+    s.block_size = BlockSize{kDefaultBlockBytes};
 
     s.size_bytes = attr.deferred_create ? FileSize{0}
         : attr.channel_bytes != 0       ? FileSize{attr.channel_bytes}
@@ -114,33 +115,33 @@ Ex<void> BlockSlots::mount(
     s.growable = attr.growable;
     s.deferred_create = attr.deferred_create;
 
-    records_[slot.v].drop_window();
+    records_[slot].drop_window();
 
-    return announce(link, slot, size_bytes, attr.writable);
+    return announce(slot, size_bytes, attr.writable);
 }
 
-Ex<void> BlockSlots::unmount(hal::ISpiTransport& link, SlotIndex slot) {
-    if (slot.v >= kBlockSlots) {
+Ex<void> BlockSlots::unmount(SlotIndex slot) {
+    if (!slot.below<kBlockSlots>()) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
     }
 
-    records_[slot.v].slot = Slot{};
-    records_[slot.v].drop_window();
-    return announce(link, slot, FileSize{0}, false);
+    records_[slot].slot = Slot{};
+    records_[slot].drop_window();
+    return announce(slot, FileSize{0}, false);
 }
 
 Ex<void> BlockSlots::install_disc(SlotIndex slot, FileSize size_bytes, IBlockRoles& roles) {
-    if (slot.v >= kBlockSlots) {
+    if (!slot.below<kBlockSlots>()) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
     }
     if (size_bytes.v == 0) {
-        records_[slot.v].slot = Slot{};
+        records_[slot].slot = Slot{};
     } else {
         const infra::OptRef<IImageSource> src = source_of_(backing_(roles, slot));
         const SlotAttributes attr = src ? src->attributes(slot) : SlotAttributes{};
-        Slot& s = records_[slot.v].slot;
+        Slot& s = records_[slot].slot;
         s.state = Slot::State::Mounted;
-        s.block_size = 512;
+        s.block_size = BlockSize{kDefaultBlockBytes};
         s.size_bytes = size_bytes;
         s.file_bytes = size_bytes;
         s.path_id = PathId{};
@@ -149,22 +150,22 @@ Ex<void> BlockSlots::install_disc(SlotIndex slot, FileSize size_bytes, IBlockRol
         s.deferred_create = attr.deferred_create;
     }
 
-    records_[slot.v].drop_window();
+    records_[slot].drop_window();
     return {};
 }
 
 const BlockSlots::Slot& BlockSlots::slot(SlotIndex i) const {
-    if (i.v >= kBlockSlots) {
+    if (!i.below<kBlockSlots>()) {
         fatal(Error{Errc::slot_range, ERR_SITE(), i.v}, "block slot index");
     }
-    return records_[i.v].slot;
+    return records_[i].slot;
 }
 
 void BlockSlots::invalidate(SlotIndex i) {
-    if (i.v >= kBlockSlots) {
+    if (!i.below<kBlockSlots>()) {
         fatal(Error{Errc::slot_range, ERR_SITE(), i.v}, "block slot index");
     }
-    records_[i.v].drop_window();
+    records_[i].drop_window();
 }
 
 std::int64_t BlockSlots::now_ns() const noexcept {
@@ -175,7 +176,7 @@ void BlockSlots::note_answer_wait_(std::int64_t waited_ns) noexcept {
     if (waited_ns <= kLateAnswerNs)
         return;
     ++diag_.late_answers;
-    const std::int64_t us = std::min<std::int64_t>(waited_ns / 1000, 0xFFFF'FFFF);
+    const std::int64_t us = std::min<std::int64_t>(waited_ns / kNsPerUs, kMaxLateUs);
     late_max_us_ = std::max(late_max_us_, static_cast<std::uint32_t>(us));
 }
 
@@ -186,43 +187,43 @@ BlockSlots::Refill BlockSlots::refill_resident(
     IBlockServer& src,
     bool answer_owed
 ) {
-    Window& w = records_[slot.v].window;
+    Window& w = records_[slot].window;
 
     const ArenaHalf served = w.half;
     w = Window{};
     w.half = served;
-    const Slot& s = records_[slot.v].slot;
+    const Slot& s = records_[slot].slot;
     if (s.state != Slot::State::Mounted || s.size_bytes.v == 0) {
         return Refill::Miss;
     }
 
     if (!chan_)
         return Refill::Miss;
-    const ArenaHalf half = records_[slot.v].fill_half();
+    const ArenaHalf half = records_[slot].fill_half();
     const std::span<std::uint8_t> dst = chan_->half_mut(slot, half);
     if (dst.empty())
         return Refill::Miss;
 
-    const std::uint64_t offset = static_cast<std::uint64_t>(base.v) * block_size;
+    const std::uint64_t offset = byte_offset(base, BlockSize{block_size}).v;
     auto n = src.read_at(slot, offset, dst);
     if (!n) {
 
         if (n.error().code == Errc::would_block && answer_owed && clock_.has_value()) {
 
             const std::int64_t now = now_ns();
-            if (records_[slot.v].resident_due_ns == 0)
-                records_[slot.v].resident_due_ns = now + kAnswerDeadlineNs;
-            if (now < records_[slot.v].resident_due_ns)
+            if (records_[slot].resident_due_ns == 0)
+                records_[slot].resident_due_ns = now + kAnswerDeadlineNs;
+            if (now < records_[slot].resident_due_ns)
                 return Refill::Defer;
             ++diag_.answer_expiries;
             note_answer_wait_(kAnswerDeadlineNs);
         }
-        records_[slot.v].resident_due_ns = 0;
+        records_[slot].resident_due_ns = 0;
         return Refill::Miss;
     }
-    if (records_[slot.v].resident_due_ns != 0)
-        note_answer_wait_(now_ns() - (records_[slot.v].resident_due_ns - kAnswerDeadlineNs));
-    records_[slot.v].resident_due_ns = 0;
+    if (records_[slot].resident_due_ns != 0)
+        note_answer_wait_(now_ns() - (records_[slot].resident_due_ns - kAnswerDeadlineNs));
+    records_[slot].resident_due_ns = 0;
     auto got = static_cast<std::uint32_t>(*n);
     if (got > kBlockStagingBytes)
         got = kBlockStagingBytes;
@@ -235,7 +236,7 @@ BlockSlots::Refill BlockSlots::refill_resident(
 
     w.base = base;
     w.valid_bytes = got;
-    w.block_size = block_size;
+    w.block_size = BlockSize{block_size};
     w.half = half;
     return Refill::Hit;
 }
@@ -247,27 +248,27 @@ bool BlockSlots::submit_fill(
     bool answer_owed,
     const BlockBacking& backing
 ) noexcept {
-    Window& w = records_[slot.v].window;
+    Window& w = records_[slot].window;
     const ArenaHalf served = w.half;
     w = Window{};
     w.half = served;
-    const Slot& s = records_[slot.v].slot;
+    const Slot& s = records_[slot].slot;
     if (s.state != Slot::State::Mounted || s.size_bytes.v == 0)
         return false;
     if (!storage_live_ || !chan_ || !source_of_(backing))
         return false;
-    SlotGate& p = records_[slot.v].gate;
+    SlotGate& p = records_[slot].gate;
     if (p.state != SlotGate::State::Idle)
         return false;
 
-    const ArenaHalf half = records_[slot.v].fill_half();
-    if (half.v >= kNoHalf)
+    const ArenaHalf half = records_[slot].fill_half();
+    if (!half.exists())
         return false;
 
     const StorageSeq seq = chan_->submit(
         infra::make<StorageRequest>(
             StorageRequest::Read{
-                .offset = static_cast<std::uint64_t>(base.v) * block_size,
+                .offset = byte_offset(base, BlockSize{block_size}).v,
                 .bytes = kBlockStagingBytes,
                 .half = half
             },
@@ -278,14 +279,14 @@ bool BlockSlots::submit_fill(
         return false;
     if (++next_seq_ == 0)
         next_seq_ = 1;
-    records_[slot.v].half_busy |= static_cast<std::uint8_t>(1u << half.v);
+    records_[slot].lend_half(half);
 
     p = SlotGate{};
     p.state = SlotGate::State::Fetching;
     p.seq = seq;
-    p.epoch = records_[slot.v].epoch;
+    p.epoch = records_[slot].epoch;
     p.base = base;
-    p.block_size = block_size;
+    p.block_size = BlockSize{block_size};
     p.answer_owed = answer_owed;
     p.due_ns = now_ns() + (answer_owed ? kAnswerDeadlineNs : kPrefetchDeadlineNs);
     return true;
@@ -295,7 +296,7 @@ StorageRequest::Head BlockSlots::request_head_(
     SlotIndex slot,
     const BlockBacking& backing
 ) const noexcept {
-    StorageRequest::Head h{StorageSeq{next_seq_}, slot, 0, {}};
+    StorageRequest::Head h{StorageSeq{next_seq_}, slot, ImageTag{}, {}};
     if (const auto src = source_of_(backing))
         h.tag = src->request_tag(slot);
     return h;
@@ -309,9 +310,9 @@ bool BlockSlots::submit_create(
 ) noexcept {
     if (!storage_live_ || !chan_)
         return false;
-    if (half.v >= kNoHalf)
+    if (!half.exists())
         return false;
-    if (records_[slot.v].gate.state != SlotGate::State::Idle)
+    if (records_[slot].gate.state != SlotGate::State::Idle)
         return false;
     const StorageSeq seq = chan_->submit(
         infra::make<StorageRequest>(
@@ -334,9 +335,9 @@ bool BlockSlots::submit_write(
 ) noexcept {
     if (!storage_live_ || !chan_)
         return false;
-    if (half.v >= kNoHalf)
+    if (!half.exists())
         return false;
-    if (records_[slot.v].gate.state != SlotGate::State::Idle)
+    if (records_[slot].gate.state != SlotGate::State::Idle)
         return false;
     const StorageSeq seq = chan_->submit(
         infra::make<StorageRequest>(
@@ -359,21 +360,21 @@ void BlockSlots::gate_commit_(
 ) noexcept {
     if (++next_seq_ == 0)
         next_seq_ = 1;
-    records_[slot.v].half_busy |= static_cast<std::uint8_t>(1u << half.v);
-    SlotGate& p = records_[slot.v].gate;
+    records_[slot].lend_half(half);
+    SlotGate& p = records_[slot].gate;
     p = SlotGate{};
     p.state = SlotGate::State::Committing;
     p.seq = seq;
-    p.epoch = records_[slot.v].epoch;
+    p.epoch = records_[slot].epoch;
     p.offset = offset;
     p.len = len;
     p.due_ns = now_ns() + kAnswerDeadlineNs;
 }
 
 bool BlockSlots::submit_attach(SlotIndex slot, IBlockRoles& roles) noexcept {
-    if (slot.v >= kBlockSlots || !storage_live_ || !chan_)
+    if (!slot.below<kBlockSlots>() || !storage_live_ || !chan_)
         return false;
-    if (records_[slot.v].gate.state != SlotGate::State::Idle)
+    if (records_[slot].gate.state != SlotGate::State::Idle)
         return false;
 
     const BlockBacking backing = backing_(roles, slot);
@@ -389,9 +390,9 @@ bool BlockSlots::submit_attach(SlotIndex slot, IBlockRoles& roles) noexcept {
 }
 
 bool BlockSlots::submit_detach(SlotIndex slot, IBlockRoles& roles) noexcept {
-    if (slot.v >= kBlockSlots || !storage_live_ || !chan_)
+    if (!slot.below<kBlockSlots>() || !storage_live_ || !chan_)
         return false;
-    if (records_[slot.v].gate.state != SlotGate::State::Idle)
+    if (records_[slot].gate.state != SlotGate::State::Idle)
         return false;
     return submit_lifecycle_(
         slot,
@@ -403,7 +404,7 @@ bool BlockSlots::submit_detach(SlotIndex slot, IBlockRoles& roles) noexcept {
 }
 
 bool BlockSlots::submit_lifecycle_(SlotIndex slot, const StorageRequest& r) noexcept {
-    SlotGate& p = records_[slot.v].gate;
+    SlotGate& p = records_[slot].gate;
     const StorageSeq seq = chan_->submit(r);
     if (seq.v == 0)
         return false;
@@ -413,23 +414,22 @@ bool BlockSlots::submit_lifecycle_(SlotIndex slot, const StorageRequest& r) noex
     p = SlotGate{};
     p.state = SlotGate::State::Staging;
     p.seq = seq;
-    p.epoch = records_[slot.v].epoch;
+    p.epoch = records_[slot].epoch;
     p.due_ns = now_ns() + kStagingDeadlineNs;
     return true;
 }
 
 static_assert(StorageCompletionSink<BlockSlots>);
 
-void BlockSlots::apply_completion(
-    SlotIndex slot,
-    const StorageCompletion& c,
-    IBlockRoles& roles
-) noexcept {
-    infra::dispatch<StorageCompletionRoutes>(c, *this, slot, roles);
+std::optional<SlotIndex> BlockSlots::slot_of_(const StorageCompletion::Head& h) noexcept {
+    if (h.slot.below<kBlockSlots>())
+        return h.slot;
+    ++diag_.stale_completions;
+    return std::nullopt;
 }
 
 bool BlockSlots::stale_(SlotIndex slot, const StorageCompletion::Head& h) noexcept {
-    const SlotGate& p = records_[slot.v].gate;
+    const SlotGate& p = records_[slot].gate;
     if (p.state == SlotGate::State::Idle || p.seq != h.seq) {
         ++diag_.stale_completions;
         return true;
@@ -440,19 +440,22 @@ bool BlockSlots::stale_(SlotIndex slot, const StorageCompletion::Head& h) noexce
 void BlockSlots::on(
     const StorageCompletion::Read& a,
     const StorageCompletion::Head& h,
-    SlotIndex slot,
     IBlockRoles&
 ) noexcept {
-    records_[slot.v].half_busy &= static_cast<std::uint8_t>(~(1u << a.half.v));
+    const auto at = slot_of_(h);
+    if (!at)
+        return;
+    const SlotIndex slot = *at;
+    records_[slot].reclaim_half(a.half);
     if (stale_(slot, h))
         return;
-    const SlotGate& p = records_[slot.v].gate;
+    const SlotGate& p = records_[slot].gate;
     bool blank_next = false;
-    if (p.epoch != records_[slot.v].epoch) {
+    if (p.epoch != records_[slot].epoch) {
 
         ++diag_.stale_completions;
     } else if (h.status == StorageStatus::Ok && a.bytes != 0) {
-        Window& w = records_[slot.v].window;
+        Window& w = records_[slot].window;
         w.base = p.base;
         w.valid_bytes = a.bytes > kBlockStagingBytes ? kBlockStagingBytes : a.bytes;
         w.block_size = p.block_size;
@@ -460,21 +463,24 @@ void BlockSlots::on(
     } else if (p.answer_owed) {
         blank_next = true;
     }
-    records_[slot.v].finish_gate(blank_next);
+    records_[slot].finish_gate(blank_next);
 }
 
 void BlockSlots::on(
     const StorageCompletion::Write& a,
     const StorageCompletion::Head& h,
-    SlotIndex slot,
     IBlockRoles&
 ) noexcept {
-    records_[slot.v].half_busy &= static_cast<std::uint8_t>(~(1u << a.half.v));
+    const auto at = slot_of_(h);
+    if (!at)
+        return;
+    const SlotIndex slot = *at;
+    records_[slot].reclaim_half(a.half);
     if (stale_(slot, h))
         return;
-    const SlotGate& p = records_[slot.v].gate;
-    Slot& s = records_[slot.v].slot;
-    if (p.epoch != records_[slot.v].epoch) {
+    const SlotGate& p = records_[slot].gate;
+    Slot& s = records_[slot].slot;
+    if (p.epoch != records_[slot].epoch) {
 
         ++diag_.stale_completions;
     } else if (h.status == StorageStatus::Ok && a.bytes == p.len) {
@@ -485,20 +491,23 @@ void BlockSlots::on(
     } else {
         ++diag_.write_failures;
     }
-    records_[slot.v].finish_gate(false);
+    records_[slot].finish_gate(false);
 }
 
 void BlockSlots::on(
     const StorageCompletion::Create& a,
     const StorageCompletion::Head& h,
-    SlotIndex slot,
     IBlockRoles&
 ) noexcept {
-    records_[slot.v].half_busy &= static_cast<std::uint8_t>(~(1u << a.half.v));
+    const auto at = slot_of_(h);
+    if (!at)
+        return;
+    const SlotIndex slot = *at;
+    records_[slot].reclaim_half(a.half);
     if (stale_(slot, h))
         return;
-    Slot& s = records_[slot.v].slot;
-    if (records_[slot.v].gate.epoch != records_[slot.v].epoch) {
+    Slot& s = records_[slot].slot;
+    if (records_[slot].gate.epoch != records_[slot].epoch) {
         ++diag_.stale_completions;
     } else if (h.status == StorageStatus::Ok) {
         s.size_bytes = FileSize{a.size};
@@ -507,15 +516,18 @@ void BlockSlots::on(
     } else {
         ++diag_.write_failures;
     }
-    records_[slot.v].finish_gate(false);
+    records_[slot].finish_gate(false);
 }
 
 void BlockSlots::on(
     const StorageCompletion::Flush&,
     const StorageCompletion::Head& h,
-    SlotIndex slot,
     IBlockRoles&
 ) noexcept {
+    const auto at = slot_of_(h);
+    if (!at)
+        return;
+    const SlotIndex slot = *at;
     if (stale_(slot, h))
         return;
     ++diag_.stale_completions;
@@ -524,38 +536,44 @@ void BlockSlots::on(
 void BlockSlots::on(
     const StorageCompletion::Attach& a,
     const StorageCompletion::Head& h,
-    SlotIndex slot,
     IBlockRoles& roles
 ) noexcept {
+    const auto at = slot_of_(h);
+    if (!at)
+        return;
+    const SlotIndex slot = *at;
     if (const auto src = source_of_(backing_(roles, slot))) {
         const bool ok = h.status == StorageStatus::Ok;
         src->note_attached(slot, ok, FileSize{ok ? a.size : 0});
     }
     if (stale_(slot, h))
         return;
-    records_[slot.v].finish_gate(false);
+    records_[slot].finish_gate(false);
 }
 
 void BlockSlots::on(
     const StorageCompletion::Detach&,
     const StorageCompletion::Head& h,
-    SlotIndex slot,
     IBlockRoles& roles
 ) noexcept {
+    const auto at = slot_of_(h);
+    if (!at)
+        return;
+    const SlotIndex slot = *at;
     if (const auto src = source_of_(backing_(roles, slot)))
         src->note_detached(slot);
     if (stale_(slot, h))
         return;
-    records_[slot.v].finish_gate(false);
+    records_[slot].finish_gate(false);
 }
 
-void BlockSlots::misrouted(const StorageCompletion&, SlotIndex, IBlockRoles&) noexcept {
+void BlockSlots::misrouted(const StorageCompletion&, IBlockRoles&) noexcept {
     TASTY_SEAT_BODY(BlockSlots);
     ++diag_.stale_completions;
 }
 
 void BlockSlots::expire(SlotIndex slot) noexcept {
-    SlotGate& p = records_[slot.v].gate;
+    SlotGate& p = records_[slot].gate;
     bool blank_next = false;
     switch (p.state) {
         case SlotGate::State::Fetching:
@@ -585,20 +603,14 @@ unsigned BlockSlots::install_completions(IBlockRoles& roles) noexcept {
         return 0;
     unsigned n = 0;
     const std::int64_t now = now_ns();
-    SlotOf route{};
 
     while (const auto c = chan_->reap()) {
         ++n;
-        if (const SlotIndex slot = infra::dispatch<StorageCompletionRoutes>(*c, route);
-            slot.v < kBlockSlots) {
-            apply_completion(slot, *c, roles);
-        } else {
-            ++diag_.stale_completions;
-        }
+        infra::dispatch<StorageCompletionRoutes>(*c, *this, roles);
     }
     for (unsigned i = 0; i < kBlockSlots; ++i) {
-        const SlotIndex slot{static_cast<std::uint8_t>(i)};
-        const SlotGate& p = records_[i].gate;
+        const SlotIndex slot = SlotIndex::of(i);
+        const SlotGate& p = records_[slot].gate;
         if (p.state != SlotGate::State::Idle && clock_.has_value() && now >= p.due_ns) {
             expire(slot);
         }
@@ -607,7 +619,7 @@ unsigned BlockSlots::install_completions(IBlockRoles& roles) noexcept {
 }
 
 BlockSlots::Blank BlockSlots::no_half_answer(SlotIndex slot) noexcept {
-    std::int64_t& due = records_[slot.v].no_half_due_ns;
+    std::int64_t& due = records_[slot].no_half_due_ns;
     if (!clock_) {
         ++diag_.no_half_substitutes;
         due = 0;
@@ -629,25 +641,25 @@ BlockSlots::Blank BlockSlots::substitute_blank(
     const BlockBacking& backing
 ) {
 
-    if (chan_ && records_[slot.v].half_held(records_[slot.v].window.half)) {
-        const ArenaHalf free_half = records_[slot.v].fill_half();
+    if (chan_ && records_[slot].half_held(records_[slot].window.half)) {
+        const ArenaHalf free_half = records_[slot].fill_half();
 
-        if (free_half.v >= kNoHalf)
+        if (!free_half.exists())
             return no_half_answer(slot);
-        records_[slot.v].window.half = free_half;
+        records_[slot].window.half = free_half;
     }
-    records_[slot.v].no_half_due_ns = 0;
+    records_[slot].no_half_due_ns = 0;
     ++diag_.blank_filled;
     if (!chan_)
         return Blank::NoBuffer;
-    std::span<std::uint8_t> window = chan_->half_mut(slot, records_[slot.v].window.half);
+    std::span<std::uint8_t> window = chan_->half_mut(slot, records_[slot].window.half);
     if (window.empty())
         return Blank::NoBuffer;
-    if (records_[slot.v].slot.deferred_create) {
+    if (records_[slot].slot.deferred_create) {
         const infra::OptRef<IImageSource> src = source_of_(backing);
         if (src && src->fill_blank(slot, lba, window))
             return Blank::Filled;
-        std::memset(window.data(), 0xFF, window.size());
+        std::memset(window.data(), kFillByte, window.size());
         return Blank::Filled;
     }
     std::memset(window.data(), 0x00, window.size());
@@ -655,7 +667,6 @@ BlockSlots::Blank BlockSlots::substitute_blank(
 }
 
 [[nodiscard]] Ex<void> BlockSlots::emit_read_data_phase_(
-    hal::ISpiTransport& link,
     SlotIndex slot,
     std::span<const std::uint8_t> serve,
     std::uint32_t offset,
@@ -664,6 +675,7 @@ BlockSlots::Blank BlockSlots::substitute_blank(
     std::uint32_t blks,
     bool count_blocks
 ) {
+    hal::ISpiTransport& link = link_;
     hal::Selected cs(link, hal::ChipSelect::Io);
 
     const auto cmd = static_cast<std::uint16_t>(static_cast<std::uint16_t>(UioOp::SectorRd) | ack);
@@ -682,41 +694,33 @@ BlockSlots::Blank BlockSlots::substitute_blank(
     return {};
 }
 
-Ex<bool> BlockSlots::answer_read(
-    hal::ISpiTransport& link,
-    SlotIndex slot,
-    Lba lba,
-    std::uint32_t nbytes,
-    std::uint16_t ack
-) {
-    if (slot.v >= kBlockSlots || nbytes == 0)
+Ex<bool> BlockSlots::answer_read(SlotIndex slot, Lba lba, std::uint32_t nbytes, std::uint16_t ack) {
+    if (!slot.below<kBlockSlots>() || nbytes == 0)
         return false;
 
-    if (records_[slot.v].gate.state != SlotGate::State::Idle)
+    if (records_[slot].gate.state != SlotGate::State::Idle)
         return false;
-    const Window& w = records_[slot.v].window;
+    const Window& w = records_[slot].window;
 
-    const std::uint32_t block_size = w.block_size;
+    const std::uint32_t block_size = w.block_size.v;
     if (block_size == 0 || nbytes % block_size != 0)
         return false;
     const std::uint32_t blks = nbytes / block_size;
     const std::uint32_t window_blocks = kBlockStagingBytes / block_size;
     const bool hit = w.valid_bytes != 0
-        && lba >= w.base
-        && (static_cast<std::uint64_t>(lba.v) + blks - w.base.v) <= window_blocks;
+        && w.covers(lba, BlockCount{blks}, BlockCount{window_blocks});
     if (!hit)
         return false;
-    const std::uint32_t offset = (lba.v - w.base.v) * block_size;
+    const std::uint32_t offset = w.block_size.span_of(lba - w.base).v;
     const std::span<const std::uint8_t> serve = chan_ ? chan_->half(slot, w.half)
                                                       : std::span<const std::uint8_t>{};
-    if (auto r = emit_read_data_phase_(link, slot, serve, offset, nbytes, ack, blks, true); !r) {
+    if (auto r = emit_read_data_phase_(slot, serve, offset, nbytes, ack, blks, true); !r) {
         return std::unexpected(r.error());
     }
     return true;
 }
 
 Ex<BlockSlots::Pass> BlockSlots::serve_read(
-    hal::ISpiTransport& link,
     const SdRequest& req,
     std::uint32_t block_size,
     std::uint32_t window_blocks,
@@ -725,20 +729,19 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
 ) {
     const std::uint32_t blks = req.block_count.v;
     const std::uint32_t sz = block_size * blks;
-    Window& w = records_[req.slot.v].window;
+    Window& w = records_[req.slot].window;
 
-    const infra::OptRef<IBlockServer> res = server_of_(backing);
+    const infra::OptRef<IBlockServer> res = backing.server();
 
     const bool hit = w.valid_bytes != 0
-        && w.block_size == block_size
-        && req.lba >= w.base
-        && (static_cast<std::uint64_t>(req.lba.v) + blks - w.base.v) <= window_blocks;
+        && w.block_size == BlockSize{block_size}
+        && w.covers(req.lba, BlockCount{blks}, BlockCount{window_blocks});
 
     std::uint32_t offset = 0;
     bool cached = hit;
     Blank blank = Blank::Filled;
     if (hit) {
-        offset = (req.lba.v - w.base.v) * block_size;
+        offset = w.block_size.span_of(req.lba - w.base).v;
     } else if (res) {
         const Refill r = refill_resident(req.slot, req.lba, block_size, *res, true);
         cached = r == Refill::Hit;
@@ -746,11 +749,11 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
             blank = Blank::Deferred;
         else if (r == Refill::Miss)
             blank = substitute_blank(req.slot, req.lba, backing);
-    } else if (records_[req.slot.v].gate.blank_next) {
+    } else if (records_[req.slot].gate.blank_next) {
 
         blank = substitute_blank(req.slot, req.lba, backing);
         if (blank != Blank::Deferred)
-            records_[req.slot.v].gate.blank_next = false;
+            records_[req.slot].gate.blank_next = false;
     } else if (submit_fill(req.slot, req.lba, block_size, true, backing)) {
 
         ++diag_.deferred_passes;
@@ -765,29 +768,29 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
 
     const std::span<const std::uint8_t> serve = blank == Blank::Static
         ? std::span<
-              const std::uint8_t>{records_[req.slot.v].slot.deferred_create ? kFfPage : kZeroPage}
-        : chan_ ? chan_->half(req.slot, records_[req.slot.v].window.half)
+              const std::uint8_t>{records_[req.slot].slot.deferred_create ? kFfPage : kZeroPage}
+        : chan_ ? chan_->half(req.slot, records_[req.slot].window.half)
                 : std::span<const std::uint8_t>{};
-    if (auto r = emit_read_data_phase_(link, req.slot, serve, offset, sz, ack, blks, cached); !r) {
+    if (auto r = emit_read_data_phase_(req.slot, serve, offset, sz, ack, blks, cached); !r) {
         return std::unexpected(r.error());
     }
 
-    if (records_[req.slot.v].slot.deferred_create) {
-        records_[req.slot.v].window = Window{};
+    if (records_[req.slot].slot.deferred_create) {
+        records_[req.slot].window = Window{};
         return Pass::Answered;
     }
     if (!cached)
         return Pass::Answered;
     const std::uint64_t consumed = static_cast<std::uint64_t>(req.lba.v)
         + blks
-        - records_[req.slot.v].window.base.v;
+        - records_[req.slot].window.base.v;
     if (consumed == window_blocks) {
         const Lba next{req.lba.v + blks};
         if (res) {
 
             if (refill_resident(req.slot, next, block_size, *res, false) != Refill::Hit) {
                 if (chan_) {
-                    const auto win = chan_->half_mut(req.slot, records_[req.slot.v].window.half);
+                    const auto win = chan_->half_mut(req.slot, records_[req.slot].window.half);
                     if (!win.empty())
                         std::memset(win.data(), 0, win.size());
                 }
@@ -801,26 +804,26 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
 }
 
 Ex<BlockSlots::Pass> BlockSlots::serve_write(
-    hal::ISpiTransport& link,
     const SdRequest& req,
     std::uint32_t block_size,
     std::uint16_t ack,
     const BlockBacking& backing
 ) {
+    hal::ISpiTransport& link = link_;
     const std::uint32_t sz = block_size * req.block_count.v;
 
-    const infra::OptRef<IBlockServer> res = server_of_(backing);
+    const infra::OptRef<IBlockServer> res = backing.server();
 
     if (!chan_) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), req.slot.v});
     }
-    const ArenaHalf drain_half = records_[req.slot.v].fill_half();
-    if (drain_half.v >= kNoHalf) {
+    const ArenaHalf drain_half = records_[req.slot].fill_half();
+    if (!drain_half.exists()) {
         ++diag_.deferred_passes;
         return Pass::Deferred;
     }
 
-    records_[req.slot.v].window = Window{};
+    records_[req.slot].window = Window{};
     {
         hal::Selected cs(link, hal::ChipSelect::Io);
 
@@ -839,7 +842,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
         }
     }
 
-    Slot& s = records_[req.slot.v].slot;
+    Slot& s = records_[req.slot].slot;
     const infra::OptRef<IImageSource> src = source_of_(backing);
     if (!src || s.state != Slot::State::Mounted) {
         ++diag_.write_failures;
@@ -851,7 +854,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
         .growable = s.growable,
         .deferred_create = s.deferred_create
     };
-    const SaveSlotRule::Plan plan = rule.plan_write(req.lba, block_size, sz);
+    const SaveSlotRule::Plan plan = rule.plan_write(req.lba, BlockSize{block_size}, sz);
     if (plan.act == SaveSlotRule::Act::Discard) {
         ++diag_.discarded_writes;
         return Pass::Answered;
@@ -892,37 +895,32 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
     return Pass::Answered;
 }
 
-Ex<BlockSlots::Pass> BlockSlots::serve(
-    hal::ISpiTransport& link,
-    const SpiBlockPoll::Decode& d,
-    IBlockRoles& roles
-) {
+Ex<BlockSlots::Pass> BlockSlots::serve(const SpiBlockPoll::Decode& d, IBlockRoles& roles) {
 
-    if (((static_cast<unsigned>(lw_slots_) >> d.req.slot.v) & 1u) != 0u) {
+    if (lw_slots_.has(d.req.slot)) {
         ++diag_.lw_slot_passes;
         return Pass::Deferred;
     }
 
-    if (records_[d.req.slot.v].gate.state != SlotGate::State::Idle) {
+    if (records_[d.req.slot].gate.state != SlotGate::State::Idle) {
         ++diag_.deferred_passes;
         return Pass::Deferred;
     }
 
     const BlockBacking backing = backing_(roles, d.req.slot);
-    auto pass = d.req.write
-        ? serve_write(link, d.req, d.block_size, d.ack, backing)
-        : serve_read(link, d.req, d.block_size, d.window_blocks, d.ack, backing);
+    const std::uint32_t bytes = d.block_size.v;
+    auto pass = d.req.write ? serve_write(d.req, bytes, d.ack, backing)
+                            : serve_read(d.req, bytes, d.window_blocks.v, d.ack, backing);
     if (pass && *pass == Pass::Answered)
-        records_[d.req.slot.v].no_half_due_ns = 0;
+        records_[d.req.slot].no_half_due_ns = 0;
     return pass;
 }
 
 Ex<SpiBlockPoll::Decode> BlockSlots::poll_block(
-    hal::ISpiTransport& link,
     IBlockRoles& roles,
     std::optional<SdStatusWord> known
 ) {
-    return block_poll_.poll(link, roles, server_, known);
+    return block_poll_.poll(roles, server_, known);
 }
 
 }

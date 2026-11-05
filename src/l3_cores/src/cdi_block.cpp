@@ -2,6 +2,7 @@
 #include "cores/cdi_block.h"
 
 #include <cstring>
+#include <utility>
 
 namespace mister::cores::cdi {
 namespace {
@@ -112,25 +113,22 @@ void widen_rw(
 
 std::size_t build_toc(
     const svc::Toc& toc,
-    std::uint8_t disc_type,
+    DiscType disc_type,
     std::span<TocEntry, kTocEntries> out
 ) noexcept {
 
     std::size_t n = 0;
-    auto add = [&](unsigned control, unsigned point, unsigned m, unsigned s, unsigned f) {
-        for (int k = 0; k < 3 && n < out.size(); ++k) {
-            out[n++] = TocEntry{
-                static_cast<std::uint8_t>(control),
-                static_cast<std::uint8_t>(point),
-                static_cast<std::uint8_t>(m),
-                static_cast<std::uint8_t>(s),
-                static_cast<std::uint8_t>(f)
-            };
-        }
+    auto add = [&](std::uint8_t control,
+                   std::uint8_t point,
+                   std::uint8_t m,
+                   std::uint8_t s,
+                   std::uint8_t f) {
+        for (int k = 0; k < 3 && n < out.size(); ++k)
+            out[n++] = TocEntry{control, point, m, s, f};
     };
 
     struct Msf {
-        unsigned m, s, f;
+        std::uint8_t m, s, f;
     };
 
     auto msf = [](int lba) {
@@ -144,20 +142,20 @@ std::size_t build_toc(
     };
     for (int i = 0; i < toc.last; ++i) {
         const Msf t = msf(static_cast<int>(toc.tracks[i].start.v));
-        add(toc.tracks[i].type != svc::TrackType::Cdda ? 0x41u : 0x01u,
+        add(toc.tracks[i].type != svc::TrackType::Cdda ? std::uint8_t{0x41} : std::uint8_t{0x01},
             bcd(static_cast<unsigned>(i + 1)),
             t.m,
             t.s,
             t.f);
     }
-    add(1, 0xA0, 1, disc_type, 0);
+    add(1, 0xA0, 1, std::to_underlying(disc_type), 0);
     add(1, 0xA1, bcd(toc.last), 0, 0);
     const Msf lead_out = msf(static_cast<int>(toc.end.v));
     add(1, 0xA2, lead_out.m, lead_out.s, lead_out.f);
     return n;
 }
 
-std::uint8_t disc_type(const svc::Toc& toc, std::uint8_t previous) noexcept {
+DiscType disc_type(const svc::Toc& toc, DiscType previous) noexcept {
 
     bool audio = false, mode1 = false, mode2 = false;
     for (int i = 0; i < toc.last; ++i) {
@@ -174,11 +172,11 @@ std::uint8_t disc_type(const svc::Toc& toc, std::uint8_t previous) noexcept {
         }
     }
     if (audio && !mode1 && !mode2)
-        return 0x00;
+        return DiscType::CdRom;
     if (mode1 && !mode2)
-        return 0x00;
+        return DiscType::CdRom;
     if (!mode1 && mode2)
-        return 0x20;
+        return DiscType::CdRomXa;
     return previous;
 }
 

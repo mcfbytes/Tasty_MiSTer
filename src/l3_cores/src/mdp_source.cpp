@@ -57,14 +57,14 @@ Ex<void> CueWavSource::ensure_parsed_() {
 Ex<void> CueWavSource::locate_data_(svc::IFile& f, std::uint32_t file_size) {
     std::uint32_t pos = wav::kPrefixBytes;
     std::byte header[wav::kChunkHeaderBytes]{};
-    while (wav::can_read_header(pos, file_size)) {
+    while (wav::can_read_header(pos, proto::FileSize{file_size})) {
         auto got = f.read_at(pos, std::span<std::byte>(header));
         if (!got)
             return std::unexpected(got.error());
         if (*got < sizeof header)
             break;
-        const std::uint32_t size = wav::declared_size(std::span<const std::byte>(header));
-        if (wav::is_data_chunk(std::span<const std::byte>(header))) {
+        const std::uint32_t size = wav::declared_size(header);
+        if (wav::is_data_chunk(header)) {
             data_start_ = pos + wav::kChunkHeaderBytes;
             data_size_ = size;
             return {};
@@ -87,14 +87,14 @@ Ex<void> CueWavSource::locate_data_(svc::IFile& f, std::uint32_t file_size) {
     );
 }
 
-Ex<PcmExtent> CueWavSource::open(std::uint8_t track) {
+Ex<PcmExtent> CueWavSource::open(svc::TrackNumber track) {
     TASTY_SEAT_BODY(CueWavSource);
     close();
     if (auto r = ensure_parsed_(); !r)
         return std::unexpected(r.error());
     const CueSheet::Track* t = sheet_.track(track);
     if (t == nullptr || t->wav_path.empty()) {
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), track});
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), track.v});
     }
     auto f = vfs_->open(t->wav_path.view(), svc::OpenMode::Read);
     if (!f)

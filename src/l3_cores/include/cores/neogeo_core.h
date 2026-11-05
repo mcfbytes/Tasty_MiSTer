@@ -8,18 +8,14 @@
 #include "cores/cd_profile.h"
 #include "cores/cd_service_rows.h"
 #include "cores/core_support.h"
-#include "cores/stream_load.h"
 #include "cores/staging_core.h"
-#include "cores/stream_tx_record.h"
+#include "cores/stream_load_host.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
 
-class NeoGeoCore final : public Core,
-                         public IStreamLoad,
-                         public IStagingCore,
-                         public ICdServiceRows {
+class NeoGeoCore final : public Core, public IStagingCore, public ICdServiceRows {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
@@ -33,9 +29,9 @@ public:
 
     [[nodiscard]] MountState mount_disc(std::string_view path) override;
 
-    void set_region(std::uint8_t region) override {
+    void set_region(proto::RegionCode region) override {
         TASTY_SEAT_BODY(NeoGeoCore);
-        drive_.set_region(region);
+        drive_.set_region(region.v);
     }
 
     [[nodiscard]] Ex<void> deferred_reset() override {
@@ -58,9 +54,6 @@ public:
         drive_.service_tick(image_sink());
     }
 
-    [[nodiscard]] Ex<proto::SessionParams> stream_opening(IoIndex index) override;
-    void stream_closed(const StreamLoadEnd& end) noexcept override;
-
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
 
@@ -69,25 +62,34 @@ private:
     [[nodiscard]] Ex<void> do_reset() override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
 
-    [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return this; }
-
-    [[nodiscard]] ICdServiceRows* on_cd_service_rows() noexcept override {
-        return cd_mode_ ? this : nullptr;
+    [[nodiscard]] infra::OptRef<IStagingCore> on_staging_core() noexcept override {
+        return infra::OptRef<IStagingCore>{*this};
     }
 
-    [[nodiscard]] const ICdDiagnostics* on_cd_diagnostics() const noexcept override {
-        return cd_mode_ ? &drive_ : nullptr;
+    [[nodiscard]] infra::OptRef<ICdServiceRows> on_cd_service_rows() noexcept override {
+        return cd_mode_ ? infra::OptRef<ICdServiceRows>{*this} : infra::OptRef<ICdServiceRows>{};
     }
 
-    [[nodiscard]] IStreamLoad* on_stream_load() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<const ICdDiagnostics> on_cd_diagnostics() const noexcept override {
+        return cd_mode_ ? infra::OptRef<const ICdDiagnostics>{drive_}
+                        : infra::OptRef<const ICdDiagnostics>{};
+    }
 
-    void on_set_pending_file_ext(std::string_view ext) noexcept override { tx_.set_ext(ext); }
+    [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
+        return infra::OptRef<IStreamLoad>{stream_};
+    }
 
-    [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return tx_.bytes(); }
+    void on_set_pending_file_ext(std::string_view ext) noexcept override {
+        stream_.set_pending_ext(ext);
+    }
 
-    [[nodiscard]] std::uint32_t on_last_tx_crc() const noexcept override { return tx_.crc(); }
+    [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override {
+        return stream_.bytes();
+    }
 
-    StreamTxRecord tx_;
+    [[nodiscard]] svc::Crc32 on_last_tx_crc() const noexcept override { return stream_.crc(); }
+
+    StreamLoadHost stream_;
     bool cd_mode_ = false;
     CdDrive drive_;
 };

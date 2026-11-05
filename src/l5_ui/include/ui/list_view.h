@@ -6,6 +6,7 @@
 #include <span>
 #include <string_view>
 
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/types.h"
 
@@ -29,6 +30,8 @@ struct Viewport {
     ) noexcept;
 };
 
+enum class Wrap : bool { No, Yes };
+
 template <class T>
 class ListView {
     TASTY_SEAT_RESIDENT(Ui);
@@ -37,21 +40,21 @@ public:
     using NameOf = std::string_view (*)(const T&);
 
     ListView(std::span<const T> items, NameOf name_of, ViewportPolicy p) noexcept
-        : items_(items),
+        : items_(RowSpan<const T>{items}),
           name_of_(name_of),
           policy_(p) {}
 
-    std::size_t count() const noexcept { return items_.size(); }
+    RowCount count() const noexcept { return items_.size(); }
 
     const Viewport& viewport() const noexcept { return view_; }
 
     const T* selected() const noexcept {
-        return view_.selected.v < items_.size() ? &items_[view_.selected.v] : nullptr;
+        return view_.selected < row_after(items_.size()) ? &items_[view_.selected] : nullptr;
     }
 
     void set_height(RowCount h) noexcept { height_ = h; }
 
-    void set_items(std::span<const T> items) noexcept { items_ = items; }
+    void set_items(std::span<const T> items) noexcept { items_ = RowSpan<const T>{items}; }
 
     void recentre() noexcept;
 
@@ -64,6 +67,9 @@ public:
     void home() noexcept;
     void end() noexcept;
 
+    template <class Pred>
+    bool select_next(Pred&& pred, Wrap wrap) noexcept;
+
     void next_group() noexcept;
     void prev_group() noexcept;
 
@@ -74,11 +80,11 @@ public:
     RowCount page_step() const noexcept;
 
 private:
-    std::span<const T> items_;
+    RowSpan<const T> items_;
     NameOf name_of_;
     ViewportPolicy policy_;
     Viewport view_{};
-    RowCount height_{16};
+    RowCount height_{kFullOsdRows};
 };
 
 }

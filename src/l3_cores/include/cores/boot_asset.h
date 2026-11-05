@@ -38,7 +38,7 @@ struct BootAsset {
     WideIoIndex dest_if_marker{};
     AssetLoader loader = AssetLoader::GenericFileTx;
 
-    std::uint64_t exact_size = 0;
+    proto::FileSize exact_size{};
 };
 
 inline constexpr std::size_t kMaxBootBuffers = 3;

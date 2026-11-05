@@ -9,8 +9,10 @@
 #include <vector>
 
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "proto/joystick.h"
+#include "proto/user_io/rumble_poll.h"
 #include "svc/device_match.h"
 #include "svc/input_device.h"
 #include "svc/deadzone_rule.h"
@@ -98,9 +100,9 @@ public:
 
     [[nodiscard]] Ex<unsigned> on_fd_ready(int fd);
 
-    std::uint32_t devices_generation() const noexcept { return devices_gen_; }
+    Generation devices_generation() const noexcept { return devices_gen_; }
 
-    std::uint8_t mouse_button_level() const noexcept;
+    proto::MouseButtons mouse_button_level() const noexcept;
 
     [[nodiscard]] Ex<void> set_grabbed(bool on);
 
@@ -113,8 +115,7 @@ public:
     [[nodiscard]] RumblePadSet rumble_pads() const noexcept override;
     [[nodiscard]] RumbleApply rumble(
         PlayerIndex player,
-        std::uint16_t strong,
-        std::uint16_t weak
+        proto::user_io::RumbleMotors motors
     ) noexcept override;
 
     const InputCounters& counters() const noexcept { return counters_; }
@@ -135,8 +136,8 @@ private:
 
     bool grabbed_ = kBornGrabbed;
     bool cfg_rumble_ = true;
-    std::uint32_t devices_gen_ = 0;
-    JoyMask joy_mask_[kMaxPlayers]{};
+    Generation devices_gen_{};
+    infra::IndexedArray<JoyMask, kMaxPlayers, PlayerIndex> joy_mask_{};
     InputCounters counters_{};
 };
 

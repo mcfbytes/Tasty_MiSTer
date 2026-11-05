@@ -12,7 +12,7 @@ namespace mister {
         "FATAL: %s (code=%u site=%u detail=%u)\n",
         what,
         static_cast<unsigned>(e.code),
-        e.site,
+        static_cast<unsigned>(e.site),
         e.detail
     );
     std::abort();

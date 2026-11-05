@@ -2,6 +2,7 @@
 #pragma once
 
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 
 namespace mister::hal {
@@ -18,6 +19,9 @@ struct SpiOutput {
 
 struct ButtonMask {
     std::uint16_t v = 0;
+
+    [[nodiscard]] constexpr bool has(ButtonMask bit) const noexcept { return (v & bit.v) != 0u; }
+
     friend constexpr bool operator==(ButtonMask, ButtonMask) = default;
 };
 
@@ -39,6 +43,17 @@ struct FrameSeq {
     std::uint32_t v = 0;
     friend constexpr bool operator==(FrameSeq, FrameSeq) = default;
     friend constexpr auto operator<=>(FrameSeq, FrameSeq) = default;
+};
+
+struct WordOffset {
+    std::size_t v = 0;
+    friend constexpr bool operator==(WordOffset, WordOffset) = default;
+    friend constexpr auto operator<=>(WordOffset, WordOffset) = default;
+};
+
+struct IoVersion {
+    std::uint8_t v = 0;
+    friend constexpr bool operator==(IoVersion, IoVersion) = default;
 };
 
 }

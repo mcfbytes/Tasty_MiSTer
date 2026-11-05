@@ -71,7 +71,7 @@ private:
     bool cold_ = false;
     std::uint8_t slot_ = 0;
     proto::FileId file_{};
-    std::uint32_t act_ = 0;
+    proto::ActKey act_{};
     std::int64_t due_ns_ = 0;
     std::array<std::string, kLadderCarrySlots> paths_{};
 };

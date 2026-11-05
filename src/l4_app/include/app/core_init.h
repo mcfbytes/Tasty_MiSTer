@@ -529,7 +529,7 @@ inline constexpr std::array<CoreInitStep, kCoreInitStepCount> kCoreInitBase{{
         nullptr,
         OnError::Ignore,
         "M2 F2 - tasty's only 0x32 emitter is "
-        "video_wire_emit.cpp:76's ZERO-PAYLOAD probe, and "
+        "ProbeOps::emit_gamma_probe's ZERO-PAYLOAD probe, and "
         "hps_io.sv:528 writes gamma_en in the payload branch only. "
         "Stock has the same hole (video.cpp:702 early-returns with "
         "no <core>_gamma.cfg)"

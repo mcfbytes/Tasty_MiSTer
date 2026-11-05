@@ -39,20 +39,24 @@ public:
         return LwSysWindow({}, image, off, size);
     }
 
+    enum : std::uint32_t { kWordBytes = sizeof(std::uint32_t), kWordAlignMask = kWordBytes - 1 };
+
     [[nodiscard]] LwOffset offset() const noexcept { return off_; }
 
     [[nodiscard]] std::uint32_t size() const noexcept { return size_; }
 
     template <class Layout>
     [[nodiscard]] Ex<RegisterWindow<Layout>> map(std::uint32_t rel) const {
-        if ((rel & 3u) != 0u || Layout::kSize > size_ || rel > size_ - Layout::kSize) {
+        if ((rel & kWordAlignMask) != 0u || Layout::kSize > size_ || rel > size_ - Layout::kSize) {
             return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), rel});
         }
         const std::uint32_t at = off_.v + rel;
         if (image_.empty())
             return RegisterWindow<Layout>::map(lw_, LwOffset{at});
-        const std::size_t words = (Layout::kSize + 3u) / 4u;
-        return RegisterWindow<Layout>::borrow(reg::Block::over(image_.subspan(at / 4u, words)));
+        const std::size_t words = (Layout::kSize + kWordAlignMask) / kWordBytes;
+        return RegisterWindow<Layout>::borrow(
+            reg::Block::over(image_.subspan(at / kWordBytes, words))
+        );
     }
 
 private:
@@ -75,7 +79,7 @@ private:
         if (board_len == 0)
             return Error{Errc::dt_missing, ERR_SITE(), off.v};
         if (size < sizeof(std::uint32_t)
-            || (off.v & 3u) != 0u
+            || (off.v & kWordAlignMask) != 0u
             || size > board_len
             || static_cast<std::size_t>(off.v) > board_len - size) {
             return Error{Errc::bad_format, ERR_SITE(), off.v};

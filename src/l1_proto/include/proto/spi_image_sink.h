@@ -11,9 +11,10 @@
 #include "hal/spi_transport.h"
 #include "proto/download_session.h"
 #include "proto/image_sink.h"
-#include "proto/spi_fio_queue.h"
 
 namespace mister::proto {
+
+class SpiFioQueue;
 
 class SpiImageSink final : public IImageSink {
     TASTY_SEAT_RESIDENT(RT);

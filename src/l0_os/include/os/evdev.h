@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 
+#include "infra/error.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 
@@ -29,7 +30,7 @@ public:
 
     [[nodiscard]] int fd() const noexcept { return fd_.get(); }
 
-    [[nodiscard]] ssize_t read(std::span<input_event> out) const noexcept;
+    [[nodiscard]] Ex<std::size_t> read(std::span<input_event> out) const noexcept;
 
     [[nodiscard]] std::optional<input_absinfo> abs_info(unsigned code) const noexcept;
 

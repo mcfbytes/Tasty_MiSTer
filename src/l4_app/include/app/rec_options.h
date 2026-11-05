@@ -7,6 +7,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "app/types.h"
 #include "infra/fixed_str.h"
 
 namespace mister::app {
@@ -23,8 +24,8 @@ struct RecOptions {
     RecScale scale = RecScale::Auto;
     RecMotion motion = RecMotion::Auto;
     std::uint16_t every = 1;
-    std::int32_t from_frame = -1;
-    std::int32_t to_frame = -1;
+    MovieFrame from_frame = kNoMovieFrame;
+    MovieFrame to_frame = kNoMovieFrame;
     std::uint64_t segment_bytes = 0;
 
     [[nodiscard]] friend bool operator==(const RecOptions&, const RecOptions&) = default;
@@ -46,9 +47,9 @@ static_assert(kRecSegmentMax == (1ull << 31));
 }
 
 [[nodiscard]] inline bool rec_bounds_ok(const RecOptions& o) noexcept {
-    if (o.from_frame < -1 || o.to_frame < -1)
+    if (o.from_frame < kNoMovieFrame || o.to_frame < kNoMovieFrame)
         return false;
-    return o.from_frame < 0 || o.to_frame < 0 || o.to_frame > o.from_frame;
+    return o.from_frame < MovieFrame{} || o.to_frame < MovieFrame{} || o.to_frame > o.from_frame;
 }
 
 [[nodiscard]] const char* rec_codec_name(RecCodec c) noexcept;

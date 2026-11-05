@@ -13,7 +13,7 @@ void CheatLink::content_loaded(
     cores::Core* core,
     TxDigest::Kind kind,
     std::string_view path,
-    std::uint32_t crc,
+    svc::Crc32 crc,
     bool same_game
 ) noexcept {
     TASTY_SEAT_BODY(CheatLink);

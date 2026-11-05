@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/video_pump.h"
 
+#include "app/input_wire.h"
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -44,15 +46,19 @@ Ex<std::vector<std::byte>> read_all(const svc::Vfs& vfs, std::string_view path) 
 }
 
 std::uint32_t fpix_detail(double f) noexcept {
-    if (!(f > 0.0) || !(f < 4.0e9))
+    constexpr double kFpixHzCeiling = 4.0e9;
+    if (!(f > 0.0) || !(f < kFpixHzCeiling))
         return 0u;
     return static_cast<std::uint32_t>(f);
 }
 
 std::uint32_t fpix_khz(double mhz) noexcept {
-    if (!(mhz > 0.0) || !(mhz < 4.0e6))
+    constexpr double kFpixMhzCeiling = 4.0e6;
+    constexpr double kKhzPerMhz = 1000.0;
+    constexpr double kRoundHalf = 0.5;
+    if (!(mhz > 0.0) || !(mhz < kFpixMhzCeiling))
         return 0u;
-    return static_cast<std::uint32_t>(mhz * 1000.0 + 0.5);
+    return static_cast<std::uint32_t>(mhz * kKhzPerMhz + kRoundHalf);
 }
 
 }
@@ -105,9 +111,8 @@ void VideoPump::load_filters() {
     svc::load_filter_set(vfs_, std::string_view{core_name_, core_name_len_}, seeds, *set);
     wire_.publish_filters(*set);
     filter_mode_ = set->modes[0];
-    const bool enabled[4] =
-        {set->modes[0] != 0, set->modes[1] != 0, set->modes[2] != 0, set->modes[3] != 0};
-    video_->set_filter_slots(std::span<const bool>(enabled, 4));
+    const auto enabled = set->enabled();
+    video_->set_filter_slots(enabled);
     ++stats_.filter_loads;
     publish_scaling_policy();
 }
@@ -119,9 +124,9 @@ void VideoPump::latch_spec(std::string_view spec) noexcept {
     spec_valid_ = true;
 }
 
-void VideoPump::force_vsync_adjust(std::uint8_t v) noexcept {
-    if (v > 1)
-        v = 0;
+void VideoPump::force_vsync_adjust(VsyncAdjust v) noexcept {
+    if (v == VsyncAdjust::LowLag)
+        v = VsyncAdjust::Off;
     ini_force_.vsync = v;
     ini_.vsync_adjust = v;
 }
@@ -221,12 +226,12 @@ void VideoPump::publish_monitoring() noexcept {
 
     GeometryRecord g{};
     const svc::VideoSample& s = video_->info();
-    g.valid = geo_edges_ != 0u || s.res != 0u || s.width != 0u;
+    g.valid = geo_edges_ != 0u || s.res != 0u || s.active.width != 0u;
     g.fb_en = s.fb_en();
     g.rotated = s.rotated();
     g.res = s.res;
-    g.width = s.width;
-    g.height = s.height;
+    g.width = s.active.width;
+    g.height = s.active.height;
     g.vtime = s.vtime;
     g.core_seq = wire_.sampled_core_seq();
     geo_cell_.publish(g);
@@ -292,7 +297,8 @@ void VideoPump::service_mode_phase() {
         return;
     }
 
-    const std::int64_t elapsed_ms = (clock_.now().count() - stage_ns_) / 1'000'000;
+    constexpr std::int64_t kNsPerMs = 1'000'000;
+    const std::int64_t elapsed_ms = (clock_.now().count() - stage_ns_) / kNsPerMs;
     if (elapsed_ms < kModeSettleMs)
         return;
 
@@ -349,25 +355,16 @@ void VideoPump::resolve_families() {
     family(svc::VmodeFamily::Pal) = FamilyMode{};
     family(svc::VmodeFamily::Ntsc) = FamilyMode{};
     if (ini_.direct_video) {
-        std::size_t idx = ini_.menu_pal ? 2u : 0u;
+        constexpr std::size_t kPresetDefault = 0;
+        constexpr std::size_t kPresetPal240 = 2;
+        std::size_t idx = ini_.menu_pal ? kPresetPal240 : kPresetDefault;
         if (ini_.forced_scandoubler)
             ++idx;
         const svc::PresetMode& p = svc::tvmodes()[idx];
         FamilyMode& def = family(svc::VmodeFamily::Default);
         def = FamilyMode{};
         def.configured = true;
-        svc::Modeline& m = def.stored.mode;
-        m.hact = p.vpar[0];
-        m.hfp = p.vpar[1];
-        m.hs = p.vpar[2];
-        m.hbp = p.vpar[3];
-        m.vact = p.vpar[4];
-        m.vfp = p.vpar[5];
-        m.vs = p.vpar[6];
-        m.vbp = p.vpar[7];
-        m.fpix_mhz = p.fpix_mhz;
-        m.vic = p.vic;
-        m.pixel_repeat = p.pr != 0;
+        def.stored.mode = svc::video_timing::preset_modeline(p);
         families_valid_ = true;
         return;
     }
@@ -402,7 +399,9 @@ VideoPump::FamilyMode VideoPump::resolve_one(std::string_view spec, bool count_f
     if (count_fallback)
         ++stats_.parse_fallbacks;
     out.stored = svc::video_timing::preset_fallback(support_fhd_, video_->supports_pr());
-    out.index = support_fhd_ ? 8u : 0u;
+    constexpr std::uint8_t kPresetDefault = 0;
+    constexpr std::uint8_t kPreset1080p60 = 8;
+    out.index = support_fhd_ ? kPreset1080p60 : kPresetDefault;
     return out;
 }
 
@@ -418,12 +417,12 @@ VideoPump::FamilyMode& VideoPump::family(svc::VmodeFamily f) noexcept {
 void VideoPump::service_family_switch() {
     if (!families_valid_ || front_end_)
         return;
-    if (ini_.vsync_adjust == 0)
+    if (ini_.vsync_adjust == VsyncAdjust::Off)
         return;
     const std::uint32_t vtime = video_->info().vtime;
     const auto choice = svc::video_timing::select_family(
         vtime,
-        ini_.vsync_adjust != 0,
+        ini_.vsync_adjust != VsyncAdjust::Off,
         family(svc::VmodeFamily::Pal).configured,
         family(svc::VmodeFamily::Ntsc).configured
     );
@@ -454,7 +453,7 @@ Ex<void> VideoPump::apply_family(svc::VmodeFamily f, double fpix_mhz) {
 
     const std::uint32_t watermark = wire_.stats().emitted;
 
-    stats_.last_mode_index = fm.index;
+    stats_.last_mode_index = VideoModeIndex{fm.index};
     stats_.last_fpix_khz = fpix_khz(clock);
 
     svc::PllBlock pll_block{};
@@ -485,7 +484,7 @@ Ex<void> VideoPump::apply_family(svc::VmodeFamily f, double fpix_mhz) {
         return r;
     }
     ++stats_.applies;
-    output_locked_ = ini_.vsync_adjust == 2 && adjusted;
+    output_locked_ = ini_.vsync_adjust == VsyncAdjust::LowLag && adjusted;
     last_apply_ns_ = clock_.now().count();
 
     if (seat_.attached() && seat_.init_ok()) {

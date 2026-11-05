@@ -232,7 +232,7 @@ struct UioMapping {
     if (r.len == 0) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(r.phys)});
     }
-    if (r.phys.v < node_base.v) {
+    if (r.phys < node_base) {
 
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(r.phys)});
     }
@@ -370,7 +370,8 @@ void FpgaMemory::handoff() noexcept {
 #endif
 }
 
-void FpgaMemory::store_release(std::size_t word_off, std::uint32_t v) {
+void FpgaMemory::store_release(WordOffset at, std::uint32_t v) {
+    const std::size_t word_off = at.v;
 
     if (base_ == nullptr || region_.len < 4u || word_off > (region_.len - 4u) / 4u) {
         fatal(
@@ -384,7 +385,8 @@ void FpgaMemory::store_release(std::size_t word_off, std::uint32_t v) {
     *p = v;
 }
 
-std::uint32_t FpgaMemory::load_acquire(std::size_t word_off) const {
+std::uint32_t FpgaMemory::load_acquire(WordOffset at) const {
+    const std::size_t word_off = at.v;
     if (base_ == nullptr || region_.len < 4u || word_off > (region_.len - 4u) / 4u) {
         fatal(
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(word_off)},

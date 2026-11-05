@@ -10,6 +10,7 @@
 #include "infra/path_text.h"
 #include "infra/seat.h"
 #include "svc/disc_mounter.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -23,10 +24,10 @@ struct DiscMountSlot {
     FixedStr<kDiscPathCap, StrFit::Reject> path{};
 
     infra::OptRef<const CuePolicy> policy{};
-    std::uint32_t gen = 0;
+    Generation gen{};
     DiscOp op = DiscOp::Mount;
-    std::uint8_t mounted = 0;
-    std::uint8_t done = 0;
+    bool mounted = false;
+    bool done = false;
 };
 
 static_assert(std::is_trivially_copyable_v<DiscMountSlot>);

@@ -30,7 +30,7 @@ public:
     std::optional<RowKey> key() const override;
     app::PageDescription::Row describe() const override;
     Transition select() override;
-    Transition on_confirm(std::uint8_t choice) override;
+    Transition on_confirm(RowIndex choice) override;
 
     [[nodiscard]] const app::RecentGames::Record& record() const noexcept { return record_; }
 

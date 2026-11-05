@@ -145,8 +145,11 @@ std::optional<ManifestAct> MraStager::next() {
                 leg_ = Leg::Done;
 
                 if (!facts_.switches.rows.empty()) {
-                    const auto pack = dip_pack(facts_.dip_cur);
-                    return SendBracket{.index = kDipIndex, .bytes = {pack.begin(), pack.end()}};
+                    const auto pack = facts_.dip_cur.le_bytes();
+                    return SendBracket{
+                        .index = proto::WideIoIndex{kDipIndex},
+                        .bytes = {pack.begin(), pack.end()}
+                    };
                 }
                 break;
             case Leg::Done:
@@ -165,7 +168,7 @@ std::optional<ManifestAct> MraStager::rom_() {
         } else {
             ++counts_.sent;
             ++counts_.staged;
-            return SendBracket{.index = w.index, .bytes = {}, .aux = w.bytes};
+            return SendBracket{.index = proto::WideIoIndex{w.index}, .bytes = {}, .aux = w.bytes};
         }
     }
     auto& roms = a_->roms;
@@ -201,13 +204,17 @@ std::optional<ManifestAct> MraStager::rom_() {
             window_ = Window{.index = index, .bytes = bytes};
             image_ = std::move(out.bytes);
             image_runs_ = std::move(out.runs);
-            return StageWindow{.index = index, .address = rom.address, .bytes = bytes};
+            return StageWindow{
+                .index = proto::WideIoIndex{index},
+                .address = rom.address,
+                .bytes = bytes
+            };
         }
         if (out.runs.empty()) {
             ++counts_.sent;
 
             std::vector<std::uint8_t> wire(out.bytes.begin(), out.bytes.end());
-            return SendBracket{.index = index, .bytes = std::move(wire)};
+            return SendBracket{.index = proto::WideIoIndex{index}, .bytes = std::move(wire)};
         }
         if (bytes > kPlainFillMax) {
 
@@ -221,7 +228,7 @@ std::optional<ManifestAct> MraStager::rom_() {
         std::vector<std::uint8_t> flat(bytes);
         ImageFile f(std::move(out.bytes), std::move(out.runs));
         (void)f.read_at(0, std::as_writable_bytes(std::span<std::uint8_t>(flat)));
-        return SendBracket{.index = index, .bytes = std::move(flat)};
+        return SendBracket{.index = proto::WideIoIndex{index}, .bytes = std::move(flat)};
     }
     return std::nullopt;
 }
@@ -244,7 +251,10 @@ std::optional<ManifestAct> MraStager::nvram_(const NvramDecl& d) {
         got += *r;
     }
     ++counts_.nvram_loads;
-    return SendBracket{.index = static_cast<std::uint8_t>(d.index), .bytes = std::move(buf)};
+    return SendBracket{
+        .index = proto::WideIoIndex{static_cast<std::uint8_t>(d.index)},
+        .bytes = std::move(buf)
+    };
 }
 
 void MraStager::finish_() noexcept {

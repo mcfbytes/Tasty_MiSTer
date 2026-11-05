@@ -36,7 +36,7 @@ Ex<CoreType> CoreSession::accept_identity(const Ex<hal::CoreIdentity>& id) {
     caps_ = signals_->latch_capabilities();
     if (type_ == CoreType::Unknown) {
         caps_.width = hal::Width::Byte;
-        caps_.io_version = 0;
+        caps_.io_version = hal::IoVersion{0};
     }
 
     phase_ = SessionPhase::Identified;
@@ -52,7 +52,7 @@ Ex<void> CoreSession::set_memory_size(MemSizeCookie cookie) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 1});
     }
     SpiFrame frame{*link_};
-    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::SetMemSz)); !r)
+    if (auto r = frame.begin(UioOp::SetMemSz); !r)
         return fail(r.error());
 
     if (auto r = frame.word(cookie.v); !r)
@@ -170,7 +170,7 @@ Ex<void> CoreSession::send_rtc_image(const RtcImage& image) {
     }
 
     SpiFrame frame{*link_};
-    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::Rtc)); !r)
+    if (auto r = frame.begin(UioOp::Rtc); !r)
         return fail(r.error());
     for (unsigned i = 0; i < 8; i += 2) {
         const auto w = static_cast<std::uint16_t>((image.rtc[i + 1] << 8) | image.rtc[i]);
@@ -180,7 +180,7 @@ Ex<void> CoreSession::send_rtc_image(const RtcImage& image) {
     if (auto r = frame.end(); !r)
         return fail(r.error());
 
-    if (auto r = frame.begin(FrameSel::Uio, static_cast<std::uint16_t>(UioOp::Timestamp)); !r)
+    if (auto r = frame.begin(UioOp::Timestamp); !r)
         return fail(r.error());
     if (auto r = frame.word(static_cast<std::uint16_t>(image.stamp & 0xFFFFu)); !r) {
         return fail(r.error());

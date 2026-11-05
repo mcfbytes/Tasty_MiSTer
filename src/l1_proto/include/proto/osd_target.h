@@ -11,4 +11,8 @@ enum class OsdTarget : std::uint8_t {
     All = 3,
 };
 
+[[nodiscard]] constexpr bool targets(OsdTarget set, OsdTarget one) noexcept {
+    return (static_cast<std::uint8_t>(set) & static_cast<std::uint8_t>(one)) != 0u;
+}
+
 }

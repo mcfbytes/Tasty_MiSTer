@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -9,12 +8,16 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "infra/error.h"
 #include "proto/types.h"
 #include "svc/archive.h"
+#include "svc/asset_name.h"
+#include "svc/asset_query.h"
 #include "svc/dir_entry.h"
+#include "svc/durable_write.h"
 #include "svc/file.h"
 #include "svc/memory_mounts.h"
 #include "svc/scan_filter.h"
@@ -74,46 +77,38 @@ public:
 
     [[nodiscard]] Ex<void> ensure_dir(std::string_view rel) const;
 
-    [[nodiscard]] Ex<void> replace(std::string_view tmp_rel, std::string_view final_rel) const;
+    [[nodiscard]] Ex<void> replace(std::string_view tmp_rel, std::string_view final_rel) const {
+        return durable_.replace(tmp_rel, final_rel);
+    }
 
-    void sync_parent_dir(std::string_view rel) const noexcept;
+    void sync_parent_dir(std::string_view rel) const noexcept { durable_.sync_parent_dir(rel); }
 
-    struct DurabilityLog {
-        std::uint64_t file_syncs = 0;
-        std::uint64_t dir_syncs = 0;
-        std::uint64_t renames = 0;
-        std::uint64_t last_file_sync = 0;
-        std::uint64_t last_rename = 0;
-    };
-
+    using DurabilityLog = DurableWrite::DurabilityLog;
     static DurabilityLog durability_log() noexcept;
 
-    static bool extension_matches(std::string_view filename, std::string_view packed_extensions);
+    static bool extension_matches(std::string_view filename, std::string_view packed_extensions) {
+        return asset_name::extension_matches(filename, packed_extensions);
+    }
 
-    static std::optional<Crc32> parse_crc_name(std::string_view filename, std::string_view ext);
+    static std::optional<Crc32> parse_crc_name(std::string_view filename, std::string_view ext) {
+        return asset_name::parse_crc_name(filename, ext);
+    }
 
-    struct AssetQuery {
-        std::string_view rom_path;
-        Crc32 crc{};
-        std::string_view ext;
-        std::string_view core_dir;
-
-        std::string_view cd_asset_dir;
-
-        bool require_zip = false;
-    };
-
+    using AssetQuery = svc::AssetQuery;
     [[nodiscard]] Ex<std::string> find_game_asset(const AssetQuery& q) const;
 
 private:
-    static void sync_dir_of_(const std::string& path) noexcept;
-    Vfs() = default;
+    Vfs(StorageRoot root, std::string root_path)
+        : root_(root),
+          root_path_(std::move(root_path)),
+          durable_(root_path_) {}
 
     Ex<std::unique_ptr<IFile>> open_backend_(std::string_view path, OpenMode mode) const;
 
     StorageRoot root_{};
     std::string root_path_;
     MemoryMounts memory_;
+    DurableWrite durable_;
 };
 
 }

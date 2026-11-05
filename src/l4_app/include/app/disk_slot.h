@@ -12,6 +12,7 @@
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "proto/disk_act.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -31,7 +32,7 @@ struct DiskSlot {
 
         struct Bind {
             static constexpr Kind kKind = Kind::Bind;
-            std::uint8_t unit = 0;
+            proto::DiskUnit unit{};
             std::uint8_t pad_[3]{};
             std::uint32_t seq = 0;
             PathText path{};
@@ -58,7 +59,7 @@ struct DiskSlot {
         std::uint8_t pad_{};
         Head head{};
         std::uint16_t pad2_{};
-        alignas(4) std::array<std::byte, kStore> store{};
+        alignas(alignof(std::uint32_t)) std::array<std::byte, kStore> store{};
     };
 
     Ask ask{};

@@ -34,7 +34,7 @@ public:
     PageId id() const override;
     std::string_view title() const override;
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
-    std::uint8_t pinned() const noexcept override;
+    RowCount pinned() const noexcept override;
     bool remembers_focus() const noexcept override;
     std::uint32_t refusals() const noexcept override;
 

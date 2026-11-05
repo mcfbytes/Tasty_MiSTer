@@ -4,6 +4,7 @@
 #include "app/hd_renderer.h"
 #include "infra/error.h"
 #include "infra/park_fds.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
 #include "infra/seat_park.h"
@@ -36,7 +37,7 @@ public:
 
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
 
-    [[nodiscard]] int park_ms() const noexcept { return renderer_.park_ms(); }
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return renderer_.park_ms(); }
 
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 

@@ -125,9 +125,9 @@ inline constexpr bool kSeatChecksEnabled = (0 != 0);
 
 namespace seat::detail {
 
-[[noreturn]] void violation(SeatTag want, SeatTag got, std::uint16_t site, const char* what);
+[[noreturn]] void violation(SeatTag want, SeatTag got, infra::ErrorSite site, const char* what);
 
-inline void check(SeatTag want, std::uint16_t site, const char* what) noexcept {
+inline void check(SeatTag want, infra::ErrorSite site, const char* what) noexcept {
     if (const SeatTag got = current_seat(); got != want) {
         violation(want, got, site, what);
     }
@@ -137,7 +137,7 @@ inline void check(SeatTag want, std::uint16_t site, const char* what) noexcept {
 
 template <SeatTag Want>
 inline void seat_assert(
-    [[maybe_unused]] std::uint16_t site,
+    [[maybe_unused]] infra::ErrorSite site,
     [[maybe_unused]] const char* what
 ) noexcept {
     if constexpr (kSeatChecksEnabled && Want != SeatTag::Unbound) {

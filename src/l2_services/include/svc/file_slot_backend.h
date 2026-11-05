@@ -33,10 +33,13 @@ public:
         std::uint64_t offset,
         std::span<const std::uint8_t> src
     ) override;
-    [[nodiscard]] Ex<proto::FileSize> open_extent(std::span<const std::byte> order) override;
+    [[nodiscard]] Ex<proto::FileSize> open_extent(
+        proto::SlotIndex slot,
+        std::span<const std::byte> order
+    ) override;
     [[nodiscard]] Ex<proto::FileSize> create(std::span<const std::uint8_t> first) override;
     [[nodiscard]] Ex<void> flush() override;
-    void release() noexcept override;
+    void release(proto::SlotIndex slot) noexcept override;
 
 private:
     const Vfs* vfs_;

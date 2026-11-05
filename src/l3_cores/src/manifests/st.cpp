@@ -9,6 +9,8 @@
 
 namespace mister::cores::manifests {
 
+using namespace std::chrono_literals;
+
 std::unique_ptr<Core> make_st(const CoreProfile& p, const CoreGrant& g) {
     return std::make_unique<StCore>(p, g.services);
 }
@@ -41,7 +43,7 @@ static_assert(
     "same predicate that covers the menu, archie and SharpMZ"
 );
 static_assert(
-    kAtariSt.default_uart_baud == 19200,
+    kAtariSt.default_uart_baud == BaudRate{19200},
     "user_io.cpp:1726: `uart_speeds[0] = is_st() ? 19200 : 115200` seeds an empty "
     "CONF_STR speed list, and 19200 is the ST's MIDI-era default"
 );
@@ -67,7 +69,7 @@ static_assert(
     "the ACSI poll claims each round it runs (no OSD row)"
 );
 static_assert(
-    kAtariSt.services[0].period_ms == 1,
+    kAtariSt.services[0].period == 1ms,
     "the ticker FALLBACK cadence, not the stock rate: stock polls every user_io "
     "pass and 1 ms is the executive's floor"
 );
@@ -233,7 +235,7 @@ constexpr std::size_t st_row(StOption o) noexcept {
     return kStOptionRows.size();
 }
 
-constexpr std::size_t st_rows_on(std::uint8_t page) noexcept {
+constexpr std::size_t st_rows_on(proto::SubmenuNo page) noexcept {
     std::size_t n = 0;
     for (const auto& r : kStOptionRows)
         if (r.page == page)
@@ -351,8 +353,8 @@ static_assert(
 );
 static_assert(
     kStOptionPages.size() == 2
-        && kStOptionPages[kStMainPage].empty()
-        && kStOptionPages[kStConfigPage] == "Config",
+        && kStOptionPages[kStMainPage.v].empty()
+        && kStOptionPages[kStConfigPage.v] == "Config",
     "menu.cpp:4630 titles the main page with the core's own name, :4815 the sub-page "
     "'Config'; an empty entry means the core name"
 );

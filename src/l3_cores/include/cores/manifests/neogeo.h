@@ -16,7 +16,7 @@ namespace mister::cores::manifests {
 
 extern const CoreProfile kNeoGeo;
 
-[[nodiscard]] std::unique_ptr<IRomsetAliasSource> make_neogeo_alias_source();
+[[nodiscard]] std::unique_ptr<NeoGeoAliasSource> make_neogeo_alias_source();
 
 std::unique_ptr<ILoader> make_neogeo_loader(const LoaderContext& ctx);
 
@@ -25,14 +25,14 @@ inline constexpr auto kNeoGeoServices = std::to_array<LinkDecoderDecl>({
         "neogeo.cmd_edge",
         reactor::Cause::Ring,
         &kCdCommandEdge<kNeoGeo>,
-        0,
+        reactor::kEveryRound,
         RoundClaim::Never,
     },
     {
         "neogeo.service_tick",
         reactor::Cause::Tick,
         &kCdServiceTick<kNeoGeo>,
-        1,
+        std::chrono::milliseconds{1},
         RoundClaim::Always,
     },
 });

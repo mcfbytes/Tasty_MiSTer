@@ -7,6 +7,7 @@
 #include "app/encode_status.h"
 #include "app/raw_frame_slot.h"
 #include "app/sidecar_msg.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "os/clock.h"
@@ -26,7 +27,7 @@ public:
         AviEncoder& video;
     };
 
-    static constexpr int kHeldPollMs = 5;
+    static constexpr infra::ParkTimeout kHeldPollMs{5};
     static constexpr unsigned kJobsPerPass = 4;
 
     explicit FrameHasher(const Wiring& w) noexcept : w_(w) {}
@@ -41,7 +42,7 @@ public:
 
     [[nodiscard]] bool holding() const noexcept { return static_cast<bool>(job_); }
 
-    [[nodiscard]] int park_ms() const noexcept;
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
 
     void release() noexcept;
 

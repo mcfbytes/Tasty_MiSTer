@@ -17,7 +17,7 @@ public:
 
     void arm() noexcept { pause_wake_.arm(); }
 
-    void wait(int ms) noexcept { decode_.wait_events(ms); }
+    void wait(infra::ParkTimeout ms) noexcept { decode_.wait_events(ms); }
 
     void disarm() noexcept { pause_wake_.disarm(); }
 

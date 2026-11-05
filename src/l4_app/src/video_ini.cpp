@@ -6,6 +6,30 @@
 
 namespace mister::app {
 
+namespace {
+
+VsyncAdjust vsync_adjust_of(const svc::ConfigSnapshot& snap) noexcept {
+    constexpr std::uint8_t kOff = 0;
+    constexpr std::uint8_t kMatch = 1;
+    if (snap.vsync_adjust == kOff)
+        return VsyncAdjust::Off;
+    if (snap.vsync_adjust == kMatch)
+        return VsyncAdjust::Match;
+    return VsyncAdjust::LowLag;
+}
+
+svc::adv7513::HdrMode hdr_mode_of(const svc::ConfigSnapshot& snap) noexcept {
+    constexpr std::uint8_t kOff = 0;
+    constexpr std::uint8_t kHlg = 1;
+    if (snap.hdr == kOff)
+        return svc::adv7513::HdrMode::Off;
+    if (snap.hdr == kHlg)
+        return svc::adv7513::HdrMode::Hlg;
+    return svc::adv7513::HdrMode::DciP3;
+}
+
+}
+
 VideoIni absent_video_ini(const VideoIni::Force& force, const VideoIni& last) {
     VideoIni ini{};
     ini.ar_cust = last.ar_cust;
@@ -52,22 +76,21 @@ VideoIni parse_video_ini(const svc::ConfigSnapshot& snap, const VideoIni::Force&
     ini.menu_pal = snap.menu_pal != 0;
     ini.forced_scandoubler = snap.forced_scandoubler != 0;
     ini.direct_video = dv_on;
-    ini.vsync_adjust = snap.vsync_adjust;
+    ini.vsync_adjust = vsync_adjust_of(snap);
 
     if (ini.direct_video)
-        ini.vsync_adjust = 0;
+        ini.vsync_adjust = VsyncAdjust::Off;
     if (force.vsync && !ini.direct_video) {
         ini.vsync_adjust = *force.vsync;
         ini.wire.vsync_align = false;
     } else {
-        ini.wire.vsync_align = (ini.vsync_adjust == 2);
+        ini.wire.vsync_align = (ini.vsync_adjust == VsyncAdjust::LowLag);
     }
     ini.refresh_min = snap.refresh_min;
     ini.refresh_max = snap.refresh_max;
 
     ini.init.hdmi_game_mode = snap.hdmi_game_mode != 0;
-    ini.init.hdr_mode = snap.hdr != 0;
-    ini.init.hlg = snap.hdr == 1;
+    ini.init.hdr = hdr_mode_of(snap);
     ini.init.hdmi_limited = snap.hdmi_limited != 0;
     ini.init.ypbpr = (snap.vga_mode_int == 1) && ini.direct_video && ini.direct_video_ini == 1;
     ini.init.dvi_mode = snap.dvi_mode == 1;

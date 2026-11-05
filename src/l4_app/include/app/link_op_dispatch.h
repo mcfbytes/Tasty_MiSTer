@@ -2,11 +2,13 @@
 #pragma once
 
 #include <concepts>
+#include <type_traits>
 #include <utility>
 
 #include "app/link_encoder.h"
 #include "app/link_op_ctx.h"
 #include "app/link_op_facts.h"
+#include "app/types.h"
 #include "infra/message_sum.h"
 #include "proto/link_op.h"
 
@@ -130,24 +132,20 @@ concept LinkOpSessionSink = std::same_as<typename S::Result, ILinkEncoder::Outco
        };
 
 template <class S>
-concept LinkOpTransferSink = std::same_as<typename S::Result, ILinkEncoder::Outcome>
+concept LinkOpTransferSink = std::same_as<typename S::Result, Delivered>
     && requires(S& s, const proto::LinkOp& m, const LinkOpCtx& c) {
-           {
-               s.on(std::declval<const proto::LinkOp::FileTx&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
+           { s.on(std::declval<const proto::LinkOp::FileTx&>(), c) } -> std::same_as<Delivered>;
            {
                s.on(std::declval<const proto::LinkOp::StagePayload&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
+           } -> std::same_as<Delivered>;
            {
                s.on(std::declval<const proto::LinkOp::StageDiscPayload&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
-           {
-               s.on(std::declval<const proto::LinkOp::StageReset&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
+           } -> std::same_as<Delivered>;
+           { s.on(std::declval<const proto::LinkOp::StageReset&>(), c) } -> std::same_as<Delivered>;
            {
                s.on(std::declval<const proto::LinkOp::SetWideIndex&>(), c)
-           } -> std::same_as<ILinkEncoder::Outcome>;
-           { s.misrouted(m, c) } -> std::same_as<ILinkEncoder::Outcome>;
+           } -> std::same_as<Delivered>;
+           { s.misrouted(m, c) } -> std::same_as<Delivered>;
        };
 
 template <class S>
@@ -197,5 +195,38 @@ concept LinkOpOptionsSink = std::same_as<typename S::Result, ILinkEncoder::Outco
     }
     return false;
 }
+
+struct LinkOpAnswerRoutes {
+
+    struct AnswerOnly {};
+    template <class A>
+    static constexpr bool routed = answer_for(A::kKind) != RefusedAnswer::None;
+};
+
+using AnswerOnly = LinkOpAnswerRoutes::AnswerOnly;
+
+template <class S>
+concept LinkOpAnswerSink = std::same_as<typename S::Result, Delivered>
+    && requires(S& s, const proto::LinkOp& m, const LinkOpCtx& c) {
+           {
+               s.on(std::declval<const proto::LinkOp::FileTx&>(), c, AnswerOnly{})
+           } -> std::same_as<Delivered>;
+           {
+               s.on(std::declval<const proto::LinkOp::StagePayload&>(), c, AnswerOnly{})
+           } -> std::same_as<Delivered>;
+           { s.misrouted(m, c, AnswerOnly{}) } -> std::same_as<Delivered>;
+       };
+
+struct LinkOpPadRoutes {
+    template <class A>
+    static constexpr bool routed = pad_for(A::kKind) != Pad::None;
+};
+
+template <class S>
+concept LinkOpPadSink = requires(S& s, const proto::LinkOp& m) {
+    { s.on(std::declval<const proto::LinkOp::JoyEmit&>()) } -> std::same_as<bool>;
+    { s.on(std::declval<const proto::LinkOp::JoyRelease&>()) } -> std::same_as<bool>;
+    { s.misrouted(m) } -> std::same_as<bool>;
+};
 
 }

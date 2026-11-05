@@ -29,22 +29,22 @@ public:
 
     MenuMask mask() const noexcept;
 
-    std::uint32_t rows_beyond_mask() const noexcept { return beyond_mask_; }
+    RowCount rows_beyond_mask() const noexcept { return beyond_mask_; }
 
     const OptionItem* at_selectable(RowIndex index) const;
 
-    bool empty_page() const noexcept { return drawn_.v == 0; }
+    bool empty_page() const noexcept { return drawn_.empty(); }
 
     bool flat() const noexcept { return flat_; }
 
-    std::uint8_t page() const noexcept { return page_; }
+    proto::SubmenuNo page() const noexcept { return page_; }
 
 private:
     std::vector<std::unique_ptr<OptionItem>> items_;
     RowCount selectable_{};
     RowCount drawn_{};
-    std::uint32_t beyond_mask_ = 0;
-    std::uint8_t page_ = 0;
+    RowCount beyond_mask_{};
+    proto::SubmenuNo page_{};
     bool flat_ = false;
 };
 

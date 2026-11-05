@@ -37,7 +37,8 @@ class RecorderBlock {
 public:
     RecorderBlock(
         const BootParts& plat,
-        DeviceBlock& device,
+        const DeviceBlock::Parts& parts,
+        OpenVerdict& verdict,
         const app::ReplayStatusCell& replay_status
     );
     RecorderBlock(const RecorderBlock&) = delete;

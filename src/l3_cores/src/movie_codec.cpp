@@ -182,7 +182,7 @@ Ex<IMovieCodec::DigestSource> IMovieCodec::head_digest_source(
     const auto got = (*f)->read_at(0, std::as_writable_bytes(std::span<std::uint8_t>(head)));
     if (!got)
         return std::unexpected(got.error());
-    const auto span = rom_digest_span(std::span<const std::uint8_t>(head.data(), *got), size->v);
+    const auto span = rom_digest_span(std::span<const std::uint8_t>(head.data(), *got), *size);
     if (!span)
         return refuse(Refusal::System);
     return DigestSource{.file = std::string(rom), .span = *span, .prefix = {}};

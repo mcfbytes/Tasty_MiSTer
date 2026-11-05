@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 
 namespace mister::reactor {
@@ -24,7 +25,7 @@ public:
 
     void disarm() noexcept {}
 
-    void wait(int ms) noexcept;
+    void wait(infra::ParkTimeout ms) noexcept;
 
 private:
     reactor::Executive& exec_;

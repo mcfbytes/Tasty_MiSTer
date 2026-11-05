@@ -4,8 +4,10 @@
 #include <array>
 #include <cstdint>
 
+#include "infra/indexed_array.h"
 #include "svc/analog_xy.h"
 #include "svc/key_edge.h"
+#include "svc/stick_index.h"
 #include "svc/types.h"
 
 namespace mister::svc {
@@ -16,10 +18,10 @@ struct DeviceReport {
     JoyMask buttons{};
     bool buttons_changed = false;
     JoyMask menu_buttons{};
-    AnalogXy stick[2]{};
-    bool stick_changed[2]{false, false};
+    infra::IndexedArray<AnalogXy, kSticks.size(), StickIndex> stick{};
+    infra::IndexedArray<bool, kSticks.size(), StickIndex> stick_changed{};
     int rel_x = 0, rel_y = 0, rel_wheel = 0;
-    std::uint8_t mouse_buttons = 0;
+    proto::MouseButtons mouse_buttons{};
     bool mouse_changed = false;
     std::uint8_t key_count = 0;
     std::uint16_t key_overflow = 0;

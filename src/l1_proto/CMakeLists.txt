@@ -12,6 +12,8 @@ add_library(mister_proto STATIC
   src/image_sink.cpp
   src/item_table.cpp
   src/joystick.cpp
+  src/link.cpp
+  src/link_ops.cpp
   src/osd.cpp
   src/pad_levels.cpp
   src/ps2_keyboard.cpp
@@ -54,6 +56,8 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/declared_line.h
   proto/lane_block_decl.h
   proto/link_frame.h
+  proto/link.h
+  proto/link_ops.h
   proto/spi_frame.h
   proto/sys_directory_image.h
   proto/sector_block_decl.h
@@ -131,10 +135,12 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/status_snapshot.h
   proto/standard_item.h
   proto/standard_item_row.h
+  proto/state_slot.h
   proto/status_register.h
   proto/status_edit.h
   proto/status_word.h
   proto/status_cell.h
+  proto/stick_pos.h
   proto/storage_channel.h
   proto/storage_completion.h
   proto/storage_completion_dispatch.h
@@ -142,6 +148,9 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/storage_request_dispatch.h
   proto/types.h
   proto/uio_opcodes.h
+  proto/fio_opcodes.h
+  proto/osd_opcodes.h
+  proto/link_route.h
   proto/upload_session.h
   proto/volume_cmd.h
   proto/rotation_dir.h

@@ -11,7 +11,6 @@
 
 #include "infra/error.h"
 #include "infra/opt_ref.h"
-#include "hal/spi_transport.h"
 #include "proto/link_frame.h"
 #include "svc/adv7513_io.h"
 #include "svc/cec_state_machine.h"
@@ -46,18 +45,10 @@ inline constexpr std::size_t kVideoWireWords = 26;
     std::span<const std::uint16_t> words
 );
 
-[[nodiscard]] Ex<std::uint16_t> emit_filter_mode(hal::ISpiTransport& link, std::uint8_t mode);
-
 [[nodiscard]] Ex<void> emit_filter_coeff_chunk(
     proto::ILinkFrame& frame,
     std::span<const std::uint16_t> chunk
 );
-
-[[nodiscard]] Ex<std::uint16_t> emit_shadow_mask(hal::ISpiTransport& link, std::uint16_t flag_word);
-
-[[nodiscard]] Ex<std::uint16_t> emit_hdmi_int_probe(hal::ISpiTransport& link);
-
-[[nodiscard]] Ex<std::uint16_t> emit_gamma_probe(hal::ISpiTransport& link);
 
 inline constexpr std::size_t kFilterPhases = 256;
 inline constexpr std::size_t kFilterTaps = 4;
@@ -66,13 +57,22 @@ inline constexpr std::size_t kFilterBanks = 2;
 inline constexpr std::size_t kFilterCoeffWords = 4096;
 
 constexpr std::size_t filter_coeff_word_count(std::uint16_t ver) noexcept {
-    switch (ver & 0x3u) {
-        case 1:
-            return kFilterBanks * (kFilterPhases / 16) * kFilterTaps;
+
+    constexpr std::uint16_t kEncodingMask = 0x3;
+    constexpr std::uint16_t kFullPrecisionBit = 0x4;
+    constexpr std::uint16_t kEncodingBytes = 1;
+
+    constexpr std::size_t kBytePhaseStep = 16;
+    constexpr std::size_t kCoarsePhaseStep = 4;
+
+    constexpr std::size_t kWordsPerEntry = 2;
+    switch (ver & kEncodingMask) {
+        case kEncodingBytes:
+            return kFilterBanks * (kFilterPhases / kBytePhaseStep) * kFilterTaps;
         case 2:
         case 3: {
-            const std::size_t skip = (ver & 0x4u) != 0 ? 1u : 4u;
-            return kFilterBanks * (kFilterPhases / skip) * kFilterTaps * 2u;
+            const std::size_t skip = (ver & kFullPrecisionBit) != 0 ? 1u : kCoarsePhaseStep;
+            return kFilterBanks * (kFilterPhases / skip) * kFilterTaps * kWordsPerEntry;
         }
         default:
             return 0;
@@ -80,38 +80,59 @@ constexpr std::size_t filter_coeff_word_count(std::uint16_t ver) noexcept {
 }
 
 constexpr std::uint16_t filter_coeff_word(std::uint16_t ver, std::size_t i) noexcept {
-    const std::size_t enc = ver & 0x3u;
-    if (enc == 1u) {
-        const std::size_t per_bank = (kFilterPhases / 16) * kFilterTaps;
+    constexpr std::uint16_t kEncodingMask = 0x3;
+    constexpr std::uint16_t kFullPrecisionBit = 0x4;
+    constexpr std::uint16_t kEncodingBytes = 1;
+    constexpr std::size_t kBytePhaseStep = 16;
+    constexpr std::size_t kCoarsePhaseStep = 4;
+    constexpr std::size_t kCoarsePhases = 64;
+    constexpr std::size_t kWordsPerEntry = 2;
+
+    constexpr unsigned kAddrShift = 9;
+    constexpr std::uint32_t kValueMask = 0x1FF;
+
+    constexpr std::uint16_t kHotByte = 128;
+    constexpr std::uint16_t kHotCoarse = 128;
+    constexpr std::uint16_t kHotFull = 256;
+
+    constexpr std::size_t kLowHalfHotTap = 1;
+    constexpr std::size_t kHighHalfHotTap = 2;
+    const std::size_t enc = ver & kEncodingMask;
+    if (enc == kEncodingBytes) {
+        const std::size_t per_bank = (kFilterPhases / kBytePhaseStep) * kFilterTaps;
         const std::size_t bank = i / per_bank;
         const std::size_t within = i % per_bank;
         const std::size_t iter = within / kFilterTaps;
         const std::size_t tap = within % kFilterTaps;
-        const std::size_t addr = bank * 64u + iter * kFilterTaps + tap;
-        const std::size_t phase = iter * 16u;
-        const std::size_t hot = (phase < kFilterPhases / 2) ? 1u : 2u;
+        const std::size_t addr = bank * per_bank + iter * kFilterTaps + tap;
+        const std::size_t phase = iter * kBytePhaseStep;
 
-        const std::uint16_t val = (tap == hot) ? std::uint16_t{128} : std::uint16_t{0};
-        return static_cast<std::uint16_t>((val & 0x1FFu) | (addr << 9));
+        const std::uint16_t val = (tap
+                                   == (phase < kFilterPhases / 2 ? kLowHalfHotTap
+                                                                 : kHighHalfHotTap))
+            ? kHotByte
+            : std::uint16_t{0};
+        return static_cast<std::uint16_t>((val & kValueMask) | (addr << kAddrShift));
     }
-    const bool full = (ver & 0x4u) != 0;
-    const std::size_t skip = full ? 1u : 4u;
-    const std::size_t stride = full ? kFilterPhases * kFilterTaps : 64u * kFilterTaps;
+    const bool full = (ver & kFullPrecisionBit) != 0;
+    const std::size_t skip = full ? 1u : kCoarsePhaseStep;
+    const std::size_t stride = full ? kFilterPhases * kFilterTaps : kCoarsePhases * kFilterTaps;
     const std::size_t per_bank = (kFilterPhases / skip) * kFilterTaps;
-    const std::size_t pair = i / 2;
+    const std::size_t pair = i / kWordsPerEntry;
     const std::size_t bank = pair / per_bank;
     const std::size_t within = pair % per_bank;
     const std::size_t iter = within / kFilterTaps;
     const std::size_t tap = within % kFilterTaps;
-    if ((i & 1u) == 0u) {
+    const bool is_address_word = i % kWordsPerEntry == 0;
+    if (is_address_word) {
         return static_cast<std::uint16_t>(bank * stride + iter * kFilterTaps + tap);
     }
     const std::size_t phase = iter * skip;
-    const std::size_t hot = (phase < kFilterPhases / 2) ? 1u : 2u;
+    const std::size_t hot = phase < kFilterPhases / 2 ? kLowHalfHotTap : kHighHalfHotTap;
     if (tap != hot)
         return 0;
 
-    return full ? std::uint16_t{256} : std::uint16_t{128};
+    return full ? kHotFull : kHotCoarse;
 }
 
 Modeline calculate_cvt(
@@ -136,22 +157,6 @@ std::optional<std::int64_t> yc_lookup(
     std::span<const YcMode> table,
     std::string_view key,
     std::string_view key_expanded
-);
-
-struct GeometryPass {
-    VideoSample sample{};
-    bool res_changed = false;
-    bool fb_changed = false;
-    bool changed = false;
-    bool resent = false;
-    bool yc_sent = false;
-};
-
-[[nodiscard]] Ex<GeometryPass> sample_video_geometry(
-    hal::ISpiTransport& link,
-    bool force,
-    GeometryGate& gate,
-    IFilterResend* filters = nullptr
 );
 
 class VideoService {

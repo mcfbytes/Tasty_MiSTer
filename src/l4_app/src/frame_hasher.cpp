@@ -29,7 +29,7 @@ bool FrameHasher::drained() const noexcept {
     return !job_ && w_.channel.outbound() == 0;
 }
 
-int FrameHasher::park_ms() const noexcept {
+infra::ParkTimeout FrameHasher::park_ms() const noexcept {
     if (job_)
         return kHeldPollMs;
     return w_.video.park_ms();
@@ -70,18 +70,15 @@ bool FrameHasher::emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept {
     std::uint32_t k = 0;
     for (std::uint8_t r = 0; r < s.runs; ++r) {
         const FrameStampRun& run = s.run[r];
-        for (std::uint32_t i = 0; i < run.count; ++i, ++k) {
+        for (CoreFrameCount i{}; i < run.count; i += CoreFrameCount{1}, ++k) {
             if (k < next_)
                 continue;
             m.hash = prev_hash_;
-            m.stamp = FrameStamp{};
-            m.stamp.core_frame = run.first + i;
-            m.stamp.header_ctr = static_cast<std::uint8_t>((run.first_ctr + i) & 0x7u);
-            m.stamp.dup = run.why;
-            if (s.stamp.movie_frame >= 0) {
-                const std::int64_t mf = static_cast<std::int64_t>(s.stamp.movie_frame)
-                    - static_cast<std::int64_t>(s.stamp.core_frame - m.stamp.core_frame);
-                m.stamp.movie_frame = static_cast<std::int32_t>(std::max<std::int64_t>(mf, -1));
+            m.stamp = run.stamp_at(i);
+            if (s.stamp.movie_frame >= MovieFrame{}) {
+                const WideMovieFrame mf = wide_frame(s.stamp.movie_frame)
+                    - MovieSpan{static_cast<std::int64_t>(s.stamp.core_frame - m.stamp.core_frame)};
+                m.stamp.movie_frame = std::max(mf, kNoWideMovieFrame).narrowed();
             }
             if (!chunk_(s, false, m) || !push_(m))
                 return false;

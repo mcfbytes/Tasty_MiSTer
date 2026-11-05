@@ -11,6 +11,7 @@
 #include "app/park_receipt.h"
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 #include "hal/boards_table.h"
 #include "hal/program_geometry.h"
 
@@ -25,16 +26,20 @@ class Vfs;
 
 namespace mister::app {
 
-inline constexpr std::uint64_t kContainerHeaderBytes = 16;
+inline constexpr std::size_t kContainerHeaderBytes = 16;
+inline constexpr proto::FileSize kContainerHeader{kContainerHeaderBytes};
 
 inline constexpr std::size_t kProgramBufferBytes = 64u * 1024u;
 
 struct PayloadWindow {
-    std::uint64_t base = 0;
-    std::uint64_t length = 0;
+    proto::FileSize base{};
+    proto::FileSize length{};
 };
 
-[[nodiscard]] Ex<PayloadWindow> container_window(std::span<const std::byte> hdr, std::uint64_t fsz);
+[[nodiscard]] Ex<PayloadWindow> container_window(
+    std::span<const std::byte> hdr,
+    proto::FileSize fsz
+);
 
 class BitstreamProgrammer {
     TASTY_SEAT_RESIDENT(Main);

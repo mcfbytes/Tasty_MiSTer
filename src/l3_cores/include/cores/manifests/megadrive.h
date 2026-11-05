@@ -18,7 +18,7 @@ inline constexpr auto kMegaDriveServices = std::to_array<LinkDecoderDecl>({
         "megadrive.mdp_tick",
         reactor::Cause::Tick,
         &kPcmWireTick<kMegaDrive>,
-        5,
+        std::chrono::milliseconds{5},
         RoundClaim::Always,
     },
 });
@@ -35,6 +35,7 @@ inline constexpr CoreProfile kMegaDrive{
     .slots = {},
     .boot_assets = {},
     .signatures = {},
+    .tasty_playable = true,
 
     .windows = kMdPlusWindows,
 };

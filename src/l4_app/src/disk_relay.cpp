@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/disk_relay.h"
+#include "proto/link.h"
 
 #include <span>
 #include <utility>
 
 #include "hal/selected.h"
 #include "hal/spi_transport.h"
+#include "infra/endian.h"
 #include "infra/message_sum.h"
 
 namespace mister::app {
@@ -24,7 +26,7 @@ void DiskRelay::install(std::unique_ptr<cores::IDiskServant> servant) noexcept {
     io_.servant = std::move(servant);
 }
 
-void DiskRelay::service_rt(hal::ISpiTransport& link, const proto::DiskPollDecl& poll) noexcept {
+void DiskRelay::service_rt(proto::Link& link, const proto::DiskPollDecl& poll) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
     const bool was_open = rt_.command_open;
     if (Chan::Loan l = chan_.reap())
@@ -36,11 +38,12 @@ void DiskRelay::service_rt(hal::ISpiTransport& link, const proto::DiskPollDecl& 
     poll_(link, poll);
 }
 
-void DiskRelay::order_bind(std::uint8_t unit, std::string_view path) noexcept {
+void DiskRelay::order_bind(proto::DiskUnit unit, std::string_view path) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
-    if (unit >= kUnits)
+    const infra::OptRef<Order> order = rt_.orders.find(unit);
+    if (!order)
         return;
-    Order& o = rt_.orders[unit];
+    Order& o = *order;
     do
         ++o.seq;
     while (o.seq == 0);
@@ -56,11 +59,13 @@ void DiskRelay::order_bind(std::uint8_t unit, std::string_view path) noexcept {
     (void)send_orders_();
 }
 
-cores::MountState DiskRelay::bind_answer(std::uint8_t unit) noexcept {
+cores::MountState DiskRelay::bind_answer(proto::DiskUnit unit) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
-    if (unit >= kUnits)
+    const auto& orders = rt_.orders;
+    const infra::OptRef<const Order> order = orders.find(unit);
+    if (!order)
         return cores::MountState::Failed;
-    const Order& o = rt_.orders[unit];
+    const Order& o = *order;
     if (o.seq != 0 && o.answered != o.seq) {
         (void)send_orders_();
         if (!rt_.command_open) {
@@ -82,9 +87,9 @@ void DiskRelay::abandon_command() noexcept {
     rt_.abandoned.add();
 }
 
-void DiskRelay::abandon_command_on(std::uint8_t unit) noexcept {
+void DiskRelay::abandon_command_on(proto::DiskUnit unit) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
-    if (rt_.open_unit != proto::kNoDiskUnit && rt_.open_unit != unit)
+    if (rt_.open_unit.has_value() && *rt_.open_unit != unit)
         return;
     abandon_command();
 }
@@ -105,10 +110,10 @@ void DiskRelay::forget() noexcept {
 
 void DiskRelay::close_command_() noexcept {
     rt_.command_open = false;
-    rt_.open_unit = proto::kNoDiskUnit;
+    rt_.open_unit.reset();
 }
 
-void DiskRelay::land_(Chan::Loan&& l, hal::ISpiTransport* link) noexcept {
+void DiskRelay::land_(Chan::Loan&& l, proto::Link* link) noexcept {
     if (!l.completed()) {
         rt_.stale.add();
         const bool ours = l->ask.head.gen == rt_.gen && l->ask.head.epoch == rt_.epoch;
@@ -122,18 +127,14 @@ void DiskRelay::land_(Chan::Loan&& l, hal::ISpiTransport* link) noexcept {
     infra::dispatch<infra::AllRouted>(l->ask, *this, l, link);
 }
 
-void DiskRelay::on(
-    const Ask::Bind& a,
-    const Ask::Head& h,
-    Chan::Loan& l,
-    hal::ISpiTransport*
-) noexcept {
+void DiskRelay::on(const Ask::Bind& a, const Ask::Head& h, Chan::Loan& l, proto::Link*) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
-    if (h.gen != rt_.gen || a.unit >= kUnits) {
+    const infra::OptRef<Order> order = rt_.orders.find(a.unit);
+    if (h.gen != rt_.gen || !order) {
         rt_.stale.add();
         return;
     }
-    Order& o = rt_.orders[a.unit];
+    Order& o = *order;
     if (a.seq != o.seq)
         return;
     o.answered = a.seq;
@@ -144,7 +145,7 @@ void DiskRelay::on(
     const Ask::Command&,
     const Ask::Head& h,
     Chan::Loan& l,
-    hal::ISpiTransport* link
+    proto::Link* link
 ) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
     act_(h, l, link);
@@ -154,35 +155,30 @@ void DiskRelay::on(
     const Ask::Resume&,
     const Ask::Head& h,
     Chan::Loan& l,
-    hal::ISpiTransport* link
+    proto::Link* link
 ) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
     act_(h, l, link);
 }
 
-void DiskRelay::on(
-    const Ask::Release&,
-    const Ask::Head&,
-    Chan::Loan&,
-    hal::ISpiTransport*
-) noexcept {
+void DiskRelay::on(const Ask::Release&, const Ask::Head&, Chan::Loan&, proto::Link*) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
 }
 
-void DiskRelay::misrouted(const Ask&, Chan::Loan&, hal::ISpiTransport*) noexcept {
+void DiskRelay::misrouted(const Ask&, Chan::Loan&, proto::Link*) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
     rt_.stale.add();
 }
 
-void DiskRelay::act_(const Ask::Head& h, Chan::Loan& l, hal::ISpiTransport* link) noexcept {
+void DiskRelay::act_(const Ask::Head& h, Chan::Loan& l, proto::Link* link) noexcept {
     if (h.gen != rt_.gen || h.epoch != rt_.epoch) {
         rt_.stale.add();
         return;
     }
     const proto::DiskAct a = l->act;
-    if (a.unit != proto::kNoDiskUnit)
-        rt_.open_unit = a.unit;
-    if (a.kind == proto::DiskAct::Kind::None) {
+    if (const std::optional<proto::DiskUnit> u = a.unit())
+        rt_.open_unit = *u;
+    if (a.kind() == proto::DiskAct::Kind::None) {
         close_command_();
         return;
     }
@@ -192,7 +188,7 @@ void DiskRelay::act_(const Ask::Head& h, Chan::Loan& l, hal::ISpiTransport* link
         return;
     }
     rt_.acts.add();
-    if (a.last) {
+    if (a.last()) {
         close_command_();
         return;
     }
@@ -201,37 +197,46 @@ void DiskRelay::act_(const Ask::Head& h, Chan::Loan& l, hal::ISpiTransport* link
     chan_.send(std::move(l));
 }
 
-bool DiskRelay::write_(hal::ISpiTransport& link, const proto::DiskAct& a, DiskSlot& s) noexcept {
+bool DiskRelay::write_(proto::Link& link, const proto::DiskAct& a, DiskSlot& s) noexcept {
 
-    if ((a.len & 1u) != 0u || a.len > s.bytes.size())
+    if ((a.len() & 1u) != 0u || a.len() > s.bytes.size())
         return false;
-    hal::Selected cs(link, hal::ChipSelect::Io);
-    if (!link.transfer(hal::SpiWord{a.opcode}))
+    if (!link.command(hal::ChipSelect::Io, a.opcode()))
         return false;
-    switch (a.kind) {
+
+    constexpr std::size_t kWordBytes = 2;
+    constexpr unsigned kByteBits = 8;
+    constexpr unsigned kByteMask = 0xFF;
+    switch (a.kind()) {
         case proto::DiskAct::Kind::Out:
-            for (std::size_t i = 0; i < a.len; i += 2) {
-                const auto lo = static_cast<std::uint16_t>(s.bytes[i]);
-                const auto hi = static_cast<std::uint16_t>(s.bytes[i + 1]);
-                if (!link.transfer(hal::SpiWord{static_cast<std::uint16_t>(lo | (hi << 8))}))
+            for (std::size_t i = 0; i < a.len(); i += kWordBytes) {
+                const auto word = infra::load_le<std::uint16_t>(
+                    std::span(s.bytes).subspan(i).first<kWordBytes>()
+                );
+                if (!link.word(word))
                     return false;
             }
-            return true;
+            break;
         case proto::DiskAct::Kind::In:
-            for (std::size_t i = 0; i < a.len; i += 2) {
-                const auto r = link.transfer(hal::SpiWord{0});
+            for (std::size_t i = 0; i < a.len(); i += kWordBytes) {
+                const auto r = link.read();
                 if (!r)
                     return false;
-                s.bytes[i] = static_cast<std::byte>(r->v & 0x00FFu);
-                s.bytes[i + 1] = static_cast<std::byte>((r->v >> 8) & 0x00FFu);
+                s.bytes[i] = static_cast<std::byte>(*r & kByteMask);
+                s.bytes[i + 1] = static_cast<std::byte>((*r >> kByteBits) & kByteMask);
             }
-            return true;
-        case proto::DiskAct::Kind::Signal:
-            return !a.has_word || link.transfer(hal::SpiWord{a.word}).has_value();
+            break;
+        case proto::DiskAct::Kind::Signal: {
+            const std::optional<std::uint16_t> w = a.word();
+            if (w.has_value() && !link.word(*w))
+                return false;
+            break;
+        }
         case proto::DiskAct::Kind::None:
-            return true;
+            break;
     }
-    return false;
+    link.close();
+    return true;
 }
 
 bool DiskRelay::send_orders_() noexcept {
@@ -244,7 +249,8 @@ bool DiskRelay::send_orders_() noexcept {
         chan_.send(std::move(l));
         rt_.release_owed = false;
     }
-    for (std::uint8_t unit = 0; unit < kUnits; ++unit) {
+    for (std::uint8_t i = 0; i < kUnits; ++i) {
+        const proto::DiskUnit unit{i};
         Order& o = rt_.orders[unit];
         if (o.seq == 0 || o.sent)
             continue;
@@ -264,27 +270,31 @@ bool DiskRelay::send_orders_() noexcept {
     return true;
 }
 
-void DiskRelay::poll_(hal::ISpiTransport& link, const proto::DiskPollDecl& poll) noexcept {
+void DiskRelay::poll_(proto::Link& link, const proto::DiskPollDecl& poll) noexcept {
     if (!proto::well_formed(poll))
         return;
+    constexpr unsigned kByteMask = 0xFF;
     Ask::Command c{};
     {
-        hal::Selected cs(link, hal::ChipSelect::Io);
-        if (!link.transfer(hal::SpiWord{poll.opcode})) {
+        if (!link.command(hal::ChipSelect::Io, poll.opcode)) {
             rt_.wire_faults.add();
             return;
         }
         for (std::uint8_t i = 0; i < poll.beats; ++i) {
-            const auto r = link.transfer(hal::SpiWord{0});
+            const auto r = link.read();
             if (!r) {
                 rt_.wire_faults.add();
                 return;
             }
-            c.state[i] = static_cast<std::byte>(r->v & 0x00FFu);
+            c.state[i] = static_cast<std::byte>(*r & kByteMask);
         }
+        link.close();
     }
     rt_.polls.add();
-    if ((static_cast<std::uint8_t>(c.state[poll.head_byte]) & poll.head_mask) == 0)
+    const auto head = infra::load_native<std::uint8_t>(
+        std::span(c.state).subspan(poll.head_byte).first<1>()
+    );
+    if ((head & poll.head_mask) == 0)
         return;
     Chan::Loan l = chan_.acquire();
     if (!l) {
@@ -333,13 +343,13 @@ void DiskRelay::on(const Ask::Bind& a, const Ask::Head& h, Job& job) noexcept {
 void DiskRelay::on(const Ask::Command& a, const Ask::Head& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
     begin_(h);
-    job->act = io_.servant ? io_.servant->start(a.state, job->bytes) : proto::DiskAct{.last = true};
+    job->act = io_.servant ? io_.servant->start(a.state, job->bytes) : proto::DiskAct::none();
 }
 
 void DiskRelay::on(const Ask::Resume&, const Ask::Head& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
     begin_(h);
-    job->act = io_.servant ? io_.servant->resume(job->bytes) : proto::DiskAct{.last = true};
+    job->act = io_.servant ? io_.servant->resume(job->bytes) : proto::DiskAct::none();
 }
 
 void DiskRelay::on(const Ask::Release&, const Ask::Head& h, Job&) noexcept {
@@ -351,7 +361,7 @@ void DiskRelay::on(const Ask::Release&, const Ask::Head& h, Job&) noexcept {
 
 void DiskRelay::misrouted(const Ask&, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
-    job->act = proto::DiskAct{.last = true};
+    job->act = proto::DiskAct::none();
 }
 
 }

@@ -6,6 +6,7 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "os/types.h"
 #include "svc/adv7513_reg_map.h"
 #include "svc/i2c_adapter.h"
 
@@ -17,29 +18,29 @@ class SubMap final : public IRegMap {
 public:
     SubMap() = default;
 
-    SubMap(II2cAdapter& a, std::uint8_t addr) noexcept : a_(a), addr_(addr) {}
+    SubMap(II2cAdapter& a, os::I2cAddr addr) noexcept : a_(a), addr_(addr) {}
 
-    [[nodiscard]] Ex<std::uint8_t> read(std::uint8_t reg) override {
+    [[nodiscard]] Ex<std::uint8_t> read(os::I2cReg reg) override {
         TASTY_SEAT_BODY(SubMap);
         if (!a_) {
-            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), addr_});
+            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), addr_.v});
         }
         return a_->read(addr_, reg);
     }
 
-    [[nodiscard]] Ex<void> write(std::uint8_t reg, std::uint8_t val) override {
+    [[nodiscard]] Ex<void> write(os::I2cReg reg, std::uint8_t val) override {
         TASTY_SEAT_BODY(SubMap);
         if (!a_) {
-            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), addr_});
+            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), addr_.v});
         }
         return a_->write(addr_, reg, val);
     }
 
-    std::uint8_t address() const noexcept { return addr_; }
+    os::I2cAddr address() const noexcept { return addr_; }
 
 private:
     infra::OptRef<II2cAdapter> a_{};
-    std::uint8_t addr_ = 0;
+    os::I2cAddr addr_{};
 };
 
 }

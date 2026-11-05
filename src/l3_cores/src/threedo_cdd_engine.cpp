@@ -296,7 +296,13 @@ CdEngine::DriveView ThreeDoCddEngine::do_drive_view(const svc::DiscGeometry& geo
     const svc::Toc& toc = geom.toc;
     const bool is_data = track_ < toc.last && toc.tracks[track_].type != svc::TrackType::Cdda;
 
-    return DriveView{static_cast<std::uint8_t>(state_), track_, lba_, lba_, is_data};
+    return DriveView{
+        static_cast<std::uint8_t>(state_),
+        svc::TrackIndex{static_cast<std::uint8_t>(track_)},
+        lba_,
+        lba_,
+        is_data
+    };
 }
 
 std::size_t ThreeDoCddEngine::do_status_words(

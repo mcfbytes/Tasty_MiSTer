@@ -7,6 +7,8 @@
 #include "cores/stream_load_end.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
+#include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 
@@ -19,8 +21,8 @@ public:
     [[nodiscard]] std::string_view ext() const noexcept { return ext_.view(); }
 
     void opened() noexcept {
-        bytes_ = 0;
-        crc_ = 0;
+        bytes_ = {};
+        crc_ = {};
     }
 
     void closed(const StreamLoadEnd& end) noexcept {
@@ -30,14 +32,14 @@ public:
         crc_ = end.crc;
     }
 
-    [[nodiscard]] std::uint64_t bytes() const noexcept { return bytes_; }
+    [[nodiscard]] std::uint64_t bytes() const noexcept { return bytes_.v; }
 
-    [[nodiscard]] std::uint32_t crc() const noexcept { return crc_; }
+    [[nodiscard]] svc::Crc32 crc() const noexcept { return crc_; }
 
 private:
     FixedStr<8, StrFit::Clip> ext_{};
-    std::uint64_t bytes_ = 0;
-    std::uint32_t crc_ = 0;
+    proto::FileSize bytes_{};
+    svc::Crc32 crc_{};
 };
 
 }

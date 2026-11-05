@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <string_view>
 
 #include "app/romset_aliases.h"
 #include "infra/opt_ref.h"
@@ -13,6 +14,8 @@
 namespace mister::ui {
 
 namespace {
+
+constexpr std::string_view kDotExt = ".ext";
 
 char lower(char c) noexcept {
     return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -75,10 +78,10 @@ bool entry_less(const BrowserEntry& a, const BrowserEntry& b) noexcept {
 
     std::size_t l1 = a.altname.size();
     std::size_t l2 = b.altname.size();
-    if (l1 > 4 && a.altname[l1 - 4] == '.')
-        l1 -= 4;
-    if (l2 > 4 && b.altname[l2 - 4] == '.')
-        l2 -= 4;
+    if (l1 > kDotExt.size() && a.altname[l1 - kDotExt.size()] == '.')
+        l1 -= kDotExt.size();
+    if (l2 > kDotExt.size() && b.altname[l2 - kDotExt.size()] == '.')
+        l2 -= kDotExt.size();
 
     const int r = icompare_n(a.altname, b.altname, l1 < l2 ? l1 : l2);
     if (r != 0)
@@ -145,7 +148,8 @@ Ex<void> BrowserSession::open(const IBrowseSource& src, Request req) {
             path_ = home_;
         }
     }
-    while (ext_.size() % 3 != 0)
+    constexpr std::size_t kExtWidth = 3;
+    while (ext_.size() % kExtWidth != 0)
         ext_.push_back(' ');
 
     std::string position;
@@ -330,11 +334,15 @@ void BrowserSession::assign_display(BrowserEntry& e) const {
     const bool xml = iends_with(e.altname, ".mgl") || iends_with(e.altname, ".mra");
     const bool rbf = iends_with(e.altname, ".rbf");
     if (rbf || xml) {
-        e.altname.resize(e.altname.size() - 4);
+        e.altname.resize(e.altname.size() - kDotExt.size());
         if (rbf) {
+
+            constexpr std::size_t kCoreDateSkip = 3;
+            constexpr std::size_t kCoreDateMin = 6;
+            constexpr std::size_t kCoreDateMax = 15;
             const std::size_t p = e.altname.find("_20");
-            if (p != std::string::npos && e.altname.size() - p - 3 >= 6) {
-                e.datecode = e.altname.substr(p + 3, 15);
+            if (p != std::string::npos && e.altname.size() - p - kCoreDateSkip >= kCoreDateMin) {
+                e.datecode = e.altname.substr(p + kCoreDateSkip, kCoreDateMax);
                 e.altname.resize(p);
             } else {
                 e.datecode = "------";
@@ -357,7 +365,7 @@ bool BrowserSession::assign_romset_display(BrowserEntry& e) const {
 
     e.from_zip = false;
     if (iends_with(e.altname, ".zip"))
-        e.altname.resize(e.altname.size() - 4);
+        e.altname.resize(e.altname.size() - kDotExt.size());
     if (!req_.aliases || e.name == "..")
         return true;
     const app::RomsetAlias ra = req_.aliases->query(path_, home_, e.name, e.altname);
@@ -383,7 +391,7 @@ void BrowserSession::position_on(std::string_view raw_name) {
             pos = i;
     }
     if (pos < entries_.size())
-        view_.select(RowIndex{static_cast<std::uint32_t>(pos)});
+        view_.select(RowIndex::of(pos));
 }
 
 void BrowserSession::select_dir_named(std::string_view name) {
@@ -399,48 +407,37 @@ void BrowserSession::select_dir_named(std::string_view name) {
             pos = i;
     }
     if (pos < entries_.size())
-        view_.select(RowIndex{static_cast<std::uint32_t>(pos)});
+        view_.select(RowIndex::of(pos));
 }
 
 void BrowserSession::seek_letter(char c) {
-    if (entries_.empty())
-        return;
     const char want = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    const std::size_t cur = view_.viewport().selected.v;
-    const auto first_of = [&](std::size_t from, std::size_t to) -> std::size_t {
-        for (std::size_t i = from; i < to; ++i) {
-            const char have = entries_[i].altname.empty()
+    (void)view_.select_next(
+        [want](const BrowserEntry& e) {
+            const char have = e.altname.empty()
                 ? '\0'
-                : static_cast<char>(
-                      std::toupper(static_cast<unsigned char>(entries_[i].altname[0]))
-                  );
-            if (have == want)
-                return i;
-        }
-        return entries_.size();
-    };
-    std::size_t found = first_of(cur + 1, entries_.size());
-    if (found == entries_.size())
-        found = first_of(0, entries_.size());
-    if (found < entries_.size())
-        view_.select(RowIndex{static_cast<std::uint32_t>(found)});
+                : static_cast<char>(std::toupper(static_cast<unsigned char>(e.altname[0])));
+            return have == want;
+        },
+        Wrap::Yes
+    );
 }
 
 void BrowserSession::next_group() {
-    if (entries_.empty() || recents_mode_)
+    if (recents_mode_)
         return;
     const bool cores = req_.scan.cores_only;
-    const std::size_t cur = view_.viewport().selected.v;
-    if (cur >= entries_.size())
+    const BrowserEntry* cur = view_.selected();
+    if (cur == nullptr)
         return;
-    const char cur_char = group_char(entries_[cur], cores);
-    const bool cur_dir = entries_[cur].is_dir;
-    for (std::size_t i = cur + 1; i < entries_.size(); ++i) {
-        if (group_char(entries_[i], cores) != cur_char || entries_[i].is_dir != cur_dir) {
-            view_.select(RowIndex{static_cast<std::uint32_t>(i)});
-            return;
-        }
-    }
+    const char cur_char = group_char(*cur, cores);
+    const bool cur_dir = cur->is_dir;
+    (void)view_.select_next(
+        [&](const BrowserEntry& e) {
+            return group_char(e, cores) != cur_char || e.is_dir != cur_dir;
+        },
+        Wrap::No
+    );
 }
 
 char BrowserSession::selected_group() const noexcept {
@@ -454,25 +451,28 @@ char BrowserSession::selected_group() const noexcept {
 }
 
 void BrowserSession::prev_group() {
-    if (entries_.empty() || recents_mode_)
+    if (recents_mode_)
         return;
     const bool cores = req_.scan.cores_only;
-    const std::size_t cur = view_.viewport().selected.v;
-    if (cur >= entries_.size() || cur == 0)
+    const RowSpan<const BrowserEntry> list{entries_};
+    const RowIndex cur = view_.viewport().selected;
+    if (cur >= row_after(list.size()) || cur == RowIndex{})
         return;
-    const bool cur_dir = entries_[cur].is_dir;
-    char cur_char = group_char(entries_[cur], cores);
+    const bool cur_dir = list[cur].is_dir;
+    char cur_char = group_char(list[cur], cores);
     bool saw_change = false;
-    for (std::size_t i = cur; i-- > 0;) {
-        if (group_char(entries_[i], cores) != cur_char || entries_[i].is_dir != cur_dir) {
+    for (RowIndex i = cur; i > RowIndex{};) {
+        i -= kOneRow;
+        const BrowserEntry& e = list[i];
+        if (group_char(e, cores) != cur_char || e.is_dir != cur_dir) {
             if (saw_change) {
-                view_.select(RowIndex{static_cast<std::uint32_t>(i + 1)});
+                view_.select(i + kOneRow);
                 return;
             }
             saw_change = true;
-            char rc = entries_[i].altname.empty() ? '\0' : entries_[i].altname[0];
+            char rc = e.altname.empty() ? '\0' : e.altname[0];
             if (rc == '_')
-                rc = entries_[i].altname.size() > 1 ? entries_[i].altname[1] : '\0';
+                rc = e.altname.size() > 1 ? e.altname[1] : '\0';
             cur_char = static_cast<char>(std::toupper(static_cast<unsigned char>(rc)));
         }
     }

@@ -5,7 +5,7 @@
 
 namespace mister::app {
 
-void RtPark::wait(int ms) noexcept {
+void RtPark::wait(infra::ParkTimeout ms) noexcept {
     (void)ms;
     exec_.block();
 }

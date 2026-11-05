@@ -24,7 +24,7 @@ struct OsdBlock {
     static constexpr std::uint32_t kCtrlLwSel = 1u << 0;
     static constexpr std::uint32_t kCtrlHr = 1u << 1;
 
-    static constexpr Reg image(std::uint32_t row, std::uint32_t w) noexcept {
+    static constexpr Reg image(std::size_t row, std::uint32_t w) noexcept {
         return static_cast<Reg>(row * kRowBytes + 4u * w);
     }
 };

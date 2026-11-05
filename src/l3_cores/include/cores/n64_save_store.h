@@ -4,21 +4,29 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
+#include <string_view>
 
 #include "cores/n64_save_order.h"
-#include "cores/n64_save_port.h"
-#include "cores/n64_save_type.h"
+#include "cores/n64_save_plan.h"
+#include "cores/n64_memory_type.h"
+#include "cores/n64_save_extent.h"
+#include "cores/types.h"
 #include "infra/error.h"
+#include "infra/indexed_array.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/block_geometry.h"
 #include "proto/types.h"
 #include "svc/file.h"
+#include "svc/slot_path.h"
+#include "svc/storage_backend.h"
 #include "svc/vfs.h"
 
 namespace mister::cores::n64 {
 
-class SaveChannelStore {
+class SaveChannelStore final : public svc::IStorageBackend {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
@@ -30,13 +38,23 @@ public:
     SaveChannelStore(const SaveChannelStore&) = delete;
     SaveChannelStore& operator=(const SaveChannelStore&) = delete;
 
-    [[nodiscard]] Ex<proto::FileSize> open(std::size_t i, std::span<const std::byte> order);
-    void close(std::size_t i) noexcept;
+    [[nodiscard]] Ex<proto::FileSize> open_extent(
+        proto::SlotIndex slot,
+        std::span<const std::byte> order
+    ) override;
 
-    void note_key(std::uint8_t key) noexcept;
+    void release(proto::SlotIndex slot) noexcept override;
 
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t offset, std::span<std::uint8_t> dst);
-    [[nodiscard]] Ex<std::size_t> write_at(std::uint64_t offset, std::span<const std::uint8_t> src);
+    void note_tag(proto::ImageTag tag) noexcept override;
+
+    [[nodiscard]] Ex<std::size_t> read_at(
+        std::uint64_t offset,
+        std::span<std::uint8_t> dst
+    ) override;
+    [[nodiscard]] Ex<std::size_t> write_at(
+        std::uint64_t offset,
+        std::span<const std::uint8_t> src
+    ) override;
 
     [[nodiscard]] std::uint32_t unchanged_writes() const noexcept { return unchanged_; }
 
@@ -50,28 +68,61 @@ public:
 
     [[nodiscard]] std::uint32_t migrated() const noexcept { return migrated_; }
 
-    [[nodiscard]] bool holds(std::size_t i) const noexcept {
-        return i < kMaxSaveRows && files_[i] != nullptr;
+    [[nodiscard]] bool holds(SaveRow row) const noexcept {
+        const auto part = parts_.find(row);
+        return part && part->is_open();
     }
 
 private:
-    void seed_(std::size_t i) noexcept;
+    class OpenPartition {
+        TASTY_SEAT_RESIDENT(Io);
 
-    [[nodiscard]] Ex<std::size_t> render_(const SaveOrder& b, std::size_t i);
-    [[nodiscard]] bool migrate_(const SaveOrder& b, std::size_t i);
-    [[nodiscard]] Ex<void> create_(const SaveOrder& b, std::size_t bytes);
+    public:
+        void claim(proto::SlotIndex slot) noexcept { slot_ = slot; }
+
+        [[nodiscard]] bool claimed_by(proto::SlotIndex slot) const noexcept {
+            return slot_ == slot;
+        }
+
+        void release() noexcept {
+            slot_.reset();
+            close();
+        }
+
+        [[nodiscard]] Ex<proto::FileSize> open(const svc::Vfs& vfs, std::string_view path);
+
+        void close() noexcept {
+            file_.reset();
+            on_disk_ = 0;
+        }
+
+        [[nodiscard]] bool is_open() const noexcept { return file_ != nullptr; }
+
+        [[nodiscard]] infra::OptRef<svc::IFile> file() noexcept {
+            return infra::opt_ref_of(file_.get());
+        }
+
+        [[nodiscard]] std::uint32_t on_disk() const noexcept { return on_disk_; }
+
+    private:
+        std::unique_ptr<svc::IFile> file_{};
+        std::optional<proto::SlotIndex> slot_{};
+        std::uint32_t on_disk_ = 0;
+    };
+
+    void adopt_(const SavePlan& plan) noexcept;
+
+    [[nodiscard]] Ex<std::size_t> render_(const SaveOrder& o);
+    [[nodiscard]] bool migrate_(const SaveOrder& o);
+    [[nodiscard]] Ex<void> create_(const SaveOrder& o, std::size_t bytes);
 
     const svc::Vfs* vfs_;
 
-    SaveOrder rows_[kMaxSaveRows]{};
-    bool byteswap_[kMaxSaveRows]{};
-    std::unique_ptr<svc::IFile> files_[kMaxSaveRows]{};
-    std::uint32_t on_disk_[kMaxSaveRows]{};
-    std::uint32_t offset_[kMaxSaveRows]{};
-    std::uint32_t length_[kMaxSaveRows]{};
+    SavePlan plan_{};
+    SaveLayout layout_{};
+    proto::ImageTag key_{};
+    infra::IndexedArray<OpenPartition, kMaxSaveRows, SaveRow> parts_{};
     svc::SlotPathText tmp_{};
-    std::uint8_t count_ = 0;
-    std::uint8_t key_ = 0;
     std::uint32_t unchanged_ = 0;
     std::uint32_t stray_ = 0;
     std::uint32_t clamped_ = 0;

@@ -10,6 +10,7 @@
 #include "cores/types.h"
 #include "infra/seat.h"
 #include "proto/bit_field.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -31,7 +32,7 @@ struct OptionRow {
     enum class ResetAct : std::uint8_t { None, Warm, Cold, kCount };
 
     std::string_view label{};
-    std::uint8_t page = 0;
+    proto::SubmenuNo page{};
     Kind kind = Kind::Separator;
     std::uint8_t id = 0;
 
@@ -46,7 +47,7 @@ struct OptionRow {
     bool browse_unmount = false;
 
     Link link = Link::None;
-    std::uint8_t link_page = 0;
+    proto::SubmenuNo link_page{};
 
     Host host = Host::None;
 
@@ -58,7 +59,7 @@ struct OptionRow {
 
     [[nodiscard]] static constexpr OptionRow cycle(
         std::string_view label,
-        std::uint8_t page,
+        proto::SubmenuNo page,
         std::uint8_t id,
         WordId word,
         proto::BitField bits,
@@ -81,7 +82,7 @@ struct OptionRow {
 
     [[nodiscard]] static constexpr OptionRow file(
         std::string_view label,
-        std::uint8_t page,
+        proto::SubmenuNo page,
         std::uint8_t id,
         IoIndex slot,
         bool ejects_on_select,
@@ -100,7 +101,7 @@ struct OptionRow {
 
     [[nodiscard]] static constexpr OptionRow action(
         std::string_view label,
-        std::uint8_t page,
+        proto::SubmenuNo page,
         std::uint8_t id,
         ResetAct reset_act
     ) noexcept {
@@ -115,10 +116,10 @@ struct OptionRow {
 
     [[nodiscard]] static constexpr OptionRow to(
         std::string_view label,
-        std::uint8_t page,
+        proto::SubmenuNo page,
         std::uint8_t id,
         Link link,
-        std::uint8_t link_page = 0
+        proto::SubmenuNo link_page = {}
     ) noexcept {
         OptionRow r{};
         r.label = label;
@@ -132,7 +133,7 @@ struct OptionRow {
 
     [[nodiscard]] static constexpr OptionRow host_fact(
         std::string_view label,
-        std::uint8_t page,
+        proto::SubmenuNo page,
         std::uint8_t id,
         Host host,
         std::span<const std::string_view> values
@@ -147,7 +148,7 @@ struct OptionRow {
         return r;
     }
 
-    [[nodiscard]] static constexpr OptionRow separator(std::uint8_t page) noexcept {
+    [[nodiscard]] static constexpr OptionRow separator(proto::SubmenuNo page) noexcept {
         OptionRow r{};
         r.page = page;
         return r;

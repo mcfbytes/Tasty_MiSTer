@@ -107,8 +107,8 @@ inline constexpr std::size_t kLwBridgeSize = 0x0020'0000u;
 inline constexpr os::PhysAddr kFpgaMemBase{0x2000'0000u};
 inline constexpr std::uint32_t kFpgaMemMask = 0x1FFF'FFFFu;
 
-constexpr os::PhysAddr fpga_mem(std::uint32_t addr) noexcept {
-    return os::PhysAddr{kFpgaMemBase.v | (addr & kFpgaMemMask)};
+constexpr os::PhysAddr fpga_mem(FabricAddr addr) noexcept {
+    return os::PhysAddr{kFpgaMemBase.v | (addr.v & kFpgaMemMask)};
 }
 
 namespace detail {

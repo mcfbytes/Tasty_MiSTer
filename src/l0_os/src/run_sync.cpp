@@ -10,6 +10,7 @@
 
 #include <cerrno>
 #include <cstdlib>
+#include <chrono>
 #include <cstring>
 #include <expected>
 #include <string>
@@ -113,7 +114,10 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
 
 }
 
-[[nodiscard]] Ex<int> run_sync(std::span<const char* const> argv, std::int32_t timeout_ms) {
+[[nodiscard]] Ex<int> run_sync(
+    std::span<const char* const> argv,
+    std::chrono::milliseconds timeout
+) {
     if (argv.empty())
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
 
@@ -131,7 +135,7 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
 
     int status = 0;
 
-    if (timeout_ms <= 0) {
+    if (timeout.count() <= 0) {
         for (;;) {
             const ::pid_t r = ::waitpid(pid, &status, 0);
             if (r < 0 && errno == EINTR)
@@ -145,7 +149,8 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
         }
     }
 
-    const std::int64_t bound_ns = static_cast<std::int64_t>(timeout_ms) * 1'000'000;
+    const std::int64_t bound_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(timeout)
+                                      .count();
     long ivl = kPollStartNs;
     for (std::int64_t waited_ns = 0; waited_ns < bound_ns; waited_ns += ivl, ivl = ramp(ivl)) {
         const Reaped re = try_reap(pid);

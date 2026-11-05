@@ -3,15 +3,17 @@
 
 #include <cstdint>
 
+#include "hal/types.h"
+
 namespace mister::hal {
 
 struct SpiSample {
 
-    static constexpr std::uint16_t kMenuButton = 1u << 0;
-    static constexpr std::uint16_t kUserButton = 1u << 1;
+    static constexpr ButtonMask kMenuButton{1u << 0};
+    static constexpr ButtonMask kUserButton{1u << 1};
 
     bool ready = false;
-    std::uint16_t buttons = 0;
+    ButtonMask buttons{};
     bool hdmi = false;
 };
 

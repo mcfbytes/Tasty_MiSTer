@@ -22,6 +22,8 @@ class DiagLog {
     TASTY_SEAT_MEDIATOR(Any, Any);
 
 public:
+    enum : unsigned { kLogFileMode = 0644, kTerminatorBytes = 2 };
+
     static constexpr std::size_t kMaxLine = 4095;
     static_assert(kMaxLine + 1 <= PIPE_BUF, "one record must still be one atomic write");
     static_assert(
@@ -32,7 +34,7 @@ public:
     DiagLog() = default;
 
     bool open(const char* path) noexcept {
-        fd_ = UniqueFd(::open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644));
+        fd_ = UniqueFd(::open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, kLogFileMode));
         return fd_.valid();
     }
 
@@ -43,6 +45,7 @@ public:
     [[gnu::format(printf, 2, 3)]]
     void appendf(const char* fmt, ...) noexcept {
         char buf[kMaxLine + 1];
+        constexpr std::size_t kRecordMax = sizeof buf - kTerminatorBytes;
         va_list ap;
         va_start(ap, fmt);
         int n = std::vsnprintf(buf, sizeof buf - 1, fmt, ap);
@@ -52,18 +55,18 @@ public:
             return;
         }
         auto len = static_cast<std::size_t>(n);
-        if (len > sizeof buf - 2) {
+        if (len > kRecordMax) {
             truncations_.fetch_add(1, std::memory_order_relaxed);
             n = std::snprintf(
                 buf,
                 sizeof buf - 1,
                 "{\"t\":\"trunc\",\"need\":%u,\"max\":%u}",
                 static_cast<unsigned>(len),
-                static_cast<unsigned>(sizeof buf - 2)
+                static_cast<unsigned>(kRecordMax)
             );
             len = (n < 0) ? 0u : static_cast<std::size_t>(n);
-            if (len > sizeof buf - 2)
-                len = sizeof buf - 2;
+            if (len > kRecordMax)
+                len = kRecordMax;
         }
         buf[len] = '\n';
         emit_(buf, len + 1);

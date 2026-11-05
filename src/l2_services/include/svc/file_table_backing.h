@@ -21,9 +21,9 @@ class FileTableBacking final : public IDiscBacking {
 public:
     [[nodiscard]] std::uint16_t count() const noexcept { return file_count_; }
 
-    [[nodiscard]] std::uint16_t push(std::unique_ptr<IFile> f) noexcept {
+    [[nodiscard]] OpenFileId push(std::unique_ptr<IFile> f) noexcept {
         files_[file_count_] = std::move(f);
-        return file_count_++;
+        return OpenFileId{file_count_++};
     }
 
     void hold_single(std::unique_ptr<IFile> f) noexcept {
@@ -31,7 +31,7 @@ public:
         file_count_ = 1;
     }
 
-    [[nodiscard]] IFile* file(std::uint16_t i) const noexcept { return files_[i].get(); }
+    [[nodiscard]] IFile* file(OpenFileId i) const noexcept { return files_[i.v].get(); }
 
     void reset() noexcept {
         for (auto& f : files_)
@@ -50,6 +50,10 @@ private:
         std::uint32_t s_off,
         std::span<std::byte> out
     ) override;
+
+    [[nodiscard]] IFile* resident_(OpenFileId id) const noexcept {
+        return id.v < file_count_ ? files_[id.v].get() : nullptr;
+    }
 
     std::unique_ptr<IFile> files_[kMaxTracks]{};
     std::uint16_t file_count_ = 0;

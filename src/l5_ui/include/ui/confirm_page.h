@@ -23,26 +23,25 @@ public:
         std::span<const std::string_view> choices;
         infra::OptRef<IConfirmHost> host{};
 
-        std::uint8_t initial = 0;
+        RowIndex initial{};
     };
 
-    explicit ConfirmPage(Spec spec) noexcept : spec_(spec), sel_{RowIndex{spec_.initial}} {}
+    explicit ConfirmPage(Spec spec) noexcept : spec_(spec), sel_{spec_.initial} {}
 
     PageId id() const override {
         TASTY_SEAT_BODY(ConfirmPage);
         return PageId::Confirm;
     }
 
-    void render(OsdRenderer& out) const override;
-    bool describe(app::PageDescription& out) const override;
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
 
     MenuMask mask() const override {
         TASTY_SEAT_BODY(ConfirmPage);
-        const std::size_t n = spec_.choices.size();
-        if (n == 0 || n >= 64)
+        const RowCount n = RowCount::of(spec_.choices.size());
+        if (n >= menu_mask_rows())
             return MenuMask{};
-        return MenuMask{(std::uint64_t{1} << n) - 1};
+        return dense_mask(n);
     }
 
     void set_selection(RowIndex i) override {

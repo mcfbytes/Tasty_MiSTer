@@ -6,6 +6,8 @@
 #include <span>
 #include <string_view>
 
+#include "proto/types.h"
+
 namespace mister::cores::snes {
 
 inline constexpr std::uint32_t kLoRomHeader = 0x007fc0;
@@ -13,8 +15,8 @@ inline constexpr std::uint32_t kHiRomHeader = 0x00ffc0;
 inline constexpr std::uint32_t kExHiRomHeader = 0x40ffc0;
 inline constexpr std::uint32_t kNoHeader = 0;
 
-[[nodiscard]] constexpr std::uint32_t copier_offset(std::uint64_t file_size) noexcept {
-    return (file_size & 512u) ? 512u : 0u;
+[[nodiscard]] constexpr std::uint32_t copier_offset(proto::FileSize file_size) noexcept {
+    return (file_size.v & 512u) ? 512u : 0u;
 }
 
 [[nodiscard]] std::uint32_t score_header(

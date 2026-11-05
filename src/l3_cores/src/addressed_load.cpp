@@ -33,11 +33,11 @@ Ex<LoadPlan> AddressedLoad::plan(const LoadAsk& ask, const proto::StatusWord&) {
     LoadPlan p{};
     p.count = 1;
 
-    if (ask.size == 0) {
+    if (ask.size.v == 0) {
         p.rows[0] = TransferRow{.index = ask.index};
         return p;
     }
-    p.rows[0] = window_row(ask.load_addr, ask.size, ask.index, aperture_)
+    p.rows[0] = window_row(ask.load_addr, ask.size.v, ask.index, aperture_)
                     .value_or(TransferRow{.index = ask.index});
     return p;
 }

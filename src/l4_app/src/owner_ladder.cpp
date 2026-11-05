@@ -73,7 +73,7 @@ bool OwnerLadder::arm(
     last_dir_.assign(ladder_->next_last_dir());
     moved_ = true;
     owed_ = Owed{ask.which, ask.tag};
-    slot_ = ask.index.v;
+    index_ = ask.index;
     ++tally_.ladders_run;
     publish_(true);
     return true;
@@ -121,7 +121,12 @@ std::optional<OwnerLadder::Ended> OwnerLadder::finish_(bool ok) {
     moved_ = false;
     start_ = false;
     core_ = false;
-    return Ended{.ok = ok, .touched = touched, .slot = slot_, .owed = std::exchange(owed_, Owed{})};
+    return Ended{
+        .ok = ok,
+        .touched = touched,
+        .index = index_,
+        .owed = std::exchange(owed_, Owed{})
+    };
 }
 
 void OwnerLadder::publish_(bool live) {
@@ -178,7 +183,7 @@ bool OwnerLadder::arm_start(
         return false;
     start_ = true;
     owed_ = Owed{};
-    slot_ = sp.save_slot.v;
+    index_ = sp.save_slot;
     last_dir_.assign(ladder_->next_last_dir());
     moved_ = true;
     ++tally_.ladders_run;
@@ -212,7 +217,7 @@ bool OwnerLadder::arm_core(
         return false;
     core_ = true;
     owed_ = owed;
-    slot_ = 0;
+    index_ = {};
     moved_ = true;
     ++tally_.ladders_run;
     publish_(true);

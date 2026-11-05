@@ -9,6 +9,7 @@
 
 #include "infra/error.h"
 #include "svc/file.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -16,7 +17,7 @@ struct ArchiveEntry {
     std::string name;
     std::uint64_t size = 0;
     std::uint64_t packed = 0;
-    std::uint32_t crc = 0;
+    Crc32 crc{};
     std::uint16_t method = 0;
     bool encrypted = false;
 

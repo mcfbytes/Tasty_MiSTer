@@ -8,7 +8,7 @@
 
 namespace mister::app {
 
-std::uint32_t LadderHostAdapter::next_generation() noexcept {
+proto::ActKey LadderHostAdapter::next_generation() noexcept {
     TASTY_SEAT_BODY(LadderHostAdapter);
     return edges_.act_keys.next();
 }
@@ -39,7 +39,8 @@ Ex<proto::FileId> LadderHostAdapter::intern_piece(
 ) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     std::vector<std::uint8_t> buf(bytes.begin(), bytes.end());
-    return edges_.inbox.intern_file(std::move(buf), ext, std::string_view{}, 0, 0, whole, offset);
+    return edges_.inbox
+        .intern_file(std::move(buf), ext, std::string_view{}, 0, svc::Crc32{}, whole, offset);
 }
 
 Ex<proto::FileId> LadderHostAdapter::intern_path(std::string_view path, std::uint64_t size_bytes) {
@@ -62,10 +63,10 @@ Ex<proto::FileId> LadderHostAdapter::intern_whole(
     return edges_.inbox.intern_file(std::move(bytes), ext, path, 0);
 }
 
-std::optional<bool> LadderHostAdapter::file_tx_answer(std::uint32_t act) {
+std::optional<bool> LadderHostAdapter::file_tx_answer(proto::ActKey act) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     const FileTxLevel level = edges_.ftx_level_cell.sample().value;
-    if (act == 0 || level.stream_act != act)
+    if (!act || level.stream_act != act)
         return std::nullopt;
     return level.stream_served;
 }
@@ -95,7 +96,7 @@ cores::MountStatus LadderHostAdapter::mount_status() {
     return edges_.mount_status_cell.sample().value;
 }
 
-bool LadderHostAdapter::order_walk(proto::IoIndex slot, std::string_view path, std::uint32_t gen) {
+bool LadderHostAdapter::order_walk(proto::IoIndex slot, std::string_view path, proto::ActKey gen) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     return acts_.order_walk(slot, path, gen);
 }
@@ -105,14 +106,15 @@ cores::MountStatus LadderHostAdapter::walk_status() {
     return edges_.belt.walk_status();
 }
 
-bool LadderHostAdapter::order_savestates(std::string_view image, std::uint32_t gen) {
+bool LadderHostAdapter::order_savestates(std::string_view image, proto::ActKey gen) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     return acts_.order_savestates(image, gen);
 }
 
-std::uint32_t LadderHostAdapter::savestates_answered() {
+proto::ActKey LadderHostAdapter::savestates_answered() {
     TASTY_SEAT_BODY(LadderHostAdapter);
-    return edges_.save_state_facts ? edges_.save_state_facts->sample().value.answered : 0u;
+    return edges_.save_state_facts ? edges_.save_state_facts->sample().value.answered
+                                   : proto::ActKey{};
 }
 
 cores::SaveExtent LadderHostAdapter::save_extent() {

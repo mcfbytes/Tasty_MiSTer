@@ -12,6 +12,7 @@
 #include "app/path_text.h"
 #include "app/replay_msg.h"
 #include "app/replay_status.h"
+#include "app/types.h"
 #include "cores/movie_codec.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -45,7 +46,7 @@ struct ReplayPlay {
             && phase_us <= period_us - kPhaseGuardUs;
     }
 
-    static constexpr std::uint32_t kRunSplit = 60;
+    static constexpr FrameCount kRunSplit{60};
     static constexpr std::uint32_t kReadChunk = 16 * 1024;
     static constexpr std::uint32_t kTickBudget = 64 * 1024;
     static constexpr unsigned kEpochTries = 3;
@@ -58,7 +59,7 @@ struct ReplayPlay {
 
     void release_movie() noexcept { runs = {}; }
 
-    std::uint16_t gen = 0;
+    ControlGeneration gen{};
     infra::OptRef<const cores::IMovieCodec> codec{};
     cores::IMovieCodec::Facts facts{};
     PathText movie{};
@@ -77,13 +78,14 @@ struct ReplayPlay {
     bool vsync_ok = false;
     std::uint8_t rom_index = 0xFF;
 
-    std::uint32_t frames = 0;
+    std::uint32_t scanned = 0;
+    FrameCount pushed{};
     std::uint32_t movie_frames = 0;
 
     std::vector<ReplayMsg::Input> runs{};
     unsigned tries = 0;
 
-    std::array<std::uint32_t, kCheckpoints> checks{};
+    std::array<MovieFrame, kCheckpoints> checks{};
     std::size_t n_checks = 0;
     std::size_t next_check = 0;
 

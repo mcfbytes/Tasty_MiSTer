@@ -8,7 +8,7 @@ namespace mister::ui {
 
 BuildEnv HdPage0Walk::page0_of(const BuildEnv& env) noexcept {
     BuildEnv page0 = env;
-    page0.page = 0;
+    page0.page = proto::kRootSubmenu;
     page0.flat = false;
     return page0;
 }

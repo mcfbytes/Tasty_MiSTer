@@ -158,7 +158,7 @@ private:
 
     struct SaveMount {
         MountAsk ask{};
-        std::uint32_t gen = 0;
+        proto::ActKey gen{};
         std::int64_t due_ns = 0;
         bool unmounted = false;
 

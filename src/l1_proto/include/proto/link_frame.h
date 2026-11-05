@@ -7,6 +7,9 @@
 
 #include "hal/uio_frame_lane.h"
 #include "infra/error.h"
+#include "proto/fio_opcodes.h"
+#include "proto/link_route.h"
+#include "proto/osd_opcodes.h"
 #include "proto/uio_opcodes.h"
 
 namespace mister::proto {
@@ -19,7 +22,13 @@ public:
 
     [[nodiscard]] virtual Ex<void> begin(FrameSel sel, std::uint16_t op) = 0;
 
-    [[nodiscard]] Ex<void> begin(UioOp op) { return begin(FrameSel::Uio, proto::word(op).v); }
+    [[nodiscard]] virtual Ex<void> begin(LinkRoute route, std::uint16_t op) = 0;
+
+    [[nodiscard]] Ex<void> begin(UioOp op) { return begin(LinkRoute::Uio, proto::word(op).v); }
+
+    [[nodiscard]] Ex<void> begin(FioOp op) { return begin(LinkRoute::Fio, proto::word(op).v); }
+
+    [[nodiscard]] Ex<void> begin(OsdOp op) { return begin(LinkRoute::Osd, proto::word(op).v); }
 
     [[nodiscard]] virtual Ex<void> word(std::uint16_t w) = 0;
 
@@ -50,10 +59,41 @@ protected:
 
 [[nodiscard]] inline Ex<void> send_frame(
     ILinkFrame& frame,
+    LinkRoute route,
+    std::uint16_t op,
+    std::span<const std::uint16_t> words
+) {
+    if (auto r = frame.begin(route, op); !r)
+        return r;
+    for (const std::uint16_t w : words) {
+        if (auto r = frame.word(w); !r)
+            return r;
+    }
+    return frame.end();
+}
+
+[[nodiscard]] inline Ex<void> send_frame(
+    ILinkFrame& frame,
     UioOp op,
     std::span<const std::uint16_t> words
 ) {
-    return send_frame(frame, FrameSel::Uio, proto::word(op).v, words);
+    return send_frame(frame, LinkRoute::Uio, proto::word(op).v, words);
+}
+
+[[nodiscard]] inline Ex<void> send_frame(
+    ILinkFrame& frame,
+    FioOp op,
+    std::span<const std::uint16_t> words
+) {
+    return send_frame(frame, LinkRoute::Fio, proto::word(op).v, words);
+}
+
+[[nodiscard]] inline Ex<void> send_frame(
+    ILinkFrame& frame,
+    OsdOp op,
+    std::span<const std::uint16_t> words
+) {
+    return send_frame(frame, LinkRoute::Osd, proto::word(op).v, words);
 }
 
 }

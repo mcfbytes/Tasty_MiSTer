@@ -112,7 +112,7 @@ HdRect BackdropJob::scale_band() noexcept {
     return box_;
 }
 
-void BackdropJob::begin_copy(std::uint8_t slot, HdRect box, const Canvas& c) noexcept {
+void BackdropJob::begin_copy(FlipBuffer buffer, HdRect box, const Canvas& c) noexcept {
     TASTY_SEAT_BODY(BackdropJob);
     if (busy() || !whole_)
         return;
@@ -122,7 +122,7 @@ void BackdropJob::begin_copy(std::uint8_t slot, HdRect box, const Canvas& c) noe
     canvas_ = c;
     box_ = clipped;
     next_row_ = clipped.y;
-    slot_ = slot;
+    target_ = buffer;
     step_ = Step::Copy;
 }
 

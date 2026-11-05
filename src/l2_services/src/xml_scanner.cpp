@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/xml_scanner.h"
 
+#include <cstdint>
+#include <limits>
+#include <string_view>
+
 namespace mister::svc::xml {
 
+namespace {
+constexpr std::string_view kCommentOpen = "!--";
+constexpr std::string_view kCommentClose = "-->";
+}
+
 bool XmlScanner::skip_markup() noexcept {
-    if (xml_.compare(pos_, 3, "!--") == 0) {
-        const std::size_t end = xml_.find("-->", pos_ + 3);
+    if (xml_.compare(pos_, kCommentOpen.size(), kCommentOpen) == 0) {
+        const std::size_t end = xml_.find(kCommentClose, pos_ + kCommentOpen.size());
         if (end == std::string_view::npos)
             return false;
-        pos_ = end + 3;
+        pos_ = end + kCommentClose.size();
         return true;
     }
     const std::size_t end = xml_.find('>', pos_);
@@ -109,7 +118,7 @@ std::optional<Token> XmlScanner::next_token(std::span<Attr, kMaxAttrs> attrs) no
                 continue;
             if (tag.attr_count < kMaxAttrs) {
                 attrs[tag.attr_count++] = Attr{name, value};
-            } else if (tag.attrs_dropped != 0xFF) {
+            } else if (tag.attrs_dropped != std::numeric_limits<std::uint8_t>::max()) {
                 ++tag.attrs_dropped;
             }
         }

@@ -11,24 +11,33 @@ namespace {
 
 class InfoPage final : public Page {
 public:
-    InfoPage(app::InfoId id, std::uint32_t timeout_ms) noexcept
+    InfoPage(app::InfoId id, std::chrono::milliseconds timeout) noexcept
         : id_(id),
-          timeout_ms_(timeout_ms != 0 ? timeout_ms : timeout_for(id)) {}
+          timeout_(timeout.count() != 0 ? timeout : timeout_for(id)) {}
 
     PageId id() const override { return PageId::Info; }
 
-    bool allows_popups() const override { return true; }
-
-    bool counts_as_menu_present() const override { return true; }
-
-    bool takes_input_focus() const override { return false; }
+    PageFacts facts() const override {
+        PageFacts f{};
+        f.auto_pop = timeout_;
+        f.has_title_strip = false;
+        f.takes_input_focus = false;
+        f.allows_popups = true;
+        return f;
+    }
 
     MenuMask mask() const override { return MenuMask{}; }
 
+    bool walk(PageWalk&) const override { return false; }
+
     void render(OsdRenderer& out) const override {
-        out.box(OsdRow{6}, OsdRow{9});
-        out.text(OsdRow{7}, text_for(id_));
-        out.text(OsdRow{8}, "");
+        constexpr OsdRow kBoxTop{6};
+        constexpr OsdRow kMessageRow{7};
+        constexpr OsdRow kBlankRow{8};
+        constexpr OsdRow kBoxBottom{9};
+        out.box(kBoxTop, kBoxBottom);
+        out.text(kMessageRow, text_for(id_));
+        out.text(kBlankRow, "");
     }
 
     bool describe(app::PageDescription& out) const override {
@@ -42,21 +51,19 @@ public:
     }
 
     Transition handle(const UiEvent& ev) override {
-        if (ev.buttons != UiEvent::None) {
+        if (ev.buttons != UiButtonMask{}) {
             return Transition{Transition::Kind::Pop};
         }
         return Transition{};
     }
 
-    std::uint32_t auto_pop_ms() const override { return timeout_ms_; }
-
-    bool has_title_strip() const override { return false; }
-
 private:
-    static std::uint32_t timeout_for(app::InfoId id) noexcept {
+    static std::chrono::milliseconds timeout_for(app::InfoId id) noexcept {
+        constexpr std::chrono::milliseconds kSavingTimeout{500};
+        constexpr std::chrono::milliseconds kDefaultTimeout{2000};
         switch (id) {
             case app::InfoId::SavingState:
-                return 500u;
+                return kSavingTimeout;
             case app::InfoId::None:
             case app::InfoId::CoreNotFound:
             case app::InfoId::CoreLoadFailed:
@@ -71,9 +78,9 @@ private:
             case app::InfoId::FbTerminalRequired:
             case app::InfoId::CdBiosMissing:
             case app::InfoId::RomLoadFailed:
-                return 2000u;
+                return kDefaultTimeout;
         }
-        return 2000u;
+        return kDefaultTimeout;
     }
 
     static const char* text_for(app::InfoId id) noexcept {
@@ -114,13 +121,13 @@ private:
     }
 
     app::InfoId id_;
-    std::uint32_t timeout_ms_;
+    std::chrono::milliseconds timeout_;
 };
 
 }
 
-std::unique_ptr<Page> make_info_page(app::InfoId id, std::uint32_t timeout_ms) {
-    return std::unique_ptr<Page>(new InfoPage(id, timeout_ms));
+std::unique_ptr<Page> make_info_page(app::InfoId id, std::chrono::milliseconds timeout) {
+    return std::unique_ptr<Page>(new InfoPage(id, timeout));
 }
 
 }

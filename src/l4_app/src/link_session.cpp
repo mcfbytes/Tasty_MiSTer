@@ -43,6 +43,7 @@
 #include <cstring>
 #include <ctime>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -67,6 +68,7 @@
 #include "proto/save_request.h"
 #include "proto/spi_fio_queue.h"
 #include "proto/spi_frame.h"
+#include "proto/link.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
@@ -148,7 +150,7 @@ LinkBinder::Wiring binder_wiring(const SupervisorParts& parts) noexcept {
 
 }
 
-static constexpr EmitSite kAdviseSite{ERR_SITE()};
+static constexpr infra::ErrorSite kAdviseSite{ERR_SITE()};
 
 LinkSession::LinkSession(
     hal::ISpiTransport& link,
@@ -335,7 +337,7 @@ bool LinkSession::core_supports_mgl() const noexcept {
 }
 
 void LinkSession::reset_video_geometry() {
-    video_.reset_geometry(core_edge_seq_);
+    video_.reset_geometry(core_edge_seq_.v);
 }
 
 void LinkSession::arm_video_prelude() {
@@ -393,12 +395,13 @@ LinkSession::RoundEntry LinkSession::poll(bool tick) {
 
         encoder_.trust_pads(core_ready_);
         if (core_ready_) {
-            const std::uint16_t but = g.buttons;
+            const hal::ButtonMask but = g.buttons;
 
             if (!video_.prelude_running()) {
 
+                proto::Link link{link_};
                 (void)video_.update_but_sw(
-                    link_,
+                    link,
                     but,
                     osd_.has_focus(),
                     infra::OptRef<proto::IResetFence>{binder_.fio_queue()}
@@ -431,7 +434,8 @@ void LinkSession::tick(RoundEntry entry) {
     nvram_.drain_write_verdicts();
     {
         const infra::OptRef<cores::Core> current = tenancy_.core();
-        cores::IWindowSave* role = current.has_value() ? current->window_save() : nullptr;
+        const auto role = current.has_value() ? current->window_save()
+                                              : infra::OptRef<cores::IWindowSave>{};
         if (const auto act = window_jobs_.service(role))
             held_.publish_ftx_level(*act, true);
     }
@@ -439,17 +443,17 @@ void LinkSession::tick(RoundEntry entry) {
     reboot_.answer_reboot(*this);
 
     if (live_at_entry && session_live() && core_ready_) {
+        proto::Link link{link_};
         video_.on_rt_round(
-            link_,
+            link,
             clock().now().count(),
             infra::OptRef<proto::IResetFence>{binder_.fio_queue()}
         );
     }
 
-    if (const cores::ICdDiagnostics* cd = tenancy_.core().has_value()
-            ? tenancy_.core()->cd_diagnostics()
-            : nullptr;
-        cd != nullptr) {
+    const auto cd = tenancy_.core().has_value() ? tenancy_.core()->cd_diagnostics()
+                                                : infra::OptRef<const cores::ICdDiagnostics>{};
+    if (cd) {
         if (const std::optional<svc::DiscCounters> dc = cd->disc_counters(); dc.has_value()) {
             disc_sync_decompress_ = dc->sync_decompress;
             disc_park_timeouts_ = dc->park_timeouts;
@@ -477,7 +481,7 @@ void LinkSession::tick(RoundEntry entry) {
     publish_diag();
 }
 
-void LinkSession::deliver(
+Delivered LinkSession::deliver(
     const proto::LinkOp& op,
     const ILinkTxReader& inbox,
     bool windows_closed
@@ -485,7 +489,7 @@ void LinkSession::deliver(
 
     const infra::OptRef<cores::Core> live_core = tenancy_.core();
     const EncoderRoles roles{
-        .saves = infra::OptRef<ISaveFlush>{*this},
+        .saves = SaveFlush{nvram_, held_, live_core},
         .cheats = infra::OptRef<ICheatApply>{cheats_},
         .cheat_call = {.core = live_core, .fio_held = held_.fio_held()},
         .acts = infra::OptRef<ICoreOptionActs>{options_}
@@ -501,6 +505,7 @@ void LinkSession::deliver(
     };
     const auto kind = infra::kind_of(op);
     ILinkEncoder::Outcome r = ILinkEncoder::Outcome::Dropped;
+    bool spent = false;
     if (admitted(window_for(kind), ctx)) {
         switch (target_for(kind)) {
             case OpTarget::Wire:
@@ -509,9 +514,12 @@ void LinkSession::deliver(
             case OpTarget::Session:
                 r = infra::dispatch<LinkOpRoutes<OpTarget::Session>>(op, *this, ctx);
                 break;
-            case OpTarget::Transfer:
-                r = infra::dispatch<LinkOpRoutes<OpTarget::Transfer>>(op, held_, ctx);
+            case OpTarget::Transfer: {
+                const auto d = infra::dispatch<LinkOpRoutes<OpTarget::Transfer>>(op, held_, ctx);
+                r = d.outcome;
+                spent = d.round_spent;
                 break;
+            }
             case OpTarget::Mount:
                 r = infra::dispatch<LinkOpRoutes<OpTarget::Mount>>(op, slot_bindings_, ctx);
                 break;
@@ -527,18 +535,11 @@ void LinkSession::deliver(
                 r = misrouted(op, ctx);
                 break;
         }
-    } else if (const auto ftx = infra::as<proto::LinkOp::FileTx>(op); ftx) {
+    } else {
 
-        if (ftx->phase == proto::LinkOp::FileTxPhase::WindowOpen) {
-            held_.publish_ftx_level(ftx->act, false);
-        } else if (ftx->phase != proto::LinkOp::FileTxPhase::WindowClose) {
-            held_.publish_stream(ftx->act, false);
-        }
-    }
-
-    if (const auto sp = infra::as<proto::LinkOp::StagePayload>(op);
-        sp && sp->act != 0 && !held_.copy_posted()) {
-        held_.publish_ftx_level(sp->act, r != ILinkEncoder::Outcome::Dropped, true);
+        const auto d = infra::dispatch<LinkOpAnswerRoutes>(op, held_, ctx, AnswerOnly{});
+        r = d.outcome;
+        spent = d.round_spent;
     }
     if (r == ILinkEncoder::Outcome::Dropped) {
         ++tally_.link_op_drops;
@@ -546,8 +547,11 @@ void LinkSession::deliver(
         ++tally_.link_ops_encoded;
         if (r == ILinkEncoder::Outcome::EncodedStatusChange) {
             rows_.publish_status_word();
+            if (const auto core = tenancy_.core())
+                core->status_changed();
         }
     }
+    return Delivered{r, spent};
 }
 
 ILinkEncoder::Outcome LinkSession::on(
@@ -557,9 +561,8 @@ ILinkEncoder::Outcome LinkSession::on(
     switch (a.table) {
         case proto::LinkOp::DecoderTable::Census: {
 
-            const bool seen = a.gen.v == torn_done_
-                || a.gen.v == static_cast<std::uint16_t>(park_.gen());
-            torn_gen_ = seen ? 0 : a.gen.v;
+            const bool seen = a.gen == torn_done_ || names_park_(a.gen);
+            torn_gen_ = seen ? proto::BindGeneration{} : a.gen;
             std::array<reactor::LinkDecoderDecl, kMaxServices> rows{};
 
             const bool dead = machine_.state() == SessionState::Failed;
@@ -590,14 +593,14 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::DropCore& a, const Li
         dropped_gen_ = park_.gen();
         holds_at_drop_ = encoder_.holds();
     }
-    ++core_edge_seq_;
+    ++core_edge_seq_.v;
     mailbox_.forget();
     disks_.forget();
     saves_.forget();
     RtRelaxScope scope(ops_);
     if (const auto r = detach(); !r) {
         tally_.last_error = r.error();
-        machine_.transition(SessionState::Failed);
+        fail_machine_();
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -630,7 +633,8 @@ ILinkEncoder::Outcome LinkSession::on(
         ++tally_.mailbox_write_drops;
         return ILinkEncoder::Outcome::Dropped;
     }
-    const std::array<std::uint16_t, 4> w{a.opcode, a.words[0], a.words[1], a.words[2]};
+    constexpr std::size_t kMailboxWords = 1 + std::tuple_size_v<decltype(a.words)>;
+    const std::array<std::uint16_t, kMailboxWords> w{a.opcode, a.words[0], a.words[1], a.words[2]};
     proto::SpiFioQueue& q = binder_.fio_queue();
     bool queued = q.append_command(w).has_value();
     if (!queued) {
@@ -654,8 +658,8 @@ ILinkEncoder::Outcome LinkSession::on(
         ++tally_.identity_record_refusals;
     const auto made = tenancy_.adopt(a);
 
-    const std::uint8_t at = tenancy_.adopted_slot();
-    const infra::OptRef<const BuiltCore> slot = at < kCoreBaySlots
+    const proto::CoreBaySlot at = tenancy_.adopted_slot();
+    const infra::OptRef<const BuiltCore> slot = in_bay(at)
         ? infra::OptRef<const BuiltCore>{tenancy_.bay().at(at)}
         : infra::OptRef<const BuiltCore>{};
     osd_.bind_rows(slot ? slot->osd_pages : OsdPageRoute::Link);
@@ -680,10 +684,10 @@ ILinkEncoder::Outcome LinkSession::on(
                 .made = made.has_value(),
                 .restore_owed = made.has_value()
                     && current.has_value()
-                    && current->config_slots() != nullptr,
+                    && current->config_slots().has_value(),
                 .cheat_records = made.has_value()
                     && current.has_value()
-                    && current->cheat_records() != nullptr,
+                    && current->cheat_records().has_value(),
                 .bind_gen = bindings_.generation().v,
                 .err = made.has_value() ? Errc{} : made.error().code
             }
@@ -694,7 +698,7 @@ ILinkEncoder::Outcome LinkSession::on(
         encoder_.drop_pads();
         (void)binder_.unbind_session();
         tally_.last_error = made.error();
-        machine_.transition(SessionState::Failed);
+        fail_machine_();
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -749,11 +753,12 @@ ILinkEncoder::Outcome LinkSession::on(
     if (a.waitmount_exhausted) {
         push(Event::SessionAdvisory{.why = Errc::timeout});
     }
+    constexpr std::size_t kCfgBytes = 16;
     if (a.cfg != proto::TxSlabId{} && session_.type() == proto::CoreType::EightBit) {
         const auto bytes = ctx.inbox.bytes(a.cfg);
-        if (bytes.size() == 16) {
+        if (bytes.size() == kCfgBytes) {
             session_.stage(
-                proto::StatusEdit::whole(proto::StatusWord::from_bytes(bytes.first<16>()))
+                proto::StatusEdit::whole(proto::StatusWord::from_bytes(bytes.first<kCfgBytes>()))
             );
         }
     }
@@ -803,20 +808,18 @@ ILinkEncoder::Outcome LinkSession::on(
     const LinkOpCtx&
 ) noexcept {
 
-    if (park_.engaged() && a.gen.v == static_cast<std::uint16_t>(park_.gen())) {
+    if (park_.engaged() && names_park_(a.gen)) {
         park_.withdraw();
-        torn_gen_ = 0;
-        torn_done_ = a.gen.v;
+        torn_gen_ = {};
+        torn_done_ = a.gen;
         push(Event::SessionAdvisory{.why = a.why});
         return ILinkEncoder::Outcome::Encoded;
     }
     if (!start_.on() || a.gen != start_.gen()) {
 
-        if (torn_gen_ != 0
-            && a.gen.v == torn_gen_
-            && a.gen.v != static_cast<std::uint16_t>(park_.gen())) {
-            torn_gen_ = 0;
-            torn_done_ = a.gen.v;
+        if (torn_gen_ != proto::BindGeneration{} && a.gen == torn_gen_ && !names_park_(a.gen)) {
+            torn_gen_ = {};
+            torn_done_ = a.gen;
             push(Event::SessionAdvisory{.why = a.why});
             return ILinkEncoder::Outcome::Encoded;
         }
@@ -841,7 +844,7 @@ ILinkEncoder::Outcome LinkSession::on(
     const auto pulse = current->reset(a.edge);
     if (!pulse)
         return ILinkEncoder::Outcome::Dropped;
-    if (cores::IWindowSave* role = current->window_save(); role != nullptr) {
+    if (const auto role = current->window_save()) {
         (void)window_jobs_.arm_reset_edge(*role, a.edge);
     }
     if (!*pulse)
@@ -925,16 +928,20 @@ Ex<void> LinkSession::reset_core() {
     return session_.pulse_reset();
 }
 
+bool LinkSession::names_park_(proto::BindGeneration g) const noexcept {
+    return g.v == static_cast<std::uint16_t>(park_.gen());
+}
+
 void LinkSession::apply_core_(const proto::LinkOp::ApplyCore& a) {
     const proto::BindGeneration gen = a.gen;
-    torn_gen_ = 0;
+    torn_gen_ = {};
 
-    const bool at_boot = gen.v == kBootGen;
-    if (!at_boot && (!park_.parked() || gen.v != static_cast<std::uint16_t>(park_.gen()))) {
+    const bool at_boot = gen == proto::BindGeneration{kBootGen};
+    if (!at_boot && (!park_.parked() || !names_park_(gen))) {
         ++tally_.stale_owner_steps;
         return;
     }
-    ++core_edge_seq_;
+    ++core_edge_seq_.v;
 
     rows_.disarm_polls();
     f12_mod_poll_.arm(false, bindings_.generation());
@@ -983,7 +990,7 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
         encoder_.drop_pads();
         (void)binder_.unbind_session();
         refuse_start_(r.error());
-        machine_.transition(SessionState::Failed);
+        fail_machine_();
         return r;
     }
 
@@ -1012,9 +1019,10 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
             .mgl_capable = core_supports_mgl(),
             .front_end = front_end
         },
-        EmitSite{ERR_SITE()}
+        ERR_SITE()
     );
-    log_edge(LogRec::CoreLoad{sat_u32((log_now_ns() - load_start_ns_) / 1'000'000u)});
+    constexpr std::uint64_t kNsPerMs = 1'000'000;
+    log_edge(LogRec::CoreLoad{sat_u32((log_now_ns() - load_start_ns_) / kNsPerMs)});
     return {};
 }
 
@@ -1124,14 +1132,19 @@ void LinkSession::reap_storage() noexcept {
 void LinkSession::service_saves(std::uint32_t budget_words) noexcept {
     TASTY_SEAT_BODY(LinkSession);
     const std::uint32_t drops = saves_.liveness_drops();
-    saves_.service_rt(link_, budget_words, fio_free_());
+    saves_.service_rt(budget_words, fio_free_());
     if (saves_.liveness_drops() != drops)
         log_edge(LogRec::Refusal{Errc::timeout, ERR_SITE()});
 }
 
 void LinkSession::gather_diag(DiagCounters& out) const noexcept {
+    constexpr unsigned kLinkLive = 1;
+    constexpr unsigned kLinkParked = 2;
+    constexpr unsigned kLinkStarted = 4;
     out.link = static_cast<std::uint8_t>(
-        (session_live() ? 1u : 0u) | (park_.parked() ? 2u : 0u) | (start_.on() ? 4u : 0u)
+        (session_live() ? kLinkLive : 0u)
+        | (park_.parked() ? kLinkParked : 0u)
+        | (start_.on() ? kLinkStarted : 0u)
     );
     out.core_shutdowns = tenancy_.tally().core_shutdowns;
     const bool status_lw = rows_.status_route() == StatusRoute::Lw;
@@ -1162,7 +1175,7 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
     out.cd_idle_ticks = cd_flow_.idle_ticks;
     out.cd_gated_ticks = cd_flow_.gated_ticks;
     out.cd_drive_state = cd_flow_.drive_state;
-    out.cd_drive_track = cd_flow_.drive_track;
+    out.cd_drive_track = cd_flow_.drive_track.v;
     out.cd_drive_lba = cd_flow_.drive_lba;
     out.cd_drive_audio_lba = cd_flow_.drive_audio_lba;
     out.cd_drive_is_data = cd_flow_.drive_is_data;
@@ -1263,7 +1276,7 @@ void LinkSession::on_osd_visibility_edge(bool visible) {
     }
     const infra::OptRef<cores::Core> current = tenancy_.core();
     if (visible && current.has_value()) {
-        if (cores::IWindowSave* role = current->window_save(); role != nullptr) {
+        if (const auto role = current->window_save()) {
             (void)window_jobs_.arm_osd_open(*role);
         }
     }
@@ -1331,9 +1344,9 @@ Ex<void> LinkSession::raise_session_(const proto::RtcImage& rtc) {
         }
         if (bound.speeds.has_value()) {
             files.have_speeds = true;
-            files.speeds[0] = (*bound.speeds)[0];
-            files.speeds[1] = (*bound.speeds)[1];
-            files.speeds[2] = (*bound.speeds)[2];
+            files.speeds[0] = cores::BaudRate{(*bound.speeds)[0]};
+            files.speeds[1] = cores::BaudRate{(*bound.speeds)[1]};
+            files.speeds[2] = cores::BaudRate{(*bound.speeds)[2]};
         }
         bindings_.spend_uart_files();
 
@@ -1356,11 +1369,6 @@ Ex<void> LinkSession::raise_session_(const proto::RtcImage& rtc) {
 bool LinkSession::session_live() const noexcept {
     TASTY_SEAT_BODY(LinkSession);
     return session_live_();
-}
-
-bool LinkSession::save_upload_counted() noexcept {
-    TASTY_SEAT_BODY(LinkSession);
-    return nvram_.save_upload_counted(save_ctx_());
 }
 
 bool LinkSession::options_push_save_bytes(

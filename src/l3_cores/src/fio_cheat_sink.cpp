@@ -3,6 +3,7 @@
 
 #include "cores/cheat_geometry.h"
 #include "proto/download_session.h"
+#include "proto/spi_fio_queue.h"
 
 namespace mister::cores {
 

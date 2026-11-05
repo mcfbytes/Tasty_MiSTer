@@ -28,7 +28,7 @@ public:
 
     CueWavSource(const svc::Vfs& vfs, std::string_view rom_path) noexcept;
 
-    [[nodiscard]] Ex<PcmExtent> open(std::uint8_t track) override;
+    [[nodiscard]] Ex<PcmExtent> open(svc::TrackNumber track) override;
     [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override;
     void close() noexcept override;
 

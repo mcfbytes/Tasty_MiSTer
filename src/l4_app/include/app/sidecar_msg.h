@@ -6,6 +6,7 @@
 
 #include "app/frame_stamp.h"
 #include "app/rec_control.h"
+#include "app/types.h"
 #include "infra/spsc_ring.h"
 
 namespace mister::app {
@@ -15,7 +16,7 @@ enum class SidecarKind : std::uint8_t { Open, Row, Close };
 struct SidecarMsg {
     SidecarKind kind = SidecarKind::Row;
     std::uint8_t pad_ = 0;
-    std::uint16_t gen = 0;
+    ControlGeneration gen{};
     std::uint16_t width = 0;
     std::uint16_t height = 0;
     std::uint32_t hash = 0;

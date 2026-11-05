@@ -37,9 +37,9 @@ struct Performer {
     void on(const Ask::Open& a, const Ask::Head& h, Job& job) noexcept {
 
         st.src.f.reset();
-        st.src.size = 0;
+        st.src.size = {};
         st.out.f.reset();
-        st.out.size = 0;
+        st.out.size = {};
         st.gen = h.gen;
         if (!a.rel.view().empty()) {
             auto r = stream_open(vfs, a.rel.view());
@@ -54,7 +54,7 @@ struct Performer {
             if (!w) {
 
                 st.src.f.reset();
-                st.src.size = 0;
+                st.src.size = {};
                 job->err = w.error();
                 return;
             }
@@ -72,7 +72,11 @@ struct Performer {
             job->err = Error{Errc::not_found, ERR_SITE(), 0};
             return;
         }
-        auto r = stream_read(*st.src.f, a.offset, std::span<std::byte>(job->data, a.want));
+        auto r = stream_read(
+            *st.src.f,
+            proto::FileSize{a.offset},
+            std::span<std::byte>(job->data, a.want)
+        );
         if (!r) {
             job->err = r.error();
             return;
@@ -88,7 +92,11 @@ struct Performer {
             job->err = Error{Errc::not_found, ERR_SITE(), 0};
             return;
         }
-        auto r = stream_write(*st.out.f, a.offset, std::span<const std::byte>(job->data, a.want));
+        auto r = stream_write(
+            *st.out.f,
+            proto::FileSize{a.offset},
+            std::span<const std::byte>(job->data, a.want)
+        );
         if (!r) {
             job->err = r.error();
             return;
@@ -115,9 +123,9 @@ struct Performer {
         if (st.src.f != nullptr || st.out.f != nullptr)
             st.closes.add(1);
         st.src.f.reset();
-        st.src.size = 0;
+        st.src.size = {};
         st.out.f.reset();
-        st.out.size = 0;
+        st.out.size = {};
         job->ok = 1;
     }
 
@@ -195,7 +203,7 @@ bool FileStreamService::arm_open(
     }
     a.out_mode = out_mode;
     loan->ask = infra::make<Ask>(a, Ask::Head{++rt_.gen});
-    loan->size = 0;
+    loan->size = {};
     loan->got = 0;
     loan->ok = 0;
     rt_.stream_open = true;

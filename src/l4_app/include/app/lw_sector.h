@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "app/types.h"
 #include "cores/blank_save_spec.h"
 #include "hal/phys_region.h"
 #include "hal/register_window.h"
@@ -32,19 +33,19 @@ struct LwSector {
     std::array<Card, proto::SectorBlockDecl::kCards> cards{};
     infra::OptRef<const cores::BlankSaveSpec> blank{};
     std::uint16_t gen = 0;
-    std::uint32_t fabric_gen = 0;
+    FabricGeneration fabric_gen{};
     bool fabric_lost = false;
 
     [[nodiscard]] std::uint16_t card_slots() const noexcept {
         std::uint16_t m = 0;
         for (const Card& c : cards)
             if (c.image.len != 0)
-                m = static_cast<std::uint16_t>(m | (1u << (c.decl.slot & 15u)));
+                m = static_cast<std::uint16_t>(m | (1u << (c.decl.slot.v & 15u)));
         return m;
     }
 
     [[nodiscard]] std::uint16_t bridge_slots() const noexcept {
-        return static_cast<std::uint16_t>(card_slots() | (1u << (block.slot & 15u)));
+        return static_cast<std::uint16_t>(card_slots() | (1u << (block.slot.v & 15u)));
     }
 };
 

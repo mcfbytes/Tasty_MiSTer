@@ -52,7 +52,7 @@ public:
         return width_;
     }
 
-    std::uint8_t io_version() const noexcept override {
+    IoVersion io_version() const noexcept override {
         TASTY_SEAT_BODY(SpiBus);
         return io_version_;
     }
@@ -88,23 +88,14 @@ public:
     [[nodiscard]] SpiSample sample() const noexcept override;
 
     class Transaction {
-    public:
-#ifndef NDEBUG
-        explicit Transaction(SpiBus& bus) : owner_(bus) { owner_.txn_enter(); }
+        TASTY_SEAT_RESIDENT(RT);
 
-        ~Transaction() { owner_.txn_exit(); }
-#else
+    public:
         explicit Transaction(SpiBus& bus) { (void)bus; }
 
         ~Transaction() = default;
-#endif
         Transaction(const Transaction&) = delete;
         Transaction& operator=(const Transaction&) = delete;
-
-#ifndef NDEBUG
-    private:
-        SpiBus& owner_;
-#endif
     };
 
     SpiOutput gpo_shadow() const noexcept { return gpo_; }
@@ -118,11 +109,6 @@ private:
 
     [[nodiscard]] Ex<std::uint32_t> spin_ack(bool want, bool counts = true) noexcept;
 
-#ifndef NDEBUG
-    void txn_enter() noexcept;
-    void txn_exit() noexcept;
-#endif
-
     enum class Post : std::uint8_t { None, Rising, Falling };
     [[nodiscard]] Ex<void> refuse_if_posted_() const noexcept;
 
@@ -133,15 +119,11 @@ private:
     reg::Reg<reg::RO> gpi_reg_;
 
     Width width_ = Width::Byte;
-    std::uint8_t io_version_ = 0;
+    IoVersion io_version_{};
     infra::OptRef<ISpiOutputObserver> obs_{};
     infra::OptRef<xthread::RtStats> stats_{};
     Post post_ = Post::None;
     MailboxClaims::Claim mailbox_;
-#ifndef NDEBUG
-    std::uint32_t txn_depth_ = 0;
-    std::uint32_t txn_cs_entry_ = 0;
-#endif
 
     unsigned ack_soft_spins_ = 0;
     std::uint64_t ack_timeout_ns_ = 0;

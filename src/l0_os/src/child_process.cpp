@@ -18,7 +18,7 @@ int open_pidfd(::pid_t pid) noexcept {
     return static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
 }
 
-std::unexpected<Error> os_error(std::uint16_t site, int e) {
+std::unexpected<Error> os_error(infra::ErrorSite site, int e) {
     return std::unexpected(Error{Errc::os, site, static_cast<std::uint32_t>(e)});
 }
 

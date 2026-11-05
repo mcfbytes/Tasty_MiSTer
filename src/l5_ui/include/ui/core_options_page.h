@@ -52,9 +52,12 @@ public:
     }
 
     void on_enter(PageContext& ctx) override;
-    void render(OsdRenderer& out) const override;
 
-    bool describe(app::PageDescription& out) const override;
+    bool walk(PageWalk& out) const override {
+        TASTY_SEAT_BODY(CoreOptionsPage);
+        return view_->walk(out);
+    }
+
     Transition handle(const UiEvent& ev) override;
 
     MenuMask mask() const override {
@@ -72,26 +75,24 @@ public:
         return view_->selection();
     }
 
-    RowCount osd_height() const override {
-        TASTY_SEAT_BODY(CoreOptionsPage);
-        return ClassicOptionsView::kOsdRows;
-    }
-
     infra::OptRef<IMaskRebuild> mask_rebuild() override {
         TASTY_SEAT_BODY(CoreOptionsPage);
         return infra::OptRef<IMaskRebuild>{*this};
     }
 
-    std::uint8_t page() const noexcept override {
+    proto::SubmenuNo page() const noexcept override {
         TASTY_SEAT_BODY(CoreOptionsPage);
         return model_.page();
     }
 
-    std::uint32_t status_field(BitField b) const noexcept {
-        return status_ ? status_->field(b) : 0u;
+    proto::FieldValue status_field(BitField b) const noexcept {
+        return status_ ? status_->field(b) : proto::FieldValue{};
     }
 
-    const OptionsModel& model() const noexcept { return model_; }
+    const OptionsModel& model() const noexcept override {
+        TASTY_SEAT_BODY(CoreOptionsPage);
+        return model_;
+    }
 
     void rebuild(const proto::ItemTable& table, const BuildEnv& env) override;
 
@@ -111,20 +112,19 @@ public:
         return published_ + (picks_ ? picks_->commands_published() : 0u);
     }
 
-    std::uint32_t first_row() const noexcept { return view_->first_row(); }
+    RowIndex first_row() const noexcept { return view_->first_row(); }
 
 private:
     void first_walk_(const proto::ItemTable& table, const BuildEnv& env);
 
     void refuse() override;
-    void write_status(BitField bits, std::uint32_t value) override;
+    void write_status(BitField bits, proto::FieldValue value) override;
     void toggle(BitField bits, bool ex) override;
 
     Transition open_browser(const OptionItem& it) override;
 
-    const OptionsModel& walk() const override;
     std::string_view heading() const override;
-    std::uint32_t field(BitField bits) const override;
+    proto::FieldValue field(BitField bits) const override;
     StatusView live_words() const override;
     Transition open_recents(const OptionItem& it) override;
     void save_config() override;

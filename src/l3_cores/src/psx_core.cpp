@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/psx_core.h"
+#include "cores/core_adopt.h"
 #include "hal/selected.h"
 
 #include <algorithm>
@@ -89,7 +90,7 @@ MountState PsxCore::mount_disc(std::string_view path) {
     return MountState::Failed;
 }
 
-void PsxCore::set_region(std::uint8_t) {
+void PsxCore::set_region(proto::RegionCode) {
     TASTY_SEAT_BODY(PsxCore);
 }
 
@@ -317,11 +318,11 @@ proto::BlockGeometry PsxCore::geometry_for(
     TASTY_SEAT_BODY(PsxCore);
     if (slot.v != profile().staging.disc_slot.v)
         return wire;
-    proto::BlockGeometry g{kSectorBytes, 0};
+    proto::BlockGeometry g{proto::BlockSize{kSectorBytes}, proto::BlockCount{}};
 
     const std::uint32_t hunk = geom_.chd_hunk_bytes();
     if (hunk != 0 && hunk <= proto::kBlockStagingBytes) {
-        g.window_blocks = hunk / kSectorBytes;
+        g.window_blocks = proto::BlockCount{hunk / kSectorBytes};
     }
     return g;
 }

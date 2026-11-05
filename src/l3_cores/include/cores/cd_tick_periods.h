@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 namespace mister::cores {
 
 struct CdTickPeriods {
-    std::uint32_t idle_us;
-    std::uint32_t stream_us;
+    std::chrono::microseconds idle;
+    std::chrono::microseconds stream;
 
-    std::uint32_t caller_us;
+    std::chrono::microseconds caller;
     std::uint8_t speeds;
-    std::uint32_t speed_us[4];
+    std::chrono::microseconds speed[4];
 };
 
 }

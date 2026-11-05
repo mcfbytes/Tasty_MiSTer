@@ -71,10 +71,10 @@ class ContentPick {
 
 public:
     struct ContentWatch {
-        std::uint32_t act = 0;
+        proto::ActKey act{};
         std::unique_ptr<svc::IFile> file{};
         std::uint64_t total = 0;
-        std::uint32_t crc = 0;
+        svc::Crc32 crc{};
         proto::WideIoIndex wire_index{};
         PathText path{};
         std::uint64_t from = 0;

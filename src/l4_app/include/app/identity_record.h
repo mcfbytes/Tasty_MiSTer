@@ -9,6 +9,7 @@
 #include "app/mra_facts.h"
 #include "app/session_identity.h"
 #include "cores/button_override.h"
+#include "cores/types.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "proto/link_op.h"
@@ -33,7 +34,7 @@ struct IdentityRecord {
     SessionIdentity identity{};
 
     bool mgl_playable = true;
-    std::uint32_t uart_default_baud = 115200;
+    cores::BaudRate uart_default_baud{115200};
     Stamp stamp{};
 };
 

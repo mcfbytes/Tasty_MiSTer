@@ -165,9 +165,9 @@ void ScriptRunner::close_detached() {
     }
 }
 
-bool ScriptRunner::quiesce_closes(int timeout_ms) noexcept {
+bool ScriptRunner::quiesce_closes(std::chrono::milliseconds timeout) noexcept {
     const ::timespec tick{0, 1'000'000};
-    for (int waited = 0; waited <= timeout_ms; ++waited) {
+    for (std::chrono::milliseconds waited{0}; waited <= timeout; ++waited) {
         if (g_closes_in_flight.load(std::memory_order_acquire) == 0)
             return true;
         (void)::nanosleep(&tick, nullptr);

@@ -69,7 +69,13 @@ private:
     bool do_streaming(const svc::DiscGeometry& geom) const noexcept override;
 
     DriveView do_drive_view(const svc::DiscGeometry&) const noexcept override {
-        return DriveView{st_.status, st_.track, st_.lba, st_.cdda.at(st_.lba), st_.is_data};
+        return DriveView{
+            st_.status,
+            svc::TrackIndex{static_cast<std::uint8_t>(st_.track)},
+            st_.lba,
+            st_.cdda.at(st_.lba),
+            st_.is_data
+        };
     }
 
     std::size_t do_command_word_count() const noexcept override { return 3; }

@@ -29,6 +29,7 @@
 #include "hal/thread_map.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/opt_ref.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -123,8 +124,11 @@ public:
 
     void grant_pause(const hal::ThreadRole& row, xthread::PauseLatch& latch) noexcept {
         TASTY_SEAT_BODY(CoreSwitch);
-        pauses_[hal::row_index(row.seat)] = &latch;
-        ddr_[hal::row_index(row.seat)] = row.ddr;
+        seats_[hal::row_index(row.seat)] = GrantedSeat{
+            row.seat,
+            infra::OptRef<xthread::PauseLatch>{latch},
+            row.ddr
+        };
     }
 
     void on_load_core(const UiRequest::LoadCore& req, CorrelationTag tag, Host& host);
@@ -262,9 +266,15 @@ private:
     bool switch_programmed_ = false;
     std::optional<HeldLoad> held_load_{};
 
-    std::array<xthread::PauseLatch*, hal::kThreadSeats> pauses_{};
+    struct GrantedSeat {
+        SeatTag seat = SeatTag::Unbound;
+        infra::OptRef<xthread::PauseLatch> latch{};
+        hal::DdrMapping ddr = hal::DdrMapping::None;
 
-    std::array<hal::DdrMapping, hal::kThreadSeats> ddr_{};
+        [[nodiscard]] bool granted() const noexcept { return latch.has_value(); }
+    };
+
+    std::array<GrantedSeat, hal::kThreadSeats> seats_{};
 
     std::optional<ParkReceipt> receipt_{};
     std::uint32_t minted_ = 0;
@@ -416,34 +426,28 @@ inline bool CoreSwitch::push_last_order() noexcept {
 }
 
 inline void CoreSwitch::pause_seats_(std::uint32_t gen, bool at_receipt) noexcept {
-    for (std::size_t i = 0; i < pauses_.size(); ++i) {
-        if (pauses_[i] == nullptr)
-            continue;
-        if (pauses_at_receipt(static_cast<SeatTag>(i + 1)) == at_receipt)
-            pauses_[i]->pause(gen);
-    }
+    for (const GrantedSeat& s : seats_)
+        if (s.granted() && pauses_at_receipt(s.seat) == at_receipt)
+            s.latch->pause(gen);
 }
 
 inline void CoreSwitch::resume_seats_() noexcept {
-    for (xthread::PauseLatch* l : pauses_)
-        if (l != nullptr)
-            l->resume();
+    for (const GrantedSeat& s : seats_)
+        if (s.granted())
+            s.latch->resume();
 }
 
 inline bool CoreSwitch::seats_paused_(std::uint32_t gen) const noexcept {
-    for (const xthread::PauseLatch* l : pauses_)
-        if (l != nullptr && !l->paused_at(gen))
+    for (const GrantedSeat& s : seats_)
+        if (s.granted() && !s.latch->paused_at(gen))
             return false;
     return true;
 }
 
 inline bool CoreSwitch::mapping_owner_late_(std::uint32_t gen) const noexcept {
-    for (std::size_t i = 0; i < pauses_.size(); ++i) {
-        if (pauses_[i] != nullptr
-            && ddr_[i] == hal::DdrMapping::Owner
-            && !pauses_[i]->paused_at(gen))
+    for (const GrantedSeat& s : seats_)
+        if (s.granted() && s.ddr == hal::DdrMapping::Owner && !s.latch->paused_at(gen))
             return true;
-    }
     return false;
 }
 
@@ -647,23 +651,20 @@ inline void CoreSwitch::publish_refusal_(
 ) noexcept {
     owner_events_.push(
         Event::RequestRefused{.which = which, .why = code},
-        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
+        Event::Head{ERR_SITE(), {}, tag}
     );
 }
 
 inline void CoreSwitch::advise_switch_held_() noexcept {
     owner_events_.push(
         Event::SessionAdvisory{.why = Errc::busy},
-        Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+        Event::Head{ERR_SITE(), {}, kUncaused}
     );
 }
 
 inline void CoreSwitch::advise_switch_failed_(Errc code) noexcept {
 
-    owner_events_.push(
-        Event::SessionAdvisory{.why = code},
-        Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
-    );
+    owner_events_.push(Event::SessionAdvisory{.why = code}, Event::Head{ERR_SITE(), {}, kUncaused});
 }
 
 }

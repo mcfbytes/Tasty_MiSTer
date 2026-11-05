@@ -26,7 +26,7 @@ void MailboxRelay::forget() noexcept {
 }
 
 void MailboxRelay::service_rt(
-    hal::ISpiTransport& link,
+    proto::Link& link,
     proto::SpiFioQueue& queue,
     const proto::MailboxFrameDecl& frame
 ) noexcept {
@@ -51,19 +51,23 @@ void MailboxRelay::service_rt(
     proto::MailboxFrame f{};
     bool moved = true;
     {
-        hal::Selected cs(link, hal::ChipSelect::Io);
-        for (std::uint8_t i = 0; i < frame.words && moved; ++i) {
-            const auto r = link.transfer(
-                hal::SpiWord{i == 0 ? frame.poll_opcode : std::uint16_t{0}}
-            );
+
+        const auto op = link.command(hal::ChipSelect::Io, frame.poll_opcode);
+        if (!op) {
+            wire_faults_.add();
+            return;
+        }
+        f.w[0] = *op;
+        moved = !last_head_ || f.w[0] != *last_head_;
+        for (std::uint8_t i = 1; i < frame.words && moved; ++i) {
+            const auto r = link.read();
             if (!r) {
                 wire_faults_.add();
                 return;
             }
-            f.w[i] = r->v;
-            if (i == 0)
-                moved = !last_head_ || f.w[0] != *last_head_;
+            f.w[i] = *r;
         }
+        link.close();
     }
     polls_.add();
     if (!moved)

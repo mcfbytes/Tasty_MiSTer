@@ -16,7 +16,7 @@ class MouseDivider {
 public:
     struct Packet {
         std::int32_t dx = 0, dy = 0, dz = 0;
-        std::uint8_t buttons = 0;
+        proto::MouseButtons buttons{};
     };
 
     explicit MouseDivider(os::IClock& clock) noexcept : clock_(clock) {}
@@ -28,7 +28,7 @@ public:
         acc_.accumulate(rx, ry, rw);
     }
 
-    void note_buttons(std::uint8_t level) noexcept { acc_.note_buttons(level); }
+    void note_buttons(proto::MouseButtons level) noexcept { acc_.note_buttons(level); }
 
     [[nodiscard]] std::optional<Packet> flush() noexcept;
 

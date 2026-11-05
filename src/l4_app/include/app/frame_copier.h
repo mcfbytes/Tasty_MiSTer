@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -23,6 +24,7 @@
 #include "hal/scaler_buffers.h"
 #include "hal/scaler_header.h"
 #include "hal/scaler_probe.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "os/delay.h"
@@ -48,12 +50,12 @@ public:
         RawFrameChannel& channel;
     };
 
-    static constexpr int kPollMs = 4;
+    static constexpr infra::ParkTimeout kPollMs{4};
     static constexpr std::int64_t kDefaultPeriodNs = 16'666'667;
 
     static constexpr std::int64_t kParkPeriods = 12;
 
-    static constexpr std::uint32_t kReplayTailFrames = 60;
+    static constexpr CoreFrameCount kReplayTailFrames{60};
 
     static constexpr std::int64_t kEpochWaitNs = 90'000'000'000;
 
@@ -67,7 +69,7 @@ public:
     void serve() noexcept;
 
     [[nodiscard]] bool idle() const noexcept;
-    [[nodiscard]] int park_ms() const noexcept;
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
 
     void release() noexcept;
 
@@ -83,7 +85,7 @@ private:
     };
 
     void sample_control_() noexcept;
-    void answer_(std::uint16_t gen, RecVerdict v) noexcept;
+    void answer_(ControlGeneration gen, RecVerdict v) noexcept;
     void begin_(const RecControl& c) noexcept;
     void end_(RecVerdict why) noexcept;
     void set_demand_(bool on) noexcept;
@@ -132,12 +134,7 @@ private:
     }
 
     void attach_pending_(RawFrameSlot& slot) noexcept;
-    void defer_(
-        std::uint64_t first,
-        std::uint32_t count,
-        std::uint8_t first_ctr,
-        DupReason why
-    ) noexcept;
+    void defer_(const FrameStampRun& run) noexcept;
     [[nodiscard]] bool geometry_ok_(const hal::ScalerHeader& h) const noexcept;
 
     [[nodiscard]] bool rate_is_ours_(std::uint32_t seq) const noexcept;
@@ -177,7 +174,7 @@ private:
         bool replay_running = false;
         bool covers_zero = false;
         std::int64_t epoch_wait_ns = -1;
-        std::uint32_t tail_left = 0;
+        CoreFrameCount tail_left{};
         bool tail_counting = false;
     };
 
@@ -186,8 +183,12 @@ private:
     hal::ScalerProbe probe_{};
     std::int64_t period_ns_ = kDefaultPeriodNs;
 
-    std::array<std::array<std::uint16_t, 8>, hal::ScalerBuffers::kBuffers> seen_key_{};
-    std::array<std::int64_t, hal::ScalerBuffers::kBuffers> seen_ns_{};
+    struct BufferWatch {
+        std::array<std::uint16_t, 8> key{};
+        std::chrono::nanoseconds seen{};
+    };
+
+    std::array<BufferWatch, hal::ScalerBuffers::kBuffers> watch_{};
     std::int64_t track_ns_ = 0;
     BufMask live_{};
 

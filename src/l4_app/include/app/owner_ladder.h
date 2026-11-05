@@ -33,7 +33,7 @@ public:
     struct Ended {
         bool ok = false;
         bool touched = false;
-        std::uint8_t slot = 0;
+        proto::IoIndex index{};
         Owed owed{};
     };
 
@@ -102,7 +102,7 @@ private:
 
     std::array<std::string, cores::kLadderCarrySlots> slot_paths_{};
     Owed owed_{};
-    std::uint8_t slot_ = 0;
+    proto::IoIndex index_{};
 };
 
 }

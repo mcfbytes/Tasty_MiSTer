@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "cores/movie_codec.h"
+#include "cores/types.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
@@ -24,7 +25,7 @@ public:
     struct Button {
         std::string_view octoshock;
         std::string_view nymashock;
-        std::uint8_t bit;
+        JoyBit bit;
     };
 
     static constexpr std::array<Button, 14> kButtons{{
@@ -51,9 +52,11 @@ public:
 
     enum class Emu : std::uint8_t { None, Octoshock, Nymashock };
 
+    enum class FirmwareRegion : std::uint8_t { None, Usa, Japan, Europe };
+
     struct Layout {
         Emu emu = Emu::None;
-        std::uint8_t firmware_region = 0;
+        FirmwareRegion firmware_region = FirmwareRegion::None;
         bool platform = false;
         bool log_key = false;
         bool pad_digital = false;
@@ -62,7 +65,6 @@ public:
         [[nodiscard]] std::uint16_t bits() const noexcept;
     };
 
-    static constexpr std::int32_t kSessionFormat = 0x20;
     static constexpr std::size_t kTocPrefixBytes = 4 * (3 + 3 * 100);
 
     static constexpr std::uint64_t kKeySectors = 26;
@@ -93,7 +95,7 @@ public:
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
         std::span<const std::uint8_t> head,
-        std::uint64_t size
+        proto::FileSize size
     ) const noexcept override;
 
     [[nodiscard]] Ex<DigestSource> digest_source(
@@ -127,9 +129,10 @@ public:
 consteval bool psx_pad_bits_are_a_permutation() {
     unsigned seen = 0;
     for (const PsxMovieCodec::Button& b : PsxMovieCodec::kButtons) {
-        if (b.bit > 13)
+        const unsigned bit = b.bit.v;
+        if (bit > 13)
             return false;
-        seen |= 1u << b.bit;
+        seen |= 1u << bit;
     }
     return seen == 0x3FFFu;
 }

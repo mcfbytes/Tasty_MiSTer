@@ -14,8 +14,10 @@
 namespace mister::os {
 namespace {
 
+enum : std::uint8_t { kLinkLocalOctet0 = 169, kLinkLocalOctet1 = 254 };
+
 bool is_wlan(std::string_view name) noexcept {
-    return name.size() >= 4 && name.substr(0, 4) == "wlan";
+    return name.starts_with("wlan");
 }
 
 }
@@ -24,7 +26,7 @@ NetPresence net_presence_from_list(std::span<const Ipv4If> ifs) noexcept {
     NetPresence out{};
     for (const auto& f : ifs) {
 
-        if (f.octet0 == 169 && f.octet1 == 254)
+        if (f.octet0 == kLinkLocalOctet0 && f.octet1 == kLinkLocalOctet1)
             continue;
         if (f.name == "eth0")
             out.wired = true;

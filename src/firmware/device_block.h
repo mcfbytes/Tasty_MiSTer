@@ -93,30 +93,78 @@ class DeviceBlock {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
-    struct Front {
-        infra::OptRef<app::LauncherDemandCell> launcher_demand{};
-        infra::OptRef<xthread::WakeFlag> launcher_wake{};
-        infra::OptRef<const app::LauncherStateCell> launcher_state{};
-        infra::OptRef<app::LauncherKeyBridge> launcher_keys{};
-        bool grants_uart = false;
+    struct Parts {
+
+        struct Wires {
+            xthread::DiagLog& diag;
+            os::MonotonicClock& clock;
+            xthread::WakeFlag& main_wake;
+            xthread::WakeFlag& main_stop;
+            xthread::WakeFlag& ui_wake;
+            xthread::WakeFlag& io_wake;
+            app::LinkTxChannel<SeatTag::Ui>& ui_inbox;
+            app::VideoPump& video;
+            app::InputWire& input;
+            app::OsdWire& osd;
+            app::EventQueue<SeatTag::RT>& events;
+            app::BtPump& bt;
+            app::CoreFrameCounter& frames;
+            app::InputEmit& input_emit;
+
+            infra::OptRef<const reactor::FrameCell> vsync{};
+        };
+
+        struct Cells {
+            app::ConfigCell& config;
+            app::ConfStrCell& conf_str;
+            app::CheatBlobCell& cheat_blob;
+            app::CheatCatalogCell& cheat_catalog;
+            app::CheatLink& cheat_link;
+            app::SaveStateAttach::AskInbox& states_asks;
+            app::SaveStateFactsCell& states_facts;
+            cores::SaveCopyCell& save_copy;
+            app::DevMemWindowMap<seat_owner::Io>& io_windows;
+            app::DevMemWindowMap<seat_owner::Ui>& ui_windows;
+            app::FrameDemandCell& frame_demand;
+            app::CoreFrameCell& core_frames;
+        };
+
+        struct SessionFacts {
+            app::LinkSession& link;
+            app::SessionOwner& owner;
+        };
+
+        struct Frontend {
+            infra::OptRef<app::LauncherDemandCell> launcher_demand{};
+            infra::OptRef<xthread::WakeFlag> launcher_wake{};
+            infra::OptRef<const app::LauncherStateCell> launcher_state{};
+            infra::OptRef<app::LauncherKeyBridge> launcher_keys{};
+            bool grants_uart = false;
+        };
+
+        struct Seats {
+            ThreadAssembly::SeatMains& mains;
+            DiagSampler& diag;
+
+            infra::OptRef<app::SaveStateAttach> save_states{};
+
+            infra::OptRef<app::UiWriteLane> ui_writes{};
+        };
+
+        Wires wires;
+        Cells cells;
+        SessionFacts session;
     };
 
-    struct Seats {
-        ThreadAssembly::SeatMains& mains;
-        DiagSampler& diag;
+    [[nodiscard]] Parts parts() noexcept;
 
-        infra::OptRef<app::SaveStateAttach> save_states{};
-
-        infra::OptRef<app::UiWriteLane> ui_writes{};
-    };
-
-    DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Front& front);
+    DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Parts::Frontend& front);
     DeviceBlock(const DeviceBlock&) = delete;
     DeviceBlock& operator=(const DeviceBlock&) = delete;
 
     void open_wires(const BootParts& plat) noexcept;
 
-    void open_seats(const BootParts& plat, const Seats& seats) noexcept;
+    void open_seats(const BootParts& plat, const Parts::Seats& seats) noexcept;
 
     void grant_pauses(const ThreadAssembly::SeatMains& mains, infra::OptRef<UiMain> ui) noexcept;
 
@@ -169,7 +217,8 @@ private:
         const BootParts& plat
     ) noexcept;
     [[nodiscard]] std::optional<app::InputPipeline> open_input_pipeline_(
-        const BootParts& plat
+        const BootParts& plat,
+        const Parts::Frontend& front
     ) noexcept;
     [[nodiscard]] std::optional<app::InputMain> open_input_main_() noexcept;
 
@@ -181,7 +230,6 @@ private:
 
 public:
     OpenVerdict opened_{};
-    const Front front_;
 
     const hal::ThreadMap& threads_;
 
@@ -212,7 +260,7 @@ public:
 
     app::DiskRelay disk_relay_{io_wake_};
 
-    app::SaveUploadRelay save_relay_{io_wake_};
+    app::SaveUploadRelay save_relay_;
 
     hal::PinLevelCell pin_levels_{};
 

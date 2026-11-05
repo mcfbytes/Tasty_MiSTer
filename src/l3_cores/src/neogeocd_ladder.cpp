@@ -61,7 +61,7 @@ Ex<bool> NeoGeoCdLadder::on_step() {
 }
 
 bool NeoGeoCdLadder::walk_answered_() {
-    if (walk_gen_ == 0)
+    if (!walk_gen_)
         walk_gen_ = next_gen();
     if (!walk_ordered_) {
         if (host_.order_walk(profile_.staging.disc_slot, image_, walk_gen_)) {

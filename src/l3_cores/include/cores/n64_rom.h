@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -23,6 +24,16 @@ enum class ByteOrder : std::uint8_t {
 inline constexpr std::size_t kMinRomBytes = 4096;
 
 inline constexpr std::size_t kHeaderBytes = 0x40;
+
+using RomHeader = std::span<const std::uint8_t, kHeaderBytes>;
+
+[[nodiscard]] constexpr std::optional<RomHeader> rom_header_of(
+    std::span<const std::uint8_t> chunk
+) noexcept {
+    if (chunk.size() < kHeaderBytes)
+        return std::nullopt;
+    return chunk.first<kHeaderBytes>();
+}
 
 inline constexpr std::size_t kInternalNameOffset = 0x20;
 inline constexpr std::size_t kCartIdOffset = 0x3b;
@@ -110,10 +121,8 @@ constexpr void normalize(std::span<std::uint8_t> data, ByteOrder order) noexcept
     }
 }
 
-[[nodiscard]] constexpr CartId cart_id(std::span<const std::uint8_t> header) noexcept {
+[[nodiscard]] constexpr CartId cart_id(RomHeader header) noexcept {
     CartId out;
-    if (header.size() < kHeaderBytes)
-        return out;
 
     std::array<char, kCartIdChars> buf{};
     bool any_named = false;
@@ -132,10 +141,8 @@ constexpr void normalize(std::span<std::uint8_t> data, ByteOrder order) noexcept
     return out;
 }
 
-[[nodiscard]] constexpr InternalName internal_name(std::span<const std::uint8_t> header) noexcept {
+[[nodiscard]] constexpr InternalName internal_name(RomHeader header) noexcept {
     InternalName out;
-    if (header.size() < kHeaderBytes)
-        return out;
 
     const std::span<const std::uint8_t> field = header.subspan(
         kInternalNameOffset,

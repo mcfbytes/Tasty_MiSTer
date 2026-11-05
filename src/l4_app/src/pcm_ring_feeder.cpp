@@ -4,6 +4,8 @@
 #include <cstring>
 #include <utility>
 
+#include "cores/pcm_source_factory.h"
+
 namespace mister::app {
 
 namespace {
@@ -93,7 +95,7 @@ Ex<void> PcmRingFeeder::adopt_ring(hal::FpgaMemory&& ring) noexcept {
     return {};
 }
 
-Ex<void> PcmRingFeeder::set_source(std::unique_ptr<cores::IPcmSource> src) {
+Ex<void> PcmRingFeeder::set_sheet(std::string_view sheet) {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, B);
 
     if (!parked()) {
@@ -105,15 +107,16 @@ Ex<void> PcmRingFeeder::set_source(std::unique_ptr<cores::IPcmSource> src) {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
 
-    if (src == nullptr) {
+    if (sheet.empty()) {
         PcmMedia none{};
         return hand_over_<PcmCommand::AttachSource>(none);
     }
     if (visible_len_.load(std::memory_order_acquire) == 0) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
+
     PcmMedia m{};
-    m.src = std::move(src);
+    (void)m.sheet.assign(sheet);
     if (auto r = hand_over_<PcmCommand::AttachSource>(m); !r)
         return r;
 
@@ -124,15 +127,12 @@ Ex<void> PcmRingFeeder::set_source(std::unique_ptr<cores::IPcmSource> src) {
     return {};
 }
 
-Ex<void> PcmRingFeeder::attach(
-    hal::FpgaMemory ring,
-    std::unique_ptr<cores::IPcmSource> src
-) noexcept {
-    if (!src)
+Ex<void> PcmRingFeeder::attach(hal::FpgaMemory ring, std::string_view sheet) noexcept {
+    if (sheet.empty())
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     if (auto r = adopt_ring(std::move(ring)); !r)
         return r;
-    return set_source(std::move(src));
+    return set_sheet(sheet);
 }
 
 void PcmRingFeeder::detach() noexcept {
@@ -170,12 +170,9 @@ void PcmRingFeeder::reset_playback_() noexcept {
 
 bool PcmRingFeeder::reap_leases_() noexcept {
     if (const auto st = state_.sample()) {
-        for (std::size_t i = 0; i < kPcmMediaLeases; ++i) {
-            if (cmd_.leases[i]
-                && static_cast<std::int32_t>(st.value.attaches - cmd_.lease_seq[i]) >= 0) {
-                cmd_.leases[i].reset();
-            }
-        }
+        for (HeldLease& h : cmd_.held)
+            if (h.lease && static_cast<std::int32_t>(st.value.attaches - h.home_at) >= 0)
+                h.lease.reset();
     }
     return media_.available() != 0;
 }
@@ -195,8 +192,7 @@ Ex<void> PcmRingFeeder::hand_over_(PcmMedia& media) noexcept {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
     ++cmd_.sent;
-    cmd_.lease_seq[idx] = cmd_.sent;
-    cmd_.leases[idx] = std::move(lease);
+    cmd_.held[idx] = HeldLease{std::move(lease), cmd_.sent};
     return {};
 }
 
@@ -213,9 +209,9 @@ Ex<void> PcmRingFeeder::submit_(const PcmCommand& c) noexcept {
     return {};
 }
 
-Ex<void> PcmRingFeeder::play(std::uint8_t track, bool loop) {
+Ex<void> PcmRingFeeder::play(svc::TrackNumber track, bool loop) {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, B);
-    return submit_(infra::make<PcmCommand>(PcmCommand::Play{track, loop}));
+    return submit_(infra::make<PcmCommand>(PcmCommand::Play{track.v, loop}));
 }
 
 Ex<void> PcmRingFeeder::stop() {
@@ -349,7 +345,9 @@ void PcmRingFeeder::on(const PcmCommand::AttachSource& a) noexcept {
         release_source_();
         rp_seen_ = 0;
         read_val_ = 0;
-        src_ = std::move(m->src);
+        if (!m->sheet.empty() && vfs_) {
+            src_ = cores::make_pcm_source(m->sheet.view(), *vfs_);
+        }
     }
     ++work_.attaches;
     publish_state_();
@@ -374,10 +372,10 @@ bool PcmRingFeeder::rest() const noexcept {
     return read_point_.generation() == rp_seen_;
 }
 
-int PcmRingFeeder::rest_ms() const noexcept {
+infra::ParkTimeout PcmRingFeeder::rest_ms() const noexcept {
     if (parked())
         return kPcmParkedPollMs;
-    return draining_ ? 5 : kPcmIdlePollMs;
+    return draining_ ? infra::ParkTimeout{5} : kPcmIdlePollMs;
 }
 
 void PcmRingFeeder::release() noexcept {
@@ -416,7 +414,7 @@ void PcmRingFeeder::apply_play_(std::uint8_t track, [[maybe_unused]] bool loop) 
 
     if (src_ != nullptr && ring_.has_value()) {
 
-        const Ex<cores::PcmExtent> ex = src_->open(track);
+        const Ex<cores::PcmExtent> ex = src_->open(svc::TrackNumber{track});
         if (ex) {
             extent_ = *ex;
 

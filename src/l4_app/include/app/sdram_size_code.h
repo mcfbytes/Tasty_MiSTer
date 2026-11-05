@@ -3,33 +3,46 @@
 
 #include <cstdint>
 
+#include "proto/types.h"
+
 namespace mister::app {
 
-inline constexpr std::uint16_t kSdramCookieMeasured = 0x8000u;
+inline constexpr proto::OsdMask kSdramCookieMeasured = proto::kSdramPresent;
 
-[[nodiscard]] constexpr std::uint8_t sdram_size_code(std::uint16_t osd_mask) noexcept {
-    switch (osd_mask & 7u) {
-        case 7u:
-            return 3u;
-        case 3u:
-            return 2u;
-        case 1u:
-            return 1u;
-        default:
-            return 0u;
-    }
+enum class SdramSizeCode : std::uint8_t { Unwired, Mb32, Mb64, Mb128 };
+
+[[nodiscard]] constexpr std::uint16_t sdram_word(SdramSizeCode code, bool measured) noexcept {
+    const proto::OsdMask size{static_cast<std::uint16_t>(code)};
+    return (measured ? kSdramCookieMeasured.with(size) : size).v;
+}
+
+[[nodiscard]] constexpr SdramSizeCode sdram_size_code(proto::OsdMask osd_mask) noexcept {
+    const proto::OsdMask size = osd_mask.only(proto::kSdramSizeBits);
+    if (size == proto::kSdramSize128)
+        return SdramSizeCode::Mb128;
+    if (size == proto::kSdramSize64)
+        return SdramSizeCode::Mb64;
+    if (size == proto::kSdramSize32)
+        return SdramSizeCode::Mb32;
+    return SdramSizeCode::Unwired;
 }
 
 static_assert(
-    sdram_size_code(7u) == 3u
-    && sdram_size_code(3u) == 2u
-    && sdram_size_code(1u) == 1u
-    && sdram_size_code(0u) == 0u
-    && sdram_size_code(2u) == 0u
-    && sdram_size_code(4u) == 0u
-    && sdram_size_code(5u) == 0u
-    && sdram_size_code(6u) == 0u
+    sdram_size_code(proto::OsdMask{7}) == SdramSizeCode::Mb128
+    && sdram_size_code(proto::OsdMask{3}) == SdramSizeCode::Mb64
+    && sdram_size_code(proto::OsdMask{1}) == SdramSizeCode::Mb32
+    && sdram_size_code(proto::OsdMask{0}) == SdramSizeCode::Unwired
+    && sdram_size_code(proto::OsdMask{2}) == SdramSizeCode::Unwired
+    && sdram_size_code(proto::OsdMask{4}) == SdramSizeCode::Unwired
+    && sdram_size_code(proto::OsdMask{5}) == SdramSizeCode::Unwired
+    && sdram_size_code(proto::OsdMask{6}) == SdramSizeCode::Unwired
 );
-static_assert(kSdramCookieMeasured == 0x8000u && (kSdramCookieMeasured & 7u) == 0u);
+static_assert(
+    sdram_word(SdramSizeCode::Mb128, false) == 3
+    && sdram_word(SdramSizeCode::Mb64, false) == 2
+    && sdram_word(SdramSizeCode::Mb32, false) == 1
+    && sdram_word(SdramSizeCode::Unwired, true) == kSdramCookieMeasured.v
+);
+static_assert(!kSdramCookieMeasured.has(proto::kSdramSizeBits));
 
 }

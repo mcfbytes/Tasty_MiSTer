@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 
 #include "hal/osd_block.h"
 #include "hal/uio_frame_lane.h"
@@ -21,17 +22,49 @@ namespace mister::proto {
 
 namespace {
 
-AxiBlockDecl read_entry(const SysDirectoryImage& dir, std::uint32_t i) {
-    AxiBlockDecl d{};
-    d.kind = dir.entry_word(i, 0);
-    d.version = dir.entry_word(i, 1);
-    d.offset = dir.entry_word(i, 2);
-    d.size = dir.entry_word(i, 3);
-    for (std::uint32_t w = 0; w < d.ops.size(); ++w)
-        d.ops[w] = dir.entry_word(i, 4 + w);
-    d.line = dir.line(i);
-    return d;
-}
+enum OpsWord : std::size_t {
+    kShapeWord = 0,
+    kCauseWord = 1,
+    kFifoWord = 2,
+    kCardWordsFirst = 3,
+    kCardWsrcFirst = 4,
+    kCardExtentFirst = 7,
+    kCardStride = 2,
+    kLaneCapsWord = 8,
+    kLaneFifoWord = 9,
+    kSysOrdinalWord = 0,
+    kSysTagWord = 2,
+    kSysCausesWord = 3,
+};
+
+enum : std::uint32_t { kAlignMask = 3 };
+
+struct DirWord {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr std::uint16_t low16() const noexcept {
+        return static_cast<std::uint16_t>(v & std::numeric_limits<std::uint16_t>::max());
+    }
+
+    [[nodiscard]] constexpr std::uint16_t high16() const noexcept {
+        return static_cast<std::uint16_t>(v >> std::numeric_limits<std::uint16_t>::digits);
+    }
+
+    [[nodiscard]] constexpr std::uint8_t top_byte() const noexcept {
+        return static_cast<std::uint8_t>(
+            v
+            >> (std::numeric_limits<std::uint32_t>::digits
+                - std::numeric_limits<std::uint8_t>::digits)
+        );
+    }
+
+    [[nodiscard]] constexpr std::uint8_t flags_byte() const noexcept {
+        return static_cast<std::uint8_t>(
+            (v >> std::numeric_limits<std::uint16_t>::digits)
+            & std::numeric_limits<std::uint8_t>::max()
+        );
+    }
+};
 
 [[nodiscard]] Ex<AxiBlockDecl> find_entry(
     const SysDirectoryImage& dir,
@@ -44,15 +77,15 @@ AxiBlockDecl read_entry(const SysDirectoryImage& dir, std::uint32_t i) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), magic});
     }
     const std::uint32_t version = dir.version();
-    if ((version >> 16) != SysDirectory::kMajor) {
+    if (DirWord{version}.high16() != SysDirectory::kMajor) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), version});
     }
     const std::uint32_t n = dir.count();
     for (std::uint32_t i = 0; i < n; ++i) {
-        const AxiBlockDecl d = read_entry(dir, i);
+        const AxiBlockDecl d = dir.entry(i);
         if (d.kind != kind)
             continue;
-        if ((d.version >> 16) != major) {
+        if (DirWord{d.version}.high16() != major) {
             return std::unexpected(Error{Errc::negotiation, ERR_SITE(), d.version});
         }
         return d;
@@ -61,7 +94,7 @@ AxiBlockDecl read_entry(const SysDirectoryImage& dir, std::uint32_t i) {
 }
 
 bool block_fits(const AxiBlockDecl& d, std::size_t need, std::uint32_t window_size) noexcept {
-    return (d.offset & 3u) == 0u
+    return (d.offset & kAlignMask) == 0u
         && d.size >= need
         && d.offset >= hal::SysDirectory::kSize
         && d.offset <= window_size
@@ -80,11 +113,10 @@ bool block_fits(const AxiBlockDecl& d, std::size_t need, std::uint32_t window_si
     if (!block_fits(*d, hal::UioRegFile::kSize, window_size)) {
         return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), d->offset});
     }
-    for (const std::uint16_t op :
-         {static_cast<std::uint16_t>(UioOp::Joystick0),
-          static_cast<std::uint16_t>(UioOp::Joystick1)}) {
-        if (!d->honours(op))
-            return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), op});
+    for (const UioOp op : {UioOp::Joystick0, UioOp::Joystick1}) {
+        if (!d->honours(op)) {
+            return std::unexpected(Error{Errc::bad_opcode, ERR_SITE(), proto::word(op).v});
+        }
     }
     return d;
 }
@@ -99,33 +131,33 @@ bool block_fits(const AxiBlockDecl& d, std::size_t need, std::uint32_t window_si
     if (!block_fits(*d, hal::SectorBlock::kSize, window_size)) {
         return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), d->offset});
     }
-    const std::uint32_t shape = d->ops[0];
-    const std::uint32_t fifo = d->ops[2];
+    const DirWord shape{d->ops[kShapeWord]};
+    const DirWord fifo{d->ops[kFifoWord]};
     const SectorBlockDecl s{
         .offset = d->offset,
         .size = d->size,
-        .slot = static_cast<std::uint8_t>(shape >> 24),
-        .frame_words = static_cast<std::uint16_t>(shape & 0xFFFFu),
-        .cause = d->ops[1],
-        .fifo_depth = static_cast<std::uint16_t>(fifo >> 16),
-        .strobe_gap = static_cast<std::uint16_t>(fifo & 0xFFFFu)
+        .slot = SlotIndex{shape.top_byte()},
+        .frame_words = shape.low16(),
+        .cause = d->ops[kCauseWord],
+        .fifo_depth = fifo.high16(),
+        .strobe_gap = fifo.low16()
     };
     if (s.frame_words == 0 || s.frame_words > hal::SectorBlock::kMaxFrameWords) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), s.frame_words});
     }
     SectorBlockDecl out = s;
     out.line_decl = d->line;
-    out.minor = static_cast<std::uint16_t>(d->version & 0xFFFFu);
+    out.minor = DirWord{d->version}.low16();
     if (out.minor == 0)
         return out;
     for (std::size_t c = 0; c < SectorBlockDecl::kCards; ++c) {
-        const std::uint32_t card = d->ops[3 + 2 * c];
+        const DirWord card{d->ops[kCardWordsFirst + kCardStride * c]};
         out.cards[c] = SectorBlockDecl::Card{
-            .slot = static_cast<std::uint8_t>(card >> 24),
-            .flags = static_cast<std::uint8_t>((card >> 16) & 0xFFu),
-            .frame_words = static_cast<std::uint16_t>(card & 0xFFFFu),
-            .wsrc = d->ops[4 + 2 * c],
-            .extent = d->ops[7 + c]
+            .slot = SlotIndex{card.top_byte()},
+            .flags = card.flags_byte(),
+            .frame_words = card.low16(),
+            .wsrc = d->ops[kCardWsrcFirst + kCardStride * c],
+            .extent = d->ops[kCardExtentFirst + c]
         };
     }
     return out;
@@ -141,10 +173,10 @@ bool block_fits(const AxiBlockDecl& d, std::size_t need, std::uint32_t window_si
     if (!block_fits(*d, hal::OsdBlock::kSize, window_size)) {
         return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), d->offset});
     }
-    if (d->ops[0] != hal::OsdBlock::kGeometry) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), d->ops[0]});
+    if (d->ops[kShapeWord] != hal::OsdBlock::kGeometry) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), d->ops[kShapeWord]});
     }
-    return OsdBlockDecl{.offset = d->offset, .size = d->size, .geometry = d->ops[0]};
+    return OsdBlockDecl{.offset = d->offset, .size = d->size, .geometry = d->ops[kShapeWord]};
 }
 
 [[nodiscard]] Ex<SysBlockDecl> find_sys_block(
@@ -158,24 +190,24 @@ bool block_fits(const AxiBlockDecl& d, std::size_t need, std::uint32_t window_si
         return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), d->offset});
     }
 
-    const std::uint32_t ordinal = d->ops[0];
+    const std::uint32_t ordinal = d->ops[kSysOrdinalWord];
     if (ordinal < kIrqPoolFirstLine || ordinal > kIrqOrdinalMax) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), ordinal});
     }
 
-    if (d->ops[2] != reactor::cause_word::kSys) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), d->ops[2]});
+    if (d->ops[kSysTagWord] != reactor::cause_word::kSys) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), d->ops[kSysTagWord]});
     }
-    if ((d->ops[3] & hal::SysBlock::kCauseStatus) == 0u) {
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), d->ops[3]});
+    if ((d->ops[kSysCausesWord] & hal::SysBlock::kCauseStatus) == 0u) {
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), d->ops[kSysCausesWord]});
     }
     return SysBlockDecl{
         .offset = d->offset,
         .size = d->size,
         .line = static_cast<os::UioLine>(ordinal - kIrqPoolFirstLine),
-        .cause = d->ops[1],
-        .tag = d->ops[2],
-        .causes = d->ops[3],
+        .cause = d->ops[kCauseWord],
+        .tag = d->ops[kSysTagWord],
+        .causes = d->ops[kSysCausesWord],
         .line_decl = d->line
     };
 }
@@ -192,9 +224,9 @@ bool block_fits(const AxiBlockDecl& d, std::size_t need, std::uint32_t window_si
     }
     LaneBlockDecl out{.offset = d->offset, .size = d->size};
     std::copy_n(d->ops.begin(), out.ops.size(), out.ops.begin());
-    out.caps = d->ops[8];
-    out.fifo_depth = static_cast<std::uint16_t>(d->ops[9] >> 16);
-    out.strobe_gap = static_cast<std::uint16_t>(d->ops[9] & 0xFFFFu);
+    out.caps = d->ops[kLaneCapsWord];
+    out.fifo_depth = DirWord{d->ops[kLaneFifoWord]}.high16();
+    out.strobe_gap = DirWord{d->ops[kLaneFifoWord]}.low16();
     out.line_decl = d->line;
     return out;
 }

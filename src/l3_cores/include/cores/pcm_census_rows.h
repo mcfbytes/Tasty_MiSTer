@@ -22,7 +22,7 @@ public:
         Core* c = bound_core<kProfile>(st);
         if (c == nullptr)
             return;
-        if (IPcmWireRows* r = c->pcm_wire_rows())
+        if (const auto r = c->pcm_wire_rows())
             r->service_pcm_tick();
     }
 };

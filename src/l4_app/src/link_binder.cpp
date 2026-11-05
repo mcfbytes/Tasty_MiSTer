@@ -81,26 +81,18 @@ Ex<void> LinkBinder::bind_session(
     for (const LinkRow& row : kLinkRows) {
         if (row.phase != BindPhase::Bind)
             continue;
-        switch (row.kind) {
-            case LinkKind::ImageSink:
-                break;
-            case LinkKind::CoreWindow:
-                break;
-            case LinkKind::CensusRows: {
+        switch (row.rt) {
+            case RtAct::BindCensus: {
                 if (auto r = bind_census(rows, owner); !r)
                     return r;
                 break;
             }
-            case LinkKind::Doorbells:
+            case RtAct::BindDoorbells:
                 bind_doorbells_(irqs, declared, lines);
                 break;
-            case LinkKind::BlockSlots:
+            case RtAct::None:
                 break;
-            case LinkKind::Pads:
-                break;
-            case LinkKind::Sectors:
-                break;
-            case LinkKind::kCount:
+            case RtAct::kCount:
                 break;
         }
     }

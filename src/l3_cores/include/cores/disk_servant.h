@@ -8,6 +8,7 @@
 
 #include "cores/staging_core.h"
 #include "proto/disk_act.h"
+#include "proto/types.h"
 
 namespace mister::svc {
 class Vfs;
@@ -19,7 +20,7 @@ class IDiskServant {
 public:
     virtual ~IDiskServant() = default;
 
-    [[nodiscard]] virtual MountState bind(std::uint8_t unit, std::string_view path) noexcept = 0;
+    [[nodiscard]] virtual MountState bind(proto::DiskUnit unit, std::string_view path) noexcept = 0;
 
     [[nodiscard]] virtual proto::DiskAct start(
         std::span<const std::byte, proto::kDiskStateBytes> state,

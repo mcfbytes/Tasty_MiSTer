@@ -13,7 +13,7 @@ public:
 
     [[nodiscard]] proto::BlockBacking resolve(proto::SlotServer kind) noexcept override {
         if (kind == proto::SlotServer::CoreDescriptor)
-            return proto::BlockBacking{kind, {}, infra::opt_ref_of(&channel_->descriptor())};
+            return proto::BlockBacking::core_descriptor(infra::opt_ref_of(&channel_->descriptor()));
         return {};
     }
 

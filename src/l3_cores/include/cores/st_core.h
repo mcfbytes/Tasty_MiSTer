@@ -20,6 +20,7 @@
 #include "cores/st_options.h"
 #include "cores/st_sysctrl.h"
 #include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "proto/disk_poll_decl.h"
 
@@ -90,8 +91,8 @@ public:
         return profile().option_rows;
     }
 
-    [[nodiscard]] OptionRowView option_view(std::size_t row) noexcept override;
-    [[nodiscard]] Ex<void> set_option(std::size_t row, std::uint8_t choice) override;
+    [[nodiscard]] OptionRowView option_view(proto::OptionRowIndex row) noexcept override;
+    [[nodiscard]] Ex<void> set_option(proto::OptionRowIndex row, proto::FieldValue choice) override;
 
     [[nodiscard]] Ex<void> set_system_ctrl(std::uint32_t ctrl);
     [[nodiscard]] Ex<void> set_ext_ctrl(std::uint32_t ext);
@@ -110,13 +111,13 @@ public:
 
     [[nodiscard]] std::uint64_t bytes_sent() const noexcept { return bytes_sent_; }
 
-    [[nodiscard]] bool acsi_bound(std::uint8_t target) const noexcept;
+    [[nodiscard]] bool acsi_bound(AcsiTarget target) const noexcept;
 
     [[nodiscard]] std::string_view tos_path() const noexcept { return cfg_.tos_img.view(); }
 
     [[nodiscard]] std::string_view cart_path() const noexcept { return cart_img_.view(); }
 
-    [[nodiscard]] std::string_view acsi_path(std::uint8_t target) const noexcept;
+    [[nodiscard]] std::string_view acsi_path(AcsiTarget target) const noexcept;
 
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
@@ -124,13 +125,21 @@ private:
     [[nodiscard]] Ex<void> on_file_tx(IoIndex index, std::span<const std::uint8_t> bytes) override;
     [[nodiscard]] Ex<void> on_apply_load_facts(std::span<const std::uint8_t> facts) override;
 
-    [[nodiscard]] ISectorKick* on_sector_kick() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<ISectorKick> on_sector_kick() noexcept override {
+        return infra::OptRef<ISectorKick>{*this};
+    }
 
-    [[nodiscard]] ISlotMount* on_slot_mount() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<ISlotMount> on_slot_mount() noexcept override {
+        return infra::OptRef<ISlotMount>{*this};
+    }
 
-    [[nodiscard]] IConfigSlots* on_config_slots() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IConfigSlots> on_config_slots() noexcept override {
+        return infra::OptRef<IConfigSlots>{*this};
+    }
 
-    [[nodiscard]] IOptionRows* on_options() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IOptionRows> on_options() noexcept override {
+        return infra::OptRef<IOptionRows>{*this};
+    }
 
     void on_set_pending_file_ext(std::string_view ext) noexcept override;
 
@@ -146,7 +155,7 @@ private:
     [[nodiscard]] Ex<void> tx_cart_(std::span<const std::uint8_t> rom);
     [[nodiscard]] Ex<void> insert_disk_(IoIndex slot, std::string_view path);
 
-    [[nodiscard]] Ex<void> eject_hdd_(std::uint8_t target);
+    [[nodiscard]] Ex<void> eject_hdd_(AcsiTarget target);
     [[nodiscard]] Ex<void> eject_all_();
     [[nodiscard]] std::uint32_t word_(WordId w) const noexcept;
     [[nodiscard]] Ex<void> push_word_(WordId w, std::uint32_t v);
@@ -157,8 +166,13 @@ private:
     StConfig cfg_{};
 
     FixedStr<kPathBytes, StrFit::Clip> cart_img_{};
-    std::array<bool, kAcsiTargets> hdd_bound_{};
-    std::array<bool, kAcsiTargets> bind_out_{};
+
+    struct AcsiBind {
+        bool bound = false;
+        bool out = false;
+    };
+
+    infra::IndexedArray<AcsiBind, kAcsiTargets, AcsiTarget> acsi_{};
     std::array<bool, 2> floppy_inserted_{};
     std::array<FixedStr<kPathBytes, StrFit::Clip>, 2> floppy_img_{};
     char view_text_[kOptionTextChars + 1]{};

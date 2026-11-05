@@ -6,8 +6,8 @@
 
 namespace mister::cores {
 
-std::uint8_t PsxSectorProgram::slot() const noexcept {
-    return static_cast<std::uint8_t>(manifests::kPsx.staging.disc_slot.v);
+proto::SlotIndex PsxSectorProgram::slot() const noexcept {
+    return manifests::kPsx.staging.disc_slot.block_slot();
 }
 
 std::uint32_t PsxSectorProgram::frame_bytes() const noexcept {

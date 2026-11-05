@@ -11,7 +11,7 @@ namespace mister::ui {
 namespace {
 
 bool offered(const OptionItem& it) noexcept {
-    return it.page == 0
+    return it.page == proto::kRootSubmenu
         && it.screen_row.has_value()
         && it.selectable_index.has_value()
         && !it.disabled;

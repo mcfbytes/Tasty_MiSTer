@@ -36,7 +36,7 @@ private:
     [[nodiscard]] bool walk_answered_();
 
     Rung rung_ = Rung::Unload;
-    std::uint32_t walk_gen_ = 0;
+    proto::ActKey walk_gen_{};
     bool walk_ordered_ = false;
     std::int64_t refused_since_ = -1;
 };

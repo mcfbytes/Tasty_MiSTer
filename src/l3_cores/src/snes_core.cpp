@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/snes_core.h"
+#include "cores/core_adopt.h"
 
 #include "cores/manifests/snes.h"
 #include "infra/byte_view.h"
@@ -39,7 +40,7 @@ Ex<void> SnesCore::do_adopt(const CoreAdopt&) {
 
 void SnesCore::on_set_pending_file_ext(std::string_view ext) noexcept {
     (void)ext_.assign(ext);
-    data_host_.set_pending_ext(ext);
+    data_host_.set_pending_file_ext(ext);
 }
 
 Ex<void> SnesCore::on_mount(IoIndex, const MountedPath&) {
@@ -185,7 +186,7 @@ SnesCore::Analysis SnesCore::analyze_(
 
 Ex<void> SnesCore::tx_rom_(IoIndex index, std::span<const std::uint8_t> bytes) {
     const auto file_size = static_cast<std::uint32_t>(bytes.size());
-    const std::uint32_t base = snes::copier_offset(file_size);
+    const std::uint32_t base = snes::copier_offset(proto::FileSize{file_size});
     const std::uint32_t payload = file_size - base;
 
     const Analysis analysis = analyze_(bytes, base, payload);

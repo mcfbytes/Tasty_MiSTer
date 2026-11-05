@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/arcade_facts.h"
 
+#include <array>
+#include <limits>
 #include <span>
 #include <utility>
 
@@ -10,19 +12,15 @@ namespace mister::cores {
 
 namespace {
 
-std::uint64_t saved_dips(const svc::Vfs& vfs, std::string_view name, std::uint64_t def) {
+mra::DipWord saved_dips(const svc::Vfs& vfs, std::string_view name, mra::DipWord def) {
     auto f = vfs.open(std::string("config/dips/").append(name), svc::OpenMode::Read);
     if (!f)
         return def;
-    std::array<std::uint8_t, 8> raw{};
+    mra::DipWord::Bytes raw{};
     auto r = (*f)->read_at(0, std::as_writable_bytes(std::span<std::uint8_t>(raw)));
     if (!r || *r != raw.size())
         return def;
-    std::uint64_t v = 0;
-    for (std::size_t i = 0; i < raw.size(); ++i) {
-        v |= static_cast<std::uint64_t>(raw[i]) << (8 * i);
-    }
-    return v;
+    return mra::DipWord::from_le_bytes(raw);
 }
 
 }
@@ -95,15 +93,10 @@ ArcadeDocument read_arcade_document(
 }
 
 bool nvram_declared(int index, int size) noexcept {
-    return index > 0 && index <= 255 && size > 0 && static_cast<std::uint64_t>(size) <= kNvramCap;
-}
-
-std::array<std::uint8_t, 8> dip_pack(std::uint64_t dip) noexcept {
-    std::array<std::uint8_t, 8> out{};
-    for (std::size_t i = 0; i < out.size(); ++i) {
-        out[i] = static_cast<std::uint8_t>(dip >> (8 * i));
-    }
-    return out;
+    return index > 0
+        && std::cmp_less_equal(index, std::numeric_limits<std::uint8_t>::max())
+        && size > 0
+        && std::cmp_less_equal(size, kNvramCap);
 }
 
 }

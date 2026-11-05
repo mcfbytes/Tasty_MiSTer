@@ -32,12 +32,12 @@ ConfigSaves::ConfigSaves(const Wiring& w) noexcept
 
 void ConfigSaves::save_dips(CorrelationTag tag) noexcept {
     TASTY_SEAT_BODY(ConfigSaves);
-    if (!order_save_ask(proto::SaveKind::Dips, 0, tag)) {
+    if (!order_save_ask(proto::SaveKind::Dips, cores::ConfigSlot{}, tag)) {
         publish_save_verdict_(false, tag);
     }
 }
 
-void ConfigSaves::save_slot(std::uint8_t slot, CorrelationTag tag) noexcept {
+void ConfigSaves::save_slot(cores::ConfigSlot slot, CorrelationTag tag) noexcept {
     TASTY_SEAT_BODY(ConfigSaves);
     slot_save_slot_ = slot;
     if (!order_save_ask(proto::SaveKind::Slot, slot, tag)) {
@@ -45,7 +45,7 @@ void ConfigSaves::save_slot(std::uint8_t slot, CorrelationTag tag) noexcept {
     }
 }
 
-void ConfigSaves::load_slot(std::uint8_t slot, CorrelationTag tag) noexcept {
+void ConfigSaves::load_slot(cores::ConfigSlot slot, CorrelationTag tag) noexcept {
     TASTY_SEAT_BODY(ConfigSaves);
     slot_load_slot_ = slot;
     (void)order_save_ask(proto::SaveKind::SlotNames, slot, tag);
@@ -58,7 +58,7 @@ void ConfigSaves::set_ini_key(std::string_view key, std::string_view value) {
     auto f = vfs_.open(kIni, svc::OpenMode::ReadWhole);
     if (f) {
         const auto sz = (*f)->size();
-        const auto buf = sz ? read_whole(**f, sz->v) : std::nullopt;
+        const auto buf = sz ? read_whole(**f, *sz) : std::nullopt;
         if (!buf) {
             iwf_cell_.publish(++tally_.ini_write_failures);
             return;
@@ -123,14 +123,14 @@ void ConfigSaves::order_slot_previews(const std::byte* pack, std::size_t len) {
         off += nlen;
         std::string rel = "config/";
         rel.append(name);
-        (void)intern_rel_at_(InternedFile::config_id(i), rel);
+        (void)intern_rel_at_(InternedFile::config_id(cores::ConfigSlot{i}), rel);
     }
     (void)push_dropping(inbox_, tally_, proto::LinkOp::BindSlotPreviews{.count = count});
 }
 
-bool ConfigSaves::bind_slot_config(std::uint8_t slot, std::string_view path) {
+bool ConfigSaves::bind_slot_config(cores::ConfigSlot slot, std::string_view path) {
     TASTY_SEAT_BODY(ConfigSaves);
-    proto::LinkOp::BindSlotConfig op{.slot = slot};
+    proto::LinkOp::BindSlotConfig op{.slot = slot.v};
     const auto id = InternedFile::config_id(slot);
     if (intern_rel_at_(id, path)) {
         op.file = id;
@@ -141,7 +141,7 @@ bool ConfigSaves::bind_slot_config(std::uint8_t slot, std::string_view path) {
 void ConfigSaves::publish_save_verdict_(bool ok, CorrelationTag tag) noexcept {
     owner_events_.push(
         Event::InfoRequest{.id = ok ? InfoId::SaveWritten : InfoId::SaveFailed},
-        Event::Head{EmitSite{ERR_SITE()}, {}, tag}
+        Event::Head{ERR_SITE(), {}, tag}
     );
 }
 
@@ -151,13 +151,13 @@ void ConfigSaves::order_save_upload_() noexcept {
 
 bool ConfigSaves::order_save_ask(
     proto::SaveKind kind,
-    std::uint8_t slot,
+    cores::ConfigSlot slot,
     CorrelationTag tag,
     bool gating
 ) noexcept {
     TASTY_SEAT_BODY(ConfigSaves);
     const proto::LinkOp op = infra::make<proto::LinkOp>(
-        proto::LinkOp::SaveAsk{.which = kind, .slot = slot, .tag = tag}
+        proto::LinkOp::SaveAsk{.which = kind, .slot = slot.v, .tag = tag}
     );
     if (gating)
         return push_gating(inbox_, tally_, sleeper_, op);

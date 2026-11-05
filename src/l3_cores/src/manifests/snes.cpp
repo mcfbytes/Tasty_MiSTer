@@ -13,6 +13,8 @@
 
 namespace mister::cores::manifests {
 
+using namespace std::chrono_literals;
+
 std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g) {
     return std::make_unique<SnesCore>(p, g.services);
 }
@@ -21,7 +23,7 @@ std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g) {
     return std::make_unique<SgbCore>(p, g.services, kSgbMailboxFrame);
 }
 
-std::unique_ptr<ICompanionLoad> make_msu_companion(const svc::Vfs& vfs) {
+std::unique_ptr<MsuCompanion> make_msu_companion(const svc::Vfs& vfs) {
     return std::make_unique<MsuCompanion>(vfs);
 }
 
@@ -42,7 +44,7 @@ static_assert(
 static_assert(
     kSgb.services.size() == 1
         && kSgb.services[0].impl == &kMailboxTick<kSgb>
-        && kSgb.services[0].period_ms == 0
+        && kSgb.services[0].period == reactor::kEveryRound
         && kSgb.services[0].cause == kSnes.services[0].cause
         && kSgbMailboxFrame.poll_opcode == kSnesMailboxFrame.poll_opcode
         && kSgbMailboxFrame.words == kSnesMailboxFrame.words,
@@ -57,7 +59,7 @@ static_assert(
     "user_io.cpp:244: is_snes() is strcasecmp(orig_name, \"SNES\")"
 );
 static_assert(
-    kSnes.services.size() == 1 && kSnes.services[0].period_ms == 0,
+    kSnes.services.size() == 1 && kSnes.services[0].period == reactor::kEveryRound,
     "user_io.cpp:3223: snes_poll runs on every user_io_poll pass, ungated"
 );
 static_assert(

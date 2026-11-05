@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 
+#include "app/page_description.h"
+#include "cores/progress.h"
 #include "infra/opt_ref.h"
+#include "infra/seat.h"
+#include "ui/page_facts.h"
 #include "ui/page_id.h"
+#include "ui/page_row.h"
+#include "ui/page_walk.h"
 #include "ui/transition.h"
 #include "ui/types.h"
 
@@ -25,11 +32,12 @@ struct UiEvent;
 class OsdRenderer;
 struct PageContext;
 struct BuildEnv;
+struct PageWalk;
 
 class IProgressView {
 public:
     virtual ~IProgressView() = default;
-    virtual void set_progress(std::uint16_t cur, std::uint16_t max) noexcept = 0;
+    virtual void set_progress(cores::Progress progress) noexcept = 0;
 
 protected:
     IProgressView() = default;
@@ -41,7 +49,7 @@ class IMaskRebuild {
 public:
     virtual ~IMaskRebuild() = default;
     virtual void rebuild(const proto::ItemTable& table, const BuildEnv& env) = 0;
-    virtual std::uint8_t page() const noexcept = 0;
+    virtual proto::SubmenuNo page() const noexcept = 0;
 
 protected:
     IMaskRebuild() = default;
@@ -51,15 +59,44 @@ protected:
 
 class Page {
 public:
+    TASTY_SEAT_RESIDENT(Ui);
+
     virtual ~Page() = default;
 
     virtual PageId id() const = 0;
 
     virtual void on_enter(PageContext&) {}
 
-    virtual void render(OsdRenderer&) const = 0;
+    virtual bool walk(PageWalk& out) const = 0;
 
-    virtual bool describe(app::PageDescription&) const { return false; }
+    virtual void render(OsdRenderer& out) const {
+        TASTY_SEAT_BODY(Page);
+        app::PageDescription page{};
+        std::array<PageRow, kMaxPageRows> rows{};
+        PageWalk w{.page = page, .rows = rows};
+        if (!walk(w))
+            return;
+        draw_classic(out, w);
+    }
+
+    template <class Walker>
+    [[nodiscard]] static bool describe_walk(const Walker& source, app::PageDescription& out) {
+        TASTY_SEAT_BODY(Page);
+        app::PageDescription page{};
+        page.first = out.first;
+        std::array<PageRow, kMaxPageRows> rows{};
+        PageWalk w{.page = page, .rows = rows};
+        if (!source.walk(w))
+            return false;
+        (void)copy_hd_rows(w);
+        out = page;
+        return true;
+    }
+
+    virtual bool describe(app::PageDescription& out) const {
+        TASTY_SEAT_BODY(Page);
+        return describe_walk(*this, out);
+    }
 
     virtual bool describe_hub(app::PageDescription&) const { return false; }
 
@@ -79,8 +116,6 @@ public:
 
     virtual Transition open_scripts(PageContext&) { return Transition{}; }
 
-    virtual bool wake_every_round() const { return false; }
-
     virtual MenuMask mask() const { return MenuMask{}; }
 
     virtual void set_selection(RowIndex) {}
@@ -97,21 +132,9 @@ public:
         return std::nullopt;
     }
 
-    virtual RowCount osd_height() const { return RowCount{16}; }
+    virtual PageFacts facts() const { return kDefaultPageFacts; }
 
-    virtual bool has_title_strip() const { return true; }
-
-    virtual std::uint32_t auto_pop_ms() const { return 0; }
-
-    virtual bool takes_input_focus() const { return true; }
-
-    virtual bool allows_global_hotkeys() const { return true; }
-
-    virtual bool allows_popups() const { return false; }
-
-    virtual bool counts_as_menu_present() const { return true; }
-
-    virtual bool allows_cfg_switch() const { return false; }
+    RowCount osd_height() const noexcept { return facts().osd_rows; }
 
     virtual bool bt_pairing_active() const { return false; }
 
@@ -125,6 +148,8 @@ protected:
     Page() = default;
     Page(const Page&) = default;
     Page& operator=(const Page&) = default;
+
+    void draw_classic(OsdRenderer& out, const PageWalk& w) const;
 };
 
 }

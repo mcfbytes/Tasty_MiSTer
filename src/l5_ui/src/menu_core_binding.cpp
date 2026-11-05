@@ -7,7 +7,6 @@ namespace mister::ui {
 
 void MenuCoreBinding::set_core_type(proto::CoreType t) noexcept {
     core_type_ = t;
-    ui_capable_ = (t == proto::CoreType::EightBit || t == proto::CoreType::SharpMz);
 }
 
 void MenuCoreBinding::latch_home(const app::IdentityLatch& identity) noexcept {

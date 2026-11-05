@@ -41,7 +41,7 @@ public:
         FixedStr<64, StrFit::Clip> core_name{};
         PathText rom_path{};
         bool arcade = false;
-        std::uint32_t generation = 0;
+        proto::ActKey generation{};
     };
 
     using AskInbox = xthread::Inbox<Ask, 2>;
@@ -52,10 +52,10 @@ public:
         FixedStr<64, StrFit::Clip> core_name{};
         PathText rom_path{};
         bool arcade = false;
-        std::uint8_t ok = 0;
-        std::uint8_t aborted = 0;
+        bool ok = false;
+        bool aborted = false;
         std::uint32_t abort_at = 0;
-        Error err{Errc::io, 0, 0};
+        Error err{Errc::io, infra::kNoSite, 0};
     };
 
     using Chan = xthread::LoanChannel<PrimeOrder, 1, SeatTag::Ui, SeatTag::Io>;
@@ -82,7 +82,7 @@ public:
     void tick() noexcept;
 
     void on_ui_pause() noexcept;
-    void on_save(unsigned slot) override;
+    void on_save(proto::StateSlot slot) override;
 
     [[nodiscard]] bool live() const noexcept { return ui_.facts.live; }
 
@@ -167,7 +167,7 @@ private:
         bool out = false;
         bool stale = false;
         bool raised = false;
-        std::uint32_t held = 0;
+        proto::ActKey held{};
         std::uint32_t abort_level = 0;
         SaveStateFacts facts{};
     } ui_;

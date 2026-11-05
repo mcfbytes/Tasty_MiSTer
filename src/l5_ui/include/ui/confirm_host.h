@@ -11,7 +11,7 @@ class IConfirmHost {
 public:
     virtual ~IConfirmHost() = default;
 
-    virtual Transition on_confirm(std::uint8_t choice) = 0;
+    virtual Transition on_confirm(RowIndex choice) = 0;
 
     virtual Transition on_cancel() { return Transition{Transition::Kind::Pop}; }
 

@@ -28,10 +28,9 @@ class SpiBlockPoll {
 
 public:
     struct Wiring {
+        hal::ISpiTransport& link;
         infra::OptRef<const std::uint64_t> slot0_file_bytes{};
     };
-
-    SpiBlockPoll() noexcept = default;
 
     explicit SpiBlockPoll(Wiring w) noexcept : wiring_(w) {}
 
@@ -39,23 +38,22 @@ public:
         bool decoded = false;
         SdRequest req;
         std::uint16_t ack = 0;
-        std::uint32_t block_size = 512;
-        std::uint32_t window_blocks = 0;
+        BlockSize block_size{kDefaultBlockBytes};
+        BlockCount window_blocks{};
     };
 
     [[nodiscard]] Ex<Decode> poll(
-        hal::ISpiTransport& link,
         IBlockRoles& roles,
-        const std::array<SlotServer, kBlockSlots>& servers,
+        const SlotServers& servers,
         std::optional<SdStatusWord> known = std::nullopt
     );
 
     const DecodeCounters& diagnostics() const noexcept { return diag_; }
 
-    [[nodiscard]] Ex<void> send_config(hal::ISpiTransport& link);
+    [[nodiscard]] Ex<void> send_config();
 
 private:
-    Wiring wiring_{};
+    Wiring wiring_;
     DecodeCounters diag_{};
 };
 

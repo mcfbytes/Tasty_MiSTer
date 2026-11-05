@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 #include "app/conf_str_cell.h"
@@ -151,7 +152,7 @@ public:
 
     std::uint32_t button_levels() const noexcept { return button_levels_; }
 
-    std::uint32_t last_hold_ms() const noexcept { return last_hold_ms_; }
+    std::chrono::milliseconds last_hold() const noexcept { return last_hold_; }
 
     std::uint32_t button_classic_opens() const noexcept { return button_classic_opens_; }
 
@@ -198,7 +199,7 @@ private:
     std::uint32_t button_edges_ = 0;
     std::uint32_t button_longs_ = 0;
     std::uint32_t button_levels_ = 0;
-    std::uint32_t last_hold_ms_ = 0;
+    std::chrono::milliseconds last_hold_{0};
     std::uint32_t button_classic_opens_ = 0;
     std::uint32_t button_injects_ = 0;
     std::uint32_t bt_route_refusals_ = 0;

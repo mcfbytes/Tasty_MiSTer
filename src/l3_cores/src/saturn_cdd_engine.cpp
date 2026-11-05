@@ -680,7 +680,7 @@ bool SaturnCddEngine::do_streaming(const svc::DiscGeometry&) const noexcept {
 CdEngine::DriveView SaturnCddEngine::do_drive_view(const svc::DiscGeometry& geom) const noexcept {
     return DriveView{
         static_cast<std::uint8_t>(state_),
-        static_cast<std::uint32_t>(track_),
+        svc::TrackIndex{static_cast<std::uint8_t>(track_)},
         lba_,
         lba_,
         is_data_(track_, geom)

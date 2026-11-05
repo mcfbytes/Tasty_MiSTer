@@ -54,7 +54,9 @@ private:
         return mailbox_ ? infra::OptRef<IMailboxRows>{*mailbox_} : infra::OptRef<IMailboxRows>{};
     }
 
-    [[nodiscard]] IStreamLoad* on_window_load() noexcept override { return &data_host_; }
+    [[nodiscard]] infra::OptRef<IStreamLoad> on_window_load() noexcept override {
+        return data_host_.stream_load();
+    }
 
     [[nodiscard]] Ex<void> tx_rom_(IoIndex index, std::span<const std::uint8_t> bytes);
     [[nodiscard]] Ex<void> tx_raw_(IoIndex index, std::span<const std::uint8_t> bytes);

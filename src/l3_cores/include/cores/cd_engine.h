@@ -17,6 +17,7 @@
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "svc/disc_read_service.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 
@@ -105,7 +106,7 @@ public:
 
     struct DriveView {
         std::uint8_t state = 0;
-        std::uint32_t track = 0;
+        svc::TrackIndex track{};
         std::int32_t lba = 0;
 
         std::int32_t audio_lba = 0;

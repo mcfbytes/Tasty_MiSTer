@@ -11,10 +11,10 @@ namespace mister::cores {
 namespace detail {
 
 template <const CoreProfile& kProfile>
-[[nodiscard]] inline ICdServiceRows* rows_for(reactor::CoreState& st) noexcept {
+[[nodiscard]] inline infra::OptRef<ICdServiceRows> rows_for(reactor::CoreState& st) noexcept {
     Core* c = bound_core<kProfile>(st);
     if (c == nullptr)
-        return nullptr;
+        return {};
     return c->cd_service_rows();
 }
 
@@ -22,7 +22,7 @@ template <const CoreProfile& kProfile>
 class ServiceTickRow final : public reactor::ILinkDecoder {
 public:
     void service(reactor::CoreState& st) const override {
-        if (ICdServiceRows* r = rows_for<kProfile>(st))
+        if (const auto r = rows_for<kProfile>(st))
             r->service_tick();
     }
 };

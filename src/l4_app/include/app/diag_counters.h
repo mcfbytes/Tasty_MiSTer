@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "infra/error.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -21,7 +22,7 @@ struct DiagCounters {
     std::uint32_t disc_prefetch_refusals = 0;
 
     std::uint16_t last_error_code = 0;
-    std::uint16_t last_error_site = 0;
+    infra::ErrorSite last_error_site{};
 
     std::uint32_t last_error_detail = 0;
 

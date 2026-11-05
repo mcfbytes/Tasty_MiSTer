@@ -6,12 +6,13 @@
 #include <string_view>
 #include <type_traits>
 
+#include "cores/types.h"
 #include "infra/error.h"
 
 namespace mister::app::proc {
 
 [[nodiscard]] Ex<int> uartmode_script(std::uint8_t mode);
-[[nodiscard]] Ex<void> mlinkutil_baud(std::uint32_t baud);
+[[nodiscard]] Ex<void> mlinkutil_baud(cores::BaudRate baud);
 [[nodiscard]] Ex<void> mlinkutil_soundfont(std::string_view relative_path);
 
 [[nodiscard]] Ex<std::string> midilink_soundfont();

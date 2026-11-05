@@ -15,6 +15,7 @@
 #include "cores/ram_image.h"
 #include "infra/error.h"
 #include "proto/status_word.h"
+#include "proto/types.h"
 #include "svc/file.h"
 
 namespace mister::svc {
@@ -207,7 +208,7 @@ public:
 
     [[nodiscard]] virtual std::optional<DigestSpan> rom_digest_span(
         std::span<const std::uint8_t> head,
-        std::uint64_t size
+        proto::FileSize size
     ) const noexcept = 0;
 
     [[nodiscard]] virtual bool rom_matches(const DigestValue& d, const Facts& f) const noexcept {

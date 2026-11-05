@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -10,7 +11,7 @@ enum class SaveAnswer : std::uint8_t { Pending, Known, Declined };
 
 struct SaveExtent {
     TASTY_SEAT_EXEMPT(const_shared);
-    std::uint32_t generation = 0;
+    proto::ActKey generation{};
     std::uint64_t size_bytes = 0;
     SaveAnswer answer = SaveAnswer::Pending;
     bool exists = false;

@@ -4,13 +4,14 @@
 #include <cstdint>
 
 #include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 
 struct StreamLoadEnd {
     proto::IoIndex index{};
-    std::uint64_t bytes = 0;
-    std::uint32_t crc = 0;
+    proto::FileSize bytes{};
+    svc::Crc32 crc{};
     bool ok = false;
 };
 

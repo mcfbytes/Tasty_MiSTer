@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "hal/reg_block.h"
 #include "proto/axi_block_decl.h"
 #include "proto/axi_pad_encoder.h"
@@ -103,10 +104,40 @@ private:
     proto::AxiBlockDecl pad_block_{};
     std::optional<proto::AxiPadEncoder> lw_{};
     proto::ILinkPadEncoder* route_ = &framed_;
-    JoyMask joy_mask_[kMaxPlayersEmit]{};
-    JoyMask autofire_[kMaxPlayersEmit]{};
 
-    bool zero_armed_[kMaxPlayersEmit]{true, true, true, true, true, true};
+    class PlayerMasks {
+        TASTY_SEAT_RESIDENT(RT);
+
+    public:
+        [[nodiscard]] JoyMask joy() const noexcept { return joy_; }
+
+        [[nodiscard]] JoyMask autofire() const noexcept { return autofire_; }
+
+        void set_joy(JoyMask mask) noexcept {
+            if (!(mask == joy_))
+                zero_armed_ = true;
+            joy_ = mask;
+        }
+
+        void set_autofire(JoyMask mask) noexcept {
+            if (!(mask == autofire_))
+                zero_armed_ = true;
+            autofire_ = mask;
+        }
+
+        [[nodiscard]] JoyMask composed(bool grabbed) const noexcept;
+
+        [[nodiscard]] bool zero_armed() const noexcept { return zero_armed_; }
+
+        void disarm() noexcept { zero_armed_ = false; }
+
+    private:
+        JoyMask joy_{};
+        JoyMask autofire_{};
+        bool zero_armed_ = true;
+    };
+
+    infra::IndexedArray<PlayerMasks, kMaxPlayersEmit, PlayerIndex> masks_{};
     bool grabbed_ = false;
     bool osd_visible_ = false;
     unsigned axis_range_zero_ = 0;

@@ -13,8 +13,8 @@ bool AviWriter::idle() const noexcept {
     return w_.in.outbound() == 0;
 }
 
-int AviWriter::park_ms() const noexcept {
-    return -1;
+infra::ParkTimeout AviWriter::park_ms() const noexcept {
+    return infra::kForever;
 }
 
 void AviWriter::serve() noexcept {

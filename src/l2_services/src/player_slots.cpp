@@ -34,9 +34,9 @@ Ex<void> PlayerSlots::assign(const DeviceIdentity& id, PlayerIndex player) {
     return {};
 }
 
-std::optional<PlayerIndex> PlayerSlots::first_free(std::uint32_t live_mask) const {
+std::optional<PlayerIndex> PlayerSlots::first_free(PlayerMask live_mask) const {
     for (std::uint8_t i = 0; i < kMaxPlayers; ++i) {
-        if ((live_mask & (1u << i)) == 0u)
+        if (!live_mask.has(PlayerIndex{i}))
             return PlayerIndex{i};
     }
     return std::nullopt;

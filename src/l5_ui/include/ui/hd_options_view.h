@@ -43,15 +43,14 @@ public:
 
     BuildEnv walk_env(const BuildEnv& env) const override;
 
-    void on_walk() override;
+    void on_model_rebuilt() override;
 
-    void render(OsdRenderer& out) const override;
-    bool describe(app::PageDescription& out) const override;
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
     MenuMask mask() const override;
     void set_selection(RowIndex i) override;
     RowIndex selection() const override;
-    std::uint32_t first_row() const noexcept override;
+    RowIndex first_row() const noexcept override;
     bool empty() const override;
 
     std::uint32_t refusals() const noexcept override;

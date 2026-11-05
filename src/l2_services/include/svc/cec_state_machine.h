@@ -48,7 +48,7 @@ public:
     std::uint32_t rx_rejected() const noexcept { return rx_rejected_; }
 
     static constexpr std::uint32_t kReleasePulseUs = 200;
-    static constexpr int kRxBuffers = 3;
+    static constexpr unsigned kRxBuffers = 3;
 
 private:
     std::uint32_t max_rx_depth_ = 0;

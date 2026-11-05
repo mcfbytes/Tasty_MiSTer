@@ -7,10 +7,12 @@ set(TASTY_CORES_TASTY
   src/core_profile.cpp
   src/fio_cheat_sink.cpp
   src/stream_load_bracket.cpp
+  src/stream_load_host.cpp
   src/generic_core.cpp
   src/core_support.cpp
   src/mdp_cue.cpp
   src/mdp_source.cpp
+  src/pcm_source_factory.cpp
   src/megadrive_core.cpp
   src/nvram_store.cpp
   src/wav_data.cpp
@@ -167,6 +169,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/stream_load.h
   cores/stream_load_bracket.h
   cores/stream_load_end.h
+  cores/stream_load_host.h
   cores/stream_tx_record.h
   cores/load_ask.h
   cores/load_plan.h
@@ -211,6 +214,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/mailbox_window.h
   cores/mdp_cue.h
   cores/mdp_source.h
+  cores/pcm_source_factory.h
   cores/megadrive_core.h
   cores/md5.h
   cores/minimig_core.h
@@ -231,7 +235,6 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/n64_cheat_engine.h
   cores/n64_core.h
   cores/n64_file_route.h
-  cores/n64_disk_facts.h
   cores/n64_load_facts.h
   cores/n64_loader.h
   cores/n64_cpak.h
@@ -244,10 +247,13 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/n64_patch_table.h
   cores/n64_rom.h
   cores/n64_save_layout.h
+  cores/n64_save_extent.h
+  cores/n64_save_layout_key.h
+  cores/n64_save_attach.h
   cores/n64_save_order.h
-  cores/n64_save_port.h
+  cores/n64_save_plan.h
   cores/n64_save_store.h
-  cores/n64_save_type.h
+  cores/n64_memory_type.h
   cores/n64_saves.h
   cores/n64_path.h
   cores/n64dd_disk_map.h
@@ -257,6 +263,8 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/n64dd_system_area.h
   cores/loader_memo.h
   cores/window_job.h
+  cores/window_job_order.h
+  cores/job_arena.h
   cores/neo_file.h
   cores/neogeo_alias_source.h
   cores/neogeo_loader.h
@@ -293,7 +301,6 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/rom_bytes.h
   cores/rom_set_assembler.h
   cores/romset_alias.h
-  cores/romset_alias_source.h
   cores/romset_files.h
   cores/romsets.h
   cores/registry.h
@@ -347,6 +354,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/switch_table.h
   cores/threedo_cdd_engine.h
   cores/types.h
+  cores/progress.h
   cores/uef.h
   cores/wav_data.h
   cores/manifests/electron.h

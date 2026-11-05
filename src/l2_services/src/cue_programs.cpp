@@ -12,6 +12,18 @@ namespace mister::svc {
 
 using namespace disc::detail;
 
+namespace {
+
+constexpr std::string_view kMode1Cooked = "MODE1/2048";
+constexpr std::string_view kMode1Raw = "MODE1/2352";
+constexpr std::string_view kMode2Raw = "MODE2/2352";
+
+constexpr OpenFileId kNoBacking{kMaxTracks};
+
+constexpr std::string_view kSegaMagic = "SEGADISCSYSTEM";
+
+}
+
 Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m) const {
 
     m.cdda_order = CddaOrder::LittleEndian;
@@ -32,7 +44,7 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
     bool pending_open = false;
     std::uint64_t pending_size = 0;
     std::unique_ptr<IFile> pending_file;
-    std::uint16_t last_backing = 0;
+    OpenFileId last_backing{};
     bool track0_size_stated = false;
     bool aborted = false;
 
@@ -46,7 +58,7 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
         std::string_view sv = lstrip(std::string_view(line));
 
         if (sv.starts_with("FILE")) {
-            std::string_view rest = lstrip(sv.substr(4));
+            std::string_view rest = lstrip(past(sv, kKwFile));
             std::string_view name;
             if (!rest.empty() && rest.front() == '"') {
                 rest.remove_prefix(1);
@@ -79,7 +91,8 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
             pending_size = sz->v;
             pending_open = true;
 
-            hdr = (policy_.wav_header_skip && ends_with_ci(fname, ".wav")) ? 44u : 0u;
+            constexpr std::uint32_t kWavHeaderBytes = 44;
+            hdr = (policy_.wav_header_skip && ends_with_ci(fname, ".wav")) ? kWavHeaderBytes : 0u;
             pregap = 0;
 
             track_pregap = 0;
@@ -88,7 +101,7 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
         }
 
         if (sv.starts_with("TRACK")) {
-            std::string_view rest = sv.substr(5);
+            std::string_view rest = past(sv, kKwTrack);
             const auto number = take_uint(rest, kCueFieldDigits);
             if (!number)
                 continue;
@@ -103,11 +116,11 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
             if (policy_.type_detect == CuePolicy::TypeDetect::Track0Only) {
 
                 if (last == 0) {
-                    if (sv.find("MODE1/2048") != std::string_view::npos) {
-                        t.sector_size = 2048;
+                    if (sv.find(kMode1Cooked) != std::string_view::npos) {
+                        t.sector_size = kUserDataBytes;
                         t.type = TrackType::Mode1;
                         track0_size_stated = true;
-                    } else if (sv.find("MODE1/2352") != std::string_view::npos) {
+                    } else if (sv.find(kMode1Raw) != std::string_view::npos) {
                         t.sector_size = kCdDataSize;
                         t.type = TrackType::Mode1;
                         track0_size_stated = true;
@@ -115,13 +128,13 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                 }
             } else if (policy_.type_detect == CuePolicy::TypeDetect::PerTrackRunningSize) {
 
-                if (sv.find("MODE1/2048") != std::string_view::npos) {
-                    running_ss = 2048;
+                if (sv.find(kMode1Cooked) != std::string_view::npos) {
+                    running_ss = kUserDataBytes;
                     t.type = TrackType::Mode1;
-                } else if (sv.find("MODE1/2352") != std::string_view::npos) {
+                } else if (sv.find(kMode1Raw) != std::string_view::npos) {
                     running_ss = kCdDataSize;
                     t.type = TrackType::Mode1;
-                } else if (sv.find("MODE2/2352") != std::string_view::npos) {
+                } else if (sv.find(kMode2Raw) != std::string_view::npos) {
                     running_ss = kCdDataSize;
                     t.type = TrackType::Mode2;
                 }
@@ -129,12 +142,12 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                     t.sector_size = running_ss;
             } else {
 
-                if (sv.find("MODE1/2048") != std::string_view::npos) {
-                    t.sector_size = 2048;
+                if (sv.find(kMode1Cooked) != std::string_view::npos) {
+                    t.sector_size = kUserDataBytes;
                     t.type = TrackType::Mode1;
                     if (last == 0)
                         track0_size_stated = true;
-                } else if (sv.find("MODE1/2352") != std::string_view::npos) {
+                } else if (sv.find(kMode1Raw) != std::string_view::npos) {
                     t.sector_size = kCdDataSize;
                     t.type = TrackType::Mode1;
                     if (last == 0)
@@ -151,7 +164,7 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
         }
 
         if (sv.starts_with("PREGAP")) {
-            if (const auto frames = take_msf(sv.substr(6))) {
+            if (const auto frames = take_msf(past(sv, kKwPregap))) {
                 pregap += *frames;
                 track_pregap = *frames;
             }
@@ -159,7 +172,7 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
         }
 
         if (sv.starts_with("INDEX")) {
-            std::string_view rest = sv.substr(5);
+            std::string_view rest = past(sv, kKwIndex);
             const auto index = take_uint(rest, kCueFieldDigits);
             if (!index)
                 continue;
@@ -170,8 +183,9 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
             if (*index == 0) {
 
                 if (last != 0 && m.toc.tracks[last - 1].end == Lba{0}) {
-                    m.toc.tracks[last - 1].end = pregap_relative ? Lba{pregap}
-                                                                 : Lba{*frames + pregap};
+                    m.toc.tracks[last - 1].end = pregap_relative
+                        ? Lba{0} + BlockCount{pregap}
+                        : Lba{0} + BlockCount{*frames + pregap};
                 }
                 continue;
             }
@@ -183,8 +197,7 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
 
             const bool accumulate = (policy_.offset_op == CuePolicy::OffsetOp::Accumulate);
             if (accumulate) {
-                t.offset += static_cast<std::int64_t>(pregap)
-                    * static_cast<std::int64_t>(kCdDataSize);
+                t.offset += std::int64_t{pregap} * std::int64_t{kCdDataSize};
             }
 
             if (!pending_open) {
@@ -193,15 +206,15 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
                 }
                 t.backing = last_backing;
-                t.start = Lba{*frames + pregap};
+                t.start = Lba{0} + BlockCount{*frames + pregap};
                 if (!accumulate) {
-                    t.offset = static_cast<std::int64_t>(pregap)
-                            * static_cast<std::int64_t>(t.sector_size)
-                        - static_cast<std::int64_t>(hdr);
+                    t.offset = std::int64_t{pregap} * std::int64_t{t.sector_size}
+                        - std::int64_t{hdr};
                 }
                 if (last != 0 && m.toc.tracks[last - 1].end == Lba{0}) {
-                    m.toc.tracks[last - 1].end = pregap_relative ? Lba{t.start.v - track_pregap}
-                                                                 : t.start;
+                    m.toc.tracks[last - 1].end = pregap_relative
+                        ? t.start - BlockCount{track_pregap}
+                        : t.start;
                 }
             } else {
 
@@ -212,28 +225,25 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                 pending_open = false;
                 t.backing = last_backing;
 
-                t.start = Lba{m.toc.end.v + pregap};
+                t.start = m.toc.end + BlockCount{pregap};
 
                 std::uint32_t ss = t.sector_size;
                 if (policy_.type_detect == CuePolicy::TypeDetect::Track0Only) {
-                    ss = (t.type != TrackType::Cdda) ? m.toc.tracks[0].sector_size
-                                                     : static_cast<std::uint32_t>(kCdDataSize);
+                    ss = (t.type != TrackType::Cdda) ? m.toc.tracks[0].sector_size : kCdDataSize;
                 }
                 if (ss == 0)
-                    ss = static_cast<std::uint32_t>(kCdDataSize);
+                    ss = kCdDataSize;
 
                 if (accumulate) {
-                    t.offset += static_cast<std::int64_t>(m.toc.end.v)
-                        * static_cast<std::int64_t>(kCdDataSize);
+                    t.offset += std::int64_t{m.toc.end.v} * std::int64_t{kCdDataSize};
                 } else {
-                    t.offset = static_cast<std::int64_t>(t.start.v) * static_cast<std::int64_t>(ss)
-                        - static_cast<std::int64_t>(hdr);
+                    t.offset = std::int64_t{t.start.v} * std::int64_t{ss} - std::int64_t{hdr};
                 }
 
                 const std::uint64_t payload = (pending_size > hdr) ? pending_size - hdr : 0;
                 const std::uint64_t sectors = (payload + ss - 1) / ss;
-                t.end = Lba{t.start.v + static_cast<std::uint32_t>(sectors)};
-                t.start = Lba{t.start.v + *frames};
+                t.end = t.start + BlockCount{static_cast<std::uint32_t>(sectors)};
+                t.start += BlockCount{*frames};
                 m.toc.end = t.end;
             }
 
@@ -249,7 +259,7 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
     }
 
     if (last != 0 && m.toc.tracks[last - 1].end == Lba{0}) {
-        m.toc.end = Lba{m.toc.end.v + pregap};
+        m.toc.end += BlockCount{pregap};
         m.toc.tracks[last - 1].end = m.toc.end;
     }
     if (last == 0) {
@@ -264,14 +274,16 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
         m.toc.sector_size = (running_ss != 0) ? running_ss : kCdDataSize;
     } else if (track0_size_stated) {
         m.toc.sector_size = m.toc.tracks[0].sector_size;
-    } else if (policy_.sniff_sega_disc_system && m.toc.tracks[0].backing < m.table.count()) {
+    } else if (policy_.sniff_sega_disc_system && m.toc.tracks[0].backing.v < m.table.count()) {
         std::byte head[16]{};
         IFile* f = m.table.file(m.toc.tracks[0].backing);
         m.toc.sector_size = kCdDataSize;
         if (f != nullptr) {
             auto rd = f->read_at(0, std::span<std::byte>(head, sizeof(head)));
-            if (rd && *rd == sizeof(head) && std::memcmp(head, "SEGADISCSYSTEM", 14) == 0) {
-                m.toc.sector_size = 2048;
+            if (rd
+                && *rd == sizeof(head)
+                && std::memcmp(head, kSegaMagic.data(), kSegaMagic.size()) == 0) {
+                m.toc.sector_size = kUserDataBytes;
             }
         }
     } else {
@@ -293,8 +305,9 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
     lead_out.end = m.toc.end;
 
     std::string sub_name;
-    if (policy_.sub_naming == CuePolicy::SubNaming::LastTrackFilename && fname.size() > 4) {
-        sub_name.assign(fname, 0, fname.size() - 4);
+    if (policy_.sub_naming == CuePolicy::SubNaming::LastTrackFilename
+        && fname.size() > kExtSub.size()) {
+        sub_name.assign(fname, 0, fname.size() - kExtSub.size());
     }
     if (!sub_name.empty()) {
         sub_name.append(".sub");
@@ -331,7 +344,7 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
         std::string_view sv = lstrip(std::string_view(line));
 
         if (sv.starts_with("FILE")) {
-            std::string_view rest = lstrip(sv.substr(4));
+            std::string_view rest = lstrip(past(sv, kKwFile));
             std::string_view name;
             if (!rest.empty() && rest.front() == '"') {
                 rest.remove_prefix(1);
@@ -363,7 +376,7 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
         }
 
         if (sv.starts_with("TRACK")) {
-            std::string_view rest = sv.substr(5);
+            std::string_view rest = past(sv, kKwTrack);
             const auto number = take_uint(rest, kCueFieldDigits);
             if (!number)
                 continue;
@@ -373,13 +386,13 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
                 return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
             }
             Track& t = m.toc.tracks[last];
-            if (sv.find("MODE1/2352") != std::string_view::npos
-                || sv.find("MODE2/2352") != std::string_view::npos) {
+            if (sv.find(kMode1Raw) != std::string_view::npos
+                || sv.find(kMode2Raw) != std::string_view::npos) {
                 t.sector_size = kCdDataSize;
                 t.type = TrackType::Mode1;
 
                 if (last == 0)
-                    m.toc.end = Lba{static_cast<std::uint32_t>(kRedBookPregap)};
+                    m.toc.end = Lba{0} + kRedBookPregap;
             } else if (sv.find("AUDIO") != std::string_view::npos) {
                 t.sector_size = kCdDataSize;
                 t.type = TrackType::Cdda;
@@ -391,7 +404,7 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
         }
 
         if (sv.starts_with("PREGAP")) {
-            if (const auto frames = take_msf(sv.substr(6))) {
+            if (const auto frames = take_msf(past(sv, kKwPregap))) {
                 pregap += *frames;
                 m.toc.tracks[last].pregap_declared = true;
             }
@@ -399,7 +412,7 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
         }
 
         if (sv.starts_with("INDEX")) {
-            std::string_view rest = sv.substr(5);
+            std::string_view rest = past(sv, kKwIndex);
             const auto index = take_uint(rest, kCueFieldDigits);
             if (!index)
                 continue;
@@ -429,27 +442,23 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
                 if (t.pregap_declared)
                     start += pregap;
 
-                std::int64_t file_base = static_cast<std::int64_t>(start)
-                    * static_cast<std::int64_t>(t.sector_size);
+                std::int64_t file_base = std::int64_t{start} * std::int64_t{t.sector_size};
                 if (last != 0) {
 
                     m.toc.tracks[last - 1].end = Lba{start};
                     if (pregap != 0) {
-                        t.pregap = start - pregap;
+                        t.pregap = BlockCount{start - pregap};
                         if (!t.pregap_declared) {
-                            file_base -= static_cast<std::int64_t>(kCdDataSize)
-                                * static_cast<std::int64_t>(t.pregap);
+                            file_base -= std::int64_t{kCdDataSize} * std::int64_t{t.pregap.v};
                         } else {
-                            t.pregap = pregap;
+                            t.pregap = BlockCount{pregap};
                         }
                     }
                 } else if (t.type != TrackType::Cdda) {
-                    t.pregap = static_cast<std::uint32_t>(kRedBookPregap);
+                    t.pregap = kRedBookPregap;
                 }
                 t.start = Lba{start};
-                t.offset = static_cast<std::int64_t>(start)
-                        * static_cast<std::int64_t>(t.sector_size)
-                    - file_base;
+                t.offset = std::int64_t{start} * std::int64_t{t.sector_size} - file_base;
             } else {
 
                 if (m.table.count() >= kMaxTracks) {
@@ -458,16 +467,13 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
                 t.backing = m.table.push(std::move(pending_file));
                 pending_open = false;
 
-                t.pregap = *frames;
+                t.pregap = BlockCount{*frames};
                 if (t.type != TrackType::Cdda && last == 0) {
-                    t.pregap = static_cast<std::uint32_t>(kRedBookPregap);
+                    t.pregap = kRedBookPregap;
                 }
                 t.start = m.toc.end;
-                m.toc.end = Lba{
-                    m.toc.end.v + static_cast<std::uint32_t>(pending_size / t.sector_size)
-                };
-                t.offset = static_cast<std::int64_t>(t.start.v)
-                    * static_cast<std::int64_t>(t.sector_size);
+                m.toc.end += BlockCount{static_cast<std::uint32_t>(pending_size / t.sector_size)};
+                t.offset = std::int64_t{t.start.v} * std::int64_t{t.sector_size};
             }
 
             t.end = m.toc.end;
@@ -503,8 +509,8 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
     const std::string text = std::move(*text_r);
     const std::string_view base_dir = dir_of(cue_path);
 
-    constexpr auto kLeadIn = static_cast<std::int64_t>(kRedBookPregap);
-    constexpr auto kSs = static_cast<std::int64_t>(kCdDataSize);
+    constexpr std::int64_t kLeadIn = std::int64_t{kRedBookPregap.v};
+    constexpr std::int64_t kSs = std::int64_t{kCdDataSize};
     std::uint32_t last = 0;
     std::int64_t index0 = 0;
     std::int64_t index1 = 0;
@@ -520,7 +526,7 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
         std::string_view sv = lstrip(std::string_view(line));
 
         if (sv.starts_with("FILE")) {
-            std::string_view rest = lstrip(sv.substr(4));
+            std::string_view rest = lstrip(past(sv, kKwFile));
             std::string_view name;
             if (!rest.empty() && rest.front() == '"') {
                 rest.remove_prefix(1);
@@ -550,7 +556,7 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
         }
 
         if (sv.starts_with("TRACK")) {
-            std::string_view rest = sv.substr(5);
+            std::string_view rest = past(sv, kKwTrack);
             const auto number = take_uint(rest, kCueFieldDigits);
             if (!number)
                 continue;
@@ -562,10 +568,10 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
             t.sector_size = kCdDataSize;
             if (last == 0)
                 disc_end = kLeadIn;
-            if (sv.find("MODE1/2352") != std::string_view::npos) {
+            if (sv.find(kMode1Raw) != std::string_view::npos) {
                 t.type = TrackType::Mode1;
             } else if (
-                sv.find("MODE2/2352") != std::string_view::npos
+                sv.find(kMode2Raw) != std::string_view::npos
                 || sv.find("CDI/2352") != std::string_view::npos
             ) {
                 t.type = TrackType::Mode2;
@@ -578,7 +584,7 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
         }
 
         if (sv.starts_with("INDEX")) {
-            std::string_view rest = sv.substr(5);
+            std::string_view rest = past(sv, kKwIndex);
             const auto index = take_uint(rest, kCueFieldDigits);
             if (!index)
                 continue;
@@ -609,8 +615,7 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
 
                 m.toc.tracks[last - 1].end = Lba{static_cast<std::uint32_t>(start - pregap)};
 
-                t.backing = stock_offset != 0 ? m.toc.tracks[0].backing
-                                              : static_cast<std::uint16_t>(kMaxTracks);
+                t.backing = stock_offset != 0 ? m.toc.tracks[0].backing : kNoBacking;
             } else {
 
                 if (m.table.count() >= kMaxTracks) {
@@ -623,7 +628,7 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
             }
             const std::int64_t pregap = index1 - index0;
             t.start = Lba{static_cast<std::uint32_t>(start)};
-            t.pregap = static_cast<std::uint32_t>(pregap);
+            t.pregap = BlockCount{static_cast<std::uint32_t>(pregap)};
 
             t.offset = (start - pregap) * kSs - stock_offset;
             t.end = Lba{static_cast<std::uint32_t>(disc_end)};

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "infra/ascii.h"
+#include "svc/asset_name.h"
 #include "svc/vfs.h"
 
 namespace mister::svc::detail {
@@ -49,26 +50,8 @@ inline std::string compose(std::string_view root, std::string_view path) {
     return out;
 }
 
-struct ZipSplit {
-    bool zipped = false;
-    std::string_view archive;
-    std::string_view member;
-};
-
-constexpr ZipSplit zip_split(std::string_view path) noexcept {
-    const std::size_t z = ifind(path, ".zip");
-    if (z == std::string_view::npos)
-        return {};
-    const std::size_t end = z + 4;
-    ZipSplit s;
-    s.zipped = true;
-    s.archive = path.substr(0, end);
-    s.member = (end < path.size()) ? path.substr(end + 1) : std::string_view{};
-    return s;
-}
-
-constexpr bool has_nested_zip(std::string_view path) noexcept {
-    const ZipSplit s = zip_split(path);
+inline bool has_nested_zip(std::string_view path) noexcept {
+    const asset_name::ZipSplit s = asset_name::zip_split(path);
     if (!s.zipped)
         return false;
     return ifind(path.substr(s.archive.size()), ".zip") != std::string_view::npos;

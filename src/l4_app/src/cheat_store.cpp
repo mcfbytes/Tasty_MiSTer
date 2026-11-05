@@ -91,7 +91,7 @@ Ex<void> CheatStore::open(
 
     svc::Vfs::AssetQuery q{};
     q.rom_path = d.path.view();
-    q.crc = svc::Crc32{d.crc};
+    q.crc = d.crc;
     q.ext = ".zip";
     q.core_dir = core_dir;
     q.cd_asset_dir = cd_dir;

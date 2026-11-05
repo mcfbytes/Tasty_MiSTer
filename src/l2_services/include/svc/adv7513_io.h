@@ -5,15 +5,16 @@
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "os/types.h"
 
 namespace mister::svc::adv7513 {
 
 class IRegMap;
 
-inline constexpr std::uint8_t kMainAddr = 0x39;
-inline constexpr std::uint8_t kCecAddr = 0x3C;
-inline constexpr std::uint8_t kEdidAddr = 0x3F;
-inline constexpr std::uint8_t kSpdAddr = 0x38;
+inline constexpr os::I2cAddr kMainAddr{0x39};
+inline constexpr os::I2cAddr kCecAddr{0x3C};
+inline constexpr os::I2cAddr kEdidAddr{0x3F};
+inline constexpr os::I2cAddr kSpdAddr{0x38};
 
 }
 

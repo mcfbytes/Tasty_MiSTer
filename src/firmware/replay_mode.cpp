@@ -341,9 +341,9 @@ void ReplayMode::FeederReplay::take_stop() noexcept {
     (void)f.take_stop();
 }
 
-std::uint32_t ReplayMode::FeederReplay::frames() const noexcept {
+app::FrameCount ReplayMode::FeederReplay::frames() const noexcept {
     TASTY_SEAT_BODY(FeederReplay);
-    return f.frames();
+    return f.pushed();
 }
 
 std::uint32_t ReplayMode::FeederReplay::movie_frames() const noexcept {

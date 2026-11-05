@@ -6,6 +6,7 @@
 #include "diag_sampler.h"
 #include "infra/error.h"
 #include "infra/park_fds.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
 #include "infra/seat_park.h"
@@ -43,7 +44,7 @@ public:
 
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
 
-    [[nodiscard]] int park_ms() const noexcept { return static_cast<int>(rest_ms_); }
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return rest_ms_; }
 
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
@@ -59,7 +60,7 @@ private:
     xthread::WakeFlag stop_;
     xthread::SeatPark park_;
     std::uint32_t slice_ = 0;
-    unsigned rest_ms_ = 0;
+    infra::ParkTimeout rest_ms_{};
     bool final_sampled_ = false;
 };
 

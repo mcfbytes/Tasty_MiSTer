@@ -35,8 +35,8 @@ public:
     }
 
     void on_enter(PageContext& ctx) override;
-    void render(OsdRenderer& out) const override;
-    bool describe(app::PageDescription& out) const override;
+
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
     Transition on_tick(PageContext& ctx) override;
 

@@ -37,6 +37,8 @@ struct HciDevListReq {
 }
 
 bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept {
+    enum : unsigned { kByteBits = 8, kBits16 = 16, kBits24 = 24 };
+
     constexpr std::size_t kHdrBytes = 4;
     constexpr std::size_t kReqBytes = 8;
     constexpr std::size_t kOptOff = 4;
@@ -45,7 +47,8 @@ bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept {
     const auto byte_at = [&](std::size_t i) {
         return static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(reply[i]));
     };
-    std::size_t n = byte_at(0) | (byte_at(1) << 8);
+
+    std::size_t n = byte_at(0) | (byte_at(1) << kByteBits);
 
     const std::size_t fits = (reply.size() - kHdrBytes) / kReqBytes;
     if (n > fits)
@@ -55,9 +58,9 @@ bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept {
     for (std::size_t i = 0; i < n; ++i) {
         const std::size_t o = kHdrBytes + i * kReqBytes + kOptOff;
         const std::uint32_t opt = byte_at(o)
-            | (byte_at(o + 1) << 8)
-            | (byte_at(o + 2) << 16)
-            | (byte_at(o + 3) << 24);
+            | (byte_at(o + 1) << kByteBits)
+            | (byte_at(o + 2) << kBits16)
+            | (byte_at(o + 3) << kBits24);
         if ((opt & (1u << kHciUpBit)) != 0u)
             return true;
     }

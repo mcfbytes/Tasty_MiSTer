@@ -32,7 +32,7 @@ void UartPerformer::on(const UartHandoff::Mode& a) {
     (void)proc::write_tmp_handoff(kCoreNameFile, a.core);
     (void)proc::write_tmp_handoff(kRbfNameFile, a.rbf);
     char sp[16] = {};
-    const int len = std::snprintf(sp, sizeof sp, "%u", a.baud);
+    const int len = std::snprintf(sp, sizeof sp, "%u", a.baud.v);
     (void)proc::write_tmp_handoff(
         kUartSpeedFile,
         std::string_view{sp, len < 0 ? 0u : static_cast<std::size_t>(len)}

@@ -53,7 +53,7 @@ void FrameClock::wait_vsync() noexcept {
     }
     const std::uint32_t n_seq = seq_.fetch_add(1, std::memory_order_release) + 1u;
 
-    cell_.publish(FrameRecord{n_seq});
+    cell_.publish(FrameRecord{hal::FrameSeq{n_seq}});
     frame_wake_.kick();
 }
 

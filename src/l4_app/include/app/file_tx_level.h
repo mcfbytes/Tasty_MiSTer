@@ -5,24 +5,25 @@
 
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
 struct FileTxLevel {
     TASTY_SEAT_EXEMPT(const_shared);
-    std::uint32_t act = 0;
+    proto::ActKey act{};
     bool open = false;
     bool payload = false;
     bool stream_served = false;
     std::uint8_t pad_{};
-    std::uint32_t stream_act = 0;
-    std::uint32_t held_act = 0;
+    proto::ActKey stream_act{};
+    proto::ActKey held_act{};
     std::uint32_t held_bytes = 0;
 
-    [[nodiscard]] constexpr bool answers(std::uint32_t key) const noexcept {
+    [[nodiscard]] constexpr bool answers(proto::ActKey key) const noexcept {
         if (held_act == key)
             return true;
-        return stream_act != 0 && static_cast<std::int32_t>(stream_act - key) >= 0;
+        return static_cast<bool>(stream_act) && stream_act.at_or_past(key);
     }
 };
 

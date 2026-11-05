@@ -101,19 +101,16 @@ public:
         return sel_;
     }
 
-    RowCount osd_height() const override {
+    PageFacts facts() const override {
         TASTY_SEAT_BODY(SystemPage);
-        return RowCount{16};
-    }
-
-    bool allows_cfg_switch() const override {
-        TASTY_SEAT_BODY(SystemPage);
-        return true;
+        PageFacts f{};
+        f.allows_cfg_switch = true;
+        return f;
     }
 
     void on_enter(PageContext& ctx) override;
-    void render(OsdRenderer& out) const override;
-    bool describe(app::PageDescription& out) const override;
+
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
 
     void on_facts(const SystemFacts& f) override {
@@ -138,14 +135,6 @@ private:
     template <class Visit>
     void for_each_row(Visit&& visit) const;
 
-    void render_row(
-        OsdRenderer& out,
-        std::uint8_t row,
-        std::optional<SystemItem> item,
-        std::string_view text,
-        bool stippled
-    ) const;
-
     Transition open_scripts_confirm();
     Transition open_scripts_browser(Transition::Kind kind);
     Transition open_core_browser(bool recents_first);
@@ -160,7 +149,7 @@ private:
         return Transition{Transition::Kind::Pop};
     }
 
-    Transition on_confirm(std::uint8_t choice) override;
+    Transition on_confirm(RowIndex choice) override;
 
     SystemFacts facts_{};
     RowIndex sel_{};
@@ -183,7 +172,7 @@ private:
 
 std::unique_ptr<Page> make_system_page(const SystemFacts& facts);
 
-std::uint8_t system_item_row(SystemItem it) noexcept;
+OsdRow system_item_row(SystemItem it) noexcept;
 
 enum class SystemRow : std::uint8_t {
     Title,

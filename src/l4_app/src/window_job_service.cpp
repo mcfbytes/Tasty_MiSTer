@@ -9,9 +9,9 @@ WindowJobService::Chan::Loan WindowJobService::acquire_() noexcept {
     return chan_.acquire();
 }
 
-void WindowJobService::send_(Chan::Loan&& loan, const cores::IWindowJobKind* kind) noexcept {
-    loan->kind = infra::opt_ref_of(kind);
-    loan->ok = 0;
+void WindowJobService::send_(Chan::Loan&& loan, cores::WindowJobBuild kind) noexcept {
+    loan->build = kind;
+    loan->ok = false;
     rt_.armed = true;
     chan_.send(std::move(loan));
 }
@@ -23,7 +23,7 @@ bool WindowJobService::arm_osd_open(cores::IWindowSave& role) noexcept {
         rt_.refusals.add(1);
         return false;
     }
-    const cores::IWindowJobKind* job = role.on_osd_open(std::span<std::byte>(loan->order));
+    const cores::WindowJobBuild job = role.on_osd_open(loan->order);
     if (job == nullptr)
         return false;
     send_(std::move(loan), job);
@@ -40,7 +40,7 @@ bool WindowJobService::arm_reset_edge(
         rt_.refusals.add(1);
         return false;
     }
-    const cores::IWindowJobKind* job = role.on_reset_edge(edge, std::span<std::byte>(loan->order));
+    const cores::WindowJobBuild job = role.on_reset_edge(edge, loan->order);
     if (job == nullptr)
         return false;
     send_(std::move(loan), job);
@@ -50,7 +50,7 @@ bool WindowJobService::arm_reset_edge(
 bool WindowJobService::hold_open(
     const cores::IWindowSave& role,
     proto::IoIndex index,
-    std::uint32_t act
+    proto::ActKey act
 ) noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "WindowJobService::hold_open off T-RT");
     if (rt_.held != Held::None || !role.owes_flush(index))
@@ -61,11 +61,13 @@ bool WindowJobService::hold_open(
     return true;
 }
 
-std::optional<std::uint32_t> WindowJobService::service(cores::IWindowSave* role) noexcept {
+std::optional<proto::ActKey> WindowJobService::service(
+    infra::OptRef<cores::IWindowSave> role
+) noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "WindowJobService::service off T-RT");
     if (auto done = chan_.reap()) {
         rt_.armed = false;
-        if (done.completed() && done->ok != 0) {
+        if (done.completed() && done->ok) {
             rt_.ok.add(1);
         } else {
             rt_.failed.add(1);
@@ -79,9 +81,8 @@ std::optional<std::uint32_t> WindowJobService::service(cores::IWindowSave* role)
         return std::nullopt;
 
     auto loan = acquire_();
-    const cores::IWindowJobKind* job = (loan && role != nullptr)
-        ? role->take_flush(rt_.held_index, std::span<std::byte>(loan->order))
-        : nullptr;
+    const cores::WindowJobBuild job = (loan && role) ? role->take_flush(rt_.held_index, loan->order)
+                                                     : nullptr;
     if (job == nullptr) {
         rt_.held = Held::None;
         return rt_.held_act;
@@ -95,16 +96,16 @@ std::optional<std::uint32_t> WindowJobService::service(cores::IWindowSave* role)
 void WindowJobService::forget_held() noexcept {
     seat_assert<SeatTag::RT>(ERR_SITE(), "WindowJobService::forget_held off T-RT");
     rt_.held = Held::None;
-    rt_.held_act = 0;
+    rt_.held_act = {};
     rt_.held_index = proto::IoIndex{};
 }
 
 void WindowJobService::finish_(bool ok, Error err) noexcept {
     WindowJobSlot& slot = *io_.job;
     io_.running.reset();
-    slot.kind.reset();
+    slot.build = nullptr;
     io_.window.reset();
-    slot.ok = ok ? 1u : 0u;
+    slot.ok = ok;
     slot.err = err;
     io_.job.complete();
     io_.job = Chan::Job{};
@@ -116,13 +117,7 @@ void WindowJobService::serve() noexcept {
         if (!io_.job)
             return;
         WindowJobSlot& slot = *io_.job;
-        io_.running.reset(
-            slot.kind ? slot.kind->build(
-                            std::span<std::byte>(slot.arena),
-                            std::span<const std::byte>(slot.order)
-                        )
-                      : nullptr
-        );
+        io_.running.reset(slot.build ? slot.build(slot.arena, slot.order) : nullptr);
         if (!io_.running) {
             finish_(false, Error{Errc::bad_format, ERR_SITE(), 0});
             return;
@@ -130,7 +125,7 @@ void WindowJobService::serve() noexcept {
     }
     cores::IWindowJob& job = *io_.running;
     if (!io_.window) {
-        auto w = Window::open(*map_, aperture_, os::PhysAddr{job.window_addr()}, job.window_len());
+        auto w = Window::open(*map_, aperture_, hal::to_phys(job.window_addr()), job.window_len());
         if (!w) {
             finish_(false, w.error());
             return;
@@ -143,7 +138,7 @@ void WindowJobService::serve() noexcept {
         return;
     }
     if (!*more)
-        finish_(true, Error{Errc::io, 0, 0});
+        finish_(true, Error{Errc::io, infra::kNoSite, 0});
 }
 
 bool WindowJobService::idle() const noexcept {

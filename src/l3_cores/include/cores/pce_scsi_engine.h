@@ -10,6 +10,8 @@
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
 #include "cores/scsi_sense.h"
+#include "cores/types.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 
@@ -26,20 +28,24 @@ public:
     struct View {
         std::uint8_t state = 0;
         std::uint32_t latency = 0;
-        std::int32_t lba = 0;
+        HeadLba lba{};
         std::uint32_t cnt = 0;
-        std::uint32_t track = 0;
+        svc::TrackIndex track{};
         bool can_read_next = false;
         bool has_status = false;
     };
+
+    svc::TrackIndex head_track() const noexcept {
+        return svc::TrackIndex{static_cast<std::uint8_t>(st_.track)};
+    }
 
     View view() const noexcept {
         return View{
             st_.state,
             st_.latency,
-            st_.lba,
+            HeadLba{st_.lba},
             st_.cnt,
-            st_.track,
+            head_track(),
             st_.can_read_next,
             st_.has_status
         };
@@ -87,7 +93,7 @@ private:
     bool do_streaming(const svc::DiscGeometry& geom) const noexcept override;
 
     DriveView do_drive_view(const svc::DiscGeometry&) const noexcept override {
-        return DriveView{st_.state, st_.track, st_.lba, st_.lba, st_.is_data};
+        return DriveView{st_.state, head_track(), st_.lba, st_.lba, st_.is_data};
     }
 
     std::size_t do_command_word_count() const noexcept override { return 7; }

@@ -11,10 +11,13 @@ SessionMachine::SessionMachine(EventQueue<SeatTag::RT>& events, xthread::LogLane
       last_transition_ns_(log_now_ns()) {}
 
 void SessionMachine::transition(SessionState to) {
+
+    if (!session_arrow(state_, to))
+        return;
     const SessionState from = state_;
     state_ = to;
     if (to == SessionState::Failed) {
-        events_.push(Event::SessionEnded{}, Event::Head{EmitSite{ERR_SITE()}, {}, tag_});
+        events_.push(Event::SessionEnded{}, Event::Head{ERR_SITE(), {}, tag_});
     }
 
     const std::uint64_t now = log_now_ns();
@@ -31,35 +34,35 @@ void SessionMachine::transition(SessionState to) {
     );
 }
 
-void SessionMachine::advise(const Event::SessionAdvisory& a, EmitSite site) {
+void SessionMachine::advise(const Event::SessionAdvisory& a, infra::ErrorSite site) {
     events_.push(a, Event::Head{site, {}, kUncaused});
 }
 
-void SessionMachine::advise(const Event::InfoRequest& a, EmitSite site) {
+void SessionMachine::advise(const Event::InfoRequest& a, infra::ErrorSite site) {
     events_.push(a, Event::Head{site, {}, kUncaused});
 }
 
-void SessionMachine::advise(const Event::SdActivity& a, EmitSite site) {
+void SessionMachine::advise(const Event::SdActivity& a, infra::ErrorSite site) {
     events_.push(a, Event::Head{site, {}, kUncaused});
 }
 
-void SessionMachine::advise(const Event::ProgressUpdate& a, EmitSite site) {
+void SessionMachine::advise(const Event::ProgressUpdate& a, infra::ErrorSite site) {
     events_.push(a, Event::Head{site, {}, kUncaused});
 }
 
-void SessionMachine::close(const Event::SessionFailed& a, EmitSite site) {
+void SessionMachine::close(const Event::SessionFailed& a, infra::ErrorSite site) {
     events_.push(a, Event::Head{site, {}, tag_});
 }
 
-void SessionMachine::close(const Event::CoreLoaded& a, EmitSite site) {
+void SessionMachine::close(const Event::CoreLoaded& a, infra::ErrorSite site) {
     events_.push(a, Event::Head{site, {}, tag_});
 }
 
-void SessionMachine::close(const Event::ConfStrOnlySession& a, EmitSite site) {
+void SessionMachine::close(const Event::ConfStrOnlySession& a, infra::ErrorSite site) {
     events_.push(a, Event::Head{site, {}, tag_});
 }
 
-void SessionMachine::echo(const Event::InfoRequest& a, EmitSite site, CorrelationTag tag) {
+void SessionMachine::echo(const Event::InfoRequest& a, infra::ErrorSite site, CorrelationTag tag) {
     events_.push(a, Event::Head{site, {}, tag});
 }
 

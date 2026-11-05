@@ -43,7 +43,7 @@ bool LoadWalk::wants_pass(
             if (level == nullptr)
                 return false;
             const auto s = level->sample();
-            return s && s.value.payload && s.value.act == act_;
+            return s && s.value.payload && s.value.act == act_.widen();
         }
         case Pc::SaveWait:
             return false;
@@ -164,9 +164,9 @@ LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
     cores::TransferRow quiet = r;
     quiet.notify = {};
 
-    const std::uint32_t act = r.bracket == cores::RowBracket::AroundWithLength
+    const proto::ActKey act = r.bracket == cores::RowBracket::AroundWithLength
         ? h.owner.next_generation()
-        : 0u;
+        : proto::ActKey{};
     auto l = LoadLadder::start(
         LoadLadder::Job{
             .loader = std::move(loader_),
@@ -262,10 +262,10 @@ LoadWalk::Pass LoadWalk::pieces_step_(Host& h) {
     return Pass::Stepped;
 }
 
-std::uint16_t LoadWalk::next_act_(Host& h) {
-    std::uint16_t act = 0;
-    while (act == 0 || act == act_)
-        act = static_cast<std::uint16_t>(h.owner.next_generation());
+proto::ActKey16 LoadWalk::next_act_(Host& h) {
+    proto::ActKey16 act{};
+    while (!act || act == act_)
+        act = h.owner.next_generation().narrow();
     act_ = act;
     return act;
 }
@@ -290,8 +290,8 @@ LoadWalk::Pass LoadWalk::send_(
     auto id = h.owner.intern_bytes(bytes, {}, 0);
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : fail_(h);
-    const std::uint16_t prev = act_;
-    const std::uint16_t act = next_act_(h);
+    const proto::ActKey16 prev = act_;
+    const proto::ActKey16 act = next_act_(h);
     if (!h.rung.inbox.push(
             proto::LinkOp::StagePayload{
                 .payload = *id,
@@ -321,7 +321,7 @@ LoadWalk::Pass LoadWalk::skip_(const cores::TransferRow& r) {
 
 LoadWalk::Pass LoadWalk::echo_(Host& h) {
     const auto s = h.rung.level != nullptr ? h.rung.level->sample() : FileTxLevelCell::Sample{};
-    if (!s || !s.value.payload || s.value.act != act_) {
+    if (!s || !s.value.payload || s.value.act != act_.widen()) {
         if (h.now_ns < echo_due_ns_)
             return Pass::Waiting;
         stalled_ = true;
@@ -343,7 +343,7 @@ LoadWalk::Pass LoadWalk::save_(Host& h) {
     auto id = h.owner.intern_path(plan_.frame.save, 0);
     if (!id || *id == proto::FileId{})
         return Pass::Waiting;
-    const std::uint32_t g = h.owner.next_generation();
+    const proto::ActKey g = h.owner.next_generation();
     if (!h.rung.inbox.push(
             proto::LinkOp::BindSlot{
                 .slot = proto::SlotIndex{0},

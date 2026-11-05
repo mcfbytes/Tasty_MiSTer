@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "cores/core_support.h"
+#include "cores/save_channel.h"
 #include "infra/opt_ref.h"
 #include "proto/block_backing.h"
 #include "proto/block_roles.h"
@@ -22,19 +23,22 @@ public:
         TASTY_SEAT_BODY(CoreBlockRoles);
 
         if (fixed_.has_value())
-            return fixed_->kind == kind ? *fixed_ : proto::BlockBacking{};
+            return fixed_->kind() == kind ? *fixed_ : proto::BlockBacking{};
         if (!core_.has_value())
             return {};
         switch (kind) {
             case proto::SlotServer::CoreBlock:
-                if (auto* block_server = core_->block_server())
-                    return proto::BlockBacking{kind, infra::opt_ref_of(block_server), {}};
+                if (const auto block_server = core_->block_server())
+                    return proto::BlockBacking::core_block(block_server);
                 return {};
             case proto::SlotServer::CoreDescriptor:
-                if (cores::ISaveChannel* channel = core_->save_channel())
-                    return proto::BlockBacking{kind, {}, infra::opt_ref_of(&channel->descriptor())};
+                if (const auto channel = core_->save_channel())
+                    return proto::BlockBacking::core_descriptor(
+                        infra::OptRef<proto::IImageSource>{channel->descriptor()}
+                    );
                 return {};
             case proto::SlotServer::Session:
+            case proto::SlotServer::kCount:
                 break;
         }
         return {};

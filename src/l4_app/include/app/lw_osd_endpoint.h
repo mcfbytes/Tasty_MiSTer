@@ -53,9 +53,9 @@ public:
     [[nodiscard]] bool bound() const noexcept { return bound_gen_ != 0; }
 
 private:
-    static constexpr std::uint32_t kRows = proto::OsdSurface::kPageRows;
+    static constexpr proto::OsdRowCount kRows = proto::OsdSurface::kPageRows;
     static_assert(
-        kRows == hal::OsdBlock::kImageRows
+        kRows == proto::OsdRowCount{hal::OsdBlock::kImageRows}
             && proto::OsdSurface::kRowBytes == hal::OsdBlock::kRowBytes,
         "the shadow holds exactly the surface's page rows"
     );
@@ -85,9 +85,9 @@ private:
     void bind_(const OsdGrant& g, std::uint32_t gen) noexcept;
     void unbind_() noexcept;
     void store_frame_() noexcept;
-    [[nodiscard]] bool store_row_(std::uint32_t row) noexcept;
+    [[nodiscard]] bool store_row_(proto::OsdRow row) noexcept;
     [[nodiscard]] std::uint32_t ctrl_() const noexcept;
-    [[nodiscard]] std::uint32_t bound_rows_() const noexcept;
+    [[nodiscard]] proto::OsdRowCount bound_rows_() const noexcept;
     [[nodiscard]] bool lease_() noexcept;
     void release_() noexcept;
     void publish_() noexcept;
@@ -97,7 +97,7 @@ private:
     OsdGrantCell::Reader grant_rd_{};
     std::uint32_t bound_gen_ = 0;
     std::optional<BlockPort> block_{};
-    std::array<std::uint32_t, kRows> stored_{};
+    proto::OsdRowCells<std::uint32_t, kRows.size()> stored_{};
     std::uint32_t ctrl_stored_ = 0;
     proto::OsdSurface::Row row_{};
     OsdRoute tally_{};

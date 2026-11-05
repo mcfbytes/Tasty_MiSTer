@@ -53,6 +53,7 @@ UiMain::UiMain(
       ui_rx_(wiring.link_rx),
       save_states_(wiring.save_states),
       ui_writes_(wiring.ui_writes),
+      verdicts_(wiring.verdicts),
       wake_(fds.wake()),
       stop_(std::move(fds).take_stop()),
       pause_(wake_, infra::OptRef<xthread::WakeFlag>{asker}),
@@ -97,7 +98,7 @@ void UiMain::serve() noexcept {
     if (save_states_)
         save_states_->tick();
     if (ui_writes_)
-        ui_writes_->tick();
+        ui_writes_->tick(verdicts_);
     if (owner_tick_)
         owner_tick_->tick();
     if (uart_) {
@@ -139,7 +140,7 @@ void UiMain::settle() noexcept {
     drain_events_();
     shots_.tick();
     if (ui_writes_)
-        ui_writes_->tick();
+        ui_writes_->tick(verdicts_);
     if (ui_round_)
         ui_round_->settle();
     if (lw_osd_)

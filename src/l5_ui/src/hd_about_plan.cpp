@@ -20,14 +20,15 @@ constexpr std::string_view kStorageLabel = "Storage";
 std::string storage_word(const SystemFacts& f) {
     std::string s = f.storage_usb ? "USB" : (f.storage_sd_fallback ? "SD (fallback)" : "SD");
     s += ", ";
-    s += format_free_space(f.avail_bytes, FreeSpaceStyle::Hd);
+    s += format_free_space(f.avail, FreeSpaceStyle::Hd);
     return s;
 }
 
 bool same_facts(const SystemFacts& a, const SystemFacts& b) {
+    constexpr std::uint64_t kBytesPerMiB = 1024ull * 1024ull;
     return std::string_view(a.version) == std::string_view(b.version)
         && std::string_view(a.os_version) == std::string_view(b.os_version)
-        && a.avail_bytes / (1024ull * 1024) == b.avail_bytes / (1024ull * 1024)
+        && a.avail.v / kBytesPerMiB == b.avail.v / kBytesPerMiB
         && a.storage_usb == b.storage_usb
         && a.storage_sd_fallback == b.storage_sd_fallback
         && a.kernel == b.kernel;

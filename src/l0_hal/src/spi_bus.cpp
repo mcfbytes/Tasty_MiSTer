@@ -40,7 +40,7 @@ std::uint64_t now_ns() noexcept {
 void SpiBus::store_gpo(std::uint32_t v) noexcept {
     gpo_reg_.write(v);
     if (obs_)
-        obs_->on_store(v);
+        obs_->on_store(SpiOutput{v});
 }
 
 void SpiBus::commit_gpo(std::uint32_t v) noexcept {
@@ -133,7 +133,7 @@ SpiSample SpiBus::sample() const noexcept {
     const std::uint32_t gpi = read_gpi();
     return SpiSample{
         .ready = (gpi & kNotReady) == 0u,
-        .buttons = static_cast<std::uint16_t>((gpi >> 29) & 3u),
+        .buttons = ButtonMask{static_cast<std::uint16_t>((gpi >> 29) & 3u)},
         .hdmi = ((gpi >> 20) & 1u) != 0u,
     };
 }
@@ -169,7 +169,7 @@ CoreCapabilities SpiBus::latch_capabilities() {
     const std::uint32_t gpi = read_gpi();
     CoreCapabilities caps{};
     caps.width = ((gpi >> 16) & 1u) != 0u ? Width::Word : Width::Byte;
-    caps.io_version = static_cast<std::uint8_t>((gpi >> 18) & 3u);
+    caps.io_version = IoVersion{static_cast<std::uint8_t>((gpi >> 18) & 3u)};
     caps.board_digital = ((gpi >> 28) & 1u) != 0u;
     caps.button_osd = ((gpi >> 29) & 1u) != 0u;
     caps.button_user = ((gpi >> 30) & 1u) != 0u;
@@ -220,27 +220,6 @@ void SpiBus::select(ChipSelect cs) {
 void SpiBus::deselect() {
     commit_gpo((gpo_.v | kCoreEnable) & ~kCsMask);
 }
-
-#ifndef NDEBUG
-void SpiBus::txn_enter() noexcept {
-    if (txn_depth_ != 0) {
-        fatal(Error{Errc::negotiation, ERR_SITE(), txn_depth_}, "SpiBus: nested Transaction");
-    }
-    ++txn_depth_;
-    txn_cs_entry_ = gpo_.v & kCsMask;
-}
-
-void SpiBus::txn_exit() noexcept {
-    --txn_depth_;
-    const std::uint32_t cs_now = gpo_.v & kCsMask;
-    if (cs_now != txn_cs_entry_) {
-        fatal(
-            Error{Errc::negotiation, ERR_SITE(), cs_now},
-            "SpiBus: Transaction left the chip-select unbalanced"
-        );
-    }
-}
-#endif
 
 Ex<void> SpiBus::refuse_if_posted_() const noexcept {
     if (post_ == Post::None)

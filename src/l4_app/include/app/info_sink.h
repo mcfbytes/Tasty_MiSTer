@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
+#include <chrono>
 
 #include "app/event.h"
+#include "cores/progress.h"
 
 namespace mister::app {
 
@@ -11,9 +12,9 @@ class InfoSink {
 public:
     virtual ~InfoSink() = default;
 
-    virtual void info(InfoId id, std::uint32_t timeout_ms = 0) = 0;
+    virtual void info(InfoId id, std::chrono::milliseconds timeout = {}) = 0;
 
-    virtual void progress(InfoId id, std::uint32_t cur, std::uint32_t max) = 0;
+    virtual void progress(InfoId id, cores::Progress p) = 0;
 
 protected:
     InfoSink() = default;

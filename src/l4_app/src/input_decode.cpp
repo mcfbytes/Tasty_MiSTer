@@ -17,7 +17,7 @@ namespace mister::app {
 
 namespace {
 
-Error os_error(std::uint16_t site) {
+Error os_error(infra::ErrorSite site) {
     return Error{Errc::os, site, static_cast<std::uint32_t>(errno)};
 }
 
@@ -27,19 +27,28 @@ constexpr std::uint16_t kKeyLeftMeta = 125;
 constexpr std::uint16_t kKeyRightMeta = 126;
 
 bool is_pass_through_modifier(std::uint16_t code) noexcept {
-    return code == 56 || code == 100 || code == 125 || code == 126;
+    constexpr std::uint16_t kKeyLeftAlt = 56;
+    constexpr std::uint16_t kKeyRightAlt = 100;
+    return code == kKeyLeftAlt
+        || code == kKeyRightAlt
+        || code == kKeyLeftMeta
+        || code == kKeyRightMeta;
 }
 
 bool ui_down_test(const std::uint64_t (&bits)[4], std::uint16_t code) noexcept {
-    return (bits[code >> 6] & (std::uint64_t{1} << (code & 63u))) != 0u;
+    constexpr unsigned kUiDownWordShift = 6;
+    constexpr unsigned kUiDownBitMask = 63;
+    return (bits[code >> kUiDownWordShift] & (std::uint64_t{1} << (code & kUiDownBitMask))) != 0u;
 }
 
 void ui_down_set(std::uint64_t (&bits)[4], std::uint16_t code, bool on) noexcept {
-    const std::uint64_t m = std::uint64_t{1} << (code & 63u);
+    constexpr unsigned kUiDownWordShift = 6;
+    constexpr unsigned kUiDownBitMask = 63;
+    const std::uint64_t m = std::uint64_t{1} << (code & kUiDownBitMask);
     if (on) {
-        bits[code >> 6] |= m;
+        bits[code >> kUiDownWordShift] |= m;
     } else {
-        bits[code >> 6] &= ~m;
+        bits[code >> kUiDownWordShift] &= ~m;
     }
 }
 
@@ -117,19 +126,23 @@ unsigned InputDecode::drop_link_events() noexcept {
 namespace {
 
 std::uint32_t device_key(const svc::InputDevice& d) noexcept {
+    constexpr std::uint32_t kFnvOffsetBasis = 2166136261u;
+    constexpr std::uint32_t kFnvPrime = 16777619u;
+    constexpr unsigned kByteBits = 8;
+    constexpr unsigned kByteMask = 0xFFu;
     const svc::DeviceIdentity& id = d.identity();
-    std::uint32_t h = 2166136261u;
+    std::uint32_t h = kFnvOffsetBasis;
     auto mix = [&h](std::uint8_t b) noexcept {
         h ^= b;
-        h *= 16777619u;
+        h *= kFnvPrime;
     };
     const std::string& s = !id.merge_id.empty() ? id.merge_id : id.id;
     for (const char c : s)
         mix(static_cast<std::uint8_t>(c));
-    mix(static_cast<std::uint8_t>(id.vid.v & 0xFFu));
-    mix(static_cast<std::uint8_t>(id.vid.v >> 8));
-    mix(static_cast<std::uint8_t>(id.pid.v & 0xFFu));
-    mix(static_cast<std::uint8_t>(id.pid.v >> 8));
+    mix(static_cast<std::uint8_t>(id.vid.v & kByteMask));
+    mix(static_cast<std::uint8_t>(id.vid.v >> kByteBits));
+    mix(static_cast<std::uint8_t>(id.pid.v & kByteMask));
+    mix(static_cast<std::uint8_t>(id.pid.v >> kByteBits));
     return h != 0u ? h : 1u;
 }
 }
@@ -167,7 +180,7 @@ void InputDecode::rebuild_registrations(Reseat bridge) {
                 joy_key_[slot] = key;
                 joy_prev_[slot] = d.report().menu_buttons.v;
                 if (bridge == Reseat::Bridge && launcher_keys_)
-                    launcher_keys_->reseat_pad(slot, joy_prev_[slot]);
+                    launcher_keys_->reseat_pad(slot, proto::JoyMask{joy_prev_[slot]});
                 for (std::uint64_t& w : ui_key_down_[slot])
                     w = 0;
             }
@@ -178,7 +191,7 @@ void InputDecode::rebuild_registrations(Reseat bridge) {
             joy_key_[slot] = 0;
             joy_prev_[slot] = 0;
             if (bridge == Reseat::Bridge && launcher_keys_)
-                launcher_keys_->reseat_pad(slot, 0);
+                launcher_keys_->reseat_pad(slot, {});
             for (std::uint64_t& w : ui_key_down_[slot])
                 w = 0;
         }
@@ -209,20 +222,23 @@ void InputDecode::deregister_devices_() noexcept {
 
 bool InputDecode::apply_requests() {
     bool rebuilt = false;
-    const std::uint32_t req = wire_.requests();
-    if ((req & InputWire::kReqGrabApply) != 0u) {
+    const InputRequestBits req = wire_.requests();
+    if (InputWire::has(req, InputWire::kReqGrabApply)) {
 
-        const bool on = (req & InputWire::kReqGrabOn) != 0u;
+        const bool on = InputWire::has(req, InputWire::kReqGrabOn);
         (void)svc_.set_grabbed(on);
-        wire_.publish_gates(on ? InputWire::kGateGrabbed : 0u, on ? 0u : InputWire::kGateGrabbed);
+        wire_.publish_gates(
+            on ? InputWire::kGateGrabbed : InputGateBits{},
+            on ? InputGateBits{} : InputWire::kGateGrabbed
+        );
         wire_.clear_request(InputWire::kReqGrabApply);
     }
 
     const auto osd_on = wire_.take_osd_request();
     if (osd_on) {
         wire_.publish_gates(
-            *osd_on ? InputWire::kGateOsdVisible : 0u,
-            *osd_on ? 0u : InputWire::kGateOsdVisible
+            *osd_on ? InputWire::kGateOsdVisible : InputGateBits{},
+            *osd_on ? InputGateBits{} : InputWire::kGateOsdVisible
         );
     }
 
@@ -255,7 +271,7 @@ void InputDecode::evict_fd(int fd) {
 
 unsigned InputDecode::decode_round(int timeout_ms) {
     before_wait();
-    wait_events(timeout_ms);
+    wait_events(infra::ParkTimeout{timeout_ms});
     return after_wait();
 }
 
@@ -266,8 +282,8 @@ void InputDecode::before_wait() {
     rumble_.refresh();
 }
 
-void InputDecode::wait_events(int timeout_ms) noexcept {
-    n_ready_ = ::epoll_wait(epfd_.get(), evs_, static_cast<int>(kMaxEpollEvents), timeout_ms);
+void InputDecode::wait_events(infra::ParkTimeout timeout) noexcept {
+    n_ready_ = ::epoll_wait(epfd_.get(), evs_, static_cast<int>(kMaxEpollEvents), timeout.count());
 }
 
 unsigned InputDecode::after_wait() {
@@ -286,7 +302,7 @@ unsigned InputDecode::after_wait() {
     if (launcher_keys_) {
         const bool owns = launcher_cell_->sample().value.owns_screen
             && !muted_
-            && (wire_.gates() & InputWire::kGateOsdVisible) == 0u;
+            && !wire_.gated(InputWire::kGateOsdVisible);
         bridging_ = launcher_keys_->set_active(owns);
     }
 
@@ -421,7 +437,7 @@ void InputDecode::flush_mouse_() {
     if (!p)
         return;
 
-    if ((wire_.gates() & InputWire::kGateOsdVisible) == 0u) {
+    if (!wire_.gated(InputWire::kGateOsdVisible)) {
         if (mouse_.motion(p->dx, p->dy, p->dz, p->buttons)) {
             tally_.mouse_packet();
             wire_.note_activity();
@@ -501,7 +517,7 @@ bool InputDecode::push_ui_edge(const RawKeyEdge& e) {
 
 void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, std::size_t dev_slot) {
 
-    const bool osd_visible = (wire_.gates() & InputWire::kGateOsdVisible) != 0u;
+    const bool osd_visible = wire_.gated(InputWire::kGateOsdVisible);
     const bool has_slot = dev_slot < svc::kMaxDevices;
     for (std::uint8_t i = 0; i < r.key_count; ++i) {
         const svc::KeyEdge& e = r.keys[i];
@@ -517,7 +533,7 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, std::s
         if (has_slot)
             ui_down_set(ui_key_down_[dev_slot], e.code, e.pressed != 0);
 
-        const RawKeyEdge ke{e.code, e.pressed ? std::uint8_t{1} : std::uint8_t{0}, 0};
+        const RawKeyEdge ke{e.code, e.pressed != 0, 0};
         if (is_osd_toggle_(e.code)) {
 
             const RawKeyEdge tog{kKeyF12, ke.pressed, ke.reserved};
@@ -544,12 +560,12 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, std::s
 
     if (arm_.armed == 0) {
         for (std::uint8_t i = 0; i < r.osd_makes; ++i) {
-            if (!push_ui_edge(RawKeyEdge{kKeyF12, 1, 0}))
+            if (!push_ui_edge(RawKeyEdge{kKeyF12, true, 0}))
                 break;
             ++joy_ui_keys_;
         }
         for (std::uint8_t i = 0; i < r.osd_breaks; ++i) {
-            if (!push_ui_edge(RawKeyEdge{kKeyF12, 0, 0}))
+            if (!push_ui_edge(RawKeyEdge{kKeyF12, false, 0}))
                 break;
             ++joy_ui_keys_;
         }
@@ -650,7 +666,7 @@ void InputDecode::publish_joy_menu(
     const std::uint32_t prev = joy_prev_[dev_slot];
     joy_prev_[dev_slot] = now;
     if (launcher_keys_)
-        launcher_keys_->pad(dev_slot, now);
+        launcher_keys_->pad(dev_slot, r.menu_buttons);
 
     if (arm_.armed != 0) {
         osdbtn_ = 0;
@@ -705,7 +721,7 @@ void InputDecode::publish_joy_menu(
         const std::uint16_t code = joy_menu_key(mask);
         if (code == 0)
             continue;
-        const RawKeyEdge ke{code, press ? std::uint8_t{1} : std::uint8_t{0}, 0};
+        const RawKeyEdge ke{code, press, 0};
 
         if (!push_ui_edge(ke))
             break;
@@ -733,10 +749,10 @@ InputDecode::Counts InputDecode::counts() const noexcept {
     c.mouse_remainder = svc_.counters().mouse_remainder_bytes();
     c.key_overflows = svc_.counters().key_overflows();
     c.quirk_drops = svc_.counters().quirk_drops();
-    c.slot_live = svc_.counters().live_slot_mask();
+    c.slot_live = svc_.counters().live_slot_mask().v;
     c.slot_ghosts = svc_.counters().ghost_slots();
     for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
-        c.slot_hash[i] = svc_.counters().slot_key_hash(i);
+        c.slot_hash[i] = svc_.counters().slot_key_hash(svc::PlayerIndex{i});
     }
     return c;
 }

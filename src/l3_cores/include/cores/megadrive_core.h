@@ -3,18 +3,18 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
+#include <optional>
 #include <string_view>
 
 #include "cores/core_support.h"
 #include "cores/pcm_feed.h"
-#include "cores/pcm_source.h"
 #include "cores/pcm_wire_rows.h"
 #include "cores/stream_load.h"
 #include "cores/stream_tx_record.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "proto/uio_opcodes.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 
@@ -66,7 +66,11 @@ public:
 
     [[nodiscard]] bool ack_pending() const noexcept { return ack_pending_; }
 
-    [[nodiscard]] std::uint8_t current_track() const noexcept { return current_track_; }
+    [[nodiscard]] std::optional<svc::TrackNumber> current_track() const noexcept {
+        if (current_track_ == 0)
+            return std::nullopt;
+        return svc::TrackNumber{current_track_};
+    }
 
     [[nodiscard]] bool paused() const noexcept { return paused_; }
 
@@ -82,15 +86,19 @@ private:
     void on_set_pending_file_ext(std::string_view ext) noexcept override;
     void on_set_pending_file_path(std::string_view path) noexcept override;
 
-    [[nodiscard]] IStreamLoad* on_stream_load() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IStreamLoad> on_stream_load() noexcept override {
+        return infra::OptRef<IStreamLoad>{*this};
+    }
 
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
 
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return tx_.bytes(); }
 
-    [[nodiscard]] std::uint32_t on_last_tx_crc() const noexcept override { return tx_.crc(); }
+    [[nodiscard]] svc::Crc32 on_last_tx_crc() const noexcept override { return tx_.crc(); }
 
-    [[nodiscard]] IPcmWireRows* on_pcm_wire_rows() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IPcmWireRows> on_pcm_wire_rows() noexcept override {
+        return infra::OptRef<IPcmWireRows>{*this};
+    }
 
     void service_pcm_tick() noexcept override;
 
@@ -130,7 +138,7 @@ private:
     bool ack_pending_ = false;
     bool paused_ = false;
 
-    std::unique_ptr<IPcmSource> pending_feed_{};
+    FixedStr<1024, StrFit::Clip> pending_feed_{};
     bool feed_rearm_pending_ = false;
 
     std::uint32_t rearm_ticks_ = 0;

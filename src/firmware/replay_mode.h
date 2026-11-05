@@ -113,7 +113,7 @@ private:
         app::ReplayFeeder& f;
         bool take_play(const TastySession::PlayAsk& ask) noexcept override;
         void take_stop() noexcept override;
-        [[nodiscard]] std::uint32_t frames() const noexcept override;
+        [[nodiscard]] app::FrameCount frames() const noexcept override;
         [[nodiscard]] std::uint32_t movie_frames() const noexcept override;
         [[nodiscard]] bool refused() const noexcept override;
         [[nodiscard]] bool active() const noexcept override;
@@ -129,7 +129,7 @@ private:
         TASTY_SEAT_EXEMPT(boot);
 
     public:
-        [[nodiscard]] DeviceBlock::Front device_front() noexcept override { return {}; }
+        [[nodiscard]] DeviceBlock::Parts::Frontend device_front() noexcept override { return {}; }
 
         [[nodiscard]] infra::OptRef<app::ScanoutRelay> scanout() noexcept override { return {}; }
 

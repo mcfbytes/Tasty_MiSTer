@@ -52,11 +52,28 @@ std::optional<TrackIndex> track_for_lba(const Toc& toc, Lba lba) noexcept {
     return std::nullopt;
 }
 
-std::uint32_t seek_ms(Lba from_lba, Lba to_lba) noexcept {
+SeekTime seek_time(Lba from_lba, Lba to_lba) noexcept {
 
     constexpr std::uint32_t kMaxSector = 360000;
+    constexpr double kTracksPerGroupGap = 1606.48;
+    constexpr std::int32_t kSettleSectors = 3;
+    constexpr std::int32_t kShortJumpSectors = 7;
+    constexpr float kSettleMs = 33.0f;
+    constexpr float kShortJumpMs = 150.0f;
+    constexpr float kNearMs = 283.0f;
+    constexpr float kMidMs = 366.0f;
+    constexpr float kFarMs = 600.0f;
+    constexpr float kNearTracks = 80.0f;
+    constexpr float kMidTracks = 160.0f;
+    constexpr float kMidTracksNext = 161.0f;
+    constexpr float kFarTracks = 644.0f;
+    constexpr double kRotShare3q = 0.75;
+    constexpr double kRotShareHalf = 0.5;
+    constexpr double kTrackStepMs = 16.66;
+    constexpr double kMidSpan = 80.0;
+    constexpr double kFarSpan = 195.0;
     if (from_lba.v > kMaxSector || to_lba.v > kMaxSector)
-        return 0;
+        return SeekTime{0};
 
     const std::int32_t from = static_cast<std::int32_t>(from_lba.v);
     const std::int32_t to = static_cast<std::int32_t>(to_lba.v);
@@ -75,7 +92,8 @@ std::uint32_t seek_ms(Lba from_lba, Lba to_lba) noexcept {
             (to - kSectorGroups[ti].start) / kSectorGroups[ti].per_rev
         );
         track_difference = static_cast<float>(
-            static_cast<double>(track_difference) + 1606.48 * static_cast<double>(ti - si - 1)
+            static_cast<double>(track_difference)
+            + kTracksPerGroupGap * static_cast<double>(ti - si - 1)
         );
     } else {
         track_difference = static_cast<float>(
@@ -85,7 +103,8 @@ std::uint32_t seek_ms(Lba from_lba, Lba to_lba) noexcept {
             (kSectorGroups[ti].end - to) / kSectorGroups[ti].per_rev
         );
         track_difference = static_cast<float>(
-            static_cast<double>(track_difference) + 1606.48 * static_cast<double>(si - ti - 1)
+            static_cast<double>(track_difference)
+            + kTracksPerGroupGap * static_cast<double>(si - ti - 1)
         );
     }
 
@@ -94,25 +113,29 @@ std::uint32_t seek_ms(Lba from_lba, Lba to_lba) noexcept {
 
     const double rotd = static_cast<double>(rot);
     float ms = 0.0f;
-    if (delta <= 3) {
-        ms = 33.0f;
-    } else if (delta < 7) {
-        ms = 150.0f + static_cast<float>(rotd * 0.75);
-    } else if (track_difference <= 80.0f) {
-        ms = 283.0f + static_cast<float>(rotd * 0.75);
-    } else if (track_difference <= 160.0f) {
-        ms = 366.0f + static_cast<float>(rotd * 0.75);
-    } else if (track_difference <= 644.0f) {
-        ms = 366.0f
-            + static_cast<float>(rotd * 0.75)
-            + static_cast<float>(static_cast<double>(track_difference - 161.0f) * 16.66 / 80.0);
+    if (delta <= kSettleSectors) {
+        ms = kSettleMs;
+    } else if (delta < kShortJumpSectors) {
+        ms = kShortJumpMs + static_cast<float>(rotd * kRotShare3q);
+    } else if (track_difference <= kNearTracks) {
+        ms = kNearMs + static_cast<float>(rotd * kRotShare3q);
+    } else if (track_difference <= kMidTracks) {
+        ms = kMidMs + static_cast<float>(rotd * kRotShare3q);
+    } else if (track_difference <= kFarTracks) {
+        ms = kMidMs
+            + static_cast<float>(rotd * kRotShare3q)
+            + static_cast<float>(
+                 static_cast<double>(track_difference - kMidTracksNext) * kTrackStepMs / kMidSpan
+            );
     } else {
-        ms = 600.0f
-            + static_cast<float>(rotd * 0.5)
-            + static_cast<float>(static_cast<double>(track_difference - 644.0f) * 16.66 / 195.0);
+        ms = kFarMs
+            + static_cast<float>(rotd * kRotShareHalf)
+            + static_cast<float>(
+                 static_cast<double>(track_difference - kFarTracks) * kTrackStepMs / kFarSpan
+            );
     }
 
-    return static_cast<std::uint32_t>(ms);
+    return SeekTime{static_cast<std::uint32_t>(ms)};
 }
 
 }

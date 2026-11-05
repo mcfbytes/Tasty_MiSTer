@@ -7,6 +7,7 @@
 
 #include "infra/seat.h"
 #include "svc/disc_reader.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -31,12 +32,12 @@ inline constexpr std::size_t kDiscReadDepth = 16;
 struct DiscReadSlot {
     TASTY_SEAT_MEDIATOR(Any, Any);
 
-    std::uint32_t gen = 0;
-    std::uint32_t lba = 0;
+    Generation gen{};
+    proto::Lba lba{};
     std::uint16_t want = 0;
     std::uint16_t got = 0;
     DiscForm form = DiscForm::RawFrame;
-    std::uint8_t ok = 0;
+    bool ok = false;
     std::byte data[kDiscSlotBytes]{};
 };
 

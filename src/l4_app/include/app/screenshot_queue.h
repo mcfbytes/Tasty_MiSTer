@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
+#include <bit>
 #include <cstdint>
+#include <limits>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <utility>
@@ -13,6 +17,7 @@
 #include "infra/seat.h"
 #include "infra/loan_channel.h"
 #include "infra/counter.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -28,8 +33,8 @@ public:
 
         FixedStr<kNameMax, StrFit::Clip> path{};
         CorrelationTag tag{};
-        std::uint8_t scaled = 0;
-        std::uint8_t ok = 0;
+        bool scaled = false;
+        bool ok = false;
     };
 
     using Chan = xthread::LoanChannel<Shot, kDepth, SeatTag::Ui, SeatTag::Diag>;
@@ -70,43 +75,53 @@ inline std::vector<std::uint8_t> encode_png_rgb24(
     std::uint32_t h,
     std::span<const std::uint8_t> rgb
 ) {
-    auto crc_step = [](std::uint32_t crc, std::uint8_t byte) noexcept {
-        crc ^= byte;
-        for (int k = 0; k < 8; ++k)
-            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
-        return crc;
-    };
+    static_assert(std::endian::native == std::endian::little);
+    constexpr std::size_t kChannels = 3;
+    constexpr std::size_t kStoredBlockMax = 65535;
+    constexpr std::size_t kStoredHeaderBytes = 5;
+    constexpr std::size_t kZlibHeaderBytes = 2;
+    constexpr std::size_t kAdlerBytes = 4;
+    constexpr std::uint32_t kAdlerMod = 65521;
+    constexpr std::uint32_t kIendCrc = 0xAE426082u;
+    constexpr std::uint32_t kIhdrLength = 13;
+    constexpr std::array<std::uint8_t, 8> kSignature{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+
+    constexpr std::array<std::uint8_t, 5> kIhdrTail{8, 2, 0, 0, 0};
+
     std::vector<std::uint8_t> out;
-    if (w == 0 || h == 0 || rgb.size() != static_cast<std::size_t>(w) * h * 3)
+    const std::size_t row_pixels = std::size_t{w} * kChannels;
+    if (w == 0 || h == 0 || rgb.size() != row_pixels * h)
         return out;
 
-    const std::size_t row = static_cast<std::size_t>(w) * 3 + 1;
+    const std::size_t row = row_pixels + 1;
     const std::size_t raw_len = row * h;
 
     auto be32 = [&out](std::uint32_t v) {
-        out.push_back(static_cast<std::uint8_t>(v >> 24));
-        out.push_back(static_cast<std::uint8_t>(v >> 16));
-        out.push_back(static_cast<std::uint8_t>(v >> 8));
-        out.push_back(static_cast<std::uint8_t>(v));
+        const auto le = std::bit_cast<std::array<std::uint8_t, 4>>(v);
+        out.insert(out.end(), le.rbegin(), le.rend());
     };
 
-    static constexpr std::uint8_t kSig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
-    out.insert(out.end(), kSig, kSig + 8);
+    auto be32_crc = [&out](std::span<const std::uint8_t> chunk) {
+        const auto be = svc::crc32_extend({}, chunk).to_be_bytes();
+        out.insert(out.end(), be.begin(), be.end());
+    };
 
-    be32(13);
+    out.insert(out.end(), kSignature.begin(), kSignature.end());
+
+    be32(kIhdrLength);
     const std::size_t ihdr_at = out.size();
-    const std::uint8_t ihdr_tail[5] = {8, 2, 0, 0, 0};
     out.insert(out.end(), {'I', 'H', 'D', 'R'});
     be32(w);
     be32(h);
-    out.insert(out.end(), ihdr_tail, ihdr_tail + 5);
-    std::uint32_t crc = 0xFFFFFFFFu;
-    for (std::size_t i = ihdr_at; i < out.size(); ++i)
-        crc = crc_step(crc, out[i]);
-    be32(~crc);
+    out.insert(out.end(), kIhdrTail.begin(), kIhdrTail.end());
+    be32_crc(std::span<const std::uint8_t>(out).subspan(ihdr_at));
 
-    const std::size_t blocks = (raw_len + 65534) / 65535;
-    be32(static_cast<std::uint32_t>(2 + raw_len + blocks * 5 + 4));
+    const std::size_t blocks = (raw_len + kStoredBlockMax - 1) / kStoredBlockMax;
+    be32(
+        static_cast<std::uint32_t>(
+            kZlibHeaderBytes + raw_len + blocks * kStoredHeaderBytes + kAdlerBytes
+        )
+    );
     const std::size_t idat_at = out.size();
     out.insert(out.end(), {'I', 'D', 'A', 'T'});
     out.push_back(0x78);
@@ -118,34 +133,33 @@ inline std::vector<std::uint8_t> encode_png_rgb24(
     auto raw_byte = [&](std::uint8_t v) {
         if (block_left == 0) {
             const std::size_t left = raw_len - emitted;
-            block_left = left < 65535 ? left : 65535;
-            out.push_back(left <= 65535 ? 1 : 0);
-            out.push_back(static_cast<std::uint8_t>(block_left & 0xFFu));
-            out.push_back(static_cast<std::uint8_t>(block_left >> 8));
-            out.push_back(static_cast<std::uint8_t>(~block_left & 0xFFu));
-            out.push_back(static_cast<std::uint8_t>((~block_left >> 8) & 0xFFu));
+            block_left = left < kStoredBlockMax ? left : kStoredBlockMax;
+            out.push_back(left <= kStoredBlockMax ? 1 : 0);
+            const auto len = static_cast<std::uint16_t>(block_left);
+            const auto nlen = static_cast<std::uint16_t>(~len);
+            const auto len_le = std::bit_cast<std::array<std::uint8_t, 2>>(len);
+            const auto nlen_le = std::bit_cast<std::array<std::uint8_t, 2>>(nlen);
+            out.insert(out.end(), len_le.begin(), len_le.end());
+            out.insert(out.end(), nlen_le.begin(), nlen_le.end());
         }
         out.push_back(v);
-        a = (a + v) % 65521u;
-        b = (b + a) % 65521u;
+        a = (a + v) % kAdlerMod;
+        b = (b + a) % kAdlerMod;
         ++emitted;
         --block_left;
     };
     for (std::uint32_t y = 0; y < h; ++y) {
         raw_byte(0);
-        const std::size_t base = static_cast<std::size_t>(y) * w * 3;
-        for (std::size_t i = 0; i < static_cast<std::size_t>(w) * 3; ++i)
+        const std::size_t base = std::size_t{y} * row_pixels;
+        for (std::size_t i = 0; i < row_pixels; ++i)
             raw_byte(rgb[base + i]);
     }
-    be32((b << 16) | a);
-    crc = 0xFFFFFFFFu;
-    for (std::size_t i = idat_at; i < out.size(); ++i)
-        crc = crc_step(crc, out[i]);
-    be32(~crc);
+    be32((b << std::numeric_limits<std::uint16_t>::digits) | a);
+    be32_crc(std::span<const std::uint8_t>(out).subspan(idat_at));
 
     be32(0);
     out.insert(out.end(), {'I', 'E', 'N', 'D'});
-    be32(0xAE426082u);
+    be32(kIendCrc);
     return out;
 }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 
@@ -79,8 +80,8 @@ public:
 
     struct SaveStateHold {
         PickedLoad load{};
-        std::uint32_t gen = 0;
-        std::int64_t due_ns = 0;
+        proto::ActKey gen{};
+        std::chrono::nanoseconds due{};
     };
 
     class Host {
@@ -113,10 +114,10 @@ public:
     void offer(ManifestLadder&& m);
     void offer(CompanionWalk&& c);
 
-    void offer(LoadWalk&& w, std::uint32_t gen);
+    void offer(LoadWalk&& w, proto::ActKey gen);
     void hold(const SaveStateHold& h);
 
-    void refuse_walk(std::uint32_t gen) noexcept;
+    void refuse_walk(proto::ActKey gen) noexcept;
 
     void step(Host& host, cores::ILadderHost& ladder);
 
@@ -178,7 +179,7 @@ private:
     std::optional<ManifestLadder> manifest_{};
     std::optional<LoadWalk> walk_{};
     std::optional<CompanionWalk> companion_walk_{};
-    std::uint32_t walk_gen_ = 0;
+    proto::ActKey walk_gen_{};
     cores::MountStatus walk_status_{};
     std::optional<Answered<cores::MountStatus>> walk_answered_{};
 };

@@ -57,7 +57,7 @@ public:
 private:
     static constexpr std::size_t kRefusalKinds = static_cast<std::size_t>(Refusal::Count);
 
-    [[nodiscard]] std::unexpected<Error> refuse(Refusal why, std::uint16_t site) noexcept;
+    [[nodiscard]] std::unexpected<Error> refuse(Refusal why, infra::ErrorSite site) noexcept;
 
     hal::FpgaMemory window_;
     const VideoGeometryCell& geometry_;

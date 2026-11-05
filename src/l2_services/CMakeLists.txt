@@ -3,6 +3,8 @@ add_library(mister_services STATIC
   src/adv7513_bus.cpp
   src/adv7513_reg_write.cpp
   src/alt_ini_index.cpp
+  src/asset_name.cpp
+  src/crc32_extend.cpp
   src/audio_service.cpp
   src/cec_state_machine.cpp
   src/chd_backing.cpp
@@ -18,6 +20,7 @@ add_library(mister_services STATIC
   src/disc_read_service.cpp
   src/disc_store.cpp
   src/disk_format_row.cpp
+  src/vfs_durable_write.cpp
   src/disk_image.cpp
   src/edid_store.cpp
   src/file_slot_backend.cpp
@@ -51,6 +54,7 @@ add_library(mister_services STATIC
   src/hdmi_link.cpp
   src/video_service.cpp
   src/video_timing.cpp
+  src/probe_ops.cpp
   src/video_wire_emit.cpp
   src/xml_scan.cpp
   src/xml_scanner.cpp
@@ -101,7 +105,10 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/analog_reshape.h
   svc/analog_xy.h
   svc/archive.h
+  svc/asset_name.h
+  svc/asset_query.h
   svc/audio_service.h
+  svc/probe_ops.h
   svc/axis_cal.h
   svc/block_ctl.h
   svc/block_half.h
@@ -137,6 +144,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/disk_codec.h
   svc/disk_format_row.h
   svc/disk_image.h
+  svc/durable_write.h
   svc/edid_store.h
   svc/file.h
   svc/file_table_backing.h
@@ -146,6 +154,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/filter_set.h
   svc/filter_store.h
   svc/frame_shaper.h
+  svc/game_asset_finder.h
   svc/geometry_gate.h
   svc/hdmi_link.h
   svc/gzip_inflate.h
@@ -163,6 +172,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/input_service.h
   svc/but_sw_wire.h
   svc/rumble_out.h
+  svc/resolution.h
   svc/joy_plan.h
   svc/key_edge.h
   svc/map_store.h
@@ -193,6 +203,8 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/sentinel_cue_program.h
   svc/slot_path.h
   svc/stick_cal.h
+  svc/stick_index.h
+  svc/stick_state.h
   svc/storage_backend.h
   svc/storage_lifecycle.h
   svc/storage_service.h

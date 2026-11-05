@@ -4,6 +4,7 @@
 #include <concepts>
 
 #include "infra/park_like.h"
+#include "infra/park_timeout.h"
 
 namespace mister::xthread {
 
@@ -12,7 +13,7 @@ concept SeatBody = requires(B& b, const B& cb) {
     { b.serve() } noexcept -> std::same_as<void>;
     { cb.idle() } noexcept -> std::same_as<bool>;
     { cb.stopping() } noexcept -> std::same_as<bool>;
-    { cb.park_ms() } noexcept -> std::same_as<int>;
+    { cb.park_ms() } noexcept -> std::same_as<infra::ParkTimeout>;
     { b.park() } noexcept -> ParkLike;
     { b.settle() } noexcept -> std::same_as<void>;
     { b.paused() } noexcept -> std::same_as<bool>;

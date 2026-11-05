@@ -40,6 +40,10 @@ inline constexpr double kScanlockVtotalRoundCeiling = static_cast<double>(kScanl
 
 namespace video_timing {
 
+[[nodiscard]] Modeline preset_modeline(const PresetMode& p) noexcept;
+
+void assign_timings(Modeline& m, std::span<const std::uint32_t, 8> t) noexcept;
+
 StoredMode store_mode(const ParsedMode& parsed, bool support_fhd, bool supports_pr);
 
 StoredMode preset_fallback(bool support_fhd, bool supports_pr);

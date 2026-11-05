@@ -13,10 +13,11 @@
 #include "infra/spsc_ring.h"
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
-#include "app/activity_source.h"
 #include "app/capture_arm.h"
 #include "app/capture_hit.h"
 #include "app/raw_key_edge.h"
+#include "app/types.h"
+#include "hal/types.h"
 #include "svc/input_service.h"
 #include "svc/joy_plan.h"
 #include "infra/seat.h"
@@ -28,22 +29,22 @@ using CaptureHitCell = xthread::Telemetry<CaptureHit, SeatTag::Input>;
 
 using RumblePadsCell = xthread::Telemetry<std::uint8_t, SeatTag::Input>;
 
-class InputWire final : public IActivitySource {
+class InputWire final {
     TASTY_SEAT_MEDIATOR(Input, Any);
 
 public:
-    static constexpr std::uint32_t kGateGrabbed = 1u << 0;
-    static constexpr std::uint32_t kGateOsdVisible = 1u << 1;
+    static constexpr InputGateBits kGateGrabbed{1u << 0};
+    static constexpr InputGateBits kGateOsdVisible{1u << 1};
 
-    static constexpr std::uint32_t kGateKeysDropped = 1u << 2;
+    static constexpr InputGateBits kGateKeysDropped{1u << 2};
 
-    static constexpr std::uint32_t kReqGrabOn = 1u << 1;
-    static constexpr std::uint32_t kReqGrabApply = 1u << 2;
+    static constexpr InputRequestBits kReqGrabOn{1u << 1};
+    static constexpr InputRequestBits kReqGrabApply{1u << 2};
 
-    static constexpr std::uint32_t kReqHotplug = 1u << 4;
+    static constexpr InputRequestBits kReqHotplug{1u << 4};
 
-    static constexpr std::uint32_t kReqOsdOn = 1u << 5;
-    static constexpr std::uint32_t kReqOsdApply = 1u << 6;
+    static constexpr InputRequestBits kReqOsdOn{1u << 5};
+    static constexpr InputRequestBits kReqOsdApply{1u << 6};
 
     static constexpr std::size_t kUiKeyRingSlots = 256;
 
@@ -87,7 +88,7 @@ public:
 
     void note_key_drop(unsigned n) noexcept {
         keys_dropped_.add(n);
-        publish_gates(kGateKeysDropped, 0u);
+        publish_gates(kGateKeysDropped, {});
     }
 
     void note_key_sweep(unsigned released) noexcept {
@@ -156,25 +157,31 @@ public:
 
     const xthread::WakeFlag& edge_reset() const noexcept { return edge_reset_; }
 
-    void publish_gates(std::uint32_t set, std::uint32_t clear) noexcept {
+    void publish_gates(InputGateBits set, InputGateBits clear) noexcept {
         std::uint32_t g = gates_.load(std::memory_order_relaxed);
-        g = (g | set) & ~clear;
+        g = (g | set.v) & ~clear.v;
         gates_.store(g, std::memory_order_release);
     }
 
-    std::uint32_t gates() const noexcept { return gates_.load(std::memory_order_acquire); }
+    InputGateBits gates() const noexcept { return {gates_.load(std::memory_order_acquire)}; }
+
+    static constexpr bool has(InputGateBits word, InputGateBits bit) noexcept {
+        return (word.v & bit.v) != 0u;
+    }
+
+    bool gated(InputGateBits bit) const noexcept { return has(gates(), bit); }
 
     void note_activity() noexcept { activity_seq_.add(1u); }
 
-    std::uint32_t activity_seq() const noexcept override { return activity_seq_.get(); }
+    std::uint32_t activity_seq() const noexcept { return activity_seq_.get(); }
 
-    bool input_grabbed() const noexcept override { return (gates() & kGateGrabbed) != 0u; }
+    bool input_grabbed() const noexcept { return gated(kGateGrabbed); }
 
     void update_osd_request(bool on) noexcept {
         std::uint32_t cur = req_.load(std::memory_order_relaxed);
         std::uint32_t next = 0;
         do {
-            next = (cur & ~kReqOsdOn) | kReqOsdApply | (on ? kReqOsdOn : 0u);
+            next = (cur & ~kReqOsdOn.v) | kReqOsdApply.v | (on ? kReqOsdOn.v : 0u);
         } while (!req_.compare_exchange_weak(
             cur,
             next,
@@ -187,25 +194,31 @@ public:
         std::uint32_t cur = req_.load(std::memory_order_acquire);
         std::uint32_t next = 0;
         do {
-            if ((cur & kReqOsdApply) == 0u)
+            if ((cur & kReqOsdApply.v) == 0u)
                 return std::nullopt;
-            next = cur & ~kReqOsdApply;
+            next = cur & ~kReqOsdApply.v;
         } while (!req_.compare_exchange_weak(
             cur,
             next,
             std::memory_order_acq_rel,
             std::memory_order_acquire
         ));
-        return (cur & kReqOsdOn) != 0u;
+        return (cur & kReqOsdOn.v) != 0u;
     }
 
-    void request(std::uint32_t set) noexcept { req_.fetch_or(set, std::memory_order_release); }
+    void request(InputRequestBits set) noexcept { req_.fetch_or(set.v, std::memory_order_release); }
 
-    void clear_request(std::uint32_t clear) noexcept {
-        req_.fetch_and(~clear, std::memory_order_release);
+    void clear_request(InputRequestBits clear) noexcept {
+        req_.fetch_and(~clear.v, std::memory_order_release);
     }
 
-    std::uint32_t requests() const noexcept { return req_.load(std::memory_order_acquire); }
+    InputRequestBits requests() const noexcept { return {req_.load(std::memory_order_acquire)}; }
+
+    static constexpr bool has(InputRequestBits word, InputRequestBits bit) noexcept {
+        return (word.v & bit.v) != 0u;
+    }
+
+    bool requested(InputRequestBits bit) const noexcept { return has(requests(), bit); }
 
     bool arm_kick() noexcept { return !kick_armed_.exchange(true, std::memory_order_acq_rel); }
 
@@ -241,17 +254,14 @@ public:
 
     std::uint32_t rebuilds_done() const noexcept { return rebuilds_done_.get(); }
 
-    static constexpr std::uint16_t kButtonOsd = 1u << 0;
-    static constexpr std::uint16_t kButtonUser = 1u << 1;
-
-    void publish_buttons(std::uint16_t level) noexcept {
-        buttons_.store(level, std::memory_order_relaxed);
-        if (level != 0u)
+    void publish_buttons(hal::ButtonMask level) noexcept {
+        buttons_.store(level.v, std::memory_order_relaxed);
+        if (level.v != 0u)
             bump(button_samples_, 1u);
     }
 
-    std::uint16_t buttons() const noexcept {
-        return static_cast<std::uint16_t>(buttons_.load(std::memory_order_relaxed));
+    hal::ButtonMask buttons() const noexcept {
+        return {static_cast<std::uint16_t>(buttons_.load(std::memory_order_relaxed))};
     }
 
     std::uint32_t button_samples() const noexcept {

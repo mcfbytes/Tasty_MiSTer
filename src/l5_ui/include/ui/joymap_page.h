@@ -52,19 +52,16 @@ public:
         return PageId::JoyMap;
     }
 
-    void render(OsdRenderer& out) const override;
-    bool describe(app::PageDescription& out) const override;
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
     Transition on_tick(PageContext& ctx) override;
 
-    bool wake_every_round() const override {
+    PageFacts facts() const override {
         TASTY_SEAT_BODY(JoyMapPage);
-        return !done_;
-    }
-
-    bool allows_global_hotkeys() const override {
-        TASTY_SEAT_BODY(JoyMapPage);
-        return false;
+        PageFacts f{};
+        f.wake_every_round = !done_;
+        f.allows_global_hotkeys = false;
+        return f;
     }
 
     std::uint32_t refusals() const noexcept override {
@@ -93,7 +90,6 @@ private:
 
     template <class Visit>
     void for_each_row(Visit&& visit) const;
-    void render_row(OsdRenderer& out, std::uint8_t row, std::string_view text) const;
 
     std::uint16_t captured_code(std::size_t i) const noexcept;
 

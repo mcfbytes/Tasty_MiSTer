@@ -21,20 +21,20 @@ std::uint32_t key_hash(std::string_view key) noexcept {
 
 void InputService::refresh_slot_census() noexcept {
     std::uint32_t bound = 0;
-    std::uint32_t live = 0;
+    PlayerMask live{};
     for (const InputDevice& d : table_.devices) {
         if (const auto s = players_.slot_of(d.identity())) {
             ++bound;
-            live |= 1u << s->v;
+            live = live.with(*s);
         }
     }
     counters_.set_bound(bound, live);
 
     std::uint32_t ghosts = 0;
     for (std::uint8_t i = 0; i < kMaxPlayers; ++i) {
-        const std::uint32_t h = key_hash(players_.key_at(i));
-        counters_.set_slot_hash(i, h);
-        if (h != 0u && (live & (1u << i)) == 0u)
+        const std::uint32_t h = key_hash(players_.key_at(PlayerIndex{i}));
+        counters_.set_slot_hash(PlayerIndex{i}, h);
+        if (h != 0u && !live.has(PlayerIndex{i}))
             ++ghosts;
     }
     counters_.set_ghosts(ghosts);
@@ -54,7 +54,7 @@ void InputService::install(DeviceTable& incoming) noexcept {
         if (grabbed_ && !d.set_grabbed(true))
             counters_.note_grab_failure();
     }
-    ++devices_gen_;
+    devices_gen_ = devices_gen_.next();
     for (JoyMask& m : joy_mask_) {
         m = JoyMask{};
     }
@@ -75,12 +75,12 @@ void InputService::apply_deadzone_rules(std::span<const DeadzoneRule> rows) noex
     }
 }
 
-std::uint8_t InputService::mouse_button_level() const noexcept {
-    std::uint8_t level = 0;
+proto::MouseButtons InputService::mouse_button_level() const noexcept {
+    proto::MouseButtons level{};
     for (const InputDevice& d : table_.devices) {
         if (!d.is_mouse())
             continue;
-        level = static_cast<std::uint8_t>(level | d.report().mouse_buttons);
+        level = level.with(d.report().mouse_buttons);
     }
     return level;
 }
@@ -133,10 +133,10 @@ void InputService::maybe_assign_slot(InputDevice& dev) {
     if (!claim)
         return;
 
-    std::uint32_t live = 0;
+    PlayerMask live{};
     for (const InputDevice& d : table_.devices) {
         if (const auto s = players_.slot_of(d.identity()))
-            live |= 1u << s->v;
+            live = live.with(*s);
     }
     const auto slot = players_.first_free(live);
     if (!slot)
@@ -157,7 +157,7 @@ void InputService::recompute_joy_masks() {
         const auto slot = players_.slot_of(d.identity());
         if (!slot)
             continue;
-        joy_mask_[slot->v].v |= d.report().buttons.v;
+        joy_mask_[*slot] = joy_mask_[*slot] | d.report().buttons;
     }
 }
 
@@ -172,7 +172,7 @@ RumblePadSet InputService::rumble_pads() const noexcept {
         const auto s = players_.slot_of(d.identity());
         if (!s)
             continue;
-        out.players = static_cast<std::uint8_t>(out.players | (1u << s->v));
+        out.players = out.players.with(*s);
 
         std::uint32_t h = out.pads[s->v] != 0 ? out.pads[s->v] : 2166136261u;
         for (const char c : PlayerSlots::key_of(d.identity())) {
@@ -186,11 +186,7 @@ RumblePadSet InputService::rumble_pads() const noexcept {
     return out;
 }
 
-RumbleApply InputService::rumble(
-    PlayerIndex player,
-    std::uint16_t strong,
-    std::uint16_t weak
-) noexcept {
+RumbleApply InputService::rumble(PlayerIndex player, proto::user_io::RumbleMotors motors) noexcept {
     TASTY_SEAT_BODY(InputService);
     if (!cfg_rumble_)
         return RumbleApply::NoDevice;
@@ -199,9 +195,9 @@ RumbleApply InputService::rumble(
         if (!d.has_rumble() || d.is_mouse())
             continue;
         const auto s = players_.slot_of(d.identity());
-        if (!s || s->v != player.v)
+        if (!s || *s != player)
             continue;
-        if (!d.set_rumble(strong, weak)) {
+        if (!d.set_rumble(motors)) {
             out = RumbleApply::Failed;
         } else if (out == RumbleApply::NoDevice) {
             out = RumbleApply::Applied;
@@ -211,9 +207,8 @@ RumbleApply InputService::rumble(
 }
 
 JoyMask InputService::joy_mask(PlayerIndex player) const {
-    if (player.v >= kMaxPlayers)
-        return JoyMask{};
-    return joy_mask_[player.v];
+    const auto mask = joy_mask_.find(player);
+    return mask ? *mask : JoyMask{};
 }
 
 Ex<void> InputService::set_grabbed(bool on) {
@@ -235,7 +230,7 @@ Ex<void> InputService::adopt(InputDevice&& dev) {
         );
     }
     table_.devices.push_back(std::move(dev));
-    ++devices_gen_;
+    devices_gen_ = devices_gen_.next();
     return {};
 }
 

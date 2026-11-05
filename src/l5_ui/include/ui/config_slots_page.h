@@ -37,13 +37,12 @@ public:
     Mode mode() const noexcept { return mode_; }
 
     void on_enter(PageContext& ctx) override;
-    void render(OsdRenderer& out) const override;
 
-    bool describe(app::PageDescription& out) const override;
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
 
-    [[nodiscard]] std::string row_text(std::uint32_t row) const;
-    [[nodiscard]] bool row_stippled(std::uint32_t row) const noexcept;
+    [[nodiscard]] std::string row_text(proto::OsdRow row) const;
+    [[nodiscard]] bool row_stippled(proto::OsdRow row) const noexcept;
 
     MenuMask mask() const override {
         TASTY_SEAT_BODY(ConfigSlotsPage);

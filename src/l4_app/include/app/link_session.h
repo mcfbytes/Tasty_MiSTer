@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 
+#include "app/types.h"
 #include "app/file_stream_service.h"
 #include "app/core_terms.h"
 #include "infra/wake_flag.h"
@@ -45,7 +46,6 @@
 #include "app/start_in_flight.h"
 #include "app/spi_encoder.h"
 #include "proto/save_ask.h"
-#include "app/save_flush.h"
 #include "app/nvram_upload.h"
 #include "proto/osd_focus.h"
 #include "proto/session_live.h"
@@ -104,7 +104,6 @@ class LinkRxChannel;
 struct SupervisorParts;
 
 class LinkSession : private cores::CoreInitHost,
-                    private ISaveFlush,
                     private RebootAnswer::Host,
                     private CoreOptionCells::Host,
                     private proto::IOsdFocus,
@@ -302,7 +301,11 @@ public:
 
     void tick(RoundEntry entry);
 
-    void deliver(const proto::LinkOp& op, const ILinkTxReader& inbox, bool windows_closed) noexcept;
+    Delivered deliver(
+        const proto::LinkOp& op,
+        const ILinkTxReader& inbox,
+        bool windows_closed
+    ) noexcept;
 
     void reap_storage() noexcept;
 
@@ -320,9 +323,7 @@ public:
 
     [[nodiscard]] Ex<std::size_t> save_upload_now() { return nvram_.save_upload_now(save_ctx_()); }
 
-    [[nodiscard]] bool save_upload_counted() noexcept override;
-
-    [[nodiscard]] std::uint32_t core_edge_seq() const noexcept { return core_edge_seq_; }
+    [[nodiscard]] CoreEdgeSeq core_edge_seq() const noexcept { return core_edge_seq_; }
 
     [[nodiscard]] infra::OptRef<cores::Core> live_core() noexcept { return tenancy_.core(); }
 
@@ -381,6 +382,8 @@ private:
     void arm_request(const LoadRequest& req);
 
     void apply_core_(const proto::LinkOp::ApplyCore& a);
+
+    [[nodiscard]] bool names_park_(proto::BindGeneration g) const noexcept;
 
     void adopt_programmed_core_();
 
@@ -479,8 +482,8 @@ private:
 
     std::uint32_t dropped_gen_ = 0;
     std::uint32_t holds_at_drop_ = 0;
-    std::uint16_t torn_gen_ = 0;
-    std::uint16_t torn_done_ = 0;
+    proto::BindGeneration torn_gen_{};
+    proto::BindGeneration torn_done_{};
 
     void take_park_ask_() noexcept;
 
@@ -523,7 +526,7 @@ private:
 
     const CoreTerms terms_;
 
-    std::uint32_t core_edge_seq_ = 0;
+    CoreEdgeSeq core_edge_seq_{};
 
     SlotBindings slot_bindings_;
 

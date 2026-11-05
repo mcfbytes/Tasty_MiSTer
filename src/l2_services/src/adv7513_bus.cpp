@@ -16,13 +16,29 @@ namespace mister::svc::adv7513 {
 
 namespace {
 
-std::unexpected<Error> err(Errc c, std::uint16_t site, std::uint32_t detail = 0) {
+constexpr std::uint8_t wire(os::I2cAddr a) noexcept {
+    return a.v;
+}
+
+constexpr std::uint8_t wire(os::I2cReg r) noexcept {
+    return r.v;
+}
+
+constexpr bool unset(os::I2cReg r) noexcept {
+    return r == os::I2cReg{};
+}
+
+constexpr os::I2cReg reg_after(os::I2cReg base, std::size_t off) noexcept {
+    return base.plus(off);
+}
+
+std::unexpected<Error> err(Errc c, infra::ErrorSite site, std::uint32_t detail = 0) {
     return std::unexpected(Error{c, site, detail});
 }
 
 }
 
-LinuxAdapter::Slot* LinuxAdapter::find(std::uint8_t addr) noexcept {
+LinuxAdapter::Slot* LinuxAdapter::find(os::I2cAddr addr) noexcept {
     for (Slot& s : slots_) {
         if (s.dev && s.addr == addr)
             return &s;
@@ -30,7 +46,7 @@ LinuxAdapter::Slot* LinuxAdapter::find(std::uint8_t addr) noexcept {
     return nullptr;
 }
 
-Ex<std::uint8_t> LinuxAdapter::probe(unsigned bus, std::uint8_t addr) {
+Ex<std::uint8_t> LinuxAdapter::probe(unsigned bus, os::I2cAddr addr) {
     TASTY_SEAT_BODY(LinuxAdapter);
 
     auto dev = os::I2cDevice::open(bus, addr);
@@ -39,7 +55,7 @@ Ex<std::uint8_t> LinuxAdapter::probe(unsigned bus, std::uint8_t addr) {
     return dev->read_byte();
 }
 
-Ex<void> LinuxAdapter::open(unsigned bus, std::uint8_t addr) {
+Ex<void> LinuxAdapter::open(unsigned bus, os::I2cAddr addr) {
     TASTY_SEAT_BODY(LinuxAdapter);
     if (find(addr) != nullptr)
         return {};
@@ -54,22 +70,22 @@ Ex<void> LinuxAdapter::open(unsigned bus, std::uint8_t addr) {
         return {};
     }
 
-    return err(Errc::bad_format, ERR_SITE(), addr);
+    return err(Errc::bad_format, ERR_SITE(), wire(addr));
 }
 
-Ex<std::uint8_t> LinuxAdapter::read(std::uint8_t addr, std::uint8_t reg) {
+Ex<std::uint8_t> LinuxAdapter::read(os::I2cAddr addr, os::I2cReg reg) {
     TASTY_SEAT_BODY(LinuxAdapter);
     Slot* s = find(addr);
     if (s == nullptr)
-        return err(Errc::not_found, ERR_SITE(), addr);
+        return err(Errc::not_found, ERR_SITE(), wire(addr));
     return s->dev->read_reg(reg);
 }
 
-Ex<void> LinuxAdapter::write(std::uint8_t addr, std::uint8_t reg, std::uint8_t val) {
+Ex<void> LinuxAdapter::write(os::I2cAddr addr, os::I2cReg reg, std::uint8_t val) {
     TASTY_SEAT_BODY(LinuxAdapter);
     Slot* s = find(addr);
     if (s == nullptr)
-        return err(Errc::not_found, ERR_SITE(), addr);
+        return err(Errc::not_found, ERR_SITE(), wire(addr));
     return s->dev->write_reg(reg, val);
 }
 
@@ -105,7 +121,7 @@ Ex<Adv7513Bus> Adv7513Bus::attach(
     if (out.acks == 0) {
         out.presence = Presence::Absent;
         out.bus = 0xFF;
-        return err(Errc::not_found, ERR_SITE(), kMainAddr);
+        return err(Errc::not_found, ERR_SITE(), wire(kMainAddr));
     }
     if (out.acks >= 2) {
 
@@ -141,7 +157,7 @@ Ex<Adv7513Bus> Adv7513Bus::attach(
     }
 
     const struct {
-        std::uint8_t addr;
+        os::I2cAddr addr;
         bool* ack;
     } subs[3] = {
         {kEdidAddr, &out.edid_ack},
@@ -165,7 +181,7 @@ Ex<void> Adv7513Bus::write_rows(std::span<const RegWrite> rows) {
         if (!r) {
 
             ++errors_;
-            if (fail_reg_ == 0)
+            if (unset(fail_reg_))
                 fail_reg_ = w.reg;
             return err(r.error().code, ERR_SITE(), reg_errno_detail(w.reg, r.error().detail));
         }
@@ -249,7 +265,7 @@ Ex<void> Adv7513Bus::set_mode(const Modeline& m, bool direct_video_menu) {
             auto r = a_.write(kMainAddr, w.reg, w.val);
             if (!r) {
                 ++errors_;
-                if (fail_reg_ == 0)
+                if (unset(fail_reg_))
                     fail_reg_ = w.reg;
 
                 return err(r.error().code, ERR_SITE(), reg_errno_detail(w.reg, r.error().detail));
@@ -289,19 +305,18 @@ SpdPacket build_standard_spd(std::string_view core_name) {
 
 Ex<void> Adv7513Bus::set_packet(
     std::uint8_t mask,
-    std::uint8_t offset,
-    const std::uint8_t* data,
-    std::size_t n
+    os::I2cReg first_reg,
+    std::optional<std::span<const std::uint8_t>> payload
 ) {
 
-    if (data != nullptr && (n == 0 || n > kPacketUpdateOff)) {
-        return err(Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(n));
+    if (payload && (payload->empty() || payload->size() > wire(kPacketUpdateOff))) {
+        return err(Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(payload->size()));
     }
 
     auto cur = a_.read(kMainAddr, kRegPacketEnable);
     if (!cur) {
         ++errors_;
-        if (spd_fail_reg_ == 0)
+        if (unset(spd_fail_reg_))
             spd_fail_reg_ = kRegPacketEnable;
         return err(
             cur.error().code,
@@ -309,12 +324,12 @@ Ex<void> Adv7513Bus::set_packet(
             reg_errno_detail(kRegPacketEnable, cur.error().detail)
         );
     }
-    const std::uint8_t want = data != nullptr
+    const std::uint8_t want = payload
         ? static_cast<std::uint8_t>(*cur | mask)
         : static_cast<std::uint8_t>(*cur & static_cast<std::uint8_t>(~mask));
     if (auto w = a_.write(kMainAddr, kRegPacketEnable, want); !w) {
         ++errors_;
-        if (spd_fail_reg_ == 0)
+        if (unset(spd_fail_reg_))
             spd_fail_reg_ = kRegPacketEnable;
         return err(
             w.error().code,
@@ -324,23 +339,23 @@ Ex<void> Adv7513Bus::set_packet(
     }
     ++writes_;
 
-    if (data == nullptr)
+    if (!payload)
         return {};
 
-    const std::uint8_t upd = static_cast<std::uint8_t>(offset + kPacketUpdateOff);
+    const os::I2cReg upd = reg_after(first_reg, wire(kPacketUpdateOff));
     if (auto w = a_.write(kSpdAddr, upd, 0x80); !w) {
         ++errors_;
-        if (spd_fail_reg_ == 0)
+        if (unset(spd_fail_reg_))
             spd_fail_reg_ = upd;
         return err(w.error().code, ERR_SITE(), reg_errno_detail(upd, w.error().detail));
     }
     ++writes_;
-    for (std::size_t i = 0; i < n; ++i) {
-        const std::uint8_t reg = static_cast<std::uint8_t>(offset + i);
-        if (auto w = a_.write(kSpdAddr, reg, data[i]); !w) {
+    for (std::size_t i = 0; i < payload->size(); ++i) {
+        const os::I2cReg reg = reg_after(first_reg, i);
+        if (auto w = a_.write(kSpdAddr, reg, (*payload)[i]); !w) {
 
             ++errors_;
-            if (spd_fail_reg_ == 0)
+            if (unset(spd_fail_reg_))
                 spd_fail_reg_ = reg;
             return err(w.error().code, ERR_SITE(), reg_errno_detail(reg, w.error().detail));
         }
@@ -348,7 +363,7 @@ Ex<void> Adv7513Bus::set_packet(
     }
     if (auto w = a_.write(kSpdAddr, upd, 0x00); !w) {
         ++errors_;
-        if (spd_fail_reg_ == 0)
+        if (unset(spd_fail_reg_))
             spd_fail_reg_ = upd;
         return err(w.error().code, ERR_SITE(), reg_errno_detail(upd, w.error().detail));
     }
@@ -357,16 +372,16 @@ Ex<void> Adv7513Bus::set_packet(
 }
 
 Ex<void> Adv7513Bus::spd_config(const SpdPacket& p) {
-    return set_packet(kPacketMaskSpd, kPacketOffsetSpd, p.b.data(), p.b.size());
+    return set_packet(kPacketMaskSpd, kPacketOffsetSpd, std::span<const std::uint8_t>(p.b));
 }
 
 Ex<void> Adv7513Bus::spd_disable() {
-    return set_packet(kPacketMaskSpd, kPacketOffsetSpd, nullptr, 0);
+    return set_packet(kPacketMaskSpd, kPacketOffsetSpd, std::nullopt);
 }
 
 Ex<Adv7513Bus::Verify> Adv7513Bus::verify(const Modeline& m, bool direct_video_menu) {
     Verify v{};
-    const std::uint8_t regs[4] = {kRegPower, 0x17, 0x3B, 0x3C};
+    const os::I2cReg regs[4] = {kRegPower, os::I2cReg{0x17}, os::I2cReg{0x3B}, os::I2cReg{0x3C}};
     std::uint8_t* const out[4] = {&v.r41, &v.r17, &v.r3b, &v.r3c};
     for (int i = 0; i < 4; ++i) {
         auto r = a_.read(kMainAddr, regs[i]);

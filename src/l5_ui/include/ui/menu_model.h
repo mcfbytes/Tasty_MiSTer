@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -36,9 +37,12 @@
 #include "ui/saved_baseline.h"
 #include "ui/osd_style_preference.h"
 #include "ui/page.h"
+#include "ui/page_deadlines.h"
 #include "ui/page_stack.h"
-#include "ui/progress_page.h"
+#include "ui/sdram_latch.h"
+#include "ui/show_edge_latch.h"
 #include "ui/status_view.h"
+#include "ui/transfer_tracker.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 
@@ -66,7 +70,7 @@ public:
 
     void on_hd_mask(HdMask m, bool front_end, infra::OptRef<app::UiRequestRing> asks);
     void on_info(app::InfoId id, PageContext& ctx);
-    void on_progress(std::uint16_t cur, std::uint16_t max, PageContext& ctx);
+    void on_progress(cores::Progress progress, PageContext& ctx);
 
     void on_request_done(proto::CorrelationTag tag, std::int64_t unix_time, PageContext& ctx);
 
@@ -175,7 +179,7 @@ public:
 
     bool flat() const noexcept { return flat_; }
 
-    BuildEnv build_env(std::uint8_t page) const noexcept;
+    BuildEnv build_env(proto::SubmenuNo page) const noexcept;
 
     bool core_options_available() const;
 
@@ -241,15 +245,15 @@ public:
 
     bool repaint_pending() const noexcept { return repaint_; }
 
-    bool status_due(std::int64_t now_ns) const noexcept {
-        return binding_.front_end() && binding_.ui_capable() && now_ns >= status_due_ns_;
+    bool status_due(std::chrono::nanoseconds now) const noexcept {
+        return binding_.front_end() && binding_.ui_capable() && deadlines_.status_due(now);
     }
 
-    bool deadline_due(std::int64_t now_ns) const noexcept {
-        return status_due(now_ns) || (auto_pop_at_ns_ != 0 && now_ns >= auto_pop_at_ns_);
+    bool deadline_due(std::chrono::nanoseconds now) const noexcept {
+        return status_due(now) || deadlines_.fired(now);
     }
 
-    std::uint32_t auto_pops() const noexcept { return auto_pops_; }
+    std::uint32_t auto_pops() const noexcept { return deadlines_.auto_pops(); }
 
     void invalidate_surface() noexcept {
         invalidate_ = true;
@@ -258,13 +262,13 @@ public:
 
     std::uint32_t surface_invalidations() const noexcept { return invalidations_; }
 
-    std::uint32_t show_edges() const noexcept { return show_edges_; }
+    std::uint32_t show_edges() const noexcept { return show_latch_.edges(); }
 
     HdMask hd_mask() const noexcept { return hd_mask_; }
 
-    std::uint16_t sdram_cfg() const noexcept { return sdram_cfg_; }
+    proto::OsdMask sdram_cfg() const noexcept { return sdram_latch_.cfg(); }
 
-    std::uint32_t sdram_ask_refusals() const noexcept { return sdram_ask_refusals_; }
+    std::uint32_t sdram_ask_refusals() const noexcept { return sdram_latch_.refusals(); }
 
     std::uint32_t pump_calls() const noexcept { return pumps_; }
 
@@ -274,7 +278,7 @@ public:
 
     std::uint32_t help_rearms() const noexcept { return help_rearms_; }
 
-    std::uint32_t status_bar_paints() const noexcept { return status_paints_; }
+    std::uint32_t status_bar_paints() const noexcept { return deadlines_.status_paints(); }
 
     std::uint32_t info_refusals() const noexcept { return info_refusals_; }
 
@@ -308,8 +312,7 @@ private:
     bool push_info(PageContext& ctx, app::InfoId id);
     void place_overlay(std::unique_ptr<Page> p);
 
-    bool show_progress(PageContext& ctx, std::uint16_t cur, std::uint16_t max);
-    void take_transfer_name_(const PageContext& ctx) noexcept;
+    bool show_progress(PageContext& ctx, cores::Progress progress);
 
     std::unique_ptr<Page> make_page(PageId id, ItemId focus, PageContext& ctx);
 
@@ -343,9 +346,7 @@ private:
     bool bootcore_armed_ = false;
     HdMask hd_mask_{};
 
-    std::uint16_t sdram_cfg_ = 0;
-    std::uint32_t sdram_ask_refusals_ = 0;
-    bool sdram_reported_ = false;
+    SdramLatch sdram_latch_{};
     proto::ItemTable items_{};
     std::optional<proto::ItemProbe> pause_probe_{};
 
@@ -356,32 +357,24 @@ private:
     app::CheatStore& cheats_;
     const app::IdentityLatch& identity_;
     bool flat_ = false;
-    std::int64_t help_rearm_at_ns_ = 0;
+
+    PageDeadlines deadlines_{};
     std::uint32_t pumps_ = 0;
     std::uint32_t root_refusals_ = 0;
     std::uint32_t bootcore_cancels_ = 0;
     std::uint32_t help_rearms_ = 0;
-    std::uint32_t status_paints_ = 0;
-    std::int64_t status_due_ns_ = 0;
-
-    std::int64_t auto_pop_at_ns_ = 0;
     std::uint32_t close_refusals_ = 0;
-    std::uint32_t auto_pops_ = 0;
     bool invalidate_ = false;
     std::uint32_t invalidations_ = 0;
 
-    bool osd_was_open_ = false;
-    std::uint32_t show_edges_ = 0;
+    ShowEdgeLatch show_latch_{};
     std::uint32_t overlay_trades_ = 0;
     std::uint32_t progress_masked_ = 0;
     std::uint32_t info_refusals_ = 0;
     std::uint32_t progress_refusals_ = 0;
     std::uint32_t bt_refusals_ = 0;
 
-    bool in_transfer_ = false;
-    std::uint32_t load_asks_seen_ = 0;
-    std::uint8_t transfer_name_len_ = 0;
-    char transfer_name_[kProgressNameMax]{};
+    TransferTracker transfers_{};
 };
 
 }

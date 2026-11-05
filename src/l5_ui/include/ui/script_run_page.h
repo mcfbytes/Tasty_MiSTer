@@ -25,8 +25,8 @@ public:
     }
 
     void on_enter(PageContext&) override;
-    void render(OsdRenderer& out) const override;
-    bool describe(app::PageDescription& out) const override;
+
+    bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
 
     Transition on_tick(PageContext&) override;
@@ -34,11 +34,6 @@ public:
     MenuMask mask() const override {
         TASTY_SEAT_BODY(ScriptRunPage);
         return MenuMask{};
-    }
-
-    RowCount osd_height() const override {
-        TASTY_SEAT_BODY(ScriptRunPage);
-        return RowCount{16};
     }
 
     bool bt_pairing_active() const override;

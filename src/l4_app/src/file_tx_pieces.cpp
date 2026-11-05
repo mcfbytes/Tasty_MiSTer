@@ -16,6 +16,8 @@ std::string_view ext_of(std::string_view path) noexcept {
     return dot == std::string_view::npos ? std::string_view{} : path.substr(dot);
 }
 
+enum Refusal : std::uint32_t { kBadTotal, kBadPath, kPastEnd };
+
 }
 
 Ex<FileTxPieces> FileTxPieces::start(
@@ -27,11 +29,11 @@ Ex<FileTxPieces> FileTxPieces::start(
     const cores::TransferRow& row
 ) {
     if (file == nullptr || total == 0 || total > std::numeric_limits<std::uint32_t>::max()) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), kBadTotal});
     }
     FileTxPieces p(std::move(file), total, wire_index, std::move(loader), row);
     if (!p.path_.assign(path))
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 1});
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), kBadPath});
     return p;
 }
 
@@ -41,10 +43,10 @@ Ex<FileTxPieces> FileTxPieces::resume(
     proto::WideIoIndex wire_index,
     std::string_view path,
     std::uint64_t from,
-    std::uint32_t crc
+    svc::Crc32 crc
 ) {
     if (from > total)
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 2});
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), kPastEnd});
     auto p = start(std::move(file), total, wire_index, path);
     if (!p)
         return p;
@@ -115,7 +117,7 @@ bool FileTxPieces::stage_() {
 FileTxPieces::Pass FileTxPieces::step(
     LinkTxChannel<SeatTag::Main>& inbox,
     const FileTxLevelCell& level,
-    std::uint32_t act
+    proto::ActKey act
 ) {
     TASTY_SEAT_BODY(FileTxPieces);
     using Phase = proto::LinkOp::FileTxPhase;
@@ -157,7 +159,7 @@ FileTxPieces::Pass FileTxPieces::step(
 
     const std::uint64_t whole = n == 0 ? total_ : 0;
     const std::uint64_t offset = n == 0 ? sent_ : 0;
-    const std::uint32_t crc = last ? crc_.value_or(key_.value()) : 0;
+    const svc::Crc32 crc = last ? crc_.value_or(key_.value()) : svc::Crc32{};
     auto id = inbox.intern_file(
         std::move(*staged_),
         ext_of(path_.view()),

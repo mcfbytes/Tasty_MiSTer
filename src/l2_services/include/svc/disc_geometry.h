@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 
@@ -15,7 +16,8 @@ using proto::Lba;
 
 [[nodiscard]] std::optional<TrackIndex> track_for_lba(const Toc& toc, Lba lba) noexcept;
 
-[[nodiscard]] std::uint32_t seek_ms(Lba from_lba, Lba to_lba) noexcept;
+using SeekTime = std::chrono::duration<std::uint32_t, std::milli>;
+[[nodiscard]] SeekTime seek_time(Lba from_lba, Lba to_lba) noexcept;
 
 struct DiscGeometry {
     TASTY_SEAT_RESIDENT(RT);
@@ -29,8 +31,8 @@ struct DiscGeometry {
         return svc::track_for_lba(toc, lba);
     }
 
-    [[nodiscard]] std::uint32_t seek_ms(Lba from_lba, Lba to_lba) const noexcept {
-        return svc::seek_ms(from_lba, to_lba);
+    [[nodiscard]] SeekTime seek_time(Lba from_lba, Lba to_lba) const noexcept {
+        return svc::seek_time(from_lba, to_lba);
     }
 
     [[nodiscard]] std::uint32_t chd_hunk_bytes() const noexcept { return hunk_bytes; }

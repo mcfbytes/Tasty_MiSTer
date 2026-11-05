@@ -118,11 +118,11 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
     };
     const cores::CoreGrant grant{services, ask.manifest};
     slot.core = row ? (*row)->make(profile, grant) : cores::make_generic(profile, grant);
-    const std::uint8_t at = bay_.index_of(&slot);
+    const proto::CoreBaySlot at{bay_.index_of(&slot)};
 
     do
         ++gen_;
-    while (gen_ == 0 || gen_ == levels_.released_gen[at]);
+    while (gen_ == 0 || gen_ == infra::at_index(levels_.released_gen, at));
     slot.gen = gen_;
     ++builds_;
 
@@ -139,13 +139,15 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
 
     slot.osd_pages = slot.core && osd_ && osd_->gen == gen_ ? OsdPageRoute::Lw : OsdPageRoute::Link;
 
-    slot.lw_slots = slot.core && sector_ && sector_->gen == gen_ ? sector_->bridge_slots() : 0u;
+    slot.lw_slots = slot.core && sector_ && sector_->gen == gen_
+        ? proto::BlockSlotMask{sector_->bridge_slots()}
+        : proto::BlockSlotMask{};
 
     slot.status_route = slot.core && sys_ && sys_->gen == gen_ ? StatusRoute::Lw
                                                                : StatusRoute::Link;
 
     slot.block_poll = block_poll_route(
-        static_cast<std::uint16_t>(ask.mount_slots | profile_slot_mask(profile)),
+        ask.mount_slots.united(profile_slot_mask(profile)),
         slot.lw_slots
     );
     if (slot.block_poll == BlockPollRoute::Retired)
@@ -156,14 +158,15 @@ proto::LinkOp::AdoptCore CoreBuilder::build(const Ask& ask) {
 }
 
 void CoreBuilder::forget(const proto::LinkOp::AdoptCore& op) noexcept {
-    if (op.outcome != proto::LinkOp::Built::Core || op.slot >= held_.size())
+    const proto::CoreBaySlot at = op.slot;
+    if (op.outcome != proto::LinkOp::Built::Core || !in_bay(at))
         return;
-    if (!held_[op.slot] || held_[op.slot]->gen != op.gen)
+    if (!held_[at] || held_[at]->gen != op.gen)
         return;
 
-    if (held_[op.slot]->block_poll == BlockPollRoute::Retired)
+    if (held_[at]->block_poll == BlockPollRoute::Retired)
         --poll_retirements_;
-    free_(op.slot);
+    free_(at);
 }
 
 void CoreBuilder::reap() noexcept {
@@ -171,9 +174,9 @@ void CoreBuilder::reap() noexcept {
     if (!released_.take_if_changed(releases_, levels))
         return;
     levels_ = levels;
-    for (std::size_t i = 0; i < held_.size(); ++i) {
-        if (held_[i] && held_[i]->gen == levels.released_gen[i])
-            free_(static_cast<std::uint8_t>(i));
+    for (const proto::CoreBaySlot s : kAllBaySlots) {
+        if (held_[s] && held_[s]->gen == infra::at_index(levels.released_gen, s))
+            free_(s);
     }
 }
 
@@ -382,7 +385,7 @@ void CoreBuilder::grant_sector_(
     std::span<const proto::IrqBinding> irqs,
     std::span<const proto::AxiLwDecl> lw,
     const cores::CoreProfile& profile,
-    std::uint32_t fabric_gen
+    FabricGeneration fabric_gen
 ) noexcept {
     const infra::OptRef<const svc::ISectorProgram> program = profile.sector_program;
     if (!program || !sectors_.grant || !sectors_.route)
@@ -416,24 +419,28 @@ void CoreBuilder::grant_sector_(
 bool CoreBuilder::card_admitted(
     const cores::CoreProfile& profile,
     const proto::SectorBlockDecl::Card& card,
-    std::uint8_t block_slot
+    proto::SlotIndex block_slot
 ) noexcept {
 
     if (profile.saves_by_channel)
         return false;
-    const std::uint32_t bytes = static_cast<std::uint32_t>(card.frame_words) * 4u;
+
+    constexpr std::uint32_t kMinFrameBytes = 128;
+    constexpr proto::SlotIndex kFirstNonCardSlot{4};
+    const std::uint32_t bytes = static_cast<std::uint32_t>(card.frame_words)
+        * sizeof(std::uint32_t);
     const bool save_slot = std::ranges::any_of(profile.slots, [&](const auto& s) noexcept {
-        return s.index.v == card.slot && s.writable && s.role == cores::SlotRole::Save;
+        return s.index.block_slot() == card.slot && s.writable && s.role == cores::SlotRole::Save;
     });
     const bool both = (card.flags & proto::SectorBlockDecl::Card::kRead) != 0
         && (card.flags & proto::SectorBlockDecl::Card::kWrite) != 0;
-    const bool block = bytes >= 128u
-        && bytes <= hal::SectorBlock::kMaxFrameWords * 4u
+    const bool block = bytes >= kMinFrameBytes
+        && bytes <= hal::SectorBlock::kMaxFrameWords * sizeof(std::uint32_t)
         && (bytes & (bytes - 1u)) == 0u;
     return save_slot
         && both
         && block
-        && card.slot < 4u
+        && card.slot < kFirstNonCardSlot
         && card.slot != block_slot
         && card.extent >= bytes
         && card.extent % bytes == 0u;
@@ -501,7 +508,8 @@ Ex<LwSector> CoreBuilder::grant_sector(
         return std::unexpected(block.error());
 
     if (block->slot != program.slot()
-        || static_cast<std::uint32_t>(block->frame_words) * 4u != program.frame_bytes()) {
+        || static_cast<std::uint32_t>(block->frame_words) * sizeof(std::uint32_t)
+            != program.frame_bytes()) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), block->frame_words});
     }
 
@@ -567,7 +575,7 @@ void CoreBuilder::raise_sector() noexcept {
         if (card.image.len == 0)
             continue;
         g.cards[c] = SectorCard{
-            .slot = card.decl.slot,
+            .slot = card.decl.slot.v,
             .frame_words = card.decl.frame_words,
             .image = card.image
         };
@@ -635,13 +643,10 @@ void CoreBuilder::revoke_sector_() noexcept {
     sector_revoked_ = true;
 }
 
-std::uint16_t CoreBuilder::profile_slot_mask(const cores::CoreProfile& profile) noexcept {
-    std::uint16_t mask = 0;
-    for (const cores::FileSlot& s : profile.slots) {
-        if (s.index.v >= 16u)
-            return 0xFFFFu;
-        mask = static_cast<std::uint16_t>(mask | (1u << s.index.v));
-    }
+proto::BlockSlotMask CoreBuilder::profile_slot_mask(const cores::CoreProfile& profile) noexcept {
+    proto::BlockSlotMask mask{};
+    for (const cores::FileSlot& s : profile.slots)
+        mask = mask.with_or_all(s.index.block_slot());
     return mask;
 }
 
@@ -666,7 +671,7 @@ bool CoreBuilder::sector_leased_() const noexcept {
 void CoreBuilder::grant_osd_(
     std::span<const proto::AxiLwDecl> lw,
     const cores::CoreProfile& profile,
-    std::uint32_t fabric_gen,
+    FabricGeneration fabric_gen,
     std::uint16_t gen
 ) noexcept {
     if (!osds_.grant || !osds_.route)
@@ -779,7 +784,7 @@ bool CoreBuilder::osd_leased_() const noexcept {
 void CoreBuilder::grant_sys_(
     std::span<const proto::IrqBinding> irqs,
     std::span<const proto::AxiLwDecl> lw,
-    std::uint32_t fabric_gen,
+    FabricGeneration fabric_gen,
     std::uint16_t gen
 ) noexcept {
     if (!sys_cells_.grant || !sys_cells_.route)
@@ -1001,7 +1006,7 @@ cores::CoreWindowGrant CoreBuilder::grant_windows(
     const std::size_t n = std::min(profile.windows.size(), cores::kMaxCoreWindows);
     for (std::size_t i = 0; i < n; ++i) {
         const cores::CoreWindowDecl& row = profile.windows[i];
-        grant.names[i] = row.region.name;
+        grant.rows[i].name = row.region.name;
 
         if (row.feeds_pcm && (!terms_.feeder || into.fed_ring.has_value())) {
             ++window_refusals_;
@@ -1014,11 +1019,11 @@ cores::CoreWindowGrant CoreBuilder::grant_windows(
         }
         if (row.feeds_pcm) {
             into.fed_ring.emplace(std::move(*mem));
-            grant.windows[i] = &*terms_.feeder;
+            grant.rows[i].window = infra::OptRef<cores::ICoreWindow>{*terms_.feeder};
             continue;
         }
         into.windows[i].emplace(std::move(*mem));
-        grant.windows[i] = &*into.windows[i];
+        grant.rows[i].window = infra::OptRef<cores::ICoreWindow>{*into.windows[i]};
     }
     return grant;
 }
@@ -1029,7 +1034,7 @@ std::uint32_t CoreBuilder::leased() const noexcept {
     );
 }
 
-void CoreBuilder::free_(std::uint8_t slot) noexcept {
+void CoreBuilder::free_(proto::CoreBaySlot slot) noexcept {
     BuiltCore& b = *held_[slot];
     b.core.reset();
     for (auto& w : b.windows)
@@ -1038,7 +1043,7 @@ void CoreBuilder::free_(std::uint8_t slot) noexcept {
     b.lines = DoorbellLines{};
     b.pads.reset();
     b.osd_pages = OsdPageRoute::Link;
-    b.lw_slots = 0;
+    b.lw_slots = {};
     b.status_route = StatusRoute::Link;
     b.block_poll = BlockPollRoute::Link;
     b.gen = 0;

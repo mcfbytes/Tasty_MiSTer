@@ -61,7 +61,7 @@ public:
 
 private:
     [[nodiscard]] Ex<void> publish_(
-        std::uint32_t addr,
+        os::PhysAddr pixels,
         std::uint16_t fmt,
         std::uint32_t w,
         std::uint32_t h,

@@ -25,8 +25,8 @@ public:
     HdListPage(std::unique_ptr<IHdPlan> plan, ItemId key, HdFocusMemory& memory);
 
     PageId id() const override;
-    void render(OsdRenderer& out) const override;
-    bool describe(app::PageDescription& out) const override;
+
+    bool walk(PageWalk& out) const override;
 
     bool describe_hub(app::PageDescription& out) const override;
     Transition handle(const UiEvent& ev) override;
@@ -34,7 +34,7 @@ public:
 
     infra::OptRef<IMaskRebuild> mask_rebuild() override;
     void rebuild(const proto::ItemTable& table, const BuildEnv& env) override;
-    std::uint8_t page() const noexcept override;
+    proto::SubmenuNo page() const noexcept override;
 
     MenuMask mask() const override;
     void set_selection(RowIndex i) override;
@@ -45,26 +45,30 @@ public:
     [[nodiscard]] bool empty() const;
     std::uint32_t refusals() const noexcept override;
 
-    [[nodiscard]] std::uint32_t rows_dropped() const noexcept;
+    [[nodiscard]] RowCount rows_dropped() const noexcept;
 
-    static constexpr std::size_t kMaxRows = 64;
+    static constexpr RowCount kMaxRows{64};
 
 private:
     struct Slots {
-        std::size_t body = 0;
-        std::size_t pinned = 0;
-        std::size_t dropped = 0;
+        RowCount body{};
+        RowCount pinned{};
+        RowCount dropped{};
+
+        [[nodiscard]] RowCount addressed() const noexcept { return body + pinned; }
+
+        [[nodiscard]] RowIndex end() const noexcept { return row_after(addressed()); }
     };
 
     [[nodiscard]] Slots slots_() const;
-    [[nodiscard]] IHdRow& row_(const Slots& s, std::size_t slot) const;
-    [[nodiscard]] bool shown_(const Slots& s, std::size_t slot) const;
-    [[nodiscard]] bool focusable_(std::size_t slot) const;
-    [[nodiscard]] std::optional<std::size_t> first_focusable_from_(std::size_t slot) const;
-    [[nodiscard]] std::optional<std::size_t> recalled_() const;
+    [[nodiscard]] IHdRow& row_(const Slots& s, RowIndex slot) const;
+    [[nodiscard]] bool shown_(const Slots& s, RowIndex slot) const;
+    [[nodiscard]] bool focusable_(RowIndex slot) const;
+    [[nodiscard]] std::optional<RowIndex> first_focusable_from_(RowIndex slot) const;
+    [[nodiscard]] std::optional<RowIndex> recalled_() const;
 
     struct Window {
-        std::array<std::size_t, app::PageDescription::kMaxRows> slot{};
+        std::array<RowIndex, app::PageDescription::kMaxRows> slot{};
         std::uint8_t count = 0;
         std::uint8_t pinned = 0;
         std::uint16_t first = 0;

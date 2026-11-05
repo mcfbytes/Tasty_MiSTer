@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/n64_saves.h"
 
+#include <utility>
+
 namespace mister::cores::n64 {
 namespace {
 
@@ -16,11 +18,7 @@ std::string_view stem_of(std::string_view name) noexcept {
 
 }
 
-SaveChannel::SaveChannel(const svc::Vfs& vfs) noexcept
-    : io_(vfs),
-      ports_{{io_, 0}, {io_, 1}, {io_, 2}, {io_, 3}, {io_, 4}} {}
-
-static_assert(kMaxSaveRows == 5, "one port initializer per mount index");
+SaveChannel::SaveChannel(const svc::Vfs& vfs) noexcept : io_(vfs) {}
 
 Ex<void> SaveChannel::plan(
     const ISaveLayout& live,
@@ -29,7 +27,9 @@ Ex<void> SaveChannel::plan(
     std::span<const SavePartition> declared
 ) {
     clear();
-    live_ = infra::OptRef<const ISaveLayout>{live};
+
+    layout_key_ = live.layout_key(declared.size());
+    layout_set_ = true;
 
     pending_plan_ = 0;
     if (declared.empty())
@@ -51,13 +51,14 @@ Ex<void> SaveChannel::plan(
         total_ += p.length;
     }
 
-    bool ok = stock_path_.assign("saves/");
-    ok = ok && stock_path_.append(core_dir);
-    ok = ok && stock_path_.append("/");
-    ok = ok && stock_path_.append(stem_of(basename_of(image_path)));
-    ok = ok && stock_path_.append(".sav");
+    SavePath& stock = plan_.stock;
+    bool ok = stock.assign("saves/");
+    ok = ok && stock.append(core_dir);
+    ok = ok && stock.append("/");
+    ok = ok && stock.append(stem_of(basename_of(image_path)));
+    ok = ok && stock.append(".sav");
     if (!ok)
-        stock_path_.clear();
+        stock.clear();
 
     pending_plan_ = store_->partitions().size();
     return {};
@@ -67,83 +68,78 @@ void SaveChannel::clear() noexcept {
 
     for (SaveOrder& o : orders_)
         o = SaveOrder{};
-    for (std::uint32_t& d : declared_)
-        d = 0;
-    for (bool& s : byteswap_)
-        s = false;
-    for (auto& p : paths_)
-        p.clear();
-    stock_path_.clear();
+    plan_ = SavePlan{};
+    outbox_ = SaveAttach::Planned{};
     store_.reset();
-    live_ = std::nullopt;
+    layout_key_ = SaveLayoutKey{};
+    layout_set_ = false;
     total_ = 0;
     pending_plan_.reset();
 }
 
-std::optional<std::size_t> SaveChannel::claim_mount_plan() noexcept {
+std::optional<ISaveChannel::MountPlan> SaveChannel::claim_mount_plan() {
     TASTY_SEAT_BODY(SaveChannel);
-    const auto n = pending_plan_;
-    pending_plan_.reset();
-    return n;
+    const auto n = std::exchange(pending_plan_, std::nullopt);
+    if (!n)
+        return std::nullopt;
+
+    MountPlan out{};
+    for (std::size_t i = 0; i < *n && i < MountPlan::kMaxMounts; ++i) {
+        out.add(mount_at(SaveRow{static_cast<std::uint8_t>(i)}));
+    }
+    return out;
 }
 
-Ex<ISaveChannel::Mount> SaveChannel::mount_at(std::size_t i) {
+Ex<ISaveChannel::Mount> SaveChannel::mount_at(SaveRow row) {
     TASTY_SEAT_BODY(SaveChannel);
-    if (!store_.has_value() || i >= kMaxSaveRows || i >= store_->partitions().size()) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(i)});
+    const auto order = orders_.find(row);
+    if (!store_.has_value() || !order || row.v >= store_->partitions().size()) {
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), row.v});
     }
-    const SavePartition& p = store_->partitions()[i];
+    const SavePartition& p = store_->partitions()[row.v];
     auto path = store_->path_for(p.name);
     if (!path) {
         ++name_refusals_;
         return std::unexpected(path.error());
     }
-    paths_[i] = *path;
-
-    SaveOrder& b = orders_[i];
-    b.path.clear();
-    if (!b.path.assign(paths_[i].view())) {
-        ++name_refusals_;
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(i)});
-    }
-    if (p.length == 0 || p.length > blank_cap(i)) {
+    SaveOrder& o = *order;
+    o.path = *path;
+    if (p.length == 0 || p.length > create_cap(row)) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), p.length});
     }
 
-    b.stock.clear();
-    if (!b.stock.assign(stock_path_.view()))
-        b.stock.clear();
-    b.offset = p.offset;
-    b.create = p.length;
-    declared_[i] = p.length;
-    byteswap_[i] = needs_byteswap(p.suffix);
-    b.cpak = p.suffix == save_suffix(MemoryType::Cpak);
+    o.offset = p.offset;
+    o.create = p.length;
+    o.cpak = p.suffix == save_suffix(MemoryType::Cpak);
+    o.row = row;
+    plan_.rows[row] = SavePlan::Row{
+        .length = proto::FileSize{p.length},
+        .byteswap = needs_byteswap(p.suffix)
+    };
 
     Mount m{};
-    m.slot = proto::IoIndex{static_cast<std::uint8_t>(i)};
+    m.row = row;
     m.size = proto::FileSize{p.length};
-    m.path = paths_[i].view();
+    m.path = o.path.view();
     return m;
 }
 
-svc::IStorageBackend* SaveChannel::backend(std::size_t i) noexcept {
+svc::IStorageBackend& SaveChannel::backend() noexcept {
     TASTY_SEAT_BODY(SaveChannel);
-    if (i >= kMaxSaveRows)
-        return nullptr;
-    return &ports_[i];
+
+    return io_;
 }
 
-std::span<const std::byte> SaveChannel::order(std::size_t i) noexcept {
+std::span<const std::byte> SaveChannel::compose_order(SaveRow row, OrderPart part) noexcept {
     TASTY_SEAT_BODY(SaveChannel);
-    if (i >= kMaxSaveRows)
+    const auto order = orders_.find(row);
+    if (!order)
         return {};
-
-    SaveOrder& o = orders_[i];
-    for (std::size_t r = 0; r < kMaxSaveRows; ++r) {
-        o.declared[r] = declared_[r];
-        o.byteswap[r] = byteswap_[r];
-    }
-    return std::as_bytes(std::span(&o, 1));
+    if (part == OrderPart::RowOnly)
+        return std::as_bytes(std::span(&*order, 1));
+    outbox_.order = *order;
+    outbox_.plan = plan_;
+    return std::as_bytes(std::span(&outbox_, 1));
 }
 
 proto::SlotAttributes SaveChannel::attributes(proto::SlotIndex) const {
@@ -156,20 +152,28 @@ proto::SlotAttributes SaveChannel::attributes(proto::SlotIndex) const {
 }
 
 std::uint64_t SaveChannel::channel_bytes() const noexcept {
-    if (!live_ || !store_.has_value())
+    if (!layout_set_ || !store_.has_value())
         return total_;
-    const SaveLayout live = expand_save_layout(live_->layout_key(store_->partitions().size()));
+    const SaveLayout live = expand_save_layout(layout_key_);
     if (!live.valid)
         return total_;
-    const std::size_t last = live.count - 1u;
-    return static_cast<std::uint64_t>(live.offset[last]) + live.length[last];
+    const RowExtent last = live.last().value_or(RowExtent{});
+    return static_cast<std::uint64_t>(last.offset) + last.length;
 }
 
-std::uint8_t SaveChannel::request_tag(proto::SlotIndex) const noexcept {
+proto::ImageTag SaveChannel::request_tag(proto::SlotIndex) const noexcept {
     TASTY_SEAT_BODY(SaveChannel);
-    if (!live_ || !store_.has_value())
-        return 0;
-    return live_->layout_key(store_->partitions().size());
+    if (!layout_set_ || !store_.has_value())
+        return {};
+    return layout_key_.to_tag();
+}
+
+void SaveChannel::note_layout(const ISaveLayout& live) noexcept {
+    TASTY_SEAT_BODY(SaveChannel);
+    if (!store_.has_value())
+        return;
+    layout_key_ = live.layout_key(store_->partitions().size());
+    layout_set_ = true;
 }
 
 void SaveChannel::note_attached(proto::SlotIndex, bool exists, proto::FileSize) noexcept {

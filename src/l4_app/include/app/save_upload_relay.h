@@ -36,9 +36,13 @@ public:
 
     static constexpr std::uint32_t kActLivenessRounds = 64;
 
-    explicit SaveUploadRelay(xthread::Polled) noexcept : chan_(xthread::Polled{}) {}
+    explicit SaveUploadRelay(hal::ISpiTransport& link, xthread::Polled) noexcept
+        : link_(link),
+          chan_(xthread::Polled{}) {}
 
-    explicit SaveUploadRelay(xthread::WakeFlag& io_wake) noexcept : chan_(io_wake) {}
+    explicit SaveUploadRelay(hal::ISpiTransport& link, xthread::WakeFlag& io_wake) noexcept
+        : link_(link),
+          chan_(io_wake) {}
 
     SaveUploadRelay(const SaveUploadRelay&) = delete;
     SaveUploadRelay& operator=(const SaveUploadRelay&) = delete;
@@ -47,7 +51,7 @@ public:
 
     [[nodiscard]] bool order(const cores::SaveImage& image, std::string_view rel) noexcept;
 
-    void service_rt(hal::ISpiTransport& link, std::uint32_t budget_words, bool fio_free) noexcept;
+    void service_rt(std::uint32_t budget_words, bool fio_free) noexcept;
 
     void forget() noexcept;
 
@@ -94,10 +98,10 @@ private:
         bool owed = false;
     };
 
-    void land_(Loan&& l, hal::ISpiTransport& link) noexcept;
+    void land_(Loan&& l) noexcept;
 
-    [[nodiscard]] bool write_(const proto::SaveAct& a, Loan& l, hal::ISpiTransport& link) noexcept;
-    void start_(hal::ISpiTransport& link) noexcept;
+    [[nodiscard]] bool write_(const proto::SaveAct& a, Loan& l) noexcept;
+    void start_() noexcept;
 
     void cut_() noexcept;
     void end_pull_() noexcept;
@@ -122,6 +126,7 @@ private:
         Ask::Head serving{};
     };
 
+    hal::ISpiTransport& link_;
     Rt rt_{};
     Io io_{};
     Chan chan_;

@@ -8,9 +8,11 @@
 
 #include "app/path_text.h"
 #include "app/types.h"
+#include "cores/types.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -29,8 +31,8 @@ struct InternedFile {
 
     static constexpr std::size_t kPieceBytes = 1024u * 1024u;
 
-    [[nodiscard]] static constexpr proto::FileId config_id(std::uint8_t slot) noexcept {
-        return proto::FileId{static_cast<std::uint16_t>(kConfigBase + slot)};
+    [[nodiscard]] static constexpr proto::FileId config_id(cores::ConfigSlot slot) noexcept {
+        return proto::FileId{static_cast<std::uint16_t>(kConfigBase + slot.v)};
     }
 
     std::span<const std::uint8_t> bytes{};
@@ -39,7 +41,7 @@ struct InternedFile {
     std::uint32_t load_addr = 0;
     std::uint64_t size_bytes = 0;
     std::uint64_t offset = 0;
-    std::uint32_t crc = 0;
+    svc::Crc32 crc{};
     proto::FileId save{};
     std::uint32_t aux = 0;
     ContentEdge edge = ContentEdge::Content;

@@ -2,6 +2,7 @@
 #include "proto/image_sink.h"
 
 #include "proto/image_bracket.h"
+#include "proto/spi_fio_queue.h"
 #include "proto/spi_image_sink.h"
 
 #include <utility>

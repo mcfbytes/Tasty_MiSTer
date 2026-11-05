@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -48,17 +49,18 @@ std::string_view field(const OptionItem::Source& in, unsigned n) {
 }
 
 std::string ext_display(std::string_view ext) {
+    constexpr std::size_t kFieldWidth = 3;
     std::string out;
     while (!ext.empty()) {
-        std::string_view g = ext.substr(0, 3);
+        std::string_view g = ext.substr(0, kFieldWidth);
         while (!g.empty() && g.back() == ' ')
             g.remove_suffix(1);
         if (!out.empty())
             out.push_back(',');
         out.append(g);
-        if (ext.size() <= 3)
+        if (ext.size() <= kFieldWidth)
             break;
-        ext.remove_prefix(3);
+        ext.remove_prefix(kFieldWidth);
     }
     return out;
 }
@@ -67,8 +69,9 @@ class SlotLabels final : public ISlotLabels {
 public:
     explicit SlotLabels(const std::vector<std::string>& v) noexcept : values_(&v) {}
 
-    bool has_label(std::uint32_t v) const noexcept override {
-        return v < values_->size() && !(*values_)[v].empty();
+    bool has_label(proto::FieldValue v) const noexcept override {
+        const std::size_t i = v.v;
+        return i < values_->size() && !(*values_)[i].empty();
     }
 
 private:
@@ -85,10 +88,6 @@ app::PageDescription::Row described(app::PageDescription::RowKind kind, std::str
     row.kind = kind;
     (void)row.label.assign(label);
     return row;
-}
-
-[[noreturn]] void never_drawn(const char* what) {
-    fatal(Error{Errc::negotiation, ERR_SITE(), 0}, what);
 }
 
 OptionItem::Carry plain_label(OptionItem& it, const OptionItem::Source& in) {
@@ -195,11 +194,13 @@ std::string OptionItem::compose(const Look& look) const {
     return on_compose(look);
 }
 
-app::PageDescription::Row OptionItem::describe(const Look& look) const {
+std::optional<app::PageDescription::Row> OptionItem::describe(const Look& look) const {
     TASTY_SEAT_BODY(OptionItem);
-    app::PageDescription::Row row = on_describe(look);
-    row.enabled = !disabled;
-    row.selected = false;
+    std::optional<app::PageDescription::Row> row = on_describe(look);
+    if (!row)
+        return std::nullopt;
+    row->enabled = !disabled;
+    row->selected = false;
     return row;
 }
 
@@ -210,8 +211,8 @@ Transition OptionItem::activate(const Press& press, IOptionHost& host) const {
 
 OptionItem::Carry PageItem::on_build(const Source& in, const BuildEnv&) {
 
-    const std::uint8_t n = source_item(in).declared_page;
-    target_page = (n >= 1 && n <= 9) ? n : std::uint8_t{0};
+    const std::uint8_t n = source_item(in).declared_page.v;
+    target_page = proto::SubmenuNo{(n >= 1 && n <= 9) ? n : std::uint8_t{0}};
     return plain_label(*this, in);
 }
 
@@ -233,17 +234,17 @@ std::string PageItem::on_compose(const Look& look) const {
     return s;
 }
 
-app::PageDescription::Row PageItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> PageItem::on_describe(const Look&) const {
     return described(app::PageDescription::RowKind::Submenu, label);
 }
 
 Transition PageItem::on_activate(const Press& press, IOptionHost& host) const {
     if (!press.select)
         return Transition{};
-    if (target_page == 0)
+    if (target_page == proto::kRootSubmenu)
         return refused(host);
 
-    return Transition{Transition::Kind::Push, PageId::CoreOptions, ItemId{target_page}};
+    return Transition{Transition::Kind::Push, PageId::CoreOptions, ItemId{target_page.v}};
 }
 
 OptionItem::Carry FileItem::on_build(const Source& in, const BuildEnv&) {
@@ -254,7 +255,7 @@ std::string FileItem::on_compose(const Look&) const {
     return compose_slot(*this, " Load *.");
 }
 
-app::PageDescription::Row FileItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> FileItem::on_describe(const Look&) const {
     const std::string text = compose_slot(*this, " Load *.");
     return described(app::PageDescription::RowKind::Action, std::string_view{text}.substr(1));
 }
@@ -271,7 +272,7 @@ std::string ImageItem::on_compose(const Look&) const {
     return compose_slot(*this, " Mount *.");
 }
 
-app::PageDescription::Row ImageItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> ImageItem::on_describe(const Look&) const {
     const std::string text = compose_slot(*this, " Mount *.");
     return described(app::PageDescription::RowKind::Action, std::string_view{text}.substr(1));
 }
@@ -289,7 +290,7 @@ std::string CheatsItem::on_compose(const Look&) const {
     return label.empty() ? std::string{" Cheats"} : " " + label;
 }
 
-app::PageDescription::Row CheatsItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> CheatsItem::on_describe(const Look&) const {
     return described(app::PageDescription::RowKind::Submenu, label);
 }
 
@@ -308,7 +309,7 @@ std::string ManualItem::on_compose(const Look&) const {
     return label;
 }
 
-app::PageDescription::Row ManualItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> ManualItem::on_describe(const Look&) const {
     return described(app::PageDescription::RowKind::Action, label);
 }
 
@@ -325,7 +326,7 @@ std::string DipItem::on_compose(const Look&) const {
     return label;
 }
 
-app::PageDescription::Row DipItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> DipItem::on_describe(const Look&) const {
     return described(app::PageDescription::RowKind::Submenu, label);
 }
 
@@ -343,7 +344,7 @@ std::string ToggleItem::on_compose(const Look&) const {
     return " " + label;
 }
 
-app::PageDescription::Row ToggleItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> ToggleItem::on_describe(const Look&) const {
     return described(app::PageDescription::RowKind::Action, label);
 }
 
@@ -360,7 +361,7 @@ std::string ToggleCloseItem::on_compose(const Look&) const {
     return " " + label;
 }
 
-app::PageDescription::Row ToggleCloseItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> ToggleCloseItem::on_describe(const Look&) const {
     return described(app::PageDescription::RowKind::Action, label);
 }
 
@@ -378,7 +379,7 @@ OptionItem::Carry CycleItem::on_build(const Source& in, const BuildEnv& env) {
 }
 
 std::string_view CycleItem::shown_value(const Look& look) const {
-    std::uint32_t x = look.value;
+    std::uint32_t x = look.value.v;
     if (x >= values.size() || values[x].empty())
         x = 0;
     return (x < values.size()) ? std::string_view{values[x]} : std::string_view{};
@@ -390,7 +391,7 @@ std::string CycleItem::on_compose(const Look& look) const {
     return std::string{row};
 }
 
-app::PageDescription::Row CycleItem::on_describe(const Look& look) const {
+std::optional<app::PageDescription::Row> CycleItem::on_describe(const Look& look) const {
     app::PageDescription::Row row = described(app::PageDescription::RowKind::Value, label);
     row.steps = true;
     (void)row.value.assign(shown_value(look));
@@ -401,8 +402,8 @@ Transition CycleItem::on_activate(const Press& press, IOptionHost& host) const {
     if (!bits.valid())
         return refused(host);
     const SlotLabels labels{values};
-    const std::uint32_t next = cycle_value(bits, press.value, press.minus ? -1 : +1, &labels);
-    host.write_status(bits, next & 0x00FF'FFFFu);
+    const proto::FieldValue next = cycle_value(bits, press.value, press.minus ? -1 : +1, &labels);
+    host.write_status(bits, proto::FieldValue{next.v & 0x00FF'FFFFu});
     return Transition{};
 }
 
@@ -418,7 +419,7 @@ std::string SeparatorItem::on_compose(const Look&) const {
     return " " + label;
 }
 
-app::PageDescription::Row SeparatorItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> SeparatorItem::on_describe(const Look&) const {
     return described(app::PageDescription::RowKind::Separator, {});
 }
 
@@ -440,8 +441,8 @@ std::string AddonItem::on_compose(const Look&) const {
     return {};
 }
 
-app::PageDescription::Row AddonItem::on_describe(const Look&) const {
-    never_drawn("AddonItem::on_describe");
+std::optional<app::PageDescription::Row> AddonItem::on_describe(const Look&) const {
+    return std::nullopt;
 }
 
 Transition AddonItem::on_activate(const Press&, IOptionHost& host) const {
@@ -456,8 +457,8 @@ std::string DefMraItem::on_compose(const Look&) const {
     return {};
 }
 
-app::PageDescription::Row DefMraItem::on_describe(const Look&) const {
-    never_drawn("DefMraItem::on_describe");
+std::optional<app::PageDescription::Row> DefMraItem::on_describe(const Look&) const {
+    return std::nullopt;
 }
 
 Transition DefMraItem::on_activate(const Press&, IOptionHost& host) const {
@@ -472,8 +473,8 @@ std::string JoyNamesItem::on_compose(const Look&) const {
     return {};
 }
 
-app::PageDescription::Row JoyNamesItem::on_describe(const Look&) const {
-    never_drawn("JoyNamesItem::on_describe");
+std::optional<app::PageDescription::Row> JoyNamesItem::on_describe(const Look&) const {
+    return std::nullopt;
 }
 
 Transition JoyNamesItem::on_activate(const Press&, IOptionHost& host) const {
@@ -488,8 +489,8 @@ std::string InfoItem::on_compose(const Look&) const {
     return {};
 }
 
-app::PageDescription::Row InfoItem::on_describe(const Look&) const {
-    never_drawn("InfoItem::on_describe");
+std::optional<app::PageDescription::Row> InfoItem::on_describe(const Look&) const {
+    return std::nullopt;
 }
 
 Transition InfoItem::on_activate(const Press&, IOptionHost& host) const {
@@ -504,8 +505,8 @@ std::string VersionItem::on_compose(const Look&) const {
     return {};
 }
 
-app::PageDescription::Row VersionItem::on_describe(const Look&) const {
-    never_drawn("VersionItem::on_describe");
+std::optional<app::PageDescription::Row> VersionItem::on_describe(const Look&) const {
+    return std::nullopt;
 }
 
 Transition VersionItem::on_activate(const Press&, IOptionHost& host) const {
@@ -520,8 +521,8 @@ std::string CfgVerItem::on_compose(const Look&) const {
     return {};
 }
 
-app::PageDescription::Row CfgVerItem::on_describe(const Look&) const {
-    never_drawn("CfgVerItem::on_describe");
+std::optional<app::PageDescription::Row> CfgVerItem::on_describe(const Look&) const {
+    return std::nullopt;
 }
 
 Transition CfgVerItem::on_activate(const Press&, IOptionHost& host) const {
@@ -536,8 +537,8 @@ std::string NoOsdItem::on_compose(const Look&) const {
     return {};
 }
 
-app::PageDescription::Row NoOsdItem::on_describe(const Look&) const {
-    never_drawn("NoOsdItem::on_describe");
+std::optional<app::PageDescription::Row> NoOsdItem::on_describe(const Look&) const {
+    return std::nullopt;
 }
 
 Transition NoOsdItem::on_activate(const Press&, IOptionHost& host) const {
@@ -552,8 +553,8 @@ std::string UnknownItem::on_compose(const Look&) const {
     return {};
 }
 
-app::PageDescription::Row UnknownItem::on_describe(const Look&) const {
-    never_drawn("UnknownItem::on_describe");
+std::optional<app::PageDescription::Row> UnknownItem::on_describe(const Look&) const {
+    return std::nullopt;
 }
 
 Transition UnknownItem::on_activate(const Press&, IOptionHost& host) const {
@@ -561,7 +562,7 @@ Transition UnknownItem::on_activate(const Press&, IOptionHost& host) const {
 }
 
 OptionItem::Carry ExitItem::on_build(const Source& in, const BuildEnv& env) {
-    label = (env.page == 0) ? kStdExit : kStdBack;
+    label = (env.page == proto::kRootSubmenu) ? kStdExit : kStdBack;
     return in.carry;
 }
 
@@ -569,7 +570,7 @@ std::string ExitItem::on_compose(const Look&) const {
     return label;
 }
 
-app::PageDescription::Row ExitItem::on_describe(const Look&) const {
+std::optional<app::PageDescription::Row> ExitItem::on_describe(const Look&) const {
     const std::string_view text{label};
     return described(
         app::PageDescription::RowKind::Action,

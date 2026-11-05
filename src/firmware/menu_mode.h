@@ -75,7 +75,7 @@ private:
             : launcher_{plat},
               title_{title} {}
 
-        [[nodiscard]] DeviceBlock::Front device_front() noexcept override {
+        [[nodiscard]] DeviceBlock::Parts::Frontend device_front() noexcept override {
             return launcher_.device_front(true);
         }
 

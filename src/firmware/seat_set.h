@@ -3,6 +3,8 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <span>
 #include <tuple>
 
 #include "seat_row.h"
@@ -38,21 +40,35 @@ struct SeatList {};
 
 using SeatMainList = SeatList<
     SeatRow<SeatTag::RT, app::RtMain>,
-    SeatRow<SeatTag::Frame, reactor::FrameMain>,
+    SeatRow<SeatTag::Frame, reactor::FrameMain, Presence::ConfigDependent>,
     SeatRow<SeatTag::Input, app::InputMain>,
     SeatRow<SeatTag::Pcm, app::PcmMain>,
     SeatRow<SeatTag::Prefetch, svc::PrefetchMain>,
     SeatRow<SeatTag::Diag, DiagMain>,
     SeatRow<SeatTag::Ui, UiMain>,
     SeatRow<SeatTag::Io, svc::IoMain>,
-    SeatRow<SeatTag::Capture, app::CaptureMain>,
-    SeatRow<SeatTag::Encode, app::EncodeMain>,
-    SeatRow<SeatTag::RecWrite, app::RecWriteMain>,
-    SeatRow<SeatTag::Launcher, app::LauncherMain>,
-    SeatRow<SeatTag::HdOsd, app::HdOsdMain>>;
+    SeatRow<SeatTag::Capture, app::CaptureMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::Encode, app::EncodeMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::RecWrite, app::RecWriteMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::Launcher, app::LauncherMain, Presence::ConfigDependent>,
+    SeatRow<SeatTag::HdOsd, app::HdOsdMain, Presence::ConfigDependent>>;
 
 constexpr std::size_t seat_index(SeatTag s) noexcept {
     return hal::row_index(s);
+}
+
+template <class... Rows>
+consteval std::array<Presence, kSeatTagCount> presence_table(SeatList<Rows...>) {
+    std::array<Presence, kSeatTagCount> table{};
+    ((table[static_cast<std::size_t>(Rows::seat)] = Rows::presence), ...);
+    return table;
+}
+
+inline constexpr auto kSeatPresence = presence_table(SeatMainList{});
+
+constexpr Presence presence_of(SeatTag s) noexcept {
+    const auto i = static_cast<std::size_t>(s);
+    return i < kSeatTagCount ? kSeatPresence[i] : Presence::Required;
 }
 
 template <class... Rows>
@@ -106,6 +122,71 @@ private:
 };
 
 using MainSlots = SeatSlots<SeatMainList>;
+
+struct SeatGroup {
+    std::span<const SeatTag> seats;
+};
+
+inline constexpr SeatTag kRecorderSeats[]{SeatTag::Capture, SeatTag::Encode, SeatTag::RecWrite};
+inline constexpr std::array kSeatGroups{SeatGroup{.seats = kRecorderSeats}};
+
+consteval bool every_grouped_seat_is_config_dependent() {
+    for (const SeatGroup& g : kSeatGroups) {
+        for (const SeatTag s : g.seats) {
+            if (presence_of(s) != Presence::ConfigDependent)
+                return false;
+        }
+    }
+    return true;
+}
+
+consteval bool seats_are_grouped_once_at_most() {
+    std::array<int, kSeatTagCount> seen{};
+    for (const SeatGroup& g : kSeatGroups) {
+        for (const SeatTag s : g.seats) {
+            if (++seen[static_cast<std::size_t>(s)] > 1)
+                return false;
+        }
+    }
+    return true;
+}
+
+static_assert(
+    every_grouped_seat_is_config_dependent(),
+    "a group is a configuration's all-or-none, so every member is "
+    "Presence::ConfigDependent; a Required seat cannot be opted out of"
+);
+static_assert(seats_are_grouped_once_at_most(), "a seat belongs to at most one group");
+
+enum class SeatContract : std::uint8_t { Any, Declared, EverySeat };
+
+template <class Bound>
+constexpr SeatTag first_absent_seat(Bound&& bound, SeatContract contract) noexcept {
+    if (contract == SeatContract::Any)
+        return SeatTag::Unbound;
+    const bool every = contract == SeatContract::EverySeat;
+    for (std::size_t i = 1; i < static_cast<std::size_t>(SeatTag::Main); ++i) {
+        const SeatTag s = static_cast<SeatTag>(i);
+        if (!every && (s == SeatTag::RT || presence_of(s) != Presence::Required))
+            continue;
+        if (!bound(s))
+            return s;
+    }
+    for (const SeatGroup& g : kSeatGroups) {
+        std::size_t held = 0;
+        SeatTag missing = SeatTag::Unbound;
+        for (const SeatTag s : g.seats) {
+            if (bound(s)) {
+                ++held;
+            } else if (missing == SeatTag::Unbound) {
+                missing = s;
+            }
+        }
+        if (held != 0 && held != g.seats.size())
+            return missing;
+    }
+    return SeatTag::Unbound;
+}
 
 struct DrainEdge {
     SeatTag seat;

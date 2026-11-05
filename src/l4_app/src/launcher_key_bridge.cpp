@@ -84,11 +84,11 @@ void LauncherKeyBridge::key(std::uint16_t code, bool down) noexcept {
     ++n_.keys;
 }
 
-void LauncherKeyBridge::pad(std::size_t slot, std::uint32_t level) noexcept {
+void LauncherKeyBridge::pad(std::size_t slot, proto::JoyMask level) noexcept {
     TASTY_SEAT_BODY(LauncherKeyBridge);
     if (slot >= pad_level_.size())
         return;
-    pad_level_[slot] = level;
+    pad_level_[slot] = level.v;
     if (!active_)
         return;
     const std::uint32_t any = pad_any_();
@@ -102,11 +102,11 @@ void LauncherKeyBridge::pad(std::size_t slot, std::uint32_t level) noexcept {
     }
 }
 
-void LauncherKeyBridge::reseat_pad(std::size_t slot, std::uint32_t level) noexcept {
+void LauncherKeyBridge::reseat_pad(std::size_t slot, proto::JoyMask level) noexcept {
     TASTY_SEAT_BODY(LauncherKeyBridge);
     if (slot >= pad_level_.size())
         return;
-    pad_level_[slot] = level;
+    pad_level_[slot] = level.v;
     if (!active_)
         return;
     const std::uint32_t any = pad_any_();

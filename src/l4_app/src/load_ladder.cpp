@@ -343,8 +343,8 @@ void LoadLadder::progress_(Host& h, bool edge) noexcept {
         cur = static_cast<std::uint16_t>(off_ * cores::kProgressSteps / job_.total);
     }
     h.events.push(
-        Event::ProgressUpdate{.cur = cur, .max = max},
-        Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+        Event::ProgressUpdate{.progress = {.done = cur, .total = max}},
+        Event::Head{ERR_SITE(), {}, kUncaused}
     );
 }
 

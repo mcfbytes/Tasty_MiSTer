@@ -2,6 +2,7 @@
 #pragma once
 
 #include "infra/park_fds.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
 #include "infra/seat_park.h"
@@ -15,7 +16,7 @@ namespace mister::fw {
 
 class ThreadAssembly;
 
-inline constexpr int kSupervisorWakeMs = 1000;
+inline constexpr infra::ParkTimeout kSupervisorWakeMs{1000};
 
 class ProcessMain final : public xthread::SeatMain<ProcessMain> {
     TASTY_SEAT_RESIDENT(Main);
@@ -40,7 +41,7 @@ public:
     void serve() noexcept;
     [[nodiscard]] bool idle() const noexcept;
     [[nodiscard]] bool stopping() const noexcept;
-    [[nodiscard]] int park_ms() const noexcept;
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
 
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 

@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "cores/file_slot.h"
-#include "cores/romset_alias_source.h"
+#include "cores/neogeo_alias_source.h"
 #include "infra/byte_view.h"
 #include "svc/read_bounded.h"
 #include "svc/vfs.h"

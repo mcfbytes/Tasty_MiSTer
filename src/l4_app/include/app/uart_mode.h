@@ -9,6 +9,7 @@
 
 #include "app/uart_handoff.h"
 #include "app/uart_modes.h"
+#include "cores/types.h"
 #include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/inbox.h"
@@ -102,7 +103,7 @@ struct UartPersistFiles {
     bool have_mode = false;
     bool have_speeds = false;
     std::uint32_t mode = 0;
-    std::uint32_t speeds[3] = {};
+    std::array<cores::BaudRate, 3> speeds{};
 };
 
 [[nodiscard]] UartPersist clamp_uart_modes(UartPersist p) noexcept;
@@ -143,7 +144,7 @@ public:
         std::string_view uart_token,
         std::string_view midi_token,
         const UartPersistFiles* files,
-        std::uint32_t default_baud
+        cores::BaudRate default_baud
     );
 
     void latch_usb_ser(bool present) noexcept;
@@ -151,9 +152,9 @@ public:
 
     std::span<const std::uint32_t> baud_table(BaudSpace s) const;
 
-    [[nodiscard]] Ex<void> validate_baud(UartMode m, std::uint32_t baud);
+    [[nodiscard]] Ex<void> validate_baud(UartMode m, cores::BaudRate baud);
 
-    std::uint32_t baud_for(UartMode m) const noexcept;
+    cores::BaudRate baud_for(UartMode m) const noexcept;
 
     UartMode mode() const noexcept { return rt_.mode; }
 

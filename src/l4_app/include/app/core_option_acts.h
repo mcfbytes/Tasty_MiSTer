@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "infra/opt_ref.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 class Core;
@@ -17,13 +18,13 @@ public:
 
     [[nodiscard]] virtual bool set_dip_counted(
         infra::OptRef<cores::Core> core,
-        std::uint8_t row,
-        std::uint32_t choice
+        proto::DipRowIndex row,
+        proto::DipChoice choice
     ) noexcept = 0;
     [[nodiscard]] virtual bool set_option_counted(
         infra::OptRef<cores::Core> core,
-        std::uint8_t row,
-        std::uint8_t choice
+        proto::OptionRowIndex row,
+        proto::FieldValue choice
     ) noexcept = 0;
 
 protected:

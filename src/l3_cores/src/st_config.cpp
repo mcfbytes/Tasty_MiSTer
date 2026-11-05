@@ -83,16 +83,16 @@ void StConfig::encode(
     put_u32(img, st_cfg::kSystemCtrl, system_ctrl);
     put_str(img, st_cfg::kTosImg, tos_img.view());
     put_str(img, st_cfg::kCartImg, cart);
-    put_str(img, st_cfg::kAcsiImg0, acsi_img[0].view());
-    put_str(img, st_cfg::kAcsiImg1, acsi_img[1].view());
+    put_str(img, st_cfg::kAcsiImg0, acsi_img[AcsiTarget{0}].view());
+    put_str(img, st_cfg::kAcsiImg1, acsi_img[AcsiTarget{1}].view());
     put_u32(img, st_cfg::kExtCtrl, ext_ctrl);
 }
 
 void StConfig::decode(std::span<const std::byte, st_cfg::kBytes> img) noexcept {
     system_ctrl = get_u32(img, st_cfg::kSystemCtrl);
     (void)tos_img.assign(get_str(img, st_cfg::kTosImg));
-    (void)acsi_img[0].assign(get_str(img, st_cfg::kAcsiImg0));
-    (void)acsi_img[1].assign(get_str(img, st_cfg::kAcsiImg1));
+    (void)acsi_img[AcsiTarget{0}].assign(get_str(img, st_cfg::kAcsiImg0));
+    (void)acsi_img[AcsiTarget{1}].assign(get_str(img, st_cfg::kAcsiImg1));
     ext_ctrl = get_u32(img, st_cfg::kExtCtrl);
 }
 

@@ -20,16 +20,18 @@ namespace {
     return HdRect{x0, y0, x1 - x0, y1 - y0};
 }
 
-int region_index(HdDirtyLedger::Region region) noexcept {
-    return static_cast<int>(region);
+std::size_t region_index(HdDirtyLedger::Region region) noexcept {
+    return static_cast<std::size_t>(region);
 }
 
 }
 
 void HdDirtyLedger::reset(HdRect panel, HdRect band, HdRect game) noexcept {
-    stale_[0][region_index(Region::Game)] = stale_[1][region_index(Region::Game)] = game;
-    stale_[0][region_index(Region::Panel)] = stale_[1][region_index(Region::Panel)] = panel;
-    stale_[0][region_index(Region::Band)] = stale_[1][region_index(Region::Band)] = band;
+    for (const FlipBuffer b : kFlipBuffers) {
+        stale_[b][region_index(Region::Game)] = game;
+        stale_[b][region_index(Region::Panel)] = panel;
+        stale_[b][region_index(Region::Band)] = band;
+    }
 }
 
 void HdDirtyLedger::invalidate(HdRect panel, HdRect band, HdRect game) noexcept {
@@ -39,20 +41,19 @@ void HdDirtyLedger::invalidate(HdRect panel, HdRect band, HdRect game) noexcept 
 void HdDirtyLedger::mark(Region region, HdRect dirty) noexcept {
     if (empty(dirty))
         return;
-    const int r = region_index(region);
-    stale_[0][r] = unite(stale_[0][r], dirty);
-    stale_[1][r] = unite(stale_[1][r], dirty);
+    const std::size_t r = region_index(region);
+    for (const FlipBuffer b : kFlipBuffers)
+        stale_[b][r] = unite(stale_[b][r], dirty);
 }
 
-HdRect HdDirtyLedger::peek(std::uint8_t slot, Region region) const noexcept {
-    return stale_[slot & 1u][region_index(region)];
+HdRect HdDirtyLedger::peek(FlipBuffer buffer, Region region) const noexcept {
+    return stale_[buffer][region_index(region)];
 }
 
-HdRect HdDirtyLedger::take(std::uint8_t slot, Region region) noexcept {
-    const int s = slot & 1u;
-    const int r = region_index(region);
-    const HdRect out = stale_[s][r];
-    stale_[s][r] = {};
+HdRect HdDirtyLedger::take(FlipBuffer buffer, Region region) noexcept {
+    const std::size_t r = region_index(region);
+    const HdRect out = stale_[buffer][r];
+    stale_[buffer][r] = {};
     return out;
 }
 

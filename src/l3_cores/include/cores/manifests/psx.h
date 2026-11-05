@@ -59,7 +59,7 @@ inline constexpr BlankSaveSpec kPsxBlankSave{
     .fill = std::byte{0x00},
     .header = kPsxMcdHeader,
     .regions = {},
-    .lba_bytes = 1024,
+    .lba_bytes = proto::BlockSize{1024},
 };
 
 inline constexpr svc::CuePolicy kPsxCuePolicy{
@@ -78,14 +78,14 @@ inline constexpr auto kPsxBootAssets = std::to_array<BootAsset>({
      .anchor = AssetAnchor::ImageDir,
      .dest = WideIoIndex{0xC0},
      .group = 1,
-     .exact_size = 512 * 1024},
+     .exact_size = proto::FileSize{512 * 1024}},
     {.name = "cd_bios.rom",
      .where = {},
      .optional = true,
      .anchor = AssetAnchor::ImageParentDir,
      .dest = WideIoIndex{0xC0},
      .group = 1,
-     .exact_size = 512 * 1024},
+     .exact_size = proto::FileSize{512 * 1024}},
 });
 
 inline constexpr auto kPsxSlots = std::to_array<FileSlot>({
@@ -119,7 +119,11 @@ inline constexpr StagingPolicy kPsxStaging{
 };
 
 inline constexpr auto kPsxServices = std::to_array<LinkDecoderDecl>({
-    {"psx.sector_kick", reactor::Cause::Tick, &kSectorKick<kPsx>, 0, RoundClaim::Never},
+    {"psx.sector_kick",
+     reactor::Cause::Tick,
+     &kSectorKick<kPsx>,
+     reactor::kEveryRound,
+     RoundClaim::Never},
 });
 
 inline constexpr const LinkDecoderDecl& kPsxSectorKick = kPsxServices[0];
@@ -137,6 +141,7 @@ inline constexpr CoreProfile kPsx{
     .blank_save = kPsxBlankSave,
     .staging = kPsxStaging,
     .suppress_stick_dpad = true,
+    .tasty_playable = true,
 
     .block_drain_budget = 1,
     .block_sector_floor = {.bytes = static_cast<std::uint32_t>(svc::kCdDataSize)},

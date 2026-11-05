@@ -24,29 +24,30 @@ std::optional<hal::ScalerBuffers> RecorderBlock::map_scaler_buffers(
 
 RecorderBlock::RecorderBlock(
     const BootParts& plat,
-    DeviceBlock& device,
+    const DeviceBlock::Parts& parts,
+    OpenVerdict& verdict,
     const app::ReplayStatusCell& replay_status
 )
     : copier_{
           app::FrameCopier::Wiring{
-              .clock = device.clock_,
+              .clock = parts.wires.clock,
               .delay = capture_delay_,
               .control = rec_control_,
               .status = rec_status_,
-              .demand = device.frame_demand_,
-              .frames = device.core_frames_,
+              .demand = parts.cells.frame_demand,
+              .frames = parts.cells.core_frames,
               .replay = replay_status,
               .writer = rec_write_status_,
               .avi_writer = avi_write_status_,
-              .video = device.video_pump_.geometry_cell(),
+              .video = parts.wires.video.geometry_cell(),
               .channel = raw_frames_
           },
-          map_scaler_buffers(plat.regions, device.verdict())
+          map_scaler_buffers(plat.regions, verdict)
       },
       avi_encoder_{app::AviEncoder::Wiring{
           .out = infra::OptRef<app::ChunkChannel>{chunks_},
           .raw = infra::OptRef<const app::RawFrameChannel>{raw_frames_},
-          .clock = infra::OptRef<const os::IClock>{device.clock_},
+          .clock = infra::OptRef<const os::IClock>{parts.wires.clock},
           .cpu = infra::OptRef<const os::IClock>{encode_cpu_}
       }},
       hasher_{app::FrameHasher::Wiring{
@@ -54,7 +55,7 @@ RecorderBlock::RecorderBlock(
           .out = sidecar_ring_,
           .writer_wake = rec_write_wake_,
           .status = encode_status_,
-          .clock = device.clock_,
+          .clock = parts.wires.clock,
           .video = avi_encoder_
       }},
       sidecar_writer_{app::SidecarWriter::Wiring{.in = sidecar_ring_, .status = rec_write_status_}},
@@ -64,11 +65,10 @@ RecorderBlock::RecorderBlock(
           .capture_wake = infra::OptRef<xthread::WakeFlag>{capture_wake_},
           .status = infra::OptRef<const app::RecorderStatusCell>{rec_status_},
           .writer = infra::OptRef<const app::RecWriteStatusCell>{rec_write_status_},
-          .diag = infra::OptRef<xthread::DiagLog>{device.diag_log_},
-          .identity = infra::OptRef<const app::IdentityLatch>{device.session_.identity()}
+          .diag = infra::OptRef<xthread::DiagLog>{parts.wires.diag},
+          .identity = infra::OptRef<const app::IdentityLatch>{parts.session.link.identity()}
       }} {
 
-    OpenVerdict& verdict = device.verdict();
     if (auto c = xthread::ParkFds::create(capture_wake_); !c) {
         verdict.refuse("T-CAPTURE: ParkFds::create", c.error());
     } else if (auto e = xthread::ParkFds::create(encode_wake_); !e) {

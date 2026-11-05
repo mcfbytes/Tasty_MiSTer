@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <tuple>
 
+#include "app/types.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 
@@ -18,7 +19,7 @@ struct ReplayMsg {
     enum class Kind : std::uint8_t { Arm, Input, End, kCount };
 
     struct Head {
-        std::uint16_t gen = 0;
+        ControlGeneration gen{};
     };
 
     static constexpr std::size_t kStore = 24;
@@ -31,7 +32,7 @@ struct ReplayMsg {
         static constexpr Kind kKind = Kind::Arm;
         std::uint8_t ports = 0;
         std::uint8_t rom_index = 0xFF;
-        std::uint8_t vsync_ok = 0;
+        bool vsync_ok = false;
         P0Parity p0 = P0Parity::Any;
         std::int16_t lead = 0;
         PowerOnEvent event = PowerOnEvent::LoadEnd;
@@ -44,14 +45,14 @@ struct ReplayMsg {
 
     struct Input {
         static constexpr Kind kKind = Kind::Input;
-        std::uint32_t first = 0;
-        std::uint32_t last = 0;
+        MovieFrame first{};
+        MovieFrame last{};
         std::array<std::uint32_t, kReplayPorts> mask{};
     };
 
     struct End {
         static constexpr Kind kKind = Kind::End;
-        std::uint32_t frame = 0;
+        MovieFrame frame{};
     };
 
     using Alternatives = std::tuple<Arm, Input, End>;

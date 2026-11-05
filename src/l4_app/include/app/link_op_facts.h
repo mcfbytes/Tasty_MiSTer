@@ -15,6 +15,12 @@ enum class OpTarget : std::uint8_t { Wire, Session, Transfer, Mount, Options, kC
 
 enum class Window : std::uint8_t { None, Framed, FramedLive };
 
+enum class RoundCost : std::uint8_t { Free, Payload, kCount };
+
+enum class RefusedAnswer : std::uint8_t { None, FtxLevel, PayloadEcho, kCount };
+
+enum class Pad : std::uint8_t { None, Emit, Release, kCount };
+
 using FrIds = std::array<std::string_view, 2>;
 
 struct LinkOpFacts {
@@ -22,6 +28,9 @@ struct LinkOpFacts {
     OpTarget target;
     Window window;
     FrIds fr;
+    RoundCost round = RoundCost::Free;
+    RefusedAnswer answer = RefusedAnswer::None;
+    Pad pad = Pad::None;
 };
 
 inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
@@ -29,12 +38,23 @@ inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
     {proto::LinkOp::Kind::ReleaseReset, OpTarget::Wire, Window::None, {}},
     {proto::LinkOp::Kind::WriteStatus, OpTarget::Wire, Window::FramedLive, {}},
     {proto::LinkOp::Kind::OsdFlush, OpTarget::Wire, Window::Framed, {}},
-    {proto::LinkOp::Kind::JoyEmit, OpTarget::Wire, Window::Framed, {}},
+    {proto::LinkOp::Kind::JoyEmit,
+     OpTarget::Wire,
+     Window::Framed,
+     {},
+     RoundCost::Free,
+     RefusedAnswer::None,
+     Pad::Emit},
     {proto::LinkOp::Kind::SendRtc, OpTarget::Wire, Window::Framed, {}},
     {proto::LinkOp::Kind::BlockAnswer, OpTarget::Wire, Window::Framed, {}},
     {proto::LinkOp::Kind::BindDecoders, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::BindSlot, OpTarget::Mount, Window::None, {}},
-    {proto::LinkOp::Kind::FileTx, OpTarget::Transfer, Window::Framed, {}},
+    {proto::LinkOp::Kind::FileTx,
+     OpTarget::Transfer,
+     Window::Framed,
+     {},
+     RoundCost::Payload,
+     RefusedAnswer::FtxLevel},
     {proto::LinkOp::Kind::BindFacts, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::BindConfig, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::BindUart, OpTarget::Session, Window::None, {}},
@@ -47,7 +67,13 @@ inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
     {proto::LinkOp::Kind::BindIdentity, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::BindDoorbells, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::BindJoy, OpTarget::Wire, Window::None, {}},
-    {proto::LinkOp::Kind::JoyRelease, OpTarget::Wire, Window::Framed, {}},
+    {proto::LinkOp::Kind::JoyRelease,
+     OpTarget::Wire,
+     Window::Framed,
+     {},
+     RoundCost::Free,
+     RefusedAnswer::None,
+     Pad::Release},
     {proto::LinkOp::Kind::SaveUpload, OpTarget::Wire, Window::None, {}},
     {proto::LinkOp::Kind::SaveAsk, OpTarget::Options, Window::None, {}},
     {proto::LinkOp::Kind::Ps2Frame, OpTarget::Wire, Window::Framed, {}},
@@ -55,7 +81,12 @@ inline constexpr auto kLinkOpFacts = std::to_array<LinkOpFacts>({
     {proto::LinkOp::Kind::AdoptCore, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::SessionUp, OpTarget::Session, Window::None, {}},
     {proto::LinkOp::Kind::StageMount, OpTarget::Mount, Window::None, {}},
-    {proto::LinkOp::Kind::StagePayload, OpTarget::Transfer, Window::Framed, {}},
+    {proto::LinkOp::Kind::StagePayload,
+     OpTarget::Transfer,
+     Window::Framed,
+     {},
+     RoundCost::Payload,
+     RefusedAnswer::PayloadEcho},
     {proto::LinkOp::Kind::StageReset, OpTarget::Transfer, Window::None, {}},
     {proto::LinkOp::Kind::StageDiscPayload, OpTarget::Transfer, Window::Framed, {}},
     {proto::LinkOp::Kind::StageCheats, OpTarget::Mount, Window::None, {}},
@@ -85,6 +116,21 @@ static_assert(
 [[nodiscard]] constexpr Window window_for(proto::LinkOp::Kind k) noexcept {
     const std::size_t i = infra::ordinal(k);
     return i < kLinkOpFacts.size() ? kLinkOpFacts[i].window : Window::None;
+}
+
+[[nodiscard]] constexpr RoundCost round_cost_for(proto::LinkOp::Kind k) noexcept {
+    const std::size_t i = infra::ordinal(k);
+    return i < kLinkOpFacts.size() ? kLinkOpFacts[i].round : RoundCost::Free;
+}
+
+[[nodiscard]] constexpr RefusedAnswer answer_for(proto::LinkOp::Kind k) noexcept {
+    const std::size_t i = infra::ordinal(k);
+    return i < kLinkOpFacts.size() ? kLinkOpFacts[i].answer : RefusedAnswer::None;
+}
+
+[[nodiscard]] constexpr Pad pad_for(proto::LinkOp::Kind k) noexcept {
+    const std::size_t i = infra::ordinal(k);
+    return i < kLinkOpFacts.size() ? kLinkOpFacts[i].pad : Pad::None;
 }
 
 }

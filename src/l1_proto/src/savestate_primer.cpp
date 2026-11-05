@@ -24,18 +24,18 @@ Ex<void> SavePrimer::begin(
     if (ss.size < SaveStateEngine::kHeaderBytes) {
         return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), ss.size});
     }
-    for (unsigned i = 0; i < SaveStateEngine::kSlots; ++i) {
-        auto m = env.map.map(SaveStateEngine::region_for(ss, i));
+    for (const StateSlot slot : kStateSlots) {
+        auto m = env.map.map(SaveStateEngine::region_for(ss, slot));
         if (!m) {
             end();
             return std::unexpected(m.error());
         }
-        regions_[i] = std::move(*m);
+        regions_[slot] = std::move(*m);
     }
     subdir_.assign(subdir);
     stem_ = std::move(stem);
     window_ = ss;
-    slot_ = 0;
+    slot_ = kStateSlots.front();
     loading_ = false;
     digit_ = 0;
     off_ = 0;
@@ -45,14 +45,14 @@ Ex<void> SavePrimer::begin(
 void SavePrimer::end() noexcept {
     for (auto& r : regions_)
         r.reset();
-    slot_ = SaveStateEngine::kSlots;
+    slot_.reset();
     window_ = SaveStateDecl{};
 }
 
 Ex<bool> SavePrimer::step(const Env& env) {
     if (!priming())
         return false;
-    auto& mem = *regions_[slot_];
+    auto& mem = *regions_[*slot_];
     const std::size_t len = static_cast<std::size_t>(window_.size);
     if (!loading_) {
         const std::size_t n = std::min(kStepBytes, len - off_);
@@ -62,13 +62,13 @@ Ex<bool> SavePrimer::step(const Env& env) {
         if (off_ == len) {
             loading_ = true;
             off_ = 0;
-            digit_ = slot_ + 1u;
+            digit_ = slot_->digit();
         }
         return true;
     }
     if (load_step_(env, mem)) {
         mem.store_release(SaveStateEngine::kCounterWord, SaveStateEngine::kSentinel);
-        ++slot_;
+        slot_ = slot_->next();
         loading_ = false;
         off_ = 0;
     }
@@ -83,7 +83,11 @@ bool SavePrimer::load_step_(const Env& env, hal::FpgaMemory& mem) {
         off_,
         mem.view(off_, n)
     );
-    if (!r && r.error().code == Errc::not_found && off_ == 0 && slot_ == 0 && digit_ != 0) {
+    if (!r
+        && r.error().code == Errc::not_found
+        && off_ == 0
+        && slot_ == kStateSlots.front()
+        && digit_ != 0) {
 
         digit_ = 0;
         r = env.files.read_at(SaveStateEngine::slot_file(subdir_, stem_, 0u), 0, mem.view(0, n));

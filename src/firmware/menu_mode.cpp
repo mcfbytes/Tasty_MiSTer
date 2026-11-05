@@ -77,9 +77,10 @@ MenuMode::MenuMode(int argc, char** argv) noexcept
         report("ProcessTitle::create", title_.error());
 
     boot_argv_ = {argv[0], (argc > 1) ? argv[1] : "", nullptr};
-    if (argc > 2) {
-        boot_argv_[2] = argv[2];
-        boot_argc_ = 3;
+    constexpr int kCompanionArg = 2;
+    if (argc > kCompanionArg) {
+        boot_argv_[kCompanionArg] = argv[kCompanionArg];
+        boot_argc_ = kCompanionArg + 1;
     }
 }
 
@@ -103,7 +104,8 @@ std::unique_ptr<SessionMode::Face> MenuMode::Launcher::face(
     const BootParts& plat,
     DeviceBlock& device
 ) {
-    return std::make_unique<MenuBlock>(plat, device, launcher_, title_);
+    const DeviceBlock::Parts parts = device.parts();
+    return std::make_unique<MenuBlock>(plat, parts, device.verdict(), launcher_, title_);
 }
 
 void MenuMode::Launcher::open_seat_fds(DeviceBlock& device) noexcept {

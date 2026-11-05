@@ -97,7 +97,9 @@ bool UiRound::poll_buttons(bool link_work) {
         }
         if (!but && m.last) {
 
-            last_hold_ms_ = static_cast<std::uint32_t>((now - m.pressed_at_ns) / 1'000'000);
+            last_hold_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::nanoseconds{now - m.pressed_at_ns}
+            );
         }
         if (!but && m.last && !m.consumed) {
             const std::int64_t held_ns = now - m.pressed_at_ns;
@@ -207,7 +209,7 @@ void UiRound::publish_page_record() {
     rec.button_classic = button_classic_opens_;
     rec.button_injects = button_injects_;
     rec.button_core_resets = button_core_resets_;
-    rec.last_hold_ms = last_hold_ms_;
+    rec.last_hold_ms = static_cast<std::uint32_t>(last_hold_.count());
     const app::RecentGames& rg = model_.recent_games();
     rec.recent_build_us = us_of(rg.build_ns());
     rec.recent_update_us_max = us_of(rg.update_ns_max());
@@ -238,9 +240,9 @@ app::UiRoundEdge UiRound::compose_(bool link_work) {
     if (poll_buttons(link_work))
         drained = true;
 
-    const bool deadline_due = model_.deadline_due(clock_.now().count());
+    const bool deadline_due = model_.deadline_due(clock_.now());
     const Page* top = model_.stack().top();
-    const bool page_poll = top != nullptr && top->wake_every_round();
+    const bool page_poll = top != nullptr && top->facts().wake_every_round;
 
     const bool hd_switchable = hd_ && hd_->available();
     if (hd_switchable != ctx_.sys.hd_switchable)

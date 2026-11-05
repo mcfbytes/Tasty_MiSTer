@@ -93,7 +93,7 @@ protected:
 
     [[nodiscard]] MountState mount_slot_bounded(proto::SlotIndex slot, std::string_view path);
 
-    [[nodiscard]] bool mount_outstanding() const noexcept { return mount_gen_ != 0; }
+    [[nodiscard]] bool mount_outstanding() const noexcept { return static_cast<bool>(mount_gen_); }
 
     [[nodiscard]] const MountStatus& mount_answer() const noexcept { return mount_answer_; }
 
@@ -113,7 +113,7 @@ protected:
     [[nodiscard]] bool order_set_index(WideIoIndex dest);
     [[nodiscard]] std::int64_t now_ns() const;
 
-    [[nodiscard]] std::uint32_t next_gen() noexcept { return host_.next_generation(); }
+    [[nodiscard]] proto::ActKey next_gen() noexcept { return host_.next_generation(); }
 
     const CoreProfile& profile_;
     const svc::Vfs& vfs_;
@@ -147,8 +147,8 @@ private:
     bool core_start_ = false;
     bool index0_taken_ = false;
     bool cheats_ordered_ = false;
-    std::uint32_t mount_gen_ = 0;
-    std::uint32_t save_gen_ = 0;
+    proto::ActKey mount_gen_{};
+    proto::ActKey save_gen_{};
     std::uint64_t save_size_ = 0;
     bool save_exists_ = false;
     MountStatus mount_answer_{};

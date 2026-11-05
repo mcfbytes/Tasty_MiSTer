@@ -18,7 +18,7 @@ PsxSectorMap::Answer PsxSectorMap::classify(std::int64_t lba) const noexcept {
 
         if (next.pregap_declared
             && lba > static_cast<std::int64_t>(next.start.v)
-                    - static_cast<std::int64_t>(next.pregap)) {
+                    - static_cast<std::int64_t>(next.pregap.v)) {
             return Answer::Pregap;
         }
     }

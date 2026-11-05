@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <bit>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -46,18 +47,21 @@ namespace mister::fw {
 
 namespace {
 
+constexpr std::chrono::nanoseconds kOneSecond{std::chrono::seconds{1}};
+constexpr std::chrono::nanoseconds kOneMilli{std::chrono::milliseconds{1}};
+
 long sys_gettid() noexcept {
     return static_cast<long>(::syscall(SYS_gettid));
 }
 
-std::unexpected<Error> os_error(std::uint16_t site, int err) {
+std::unexpected<Error> os_error(infra::ErrorSite site, int err) {
     return std::unexpected(Error{Errc::os, site, static_cast<std::uint32_t>(err)});
 }
 
-void sleep_ns(long ns) noexcept {
+void sleep_one_milli() noexcept {
     timespec ts{};
     ts.tv_sec = 0;
-    ts.tv_nsec = ns;
+    ts.tv_nsec = kOneMilli.count();
     int rc = 0;
     do {
         rc = ::clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &ts);
@@ -75,9 +79,10 @@ void sleep_ns(long ns) noexcept {
 [[nodiscard]] std::optional<std::uint64_t> parse_u64(const char* s) noexcept {
     if (s == nullptr || *s < '0' || *s > '9')
         return std::nullopt;
+    constexpr std::uint64_t kDecimalBase = 10;
     std::uint64_t v = 0;
     while (*s >= '0' && *s <= '9') {
-        v = v * 10u + static_cast<std::uint64_t>(*s - '0');
+        v = v * kDecimalBase + static_cast<std::uint64_t>(*s - '0');
         ++s;
     }
     return v;
@@ -153,12 +158,14 @@ void confirm_current_cpu(int cpu, RtSetup& out) noexcept {
 
 template <class Ready>
 [[nodiscard]] Ex<void> await_published(Ready ready) {
-    for (int spins = 0; spins < 200'000; ++spins) {
+    constexpr int kMaxSpins = 200'000;
+    constexpr int kSleepEveryMask = 0x3FF;
+    for (int spins = 0; spins < kMaxSpins; ++spins) {
         if (ready())
             return {};
         (void)::sched_yield();
-        if ((spins & 0x3FF) == 0x3FF)
-            sleep_ns(1'000'000);
+        if ((spins & kSleepEveryMask) == kSleepEveryMask)
+            sleep_one_milli();
     }
     return std::unexpected(Error{Errc::timeout, ERR_SITE(), 0});
 }
@@ -351,6 +358,8 @@ bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     ++p;
+    constexpr int kRtPriorityField = 37;
+    constexpr int kPolicyField = 38;
     SchedInfo info{};
     int token = 0;
     while (*p != '\0') {
@@ -363,14 +372,14 @@ bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
             ++p;
         if (token == 0)
             info.state = *start;
-        if (token == 37 || token == 38) {
+        if (token == kRtPriorityField || token == kPolicyField) {
             const auto v = parse_u64(start);
             if (!v) {
                 return std::unexpected(
                     Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(token)}
                 );
             }
-            if (token == 37)
+            if (token == kRtPriorityField)
                 info.rt_priority = static_cast<int>(*v);
             else
                 info.policy = static_cast<int>(*v);
@@ -415,7 +424,8 @@ bool cpus_in_affinity_mask(const hal::ThreadMap& m) noexcept {
         if (!kb) {
             return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
         }
-        return *kb * 1024u;
+        constexpr std::uint64_t kBytesPerKb = 1024;
+        return *kb * kBytesPerKb;
     }
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 }
@@ -468,6 +478,8 @@ ThreadAssembly::ThreadAssembly(
           with_ui_cells_(diag_sources, ui),
           diag_services
       ) {
+
+    contract_ = SeatContract::Declared;
     create_mains_(events, ui_wires, ui);
 }
 
@@ -673,6 +685,18 @@ void* ThreadAssembly::trampoline(void* self) {
     return nullptr;
 }
 
+Ex<void> ThreadAssembly::check_presence_() const noexcept {
+    const SeatTag missing = first_absent_seat(
+        [this](SeatTag s) noexcept { return mains_.bound(s); },
+        contract_
+    );
+    if (missing == SeatTag::Unbound)
+        return {};
+    return std::unexpected(
+        Error{Errc::seat_absent, ERR_SITE(), static_cast<std::uint32_t>(missing)}
+    );
+}
+
 Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
 
     app::RtMain* const rt = mains_.get<app::RtMain>();
@@ -683,32 +707,27 @@ Ex<void> ThreadAssembly::spawn(RtMode mode, const SeatMains& mains) {
     mains_.bind(&*ui_main_);
     mains_.bind(rt);
 
-    if (!(mains_.bound(SeatTag::Capture)
-          && mains_.bound(SeatTag::Encode)
-          && mains_.bound(SeatTag::RecWrite))) {
-        mains_.bind(static_cast<app::CaptureMain*>(nullptr));
-        mains_.bind(static_cast<app::EncodeMain*>(nullptr));
-        mains_.bind(static_cast<app::RecWriteMain*>(nullptr));
-    }
+    if (auto present = check_presence_(); !present)
+        return present;
 
     publish_evidence_();
 
     for (const SeatTag s : std::span(kSpawnOrder).first(kSpawnOrder.size() - 1)) {
-        if (!mains_.bound(s))
-            continue;
-        const std::size_t i = seat_index(s);
-        if (auto r = spawn_seat(
-                hal::seat_of(threads_, s),
-                SeatTable::of(s).body,
-                this,
-                thread_[i],
-                mode,
-                ev_.seat_sched[i]
-            );
-            !r) {
-            return r;
+        if (mains_.bound(s)) {
+            const std::size_t i = seat_index(s);
+            if (auto r = spawn_seat(
+                    hal::seat_of(threads_, s),
+                    SeatTable::of(s).body,
+                    this,
+                    thread_[i],
+                    mode,
+                    ev_.seat_sched[i]
+                );
+                !r) {
+                return r;
+            }
+            live_[i] = true;
         }
-        live_[i] = true;
     }
 
     if (auto p = await_published([this] {
@@ -776,8 +795,8 @@ timespec deadline_from_now(std::int64_t deadline_ns) noexcept {
     timespec abs{};
     (void)::clock_gettime(CLOCK_MONOTONIC, &abs);
     const std::int64_t total = static_cast<std::int64_t>(abs.tv_nsec) + deadline_ns;
-    abs.tv_sec += static_cast<time_t>(total / 1'000'000'000);
-    abs.tv_nsec = static_cast<long>(total % 1'000'000'000);
+    abs.tv_sec += static_cast<time_t>(total / kOneSecond.count());
+    abs.tv_nsec = static_cast<long>(total % kOneSecond.count());
     return abs;
 }
 
@@ -790,7 +809,11 @@ Ex<void> ThreadAssembly::join_rt_within(std::int64_t deadline_ns) {
     const int rc = join_within(thread_[i], rt_exited_, deadline_from_now(deadline_ns));
     if (rc == ETIMEDOUT) {
         return std::unexpected(
-            Error{Errc::timeout, ERR_SITE(), static_cast<std::uint32_t>(deadline_ns / 1'000'000)}
+            Error{
+                Errc::timeout,
+                ERR_SITE(),
+                static_cast<std::uint32_t>(deadline_ns / kOneMilli.count())
+            }
         );
     }
     if (rc != 0)
@@ -806,7 +829,11 @@ Ex<void> ThreadAssembly::join_io_within(std::int64_t deadline_ns) {
     const int rc = join_within(thread_[i], io_exited_, deadline_from_now(deadline_ns));
     if (rc == ETIMEDOUT) {
         return std::unexpected(
-            Error{Errc::timeout, ERR_SITE(), static_cast<std::uint32_t>(deadline_ns / 1'000'000)}
+            Error{
+                Errc::timeout,
+                ERR_SITE(),
+                static_cast<std::uint32_t>(deadline_ns / kOneMilli.count())
+            }
         );
     }
     if (rc != 0)
@@ -818,23 +845,16 @@ Ex<void> ThreadAssembly::join_io_within(std::int64_t deadline_ns) {
 Ex<void> ThreadAssembly::stop_and_join_rt(std::int64_t deadline_ns) {
     if (!live_[seat_index(SeatTag::RT)])
         return {};
-    timespec now{};
-    (void)::clock_gettime(CLOCK_MONOTONIC, &now);
-    const std::int64_t hard = static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000
-        + now.tv_nsec
-        + deadline_ns;
+    const auto hard = std::chrono::steady_clock::now() + std::chrono::nanoseconds{deadline_ns};
     for (;;) {
 
         mains_.get<app::RtMain>()->stop();
-        (void)::clock_gettime(CLOCK_MONOTONIC, &now);
-        const std::int64_t now_ns = static_cast<std::int64_t>(now.tv_sec) * 1'000'000'000
-            + now.tv_nsec;
-        std::int64_t rem = hard - now_ns;
-        if (rem <= 0)
+        std::chrono::nanoseconds rem = hard - std::chrono::steady_clock::now();
+        if (rem <= std::chrono::nanoseconds::zero())
             return join_rt_within(0);
-        if (rem > kRtJoinSliceNs)
-            rem = kRtJoinSliceNs;
-        if (auto r = join_rt_within(rem); r)
+        if (rem > std::chrono::nanoseconds{kRtJoinSliceNs})
+            rem = std::chrono::nanoseconds{kRtJoinSliceNs};
+        if (auto r = join_rt_within(rem.count()); r)
             return r;
         else if (r.error().code != Errc::timeout)
             return r;

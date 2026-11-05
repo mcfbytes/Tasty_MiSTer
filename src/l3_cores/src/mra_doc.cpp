@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/mra_doc.h"
 
+#include <tuple>
+#include <utility>
+
 #include "cores/stock_scan.h"
 #include "infra/ascii.h"
 #include "svc/xml_scan.h"
@@ -202,9 +205,8 @@ struct Walk {
     }
 
     void finish_dip() {
-        for (int i = 0; i < dip.num && i < static_cast<int>(kMaxDipIds); ++i) {
-            const std::size_t n = static_cast<std::size_t>(i);
-            dip.val[n] = (dip.has_val ? dip.val[n] : static_cast<std::uint64_t>(i)) << dip.start;
+        for (std::size_t n = 0; n < kMaxDipIds && std::cmp_less(n, dip.num); ++n) {
+            dip.val[n] = (dip.has_val ? dip.val[n] : DipWord{n}).shifted(dip.start);
         }
         if (d.switches.rows.size() < kMaxDipRows)
             d.switches.rows.push_back(std::move(dip));
@@ -324,8 +326,9 @@ struct Walk {
             } else if (insidesw) {
                 if (is_switches && ieq(an, "default")) {
                     const std::vector<std::uint8_t> b = hex_bytes(v);
-                    for (std::size_t k = 0; k < b.size() && k < 8; ++k) {
-                        d.switches.dip_def |= static_cast<std::uint64_t>(b[k]) << (k * 8);
+                    for (std::size_t k = 0; k < b.size() && k < std::tuple_size_v<DipWord::Bytes>;
+                         ++k) {
+                        d.switches.dip_def = d.switches.dip_def.with_byte(k, b[k]);
                     }
                 }
                 if (is_dip) {
@@ -344,11 +347,8 @@ struct Walk {
                         if (!bad) {
                             if (r.num == 1)
                                 e = b;
-                            std::uint64_t mask = 1;
-                            for (int k = 0; k < e - b; ++k)
-                                mask = (mask << 1) | 1;
                             dip.start = b;
-                            dip.mask = mask << b;
+                            dip.mask = DipWord::ones(e - b + 1).shifted(b);
                             dip.size = e - b + 1;
                         }
                     }
@@ -370,12 +370,12 @@ struct Walk {
                     }
                     if (ieq(an, "values")) {
                         std::string_view rest = v;
-                        int n = 0;
-                        while (!rest.empty() && n < static_cast<int>(kMaxDipIds)) {
+                        std::size_t n = 0;
+                        while (!rest.empty() && n < kMaxDipIds) {
                             const Scan r = scan_ul(rest, 0);
                             if (r.used == 0)
                                 break;
-                            dip.val[static_cast<std::size_t>(n)] = r.value;
+                            dip.val[n] = DipWord{r.value};
                             rest.remove_prefix(r.used);
                             while (!rest.empty() && (rest.front() == ' ' || rest.front() == ',')) {
                                 rest.remove_prefix(1);
@@ -450,7 +450,7 @@ struct Walk {
                 n.kind = RomNodeKind::FilePart;
                 n.name = partname;
                 n.zips = partzip;
-                n.crc = crc;
+                n.crc = svc::Crc32{crc};
                 n.offset = offset;
                 n.length = length;
             } else {

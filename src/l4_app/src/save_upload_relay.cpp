@@ -33,11 +33,7 @@ bool SaveUploadRelay::order(const cores::SaveImage& image, std::string_view rel)
     return true;
 }
 
-void SaveUploadRelay::service_rt(
-    hal::ISpiTransport& link,
-    std::uint32_t budget_words,
-    bool fio_free
-) noexcept {
+void SaveUploadRelay::service_rt(std::uint32_t budget_words, bool fio_free) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, A);
 
     const std::uint32_t left = budget_words - std::min(budget_words, rt_.round_words);
@@ -45,7 +41,7 @@ void SaveUploadRelay::service_rt(
     if (rt_.pull_out && may_act) {
         if (Loan l = chan_.reap()) {
             rt_.unanswered = 0;
-            land_(std::move(l), link);
+            land_(std::move(l));
         } else if (rt_.open && ++rt_.unanswered >= kActLivenessRounds) {
 
             rt_.liveness_drops.add();
@@ -59,7 +55,7 @@ void SaveUploadRelay::service_rt(
     while (Loan l = chan_.reap())
         rt_.stale.add();
     if (rt_.order.owed)
-        start_(link);
+        start_();
 }
 
 void SaveUploadRelay::forget() noexcept {
@@ -119,14 +115,14 @@ void SaveUploadRelay::end_pull_() noexcept {
     rt_.pull_out = false;
 }
 
-void SaveUploadRelay::start_(hal::ISpiTransport& link) noexcept {
+void SaveUploadRelay::start_() noexcept {
     Loan l = chan_.acquire();
     if (!l)
         return;
     do
         ++rt_.epoch;
     while (rt_.epoch == 0);
-    rt_.width = link.width();
+    rt_.width = link_.width();
     const Ask::Start s{
         .size = rt_.order.image.size,
         .index = rt_.order.image.index.v,
@@ -141,7 +137,7 @@ void SaveUploadRelay::start_(hal::ISpiTransport& link) noexcept {
     chan_.send(std::move(l));
 }
 
-void SaveUploadRelay::land_(Loan&& l, hal::ISpiTransport& link) noexcept {
+void SaveUploadRelay::land_(Loan&& l) noexcept {
     const Ask::Head h = l->ask.head;
     if (h.gen != rt_.gen || h.epoch != rt_.epoch) {
         rt_.stale.add();
@@ -162,7 +158,7 @@ void SaveUploadRelay::land_(Loan&& l, hal::ISpiTransport& link) noexcept {
         }
         return;
     }
-    if (!write_(a, l, link)) {
+    if (!write_(a, l)) {
         cut_();
         return;
     }
@@ -171,13 +167,13 @@ void SaveUploadRelay::land_(Loan&& l, hal::ISpiTransport& link) noexcept {
     chan_.send(std::move(l));
 }
 
-bool SaveUploadRelay::write_(const proto::SaveAct& a, Loan& l, hal::ISpiTransport& link) noexcept {
+bool SaveUploadRelay::write_(const proto::SaveAct& a, Loan& l) noexcept {
     const std::uint32_t words = proto::save_act_words(a, rt_.width);
     switch (a.kind) {
         case proto::SaveAct::Kind::Open: {
             if (rt_.open)
                 break;
-            auto s = proto::UploadSession::begin(link, a.index);
+            auto s = proto::UploadSession::begin(link_, a.index);
             rt_.round_words += words;
             if (!s) {
                 rt_.wire_faults.add();

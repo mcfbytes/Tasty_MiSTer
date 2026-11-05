@@ -20,6 +20,8 @@ class Block {
     TASTY_SEAT_EXEMPT(component);
 
 public:
+    enum Align : std::uint32_t { kWordAlignMask = 3 };
+
     Block() = default;
 
     Block(Block&& o) noexcept
@@ -61,7 +63,7 @@ public:
     template <Access A>
     [[nodiscard]] std::optional<Reg<A>> at(std::uint32_t byte_off) const noexcept {
         if (base_ == nullptr
-            || (byte_off & 3u) != 0u
+            || (byte_off & kWordAlignMask) != 0u
             || len_ < sizeof(std::uint32_t)
             || static_cast<std::size_t>(byte_off) > len_ - sizeof(std::uint32_t)) {
             return std::nullopt;

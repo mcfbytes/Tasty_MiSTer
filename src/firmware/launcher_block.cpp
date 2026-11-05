@@ -8,8 +8,8 @@
 
 namespace mister::fw {
 
-DeviceBlock::Front LauncherBlock::device_front(bool grants_uart) noexcept {
-    return DeviceBlock::Front{
+DeviceBlock::Parts::Frontend LauncherBlock::device_front(bool grants_uart) noexcept {
+    return DeviceBlock::Parts::Frontend{
         .launcher_demand = infra::OptRef{launcher_demand_},
         .launcher_wake = infra::OptRef<xthread::WakeFlag>{launcher_wake_},
         .launcher_state = infra::OptRef<const app::LauncherStateCell>{launcher_state_},

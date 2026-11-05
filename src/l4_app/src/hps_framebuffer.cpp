@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdio>
 
+#include "os/types.h"
 #include "svc/video_service.h"
 
 namespace mister::app {
@@ -25,7 +26,7 @@ constexpr std::uint32_t kPixelOff = 4096;
 }
 
 Ex<void> HpsFramebuffer::publish_(
-    std::uint32_t addr,
+    os::PhysAddr pixels,
     std::uint16_t fmt,
     std::uint32_t w,
     std::uint32_t h,
@@ -35,10 +36,11 @@ Ex<void> HpsFramebuffer::publish_(
     std::uint32_t vmax,
     std::uint32_t stride
 ) noexcept {
+    const auto [addr_lo, addr_hi] = pixels.low_halves();
     const std::array<std::uint16_t, 10> words{
         static_cast<std::uint16_t>(kFbEn | fmt),
-        static_cast<std::uint16_t>(addr),
-        static_cast<std::uint16_t>(addr >> 16),
+        addr_lo,
+        addr_hi,
         static_cast<std::uint16_t>(w),
         static_cast<std::uint16_t>(h),
         static_cast<std::uint16_t>(hmin),
@@ -69,28 +71,30 @@ void HpsFramebuffer::write_mode_param_(
 
 Ex<void> HpsFramebuffer::raise() noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
+    constexpr std::uint32_t kBigOutputScale = 2, kBytes8888 = 4;
+    constexpr int kName8888 = 8888;
     const std::uint32_t ow = output_.output_width();
     const std::uint32_t oh = output_.output_height();
     if (fb_.len == 0 || ow == 0 || oh == 0)
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    const std::uint32_t scale = ow * oh > kFbPixels ? 2u : 1u;
+    const std::uint32_t scale = ow * oh > kFbPixels ? kBigOutputScale : 1u;
     width_ = ow / scale;
     height_ = oh / scale;
     raised_ = true;
     viewing_ = false;
-    write_mode_param_(8888, 1, width_, height_, width_ * 4u);
+    write_mode_param_(kName8888, 1, width_, height_, width_ * kBytes8888);
     if (held_)
         return {};
     return publish_(
-        static_cast<std::uint32_t>(fb_.phys.v + kPixelOff),
-        kFmtRxB | kFmt8888,
+        os::PhysAddr{fb_.phys.v + kPixelOff},
+        static_cast<std::uint16_t>(kFmtRxB | kFmt8888),
         width_,
         height_,
         0,
         ow - 1,
         0,
         oh - 1,
-        width_ * 4u
+        width_ * kBytes8888
     );
 }
 
@@ -100,7 +104,7 @@ Ex<void> HpsFramebuffer::raise_view(const FbView& view) noexcept {
     const std::uint32_t oh = output_.output_height();
     if (fb_.len == 0 || ow == 0 || oh == 0)
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    const std::uint64_t bytes = static_cast<std::uint64_t>(view.height) * view.stride;
+    const std::uint64_t bytes = std::uint64_t{view.height} * view.stride;
     if (view.offset > fb_.len || bytes > fb_.len - view.offset)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), view.offset});
     const std::uint16_t fmt = view.format == FbView::FbFormat::Rgb565
@@ -113,7 +117,7 @@ Ex<void> HpsFramebuffer::raise_view(const FbView& view) noexcept {
     if (held_)
         return {};
     return publish_(
-        static_cast<std::uint32_t>(fb_.phys.v + view.offset),
+        os::PhysAddr{fb_.phys.v + view.offset},
         fmt,
         view.width,
         view.height,
@@ -137,6 +141,16 @@ Ex<void> HpsFramebuffer::drop() noexcept {
 
 bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
+    constexpr int kName8888 = 8888, kName1555 = 1555, kName565 = 565, kNamePal8 = 8;
+
+    constexpr int kMinDivisor = 1, kMaxDivisor = 4, kMinSide = 120;
+
+    constexpr int kDivisorFields = 3, kGeometryFields = 4;
+
+    constexpr std::size_t kCmdDigitAt = 6;
+    constexpr char kCmd2 = '2';
+    constexpr unsigned kBpp8888 = 4, kBpp16 = 2, kBpp8 = 1;
+    constexpr std::uint32_t kCentre = 2, kStrideAlignMask = 16 - 1u;
     ++fb_cmds_;
     if (!raised_ || held_ || viewing_) {
         ++refused_;
@@ -156,25 +170,27 @@ bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
     std::uint32_t vmax = oh - 1;
     bool accept = false;
     bool write_param = true;
-    if (std::sscanf(text.c_str(), "fb_cmd0 %d %d %d", &fmt, &rb, &div) == 3
-        || std::sscanf(text.c_str(), "fb_cmd2 %d %d %d", &fmt, &rb, &div) == 3) {
-        if (div >= 1 && div <= 4) {
+    if (std::sscanf(text.c_str(), "fb_cmd0 %d %d %d", &fmt, &rb, &div) == kDivisorFields
+        || std::sscanf(text.c_str(), "fb_cmd2 %d %d %d", &fmt, &rb, &div) == kDivisorFields) {
+        if (div >= kMinDivisor && div <= kMaxDivisor) {
             w = static_cast<int>(ow) / div;
             h = static_cast<int>(oh) / div;
             accept = true;
-            write_param = text.size() > 6 && text[6] != '2';
+            write_param = text.size() > kCmdDigitAt && text[kCmdDigitAt] != kCmd2;
         }
-    } else if (std::sscanf(text.c_str(), "fb_cmd1 %d %d %d %d", &fmt, &rb, &w, &h) == 4) {
-        if (w < 120 || w > static_cast<int>(ow))
+    } else if (
+        std::sscanf(text.c_str(), "fb_cmd1 %d %d %d %d", &fmt, &rb, &w, &h) == kGeometryFields
+    ) {
+        if (w < kMinSide || w > static_cast<int>(ow))
             w = static_cast<int>(ow);
-        if (h < 120 || h > static_cast<int>(oh))
+        if (h < kMinSide || h > static_cast<int>(oh))
             h = static_cast<int>(oh);
 
         int d = 1;
         while (w * (d + 1) <= static_cast<int>(ow) && h * (d + 1) <= static_cast<int>(oh))
             ++d;
-        hmin = (ow - static_cast<std::uint32_t>(w * d)) / 2u;
-        vmin = (oh - static_cast<std::uint32_t>(h * d)) / 2u;
+        hmin = (ow - static_cast<std::uint32_t>(w * d)) / kCentre;
+        vmin = (oh - static_cast<std::uint32_t>(h * d)) / kCentre;
         hmax = hmin + static_cast<std::uint32_t>(w * d) - 1u;
         vmax = vmin + static_cast<std::uint32_t>(h * d) - 1u;
         accept = true;
@@ -183,20 +199,20 @@ bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
     unsigned bpp = 0;
     if (accept) {
         switch (fmt) {
-            case 8888:
-                bpp = 4;
+            case kName8888:
+                bpp = kBpp8888;
                 sc = kFmt8888;
                 break;
-            case 1555:
-                bpp = 2;
+            case kName1555:
+                bpp = kBpp16;
                 sc = kFmt1555;
                 break;
-            case 565:
-                bpp = 2;
+            case kName565:
+                bpp = kBpp16;
                 sc = kFmt565;
                 break;
-            case 8:
-                bpp = 1;
+            case kNamePal8:
+                bpp = kBpp8;
                 sc = kFmtPal8;
                 rb = 0;
                 break;
@@ -214,20 +230,10 @@ bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
     }
     const auto uw = static_cast<std::uint32_t>(w);
     const auto uh = static_cast<std::uint32_t>(h);
-    const std::uint32_t stride = ((uw * bpp) + 15u) & ~15u;
+    const std::uint32_t stride = (uw * bpp + kStrideAlignMask) & ~kStrideAlignMask;
     width_ = uw;
     height_ = uh;
-    if (!publish_(
-            static_cast<std::uint32_t>(fb_.phys.v + kPixelOff),
-            sc,
-            uw,
-            uh,
-            hmin,
-            hmax,
-            vmin,
-            vmax,
-            stride
-        ))
+    if (!publish_(os::PhysAddr{fb_.phys.v + kPixelOff}, sc, uw, uh, hmin, hmax, vmin, vmax, stride))
         ++refused_;
     if (write_param)
         write_mode_param_(static_cast<unsigned>(fmt), static_cast<unsigned>(rb), uw, uh, stride);

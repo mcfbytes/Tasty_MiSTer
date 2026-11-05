@@ -9,6 +9,7 @@
 #include "cores/blank_region.h"
 #include "infra/byte_view.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -21,7 +22,7 @@ struct BlankSaveSpec {
 
     bool generic_ff = false;
 
-    std::uint32_t lba_bytes = 512;
+    proto::BlockSize lba_bytes{512};
 
     constexpr bool declared() const noexcept { return !header.empty() || !regions.empty(); }
 };

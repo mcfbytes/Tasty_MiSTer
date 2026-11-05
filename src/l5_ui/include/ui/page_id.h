@@ -30,7 +30,6 @@ enum class PageId : std::uint8_t {
 
     CoreOptions,
     ArcadeDip,
-    AtariCart,
 
     CoreSettings,
     ConfigSlots,
@@ -43,14 +42,6 @@ enum class PageId : std::uint8_t {
     AdvancedMapButtons,
     AdvancedMapCapture,
 
-    MinimigMain,
-    MinimigDisk,
-    MinimigChipset,
-    MinimigVideo,
-    MinimigCd32Cdtv,
-    MinimigLoadConfig,
-    MinimigSaveConfig,
-    ArchieMain,
     Mt32Pi,
 
     HdMenu,
@@ -67,8 +58,8 @@ enum class PageId : std::uint8_t {
     kCount,
 };
 static_assert(
-    static_cast<unsigned>(PageId::kCount) == 50,
-    "39 stock pages, ten pages with no stock state, and the closed sentinel. "
+    static_cast<unsigned>(PageId::kCount) == 41,
+    "30 stock pages, ten pages with no stock state, and the closed sentinel. "
     "This pins the CARDINALITY only; the map itself — every ordinal, "
     "every New home — is joined by a check."
 );

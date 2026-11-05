@@ -18,9 +18,13 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/fixed_ring.h
   infra/fixed_str.h
   infra/inbox.h
+  infra/affine.h
+  infra/indexed_array.h
+  infra/indexed_span.h
   infra/json_name.h
   infra/json_out.h
   infra/lat_hist.h
+  infra/park_timeout.h
   infra/log_lane.h
   infra/log_rec.h
   infra/log_rec_dispatch.h

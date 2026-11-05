@@ -28,24 +28,29 @@ inline constexpr auto kSaturnServices = std::to_array<LinkDecoderDecl>({
         "saturn.cmd_edge",
         reactor::Cause::Ring,
         &kCdCommandEdge<kSaturn>,
-        1,
+        std::chrono::milliseconds{1},
         RoundClaim::Always,
     },
     {
         "saturn.service_tick",
         reactor::Cause::Tick,
         &kCdServiceTick<kSaturn>,
-        1,
+        std::chrono::milliseconds{1},
         RoundClaim::Always,
     },
 });
 
 inline constexpr CdTickPeriods kSaturnTicks{
-    .idle_us = 13'333,
-    .stream_us = 13'333,
-    .caller_us = 1'000,
+    .idle = std::chrono::microseconds{13'333},
+    .stream = std::chrono::microseconds{13'333},
+    .caller = std::chrono::microseconds{1'000},
     .speeds = 3,
-    .speed_us = {16'667, 13'333, 6'667, 0},
+    .speed = {
+        std::chrono::microseconds{16'667},
+        std::chrono::microseconds{13'333},
+        std::chrono::microseconds{6'667},
+        {}
+    },
 };
 
 inline constexpr CdIoIndices kSaturnIoIndices{

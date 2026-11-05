@@ -65,16 +65,8 @@ CoreCellMirror::Changed CoreCellMirror::sync() {
     }
     if (status_reader_.take_if_changed(status_cell_, status_scratch_)) {
         ++status_reads_;
-        static_assert(
-            std::size(StatusView{}.w) == std::size(proto::StatusWord{}.words),
-            "the L5 view and the L1 cell payload are the same "
-            "eight words; a size split would drop the high bits "
-            "item exists for"
-        );
         StatusView v;
-        for (std::size_t i = 0; i < std::size(v.w); ++i) {
-            v.w[i] = status_scratch_.words[i];
-        }
+        v.status = status_scratch_;
         if (set_status_words(v))
             out.repaint = true;
     }
@@ -122,14 +114,10 @@ bool CoreCellMirror::sync_cheats_() {
 }
 
 bool CoreCellMirror::set_status_words(StatusView s) noexcept {
-    bool changed = false;
-    for (std::size_t i = 0; i < std::size(status_words_.w); ++i) {
-        if (status_words_.w[i] != s.w[i]) {
-            status_words_.w[i] = s.w[i];
-            changed = true;
-        }
-    }
-    return changed;
+    if (status_words_.status == s.status)
+        return false;
+    status_words_ = s;
+    return true;
 }
 
 }

@@ -2,6 +2,7 @@
 #include "app/frame_numbering.h"
 
 #include <algorithm>
+#include <limits>
 
 #include "frame_ctr_detail.h"
 
@@ -20,17 +21,18 @@ std::uint64_t FrameNumbering::core_frame() const noexcept {
     return static_cast<std::uint64_t>(static_cast<std::int64_t>(ext_) + anchor_off_);
 }
 
-std::int32_t FrameNumbering::movie_of(
+MovieFrame FrameNumbering::movie_of(
     const CoreFrameRecord& cell,
     std::uint64_t core
 ) const noexcept {
-    if (cell.movie_frame == -1)
-        return -1;
-    const std::int64_t m = static_cast<std::int64_t>(cell.movie_frame)
-        + (static_cast<std::int64_t>(core)
-           + cell_off_
-           - static_cast<std::int64_t>(cell.core_frame));
-    return static_cast<std::int32_t>(std::max<std::int64_t>(m, -0x7FFF'FFFF));
+    if (cell.movie_frame == kNoMovieFrame)
+        return kNoMovieFrame;
+    const WideMovieFrame m = wide_frame(cell.movie_frame)
+        + MovieSpan{
+            static_cast<std::int64_t>(core) + cell_off_ - static_cast<std::int64_t>(cell.core_frame)
+        };
+    constexpr WideMovieFrame kFloor{-std::numeric_limits<std::int32_t>::max()};
+    return std::max(m, kFloor).narrowed();
 }
 
 bool FrameNumbering::anchor(

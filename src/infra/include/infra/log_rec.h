@@ -89,7 +89,7 @@ struct LogRec {
     struct Refusal {
         static constexpr Kind kKind = Kind::Refusal;
         Errc code{};
-        std::uint16_t site = 0;
+        infra::ErrorSite site{};
     };
 
     struct RingLoss {

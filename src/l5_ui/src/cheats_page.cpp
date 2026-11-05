@@ -4,11 +4,15 @@
 #include <cstdio>
 
 #include "app/cheat_store.h"
+#include "infra/ascii.h"
 #include "app/hd_window.h"
 #include "app/page_description.h"
+#include "ui/draw_classic.h"
 #include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_context.h"
+#include "ui/page_row.h"
+#include "ui/page_walk.h"
 #include "ui/ui_event.h"
 
 namespace mister::ui {
@@ -32,13 +36,10 @@ std::string_view name_of_row(const app::CheatRow& r) noexcept {
     return r.name;
 }
 
+constexpr std::string_view kGgSuffix = ".gg";
+
 bool ends_with_gg(std::string_view s) noexcept {
-    if (s.size() < 3)
-        return false;
-    const std::string_view tail = s.substr(s.size() - 3);
-    return (tail[0] == '.')
-        && (tail[1] == 'g' || tail[1] == 'G')
-        && (tail[2] == 'g' || tail[2] == 'G');
+    return infra::iends_with(s, kGgSuffix);
 }
 
 constexpr char kOnGlyph = static_cast<char>(0x1A);
@@ -54,10 +55,11 @@ std::string cheat_row_text(const app::CheatRow& row) {
     s.push_back(' ');
     s.append(row.name);
 
-    if (s.size() > 3 && ends_with_gg(s))
-        s.resize(s.size() - 3);
-    if (s.size() > 28) {
-        s.resize(28);
+    constexpr std::size_t kRowWidth = 28;
+    if (s.size() > kGgSuffix.size() && ends_with_gg(s))
+        s.resize(s.size() - kGgSuffix.size());
+    if (s.size() > kRowWidth) {
+        s.resize(kRowWidth);
         s.push_back(kMoreGlyph);
     }
     return s;
@@ -101,53 +103,68 @@ Transition CheatsPage::on_tick(PageContext&) {
     return Transition{};
 }
 
-void CheatsPage::render(OsdRenderer& out) const {
+bool CheatsPage::walk(PageWalk& out) const {
     TASTY_SEAT_BODY(CheatsPage);
-    out.set_title(cheats_title_text(store_->loaded()));
+    (void)out.page.title.assign(cheats_title_text(store_->loaded()));
+    out.title_arrow = OsdRenderer::kArrowNone;
+    out.count = 0;
 
-    const std::uint32_t rows = osd_height().v;
+    const std::uint32_t height = osd_height().v;
     const std::uint32_t first = view_.viewport().first.v;
     const std::uint32_t sel = view_.viewport().selected.v;
     const auto count = static_cast<std::uint32_t>(rows_.size());
-    for (std::uint32_t r = 0; r < rows; ++r) {
+    const std::uint16_t total = static_cast<std::uint16_t>(count);
+    const app::HdWindow win = app::hd_window(
+        static_cast<std::uint16_t>(sel),
+        total,
+        out.page.first
+    );
+    const std::uint32_t win_first = win.first;
+    const std::uint32_t win_last = win_first + win.count;
+    out.page.first = win.first;
+    out.page.total = total;
+
+    const auto classic_at = [&](std::uint32_t r) {
         const std::uint32_t k = first + r;
         std::string s;
-        std::uint8_t leftchar = 0;
+        std::optional<Glyph> leftchar;
         if (k < count) {
             s = cheat_row_text(rows_[k]);
-
             if (r == 0 && k != 0)
-                leftchar = static_cast<std::uint8_t>(Glyph::ArrowUp);
-            if (r + 1 == rows && k + 1 < count) {
-                leftchar = static_cast<std::uint8_t>(Glyph::ArrowDown);
+                leftchar = Glyph::ArrowUp;
+            if (r + 1 == height && k + 1 < count) {
+                leftchar = Glyph::ArrowDown;
             }
         }
-        out.set_arrow(OsdRenderer::kArrowNone);
-        out.text(OsdRow{static_cast<std::uint8_t>(r)}, s, k < count && k == sel, false, leftchar);
-    }
-}
+        return classic_row(
+            OsdRow::of(r),
+            s,
+            k < count && k == sel,
+            false,
+            leftchar,
+            OsdRenderer::kArrowNone
+        );
+    };
 
-bool CheatsPage::describe(app::PageDescription& out) const {
-    TASTY_SEAT_BODY(CheatsPage);
-    const std::uint16_t hint = out.first;
-    out = {};
-    (void)out.title.assign(cheats_title_text(store_->loaded()));
-
-    const std::uint16_t total = static_cast<std::uint16_t>(rows_.size());
-    const std::uint16_t selected = static_cast<std::uint16_t>(view_.viewport().selected.v);
-    const app::HdWindow win = app::hd_window(selected, total, hint);
-    out.first = win.first;
-    out.row_count = win.count;
-    out.total = total;
     for (std::uint8_t i = 0; i < win.count; ++i) {
-        const std::uint16_t at = static_cast<std::uint16_t>(win.first + i);
-        app::PageDescription::Row& row = out.rows[i];
-        (void)row.label.assign(rows_[at].name);
-        (void)row.value.assign(rows_[at].enabled ? "On" : "Off");
-        row.kind = app::PageDescription::RowKind::Value;
-        row.steps = false;
-        row.enabled = true;
-        row.selected = at == selected;
+        const std::uint32_t at = win_first + i;
+        PageRow& r = out.rows[out.count++];
+        r.has_hd = true;
+        (void)r.hd.label.assign(rows_[at].name);
+        (void)r.hd.value.assign(rows_[at].enabled ? "On" : "Off");
+        r.hd.kind = app::PageDescription::RowKind::Value;
+        r.hd.steps = false;
+        r.hd.enabled = true;
+        r.hd.selected = at == sel;
+        if (at < first || at >= first + height)
+            continue;
+        r.classic = classic_at(at - first);
+    }
+    for (std::uint32_t r = 0; r < height; ++r) {
+        const std::uint32_t k = first + r;
+        if (k < count && k >= win_first && k < win_last)
+            continue;
+        out.rows[out.count++].classic = classic_at(r);
     }
     return true;
 }
@@ -164,29 +181,29 @@ void CheatsPage::publish_apply_() {
 
 Transition CheatsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(CheatsPage);
-    if ((ev.buttons & UiEvent::Menu) != 0) {
+    if (ev.buttons.has_any({UiEvent::Menu})) {
 
         return Transition{Transition::Kind::Pop};
     }
     view_.set_height(osd_height());
 
-    if ((ev.buttons & (UiEvent::Left | UiEvent::Back)) != 0) {
+    if (ev.buttons.has_any({UiEvent::Left | UiEvent::Back})) {
         view_.prev_page();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Right) != 0) {
+    if (ev.buttons.has_any({UiEvent::Right})) {
         view_.next_page();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Down) != 0) {
+    if (ev.buttons.has_any({UiEvent::Down})) {
         view_.next();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Up) != 0) {
+    if (ev.buttons.has_any({UiEvent::Up})) {
         view_.prev();
         return Transition{};
     }
-    if ((ev.buttons & UiEvent::Select) != 0) {
+    if (ev.buttons.has_any({UiEvent::Select})) {
         const std::size_t i = view_.viewport().selected.v;
         auto changed = store_->toggle(i);
         if (!changed) {

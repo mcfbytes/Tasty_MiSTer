@@ -3,12 +3,12 @@
 
 namespace mister::proto {
 
-Ex<void> FramePadEncoder::digital(std::uint16_t opcode, JoyMask map) {
+Ex<void> FramePadEncoder::digital(UioOp opcode, JoyMask map) {
     TASTY_SEAT_BODY(FramePadEncoder);
     if (!frame_)
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), opcode});
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), proto::word(opcode).v});
     ILinkFrame& frame = *frame_;
-    if (auto e = frame.begin(FrameSel::Uio, opcode); !e)
+    if (auto e = frame.begin(opcode); !e)
         return e;
     if (auto e = frame.word(static_cast<std::uint16_t>(map.v & 0xFFFFu)); !e)
         return e;
@@ -18,17 +18,12 @@ Ex<void> FramePadEncoder::digital(std::uint16_t opcode, JoyMask map) {
     return frame.end();
 }
 
-Ex<void> FramePadEncoder::stick(
-    std::uint16_t opcode,
-    std::uint8_t index,
-    std::uint8_t x,
-    std::uint8_t y
-) {
+Ex<void> FramePadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) {
     TASTY_SEAT_BODY(FramePadEncoder);
     if (!frame_)
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), opcode});
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), proto::word(opcode).v});
     ILinkFrame& frame = *frame_;
-    if (auto e = frame.begin(FrameSel::Uio, opcode); !e)
+    if (auto e = frame.begin(opcode); !e)
         return e;
     if (auto e = frame.word(index); !e)
         return e;
@@ -36,22 +31,22 @@ Ex<void> FramePadEncoder::stick(
     if (port_.wire().analog_word) {
 
         const auto w = static_cast<std::uint16_t>(
-            static_cast<std::uint16_t>(static_cast<std::uint16_t>(y) << 8)
-            | static_cast<std::uint16_t>(x)
+            static_cast<std::uint16_t>(static_cast<std::uint16_t>(pos.y) << 8)
+            | static_cast<std::uint16_t>(pos.x)
         );
         if (auto e = frame.word(w); !e)
             return e;
         return frame.end();
     }
 
-    if (auto e = frame.word(x); !e)
+    if (auto e = frame.word(pos.x); !e)
         return e;
-    if (auto e = frame.word(y); !e)
+    if (auto e = frame.word(pos.y); !e)
         return e;
     return frame.end();
 }
 
-std::uint32_t FramePadEncoder::link_words(std::uint16_t, bool) const noexcept {
+std::uint32_t FramePadEncoder::link_words(UioOp, bool) const noexcept {
     TASTY_SEAT_BODY(FramePadEncoder);
     return JoystickPort::kMaxDigitalPushWords;
 }

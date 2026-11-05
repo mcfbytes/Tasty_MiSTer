@@ -4,9 +4,6 @@
 #include <cstdint>
 
 #include "infra/error.h"
-#include "hal/selected.h"
-#include "hal/spi_transport.h"
-#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
@@ -21,13 +18,5 @@ struct SaveRequestWord {
 
     friend constexpr bool operator==(SaveRequestWord, SaveRequestWord) = default;
 };
-
-[[nodiscard]] inline Ex<SaveRequestWord> read_save_request(hal::ISpiTransport& link) {
-    hal::Selected cs(link, hal::ChipSelect::Io);
-    auto r = link.transfer(word(UioOp::ChkUpload));
-    if (!r)
-        return std::unexpected(r.error());
-    return SaveRequestWord{r->v};
-}
 
 }

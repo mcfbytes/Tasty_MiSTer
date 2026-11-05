@@ -49,8 +49,7 @@ HdCoreAboutPlan::HdCoreAboutPlan(const HdPlanInputs& in) {
                 lines_.push_back(Line{std::string(text), {}});
         }
     }
-    if (lines_.size() > HdListPage::kMaxRows)
-        lines_.resize(HdListPage::kMaxRows);
+    HdListPage::kMaxRows.clip(lines_);
 
     rows_.reserve(lines_.size());
     for (const Line& l : lines_) {

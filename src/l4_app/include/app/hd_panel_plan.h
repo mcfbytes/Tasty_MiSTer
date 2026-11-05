@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 
 #include "app/hd_metrics.h"
@@ -10,7 +11,8 @@
 namespace mister::app {
 
 [[nodiscard]] constexpr bool choices_in_a_row(std::size_t n) noexcept {
-    return n <= 2;
+    constexpr std::size_t kMaxChoicesInARow = 2;
+    return n <= kMaxChoicesInARow;
 }
 
 struct HdPanelPlan {
@@ -43,6 +45,9 @@ struct HdPanelPlan {
     const PageDescription& page
 ) noexcept {
     using Kind = PageDescription::RowKind;
+
+    constexpr std::int32_t kHalvesPerRow = 2, kHalvesPerSeparator = 1, kFrameSides = 2,
+                           kSeparatorDivisor = 2;
     HdPanelPlan p{};
     const auto n = static_cast<std::uint8_t>(
         std::min<std::size_t>(page.row_count, PageDescription::kMaxRows)
@@ -75,15 +80,17 @@ struct HdPanelPlan {
             p.steps = true;
     }
 
-    const std::int32_t frame = 2 * (m.card_pad + m.stroke);
+    const std::int32_t frame = kFrameSides * (m.card_pad + m.stroke);
     const std::int32_t bottom = m.help_top - m.gap;
     std::int32_t fixed = 0;
-    std::int32_t halves = 2 * (p.main_count - p.main_seps) + p.main_seps;
+    std::int32_t halves = kHalvesPerRow * (p.main_count - p.main_seps)
+        + kHalvesPerSeparator * p.main_seps;
     if (p.main_count != 0)
         fixed += frame;
     if (p.pinned_count != 0) {
         fixed += frame + m.gap;
-        halves += 2 * (p.pinned_count - p.pinned_seps) + p.pinned_seps;
+        halves += kHalvesPerRow * (p.pinned_count - p.pinned_seps)
+            + kHalvesPerSeparator * p.pinned_seps;
     }
     if (p.choice_count != 0) {
         const std::int32_t rows = p.choice_stacked ? p.choice_count : 1;
@@ -93,8 +100,8 @@ struct HdPanelPlan {
     const std::int32_t room = bottom - m.list_top - fixed;
     p.row_h = m.row_h;
     if (halves > 0 && room > 0)
-        p.row_h = std::min(m.row_h, 2 * room / halves);
-    p.sep_h = p.row_h / 2;
+        p.row_h = std::min(m.row_h, kHalvesPerRow * room / halves);
+    p.sep_h = p.row_h / kSeparatorDivisor;
 
     const auto block = [&](std::uint8_t rows, std::uint8_t seps) {
         return rows == 0 ? 0 : frame + (rows - seps) * p.row_h + seps * p.sep_h;

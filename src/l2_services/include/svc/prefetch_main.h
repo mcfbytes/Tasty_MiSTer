@@ -4,6 +4,7 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
+#include "infra/park_timeout.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
@@ -44,7 +45,7 @@ public:
 
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
 
-    [[nodiscard]] int park_ms() const noexcept { return prefetch_.park_ms(); }
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return prefetch_.park_ms(); }
 
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 

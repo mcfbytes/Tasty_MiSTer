@@ -5,14 +5,14 @@
 #include <utility>
 
 #include "app/durable_write.h"
-#include "app/write_verdict.h"
+#include "app/verdict_sinks.h"
 
 namespace mister::app {
 
 Ex<void> UiWriteLane::arm(
     std::string_view rel,
     std::span<const std::byte> bytes,
-    infra::OptRef<IWriteVerdict> verdict
+    VerdictSink sink
 ) noexcept {
     seat_assert<SeatTag::Ui>(ERR_SITE(), "UiWriteLane::arm off T-UI");
     if (rel.empty() || bytes.size() > kBytes) {
@@ -31,7 +31,7 @@ Ex<void> UiWriteLane::arm(
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     loan->len = static_cast<std::uint32_t>(bytes.size());
-    loan->ok = 0;
+    loan->ok = false;
     if (!bytes.empty())
         std::memcpy(loan->data, bytes.data(), bytes.size());
 
@@ -42,27 +42,37 @@ Ex<void> UiWriteLane::arm(
     if (sh.held && !bytes.empty())
         std::memcpy(sh.data, bytes.data(), bytes.size());
     sh.seq = ++ui_.seq;
-    sh.verdict = verdict;
+    sh.sink = sink;
     sh.live = true;
 
     chan_.send(std::move(loan));
     return {};
 }
 
-void UiWriteLane::tick() noexcept {
+void UiWriteLane::tick(VerdictSinks sinks) noexcept {
     seat_assert<SeatTag::Ui>(ERR_SITE(), "UiWriteLane::tick off T-UI");
     while (auto done = chan_.reap()) {
         Shadow& sh = ui_.shadow[chan_.index_of(done)];
         sh.live = false;
-        const bool ok = done.completed() && done->ok != 0;
+        const bool ok = done.completed() && done->ok;
         if (ok) {
             ++ui_.writes;
         } else {
             ++ui_.failures;
         }
-        const infra::OptRef<IWriteVerdict> to = std::exchange(sh.verdict, std::nullopt);
-        if (to)
-            to->on_written(ok);
+        const VerdictSink named = std::exchange(sh.sink, VerdictSink::None);
+        switch (named) {
+            case VerdictSink::None:
+                break;
+            case VerdictSink::Played:
+                if (sinks.played)
+                    sinks.played->on_written(ok);
+                break;
+            case VerdictSink::Recents:
+                if (sinks.recents)
+                    sinks.recents->on_written(ok);
+                break;
+        }
     }
 }
 
@@ -100,7 +110,7 @@ void UiWriteLane::serve() noexcept {
         job->rel.view(),
         std::span<const std::byte>{job->data, job->len}
     );
-    job->ok = r ? 1u : 0u;
+    job->ok = r.has_value();
     job.complete();
 }
 

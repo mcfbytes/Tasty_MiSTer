@@ -8,6 +8,8 @@
 
 namespace mister::cores::manifests {
 
+using namespace std::chrono_literals;
+
 std::unique_ptr<Core> make_n64(const CoreProfile& p, const CoreGrant& g) {
     return std::make_unique<N64Core>(p, g.services);
 }
@@ -31,7 +33,7 @@ static_assert(
     "is not 64DD"
 );
 static_assert(
-    kN64.services[0].period_ms == 16,
+    kN64.services[0].period == 16ms,
     "the NTSC frame on the executive's 1 kHz grid; the 17/17/16 and PAL-20 "
     "gaps accumulate inside the body, because a row period equal to the gap "
     "would alias every 17 ms deadline onto the round after next"

@@ -6,6 +6,8 @@
 
 namespace mister::cores::manifests {
 
+using namespace std::chrono_literals;
+
 static_assert(kPceCdIoIndices.data == IoIndex{2}, "pcecdd.cpp:13: PCECD_DATA_IO_INDEX == 2");
 static_assert(
     kPceCdIoIndices.cdda == IoIndex{3},
@@ -32,23 +34,23 @@ static_assert(
 );
 
 static_assert(
-    kPceCdTicks.stream_us == 16'000,
+    kPceCdTicks.stream == 16'000us,
     "pcecd.cpp:28-29: 16.0 ms between frames in READ state"
 );
 static_assert(
-    kPceCdTicks.idle_us == 13'333,
+    kPceCdTicks.idle == 13'333us,
     "pcecd.cpp:31-33: 13 + ((adj==3)?1:0) walks 14/13/13 — the "
     "13.333 ms Red Book average, the same dither as req"
 );
 static_assert(
-    kPceCdTicks.stream_us > kPceCdTicks.idle_us,
+    kPceCdTicks.stream > kPceCdTicks.idle,
     "pcecd.cpp:28-31: the PCE READ cadence is SLOWER than idle — "
     "inverted relative to MegaCD, and contract"
 );
 
 static_assert(
-    kPceCdTicks.caller_us == kPceCdServices[1].period_ms * 1000u,
-    "caller_us must BE the service row's own period_ms"
+    kPceCdTicks.caller == kPceCdServices[1].period,
+    "caller must BE the service row's own period"
 );
 
 static_assert(kPceCdTicks.speeds == 0, "PCE-CD engages no speed-indexed override");
@@ -103,13 +105,13 @@ static_assert(
 );
 
 static_assert(
-    kPceCdServices[0].period_ms == 0,
+    kPceCdServices[0].period == reactor::kEveryRound,
     "the command edge runs EVERY ROUND: Cause::Ring never "
     "dispatches, and stock reads UIO_CD_GET ungated"
 );
 static_assert(
-    kPceCdServices[1].period_ms != 0,
-    "3.3/3.4: period_ms == 0 is an ARGUED escape hatch, not a "
+    kPceCdServices[1].period != reactor::kEveryRound,
+    "3.3/3.4: period == kEveryRound is an ARGUED escape hatch, not a "
     "default -- it costs an SPI transaction every T-RT round"
 );
 

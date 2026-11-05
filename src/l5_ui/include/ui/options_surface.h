@@ -16,10 +16,10 @@ class OptionsModel;
 
 class IOptionsSurface : public IOptionHost {
 public:
-    [[nodiscard]] virtual const OptionsModel& walk() const = 0;
+    [[nodiscard]] virtual const OptionsModel& model() const = 0;
     [[nodiscard]] virtual std::string_view heading() const = 0;
 
-    [[nodiscard]] virtual std::uint32_t field(proto::BitField bits) const = 0;
+    [[nodiscard]] virtual proto::FieldValue field(proto::BitField bits) const = 0;
 
     [[nodiscard]] virtual StatusView live_words() const = 0;
 

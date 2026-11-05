@@ -12,6 +12,7 @@
 #include "app/scanout_channel.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 #include "os/child_process.h"
@@ -96,7 +97,7 @@ public:
 
     [[nodiscard]] bool idle() const noexcept;
 
-    [[nodiscard]] int park_ms() const noexcept;
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
 
     [[nodiscard]] const Counters& counters() const noexcept { return n_; }
 

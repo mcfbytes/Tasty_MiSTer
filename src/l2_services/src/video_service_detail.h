@@ -5,7 +5,7 @@
 
 namespace mister::svc {
 
-inline std::unexpected<Error> err(Errc c, std::uint16_t site, std::uint32_t detail = 0) {
+inline std::unexpected<Error> err(Errc c, infra::ErrorSite site, std::uint32_t detail = 0) {
     return std::unexpected(Error{c, site, detail});
 }
 

@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "proto/types.h"
+#include "ui/types.h"
 
 namespace mister::ui {
 
@@ -29,7 +30,7 @@ struct UiEvent {
         PadBack = 1u << 10,
     };
 
-    std::uint16_t buttons = None;
+    UiButtonMask buttons{};
 
     std::uint16_t repeat_depth = 0;
 };

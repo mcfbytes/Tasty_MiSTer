@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -52,6 +53,7 @@
 #include "cores/boot_ladder.h"
 #include "cores/companion_load.h"
 #include "infra/log_lane.h"
+#include "infra/park_timeout.h"
 #include "os/monotonic_clock.h"
 #include "proto/status_cell.h"
 
@@ -164,7 +166,7 @@ public:
 
     unsigned tick();
 
-    [[nodiscard]] int wake_hint_ms(int floor_ms) const noexcept;
+    [[nodiscard]] infra::ParkTimeout wake_hint_ms(infra::ParkTimeout floor_ms) const noexcept;
 
     [[nodiscard]] bool program_owed() const noexcept;
 
@@ -268,9 +270,9 @@ private:
     [[nodiscard]] bool order_walk(
         proto::IoIndex slot,
         std::string_view path,
-        std::uint32_t gen
+        proto::ActKey gen
     ) override;
-    [[nodiscard]] bool order_savestates(std::string_view image, std::uint32_t gen) override;
+    [[nodiscard]] bool order_savestates(std::string_view image, proto::ActKey gen) override;
 
     [[nodiscard]] cores::ILadderHost& ladder_host() noexcept override;
 
@@ -305,11 +307,15 @@ private:
     void publish_refusal(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept;
     void publish_done(UiRequest::Kind which, CorrelationTag tag) noexcept;
     void refuse_file_ask(UiRequest::Kind asked, CorrelationTag tag, Errc code) noexcept;
-    [[nodiscard]] std::optional<std::uint32_t> attach_row_savestates(
+    [[nodiscard]] std::optional<proto::ActKey> attach_row_savestates(
         bool opensave,
         std::string_view rom
     );
-    void hold_for_savestates(const PickedLoad& load, std::uint32_t gen, std::int64_t due_ns);
+    void hold_for_savestates(
+        const PickedLoad& load,
+        proto::ActKey gen,
+        std::chrono::nanoseconds due
+    );
     void begin_companion(std::string_view path);
 
     void switch_minted(const UiRequest::LoadCore& req) noexcept override;
@@ -360,8 +366,8 @@ private:
     template <class A>
     [[nodiscard]] bool admit_(const A& req, CorrelationTag tag) noexcept;
     void step_companion_();
-    [[nodiscard]] bool ask_savestates_(std::string_view rom, std::uint32_t gen) noexcept;
-    [[nodiscard]] bool savestates_answered_(std::uint32_t gen) const noexcept;
+    [[nodiscard]] bool ask_savestates_(std::string_view rom, proto::ActKey gen) noexcept;
+    [[nodiscard]] bool savestates_answered_(proto::ActKey gen) const noexcept;
     template <class A>
     void order_(const A& alt) noexcept;
     template <class A>
@@ -379,7 +385,7 @@ private:
     ) const;
     [[nodiscard]] std::string start_rbf_() const;
     void order_start_chain_(const StartChain& chain);
-    void order_rbf_tail_(std::string_view path, proto::WideIoIndex dest, std::uint64_t offset);
+    void order_rbf_tail_(std::string_view path, proto::WideIoIndex dest, proto::FileSize offset);
 
     struct RememberedFile {
         proto::ConfStrFileRow row;

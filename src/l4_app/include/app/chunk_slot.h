@@ -6,6 +6,7 @@
 #include <span>
 
 #include "app/rec_control.h"
+#include "app/types.h"
 #include "infra/endian.h"
 #include "infra/loan_channel.h"
 #include "infra/seat.h"
@@ -36,7 +37,7 @@ struct ChunkSlot {
     std::uint8_t scale = 1;
     RecCodec codec = RecCodec::Cscd;
     std::uint8_t pad_ = 0;
-    std::uint16_t gen = 0;
+    ControlGeneration gen{};
     std::uint16_t segment = 0;
     std::uint16_t width = 0;
     std::uint16_t height = 0;

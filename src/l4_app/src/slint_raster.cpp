@@ -76,13 +76,9 @@ Plat*& shared_platform() {
     return held;
 }
 
-[[nodiscard]] slint::Color color_of(std::uint32_t rgb) {
-    return slint::Color::from_argb_uint8(
-        255,
-        static_cast<std::uint8_t>(rgb >> 16),
-        static_cast<std::uint8_t>(rgb >> 8),
-        static_cast<std::uint8_t>(rgb)
-    );
+[[nodiscard]] slint::Color color_of(Rgb888 rgb) {
+    const auto [r, g, b] = rgb.channels();
+    return slint::Color::from_argb_uint8(255, r, g, b);
 }
 
 [[nodiscard]] MenuRow menu_row(const PageDescription::Row& row, const HdTheme& theme) {

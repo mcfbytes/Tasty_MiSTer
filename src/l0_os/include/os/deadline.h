@@ -23,6 +23,10 @@ public:
 
     std::chrono::nanoseconds at() const noexcept { return at_; }
 
+    std::chrono::nanoseconds remaining(std::chrono::nanoseconds now) const noexcept {
+        return at_ - now;
+    }
+
     [[nodiscard]] Ex<void> sleep_until() const;
 
 private:

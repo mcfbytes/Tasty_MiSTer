@@ -4,10 +4,12 @@
 #include <cstdint>
 #include <vector>
 
+#include "proto/types.h"
+
 namespace mister::cores {
 
 struct SendBracket {
-    std::uint8_t index = 0;
+    proto::WideIoIndex index{};
     std::vector<std::uint8_t> bytes;
     std::uint32_t aux = 0;
 };

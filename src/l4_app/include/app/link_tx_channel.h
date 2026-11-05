@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "svc/types.h"
 #include "app/file_bytes.h"
 #include "app/interned_file.h"
 #include "app/link_bytes.h"
@@ -81,7 +82,7 @@ public:
         std::string_view ext,
         std::string_view path,
         std::uint32_t load_addr,
-        std::uint32_t crc = 0,
+        svc::Crc32 crc = {},
         std::uint64_t whole = 0,
         std::uint64_t offset = 0
     ) {
@@ -99,7 +100,7 @@ public:
     [[nodiscard]] Ex<proto::FileId> intern_file_path(
         std::string_view path,
         std::uint64_t size_bytes,
-        std::uint32_t crc = 0,
+        svc::Crc32 crc = {},
         std::uint32_t aux = 0
     ) {
         return files_.intern_path(path, size_bytes, crc, aux);

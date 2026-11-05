@@ -20,7 +20,10 @@ std::span<const std::byte> as_bytes_const(std::span<const std::uint8_t> s) noexc
 
 }
 
-Ex<proto::FileSize> FileSlotBackend::open_extent(std::span<const std::byte> order) {
+Ex<proto::FileSize> FileSlotBackend::open_extent(
+    proto::SlotIndex,
+    std::span<const std::byte> order
+) {
     TASTY_SEAT_BODY(FileSlotBackend);
     file_.reset();
     path_.clear();
@@ -100,7 +103,7 @@ Ex<void> FileSlotBackend::flush() {
     return file_->flush();
 }
 
-void FileSlotBackend::release() noexcept {
+void FileSlotBackend::release(proto::SlotIndex) noexcept {
     TASTY_SEAT_BODY(FileSlotBackend);
     file_.reset();
 }

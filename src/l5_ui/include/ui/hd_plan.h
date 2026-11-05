@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "infra/opt_ref.h"
+#include "ui/types.h"
 #include "ui/hd_row.h"
 #include "ui/page_id.h"
 
@@ -24,7 +25,7 @@ public:
 
     [[nodiscard]] virtual std::span<const std::reference_wrapper<IHdRow>> rows() const = 0;
 
-    [[nodiscard]] virtual std::uint8_t pinned() const noexcept { return 0; }
+    [[nodiscard]] virtual RowCount pinned() const noexcept { return RowCount{}; }
 
     [[nodiscard]] virtual bool remembers_focus() const noexcept { return true; }
 

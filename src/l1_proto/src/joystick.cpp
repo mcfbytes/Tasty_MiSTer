@@ -4,102 +4,82 @@
 
 namespace mister::proto {
 
+namespace {
+
+constexpr JoyMask kDirections{kJoyRight | kJoyLeft | kJoyDown | kJoyUp};
+
+std::unexpected<Error> bad_player(PlayerIndex player, infra::ErrorSite site) noexcept {
+    return std::unexpected(Error{Errc::slot_range, site, player.v});
+}
+
+}
+
 Ex<void> JoystickPort::push_digital(
     ILinkPadEncoder& pads,
     PlayerIndex player,
     JoyMask map,
     bool new_dir
 ) {
-    if (player.v >= kMaxPorts) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
-    }
+    if (!prev_.find(player))
+        return bad_player(player, ERR_SITE());
     const std::uint8_t port = swapped(player.v);
 
-    if ((map.v >> 16) != 0u)
+    if (map.beyond_low_half())
         use32_ = true;
 
-    const std::uint16_t opcode = digital_opcode(port);
+    const UioOp opcode = digital_opcode(port);
 
     if (auto e = pads.digital(opcode, map); !e)
         return e;
 
     if (!wire_.suppress_analog_followup && wire_.joy_transl == 1 && new_dir) {
-        const auto x = static_cast<std::int8_t>((map.v & 0x2u) ? -128 : ((map.v & 0x1u) ? 127 : 0));
-        const auto y = static_cast<std::int8_t>((map.v & 0x8u) ? -128 : ((map.v & 0x4u) ? 127 : 0));
-        return push_analog_l(pads, stick_index(player), x, y);
+        const std::uint8_t x = map.any(JoyMask{kJoyLeft})
+            ? 0x80
+            : (map.any(JoyMask{kJoyRight}) ? 0x7F : 0);
+        const std::uint8_t y = map.any(JoyMask{kJoyUp}) ? 0x80
+                                                        : (map.any(JoyMask{kJoyDown}) ? 0x7F : 0);
+        return push_analog_l(pads, stick_index(player), StickPos{x, y});
     }
     return {};
 }
 
 Ex<void> JoystickPort::push_analog(
     ILinkPadEncoder& pads,
-    std::uint16_t opcode,
+    UioOp opcode,
     std::uint8_t index,
-    std::uint8_t x,
-    std::uint8_t y
+    StickPos pos
 ) {
 
     if (!wire_.analog_capable)
         return {};
 
-    return pads.stick(opcode, swapped(index), x, y);
+    return pads.stick(opcode, swapped(index), pos);
 }
 
-Ex<void> JoystickPort::push_analog_l(
-    ILinkPadEncoder& pads,
-    std::uint8_t index,
-    std::int8_t x,
-    std::int8_t y
-) {
-    return push_analog(
-        pads,
-        static_cast<std::uint16_t>(UioOp::Astick),
-        index,
-        static_cast<std::uint8_t>(x),
-        static_cast<std::uint8_t>(y)
-    );
+Ex<void> JoystickPort::push_analog_l(ILinkPadEncoder& pads, std::uint8_t index, StickPos pos) {
+    return push_analog(pads, UioOp::Astick, index, pos);
 }
 
-Ex<void> JoystickPort::push_analog_r(
-    ILinkPadEncoder& pads,
-    std::uint8_t index,
-    std::int8_t x,
-    std::int8_t y
-) {
+Ex<void> JoystickPort::push_analog_r(ILinkPadEncoder& pads, std::uint8_t index, StickPos pos) {
 
-    return push_analog(
-        pads,
-        static_cast<std::uint16_t>(UioOp::Astick2),
-        index,
-        static_cast<std::uint8_t>(x),
-        static_cast<std::uint8_t>(y)
-    );
+    return push_analog(pads, UioOp::Astick2, index, pos);
 }
 
 Ex<void> JoystickPort::push_paddle(ILinkPadEncoder& pads, PlayerIndex player, std::uint8_t value) {
-    if (player.v >= kMaxPorts) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
-    }
-    return push_analog(
-        pads,
-        static_cast<std::uint16_t>(UioOp::Astick),
-        paddle_index(player),
-        value,
-        0
-    );
+    if (!prev_.find(player))
+        return bad_player(player, ERR_SITE());
+    return push_analog(pads, UioOp::Astick, paddle_index(player), StickPos{value, 0});
 }
 
 Ex<void> JoystickPort::push_spinner(ILinkPadEncoder& pads, PlayerIndex player, std::int8_t delta) {
-    if (player.v >= kMaxPorts) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
-    }
+    if (!prev_.find(player))
+        return bad_player(player, ERR_SITE());
 
     return push_analog(
         pads,
-        static_cast<std::uint16_t>(UioOp::Astick),
+        UioOp::Astick,
         spinner_index(player),
-        static_cast<std::uint8_t>(delta),
-        0
+        StickPos{static_cast<std::uint8_t>(delta), 0}
     );
 }
 
@@ -109,29 +89,27 @@ Ex<bool> JoystickPort::submit(
     JoyMask buttons,
     JoyMask autofire
 ) {
-    if (player.v >= kMaxPorts) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
-    }
-    const JoyMask composed{buttons.v | autofire.v};
+    if (!prev_.find(player))
+        return bad_player(player, ERR_SITE());
+    const JoyMask composed = buttons | autofire;
 
-    const bool new_dir = ((composed.v & 0xFu) | (prev_[player.v].v & 0xFu)) != 0u;
+    const bool new_dir = (composed | prev_[player]).any(kDirections);
 
-    if (composed == prev_[player.v])
+    if (composed == prev_[player])
         return false;
 
     if (auto e = push_digital(pads, player, composed, new_dir); !e) {
         return std::unexpected(e.error());
     }
-    prev_[player.v] = composed;
+    prev_[player] = composed;
     return true;
 }
 
 Ex<bool> JoystickPort::release(ILinkPadEncoder& pads, PlayerIndex player, JoyMask composed) {
-    if (player.v >= kMaxPorts) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
-    }
+    if (!prev_.find(player))
+        return bad_player(player, ERR_SITE());
 
-    if (composed.v == 0u)
+    if (composed == JoyMask{})
         return false;
     if (auto e = push_digital(pads, player, JoyMask{0}, true); !e) {
         return std::unexpected(e.error());
@@ -152,11 +130,11 @@ Ex<std::uint8_t> JoystickPort::paddle_scale(std::int32_t raw, std::int32_t min, 
     else if (value > max)
         value = max;
 
-    const std::int64_t num = static_cast<std::int64_t>(value - min) * 255;
-    const std::int64_t den = static_cast<std::int64_t>(max) - static_cast<std::int64_t>(min);
+    const std::int64_t num = std::int64_t{value - min} * 255;
+    const std::int64_t den = std::int64_t{max} - min;
     const std::int64_t scaled = num / den;
 
-    return static_cast<std::uint8_t>(static_cast<std::uint32_t>(scaled) & 0xFFu);
+    return static_cast<std::uint8_t>(scaled);
 }
 
 }

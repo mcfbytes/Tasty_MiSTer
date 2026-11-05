@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "svc/types.h"
 #include "app/file_tx_level.h"
 #include "app/link_tx_channel.h"
 #include "app/load_key.h"
@@ -27,9 +28,9 @@ public:
     enum class Pass : std::uint8_t { Sent, Waiting, Done, Failed };
 
     struct LastOp {
-        std::uint32_t act = 0;
+        proto::ActKey act{};
         std::uint64_t from = 0;
-        std::uint32_t crc = 0;
+        svc::Crc32 crc{};
         bool shaped = false;
     };
 
@@ -48,13 +49,13 @@ public:
         proto::WideIoIndex wire_index,
         std::string_view path,
         std::uint64_t from,
-        std::uint32_t crc
+        svc::Crc32 crc
     );
 
     [[nodiscard]] Pass step(
         LinkTxChannel<SeatTag::Main>& inbox,
         const FileTxLevelCell& level,
-        std::uint32_t act
+        proto::ActKey act
     );
 
     [[nodiscard]] bool ready(
@@ -100,7 +101,7 @@ private:
           wire_index_(wire_index) {}
 
     struct Outstanding {
-        std::uint32_t act = 0;
+        proto::ActKey act{};
         std::uint64_t from = 0;
         std::uint64_t bytes = 0;
     };
@@ -120,7 +121,7 @@ private:
     std::uint64_t sent_ = 0;
     std::uint64_t keyed_to_ = 0;
     LoadKey key_;
-    std::optional<std::uint32_t> crc_{};
+    std::optional<svc::Crc32> crc_{};
     proto::WideIoIndex wire_index_;
     bool cut_owed_ = false;
     bool facts_sent_ = false;

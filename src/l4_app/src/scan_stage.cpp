@@ -47,7 +47,7 @@ IReplayStage::Step ScanStage::enter(Ctx ctx) noexcept {
     play.facts = {};
     in_log_ = false;
     log_done_ = false;
-    play.frames = 0;
+    play.scanned = 0;
     play.movie_frames = 0;
     play.tries = 0;
     play.vsync_ok = ctx.w.video.output_locked();
@@ -144,11 +144,11 @@ std::optional<PlayRefusal> ScanStage::scan_line_(
     if (!fr)
         return PlayRefusal{Refusal::Movie, fr.error().detail};
 
-    if (play.frames > 0 && fr->commands != 0)
-        return PlayRefusal{Refusal::Command, play.frames};
-    if (++play.frames > ReplayPlay::kMaxFrames)
-        return PlayRefusal{Refusal::TooLong, play.frames};
-    if (const std::uint32_t f = play.frames - 1; !play.stop_at || f < *play.stop_at)
+    if (play.scanned > 0 && fr->commands != 0)
+        return PlayRefusal{Refusal::Command, play.scanned};
+    if (++play.scanned > ReplayPlay::kMaxFrames)
+        return PlayRefusal{Refusal::TooLong, play.scanned};
+    if (const std::uint32_t f = play.scanned - 1; !play.stop_at || f < *play.stop_at)
         note_frame_(play, f, *fr);
     return std::nullopt;
 }
@@ -163,23 +163,29 @@ void ScanStage::note_frame_(
         m[p] = fr.mask[p];
     if (!play.runs.empty()) {
         ReplayMsg::Input& run = play.runs.back();
-        if (run.mask == m && run.last - run.first + 1 < ReplayPlay::kRunSplit) {
-            run.last = f;
+        if (run.mask == m && run.last - run.first + FrameCount{1} < ReplayPlay::kRunSplit) {
+            run.last = movie_frame_from_wire(f);
             return;
         }
     }
-    play.runs.push_back(ReplayMsg::Input{.first = f, .last = f, .mask = m});
+    play.runs.push_back(
+        ReplayMsg::Input{
+            .first = movie_frame_from_wire(f),
+            .last = movie_frame_from_wire(f),
+            .mask = m
+        }
+    );
 }
 
 IReplayStage::Step ScanStage::finish_scan_(Ctx ctx) noexcept {
     ReplayPlay& play = ctx.play;
-    if (!in_log_ || play.frames == 0) {
+    if (!in_log_ || play.scanned == 0) {
         return Step::refuse(
             Refusal::Movie,
             static_cast<std::uint32_t>(cores::IMovieCodec::Refusal::NotAMovie)
         );
     }
-    play.movie_frames = play.stop_at ? std::min(play.frames, *play.stop_at) : play.frames;
+    play.movie_frames = play.stop_at ? std::min(play.scanned, *play.stop_at) : play.scanned;
 
     file_.reset();
     play.runs.shrink_to_fit();

@@ -8,6 +8,7 @@
 #include "infra/fixed_str.h"
 #include "infra/path_text.h"
 #include "infra/seat.h"
+#include "svc/types.h"
 
 namespace mister::cores::mdp {
 
@@ -32,10 +33,10 @@ public:
 
     [[nodiscard]] std::uint8_t track_count() const noexcept { return num_tracks_; }
 
-    [[nodiscard]] const Track* track(std::uint8_t n) const noexcept {
-        if (n < 1 || n > num_tracks_)
+    [[nodiscard]] const Track* track(svc::TrackNumber n) const noexcept {
+        if (n.v < 1 || n.v > num_tracks_)
             return nullptr;
-        return &tracks_[n];
+        return &tracks_[n.v];
     }
 
 private:

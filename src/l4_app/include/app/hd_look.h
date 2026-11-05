@@ -5,6 +5,8 @@
 #include <string_view>
 #include <type_traits>
 
+#include "app/types.h"
+
 namespace mister::app {
 
 enum class HdLookField : std::uint8_t { Layout, Colors, GameDisplay, Opacity };
@@ -12,38 +14,45 @@ enum class HdLookField : std::uint8_t { Layout, Colors, GameDisplay, Opacity };
 inline constexpr std::uint8_t kHdOpacityDefault = 85;
 
 struct HdLook {
-    std::uint8_t layout = 0;
-    std::uint8_t colors = 0;
+    HdLayoutIndex layout{};
+    HdColors colors{};
     std::uint8_t display = 0;
     std::uint8_t opacity = kHdOpacityDefault;
 
     friend constexpr bool operator==(const HdLook&, const HdLook&) noexcept = default;
 };
 
-static_assert(std::is_trivially_copyable_v<HdLook> && sizeof(HdLook) == 4);
-
-[[nodiscard]] constexpr std::uint8_t HdLook::* hd_look_member(HdLookField f) noexcept {
-    switch (f) {
-        case HdLookField::Layout:
-            return &HdLook::layout;
-        case HdLookField::Colors:
-            return &HdLook::colors;
-        case HdLookField::GameDisplay:
-            return &HdLook::display;
-        case HdLookField::Opacity:
-            return &HdLook::opacity;
-    }
-    return nullptr;
-}
+static_assert(std::is_trivially_copyable_v<HdLook> && sizeof(HdLook) == sizeof(std::uint32_t));
 
 [[nodiscard]] constexpr std::uint8_t hd_look_get(const HdLook& look, HdLookField f) noexcept {
-    const auto member = hd_look_member(f);
-    return member != nullptr ? look.*member : std::uint8_t{0};
+    switch (f) {
+        case HdLookField::Layout:
+            return look.layout.v;
+        case HdLookField::Colors:
+            return look.colors.v;
+        case HdLookField::GameDisplay:
+            return look.display;
+        case HdLookField::Opacity:
+            return look.opacity;
+    }
+    return 0;
 }
 
 [[nodiscard]] constexpr HdLook hd_look_with(HdLook look, HdLookField f, std::uint8_t v) noexcept {
-    if (const auto member = hd_look_member(f); member != nullptr)
-        look.*member = v;
+    switch (f) {
+        case HdLookField::Layout:
+            look.layout = HdLayoutIndex{v};
+            break;
+        case HdLookField::Colors:
+            look.colors = HdColors{v};
+            break;
+        case HdLookField::GameDisplay:
+            look.display = v;
+            break;
+        case HdLookField::Opacity:
+            look.opacity = v;
+            break;
+    }
     return look;
 }
 

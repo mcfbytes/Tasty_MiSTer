@@ -4,10 +4,15 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <cerrno>
+
 namespace mister::os {
 
-ssize_t Evdev::read(std::span<input_event> out) const noexcept {
-    return ::read(fd_.get(), out.data(), out.size_bytes());
+Ex<std::size_t> Evdev::read(std::span<input_event> out) const noexcept {
+    const ssize_t n = ::read(fd_.get(), out.data(), out.size_bytes());
+    if (n < 0)
+        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+    return static_cast<std::size_t>(n);
 }
 
 std::optional<input_absinfo> Evdev::abs_info(unsigned code) const noexcept {

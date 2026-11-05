@@ -17,7 +17,7 @@ class Vfs;
 
 namespace mister::cores {
 struct FileSlot;
-class IRomsetAliasSource;
+class NeoGeoAliasSource;
 }
 
 namespace mister::app {
@@ -46,7 +46,7 @@ private:
     std::optional<std::string> read_prefix(std::string_view path, std::uint64_t cap) override;
 
     const svc::Vfs* vfs_;
-    std::unique_ptr<cores::IRomsetAliasSource> source_;
+    std::unique_ptr<cores::NeoGeoAliasSource> source_;
 };
 
 }

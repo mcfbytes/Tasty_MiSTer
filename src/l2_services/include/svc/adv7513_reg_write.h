@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <span>
 
+#include "os/types.h"
+
 namespace mister::svc {
 struct Modeline;
 }
@@ -14,15 +16,15 @@ namespace mister::svc::adv7513 {
 
 struct InitOptions;
 
-inline constexpr std::uint8_t kRegPower = 0x41;
-inline constexpr std::uint8_t kRegStatus = 0x42;
-inline constexpr std::uint8_t kRegIntEnable = 0x94;
-inline constexpr std::uint8_t kRegIntStatus = 0x96;
-inline constexpr std::uint8_t kRegEdidSegment = 0xC4;
-inline constexpr std::uint8_t kRegEdidTrigger = 0xC9;
+inline constexpr os::I2cReg kRegPower{0x41};
+inline constexpr os::I2cReg kRegStatus{0x42};
+inline constexpr os::I2cReg kRegIntEnable{0x94};
+inline constexpr os::I2cReg kRegIntStatus{0x96};
+inline constexpr os::I2cReg kRegEdidSegment{0xC4};
+inline constexpr os::I2cReg kRegEdidTrigger{0xC9};
 
 struct RegWrite {
-    std::uint8_t reg = 0;
+    os::I2cReg reg{};
     std::uint8_t val = 0;
     friend constexpr bool operator==(RegWrite, RegWrite) = default;
 };

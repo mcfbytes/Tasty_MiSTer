@@ -27,6 +27,8 @@ struct StorageCompletion {
     enum class Kind : std::uint8_t { Read, Write, Create, Flush, Attach, Detach, kCount };
     static constexpr std::size_t kStore = 16;
 
+    enum : std::size_t { kStoreAlign = 8 };
+
     struct Head {
         StorageSeq seq{};
         SlotIndex slot{};
@@ -76,7 +78,7 @@ struct StorageCompletion {
     Kind kind = Kind::Read;
     std::uint8_t pad_[7]{};
     Head head{};
-    alignas(8) std::array<std::byte, kStore> store{};
+    alignas(kStoreAlign) std::array<std::byte, kStore> store{};
 };
 
 static_assert(

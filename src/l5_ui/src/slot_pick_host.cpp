@@ -9,6 +9,7 @@
 #include "app/info_sink.h"
 #include "app/name_config.h"
 #include "app/romset_alias_reader.h"
+#include "infra/ascii.h"
 #include "app/session_identity.h"
 #include "ui/browser_entry.h"
 #include "ui/browser_launch.h"
@@ -20,7 +21,8 @@ namespace mister::ui {
 namespace {
 
 std::string with_chd(std::string ext) {
-    while (ext.size() % 3 != 0)
+    constexpr std::size_t kFieldWidth = 3;
+    while (ext.size() % kFieldWidth != 0)
         ext.push_back(' ');
     constexpr std::string_view kChd = "CHD";
     const auto upper_eq = [](char a, char b) {
@@ -118,11 +120,7 @@ BrowserSession::Request SlotPickHost::browser_request(const OptionItem& it, bool
 
 std::string_view SlotPickHost::browse_home_(const OptionItem& it) const noexcept {
     const std::string_view el = it.ext_list;
-    const bool cue_row = !env_.cue_dir.empty()
-        && el.size() >= 3
-        && (el[0] == 'C' || el[0] == 'c')
-        && (el[1] == 'U' || el[1] == 'u')
-        && (el[2] == 'E' || el[2] == 'e');
+    const bool cue_row = !env_.cue_dir.empty() && infra::istarts_with(el, "CUE");
     return cue_row ? std::string_view{env_.cue_dir} : std::string_view{env_.core_dir};
 }
 

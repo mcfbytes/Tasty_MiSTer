@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string>
 
+#include "svc/types.h"
+
 namespace mister::cores::mra {
 
 enum class RomNodeKind : std::uint8_t { FilePart, TextPart, Patch, InterleaveStart, InterleaveEnd };
@@ -12,7 +14,7 @@ struct RomNode {
     RomNodeKind kind = RomNodeKind::FilePart;
     std::string name;
     std::string zips;
-    std::uint32_t crc = 0;
+    svc::Crc32 crc{};
     std::int32_t offset = 0;
     std::int32_t length = -1;
     std::int32_t repeat = 1;

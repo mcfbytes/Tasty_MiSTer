@@ -13,8 +13,8 @@ bool ScreenshotPump::take(std::string_view path, bool scaled) noexcept {
     if (!shot)
         return true;
     (void)shot->path.assign(path);
-    shot->scaled = scaled ? 1 : 0;
-    shot->ok = 0;
+    shot->scaled = scaled;
+    shot->ok = false;
     shots_.submit(std::move(shot));
     ++armed_;
     return true;
@@ -24,7 +24,7 @@ void ScreenshotPump::tick() noexcept {
     TASTY_SEAT_BODY(ScreenshotPump);
     while (auto res = shots_.reap()) {
 
-        const bool wrote = res.completed() && res->ok != 0;
+        const bool wrote = res.completed() && res->ok;
         ++reaped_;
         if (!sink_)
             continue;
@@ -33,7 +33,7 @@ void ScreenshotPump::tick() noexcept {
                 Event::InfoRequest{
                     .id = wrote ? InfoId::ScreenshotWritten : InfoId::ScreenshotFailed
                 },
-                Event::Head{EmitSite{ERR_SITE()}, {}, res->tag}
+                Event::Head{ERR_SITE(), {}, res->tag}
             )
         );
     }

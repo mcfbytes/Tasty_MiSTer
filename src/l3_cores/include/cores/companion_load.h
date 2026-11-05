@@ -12,22 +12,8 @@
 
 namespace mister::cores {
 
-class ICompanionLoad {
-public:
-    virtual ~ICompanionLoad() = default;
+class MsuCompanion;
 
-    [[nodiscard]] virtual Ex<CompanionPlan> plan(const CompanionAsk& ask) = 0;
-
-    [[nodiscard]] virtual std::unique_ptr<ILoader> loader() = 0;
-
-    [[nodiscard]] virtual ServantId servant() const noexcept = 0;
-
-protected:
-    ICompanionLoad() = default;
-    ICompanionLoad(const ICompanionLoad&) = default;
-    ICompanionLoad& operator=(const ICompanionLoad&) = default;
-};
-
-using MakeCompanion = std::unique_ptr<ICompanionLoad> (*)(const svc::Vfs&);
+using MakeCompanion = std::unique_ptr<MsuCompanion> (*)(const svc::Vfs&);
 
 }

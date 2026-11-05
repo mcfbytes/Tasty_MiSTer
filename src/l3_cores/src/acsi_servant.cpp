@@ -2,10 +2,12 @@
 #include "cores/acsi_servant.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <utility>
 
 #include "cores/st_config.h"
+#include "infra/endian.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
@@ -56,7 +58,8 @@ constexpr std::uint8_t u8(std::byte b) noexcept {
 }
 
 constexpr std::byte b8(std::uint32_t v) noexcept {
-    return static_cast<std::byte>(v & 0xFFu);
+    constexpr std::uint32_t kByteMask = 0xFF;
+    return static_cast<std::byte>(v & kByteMask);
 }
 
 void put_text(std::span<std::byte> dst, std::string_view text, std::byte pad) noexcept {
@@ -84,20 +87,24 @@ Ex<void> AcsiServant::bind_target(
     svc::IDiskImage* img,
     std::string_view name
 ) noexcept {
-    if (t.v >= kTargets)
+    const auto found = slot_.find(t);
+    if (!found)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), t.v});
-    Slot& slot = slot_[t.v];
+    Slot& slot = *found;
     slot.image = infra::opt_ref_of(img);
     (void)slot.name.assign(img != nullptr ? name : std::string_view{});
     return {};
 }
 
-MountState AcsiServant::bind(std::uint8_t unit, std::string_view path) noexcept {
+MountState AcsiServant::bind(proto::DiskUnit unit, std::string_view path) noexcept {
     TASTY_SEAT_BODY(AcsiServant);
-    if (unit >= kTargets)
+    const AcsiTarget target{unit.v};
+    const auto found = slot_.find(target);
+    if (!found)
         return MountState::Failed;
-    (void)bind_target(AcsiTarget{unit}, nullptr, {});
-    owned_[unit].reset();
+    Slot& slot = *found;
+    (void)bind_target(target, nullptr, {});
+    slot.owned.reset();
     if (path.empty())
         return MountState::Done;
     if (!vfs_)
@@ -108,18 +115,19 @@ MountState AcsiServant::bind(std::uint8_t unit, std::string_view path) noexcept 
         img = svc::open_disk_image(*vfs_, path, formats_, svc::OpenMode::Read);
     if (!img)
         return MountState::Failed;
-    owned_[unit] = std::move(*img);
-    (void)bind_target(AcsiTarget{unit}, owned_[unit].get(), StConfig::leaf_of(path));
+    slot.owned = std::move(*img);
+    (void)bind_target(target, slot.owned.get(), StConfig::leaf_of(path));
     return MountState::Done;
 }
 
 void AcsiServant::release() noexcept {
     TASTY_SEAT_BODY(AcsiServant);
     forget_command_();
-    for (std::uint8_t t = 0; t < kTargets; ++t) {
-        (void)bind_target(AcsiTarget{t}, nullptr, {});
-        owned_[t].reset();
-        slot_[t].asc = 0;
+    for (Slot& slot : slot_) {
+        slot.image.reset();
+        (void)slot.name.assign(std::string_view{});
+        slot.owned.reset();
+        slot.asc = 0;
     }
 }
 
@@ -127,24 +135,25 @@ proto::DiskAct AcsiServant::start(
     std::span<const std::byte, proto::kDiskStateBytes> state,
     std::span<std::byte, proto::kDiskActBytes> bytes
 ) noexcept {
+    constexpr std::size_t kStateTargetAt = 10;
     TASTY_SEAT_BODY(AcsiServant);
     forget_command_();
     std::copy(state.begin(), state.end(), state_.begin());
-    if ((u8(state_[10]) & 0x01u) == 0)
-        return proto::DiskAct{.last = true};
+    if ((u8(state_[kStateTargetAt]) & 0x01u) == 0)
+        return proto::DiskAct::none();
     ++commands_;
 
-    const std::uint8_t target = static_cast<std::uint8_t>(u8(state_[10]) >> 5);
-    if (target >= kTargets || !slot_[target].image || slot_[target].image->size().v == 0) {
+    constexpr unsigned kLunShift = 5;
+    const AcsiTarget target{static_cast<std::uint8_t>(u8(state_[kStateTargetAt]) >> kLunShift)};
+    const auto found = slot_.find(target);
+    if (!found || !found->image || found->image->size().v == 0) {
         ++naks_;
         nak_();
     } else {
         target_ = target;
-        dispatch_(slot_[target]);
+        dispatch_(*found);
     }
-    proto::DiskAct first = next_act_(bytes);
-    first.unit = target;
-    return first;
+    return next_act_(bytes).with_unit(proto::DiskUnit{target.v});
 }
 
 proto::DiskAct AcsiServant::resume(std::span<std::byte, proto::kDiskActBytes> bytes) noexcept {
@@ -209,43 +218,57 @@ proto::DiskAct AcsiServant::next_act_(std::span<std::byte, proto::kDiskActBytes>
     if (std::exchange(reply_owed_, false)) {
         std::memcpy(bytes.data(), reply_.data(), reply_len_);
         const auto n = static_cast<std::uint16_t>(std::exchange(reply_len_, 0));
-        return proto::DiskAct{.kind = proto::DiskAct::Kind::Out, .opcode = kWriteMemory, .len = n};
+        return proto::DiskAct::out(kWriteMemory, n);
     }
     if (transfer_ == Transfer::Read)
         return read_step_(bytes);
     if (transfer_ == Transfer::Write)
         return write_step_(bytes);
     if (std::exchange(ack_owed_, false)) {
-        return proto::DiskAct{
-            .kind = proto::DiskAct::Kind::Signal,
-            .last = true,
-            .has_word = true,
-            .opcode = kAckDma,
-            .word = status_
-        };
+        return proto::DiskAct::signal(kAckDma, true, static_cast<std::uint16_t>(status_));
     }
     if (std::exchange(nak_owed_, false)) {
-        return proto::DiskAct{
-            .kind = proto::DiskAct::Kind::Signal,
-            .last = true,
-            .opcode = kNakDma
-        };
+        return proto::DiskAct::signal(kNakDma, true, std::nullopt);
     }
-    return proto::DiskAct{.last = true};
+    return proto::DiskAct::none();
 }
 
 void AcsiServant::dispatch_(Slot& slot) {
+    constexpr std::uint32_t kCdb6LbaMask = 0x1FFFFF;
+    constexpr std::size_t kCdb6LengthAt = 4;
+    constexpr std::uint32_t kCdb6ZeroLengthBlocks = 256;
+    constexpr std::size_t kCdb10LbaAt = 2;
+    constexpr std::size_t kCdb10LengthAt = 7;
+    constexpr std::size_t kCapacityBlockSizeAt = 6;
+    constexpr std::size_t kSenseKeyAt = 2;
+    constexpr std::size_t kSenseLengthAt = 7;
+    constexpr std::size_t kSenseAscAt = 12;
+    constexpr std::size_t kInquiryVersionAt = 2;
+    constexpr std::size_t kInquiryLengthAt = 4;
+    constexpr std::uint32_t kInquiryHeaderBytes = 5;
+    constexpr std::size_t kInquiryVendorAt = 8;
+    constexpr std::size_t kInquiryProductAt = 16;
+    constexpr std::size_t kInquiryProductBytes = 16;
+    constexpr std::size_t kInquiryRevisionAt = 32;
+    constexpr std::size_t kInquirySerialAt = 36;
+    constexpr std::size_t kModeExtentLengthAt = 3;
+    constexpr std::size_t kModeBlockCountAt = 5;
+    constexpr std::size_t kModeBlockCountBytes = 3;
+    constexpr std::size_t kModeBlockSizeAt = 10;
+    constexpr std::uint32_t kWordBytes = 2;
     const std::uint8_t cmd = u8(state_[0]);
-    const std::uint8_t lun = static_cast<std::uint8_t>(u8(state_[1]) >> 5);
-    std::uint64_t lba = (static_cast<std::uint32_t>(u8(state_[1]) & 0x1Fu) << 16)
-        | (static_cast<std::uint32_t>(u8(state_[2])) << 8)
-        | u8(state_[3]);
-    std::uint32_t length = u8(state_[4]);
+    const std::span<const std::byte, proto::kDiskStateBytes> cdb(state_);
+    constexpr unsigned kLunShift = 5;
+    constexpr std::size_t kCdbWordBytes = sizeof(std::uint32_t);
+    const std::uint8_t lun = static_cast<std::uint8_t>(u8(state_[1]) >> kLunShift);
+    std::uint64_t lba = infra::load_be<std::uint32_t>(cdb.first<kCdbWordBytes>()) & kCdb6LbaMask;
+    std::uint32_t length = u8(state_[kCdb6LengthAt]);
     if (length == 0)
-        length = 256;
+        length = kCdb6ZeroLengthBlocks;
     const std::uint64_t blocks = slot.image->size().v / kBlockBytes;
+    const auto block_count = static_cast<std::uint32_t>(blocks);
     const auto reply_words = [&] {
-        return std::span<const std::byte>(reply_).first((length / 2u) * 2u);
+        return std::span<const std::byte>(reply_).first((length / kWordBytes) * kWordBytes);
     };
     reply_.fill(std::byte{0});
 
@@ -254,12 +277,9 @@ void AcsiServant::dispatch_(Slot& slot) {
             if (lun != 0)
                 return answer_(slot, kStatusCheck, kAscInvalidLun);
 
-            const std::uint32_t last = static_cast<std::uint32_t>(blocks) - 1u;
-            reply_[0] = b8(last >> 24);
-            reply_[1] = b8(last >> 16);
-            reply_[2] = b8(last >> 8);
-            reply_[3] = b8(last);
-            reply_[6] = std::byte{kBlockSizeCode};
+            const std::uint32_t last = block_count - 1u;
+            infra::store_be<std::uint32_t>(std::span(reply_).first<kCdbWordBytes>(), last);
+            reply_[kCapacityBlockSizeAt] = std::byte{kBlockSizeCode};
             memory_write_(std::span<const std::byte>(reply_).first(kCapacityBytes));
             return answer_(slot, kStatusGood, kAscNone);
         }
@@ -272,10 +292,10 @@ void AcsiServant::dispatch_(Slot& slot) {
         case kCmdRequestSense:
             if (lun != 0)
                 slot.asc = kAscInvalidLun;
-            reply_[7] = std::byte{kSenseAdditionalLength};
+            reply_[kSenseLengthAt] = std::byte{kSenseAdditionalLength};
             if (slot.asc != kAscNone) {
-                reply_[2] = std::byte{kSenseKeyIllegalRequest};
-                reply_[12] = std::byte{slot.asc};
+                reply_[kSenseKeyAt] = std::byte{kSenseKeyIllegalRequest};
+                reply_[kSenseAscAt] = std::byte{slot.asc};
             }
             memory_write_(std::span<const std::byte>(reply_).first(kSenseBytes));
             return answer_(slot, kStatusGood, kAscNone);
@@ -287,11 +307,10 @@ void AcsiServant::dispatch_(Slot& slot) {
             if (lun != 0)
                 return answer_(slot, kStatusCheck, kAscInvalidLun);
             if (cmd == kCmdRead10 || cmd == kCmdWrite10) {
-                lba = (static_cast<std::uint32_t>(u8(state_[2])) << 24)
-                    | (static_cast<std::uint32_t>(u8(state_[3])) << 16)
-                    | (static_cast<std::uint32_t>(u8(state_[4])) << 8)
-                    | u8(state_[5]);
-                length = (static_cast<std::uint32_t>(u8(state_[7])) << 8) | u8(state_[8]);
+                lba = infra::load_be<std::uint32_t>(cdb.subspan<kCdb10LbaAt, kCdbWordBytes>());
+                length = infra::load_be<std::uint16_t>(
+                    cdb.subspan<kCdb10LengthAt, sizeof(std::uint16_t)>()
+                );
             }
             if (lba + length > blocks)
                 return answer_(slot, kStatusCheck, kAscLbaOutOfRange);
@@ -301,18 +320,30 @@ void AcsiServant::dispatch_(Slot& slot) {
         }
 
         case kCmdInquiry: {
-            reply_[2] = std::byte{kInquiryScsi2};
-            reply_[4] = b8(length - 5u);
-            put_text(std::span(reply_).subspan(8, kVendor.size()), kVendor, std::byte{' '});
-            put_text(std::span(reply_).subspan(16, 16), {}, std::byte{' '});
+            reply_[kInquiryVersionAt] = std::byte{kInquiryScsi2};
+            reply_[kInquiryLengthAt] = b8(length - kInquiryHeaderBytes);
             put_text(
-                std::span(reply_).subspan(16, kInquiryNameBytes),
+                std::span(reply_).subspan(kInquiryVendorAt, kVendor.size()),
+                kVendor,
+                std::byte{' '}
+            );
+            put_text(
+                std::span(reply_).subspan(kInquiryProductAt, kInquiryProductBytes),
+                {},
+                std::byte{' '}
+            );
+            put_text(
+                std::span(reply_).subspan(kInquiryProductAt, kInquiryNameBytes),
                 slot.name.view(),
                 std::byte{0}
             );
-            put_text(std::span(reply_).subspan(32, kRevision.size()), kRevision, std::byte{' '});
             put_text(
-                std::span(reply_).subspan(36, kInquirySerialBytes),
+                std::span(reply_).subspan(kInquiryRevisionAt, kRevision.size()),
+                kRevision,
+                std::byte{' '}
+            );
+            put_text(
+                std::span(reply_).subspan(kInquirySerialAt, kInquirySerialBytes),
                 serial_.view(),
                 std::byte{' '}
             );
@@ -325,12 +356,15 @@ void AcsiServant::dispatch_(Slot& slot) {
         case kCmdModeSense: {
             if (lun != 0)
                 return answer_(slot, kStatusCheck, kAscInvalidLun);
-            const auto count = static_cast<std::uint32_t>(blocks);
-            reply_[3] = std::byte{kModeSenseExtentBytes};
-            reply_[5] = b8(count >> 16);
-            reply_[6] = b8(count >> 8);
-            reply_[7] = b8(count);
-            reply_[10] = std::byte{kBlockSizeCode};
+            reply_[kModeExtentLengthAt] = std::byte{kModeSenseExtentBytes};
+            std::array<std::byte, kCdbWordBytes> count_be{};
+            infra::store_be<std::uint32_t>(std::span(count_be), block_count);
+            std::copy_n(
+                count_be.begin() + 1,
+                kModeBlockCountBytes,
+                reply_.begin() + kModeBlockCountAt
+            );
+            reply_[kModeBlockSizeAt] = std::byte{kBlockSizeCode};
             memory_write_(reply_words());
             return answer_(slot, kStatusGood, kAscNone);
         }
@@ -381,11 +415,7 @@ proto::DiskAct AcsiServant::read_step_(std::span<std::byte, proto::kDiskActBytes
     const std::size_t k = std::min(proto::kDiskActBytes, chunk_len_ - chunk_off_);
     std::memcpy(bytes.data(), chunk_.data() + chunk_off_, k);
     chunk_off_ += k;
-    return proto::DiskAct{
-        .kind = proto::DiskAct::Kind::Out,
-        .opcode = kWriteMemory,
-        .len = static_cast<std::uint16_t>(k)
-    };
+    return proto::DiskAct::out(kWriteMemory, static_cast<std::uint16_t>(k));
 }
 
 proto::DiskAct AcsiServant::write_step_(std::span<std::byte, proto::kDiskActBytes> bytes) {
@@ -401,11 +431,7 @@ proto::DiskAct AcsiServant::write_step_(std::span<std::byte, proto::kDiskActByte
         length_ -= chunk_blocks_;
     }
     in_len_ = std::min(proto::kDiskActBytes, chunk_len_ - chunk_off_);
-    return proto::DiskAct{
-        .kind = proto::DiskAct::Kind::In,
-        .opcode = kReadMemory,
-        .len = static_cast<std::uint16_t>(in_len_)
-    };
+    return proto::DiskAct::in(kReadMemory, static_cast<std::uint16_t>(in_len_));
 }
 
 }

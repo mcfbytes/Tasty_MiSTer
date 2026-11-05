@@ -6,6 +6,7 @@
 #include <cstddef>
 
 #include "infra/crc32.h"
+#include "infra/endian.h"
 
 namespace mister::cores {
 namespace {
@@ -36,34 +37,35 @@ constexpr std::array<std::uint32_t, 64> kSha256K{
 };
 
 std::uint32_t be32(const std::uint8_t* p) {
-    return (std::uint32_t{p[0]} << 24)
-        | (std::uint32_t{p[1]} << 16)
-        | (std::uint32_t{p[2]} << 8)
-        | std::uint32_t{p[3]};
+    constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
+    return infra::load_be<std::uint32_t>(std::span<const std::uint8_t, kWordBytes>(p, kWordBytes));
 }
 
 int hex(char c) {
+    constexpr int kHexLetterBase = 10;
     if (c >= '0' && c <= '9')
         return c - '0';
     if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
+        return c - 'a' + kHexLetterBase;
     if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
+        return c - 'A' + kHexLetterBase;
     return -1;
 }
 
 }
 
 std::optional<DigestValue> parse_hex_digest(std::string_view text, DigestKind kind) noexcept {
+    constexpr std::size_t kHexPerByte = 2;
+    constexpr unsigned kNibbleBits = 4;
     DigestValue v{.kind = kind, .len = digest_len(kind)};
-    if (text.size() != 2u * v.len)
+    if (text.size() != kHexPerByte * v.len)
         return std::nullopt;
     for (std::size_t i = 0; i < v.len; ++i) {
-        const int hi = hex(text[2 * i]);
-        const int lo = hex(text[2 * i + 1]);
+        const int hi = hex(text[kHexPerByte * i]);
+        const int lo = hex(text[kHexPerByte * i + 1]);
         if (hi < 0 || lo < 0)
             return std::nullopt;
-        v.bytes[i] = static_cast<std::uint8_t>(hi << 4 | lo);
+        v.bytes[i] = static_cast<std::uint8_t>(hi << kNibbleBits | lo);
     }
     return v;
 }
@@ -83,32 +85,51 @@ RomDigest::RomDigest(DigestKind kind) noexcept : kind_(kind) {
 }
 
 void RomDigest::sha1_block_(const std::uint8_t* p) noexcept {
-    std::array<std::uint32_t, 80> w{};
-    for (std::size_t i = 0; i < 16; ++i)
-        w[i] = be32(p + 4 * i);
-    for (std::size_t i = 16; i < 80; ++i)
-        w[i] = std::rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+    constexpr std::size_t kBlockWords = 16;
+    constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
+    constexpr std::size_t kSha1Rounds = 80;
+    constexpr std::size_t kSha1Stage = 20;
+    constexpr std::uint32_t kSha1K0 = 0x5A827999u;
+    constexpr std::uint32_t kSha1K1 = 0x6ED9EBA1u;
+    constexpr std::uint32_t kSha1K2 = 0x8F1BBCDCu;
+    constexpr std::uint32_t kSha1K3 = 0xCA62C1D6u;
+    constexpr std::size_t kSha1Stage2 = 2 * kSha1Stage;
+    constexpr std::size_t kSha1Stage3 = 3 * kSha1Stage;
+    constexpr int kSha1StepRot = 5;
+    constexpr int kSha1BRot = 30;
+    constexpr std::size_t kSha1Back3 = 3;
+    constexpr std::size_t kSha1Back8 = 8;
+    constexpr std::size_t kSha1Back14 = 14;
+    constexpr std::size_t kSha1Back16 = 16;
+    std::array<std::uint32_t, kSha1Rounds> w{};
+    for (std::size_t i = 0; i < kBlockWords; ++i)
+        w[i] = be32(p + kWordBytes * i);
+    for (std::size_t i = kBlockWords; i < kSha1Rounds; ++i)
+        w[i] = std::rotl(
+            w[i - kSha1Back3] ^ w[i - kSha1Back8] ^ w[i - kSha1Back14] ^ w[i - kSha1Back16],
+            1
+        );
     std::uint32_t a = h_[0], b = h_[1], c = h_[2], d = h_[3], e = h_[4];
-    for (std::size_t i = 0; i < 80; ++i) {
+    for (std::size_t i = 0; i < kSha1Rounds; ++i) {
         std::uint32_t f = 0;
         std::uint32_t k = 0;
-        if (i < 20) {
+        if (i < kSha1Stage) {
             f = (b & c) | (~b & d);
-            k = 0x5A827999u;
-        } else if (i < 40) {
+            k = kSha1K0;
+        } else if (i < kSha1Stage2) {
             f = b ^ c ^ d;
-            k = 0x6ED9EBA1u;
-        } else if (i < 60) {
+            k = kSha1K1;
+        } else if (i < kSha1Stage3) {
             f = (b & c) | (b & d) | (c & d);
-            k = 0x8F1BBCDCu;
+            k = kSha1K2;
         } else {
             f = b ^ c ^ d;
-            k = 0xCA62C1D6u;
+            k = kSha1K3;
         }
-        const std::uint32_t t = std::rotl(a, 5) + f + e + k + w[i];
+        const std::uint32_t t = std::rotl(a, kSha1StepRot) + f + e + k + w[i];
         e = d;
         d = c;
-        c = std::rotl(b, 30);
+        c = std::rotl(b, kSha1BRot);
         b = a;
         a = t;
     }
@@ -120,30 +141,65 @@ void RomDigest::sha1_block_(const std::uint8_t* p) noexcept {
 }
 
 void RomDigest::sha256_block_(const std::uint8_t* p) noexcept {
-    std::array<std::uint32_t, 64> w{};
-    for (std::size_t i = 0; i < 16; ++i)
-        w[i] = be32(p + 4 * i);
-    for (std::size_t i = 16; i < 64; ++i) {
-        const std::uint32_t s0 = std::rotr(w[i - 15], 7)
-            ^ std::rotr(w[i - 15], 18)
-            ^ (w[i - 15] >> 3);
-        const std::uint32_t s1 = std::rotr(w[i - 2], 17)
-            ^ std::rotr(w[i - 2], 19)
-            ^ (w[i - 2] >> 10);
-        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    constexpr std::size_t kBlockWords = 16;
+    constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
+    constexpr std::size_t kSha256Rounds = 64;
+    constexpr std::size_t kSha256Words = 8;
+    constexpr std::size_t kSha256Back15 = 15;
+    constexpr std::size_t kSha256Back2 = 2;
+    constexpr std::size_t kSha256Back16 = 16;
+    constexpr std::size_t kSha256Back7 = 7;
+    constexpr int kSigma0Rot1 = 7;
+    constexpr int kSigma0Rot2 = 18;
+    constexpr int kSigma0Shift = 3;
+    constexpr int kSigma1Rot1 = 17;
+    constexpr int kSigma1Rot2 = 19;
+    constexpr int kSigma1Shift = 10;
+    constexpr int kBigSigma1Rot1 = 6;
+    constexpr int kBigSigma1Rot2 = 11;
+    constexpr int kBigSigma1Rot3 = 25;
+    constexpr int kBigSigma0Rot1 = 2;
+    constexpr int kBigSigma0Rot2 = 13;
+    constexpr int kBigSigma0Rot3 = 22;
+    constexpr std::size_t kVa = 0;
+    constexpr std::size_t kVb = 1;
+    constexpr std::size_t kVc = 2;
+    constexpr std::size_t kVe = 4;
+    constexpr std::size_t kVf = 5;
+    constexpr std::size_t kVg = 6;
+    constexpr std::size_t kVh = 7;
+    std::array<std::uint32_t, kSha256Rounds> w{};
+    for (std::size_t i = 0; i < kBlockWords; ++i)
+        w[i] = be32(p + kWordBytes * i);
+    for (std::size_t i = kBlockWords; i < kSha256Rounds; ++i) {
+        const std::uint32_t x = w[i - kSha256Back15];
+        const std::uint32_t y = w[i - kSha256Back2];
+        const std::uint32_t s0 = std::rotr(x, kSigma0Rot1)
+            ^ std::rotr(x, kSigma0Rot2)
+            ^ (x >> kSigma0Shift);
+        const std::uint32_t s1 = std::rotr(y, kSigma1Rot1)
+            ^ std::rotr(y, kSigma1Rot2)
+            ^ (y >> kSigma1Shift);
+        w[i] = w[i - kSha256Back16] + s0 + w[i - kSha256Back7] + s1;
     }
-    std::array<std::uint32_t, 8> v = h_;
-    for (std::size_t i = 0; i < 64; ++i) {
-        const std::uint32_t s1 = std::rotr(v[4], 6) ^ std::rotr(v[4], 11) ^ std::rotr(v[4], 25);
-        const std::uint32_t ch = (v[4] & v[5]) ^ (~v[4] & v[6]);
-        const std::uint32_t t1 = v[7] + s1 + ch + kSha256K[i] + w[i];
-        const std::uint32_t s0 = std::rotr(v[0], 2) ^ std::rotr(v[0], 13) ^ std::rotr(v[0], 22);
-        const std::uint32_t mj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
+    std::array<std::uint32_t, kSha256Words> v = h_;
+    for (std::size_t i = 0; i < kSha256Rounds; ++i) {
+        const std::uint32_t e = v[kVe];
+        const std::uint32_t a = v[kVa];
+        const std::uint32_t s1 = std::rotr(e, kBigSigma1Rot1)
+            ^ std::rotr(e, kBigSigma1Rot2)
+            ^ std::rotr(e, kBigSigma1Rot3);
+        const std::uint32_t ch = (e & v[kVf]) ^ (~e & v[kVg]);
+        const std::uint32_t t1 = v[kVh] + s1 + ch + kSha256K[i] + w[i];
+        const std::uint32_t s0 = std::rotr(a, kBigSigma0Rot1)
+            ^ std::rotr(a, kBigSigma0Rot2)
+            ^ std::rotr(a, kBigSigma0Rot3);
+        const std::uint32_t mj = (a & v[kVb]) ^ (a & v[kVc]) ^ (v[kVb] & v[kVc]);
         std::copy_backward(v.begin(), v.end() - 1, v.end());
-        v[4] += t1;
-        v[0] = t1 + s0 + mj;
+        v[kVe] += t1;
+        v[kVa] = t1 + s0 + mj;
     }
-    for (std::size_t i = 0; i < 8; ++i)
+    for (std::size_t i = 0; i < kSha256Words; ++i)
         h_[i] += v[i];
 }
 
@@ -162,6 +218,7 @@ void RomDigest::block_(const std::uint8_t* p) noexcept {
 }
 
 void RomDigest::update(std::span<const std::uint8_t> data) noexcept {
+    constexpr std::size_t kBlockBytes = 64;
     switch (kind_) {
         case DigestKind::Md5:
             md5_.update(data);
@@ -173,24 +230,32 @@ void RomDigest::update(std::span<const std::uint8_t> data) noexcept {
         case DigestKind::Sha256:
             break;
     }
-    std::size_t fill = static_cast<std::size_t>(total_ % 64u);
+    std::size_t fill = static_cast<std::size_t>(total_ % kBlockBytes);
     total_ += data.size();
     std::size_t i = 0;
     if (fill != 0) {
-        const std::size_t n = std::min(data.size(), 64 - fill);
+        const std::size_t n = std::min(data.size(), kBlockBytes - fill);
         std::copy_n(data.data(), n, tail_.data() + fill);
         i = n;
         fill += n;
-        if (fill < 64)
+        if (fill < kBlockBytes)
             return;
         block_(tail_.data());
     }
-    for (; i + 64 <= data.size(); i += 64)
+    for (; i + kBlockBytes <= data.size(); i += kBlockBytes)
         block_(data.data() + i);
     std::copy(data.begin() + static_cast<std::ptrdiff_t>(i), data.end(), tail_.begin());
 }
 
 DigestValue RomDigest::finish() noexcept {
+    constexpr std::size_t kBlockBytes = 64;
+    constexpr std::size_t kLengthAt = 56;
+    constexpr std::size_t kLengthBytes = 8;
+    constexpr std::uint8_t kPadMarker = 0x80;
+    constexpr unsigned kByteBits = 8;
+    constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
+    constexpr unsigned kTopByteShift = 24;
+    constexpr unsigned kTopBitShift = 56;
     DigestValue out{.kind = kind_, .len = digest_len(kind_)};
     switch (kind_) {
         case DigestKind::Md5: {
@@ -200,31 +265,33 @@ DigestValue RomDigest::finish() noexcept {
         }
         case DigestKind::Crc32: {
             for (std::size_t i = 0; i < out.len; ++i)
-                out.bytes[i] = static_cast<std::uint8_t>(h_[0] >> (24 - 8 * i));
+                out.bytes[i] = static_cast<std::uint8_t>(h_[0] >> (kTopByteShift - kByteBits * i));
             return out;
         }
         case DigestKind::Sha1:
         case DigestKind::Sha256:
             break;
     }
-    const std::uint64_t bits = total_ * 8u;
-    std::size_t fill = static_cast<std::size_t>(total_ % 64u);
-    tail_[fill++] = 0x80;
-    if (fill > 56) {
+    const std::uint64_t bits = total_ * kByteBits;
+    std::size_t fill = static_cast<std::size_t>(total_ % kBlockBytes);
+    tail_[fill++] = kPadMarker;
+    if (fill > kLengthAt) {
         std::fill(tail_.begin() + static_cast<std::ptrdiff_t>(fill), tail_.end(), std::uint8_t{0});
         block_(tail_.data());
         fill = 0;
     }
     std::fill(
         tail_.begin() + static_cast<std::ptrdiff_t>(fill),
-        tail_.begin() + 56,
+        tail_.begin() + kLengthAt,
         std::uint8_t{0}
     );
-    for (std::size_t i = 0; i < 8; ++i)
-        tail_[56 + i] = static_cast<std::uint8_t>(bits >> (56 - 8 * i));
+    for (std::size_t i = 0; i < kLengthBytes; ++i)
+        tail_[kLengthAt + i] = static_cast<std::uint8_t>(bits >> (kTopBitShift - kByteBits * i));
     block_(tail_.data());
     for (std::size_t i = 0; i < out.len; ++i)
-        out.bytes[i] = static_cast<std::uint8_t>(h_[i / 4] >> (24 - 8 * (i % 4)));
+        out.bytes[i] = static_cast<std::uint8_t>(
+            h_[i / kWordBytes] >> (kTopByteShift - kByteBits * (i % kWordBytes))
+        );
     return out;
 }
 

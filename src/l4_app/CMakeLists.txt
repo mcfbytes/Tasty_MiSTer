@@ -123,6 +123,7 @@ add_library(mister_app STATIC
   src/rt_main.cpp
   src/rumble_relay.cpp
   src/rt_park.cpp
+  src/save_flush.cpp
   src/save_image_source.cpp
   src/scaler_frame_source.cpp
   src/scanout_packet.cpp
@@ -188,7 +189,6 @@ if(TASTY_WITH_HDOSD)
 endif()
 
 tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
-  app/activity_source.h
   app/avi_encoder.h
   app/avi_format.h
   app/avi_write_status.h
@@ -325,7 +325,6 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/mra_facts.h
   app/name_config.h
   app/remembered_path.h
-  app/link_osd_rows.h
   app/osd_row_tally.h
   app/osd_rows.h
   app/osd_wire.h
@@ -349,6 +348,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/played_history.h
   app/ui_write_lane.h
   app/write_verdict.h
+  app/verdict_sinks.h
   app/mgl_doc.h
   app/romset_alias_reader.h
   app/romset_aliases.h
@@ -420,6 +420,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/cheat_call.h
   app/cheat_link.h
   app/link_op_dispatch.h
+  app/link_op_producers.h
   app/link_producers.h
   app/pending_load.h
   app/link_binder.h

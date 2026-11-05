@@ -34,7 +34,7 @@ public:
 
     [[nodiscard]] bool audio_cd() const noexcept { return audio_cd_; }
 
-    [[nodiscard]] std::uint8_t disc_type() const noexcept { return disc_type_; }
+    [[nodiscard]] DiscType disc_type() const noexcept { return disc_type_; }
 
     [[nodiscard]] std::size_t toc_entries() const noexcept { return toc_count_; }
 
@@ -44,7 +44,7 @@ public:
 
     [[nodiscard]] MountState mount_disc(std::string_view path) override;
 
-    void set_region(std::uint8_t) override { TASTY_SEAT_BODY(CdiCore); }
+    void set_region(proto::RegionCode) override { TASTY_SEAT_BODY(CdiCore); }
 
     [[nodiscard]] Ex<void> deferred_reset() override {
         TASTY_SEAT_BODY(CdiCore);
@@ -78,9 +78,13 @@ private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     [[nodiscard]] Ex<void> on_mount(IoIndex slot, const MountedPath& p) override;
 
-    [[nodiscard]] IStagingCore* on_staging_core() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<IStagingCore> on_staging_core() noexcept override {
+        return infra::OptRef<IStagingCore>{*this};
+    }
 
-    [[nodiscard]] proto::IBlockServer* on_block_server() noexcept override { return this; }
+    [[nodiscard]] infra::OptRef<proto::IBlockServer> on_block_server() noexcept override {
+        return infra::OptRef<proto::IBlockServer>{*this};
+    }
 
     enum class Answer : std::uint8_t { TocArea, Track, LeadOut };
     [[nodiscard]] Answer classify_(std::int32_t lba) const noexcept;
@@ -106,7 +110,7 @@ private:
     bool probed_ = false;
     bool audio_cd_ = false;
 
-    std::uint8_t disc_type_ = 0;
+    DiscType disc_type_ = DiscType::CdRom;
     std::array<cdi::TocEntry, cdi::kTocEntries> toc_{};
     std::size_t toc_count_ = 0;
     StagePlan plan_{};

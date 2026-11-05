@@ -16,7 +16,7 @@ public:
 
     virtual void refuse() = 0;
 
-    virtual void write_status(proto::BitField bits, std::uint32_t value) = 0;
+    virtual void write_status(proto::BitField bits, proto::FieldValue value) = 0;
 
     virtual void toggle(proto::BitField bits, bool ex) = 0;
 

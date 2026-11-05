@@ -6,27 +6,24 @@
 
 namespace mister::proto {
 
-Ex<void> AxiPadEncoder::digital(std::uint16_t opcode, JoyMask map) {
+Ex<void> AxiPadEncoder::digital(UioOp opcode, JoyMask map) {
     TASTY_SEAT_BODY(AxiPadEncoder);
     if (!block_.honours(opcode))
         return otherwise_.digital(opcode, map);
-    if (const auto s = PadLevels::slot(opcode, 0))
-        return level_(*s, map.v);
+    const PadLevels::Slot s = PadLevels::level_of(opcode, 0);
+    if (PadLevels::is_level(s))
+        return level_(s, map.v);
     return store_(opcode, 0, map.v);
 }
 
-Ex<void> AxiPadEncoder::stick(
-    std::uint16_t opcode,
-    std::uint8_t index,
-    std::uint8_t x,
-    std::uint8_t y
-) {
+Ex<void> AxiPadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) {
     TASTY_SEAT_BODY(AxiPadEncoder);
     if (!block_.honours(opcode))
-        return otherwise_.stick(opcode, index, x, y);
-    const std::uint32_t word = PadLevels::stick_word(x, y);
-    if (const auto s = PadLevels::slot(opcode, index))
-        return level_(*s, word);
+        return otherwise_.stick(opcode, index, pos);
+    const std::uint32_t word = PadLevels::stick_word(pos);
+    const PadLevels::Slot s = PadLevels::level_of(opcode, index);
+    if (PadLevels::is_level(s))
+        return level_(s, word);
     return store_(opcode, index, word);
 }
 
@@ -37,44 +34,41 @@ void AxiPadEncoder::trust(bool ready) noexcept {
         return;
 
     for (std::size_t i = 0; i < PadLevels::kCount; ++i)
-        (void)settle_(i);
+        (void)settle_(PadLevels::slot_at(i));
 }
 
-std::uint32_t AxiPadEncoder::link_words(std::uint16_t opcode, bool follow_up) const noexcept {
+std::uint32_t AxiPadEncoder::link_words(UioOp opcode, bool follow_up) const noexcept {
     TASTY_SEAT_BODY(AxiPadEncoder);
     constexpr std::uint32_t kStickWords = 4;
     if (!block_.honours(opcode))
         return otherwise_.link_words(opcode, follow_up);
-    return (follow_up && !block_.honours(static_cast<std::uint16_t>(UioOp::Astick))) ? kStickWords
-                                                                                     : 0u;
+    return (follow_up && !block_.honours(UioOp::Astick)) ? kStickWords : 0u;
 }
 
-Ex<void> AxiPadEncoder::level_(std::size_t slot, std::uint32_t word) {
-    want_.put(slot, word);
+Ex<void> AxiPadEncoder::level_(PadLevels::Slot level, std::uint32_t word) {
+    want_.put(level, word);
     if (!trusted_) {
         ++held_;
         return {};
     }
-    return settle_(slot);
+    return settle_(level);
 }
 
-Ex<void> AxiPadEncoder::settle_(std::size_t slot) {
-    const std::optional<std::uint32_t> want = want_.at(slot);
-    if (!want || want == stored_.at(slot))
+Ex<void> AxiPadEncoder::settle_(PadLevels::Slot level) {
+    const std::optional<std::uint32_t> want = want_.at(level);
+    if (!want || want == stored_.at(level))
         return {};
-    const PadLevels::Reg r = PadLevels::kRegs[slot];
+    const PadLevels::Reg r = PadLevels::reg(level);
     if (auto e = store_(r.opcode, r.index, *want); !e)
         return e;
-    stored_.put(slot, *want);
+    stored_.put(level, *want);
     return {};
 }
 
-Ex<void> AxiPadEncoder::store_(std::uint16_t opcode, std::uint8_t index, std::uint32_t word) {
+Ex<void> AxiPadEncoder::store_(UioOp opcode, std::uint8_t index, std::uint32_t word) {
     if (!trusted_)
-        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), opcode});
-    const auto off = static_cast<std::uint32_t>(
-        hal::UioRegFile::at(static_cast<std::uint8_t>(opcode), index)
-    );
+        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), proto::word(opcode).v});
+    const auto off = static_cast<std::uint32_t>(hal::UioRegFile::at(byte(opcode), index));
     const auto reg = pad_.at<hal::reg::WO>(off);
     if (!reg)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), off});

@@ -3,13 +3,14 @@
 
 #include <cstdint>
 
+#include "hal/types.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
 namespace mister::reactor {
 
 struct FrameRecord {
-    std::uint32_t seq = 0;
+    hal::FrameSeq seq{};
 };
 
 using FrameCell = xthread::Telemetry<FrameRecord, SeatTag::Frame>;

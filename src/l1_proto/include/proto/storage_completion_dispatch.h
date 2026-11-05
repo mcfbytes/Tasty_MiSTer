@@ -15,16 +15,15 @@ concept StorageCompletionSink = requires(
     S& s,
     const StorageCompletion& m,
     const StorageCompletion::Head& h,
-    SlotIndex i,
     IBlockRoles& r
 ) {
-    s.on(std::declval<const StorageCompletion::Read&>(), h, i, r);
-    s.on(std::declval<const StorageCompletion::Write&>(), h, i, r);
-    s.on(std::declval<const StorageCompletion::Create&>(), h, i, r);
-    s.on(std::declval<const StorageCompletion::Flush&>(), h, i, r);
-    s.on(std::declval<const StorageCompletion::Attach&>(), h, i, r);
-    s.on(std::declval<const StorageCompletion::Detach&>(), h, i, r);
-    s.misrouted(m, i, r);
+    s.on(std::declval<const StorageCompletion::Read&>(), h, r);
+    s.on(std::declval<const StorageCompletion::Write&>(), h, r);
+    s.on(std::declval<const StorageCompletion::Create&>(), h, r);
+    s.on(std::declval<const StorageCompletion::Flush&>(), h, r);
+    s.on(std::declval<const StorageCompletion::Attach&>(), h, r);
+    s.on(std::declval<const StorageCompletion::Detach&>(), h, r);
+    s.misrouted(m, r);
 };
 
 using StorageCompletionRoutes = infra::AllRouted;

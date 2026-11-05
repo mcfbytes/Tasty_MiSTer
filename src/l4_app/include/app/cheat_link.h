@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "svc/types.h"
 #include "app/cheat_apply.h"
 #include "app/cheat_blob_cell.h"
 #include "app/tx_digest_cell.h"
@@ -24,7 +25,7 @@ public:
         cores::Core* core,
         TxDigest::Kind kind,
         std::string_view path,
-        std::uint32_t crc,
+        svc::Crc32 crc,
         bool same_game
     ) noexcept override;
     [[nodiscard]] bool apply_cheats_counted(const CheatCall& call) noexcept override;

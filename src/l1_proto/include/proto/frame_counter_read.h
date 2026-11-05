@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include "hal/spi_transport.h"
+#include "proto/link.h"
 #include "proto/frame_count.h"
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -18,7 +18,7 @@ public:
 
     static constexpr std::uint32_t kReadWords = 1;
 
-    [[nodiscard]] Ex<FrameCount> read(hal::ISpiTransport& link);
+    [[nodiscard]] Ex<FrameCount> read(Link& link);
 
     [[nodiscard]] std::uint32_t reads() const noexcept { return reads_; }
 

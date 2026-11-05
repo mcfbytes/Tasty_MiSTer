@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/core_support.h"
+#include "cores/core_adopt.h"
+#include "proto/core_session.h"
 
 #include <algorithm>
 

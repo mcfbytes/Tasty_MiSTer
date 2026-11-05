@@ -25,10 +25,25 @@ bool starts_with(std::string_view s, std::string_view p) {
     return s.size() >= p.size() && s.compare(0, p.size(), p) == 0;
 }
 
+std::string_view after(std::string_view s, std::string_view prefix) {
+    return s.substr(prefix.size());
+}
+
+constexpr std::string_view kXmlExtension = ".mra";
+constexpr std::string_view kVideoModePrefix = "video_mode ";
+constexpr std::string_view kLoadCorePrefix = "load_core ";
+constexpr std::string_view kScreenshotPrefix = "screenshot";
+constexpr std::string_view kScaledWord = "scaled";
+constexpr std::string_view kVolumePrefix = "volume ";
+constexpr std::string_view kTasPlayPrefix = "tas_play ";
+constexpr std::string_view kRecStartPrefix = "rec_start ";
+constexpr std::string_view kRecArmPrefix = "rec_arm ";
+
 XmlKind xml_kind_of(std::string_view s) {
-    if (s.size() <= 4)
+    constexpr std::size_t kXmlExtensionLen = kXmlExtension.size();
+    if (s.size() <= kXmlExtensionLen)
         return XmlKind::Rbf;
-    const std::string_view tail = s.substr(s.size() - 4);
+    const std::string_view tail = s.substr(s.size() - kXmlExtensionLen);
     if (infra::ieq(tail, ".mra"))
         return XmlKind::Mra;
     if (infra::ieq(tail, ".mgl"))
@@ -70,10 +85,11 @@ std::optional<std::string_view> next_token(std::string_view& rest) {
 }
 
 std::optional<std::int32_t> small_int(std::string_view s) {
+    constexpr std::size_t kMaxSmallIntDigits = 9;
     if (s.size() > 1 && s.front() == '+' && s[1] != '-')
         s.remove_prefix(1);
     const std::size_t digits = !s.empty() && s.front() == '-' ? s.size() - 1 : s.size();
-    if (digits > 9)
+    if (digits > kMaxSmallIntDigits)
         return std::nullopt;
     return infra::parse_int<std::int32_t>(s);
 }
@@ -169,9 +185,9 @@ std::optional<ParsedRec> parse_rec(std::string_view args) {
             if (!take(bit))
                 return std::nullopt;
             if (key == "from")
-                v.opt.from_frame = *n;
+                v.opt.from_frame = MovieFrame{*n};
             else
-                v.opt.to_frame = *n;
+                v.opt.to_frame = MovieFrame{*n};
         } else if (key == "segment") {
             const auto n = parse_rec_size(val);
             if (!n || !rec_segment_ok(*n) || !take(kSeg))
@@ -195,15 +211,17 @@ CmdLineOutcome taken(bool t) noexcept {
 static_assert(kCmdLineMax <= app::kPathMax, "a FIFO read's operand always fits PathText");
 
 CmdLineOutcome deliver_cmd_line(std::string_view line, ICmdVerbSink& sink) noexcept {
+    constexpr std::int8_t kMaxAttenuation = 7;
+    constexpr char kVolumeDigitMax = '7';
 
     if (starts_with(line, "fb_cmd"))
         return taken(sink.on(CmdVerb::FbCmd{line}));
 
-    if (starts_with(line, "video_mode "))
-        return taken(sink.on(CmdVerb::VideoMode{line.substr(11)}));
+    if (starts_with(line, kVideoModePrefix))
+        return taken(sink.on(CmdVerb::VideoMode{after(line, kVideoModePrefix)}));
 
-    if (starts_with(line, "load_core ")) {
-        const std::string_view path = line.substr(10);
+    if (starts_with(line, kLoadCorePrefix)) {
+        const std::string_view path = after(line, kLoadCorePrefix);
         switch (xml_kind_of(line)) {
             case XmlKind::Mgl:
                 return taken(sink.on(CmdVerb::Playlist{path}));
@@ -215,27 +233,31 @@ CmdLineOutcome deliver_cmd_line(std::string_view line, ICmdVerbSink& sink) noexc
         return CmdLineOutcome::Unrecognised;
     }
 
-    if (starts_with(line, "screenshot")) {
-        std::string_view rest = lstrip(line.substr(10));
+    if (starts_with(line, kScreenshotPrefix)) {
+        std::string_view rest = lstrip(after(line, kScreenshotPrefix));
         bool scaled = false;
-        if (starts_with(rest, "scaled") && (rest.size() == 6 || is_blank(rest[6]))) {
+        if (starts_with(rest, kScaledWord)
+            && (rest.size() == kScaledWord.size() || is_blank(rest[kScaledWord.size()]))) {
             scaled = true;
-            rest = lstrip(rest.substr(6));
+            rest = lstrip(after(rest, kScaledWord));
         }
         return taken(sink.on(CmdVerb::Screenshot{rest, scaled}));
     }
 
-    if (starts_with(line, "volume ")) {
-        const std::string_view arg = line.substr(7);
+    if (starts_with(line, kVolumePrefix)) {
+        const std::string_view arg = after(line, kVolumePrefix);
         if (arg == "mute")
             return taken(sink.on(CmdVerb::Volume{proto::VolumeCmd::SetMute, 1}));
         if (arg == "unmute")
             return taken(sink.on(CmdVerb::Volume{proto::VolumeCmd::SetMute, 0}));
-        if (arg.size() == 1 && arg[0] >= '0' && arg[0] <= '7') {
+        if (arg.size() == 1 && arg[0] >= '0' && arg[0] <= kVolumeDigitMax) {
 
             const auto n = static_cast<std::int8_t>(arg[0] - '0');
             return taken(sink.on(
-                CmdVerb::Volume{proto::VolumeCmd::SetAtten, static_cast<std::int8_t>(7 - n)}
+                CmdVerb::Volume{
+                    proto::VolumeCmd::SetAtten,
+                    static_cast<std::int8_t>(kMaxAttenuation - n)
+                }
             ));
         }
         return CmdLineOutcome::Unrecognised;
@@ -244,8 +266,8 @@ CmdLineOutcome deliver_cmd_line(std::string_view line, ICmdVerbSink& sink) noexc
     if (line == "rtstats")
         return taken(sink.on(CmdVerb::RtStats{}));
 
-    if (starts_with(line, "tas_play ")) {
-        const auto v = parse_tas_play(line.substr(9));
+    if (starts_with(line, kTasPlayPrefix)) {
+        const auto v = parse_tas_play(after(line, kTasPlayPrefix));
         if (!v)
             return CmdLineOutcome::Unrecognised;
         return taken(sink.on(*v));
@@ -253,9 +275,9 @@ CmdLineOutcome deliver_cmd_line(std::string_view line, ICmdVerbSink& sink) noexc
     if (line == "tas_stop")
         return taken(sink.on(CmdVerb::TasStop{}));
 
-    if (starts_with(line, "rec_start ") || starts_with(line, "rec_arm ")) {
-        const bool arm = starts_with(line, "rec_arm ");
-        const auto v = parse_rec(line.substr(arm ? 8 : 10));
+    if (starts_with(line, kRecStartPrefix) || starts_with(line, kRecArmPrefix)) {
+        const bool arm = starts_with(line, kRecArmPrefix);
+        const auto v = parse_rec(after(line, arm ? kRecArmPrefix : kRecStartPrefix));
         if (!v)
             return CmdLineOutcome::Unrecognised;
         if (arm)
@@ -320,6 +342,7 @@ std::string_view CmdFifo::last_unrecognised() const noexcept {
 }
 
 Ex<CmdFifo> CmdFifo::open(const char* path, ICmdVerbSink& route) {
+    constexpr ::mode_t kFifoMode = 0666;
     if (path == nullptr) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
@@ -334,7 +357,7 @@ Ex<CmdFifo> CmdFifo::open(const char* path, ICmdVerbSink& route) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
 
-    if (::mkfifo(path, 0666) != 0) {
+    if (::mkfifo(path, kFifoMode) != 0) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
 

@@ -79,13 +79,13 @@ public:
 
     [[nodiscard]] bool set_dip_counted(
         infra::OptRef<cores::Core> core,
-        std::uint8_t row,
-        std::uint32_t choice
+        proto::DipRowIndex row,
+        proto::DipChoice choice
     ) noexcept override;
     [[nodiscard]] bool set_option_counted(
         infra::OptRef<cores::Core> core,
-        std::uint8_t row,
-        std::uint8_t choice
+        proto::OptionRowIndex row,
+        proto::FieldValue choice
     ) noexcept override;
 
     void publish_dip_table(infra::OptRef<cores::Core> core) noexcept;
@@ -187,8 +187,8 @@ inline void CoreOptionCells::answer_save_ask_(
     const proto::SaveKind kind = ask.which;
     const CorrelationTag tag = ask.tag;
 
-    cores::IDipSwitches* sw = nullptr;
-    cores::IConfigSlots* cs = nullptr;
+    infra::OptRef<cores::IDipSwitches> sw{};
+    infra::OptRef<cores::IConfigSlots> cs{};
     FixedStr<kConfigRelCap, StrFit::Reject> rel;
     std::span<const std::byte> payload;
 
@@ -197,8 +197,9 @@ inline void CoreOptionCells::answer_save_ask_(
 
     switch (kind) {
         case proto::SaveKind::Dips: {
-            sw = core.has_value() ? core->dip_switches() : nullptr;
-            if (sw == nullptr) {
+            if (core.has_value())
+                sw = core->dip_switches();
+            if (!sw) {
                 return (void)push_save_bytes_(kind, proto::SaveStatus::Refused, {}, {}, tag, host);
             }
             if (!sw->dips_dirty()) {
@@ -211,8 +212,9 @@ inline void CoreOptionCells::answer_save_ask_(
         }
         case proto::SaveKind::Slot:
         case proto::SaveKind::SlotNames: {
-            cs = core.has_value() ? core->config_slots() : nullptr;
-            if (cs == nullptr) {
+            if (core.has_value())
+                cs = core->config_slots();
+            if (!cs) {
 
                 if (!core.has_value())
                     publish_config_slots(core);
@@ -251,7 +253,7 @@ inline void CoreOptionCells::answer_save_ask_(
     }
     const bool
         accepted = push_save_bytes_(kind, proto::SaveStatus::Bytes, *path_id, data_id, tag, host);
-    if (accepted && kind == proto::SaveKind::Dips && sw != nullptr) {
+    if (accepted && kind == proto::SaveKind::Dips && sw.has_value()) {
 
         sw->mark_dips_saved();
         ++tally_.dip_saves;
@@ -264,8 +266,10 @@ inline ILinkEncoder::Outcome CoreOptionCells::on(
     Host&
 ) noexcept {
     TASTY_SEAT_BODY(CoreOptionCells);
-    cores::IConfigSlots* cs = ctx.core.has_value() ? ctx.core->config_slots() : nullptr;
-    if (cs == nullptr) {
+    infra::OptRef<cores::IConfigSlots> cs{};
+    if (ctx.core.has_value())
+        cs = ctx.core->config_slots();
+    if (!cs) {
         return ILinkEncoder::Outcome::Dropped;
     }
     std::span<const std::byte> blob{};
@@ -290,15 +294,19 @@ inline ILinkEncoder::Outcome CoreOptionCells::on(
     Host&
 ) noexcept {
     TASTY_SEAT_BODY(CoreOptionCells);
-    cores::IConfigSlots* cs = ctx.core.has_value() ? ctx.core->config_slots() : nullptr;
-    if (cs == nullptr) {
+    infra::OptRef<cores::IConfigSlots> cs{};
+    if (ctx.core.has_value())
+        cs = ctx.core->config_slots();
+    if (!cs) {
         return ILinkEncoder::Outcome::Dropped;
     }
     const auto count = std::min<std::uint8_t>(a.count, cores::kMaxConfigSlots);
     config_slot_scratch_ = ConfigSlotTable{};
     config_slot_scratch_.count = count;
     for (std::uint8_t i = 0; i < count; ++i) {
-        const InternedFile* const file = ctx.inbox.file(InternedFile::config_id(i));
+        const InternedFile* const file = ctx.inbox.file(
+            InternedFile::config_id(cores::ConfigSlot{i})
+        );
         std::span<const std::byte> blob{};
         if (file != nullptr && !file->bytes.empty()) {
             blob = std::as_bytes(std::span<const std::uint8_t>(file->bytes));
@@ -332,8 +340,10 @@ inline ILinkEncoder::Outcome CoreOptionCells::misrouted(
 
 inline void CoreOptionCells::publish_config_slots(infra::OptRef<cores::Core> core) noexcept {
     TASTY_SEAT_BODY(CoreOptionCells);
-    cores::IConfigSlots* cs = core.has_value() ? core->config_slots() : nullptr;
-    if (cs == nullptr || !vfs_)
+    infra::OptRef<cores::IConfigSlots> cs{};
+    if (core.has_value())
+        cs = core->config_slots();
+    if (!cs || !vfs_)
         config_slot_scratch_ = ConfigSlotTable{};
     config_slot_cell_.publish(config_slot_scratch_);
 }
@@ -344,8 +354,8 @@ inline void CoreOptionCells::publish_option_table(infra::OptRef<cores::Core> cor
     if (core.has_value()) {
 
         const cores::CoreProfile& p = core->profile();
-        cores::IOptionRows* rows = core->options();
-        if (rows == nullptr) {
+        const auto rows = core->options();
+        if (!rows) {
             option_cell_.publish(option_scratch_);
             return;
         }
@@ -354,7 +364,9 @@ inline void CoreOptionCells::publish_option_table(infra::OptRef<cores::Core> cor
         const std::size_t n = decls.size() < cap ? decls.size() : cap;
         option_scratch_.count = static_cast<std::uint8_t>(n);
         for (std::size_t i = 0; i < n; ++i) {
-            const cores::OptionRowView v = rows->option_view(i);
+            const cores::OptionRowView v = rows->option_view(
+                proto::OptionRowIndex{static_cast<std::uint8_t>(i)}
+            );
             OptionTable::Row& row = option_scratch_.rows[i];
             row.decl = infra::OptRef<const cores::OptionRow>{decls[i]};
             row.current = v.current;
@@ -381,21 +393,23 @@ inline void CoreOptionCells::publish_option_table(infra::OptRef<cores::Core> cor
 inline void CoreOptionCells::publish_dip_table(infra::OptRef<cores::Core> core) noexcept {
     TASTY_SEAT_BODY(CoreOptionCells);
     dip_scratch_ = DipTable{};
-    cores::IDipSwitches* sw = core.has_value() ? core->dip_switches() : nullptr;
-    if (sw != nullptr) {
+    infra::OptRef<cores::IDipSwitches> sw{};
+    if (core.has_value())
+        sw = core->dip_switches();
+    if (sw) {
         const std::size_t cap = std::size(dip_scratch_.rows);
         const std::size_t n = sw->dip_count() < cap ? sw->dip_count() : cap;
         dip_scratch_.count = static_cast<std::uint8_t>(n);
         for (std::size_t i = 0; i < n; ++i) {
-            const cores::DipRowView rv = sw->dip_row(i);
-            DipTable::Row& row = dip_scratch_.rows[i];
+            const auto at = proto::DipRowIndex::of(i);
+            const cores::DipRowView rv = sw->dip_row(at);
+            DipTable::Row& row = at.pick(dip_scratch_.rows);
             copy_cell_text(row.name, rv.name);
-            const std::size_t ids = std::size(row.ids);
-            row.choices = static_cast<std::uint8_t>(rv.choices < ids ? rv.choices : ids);
-            row.current = rv.current < row.choices ? rv.current : 0;
-            for (std::size_t m = 0; m < row.choices; ++m) {
-                copy_cell_text(row.ids[m], sw->dip_choice(i, m));
-            }
+            row.choices = rv.choices.capped_to(row.ids);
+            row.current = rv.current.within(row.choices) ? rv.current : proto::DipChoice{};
+            row.choices.each([&](proto::DipChoice m) {
+                copy_cell_text(m.pick(row.ids), sw->dip_choice(at, m));
+            });
         }
     }
     dip_cell_.publish(dip_scratch_);
@@ -403,12 +417,14 @@ inline void CoreOptionCells::publish_dip_table(infra::OptRef<cores::Core> core) 
 
 inline bool CoreOptionCells::set_dip_counted(
     infra::OptRef<cores::Core> core,
-    std::uint8_t row,
-    std::uint32_t choice
+    proto::DipRowIndex row,
+    proto::DipChoice choice
 ) noexcept {
     TASTY_SEAT_BODY(CoreOptionCells);
-    cores::IDipSwitches* sw = core.has_value() ? core->dip_switches() : nullptr;
-    if (sw == nullptr)
+    infra::OptRef<cores::IDipSwitches> sw{};
+    if (core.has_value())
+        sw = core->dip_switches();
+    if (!sw)
         return false;
     if (auto r = sw->set_dip(row, choice); !r)
         return false;
@@ -419,12 +435,14 @@ inline bool CoreOptionCells::set_dip_counted(
 
 inline bool CoreOptionCells::set_option_counted(
     infra::OptRef<cores::Core> core,
-    std::uint8_t row,
-    std::uint8_t choice
+    proto::OptionRowIndex row,
+    proto::FieldValue choice
 ) noexcept {
     TASTY_SEAT_BODY(CoreOptionCells);
-    cores::IOptionRows* rows = core.has_value() ? core->options() : nullptr;
-    if (rows == nullptr)
+    infra::OptRef<cores::IOptionRows> rows{};
+    if (core.has_value())
+        rows = core->options();
+    if (!rows)
         return false;
     if (auto r = rows->set_option(row, choice); !r)
         return false;

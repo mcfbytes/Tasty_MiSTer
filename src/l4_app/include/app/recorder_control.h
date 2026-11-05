@@ -61,7 +61,7 @@ public:
         std::time_t now
     ) noexcept;
 
-    [[nodiscard]] std::uint16_t generation() const noexcept { return gen_; }
+    [[nodiscard]] ControlGeneration generation() const noexcept { return gen_; }
 
 private:
     [[nodiscard]] std::string name_() const;
@@ -79,10 +79,10 @@ private:
     ) noexcept;
 
     Wiring w_;
-    std::uint16_t gen_ = 0;
+    ControlGeneration gen_{};
     RecorderStatusCell::Reader status_seen_{};
-    std::uint16_t logged_answer_ = 0;
-    std::uint16_t logged_end_ = 0;
+    ControlGeneration logged_answer_{};
+    ControlGeneration logged_end_{};
 };
 
 }

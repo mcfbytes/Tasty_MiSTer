@@ -135,7 +135,7 @@ struct UiRequest {
 
     struct SdramDetected {
         static constexpr Kind kKind = Kind::SdramDetected;
-        std::uint16_t osd_mask = 0;
+        proto::OsdMask osd_mask{};
     };
 
     struct SetHdLook {

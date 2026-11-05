@@ -79,7 +79,7 @@ public:
 
     std::optional<TrackIndex> track_for_lba(Lba lba) const;
 
-    std::uint32_t seek_ms(Lba from_lba, Lba to_lba) const;
+    SeekTime seek_time(Lba from_lba, Lba to_lba) const;
 
     void prefetch_hint(Lba lba);
 

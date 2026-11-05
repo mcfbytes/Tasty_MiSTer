@@ -101,10 +101,10 @@ void SaveStateAttach::take_ask_(const Ask& ask) noexcept {
     loan->core_name = ask.core_name;
     loan->rom_path = ask.rom_path;
     loan->arcade = ask.arcade;
-    loan->ok = 0;
-    loan->aborted = 0;
+    loan->ok = false;
+    loan->aborted = false;
     loan->abort_at = ui_.abort_level;
-    loan->err = Error{Errc::io, 0, 0};
+    loan->err = Error{Errc::io, infra::kNoSite, 0};
     chan_.send(std::move(loan));
     ui_.out = true;
 }
@@ -114,8 +114,8 @@ void SaveStateAttach::reap_() noexcept {
     if (!done)
         return;
     ui_.out = false;
-    bool attached = done.completed() && done->ok != 0 && !ui_.stale;
-    if (done.completed() && done->aborted != 0)
+    bool attached = done.completed() && done->ok && !ui_.stale;
+    if (done.completed() && done->aborted)
         ++ui_.facts.prime_aborts;
     ui_.stale = false;
 
@@ -163,7 +163,7 @@ void SaveStateAttach::scan_() noexcept {
     facts_cell_.publish(ui_.facts);
 }
 
-void SaveStateAttach::on_save(unsigned) {
+void SaveStateAttach::on_save(proto::StateSlot) {
     seat_assert<SeatTag::Ui>(ERR_SITE(), "SaveStateAttach::on_save off T-UI");
     ui_.raised = true;
     copy_.publish(cores::SaveCopyLevel{.writing = true});
@@ -172,7 +172,7 @@ void SaveStateAttach::on_save(unsigned) {
     toast_->deliver(
         infra::make<Event>(
             Event::InfoRequest{.id = InfoId::SavingState},
-            Event::Head{EmitSite{ERR_SITE()}, {}, kUncaused}
+            Event::Head{ERR_SITE(), {}, kUncaused}
         )
     );
 }
@@ -205,7 +205,7 @@ void SaveStateAttach::on_ui_pause() noexcept {
 
 void SaveStateAttach::finish_(bool ok, Error err) noexcept {
     io_.primer.end();
-    io_.job->ok = ok ? 1u : 0u;
+    io_.job->ok = ok;
     io_.job->err = err;
     io_.job.complete();
     io_.job = Chan::Job{};
@@ -229,7 +229,7 @@ void SaveStateAttach::serve() noexcept {
         return;
     }
     if (abort_.sample().value != io_.job->abort_at) {
-        io_.job->aborted = 1;
+        io_.job->aborted = true;
         finish_(false, Error{Errc::cancelled, ERR_SITE(), 0});
         return;
     }
@@ -239,7 +239,7 @@ void SaveStateAttach::serve() noexcept {
         return;
     }
     if (!*more)
-        finish_(true, Error{Errc::io, 0, 0});
+        finish_(true, Error{Errc::io, infra::kNoSite, 0});
 }
 
 bool SaveStateAttach::idle() const noexcept {

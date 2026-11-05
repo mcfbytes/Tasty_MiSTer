@@ -66,14 +66,14 @@ public:
 
     struct Look {
         bool flat = false;
-        std::uint32_t value = 0;
+        proto::FieldValue value{};
     };
 
     struct Press {
         bool select = false;
         bool minus = false;
         bool at_root = false;
-        std::uint32_t value = 0;
+        proto::FieldValue value{};
     };
 
     virtual ~OptionItem() = default;
@@ -87,7 +87,7 @@ public:
     [[nodiscard]] Carry build(const Source& in, const BuildEnv& env);
     [[nodiscard]] std::string compose(const Look& look) const;
 
-    [[nodiscard]] app::PageDescription::Row describe(const Look& look) const;
+    [[nodiscard]] std::optional<app::PageDescription::Row> describe(const Look& look) const;
     [[nodiscard]] Transition activate(const Press& press, IOptionHost& host) const;
 
     [[nodiscard]] virtual bool hidden_in_flat_root() const noexcept { return false; }
@@ -104,8 +104,8 @@ public:
     bool disabled = false;
     bool store_name = false;
     bool ext_word = false;
-    std::uint8_t page = 0;
-    std::uint8_t target_page = 0;
+    proto::SubmenuNo page{};
+    proto::SubmenuNo target_page{};
 
     std::uint8_t ioctl_index = 0;
 
@@ -127,7 +127,8 @@ protected:
 private:
     virtual Carry on_build(const Source& in, const BuildEnv& env) = 0;
     virtual std::string on_compose(const Look& look) const = 0;
-    virtual app::PageDescription::Row on_describe(const Look& look) const = 0;
+
+    virtual std::optional<app::PageDescription::Row> on_describe(const Look& look) const = 0;
     virtual Transition on_activate(const Press& press, IOptionHost& host) const = 0;
 };
 
@@ -261,6 +262,11 @@ static_assert(every_item_kind_maps_exactly_once());
     return OptionItem::Kind::Unknown;
 }
 
-std::uint32_t cycle_value(BitField bits, std::uint32_t current, int dir, const ISlotLabels* labels);
+proto::FieldValue cycle_value(
+    BitField bits,
+    proto::FieldValue current,
+    int dir,
+    const ISlotLabels* labels
+);
 
 }

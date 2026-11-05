@@ -5,6 +5,7 @@
 
 #include "app/input_decode.h"
 #include "app/input_wire.h"
+#include "app/types.h"
 #include "hal/spi_transport.h"
 #include "hal/boards_table.h"
 #include "proto/core_session.h"
@@ -41,7 +42,7 @@ public:
     InputEmit(const InputEmit&) = delete;
     InputEmit& operator=(const InputEmit&) = delete;
 
-    void on_rt_round(bool tick, std::uint32_t core_edge_seq, bool live);
+    void on_rt_round(bool tick, CoreEdgeSeq core_edge_seq, bool live);
 
     void apply_edge_reset();
 
@@ -62,7 +63,7 @@ private:
 
     xthread::WakeFlag::Cursor reset_seen_{};
 
-    std::uint32_t wm_core_edge_seq_ = 0;
+    CoreEdgeSeq wm_core_edge_seq_{};
 
     CountsCell counts_cell_{};
     xthread::Counter n_rt_rounds_{};

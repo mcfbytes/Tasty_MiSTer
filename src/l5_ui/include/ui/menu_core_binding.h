@@ -23,7 +23,7 @@ public:
 
     proto::CoreType core_type() const noexcept { return core_type_; }
 
-    bool ui_capable() const noexcept { return ui_capable_; }
+    bool ui_capable() const noexcept { return core_type_ != proto::CoreType::Unknown; }
 
     void set_front_end(bool on) noexcept { front_end_ = on; }
 
@@ -38,7 +38,6 @@ public:
 
 private:
     proto::CoreType core_type_ = proto::CoreType::Unknown;
-    bool ui_capable_ = false;
     bool front_end_ = false;
     cores::PauseOnOsd pause_rule_ = cores::PauseOnOsd::Option;
     FixedStr<app::SessionIdentity::kMax, StrFit::Clip> browse_home_{};

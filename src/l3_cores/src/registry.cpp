@@ -163,6 +163,35 @@ static_assert(
     "two factories for one discriminant"
 );
 
+consteval std::size_t tasty_rows() {
+    std::size_t n = 0;
+    for (const CoreFactory& f : kCoreTable)
+        n += f.profile->tasty_playable ? 1u : 0u;
+    return n;
+}
+
+static_assert(tasty_rows() == 4, "exactly four registry rows are tasty_playable");
+
+consteval bool tasty_names_join() {
+    constexpr std::string_view kTastyNames[]{"MENU", "SNES", "MegaDrive", "PSX"};
+    if (tasty_rows() != std::size(kTastyNames))
+        return false;
+    for (std::string_view want : kTastyNames) {
+        std::size_t tagged = 0;
+        for (const CoreFactory& f : kCoreTable)
+            tagged += (f.profile->tasty_playable && f.name == want) ? 1u : 0u;
+        if (tagged != 1)
+            return false;
+    }
+    return true;
+}
+
+static_assert(
+    tasty_names_join(),
+    "the tasty rows are MENU, SNES, MegaDrive and PSX by name: `tasty_plays` "
+    "answers a CONF_STR name, so a tag on a renamed row is a core tasty cannot load"
+);
+
 consteval bool generic_rows_start_no_mount() {
     for (const CoreFactory& f : kCoreTable)
         if (f.make == &make_generic && f.profile->undeclared_start_mount != StartMount::Unmodelled)
@@ -208,8 +237,8 @@ consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
         && !p.suppress_analog_followup
         && !p.analog_reshape
         && p.cue_browse_dir.empty()
-        && p.default_uart_baud == 115200
-        && p.disk_formats.empty()
+        && p.default_uart_baud == BaudRate{115200}
+    && p.disk_formats.empty()
         && p.option_rows.empty()
         && p.option_pages.empty()
         && p.init_additions.empty()

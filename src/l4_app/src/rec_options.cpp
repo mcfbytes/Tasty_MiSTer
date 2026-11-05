@@ -126,13 +126,13 @@ FixedStr<160, StrFit::Reject> format_rec_options(const RecOptions& o) noexcept {
     const int n = std::snprintf(
         buf,
         sizeof buf,
-        "codec=%s scale=%s motion=%s every=%u from=%d to=%d segment=%llu",
+        "codec=%s scale=%s motion=%s every=%u from=%s to=%s segment=%llu",
         rec_codec_name(o.codec),
         rec_scale_name(o.scale),
         rec_motion_name(o.motion),
         every,
-        o.from_frame,
-        o.to_frame,
+        o.from_frame.text().c_str(),
+        o.to_frame.text().c_str(),
         static_cast<unsigned long long>(o.segment_bytes)
     );
     FixedStr<160, StrFit::Reject> out;

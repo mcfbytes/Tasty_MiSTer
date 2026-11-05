@@ -12,8 +12,8 @@ bool eq(std::string_view a, const char* b) noexcept {
     return a == std::string_view(b);
 }
 
-[[nodiscard]] Ex<TastyArgs> fail(std::uint32_t d) noexcept {
-    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), d});
+[[nodiscard]] Ex<TastyArgs> fail(TastyRefusal::Code r) noexcept {
+    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), r});
 }
 
 }
@@ -69,62 +69,62 @@ void tasty_print_usage(std::FILE* out) noexcept {
 
 const char* tasty_args_refusal(std::uint32_t detail) noexcept {
     switch (detail) {
-        case 1:
+        case TastyRefusal::NoVerb:
             return "no verb (try tasty help)";
-        case 2:
+        case TastyRefusal::NoMovie:
             return "the verb needs a movie file";
-        case 3:
+        case TastyRefusal::MovieTooLong:
             return "the movie path is too long";
-        case 4:
-        case 5:
+        case TastyRefusal::NoRecAction:
+        case TastyRefusal::BadRecAction:
             return "rec needs start or stop";
-        case 6:
+        case TastyRefusal::UnknownVerb:
             return "unknown verb (try tasty help)";
-        case 10:
+        case TastyRefusal::BadRom:
             return "--rom needs a file";
-        case 11:
+        case TastyRefusal::BadCore:
             return "--core needs a file";
-        case 12:
+        case TastyRefusal::BadRecord:
             return "--record needs a directory";
-        case 13:
+        case TastyRefusal::BadLead:
             return "--lead needs a whole number of frames";
-        case 14:
+        case TastyRefusal::BadLinger:
             return "--linger needs a whole number of seconds";
-        case 15:
+        case TastyRefusal::BadVsyncAdjust:
             return "--vsync-adjust is 0 or 1";
-        case 16:
+        case TastyRefusal::BadStopAt:
             return "--stop-at needs a frame number above 0";
-        case 17:
+        case TastyRefusal::BadRamInit:
             return "--ram-init is zero, ff or random";
-        case 18:
+        case TastyRefusal::BadPhase:
             return "--phase needs a whole number of microseconds";
-        case 20:
+        case TastyRefusal::UnknownOption:
             return "unknown option (try tasty help)";
-        case 21:
+        case TastyRefusal::CheckNoRom:
             return "this verb needs --rom";
-        case 22:
+        case TastyRefusal::BadCodec:
             return "--codec is cscd or zmbv";
-        case 23:
+        case TastyRefusal::BadScale:
             return "--scale is auto, native or half";
-        case 24:
+        case TastyRefusal::BadEvery:
             return "--every is a whole number from 1 to 600";
-        case 25:
+        case TastyRefusal::BadFrom:
             return "--from needs a movie frame number, 0 or more";
-        case 26:
+        case TastyRefusal::BadTo:
             return "--to needs a movie frame number, 0 or more";
-        case 27:
+        case TastyRefusal::BadSegment:
             return "--segment is a size from 16M to 2G (bytes, or with K, M or G)";
-        case 28:
+        case TastyRefusal::BadRecBounds:
             return "--to must be after --from";
-        case 29:
+        case TastyRefusal::RecOptionsWithoutRecord:
             return "--codec, --scale, --motion, --every, --from, --to and --segment need --record";
-        case 30:
+        case TastyRefusal::BadMotion:
             return "--motion is auto, off, small or full";
-        case 31:
+        case TastyRefusal::SliceOnRecStart:
             return "--from and --to count movie frames; use them with tasty play --record";
-        case 32:
+        case TastyRefusal::BadSave:
             return "--save needs a file";
-        case 33:
+        case TastyRefusal::SaveNotPlay:
             return "--save seeds a movie's battery save; use it with tasty play";
         default:
             return "bad arguments (try tasty help)";
@@ -154,55 +154,61 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
 }
 
 [[nodiscard]] Ex<TastyArgs> parse_tasty_args(std::span<const char* const> argv) noexcept {
+
+    constexpr std::size_t kVerbArg = 1;
+    constexpr std::size_t kOperandArg = 2;
+    constexpr std::size_t kFirstOptionArg = 3;
+
+    constexpr std::size_t kOptionWidth = 2;
     TastyArgs a{};
-    if (argv.size() < 2)
-        return fail(1);
-    std::string_view v0{argv[1]};
-    std::size_t i = 2;
+    if (argv.size() <= kVerbArg)
+        return fail(TastyRefusal::NoVerb);
+    std::string_view v0{argv[kVerbArg]};
+    std::size_t i = kOperandArg;
     if (eq(v0, "help") || eq(v0, "--help") || eq(v0, "-h")) {
         a.verb = TastyVerb::Help;
         return a;
     }
     if (eq(v0, "play")) {
         a.verb = TastyVerb::Play;
-        if (argv.size() < 3)
-            return fail(2);
-        if (!a.movie.assign(argv[2]))
-            return fail(3);
-        i = 3;
+        if (argv.size() <= kOperandArg)
+            return fail(TastyRefusal::NoMovie);
+        if (!a.movie.assign(argv[kOperandArg]))
+            return fail(TastyRefusal::MovieTooLong);
+        i = kFirstOptionArg;
     } else if (eq(v0, "info")) {
         a.verb = TastyVerb::Info;
-        if (argv.size() < 3)
-            return fail(2);
-        if (!a.movie.assign(argv[2]))
-            return fail(3);
-        i = 3;
+        if (argv.size() <= kOperandArg)
+            return fail(TastyRefusal::NoMovie);
+        if (!a.movie.assign(argv[kOperandArg]))
+            return fail(TastyRefusal::MovieTooLong);
+        i = kFirstOptionArg;
     } else if (eq(v0, "check")) {
         a.verb = TastyVerb::Check;
-        if (argv.size() < 3)
-            return fail(2);
-        if (!a.movie.assign(argv[2]))
-            return fail(3);
-        i = 3;
+        if (argv.size() <= kOperandArg)
+            return fail(TastyRefusal::NoMovie);
+        if (!a.movie.assign(argv[kOperandArg]))
+            return fail(TastyRefusal::MovieTooLong);
+        i = kFirstOptionArg;
     } else if (eq(v0, "status")) {
         a.verb = TastyVerb::Status;
     } else if (eq(v0, "stop")) {
         a.verb = TastyVerb::Stop;
     } else if (eq(v0, "rec")) {
-        if (argv.size() < 3)
-            return fail(4);
-        std::string_view sub{argv[2]};
+        if (argv.size() <= kOperandArg)
+            return fail(TastyRefusal::NoRecAction);
+        std::string_view sub{argv[kOperandArg]};
         if (eq(sub, "start")) {
             a.verb = TastyVerb::RecStart;
-            i = 3;
+            i = kFirstOptionArg;
         } else if (eq(sub, "stop")) {
             a.verb = TastyVerb::RecStop;
-            i = 3;
+            i = kFirstOptionArg;
         } else {
-            return fail(5);
+            return fail(TastyRefusal::BadRecAction);
         }
     } else {
-        return fail(6);
+        return fail(TastyRefusal::UnknownVerb);
     }
 
     bool rec_opt = false;
@@ -216,67 +222,67 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
         if (eq(o, "--rom")) {
             const char* p = need();
             if (p == nullptr || !a.rom.assign(p))
-                return fail(10);
-            i += 2;
+                return fail(TastyRefusal::BadRom);
+            i += kOptionWidth;
         } else if (eq(o, "--core")) {
             const char* p = need();
             if (p == nullptr || !a.core.assign(p))
-                return fail(11);
-            i += 2;
+                return fail(TastyRefusal::BadCore);
+            i += kOptionWidth;
         } else if (eq(o, "--record")) {
             const char* p = need();
             if (p == nullptr)
-                return fail(12);
+                return fail(TastyRefusal::BadRecord);
             app::PathText path{};
             if (!path.assign(p))
-                return fail(12);
+                return fail(TastyRefusal::BadRecord);
             a.record = path;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--lead")) {
             const char* p = need();
             if (p == nullptr)
-                return fail(13);
+                return fail(TastyRefusal::BadLead);
             const auto n = infra::parse_int<std::int32_t>(p);
             if (!n)
-                return fail(13);
+                return fail(TastyRefusal::BadLead);
             a.lead = *n;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--phase")) {
             const char* p = need();
             if (p == nullptr)
-                return fail(18);
+                return fail(TastyRefusal::BadPhase);
             const auto n = infra::parse_int<std::uint32_t>(p);
             if (!n)
-                return fail(18);
+                return fail(TastyRefusal::BadPhase);
             a.phase_us = *n;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--stop-at")) {
             const char* p = need();
             if (p == nullptr)
-                return fail(16);
+                return fail(TastyRefusal::BadStopAt);
             const auto n = infra::parse_int<std::uint32_t>(p);
             if (!n || *n == 0)
-                return fail(16);
+                return fail(TastyRefusal::BadStopAt);
             a.stop_at = *n;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--linger") || eq(o, "--return-after")) {
             const char* p = need();
             if (p == nullptr)
-                return fail(14);
+                return fail(TastyRefusal::BadLinger);
             const auto n = infra::parse_int<std::uint32_t>(p);
             if (!n)
-                return fail(14);
+                return fail(TastyRefusal::BadLinger);
             a.return_after_s = *n;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--vsync-adjust")) {
             const char* p = need();
             if (p == nullptr)
-                return fail(15);
+                return fail(TastyRefusal::BadVsyncAdjust);
             const auto n = infra::parse_int<std::uint32_t>(p);
             if (!n || *n > 1)
-                return fail(15);
-            a.vsync_adjust = static_cast<std::uint8_t>(*n);
-            i += 2;
+                return fail(TastyRefusal::BadVsyncAdjust);
+            a.vsync_adjust = *n == 0 ? app::VsyncAdjust::Off : app::VsyncAdjust::Match;
+            i += kOptionWidth;
         } else if (eq(o, "--stay")) {
             a.stay = true;
             ++i;
@@ -286,7 +292,7 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
         } else if (eq(o, "--ram-init")) {
             const char* p = need();
             if (p == nullptr)
-                return fail(17);
+                return fail(TastyRefusal::BadRamInit);
             const std::string_view s{p};
             using Fill = cores::IMovieCodec::RamFill;
             if (s == "zero")
@@ -296,15 +302,15 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
             else if (s == "random")
                 a.ram_fill = Fill::Random;
             else
-                return fail(17);
-            i += 2;
+                return fail(TastyRefusal::BadRamInit);
+            i += kOptionWidth;
         } else if (eq(o, "--save")) {
             const char* p = need();
             app::PathText save{};
             if (p == nullptr || !save.assign(p))
-                return fail(32);
+                return fail(TastyRefusal::BadSave);
             a.save = save;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--strict")) {
             a.strict = true;
             ++i;
@@ -323,77 +329,78 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
             const char* p = need();
             const auto c = p != nullptr ? app::parse_rec_codec(p) : std::nullopt;
             if (!c)
-                return fail(22);
+                return fail(TastyRefusal::BadCodec);
             a.rec.codec = *c;
             rec_opt = true;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--motion")) {
             const char* p = need();
             const auto m = p != nullptr ? app::parse_rec_motion(p) : std::nullopt;
             if (!m)
-                return fail(30);
+                return fail(TastyRefusal::BadMotion);
             a.rec.motion = *m;
             rec_opt = true;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--scale")) {
             const char* p = need();
             const auto s = p != nullptr ? app::parse_rec_scale(p) : std::nullopt;
             if (!s)
-                return fail(23);
+                return fail(TastyRefusal::BadScale);
             a.rec.scale = *s;
             rec_opt = true;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--every")) {
             const char* p = need();
             const auto n = p != nullptr ? app::parse_rec_every(p) : std::nullopt;
             if (!n)
-                return fail(24);
+                return fail(TastyRefusal::BadEvery);
             a.rec.every = *n;
             rec_opt = true;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--from")) {
             const char* p = need();
             if (p == nullptr)
-                return fail(25);
+                return fail(TastyRefusal::BadFrom);
             const auto n = infra::parse_int<std::int32_t>(p);
             if (!n || *n < 0)
-                return fail(25);
-            a.rec.from_frame = *n;
+                return fail(TastyRefusal::BadFrom);
+            a.rec.from_frame = app::MovieFrame{*n};
             rec_opt = true;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--to")) {
             const char* p = need();
             if (p == nullptr)
-                return fail(26);
+                return fail(TastyRefusal::BadTo);
             const auto n = infra::parse_int<std::int32_t>(p);
             if (!n || *n < 0)
-                return fail(26);
-            a.rec.to_frame = *n;
+                return fail(TastyRefusal::BadTo);
+            a.rec.to_frame = app::MovieFrame{*n};
             rec_opt = true;
-            i += 2;
+            i += kOptionWidth;
         } else if (eq(o, "--segment")) {
             const char* p = need();
             const auto n = p != nullptr ? app::parse_rec_size(p) : std::nullopt;
             if (!n || *n == 0 || !app::rec_segment_ok(*n))
-                return fail(27);
+                return fail(TastyRefusal::BadSegment);
             a.rec.segment_bytes = *n;
             rec_opt = true;
-            i += 2;
+            i += kOptionWidth;
         } else {
-            return fail(20);
+            return fail(TastyRefusal::UnknownOption);
         }
     }
     if (!app::rec_bounds_ok(a.rec))
-        return fail(28);
+        return fail(TastyRefusal::BadRecBounds);
     if (!a.record && rec_opt)
-        return fail(29);
+        return fail(TastyRefusal::RecOptionsWithoutRecord);
 
-    if (a.verb == TastyVerb::RecStart && (a.rec.from_frame >= 0 || a.rec.to_frame >= 0))
-        return fail(31);
+    if (a.verb == TastyVerb::RecStart
+        && (a.rec.from_frame >= app::MovieFrame{} || a.rec.to_frame >= app::MovieFrame{}))
+        return fail(TastyRefusal::SliceOnRecStart);
     if (a.verb == TastyVerb::Check && a.rom.empty())
-        return fail(21);
+        return fail(TastyRefusal::CheckNoRom);
     if (a.save && a.verb != TastyVerb::Play)
-        return fail(33);
+        return fail(TastyRefusal::SaveNotPlay);
     return a;
 }
 

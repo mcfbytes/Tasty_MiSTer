@@ -57,7 +57,7 @@ public:
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }
 
-    [[nodiscard]] virtual std::optional<bool> file_tx_answer(std::uint32_t) { return std::nullopt; }
+    [[nodiscard]] virtual std::optional<bool> file_tx_answer(proto::ActKey) { return std::nullopt; }
 
     [[nodiscard]] virtual bool order_load_facts(std::span<const std::uint8_t>) { return false; }
 
@@ -66,19 +66,19 @@ public:
         std::uint64_t size_bytes
     ) = 0;
 
-    [[nodiscard]] virtual std::uint32_t next_generation() noexcept = 0;
+    [[nodiscard]] virtual proto::ActKey next_generation() noexcept = 0;
 
     [[nodiscard]] virtual MountStatus mount_status() = 0;
 
-    [[nodiscard]] virtual bool order_walk(proto::IoIndex, std::string_view, std::uint32_t) {
+    [[nodiscard]] virtual bool order_walk(proto::IoIndex, std::string_view, proto::ActKey) {
         return false;
     }
 
     [[nodiscard]] virtual MountStatus walk_status() { return {}; }
 
-    [[nodiscard]] virtual bool order_savestates(std::string_view, std::uint32_t) { return false; }
+    [[nodiscard]] virtual bool order_savestates(std::string_view, proto::ActKey) { return false; }
 
-    [[nodiscard]] virtual std::uint32_t savestates_answered() { return 0; }
+    [[nodiscard]] virtual proto::ActKey savestates_answered() { return {}; }
 
     [[nodiscard]] virtual SaveExtent save_extent() = 0;
     [[nodiscard]] virtual proto::StatusWord status_word() = 0;

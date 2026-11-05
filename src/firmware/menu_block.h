@@ -35,7 +35,8 @@ class MenuBlock final : public SessionMode::Face {
 public:
     MenuBlock(
         const BootParts& plat,
-        DeviceBlock& device,
+        const DeviceBlock::Parts& parts,
+        OpenVerdict& verdict,
         LauncherBlock& launcher,
         infra::OptRef<os::ProcessTitle> title
     );

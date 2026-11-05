@@ -16,8 +16,10 @@ void BoardReset::board_reset() {
         sleeper_->sleep_ms(kResetSettleMs);
         return;
     }
-    for (unsigned ms = 0; ms < kResetSettleMs; ms += 100) {
-        ::usleep(100000);
+    constexpr unsigned kPollSliceMs = 100;
+    constexpr useconds_t kPollSliceUs = kPollSliceMs * 1000;
+    for (unsigned ms = 0; ms < kResetSettleMs; ms += kPollSliceMs) {
+        ::usleep(kPollSliceUs);
     }
 }
 

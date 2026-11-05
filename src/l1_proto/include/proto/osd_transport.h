@@ -5,9 +5,9 @@
 #include <span>
 
 #include "infra/error.h"
-#include "hal/selected.h"
 #include "hal/spi_transport.h"
 #include "proto/osd_surface.h"
+#include "proto/link.h"
 #include "proto/osd_target.h"
 #include "proto/types.h"
 #include "infra/seat.h"
@@ -31,26 +31,26 @@ public:
     static constexpr std::uint32_t kIoEn = 1u << 20;
 
     [[nodiscard]] Ex<void> flush_row(
-        hal::ISpiTransport& link,
+        proto::Link& link,
         OsdRow r,
         std::span<const std::uint8_t> bytes
     );
 
-    [[nodiscard]] Ex<void> set_visible(hal::ISpiTransport& link, bool visible);
+    [[nodiscard]] Ex<void> set_visible(proto::Link& link, bool visible);
 
-    [[nodiscard]] Ex<void> enable(hal::ISpiTransport& link, OsdMode mode);
+    [[nodiscard]] Ex<void> enable(proto::Link& link, OsdMode mode);
 
     [[nodiscard]] Ex<void> enable_info(
-        hal::ISpiTransport& link,
+        proto::Link& link,
         std::uint16_t x,
         std::uint16_t y,
         std::uint16_t width,
         std::uint16_t height
     );
 
-    [[nodiscard]] Ex<void> set_rotation(hal::ISpiTransport& link, OsdRotation rotate);
+    [[nodiscard]] Ex<void> set_rotation(proto::Link& link, OsdRotation rotate);
 
-    [[nodiscard]] Ex<void> menu_ctl(hal::ISpiTransport& link, bool enable_menu);
+    [[nodiscard]] Ex<void> menu_ctl(proto::Link& link, bool enable_menu);
 
     [[nodiscard]] Ex<void> set_target(OsdTarget t) noexcept {
         target_ = t;
@@ -60,11 +60,10 @@ public:
     OsdTarget target() const noexcept { return target_; }
 
     static constexpr hal::SpiOutput select_mask(OsdTarget t) noexcept {
-        const auto bits = static_cast<std::uint8_t>(t);
         std::uint32_t m = kOsdEn | kIoEn | kFpgaEn;
-        if ((bits & static_cast<std::uint8_t>(OsdTarget::Hdmi)) != 0u)
+        if (targets(t, OsdTarget::Hdmi))
             m &= ~kFpgaEn;
-        if ((bits & static_cast<std::uint8_t>(OsdTarget::Vga)) != 0u)
+        if (targets(t, OsdTarget::Vga))
             m &= ~kIoEn;
         return hal::SpiOutput{m};
     }
@@ -74,8 +73,8 @@ public:
     std::uint32_t unrouted_selects() const noexcept { return unrouted_selects_; }
 
 private:
-    hal::Selected begin(hal::ISpiTransport& link);
-    [[nodiscard]] Ex<void> command(hal::ISpiTransport& link, std::uint16_t cmd);
+    [[nodiscard]] hal::ChipSelect chip_select() const noexcept;
+    [[nodiscard]] Ex<void> command(proto::Link& link, std::uint16_t cmd);
 
     OsdTarget target_ = OsdTarget::All;
     std::uint32_t unrouted_selects_ = 0;

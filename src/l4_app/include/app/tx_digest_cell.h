@@ -7,6 +7,7 @@
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -19,7 +20,7 @@ struct TxDigest {
 
     Kind kind = Kind::None;
     bool same_game = false;
-    std::uint32_t crc = 0;
+    svc::Crc32 crc{};
     FixedStr<kPathCap, StrFit::Clip> path{};
 };
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 
@@ -44,9 +45,9 @@ public:
 
     std::uint16_t repeat_depth() const noexcept { return hold_cnt_; }
 
-    static std::uint16_t decode(std::uint32_t code, bool ini_select) noexcept;
+    static UiButtonMask decode(proto::KeyCode code, bool ini_select) noexcept;
 
-    static bool repeatable(std::uint32_t code) noexcept;
+    static bool repeatable(proto::KeyCode code) noexcept;
 
 private:
     static constexpr unsigned kQueue = 32;
@@ -58,8 +59,13 @@ private:
     std::optional<UiEvent> accept_(std::uint32_t code, std::int64_t now) noexcept;
 
     const os::IClock* clock_;
-    std::uint32_t slots_[kQueue]{};
-    bool synth_[kQueue]{};
+
+    struct QueuedKey {
+        std::uint32_t code = 0;
+        bool synth = false;
+    };
+
+    std::array<QueuedKey, kQueue> queue_{};
     unsigned head_ = 0;
     unsigned count_ = 0;
     bool ini_select_ = false;

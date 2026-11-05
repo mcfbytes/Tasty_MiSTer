@@ -193,7 +193,7 @@ SavePath pick_disc_path(
     const svc::Vfs& vfs,
     const SavePath& own,
     const SavePath& stock,
-    std::uint64_t length
+    proto::FileSize length
 ) {
     if (vfs.file_exists(own.view()) || !vfs.file_exists(stock.view()))
         return own;
@@ -201,7 +201,7 @@ SavePath pick_disc_path(
     if (!f)
         return own;
     auto size = (*f)->size();
-    if (!size || size->v != length)
+    if (!size || size->v != length.v)
         return own;
     return stock;
 }

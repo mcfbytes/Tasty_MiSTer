@@ -3,8 +3,8 @@
 
 namespace mister::proto {
 
-Ex<void> Ps2Mouse::motion(int dx, int dy, int dz, std::uint8_t buttons) {
-    auto b0 = static_cast<std::uint8_t>((static_cast<std::uint8_t>(buttons) & 0x07u) | 0x08u);
+Ex<void> Ps2Mouse::motion(int dx, int dy, int dz, MouseButtons buttons) {
+    auto b0 = static_cast<std::uint8_t>((buttons.v & 0x07u) | 0x08u);
 
     std::uint8_t bx;
     if (dx < 0)
@@ -44,10 +44,10 @@ Ex<void> Ps2Mouse::motion(int dx, int dy, int dz, std::uint8_t buttons) {
         static_cast<std::uint16_t>(b0) | ((static_cast<std::uint16_t>(w) & 0x7Fu) << 8)
     );
     p.word1 = static_cast<std::uint16_t>(
-        static_cast<std::uint16_t>(bx) | ((static_cast<unsigned>(buttons) << 5u) & 0x0F00u)
+        static_cast<std::uint16_t>(bx) | ((static_cast<unsigned>(buttons.v) << 5u) & 0x0F00u)
     );
     p.word2 = static_cast<std::uint16_t>(
-        static_cast<std::uint16_t>(by) | ((static_cast<unsigned>(buttons) << 1u) & 0x0100u)
+        static_cast<std::uint16_t>(by) | ((static_cast<unsigned>(buttons.v) << 1u) & 0x0100u)
     );
     (void)packets_.push(p);
     return {};

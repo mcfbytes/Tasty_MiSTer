@@ -1,18 +1,33 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "infra/opt_ref.h"
+#include "infra/seat.h"
+
+namespace mister::cores {
+class Core;
+}
+
 namespace mister::app {
 
-class ISaveFlush {
+class HeldTransfer;
+class NvramUpload;
+
+class SaveFlush {
+    TASTY_SEAT_RESIDENT(RT);
+
 public:
-    virtual ~ISaveFlush() = default;
+    SaveFlush(NvramUpload& upload, HeldTransfer& held, infra::OptRef<cores::Core> core) noexcept
+        : upload_(upload),
+          held_(held),
+          core_(core) {}
 
-    [[nodiscard]] virtual bool save_upload_counted() noexcept = 0;
+    [[nodiscard]] bool counted() const noexcept;
 
-protected:
-    ISaveFlush() = default;
-    ISaveFlush(const ISaveFlush&) = default;
-    ISaveFlush& operator=(const ISaveFlush&) = default;
+private:
+    NvramUpload& upload_;
+    HeldTransfer& held_;
+    infra::OptRef<cores::Core> core_;
 };
 
 }

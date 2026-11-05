@@ -9,6 +9,7 @@
 #include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/inbox.h"
+#include "infra/park_timeout.h"
 #include "infra/rt_stats.h"
 #include "infra/slot_pool.h"
 #include "infra/loan_channel.h"
@@ -141,7 +142,7 @@ public:
 
     [[nodiscard]] bool idle() const noexcept;
 
-    [[nodiscard]] int park_ms() const noexcept { return rest_ms_; }
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return rest_ms_; }
 
     void release() noexcept;
 
@@ -191,7 +192,7 @@ private:
 
     void reset_consumer_() noexcept;
 
-    void rest_(int ms, std::uint32_t want, bool watch_free) noexcept;
+    void rest_(infra::ParkTimeout ms, std::uint32_t want, bool watch_free) noexcept;
     void release_media_() noexcept;
 
     void take_attaches_() noexcept;
@@ -247,7 +248,7 @@ private:
     bool rests_ = false;
     bool rest_parked_ = false;
     bool watch_free_ = false;
-    int rest_ms_ = 0;
+    infra::ParkTimeout rest_ms_ = infra::kNoWait;
     std::uint32_t want_seen_ = kNoPrefetchHunk;
 
     Chan::Job held_{};

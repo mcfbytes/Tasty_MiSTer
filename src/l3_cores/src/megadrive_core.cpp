@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/megadrive_core.h"
-
-#include <memory>
-#include <utility>
+#include "cores/core_adopt.h"
 
 #include "cores/core_window.h"
 #include "cores/file_tx.h"
 #include "cores/manifests/megadrive.h"
-#include "cores/mdp_source.h"
 #include "cores/mounted_path.h"
 #include "hal/selected.h"
 #include "hal/spi_transport.h"
@@ -42,8 +39,7 @@ void MegaDriveCore::rearm_feed_() {
     current_track_ = 0;
     rearm_ticks_ = 0;
 
-    pending_feed_ = path_.empty() ? nullptr
-                                  : std::make_unique<mdp::CueWavSource>(host().vfs, path_.view());
+    (void)pending_feed_.assign(path_.view());
     feed_rearm_pending_ = true;
     retry_feed_(*fd);
 }
@@ -56,9 +52,9 @@ void MegaDriveCore::retry_feed_(IPcmFeed& fd) noexcept {
         return;
     }
     feed_rearm_pending_ = false;
-    if (auto r = fd.set_source(std::move(pending_feed_)); !r)
+    if (auto r = fd.set_sheet(pending_feed_.view()); !r)
         ++feed_refusals_;
-    pending_feed_.reset();
+    pending_feed_.clear();
 }
 
 Ex<proto::SessionParams> MegaDriveCore::stream_opening(IoIndex) {
@@ -180,7 +176,7 @@ void MegaDriveCore::arm_play_(IPcmFeed& fd, std::uint8_t track, bool loop) noexc
     ack_track_ = track;
     ack_ticks_ = 0;
     ack_pending_ = true;
-    if (auto r = fd.play(track, loop); !r) {
+    if (auto r = fd.play(svc::TrackNumber{track}, loop); !r) {
         ++play_refusals_;
         answer_no_play_();
     }

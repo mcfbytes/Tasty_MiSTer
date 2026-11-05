@@ -25,18 +25,10 @@ public:
           block_(block),
           otherwise_(otherwise) {}
 
-    [[nodiscard]] Ex<void> digital(std::uint16_t opcode, JoyMask map) override;
+    [[nodiscard]] Ex<void> digital(UioOp opcode, JoyMask map) override;
 
-    [[nodiscard]] Ex<void> stick(
-        std::uint16_t opcode,
-        std::uint8_t index,
-        std::uint8_t x,
-        std::uint8_t y
-    ) override;
-    [[nodiscard]] std::uint32_t link_words(
-        std::uint16_t opcode,
-        bool follow_up
-    ) const noexcept override;
+    [[nodiscard]] Ex<void> stick(UioOp opcode, std::uint8_t index, StickPos pos) override;
+    [[nodiscard]] std::uint32_t link_words(UioOp opcode, bool follow_up) const noexcept override;
 
     void trust(bool ready) noexcept;
 
@@ -45,9 +37,9 @@ public:
     [[nodiscard]] std::uint32_t held() const noexcept { return held_; }
 
 private:
-    [[nodiscard]] Ex<void> level_(std::size_t slot, std::uint32_t word);
-    [[nodiscard]] Ex<void> settle_(std::size_t slot);
-    [[nodiscard]] Ex<void> store_(std::uint16_t opcode, std::uint8_t index, std::uint32_t word);
+    [[nodiscard]] Ex<void> level_(PadLevels::Slot level, std::uint32_t word);
+    [[nodiscard]] Ex<void> settle_(PadLevels::Slot level);
+    [[nodiscard]] Ex<void> store_(UioOp opcode, std::uint8_t index, std::uint32_t word);
 
     hal::reg::Block pad_;
     const AxiBlockDecl& block_;

@@ -17,7 +17,6 @@
 #include "cores/n64_db_tags.h"
 #include "cores/n64_file_route.h"
 #include "cores/n64_ipl3.h"
-#include "cores/n64_disk_facts.h"
 #include "cores/n64_load_facts.h"
 #include "cores/n64_options.h"
 #include "cores/n64_rom.h"
@@ -30,6 +29,7 @@
 #include "proto/status_word.h"
 #include "svc/file.h"
 #include "svc/slot_path.h"
+#include "svc/types.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
@@ -54,7 +54,7 @@ public:
         n64::InternalName internal_name{};
         FixedStr<33, StrFit::Reject> header_md5{};
         FixedStr<33, StrFit::Reject> file_md5{};
-        std::uint32_t crc32 = 0;
+        svc::Crc32 crc32{};
         std::uint64_t bytes = 0;
 
         std::uint8_t detected = 0;
@@ -179,7 +179,6 @@ private:
     FixedStr<kInfoChars + 1, StrFit::Clip> info_{};
     mra::Md5 md5_{};
     n64::LoadFacts slab_{};
-    n64::DiskFacts disk_facts_{};
     std::uint32_t patches_applied_ = 0;
     std::uint32_t patch_errors_ = 0;
     bool concluded_ = false;

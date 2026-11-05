@@ -55,9 +55,9 @@ N64Loader::Shape N64Loader::shape_of(const TransferRow& row) noexcept {
 Ex<LoadPlan> N64Loader::plan(const LoadAsk& ask, const proto::StatusWord& status) {
     TASTY_SEAT_BODY(N64Loader);
     const n64::FileRoute r = n64::file_route(ask.index.io());
-    if (ask.size != 0 && r == n64::FileRoute::DiskImage)
+    if (ask.size != proto::FileSize{} && r == n64::FileRoute::DiskImage)
         return plan_disk_(ask, status);
-    if (ask.size != 0 && r == n64::FileRoute::Ipl) {
+    if (ask.size != proto::FileSize{} && r == n64::FileRoute::Ipl) {
         LoadPlan p{};
         p.count = 1;
         if (ask.load_addr == 0 || !plan_ipl_row_(p.rows[0], ask.path, true)) {
@@ -71,7 +71,8 @@ Ex<LoadPlan> N64Loader::plan(const LoadAsk& ask, const proto::StatusWord& status
         return p;
     }
 
-    if (r == n64::FileRoute::Pif || (ask.size != 0 && r == n64::FileRoute::GameBoy)) {
+    if (r == n64::FileRoute::Pif
+        || (ask.size != proto::FileSize{} && r == n64::FileRoute::GameBoy)) {
         LoadPlan p{};
         p.count = 1;
         p.rows[0].index = ask.index;
@@ -84,7 +85,7 @@ Ex<LoadPlan> N64Loader::plan_rom_(const LoadAsk& ask, const proto::StatusWord& s
     LoadPlan p{};
     p.count = 1;
     p.rows[0].index = ask.index;
-    if (auto b = begin_rom_(ask.size, status); !b) {
+    if (auto b = begin_rom_(ask.size.v, status); !b) {
         memo_.last_boot.clear();
         return std::unexpected(b.error());
     }
@@ -281,7 +282,7 @@ void N64Loader::shape_rom_(std::span<std::uint8_t> piece, std::uint64_t off) {
         const std::size_t n = std::min(kHeaderBytes, piece.size() - at);
         std::memcpy(swap_, piece.data() + at, n);
         n64::normalize(std::span<std::uint8_t>(swap_, n), n64::ByteOrder::ByteSwapped);
-        facts_.crc32 = crc32_update(facts_.crc32, std::span<const std::uint8_t>(swap_, n));
+        facts_.crc32 = svc::crc32_extend(facts_.crc32, std::span<const std::uint8_t>(swap_, n));
     }
 }
 
@@ -290,7 +291,7 @@ void N64Loader::shape_ipl_(std::span<std::uint8_t> piece, std::uint64_t off) {
         ipl_order_ = n64::detect_byte_order(piece);
         slab_.kind = ipl_boot_ ? n64::FactsKind::IplBoot : n64::FactsKind::IplPreload;
         slab_.mask = {};
-        slab_.crc32 = 0;
+        slab_.crc32 = {};
         slab_.bytes = 0;
         concluded_ = false;
     }
@@ -392,8 +393,11 @@ Ex<void> N64Loader::finish(ICoreWindow* window) {
     if (shape_ == Shape::Disk) {
 
         concluded_ = disk_ && disk_->expander.complete();
-        if (concluded_)
-            disk_facts_ = n64::DiskFacts{.load_addr = disk_->load_addr};
+        if (concluded_) {
+            slab_ = n64::LoadFacts{};
+            slab_.kind = n64::FactsKind::Disk;
+            slab_.load_addr = hal::FabricAddr{disk_->load_addr};
+        }
         return {};
     }
     if (shape_ == Shape::Ipl) {
@@ -422,9 +426,6 @@ std::span<const std::uint8_t> N64Loader::facts() const noexcept {
     TASTY_SEAT_BODY(N64Loader);
     if (!concluded_)
         return {};
-    if (shape_ == Shape::Disk) {
-        return infra::byte_cast<const std::uint8_t>(infra::bytes_of(disk_facts_));
-    }
     return infra::byte_cast<const std::uint8_t>(infra::bytes_of(slab_));
 }
 
@@ -457,11 +458,13 @@ void N64Loader::apply_patches_(ICoreWindow* window) noexcept {
 }
 
 void N64Loader::analyze_header_(std::span<const std::uint8_t> head) {
-    facts_.internal_name = n64::internal_name(head);
-    facts_.cart_id = n64::cart_id(head);
+    if (const auto header = n64::rom_header_of(head)) {
+        facts_.internal_name = n64::internal_name(*header);
+        facts_.cart_id = n64::cart_id(*header);
 
-    for (std::size_t i = 0; i < 4; ++i)
-        facts_.controllers[i] = head[0x34 + i];
+        for (std::size_t i = 0; i < 4; ++i)
+            facts_.controllers[i] = (*header)[0x34 + i];
+    }
     bootcode_ = n64::bootcode_checksums(head);
 }
 

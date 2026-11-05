@@ -45,4 +45,24 @@ concept LinkEventInputSink = requires(S& s, const proto::LinkEvent& m) {
     s.misrouted(m);
 };
 
+struct LinkEventSinkOf {
+    using Result = EventSink;
+
+    template <class A>
+    EventSink on(const A&) const noexcept {
+        return kLinkEventFacts[infra::ordinal(A::kKind)].sink;
+    }
+
+    EventSink on(const proto::LinkEvent::PolledWord& w) const noexcept {
+        return poll_sink(w.shape);
+    }
+
+    EventSink misrouted(const proto::LinkEvent&) const noexcept { return EventSink::kCount; }
+};
+
+[[nodiscard]] inline EventSink sink_for(const proto::LinkEvent& e) noexcept {
+    LinkEventSinkOf of{};
+    return infra::dispatch<infra::AllRouted>(e, of);
+}
+
 }

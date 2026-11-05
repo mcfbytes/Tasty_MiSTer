@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <new>
 
 #include "cores/n64_path.h"
 #include "infra/endian.h"
@@ -57,18 +56,16 @@ bool ram_save_path(std::string_view disk_path, std::string_view core_dir, SavePa
     return ok;
 }
 
-const RamSaveJob::Kind kRamSaveKind{};
+const WindowJobBuild kRamSaveKind = &build_ram_save_job;
 
 bool write_ram_save_order(
-    std::span<std::byte> order,
-    std::uint32_t load_addr,
+    WindowJobOrder& order,
+    hal::FabricAddr load_addr,
     std::string_view disk_path,
     std::string_view core_dir
 ) noexcept {
     RamSaveJob::Order o{};
-    if (order.size() < sizeof o
-        || disk_path.size() > sizeof o.disk_path
-        || core_dir.size() > sizeof o.core_dir) {
+    if (disk_path.size() > sizeof o.disk_path || core_dir.size() > sizeof o.core_dir) {
         return false;
     }
     o.load_addr = load_addr;
@@ -76,31 +73,24 @@ bool write_ram_save_order(
     o.core_len = static_cast<std::uint8_t>(core_dir.size());
     std::memcpy(o.disk_path, disk_path.data(), disk_path.size());
     std::memcpy(o.core_dir, core_dir.data(), core_dir.size());
-    infra::store_native<RamSaveJob::Order>(order.first<sizeof(RamSaveJob::Order)>(), o);
-    return true;
+    return order.put(o);
 }
 
-IWindowJob* RamSaveJob::Kind::build(
-    std::span<std::byte> arena,
-    std::span<const std::byte> order
-) const noexcept {
-    TASTY_SEAT_BODY(RamSaveJob::Kind);
-    static_assert(sizeof(RamSaveJob) <= kWindowJobBytes);
-    static_assert(alignof(RamSaveJob) <= kWindowJobAlign);
-    if (order.size() < sizeof(Order) || arena.size() < sizeof(RamSaveJob))
+IWindowJob* build_ram_save_job(JobArena& arena, const WindowJobOrder& order) noexcept {
+    seat_assert<SeatTag::Io>(ERR_SITE(), "build_ram_save_job off T-IO");
+    const auto o = order.as<RamSaveJob::Order>();
+    if (!o || o->path_len > sizeof o->disk_path || o->core_len > sizeof o->core_dir) {
         return nullptr;
-    const auto o = infra::load_native<Order>(order.first<sizeof(Order)>());
-    if (o.path_len > sizeof o.disk_path || o.core_len > sizeof o.core_dir)
-        return nullptr;
-    return ::new (static_cast<void*>(arena.data())) RamSaveJob(
-        o.load_addr,
-        std::string_view(o.disk_path, o.path_len),
-        std::string_view(o.core_dir, o.core_len)
+    }
+    return arena.emplace<RamSaveJob>(
+        o->load_addr,
+        std::string_view(o->disk_path, o->path_len),
+        std::string_view(o->core_dir, o->core_len)
     );
 }
 
 RamSaveJob::RamSaveJob(
-    std::uint32_t load_addr,
+    hal::FabricAddr load_addr,
     std::string_view disk_path,
     std::string_view core_dir
 ) noexcept
@@ -108,7 +98,7 @@ RamSaveJob::RamSaveJob(
     path_ok_ = disk_path_.assign(disk_path) && core_dir_.assign(core_dir);
 }
 
-std::uint32_t RamSaveJob::window_addr() const noexcept {
+hal::FabricAddr RamSaveJob::window_addr() const noexcept {
     TASTY_SEAT_BODY(RamSaveJob);
     return addr_;
 }

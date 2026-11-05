@@ -9,22 +9,27 @@ namespace mister::hal {
 namespace {
 
 constexpr std::uint8_t ctr_minus(std::uint8_t c, std::uint32_t n) noexcept {
-    return static_cast<std::uint8_t>((c - n) & 0x7u);
+    constexpr std::uint32_t kCounterMask = 0x7;
+    return static_cast<std::uint8_t>((c - n) & kCounterMask);
 }
 
 constexpr std::uint8_t ctr_plus(std::uint8_t c, std::uint32_t n) noexcept {
-    return static_cast<std::uint8_t>((c + n) & 0x7u);
+    constexpr std::uint32_t kCounterMask = 0x7;
+    return static_cast<std::uint8_t>((c + n) & kCounterMask);
 }
 
 bool plausible(const ScalerHeader& h) noexcept {
+    constexpr unsigned kMinHeaderSize = 64;
+    constexpr unsigned kMaxHeaderSize = 4096;
+    constexpr unsigned kRgbBytesPerPixel = 3;
     const unsigned hs = h.header_size;
     return h.supported()
-        && hs >= 64u
-        && hs <= 4096u
+        && hs >= kMinHeaderSize
+        && hs <= kMaxHeaderSize
         && (hs & (hs - 1u)) == 0u
         && h.width != 0
         && h.height != 0
-        && static_cast<unsigned>(h.width) * 3u <= h.line;
+        && static_cast<unsigned>(h.width) * kRgbBytesPerPixel <= h.line;
 }
 
 std::size_t frame_end(std::size_t base, const ScalerHeader& h) noexcept {
@@ -39,7 +44,8 @@ void ScalerProbe::restart(std::int64_t now) noexcept {
 }
 
 void ScalerProbe::read(const ScalerBuffers& window) noexcept {
-    for (std::size_t side = 0; side < 2; ++side) {
+    constexpr std::size_t kSides = 2;
+    for (std::size_t side = 0; side < kSides; ++side) {
         ProbeSide& p = sides_[side];
         const std::size_t stride = side == 0 ? ScalerBuffers::kStrideLarge
                                              : ScalerBuffers::kStrideSmall;
@@ -77,9 +83,10 @@ ScalerProbe::Verdict ScalerProbe::decide(std::int64_t now) noexcept {
         return Verdict::LargeLowlat;
     if (now - start_ns_ < kProbeNs)
         return Verdict::Pending;
-    if (triple_live(large, 2))
+    constexpr std::uint32_t kLiveTriple = 2;
+    if (triple_live(large, kLiveTriple))
         return Verdict::Large;
-    if (triple_live(sides_[1], 2))
+    if (triple_live(sides_[1], kLiveTriple))
         return Verdict::Small;
     return Verdict::Dead;
 }
@@ -110,9 +117,21 @@ std::optional<ScalerProbe::Pick> ScalerProbe::pick_complete(
     for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i)
         if (!all_live && live[i] && h[i].interlaced() && h[i].supported())
             return std::nullopt;
-    if (const std::size_t top = all_live ? newest(1, 4) : ScalerBuffers::kBuffers;
+    constexpr std::uint32_t kAheadMin = 1;
+    constexpr std::uint32_t kAheadMax = 4;
+    constexpr std::uint8_t kCounterModulus = 8;
+
+    enum : std::uint8_t {
+        kWovenLoWide = 2,
+        kWovenHiWide = 4,
+        kWovenLoNarrow = 1,
+        kWovenHiNarrow = 3
+    };
+
+    constexpr std::uint8_t kWovenMinLag = 2;
+    if (const std::size_t top = all_live ? newest(kAheadMin, kAheadMax) : ScalerBuffers::kBuffers;
         top != ScalerBuffers::kBuffers && h[top].interlaced()) {
-        std::uint8_t lo = 8;
+        std::uint8_t lo = kCounterModulus;
         std::uint8_t hi = 0;
         std::size_t near = top;
         for (std::size_t j = 0; j < ScalerBuffers::kBuffers; ++j) {
@@ -122,11 +141,12 @@ std::optional<ScalerProbe::Pick> ScalerProbe::pick_complete(
             hi = std::max(hi, d);
             if (d < lo)
                 lo = d;
-            if (d >= 2
+            if (d >= kWovenMinLag
                 && (near == top || d < ctr_minus(h[top].frame_counter(), h[near].frame_counter())))
                 near = j;
         }
-        if ((lo == 2 && hi == 4) || (lo == 1 && hi == 3))
+        if ((lo == kWovenLoWide && hi == kWovenHiWide)
+            || (lo == kWovenLoNarrow && hi == kWovenHiNarrow))
             return Pick{
                 .buf = near,
                 .lag = ctr_minus(h[top].frame_counter(), h[near].frame_counter()),
@@ -170,7 +190,8 @@ std::optional<ScalerProbe::Verdict> ScalerProbe::still(
     if (!head->triple_buffered())
         return Verdict::LargeLowlat;
     const bool small_first = known == ScalerBuffers::kStrideSmall;
-    const std::array<std::size_t, 2> order = small_first
+    constexpr std::size_t kSides = 2;
+    const std::array<std::size_t, kSides> order = small_first
         ? std::array{ScalerBuffers::kStrideSmall, ScalerBuffers::kStrideLarge}
         : std::array{ScalerBuffers::kStrideLarge, ScalerBuffers::kStrideSmall};
     for (const std::size_t stride : order) {
@@ -195,9 +216,11 @@ std::optional<ScalerProbe::Verdict> ScalerProbe::still(
 }
 
 bool ScalerProbe::port_stuck(ScalerBuffers& window) noexcept {
-    static constexpr std::size_t kBeat = 16;
-    static constexpr std::size_t kMaxShort = 255 * kBeat;
-    std::array<std::byte, 4096> chunk;
+    static constexpr std::size_t kBeat = ScalerHeader::kBytes;
+    constexpr std::size_t kMaxShortBeats = 255;
+    constexpr std::size_t kChunkBytes = 4096;
+    static constexpr std::size_t kMaxShort = kMaxShortBeats * kBeat;
+    std::array<std::byte, kChunkBytes> chunk;
     const std::size_t len = window.len();
     for (std::size_t off = 0; off + chunk.size() <= len; off += chunk.size()) {
         if (!window.copy(off, chunk))

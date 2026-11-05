@@ -9,6 +9,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "infra/affine.h"
 #include "infra/json_name.h"
 
 namespace mister::infra {
@@ -69,6 +70,19 @@ public:
         key_(key);
         using U = std::underlying_type_t<E>;
         value_(static_cast<std::make_unsigned_t<U>>(static_cast<U>(v)));
+    }
+
+    template <class R>
+        requires(affine::Affine<R> && std::integral<decltype(R::v)>)
+    constexpr void field(JsonName key, R r) noexcept {
+        const auto [number] = r;
+        field(key, number);
+    }
+
+    template <class T>
+        requires requires(JsonOut& o, JsonName k, const T& t) { json_field(o, k, t); }
+    constexpr void field(JsonName key, const T& t) noexcept {
+        json_field(*this, key, t);
     }
 
     template <std::integral I>
@@ -168,10 +182,12 @@ private:
         digits_out_(v);
     }
 
+    enum : std::uint64_t { kRadix = 10 };
+
     static constexpr std::size_t digits_(std::uint64_t v) noexcept {
         std::size_t n = 1;
-        while (v >= 10) {
-            v /= 10;
+        while (v >= kRadix) {
+            v /= kRadix;
             ++n;
         }
         return n;
@@ -181,8 +197,8 @@ private:
         std::array<char, 20> rev{};
         std::size_t n = 0;
         do {
-            rev[n++] = static_cast<char>('0' + v % 10);
-            v /= 10;
+            rev[n++] = static_cast<char>('0' + v % kRadix);
+            v /= kRadix;
         } while (v != 0);
         std::array<char, 20> fwd{};
         for (std::size_t i = 0; i < n; ++i)
@@ -206,7 +222,18 @@ template <class T>
 }
 
 [[nodiscard]] consteval std::size_t json_record_worst(JsonName t, std::size_t members) {
-    return 6 + t.view().size() + 8 + 10 + (members == 0 ? 0 : members + 1) + 1;
+    enum : std::size_t {
+        kOpenAndTypeKey = 6,
+        kSeqKey = 8,
+        kSeqDigits = 10,
+    };
+
+    return kOpenAndTypeKey
+        + t.view().size()
+        + kSeqKey
+        + kSeqDigits
+        + (members == 0 ? 0 : members + 1)
+        + 1;
 }
 
 }

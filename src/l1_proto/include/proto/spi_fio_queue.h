@@ -132,7 +132,31 @@ private:
         [[nodiscard]] Ex<void> on(const FioWindow::IoCommand& c) noexcept;
         [[nodiscard]] Ex<void> misrouted(const FioWindow&) noexcept;
     };
-    struct Cost;
+
+    struct Cost {
+        TASTY_SEAT_RESIDENT(RT);
+        using Result = std::uint32_t;
+        hal::Width width;
+
+        std::uint32_t on(const FioWindow::Index&) const noexcept { return 2; }
+
+        std::uint32_t on(const FioWindow::Open&) const noexcept { return 2; }
+
+        std::uint32_t on(const FioWindow::Data& d) const noexcept {
+            const std::size_t n = width == hal::Width::Word ? (d.len + 1u) / 2u : d.len;
+            return 1 + static_cast<std::uint32_t>(n);
+        }
+
+        std::uint32_t on(const FioWindow::Close&) const noexcept { return 2; }
+
+        std::uint32_t on(const FioWindow::IoCommand& c) const noexcept { return c.words; }
+
+        std::uint32_t misrouted(const FioWindow&) const noexcept {
+            TASTY_SEAT_BODY(Cost);
+            return 0;
+        }
+    };
+
     [[nodiscard]] std::uint32_t cost_(const FioWindow& w) const noexcept;
     void abandon_() noexcept;
     void reset_abandon_() noexcept;

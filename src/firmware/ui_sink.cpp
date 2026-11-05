@@ -178,7 +178,7 @@ void UiSink::on(const app::Event::InfoRequest& a, const app::Event::Head& h) {
 
 void UiSink::on(const app::Event::ProgressUpdate& a, const app::Event::Head& h) {
     w_.trace.record(a, h);
-    w_.menu->on_progress(a.cur, a.max, w_.ctx);
+    w_.menu->on_progress(a.progress, w_.ctx);
 }
 
 void UiSink::on(const app::Event::SdActivity& a, const app::Event::Head& h) {
@@ -202,6 +202,7 @@ void UiSink::misrouted(const app::Event&) noexcept {
 static_assert(app::EventUiSink<UiSink>);
 
 void HostFacts::sample(ui::SystemFacts& sys, ui::StatusBarFacts& bar) {
+    constexpr std::chrono::seconds kProbeInterval{3};
     TASTY_SEAT_BODY(HostFacts);
 
     static_assert(
@@ -226,8 +227,9 @@ void HostFacts::sample(ui::SystemFacts& sys, ui::StatusBarFacts& bar) {
 
     struct statvfs st{};
     if (::statvfs(vfs_.root_path().c_str(), &st) == 0) {
-        sys.avail_bytes = static_cast<std::uint64_t>(st.f_bsize)
-            * static_cast<std::uint64_t>(st.f_bavail);
+        sys.avail = proto::FileSize{
+            static_cast<std::uint64_t>(st.f_bsize) * static_cast<std::uint64_t>(st.f_bavail)
+        };
     }
     sys.storage_usb = vfs_.root().usb;
 
@@ -242,7 +244,7 @@ void HostFacts::sample(ui::SystemFacts& sys, ui::StatusBarFacts& bar) {
     const bool pairing = menu_.bt_pairing_active();
     if (!pairing) {
         const auto mono = clock_.now();
-        if (!bt_probed_ || mono - bt_probed_at_ >= std::chrono::seconds{3}) {
+        if (!bt_probed_ || mono - bt_probed_at_ >= kProbeInterval) {
             bt_probed_ = true;
             bt_probed_at_ = mono;
             if (auto up = os::bluetooth_adapter_up())
@@ -252,7 +254,7 @@ void HostFacts::sample(ui::SystemFacts& sys, ui::StatusBarFacts& bar) {
     bar.bluetooth = bt_up_;
 
     const auto mono = clock_.now();
-    if (!net_probed_ || mono - net_probed_at_ >= std::chrono::seconds{3}) {
+    if (!net_probed_ || mono - net_probed_at_ >= kProbeInterval) {
         net_probed_ = true;
         net_probed_at_ = mono;
         if (auto np = os::net_presence()) {

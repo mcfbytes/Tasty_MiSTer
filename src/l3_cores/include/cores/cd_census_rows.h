@@ -17,7 +17,7 @@ template <const CoreProfile& kProfile>
 class CommandEdgeRow final : public reactor::ILinkDecoder {
 public:
     void service(reactor::CoreState& st) const override {
-        if (ICdServiceRows* r = rows_for<kProfile>(st))
+        if (const auto r = rows_for<kProfile>(st))
             r->service_command_edge();
     }
 };
