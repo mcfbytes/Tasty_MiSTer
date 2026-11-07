@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "reactor/round_timer.h"
 
+#include <chrono>
+#include <limits>
+
 namespace mister::reactor {
 
 namespace {
 
-constexpr std::uint32_t kU32Max = 0xFFFF'FFFFu;
+constexpr std::uint32_t kU32Max = std::numeric_limits<std::uint32_t>::max();
 
 constexpr std::uint32_t sat_add(std::uint32_t a, std::uint64_t b) noexcept {
     const std::uint64_t s = static_cast<std::uint64_t>(a) + b;
@@ -27,6 +30,7 @@ void RoundTimer::begin(std::int64_t t_wake_ns) noexcept {
     longest_ = {};
     lifecycle_ = 0;
     in_round_ = true;
+    recorder_.begin(MonoInstant{std::chrono::nanoseconds{t_wake_ns}});
 }
 
 void RoundTimer::wake(std::int64_t latency_ns, std::uint64_t missed_ticks) noexcept {
@@ -37,16 +41,19 @@ void RoundTimer::wake(std::int64_t latency_ns, std::uint64_t missed_ticks) noexc
     acc_.tick_overruns = sat_add(acc_.tick_overruns, missed_ticks);
     if (lat > acc_.all_wake_max_ns)
         acc_.all_wake_max_ns = lat;
+    recorder_.wake(round_span(std::chrono::nanoseconds{latency_ns}));
 }
 
 void RoundTimer::mark(RoundSegment seg, std::size_t index, std::int64_t now_ns) noexcept {
     if (!in_round_)
         return;
     const std::int64_t d = now_ns - last_mark_ns_;
+    const RoundTiming::Cause at{seg, static_cast<std::uint8_t>(index), 0, 0};
     if (d > longest_ns_) {
         longest_ns_ = d;
-        longest_ = RoundTiming::Cause{seg, static_cast<std::uint8_t>(index), 0, 0};
+        longest_ = at;
     }
+    recorder_.mark(at, round_span(std::chrono::nanoseconds{d}));
     last_mark_ns_ = now_ns;
 }
 
@@ -83,6 +90,10 @@ std::int64_t RoundTimer::end(std::int64_t t_end_ns) noexcept {
             acc_.steady_max_epoch = acc_.epoch + 1;
         }
     }
+    const MonoInstant finish{std::chrono::nanoseconds{t}};
+    if (dur > kOverNs)
+        recorder_.record(finish, cause);
+    recorder_.end(finish, cause);
     in_round_ = false;
     if (t - epoch_start_ns_ >= kEpochNs)
         close_epoch_(t);

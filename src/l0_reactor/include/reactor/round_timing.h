@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <type_traits>
 
 #include "infra/seat.h"
@@ -53,20 +55,27 @@ static_assert(sizeof(RoundTiming) == 512, "one memcpy per epoch; a new field mus
 
 using RoundTimingCell = xthread::Telemetry<RoundTiming, SeatTag::RT>;
 
+inline constexpr std::uint64_t kFirstBucketNs = 1024;
+inline constexpr std::uint64_t kNsPerUs = std::chrono::nanoseconds{std::chrono::microseconds{1}}
+                                              .count();
+inline constexpr std::uint32_t kPercentileDenominator = 100;
+
 constexpr std::size_t round_bucket(std::uint64_t ns) noexcept {
     std::size_t b = 0;
-    for (std::uint64_t v = ns >> 10; v != 0 && b < kRoundBuckets - 1; v >>= 1)
+    for (std::uint64_t v = ns / kFirstBucketNs; v != 0 && b < kRoundBuckets - 1; v >>= 1)
         ++b;
     return b;
 }
 
 constexpr std::uint32_t round_bucket_edge_us(std::size_t b) noexcept {
-    return static_cast<std::uint32_t>(((std::uint64_t{1024} << b) + 999) / 1000);
+    return static_cast<std::uint32_t>(((kFirstBucketNs << b) + (kNsPerUs - 1)) / kNsPerUs);
 }
 
 constexpr std::uint32_t round_us(std::uint64_t ns) noexcept {
-    const std::uint64_t us = ns / 1000;
-    return us > 0xFFFFFFFFull ? 0xFFFFFFFFu : static_cast<std::uint32_t>(us);
+    const std::uint64_t us = ns / kNsPerUs;
+    return us > std::numeric_limits<std::uint32_t>::max()
+        ? std::numeric_limits<std::uint32_t>::max()
+        : static_cast<std::uint32_t>(us);
 }
 
 constexpr std::uint32_t round_avg_us(const RoundTiming::Dist& d) noexcept {
@@ -80,7 +89,7 @@ constexpr std::uint32_t round_all_steady_avg_us(const RoundTiming& t) noexcept {
 constexpr std::uint32_t round_p99_us(const RoundTiming::Dist& d) noexcept {
     if (d.n == 0)
         return 0;
-    const std::uint32_t want = d.n - d.n / 100;
+    const std::uint32_t want = d.n - d.n / kPercentileDenominator;
     std::uint32_t cum = 0;
     for (std::size_t b = 0; b < kRoundBuckets; ++b) {
         cum += d.hist[b];

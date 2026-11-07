@@ -12,6 +12,7 @@
 #include <string_view>
 
 #include "cores/n64_memory_type.h"
+#include "infra/endian.h"
 #include "infra/error.h"
 #include "infra/unique_fd.h"
 
@@ -111,10 +112,9 @@ inline constexpr IdEntry kIdTemplate = detail::make_id_template();
         e[i] = serial[i];
     const std::uint16_t sum = id_checksum(std::span<const std::uint8_t, kIdEntrySize>{e});
     const std::uint16_t inv = id_inverse_checksum(sum);
-    e[kIdSumOffset] = static_cast<std::uint8_t>(sum >> 8);
-    e[kIdSumOffset + 1] = static_cast<std::uint8_t>(sum & 0xFF);
-    e[kIdInverseOffset] = static_cast<std::uint8_t>(inv >> 8);
-    e[kIdInverseOffset + 1] = static_cast<std::uint8_t>(inv & 0xFF);
+
+    infra::store_be<std::uint16_t>(std::span<std::uint8_t>(e).subspan<kIdSumOffset, 2u>(), sum);
+    infra::store_be<std::uint16_t>(std::span<std::uint8_t>(e).subspan<kIdInverseOffset, 2u>(), inv);
     return e;
 }
 

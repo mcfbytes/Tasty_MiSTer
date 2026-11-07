@@ -32,8 +32,23 @@ public:
 
     const Page* bottom() const noexcept { return pages_.empty() ? nullptr : pages_.front().get(); }
 
+    static constexpr std::size_t kBeneathTopFromEnd = 2;
+
+    Page* beneath() noexcept {
+        return pages_.size() >= kBeneathTopFromEnd
+            ? pages_[pages_.size() - kBeneathTopFromEnd].get()
+            : nullptr;
+    }
+
+    const Page* beneath() const noexcept {
+        return pages_.size() >= kBeneathTopFromEnd
+            ? pages_[pages_.size() - kBeneathTopFromEnd].get()
+            : nullptr;
+    }
+
     PageId beneath_top_id() const noexcept {
-        return pages_.size() < 2 ? PageId::None : pages_[pages_.size() - 2]->id();
+        const Page* under = beneath();
+        return under == nullptr ? PageId::None : under->id();
     }
 
     void push(std::unique_ptr<Page> p);

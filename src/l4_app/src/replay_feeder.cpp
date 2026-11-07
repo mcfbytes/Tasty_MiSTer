@@ -100,11 +100,14 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
         return true;
     }
     const cores::IMovieCodec::LeadRange range = play_.codec->lead_range();
-    if (p.lead && (*p.lead < range.min || *p.lead > range.max)) {
-        refuse_(PlayRefusal{Refusal::Lead, static_cast<std::uint32_t>(*p.lead)});
+
+    const std::optional<std::int32_t> lead = p.lead ? std::optional<std::int32_t>{p.lead->v}
+                                                    : std::nullopt;
+    if (lead && (*lead < range.min || *lead > range.max)) {
+        refuse_(PlayRefusal{Refusal::Lead, static_cast<std::uint32_t>(*lead)});
         return true;
     }
-    if (p.stop_at && *p.stop_at == 0) {
+    if (p.stop_at && *p.stop_at == MovieFrame{}) {
         refuse_(
             PlayRefusal{
                 Refusal::Movie,
@@ -113,13 +116,14 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
         );
         return true;
     }
-    play_.lead_override = p.lead;
+    play_.lead_override = lead;
     play_.stop_at = p.stop_at;
     play_.ram_fill = p.ram_fill;
     play_.seeded_save = p.seeded_save;
     play_.set_ok = p.set_settings;
     play_.set.clear();
-    play_.offset_us = p.phase_us.value_or(0);
+    play_.offset_us = p.phase ? std::chrono::duration_cast<ReplayPlay::ArmMicros>(*p.phase).count()
+                              : 0u;
     active_ = std::make_unique<ScanStage>();
     apply_(active_->enter(ctx_()));
     return true;

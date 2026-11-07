@@ -33,6 +33,7 @@
 #include "app/tx_digest_cell.h"
 #include "app/types.h"
 #include "app/window_job_service.h"
+#include "infra/endian.h"
 #include "cores/core_support.h"
 #include "cores/load_progress.h"
 #include "cores/progress_ticker.h"
@@ -349,7 +350,7 @@ inline ILinkEncoder::Outcome HeldTransfer::stage_payload_(
             return ILinkEncoder::Outcome::Dropped;
         stage_open_.emplace(std::move(*ds));
         stage_tick_.bind(a.progress ? this : nullptr);
-        stage_tick_.begin(proto::FileSize{file != nullptr ? file->size_bytes : 0});
+        stage_tick_.begin(file != nullptr ? file->size_bytes : proto::FileSize{});
     } else if (!stage_open_) {
         return drop_stage_();
     }
@@ -686,13 +687,13 @@ inline ILinkEncoder::Outcome HeldTransfer::stage_copy_(
     std::span<const std::uint8_t> bytes
 ) noexcept {
     cut_stage_();
-    const std::size_t n = bytes.size() / 2u;
+    const std::size_t n = bytes.size() / sizeof(std::uint16_t);
     if (copy_ds_ || proto::sets_region(a) || a.copy_word > n || n > kCopyWordsMax) {
         return ILinkEncoder::Outcome::Dropped;
     }
     std::array<std::uint16_t, kCopyWordsMax> w{};
-    for (std::size_t i = 0; i < n; ++i)
-        w[i] = static_cast<std::uint16_t>(bytes[2u * i] | (bytes[2u * i + 1u] << 8));
+
+    infra::load_le_run(bytes.first(n * sizeof(std::uint16_t)), std::span(w).first(n));
     (void)binder_.fio_queue().flush();
     auto ds = proto::DownloadSession::begin(link_, a.dest);
     if (!ds)
@@ -795,7 +796,7 @@ inline ILinkEncoder::Outcome HeldTransfer::drop_stage_() noexcept {
 }
 
 inline bool HeldTransfer::stage_fits_round_(std::size_t bytes) const noexcept {
-    const std::size_t words = link_.width() == hal::Width::Word ? (bytes + 1u) / 2u : bytes;
+    const std::size_t words = hal::words(link_.width(), bytes);
     return words <= proto::tightest_load_budget_words();
 }
 

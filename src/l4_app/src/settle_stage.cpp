@@ -33,8 +33,7 @@ std::string value_label(
     if (table) {
         for (const proto::Item& it : table->items()) {
             if (it.kind != proto::ItemKind::Option
-                || it.bits.start.v != need.lo
-                || it.bits.width != need.width)
+                || it.bits != proto::BitField{proto::StatusBit{need.lo}, need.width})
                 continue;
             const std::string_view label = table->subfield(it, kFirstLabelSubfield + value);
             if (!label.empty())
@@ -176,7 +175,7 @@ IReplayStage::Step SettleStage::settle_(Ctx ctx) noexcept {
         const auto slot = rom_slot_(ctx);
         if (!slot)
             return Step::refuse(Refusal::Slot);
-        play.rom_index = *slot;
+        play.rom_index = slot->v;
     }
     load_checkpoints_(ctx);
     ctx.w.diag.appendf(
@@ -311,7 +310,7 @@ void SettleStage::load_checkpoints_(Ctx ctx) noexcept {
     );
 }
 
-std::optional<std::uint8_t> SettleStage::rom_slot_(Ctx ctx) noexcept {
+std::optional<proto::IoIndex> SettleStage::rom_slot_(Ctx ctx) noexcept {
     if (ctx.w.conf.sample_into(conf_) == 0 || conf_.truncated)
         return std::nullopt;
     const auto table = proto::ItemTable::parse(std::string_view(conf_.text, conf_.len));

@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <type_traits>
 #include <utility>
@@ -43,6 +44,8 @@ public:
 
     struct Losses {
         TASTY_SEAT_EXEMPT(component);
+
+        static constexpr std::uint32_t kMax = std::numeric_limits<std::uint32_t>::max();
         std::array<std::uint32_t, kKinds> per_kind{};
 
         [[nodiscard]] constexpr std::uint32_t of(Kind k) const noexcept {
@@ -52,7 +55,7 @@ public:
         [[nodiscard]] constexpr std::uint32_t total() const noexcept {
             std::uint32_t sum = 0;
             for (const std::uint32_t n : per_kind)
-                sum = (sum > kSaturated - n) ? kSaturated : sum + n;
+                sum = (sum > kMax - n) ? kMax : sum + n;
             return sum;
         }
     };
@@ -68,12 +71,19 @@ public:
             return lane_->offer_(alt, head...);
         }
 
+        template <class A>
+            requires infra::AlternativeOf<A, Sum>
+        [[nodiscard]] bool admit() noexcept {
+            seat_assert<ProducerSeat>(ERR_SITE(), "CountedLane::admit off the producer seat");
+            return lane_->admit_<A>();
+        }
+
         [[nodiscard]] std::size_t size() const noexcept { return lane_->ring_.size(); }
 
     private:
         friend class CountedLane;
 
-        explicit Producer(CountedLane& l) noexcept : lane_(&l) {}
+        constexpr explicit Producer(CountedLane& l) noexcept : lane_(&l) {}
 
         CountedLane* lane_;
     };
@@ -109,7 +119,7 @@ public:
     CountedLane(const CountedLane&) = delete;
     CountedLane& operator=(const CountedLane&) = delete;
 
-    [[nodiscard]] Producer producer() noexcept { return Producer{*this}; }
+    [[nodiscard]] constexpr Producer producer() noexcept { return Producer{*this}; }
 
     [[nodiscard]] Consumer consumer() noexcept { return Consumer{ring_.consumer()}; }
 
@@ -136,13 +146,26 @@ private:
         static_assert(infra::ordinal(A::kKind) < kKinds);
         if (ring_.push(build_(alt, head...)))
             return true;
-        Counter& lost = loss_[infra::ordinal(A::kKind)];
-        if (lost.get() != kSaturated)
-            lost.add();
+        lose_<A>();
         return false;
     }
 
-    static constexpr std::uint32_t kSaturated = 0xFFFFFFFFu;
+    template <class A>
+    bool admit_() noexcept {
+        static_assert(infra::ordinal(A::kKind) < kKinds);
+        if (ring_.size() < N)
+            return true;
+        lose_<A>();
+        return false;
+    }
+
+    template <class A>
+    void lose_() noexcept {
+        Counter& lost = loss_[infra::ordinal(A::kKind)];
+
+        if (lost.get() != Losses::kMax)
+            lost.add();
+    }
 
     Ring ring_;
     Counter loss_[kKinds];

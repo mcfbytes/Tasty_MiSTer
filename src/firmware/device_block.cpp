@@ -145,6 +145,7 @@ DiagSampler::DeviceCells DeviceBlock::diag_sources(const BootParts& plat) noexce
         .ini_write_failures = owner_.ini_write_failures_cell(),
         .doorbell = session_.doorbell_cell(),
         .round_timing = plat.round_timer.cell(),
+        .round_traces = plat.round_timer.traces(),
 
         .frames = infra::opt_ref_of(frame_ != nullptr ? &frame_->frame_cell() : nullptr),
         .screenshots = shots_,

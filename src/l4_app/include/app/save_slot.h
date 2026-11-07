@@ -12,6 +12,7 @@
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "proto/save_act.h"
+#include "cores/wire_word.h"
 
 namespace mister::app {
 
@@ -33,9 +34,11 @@ struct SaveUploadSlot {
             static constexpr Kind kKind = Kind::Start;
             std::uint32_t size = 0;
             std::uint16_t index = 0;
-            std::uint8_t word_bytes = 1;
+            cores::WireWordBytes word_bytes{};
             std::uint8_t pad_{};
         };
+
+        static_assert(sizeof(Start) == 8, "the save loan's Start stays one 8-byte slot");
 
         struct Resume {
             static constexpr Kind kKind = Kind::Resume;

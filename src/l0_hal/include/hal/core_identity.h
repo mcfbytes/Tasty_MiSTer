@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
+#include "hal/types.h"
 
 namespace mister::hal {
 
+inline constexpr CoreTypeByte kUnnegotiatedType{0x55};
+
 struct CoreIdentity {
-    std::uint8_t type_byte = 0x55;
-    bool dual_sdram = false;
+    CoreTypeByte type{kUnnegotiatedType};
+
+    [[nodiscard]] constexpr bool dual_sdram() const noexcept { return type.dual_sdram(); }
 };
 
 }

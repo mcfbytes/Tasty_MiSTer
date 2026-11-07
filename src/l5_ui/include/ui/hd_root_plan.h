@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <optional>
 #include <span>
 #include <string>
@@ -58,11 +59,37 @@ public:
     std::uint32_t refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
-    static constexpr std::size_t kRows = 10;
+    enum class Slot : std::uint8_t {
+        Resume,
+        Load,
+        Media,
+        Recent,
+        Cheats,
+        Reset,
+        Separator,
+        CoreSettings,
+        Settings,
+        MainMenu
+    };
+    static constexpr Slot kSlots[] = {
+        Slot::Resume,
+        Slot::Load,
+        Slot::Media,
+        Slot::Recent,
+        Slot::Cheats,
+        Slot::Reset,
+        Slot::Separator,
+        Slot::CoreSettings,
+        Slot::Settings,
+        Slot::MainMenu
+    };
+
+    static constexpr std::size_t kRows = std::size(kSlots);
     static constexpr std::size_t kReserved = 2;
     static_assert(kRows + kReserved <= app::PageDescription::kMaxRows);
 
     static constexpr std::uint8_t kPinned = 3;
+    static_assert(kPinned <= kRows);
 
     static constexpr app::RowTier kTier = app::RowTier::Verb;
 
@@ -106,6 +133,8 @@ private:
     };
 
     void walk_(const proto::ItemTable& table, const BuildEnv& env);
+
+    [[nodiscard]] IHdRow& row_for_(Slot slot) noexcept;
 
     void gate_() noexcept;
     Transition reset_yes_();

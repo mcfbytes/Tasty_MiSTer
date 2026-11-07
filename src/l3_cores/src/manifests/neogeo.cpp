@@ -30,8 +30,9 @@ std::unique_ptr<BootLadder> make_neogeo_ladder(const CoreProfile& p, const Ladde
 }
 
 static_assert(
-    kNeoGeo.windows.size() > NeoGeoLoader::kMemWindow
-        && std::string_view{kNeoGeo.windows[NeoGeoLoader::kMemWindow].region.name} == "neogeo-mem",
+    NeoGeoLoader::kMemWindow.in(kNeoGeo.windows).has_value()
+        && std::string_view{NeoGeoLoader::kMemWindow.in(kNeoGeo.windows)->region.name}
+            == "neogeo-mem",
     "neogeo_loader.cpp:240 and :300: the C-ROM pairs and the P-ROM land at 0x38000000"
 );
 

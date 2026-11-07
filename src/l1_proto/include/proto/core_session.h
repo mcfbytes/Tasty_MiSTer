@@ -36,16 +36,15 @@ enum class CoreType : std::uint8_t {
     SharpMz = 0xA7,
 };
 
-[[nodiscard]] constexpr CoreType fold_core_type(std::uint8_t type_byte) noexcept {
-    switch (type_byte) {
-        case 0xA4:
-        case 0xA8:
-            return CoreType::EightBit;
-        case 0xA7:
-            return CoreType::SharpMz;
-        default:
-            return CoreType::Unknown;
-    }
+inline constexpr hal::CoreTypeByte kEightBitWire{0xA4};
+inline constexpr hal::CoreTypeByte kPrivateDialectWire{0xA7};
+
+[[nodiscard]] constexpr CoreType fold_core_type(hal::CoreTypeByte type_byte) noexcept {
+    if (type_byte == kEightBitWire || type_byte.dual_sdram())
+        return CoreType::EightBit;
+    if (type_byte == kPrivateDialectWire)
+        return CoreType::SharpMz;
+    return CoreType::Unknown;
 }
 
 class CoreSession {

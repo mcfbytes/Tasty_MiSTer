@@ -19,6 +19,7 @@ namespace {
 
 using detail::icmp_n;
 using detail::iequals;
+using detail::RowId;
 using detail::kExtSchema;
 using detail::kSchema;
 
@@ -217,11 +218,7 @@ char char_at(std::string_view s, std::size_t i) {
     return i < s.size() ? s[i] : '\0';
 }
 
-void parse_var(
-    std::string_view line,
-    ConfigSnapshot& into,
-    bool (&array_append)[kNumIniOptions + kNumExtOptions]
-) {
+void parse_var(std::string_view line, ConfigSnapshot& into, detail::ArrayAppendSeen& array_append) {
 
     std::size_t i = 0;
     for (;;) {
@@ -241,24 +238,24 @@ void parse_var(
 
     const char* value = line.data() + i;
 
-    constexpr std::size_t kNoRow = kNumIniOptions + kNumExtOptions;
-    std::size_t var_id = kNoRow;
+    std::optional<RowId> found;
     for (std::size_t j = 0; j < std::size(kSchema); ++j) {
         if (iequals(key, kSchema[j].name))
-            var_id = j;
+            found = RowId::classic(j);
     }
 
-    for (std::size_t j = 0; var_id == kNoRow && j < std::size(kExtSchema); ++j) {
-        if (iequals(key, kExtSchema[j].name))
-            var_id = kNumIniOptions + j;
+    for (std::size_t j = 0; !found && j < std::size(kExtSchema); ++j) {
+        if (iequals(key, kExtSchema[j].name)) {
+            found = RowId::extension(j);
+        }
     }
-    if (var_id == kNoRow) {
+    if (!found) {
         record_unknown(into, key);
         return;
     }
 
-    const Option& o = (var_id < kNumIniOptions) ? kSchema[var_id]
-                                                : kExtSchema[var_id - kNumIniOptions];
+    const RowId var_id = *found;
+    const Option& o = option_at(var_id);
     ConfigField field{into, o};
     const std::size_t vlen = std::strlen(value);
     const std::string_view text{value, vlen};
@@ -344,7 +341,21 @@ config_parser::PassOutcome config_parser::parse(
 
     bool section = false;
 
-    bool array_append[kNumIniOptions + kNumExtOptions] = {};
+    detail::ArrayAppendSeen array_append{};
+
+    const auto enter_section = [&](std::string_view header) {
+        const SectionVerdict v = classify_section(header, names);
+        if (v.video_header)
+            outcome.saw_video_section = true;
+        if (v.kind == SectionMatch::VideoQualified || v.kind == SectionMatch::VideoUnqualified) {
+            outcome.used_video_section = true;
+        }
+        section = v.matched;
+        if (section) {
+            for (bool& a : array_append)
+                a = false;
+        }
+    };
 
     IniLineReader reader{text};
 
@@ -353,33 +364,9 @@ config_parser::PassOutcome config_parser::parse(
         const char first = line.empty() ? '\0' : line.front();
 
         if (first == kSectionStart) {
-
-            const SectionVerdict v = classify_section(line, names);
-            if (v.video_header)
-                outcome.saw_video_section = true;
-            if (v.kind == SectionMatch::VideoQualified
-                || v.kind == SectionMatch::VideoUnqualified) {
-                outcome.used_video_section = true;
-            }
-            section = v.matched;
-            if (section) {
-                for (bool& a : array_append)
-                    a = false;
-            }
+            enter_section(line);
         } else if (first == kInclSection && !section) {
-
-            const SectionVerdict v = classify_section(line, names);
-            if (v.video_header)
-                outcome.saw_video_section = true;
-            if (v.kind == SectionMatch::VideoQualified
-                || v.kind == SectionMatch::VideoUnqualified) {
-                outcome.used_video_section = true;
-            }
-            section = v.matched;
-            if (section) {
-                for (bool& a : array_append)
-                    a = false;
-            }
+            enter_section(line);
         } else if (section) {
             parse_var(line, into, array_append);
         }

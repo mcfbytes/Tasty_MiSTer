@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 #include "cores/manifests/n64.h"
 #include "cores/n64_path.h"
@@ -14,7 +15,6 @@ namespace mister::cores {
 
 using n64::MemoryType;
 using n64::PadType;
-using n64::SystemType;
 
 namespace {
 
@@ -28,8 +28,7 @@ namespace {
     return 0;
 }
 
-[[nodiscard]] bool pad_is_pinned(std::uint32_t v) noexcept {
-    const auto p = static_cast<PadType>(v);
+[[nodiscard]] bool pad_is_pinned(PadType p) noexcept {
     return p == PadType::Snac || p == PadType::Keyboard || p == PadType::Mouse;
 }
 
@@ -60,10 +59,10 @@ Ex<LoadPlan> N64Loader::plan(const LoadAsk& ask, const proto::StatusWord& status
     if (ask.size != proto::FileSize{} && r == n64::FileRoute::Ipl) {
         LoadPlan p{};
         p.count = 1;
-        if (ask.load_addr == 0 || !plan_ipl_row_(p.rows[0], ask.path, true)) {
-            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), ask.load_addr});
+        if (ask.load_addr == hal::FabricAddr{} || !plan_ipl_row_(p.rows[0], ask.path, true)) {
+            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), ask.load_addr.v});
         }
-        p.rows[0].addr = ask.load_addr;
+        p.rows[0].addr = ask.load_addr.v;
         p.rows[0].index = ask.index;
         p.rows[0].source = ipl_path_.view();
         slab_ = n64::LoadFacts{};
@@ -94,25 +93,23 @@ Ex<LoadPlan> N64Loader::plan_rom_(const LoadAsk& ask, const proto::StatusWord& s
     p.rows[0].shaped = true;
     p.rows[0].shape = raw(Shape::Rom);
 
-    if (ask.load_addr != 0) {
+    if (ask.load_addr != hal::FabricAddr{}) {
         p.rows[0].dest = RowDest::Window;
-        p.rows[0].addr = ask.load_addr;
+        p.rows[0].addr = ask.load_addr.v;
     }
     return p;
 }
 
 Ex<void> N64Loader::begin_rom_(std::uint64_t size, const proto::StatusWord& status) {
 
-    if (size < n64::kMinRomBytes || size > 0xFFFF'FFFFu) {
+    if (size < n64::kMinRomBytes || size > std::numeric_limits<std::uint32_t>::max()) {
         return std::unexpected(
             Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(size)}
         );
     }
     facts_ = RomFacts{};
-    facts_.bytes = size;
-    tags_ = n64::DbTags{};
-    bootcode_ = {};
-    info_.clear();
+    facts_.bytes = proto::FileSize{size};
+    ladder_.reset();
     md5_ = mra::Md5{};
     slab_ = n64::LoadFacts{};
     slab_.bits = status;
@@ -125,7 +122,7 @@ Ex<void> N64Loader::begin_rom_(std::uint64_t size, const proto::StatusWord& stat
 
 Ex<LoadPlan> N64Loader::plan_disk_(const LoadAsk& ask, const proto::StatusWord& status) {
 
-    if (ask.load_addr == 0)
+    if (ask.load_addr == hal::FabricAddr{})
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     auto file = vfs_.open(ask.path, svc::OpenMode::Read);
     if (!file)
@@ -153,7 +150,7 @@ Ex<LoadPlan> N64Loader::plan_disk_(const LoadAsk& ask, const proto::StatusWord& 
     row.placed = true;
     row.shape = raw(Shape::Disk);
     row.index = ask.index;
-    row.addr = ask.load_addr;
+    row.addr = ask.load_addr.v;
     row.source = disk_->path.view();
     row.file_len = n64dd::kNddBytes;
     row.extent = n64dd::kFlatBytes;
@@ -203,7 +200,7 @@ void N64Loader::plan_autoload_(LoadPlan& p) {
 
         if (!plan_ipl_row_(row, ipl_path_.view(), !cart))
             return;
-        row.index = proto::WideIoIndex{(cart ? n64::kDdIplPreloadIndex : n64::kDdIplIndex).v};
+        row.index = proto::WideIoIndex::of(cart ? n64::kDdIplPreloadIndex : n64::kDdIplIndex, 0);
         row.addr = manifests::kDdIplLoadAddr;
         row.source = ipl_path_.view();
         ++p.count;
@@ -212,15 +209,20 @@ void N64Loader::plan_autoload_(LoadPlan& p) {
         return;
     auto f = vfs_.open(cart_path_.view(), svc::OpenMode::Read);
     const auto size = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
-    if (!size || size->v < n64::kMinRomBytes || size->v > 0xFFFF'FFFFu)
+    if (!size
+        || !size->within(
+            proto::FileSize{n64::kMinRomBytes},
+            proto::FileSize{std::numeric_limits<std::uint32_t>::max()}
+        )) {
         return;
+    }
     cart_bytes_ = size->v;
     rom_pending_ = true;
     TransferRow& row = p.rows[p.count++];
     row.dest = RowDest::Window;
     row.shaped = true;
     row.shape = raw(Shape::Rom);
-    row.index = proto::WideIoIndex{n64::kRomIndex.v};
+    row.index = proto::WideIoIndex::of(n64::kRomIndex, 0);
     row.addr = manifests::kRomLoadAddr;
     row.source = cart_path_.view();
     row.file_len = static_cast<std::uint32_t>(size->v);
@@ -229,8 +231,10 @@ void N64Loader::plan_autoload_(LoadPlan& p) {
 bool N64Loader::plan_ipl_row_(TransferRow& row, std::string_view path, bool boot) {
     auto f = vfs_.open(path, svc::OpenMode::Read);
     const auto size = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
-    if (!size || size->v < n64dd::kIplMinBytes || size->v > n64dd::kIplBytes)
+    if (!size
+        || !size->within(proto::FileSize{n64dd::kIplMinBytes}, proto::FileSize{n64dd::kIplBytes})) {
         return false;
+    }
     if (path.data() != ipl_path_.view().data() && !ipl_path_.assign(path))
         return false;
     row.dest = RowDest::Window;
@@ -299,16 +303,20 @@ void N64Loader::shape_ipl_(std::span<std::uint8_t> piece, std::uint64_t off) {
     if (off != 0 || piece.size() < n64::kMinRomBytes)
         return;
     static constexpr std::string_view kDevId = "NDXJ";
-    const bool dev = std::memcmp(piece.data() + 0x3B, kDevId.data(), kDevId.size()) == 0;
-    write_(n64::opt::kDdDevelopment, dev ? 1u : 0u);
+    const bool dev = std::memcmp(piece.data() + n64::kCartIdOffset, kDevId.data(), kDevId.size())
+        == 0;
+    slab_.set_flag(n64::opt::kDdDevelopment, dev);
     if (!ipl_boot_)
         return;
     const auto sums = n64::bootcode_checksums(piece.first(n64::kMinRomBytes));
-    const auto d = n64::detect_from_bootcode(static_cast<char>(piece[0x3E]), sums);
-    if (auto_detect_()) {
-        write_(n64::opt::kSysType, static_cast<std::uint32_t>(d.system));
-        write_(n64::opt::kCicType, static_cast<std::uint32_t>(d.cic));
-        set_cart_save_type_(MemoryType::None);
+    const auto d = n64::detect_from_bootcode(
+        static_cast<char>(piece[n64::kCartIdRegionOffset]),
+        sums
+    );
+    if (slab_.auto_detect()) {
+        slab_.set_system(d.system);
+        slab_.set_cic(d.cic);
+        slab_.set_cart_save_type(MemoryType::None);
     }
 }
 
@@ -348,7 +356,7 @@ Ex<bool> N64Loader::load_ram_step_(ICoreWindow& window) {
             return false;
         auto size = (*f)->size();
 
-        if (!size || size->v != total)
+        if (!size || *size != proto::FileSize{total})
             return false;
         d.ram_file = std::move(*f);
         d.ram_off = 0;
@@ -396,7 +404,7 @@ Ex<void> N64Loader::finish(ICoreWindow* window) {
         if (concluded_) {
             slab_ = n64::LoadFacts{};
             slab_.kind = n64::FactsKind::Disk;
-            slab_.load_addr = hal::FabricAddr{disk_->load_addr};
+            slab_.load_addr = disk_->load_addr;
         }
         return {};
     }
@@ -407,9 +415,11 @@ Ex<void> N64Loader::finish(ICoreWindow* window) {
         return {};
     }
     facts_.file_md5 = md5_.hex_str();
-    run_detect_ladder_();
+    const n64::DetectOutcome detected = ladder_.run(facts_, slab_);
+    facts_.detected = detected.detected;
+    facts_.homebrew = detected.homebrew;
     apply_patches_(window);
-    compose_info_();
+    ladder_.compose_info(facts_, slab_, patches_applied_ != 0);
     slab_.crc32 = facts_.crc32;
     slab_.kind = n64::FactsKind::Rom;
     concluded_ = true;
@@ -432,12 +442,13 @@ std::span<const std::uint8_t> N64Loader::facts() const noexcept {
 void N64Loader::apply_patches_(ICoreWindow* window) noexcept {
     if (window == nullptr)
         return;
-    if (read_(n64::opt::kPatches) != 0)
+    if (slab_.flag(n64::opt::kPatches))
         return;
 
-    for (const n64::PatchTable::Entry& e : tags_.patches.view().first(tags_.patches.applicable())) {
+    for (const n64::PatchTable::Entry& e :
+         ladder_.tags().patches.view().first(ladder_.tags().patches.applicable())) {
         const std::uint32_t at = e.address * 4u;
-        if (at >= facts_.bytes)
+        if (proto::FileSize{at} >= facts_.bytes)
             break;
         if (e.turbo_core_only && !turbo_)
             continue;
@@ -462,155 +473,157 @@ void N64Loader::analyze_header_(std::span<const std::uint8_t> head) {
         facts_.internal_name = n64::internal_name(*header);
         facts_.cart_id = n64::cart_id(*header);
 
-        for (std::size_t i = 0; i < 4; ++i)
-            facts_.controllers[i] = (*header)[0x34 + i];
+        for (std::size_t i = 0; i < n64::kControllerCount; ++i)
+            facts_.controllers[i] = (*header)[n64::kControllerOffset + i];
     }
-    bootcode_ = n64::bootcode_checksums(head);
+    facts_.bootcode = n64::bootcode_checksums(head);
 }
 
-void N64Loader::run_detect_ladder_() {
-    facts_.detected = lookup_and_apply_(n64::DbKey::Md5, facts_.header_md5.view());
-    if (facts_.detected == 0) {
-        facts_.detected = lookup_and_apply_(n64::DbKey::Md5, facts_.file_md5.view());
+namespace n64 {
+
+DetectOutcome DetectLadder::run(const RomFacts& facts, LoadFacts& slab) {
+    detected_ = lookup_and_apply_(slab, DbKey::Md5, facts.header_md5.view());
+    if (detected_.none())
+        detected_ = lookup_and_apply_(slab, DbKey::Md5, facts.file_md5.view());
+    if (detected_.none() && cart_id_lookupable(facts.cart_id.view())) {
+        detected_ = lookup_and_apply_(slab, DbKey::CartridgeId, facts.cart_id.view());
     }
-    if (facts_.detected == 0 && n64::cart_id_lookupable(facts_.cart_id.view())) {
-        facts_.detected = lookup_and_apply_(n64::DbKey::CartridgeId, facts_.cart_id.view());
-    }
-    if (facts_.detected == 0) {
-        if (apply_homebrew_()) {
-            facts_.homebrew = true;
-            facts_.detected = n64::kDetectDbBit;
-        } else if (auto_detect_()) {
-            apply_unknown_defaults_();
+    DetectOutcome out{};
+    if (detected_.none()) {
+        if (apply_homebrew_(facts, slab)) {
+            out.homebrew = true;
+            detected_ = DetectFlags{}.with(DetectFlag::Db);
+        } else if (slab.auto_detect()) {
+            apply_unknown_defaults_(slab);
         }
     }
 
-    if ((facts_.detected & n64::kDetectRegionBit) == 0) {
-        const std::string_view id = facts_.cart_id.view();
+    if (!detected_.has(DetectFlag::Region)) {
+        const std::string_view id = facts.cart_id.view();
         const char region = id.size() > 3 ? id[3] : '\0';
-        const auto d = n64::detect_from_bootcode(region, bootcode_);
-        apply_ipl3_(d);
+        const auto d = detect_from_bootcode(region, facts.bootcode);
+        apply_ipl3_(slab, d, detected_);
     }
+    out.detected = detected_;
+    return out;
 }
 
-std::uint8_t N64Loader::lookup_and_apply_(n64::DbKey kind, std::string_view key) {
-    const n64::DbTags t = reader_.scan(kind, key);
+DetectFlags DetectLadder::lookup_and_apply_(LoadFacts& slab, DbKey kind, std::string_view key) {
+    const DbTags t = reader_.scan(kind, key);
     if (!t.found)
-        return 0;
+        return {};
     tags_ = t;
     if (!t.malformed)
-        apply_tags_(t);
-    return n64::detect_level(t, auto_detect_());
+        apply_tags_(slab, t);
+    return DetectFlags::of(detect_level(t, slab.auto_detect()));
 }
 
-void N64Loader::apply_tags_(const n64::DbTags& t) {
-    if (!auto_detect_())
+void DetectLadder::apply_tags_(LoadFacts& slab, const DbTags& t) {
+    if (!slab.auto_detect())
         return;
     if (t.system != SystemType::Unknown) {
-        write_(n64::opt::kSysType, static_cast<std::uint32_t>(t.system));
+        slab.set_system(t.system);
     }
-    if (t.cic != n64::Cic::Unknown) {
-        write_(n64::opt::kCicType, static_cast<std::uint32_t>(t.cic));
+    if (t.cic != Cic::Unknown) {
+        slab.set_cic(t.cic);
     }
-    write_(n64::opt::kNoEpak, t.no_epak ? 1u : 0u);
-    write_(n64::opt::kCpak, t.cpak ? 1u : 0u);
-    write_(n64::opt::kRpak, t.rpak ? 1u : 0u);
-    write_(n64::opt::kTpak, t.tpak ? 1u : 0u);
-    write_(n64::opt::kRtc, t.rtc ? 1u : 0u);
-    set_cart_save_type_(t.save_type);
+    slab.set_flag(opt::kNoEpak, t.no_epak);
+    slab.set_flag(opt::kCpak, t.cpak);
+    slab.set_flag(opt::kRpak, t.rpak);
+    slab.set_flag(opt::kTpak, t.tpak);
+    slab.set_flag(opt::kRtc, t.rtc);
+    slab.set_cart_save_type(t.save_type);
 
-    const std::uint32_t pad0 = read_(n64::opt::kControllers[0]);
-    if (auto_pak_() && !pad_is_pinned(pad0)) {
-        write_(n64::opt::kControllers[0], static_cast<std::uint32_t>(t.preferred_pad));
+    if (slab.auto_pak() && !pad_is_pinned(slab.controller(opt::kControllers[0]))) {
+        slab.set_controller(opt::kControllers[0], t.preferred_pad);
     }
 }
 
-bool N64Loader::apply_homebrew_() {
-    const std::string_view id = facts_.cart_id.view();
-    if (id.size() < n64::kCartIdChars)
+bool DetectLadder::apply_homebrew_(const RomFacts& facts, LoadFacts& slab) {
+    const std::string_view id = facts.cart_id.view();
+    if (id.size() < kCartIdChars)
         return false;
     if (id[1] != 'E' || id[2] != 'D')
         return false;
 
-    if (!auto_detect_())
+    if (!slab.auto_detect())
         return false;
 
     switch (hex_to_dec(id[4])) {
         case 1:
-            set_cart_save_type_(MemoryType::Eeprom512);
+            slab.set_cart_save_type(MemoryType::Eeprom512);
             break;
         case 2:
-            set_cart_save_type_(MemoryType::Eeprom2k);
+            slab.set_cart_save_type(MemoryType::Eeprom2k);
             break;
         case 3:
-            set_cart_save_type_(MemoryType::Sram32k);
+            slab.set_cart_save_type(MemoryType::Sram32k);
             break;
         case 4:
-            set_cart_save_type_(MemoryType::Sram96k);
+            slab.set_cart_save_type(MemoryType::Sram96k);
             break;
         case 5:
-            set_cart_save_type_(MemoryType::Flash128k);
+            slab.set_cart_save_type(MemoryType::Flash128k);
             break;
         default:
-            set_cart_save_type_(MemoryType::None);
+            slab.set_cart_save_type(MemoryType::None);
             break;
     }
 
-    write_(n64::opt::kRtc, hex_to_dec(id[5]) & 1u);
+    slab.set_flag(opt::kRtc, (hex_to_dec(id[5]) & 1u) != 0u);
 
-    const auto* cs = facts_.controllers;
+    const auto& cs = facts.controllers;
     const bool rpak = cs[0] == 0x01 || cs[1] == 0x01 || cs[2] == 0x01 || cs[3] == 0x01;
     const bool cpak = cs[0] == 0x02 || cs[1] == 0x02 || cs[2] == 0x02 || cs[3] == 0x02;
-    write_(n64::opt::kRpak, rpak ? 1u : 0u);
-    write_(n64::opt::kCpak, cpak ? 1u : 0u);
+    slab.set_flag(opt::kRpak, rpak);
+    slab.set_flag(opt::kCpak, cpak);
 
-    write_(n64::opt::kTpak, cs[0] == 0x03 ? 1u : 0u);
+    slab.set_flag(opt::kTpak, cs[0] == 0x03);
 
-    if (!auto_pak_())
+    if (!slab.auto_pak())
         return true;
-    for (std::size_t i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < cs.size(); ++i) {
         const std::uint8_t want = cs[i];
         if (want == 0)
             continue;
-        if (pad_is_pinned(read_(n64::opt::kControllers[i])))
+        if (pad_is_pinned(slab.controller(opt::kControllers[i])))
             continue;
         if (want < 0x80) {
             const PadType p = want == 0x01 ? PadType::PadWithRpak
                 : want == 0x02             ? PadType::PadWithCpak
                 : (want == 0x03 && i == 0) ? PadType::PadWithTpak
                                            : PadType::Pad;
-            write_(n64::opt::kControllers[i], static_cast<std::uint32_t>(p));
+            slab.set_controller(opt::kControllers[i], p);
         } else if (want == 0xff) {
-            write_(n64::opt::kControllers[i], static_cast<std::uint32_t>(PadType::Unplugged));
+            slab.set_controller(opt::kControllers[i], PadType::Unplugged);
         }
     }
     return true;
 }
 
-void N64Loader::apply_unknown_defaults_() {
-    write_(n64::opt::kNoEpak, 0);
-    write_(n64::opt::kCpak, 0);
-    write_(n64::opt::kRpak, 0);
-    write_(n64::opt::kTpak, 0);
-    write_(n64::opt::kRtc, 0);
-    set_cart_save_type_(MemoryType::None);
+void DetectLadder::apply_unknown_defaults_(LoadFacts& slab) {
+    slab.set_flag(opt::kNoEpak, false);
+    slab.set_flag(opt::kCpak, false);
+    slab.set_flag(opt::kRpak, false);
+    slab.set_flag(opt::kTpak, false);
+    slab.set_flag(opt::kRtc, false);
+    slab.set_cart_save_type(MemoryType::None);
 }
 
-void N64Loader::apply_ipl3_(const n64::Ipl3Detect& d) {
-    if (!auto_detect_()) {
+void DetectLadder::apply_ipl3_(LoadFacts& slab, const Ipl3Detect& d, DetectFlags& detected) {
+    if (!slab.auto_detect()) {
 
-        facts_.detected = static_cast<std::uint8_t>(facts_.detected | n64::kDetectRegionBit);
+        detected = detected.with(DetectFlag::Region);
         return;
     }
-    write_(n64::opt::kSysType, static_cast<std::uint32_t>(d.system));
-    write_(n64::opt::kCicType, static_cast<std::uint32_t>(d.cic));
-    if (d.known_signature) {
-        facts_.detected = static_cast<std::uint8_t>(facts_.detected | n64::kDetectRegionBit);
-    }
+    slab.set_system(d.system);
+    slab.set_cic(d.cic);
+    if (d.known_signature)
+        detected = detected.with(DetectFlag::Region);
 }
 
-void N64Loader::compose_info_() {
-    if (!auto_detect_())
+void DetectLadder::compose_info(const RomFacts& facts, const LoadFacts& slab, bool patched) {
+    if (!slab.auto_detect())
         return;
     info_.clear();
 
@@ -620,96 +633,130 @@ void N64Loader::compose_info_() {
 
     app("Auto-detect:");
 
-    const std::string_view id = facts_.cart_id.view();
+    const std::string_view id = facts.cart_id.view();
     if (!id.empty() && (id[1] != 'E' || id[2] != 'D')) {
         char line[40]{};
         const int n = std::snprintf(
             line,
             sizeof line,
             "\n[%.4s] v.%u.%u",
-            facts_.cart_id.c_str(),
+            facts.cart_id.c_str(),
             hex_to_dec(id[4]) + 1u,
             hex_to_dec(id[5])
         );
         if (n > 0)
             app(std::string_view(line, static_cast<std::size_t>(n)));
     }
-    if (!facts_.internal_name.empty()) {
+    if (!facts.internal_name.empty()) {
         app("\n\"");
-        app(facts_.internal_name.view());
+        app(facts.internal_name.view());
         app("\"");
     }
 
-    if ((facts_.detected & n64::kDetectRegionBit) == 0) {
+    if (!detected_.has(DetectFlag::Region)) {
         app("\nUnknown Region/CIC");
     } else {
-        const auto sys = static_cast<SystemType>(read_(n64::opt::kSysType));
-        const auto cic = static_cast<n64::Cic>(read_(n64::opt::kCicType));
+        const SystemType sys = slab.system();
+        const Cic cic = slab.cic();
         app("\nRegion: ");
-        app(n64::system_text(sys));
+        app(system_text(sys));
         app(" (");
-        app(n64::cic_text(cic));
+        app(cic_text(cic));
         app(")");
     }
 
-    if ((facts_.detected & n64::kDetectDbBit) == 0) {
+    if (!detected_.has(DetectFlag::Db)) {
         app("\nROM missing from database.\nYou might not be able to save.");
     } else {
-        const MemoryType save = cart_save_type_();
+        const MemoryType save = slab.cart_save_type();
         if (save != MemoryType::None) {
             app("\nSave Type: ");
-            app(n64::save_type_text(save));
+            app(save_type_text(save));
         }
-        if (read_(n64::opt::kTpak) != 0)
+        if (slab.flag(opt::kTpak))
             app("\nTransfer Pak \x96");
-        if (read_(n64::opt::kCpak) != 0)
+        if (slab.flag(opt::kCpak))
             app("\nController Pak \x96");
-        if (read_(n64::opt::kRpak) != 0)
+        if (slab.flag(opt::kRpak))
             app("\nRumble Pak \x96");
-        if (read_(n64::opt::kRtc) != 0)
+        if (slab.flag(opt::kRtc))
             app("\nRTC \x96");
-        if (read_(n64::opt::kNoEpak) != 0)
+        if (slab.flag(opt::kNoEpak))
             app("\nDisable Exp. Pak \x96");
-        if (patches_applied_ != 0)
+        if (patched)
             app("\nPatched \x96");
     }
 }
 
-std::uint32_t N64Loader::read_(n64::StatusField f) const noexcept {
+std::uint32_t LoadFacts::field_(StatusField f) const noexcept {
     std::uint32_t v = 0;
     for (std::uint8_t i = 0; i < f.width; ++i) {
-        if (slab_.bits.get_bit(proto::StatusBit{static_cast<std::uint8_t>(f.lo + i)})) {
+        if (bits.get_bit(proto::StatusBit{static_cast<std::uint8_t>(f.lo + i)})) {
             v |= (1u << i);
         }
     }
     return v;
 }
 
-void N64Loader::write_(n64::StatusField f, std::uint32_t v) noexcept {
+void LoadFacts::set_field_(StatusField f, std::uint32_t v) noexcept {
     for (std::uint8_t i = 0; i < f.width; ++i) {
         const unsigned bit = f.lo + i;
-        set_bit(slab_.bits, bit, ((v >> i) & 1u) != 0u);
-        set_bit(slab_.mask, bit, true);
+        set_bit(bits, bit, ((v >> i) & 1u) != 0u);
+        set_bit(mask, bit, true);
     }
 }
 
-bool N64Loader::auto_detect_() const noexcept {
-
-    return read_(n64::opt::kAutoDetect) == 0;
+bool LoadFacts::flag(StatusField f) const noexcept {
+    return field_(f) != 0;
 }
 
-bool N64Loader::auto_pak_() const noexcept {
-    return read_(n64::opt::kAutoPak) == 0;
+void LoadFacts::set_flag(StatusField f, bool on) noexcept {
+    set_field_(f, on ? 1u : 0u);
 }
 
-n64::MemoryType N64Loader::cart_save_type_() const noexcept {
-    const auto v = static_cast<MemoryType>(read_(n64::opt::kSaveType));
-    return n64::save_size(v) != 0 ? v : MemoryType::None;
+SystemType LoadFacts::system() const noexcept {
+    return static_cast<SystemType>(field_(opt::kSysType));
 }
 
-void N64Loader::set_cart_save_type_(n64::MemoryType t) noexcept {
-    const std::uint32_t v = n64::save_size(t) != 0 ? static_cast<std::uint32_t>(t) : 0u;
-    write_(n64::opt::kSaveType, v);
+void LoadFacts::set_system(SystemType t) noexcept {
+    set_field_(opt::kSysType, static_cast<std::uint32_t>(t));
+}
+
+Cic LoadFacts::cic() const noexcept {
+    return static_cast<Cic>(field_(opt::kCicType));
+}
+
+void LoadFacts::set_cic(Cic c) noexcept {
+    set_field_(opt::kCicType, static_cast<std::uint32_t>(c));
+}
+
+PadType LoadFacts::controller(StatusField f) const noexcept {
+    return static_cast<PadType>(field_(f));
+}
+
+void LoadFacts::set_controller(StatusField f, PadType p) noexcept {
+    set_field_(f, static_cast<std::uint32_t>(p));
+}
+
+bool LoadFacts::auto_detect() const noexcept {
+
+    return !flag(opt::kAutoDetect);
+}
+
+bool LoadFacts::auto_pak() const noexcept {
+    return !flag(opt::kAutoPak);
+}
+
+MemoryType LoadFacts::cart_save_type() const noexcept {
+    const auto v = static_cast<MemoryType>(field_(opt::kSaveType));
+    return save_size(v) != 0 ? v : MemoryType::None;
+}
+
+void LoadFacts::set_cart_save_type(MemoryType t) noexcept {
+    const std::uint32_t v = save_size(t) != 0 ? static_cast<std::uint32_t>(t) : 0u;
+    set_field_(opt::kSaveType, v);
+}
+
 }
 
 }

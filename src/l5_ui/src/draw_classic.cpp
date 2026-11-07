@@ -13,18 +13,15 @@ namespace mister::ui {
 PageRow::Classic classic_row(
     proto::OsdRow row,
     std::string_view text,
-    bool inverted,
-    bool stippled,
-    std::optional<Glyph> leftchar,
-    std::optional<OsdRenderer::Arrow> arrow
+    ClassicMarks marks
 ) noexcept {
     PageRow::Classic c;
     (void)c.text.assign(text);
     c.row = row;
-    c.leftchar = leftchar;
-    c.arrow = arrow;
-    c.inverted = inverted;
-    c.stippled = stippled;
+    c.leftchar = marks.leftchar;
+    c.arrow = marks.arrow;
+    c.inverted = marks.inverted;
+    c.stippled = marks.stippled;
     return c;
 }
 

@@ -96,7 +96,7 @@ struct InputStats {
     std::uint32_t ui_keys = 0;
     std::uint32_t ui_keys_dropped = 0;
 
-    std::uint32_t slot_live = 0;
+    svc::PlayerMask slot_live{};
     std::uint32_t slot_ghosts = 0;
     std::uint32_t slot_hash[svc::kMaxPlayers]{};
 
@@ -105,7 +105,6 @@ struct InputStats {
     std::uint32_t keys_released = 0;
     std::uint32_t rebuilds_done = 0;
     std::uint32_t rebuilds_refused = 0;
-    std::uint32_t button_samples = 0;
     std::uint32_t button_actions = 0;
 };
 

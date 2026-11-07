@@ -6,6 +6,9 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <limits>
+
+#include "app/log_clock.h"
 
 namespace mister::app {
 
@@ -183,12 +186,14 @@ void AviWriter::finalize_() noexcept {
     dirty_ = true;
 }
 
-static_assert(std::uint64_t{avi::kVtimeMax} * kRecEveryMax <= 0xFFFF'FFFFu);
+static_assert(
+    std::uint64_t{avi::kVtimeMax} * kRecEveryMax <= std::numeric_limits<std::uint32_t>::max()
+);
 
 std::uint32_t AviWriter::scaled_vtime_(std::uint32_t vtime) const noexcept {
     const std::uint32_t mul = frame_mul_ == 0 ? 1u : frame_mul_;
     const std::uint64_t product = std::uint64_t{vtime} * mul;
-    return static_cast<std::uint32_t>(product > 0xFFFF'FFFFu ? 0xFFFF'FFFFu : product);
+    return sat_u32(product);
 }
 
 void AviWriter::learn_rate_(std::uint32_t vtime) noexcept {

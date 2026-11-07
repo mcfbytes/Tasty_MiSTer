@@ -71,6 +71,8 @@ private:
     );
 
     static constexpr std::size_t kBootImages = 5;
+
+    static constexpr std::uint8_t kNumberedBootImages = 4;
     std::array<StartFile, cores::kMaxStartAssets> files_{};
     std::size_t count_ = 0;
     std::array<StartFile, kBootImages> images_{};

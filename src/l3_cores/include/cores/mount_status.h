@@ -15,7 +15,7 @@ struct MountStatus {
     proto::ActKey generation{};
     MountState state = MountState::Pending;
     bool data_first_track = false;
-    std::uint64_t disc_size_bytes = 0;
+    proto::FileSize disc_size_bytes{};
     FixedStr<11, StrFit::Clip> game_id{};
 };
 

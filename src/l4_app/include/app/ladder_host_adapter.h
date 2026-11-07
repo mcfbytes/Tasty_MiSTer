@@ -68,11 +68,11 @@ public:
     [[nodiscard]] Ex<proto::FileId> intern_bytes(
         std::span<const std::uint8_t> bytes,
         std::string_view ext,
-        std::uint32_t load_addr
+        hal::FabricAddr load_addr
     ) override;
     [[nodiscard]] Ex<proto::FileId> intern_path(
         std::string_view path,
-        std::uint64_t size_bytes
+        proto::FileSize size
     ) override;
     [[nodiscard]] Ex<proto::FileId> intern_piece(
         std::span<const std::uint8_t> bytes,
@@ -87,7 +87,7 @@ public:
     [[nodiscard]] std::optional<bool> file_tx_answer(proto::ActKey act) override;
     [[nodiscard]] bool order_load_facts(std::span<const std::uint8_t> facts) override;
     [[nodiscard]] std::size_t link_in_flight() const noexcept override;
-    [[nodiscard]] std::size_t link_word_bytes() const noexcept override;
+    [[nodiscard]] cores::WireWordBytes link_word_bytes() const noexcept override;
     [[nodiscard]] proto::ActKey next_generation() noexcept override;
     [[nodiscard]] cores::MountStatus mount_status() override;
     [[nodiscard]] bool order_walk(

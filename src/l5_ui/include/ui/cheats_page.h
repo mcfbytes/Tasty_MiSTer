@@ -21,8 +21,6 @@ namespace mister::ui {
 
 [[nodiscard]] std::string cheat_row_text(const app::CheatRow& row);
 
-[[nodiscard]] std::string cheats_title_text(std::size_t loaded);
-
 class CheatsPage final : public Page {
     TASTY_SEAT_RESIDENT(Ui);
 
@@ -35,6 +33,8 @@ public:
     }
 
     void on_enter(PageContext& ctx) override;
+
+    [[nodiscard]] std::string title_text() const;
 
     bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;

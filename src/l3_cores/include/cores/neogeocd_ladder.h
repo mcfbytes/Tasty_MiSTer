@@ -38,7 +38,7 @@ private:
     Rung rung_ = Rung::Unload;
     proto::ActKey walk_gen_{};
     bool walk_ordered_ = false;
-    std::int64_t refused_since_ = -1;
+    std::chrono::nanoseconds refused_since_{-1};
 };
 
 }

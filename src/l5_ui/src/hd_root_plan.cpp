@@ -78,23 +78,40 @@ HdRootPlan::HdRootPlan(const HdPlanInputs& in)
       ) {
     TASTY_SEAT_BODY(HdRootPlan);
     walk_(in.items, in.env);
-    refs_ = {
-        resume_gate_,
-        load_row_,
-        media_gate_,
-        recent_gate_,
-        cheats_gate_,
-        reset_gate_,
-        separator_,
-        core_settings_gate_,
-        settings_row_,
-        main_menu_gate_
-    };
+    refs_.reserve(std::size(kSlots));
+    for (const Slot slot : kSlots)
+        refs_.push_back(row_for_(slot));
 
     if (has_reset_ && (!ctx_.ui_requests || !ctx_.launches.confirm))
         ++refusals_;
     if (!front_end_ && (!ctx_.route || !ctx_.launches.confirm))
         ++refusals_;
+}
+
+IHdRow& HdRootPlan::row_for_(Slot slot) noexcept {
+    switch (slot) {
+        case Slot::Resume:
+            return resume_gate_;
+        case Slot::Load:
+            return load_row_;
+        case Slot::Media:
+            return media_gate_;
+        case Slot::Recent:
+            return recent_gate_;
+        case Slot::Cheats:
+            return cheats_gate_;
+        case Slot::Reset:
+            return reset_gate_;
+        case Slot::Separator:
+            return separator_;
+        case Slot::CoreSettings:
+            return core_settings_gate_;
+        case Slot::Settings:
+            return settings_row_;
+        case Slot::MainMenu:
+            return main_menu_gate_;
+    }
+    return separator_;
 }
 
 void HdRootPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) {

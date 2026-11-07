@@ -34,6 +34,30 @@ static_assert(
     "a thread_local SeatTag is zero-initialised, so 0 is Unbound"
 );
 
+namespace seat_arg {
+inline constexpr SeatTag Any = SeatTag::Unbound;
+inline constexpr SeatTag RT = SeatTag::RT;
+inline constexpr SeatTag Frame = SeatTag::Frame;
+inline constexpr SeatTag Input = SeatTag::Input;
+inline constexpr SeatTag Pcm = SeatTag::Pcm;
+inline constexpr SeatTag Prefetch = SeatTag::Prefetch;
+inline constexpr SeatTag Diag = SeatTag::Diag;
+inline constexpr SeatTag Ui = SeatTag::Ui;
+inline constexpr SeatTag Io = SeatTag::Io;
+inline constexpr SeatTag Capture = SeatTag::Capture;
+inline constexpr SeatTag Encode = SeatTag::Encode;
+inline constexpr SeatTag RecWrite = SeatTag::RecWrite;
+inline constexpr SeatTag Launcher = SeatTag::Launcher;
+inline constexpr SeatTag HdOsd = SeatTag::HdOsd;
+inline constexpr SeatTag Main = SeatTag::Main;
+}
+
+namespace seat_exempt {
+inline constexpr int component = 0;
+inline constexpr int const_shared = 1;
+inline constexpr int boot = 2;
+}
+
 using SeatNameRow = std::pair<SeatTag, const char*>;
 
 inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatNames{{
@@ -125,6 +149,19 @@ inline constexpr bool kSeatChecksEnabled = (0 != 0);
 
 namespace seat::detail {
 
+[[nodiscard]] constexpr std::uint32_t pair_detail(SeatTag want, SeatTag got) noexcept {
+    constexpr unsigned kTagBits = 8;
+    return (static_cast<std::uint32_t>(want) << kTagBits) | static_cast<std::uint32_t>(got);
+}
+
+[[nodiscard]] constexpr std::uint32_t tag_detail(SeatTag t) noexcept {
+    return static_cast<std::uint32_t>(t);
+}
+
+[[nodiscard]] constexpr SeatTag tag_from_detail(std::uint32_t detail) noexcept {
+    return static_cast<SeatTag>(static_cast<std::uint8_t>(detail));
+}
+
 [[noreturn]] void violation(SeatTag want, SeatTag got, infra::ErrorSite site, const char* what);
 
 inline void check(SeatTag want, infra::ErrorSite site, const char* what) noexcept {
@@ -143,30 +180,6 @@ inline void seat_assert(
     if constexpr (kSeatChecksEnabled && Want != SeatTag::Unbound) {
         seat::detail::check(Want, site, what);
     }
-}
-
-namespace seat_arg {
-inline constexpr SeatTag Any = SeatTag::Unbound;
-inline constexpr SeatTag RT = SeatTag::RT;
-inline constexpr SeatTag Frame = SeatTag::Frame;
-inline constexpr SeatTag Input = SeatTag::Input;
-inline constexpr SeatTag Pcm = SeatTag::Pcm;
-inline constexpr SeatTag Prefetch = SeatTag::Prefetch;
-inline constexpr SeatTag Diag = SeatTag::Diag;
-inline constexpr SeatTag Ui = SeatTag::Ui;
-inline constexpr SeatTag Io = SeatTag::Io;
-inline constexpr SeatTag Capture = SeatTag::Capture;
-inline constexpr SeatTag Encode = SeatTag::Encode;
-inline constexpr SeatTag RecWrite = SeatTag::RecWrite;
-inline constexpr SeatTag Launcher = SeatTag::Launcher;
-inline constexpr SeatTag HdOsd = SeatTag::HdOsd;
-inline constexpr SeatTag Main = SeatTag::Main;
-}
-
-namespace seat_exempt {
-inline constexpr int component = 0;
-inline constexpr int const_shared = 1;
-inline constexpr int boot = 2;
 }
 
 }

@@ -20,6 +20,7 @@
 #include "app/rec_write_status.h"
 #include "app/recorder_status.h"
 #include "app/replay_status.h"
+#include "app/types.h"
 #include "app/video_pump.h"
 #include "hal/scaler_buffers.h"
 #include "hal/scaler_header.h"
@@ -30,6 +31,18 @@
 #include "os/delay.h"
 
 namespace mister::app {
+
+struct HeaderKey {
+    hal::ScalerHeader fields{};
+
+    [[nodiscard]] static constexpr HeaderKey of(const hal::ScalerHeader& h) noexcept {
+        return HeaderKey{h};
+    }
+
+    [[nodiscard]] constexpr hal::ScalerHeader header() const noexcept { return fields; }
+
+    friend constexpr bool operator==(const HeaderKey&, const HeaderKey&) = default;
+};
 
 class FrameCopier {
     TASTY_SEAT_RESIDENT(Capture);
@@ -116,9 +129,9 @@ private:
 
     void on_complete_(
         std::size_t buf,
-        std::uint8_t ctr,
+        hal::HeaderCtr ctr,
         std::int64_t now,
-        std::int64_t behind,
+        CoreFrameGap behind,
         std::uint32_t fields
     ) noexcept;
 
@@ -129,8 +142,8 @@ private:
         std::int64_t now
     ) noexcept;
 
-    [[nodiscard]] std::int64_t lag_(std::int64_t behind) const noexcept {
-        return gen_.lowlat ? 0 : gen_.lag_steps + behind;
+    [[nodiscard]] CoreFrameGap lag_(CoreFrameGap behind) const noexcept {
+        return gen_.lowlat ? CoreFrameGap{} : CoreFrameGap::of_lead(gen_.lag_steps) + behind;
     }
 
     void attach_pending_(RawFrameSlot& slot) noexcept;
@@ -161,7 +174,7 @@ private:
         bool lowlat = false;
         std::size_t regrow_bytes = 0;
 
-        std::int64_t lag_steps = 1;
+        hal::HeaderCtr::Lag lag_steps{1};
         bool woven = false;
         bool matched = true;
         std::uint8_t npending = 0;
@@ -184,7 +197,7 @@ private:
     std::int64_t period_ns_ = kDefaultPeriodNs;
 
     struct BufferWatch {
-        std::array<std::uint16_t, 8> key{};
+        HeaderKey key{};
         std::chrono::nanoseconds seen{};
     };
 
@@ -196,7 +209,7 @@ private:
     std::uint32_t core_seq_ = 0;
     std::array<FrameStampRun, RawFrameSlot::kMaxRuns> pending_{};
 
-    std::uint8_t ll_ctr_ = 0;
+    hal::HeaderCtr ll_ctr_{};
     std::int64_t ll_due_ns_ = 0;
     std::int64_t copy_ns_ = 1'000'000;
 

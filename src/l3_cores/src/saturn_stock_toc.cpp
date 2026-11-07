@@ -5,26 +5,24 @@ namespace mister::cores {
 
 void SaturnStockToc::learn(const svc::DiscGeometry& geom) noexcept {
     const svc::Toc& toc = geom.toc;
-    const bool chd = geom.hunk_bytes != 0;
-    std::int32_t file_end = 0;
-    for (std::size_t i = 0; i <= svc::kMaxTracks; ++i) {
-        start_[i] = 0;
-        index1_[i] = 0;
-    }
-    for (std::uint32_t i = 0; i < toc.last && i < svc::kMaxTracks; ++i) {
-        const svc::Track& t = toc.tracks[i];
-        const auto start = static_cast<std::int32_t>(t.start.v);
-        const bool own_file = i == 0 || t.backing != toc.tracks[i - 1].backing;
+    const bool chd = geom.chd_hunk_bytes() != 0;
+    HeadLba file_end{};
+    rows_ = {};
+    toc.last.for_each_index([&](svc::TrackIndex i) {
+        const svc::Track& t = toc.at(i);
+        const HeadLba start = HeadLba::of(t.start);
+        const bool own_file = i == svc::TrackIndex{}
+            || t.backing != toc.at(i - svc::TrackCount{1}).backing;
         if (chd || !own_file) {
-            start_[i] = start;
-            continue;
+            rows_[i].start = start;
+            return;
         }
-        start_[i] = file_end;
-        index1_[i] = start - file_end;
-        file_end = static_cast<std::int32_t>(t.end.v);
-    }
-    if (toc.last <= svc::kMaxTracks)
-        start_[toc.last] = static_cast<std::int32_t>(toc.end.v);
+        rows_[i].start = file_end;
+        rows_[i].index1 = start - file_end;
+        file_end = HeadLba::of(t.end);
+    });
+    if (const auto last = rows_.find(toc.last.next_index()))
+        last->start = HeadLba::of(toc.end);
 }
 
 }

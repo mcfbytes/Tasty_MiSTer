@@ -9,7 +9,6 @@
 namespace mister::svc {
 
 struct JoyPlan {
-    TASTY_SEAT_EXEMPT(component);
     static constexpr std::int8_t kNone = -1;
     static constexpr std::size_t kWords = 32;
     static constexpr std::int8_t kFirstButtonWord = 4;

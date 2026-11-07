@@ -43,7 +43,7 @@ public:
 
     std::uint32_t mount_refusals() const noexcept { return stream_.mount_refusals(); }
 
-    std::uint16_t last_index() const noexcept { return stream_.last_index(); }
+    proto::IoIndex last_index() const noexcept { return stream_.last_index(); }
 
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;

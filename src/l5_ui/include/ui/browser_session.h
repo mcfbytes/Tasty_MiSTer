@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -69,16 +70,17 @@ public:
     static constexpr std::size_t kPathBudget = kPathMax - 100;
     static constexpr std::size_t kFilterMax = 255;
     static constexpr std::size_t kRememberMax = 127;
-    static constexpr std::int64_t kFilterTimeoutNs = 2'000'000'000;
+
+    static constexpr std::chrono::seconds kFilterTimeout{2};
 
     [[nodiscard]] Ex<void> open(const IBrowseSource& src, Request req);
 
     [[nodiscard]] Ex<void> rescan();
     [[nodiscard]] Ex<void> change_dir(std::string_view name);
 
-    void type_ahead(char c, std::int64_t now_ns);
+    void type_ahead(char c, std::chrono::nanoseconds now);
 
-    void note_navigation() noexcept { filter_deadline_ns_ = 0; }
+    void note_navigation() noexcept { filter_deadline_.reset(); }
 
     void clear_filter() noexcept { filter_.clear(); }
 
@@ -135,7 +137,8 @@ private:
     std::string path_;
     std::string home_;
     bool recents_mode_ = false;
-    std::int64_t filter_deadline_ns_ = 0;
+
+    std::optional<std::chrono::nanoseconds> filter_deadline_{};
     std::uint32_t scans_ = 0;
     std::uint32_t refusals_ = 0;
     ListView<BrowserEntry> view_{{}, &BrowserSession::entry_name, {}};

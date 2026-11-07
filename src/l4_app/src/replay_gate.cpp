@@ -5,6 +5,7 @@
 
 #include "infra/message_sum.h"
 #include "app/link_op_dispatch.h"
+#include "app/log_clock.h"
 #include "proto/spi_fio_queue.h"
 #include "reactor/tick.h"
 #include "svc/input_emitter.h"
@@ -18,6 +19,14 @@ static_assert(
 
 std::int64_t ReplayGate::now_ns_() const noexcept {
     return w_.clock.now().count();
+}
+
+std::chrono::nanoseconds ReplayGate::end_to_edge_() const noexcept {
+    return std::chrono::nanoseconds{edge_ns_ - end_ns_};
+}
+
+std::chrono::nanoseconds ReplayGate::into_frame_() const noexcept {
+    return std::chrono::nanoseconds{now_ - edge_ns_};
 }
 
 Ex<proto::FrameCount> ReplayGate::read_counter_() noexcept {
@@ -74,10 +83,10 @@ void ReplayGate::tick(
     if (!ready) {
         ++status_.held_rounds;
         tick_ns_ = 0;
-        gap_ns_ = 0;
+        gap_ = {};
         return;
     }
-    gap_ns_ = tick_ns_ != 0 ? now_ - tick_ns_ : 0;
+    gap_ = std::chrono::nanoseconds{tick_ns_ != 0 ? now_ - tick_ns_ : 0};
     tick_ns_ = now_;
     note_gap_();
     if (!sample_ref_())
@@ -87,7 +96,7 @@ void ReplayGate::tick(
             disarm_(ReplayEnd::EpochAmbiguous, true);
         return;
     }
-    mf_ = WideMovieFrame{static_cast<std::int64_t>(frames_) - epoch_ - lead_};
+    mf_ = WideMovieFrame{static_cast<std::int64_t>(frames_) - epoch_} - lead_;
     note_depth_();
     if (held_ && due_(*held_)) {
         const ReplayMsg::Input r = *held_;
@@ -131,7 +140,7 @@ bool ReplayGate::sample_ref_() noexcept {
             now_,
             std::max(prev_read, edge_ns_ + static_cast<std::int64_t>(d) * period_ns_)
         );
-    edge_gap_ns_ = edge - edge_ns_;
+    edge_gap_ = std::chrono::nanoseconds{edge - edge_ns_};
     edge_ns_ = edge;
     if (d > 1)
         status_.skipped_edges += d - 1;
@@ -198,11 +207,11 @@ static_assert(LinkOpPadSink<PadOwned>);
 
 void ReplayGate::decide_epoch_(std::uint32_t delta) noexcept {
     const std::int64_t d = edge_ns_ - end_ns_;
-    status_.epoch_delay_us = static_cast<std::uint32_t>(std::max<std::int64_t>(0, d) / 1000);
+    status_.epoch_delay_us = us_of(end_to_edge_());
     const EpochPick p = epoch_at(d, poweron_ns_, period_ns_, line0_ns_, p0_, last_raw_);
     const bool band = p.j != p.hi;
 
-    const bool untimed = p.j == 0 && -static_cast<std::int64_t>(lead_) >= kFloorBack;
+    const bool untimed = p.j == 0 && lead_ <= MovieSpan{-std::int64_t{kFloorBack}};
 
     bool slipped = false;
     std::uint8_t slip = 0;
@@ -243,17 +252,14 @@ void ReplayGate::decide_silence_(std::uint32_t delta) noexcept {
 
     if (delta != 1)
         return disarm_(ReplayEnd::EpochAmbiguous, true);
-    status_.epoch_delay_us = static_cast<std::uint32_t>(
-        std::max<std::int64_t>(0, edge_ns_ - end_ns_) / 1000
-    );
+    status_.epoch_delay_us = us_of(end_to_edge_());
     epoch_ = frames_;
     status_.epoch_edge = epoch_;
     epoch_known_ = true;
 }
 
 bool ReplayGate::pre_epoch_(MovieFrame frame) const noexcept {
-    return wide_frame(frame) + MovieSpan{lead_}
-    < WideMovieFrame{-static_cast<std::int64_t>(floor_back_)};
+    return wide_frame(frame) + lead_ < WideMovieFrame{-static_cast<std::int64_t>(floor_back_)};
 }
 
 bool ReplayGate::live_() const noexcept {
@@ -273,19 +279,16 @@ void ReplayGate::note_late_(MovieFrame first) noexcept {
     if (status_.first_late_frame >= MovieFrame{})
         return;
     status_.first_late_frame = first;
-    status_.late_gap_us = static_cast<std::uint32_t>(gap_ns_ / 1000);
-    status_.late_into_us = static_cast<std::uint32_t>(
-        std::max<std::int64_t>(0, now_ - edge_ns_) / 1000
-    );
-    status_.late_edge_us = static_cast<std::uint32_t>(
-        std::max<std::int64_t>(0, edge_gap_ns_) / 1000
-    );
+    status_.late_gap_us = us_of(gap_);
+    status_.late_into_us = us_of(into_frame_());
+    status_.late_edge_us = us_of(edge_gap_);
     status_.late_depth = queued_.value_or(0);
 }
 
 void ReplayGate::note_gap_() noexcept {
-    if (gap_ns_ / 1000 > status_.gap_max_us) {
-        status_.gap_max_us = static_cast<std::uint32_t>(gap_ns_ / 1000);
+    const StatusMicros us = us_of(gap_);
+    if (us > status_.gap_max_us) {
+        status_.gap_max_us = us;
         status_.gap_frame = mf_.narrowed();
     }
 }
@@ -318,7 +321,7 @@ void ReplayGate::apply_(const ReplayMsg::Input& r) noexcept {
     if (first < mf_) {
         note_late_(r.first);
     } else {
-        const auto us = static_cast<std::uint32_t>((now_ - edge_ns_) / 1000);
+        const StatusMicros us = us_of(into_frame_());
         if (now_ - edge_ns_ - offset_ns_ > kSlipNs)
             ++status_.delayed;
         status_.apply_min_us = status_.on_time == 0 ? us : std::min(status_.apply_min_us, us);
@@ -411,7 +414,7 @@ void ReplayGate::on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept 
     ports_ = static_cast<std::uint8_t>(a.ports & ((1u << kReplayPorts) - 1u));
     rom_index_ = a.rom_index;
     vsync_ok_ = a.vsync_ok;
-    lead_ = a.lead;
+    lead_ = MovieSpan{a.lead};
     offset_ns_ = static_cast<std::int64_t>(a.offset_us) * 1000;
     period_ns_ = a.period_ns;
     line0_ns_ = a.line0_ns;
@@ -426,9 +429,9 @@ void ReplayGate::on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept 
     epoch_ = 0;
     frames_ = 0;
     read_ns_ = 0;
-    edge_gap_ns_ = 0;
+    edge_gap_ = {};
     tick_ns_ = 0;
-    gap_ns_ = 0;
+    gap_ = {};
     mf_ = kNoWideMovieFrame;
     covered_ = kNoWideMovieFrame;
     underrun_at_ = kNoWideMovieFrame;

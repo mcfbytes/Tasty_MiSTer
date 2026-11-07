@@ -8,6 +8,7 @@
 #include "infra/seat.h"
 #include "svc/device_identity.h"
 #include "svc/map_store.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -32,19 +33,19 @@ public:
     void cancel();
 
     void on_device(const DeviceIdentity& id);
-    void on_button(std::uint16_t code);
+    void on_button(EvdevCode code);
 
     const DeviceIdentity& device() const noexcept { return device_; }
 
     MapKind kind() const noexcept { return kind_; }
 
-    std::optional<std::uint16_t> captured() const noexcept { return captured_; }
+    std::optional<EvdevCode> captured() const noexcept { return captured_; }
 
 private:
     Step step_ = Step::Idle;
     DeviceIdentity device_{};
     MapKind kind_ = MapKind::Joystick;
-    std::optional<std::uint16_t> captured_{};
+    std::optional<EvdevCode> captured_{};
 };
 
 }

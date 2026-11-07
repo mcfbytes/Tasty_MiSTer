@@ -8,7 +8,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <span>
@@ -23,38 +22,45 @@ namespace {
 
 enum : unsigned {
     kDetailObservedShift = 8,
-    kCellByteBits = 8,
-    kCellByteMask = 0xFF,
     kObservedExtShift = 4,
     kExtPortaMask = 0xF,
-    kBurstBytes = 32,
-    kWordBytes = 4,
-    kCdRatioFieldMask = 3,
-    kMselWideBit = 8,
-    kMselRungMask = 3,
-    kMselRung0 = 0,
-    kMselRung1 = 1,
-    kMselRung2 = 2,
-    kCellHighByte = 2,
-    kCellLowByte = 3,
-    kEnvTrailerBytes = 2,
 };
 
-constexpr std::uint32_t kStageResetPhase = 1;
-constexpr std::uint32_t kStageCfgPhase = 2;
-constexpr std::uint32_t kStageConfigError = 3;
-constexpr std::uint32_t kStageConfigDone = 4;
-constexpr std::uint32_t kStageDclkEnter = 5;
-constexpr std::uint32_t kStageInitPhase = 6;
-constexpr std::uint32_t kStageDclkExit = 7;
-constexpr std::uint32_t kStageUserMode = 8;
+constexpr std::size_t kBurstBytes = FpgaMgrData::kBurstWords * sizeof(std::uint32_t);
 
-constexpr std::uint32_t detail_of(std::uint32_t stage, std::uint32_t observed) noexcept {
-    return stage | (observed << kDetailObservedShift);
+enum class LoadStage : std::uint32_t {
+    ResetPhase = 1,
+    CfgPhase = 2,
+    ConfigError = 3,
+    ConfigDone = 4,
+    DclkEnter = 5,
+    InitPhase = 6,
+    DclkExit = 7,
+    UserMode = 8,
+};
+
+constexpr std::uint32_t detail_of(LoadStage stage, std::uint32_t observed) noexcept {
+    return static_cast<std::uint32_t>(stage) | (observed << kDetailObservedShift);
 }
 
-constexpr std::uint32_t observed_of(std::uint32_t mode, std::uint32_t ext) noexcept {
-    return (mode & FpgaMgr::kStatModeMask) | ((ext & kExtPortaMask) << kObservedExtShift);
+constexpr std::uint32_t observed_of(FpgaMgrMode mode, std::uint32_t ext) noexcept {
+    return (to_bits(mode) & FpgaMgr::kStatModeMask) | ((ext & kExtPortaMask) << kObservedExtShift);
+}
+
+constexpr FpgaMgrMode mode_of(std::uint32_t stat) noexcept {
+    switch (stat & FpgaMgr::kStatModeMask) {
+        case to_bits(FpgaMgrMode::Off):
+            return FpgaMgrMode::Off;
+        case to_bits(FpgaMgrMode::Reset):
+            return FpgaMgrMode::Reset;
+        case to_bits(FpgaMgrMode::Cfg):
+            return FpgaMgrMode::Cfg;
+        case to_bits(FpgaMgrMode::Init):
+            return FpgaMgrMode::Init;
+        case to_bits(FpgaMgrMode::User):
+            return FpgaMgrMode::User;
+    }
+    return FpgaMgrMode::Unknown;
 }
 
 }
@@ -66,7 +72,7 @@ Programmer::Programmer(
 )
     : mgr_(std::move(mgr)),
       data_(std::move(data)),
-      handoff_(std::move(handoff)) {}
+      page_(std::move(handoff)) {}
 
 Programmer Programmer::over(
     hal::RegisterWindow<FpgaMgr> mgr,
@@ -133,17 +139,18 @@ Ex<Programmer> Programmer::open_at(const char* manager_dir) {
     return loader;
 }
 
-void Programmer::ctrl_update(std::uint32_t clear, std::uint32_t set) {
+void Programmer::ctrl_update(FpgaCtrl clear, FpgaCtrl set) {
     hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
-    mgr_.write(FpgaMgr::Reg::Ctrl, (mgr_.read(FpgaMgr::Reg::Ctrl) & ~clear) | set);
+    const FpgaCtrl next = FpgaCtrl{mgr_.read(FpgaMgr::Reg::Ctrl)}.without(clear).with(set);
+    mgr_.write(FpgaMgr::Reg::Ctrl, next.v);
 }
 
-void Programmer::set_cd_ratio(std::uint32_t ratio) {
-    ctrl_update(FpgaMgr::kCtrlCdRatioMask, (ratio & kCdRatioFieldMask) << FpgaMgr::kCtrlCdRatioLsb);
+void Programmer::set_cd_ratio(CdRatio ratio) {
+    ctrl_update(kCtrlCdRatioMask, cd_ratio_field(ratio));
 }
 
-std::uint32_t Programmer::mode() {
-    return mgr_.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatModeMask;
+FpgaMgrMode Programmer::mode() const {
+    return mode_of(mgr_.read(FpgaMgr::Reg::Stat));
 }
 
 std::uint32_t Programmer::ext_nibble() {
@@ -171,19 +178,19 @@ bool Programmer::rung_done_() {
         case StepPc::Idle:
             return true;
         case StepPc::ResetWait:
-            return mode() == FpgaMgr::kModeResetPhase;
+            return mode() == FpgaMgrMode::Reset;
         case StepPc::CfgWait:
-            return mode() == FpgaMgr::kModeCfgPhase;
+            return mode() == FpgaMgrMode::Cfg;
         case StepPc::DclkEnterWait:
         case StepPc::DclkExitWait:
             return dclk_done_();
         case StepPc::InitWait: {
 
-            const std::uint32_t m = mode();
-            return m == FpgaMgr::kModeInitPhase || m == FpgaMgr::kModeUserMode;
+            const FpgaMgrMode m = mode();
+            return m == FpgaMgrMode::Init || m == FpgaMgrMode::User;
         }
         case StepPc::UserWait:
-            return mode() == FpgaMgr::kModeUserMode;
+            return mode() == FpgaMgrMode::User;
     }
     return true;
 }
@@ -208,29 +215,14 @@ Ex<bool> Programmer::program_begin() {
     const std::uint32_t msel = (mgr_.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatMselMask)
         >> FpgaMgr::kStatMselLsb;
 
-    if ((msel & kMselWideBit) != 0u) {
-        ctrl_update(0, FpgaMgr::kCtrlCfgWdth);
-        if ((msel & kMselRungMask) == kMselRung0) {
-            set_cd_ratio(FpgaMgr::kCdRatio1);
-        } else if ((msel & kMselRungMask) == kMselRung1) {
-            set_cd_ratio(FpgaMgr::kCdRatio4);
-        } else if ((msel & kMselRungMask) == kMselRung2) {
-            set_cd_ratio(FpgaMgr::kCdRatio8);
-        }
-    } else {
-        ctrl_update(FpgaMgr::kCtrlCfgWdth, 0);
-        if ((msel & kMselRungMask) == kMselRung0) {
-            set_cd_ratio(FpgaMgr::kCdRatio1);
-        } else if ((msel & kMselRungMask) == kMselRung1) {
-            set_cd_ratio(FpgaMgr::kCdRatio2);
-        } else if ((msel & kMselRungMask) == kMselRung2) {
-            set_cd_ratio(FpgaMgr::kCdRatio4);
-        }
-    }
+    const bool wide = (msel & FpgaMgr::kMselWideMask) != 0u;
+    ctrl_update(wide ? kCtrlNone : kCtrlCfgWdth, wide ? kCtrlCfgWdth : kCtrlNone);
+    if (const auto ratio = cd_ratio_of(msel))
+        set_cd_ratio(*ratio);
 
-    ctrl_update(FpgaMgr::kCtrlNce, 0);
-    ctrl_update(0, FpgaMgr::kCtrlEn);
-    ctrl_update(0, FpgaMgr::kCtrlNConfigPull);
+    ctrl_update(kCtrlNce, kCtrlNone);
+    ctrl_update(kCtrlNone, kCtrlEn);
+    ctrl_update(kCtrlNone, kCtrlNConfigPull);
     step_ = StepPc::ResetWait;
     return program_step();
 }
@@ -240,24 +232,26 @@ void Programmer::program_write(std::span<const std::byte> image) {
     const std::byte* src = image.data();
     const std::size_t loops32 = image.size() / kBurstBytes;
     const std::size_t rem = image.size() % kBurstBytes;
-    const std::size_t loops4 = rem / kWordBytes;
-    const std::size_t tail = rem % kWordBytes;
+    const std::size_t loops4 = rem / sizeof(std::uint32_t);
+    const std::size_t tail = rem % sizeof(std::uint32_t);
 
     for (std::size_t g = 0; g < loops32; ++g) {
         for (std::size_t k = 0; k < FpgaMgrData::kBurstWords; ++k) {
             const auto w = infra::load_le<std::uint32_t>(
-                std::span<const std::byte, kWordBytes>(src, kWordBytes)
+                std::span<const std::byte, sizeof(std::uint32_t)>(src, sizeof(std::uint32_t))
             );
             src += sizeof w;
             data_.write(
-                static_cast<FpgaMgrData::Reg>(static_cast<std::uint32_t>(k * kWordBytes)),
+                static_cast<FpgaMgrData::Reg>(
+                    static_cast<std::uint32_t>(k * sizeof(std::uint32_t))
+                ),
                 w
             );
         }
     }
     for (std::size_t n = 0; n < loops4; ++n) {
         const auto w = infra::load_le<std::uint32_t>(
-            std::span<const std::byte, kWordBytes>(src, kWordBytes)
+            std::span<const std::byte, sizeof(std::uint32_t)>(src, sizeof(std::uint32_t))
         );
         src += sizeof w;
         data_.write(FpgaMgrData::Reg::Data, w);
@@ -294,17 +288,21 @@ Ex<void> Programmer::poll_config_done() {
             Error{
                 Errc::core_load,
                 ERR_SITE(),
-                detail_of(kStageConfigError, observed_of(mode(), reg))
+                detail_of(LoadStage::ConfigError, observed_of(mode(), reg))
             }
         );
     }
     if (i == FpgaMgr::kTimeoutCount) {
         return std::unexpected(
-            Error{Errc::timeout, ERR_SITE(), detail_of(kStageConfigDone, observed_of(mode(), reg))}
+            Error{
+                Errc::timeout,
+                ERR_SITE(),
+                detail_of(LoadStage::ConfigDone, observed_of(mode(), reg))
+            }
         );
     }
 
-    ctrl_update(FpgaMgr::kCtrlAxiCfgEn, 0);
+    ctrl_update(kCtrlAxiCfgEn, kCtrlNone);
     return {};
 }
 
@@ -320,7 +318,7 @@ Ex<bool> Programmer::program_step() {
                 a = await_(a.left);
                 if (!a.hit)
                     return false;
-                ctrl_update(FpgaMgr::kCtrlNConfigPull, 0);
+                ctrl_update(kCtrlNConfigPull, kCtrlNone);
                 step_ = StepPc::CfgWait;
                 break;
             case StepPc::CfgWait:
@@ -332,7 +330,7 @@ Ex<bool> Programmer::program_step() {
                     hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
                     mgr_.write(FpgaMgr::Reg::GpioPortaEoi, FpgaMgr::kEoiAll);
                 }
-                ctrl_update(0, FpgaMgr::kCtrlAxiCfgEn);
+                ctrl_update(kCtrlNone, kCtrlAxiCfgEn);
                 data_txn_.emplace(data_);
                 step_ = StepPc::Idle;
                 return true;
@@ -360,7 +358,7 @@ Ex<bool> Programmer::program_step() {
                 if (!a.hit)
                     return false;
 
-                ctrl_update(FpgaMgr::kCtrlEn, 0);
+                ctrl_update(kCtrlEn, kCtrlNone);
                 step_ = StepPc::Idle;
                 return true;
         }
@@ -373,17 +371,17 @@ std::uint32_t Programmer::pending_stage() noexcept {
         case StepPc::Idle:
             return 0;
         case StepPc::ResetWait:
-            return detail_of(kStageResetPhase, mode());
+            return detail_of(LoadStage::ResetPhase, to_bits(mode()));
         case StepPc::CfgWait:
-            return detail_of(kStageCfgPhase, mode());
+            return detail_of(LoadStage::CfgPhase, to_bits(mode()));
         case StepPc::DclkEnterWait:
-            return detail_of(kStageDclkEnter, observed_of(mode(), ext_nibble()));
+            return detail_of(LoadStage::DclkEnter, observed_of(mode(), ext_nibble()));
         case StepPc::InitWait:
-            return detail_of(kStageInitPhase, observed_of(mode(), ext_nibble()));
+            return detail_of(LoadStage::InitPhase, observed_of(mode(), ext_nibble()));
         case StepPc::DclkExitWait:
-            return detail_of(kStageDclkExit, 0);
+            return detail_of(LoadStage::DclkExit, 0);
         case StepPc::UserWait:
-            return detail_of(kStageUserMode, mode());
+            return detail_of(LoadStage::UserMode, to_bits(mode()));
     }
     return 0;
 }
@@ -394,7 +392,7 @@ Programmer::Programmer(Programmer&& o) noexcept
       handoff_pages_(std::move(o.handoff_pages_)),
       mgr_(std::move(o.mgr_)),
       data_(std::move(o.data_)),
-      handoff_(std::move(o.handoff_)),
+      page_(std::move(o.page_)),
       claims_(std::move(o.claims_)) {
     if (o.data_txn_.has_value() || o.step_ != StepPc::Idle) {
         fatal(Error{Errc::bridge_state, ERR_SITE(), 0}, "Programmer: move mid-program");
@@ -454,136 +452,7 @@ bool Programmer::programmed() const {
     if ((mgr_.read(FpgaMgr::Reg::GpioExtPorta) & FpgaMgr::kMonId) == 0u) {
         return false;
     }
-    return (mgr_.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatModeMask) == FpgaMgr::kModeUserMode;
-}
-
-std::byte* Programmer::handoff_base() {
-    if (!handoff_.has_value())
-        return nullptr;
-    return handoff_->view(0, kHandoffPage.len).data();
-}
-
-Ex<hal::HandoffPage> Programmer::handoff() {
-    TASTY_SEAT_BODY(Programmer);
-    const std::byte* page = handoff_base();
-    if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
-    }
-    const auto raw = infra::byte_cast<const std::uint8_t>(
-        std::span<const std::byte>(page, kHandoffPage.len)
-    );
-
-    hal::HandoffPage out{};
-    out.env_valid = std::equal(
-        std::begin(kHandoffEnvCookie),
-        std::end(kHandoffEnvCookie),
-        raw.begin()
-    );
-
-    const auto sd = raw.subspan(kHandoffSdramOffset);
-    if (sd[0] == kHandoffSdramCookie[0] && sd[1] == kHandoffSdramCookie[1]) {
-        out.sdram_valid = true;
-        out.sdram_cfg = static_cast<std::uint16_t>(
-            kHandoffSdramPresent
-            | (static_cast<std::uint32_t>(sd[kCellHighByte]) << kCellByteBits)
-            | static_cast<std::uint32_t>(sd[kCellLowByte])
-        );
-    }
-
-    const auto al = raw.subspan(kHandoffAltCfgOffset);
-    if (al[0] == kHandoffAltCfgCookie[0]
-        && al[1] == kHandoffAltCfgCookie[1]
-        && al[kCellHighByte] == kHandoffAltCfgCookie[kCellHighByte]) {
-        out.altcfg_valid = true;
-        out.altcfg = al[kCellLowByte];
-    }
-
-    out.reboot_flag = infra::load_native<std::uint32_t>(
-        std::span<const std::byte, kWordBytes>(page + kHandoffRebootOffset, kWordBytes)
-    );
-    return out;
-}
-
-Ex<void> Programmer::write_env(std::string_view core_name, std::span<const std::byte> cfg) {
-    TASTY_SEAT_BODY(Programmer);
-    std::byte* page = handoff_base();
-    if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
-    }
-
-    static constexpr char kCoreEq[] = {'c', 'o', 'r', 'e', '=', '"'};
-    const std::size_t header = sizeof kHandoffEnvCookie
-        + sizeof kCoreEq
-        + core_name.size()
-        + kEnvTrailerBytes;
-
-    if (header > kHandoffEnvLimit || cfg.size() > kHandoffEnvLimit - header) {
-        const std::size_t needed = header + cfg.size();
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(needed)}
-        );
-    }
-
-    std::memset(page, 0, kHandoffEnvLimit);
-
-    std::size_t at = 0;
-    std::memcpy(page + at, kHandoffEnvCookie, sizeof kHandoffEnvCookie);
-    at += sizeof kHandoffEnvCookie;
-    std::memcpy(page + at, kCoreEq, sizeof kCoreEq);
-    at += sizeof kCoreEq;
-    if (!core_name.empty()) {
-        std::memcpy(page + at, core_name.data(), core_name.size());
-        at += core_name.size();
-    }
-    page[at++] = static_cast<std::byte>('"');
-    page[at++] = static_cast<std::byte>('\n');
-    if (!cfg.empty())
-        std::memcpy(page + at, cfg.data(), cfg.size());
-    return {};
-}
-
-Ex<void> Programmer::write_sdram_cfg(std::uint16_t cfg) {
-    TASTY_SEAT_BODY(Programmer);
-    std::byte* page = handoff_base();
-    if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
-    }
-    auto cell = infra::byte_cast<std::uint8_t>(std::span<std::byte>(page, kHandoffPage.len))
-                    .subspan(kHandoffSdramOffset);
-    cell[0] = kHandoffSdramCookie[0];
-    cell[1] = kHandoffSdramCookie[1];
-    cell[kCellHighByte] = static_cast<std::uint8_t>(cfg >> kCellByteBits);
-    cell[kCellLowByte] = static_cast<std::uint8_t>(cfg & kCellByteMask);
-    return {};
-}
-
-Ex<void> Programmer::write_altcfg(std::uint8_t alt) {
-    TASTY_SEAT_BODY(Programmer);
-    std::byte* page = handoff_base();
-    if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
-    }
-    auto cell = infra::byte_cast<std::uint8_t>(std::span<std::byte>(page, kHandoffPage.len))
-                    .subspan(kHandoffAltCfgOffset);
-    cell[0] = kHandoffAltCfgCookie[0];
-    cell[1] = kHandoffAltCfgCookie[1];
-    cell[kCellHighByte] = kHandoffAltCfgCookie[kCellHighByte];
-    cell[kCellLowByte] = alt;
-    return {};
-}
-
-Ex<void> Programmer::write_reboot_flag(bool warm) {
-    TASTY_SEAT_BODY(Programmer);
-    std::byte* page = handoff_base();
-    if (page == nullptr) {
-        return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(kHandoffPage.phys)});
-    }
-    const std::uint32_t flag = warm ? kHandoffRebootWarm : 0u;
-    infra::store_native<std::uint32_t>(
-        std::span<std::byte, kWordBytes>(page + kHandoffRebootOffset, kWordBytes),
-        flag
-    );
-    return {};
+    return mode() == FpgaMgrMode::User;
 }
 
 static_assert(

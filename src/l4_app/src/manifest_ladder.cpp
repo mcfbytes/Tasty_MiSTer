@@ -72,7 +72,7 @@ ManifestLadder::Pass ManifestLadder::window_(Host& h, const cores::StageWindow& 
     auto win = LoadWindow<seat_owner::Main>::open(
         h.map,
         h.aperture,
-        os::PhysAddr{w.address},
+        hal::to_phys(w.address),
         w.bytes
     );
     if (!win) {
@@ -129,20 +129,21 @@ ManifestLadder::Pass ManifestLadder::send_(Host& h) {
     cores::SendBracket& b = *bracket_;
     const std::uint64_t bytes = b.bytes.size();
 
-    auto id = b.bytes.empty() ? inbox.intern_file_path(rel_.view(), 0, svc::Crc32{}, b.aux)
-                              : inbox.intern_file(std::move(b.bytes), {}, rel_.view(), 0);
+    auto id = b.bytes.empty()
+        ? inbox.intern_file_path(rel_.view(), proto::FileSize{}, svc::Crc32{}, b.aux)
+        : inbox.intern_file(std::move(b.bytes), {}, rel_.view(), hal::FabricAddr{});
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : fail_(id.error().code);
     proto::ActKey16 act{};
     while (!act || act == act_)
         act = h.owner.next_generation().narrow();
     const proto::LinkOp::StagePayload
-        op{.payload = *id, .dest = b.index, .chunk = kSendChunk, .act = act};
+        op{.payload = *id, .dest = b.index, .chunk = kStockFileTxChunk, .act = act};
     if (!inbox.push(op))
         return fail_(Errc::would_block);
     act_ = act;
     bracket_.reset();
-    echo_due_ns_ = h.now_ns + echo_bound_ns(bytes);
+    echo_due_ns_ = h.now_ns + echo_bound(proto::FileSize{bytes}, kEcho).count();
     pc_ = Pc::Echo;
     return Pass::Stepped;
 }

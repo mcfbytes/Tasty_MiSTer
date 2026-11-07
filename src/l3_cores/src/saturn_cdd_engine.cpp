@@ -3,6 +3,7 @@
 
 #include <cstring>
 
+#include "cd_core_detail.h"
 #include "cores/saturn_seek.h"
 
 namespace mister::cores {
@@ -25,75 +26,51 @@ constexpr std::uint8_t kStatIdle = 0x46;
 constexpr std::uint8_t kStatOpen = 0x80;
 constexpr std::uint8_t kStatSeekRing = 0xB2;
 
-constexpr std::int32_t kFad = saturn::kFadToLbaBias;
-constexpr std::size_t kUserData = 2048;
+constexpr SectorCount kFadSectors{saturn::kFadToLbaBias};
+constexpr std::uint8_t kAbsentTrack = 0xAA;
 constexpr std::size_t kHeaderBytes = 16;
 constexpr std::size_t kRingHeaderBytes = 12;
-
-struct StockMsf {
-    std::uint8_t m, s, f;
-};
-
-constexpr StockMsf stock_msf(std::int32_t lba) noexcept {
-    return {
-        static_cast<std::uint8_t>((lba / 75) / 60),
-        static_cast<std::uint8_t>((lba / 75) % 60),
-        static_cast<std::uint8_t>(lba % 75)
-    };
-}
-
-static_assert(stock_msf(-4).f == 252 && stock_msf(-4).s == 0);
-
-constexpr std::uint8_t stock_bcd(std::int32_t v) noexcept {
-    return static_cast<std::uint8_t>(((v / 10) << 4) | (v % 10));
-}
-
-static_assert(stock_bcd(252) == 0x92 && stock_bcd(99) == 0x99);
 
 }
 
 void SaturnCddEngine::reset_status_() noexcept {
 
-    stat_[0] = kStatOpen;
+    stat_.set(StatField::Status, kStatOpen);
     for (std::size_t i = 1; i <= 9; ++i)
-        stat_[i] = 0;
-    stat_[11] = 0;
-    stat_[11] = saturn::frame_checksum(
-        std::span<const std::uint8_t, saturn::kFrameSumBytes>(stat_, saturn::kFrameSumBytes)
-    );
+        stat_.bytes[i] = 0;
+    stat_.set(StatField::Checksum, 0);
+    stat_.seal();
 }
 
 Ex<void> SaturnCddEngine::do_accept(std::span<const std::uint16_t> words, CdDialectPorts& p) {
 
-    for (std::size_t i = 0; i < 6; ++i) {
-        comm_[2 * i] = static_cast<std::uint8_t>(words[i] & 0xFFu);
-        comm_[2 * i + 1] = static_cast<std::uint8_t>(words[i] >> 8);
-    }
+    comm_.load_words(words);
     command_exec_(p.geom);
     return {};
 }
 
 void SaturnCddEngine::command_exec_(const svc::DiscGeometry& geom) noexcept {
     const svc::Toc& toc = geom.toc;
-    const std::int32_t last = toc.last;
-    std::int32_t cmd_fad = (static_cast<std::int32_t>(comm_[1]) << 16)
-        | (static_cast<std::int32_t>(comm_[2]) << 8)
-        | static_cast<std::int32_t>(comm_[3]);
-    std::int32_t cmd_idx = comm_[4];
-    std::int32_t cmd_tno = comm_[8];
+    const SaturnCddFrame::Comm cmd = comm_.comm();
+    HeadLba cmd_head = cmd.head;
+    std::uint32_t cmd_idx = cmd.index;
+    svc::TrackNumber cmd_tno = cmd.track;
 
-    constexpr std::int32_t kIndexNum = 2;
-    if (cmd_tno >= 1 && cmd_idx > kIndexNum && cmd_tno - 1 < last) {
+    constexpr std::uint32_t kIndexNum = 2;
+    if (cmd_tno != svc::TrackNumber{}
+        && cmd_idx > kIndexNum
+        && toc.last.contains(cmd_tno.index())) {
         cmd_idx -= kIndexNum;
-        cmd_tno += 1;
-        cmd_fad = start_of_(cmd_tno - 1) + kFad;
+        const svc::TrackIndex next = cmd_tno.index() + svc::TrackCount{1};
+        cmd_tno = next.number();
+        cmd_head = start_of_(next);
     }
-    const std::int32_t fad = cmd_fad + offset_by_index_(cmd_tno, cmd_idx, geom);
-    const std::int32_t speed = comm_[10] == 1 ? 1 : 2;
+    const HeadLba head = cmd_head + offset_by_index_(cmd_tno, cmd_idx, geom);
+    const std::int32_t speed = cmd.speed == 1 ? 1 : 2;
 
-    switch (comm_[0]) {
+    switch (cmd.command) {
         case kCommSeekRing:
-            seek_lba_ = fad - kFad;
+            seek_lba_ = head;
             track_ = track_by_lba_(seek_lba_, geom);
             index_ = index_by_lba_(track_, seek_lba_);
             pend_.seek_ring = true;
@@ -111,20 +88,20 @@ void SaturnCddEngine::command_exec_(const svc::DiscGeometry& geom) noexcept {
             pend_.read_pend = false;
             break;
         case kCommRead: {
-            const std::int32_t lba_old = lba_;
-            seek_lba_ = fad - kFad - saturn::kReadHeadLead;
+            const HeadLba lba_old = lba_;
+            seek_lba_ = head - SectorCount{saturn::kReadHeadLead};
             lba_ = seek_lba_;
             track_ = track_by_lba_(seek_lba_, geom);
             index_ = index_by_lba_(track_, seek_lba_);
             pend_.read_pend = true;
             pend_.seek_pend = true;
-            const std::int32_t from = lba_old - saturn::kSeekOriginLead;
-            seek_delay_ = static_cast<std::int32_t>(saturn::seek_delay_ticks(
+            const HeadLba from = lba_old - SectorCount{saturn::kSeekOriginLead};
+            seek_delay_ = saturn::seek_delay_ticks(
                 from,
-                fad - kFad,
-                static_cast<std::uint32_t>(track_by_lba_(from, geom)),
-                static_cast<std::uint32_t>(track_by_lba_(fad - kFad, geom))
-            ));
+                head,
+                track_by_lba_(from, geom),
+                track_by_lba_(head, geom)
+            );
             pend_.pause_pend = false;
             speed_ = speed;
             audio_first_ = true;
@@ -139,19 +116,19 @@ void SaturnCddEngine::command_exec_(const svc::DiscGeometry& geom) noexcept {
             pend_.read_pend = false;
             break;
         case kCommSeek: {
-            const std::int32_t lba_old = lba_;
-            seek_lba_ = fad - kFad;
+            const HeadLba lba_old = lba_;
+            seek_lba_ = head;
             lba_ = seek_lba_;
             track_ = track_by_lba_(seek_lba_, geom);
             index_ = index_by_lba_(track_, seek_lba_);
             pend_.seek_pend = true;
-            const std::int32_t from = lba_old - saturn::kSeekOriginLead;
-            seek_delay_ = static_cast<std::int32_t>(saturn::seek_delay_ticks(
+            const HeadLba from = lba_old - SectorCount{saturn::kSeekOriginLead};
+            seek_delay_ = saturn::seek_delay_ticks(
                 from,
-                fad - kFad,
-                static_cast<std::uint32_t>(track_by_lba_(from, geom)),
-                static_cast<std::uint32_t>(track_by_lba_(fad - kFad, geom))
-            ));
+                head,
+                track_by_lba_(from, geom),
+                track_by_lba_(head, geom)
+            );
             pend_.final_read = pend_.read_pend;
             pend_.read_pend = false;
             pend_.pause_pend = false;
@@ -168,10 +145,7 @@ void SaturnCddEngine::command_exec_(const svc::DiscGeometry& geom) noexcept {
             break;
     }
 
-    const std::uint8_t sum = saturn::frame_checksum(
-        std::span<const std::uint8_t, saturn::kFrameSumBytes>(comm_, saturn::kFrameSumBytes)
-    );
-    if (sum != comm_[11])
+    if (!comm_.checksum_ok())
         ++stats_.crc_faults;
 }
 
@@ -202,105 +176,112 @@ void SaturnCddEngine::fill_position_(
     const svc::DiscGeometry& geom
 ) noexcept {
     const svc::Toc& toc = geom.toc;
-    const StockMsf amsf = stock_msf(lba_ + kFad);
-    const std::int32_t rel = lba_ - start_of_(track_);
-    StockMsf msf{};
+    const Msf amsf = stock_msf_of(lba_ + kFadSectors);
+    const SectorCount rel = lba_ - start_of_(track_);
+    Msf msf{};
     if (pause_msf) {
-        msf = stock_msf((rel < 0 ? -rel : rel) + kFad);
+        msf = stock_msf_of(rel.magnitude() + kFadSectors);
+    } else if (lba_ < HeadLba{}) {
+        msf = stock_msf_of(HeadLba{} - lba_);
     } else {
-        msf = lba_ < 0 ? stock_msf(-lba_) : stock_msf(rel);
+        msf = stock_msf_of(rel);
     }
-    stat_[0] = code;
-    stat_[1] = static_cast<std::uint8_t>(q | 0x01);
-    stat_[2] = lba_ < static_cast<std::int32_t>(toc.end.v) + kFad ? stock_bcd(track_ + 1) : 0xAA;
-    stat_[3] = lba_ < 0 ? 0x00 : stock_bcd(index_);
-    stat_[4] = stock_bcd(msf.m);
-    stat_[5] = stock_bcd(msf.s);
-    stat_[6] = stock_bcd(msf.f);
-    stat_[7] = 0x00;
-    stat_[8] = stock_bcd(amsf.m);
-    stat_[9] = stock_bcd(amsf.s);
-    stat_[10] = stock_bcd(amsf.f);
+    stat_.set(StatField::Status, code);
+    stat_.set(StatField::Control, static_cast<std::uint8_t>(q | 0x01));
+    stat_.set(
+        StatField::Track,
+        lba_ < head_of(toc.end) + kFadSectors ? bcd(track_.number()) : kAbsentTrack
+    );
+    stat_.set(StatField::Index, lba_ < HeadLba{} ? 0x00 : bcd(index_));
+    stat_.set(StatField::Minute, bcd(msf.m));
+    stat_.set(StatField::Second, bcd(msf.s));
+    stat_.set(StatField::Frame, bcd(msf.f));
+    stat_.set(StatField::Zero, 0x00);
+    stat_.set(StatField::AbsMinute, bcd(amsf.m));
+    stat_.set(StatField::AbsSecond, bcd(amsf.s));
+    stat_.set(StatField::AbsFrame, bcd(amsf.f));
 }
 
 void SaturnCddEngine::process_(const svc::DiscGeometry& geom) noexcept {
 
     const svc::Toc& toc = geom.toc;
-    const std::int32_t last = toc.last;
-    std::uint8_t q = lba_ < static_cast<std::int32_t>(toc.end.v) && is_data_(track_, geom) ? 0x40
-                                                                                           : 0x00;
+    std::uint8_t q = lba_ < head_of(toc.end) && is_data_(track_, geom) ? 0x40 : 0x00;
 
     if (lid_open_) {
         state_ = State::Open;
         const std::uint8_t open[11] = {kStatOpen, 0x41, 0x01, 0x01, 0, 0, 0, 0, 0, 0, 0};
-        std::memcpy(stat_, open, sizeof open);
+        std::memcpy(stat_.bytes.data(), open, sizeof open);
     } else if (pend_.read_toc) {
         state_ = State::ReadToc;
-        StockMsf msf{0, 2, 0};
+        Msf msf{0, 2, 0};
         std::uint8_t idx = 0;
         if (toc_pos_ < 0x100) {
-            std::int32_t at = start_of_(toc_pos_) + kFad;
+            const svc::TrackIndex row = svc::TrackIndex::of(toc_pos_);
+            HeadLba at = start_of_(row) + kFadSectors;
             if (toc_at_index1_)
-                at += offset_by_index_(toc_pos_ + 1, 1, geom);
-            msf = stock_msf(at);
-            idx = stock_bcd(toc_pos_ + 1);
-            q = is_data_(toc_pos_ & 0xFF, geom) ? 0x40 : 0x00;
+                at += offset_by_index_(row.number(), 1, geom);
+            msf = stock_msf_of(at);
+            idx = bcd(row.number());
+            q = is_data_(row, geom) ? 0x40 : 0x00;
             ++toc_pos_;
-            if (toc_pos_ >= last)
+            if (!toc.last.contains(svc::TrackIndex::of(toc_pos_)))
                 toc_pos_ = 0x100;
         } else {
             if (toc_pos_ == 0x100) {
                 msf = {1, 0, 0};
                 idx = 0xA0;
-                q = is_data_(0, geom) ? 0x40 : 0x00;
+                q = is_data_(svc::TrackIndex{}, geom) ? 0x40 : 0x00;
             } else if (toc_pos_ == 0x101) {
-                msf = {static_cast<std::uint8_t>(last), 0, 0};
+                msf = toc.last.as_minute();
                 idx = 0xA1;
-                q = is_data_(last - 1, geom) ? 0x40 : 0x00;
+                q = is_data_(toc.last.last_index(), geom) ? 0x40 : 0x00;
             } else if (toc_pos_ == 0x102) {
-                msf = stock_msf(static_cast<std::int32_t>(toc.end.v) + kFad);
+                msf = stock_msf_of(head_of(toc.end) + kFadSectors);
                 idx = 0xA2;
                 q = 0x00;
                 pend_.read_toc = false;
             }
             ++toc_pos_;
         }
-        stat_[0] = kStatToc;
-        stat_[1] = static_cast<std::uint8_t>(q | 0x01);
-        stat_[2] = 0x00;
-        stat_[3] = idx;
-        stat_[4] = 0x00;
-        stat_[5] = 0x00;
-        stat_[6] = 0x00;
-        stat_[7] = 0x00;
-        stat_[8] = stock_bcd(msf.m);
-        stat_[9] = stock_bcd(msf.s);
-        stat_[10] = stock_bcd(msf.f);
+        stat_.set(StatField::Status, kStatToc);
+        stat_.set(StatField::Control, static_cast<std::uint8_t>(q | 0x01));
+        stat_.set(StatField::Track, 0x00);
+        stat_.set(StatField::Index, idx);
+        stat_.set(StatField::Minute, 0x00);
+        stat_.set(StatField::Second, 0x00);
+        stat_.set(StatField::Frame, 0x00);
+        stat_.set(StatField::Zero, 0x00);
+        stat_.set(StatField::AbsMinute, bcd(msf.m));
+        stat_.set(StatField::AbsSecond, bcd(msf.s));
+        stat_.set(StatField::AbsFrame, bcd(msf.f));
     } else if (pend_.seek_pend) {
         state_ = pend_.final_read ? State::Read : State::Seek;
         fill_position_(kStatSeek, q, false, geom);
-        --seek_delay_;
-        if (seek_delay_ <= 0) {
-            seek_delay_ = 0;
+        seek_delay_ -= saturn::SeekTicks{1};
+        if (seek_delay_ <= saturn::SeekTicks{}) {
+            seek_delay_ = saturn::SeekTicks{};
             pend_.seek_pend = false;
         }
         pend_.final_read = false;
     } else if (pend_.seek_ring || pend_.seek_ring2) {
 
         state_ = State::SeekRing;
-        const std::int32_t fad = lba_ + kFad;
+        const auto fad = SaturnCddFrame::fad_bytes(lba_);
         const bool second = !pend_.seek_ring;
-        stat_[0] = second ? static_cast<std::uint8_t>(kStatSeekRing | 0x04) : kStatSeekRing;
-        stat_[1] = second ? 0x48 : 0x00;
-        stat_[2] = second ? 0x5A : 0x00;
-        stat_[3] = static_cast<std::uint8_t>(fad >> 16);
-        stat_[4] = static_cast<std::uint8_t>(fad >> 8);
-        stat_[5] = static_cast<std::uint8_t>(fad);
-        stat_[6] = second ? 0x0A : 0x00;
-        stat_[7] = second ? 0x0A : 0x00;
-        stat_[8] = second ? 0x09 : 0x00;
-        stat_[9] = second ? 0x09 : 0x00;
-        stat_[10] = 0x00;
+        stat_.set(
+            StatField::Status,
+            second ? static_cast<std::uint8_t>(kStatSeekRing | 0x04) : kStatSeekRing
+        );
+        stat_.set(StatField::Control, second ? 0x48 : 0x00);
+        stat_.set(StatField::Track, second ? 0x5A : 0x00);
+        stat_.set(StatField::Index, fad[0]);
+        stat_.set(StatField::Minute, fad[1]);
+        stat_.set(StatField::Second, fad[2]);
+        stat_.set(StatField::Frame, second ? 0x0A : 0x00);
+        stat_.set(StatField::Zero, second ? 0x0A : 0x00);
+        stat_.set(StatField::AbsMinute, second ? 0x09 : 0x00);
+        stat_.set(StatField::AbsSecond, second ? 0x09 : 0x00);
+        stat_.set(StatField::AbsFrame, 0x00);
         if (seek_ring_time_ != 0) {
             --seek_ring_time_;
         } else {
@@ -322,24 +303,22 @@ void SaturnCddEngine::process_(const svc::DiscGeometry& geom) noexcept {
     } else if (pend_.stop_pend) {
         state_ = State::Stop;
         const std::uint8_t stop[11] = {kStatStop, 0x41, 0x01, 0x01, 0, 0, 0, 0, 0, 0, 0};
-        std::memcpy(stat_, stop, sizeof stop);
+        std::memcpy(stat_.bytes.data(), stop, sizeof stop);
         pend_.stop_pend = false;
     } else {
         state_ = State::Idle;
         fill_position_(kStatIdle, q, true, geom);
     }
-    stat_[11] = saturn::frame_checksum(
-        std::span<const std::uint8_t, saturn::kFrameSumBytes>(stat_, saturn::kFrameSumBytes)
-    );
+    stat_.seal();
 }
 
 Ex<void> SaturnCddEngine::update_(CdDialectPorts& p) {
 
     switch (state_) {
         case State::Idle:
-            ++lba_;
-            if (lba_ > seek_lba_ + 4)
-                lba_ -= 4;
+            lba_ += SectorCount{1};
+            if (lba_ > seek_lba_ + SectorCount{4})
+                lba_ -= SectorCount{4};
             retrack_(p.geom);
             break;
         case State::Open:
@@ -351,12 +330,10 @@ Ex<void> SaturnCddEngine::update_(CdDialectPorts& p) {
                 return std::unexpected(r.error());
             return {};
         }
-        case State::Pause:
         case State::Stop:
             retrack_(p.geom);
             break;
         case State::Seek:
-        case State::SeekRead:
             if (!pend_.seek_pend)
                 lba_ = seek_lba_;
             retrack_(p.geom);
@@ -373,14 +350,13 @@ Ex<void> SaturnCddEngine::update_(CdDialectPorts& p) {
 Ex<SaturnCddEngine::Sent> SaturnCddEngine::read_pass_(CdDialectPorts& p) {
     const svc::Toc& toc = p.geom.toc;
     Ex<Sent> sent = Sent::Yes;
-    if (lba_ >= static_cast<std::int32_t>(toc.end.v)) {
+    if (lba_ >= head_of(toc.end)) {
         auto r = ring_sector_send_(p);
         if (!r)
             sent = std::unexpected(r.error());
     } else if (is_data_(track_, p.geom)) {
 
-        const bool synth = sector_size_(track_, p.geom) == kUserData
-            || lba_ - start_of_(track_) < 0;
+        const bool synth = sector_size_(track_, p.geom) == kUserData || lba_ < start_of_(track_);
         sent = data_sector_send_(synth, p);
     } else {
         sent = audio_sector_send_(p);
@@ -391,7 +367,7 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::read_pass_(CdDialectPorts& p) {
         ++declines_;
         return sent;
     }
-    ++lba_;
+    lba_ += SectorCount{1};
     retrack_(p.geom);
     seek_lba_ = lba_;
     prime_(p.geom);
@@ -399,20 +375,22 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::read_pass_(CdDialectPorts& p) {
 }
 
 Ex<SaturnCddEngine::Sent> SaturnCddEngine::data_sector_send_(bool synth_header, CdDialectPorts& p) {
-    const std::int32_t at = lba_ >= 0 ? lba_ : 0;
+    const HeadLba at = lba_ >= HeadLba{} ? lba_ : HeadLba{};
     const bool cooked = sector_size_(track_, p.geom) == kUserData;
     const svc::DiscForm form = cooked ? svc::DiscForm::UserData : svc::DiscForm::RawFrame;
     const std::span<std::uint8_t> dst = cooked
         ? std::span<std::uint8_t>(sec_ + kHeaderBytes, kUserData)
         : std::span<std::uint8_t>(sec_);
-    const svc::Lba lba{static_cast<std::uint32_t>(at)};
-    if (facts_.disc.take(form, lba, std::as_writable_bytes(dst)) == 0) {
-        if (!facts_.disc.take_read_failed(form, lba))
+    const std::optional<svc::Lba> lba = at.readable();
+    if (!lba)
+        return Sent::Declined;
+    if (facts_.disc.take(form, *lba, std::as_writable_bytes(dst)) == 0) {
+        if (!facts_.disc.take_read_failed(form, *lba))
             return Sent::Declined;
         ++stats_.substitutes;
     }
     if (synth_header) {
-        const StockMsf msf = stock_msf(lba_ + kFad);
+        const Msf msf = stock_msf_of(lba_ + kFadSectors);
         const std::uint8_t header[kHeaderBytes] = {
             0x00,
             0xFF,
@@ -426,9 +404,9 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::data_sector_send_(bool synth_header, 
             0xFF,
             0xFF,
             0x00,
-            stock_bcd(msf.m),
-            stock_bcd(msf.s),
-            stock_bcd(msf.f),
+            bcd(msf.m),
+            bcd(msf.s),
+            bcd(msf.f),
             0x01
         };
         std::memcpy(sec_, header, kHeaderBytes);
@@ -461,12 +439,9 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::data_sector_send_(bool synth_header, 
     }
     data_ring_.advance_write();
     const std::uint8_t read_slot = data_ring_.take_read();
-    const auto mode = static_cast<std::uint16_t>(
-        (speed_ == 2 ? 0x0101 : 0x0000)
-        | (boot ? 0x0808 : 0x0000)
-        | (read_slot << 4)
-        | (read_slot << 12)
-    );
+    const SaturnModeWord mode = (speed_ == 2 ? SaturnModeWord::speed_double() : SaturnModeWord{})
+                                    .with(boot ? SaturnModeWord::boot() : SaturnModeWord{})
+                                    .with_slot(read_slot);
     ++stats_.data_sectors;
     if (auto r = send_mode_(mode, p.link); !r)
         return std::unexpected(r.error());
@@ -478,22 +453,20 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::audio_sector_send_(CdDialectPorts& p)
     const bool first = audio_first_;
     const std::size_t count = first ? 2 : 1;
     for (std::size_t k = 0; k < count; ++k) {
-        const std::int64_t want = static_cast<std::int64_t>(lba_)
-            + (first ? static_cast<std::int64_t>(k) : 1);
-        if (aud_lba_[k] == want)
+        const HeadLba want = lba_ + SectorCount{first ? static_cast<std::int32_t>(k) : 1};
+        if (aud_[k].lba == want)
             continue;
-        if (want >= 0) {
-            const svc::Lba at{static_cast<std::uint32_t>(want)};
-            const std::span<std::uint8_t> dst(aud_[k]);
-            if (facts_.disc.take(svc::DiscForm::RawFrame, at, std::as_writable_bytes(dst)) == 0) {
-                if (!facts_.disc.take_read_failed(svc::DiscForm::RawFrame, at))
+        if (const std::optional<svc::Lba> at = want.readable()) {
+            const std::span<std::uint8_t> dst(aud_[k].data);
+            if (facts_.disc.take(svc::DiscForm::RawFrame, *at, std::as_writable_bytes(dst)) == 0) {
+                if (!facts_.disc.take_read_failed(svc::DiscForm::RawFrame, *at))
                     return Sent::Declined;
                 ++stats_.substitutes;
             }
         } else {
             ++stats_.substitutes;
         }
-        aud_lba_[k] = want;
+        aud_[k].lba = want;
     }
     if (window_ == nullptr)
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 1});
@@ -502,18 +475,19 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::audio_sector_send_(CdDialectPorts& p)
     for (std::size_t k = 0; k < count; ++k) {
         if (auto w = window_->write(
                 (audio_ring_.write() + k) * kSlotBytes,
-                std::as_bytes(std::span<const std::uint8_t>(aud_[k]))
+                std::as_bytes(std::span<const std::uint8_t>(aud_[k].data))
             );
             !w) {
             return std::unexpected(w.error());
         }
     }
-    aud_lba_[0] = aud_lba_[1] = -1;
+    aud_[0].lba.reset();
+    aud_[1].lba.reset();
     if (first)
         audio_ring_.skip_write();
     audio_ring_.advance_write();
     const std::uint8_t read_slot = audio_ring_.take_read();
-    const auto mode = static_cast<std::uint16_t>(0x0202 | (read_slot << 4) | (read_slot << 12));
+    const SaturnModeWord mode = SaturnModeWord::cdda().with_slot(read_slot);
     stats_.cdda_sectors += static_cast<std::uint32_t>(count);
     if (auto r = send_mode_(mode, p.link); !r)
         return std::unexpected(r.error());
@@ -522,21 +496,9 @@ Ex<SaturnCddEngine::Sent> SaturnCddEngine::audio_sector_send_(CdDialectPorts& p)
 
 Ex<void> SaturnCddEngine::ring_sector_send_(CdDialectPorts& p) {
 
-    const StockMsf msf = stock_msf(lba_ + kFad);
-    const std::uint8_t header[kRingHeaderBytes] = {
-        stock_bcd(msf.m),
-        stock_bcd(msf.s),
-        stock_bcd(msf.f),
-        0x02,
-        0x00,
-        0x00,
-        0x28,
-        0x00,
-        0x00,
-        0x00,
-        0x28,
-        0x00
-    };
+    const Msf msf = stock_msf_of(lba_ + kFadSectors);
+    const std::uint8_t header[kRingHeaderBytes] =
+        {bcd(msf.m), bcd(msf.s), bcd(msf.f), 0x02, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x28, 0x00};
     saturn::fill_ring_body(std::span<std::uint8_t, saturn::kSectorBytes>(sec_));
     std::memcpy(sec_ + saturn::kRingBodyFirst, header, kRingHeaderBytes);
     std::memset(sec_ + saturn::kRingBodyLast, 0, saturn::kSectorBytes - saturn::kRingBodyLast);
@@ -550,15 +512,14 @@ Ex<void> SaturnCddEngine::ring_sector_send_(CdDialectPorts& p) {
         return std::unexpected(w.error());
     }
     ++stats_.data_sectors;
-    return send_mode_(static_cast<std::uint16_t>((speed_ == 2 ? 0x0101 : 0x0000) | 0x0404), p.link);
+    const SaturnModeWord mode = (speed_ == 2 ? SaturnModeWord::speed_double() : SaturnModeWord{})
+                                    .with(SaturnModeWord::ring());
+    return send_mode_(mode, p.link);
 }
 
-Ex<void> SaturnCddEngine::send_mode_(std::uint16_t mode, ICdLink& link) {
+Ex<void> SaturnCddEngine::send_mode_(SaturnModeWord mode, ICdLink& link) {
 
-    const std::uint8_t bytes[2] = {
-        static_cast<std::uint8_t>(mode & 0xFFu),
-        static_cast<std::uint8_t>(mode >> 8)
-    };
+    const auto bytes = mode.wire_bytes();
     return link.send_data(
         facts_.profile.io.data,
         std::as_bytes(std::span<const std::uint8_t>(bytes))
@@ -568,30 +529,33 @@ Ex<void> SaturnCddEngine::send_mode_(std::uint16_t mode, ICdLink& link) {
 void SaturnCddEngine::prime_(const svc::DiscGeometry& geom) noexcept {
 
     const svc::Toc& toc = geom.toc;
-    if (lba_ >= static_cast<std::int32_t>(toc.end.v))
+    if (lba_ >= head_of(toc.end))
         return;
+    const HeadLba at = lba_ >= HeadLba{} ? lba_ : HeadLba{};
     if (is_data_(track_, geom)) {
-        const std::int32_t at = lba_ >= 0 ? lba_ : 0;
-        facts_.disc.hint(
-            sector_size_(track_, geom) == kUserData ? svc::DiscForm::UserData
-                                                    : svc::DiscForm::RawFrame,
-            svc::Lba{static_cast<std::uint32_t>(at)}
-        );
+        if (const std::optional<svc::Lba> lba = at.readable()) {
+            facts_.disc.hint(
+                sector_size_(track_, geom) == kUserData ? svc::DiscForm::UserData
+                                                        : svc::DiscForm::RawFrame,
+                *lba
+            );
+        }
         return;
     }
-    const std::int32_t first = audio_first_ ? lba_ : lba_ + 1;
-    for (std::int32_t at = first; at <= lba_ + 1; ++at) {
-        if (at >= 0)
-            facts_.disc.hint(svc::DiscForm::RawFrame, svc::Lba{static_cast<std::uint32_t>(at)});
+    const HeadLba first = audio_first_ ? lba_ : lba_ + SectorCount{1};
+    for (HeadLba at2 = first; at2 <= lba_ + SectorCount{1}; at2 += SectorCount{1}) {
+        if (const std::optional<svc::Lba> lba = at2.readable()) {
+            facts_.disc.hint(svc::DiscForm::RawFrame, *lba);
+        }
     }
 }
 
 bool SaturnCddEngine::take_header_(const svc::DiscGeometry& geom) noexcept {
 
     const svc::Toc& toc = geom.toc;
-    if (toc.last == 0)
+    if (toc.last == svc::TrackCount{})
         return false;
-    const bool cooked = toc.tracks[0].sector_size == kUserData;
+    const bool cooked = toc.at(svc::TrackIndex{}).sector_size == kUserData;
     const svc::DiscForm form = cooked ? svc::DiscForm::UserData : svc::DiscForm::RawFrame;
     const std::span<std::uint8_t> dst = cooked ? std::span<std::uint8_t>(sec_, kUserData)
                                                : std::span<std::uint8_t>(sec_);
@@ -620,8 +584,8 @@ Ex<std::size_t> SaturnCddEngine::do_disc_descriptor(
     if (!take_header_(geom)) {
         header_owed_ = true;
         facts_.disc.hint(
-            geom.toc.tracks[0].sector_size == kUserData ? svc::DiscForm::UserData
-                                                        : svc::DiscForm::RawFrame,
+            geom.toc.at(svc::TrackIndex{}).sector_size == kUserData ? svc::DiscForm::UserData
+                                                                    : svc::DiscForm::RawFrame,
             svc::Lba{0}
         );
         return std::size_t{0};
@@ -643,10 +607,10 @@ Ex<void> SaturnCddEngine::do_notify_disc(bool loaded, const svc::DiscGeometry& g
     }
     lid_open_ = false;
     pend_.stop_pend = true;
-    if (geom.toc.last != 0) {
+    if (geom.toc.last != svc::TrackCount{}) {
         facts_.disc.hint(
-            geom.toc.tracks[0].sector_size == kUserData ? svc::DiscForm::UserData
-                                                        : svc::DiscForm::RawFrame,
+            geom.toc.at(svc::TrackIndex{}).sector_size == kUserData ? svc::DiscForm::UserData
+                                                                    : svc::DiscForm::RawFrame,
             svc::Lba{0}
         );
     }
@@ -658,12 +622,13 @@ void SaturnCddEngine::do_reset_machine() noexcept {
     state_ = State::Open;
     lid_open_ = true;
     pend_.reset();
-    track_ = 0;
-    lba_ = 0;
-    seek_lba_ = 0;
+    track_ = svc::TrackIndex{};
+    lba_ = HeadLba{};
+    seek_lba_ = HeadLba{};
     speed_ = 0;
     audio_first_ = false;
-    aud_lba_[0] = aud_lba_[1] = -1;
+    aud_[0].lba.reset();
+    aud_[1].lba.reset();
     reset_status_();
 }
 
@@ -678,13 +643,7 @@ bool SaturnCddEngine::do_streaming(const svc::DiscGeometry&) const noexcept {
 }
 
 CdEngine::DriveView SaturnCddEngine::do_drive_view(const svc::DiscGeometry& geom) const noexcept {
-    return DriveView{
-        static_cast<std::uint8_t>(state_),
-        svc::TrackIndex{static_cast<std::uint8_t>(track_)},
-        lba_,
-        lba_,
-        is_data_(track_, geom)
-    };
+    return DriveView{static_cast<std::uint8_t>(state_), track_, lba_, lba_, is_data_(track_, geom)};
 }
 
 std::size_t SaturnCddEngine::do_status_words(
@@ -693,7 +652,7 @@ std::size_t SaturnCddEngine::do_status_words(
 ) const noexcept {
 
     for (std::size_t i = 0; i < 6; ++i) {
-        out[i] = static_cast<std::uint16_t>(stat_[2 * i] | (stat_[2 * i + 1] << 8));
+        out[i] = stat_.word(i);
     }
     return 6;
 }
@@ -703,59 +662,52 @@ void SaturnCddEngine::retrack_(const svc::DiscGeometry& geom) noexcept {
     index_ = index_by_lba_(track_, lba_);
 }
 
-std::int32_t SaturnCddEngine::track_by_lba_(
-    std::int32_t lba,
+svc::TrackIndex SaturnCddEngine::track_by_lba_(
+    HeadLba lba,
     const svc::DiscGeometry& geom
 ) const noexcept {
 
-    const svc::Toc& toc = geom.toc;
-    std::int32_t i = 0;
-    while (i < toc.last && static_cast<std::int64_t>(toc.tracks[i].end.v) <= lba)
-        ++i;
-    return i;
+    return track_scan(geom.toc, lba);
 }
 
-std::int32_t SaturnCddEngine::index_by_lba_(std::int32_t track, std::int32_t lba) const noexcept {
+std::uint32_t SaturnCddEngine::index_by_lba_(svc::TrackIndex track, HeadLba lba) const noexcept {
 
-    return lba - start_of_(track) < 0 ? 0 : 1;
+    return lba < start_of_(track) ? 0 : 1;
 }
 
-std::int32_t SaturnCddEngine::offset_by_index_(
-    std::int32_t tno,
-    std::int32_t idx,
+SectorCount SaturnCddEngine::offset_by_index_(
+    svc::TrackNumber tno,
+    std::uint32_t idx,
     const svc::DiscGeometry& geom
 ) const noexcept {
 
-    const std::int32_t last = geom.toc.last;
-    std::int32_t t = tno - 1;
-    if (t < 0)
-        t = 0;
-    else if (t > last)
-        t = last;
-    if (idx > 99)
-        idx = 99;
-    if (idx <= 0)
-        return 0;
+    const svc::TrackCount last = geom.toc.last;
+    svc::TrackIndex t = tno == svc::TrackNumber{} ? svc::TrackIndex{} : tno.index();
+    if (!last.contains(t))
+        t = last.next_index();
     if (idx != 1)
-        return 0;
+        return SectorCount{};
     return stock_toc_.index1_of(t);
 }
 
-std::int32_t SaturnCddEngine::start_of_(std::int32_t track) const noexcept {
+HeadLba SaturnCddEngine::start_of_(svc::TrackIndex track) const noexcept {
     return stock_toc_.start_of(track);
 }
 
-bool SaturnCddEngine::is_data_(std::int32_t track, const svc::DiscGeometry& geom) const noexcept {
-    const svc::Toc& toc = geom.toc;
-    return track >= 0 && track < toc.last && toc.tracks[track].type != svc::TrackType::Cdda;
-}
-
-std::uint32_t SaturnCddEngine::sector_size_(
-    std::int32_t track,
+bool SaturnCddEngine::is_data_(
+    svc::TrackIndex track,
     const svc::DiscGeometry& geom
 ) const noexcept {
     const svc::Toc& toc = geom.toc;
-    return track >= 0 && track < toc.last ? toc.tracks[track].sector_size : 0u;
+    return toc.last.contains(track) && toc.at(track).type != svc::TrackType::Cdda;
+}
+
+std::uint32_t SaturnCddEngine::sector_size_(
+    svc::TrackIndex track,
+    const svc::DiscGeometry& geom
+) const noexcept {
+    const svc::Toc& toc = geom.toc;
+    return toc.last.contains(track) ? toc.at(track).sector_size : 0u;
 }
 
 }

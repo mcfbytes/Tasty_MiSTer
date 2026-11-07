@@ -10,7 +10,6 @@
 namespace mister::proto {
 
 struct ResetTerms {
-    TASTY_SEAT_EXEMPT(component);
     StatusWord held{};
     StatusWord raised{};
     std::uint16_t buttons = 0;

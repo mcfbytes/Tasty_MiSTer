@@ -101,10 +101,12 @@ private:
             fatal(Error{Errc::mmap_failed, ERR_SITE(), off}, "RegisterWindow: unmapped");
         }
 
-        if ((off & 3u) != 0u || static_cast<std::size_t>(off) > Layout::kSize - 4u) {
+        const auto byte_off = static_cast<std::size_t>(off);
+        if ((off & reg::Block::kWordAlignMask) != 0u
+            || byte_off > Layout::kSize - sizeof(std::uint32_t)) {
             fatal(Error{Errc::slot_range, ERR_SITE(), off}, "RegisterWindow: offset");
         }
-        return static_cast<std::size_t>(off);
+        return byte_off;
     }
 
 public:

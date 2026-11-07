@@ -29,8 +29,6 @@ inline constexpr bool kAdvModeWrite = true;
 inline constexpr os::I2cReg kRegPacketEnable{0x40};
 inline constexpr std::uint8_t kPacketMaskSpd = 0x40;
 inline constexpr os::I2cReg kPacketOffsetSpd{0x00};
-
-inline constexpr os::I2cReg kPacketUpdateOff{0x1F};
 inline constexpr std::size_t kSpdPacketBytes = 31;
 
 struct SpdPacket {
@@ -39,18 +37,6 @@ struct SpdPacket {
 };
 
 SpdPacket build_standard_spd(std::string_view core_name);
-
-constexpr std::uint32_t reg_errno_detail(os::I2cReg reg, std::uint32_t err) noexcept {
-    return static_cast<std::uint32_t>(reg.v) | (err << 8);
-}
-
-constexpr os::I2cReg detail_reg(std::uint32_t d) noexcept {
-    return os::I2cReg{static_cast<std::uint8_t>(d & 0xFFu)};
-}
-
-constexpr std::uint32_t detail_errno(std::uint32_t d) noexcept {
-    return d >> 8;
-}
 
 class Adv7513Bus {
     TASTY_SEAT_RESIDENT(Ui);

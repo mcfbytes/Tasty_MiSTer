@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -95,13 +96,15 @@ constinit xthread::LogLane rt_lane TASTY_PERSIST(proc, main_rt_lane){};
     if (sched) {
         state = sched->state;
         wchan = sched->wchan.size() != 0 ? sched->wchan.c_str() : "-";
-        policy = sched->policy;
+        policy = sched->policy ? fw::sched_policy_field(*sched->policy) : -1;
         prio = sched->rt_priority;
     }
     const auto hb = static_cast<unsigned long long>(
         rt_stats.heartbeat.load(std::memory_order_relaxed)
     );
-    const auto deadline_ms = static_cast<long long>(fw::kRtStopDeadlineNs / 1'000'000);
+    const auto deadline_ms = static_cast<long long>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(fw::kRtStopDeadlineNs).count()
+    );
     assembly.diag().diag_sink().appendf(
         "{\"t\":\"wedge\",\"seat\":\"T-RT\",\"tid\":%ld,\"state\":\"%c\",\"wchan\":\"%s\","
         "\"policy\":%d,\"prio\":%d,\"hb\":%llu,\"deadline_ms\":%lld,\"err\":%u,\"site\":%u,"
@@ -468,7 +471,9 @@ ProcessStandup::Exit ProcessStandup::run_boot_ladder() {
         {
 
             const mister::SeatScope main_as_main{mister::SeatTag::Main};
-            owner.latch_boot_companion(boot_args.size() > 2 ? boot_args[2] : "");
+            owner.latch_boot_companion(
+                boot_args.size() > kCompanionArg ? boot_args[kCompanionArg] : ""
+            );
             if (*b)
                 owner.service_boot(**b);
             else

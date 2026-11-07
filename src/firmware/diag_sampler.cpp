@@ -5,6 +5,7 @@
 #include "boot_parts.h"
 #include "rt_evidence.h"
 #include "infra/seat.h"
+#include "round_trace_record.h"
 #include "rtstats_format.h"
 
 #include <sys/stat.h>
@@ -96,6 +97,11 @@ DiagSampler::DiagSampler(
       rec_encode_(sources.rec_encode),
       doorbell_cell_(sources.doorbell),
       round_timing_(sources.round_timing),
+      round_traces_(sources.round_traces),
+      trace_rx_(wired_end(
+          sources.round_traces.consumer(),
+          "T-DIAG: round trace lane consumer minted twice"
+      )),
       ui_pages_(sources.ui_pages),
       diag_(diag),
       lane_rt_(rt_lane),
@@ -237,6 +243,7 @@ void DiagSampler::sample(bool stopping) noexcept {
 
 void DiagSampler::answer() noexcept {
     if (diag_.is_open()) {
+        drain_round_traces();
         if (const std::uint32_t d = stats_.dump_requests.load(std::memory_order_relaxed);
             d != last_dump_) {
             last_dump_ = d;
@@ -247,8 +254,11 @@ void DiagSampler::answer() noexcept {
 }
 
 void DiagSampler::render_final() noexcept {
-    if (diag_.is_open())
-        render_records("final");
+    if (!diag_.is_open())
+        return;
+    drain_round_traces();
+    voice_trace_drops_();
+    render_records("final");
 }
 
 void DiagSampler::drain_screenshots() noexcept {
@@ -406,6 +416,96 @@ void DiagSampler::drain_log_lane() noexcept {
         last_log_misrouted_ = log_misrouted_;
         diag_.appendf("{\"t\":\"drops\",\"src\":\"log_misrouted\",\"n\":%u}", log_misrouted_);
     }
+}
+
+void DiagSampler::drain_round_traces() noexcept {
+    const reactor::MonoInstant now = std::chrono::steady_clock::now();
+    if (now - trace_window_ >= kTraceWindow) {
+        voice_trace_drops_();
+        trace_window_ = now;
+        trace_spent_ = {};
+    }
+    for (std::size_t n = 0; n < reactor::RoundTraceLane::kCapacity; ++n) {
+        const std::optional<reactor::RoundTrace> r = trace_rx_.pop();
+        if (!r)
+            break;
+        infra::dispatch<infra::AllRouted>(*r, *this);
+    }
+}
+
+void DiagSampler::on(const reactor::RoundTrace::SlowSteady& a) noexcept {
+    render_trace_(a.kKind, a.round);
+}
+
+void DiagSampler::on(const reactor::RoundTrace::SlowLifecycle& a) noexcept {
+    render_trace_(a.kKind, a.round);
+}
+
+void DiagSampler::render_trace_(
+    reactor::RoundTrace::Kind k,
+    const reactor::RoundTrace::Round& r
+) noexcept {
+    TraceKindDrops& drops = trace_drops_[infra::ordinal(k)];
+    if (trace_bytes_ >= kTraceBytesPerProcess) {
+        drops.cap = drops.cap.added();
+        return;
+    }
+    if (trace_spent_ >= kTraceLinesPerWindow) {
+        drops.budget = drops.budget.added();
+        return;
+    }
+    infra::JsonOut o;
+    o.begin_record(RoundTraceRecord::kKey, diag_seq_);
+    to_json(o, r);
+    o.end_record();
+
+    const TraceBytes after = trace_bytes_.plus(o.view().size() + 1);
+    if (after > kTraceBytesPerProcess) {
+        trace_bytes_ = kTraceBytesPerProcess;
+        drops.cap = drops.cap.added();
+        return;
+    }
+    trace_bytes_ = after;
+    trace_spent_ = trace_spent_.next();
+    diag_.append(o);
+}
+
+void DiagSampler::voice_trace_drops_() noexcept {
+    const reactor::RoundTraceLane::Losses lost = round_traces_.losses();
+    for (const reactor::RoundTrace::Kind k : kTraceKinds) {
+        TraceKindDrops& drops = trace_drops_[infra::ordinal(k)];
+        drops.lane.drops = lost.of(k);
+        voice_trace_("rtflight", k, drops.lane);
+        voice_trace_("rtflight_budget", k, drops.budget);
+        voice_trace_("rtflight_cap", k, drops.cap);
+        drops = {drops.lane.voiced(), drops.budget.voiced(), drops.cap.voiced()};
+    }
+    if (trace_misroutes_.moved()) {
+        trace_misroutes_ = trace_misroutes_.voiced();
+        diag_.appendf(
+            "{\"t\":\"drops\",\"src\":\"rtflight_misrouted\",\"n\":%u}",
+            trace_misroutes_.drops
+        );
+    }
+}
+
+void DiagSampler::voice_trace_(
+    const char* src,
+    reactor::RoundTrace::Kind k,
+    TraceDrops d
+) noexcept {
+    if (d.moved())
+        diag_.appendf(
+            "{\"t\":\"drops\",\"src\":\"%s\",\"kind\":%u,\"n\":%u}",
+            src,
+            static_cast<unsigned>(infra::ordinal(k)),
+            d.drops
+        );
+}
+
+void DiagSampler::misrouted(const reactor::RoundTrace&) noexcept {
+    TASTY_SEAT_BODY(DiagSampler);
+    trace_misroutes_ = trace_misroutes_.added();
 }
 
 void DiagSampler::voice_log_losses_(
@@ -704,9 +804,9 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         ips.ui_keys_dropped,
         ips.quirk_drops,
         ips.rejected,
-        ips.button_samples,
+        0u,
         ips.button_actions,
-        ips.slot_live,
+        ips.slot_live.text().c_str(),
         ips.slot_ghosts,
         hash0,
         hash1,

@@ -2,9 +2,11 @@
 #pragma once
 
 #include <climits>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 
 #include "infra/error.h"
 #include "infra/fixed_str.h"
@@ -23,7 +25,7 @@ struct RtEvidence;
 
 enum class RtMode : std::uint8_t { Required, BestEffort };
 
-void pin_current_cpu(int cpu, RtSetup& out) noexcept;
+void pin_current_cpu(os::CpuId cpu, RtSetup& out) noexcept;
 
 [[nodiscard]] Ex<void> verify_cpu_topology(
     const hal::ThreadMap& m,
@@ -46,39 +48,36 @@ inline constexpr std::size_t kStackPageBytes = 4096;
 
 inline constexpr std::size_t kStackPrefaultReserveBytes = 64u * 1024u;
 
-constexpr std::size_t prefault_mapped_bound(
-    std::size_t mapped,
-    std::uint64_t rlimit_cur,
-    bool growable
-) noexcept {
-    if (growable && rlimit_cur > mapped) {
-        return rlimit_cur > static_cast<std::uint64_t>(SIZE_MAX)
-            ? SIZE_MAX
-            : static_cast<std::size_t>(rlimit_cur);
-    }
-    return mapped;
-}
+struct StackExtent {
+    std::size_t used = 0;
+    std::size_t mapped = 0;
+    std::uint64_t rlimit = 0;
 
-constexpr std::size_t stack_prefault_span(
-    std::size_t requested,
-    std::size_t used,
-    std::size_t mapped,
-    std::uint64_t rlimit_cur
-) noexcept {
-    std::uint64_t limit = mapped;
-    if (rlimit_cur < limit)
-        limit = rlimit_cur;
-    const std::uint64_t floor = static_cast<std::uint64_t>(used) + kStackPrefaultReserveBytes;
-    if (limit <= floor)
-        return 0;
-    const std::uint64_t room = limit - floor;
-    return room < requested ? static_cast<std::size_t>(room) : requested;
-}
+    [[nodiscard]] constexpr std::size_t bound(bool growable) const noexcept {
+        if (growable && rlimit > mapped) {
+            return rlimit > static_cast<std::uint64_t>(SIZE_MAX) ? SIZE_MAX
+                                                                 : static_cast<std::size_t>(rlimit);
+        }
+        return mapped;
+    }
+
+    [[nodiscard]] constexpr std::size_t span(std::size_t requested, bool growable) const noexcept {
+        std::uint64_t limit = bound(growable);
+        if (rlimit < limit)
+            limit = rlimit;
+        const std::uint64_t floor = static_cast<std::uint64_t>(used) + kStackPrefaultReserveBytes;
+        if (limit <= floor)
+            return 0;
+        const std::uint64_t room = limit - floor;
+        return room < requested ? static_cast<std::size_t>(room) : requested;
+    }
+};
 
 void prefault_current_stack(std::size_t requested, RtEvidence& ev) noexcept;
 
 struct SchedInfo {
-    int policy = -1;
+
+    std::optional<hal::SchedPolicy> policy{};
     int rt_priority = -1;
     char state = '?';
     FixedStr<31, StrFit::Clip> wchan;
@@ -86,13 +85,18 @@ struct SchedInfo {
 
 [[nodiscard]] Ex<SchedInfo> read_thread_sched(long tid);
 
+[[nodiscard]] constexpr int sched_policy_field(hal::SchedPolicy p) noexcept {
+    constexpr int kSchedFifoField = 1;
+    return p == hal::SchedPolicy::Fifo ? kSchedFifoField : 0;
+}
+
 inline constexpr int kRtWedgeExitStatus = 75;
 
-inline constexpr std::int64_t kRtStopDeadlineNs = 120'000'000'000;
+inline constexpr std::chrono::nanoseconds kRtStopDeadlineNs{std::chrono::seconds{120}};
 
-inline constexpr std::int64_t kIoStopDeadlineNs = 5'000'000'000;
+inline constexpr std::chrono::nanoseconds kIoStopDeadlineNs{std::chrono::seconds{5}};
 
-inline constexpr std::int64_t kRtJoinSliceNs = 20'000'000;
+inline constexpr std::chrono::nanoseconds kRtJoinSliceNs{std::chrono::milliseconds{20}};
 
 [[nodiscard]] Ex<std::uint64_t> read_vm_rss_bytes();
 

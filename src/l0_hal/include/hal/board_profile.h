@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <utility>
 
 #include "infra/error.h"
 #include "hal/axi.h"
@@ -29,7 +30,7 @@
 namespace mister::hal {
 
 enum class BoardId : std::uint8_t { De10Nano, De25Nano, Zynq7000, SpiSbc };
-inline constexpr std::size_t kBoardCount = 4;
+inline constexpr std::size_t kBoardCount = std::to_underlying(BoardId::SpiSbc) + 1;
 
 inline constexpr FpgaAperture kUnsourcedFpgaMem{
     {os::PhysAddr{0u}, regions::kLenUnsourced, "unsourced"},
@@ -68,7 +69,7 @@ struct BoardProfile {
     KernelContract kernel;
 
     const ThreadMap& threads;
-    int main_cpu;
+    os::CpuId main_cpu;
 
     bool verified;
 

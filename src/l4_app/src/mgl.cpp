@@ -3,10 +3,14 @@
 
 #include "app/name_config.h"
 
+#include <algorithm>
+#include <array>
 #include <cstring>
+#include <span>
 
 #include "app/mgl_item_dispatch.h"
 #include "infra/ascii.h"
+#include "infra/message_sum.h"
 #include "svc/xml_scan.h"
 #include "svc/xml_scanner.h"
 
@@ -22,11 +26,36 @@ using namespace std::chrono_literals;
 struct RawItem {
     MglItem::Slot slot = MglItem::Slot::File;
     std::uint8_t index = 0;
-    std::uint16_t delay_s = 0;
+    DelaySeconds delay_s{};
     FixedStr<MglItem::kPathMax, StrFit::Clip> path{};
 };
 
 constexpr std::chrono::milliseconds kDefaultResetHold{100};
+
+enum class ElementAttr : std::uint8_t { Delay, Type, Index, Path, kCount };
+
+class ElementAttrs {
+public:
+    void with(ElementAttr a) noexcept { seen_[infra::ordinal(a)] = true; }
+
+    [[nodiscard]] bool has(ElementAttr a) const noexcept { return seen_[infra::ordinal(a)]; }
+
+    [[nodiscard]] bool all() const noexcept {
+        return std::ranges::all_of(seen_, [](bool seen) { return seen; });
+    }
+
+private:
+    std::array<bool, infra::ordinal(ElementAttr::kCount)> seen_{};
+};
+
+constexpr ElementAttr kHasDelay = ElementAttr::Delay;
+constexpr ElementAttr kHasType = ElementAttr::Type;
+constexpr ElementAttr kHasIndex = ElementAttr::Index;
+constexpr ElementAttr kHasPath = ElementAttr::Path;
+
+[[nodiscard]] std::uint32_t parse_ul(std::string_view s);
+bool parse_file_item(std::span<const xml::Attr> attrs, RawItem& it);
+bool parse_reset_item(std::span<const xml::Attr> attrs, RawItem& it);
 
 [[nodiscard]] std::uint32_t parse_ul(std::string_view s) {
     constexpr unsigned kDecimal = 10;
@@ -78,6 +107,53 @@ constexpr std::chrono::milliseconds kDefaultResetHold{100};
                : static_cast<std::uint32_t>(v);
 }
 
+bool parse_file_item(std::span<const xml::Attr> attrs, RawItem& it) {
+    ElementAttrs valid;
+    for (const xml::Attr& a : attrs) {
+        if (ieq(a.name, "delay")) {
+
+            it.delay_s = DelaySeconds::of(parse_ul(a.value));
+            valid.with(kHasDelay);
+        } else if (ieq(a.name, "type")) {
+
+            if (ieq(a.value, "s")) {
+                it.slot = MglItem::Slot::Image;
+                valid.with(kHasType);
+            } else if (ieq(a.value, "f")) {
+                it.slot = MglItem::Slot::File;
+                valid.with(kHasType);
+            }
+        } else if (ieq(a.name, "index")) {
+
+            const std::uint32_t n = parse_ul(a.value);
+            if (!proto::FileSlotDigit::from(n))
+                continue;
+            it.index = static_cast<std::uint8_t>(n);
+            valid.with(kHasIndex);
+        } else if (ieq(a.name, "path")) {
+            (void)it.path.assign(a.value);
+            valid.with(kHasPath);
+        }
+    }
+    return valid.all();
+}
+
+bool parse_reset_item(std::span<const xml::Attr> attrs, RawItem& it) {
+    ElementAttrs valid;
+    for (const xml::Attr& a : attrs) {
+        if (ieq(a.name, "delay")) {
+            it.delay_s = DelaySeconds::of(parse_ul(a.value));
+            valid.with(kHasDelay);
+        } else if (ieq(a.name, "hold")) {
+
+            constexpr std::uint32_t kHoldMax = std::numeric_limits<std::uint8_t>::max();
+            const std::uint32_t n = parse_ul(a.value);
+            it.index = static_cast<std::uint8_t>(n > kHoldMax ? kHoldMax : n);
+        }
+    }
+    return valid.has(kHasDelay);
+}
+
 }
 
 void MglPlayer::reset() noexcept {
@@ -91,7 +167,7 @@ void MglPlayer::reset() noexcept {
     image_home_ = {};
     base_ = PathBase::Home;
     count_ = 0;
-    current_ = 0;
+    current_ = MglItemNo{};
     publishes_ = 0;
     drops_ = 0;
     last_tag_ = {};
@@ -101,20 +177,10 @@ void MglPlayer::reset() noexcept {
 }
 
 Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
-    constexpr std::uint32_t kDelayMax = 0xFFFFu;
-    constexpr std::uint32_t kHoldMax = 0xFFu;
-    constexpr std::uint32_t kLoadIndexMax = 15;
-    constexpr unsigned kHasDelay = 0x1u;
-    constexpr unsigned kHasType = 0x2u;
-    constexpr unsigned kHasIndex = 0x4u;
-    constexpr unsigned kHasPath = 0x8u;
-    constexpr unsigned kHasAll = kHasDelay | kHasType | kHasIndex | kHasPath;
     reset();
 
-    if (!core_supports_mgl) {
-
+    if (!core_supports_mgl)
         return {};
-    }
 
     bool inside_mgl = false;
     xml::XmlScanner scan{doc};
@@ -134,69 +200,24 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
             continue;
 
         RawItem& it = raw[count_];
-
-        if (ieq(tag->name, "file")) {
-            unsigned valid = 0;
-            for (std::size_t i = 0; i < tag->attr_count; ++i) {
-                const xml::Attr& a = attrs[i];
-                std::uint32_t n = 0;
-                if (ieq(a.name, "delay")) {
-
-                    n = parse_ul(a.value);
-                    it.delay_s = static_cast<std::uint16_t>(n > kDelayMax ? kDelayMax : n);
-                    valid |= kHasDelay;
-                } else if (ieq(a.name, "type")) {
-
-                    if (ieq(a.value, "s")) {
-                        it.slot = MglItem::Slot::Image;
-                        valid |= kHasType;
-                    } else if (ieq(a.value, "f")) {
-                        it.slot = MglItem::Slot::File;
-                        valid |= kHasType;
-                    }
-                } else if (ieq(a.name, "index")) {
-                    n = parse_ul(a.value);
-
-                    if (n > kLoadIndexMax)
-                        continue;
-                    it.index = static_cast<std::uint8_t>(n);
-                    valid |= kHasIndex;
-                } else if (ieq(a.name, "path")) {
-                    (void)it.path.assign(a.value);
-                    valid |= kHasPath;
-                }
-            }
-
-            if (valid == kHasAll) {
-                entries_[count_].item = infra::make<MglItem>(MglItem::Load{
-                    .slot = it.slot,
-                    .index = it.index,
-                    .delay_s = it.delay_s,
-                    .path = it.path
-                });
-                ++count_;
-            }
-        } else if (ieq(tag->name, "reset")) {
-            bool valid = false;
-            for (std::size_t i = 0; i < tag->attr_count; ++i) {
-                const xml::Attr& a = attrs[i];
-                std::uint32_t n = 0;
-                if (ieq(a.name, "delay")) {
-                    n = parse_ul(a.value);
-                    it.delay_s = static_cast<std::uint16_t>(n > kDelayMax ? kDelayMax : n);
-                    valid = true;
-                } else if (ieq(a.name, "hold")) {
-                    n = parse_ul(a.value);
-
-                    it.index = static_cast<std::uint8_t>(n > kHoldMax ? kHoldMax : n);
-                }
-            }
-            if (valid) {
-                entries_[count_].item = infra::make<MglItem>(
-                    MglItem::Reset{.delay_s = it.delay_s, .hold_s = it.index}
-                );
-                ++count_;
-            }
+        const MglItemNo no = MglItemNo::of(count_);
+        if (ieq(tag->name, "file")
+            && parse_file_item(std::span<const xml::Attr>{attrs, tag->attr_count}, it)) {
+            entries_[no].item = infra::make<MglItem>(MglItem::Load{
+                .slot = it.slot,
+                .index = proto::FileSlotDigit{it.index},
+                .delay_s = it.delay_s,
+                .path = it.path
+            });
+            ++count_;
+        } else if (
+            ieq(tag->name, "reset")
+            && parse_reset_item(std::span<const xml::Attr>{attrs, tag->attr_count}, it)
+        ) {
+            entries_[no].item = infra::make<MglItem>(
+                MglItem::Reset{.delay_s = it.delay_s, .hold_s = it.index}
+            );
+            ++count_;
         }
     }
 
@@ -205,17 +226,17 @@ Ex<void> MglPlayer::parse(std::string_view doc, bool core_supports_mgl) {
 }
 
 Ex<void> MglPlayer::adopt(const MglItem& item, PathBase base, bool core_supports_mgl) {
-    constexpr std::uint32_t kLoadIndexMax = 15;
     TASTY_SEAT_BODY(MglPlayer);
     reset();
     if (!core_supports_mgl)
         return {};
 
-    if (const auto ld = infra::as<MglItem::Load>(item); ld && ld->index > kLoadIndexMax)
+    const auto ld = load_of(item);
+    if (ld && !mgl_index_in_range(ld->index))
         return {};
 
     base_ = base;
-    entries_[0].item = item;
+    entries_[MglItemNo{}].item = item;
     count_ = 1;
     state_ = MglState::Armed;
     return {};
@@ -233,19 +254,15 @@ void MglPlayer::arm(const os::IClock& clock) {
     if (armed_ || state_ == MglState::Done)
         return;
     armed_ = true;
-    timer_ = os::Deadline::in(clock, std::chrono::seconds{delay_of_(0)});
+    timer_ = os::Deadline::in(clock, delay_of_(MglItemNo{}).as_seconds());
 }
 
-std::uint16_t MglPlayer::delay_of_(std::uint8_t i) const noexcept {
-    if (const auto ld = infra::as<MglItem::Load>(entries_[i].item); ld)
-        return ld->delay_s;
-    if (const auto rs = infra::as<MglItem::Reset>(entries_[i].item); rs)
-        return rs->delay_s;
-    return 0;
+DelaySeconds MglPlayer::delay_of_(MglItemNo i) const noexcept {
+    return delay_of(entries_[i].item);
 }
 
-std::uint8_t MglPlayer::hold_of_(std::uint8_t i) const noexcept {
-    const auto rs = infra::as<MglItem::Reset>(entries_[i].item);
+std::uint8_t MglPlayer::hold_of_(MglItemNo i) const noexcept {
+    const auto rs = reset_of(entries_[i].item);
     return rs ? rs->hold_s : 0;
 }
 
@@ -271,9 +288,9 @@ void MglPlayer::dispatch_current() {
 }
 
 Ex<void> MglPlayer::publish_load_() {
-    const auto ld = infra::as<MglItem::Load>(entries_[current_].item);
+    const auto ld = load_of(entries_[current_].item);
     if (!ld || ld->path.empty()) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), current_});
+        return std::unexpected(current_.refusal(Errc::bad_format, ERR_SITE()));
     }
 
     const std::string_view p = ld->path.view();
@@ -283,19 +300,13 @@ Ex<void> MglPlayer::publish_load_() {
         ? path.assign(p)
         : path.assign(home.view()) && path.append("/") && path.append(p);
     if (!fits) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), current_});
+        return std::unexpected(current_.refusal(Errc::bad_format, ERR_SITE()));
     }
     const CorrelationTag tag = ld->slot == MglItem::Slot::File
-        ? asks_.push(
-              UiRequest::LoadFileByDigit{
-                  .digit = proto::FileSlotDigit{ld->index},
-                  .scope = scope_,
-                  .path = path
-              }
-          )
+        ? asks_.push(UiRequest::LoadFileByDigit{.digit = ld->index, .scope = scope_, .path = path})
         : asks_.push(
               UiRequest::MountImage{
-                  .index = proto::IoIndex{ld->index},
+                  .index = mount_index_of(ld->index),
                   .scope = scope_,
                   .path = path
               }
@@ -313,19 +324,19 @@ Ex<void> MglPlayer::publish_load_() {
 }
 
 void MglPlayer::remember(
-    std::uint8_t i,
+    MglItemNo i,
     const RememberedStem& stem,
     RememberedSlot slot,
-    std::uint8_t ioctl_index
+    proto::IoIndex ioctl_index
 ) noexcept {
-    if (i >= count_)
+    if (!i.below(count_))
         return;
     stem_ = stem;
     entries_[i].remember = RememberAt{slot, ioctl_index};
 }
 
 bool MglPlayer::owns(CorrelationTag tag) const noexcept {
-    for (std::uint8_t i = 0; tag && i < count_; ++i)
+    for (MglItemNo i{}; tag && i.below(count_); i = i.next())
         if (entries_[i].tag == tag)
             return true;
     return false;
@@ -334,12 +345,12 @@ bool MglPlayer::owns(CorrelationTag tag) const noexcept {
 bool MglPlayer::replay_refused(CorrelationTag tag, const os::IClock& clock) {
     if (!tag)
         return false;
-    std::uint8_t i = 0;
-    while (i < count_ && entries_[i].tag != tag)
-        ++i;
-    if (i == count_)
+    MglItemNo i{};
+    while (i.below(count_) && entries_[i].tag != tag)
+        i = i.next();
+    if (!i.below(count_))
         return false;
-    for (std::uint8_t k = i; k < count_; ++k)
+    for (MglItemNo k = i; k.below(count_); k = k.next())
         entries_[k].tag = kUncaused;
     current_ = i;
     armed_ = true;
@@ -349,7 +360,6 @@ bool MglPlayer::replay_refused(CorrelationTag tag, const os::IClock& clock) {
 }
 
 Ex<void> MglPlayer::advance(const os::IClock& clock) {
-    constexpr std::uint32_t kMillisPerSecond = 1000;
     if (state_ == MglState::Done)
         return {};
     if (!armed_)
@@ -376,9 +386,9 @@ Ex<void> MglPlayer::advance(const os::IClock& clock) {
 
         case MglState::Advancing:
 
-            ++current_;
-            if (current_ < count_) {
-                timer_ = os::Deadline::in(clock, std::chrono::seconds{delay_of_(current_)});
+            current_ = current_.next();
+            if (current_.below(count_)) {
+                timer_ = os::Deadline::in(clock, delay_of_(current_).as_seconds());
                 state_ = MglState::Armed;
             } else {
                 state_ = MglState::Done;
@@ -391,10 +401,9 @@ Ex<void> MglPlayer::advance(const os::IClock& clock) {
             record_wire_publish(link_tx_.push(op));
 
             const std::uint8_t hold_s = hold_of_(current_);
-            const auto hold_ms = (hold_s != 0)
-                ? std::chrono::milliseconds{hold_s * kMillisPerSecond}
-                : kDefaultResetHold;
-            timer_ = os::Deadline::in(clock, hold_ms);
+            const std::chrono::milliseconds hold = hold_s != 0 ? std::chrono::seconds{hold_s}
+                                                               : kDefaultResetHold;
+            timer_ = os::Deadline::in(clock, hold);
             state_ = MglState::ResetRelease;
             return {};
         }

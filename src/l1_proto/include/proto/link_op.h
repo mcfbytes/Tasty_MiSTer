@@ -127,7 +127,7 @@ struct LinkOp {
         static constexpr Kind kKind = Kind::BlockAnswer;
         SlotIndex slot{};
         std::uint8_t pad_{};
-        std::uint16_t ack = 0;
+        SectorAck ack{};
         Lba lba{};
         std::uint32_t bytes = 0;
     };

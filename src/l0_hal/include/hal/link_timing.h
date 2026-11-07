@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 #include "infra/error.h"
@@ -22,7 +23,6 @@ struct LinkTiming {
 };
 
 class LinkTimingValues {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     LinkTimingValues() = delete;
@@ -91,7 +91,7 @@ constexpr bool all_measured(const LinkTiming& t) noexcept {
         && t.start_ack_timeout_ns.measured();
 }
 
-inline constexpr std::uint64_t kLoadWireNs = 10'000'000;
+inline constexpr std::chrono::nanoseconds kLoadWire{std::chrono::milliseconds{10}};
 
 constexpr std::uint64_t round_cost_ns(
     std::uint32_t word_ns,

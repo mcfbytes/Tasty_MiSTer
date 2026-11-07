@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "app/types.h"
+#include "hal/types.h"
 
 namespace mister::app {
 
@@ -22,10 +23,10 @@ enum class DupReason : std::uint8_t {
 struct FrameStampRun;
 
 struct FrameStamp {
-    std::uint64_t core_frame = 0;
+    WideCoreFrame core_frame{};
     std::int64_t capture_ns = 0;
     MovieFrame movie_frame = kNoMovieFrame;
-    std::uint8_t header_ctr = 0;
+    hal::HeaderCtr header_ctr{};
     DupReason dup = DupReason::None;
     std::uint8_t pad_[2]{};
 
@@ -33,9 +34,9 @@ struct FrameStamp {
 };
 
 struct FrameStampRun {
-    std::uint64_t first = 0;
+    WideCoreFrame first{};
     CoreFrameCount count{};
-    std::uint8_t first_ctr = 0;
+    hal::HeaderCtr first_ctr{};
     DupReason why = DupReason::Missed;
     std::uint8_t pad_[2]{};
 
@@ -55,18 +56,16 @@ struct FrameStampRun {
 };
 
 constexpr FrameStamp CoreFrameCount::after(const FrameStamp& s) const noexcept {
-    constexpr unsigned kCtrMask = 0x7;
     FrameStamp out = s;
-    out.core_frame = s.core_frame + v;
-    out.header_ctr = static_cast<std::uint8_t>((s.header_ctr + v) & kCtrMask);
+    out.core_frame = s.core_frame + CoreFrameGap::of_count(*this);
+    out.header_ctr = s.header_ctr.plus(hal::HeaderCtr::Lag::of_frames(v));
     return out;
 }
 
 constexpr FrameStamp CoreFrameCount::before(const FrameStamp& s) const noexcept {
-    constexpr unsigned kCtrMask = 0x7;
     FrameStamp out = s;
-    out.core_frame = s.core_frame - v;
-    out.header_ctr = static_cast<std::uint8_t>((s.header_ctr - v) & kCtrMask);
+    out.core_frame = s.core_frame - CoreFrameGap::of_count(*this);
+    out.header_ctr = s.header_ctr.minus(hal::HeaderCtr::Lag::of_frames(v));
     return out;
 }
 

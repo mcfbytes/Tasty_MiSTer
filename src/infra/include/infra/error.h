@@ -76,6 +76,14 @@ using Ex = std::expected<T, Error>;
 
 #define ERR_SITE() (::mister::infra::site_at_line(__LINE__))
 
+namespace infra {
+
+[[nodiscard]] constexpr Error errno_error(Errc errc, ErrorSite at, int err) noexcept {
+    return Error{errc, at, static_cast<std::uint32_t>(err)};
+}
+
+}
+
 [[noreturn]] void fatal(Error e, const char* what);
 
 inline std::unexpected<Error> unimplemented(infra::ErrorSite site) {

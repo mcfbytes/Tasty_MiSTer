@@ -13,6 +13,7 @@
 #include "cores/cd_profile.h"
 #include "cores/cd_tick_periods.h"
 #include "cores/core_window.h"
+#include "cores/types.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "os/clock.h"
@@ -107,9 +108,9 @@ public:
     struct DriveView {
         std::uint8_t state = 0;
         svc::TrackIndex track{};
-        std::int32_t lba = 0;
+        HeadLba lba{};
 
-        std::int32_t audio_lba = 0;
+        HeadLba audio_lba{};
         bool is_data = true;
     };
 

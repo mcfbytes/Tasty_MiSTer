@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 #include "infra/opt_ref.h"
@@ -42,6 +43,8 @@ protected:
     ISleeper(const ISleeper&) = default;
     ISleeper& operator=(const ISleeper&) = default;
 };
+
+void sleep_ms(infra::OptRef<ISleeper> sleeper, std::chrono::milliseconds ms) noexcept;
 
 class IStopSignal {
 public:

@@ -223,33 +223,38 @@ std::uint16_t filter_bank_word(
     std::uint32_t bank,
     std::size_t i
 ) noexcept {
-    const std::uint32_t enc = ver & 0x3u;
+    const std::size_t enc = ver & kFilterEncodingMask;
     if (enc == 0u)
         return 0;
-    if (enc == 1u) {
+    if (enc == kFilterEncodingBytes) {
 
+        const std::size_t per_bank = (kFilterPhases / kFilterBytePhaseStep) * kFilterTaps;
         const std::size_t iter = i / kFilterTaps;
         const std::size_t tap = i % kFilterTaps;
-        const std::size_t addr = static_cast<std::size_t>(bank) * 64u + iter * kFilterTaps + tap;
-        const int t = phases[iter * 16u].t[tap];
+        const std::size_t addr = static_cast<std::size_t>(bank) * per_bank
+            + iter * kFilterTaps
+            + tap;
+        const int t = phases[iter * kFilterBytePhaseStep].t[tap];
         return static_cast<std::uint16_t>(
-            (static_cast<std::uint32_t>(t >> 1) & 0x1FFu) | (static_cast<std::uint32_t>(addr) << 9)
+            (static_cast<std::uint32_t>(t >> 1) & kFilterValueMask9)
+            | (static_cast<std::uint32_t>(addr) << kFilterAddrShift)
         );
     }
 
-    const bool full = (ver & 0x4u) != 0;
-    const std::size_t skip = full ? 1u : 4u;
+    const bool full = (ver & kFilterFullPrecisionBit) != 0;
+    const std::size_t skip = full ? 1u : kFilterCoarsePhaseStep;
     const int shift = full ? 0 : 1;
-    const std::size_t base = static_cast<std::size_t>(bank)
-        * (full ? kFilterPhases * kFilterTaps : 64u * kFilterTaps);
-    const std::size_t pair = i / 2u;
+    const std::size_t per_bank = full ? kFilterPhases * kFilterTaps
+                                      : kFilterCoarsePhases * kFilterTaps;
+    const std::size_t base = static_cast<std::size_t>(bank) * per_bank;
+    const std::size_t pair = i / kFilterWordsPerEntry;
     const std::size_t iter = pair / kFilterTaps;
     const std::size_t tap = pair % kFilterTaps;
     if ((i & 1u) == 0u) {
         return static_cast<std::uint16_t>(base + iter * kFilterTaps + tap);
     }
     const int t = phases[iter * skip].t[tap];
-    return static_cast<std::uint16_t>(static_cast<std::uint32_t>(t >> shift) & 0x3FFu);
+    return static_cast<std::uint16_t>(static_cast<std::uint32_t>(t >> shift) & kFilterValueMask10);
 }
 
 FilterSendPlan plan_filter_banks(
@@ -260,13 +265,13 @@ FilterSendPlan plan_filter_banks(
     bool send_vert
 ) noexcept {
     FilterSendPlan p{};
-    if ((ver & 0x3u) == 0u)
+    if ((ver & kFilterEncodingMask) == 0u)
         return p;
     if (send_horiz)
         p.segs[p.count++] = {false, false, 0};
     if (send_vert)
         p.segs[p.count++] = {true, false, 1};
-    if ((ver & 0x3u) == 3u) {
+    if ((ver & kFilterEncodingMask) == 3u) {
 
         if (horiz.is_adaptive && send_horiz) {
             p.segs[p.count++] = {false, true, 2};

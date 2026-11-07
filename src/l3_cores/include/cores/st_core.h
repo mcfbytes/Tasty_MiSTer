@@ -9,6 +9,7 @@
 
 #include "cores/config_slots.h"
 #include "cores/core_support.h"
+#include "cores/file_tx.h"
 #include "cores/mounted_path.h"
 #include "cores/option_row_view.h"
 #include "cores/option_rows.h"
@@ -16,6 +17,7 @@
 #include "cores/slot_mount.h"
 #include "cores/st_config.h"
 #include "cores/st_config_layout.h"
+#include "cores/st_ctrl.h"
 #include "cores/st_option_row.h"
 #include "cores/st_options.h"
 #include "cores/st_sysctrl.h"
@@ -48,7 +50,7 @@ public:
     static constexpr proto::WideIoIndex kTosSmallIndex{1};
     static constexpr proto::WideIoIndex kCartIndex{2};
 
-    static constexpr std::size_t kChunkBytes = 4096;
+    static constexpr std::size_t kChunkBytes = kFileTxChunkBytes;
     static constexpr std::uint32_t kClearBytes = 16u * 1024u;
     static constexpr std::size_t kCartBytes = 128u * 1024u;
     static constexpr std::size_t kCartBufferBytes = kCartBytes + 4u;
@@ -146,14 +148,16 @@ private:
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return bytes_sent_; }
 
     [[nodiscard]] Ex<void> push_control_();
-    [[nodiscard]] Ex<void> update_sysctrl_(std::uint32_t ctrl);
+    [[nodiscard]] Ex<void> update_sysctrl_(st_ctrl::CtrlWord ctrl);
+
+    void store_sysctrl_(st_ctrl::CtrlWord ctrl) noexcept;
 
     [[nodiscard]] Ex<void> clear_low_ram_();
     [[nodiscard]] Ex<void> tx_tos_(std::span<const std::uint8_t> bytes, std::string_view ext);
 
     [[nodiscard]] Ex<void> tx_cart_from_(std::span<const std::uint8_t> image);
     [[nodiscard]] Ex<void> tx_cart_(std::span<const std::uint8_t> rom);
-    [[nodiscard]] Ex<void> insert_disk_(IoIndex slot, std::string_view path);
+    [[nodiscard]] Ex<void> insert_disk_(st_ctrl::StSlot slot, std::string_view path);
 
     [[nodiscard]] Ex<void> eject_hdd_(AcsiTarget target);
     [[nodiscard]] Ex<void> eject_all_();
@@ -173,7 +177,6 @@ private:
     };
 
     infra::IndexedArray<AcsiBind, kAcsiTargets, AcsiTarget> acsi_{};
-    std::array<bool, 2> floppy_inserted_{};
     std::array<FixedStr<kPathBytes, StrFit::Clip>, 2> floppy_img_{};
     char view_text_[kOptionTextChars + 1]{};
     FixedStr<8, StrFit::Clip> ext_{};

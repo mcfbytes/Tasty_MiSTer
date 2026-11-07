@@ -85,28 +85,24 @@ std::span<const std::byte> CscdCodec::encode(
     bool key,
     std::span<std::byte> out
 ) noexcept {
-    constexpr std::size_t kRgbBytes = 3;
     TASTY_SEAT_BODY(CscdCodec);
     if (!open()
-        || !rgb.covers(RowBytes{std::size_t{width_} * kRgbPixelBytes}, PictureRows{height_})
+        || !rgb.covers(rgb_row_of(width_), PictureRows{height_})
         || out.size() < payload_bound(width_, height_))
         return {};
-    const std::size_t row = row_bytes(width_);
+    const RowBytes row{row_bytes(width_)};
     const std::size_t w = width_;
+    const RowBytes line = rgb_row_of(w);
+    const PictureRows height{height_};
     auto* const prev_bytes = infra::byte_cast<std::uint8_t>(prev_).data();
     auto* const delta_bytes = infra::byte_cast<std::uint8_t>(delta_).data();
-    for (std::size_t y = 0; y < height_; ++y) {
-        const auto* s = infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(
-                                                                 rgb.bytes.data()
-                                                                     + y * rgb.stride.v,
-                                                                 w * kRgbBytes
-                                                             ))
-                            .data();
-        const std::size_t at = (height_ - 1u - y) * row;
+    for_each_row(height, [&](PictureRow y) {
+        const auto* s = infra::byte_cast<const std::uint8_t>(line.head(rgb.from_row(y))).data();
+        const std::size_t at = row_start(row, y.flipped_in(height));
         auto* p = prev_bytes + at;
         auto* d = delta_bytes + at;
         for (std::size_t x = 0; x < w; ++x) {
-            const std::size_t px = kRgbBytes * x;
+            const std::size_t px = kRgbPixelBytes * x;
             const std::uint8_t b = s[px + 2], g = s[px + 1], r = s[px];
             d[px] = static_cast<std::uint8_t>(b - p[px]);
             d[px + 1] = static_cast<std::uint8_t>(g - p[px + 1]);
@@ -115,7 +111,7 @@ std::span<const std::byte> CscdCodec::encode(
             p[px + 1] = g;
             p[px + 2] = r;
         }
-    }
+    });
     return out.first(pack_(key ? prev_.data() : delta_.data(), key, out));
 }
 
@@ -144,39 +140,37 @@ std::size_t CscdCodec::pack_(const std::byte* src, bool key, std::span<std::byte
     return kHeadBytes + n;
 }
 
-void CscdCodec::half_scale(
-    const std::byte* rgb,
-    std::size_t line,
-    std::uint16_t w,
-    std::uint16_t h,
-    std::byte* dst
-) noexcept {
-    constexpr std::size_t kRgbBytes = 3;
+void CscdCodec::half_scale(RgbRows src, std::uint16_t src_w, std::span<std::byte> dst) noexcept {
     constexpr std::size_t kHalf = 2;
     constexpr unsigned kBoxPixels = 4;
     constexpr unsigned kBoxShift = 2;
     constexpr unsigned kBoxRound = kBoxPixels / 2;
+    const std::size_t w = src_w;
     const std::size_t ow = w / kHalf;
-    const std::size_t oh = h / kHalf;
-    auto* const out_bytes = infra::byte_cast<std::uint8_t>(
-                                std::span<std::byte>(dst, oh * ow * kRgbBytes)
-    )
+    const PictureRows oh = src.rows.halved();
+    const RowBytes out_row = rgb_row_of(ow);
+    auto* const out_bytes = infra::byte_cast<std::uint8_t>(dst.first(rows_span(out_row, oh)))
                                 .data();
-    for (std::size_t y = 0; y < oh; ++y) {
-        const auto* a = infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(
-                                                                 rgb + kHalf * y * line,
-                                                                 static_cast<std::size_t>(w)
-                                                                     * kRgbBytes
-                                                             ))
+    const RowBytes row = rgb_row_of(w);
+    for_each_row(oh, [&](PictureRow y) {
+        const auto* a = infra::byte_cast<const std::uint8_t>(row.head(src.from_row(y.doubled())))
                             .data();
-        const auto* b = a + line;
-        auto* o = out_bytes + y * ow * kRgbBytes;
-        for (std::size_t x = 0; x < ow * kRgbBytes; ++x) {
-            const std::size_t c = (x / kRgbBytes) * (kHalf * kRgbBytes) + x % kRgbBytes;
-            const unsigned sum = kBoxRound + a[c] + a[c + kRgbBytes] + b[c] + b[c + kRgbBytes];
+        const auto* b = infra::byte_cast<const std::uint8_t>(
+                            src.from_row(y.doubled() + PictureRows{1})
+        )
+                            .data();
+        auto* o = out_bytes + row_start(out_row, y);
+        for (std::size_t x = 0; x < ow * kRgbPixelBytes; ++x) {
+            const std::size_t c = (x / kRgbPixelBytes) * (kHalf * kRgbPixelBytes)
+                + x % kRgbPixelBytes;
+            const unsigned sum = kBoxRound
+                + a[c]
+                + a[c + kRgbPixelBytes]
+                + b[c]
+                + b[c + kRgbPixelBytes];
             o[x] = static_cast<std::uint8_t>(sum >> kBoxShift);
         }
-    }
+    });
 }
 
 }

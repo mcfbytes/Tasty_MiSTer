@@ -11,6 +11,8 @@
 #include "app/link_tx_channel.h"
 #include "app/mra_facts.h"
 #include "app/owner_tally.h"
+#include "app/session_bindings.h"
+#include "hal/types.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
@@ -21,7 +23,7 @@ class Vfs;
 
 namespace mister::app {
 
-[[nodiscard]] std::array<std::string_view, 4> bind_identity_fields(
+[[nodiscard]] std::array<std::string_view, SessionBindings::kIdentityFields> bind_identity_fields(
     const proto::ConfStr& conf
 ) noexcept;
 
@@ -44,7 +46,7 @@ public:
     void doorbells(
         const proto::ConfStr& conf,
         std::span<const proto::AxiLwDecl> lw,
-        std::optional<std::uint32_t> owned
+        std::optional<hal::LwOffset> owned
     );
     void joy(std::string_view core_name) noexcept;
     void facts(const MraFacts& facts) noexcept;

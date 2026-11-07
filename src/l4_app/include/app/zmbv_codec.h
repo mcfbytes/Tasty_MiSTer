@@ -16,6 +16,24 @@
 
 namespace mister::app {
 
+struct ZmbvLayout {
+
+    static constexpr std::size_t kPixelBytes = 4;
+
+    static constexpr std::size_t kMvBytesPerBlock = 2;
+
+    static constexpr std::size_t kMvAlign = 4;
+    static constexpr std::size_t kMvAlignMask = kMvAlign - 1;
+
+    static constexpr std::size_t kInterHeaderBytes = 1;
+    static constexpr std::size_t kKeyHeaderBytes = 7;
+    static constexpr std::uint8_t kKeyframeFlag = 1;
+    static constexpr std::uint8_t kVersionMajor = 0;
+    static constexpr std::uint8_t kVersionMinor = 1;
+    static constexpr std::uint8_t kCompressionZlib = 1;
+    static constexpr std::uint8_t kFormatTopDownBgr0 = 8;
+};
+
 class ZmbvCodec final : public IFrameCodec {
     TASTY_SEAT_RESIDENT(Encode);
 

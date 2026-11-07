@@ -6,27 +6,37 @@
 #include <cstdint>
 #include <span>
 
+#include "cores/cd_msf.h"
 #include "cores/types.h"
+#include "infra/endian.h"
 #include "proto/block_geometry.h"
+#include "svc/msf.h"
 #include "svc/toc.h"
 
 namespace mister::cores::cdi {
 
-inline constexpr std::size_t kSectorBytes = 2352;
+inline constexpr std::size_t kSectorBytes = svc::kCdDataSize;
 
 inline constexpr std::size_t kQBytes = 24;
 inline constexpr std::size_t kRwBytes = 192;
 inline constexpr std::size_t kSubcodeBytes = kQBytes + kRwBytes;
 inline constexpr std::size_t kBlockBytes = kSectorBytes + kSubcodeBytes;
+inline constexpr std::uint32_t kBlockSize32{kBlockBytes};
 inline constexpr std::size_t kRawSubcodeBytes = 96;
 
-consteval std::array<std::uint16_t, 256> make_crc_table() {
-    std::array<std::uint16_t, 256> t{};
-    for (unsigned i = 0; i < 256; ++i) {
-        unsigned c = i << 8;
-        for (int k = 0; k < 8; ++k)
-            c = (c & 0x8000u) ? ((c << 1) ^ 0x1021u) : (c << 1);
-        t[i] = static_cast<std::uint16_t>(c & 0xFFFFu);
+inline constexpr std::uint16_t kCrc16Poly = 0x1021;
+inline constexpr std::uint16_t kCrc16TopBit = 0x8000;
+inline constexpr unsigned kCrc16Mask = 0xFFFF;
+inline constexpr std::size_t kCrcTableSize = 256;
+inline constexpr unsigned kByteBits = 8;
+
+consteval std::array<std::uint16_t, kCrcTableSize> make_crc_table() {
+    std::array<std::uint16_t, kCrcTableSize> t{};
+    for (unsigned i = 0; i < kCrcTableSize; ++i) {
+        unsigned c = i << kByteBits;
+        for (unsigned k = 0; k < kByteBits; ++k)
+            c = (c & kCrc16TopBit) ? ((c << 1) ^ kCrc16Poly) : (c << 1);
+        t[i] = static_cast<std::uint16_t>(c);
     }
     return t;
 }
@@ -34,13 +44,67 @@ consteval std::array<std::uint16_t, 256> make_crc_table() {
 inline constexpr auto kCrcTable = make_crc_table();
 
 constexpr std::uint8_t bcd(unsigned v) noexcept {
-    return static_cast<std::uint8_t>(((v / 10) << 4) | (v % 10));
+    return proto::PackedBcd::unmasked_byte(v);
 }
 
+constexpr std::uint8_t bcd(svc::TrackNumber n) noexcept {
+    return n.bcd_byte();
+}
+
+struct QFrame {
+    static constexpr std::size_t kWords = 12;
+    enum class Field : std::uint8_t {
+        Control = 0,
+        Point = 1,
+        Index = 2,
+        Minute = 3,
+        Second = 4,
+        Frame = 5,
+        Zero = 6,
+        AMinute = 7,
+        ASecond = 8,
+        AFrame = 9,
+        CrcHigh = 10,
+        CrcLow = 11,
+        kCount = 12,
+    };
+
+    std::array<std::uint8_t, kQBytes> bytes{};
+
+    constexpr void set(Field f, unsigned v) noexcept {
+        const std::size_t at = static_cast<std::size_t>(f) * sizeof(std::uint16_t);
+        infra::store_be<std::uint16_t>(
+            std::span<std::uint8_t, sizeof(std::uint16_t)>(
+                bytes.data() + at,
+                sizeof(std::uint16_t)
+            ),
+            static_cast<std::uint16_t>(v)
+        );
+    }
+
+    constexpr void seal() noexcept {
+        unsigned accum = 0;
+        for (std::size_t i = 0; i < kWords; ++i) {
+            const unsigned data = bytes[1 + i * 2];
+            accum = ((accum << kByteBits) | data) ^ kCrcTable[accum >> kByteBits];
+            accum &= kCrc16Mask;
+        }
+        set(Field::CrcHigh, (accum >> kByteBits) & 0xFFu);
+        set(Field::CrcLow, accum & 0xFFu);
+    }
+
+    [[nodiscard]] constexpr std::span<const std::uint8_t, kQBytes> view() const noexcept {
+        return bytes;
+    }
+
+    friend constexpr bool operator==(QFrame, QFrame) = default;
+};
+
+static_assert(sizeof(QFrame) == kQBytes);
+
 constexpr std::uint32_t hunk_window(std::uint32_t hunk_bytes) noexcept {
-    return hunk_bytes != 0 && hunk_bytes <= proto::kBlockStagingBytes
-        ? hunk_bytes / static_cast<std::uint32_t>(kBlockBytes)
-        : 0;
+    return hunk_bytes != 0 && hunk_bytes <= proto::kBlockStagingBytes ? hunk_bytes / kBlockSize32
+                                                                      : 0;
 }
 
 inline constexpr std::array<std::uint8_t, 15> kBootHeader =
@@ -49,13 +113,9 @@ inline constexpr std::array<std::uint8_t, 15> kBootHeader =
 inline constexpr std::size_t kTocEntries = 306;
 using TocEntry = std::array<std::uint8_t, 5>;
 
-void compose_q(std::int32_t lba, const svc::Toc& toc, std::span<std::uint8_t, kQBytes> q) noexcept;
+[[nodiscard]] QFrame compose_q(std::int32_t lba, const svc::Toc& toc) noexcept;
 
-void compose_toc_q(
-    std::int32_t lba,
-    std::span<const TocEntry> entries,
-    std::span<std::uint8_t, kQBytes> q
-) noexcept;
+[[nodiscard]] QFrame compose_toc_q(std::int32_t lba, std::span<const TocEntry> entries) noexcept;
 
 void widen_rw(
     std::span<const std::uint8_t, kRawSubcodeBytes> symbols,

@@ -109,9 +109,7 @@ public:
 
     [[nodiscard]] CorrelationTag load_tag() const noexcept { return load_tag_; }
 
-    [[nodiscard]] std::string_view resolved_rbf() const noexcept {
-        return std::string_view{rbf_, rbf_len_};
-    }
+    [[nodiscard]] std::string_view resolved_rbf() const noexcept { return rbf_.view(); }
 
     static constexpr unsigned kArmTimeoutMs = 10000;
     static constexpr unsigned kLoadRetryMs = 2000;
@@ -122,9 +120,7 @@ public:
 
     static constexpr unsigned kBusyBoundMs = 60000;
 
-    [[nodiscard]] std::string_view rbf_request() const noexcept {
-        return std::string_view{want_, want_len_};
-    }
+    [[nodiscard]] std::string_view rbf_request() const noexcept { return want_.view(); }
 
 private:
     void enter(State s) noexcept;
@@ -135,6 +131,8 @@ private:
     [[nodiscard]] bool resolve_and_load(std::string_view want);
     void pump_advance();
     void abandon(InfoId id, Errc code);
+
+    void fail_read_(Errc code) noexcept;
 
     bool publish_load();
 
@@ -177,13 +175,11 @@ private:
     std::optional<Errc> last_error_{};
 
     bool pending_ = false;
-    std::uint16_t latch_len_ = 0;
-    char latch_[kPathMax]{};
 
-    std::uint16_t want_len_ = 0;
-    char want_[kPathMax]{};
-    std::uint16_t rbf_len_ = 0;
-    char rbf_[kPathMax]{};
+    FixedStr<kPathMax, StrFit::Clip> latch_{};
+
+    FixedStr<kPathMax, StrFit::Clip> want_{};
+    FixedStr<kPathMax, StrFit::Clip> rbf_{};
 
     std::uint32_t doc_len_ = 0;
     char doc_[kMglDocMax]{};

@@ -5,10 +5,11 @@
 #include <span>
 
 #include "infra/error.h"
+#include "os/child_process.h"
 
 namespace mister::os {
 
-[[nodiscard]] Ex<int> run_sync(
+[[nodiscard]] Ex<ChildProcessExit> run_sync(
     std::span<const char* const> argv,
     std::chrono::milliseconds timeout = std::chrono::seconds{30}
 );

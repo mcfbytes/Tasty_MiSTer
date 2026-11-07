@@ -11,26 +11,26 @@ void DiagMain::start() noexcept {
 }
 
 void DiagMain::serve() noexcept {
-    const unsigned period = sampler_.sample_period_ms();
+    const std::chrono::milliseconds period = sampler_.sample_period();
     if (slice_ == 0 || stopping()) {
         sampler_.sample(stopping());
         if (stopping()) {
             final_sampled_ = true;
             return;
         }
-        if (period == 0) {
+        if (period == std::chrono::milliseconds::zero()) {
             rest_ms_ = infra::kNoWait;
             return;
         }
     }
     sampler_.answer();
-    const unsigned slept = slice_ * kDiagSliceMs;
-    const unsigned left = period > slept ? period - slept : 0u;
-    using Slice = std::chrono::duration<unsigned, std::milli>;
+    const std::chrono::milliseconds slept = kDiagSlice * slice_;
+    const std::chrono::milliseconds left = period > slept ? period - slept
+                                                          : std::chrono::milliseconds::zero();
     rest_ms_ = std::chrono::duration_cast<infra::ParkTimeout>(
-        Slice{left < kDiagSliceMs ? left : kDiagSliceMs}
+        left < kDiagSlice ? left : kDiagSlice
     );
-    slice_ = slept + kDiagSliceMs >= period ? 0u : slice_ + 1u;
+    slice_ = slept + kDiagSlice >= period ? 0u : slice_ + 1u;
 }
 
 void DiagMain::settle() noexcept {

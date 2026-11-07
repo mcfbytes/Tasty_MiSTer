@@ -9,10 +9,14 @@
 
 namespace mister::app {
 
-std::string remembered_blob_name(const RememberedStem& stem, RememberedSlot s, std::uint8_t index) {
+std::string remembered_blob_name(
+    const RememberedStem& stem,
+    RememberedSlot s,
+    proto::IoIndex index
+) {
     std::string n{stem.view()};
     n += (s == RememberedSlot::File) ? ".f" : ".s";
-    n += std::to_string(index);
+    n += index.text().c_str();
     return n;
 }
 
@@ -20,7 +24,7 @@ std::string read_remembered_path(
     const svc::Vfs& vfs,
     const RememberedStem& stem,
     RememberedSlot s,
-    std::uint8_t index
+    proto::IoIndex index
 ) {
     if (stem.empty())
         return {};

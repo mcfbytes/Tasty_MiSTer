@@ -18,6 +18,8 @@
 #include "svc/geometry_gate.h"
 #include "svc/hdmi_link.h"
 #include "svc/modeline.h"
+#include "svc/modeline_item.h"
+#include "svc/resolution.h"
 #include "svc/parsed_mode.h"
 #include "svc/pll_solver.h"
 #include "svc/types.h"
@@ -56,23 +58,31 @@ inline constexpr std::size_t kFilterBanks = 2;
 
 inline constexpr std::size_t kFilterCoeffWords = 4096;
 
+inline constexpr std::uint16_t kFilterEncodingMask = 0x3;
+inline constexpr std::uint16_t kFilterFullPrecisionBit = 0x4;
+inline constexpr std::uint16_t kFilterEncodingBytes = 1;
+
+inline constexpr std::size_t kFilterBytePhaseStep = 16;
+inline constexpr std::size_t kFilterCoarsePhaseStep = 4;
+inline constexpr std::size_t kFilterCoarsePhases = 64;
+inline constexpr std::size_t kFilterWordsPerEntry = 2;
+
+inline constexpr unsigned kFilterAddrShift = 9;
+inline constexpr std::uint32_t kFilterValueMask9 = 0x1FF;
+inline constexpr std::uint32_t kFilterValueMask10 = 0x3FF;
+
+inline constexpr std::uint16_t kFilterHotByte = 128;
+inline constexpr std::uint16_t kFilterHotFull = 256;
+
 constexpr std::size_t filter_coeff_word_count(std::uint16_t ver) noexcept {
-
-    constexpr std::uint16_t kEncodingMask = 0x3;
-    constexpr std::uint16_t kFullPrecisionBit = 0x4;
-    constexpr std::uint16_t kEncodingBytes = 1;
-
-    constexpr std::size_t kBytePhaseStep = 16;
-    constexpr std::size_t kCoarsePhaseStep = 4;
-
-    constexpr std::size_t kWordsPerEntry = 2;
-    switch (ver & kEncodingMask) {
-        case kEncodingBytes:
-            return kFilterBanks * (kFilterPhases / kBytePhaseStep) * kFilterTaps;
+    switch (ver & kFilterEncodingMask) {
+        case kFilterEncodingBytes:
+            return kFilterBanks * (kFilterPhases / kFilterBytePhaseStep) * kFilterTaps;
         case 2:
         case 3: {
-            const std::size_t skip = (ver & kFullPrecisionBit) != 0 ? 1u : kCoarsePhaseStep;
-            return kFilterBanks * (kFilterPhases / skip) * kFilterTaps * kWordsPerEntry;
+            const std::size_t skip = (ver & kFilterFullPrecisionBit) != 0 ? 1u
+                                                                          : kFilterCoarsePhaseStep;
+            return kFilterBanks * (kFilterPhases / skip) * kFilterTaps * kFilterWordsPerEntry;
         }
         default:
             return 0;
@@ -80,50 +90,39 @@ constexpr std::size_t filter_coeff_word_count(std::uint16_t ver) noexcept {
 }
 
 constexpr std::uint16_t filter_coeff_word(std::uint16_t ver, std::size_t i) noexcept {
-    constexpr std::uint16_t kEncodingMask = 0x3;
-    constexpr std::uint16_t kFullPrecisionBit = 0x4;
-    constexpr std::uint16_t kEncodingBytes = 1;
-    constexpr std::size_t kBytePhaseStep = 16;
-    constexpr std::size_t kCoarsePhaseStep = 4;
-    constexpr std::size_t kCoarsePhases = 64;
-    constexpr std::size_t kWordsPerEntry = 2;
 
-    constexpr unsigned kAddrShift = 9;
-    constexpr std::uint32_t kValueMask = 0x1FF;
-
-    constexpr std::uint16_t kHotByte = 128;
     constexpr std::uint16_t kHotCoarse = 128;
-    constexpr std::uint16_t kHotFull = 256;
 
     constexpr std::size_t kLowHalfHotTap = 1;
     constexpr std::size_t kHighHalfHotTap = 2;
-    const std::size_t enc = ver & kEncodingMask;
-    if (enc == kEncodingBytes) {
-        const std::size_t per_bank = (kFilterPhases / kBytePhaseStep) * kFilterTaps;
+    const std::size_t enc = ver & kFilterEncodingMask;
+    if (enc == kFilterEncodingBytes) {
+        const std::size_t per_bank = (kFilterPhases / kFilterBytePhaseStep) * kFilterTaps;
         const std::size_t bank = i / per_bank;
         const std::size_t within = i % per_bank;
         const std::size_t iter = within / kFilterTaps;
         const std::size_t tap = within % kFilterTaps;
         const std::size_t addr = bank * per_bank + iter * kFilterTaps + tap;
-        const std::size_t phase = iter * kBytePhaseStep;
+        const std::size_t phase = iter * kFilterBytePhaseStep;
 
         const std::uint16_t val = (tap
                                    == (phase < kFilterPhases / 2 ? kLowHalfHotTap
                                                                  : kHighHalfHotTap))
-            ? kHotByte
+            ? kFilterHotByte
             : std::uint16_t{0};
-        return static_cast<std::uint16_t>((val & kValueMask) | (addr << kAddrShift));
+        return static_cast<std::uint16_t>((val & kFilterValueMask9) | (addr << kFilterAddrShift));
     }
-    const bool full = (ver & kFullPrecisionBit) != 0;
-    const std::size_t skip = full ? 1u : kCoarsePhaseStep;
-    const std::size_t stride = full ? kFilterPhases * kFilterTaps : kCoarsePhases * kFilterTaps;
+    const bool full = (ver & kFilterFullPrecisionBit) != 0;
+    const std::size_t skip = full ? 1u : kFilterCoarsePhaseStep;
+    const std::size_t stride = full ? kFilterPhases * kFilterTaps
+                                    : kFilterCoarsePhases * kFilterTaps;
     const std::size_t per_bank = (kFilterPhases / skip) * kFilterTaps;
-    const std::size_t pair = i / kWordsPerEntry;
+    const std::size_t pair = i / kFilterWordsPerEntry;
     const std::size_t bank = pair / per_bank;
     const std::size_t within = pair % per_bank;
     const std::size_t iter = within / kFilterTaps;
     const std::size_t tap = within % kFilterTaps;
-    const bool is_address_word = i % kWordsPerEntry == 0;
+    const bool is_address_word = i % kFilterWordsPerEntry == 0;
     if (is_address_word) {
         return static_cast<std::uint16_t>(bank * stride + iter * kFilterTaps + tap);
     }
@@ -132,14 +131,13 @@ constexpr std::uint16_t filter_coeff_word(std::uint16_t ver, std::size_t i) noex
     if (tap != hot)
         return 0;
 
-    return full ? kHotFull : kHotCoarse;
+    return full ? kFilterHotFull : kHotCoarse;
 }
 
 Modeline calculate_cvt(
-    std::uint32_t h_pixels,
-    std::uint32_t v_lines,
+    Resolution active,
     float refresh_rate,
-    std::uint8_t reduced_blanking,
+    ReducedBlanking reduced_blanking,
     bool supports_pr
 );
 

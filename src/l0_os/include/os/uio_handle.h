@@ -20,7 +20,6 @@ static_assert(UioLineSpace{}.sysfs_root == std::string_view{kUioClassRoot});
 [[nodiscard]] int find_uio_node_under(const char* sysfs_root, std::string_view name) noexcept;
 
 class UioHandle {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     UioHandle() = default;

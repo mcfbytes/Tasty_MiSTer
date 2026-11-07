@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "cores/core_support.h"
+#include "cores/md_cmd_flags.h"
 #include "cores/pcm_feed.h"
 #include "cores/pcm_wire_rows.h"
 #include "cores/stream_load.h"
@@ -24,16 +25,9 @@ class MegaDriveCore final : public Core, public IPcmWireRows, public IStreamLoad
 public:
     MegaDriveCore(const CoreProfile& p, const HostServices& h) : Core(p, h) {}
 
-    static constexpr std::size_t kChunkBytes = 4096;
-
     static constexpr std::uint16_t kCmdStatus = 0x60;
     static constexpr std::uint16_t kCmdAck = static_cast<std::uint16_t>(proto::UioOp::DmaWrite);
     static constexpr std::uint16_t kCmdAudio = static_cast<std::uint16_t>(proto::UioOp::DmaRead);
-    static constexpr std::uint8_t kFlagPlay = 0x01;
-    static constexpr std::uint8_t kFlagStop = 0x02;
-    static constexpr std::uint8_t kFlagResume = 0x04;
-    static constexpr std::uint8_t kFlagVolume = 0x08;
-    static constexpr std::uint8_t kFlagLoop = 0x10;
 
     static constexpr std::uint32_t kAckTicks = 75;
 
@@ -67,9 +61,7 @@ public:
     [[nodiscard]] bool ack_pending() const noexcept { return ack_pending_; }
 
     [[nodiscard]] std::optional<svc::TrackNumber> current_track() const noexcept {
-        if (current_track_ == 0)
-            return std::nullopt;
-        return svc::TrackNumber{current_track_};
+        return current_track_;
     }
 
     [[nodiscard]] bool paused() const noexcept { return paused_; }
@@ -77,7 +69,7 @@ public:
 private:
     struct Status {
         std::uint8_t track = 0;
-        std::uint8_t flags = 0;
+        md::CmdFlags flags{};
         std::uint8_t fade = 0;
         std::uint8_t volume = 0;
     };
@@ -108,11 +100,11 @@ private:
     void retry_feed_(IPcmFeed& fd) noexcept;
 
     [[nodiscard]] bool read_status_(Status& out) noexcept;
-    void send_ack_(std::uint8_t track, bool playing) noexcept;
+    void send_ack_(std::optional<svc::TrackNumber> track, bool playing) noexcept;
     void pump_(IPcmFeed& fd) noexcept;
 
     [[nodiscard]] bool settle_ack_(IPcmFeed& fd) noexcept;
-    void arm_play_(IPcmFeed& fd, std::uint8_t track, bool loop) noexcept;
+    void arm_play_(IPcmFeed& fd, svc::TrackNumber track, bool loop) noexcept;
 
     void answer_no_play_() noexcept;
 
@@ -128,10 +120,10 @@ private:
     std::uint32_t feed_deferrals_ = 0;
     std::uint32_t play_refusals_ = 0;
     std::uint32_t ack_timeouts_ = 0;
-    std::uint16_t last_index_ = 0;
+    proto::IoIndex last_index_{};
 
-    std::uint8_t current_track_ = 0;
-    std::uint8_t ack_track_ = 0;
+    std::optional<svc::TrackNumber> current_track_{};
+    svc::TrackNumber ack_track_{};
     std::uint32_t served_before_ = 0;
 
     std::uint32_t ack_ticks_ = 0;

@@ -162,7 +162,7 @@ Ex<bool> StMediaLadder::order_mount_(std::uint8_t slot, std::string_view path, R
             if (auto sz = (*f)->size())
                 size = sz->v;
         }
-        auto id = host_.intern_path(path, size);
+        auto id = host_.intern_path(path, proto::FileSize{size});
         if (!id) {
             if (id.error().code == Errc::would_block)
                 return false;

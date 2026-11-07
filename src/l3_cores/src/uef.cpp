@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include "infra/endian.h"
+
 namespace mister::cores::uef {
 namespace {
 
@@ -10,19 +12,22 @@ namespace {
     std::span<const std::uint8_t> image,
     std::size_t pos
 ) noexcept {
-    return static_cast<std::uint16_t>(
-        image[pos] | (static_cast<std::uint16_t>(image[pos + 1]) << 8)
-    );
+    return infra::load_le<std::uint16_t>(image.subspan(pos).first<2>());
 }
 
 [[nodiscard]] std::uint32_t read_u32(
     std::span<const std::uint8_t> image,
     std::size_t pos
 ) noexcept {
-    return static_cast<std::uint32_t>(image[pos])
-        | (static_cast<std::uint32_t>(image[pos + 1]) << 8)
-        | (static_cast<std::uint32_t>(image[pos + 2]) << 16)
-        | (static_cast<std::uint32_t>(image[pos + 3]) << 24);
+    return infra::load_le<std::uint32_t>(image.subspan(pos).first<4>());
+}
+
+[[nodiscard]] constexpr std::uint32_t tape_byte_at(std::uint32_t bit_pos) noexcept {
+    return bit_pos / kBitsPerTapeByte;
+}
+
+[[nodiscard]] constexpr std::uint32_t tape_slot_at(std::uint32_t bit_pos) noexcept {
+    return bit_pos % kBitsPerTapeByte;
 }
 
 }
@@ -59,9 +64,9 @@ const ChunkInfo* locate_chunk(
     for (;;) {
         if (pos + kChunkHeaderBytes > image.size())
             break;
-        const std::uint16_t id = read_u16(image, pos);
+        const ChunkId id = chunk_id(read_u16(image, pos));
 
-        if (id == 0xFFFFu)
+        if (id == kShortReadId)
             break;
         const std::uint32_t length = read_u32(image, pos + 2);
         pos += kChunkHeaderBytes;
@@ -72,7 +77,7 @@ const ChunkInfo* locate_chunk(
         if (id == kTapeId || id == kGapId || id == kHighToneId || id == kHighDummyId) {
             std::uint32_t chunk_bitlen = 0;
             if (id == kTapeId) {
-                chunk_bitlen = length * 10u;
+                chunk_bitlen = length * kBitsPerTapeByte;
             } else if (id == kGapId || id == kHighToneId) {
                 if (pos + 2 > image.size())
                     break;
@@ -82,7 +87,7 @@ const ChunkInfo* locate_chunk(
                     break;
                 cache.pre_carrier = ms_to_bits(read_u16(image, pos));
                 const std::uint32_t post_carrier = ms_to_bits(read_u16(image, pos + 2));
-                chunk_bitlen = cache.pre_carrier + 20u + post_carrier;
+                chunk_bitlen = cache.pre_carrier + kHighDummyCarrierBits + post_carrier;
             }
 
             if (bit_pos < chunk_bitlen) {
@@ -115,27 +120,27 @@ std::uint8_t bit_at(
         return 1;
 
     if (info->id == kTapeId) {
-        const std::uint32_t byte_offset = bit_pos / 10;
-        const std::uint32_t offset = bit_pos - byte_offset * 10;
-        if (offset == 0)
+        const std::uint32_t slot = tape_slot_at(bit_pos);
+        if (slot == kStartSlot)
             return kStartBit;
-        if (offset == 9)
+        if (slot == kStopSlot)
             return kStopBit;
-        const std::size_t byte_pos = static_cast<std::size_t>(info->file_offset) + byte_offset;
+        const std::size_t byte_pos = static_cast<std::size_t>(info->file_offset)
+            + tape_byte_at(bit_pos);
 
         const std::uint8_t byte = byte_pos < image.size() ? image[byte_pos] : std::uint8_t{0};
-        const std::uint32_t shift = offset - 1;
+        const std::uint32_t shift = slot - 1;
         return (byte & (1u << shift)) ? 1 : 0;
     }
 
-    if (bit_pos < info->pre_carrier || bit_pos >= info->pre_carrier + 20u)
+    if (bit_pos < info->pre_carrier || bit_pos >= info->pre_carrier + kHighDummyCarrierBits)
         return 1;
-    std::uint32_t rel = (bit_pos - info->pre_carrier) % 10u;
-    if (rel == 0)
+    const std::uint32_t slot = tape_slot_at(bit_pos - info->pre_carrier);
+    if (slot == kStartSlot)
         return kStartBit;
-    if (rel == 9)
+    if (slot == kStopSlot)
         return kStopBit;
-    const std::uint32_t shift = rel - 1;
+    const std::uint32_t shift = slot - 1;
     return (kHighDummyByte & (1u << shift)) ? 1 : 0;
 }
 

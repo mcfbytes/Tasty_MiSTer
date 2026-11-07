@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "proto/user_io/rumble_poll.h"
+#include "svc/rumble_pad_set.h"
 #include "svc/types.h"
 
 namespace mister::svc {

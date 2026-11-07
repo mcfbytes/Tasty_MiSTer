@@ -8,6 +8,7 @@
 #include <span>
 #include <vector>
 
+#include "app/rgb_rows.h"
 #include "hal/scaler_buffers.h"
 #include "hal/scaler_header.h"
 #include "hal/scaler_probe.h"
@@ -25,10 +26,8 @@ public:
     static constexpr std::int64_t kPollNs = 4'000'000;
 
     struct Image {
-        std::span<const std::byte> rgb{};
+        RgbRows rgb{};
         std::uint16_t width = 0;
-        std::uint16_t height = 0;
-        std::uint16_t line = 0;
         bool live = false;
         bool fresh = false;
         bool same = false;

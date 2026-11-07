@@ -2,9 +2,11 @@
 #include "app/load_walk.h"
 
 #include <algorithm>
+#include <span>
 #include <vector>
 
 #include "app/load_window.h"
+#include "infra/endian.h"
 #include "cores/transfer_row.h"
 #include "proto/link_op.h"
 
@@ -227,25 +229,25 @@ LoadWalk::Pass LoadWalk::payload_(Host& h, const cores::TransferRow& r) {
         got += *n;
     }
     raw.resize(std::max<std::size_t>(got, r.extent), std::uint8_t{0});
-    std::uint16_t chunk = kPayloadChunk;
+    std::uint16_t chunk = kStockFileTxChunk;
     if (r.byte_words) {
 
         std::vector<std::uint8_t> wide(2u * raw.size(), std::uint8_t{0});
         for (std::size_t i = 0; i < raw.size(); ++i)
             wide[2u * i] = raw[i];
         raw = std::move(wide);
-        chunk = static_cast<std::uint16_t>(2u * kPayloadChunk);
+        chunk = static_cast<std::uint16_t>(2u * kStockFileTxChunk);
     }
     const std::uint64_t bytes = raw.size();
     auto p = cores::PayloadPieces::of_bytes(
         std::move(raw),
         {},
-        {.dest = r.index, .chunk = chunk, .act = next_act_(h)}
+        {.dest = r.index, .chunk = cores::WireChunk::of(chunk), .act = next_act_(h)}
     );
     if (!p)
         return fail_(h);
     pieces_.emplace(std::move(*p));
-    echo_bytes_ = bytes;
+    echo_bytes_ = proto::FileSize{bytes};
     pc_ = Pc::Pieces;
     return pieces_step_(h);
 }
@@ -257,7 +259,7 @@ LoadWalk::Pass LoadWalk::pieces_step_(Host& h) {
     pieces_.reset();
     if (pass == cores::PayloadPieces::Pass::Failed)
         return fail_(h);
-    echo_due_ns_ = h.now_ns + echo_bound_ns(echo_bytes_);
+    echo_due_ns_ = h.now_ns + echo_bound(echo_bytes_, kEcho).count();
     pc_ = Pc::Echo;
     return Pass::Stepped;
 }
@@ -271,12 +273,8 @@ proto::ActKey16 LoadWalk::next_act_(Host& h) {
 }
 
 LoadWalk::Pass LoadWalk::notify_(Host& h, const cores::PostNotify& n) {
-    std::vector<std::uint8_t> words;
-    words.reserve(2u * n.words.size());
-    for (const std::uint16_t w : n.words) {
-        words.push_back(static_cast<std::uint8_t>(w & 0xFFu));
-        words.push_back(static_cast<std::uint8_t>(w >> 8));
-    }
+    std::vector<std::uint8_t> words(n.words.size() * sizeof(std::uint16_t));
+    infra::store_le_run(std::span<const std::uint16_t>(n.words), std::span(words));
     return send_(h, words, n);
 }
 
@@ -287,7 +285,7 @@ LoadWalk::Pass LoadWalk::send_(
 ) {
     if (h.rung.inbox.ring().size() >= proto::kLinkTxCapacity)
         return Pass::Waiting;
-    auto id = h.owner.intern_bytes(bytes, {}, 0);
+    auto id = h.owner.intern_bytes(bytes, {}, hal::FabricAddr{});
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : fail_(h);
     const proto::ActKey16 prev = act_;
@@ -296,14 +294,14 @@ LoadWalk::Pass LoadWalk::send_(
             proto::LinkOp::StagePayload{
                 .payload = *id,
                 .dest = proto::WideIoIndex{cores::PostNotify::kIndex},
-                .copy_word = notify.copies() ? cores::PostNotify::kCopyWord : std::uint8_t{0},
+                .copy_word = notify.copy_word(),
                 .act = act
             }
         )) {
         act_ = prev;
         return Pass::Waiting;
     }
-    echo_due_ns_ = h.now_ns + echo_bound_ns(notify.copy_bytes());
+    echo_due_ns_ = h.now_ns + echo_bound(notify.copy_bytes(), kEcho).count();
     landed_ = false;
     pc_ = Pc::Echo;
     return Pass::Stepped;
@@ -340,7 +338,7 @@ LoadWalk::Pass LoadWalk::save_(Host& h) {
     }
     if (save_due_ns_ == 0)
         save_due_ns_ = h.now_ns + kSaveBoundNs;
-    auto id = h.owner.intern_path(plan_.frame.save, 0);
+    auto id = h.owner.intern_path(plan_.frame.save, proto::FileSize{});
     if (!id || *id == proto::FileId{})
         return Pass::Waiting;
     const proto::ActKey g = h.owner.next_generation();

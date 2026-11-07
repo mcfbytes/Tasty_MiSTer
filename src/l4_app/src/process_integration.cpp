@@ -28,10 +28,10 @@ namespace mister::app::proc {
     if (!rc)
         return std::unexpected(rc.error());
 
-    if (*rc == 127) {
+    if (!rc->signalled && rc->code == 127) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     }
-    return *rc;
+    return rc->code;
 }
 
 [[nodiscard]] Ex<void> mlinkutil_baud(cores::BaudRate) {
@@ -61,7 +61,7 @@ namespace mister::app::proc {
     auto rc = os::run_sync(argv);
     if (!rc)
         return std::unexpected(rc.error());
-    if (*rc == 127)
+    if (!rc->signalled && rc->code == 127)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
@@ -72,7 +72,7 @@ namespace mister::app::proc {
     auto rc = os::run_sync(argv);
     if (!rc)
         return std::unexpected(rc.error());
-    if (*rc == 127)
+    if (!rc->signalled && rc->code == 127)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
@@ -88,7 +88,7 @@ namespace mister::app::proc {
     auto rc = os::run_sync(argv);
     if (!rc)
         return std::unexpected(rc.error());
-    if (*rc == 127)
+    if (!rc->signalled && rc->code == 127)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
@@ -104,7 +104,7 @@ namespace mister::app::proc {
     auto rc = os::run_sync(argv);
     if (!rc)
         return std::unexpected(rc.error());
-    if (*rc == 127)
+    if (!rc->signalled && rc->code == 127)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }

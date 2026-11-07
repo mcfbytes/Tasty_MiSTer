@@ -40,7 +40,15 @@ inline constexpr unsigned kSideStripeBytes = 22;
 
 inline constexpr unsigned kProgressMax = 167;
 
-inline constexpr unsigned kOptionRowWidth = 28;
+inline constexpr unsigned kClassicRowColumns = 28;
+
+inline constexpr unsigned kArrowColumn = kClassicRowColumns - 1;
+
+inline constexpr unsigned kDirectoryRowColumns = kOsdColumns;
+
+inline constexpr std::size_t kTitleBytes = 256;
+
+inline constexpr std::size_t kStatusBarBytes = 40;
 
 std::size_t format_key_value(std::span<char> out, std::string_view name, std::string_view value);
 
@@ -115,7 +123,7 @@ private:
     proto::OsdSurface* surface_;
     RowCount height_ = kFullOsdRows;
     std::uint8_t scratch_[proto::OsdSurface::kRowBytes]{};
-    std::uint8_t title_[256]{};
+    std::uint8_t title_[kTitleBytes]{};
     Arrow arrow_ = kArrowNone;
     Stripe stripe_ = Stripe::Title;
     std::uint32_t publishes_ = 0;

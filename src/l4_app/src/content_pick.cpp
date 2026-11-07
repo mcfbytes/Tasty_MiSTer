@@ -136,7 +136,7 @@ std::optional<ContentRequest> ContentPick::content_for(
         cr.path = *member;
         cr.slot = proto::ConfStr::wire_index(row, member->view());
     }
-    cr.load_addr = row.load_addr;
+    cr.load_addr = hal::FabricAddr{row.load_addr};
     return cr;
 }
 
@@ -218,7 +218,7 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
     }
 
     const bool quiet = !req.whole && no_mount_in_flight_();
-    if (sz->v > InternedFile::kPieceBytes && quiet && streams_files_()) {
+    if (*sz > proto::FileSize{InternedFile::kPieceBytes} && quiet && streams_files_()) {
         auto p = FileTxPieces::start(std::move(*f), sz->v, req.slot, path);
         if (!p) {
             ++owner_tally_.files_failed;
@@ -262,7 +262,7 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
     }
     ++owner_tally_.files_loaded;
     publish_done_(req.asked, req.tag);
-    if (req.load_addr == 0)
+    if (req.load_addr == hal::FabricAddr{})
         return After{.companion = req.path};
     return {};
 }

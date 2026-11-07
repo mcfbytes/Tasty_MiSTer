@@ -4,11 +4,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <span>
-#include <string_view>
 
 #include "infra/error.h"
+#include "boards/cyclone_v/cyclone_v_handoff.h"
 #include "hal/boot_handoff.h"
 #include "hal/fpga_memory.h"
 #include "hal/fpga_programmer.h"
@@ -24,6 +25,56 @@ class BoardWindows;
 }
 
 namespace mister::boards::cyclone_v {
+
+struct FpgaCtrl {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr FpgaCtrl with(FpgaCtrl bits) const noexcept {
+        return FpgaCtrl{v | bits.v};
+    }
+
+    [[nodiscard]] constexpr FpgaCtrl without(FpgaCtrl bits) const noexcept {
+        return FpgaCtrl{v & ~bits.v};
+    }
+
+    [[nodiscard]] constexpr bool has(FpgaCtrl bits) const noexcept {
+        return (v & bits.v) == bits.v;
+    }
+
+    friend constexpr bool operator==(FpgaCtrl, FpgaCtrl) = default;
+};
+
+inline constexpr FpgaCtrl kCtrlNone{0u};
+inline constexpr FpgaCtrl kCtrlCfgWdth{0x200u};
+inline constexpr FpgaCtrl kCtrlAxiCfgEn{0x100u};
+inline constexpr FpgaCtrl kCtrlNConfigPull{0x004u};
+inline constexpr FpgaCtrl kCtrlNce{0x002u};
+inline constexpr FpgaCtrl kCtrlEn{0x001u};
+inline constexpr std::uint32_t kCtrlCdRatioLsb = 6;
+inline constexpr FpgaCtrl kCtrlCdRatioMask{0x3u << kCtrlCdRatioLsb};
+
+enum class FpgaMgrMode : std::uint32_t {
+    Off = 0x0,
+    Reset = 0x1,
+    Cfg = 0x2,
+    Init = 0x3,
+    User = 0x4,
+    Unknown = 0x5,
+};
+
+[[nodiscard]] constexpr std::uint32_t to_bits(FpgaMgrMode mode) noexcept {
+    return static_cast<std::uint32_t>(mode);
+}
+
+enum class CdRatio : std::uint32_t { One = 0x0, Two = 0x1, Four = 0x2, Eight = 0x3 };
+
+[[nodiscard]] constexpr std::uint32_t to_bits(CdRatio ratio) noexcept {
+    return static_cast<std::uint32_t>(ratio);
+}
+
+[[nodiscard]] constexpr FpgaCtrl cd_ratio_field(CdRatio ratio) noexcept {
+    return FpgaCtrl{to_bits(ratio) << kCtrlCdRatioLsb};
+}
 
 struct FpgaMgr {
     enum class Reg : std::uint32_t {
@@ -41,13 +92,8 @@ struct FpgaMgr {
     static constexpr std::uint32_t kStatMselMask = 0xF8;
     static constexpr std::uint32_t kStatMselLsb = 3;
 
-    static constexpr std::uint32_t kCtrlCfgWdth = 0x200;
-    static constexpr std::uint32_t kCtrlAxiCfgEn = 0x100;
-    static constexpr std::uint32_t kCtrlNConfigPull = 0x004;
-    static constexpr std::uint32_t kCtrlNce = 0x002;
-    static constexpr std::uint32_t kCtrlEn = 0x001;
-    static constexpr std::uint32_t kCtrlCdRatioLsb = 6;
-    static constexpr std::uint32_t kCtrlCdRatioMask = 0x3u << kCtrlCdRatioLsb;
+    static constexpr std::uint32_t kMselWideMask = 0x8;
+    static constexpr std::uint32_t kMselRungMask = 0x3;
 
     static constexpr std::uint32_t kMonCrc = 0x8;
     static constexpr std::uint32_t kMonId = 0x4;
@@ -56,18 +102,6 @@ struct FpgaMgr {
 
     static constexpr std::uint32_t kEoiAll = 0xFFF;
 
-    static constexpr std::uint32_t kModeFpgaOff = 0x0;
-    static constexpr std::uint32_t kModeResetPhase = 0x1;
-    static constexpr std::uint32_t kModeCfgPhase = 0x2;
-    static constexpr std::uint32_t kModeInitPhase = 0x3;
-    static constexpr std::uint32_t kModeUserMode = 0x4;
-    static constexpr std::uint32_t kModeUnknown = 0x5;
-
-    static constexpr std::uint32_t kCdRatio1 = 0x0;
-    static constexpr std::uint32_t kCdRatio2 = 0x1;
-    static constexpr std::uint32_t kCdRatio4 = 0x2;
-    static constexpr std::uint32_t kCdRatio8 = 0x3;
-
     static constexpr std::uint32_t kTimeoutCount = 0x1000000;
     static constexpr std::uint32_t kPollsPerPass = 0x100;
 
@@ -75,6 +109,19 @@ struct FpgaMgr {
     static constexpr std::uint32_t kDclkExitInit = 0x5000;
     static constexpr std::uint32_t kDclkStatDone = 0x1;
 };
+
+inline constexpr CdRatio kCdRatioFor[2][3] = {
+    {CdRatio::One, CdRatio::Four, CdRatio::Eight},
+    {CdRatio::One, CdRatio::Two, CdRatio::Four},
+};
+
+[[nodiscard]] constexpr std::optional<CdRatio> cd_ratio_of(std::uint32_t msel) noexcept {
+    const std::uint32_t column = (msel & FpgaMgr::kMselWideMask) != 0u ? 0u : 1u;
+    const std::uint32_t row = msel & FpgaMgr::kMselRungMask;
+    if (row >= std::size(kCdRatioFor[0]))
+        return std::nullopt;
+    return kCdRatioFor[column][row];
+}
 
 struct FpgaMgrData {
     enum class Reg : std::uint32_t { Data = 0x00 };
@@ -85,22 +132,7 @@ struct FpgaMgrData {
 inline constexpr os::PhysAddr kFpgaMgrBase{0xFF70'6000u};
 inline constexpr os::PhysAddr kFpgaMgrDataBase{0xFFB9'0000u};
 
-inline constexpr hal::PhysRegion kHandoffPage{os::PhysAddr{0x1FFF'F000u}, 0x1000u, "uboot-handoff"};
-
-inline constexpr std::uint8_t kHandoffEnvCookie[4] = {0x21, 0x43, 0x65, 0x87};
-inline constexpr std::uint8_t kHandoffSdramCookie[2] = {0x12, 0x57};
-inline constexpr std::uint8_t kHandoffAltCfgCookie[3] = {0x34, 0x99, 0xBA};
-
-inline constexpr std::uint32_t kHandoffRebootWarm = 0xBEEF'B001u;
-inline constexpr std::size_t kHandoffSdramOffset = 0xF00;
-inline constexpr std::size_t kHandoffAltCfgOffset = 0xF04;
-inline constexpr std::size_t kHandoffRebootOffset = 0xF08;
-
-inline constexpr std::size_t kHandoffEnvLimit = kHandoffSdramOffset;
-
-inline constexpr std::uint16_t kHandoffSdramPresent = 0x8000;
-
-class Programmer final : public hal::IFpgaProgrammer, public hal::IBootHandoff {
+class Programmer final : public hal::IFpgaProgrammer {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
@@ -123,25 +155,12 @@ public:
     [[nodiscard]] Ex<bool> program_step() override;
     [[nodiscard]] std::uint32_t pending_stage() noexcept override;
 
-    [[nodiscard]] Ex<hal::HandoffPage> handoff() override;
-
     bool programmed() const override;
 
     hal::IBootHandoff* boot_handoff() noexcept override {
         TASTY_SEAT_BODY(Programmer);
-        return this;
+        return &page_;
     }
-
-    [[nodiscard]] Ex<void> write_env(
-        std::string_view core_name,
-        std::span<const std::byte> cfg
-    ) override;
-
-    [[nodiscard]] Ex<void> write_sdram_cfg(std::uint16_t cfg) override;
-
-    [[nodiscard]] Ex<void> write_altcfg(std::uint8_t alt) override;
-
-    [[nodiscard]] Ex<void> write_reboot_flag(bool warm) override;
 
 private:
     Programmer(
@@ -172,13 +191,11 @@ private:
     [[nodiscard]] bool rung_done_();
     [[nodiscard]] bool dclk_done_();
     void dclk_arm_(std::uint32_t count);
-    void set_cd_ratio(std::uint32_t ratio);
-    void ctrl_update(std::uint32_t clear, std::uint32_t set);
-    std::uint32_t mode();
+    void set_cd_ratio(CdRatio ratio);
+    void ctrl_update(FpgaCtrl clear, FpgaCtrl set);
+    FpgaMgrMode mode() const;
 
     std::uint32_t ext_nibble();
-
-    std::byte* handoff_base();
 
     std::optional<os::MmioRegion> mgr_pages_;
     std::optional<os::MmioRegion> data_pages_;
@@ -186,7 +203,7 @@ private:
 
     hal::RegisterWindow<FpgaMgr> mgr_;
     hal::RegisterWindow<FpgaMgrData> data_;
-    std::optional<hal::FpgaMemory> handoff_;
+    UbootHandoffPage page_;
 
     std::optional<hal::RegisterWindow<FpgaMgrData>::Transaction> data_txn_;
     bool tail_seen_ = false;

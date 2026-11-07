@@ -99,7 +99,7 @@ struct FakeReplay final : fw::TastySession::Replay {
 
     app::FrameCount frames() const noexcept override { return app::FrameCount{12}; }
 
-    std::uint32_t movie_frames() const noexcept override { return 12; }
+    app::FrameCount movie_frames() const noexcept override { return app::FrameCount{12}; }
 
     bool refused() const noexcept override { return refuse_later; }
 
@@ -190,7 +190,7 @@ fw::TastyArgs play_args() {
     fw::TastyArgs a{};
     a.verb = fw::TastyVerb::Play;
     a.no_splash = true;
-    a.return_after_s = 0;
+    a.return_after_s = std::chrono::seconds{0};
     (void)a.movie.assign("m.fm2");
     (void)a.rom.assign("r.nes");
     (void)a.core.assign("/media/fat/_Console/NES.rbf");
@@ -407,7 +407,7 @@ void test_cli_play() {
     CHECK(a->movie.view() == "/m/a.fm2");
     CHECK(a->rom.view() == "/r/a.nes");
     CHECK(a->stay);
-    CHECK(a->return_after_s == 30);
+    CHECK(a->return_after_s == std::chrono::seconds{30});
     CHECK(a->vsync_adjust == app::VsyncAdjust::Off);
 }
 
@@ -2198,21 +2198,26 @@ void test_cli_run_flags() {
     CHECK(a.has_value());
     if (!a)
         return;
-    CHECK(a->stop_at == std::optional<std::uint32_t>{3600});
-    CHECK_EQ(a->return_after_s, 0u);
+    CHECK(a->stop_at == std::optional<app::MovieFrame>{app::MovieFrame{3600}});
+    CHECK(a->return_after_s == std::chrono::seconds{0});
     CHECK(a->strict);
     const char* const dflt[] = {"tasty", "play", "m.fm2", "--rom", "r.nes"};
     const auto d = fw::parse_tasty_args(std::span<const char* const>(dflt));
-    CHECK(d.has_value() && !d->stop_at && !d->strict && d->return_after_s == 30);
+    CHECK(
+        d.has_value() && !d->stop_at && !d->strict && d->return_after_s == std::chrono::seconds{30}
+    );
     CHECK(d.has_value() && !d->phase_us);
     const char* const old[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--return-after", "5"};
     const auto o = fw::parse_tasty_args(std::span<const char* const>(old));
-    CHECK(o.has_value() && o->return_after_s == 5);
+    CHECK(o.has_value() && o->return_after_s == std::chrono::seconds{5});
     const char* const zero[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--stop-at", "0"};
     CHECK(!fw::parse_tasty_args(std::span<const char* const>(zero)).has_value());
     const char* const ph[] = {"tasty", "play", "m.fm2", "--rom", "r.nes", "--phase", "4000"};
     const auto p = fw::parse_tasty_args(std::span<const char* const>(ph));
-    CHECK(p.has_value() && p->phase_us == std::optional<std::uint32_t>{4000});
+    CHECK(
+        p.has_value()
+        && p->phase_us == std::optional<std::chrono::microseconds>{std::chrono::microseconds{4000}}
+    );
     const char* const miss[] = {"tasty", "play", "m.fm2", "--phase"};
     const auto m = fw::parse_tasty_args(std::span<const char* const>(miss));
     CHECK(!m.has_value());
@@ -2234,14 +2239,17 @@ void test_cli_run_flags() {
 void test_session_play_ask() {
     for (const bool strict : {false, true}) {
         Sess x;
-        x.args.stop_at = 3600;
-        x.args.phase_us = 4000;
+        x.args.stop_at = app::MovieFrame{3600};
+        x.args.phase_us = std::chrono::microseconds{4000};
         x.args.strict = strict;
         x.s.emplace(x.w, x.args);
         to_run(x);
         CHECK_EQ(x.replay.plays, 1u);
-        CHECK(x.replay.last.stop_at == std::optional<std::uint32_t>{3600});
-        CHECK(x.replay.last.phase_us == std::optional<std::uint32_t>{4000});
+        CHECK(x.replay.last.stop_at == std::optional<app::MovieFrame>{app::MovieFrame{3600}});
+        CHECK(
+            x.replay.last.phase_us
+            == std::optional<std::chrono::microseconds>{std::chrono::microseconds{4000}}
+        );
         CHECK(x.replay.last.set_settings == !strict);
     }
 }
@@ -2784,7 +2792,7 @@ void test_prepare_play_lead_rom_and_ram() {
     CHECK(t.put("m.fm2", movie));
     fw::TastyArgs a{};
     CHECK(a.movie.assign("m.fm2"));
-    a.lead = 1000;
+    a.lead = app::MovieFrame{1000};
     {
         StderrTo err;
         CHECK(fw::tasty_prepare_play(*vfs, a) == 1);
@@ -2792,23 +2800,23 @@ void test_prepare_play_lead_rom_and_ram() {
         CHECK(text.find("outside") != std::string::npos);
         CHECK(text.find("--lead") != std::string::npos);
     }
-    a.lead = -9;
+    a.lead = app::MovieFrame{-9};
     {
         StderrTo err;
         CHECK(fw::tasty_prepare_play(*vfs, a) == 1);
         CHECK(err.text().find("outside") != std::string::npos);
     }
     CHECK(t.put("r.nes", rom));
-    a.lead = -3;
+    a.lead = app::MovieFrame{-3};
     CHECK(a.rom.assign(t.p("r.nes")));
     CHECK(fw::tasty_prepare_play(*vfs, a) == 0);
-    a.phase_us = 0;
+    a.phase_us = std::chrono::microseconds{0};
     {
         StderrTo err;
         CHECK(fw::tasty_prepare_play(*vfs, a) == 1);
         CHECK(err.text().find("leave 2000 us before the next frame") != std::string::npos);
     }
-    a.phase_us = 20'000;
+    a.phase_us = std::chrono::microseconds{20'000};
     {
         StderrTo err;
         CHECK(fw::tasty_prepare_play(*vfs, a) == 1);
@@ -2816,13 +2824,13 @@ void test_prepare_play_lead_rom_and_ram() {
     }
 
     for (const std::uint32_t bad : {999u, 14'700u, 15'000u}) {
-        a.phase_us = bad;
+        a.phase_us = std::chrono::microseconds{bad};
         StderrTo err;
         CHECK(fw::tasty_prepare_play(*vfs, a) == 1);
         CHECK(err.text().find("leave 2000 us before the next frame") != std::string::npos);
     }
     for (const std::uint32_t good : {1000u, 4000u, 14'600u}) {
-        a.phase_us = good;
+        a.phase_us = std::chrono::microseconds{good};
         CHECK(fw::tasty_prepare_play(*vfs, a) == 0);
     }
     a.phase_us.reset();

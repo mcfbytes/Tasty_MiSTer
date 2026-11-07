@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -14,10 +15,12 @@
 #include "cores/ladder_context.h"
 #include "cores/ladder_host.h"
 #include "cores/payload_pieces.h"
+#include "cores/wire_word.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "os/clock.h"
+#include "proto/types.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
@@ -43,8 +46,6 @@ public:
     };
 
     static constexpr std::uint8_t kDone = 0xFF;
-
-    static constexpr std::uint16_t kGenericChunk = 4096;
 
     virtual ~BootLadder() = default;
     BootLadder(const BootLadder&) = delete;
@@ -99,10 +100,10 @@ protected:
 
     [[nodiscard]] bool prepare_save(std::string_view path);
 
-    [[nodiscard]] std::uint64_t save_size() const noexcept { return save_size_; }
+    [[nodiscard]] proto::FileSize save_size() const noexcept { return save_size_; }
 
     [[nodiscard]] bool order_mount_save(std::string_view path, bool bracketed);
-    [[nodiscard]] bool order_announce_disc(std::uint64_t size_bytes);
+    [[nodiscard]] bool order_announce_disc(proto::FileSize size_bytes);
     [[nodiscard]] bool order_notify_mount(bool loaded);
     [[nodiscard]] bool order_status_bit0(bool asserted);
     [[nodiscard]] bool order_reset();
@@ -111,7 +112,7 @@ protected:
     [[nodiscard]] bool order_empty_bracket(WideIoIndex dest);
 
     [[nodiscard]] bool order_set_index(WideIoIndex dest);
-    [[nodiscard]] std::int64_t now_ns() const;
+    [[nodiscard]] std::chrono::nanoseconds now_ns() const;
 
     [[nodiscard]] proto::ActKey next_gen() noexcept { return host_.next_generation(); }
 
@@ -131,8 +132,8 @@ protected:
     std::uint8_t sub_ = 0;
     bool marker_seen_ = false;
     bool save_ready_ = false;
-    std::int64_t pulse_release_ns_ = 0;
-    std::int64_t mount_due_ns_ = 0;
+    std::chrono::nanoseconds pulse_release_ns_{};
+    std::chrono::nanoseconds mount_due_ns_{};
     bool bit0_asserted_ = false;
 
     Report report_{};
@@ -149,7 +150,7 @@ private:
     bool cheats_ordered_ = false;
     proto::ActKey mount_gen_{};
     proto::ActKey save_gen_{};
-    std::uint64_t save_size_ = 0;
+    proto::FileSize save_size_{};
     bool save_exists_ = false;
     MountStatus mount_answer_{};
 };

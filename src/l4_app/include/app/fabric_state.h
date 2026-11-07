@@ -4,13 +4,14 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "app/types.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
 namespace mister::app {
 
 struct FabricState {
-    std::uint32_t gen = 0;
+    FabricGeneration gen{};
     std::uint16_t cookie = 0;
     bool configured = false;
     bool bridges_down = false;
@@ -40,7 +41,7 @@ public:
 
     [[nodiscard]] std::uint16_t cookie() const noexcept { return last_.cookie; }
 
-    [[nodiscard]] std::uint32_t gen() const noexcept { return last_.gen; }
+    [[nodiscard]] FabricGeneration gen() const noexcept { return last_.gen; }
 
     [[nodiscard]] const FabricState& value() const noexcept { return last_; }
 

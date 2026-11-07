@@ -56,10 +56,10 @@ std::size_t page_size() noexcept {
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), off.v});
     }
 
-    if (len == 0 || len > lw.len || static_cast<std::size_t>(off.v) > lw.len - len) {
+    if (!off.fits(lw.len, len)) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), off.v});
     }
-    if ((off.v & 3u) != 0u) {
+    if (!off.dword_aligned()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), off.v});
     }
     return map_registers(os::PhysAddr{lw.phys.v + off.v}, len);

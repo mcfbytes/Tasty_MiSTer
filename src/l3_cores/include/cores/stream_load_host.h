@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "cores/file_tx.h"
 #include "cores/stream_load.h"
 #include "cores/stream_tx_record.h"
 #include "infra/error.h"
@@ -21,7 +22,7 @@ class StreamLoadHost final : public IStreamLoad {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr std::size_t kChunkBytes = 4096;
+    static constexpr std::size_t kChunkBytes = kFileTxChunkBytes;
 
     [[nodiscard]] Ex<proto::SessionParams> stream_opening(IoIndex index) override;
     void stream_closed(const StreamLoadEnd& end) noexcept override;
@@ -40,14 +41,14 @@ public:
 
     [[nodiscard]] std::uint32_t mount_refusals() const noexcept { return mount_refusals_; }
 
-    [[nodiscard]] std::uint16_t last_index() const noexcept { return last_index_; }
+    [[nodiscard]] proto::IoIndex last_index() const noexcept { return last_index_; }
 
 private:
     StreamTxRecord tx_;
     std::uint32_t transfers_ = 0;
     std::uint32_t chunks_ = 0;
     std::uint32_t mount_refusals_ = 0;
-    std::uint16_t last_index_ = 0;
+    proto::IoIndex last_index_{};
 };
 
 }

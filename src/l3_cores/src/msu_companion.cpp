@@ -34,7 +34,7 @@ Ex<CompanionPlan> MsuCompanion::plan(const CompanionAsk& ask) {
         .dest = RowDest::Window,
         .index = proto::WideIoIndex{msu::kDataIndex},
         .addr = 0,
-        .window = 0,
+        .window = WindowRef::at(CoreWindowSlot{0}),
         .bracket = RowBracket::AroundWithLength,
         .source = data_.view(),
         .placed = true

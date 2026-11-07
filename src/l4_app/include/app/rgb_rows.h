@@ -7,31 +7,33 @@
 #include <cstdint>
 #include <span>
 
+#include "app/picture_row.h"
 #include "app/row_bytes.h"
 
 namespace mister::app {
 
 inline constexpr std::size_t kRgbPixelBytes = 3;
 
-struct PictureRows {
-    std::uint16_t v = 0;
-    [[nodiscard]] constexpr bool operator==(const PictureRows&) const noexcept = default;
-    [[nodiscard]] constexpr auto operator<=>(const PictureRows&) const noexcept = default;
-};
+[[nodiscard]] constexpr RowBytes rgb_row_of(std::size_t pixels) noexcept {
+    return RowBytes{pixels * kRgbPixelBytes};
+}
 
 struct RgbRows {
     std::span<const std::byte> bytes{};
     RowBytes stride{};
     PictureRows rows{};
 
+    [[nodiscard]] constexpr std::span<const std::byte> from_row(PictureRow row) const noexcept {
+        return bytes.subspan(row_start(stride, row));
+    }
+
+    template <class F>
+    constexpr void each_row(RowBytes width, F&& f) const {
+        for_each_row(rows, [&](PictureRow y) { f(width.head(from_row(y))); });
+    }
+
     [[nodiscard]] constexpr bool covers(RowBytes row, PictureRows height) const noexcept {
-        if (height == PictureRows{} || rows < height || bytes.size() < row.v)
-            return false;
-        if (height == PictureRows{1})
-            return true;
-        return stride.v > 0
-            && stride.v >= row.v
-            && (bytes.size() - row.v) / stride.v >= height.v - 1u;
+        return rows >= height && stride.reaches(bytes.size(), row, height);
     }
 };
 

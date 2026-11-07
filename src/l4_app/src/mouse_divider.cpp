@@ -9,9 +9,9 @@ constexpr std::int64_t kMouseDividerNs = 15'000'000;
 
 std::optional<MouseDivider::Packet> MouseDivider::flush() noexcept {
     const MouseDelta md = acc_.take();
-    carry_x_ += md.dx;
-    carry_y_ += md.dy;
-    carry_z_ += md.dz;
+    carry_.dx += md.motion.dx;
+    carry_.dy += md.motion.dy;
+    carry_.wheel += md.motion.wheel;
     if (md.moved || md.button_edge)
         mouse_pending_ = true;
     if (!mouse_pending_)
@@ -20,10 +20,8 @@ std::optional<MouseDivider::Packet> MouseDivider::flush() noexcept {
     const bool due = (now - last_mouse_ns_) > kMouseDividerNs;
     if (!due && !md.button_edge)
         return std::nullopt;
-    const Packet p{carry_x_, carry_y_, carry_z_, md.buttons};
-    carry_x_ = 0;
-    carry_y_ = 0;
-    carry_z_ = 0;
+    const Packet p{carry_, md.buttons};
+    carry_ = {};
     last_mouse_ns_ = now;
     mouse_pending_ = false;
     return p;

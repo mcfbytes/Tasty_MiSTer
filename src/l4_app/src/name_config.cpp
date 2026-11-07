@@ -26,13 +26,13 @@ std::string NameConfig::card_cid_path(std::string_view sd_block) {
 Ex<void> NameConfig::save_path(
     const RememberedStem& stem,
     Slot s,
-    std::uint8_t index,
+    proto::IoIndex index,
     std::string_view path
 ) {
     TASTY_SEAT_BODY(NameConfig);
 
     if (stem.empty())
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), index});
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), index.v});
     std::array<std::byte, kPathBlob> blob{};
     std::memcpy(blob.data(), path.data(), std::min(path.size(), kPathBlob - 1));
     return durable_write(*vfs_, "config/" + remembered_blob_name(stem, s, index), blob);

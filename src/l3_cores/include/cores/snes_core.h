@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "cores/core_support.h"
+#include "cores/file_tx.h"
 #include "cores/generic_core.h"
 #include "cores/mailbox_carriage.h"
 #include "cores/snes_rom.h"
@@ -24,7 +25,7 @@ class SnesCore final : public Core {
 public:
     SnesCore(const CoreProfile& p, const HostServices& h);
 
-    static constexpr std::size_t kChunkBytes = 4096;
+    static constexpr std::size_t kChunkBytes = kFileTxChunkBytes;
 
     [[nodiscard]] std::uint64_t bytes_sent() const noexcept { return bytes_sent_; }
 
@@ -32,13 +33,13 @@ public:
 
     [[nodiscard]] std::uint32_t rom_transforms() const noexcept { return rom_transforms_; }
 
-    [[nodiscard]] std::uint32_t last_header_addr() const noexcept { return last_header_addr_; }
+    [[nodiscard]] snes::HeaderAddr last_header_addr() const noexcept { return last_header_addr_; }
 
     [[nodiscard]] std::uint16_t last_index() const noexcept { return last_index_; }
 
 private:
     struct Analysis {
-        std::uint32_t addr = 0;
+        snes::HeaderAddr addr{};
         snes::CartSniff sniff{};
     };
 
@@ -66,17 +67,8 @@ private:
         std::uint64_t off,
         std::span<std::uint8_t> dst
     ) noexcept;
-    [[nodiscard]] static std::uint32_t score_candidate_(
-        std::span<const std::uint8_t> bytes,
-        std::uint32_t base,
-        std::uint32_t payload,
-        std::uint32_t addr
-    ) noexcept;
-    [[nodiscard]] static Analysis analyze_(
-        std::span<const std::uint8_t> bytes,
-        std::uint32_t base,
-        std::uint32_t payload
-    ) noexcept;
+
+    [[nodiscard]] static Analysis analyze_(std::span<const std::uint8_t> image) noexcept;
     [[nodiscard]] Ex<void> stream_mirrored_(
         proto::ImageBracket& session,
         std::span<const std::uint8_t> bytes,
@@ -88,7 +80,7 @@ private:
     std::uint64_t bytes_sent_ = 0;
     std::uint32_t transfers_ = 0;
     std::uint32_t rom_transforms_ = 0;
-    std::uint32_t last_header_addr_ = 0;
+    snes::HeaderAddr last_header_addr_{};
     std::uint16_t last_index_ = 0;
 
     std::uint8_t buf_[kChunkBytes]{};

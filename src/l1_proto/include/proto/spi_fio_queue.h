@@ -36,6 +36,9 @@ public:
     static constexpr std::uint32_t kPieceWords = 392;
     static constexpr std::uint32_t kUnbudgeted = std::numeric_limits<std::uint32_t>::max();
 
+    static constexpr std::uint32_t kWindowHeaderWords = 2;
+    static constexpr std::uint32_t kDataHeaderWords = 1;
+
     struct Bracket {
         WideIoIndex index{};
         std::span<const std::uint8_t> bytes{};
@@ -123,7 +126,7 @@ private:
         using Result = Ex<void>;
         hal::ISpiTransport* link;
         const std::uint8_t* slab;
-        std::uint16_t latched = 0;
+        WideIoIndex latched{};
         std::optional<DownloadSession> open{};
         [[nodiscard]] Ex<void> on(const FioWindow::Index& i) noexcept;
         [[nodiscard]] Ex<void> on(const FioWindow::Open&) noexcept;
@@ -138,16 +141,16 @@ private:
         using Result = std::uint32_t;
         hal::Width width;
 
-        std::uint32_t on(const FioWindow::Index&) const noexcept { return 2; }
+        std::uint32_t on(const FioWindow::Index&) const noexcept { return kWindowHeaderWords; }
 
-        std::uint32_t on(const FioWindow::Open&) const noexcept { return 2; }
+        std::uint32_t on(const FioWindow::Open&) const noexcept { return kWindowHeaderWords; }
 
         std::uint32_t on(const FioWindow::Data& d) const noexcept {
             const std::size_t n = width == hal::Width::Word ? (d.len + 1u) / 2u : d.len;
-            return 1 + static_cast<std::uint32_t>(n);
+            return kDataHeaderWords + static_cast<std::uint32_t>(n);
         }
 
-        std::uint32_t on(const FioWindow::Close&) const noexcept { return 2; }
+        std::uint32_t on(const FioWindow::Close&) const noexcept { return kWindowHeaderWords; }
 
         std::uint32_t on(const FioWindow::IoCommand& c) const noexcept { return c.words; }
 
@@ -203,7 +206,8 @@ consteval bool load_budget_fits_every_board() {
     return hal::every_measured(&hal::BoardProfile::timing, [](const hal::LinkTiming& g) consteval {
         const auto t = hal::LinkTimingValues::measured(g);
         return t.load_budget_words >= t.round_budget_words
-            && std::uint64_t{t.load_budget_words} * t.word_ns <= hal::kLoadWireNs;
+            && std::chrono::nanoseconds{std::uint64_t{t.load_budget_words} * t.word_ns}
+            <= hal::kLoadWire;
     });
 }
 

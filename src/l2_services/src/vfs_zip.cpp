@@ -87,20 +87,22 @@ int zip_locate(unzFile uf, const std::string& member) {
     return zip_locate_long(uf, member);
 }
 
+constexpr std::uint16_t kZipEncryptedFlag = 1;
+
 constexpr std::uint64_t kMaxDeflateRatio = 1032;
 constexpr std::uint64_t kDeflateSlack = 1u << 16;
 
 bool zip_size_is_possible(const unz_file_info64& fi) noexcept {
     const auto comp = static_cast<std::uint64_t>(fi.compressed_size);
     const auto unc = static_cast<std::uint64_t>(fi.uncompressed_size);
-    switch (fi.compression_method) {
-        case 0:
-            return unc <= comp;
-        case 8:
-            break;
-        default:
-            return true;
-    }
+
+    const std::optional<ZipMethod> method = method_of(
+        static_cast<std::uint16_t>(fi.compression_method)
+    );
+    if (!method)
+        return true;
+    if (*method == ZipMethod::Stored)
+        return unc <= comp;
     if (comp > (UINT64_MAX - kDeflateSlack) / kMaxDeflateRatio)
         return true;
     return unc <= comp * kMaxDeflateRatio + kDeflateSlack;
@@ -116,12 +118,8 @@ bool zip_size_is_possible(const unz_file_info64& fi) noexcept {
     ZipListing out;
     unz_global_info64 gi{};
     if (::unzGetGlobalInfo64(*uf, &gi) == UNZ_OK && gi.number_entry <= kZipReserveCap) {
-        const auto n = static_cast<std::size_t>(gi.number_entry);
-        out.names.reserve(n);
-        out.sizes.reserve(n);
-        out.dirs.reserve(n);
+        out.members.reserve(static_cast<std::size_t>(gi.number_entry));
     }
-
     int rc = ::unzGoToFirstFile(*uf);
     while (rc == UNZ_OK) {
         unz_file_info64 fi{};
@@ -134,10 +132,11 @@ bool zip_size_is_possible(const unz_file_info64& fi) noexcept {
             rc = ::unzGoToNextFile(*uf);
             continue;
         }
-        std::string nm = zip_current_name(*uf, fi);
-        out.sizes.push_back(static_cast<std::uint64_t>(fi.uncompressed_size));
-        out.dirs.push_back(zip_name_is_dir(nm) ? char{1} : char{0});
-        out.names.push_back(std::move(nm));
+        ZipMember member;
+        member.name = zip_current_name(*uf, fi);
+        member.size = proto::FileSize{fi.uncompressed_size};
+        member.is_dir = zip_name_is_dir(member.name);
+        out.members.push_back(std::move(member));
         rc = ::unzGoToNextFile(*uf);
     }
     ::unzClose(*uf);
@@ -399,7 +398,7 @@ struct ZipEntries {
             .packed = static_cast<std::uint64_t>(fi.compressed_size),
             .crc = Crc32{static_cast<std::uint32_t>(fi.crc)},
             .method = static_cast<std::uint16_t>(fi.compression_method),
-            .encrypted = (fi.flag & 1u) != 0u,
+            .encrypted = (fi.flag & kZipEncryptedFlag) != 0u,
             .plausible = zip_size_is_possible(fi)
         };
         if (e.name.size() != fi.size_filename) {
@@ -429,7 +428,7 @@ public:
         if (index >= z_.entries.size())
             return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
         const ArchiveEntry& e = z_.entries[index];
-        if (e.encrypted || (e.method != 0 && e.method != 8)) {
+        if (e.encrypted || !method_of(e.method)) {
             return std::unexpected(Error{Errc::bad_format, ERR_SITE(), e.method});
         }
         auto uf = zip_open_archive(archive_);

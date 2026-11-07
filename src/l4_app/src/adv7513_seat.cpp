@@ -133,7 +133,7 @@ Adv7513Seat::Edge Adv7513Seat::configure(
 bool Adv7513Seat::attach(Host h) {
     breaker_.reset();
     auto b = svc::adv7513::Adv7513Bus::attach(breaker_, board_, probe_);
-    h.stats.i2c_bus = probe_.bus;
+    h.stats.i2c_bus = probe_.bus.value_or(kI2cBusNeverAcked);
     if (!b) {
         h.last_error = b.error();
         h.stats.i2c = probe_.presence == svc::adv7513::Presence::Ambiguous
@@ -153,8 +153,7 @@ bool Adv7513Seat::attach(Host h) {
 }
 
 void Adv7513Seat::schedule_reprobe() noexcept {
-    next_probe_ns_ = clock_.now().count()
-        + static_cast<std::int64_t>(probe_backoff_ms_) * 1'000'000;
+    next_probe_ns_ = (clock_.now() + probe_backoff_ms_).count();
     probe_backoff_ms_ = probe_backoff_ms_ >= kReprobeMaxMs / 2 ? kReprobeMaxMs
                                                                : probe_backoff_ms_ * 2;
 }
@@ -172,7 +171,7 @@ Adv7513Seat::Edge Adv7513Seat::recover(Host h) {
         init_ok_ = false;
         h.stats.i2c = VideoI2cOutcome::Failed;
 
-        if (clock_.now().count() - attached_ns_ >= std::int64_t{kReprobeMaxMs} * 1'000'000)
+        if (clock_.now() - std::chrono::nanoseconds{attached_ns_} >= kReprobeMaxMs)
             probe_backoff_ms_ = kReprobeFirstMs;
         schedule_reprobe();
         return Edge::Lost;
@@ -220,7 +219,7 @@ void Adv7513Seat::send_spd(Host h, const Spd& spd) {
         return;
 
     Ex<void> r{};
-    if (!probe_.spd_ack) {
+    if (!probe_.spd_ack()) {
         r = adv_->spd_disable();
         if (r)
             ++h.stats.spd_disables;

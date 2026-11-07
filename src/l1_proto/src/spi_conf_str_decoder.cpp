@@ -19,7 +19,7 @@ Ex<std::size_t> SpiConfStrDecoder::read_() noexcept {
         auto r = link_->transfer(hal::SpiWord{0});
         if (!r)
             return std::unexpected(r.error());
-        const auto byte = static_cast<std::uint8_t>(r->v & 0xFFu);
+        const auto byte = static_cast<std::uint8_t>(r->v);
         if (byte == 0)
             break;
         buf_[n++] = byte;

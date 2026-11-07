@@ -26,6 +26,8 @@ struct PageFacts {
 
     bool wake_every_round = false;
 
+    bool repeat_all_keys = false;
+
     friend constexpr bool operator==(const PageFacts&, const PageFacts&) = default;
 };
 

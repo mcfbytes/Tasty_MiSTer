@@ -7,6 +7,7 @@
 #include "cores/cd_io_indices.h"
 #include "cores/cd_quirk_row.h"
 #include "cores/cd_tick_periods.h"
+#include "cores/types.h"
 #include "infra/seat.h"
 #include "proto/reset_terms.h"
 #include "svc/disc_engine.h"
@@ -36,7 +37,7 @@ struct CdProfile {
     bool sniff_sega_disc_system = false;
 
     struct SeekFastPath {
-        std::uint32_t count;
+        SectorCount count;
         std::uint32_t latency_ticks;
     };
 

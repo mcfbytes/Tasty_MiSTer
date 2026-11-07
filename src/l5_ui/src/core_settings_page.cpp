@@ -2,17 +2,23 @@
 #include "ui/core_settings_page.h"
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "app/hd_window.h"
+#include "infra/indexed_array.h"
+#include "infra/message_sum.h"
+#include "ui/page_window.h"
 #include "ui/arc_label.h"
 #include "ui/browser_launch.h"
+#include "ui/config_slots_page.h"
 #include "ui/draw_classic.h"
 #include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_ask.h"
+#include "ui/slot_labels.h"
+#include "ui/options_keys.h"
 #include "ui/page_context.h"
 #include "ui/ui_event.h"
 
@@ -24,10 +30,6 @@ constexpr const char kStdExit[] = "            exit";
 constexpr const char kStdBack[] = "            back";
 constexpr char kSubmenuArrow = '\x16';
 
-constexpr std::size_t kArrowColumn = 27;
-
-constexpr std::size_t kFileRowWidth = 28;
-
 std::string_view plain_label(std::string_view t) noexcept {
     while (!t.empty() && t.front() == ' ')
         t.remove_prefix(1);
@@ -35,6 +37,72 @@ std::string_view plain_label(std::string_view t) noexcept {
         t.remove_suffix(1);
     return t;
 }
+
+class ResolvedLabels final : public ISlotLabels {
+public:
+    ResolvedLabels(const cores::OptionRow& d, const std::string_view (&arc)[2]) noexcept
+        : row_(&d),
+          arc_(&arc) {}
+
+    bool has_label(proto::FieldValue v) const noexcept override {
+        if (!v.within(proto::FieldCount::of(row_->values.size())))
+            return false;
+        return !resolve_arc(infra::at_index(row_->values, v), *arc_).empty();
+    }
+
+private:
+    const cores::OptionRow* row_;
+    const std::string_view (*arc_)[2];
+};
+
+struct LinkTarget {
+    cores::OptionRow::Link kind;
+    PageId page;
+
+    bool takes_row_argument;
+    ItemId item;
+    std::string_view evidence;
+};
+
+constexpr auto kLinkTargets = std::to_array<LinkTarget>({
+    {cores::OptionRow::Link::None,
+     PageId::None,
+     false,
+     kNoItem,
+     "no factory in this tree: refused and counted"},
+    {cores::OptionRow::Link::SubPage,
+     PageId::CoreSettings,
+     true,
+     kNoItem,
+     "menu.cpp:4970-4985 — another page of this same table"},
+    {cores::OptionRow::Link::LoadConfig,
+     PageId::ConfigSlots,
+     false,
+     config_slots_item(ConfigSlotsPage::Mode::Load),
+     "menu.cpp:4987-4999"},
+    {cores::OptionRow::Link::SaveConfig,
+     PageId::ConfigSlots,
+     false,
+     config_slots_item(ConfigSlotsPage::Mode::Save),
+     "menu.cpp:5001-5013"},
+    {cores::OptionRow::Link::Mt32Pi, PageId::Mt32Pi, false, kNoItem, "menu.cpp:5015-5030"},
+});
+
+static_assert(
+    infra::rows_are_ordinal(kLinkTargets),
+    "every Link names its target; a row without one would refuse silently"
+);
+
+constexpr const LinkTarget* link_target_of(cores::OptionRow::Link link) {
+    for (const LinkTarget& t : kLinkTargets) {
+        if (t.kind == link)
+            return &t;
+    }
+    return nullptr;
+}
+
+inline constexpr std::size_t kHostOffSlot = 0;
+inline constexpr std::size_t kHostOnSlot = 1;
 
 app::PageDescription::RowKind row_kind_of(cores::OptionRow::Kind k) noexcept {
     switch (k) {
@@ -66,10 +134,10 @@ CoreSettingsPage::CoreSettingsPage(Spec s)
     rebuild();
 }
 
-std::string CoreSettingsPage::value_label(const cores::OptionRow& d, std::uint32_t slot) const {
-    if (slot >= d.values.size())
+std::string CoreSettingsPage::value_label(const cores::OptionRow& d, proto::FieldValue slot) const {
+    if (!slot.within(proto::FieldCount::of(d.values.size())))
         return {};
-    return resolve_arc(d.values[slot], arc_);
+    return resolve_arc(infra::at_index(d.values, slot), arc_);
 }
 
 std::string CoreSettingsPage::cycle_value(const app::OptionTable::Row& r) const {
@@ -78,13 +146,17 @@ std::string CoreSettingsPage::cycle_value(const app::OptionTable::Row& r) const 
     return resolved.empty() ? value_label(d, drawn_choice(r)) : resolved;
 }
 
-std::uint32_t CoreSettingsPage::drawn_choice(const app::OptionTable::Row& r) const {
+proto::FieldValue CoreSettingsPage::drawn_choice(const app::OptionTable::Row& r) const {
     const cores::OptionRow& d = *r.decl;
     const std::uint32_t n = d.choice_count();
     if (n == 0)
-        return 0;
-    const std::uint32_t cur = r.current < n ? r.current : 0;
-    return value_label(d, cur).empty() ? 0 : cur;
+        return {};
+
+    return choice_slot(
+        ResolvedLabels{d, arc_},
+        proto::FieldValue{r.current},
+        proto::FieldCount::of(n)
+    );
 }
 
 void CoreSettingsPage::rebuild() {
@@ -185,8 +257,9 @@ std::string CoreSettingsPage::compose(const Line& l) const {
         case cores::OptionRow::Kind::Host:
             s.assign(d.label);
 
-            if (d.values.size() >= 2)
-                s.append(d.values[joyswap_ ? 1 : 0]);
+            if (d.values.size() > kHostOnSlot) {
+                s.append(d.values[joyswap_ ? kHostOnSlot : kHostOffSlot]);
+            }
             return s;
         case cores::OptionRow::Kind::Cycle: {
             s.assign(d.label);
@@ -196,8 +269,8 @@ std::string CoreSettingsPage::compose(const Line& l) const {
         case cores::OptionRow::Kind::File:
             s.assign(d.label);
             s.append(tr.text.view());
-            if (s.size() > kFileRowWidth)
-                s.resize(kFileRowWidth);
+            if (s.size() > kClassicRowColumns)
+                s.resize(kClassicRowColumns);
             return s;
     }
     return s;
@@ -308,17 +381,17 @@ bool CoreSettingsPage::walk(PageWalk& out) const {
             selected = total;
         ++total;
     }
-    const app::HdWindow win = app::hd_window(selected, total, out.page.first);
-    out.page.first = win.first;
-    out.page.total = total;
+    const app::HdWindow win = window_page(out.page, RowIndex::of(selected), RowCount::of(total));
 
-    std::uint16_t at = 0;
+    const RowRange window = ui::rows(win.first, win.count);
+    RowIndex at{};
     for (std::size_t i = 0; i < drawn_rows.size(); ++i) {
         const Drawn& d = drawn_rows[i];
         if (!is_hd(d))
             continue;
-        const std::uint16_t index = at++;
-        if (index < win.first || index >= win.first + win.count)
+        const RowIndex index = at;
+        at += kOneRow;
+        if (!window.contains(index))
             continue;
         drawn_rows[i].in_window = true;
         if (out.count >= out.rows.size())
@@ -335,10 +408,11 @@ bool CoreSettingsPage::walk(PageWalk& out) const {
         r.classic = classic_row(
             row,
             d.text,
-            d.selected,
-            d.stippled,
-            leftchar_of(row, ring),
-            ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight) : OsdRenderer::kArrowNone
+            {.inverted = d.selected,
+             .stippled = d.stippled,
+             .leftchar = leftchar_of(row, ring),
+             .arrow = ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight)
+                           : OsdRenderer::kArrowNone}
         );
     }
 
@@ -356,10 +430,11 @@ bool CoreSettingsPage::walk(PageWalk& out) const {
         pr.classic = classic_row(
             row,
             found ? found->text : std::string{},
-            found && found->selected,
-            found && found->stippled,
-            leftchar_of(row, ring),
-            ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight) : OsdRenderer::kArrowNone
+            {.inverted = found && found->selected,
+             .stippled = found && found->stippled,
+             .leftchar = leftchar_of(row, ring),
+             .arrow = ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight)
+                           : OsdRenderer::kArrowNone}
         );
     }
     return true;
@@ -450,30 +525,24 @@ Transition CoreSettingsPage::open_browser(const app::OptionTable::Row& r, bool r
 Transition CoreSettingsPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(CoreSettingsPage);
     const bool at_root = page_ == proto::kRootSubmenu;
+    const OptionsKeys keys = OptionsKeys::of(ev);
 
-    if (ev.buttons.has_any({UiEvent::Menu}))
+    if (keys.menu)
         return Transition{Transition::Kind::CloseAll};
 
-    const bool select = ev.buttons.has_any({UiEvent::Select});
-    const bool plus = ev.buttons.has_any({UiEvent::Plus});
-    const bool minus = ev.buttons.has_any({UiEvent::Minus});
-    const bool back = ev.buttons.has_any({UiEvent::Back});
-    const bool left = ev.buttons.has_any({UiEvent::Left});
-    const bool right = ev.buttons.has_any({UiEvent::Right});
-    const bool recent = ev.buttons.has_any({UiEvent::Recent});
-
-    if (!at_root && (back || left))
+    if (!at_root && (keys.back || keys.left))
         return leave();
-    if (at_root && !select && !plus && !minus && !recent) {
+    if (at_root && keys.no_row_key()) {
 
-        if (right)
-            return Transition{Transition::Kind::Replace, PageId::System};
-        if (left)
-            return Transition{Transition::Kind::Replace, PageId::Misc, ItemId{3}};
+        if (const std::optional<Transition> ring = ring_transition(at_root, keys))
+            return *ring;
         return Transition{};
     }
-    if (!select && !plus && !minus && !recent)
+    if (keys.no_row_key())
         return Transition{};
+    const bool select = keys.select;
+    const bool minus = keys.minus;
+    const bool recent = keys.recent;
 
     if (sel_ == exit_ordinal()) {
         if (!select)
@@ -513,26 +582,24 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
                 return Transition{};
             }
 
-            const std::uint32_t raw = tr.current;
-            const std::uint32_t cur = value_label(d, raw).empty() ? 0 : raw;
-            std::uint32_t next = minus ? (cur == 0 ? n - 1 : cur - 1)
-                                       : (cur + 1 > n - 1 ? 0 : cur + 1);
+            const ResolvedLabels labels{d, arc_};
+
+            const proto::FieldCount slots = proto::FieldCount::of(d.values.size());
+            const proto::FieldCount choices = proto::FieldCount::of(n);
+            const proto::FieldValue cur = choice_slot(labels, proto::FieldValue{tr.current}, slots);
+            proto::FieldValue next = minus ? cur.cycled_back(choices) : cur.cycled_forward(choices);
 
             if (!minus) {
-                if (value_label(d, next).empty())
-                    next = 0;
+                next = choice_slot(labels, next, slots);
             } else {
-                for (std::uint32_t i = 0; i < n && value_label(d, next).empty(); ++i) {
-                    next = (next + n - 1) % n;
+                for (std::uint32_t i = 0; i < n && !labels.has_label(next); ++i) {
+                    next = next.wrapped_back(choices);
                 }
-                if (value_label(d, next).empty())
+                if (!labels.has_label(next))
                     next = cur;
             }
             push_op(
-                proto::LinkOp::SetCoreOption{
-                    .row = proto::OptionRowIndex{l->index},
-                    .choice = proto::FieldValue{next}
-                }
+                proto::LinkOp::SetCoreOption{.row = proto::OptionRowIndex{l->index}, .choice = next}
             );
             if (d.arms_reset)
                 armed_ = true;
@@ -551,28 +618,20 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
             );
             return Transition{Transition::Kind::CloseAll};
         }
-        case cores::OptionRow::Kind::Link:
+        case cores::OptionRow::Kind::Link: {
             if (!select)
                 return Transition{};
-            switch (d.link) {
-                case cores::OptionRow::Link::SubPage:
-                    return Transition{
-                        Transition::Kind::Push,
-                        PageId::CoreSettings,
-                        ItemId{d.link_page.v}
-                    };
-                case cores::OptionRow::Link::LoadConfig:
-                    return Transition{Transition::Kind::Push, PageId::ConfigSlots, ItemId{0}};
-                case cores::OptionRow::Link::SaveConfig:
-                    return Transition{Transition::Kind::Push, PageId::ConfigSlots, ItemId{1}};
-                case cores::OptionRow::Link::Mt32Pi:
-                    return Transition{Transition::Kind::Push, PageId::Mt32Pi};
-                case cores::OptionRow::Link::None:
-                case cores::OptionRow::Link::kCount:
-                    break;
+
+            const LinkTarget* const found = link_target_of(d.link);
+            if (found == nullptr || found->page == PageId::None) {
+                ++refusals_;
+                return Transition{};
             }
-            ++refusals_;
-            return Transition{};
+            const LinkTarget& target = *found;
+            const ItemId focus = target.takes_row_argument ? item_submenu(d.link_page)
+                                                           : target.item;
+            return Transition{Transition::Kind::Push, target.page, focus};
+        }
         case cores::OptionRow::Kind::Host:
         case cores::OptionRow::Kind::Separator:
         case cores::OptionRow::Kind::kCount:

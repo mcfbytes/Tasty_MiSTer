@@ -18,10 +18,7 @@
 
 namespace mister::app::phase {
 
-struct Gen {
-    std::uint32_t v = 0;
-    friend constexpr bool operator==(Gen, Gen) = default;
-};
+using Gen = proto::BindGeneration;
 
 struct Idle {};
 
@@ -827,7 +824,7 @@ struct SwitchPhase {
         Origin origin = Origin::Design;
         PhaseKind at = PhaseKind::Idle;
         PhaseKind under = PhaseKind::Idle;
-        std::uint32_t gen = 0;
+        std::optional<Gen> gen{};
     };
 
     constexpr Taken take(Stimulus on, const Facts& f) noexcept {
@@ -835,7 +832,7 @@ struct SwitchPhase {
             .origin = judged(now, on),
             .at = kind(now),
             .under = kind(stage()),
-            .gen = gen_of(now).value_or(Gen{}).v
+            .gen = gen_of(now)
         };
         const Step step = advance(now, on, f);
         now = step.next;

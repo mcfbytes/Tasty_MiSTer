@@ -12,8 +12,8 @@ namespace {
 
 using Phase = proto::LinkOp::StagePhase;
 
-bool fits(std::uint64_t size, std::uint16_t chunk) noexcept {
-    return chunk != 0 || size <= PayloadPieces::kPieceBytes;
+bool fits(std::uint64_t size, WireChunk chunk) noexcept {
+    return !chunk.one_write() || size <= PayloadPieces::kPieceBytes;
 }
 
 }
@@ -67,12 +67,12 @@ PayloadPieces::Pass PayloadPieces::step(ILadderHost& host) {
         return end_;
     if (cut_owed_)
         return fail_(host);
-    if (word_bytes_ == 0)
+    if (!word_bytes_)
         word_bytes_ = host.link_word_bytes();
     while (host.link_in_flight() < kAhead) {
         const std::uint64_t left = size_ - sent_;
         const auto n = static_cast<std::size_t>(
-            std::min<std::uint64_t>(left, piece_bytes(frame_.chunk, word_bytes_))
+            std::min<std::uint64_t>(left, piece_bytes(frame_.chunk, *word_bytes_))
         );
         const bool first = sent_ == 0;
         const bool last = n == left;
@@ -97,9 +97,9 @@ PayloadPieces::Pass PayloadPieces::step(ILadderHost& host) {
             .dest = frame_.dest,
             .progress = frame_.progress,
             .phase = first ? (last ? Phase::Whole : Phase::Open)
-                           : (last ? Phase::Close : Phase::Piece),
-            .chunk = frame_.chunk
+                           : (last ? Phase::Close : Phase::Piece)
         };
+        frame_.chunk.stamp(op);
         if (last) {
             op.region = frame_.region;
             op.act = frame_.act;
@@ -118,11 +118,8 @@ PayloadPieces::Pass PayloadPieces::fail_(ILadderHost& host) {
     if (sent_ == 0)
         return end_ = Pass::Failed;
     cut_owed_ = true;
-    const proto::LinkOp::StagePayload cut{
-        .dest = frame_.dest,
-        .phase = Phase::Close,
-        .chunk = frame_.chunk
-    };
+    proto::LinkOp::StagePayload cut{.dest = frame_.dest, .phase = Phase::Close};
+    frame_.chunk.stamp(cut);
     if (!host.order(cut))
         return Pass::Waiting;
     cut_owed_ = false;

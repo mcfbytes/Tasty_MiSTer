@@ -9,10 +9,12 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <cstdio>
+#include <cstdint>
+#include <span>
 #include <string_view>
 
 #include "infra/unique_fd.h"
+#include "os/path_buf.h"
 #include "os/ui_vt_console.h"
 
 namespace mister::os {
@@ -24,6 +26,17 @@ UniqueFd open_rw(const char* path) noexcept {
     return UniqueFd{::open(path, O_RDWR | O_NOCTTY | O_CLOEXEC | O_NONBLOCK)};
 }
 
+[[nodiscard]] constexpr int vt_arg(VtNumber vt) noexcept {
+    return static_cast<int>(vt.v);
+}
+
+UniqueFd open_vt(VtNumber vt) noexcept {
+    char path[kVtTtyPathBuf];
+    if (!format_path(std::span<char>(path), "/dev/tty%d", vt_arg(vt)))
+        return {};
+    return open_rw(path);
+}
+
 void write_all(int fd, std::string_view s) noexcept {
     while (!s.empty()) {
         const ssize_t n = ::write(fd, s.data(), s.size());
@@ -33,26 +46,22 @@ void write_all(int fd, std::string_view s) noexcept {
     }
 }
 
-void vt_tty(char (&path)[16], int vt) noexcept {
-    (void)std::snprintf(path, sizeof path, "/dev/tty%d", vt);
-}
-
-std::optional<int> active_op() noexcept {
+std::optional<VtNumber> active_op() noexcept {
     const UniqueFd fd = open_rw(kConsole);
     if (!fd.valid())
         return std::nullopt;
     vt_stat st{};
     if (::ioctl(fd.get(), VT_GETSTATE, &st) != 0)
         return std::nullopt;
-    return static_cast<int>(st.v_active);
+    return VtNumber{st.v_active};
 }
 
-[[nodiscard]] Ex<void> activate_op(int vt) noexcept {
+[[nodiscard]] Ex<void> activate_op(VtNumber vt) noexcept {
     const UniqueFd fd = open_rw(kConsole);
     if (!fd.valid())
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    if (::ioctl(fd.get(), VT_ACTIVATE, vt) != 0)
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
+    if (::ioctl(fd.get(), VT_ACTIVATE, vt_arg(vt)) != 0)
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
     return {};
 }
 
@@ -83,10 +92,8 @@ void restore_text_op(const char* tty) noexcept {
     write_all(fd.get(), kShow);
 }
 
-std::optional<bool> text_mode_op(int vt) noexcept {
-    char path[16];
-    vt_tty(path, vt);
-    const UniqueFd fd = open_rw(path);
+std::optional<bool> text_mode_op(VtNumber vt) noexcept {
+    const UniqueFd fd = open_vt(vt);
     if (!fd.valid())
         return std::nullopt;
     int mode = 0;
@@ -95,10 +102,8 @@ std::optional<bool> text_mode_op(int vt) noexcept {
     return mode == KD_TEXT;
 }
 
-void graphics_op(int vt) noexcept {
-    char path[16];
-    vt_tty(path, vt);
-    const UniqueFd fd = open_rw(path);
+void graphics_op(VtNumber vt) noexcept {
+    const UniqueFd fd = open_vt(vt);
     if (!fd.valid())
         return;
     constexpr std::string_view kHide = "\033[0m\033[?25l";
@@ -106,19 +111,15 @@ void graphics_op(int vt) noexcept {
     (void)::ioctl(fd.get(), KDSETMODE, KD_GRAPHICS);
 }
 
-void text_op(int vt) noexcept {
-    char path[16];
-    vt_tty(path, vt);
-    const UniqueFd fd = open_rw(path);
+void text_op(VtNumber vt) noexcept {
+    const UniqueFd fd = open_vt(vt);
     if (!fd.valid())
         return;
     (void)::ioctl(fd.get(), KDSETMODE, KD_TEXT);
 }
 
-void cursor_op(int vt, bool shown) noexcept {
-    char path[16];
-    vt_tty(path, vt);
-    const UniqueFd fd = open_rw(path);
+void cursor_op(VtNumber vt, bool shown) noexcept {
+    const UniqueFd fd = open_vt(vt);
     if (!fd.valid())
         return;
     write_all(fd.get(), shown ? std::string_view{"\033[?25h"} : std::string_view{"\033[?25l"});
@@ -126,12 +127,12 @@ void cursor_op(int vt, bool shown) noexcept {
 
 }
 
-std::optional<int> LinuxVtConsole::active() noexcept {
+std::optional<VtNumber> LinuxVtConsole::active() noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
     return active_op();
 }
 
-Ex<void> LinuxVtConsole::activate(int vt) noexcept {
+Ex<void> LinuxVtConsole::activate(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
     return activate_op(vt);
 }
@@ -146,32 +147,32 @@ void LinuxVtConsole::restore_text(const char* tty) noexcept {
     restore_text_op(tty);
 }
 
-std::optional<bool> LinuxVtConsole::text_mode(int vt) noexcept {
+std::optional<bool> LinuxVtConsole::text_mode(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
     return text_mode_op(vt);
 }
 
-void LinuxVtConsole::graphics(int vt) noexcept {
+void LinuxVtConsole::graphics(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
     graphics_op(vt);
 }
 
-void LinuxVtConsole::text(int vt) noexcept {
+void LinuxVtConsole::text(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
     text_op(vt);
 }
 
-void LinuxVtConsole::cursor(int vt, bool shown) noexcept {
+void LinuxVtConsole::cursor(VtNumber vt, bool shown) noexcept {
     TASTY_SEAT_BODY(LinuxVtConsole);
     cursor_op(vt, shown);
 }
 
-std::optional<int> UiVtConsole::active() noexcept {
+std::optional<VtNumber> UiVtConsole::active() noexcept {
     TASTY_SEAT_BODY(UiVtConsole);
     return active_op();
 }
 
-Ex<void> UiVtConsole::activate(int vt) noexcept {
+Ex<void> UiVtConsole::activate(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(UiVtConsole);
     return activate_op(vt);
 }
@@ -186,22 +187,22 @@ void UiVtConsole::restore_text(const char* tty) noexcept {
     restore_text_op(tty);
 }
 
-std::optional<bool> UiVtConsole::text_mode(int vt) noexcept {
+std::optional<bool> UiVtConsole::text_mode(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(UiVtConsole);
     return text_mode_op(vt);
 }
 
-void UiVtConsole::graphics(int vt) noexcept {
+void UiVtConsole::graphics(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(UiVtConsole);
     graphics_op(vt);
 }
 
-void UiVtConsole::text(int vt) noexcept {
+void UiVtConsole::text(VtNumber vt) noexcept {
     TASTY_SEAT_BODY(UiVtConsole);
     text_op(vt);
 }
 
-void UiVtConsole::cursor(int vt, bool shown) noexcept {
+void UiVtConsole::cursor(VtNumber vt, bool shown) noexcept {
     TASTY_SEAT_BODY(UiVtConsole);
     cursor_op(vt, shown);
 }

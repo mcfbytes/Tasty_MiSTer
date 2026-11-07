@@ -12,13 +12,11 @@
 #include "cores/loader.h"
 #include "cores/loader_memo.h"
 #include "cores/md5.h"
-#include "cores/n64_db.h"
 #include "cores/n64_db_reader.h"
-#include "cores/n64_db_tags.h"
+#include "cores/n64_detect.h"
 #include "cores/n64_file_route.h"
-#include "cores/n64_ipl3.h"
 #include "cores/n64_load_facts.h"
-#include "cores/n64_options.h"
+#include "cores/n64_patch_table.h"
 #include "cores/n64_rom.h"
 #include "cores/n64dd_disk_map.h"
 #include "cores/n64dd_expander.h"
@@ -41,26 +39,12 @@ public:
     static constexpr std::size_t kHeaderBytes = 4096;
     static constexpr std::size_t kDbChunkBytes = N64DbReader::kChunkBytes;
 
-    static constexpr std::size_t kInfoChars = 255;
-
     enum class Shape : std::uint8_t { Rom, Ipl, Disk };
 
     static constexpr std::size_t kRamStepBytes = 64u * 1024u;
     using Path = FixedStr<svc::kSlotPathCap, StrFit::Reject>;
 
-    struct RomFacts {
-        n64::ByteOrder order = n64::ByteOrder::Unknown;
-        n64::CartId cart_id{};
-        n64::InternalName internal_name{};
-        FixedStr<33, StrFit::Reject> header_md5{};
-        FixedStr<33, StrFit::Reject> file_md5{};
-        svc::Crc32 crc32{};
-        std::uint64_t bytes = 0;
-
-        std::uint8_t detected = 0;
-        std::uint8_t controllers[4]{};
-        bool homebrew = false;
-    };
+    using RomFacts = n64::RomFacts;
 
     N64Loader(const svc::Vfs& vfs, std::string_view core_dir, bool turbo, LoaderMemo& memo) noexcept
         : vfs_(vfs),
@@ -99,9 +83,7 @@ public:
 
     [[nodiscard]] const RomFacts& rom_facts() const noexcept { return facts_; }
 
-    [[nodiscard]] const n64::DbTags& db_tags() const noexcept { return tags_; }
-
-    [[nodiscard]] std::string_view auto_detect_info() const noexcept { return info_.view(); }
+    [[nodiscard]] std::string_view auto_detect_info() const noexcept { return ladder_.info(); }
 
     [[nodiscard]] std::uint32_t db_long_lines() const noexcept { return reader_.long_lines(); }
 
@@ -118,7 +100,7 @@ private:
         n64dd::NddExpander expander{};
         Path path{};
         Path ram_path{};
-        std::uint32_t load_addr = 0;
+        hal::FabricAddr load_addr{};
         std::unique_ptr<svc::IFile> ram_file{};
         std::uint64_t ram_off = 0;
         std::uint32_t ram_loaded = 0;
@@ -137,21 +119,7 @@ private:
     [[nodiscard]] Ex<bool> load_ram_step_(ICoreWindow& window);
     void remember_boot_(std::string_view path) noexcept;
     void analyze_header_(std::span<const std::uint8_t> head);
-    void run_detect_ladder_();
     void apply_patches_(ICoreWindow* window) noexcept;
-    [[nodiscard]] std::uint8_t lookup_and_apply_(n64::DbKey kind, std::string_view key);
-    void apply_tags_(const n64::DbTags& t);
-    [[nodiscard]] bool apply_homebrew_();
-    void apply_unknown_defaults_();
-    void apply_ipl3_(const n64::Ipl3Detect& d);
-    void compose_info_();
-
-    [[nodiscard]] std::uint32_t read_(n64::StatusField f) const noexcept;
-    void write_(n64::StatusField f, std::uint32_t v) noexcept;
-    [[nodiscard]] bool auto_detect_() const noexcept;
-    [[nodiscard]] bool auto_pak_() const noexcept;
-    [[nodiscard]] n64::MemoryType cart_save_type_() const noexcept;
-    void set_cart_save_type_(n64::MemoryType t) noexcept;
 
     [[nodiscard]] static constexpr std::uint8_t raw(Shape s) noexcept {
         return static_cast<std::uint8_t>(s);
@@ -174,11 +142,10 @@ private:
     bool rom_pending_ = false;
     bool ipl_boot_ = false;
     RomFacts facts_{};
-    n64::DbTags tags_{};
-    std::array<std::uint64_t, 2> bootcode_{};
-    FixedStr<kInfoChars + 1, StrFit::Clip> info_{};
-    mra::Md5 md5_{};
     n64::LoadFacts slab_{};
+
+    n64::DetectLadder ladder_{reader_};
+    mra::Md5 md5_{};
     std::uint32_t patches_applied_ = 0;
     std::uint32_t patch_errors_ = 0;
     bool concluded_ = false;

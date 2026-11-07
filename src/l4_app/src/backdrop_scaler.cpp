@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <optional>
 
 namespace mister::app {
 namespace {
@@ -14,36 +16,6 @@ namespace {
         | (static_cast<std::uint16_t>(g >> 2) << 5)
         | (b >> 3)
     );
-}
-
-[[nodiscard]] HdRect clip_box(HdRect r, std::int32_t w, std::int32_t h) noexcept {
-    if (r.w <= 0 || r.h <= 0)
-        return {};
-    if (r.x < 0) {
-        r.w += r.x;
-        r.x = 0;
-    }
-    if (r.y < 0) {
-        r.h += r.y;
-        r.y = 0;
-    }
-    if (r.w <= 0 || r.h <= 0 || r.x >= w || r.y >= h)
-        return {};
-    if (r.x + r.w > w)
-        r.w = w - r.x;
-    if (r.y + r.h > h)
-        r.h = h - r.y;
-    return r;
-}
-
-[[nodiscard]] HdRect intersect(HdRect a, HdRect b) noexcept {
-    const std::int32_t x0 = a.x > b.x ? a.x : b.x;
-    const std::int32_t y0 = a.y > b.y ? a.y : b.y;
-    const std::int32_t x1 = (a.x + a.w) < (b.x + b.w) ? (a.x + a.w) : (b.x + b.w);
-    const std::int32_t y1 = (a.y + a.h) < (b.y + b.h) ? (a.y + a.h) : (b.y + b.h);
-    if (x1 <= x0 || y1 <= y0)
-        return {};
-    return HdRect{x0, y0, x1 - x0, y1 - y0};
 }
 
 }
@@ -118,71 +90,56 @@ void BackdropScaler::ensure_xmap_(
 }
 
 HdRect BackdropScaler::scale(
-    std::span<const std::byte> rgb,
+    RgbRows src,
     std::uint16_t src_w,
-    std::uint16_t src_h,
-    std::uint16_t src_line,
-    std::span<std::uint16_t> frame,
-    std::uint32_t stride_px,
+    PxPlane dst,
     HdRect game,
     HdRect picture,
     bool report
 ) noexcept {
     TASTY_SEAT_BODY(BackdropScaler);
-    if (stride_px == 0 || frame.empty() || src_w == 0 || src_h == 0 || src_line < src_w * 3u)
+    if (src_w == 0
+        || src.rows == PictureRows{}
+        || dst.row_px == 0
+        || dst.pixels.empty()
+        || src.stride.lacks(rgb_row_of(src_w)))
         return {};
-    const auto frame_h = static_cast<std::int32_t>(frame.size() / stride_px);
-    const auto frame_w = static_cast<std::int32_t>(stride_px);
-    game = clip_box(game, frame_w, frame_h);
+    game = game.intersect(dst.bounds());
     if (game.w <= 0 || game.h <= 0)
         return {};
-    paint_band_(
-        rgb,
-        src_w,
-        src_h,
-        src_line,
-        frame,
-        stride_px,
-        game,
-        picture,
-        game.y,
-        game.y + game.h
-    );
+    paint_band_(src, src_w, dst, game, picture, game.y, game.y + game.h);
     return report ? game : HdRect{};
 }
 
 void BackdropScaler::scale_rows(
-    std::span<const std::byte> rgb,
+    RgbRows src,
     std::uint16_t src_w,
-    std::uint16_t src_h,
-    std::uint16_t src_line,
-    std::span<std::uint16_t> frame,
-    std::uint32_t stride_px,
+    PxPlane dst,
     HdRect game,
     HdRect picture,
     std::int32_t y0,
     std::int32_t y1
 ) noexcept {
     TASTY_SEAT_BODY(BackdropScaler);
-    if (stride_px == 0 || frame.empty() || src_w == 0 || src_h == 0 || src_line < src_w * 3u)
+    if (src_w == 0
+        || src.rows == PictureRows{}
+        || dst.row_px == 0
+        || dst.pixels.empty()
+        || src.stride.lacks(rgb_row_of(src_w)))
         return;
-    const auto frame_h = static_cast<std::int32_t>(frame.size() / stride_px);
-    const auto frame_w = static_cast<std::int32_t>(stride_px);
-    game = clip_box(game, frame_w, frame_h);
+    game = game.intersect(dst.bounds());
     if (game.w <= 0 || game.h <= 0)
         return;
     const auto band0 = y0 > game.y ? y0 : game.y;
     const auto band1 = y1 < game.y + game.h ? y1 : game.y + game.h;
     if (band0 >= band1)
         return;
-    paint_band_(rgb, src_w, src_h, src_line, frame, stride_px, game, picture, band0, band1);
+    paint_band_(src, src_w, dst, game, picture, band0, band1);
 }
 
 void BackdropScaler::scale_target_rows(
-    std::span<const std::byte> rgb,
+    RgbRows src,
     std::uint16_t src_w,
-    std::uint16_t src_h,
-    std::uint16_t src_line,
     HdRect picture,
     const BackdropScalerTarget& target,
     std::int32_t y0,
@@ -199,10 +156,7 @@ void BackdropScaler::scale_target_rows(
     const auto band1 = y1 < r.y + r.h ? y1 : r.y + r.h;
     if (band0 >= band1)
         return;
-    const bool usable = src_w != 0
-        && src_h != 0
-        && src_line >= src_w * 3u
-        && rgb.size() >= static_cast<std::size_t>(src_line) * src_h;
+    const bool usable = src_w != 0 && src.covers(rgb_row_of(src_w), src.rows);
     if (!usable) {
         for (std::int32_t y = band0; y < band1; ++y) {
             const auto row = target.px.subspan(static_cast<std::size_t>(y - r.y) * w, w);
@@ -223,18 +177,20 @@ void BackdropScaler::scale_target_rows(
     const auto dim = [q](std::byte c) noexcept {
         return static_cast<std::uint8_t>((static_cast<std::uint32_t>(c) * q) >> 8);
     };
-    std::uint32_t packed_sy = 0xFFFFFFFFu;
+    std::optional<PictureRow> packed_sy;
     for (std::int32_t y = band0; y < band1; ++y) {
-        auto sy = static_cast<std::uint32_t>(y - picture.y)
-            * src_h
-            / static_cast<std::uint32_t>(picture.h);
-        if (sy >= src_h)
-            sy = static_cast<std::uint32_t>(src_h - 1);
+        const PictureRow sy = src.rows.sample_row(
+            static_cast<std::uint32_t>(y - picture.y),
+            PictureRows{static_cast<std::uint16_t>(picture.h)}
+        );
         if (sy != packed_sy) {
             packed_sy = sy;
-            const auto src = rgb.subspan(static_cast<std::size_t>(sy) * src_line);
+            const auto row = src.from_row(sy);
             for (std::size_t x = 0; x < w; ++x) {
-                const auto p = src.subspan(static_cast<std::size_t>(target_cols_[x]) * 3u, 3);
+                const auto p = row.subspan(
+                    static_cast<std::size_t>(target_cols_[x]) * kRgbPixelBytes,
+                    kRgbPixelBytes
+                );
                 target_px_[x] = pack565(dim(p[0]), dim(p[1]), dim(p[2]));
             }
         }
@@ -246,32 +202,26 @@ void BackdropScaler::scale_target_rows(
 }
 
 void BackdropScaler::paint_band_(
-    std::span<const std::byte> rgb,
+    RgbRows src,
     std::uint16_t src_w,
-    std::uint16_t src_h,
-    std::uint16_t src_line,
-    std::span<std::uint16_t> frame,
-    std::uint32_t stride_px,
+    PxPlane dst,
     HdRect game,
     HdRect picture,
     std::int32_t y0,
     std::int32_t y1
 ) noexcept {
-    const auto frame_h = static_cast<std::int32_t>(frame.size() / stride_px);
-    const auto frame_w = static_cast<std::int32_t>(stride_px);
-    const HdRect shown = intersect(clip_box(picture, frame_w, frame_h), game);
+    const HdRect shown = picture.intersect(dst.bounds()).intersect(game);
     const auto gx0 = game.x;
     const auto gx1 = game.x + game.w;
-    const bool has_shown = shown.w > 0 && shown.h > 0;
-    const auto bytes = static_cast<std::size_t>(src_line) * src_h;
+    const bool has_shown = !shown.is_empty();
 
-    const bool draw_shown = has_shown && rgb.size() >= bytes;
+    const bool draw_shown = has_shown && src.covers(rgb_row_of(src_w), src.rows);
     const auto cx0 = shown.x;
     const auto cx1 = shown.x + shown.w;
     const auto cy0 = shown.y;
     const auto cy1 = shown.y + shown.h;
     for (std::int32_t y = y0; y < y1; ++y) {
-        auto* row = frame.data() + static_cast<std::size_t>(y) * stride_px;
+        auto* row = dst.row(PlaneRow{y}).data();
         if (draw_shown && y >= cy0 && y < cy1) {
             for (std::int32_t x = gx0; x < cx0; ++x)
                 row[x] = primary_;
@@ -294,20 +244,19 @@ void BackdropScaler::paint_band_(
     const auto dim = [](std::uint8_t c, std::uint32_t q) noexcept {
         return static_cast<std::uint8_t>((static_cast<std::uint32_t>(c) * q) >> 8);
     };
-    std::uint32_t packed_sy = 0xFFFFFFFFu;
+    std::optional<PictureRow> packed_sy;
     for (std::int32_t y = dy0; y < dy1; ++y) {
-        auto sy = static_cast<std::uint32_t>(y - picture.y)
-            * src_h
-            / static_cast<std::uint32_t>(picture.h);
-        if (sy >= src_h)
-            sy = static_cast<std::uint32_t>(src_h - 1);
+        const PictureRow sy = src.rows.sample_row(
+            static_cast<std::uint32_t>(y - picture.y),
+            PictureRows{static_cast<std::uint16_t>(picture.h)}
+        );
         if (sy != packed_sy) {
             packed_sy = sy;
-            const auto* src = rgb.data() + static_cast<std::size_t>(sy) * src_line;
+            const auto* line = src.from_row(sy).data();
             for (std::int32_t x = 0; x < shown.w; ++x) {
                 const auto sx = xmap_[static_cast<std::size_t>(x)];
                 const std::uint32_t q = qmap_[static_cast<std::size_t>(x)];
-                const auto* p = src + static_cast<std::size_t>(sx) * 3u;
+                const auto* p = line + static_cast<std::size_t>(sx) * kRgbPixelBytes;
                 row_px_[static_cast<std::size_t>(x)] = pack565(
                     dim(static_cast<std::uint8_t>(p[0]), q),
                     dim(static_cast<std::uint8_t>(p[1]), q),
@@ -315,8 +264,8 @@ void BackdropScaler::paint_band_(
                 );
             }
         }
-        auto* dst = frame.data() + static_cast<std::size_t>(y) * stride_px + shown.x;
-        std::memcpy(dst, row_px_.data(), static_cast<std::size_t>(shown.w) * sizeof(std::uint16_t));
+        auto* out = dst.row(PlaneRow{y}).subspan(static_cast<std::size_t>(shown.x)).data();
+        std::memcpy(out, row_px_.data(), static_cast<std::size_t>(shown.w) * sizeof(std::uint16_t));
     }
 }
 

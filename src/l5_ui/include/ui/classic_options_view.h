@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
+#include "app/page_description.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
 #include "ui/options_view.h"
@@ -44,6 +46,25 @@ private:
     [[nodiscard]] RowCount osd_height() const noexcept { return kOsdRows; }
 
     [[nodiscard]] std::optional<Glyph> leftchar_of(proto::OsdRow row, bool has_ring) const noexcept;
+
+    struct Drawn {
+        app::PageDescription::Row hd;
+        const OptionItem* item;
+    };
+
+    struct DrawnList {
+        std::vector<Drawn> rows;
+        RowIndex selected{};
+    };
+
+    struct Line {
+        std::string text;
+        bool emitted = false;
+    };
+
+    [[nodiscard]] DrawnList compose_drawn() const;
+
+    void compose_lines(RowSpan<Line> lines) const;
 
     const OptionItem* row_at(RowCount row) const;
 

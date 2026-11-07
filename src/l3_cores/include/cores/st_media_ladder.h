@@ -72,7 +72,7 @@ private:
     std::uint8_t slot_ = 0;
     proto::FileId file_{};
     proto::ActKey act_{};
-    std::int64_t due_ns_ = 0;
+    std::chrono::nanoseconds due_ns_{};
     std::array<std::string, kLadderCarrySlots> paths_{};
 };
 

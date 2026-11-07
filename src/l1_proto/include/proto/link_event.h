@@ -9,6 +9,7 @@
 #include "infra/error.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "hal/types.h"
 #include "infra/spsc_ring.h"
 #include "proto/save_ask.h"
 #include "proto/types.h"
@@ -90,14 +91,14 @@ struct LinkEvent {
         bool restore_owed = false;
         bool cheat_records = false;
         std::uint8_t pad_{};
-        std::uint16_t bind_gen = 0;
+        BindGeneration bind_gen{};
         Errc err{};
     };
 
     struct IdentityMatched {
         static constexpr Kind kKind = Kind::IdentityMatched;
         bool dual_sdram = false;
-        std::uint8_t type_byte = 0;
+        hal::CoreTypeByte type_byte{};
         BindGeneration bind_gen{};
         bool wide = false;
         std::uint8_t pad_{};

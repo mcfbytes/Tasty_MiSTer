@@ -12,10 +12,7 @@ Ex<FrameCount> FrameCounterRead::read(Link& link) {
         return std::unexpected(r.error());
     link.close();
     const std::uint16_t w = *r;
-    return FrameCount{
-        .supported = (w & 0x100u) != 0u,
-        .count = static_cast<std::uint8_t>(w & 0xFFu)
-    };
+    return FrameCount{.supported = (w & 0x100u) != 0u, .count = static_cast<std::uint8_t>(w)};
 }
 
 }

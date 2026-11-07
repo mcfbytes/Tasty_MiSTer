@@ -178,7 +178,7 @@ void VideoPump::on_core_loaded(bool front_end) {
     front_end_ = front_end;
     video_->reset_resolution_gate();
     geo_edges_ = 0;
-    geo_gen_seen_ = video_->resolution_generation().v;
+    geo_gen_seen_ = video_->resolution_generation();
     publish_scaling_policy();
 }
 
@@ -204,7 +204,7 @@ void VideoPump::tick() {
         if (r.error().code != Errc::not_found)
             last_error_ = r.error();
     }
-    const auto g = video_->resolution_generation().v;
+    const auto g = video_->resolution_generation();
     if (g != geo_gen_seen_) {
         geo_gen_seen_ = g;
         ++geo_edges_;
@@ -226,10 +226,10 @@ void VideoPump::publish_monitoring() noexcept {
 
     GeometryRecord g{};
     const svc::VideoSample& s = video_->info();
-    g.valid = geo_edges_ != 0u || s.res != 0u || s.active.width != 0u;
+    g.valid = geo_edges_ != 0u || s.res.v != 0u || s.active.width != 0u;
     g.fb_en = s.fb_en();
     g.rotated = s.rotated();
-    g.res = s.res;
+    g.res = s.res.v;
     g.width = s.active.width;
     g.height = s.active.height;
     g.vtime = s.vtime;
@@ -246,7 +246,7 @@ void VideoPump::publish_scaling_policy() noexcept {
     p.filter_mode = filter_mode_;
     p.front_end = front_end_;
     wire_.publish_policy(p);
-    wire_.publish_ar_custom(ini_.ar_cust[0], ini_.ar_cust[1], ini_.ar_cust[2], ini_.ar_cust[3]);
+    wire_.publish_ar_custom(ini_.ar_cust);
     wire_.publish_shadow_mask(0x0000);
 }
 
@@ -386,7 +386,7 @@ VideoPump::FamilyMode VideoPump::resolve_one(std::string_view spec, bool count_f
                 video_->supports_pr()
             );
             if (parsed->how == svc::ModeRequest::PresetIndex) {
-                out.index = static_cast<std::uint8_t>(parsed->preset_index & 0xFFu);
+                out.index = VideoModeIndex{static_cast<std::uint8_t>(parsed->preset_index)};
             }
             if (parsed->raw_pll) {
                 out.have_raw_pll = true;
@@ -399,8 +399,8 @@ VideoPump::FamilyMode VideoPump::resolve_one(std::string_view spec, bool count_f
     if (count_fallback)
         ++stats_.parse_fallbacks;
     out.stored = svc::video_timing::preset_fallback(support_fhd_, video_->supports_pr());
-    constexpr std::uint8_t kPresetDefault = 0;
-    constexpr std::uint8_t kPreset1080p60 = 8;
+    constexpr VideoModeIndex kPresetDefault{0};
+    constexpr VideoModeIndex kPreset1080p60{8};
     out.index = support_fhd_ ? kPreset1080p60 : kPresetDefault;
     return out;
 }
@@ -453,7 +453,7 @@ Ex<void> VideoPump::apply_family(svc::VmodeFamily f, double fpix_mhz) {
 
     const std::uint32_t watermark = wire_.stats().emitted;
 
-    stats_.last_mode_index = VideoModeIndex{fm.index};
+    stats_.last_mode_index = fm.index;
     stats_.last_fpix_khz = fpix_khz(clock);
 
     svc::PllBlock pll_block{};

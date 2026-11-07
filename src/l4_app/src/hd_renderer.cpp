@@ -13,50 +13,14 @@
 #include "app/hd_layout.h"
 #include "app/hd_theme.h"
 #include "app/hd_themes.h"
+#include "app/log_clock.h"
 #include "infra/byte_view.h"
 
 namespace mister::app {
 namespace {
 
-HdRect box_of(HdLayout::Rect r) noexcept {
-    return HdRect{r.x, r.y, r.w, r.h};
-}
-
-[[nodiscard]] HdRect intersect(HdRect a, HdRect b) noexcept {
-    if (a.w <= 0 || a.h <= 0 || b.w <= 0 || b.h <= 0)
-        return {};
-    const std::int32_t x0 = a.x > b.x ? a.x : b.x;
-    const std::int32_t y0 = a.y > b.y ? a.y : b.y;
-    const std::int32_t x1 = (a.x + a.w) < (b.x + b.w) ? (a.x + a.w) : (b.x + b.w);
-    const std::int32_t y1 = (a.y + a.h) < (b.y + b.h) ? (a.y + a.h) : (b.y + b.h);
-    if (x1 <= x0 || y1 <= y0)
-        return {};
-    return HdRect{x0, y0, x1 - x0, y1 - y0};
-}
-
-[[nodiscard]] std::uint32_t us_of(std::uint64_t t0, std::uint64_t t1) noexcept {
-    const std::uint64_t us = (t1 >= t0 ? t1 - t0 : 0) / 1000u;
-    return us > 0xffffffffu ? 0xffffffffu : static_cast<std::uint32_t>(us);
-}
-
-HdRect clip_box(HdRect r, std::int32_t w, std::int32_t h) noexcept {
-    if (r.w <= 0 || r.h <= 0)
-        return {};
-    if (r.x < 0) {
-        r.w += r.x;
-        r.x = 0;
-    }
-    if (r.y < 0) {
-        r.h += r.y;
-        r.y = 0;
-    }
-    if (r.w <= 0 || r.h <= 0 || r.x >= w || r.y >= h)
-        return {};
-    if (r.x + r.w > w)
-        r.w = w - r.x;
-    if (r.y + r.h > h)
-        r.h = h - r.y;
-    return r;
+[[nodiscard]] StatusMicros span_us(std::uint64_t from, std::uint64_t to) noexcept {
+    return us_between(LogStamp{from}, LogStamp{to});
 }
 
 }
@@ -92,8 +56,9 @@ void HdRenderer::begin() noexcept {
     st_ = {};
     st_.fps = pacer_.fps();
 
+    constexpr std::uint8_t kSlotsMapped = 1u, kScalerMapped = 2u;
     st_.uio = static_cast<std::uint8_t>(
-        (slots_ && slots_->uio_bound() ? 1u : 0u) | (scaler_uio_ ? 2u : 0u)
+        (slots_ && slots_->uio_bound() ? kSlotsMapped : 0u) | (scaler_uio_ ? kScalerMapped : 0u)
     );
     if (raster_() || sampler_) {
         scaler_.open(theme_);
@@ -378,8 +343,8 @@ std::uint64_t HdRenderer::wait_ns_(std::uint64_t now) const noexcept {
 
 bool HdRenderer::ensure_frame_() noexcept {
     const HdSurface& s = ask_.surface;
-    const std::size_t bytes = static_cast<std::size_t>(s.stride) * s.h;
-    const bool stride_ok = s.stride >= s.w * 2u && (s.stride % 2u) == 0u;
+    const std::size_t bytes = s.frame_bytes();
+    const bool stride_ok = s.stride_ok();
     const bool fits = slots_
         && bytes <= kMaxFrameBytes
         && static_cast<std::size_t>(s.slot[0]) + bytes <= slots_->region().len
@@ -390,7 +355,7 @@ bool HdRenderer::ensure_frame_() noexcept {
         publish_();
         return false;
     }
-    const std::size_t px = bytes / 2u;
+    const std::size_t px = s.pixel_count();
     if (frame_.size() != px)
         frame_.assign(px, 0);
     return true;
@@ -436,7 +401,7 @@ void HdRenderer::start_epoch_(const HdLayout& layout) noexcept {
         static_cast<std::int32_t>(ask_.surface.w),
         static_cast<std::int32_t>(ask_.surface.h)
     );
-    ledger_.reset(box_of(layout.panel), box_of(layout.band), box_of(hd_beside_panel(layout)));
+    ledger_.reset(layout.panel, layout.band, hd_beside_panel(layout));
     const std::uint16_t fill = hd_pack565(theme_.primary);
     std::fill(frame_.begin(), frame_.end(), fill);
     job_.reset_canvas();
@@ -466,8 +431,8 @@ void HdRenderer::draw_(std::uint64_t now) noexcept {
         s.h,
         hd_game_display_of(look_)
     );
-    const std::uint32_t stride_px = s.stride / 2u;
-    const HdLayout::Rect menu = hd_menu_box(layout);
+    const std::uint32_t stride_px = s.row_len();
+    const HdRect menu = hd_menu_box(layout);
     const std::size_t origin_i = static_cast<std::size_t>(menu.y) * stride_px
         + static_cast<std::size_t>(menu.x);
     if (menu.x < 0 || menu.y < 0 || origin_i > frame_.size()) {
@@ -515,8 +480,8 @@ void HdRenderer::draw_(std::uint64_t now) noexcept {
 
 void HdRenderer::panel_step_(const HdLayout& layout, bool asked) noexcept {
     const HdSurface& s = ask_.surface;
-    const std::uint32_t stride_px = s.stride / 2u;
-    const HdLayout::Rect menu = hd_menu_box(layout);
+    const std::uint32_t stride_px = s.row_len();
+    const HdRect menu = hd_menu_box(layout);
     const std::size_t origin_i = static_cast<std::size_t>(menu.y) * stride_px
         + static_cast<std::size_t>(menu.x);
     const std::uint64_t t0 = now_ns_();
@@ -538,9 +503,7 @@ void HdRenderer::panel_step_(const HdLayout& layout, bool asked) noexcept {
     }
     canvas_fresh_ = false;
     const std::uint64_t tr1 = now_ns_();
-    st_.render_us_last = us_of(t0, tr1);
-    if (st_.render_us_last > st_.render_us_max)
-        st_.render_us_max = st_.render_us_last;
+    st_.render_us.note(span_us(t0, tr1));
     panel_owed_ = false;
 
     struct Box {
@@ -557,13 +520,8 @@ void HdRenderer::panel_step_(const HdLayout& layout, bool asked) noexcept {
         drawn.x += menu.x;
         drawn.y += menu.y;
         for (const HdDirtyLedger::Region region : kCards) {
-            const HdLayout::Rect card = region == HdDirtyLedger::Region::Band ? layout.band
-                                                                              : layout.panel;
-            const HdRect clipped = clip_box(
-                intersect(drawn, box_of(card)),
-                static_cast<std::int32_t>(s.w),
-                static_cast<std::int32_t>(s.h)
-            );
+            const HdRect card = region == HdDirtyLedger::Region::Band ? layout.band : layout.panel;
+            const HdRect clipped = drawn.intersect(card).intersect(s.bounds());
             if (clipped.w <= 0 || clipped.h <= 0)
                 continue;
             if (std::int64_t{clipped.w} * clipped.h > max_px)
@@ -583,9 +541,7 @@ void HdRenderer::panel_step_(const HdLayout& layout, bool asked) noexcept {
     }
     place_(tr1, wrote);
     const std::uint64_t t1 = now_ns_();
-    st_.panel_us_last = us_of(t0, t1);
-    if (st_.panel_us_last > st_.panel_us_max)
-        st_.panel_us_max = st_.panel_us_last;
+    st_.panel_us.note(span_us(t0, t1));
     if (t1 >= t0 && t1 - t0 >= kDeadlineNs)
         deadline_ = true;
 }
@@ -615,12 +571,12 @@ bool HdRenderer::copy_stale_(std::uint64_t now) noexcept {
 bool HdRenderer::spills_(const HdDirty& dirty, const HdLayout& layout) const noexcept {
     if (layout.band.h <= 0)
         return false;
-    const HdLayout::Rect menu = hd_menu_box(layout);
+    const HdRect menu = hd_menu_box(layout);
     for (std::uint8_t i = 0; i < dirty.count && i < dirty.rects.size(); ++i) {
         HdRect drawn = dirty.rects[i];
         drawn.x += menu.x;
         drawn.y += menu.y;
-        const HdRect over = intersect(drawn, box_of(layout.game));
+        const HdRect over = drawn.intersect(layout.game);
         if (over.w > 0 && over.h > 0)
             return true;
     }
@@ -670,9 +626,7 @@ bool HdRenderer::flip_(std::uint64_t now) noexcept {
     const CanvasGen gen = holds_[o].gen;
     if (gen != shown_gen_ && gen != fill_gen_ && gen != CanvasGen{}) {
         vis_.backdrop();
-        st_.bd_us_last = us_of(gen_started_, sent);
-        if (st_.bd_us_last > st_.bd_us_max)
-            st_.bd_us_max = st_.bd_us_last;
+        st_.bd_us.note(span_us(gen_started_, sent));
     }
     shown_gen_ = gen;
     if (pending_)
@@ -693,12 +647,8 @@ bool HdRenderer::slice_(std::uint64_t now) noexcept {
             canvas_gen_ = canvas_gen_.next();
             gen_started_ = job_started_;
             bd_reset_ = false;
-            st_.scale_us_last = us_of(0, scale_ns_);
-            if (st_.scale_us_last > st_.scale_us_max)
-                st_.scale_us_max = st_.scale_us_last;
-            st_.sample_us_last = st_.read_us_last + st_.scale_us_last;
-            if (st_.sample_us_last > st_.sample_us_max)
-                st_.sample_us_max = st_.sample_us_last;
+            st_.scale_us.note(span_us(0, scale_ns_));
+            st_.sample_us.note(st_.read_us.last + st_.scale_us.last);
             scale_ns_ = 0;
             return true;
         }
@@ -714,9 +664,7 @@ bool HdRenderer::slice_(std::uint64_t now) noexcept {
             (void)ledger_.take(t, HdDirtyLedger::Region::Game);
             holds_[t].gen = canvas_gen_;
             slots_->handoff();
-            st_.copy_us_last = us_of(0, copy_ns_);
-            if (st_.copy_us_last > st_.copy_us_max)
-                st_.copy_us_max = st_.copy_us_last;
+            st_.copy_us.note(span_us(0, copy_ns_));
             copy_ns_ = 0;
             return true;
         }
@@ -739,9 +687,7 @@ bool HdRenderer::read_(std::uint64_t now) noexcept {
     const std::uint64_t t_read0 = now_ns_();
     const auto img = job_.read(*sampler_, static_cast<std::int64_t>(t_read0), canvas_(), bd_reset_);
     const std::uint64_t t_read1 = now_ns_();
-    st_.read_us_last = us_of(t_read0, t_read1);
-    if (st_.read_us_last > st_.read_us_max)
-        st_.read_us_max = st_.read_us_last;
+    st_.read_us.note(span_us(t_read0, t_read1));
     if (img.stuck) {
         st_.state = HdOsdStatus::State::Failed;
         st_.fail = HdOsdStatus::Fail::PortStuck;
@@ -750,22 +696,20 @@ bool HdRenderer::read_(std::uint64_t now) noexcept {
         return false;
     }
     st_.backdrop_w = img.live ? img.width : 0;
-    st_.backdrop_h = img.live ? img.height : 0;
+    st_.backdrop_h = img.live ? img.rgb.rows : PictureRows{};
     st_.stride_mib = img.stride_mib;
     st_.lowlat = img.lowlat ? 1 : 0;
     if (img.live && img.same && !bd_reset_)
         ++st_.bd_same;
     if (!job_.busy()) {
-        st_.sample_us_last = st_.read_us_last;
-        if (st_.sample_us_last > st_.sample_us_max)
-            st_.sample_us_max = st_.sample_us_last;
+        st_.sample_us.note(st_.read_us.last);
     }
     return job_.busy();
 }
 
 void HdRenderer::visible_(std::uint64_t now, bool by_flip) noexcept {
     if (pending_stamp_ != 0)
-        vis_.sample(us_of(pending_stamp_, now));
+        vis_.sample(span_us(pending_stamp_, now));
     if (by_flip) {
         vis_.flipped();
     } else {
@@ -776,10 +720,10 @@ void HdRenderer::visible_(std::uint64_t now, bool by_flip) noexcept {
 
 BackdropJob::Canvas HdRenderer::canvas_() noexcept {
     return BackdropJob::Canvas{
-        .frame = std::span<std::uint16_t>{frame_},
-        .stride_px = ask_.surface.stride / 2u,
-        .game = box_of(layout_.game),
-        .picture = box_of(layout_.picture),
+        .frame =
+            PxPlane{.pixels = std::span<std::uint16_t>{frame_}, .row_px = ask_.surface.row_len()},
+        .game = layout_.game,
+        .picture = layout_.picture,
         .targets = glass_.targets(),
         .glass = glass_.bounds()
     };
@@ -793,13 +737,19 @@ void HdRenderer::copy_rect_(FlipBuffer buffer, HdRect rect) noexcept {
         return;
     if (static_cast<std::uint32_t>(rect.y) + static_cast<std::uint32_t>(rect.h) > s.h)
         return;
-    const std::uint32_t stride_px = s.stride / 2u;
-    const std::size_t bytes = static_cast<std::size_t>(s.stride) * s.h;
+    const std::uint32_t stride_px = s.row_len();
+    const std::size_t bytes = s.frame_bytes();
     std::span<std::byte> dst = slots_->view(buffer.in(s.slot), bytes);
     const auto put = [&](std::int32_t x, std::int32_t y, std::span<const std::uint16_t> px) {
-        const std::size_t at = static_cast<std::size_t>(y) * s.stride
-            + static_cast<std::size_t>(x) * 2u;
-        hal::copy_to_uncached(dst.data() + at, infra::bytes_of(px.front()).data(), px.size() * 2u);
+        const std::size_t at = s.byte_offset(
+            static_cast<std::uint32_t>(x),
+            static_cast<std::uint32_t>(y)
+        );
+        hal::copy_to_uncached(
+            dst.data() + at,
+            infra::bytes_of(px.front()).data(),
+            px.size() * kRgb565PixelBytes
+        );
     };
     for (std::int32_t y = rect.y; y < rect.y + rect.h; ++y) {
         const auto row = std::span<const std::uint16_t>{frame_}.subspan(
@@ -819,7 +769,9 @@ void HdRenderer::copy_rect_(FlipBuffer buffer, HdRect rect) noexcept {
         if (left + mid < row.size())
             put(g.x + g.w, y, row.subspan(left + mid));
     }
-    vis_.copied(static_cast<std::size_t>(rect.w) * 2u * static_cast<std::size_t>(rect.h));
+    vis_.copied(
+        static_cast<std::size_t>(rect.w) * kRgb565PixelBytes * static_cast<std::size_t>(rect.h)
+    );
 }
 
 }

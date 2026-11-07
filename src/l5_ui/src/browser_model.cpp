@@ -113,7 +113,7 @@ Ex<void> BrowserSession::open(const IBrowseSource& src, Request req) {
     src_ = infra::OptRef<const IBrowseSource>{src};
     req_ = static_cast<Request&&>(req);
     filter_.clear();
-    filter_deadline_ns_ = 0;
+    filter_deadline_.reset();
     entries_.clear();
     view_.set_items({});
 
@@ -210,7 +210,7 @@ Ex<void> BrowserSession::change_dir(std::string_view name) {
 
 void BrowserSession::enter_recents(std::vector<BrowserEntry> rows) {
     filter_.clear();
-    filter_deadline_ns_ = 0;
+    filter_deadline_.reset();
     entries_ = static_cast<std::vector<BrowserEntry>&&>(rows);
     view_.set_items(entries_);
     view_.select(RowIndex{0});
@@ -221,10 +221,10 @@ Ex<void> BrowserSession::exit_recents() {
     return scan_list({});
 }
 
-void BrowserSession::type_ahead(char c, std::int64_t now_ns) {
+void BrowserSession::type_ahead(char c, std::chrono::nanoseconds now) {
     if (recents_mode_)
         return;
-    if (now_ns >= filter_deadline_ns_) {
+    if (!filter_deadline_ || now >= *filter_deadline_) {
         filter_.assign(1, c);
         (void)scan_list({});
         seek_letter(c);
@@ -232,7 +232,7 @@ void BrowserSession::type_ahead(char c, std::int64_t now_ns) {
         filter_.push_back(c);
         (void)scan_list(filter_);
     }
-    filter_deadline_ns_ = now_ns + kFilterTimeoutNs;
+    filter_deadline_ = now + kFilterTimeout;
 }
 
 std::string BrowserSession::selected_full_path() const {
@@ -351,7 +351,8 @@ void BrowserSession::assign_display(BrowserEntry& e) const {
         return;
     }
 
-    if (!req_.scan.cores_only && ext_.size() > 3)
+    constexpr std::size_t kShortExtChars = 3;
+    if (!req_.scan.cores_only && ext_.size() > kShortExtChars)
         return;
     if (ext_.find('*') != std::string::npos || ext_.find('?') != std::string::npos)
         return;

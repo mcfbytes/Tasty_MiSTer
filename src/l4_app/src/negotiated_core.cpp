@@ -41,8 +41,9 @@ std::vector<std::uint8_t> NegotiatedCore::read_manifest_(std::string_view rel) c
         if (f) {
             auto sz = (*f)->size();
             const auto role = cores::manifest_doc_role();
-            const std::uint64_t kMaxDoc = role ? role->doc_max() : 16ull * 1024u * 1024u;
-            if (sz && sz->v != 0 && sz->v <= kMaxDoc) {
+            const proto::FileSize max_doc = role ? proto::FileSize{role->doc_max()}
+                                                 : kManifestDocMax;
+            if (sz && *sz != proto::FileSize{} && *sz <= max_doc) {
                 buf.resize(static_cast<std::size_t>(sz->v));
                 std::size_t off = 0;
                 bool ok = true;

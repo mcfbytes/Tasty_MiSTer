@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "hal/types.h"
+#include "os/types.h"
 
 namespace mister::hal {
 
@@ -13,8 +14,8 @@ struct DoorbellPolicy {
     LwOffset cause_base{0};
     std::uint32_t cause_span = 0;
 
-    [[nodiscard]] constexpr bool line_in_pool(std::uint32_t line) const noexcept {
-        return line < pool;
+    [[nodiscard]] constexpr bool line_in_pool(os::UioLine line) const noexcept {
+        return os::to_ordinal(line) < pool;
     }
 
     [[nodiscard]] constexpr bool cause_in_aperture(LwOffset off, std::size_t len) const noexcept {
@@ -22,7 +23,7 @@ struct DoorbellPolicy {
             return false;
         if (off < cause_base)
             return false;
-        return static_cast<std::size_t>(off.v - cause_base.v) <= cause_span - len;
+        return off.distance_to(cause_base) <= cause_span - len;
     }
 };
 

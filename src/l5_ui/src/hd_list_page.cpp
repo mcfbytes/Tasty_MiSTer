@@ -22,12 +22,9 @@
 namespace mister::ui {
 
 app::HdWindow window_page(app::PageDescription& page, RowIndex selected, RowCount total) noexcept {
-    const auto narrow = [](RowCount n) {
-        return static_cast<std::uint16_t>(n.v);
-    };
-    const app::HdWindow win = app::hd_window(narrow(selected.before()), narrow(total), page.first);
+    const app::HdWindow win = app::hd_window(selected, total, page.first);
     page.first = win.first;
-    page.total = narrow(total);
+    page.total = total;
     return win;
 }
 
@@ -76,7 +73,7 @@ bool HdListPage::shown_(const Slots& s, RowIndex slot) const {
 
 bool HdListPage::focusable_(RowIndex slot) const {
     const Slots s = slots_();
-    return shown_(s, slot) && row_(s, slot).describe().kind != RowKind::Separator;
+    return shown_(s, slot) && row_(s, slot).focusable();
 }
 
 std::optional<RowIndex> HdListPage::first_focusable_from_(RowIndex from) const {
@@ -98,7 +95,7 @@ std::optional<RowIndex> HdListPage::first_focusable_from_(RowIndex from) const {
 }
 
 std::optional<RowIndex> HdListPage::recalled_() const {
-    const std::optional<HdFocusMemory::Focus> f = memory_.recall(plan_->id(), key_);
+    const std::optional<HdFocusMemory::Focus> f = memory_.recall(FocusKey{plan_->id(), key_});
     if (!f)
         return std::nullopt;
     const Slots s = slots_();
@@ -119,40 +116,43 @@ std::optional<RowIndex> HdListPage::recalled_() const {
     return std::nullopt;
 }
 
-HdListPage::Window HdListPage::window_(std::uint16_t prev_first) const {
+HdListPage::Window HdListPage::window_(RowIndex prev_first) const {
     const Slots s = slots_();
     Window w{};
-    std::array<RowIndex, kMaxRows.size()> body{};
-    std::size_t body_n = 0;
-    std::size_t sel_at = 0;
+    RowSet<kMaxRows.size()> body{};
+    RowIndex sel_at{};
     bool sel_in_body = false;
     for (const RowIndex i : rows(s.body)) {
         if (!shown_(s, i))
             continue;
         if (i == sel_) {
-            sel_at = body_n;
+            sel_at = row_after(body.n);
             sel_in_body = true;
         }
-        body[body_n++] = i;
+        body.add(i);
     }
-    std::array<RowIndex, app::PageDescription::kMaxRows> pinned{};
+    RowSet<app::PageDescription::kMaxRows> pinned{};
     for (const RowIndex i : rows(row_after(s.body), s.pinned)) {
-        if (w.pinned >= pinned.size())
+        if (pinned.n >= RowCount::of(pinned.at.size()))
             break;
         if (shown_(s, i))
-            pinned[w.pinned++] = i;
+            pinned.add(i);
     }
-    const auto height = static_cast<std::uint16_t>(app::PageDescription::kMaxRows - w.pinned);
-    const auto total = static_cast<std::uint16_t>(body_n);
+    w.pinned = pinned.n;
+    const RowCount height = RowCount::of(app::PageDescription::kMaxRows) - w.pinned;
 
-    const auto selected = static_cast<std::uint16_t>(sel_in_body ? sel_at : prev_first);
-    const app::HdWindow bw = app::hd_window(selected, total, prev_first, height);
+    const RowIndex selected = sel_in_body ? sel_at : prev_first;
+    const app::HdWindow bw = app::hd_window(selected, body.n, prev_first, height);
     w.first = bw.first;
-    w.total = static_cast<std::uint16_t>(total + w.pinned);
-    for (std::size_t k = 0; k < bw.count; ++k)
-        w.slot[w.count++] = body[bw.first + k];
-    for (std::size_t k = 0; k < w.pinned; ++k)
-        w.slot[w.count++] = pinned[k];
+    w.total = body.n + w.pinned;
+    for (const RowIndex k : rows(w.first, bw.count)) {
+        w.slot[row_after(w.count)] = body[k];
+        w.count += kOneRow;
+    }
+    for (const RowIndex k : rows(w.pinned)) {
+        w.slot[row_after(w.count)] = pinned[k];
+        w.count += kOneRow;
+    }
     return w;
 }
 
@@ -162,7 +162,7 @@ void HdListPage::focus_(RowIndex i) {
         return;
     const Slots s = slots_();
     const std::optional<RowKey> key = i < s.end() ? row_(s, i).key() : std::optional<RowKey>{};
-    memory_.remember(plan_->id(), key_, HdFocusMemory::Focus{i, key});
+    memory_.remember(FocusKey{plan_->id(), key_}, HdFocusMemory::Focus{i, key});
 }
 
 MenuMask HdListPage::mask() const {
@@ -171,7 +171,7 @@ MenuMask HdListPage::mask() const {
     const Slots s = slots_();
     for (const RowIndex i : rows(s.addressed())) {
         if (focusable_(i))
-            m = with_row(m, i);
+            m = m.with(i);
     }
     return m;
 }
@@ -189,25 +189,25 @@ RowIndex HdListPage::selection() const {
 std::optional<Page::TierRun> HdListPage::tier_run(RowIndex at) const {
     TASTY_SEAT_BODY(HdListPage);
     const MenuMask m = mask();
-    if (!has_row(m, at))
+    if (!m.has(at))
         return std::nullopt;
     const Slots s = slots_();
-    const app::RowTier tier = row_(s, at).describe().tier;
+    const app::RowTier tier = row_(s, at).tier();
     MenuMask run = row_bit(at);
     for (RowIndex i = at + kOneRow; i < row_after(kMaxRows); i += kOneRow) {
-        if (!has_row(m, i))
+        if (!m.has(i))
             continue;
-        if (row_(s, i).describe().tier != tier)
+        if (row_(s, i).tier() != tier)
             break;
-        run = with_row(run, i);
+        run = run.with(i);
     }
     for (RowIndex i = at; i > RowIndex{};) {
         i -= kOneRow;
-        if (!has_row(m, i))
+        if (!m.has(i))
             continue;
-        if (row_(s, i).describe().tier != tier)
+        if (row_(s, i).tier() != tier)
             break;
-        run = with_row(run, i);
+        run = run.with(i);
     }
     return TierRun{.tier = tier, .rows = run};
 }
@@ -238,7 +238,7 @@ bool HdListPage::walk(PageWalk& out) const {
     out.page.pinned = w.pinned;
     out.count = 0;
 
-    for (std::uint8_t k = 0; k < w.count; ++k) {
+    for (const RowIndex k : rows(w.count)) {
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
         app::PageDescription::Row d = row_(s, w.slot[k]).describe();
@@ -246,8 +246,8 @@ bool HdListPage::walk(PageWalk& out) const {
         r.hd = d;
     }
 
-    const Window c = window_(0);
-    for (std::uint8_t line = 0; line < c.count; ++line) {
+    const Window c = window_(RowIndex{});
+    for (const RowIndex line : rows(c.count)) {
         const RowIndex slot = c.slot[line];
         const app::PageDescription::Row d = row_(s, slot).describe();
         std::string text(d.label.view());
@@ -257,12 +257,9 @@ bool HdListPage::walk(PageWalk& out) const {
             text.append(" >");
         const bool inverted = d.kind != RowKind::Separator && slot == sel_;
         out.rows[out.count++].classic = classic_row(
-            OsdRow{line},
+            osd_row_at(line.before()),
             text,
-            inverted,
-            false,
-            std::nullopt,
-            OsdRenderer::kArrowNone
+            {.inverted = inverted, .arrow = OsdRenderer::kArrowNone}
         );
     }
 
@@ -311,7 +308,7 @@ Transition HdListPage::handle(const UiEvent& ev) {
     IHdRow& row = row_(slots_(), sel_);
     if (select)
         return row.select();
-    if (!row.describe().steps)
+    if (!row.has_steps())
         return Transition{};
     return row.step(ev.buttons.has_any({UiEvent::Plus}) ? 1 : -1);
 }

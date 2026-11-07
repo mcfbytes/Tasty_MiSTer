@@ -59,7 +59,6 @@ public:
     };
 
     class Fds {
-        TASTY_SEAT_EXEMPT(component);
 
     public:
         [[nodiscard]] static Ex<Fds> create() noexcept;
@@ -151,7 +150,7 @@ private:
     std::uint32_t escaped_gen_ = 0;
     std::uint32_t given_up_gen_ = 0;
     unsigned strikes_ = 0;
-    int prior_vt_ = 0;
+    os::VtNumber prior_vt_{};
     std::optional<Ns> respawn_at_{};
     std::optional<Ns> kill_at_{};
     std::optional<Ns> settle_by_{};

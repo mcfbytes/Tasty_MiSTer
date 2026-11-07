@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 #include "infra/seat.h"
@@ -8,6 +9,23 @@
 #include "proto/types.h"
 
 namespace mister::proto {
+
+inline constexpr std::chrono::steady_clock::time_point kNoDue{};
+
+[[nodiscard]] constexpr std::chrono::steady_clock::time_point due_after(
+    std::int64_t now_ns,
+    std::int64_t span_ns
+) noexcept {
+    return std::chrono::steady_clock::time_point{
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::nanoseconds{now_ns + span_ns}
+        )
+    };
+}
+
+[[nodiscard]] constexpr std::int64_t due_ns_of(std::chrono::steady_clock::time_point at) noexcept {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(at.time_since_epoch()).count();
+}
 
 struct SlotRecord {
     TASTY_SEAT_RESIDENT(RT);
@@ -46,7 +64,8 @@ struct SlotRecord {
         BlockSize block_size{};
         std::uint64_t offset = 0;
         std::uint32_t len = 0;
-        std::int64_t due_ns = 0;
+
+        std::chrono::steady_clock::time_point due{};
         bool answer_owed = false;
         bool blank_next = false;
     };
@@ -60,9 +79,9 @@ struct SlotRecord {
     std::uint8_t half_busy = 0;
     std::uint32_t epoch = 0;
 
-    std::int64_t no_half_due_ns = 0;
+    std::chrono::steady_clock::time_point no_half_due{};
 
-    std::int64_t resident_due_ns = 0;
+    std::chrono::steady_clock::time_point resident_due{};
 
     [[nodiscard]] bool half_held(ArenaHalf h) const noexcept {
         return (half_busy & h.mask<std::uint8_t>()) != 0;
@@ -87,8 +106,8 @@ struct SlotRecord {
     void drop_window() noexcept {
         window = Window{};
         gate.blank_next = false;
-        resident_due_ns = 0;
-        no_half_due_ns = 0;
+        resident_due = kNoDue;
+        no_half_due = kNoDue;
         ++epoch;
     }
 

@@ -13,6 +13,7 @@ using infra::ieq;
 
 namespace {
 
+using stock_scan::Radix;
 using stock_scan::scan_atoi;
 
 [[nodiscard]] bool icontains(std::string_view hay, std::string_view needle) noexcept {
@@ -151,8 +152,7 @@ struct LoadWalk {
     int file_cnt = 0;
 
     std::string file_name;
-    FileClass file_class = FileClass::Raw;
-    std::uint8_t file_index = 0;
+    FileIndex file_index = FileIndex::Bios;
     std::uint32_t file_offset = 0;
     std::uint32_t file_size = 0;
 };
@@ -192,9 +192,9 @@ void on_romset_start(
             w.cfg.use_pcm = static_cast<std::uint32_t>(scan_atoi(av));
             w.force_pcm = true;
         } else if (ieq(an, "vromb_offset")) {
-            w.vromb_offset = stock_scan::scan_ul(av, 0).value;
+            w.vromb_offset = stock_scan::scan_ul(av, Radix::Auto).value;
         } else if (ieq(an, "vrom_mirror")) {
-            w.vrom_mirror = stock_scan::scan_ul(av, 0).value != 0;
+            w.vrom_mirror = stock_scan::scan_ul(av, Radix::Auto).value != 0;
         } else if (ieq(an, "rom_wait")) {
             w.cfg.rom_wait = static_cast<std::uint32_t>(scan_atoi(av));
         } else if (ieq(an, "p_wait")) {
@@ -207,33 +207,27 @@ void on_romset_start(
     }
 }
 
-struct FileTyping {
-    std::uint8_t index = 0;
-    FileClass cls = FileClass::Raw;
-};
-
-[[nodiscard]] FileTyping type_from_letter(char c) noexcept {
+[[nodiscard]] FileIndex type_from_letter(char c) noexcept {
     switch (c) {
         case 'C':
-            return {15, FileClass::Spr};
+            return FileIndex::Sprite;
         case 'M':
-            return {9, FileClass::Raw};
+            return FileIndex::M1;
         case 'P':
-            return {4, FileClass::Raw};
+            return FileIndex::Prom;
         case 'S':
-            return {8, FileClass::Fix};
+            return FileIndex::Srom;
         case 'V':
-            return {16, FileClass::Raw};
+            return FileIndex::VromFirst;
         default:
-            return {};
+            return FileIndex::Bios;
     }
 }
 
 void on_file_start(LoadWalk& w, const xml::Tag& tag, const xml::Attr* attrs) {
     w.file_offset = 0;
     w.file_size = 0;
-    w.file_class = FileClass::Raw;
-    w.file_index = 0;
+    w.file_index = FileIndex::Bios;
     w.file_name.clear();
 
     bool use_index = false;
@@ -248,24 +242,17 @@ void on_file_start(LoadWalk& w, const xml::Tag& tag, const xml::Attr* attrs) {
             w.file_name = std::string(av);
         if (use_index) {
             if (ieq(an, "index")) {
-                w.file_index = static_cast<std::uint8_t>(scan_atoi(av));
-                if (w.file_index >= 64 || w.file_index == 15) {
-                    w.file_class = FileClass::Spr;
-                } else if (w.file_index == 2 || w.file_index == 8) {
-                    w.file_class = FileClass::Fix;
-                } else if (w.file_index >= 48 && w.file_index <= 63 && !w.force_pcm) {
+                w.file_index = FileIndex::of(scan_atoi(av));
+                if (w.file_index.in_pcm_range() && !w.force_pcm)
                     w.cfg.use_pcm = 0;
-                }
             }
         } else if (ieq(an, "type") && !av.empty()) {
-            const FileTyping ft = type_from_letter(av[0]);
-            w.file_index = ft.index;
-            w.file_class = ft.cls;
+            w.file_index = type_from_letter(av[0]);
         }
         if (ieq(an, "offset"))
-            w.file_offset = stock_scan::scan_l(av, 0).value;
+            w.file_offset = stock_scan::scan_l(av, Radix::Auto).value;
         if (ieq(an, "size"))
-            w.file_size = stock_scan::scan_l(av, 0).value;
+            w.file_size = stock_scan::scan_l(av, Radix::Auto).value;
     }
     w.in_file = true;
 }
@@ -274,14 +261,12 @@ void on_file_end(LoadWalk& w) {
     if (w.in_file) {
         RomsetFile f;
         f.name = w.file_name;
-        f.file_class = w.file_class;
+        f.file_class = w.file_index.class_of();
         f.index = w.file_index;
         f.offset = w.file_offset;
         f.size = w.file_size;
-        if (!w.vrom_mirror && w.file_index >= 16 && w.file_index < 64) {
-            const std::uint32_t stride = (static_cast<std::uint32_t>(w.file_index) - 16u)
-                * 0x80000u;
-            f.expand = kVromSize - (stride & 0xFFFFFFu);
+        if (!w.vrom_mirror && w.file_index.is_vrom()) {
+            f.expand = kVromSize - w.file_index.mirror_stride();
         }
         w.plan.files.push_back(std::move(f));
         ++w.file_cnt;
@@ -341,20 +326,35 @@ RomsetPlan load_files(std::string_view xml_text, std::string_view romset) {
 
 std::vector<RomsetFile> fallback_files(const RomsetPlan& plan) {
     const std::uint32_t expand = plan.vrom_mirror ? 0u : kVromSize;
+    const auto row = [](std::string name, FileIndex index) {
+        return RomsetFile{.name = std::move(name), .index = index, .file_class = index.class_of()};
+    };
+
+    const auto vrom = [&](FileIndex index) {
+        RomsetFile f = row("vroma0", index);
+        f.expand = expand;
+        return f;
+    };
     std::vector<RomsetFile> out{
-        {"prom", FileClass::Raw, 4, 0, 0, 0},
-        {"p1rom", FileClass::Raw, 4, 0, 0, 0},
-        {"p2rom", FileClass::Raw, 6, 0, 0, 0},
-        {"srom", FileClass::Fix, 8, 0, 0, 0},
-        {"crom0", FileClass::Spr, 15, 0, 0, 0},
-        {"m1rom", FileClass::Raw, 9, 0, 0, 0},
+        row("prom", FileIndex::Prom),
+        row("p1rom", FileIndex::Prom),
+        row("p2rom", FileIndex::Prom2),
+        row("srom", FileIndex::Srom),
+        row("crom0", FileIndex::Sprite),
+        row("m1rom", FileIndex::M1),
     };
     if (plan.vromb_offset != 0) {
-        out.push_back({"vroma0", FileClass::Raw, 16, 0, plan.vromb_offset, expand});
-        out.push_back({"vroma0", FileClass::Raw, 48, plan.vromb_offset, 0, expand});
+        RomsetFile a = vrom(FileIndex::VromFirst);
+        a.size = plan.vromb_offset;
+        out.push_back(std::move(a));
+        RomsetFile b = vrom(FileIndex::VromB);
+        b.offset = plan.vromb_offset;
+        out.push_back(std::move(b));
     } else {
-        out.push_back({"vroma0", FileClass::Raw, 16, 0, 0, expand});
-        out.push_back({"vromb0", FileClass::Raw, 48, 0, 0, expand});
+        out.push_back(vrom(FileIndex::VromFirst));
+        RomsetFile b = vrom(FileIndex::VromB);
+        b.name = "vromb0";
+        out.push_back(std::move(b));
     }
     return out;
 }

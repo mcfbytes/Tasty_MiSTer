@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "infra/seat.h"
+#include "ui/focus_key.h"
 #include "ui/page_id.h"
 #include "ui/types.h"
 
@@ -23,9 +24,9 @@ public:
         std::optional<RowKey> key{};
     };
 
-    [[nodiscard]] std::optional<Focus> recall(PageId page, ItemId item) const noexcept;
+    [[nodiscard]] std::optional<Focus> recall(FocusKey key) const noexcept;
 
-    void remember(PageId page, ItemId item, Focus focus) noexcept;
+    void remember(FocusKey key, Focus focus) noexcept;
     void clear() noexcept;
 
     std::size_t size() const noexcept { return count_; }
@@ -34,14 +35,19 @@ public:
 
 private:
     struct Entry {
-        PageId page = PageId::None;
-        ItemId item{};
+        FocusKey key{};
         Focus focus{};
+
+        [[nodiscard]] bool matches(FocusKey other) const noexcept { return key == other; }
     };
+
+    [[nodiscard]] static constexpr std::size_t next_slot(std::size_t slot) noexcept {
+        return (slot + 1u) % kEntries;
+    }
 
     std::array<Entry, kEntries> entries_{};
     std::uint8_t count_ = 0;
-    std::uint8_t oldest_ = 0;
+    std::size_t oldest_ = 0;
     std::uint32_t evictions_ = 0;
 };
 

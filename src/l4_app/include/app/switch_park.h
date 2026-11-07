@@ -32,7 +32,7 @@ public:
     [[nodiscard]] xthread::PauseGen asked() const noexcept { return latch_.asked(); }
 
     [[nodiscard]] std::optional<ParkReceipt> answered(xthread::PauseGen g) const noexcept {
-        if (g == 0 || !latch_.paused_at(g))
+        if (g.is_none() || !latch_.paused_at(g))
             return std::nullopt;
         return ParkReceipt{g};
     }

@@ -21,8 +21,7 @@ void CompanionHost::on(const CompanionBind::Attach& a) noexcept {
     TASTY_SEAT_BODY(CompanionHost);
     if (held_)
         held_->release();
-    const auto i = static_cast<std::size_t>(a.servant);
-    held_ = infra::opt_ref_of(i < servants_.size() ? servants_[i].get() : nullptr);
+    held_ = infra::opt_ref_of(servants_[a.servant].get());
     if (held_)
         held_->begin_core();
     bound_gen_ = 0;

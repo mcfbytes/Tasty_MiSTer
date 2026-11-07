@@ -29,6 +29,13 @@ namespace mister::svc {
 
 inline constexpr unsigned kMaxDevices = 32;
 
+inline constexpr std::uint32_t kFnvOffsetBasis = 0x811c9dc5u;
+inline constexpr std::uint32_t kFnvPrime = 0x01000193u;
+[[nodiscard]] std::uint32_t fnv1a_32(
+    std::string_view bytes,
+    std::uint32_t seed = kFnvOffsetBasis
+) noexcept;
+
 struct MouseFixupRule {
     DeviceMatch match;
     QuirkId quirk;

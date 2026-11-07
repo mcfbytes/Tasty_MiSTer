@@ -11,6 +11,7 @@
 #include "cores/cd_engine.h"
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
+#include "cores/types.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "os/clock.h"
@@ -71,28 +72,24 @@ private:
 
     void command_exec_(const svc::DiscGeometry& geom);
     [[nodiscard]] Ex<void> update_(CdDialectPorts& p);
-    void hint_at_(std::int32_t lba, const svc::DiscGeometry& geom) noexcept;
+    void hint_at_(HeadLba lba, const svc::DiscGeometry& geom) noexcept;
     void read_data_(const svc::DiscGeometry& geom);
 
     [[nodiscard]] Ex<void> data_sector_send_(
         std::span<const std::uint8_t> header,
         CdDialectPorts& p
     );
-    [[nodiscard]] std::uint32_t track_by_lba_(
-        std::int32_t lba,
-        const svc::DiscGeometry& geom
-    ) const noexcept;
 
     CdDialectFacts facts_;
     CdEngineStats stats_{};
 
-    std::uint8_t sec_buf_[2352] = {};
+    std::uint8_t sec_buf_[svc::kCdDataSize] = {};
     std::uint8_t comm_[8] = {};
     State state_ = State::Open;
 
-    std::int32_t lba_ = 0;
-    std::int32_t block_reads_ = 0;
-    std::uint32_t track_ = 0;
+    HeadLba lba_{};
+    SectorCount block_reads_{};
+    svc::TrackIndex track_{};
     bool read_pend_ = false;
     bool loaded_ = false;
 };

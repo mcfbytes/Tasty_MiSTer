@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <span>
 
 #include "cd_core_detail.h"
@@ -41,6 +42,15 @@ constexpr std::uint8_t kCdCommTrayOpen = 0xD;
 
 constexpr std::int32_t kCdScanSpeed = 30;
 
+constexpr std::int64_t kSeekTicksPerSpan = 120;
+constexpr std::int64_t kSeekSpanSectors = 270000;
+
+[[nodiscard]] std::uint32_t seek_latency_ticks(SectorCount distance) noexcept {
+    return static_cast<std::uint32_t>(
+        (std::int64_t{distance.magnitude().v} * kSeekTicksPerSpan) / kSeekSpanSectors
+    );
+}
+
 }
 
 Ex<void> SegaCddEngine::do_notify_disc(bool loaded, const svc::DiscGeometry&) {
@@ -57,15 +67,15 @@ bool SegaCddEngine::do_streaming(const svc::DiscGeometry& geom) const noexcept {
     if (st_.status != kCdStatPlay || st_.latency != 0)
         return false;
     const svc::Toc& toc = geom.toc;
-    if (st_.track >= toc.last)
+    if (!toc.last.contains(st_.track))
         return false;
-    const bool cdda = toc.tracks[st_.track].type == TrackType::Cdda;
+    const bool cdda = toc.at(st_.track).type == TrackType::Cdda;
 
     return facts_.profile.stream_on_data_track ? !cdda : cdda;
 }
 
 Ex<void> SegaCddEngine::do_push_sector(CdDialectPorts& p) {
-    if (st_.status != kCdStatPlay || st_.latency != 0 || st_.track >= p.geom.toc.last) {
+    if (st_.status != kCdStatPlay || st_.latency != 0 || !p.geom.toc.last.contains(st_.track)) {
         return {};
     }
     return send_sector_(p);
@@ -104,8 +114,7 @@ Ex<void> SegaCddEngine::do_accept(std::span<const std::uint16_t> words, CdDialec
 Ex<void> SegaCddEngine::do_tick(CdDialectPorts& p) {
 
     if (st_.has_command) {
-        const std::uint64_t frame = cdwire::sega_pack_status(
-            std::span<const std::uint8_t, 9>(st_.stat),
+        const std::uint64_t frame = st_.stat.packed(
             st_.is_data,
             facts_.profile.crc_start,
             facts_.profile.status_carries_is_data
@@ -155,7 +164,7 @@ Ex<void> SegaCddEngine::update_(CdDialectPorts& p) {
             --m.latency;
             return {};
         }
-        if (m.track >= toc.last) {
+        if (!toc.last.contains(m.track)) {
             m.status = kCdStatEnd;
             return {};
         }
@@ -163,29 +172,27 @@ Ex<void> SegaCddEngine::update_(CdDialectPorts& p) {
     }
     if (m.status == kCdStatScan) {
         m.lba += m.scan_offset;
-        if (m.track < toc.last && m.lba >= static_cast<std::int64_t>(toc.tracks[m.track].end.v)) {
-            ++m.track;
-            if (m.track < toc.last) {
-                m.lba = static_cast<std::int32_t>(toc.tracks[m.track].start.v);
+        if (toc.last.contains(m.track) && m.lba >= head_of(toc.at(m.track).end)) {
+            m.track += svc::TrackCount{1};
+            if (toc.last.contains(m.track)) {
+                m.lba = head_of(toc.at(m.track).start);
             } else {
-                m.lba = static_cast<std::int32_t>(toc.end.v);
+                m.lba = head_of(toc.end);
                 m.cdda.locate();
                 m.status = kCdStatEnd;
                 m.is_data = true;
                 return {};
             }
-        } else if (
-            m.track < toc.last && m.lba < static_cast<std::int64_t>(toc.tracks[m.track].start.v)
-        ) {
-            if (m.track > 0) {
-                --m.track;
-                m.lba = static_cast<std::int32_t>(toc.tracks[m.track].end.v);
+        } else if (toc.last.contains(m.track) && m.lba < head_of(toc.at(m.track).start)) {
+            if (m.track != svc::TrackIndex{}) {
+                m.track -= svc::TrackCount{1};
+                m.lba = head_of(toc.at(m.track).end);
             } else {
-                m.lba = 0;
+                m.lba = HeadLba{};
             }
         }
         m.cdda.locate();
-        m.is_data = m.track < toc.last && toc.tracks[m.track].type != TrackType::Cdda;
+        m.is_data = toc.last.contains(m.track) && toc.at(m.track).type != TrackType::Cdda;
         return {};
     }
 
@@ -197,7 +204,7 @@ Ex<void> SegaCddEngine::send_sector_(CdDialectPorts& p) {
 
     auto& m = st_;
     const svc::Toc& toc = p.geom.toc;
-    const svc::Track& tk = toc.tracks[m.track];
+    const svc::Track& tk = toc.at(m.track);
     const bool data_track = tk.type != TrackType::Cdda;
 
     pump_pipeline_(p.geom);
@@ -216,46 +223,41 @@ Ex<void> SegaCddEngine::send_sector_(CdDialectPorts& p) {
     IoIndex idx = facts_.profile.io.data;
     if (data_track) {
 
-        const Msf msf = lba_to_msf(m.lba + 150);
+        const Msf msf = msf_of(m.lba + kPregapSectors);
         sec_buf_[12] = bcd(msf.m);
         sec_buf_[13] = bcd(msf.s);
         sec_buf_[14] = bcd(msf.f);
         sec_buf_[15] = 0x01;
-        if (m.lba >= 0) {
-            const Lba at{static_cast<std::uint32_t>(m.lba)};
+        if (const std::optional<Lba> at = m.lba.readable()) {
 
             if (facts_.disc.take(
                     svc::DiscForm::UserData,
-                    at,
+                    *at,
                     std::as_writable_bytes(std::span(sec_buf_ + 16, kUserData))
                 )
                 == 0) {
                 ++stats_.substitutes;
             }
-            facts_.disc.hint(svc::DiscForm::UserData, Lba{at.v + 1});
+            facts_.disc.hint(svc::DiscForm::UserData, *(m.lba + SectorCount{1}).readable());
         }
     } else {
-        if (m.lba >= static_cast<std::int64_t>(tk.start.v)) {
+        if (m.lba >= head_of(tk.start)) {
             m.is_data = false;
         }
 
-        const std::int32_t sectors = m.cdda.frame_sectors();
-        len = static_cast<std::size_t>(sectors) * kRawFrame;
+        const SectorCount sectors = m.cdda.frame_sectors();
+        len = sectors.bytes(kRawFrame);
         idx = facts_.profile.io.cdda;
         if (!m.is_data) {
-            const std::int32_t from = m.cdda.at(m.lba);
-            for (std::int32_t i = 0; i < sectors; ++i) {
-                const std::int32_t read_lba = from + i;
-                if (read_lba >= 0) {
-                    const Lba at{static_cast<std::uint32_t>(read_lba)};
+            const HeadLba from = m.cdda.at(m.lba);
+            for (SectorCount i{}; i < sectors; i += SectorCount{1}) {
+                const auto read_lba = (from + i).readable();
+                if (read_lba) {
                     if (facts_.disc.take(
                             svc::DiscForm::RawFrame,
-                            at,
+                            *read_lba,
                             std::as_writable_bytes(
-                                std::span(
-                                    sec_buf_ + static_cast<std::size_t>(i) * kRawFrame,
-                                    kRawFrame
-                                )
+                                std::span(sec_buf_ + i.bytes(kRawFrame), kRawFrame)
                             )
                         )
                         == 0) {
@@ -287,9 +289,9 @@ Ex<void> SegaCddEngine::send_sector_(CdDialectPorts& p) {
         ++stats_.data_sectors;
     }
 
-    ++m.lba;
-    if (m.track < toc.last && m.lba >= static_cast<std::int64_t>(toc.tracks[m.track].end.v)) {
-        ++m.track;
+    m.lba += SectorCount{1};
+    if (toc.last.contains(m.track) && m.lba >= head_of(toc.at(m.track).end)) {
+        m.track += svc::TrackCount{1};
         m.is_data = true;
     }
 
@@ -300,16 +302,16 @@ Ex<void> SegaCddEngine::send_sector_(CdDialectPorts& p) {
 std::span<const std::uint8_t> SegaCddEngine::subcode_stage_() {
 
     auto& m = st_;
-    if (m.lba < 0)
+    const std::optional<Lba> sub_at = m.lba.readable();
+    if (!sub_at)
         return {};
     std::uint8_t raw[kSubBytes];
-    const Lba sub_at{static_cast<std::uint32_t>(m.lba)};
     const std::size_t sub_got = facts_.disc.take(
         svc::DiscForm::Subcode,
-        sub_at,
+        *sub_at,
         std::as_writable_bytes(std::span(raw, kSubBytes))
     );
-    facts_.disc.hint(svc::DiscForm::Subcode, Lba{sub_at.v + 1});
+    facts_.disc.hint(svc::DiscForm::Subcode, *(m.lba + SectorCount{1}).readable());
     if (sub_got == 0) {
         ++stats_.subcode_substitutes;
         return {};
@@ -320,16 +322,17 @@ std::span<const std::uint8_t> SegaCddEngine::subcode_stage_() {
     return std::span<const std::uint8_t>(sub_buf_, 98);
 }
 
-void SegaCddEngine::hint_at_(std::int32_t lba, const svc::DiscGeometry& geom) noexcept {
-    if (lba < 0)
+void SegaCddEngine::hint_at_(HeadLba lba, const svc::DiscGeometry& geom) noexcept {
+    const std::optional<Lba> at = lba.readable();
+    if (!at)
         return;
     const svc::Toc& toc = geom.toc;
-    const std::uint32_t tr = track_scan(toc, lba);
-    const bool data = tr < toc.last && toc.tracks[tr].type != TrackType::Cdda;
+    const svc::TrackIndex tr = track_scan(toc, lba);
+    const bool data = toc.last.contains(tr) && toc.at(tr).type != TrackType::Cdda;
 
     prime_head(
         facts_.disc,
-        lba,
+        static_cast<std::int32_t>(at->v),
         {.form = data ? svc::DiscForm::UserData : svc::DiscForm::RawFrame,
          .pair = !data,
          .subcode = true}
@@ -339,29 +342,26 @@ void SegaCddEngine::hint_at_(std::int32_t lba, const svc::DiscGeometry& geom) no
 void SegaCddEngine::pump_pipeline_(const svc::DiscGeometry& geom) noexcept {
     auto& m = st_;
     const svc::Toc& toc = geom.toc;
-    if (toc.last == 0 || m.lba < 0)
+    const std::optional<Lba> head = m.lba.readable();
+    if (toc.last == svc::TrackCount{} || !head)
         return;
-    const Lba head{static_cast<std::uint32_t>(m.lba)};
-    const std::uint32_t tr = track_scan(toc, m.lba);
-    if (tr < toc.last && toc.tracks[tr].type != TrackType::Cdda) {
-        facts_.disc.hint(svc::DiscForm::UserData, head);
-    } else {
-        const std::int32_t from = m.cdda.at(m.lba);
-        if (from >= 0) {
-            const Lba base{static_cast<std::uint32_t>(from)};
-            facts_.disc.hint(svc::DiscForm::RawFrame, base);
-            facts_.disc.hint(svc::DiscForm::RawFrame, Lba{base.v + 1});
+    const svc::TrackIndex tr = track_scan(toc, m.lba);
+    if (toc.last.contains(tr) && toc.at(tr).type != TrackType::Cdda) {
+        facts_.disc.hint(svc::DiscForm::UserData, *head);
+    } else if (const std::optional<Lba> from = m.cdda.at(m.lba).readable()) {
+        facts_.disc.hint(svc::DiscForm::RawFrame, *from);
+        if (const std::optional<Lba> next = m.cdda.at(m.lba + SectorCount{1}).readable()) {
+            facts_.disc.hint(svc::DiscForm::RawFrame, *next);
         }
     }
-    facts_.disc.hint(svc::DiscForm::Subcode, head);
+    facts_.disc.hint(svc::DiscForm::Subcode, *head);
 }
 
-void SegaCddEngine::seek_(std::int32_t lba, bool play, const svc::DiscGeometry& geom) {
+void SegaCddEngine::seek_(HeadLba lba, bool play, const svc::DiscGeometry& geom) {
 
     auto& m = st_;
     const svc::Toc& toc = geom.toc;
-    m.latency = (play ? 11u : 0u)
-        + static_cast<std::uint32_t>((std::abs(lba - m.lba) * std::int64_t{120}) / 270000);
+    m.latency = (play ? 11u : 0u) + seek_latency_ticks(lba - m.lba);
     m.lba = lba;
     m.track = track_scan(toc, lba);
     hint_at_(lba, geom);
@@ -375,60 +375,58 @@ void SegaCddEngine::do_reset_machine() noexcept {
 
     auto& m = st_;
     m.latency = 10;
-    m.track = 0;
-    m.lba = 0;
+    m.track = svc::TrackIndex{};
+    m.lba = HeadLba{};
     m.cdda.locate();
     m.cdda.reprime();
-    m.scan_offset = 0;
+    m.scan_offset = SectorCount{};
     m.is_data = true;
     m.status = kCdStatStop;
-    for (auto& s : m.stat)
-        s = 0;
+    m.stat = SegaCddStat{};
 }
 
 void SegaCddEngine::command_exec_(const svc::DiscGeometry& geom) {
 
     auto& m = st_;
     const svc::Toc& toc = geom.toc;
+    using Field = SegaCddStat::Field;
     const auto cur_type_nib = [&]() -> std::uint8_t {
-        return (m.track < toc.last) ? static_cast<std::uint8_t>(toc.tracks[m.track].type) : 0u;
+        return toc.last.contains(m.track) ? static_cast<std::uint8_t>(toc.at(m.track).type) : 0u;
     };
-    const auto write_msf = [&](std::int32_t lba) {
-        const Msf msf = lba_to_msf(lba);
-        m.stat[2] = static_cast<std::uint8_t>(bcd(msf.m) >> 4);
-        m.stat[3] = static_cast<std::uint8_t>(bcd(msf.m) & 0xF);
-        m.stat[4] = static_cast<std::uint8_t>(bcd(msf.s) >> 4);
-        m.stat[5] = static_cast<std::uint8_t>(bcd(msf.s) & 0xF);
-        m.stat[6] = static_cast<std::uint8_t>(bcd(msf.f) >> 4);
-        m.stat[7] = static_cast<std::uint8_t>(bcd(msf.f) & 0xF);
+    const auto write_msf = [&](HeadLba lba) {
+        m.stat.set_msf(msf_of(lba));
     };
-    const auto zero_tail = [&](std::size_t from) {
-        for (std::size_t i = from; i < 9; ++i)
-            m.stat[i] = 0;
+    const auto write_absent_track = [&]() {
+        m.stat.set(Field::Bcd0Tens, SegaCddStat::kAbsent);
+        m.stat.set(Field::Bcd0Ones, SegaCddStat::kAbsent);
+    };
+    const auto write_track = [&]() {
+        if (toc.last.contains(m.track)) {
+            m.stat.set_bcd(SegaCddStat::BcdSlot::Bcd0, m.track.number());
+        } else {
+            write_absent_track();
+        }
     };
 
     switch (m.comm[0]) {
         case kCdCommIdle:
 
             if (m.latency <= 3) {
-                m.stat[0] = m.status;
-                if (m.stat[1] == 0x0F) {
-                    m.stat[1] = 0x0;
-                    write_msf(m.lba + 150);
-                    m.stat[8] = cur_type_nib() != 0 ? 0x04 : 0x00;
-                } else if (m.stat[1] == 0x00) {
-                    write_msf(m.lba + 150);
-                    m.stat[8] = cur_type_nib() != 0 ? 0x04 : 0x00;
-                } else if (m.stat[1] == 0x01) {
-                    const std::int32_t base = (m.track < toc.last)
-                        ? static_cast<std::int32_t>(toc.tracks[m.track].start.v)
-                        : 0;
-                    write_msf(std::abs(m.lba - base));
-                    m.stat[8] = cur_type_nib() != 0 ? 0x04 : 0x00;
-                } else if (m.stat[1] == 0x02) {
-                    const bool in = m.track < toc.last;
-                    m.stat[2] = in ? static_cast<std::uint8_t>(bcd(m.track + 1) >> 4) : 0xA;
-                    m.stat[3] = in ? static_cast<std::uint8_t>(bcd(m.track + 1) & 0xF) : 0xA;
+                m.stat.set_status(m.status);
+                if (m.stat.subcommand() == 0x0F) {
+                    m.stat.set_subcommand(0x0);
+                    write_msf(m.lba + kPregapSectors);
+                    m.stat.set_type_byte(cur_type_nib() != 0 ? 0x04 : 0x00);
+                } else if (m.stat.subcommand() == 0x00) {
+                    write_msf(m.lba + kPregapSectors);
+                    m.stat.set_type_byte(cur_type_nib() != 0 ? 0x04 : 0x00);
+                } else if (m.stat.subcommand() == 0x01) {
+                    const HeadLba base = toc.last.contains(m.track) ? head_of(toc.at(m.track).start)
+                                                                    : HeadLba{};
+                    write_msf(HeadLba{} + (m.lba - base).magnitude());
+                    m.stat.set_type_byte(cur_type_nib() != 0 ? 0x04 : 0x00);
+                } else if (m.stat.subcommand() == 0x02) {
+                    write_track();
                 }
             }
             break;
@@ -436,8 +434,8 @@ void SegaCddEngine::command_exec_(const svc::DiscGeometry& geom) {
         case kCdCommStop:
             m.status = kCdStatStop;
             m.is_data = true;
-            m.stat[0] = m.status;
-            zero_tail(1);
+            m.stat.set_status(m.status);
+            m.stat.clear_from(Field::Subcommand);
             break;
 
         case kCdCommToc: {
@@ -445,72 +443,72 @@ void SegaCddEngine::command_exec_(const svc::DiscGeometry& geom) {
                 m.status = kCdStatToc;
             switch (m.comm[3]) {
                 case 0:
-                    m.stat[0] = m.status;
-                    m.stat[1] = 0x0;
-                    write_msf(m.lba + 150);
-                    m.stat[8] = static_cast<std::uint8_t>(cur_type_nib() << 2);
+                    m.stat.set_status(m.status);
+                    m.stat.set_subcommand(0x0);
+                    write_msf(m.lba + kPregapSectors);
+                    m.stat.set_type_byte(static_cast<std::uint8_t>(cur_type_nib() << 2));
                     break;
                 case 1: {
-                    const std::int32_t base = (m.track < toc.last)
-                        ? static_cast<std::int32_t>(toc.tracks[m.track].start.v)
-                        : 0;
-                    m.stat[0] = m.status;
-                    m.stat[1] = 0x1;
-                    write_msf(std::abs(m.lba - base));
-                    m.stat[8] = static_cast<std::uint8_t>(cur_type_nib() << 2);
+                    const HeadLba base = toc.last.contains(m.track) ? head_of(toc.at(m.track).start)
+                                                                    : HeadLba{};
+                    m.stat.set_status(m.status);
+                    m.stat.set_subcommand(0x1);
+                    write_msf(HeadLba{} + (m.lba - base).magnitude());
+                    m.stat.set_type_byte(static_cast<std::uint8_t>(cur_type_nib() << 2));
                     break;
                 }
-                case 2: {
-                    const bool in = m.track < toc.last;
-                    m.stat[0] = m.status;
-                    m.stat[1] = 0x2;
-                    m.stat[2] = in ? static_cast<std::uint8_t>(bcd(m.track + 1) >> 4) : 0xA;
-                    m.stat[3] = in ? static_cast<std::uint8_t>(bcd(m.track + 1) & 0xF) : 0xA;
-                    zero_tail(4);
+                case 2:
+                    m.stat.set_status(m.status);
+                    m.stat.set_subcommand(0x2);
+                    write_track();
+                    m.stat.clear_from(Field::Bcd1Tens);
                     break;
-                }
                 case 3:
-                    m.stat[0] = m.status;
-                    m.stat[1] = 0x3;
-                    write_msf(static_cast<std::int32_t>(toc.end.v) + 150);
-                    m.stat[8] = 0;
+                    m.stat.set_status(m.status);
+                    m.stat.set_subcommand(0x3);
+                    write_msf(head_of(toc.end) + kPregapSectors);
+                    m.stat.set_type_byte(0);
                     break;
                 case 4:
-                    m.stat[0] = m.status;
-                    m.stat[1] = 0x4;
-                    m.stat[2] = 0;
-                    m.stat[3] = 1;
-                    m.stat[4] = static_cast<std::uint8_t>(bcd(toc.last) >> 4);
-                    m.stat[5] = static_cast<std::uint8_t>(bcd(toc.last) & 0xF);
-                    zero_tail(6);
+                    m.stat.set_status(m.status);
+                    m.stat.set_subcommand(0x4);
+                    m.stat.set(Field::Bcd0Tens, 0);
+                    m.stat.set(Field::Bcd0Ones, 1);
+                    m.stat.set_bcd(SegaCddStat::BcdSlot::Bcd1, toc.last);
+                    m.stat.clear_from(Field::Bcd2Tens);
                     break;
                 case 5: {
 
-                    std::uint32_t track = static_cast<std::uint32_t>(m.comm[4]) * 10u + m.comm[5];
-                    const std::uint32_t last = toc.last ? toc.last : 1u;
-                    if (track < 1)
-                        track = 1;
-                    if (track > last)
-                        track = last;
-                    const auto& tk = toc.tracks[track - 1];
-                    const Msf msf = lba_to_msf(static_cast<std::int32_t>(tk.start.v) + 150);
-                    m.stat[0] = m.status;
-                    m.stat[1] = 0x5;
-                    m.stat[2] = static_cast<std::uint8_t>(bcd(msf.m) >> 4);
-                    m.stat[3] = static_cast<std::uint8_t>(bcd(msf.m) & 0xF);
-                    m.stat[4] = static_cast<std::uint8_t>(bcd(msf.s) >> 4);
-                    m.stat[5] = static_cast<std::uint8_t>(bcd(msf.s) & 0xF);
-                    m.stat[6] = static_cast<std::uint8_t>(
-                        (bcd(msf.f) >> 4) | (static_cast<std::uint8_t>(tk.type) << 3)
+                    const svc::TrackNumber track = toc.last.clamped_number(
+                        static_cast<std::uint32_t>(m.comm[4]) * 10u + m.comm[5]
                     );
-                    m.stat[7] = static_cast<std::uint8_t>(bcd(msf.f) & 0xF);
-                    m.stat[8] = static_cast<std::uint8_t>(bcd(track) & 0xF);
+                    const svc::Track& tk = toc.at(track.index());
+                    const Msf msf = msf_of(head_of(tk.start) + kPregapSectors);
+                    m.stat.set_status(m.status);
+                    m.stat.set_subcommand(0x5);
+                    m.stat.set_bcd(SegaCddStat::BcdSlot::Bcd0, msf.m);
+                    m.stat.set_bcd(SegaCddStat::BcdSlot::Bcd1, msf.s);
+                    const std::uint8_t f_packed = cdwire::bcd(msf.f);
+                    m.stat.set(
+                        Field::Bcd2Tens,
+                        static_cast<std::uint8_t>(
+                            (f_packed >> 4) | (static_cast<std::uint8_t>(tk.type) << 3)
+                        )
+                    );
+                    m.stat.set(
+                        Field::Bcd2Ones,
+                        static_cast<std::uint8_t>(f_packed & SegaCddStat::kNibbleMask)
+                    );
+                    m.stat.set(
+                        Field::Type,
+                        static_cast<std::uint8_t>(cdwire::bcd(track) & SegaCddStat::kNibbleMask)
+                    );
                     break;
                 }
                 case 6:
-                    m.stat[0] = m.status;
-                    m.stat[1] = 0x6;
-                    zero_tail(2);
+                    m.stat.set_status(m.status);
+                    m.stat.set_subcommand(0x6);
+                    m.stat.clear_from(Field::Bcd0Tens);
                     break;
                 default:
                     break;
@@ -521,86 +519,88 @@ void SegaCddEngine::command_exec_(const svc::DiscGeometry& geom) {
         case kCdCommPlay:
         case kCdCommSeek: {
 
-            const std::int32_t lba = static_cast<std::int32_t>(
-                                         (static_cast<std::uint32_t>(m.comm[2]) * 10u + m.comm[3])
-                                             * 60u
-                                             * 75u
-                                         + (static_cast<std::uint32_t>(m.comm[4]) * 10u + m.comm[5])
-                                             * 75u
-                                         + (static_cast<std::uint32_t>(m.comm[6]) * 10u + m.comm[7])
-                                     )
-                - 150;
+            const HeadLba lba = HeadLba{static_cast<std::int32_t>(
+                                    (static_cast<std::uint32_t>(m.comm[2]) * 10u + m.comm[3])
+                                        * svc::kSecondsPerMinute
+                                        * svc::kFramesPerSecond
+                                    + (static_cast<std::uint32_t>(m.comm[4]) * 10u + m.comm[5])
+                                        * svc::kFramesPerSecond
+                                    + (static_cast<std::uint32_t>(m.comm[6]) * 10u + m.comm[7])
+                                )}
+                - kPregapSectors;
             const bool play = m.comm[0] == kCdCommPlay;
             seek_(lba, play, geom);
             m.is_data = true;
             m.status = play ? kCdStatPlay : kCdStatSeek;
-            m.stat[0] = kCdStatSeek;
-            m.stat[1] = 0xF;
-            zero_tail(2);
+            m.stat.set_status(kCdStatSeek);
+            m.stat.set_subcommand(0xF);
+            m.stat.clear_from(Field::Bcd0Tens);
             break;
         }
 
         case kCdCommPause:
             m.is_data = true;
             m.status = kCdStatPause;
-            m.stat[0] = m.status;
+            m.stat.set_status(m.status);
             break;
 
         case kCdCommResume:
             m.status = kCdStatPlay;
-            m.stat[0] = m.status;
+            m.stat.set_status(m.status);
             m.cdda.reprime();
             break;
 
         case kCdCommFwScan:
-            m.scan_offset = kCdScanSpeed;
+            m.scan_offset = SectorCount{kCdScanSpeed};
             m.status = kCdStatScan;
-            m.stat[0] = m.status;
+            m.stat.set_status(m.status);
             break;
 
         case kCdCommRwScan:
-            m.scan_offset = -kCdScanSpeed;
+            m.scan_offset = SectorCount{-kCdScanSpeed};
             m.status = kCdStatScan;
-            m.stat[0] = m.status;
+            m.stat.set_status(m.status);
             break;
 
         case kCdCommTrackMove:
 
             m.is_data = true;
             m.status = kCdStatPause;
-            m.stat[0] = m.status;
+            m.stat.set_status(m.status);
             break;
 
         case kCdCommTrackPlay: {
-            std::uint32_t index = static_cast<std::uint32_t>(m.comm[2]) * 10u + m.comm[3];
-            if (index > 0)
-                index -= 1;
 
-            index = (toc.last == 0) ? 0u : (index >= toc.last) ? toc.last - 1u : index;
-            const std::int32_t lba = static_cast<std::int32_t>(toc.tracks[index].start.v);
+            const svc::TrackIndex row = toc.last
+                                            .clamped_number(
+                                                static_cast<std::uint32_t>(m.comm[2]) * 10u
+                                                + m.comm[3]
+                                            )
+                                            .index();
+            const HeadLba lba = head_of(toc.at(row).start);
             seek_(lba, true, geom);
             m.is_data = true;
             m.status = kCdStatPlay;
-            m.stat[0] = kCdStatSeek;
-            m.stat[1] = 0xF;
-            zero_tail(2);
+            m.stat.set_status(kCdStatSeek);
+            m.stat.set_subcommand(0xF);
+            m.stat.clear_from(Field::Bcd0Tens);
             break;
         }
 
         case kCdCommTrayClose:
             m.is_data = true;
             m.status = m.loaded ? kCdStatToc : kCdStatNoDisc;
-            m.stat[0] = kCdStatStop;
+            m.stat.set_status(kCdStatStop);
             break;
 
         case kCdCommTrayOpen:
             m.is_data = true;
             m.status = kCdStatOpen;
-            m.stat[0] = kCdStatOpen;
+            m.stat.set_status(kCdStatOpen);
             break;
 
         default:
-            m.stat[0] = m.status;
+            m.stat.set_status(m.status);
             break;
     }
 }

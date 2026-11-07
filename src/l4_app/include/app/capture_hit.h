@@ -14,8 +14,8 @@ inline constexpr std::size_t kCaptureIdCap = 128;
 struct CaptureHit {
     std::uint32_t token = 0;
     std::uint32_t unique_hash = 0;
-    std::uint16_t code = 0;
-    std::uint8_t device_ordinal = 0;
+    svc::EvdevCode code{};
+    svc::DeviceSlot device_ordinal{};
     bool mod = false;
     bool unique_filenames = false;
     bool id_clipped = false;

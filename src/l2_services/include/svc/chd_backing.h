@@ -21,6 +21,11 @@
 
 namespace mister::svc {
 
+struct ChdHandles {
+    std::unique_ptr<IChdSource> primary{};
+    std::unique_ptr<IChdSource> prefetch{};
+};
+
 class ChdBacking final : public IDiscBacking {
     TASTY_SEAT_RESIDENT(Io);
 
@@ -29,12 +34,9 @@ public:
 
     [[nodiscard]] bool attached() const noexcept { return chd_ != nullptr; }
 
-    [[nodiscard]] Ex<void> attach(
-        std::unique_ptr<IChdSource> source,
-        std::unique_ptr<IChdSource> prefetch_source
-    );
+    [[nodiscard]] Ex<void> attach(ChdHandles handles);
 
-    [[nodiscard]] std::optional<ChdMetaRow> track_metadata(std::uint32_t index) {
+    [[nodiscard]] std::optional<ChdMetaRow> track_metadata(TrackIndex index) {
         return chd_->track_metadata(index);
     }
 
@@ -44,7 +46,7 @@ public:
         std::span<std::byte> dst
     );
 
-    [[nodiscard]] bool prefetch_off() const noexcept { return !chd_ || sectors_per_hunk_ == 0; }
+    [[nodiscard]] bool prefetch_off() const noexcept { return !chd_ || geo_.hunk_bytes.empty(); }
 
     void prefetch_hint(proto::Lba lba, const Track& t);
 
@@ -59,8 +61,10 @@ public:
 
     void release() noexcept;
 
-    [[nodiscard]] std::uint32_t hunk_bytes() const noexcept {
-        return chd_ != nullptr ? static_cast<std::uint32_t>(hunk_bytes_) : 0;
+    [[nodiscard]] std::uint32_t hunk_bytes() const noexcept { return geometry().hunk_detail(); }
+
+    [[nodiscard]] ChdGeometry geometry() const noexcept {
+        return chd_ != nullptr ? geo_ : ChdGeometry{};
     }
 
     [[nodiscard]] DiscCounters counters() const noexcept {
@@ -85,15 +89,13 @@ private:
         std::span<std::byte> out
     ) override;
 
-    [[nodiscard]] Ex<void> load_hunk(std::uint32_t hunk);
+    [[nodiscard]] Ex<void> load_hunk(HunkIndex hunk);
 
     std::unique_ptr<IChdSource> chd_;
     std::unique_ptr<std::byte[]> hunk_buf_;
-    std::size_t hunk_bytes_ = 0;
-    std::uint32_t sectors_per_hunk_ = 0;
-    std::uint32_t hunk_count_ = 0;
-    static constexpr std::uint32_t kNoHunk = 0xFFFFFFFFu;
-    std::uint32_t hunk_memo_ = kNoHunk;
+
+    ChdGeometry geo_{};
+    HunkIndex hunk_memo_{HunkIndex::none()};
 
     std::span<const std::byte> hunk_view_{};
 

@@ -4,6 +4,7 @@
 #include "proto/upload_session.h"
 #include "hal/selected.h"
 #include "proto/fio_opcodes.h"
+#include "infra/endian.h"
 
 #include <algorithm>
 #include <optional>
@@ -42,9 +43,7 @@ constexpr bool taken(hal::SpiWord) noexcept {
     if (w == hal::Width::Word) {
         const std::size_t pairs = data.size() / 2u;
         for (std::size_t i = 0; i < pairs; ++i) {
-            const auto lo = static_cast<std::uint16_t>(data[2u * i]);
-            const auto hi = static_cast<std::uint16_t>(data[2u * i + 1u]);
-            const auto pair_word = static_cast<std::uint16_t>(lo | (hi << 8));
+            const auto pair_word = infra::load_le<std::uint16_t>(data.subspan(2u * i).first<2>());
             if (auto r = beat(link, pair_word); !r)
                 return std::unexpected(r.error());
         }
@@ -73,8 +72,7 @@ constexpr bool taken(hal::SpiWord) noexcept {
             auto r = beat(link, 0);
             if (!r)
                 return std::unexpected(r.error());
-            data[2u * i] = static_cast<std::uint8_t>(r->v & 0x00FFu);
-            data[2u * i + 1u] = static_cast<std::uint8_t>((r->v >> 8) & 0x00FFu);
+            infra::store_le<std::uint16_t>(data.subspan(2u * i).first<2>(), r->v);
         }
         if ((data.size() & 1u) != 0u) {
             auto r = beat(link, 0);
@@ -166,8 +164,8 @@ Ex<FioBracket> FioBracket::begin(
         bracket.emplace(FioBracket{link, index.v});
 
         if (params.aux.v != 0) {
-            const auto lo = static_cast<std::uint16_t>(params.aux.v & 0xFFFFu);
-            const auto hi = static_cast<std::uint16_t>((params.aux.v >> 16) & 0xFFFFu);
+            const auto lo = static_cast<std::uint16_t>(params.aux.v);
+            const auto hi = static_cast<std::uint16_t>((params.aux.v >> 16));
             auto r = beat(link, lo);
             if (r)
                 r = beat(link, hi);
@@ -272,7 +270,7 @@ Ex<std::size_t> DownloadSession::write_taken(std::span<const std::uint8_t> data)
     for (std::size_t at = 0; at < data.size(); at += step) {
         auto out_word = static_cast<std::uint16_t>(data[at]);
         if (step == 2u && at + 1u < data.size())
-            out_word = static_cast<std::uint16_t>(out_word | (data[at + 1u] << 8));
+            out_word = infra::load_le<std::uint16_t>(data.subspan(at).first<2>());
         auto r = link->transfer_or_post(hal::SpiWord{out_word});
         if (!r)
             return std::unexpected(r.error());

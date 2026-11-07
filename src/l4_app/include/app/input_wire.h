@@ -9,6 +9,7 @@
 
 #include "infra/counter.h"
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/spsc_ring.h"
 #include "infra/telemetry.h"
@@ -20,9 +21,30 @@
 #include "hal/types.h"
 #include "svc/input_service.h"
 #include "svc/joy_plan.h"
+#include "svc/types.h"
 #include "infra/seat.h"
 
 namespace mister::app {
+
+struct JoyLevel {
+    svc::JoyMask mask{};
+    svc::JoyMask autofire{};
+
+    [[nodiscard]] constexpr std::uint64_t packed() const noexcept {
+        constexpr unsigned kAutofireShift = 32;
+        return (static_cast<std::uint64_t>(autofire.v) << kAutofireShift) | mask.v;
+    }
+
+    [[nodiscard]] static constexpr JoyLevel unpack(std::uint64_t cell) noexcept {
+        constexpr unsigned kAutofireShift = 32;
+        return JoyLevel{
+            svc::JoyMask{static_cast<std::uint32_t>(cell)},
+            svc::JoyMask{static_cast<std::uint32_t>(cell >> kAutofireShift)}
+        };
+    }
+
+    friend constexpr bool operator==(JoyLevel, JoyLevel) = default;
+};
 
 using CaptureArmCell = xthread::Telemetry<CaptureArm, SeatTag::Ui>;
 using CaptureHitCell = xthread::Telemetry<CaptureHit, SeatTag::Input>;
@@ -52,26 +74,15 @@ public:
     InputWire(const InputWire&) = delete;
     InputWire& operator=(const InputWire&) = delete;
 
-    void publish_joy(svc::PlayerIndex player, svc::JoyMask mask, svc::JoyMask autofire) noexcept {
-        if (player.v >= svc::kMaxPlayers)
-            return;
-        const std::uint64_t cell = (static_cast<std::uint64_t>(autofire.v) << 32) | mask.v;
-        joy_[player.v].store(cell, std::memory_order_release);
+    void publish_joy(svc::PlayerIndex player, JoyLevel level) noexcept {
+        if (const auto cell = joy_.find(player)) {
+            cell->store(level.packed(), std::memory_order_release);
+        }
     }
 
-    struct JoyCell {
-        svc::JoyMask mask{};
-        svc::JoyMask autofire{};
-    };
-
-    JoyCell joy(svc::PlayerIndex player) const noexcept {
-        if (player.v >= svc::kMaxPlayers)
-            return JoyCell{};
-        const std::uint64_t cell = joy_[player.v].load(std::memory_order_acquire);
-        return JoyCell{
-            svc::JoyMask{static_cast<std::uint32_t>(cell)},
-            svc::JoyMask{static_cast<std::uint32_t>(cell >> 32)}
-        };
+    JoyLevel joy(svc::PlayerIndex player) const noexcept {
+        const auto cell = joy_.find(player);
+        return cell ? JoyLevel::unpack(cell->load(std::memory_order_acquire)) : JoyLevel{};
     }
 
     bool push_ui_key(RawKeyEdge e) noexcept;
@@ -254,20 +265,6 @@ public:
 
     std::uint32_t rebuilds_done() const noexcept { return rebuilds_done_.get(); }
 
-    void publish_buttons(hal::ButtonMask level) noexcept {
-        buttons_.store(level.v, std::memory_order_relaxed);
-        if (level.v != 0u)
-            bump(button_samples_, 1u);
-    }
-
-    hal::ButtonMask buttons() const noexcept {
-        return {static_cast<std::uint16_t>(buttons_.load(std::memory_order_relaxed))};
-    }
-
-    std::uint32_t button_samples() const noexcept {
-        return button_samples_.load(std::memory_order_relaxed);
-    }
-
     void note_button_action() noexcept { button_actions_.add(1u); }
 
     std::uint32_t button_actions() const noexcept { return button_actions_.get(); }
@@ -287,7 +284,7 @@ public:
     );
 
 private:
-    std::atomic<std::uint64_t> joy_[svc::kMaxPlayers]{};
+    infra::IndexedArray<std::atomic<std::uint64_t>, svc::kMaxPlayers, svc::PlayerIndex> joy_{};
 
     xthread::SpscRing<RawKeyEdge, kUiKeyRingSlots> ui_keys_{};
     xthread::Counter ui_keys_dropped_{};
@@ -319,8 +316,6 @@ private:
     xthread::Counter rebuilds_refused_{};
     xthread::Counter rebuilds_done_{};
 
-    std::atomic<std::uint32_t> buttons_{0};
-    std::atomic<std::uint32_t> button_samples_{0};
     xthread::Counter button_actions_{};
     xthread::Counter core_edges_{};
 };

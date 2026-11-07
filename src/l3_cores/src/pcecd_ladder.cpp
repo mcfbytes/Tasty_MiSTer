@@ -110,7 +110,7 @@ Ex<AssetWait> PceCdLadder::load_pce_bios(const BootAsset& row) {
     auto p = PayloadPieces::of_bytes(
         std::move(payload),
         {},
-        {.dest = dest, .region = region, .chunk = static_cast<std::uint16_t>(kPceChunk)}
+        {.dest = dest, .region = region, .chunk = WireChunk::of(kPceChunk)}
     );
     if (!p)
         return std::unexpected(p.error());
@@ -230,7 +230,7 @@ Ex<bool> PceCdLadder::on_step() {
                 return false;
             bit0_asserted_ = true;
             pulse_release_ns_ = now_ns()
-                + static_cast<std::int64_t>(profile_.staging.reset_pulse_us) * 1000;
+                + std::chrono::microseconds{profile_.staging.reset_pulse_us};
             sub_ = 0;
             rung_ = Rung::PulseRelease;
             return false;

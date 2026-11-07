@@ -182,9 +182,9 @@ struct SlintRasterOf<C>::Impl {
     HdMetrics metrics{};
     HdMetrics card_metrics{};
     PageDescription fitted{};
-    std::uint16_t fit_top = 0;
+    RowIndex fit_top{};
     decltype(PageDescription::title) fit_title{};
-    std::uint16_t fit_total = 0;
+    RowCount fit_total{};
     bool have_theme = false;
     bool force_full = false;
     infra::OptRef<Plat> plat{};
@@ -246,7 +246,7 @@ struct SlintRasterOf<C>::Impl {
         tok.set_help_pad(px(m.help_pad));
         tok.set_gap(px(m.gap));
         tok.set_row_h(px(m.row_h));
-        tok.set_sep_h(px(m.row_h / 2));
+        tok.set_sep_h(px(hd_sep_h(m.row_h)));
         tok.set_row_pad(px(m.row_pad));
         tok.set_card_pad(px(m.card_pad));
         tok.set_radius_md(px(m.radius_md));
@@ -264,7 +264,7 @@ struct SlintRasterOf<C>::Impl {
     }
 
     void apply_size() {
-        const HdLayout::Rect box = hd_menu_box(layout);
+        const HdRect box = hd_menu_box(layout);
         if (!scene || !scene->ui || box.w <= 0 || box.h <= 0)
             return;
         const auto pw = static_cast<std::uint32_t>(box.w);
@@ -301,7 +301,7 @@ struct SlintRasterOf<C>::Impl {
     }
 
     [[nodiscard]] bool ensure() {
-        const HdLayout::Rect box = hd_menu_box(layout);
+        const HdRect box = hd_menu_box(layout);
         if (!have_theme || box.w <= 0 || box.h <= 0)
             return have_theme;
         if (shared_platform() == nullptr) {
@@ -397,10 +397,10 @@ struct SlintRasterOf<C>::Impl {
         set_if(ui->get_band_focus(), page.hub.count != 0 && page.hub.depth == 0, [&](bool v) {
             ui->set_band_focus(v);
         });
-        set_if(ui->get_list_first(), static_cast<int>(page.first), [&](int v) {
+        set_if(ui->get_list_first(), static_cast<int>(page.first.v), [&](int v) {
             ui->set_list_first(v);
         });
-        set_if(ui->get_list_total(), static_cast<int>(page.total), [&](int v) {
+        set_if(ui->get_list_total(), static_cast<int>(page.total.v), [&](int v) {
             ui->set_list_total(v);
         });
         const int rail = rail_slot(page.letter);
@@ -415,13 +415,7 @@ struct SlintRasterOf<C>::Impl {
         set_if(ui->get_cue_up(), plan.cue_up, [&](bool v) { ui->set_cue_up(v); });
         set_if(ui->get_cue_down(), plan.cue_down, [&](bool v) { ui->set_cue_down(v); });
         char cue[24];
-        std::snprintf(
-            cue,
-            sizeof(cue),
-            "%u / %u",
-            static_cast<unsigned>(plan.cue_at),
-            static_cast<unsigned>(plan.cue_total)
-        );
+        std::snprintf(cue, sizeof(cue), "%u / %u", plan.cue_at.v, plan.cue_total.v);
         set_if(ui->get_cue_text(), slint::SharedString{cue}, [&](const slint::SharedString& v) {
             ui->set_cue_text(v);
         });
@@ -431,11 +425,11 @@ struct SlintRasterOf<C>::Impl {
             [&](const slint::SharedString& v) { ui->set_caption_text(v); }
         );
         const HdScrollCounts counts = hd_scroll_counts(
-            page.first,
+            page.first.v,
             static_cast<std::uint32_t>(
-                std::min<std::size_t>(page.row_count, PageDescription::kMaxRows)
+                std::min<std::size_t>(page.row_count.size(), PageDescription::kMaxRows)
             ),
-            plan.cue_total
+            plan.cue_total.v
         );
         set_if(
             ui->get_above_text(),
@@ -457,7 +451,7 @@ struct SlintRasterOf<C>::Impl {
             shared(counts.below_n.view()),
             [&](const slint::SharedString& v) { ui->set_below_count(v); }
         );
-        const auto rows = std::span{page.rows}.first(page.row_count);
+        const auto rows = std::span{page.rows}.first(page.row_count.size());
         const bool shelf = std::ranges::any_of(rows, [](const PageDescription::Row& r) {
             return r.tier == RowTier::Shelf;
         });
@@ -475,12 +469,12 @@ struct SlintRasterOf<C>::Impl {
         std::vector<MenuRow> main;
         std::vector<MenuRow> pinned;
         std::vector<MenuRow> choices;
-        for (std::uint8_t i = 0; i < plan.main_count; ++i)
+        for (std::uint32_t i = 0; i < plan.main_count.v; ++i)
             main.push_back(menu_row(page.rows[i], theme));
-        for (std::uint8_t i = 0; i < plan.pinned_count; ++i)
-            pinned.push_back(menu_row(page.rows[plan.pinned_first + i], theme));
-        for (std::uint8_t i = 0; i < plan.choice_count; ++i)
-            choices.push_back(menu_row(page.rows[plan.choice_first + i], theme));
+        for (std::uint32_t i = 0; i < plan.pinned_count.v; ++i)
+            pinned.push_back(menu_row(page.rows[plan.pinned_first.v + i], theme));
+        for (std::uint32_t i = 0; i < plan.choice_count.v; ++i)
+            choices.push_back(menu_row(page.rows[plan.choice_first.v + i], theme));
         put<MenuRow>(scene->rows, std::move(main), [&](auto m) { ui->set_entries(m); });
         put<MenuRow>(scene->pinned, std::move(pinned), [&](auto m) { ui->set_pinned_entries(m); });
         put<MenuRow>(scene->choices, std::move(choices), [&](auto m) { ui->set_choices(m); });
@@ -569,7 +563,7 @@ HdDirty SlintRasterOf<C>::render_(
 ) {
     if (!impl_->ensure())
         return {};
-    const HdLayout::Rect box = hd_menu_box(impl_->layout);
+    const HdRect box = hd_menu_box(impl_->layout);
     const auto ph = box.h;
     const auto pw = box.w;
     const auto need = static_cast<std::size_t>(stride_px) * static_cast<std::size_t>(ph);

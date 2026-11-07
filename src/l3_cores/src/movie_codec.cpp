@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <charconv>
+#include <limits>
 #include <span>
 #include <string>
 #include <system_error>
@@ -204,7 +205,7 @@ std::optional<std::uint32_t> IMovieCodec::power_on_ns(
 
     const std::uint64_t ns = p.clocks / p.clock_hz * 1'000'000'000u
         + p.clocks % p.clock_hz * 1'000'000'000u / p.clock_hz;
-    if (ns > 0xFFFF'FFFFu)
+    if (ns > std::numeric_limits<std::uint32_t>::max())
         return std::nullopt;
     return static_cast<std::uint32_t>(ns);
 }

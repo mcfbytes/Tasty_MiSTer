@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 
 #include "app/cmd_fifo.h"
 #include "reactor/frame_clock.h"
 #include "reactor/round_timing.h"
+#include "reactor/round_trace.h"
 #include "app/mgl_pump.h"
 #include "app/osd_wire.h"
 #include "app/doorbell_cell.h"
@@ -93,6 +97,7 @@ public:
         const Main<std::uint32_t>& ini_write_failures;
         const app::DoorbellStatsCell& doorbell;
         const reactor::RoundTimingCell& round_timing;
+        reactor::RoundTraceLane& round_traces;
         infra::OptRef<const reactor::FrameCell> frames{};
         app::ScreenshotQueue& screenshots;
         infra::OptRef<const app::SectorRouteCell> sector_route{};
@@ -118,6 +123,7 @@ public:
         const Main<std::uint32_t>& ini_write_failures;
         const app::DoorbellStatsCell& doorbell;
         const reactor::RoundTimingCell& round_timing;
+        reactor::RoundTraceLane& round_traces;
         infra::OptRef<const reactor::FrameCell> frames{};
         infra::OptRef<const app::UiPageCell> ui_pages{};
         infra::OptRef<const app::HdOsdStatusCell> hd{};
@@ -171,9 +177,9 @@ public:
 
     std::uint32_t screenshots_failed() const noexcept { return shots_failed_; }
 
-    void set_sample_period_ms(unsigned ms) noexcept { sample_ms_ = ms; }
+    void set_sample_period(std::chrono::milliseconds period) noexcept { sample_ms_ = period; }
 
-    [[nodiscard]] unsigned sample_period_ms() const noexcept { return sample_ms_; }
+    [[nodiscard]] std::chrono::milliseconds sample_period() const noexcept { return sample_ms_; }
 
     const DiagStats& stats() const noexcept { return diag_stats_; }
 
@@ -212,6 +218,28 @@ public:
     void on(const LogRec::ConfStrArrived& a, const LogRec::Head& h) noexcept;
     void misrouted(const LogRec& r) noexcept;
 
+    void on(const reactor::RoundTrace::SlowSteady& a) noexcept;
+    void on(const reactor::RoundTrace::SlowLifecycle& a) noexcept;
+    void misrouted(const reactor::RoundTrace& r) noexcept;
+
+    static constexpr std::chrono::seconds kTraceWindow{1};
+
+    struct TraceBytes {
+        std::uint64_t v = 0;
+
+        [[nodiscard]] constexpr TraceBytes plus(std::size_t line) const noexcept {
+            return TraceBytes{v + line};
+        }
+
+        friend constexpr auto operator<=>(TraceBytes, TraceBytes) = default;
+    };
+
+    static constexpr TraceBytes kTraceBytesPerProcess{std::uint64_t{4} << 20};
+
+    void preload_trace_bytes(TraceBytes spent) noexcept { trace_bytes_ = spent; }
+
+    void preload_trace_window(reactor::MonoInstant start) noexcept { trace_window_ = start; }
+
     [[nodiscard]] std::uint32_t log_misrouted() const noexcept { return log_misrouted_; }
 
 private:
@@ -237,6 +265,51 @@ private:
     void line_(LogRec::Kind k, const LogRec::Head& h, std::uint32_t a, std::uint32_t b) noexcept;
 
     void drain_log_lane() noexcept;
+
+    void drain_round_traces() noexcept;
+    void render_trace_(reactor::RoundTrace::Kind k, const reactor::RoundTrace::Round& r) noexcept;
+    void voice_trace_drops_() noexcept;
+
+    struct TraceDrops {
+        std::uint32_t drops = 0;
+        std::uint32_t voiced_drops = 0;
+
+        [[nodiscard]] constexpr TraceDrops added() const noexcept {
+            if (drops == std::numeric_limits<std::uint32_t>::max())
+                return *this;
+            return TraceDrops{drops + 1u, voiced_drops};
+        }
+
+        [[nodiscard]] constexpr bool moved() const noexcept { return drops != voiced_drops; }
+
+        [[nodiscard]] constexpr TraceDrops voiced() const noexcept {
+            return TraceDrops{drops, drops};
+        }
+    };
+
+    struct TraceKindDrops {
+        TraceDrops lane{};
+        TraceDrops budget{};
+        TraceDrops cap{};
+    };
+
+    static constexpr std::array kTraceKinds{
+        reactor::RoundTrace::Kind::SlowSteady,
+        reactor::RoundTrace::Kind::SlowLifecycle
+    };
+    static_assert(kTraceKinds.size() == reactor::RoundTraceLane::kKinds, "every kind voiced");
+
+    void voice_trace_(const char* src, reactor::RoundTrace::Kind k, TraceDrops d) noexcept;
+
+    struct TraceLines {
+        std::uint32_t v = 0;
+
+        [[nodiscard]] constexpr TraceLines next() const noexcept { return TraceLines{v + 1u}; }
+
+        friend constexpr auto operator<=>(TraceLines, TraceLines) = default;
+    };
+
+    static constexpr TraceLines kTraceLinesPerWindow{16};
 
     using LossCounts = std::array<std::uint32_t, infra::ordinal(LogRec::Kind::kCount)>;
     void voice_log_losses_(const LossCounts& losses, LossCounts& last, const char* src) noexcept;
@@ -278,6 +351,13 @@ private:
     const app::EncodeStatusCell& rec_encode_;
     const app::DoorbellStatsCell& doorbell_cell_;
     const reactor::RoundTimingCell& round_timing_;
+    reactor::RoundTraceLane& round_traces_;
+    reactor::RoundTraceLane::Consumer trace_rx_;
+    reactor::MonoInstant trace_window_{};
+    TraceLines trace_spent_{};
+    TraceBytes trace_bytes_{};
+    std::array<TraceKindDrops, reactor::RoundTraceLane::kKinds> trace_drops_{};
+    TraceDrops trace_misroutes_{};
     infra::OptRef<const app::UiPageCell> ui_pages_{};
     xthread::DiagLog& diag_;
     xthread::LogLane& lane_rt_;
@@ -303,7 +383,7 @@ private:
     std::uint32_t last_dlm_ = 0;
     DiagRecords records_;
     DiagStats diag_stats_{};
-    unsigned sample_ms_ = 1000;
+    std::chrono::milliseconds sample_ms_{std::chrono::seconds{1}};
 };
 
 }

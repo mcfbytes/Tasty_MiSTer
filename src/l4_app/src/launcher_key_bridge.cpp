@@ -4,7 +4,10 @@
 #include <linux/input-event-codes.h>
 
 #include <array>
+#include <cstddef>
+#include <limits>
 
+#include "app/input_wire.h"
 #include "proto/joystick.h"
 
 namespace mister::app {
@@ -12,23 +15,23 @@ namespace mister::app {
 namespace {
 
 struct PadKey {
-    std::uint32_t bit;
-    std::uint16_t code;
+    svc::JoyMask bit;
+    svc::EvdevCode code;
 };
 
 constexpr std::array<PadKey, 12> kPadKeys{{
-    {proto::kJoyUp, KEY_UP},
-    {proto::kJoyDown, KEY_DOWN},
-    {proto::kJoyLeft, KEY_LEFT},
-    {proto::kJoyRight, KEY_RIGHT},
-    {proto::kJoyBtn1, KEY_ENTER},
-    {proto::kJoyBtn2, KEY_ESC},
-    {proto::kJoyBtn3, KEY_SPACE},
-    {proto::kJoyBtn4, KEY_TAB},
-    {proto::kJoyL, KEY_PAGEUP},
-    {proto::kJoyR, KEY_PAGEDOWN},
-    {proto::kJoyL2, KEY_F1},
-    {proto::kJoyR2, KEY_BACKSPACE},
+    {svc::JoyMask{proto::kJoyUp}, svc::EvdevCode{KEY_UP}},
+    {svc::JoyMask{proto::kJoyDown}, svc::EvdevCode{KEY_DOWN}},
+    {svc::JoyMask{proto::kJoyLeft}, svc::EvdevCode{KEY_LEFT}},
+    {svc::JoyMask{proto::kJoyRight}, svc::EvdevCode{KEY_RIGHT}},
+    {svc::JoyMask{proto::kJoyBtn1}, svc::EvdevCode{KEY_ENTER}},
+    {svc::JoyMask{proto::kJoyBtn2}, svc::EvdevCode{KEY_ESC}},
+    {svc::JoyMask{proto::kJoyBtn3}, svc::EvdevCode{KEY_SPACE}},
+    {svc::JoyMask{proto::kJoyBtn4}, svc::EvdevCode{KEY_TAB}},
+    {svc::JoyMask{proto::kJoyL}, svc::EvdevCode{KEY_PAGEUP}},
+    {svc::JoyMask{proto::kJoyR}, svc::EvdevCode{KEY_PAGEDOWN}},
+    {svc::JoyMask{proto::kJoyL2}, svc::EvdevCode{KEY_F1}},
+    {svc::JoyMask{proto::kJoyR2}, svc::EvdevCode{KEY_BACKSPACE}},
 }};
 
 }
@@ -52,81 +55,88 @@ bool LauncherKeyBridge::set_active(bool on) noexcept {
     return active_;
 }
 
-std::uint32_t LauncherKeyBridge::pad_any_() const noexcept {
-    std::uint32_t any = 0;
-    for (const std::uint32_t l : pad_level_)
-        any |= l;
+svc::JoyMask LauncherKeyBridge::pad_any_() const noexcept {
+    svc::JoyMask any{};
+    for (const svc::JoyMask level : pad_level_)
+        any = any.with(level);
     return any;
 }
 
-void LauncherKeyBridge::sync_(std::uint16_t code) noexcept {
-    if (code == 0 || code >= 256)
+void LauncherKeyBridge::sync_(svc::EvdevCode code) noexcept {
+    if (code == svc::EvdevCode{} || !code.is_key())
         return;
-    const std::uint64_t bit = std::uint64_t{1} << (code % 64);
-    bool want = (kbd_down_[code / 64] & bit) != 0;
+    bool want = held_.has(code);
     for (const PadKey& k : kPadKeys)
-        want = want || (k.code == code && (pad_or_ & k.bit) != 0);
-    std::uint64_t& sent = down_[code / 64];
-    if (((sent & bit) != 0) == want)
+        want = want || (k.code == code && pad_or_.any(k.bit));
+    if (sent_.has(code) == want)
         return;
-    sent = want ? (sent | bit) : (sent & ~bit);
-    out_.key(code, want);
+    if (want) {
+        sent_.set(code);
+    } else {
+        sent_.clear(code);
+    }
+    inject_(code, want);
 }
 
-void LauncherKeyBridge::key(std::uint16_t code, bool down) noexcept {
+void LauncherKeyBridge::inject_(svc::EvdevCode code, bool down) noexcept {
+    out_.key(code.v, down);
+}
+
+void LauncherKeyBridge::key(svc::EvdevCode code, bool down) noexcept {
     TASTY_SEAT_BODY(LauncherKeyBridge);
-    if (!active_ || code == 0 || code >= 256)
+    if (!active_ || code == svc::EvdevCode{} || !code.is_key())
         return;
-    std::uint64_t& word = kbd_down_[code / 64];
-    const std::uint64_t bit = std::uint64_t{1} << (code % 64);
-    word = down ? (word | bit) : (word & ~bit);
+    if (down) {
+        held_.set(code);
+    } else {
+        held_.clear(code);
+    }
     sync_(code);
     ++n_.keys;
 }
 
-void LauncherKeyBridge::pad(std::size_t slot, proto::JoyMask level) noexcept {
+void LauncherKeyBridge::pad(svc::DeviceSlot slot, svc::JoyMask level) noexcept {
     TASTY_SEAT_BODY(LauncherKeyBridge);
-    if (slot >= pad_level_.size())
+    const auto cell = pad_level_.find(slot);
+    if (!cell)
         return;
-    pad_level_[slot] = level.v;
+    *cell = level;
     if (!active_)
         return;
-    const std::uint32_t any = pad_any_();
-    const std::uint32_t diff = any ^ pad_or_;
+    const svc::JoyMask any = pad_any_();
+    const svc::JoyMask diff = any.differing(pad_or_);
     pad_or_ = any;
     for (const PadKey& k : kPadKeys) {
-        if ((diff & k.bit) == 0)
+        if (!diff.any(k.bit))
             continue;
         sync_(k.code);
         ++n_.pad_keys;
     }
 }
 
-void LauncherKeyBridge::reseat_pad(std::size_t slot, proto::JoyMask level) noexcept {
+void LauncherKeyBridge::reseat_pad(svc::DeviceSlot slot, svc::JoyMask level) noexcept {
     TASTY_SEAT_BODY(LauncherKeyBridge);
-    if (slot >= pad_level_.size())
+    const auto cell = pad_level_.find(slot);
+    if (!cell)
         return;
-    pad_level_[slot] = level.v;
+    *cell = level;
     if (!active_)
         return;
-    const std::uint32_t any = pad_any_();
-    const std::uint32_t gone = pad_or_ & ~any;
+    const svc::JoyMask any = pad_any_();
+    const svc::JoyMask gone = pad_or_.without(any);
     pad_or_ = any;
     for (const PadKey& k : kPadKeys)
-        if ((gone & k.bit) != 0)
+        if (gone.any(k.bit))
             sync_(k.code);
 }
 
 void LauncherKeyBridge::release_all_() noexcept {
-    for (std::uint16_t w = 0; w < 4; ++w) {
-        kbd_down_[w] = 0;
-        while (down_[w] != 0) {
-            const auto b = static_cast<std::uint16_t>(__builtin_ctzll(down_[w]));
-            down_[w] &= down_[w] - 1;
-            out_.key(static_cast<std::uint16_t>(w * 64 + b), false);
-            ++n_.releases;
-        }
-    }
+    sent_.drain([this](svc::EvdevCode code) {
+        held_.clear(code);
+        inject_(code, false);
+        ++n_.releases;
+    });
+    held_ = {};
 }
 
 }

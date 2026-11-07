@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "infra/error.h"
+#include "infra/mint_guard.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/slot_pool.h"
@@ -46,7 +47,7 @@ class LoanChannel {
 public:
     struct Handoff {
         std::uint8_t index = 0;
-        std::uint8_t done = 0;
+        bool done = false;
     };
 
     static_assert(std::is_trivially_copyable_v<Handoff> && sizeof(Handoff) == 2);
@@ -99,12 +100,12 @@ public:
 
         [[nodiscard]] Slot* operator->() const noexcept { return checked_(); }
 
-        [[nodiscard]] bool completed() const noexcept { return done_ != 0; }
+        [[nodiscard]] bool completed() const noexcept { return done_; }
 
     private:
         friend class LoanChannel;
 
-        Loan(LoanChannel* ch, Lease l, std::uint8_t done) noexcept
+        Loan(LoanChannel* ch, Lease l, bool done) noexcept
             : ch_(ch),
               lease_(std::move(l)),
               done_(done) {}
@@ -127,7 +128,7 @@ public:
 
         LoanChannel* ch_ = nullptr;
         Lease lease_{nullptr, typename Pool::Return{}};
-        std::uint8_t done_ = 0;
+        bool done_ = false;
     };
 
     class Job {
@@ -164,7 +165,7 @@ public:
 
         [[nodiscard]] std::uint8_t index() const noexcept { return h_.index; }
 
-        void complete() noexcept { h_.done = 1; }
+        void complete() noexcept { h_.done = true; }
 
     private:
         friend class LoanChannel;
@@ -333,10 +334,12 @@ public:
             (void)r.release();
     }
 
-    [[nodiscard]] Owner owner() noexcept { return mint_(kOwnerMinted) ? Owner{this} : Owner{}; }
+    [[nodiscard]] Owner owner() noexcept {
+        return minted_.mint(infra::MintGuard::End::first) ? Owner{this} : Owner{};
+    }
 
     [[nodiscard]] Worker worker() noexcept {
-        return mint_(kWorkerMinted) ? Worker{this} : Worker{};
+        return minted_.mint(infra::MintGuard::End::second) ? Worker{this} : Worker{};
     }
 
     [[nodiscard]] std::uint32_t breaches() const noexcept {
@@ -349,7 +352,7 @@ public:
         if (l == nullptr)
             return Loan{};
         bump_(loans_, 1);
-        return Loan{this, std::move(l), 0};
+        return Loan{this, std::move(l), false};
     }
 
     void send(Loan&& l) noexcept {
@@ -489,15 +492,6 @@ public:
 private:
     friend class Loan;
     friend class Job;
-    static constexpr std::uint8_t kOwnerMinted = 1;
-    static constexpr std::uint8_t kWorkerMinted = 2;
-
-    [[nodiscard]] bool mint_(std::uint8_t side) noexcept {
-        if ((minted_ & side) != 0)
-            return false;
-        minted_ = static_cast<std::uint8_t>(minted_ | side);
-        return true;
-    }
 
     static void reset_([[maybe_unused]] Slot& s) noexcept {
         if constexpr (ResetsOnReap<Slot>)
@@ -531,7 +525,7 @@ private:
     infra::OptRef<WakeFlag> owner_wake_{};
     std::atomic<std::uint8_t> loans_{0};
     std::atomic<std::uint8_t> jobs_{0};
-    std::uint8_t minted_ = 0;
+    infra::MintGuard minted_{};
     std::atomic<std::uint32_t> breaches_{0};
     std::uint8_t live_ = N;
     Pool pool_{};

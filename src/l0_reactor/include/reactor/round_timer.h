@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "infra/seat.h"
+#include "reactor/round_recorder.h"
 #include "reactor/round_timing.h"
 
 namespace mister::reactor {
@@ -32,6 +33,8 @@ public:
 
     [[nodiscard]] const RoundTimingCell& cell() const noexcept { return cell_; }
 
+    [[nodiscard]] RoundTraceLane& traces() noexcept { return recorder_.lane(); }
+
     void preload_all_steady(std::uint32_t rounds, std::uint64_t sum_ns) noexcept {
         acc_.all_steady_rounds = rounds;
         acc_.all_steady_sum_ns = sum_ns;
@@ -54,6 +57,7 @@ private:
     std::uint8_t lifecycle_ = 0;
     bool in_round_ = false;
     RoundTimingCell cell_{};
+    RoundRecorder recorder_{};
 };
 
 }

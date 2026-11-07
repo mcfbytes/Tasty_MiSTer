@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <bit>
 #include <compare>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
+#include "app/types.h"
 #include "infra/affine.h"
 #include "infra/indexed_span.h"
 #include "proto/types.h"
@@ -20,6 +23,8 @@ using ::mister::infra::affine::operator-=;
 
 enum class KeyEdge : std::uint8_t { Make, Break };
 
+enum class CycleDir : std::int8_t { Next, Back };
+
 struct ItemId {
     std::uint16_t v = 0;
 
@@ -33,45 +38,24 @@ struct ItemId {
 
 inline constexpr ItemId kNoItem{0};
 
-struct RowCount {
-    std::uint32_t v = 0;
-    using affine_count = RowCount;
+using app::config_slot_of;
+using app::dip_row_of;
+using app::last_osd_row;
+using app::osd_row_at;
+using app::osd_rows_of;
+using app::row_after;
+using app::row_index_of;
+using app::RowCount;
+using app::RowIndex;
+using app::saturating_sub;
 
-    template <std::integral I>
-    [[nodiscard]] static constexpr RowCount of(I n) noexcept {
-        return RowCount{static_cast<std::uint32_t>(n)};
-    }
+[[nodiscard]] constexpr ItemId item_submenu(proto::SubmenuNo n) noexcept {
+    return ItemId{n.v};
+}
 
-    [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
-
-    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
-
-    [[nodiscard]] constexpr RowCount half() const noexcept { return RowCount{v >> 1u}; }
-
-    template <class Rows>
-    constexpr void clip(Rows& rows) const {
-        if (rows.size() > v)
-            rows.resize(v);
-    }
-
-    friend constexpr bool operator==(RowCount, RowCount) = default;
-    friend constexpr auto operator<=>(RowCount, RowCount) = default;
-};
-
-struct RowIndex {
-    std::uint32_t v = 0;
-    using affine_count = RowCount;
-
-    template <std::integral I>
-    [[nodiscard]] static constexpr RowIndex of(I n) noexcept {
-        return RowIndex{static_cast<std::uint32_t>(n)};
-    }
-
-    [[nodiscard]] constexpr RowCount before() const noexcept { return RowCount{v}; }
-
-    friend constexpr bool operator==(RowIndex, RowIndex) = default;
-    friend constexpr auto operator<=>(RowIndex, RowIndex) = default;
-};
+[[nodiscard]] constexpr ItemId item_row(RowIndex r) noexcept {
+    return ItemId{static_cast<std::uint16_t>(r.v)};
+}
 
 template <class T>
 using RowSpan = infra::IndexedSpan<T, RowIndex>;
@@ -122,45 +106,46 @@ inline constexpr RowCount kOneRow{1};
 
 inline constexpr RowCount kFullOsdRows{16};
 
-[[nodiscard]] constexpr RowIndex row_after(RowCount count) noexcept {
-    return RowIndex{count.v};
-}
-
 [[nodiscard]] constexpr RowIndex last_row(RowCount count) noexcept {
     return row_after(count - kOneRow);
 }
 
-[[nodiscard]] constexpr RowCount saturating_sub(RowCount count, RowCount height) noexcept {
-    return RowCount{count.v > height.v ? count.v - height.v : 0u};
-}
+enum class RowKeySpace : std::uint32_t { Push = 0x2, Slot = 0x4 };
 
 struct RowKey {
     std::uint32_t v = 0;
+
+    [[nodiscard]] static constexpr RowKey in_space(RowKeySpace space, ItemId ordinal) noexcept {
+        constexpr unsigned kSpaceShift = 16;
+        return RowKey{(static_cast<std::uint32_t>(space) << kSpaceShift) | ordinal.v};
+    }
+
     friend constexpr bool operator==(RowKey, RowKey) = default;
 };
 
-[[nodiscard]] constexpr proto::OsdRowCount osd_rows_of(RowCount height) noexcept {
-    return proto::OsdRowCount::of(height.v);
-}
-
-[[nodiscard]] constexpr proto::OsdRow last_osd_row(RowCount height) noexcept {
-    return proto::OsdRow::of(height.v - 1u);
-}
-
-[[nodiscard]] constexpr proto::OsdRow osd_row_at(RowCount offset) noexcept {
-    return proto::OsdRow::of(offset.v);
-}
-
-[[nodiscard]] constexpr RowIndex row_index_of(proto::OsdRow row) noexcept {
-    return RowIndex{row.v};
-}
-
-[[nodiscard]] constexpr proto::DipRowIndex dip_row_of(RowIndex row) noexcept {
-    return proto::DipRowIndex::of(row.v);
-}
-
 struct MenuMask {
     std::uint64_t v = 0;
+
+    [[nodiscard]] constexpr bool has(RowIndex r) const noexcept;
+
+    [[nodiscard]] constexpr MenuMask with(RowIndex r) const noexcept;
+
+    [[nodiscard]] constexpr MenuMask only(MenuMask subset) const noexcept;
+
+    [[nodiscard]] constexpr MenuMask without_row(RowIndex r) const noexcept;
+
+    [[nodiscard]] constexpr MenuMask without(MenuMask drop) const noexcept {
+        return MenuMask{v & ~drop.v};
+    }
+
+    [[nodiscard]] constexpr std::optional<RowIndex> lowest() const noexcept;
+
+    [[nodiscard]] constexpr std::optional<RowIndex> highest() const noexcept;
+
+    [[nodiscard]] constexpr std::optional<RowIndex> next_after(RowIndex r) const noexcept;
+
+    [[nodiscard]] constexpr std::optional<RowIndex> prev_before(RowIndex r) const noexcept;
+
     friend constexpr bool operator==(MenuMask, MenuMask) = default;
 };
 
@@ -187,12 +172,53 @@ struct MenuMask {
     return (m.v & row_bit(r).v) != 0;
 }
 
+constexpr bool MenuMask::has(RowIndex r) const noexcept {
+    return has_row(*this, r);
+}
+
+constexpr MenuMask MenuMask::with(RowIndex r) const noexcept {
+    return with_row(*this, r);
+}
+
+constexpr MenuMask MenuMask::only(MenuMask subset) const noexcept {
+    return MenuMask{v & subset.v};
+}
+
+constexpr MenuMask MenuMask::without_row(RowIndex r) const noexcept {
+    return MenuMask{v & ~row_bit(r).v};
+}
+
+constexpr std::optional<RowIndex> MenuMask::lowest() const noexcept {
+    if (v == 0)
+        return std::nullopt;
+    return RowIndex{static_cast<std::uint32_t>(std::countr_zero(v))};
+}
+
+constexpr std::optional<RowIndex> MenuMask::highest() const noexcept {
+    constexpr std::uint32_t kTop = menu_mask_rows().v - 1u;
+    if (v == 0)
+        return std::nullopt;
+    return RowIndex{kTop - static_cast<std::uint32_t>(std::countl_zero(v))};
+}
+
+constexpr std::optional<RowIndex> MenuMask::next_after(RowIndex r) const noexcept {
+    if (r >= row_after(menu_mask_rows() - kOneRow))
+        return std::nullopt;
+    return without(dense_mask(r.before() + kOneRow)).lowest();
+}
+
+constexpr std::optional<RowIndex> MenuMask::prev_before(RowIndex r) const noexcept {
+    return only(dense_mask(r.before())).highest();
+}
+
 struct HdMask {
     std::uint32_t v = 0;
 
     [[nodiscard]] constexpr proto::OsdMask osd_word() const noexcept {
         return proto::OsdMask{static_cast<std::uint16_t>(v)};
     }
+
+    [[nodiscard]] constexpr bool has(HdMask bits) const noexcept { return (v & bits.v) != 0u; }
 
     friend constexpr bool operator==(HdMask, HdMask) = default;
 };
@@ -221,5 +247,19 @@ static_assert(has_row(MenuMask{0b100u}, RowIndex{2}) && !has_row(MenuMask{0b100u
 static_assert(row_after(RowCount{3}) - RowIndex{} == RowCount{3});
 static_assert(dense_mask(RowCount{3}) == MenuMask{0b111u});
 static_assert(dense_mask(menu_mask_rows()) == MenuMask{~std::uint64_t{0}});
+static_assert(MenuMask{}.lowest() == std::nullopt && MenuMask{}.highest() == std::nullopt);
+static_assert(MenuMask{0b1010u}.lowest() == RowIndex{1});
+static_assert(MenuMask{0b1010u}.highest() == RowIndex{3});
+static_assert(MenuMask{0b1010u}.next_after(RowIndex{1}) == RowIndex{3});
+static_assert(MenuMask{0b1010u}.next_after(RowIndex{3}) == std::nullopt);
+static_assert(MenuMask{0b1010u}.prev_before(RowIndex{3}) == RowIndex{1});
+static_assert(MenuMask{0b1010u}.prev_before(RowIndex{0}) == std::nullopt);
+static_assert(MenuMask{0b1010u}.prev_before(RowIndex{40}) == RowIndex{3});
+static_assert(MenuMask{0b1111u}.only(MenuMask{0b0101u}) == MenuMask{0b0101u});
+static_assert(MenuMask{0b1111u}.without_row(RowIndex{1}) == MenuMask{0b1101u});
+static_assert(MenuMask{}.with(RowIndex{2}) == MenuMask{0b100u});
+static_assert(!MenuMask{}.has(RowIndex{2}) && MenuMask{0b100u}.has(RowIndex{2}));
+static_assert(sizeof(MenuMask) == 8);
+static_assert(sizeof(CycleDir) == 1);
 
 }

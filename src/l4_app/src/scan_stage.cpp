@@ -48,7 +48,7 @@ IReplayStage::Step ScanStage::enter(Ctx ctx) noexcept {
     in_log_ = false;
     log_done_ = false;
     play.scanned = 0;
-    play.movie_frames = 0;
+    play.movie_frames = FrameCount{};
     play.tries = 0;
     play.vsync_ok = ctx.w.video.output_locked();
     return Step::stay();
@@ -148,7 +148,8 @@ std::optional<PlayRefusal> ScanStage::scan_line_(
         return PlayRefusal{Refusal::Command, play.scanned};
     if (++play.scanned > ReplayPlay::kMaxFrames)
         return PlayRefusal{Refusal::TooLong, play.scanned};
-    if (const std::uint32_t f = play.scanned - 1; !play.stop_at || f < *play.stop_at)
+    if (const std::uint32_t f = play.scanned - 1;
+        !play.stop_at || movie_frame_from_wire(f) < *play.stop_at)
         note_frame_(play, f, *fr);
     return std::nullopt;
 }
@@ -185,14 +186,18 @@ IReplayStage::Step ScanStage::finish_scan_(Ctx ctx) noexcept {
             static_cast<std::uint32_t>(cores::IMovieCodec::Refusal::NotAMovie)
         );
     }
-    play.movie_frames = play.stop_at ? std::min(play.scanned, *play.stop_at) : play.scanned;
+    const FrameCount scanned = movie_frame_from_wire(play.scanned) - MovieFrame{};
+    play.movie_frames = play.stop_at ? std::min(scanned, *play.stop_at - MovieFrame{}) : scanned;
 
     file_.reset();
     play.runs.shrink_to_fit();
     const cores::IMovieCodec::Raster r = play.codec->raster(play.facts);
     if (play.offset_us == 0)
         play.offset_us = r.period_ns / 2000;
-    if (!ReplayPlay::phase_fits(play.offset_us, r.period_ns))
+    if (!ReplayPlay::phase_fits(
+            std::chrono::microseconds{play.offset_us},
+            std::chrono::nanoseconds{r.period_ns}
+        ))
         return Step::refuse(Refusal::Phase, play.offset_us);
     return Step::enter(Step::Next::Hash);
 }

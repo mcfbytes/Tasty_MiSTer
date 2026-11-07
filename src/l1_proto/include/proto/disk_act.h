@@ -17,7 +17,6 @@ inline constexpr std::size_t kDiskStateBytes = 16;
 inline constexpr std::size_t kDiskActBytes = 512;
 
 struct DiskAct {
-    TASTY_SEAT_EXEMPT(component);
 
     enum class Kind : std::uint8_t { None, Out, In, Signal };
 

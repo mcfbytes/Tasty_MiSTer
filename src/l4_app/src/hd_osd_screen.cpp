@@ -78,12 +78,12 @@ void HdOsdScreen::sync_console_() noexcept {
     } else {
         release_console_();
     }
-    if (!open_ && guarded_vt_ == 0)
+    if (!open_ && !guarded_vt_)
         show_cursor_();
 }
 
 void HdOsdScreen::hide_cursor_() noexcept {
-    if (!w_.vt || hushed_vt_ != 0)
+    if (!w_.vt || hushed_vt_)
         return;
     const auto vt = w_.vt->active();
     if (!vt)
@@ -96,15 +96,15 @@ void HdOsdScreen::hide_cursor_() noexcept {
 }
 
 void HdOsdScreen::show_cursor_() noexcept {
-    if (hushed_vt_ == 0)
+    if (!hushed_vt_)
         return;
     if (w_.vt)
-        w_.vt->cursor(hushed_vt_, true);
-    hushed_vt_ = 0;
+        w_.vt->cursor(*hushed_vt_, true);
+    hushed_vt_.reset();
 }
 
 void HdOsdScreen::capture_console_() noexcept {
-    if (!w_.vt || guarded_vt_ != 0)
+    if (!w_.vt || guarded_vt_)
         return;
     const auto vt = w_.vt->active();
     if (!vt)
@@ -114,16 +114,16 @@ void HdOsdScreen::capture_console_() noexcept {
         return;
     w_.vt->graphics(*vt);
     guarded_vt_ = *vt;
-    if (hushed_vt_ == 0)
+    if (!hushed_vt_)
         hushed_vt_ = *vt;
 }
 
 void HdOsdScreen::release_console_() noexcept {
-    if (guarded_vt_ == 0)
+    if (!guarded_vt_)
         return;
     if (w_.vt)
-        w_.vt->text(guarded_vt_);
-    guarded_vt_ = 0;
+        w_.vt->text(*guarded_vt_);
+    guarded_vt_.reset();
 }
 
 bool HdOsdScreen::try_open_() noexcept {

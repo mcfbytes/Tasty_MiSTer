@@ -14,7 +14,8 @@ namespace mister::app {
 struct CheatBlob {
     TASTY_SEAT_EXEMPT(const_shared);
     std::uint16_t len = 0;
-    std::uint32_t unit = 16;
+
+    std::uint32_t unit = cores::kCheatDefaultUnit;
     std::uint8_t bytes[cores::kCheatTableBytes] = {};
 };
 

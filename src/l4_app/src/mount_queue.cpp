@@ -95,7 +95,7 @@ std::optional<std::uint8_t> MountQueue::pick_index_word_(
         return std::nullopt;
     const proto::ConfStrEntry* row = nullptr;
     for (const proto::ConfStrEntry& e : negotiated_.conf_str()->file_slots())
-        if (e.letter == 'S' && e.ioctl_index == index.v)
+        if (e.letter == 'S' && e.ioctl_index == index)
             row = &e;
     if (row == nullptr)
         return std::nullopt;
@@ -116,10 +116,10 @@ void MountQueue::arm_plain_mount_(Host& host, const MountAsk& ask) {
     const std::string_view path = ask.path.view();
     proto::LinkOp::BindMount op{.index = ask.index, .perform = true};
     if (!path.empty()) {
-        std::uint64_t size = 0;
+        proto::FileSize size{};
         if (auto f = vfs_.open(path, svc::OpenMode::ReadWrite)) {
             if (auto sz = (*f)->size())
-                size = sz->v;
+                size = *sz;
         }
         const auto id = inbox_.intern_file_path(path, size);
         if (!id || *id == proto::FileId{}) {
@@ -160,7 +160,7 @@ void MountQueue::step_save_mount(Host& host) {
             if (m.then_load) {
 
                 if (!negotiated_.owns_loader()
-                    && host.arm_loader(*m.then_load, path, e.size_bytes)) {
+                    && host.arm_loader(*m.then_load, path, e.size_bytes.v)) {
                     finish_save_mount_(host, true, true);
                     return;
                 }
@@ -243,7 +243,7 @@ void MountQueue::step_save_mount(Host& host) {
         m.gen = g;
         return;
     }
-    const auto id = host.ladder_host().intern_path(path, 0);
+    const auto id = host.ladder_host().intern_path(path, proto::FileSize{});
     if (!id || *id == proto::FileId{})
         return;
     const proto::ActKey g = host.ladder_host().next_generation();
@@ -358,24 +358,23 @@ bool MountQueue::read_remembered_mounts(RememberedFiles files) {
     bool slot0_held = false;
     const proto::ItemTable items = negotiated_.conf_str()->item_table();
     for (const proto::Item& it : items.items()) {
-        if (it.kind != proto::ItemKind::MountSlot || !it.store_name || !it.has_digit)
+        if (it.kind != proto::ItemKind::MountSlot || !it.store_name || !it.digit)
             continue;
+        const proto::FileSlotDigit digit = *it.digit;
         const std::string path = read_remembered_path(
             vfs_,
             negotiated_.remembered_stem(),
             RememberedSlot::Mount,
-            it.digit
+            digit.io_index()
         );
         if (path.empty())
             continue;
-        slot0_held = slot0_held || it.digit == 0;
-        MountAsk ask{
-            .which = UiRequest::Kind::MountImage,
-            .index = proto::IoIndex{it.digit},
-            .tag = kUncaused
-        };
+
+        slot0_held = slot0_held || digit == proto::FileSlotDigit{};
+        const proto::IoIndex io = digit.io_index();
+        MountAsk ask{.which = UiRequest::Kind::MountImage, .index = io, .tag = kUncaused};
         ask.index_word = proto::WideIoIndex::of(
-                             proto::IoIndex{it.digit},
+                             io,
                              proto::ConfStr::ext_subindex(path, items.subfield(it, 1))
         )
                              .fio_byte();

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -67,13 +68,16 @@ struct TastyArgs {
     app::PathText core{};
 
     std::optional<app::PathText> record{};
-    std::optional<std::int32_t> lead{};
-    std::optional<std::uint32_t> phase_us{};
-    std::optional<std::uint32_t> stop_at{};
+
+    std::optional<app::MovieFrame> lead{};
+
+    std::optional<std::chrono::microseconds> phase_us{};
+
+    std::optional<app::MovieFrame> stop_at{};
     std::optional<cores::IMovieCodec::RamFill> ram_fill{};
 
     std::optional<app::PathText> save{};
-    std::uint32_t return_after_s = 30;
+    std::chrono::seconds return_after_s{30};
     app::VsyncAdjust vsync_adjust = app::VsyncAdjust::Off;
     bool stay = false;
     bool strict = false;

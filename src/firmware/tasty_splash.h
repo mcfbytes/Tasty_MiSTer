@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 
@@ -20,9 +21,8 @@ class TastySplash {
 public:
     static constexpr std::uint32_t kDefaultW = 1280;
     static constexpr std::uint32_t kDefaultH = 720;
-    static constexpr std::size_t kPixelOff = 4096;
     static constexpr std::uint16_t kFbEnWord = 0x8016;
-    static constexpr std::int64_t kShowNs = 2'000'000'000;
+    static constexpr std::chrono::nanoseconds kShowNs{std::chrono::seconds{2}};
 
     [[nodiscard]] Ex<void> map(const hal::PhysRegion& fb) noexcept;
     [[nodiscard]] bool blit(std::uint32_t width, std::uint32_t height) noexcept;

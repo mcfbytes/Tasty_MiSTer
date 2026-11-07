@@ -56,10 +56,6 @@
 namespace mister::app {
 namespace {
 
-[[nodiscard]] proto::BindGeneration as_generation(std::uint32_t gen) noexcept {
-    return proto::BindGeneration{static_cast<std::uint16_t>(gen)};
-}
-
 [[nodiscard]] phase::Facts facts_of(
     const CoreSwitch& sw,
     const NegotiatedCore& nc,
@@ -68,7 +64,7 @@ namespace {
 ) noexcept {
     const auto& owed = reboot.owed();
     return phase::Facts{
-        .gen = phase::Gen{sw.gen()},
+        .gen = sw.bind_generation(),
         .loaded = sw.pending_step_arg().loaded,
         .conf_gen = nc.conf_scope().gen,
         .why = why,
@@ -232,8 +228,8 @@ void SessionOwner::set_identity_poll_budget(std::uint32_t n) noexcept {
     identity_poll_budget_ = n;
 }
 
-void SessionOwner::set_start_bound_ms(std::uint32_t ms) noexcept {
-    start_bound_ms_ = ms;
+void SessionOwner::set_start_bound_ms(std::chrono::milliseconds ms) noexcept {
+    start_bound_ = ms;
 }
 
 void SessionOwner::set_readiness_poll_budget(std::uint32_t n) noexcept {
@@ -378,7 +374,7 @@ void SessionOwner::program_() {
         );
 
         phase::Facts f = facts_of(switch_, negotiated_, reboot_, Errc::negotiation);
-        f.bound = os::Deadline::in(clock_, std::chrono::milliseconds{start_bound_ms_});
+        f.bound = os::Deadline::in(clock_, start_bound_);
         const phase::Stimulus on = programmed_gen ? phase::Stimulus::ProgramOk
                                                   : phase::Stimulus::ProgramFailed;
         judge_(phase_.take(on, f), on);
@@ -649,7 +645,7 @@ void SessionOwner::refuse_busy(UiRequest::Kind asked, CorrelationTag tag) noexce
 void SessionOwner::watch_start_() noexcept {
 
     const auto due = phase_.bound();
-    if (start_bound_ms_ == 0 || !due || !due->expired(clock_))
+    if (start_bound_ == std::chrono::milliseconds::zero() || !due || !due->expired(clock_))
         return;
     if (rebooting_()) {
         phase_.end_bound();
@@ -761,12 +757,12 @@ void SessionOwner::service_boot(const UiRequest::LoadCore& req) {
     front_end_armed_ = !req.path.empty() && !names_front_end_image(req.path.view(), req.xml);
     before_seats_ = true;
     order_hold_reset_();
-    order_bind_decoders_(proto::LinkOp::DecoderTable::PreSession, kBootGen);
+    order_bind_decoders_(proto::LinkOp::DecoderTable::PreSession, proto::BindGeneration{kBootGen});
 
     const CoreSwitch::StepArg arg = switch_.step_arg(switch_.program_at_boot(*this));
     switch_.latch_step_arg(arg);
     (void)order_refusable_(
-        proto::LinkOp::ApplyCore{.loaded = arg.loaded, .gen = as_generation(kBootGen)}
+        proto::LinkOp::ApplyCore{.loaded = arg.loaded, .gen = proto::BindGeneration{kBootGen}}
     );
     phase_edge_(phase::Stimulus::BootApply);
     if (negotiated_.facts_pending()) {
@@ -794,11 +790,7 @@ void SessionOwner::finish_pick_(UiRequest::Kind asked, CorrelationTag tag, Conte
 
 void SessionOwner::run_load_(const PickedLoad& load) {
     if (const auto gen = attach_row_savestates(load.opensave, load.content.path.view())) {
-        hold_for_savestates(
-            load,
-            *gen,
-            clock_.now() + std::chrono::nanoseconds{cores::kSaveStateHoldBoundNs}
-        );
+        hold_for_savestates(load, *gen, clock_.now() + cores::kSaveStateHoldBound);
         return;
     }
     after_content_(content_.run_attached_load(load, *this));
@@ -1246,7 +1238,7 @@ void SessionOwner::order_make_core_(
             .irqs = conf ? conf->irq_bindings() : std::span<const proto::IrqBinding>{},
             .lw = conf ? conf->lw_windows() : std::span<const proto::AxiLwDecl>{},
             .fabric = fabric,
-            .fabric_gen = FabricGeneration{fabric_gen_},
+            .fabric_gen = fabric_gen_,
             .mount_slots = conf ? conf->mount_slot_mask() : proto::BlockSlotMask{}
         }
     );
@@ -1278,7 +1270,7 @@ void SessionOwner::order_make_core_(
         (void)ask_savestates_(negotiated_.manifest_rel().view(), ladder_host_.next_generation());
     }
 
-    phase_.rebound(os::Deadline::in(clock_, std::chrono::milliseconds{start_bound_ms_}));
+    phase_.rebound(os::Deadline::in(clock_, start_bound_));
 }
 
 void SessionOwner::latch_boot_companion(std::string_view xml) noexcept {
@@ -1303,9 +1295,13 @@ bool SessionOwner::order_refusable_(const A& alt) noexcept {
 
 void SessionOwner::order_bind_decoders_(
     proto::LinkOp::DecoderTable table,
-    std::uint32_t gen
+    proto::BindGeneration gen
 ) noexcept {
-    (void)order_refusable_(proto::LinkOp::BindDecoders{.table = table, .gen = as_generation(gen)});
+    (void)order_refusable_(proto::LinkOp::BindDecoders{.table = table, .gen = gen});
+}
+
+bool SessionOwner::owes_switch_(proto::BindGeneration gen) const noexcept {
+    return gen == switch_.bind_generation();
 }
 
 void SessionOwner::publish_done(UiRequest::Kind which, CorrelationTag tag) noexcept {
@@ -1324,8 +1320,8 @@ void SessionOwner::publish_refusal(UiRequest::Kind which, Errc code, Correlation
 }
 
 void SessionOwner::abort_start_(Errc why) noexcept {
-    switch_.end(proto::LinkOp::AbortSwitch{.why = why, .gen = as_generation(switch_.gen())});
-    order_bind_decoders_(proto::LinkOp::DecoderTable::Census, switch_.gen());
+    switch_.end(proto::LinkOp::AbortSwitch{.why = why, .gen = switch_.bind_generation()});
+    order_bind_decoders_(proto::LinkOp::DecoderTable::Census, switch_.bind_generation());
 }
 
 void SessionOwner::refuse_started_switch_(Errc why, phase::Stimulus on) noexcept {
@@ -1435,7 +1431,7 @@ void SessionOwner::on(const proto::LinkEvent::BlockRequest&) noexcept {
 
 void SessionOwner::on(const proto::LinkEvent::StartRefused& e) noexcept {
 
-    if (e.bind_gen != as_generation(switch_.gen())) {
+    if (!owes_switch_(e.bind_gen)) {
         ++tally_.stale_events;
         return;
     }
@@ -1443,7 +1439,7 @@ void SessionOwner::on(const proto::LinkEvent::StartRefused& e) noexcept {
         return refuse_rebooting_(phase::Stimulus::StartRefused);
     if (const auto* refused = phase_.in_stage<phase::Refused>()) {
 
-        if (refused->by_bridge && refused->gen.v == switch_.gen()) {
+        if (refused->by_bridge && refused->gen == switch_.bind_generation()) {
             abort_start_(e.err);
             return;
         }
@@ -1461,7 +1457,7 @@ void SessionOwner::misrouted(const proto::LinkEvent&) noexcept {
 static_assert(LinkEventMainSink<SessionOwner>);
 
 void SessionOwner::on(const proto::LinkEvent::CoreMade& m) noexcept {
-    if (m.bind_gen != switch_.gen()) {
+    if (!owes_switch_(m.bind_gen)) {
         ++tally_.stale_events;
         return;
     }
@@ -1537,17 +1533,17 @@ void SessionOwner::order_session_up_() noexcept {
     const std::vector<RememberedFile> remembered = read_remembered_files_();
 
     const bool index0_taken = std::ranges::any_of(remembered, [](const RememberedFile& f) noexcept {
-        return f.row.ioctl_index == 0;
+        return f.row.ioctl_index == proto::IoIndex{};
     });
 
     builder_.raise_osd();
 
     proto::LinkOp::SessionUp up{};
-    up.rtc.rtc[7] = 0x40;
+    up.rtc = proto::RtcImage::zero_date();
     const std::time_t now = std::time(nullptr);
     if (now == static_cast<std::time_t>(-1)) {
         std::fprintf(stderr, "mister: RTC clock read failed; the core starts with a zero date\n");
-    } else if (const auto image = proto::rtc_image_at(static_cast<std::uint32_t>(now)); image) {
+    } else if (const auto image = proto::rtc_image_at(now); image) {
         up.rtc = *image;
     } else {
         std::fprintf(
@@ -1707,7 +1703,7 @@ void SessionOwner::order_rbf_tail_(
                                                                : path.substr(dot);
     LoadKey key(buf.size());
     key.feed(buf);
-    const auto id = inbox_.intern_file(std::move(buf), ext, path, 0, key.value());
+    const auto id = inbox_.intern_file(std::move(buf), ext, path, hal::FabricAddr{}, key.value());
     if (!id) {
         ++tally_.files_failed;
         return;
@@ -1731,7 +1727,7 @@ void SessionOwner::order_rbf_tail_(
 
 void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
     log_conf_str_(c);
-    if (c.bind_gen.v != switch_.gen()) {
+    if (!owes_switch_(c.bind_gen)) {
         ++tally_.stale_events;
         return;
     }
@@ -1776,15 +1772,14 @@ void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
 
     const bool manifest = build_has_manifest_(cs);
     const bool fabric = CoreBuilder::fabric_route(name, manifest);
-    const std::optional<std::uint32_t> owned = fabric
-        ? builder_.claim_sector(
-              {.name = name,
-               .manifest = manifest,
-               .irqs = cs.irq_bindings(),
-               .lw = lw,
-               .fabric_gen = FabricGeneration{fabric_gen_}}
-          )
-        : std::nullopt;
+    const std::optional<hal::LwOffset> owned = fabric ? builder_.claim_sector(
+                                                            {.name = name,
+                                                             .manifest = manifest,
+                                                             .irqs = cs.irq_bindings(),
+                                                             .lw = lw,
+                                                             .fabric_gen = fabric_gen_}
+                                                        )
+                                                      : std::nullopt;
     bind_.doorbells(cs, lw, owned);
     bind_.joy(name);
 
@@ -1797,7 +1792,11 @@ void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
         launcher_.latch(*ini.launcher, name, switch_.pending().path.view());
     op.conf = conf_switches(cfg);
     ini_.publish(cfg);
-    launcher_.publish(name, svc::direct_video_resolved(cfg) != 0, switch_.pending().path.view());
+    launcher_.publish(
+        name,
+        svc::direct_video_resolved(cfg) != svc::DirectVideo::Off,
+        switch_.pending().path.view()
+    );
     if (cs.savestate().has_value() && !name.empty()) {
         (void)vfs_.ensure_dir(std::string("savestates/") + std::string(name));
     }
@@ -1827,7 +1826,7 @@ bool SessionOwner::launcher_swap_room_() const noexcept {
 
 void SessionOwner::on(const proto::LinkEvent::IdentityMismatch& w) noexcept {
     ++tally_.identities_fail;
-    if (w.bind_gen.v != switch_.gen())
+    if (!owes_switch_(w.bind_gen))
         return;
     if (rebooting_())
         return refuse_rebooting_(
@@ -1840,7 +1839,7 @@ void SessionOwner::on(const proto::LinkEvent::IdentityMismatch& w) noexcept {
             phase_.wedge();
             ++tally_.fabric_wedges;
 
-            order_bind_decoders_(proto::LinkOp::DecoderTable::Census, switch_.gen());
+            order_bind_decoders_(proto::LinkOp::DecoderTable::Census, switch_.bind_generation());
             reboot_.settle(true);
             phase_edge_(phase::Stimulus::Reboot);
             return;
@@ -1854,7 +1853,7 @@ void SessionOwner::on(const proto::LinkEvent::IdentityMismatch& w) noexcept {
 
 void SessionOwner::on(const proto::LinkEvent::IdentityMatched& w) noexcept {
     ++tally_.identities_ok;
-    if (w.bind_gen.v != switch_.gen())
+    if (!owes_switch_(w.bind_gen))
         return;
     if (rebooting_())
         return refuse_rebooting_(phase::Stimulus::IdentityMatched);
@@ -1865,7 +1864,7 @@ void SessionOwner::on(const proto::LinkEvent::IdentityMatched& w) noexcept {
         return;
     }
 
-    const BindOutcome bind = bind_link_rows(kLinkRows, inbox_, switch_.gen());
+    const BindOutcome bind = bind_link_rows(kLinkRows, inbox_, switch_.bind_generation());
     tally_.order_refusals += bind.decoders_refused;
     tally_.op_drops += bind.slots_refused;
     if (negotiated_.facts_pending()) {
@@ -1875,7 +1874,7 @@ void SessionOwner::on(const proto::LinkEvent::IdentityMatched& w) noexcept {
     switch_.end(
         proto::LinkOp::ApplyCore{
             .loaded = switch_.pending_step_arg().loaded,
-            .gen = as_generation(switch_.gen())
+            .gen = switch_.bind_generation()
         }
     );
     phase_edge_(phase::Stimulus::IdentityMatched);
@@ -1907,7 +1906,7 @@ void SessionOwner::forget_core() noexcept {
     forget_core_();
 }
 
-void SessionOwner::release_and_await_identity_(std::uint32_t gen) noexcept {
+void SessionOwner::release_and_await_identity_(proto::BindGeneration gen) noexcept {
     order_(proto::LinkOp::ReleaseReset{});
     order_bind_decoders_(proto::LinkOp::DecoderTable::PreSession, gen);
     negotiated_.note_width(false);
@@ -1922,7 +1921,7 @@ void SessionOwner::pause_wedged() noexcept {
 void SessionOwner::programmed(bool ok) {
     TASTY_SEAT_BODY(SessionOwner);
     readiness_.latch_load_ok(ok);
-    ++fabric_gen_;
+    fabric_gen_ = fabric_gen_.next();
     if (ok)
         negotiated_.latch_mra_facts(switch_.pending());
 }
@@ -1992,7 +1991,7 @@ infra::ParkTimeout SessionOwner::wake_hint_ms(infra::ParkTimeout floor_ms) const
 
     if (rung_wait_() != Wait::None && floor_ms > kPieceRetryMs)
         floor_ms = kPieceRetryMs;
-    if (const auto due = phase_.bound(); due && start_bound_ms_ != 0)
+    if (const auto due = phase_.bound(); due && start_bound_ != std::chrono::milliseconds::zero())
         floor_ms = until(*due, floor_ms);
     if (!switch_.receipt_held() || readiness_.recovering())
         return floor_ms;
@@ -2023,7 +2022,7 @@ void SessionOwner::judge_(const phase::SwitchPhase::Taken& t, phase::Stimulus on
     if (log_) {
         (void)log_->push(
             LogRec::PhaseTolerated{
-                .gen = t.gen,
+                .gen = t.gen ? t.gen->v : 0u,
                 .phase = static_cast<std::uint8_t>(t.at),
                 .under = static_cast<std::uint8_t>(t.under),
                 .stimulus = static_cast<std::uint8_t>(on)
@@ -2094,7 +2093,7 @@ void SessionOwner::log_conf_str_(const proto::LinkEvent::ConfStr& c) noexcept {
     if (!log_)
         return;
     const auto* wait = phase_.in_stage<phase::AwaitConfStr>();
-    const bool awaited = c.bind_gen.v == switch_.gen() && wait != nullptr && wait->loaded;
+    const bool awaited = owes_switch_(c.bind_gen) && wait != nullptr && wait->loaded;
     (void)log_->push(
         LogRec::ConfStrArrived{
             .bind_gen = c.bind_gen.v,

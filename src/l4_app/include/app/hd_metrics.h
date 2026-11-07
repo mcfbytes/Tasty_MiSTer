@@ -9,6 +9,11 @@
 
 namespace mister::app {
 
+[[nodiscard]] constexpr std::int32_t hd_sep_h(std::int32_t row_h) noexcept {
+    constexpr std::int32_t kSeparatorDivisor = 2;
+    return row_h / kSeparatorDivisor;
+}
+
 struct HdMetrics {
     std::int32_t tier = 720;
     std::int32_t font_hero = 0;

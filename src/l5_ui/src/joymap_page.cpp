@@ -4,6 +4,8 @@
 #include <linux/input-event-codes.h>
 
 #include <algorithm>
+#include <array>
+#include <type_traits>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
@@ -46,27 +48,27 @@ constexpr std::string_view kWordNames[12] = {
 constexpr std::string_view kMenuOk = "Menu: OK";
 constexpr std::string_view kMenuBack = "Menu: Back";
 
-constexpr std::uint8_t kCntOk = 21;
-constexpr std::uint8_t kCntEsc = 22;
-constexpr std::uint8_t kMenuFuncWord = 23;
-constexpr std::uint8_t kSegment = 12;
 constexpr std::size_t kDpad = 4;
 constexpr std::size_t kMaxNames = 28;
-constexpr std::uint8_t kClassicRows = 16;
-static_assert(kClassicRows <= kMaxPageRows, "the classic rows must fit the walk's row table");
+static_assert(kDpad + kMaxNames <= JoyMapBlob::kWords, "every prompt's word is a blob word");
+
+static_assert(kFullOsdRows.v <= kMaxPageRows, "the classic rows must fit the walk's row table");
+
+constexpr int kPromptColumns = 30;
+
+constexpr proto::OsdRow kPromptRow{3};
+constexpr proto::OsdRow kIdRow{5};
+constexpr proto::OsdRow kSkipRow{7};
+constexpr proto::OsdRow kCancelRow{8};
+constexpr proto::OsdRow kFinishRow{9};
 
 static_assert(kMaxNames * sizeof(JoyMapPrompt::name) - 1 <= app::SessionIdentity::kJNamesCap - 1);
-
-bool is_make(std::uint32_t raw, std::uint32_t key) noexcept {
-    constexpr std::uint32_t kCodeMask = std::numeric_limits<std::uint16_t>::max();
-    return (raw & KeyDecoder::kUpstroke) == 0 && (raw & kCodeMask) == key;
-}
 
 }
 
 std::vector<JoyMapPrompt> build_joymap_prompts(bool system_pass, std::string_view j_names) {
     std::vector<JoyMapPrompt> out;
-    const auto add = [&out](std::uint8_t word, std::string_view name) {
+    const auto add = [&out](BlobWord word, std::string_view name) {
         JoyMapPrompt p{};
         p.word = word;
         const std::size_t n = name.size() < sizeof p.name - 1 ? name.size() : sizeof p.name - 1;
@@ -74,15 +76,22 @@ std::vector<JoyMapPrompt> build_joymap_prompts(bool system_pass, std::string_vie
         p.name[n] = '\0';
         out.push_back(p);
     };
+
+    BlobWord word{};
     if (system_pass) {
-        for (std::uint8_t w = 0; w < std::size(kWordNames); ++w)
-            add(w, kWordNames[w]);
-        add(kCntOk, kMenuOk);
-        add(kCntEsc, kMenuBack);
+        for (const std::string_view name : kWordNames) {
+            add(word, name);
+            word = word.next();
+        }
+        add(JoyMapBlob::kCntOk, kMenuOk);
+        add(JoyMapBlob::kCntEsc, kMenuBack);
         return out;
     }
-    for (std::uint8_t w = 0; w < kDpad; ++w)
-        add(w, kWordNames[w]);
+    for (std::size_t w = 0; w < kDpad; ++w) {
+        add(word, kWordNames[w]);
+        word = word.next();
+    }
+    const BlobWord first_button = word;
 
     std::size_t count = 0;
     std::size_t begin = 0;
@@ -92,7 +101,8 @@ std::vector<JoyMapPrompt> build_joymap_prompts(bool system_pass, std::string_vie
         const std::string_view field = j_names.substr(begin, end - begin);
         if (field.empty())
             break;
-        add(static_cast<std::uint8_t>(kDpad + count), field);
+        add(word, field);
+        word = word.next();
         ++count;
         if (comma == std::string_view::npos)
             break;
@@ -101,8 +111,11 @@ std::vector<JoyMapPrompt> build_joymap_prompts(bool system_pass, std::string_vie
 
     if (count == 0) {
         constexpr std::size_t kGenericButtons = 4;
-        for (std::uint8_t w = kDpad; w < kDpad + kGenericButtons; ++w)
-            add(w, kWordNames[w]);
+        word = first_button;
+        for (std::size_t w = kDpad; w < kDpad + kGenericButtons; ++w) {
+            add(word, kWordNames[w]);
+            word = word.next();
+        }
     }
     return out;
 }
@@ -143,40 +156,51 @@ void JoyMapPage::disarm() {
     spec_.wire->wake();
 }
 
-void JoyMapPage::record(const JoyMapPrompt& p, std::uint16_t code) {
-    constexpr unsigned kHalfBits = std::numeric_limits<std::uint16_t>::digits;
-    if (p.word == kCntOk) {
-        blob_[kMenuFuncWord] = code;
-    } else if (p.word == kCntEsc) {
-        blob_[kMenuFuncWord] = (static_cast<std::uint32_t>(code) << kHalfBits)
-            | blob_[kMenuFuncWord];
-    } else if (p.word < blob_.size()) {
-        blob_[p.word] = code;
+void JoyMapBlob::store(BlobWord word, svc::EvdevCode code) noexcept {
+    std::uint32_t& menu = infra::at_index(blob_, kMenuFuncWord);
+    if (word == kCntOk) {
+        menu = svc::packed_word(svc::PackedKeys::lone(code));
+    } else if (word == kCntEsc) {
+        svc::PackedKeys pair = svc::packed_keys_of(menu);
+        pair.hi = pair.hi.or_bits(code);
+        menu = svc::packed_word(pair);
+    } else if (word.indexes(blob_)) {
+        infra::at_index(blob_, word) = svc::packed_word(svc::PackedKeys::lone(code));
     }
 }
 
-std::uint16_t JoyMapPage::captured_code(std::size_t i) const noexcept {
-    constexpr unsigned kHalfBits = std::numeric_limits<std::uint16_t>::digits;
-    constexpr std::uint32_t kHalfMask = std::numeric_limits<std::uint16_t>::max();
-    if (i >= prompts_.size())
-        return 0;
-    const JoyMapPrompt& p = prompts_[i];
-    if (p.word == kCntOk)
-        return static_cast<std::uint16_t>(blob_[kMenuFuncWord] & kHalfMask);
-    if (p.word == kCntEsc)
-        return static_cast<std::uint16_t>((blob_[kMenuFuncWord] >> kHalfBits) & kHalfMask);
-    if (p.word < blob_.size())
-        return static_cast<std::uint16_t>(blob_[p.word] & kHalfMask);
-    return 0;
+svc::EvdevCode JoyMapBlob::code(BlobWord word) const noexcept {
+    const svc::PackedKeys menu = svc::packed_keys_of(infra::at_index(blob_, kMenuFuncWord));
+    if (word == kCntOk)
+        return menu.lo;
+    if (word == kCntEsc)
+        return menu.hi;
+    if (word.indexes(blob_))
+        return svc::packed_keys_of(infra::at_index(blob_, word)).lo;
+    return svc::EvdevCode{};
 }
 
-bool JoyMapPage::duplicate_in_segment(const JoyMapPrompt& p, std::uint16_t code) const {
-    const std::uint8_t seg = p.word >= kSegment ? kSegment : std::uint8_t{0};
-    for (std::uint8_t w = seg; w < p.word && w < blob_.size(); ++w) {
-        if (blob_[w] == code)
+bool JoyMapBlob::duplicate_in(BlobWord word, svc::EvdevCode code) const noexcept {
+    const BlobWord seg = word >= kSegment ? kSegment : BlobWord{};
+    for (BlobWord w = seg; w < word && w.indexes(blob_); w = w.next()) {
+        if (svc::packed_keys_of(infra::at_index(blob_, w)) == svc::PackedKeys::lone(code))
             return true;
     }
     return false;
+}
+
+void JoyMapPage::record(const JoyMapPrompt& p, svc::EvdevCode code) {
+    blob_.store(p.word, code);
+}
+
+svc::EvdevCode JoyMapPage::captured_code(std::size_t i) const noexcept {
+    if (i >= prompts_.size())
+        return {};
+    return blob_.code(prompts_[i].word);
+}
+
+bool JoyMapPage::duplicate_in_segment(const JoyMapPrompt& p, svc::EvdevCode code) const {
+    return blob_.duplicate_in(p.word, code);
 }
 
 Transition JoyMapPage::finish(bool save) {
@@ -195,11 +219,8 @@ Transition JoyMapPage::finish(bool save) {
     const svc::MapStore store{*spec_.files};
     svc::ButtonMap map;
     map.kind = svc::MapKind::Joystick;
-    map.blob.resize(blob_.size() * sizeof(std::uint32_t));
-    infra::store_le_run<std::uint32_t>(
-        std::span<const std::uint32_t>{blob_},
-        std::span<std::byte>{map.blob}
-    );
+    map.blob.resize(blob_.words().size() * sizeof(std::uint32_t));
+    infra::store_le_run<std::uint32_t>(blob_.words(), std::span<std::byte>{map.blob});
     svc::DeviceIdentity id{};
     id.vid = lock_.vid;
     id.pid = lock_.pid;
@@ -230,7 +251,7 @@ Transition JoyMapPage::handle(const UiEvent& ev) {
         return Transition{};
     }
 
-    if (is_make(ev.raw.v, KEY_SPACE)) {
+    if (KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_SPACE})) {
         if (!locked_)
             return Transition{};
         ++cur_;
@@ -241,7 +262,8 @@ Transition JoyMapPage::handle(const UiEvent& ev) {
         return Transition{};
     }
 
-    if (is_make(ev.raw.v, KEY_ENTER) || is_make(ev.raw.v, KEY_KPENTER)) {
+    if (KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_ENTER})
+        || KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_KPENTER})) {
         return finish(locked_);
     }
     if (ev.buttons.has_any({UiEvent::Menu}))
@@ -297,20 +319,19 @@ void JoyMapPage::rebegin() {
 
 template <class Visit>
 void JoyMapPage::for_each_row(Visit&& visit) const {
-    char s[40];
-    s[0] = '\0';
+    std::array<char, kClassicRowCap> s{};
     if (!done_ && cur_ < prompts_.size()) {
 
         const std::string_view name = prompts_[cur_].text();
         constexpr std::string_view kPrompt = "Press: ";
-        constexpr int kRowColumns = 30;
-        int pad = (kRowColumns - (static_cast<int>(name.size()) + static_cast<int>(kPrompt.size())))
+        int pad = (kPromptColumns
+                   - (static_cast<int>(name.size()) + static_cast<int>(kPrompt.size())))
             / 2;
         if (pad < 0)
             pad = 0;
         std::snprintf(
-            s,
-            sizeof s,
+            s.data(),
+            s.size(),
             "%*sPress: %.*s",
             pad,
             "",
@@ -318,46 +339,34 @@ void JoyMapPage::for_each_row(Visit&& visit) const {
             name.data()
         );
     }
-    char idrow[40];
-    idrow[0] = '\0';
+    std::array<char, kClassicRowCap> idrow{};
     if (locked_) {
         std::snprintf(
-            idrow,
-            sizeof idrow,
+            idrow.data(),
+            idrow.size(),
             "   Joystick ID: %04x:%04x",
             static_cast<unsigned>(lock_.vid.v),
             static_cast<unsigned>(lock_.pid.v)
         );
     }
-    constexpr std::uint8_t kPromptRow = 3;
-    constexpr std::uint8_t kIdRow = 5;
-    constexpr std::uint8_t kSkipRow = 7;
-    constexpr std::uint8_t kCancelRow = 8;
-    constexpr std::uint8_t kFinishRow = 9;
-    for (std::uint8_t r = 0; r < kClassicRows; ++r) {
-        switch (r) {
-            case kPromptRow:
-                visit(r, std::string_view{s}, RowRole::Line);
-                break;
-            case kIdRow:
-                visit(r, std::string_view{idrow}, RowRole::Line);
-                break;
-            case kSkipRow:
-                visit(
-                    r,
-                    locked_ ? std::string_view{"        Space \x16 Skip"} : std::string_view{},
-                    RowRole::Legend
-                );
-                break;
-            case kCancelRow:
-                visit(r, std::string_view{"          Esc \x16 Cancel"}, RowRole::Legend);
-                break;
-            case kFinishRow:
-                visit(r, std::string_view{"        Enter \x16 Finish"}, RowRole::Legend);
-                break;
-            default:
-                visit(r, std::string_view{}, RowRole::Line);
-                break;
+    for (const RowIndex r : rows(kFullOsdRows)) {
+        const proto::OsdRow at = osd_row_at(r.before());
+        if (at == kPromptRow) {
+            visit(r, std::string_view{s.data()}, RowRole::Line);
+        } else if (at == kIdRow) {
+            visit(r, std::string_view{idrow.data()}, RowRole::Line);
+        } else if (at == kSkipRow) {
+            visit(
+                r,
+                locked_ ? std::string_view{"        Space \x16 Skip"} : std::string_view{},
+                RowRole::Legend
+            );
+        } else if (at == kCancelRow) {
+            visit(r, std::string_view{"          Esc \x16 Cancel"}, RowRole::Legend);
+        } else if (at == kFinishRow) {
+            visit(r, std::string_view{"        Enter \x16 Finish"}, RowRole::Legend);
+        } else {
+            visit(r, std::string_view{}, RowRole::Line);
         }
     }
 }
@@ -368,20 +377,20 @@ bool JoyMapPage::walk(PageWalk& out) const {
     out.title_arrow = OsdRenderer::kArrowNone;
     out.count = 0;
 
-    struct Row {
-        std::uint8_t row;
+    struct Drawn {
+        RowIndex row;
         std::string text;
         RowRole role;
     };
 
-    std::vector<Row> rows;
-    for_each_row([&](std::uint8_t row, std::string_view text, RowRole role) {
-        rows.push_back(Row{row, std::string{text}, role});
+    std::vector<Drawn> drawn;
+    for_each_row([&](RowIndex row, std::string_view text, RowRole role) {
+        drawn.push_back(Drawn{row, std::string{text}, role});
     });
 
     std::string legend;
-    for (std::size_t i = 0; i < rows.size(); ++i) {
-        const Row& row = rows[i];
+    for (std::size_t i = 0; i < drawn.size(); ++i) {
+        const Drawn& row = drawn[i];
         const bool legend_row = row.role == RowRole::Legend && !row.text.empty();
         if (legend_row) {
 
@@ -402,12 +411,9 @@ bool JoyMapPage::walk(PageWalk& out) const {
         pr.has_hd = false;
         pr.legend = legend_row;
         pr.classic = classic_row(
-            OsdRow{row.row},
+            osd_row_at(row.row.before()),
             row.text,
-            false,
-            false,
-            std::nullopt,
-            OsdRenderer::kArrowNone
+            {.arrow = OsdRenderer::kArrowNone}
         );
     }
 
@@ -416,7 +422,7 @@ bool JoyMapPage::walk(PageWalk& out) const {
         out.rows.size(),
         static_cast<std::size_t>(out.count) + app::PageDescription::kMaxRows
     );
-    for (const Row& row : rows) {
+    for (const Drawn& row : drawn) {
         std::string_view text{row.text};
         while (!text.empty() && text.front() == ' ')
             text.remove_prefix(1);
@@ -440,18 +446,18 @@ bool JoyMapPage::walk(PageWalk& out) const {
         r.has_hd = true;
         r.hd.kind = app::PageDescription::RowKind::Text;
         (void)r.hd.label.assign(prompts_[i].text());
-        const std::uint16_t code = captured_code(i);
-        char v[16];
-        if (code == 0) {
-            std::snprintf(v, sizeof v, "%s", "skipped");
+        const svc::EvdevCode code = captured_code(i);
+        std::array<char, std::remove_cvref_t<decltype(r.hd.value)>::kCapacity> v{};
+        if (code.is_unset()) {
+            std::snprintf(v.data(), v.size(), "%s", "skipped");
         } else {
-            std::snprintf(v, sizeof v, "0x%X", static_cast<unsigned>(code));
+            std::snprintf(v.data(), v.size(), "0x%X", static_cast<unsigned>(code.v));
         }
-        (void)r.hd.value.assign(std::string_view{v});
+        (void)r.hd.value.assign(std::string_view{v.data()});
     }
 
-    out.page.first = 0;
-    out.page.total = hd_total;
+    out.page.first = RowIndex{};
+    out.page.total = RowCount::of(hd_total);
     (void)out.page.footer.assign(legend);
     return true;
 }

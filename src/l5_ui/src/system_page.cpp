@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/system_page.h"
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
@@ -8,7 +9,7 @@
 #include <string_view>
 
 #include "app/cmd_verb_sink.h"
-#include "app/hd_window.h"
+#include "ui/page_window.h"
 #include "app/page_description.h"
 #include "app/pending_load.h"
 #include "app/name_config.h"
@@ -138,24 +139,22 @@ void SystemPage::on_enter(PageContext& ctx) {
 
 namespace {
 
-enum ClassicLine : std::uint8_t {
-    kLineCore,
-    kLineVersion,
-    kLineGapTop,
-    kLineStorage,
-    kLineSpace,
-    kLineSwitch,
-    kLineGapMid,
-    kLineRemap,
-    kLineJoystick,
-    kLineScripts,
-    kLineHelp,
-    kLineSave,
-    kLineReboot,
-    kLineKernel,
-    kLineUseHd,
-    kLineExit,
-};
+constexpr proto::OsdRow kLineCore{0};
+constexpr proto::OsdRow kLineVersion{1};
+constexpr proto::OsdRow kLineGapTop{2};
+constexpr proto::OsdRow kLineStorage{3};
+constexpr proto::OsdRow kLineSpace{4};
+constexpr proto::OsdRow kLineSwitch{5};
+constexpr proto::OsdRow kLineGapMid{6};
+constexpr proto::OsdRow kLineRemap{7};
+constexpr proto::OsdRow kLineJoystick{8};
+constexpr proto::OsdRow kLineScripts{9};
+constexpr proto::OsdRow kLineHelp{10};
+constexpr proto::OsdRow kLineSave{11};
+constexpr proto::OsdRow kLineReboot{12};
+constexpr proto::OsdRow kLineKernel{13};
+constexpr proto::OsdRow kLineUseHd{14};
+constexpr proto::OsdRow kLineExit{15};
 
 constexpr std::string_view kColdHead = " Cold";
 constexpr RowIndex kConfirmCancel{0};
@@ -164,15 +163,21 @@ constexpr RowIndex kConfirmRememberScripts{2};
 
 template <class Visit>
 void SystemPage::for_each_row(Visit&& visit) const {
-    char s[40];
+    std::array<char, kClassicRowCap> s{};
     visit(kLineCore, SystemItem::Core, std::string_view{kRowCore}, false);
 
     if (facts_.os_version[0] != '\0') {
-        std::snprintf(s, sizeof s, " MiSTer v%s,  OS v%s", facts_.version, facts_.os_version);
+        std::snprintf(
+            s.data(),
+            s.size(),
+            " MiSTer v%s,  OS v%s",
+            facts_.version,
+            facts_.os_version
+        );
     } else {
-        std::snprintf(s, sizeof s, "       MiSTer v%s", facts_.version);
+        std::snprintf(s.data(), s.size(), "       MiSTer v%s", facts_.version);
     }
-    visit(kLineVersion, std::nullopt, std::string_view{s}, false);
+    visit(kLineVersion, std::nullopt, std::string_view{s.data()}, false);
     visit(kLineGapTop, std::nullopt, std::string_view{}, false);
 
     std::string_view storage;
@@ -209,11 +214,11 @@ void SystemPage::for_each_row(Visit&& visit) const {
     );
 
     if (reboot_req_) {
-        std::snprintf(s, sizeof s, " Cold Reboot");
+        std::snprintf(s.data(), s.size(), " Cold Reboot");
         visit(
             kLineReboot,
             SystemItem::Reboot,
-            std::string_view{s + kColdHead.size() - reboot_off_},
+            std::string_view{s.data() + kColdHead.size() - reboot_off_},
             false
         );
     } else {
@@ -237,7 +242,7 @@ bool SystemPage::walk(PageWalk& out) const {
 
     std::uint16_t total = 0;
     std::uint16_t selected = 0;
-    for_each_row([&](std::uint8_t, std::optional<SystemItem> item, std::string_view text, bool) {
+    for_each_row([&](proto::OsdRow, std::optional<SystemItem> item, std::string_view text, bool) {
         if (text.empty())
             return;
         if (item.has_value() && item_selected(*item))
@@ -245,26 +250,25 @@ bool SystemPage::walk(PageWalk& out) const {
         ++total;
     });
 
-    const app::HdWindow win = app::hd_window(selected, total, out.page.first);
-    out.page.total = total;
-    out.page.first = win.first;
+    const app::HdWindow win = window_page(out.page, RowIndex::of(selected), RowCount::of(total));
 
-    std::uint16_t at = 0;
-    for_each_row([&](std::uint8_t row,
+    const RowRange window = rows(win.first, win.count);
+    RowIndex at{};
+    for_each_row([&](proto::OsdRow row,
                      std::optional<SystemItem> item,
                      std::string_view text,
                      bool stippled) {
         if (text.empty())
             return;
-        const std::uint16_t index = at++;
-        if (index < win.first || index >= win.first + win.count)
+        const RowIndex index = at;
+        at += kOneRow;
+        if (!window.contains(index))
             return;
         PageRow& r = out.rows[out.count++];
         r.classic = classic_row(
-            OsdRow{row},
+            row,
             text,
-            item.has_value() && item_selected(*item),
-            stippled
+            {.inverted = item.has_value() && item_selected(*item), .stippled = stippled}
         );
         r.has_hd = true;
         if (item == SystemItem::Reboot) {
@@ -278,22 +282,22 @@ bool SystemPage::walk(PageWalk& out) const {
         r.hd.selected = item.has_value() && item_selected(*item);
     });
 
-    at = 0;
-    for_each_row([&](std::uint8_t row,
+    at = RowIndex{};
+    for_each_row([&](proto::OsdRow row,
                      std::optional<SystemItem> item,
                      std::string_view text,
                      bool stippled) {
         if (!text.empty()) {
-            const std::uint16_t index = at++;
-            if (index >= win.first && index < win.first + win.count)
+            const RowIndex index = at;
+            at += kOneRow;
+            if (window.contains(index))
                 return;
         }
         PageRow& r = out.rows[out.count++];
         r.classic = classic_row(
-            OsdRow{row},
+            row,
             text,
-            item.has_value() && item_selected(*item),
-            stippled
+            {.inverted = item.has_value() && item_selected(*item), .stippled = stippled}
         );
         r.has_hd = false;
     });
@@ -323,7 +327,7 @@ Transition SystemPage::handle(const UiEvent& ev) {
     if (!ev.buttons.has_any({UiEvent::Select}))
         return reboot_release(ev);
 
-    const auto item = system_item_from_raw(sel_.v);
+    const auto item = system_item_of(sel_);
     if (!item) {
         ++refusals_;
         return Transition{};

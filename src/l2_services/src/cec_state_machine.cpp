@@ -14,14 +14,127 @@ namespace mister::svc {
 
 namespace {
 
-constexpr os::I2cReg kCecRegRxHeader[3] = {os::I2cReg{0x15}, os::I2cReg{0x27}, os::I2cReg{0x38}};
-constexpr os::I2cReg kCecRegRxLength[3] = {os::I2cReg{0x25}, os::I2cReg{0x37}, os::I2cReg{0x48}};
+struct CecRxBuffer {
+    os::I2cReg header;
+    os::I2cReg length;
+};
+
+constexpr CecRxBuffer kRxRows[] = {
+    {os::I2cReg{0x15}, os::I2cReg{0x25}},
+    {os::I2cReg{0x27}, os::I2cReg{0x37}},
+    {os::I2cReg{0x38}, os::I2cReg{0x48}},
+};
+static_assert(std::size(kRxRows) == CecStateMachine::kRxBuffers, "one row per ADV7513 RX buffer");
+
 constexpr os::I2cReg kCecRegRxStatus{0x26};
 constexpr os::I2cReg kCecRegRxReady{0x49};
 constexpr os::I2cReg kCecRegRxBuffers{0x4A};
 constexpr os::I2cReg kMainRegInt1Status{0x97};
 constexpr std::uint8_t kCecIntRxRdyMask = 0x07;
 
+constexpr std::uint8_t kRxReleaseBracket = 0x08;
+
+struct RxSlot {
+    static constexpr unsigned kRankBits = 2;
+    std::uint8_t v = 0;
+
+    [[nodiscard]] constexpr const CecRxBuffer& regs() const noexcept { return kRxRows[v]; }
+
+    [[nodiscard]] constexpr std::uint8_t bit() const noexcept {
+        return static_cast<std::uint8_t>(1u << v);
+    }
+
+    [[nodiscard]] constexpr std::uint8_t release_byte() const noexcept {
+        return static_cast<std::uint8_t>(kRxReleaseBracket | bit());
+    }
+
+    [[nodiscard]] constexpr unsigned rank_shift() const noexcept { return unsigned{v} * kRankBits; }
+};
+
+struct RxReady {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] static constexpr RxReady of(std::uint8_t reg) noexcept {
+        return RxReady{static_cast<std::uint8_t>(reg & kCecIntRxRdyMask)};
+    }
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr bool holds(RxSlot slot) const noexcept { return (v & slot.bit()) != 0; }
+
+    [[nodiscard]] constexpr std::uint32_t depth() const noexcept {
+        return static_cast<std::uint32_t>(std::popcount(v));
+    }
+};
+
+struct RxOrder {
+    static constexpr unsigned kRankMask = 0x03;
+    static constexpr unsigned kNoRank = 4;
+    std::uint8_t v = 0;
+
+    [[nodiscard]] constexpr unsigned rank_of(RxSlot slot) const noexcept {
+        return (unsigned{v} >> slot.rank_shift()) & kRankMask;
+    }
+
+    [[nodiscard]] constexpr std::optional<RxSlot> oldest_ready(RxReady ready) const noexcept {
+        std::optional<RxSlot> selected;
+        unsigned oldest = kNoRank;
+        for (std::uint8_t i = 0; i < CecStateMachine::kRxBuffers; ++i) {
+            const RxSlot slot{i};
+            if (!ready.holds(slot))
+                continue;
+            const unsigned rank = rank_of(slot);
+            if (rank > 0 && rank < oldest) {
+                oldest = rank;
+                selected = slot;
+            }
+        }
+        if (selected)
+            return selected;
+        for (std::uint8_t i = 0; i < CecStateMachine::kRxBuffers; ++i) {
+            if (ready.holds(RxSlot{i}))
+                return RxSlot{i};
+        }
+        return std::nullopt;
+    }
+};
+
+[[nodiscard]] Ex<void> release_rx(const adv7513::Io& io, RxSlot slot) {
+    if (auto r = io.cec->write(kCecRegRxBuffers, slot.release_byte()); !r) {
+        return err(r.error().code, ERR_SITE(), r.error().detail);
+    }
+    if (io.delay) {
+        io.delay->sleep_for(std::chrono::microseconds{CecStateMachine::kReleasePulseUs});
+    }
+    if (auto r = io.cec->write(kCecRegRxBuffers, kRxReleaseBracket); !r) {
+        return err(r.error().code, ERR_SITE(), r.error().detail);
+    }
+    return {};
+}
+
+}
+
+Ex<CecMessage> CecStateMachine::decode_rx(os::I2cReg hdr_reg, CecLength length) {
+    CecMessage msg{};
+    msg.length = length;
+    auto h = io_.cec->read(hdr_reg);
+    if (!h)
+        return err(h.error().code, ERR_SITE(), h.error().detail);
+    msg.header = *h;
+    if (length.v > 1) {
+        auto op = io_.cec->read(hdr_reg.plus(1));
+        if (!op)
+            return err(op.error().code, ERR_SITE(), op.error().detail);
+        msg.opcode = *op;
+    }
+    const std::span<std::uint8_t> payload = length.payload_of(msg.data);
+    for (std::size_t i = 0; i < payload.size(); ++i) {
+        auto d = io_.cec->read(hdr_reg.plus(CecLength::kHeaderBytes + i));
+        if (!d)
+            return err(d.error().code, ERR_SITE(), d.error().detail);
+        payload[i] = *d;
+    }
+    return msg;
 }
 
 Ex<void> CecStateMachine::poll_deadline() {
@@ -40,11 +153,11 @@ Ex<void> CecStateMachine::poll_deadline() {
     if (!io_.hdmi->hdmi_int_asserted())
         return {};
 
-    auto ready = io_.cec->read(kCecRegRxReady);
-    if (!ready)
-        return err(ready.error().code, ERR_SITE(), ready.error().detail);
-    const unsigned rx_bits = unsigned{*ready} & unsigned{kCecIntRxRdyMask};
-    if (rx_bits == 0) {
+    auto ready_reg = io_.cec->read(kCecRegRxReady);
+    if (!ready_reg)
+        return err(ready_reg.error().code, ERR_SITE(), ready_reg.error().detail);
+    const RxReady ready = RxReady::of(*ready_reg);
+    if (ready.empty()) {
 
         if (auto r = io_.main->write(kMainRegInt1Status, kCecIntRxRdyMask); !r) {
             return err(r.error().code, ERR_SITE(), r.error().detail);
@@ -52,7 +165,7 @@ Ex<void> CecStateMachine::poll_deadline() {
         return {};
     }
 
-    const std::uint32_t depth = static_cast<std::uint32_t>(std::popcount(rx_bits));
+    const std::uint32_t depth = ready.depth();
     if (depth > max_rx_depth_)
         max_rx_depth_ = depth;
 
@@ -60,75 +173,28 @@ Ex<void> CecStateMachine::poll_deadline() {
     if (!order)
         return err(order.error().code, ERR_SITE(), order.error().detail);
 
-    constexpr unsigned kNoBuffer = kRxBuffers;
-    unsigned selected = kNoBuffer;
-    unsigned oldest = 4;
-    for (unsigned i = 0; i < kRxBuffers; ++i) {
-        if (!(rx_bits & (1u << i)))
-            continue;
-        const unsigned rank = (unsigned{*order} >> (i * 2)) & 0x03u;
-        if (rank > 0 && rank < oldest) {
-            oldest = rank;
-            selected = i;
-        }
-    }
-    if (selected == kNoBuffer) {
-        for (unsigned i = 0; i < kRxBuffers; ++i) {
-            if (rx_bits & (1u << i)) {
-                selected = i;
-                break;
-            }
-        }
-    }
-    if (selected == kNoBuffer)
+    const std::optional<RxSlot> selected = RxOrder{*order}.oldest_ready(ready);
+    if (!selected)
         return {};
+    const RxSlot slot = *selected;
 
-    const std::size_t idx = selected;
-
-    auto len_raw = io_.cec->read(kCecRegRxLength[idx]);
+    auto len_raw = io_.cec->read(slot.regs().length);
     if (!len_raw)
         return err(len_raw.error().code, ERR_SITE(), len_raw.error().detail);
-    const std::uint8_t length = static_cast<std::uint8_t>(*len_raw & 0x1Fu);
-    const os::I2cReg hdr_reg = kCecRegRxHeader[idx];
-
-    if (length >= 1 && length <= 16) {
-        CecMessage msg{};
-        msg.length = length;
-        auto h = io_.cec->read(hdr_reg);
-        if (!h)
-            return err(h.error().code, ERR_SITE(), h.error().detail);
-        msg.header = *h;
-        if (length > 1) {
-            auto op = io_.cec->read(hdr_reg.plus(1));
-            if (!op)
-                return err(op.error().code, ERR_SITE(), op.error().detail);
-            msg.opcode = *op;
-        }
-        const std::uint8_t payload = static_cast<std::uint8_t>(length > 2 ? length - 2 : 0);
-        for (std::uint8_t i = 0; i < payload; ++i) {
-            auto d = io_.cec->read(hdr_reg.plus(2 + i));
-            if (!d)
-                return err(d.error().code, ERR_SITE(), d.error().detail);
-            msg.data[i] = *d;
-        }
-        last_ = msg;
+    if (const auto length = CecLength::of(*len_raw)) {
+        auto msg = decode_rx(slot.regs().header, *length);
+        if (!msg)
+            return std::unexpected(msg.error());
+        last_ = *msg;
     } else {
         ++rx_rejected_;
     }
 
-    const std::uint8_t bit = static_cast<std::uint8_t>(1u << selected);
-    if (auto r = io_.cec->write(kCecRegRxBuffers, static_cast<std::uint8_t>(0x08u | bit)); !r) {
-        return err(r.error().code, ERR_SITE(), r.error().detail);
-    }
-    if (io_.delay) {
-        io_.delay->sleep_for(std::chrono::microseconds{kReleasePulseUs});
-    }
-    if (auto r = io_.cec->write(kCecRegRxBuffers, 0x08); !r) {
-        return err(r.error().code, ERR_SITE(), r.error().detail);
-    }
+    if (auto r = release_rx(io_, slot); !r)
+        return r;
     ++rx_released_;
 
-    if (auto r = io_.main->write(kMainRegInt1Status, bit); !r) {
+    if (auto r = io_.main->write(kMainRegInt1Status, slot.bit()); !r) {
         return err(r.error().code, ERR_SITE(), r.error().detail);
     }
     return {};

@@ -95,7 +95,7 @@ MountState CdiCore::finish_mount_() {
     if (probed_)
         return MountState::Done;
 
-    if (!geom_.mounted || geom_.toc.last == 0)
+    if (!geom_.mounted || geom_.toc.last == svc::TrackCount{})
         return MountState::Failed;
     std::array<std::uint8_t, kBlock> block{};
     if (!serve_block_(kBootLba, block))
@@ -107,18 +107,20 @@ MountState CdiCore::finish_mount_() {
     }
     disc_type_ = cdi::disc_type(geom_.toc, disc_type_);
     toc_count_ = cdi::build_toc(geom_.toc, disc_type_, toc_);
-    plan_.disc_size_bytes = static_cast<std::uint64_t>(geom_.toc.end.v) * cdi::kSectorBytes;
-    plan_.data_first_track = geom_.toc.tracks[0].type != svc::TrackType::Cdda;
+    plan_.disc_size_bytes = proto::FileSize{
+        static_cast<std::uint64_t>(geom_.toc.end.v) * cdi::kSectorBytes
+    };
+    plan_.data_first_track = geom_.toc.at(svc::TrackIndex{}).type != svc::TrackType::Cdda;
     probed_ = true;
     return MountState::Done;
 }
 
 CdiCore::Answer CdiCore::classify_(std::int32_t lba) const noexcept {
     const svc::Toc& toc = geom_.toc;
-    if (lba < 0 || !geom_.mounted || toc.last == 0)
+    if (lba < 0 || !geom_.mounted || toc.last == svc::TrackCount{})
         return Answer::TocArea;
-    for (std::uint8_t i = 0; i < toc.last; ++i) {
-        const svc::Track& t = toc.tracks[i];
+    for (svc::TrackIndex i{}; toc.last.contains(i); i = i + svc::TrackCount{1}) {
+        const svc::Track& t = toc.at(i);
         const std::int64_t lo = static_cast<std::int64_t>(t.start.v)
             - static_cast<std::int32_t>(t.pregap.v);
         const std::int64_t hi = static_cast<std::int64_t>(t.end.v) - 1;
@@ -149,14 +151,21 @@ bool CdiCore::serve_block_(
         case Answer::TocArea:
 
             if (lba < 0) {
-                cdi::compose_toc_q(lba, std::span<const cdi::TocEntry>{toc_.data(), toc_count_}, q);
+                const cdi::QFrame frame = cdi::compose_toc_q(
+                    lba,
+                    std::span<const cdi::TocEntry>{toc_.data(), toc_count_}
+                );
+                std::memcpy(q.data(), frame.bytes.data(), cdi::kQBytes);
             } else {
-                cdi::compose_q(lba, geom_.toc, q);
+                const cdi::QFrame frame = cdi::compose_q(lba, geom_.toc);
+                std::memcpy(q.data(), frame.bytes.data(), cdi::kQBytes);
             }
             return true;
-        case Answer::LeadOut:
-            cdi::compose_q(lba, geom_.toc, q);
+        case Answer::LeadOut: {
+            const cdi::QFrame frame = cdi::compose_q(lba, geom_.toc);
+            std::memcpy(q.data(), frame.bytes.data(), cdi::kQBytes);
             return true;
+        }
         case Answer::Track:
             break;
     }
@@ -179,7 +188,8 @@ bool CdiCore::serve_block_(
             rw
         );
     }
-    cdi::compose_q(lba, geom_.toc, q);
+    const cdi::QFrame q_frame = cdi::compose_q(lba, geom_.toc);
+    std::memcpy(q.data(), q_frame.bytes.data(), cdi::kQBytes);
     return true;
 }
 

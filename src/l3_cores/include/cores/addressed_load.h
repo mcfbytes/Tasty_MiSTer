@@ -25,7 +25,7 @@ public:
     explicit AddressedLoad(const hal::PhysRegion& aperture) noexcept : aperture_(aperture) {}
 
     [[nodiscard]] static std::optional<TransferRow> window_row(
-        std::uint32_t addr,
+        hal::FabricAddr addr,
         std::uint64_t bytes,
         proto::WideIoIndex index,
         const hal::PhysRegion& aperture

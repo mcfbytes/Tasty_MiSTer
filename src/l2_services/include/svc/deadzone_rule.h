@@ -8,6 +8,7 @@
 
 #include "infra/fixed_str.h"
 #include "svc/config_snapshot.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -16,7 +17,7 @@ inline constexpr std::size_t kDeadzoneUidChars = 255;
 struct DeadzoneRule {
 
     FixedStr<kDeadzoneUidChars + 1, StrFit::Reject> uid{};
-    std::uint8_t deadzone = 0;
+    Deadzone deadzone{};
 };
 
 [[nodiscard]] std::optional<DeadzoneRule> parse_deadzone_rule(std::string_view line);

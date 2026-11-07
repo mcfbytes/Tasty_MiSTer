@@ -77,7 +77,7 @@ Ex<proto::FileId> FileBytes<P>::intern(
     std::vector<std::uint8_t>&& bytes,
     std::string_view ext,
     std::string_view path,
-    std::uint32_t load_addr,
+    hal::FabricAddr load_addr,
     svc::Crc32 crc,
     std::uint64_t whole,
     std::uint64_t offset
@@ -104,7 +104,7 @@ Ex<proto::FileId> FileBytes<P>::intern(
     heap_[*i] = std::move(bytes);
     s.bytes = heap_[*i];
     s.load_addr = load_addr;
-    s.size_bytes = whole != 0 ? whole : s.bytes.size();
+    s.size_bytes = proto::FileSize{whole != 0 ? whole : s.bytes.size()};
     s.offset = offset;
     s.crc = crc;
     return proto::FileId{static_cast<std::uint16_t>(*i + 1)};
@@ -113,7 +113,7 @@ Ex<proto::FileId> FileBytes<P>::intern(
 template <SeatTag P>
 Ex<proto::FileId> FileBytes<P>::intern_path(
     std::string_view path,
-    std::uint64_t size_bytes,
+    proto::FileSize size,
     svc::Crc32 crc,
     std::uint32_t aux
 ) {
@@ -128,7 +128,7 @@ Ex<proto::FileId> FileBytes<P>::intern_path(
     if (!staged)
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), *i});
     InternedFile& s = *staged;
-    s.size_bytes = size_bytes;
+    s.size_bytes = size;
     s.crc = crc;
     s.aux = aux;
     return proto::FileId{static_cast<std::uint16_t>(*i + 1)};
@@ -140,7 +140,7 @@ Ex<proto::FileId> FileBytes<P>::intern_at(
     std::vector<std::uint8_t>&& bytes,
     std::string_view ext,
     std::string_view path,
-    std::uint32_t load_addr
+    hal::FabricAddr load_addr
 ) {
     const std::uint16_t id = fid.v;
     if (id <= InternedFile::kRecycleSlots || id >= InternedFile::kSlots) {
@@ -167,7 +167,7 @@ Ex<proto::FileId> FileBytes<P>::intern_at(
     if (path.empty())
         s.path.clear();
     s.load_addr = load_addr;
-    s.size_bytes = n;
+    s.size_bytes = proto::FileSize{n};
     s.crc = {};
     s.save = {};
     s.aux = 0;

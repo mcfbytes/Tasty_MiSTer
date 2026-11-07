@@ -8,6 +8,7 @@
 
 #include "cores/file_slot.h"
 #include "cores/types.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "proto/bit_field.h"
 #include "proto/types.h"
@@ -55,6 +56,14 @@ struct OptionRow {
 
     [[nodiscard]] constexpr std::uint8_t choice_count() const noexcept {
         return choices != 0 ? choices : static_cast<std::uint8_t>(values.size());
+    }
+
+    [[nodiscard]] constexpr bool labelled(ChoiceSlot pick) const noexcept {
+        return pick.within(values) && !infra::at_index(values, pick).empty();
+    }
+
+    [[nodiscard]] constexpr ChoiceSlot choice_slot(ChoiceSlot pick) const noexcept {
+        return labelled(pick) ? pick : ChoiceSlot{};
     }
 
     [[nodiscard]] static constexpr OptionRow cycle(

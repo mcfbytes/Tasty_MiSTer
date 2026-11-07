@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/hd_theme.h"
 
+#include "app/vec3.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -46,9 +48,18 @@ struct Lch {
     double h = 0.0;
 };
 
-using Matrix3 = std::array<std::array<double, 3>, 3>;
-
 constexpr double kByteMax = 255.0;
+
+constexpr float kByteMaxF = 255.f;
+constexpr std::uint8_t kChannelMax = 255;
+constexpr float kHueSectorDeg = 60.f;
+constexpr float kHueTurnDeg = 360.f;
+constexpr std::size_t kHueSectors = 6;
+
+constexpr float kGreenSector = 2.f;
+constexpr float kBlueSector = 4.f;
+constexpr float kSectorCycle = 2.f;
+constexpr float kHalf = 0.5f;
 
 constexpr double kSrgbToLinearKnee = 0.04045;
 constexpr double kSrgbFromLinearKnee = 0.0031308;
@@ -60,24 +71,24 @@ constexpr double kRoundHalf = 0.5;
 
 constexpr std::array<double, 3> kLuma{0.2126, 0.7152, 0.0722};
 
-constexpr Matrix3 kLmsOfLinear{
+constexpr Mat3 kLmsOfLinear{std::array<Vec3<double>, 3>{
     {{0.4122214708, 0.5363325363, 0.0514459929},
      {0.2119034982, 0.6806995451, 0.1073969566},
      {0.0883024619, 0.2817188376, 0.6299787005}}
-};
-constexpr Matrix3 kLabOfLms{
+}};
+constexpr Mat3 kLabOfLms{std::array<Vec3<double>, 3>{
     {{0.2104542553, 0.7936177850, -0.0040720468},
      {1.9779984951, -2.4285922050, 0.4505937099},
      {0.0259040371, 0.7827717662, -0.8086757660}}
-};
+}};
 constexpr std::array<double, 2> kLmsLOfAb{0.3963377774, 0.2158037573};
 constexpr std::array<double, 2> kLmsMOfAb{-0.1055613458, -0.0638541728};
 constexpr std::array<double, 2> kLmsSOfAb{-0.0894841775, -1.2914855480};
-constexpr Matrix3 kLinearOfLms3{
+constexpr Mat3 kLinearOfLms3{std::array<Vec3<double>, 3>{
     {{4.0767416621, -3.3077115913, 0.2309699292},
      {-1.2684380046, 2.6097574011, -0.3413193965},
      {-0.0041960863, -0.7034186147, 1.7076147010}}
-};
+}};
 constexpr double kGamutEps = 1e-6;
 
 constexpr Rgb888 kBlack{0x000000u};
@@ -124,39 +135,25 @@ double luminance(Rgb888 rgb) noexcept {
 
 Lch to_lch(Rgb888 rgb) noexcept {
     const Rgb c = unpack(rgb);
-    const double r = to_linear(c[0]);
-    const double g = to_linear(c[1]);
-    const double b = to_linear(c[2]);
-    const auto& m = kLmsOfLinear;
-    const double l = std::cbrt(m[0][0] * r + m[0][1] * g + m[0][2] * b);
-    const double mm = std::cbrt(m[1][0] * r + m[1][1] * g + m[1][2] * b);
-    const double s = std::cbrt(m[2][0] * r + m[2][1] * g + m[2][2] * b);
-    const auto& k = kLabOfLms;
-    const double ok_l = k[0][0] * l + k[0][1] * mm + k[0][2] * s;
-    const double ok_a = k[1][0] * l + k[1][1] * mm + k[1][2] * s;
-    const double ok_b = k[2][0] * l + k[2][1] * mm + k[2][2] * s;
-    return {ok_l, std::hypot(ok_a, ok_b), std::atan2(ok_b, ok_a)};
+    const Vec3<double> linear{to_linear(c[0]), to_linear(c[1]), to_linear(c[2])};
+    const Vec3<double> lms = mat3_apply(kLmsOfLinear, linear);
+    const Vec3<double> root{std::cbrt(lms.x), std::cbrt(lms.y), std::cbrt(lms.z)};
+    const Vec3<double> lab = mat3_apply(kLabOfLms, root);
+    return {lab.x, std::hypot(lab.y, lab.z), std::atan2(lab.z, lab.y)};
 }
 
-std::array<double, 3> lch_to_linear(Lch x) noexcept {
+Vec3<double> lch_to_linear(Lch x) noexcept {
     const double ok_a = x.c * std::cos(x.h);
     const double ok_b = x.c * std::sin(x.h);
     const double l = x.l + kLmsLOfAb[0] * ok_a + kLmsLOfAb[1] * ok_b;
     const double m = x.l + kLmsMOfAb[0] * ok_a + kLmsMOfAb[1] * ok_b;
     const double s = x.l + kLmsSOfAb[0] * ok_a + kLmsSOfAb[1] * ok_b;
-    const double l3 = l * l * l;
-    const double m3 = m * m * m;
-    const double s3 = s * s * s;
-    const auto& k = kLinearOfLms3;
-    return {
-        k[0][0] * l3 + k[0][1] * m3 + k[0][2] * s3,
-        k[1][0] * l3 + k[1][1] * m3 + k[1][2] * s3,
-        k[2][0] * l3 + k[2][1] * m3 + k[2][2] * s3
-    };
+    return mat3_apply(kLinearOfLms3, Vec3<double>{l * l * l, m * m * m, s * s * s});
 }
 
-bool in_gamut(const std::array<double, 3>& v) noexcept {
-    return std::all_of(v.begin(), v.end(), [](double c) {
+bool in_gamut(const Vec3<double>& v) noexcept {
+    const std::array<double, 3> channels{v.x, v.y, v.z};
+    return std::all_of(channels.begin(), channels.end(), [](double c) {
         return c >= -kGamutEps && c <= 1.0 + kGamutEps;
     });
 }
@@ -176,8 +173,8 @@ Rgb888 from_lch(Lch x) noexcept {
         }
         x.c = lo;
     }
-    const auto v = lch_to_linear(x);
-    return pack({from_linear(v[0]), from_linear(v[1]), from_linear(v[2])});
+    const Vec3<double> v = lch_to_linear(x);
+    return pack({from_linear(v.x), from_linear(v.y), from_linear(v.z)});
 }
 
 double shown_contrast(Rgb888 a, Rgb888 b) noexcept {
@@ -213,40 +210,41 @@ float rem_euclid(float x, float m) noexcept {
 }
 
 std::uint8_t slint_quantize(float c) noexcept {
-    float x = c * 255.f;
-    if (std::fmod(x, 1.f) > 0.5f)
-        x += 0.5f;
+    float x = c * kByteMaxF;
+    if (std::fmod(x, 1.f) > kHalf)
+        x += kHalf;
     if (!(x > 0.f))
         return 0;
-    if (x >= 255.f)
-        return 255;
+    if (x >= kByteMaxF)
+        return kChannelMax;
     return static_cast<std::uint8_t>(x);
 }
 
 Hsv to_hsv(Rgb888 rgb) noexcept {
     const Rgb c = unpack(rgb);
-    const float r = static_cast<float>(c[0]) / 255.f;
-    const float g = static_cast<float>(c[1]) / 255.f;
-    const float b = static_cast<float>(c[2]) / 255.f;
+    const float r = static_cast<float>(c[0]) / kByteMaxF;
+    const float g = static_cast<float>(c[1]) / kByteMaxF;
+    const float b = static_cast<float>(c[2]) / kByteMaxF;
     const float hi = std::max({r, g, b});
     const float chroma = hi - std::min({r, g, b});
     float sector = 0.f;
     if (chroma == 0.f)
         sector = 0.f;
     else if (hi == r)
-        sector = std::fmod((g - b) / chroma, 6.f);
+        sector = std::fmod((g - b) / chroma, static_cast<float>(kHueSectors));
     else if (hi == g)
-        sector = 2.f + (b - r) / chroma;
+        sector = kGreenSector + (b - r) / chroma;
     else
-        sector = 4.f + (r - g) / chroma;
-    return {rem_euclid(60.f * sector, 360.f), hi == 0.f ? 0.f : chroma / hi, hi};
+        sector = kBlueSector + (r - g) / chroma;
+    return {rem_euclid(kHueSectorDeg * sector, kHueTurnDeg), hi == 0.f ? 0.f : chroma / hi, hi};
 }
 
 Rgb888 from_hsv(Hsv x) noexcept {
     const float chroma = x.s * x.v;
-    const float hue = rem_euclid(x.h, 360.f);
-    const float mid = chroma * (1.f - std::fabs(std::fmod(hue / 60.f, 2.f) - 1.f));
-    const std::array<std::array<float, 3>, 6> by_sector{
+    const float hue = rem_euclid(x.h, kHueTurnDeg);
+    const float mid = chroma
+        * (1.f - std::fabs(std::fmod(hue / kHueSectorDeg, kSectorCycle) - 1.f));
+    const std::array<Vec3f, kHueSectors> by_sector{
         {{chroma, mid, 0.f},
          {mid, chroma, 0.f},
          {0.f, chroma, mid},
@@ -254,11 +252,10 @@ Rgb888 from_hsv(Hsv x) noexcept {
          {mid, 0.f, chroma},
          {chroma, 0.f, mid}}
     };
-    const auto sector = static_cast<std::size_t>(hue / 60.f);
-    const std::array<float, 3> c = sector < by_sector.size() ? by_sector[sector]
-                                                             : std::array<float, 3>{};
+    const auto sector = static_cast<std::size_t>(hue / kHueSectorDeg);
+    const Vec3f c = sector < by_sector.size() ? by_sector[sector] : Vec3f{};
     const float m = x.v - chroma;
-    return pack({slint_quantize(c[0] + m), slint_quantize(c[1] + m), slint_quantize(c[2] + m)});
+    return pack({slint_quantize(c.x + m), slint_quantize(c.y + m), slint_quantize(c.z + m)});
 }
 
 Rgb888 slint_brighter(Rgb888 rgb, float factor) noexcept {

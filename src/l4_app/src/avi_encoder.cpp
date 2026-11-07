@@ -10,6 +10,8 @@
 #include <utility>
 
 #include "app/avi_format.h"
+#include "app/log_clock.h"
+#include "app/rgb_rows.h"
 
 namespace mister::app {
 
@@ -26,8 +28,8 @@ std::int64_t AviEncoder::now_() const noexcept {
     return w_.clock ? w_.clock->now().count() : 0;
 }
 
-std::int64_t AviEncoder::cpu_now_() const noexcept {
-    return w_.cpu ? w_.cpu->now().count() : now_();
+std::chrono::nanoseconds AviEncoder::cpu_now_() const noexcept {
+    return w_.cpu ? w_.cpu->now() : std::chrono::nanoseconds{now_()};
 }
 
 bool AviEncoder::take_dirty() noexcept {
@@ -59,8 +61,6 @@ RecPath AviEncoder::segment_path(const RecPath& sidecar, std::uint16_t index) no
 }
 
 bool AviEncoder::open(const RawFrameSlot& s) noexcept {
-    constexpr std::uint8_t kFullScale = 1;
-    constexpr std::uint8_t kHalfScale = 2;
     constexpr std::size_t kBytesPerKib = 1024;
     TASTY_SEAT_BODY(AviEncoder);
     flush_();
@@ -134,7 +134,7 @@ bool AviEncoder::close(const RawFrameSlot& s) noexcept {
     return true;
 }
 
-bool AviEncoder::kept_(std::uint64_t core, MovieFrame movie) const noexcept {
+bool AviEncoder::kept_(WideCoreFrame core, MovieFrame movie) const noexcept {
     const RecOptions& o = opt_;
     if (o.from_frame >= MovieFrame{} || o.to_frame >= MovieFrame{}) {
         if (movie < MovieFrame{})
@@ -150,7 +150,7 @@ bool AviEncoder::kept_(std::uint64_t core, MovieFrame movie) const noexcept {
 
     if (o.from_frame >= MovieFrame{})
         return (movie - o.from_frame).multiple_of(FrameCount{o.every});
-    return core % every == 0;
+    return core.on_every(every);
 }
 
 IFrameCodec& AviEncoder::codec_for_(RecCodec c) noexcept {
@@ -163,6 +163,19 @@ IFrameCodec& AviEncoder::codec_for_(RecCodec c) noexcept {
     return cscd_;
 }
 
+RgbRows AviEncoder::picture_of_(const RawFrameSlot& s) noexcept {
+    if (scale_ != kHalfScale)
+        return s.rgb;
+    const RowBytes row = rgb_row_of(std::size_t{s.width} / kHalfScale);
+    const PictureRows rows = s.rgb.rows.halved();
+    const std::size_t bytes = rows_span(row, rows);
+    if (half_.slot_bytes() < bytes && !half_.reserve(1, bytes))
+        return {};
+    const std::span<std::byte> dst = half_.stripe(0).first(bytes);
+    CscdCodec::half_scale(s.rgb, s.width, dst);
+    return RgbRows{dst, row, rows};
+}
+
 bool AviEncoder::chunk_one_(
     IFrameCodec& codec,
     const RawFrameSlot& s,
@@ -171,17 +184,11 @@ bool AviEncoder::chunk_one_(
     std::uint32_t run,
     bool stable
 ) noexcept {
-    constexpr std::uint8_t kFullScale = 1;
-    constexpr std::uint8_t kHalfScale = 2;
-    constexpr std::size_t kRgbBytes = 3;
-    constexpr std::int64_t kNsPerUs = 1000;
     constexpr std::size_t kBacklogResumeDivisor = 4;
     const auto ow = static_cast<std::uint16_t>(
         scale_ == kHalfScale ? s.width / kHalfScale : s.width
     );
-    const auto oh = static_cast<std::uint16_t>(
-        scale_ == kHalfScale ? s.height / kHalfScale : s.height
-    );
+    const std::uint16_t oh = s.rgb.rows.halved_if(scale_ == kHalfScale);
     if (ow == 0 || oh == 0) {
         ++st_.errors;
         dirty_ = true;
@@ -219,43 +226,24 @@ bool AviEncoder::chunk_one_(
     std::span<const std::byte> payload;
     bool key = false;
     bool lost = false;
-    std::span<const std::byte> src;
     if (real) {
         key = need_key_ || since_key_ >= lim_.key_interval;
-        const std::int64_t c0 = cpu_now_();
-        src = s.pixels;
-        std::size_t line = s.line;
-        if (scale_ == kHalfScale) {
-            const std::size_t bytes = std::size_t{ow} * kRgbBytes * oh;
-            if (half_.slot_bytes() < bytes && !half_.reserve(1, bytes))
-                src = {};
-            if (!src.empty()) {
-                CscdCodec::half_scale(
-                    s.pixels.data(),
-                    s.line,
-                    s.width,
-                    s.height,
-                    half_.stripe(0).data()
-                );
-                src = half_.stripe(0);
-                line = std::size_t{ow} * kRgbBytes;
-            }
-        }
-        if (!src.empty())
-            payload = codec.encode(RgbRows{src, RowBytes{line}, PictureRows{oh}}, key, out);
-        const std::int64_t spent = cpu_now_() - c0;
-        st_.enc_us_last = static_cast<std::uint32_t>(spent / kNsPerUs);
-        st_.enc_us_max = std::max(st_.enc_us_max, st_.enc_us_last);
+        const std::chrono::nanoseconds c0 = cpu_now_();
+        const RgbRows picture = picture_of_(s);
+        if (!picture.bytes.empty())
+            payload = codec.encode(picture, key, out);
+        const std::chrono::nanoseconds spent = cpu_now_() - c0;
+        st_.enc_us.note(us_of(spent));
         if (!payload.empty()) {
             ++st_.encoded;
-            budget_(spent, now_());
+            budget_(spent.count(), now_());
         }
+        lost = picture.bytes.empty();
     }
     if (payload.empty()) {
         if (real) {
             ++st_.errors;
             need_key_ = true;
-            lost = src.empty();
         }
         if (need_key_) {
             payload = codec.rekey(out);
@@ -311,7 +299,7 @@ bool AviEncoder::chunk_one_(
 bool AviEncoder::chunk(
     const RawFrameSlot& s,
     bool real,
-    std::uint64_t core,
+    WideCoreFrame core,
     MovieFrame movie
 ) noexcept {
     TASTY_SEAT_BODY(AviEncoder);
@@ -353,7 +341,6 @@ std::int64_t AviEncoder::frame_budget_ns_(std::uint32_t vtime) const noexcept {
 }
 
 void AviEncoder::step_half_(bool behind, std::int64_t now) noexcept {
-    constexpr std::uint8_t kHalfScale = 2;
     scale_ = kHalfScale;
     need_roll_ = true;
     if (st_.steps != UINT8_MAX)
@@ -370,8 +357,6 @@ bool AviEncoder::too_soon_(std::int64_t now) const noexcept {
 }
 
 void AviEncoder::recover_(std::size_t queued, std::size_t depth, std::int64_t now) noexcept {
-    constexpr std::uint8_t kFullScale = 1;
-    constexpr std::uint8_t kHalfScale = 2;
     constexpr std::size_t kBacklogResumeDivisor = 4;
     if (scale_ != kHalfScale || cause_ != HalfCause::Queue)
         return;
@@ -395,7 +380,6 @@ void AviEncoder::recover_(std::size_t queued, std::size_t depth, std::int64_t no
 }
 
 void AviEncoder::budget_(std::int64_t cpu_ns, std::int64_t now) noexcept {
-    constexpr std::uint8_t kFullScale = 1;
     constexpr std::int64_t kPercent = 100;
     if (win_start_ < 0) {
         win_start_ = now;

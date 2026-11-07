@@ -13,20 +13,9 @@ namespace mister::hal {
 
 namespace {
 
-constexpr std::uint32_t kData = 0x0000FFFFu;
-constexpr std::uint32_t kStrobe = 1u << 17;
-constexpr std::uint32_t kFpgaEnable = 1u << 18;
-constexpr std::uint32_t kOsdEnable = 1u << 19;
-constexpr std::uint32_t kIoEnable = 1u << 20;
-constexpr std::uint32_t kDiskLed = 1u << 29;
-constexpr std::uint32_t kCoreReset = 1u << 30;
-constexpr std::uint32_t kCoreEnable = 1u << 31;
-constexpr std::uint32_t kCsMask = kFpgaEnable | kOsdEnable | kIoEnable;
-
-constexpr std::uint32_t kAck = kStrobe;
-constexpr std::uint32_t kNotReady = 1u << 31;
-
-constexpr std::uint8_t kCoreTypeDualSdram = 0xA8;
+[[nodiscard]] constexpr SpiOutput chip_selects(SpiOutput w) noexcept {
+    return SpiOutput{w.v & gpo::kCsMask.v};
+}
 
 std::uint64_t now_ns() noexcept {
     timespec ts{};
@@ -37,32 +26,32 @@ std::uint64_t now_ns() noexcept {
 
 }
 
-void SpiBus::store_gpo(std::uint32_t v) noexcept {
-    gpo_reg_.write(v);
+void SpiBus::store_gpo(SpiOutput v) noexcept {
+    gpo_reg_.write(v.v);
     if (obs_)
-        obs_->on_store(SpiOutput{v});
+        obs_->on_store(v);
 }
 
-void SpiBus::commit_gpo(std::uint32_t v) noexcept {
-    gpo_.v = v;
+void SpiBus::commit_gpo(SpiOutput v) noexcept {
+    gpo_ = v;
     store_gpo(v);
 }
 
-std::uint32_t SpiBus::read_gpi() const noexcept {
-    return gpi_reg_.read();
+GpiWord SpiBus::read_gpi() const noexcept {
+    return GpiWord{gpi_reg_.read()};
 }
 
-Ex<std::uint32_t> SpiBus::spin_ack(bool want, bool counts) noexcept {
+Ex<GpiWord> SpiBus::spin_ack(bool want, bool counts) noexcept {
     unsigned budget = ack_soft_spins_;
     std::uint64_t limit = 0;
     bool armed = false;
     for (;;) {
-        const std::uint32_t gpi = read_gpi();
-        if ((gpi & kNotReady) != 0u) {
+        GpiWord gpi = read_gpi();
+        if (gpi.test(kGpiNotReadyField)) {
 
-            return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), gpi});
+            return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), detail_of(gpi)});
         }
-        if (((gpi & kAck) != 0u) == want)
+        if (gpi.test(kGpiAckField) == want)
             return gpi;
         if (--budget != 0u)
             continue;
@@ -76,7 +65,7 @@ Ex<std::uint32_t> SpiBus::spin_ack(bool want, bool counts) noexcept {
         if (now >= limit) {
             if (counts && stats_)
                 stats_->spin_timeouts.add();
-            return std::unexpected(Error{Errc::spi_timeout, ERR_SITE(), gpi});
+            return std::unexpected(Error{Errc::spi_timeout, ERR_SITE(), detail_of(gpi)});
         }
     }
 }
@@ -97,7 +86,7 @@ Ex<SpiBus> SpiBus::open(Mailbox mailbox, xthread::RtStats* stats) {
 
     bus.mailbox_ = std::move(mailbox).consume();
 
-    bus.commit_gpo(0);
+    bus.commit_gpo(SpiOutput{});
     return bus;
 }
 
@@ -119,62 +108,57 @@ SpiBus SpiBus::attach_registers(
     bus.ack_soft_spins_ = timing.ack_soft_spins;
     bus.ack_timeout_ns_ = timing.ack_timeout_ns;
     bus.start_ack_timeout_ns_ = timing.start_ack_timeout_ns;
-    bus.commit_gpo(0);
+    bus.commit_gpo(SpiOutput{});
     return bus;
 }
 
 bool SpiBus::ready() const {
     TASTY_SEAT_BODY(SpiBus);
 
-    return (read_gpi() & kNotReady) == 0u;
+    return !read_gpi().test(kGpiNotReadyField);
 }
 
 SpiSample SpiBus::sample() const noexcept {
-    const std::uint32_t gpi = read_gpi();
-    return SpiSample{
-        .ready = (gpi & kNotReady) == 0u,
-        .buttons = ButtonMask{static_cast<std::uint16_t>((gpi >> 29) & 3u)},
-        .hdmi = ((gpi >> 20) & 1u) != 0u,
-    };
+    return decode_sample(read_gpi());
 }
 
 Ex<CoreIdentity> SpiBus::identify() {
 
-    const std::uint32_t pre = read_gpi();
-    if ((pre & kNotReady) != 0u) {
-        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), pre});
+    const GpiWord pre = read_gpi();
+    if (pre.test(kGpiNotReadyField)) {
+        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), detail_of(pre)});
     }
 
-    const std::uint32_t id_view = gpo_.v & ~kCoreEnable;
+    const SpiOutput id_view = gpo_.without(gpo::kCoreEnable);
     commit_gpo(id_view);
-    const std::uint32_t sample = read_gpi();
-    commit_gpo(id_view | kCoreEnable);
+    const GpiWord sample = read_gpi();
+    commit_gpo(id_view.with(gpo::kCoreEnable));
 
-    if ((sample >> 8) != kCoreIdMagic) {
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), sample});
+    if (sample.field(kGpiCoreIdField) != kCoreIdMagic) {
+        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), detail_of(sample)});
     }
-    const auto type_byte = static_cast<std::uint8_t>(sample & 0xFFu);
-    return CoreIdentity{type_byte, type_byte == kCoreTypeDualSdram};
+    const CoreTypeByte type{static_cast<std::uint8_t>(sample.field(kGpiTypeByteField))};
+    return CoreIdentity{type};
 }
 
 CoreCapabilities SpiBus::latch_capabilities() {
 
-    if ((gpo_.v & kCoreEnable) == 0u) {
+    if (!gpo_.has(gpo::kCoreEnable)) {
         fatal(
             Error{Errc::negotiation, ERR_SITE(), gpo_.v},
             "SpiBus::latch_capabilities() sampled with core-enable low"
         );
     }
 
-    const std::uint32_t gpi = read_gpi();
+    const GpiWord gpi = read_gpi();
     CoreCapabilities caps{};
-    caps.width = ((gpi >> 16) & 1u) != 0u ? Width::Word : Width::Byte;
-    caps.io_version = IoVersion{static_cast<std::uint8_t>((gpi >> 18) & 3u)};
-    caps.board_digital = ((gpi >> 28) & 1u) != 0u;
-    caps.button_osd = ((gpi >> 29) & 1u) != 0u;
-    caps.button_user = ((gpi >> 30) & 1u) != 0u;
-    caps.free_caps = static_cast<std::uint8_t>((gpi >> 21) & 0x3Fu);
-    caps.lw_directory = ((gpi >> 27) & 1u) != 0u;
+    caps.width = gpi.test(kGpiWidthField) ? Width::Word : Width::Byte;
+    caps.io_version = IoVersion{static_cast<std::uint8_t>(gpi.field(kGpiIoVersionField))};
+    caps.board_digital = gpi.test(kGpiBoardDigitalField);
+    caps.button_osd = gpi.test(kGpiButtonOsdField);
+    caps.button_user = gpi.test(kGpiButtonUserField);
+    caps.free_caps = static_cast<std::uint8_t>(gpi.field(kGpiFreeCapsField));
+    caps.lw_directory = gpi.test(kGpiDirectoryField);
 
     width_ = caps.width;
     io_version_ = caps.io_version;
@@ -183,42 +167,42 @@ CoreCapabilities SpiBus::latch_capabilities() {
 
 void SpiBus::set_core_reset(bool asserted) {
 
-    const std::uint32_t base = gpo_.v & ~(kCoreReset | kCoreEnable);
-    commit_gpo(base | (asserted ? kCoreReset : kCoreEnable));
+    const SpiOutput base = gpo_.without(gpo::kCoreReset).without(gpo::kCoreEnable);
+    commit_gpo(base.with(asserted ? gpo::kCoreReset : gpo::kCoreEnable));
 }
 
 void SpiBus::clear_gpo() {
-    commit_gpo(0);
+    commit_gpo(SpiOutput{});
 }
 
 void SpiBus::select(ChipSelect cs) {
 
-    std::uint32_t v = (gpo_.v | kCoreEnable) & ~kCsMask;
+    SpiOutput v = gpo_.with(gpo::kCoreEnable).without(gpo::kCsMask);
     switch (cs) {
         case ChipSelect::Fpga:
-            v |= kFpgaEnable;
+            v = v.with(gpo::kFpgaEnable);
             break;
         case ChipSelect::Osd:
-            v |= kOsdEnable;
+            v = v.with(gpo::kOsdEnable);
             break;
         case ChipSelect::Io:
-            v |= kIoEnable;
+            v = v.with(gpo::kIoEnable);
             break;
         case ChipSelect::None:
             break;
 
         case ChipSelect::OsdVga:
-            v |= kOsdEnable | kFpgaEnable;
+            v = v.with(gpo::kOsdEnable).with(gpo::kFpgaEnable);
             break;
         case ChipSelect::OsdHdmi:
-            v |= kOsdEnable | kIoEnable;
+            v = v.with(gpo::kOsdEnable).with(gpo::kIoEnable);
             break;
     }
     commit_gpo(v);
 }
 
 void SpiBus::deselect() {
-    commit_gpo((gpo_.v | kCoreEnable) & ~kCsMask);
+    commit_gpo(gpo_.with(gpo::kCoreEnable).without(gpo::kCsMask));
 }
 
 Ex<void> SpiBus::refuse_if_posted_() const noexcept {
@@ -247,9 +231,9 @@ Ex<bool> SpiBus::transfer_or_post(SpiWord out) {
 
 Ex<SpiWord> SpiBus::handshake_(SpiWord out, bool guarded) noexcept {
 
-    const std::uint32_t gpo = (gpo_.v & ~(kData | kStrobe)) | out.v;
+    const SpiOutput gpo = gpo_.without(gpo::kData).without(gpo::kStrobe).with_data(out);
     commit_gpo(gpo);
-    commit_gpo(gpo | kStrobe);
+    commit_gpo(gpo.with(gpo::kStrobe));
     if (auto ack = spin_ack(true, !guarded); !ack) {
         if (guarded && ack.error().code == Errc::spi_timeout) {
             post_ = Post::Rising;
@@ -267,16 +251,16 @@ Ex<SpiWord> SpiBus::handshake_(SpiWord out, bool guarded) noexcept {
         return std::unexpected(sample.error());
     }
 
-    return SpiWord{static_cast<std::uint16_t>(*sample & kData)};
+    return gpi_data(*sample);
 }
 
 Ex<void> SpiBus::post(SpiWord out) {
     TASTY_SEAT_BODY(SpiBus);
     if (auto held = refuse_if_posted_(); !held)
         return held;
-    const std::uint32_t gpo = (gpo_.v & ~(kData | kStrobe)) | out.v;
+    const SpiOutput gpo = gpo_.without(gpo::kData).without(gpo::kStrobe).with_data(out);
     commit_gpo(gpo);
-    commit_gpo(gpo | kStrobe);
+    commit_gpo(gpo.with(gpo::kStrobe));
     post_ = Post::Rising;
     return {};
 }
@@ -285,19 +269,19 @@ Ex<bool> SpiBus::posted_done() {
     TASTY_SEAT_BODY(SpiBus);
     if (post_ == Post::None)
         return true;
-    std::uint32_t gpi = read_gpi();
-    if (post_ == Post::Rising && (gpi & kNotReady) == 0u) {
-        if ((gpi & kAck) == 0u)
+    GpiWord gpi = read_gpi();
+    if (post_ == Post::Rising && !gpi.test(kGpiNotReadyField)) {
+        if (!gpi.test(kGpiAckField))
             return false;
-        commit_gpo(gpo_.v & ~kStrobe);
+        commit_gpo(gpo_.without(gpo::kStrobe));
         post_ = Post::Falling;
         gpi = read_gpi();
     }
-    if ((gpi & kNotReady) != 0u) {
+    if (gpi.test(kGpiNotReadyField)) {
         abandon_post();
-        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), gpi});
+        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), detail_of(gpi)});
     }
-    if ((gpi & kAck) != 0u)
+    if (gpi.test(kGpiAckField))
         return false;
     post_ = Post::None;
     return true;
@@ -307,29 +291,31 @@ void SpiBus::abandon_post() noexcept {
     TASTY_SEAT_BODY(SpiBus);
     if (post_ == Post::None)
         return;
-    commit_gpo(gpo_.v & ~kStrobe);
+    commit_gpo(gpo_.without(gpo::kStrobe));
     post_ = Post::None;
 }
 
 Ex<void> SpiBus::block_write(std::span<const std::uint8_t> data) {
     if (auto held = refuse_if_posted_(); !held)
         return held;
-    const std::uint32_t base = gpo_.v & ~(kData | kStrobe);
-    std::uint32_t gpo = base;
+    const SpiOutput base = gpo_.without(gpo::kData).without(gpo::kStrobe);
+    SpiOutput gpo = base;
     if (width_ == Width::Word) {
         const std::size_t n = data.size() / 2u;
         for (std::size_t i = 0; i < n; ++i) {
-            gpo = base
-                | static_cast<std::uint32_t>(data[2u * i])
-                | (static_cast<std::uint32_t>(data[2u * i + 1u]) << 8);
+            const auto word = static_cast<std::uint16_t>(
+                static_cast<std::uint32_t>(data[2u * i])
+                | (static_cast<std::uint32_t>(data[2u * i + 1u]) << 8)
+            );
+            gpo = base.with_data(SpiWord{word});
             store_gpo(gpo);
-            store_gpo(gpo | kStrobe);
+            store_gpo(gpo.with(gpo::kStrobe));
         }
     } else {
         for (const std::uint8_t byte : data) {
-            gpo = base | static_cast<std::uint32_t>(byte);
+            gpo = base.with_data(SpiWord{byte});
             store_gpo(gpo);
-            store_gpo(gpo | kStrobe);
+            store_gpo(gpo.with(gpo::kStrobe));
         }
     }
 
@@ -340,43 +326,43 @@ Ex<void> SpiBus::block_write(std::span<const std::uint8_t> data) {
 Ex<void> SpiBus::block_read(std::span<std::uint8_t> data) {
     if (auto held = refuse_if_posted_(); !held)
         return held;
-    const std::uint32_t gpo = gpo_.v & ~(kData | kStrobe);
+    const SpiOutput gpo = gpo_.without(gpo::kData).without(gpo::kStrobe);
     const std::size_t n = (width_ == Width::Word) ? data.size() / 2u : data.size();
     if (n == 0)
         return {};
 
     if (width_ == Width::Word) {
         for (std::size_t i = 0; i < n; ++i) {
-            store_gpo(gpo | kStrobe);
+            store_gpo(gpo.with(gpo::kStrobe));
             store_gpo(gpo);
-            const std::uint32_t gpi = read_gpi();
-            data[2u * i] = static_cast<std::uint8_t>(gpi & 0xFFu);
-            data[2u * i + 1u] = static_cast<std::uint8_t>((gpi >> 8) & 0xFFu);
+            const SpiWord w = gpi_data(read_gpi());
+            data[2u * i] = static_cast<std::uint8_t>(w.v);
+            data[2u * i + 1u] = static_cast<std::uint8_t>(w.v >> 8);
         }
     } else {
         for (std::size_t i = 0; i < n; ++i) {
-            store_gpo(gpo | kStrobe);
+            store_gpo(gpo.with(gpo::kStrobe));
             store_gpo(gpo);
-            data[i] = static_cast<std::uint8_t>(read_gpi() & 0xFFu);
+            data[i] = static_cast<std::uint8_t>(gpi_data(read_gpi()).v);
         }
     }
 
-    gpo_.v = gpo;
+    gpo_ = gpo;
     return {};
 }
 
 Ex<ButtonMask> SpiBus::buttons() {
-    commit_gpo(gpo_.v | kCoreEnable);
-    const std::uint32_t gpi = read_gpi();
-    if ((gpi & kNotReady) != 0u) {
+    commit_gpo(gpo_.with(gpo::kCoreEnable));
+    const GpiWord gpi = read_gpi();
+    if (gpi.test(kGpiNotReadyField)) {
 
-        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), gpi});
+        return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), detail_of(gpi)});
     }
-    return ButtonMask{static_cast<std::uint16_t>((gpi >> 29) & 3u)};
+    return gpi.buttons();
 }
 
 void SpiBus::set_disk_led(bool on) {
-    commit_gpo(on ? (gpo_.v | kDiskLed) : (gpo_.v & ~kDiskLed));
+    commit_gpo(on ? gpo_.with(gpo::kDiskLed) : gpo_.without(gpo::kDiskLed));
 }
 
 }

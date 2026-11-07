@@ -186,8 +186,8 @@ Ex<proto::FileSize> SaveChannelStore::OpenPartition::open(
     if (!size)
         return std::unexpected(size.error());
     file_ = std::move(*f);
-    on_disk_ = static_cast<std::uint32_t>(size->v);
-    return proto::FileSize{on_disk_};
+    on_disk_ = *size;
+    return on_disk_;
 }
 
 Ex<std::size_t> SaveChannelStore::read_at(std::uint64_t offset, std::span<std::uint8_t> dst) {
@@ -230,8 +230,9 @@ Ex<std::size_t> SaveChannelStore::write_at(
         return std::size_t{0};
     }
 
-    if (auto head = layout_.locate(offset);
-        head && parts_[head->row].is_open() && head->rest.offset >= parts_[head->row].on_disk()) {
+    if (auto head = layout_.locate(offset); head
+        && parts_[head->row].is_open()
+        && !parts_[head->row].on_disk().holds_offset(head->rest.offset)) {
         ++clamped_;
         return src.size();
     }
@@ -247,10 +248,7 @@ Ex<std::size_t> SaveChannelStore::write_at(
         if (!f)
             break;
 
-        const std::uint64_t on_disk = part.on_disk();
-        const std::size_t fits = hit->rest.offset < on_disk
-            ? static_cast<std::size_t>(std::min<std::uint64_t>(want, on_disk - hit->rest.offset))
-            : 0;
+        const std::size_t fits = part.on_disk().clamp_write(hit->rest.offset, want);
         if (fits != want)
             ++clamped_;
         if (fits == 0) {

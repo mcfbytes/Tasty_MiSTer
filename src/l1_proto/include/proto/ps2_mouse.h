@@ -16,7 +16,7 @@ class Ps2Mouse {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
-    [[nodiscard]] Ex<void> motion(int dx, int dy, int dz, MouseButtons buttons);
+    [[nodiscard]] Ex<void> motion(MouseDelta delta, MouseButtons buttons);
 
     [[nodiscard]] bool next_frame(Ps2Frame& out) noexcept;
 
@@ -31,6 +31,8 @@ public:
 private:
     struct Packet {
         std::uint16_t word0 = 0, word1 = 0, word2 = 0;
+
+        [[nodiscard]] static Packet of(MouseDelta delta, MouseButtons buttons) noexcept;
     };
 
     static constexpr std::uint8_t kPacketQueueCap = 16;

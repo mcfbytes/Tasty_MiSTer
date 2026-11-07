@@ -25,7 +25,6 @@ void InputWire::on_core_loaded(
     infra::OptRef<const svc::IAnalogReshape> analog_reshape
 ) noexcept {
 
-    buttons_.store(0u, std::memory_order_relaxed);
     core_edges_.add(1u);
 
     publish_core_name(core_name, front_end);
@@ -41,8 +40,6 @@ void InputWire::on_core_detached() noexcept {
 
     publish_analog_reshape(std::nullopt);
     publish_edge_reset();
-
-    buttons_.store(0u, std::memory_order_relaxed);
     core_edges_.add(1u);
 }
 

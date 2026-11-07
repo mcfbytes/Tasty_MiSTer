@@ -34,7 +34,7 @@ private:
         const cores::IMovieCodec::SettingNeeds& needs,
         infra::OptRef<const proto::ItemTable> labels
     ) noexcept;
-    [[nodiscard]] std::optional<std::uint8_t> rom_slot_(Ctx ctx) noexcept;
+    [[nodiscard]] std::optional<proto::IoIndex> rom_slot_(Ctx ctx) noexcept;
     static void load_checkpoints_(Ctx ctx) noexcept;
 
     bool waiting_ = false;

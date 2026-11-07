@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/link_session.h"
 
+#include "app/core_switch.h"
 #include "app/log_clock.h"
 #include "app/disk_relay.h"
 #include "app/mailbox_relay.h"
@@ -593,7 +594,7 @@ ILinkEncoder::Outcome LinkSession::on(const proto::LinkOp::DropCore& a, const Li
         dropped_gen_ = park_.gen();
         holds_at_drop_ = encoder_.holds();
     }
-    ++core_edge_seq_.v;
+    core_edge_seq_ = core_edge_seq_.next();
     mailbox_.forget();
     disks_.forget();
     saves_.forget();
@@ -929,7 +930,7 @@ Ex<void> LinkSession::reset_core() {
 }
 
 bool LinkSession::names_park_(proto::BindGeneration g) const noexcept {
-    return g.v == static_cast<std::uint16_t>(park_.gen());
+    return pause_gen_of(g) == park_.gen();
 }
 
 void LinkSession::apply_core_(const proto::LinkOp::ApplyCore& a) {
@@ -941,7 +942,7 @@ void LinkSession::apply_core_(const proto::LinkOp::ApplyCore& a) {
         ++tally_.stale_owner_steps;
         return;
     }
-    ++core_edge_seq_.v;
+    core_edge_seq_ = core_edge_seq_.next();
 
     rows_.disarm_polls();
     f12_mod_poll_.arm(false, bindings_.generation());
@@ -1021,8 +1022,7 @@ Ex<void> LinkSession::perform_session_up_(const proto::LinkOp::SessionUp& op) {
         },
         ERR_SITE()
     );
-    constexpr std::uint64_t kNsPerMs = 1'000'000;
-    log_edge(LogRec::CoreLoad{sat_u32((log_now_ns() - load_start_ns_) / kNsPerMs)});
+    log_edge(LogRec::CoreLoad{ms_of(log_now() - load_start_).count()});
     return {};
 }
 
@@ -1064,7 +1064,7 @@ void LinkSession::arm_request(const LoadRequest& req) {
 
     machine_.adopt_tag(kUncaused);
 
-    load_start_ns_ = log_now_ns();
+    load_start_ = log_now();
     pending_.arm(req);
 }
 
@@ -1076,7 +1076,7 @@ static_assert(
 
 Ex<void> LinkSession::detach() {
 
-    const std::uint64_t t0 = log_now_ns();
+    const std::chrono::nanoseconds t0 = log_now();
 
     held_.cut_all();
 
@@ -1176,8 +1176,9 @@ void LinkSession::gather_diag(DiagCounters& out) const noexcept {
     out.cd_gated_ticks = cd_flow_.gated_ticks;
     out.cd_drive_state = cd_flow_.drive_state;
     out.cd_drive_track = cd_flow_.drive_track.v;
-    out.cd_drive_lba = cd_flow_.drive_lba;
-    out.cd_drive_audio_lba = cd_flow_.drive_audio_lba;
+
+    out.cd_drive_lba = cd_flow_.drive_lba.v;
+    out.cd_drive_audio_lba = cd_flow_.drive_audio_lba.v;
     out.cd_drive_is_data = cd_flow_.drive_is_data;
     out.cd_substitutes = cd_flow_.substitutes;
     out.cd_subcode_substitutes = cd_flow_.subcode_substitutes;
@@ -1344,9 +1345,7 @@ Ex<void> LinkSession::raise_session_(const proto::RtcImage& rtc) {
         }
         if (bound.speeds.has_value()) {
             files.have_speeds = true;
-            files.speeds[0] = cores::BaudRate{(*bound.speeds)[0]};
-            files.speeds[1] = cores::BaudRate{(*bound.speeds)[1]};
-            files.speeds[2] = cores::BaudRate{(*bound.speeds)[2]};
+            files.speeds = *bound.speeds;
         }
         bindings_.spend_uart_files();
 

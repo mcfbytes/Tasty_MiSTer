@@ -40,7 +40,7 @@ inline constexpr std::uint16_t kSlotFocusPresentBit = 0x200u;
         return std::nullopt;
     return SlotFocus{
         (id.v & kSlotFocusKindBit) != 0u ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
-        proto::IoIndex{static_cast<std::uint8_t>(id.v & 0xFFu)}
+        proto::IoIndex{static_cast<std::uint8_t>(id.v)}
     };
 }
 

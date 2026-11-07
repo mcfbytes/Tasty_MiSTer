@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -12,6 +13,7 @@
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "os/clock.h"
+#include "cores/n64_ntsc_cadence.h"
 
 namespace mister::cores::n64 {
 
@@ -29,7 +31,6 @@ public:
         : clock_(&clock),
           window_(window) {}
 
-    static constexpr std::int64_t kPalGapMs = 20;
     static constexpr std::int64_t kNoGameGapMs = 1000;
 
     static constexpr std::int64_t kResetGapMs = 2500;
@@ -65,7 +66,7 @@ private:
     std::array<CheatCode, CheatCode::kMax> codes_{};
     std::uint32_t count_ = 0;
     std::int64_t due_ns_ = 0;
-    std::uint8_t adj_ = 0;
+    NtscCadence cadence_{};
     std::uint32_t applies_ = 0;
     std::uint32_t passes_ = 0;
     std::uint32_t code_writes_ = 0;

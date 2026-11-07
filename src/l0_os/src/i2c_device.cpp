@@ -7,31 +7,32 @@
 #include <sys/ioctl.h>
 
 #include <cerrno>
-#include <cstdio>
+#include <cstdint>
 #include <optional>
+#include <span>
+
+#include "os/path_buf.h"
 
 namespace mister::os {
 
 namespace {
 
-constexpr std::size_t kDevPathMax = 32;
-
 [[nodiscard]] Ex<UniqueFd> open_i2c_node(unsigned bus, I2cAddr addr) {
-    char path[kDevPathMax];
-    std::snprintf(path, sizeof path, "/dev/i2c-%u", bus);
+    char path[kI2cDevPathBuf];
+    if (!format_path(std::span<char>(path), "/dev/i2c-%u", bus)) {
+        return std::unexpected(
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(sizeof path)}
+        );
+    }
 
     const int fd = ::open(path, O_RDWR | O_CLOEXEC);
     if (fd < 0) {
-        return std::unexpected(
-            Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(errno)}
-        );
+        return std::unexpected(infra::errno_error(Errc::uio_open, ERR_SITE(), errno));
     }
     UniqueFd owned(fd);
 
-    if (::ioctl(owned.get(), I2C_SLAVE, static_cast<int>(addr.v)) < 0) {
-        return std::unexpected(
-            Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(errno)}
-        );
+    if (::ioctl(owned.get(), I2C_SLAVE, int{addr.v}) < 0) {
+        return std::unexpected(infra::errno_error(Errc::uio_open, ERR_SITE(), errno));
     }
     return owned;
 }
@@ -52,7 +53,7 @@ enum : std::uint8_t { kSmbusRead = I2C_SMBUS_READ, kSmbusWrite = I2C_SMBUS_WRITE
     args.size = static_cast<std::uint32_t>(type);
     args.data = data;
     if (::ioctl(fd, I2C_SMBUS, &args) < 0) {
-        return std::unexpected(Error{Errc::io, site, static_cast<std::uint32_t>(errno)});
+        return std::unexpected(infra::errno_error(Errc::io, site, errno));
     }
     return {};
 }

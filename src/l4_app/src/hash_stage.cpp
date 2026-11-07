@@ -107,7 +107,7 @@ IReplayStage::Step HashStage::finish_rom_(Ctx ctx) noexcept {
         if (!f)
             continue;
         const auto size = (*f)->size();
-        if (!size || size->v != c->size)
+        if (!size || *size != c->size)
             continue;
         hasher_.arm(std::move(*f), 0, size->v, cores::RomDigest{play.facts.firmware.kind});
         firmware_pass_ = true;

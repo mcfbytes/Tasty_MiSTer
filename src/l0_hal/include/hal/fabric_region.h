@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 
@@ -23,7 +24,7 @@ struct FabricRegion {
 ) noexcept {
     if (ap.region.len == 0)
         return true;
-    if (ap.region.len > 0xFFFF'FFFFu)
+    if (ap.region.len > std::numeric_limits<std::uint32_t>::max())
         return false;
     const auto extent = static_cast<std::uint32_t>(ap.region.len);
     if (r.len == 0)

@@ -6,11 +6,12 @@
 
 #include "infra/seat.h"
 #include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
 struct MouseDelta {
-    std::int32_t dx = 0, dy = 0, dz = 0;
+    svc::MouseMotion motion{};
     proto::MouseButtons buttons{};
     bool button_edge = false;
     bool moved = false;
@@ -41,10 +42,10 @@ class MouseAccumulator {
     Total wm_x_{}, wm_y_{}, wm_w_{}, wm_edges_{};
 
 public:
-    void accumulate(std::int32_t rx, std::int32_t ry, std::int32_t rw) noexcept {
-        x_ = x_.plus(rx);
-        y_ = y_.plus(ry);
-        wheel_ = wheel_.plus(rw);
+    void accumulate(svc::MouseMotion motion) noexcept {
+        x_ = x_.plus(motion.dx);
+        y_ = y_.plus(motion.dy);
+        wheel_ = wheel_.plus(motion.wheel);
     }
 
     void note_buttons(proto::MouseButtons level) noexcept {
@@ -56,12 +57,10 @@ public:
 
     MouseDelta take() noexcept {
         MouseDelta d{};
-        d.dx = x_.since(wm_x_);
-        d.dy = y_.since(wm_y_);
-        d.dz = wheel_.since(wm_w_);
+        d.motion = svc::MouseMotion{x_.since(wm_x_), y_.since(wm_y_), wheel_.since(wm_w_)};
         d.buttons = buttons_;
         d.button_edge = (edges_ != wm_edges_);
-        d.moved = (d.dx != 0) || (d.dy != 0) || (d.dz != 0);
+        d.moved = d.motion.dx != 0 || d.motion.dy != 0 || d.motion.wheel != 0;
         wm_x_ = x_;
         wm_y_ = y_;
         wm_w_ = wheel_;

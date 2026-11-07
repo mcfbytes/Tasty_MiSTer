@@ -2,6 +2,7 @@
 #include "app/ini_parse.h"
 
 #include "app/config_apply.h"
+#include "app/types.h"
 #include "infra/byte_view.h"
 #include "svc/config_parser.h"
 #include "svc/vfs.h"
@@ -70,14 +71,14 @@ namespace {
     c.set(B::VgaScaler, cfg.vga_scaler != 0)
         .set(B::VgaSog, cfg.vga_sog != 0)
         .set(B::Csync, cfg.csync != 0)
-        .set(B::Ypbpr, cfg.vga_mode_int == 1)
+        .set(B::Ypbpr, vga_mode_of(cfg.vga_mode_int) == VgaMode::YPbPr)
         .set(B::ForcedScandoubler, cfg.forced_scandoubler != 0)
         .set(B::Audio96k, cfg.hdmi_audio_96k != 0)
         .set(B::Dvi, cfg.dvi_mode == 1)
         .set(B::HdmiLimited1, (cfg.hdmi_limited & 1u) != 0)
         .set(B::HdmiLimited2, (cfg.hdmi_limited & 2u) != 0)
-        .set(B::DirectVideo, svc::direct_video_resolved(cfg) != 0)
-        .set(B::DirectVideo2, svc::direct_video_resolved(cfg) == 2);
+        .set(B::DirectVideo, svc::direct_video_resolved(cfg) != svc::DirectVideo::Off)
+        .set(B::DirectVideo2, svc::direct_video_resolved(cfg) == svc::DirectVideo::Auto);
     return c;
 }
 

@@ -21,8 +21,8 @@ class StatusRegister {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr unsigned kBits = 128;
-    static constexpr unsigned kWords = 8;
+    static constexpr unsigned kBits = StatusWord::kBits;
+    static constexpr unsigned kWords = StatusWord::kWords;
 
     void write(const StatusEdit& edit) noexcept;
 
@@ -37,12 +37,12 @@ public:
 
     bool dirty() const noexcept { return dirty_; }
 
-    hal::SpiWord word(unsigned i) const { return hal::SpiWord{words_[i]}; }
+    hal::SpiWord word(unsigned i) const { return hal::SpiWord{shadow_.words[i]}; }
 
     [[nodiscard]] StatusWord value() const noexcept;
 
 private:
-    std::array<std::uint16_t, kWords> words_{};
+    StatusWord shadow_{};
     bool dirty_ = false;
     StatusWord sent_{};
     infra::OptRef<IResetFence> fence_{};

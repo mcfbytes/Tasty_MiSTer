@@ -120,10 +120,8 @@ Executive::Executive(Executive&& o) noexcept
         borrowed_[i] = o.borrowed_[i];
     for (int i = 0; i < kMaxEvents; ++i)
         evs_[i] = o.evs_[i];
-    for (std::size_t i = 0; i < static_cast<std::size_t>(Cause::kCount); ++i) {
+    for (std::size_t i = 0; i < static_cast<std::size_t>(Cause::kCount); ++i)
         last_raise_[i] = o.last_raise_[i];
-        last_raise_round_[i] = o.last_raise_round_[i];
-    }
 }
 
 Ex<void> Executive::bind(std::span<const LinkDecoderDecl> services, CoreState& state) {
@@ -237,19 +235,15 @@ void Executive::recompute_delivered() noexcept {
 
 void Executive::recompute_raise(Cause c) noexcept {
     const std::size_t ci = static_cast<std::size_t>(c);
-    std::uint64_t ms = kNeverRaised;
-    std::uint64_t round = 0;
+    RaiseStamp newest{};
     for (std::size_t i = 0; i < notifier_count_; ++i) {
         const Line& line = lines_[NotifierSlot{i}];
         if (!line.delivers(c) || !line.has_evidence())
             continue;
-        if (ms == kNeverRaised || line.stamp().ms > ms) {
-            ms = line.stamp().ms;
-            round = line.stamp().round;
-        }
+        if (newest.ms == kNeverRaised || line.stamp().ms > newest.ms)
+            newest = line.stamp();
     }
-    last_raise_[ci] = ms;
-    last_raise_round_[ci] = round;
+    last_raise_[ci] = newest;
 }
 
 Ex<void> Executive::add_fd(int fd) {
@@ -431,10 +425,10 @@ void Executive::dispatch_cause(Cause c, NotifierSlot line, std::int64_t wake_ns)
 
     if (c == Cause::None || c == Cause::Tick)
         return;
+    const RaiseStamp at{tick_count_, round_count_};
     if (const auto l = lines_.find(line))
-        l->raised(RaiseStamp{tick_count_, round_count_});
-    last_raise_[static_cast<std::size_t>(c)] = tick_count_;
-    last_raise_round_[static_cast<std::size_t>(c)] = round_count_;
+        l->raised(at);
+    last_raise_[static_cast<std::size_t>(c)] = at;
 
     for (std::size_t i = 0; i < service_count_; ++i)
         if (services_[i].cause == c)
@@ -446,14 +440,14 @@ static_assert(kTickNs == 1'000'000);
 bool Executive::notifier_carries(const LinkDecoderDecl& s) const noexcept {
     if (s.cause == Cause::Tick || !delivered_.has(s.cause))
         return false;
-    const std::size_t ci = static_cast<std::size_t>(s.cause);
-    if (last_raise_[ci] == kNeverRaised)
+    const RaiseStamp& at = last_raise_[static_cast<std::size_t>(s.cause)];
+    if (at.ms == kNeverRaised)
         return false;
     if (s.period == kEveryRound)
-        return raise_is_recent_rounds(round_count_, last_raise_round_[ci]);
+        return raise_is_recent_rounds(round_count_, at.round);
     return raise_is_recent(
         std::chrono::milliseconds{static_cast<std::int64_t>(tick_count_)},
-        std::chrono::milliseconds{static_cast<std::int64_t>(last_raise_[ci])},
+        std::chrono::milliseconds{static_cast<std::int64_t>(at.ms)},
         s.period
     );
 }

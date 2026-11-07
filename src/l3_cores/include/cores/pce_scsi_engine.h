@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "cores/cd_dialect_facts.h"
@@ -29,21 +30,19 @@ public:
         std::uint8_t state = 0;
         std::uint32_t latency = 0;
         HeadLba lba{};
-        std::uint32_t cnt = 0;
+        SectorCount cnt{};
         svc::TrackIndex track{};
         bool can_read_next = false;
         bool has_status = false;
     };
 
-    svc::TrackIndex head_track() const noexcept {
-        return svc::TrackIndex{static_cast<std::uint8_t>(st_.track)};
-    }
+    svc::TrackIndex head_track() const noexcept { return st_.track; }
 
     View view() const noexcept {
         return View{
             st_.state,
             st_.latency,
-            HeadLba{st_.lba},
+            st_.lba,
             st_.cnt,
             head_track(),
             st_.can_read_next,
@@ -72,14 +71,14 @@ private:
         std::uint8_t cdda_first = 0;
         std::uint32_t latency = 0;
         std::uint32_t audio_delay = 0;
-        std::uint32_t cnt = 0;
-        std::int32_t lba = 0;
+        SectorCount cnt{};
+        HeadLba lba{};
         CddaPlayRange cdda{};
-        std::uint32_t track = 0;
+        svc::TrackIndex track{};
         ScsiSense sense{};
         std::uint8_t subq[12] = {};
         std::uint8_t subc[96] = {};
-        std::int32_t subc_lba = -1;
+        HeadLba subc_lba{-1};
     };
 
     [[nodiscard]] Ex<void> do_accept(
@@ -118,22 +117,21 @@ private:
     [[nodiscard]] Ex<void> command_exec_(CdDialectPorts& p);
     [[nodiscard]] Ex<void> send_status_(std::uint16_t status, ICdLink& link);
     [[nodiscard]] Ex<void> send_data_request_(ICdLink& link);
-    void build_subcode_frame_(std::int32_t lba, const svc::DiscGeometry& geom);
-    std::uint32_t track_by_lba_(std::int32_t lba, const svc::DiscGeometry& geom) const;
-    std::uint32_t seek_ticks_(
-        std::int32_t from,
-        std::int32_t to,
-        const svc::DiscGeometry& geom
-    ) const;
+    void build_subcode_frame_(HeadLba lba, const svc::DiscGeometry& geom);
+    svc::TrackIndex track_by_lba_(HeadLba lba, const svc::DiscGeometry& geom) const;
+    std::uint32_t seek_ticks_(HeadLba from, HeadLba to, const svc::DiscGeometry& geom) const;
 
-    void hint_at_(std::int32_t lba, bool doubled, const svc::DiscGeometry& geom) noexcept;
+    void hint_at_(HeadLba lba, bool doubled, const svc::DiscGeometry& geom) noexcept;
     void pump_pipeline_(const svc::DiscGeometry& geom) noexcept;
+
+    static constexpr std::size_t kFramePairBytes = 2 * svc::kCdDataSize;
+    static constexpr std::size_t kSubcodeStageBytes = 100;
 
     CdDialectFacts facts_;
     CdEngineStats stats_{};
 
-    std::uint8_t sec_buf_[2352 + 2352] = {};
-    std::uint8_t sub_buf_[100] = {};
+    std::uint8_t sec_buf_[kFramePairBytes] = {};
+    std::uint8_t sub_buf_[kSubcodeStageBytes] = {};
     Cdd st_{};
 };
 

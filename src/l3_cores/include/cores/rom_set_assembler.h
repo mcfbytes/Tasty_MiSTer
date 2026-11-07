@@ -1,16 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "cores/fill_run.h"
 #include "cores/md5.h"
+#include "cores/mra_lane.h"
+#include "cores/mra_lane_writes.h"
+#include "cores/mra_unit_len.h"
+#include "cores/mra_map_word.h"
 #include "cores/rom_bytes.h"
+#include "cores/types.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "svc/vfs.h"
 
@@ -20,15 +26,18 @@ struct Rom;
 struct RomNode;
 struct AssembledRom;
 
-inline constexpr std::size_t kRomLanes = 8;
-inline constexpr int kRomGrowBlock = 1024 * 1024;
+inline constexpr RomLength kRomGrowBlock{1024u * 1024u};
 inline constexpr std::size_t kErrorCap = 1023;
+
+inline constexpr std::size_t kStreamChunkBytes = 8192;
+
+inline constexpr std::size_t kFillTileBytes = 64u * 1024u;
 
 inline constexpr std::int32_t kRepeatCap = 16384;
 
 inline constexpr std::int32_t kFillRepeatCap = 512 * 1024 * 1024;
 
-inline constexpr std::uint32_t kStagedRomMax = 512u * 1024u * 1024u;
+inline constexpr RomOffset kStagedRomMax{512u * 1024u * 1024u};
 
 class RomSetAssembler {
 public:
@@ -62,16 +71,16 @@ private:
     void interleave_end() noexcept;
     [[nodiscard]] AssembledRom finish(const Rom& rom);
 
-    [[nodiscard]] bool grow_for(std::size_t idx, int chunk);
-    [[nodiscard]] bool ensure_writable(std::size_t hi);
+    [[nodiscard]] bool grow_for(LaneIndex lane, RomLength reserve);
+    [[nodiscard]] bool ensure_writable(RomOffset hi);
     [[nodiscard]] bool refuse_size();
-    [[nodiscard]] int scatter(const std::uint8_t* src, int chunk, std::uint32_t map);
+    [[nodiscard]] int scatter(std::span<const std::uint8_t> src, MapWord map);
     [[nodiscard]] int stream_file(
         const std::string& fname,
         std::uint32_t crc,
         std::int32_t start,
         int length,
-        std::uint32_t map
+        MapWord map
     );
     [[nodiscard]] std::string part_path(std::string_view zip, std::string_view member) const;
 
@@ -84,15 +93,15 @@ private:
     bool sized_out_ = false;
 
     RomBytes data_;
-    std::array<int, kRomLanes> romlen_{};
-    int romblkl_ = 0;
-    int unitlen_ = 1;
+    infra::IndexedArray<RomOffset, kRomLanes, LaneIndex> romlen_{};
+    RomOffset romblkl_{};
+    UnitLen unitlen_{};
     bool inside_ilv_ = false;
     Md5 md5_;
 
     std::vector<FillRun> runs_;
-    int run_total_ = 0;
-    int hw_ = 0;
+    RomLength run_total_{};
+    RomOffset hw_{};
 };
 
 }

@@ -13,11 +13,9 @@ namespace mister::os {
 
 namespace {
 
-bool emit(int fd, std::uint16_t type, std::uint16_t code, std::int32_t value) noexcept {
-    input_event ev{};
-    ev.type = type;
-    ev.code = code;
-    ev.value = value;
+constexpr std::uint16_t kKeyCodeCount = 256;
+
+bool emit(int fd, const input_event& ev) noexcept {
     ssize_t n = 0;
     do {
         n = ::write(fd, &ev, sizeof ev);
@@ -33,17 +31,17 @@ Ex<void> UinputKeyboard::open() noexcept {
         return {};
     UniqueFd fd{::open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC)};
     if (!fd.valid())
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
     if (::ioctl(fd.get(), UI_SET_EVBIT, EV_KEY) != 0
         || ::ioctl(fd.get(), UI_SET_EVBIT, EV_SYN) != 0)
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    for (int code = 1; code < 256; ++code)
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
+    for (std::uint16_t code = 1; code < kKeyCodeCount; ++code)
         (void)::ioctl(fd.get(), UI_SET_KEYBIT, code);
     uinput_setup setup{};
     setup.id.bustype = BUS_VIRTUAL;
     std::strncpy(setup.name, kName, UINPUT_MAX_NAME_SIZE - 1);
     if (::ioctl(fd.get(), UI_DEV_SETUP, &setup) != 0 || ::ioctl(fd.get(), UI_DEV_CREATE) != 0)
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
     fd_ = std::move(fd);
     return {};
 }
@@ -52,8 +50,17 @@ void UinputKeyboard::key(std::uint16_t code, bool down) noexcept {
     TASTY_SEAT_BODY(UinputKeyboard);
     if (!fd_.valid())
         return;
-    if (emit(fd_.get(), EV_KEY, code, down ? 1 : 0))
-        (void)emit(fd_.get(), EV_SYN, SYN_REPORT, 0);
+    input_event key_event{};
+    key_event.type = EV_KEY;
+    key_event.code = code;
+    key_event.value = down ? 1 : 0;
+    if (emit(fd_.get(), key_event)) {
+        input_event sync_event{};
+        sync_event.type = EV_SYN;
+        sync_event.code = SYN_REPORT;
+        sync_event.value = 0;
+        (void)emit(fd_.get(), sync_event);
+    }
 }
 
 }

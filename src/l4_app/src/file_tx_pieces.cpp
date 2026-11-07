@@ -164,7 +164,7 @@ FileTxPieces::Pass FileTxPieces::step(
         std::move(*staged_),
         ext_of(path_.view()),
         path_.view(),
-        0,
+        hal::FabricAddr{},
         crc,
         whole,
         offset

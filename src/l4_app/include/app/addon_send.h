@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -22,6 +23,44 @@ class Vfs;
 
 namespace mister::app {
 
+struct EntryNo {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] static constexpr std::optional<EntryNo> of(std::size_t i) noexcept {
+        if (i >= std::numeric_limits<std::uint8_t>::max())
+            return std::nullopt;
+        return EntryNo{static_cast<std::uint8_t>(i + 1u)};
+    }
+
+    friend constexpr bool operator==(EntryNo, EntryNo) = default;
+};
+
+struct AddonDest {
+    std::uint16_t v = 0;
+    static constexpr unsigned kFioBits = 8;
+
+    [[nodiscard]] static constexpr AddonDest of(EntryNo entry, std::uint8_t fio) noexcept {
+        return AddonDest{
+            static_cast<std::uint16_t>((static_cast<std::uint16_t>(entry.v) << kFioBits) | fio)
+        };
+    }
+
+    [[nodiscard]] constexpr proto::WideIoIndex wide() const noexcept {
+        return proto::WideIoIndex{v};
+    }
+
+    friend constexpr bool operator==(AddonDest, AddonDest) = default;
+};
+
+static_assert(
+    AddonDest::of(EntryNo{3}, 0x81) == AddonDest{0x0381},
+    "stock's framing: the 1-based entry number high, the FIO index low"
+);
+static_assert(
+    !EntryNo::of(255).has_value() && EntryNo::of(254) == EntryNo{255},
+    "the numbering runs 1..255, so a list stops at 255 entries"
+);
+
 class AddonSend final : public Rung {
     TASTY_SEAT_RESIDENT(Main);
 
@@ -32,7 +71,7 @@ public:
 
     struct Entry {
         std::string ext;
-        proto::WideIoIndex dest{};
+        AddonDest dest{};
         PathText path{};
     };
 
@@ -73,13 +112,13 @@ public:
     [[nodiscard]] bool image_failed() const noexcept { return image_failed_; }
 
 private:
-    static constexpr std::size_t kNoImage = static_cast<std::size_t>(-1);
-
     [[nodiscard]] bool open_(const svc::Vfs& vfs);
+
+    [[nodiscard]] bool next_is_image() const noexcept;
 
     std::vector<Entry> entries_;
     std::vector<std::uint8_t> image_;
-    std::size_t image_at_ = kNoImage;
+    std::optional<EntryNo> image_at_{};
     std::size_t next_ = 0;
     std::optional<cores::PayloadPieces> pieces_{};
     std::uint32_t sent_ = 0;

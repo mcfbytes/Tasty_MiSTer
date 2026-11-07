@@ -73,7 +73,7 @@ void NanosleepDelay::sleep_until(std::chrono::nanoseconds at) {
 
 Ex<void> Deadline::sleep_until() const {
     if (const int rc = sleep_until_raw(at_); rc != 0) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(rc)});
+        return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), rc));
     }
     return {};
 }

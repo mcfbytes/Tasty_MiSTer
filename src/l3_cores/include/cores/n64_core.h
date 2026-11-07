@@ -43,7 +43,7 @@ public:
 
     [[nodiscard]] std::uint32_t transfers() const noexcept { return transfers_; }
 
-    [[nodiscard]] std::uint16_t last_index() const noexcept { return last_index_; }
+    [[nodiscard]] proto::IoIndex last_index() const noexcept { return last_index_; }
 
     [[nodiscard]] const n64::CheatEngine& cheats() const noexcept { return cheats_; }
 
@@ -127,7 +127,7 @@ private:
     svc::Crc32 crc32_{};
     std::uint64_t bytes_sent_ = 0;
     std::uint32_t transfers_ = 0;
-    std::uint16_t last_index_ = 0;
+    proto::IoIndex last_index_{};
     std::uint32_t save_plan_errors_ = 0;
     std::uint32_t facts_refusals_ = 0;
     hal::FabricAddr disk_addr_{};

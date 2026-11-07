@@ -43,6 +43,7 @@ tasty_add_header_checks(tasty_os_header_checks LIB mister_os HEADERS
   os/monotonic_clock.h
   os/nanosleep_delay.h
   os/net_probe.h
+  os/path_buf.h
   os/process_title.h
   os/run_sync.h
   os/small_file.h

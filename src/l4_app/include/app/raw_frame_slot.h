@@ -9,6 +9,7 @@
 
 #include "app/frame_stamp.h"
 #include "app/rec_control.h"
+#include "app/rgb_rows.h"
 #include "app/types.h"
 #include "infra/loan_channel.h"
 #include "infra/seat.h"
@@ -29,12 +30,11 @@ struct RawFrameSlot {
     std::array<FrameStampRun, kMaxRuns> run{};
     FrameStamp stamp{};
     std::uint16_t width = 0;
-    std::uint16_t height = 0;
-    std::uint32_t line = 0;
+
+    RgbRows rgb{};
     std::uint32_t vtime = 0;
     RecMode mode = RecMode::Hash;
     RecOptions opt{};
-    std::span<const std::byte> pixels{};
     RecPath path{};
 };
 

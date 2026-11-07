@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cstring>
 #include <utility>
 
 #include "cores/assembled_rom.h"
@@ -11,6 +10,7 @@
 #include "cores/rom.h"
 #include "cores/rom_bytes.h"
 #include "cores/rom_set_assembler.h"
+#include "hal/types.h"
 #include "infra/ascii.h"
 #include "infra/byte_view.h"
 
@@ -23,47 +23,42 @@ public:
     ImageFile(RomBytes bytes, std::vector<FillRun> runs) noexcept
         : bytes_(std::move(bytes)),
           runs_(std::move(runs)) {
-        size_ = bytes_.size();
+        end_ = bytes_.extent();
         for (const FillRun& r : runs_) {
-            size_ += r.len;
+            end_ += r.len;
         }
     }
 
     [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
-        if (off >= size_)
+        const std::optional<RomOffset> from = end_.read_from(off);
+        if (!from)
             return std::size_t{0};
-        const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(dst.size(), size_ - off));
-        auto* out = infra::byte_cast<std::uint8_t>(dst).data();
-        std::uint64_t p = off;
-        std::uint64_t before = 0;
-        std::size_t k = 0;
+        RomOffset p = *from;
+        std::span<std::uint8_t> out = (end_ - p).first_of(infra::byte_cast<std::uint8_t>(dst));
+        const std::size_t n = out.size();
+        RomLength before{};
+
+        const auto take = [&](std::span<const std::uint8_t> src) {
+            const std::span<std::uint8_t> m = RomLength::of(src).first_of(out);
+            std::ranges::copy(src.first(m.size()), m.begin());
+            p += RomLength::of(m);
+            out = out.subspan(m.size());
+        };
         for (const FillRun& r : runs_) {
-            if (k == n)
+            if (out.empty())
                 break;
-            if (p < r.at) {
-                const auto m = static_cast<std::size_t>(std::min<std::uint64_t>(n - k, r.at - p));
-                std::memcpy(out + k, bytes_.data() + static_cast<std::size_t>(p - before), m);
-                k += m;
-                p += m;
-            }
-            const std::uint64_t end = std::uint64_t{r.at} + r.len;
-            if (k < n && p < end) {
-                const auto m = static_cast<std::size_t>(std::min<std::uint64_t>(n - k, end - p));
-                if (r.pattern.size() == 1) {
-                    std::memset(out + k, r.pattern[0], m);
-                } else {
-                    const auto ph = static_cast<std::size_t>(p - r.at);
-                    for (std::size_t i = 0; i < m; ++i) {
-                        out[k + i] = r.pattern[(ph + i) % r.pattern.size()];
-                    }
-                }
-                k += m;
-                p += m;
+            if (p < r.at)
+                take((r.at - p).first_of(bytes_.from(p - before)));
+            if (!out.empty() && p < r.end()) {
+                const std::span<std::uint8_t> m = (r.end() - p).first_of(out);
+                r.write_to(m, p - r.at);
+                p += RomLength::of(m);
+                out = out.subspan(m.size());
             }
             before += r.len;
         }
-        if (k < n)
-            std::memcpy(out + k, bytes_.data() + static_cast<std::size_t>(p - before), n - k);
+        if (!out.empty())
+            take(bytes_.from(p - before));
         return n;
     }
 
@@ -71,7 +66,9 @@ public:
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }
 
-    [[nodiscard]] Ex<svc::FileSize> size() const override { return svc::FileSize{size_}; }
+    [[nodiscard]] Ex<svc::FileSize> size() const override {
+        return (end_ - RomOffset{}).file_size();
+    }
 
     [[nodiscard]] Ex<void> flush() override { return {}; }
 
@@ -80,7 +77,7 @@ public:
 private:
     RomBytes bytes_;
     std::vector<FillRun> runs_;
-    std::uint64_t size_ = 0;
+    RomOffset end_{};
 };
 
 }
@@ -184,11 +181,12 @@ std::optional<ManifestAct> MraStager::rom_() {
             break;
         const Rom& rom = roms[a_->at++];
         AssembledRom out = a_->assembler.assemble(rom);
-        if (!out.send || out.size() == 0) {
+        const RomLength len = out.length();
+        if (!out.send || len.empty()) {
             ++counts_.discarded;
             continue;
         }
-        if (rom.address != 0 && !audited_) {
+        if (rom.address != hal::FabricAddr{} && !audited_) {
             ++counts_.ddr_refusals;
             ++counts_.discarded;
             continue;
@@ -199,8 +197,8 @@ std::optional<ManifestAct> MraStager::rom_() {
             continue;
         }
         const auto index = static_cast<std::uint8_t>(out.index);
-        const auto bytes = static_cast<std::uint32_t>(out.size());
-        if (rom.address != 0) {
+        const std::uint32_t bytes = len.v;
+        if (rom.address != hal::FabricAddr{}) {
             window_ = Window{.index = index, .bytes = bytes};
             image_ = std::move(out.bytes);
             image_runs_ = std::move(out.runs);

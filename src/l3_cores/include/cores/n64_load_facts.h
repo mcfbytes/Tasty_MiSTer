@@ -10,6 +10,9 @@
 #include "infra/endian.h"
 #include "infra/seat.h"
 
+#include "cores/n64_db_tags.h"
+#include "cores/n64_memory_type.h"
+#include "cores/n64_options.h"
 #include "proto/status_word.h"
 #include "svc/types.h"
 
@@ -35,6 +38,27 @@ struct LoadFacts {
             return std::nullopt;
         return f;
     }
+
+    [[nodiscard]] bool flag(StatusField f) const noexcept;
+    void set_flag(StatusField f, bool on) noexcept;
+
+    [[nodiscard]] SystemType system() const noexcept;
+    void set_system(SystemType t) noexcept;
+    [[nodiscard]] Cic cic() const noexcept;
+    void set_cic(Cic c) noexcept;
+
+    [[nodiscard]] PadType controller(StatusField f) const noexcept;
+    void set_controller(StatusField f, PadType p) noexcept;
+
+    [[nodiscard]] bool auto_detect() const noexcept;
+    [[nodiscard]] bool auto_pak() const noexcept;
+
+    [[nodiscard]] MemoryType cart_save_type() const noexcept;
+    void set_cart_save_type(MemoryType t) noexcept;
+
+private:
+    [[nodiscard]] std::uint32_t field_(StatusField f) const noexcept;
+    void set_field_(StatusField f, std::uint32_t v) noexcept;
 };
 
 static_assert(std::is_trivially_copyable_v<LoadFacts> && sizeof(LoadFacts) == 48);

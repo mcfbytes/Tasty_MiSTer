@@ -12,7 +12,7 @@ enum class SaveAnswer : std::uint8_t { Pending, Known, Declined };
 struct SaveExtent {
     TASTY_SEAT_EXEMPT(const_shared);
     proto::ActKey generation{};
-    std::uint64_t size_bytes = 0;
+    proto::FileSize size_bytes{};
     SaveAnswer answer = SaveAnswer::Pending;
     bool exists = false;
 };

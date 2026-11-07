@@ -1,49 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/backdrop_job.h"
 
+#include "app/rgb_rows.h"
+
 namespace mister::app {
 namespace {
 
-[[nodiscard]] HdRect clip_box(HdRect r, std::int32_t w, std::int32_t h) noexcept {
-    if (r.w <= 0 || r.h <= 0)
-        return {};
-    if (r.x < 0) {
-        r.w += r.x;
-        r.x = 0;
-    }
-    if (r.y < 0) {
-        r.h += r.y;
-        r.y = 0;
-    }
-    if (r.w <= 0 || r.h <= 0 || r.x >= w || r.y >= h)
-        return {};
-    if (r.x + r.w > w)
-        r.w = w - r.x;
-    if (r.y + r.h > h)
-        r.h = h - r.y;
-    return r;
-}
-
 [[nodiscard]] HdRect canvas_game(const BackdropJob::Canvas& c) noexcept {
-    if (c.stride_px == 0 || c.frame.empty())
+    if (c.frame.row_px == 0 || c.frame.pixels.empty())
         return {};
-    return clip_box(
-        c.game,
-        static_cast<std::int32_t>(c.stride_px),
-        static_cast<std::int32_t>(c.frame.size() / c.stride_px)
-    );
-}
-
-[[nodiscard]] HdRect join(HdRect a, HdRect b) noexcept {
-    if (b.w <= 0 || b.h <= 0)
-        return a;
-    if (a.w <= 0 || a.h <= 0)
-        return b;
-    const std::int32_t x0 = a.x < b.x ? a.x : b.x;
-    const std::int32_t y0 = a.y < b.y ? a.y : b.y;
-    const std::int32_t x1 = a.x + a.w > b.x + b.w ? a.x + a.w : b.x + b.w;
-    const std::int32_t y1 = a.y + a.h > b.y + b.h ? a.y + a.h : b.y + b.h;
-    return HdRect{x0, y0, x1 - x0, y1 - y0};
+    return c.game.intersect(c.frame.bounds());
 }
 
 }
@@ -62,13 +28,13 @@ BackdropSampler::Image BackdropJob::read(
         return img;
     if (!(img.fresh && !img.same) && !reset)
         return img;
-    const bool usable = img.width != 0 && img.height != 0 && img.line >= img.width * 3u;
+    const bool usable = img.width != 0 && img.rgb.covers(rgb_row_of(img.width), img.rgb.rows);
     const HdRect game = canvas_game(c);
     if (!usable || game.w <= 0 || game.h <= 0)
         return img;
     img_ = img;
     canvas_ = c;
-    box_ = join(game, c.glass);
+    box_ = game.union_with(c.glass);
     next_row_ = box_.y;
     step_ = Step::Scale;
     return img;
@@ -83,26 +49,14 @@ HdRect BackdropJob::scale_band() noexcept {
     scaler_.scale_rows(
         img_.rgb,
         img_.width,
-        img_.height,
-        img_.line,
         canvas_.frame,
-        canvas_.stride_px,
         canvas_.game,
         canvas_.picture,
         next_row_,
         y1
     );
     for (const BackdropScalerTarget& t : canvas_.targets)
-        scaler_.scale_target_rows(
-            img_.rgb,
-            img_.width,
-            img_.height,
-            img_.line,
-            canvas_.picture,
-            t,
-            next_row_,
-            y1
-        );
+        scaler_.scale_target_rows(img_.rgb, img_.width, canvas_.picture, t, next_row_, y1);
     next_row_ = y1;
     if (next_row_ < end)
         return {};
@@ -116,7 +70,7 @@ void BackdropJob::begin_copy(FlipBuffer buffer, HdRect box, const Canvas& c) noe
     TASTY_SEAT_BODY(BackdropJob);
     if (busy() || !whole_)
         return;
-    const HdRect clipped = canvas_game(Canvas{c.frame, c.stride_px, box, {}});
+    const HdRect clipped = canvas_game(Canvas{.frame = c.frame, .game = box});
     if (clipped.w <= 0 || clipped.h <= 0)
         return;
     canvas_ = c;

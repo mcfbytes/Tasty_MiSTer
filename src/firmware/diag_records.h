@@ -16,6 +16,7 @@
 #include "rg_record.h"
 #include "record_ctx.h"
 #include "rnd_record.h"
+#include "round_trace_record.h"
 #include "tas_record.h"
 
 namespace mister::fw {

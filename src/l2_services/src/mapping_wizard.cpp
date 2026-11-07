@@ -19,8 +19,8 @@ void MappingWizard::on_device(const DeviceIdentity& id) {
     step_ = Step::AwaitButton;
 }
 
-void MappingWizard::on_button(std::uint16_t code) {
-    if (step_ != Step::AwaitButton || code == 0)
+void MappingWizard::on_button(EvdevCode code) {
+    if (step_ != Step::AwaitButton || code.is_unset())
         return;
     captured_ = code;
 }

@@ -29,6 +29,7 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/log_rec.h
   infra/log_rec_dispatch.h
   infra/message_sum.h
+  infra/mint_guard.h
   infra/opt_ref.h
   infra/park_fds.h
   infra/park_like.h

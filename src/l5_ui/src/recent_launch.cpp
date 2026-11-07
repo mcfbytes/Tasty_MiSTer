@@ -26,9 +26,9 @@ app::Mgl document_of(const app::RecentGames::Record& r) {
     app::Mgl doc;
     (void)doc.rbf.assign(r.rbf);
     (void)doc.path.assign(r.path);
-    doc.slot = r.slot == 'S' ? app::Mgl::Slot::Image : app::Mgl::Slot::File;
-    doc.index = r.ioctl_index;
-    doc.delay_s = 0;
+    doc.slot = r.slot == 'S' ? app::MglItem::Slot::Image : app::MglItem::Slot::File;
+    doc.index = proto::FileSlotDigit{r.ioctl_index};
+    doc.delay_s = app::DelaySeconds{};
     return doc;
 }
 

@@ -2,12 +2,18 @@
 #include "proto/spi_ps2_decoder.h"
 
 #include "hal/selected.h"
+#include "infra/endian.h"
 #include "proto/ps2_wire.h"
 
 #include <span>
 #include "proto/uio_opcodes.h"
 
 namespace mister::proto {
+
+namespace {
+
+constexpr std::size_t kPairBytes = 2;
+}
 
 [[nodiscard]] Ex<void> write_ps2_frame(ILinkFrame& frame, const Ps2Frame& f) {
     if (f.len == 0 || f.len > kPs2FrameBytes) {
@@ -22,9 +28,8 @@ namespace mister::proto {
     std::size_t n = 0;
     if (f.stream == Ps2Stream::MousePacket) {
         for (std::uint8_t i = 0; i + 1u < f.len; i = static_cast<std::uint8_t>(i + 2u)) {
-            words[n++] = static_cast<std::uint16_t>(
-                static_cast<std::uint16_t>(f.bytes[i])
-                | static_cast<std::uint16_t>(static_cast<std::uint16_t>(f.bytes[i + 1]) << 8)
+            words[n++] = infra::load_le<std::uint16_t>(
+                std::span<const std::uint8_t, kPairBytes>(f.bytes.data() + i, kPairBytes)
             );
         }
     } else {

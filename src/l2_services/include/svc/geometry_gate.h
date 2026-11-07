@@ -9,7 +9,7 @@
 namespace mister::svc {
 
 struct GeometryGate {
-    std::uint16_t last_res = 0;
+    ResWord last_res{};
     std::uint8_t last_fb_crc = 0;
     std::uint16_t last_flt_flags = 0;
     bool vi_seen = false;

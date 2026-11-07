@@ -19,6 +19,9 @@ namespace {
 constexpr std::size_t kSysBtnCntOk = 21;
 constexpr std::size_t kSysBtnCntEsc = 22;
 
+constexpr std::size_t kSysAxisFirst = 24;
+constexpr unsigned kSysAxisWords = 4;
+
 const AxisCal kNullAxis{};
 
 }
@@ -106,10 +109,11 @@ Ex<InputDevice> InputDevice::adopt(
     return dev;
 }
 
-const AxisCal& InputDevice::axis(unsigned code) const {
-    if (code >= kAxisCount)
+const AxisCal& InputDevice::axis(EvdevCode code) const {
+    const auto slot = code.axis_position<kAxisCount>();
+    if (!slot)
         return kNullAxis;
-    return axes_[code];
+    return axes_[*slot];
 }
 
 StickCal InputDevice::stick_cal(StickIndex stick) const noexcept {
@@ -117,35 +121,42 @@ StickCal InputDevice::stick_cal(StickIndex stick) const noexcept {
     return s ? s->cal() : StickCal{};
 }
 
-void InputDevice::install_sys_map(const JoyWords& words) noexcept {
-    sys_map_ = words;
-
-    if (sys_map_[kSysBtnCntEsc] == 0)
-        sys_map_[kSysBtnCntEsc] = sys_map_[kSysBtnCntOk];
-
-    menu_map_ = rules::derive_menu_map(sys_map_, facts_.quirk != QuirkId::Wheel);
+const JoyWords& DeviceMaps::install_sys(const JoyWords& words) noexcept {
+    sys = words;
+    if (packed_word(sys[kSysBtnCntEsc]) == 0)
+        sys[kSysBtnCntEsc] = sys[kSysBtnCntOk];
+    return sys;
 }
 
-bool InputDevice::matches_sys_button(std::uint16_t code) const noexcept {
-    if (code == 0)
+std::span<const PackedKeys> DeviceMaps::wire_view() const noexcept {
+    static constexpr JoyWords kUnset{};
+    return wire ? std::span<const PackedKeys>{*wire} : std::span<const PackedKeys>{kUnset};
+}
+
+void InputDevice::install_sys_map(const JoyWords& words) noexcept {
+    const JoyWords& fixed = maps_.install_sys(words);
+
+    maps_.set_menu(rules::derive_menu_map(fixed, facts_.quirk != QuirkId::Wheel));
+}
+
+bool InputDevice::matches_sys_button(EvdevCode code) const noexcept {
+    if (code.is_unset())
         return false;
     for (std::size_t i = 0; i <= 11; ++i) {
-        const std::uint32_t packed = sys_map_[i];
-        if (packed == 0)
+        const PackedKeys packed = maps_.sys[i];
+        if (packed == PackedKeys{})
             continue;
-        if ((packed & 0xFFFFu) == code)
-            return true;
-        if ((packed >> 16) == code)
+        if (packed.lo == code || packed.hi == code)
             return true;
     }
     return false;
 }
 
 bool InputDevice::has_nonzero_joy_map() const noexcept {
-    if (!joy_map_)
+    if (!maps_.wire_present())
         return false;
-    for (const std::uint32_t w : *joy_map_) {
-        if (w != 0)
+    for (const PackedKeys w : *maps_.wire) {
+        if (w != PackedKeys{})
             return true;
     }
     return false;
@@ -215,46 +226,36 @@ bool InputDevice::release_for_handover() noexcept {
     return ok;
 }
 
-void InputDevice::mark_down(std::uint16_t code, bool on) noexcept {
-    const std::size_t word = code / 64u;
-    if (word >= down_.size())
-        return;
-    const std::uint64_t mask = std::uint64_t{1} << (code % 64u);
+void InputDevice::mark_down(EvdevCode code, bool on) noexcept {
     if (on)
-        down_[word] |= mask;
+        down_.set(code);
     else
-        down_[word] &= ~mask;
+        down_.clear(code);
 }
 
-void InputDevice::push_key_edge(std::uint16_t code, bool pressed) noexcept {
+void InputDevice::push_key_edge(EvdevCode code, bool pressed) noexcept {
     mark_down(code, pressed);
     keys_changed_ = true;
-    if (report_.key_count < kMaxKeyEdges) {
-        report_.keys[report_.key_count] = KeyEdge{code, pressed};
-        ++report_.key_count;
-    } else {
-        ++report_.key_overflow;
-    }
+    report_.keys.push(KeyEdge{code, pressed});
 }
 
-void InputDevice::track_osd_combo(std::uint16_t code, bool pressed) noexcept {
-    if (code == 0)
+void InputDevice::track_osd_combo(EvdevCode code, bool pressed) noexcept {
+    if (code.is_unset())
         return;
     const std::uint8_t was = osd_combo_;
-    const auto wide = static_cast<std::uint32_t>(code);
-    if (sys_map_[kSysBtnCntEsc] != 0 && wide == sys_map_[kSysBtnCntEsc]) {
+    if (maps_.sys[kSysBtnCntEsc] == PackedKeys::lone(code)) {
         if (pressed)
             osd_combo_ |= 2u;
         else
             osd_combo_ = static_cast<std::uint8_t>(osd_combo_ & ~2u);
     }
-    if (sys_map_[kSysBtnCntOk] != 0 && wide == sys_map_[kSysBtnCntOk]) {
+    if (maps_.sys[kSysBtnCntOk] == PackedKeys::lone(code)) {
         if (pressed)
             osd_combo_ |= 1u;
         else
             osd_combo_ = static_cast<std::uint8_t>(osd_combo_ & ~1u);
     }
-    if (code < 256 || was == osd_combo_)
+    if (code.is_key() || was == osd_combo_)
         return;
     if (was != 3u && osd_combo_ == 3u) {
         if (report_.osd_makes != 0xFFu)
@@ -265,8 +266,9 @@ void InputDevice::track_osd_combo(std::uint16_t code, bool pressed) noexcept {
     }
 }
 
-void InputDevice::synth_axis(std::uint16_t code, std::int32_t value, const AxisCal& cal) noexcept {
-    if (code >= kAxisCount)
+void InputDevice::synth_axis(EvdevCode code, std::int32_t value, const AxisCal& cal) noexcept {
+    const auto slot = code.axis_position<kAxisCount>();
+    if (!slot)
         return;
 
     if (is_pdsp_like(facts_.quirk))
@@ -286,9 +288,9 @@ void InputDevice::synth_axis(std::uint16_t code, std::int32_t value, const AxisC
         const std::int32_t threshold = range / 4;
 
         bool only_max = true;
-        for (unsigned nn = 0; nn < 4; ++nn) {
-            const std::uint32_t w = sys_map_[24u + nn];
-            if (w != 0 && (w & 0xFFFFu) == code)
+        for (unsigned nn = 0; nn < kSysAxisWords; ++nn) {
+            const PackedKeys w = maps_.sys[kSysAxisFirst + nn];
+            if (w != PackedKeys{} && w.lo == code)
                 only_max = false;
         }
         if (value < center - threshold && !only_max)
@@ -297,27 +299,52 @@ void InputDevice::synth_axis(std::uint16_t code, std::int32_t value, const AxisC
             edge = 2;
     }
 
-    const std::uint8_t last = axis_edge_[code];
+    const std::uint8_t last = axis_edge_[*slot];
     if (last == edge)
         return;
-    axis_edge_[code] = edge;
+    axis_edge_[*slot] = edge;
 
-    const auto base = static_cast<std::uint16_t>(
-        kKeyEmuBase + (static_cast<unsigned>(code) << 1u) - 1u
-    );
+    const auto edge_code = [code](std::uint8_t e) {
+        return e == 1 ? code.key_emu_min() : code.key_emu_max();
+    };
     if (last != 0) {
-        push_key_edge(static_cast<std::uint16_t>(base + last), false);
+        push_key_edge(edge_code(last), false);
         if (report_.axis_edges != 0xFFFFu)
             ++report_.axis_edges;
     }
     if (edge != 0) {
-        push_key_edge(static_cast<std::uint16_t>(base + edge), true);
+        push_key_edge(edge_code(edge), true);
         if (report_.axis_edges != 0xFFFFu)
             ++report_.axis_edges;
     }
 }
 
 namespace {
+
+struct PersonalityFilter {
+    QuirkId quirk = QuirkId::None;
+
+    static constexpr EvdevCode kLastDsAxis{40};
+
+    [[nodiscard]] bool drops(const input_event& ev) const noexcept {
+
+        if (quirk == QuirkId::Ds4Touch
+            && ev.type == EV_KEY
+            && (ev.code == BTN_TOOL_FINGER
+                || ev.code == BTN_TOUCH
+                || ev.code == BTN_TOOL_DOUBLETAP)) {
+            return true;
+        }
+        if (ev.type != EV_ABS || !is_dualshock_like(quirk))
+            return false;
+
+        const EvdevCode code{ev.code};
+        if (code > kLastDsAxis)
+            return true;
+
+        return quirk == QuirkId::Ds4Touch && (code == EvdevCode{ABS_X} || code == EvdevCode{ABS_Y});
+    }
+};
 
 std::int32_t normalize_axis(std::int32_t value, const AxisCal& cal) {
     const std::int32_t hrange = (cal.max - cal.min) / 2;
@@ -342,21 +369,87 @@ struct StickAxis {
     bool is_y;
 };
 
-std::optional<StickAxis> stick_of(std::uint16_t code) {
-    switch (code) {
-        case ABS_X:
-            return StickAxis{kLeftStick, false};
-        case ABS_Y:
-            return StickAxis{kLeftStick, true};
-        case ABS_RX:
-            return StickAxis{kRightStick, false};
-        case ABS_RY:
-            return StickAxis{kRightStick, true};
-        default:
-            return std::nullopt;
+std::optional<StickAxis> stick_of(EvdevCode code) {
+    if (code == EvdevCode{ABS_X})
+        return StickAxis{kLeftStick, false};
+    if (code == EvdevCode{ABS_Y})
+        return StickAxis{kLeftStick, true};
+    if (code == EvdevCode{ABS_RX})
+        return StickAxis{kRightStick, false};
+    if (code == EvdevCode{ABS_RY})
+        return StickAxis{kRightStick, true};
+    return std::nullopt;
+}
+
+}
+
+void InputDevice::decode_key(const input_event& ev) noexcept {
+    const EvdevCode code{ev.code};
+    const bool pressed = ev.value != 0;
+    track_osd_combo(code, pressed);
+    push_key_edge(code, pressed);
+    if (ev.code >= BTN_LEFT && ev.code <= BTN_MIDDLE) {
+        const proto::MouseButtons bit = proto::MouseButtons::nth(ev.code - BTN_LEFT);
+        report_.mouse_buttons = pressed ? report_.mouse_buttons.with(bit)
+                                        : report_.mouse_buttons.without(bit);
+        report_.mouse_changed = true;
     }
 }
 
+void InputDevice::decode_rel(const input_event& ev) noexcept {
+    if (ev.code == REL_X)
+        report_.rel_x += ev.value;
+    else if (ev.code == REL_Y)
+        report_.rel_y += ev.value;
+    else if (ev.code == REL_WHEEL)
+        report_.rel_wheel += ev.value;
+    else
+        return;
+    report_.mouse_changed = true;
+}
+
+void InputDevice::decode_abs(const input_event& ev) noexcept {
+    const EvdevCode code{ev.code};
+    const auto sa = stick_of(code);
+
+    const AxisCal& cal = axis(code);
+    if (!sa) {
+        synth_axis(code, ev.value, cal);
+        return;
+    }
+    const StickIndex stick = sa->stick;
+    const bool is_y = sa->is_y;
+    StickState& st = sticks_[stick];
+    const std::int32_t v = normalize_axis(ev.value, cal);
+    if (is_y)
+        st.raw.y = v;
+    else
+        st.raw.x = v;
+
+    st.learn(rules::is_diagonal(st.raw));
+    if (const auto slot = code.axis_position<kAxisCount>()) {
+        const std::int32_t axis_value = is_y ? st.raw.y : st.raw.x;
+        const std::int32_t seen = axis_value < 0 ? -axis_value : axis_value;
+        if (seen > axes_[*slot].seen_max)
+            axes_[*slot].seen_max = seen;
+    }
+
+    const StickCal sc = st.cal();
+    rules::DeadzoneParams dp{};
+    dp.deadzone = deadzone_;
+    dp.max_cardinal = sc.max_cardinal;
+    dp.max_range = sc.max_range;
+    AnalogXy xy = rules::apply_deadzone(st.raw, dp);
+
+    if (reshape_)
+        xy = reshape_->reshape(xy, cal, sc);
+    if (!(xy == st.published)) {
+        report_.stick_changed[stick] = true;
+        st.published = xy;
+    }
+    report_.stick[stick] = xy;
+
+    synth_axis(code, ev.value, cal);
 }
 
 Ex<unsigned> InputDevice::drain() {
@@ -372,6 +465,7 @@ Ex<unsigned> InputDevice::drain() {
         report_.stick[i] = sticks_[i].published;
     unsigned decoded = 0;
     keys_changed_ = false;
+    const PersonalityFilter filter{facts_.quirk};
 
     struct input_event evs[32];
     bool more = true;
@@ -404,103 +498,21 @@ Ex<unsigned> InputDevice::drain() {
             const struct input_event& ev = evs[i];
             ++decoded;
 
-            if (facts_.quirk == QuirkId::Ds4Touch
-                && ev.type == EV_KEY
-                && (ev.code == BTN_TOOL_FINGER
-                    || ev.code == BTN_TOUCH
-                    || ev.code == BTN_TOOL_DOUBLETAP)) {
-
+            if (filter.drops(ev)) {
                 if (report_.quirk_drops != 0xFFFFu)
                     ++report_.quirk_drops;
                 continue;
             }
-            if (ev.type == EV_ABS && is_dualshock_like(facts_.quirk)) {
-
-                if (ev.code > 40) {
-                    if (report_.quirk_drops != 0xFFFFu)
-                        ++report_.quirk_drops;
-                    continue;
-                }
-
-                if (facts_.quirk == QuirkId::Ds4Touch && ev.code <= 1) {
-                    if (report_.quirk_drops != 0xFFFFu)
-                        ++report_.quirk_drops;
-                    continue;
-                }
-            }
             switch (ev.type) {
-                case EV_KEY: {
-                    const auto code = static_cast<std::uint16_t>(ev.code);
-                    const bool pressed = ev.value != 0;
-                    track_osd_combo(code, pressed);
-                    push_key_edge(code, pressed);
-                    if (code >= BTN_LEFT && code <= BTN_MIDDLE) {
-                        const auto bit = static_cast<std::uint8_t>(1u << (code - BTN_LEFT));
-                        if (pressed)
-                            report_.mouse_buttons.v |= bit;
-                        else
-                            report_.mouse_buttons.v = static_cast<std::uint8_t>(
-                                report_.mouse_buttons.v & ~bit
-                            );
-                        report_.mouse_changed = true;
-                    }
+                case EV_KEY:
+                    decode_key(ev);
                     break;
-                }
                 case EV_REL:
-
-                    if (ev.code == REL_X)
-                        report_.rel_x += ev.value;
-                    else if (ev.code == REL_Y)
-                        report_.rel_y += ev.value;
-                    else if (ev.code == REL_WHEEL)
-                        report_.rel_wheel += ev.value;
-                    else
-                        break;
-                    report_.mouse_changed = true;
+                    decode_rel(ev);
                     break;
-                case EV_ABS: {
-                    const auto sa = stick_of(static_cast<std::uint16_t>(ev.code));
-
-                    const AxisCal& cal = axis(ev.code);
-                    if (!sa) {
-                        synth_axis(static_cast<std::uint16_t>(ev.code), ev.value, cal);
-                        break;
-                    }
-                    const StickIndex stick = sa->stick;
-                    const bool is_y = sa->is_y;
-                    StickState& st = sticks_[stick];
-                    const std::int32_t v = normalize_axis(ev.value, cal);
-                    if (is_y)
-                        st.raw.y = v;
-                    else
-                        st.raw.x = v;
-
-                    st.learn(rules::is_diagonal(st.raw));
-                    if (ev.code < kAxisCount) {
-                        const std::int32_t axis = is_y ? st.raw.y : st.raw.x;
-                        const std::int32_t seen = axis < 0 ? -axis : axis;
-                        if (seen > axes_[ev.code].seen_max)
-                            axes_[ev.code].seen_max = seen;
-                    }
-
-                    const StickCal sc = st.cal();
-                    rules::DeadzoneParams dp{};
-                    dp.deadzone = deadzone_;
-                    dp.max_cardinal = sc.max_cardinal;
-                    dp.max_range = sc.max_range;
-                    AnalogXy xy = rules::apply_deadzone(st.raw, dp);
-
-                    if (reshape_)
-                        xy = reshape_->reshape(xy, cal, sc);
-                    if (!(xy == st.published)) {
-                        report_.stick_changed[stick] = true;
-                        st.published = xy;
-                    }
-                    report_.stick[stick] = xy;
-
-                    synth_axis(static_cast<std::uint16_t>(ev.code), ev.value, cal);
+                case EV_ABS:
+                    decode_abs(ev);
                     break;
-                }
                 default:
                     break;
             }
@@ -508,15 +520,15 @@ Ex<unsigned> InputDevice::drain() {
     }
 
     mouse_buttons_ = report_.mouse_buttons;
-    if (keys_changed_ && joy_map_) {
+    if (keys_changed_ && maps_.wire_present()) {
 
-        const JoyMask now = rules::mask_for(*joy_map_, down_);
+        const JoyMask now = rules::mask_for(*maps_.wire, down_);
         report_.buttons = now;
         report_.buttons_changed = !(now == joy_prev_);
         joy_prev_ = now;
     }
     if (keys_changed_) {
-        const JoyMask menu_now = rules::mask_for(menu_map_, down_);
+        const JoyMask menu_now = rules::mask_for(maps_.menu, down_);
         report_.menu_buttons = menu_now;
         menu_prev_ = menu_now;
     }

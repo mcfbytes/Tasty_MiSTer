@@ -14,14 +14,144 @@
 
 namespace mister::svc {
 
-inline constexpr std::uint8_t kVolAttMask = 0x07;
-inline constexpr std::uint8_t kVolMuteBit = 0x10;
-inline constexpr std::uint8_t kVolValidMask = 0x17;
-inline constexpr std::uint8_t kCoreBoostMask = 0x60;
-inline constexpr std::uint8_t kCoreBoostMax = 0x40;
-inline constexpr std::uint8_t kCoreAttMax = 6;
+struct CoreVolume;
+
+struct Attenuation {
+    std::uint8_t v = 0;
+    friend constexpr bool operator==(Attenuation, Attenuation) = default;
+};
+
+enum class VolumeStep : std::uint8_t { Quieter, Hold, Louder };
+
+struct VolumeByte {
+    std::uint8_t v = 0;
+    static constexpr std::uint8_t kAttenMask = 0x07;
+    static constexpr std::uint8_t kMuteBit = 0x10;
+    static constexpr std::uint8_t kValidMask = 0x17;
+    static constexpr std::uint8_t kMaxAttenuation = 0x07;
+
+    [[nodiscard]] constexpr bool muted() const noexcept { return (v & kMuteBit) != 0; }
+
+    [[nodiscard]] constexpr Attenuation attenuation() const noexcept {
+        return Attenuation{static_cast<std::uint8_t>(v & kAttenMask)};
+    }
+
+    [[nodiscard]] constexpr bool quietest() const noexcept {
+        return (v & kAttenMask) == kMaxAttenuation;
+    }
+
+    [[nodiscard]] constexpr bool loudest() const noexcept { return (v & kAttenMask) == 0; }
+
+    [[nodiscard]] constexpr std::uint8_t kept_bits() const noexcept { return v & kValidMask; }
+
+    [[nodiscard]] constexpr VolumeByte valid() const noexcept {
+        return VolumeByte{static_cast<std::uint8_t>(v & kValidMask)};
+    }
+
+    [[nodiscard]] constexpr VolumeByte with_mute(bool on) const noexcept {
+        return VolumeByte{static_cast<std::uint8_t>((v & kAttenMask) | (on ? kMuteBit : 0))};
+    }
+
+    [[nodiscard]] constexpr VolumeByte with_attenuation(Attenuation a) const noexcept {
+        return VolumeByte{static_cast<std::uint8_t>((v & kMuteBit) | (a.v & kAttenMask))};
+    }
+
+    [[nodiscard]] constexpr VolumeByte toggled_mute() const noexcept {
+        return VolumeByte{static_cast<std::uint8_t>(v ^ kMuteBit)}.valid();
+    }
+
+    [[nodiscard]] constexpr VolumeByte without_mute() const noexcept {
+        return VolumeByte{static_cast<std::uint8_t>(v & ~kMuteBit)};
+    }
+
+    [[nodiscard]] constexpr VolumeByte capped_under(CoreVolume core) const noexcept;
+
+    [[nodiscard]] constexpr std::uint8_t summed_with(CoreVolume core) const noexcept;
+
+    [[nodiscard]] constexpr VolumeByte quieter() const noexcept {
+        return VolumeByte{static_cast<std::uint8_t>(v + 1)};
+    }
+
+    [[nodiscard]] constexpr VolumeByte louder() const noexcept {
+        return VolumeByte{static_cast<std::uint8_t>(v - 1)};
+    }
+
+    friend constexpr bool operator==(VolumeByte, VolumeByte) = default;
+};
+
+static_assert(sizeof(VolumeByte) == 1, "the wire attenuation is one byte");
+
+struct CoreVolume {
+    std::uint8_t v = 0;
+    static constexpr std::uint8_t kAttenMask = VolumeByte::kAttenMask;
+    static constexpr std::uint8_t kBoostMask = 0x60;
+    static constexpr std::uint8_t kBoostStep = 0x20;
+    static constexpr std::uint8_t kBoostMax = 0x40;
+    static constexpr std::uint8_t kAttenMax = 6;
+
+    [[nodiscard]] constexpr std::uint8_t field_bits() const noexcept {
+        return v & (kAttenMask | kBoostMask);
+    }
+
+    [[nodiscard]] constexpr CoreVolume attenuation_only() const noexcept {
+        return CoreVolume{static_cast<std::uint8_t>(v & kAttenMask)};
+    }
+
+    [[nodiscard]] constexpr CoreVolume stepped(
+        VolumeStep step,
+        bool boost_available
+    ) const noexcept {
+        std::uint8_t out = v & kAttenMask;
+        if (boost_available) {
+            unsigned boost = v & kBoostMask;
+            if (step == VolumeStep::Quieter) {
+                if (boost != 0) {
+                    out = 0;
+                    boost -= kBoostStep;
+                } else if (out < kAttenMax) {
+                    ++out;
+                }
+            }
+            if (step == VolumeStep::Louder) {
+                if (boost != 0 || out == 0) {
+                    boost += kBoostStep;
+                    if (boost > kBoostMax)
+                        boost = kBoostMax;
+                } else if (out > 0) {
+                    --out;
+                }
+            }
+            out = static_cast<std::uint8_t>(out | boost);
+        } else {
+            if (step == VolumeStep::Quieter && out < kAttenMax)
+                ++out;
+            if (step == VolumeStep::Louder && out > 0)
+                --out;
+        }
+        return CoreVolume{out};
+    }
+
+    friend constexpr bool operator==(CoreVolume, CoreVolume) = default;
+};
+
+constexpr VolumeByte VolumeByte::capped_under(CoreVolume core) const noexcept {
+    if (muted() || static_cast<unsigned>(v) + core.v <= kMaxAttenuation)
+        return *this;
+    return VolumeByte{static_cast<std::uint8_t>(kMaxAttenuation - core.v)};
+}
+
+constexpr std::uint8_t VolumeByte::summed_with(CoreVolume core) const noexcept {
+    return static_cast<std::uint8_t>(v + core.v);
+}
+
+static_assert(sizeof(CoreVolume) == 1, "the core volume is one byte");
 
 inline constexpr std::size_t kFilterWireWords = 15;
+
+inline constexpr int kFilterLines = 9;
+
+inline constexpr std::int64_t kCoefScaleQ39 = 0x8000000000LL;
+inline constexpr std::int32_t kCoefScaleQ21 = 0x200000;
 
 class AudioService {
     TASTY_SEAT_RESIDENT(RT);
@@ -31,15 +161,15 @@ public:
 
     void set_volume(proto::VolumeCmd kind, int arg);
 
-    std::uint8_t volume_byte() const noexcept { return vol_att_ & kVolValidMask; }
+    std::uint8_t volume_byte() const noexcept { return vol_.kept_bits(); }
 
-    bool muted() const noexcept { return (vol_att_ & kVolMuteBit) != 0; }
+    bool muted() const noexcept { return vol_.muted(); }
 
-    std::uint8_t attenuation() const noexcept { return vol_att_ & kVolAttMask; }
+    Attenuation attenuation() const noexcept { return vol_.attenuation(); }
 
     void set_core_volume(int cmd);
 
-    std::uint8_t core_volume_byte() const noexcept { return corevol_att_; }
+    std::uint8_t core_volume_byte() const noexcept { return corevol_.field_bits(); }
 
     [[nodiscard]] Ex<bool> probe_filter();
 
@@ -67,8 +197,8 @@ public:
 
 private:
     AudioService() = default;
-    std::uint8_t vol_att_ = 0;
-    std::uint8_t corevol_att_ = 0;
+    VolumeByte vol_{};
+    CoreVolume corevol_{};
     bool has_filter_ = false;
     bool has_boost_ = false;
     bool dirty_ = false;

@@ -36,7 +36,7 @@ Ex<void> ChdPrefetch::open() {
     return wake_.open_fd();
 }
 
-void ChdPrefetch::rest_(infra::ParkTimeout ms, std::uint32_t want, bool watch_free) noexcept {
+void ChdPrefetch::rest_(infra::ParkTimeout ms, HunkIndex want, bool watch_free) noexcept {
     rests_ = true;
     rest_parked_ = false;
     rest_ms_ = ms;
@@ -73,7 +73,7 @@ void ChdPrefetch::reset_consumer_() noexcept {
         resident_[i] = Chan::Loan{};
     resident_count_ = 0;
     (void)chan_.reclaim_all_parked();
-    want_ = kNoPrefetchHunk;
+    want_ = HunkIndex::none();
 }
 
 bool ChdPrefetch::settle_park() noexcept {
@@ -91,49 +91,46 @@ bool ChdPrefetch::settle_park() noexcept {
     return true;
 }
 
-Ex<void> ChdPrefetch::attach(
-    std::unique_ptr<IChdSource> src,
-    std::uint32_t hunk_bytes,
-    std::uint32_t hunk_count
-) noexcept {
+Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) noexcept {
 
     if (!parked())
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
-    if (!src || hunk_bytes == 0 || hunk_count == 0) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), hunk_bytes});
+    if (!src || geo.hunk_extent() == 0 || geo.hunk_count == HunkCount{}) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
     }
     if (!opened())
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
 
     depth_ = 0;
-    hunk_bytes_ = 0;
+    hunk_extent_ = 0;
     poisoned_ = false;
 
-    const std::size_t depth = derive_depth(kPrefetchBudgetBytes, hunk_bytes);
-    if (depth == 0)
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), hunk_bytes});
+    const std::size_t depth = derive_depth(kPrefetchBudgetBytes, geo.hunk_bytes);
+    if (depth == 0) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
+    }
 
-    if (slab_ == nullptr)
-        return std::unexpected(Error{Errc::os, ERR_SITE(), hunk_bytes});
-    if (static_cast<std::size_t>(hunk_bytes) * depth > kPrefetchBudgetBytes) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), hunk_bytes});
+    if (slab_ == nullptr) {
+        return std::unexpected(Error{Errc::os, ERR_SITE(), geo.hunk_detail()});
+    }
+    if (geo.hunk_extent() * depth > kPrefetchBudgetBytes) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
     }
 
     for (std::size_t i = 0; i < resident_count_; ++i)
         resident_[i] = Chan::Loan{};
     resident_count_ = 0;
-    want_ = kNoPrefetchHunk;
+    want_ = HunkIndex::none();
     (void)chan_.reclaim_all_parked();
-    want_hunk_.store(kNoPrefetchHunk, std::memory_order_release);
+    want_hunk_.store(HunkIndex::none(), std::memory_order_release);
 
-    hunk_bytes_ = hunk_bytes;
+    hunk_extent_ = geo.hunk_extent();
     depth_ = depth;
 
-    const std::uint32_t avail = static_cast<std::uint32_t>(depth_) - kPrefetchLookBehind;
+    const HunkCount avail = HunkCount::of_slots(depth_) - kPrefetchLookBehind;
     ChdMedia media;
     media.src = std::move(src);
-    media.hunk_bytes = hunk_bytes;
-    media.hunk_count = hunk_count;
+    media.geo = geo;
     media.forward_span = avail < kPrefetchForwardSpan ? avail : kPrefetchForwardSpan;
 
     if (!chan_.set_live(static_cast<std::uint8_t>(depth_))) {
@@ -158,8 +155,9 @@ Ex<void> ChdPrefetch::attach(
 bool ChdPrefetch::reap_leases_() noexcept {
     const std::uint32_t taken = attaches_taken_.load(std::memory_order_acquire);
     for (std::size_t i = 0; i < kChdMediaLeases; ++i) {
-        if (cmd_.leases[i] && static_cast<std::int32_t>(taken - cmd_.lease_seq[i]) >= 0)
-            cmd_.leases[i].reset();
+        HeldLease& held = cmd_.leases[i];
+        if (held.lease && static_cast<std::int32_t>(taken - held.seq) >= 0)
+            held.lease.reset();
     }
     return media_.available() != 0;
 }
@@ -176,8 +174,8 @@ Ex<void> ChdPrefetch::hand_over_(ChdMedia&& media) noexcept {
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
     ++cmd_.sent;
-    cmd_.lease_seq[idx] = cmd_.sent;
-    cmd_.leases[idx] = std::move(lease);
+    cmd_.leases[idx].seq = cmd_.sent;
+    cmd_.leases[idx].lease = std::move(lease);
     return {};
 }
 
@@ -187,11 +185,10 @@ void ChdPrefetch::take_attaches_() noexcept {
             held_ = Chan::Job{};
             ChdMedia& m = media_.at(a->lease);
             src_ = std::move(m.src);
-            worker_hunk_bytes_ = m.hunk_bytes;
-            hunk_count_ = m.hunk_count;
+            geo_ = m.geo;
             forward_span_ = m.forward_span;
-            next_ = 0;
-            tracking_ = kNoPrefetchHunk;
+            next_ = HunkIndex{};
+            tracking_ = HunkIndex::none();
             disabled_ = false;
         }
         attaches_taken_.store(++taken_, std::memory_order_release);
@@ -203,8 +200,8 @@ void ChdPrefetch::release_media_() noexcept {
     take_attaches_();
     held_ = Chan::Job{};
     src_.reset();
-    tracking_ = kNoPrefetchHunk;
-    next_ = 0;
+    tracking_ = HunkIndex::none();
+    next_ = HunkIndex{};
     disabled_ = false;
 }
 
@@ -224,9 +221,9 @@ void ChdPrefetch::serve() noexcept {
         return;
     }
 
-    const std::uint32_t want = want_hunk_.load(std::memory_order_acquire);
-    if (want != kNoPrefetchHunk && want != tracking_) {
-        if (tracking_ == kNoPrefetchHunk) {
+    const HunkIndex want = want_hunk_.load(std::memory_order_acquire);
+    if (want != HunkIndex::none() && want != tracking_) {
+        if (tracking_ == HunkIndex::none()) {
 
             tracking_ = want;
             next_ = want;
@@ -241,11 +238,11 @@ void ChdPrefetch::serve() noexcept {
         }
     }
 
-    const std::uint32_t lead = next_ - tracking_;
+    const HunkCount lead = next_ - tracking_;
     const bool no_work = disabled_
         || (src_ == nullptr)
-        || (want == kNoPrefetchHunk)
-        || (next_ >= hunk_count_)
+        || (want == HunkIndex::none())
+        || !geo_.hunk_count.contains(next_)
         || (lead >= forward_span_);
 
     Chan::Job job;
@@ -261,11 +258,12 @@ void ChdPrefetch::serve() noexcept {
         return;
     }
 
-    const std::uint32_t h = next_;
-    std::byte* dst = slab_.get() + static_cast<std::size_t>(job.index()) * worker_hunk_bytes_;
+    const HunkIndex h = next_;
+    const std::size_t hunk_bytes = geo_.hunk_extent();
+    std::byte* dst = slab_.get() + static_cast<std::size_t>(job.index()) * hunk_bytes;
     constexpr std::int64_t kNsPerMicrosecond = 1000;
     const std::int64_t t0 = decode_now_ns();
-    auto r = src_->read_hunk(h, std::span<std::byte>(dst, worker_hunk_bytes_));
+    auto r = src_->read_hunk(h, std::span<std::byte>(dst, hunk_bytes));
     decode_us_.add(static_cast<std::uint32_t>((decode_now_ns() - t0) / kNsPerMicrosecond));
     if (!r) {
         errors_.add();
@@ -278,10 +276,10 @@ void ChdPrefetch::serve() noexcept {
     job->hunk = h;
     job.complete();
     job = Chan::Job{};
-    ++next_;
+    next_ = next_ + HunkCount{1};
 
     if (!sprinting_())
-        rest_(infra::ParkTimeout{kPrefetchTopUpMs}, want, false);
+        rest_(kPrefetchTopUpMs, want, false);
 }
 
 void ChdPrefetch::release() noexcept {
@@ -297,7 +295,7 @@ void ChdPrefetch::park_now() noexcept {
     parked_.store(true, std::memory_order_release);
 }
 
-void ChdPrefetch::submit(std::uint32_t hunk) noexcept {
+void ChdPrefetch::submit(HunkIndex hunk) noexcept {
     if (depth_ == 0 || poisoned_)
         return;
     if (hunk == want_)
@@ -311,14 +309,17 @@ void ChdPrefetch::kick_worker_() noexcept {
     wake_.kick_if_armed();
 }
 
-std::size_t ChdPrefetch::evict_(std::uint32_t current) noexcept {
+std::size_t ChdPrefetch::evict_(HunkIndex current) noexcept {
 
-    const std::uint32_t lo = current > kPrefetchLookBehind ? current - kPrefetchLookBehind : 0u;
+    const HunkCount behind = current - HunkIndex{};
+    const HunkCount look = behind < kPrefetchLookBehind ? behind : kPrefetchLookBehind;
+    const HunkIndex lo = current - look;
+    const HunkCount span{static_cast<std::uint32_t>(depth_)};
     std::size_t w = 0;
     std::size_t released = 0;
     for (std::size_t i = 0; i < resident_count_; ++i) {
-        const std::uint32_t h = resident_hunk_[i];
-        const bool in_window = (h >= lo) && (h - lo) < static_cast<std::uint32_t>(depth_);
+        const HunkIndex h = resident_hunk_[i];
+        const bool in_window = h >= lo && (h - lo) < span;
         if (!in_window) {
             chan_.send(std::move(resident_[i]));
             ++released;
@@ -333,7 +334,7 @@ std::size_t ChdPrefetch::evict_(std::uint32_t current) noexcept {
     return released;
 }
 
-const std::byte* ChdPrefetch::take(std::uint32_t hunk) noexcept {
+const std::byte* ChdPrefetch::take(HunkIndex hunk) noexcept {
     if (depth_ == 0 || poisoned_)
         return nullptr;
 
@@ -365,7 +366,7 @@ const std::byte* ChdPrefetch::take(std::uint32_t hunk) noexcept {
         if (resident_hunk_[i] == hunk) {
             hits_.add();
             return slab_.get()
-                + static_cast<std::size_t>(chan_.index_of(resident_[i])) * hunk_bytes_;
+                + static_cast<std::size_t>(chan_.index_of(resident_[i])) * hunk_extent_;
         }
     }
     return nullptr;

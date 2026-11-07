@@ -325,7 +325,7 @@ void LauncherHost::release_screen_(bool restore_console) noexcept {
     if (restore_console && demand_.profile) {
         const std::string tty(demand_.profile->tty);
         w_.console.restore_text(tty.c_str());
-        if (prior_vt_ > 0)
+        if (prior_vt_ != os::VtNumber{})
             (void)w_.console.activate(prior_vt_);
     }
 }

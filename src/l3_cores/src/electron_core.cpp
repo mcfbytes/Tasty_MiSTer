@@ -71,7 +71,7 @@ Ex<void> ElectronCore::tx_uef_(IoIndex index, std::span<const std::uint8_t> byte
     auto session = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{index.v}, params);
     if (!session)
         return std::unexpected(session.error());
-    last_index_ = static_cast<std::uint16_t>(index.v);
+    last_index_ = index;
     ++transfers_;
     last_numbits_ = 0;
 
@@ -116,7 +116,7 @@ Ex<void> ElectronCore::tx_raw_(IoIndex index, std::span<const std::uint8_t> byte
     auto session = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{index.v}, params);
     if (!session)
         return std::unexpected(session.error());
-    last_index_ = static_cast<std::uint16_t>(index.v);
+    last_index_ = index;
     ++transfers_;
 
     for (std::size_t off = 0; off < bytes.size();) {

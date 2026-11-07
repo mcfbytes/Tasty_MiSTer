@@ -1,17 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
 
 #include "app/link_encoder.h"
+#include "cores/types.h"
+#include "hal/types.h"
 #include "infra/affine.h"
 #include "infra/decimal_text.h"
 #include "infra/json_out.h"
+#include "infra/seat.h"
 #include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -23,6 +30,85 @@ using ::mister::infra::affine::operator-=;
 
 using proto::CorrelationTag;
 using proto::kUncaused;
+
+struct RowCount {
+    std::uint32_t v = 0;
+    using affine_count = RowCount;
+
+    template <std::integral I>
+    [[nodiscard]] static constexpr RowCount of(I n) noexcept {
+        return RowCount{static_cast<std::uint32_t>(n)};
+    }
+
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr RowCount half() const noexcept { return RowCount{v >> 1u}; }
+
+    [[nodiscard]] constexpr std::int32_t extent(std::int32_t pitch) const noexcept {
+        return static_cast<std::int32_t>(v) * pitch;
+    }
+
+    template <class Rows>
+    constexpr void clip(Rows& rows) const {
+        if (rows.size() > v)
+            rows.resize(v);
+    }
+
+    friend constexpr bool operator==(RowCount, RowCount) = default;
+    friend constexpr auto operator<=>(RowCount, RowCount) = default;
+};
+
+struct RowIndex {
+    std::uint32_t v = 0;
+    using affine_count = RowCount;
+
+    template <std::integral I>
+    [[nodiscard]] static constexpr RowIndex of(I n) noexcept {
+        return RowIndex{static_cast<std::uint32_t>(n)};
+    }
+
+    [[nodiscard]] constexpr RowCount before() const noexcept { return RowCount{v}; }
+
+    friend constexpr bool operator==(RowIndex, RowIndex) = default;
+    friend constexpr auto operator<=>(RowIndex, RowIndex) = default;
+};
+
+[[nodiscard]] constexpr RowIndex row_after(RowCount count) noexcept {
+    return RowIndex{count.v};
+}
+
+[[nodiscard]] constexpr RowCount saturating_sub(RowCount count, RowCount height) noexcept {
+    return RowCount{count.v > height.v ? count.v - height.v : 0u};
+}
+
+[[nodiscard]] constexpr proto::OsdRowCount osd_rows_of(RowCount height) noexcept {
+    return proto::OsdRowCount::of(height.v);
+}
+
+[[nodiscard]] constexpr proto::OsdRow last_osd_row(RowCount height) noexcept {
+    return proto::OsdRow::of(height.v - 1u);
+}
+
+[[nodiscard]] constexpr proto::OsdRow osd_row_at(RowCount offset) noexcept {
+    return proto::OsdRow::of(offset.v);
+}
+
+[[nodiscard]] constexpr RowIndex row_index_of(proto::OsdRow row) noexcept {
+    return RowIndex{row.v};
+}
+
+[[nodiscard]] constexpr proto::DipRowIndex dip_row_of(RowIndex row) noexcept {
+    return proto::DipRowIndex::of(row.v);
+}
+
+[[nodiscard]] constexpr cores::ConfigSlot config_slot_of(RowIndex i) noexcept {
+    return cores::ConfigSlot{static_cast<std::uint8_t>(i.v)};
+}
+
+static_assert(sizeof(RowCount) == 4);
+static_assert(sizeof(RowIndex) == 4);
 
 struct Delivered {
     ILinkEncoder::Outcome outcome = ILinkEncoder::Outcome::Dropped;
@@ -94,6 +180,8 @@ struct FrameCount {
     [[nodiscard]] constexpr bool multiple_of(FrameCount stride) const noexcept {
         return v % stride.v == 0;
     }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
 
     friend constexpr bool operator==(FrameCount, FrameCount) = default;
     friend constexpr auto operator<=>(FrameCount, FrameCount) = default;
@@ -179,8 +267,73 @@ inline constexpr WideMovieFrame kNoWideMovieFrame{-1};
     return WideMovieFrame{f.v};
 }
 
+struct CoreFrameGap {
+    std::int64_t v = 0;
+    using affine_count = CoreFrameGap;
+
+    [[nodiscard]] static constexpr CoreFrameGap of_lead(hal::HeaderCtr::Lag lead) noexcept {
+        return CoreFrameGap{lead.v};
+    }
+
+    [[nodiscard]] static constexpr CoreFrameGap of_count(CoreFrameCount n) noexcept {
+        return CoreFrameGap{n.v};
+    }
+
+    [[nodiscard]] constexpr CoreFrameGap truncated_to(CoreFrameGap unit) const noexcept {
+        return CoreFrameGap{unit.v * (v / unit.v)};
+    }
+
+    [[nodiscard]] constexpr CoreFrameGap halved() const noexcept { return CoreFrameGap{v / 2}; }
+
+    [[nodiscard]] constexpr bool beyond(CoreFrameGap tol) const noexcept {
+        return v > tol.v || v < -tol.v;
+    }
+
+    [[nodiscard]] constexpr std::int64_t lasting_ns(std::int64_t period_ns) const noexcept {
+        return v * period_ns;
+    }
+
+    [[nodiscard]] constexpr std::int64_t period_ns_of(std::int64_t span_ns) const noexcept {
+        return span_ns / v;
+    }
+
+    [[nodiscard]] constexpr CoreFrameCount core_frames() const noexcept {
+        return CoreFrameCount{static_cast<std::uint32_t>(v)};
+    }
+
+    [[nodiscard]] constexpr MovieSpan movie_span() const noexcept { return MovieSpan{v}; }
+
+    friend constexpr bool operator==(CoreFrameGap, CoreFrameGap) = default;
+    friend constexpr auto operator<=>(CoreFrameGap, CoreFrameGap) = default;
+};
+
+struct WideCoreFrame {
+    std::int64_t v = 0;
+    using affine_count = CoreFrameGap;
+
+    [[nodiscard]] static constexpr WideCoreFrame numbered(std::uint64_t n) noexcept {
+        return WideCoreFrame{static_cast<std::int64_t>(n)};
+    }
+
+    [[nodiscard]] constexpr std::uint64_t number() const noexcept {
+        return static_cast<std::uint64_t>(v);
+    }
+
+    [[nodiscard]] constexpr bool on_every(std::uint32_t every) const noexcept {
+        return number() % every == 0;
+    }
+
+    friend constexpr bool operator==(WideCoreFrame, WideCoreFrame) = default;
+    friend constexpr auto operator<=>(WideCoreFrame, WideCoreFrame) = default;
+};
+
 struct FabricGeneration {
     std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr FabricGeneration next() const noexcept {
+        return FabricGeneration{v + 1u};
+    }
+
     friend constexpr bool operator==(FabricGeneration, FabricGeneration) = default;
 };
 
@@ -196,6 +349,9 @@ struct InputGateBits {
 
 struct CoreEdgeSeq {
     std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr CoreEdgeSeq next() const noexcept { return CoreEdgeSeq{v + 1u}; }
+
     friend constexpr bool operator==(CoreEdgeSeq, CoreEdgeSeq) = default;
 };
 
@@ -260,8 +416,18 @@ struct HdColors {
 
 enum class VsyncAdjust : std::uint8_t { Off, Match, LowLag };
 
-enum class DirectVideo : std::uint8_t { Off, On, Auto };
+using svc::DirectVideo;
 
-enum class VgaMode : std::uint8_t { Rgb, YPbPr, SVideo, Cvbs };
+enum class VgaMode : std::uint8_t { Rgb, YPbPr, SVideo, Cvbs, Subcarrier };
+
+[[nodiscard]] constexpr std::uint8_t wire_of(VgaMode m) noexcept {
+    return static_cast<std::uint8_t>(m);
+}
+
+[[nodiscard]] constexpr std::optional<VgaMode> vga_mode_of(std::uint8_t raw) noexcept {
+    if (raw > wire_of(VgaMode::Subcarrier))
+        return std::nullopt;
+    return static_cast<VgaMode>(raw);
+}
 
 }

@@ -184,6 +184,8 @@ private:
 
     enum : std::uint64_t { kRadix = 10 };
 
+    static constexpr std::size_t kMaxDigits = std::numeric_limits<std::uint64_t>::digits10 + 1;
+
     static constexpr std::size_t digits_(std::uint64_t v) noexcept {
         std::size_t n = 1;
         while (v >= kRadix) {
@@ -194,16 +196,14 @@ private:
     }
 
     constexpr void digits_out_(std::uint64_t v) noexcept {
-        std::array<char, 20> rev{};
-        std::size_t n = 0;
+
+        std::array<char, kMaxDigits> buf{};
+        std::size_t at = buf.size();
         do {
-            rev[n++] = static_cast<char>('0' + v % kRadix);
+            buf[--at] = static_cast<char>('0' + v % kRadix);
             v /= kRadix;
         } while (v != 0);
-        std::array<char, 20> fwd{};
-        for (std::size_t i = 0; i < n; ++i)
-            fwd[i] = rev[n - 1 - i];
-        put_(std::string_view(fwd.data(), n));
+        put_(std::string_view(buf.data() + at, buf.size() - at));
     }
 
     std::array<char, kCapacity + 1> buf_{};

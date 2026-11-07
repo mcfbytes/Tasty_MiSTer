@@ -100,7 +100,7 @@ public:
 
     bool on(const CmdVerb::TasPlay& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        return replay_.take_play(ReplayFeeder::Play{v.movie, v.rom, v.phase_us, v.lead});
+        return replay_.take_play(ReplayFeeder::Play{v.movie, v.rom, v.phase, v.lead});
     }
 
     bool on(const CmdVerb::TasStop&) noexcept override {

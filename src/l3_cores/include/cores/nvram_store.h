@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "cores/save_partition.h"
+#include "cores/fnv1a64.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
@@ -80,8 +81,10 @@ public:
 private:
     NvramStore() = default;
 
-    [[nodiscard]] Ex<SavePath> per_disc_path(const SavePartition& p, bool stock) const;
-    [[nodiscard]] Ex<SavePath> per_core_path(const SavePartition& p, bool indexed) const;
+    [[nodiscard]] Ex<SavePath> per_disc_path(const SavePartition& p) const;
+    [[nodiscard]] Ex<SavePath> stock_disc_path(const SavePartition& p) const;
+    [[nodiscard]] Ex<SavePath> per_core_path(const SavePartition& p) const;
+    [[nodiscard]] Ex<SavePath> per_core_indexed_path(const SavePartition& p) const;
     [[nodiscard]] Ex<SavePath> per_image_path(const SavePartition& p) const;
 
     NvramPolicy policy_{};

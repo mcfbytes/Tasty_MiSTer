@@ -207,7 +207,12 @@ Transition SlotPickHost::eject(const OptionItem& it) {
 void SlotPickHost::unmount_pending_() {
     if (pending_store_
         && b_.names
-        && !b_.names->save_path(env_.file_stem, app::NameConfig::Slot::Mount, pending_slot_, {})) {
+        && !b_.names->save_path(
+            env_.file_stem,
+            app::NameConfig::Slot::Mount,
+            proto::IoIndex{pending_slot_},
+            {}
+        )) {
         ++refusals_;
     }
     ask_mount(pending_slot_, {});
@@ -227,7 +232,7 @@ Transition SlotPickHost::on_picked(const BrowserEntry& e, std::string_view path)
     if (pending_store_ && b_.names) {
         const auto slot = pending_mounts_ ? app::NameConfig::Slot::Mount
                                           : app::NameConfig::Slot::File;
-        if (!b_.names->save_path(env_.file_stem, slot, pending_slot_, path))
+        if (!b_.names->save_path(env_.file_stem, slot, proto::IoIndex{pending_slot_}, path))
             ++refusals_;
     }
 
@@ -270,7 +275,12 @@ Transition SlotPickHost::on_clear() {
         ++refusals_;
         return Transition{};
     }
-    if (!b_.names->save_path(env_.file_stem, app::NameConfig::Slot::File, pending_slot_, {})) {
+    if (!b_.names->save_path(
+            env_.file_stem,
+            app::NameConfig::Slot::File,
+            proto::IoIndex{pending_slot_},
+            {}
+        )) {
         ++refusals_;
     }
     if (b_.info)

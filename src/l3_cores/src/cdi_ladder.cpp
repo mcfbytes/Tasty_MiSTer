@@ -104,7 +104,7 @@ Ex<bool> CdiLadder::on_step() {
             return true;
 
         case Rung::Eject:
-            if (!order_announce_disc(0))
+            if (!order_announce_disc(proto::FileSize{}))
                 return false;
             rung_ = Rung::Done;
             return true;

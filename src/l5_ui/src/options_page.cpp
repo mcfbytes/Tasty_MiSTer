@@ -43,13 +43,13 @@ proto::FieldValue StatusView::field(BitField b) const noexcept {
 proto::FieldValue cycle_value(
     BitField bits,
     proto::FieldValue current,
-    int dir,
+    CycleDir dir,
     const ISlotLabels* labels
 ) {
     if (!bits.valid())
         return current;
     const std::uint32_t m = bits.mask();
-    const bool forward = dir >= 0;
+    const bool forward = dir == CycleDir::Next;
 
     std::uint32_t raw = (current.v + (forward ? 1u : ~0u)) & m;
     proto::FieldValue v{raw};

@@ -19,7 +19,7 @@ HdOptionsView::HdOptionsView(IOptionsSurface& surface, const Spec& spec) noexcep
 HdOptionsView::~HdOptionsView() = default;
 
 std::unique_ptr<HdListPage> HdOptionsView::make_list_() const {
-    const ItemId key{surface_.model().page().v};
+    const ItemId key = item_submenu(surface_.model().page());
     return std::make_unique<HdListPage>(
         std::make_unique<HdOptionsPlan>(surface_, spec_),
         key,

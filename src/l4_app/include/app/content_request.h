@@ -6,6 +6,7 @@
 
 #include "app/path_text.h"
 #include "app/types.h"
+#include "hal/types.h"
 #include "app/ui_request.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
@@ -17,7 +18,7 @@ struct ContentRequest {
     TASTY_SEAT_EXEMPT(component);
     PathText path{};
     proto::WideIoIndex slot{};
-    std::uint32_t load_addr = 0;
+    hal::FabricAddr load_addr{};
     proto::FileId save{};
     bool whole = false;
     ContentEdge edge = ContentEdge::Content;

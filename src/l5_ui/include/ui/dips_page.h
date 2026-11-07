@@ -67,7 +67,7 @@ private:
     infra::OptRef<app::UiRequestRing> asks_{};
     infra::OptRef<app::LinkTxChannel<SeatTag::Ui>> link_tx_{};
     RowIndex sel_{};
-    std::uint32_t first_row_ = 0;
+    RowIndex first_row_{};
     std::uint32_t refusals_ = 0;
     std::uint32_t published_ = 0;
 };

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 #include "ui/types.h"
@@ -8,11 +9,9 @@
 
 namespace mister::ui {
 
-inline constexpr unsigned kDebounceMs = 20;
-inline constexpr unsigned kRepeatDelayMs = 500;
-inline constexpr unsigned kRepeatRateMs = 50;
-inline constexpr unsigned kMenuLongPressMs = 3000;
-inline constexpr unsigned kUserLongPressMs = 1500;
+inline constexpr std::chrono::milliseconds kDebounce{20};
+inline constexpr std::chrono::milliseconds kRepeatDelay{500};
+inline constexpr std::chrono::milliseconds kRepeatRate{50};
 
 class Navigator {
     TASTY_SEAT_RESIDENT(Ui);

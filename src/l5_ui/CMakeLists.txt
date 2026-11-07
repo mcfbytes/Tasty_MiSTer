@@ -43,6 +43,7 @@ target_link_libraries(mister_ui
   PRIVATE tasty_options)
 
 tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
+  ui/focus_key.h
   ui/bt_ops.h
   ui/bt_pair_policy.h
   ui/browse_source.h

@@ -18,8 +18,7 @@ enum class VideoI2cOutcome : std::uint8_t {
     Failed,
 };
 
-inline constexpr std::uint8_t kVideoModeNever = kVideoModeIndexNever.v;
-inline constexpr std::uint8_t kVideoModeCustom = kVideoModeIndexCustom.v;
+inline constexpr std::uint8_t kI2cBusNeverAcked = 0xFFu;
 
 struct VideoPumpStats {
     std::uint32_t edges = 0;
@@ -42,7 +41,7 @@ struct VideoPumpStats {
 
     VideoI2cOutcome i2c = VideoI2cOutcome::Unwired;
 
-    std::uint8_t i2c_bus = 0xFFu;
+    std::uint8_t i2c_bus = kI2cBusNeverAcked;
     std::uint32_t i2c_writes = 0;
     std::uint32_t i2c_errors = 0;
     std::uint8_t i2c_fail_reg = 0;

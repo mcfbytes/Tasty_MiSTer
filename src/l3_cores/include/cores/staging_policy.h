@@ -25,7 +25,7 @@ struct StagingPolicy {
 
     std::span<const std::string_view> save_name_disc_words{};
 
-    std::uint64_t save_pre_bytes = 0;
+    proto::FileSize save_pre_bytes{};
 
     bool save_pre_on_empty = false;
 

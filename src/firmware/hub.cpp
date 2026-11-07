@@ -33,6 +33,7 @@ DiagSampler::Sources Hub::diag_sources_(const BootParts& plat) noexcept {
         .ini_write_failures = d.ini_write_failures,
         .doorbell = d.doorbell,
         .round_timing = d.round_timing,
+        .round_traces = d.round_traces,
         .frames = d.frames,
         .ui_pages = f.ui_pages,
         .hd = f.hd,

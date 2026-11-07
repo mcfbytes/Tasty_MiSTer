@@ -289,6 +289,8 @@ bool digest_matches(
     return false;
 }
 
+enum class RomConsider : std::int8_t { No, Match, PathTooLong };
+
 int lookup_rom(
     const svc::Vfs& vfs,
     const cores::IMovieCodec& codec,
@@ -307,11 +309,11 @@ int lookup_rom(
 
     bool stopped = false;
 
-    auto consider = [&](const std::string& child) -> int {
+    auto consider = [&](const std::string& child) -> RomConsider {
         ++seen;
         auto src = codec.digest_source(vfs, child);
         if (!src)
-            return 0;
+            return RomConsider::No;
         std::uint64_t prefix_n = src->prefix.size();
         for (const auto& a : src->alt_prefixes)
             prefix_n += a.size();
@@ -319,20 +321,20 @@ int lookup_rom(
 
         if (prefix_n > kRomHashBytes - hashed || span_n > kRomHashBytes - hashed - prefix_n) {
             stopped = true;
-            return 0;
+            return RomConsider::No;
         }
         hashed += prefix_n + span_n;
         const auto d = digest_of(vfs, *src, facts.digest.kind);
         if (!digest_matches(codec, d, facts))
-            return 0;
-        return rom.assign(child) ? 1 : -1;
+            return RomConsider::No;
+        return rom.assign(child) ? RomConsider::Match : RomConsider::PathTooLong;
     };
     std::vector<std::string> subdirs;
 
-    auto walk = [&](const std::string& dir, bool top) -> int {
+    auto walk = [&](const std::string& dir, bool top) -> RomConsider {
         auto listing = vfs.scan(dir, filt);
         if (!listing)
-            return 0;
+            return RomConsider::No;
         for (const svc::DirEntry& e : *listing) {
             if (e.name == "." || e.name == "..")
                 continue;
@@ -343,20 +345,20 @@ int lookup_rom(
             }
             if (seen >= kRomNameCap) {
                 stopped = true;
-                return 0;
+                return RomConsider::No;
             }
-            const int r = consider(rooted(vfs, dir + "/" + e.name));
-            if (r != 0 || stopped)
+            const RomConsider r = consider(rooted(vfs, dir + "/" + e.name));
+            if (r != RomConsider::No || stopped)
                 return r;
         }
-        return 0;
+        return RomConsider::No;
     };
-    int r = walk(rel, true);
-    for (std::size_t i = 0; r == 0 && !stopped && i < subdirs.size(); ++i)
+    RomConsider r = walk(rel, true);
+    for (std::size_t i = 0; r == RomConsider::No && !stopped && i < subdirs.size(); ++i)
         r = walk(subdirs[i], false);
-    if (r == 1)
+    if (r == RomConsider::Match)
         return 0;
-    if (r < 0) {
+    if (r == RomConsider::PathTooLong) {
         std::fprintf(stderr, "tasty: the matching ROM path is too long; pass --rom\n");
         return 1;
     }
@@ -485,7 +487,7 @@ void tasty_set_home_image(const char* exe, const char* arg) noexcept {
         std::snprintf(g_home_menu, sizeof g_home_menu, "%s", arg);
 }
 
-[[nodiscard]] Ex<int> tasty_lock_owner() noexcept {
+[[nodiscard]] Ex<UniqueFd> tasty_lock_owner() noexcept {
     const int fd = ::open(
         g_lock_path,
         O_RDWR | O_CREAT | O_CLOEXEC,
@@ -498,7 +500,7 @@ void tasty_set_home_image(const char* exe, const char* arg) noexcept {
         ::close(fd);
         return std::unexpected(Error{Errc::busy, ERR_SITE(), static_cast<std::uint32_t>(e)});
     }
-    return fd;
+    return UniqueFd{fd};
 }
 
 void tasty_clear_status() noexcept {
@@ -506,14 +508,14 @@ void tasty_clear_status() noexcept {
     (void)::unlink(g_status_tmp_path);
 }
 
-void tasty_unlock(int fd) noexcept {
-    if (fd < 0)
+void tasty_unlock(UniqueFd& fd) noexcept {
+    if (!fd.valid())
         return;
     (void)::unlink(g_pid_path);
     tasty_clear_status();
     (void)::unlink(g_lock_path);
-    (void)::flock(fd, LOCK_UN);
-    ::close(fd);
+    (void)::flock(fd.get(), LOCK_UN);
+    fd.reset();
 }
 
 ReturnHome::ReturnHome() noexcept {
@@ -523,7 +525,7 @@ ReturnHome::ReturnHome() noexcept {
 }
 
 ReturnHome::~ReturnHome() noexcept {
-    if (lock_fd >= 0)
+    if (lock_fd.valid())
         tasty_unlock(lock_fd);
     if (armed)
         (void)tasty_launch_home();
@@ -1037,23 +1039,29 @@ int tasty_prepare_play(const svc::Vfs& vfs, TastyArgs& a) {
         std::fprintf(stderr, "tasty: cannot read movie %s\n", a.movie.c_str());
         return 1;
     }
-    const std::int32_t lead = a.lead.value_or(sys->codec->default_lead(*facts));
+    const app::MovieFrame lead = a.lead.value_or(app::MovieFrame{sys->codec->default_lead(*facts)});
     const auto range = sys->codec->lead_range();
     constexpr auto kArmMin = static_cast<std::int32_t>(std::numeric_limits<std::int16_t>::min());
     constexpr auto kArmMax = static_cast<std::int32_t>(std::numeric_limits<std::int16_t>::max());
-    if (lead < range.min || lead > range.max || lead < kArmMin || lead > kArmMax) {
+    if (lead < app::MovieFrame{range.min}
+        || lead > app::MovieFrame{range.max}
+        || lead < app::MovieFrame{kArmMin}
+        || lead > app::MovieFrame{kArmMax}) {
         std::fprintf(
             stderr,
-            "tasty: --lead %d is outside %d..%d for this movie; "
+            "tasty: --lead %s is outside %d..%d for this movie; "
             "pass a lead inside that range\n",
-            static_cast<int>(lead),
+            lead.text().c_str(),
             static_cast<int>(range.min),
             static_cast<int>(range.max)
         );
         return 1;
     }
     if (a.phase_us) {
-        if (!app::ReplayFeeder::phase_fits(*a.phase_us, sys->codec->raster(*facts).period_ns)) {
+        if (!app::ReplayFeeder::phase_fits(
+                *a.phase_us,
+                std::chrono::nanoseconds{sys->codec->raster(*facts).period_ns}
+            )) {
             std::fprintf(stderr, "tasty: %s\n", tasty_refusal_sentence("phase"));
             return 1;
         }
@@ -1232,31 +1240,29 @@ std::optional<app::PathText> tasty_prepare_record(
 
 void warn_writeback_cpumask(
     const os::WritebackProbe& wb,
-    int rt_cpu,
+    os::CpuId rt_cpu,
     const char* prog,
     std::FILE* out
 ) noexcept {
     if (!wb.fs_magic || !os::is_network_fs(*wb.fs_magic))
         return;
     const auto cpus = os::effective_writeback_cpus(wb);
-    if (!cpus || rt_cpu < 0 || rt_cpu >= std::numeric_limits<std::uint64_t>::digits)
+    if (!cpus)
         return;
-    const std::uint64_t rt_bit = std::uint64_t{1} << rt_cpu;
-    if ((*cpus & rt_bit) == 0)
+    const os::CpuSet rt_only = rt_cpu.as_set();
+    if (cpus->intersect(rt_only).empty())
         return;
-    std::uint64_t fix = *wb.cpumask & ~rt_bit;
-    constexpr std::uint64_t kCpu0 = std::uint64_t{1} << 0;
-    constexpr std::uint64_t kCpu1 = std::uint64_t{1} << 1;
-    if (fix == 0)
-        fix = rt_cpu == 0 ? kCpu1 : kCpu0;
+    os::CpuSet fix = wb.cpumask->without(rt_only);
+    if (fix.empty())
+        fix = rt_cpu.housekeeping_set();
     std::fprintf(
         out,
-        "%s: warning: writeback cpumask=%llx: flushing to a network share may run on "
-        "real-time CPU %d and stall real-time I/O; fix: echo %llx > %s\n",
+        "%s: warning: writeback cpumask=%s: flushing to a network share may run on "
+        "real-time CPU %s and stall real-time I/O; fix: echo %s > %s\n",
         prog,
-        static_cast<unsigned long long>(*wb.cpumask),
-        rt_cpu,
-        static_cast<unsigned long long>(fix),
+        wb.cpumask->text().c_str(),
+        rt_cpu.text().c_str(),
+        fix.text().c_str(),
         os::kWritebackCpumaskPath
     );
 }
@@ -1275,7 +1281,7 @@ std::string_view tasty_record_dir(std::string_view record) noexcept {
 
 void tasty_warn_record_writeback(
     std::string_view record,
-    int rt_cpu,
+    os::CpuId rt_cpu,
     const char* cpumask_path,
     const char* unbound_path,
     std::FILE* out
@@ -1284,14 +1290,14 @@ void tasty_warn_record_writeback(
     if (!dir.assign(tasty_record_dir(record)))
         return;
     warn_writeback_cpumask(
-        os::read_writeback_probe(dir.c_str(), cpumask_path, unbound_path),
+        os::read_writeback_probe(os::WritebackPaths{dir.c_str(), cpumask_path, unbound_path}),
         rt_cpu,
         "tasty",
         out
     );
 }
 
-void tasty_warn_record_writeback(std::string_view record, int rt_cpu) noexcept {
+void tasty_warn_record_writeback(std::string_view record, os::CpuId rt_cpu) noexcept {
     tasty_warn_record_writeback(
         record,
         rt_cpu,

@@ -42,6 +42,8 @@ class UiWriteLane;
 
 namespace mister::fw {
 
+inline constexpr std::size_t kCompanionArg = 2;
+
 struct BootParts;
 class RecorderBlock;
 class ReplayBlock;

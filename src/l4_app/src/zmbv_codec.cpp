@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <limits>
 #include <new>
 
 #include "infra/byte_view.h"
@@ -17,6 +18,34 @@ constexpr std::size_t kAlign = 64;
 
 constexpr std::size_t up(std::size_t n) noexcept {
     return (n + kAlign - 1) / kAlign * kAlign;
+}
+
+struct MvBlocks {
+    std::size_t v = 0;
+
+    [[nodiscard]] static constexpr MvBlocks of_grid(int cols, int rows) noexcept {
+        return MvBlocks{static_cast<std::size_t>(cols) * static_cast<std::size_t>(rows)};
+    }
+
+    [[nodiscard]] constexpr std::size_t table_bytes() const noexcept {
+        return v * ZmbvLayout::kMvBytesPerBlock;
+    }
+
+    [[nodiscard]] constexpr std::size_t padded_table_bytes() const noexcept {
+        return (table_bytes() + ZmbvLayout::kMvAlignMask) & ~ZmbvLayout::kMvAlignMask;
+    }
+};
+
+constexpr std::size_t deflate_bound(std::size_t n) noexcept {
+    constexpr std::size_t kStoredBlockBytes = 8;
+    constexpr std::size_t kHuffmanBlockBytes = 64;
+    constexpr std::size_t kAllocFloor = 64;
+    constexpr std::size_t kFlushMarker = 16;
+    return n
+        + (n + kStoredBlockBytes - 1) / kStoredBlockBytes
+        + (n + kHuffmanBlockBytes - 1) / kHuffmanBlockBytes
+        + kAllocFloor
+        + kFlushMarker;
 }
 
 constexpr int kMeRung[] = {1, 2, 4, 8};
@@ -64,10 +93,6 @@ ZmbvCodec::~ZmbvCodec() {
 }
 
 Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
-    constexpr std::size_t kBgr0Bytes = 4;
-    constexpr std::size_t kMvBytesPerBlock = 2;
-    constexpr std::size_t kMvAlignMask = 3;
-    constexpr std::size_t kKeyHeaderBytes = 7;
     constexpr std::size_t kStripePlanes = 2;
     constexpr std::size_t kDeflateStreamSlack = 8;
     TASTY_SEAT_BODY(ZmbvCodec);
@@ -76,14 +101,12 @@ Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     bx_ = (static_cast<int>(w) + kBlock - 1) / kBlock;
     by_ = (static_cast<int>(h) + kBlock - 1) / kBlock;
-    const std::size_t pic = std::size_t{w} * h * kBgr0Bytes;
-    const std::size_t mv = (std::size_t(bx_) * static_cast<std::size_t>(by_) * kMvBytesPerBlock
-                            + kMvAlignMask)
-        & ~kMvAlignMask;
-    const std::size_t hist_n = std::size_t(bx_) * static_cast<std::size_t>(by_) * kMvBytesPerBlock;
+    const std::size_t pic = std::size_t{w} * h * ZmbvLayout::kPixelBytes;
+    const MvBlocks blocks = MvBlocks::of_grid(bx_, by_);
+    const std::size_t mv = blocks.padded_table_bytes();
+    const std::size_t hist_n = blocks.table_bytes();
     const std::size_t worst = mv + pic;
-
-    const std::size_t bound = worst + ((worst + 7) >> 3) + ((worst + 63) >> 6) + 64u + 16u;
+    const std::size_t bound = deflate_bound(worst);
     const std::size_t total = up(pic) * kStripePlanes
         + up(worst)
         + up(bound + kDeflateStreamSlack)
@@ -108,7 +131,7 @@ Ex<void> ZmbvCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     std::fill(hist_.begin(), hist_.end(), std::byte{0});
     width_ = w;
     height_ = h;
-    max_payload_ = kKeyHeaderBytes + bound;
+    max_payload_ = ZmbvLayout::kKeyHeaderBytes + bound;
     z_ = z_stream{};
     if (::deflateInit(&z_, kLevel) != Z_OK) {
         end();
@@ -162,15 +185,14 @@ std::size_t ZmbvCodec::deflate_sync_(
 }
 
 void ZmbvCodec::to_bgr0_(const std::byte* rgb, std::size_t line) noexcept {
-    constexpr std::size_t kRgbBytes = 3;
-    constexpr std::size_t kBgr0Bytes = 4;
+    constexpr std::size_t kBgr0Bytes = ZmbvLayout::kPixelBytes;
     TASTY_SEAT_BODY(ZmbvCodec);
     auto* dst = infra::byte_cast<std::uint8_t>(cur_).data();
     for (std::uint16_t y = 0; y < height_; ++y) {
         const auto* s = infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(
                                                                  rgb + std::size_t{y} * line,
                                                                  static_cast<std::size_t>(width_)
-                                                                     * kRgbBytes
+                                                                     * kRgbPixelBytes
                                                              ))
                             .data();
         for (std::uint16_t x = 0; x < width_; ++x) {
@@ -178,25 +200,25 @@ void ZmbvCodec::to_bgr0_(const std::byte* rgb, std::size_t line) noexcept {
             dst[1] = s[1];
             dst[2] = s[0];
             dst[3] = 0;
-            s += kRgbBytes;
+            s += kRgbPixelBytes;
             dst += kBgr0Bytes;
         }
     }
 }
 
 std::size_t ZmbvCodec::emit_key_(const std::byte* bgr0, std::span<std::byte> out) noexcept {
-    constexpr std::size_t kBgr0Bytes = 4;
-    constexpr std::size_t kKeyHeaderBytes = 7;
+    constexpr std::size_t kBgr0Bytes = ZmbvLayout::kPixelBytes;
+    constexpr std::size_t kKeyHeaderBytes = ZmbvLayout::kKeyHeaderBytes;
     TASTY_SEAT_BODY(ZmbvCodec);
     if (out.size() < max_payload_ || !z_ready_)
         return 0;
     if (::deflateReset(&z_) != Z_OK)
         return 0;
-    out[0] = std::byte{1};
-    out[1] = std::byte{0};
-    out[2] = std::byte{1};
-    out[3] = std::byte{1};
-    out[4] = std::byte{8};
+    out[0] = std::byte{ZmbvLayout::kKeyframeFlag};
+    out[1] = std::byte{ZmbvLayout::kVersionMajor};
+    out[2] = std::byte{ZmbvLayout::kVersionMinor};
+    out[3] = std::byte{ZmbvLayout::kCompressionZlib};
+    out[4] = std::byte{ZmbvLayout::kFormatTopDownBgr0};
     out[5] = std::byte{static_cast<unsigned char>(kBlock)};
     out[6] = std::byte{static_cast<unsigned char>(kBlock)};
     const std::size_t pic = std::size_t{width_} * height_ * kBgr0Bytes;
@@ -210,7 +232,7 @@ std::size_t ZmbvCodec::emit_inter_(
     std::size_t n,
     std::span<std::byte> out
 ) noexcept {
-    constexpr std::size_t kInterHeaderBytes = 1;
+    constexpr std::size_t kInterHeaderBytes = ZmbvLayout::kInterHeaderBytes;
     TASTY_SEAT_BODY(ZmbvCodec);
     if (out.size() < max_payload_ || !z_ready_ || n == 0)
         return 0;
@@ -225,17 +247,11 @@ std::size_t ZmbvCodec::emit_inter_(
 }
 
 std::size_t ZmbvCodec::build_inter_() noexcept {
-    constexpr std::size_t kBgr0Bytes = 4;
-    constexpr int kBgr0Lanes = 4;
-    constexpr std::size_t kMvBytesPerBlock = 2;
-    constexpr std::size_t kMvAlignMask = 3;
-    constexpr std::uint32_t kSadNoStop = 0xFFFF'FFFFu;
+    constexpr std::size_t kBgr0Bytes = ZmbvLayout::kPixelBytes;
+    constexpr int kBgr0Lanes = static_cast<int>(ZmbvLayout::kPixelBytes);
+    constexpr std::uint32_t kSadNoStop = std::numeric_limits<std::uint32_t>::max();
     TASTY_SEAT_BODY(ZmbvCodec);
-    const std::size_t mv_bytes = (std::size_t(bx_)
-                                      * static_cast<std::size_t>(by_)
-                                      * kMvBytesPerBlock
-                                  + kMvAlignMask)
-        & ~kMvAlignMask;
+    const std::size_t mv_bytes = MvBlocks::of_grid(bx_, by_).padded_table_bytes();
     std::memset(plain_.data(), 0, mv_bytes);
     std::byte* mv = plain_.data();
     auto* const plain_bytes = infra::byte_cast<std::uint8_t>(plain_).data();
@@ -360,10 +376,9 @@ std::span<const std::byte> ZmbvCodec::encode(
     bool key,
     std::span<std::byte> out
 ) noexcept {
-    constexpr std::size_t kBgr0Bytes = 4;
+    constexpr std::size_t kBgr0Bytes = ZmbvLayout::kPixelBytes;
     TASTY_SEAT_BODY(ZmbvCodec);
-    if (!open()
-        || !rgb.covers(RowBytes{std::size_t{width_} * kRgbPixelBytes}, PictureRows{height_}))
+    if (!open() || !rgb.covers(rgb_row_of(width_), PictureRows{height_}))
         return {};
     sad_calls_ = 0;
     cut_frame_ = false;

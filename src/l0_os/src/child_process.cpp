@@ -19,7 +19,7 @@ int open_pidfd(::pid_t pid) noexcept {
 }
 
 std::unexpected<Error> os_error(infra::ErrorSite site, int e) {
-    return std::unexpected(Error{Errc::os, site, static_cast<std::uint32_t>(e)});
+    return std::unexpected(infra::errno_error(Errc::os, site, e));
 }
 
 std::vector<char*> terminated(std::span<const char* const> v) {

@@ -13,6 +13,8 @@
 #include "svc/device_facts.h"
 #include "svc/input_service.h"
 #include "svc/joy_plan.h"
+#include "svc/packed_keys.h"
+#include "svc/types.h"
 
 namespace mister::svc::rules {
 
@@ -31,6 +33,12 @@ inline constexpr Pid kAllMicePid{0xFFFF};
 struct SpinnerPolicy {
     Vid vid{};
     Pid pid{};
+
+    [[nodiscard]] constexpr bool claims(Vid v, Pid p) const noexcept {
+        const bool all_mice = vid == kAllMiceVid && pid == kAllMicePid;
+        const bool exact = vid != kAnyVid && pid != kAnyPid && v == vid && p == pid;
+        return all_mice || exact;
+    }
 };
 
 struct UniquePolicy {
@@ -40,7 +48,14 @@ struct UniquePolicy {
     std::span<const std::uint32_t> vidpids{};
 };
 
-std::uint32_t str_hash(std::string_view s, std::uint32_t seed = 5381u);
+inline constexpr std::uint32_t kDjb2Seed = 5381u;
+inline constexpr std::uint32_t kDjb2Step = 33u;
+
+inline constexpr std::size_t kNameSumChars = 128;
+
+inline constexpr std::string_view kSpinnerSuffix = "_sp";
+
+std::uint32_t str_hash(std::string_view s, std::uint32_t seed = kDjb2Seed);
 
 void derive_idstr(DeviceFacts& slot);
 
@@ -79,7 +94,7 @@ MapPaths map_paths(std::string_view name, MapKind kind);
 bool is_diagonal(AnalogXy in);
 
 struct DeadzoneParams {
-    std::int32_t deadzone = 0;
+    Deadzone deadzone{};
     float max_cardinal = 0.0f;
     float max_range = 0.0f;
     std::int32_t min_out = -127;
@@ -87,7 +102,10 @@ struct DeadzoneParams {
 
 AnalogXy apply_deadzone(AnalogXy in, const DeadzoneParams& p);
 
-std::uint8_t deadzone_class(QuirkId quirk);
+inline constexpr Deadzone kDeadzoneNone{0};
+inline constexpr Deadzone kDeadzoneDualShock{10};
+inline constexpr Deadzone kDeadzoneDefault{2};
+Deadzone deadzone_class(QuirkId quirk);
 
 bool deadzone_uid_matches(
     std::string_view uid,
@@ -98,7 +116,7 @@ bool deadzone_uid_matches(
     std::string_view merge_id
 );
 
-std::uint8_t deadzone_for(
+Deadzone deadzone_for(
     QuirkId quirk,
     Vid vid,
     Pid pid,
@@ -111,16 +129,13 @@ std::uint8_t deadzone_for(
 ButtonMap default_sys_map();
 
 ButtonMap derive_joy_map(
-    std::span<const std::uint32_t> sys_map,
+    std::span<const PackedKeys> sys_map,
     bool axis_emu,
     const JoyPlan& plan = {}
 );
 
-std::array<std::uint32_t, 32> derive_menu_map(
-    std::span<const std::uint32_t> sys_map,
-    bool axis_keys
-);
+JoyWords derive_menu_map(std::span<const PackedKeys> sys_map, bool axis_keys);
 
-JoyMask mask_for(std::span<const std::uint32_t> joy_map, std::span<const std::uint64_t> down_bits);
+JoyMask mask_for(std::span<const PackedKeys> joy_map, const KeyDownSet<kDownWords>& down);
 
 }

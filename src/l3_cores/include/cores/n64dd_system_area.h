@@ -5,6 +5,7 @@
 #include <bitset>
 #include <cstdint>
 
+#include "cores/n64dd_disk_type.h"
 #include "cores/n64dd_geometry.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
@@ -18,7 +19,7 @@ struct SystemArea {
     std::array<std::uint8_t, kSystemSectorBytes> sys{};
     std::bitset<kLbaCount> bad_lba{};
     FixedStr<5, StrFit::Reject> disk_id{};
-    std::uint8_t disk_type = 0;
+    DiskType disk_type{};
     bool development = false;
     bool cart_expansion = false;
     Region region = Region::Unknown;

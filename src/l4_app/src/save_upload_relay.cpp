@@ -126,7 +126,7 @@ void SaveUploadRelay::start_() noexcept {
     const Ask::Start s{
         .size = rt_.order.image.size,
         .index = rt_.order.image.index.v,
-        .word_bytes = static_cast<std::uint8_t>(rt_.width == hal::Width::Word ? 2 : 1)
+        .word_bytes = cores::WireWordBytes::of(rt_.width)
     };
     l->ask = infra::make<Ask>(s, head_());
     l->act = {};

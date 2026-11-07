@@ -68,8 +68,8 @@ bool NeoGeoCdLadder::walk_answered_() {
             walk_ordered_ = true;
             return false;
         }
-        const std::int64_t now = now_ns();
-        if (refused_since_ < 0)
+        const std::chrono::nanoseconds now = now_ns();
+        if (refused_since_ < std::chrono::nanoseconds::zero())
             refused_since_ = now;
         return now - refused_since_ >= kDiscMountBoundNs;
     }

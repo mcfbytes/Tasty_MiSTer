@@ -2,10 +2,11 @@
 #include "ui/cheats_page.h"
 
 #include <cstdio>
+#include <span>
 
 #include "app/cheat_store.h"
 #include "infra/ascii.h"
-#include "app/hd_window.h"
+#include "ui/page_window.h"
 #include "app/page_description.h"
 #include "ui/draw_classic.h"
 #include "ui/menu_model.h"
@@ -55,19 +56,19 @@ std::string cheat_row_text(const app::CheatRow& row) {
     s.push_back(' ');
     s.append(row.name);
 
-    constexpr std::size_t kRowWidth = 28;
     if (s.size() > kGgSuffix.size() && ends_with_gg(s))
         s.resize(s.size() - kGgSuffix.size());
-    if (s.size() > kRowWidth) {
-        s.resize(kRowWidth);
+    if (s.size() > kClassicRowColumns) {
+        s.resize(kClassicRowColumns);
         s.push_back(kMoreGlyph);
     }
     return s;
 }
 
-std::string cheats_title_text(std::size_t loaded) {
+std::string CheatsPage::title_text() const {
+    TASTY_SEAT_BODY(CheatsPage);
     char b[32];
-    std::snprintf(b, sizeof(b), "Cheats (%u)", static_cast<unsigned>(loaded));
+    std::snprintf(b, sizeof(b), "Cheats (%s)", store_->loaded().text().c_str());
     return b;
 }
 
@@ -105,64 +106,58 @@ Transition CheatsPage::on_tick(PageContext&) {
 
 bool CheatsPage::walk(PageWalk& out) const {
     TASTY_SEAT_BODY(CheatsPage);
-    (void)out.page.title.assign(cheats_title_text(store_->loaded()));
+    (void)out.page.title.assign(title_text());
     out.title_arrow = OsdRenderer::kArrowNone;
     out.count = 0;
 
-    const std::uint32_t height = osd_height().v;
-    const std::uint32_t first = view_.viewport().first.v;
-    const std::uint32_t sel = view_.viewport().selected.v;
-    const auto count = static_cast<std::uint32_t>(rows_.size());
-    const std::uint16_t total = static_cast<std::uint16_t>(count);
-    const app::HdWindow win = app::hd_window(
-        static_cast<std::uint16_t>(sel),
-        total,
-        out.page.first
-    );
-    const std::uint32_t win_first = win.first;
-    const std::uint32_t win_last = win_first + win.count;
-    out.page.first = win.first;
-    out.page.total = total;
+    const RowCount height = osd_height();
+    const RowIndex first = view_.viewport().first;
+    const RowIndex sel = view_.viewport().selected;
+    const RowSpan<const app::CheatRow> cheat_rows{std::span<const app::CheatRow>{rows_}};
+    const RowCount count = RowCount::of(rows_.size());
+    const RowIndex end = row_after(count);
+    const app::HdWindow win = window_page(out.page, sel, count);
+    const RowRange window = rows(win.first, win.count);
+    const RowRange viewport = rows(first, height);
 
-    const auto classic_at = [&](std::uint32_t r) {
-        const std::uint32_t k = first + r;
+    const auto classic_at = [&](RowCount r) {
+        const RowIndex k = first + r;
         std::string s;
         std::optional<Glyph> leftchar;
-        if (k < count) {
-            s = cheat_row_text(rows_[k]);
-            if (r == 0 && k != 0)
+        if (k < end) {
+            s = cheat_row_text(cheat_rows[k]);
+            if (r.empty() && k != RowIndex{})
                 leftchar = Glyph::ArrowUp;
-            if (r + 1 == height && k + 1 < count) {
+            if (r + kOneRow == height && k + kOneRow < end) {
                 leftchar = Glyph::ArrowDown;
             }
         }
         return classic_row(
-            OsdRow::of(r),
+            osd_row_at(r),
             s,
-            k < count && k == sel,
-            false,
-            leftchar,
-            OsdRenderer::kArrowNone
+            {.inverted = k < end && k == sel,
+             .stippled = false,
+             .leftchar = leftchar,
+             .arrow = OsdRenderer::kArrowNone}
         );
     };
 
-    for (std::uint8_t i = 0; i < win.count; ++i) {
-        const std::uint32_t at = win_first + i;
+    for (const RowIndex at : window) {
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
-        (void)r.hd.label.assign(rows_[at].name);
-        (void)r.hd.value.assign(rows_[at].enabled ? "On" : "Off");
+        (void)r.hd.label.assign(cheat_rows[at].name);
+        (void)r.hd.value.assign(cheat_rows[at].enabled ? "On" : "Off");
         r.hd.kind = app::PageDescription::RowKind::Value;
         r.hd.steps = false;
         r.hd.enabled = true;
         r.hd.selected = at == sel;
-        if (at < first || at >= first + height)
+        if (!viewport.contains(at))
             continue;
         r.classic = classic_at(at - first);
     }
-    for (std::uint32_t r = 0; r < height; ++r) {
-        const std::uint32_t k = first + r;
-        if (k < count && k >= win_first && k < win_last)
+    for (const RowIndex v : rows(height)) {
+        const RowCount r = v.before();
+        if (first + r < end && window.contains(first + r))
             continue;
         out.rows[out.count++].classic = classic_at(r);
     }

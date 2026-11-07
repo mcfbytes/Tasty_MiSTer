@@ -22,9 +22,7 @@ void copy_cell_text(char (&dst)[N], std::string_view src) noexcept {
 
 void pack_cheat_catalog(const cores::ICheatRecords& records, CheatCatalog& out) noexcept {
     out = CheatCatalog{};
-    const cores::CheatGeometry geom = records.cheat_geometry();
-    out.unit = geom.unit;
-    out.max_active = geom.max_active;
+    out.geometry = records.cheat_geometry();
     const std::size_t have = records.cheat_count();
     for (std::size_t i = 0; i < have; ++i) {
         const std::span<const std::uint8_t> bytes = records.cheat_bytes(i);

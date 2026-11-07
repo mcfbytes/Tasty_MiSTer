@@ -36,7 +36,7 @@ void MegaDriveCore::rearm_feed_() {
     ++feed_arms_;
     ack_pending_ = false;
     paused_ = false;
-    current_track_ = 0;
+    current_track_.reset();
     rearm_ticks_ = 0;
 
     (void)pending_feed_.assign(path_.view());
@@ -67,7 +67,7 @@ Ex<proto::SessionParams> MegaDriveCore::stream_opening(IoIndex) {
 
 void MegaDriveCore::stream_closed(const StreamLoadEnd& end) noexcept {
     TASTY_SEAT_BODY(MegaDriveCore);
-    last_index_ = static_cast<std::uint16_t>(end.index.v);
+    last_index_ = end.index;
     ++transfers_;
     tx_.closed(end);
     if (!end.ok)
@@ -95,15 +95,22 @@ bool MegaDriveCore::read_status_(Status& out) noexcept {
         return false;
     }
     ++status_reads_;
-    out.track = static_cast<std::uint8_t>((w0->v >> 8) & 0xFFu);
-    out.flags = static_cast<std::uint8_t>(w0->v & 0xFFu);
-    out.fade = static_cast<std::uint8_t>((w1->v >> 8) & 0xFFu);
+    out.track = static_cast<std::uint8_t>((w0->v >> 8));
+    out.flags = md::CmdFlags{static_cast<std::uint8_t>(w0->v)};
+    out.fade = static_cast<std::uint8_t>((w1->v >> 8));
 
-    out.volume = static_cast<std::uint8_t>(w1->v & 0xFFu);
+    out.volume = static_cast<std::uint8_t>(w1->v);
     return true;
 }
 
-void MegaDriveCore::send_ack_(std::uint8_t track, bool playing) noexcept {
+namespace {
+
+std::uint8_t wire_track(std::optional<svc::TrackNumber> track) noexcept {
+    return track ? track->v : 0u;
+}
+}
+
+void MegaDriveCore::send_ack_(std::optional<svc::TrackNumber> track, bool playing) noexcept {
     hal::ISpiTransport& link = host().link;
     hal::Selected cs(link, hal::ChipSelect::Io);
     if (auto r = link.transfer(hal::SpiWord{kCmdAck}); !r) {
@@ -111,7 +118,7 @@ void MegaDriveCore::send_ack_(std::uint8_t track, bool playing) noexcept {
         return;
     }
     const std::uint16_t word = static_cast<std::uint16_t>(
-        (static_cast<unsigned>(track) << 8) | (playing ? 1u : 0u)
+        (static_cast<unsigned>(wire_track(track)) << 8) | (playing ? 1u : 0u)
     );
     if (auto r = link.transfer(hal::SpiWord{word}); !r) {
         ++wire_faults_;
@@ -151,7 +158,7 @@ bool MegaDriveCore::settle_ack_(IPcmFeed& fd) noexcept {
     const PcmFeedState s = fd.state();
     if (s.served == served_before_ || !s.primed)
         return false;
-    current_track_ = s.playing ? ack_track_ : 0;
+    current_track_ = s.playing ? std::optional<svc::TrackNumber>{ack_track_} : std::nullopt;
     ack_pending_ = false;
     send_ack_(current_track_, s.playing);
     return true;
@@ -159,11 +166,11 @@ bool MegaDriveCore::settle_ack_(IPcmFeed& fd) noexcept {
 
 void MegaDriveCore::answer_no_play_() noexcept {
     ack_pending_ = false;
-    current_track_ = 0;
-    send_ack_(0, false);
+    current_track_.reset();
+    send_ack_(std::nullopt, false);
 }
 
-void MegaDriveCore::arm_play_(IPcmFeed& fd, std::uint8_t track, bool loop) noexcept {
+void MegaDriveCore::arm_play_(IPcmFeed& fd, svc::TrackNumber track, bool loop) noexcept {
     paused_ = false;
 
     if (feed_rearm_pending_ || !fd.can_serve()) {
@@ -176,7 +183,7 @@ void MegaDriveCore::arm_play_(IPcmFeed& fd, std::uint8_t track, bool loop) noexc
     ack_track_ = track;
     ack_ticks_ = 0;
     ack_pending_ = true;
-    if (auto r = fd.play(svc::TrackNumber{track}, loop); !r) {
+    if (auto r = fd.play(track, loop); !r) {
         ++play_refusals_;
         answer_no_play_();
     }
@@ -203,12 +210,12 @@ void MegaDriveCore::service_pcm_tick() noexcept {
         }
         return;
     }
-    if (st.flags == 0) {
+    if (st.flags.none()) {
         pump_(fd);
         return;
     }
 
-    if ((st.flags & kFlagPlay) != 0) {
+    if (st.flags.has(md::CmdFlags::Play)) {
         if (st.track == 0) {
 
             send_ack_(current_track_, fd.state().playing);
@@ -217,17 +224,17 @@ void MegaDriveCore::service_pcm_tick() noexcept {
 
         if (feed_rearm_pending_ && ++rearm_ticks_ < kAckTicks)
             return;
-        arm_play_(fd, st.track, (st.flags & kFlagLoop) != 0);
+        arm_play_(fd, svc::TrackNumber{st.track}, st.flags.has(md::CmdFlags::Loop));
         return;
     }
-    if ((st.flags & kFlagStop) != 0) {
+    if (st.flags.has(md::CmdFlags::Stop)) {
 
         if (st.fade == 0) {
             paused_ = true;
             if (auto r = fd.stop(); !r)
                 paused_ = false;
         }
-    } else if ((st.flags & kFlagResume) != 0) {
+    } else if (st.flags.has(md::CmdFlags::Resume)) {
         paused_ = false;
         (void)fd.resume();
     }

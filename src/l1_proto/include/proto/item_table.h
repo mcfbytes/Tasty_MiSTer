@@ -71,8 +71,8 @@ struct Item {
     SubmenuNo page{};
     SubmenuNo declared_page{};
     BitField bits{};
-    std::uint8_t digit = 0;
-    bool has_digit = false;
+
+    std::optional<FileSlotDigit> digit{};
     bool opensave = false;
     bool store_name = false;
     std::uint8_t cond_count = 0;
@@ -89,7 +89,6 @@ static_assert(std::is_trivially_copyable_v<Item>);
 [[nodiscard]] Visibility evaluate(const Item& it, OsdMask hdmask) noexcept;
 
 class ItemTable {
-    TASTY_SEAT_EXEMPT(const_shared);
 
 public:
     [[nodiscard]] static Ex<ItemTable> parse(std::string_view raw);

@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include "infra/error.h"
+#include "infra/parse_int.h"
 #include "infra/unique_fd.h"
 #include "os/small_file.h"
 
@@ -42,18 +43,14 @@ std::optional<os::KernelIrq> line_number(std::string_view line) noexcept {
     std::size_t i = 0;
     while (i < line.size() && is_blank(line[i]))
         ++i;
-    std::uint64_t n = 0;
-    std::size_t digits = 0;
-    while (i < line.size() && line[i] >= '0' && line[i] <= '9') {
-        n = n * 10u + static_cast<std::uint64_t>(line[i] - '0');
-        if (n > 0xFFFF'FFFFu)
-            return std::nullopt;
-        ++i;
-        ++digits;
-    }
-    if (digits == 0 || i >= line.size() || line[i] != ':')
+    const std::size_t colon = line.find(':', i);
+    if (colon == std::string_view::npos || colon == i)
         return std::nullopt;
-    return os::KernelIrq{static_cast<std::uint32_t>(n)};
+
+    const auto n = infra::parse_int<std::uint32_t>(line.substr(i, colon - i));
+    if (!n)
+        return std::nullopt;
+    return os::KernelIrq{*n};
 }
 
 bool names_action(std::string_view tail, std::string_view action) noexcept {
@@ -70,22 +67,10 @@ bool names_action(std::string_view tail, std::string_view action) noexcept {
 }
 
 std::optional<std::uint32_t> hex_group(std::string_view g) noexcept {
+
     if (g.empty() || g.size() > 8)
         return std::nullopt;
-    std::uint32_t v = 0;
-    for (const char c : g) {
-        unsigned d = 0;
-        if (c >= '0' && c <= '9')
-            d = static_cast<unsigned>(c - '0');
-        else if (c >= 'a' && c <= 'f')
-            d = static_cast<unsigned>(c - 'a') + 10u;
-        else if (c >= 'A' && c <= 'F')
-            d = static_cast<unsigned>(c - 'A') + 10u;
-        else
-            return std::nullopt;
-        v = (v << 4) | d;
-    }
-    return v;
+    return infra::parse_int<std::uint32_t>(g, 16);
 }
 
 struct IrqPath {

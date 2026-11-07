@@ -3,13 +3,14 @@
 
 #include <cstdint>
 
+#include "hal/types.h"
 #include "proto/types.h"
 
 namespace mister::cores {
 
 struct StageWindow {
     proto::WideIoIndex index{};
-    std::uint32_t address = 0;
+    hal::FabricAddr address{};
     std::uint32_t bytes = 0;
 };
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -44,6 +45,9 @@ public:
 
     static constexpr std::uint32_t kSegmentFrames = kChunksPerSegment;
 
+    static constexpr std::uint8_t kFullScale = 1;
+    static constexpr std::uint8_t kHalfScale = 2;
+
     static constexpr std::uint8_t kSustainWindows = 3;
 
     static constexpr std::uint8_t kRecoverDoublings = 3;
@@ -70,7 +74,7 @@ public:
     [[nodiscard]] bool chunk(
         const RawFrameSlot& s,
         bool real,
-        std::uint64_t core_frame,
+        WideCoreFrame core_frame,
         MovieFrame movie_frame
     ) noexcept;
 
@@ -113,8 +117,8 @@ private:
     void recover_(std::size_t queued, std::size_t depth, std::int64_t now) noexcept;
     [[nodiscard]] std::int64_t frame_budget_ns_(std::uint32_t vtime) const noexcept;
     [[nodiscard]] std::int64_t now_() const noexcept;
-    [[nodiscard]] std::int64_t cpu_now_() const noexcept;
-    [[nodiscard]] bool kept_(std::uint64_t core, MovieFrame movie) const noexcept;
+    [[nodiscard]] std::chrono::nanoseconds cpu_now_() const noexcept;
+    [[nodiscard]] bool kept_(WideCoreFrame core, MovieFrame movie) const noexcept;
     [[nodiscard]] IFrameCodec& codec_for_(RecCodec c) noexcept;
     [[nodiscard]] bool chunk_one_(
         IFrameCodec& codec,
@@ -124,6 +128,8 @@ private:
         std::uint32_t run,
         bool stable
     ) noexcept;
+
+    [[nodiscard]] RgbRows picture_of_(const RawFrameSlot& s) noexcept;
 
     Wiring w_;
     Limits lim_{};

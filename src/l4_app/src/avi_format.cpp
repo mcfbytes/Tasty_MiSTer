@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/avi_format.h"
 
-#include <algorithm>
+#include <limits>
 
 #include "app/cscd_codec.h"
+#include "app/log_clock.h"
 
 namespace mister::app::avi {
 
@@ -34,32 +35,38 @@ struct Put {
     }
 };
 
-constexpr std::uint32_t kStrl = 4 + (8 + 56) + (8 + 40);
-constexpr std::uint32_t kHdrl = 4 + (8 + 56) + 8 + kStrl;
-constexpr std::uint32_t kJunkAt = 12 + 8 + kHdrl;
-constexpr std::uint32_t kMoviListAt = kHeaderBytes - 12;
+constexpr std::uint32_t kChunkHeadBytes = 8;
+constexpr std::uint32_t kListTypeBytes = 4;
+constexpr std::uint32_t kRiffHeadBytes = 12;
+constexpr std::uint32_t kAvihBytes = 56;
+constexpr std::uint32_t kStrhBytes = 56;
+constexpr std::uint32_t kStrfBytes = 40;
+
+constexpr std::uint32_t kStrl = kListTypeBytes
+    + (kChunkHeadBytes + kStrhBytes)
+    + (kChunkHeadBytes + kStrfBytes);
+constexpr std::uint32_t kHdrl = kListTypeBytes
+    + (kChunkHeadBytes + kAvihBytes)
+    + kChunkHeadBytes
+    + kStrl;
+constexpr std::uint32_t kJunkAt = kRiffHeadBytes + kChunkHeadBytes + kHdrl;
+constexpr std::uint32_t kMoviListAt = static_cast<std::uint32_t>(kMoviFourcc) - kChunkHeadBytes;
 static_assert(kJunkAt + 8 < kMoviListAt, "the header's lists must leave room for JUNK");
 
 constexpr std::uint32_t clamp32(std::uint64_t v) noexcept {
-    constexpr std::uint32_t kMaxU32 = 0xFFFF'FFFFu;
-    return static_cast<std::uint32_t>(std::min<std::uint64_t>(v, kMaxU32));
+    return sat_u32(v);
 }
 
 }
 
 void header(const Fields& f, Header& out) noexcept {
-    constexpr std::uint32_t kChunkHeadBytes = 8;
-    constexpr std::uint32_t kAvihBytes = 56;
-    constexpr std::uint32_t kStrhBytes = 56;
-    constexpr std::uint32_t kStrfBytes = 40;
     constexpr std::size_t kAvihReservedBytes = 16;
     constexpr std::size_t kStrfTrailBytes = 16;
     constexpr std::uint32_t kMicrosPerSecond = 1'000'000;
     constexpr std::uint16_t kBitsPerPixelZmbv = 32;
     constexpr std::uint16_t kBitsPerPixelCscd = 24;
     constexpr std::uint32_t kBytesPerPixelZmbv = 4;
-    constexpr std::uint32_t kListTypeBytes = 4;
-    constexpr std::uint32_t kNoQuality = 0xFFFF'FFFFu;
+    constexpr std::uint32_t kNoQuality = std::numeric_limits<std::uint32_t>::max();
     constexpr std::uint32_t kStreamCount = 1;
     out.fill(std::byte{0});
     Put p{out};

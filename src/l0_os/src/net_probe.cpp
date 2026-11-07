@@ -14,8 +14,6 @@
 namespace mister::os {
 namespace {
 
-enum : std::uint8_t { kLinkLocalOctet0 = 169, kLinkLocalOctet1 = 254 };
-
 bool is_wlan(std::string_view name) noexcept {
     return name.starts_with("wlan");
 }
@@ -25,8 +23,7 @@ bool is_wlan(std::string_view name) noexcept {
 NetPresence net_presence_from_list(std::span<const Ipv4If> ifs) noexcept {
     NetPresence out{};
     for (const auto& f : ifs) {
-
-        if (f.octet0 == kLinkLocalOctet0 && f.octet1 == kLinkLocalOctet1)
+        if (f.is_link_local())
             continue;
         if (f.name == "eth0")
             out.wired = true;
@@ -39,7 +36,7 @@ NetPresence net_presence_from_list(std::span<const Ipv4If> ifs) noexcept {
 [[nodiscard]] Ex<NetPresence> net_presence() {
     ifaddrs* ifaddr = nullptr;
     if (::getifaddrs(&ifaddr) == -1) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
     }
 
     NetPresence out{};

@@ -40,6 +40,11 @@ constexpr const char kStdBack[] = "            back";
 constexpr const char kDipRow[] = " DIP Switches              \x16";
 constexpr char kSubmenuArrow = '\x16';
 
+constexpr unsigned kFirstValueField = 2;
+
+constexpr std::uint8_t kSubmenuDigitFirst = 1;
+constexpr std::uint8_t kSubmenuDigitLast = 9;
+
 const proto::Item& source_item(const OptionItem::Source& in) {
     return in.table->items()[in.item.v];
 }
@@ -74,6 +79,11 @@ public:
         return i < values_->size() && !(*values_)[i].empty();
     }
 
+    std::string_view label(proto::FieldValue v) const noexcept {
+        const std::size_t i = v.v;
+        return i < values_->size() ? std::string_view{(*values_)[i]} : std::string_view{};
+    }
+
 private:
     const std::vector<std::string>* values_;
 };
@@ -106,7 +116,7 @@ OptionItem::Carry build_slot(
     it.addon_ext = std::string{in.carry.addon};
     it.addon_after = in.carry.addon_after;
     const proto::Item& src = source_item(in);
-    it.ioctl_index = src.has_digit ? src.digit : default_index;
+    it.ioctl_index = src.digit ? src.digit->v : default_index;
     OptionItem::Carry next = in.carry;
     next.addon = {};
     next.addon_after = false;
@@ -212,7 +222,9 @@ Transition OptionItem::activate(const Press& press, IOptionHost& host) const {
 OptionItem::Carry PageItem::on_build(const Source& in, const BuildEnv&) {
 
     const std::uint8_t n = source_item(in).declared_page.v;
-    target_page = proto::SubmenuNo{(n >= 1 && n <= 9) ? n : std::uint8_t{0}};
+    target_page = proto::SubmenuNo{
+        (n >= kSubmenuDigitFirst && n <= kSubmenuDigitLast) ? n : std::uint8_t{0}
+    };
     return plain_label(*this, in);
 }
 
@@ -244,7 +256,7 @@ Transition PageItem::on_activate(const Press& press, IOptionHost& host) const {
     if (target_page == proto::kRootSubmenu)
         return refused(host);
 
-    return Transition{Transition::Kind::Push, PageId::CoreOptions, ItemId{target_page.v}};
+    return Transition{Transition::Kind::Push, PageId::CoreOptions, item_submenu(target_page)};
 }
 
 OptionItem::Carry FileItem::on_build(const Source& in, const BuildEnv&) {
@@ -372,21 +384,19 @@ Transition ToggleCloseItem::on_activate(const Press& press, IOptionHost& host) c
 }
 
 OptionItem::Carry CycleItem::on_build(const Source& in, const BuildEnv& env) {
-    for (unsigned n = 2; n < source_item(in).subfield_count; ++n) {
+    for (unsigned n = kFirstValueField; n < source_item(in).subfield_count; ++n) {
         values.push_back(resolve_arc(field(in, n), env.custom_aspect_ratio));
     }
     return plain_label(*this, in);
 }
 
 std::string_view CycleItem::shown_value(const Look& look) const {
-    std::uint32_t x = look.value.v;
-    if (x >= values.size() || values[x].empty())
-        x = 0;
-    return (x < values.size()) ? std::string_view{values[x]} : std::string_view{};
+    const SlotLabels labels{values};
+    return labels.label(choice_slot(labels, look.value, proto::FieldCount::of(values.size())));
 }
 
 std::string CycleItem::on_compose(const Look& look) const {
-    char row[kOptionRowWidth + 1] = {};
+    char row[kClassicRowColumns + 1] = {};
     format_key_value(row, label, shown_value(look));
     return std::string{row};
 }
@@ -402,8 +412,14 @@ Transition CycleItem::on_activate(const Press& press, IOptionHost& host) const {
     if (!bits.valid())
         return refused(host);
     const SlotLabels labels{values};
-    const proto::FieldValue next = cycle_value(bits, press.value, press.minus ? -1 : +1, &labels);
-    host.write_status(bits, proto::FieldValue{next.v & 0x00FF'FFFFu});
+    const proto::FieldValue next = cycle_value(
+        bits,
+        press.value,
+        press.minus ? CycleDir::Back : CycleDir::Next,
+        &labels
+    );
+    constexpr std::uint32_t kStatusFieldMask = (std::uint32_t{1} << kStatusFieldBits) - 1u;
+    host.write_status(bits, proto::FieldValue{next.v & kStatusFieldMask});
     return Transition{};
 }
 

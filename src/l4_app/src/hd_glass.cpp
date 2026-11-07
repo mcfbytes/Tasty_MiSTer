@@ -10,29 +10,6 @@
 #endif
 
 namespace mister::app {
-namespace {
-
-[[nodiscard]] HdRect overlap(HdRect a, HdRect b) noexcept {
-    if (a.w <= 0 || a.h <= 0 || b.w <= 0 || b.h <= 0)
-        return {};
-    const std::int32_t x0 = std::max(a.x, b.x);
-    const std::int32_t y0 = std::max(a.y, b.y);
-    const std::int32_t x1 = std::min(a.x + a.w, b.x + b.w);
-    const std::int32_t y1 = std::min(a.y + a.h, b.y + b.h);
-    if (x1 <= x0 || y1 <= y0)
-        return {};
-    return HdRect{x0, y0, x1 - x0, y1 - y0};
-}
-
-[[nodiscard]] HdRect box_of(HdLayout::Rect r) noexcept {
-    return HdRect{r.x, r.y, r.w, r.h};
-}
-
-[[nodiscard]] bool empty(HdRect r) noexcept {
-    return r.w <= 0 || r.h <= 0;
-}
-
-}
 
 void hd_glass_compose_scalar(
     const HdGlassKernel& k,
@@ -91,21 +68,24 @@ void HdGlass::relayout(
     TASTY_SEAT_BODY(HdGlass);
     const HdThemeGlass& g = theme.glass;
     active_ = false;
-    rects_ = {};
-    base_ = {};
-    if (!g.on() || empty(box_of(layout.game)))
+    glass_ = {};
+    if (!g.on() || layout.game.is_empty())
         return;
     const HdRect surface{0, 0, w, h};
-    const HdRect picture = overlap(box_of(layout.picture), surface);
-    rects_ = {overlap(picture, box_of(layout.panel)), overlap(picture, box_of(layout.band))};
+    const HdRect picture = layout.picture.intersect(surface);
+    glass_ = {
+        GlassRect{.rect = picture.intersect(layout.panel)},
+        GlassRect{.rect = picture.intersect(layout.band)}
+    };
     std::size_t total = 0;
     std::int32_t widest = 0;
     for (std::size_t i = 0; i < kRects; ++i) {
-        base_[i] = total;
-        if (empty(rects_[i]))
+        glass_[i].base = total;
+        if (glass_[i].rect.is_empty())
             continue;
-        total += static_cast<std::size_t>(rects_[i].w) * static_cast<std::size_t>(rects_[i].h);
-        widest = std::max(widest, rects_[i].w);
+        total += static_cast<std::size_t>(glass_[i].rect.w)
+            * static_cast<std::size_t>(glass_[i].rect.h);
+        widest = std::max(widest, glass_[i].rect.w);
     }
     if (total == 0)
         return;
@@ -126,20 +106,8 @@ HdRect HdGlass::bounds() const noexcept {
     HdRect out{};
     if (!active_)
         return out;
-    for (const HdRect& r : rects_) {
-        if (empty(r))
-            continue;
-        if (empty(out)) {
-            out = r;
-            continue;
-        }
-        const std::int32_t x1 = std::max(out.x + out.w, r.x + r.w);
-        const std::int32_t y1 = std::max(out.y + out.h, r.y + r.h);
-        out.x = std::min(out.x, r.x);
-        out.y = std::min(out.y, r.y);
-        out.w = x1 - out.x;
-        out.h = y1 - out.y;
-    }
+    for (const GlassRect& g : glass_)
+        out = out.union_with(g.rect);
     return out;
 }
 
@@ -148,13 +116,13 @@ std::array<BackdropScalerTarget, HdGlass::kRects> HdGlass::targets() noexcept {
     if (!active_)
         return out;
     for (std::size_t i = 0; i < kRects; ++i) {
-        if (empty(rects_[i]))
+        const GlassRect& g = glass_[i];
+        if (g.rect.is_empty())
             continue;
-        const auto n = static_cast<std::size_t>(rects_[i].w)
-            * static_cast<std::size_t>(rects_[i].h);
+        const auto n = static_cast<std::size_t>(g.rect.w) * static_cast<std::size_t>(g.rect.h);
         out[i] = BackdropScalerTarget{
-            .px = std::span{under_}.subspan(base_[i], n),
-            .rect = rects_[i],
+            .px = std::span{under_}.subspan(g.base, n),
+            .rect = g.rect,
             .q8 = q8_,
             .fill = fill_
         };
@@ -165,9 +133,9 @@ std::array<BackdropScalerTarget, HdGlass::kRects> HdGlass::targets() noexcept {
 HdRect HdGlass::span_at(std::int32_t y, std::int32_t x0, std::int32_t x1) const noexcept {
     if (!active_)
         return {};
-    for (const HdRect& r : rects_) {
-        const HdRect s = overlap(r, HdRect{x0, y, x1 - x0, 1});
-        if (!empty(s))
+    for (const GlassRect& g : glass_) {
+        const HdRect s = g.rect.intersect(HdRect{x0, y, x1 - x0, 1});
+        if (!s.is_empty())
             return s;
     }
     return {};
@@ -180,13 +148,13 @@ std::span<const std::uint16_t> HdGlass::compose(
 ) noexcept {
     TASTY_SEAT_BODY(HdGlass);
     for (std::size_t i = 0; i < kRects; ++i) {
-        const HdRect& r = rects_[i];
-        if (!active_ || empty(r) || y < r.y || y >= r.y + r.h || x < r.x || x >= r.x + r.w)
+        const HdRect& r = glass_[i].rect;
+        if (!active_ || r.is_empty() || y < r.y || y >= r.y + r.h || x < r.x || x >= r.x + r.w)
             continue;
         const auto n = std::min<std::size_t>(src.size(), static_cast<std::size_t>(r.x + r.w - x));
         if (n > row_.size())
             continue;
-        const std::size_t at = base_[i]
+        const std::size_t at = glass_[i].base
             + static_cast<std::size_t>(y - r.y) * static_cast<std::size_t>(r.w)
             + static_cast<std::size_t>(x - r.x);
         const auto out = std::span{row_}.first(n);

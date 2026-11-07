@@ -15,9 +15,10 @@ bool HdKeyRemap::selected_row_steps(const MenuModel& model) const {
     app::PageDescription d{};
     if (top == nullptr || !top->describe(d))
         return false;
-    for (std::uint8_t i = 0; i < d.row_count && i < d.rows.size(); ++i) {
-        if (d.rows[i].selected)
-            return d.rows[i].steps;
+    for (const RowIndex r : rows(d.listed())) {
+        const app::PageDescription::Row& row = d.row(r);
+        if (row.selected)
+            return row.steps;
     }
     return false;
 }

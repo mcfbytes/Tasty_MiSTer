@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "app/config_slot_cell.h"
@@ -13,6 +14,14 @@
 #include "ui/page.h"
 
 namespace mister::ui {
+
+struct SlotChoice {
+    std::optional<cores::ConfigSlot> slot{};
+
+    [[nodiscard]] constexpr bool back() const noexcept { return !slot.has_value(); }
+
+    friend constexpr bool operator==(const SlotChoice&, const SlotChoice&) = default;
+};
 
 class ConfigSlotsPage final : public Page {
     TASTY_SEAT_RESIDENT(Ui);
@@ -67,12 +76,13 @@ public:
     std::uint32_t commands_published() const noexcept { return published_; }
 
 private:
-    static constexpr std::uint32_t kNoSlot = 0xFFFF'FFFFu;
-
     void ask_slot(cores::ConfigSlot slot);
-    [[nodiscard]] std::uint32_t slot_count() const noexcept;
-    [[nodiscard]] bool selectable(std::uint32_t slot) const noexcept;
-    [[nodiscard]] std::uint32_t slot_at(std::uint32_t row) const noexcept;
+    [[nodiscard]] RowCount slot_count() const noexcept;
+    [[nodiscard]] bool selectable(cores::ConfigSlot slot) const noexcept;
+
+    [[nodiscard]] std::optional<cores::ConfigSlot> slot_at(proto::OsdRow row) const noexcept;
+
+    [[nodiscard]] SlotChoice choice_of(RowIndex at) const noexcept;
 
     const app::ConfigSlotTable* table_;
     Mode mode_;
@@ -83,5 +93,14 @@ private:
     std::uint32_t refusals_ = 0;
     std::uint32_t published_ = 0;
 };
+
+[[nodiscard]] constexpr ItemId config_slots_item(ConfigSlotsPage::Mode mode) noexcept {
+    return ItemId{static_cast<std::uint16_t>(mode)};
+}
+
+[[nodiscard]] constexpr ConfigSlotsPage::Mode mode_of(ItemId item) noexcept {
+    return item == config_slots_item(ConfigSlotsPage::Mode::Load) ? ConfigSlotsPage::Mode::Load
+                                                                  : ConfigSlotsPage::Mode::Save;
+}
 
 }

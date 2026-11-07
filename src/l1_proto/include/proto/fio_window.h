@@ -8,6 +8,7 @@
 
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::proto {
 
@@ -18,7 +19,7 @@ struct FioWindow {
 
     struct Index {
         static constexpr Kind kKind = Kind::Index;
-        std::uint16_t index = 0;
+        WideIoIndex index{};
     };
 
     struct Open {

@@ -14,6 +14,9 @@ namespace mister::svc {
 
 namespace {
 
+constexpr Vid kVidSony{0x054C};
+constexpr Vid kVidNintendo{0x057E};
+
 constexpr NoMergeRule kNoMergeRules[] = {
 
     {DeviceMatch{Vid{0x289B}, Pid{0x0057}, MatchArity::VidNotPid},
@@ -69,7 +72,7 @@ constexpr AdmissionRule kAdmissionRules[] = {
      AdmitAction::Reject,
      QuirkId::None,
      "input.cpp:5207-5213 — skip our own uinput node (UINPUT_NAME)"},
-    {Vid{0x054C},
+    {kVidSony,
      kAnyPid,
      "Motion",
      NameMatch::Contains,
@@ -77,91 +80,91 @@ constexpr AdmissionRule kAdmissionRules[] = {
      QuirkId::None,
      "input.cpp:5268-5273 — DualShock/DualSense Motion Sensors: don't use Accelerometer"},
 
-    {Vid{0x054C},
+    {kVidSony,
      Pid{0x05C4},
      "Touchpad",
      NameMatch::Contains,
      AdmitAction::Assign,
      QuirkId::Ds4Touch,
      "input.cpp:5280-5283 — DS4 v1 touchpad node"},
-    {Vid{0x054C},
+    {kVidSony,
      Pid{0x09CC},
      "Touchpad",
      NameMatch::Contains,
      AdmitAction::Assign,
      QuirkId::Ds4Touch,
      "input.cpp:5280-5283 — DS4 v2 touchpad node"},
-    {Vid{0x054C},
+    {kVidSony,
      Pid{0x0BA0},
      "Touchpad",
      NameMatch::Contains,
      AdmitAction::Assign,
      QuirkId::Ds4Touch,
      "input.cpp:5280-5283 — DS4 USB dongle touchpad node"},
-    {Vid{0x054C},
+    {kVidSony,
      Pid{0x0CE6},
      "Touchpad",
      NameMatch::Contains,
      AdmitAction::Assign,
      QuirkId::Ds4Touch,
      "input.cpp:5280-5283 — DualSense touchpad node (THE rig device)"},
-    {Vid{0x054C},
+    {kVidSony,
      Pid{0x0268},
      nullptr,
      NameMatch::Any,
      AdmitAction::Assign,
      QuirkId::Ds3,
      "input.cpp:5276 — DualShock 3"},
-    {Vid{0x054C},
+    {kVidSony,
      Pid{0x05C4},
      nullptr,
      NameMatch::Any,
      AdmitAction::Assign,
      QuirkId::Ds4,
      "input.cpp:5278-5279 — DS4 v1"},
-    {Vid{0x054C},
+    {kVidSony,
      Pid{0x09CC},
      nullptr,
      NameMatch::Any,
      AdmitAction::Assign,
      QuirkId::Ds4,
      "input.cpp:5278-5279 — DS4 v2"},
-    {Vid{0x054C},
+    {kVidSony,
      Pid{0x0BA0},
      nullptr,
      NameMatch::Any,
      AdmitAction::Assign,
      QuirkId::Ds4,
      "input.cpp:5278-5279 — DS4 USB dongle"},
-    {Vid{0x054C},
+    {kVidSony,
      Pid{0x0CE6},
      nullptr,
      NameMatch::Any,
      AdmitAction::Assign,
      QuirkId::Ds4,
      "input.cpp:5278-5279 — DualSense"},
-    {Vid{0x057E},
+    {kVidNintendo,
      Pid{0x0306},
      "Accelerometer",
      NameMatch::Contains,
      AdmitAction::Reject,
      QuirkId::None,
      "input.cpp:5295-5300 — Wiimote accelerometer node"},
-    {Vid{0x057E},
+    {kVidNintendo,
      Pid{0x0330},
      "Accelerometer",
      NameMatch::Contains,
      AdmitAction::Reject,
      QuirkId::None,
      "input.cpp:5295-5300 — Wii U pro accelerometer node"},
-    {Vid{0x057E},
+    {kVidNintendo,
      Pid{0x0306},
      "Motion Plus",
      NameMatch::Contains,
      AdmitAction::Reject,
      QuirkId::None,
      "input.cpp:5302-5308 — Wiimote Motion Plus node"},
-    {Vid{0x057E},
+    {kVidNintendo,
      Pid{0x0330},
      "Motion Plus",
      NameMatch::Contains,
@@ -169,7 +172,7 @@ constexpr AdmissionRule kAdmissionRules[] = {
      QuirkId::None,
      "input.cpp:5302-5308 — Wii U pro Motion Plus node"},
 
-    {Vid{0x057E},
+    {kVidNintendo,
      kAnyPid,
      " IMU",
      NameMatch::ContainsCs,
@@ -213,6 +216,12 @@ bool contains_sub(std::string_view hay, std::string_view needle, bool fold) {
     return false;
 }
 
+constexpr unsigned kHexNibbleBits = 4;
+constexpr std::uint32_t kHexRadix = 16;
+constexpr unsigned kHexDigitMask = 0xFu;
+constexpr std::size_t kHexDigits16 = 4;
+constexpr std::size_t kHexDigits32 = 8;
+
 std::optional<std::uint32_t> hex_token(std::string_view t, std::size_t max_digits) {
     if (t.size() >= 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X'))
         t.remove_prefix(2);
@@ -224,7 +233,7 @@ std::optional<std::uint32_t> hex_token(std::string_view t, std::size_t max_digit
         const int d = (c >= '0' && c <= '9') ? c - '0' : (l >= 'a' && l <= 'f') ? l - 'a' + 10 : -1;
         if (d < 0)
             return std::nullopt;
-        v = v * 16u + static_cast<std::uint32_t>(d);
+        v = v * kHexRadix + static_cast<std::uint32_t>(d);
     }
     return v;
 }
@@ -250,7 +259,7 @@ std::optional<std::pair<bool, std::uint32_t>> vid_pid_token(std::string_view t) 
     }
     if (n == 0 || i >= t.size() || t[i] != ':')
         return std::nullopt;
-    const auto v = hex_token(t.substr(i + 1), 4);
+    const auto v = hex_token(t.substr(i + 1), kHexDigits16);
     if (!v)
         return std::nullopt;
     return std::pair<bool, std::uint32_t>{head == 'v', *v};
@@ -309,8 +318,9 @@ namespace {
 std::string hex4(std::uint16_t v) {
     static constexpr char kDigits[] = "0123456789abcdef";
     std::string out;
-    for (int shift = 12; shift >= 0; shift -= 4) {
-        out.push_back(kDigits[(static_cast<unsigned>(v) >> shift) & 0xFu]);
+    for (int shift = static_cast<int>((kHexDigits16 - 1) * kHexNibbleBits); shift >= 0;
+         shift -= static_cast<int>(kHexNibbleBits)) {
+        out.push_back(kDigits[(static_cast<unsigned>(v) >> shift) & kHexDigitMask]);
     }
     return out;
 }
@@ -318,8 +328,9 @@ std::string hex4(std::uint16_t v) {
 std::string hex8(std::uint32_t v) {
     static constexpr char kDigits[] = "0123456789abcdef";
     std::string out;
-    for (int shift = 28; shift >= 0; shift -= 4) {
-        out.push_back(kDigits[(v >> shift) & 0xFu]);
+    for (int shift = static_cast<int>((kHexDigits32 - 1) * kHexNibbleBits); shift >= 0;
+         shift -= static_cast<int>(kHexNibbleBits)) {
+        out.push_back(kDigits[(v >> shift) & kHexDigitMask]);
     }
     return out;
 }
@@ -367,23 +378,76 @@ std::string_view line_value(std::string_view line) {
 std::uint32_t str_hash(std::string_view s, std::uint32_t seed) {
     std::uint32_t hash = seed;
     for (const char c : s) {
-        hash = hash * 33u + static_cast<std::uint32_t>(static_cast<unsigned char>(c));
+        hash = hash * kDjb2Step + static_cast<std::uint32_t>(static_cast<unsigned char>(c));
     }
     return hash;
 }
 
+namespace {
+
+struct IdstrUniqRule {
+    Vid vid;
+    Pid pid;
+    bool teensy;
+};
+
+constexpr IdstrUniqRule kIdstrUniqRules[] = {
+    {Vid{0x2341}, kAnyPid, false},
+    {Vid{0x16C0}, kAnyPid, true},
+    {Vid{0x16D0}, Pid{0x127E}, false},
+    {Vid{0x16D0}, Pid{0x1460}, false},
+    {Vid{0x1209}, Pid{0x595A}, false},
+};
+
+constexpr Vid kControllaVid{0x1209};
+constexpr Pid kControllaPids[] = {Pid{0xFACE}, Pid{0xFACA}};
+
+constexpr unsigned kTeensyPidHigh = 0x04;
+
+constexpr bool is_teensy_pid(Pid pid) noexcept {
+    return (pid.v >> 8) == kTeensyPidHigh;
+}
+
+constexpr bool wants_uniq_suffix(Vid vid, Pid pid) noexcept {
+    for (const IdstrUniqRule& r : kIdstrUniqRules) {
+        if (r.vid != vid)
+            continue;
+        if (r.teensy)
+            return is_teensy_pid(pid);
+        if (r.pid == kAnyPid || r.pid == pid)
+            return true;
+    }
+    return false;
+}
+
+constexpr bool wants_name_sum(Vid vid, Pid pid) noexcept {
+    if (vid != kControllaVid)
+        return false;
+    for (const Pid p : kControllaPids) {
+        if (p == pid)
+            return true;
+    }
+    return false;
+}
+
+constexpr bool idstr_rules_have_exact_vids() noexcept {
+    for (const IdstrUniqRule& r : kIdstrUniqRules) {
+        if (r.vid == kAnyVid)
+            return false;
+    }
+    return true;
+}
+
+static_assert(idstr_rules_have_exact_vids(), "an idstr row's vid is EXACT");
+
+}
+
 void derive_idstr(DeviceFacts& slot) {
-    const std::uint16_t vid = slot.id.vid.v;
-    const std::uint16_t pid = slot.id.pid.v;
     const auto id_stem = [&] {
         return vid_pid(slot.id.vid, slot.id.pid);
     };
 
-    const bool rule1_vidpid = vid == 0x2341
-        || (vid == 0x16C0 && (pid >> 8) == 0x04)
-        || (vid == 0x16D0 && (pid == 0x127E || pid == 0x1460))
-        || (vid == 0x1209 && pid == 0x595A);
-    if (rule1_vidpid && !slot.uniq.empty()) {
+    if (wants_uniq_suffix(slot.id.vid, slot.id.pid) && !slot.uniq.empty()) {
         std::string s = id_stem();
         s.push_back('_');
         s.append(slot.uniq);
@@ -398,9 +462,10 @@ void derive_idstr(DeviceFacts& slot) {
         return;
     }
 
-    if (vid == 0x1209 && (pid == 0xFACE || pid == 0xFACA)) {
+    if (wants_name_sum(slot.id.vid, slot.id.pid)) {
         std::uint32_t sum = 0;
-        const std::size_t n = slot.id.name.size() < 128u ? slot.id.name.size() : 128u;
+        const std::size_t n = slot.id.name.size() < kNameSumChars ? slot.id.name.size()
+                                                                  : kNameSumChars;
         for (std::size_t i = 0; i < n; ++i) {
             sum += static_cast<unsigned char>(slot.id.name[i]);
         }
@@ -417,13 +482,16 @@ void derive_idstr(DeviceFacts& slot) {
 }
 
 bool wants_unique_mapping(const DeviceIdentity& id, const UniquePolicy& pol) {
-    const std::uint32_t vidpid = (static_cast<std::uint32_t>(id.vid.v) << 16)
-        | static_cast<std::uint32_t>(id.pid.v);
+    const VidPidKey device = VidPidKey::of(id.vid, id.pid);
     for (const std::uint32_t row : pol.vidpids) {
         if (row == 0)
             break;
-        if (pol.force || pol.all || row == 1 || row == vidpid)
+        if (pol.force
+            || pol.all
+            || VidPidKey::of(row) == VidPidKey::every_device()
+            || VidPidKey::of(row) == device) {
             return true;
+        }
     }
     return false;
 }
@@ -584,23 +652,11 @@ MergeStats fixup_mouse_nodes(FactsSpan slots, const SpinnerPolicy& spin) {
                 break;
             }
             slots[i]->bind = static_cast<unsigned>(j);
-            slots[i]->id.vid = slots[j]->id.vid;
-            slots[i]->id.pid = slots[j]->id.pid;
-            slots[i]->id.version = slots[j]->id.version;
-            slots[i]->id.bustype = slots[j]->id.bustype;
-            slots[i]->id.source = slots[j]->id.source;
-            slots[i]->quirk = slots[j]->quirk;
-            slots[i]->id.name = slots[j]->id.name;
-            slots[i]->id.id = slots[j]->id.id;
+            slots[i]->inherit_identity_from(*slots[j]);
             ++st.mouse_fixups;
 
             if (slots[i]->quirk == QuirkId::None) {
-                const bool all_mice = spin.vid == kAllMiceVid && spin.pid == kAllMicePid;
-                const bool exact = spin.vid != kAnyVid
-                    && spin.pid != kAnyPid
-                    && slots[i]->id.vid == spin.vid
-                    && slots[i]->id.pid == spin.pid;
-                if (all_mice || exact) {
+                if (spin.claims(slots[i]->id.vid, slots[i]->id.pid)) {
                     slots[i]->quirk = QuirkId::Mssp;
                     slots[i]->bind = static_cast<unsigned>(i);
                     slots[i]->spinner_prediv = 1;
@@ -611,7 +667,7 @@ MergeStats fixup_mouse_nodes(FactsSpan slots, const SpinnerPolicy& spin) {
                     slots[i]->spinner_prediv = 3;
                 }
                 if (slots[i]->quirk == QuirkId::Mssp) {
-                    slots[i]->id.merge_id.append("_sp");
+                    slots[i]->id.merge_id.append(kSpinnerSuffix);
                     ++st.mssp;
                 }
             }
@@ -671,6 +727,14 @@ MapPaths map_paths(std::string_view name, MapKind kind) {
     return p;
 }
 
+constexpr float kDiagonalSlopeMin = 0.85f;
+constexpr float kBoxRadiusDiag = 1.4142136f;
+constexpr float kBoxRadiusDiagScale = 2.4142136f;
+constexpr float kLearnedMaxFloorFactor = 2.0f;
+constexpr float kAxisScale = static_cast<float>(AnalogXy::kAxisMax);
+
+constexpr Deadzone kDeadzoneCheapBound{2};
+
 bool is_diagonal(AnalogXy in) {
     if (in.x == 0 || in.y == 0)
         return false;
@@ -679,19 +743,19 @@ bool is_diagonal(AnalogXy in) {
     const bool x_dominant = (in.x > in.y) == (in.x > -in.y);
     const auto num = static_cast<float>(x_dominant ? in.y : in.x);
     const auto den = static_cast<float>(x_dominant ? in.x : in.y);
-    return std::fabs(num / den) >= 0.85f;
+    return std::fabs(num / den) >= kDiagonalSlopeMin;
 }
 
 AnalogXy apply_deadzone(AnalogXy in, const DeadzoneParams& p) {
     const auto x = static_cast<float>(in.x);
     const auto y = static_cast<float>(in.y);
-    const auto dz = static_cast<float>(p.deadzone);
+    const float dz = p.deadzone.magnitude();
 
-    if (p.deadzone <= 2) {
-        if (p.deadzone != 0) {
+    if (p.deadzone <= kDeadzoneCheapBound) {
+        if (p.deadzone != kDeadzoneNone) {
             const std::int32_t dominant = ((in.x > in.y) == (in.x > -in.y)) ? in.x : in.y;
             const std::int32_t mag = dominant < 0 ? -dominant : dominant;
-            if (mag <= p.deadzone)
+            if (p.deadzone.swallows(mag))
                 return AnalogXy{0, 0};
         }
         return in;
@@ -704,10 +768,12 @@ AnalogXy apply_deadzone(AnalogXy in, const DeadzoneParams& p) {
     const float angle = std::atan2(y, x);
     const float box_radius = 1.0f
         / std::fmax(std::fabs(std::sin(angle)), std::fabs(std::cos(angle)));
-    const float cardinality = (1.4142136f - box_radius) * 2.4142136f;
+    const float cardinality = (kBoxRadiusDiag - box_radius) * kBoxRadiusDiagScale;
 
-    const float max_cardinal = p.max_cardinal > (2.0f * dz) ? p.max_cardinal : 127.0f;
-    const float max_diagonal = p.max_range > (2.0f * dz) ? p.max_range : 127.0f;
+    const float max_cardinal = p.max_cardinal > (kLearnedMaxFloorFactor * dz) ? p.max_cardinal
+                                                                              : kAxisScale;
+    const float max_diagonal = p.max_range > (kLearnedMaxFloorFactor * dz) ? p.max_range
+                                                                           : kAxisScale;
     const float range = cardinality * max_cardinal + (1.0f - cardinality) * max_diagonal;
 
     const float weight = 1.0f - std::fmax(range - radius, 0.0f) / (range - dz);
@@ -719,20 +785,21 @@ AnalogXy apply_deadzone(AnalogXy in, const DeadzoneParams& p) {
     float ox = std::nearbyint(adjusted * std::cos(angle));
     float oy = std::nearbyint(adjusted * std::sin(angle));
     const auto lo = static_cast<float>(p.min_out);
-    ox = std::fmin(std::fmax(ox, lo), 127.0f);
-    oy = std::fmin(std::fmax(oy, lo), 127.0f);
+    ox = std::fmin(std::fmax(ox, lo), kAxisScale);
+    oy = std::fmin(std::fmax(oy, lo), kAxisScale);
     return AnalogXy{static_cast<std::int32_t>(ox), static_cast<std::int32_t>(oy)};
 }
 
 namespace {
-constexpr std::uint32_t kDefMmap[32] = {
+
+constexpr std::uint32_t kDefMmap[kJoyWords] = {
     0x00000321u, 0x00000320u, 0x00000323u, 0x00000322u, 0x00000131u, 0x00000130u, 0x00000133u,
     0x00000134u, 0x00000136u, 0x00000137u, 0x0000013Au, 0x0000013Bu, 0u,          0u,
     0u,          0u,          0u,          0u,          0u,          0u,          0u,
     0x0000013Cu, 0x0000013Cu, 0x01300131u, 0x00020000u, 0x00020001u, 0x00020003u, 0x00020004u,
     0x00020000u, 0x00020001u, 0u,          0u,
 };
-static_assert(sizeof kDefMmap == 128, "req: the Joystick blob is exactly 128 bytes");
+static_assert(sizeof kDefMmap == sizeof(JoyWords), "req: the Joystick blob is exactly 128 bytes");
 
 constexpr std::size_t kBtnRight = 0;
 constexpr std::size_t kBtnLeft = 1;
@@ -741,109 +808,112 @@ constexpr std::size_t kBtnUp = 3;
 constexpr std::size_t kAxisX = 28;
 constexpr std::size_t kAxisY = 29;
 
-constexpr std::uint32_t kKeyEmu = 768;
+constexpr std::size_t kDirectionWords = 4;
 
-ButtonMap encode_map(const std::uint32_t (&w)[32]) {
+constexpr std::size_t kMenuFuncWord = 23;
+
+constexpr std::size_t kSysAxisFirst = 24;
+constexpr std::size_t kSysAxisWords = 4;
+
+ButtonMap encode_map(const JoyWords& w) {
     ButtonMap m;
     m.kind = MapKind::Joystick;
-    m.blob.resize(128);
-    for (std::size_t i = 0; i < 32; ++i) {
-        for (std::size_t b = 0; b < 4; ++b) {
-            m.blob[i * 4 + b] = static_cast<std::byte>((w[i] >> (8u * b)) & 0xFFu);
-        }
+    constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
+    m.blob.resize(map_spec(MapKind::Joystick).bytes);
+    for (std::size_t i = 0; i < w.size(); ++i) {
+        infra::store_le<std::uint32_t>(
+            std::span<std::byte>(m.blob).subspan(i * kWordBytes).first<kWordBytes>(),
+            packed_word(w[i])
+        );
     }
     return m;
+}
+
+constexpr JoyWords default_words() noexcept {
+    JoyWords out{};
+    for (std::size_t i = 0; i < kJoyWords; ++i)
+        out[i] = packed_keys_of(kDefMmap[i]);
+    return out;
 }
 }
 
 ButtonMap default_sys_map() {
-    return encode_map(kDefMmap);
+    return encode_map(default_words());
 }
 
-ButtonMap derive_joy_map(
-    std::span<const std::uint32_t> sys_map,
-    bool axis_emu,
-    const JoyPlan& plan
-) {
-    std::uint32_t w[32] = {};
+ButtonMap derive_joy_map(std::span<const PackedKeys> sys_map, bool axis_emu, const JoyPlan& plan) {
+    JoyWords w{};
 
-    if (sys_map.size() < 32)
+    if (sys_map.size() < kJoyWords)
         return encode_map(w);
 
-    w[kBtnRight] = sys_map[kBtnRight] & 0xFFFFu;
-    w[kBtnLeft] = sys_map[kBtnLeft] & 0xFFFFu;
-    w[kBtnDown] = sys_map[kBtnDown] & 0xFFFFu;
-    w[kBtnUp] = sys_map[kBtnUp] & 0xFFFFu;
+    w[kBtnRight] = PackedKeys{sys_map[kBtnRight].lo, EvdevCode{}};
+    w[kBtnLeft] = PackedKeys{sys_map[kBtnLeft].lo, EvdevCode{}};
+    w[kBtnDown] = PackedKeys{sys_map[kBtnDown].lo, EvdevCode{}};
+    w[kBtnUp] = PackedKeys{sys_map[kBtnUp].lo, EvdevCode{}};
 
-    if (sys_map[kAxisX] != 0 && axis_emu) {
-        const std::uint32_t key = kKeyEmu + ((sys_map[kAxisX] & 0xFFFFu) << 1u);
-        w[kBtnLeft] = (key << 16u) | w[kBtnLeft];
-        w[kBtnRight] = ((key + 1u) << 16u) | w[kBtnRight];
+    if (sys_map[kAxisX] != PackedKeys{} && axis_emu) {
+        const EvdevCode axis = sys_map[kAxisX].lo;
+        w[kBtnLeft].hi = axis.key_emu_min();
+        w[kBtnRight].hi = axis.key_emu_max();
     }
-    if (sys_map[kAxisY] != 0 && axis_emu) {
-        const std::uint32_t key = kKeyEmu + ((sys_map[kAxisY] & 0xFFFFu) << 1u);
-        w[kBtnUp] = (key << 16u) | w[kBtnUp];
-        w[kBtnDown] = ((key + 1u) << 16u) | w[kBtnDown];
+    if (sys_map[kAxisY] != PackedKeys{} && axis_emu) {
+        const EvdevCode axis = sys_map[kAxisY].lo;
+        w[kBtnUp].hi = axis.key_emu_min();
+        w[kBtnDown].hi = axis.key_emu_max();
     }
 
-    for (std::size_t j = 4; j < 32u; ++j) {
+    for (std::size_t j = JoyPlan::kFirstButtonWord; j < kJoyWords; ++j) {
         const std::int8_t s = plan.src[j];
-        if (s < 4 || s > 11)
+        if (s < JoyPlan::kFirstButtonWord || s > JoyPlan::kLastButtonWord)
             continue;
         w[j] = sys_map[static_cast<std::size_t>(s)];
     }
     return encode_map(w);
 }
 
-std::array<std::uint32_t, 32> derive_menu_map(
-    std::span<const std::uint32_t> sys_map,
-    bool axis_keys
-) {
-    std::array<std::uint32_t, 32> w{};
-    if (sys_map.size() < 32)
+JoyWords derive_menu_map(std::span<const PackedKeys> sys_map, bool axis_keys) {
+    JoyWords w{};
+    if (sys_map.size() < kJoyWords)
         return w;
-    for (std::size_t i = 0; i < 4; ++i)
-        w[i] = sys_map[i] & 0xFFFFu;
-    const std::uint32_t ok = sys_map[23] & 0xFFFFu;
-    const std::uint32_t esc = sys_map[23] >> 16;
-    w[4] = ok != 0 ? ok : (sys_map[4] & 0xFFFFu);
-    w[5] = esc != 0 ? esc : (sys_map[5] & 0xFFFFu);
-    w[6] = sys_map[7] & 0xFFFFu;
-    w[7] = sys_map[6] & 0xFFFFu;
-    w[10] = sys_map[8] & 0xFFFFu;
-    w[11] = sys_map[9] & 0xFFFFu;
-    w[12] = sys_map[11] & 0xFFFFu;
-    w[13] = sys_map[10] & 0xFFFFu;
+
+    for (std::size_t i = 0; i < kDirectionWords; ++i)
+        w[i] = PackedKeys{sys_map[i].lo, EvdevCode{}};
+    const EvdevCode ok = sys_map[kMenuFuncWord].lo;
+    const EvdevCode esc = sys_map[kMenuFuncWord].hi;
+    w[4].lo = ok.v != 0 ? ok : sys_map[4].lo;
+    w[5].lo = esc.v != 0 ? esc : sys_map[5].lo;
+    w[6].lo = sys_map[7].lo;
+    w[7].lo = sys_map[6].lo;
+    w[10].lo = sys_map[8].lo;
+    w[11].lo = sys_map[9].lo;
+    w[12].lo = sys_map[11].lo;
+    w[13].lo = sys_map[10].lo;
     if (axis_keys) {
-        if (sys_map[kAxisX] != 0) {
-            const std::uint32_t key = kKeyEmu + ((sys_map[kAxisX] & 0xFFFFu) << 1u);
-            w[kBtnLeft] |= key << 16u;
-            w[kBtnRight] |= (key + 1u) << 16u;
+        if (sys_map[kAxisX] != PackedKeys{}) {
+            const EvdevCode axis = sys_map[kAxisX].lo;
+            w[kBtnLeft].hi = axis.key_emu_min();
+            w[kBtnRight].hi = axis.key_emu_max();
         }
-        if (sys_map[kAxisY] != 0) {
-            const std::uint32_t key = kKeyEmu + ((sys_map[kAxisY] & 0xFFFFu) << 1u);
-            w[kBtnUp] |= key << 16u;
-            w[kBtnDown] |= (key + 1u) << 16u;
+        if (sys_map[kAxisY] != PackedKeys{}) {
+            const EvdevCode axis = sys_map[kAxisY].lo;
+            w[kBtnUp].hi = axis.key_emu_min();
+            w[kBtnDown].hi = axis.key_emu_max();
         }
     }
     return w;
 }
 
-JoyMask mask_for(std::span<const std::uint32_t> joy_map, std::span<const std::uint64_t> down_bits) {
+JoyMask mask_for(std::span<const PackedKeys> joy_map, const KeyDownSet<kDownWords>& down) {
     std::uint32_t mask = 0;
-    for (std::size_t i = 0; i < joy_map.size() && i < 32u; ++i) {
-        const std::uint32_t packed = joy_map[i];
-        if (packed == 0)
+    for (std::size_t i = 0; i < joy_map.size() && i < kJoyWords; ++i) {
+        const PackedKeys packed = joy_map[i];
+        if (packed == PackedKeys{})
             continue;
-        const std::uint32_t lo = packed & 0xFFFFu;
-        const std::uint32_t hi = packed >> 16;
-        for (const std::uint32_t code : {lo, hi}) {
-            if (code == 0)
+        for (const EvdevCode code : {packed.lo, packed.hi}) {
+            if (code.is_unset())
                 continue;
-            const std::size_t word = code / 64u;
-            if (word >= down_bits.size())
-                continue;
-            if ((down_bits[word] >> (code % 64u)) & 1u) {
+            if (down.has(code)) {
                 mask |= (1u << i);
                 break;
             }
@@ -852,15 +922,15 @@ JoyMask mask_for(std::span<const std::uint32_t> joy_map, std::span<const std::ui
     return JoyMask{mask};
 }
 
-std::uint8_t deadzone_class(QuirkId quirk) {
+Deadzone deadzone_class(QuirkId quirk) {
     switch (quirk) {
         case QuirkId::LightGun:
         case QuirkId::OpenFire:
         case QuirkId::Wheel:
-            return 0;
+            return kDeadzoneNone;
         case QuirkId::Ds3:
         case QuirkId::Ds4:
-            return 10;
+            return kDeadzoneDualShock;
         case QuirkId::None:
         case QuirkId::Mssp:
         case QuirkId::AtariVcs:
@@ -869,7 +939,7 @@ std::uint8_t deadzone_class(QuirkId quirk) {
         case QuirkId::Ds4Touch:
             break;
     }
-    return 2;
+    return kDeadzoneDefault;
 }
 
 bool deadzone_uid_matches(
@@ -880,8 +950,8 @@ bool deadzone_uid_matches(
     std::string_view sysfs,
     std::string_view merge_id
 ) {
-    if (const auto v = hex_token(uid, 8)) {
-        return ((static_cast<std::uint32_t>(vid.v) << 16) | pid.v) == *v;
+    if (const auto v = hex_token(uid, kHexDigits32)) {
+        return VidPidKey::of(vid, pid) == VidPidKey::of(*v);
     }
     if (const auto vp = vid_pid_token(uid)) {
         return vp->first ? vid.v == static_cast<std::uint16_t>(vp->second)
@@ -893,7 +963,7 @@ bool deadzone_uid_matches(
         || contains_sub(id, uid, true);
 }
 
-std::uint8_t deadzone_for(
+Deadzone deadzone_for(
     QuirkId quirk,
     Vid vid,
     Pid pid,
@@ -909,6 +979,17 @@ std::uint8_t deadzone_for(
     return deadzone_class(quirk);
 }
 
+}
+
+void DeviceFacts::inherit_identity_from(const DeviceFacts& src) {
+    id.vid = src.id.vid;
+    id.pid = src.id.pid;
+    id.version = src.id.version;
+    id.bustype = src.id.bustype;
+    id.source = src.id.source;
+    quirk = src.quirk;
+    id.name = src.id.name;
+    id.id = src.id.id;
 }
 
 std::optional<DeadzoneRule> parse_deadzone_rule(std::string_view line) {
@@ -937,7 +1018,8 @@ std::optional<DeadzoneRule> parse_deadzone_rule(std::string_view line) {
     DeadzoneRule r{};
     if (!r.uid.assign(line.substr(0, i)))
         return std::nullopt;
-    r.deadzone = static_cast<std::uint8_t>(value > 64u ? 64u : value);
+
+    r.deadzone = Deadzone::clamped(value);
     return r;
 }
 

@@ -38,7 +38,7 @@ static_assert(
     "cdi.cpp:492-497: the save is index 1; cdi.cpp:1152-1153 the disc index 0"
 );
 static_assert(
-    kCdi.staging.save_pre_bytes == 8 * 1024,
+    kCdi.staging.save_pre_bytes == proto::FileSize{8 * 1024},
     "cdi.cpp:25,497: TIMEKEEPER_SIZE (8 * 1024) is the pre_size"
 );
 static_assert(

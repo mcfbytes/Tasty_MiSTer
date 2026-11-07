@@ -20,30 +20,28 @@ struct IrqPin {
 
 inline constexpr std::size_t kMaxIrqPins = 4;
 
-enum : unsigned { kLastCpuBit = 31 };
+[[nodiscard]] constexpr os::CpuMask cpus_known(const ThreadMap& m) noexcept {
+    return os::CpuMask::below(max_cpu(m).next());
+}
 
 constexpr bool irq_pins_well_formed(std::span<const IrqPin> pins, const ThreadMap& m) noexcept {
     if (pins.size() > kMaxIrqPins)
         return false;
-    const auto hi = static_cast<unsigned>(max_cpu(m));
-    const std::uint32_t known = hi >= kLastCpuBit ? ~0u : (1u << (hi + 1u)) - 1u;
-    const std::uint32_t rt = 1u << static_cast<unsigned>(seat_of(m, SeatTag::RT).cpu);
+    const os::CpuMask known = cpus_known(m);
+    const os::CpuMask rt = os::CpuMask::of(seat_of(m, SeatTag::RT).cpu);
     for (const IrqPin& p : pins) {
         if (p.action.empty())
             return false;
-        if (p.cpus.v == 0 || (p.cpus.v & ~known) != 0)
+        if (p.cpus.empty() || !p.cpus.subset_of(known))
             return false;
-        if ((p.cpus.v & rt) != 0)
+        if (p.cpus.intersects(rt))
             return false;
     }
     return true;
 }
 
 constexpr os::CpuMask cpus_off_rt(const ThreadMap& m) noexcept {
-    const auto hi = static_cast<unsigned>(max_cpu(m));
-    const std::uint32_t known = hi >= kLastCpuBit ? ~0u : (1u << (hi + 1u)) - 1u;
-    const std::uint32_t rt = 1u << static_cast<unsigned>(seat_of(m, SeatTag::RT).cpu);
-    return os::CpuMask{known & ~rt};
+    return cpus_known(m).without(os::CpuMask::of(seat_of(m, SeatTag::RT).cpu));
 }
 
 enum class IrqPinOutcome : std::uint8_t {

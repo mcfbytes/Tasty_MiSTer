@@ -13,10 +13,7 @@ Ex<void> PadLevels::replay(PadLevels::Slot level, ILinkPadEncoder& to) const {
     return to.stick(
         r.opcode,
         r.index,
-        StickPos{
-            static_cast<std::uint8_t>(*w & 0xFFu),
-            static_cast<std::uint8_t>((*w >> 8) & 0xFFu)
-        }
+        StickPos{static_cast<std::uint8_t>(*w), static_cast<std::uint8_t>((*w >> 8))}
     );
 }
 

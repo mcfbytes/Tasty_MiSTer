@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -30,10 +31,10 @@ public:
     struct Play {
         std::string_view movie{};
         std::string_view rom{};
-        std::optional<std::uint32_t> phase_us{};
-        std::optional<std::int32_t> lead{};
+        std::optional<std::chrono::microseconds> phase{};
+        std::optional<MovieFrame> lead{};
 
-        std::optional<std::uint32_t> stop_at{};
+        std::optional<MovieFrame> stop_at{};
 
         bool set_settings = false;
 
@@ -47,10 +48,10 @@ public:
     static constexpr std::int64_t kDiscSettleNs = ReplayPlay::kDiscSettleNs;
 
     [[nodiscard]] static constexpr bool phase_fits(
-        std::uint32_t phase_us,
-        std::uint64_t period_ns
+        std::chrono::microseconds phase,
+        std::chrono::nanoseconds period
     ) noexcept {
-        return ReplayPlay::phase_fits(phase_us, period_ns);
+        return ReplayPlay::phase_fits(phase, period);
     }
 
     explicit ReplayFeeder(Wiring w) noexcept;
@@ -83,7 +84,7 @@ public:
 
     [[nodiscard]] FrameCount pushed() const noexcept { return play_.pushed; }
 
-    [[nodiscard]] std::uint32_t movie_frames() const noexcept { return play_.movie_frames; }
+    [[nodiscard]] FrameCount movie_frames() const noexcept { return play_.movie_frames; }
 
     [[nodiscard]] std::uint32_t tries() const noexcept { return play_.tries; }
 

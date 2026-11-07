@@ -122,8 +122,8 @@ private:
 
     [[nodiscard]] std::string cycle_value(const app::OptionTable::Row& r) const;
 
-    [[nodiscard]] std::string value_label(const cores::OptionRow& d, std::uint32_t slot) const;
-    [[nodiscard]] std::uint32_t drawn_choice(const app::OptionTable::Row& r) const;
+    [[nodiscard]] std::string value_label(const cores::OptionRow& d, proto::FieldValue slot) const;
+    [[nodiscard]] proto::FieldValue drawn_choice(const app::OptionTable::Row& r) const;
     [[nodiscard]] const Line* line_for_ordinal(RowIndex o) const noexcept;
     [[nodiscard]] RowIndex exit_drawn() const noexcept;
 

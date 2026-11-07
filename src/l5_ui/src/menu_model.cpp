@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -183,53 +184,39 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
     switch (id) {
         case PageId::System:
             return make_system_page(page_facts_(ctx.sys));
-        case PageId::CoreOptions: {
-            const proto::SubmenuNo page = focus.submenu();
+        case PageId::CoreOptions:
+            return make_core_options_page_(focus.submenu());
+        case PageId::Browser: {
 
-            std::string_view title = items_.core_name();
-            if (page != proto::kRootSubmenu)
-                title = declared_title(items_, page).value_or(title);
-            auto p = std::make_unique<CoreOptionsPage>(
-                items_,
-                build_env(page),
-                title,
-                infra::OptRef<const StatusView>{mirror_.status_words()}
-            );
-
-            if (p->model().empty_page()) {
+            if (!ctx.launches.browser || !ctx.storage) {
                 ++root_refusals_;
                 return nullptr;
             }
-            return p;
-        }
-        case PageId::Browser: {
-
-            if (!ctx.launches.browser
-                || !ctx.storage
-                || !ctx.launches.browser->pending.has_value()) {
+            std::optional<BrowserSession::Request> req = ctx.launches.browser->take();
+            if (!req) {
                 ++root_refusals_;
                 return nullptr;
             }
             const Page* parent = stack_.top();
-            const RowCount h = parent != nullptr ? parent->osd_height() : RowCount{16};
-            auto req = static_cast<BrowserSession::Request&&>(*ctx.launches.browser->pending);
-            ctx.launches.browser->pending.reset();
+            const RowCount h = parent != nullptr ? parent->osd_height() : kFullOsdRows;
             return std::make_unique<BrowserPage>(
                 *ctx.storage,
-                static_cast<BrowserSession::Request&&>(req),
+                static_cast<BrowserSession::Request&&>(*req),
                 h,
                 ctx.clock
             );
         }
         case PageId::ScriptRun: {
-            if (!ctx.launches.script || !ctx.launches.script->pending.has_value()) {
+            if (!ctx.launches.script) {
                 ++root_refusals_;
                 return nullptr;
             }
-            ScriptLaunch::Request req = static_cast<ScriptLaunch::Request&&>(
-                *ctx.launches.script->pending
-            );
-            ctx.launches.script->pending.reset();
+            std::optional<ScriptLaunch::Request> armed = ctx.launches.script->take();
+            if (!armed) {
+                ++root_refusals_;
+                return nullptr;
+            }
+            ScriptLaunch::Request req = static_cast<ScriptLaunch::Request&&>(*armed);
 
             switch (script_policy_for(req.kind).gate_open(ctx.bt)) {
                 case IScriptPolicy::OpenGate::Refuse:
@@ -257,36 +244,8 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             }
             return std::make_unique<CheatsPage>(cheats_);
         }
-        case PageId::CoreSettings: {
-
-            const proto::SubmenuNo page = focus.submenu();
-            if (mirror_.option_table().count == 0 || page.v >= cores::kMaxOptionPages) {
-                ++root_refusals_;
-                return nullptr;
-            }
-            CoreSettingsPage::Spec spec{};
-            spec.table = &mirror_.option_table();
-            spec.page = page;
-
-            const std::string_view declared = mirror_.option_table().page_title[page.v].view();
-            spec.title = !declared.empty()
-                ? std::string(declared)
-                : (page == proto::kRootSubmenu ? std::string(items_.core_name()) : std::string{});
-            spec.mt32_available = (hd_mask_.v & 1u) != 0;
-
-            const BuildEnv env = build_env(page);
-            spec.custom_aspect_ratio[0] = env.custom_aspect_ratio[0];
-            spec.custom_aspect_ratio[1] = env.custom_aspect_ratio[1];
-            spec.conf_gen = env.conf_gen;
-            auto p = std::make_unique<CoreSettingsPage>(
-                static_cast<CoreSettingsPage::Spec&&>(spec)
-            );
-            if (p->empty_page()) {
-                ++root_refusals_;
-                return nullptr;
-            }
-            return p;
-        }
+        case PageId::CoreSettings:
+            return make_core_settings_page_(focus.submenu());
         case PageId::ConfigSlots: {
             if (mirror_.config_slot_table().count == 0) {
                 ++root_refusals_;
@@ -294,7 +253,7 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             }
             return std::make_unique<ConfigSlotsPage>(
                 mirror_.config_slot_table(),
-                focus.v != 0 ? ConfigSlotsPage::Mode::Save : ConfigSlotsPage::Mode::Load,
+                mode_of(focus),
                 mirror_.conf_gen()
             );
         }
@@ -327,13 +286,16 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             return std::make_unique<JoyMapPage>(static_cast<JoyMapPage::Spec&&>(spec));
         }
         case PageId::Confirm: {
-            if (!ctx.launches.confirm || !ctx.launches.confirm->pending.has_value()) {
+            if (!ctx.launches.confirm) {
                 ++root_refusals_;
                 return nullptr;
             }
-            ConfirmPage::Spec spec = *ctx.launches.confirm->pending;
-            ctx.launches.confirm->pending.reset();
-            return std::make_unique<ConfirmPage>(spec);
+            std::optional<ConfirmPage::Spec> spec = ctx.launches.confirm->take();
+            if (!spec) {
+                ++root_refusals_;
+                return nullptr;
+            }
+            return std::make_unique<ConfirmPage>(*spec);
         }
 
         case PageId::HdMenu:
@@ -434,6 +396,51 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
     return nullptr;
 }
 
+std::unique_ptr<Page> MenuModel::make_core_options_page_(proto::SubmenuNo page) {
+    std::string_view title = items_.core_name();
+    if (page != proto::kRootSubmenu)
+        title = declared_title(items_, page).value_or(title);
+    auto p = std::make_unique<CoreOptionsPage>(
+        items_,
+        build_env(page),
+        title,
+        infra::OptRef<const StatusView>{mirror_.status_words()}
+    );
+
+    if (p->model().empty_page()) {
+        ++root_refusals_;
+        return nullptr;
+    }
+    return p;
+}
+
+std::unique_ptr<Page> MenuModel::make_core_settings_page_(proto::SubmenuNo page) {
+    CoreSettingsPage::Spec spec{};
+    if (mirror_.option_table().count == 0 || page.v >= cores::kMaxOptionPages) {
+        ++root_refusals_;
+        return nullptr;
+    }
+    spec.table = &mirror_.option_table();
+    spec.page = page;
+
+    const std::optional<std::string_view> declared = mirror_.option_table().title(page);
+    spec.title = declared
+        ? std::string(*declared)
+        : (page == proto::kRootSubmenu ? std::string(items_.core_name()) : std::string{});
+    spec.mt32_available = hd_mask_.has(kMt32Present);
+
+    const BuildEnv env = build_env(page);
+    spec.custom_aspect_ratio[0] = env.custom_aspect_ratio[0];
+    spec.custom_aspect_ratio[1] = env.custom_aspect_ratio[1];
+    spec.conf_gen = env.conf_gen;
+    auto p = std::make_unique<CoreSettingsPage>(static_cast<CoreSettingsPage::Spec&&>(spec));
+    if (p->empty_page()) {
+        ++root_refusals_;
+        return nullptr;
+    }
+    return p;
+}
+
 HdPlanInputs MenuModel::plan_inputs_(PageContext& ctx, ItemId focus) {
     return HdPlanInputs{
         .ctx = ctx,
@@ -497,7 +504,7 @@ void MenuModel::apply(const Transition& t, PageContext& ctx) {
             if (p == nullptr)
                 return;
             if (from_hd)
-                p->set_selection(RowIndex{static_cast<std::uint32_t>(SystemItem::Exit)});
+                p->set_selection(system_row_of(SystemItem::Exit));
             stack_.push(static_cast<std::unique_ptr<Page>&&>(p));
             forget_hd_window_(stack_.depth() - 1);
             if (Page* top = stack_.top())
@@ -574,7 +581,7 @@ bool MenuModel::describe_top(app::PageDescription& out) {
         return false;
     const std::size_t depth = stack_.depth();
     const bool remember = depth >= 1 && depth <= kHdWindowDepths;
-    out.first = remember ? hd_window_first_[depth - 1] : 0;
+    out.first = remember ? hd_window_first_[depth - 1] : RowIndex{};
     if (!top->describe(out))
         return false;
     if (remember)
@@ -654,7 +661,7 @@ void MenuModel::on_core_load_done(proto::CorrelationTag tag, PageContext& ctx) {
 
 void MenuModel::forget_hd_window_(std::size_t depth0) noexcept {
     if (depth0 < kHdWindowDepths)
-        hd_window_first_[depth0] = 0;
+        hd_window_first_[depth0] = RowIndex{};
 }
 
 bool MenuModel::show_progress(PageContext& ctx, cores::Progress progress) {
@@ -723,6 +730,115 @@ bool MenuModel::push_info(PageContext& ctx, app::InfoId id) {
     return true;
 }
 
+MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
+    KeyPhase out{};
+
+    std::optional<UiEvent> ev;
+    if (ctx.keys) {
+        const Page* rt = stack_.top();
+        ctx.keys->set_repeat_all(rt != nullptr && rt->facts().repeat_all_keys);
+        ev = ctx.keys->pop();
+    }
+    if (!ev.has_value())
+        return out;
+
+    if (bootcore_armed_) {
+        bootcore_armed_ = false;
+        ++bootcore_cancels_;
+    }
+
+    const UiButtonMask buttons = ev->buttons;
+
+    constexpr std::uint16_t kRearm = UiEvent::Menu
+        | UiEvent::Select
+        | UiEvent::Up
+        | UiEvent::Down
+        | UiEvent::Left
+        | UiEvent::Right
+        | UiEvent::Plus
+        | UiEvent::Minus;
+    if (buttons.has_any({kRearm})) {
+        ++help_rearms_;
+        if (ctx.clock) {
+            deadlines_.rearm_help(ctx.clock->now());
+        }
+    }
+
+    if (!menu_has_focus()) {
+        if (buttons.has_any({UiEvent::Menu})) {
+            if (osd_open()) {
+
+                stack_.clear();
+                seed_navigator();
+                arm_auto_pop(ctx);
+                show_latch_.mark_closed();
+                ++overlay_trades_;
+            }
+            open_root(ctx);
+            out.did = true;
+        }
+        out.round_over = true;
+        return out;
+    }
+
+    bool routed = false;
+    if (KeyDecoder::is_make(ev->raw, svc::EvdevCode{KEY_F11})) {
+        routed = true;
+        const Page* run = stack_.top();
+        const bool mid_script = run != nullptr && run->holds_pairing_hotkey();
+        if (mid_script) {
+            ++bt_refusals_;
+        } else {
+            open_bt_pairing(ctx);
+            out.did = true;
+        }
+    }
+
+    Page* top = stack_.top();
+    if (routed)
+        top = nullptr;
+
+    const HdKeyRemap::Axis axis = top != nullptr ? remap_.axis(*this, buttons) : HdKeyRemap::Axis{};
+    const bool across = axis.move != HdKeyRemap::Axis::Move::None;
+    if (top != nullptr) {
+        bool moved = false;
+        if (across) {
+            moved = remap_.apply(axis, nav_);
+        } else if (buttons.has_any({UiEvent::Up})) {
+            moved = nav_.move(Navigator::Direction::Up);
+        } else if (buttons.has_any({UiEvent::Down})) {
+            moved = nav_.move(Navigator::Direction::Down);
+        }
+        if (moved) {
+            top->set_selection(nav_.index());
+            repaint_ = true;
+        }
+    }
+
+    if (top != nullptr) {
+        UiEvent forwarded = *ev;
+        constexpr std::uint16_t kSides = UiEvent::Left | UiEvent::Right;
+        forwarded.buttons = across ? buttons.without({kSides}) : buttons;
+
+        const HdKeyRemap::Refresh rw = remap_.refresh(*this, forwarded);
+        Transition t = top->handle(rw.ev);
+
+        if (top->selection() != nav_.index())
+            nav_.set_index(top->selection());
+        if (rw.one_page) {
+            const HdKeyRemap::Settled s = HdKeyRemap::settle(t, stack_.depth());
+            if (s.dropped)
+                disarm_launches_(ctx);
+            t = s.t;
+        }
+        apply(t, ctx);
+
+        repaint_ = true;
+        out.did = true;
+    }
+    return out;
+}
+
 bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
     ++pumps_;
 
@@ -780,114 +896,10 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
         }
     }
 
-    std::optional<UiEvent> ev;
-    if (ctx.keys) {
-        const Page* rt = stack_.top();
-        const bool reboot_row = rt != nullptr
-            && rt->id() == PageId::System
-            && rt->selection().v == static_cast<std::uint32_t>(SystemItem::Reboot);
-        const bool browser = rt != nullptr && rt->id() == PageId::Browser;
-        ctx.keys->set_repeat_all(reboot_row || browser);
-        ev = ctx.keys->pop();
-    }
-
-    if (ev.has_value()) {
-
-        if (bootcore_armed_) {
-            bootcore_armed_ = false;
-            ++bootcore_cancels_;
-        }
-
-        const UiButtonMask buttons = ev->buttons;
-
-        constexpr std::uint16_t kRearm = UiEvent::Menu
-            | UiEvent::Select
-            | UiEvent::Up
-            | UiEvent::Down
-            | UiEvent::Left
-            | UiEvent::Right
-            | UiEvent::Plus
-            | UiEvent::Minus;
-        if (buttons.has_any({kRearm})) {
-            ++help_rearms_;
-            if (ctx.clock) {
-                deadlines_.rearm_help(ctx.clock->now());
-            }
-        }
-
-        if (!menu_has_focus()) {
-            if (buttons.has_any({UiEvent::Menu})) {
-                if (osd_open()) {
-
-                    stack_.clear();
-                    seed_navigator();
-                    arm_auto_pop(ctx);
-                    show_latch_.mark_closed();
-                    ++overlay_trades_;
-                }
-                open_root(ctx);
-                did = true;
-            }
-            return did;
-        }
-
-        bool routed = false;
-        if ((ev->raw.v & KeyDecoder::kUpstroke) == 0 && (ev->raw.v & 0xFFFFu) == KEY_F11) {
-            routed = true;
-            const Page* run = stack_.top();
-            const bool mid_script = run != nullptr && run->holds_pairing_hotkey();
-            if (mid_script) {
-                ++bt_refusals_;
-            } else {
-                open_bt_pairing(ctx);
-                did = true;
-            }
-        }
-
-        Page* top = stack_.top();
-        if (routed)
-            top = nullptr;
-
-        const HdKeyRemap::Axis axis = top != nullptr ? remap_.axis(*this, buttons)
-                                                     : HdKeyRemap::Axis{};
-        const bool across = axis.move != HdKeyRemap::Axis::Move::None;
-        if (top != nullptr) {
-            bool moved = false;
-            if (across) {
-                moved = remap_.apply(axis, nav_);
-            } else if (buttons.has_any({UiEvent::Up})) {
-                moved = nav_.move(Navigator::Direction::Up);
-            } else if (buttons.has_any({UiEvent::Down})) {
-                moved = nav_.move(Navigator::Direction::Down);
-            }
-            if (moved) {
-                top->set_selection(nav_.index());
-                repaint_ = true;
-            }
-        }
-
-        if (top != nullptr) {
-            UiEvent forwarded = *ev;
-            constexpr std::uint16_t kSides = UiEvent::Left | UiEvent::Right;
-            forwarded.buttons = across ? buttons.without({kSides}) : buttons;
-
-            const HdKeyRemap::Refresh rw = remap_.refresh(*this, forwarded);
-            Transition t = top->handle(rw.ev);
-
-            if (top->selection() != nav_.index())
-                nav_.set_index(top->selection());
-            if (rw.one_page) {
-                const HdKeyRemap::Settled s = HdKeyRemap::settle(t, stack_.depth());
-                if (s.dropped)
-                    disarm_launches_(ctx);
-                t = s.t;
-            }
-            apply(t, ctx);
-
-            repaint_ = true;
-            did = true;
-        }
-    }
+    const KeyPhase key = pump_key_(ctx);
+    did = did || key.did;
+    if (key.round_over)
+        return did;
 
     if (show_latch_.on_open(osd_open())) {
 
@@ -1090,11 +1102,11 @@ void MenuModel::drop_pages_() noexcept {
 
 void MenuModel::disarm_launches_(PageContext& ctx) noexcept {
     if (ctx.launches.browser)
-        ctx.launches.browser->pending.reset();
+        ctx.launches.browser->disarm();
     if (ctx.launches.script)
-        ctx.launches.script->pending.reset();
+        ctx.launches.script->disarm();
     if (ctx.launches.confirm)
-        ctx.launches.confirm->pending.reset();
+        ctx.launches.confirm->disarm();
 }
 
 void MenuModel::close_osd() noexcept {
@@ -1124,7 +1136,7 @@ void MenuModel::set_status_words(StatusView s) noexcept {
 BuildEnv MenuModel::build_env(proto::SubmenuNo page) const noexcept {
     BuildEnv env;
 
-    env.hdmask = proto::OsdMask{static_cast<std::uint16_t>(hd_mask_.v & 0xFFFFu)};
+    env.hdmask = hd_mask_.osd_word();
     env.page = page;
     env.flat = flat_;
 
@@ -1136,7 +1148,9 @@ BuildEnv MenuModel::build_env(proto::SubmenuNo page) const noexcept {
         if (identity_.copy(cid)) {
             if (!cid.cue_dir.empty())
                 env.cue_dir = cid.cue_dir;
-            env.slots = cid.slots.first(cid.slots.size() > 255 ? 255 : cid.slots.size());
+
+            constexpr std::size_t kSlotsInAByte = std::numeric_limits<std::uint8_t>::max();
+            env.slots = cid.slots.first(std::min(cid.slots.size(), kSlotsInAByte));
             env.image_no_zip = cid.image_no_zip;
         }
     }
@@ -1205,7 +1219,7 @@ void MenuModel::open_root_(PageContext& ctx, bool hd_allowed) {
             continue;
         if (row.arm == RootArm::System) {
 
-            p->set_selection(RowIndex{static_cast<std::uint32_t>(SystemItem::Exit)});
+            p->set_selection(system_row_of(SystemItem::Exit));
         }
         stack_.push(static_cast<std::unique_ptr<Page>&&>(p));
         forget_hd_window_(stack_.depth() - 1);
@@ -1238,7 +1252,7 @@ void MenuModel::open_bt_pairing(PageContext& ctx) {
     ScriptLaunch::Request req;
     req.kind = ScriptKind::BtPair;
     req.bt_reset = ctx.bt_reset_before_pair;
-    ctx.launches.script->pending = static_cast<ScriptLaunch::Request&&>(req);
+    (void)ctx.launches.script->arm(static_cast<ScriptLaunch::Request&&>(req));
     const auto kind = osd_open() ? Transition::Kind::Replace : Transition::Kind::Push;
     apply(Transition{kind, PageId::ScriptRun}, ctx);
 }

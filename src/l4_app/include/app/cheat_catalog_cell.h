@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "cores/cheat_geometry.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 
@@ -22,8 +23,7 @@ struct CheatCatalog {
         std::uint16_t len = 0;
     };
 
-    std::uint32_t unit = 16;
-    std::uint16_t max_active = 128;
+    cores::CheatGeometry geometry{};
     std::uint8_t count = 0;
     std::uint16_t used = 0;
     std::uint16_t dropped = 0;

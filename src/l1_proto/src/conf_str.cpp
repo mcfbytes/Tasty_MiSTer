@@ -3,6 +3,7 @@
 #include "conf_str_detail.h"
 
 #include <cctype>
+#include <limits>
 #include <optional>
 
 namespace mister::proto {
@@ -153,7 +154,6 @@ std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
             fs.letter = (it.kind == ItemKind::FileSlot) ? 'F' : 'S';
             fs.selentry = static_cast<std::uint8_t>(selentry);
             fs.digit = it.digit;
-            fs.has_digit = it.has_digit;
             fs.opensave = it.opensave;
             fs.store_name = it.store_name;
 
@@ -161,9 +161,9 @@ std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
                 fs.ext.assign(ext.data(), ext.size());
             }
 
-            fs.ioctl_index = fs.has_digit ? fs.digit
-                : (fs.letter == 'F')      ? static_cast<std::uint8_t>(selentry + 1u)
-                                          : static_cast<std::uint8_t>(0u);
+            fs.ioctl_index = fs.digit ? fs.digit->io_index()
+                : (fs.letter == 'F')  ? IoIndex{static_cast<std::uint8_t>(selentry + 1u)}
+                                      : IoIndex{};
             if (fs.letter == 'F')
                 fs.load_addr = parse_load_addr(ast.subfield(it, 3));
             const Item* addon = bound_addon(items, n);
@@ -180,7 +180,7 @@ std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
 std::uint32_t parse_load_addr(std::string_view field) noexcept {
     constexpr unsigned kHexDigitBits = 4;
     constexpr unsigned kLetterDigitBase = 10;
-    constexpr std::uint64_t kSaturated = 0xFFFF'FFFFu;
+    constexpr std::uint64_t kSaturated = std::numeric_limits<std::uint32_t>::max();
     std::size_t i = 0;
     while (i < field.size() && (field[i] == ' ' || (field[i] >= '\t' && field[i] <= '\r')))
         ++i;
@@ -219,13 +219,20 @@ FileSlotHit ConfStr::find_slot_in(
     char type,
     std::uint8_t index
 ) noexcept {
+    return find_slot_in(slots, type, FileSlotDigit{index});
+}
+
+FileSlotHit ConfStr::find_slot_in(
+    std::span<const ConfStrEntry> slots,
+    char type,
+    FileSlotDigit digit
+) noexcept {
     constexpr int kCaseBit = 0x20;
     const char want = (type >= 'a' && type <= 'z') ? static_cast<char>(type - kCaseBit) : type;
     const ConfStrEntry* hit = nullptr;
     for (const ConfStrEntry& s : slots) {
 
-        const std::uint8_t num = s.has_digit ? s.digit : 0u;
-        if (s.letter == want && num == index)
+        if (s.letter == want && FileSlotDigit::or_zero(s.digit) == digit)
             hit = &s;
     }
     if (hit != nullptr)
@@ -253,7 +260,7 @@ std::optional<ConfStrFileRow> ConfStr::menu_pick(ItemOrdinal item, IoIndex drawn
     const Item* addon = bound_addon(items, item.v);
     return ConfStrFileRow{
         ast_.subfield(it, 1),
-        drawn.v,
+        drawn,
         parse_load_addr(ast_.subfield(it, 3)),
         it.opensave,
         addon_list(ast_, addon),
@@ -264,12 +271,12 @@ std::optional<ConfStrFileRow> ConfStr::menu_pick(ItemOrdinal item, IoIndex drawn
 std::vector<ConfStrFileRow> ConfStr::remembered_rows() const {
     std::vector<ConfStrFileRow> rows;
     for (const Item& it : ast_.items()) {
-        if (it.kind != ItemKind::FileSlot || !it.store_name || !it.has_digit)
+        if (it.kind != ItemKind::FileSlot || !it.store_name || !it.digit)
             continue;
         rows.push_back(
             ConfStrFileRow{
                 ast_.subfield(it, 1),
-                it.digit,
+                it.digit->io_index(),
                 parse_load_addr(ast_.subfield(it, 3)),
                 it.opensave
             }
@@ -281,9 +288,9 @@ std::vector<ConfStrFileRow> ConfStr::remembered_rows() const {
 std::vector<IoIndex> ConfStr::remembered_mounts() const {
     std::vector<IoIndex> slots;
     for (const Item& it : ast_.items()) {
-        if (it.kind != ItemKind::MountSlot || !it.store_name || !it.has_digit)
+        if (it.kind != ItemKind::MountSlot || !it.store_name || !it.digit)
             continue;
-        slots.push_back(IoIndex{it.digit});
+        slots.push_back(it.digit->io_index());
     }
     return slots;
 }
@@ -294,7 +301,7 @@ BlockSlotMask ConfStr::mount_slot_mask() const noexcept {
         if (it.kind != ItemKind::MountSlot)
             continue;
 
-        mask = mask.with_or_all(SlotIndex{it.has_digit ? it.digit : std::uint8_t{0}});
+        mask = mask.with_or_all(FileSlotDigit::or_zero(it.digit).slot());
     }
     return mask;
 }

@@ -3,11 +3,19 @@
 
 #include <cstdint>
 
+#include "cores/types.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "svc/disc_read_service.h"
 #include "svc/track.h"
 
 namespace mister::cores {
+
+struct StockTrack {
+    HeadLba start{};
+    SectorCount index1{};
+    friend constexpr bool operator==(StockTrack, StockTrack) = default;
+};
 
 class SaturnStockToc {
     TASTY_SEAT_RESIDENT(RT);
@@ -15,19 +23,21 @@ class SaturnStockToc {
 public:
     void learn(const svc::DiscGeometry& geom) noexcept;
 
-    [[nodiscard]] std::int32_t start_of(std::int32_t track) const noexcept {
-        if (track < 0 || track > static_cast<std::int32_t>(svc::kMaxTracks))
-            return 0;
-        return start_[track];
+    [[nodiscard]] HeadLba start_of(svc::TrackIndex track) const noexcept {
+        return row(track).start;
     }
 
-    [[nodiscard]] std::int32_t index1_of(std::int32_t track) const noexcept {
-        return index1_[track];
+    [[nodiscard]] SectorCount index1_of(svc::TrackIndex track) const noexcept {
+        return row(track).index1;
     }
 
 private:
-    std::int32_t start_[svc::kMaxTracks + 1] = {};
-    std::int32_t index1_[svc::kMaxTracks + 1] = {};
+    [[nodiscard]] StockTrack row(svc::TrackIndex track) const noexcept {
+        const auto r = rows_.find(track);
+        return r ? *r : StockTrack{};
+    }
+
+    infra::IndexedArray<StockTrack, svc::kMaxTracks + 1, svc::TrackIndex> rows_{};
 };
 
 }

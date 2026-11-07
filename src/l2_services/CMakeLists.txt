@@ -92,6 +92,10 @@ target_link_libraries(mister_services PUBLIC ${TASTY_MINIZIP_LIBRARY})
 target_sources(mister_services PRIVATE src/vfs_zip.cpp)
 
 tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
+  svc/modeline_item.h
+  svc/msf.h
+  svc/packed_keys.h
+  svc/rumble_pad_set.h
   svc/adv7513_breaker.h
   svc/adv7513_bus.h
   svc/adv7513_init_options.h
@@ -115,6 +119,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/button_map.h
   svc/cec_state_machine.h
   svc/chd_backing.h
+  svc/chd_geometry.h
   svc/chd_meta_row.h
   svc/chd_prefetch.h
   svc/chd_source.h

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <concepts>
 #include <cstdint>
+#include <iterator>
 
 #include "infra/error.h"
 #include "infra/park_like.h"
@@ -54,7 +55,7 @@ public:
         int left = ms;
         int n = 0;
         for (;;) {
-            n = ::poll(fds, 3, left);
+            n = ::poll(fds, static_cast<nfds_t>(std::size(fds)), left);
             if (n >= 0 || errno != EINTR)
                 break;
             if (ms > 0)
@@ -66,15 +67,12 @@ public:
         }
         if constexpr (kSeatChecksEnabled) {
             if (n < 0)
-                fatal(
-                    Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)},
-                    "SeatPark poll"
-                );
+                fatal(infra::errno_error(Errc::os, ERR_SITE(), errno), "SeatPark poll");
             for (const pollfd& f : fds)
                 if ((f.revents & POLLNVAL) != 0)
                     fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "SeatPark polls a closed fd");
         }
-        extra_ready_ = n > 0 && (fds[2].revents & POLLIN) != 0;
+        extra_ready_ = n > 0 && (fds[kExtraSlot].revents & POLLIN) != 0;
         if (n > 0 && (fds[0].revents & POLLIN) != 0) {
             ++wakes_;
             wake_.drain();
@@ -90,6 +88,8 @@ public:
     [[nodiscard]] bool extra_ready() const noexcept { return extra_ready_; }
 
 private:
+    static constexpr std::size_t kExtraSlot = 2;
+
     static int remaining_ms_(std::chrono::steady_clock::time_point deadline) noexcept {
         const auto left = std::chrono::ceil<std::chrono::milliseconds>(
             deadline - std::chrono::steady_clock::now()

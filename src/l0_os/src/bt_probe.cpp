@@ -7,10 +7,10 @@
 
 #include <cerrno>
 #include <cstdint>
-#include <cstring>
 #include <span>
 
 #include "infra/byte_view.h"
+#include "infra/endian.h"
 #include "infra/unique_fd.h"
 
 namespace mister::os {
@@ -26,7 +26,7 @@ struct HciDevReq {
     std::uint32_t dev_opt;
 };
 
-constexpr std::size_t kHciMaxDev = 16;
+constexpr std::uint16_t kHciMaxDev = 16;
 
 struct HciDevListReq {
     std::uint16_t dev_num;
@@ -37,18 +37,13 @@ struct HciDevListReq {
 }
 
 bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept {
-    enum : unsigned { kByteBits = 8, kBits16 = 16, kBits24 = 24 };
-
     constexpr std::size_t kHdrBytes = 4;
     constexpr std::size_t kReqBytes = 8;
     constexpr std::size_t kOptOff = 4;
     if (reply.size() < kHdrBytes)
         return false;
-    const auto byte_at = [&](std::size_t i) {
-        return static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(reply[i]));
-    };
 
-    std::size_t n = byte_at(0) | (byte_at(1) << kByteBits);
+    std::size_t n = infra::load_le<std::uint16_t>(reply.first<2>());
 
     const std::size_t fits = (reply.size() - kHdrBytes) / kReqBytes;
     if (n > fits)
@@ -57,10 +52,7 @@ bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept {
         n = kHciMaxDev;
     for (std::size_t i = 0; i < n; ++i) {
         const std::size_t o = kHdrBytes + i * kReqBytes + kOptOff;
-        const std::uint32_t opt = byte_at(o)
-            | (byte_at(o + 1) << kByteBits)
-            | (byte_at(o + 2) << kBits16)
-            | (byte_at(o + 3) << kBits24);
+        const std::uint32_t opt = infra::load_le<std::uint32_t>(reply.subspan(o).first<4>());
         if ((opt & (1u << kHciUpBit)) != 0u)
             return true;
     }
@@ -80,14 +72,14 @@ bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept {
             return false;
         }
 
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(e)});
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), e));
     }
     UniqueFd guard{fd};
 
     HciDevListReq dl{};
-    dl.dev_num = static_cast<std::uint16_t>(kHciMaxDev);
+    dl.dev_num = kHciMaxDev;
     if (::ioctl(fd, kHciGetDevList, &dl) < 0) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
     }
 
     return hci_devlist_any_up(infra::bytes_of(dl));

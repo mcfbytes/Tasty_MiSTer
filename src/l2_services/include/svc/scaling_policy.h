@@ -10,7 +10,6 @@
 namespace mister::svc {
 
 struct ScalingPolicy {
-    TASTY_SEAT_EXEMPT(component);
     std::uint16_t scrw = 0;
     std::uint16_t scrh = 0;
     VscaleMode vscale_mode = VscaleMode::Fit;

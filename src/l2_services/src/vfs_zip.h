@@ -9,13 +9,12 @@
 
 #include "infra/error.h"
 #include "svc/vfs.h"
+#include "vfs_detail.h"
 
 namespace mister::svc::detail {
 
 struct ZipListing {
-    std::vector<std::string> names;
-    std::vector<std::uint64_t> sizes;
-    std::vector<char> dirs;
+    std::vector<ZipMember> members;
 };
 
 [[nodiscard]] Ex<ZipListing> zip_list(const std::string& archive);

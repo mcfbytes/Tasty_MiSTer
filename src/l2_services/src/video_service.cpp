@@ -127,6 +127,87 @@ TokenList tokenize_commas(std::string_view s) {
     return out;
 }
 
+constexpr std::size_t kArityPreset = 1;
+constexpr std::size_t kArityCvtFractional = 2;
+constexpr std::size_t kArityCvt = 3;
+constexpr std::size_t kArityTimings = 9;
+constexpr std::size_t kArityTimingsPolarity = 11;
+constexpr std::size_t kArityRaw = 21;
+
+constexpr std::size_t kTokenWidth = 0;
+constexpr std::size_t kTokenHeight = 1;
+constexpr std::size_t kTokenRate = 2;
+constexpr std::size_t kTokenPixelClockKhz = 8;
+constexpr std::size_t kTokenShortHpol = 9;
+constexpr std::size_t kTokenShortVpol = 10;
+constexpr double kKhzPerMhz = 1000.0;
+
+constexpr std::uint32_t kTokenByteMask = 0xFF;
+
+struct ModeSpec {
+    std::array<std::uint32_t, kMaxTokens> val{};
+    TokenList integers{};
+    TokenList flags{};
+    double rate = 0.0;
+};
+
+std::optional<ModeSpec> scan_mode(std::string_view spec) {
+    if (spec.empty())
+        return std::nullopt;
+    const TokenList tokens = tokenize_commas(spec);
+    if (tokens.count == 0)
+        return std::nullopt;
+    ModeSpec s{};
+    std::size_t run = 0;
+    for (; run < tokens.count; ++run) {
+        const auto parsed = parse_u32_base0(tokens.items[run]);
+        if (!parsed)
+            break;
+        s.val[run] = *parsed;
+    }
+
+    if (run == kArityCvtFractional && tokens.count > kArityCvtFractional) {
+        if (const auto parsed = parse_double_all(tokens.items[run])) {
+            s.rate = *parsed;
+            ++run;
+        }
+    }
+    for (std::size_t i = 0; i < tokens.count; ++i) {
+        TokenList& side = (i < run) ? s.integers : s.flags;
+        side.items[side.count++] = tokens.items[i];
+    }
+    return s;
+}
+
+[[nodiscard]] Ex<void> apply_mode_flags(const ModeSpec& s, Modeline& m) {
+    for (std::size_t i = 0; i < s.flags.count; ++i) {
+        const std::string_view flag = s.flags.items[i];
+        if (iequals(flag, "+vsync"))
+            m.vpol = true;
+        else if (iequals(flag, "-vsync"))
+            m.vpol = false;
+        else if (iequals(flag, "+hsync"))
+            m.hpol = true;
+        else if (iequals(flag, "-hsync"))
+            m.hpol = false;
+        else if (iequals(flag, "cvt"))
+            m.rb = rb_byte(ReducedBlanking::Off);
+        else if (iequals(flag, "cvtrb"))
+            m.rb = rb_byte(ReducedBlanking::On);
+        else if (iequals(flag, "pr"))
+            m.pixel_repeat = true;
+        else
+            return std::unexpected(
+                Error{
+                    Errc::bad_format,
+                    ERR_SITE(),
+                    static_cast<std::uint32_t>(s.integers.count + i)
+                }
+            );
+    }
+    return {};
+}
+
 }
 
 std::string_view YcMode::key_view() const noexcept {
@@ -206,96 +287,37 @@ VideoService VideoService::create() {
 
 Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) const {
 
-    constexpr std::size_t kTokPllFirst = 9;
-    constexpr std::size_t kTokDocumentedForm = 21;
-    constexpr std::size_t kTokHpol = 21;
-    constexpr std::size_t kTokVpol = 22;
-    constexpr std::size_t kTokVic = 23;
-    constexpr std::size_t kTokRb = 24;
-    constexpr std::size_t kTokPixelRepeat = 25;
-    constexpr std::uint32_t kByteMask = 0xFF;
-    constexpr std::size_t kTokPresetForm = 1;
-    constexpr std::size_t kTokRetryForm = 2;
-    constexpr std::size_t kTokTripleForm = 3;
-    constexpr std::size_t kTokNineForm = 9;
-    constexpr std::size_t kTokElevenForm = 11;
-    constexpr std::size_t kTokPresetIndex = 0, kTokWidth = 0, kTokHeight = 1, kTokRate = 2;
-    constexpr std::size_t kTokPixelClockKhz = 8;
-    constexpr std::size_t kTokNineHpol = 9, kTokNineVpol = 10;
-    constexpr double kKhzPerMhz = 1000.0;
-    constexpr std::size_t kTimings = 8;
-    if (spec.empty()) {
+    const auto scanned = scan_mode(spec);
+    if (!scanned)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    }
-
-    const TokenList tokens = tokenize_commas(spec);
-    const std::size_t token_cnt = tokens.count;
-    if (token_cnt == 0) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    }
-
-    std::array<std::uint32_t, kMaxTokens> val{};
-    double valf = 0.0;
-    std::size_t cnt = 0;
-    for (; cnt < token_cnt; ++cnt) {
-        const auto parsed = parse_u32_base0(tokens.items[cnt]);
-        if (!parsed)
-            break;
-        val[cnt] = *parsed;
-    }
-
-    if (cnt == kTokRetryForm && token_cnt > kTokRetryForm) {
-        if (const auto parsed = parse_double_all(tokens.items[cnt])) {
-            valf = *parsed;
-            ++cnt;
-        }
-    }
+    const ModeSpec& s = *scanned;
 
     video_timing::ParsedMode out{};
     Modeline& m = out.mode;
-    m.rb = 1;
+    m.rb = rb_byte(ReducedBlanking::On);
 
-    for (std::size_t i = cnt; i < token_cnt; ++i) {
-        const std::string_view flag = tokens.items[i];
-        if (iequals(flag, "+vsync"))
-            m.vpol = true;
-        else if (iequals(flag, "-vsync"))
-            m.vpol = false;
-        else if (iequals(flag, "+hsync"))
-            m.hpol = true;
-        else if (iequals(flag, "-hsync"))
-            m.hpol = false;
-        else if (iequals(flag, "cvt"))
-            m.rb = 0;
-        else if (iequals(flag, "cvtrb"))
-            m.rb = 1;
-        else if (iequals(flag, "pr"))
-            m.pixel_repeat = true;
-        else {
-            return std::unexpected(
-                Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(i)}
-            );
-        }
-    }
+    if (auto flagged = apply_mode_flags(s, m); !flagged)
+        return std::unexpected(flagged.error());
 
-    if (cnt == kTokPresetForm) {
+    const std::size_t cnt = s.integers.count;
+    if (cnt == kArityPreset) {
 
         out.how = ModeRequest::PresetIndex;
-        out.preset_index = val[kTokPresetIndex];
+        out.preset_index = s.val[kTokenWidth];
         return out;
     }
 
-    if (cnt == kTokTripleForm) {
+    if (cnt == kArityCvt) {
 
-        const double rate = (valf != 0.0) ? valf : static_cast<double>(val[kTokRate]);
+        const double rate = (s.rate != 0.0) ? s.rate : static_cast<double>(s.val[kTokenRate]);
 
         const bool hpol = m.hpol;
         const bool vpol = m.vpol;
+        const Resolution active{s.val[kTokenWidth], s.val[kTokenHeight]};
         out.mode = calculate_cvt(
-            val[kTokWidth],
-            val[kTokHeight],
+            active,
             static_cast<float>(rate),
-            m.rb,
+            reduced_blanking_of(m.rb).value_or(ReducedBlanking::On),
             supports_pr_
         );
         out.mode.hpol = hpol;
@@ -304,42 +326,50 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
         return out;
     }
 
-    if (cnt >= kTokDocumentedForm) {
+    if (cnt >= kArityRaw) {
 
         video_timing::assign_timings(
             m,
-            std::span<const std::uint32_t, kTimings>(val.data() + 1, kTimings)
+            std::span<const std::uint32_t, kModelineTimings>(
+                s.val.data() + item(ModelineItem::Hact),
+                kModelineTimings
+            )
         );
         PllBlock pll{};
         for (std::size_t i = 0; i < pll.size(); ++i)
-            pll[i] = val[kTokPllFirst + i];
+            pll[i] = s.val[item(ModelineItem::PllFirst) + i];
         out.raw_pll = pll;
-        if (cnt > kTokHpol)
-            m.hpol = (val[kTokHpol] != 0);
-        if (cnt > kTokVpol)
-            m.vpol = (val[kTokVpol] != 0);
-        if (cnt > kTokVic)
-            m.vic = static_cast<std::uint8_t>(val[kTokVic] & kByteMask);
-        if (cnt > kTokRb)
-            m.rb = static_cast<std::uint8_t>(val[kTokRb] & kByteMask);
-        if (cnt > kTokPixelRepeat)
-            m.pixel_repeat = (val[kTokPixelRepeat] != 0);
+        if (cnt > item(ModelineItem::Hpol)) {
+            m.hpol = (s.val[item(ModelineItem::Hpol)] != 0);
+        }
+        if (cnt > item(ModelineItem::Vpol)) {
+            m.vpol = (s.val[item(ModelineItem::Vpol)] != 0);
+        }
+        if (cnt > item(ModelineItem::Vic)) {
+            m.vic = static_cast<std::uint8_t>(s.val[item(ModelineItem::Vic)] & kTokenByteMask);
+        }
+        if (cnt > item(ModelineItem::Rb)) {
+            m.rb = static_cast<std::uint8_t>(s.val[item(ModelineItem::Rb)] & kTokenByteMask);
+        }
+        if (cnt > item(ModelineItem::PixelRepeat)) {
+            m.pixel_repeat = (s.val[item(ModelineItem::PixelRepeat)] != 0);
+        }
 
         out.how = ModeRequest::RawModeline;
         return out;
     }
 
-    if (cnt == kTokNineForm || cnt == kTokElevenForm) {
+    if (cnt == kArityTimings || cnt == kArityTimingsPolarity) {
         video_timing::assign_timings(
             m,
-            std::span<const std::uint32_t, kTimings>(val.data(), kTimings)
+            std::span<const std::uint32_t, kModelineTimings>(s.val.data(), kModelineTimings)
         );
 
-        m.fpix_mhz = static_cast<double>(val[kTokPixelClockKhz]) / kKhzPerMhz;
-        if (cnt == kTokElevenForm) {
+        m.fpix_mhz = static_cast<double>(s.val[kTokenPixelClockKhz]) / kKhzPerMhz;
+        if (cnt == kArityTimingsPolarity) {
 
-            m.hpol = (val[kTokNineHpol] != 0);
-            m.vpol = (val[kTokNineVpol] != 0);
+            m.hpol = (s.val[kTokenShortHpol] != 0);
+            m.vpol = (s.val[kTokenShortVpol] != 0);
             out.how = ModeRequest::Eleven;
         } else {
             out.how = ModeRequest::Nine;

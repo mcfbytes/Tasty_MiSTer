@@ -12,9 +12,11 @@
 #include "cores/movie_archive.h"
 #include "infra/ascii.h"
 #include "infra/byte_view.h"
+#include "infra/endian.h"
 #include "svc/chd_source.h"
 #include "svc/disc_engine.h"
 #include "svc/file.h"
+#include "svc/msf.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
@@ -24,7 +26,7 @@ using infra::ieq;
 namespace {
 
 using CR = IMovieCodec::Refusal;
-using Emu = PsxMovieCodec::Emu;
+using MovieEmu = PsxMovieCodec::Emu;
 using Layout = PsxMovieCodec::Layout;
 using FirmwareRegion = PsxMovieCodec::FirmwareRegion;
 
@@ -88,21 +90,24 @@ std::optional<bool> boolean(std::string_view v) {
     return std::nullopt;
 }
 
-std::optional<std::uint8_t> column_role(std::string_view name) {
+using ColumnRole = PsxMovieCodec::ColumnRole;
+using MovieCommand = PsxMovieCodec::ColumnRole::MovieCommand;
+
+std::optional<ColumnRole> column_role(std::string_view name) {
     if (name == "Disc Select" || name == "Disk Index")
-        return PsxMovieCodec::kColValue;
+        return ColumnRole::command(MovieCommand::Value);
     if (name == "Open" || name == "Close" || name == "Open Tray" || name == "Close Tray")
-        return PsxMovieCodec::kColTray;
+        return ColumnRole::command(MovieCommand::Tray);
     if (name == "Reset")
-        return PsxMovieCodec::kColReset;
+        return ColumnRole::command(MovieCommand::Reset);
     if (name == "Power")
-        return PsxMovieCodec::kColPower;
+        return ColumnRole::command(MovieCommand::Power);
     if (!name.starts_with("P1 "))
         return std::nullopt;
     name.remove_prefix(3);
     for (const PsxMovieCodec::Button& b : PsxMovieCodec::kButtons) {
         if (name == b.octoshock || name == b.nymashock)
-            return b.bit.v;
+            return ColumnRole::pad(b.bit.v);
     }
     return std::nullopt;
 }
@@ -119,14 +124,14 @@ std::optional<IMovieCodec::Facts> read_log_key(std::string_view key, IMovieCodec
         const auto role = column_role(name);
         if (!role || f.columns_n == f.columns.size())
             return std::nullopt;
-        if (*role < 14) {
-            if ((bits >> *role) & 1u)
+        if (role->is_pad()) {
+            if ((bits & role->pad_mask()) != 0)
                 return std::nullopt;
-            bits |= 1u << *role;
+            bits |= role->pad_mask();
         }
-        f.columns[f.columns_n++] = *role;
+        f.columns[f.columns_n++] = role->v;
     }
-    if (bits != 0x3FFFu)
+    if (bits != PsxMovieCodec::kPadBitMask)
         return std::nullopt;
     return f;
 }
@@ -144,17 +149,6 @@ struct Cue {
     std::vector<std::string> files;
     std::vector<CueTrack> tracks;
 };
-
-std::optional<std::uint32_t> msf(std::string_view s) {
-    if (s.size() != 8 || s[2] != ':' || s[5] != ':')
-        return std::nullopt;
-    const auto m = decimal(s.substr(0, 2), 2);
-    const auto sec = decimal(s.substr(3, 2), 2);
-    const auto fr = decimal(s.substr(6, 2), 2);
-    if (!m || !sec || !fr || *sec >= 60 || *fr >= 75)
-        return std::nullopt;
-    return (*m * 60 + *sec) * 75 + *fr;
-}
 
 [[nodiscard]] Ex<Cue> parse_cue(std::string_view text) {
     Cue c;
@@ -176,7 +170,7 @@ std::optional<std::uint32_t> msf(std::string_view s) {
                 name = fl.f[1];
                 type = fl.f[2];
             }
-            if (name.empty() || !ieq(type, "BINARY") || c.files.size() == 99)
+            if (name.empty() || !ieq(type, "BINARY") || c.files.size() == PsxMovieCodec::kMaxFiles)
                 return std::unexpected(refuse(CR::Disk, ERR_SITE()));
             c.files.emplace_back(name);
         } else if (ieq(kw, "TRACK")) {
@@ -197,7 +191,7 @@ std::optional<std::uint32_t> msf(std::string_view s) {
             c.tracks.push_back(t);
         } else if (ieq(kw, "INDEX")) {
             const auto n = decimal(fl.f[1], 2);
-            const auto at = msf(fl.f[2]);
+            const auto at = PsxMovieCodec::MovieTimecode::parse(fl.f[2]);
             if (c.tracks.empty() || !n || !at)
                 return std::unexpected(refuse(CR::Disk, ERR_SITE()));
             CueTrack& t = c.tracks.back();
@@ -226,7 +220,7 @@ std::optional<std::uint32_t> msf(std::string_view s) {
             return std::unexpected(refuse(CR::Disk, ERR_SITE()));
         }
     }
-    if (c.tracks.empty() || c.tracks.size() > 99)
+    if (c.tracks.empty() || c.tracks.size() > PsxMovieCodec::kMaxFiles)
         return std::unexpected(refuse(CR::Disk, ERR_SITE()));
     for (const CueTrack& t : c.tracks)
         if (!t.index1)
@@ -238,24 +232,33 @@ std::optional<std::uint32_t> msf(std::string_view s) {
     return c;
 }
 
-std::array<std::uint8_t, 12> le32x3(std::int64_t a, std::int64_t b, std::int64_t c) {
+template <class W>
+void put_toc_word(std::span<std::uint8_t, 4> dst, const W& w) {
+    if constexpr (std::is_integral_v<W>)
+        infra::store_le<std::uint32_t>(dst, static_cast<std::uint32_t>(w));
+    else
+        w.store_le32(dst);
+}
+
+template <class A, class B, class C>
+std::array<std::uint8_t, 12> le32x3(const A& a, const B& b, const C& c) {
     std::array<std::uint8_t, 12> out{};
-    const std::array<std::int64_t, 3> v{a, b, c};
-    for (std::size_t k = 0; k < 3; ++k)
-        for (unsigned i = 0; i < 4; ++i)
-            out[4 * k + i] = static_cast<std::uint8_t>(static_cast<std::uint32_t>(v[k]) >> (8 * i));
+    const std::span<std::uint8_t, 12> all(out);
+    put_toc_word(all.subspan<0, 4>(), a);
+    put_toc_word(all.subspan<4, 4>(), b);
+    put_toc_word(all.subspan<8, 4>(), c);
     return out;
 }
 
 struct TocTrack {
-    std::uint8_t number = 0;
+    svc::TrackNumber number{};
     bool data = false;
     bool mode2 = false;
     std::uint8_t flags = 0;
-    std::int64_t lba = 0;
+    proto::BlockCount lba{};
 };
 
-std::vector<std::uint8_t> toc_bytes(std::span<const TocTrack> tracks, std::int64_t lead_out) {
+std::vector<std::uint8_t> toc_bytes(std::span<const TocTrack> tracks, proto::BlockCount lead_out) {
     std::vector<std::uint8_t> out;
     out.reserve(PsxMovieCodec::kTocPrefixBytes);
     const auto add = [&out](const std::array<std::uint8_t, 12>& e) {
@@ -325,25 +328,77 @@ constexpr WideIoIndex kBiosDest{0xC0};
 
 }
 
+std::optional<std::uint32_t> PsxMovieCodec::MovieTimecode::parse(std::string_view s) noexcept {
+    constexpr std::size_t kFields = 3;
+    constexpr std::size_t kSeparators = kFields - 1;
+    constexpr std::size_t kLen = kFields * kDigits + kSeparators;
+    if (s.size() != kLen || s[2] != ':' || s[5] != ':')
+        return std::nullopt;
+    const auto m = decimal(s.substr(0, kDigits), kDigits);
+    const auto sec = decimal(s.substr(3, kDigits), kDigits);
+    const auto fr = decimal(s.substr(6, kDigits), kDigits);
+    if (!m || !sec || !fr || *sec >= svc::kSecondsPerMinute || *fr >= svc::kFramesPerSecond)
+        return std::nullopt;
+    return (*m * svc::kSecondsPerMinute + *sec) * svc::kFramesPerSecond + *fr;
+}
+
+namespace {
+
+enum class LayoutField : std::uint8_t {
+    Emu,
+    Region,
+    Platform,
+    LogKey,
+    PadDigital,
+    CardOff,
+    kCount
+};
+
+struct LayoutBits {
+    std::uint8_t shift;
+    std::uint8_t mask;
+};
+
+constexpr std::array<LayoutBits, static_cast<std::size_t>(LayoutField::kCount)> kLayoutBits{{
+    {0, 0x3},
+    {2, 0x3},
+    {4, 0x1},
+    {5, 0x1},
+    {6, 0x1},
+    {7, 0x1},
+}};
+
+constexpr unsigned field_of(std::uint16_t bits, LayoutField f) noexcept {
+    const LayoutBits& row = kLayoutBits[static_cast<std::size_t>(f)];
+    return static_cast<unsigned>((bits >> row.shift) & row.mask);
+}
+
+constexpr unsigned pack_field(LayoutField f, unsigned value) noexcept {
+    const LayoutBits& row = kLayoutBits[static_cast<std::size_t>(f)];
+    return (value & row.mask) << row.shift;
+}
+
+}
+
 Layout Layout::of(std::uint16_t b) noexcept {
     Layout l{};
-    l.emu = static_cast<Emu>(b & 0x3u);
-    l.firmware_region = kRegionByCode[(b >> 2) & 0x3u];
-    l.platform = ((b >> 4) & 1u) != 0;
-    l.log_key = ((b >> 5) & 1u) != 0;
-    l.pad_digital = ((b >> 6) & 1u) != 0;
-    l.card_off = ((b >> 7) & 1u) != 0;
+    l.emu = static_cast<MovieEmu>(field_of(b, LayoutField::Emu));
+    l.firmware_region = kRegionByCode[field_of(b, LayoutField::Region)];
+    l.platform = field_of(b, LayoutField::Platform) != 0;
+    l.log_key = field_of(b, LayoutField::LogKey) != 0;
+    l.pad_digital = field_of(b, LayoutField::PadDigital) != 0;
+    l.card_off = field_of(b, LayoutField::CardOff) != 0;
     return l;
 }
 
 std::uint16_t Layout::bits() const noexcept {
     return static_cast<std::uint16_t>(
-        static_cast<unsigned>(emu)
-        | (std::to_underlying(firmware_region) & 0x3u) << 2
-        | unsigned{platform} << 4
-        | unsigned{log_key} << 5
-        | unsigned{pad_digital} << 6
-        | unsigned{card_off} << 7
+        pack_field(LayoutField::Emu, static_cast<unsigned>(emu))
+        | pack_field(LayoutField::Region, std::to_underlying(firmware_region))
+        | pack_field(LayoutField::Platform, unsigned{platform})
+        | pack_field(LayoutField::LogKey, unsigned{log_key})
+        | pack_field(LayoutField::PadDigital, unsigned{pad_digital})
+        | pack_field(LayoutField::CardOff, unsigned{card_off})
     );
 }
 
@@ -400,9 +455,9 @@ Ex<IMovieCodec::Facts> PsxMovieCodec::header_line(
     } else if (key == "Core") {
 
         if (val == "Octoshock") {
-            l.emu = Emu::Octoshock;
+            l.emu = MovieEmu::Octoshock;
         } else if (val == "Nymashock") {
-            l.emu = Emu::Nymashock;
+            l.emu = MovieEmu::Nymashock;
         } else {
             return std::unexpected(refuse(CR::System, ERR_SITE()));
         }
@@ -486,7 +541,7 @@ Ex<IMovieCodec::Facts> PsxMovieCodec::header_line(
 
 Ex<void> PsxMovieCodec::finish_header(const Facts& f) const noexcept {
     const Layout l = Layout::of(f.layout);
-    if (f.version != 2 || !l.platform || l.emu == Emu::None)
+    if (f.version != 2 || !l.platform || l.emu == MovieEmu::None)
         return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
     if (!l.log_key || !l.pad_digital)
         return std::unexpected(refuse(CR::PortType, ERR_SITE()));
@@ -503,14 +558,15 @@ Ex<IMovieCodec::Frame> PsxMovieCodec::frame(std::string_view line, const Facts& 
     if (line.size() > kLineMax || !starts_log(line))
         return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
     Frame out{};
+    CommandMask commands{};
     std::size_t at = 0;
     for (std::size_t c = 0; c < f.columns_n; ++c) {
         while (at < line.size() && line[at] == '|')
             ++at;
         if (at == line.size())
             return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
-        const std::uint8_t role = f.columns[c];
-        if (role == kColValue) {
+        const ColumnRole role = ColumnRole::of(f.columns[c]);
+        if (!role.is_pad() && role.command() == MovieCommand::Value) {
 
             const std::size_t comma = line.find(',', at);
             if (comma == std::string_view::npos)
@@ -526,19 +582,27 @@ Ex<IMovieCodec::Frame> PsxMovieCodec::frame(std::string_view line, const Facts& 
 
         if (ch <= ' ' || ch >= 0x7F)
             return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
-        if (role == kColTray)
-            return std::unexpected(refuse(CR::Disk, ERR_SITE()));
-        if (role == kColReset) {
-            out.commands = static_cast<std::uint8_t>(out.commands | 0x1u);
-        } else if (role == kColPower) {
-            out.commands = static_cast<std::uint8_t>(out.commands | 0x2u);
-        } else {
-            out.mask[0] |= 1u << role;
+        if (role.is_pad()) {
+            out.mask[0] |= role.pad_mask();
+            continue;
+        }
+        switch (role.command()) {
+            case MovieCommand::Tray:
+                return std::unexpected(refuse(CR::Disk, ERR_SITE()));
+            case MovieCommand::Reset:
+                commands = commands.with_reset();
+                break;
+            case MovieCommand::Power:
+                commands = commands.with_power();
+                break;
+            case MovieCommand::Value:
+                break;
         }
     }
     for (; at < line.size(); ++at)
         if (line[at] != '|')
             return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
+    out.commands = commands.v;
     return out;
 }
 
@@ -597,20 +661,21 @@ Ex<std::vector<std::uint8_t>> PsxMovieCodec::toc_prefix(
     if (file_sizes.size() != c->files.size())
         return std::unexpected(refuse(CR::Disk, ERR_SITE()));
 
-    std::vector<std::int64_t> base(c->files.size() + 1, 0);
+    std::vector<proto::BlockCount> base(c->files.size() + 1);
     for (std::size_t i = 0; i < c->files.size(); ++i)
-        base[i + 1] = base[i] + static_cast<std::int64_t>(file_sizes[i] / kSectorBytes);
+        base[i + 1] = base[i]
+            + proto::BlockCount{static_cast<std::uint32_t>(file_sizes[i] / kSectorBytes)};
     if (file_sizes.front() < kKeySectors * kSectorBytes)
         return std::unexpected(refuse(CR::Disk, ERR_SITE()));
     std::vector<TocTrack> toc;
     toc.reserve(c->tracks.size());
     for (const CueTrack& t : c->tracks)
         toc.push_back(
-            {.number = t.number,
+            {.number = svc::TrackNumber::of(t.number),
              .data = t.data,
              .mode2 = t.mode2,
              .flags = t.flags,
-             .lba = base[t.file] + *t.index1}
+             .lba = base[t.file] + proto::BlockCount{*t.index1}}
         );
     return toc_bytes(toc, base.back());
 }
@@ -618,17 +683,17 @@ Ex<std::vector<std::uint8_t>> PsxMovieCodec::toc_prefix(
 Ex<std::vector<std::uint8_t>> PsxMovieCodec::chd_key(svc::IChdSource& chd) {
 
     std::vector<TocTrack> toc;
-    std::int64_t lba = 0;
-    std::uint32_t first_frames = 0;
+    proto::BlockCount at{};
+    proto::BlockCount first_frames{};
     for (std::uint32_t i = 0;; ++i) {
-        const auto row = chd.track_metadata(i);
+        const auto row = chd.track_metadata(svc::TrackIndex::of(i));
         if (!row)
             break;
         const auto t = svc::parse_chd_track(*row);
-        if (!t || t->number != i + 1 || i == 99)
+        if (!t || !t->number.matches(i + 1) || i == PsxMovieCodec::kMaxFiles)
             return std::unexpected(refuse(CR::Disk, ERR_SITE()));
         const std::string_view type(t->type);
-        TocTrack e{.number = static_cast<std::uint8_t>(t->number)};
+        TocTrack e{.number = t->number};
         if (type == "MODE2_RAW" || type == "MODE1_RAW") {
             e.data = true;
             e.mode2 = type == "MODE2_RAW";
@@ -637,35 +702,39 @@ Ex<std::vector<std::uint8_t>> PsxMovieCodec::chd_key(svc::IChdSource& chd) {
         }
 
         const bool held = t->pgtype[0] == 'V';
-        if ((t->pregap != 0 && !held) || t->postgap != 0)
+        if ((t->pregap != proto::BlockCount{} && !held) || t->postgap != proto::BlockCount{})
             return std::unexpected(refuse(CR::Disk, ERR_SITE()));
-        e.lba = lba + t->pregap;
-        lba += t->frames;
+        e.lba = at + t->pregap;
+        at += t->frames;
         if (i == 0)
             first_frames = t->frames;
         toc.push_back(e);
     }
-    if (toc.empty() || !toc.front().data || toc.front().lba != 0 || first_frames < kKeySectors)
+    if (toc.empty()
+        || !toc.front().data
+        || toc.front().lba != proto::BlockCount{}
+        || first_frames < proto::BlockCount{kKeySectors})
         return std::unexpected(refuse(CR::Disk, ERR_SITE()));
-    std::vector<std::uint8_t> out = toc_bytes(toc, lba);
+    std::vector<std::uint8_t> out = toc_bytes(toc, at);
 
     const svc::IChdSource::Geometry geo = chd.geometry();
-    if (geo.unit_bytes != kChdFrameBytes
+    if (geo.unit_bytes != proto::FileSize{kChdFrameBytes}
         || geo.hunk_bytes < geo.unit_bytes
-        || geo.hunk_bytes > kChdHunkMax)
+        || geo.hunk_bytes > proto::FileSize{kChdHunkMax})
         return std::unexpected(refuse(CR::Disk, ERR_SITE()));
-    const std::uint32_t per_hunk = geo.hunk_bytes / geo.unit_bytes;
-    std::vector<std::byte> hunk(geo.hunk_bytes);
-    std::optional<std::uint32_t> held_hunk{};
+    std::vector<std::byte> hunk(geo.hunk_extent());
+    std::optional<svc::HunkIndex> held_hunk{};
     out.reserve(out.size() + kKeySectors * kSectorBytes);
     for (std::uint32_t f = 0; f < kKeySectors; ++f) {
-        if (held_hunk != f / per_hunk) {
-            if (auto r = chd.read_hunk(f / per_hunk, hunk); !r)
+        const svc::ChdUnit unit{f};
+        const svc::HunkIndex wanted = geo.hunk_of(unit);
+        if (held_hunk != wanted) {
+            if (auto r = chd.read_hunk(wanted, hunk); !r)
                 return std::unexpected(r.error());
-            held_hunk = f / per_hunk;
+            held_hunk = wanted;
         }
         const auto* p = infra::byte_cast<const std::uint8_t>(std::span(hunk)).data()
-            + static_cast<std::size_t>(f % per_hunk) * geo.unit_bytes;
+            + geo.offset_in_hunk(unit);
         out.insert(out.end(), p, p + kSectorBytes);
     }
     return out;
@@ -718,7 +787,7 @@ Ex<IMovieCodec::DigestSource> PsxMovieCodec::digest_source(
     const auto size = (*cue)->size();
     if (!size)
         return std::unexpected(size.error());
-    if (size->v > kCueMax)
+    if (*size > proto::FileSize{kCueMax})
         return std::unexpected(refuse(CR::Disk, ERR_SITE()));
     std::string text(static_cast<std::size_t>(size->v), '\0');
     const auto got = (*cue)->read_at(0, std::as_writable_bytes(std::span<char>(text)));
@@ -763,7 +832,7 @@ std::optional<IMovieCodec::Companion> PsxMovieCodec::companion(
     for (const BootAsset& row : manifests::kPsxBootAssets) {
         if (n == c.paths.size() || row.dest != kBiosDest)
             continue;
-        c.size = row.exact_size.v;
+        c.size = row.exact_size;
         if (row.anchor == AssetAnchor::ImageDir && !dir.empty()) {
             c.paths[n++] = std::string(dir) + std::string(row.name);
         } else if (

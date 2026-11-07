@@ -16,8 +16,8 @@ public:
     TASTY_SEAT_RESIDENT(Input);
 
     void note_drain(const DeviceReport& r) noexcept {
-        if (r.key_overflow != 0)
-            n_key_overflow_.add(r.key_overflow);
+        if (r.keys.dropped() != 0)
+            n_key_overflow_.add(r.keys.dropped());
         if (r.mouse_remainder != 0)
             n_mouse_rem_.add(r.mouse_remainder);
         if (r.axis_edges != 0)

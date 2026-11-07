@@ -22,6 +22,9 @@ inline constexpr std::uint32_t kChdTrackPadding = 4;
 enum class TrackType : std::uint8_t { Cdda = 0, Mode1 = 1, Mode2 = 2 };
 
 struct Track {
+
+    static constexpr std::uint32_t kIndexes = 2;
+
     TrackNumber number{};
     TrackType type = TrackType::Cdda;
     Lba start{};
@@ -35,5 +38,13 @@ struct Track {
 
     bool pregap_declared = false;
 };
+
+[[nodiscard]] constexpr std::int64_t cue_byte_pos(const Track& t, Lba lba) noexcept {
+    return static_cast<std::int64_t>(lba.v) * static_cast<std::int64_t>(t.sector_size) - t.offset;
+}
+
+[[nodiscard]] constexpr std::int64_t chd_sector_pos(const Track& t, Lba lba) noexcept {
+    return static_cast<std::int64_t>(lba.v) + t.offset;
+}
 
 }

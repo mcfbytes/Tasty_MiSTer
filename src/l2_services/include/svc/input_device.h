@@ -39,12 +39,33 @@ inline constexpr unsigned kAxisCount = 64;
 inline constexpr std::uint16_t kRumbleLengthMs = 0x7FFF;
 using AxisTable = std::array<AxisCal, kAxisCount>;
 
+inline constexpr EvdevCode kKeyEmuBase{EvdevCode::kKeyEmuBase};
+
 inline constexpr std::size_t kDownWords = 14;
-inline constexpr std::uint16_t kKeyEmuBase = 768;
 static_assert(
-    kDownWords * 64u == 896u && 896u > kKeyEmuBase + 2u * (kAxisCount - 1u) + 1u,
+    kDownWords * 64u == 896u && 896u > EvdevCode::kKeyEmuBase + 2u * (kAxisCount - 1u) + 1u,
     "down_ must hold every KEY_EMU synthetic axis code "
     "(input.cpp:6113): 768 + 2*63 + 1 = 895"
+);
+
+struct DeviceMaps {
+    TASTY_SEAT_EXEMPT(component);
+    std::optional<JoyWords> wire{};
+    JoyWords sys{};
+    JoyWords menu{};
+
+    const JoyWords& install_sys(const JoyWords& words) noexcept;
+
+    void set_menu(JoyWords m) noexcept { menu = m; }
+
+    std::span<const PackedKeys> wire_view() const noexcept;
+
+    bool wire_present() const noexcept { return wire.has_value(); }
+};
+
+static_assert(
+    std::is_trivially_copyable_v<DeviceMaps>,
+    "the map trio crosses the T-DIAG -> T-INPUT handover by value"
 );
 
 [[nodiscard]] ff_effect make_rumble_effect(
@@ -98,29 +119,26 @@ public:
 
     bool grabbed() const noexcept { return grabbed_; }
 
-    const AxisCal& axis(unsigned code) const;
+    const AxisCal& axis(EvdevCode code) const;
 
-    void install_joy_map(const JoyWords& words) noexcept { joy_map_ = words; }
+    void install_joy_map(const JoyWords& words) noexcept { maps_.wire = words; }
 
-    bool has_joy_map() const noexcept { return joy_map_.has_value(); }
+    bool has_joy_map() const noexcept { return maps_.wire_present(); }
 
-    std::span<const std::uint32_t> joy_map() const noexcept {
-        return joy_map_ ? std::span<const std::uint32_t>{*joy_map_}
-                        : std::span<const std::uint32_t>{kUnsetJoyMap};
-    }
+    std::span<const PackedKeys> joy_map() const noexcept { return maps_.wire_view(); }
 
     void install_sys_map(const JoyWords& words) noexcept;
 
-    std::span<const std::uint32_t> sys_map() const noexcept { return sys_map_; }
+    std::span<const PackedKeys> sys_map() const noexcept { return maps_.sys; }
 
-    std::span<const std::uint32_t> menu_map() const noexcept { return menu_map_; }
+    std::span<const PackedKeys> menu_map() const noexcept { return maps_.menu; }
 
-    bool matches_sys_button(std::uint16_t code) const noexcept;
+    bool matches_sys_button(EvdevCode code) const noexcept;
     bool has_nonzero_joy_map() const noexcept;
 
-    void set_deadzone(std::int32_t dz) noexcept { deadzone_ = dz; }
+    void set_deadzone(Deadzone dz) noexcept { deadzone_ = dz; }
 
-    std::int32_t deadzone() const noexcept { return deadzone_; }
+    Deadzone deadzone() const noexcept { return deadzone_; }
 
     StickCal stick_cal(StickIndex stick) const noexcept;
 
@@ -159,31 +177,30 @@ private:
     std::int16_t rumble_id() const noexcept { return rumble_id_; }
 
     InputDevice() = default;
-    void mark_down(std::uint16_t code, bool on) noexcept;
+    void mark_down(EvdevCode code, bool on) noexcept;
 
-    void push_key_edge(std::uint16_t code, bool pressed) noexcept;
-    void track_osd_combo(std::uint16_t code, bool pressed) noexcept;
-    void synth_axis(std::uint16_t code, std::int32_t value, const AxisCal& cal) noexcept;
+    void push_key_edge(EvdevCode code, bool pressed) noexcept;
+    void track_osd_combo(EvdevCode code, bool pressed) noexcept;
+    void synth_axis(EvdevCode code, std::int32_t value, const AxisCal& cal) noexcept;
+
+    void decode_key(const input_event& ev) noexcept;
+    void decode_rel(const input_event& ev) noexcept;
+    void decode_abs(const input_event& ev) noexcept;
     os::Evdev ev_{};
     DeviceFacts facts_{};
     bool mod_ = false;
     bool grabbed_ = false;
     bool rumble_ = false;
     std::int16_t rumble_id_ = -1;
-    std::int32_t deadzone_ = 0;
+    Deadzone deadzone_{};
     infra::OptRef<const IAnalogReshape> reshape_;
     proto::MouseButtons mouse_buttons_{};
     std::uint8_t osd_combo_ = 0;
     bool keys_changed_ = false;
 
-    static constexpr std::array<std::uint32_t, 32> kUnsetJoyMap{};
-    std::optional<std::array<std::uint32_t, 32>> joy_map_{};
-
-    static_assert(std::is_trivially_copyable_v<decltype(joy_map_)>);
-    std::array<std::uint32_t, 32> sys_map_{};
-    std::array<std::uint32_t, 32> menu_map_{};
+    DeviceMaps maps_{};
     AxisTable axes_{};
-    std::array<std::uint64_t, kDownWords> down_{};
+    KeyDownSet<kDownWords> down_{};
     std::array<std::uint8_t, kAxisCount> axis_edge_{};
     infra::IndexedArray<StickState, kSticks.size(), StickIndex> sticks_{};
     JoyMask joy_prev_{};

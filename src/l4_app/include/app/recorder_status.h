@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "app/frame_stamp.h"
+#include "app/lat_stat.h"
 #include "app/types.h"
 #include "infra/fixed_str.h"
 #include "infra/json_out.h"
@@ -73,11 +74,10 @@ struct RecorderStatus {
     std::uint32_t bad_header = 0;
     std::uint32_t woven = 0;
     std::uint32_t unmatched = 0;
-    std::uint32_t copy_us_last = 0;
-    std::uint32_t copy_us_max = 0;
+    LatStat copy_us{};
     std::uint32_t arena_kib = 0;
-    std::uint64_t first_core_frame = 0;
-    std::uint64_t last_core_frame = 0;
+    WideCoreFrame first_core_frame{};
+    WideCoreFrame last_core_frame{};
 };
 
 constexpr void to_json(infra::JsonOut& o, const RecorderStatus& s) noexcept {
@@ -102,12 +102,12 @@ constexpr void to_json(infra::JsonOut& o, const RecorderStatus& s) noexcept {
     o.field("bad_header", s.bad_header);
     o.field("woven", s.woven);
     o.field("unmatched", s.unmatched);
-    o.field("copy_us", s.copy_us_last);
-    o.field("copy_us_max", s.copy_us_max);
+    o.field("copy_us", s.copy_us.last.count());
+    o.field("copy_us_max", s.copy_us.max.count());
     o.field("arena_kib", s.arena_kib);
     o.field("depth", s.depth);
-    o.field("first", s.first_core_frame);
-    o.field("last", s.last_core_frame);
+    o.field("first", s.first_core_frame.number());
+    o.field("last", s.last_core_frame.number());
 }
 
 using RecorderStatusCell = xthread::Telemetry<RecorderStatus, SeatTag::Capture>;

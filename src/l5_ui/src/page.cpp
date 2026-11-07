@@ -18,7 +18,7 @@ std::uint8_t copy_hd_rows(PageWalk& w) noexcept {
         w.page.rows[n] = r.hd;
         ++n;
     }
-    w.page.row_count = n;
+    w.page.row_count = app::RowCount::of(n);
     return n;
 }
 

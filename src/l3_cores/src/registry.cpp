@@ -527,7 +527,8 @@ consteval bool loader_rows_keep_their_loader() {
     for (const CoreFactory& f : kCoreTable) {
         if (f.make_loader == nullptr)
             continue;
-        if (loader_for(&f, 0) != f.make_loader || loader_for(&f, 1) != f.make_loader)
+        if (loader_for(&f, hal::FabricAddr{}) != f.make_loader
+            || loader_for(&f, hal::FabricAddr{1}) != f.make_loader)
             return false;
     }
     return true;

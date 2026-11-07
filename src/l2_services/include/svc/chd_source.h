@@ -8,6 +8,9 @@
 #include <span>
 
 #include "infra/error.h"
+#include "proto/types.h"
+#include "svc/chd_geometry.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -16,19 +19,15 @@ class IFile;
 
 class IChdSource {
 public:
-    virtual ~IChdSource() = default;
+    using Geometry = ChdGeometry;
 
-    struct Geometry {
-        std::uint32_t hunk_bytes = 0;
-        std::uint32_t unit_bytes = 0;
-        std::uint32_t hunk_count = 0;
-    };
+    virtual ~IChdSource() = default;
 
     virtual Geometry geometry() const noexcept = 0;
 
-    virtual std::optional<ChdMetaRow> track_metadata(std::uint32_t index) = 0;
+    virtual std::optional<ChdMetaRow> track_metadata(TrackIndex index) = 0;
 
-    [[nodiscard]] virtual Ex<void> read_hunk(std::uint32_t hunk, std::span<std::byte> dst) = 0;
+    [[nodiscard]] virtual Ex<void> read_hunk(HunkIndex hunk, std::span<std::byte> dst) = 0;
 
 protected:
     IChdSource() = default;
@@ -37,10 +36,10 @@ protected:
 };
 
 struct ChdTrack {
-    std::uint32_t number = 0;
-    std::uint32_t frames = 0;
-    std::uint32_t pregap = 0;
-    std::uint32_t postgap = 0;
+    TrackNumber number{};
+    proto::BlockCount frames{};
+    proto::BlockCount pregap{};
+    proto::BlockCount postgap{};
     char type[32]{};
     char subtype[32]{};
     char pgtype[32]{};

@@ -2,6 +2,7 @@
 #include "ui/event_trace.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <ctime>
 #include <iterator>
@@ -11,6 +12,8 @@
 namespace mister::ui {
 
 namespace {
+
+constexpr std::size_t kEventFieldBytes = 96;
 
 struct RequestName {
     app::UiRequest::Kind kind;
@@ -123,7 +126,7 @@ void EventTrace::write_(
 void EventTrace::record(const app::Event::CoreLoaded& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(
         f,
         sizeof f,
@@ -138,7 +141,7 @@ void EventTrace::record(const app::Event::CoreLoaded& a, const app::Event::Head&
 void EventTrace::record(const app::Event::SessionFailed& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(f, sizeof f, "\"errc\":\"%s\",", errc_name(a.why));
     write_("SessionFailed", f, app::Event::SessionFailed::kKind, h);
 }
@@ -146,7 +149,7 @@ void EventTrace::record(const app::Event::SessionFailed& a, const app::Event::He
 void EventTrace::record(const app::Event::SdActivity& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(f, sizeof f, "\"slot\":%u,", static_cast<unsigned>(a.slot));
     write_("SdActivity", f, app::Event::SdActivity::kKind, h);
 }
@@ -154,7 +157,7 @@ void EventTrace::record(const app::Event::SdActivity& a, const app::Event::Head&
 void EventTrace::record(const app::Event::InfoRequest& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(f, sizeof f, "\"id\":%u,", static_cast<unsigned>(a.id));
     write_("InfoRequest", f, app::Event::InfoRequest::kKind, h);
 }
@@ -162,7 +165,7 @@ void EventTrace::record(const app::Event::InfoRequest& a, const app::Event::Head
 void EventTrace::record(const app::Event::ProgressUpdate& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(
         f,
         sizeof f,
@@ -176,7 +179,7 @@ void EventTrace::record(const app::Event::ProgressUpdate& a, const app::Event::H
 void EventTrace::record(const app::Event::DeadlineMiss& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(f, sizeof f, "\"slot\":%u,", static_cast<unsigned>(a.slot));
     write_("DeadlineMiss", f, app::Event::DeadlineMiss::kKind, h);
 }
@@ -184,7 +187,7 @@ void EventTrace::record(const app::Event::DeadlineMiss& a, const app::Event::Hea
 void EventTrace::record(const app::Event::RequestRefused& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(
         f,
         sizeof f,
@@ -201,7 +204,7 @@ void EventTrace::record(
 ) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(f, sizeof f, "\"cause\":%u,", static_cast<unsigned>(a.cause));
     write_("ConfStrOnlySession", f, app::Event::ConfStrOnlySession::kKind, h);
 }
@@ -209,7 +212,7 @@ void EventTrace::record(
 void EventTrace::record(const app::Event::SessionAdvisory& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(f, sizeof f, "\"errc\":\"%s\",", errc_name(a.why));
     write_("SessionAdvisory", f, app::Event::SessionAdvisory::kKind, h);
 }
@@ -223,7 +226,7 @@ void EventTrace::record(const app::Event::SessionEnded&, const app::Event::Head&
 void EventTrace::record(const app::Event::RamImageDeclined& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(f, sizeof f, "\"errc\":\"%s\",", errc_name(a.why));
     write_("RamImageDeclined", f, app::Event::RamImageDeclined::kKind, h);
 }
@@ -231,7 +234,7 @@ void EventTrace::record(const app::Event::RamImageDeclined& a, const app::Event:
 void EventTrace::record(const app::Event::RequestDone& a, const app::Event::Head& h) noexcept {
     if (!admit_())
         return;
-    char f[96];
+    char f[kEventFieldBytes];
     std::snprintf(f, sizeof f, "\"req\":\"%s\",", request_name(a.which));
     write_("RequestDone", f, app::Event::RequestDone::kKind, h);
 }
@@ -240,7 +243,8 @@ void EventTrace::record_misrouted() noexcept {
     if (!admit_())
         return;
     log_.appendf(
-        "{\"t\":\"ev\",\"k\":\"?\",\"depth\":%u,\"suppressed\":%u,\"seq\":%u}",
+        "{\"t\":\"ev\",\"k\":\"?\",\"depth\":%u,"
+        "\"suppressed\":%u,\"seq\":%u}",
         static_cast<unsigned>(queue_->depth()),
         static_cast<unsigned>(suppressed_),
         static_cast<unsigned>(seq_)

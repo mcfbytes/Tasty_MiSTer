@@ -45,9 +45,7 @@ public:
         } else {
             const int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
             if (fd < 0) {
-                return std::unexpected(
-                    Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)}
-                );
+                return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
             }
             fd_.reset(fd);
             return {};

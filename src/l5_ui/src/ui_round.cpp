@@ -70,23 +70,19 @@ bool UiRound::poll_buttons(bool link_work) {
             return false;
         settling_ = false;
     }
-    const std::int64_t now = clock_.now().count();
+    const std::chrono::nanoseconds now = clock_.now();
 
     {
         const bool but = osd_held_;
         ButtonMachine& m = osd_btn_;
-        if (but && !m.last) {
-            m.long_at_ns = now + kOsdLongPressNs;
-            m.pressed_at_ns = now;
+        if (m.press_edge(but, now, kOsdLongPress))
             ++button_edges_;
-        }
-        if (but && !m.consumed && now >= m.long_at_ns) {
-            m.consumed = true;
+        if (m.long_ready(but, now)) {
             ++button_longs_;
             input_.note_button_action();
 
             if (model_.stack().top_id() == PageId::ScriptRun) {
-                decoder_.push_synth(proto::KeyCode{KEY_BACKSPACE | KeyDecoder::kUpstroke});
+                decoder_.push_synth(proto::KeyCode{KEY_BACKSPACE}.with_release());
                 ++button_injects_;
                 drained = true;
             } else if (model_.global_hotkeys_allowed()) {
@@ -95,60 +91,52 @@ bool UiRound::poll_buttons(bool link_work) {
                 ++bt_route_refusals_;
             }
         }
-        if (!but && m.last) {
+        const std::optional<std::chrono::nanoseconds> held = m.release_hold(but, now);
+        if (held) {
 
-            last_hold_ = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::nanoseconds{now - m.pressed_at_ns}
-            );
+            last_hold_ = std::chrono::duration_cast<std::chrono::milliseconds>(*held);
         }
-        if (!but && m.last && !m.consumed) {
-            const std::int64_t held_ns = now - m.pressed_at_ns;
+        if (held && !m.consumed()) {
 
-            const bool wants_classic = held_ns >= kOsdClassicHoldNs
-                && held_ns < kOsdLongPressNs
+            const bool wants_classic = *held >= kOsdClassicHold
+                && *held < kOsdLongPress
                 && model_.hd_root()
                 && !model_.osd_open();
             if (wants_classic && model_.open_classic_root(ctx_)) {
                 ++button_classic_opens_;
             } else {
-                decoder_.push_synth(proto::KeyCode{KEY_F12 | KeyDecoder::kUpstroke});
+                decoder_.push_synth(proto::KeyCode{KEY_F12}.with_release());
                 ++button_injects_;
             }
             input_.note_button_action();
             drained = true;
         }
-        if (!but)
-            m.consumed = false;
-        m.last = but;
+        m.end_sample(but);
     }
 
     {
         const bool but = user_held_;
         ButtonMachine& m = user_btn_;
         if (model_.menu_has_focus()) {
-            if (but && !m.last) {
-                m.long_at_ns = now + kUserLongPressNs;
+            if (m.press_edge(but, now, kUserLongPress))
                 ++button_edges_;
-            }
-            if (but && !m.consumed && now >= m.long_at_ns) {
+            if (m.long_ready(but, now)) {
 
-                m.consumed = true;
                 ++button_longs_;
                 input_.note_button_action();
             }
-            if (!but && m.last && !m.consumed) {
+            const std::optional<std::chrono::nanoseconds> released = m.release_hold(but, now);
+            if (released && !m.consumed()) {
 
                 ++button_edges_;
                 input_.note_button_action();
             }
-        } else if (user_release_pending_ || (!but && m.last)) {
+        } else if (user_release_pending_ || m.release_hold(but, now)) {
 
             ask_user_reset_();
         }
         user_release_pending_ = false;
-        if (!but)
-            m.consumed = false;
-        m.last = but;
+        m.end_sample(but);
     }
     return drained;
 }
@@ -229,10 +217,10 @@ app::UiRoundEdge UiRound::compose_(bool link_work) {
         const auto e = input_.pop_ui_key();
         if (!e.has_value())
             break;
-        std::uint32_t code = e->code;
-        if (e->pressed == 0)
-            code |= KeyDecoder::kUpstroke;
-        decoder_.push_raw(proto::KeyCode{code});
+        proto::KeyCode code = e->code.wire_key();
+        if (!e->pressed)
+            code = code.with_release();
+        decoder_.push_raw(code);
         ++keys_drained_;
         drained = true;
     }

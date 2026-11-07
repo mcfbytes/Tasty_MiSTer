@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <utility>
 
+#include "cores/file_tx.h"
 #include "svc/file.h"
 
 namespace mister::cores {
@@ -69,7 +70,7 @@ bool BootLadder::finish_acts_() {
         && (!report_.same_game || cl.reset_on_remount);
     if (owed) {
         proto::FileId id{};
-        if (auto r = host_.intern_path(image_, 0); r && *r != proto::FileId{})
+        if (auto r = host_.intern_path(image_, proto::FileSize{}); r && *r != proto::FileId{})
             id = *r;
 
         if (id != proto::FileId{}) {
@@ -84,8 +85,8 @@ bool BootLadder::finish_acts_() {
     return true;
 }
 
-std::int64_t BootLadder::now_ns() const {
-    return clock_.now().count();
+std::chrono::nanoseconds BootLadder::now_ns() const {
+    return clock_.now();
 }
 
 std::string_view BootLadder::dir_of(std::string_view path) {
@@ -217,7 +218,7 @@ Ex<AssetWait> BootLadder::load_row(const BootAsset& row) {
             std::move(*f),
             sz->v,
             ext_of(load_path_.view()),
-            {.dest = dest, .chunk = kGenericChunk, .progress = true}
+            {.dest = dest, .chunk = WireChunk::of(kFileTxChunkBytes), .progress = true}
         );
         if (!p)
             return std::unexpected(p.error());
@@ -279,7 +280,7 @@ MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_vie
     if (!mount_gen_) {
         proto::FileId id{};
         if (!path.empty()) {
-            auto r = host_.intern_path(path, 0);
+            auto r = host_.intern_path(path, proto::FileSize{});
             if (!r || *r == proto::FileId{})
                 return MountState::Failed;
             id = *r;
@@ -304,13 +305,13 @@ MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_vie
     if (s.generation == mount_gen_ && s.state != MountState::Pending) {
         mount_answer_ = s;
         mount_gen_ = {};
-        mount_due_ns_ = 0;
+        mount_due_ns_ = {};
         return s.state;
     }
 
     if (now_ns() >= mount_due_ns_) {
         mount_gen_ = {};
-        mount_due_ns_ = 0;
+        mount_due_ns_ = {};
         return MountState::Failed;
     }
     return MountState::Pending;
@@ -318,7 +319,7 @@ MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_vie
 
 bool BootLadder::prepare_save(std::string_view path) {
     if (!save_gen_) {
-        auto id = host_.intern_path(path, 0);
+        auto id = host_.intern_path(path, proto::FileSize{});
         if (!id || *id == proto::FileId{})
             return false;
         const proto::ActKey g = next_gen();
@@ -366,8 +367,8 @@ bool BootLadder::order_mount_save(std::string_view path, bool bracketed) {
     }
 
     const StagingPolicy& sp = profile_.staging;
-    const bool pre = save_size_ == 0 && (!save_exists_ || sp.save_pre_on_empty);
-    const std::uint64_t size = pre ? sp.save_pre_bytes : save_size_;
+    const bool pre = save_size_ == proto::FileSize{} && (!save_exists_ || sp.save_pre_on_empty);
+    const proto::FileSize size = pre ? sp.save_pre_bytes : save_size_;
     auto id = host_.intern_path(path, size);
     if (!id || *id == proto::FileId{})
         return false;
@@ -376,12 +377,12 @@ bool BootLadder::order_mount_save(std::string_view path, bool bracketed) {
     return host_.order(op);
 }
 
-bool BootLadder::order_announce_disc(std::uint64_t size_bytes) {
+bool BootLadder::order_announce_disc(proto::FileSize size_bytes) {
     proto::LinkOp::BindSlot op{
         .slot = profile_.staging.disc_slot.block_slot(),
         .bind = proto::LinkOp::SlotBind::MountCd
     };
-    if (size_bytes != 0) {
+    if (size_bytes != proto::FileSize{}) {
         auto id = host_.intern_path(image_, size_bytes);
         if (!id || *id == proto::FileId{})
             return false;

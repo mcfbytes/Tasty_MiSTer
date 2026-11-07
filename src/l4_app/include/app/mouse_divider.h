@@ -7,6 +7,7 @@
 #include "app/mouse_accumulator.h"
 #include "infra/seat.h"
 #include "os/clock.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -15,7 +16,7 @@ class MouseDivider {
 
 public:
     struct Packet {
-        std::int32_t dx = 0, dy = 0, dz = 0;
+        svc::MouseMotion motion{};
         proto::MouseButtons buttons{};
     };
 
@@ -24,9 +25,7 @@ public:
     MouseDivider(const MouseDivider&) = delete;
     MouseDivider& operator=(const MouseDivider&) = delete;
 
-    void accumulate(std::int32_t rx, std::int32_t ry, std::int32_t rw) noexcept {
-        acc_.accumulate(rx, ry, rw);
-    }
+    void accumulate(svc::MouseMotion motion) noexcept { acc_.accumulate(motion); }
 
     void note_buttons(proto::MouseButtons level) noexcept { acc_.note_buttons(level); }
 
@@ -37,7 +36,7 @@ private:
     MouseAccumulator acc_{};
     std::int64_t last_mouse_ns_ = 0;
     bool mouse_pending_ = false;
-    std::int32_t carry_x_ = 0, carry_y_ = 0, carry_z_ = 0;
+    svc::MouseMotion carry_{};
 };
 
 }

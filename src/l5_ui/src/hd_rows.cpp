@@ -49,14 +49,7 @@ Row HdPushRow::describe() const {
 
 std::optional<RowKey> HdPushRow::key() const {
     TASTY_SEAT_BODY(HdPushRow);
-    constexpr std::uint32_t kPushKeyBase = 0x2'0000u;
-    constexpr unsigned kPushPageShift = 8;
-    constexpr std::uint32_t kPushFocusMask = 0xFFu;
-    return RowKey{
-        kPushKeyBase
-        | (static_cast<std::uint32_t>(spec_.page) << kPushPageShift)
-        | (spec_.focus.v & kPushFocusMask)
-    };
+    return RowKey::in_space(RowKeySpace::Push, item_pushing(spec_.page, spec_.focus));
 }
 
 Transition HdPushRow::select() {

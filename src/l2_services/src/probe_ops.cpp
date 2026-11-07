@@ -70,7 +70,7 @@ Ex<GeometryPass> ProbeOps::sample_video_geometry(
     GeometryPass pass{};
     pass.sample = gate.last;
 
-    std::uint16_t commit_res = gate.last_res;
+    ResWord commit_res = gate.last_res;
     std::uint8_t commit_fb_crc = gate.last_fb_crc;
     std::uint16_t commit_flt = gate.last_flt_flags;
     bool commit_vi_seen = gate.vi_seen;
@@ -83,10 +83,11 @@ Ex<GeometryPass> ProbeOps::sample_video_geometry(
         auto res = link_.read();
         if (!res)
             return std::unexpected(res.error());
-        pass.res_changed = (*res != gate.last_res);
-        pass.sample.res = *res;
+        const ResWord res_word{*res};
+        pass.res_changed = (res_word != gate.last_res);
+        pass.sample.res = res_word;
 
-        commit_res = *res;
+        commit_res = res_word;
         if (pass.res_changed || force) {
             if (pass.res_changed)
                 commit_vi_seen = true;
@@ -148,7 +149,7 @@ Ex<GeometryPass> ProbeOps::sample_video_geometry(
         auto op = link_.command(proto::UioOp::GetFbPar);
         if (!op)
             return std::unexpected(op.error());
-        const auto crc = static_cast<std::uint8_t>(*op & 0xFFu);
+        const auto crc = static_cast<std::uint8_t>(*op);
         pass.fb_changed = (crc != gate.last_fb_crc);
         commit_fb_crc = crc;
         pass.sample.fb_crc = crc;
@@ -156,11 +157,11 @@ Ex<GeometryPass> ProbeOps::sample_video_geometry(
             auto arx_raw = link_.read();
             if (!arx_raw)
                 return std::unexpected(arx_raw.error());
-            pass.sample.arx_raw = *arx_raw;
+            pass.sample.aspect.arx_raw = *arx_raw;
             auto ary_raw = link_.read();
             if (!ary_raw)
                 return std::unexpected(ary_raw.error());
-            pass.sample.ary_raw = *ary_raw;
+            pass.sample.aspect.ary_raw = *ary_raw;
             auto fb_fmt = link_.read();
             if (!fb_fmt)
                 return std::unexpected(fb_fmt.error());

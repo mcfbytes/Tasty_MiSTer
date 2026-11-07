@@ -30,7 +30,9 @@ Ex<BoardWindows> BoardWindows::open(const BoardProfile& profile, FallbackNotice 
         }
         const auto slot = static_cast<std::size_t>(d.id);
         const detail::MappedRegs& page = w.pages_[slot].emplace(std::move(*m));
-        w.lends_[slot] = reg::Lend::of(page.pages, page.lead);
+        if (auto b = w.bind_slot(d.id, reg::Lend::of(page.pages, page.lead)); !b) {
+            return std::unexpected(b.error());
+        }
     }
     return w;
 }
@@ -45,18 +47,35 @@ Ex<BoardWindows> BoardWindows::attach(
     BoardWindows w{profile};
     for (const WindowImage& img : images) {
         const auto slot = static_cast<std::size_t>(img.id);
-        if (slot >= profile.windows.size()
-            || img.id == profile.lw_window
-            || img.words.empty()
-            || w.lends_[slot].lent()) {
+        if (slot >= profile.windows.size()) {
             return std::unexpected(
                 Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(slot)}
             );
         }
 
-        w.lends_[slot] = reg::Lend::over(img.words).first(profile.windows[slot].region.len);
+        if (auto b = w.bind_slot(
+                img.id,
+                reg::Lend::over(img.words).first(profile.windows[slot].region.len)
+            );
+            !b) {
+            return std::unexpected(b.error());
+        }
     }
     return w;
+}
+
+Ex<void> BoardWindows::bind_slot(WindowId id, reg::Lend lend) {
+    const auto slot = static_cast<std::size_t>(id);
+    if (slot >= profile_->windows.size()
+        || id == profile_->lw_window
+        || !lend.lent()
+        || lends_[slot].lent()) {
+        return std::unexpected(
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(slot)}
+        );
+    }
+    lends_[slot] = lend;
+    return {};
 }
 
 Ex<reg::Block> BoardWindows::lead_of(WindowId id, std::size_t need) const {
@@ -91,11 +110,12 @@ Ex<Mailbox> BoardWindows::take_mailbox() {
     return Mailbox{MailboxRegs{*gpo, *gpi}, *timing, std::move(*claim)};
 }
 
-Ex<reg::Reg<reg::WO>> BoardWindows::mailbox_gpo() const {
-    const auto fact = profile_->mailbox_gpo_offset.resolve(
-        ERR_SITE(),
-        static_cast<std::uint32_t>(FactField::MailboxGpoOffset)
-    );
+template <reg::Access A>
+Ex<reg::Reg<A>> BoardWindows::mailbox_reg(FactField field) const {
+    const Fact<std::uint32_t>& offset = field == FactField::MailboxGpoOffset
+        ? profile_->mailbox_gpo_offset
+        : profile_->mailbox_gpi_offset;
+    const auto fact = offset.resolve(ERR_SITE(), static_cast<std::uint32_t>(field));
     if (!fact)
         return std::unexpected(fact.error());
     const std::uint32_t off = *fact;
@@ -105,30 +125,18 @@ Ex<reg::Reg<reg::WO>> BoardWindows::mailbox_gpo() const {
     );
     if (!base)
         return std::unexpected(base.error());
-    auto r = base->at<reg::WO>(off);
+    auto r = base->at<A>(off);
     if (!r)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), off});
     return *r;
 }
 
+Ex<reg::Reg<reg::WO>> BoardWindows::mailbox_gpo() const {
+    return mailbox_reg<reg::WO>(FactField::MailboxGpoOffset);
+}
+
 Ex<reg::Reg<reg::RO>> BoardWindows::mailbox_gpi() const {
-    const auto fact = profile_->mailbox_gpi_offset.resolve(
-        ERR_SITE(),
-        static_cast<std::uint32_t>(FactField::MailboxGpiOffset)
-    );
-    if (!fact)
-        return std::unexpected(fact.error());
-    const std::uint32_t off = *fact;
-    auto base = lead_of(
-        profile_->mailbox_window,
-        static_cast<std::size_t>(off) + sizeof(std::uint32_t)
-    );
-    if (!base)
-        return std::unexpected(base.error());
-    auto r = base->at<reg::RO>(off);
-    if (!r)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), off});
-    return *r;
+    return mailbox_reg<reg::RO>(FactField::MailboxGpiOffset);
 }
 
 }

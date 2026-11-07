@@ -6,12 +6,14 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <string>
 
 #include "app/core_builder.h"
 #include "app/doorbell_lines.h"
 #include "app/intern_exact.h"
 #include "app/link_tx_reader.h"
+#include "app/session_bindings.h"
 #include "app/owner_push.h"
 #include "cores/registry.h"
 #include "infra/byte_view.h"
@@ -20,28 +22,37 @@
 
 namespace mister::app {
 
-std::array<std::string_view, 4> bind_identity_fields(const proto::ConfStr& conf) noexcept {
+std::array<std::string_view, SessionBindings::kIdentityFields> bind_identity_fields(
+    const proto::ConfStr& conf
+) noexcept {
     constexpr std::size_t kCap = kLinkTxSlabBytes;
-    std::array<std::string_view, 4> f =
+
+    constexpr std::size_t kSeparators = SessionBindings::kIdentityFields - 1;
+    std::array<std::string_view, SessionBindings::kIdentityFields> f =
         {conf.name(), conf.button_list(0), conf.button_list(1), conf.button_list(2)};
     auto total = [&f]() noexcept {
-        return f[0].size() + f[1].size() + f[2].size() + f[3].size() + 3;
+        std::size_t n = kSeparators;
+        for (const std::string_view v : f)
+            n += v.size();
+        return n;
     };
 
-    for (std::size_t i = 3; i >= 1 && total() > kCap; --i)
+    for (std::size_t i = kSeparators; i >= 1 && total() > kCap; --i)
         f[i] = {};
     if (total() > kCap)
-        f[0] = f[0].substr(0, kCap - 3);
+        f[0] = f[0].substr(0, kCap - kSeparators);
     return f;
 }
 
 bool BindTail::identity(const proto::ConfStr& conf) {
     TASTY_SEAT_BODY(BindTail);
-    const std::array<std::string_view, 4> f = bind_identity_fields(conf);
+    const std::array<std::string_view, SessionBindings::kIdentityFields> f = bind_identity_fields(
+        conf
+    );
     std::string blob;
-    for (unsigned i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < f.size(); ++i) {
         blob.append(f[i]);
-        if (i != 3)
+        if (i + 1 != f.size())
             blob.push_back('\0');
     }
     const auto id = inbox_.intern(infra::text_bytes<const std::uint8_t>(blob));
@@ -65,7 +76,7 @@ bool BindTail::identity(const proto::ConfStr& conf) {
 void BindTail::doorbells(
     const proto::ConfStr& conf,
     std::span<const proto::AxiLwDecl> lw,
-    std::optional<std::uint32_t> owned
+    std::optional<hal::LwOffset> owned
 ) {
     TASTY_SEAT_BODY(BindTail);
 
@@ -74,7 +85,9 @@ void BindTail::doorbells(
 
     const std::size_t rows = std::min(declared, kMaxDoorbellRows);
     proto::LinkOp::BindDoorbells op{
-        .declared = static_cast<std::uint8_t>(std::min<std::size_t>(declared, 0xFF))
+        .declared = static_cast<std::uint8_t>(
+            std::min<std::size_t>(declared, std::numeric_limits<std::uint8_t>::max())
+        )
     };
     if (rows != 0) {
         std::array<std::uint8_t, kLinkTxSlabBytes> packed{};
@@ -152,10 +165,10 @@ void BindTail::uart(std::string_view core_name, const proto::ConfStr* conf) {
     if (!core_name.empty()) {
         std::string rel = "config/uartmode.";
         rel += core_name;
-        op.mode = intern_exact(vfs_, inbox_, rel, 4);
+        op.mode = intern_exact(vfs_, inbox_, rel, SessionBindings::Uart::kModeBytes);
         rel = "config/uartspeed.";
         rel += core_name;
-        op.speeds = intern_exact(vfs_, inbox_, rel, 12);
+        op.speeds = intern_exact(vfs_, inbox_, rel, SessionBindings::Uart::kSpeedsBytes);
     }
 
     (void)push_gating(inbox_, tally_, sleeper_, infra::make<proto::LinkOp>(op));

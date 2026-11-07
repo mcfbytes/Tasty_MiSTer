@@ -8,6 +8,8 @@ namespace mister::svc {
 struct AnalogXy {
     std::int32_t x = 0;
     std::int32_t y = 0;
+
+    static constexpr std::int32_t kAxisMax = 127;
     friend constexpr bool operator==(AnalogXy, AnalogXy) = default;
 };
 

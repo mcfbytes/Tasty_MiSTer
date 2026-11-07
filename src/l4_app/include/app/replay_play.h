@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -33,17 +34,17 @@ struct ReplayPlay {
     };
 
     static constexpr std::uint32_t kMaxFrames = 1u << 20;
-    static constexpr std::uint32_t kPhaseMinUs = 1000;
-    static constexpr std::uint32_t kPhaseGuardUs = 2000;
+
+    using ArmMicros = std::chrono::duration<std::uint32_t, std::micro>;
+    static constexpr std::chrono::microseconds kPhaseMin{1000};
+    static constexpr std::chrono::microseconds kPhaseGuard{2000};
 
     [[nodiscard]] static constexpr bool phase_fits(
-        std::uint32_t phase_us,
-        std::uint64_t period_ns
+        std::chrono::microseconds phase,
+        std::chrono::nanoseconds period
     ) noexcept {
-        const std::uint64_t period_us = period_ns / 1000;
-        return period_us > kPhaseGuardUs
-            && phase_us >= kPhaseMinUs
-            && phase_us <= period_us - kPhaseGuardUs;
+        const auto period_us = std::chrono::duration_cast<std::chrono::microseconds>(period);
+        return period_us > kPhaseGuard && phase >= kPhaseMin && phase <= period_us - kPhaseGuard;
     }
 
     static constexpr FrameCount kRunSplit{60};
@@ -66,7 +67,7 @@ struct ReplayPlay {
     PathText rom{};
     std::uint32_t offset_us = 0;
     std::optional<std::int32_t> lead_override{};
-    std::optional<std::uint32_t> stop_at{};
+    std::optional<MovieFrame> stop_at{};
     std::optional<cores::IMovieCodec::RamFill> ram_fill{};
     bool seeded_save = false;
     bool set_ok = false;
@@ -80,7 +81,7 @@ struct ReplayPlay {
 
     std::uint32_t scanned = 0;
     FrameCount pushed{};
-    std::uint32_t movie_frames = 0;
+    FrameCount movie_frames{};
 
     std::vector<ReplayMsg::Input> runs{};
     unsigned tries = 0;

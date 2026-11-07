@@ -89,7 +89,7 @@ void RunStage::stream_(Ctx ctx) noexcept {
     }
     end_pushed_ = ctx.w.ring.push(
         infra::make<ReplayMsg>(
-            ReplayMsg::End{.frame = movie_frame_from_wire(play.movie_frames)},
+            ReplayMsg::End{.frame = MovieFrame{} + play.movie_frames},
             ReplayMsg::Head{play.gen}
         )
     );

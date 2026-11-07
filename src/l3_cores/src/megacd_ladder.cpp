@@ -33,7 +33,7 @@ Ex<bool> MegaCdLadder::on_step() {
                     return false;
                 bit0_asserted_ = true;
                 pulse_release_ns_ = now_ns()
-                    + static_cast<std::int64_t>(profile_.staging.reset_pulse_us) * 1000;
+                    + std::chrono::microseconds{profile_.staging.reset_pulse_us};
             }
             if (profile_.staging.reset_pulse_us == 0) {
                 if (!order_status_bit0(false))

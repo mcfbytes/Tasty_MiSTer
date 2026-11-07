@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "cores/st_config.h"
-#include "cores/st_sysctrl.h"
+#include "infra/indexed_array.h"
 
 namespace mister::cores {
 
@@ -32,8 +32,8 @@ constinit const StOptionRowBlitter kBlitter{};
 constinit const StOptionRowViking kViking{};
 constinit const StOptionRowAspect kAspect{};
 constinit const StOptionRowVideoCrop kVideoCrop{};
-constinit const StOptionRowFloppy kFloppyA{StOption::FloppyA, 0};
-constinit const StOptionRowFloppy kFloppyB{StOption::FloppyB, 1};
+constinit const StOptionRowFloppy kFloppyA{StOption::FloppyA, st_ctrl::StSlot::FloppyA};
+constinit const StOptionRowFloppy kFloppyB{StOption::FloppyB, st_ctrl::StSlot::FloppyB};
 constinit const StOptionRowHdd kHdd0{StOption::Hdd0, AcsiTarget{0}};
 constinit const StOptionRowHdd kHdd1{StOption::Hdd1, AcsiTarget{1}};
 constinit const StOptionRowTos kTos{};
@@ -42,52 +42,50 @@ constinit const StOptionRowCartridge kCartridge{};
 }
 
 OptionRowView StOptionRowBlitter::on_cycle_view(const Facts& f, const OptionRow& r) const noexcept {
-    const std::uint32_t sc = f.system_ctrl;
-    const bool ste = (sc & st_ctrl::kChipsetMask) != 0;
-    const bool bit = (sc & st_ctrl::kBlitter) != 0;
+    const st_ctrl::CtrlWord sc = f.system_ctrl;
+    const bool ste = sc.chipset() != st_ctrl::CtrlWord::kChipsetSt;
+    const bool bit = sc.has(st_ctrl::CtrlWord::kBlitter);
     return {static_cast<std::uint8_t>(bit ? 1 : 0), ste, r.values[(bit || ste) ? 1 : 0]};
 }
 
 Ex<StOptionRow::Write> StOptionRowBlitter::on_cycle_set(const Facts& f, std::uint8_t choice) const {
-    const std::uint32_t sc = f.system_ctrl;
+    const st_ctrl::CtrlWord sc = f.system_ctrl;
 
-    if ((sc & st_ctrl::kSte) != 0)
+    if (sc.has(st_ctrl::CtrlWord::kSte))
         return Write{};
     return Write{
-        .system_ctrl = (choice & 1u) != 0 ? sc | st_ctrl::kBlitter : sc & ~st_ctrl::kBlitter
+        .system_ctrl = (choice & 1u) != 0 ? sc.with(st_ctrl::CtrlWord::kBlitter)
+                                          : sc.without(st_ctrl::CtrlWord::kBlitter)
     };
 }
 
 OptionRowView StOptionRowViking::on_cycle_view(const Facts& f, const OptionRow& r) const noexcept {
-    const std::uint32_t sc = f.system_ctrl;
-    const bool room = (sc & st_ctrl::kMemConfigMask) <= st_ctrl::kMemConfig8M;
-    const bool bit = (sc & st_ctrl::kViking) != 0;
+    const st_ctrl::CtrlWord sc = f.system_ctrl;
+    const bool room = sc.mem_config() <= st_ctrl::CtrlWord::kMem8M;
+    const bool bit = sc.has(st_ctrl::CtrlWord::kViking);
     return {static_cast<std::uint8_t>(bit ? 1 : 0), !room, r.values[(bit && room) ? 1 : 0]};
 }
 
 Ex<StOptionRow::Write> StOptionRowViking::on_cycle_set(const Facts& f, std::uint8_t choice) const {
-    const std::uint32_t sc = f.system_ctrl;
+    const st_ctrl::CtrlWord sc = f.system_ctrl;
     return Write{
-        .system_ctrl = (choice & 1u) != 0 ? sc | st_ctrl::kViking : sc & ~st_ctrl::kViking
+        .system_ctrl = (choice & 1u) != 0 ? sc.with(st_ctrl::CtrlWord::kViking)
+                                          : sc.without(st_ctrl::CtrlWord::kViking)
     };
 }
 
 OptionRowView StOptionRowAspect::on_cycle_view(const Facts& f, const OptionRow& r) const noexcept {
-    const std::uint32_t sc = f.system_ctrl;
-    const auto ar = static_cast<std::uint8_t>(
-        ((sc & st_ctrl::kVideoAspect1) != 0 ? 1u : 0u)
-        | ((sc & st_ctrl::kVideoAspect2) != 0 ? 2u : 0u)
-    );
-    return {ar, false, r.values[ar]};
+    const auto ar = f.system_ctrl.aspect();
+    return {ar.v, false, infra::at_index(r.values, ar)};
 }
 
 Ex<StOptionRow::Write> StOptionRowAspect::on_cycle_set(const Facts& f, std::uint8_t choice) const {
-    const std::uint32_t sc = f.system_ctrl;
-    std::uint32_t v = sc & ~(st_ctrl::kVideoAspect1 | st_ctrl::kVideoAspect2);
+    st_ctrl::CtrlWord v = f.system_ctrl.without(st_ctrl::CtrlWord::kVideoAspect1)
+                              .without(st_ctrl::CtrlWord::kVideoAspect2);
     if ((choice & 1u) != 0)
-        v |= st_ctrl::kVideoAspect1;
+        v = v.with(st_ctrl::CtrlWord::kVideoAspect1);
     if ((choice & 2u) != 0)
-        v |= st_ctrl::kVideoAspect2;
+        v = v.with(st_ctrl::CtrlWord::kVideoAspect2);
     return Write{.system_ctrl = v};
 }
 
@@ -95,9 +93,9 @@ OptionRowView StOptionRowVideoCrop::on_cycle_view(
     const Facts& f,
     const OptionRow& r
 ) const noexcept {
-    const std::uint32_t sc = f.system_ctrl;
+    const st_ctrl::CtrlWord sc = f.system_ctrl;
 
-    const bool border = (sc & st_ctrl::kBorder) != 0;
+    const bool border = sc.has(st_ctrl::CtrlWord::kBorder);
     const bool p216 = (f.ext_ctrl & st_ctrl::kExtCrop216) != 0;
     const std::uint8_t choice = !border ? 0 : p216 ? 2 : 1;
     return {choice, false, r.values[choice]};
@@ -107,19 +105,21 @@ Ex<StOptionRow::Write> StOptionRowVideoCrop::on_cycle_set(
     const Facts& f,
     std::uint8_t choice
 ) const {
-    const std::uint32_t sc = f.system_ctrl;
+    const st_ctrl::CtrlWord sc = f.system_ctrl;
 
     return Write{
-        .system_ctrl = choice != 0 ? sc | st_ctrl::kBorder : sc & ~st_ctrl::kBorder,
+        .system_ctrl = choice != 0 ? sc.with(st_ctrl::CtrlWord::kBorder)
+                                   : sc.without(st_ctrl::CtrlWord::kBorder),
         .ext_ctrl = choice == 2 ? f.ext_ctrl | st_ctrl::kExtCrop216
                                 : f.ext_ctrl & ~st_ctrl::kExtCrop216
     };
 }
 
 OptionRowView StOptionRowFloppy::on_file_view(const Facts& f, std::span<char> text) const noexcept {
-    const std::uint8_t i = drive_;
-    const bool wp = (f.system_ctrl & st_ctrl::write_protect_bit(i)) != 0;
-    const std::string_view name = f.floppy_in[i] ? StConfig::leaf_of(f.floppy[i]) : kNoDisk;
+    const bool wp = f.system_ctrl.has(st_ctrl::write_protect_bit(drive_));
+    const std::string_view path = infra::at_index(f.floppy, drive_);
+    const bool inserted = !path.empty();
+    const std::string_view name = inserted ? StConfig::leaf_of(path) : kNoDisk;
     const int n = std::snprintf(
         text.data(),
         text.size(),
@@ -129,19 +129,15 @@ OptionRowView StOptionRowFloppy::on_file_view(const Facts& f, std::span<char> te
         name.data()
     );
     const auto len = std::min(static_cast<std::size_t>(n > 0 ? n : 0), text.size() - 1);
-    return {
-        static_cast<std::uint8_t>(f.floppy_in[i] ? 1 : 0),
-        false,
-        std::string_view{text.data(), len}
-    };
+    return {static_cast<std::uint8_t>(inserted ? 1 : 0), false, std::string_view{text.data(), len}};
 }
 
 OptionRowView StOptionRowHdd::on_file_view(const Facts& f, std::span<char>) const noexcept {
-    const std::uint8_t t = target_.v;
+    const bool bound = infra::at_index(f.hdd_bound, target_);
     return {
-        static_cast<std::uint8_t>(f.hdd_bound[t] ? 1 : 0),
+        static_cast<std::uint8_t>(bound ? 1 : 0),
         false,
-        f.hdd_bound[t] ? StConfig::leaf_of(f.acsi[t]) : kNoDisk
+        bound ? StConfig::leaf_of(infra::at_index(f.acsi, target_)) : kNoDisk
     };
 }
 
@@ -152,7 +148,7 @@ OptionRowView StOptionRowTos::on_file_view(const Facts& f, std::span<char>) cons
 OptionRowView StOptionRowCartridge::on_file_view(const Facts& f, std::span<char>) const noexcept {
     return {
         static_cast<std::uint8_t>(f.cart.empty() ? 0 : 1),
-        (f.system_ctrl & st_ctrl::kDongle) != 0,
+        f.system_ctrl.has(st_ctrl::CtrlWord::kDongle),
         f.cart.empty() ? kNoCartridge : StConfig::leaf_of(f.cart)
     };
 }

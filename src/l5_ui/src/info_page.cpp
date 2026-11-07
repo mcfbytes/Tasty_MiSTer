@@ -45,8 +45,8 @@ public:
         app::PageDescription::Row& row = out.rows[0];
         row.kind = app::PageDescription::RowKind::Text;
         (void)row.label.assign(text_for(id_));
-        out.row_count = 1;
-        out.total = 1;
+        out.row_count = RowCount::of(1);
+        out.total = RowCount::of(1);
         return true;
     }
 

@@ -2,6 +2,7 @@
 #include "cores/mdp_source.h"
 
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -71,7 +72,7 @@ Ex<void> CueWavSource::locate_data_(svc::IFile& f, std::uint32_t file_size) {
         }
 
         const std::uint64_t next = static_cast<std::uint64_t>(pos) + wav::kChunkHeaderBytes + size;
-        if (next > 0xFFFF'FFFFu) {
+        if (next > std::numeric_limits<std::uint32_t>::max()) {
             return std::unexpected(
                 Error{
                     Errc::bad_format,
@@ -102,7 +103,7 @@ Ex<PcmExtent> CueWavSource::open(svc::TrackNumber track) {
     auto sz = (*f)->size();
     if (!sz)
         return std::unexpected(sz.error());
-    if (sz->v > 0xFFFF'FFFFu)
+    if (sz->v > std::numeric_limits<std::uint32_t>::max())
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     if (auto r = locate_data_(**f, static_cast<std::uint32_t>(sz->v)); !r) {
         return std::unexpected(r.error());

@@ -3,9 +3,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
+#include <type_traits>
 
+#include "infra/indexed_array.h"
 #include "svc/config.h"
 #include "svc/config_snapshot.h"
 
@@ -27,7 +30,21 @@ constexpr std::uint16_t aspect_off(std::size_t n) {
     return static_cast<std::uint16_t>(offsetof(ConfigSnapshot, custom_aspect_ratio) + n * 16u);
 }
 
-constexpr std::int64_t kU32Max = 0xFFFFFFFF;
+struct RowId {
+    std::uint16_t v = 0;
+
+    [[nodiscard]] static constexpr RowId classic(std::size_t j) noexcept {
+        return RowId{static_cast<std::uint16_t>(j)};
+    }
+
+    [[nodiscard]] static constexpr RowId extension(std::size_t j) noexcept {
+        return RowId{static_cast<std::uint16_t>(kNumIniOptions + j)};
+    }
+
+    friend constexpr bool operator==(RowId, RowId) = default;
+};
+
+constexpr std::int64_t kU32Max = std::numeric_limits<std::uint32_t>::max();
 constexpr std::int64_t kU16Max = 0xFFFF;
 
 inline constexpr Option kSchema[] = {
@@ -237,7 +254,141 @@ inline constexpr Option kExtSchema[] = {
     {"HD_MENU_OPACITY", OptionType::U8, 50, 100, 85, TASTY_CFG_OFF(hd_menu_opacity), 0, false},
 };
 
+template <class F>
+consteval bool def_matches(const Option& o, const F& field) {
+    if constexpr (std::is_floating_point_v<F>) {
+        return o.def == 0 && field == F{};
+    } else {
+        return o.def == field;
+    }
+}
+
+consteval bool default_agrees(const ConfigSnapshot& d, const Option& o) {
+#define TASTY_CFG_CHECK(field) \
+    if (o.offset == TASTY_CFG_OFF(field)) \
+        return def_matches(o, d.field);
+
+    TASTY_CFG_CHECK(keyrah_mode)
+    TASTY_CFG_CHECK(forced_scandoubler)
+    TASTY_CFG_CHECK(key_menu_as_rgui)
+    TASTY_CFG_CHECK(reset_combo)
+    TASTY_CFG_CHECK(csync)
+    TASTY_CFG_CHECK(vga_scaler)
+    TASTY_CFG_CHECK(vga_sog)
+    TASTY_CFG_CHECK(hdmi_audio_96k)
+    TASTY_CFG_CHECK(dvi_mode)
+    TASTY_CFG_CHECK(hdmi_limited)
+    TASTY_CFG_CHECK(hdmi_cec)
+    TASTY_CFG_CHECK(hdmi_cec_sleep)
+    TASTY_CFG_CHECK(hdmi_cec_wake)
+    TASTY_CFG_CHECK(hdmi_cec_input_mode)
+    TASTY_CFG_CHECK(hdmi_cec_power_on)
+    TASTY_CFG_CHECK(hdmi_cec_clock)
+    TASTY_CFG_CHECK(direct_video)
+    TASTY_CFG_CHECK(video_info)
+    TASTY_CFG_CHECK(refresh_min)
+    TASTY_CFG_CHECK(refresh_max)
+    TASTY_CFG_CHECK(controller_info)
+    TASTY_CFG_CHECK(vsync_adjust)
+    TASTY_CFG_CHECK(kbd_nomouse)
+    TASTY_CFG_CHECK(mouse_throttle)
+    TASTY_CFG_CHECK(bootscreen)
+    TASTY_CFG_CHECK(vscale_mode)
+    TASTY_CFG_CHECK(vscale_border)
+    TASTY_CFG_CHECK(rbf_hide_datecode)
+    TASTY_CFG_CHECK(menu_pal)
+    TASTY_CFG_CHECK(bootcore_timeout)
+    TASTY_CFG_CHECK(fb_size)
+    TASTY_CFG_CHECK(fb_terminal)
+    TASTY_CFG_CHECK(osd_rotate)
+    TASTY_CFG_CHECK(osd_timeout)
+    TASTY_CFG_CHECK(gamepad_defaults)
+    TASTY_CFG_CHECK(recents)
+    TASTY_CFG_CHECK(jamma_vid)
+    TASTY_CFG_CHECK(jamma_pid)
+    TASTY_CFG_CHECK(jamma2_vid)
+    TASTY_CFG_CHECK(jamma2_pid)
+    TASTY_CFG_CHECK(no_merge_vid)
+    TASTY_CFG_CHECK(no_merge_pid)
+    TASTY_CFG_CHECK(spinner_vid)
+    TASTY_CFG_CHECK(spinner_pid)
+    TASTY_CFG_CHECK(spinner_throttle)
+    TASTY_CFG_CHECK(spinner_axis)
+    TASTY_CFG_CHECK(sniper_mode)
+    TASTY_CFG_CHECK(browse_expand)
+    TASTY_CFG_CHECK(logo)
+    TASTY_CFG_CHECK(log_file_entry)
+    TASTY_CFG_CHECK(shmask_mode_default)
+    TASTY_CFG_CHECK(bt_auto_disconnect)
+    TASTY_CFG_CHECK(bt_reset_before_pair)
+    TASTY_CFG_CHECK(rumble)
+    TASTY_CFG_CHECK(wheel_force)
+    TASTY_CFG_CHECK(wheel_range)
+    TASTY_CFG_CHECK(hdmi_game_mode)
+    TASTY_CFG_CHECK(vrr_mode)
+    TASTY_CFG_CHECK(vrr_vesa_framerate)
+    TASTY_CFG_CHECK(video_off)
+    TASTY_CFG_CHECK(video_off_logo)
+    TASTY_CFG_CHECK(disable_autofire)
+    TASTY_CFG_CHECK(video_brightness)
+    TASTY_CFG_CHECK(video_contrast)
+    TASTY_CFG_CHECK(video_saturation)
+    TASTY_CFG_CHECK(video_hue)
+    TASTY_CFG_CHECK(hdr)
+    TASTY_CFG_CHECK(hdr_max_nits)
+    TASTY_CFG_CHECK(hdr_avg_nits)
+    TASTY_CFG_CHECK(vga_mode_int)
+    TASTY_CFG_CHECK(ntsc_mode)
+    TASTY_CFG_CHECK(osd_lock_time)
+    TASTY_CFG_CHECK(debug)
+    TASTY_CFG_CHECK(lookahead)
+    TASTY_CFG_CHECK(autofire_on_directions)
+    TASTY_CFG_CHECK(xbe2_shift)
+    TASTY_CFG_CHECK(spd_quirk)
+    TASTY_CFG_CHECK(hdmi_off)
+    TASTY_CFG_CHECK(sanity_check)
+    TASTY_CFG_CHECK(scanrate_lock)
+    TASTY_CFG_CHECK(osd_style)
+    TASTY_CFG_CHECK(hd_osd_fps)
+    TASTY_CFG_CHECK(hd_theme)
+    TASTY_CFG_CHECK(hd_layout)
+    TASTY_CFG_CHECK(hd_colors)
+    TASTY_CFG_CHECK(hd_game_display)
+    TASTY_CFG_CHECK(hd_menu_opacity)
+    TASTY_CFG_CHECK(alt_ini)
+    TASTY_CFG_CHECK(parse_error_count)
+#undef TASTY_CFG_CHECK
+    return o.def == 0;
+}
+
+consteval bool defaults_agree() {
+
+    const ConfigSnapshot d{};
+    const auto agrees = [&d](const Option& o) {
+        if (o.length != 0)
+            return true;
+        return default_agrees(d, o);
+    };
+    for (const Option& o : kSchema) {
+        if (!agrees(o))
+            return false;
+    }
+    for (const Option& o : kExtSchema) {
+        if (!agrees(o))
+            return false;
+    }
+    return true;
+}
+
+static_assert(defaults_agree(), "Option::def must agree with ConfigSnapshot's initializers");
+
 #undef TASTY_CFG_OFF
+
+[[nodiscard]] constexpr const Option& option_at(RowId id) noexcept {
+    return (id.v < kNumIniOptions) ? kSchema[id.v] : kExtSchema[id.v - kNumIniOptions];
+}
+
+using ArrayAppendSeen = infra::IndexedArray<bool, kNumIniOptions + kNumExtOptions, RowId>;
 
 constexpr unsigned char lower_ascii(unsigned char c) {
     return (c >= 'A' && c <= 'Z') ? static_cast<unsigned char>(c + 32) : c;

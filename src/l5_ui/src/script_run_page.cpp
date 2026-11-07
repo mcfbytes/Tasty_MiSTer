@@ -21,8 +21,9 @@ namespace mister::ui {
 
 namespace {
 
-constexpr std::size_t kRows = 16;
-constexpr std::size_t kOutputRows = kRows - 2;
+constexpr RowCount kLegendRows{2};
+constexpr RowCount kOutputRows = kFullOsdRows - kLegendRows;
+constexpr proto::OsdRow kRenewNoticeRow{7};
 }
 
 ScriptRunPage::ScriptRunPage(ScriptKind kind, std::string argv0, bool bt_reset) noexcept
@@ -48,14 +49,12 @@ bool ScriptRunPage::walk(PageWalk& out) const {
     out.title_arrow = OsdRenderer::kArrowNone;
     out.count = 0;
 
-    const std::span<const std::string> lines = runner_.lines();
-    const std::size_t line_count = lines.size();
-    const std::size_t hd_count = line_count < app::PageDescription::kMaxRows
-        ? line_count
-        : app::PageDescription::kMaxRows;
-    const std::size_t hd_first = line_count - hd_count;
-    out.page.first = static_cast<std::uint16_t>(hd_first);
-    out.page.total = static_cast<std::uint16_t>(line_count);
+    const RowSpan<const std::string> lines{runner_.lines()};
+    const RowCount line_count = lines.size();
+    const RowCount hd_count = std::min(line_count, RowCount::of(app::PageDescription::kMaxRows));
+    const RowIndex hd_first = row_after(line_count - hd_count);
+    out.page.first = hd_first;
+    out.page.total = line_count;
 
     std::string_view word = runner_.finished() ? std::string_view{"OK"} : policy_.running_footer();
     word.remove_prefix(std::min(word.find_first_not_of(' '), word.size()));
@@ -64,10 +63,10 @@ bool ScriptRunPage::walk(PageWalk& out) const {
     (void)out.page.footer.assign(legend);
 
     const bool notice = phase_ != Phase::Run;
-    const std::size_t first = line_count > kOutputRows ? line_count - kOutputRows : 0;
+    const RowCount first = saturating_sub(line_count, kOutputRows);
 
-    for (std::size_t i = 0; i < hd_count; ++i) {
-        const std::size_t idx = hd_first + i;
+    for (const RowIndex i : rows(hd_count)) {
+        const RowIndex idx = hd_first + i.before();
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
         r.hd.kind = app::PageDescription::RowKind::Text;
@@ -75,55 +74,45 @@ bool ScriptRunPage::walk(PageWalk& out) const {
 
         if (notice)
             continue;
-        const std::size_t vr = idx - first;
+        const RowCount vr = idx - row_after(first);
         if (vr >= kOutputRows)
             continue;
-        r.classic = classic_row(
-            OsdRow::of(vr),
-            lines[idx],
-            false,
-            false,
-            std::nullopt,
-            OsdRenderer::kArrowNone
-        );
+        r.classic = classic_row(osd_row_at(vr), lines[idx], {.arrow = OsdRenderer::kArrowNone});
     }
 
     if (notice) {
 
-        for (std::size_t i = 0; i < kRows; ++i) {
-            const bool finish = i + 1 == kRows;
+        for (const RowIndex r : rows(kFullOsdRows)) {
+            const proto::OsdRow at = osd_row_at(r.before());
+            const bool finish = at == last_osd_row(kFullOsdRows);
             out.rows[out.count++].classic = classic_row(
-                OsdRow::of(i),
-                finish
-                    ? std::string_view{"           Finish"}
-                    : (i == 7 ? std::string_view{"   Delete all pairings..."} : std::string_view{}),
-                finish,
-                false,
-                std::nullopt,
-                OsdRenderer::kArrowNone
+                at,
+                finish ? std::string_view{"           Finish"}
+                       : (at == kRenewNoticeRow ? std::string_view{"   Delete all pairings..."}
+                                                : std::string_view{}),
+                {.inverted = finish, .arrow = OsdRenderer::kArrowNone}
             );
         }
         return true;
     }
 
-    for (std::size_t i = 0; i < kOutputRows; ++i) {
-        const std::size_t idx = first + i;
-        if (idx < line_count && idx >= hd_first)
+    for (const RowIndex r : rows(kOutputRows)) {
+        const RowIndex idx = row_after(first) + r.before();
+        const bool listed = idx < row_after(line_count);
+        if (listed && idx >= hd_first)
             continue;
         out.rows[out.count++].classic = classic_row(
-            OsdRow::of(i),
-            idx < line_count ? std::string_view{lines[idx]} : std::string_view{},
-            false,
-            false,
-            std::nullopt,
-            OsdRenderer::kArrowNone
+            osd_row_at(r.before()),
+            listed ? std::string_view{lines[idx]} : std::string_view{},
+            {.arrow = OsdRenderer::kArrowNone}
         );
     }
-    out.rows[out.count++].classic = classic_row(OsdRow::of(kOutputRows), std::string_view{});
+    out.rows[out.count++].classic = classic_row(osd_row_at(kOutputRows), std::string_view{});
 
     const std::string_view footer = runner_.finished() ? std::string_view{"             OK"}
                                                        : policy_.running_footer();
-    out.rows[out.count++].classic = classic_row(OsdRow::of(kRows - 1), footer, true);
+    out.rows[out.count++]
+        .classic = classic_row(last_osd_row(kFullOsdRows), footer, {.inverted = true});
     return true;
 }
 

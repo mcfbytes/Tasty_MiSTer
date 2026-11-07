@@ -17,6 +17,7 @@
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
 #include "cores/generic_profile.h"
+#include "hal/types.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 
@@ -51,12 +52,12 @@ const CoreProfile& profile_for(std::string_view conf_str_name);
 
 [[nodiscard]] constexpr MakeLoader loader_for(
     const CoreFactory* row,
-    std::uint32_t load_addr
+    hal::FabricAddr load_addr
 ) noexcept {
     if (row != nullptr && row->make_loader != nullptr)
         return row->make_loader;
     const CoreProfile& p = row != nullptr ? *row->profile : kGenericProfile;
-    if (load_addr == 0 || p.file_tx_whole)
+    if (load_addr == hal::FabricAddr{} || p.file_tx_whole)
         return nullptr;
     return &make_addressed_load;
 }

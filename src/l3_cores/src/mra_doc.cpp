@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "cores/stock_scan.h"
+#include "hal/types.h"
 #include "infra/ascii.h"
 #include "svc/xml_scan.h"
 #include "svc/xml_scanner.h"
@@ -47,6 +48,7 @@ std::vector<std::uint8_t> hex_bytes(std::string_view text) {
 namespace {
 
 using stock_scan::is_c_space;
+using stock_scan::Radix;
 using stock_scan::Scan;
 using stock_scan::scan_atoi;
 using stock_scan::scan_ul;
@@ -144,6 +146,86 @@ struct BitsScan {
     return s;
 }
 
+enum class Element : std::uint8_t {
+    None,
+    Rom,
+    Switches,
+    Interleave,
+    Part,
+    Patch,
+    Dip,
+    Cheat,
+    Buttons,
+    Nvram,
+    Cheats,
+    Setname,
+    Rotation,
+};
+
+[[nodiscard]] Element element_of(std::string_view name) noexcept {
+    if (ieq(name, "rom"))
+        return Element::Rom;
+    if (ieq(name, "switches"))
+        return Element::Switches;
+    if (ieq(name, "interleave"))
+        return Element::Interleave;
+    if (ieq(name, "part"))
+        return Element::Part;
+    if (ieq(name, "patch"))
+        return Element::Patch;
+    if (ieq(name, "dip"))
+        return Element::Dip;
+    if (ieq(name, "cheat"))
+        return Element::Cheat;
+    if (ieq(name, "buttons"))
+        return Element::Buttons;
+    if (ieq(name, "nvram"))
+        return Element::Nvram;
+    if (ieq(name, "cheats"))
+        return Element::Cheats;
+    if (ieq(name, "setname"))
+        return Element::Setname;
+    if (ieq(name, "rotation"))
+        return Element::Rotation;
+    return Element::None;
+}
+
+struct RomAttrs {
+    int index = 0;
+    std::string zips;
+    std::string md5;
+    hal::FabricAddr address{};
+};
+
+struct CheatAttrs {
+    std::int32_t size = 0;
+    std::int32_t max = 0;
+};
+
+struct PendingNode {
+
+    void reset() noexcept {
+        part_name.clear();
+        offset = 0;
+        length = -1;
+        repeat = 1;
+        crc = svc::Crc32{};
+    }
+
+    std::string part_name;
+    std::string part_zip;
+    std::int32_t offset = 0;
+    std::int32_t length = -1;
+    std::int32_t repeat = 1;
+    svc::Crc32 crc{};
+
+    MapWord map{};
+    std::int32_t patch_addr = 0;
+    bool patch_xor = false;
+    int ilv_input = 0;
+    int ilv_output = 0;
+};
+
 struct Walk {
     explicit Walk(MraDoc& doc) : d(doc) {}
 
@@ -159,30 +241,14 @@ struct Walk {
     bool predone = false;
 
     std::string acc;
-
-    std::string partname;
-    std::string partzip;
-    std::int32_t offset = 0;
-    std::int32_t length = -1;
-    std::int32_t repeat = 1;
-    std::uint32_t crc = 0;
-    std::uint32_t map = 0;
-    std::uint32_t map_digits = 0;
-    std::int32_t patchaddr = 0;
-    bool patch_xor = false;
-    int ilv_input = 0;
-    int ilv_output = 0;
+    PendingNode node;
     DipRow dip{};
     std::string cheatname;
 
     void start_resets() {
         acc.clear();
-        partname.clear();
+        node.reset();
         cheatname.clear();
-        offset = 0;
-        length = -1;
-        repeat = 1;
-        crc = 0;
     }
 
     void end_common() {
@@ -196,8 +262,8 @@ struct Walk {
         MraCheat c;
         c.name = cheatname;
         c.bytes = hex_bytes(acc);
-        const std::size_t unit = d.cheat_geometry.unit;
-        if (unit == 0 || c.bytes.size() % unit != 0 || c.bytes.size() > kCheatTableBytes) {
+        const proto::FileSize body{c.bytes.size()};
+        if (!d.cheat_geometry.unit.whole(body) || body > proto::FileSize{kCheatTableBytes}) {
             ++d.cheats_dropped;
             return;
         }
@@ -214,216 +280,249 @@ struct Walk {
     }
 
     void on_start(const xml::Tag& tag, const xml::Attr* attrs) {
-        const std::string_view name = tag.name;
+        const Element el = element_of(tag.name);
         start_resets();
-
-        int rom_index = 0;
-        std::string rom_zips;
-        std::string rom_md5;
-        std::uint32_t rom_address = 0;
-
-        const bool is_rom = ieq(name, "rom");
-        const bool is_switches = ieq(name, "switches");
-        const bool is_interleave = ieq(name, "interleave");
-        const bool is_part = ieq(name, "part");
-        const bool is_patch = ieq(name, "patch");
-        const bool is_dip = ieq(name, "dip");
-        const bool is_buttons = ieq(name, "buttons");
-        const bool is_nvram = ieq(name, "nvram");
-        const bool is_cheats = ieq(name, "cheats");
-
-        std::int32_t cheat_size = 0;
-        std::int32_t cheat_max = 0;
-
-        if (is_rom) {
-            insiderom = true;
-            ilv_input = 0;
-            ilv_output = 0;
-            map = 0;
-            map_digits = 0;
-        } else if (is_switches) {
-            insidesw = true;
-            d.switches = SwitchTable{};
-            dip = DipRow{};
-        } else if (is_interleave) {
-            ilv_input = 8;
-            ilv_output = 0;
-            map = 0;
-            map_digits = 0;
-        } else if (is_part) {
-            partzip.clear();
-            map = 0;
-            map_digits = 0;
-        } else if (is_patch) {
-            patchaddr = 0;
-            patch_xor = false;
-        } else if (ieq(name, "setname")) {
-            if (!predone) {
-                insetname = true;
-                foundsetname = true;
-            }
-        } else if (ieq(name, "rotation")) {
-            if (!predone) {
-                inrotation = true;
-                foundrotation = true;
-            }
-        }
+        RomAttrs rom;
+        CheatAttrs geom;
+        open_element(el);
 
         for (std::size_t i = 0; i < tag.attr_count; ++i) {
             const std::string_view an = attrs[i].name;
             const std::string v = decode(attrs[i].value);
-            if (is_rom) {
-                if (ieq(an, "zip"))
-                    rom_zips = v;
-                if (ieq(an, "md5"))
-                    rom_md5 = v;
-                if (ieq(an, "index"))
-                    rom_index = scan_atoi(v);
-                if (ieq(an, "address"))
-                    rom_address = scan_ul(v, 0).value;
-            }
-            if (is_buttons) {
-                if (ieq(an, "names"))
-                    d.buttons_names = v;
-                if (ieq(an, "default"))
-                    d.buttons_default = v;
-            }
-            if (insetname && ieq(an, "same_dir") && v == "1")
-                d.setname_same_dir = true;
-
+            if (el == Element::Rom)
+                read_rom_attr(an, v, rom);
+            read_document_attr(el, an, v, geom);
             if (insiderom) {
-                if (is_interleave) {
-                    if (ieq(an, "input"))
-                        ilv_input = static_cast<int>(scan_ul(v, 0).value);
-                    if (ieq(an, "output"))
-                        ilv_output = static_cast<int>(scan_ul(v, 0).value);
-                }
-                if (is_part) {
-                    if (ieq(an, "zip"))
-                        partzip = v;
-                    if (ieq(an, "name"))
-                        partname = v;
-                    if (ieq(an, "offset"))
-                        offset = static_cast<std::int32_t>(scan_ul(v, 0).value);
-                    if (ieq(an, "length"))
-                        length = static_cast<std::int32_t>(scan_ul(v, 0).value);
-                    if (ieq(an, "repeat"))
-                        repeat = static_cast<std::int32_t>(scan_ul(v, 0).value);
-                    if (ieq(an, "crc"))
-                        crc = scan_ul(v, 16).value;
-                    if (ieq(an, "map")) {
-                        map = scan_ul(v, 16).value;
-                        map_digits = static_cast<std::uint32_t>(v.size());
-                    }
-                }
-                if (is_patch) {
-                    if (ieq(an, "offset")) {
-                        patchaddr = static_cast<std::int32_t>(scan_ul(v, 0).value);
-                    }
-                    if (ieq(an, "operation") && ieq(v, "xor"))
-                        patch_xor = true;
-                }
+                if (el == Element::Interleave)
+                    read_interleave_attr(an, v);
+                if (el == Element::Part)
+                    read_part_attr(an, v);
+                if (el == Element::Patch)
+                    read_patch_attr(an, v);
             } else if (insidesw) {
-                if (is_switches && ieq(an, "default")) {
-                    const std::vector<std::uint8_t> b = hex_bytes(v);
-                    for (std::size_t k = 0; k < b.size() && k < std::tuple_size_v<DipWord::Bytes>;
-                         ++k) {
-                        d.switches.dip_def = d.switches.dip_def.with_byte(k, b[k]);
-                    }
-                }
-                if (is_dip) {
-                    if (ieq(an, "name"))
-                        dip.name = capped(v);
-                    if (ieq(an, "bits")) {
-                        const BitsScan r = scan_bits(v);
-                        int b = r.b;
-                        int e = r.e;
-                        const bool bad = r.num <= 0
-                            || b < 0
-                            || b > 63
-                            || e < 0
-                            || e > 63
-                            || (r.num == 2 && e < b);
-                        if (!bad) {
-                            if (r.num == 1)
-                                e = b;
-                            dip.start = b;
-                            dip.mask = DipWord::ones(e - b + 1).shifted(b);
-                            dip.size = e - b + 1;
-                        }
-                    }
-                    if (ieq(an, "ids")) {
-                        dip.ids.clear();
-                        std::string_view rest = v;
-                        int n = 0;
-                        while (!rest.empty() && n < static_cast<int>(kMaxDipIds)) {
-                            const std::size_t comma = rest.find(',');
-                            const std::size_t len = (comma == std::string_view::npos) ? rest.size()
-                                                                                      : comma;
-                            dip.ids.push_back(capped(std::string(rest.substr(0, len))));
-                            rest.remove_prefix(len);
-                            if (!rest.empty() && rest.front() == ',')
-                                rest.remove_prefix(1);
-                            ++n;
-                        }
-                        dip.num = n;
-                    }
-                    if (ieq(an, "values")) {
-                        std::string_view rest = v;
-                        std::size_t n = 0;
-                        while (!rest.empty() && n < kMaxDipIds) {
-                            const Scan r = scan_ul(rest, 0);
-                            if (r.used == 0)
-                                break;
-                            dip.val[n] = DipWord{r.value};
-                            rest.remove_prefix(r.used);
-                            while (!rest.empty() && (rest.front() == ' ' || rest.front() == ',')) {
-                                rest.remove_prefix(1);
-                            }
-                            ++n;
-                        }
-                        dip.has_val = true;
-                    }
-                }
-            } else if (insidecheats) {
-                if (ieq(name, "cheat") && ieq(an, "name")) {
-                    cheatname = v;
-                }
-            } else {
-                if (is_nvram && ieq(an, "index")) {
-                    d.nvram_index = static_cast<int>(scan_ul(v, 0).value);
-                }
-                if (is_nvram && ieq(an, "size")) {
-                    d.nvram_size = static_cast<int>(scan_ul(v, 0).value);
-                }
-                if (is_cheats && ieq(an, "size")) {
-                    cheat_size = static_cast<std::int32_t>(scan_ul(v, 0).value);
-                }
-                if (is_cheats && ieq(an, "max")) {
-                    cheat_max = static_cast<std::int32_t>(scan_ul(v, 0).value);
-                }
+                read_switches_attr(el, an, v);
             }
         }
 
-        if (is_rom) {
+        close_start(el, std::move(rom), geom);
+    }
+
+    void open_element(Element el) {
+        switch (el) {
+            case Element::Rom:
+                insiderom = true;
+                node.ilv_input = 0;
+                node.ilv_output = 0;
+                node.map = MapWord{};
+                break;
+            case Element::Switches:
+                insidesw = true;
+                d.switches = SwitchTable{};
+                dip = DipRow{};
+                break;
+            case Element::Interleave:
+                node.ilv_input = kInterleaveByteBits;
+                node.ilv_output = 0;
+                node.map = MapWord{};
+                break;
+            case Element::Part:
+                node.part_zip.clear();
+                node.map = MapWord{};
+                break;
+            case Element::Patch:
+                node.patch_addr = 0;
+                node.patch_xor = false;
+                break;
+            case Element::Setname:
+                if (!predone) {
+                    insetname = true;
+                    foundsetname = true;
+                }
+                break;
+            case Element::Rotation:
+                if (!predone) {
+                    inrotation = true;
+                    foundrotation = true;
+                }
+                break;
+            case Element::None:
+            case Element::Dip:
+            case Element::Cheat:
+            case Element::Buttons:
+            case Element::Nvram:
+            case Element::Cheats:
+                break;
+        }
+    }
+
+    void read_rom_attr(std::string_view an, const std::string& v, RomAttrs& rom) {
+        if (ieq(an, "zip"))
+            rom.zips = v;
+        if (ieq(an, "md5"))
+            rom.md5 = v;
+        if (ieq(an, "index"))
+            rom.index = scan_atoi(v);
+        if (ieq(an, "address"))
+            rom.address = hal::FabricAddr{scan_ul(v, Radix::Auto).value};
+    }
+
+    void read_interleave_attr(std::string_view an, const std::string& v) {
+        if (ieq(an, "input"))
+            node.ilv_input = static_cast<int>(scan_ul(v, Radix::Auto).value);
+        if (ieq(an, "output"))
+            node.ilv_output = static_cast<int>(scan_ul(v, Radix::Auto).value);
+    }
+
+    void read_part_attr(std::string_view an, const std::string& v) {
+        if (ieq(an, "zip"))
+            node.part_zip = v;
+        if (ieq(an, "name"))
+            node.part_name = v;
+        if (ieq(an, "offset")) {
+            node.offset = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+        }
+        if (ieq(an, "length")) {
+            node.length = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+        }
+        if (ieq(an, "repeat")) {
+            node.repeat = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+        }
+        if (ieq(an, "crc"))
+            node.crc = svc::Crc32{scan_ul(v, Radix::Hex).value};
+        if (ieq(an, "map")) {
+            node.map = MapWord{
+                .value = scan_ul(v, Radix::Hex).value,
+                .digits = static_cast<std::uint32_t>(v.size())
+            };
+        }
+    }
+
+    void read_patch_attr(std::string_view an, const std::string& v) {
+        if (ieq(an, "offset")) {
+            node.patch_addr = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+        }
+        if (ieq(an, "operation") && ieq(v, "xor"))
+            node.patch_xor = true;
+    }
+
+    void read_switches_attr(Element el, std::string_view an, const std::string& v) {
+        if (el == Element::Switches && ieq(an, "default")) {
+            const std::vector<std::uint8_t> b = hex_bytes(v);
+            for (std::size_t k = 0; k < b.size() && k < std::tuple_size_v<DipWord::Bytes>; ++k) {
+                d.switches.dip_def = d.switches.dip_def.with_byte(k, b[k]);
+            }
+        }
+        if (el != Element::Dip)
+            return;
+        if (ieq(an, "name"))
+            dip.name = capped(v);
+        if (ieq(an, "bits")) {
+            const BitsScan r = scan_bits(v);
+            int b = r.b;
+            int e = r.e;
+            const bool bad = r.num <= 0
+                || b < 0
+                || b > 63
+                || e < 0
+                || e > 63
+                || (r.num == 2 && e < b);
+            if (!bad) {
+                if (r.num == 1)
+                    e = b;
+                dip.start = b;
+                dip.mask = DipWord::ones(e - b + 1).shifted(b);
+                dip.size = e - b + 1;
+            }
+        }
+        if (ieq(an, "ids")) {
+            dip.ids.clear();
+            std::string_view rest = v;
+            int n = 0;
+            while (!rest.empty() && n < static_cast<int>(kMaxDipIds)) {
+                const std::size_t comma = rest.find(',');
+                const std::size_t len = (comma == std::string_view::npos) ? rest.size() : comma;
+                dip.ids.push_back(capped(std::string(rest.substr(0, len))));
+                rest.remove_prefix(len);
+                if (!rest.empty() && rest.front() == ',')
+                    rest.remove_prefix(1);
+                ++n;
+            }
+            dip.num = n;
+        }
+        if (ieq(an, "values")) {
+            std::string_view rest = v;
+            std::size_t n = 0;
+            while (!rest.empty() && n < kMaxDipIds) {
+                const Scan r = scan_ul(rest, Radix::Auto);
+                if (r.used == 0)
+                    break;
+                dip.val[n] = DipWord{r.value};
+                rest.remove_prefix(r.used);
+                while (!rest.empty() && (rest.front() == ' ' || rest.front() == ',')) {
+                    rest.remove_prefix(1);
+                }
+                ++n;
+            }
+            dip.has_val = true;
+        }
+    }
+
+    void read_document_attr(
+        Element el,
+        std::string_view an,
+        const std::string& v,
+        CheatAttrs& geom
+    ) {
+        if (el == Element::Buttons) {
+            if (ieq(an, "names"))
+                d.buttons_names = v;
+            if (ieq(an, "default"))
+                d.buttons_default = v;
+        }
+        if (insetname && ieq(an, "same_dir") && v == "1")
+            d.setname_same_dir = true;
+
+        if (insiderom || insidesw)
+            return;
+        if (insidecheats) {
+            if (el == Element::Cheat && ieq(an, "name"))
+                cheatname = v;
+            return;
+        }
+        if (el == Element::Nvram && ieq(an, "index")) {
+            d.nvram_index = static_cast<int>(scan_ul(v, Radix::Auto).value);
+        }
+        if (el == Element::Nvram && ieq(an, "size")) {
+            d.nvram_size = static_cast<int>(scan_ul(v, Radix::Auto).value);
+        }
+        if (el == Element::Cheats && ieq(an, "size")) {
+            geom.size = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+        }
+        if (el == Element::Cheats && ieq(an, "max")) {
+            geom.max = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+        }
+    }
+
+    void close_start(Element el, RomAttrs&& rom, const CheatAttrs& geom) {
+        if (el == Element::Rom) {
             Rom r;
-            r.index = rom_index;
-            r.zips = std::move(rom_zips);
-            r.md5 = std::move(rom_md5);
-            r.address = rom_address;
+            r.index = rom.index;
+            r.zips = std::move(rom.zips);
+            r.md5 = std::move(rom.md5);
+            r.address = rom.address;
             d.roms.push_back(std::move(r));
         }
-        if (is_cheats) {
+        if (el == Element::Cheats) {
             insidecheats = true;
             d.cheats.clear();
             d.cheats_dropped = 0;
-            d.cheat_geometry = clamp_cheat_geometry(cheat_size, cheat_max);
+            d.cheat_geometry = clamp_cheat_geometry(geom.size, geom.max);
         }
-        if (is_interleave && insiderom) {
+        if (el == Element::Interleave && insiderom) {
             RomNode n;
             n.kind = RomNodeKind::InterleaveStart;
-            n.input = ilv_input;
-            n.output = ilv_output;
+            n.input = node.ilv_input;
+            n.output = node.ilv_output;
             d.roms.back().nodes.push_back(std::move(n));
         }
     }
@@ -446,27 +545,26 @@ struct Walk {
         }
         if (ieq(name, "part") && insiderom) {
             RomNode n;
-            if (!partname.empty()) {
+            if (!node.part_name.empty()) {
                 n.kind = RomNodeKind::FilePart;
-                n.name = partname;
-                n.zips = partzip;
-                n.crc = svc::Crc32{crc};
-                n.offset = offset;
-                n.length = length;
+                n.name = node.part_name;
+                n.zips = node.part_zip;
+                n.crc = node.crc;
+                n.offset = node.offset;
+                n.length = node.length;
             } else {
                 n.kind = RomNodeKind::TextPart;
                 n.text = acc;
             }
-            n.repeat = repeat;
-            n.map = map;
-            n.map_digits = map_digits;
+            n.repeat = node.repeat;
+            n.map = node.map;
             d.roms.back().nodes.push_back(std::move(n));
         }
         if (ieq(name, "patch") && insiderom) {
             RomNode n;
             n.kind = RomNodeKind::Patch;
-            n.offset = patchaddr;
-            n.xor_op = patch_xor;
+            n.offset = node.patch_addr;
+            n.xor_op = node.patch_xor;
             n.text = acc;
             d.roms.back().nodes.push_back(std::move(n));
         }
@@ -484,10 +582,9 @@ struct Walk {
                 n.kind = RomNodeKind::InterleaveEnd;
                 d.roms.back().nodes.push_back(std::move(n));
             }
-            ilv_input = 0;
-            ilv_output = 0;
-            map = 0;
-            map_digits = 0;
+            node.ilv_input = 0;
+            node.ilv_output = 0;
+            node.map = MapWord{};
         }
         end_common();
     }

@@ -84,10 +84,10 @@ struct CdWirePort::CddaCapture {
             return;
         }
         const auto n = static_cast<std::uint32_t>(p.size());
-        buf[used + 0] = static_cast<std::uint8_t>(n & 0xFFu);
-        buf[used + 1] = static_cast<std::uint8_t>((n >> 8) & 0xFFu);
-        buf[used + 2] = static_cast<std::uint8_t>((n >> 16) & 0xFFu);
-        buf[used + 3] = static_cast<std::uint8_t>((n >> 24) & 0xFFu);
+        buf[used + 0] = static_cast<std::uint8_t>(n);
+        buf[used + 1] = static_cast<std::uint8_t>((n >> 8));
+        buf[used + 2] = static_cast<std::uint8_t>((n >> 16));
+        buf[used + 3] = static_cast<std::uint8_t>((n >> 24));
         std::memcpy(buf.data() + used + 4, p.data(), p.size());
         used += need;
     }
@@ -253,7 +253,7 @@ std::optional<CdCommandWords> CdWirePort::read_command_edge(CdEngine& eng) noexc
             ++wire_faults_;
             failed = true;
         } else {
-            const auto req = static_cast<std::uint8_t>(first->v & 0xFFu);
+            const auto req = static_cast<std::uint8_t>(first->v);
 
             static_cast<void>(eng.on_command_edge(req));
             wanted = eng.command_wanted();

@@ -23,8 +23,6 @@ bool iequal(std::string_view a, std::string_view b) noexcept {
     return true;
 }
 
-constexpr std::size_t kMaxEntries = 255;
-
 }
 
 std::optional<PathText> AddonSend::path_of(std::string_view pick, std::string_view ext) {
@@ -49,7 +47,10 @@ std::optional<PathText> AddonSend::path_of(std::string_view pick, std::string_vi
 
 AddonSend AddonSend::plan(std::string_view list, std::string_view pick, proto::WideIoIndex idx) {
     AddonSend s;
-    for (std::size_t i = 1; !list.empty() && i <= kMaxEntries; ++i) {
+    for (std::size_t i = 0; !list.empty(); ++i) {
+        const auto no = EntryNo::of(i);
+        if (!no)
+            break;
         const std::size_t comma = list.find(',');
         const std::string_view ext = list.substr(0, comma);
         if (ext.empty())
@@ -58,9 +59,7 @@ AddonSend AddonSend::plan(std::string_view list, std::string_view pick, proto::W
             s.entries_.push_back(
                 Entry{
                     .ext = std::string{ext},
-                    .dest = proto::WideIoIndex{static_cast<std::uint16_t>(
-                        (i << 8) | idx.fio_byte()
-                    )},
+                    .dest = AddonDest::of(*no, idx.fio_byte()),
                     .path = *path
                 }
             );
@@ -77,16 +76,25 @@ bool AddonSend::take_image(std::vector<std::uint8_t> bytes) {
         if (!iequal(entries_[i].ext, cores::kRamImageAddon))
             continue;
         image_ = std::move(bytes);
-        image_at_ = i;
+        image_at_ = EntryNo::of(i);
         return true;
     }
     return false;
 }
 
+bool AddonSend::next_is_image() const noexcept {
+    const auto here = EntryNo::of(next_);
+    return image_at_ && here && *image_at_ == *here;
+}
+
 bool AddonSend::open_(const svc::Vfs& vfs) {
     const Entry& e = entries_[next_];
-    const cores::PayloadPieces::Frame frame{.dest = e.dest, .chunk = kChunk, .progress = true};
-    if (next_ == image_at_) {
+    const cores::PayloadPieces::Frame frame{
+        .dest = e.dest.wide(),
+        .chunk = cores::WireChunk::of(kChunk),
+        .progress = true
+    };
+    if (next_is_image()) {
         auto p = cores::PayloadPieces::of_bytes(std::move(image_), {}, frame);
         if (!p)
             return false;
@@ -107,8 +115,9 @@ bool AddonSend::open_(const svc::Vfs& vfs) {
 AddonSend::Pass AddonSend::step(cores::ILadderHost& host, const svc::Vfs& vfs) {
     TASTY_SEAT_BODY(AddonSend);
     while (next_ < entries_.size()) {
+        const bool image_entry = next_is_image();
         if (!pieces_ && !open_(vfs)) {
-            if (next_ == image_at_)
+            if (image_entry)
                 image_failed_ = true;
             ++missing_;
             ++next_;
@@ -119,7 +128,7 @@ AddonSend::Pass AddonSend::step(cores::ILadderHost& host, const svc::Vfs& vfs) {
             return Pass::Waiting;
         const bool done = pass == cores::PayloadPieces::Pass::Done;
         done ? ++sent_ : ++failed_;
-        if (next_ == image_at_)
+        if (image_entry)
             (done ? image_sent_ : image_failed_) = true;
         pieces_.reset();
         ++next_;

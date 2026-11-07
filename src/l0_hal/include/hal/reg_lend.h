@@ -19,7 +19,6 @@ namespace mister::hal::reg {
 class Block;
 
 class Lend {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     Lend() = default;

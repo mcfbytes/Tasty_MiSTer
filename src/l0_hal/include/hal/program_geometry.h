@@ -20,7 +20,6 @@ constexpr bool all_measured(const ProgramGeometry& g) noexcept {
 }
 
 class ProgramGeometryValues {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     ProgramGeometryValues() = delete;

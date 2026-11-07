@@ -24,6 +24,7 @@
 #include "svc/disc_geometry.h"
 #include "svc/frame_shaper.h"
 #include "svc/image_opener.h"
+#include "svc/msf.h"
 #include "svc/subcode_sidecar.h"
 #include "svc/toc.h"
 #include "svc/track.h"
@@ -83,14 +84,14 @@ public:
 
     void prefetch_hint(Lba lba);
 
-    static constexpr std::uint32_t kAdviseAheadSectors = 75;
+    static constexpr std::uint32_t kAdviseAheadSectors = kFramesPerSecond;
 
     void advise_ahead(Lba lba) noexcept;
 
     std::uint32_t chd_hunk_bytes() const noexcept { return chd_.hunk_bytes(); }
 
     [[nodiscard]] DiscGeometry geometry() const noexcept {
-        return DiscGeometry{.toc = toc_, .hunk_bytes = chd_hunk_bytes(), .mounted = mounted_};
+        return DiscGeometry{.toc = toc_, .chd = chd_.geometry(), .mounted = mounted_};
     }
 
     [[nodiscard]] DiscCounters counters() const noexcept { return chd_.counters(); }
@@ -110,6 +111,19 @@ private:
     );
 
     enum class Form : std::uint8_t { Native, UserData, RedBook };
+
+    struct FormShape {
+        std::size_t out_len = 0;
+        std::size_t dst_off = 0;
+        std::uint32_t s_off = 0;
+        std::size_t len = 0;
+    };
+
+    [[nodiscard]] static std::optional<FormShape> shape_of(
+        Form form,
+        std::uint32_t ss,
+        TrackType type
+    ) noexcept;
 
     [[nodiscard]] Ex<void> mount_cue(std::string_view cue_path);
 

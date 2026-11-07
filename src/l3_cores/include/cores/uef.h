@@ -20,7 +20,18 @@ enum ChunkId : std::uint16_t {
     kFreqChgId = 0x0113,
     kSecurityId = 0x0114,
     kFloatGapId = 0x0116,
+    kShortReadId = 0xFFFF,
 };
+
+[[nodiscard]] constexpr ChunkId chunk_id(std::uint16_t raw) noexcept {
+    return static_cast<ChunkId>(raw);
+}
+
+inline constexpr std::uint32_t kBitsPerTapeByte = 10;
+inline constexpr std::uint32_t kStartSlot = 0;
+inline constexpr std::uint32_t kStopSlot = 9;
+
+inline constexpr std::uint32_t kHighDummyCarrierBits = 20;
 
 inline constexpr double kBaud = 1000000.0 / (16.0 * 52.0);
 
@@ -36,7 +47,7 @@ inline constexpr std::uint8_t kHighDummyByte = 'A';
 [[nodiscard]] bool valid_header(std::span<const std::uint8_t> image) noexcept;
 
 struct ChunkInfo {
-    std::uint16_t id = 0;
+    ChunkId id{};
     std::uint32_t length = 0;
     std::uint32_t file_offset = 0;
     std::uint32_t bit_offset_start = 0;

@@ -5,6 +5,7 @@
 #include <sys/epoll.h>
 
 #include <cerrno>
+#include <optional>
 #include <utility>
 
 #include "app/link_event_dispatch.h"
@@ -21,35 +22,26 @@ Error os_error(infra::ErrorSite site) {
     return Error{Errc::os, site, static_cast<std::uint32_t>(errno)};
 }
 
-constexpr std::uint16_t kKeyF12 = 88;
-constexpr std::uint16_t kKeyMenu = 139;
-constexpr std::uint16_t kKeyLeftMeta = 125;
-constexpr std::uint16_t kKeyRightMeta = 126;
+constexpr svc::EvdevCode kKeyF12{88};
+constexpr svc::EvdevCode kKeyMenu{139};
+constexpr svc::EvdevCode kKeyLeftMeta{125};
+constexpr svc::EvdevCode kKeyRightMeta{126};
 
-bool is_pass_through_modifier(std::uint16_t code) noexcept {
-    constexpr std::uint16_t kKeyLeftAlt = 56;
-    constexpr std::uint16_t kKeyRightAlt = 100;
+bool is_pass_through_modifier(svc::EvdevCode code) noexcept {
+    constexpr svc::EvdevCode kKeyLeftAlt{56};
+    constexpr svc::EvdevCode kKeyRightAlt{100};
     return code == kKeyLeftAlt
         || code == kKeyRightAlt
         || code == kKeyLeftMeta
         || code == kKeyRightMeta;
 }
 
-bool ui_down_test(const std::uint64_t (&bits)[4], std::uint16_t code) noexcept {
-    constexpr unsigned kUiDownWordShift = 6;
-    constexpr unsigned kUiDownBitMask = 63;
-    return (bits[code >> kUiDownWordShift] & (std::uint64_t{1} << (code & kUiDownBitMask))) != 0u;
+proto::HidUsage hid_usage_of(svc::EvdevCode code) noexcept {
+    return code.hid_usage();
 }
 
-void ui_down_set(std::uint64_t (&bits)[4], std::uint16_t code, bool on) noexcept {
-    constexpr unsigned kUiDownWordShift = 6;
-    constexpr unsigned kUiDownBitMask = 63;
-    const std::uint64_t m = std::uint64_t{1} << (code & kUiDownBitMask);
-    if (on) {
-        bits[code >> kUiDownWordShift] |= m;
-    } else {
-        bits[code >> kUiDownWordShift] &= ~m;
-    }
+constexpr svc::DeviceSlot device_slot_of(std::size_t i) noexcept {
+    return svc::DeviceSlot{static_cast<std::uint8_t>(i)};
 }
 
 }
@@ -170,31 +162,31 @@ void InputDecode::rebuild_registrations(Reseat bridge) {
         }
     }
 
-    {
-        std::size_t slot = 0;
-        for (svc::InputDevice& d : svc_.devices()) {
-            if (slot >= svc::kMaxDevices)
-                break;
-            const std::uint32_t key = device_key(d);
-            if (joy_key_[slot] != key) {
-                joy_key_[slot] = key;
-                joy_prev_[slot] = d.report().menu_buttons.v;
-                if (bridge == Reseat::Bridge && launcher_keys_)
-                    launcher_keys_->reseat_pad(slot, proto::JoyMask{joy_prev_[slot]});
-                for (std::uint64_t& w : ui_key_down_[slot])
-                    w = 0;
-            }
-            ++slot;
-        }
-
-        for (; slot < svc::kMaxDevices; ++slot) {
-            joy_key_[slot] = 0;
-            joy_prev_[slot] = 0;
+    std::size_t slot = 0;
+    for (svc::InputDevice& d : svc_.devices()) {
+        if (slot >= svc::kMaxDevices)
+            break;
+        const svc::DeviceSlot dev = device_slot_of(slot);
+        DeviceInputState& state = devices_[dev];
+        const std::uint32_t key = device_key(d);
+        if (state.key != key) {
+            state.key = key;
+            state.prev_menu = d.report().menu_buttons;
             if (bridge == Reseat::Bridge && launcher_keys_)
-                launcher_keys_->reseat_pad(slot, {});
-            for (std::uint64_t& w : ui_key_down_[slot])
-                w = 0;
+                launcher_keys_->reseat_pad(dev, state.prev_menu);
+            state.ui_down = KeyDownSet{};
         }
+        ++slot;
+    }
+
+    for (; slot < svc::kMaxDevices; ++slot) {
+        const svc::DeviceSlot dev = device_slot_of(slot);
+        DeviceInputState& state = devices_[dev];
+        state.key = 0;
+        state.prev_menu = {};
+        if (bridge == Reseat::Bridge && launcher_keys_)
+            launcher_keys_->reseat_pad(dev, {});
+        state.ui_down = KeyDownSet{};
     }
     seen_gen_ = svc_.devices_generation();
 }
@@ -310,50 +302,9 @@ unsigned InputDecode::after_wait() {
     unsigned decoded = 0;
     bool published = false;
     for (int i = 0; i < n; ++i) {
-        const int fd = evs_[i].data.fd;
-        const std::uint32_t events = evs_[i].events;
-        if (fd == wire_.ctrl_fd()) {
-            wire_.drain_ctrl();
-            continue;
-        }
-
-        if (fd == stop_fd_)
-            continue;
-        if (pause_wake_ && fd == pause_wake_->fd()) {
-            pause_wake_->drain();
-            continue;
-        }
-
-        if ((events & (EPOLLHUP | EPOLLERR)) != 0u) {
-            evict_fd(fd);
-            continue;
-        }
-        auto got = svc_.on_fd_ready(fd);
-        if (!got) {
-
-            evict_fd(fd);
-            continue;
-        }
-        decoded += *got;
-        if (fd == svc_.hotplug().fd()) {
-
-            if (svc_.hotplug().take_pending()) {
-                rearm_credit_ = kEvictRearmCredit;
-                wire_.request(InputWire::kReqHotplug);
-            }
-            continue;
-        }
-        std::size_t slot = 0;
-        for (svc::InputDevice& d : svc_.devices()) {
-            if (d.fd() != fd) {
-                ++slot;
-                continue;
-            }
-            maybe_capture(d, slot < svc::kMaxDevices ? slot : 0u);
-            publish_from(d.report(), d.is_mouse(), slot < svc::kMaxDevices ? slot : 0u);
-            published = true;
-            break;
-        }
+        const ReadyFd ready = drain_ready_fd(evs_[i].data.fd, evs_[i].events);
+        decoded += ready.decoded;
+        published = published || ready.published;
     }
 
     if (published || rebuilt || joy_.owes_publish()) {
@@ -374,6 +325,54 @@ unsigned InputDecode::after_wait() {
     }
     counts_cell_.publish(counts());
     return decoded;
+}
+
+InputDecode::ReadyFd InputDecode::drain_ready_fd(int fd, std::uint32_t events) {
+    ReadyFd out{};
+    if (fd == wire_.ctrl_fd()) {
+        wire_.drain_ctrl();
+        return out;
+    }
+
+    if (fd == stop_fd_)
+        return out;
+    if (pause_wake_ && fd == pause_wake_->fd()) {
+        pause_wake_->drain();
+        return out;
+    }
+
+    if ((events & (EPOLLHUP | EPOLLERR)) != 0u) {
+        evict_fd(fd);
+        return out;
+    }
+    auto got = svc_.on_fd_ready(fd);
+    if (!got) {
+
+        evict_fd(fd);
+        return out;
+    }
+    out.decoded = *got;
+    if (fd == svc_.hotplug().fd()) {
+
+        if (svc_.hotplug().take_pending()) {
+            rearm_credit_ = kEvictRearmCredit;
+            wire_.request(InputWire::kReqHotplug);
+        }
+        return out;
+    }
+    std::size_t pos = 0;
+    for (svc::InputDevice& d : svc_.devices()) {
+        if (d.fd() != fd) {
+            ++pos;
+            continue;
+        }
+        const svc::DeviceSlot slot = device_slot_of(pos < svc::kMaxDevices ? pos : 0u);
+        maybe_capture(d, slot);
+        publish_from(d.report(), d.is_mouse(), slot);
+        out.published = true;
+        break;
+    }
+    return out;
 }
 
 void InputDecode::drain_link_events_() {
@@ -406,15 +405,15 @@ void InputDecode::on(const proto::LinkEvent::PolledWord& w) noexcept {
     ++link_event_misrouted_;
 }
 
-bool InputDecode::is_osd_toggle_(std::uint16_t code) const noexcept {
+bool InputDecode::is_osd_toggle_(svc::EvdevCode code) const noexcept {
     if (code == kKeyMenu)
         return true;
     if (code != kKeyF12)
         return false;
     if (!f12_mod_needed_)
         return true;
-    for (const auto& down : ui_key_down_) {
-        if (ui_down_test(down, kKeyLeftMeta) || ui_down_test(down, kKeyRightMeta))
+    for (const DeviceInputState& state : devices_) {
+        if (state.ui_down.has(kKeyLeftMeta) || state.ui_down.has(kKeyRightMeta))
             return true;
     }
     return false;
@@ -438,7 +437,7 @@ void InputDecode::flush_mouse_() {
         return;
 
     if (!wire_.gated(InputWire::kGateOsdVisible)) {
-        if (mouse_.motion(p->dx, p->dy, p->dz, p->buttons)) {
+        if (mouse_.motion(p->motion, p->buttons)) {
             tally_.mouse_packet();
             wire_.note_activity();
         }
@@ -509,32 +508,35 @@ bool InputDecode::push_ui_edge(const RawKeyEdge& e) {
         "\"dropped\":%u,\"code\":%u,\"pressed\":%u}",
         static_cast<unsigned>(InputWire::kUiKeyRingSlots),
         static_cast<unsigned>(wire_.ui_keys_dropped()),
-        static_cast<unsigned>(e.code),
+        static_cast<unsigned>(e.code.v),
         static_cast<unsigned>(e.pressed)
     );
     return false;
 }
 
-void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, std::size_t dev_slot) {
+void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, svc::DeviceSlot slot) {
 
     const bool osd_visible = wire_.gated(InputWire::kGateOsdVisible);
-    const bool has_slot = dev_slot < svc::kMaxDevices;
-    for (std::uint8_t i = 0; i < r.key_count; ++i) {
-        const svc::KeyEdge& e = r.keys[i];
-        if (e.code >= 256)
+    DeviceInputState& state = devices_[slot];
+    for (std::size_t i = 0; i < r.keys.count(); ++i) {
+        const svc::KeyEdge e = r.keys.at(i);
+
+        const svc::EvdevCode code = e.code;
+        if (!code.is_key())
             continue;
 
         if (e.pressed != 0 && !svc_.grabbed())
             continue;
 
-        const bool ui_repeat = has_slot
-            && e.pressed != 0
-            && ui_down_test(ui_key_down_[dev_slot], e.code);
-        if (has_slot)
-            ui_down_set(ui_key_down_[dev_slot], e.code, e.pressed != 0);
+        const bool ui_repeat = e.pressed != 0 && state.ui_down.has(code);
+        if (e.pressed != 0) {
+            state.ui_down.set(code);
+        } else {
+            state.ui_down.clear(code);
+        }
 
-        const RawKeyEdge ke{e.code, e.pressed != 0, 0};
-        if (is_osd_toggle_(e.code)) {
+        const RawKeyEdge ke{code, e.pressed != 0, 0};
+        if (is_osd_toggle_(code)) {
 
             const RawKeyEdge tog{kKeyF12, ke.pressed, ke.reserved};
             if (!ui_repeat && !push_ui_edge(tog))
@@ -544,15 +546,15 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, std::s
         if (osd_visible) {
             if (!ui_repeat && !push_ui_edge(ke))
                 break;
-            if (!is_pass_through_modifier(e.code))
+            if (!is_pass_through_modifier(code))
                 continue;
         }
         if (bridging_) {
-            launcher_keys_->key(ke.code, ke.pressed != 0);
+            launcher_keys_->key(code, ke.pressed != 0);
             continue;
         }
 
-        if (kbd_.key_event(proto::HidUsage{static_cast<std::uint8_t>(ke.code)}, ke.pressed != 0)) {
+        if (kbd_.key_event(hid_usage_of(code), ke.pressed != 0)) {
             tally_.key_published();
             tally_.key_emitted();
         }
@@ -572,31 +574,32 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, std::s
     }
 
     if (!is_mouse)
-        publish_joy_menu(r, dev_slot, osd_visible);
+        publish_joy_menu(r, slot, osd_visible);
 
     if (is_mouse) {
 
-        if (svc_.grabbed())
-            mouse_divider_.accumulate(r.rel_x, r.rel_y, r.rel_wheel);
+        if (svc_.grabbed()) {
+            mouse_divider_.accumulate(svc::MouseMotion{r.rel_x, r.rel_y, r.rel_wheel});
+        }
 
         mouse_divider_.note_buttons(svc_.mouse_button_level());
     }
 }
 
-void InputDecode::maybe_capture(const svc::InputDevice& d, std::size_t dev_slot) {
+void InputDecode::maybe_capture(const svc::InputDevice& d, svc::DeviceSlot slot) {
     if (arm_.armed == 0 || arm_.token == 0 || arm_.token == capture_served_)
         return;
     const svc::DeviceReport& r = d.report();
-    for (std::uint8_t i = 0; i < r.key_count; ++i) {
-        const svc::KeyEdge& e = r.keys[i];
-        if (!e.pressed || e.code < 256)
+    for (std::size_t i = 0; i < r.keys.count(); ++i) {
+        const svc::KeyEdge e = r.keys.at(i);
+        if (!e.pressed || e.code.is_key())
             continue;
         const svc::DeviceIdentity& id = d.identity();
         CaptureHit hit{};
         hit.token = arm_.token;
         hit.unique_hash = id.unique_hash;
         hit.code = e.code;
-        hit.device_ordinal = static_cast<std::uint8_t>(dev_slot);
+        hit.device_ordinal = slot;
         hit.mod = d.mod();
         hit.unique_filenames = id.unique_filenames;
         hit.vid = id.vid;
@@ -612,118 +615,112 @@ void InputDecode::maybe_capture(const svc::InputDevice& d, std::size_t dev_slot)
 
 namespace {
 
-constexpr std::uint16_t kKeyRight = 106;
-constexpr std::uint16_t kKeyLeft = 105;
-constexpr std::uint16_t kKeyUp = 103;
-constexpr std::uint16_t kKeyDown = 108;
-constexpr std::uint16_t kKeyEnter = 28;
-constexpr std::uint16_t kKeyBackspace = 14;
-constexpr std::uint16_t kKeyTab = 15;
-constexpr std::uint16_t kKeyMinus = 12;
-constexpr std::uint16_t kKeyEqual = 13;
-constexpr std::uint16_t kKeyGrave = 41;
-constexpr std::uint16_t kKeyBack = 158;
+constexpr svc::EvdevCode kKeyRight{106};
+constexpr svc::EvdevCode kKeyLeft{105};
+constexpr svc::EvdevCode kKeyUp{103};
+constexpr svc::EvdevCode kKeyDown{108};
+constexpr svc::EvdevCode kKeyEnter{28};
+constexpr svc::EvdevCode kKeyBackspace{14};
+constexpr svc::EvdevCode kKeyTab{15};
+constexpr svc::EvdevCode kKeyMinus{12};
+constexpr svc::EvdevCode kKeyEqual{13};
+constexpr svc::EvdevCode kKeyGrave{41};
+constexpr svc::EvdevCode kKeyBack{158};
 
-std::uint16_t joy_menu_key(std::uint32_t mask) noexcept {
-    switch (mask) {
-        case proto::kJoyRight:
-            return kKeyRight;
-        case proto::kJoyLeft:
-            return kKeyLeft;
-        case proto::kJoyUp:
-            return kKeyUp;
-        case proto::kJoyDown:
-            return kKeyDown;
-        case proto::kJoyBtn1:
-            return kKeyEnter;
-        case proto::kJoyBtn2:
-            return kKeyBack;
-        case proto::kJoyBtn3:
-            return kKeyBackspace;
-        case proto::kJoyBtn4:
-            return kKeyTab;
-        case proto::kJoyL:
-            return kKeyMinus;
-        case proto::kJoyR:
-            return kKeyEqual;
-        case proto::kJoyR2:
-            return kKeyGrave;
-        default:
-            return 0;
-    }
+constexpr svc::JoyMask kJoyRight{proto::kJoyRight};
+constexpr svc::JoyMask kJoyLeft{proto::kJoyLeft};
+constexpr svc::JoyMask kJoyUp{proto::kJoyUp};
+constexpr svc::JoyMask kJoyDown{proto::kJoyDown};
+constexpr svc::JoyMask kJoyBtn1{proto::kJoyBtn1};
+constexpr svc::JoyMask kJoyBtn2{proto::kJoyBtn2};
+constexpr svc::JoyMask kJoyBtn3{proto::kJoyBtn3};
+constexpr svc::JoyMask kJoyBtn4{proto::kJoyBtn4};
+constexpr svc::JoyMask kJoyL{proto::kJoyL};
+constexpr svc::JoyMask kJoyR{proto::kJoyR};
+constexpr svc::JoyMask kJoyR2{proto::kJoyR2};
+
+constexpr svc::JoyMask kJoyChord = kJoyBtn1.with(kJoyBtn2);
+constexpr svc::JoyMask kJoyChordTriple = kJoyChord.with(kJoyBtn3);
+
+std::optional<svc::EvdevCode> joy_menu_key(svc::JoyMask mask) noexcept {
+    if (mask == kJoyRight)
+        return kKeyRight;
+    if (mask == kJoyLeft)
+        return kKeyLeft;
+    if (mask == kJoyUp)
+        return kKeyUp;
+    if (mask == kJoyDown)
+        return kKeyDown;
+    if (mask == kJoyBtn1)
+        return kKeyEnter;
+    if (mask == kJoyBtn2)
+        return kKeyBack;
+    if (mask == kJoyBtn3)
+        return kKeyBackspace;
+    if (mask == kJoyBtn4)
+        return kKeyTab;
+    if (mask == kJoyL)
+        return kKeyMinus;
+    if (mask == kJoyR)
+        return kKeyEqual;
+    if (mask == kJoyR2)
+        return kKeyGrave;
+    return std::nullopt;
 }
 
 }
 
 void InputDecode::publish_joy_menu(
     const svc::DeviceReport& r,
-    std::size_t dev_slot,
+    svc::DeviceSlot slot,
     bool osd_visible
 ) {
-    if (dev_slot >= svc::kMaxDevices)
-        return;
-    const std::uint32_t now = r.menu_buttons.v;
-    const std::uint32_t prev = joy_prev_[dev_slot];
-    joy_prev_[dev_slot] = now;
+    DeviceInputState& state = devices_[slot];
+    const svc::JoyMask now = r.menu_buttons;
+    const svc::JoyMask prev = state.prev_menu;
+    state.prev_menu = now;
     if (launcher_keys_)
-        launcher_keys_->pad(dev_slot, r.menu_buttons);
+        launcher_keys_->pad(slot, now);
 
-    if (arm_.armed != 0) {
-        osdbtn_ = 0;
+    if (arm_.armed != 0 || bridging_ || !osd_visible) {
+        osdbtn_ = {};
         return;
     }
 
-    if (bridging_) {
-        osdbtn_ = 0;
-        return;
-    }
+    svc::JoyMask diff = now.differing(prev);
+    while (!diff.empty()) {
+        const svc::JoyMask bit = diff.lowest();
+        diff = diff.without(bit);
+        const bool press = now.any(bit);
 
-    if (!osd_visible) {
-        osdbtn_ = 0;
-        return;
-    }
-
-    std::uint32_t diff = now ^ prev;
-    while (diff != 0u) {
-        const std::uint32_t bit = diff & (~diff + 1u);
-        diff &= ~bit;
-        const bool press = (now & bit) != 0u;
-
-        std::uint32_t mask = bit & ~proto::kJoyBtn3;
+        svc::JoyMask mask = bit.without(kJoyBtn3);
         if (press) {
-            osdbtn_ |= mask;
-            if ((mask & (proto::kJoyBtn1 | proto::kJoyBtn2)) != 0u) {
-                if ((osdbtn_ & (proto::kJoyBtn1 | proto::kJoyBtn2))
-                    == (proto::kJoyBtn1 | proto::kJoyBtn2)) {
-                    osdbtn_ |= proto::kJoyBtn3;
-                    mask = proto::kJoyBtn3;
-                }
+            osdbtn_ = osdbtn_.with(mask);
+            if (mask.any(kJoyChord) && osdbtn_.only(kJoyChord) == kJoyChord) {
+                osdbtn_ = osdbtn_.with(kJoyBtn3);
+                mask = kJoyBtn3;
             }
         } else {
-            const std::uint32_t old = osdbtn_;
-            osdbtn_ &= ~mask;
-            if ((mask & (proto::kJoyBtn1 | proto::kJoyBtn2)) != 0u) {
-                if ((old & (proto::kJoyBtn1 | proto::kJoyBtn2 | proto::kJoyBtn3))
-                    == (proto::kJoyBtn1 | proto::kJoyBtn2 | proto::kJoyBtn3)) {
-                    mask = proto::kJoyBtn3;
-                } else if ((old & proto::kJoyBtn3) != 0u) {
-                    if ((osdbtn_ & (proto::kJoyBtn1 | proto::kJoyBtn2)) == 0u) {
-                        osdbtn_ &= ~proto::kJoyBtn3;
-                    }
-                    mask = 0;
+            const svc::JoyMask old = osdbtn_;
+            osdbtn_ = osdbtn_.without(mask);
+            if (mask.any(kJoyChord)) {
+                if (old.only(kJoyChordTriple) == kJoyChordTriple) {
+                    mask = kJoyBtn3;
+                } else if (old.any(kJoyBtn3)) {
+                    if (!osdbtn_.any(kJoyChord))
+                        osdbtn_ = osdbtn_.without(kJoyBtn3);
+                    mask = {};
                 }
             }
-            if ((mask & proto::kJoyBtn2) != 0u && (old & proto::kJoyBtn2) == 0u) {
-                mask = 0;
-            }
+            if (mask.any(kJoyBtn2) && !old.any(kJoyBtn2))
+                mask = {};
         }
 
-        const std::uint16_t code = joy_menu_key(mask);
-        if (code == 0)
+        const std::optional<svc::EvdevCode> code = joy_menu_key(mask);
+        if (!code)
             continue;
-        const RawKeyEdge ke{code, press, 0};
 
-        if (!push_ui_edge(ke))
+        if (!push_ui_edge(RawKeyEdge{*code, press, 0}))
             break;
         ++joy_ui_keys_;
     }
@@ -749,7 +746,7 @@ InputDecode::Counts InputDecode::counts() const noexcept {
     c.mouse_remainder = svc_.counters().mouse_remainder_bytes();
     c.key_overflows = svc_.counters().key_overflows();
     c.quirk_drops = svc_.counters().quirk_drops();
-    c.slot_live = svc_.counters().live_slot_mask().v;
+    c.slot_live = svc_.counters().live_slot_mask();
     c.slot_ghosts = svc_.counters().ghost_slots();
     for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
         c.slot_hash[i] = svc_.counters().slot_key_hash(svc::PlayerIndex{i});

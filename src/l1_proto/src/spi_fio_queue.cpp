@@ -4,19 +4,26 @@
 
 #include <algorithm>
 #include <cstring>
+#include <span>
 
 #include "hal/selected.h"
+#include "infra/endian.h"
 
 namespace mister::proto {
+
+namespace {
+
+constexpr std::size_t kPairBytes = 2;
+}
 
 Ex<void> SpiFioQueue::Emitter::on(const FioWindow::Index& i) noexcept {
     latched = i.index;
     SpiFrame frame{*link};
-    return DownloadSession::set_index(frame, WideIoIndex{i.index});
+    return DownloadSession::set_index(frame, latched);
 }
 
 Ex<void> SpiFioQueue::Emitter::on(const FioWindow::Open&) noexcept {
-    auto s = DownloadSession::open(*link, WideIoIndex{latched});
+    auto s = DownloadSession::open(*link, latched);
     if (!s)
         return std::unexpected(s.error());
     open.emplace(std::move(*s));
@@ -41,7 +48,9 @@ Ex<void> SpiFioQueue::Emitter::on(const FioWindow::IoCommand& c) noexcept {
     hal::Selected cs(*link, hal::ChipSelect::Io);
     for (std::size_t i = 0; i < c.words; ++i) {
         const std::size_t at = c.offset + 2u * i;
-        const auto w = static_cast<std::uint16_t>(slab[at] | (slab[at + 1] << 8));
+        const auto w = infra::load_le<std::uint16_t>(
+            std::span<const std::uint8_t, kPairBytes>(slab + at, kPairBytes)
+        );
         if (auto r = link->transfer(hal::SpiWord{w}); !r)
             return std::unexpected(r.error());
     }
@@ -117,7 +126,7 @@ Ex<void> SpiFioQueue::append_command(std::span<const std::uint16_t> words) {
     }
     const std::size_t at = slab_used_;
     for (std::size_t i = 0; i < words.size(); ++i) {
-        slab_[at + 2u * i] = static_cast<std::uint8_t>(words[i] & 0xFFu);
+        slab_[at + 2u * i] = static_cast<std::uint8_t>(words[i]);
         slab_[at + 2u * i + 1u] = static_cast<std::uint8_t>(words[i] >> 8);
     }
     slab_used_ += bytes;
@@ -156,7 +165,7 @@ Ex<void> SpiFioQueue::place_(std::span<const Bracket> act) {
     }
     std::size_t at = slab_used_;
     for (const Bracket& b : act) {
-        q_[size_++] = infra::make<FioWindow>(FioWindow::Index{b.index.v});
+        q_[size_++] = infra::make<FioWindow>(FioWindow::Index{b.index});
         q_[size_++] = infra::make<FioWindow>(FioWindow::Open{});
         std::size_t off = 0;
         do {

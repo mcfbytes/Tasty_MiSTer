@@ -20,7 +20,7 @@ using cores::InitPhase;
 using cores::InitStatus;
 using cores::OnError;
 using cores::kAnyDialect;
-using cores::kEightBitOnly;
+using cores::kEightBitDialect;
 
 [[nodiscard]] Ex<void> init_reset_video_geometry(CoreInitContext& ctx);
 [[nodiscard]] Ex<void> init_arm_video_prelude(CoreInitContext& ctx);
@@ -87,7 +87,7 @@ inline constexpr std::array<CoreInitStep, kCoreInitStepCount> kCoreInitBase{{
         FabricReg::Status,
         InitStatus::Satisfied,
         InitPhase::CompletionArm,
-        kEightBitOnly,
+        kEightBitDialect,
         &init_flush_status,
         OnError::Ignore,
         "item - StatusRegister::flush, all 8 words; req "
@@ -109,7 +109,7 @@ inline constexpr std::array<CoreInitStep, kCoreInitStepCount> kCoreInitBase{{
         FabricReg::SdramSz,
         InitStatus::SatisfiedElsewhere,
         InitPhase::Negotiation,
-        kEightBitOnly,
+        kEightBitDialect,
         nullptr,
         OnError::Ignore,
         "CoreSession::set_memory_size (0x31), EightBit only"
@@ -119,7 +119,7 @@ inline constexpr std::array<CoreInitStep, kCoreInitStepCount> kCoreInitBase{{
         FabricReg::Rtc,
         InitStatus::SatisfiedElsewhere,
         InitPhase::Apply,
-        kEightBitOnly,
+        kEightBitDialect,
         nullptr,
         OnError::Ignore,
         "CoreSession::send_rtc_image (0x22), 4 words, EightBit only"
@@ -129,7 +129,7 @@ inline constexpr std::array<CoreInitStep, kCoreInitStepCount> kCoreInitBase{{
         FabricReg::Timestamp,
         InitStatus::SatisfiedElsewhere,
         InitPhase::Apply,
-        kEightBitOnly,
+        kEightBitDialect,
         nullptr,
         OnError::Ignore,
         "CoreSession::send_rtc_image (0x24), 2 words, EightBit only"

@@ -15,8 +15,10 @@
 #include "app/launcher_state.h"
 #include "app/mouse_accumulator.h"
 #include "app/mouse_divider.h"
+#include "app/raw_key_edge.h"
 #include "app/rumble_relay.h"
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
@@ -32,6 +34,7 @@
 #include "hal/boards_table.h"
 #include "svc/device_table.h"
 #include "svc/input_service.h"
+#include "svc/types.h"
 #include "infra/seat.h"
 
 namespace mister::xthread {
@@ -48,6 +51,13 @@ class LinkRxChannel;
 inline constexpr std::size_t kTableLeases = 2;
 using DeviceTableLoans = xthread::
     LoanChannel<svc::DeviceTable, kTableLeases, SeatTag::Diag, SeatTag::Input>;
+
+struct DeviceInputState {
+    svc::JoyMask prev_menu{};
+    std::uint32_t key = 0;
+    KeyDownSet ui_down{};
+    friend constexpr bool operator==(const DeviceInputState&, const DeviceInputState&) = default;
+};
 
 struct InputDecodeCounts {
     std::uint32_t rounds = 0;
@@ -69,7 +79,7 @@ struct InputDecodeCounts {
     std::uint32_t mouse_remainder = 0;
     std::uint32_t key_overflows = 0;
     std::uint32_t quirk_drops = 0;
-    std::uint32_t slot_live = 0;
+    svc::PlayerMask slot_live{};
     std::uint32_t slot_ghosts = 0;
     std::uint32_t slot_hash[svc::kMaxPlayers]{};
 };
@@ -167,18 +177,26 @@ public:
 
 private:
     enum class Reseat : std::uint8_t { Skip, Bridge };
-    void rebuild_registrations(Reseat bridge);
-    void publish_from(const svc::DeviceReport& r, bool is_mouse, std::size_t dev_slot);
 
-    void maybe_capture(const svc::InputDevice& d, std::size_t dev_slot);
-    void publish_joy_menu(const svc::DeviceReport& r, std::size_t dev_slot, bool osd_visible);
+    struct ReadyFd {
+        unsigned decoded = 0;
+        bool published = false;
+    };
+
+    void rebuild_registrations(Reseat bridge);
+    void publish_from(const svc::DeviceReport& r, bool is_mouse, svc::DeviceSlot slot);
+
+    void maybe_capture(const svc::InputDevice& d, svc::DeviceSlot slot);
+    void publish_joy_menu(const svc::DeviceReport& r, svc::DeviceSlot slot, bool osd_visible);
+
+    ReadyFd drain_ready_fd(int fd, std::uint32_t events);
     bool push_ui_edge(const RawKeyEdge& e);
     void drain_link_events_();
     unsigned flush_ps2_frames_();
     void flush_mouse_();
     void sweep_dropped_keys_();
 
-    [[nodiscard]] bool is_osd_toggle_(std::uint16_t code) const noexcept;
+    [[nodiscard]] bool is_osd_toggle_(svc::EvdevCode code) const noexcept;
     bool apply_requests();
 
     unsigned take_tables_() noexcept;
@@ -211,12 +229,9 @@ private:
     std::uint32_t wm_frame_drops_ = 0;
     bool sweep_owed_ = false;
 
-    std::uint32_t joy_prev_[svc::kMaxDevices] = {};
-    std::uint32_t joy_key_[svc::kMaxDevices] = {};
+    infra::IndexedArray<DeviceInputState, svc::kMaxDevices, svc::DeviceSlot> devices_{};
 
-    std::uint64_t ui_key_down_[svc::kMaxDevices][4] = {};
-
-    std::uint32_t osdbtn_ = 0;
+    svc::JoyMask osdbtn_{};
     std::uint32_t joy_ui_keys_ = 0;
     std::uint32_t link_event_misrouted_ = 0;
 

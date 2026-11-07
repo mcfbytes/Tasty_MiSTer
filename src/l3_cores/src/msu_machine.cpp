@@ -41,7 +41,7 @@ proto::MailboxAct MsuMachine::serve(
     TASTY_SEAT_BODY(MsuMachine);
     if (!present_)
         return {};
-    const auto req = static_cast<std::uint8_t>(frame.w[0] & 0xFFu);
+    const auto req = static_cast<std::uint8_t>(frame.w[0]);
     if (req == last_req_)
         return {};
     last_req_ = req;

@@ -21,7 +21,7 @@ FlatSaveServant::FlatSaveServant(const svc::Vfs& vfs) : vfs_(vfs), image_(kImage
 proto::SaveAct FlatSaveServant::start(
     const cores::SaveImage& image,
     std::string_view rel,
-    std::uint8_t word_bytes
+    cores::WireWordBytes word
 ) noexcept {
     TASTY_SEAT_BODY(FlatSaveServant);
     phase_ = Phase::Idle;
@@ -34,7 +34,7 @@ proto::SaveAct FlatSaveServant::start(
     asked_ = 0;
 
     piece_ = static_cast<std::uint16_t>(
-        word_bytes == 2 ? proto::kSavePieceBytes : proto::kSavePieceBytes / 2u
+        word.is_wide() ? proto::kSavePieceBytes : proto::kSavePieceBytes / 2u
     );
     phase_ = Phase::Opening;
     return proto::SaveAct{.kind = proto::SaveAct::Kind::Open, .index = index_};

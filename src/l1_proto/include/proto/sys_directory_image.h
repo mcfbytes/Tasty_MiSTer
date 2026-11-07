@@ -16,7 +16,6 @@ struct AxiBlockDecl;
 
 class SysDirectoryImage {
 public:
-    TASTY_SEAT_EXEMPT(const_shared);
     static constexpr std::size_t kWords = hal::SysDirectory::kSize / 4;
 
     [[nodiscard]] static SysDirectoryImage read(

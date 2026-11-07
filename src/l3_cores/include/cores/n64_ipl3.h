@@ -8,6 +8,7 @@
 
 #include "cores/n64_db_tags.h"
 #include "cores/n64_ipl3_row.h"
+#include "infra/endian.h"
 
 namespace mister::cores::n64 {
 
@@ -30,19 +31,11 @@ struct Ipl3Detect {
 
     std::uint64_t sum = 0;
     std::size_t i = kBootcodeBegin;
-    for (; i < kBootcodeAleckEnd; i += 4) {
-        sum += static_cast<std::uint32_t>(chunk[i])
-            | (static_cast<std::uint32_t>(chunk[i + 1]) << 8)
-            | (static_cast<std::uint32_t>(chunk[i + 2]) << 16)
-            | (static_cast<std::uint32_t>(chunk[i + 3]) << 24);
-    }
+    for (; i < kBootcodeAleckEnd; i += 4)
+        sum += infra::load_le<std::uint32_t>(chunk.subspan(i).first<4>());
     sums[1] = sum;
-    for (; i < kBootcodeEnd; i += 4) {
-        sum += static_cast<std::uint32_t>(chunk[i])
-            | (static_cast<std::uint32_t>(chunk[i + 1]) << 8)
-            | (static_cast<std::uint32_t>(chunk[i + 2]) << 16)
-            | (static_cast<std::uint32_t>(chunk[i + 3]) << 24);
-    }
+    for (; i < kBootcodeEnd; i += 4)
+        sum += infra::load_le<std::uint32_t>(chunk.subspan(i).first<4>());
     sums[0] = sum;
     return sums;
 }

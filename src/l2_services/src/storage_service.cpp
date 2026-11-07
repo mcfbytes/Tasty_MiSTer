@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/storage_service.h"
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
@@ -108,6 +109,14 @@ struct AdmitReader {
 
 static_assert(proto::StorageRequestSink<AdmitReader>);
 
+template <class T>
+[[nodiscard]] constexpr std::span<T> clamped_extent(
+    std::span<T> whole,
+    std::uint32_t bytes
+) noexcept {
+    return whole.first(std::min<std::size_t>(whole.size(), static_cast<std::size_t>(bytes)));
+}
+
 }
 
 static_assert(proto::StorageRequestSink<StorageService, StorageService::Work>);
@@ -132,9 +141,7 @@ void StorageService::on(const Req::Read& a, const Req::Head& h, Work& w) noexcep
         b.note_tag(h.tag);
 
         const std::span<std::uint8_t> whole = w.data;
-        const std::span<std::uint8_t> dst = whole.first(
-            a.bytes > whole.size() ? whole.size() : a.bytes
-        );
+        const std::span<std::uint8_t> dst = clamped_extent(whole, a.bytes);
         auto n = b.read_at(a.offset, dst);
 
         if (n) {
@@ -158,13 +165,12 @@ void StorageService::on(const Req::Write& a, const Req::Head& h, Work& w) noexce
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
         const std::span<const std::uint8_t> whole = w.data;
-        const std::uint32_t want = a.bytes > whole.size() ? static_cast<std::uint32_t>(whole.size())
-                                                          : a.bytes;
-        auto n = b.write_at(a.offset, whole.first(want));
+        const std::span<const std::uint8_t> want = clamped_extent(whole, a.bytes);
+        auto n = b.write_at(a.offset, want);
         if (!n) {
             st = status_of(n.error().code);
         } else {
-            if (*n != want)
+            if (*n != want.size())
                 st = proto::StorageStatus::ShortWrite;
             c.bytes = static_cast<std::uint32_t>(*n);
         }
@@ -181,12 +187,11 @@ void StorageService::on(const Req::Create& a, const Req::Head& h, Work& w) noexc
         IStorageBackend& b = *live;
         b.note_tag(h.tag);
         const std::span<const std::uint8_t> whole = w.data;
-        const std::uint32_t want = a.bytes > whole.size() ? static_cast<std::uint32_t>(whole.size())
-                                                          : a.bytes;
-        auto e = b.create(whole.first(want));
+        const std::span<const std::uint8_t> ask = clamped_extent(whole, a.bytes);
+        auto e = b.create(ask);
         if (e) {
             c.size = e->v;
-            c.bytes = want;
+            c.bytes = static_cast<std::uint32_t>(ask.size());
         } else {
             st = status_of(e.error().code);
         }

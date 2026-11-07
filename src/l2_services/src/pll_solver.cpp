@@ -9,9 +9,9 @@ namespace mister::svc {
 std::uint32_t pll::encode_div(std::uint32_t div) {
 
     if (div & 1u) {
-        return 0x20000u | (((div / 2u) + 1u) << 8) | (div / 2u);
+        return kPllAsymmetricBit | (((div / 2u) + 1u) << kPllDivHalfShift) | (div / 2u);
     }
-    return ((div / 2u) << 8) | (div / 2u);
+    return ((div / 2u) << kPllDivHalfShift) | (div / 2u);
 }
 
 std::optional<PllParams> pll::find(double f_out_mhz) {
@@ -20,7 +20,7 @@ std::optional<PllParams> pll::find(double f_out_mhz) {
         return std::nullopt;
 
     std::uint32_t c = 1;
-    while ((f_out_mhz * c) < 400) {
+    while ((f_out_mhz * c) < kFvcoFloorMhz) {
         if (c >= kSearchCeiling)
             return std::nullopt;
         ++c;
@@ -28,8 +28,8 @@ std::optional<PllParams> pll::find(double f_out_mhz) {
 
     for (;;) {
         double fvco = f_out_mhz * c;
-        const std::uint32_t m = static_cast<std::uint32_t>(fvco / 50);
-        const double ko = (fvco / 50) - m;
+        const std::uint32_t m = static_cast<std::uint32_t>(fvco / kFvcoStepMhz);
+        const double ko = (fvco / kFvcoStepMhz) - m;
 
         fvco = ko + m;
         fvco *= kFvcoStepMhz;
@@ -46,7 +46,7 @@ std::optional<PllParams> pll::find(double f_out_mhz) {
             p.c = c;
             p.m = m;
 
-            p.k = (ko != 0.0) ? static_cast<std::uint32_t>(ko * 4294967296.0) : 1u;
+            p.k = (ko != 0.0) ? static_cast<std::uint32_t>(ko * kFractionScale) : kPllZeroFraction;
             p.approximated = false;
             return p;
         }
@@ -57,20 +57,20 @@ PllParams pll::approximate(double f_out_mhz) {
 
     PllParams p{};
     p.approximated = true;
-    p.k = 1u;
+    p.k = kPllZeroFraction;
     if (!(f_out_mhz > 0.0))
         return p;
 
     std::uint32_t c = 1;
-    while ((f_out_mhz * c) < 400) {
+    while ((f_out_mhz * c) < kFvcoFloorMhz) {
         if (c >= kSearchCeiling)
             return p;
         ++c;
     }
 
     const double fvco = f_out_mhz * c;
-    std::uint32_t m = static_cast<std::uint32_t>(fvco / 50);
-    double ko = (fvco / 50) - m;
+    std::uint32_t m = static_cast<std::uint32_t>(fvco / kFvcoStepMhz);
+    double ko = (fvco / kFvcoStepMhz) - m;
 
     if (ko <= kKoBandLow) {
         ko = 0;
@@ -81,24 +81,24 @@ PllParams pll::approximate(double f_out_mhz) {
 
     p.c = c;
     p.m = m;
-    p.k = (ko != 0.0) ? static_cast<std::uint32_t>(ko * 4294967296.0) : 1u;
+    p.k = (ko != 0.0) ? static_cast<std::uint32_t>(ko * kFractionScale) : kPllZeroFraction;
     return p;
 }
 
 PllBlock pll::block(const PllParams& p) {
 
     PllBlock b{};
-    b[0] = 4;
+    b[0] = pll_reg_word(PllReg::M);
     b[1] = encode_div(p.m);
-    b[2] = 3;
-    b[3] = 0x10000;
-    b[4] = 5;
+    b[2] = pll_reg_word(PllReg::N);
+    b[3] = kPllNPayload;
+    b[4] = pll_reg_word(PllReg::C);
     b[5] = encode_div(p.c);
-    b[6] = 9;
-    b[7] = 2;
-    b[8] = 8;
-    b[9] = 7;
-    b[10] = 7;
+    b[6] = pll_reg_word(PllReg::ChargePump);
+    b[7] = kPllChargePumpValue;
+    b[8] = pll_reg_word(PllReg::Bandwidth);
+    b[9] = kPllBandwidthValue;
+    b[10] = pll_reg_word(PllReg::K);
     b[11] = p.k;
     return b;
 }
@@ -124,7 +124,7 @@ double pll::fpix_mhz(double f_out_mhz) {
         c = found->c;
         m = found->m;
         double fvco = f_out_mhz * c;
-        ko = (fvco / 50) - m;
+        ko = (fvco / kFvcoStepMhz) - m;
     } else {
         const PllParams p = approximate(f_out_mhz);
         if (p.c == 0)

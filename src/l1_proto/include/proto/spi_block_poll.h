@@ -37,7 +37,7 @@ public:
     struct Decode {
         bool decoded = false;
         SdRequest req;
-        std::uint16_t ack = 0;
+        SectorAck ack{};
         BlockSize block_size{kDefaultBlockBytes};
         BlockCount window_blocks{};
     };

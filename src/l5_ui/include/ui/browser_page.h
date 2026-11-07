@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "infra/opt_ref.h"
@@ -62,6 +64,8 @@ public:
         TASTY_SEAT_BODY(BrowserPage);
         PageFacts f{};
         f.osd_rows = height_;
+
+        f.repeat_all_keys = true;
         return f;
     }
 
@@ -79,11 +83,15 @@ public:
 private:
     Transition select_current();
 
+    bool navigate_(const UiEvent& ev);
+
     Transition handle_recents(const UiEvent& ev);
 
     Transition open_recents_list();
 
-    std::int64_t now_ns() const noexcept { return clock_ ? clock_->now().count() : 0; }
+    std::chrono::nanoseconds now_ns() const noexcept {
+        return clock_ ? clock_->now() : std::chrono::nanoseconds::zero();
+    }
 
     BrowserSession session_{};
     const IBrowseSource* src_;

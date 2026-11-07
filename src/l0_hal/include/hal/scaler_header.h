@@ -5,12 +5,12 @@
 #include <cstdint>
 #include <span>
 
+#include "hal/types.h"
 #include "infra/seat.h"
 
 namespace mister::hal {
 
 struct ScalerHeader {
-    TASTY_SEAT_EXEMPT(component);
 
     static constexpr std::size_t kBytes = 16;
     static constexpr std::uint8_t kTypeImage = 1;
@@ -59,10 +59,11 @@ struct ScalerHeader {
         return type == kTypeImage && format == kFormatRgb24;
     }
 
-    [[nodiscard]] constexpr std::uint8_t frame_counter() const noexcept {
+    [[nodiscard]] constexpr HeaderCtr frame_counter() const noexcept {
         constexpr unsigned kFrameCounterShift = 5;
-        constexpr std::uint16_t kFrameCounterMask = 0x7;
-        return static_cast<std::uint8_t>((attributes >> kFrameCounterShift) & kFrameCounterMask);
+        return HeaderCtr{
+            static_cast<std::uint8_t>((attributes >> kFrameCounterShift) & HeaderCtr::kMask)
+        };
     }
 
     [[nodiscard]] constexpr bool triple_buffered() const noexcept {

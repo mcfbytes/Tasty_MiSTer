@@ -57,13 +57,14 @@ void load_filter_set(
 );
 
 [[nodiscard]] constexpr std::size_t filter_bank_word_count(std::uint16_t ver) noexcept {
-    switch (ver & 0x3u) {
-        case 1:
-            return (kFilterPhases / 16) * kFilterTaps;
+    switch (ver & kFilterEncodingMask) {
+        case kFilterEncodingBytes:
+            return (kFilterPhases / kFilterBytePhaseStep) * kFilterTaps;
         case 2:
         case 3: {
-            const std::size_t skip = (ver & 0x4u) != 0 ? 1u : 4u;
-            return (kFilterPhases / skip) * kFilterTaps * 2u;
+            const std::size_t skip = (ver & kFilterFullPrecisionBit) != 0 ? 1u
+                                                                          : kFilterCoarsePhaseStep;
+            return (kFilterPhases / skip) * kFilterTaps * kFilterWordsPerEntry;
         }
         default:
             return 0;

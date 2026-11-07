@@ -14,7 +14,7 @@ namespace mister::os {
 [[nodiscard]] Ex<std::size_t> read_small_file(const char* path, std::span<char> buf) noexcept {
     const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
     }
     UniqueFd guard{fd};
 
@@ -24,7 +24,7 @@ namespace mister::os {
         if (n < 0) {
             if (errno == EINTR)
                 continue;
-            return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+            return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
         }
         if (n == 0)
             break;

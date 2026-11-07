@@ -13,6 +13,22 @@
 
 namespace mister::proto {
 
+enum class ScanSet : std::uint8_t {
+    kSet1 = 1,
+    kSet2 = 2,
+    kSet3 = 3,
+};
+
+[[nodiscard]] constexpr Ps2Reply scan_set_reply(ScanSet set) noexcept {
+    return reply_of(static_cast<std::uint8_t>(set));
+}
+
+[[nodiscard]] constexpr ScanSet scan_set_of(std::uint8_t n) noexcept {
+    return n == 1 ? ScanSet::kSet1 : n == 3 ? ScanSet::kSet3 : ScanSet::kSet2;
+}
+
+enum class Press : std::uint8_t { kRelease = 0, kMake = 1, kRepeat = 2 };
+
 class Ps2Keyboard {
     TASTY_SEAT_RESIDENT(Input);
 
@@ -37,7 +53,7 @@ public:
 
 private:
     std::array<bool, 256> down_{};
-    std::uint8_t scan_set_ = 2;
+    ScanSet scan_set_ = ScanSet::kSet2;
 
     static constexpr std::uint8_t kMaxFrameBytes = kPs2FrameBytes;
     static constexpr std::uint8_t kFrameQueueCap = 32;

@@ -34,9 +34,9 @@ inline constexpr std::uint32_t kDataBound = 0x1EA0'0000u;
 
 [[nodiscard]] constexpr std::array<std::uint16_t, 3> set_words(std::uint64_t v) noexcept {
     return {
-        static_cast<std::uint16_t>(v & 0xFFFFu),
-        static_cast<std::uint16_t>((v >> 16) & 0xFFFFu),
-        static_cast<std::uint16_t>((v >> 32) & 0xFFFFu)
+        static_cast<std::uint16_t>(v),
+        static_cast<std::uint16_t>((v >> 16)),
+        static_cast<std::uint16_t>((v >> 32))
     };
 }
 

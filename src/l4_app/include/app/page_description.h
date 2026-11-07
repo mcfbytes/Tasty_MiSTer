@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
+#include "app/types.h"
 #include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
 
 namespace mister::app {
 
@@ -46,14 +49,24 @@ struct PageDescription {
     };
 
     FixedStr<48, StrFit::Clip> title{};
+
+    [[nodiscard]] constexpr RowCount listed() const noexcept {
+        return std::min(row_count, RowCount::of(kMaxRows));
+    }
+
+    [[nodiscard]] constexpr const Row& row(RowIndex at) const noexcept {
+        return infra::at_index(rows, at);
+    }
+
     FixedStr<48, StrFit::Clip> crumb{};
 
     FixedStr<64, StrFit::Clip> subtitle{};
     std::array<Row, kMaxRows> rows{};
-    std::uint8_t row_count = 0;
-    std::uint16_t first = 0;
-    std::uint16_t total = 0;
-    std::uint8_t pinned = 0;
+
+    RowCount row_count{};
+    RowIndex first{};
+    RowCount total{};
+    RowCount pinned{};
     Shape shape = Shape::List;
 
     char letter = '\0';

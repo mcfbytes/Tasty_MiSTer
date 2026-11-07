@@ -35,6 +35,11 @@ void hd_glass_compose_scalar(
     std::span<std::uint16_t> out
 ) noexcept;
 
+struct GlassRect {
+    HdRect rect{};
+    std::size_t base = 0;
+};
+
 class HdGlass {
     TASTY_SEAT_RESIDENT(HdOsd);
 
@@ -67,8 +72,7 @@ private:
     std::uint16_t q8_ = 0;
     std::uint16_t fill_ = 0;
     bool active_ = false;
-    std::array<HdRect, kRects> rects_{};
-    std::array<std::size_t, kRects> base_{};
+    std::array<GlassRect, kRects> glass_{};
     std::vector<std::uint16_t> under_{};
     std::vector<std::uint16_t> row_{};
 };

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -54,6 +55,27 @@ struct ShadowMaskWord {
 
 static_assert(std::is_trivially_copyable_v<ShadowMaskWord>);
 
+inline constexpr std::size_t kArCustomWords = 4;
+inline constexpr unsigned kArCustomWordBits = 16;
+
+using ArCustomWords = std::array<std::uint16_t, kArCustomWords>;
+
+[[nodiscard]] constexpr std::uint64_t pack_ar_custom(const ArCustomWords& w) noexcept {
+    std::uint64_t bits = 0;
+    for (std::size_t i = 0; i < kArCustomWords; ++i)
+        bits |= std::uint64_t{w[i]} << (i * kArCustomWordBits);
+    return bits;
+}
+
+[[nodiscard]] constexpr ArCustomWords unpack_ar_custom(std::uint64_t bits) noexcept {
+    ArCustomWords w{};
+    for (std::size_t i = 0; i < kArCustomWords; ++i)
+        w[i] = static_cast<std::uint16_t>(bits >> (i * kArCustomWordBits));
+    return w;
+}
+
+inline constexpr std::uint16_t kFilterVerMask = 0x000F;
+
 struct PreludeStats {
     std::uint32_t arms = 0;
     std::uint32_t completions = 0;
@@ -78,6 +100,47 @@ struct PreludeStats {
 };
 
 static_assert(std::is_trivially_copyable_v<PreludeStats>);
+
+struct FilterStream {
+    TASTY_SEAT_RESIDENT(RT);
+
+    struct Ports {
+        proto::Link* link;
+        const svc::FilterSet& set;
+        svc::FilterBank& sent_horiz;
+        svc::FilterBank& sent_vert;
+        PreludeStats& pre;
+        xthread::Counter& streams;
+        xthread::Counter& words;
+        xthread::Counter& errors;
+    };
+
+    bool armed = false;
+    bool generated = false;
+    bool prelude = false;
+    bool tail = false;
+    std::uint16_t ver = 0;
+    svc::FilterSendPlan plan{};
+    std::uint8_t seg_i = 0;
+    svc::VFilter vert_slot = svc::VFilter::Horz;
+    std::size_t cursor = 0;
+    svc::ScalingWords tail_words{};
+
+    bool arm(
+        const Ports& p,
+        std::uint16_t flt_flags,
+        svc::VFilter slot,
+        bool in_prelude,
+        bool with_tail,
+        const svc::ScalingWords& tw
+    ) noexcept;
+
+    void arm_generated(std::uint16_t flt_flags, bool in_prelude) noexcept;
+
+    void step(const Ports& p) noexcept;
+
+    [[nodiscard]] bool active() const noexcept { return armed; }
+};
 
 class VideoWire : public svc::VideoService::IVideoWireSink,
                   public svc::VideoService::IResolutionSampler,
@@ -211,17 +274,8 @@ public:
 
     FilterStats filter_stats() const noexcept;
 
-    void publish_ar_custom(
-        std::uint16_t a0,
-        std::uint16_t a1,
-        std::uint16_t a2,
-        std::uint16_t a3
-    ) noexcept {
-        const std::uint64_t bits = static_cast<std::uint64_t>(a0)
-            | (static_cast<std::uint64_t>(a1) << 16)
-            | (static_cast<std::uint64_t>(a2) << 32)
-            | (static_cast<std::uint64_t>(a3) << 48);
-        ar_cust_.publish(bits);
+    void publish_ar_custom(const ArCustomWords& words) noexcept {
+        ar_cust_.publish(pack_ar_custom(words));
     }
 
     void publish_shadow_mask(std::uint16_t flag_word) noexcept {
@@ -271,15 +325,27 @@ private:
 
     bool consume_filters();
     bool service_filter_publish(proto::Link& link);
-    bool arm_filter_stream(
-        std::uint16_t flt_flags,
-        svc::VFilter vert_slot,
-        bool prelude,
-        bool tail,
-        const svc::ScalingWords& tail_words
-    );
-    void step_filter_stream(proto::Link& link);
+
+    [[nodiscard]] FilterStream::Ports stream_ports_(proto::Link* link) noexcept {
+        return {
+            .link = link,
+            .set = flt_local_,
+            .sent_horiz = sent_horiz_,
+            .sent_vert = sent_vert_,
+            .pre = pre_,
+            .streams = flt_streams_,
+            .words = flt_stream_words_,
+            .errors = flt_stream_errors_
+        };
+    }
+
     svc::VFilter select_slot(const svc::VideoSample& s) const;
+
+    void replay_parked_(
+        proto::Link& link,
+        infra::OptRef<proto::IResetFence> fence,
+        bool with_but_sw
+    ) noexcept;
 
     LinkTxChannel<SeatTag::Ui>& link_tx_;
     std::uint32_t gen_ = 0;
@@ -310,16 +376,7 @@ private:
     std::uint32_t flt_seen_gen_ = 0;
     svc::FilterBank sent_horiz_{};
     svc::FilterBank sent_vert_{};
-    bool fs_active_ = false;
-    bool fs_generated_ = false;
-    bool fs_prelude_ = false;
-    bool fs_tail_ = false;
-    std::uint16_t fs_ver_ = 0;
-    svc::FilterSendPlan fs_plan_{};
-    std::uint8_t fs_seg_i_ = 0;
-    svc::VFilter fs_vert_slot_ = svc::VFilter::Horz;
-    std::size_t fs_cursor_ = 0;
-    svc::ScalingWords fs_tail_words_{};
+    FilterStream fs_{};
     xthread::Counter flt_published_{};
     xthread::Counter flt_consumed_{};
     xthread::Counter flt_waits_{};
@@ -378,8 +435,7 @@ private:
 consteval bool coeff_chunk_fits_every_board() {
     return hal::every_measured(&hal::BoardProfile::timing, [](const hal::LinkTiming& g) consteval {
         const std::int64_t beat_ns = hal::LinkTimingValues::measured(g).beat_ns;
-        return static_cast<std::int64_t>(VideoWire::kCoeffChunkWords + 1) * beat_ns
-            <= VideoWire::kRoundBudgetNs;
+        return std::int64_t{VideoWire::kCoeffChunkWords + 1} * beat_ns <= VideoWire::kRoundBudgetNs;
     });
 }
 

@@ -16,17 +16,20 @@ namespace mister::svc::adv7513 {
 
 namespace {
 
-constexpr std::uint8_t wire(os::I2cAddr a) noexcept {
-    return a.v;
-}
-
-constexpr std::uint8_t wire(os::I2cReg r) noexcept {
-    return r.v;
-}
-
 constexpr bool unset(os::I2cReg r) noexcept {
     return r == os::I2cReg{};
 }
+
+struct SubMapRow {
+    SubMapRole role;
+    os::I2cAddr addr;
+};
+
+constexpr std::array<SubMapRow, kSubMapCount> kSubMapRows{{
+    {SubMapRole::Edid, kEdidAddr},
+    {SubMapRole::Spd, kSpdAddr},
+    {SubMapRole::Cec, kCecAddr},
+}};
 
 constexpr os::I2cReg reg_after(os::I2cReg base, std::size_t off) noexcept {
     return base.plus(off);
@@ -70,14 +73,14 @@ Ex<void> LinuxAdapter::open(unsigned bus, os::I2cAddr addr) {
         return {};
     }
 
-    return err(Errc::bad_format, ERR_SITE(), wire(addr));
+    return err(Errc::bad_format, ERR_SITE(), addr_detail(addr));
 }
 
 Ex<std::uint8_t> LinuxAdapter::read(os::I2cAddr addr, os::I2cReg reg) {
     TASTY_SEAT_BODY(LinuxAdapter);
     Slot* s = find(addr);
     if (s == nullptr)
-        return err(Errc::not_found, ERR_SITE(), wire(addr));
+        return err(Errc::not_found, ERR_SITE(), addr_detail(addr));
     return s->dev->read_reg(reg);
 }
 
@@ -85,7 +88,7 @@ Ex<void> LinuxAdapter::write(os::I2cAddr addr, os::I2cReg reg, std::uint8_t val)
     TASTY_SEAT_BODY(LinuxAdapter);
     Slot* s = find(addr);
     if (s == nullptr)
-        return err(Errc::not_found, ERR_SITE(), wire(addr));
+        return err(Errc::not_found, ERR_SITE(), addr_detail(addr));
     return s->dev->write_reg(reg, val);
 }
 
@@ -102,7 +105,7 @@ Ex<Adv7513Bus> Adv7513Bus::attach(
     );
     if (!range) {
         out.presence = Presence::Absent;
-        out.bus = 0xFF;
+        out.bus.reset();
         return std::unexpected(range.error());
     }
     unsigned found = 0;
@@ -120,8 +123,8 @@ Ex<Adv7513Bus> Adv7513Bus::attach(
     }
     if (out.acks == 0) {
         out.presence = Presence::Absent;
-        out.bus = 0xFF;
-        return err(Errc::not_found, ERR_SITE(), wire(kMainAddr));
+        out.bus.reset();
+        return err(Errc::not_found, ERR_SITE(), addr_detail(kMainAddr));
     }
     if (out.acks >= 2) {
 
@@ -156,19 +159,9 @@ Ex<Adv7513Bus> Adv7513Bus::attach(
         );
     }
 
-    const struct {
-        os::I2cAddr addr;
-        bool* ack;
-    } subs[3] = {
-        {kEdidAddr, &out.edid_ack},
-        {kSpdAddr, &out.spd_ack},
-        {kCecAddr, &out.cec_ack},
-    };
-
-    for (const auto& s : subs) {
-        if (a.probe(found, s.addr)) {
-            *s.ack = a.open(found, s.addr).has_value();
-        }
+    for (const SubMapRow& s : kSubMapRows) {
+        const bool acked = a.probe(found, s.addr).has_value();
+        out.set_ack(s.role, acked && a.open(found, s.addr).has_value());
     }
 
     out.presence = Presence::Found;
@@ -183,7 +176,7 @@ Ex<void> Adv7513Bus::write_rows(std::span<const RegWrite> rows) {
             ++errors_;
             if (unset(fail_reg_))
                 fail_reg_ = w.reg;
-            return err(r.error().code, ERR_SITE(), reg_errno_detail(w.reg, r.error().detail));
+            return err(r.error().code, ERR_SITE(), w.reg.errno_detail(r.error()));
         }
         ++writes_;
     }
@@ -217,7 +210,7 @@ Ex<void> Adv7513Bus::tmds_power(bool on) {
 Ex<std::uint8_t> Adv7513Bus::read_status() {
     auto r = a_.read(kMainAddr, kRegStatus);
     if (!r)
-        return err(r.error().code, ERR_SITE(), reg_errno_detail(kRegStatus, r.error().detail));
+        return err(r.error().code, ERR_SITE(), kRegStatus.errno_detail(r.error()));
     return *r;
 }
 
@@ -235,9 +228,8 @@ struct ModeBytes {
     std::uint8_t sync_invert, pr_flags, vic;
 };
 
-ModeBytes mode_bytes(const Modeline& m, bool direct_video_menu) {
-    const auto t = mode_table(m, direct_video_menu);
-    return ModeBytes{t[0].val, t[1].val, t[2].val};
+ModeBytes mode_bytes(const std::array<RegWrite, 3>& table) {
+    return ModeBytes{table[0].val, table[1].val, table[2].val};
 }
 
 }
@@ -249,26 +241,23 @@ Ex<void> Adv7513Bus::set_mode(const Modeline& m, bool direct_video_menu) {
         (void)direct_video_menu;
         return {};
     } else {
-        const ModeBytes b = mode_bytes(m, direct_video_menu);
+
+        const std::array<RegWrite, 3> table = mode_table(m, direct_video_menu);
+        const ModeBytes b = mode_bytes(table);
 
         if (last_sync_invert_ == b.sync_invert
             && last_pr_flags_ == b.pr_flags
             && last_vic_ == b.vic) {
             return {};
         }
-        const RegWrite rows[3] = {
-            {0x17, b.sync_invert},
-            {0x3B, b.pr_flags},
-            {0x3C, b.vic},
-        };
-        for (const RegWrite& w : rows) {
+        for (const RegWrite& w : table) {
             auto r = a_.write(kMainAddr, w.reg, w.val);
             if (!r) {
                 ++errors_;
                 if (unset(fail_reg_))
                     fail_reg_ = w.reg;
 
-                return err(r.error().code, ERR_SITE(), reg_errno_detail(w.reg, r.error().detail));
+                return err(r.error().code, ERR_SITE(), w.reg.errno_detail(r.error()));
             }
             ++writes_;
         }
@@ -309,7 +298,8 @@ Ex<void> Adv7513Bus::set_packet(
     std::optional<std::span<const std::uint8_t>> payload
 ) {
 
-    if (payload && (payload->empty() || payload->size() > wire(kPacketUpdateOff))) {
+    constexpr std::size_t kPacketUpdateOff = 0x1F;
+    if (payload && (payload->empty() || payload->size() > kPacketUpdateOff)) {
         return err(Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(payload->size()));
     }
 
@@ -318,11 +308,7 @@ Ex<void> Adv7513Bus::set_packet(
         ++errors_;
         if (unset(spd_fail_reg_))
             spd_fail_reg_ = kRegPacketEnable;
-        return err(
-            cur.error().code,
-            ERR_SITE(),
-            reg_errno_detail(kRegPacketEnable, cur.error().detail)
-        );
+        return err(cur.error().code, ERR_SITE(), kRegPacketEnable.errno_detail(cur.error()));
     }
     const std::uint8_t want = payload
         ? static_cast<std::uint8_t>(*cur | mask)
@@ -331,23 +317,19 @@ Ex<void> Adv7513Bus::set_packet(
         ++errors_;
         if (unset(spd_fail_reg_))
             spd_fail_reg_ = kRegPacketEnable;
-        return err(
-            w.error().code,
-            ERR_SITE(),
-            reg_errno_detail(kRegPacketEnable, w.error().detail)
-        );
+        return err(w.error().code, ERR_SITE(), kRegPacketEnable.errno_detail(w.error()));
     }
     ++writes_;
 
     if (!payload)
         return {};
 
-    const os::I2cReg upd = reg_after(first_reg, wire(kPacketUpdateOff));
+    const os::I2cReg upd = reg_after(first_reg, kPacketUpdateOff);
     if (auto w = a_.write(kSpdAddr, upd, 0x80); !w) {
         ++errors_;
         if (unset(spd_fail_reg_))
             spd_fail_reg_ = upd;
-        return err(w.error().code, ERR_SITE(), reg_errno_detail(upd, w.error().detail));
+        return err(w.error().code, ERR_SITE(), upd.errno_detail(w.error()));
     }
     ++writes_;
     for (std::size_t i = 0; i < payload->size(); ++i) {
@@ -357,7 +339,7 @@ Ex<void> Adv7513Bus::set_packet(
             ++errors_;
             if (unset(spd_fail_reg_))
                 spd_fail_reg_ = reg;
-            return err(w.error().code, ERR_SITE(), reg_errno_detail(reg, w.error().detail));
+            return err(w.error().code, ERR_SITE(), reg.errno_detail(w.error()));
         }
         ++writes_;
     }
@@ -365,7 +347,7 @@ Ex<void> Adv7513Bus::set_packet(
         ++errors_;
         if (unset(spd_fail_reg_))
             spd_fail_reg_ = upd;
-        return err(w.error().code, ERR_SITE(), reg_errno_detail(upd, w.error().detail));
+        return err(w.error().code, ERR_SITE(), upd.errno_detail(w.error()));
     }
     ++writes_;
     return {};
@@ -381,16 +363,16 @@ Ex<void> Adv7513Bus::spd_disable() {
 
 Ex<Adv7513Bus::Verify> Adv7513Bus::verify(const Modeline& m, bool direct_video_menu) {
     Verify v{};
-    const os::I2cReg regs[4] = {kRegPower, os::I2cReg{0x17}, os::I2cReg{0x3B}, os::I2cReg{0x3C}};
+    const os::I2cReg regs[4] = {kRegPower, kRegVideoFormat, kRegPixelRepeat, kRegVic};
     std::uint8_t* const out[4] = {&v.r41, &v.r17, &v.r3b, &v.r3c};
     for (int i = 0; i < 4; ++i) {
         auto r = a_.read(kMainAddr, regs[i]);
         if (!r)
-            return err(r.error().code, ERR_SITE(), reg_errno_detail(regs[i], r.error().detail));
+            return err(r.error().code, ERR_SITE(), regs[i].errno_detail(r.error()));
         *out[i] = *r;
     }
 
-    const ModeBytes b = mode_bytes(m, direct_video_menu);
+    const ModeBytes b = mode_bytes(mode_table(m, direct_video_menu));
 
     v.matched = (v.r41 == 0x10)
         && (!kAdvModeWrite || (v.r17 == b.sync_invert && v.r3b == b.pr_flags && v.r3c == b.vic));

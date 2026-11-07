@@ -8,6 +8,8 @@
 #include <cstring>
 #include <optional>
 
+#include "app/rgb_rows.h"
+
 namespace mister::app {
 
 BackdropSampler::BackdropSampler(hal::ScalerBuffers window, const os::IClock* clock) noexcept
@@ -119,10 +121,12 @@ BackdropSampler::Marks BackdropSampler::marks_() const noexcept {
 
 BackdropSampler::Image BackdropSampler::image_(bool fresh) const noexcept {
     Image img;
-    img.rgb = std::span<const std::byte>{cache_.data(), view_n_};
+    img.rgb = RgbRows{
+        .bytes = std::span<const std::byte>{cache_.data(), view_n_},
+        .stride = RowBytes{line_},
+        .rows = PictureRows{height_}
+    };
     img.width = width_;
-    img.height = height_;
-    img.line = line_;
     img.live = live_;
     img.fresh = fresh && live_;
     img.same = same_ && live_;
@@ -134,12 +138,11 @@ BackdropSampler::Image BackdropSampler::image_(bool fresh) const noexcept {
 }
 
 bool BackdropSampler::copy_frame_() noexcept {
-    constexpr unsigned kRgbBytes = 3;
     const auto load = [this](std::size_t buf) -> std::optional<hal::ScalerHeader> {
         const auto h = window_.header(buf * stride_);
         if (!h || !h->supported() || h->width == 0 || h->height == 0)
             return std::nullopt;
-        if (unsigned{h->width} * kRgbBytes > h->line)
+        if (RowBytes{h->line}.lacks(rgb_row_of(h->width)))
             return std::nullopt;
         return *h;
     };
@@ -173,7 +176,7 @@ bool BackdropSampler::copy_frame_() noexcept {
         cache_.resize(nbytes);
     if (prev_.size() < nbytes)
         prev_.resize(nbytes);
-    const std::uint8_t before = header->frame_counter();
+    const auto before = header->frame_counter();
     if (clock_)
         (void)clock_->now();
     if (!window_

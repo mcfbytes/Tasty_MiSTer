@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/config_apply.h"
 
+#include "app/types.h"
+
 #include "svc/config_snapshot.h"
 #include "svc/vfs.h"
 
@@ -34,15 +36,15 @@ void apply_vga_mode_fixup(svc::ConfigSnapshot& cfg) noexcept {
     if (v.empty())
         return;
     if (ieq(v, "rgb"))
-        cfg.vga_mode_int = 0;
+        cfg.vga_mode_int = wire_of(VgaMode::Rgb);
     if (ieq(v, "ypbpr"))
-        cfg.vga_mode_int = 1;
+        cfg.vga_mode_int = wire_of(VgaMode::YPbPr);
     if (ieq(v, "svideo"))
-        cfg.vga_mode_int = 2;
+        cfg.vga_mode_int = wire_of(VgaMode::SVideo);
     if (ieq(v, "cvbs"))
-        cfg.vga_mode_int = 3;
+        cfg.vga_mode_int = wire_of(VgaMode::Cvbs);
     if (ieq(v, "subcarrier")) {
-        cfg.vga_mode_int = 4;
+        cfg.vga_mode_int = wire_of(VgaMode::Subcarrier);
         cfg.csync = 1;
         cfg.forced_scandoubler = 0;
     }

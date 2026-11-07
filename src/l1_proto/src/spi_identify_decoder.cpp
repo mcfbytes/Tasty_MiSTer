@@ -20,8 +20,8 @@ void SpiIdentifyDecoder::service() noexcept {
     }
     (void)out_.push(
         LinkEvent::IdentityMatched{
-            .dual_sdram = id->dual_sdram,
-            .type_byte = id->type_byte,
+            .dual_sdram = id->dual_sdram(),
+            .type_byte = id->type,
             .bind_gen = *gen_,
             .wide = session_->capabilities().width == hal::Width::Word
         }

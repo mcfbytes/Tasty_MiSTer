@@ -8,14 +8,21 @@
 
 namespace mister {
 
+inline constexpr std::uint64_t kHeaderSkipMask = 0x3FFu;
+
 namespace detail {
 
-inline constexpr std::array<std::uint32_t, 256> kCrc32Table = [] {
-    std::array<std::uint32_t, 256> t{};
-    for (std::uint32_t i = 0; i < 256; ++i) {
+inline constexpr std::uint32_t kCrcTableEntries = 256;
+inline constexpr std::uint32_t kReflectedPolynomial = 0xEDB88320u;
+inline constexpr unsigned kBitsPerByte = 8;
+inline constexpr std::uint32_t kByteMask = 0xFFu;
+
+inline constexpr std::array<std::uint32_t, kCrcTableEntries> kCrc32Table = [] {
+    std::array<std::uint32_t, kCrcTableEntries> t{};
+    for (std::uint32_t i = 0; i < kCrcTableEntries; ++i) {
         std::uint32_t c = i;
-        for (int k = 0; k < 8; ++k) {
-            c = (c & 1u) != 0u ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+        for (unsigned k = 0; k < kBitsPerByte; ++k) {
+            c = (c & 1u) != 0u ? (kReflectedPolynomial ^ (c >> 1)) : (c >> 1);
         }
         t[i] = c;
     }
@@ -30,7 +37,7 @@ inline constexpr std::array<std::uint32_t, 256> kCrc32Table = [] {
 ) noexcept {
     std::uint32_t c = ~crc;
     for (const std::uint8_t b : data) {
-        c = detail::kCrc32Table[(c ^ b) & 0xFFu] ^ (c >> 8);
+        c = detail::kCrc32Table[(c ^ b) & detail::kByteMask] ^ (c >> 8);
     }
     return ~c;
 }
@@ -40,7 +47,7 @@ inline constexpr std::array<std::uint32_t, 256> kCrc32Table = [] {
 }
 
 [[nodiscard]] constexpr std::uint64_t crc32_header_skip(std::uint64_t total) noexcept {
-    return total & 0x3FFu;
+    return total & kHeaderSkipMask;
 }
 
 }

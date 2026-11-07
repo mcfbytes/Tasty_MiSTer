@@ -21,7 +21,7 @@ bool LadderHostAdapter::order(const proto::LinkOp& op) {
 Ex<proto::FileId> LadderHostAdapter::intern_bytes(
     std::span<const std::uint8_t> bytes,
     std::string_view ext,
-    std::uint32_t load_addr
+    hal::FabricAddr load_addr
 ) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     std::vector<std::uint8_t> buf(bytes.begin(), bytes.end());
@@ -39,13 +39,20 @@ Ex<proto::FileId> LadderHostAdapter::intern_piece(
 ) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     std::vector<std::uint8_t> buf(bytes.begin(), bytes.end());
-    return edges_.inbox
-        .intern_file(std::move(buf), ext, std::string_view{}, 0, svc::Crc32{}, whole, offset);
+    return edges_.inbox.intern_file(
+        std::move(buf),
+        ext,
+        std::string_view{},
+        hal::FabricAddr{},
+        svc::Crc32{},
+        whole,
+        offset
+    );
 }
 
-Ex<proto::FileId> LadderHostAdapter::intern_path(std::string_view path, std::uint64_t size_bytes) {
+Ex<proto::FileId> LadderHostAdapter::intern_path(std::string_view path, proto::FileSize size) {
     TASTY_SEAT_BODY(LadderHostAdapter);
-    auto id = edges_.inbox.intern_file_path(path, size_bytes);
+    auto id = edges_.inbox.intern_file_path(path, size);
     if (!id)
         return std::unexpected(id.error());
     ++edges_.tally.images_sized;
@@ -60,7 +67,7 @@ Ex<proto::FileId> LadderHostAdapter::intern_whole(
     const std::size_t dot = path.rfind('.');
     const std::string_view ext = dot == std::string_view::npos ? std::string_view{}
                                                                : path.substr(dot);
-    return edges_.inbox.intern_file(std::move(bytes), ext, path, 0);
+    return edges_.inbox.intern_file(std::move(bytes), ext, path, hal::FabricAddr{});
 }
 
 std::optional<bool> LadderHostAdapter::file_tx_answer(proto::ActKey act) {
@@ -86,9 +93,11 @@ std::size_t LadderHostAdapter::link_in_flight() const noexcept {
     return edges_.inbox.ring().size();
 }
 
-std::size_t LadderHostAdapter::link_word_bytes() const noexcept {
+cores::WireWordBytes LadderHostAdapter::link_word_bytes() const noexcept {
     TASTY_SEAT_BODY(LadderHostAdapter);
-    return edges_.negotiated.link_wide() ? 2u : 1u;
+    return cores::WireWordBytes::of(
+        edges_.negotiated.link_wide() ? hal::Width::Word : hal::Width::Byte
+    );
 }
 
 cores::MountStatus LadderHostAdapter::mount_status() {

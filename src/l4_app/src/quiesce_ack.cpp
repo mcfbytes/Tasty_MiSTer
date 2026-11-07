@@ -10,8 +10,8 @@ void QuiesceAck::poll(SwitchPark& sp) noexcept {
     ParkBody b{.taken = seen_.taken(), .gen = gen_, .quiet = false};
     (void)sp.observe(seen_, b);
 
-    const std::uint32_t g = seen_.taken();
-    if (!engaged() && g != 0 && g != over_)
+    const xthread::PauseGen g = seen_.taken();
+    if (!engaged() && !g.is_none() && g != over_)
         gen_ = g;
 }
 

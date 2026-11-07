@@ -143,9 +143,9 @@ static_assert(
     const HdTemplateTraits& traits,
     const PageDescription& page
 ) noexcept {
-    const std::size_t n = std::min<std::size_t>(page.row_count, PageDescription::kMaxRows);
-    for (std::size_t i = 0; i < n; ++i)
-        if ((traits.horizontal_tiers & tier_bit(page.rows[i].tier)) != 0)
+    const RowIndex end = RowIndex{} + page.listed();
+    for (RowIndex i{}; i < end; i += RowCount::of(1))
+        if ((traits.horizontal_tiers & tier_bit(page.row(i).tier)) != 0)
             return true;
     return false;
 }
@@ -262,19 +262,26 @@ static_assert(
 }
 
 inline constexpr auto kHdOpacityNames = [] {
+    constexpr unsigned kTextBase = 10, kFullPercent = 100;
+    constexpr char kTextZero = '0', kPercentSign = '%', kTextEnd = '\0';
     std::array<std::array<char, 4>, kHdOpacityMax - kHdOpacityMin + 1> names{};
     for (std::size_t i = 0; i < names.size(); ++i) {
         const auto pct = static_cast<unsigned>(kHdOpacityMin + i);
         auto& n = names[i];
-        if (pct >= 100) {
+        if (pct >= kFullPercent) {
             n = {
-                static_cast<char>('0' + pct / 100),
-                static_cast<char>('0' + pct / 10 % 10),
-                static_cast<char>('0' + pct % 10),
-                '%'
+                static_cast<char>(kTextZero + pct / kFullPercent),
+                static_cast<char>(kTextZero + pct / kTextBase % kTextBase),
+                static_cast<char>(kTextZero + pct % kTextBase),
+                kPercentSign
             };
         } else {
-            n = {static_cast<char>('0' + pct / 10), static_cast<char>('0' + pct % 10), '%', '\0'};
+            n = {
+                static_cast<char>(kTextZero + pct / kTextBase),
+                static_cast<char>(kTextZero + pct % kTextBase),
+                kPercentSign,
+                kTextEnd
+            };
         }
     }
     return names;

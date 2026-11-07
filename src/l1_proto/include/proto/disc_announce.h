@@ -23,20 +23,20 @@ struct DiscAnnounce {
     ) const {
         if (auto r = frame.begin(UioOp::SetSdInfo); !r)
             return r;
-        if (auto r = write32_word(frame, static_cast<std::uint32_t>(size_bytes.v & 0xFFFFFFFFu));
-            !r)
+        if (auto r = emit_u32(frame, size_bytes.low_word(), hal::Width::Word); !r)
             return r;
-        if (auto r = write32_word(frame, static_cast<std::uint32_t>(size_bytes.v >> 32)); !r)
+        if (auto r = emit_u32(frame, size_bytes.high_word(), hal::Width::Word); !r)
             return r;
         if (auto r = frame.end(); !r)
             return r;
         if (slot.v > kMaxAnnounceableSlot) {
             return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
         }
-        const auto parm = static_cast<std::uint16_t>((1u << slot.v) | 0x80u);
+
+        const SdStatParameter parm = SdStatParameter::of(slot, false);
         if (auto r = frame.begin(UioOp::SetSdStat); !r)
             return r;
-        if (auto r = frame.word(parm); !r)
+        if (auto r = frame.word(parm.v); !r)
             return r;
         return frame.end();
     }
@@ -69,12 +69,6 @@ struct DiscAnnounce {
             slots.count_unencodable_announce();
         }
         return r;
-    }
-
-    [[nodiscard]] static Ex<void> write32_word(ILinkFrame& frame, std::uint32_t v) {
-        if (auto r = frame.word(static_cast<std::uint16_t>(v & 0xFFFFu)); !r)
-            return r;
-        return frame.word(static_cast<std::uint16_t>(v >> 16));
     }
 };
 

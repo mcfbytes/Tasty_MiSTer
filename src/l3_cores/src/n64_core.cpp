@@ -66,7 +66,7 @@ Ex<proto::SessionParams> N64Core::stream_opening(IoIndex index) {
     if (!session_)
         return std::unexpected(Error{Errc::core_load, ERR_SITE(), index.v});
     const n64::FileRoute route = n64::stream_route(index);
-    last_index_ = index.v;
+    last_index_ = index;
     ++transfers_;
     bytes_sent_ = 0;
     if (route == n64::FileRoute::Rom) {

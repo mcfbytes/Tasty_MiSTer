@@ -5,20 +5,23 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
 #include <system_error>
 
 #include "infra/error.h"
+#include "svc/msf.h"
+#include "svc/toc.h"
+#include "svc/vfs.h"
 
 namespace mister::svc::disc::detail {
 
-inline constexpr std::uint32_t kFramesPerSecond = 75;
 inline constexpr std::size_t kSubcodeBytes = 96;
 inline constexpr std::size_t kUserDataBytes = 2048;
 inline constexpr std::uint32_t kMode2Cooked = 2336;
-inline constexpr std::uint32_t kMaxCueTracks = 99;
+inline constexpr TrackCount kMaxCueTracks{99};
 
 inline constexpr std::string_view kKwFile = "FILE";
 inline constexpr std::string_view kKwTrack = "TRACK";
@@ -95,8 +98,55 @@ inline std::optional<std::uint32_t> take_msf(std::string_view s) noexcept {
     const auto f = take_uint(s, kCueFieldDigits);
     if (!f)
         return std::nullopt;
-    constexpr std::uint32_t kSecondsPerMinute = 60;
+
     return *m * kSecondsPerMinute * kFramesPerSecond + *sec * kFramesPerSecond + *f;
+}
+
+struct CueFileDecl {
+    std::string_view name;
+    std::string_view format;
+};
+
+[[nodiscard]] inline CueFileDecl take_cue_file(std::string_view rest) noexcept {
+    CueFileDecl out{};
+    if (!rest.empty() && rest.front() == '"') {
+        rest.remove_prefix(1);
+        const std::size_t q = rest.find('"');
+        out.name = rest.substr(0, q == std::string_view::npos ? rest.size() : q);
+        out.format = (q == std::string_view::npos) ? std::string_view{} : rest.substr(q);
+        return out;
+    }
+    const std::size_t sp = rest.find(' ');
+    out.name = rest.substr(0, sp == std::string_view::npos ? rest.size() : sp);
+    out.format = (sp == std::string_view::npos) ? std::string_view{} : rest.substr(sp);
+    return out;
+}
+
+struct PendingFile {
+    std::unique_ptr<IFile> file{};
+    proto::FileSize size{};
+    bool open = false;
+
+    void adopt(std::unique_ptr<IFile> f, proto::FileSize sz) noexcept {
+        file = std::move(f);
+        size = sz;
+        open = true;
+    }
+
+    [[nodiscard]] std::unique_ptr<IFile> take() noexcept {
+        open = false;
+        return std::move(file);
+    }
+};
+
+inline void close_toc(Toc& toc, TrackCount count) noexcept {
+    toc.last = count;
+    toc.offset_unit = OffsetUnit::CueBytes;
+    Track& lead_out = toc.at(count.next_index());
+    lead_out.number = count.next_index().number();
+    lead_out.type = TrackType::Cdda;
+    lead_out.start = toc.end;
+    lead_out.end = toc.end;
 }
 
 class LineReader {

@@ -9,13 +9,17 @@
 
 namespace mister::ui {
 
+struct ClassicMarks {
+    bool inverted = false;
+    bool stippled = false;
+    std::optional<Glyph> leftchar{};
+    std::optional<OsdRenderer::Arrow> arrow{};
+};
+
 [[nodiscard]] PageRow::Classic classic_row(
     proto::OsdRow row,
     std::string_view text,
-    bool inverted = false,
-    bool stippled = false,
-    std::optional<Glyph> leftchar = std::nullopt,
-    std::optional<OsdRenderer::Arrow> arrow = std::nullopt
+    ClassicMarks marks = {}
 ) noexcept;
 
 }

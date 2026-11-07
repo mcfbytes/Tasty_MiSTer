@@ -31,7 +31,7 @@ public:
     [[nodiscard]] proto::SaveAct start(
         const cores::SaveImage& image,
         std::string_view rel,
-        std::uint8_t word_bytes
+        cores::WireWordBytes word
     ) noexcept override;
     [[nodiscard]] proto::SaveAct resume(
         std::span<const std::uint8_t, proto::kSavePieceBytes> bytes

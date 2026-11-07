@@ -3,29 +3,29 @@
 
 namespace mister::ui {
 
-std::optional<HdFocusMemory::Focus> HdFocusMemory::recall(PageId page, ItemId item) const noexcept {
+std::optional<HdFocusMemory::Focus> HdFocusMemory::recall(FocusKey key) const noexcept {
     TASTY_SEAT_BODY(HdFocusMemory);
     for (std::uint8_t i = 0; i < count_; ++i) {
-        if (entries_[i].page == page && entries_[i].item == item)
+        if (entries_[i].matches(key))
             return entries_[i].focus;
     }
     return std::nullopt;
 }
 
-void HdFocusMemory::remember(PageId page, ItemId item, Focus focus) noexcept {
+void HdFocusMemory::remember(FocusKey key, Focus focus) noexcept {
     TASTY_SEAT_BODY(HdFocusMemory);
     for (std::uint8_t i = 0; i < count_; ++i) {
-        if (entries_[i].page == page && entries_[i].item == item) {
+        if (entries_[i].matches(key)) {
             entries_[i].focus = focus;
             return;
         }
     }
     if (count_ < kEntries) {
-        entries_[count_++] = Entry{page, item, focus};
+        entries_[count_++] = Entry{key, focus};
         return;
     }
-    entries_[oldest_] = Entry{page, item, focus};
-    oldest_ = static_cast<std::uint8_t>((oldest_ + 1) % kEntries);
+    entries_[oldest_] = Entry{key, focus};
+    oldest_ = next_slot(oldest_);
     ++evictions_;
 }
 

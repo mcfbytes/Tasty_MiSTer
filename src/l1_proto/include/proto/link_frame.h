@@ -5,6 +5,7 @@
 #include <optional>
 #include <span>
 
+#include "hal/types.h"
 #include "hal/uio_frame_lane.h"
 #include "infra/error.h"
 #include "proto/fio_opcodes.h"
@@ -94,6 +95,22 @@ protected:
     std::span<const std::uint16_t> words
 ) {
     return send_frame(frame, LinkRoute::Osd, proto::word(op).v, words);
+}
+
+[[nodiscard]] inline Ex<void> emit_u32(ILinkFrame& frame, std::uint32_t v, hal::Width framing) {
+    constexpr unsigned kByteBits = 8;
+    constexpr unsigned kHalfBits = 16;
+    constexpr std::uint32_t kByteMask = 0xFFu;
+    if (framing == hal::Width::Word) {
+        if (auto r = frame.word(static_cast<std::uint16_t>(v)); !r)
+            return r;
+        return frame.word(static_cast<std::uint16_t>(v >> kHalfBits));
+    }
+    for (unsigned shift = 0; shift < kHalfBits * 2u; shift += kByteBits) {
+        if (auto r = frame.word(static_cast<std::uint16_t>((v >> shift) & kByteMask)); !r)
+            return r;
+    }
+    return {};
 }
 
 }

@@ -219,7 +219,6 @@ InputStats collect_input_stats(const InputSample& s, const InputBuild::Counts& b
         out.keys_released = s.wire->keys_released();
         out.rebuilds_done = s.wire->rebuilds_done();
         out.rebuilds_refused = s.wire->rebuilds_refused();
-        out.button_samples = s.wire->button_samples();
         out.button_actions = s.wire->button_actions();
     }
     return out;

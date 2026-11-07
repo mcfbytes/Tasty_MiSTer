@@ -8,6 +8,7 @@
 
 #include "app/path_text.h"
 #include "app/types.h"
+#include "hal/types.h"
 #include "cores/types.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
@@ -38,8 +39,8 @@ struct InternedFile {
     std::span<const std::uint8_t> bytes{};
     FixedStr<8, StrFit::Reject> ext{};
     PathText path{};
-    std::uint32_t load_addr = 0;
-    std::uint64_t size_bytes = 0;
+    hal::FabricAddr load_addr{};
+    proto::FileSize size_bytes{};
     std::uint64_t offset = 0;
     svc::Crc32 crc{};
     proto::FileId save{};

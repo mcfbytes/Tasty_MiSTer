@@ -3,7 +3,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <string_view>
+
+#include "infra/endian.h"
 
 namespace mister::cores::wav {
 namespace {
@@ -24,11 +27,7 @@ bool is_data_chunk(ChunkHeader header) noexcept {
 }
 
 std::uint32_t declared_size(ChunkHeader header) noexcept {
-    std::uint32_t v = 0;
-    for (std::size_t i = 0; i < 4; ++i) {
-        v |= static_cast<std::uint32_t>(header[4 + i]) << (8 * i);
-    }
-    return v;
+    return infra::load_le<std::uint32_t>(header.subspan(4).first<4>());
 }
 
 [[nodiscard]] Ex<WavData> find_data_chunk(std::span<const std::byte> image) noexcept {
@@ -36,7 +35,7 @@ std::uint32_t declared_size(ChunkHeader header) noexcept {
         return refuse(Refusal::kTooSmall, ERR_SITE());
 
     const auto file_size = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(image.size(), 0xFFFFFFFFu)
+        std::min<std::uint64_t>(image.size(), std::numeric_limits<std::uint32_t>::max())
     );
     std::uint32_t pos = kPrefixBytes;
     while (can_read_header(pos, proto::FileSize{file_size})) {
@@ -46,7 +45,7 @@ std::uint32_t declared_size(ChunkHeader header) noexcept {
             return WavData{pos + kChunkHeaderBytes, size};
 
         const std::uint64_t next = std::uint64_t{pos} + kChunkHeaderBytes + size;
-        if (next > 0xFFFFFFFFull)
+        if (next > std::numeric_limits<std::uint32_t>::max())
             return refuse(Refusal::kSizeOverflows, ERR_SITE());
         pos = static_cast<std::uint32_t>(next);
     }

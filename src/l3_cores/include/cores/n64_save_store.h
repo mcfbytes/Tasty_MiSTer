@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -93,7 +94,7 @@ private:
 
         void close() noexcept {
             file_.reset();
-            on_disk_ = 0;
+            on_disk_ = proto::FileSize{};
         }
 
         [[nodiscard]] bool is_open() const noexcept { return file_ != nullptr; }
@@ -102,12 +103,12 @@ private:
             return infra::opt_ref_of(file_.get());
         }
 
-        [[nodiscard]] std::uint32_t on_disk() const noexcept { return on_disk_; }
+        [[nodiscard]] proto::FileSize on_disk() const noexcept { return on_disk_; }
 
     private:
         std::unique_ptr<svc::IFile> file_{};
         std::optional<proto::SlotIndex> slot_{};
-        std::uint32_t on_disk_ = 0;
+        proto::FileSize on_disk_{};
     };
 
     void adopt_(const SavePlan& plan) noexcept;

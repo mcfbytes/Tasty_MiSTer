@@ -35,15 +35,13 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
 
     const std::string_view base_dir = dir_of(cue_path);
 
-    std::uint32_t last = 0;
+    TrackCount last{};
     std::uint32_t pregap = 0;
 
     std::uint32_t track_pregap = 0;
     std::uint32_t hdr = 0;
     std::string fname;
-    bool pending_open = false;
-    std::uint64_t pending_size = 0;
-    std::unique_ptr<IFile> pending_file;
+    PendingFile pending;
     OpenFileId last_backing{};
     bool track0_size_stated = false;
     bool aborted = false;
@@ -58,21 +56,11 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
         std::string_view sv = lstrip(std::string_view(line));
 
         if (sv.starts_with("FILE")) {
-            std::string_view rest = lstrip(past(sv, kKwFile));
-            std::string_view name;
-            if (!rest.empty() && rest.front() == '"') {
-                rest.remove_prefix(1);
-                const std::size_t q = rest.find('"');
-                name = rest.substr(0, q == std::string_view::npos ? rest.size() : q);
-                rest = (q == std::string_view::npos) ? std::string_view{} : rest.substr(q);
-            } else {
-                const std::size_t sp = rest.find(' ');
-                name = rest.substr(0, sp == std::string_view::npos ? rest.size() : sp);
-                rest = (sp == std::string_view::npos) ? std::string_view{} : rest.substr(sp);
-            }
+            const CueFileDecl decl = take_cue_file(lstrip(past(sv, kKwFile)));
+            const std::string_view rest = decl.format;
 
             fname.assign(base_dir);
-            fname.append(name);
+            fname.append(decl.name);
 
             auto f = m.io.open_file(fname);
             if (!f)
@@ -87,16 +75,14 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                 return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
             }
 
-            pending_file = std::move(*f);
-            pending_size = sz->v;
-            pending_open = true;
+            pending.adopt(std::move(*f), *sz);
 
             constexpr std::uint32_t kWavHeaderBytes = 44;
             hdr = (policy_.wav_header_skip && ends_with_ci(fname, ".wav")) ? kWavHeaderBytes : 0u;
             pregap = 0;
 
             track_pregap = 0;
-            m.toc.tracks[last].offset = 0;
+            m.toc.at(last.next_index()).offset = 0;
             continue;
         }
 
@@ -106,16 +92,16 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
             if (!number)
                 continue;
 
-            if (*number != last + 1) {
+            if (!last.next_index().number().matches(*number)) {
                 aborted = true;
                 break;
             }
 
             track_pregap = 0;
-            Track& t = m.toc.tracks[last];
+            Track& t = m.toc.at(last.next_index());
             if (policy_.type_detect == CuePolicy::TypeDetect::Track0Only) {
 
-                if (last == 0) {
+                if (last.empty()) {
                     if (sv.find(kMode1Cooked) != std::string_view::npos) {
                         t.sector_size = kUserDataBytes;
                         t.type = TrackType::Mode1;
@@ -145,12 +131,12 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                 if (sv.find(kMode1Cooked) != std::string_view::npos) {
                     t.sector_size = kUserDataBytes;
                     t.type = TrackType::Mode1;
-                    if (last == 0)
+                    if (last.empty())
                         track0_size_stated = true;
                 } else if (sv.find(kMode1Raw) != std::string_view::npos) {
                     t.sector_size = kCdDataSize;
                     t.type = TrackType::Mode1;
-                    if (last == 0)
+                    if (last.empty())
                         track0_size_stated = true;
                 } else if (sv.find("AUDIO") != std::string_view::npos) {
                     t.sector_size = kCdDataSize;
@@ -158,8 +144,8 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                 }
             }
 
-            if (last != 0 && !pending_open)
-                m.toc.tracks[last - 1].end = Lba{0};
+            if (!last.empty() && !pending.open)
+                m.toc.at(last.last_index()).end = Lba{0};
             continue;
         }
 
@@ -182,8 +168,8 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
 
             if (*index == 0) {
 
-                if (last != 0 && m.toc.tracks[last - 1].end == Lba{0}) {
-                    m.toc.tracks[last - 1].end = pregap_relative
+                if (!last.empty() && m.toc.at(last.last_index()).end == Lba{0}) {
+                    m.toc.at(last.last_index()).end = pregap_relative
                         ? Lba{0} + BlockCount{pregap}
                         : Lba{0} + BlockCount{*frames + pregap};
                 }
@@ -192,15 +178,15 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
             if (*index != 1)
                 continue;
 
-            Track& t = m.toc.tracks[last];
-            t.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
+            Track& t = m.toc.at(last.next_index());
+            t.number = last.next_index().number();
 
             const bool accumulate = (policy_.offset_op == CuePolicy::OffsetOp::Accumulate);
             if (accumulate) {
                 t.offset += std::int64_t{pregap} * std::int64_t{kCdDataSize};
             }
 
-            if (!pending_open) {
+            if (!pending.open) {
 
                 if (m.table.count() == 0) {
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
@@ -211,8 +197,8 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                     t.offset = std::int64_t{pregap} * std::int64_t{t.sector_size}
                         - std::int64_t{hdr};
                 }
-                if (last != 0 && m.toc.tracks[last - 1].end == Lba{0}) {
-                    m.toc.tracks[last - 1].end = pregap_relative
+                if (!last.empty() && m.toc.at(last.last_index()).end == Lba{0}) {
+                    m.toc.at(last.last_index()).end = pregap_relative
                         ? t.start - BlockCount{track_pregap}
                         : t.start;
                 }
@@ -221,15 +207,15 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                 if (m.table.count() >= kMaxTracks) {
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), m.table.count()});
                 }
-                last_backing = m.table.push(std::move(pending_file));
-                pending_open = false;
+                last_backing = m.table.push(pending.take());
                 t.backing = last_backing;
 
                 t.start = m.toc.end + BlockCount{pregap};
 
                 std::uint32_t ss = t.sector_size;
                 if (policy_.type_detect == CuePolicy::TypeDetect::Track0Only) {
-                    ss = (t.type != TrackType::Cdda) ? m.toc.tracks[0].sector_size : kCdDataSize;
+                    ss = (t.type != TrackType::Cdda) ? m.toc.at(TrackIndex{}).sector_size
+                                                     : kCdDataSize;
                 }
                 if (ss == 0)
                     ss = kCdDataSize;
@@ -240,14 +226,13 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
                     t.offset = std::int64_t{t.start.v} * std::int64_t{ss} - std::int64_t{hdr};
                 }
 
-                const std::uint64_t payload = (pending_size > hdr) ? pending_size - hdr : 0;
-                const std::uint64_t sectors = (payload + ss - 1) / ss;
-                t.end = t.start + BlockCount{static_cast<std::uint32_t>(sectors)};
+                const proto::FileSize payload = pending.size.after_header(proto::FileSize{hdr});
+                t.end = t.start + payload.units_covering(proto::FileSize{ss});
                 t.start += BlockCount{*frames};
                 m.toc.end = t.end;
             }
 
-            ++last;
+            last += TrackCount{1};
             if (last == kMaxCueTracks)
                 break;
             continue;
@@ -255,28 +240,25 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
     }
 
     if (aborted) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
+        return std::unexpected(last.refusal(Errc::bad_format, ERR_SITE()));
     }
 
-    if (last != 0 && m.toc.tracks[last - 1].end == Lba{0}) {
+    if (!last.empty() && m.toc.at(last.last_index()).end == Lba{0}) {
         m.toc.end += BlockCount{pregap};
-        m.toc.tracks[last - 1].end = m.toc.end;
+        m.toc.at(last.last_index()).end = m.toc.end;
     }
-    if (last == 0) {
+    if (last.empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-
-    m.toc.last = static_cast<std::uint8_t>(last);
-    m.toc.offset_unit = OffsetUnit::CueBytes;
 
     if (policy_.type_detect == CuePolicy::TypeDetect::PerTrackRunningSize) {
 
         m.toc.sector_size = (running_ss != 0) ? running_ss : kCdDataSize;
     } else if (track0_size_stated) {
-        m.toc.sector_size = m.toc.tracks[0].sector_size;
-    } else if (policy_.sniff_sega_disc_system && m.toc.tracks[0].backing.v < m.table.count()) {
+        m.toc.sector_size = m.toc.at(TrackIndex{}).sector_size;
+    } else if (policy_.sniff_sega_disc_system && m.table.holds(m.toc.at(TrackIndex{}).backing)) {
         std::byte head[16]{};
-        IFile* f = m.table.file(m.toc.tracks[0].backing);
+        IFile* f = m.table.file(m.toc.at(TrackIndex{}).backing);
         m.toc.sector_size = kCdDataSize;
         if (f != nullptr) {
             auto rd = f->read_at(0, std::span<std::byte>(head, sizeof(head)));
@@ -291,18 +273,14 @@ Ex<void> SentinelCueProgram::parse(std::string_view cue_path, const CueMount& m)
     }
 
     if (policy_.type_detect != CuePolicy::TypeDetect::PerTrack) {
-        for (std::uint32_t i = 0; i < last; ++i) {
-            if (m.toc.tracks[i].type != TrackType::Cdda) {
-                m.toc.tracks[i].sector_size = m.toc.sector_size;
-            }
-        }
+        last.for_each_index([&](TrackIndex i) {
+            Track& row = m.toc.at(i);
+            if (row.type != TrackType::Cdda)
+                row.sector_size = m.toc.sector_size;
+        });
     }
 
-    Track& lead_out = m.toc.tracks[last];
-    lead_out.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
-    lead_out.type = TrackType::Cdda;
-    lead_out.start = m.toc.end;
-    lead_out.end = m.toc.end;
+    close_toc(m.toc, last);
 
     std::string sub_name;
     if (policy_.sub_naming == CuePolicy::SubNaming::LastTrackFilename
@@ -330,13 +308,11 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
 
     const std::string_view base_dir = dir_of(cue_path);
 
-    std::uint32_t last = 0;
+    TrackCount last{};
 
     std::uint32_t pregap = 0;
     std::string fname;
-    bool pending_open = false;
-    std::uint64_t pending_size = 0;
-    std::unique_ptr<IFile> pending_file;
+    PendingFile pending;
 
     LineReader reader(text);
     char line[1024];
@@ -344,20 +320,10 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
         std::string_view sv = lstrip(std::string_view(line));
 
         if (sv.starts_with("FILE")) {
-            std::string_view rest = lstrip(past(sv, kKwFile));
-            std::string_view name;
-            if (!rest.empty() && rest.front() == '"') {
-                rest.remove_prefix(1);
-                const std::size_t q = rest.find('"');
-                name = rest.substr(0, q == std::string_view::npos ? rest.size() : q);
-                rest = (q == std::string_view::npos) ? std::string_view{} : rest.substr(q);
-            } else {
-                const std::size_t sp = rest.find(' ');
-                name = rest.substr(0, sp == std::string_view::npos ? rest.size() : sp);
-                rest = (sp == std::string_view::npos) ? std::string_view{} : rest.substr(sp);
-            }
+            const CueFileDecl decl = take_cue_file(lstrip(past(sv, kKwFile)));
+            const std::string_view rest = decl.format;
             fname.assign(base_dir);
-            fname.append(name);
+            fname.append(decl.name);
 
             auto f = m.io.open_file(fname);
             if (!f)
@@ -367,11 +333,9 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
                 return std::unexpected(sz.error());
 
             if (rest.find("BINARY") == std::string_view::npos) {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
+                return std::unexpected(last.refusal(Errc::bad_format, ERR_SITE()));
             }
-            pending_file = std::move(*f);
-            pending_size = sz->v;
-            pending_open = true;
+            pending.adopt(std::move(*f), *sz);
             continue;
         }
 
@@ -382,23 +346,23 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
                 continue;
             pregap = 0;
 
-            if (*number != last + 1) {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
+            if (!last.next_index().number().matches(*number)) {
+                return std::unexpected(last.refusal(Errc::bad_format, ERR_SITE()));
             }
-            Track& t = m.toc.tracks[last];
+            Track& t = m.toc.at(last.next_index());
             if (sv.find(kMode1Raw) != std::string_view::npos
                 || sv.find(kMode2Raw) != std::string_view::npos) {
                 t.sector_size = kCdDataSize;
                 t.type = TrackType::Mode1;
 
-                if (last == 0)
+                if (last.empty())
                     m.toc.end = Lba{0} + kRedBookPregap;
             } else if (sv.find("AUDIO") != std::string_view::npos) {
                 t.sector_size = kCdDataSize;
                 t.type = TrackType::Cdda;
             } else {
 
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
+                return std::unexpected(last.refusal(Errc::bad_format, ERR_SITE()));
             }
             continue;
         }
@@ -406,7 +370,7 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
         if (sv.starts_with("PREGAP")) {
             if (const auto frames = take_msf(past(sv, kKwPregap))) {
                 pregap += *frames;
-                m.toc.tracks[last].pregap_declared = true;
+                m.toc.at(last.next_index()).pregap_declared = true;
             }
             continue;
         }
@@ -422,30 +386,30 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
 
             if (*index == 0) {
 
-                if (!pending_open)
+                if (!pending.open)
                     pregap = *frames;
                 continue;
             }
             if (*index != 1)
                 continue;
 
-            Track& t = m.toc.tracks[last];
-            t.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
+            Track& t = m.toc.at(last.next_index());
+            t.number = last.next_index().number();
 
-            if (!pending_open) {
+            if (!pending.open) {
 
                 if (m.table.count() == 0) {
-                    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
+                    return std::unexpected(last.refusal(Errc::bad_format, ERR_SITE()));
                 }
-                t.backing = m.toc.tracks[0].backing;
+                t.backing = m.toc.at(TrackIndex{}).backing;
                 std::uint32_t start = *frames;
                 if (t.pregap_declared)
                     start += pregap;
 
                 std::int64_t file_base = std::int64_t{start} * std::int64_t{t.sector_size};
-                if (last != 0) {
+                if (!last.empty()) {
 
-                    m.toc.tracks[last - 1].end = Lba{start};
+                    m.toc.at(last.last_index()).end = Lba{start};
                     if (pregap != 0) {
                         t.pregap = BlockCount{start - pregap};
                         if (!t.pregap_declared) {
@@ -464,39 +428,32 @@ Ex<void> IndexTripleCueProgram::parse(std::string_view cue_path, const CueMount&
                 if (m.table.count() >= kMaxTracks) {
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), m.table.count()});
                 }
-                t.backing = m.table.push(std::move(pending_file));
-                pending_open = false;
+                t.backing = m.table.push(pending.take());
 
                 t.pregap = BlockCount{*frames};
-                if (t.type != TrackType::Cdda && last == 0) {
+                if (t.type != TrackType::Cdda && last.empty()) {
                     t.pregap = kRedBookPregap;
                 }
                 t.start = m.toc.end;
-                m.toc.end += BlockCount{static_cast<std::uint32_t>(pending_size / t.sector_size)};
+                m.toc.end += pending.size.whole_units(proto::FileSize{t.sector_size});
                 t.offset = std::int64_t{t.start.v} * std::int64_t{t.sector_size};
             }
 
             t.end = m.toc.end;
-            ++last;
+            last += TrackCount{1};
             if (last >= kMaxCueTracks)
                 break;
             continue;
         }
     }
 
-    if (last == 0) {
+    if (last.empty()) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
-    m.toc.last = static_cast<std::uint8_t>(last);
-    m.toc.sector_size = m.toc.tracks[0].sector_size;
-    m.toc.offset_unit = OffsetUnit::CueBytes;
+    m.toc.sector_size = m.toc.at(TrackIndex{}).sector_size;
 
-    Track& lead_out = m.toc.tracks[last];
-    lead_out.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
-    lead_out.type = TrackType::Cdda;
-    lead_out.start = m.toc.end;
-    lead_out.end = m.toc.end;
+    close_toc(m.toc, last);
     return {};
 }
 
@@ -511,14 +468,12 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
 
     constexpr std::int64_t kLeadIn = std::int64_t{kRedBookPregap.v};
     constexpr std::int64_t kSs = std::int64_t{kCdDataSize};
-    std::uint32_t last = 0;
+    TrackCount last{};
     std::int64_t index0 = 0;
     std::int64_t index1 = 0;
-    std::int64_t disc_end = 0;
+    Lba disc_end{};
     std::string fname;
-    bool pending_open = false;
-    std::uint64_t pending_size = 0;
-    std::unique_ptr<IFile> pending_file;
+    PendingFile pending;
 
     LineReader reader(text);
     char line[1024];
@@ -526,20 +481,10 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
         std::string_view sv = lstrip(std::string_view(line));
 
         if (sv.starts_with("FILE")) {
-            std::string_view rest = lstrip(past(sv, kKwFile));
-            std::string_view name;
-            if (!rest.empty() && rest.front() == '"') {
-                rest.remove_prefix(1);
-                const std::size_t q = rest.find('"');
-                name = rest.substr(0, q == std::string_view::npos ? rest.size() : q);
-                rest = (q == std::string_view::npos) ? std::string_view{} : rest.substr(q);
-            } else {
-                const std::size_t sp = rest.find(' ');
-                name = rest.substr(0, sp == std::string_view::npos ? rest.size() : sp);
-                rest = (sp == std::string_view::npos) ? std::string_view{} : rest.substr(sp);
-            }
+            const CueFileDecl decl = take_cue_file(lstrip(past(sv, kKwFile)));
+            const std::string_view rest = decl.format;
             fname.assign(base_dir);
-            fname.append(name);
+            fname.append(decl.name);
             auto f = m.io.open_file(fname);
             if (!f)
                 return std::unexpected(f.error());
@@ -547,11 +492,9 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
             if (!sz)
                 return std::unexpected(sz.error());
             if (rest.find("BINARY") == std::string_view::npos) {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
+                return std::unexpected(last.refusal(Errc::bad_format, ERR_SITE()));
             }
-            pending_file = std::move(*f);
-            pending_size = sz->v;
-            pending_open = true;
+            pending.adopt(std::move(*f), *sz);
             continue;
         }
 
@@ -561,13 +504,13 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
             if (!number)
                 continue;
             index0 = 0;
-            if (*number != last + 1) {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
+            if (!last.next_index().number().matches(*number)) {
+                return std::unexpected(last.refusal(Errc::bad_format, ERR_SITE()));
             }
-            Track& t = m.toc.tracks[last];
+            Track& t = m.toc.at(last.next_index());
             t.sector_size = kCdDataSize;
-            if (last == 0)
-                disc_end = kLeadIn;
+            if (last.empty())
+                disc_end = Lba{} + kRedBookPregap;
             if (sv.find(kMode1Raw) != std::string_view::npos) {
                 t.type = TrackType::Mode1;
             } else if (
@@ -578,7 +521,7 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
             } else if (sv.find("AUDIO") != std::string_view::npos) {
                 t.type = TrackType::Cdda;
             } else {
-                return std::unexpected(Error{Errc::bad_format, ERR_SITE(), last});
+                return std::unexpected(last.refusal(Errc::bad_format, ERR_SITE()));
             }
             continue;
         }
@@ -599,13 +542,13 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
                 continue;
             index1 = *frames;
 
-            Track& t = m.toc.tracks[last];
-            t.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
+            Track& t = m.toc.at(last.next_index());
+            t.number = last.next_index().number();
             std::int64_t start = 0;
             std::int64_t stock_offset = 0;
-            if (!pending_open) {
+            if (!pending.open) {
 
-                if (last == 0)
+                if (last.empty())
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
                 if (index0 == 0)
                     index0 = index1;
@@ -613,45 +556,39 @@ Ex<void> IndexPairCueProgram::parse(std::string_view cue_path, const CueMount& m
                 stock_offset = index0 * kSs;
                 const std::int64_t pregap = index1 - index0;
 
-                m.toc.tracks[last - 1].end = Lba{static_cast<std::uint32_t>(start - pregap)};
+                m.toc.at(last.last_index()).end = Lba{static_cast<std::uint32_t>(start - pregap)};
 
-                t.backing = stock_offset != 0 ? m.toc.tracks[0].backing : kNoBacking;
+                t.backing = stock_offset != 0 ? m.toc.at(TrackIndex{}).backing : kNoBacking;
             } else {
 
                 if (m.table.count() >= kMaxTracks) {
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), m.table.count()});
                 }
-                t.backing = m.table.push(std::move(pending_file));
-                pending_open = false;
-                start = disc_end + index0 + index1;
-                disc_end += static_cast<std::int64_t>(pending_size / kCdDataSize);
+                t.backing = m.table.push(pending.take());
+
+                start = std::int64_t{disc_end.v} + index0 + index1;
+                disc_end += pending.size.whole_units(proto::FileSize{kCdDataSize});
             }
             const std::int64_t pregap = index1 - index0;
             t.start = Lba{static_cast<std::uint32_t>(start)};
             t.pregap = BlockCount{static_cast<std::uint32_t>(pregap)};
 
             t.offset = (start - pregap) * kSs - stock_offset;
-            t.end = Lba{static_cast<std::uint32_t>(disc_end)};
-            ++last;
+            t.end = disc_end;
+            last += TrackCount{1};
             if (last >= kMaxCueTracks)
                 break;
             continue;
         }
     }
 
-    if (last == 0)
+    if (last.empty())
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
 
-    m.toc.last = static_cast<std::uint8_t>(last);
-    m.toc.end = Lba{static_cast<std::uint32_t>(disc_end)};
+    m.toc.end = disc_end;
     m.toc.sector_size = kCdDataSize;
-    m.toc.offset_unit = OffsetUnit::CueBytes;
 
-    Track& lead_out = m.toc.tracks[last];
-    lead_out.number = TrackNumber{static_cast<std::uint8_t>(last + 1)};
-    lead_out.type = TrackType::Cdda;
-    lead_out.start = m.toc.end;
-    lead_out.end = m.toc.end;
+    close_toc(m.toc, last);
     return {};
 }
 

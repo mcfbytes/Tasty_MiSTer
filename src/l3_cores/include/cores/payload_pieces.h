@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "cores/ladder_host.h"
+#include "cores/wire_word.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "proto/link_op.h"
@@ -34,7 +35,7 @@ public:
     struct Frame {
         proto::WideIoIndex dest{};
         proto::RegionCode region = proto::RegionCode::kNone;
-        std::uint16_t chunk = 0;
+        WireChunk chunk = WireChunk::single();
         bool progress = false;
         proto::ActKey16 act{};
     };
@@ -53,15 +54,13 @@ public:
     );
 
     [[nodiscard]] static constexpr std::size_t piece_bytes(
-        std::uint16_t chunk,
-        std::size_t word_bytes = 1
+        WireChunk chunk,
+        WireWordBytes word
     ) noexcept {
-        const std::size_t cap = kPieceWords * (word_bytes == 2 ? 2u : 1u);
-        if (chunk == 0)
+        const std::size_t cap = word.scale(kPieceWords);
+        if (chunk.one_write())
             return cap;
-        if (chunk >= cap)
-            return chunk;
-        return cap - cap % chunk;
+        return chunk.whole_within(cap);
     }
 
     [[nodiscard]] Pass step(ILadderHost& host);
@@ -92,7 +91,7 @@ private:
     std::optional<std::vector<std::uint8_t>> staged_{};
     std::uint64_t size_ = 0;
     std::uint64_t sent_ = 0;
-    std::size_t word_bytes_ = 0;
+    std::optional<WireWordBytes> word_bytes_{};
     std::string ext_;
     Frame frame_;
     Pass end_ = Pass::Waiting;

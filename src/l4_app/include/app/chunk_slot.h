@@ -26,11 +26,13 @@ struct ChunkSlot {
         std::span<const std::byte> table,
         std::size_t i
     ) noexcept {
-        return infra::load_le<std::uint32_t>(table.subspan(i * 4u).first<4>());
+        constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
+        return infra::load_le<std::uint32_t>(table.subspan(i * kWordBytes).first<kWordBytes>());
     }
 
     static void set_desc_word(std::span<std::byte> table, std::size_t i, std::uint32_t w) noexcept {
-        infra::store_le<std::uint32_t>(table.subspan(i * 4u).first<4>(), w);
+        constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
+        infra::store_le<std::uint32_t>(table.subspan(i * kWordBytes).first<kWordBytes>(), w);
     }
 
     ChunkKind kind = ChunkKind::Data;

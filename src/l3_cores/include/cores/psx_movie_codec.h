@@ -11,6 +11,7 @@
 #include "cores/movie_codec.h"
 #include "cores/types.h"
 #include "infra/seat.h"
+#include "svc/track.h"
 
 namespace mister::svc {
 class IChdSource;
@@ -45,10 +46,63 @@ public:
         {"R2", "R2", 13},
     }};
 
-    static constexpr std::uint8_t kColValue = 0x40;
-    static constexpr std::uint8_t kColReset = 0x41;
-    static constexpr std::uint8_t kColPower = 0x42;
-    static constexpr std::uint8_t kColTray = 0x43;
+    struct ColumnRole {
+        static constexpr std::uint8_t kPadCount = 14;
+        enum class MovieCommand : std::uint8_t {
+            Value = 0x40,
+            Reset = 0x41,
+            Power = 0x42,
+            Tray = 0x43,
+        };
+        std::uint8_t v = 0;
+
+        [[nodiscard]] static constexpr ColumnRole of(std::uint8_t role) noexcept {
+            return ColumnRole{role};
+        }
+
+        [[nodiscard]] static constexpr ColumnRole pad(std::uint8_t bit) noexcept {
+            return ColumnRole{bit};
+        }
+
+        [[nodiscard]] static constexpr ColumnRole command(MovieCommand c) noexcept {
+            return ColumnRole{static_cast<std::uint8_t>(c)};
+        }
+
+        [[nodiscard]] constexpr bool is_pad() const noexcept { return v < kPadCount; }
+
+        [[nodiscard]] constexpr std::uint32_t pad_mask() const noexcept { return 1u << v; }
+
+        [[nodiscard]] constexpr MovieCommand command() const noexcept {
+            return static_cast<MovieCommand>(v);
+        }
+
+        friend constexpr bool operator==(ColumnRole, ColumnRole) = default;
+    };
+
+    static constexpr std::uint32_t kPadBitMask = (1u << ColumnRole::kPadCount) - 1u;
+
+    struct CommandMask {
+        static constexpr std::uint8_t kReset = 0x1;
+        static constexpr std::uint8_t kPower = 0x2;
+        std::uint8_t v = 0;
+
+        [[nodiscard]] constexpr CommandMask with_reset() const noexcept {
+            return CommandMask{static_cast<std::uint8_t>(v | kReset)};
+        }
+
+        [[nodiscard]] constexpr CommandMask with_power() const noexcept {
+            return CommandMask{static_cast<std::uint8_t>(v | kPower)};
+        }
+
+        friend constexpr bool operator==(CommandMask, CommandMask) = default;
+    };
+
+    struct MovieTimecode {
+        static constexpr std::size_t kDigits = 2;
+        [[nodiscard]] static std::optional<std::uint32_t> parse(std::string_view s) noexcept;
+    };
+
+    static constexpr std::size_t kMaxFiles = 99;
 
     enum class Emu : std::uint8_t { None, Octoshock, Nymashock };
 
@@ -68,9 +122,9 @@ public:
     static constexpr std::size_t kTocPrefixBytes = 4 * (3 + 3 * 100);
 
     static constexpr std::uint64_t kKeySectors = 26;
-    static constexpr std::uint64_t kSectorBytes = 2352;
+    static constexpr std::uint64_t kSectorBytes = svc::kCdDataSize;
 
-    static constexpr std::uint32_t kChdFrameBytes = 2448;
+    static constexpr std::uint32_t kChdFrameBytes = static_cast<std::uint32_t>(svc::kCdFrameSize);
     static constexpr std::uint32_t kChdHunkMax = 1u << 20;
     static constexpr std::int32_t kLeadMin = -120;
     static constexpr std::int32_t kLeadMax = 1200;
@@ -134,7 +188,7 @@ consteval bool psx_pad_bits_are_a_permutation() {
             return false;
         seen |= 1u << bit;
     }
-    return seen == 0x3FFFu;
+    return seen == PsxMovieCodec::kPadBitMask;
 }
 
 static_assert(

@@ -25,7 +25,7 @@ int cf_fclose(core_file* f);
 int cf_fseek(core_file* f, std::int64_t off, int whence);
 
 struct CoreFileBinding {
-    CoreFileBinding(IFile& source, std::uint64_t byte_size) noexcept
+    CoreFileBinding(IFile& source, proto::FileSize byte_size) noexcept
         : file(&source),
           size(byte_size) {
         cf.argp = this;
@@ -38,12 +38,12 @@ struct CoreFileBinding {
     core_file cf{};
     IFile* file;
     std::uint64_t pos = 0;
-    std::uint64_t size;
+    proto::FileSize size;
 };
 
 std::uint64_t cf_fsize(core_file* f) {
     auto* b = static_cast<CoreFileBinding*>(f->argp);
-    return b->size;
+    return b->size.v;
 }
 
 std::size_t cf_fread(void* dst, std::size_t elem, std::size_t count, core_file* f) {
@@ -71,7 +71,7 @@ int cf_fseek(core_file* f, std::int64_t off, int whence) {
     if (whence == SEEK_CUR)
         base = static_cast<std::int64_t>(b->pos);
     else if (whence == SEEK_END)
-        base = static_cast<std::int64_t>(b->size);
+        base = static_cast<std::int64_t>(b->size.v);
     const std::int64_t next = base + off;
     if (next < 0)
         return -1;
@@ -105,7 +105,7 @@ class LibChdrSource final : public IChdSource {
 public:
     [[nodiscard]] static Ex<std::unique_ptr<LibChdrSource>> open(
         std::unique_ptr<IFile> file,
-        std::uint64_t size
+        proto::FileSize size
     ) {
         auto src = std::make_unique<LibChdrSource>(Key{}, std::move(file), size);
         if (src->handle_.chd == nullptr) {
@@ -114,7 +114,7 @@ public:
         return src;
     }
 
-    LibChdrSource(Key, std::unique_ptr<IFile> file, std::uint64_t size) noexcept
+    LibChdrSource(Key, std::unique_ptr<IFile> file, proto::FileSize size) noexcept
         : file_(std::move(file)),
           binding_(*file_, size),
           handle_(open_handle(binding_)) {}
@@ -129,14 +129,15 @@ public:
 
     Geometry geometry() const noexcept override {
         return Geometry{
-            handle_.header->hunkbytes,
-            handle_.header->unitbytes,
-            handle_.header->totalhunks
+            proto::FileSize{handle_.header->hunkbytes},
+            proto::FileSize{handle_.header->unitbytes},
+            HunkCount{handle_.header->totalhunks}
         };
     }
 
-    std::optional<ChdMetaRow> track_metadata(std::uint32_t index) override {
+    std::optional<ChdMetaRow> track_metadata(TrackIndex track) override {
 
+        const std::uint32_t index = track.v;
         if (chd_get_metadata(
                 handle_.chd,
                 CDROM_TRACK_METADATA2_TAG,
@@ -168,13 +169,14 @@ public:
         return std::nullopt;
     }
 
-    [[nodiscard]] Ex<void> read_hunk(std::uint32_t hunk, std::span<std::byte> dst) override {
+    [[nodiscard]] Ex<void> read_hunk(HunkIndex hunk, std::span<std::byte> dst) override {
         if (dst.size() < handle_.header->hunkbytes) {
             return std::unexpected(
                 Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(dst.size())}
             );
         }
-        const chd_error err = chd_read(handle_.chd, hunk, dst.data());
+
+        const chd_error err = chd_read(handle_.chd, hunk.v, dst.data());
         if (err != CHDERR_NONE) {
             return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(err)});
         }
@@ -196,7 +198,7 @@ Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file) {
     auto sz = file->size();
     if (!sz)
         return std::unexpected(sz.error());
-    auto src = LibChdrSource::open(std::move(file), sz->v);
+    auto src = LibChdrSource::open(std::move(file), *sz);
     if (!src)
         return std::unexpected(src.error());
     return std::unique_ptr<IChdSource>(std::move(*src));

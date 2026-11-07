@@ -4,6 +4,7 @@ add_library(mister_reactor STATIC
   src/frame_clock.cpp
   src/frame_main.cpp
   src/notifier.cpp
+  src/round_recorder.cpp
   src/round_timer.cpp
 )
 target_include_directories(mister_reactor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -25,8 +26,10 @@ tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
   reactor/link_decoder_decl.h
   reactor/notifier.h
   reactor/notifier_slot.h
+  reactor/round_recorder.h
   reactor/round_timer.h
   reactor/round_timing.h
+  reactor/round_trace.h
   reactor/tick.h
 )
 

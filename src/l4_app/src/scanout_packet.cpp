@@ -11,7 +11,7 @@ std::uint16_t le16(std::span<const std::byte> b, std::size_t at) noexcept {
 }
 
 void put16(std::span<std::byte, kMaxPacketBytes> b, std::size_t at, std::uint16_t v) noexcept {
-    b[at] = static_cast<std::byte>(v & 0xFFu);
+    b[at] = static_cast<std::byte>(v);
     b[at + 1] = static_cast<std::byte>(v >> 8);
 }
 

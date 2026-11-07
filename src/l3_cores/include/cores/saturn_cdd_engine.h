@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -12,9 +13,13 @@
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
 #include "cores/core_window.h"
+#include "cores/saturn_cdd_frame.h"
 #include "cores/saturn_stock_toc.h"
+#include "cores/saturn_mode.h"
+#include "cores/types.h"
 #include "cores/saturn_pending.h"
 #include "cores/saturn_ring.h"
+#include "cores/saturn_seek.h"
 #include "cores/saturn_slot_ring.h"
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -49,23 +54,22 @@ public:
     [[nodiscard]] bool header_owed() const noexcept { return header_owed_; }
 
     [[nodiscard]] std::span<const std::uint8_t, saturn::kFrameBytes> status_frame() const noexcept {
-        return std::span<const std::uint8_t, saturn::kFrameBytes>(stat_);
+        return stat_.bytes;
     }
 
 private:
     enum class State : std::uint8_t {
-        Idle,
-        Open,
-        ReadToc,
-        Read,
-        Pause,
-        Stop,
-        Seek,
-        SeekRead,
-        SeekRing
+        Idle = 0,
+        Open = 1,
+        ReadToc = 2,
+        Read = 3,
+        Stop = 5,
+        Seek = 6,
+        SeekRing = 8,
     };
 
     enum class Sent : std::uint8_t { Yes, Declined };
+    using StatField = SaturnCddFrame::Field;
 
     [[nodiscard]] Ex<void> do_accept(
         std::span<const std::uint16_t> words,
@@ -118,25 +122,28 @@ private:
     [[nodiscard]] Ex<Sent> data_sector_send_(bool synth_header, CdDialectPorts& p);
     [[nodiscard]] Ex<Sent> audio_sector_send_(CdDialectPorts& p);
     [[nodiscard]] Ex<void> ring_sector_send_(CdDialectPorts& p);
-    [[nodiscard]] Ex<void> send_mode_(std::uint16_t mode, ICdLink& link);
+    [[nodiscard]] Ex<void> send_mode_(SaturnModeWord mode, ICdLink& link);
     [[nodiscard]] bool take_header_(const svc::DiscGeometry& geom) noexcept;
     void prime_(const svc::DiscGeometry& geom) noexcept;
     void retrack_(const svc::DiscGeometry& geom) noexcept;
 
-    [[nodiscard]] std::int32_t track_by_lba_(
-        std::int32_t lba,
+    [[nodiscard]] svc::TrackIndex track_by_lba_(
+        HeadLba lba,
         const svc::DiscGeometry& geom
     ) const noexcept;
-    [[nodiscard]] std::int32_t index_by_lba_(std::int32_t track, std::int32_t lba) const noexcept;
-    [[nodiscard]] std::int32_t offset_by_index_(
-        std::int32_t tno,
-        std::int32_t idx,
+    [[nodiscard]] std::uint32_t index_by_lba_(svc::TrackIndex track, HeadLba lba) const noexcept;
+    [[nodiscard]] SectorCount offset_by_index_(
+        svc::TrackNumber tno,
+        std::uint32_t idx,
         const svc::DiscGeometry& geom
     ) const noexcept;
-    [[nodiscard]] std::int32_t start_of_(std::int32_t track) const noexcept;
-    [[nodiscard]] bool is_data_(std::int32_t track, const svc::DiscGeometry& geom) const noexcept;
+    [[nodiscard]] HeadLba start_of_(svc::TrackIndex track) const noexcept;
+    [[nodiscard]] bool is_data_(
+        svc::TrackIndex track,
+        const svc::DiscGeometry& geom
+    ) const noexcept;
     [[nodiscard]] std::uint32_t sector_size_(
-        std::int32_t track,
+        svc::TrackIndex track,
         const svc::DiscGeometry& geom
     ) const noexcept;
 
@@ -145,15 +152,15 @@ private:
     ICoreWindow* window_;
     CdEngineStats stats_{};
 
-    std::uint8_t comm_[saturn::kFrameBytes] = {};
-    std::uint8_t stat_[saturn::kFrameBytes] = {};
+    SaturnCddFrame comm_{};
+    SaturnCddFrame stat_{};
     State state_ = State::Open;
-    std::int32_t lba_ = 0;
-    std::int32_t track_ = 0;
-    std::int32_t index_ = 0;
-    std::int32_t seek_lba_ = 0;
-    std::int32_t toc_pos_ = 0;
-    std::int32_t seek_delay_ = 0;
+    HeadLba lba_{};
+    svc::TrackIndex track_{};
+    std::uint32_t index_ = 0;
+    HeadLba seek_lba_{};
+    std::uint32_t toc_pos_ = 0;
+    saturn::SeekTicks seek_delay_{};
     std::int32_t speed_ = 0;
     bool lid_open_ = true;
     SaturnPending pend_{};
@@ -171,10 +178,13 @@ private:
     bool header_owed_ = false;
     std::uint32_t declines_ = 0;
 
-    std::uint8_t sec_[saturn::kSectorBytes] = {};
-    std::uint8_t aud_[2][saturn::kSectorBytes] = {};
+    struct AudioSector {
+        std::array<std::uint8_t, saturn::kSectorBytes> data{};
+        std::optional<HeadLba> lba{};
+    };
 
-    std::int64_t aud_lba_[2] = {-1, -1};
+    std::uint8_t sec_[saturn::kSectorBytes] = {};
+    std::array<AudioSector, 2> aud_{};
     std::uint8_t header_[kBootHeaderBytes] = {};
 };
 

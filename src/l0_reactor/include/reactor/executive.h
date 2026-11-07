@@ -144,7 +144,7 @@ private:
           log_lane_(wiring.log_lane),
           round_timer_(wiring.round_timer) {
         for (auto& t : last_raise_)
-            t = kNeverRaised;
+            t = RaiseStamp{};
     }
 
     static constexpr std::uint64_t kNeverRaised = ~std::uint64_t{0};
@@ -209,8 +209,7 @@ private:
     std::size_t notifier_count_ = 0;
     CauseSet delivered_;
 
-    std::uint64_t last_raise_[static_cast<std::size_t>(Cause::kCount)] = {};
-    std::uint64_t last_raise_round_[static_cast<std::size_t>(Cause::kCount)] = {};
+    RaiseStamp last_raise_[static_cast<std::size_t>(Cause::kCount)] = {};
     LinkDecoderDecl services_[kMaxServices] = {};
     std::uint64_t next_due_[kMaxServices] = {};
 

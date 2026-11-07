@@ -8,21 +8,23 @@
 namespace mister::cores {
 
 std::optional<TransferRow> AddressedLoad::window_row(
-    std::uint32_t addr,
+    hal::FabricAddr addr,
     std::uint64_t bytes,
     proto::WideIoIndex index,
     const hal::PhysRegion& aperture
 ) noexcept {
-    if (addr == 0 || bytes > std::numeric_limits<std::uint32_t>::max())
+    if (addr == hal::FabricAddr{} || bytes > std::numeric_limits<std::uint32_t>::max()) {
         return std::nullopt;
+    }
 
-    if (!hal::resolve_load_region(aperture, os::PhysAddr{addr}, 1))
+    if (!hal::resolve_load_region(aperture, hal::to_phys(addr), 1))
         return std::nullopt;
     TransferRow r{};
     r.dest = RowDest::Window;
     r.index = index;
-    r.addr = addr;
-    r.window = kPhysicalAddr;
+
+    r.addr = addr.v;
+    r.window = WindowRef::physical();
     r.bracket = RowBracket::AroundWithLength;
     r.file_len = static_cast<std::uint32_t>(bytes);
     return r;
@@ -33,7 +35,7 @@ Ex<LoadPlan> AddressedLoad::plan(const LoadAsk& ask, const proto::StatusWord&) {
     LoadPlan p{};
     p.count = 1;
 
-    if (ask.size.v == 0) {
+    if (ask.size.empty()) {
         p.rows[0] = TransferRow{.index = ask.index};
         return p;
     }

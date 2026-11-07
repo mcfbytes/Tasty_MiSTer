@@ -3,13 +3,15 @@
 
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
-#include "app/hd_window.h"
+#include "ui/page_window.h"
 #include "app/page_description.h"
 #include "ui/draw_classic.h"
 #include "ui/options_model.h"
+#include "ui/options_keys.h"
 #include "ui/options_page.h"
 #include "ui/options_surface.h"
 #include "ui/osd_renderer.h"
@@ -63,19 +65,9 @@ void ClassicOptionsView::for_each_drawn(Visit&& visit) const {
     }
 }
 
-bool ClassicOptionsView::walk(PageWalk& out) const {
-    TASTY_SEAT_BODY(ClassicOptionsView);
-    (void)out.page.title.assign(surface_.heading());
-    out.title_arrow = OsdRenderer::kArrowNone;
-    out.count = 0;
-
-    const RowCount rows = osd_height();
-    const bool at_root = (model_.page() == proto::kRootSubmenu);
+ClassicOptionsView::DrawnList ClassicOptionsView::compose_drawn() const {
+    DrawnList list{};
     const bool flat = model_.flat();
-
-    std::vector<app::PageDescription::Row> all;
-    std::vector<const OptionItem*> drawn;
-    std::uint16_t selected = 0;
     for_each_drawn([&](const OptionItem& it) {
         const OptionItem::Look look{.flat = flat, .value = status_field(it.bits)};
         const std::optional<app::PageDescription::Row> own = it.describe(look);
@@ -86,19 +78,15 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
 
         if (it.selectable_index.has_value() && *it.selectable_index == sel_) {
             row.selected = true;
-            selected = static_cast<std::uint16_t>(all.size());
+            list.selected = RowIndex::of(list.rows.size());
         }
-        all.push_back(row);
-        drawn.push_back(&it);
+        list.rows.push_back(Drawn{.hd = row, .item = &it});
     });
+    return list;
+}
 
-    const std::uint16_t total = static_cast<std::uint16_t>(all.size());
-    const app::HdWindow win = app::hd_window(selected, total, out.page.first);
-    out.page.first = win.first;
-    out.page.row_count = win.count;
-    out.page.total = total;
-
-    std::vector<std::string> composed(rows.size());
+void ClassicOptionsView::compose_lines(RowSpan<Line> lines) const {
+    const RowCount rows = osd_height();
     for_each_drawn([&](const OptionItem& it) {
         const RowIndex placed = row_index_of(*it.screen_row);
         if (placed < first_row_)
@@ -106,53 +94,79 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
         const RowCount row = placed - first_row_;
         if (row >= rows)
             return;
-        composed[row.size()] = compose(it);
+        lines[row_after(row)].text = compose(it);
     });
-    std::vector<bool> emitted(rows.size(), false);
+}
 
-    for (std::uint8_t i = 0; i < win.count; ++i) {
-        const std::uint32_t index = static_cast<std::uint32_t>(win.first) + i;
-        if (index >= all.size() || out.count >= out.rows.size())
+bool ClassicOptionsView::walk(PageWalk& out) const {
+    TASTY_SEAT_BODY(ClassicOptionsView);
+    (void)out.page.title.assign(surface_.heading());
+    out.title_arrow = OsdRenderer::kArrowNone;
+    out.count = 0;
+
+    const RowCount rows = osd_height();
+    const bool at_root = (model_.page() == proto::kRootSubmenu);
+    const DrawnList drawn = compose_drawn();
+
+    const RowSpan<const Drawn> drawn_rows{std::span<const Drawn>{drawn.rows}};
+    const RowCount total = RowCount::of(drawn.rows.size());
+    const app::HdWindow win = window_page(out.page, drawn.selected, total);
+    out.page.row_count = win.count;
+
+    std::vector<Line> storage(rows.size());
+    const RowSpan<Line> lines{std::span<Line>{storage}};
+    compose_lines(lines);
+
+    for (const RowIndex at : ui::rows(win.first, win.count)) {
+        if (at >= row_after(total) || out.count >= out.rows.size())
             break;
         PageRow& r = out.rows[out.count++];
-        r.hd = all[index];
+        r.hd = drawn_rows[at].hd;
         r.has_hd = true;
-        const OptionItem& window_item = *drawn[index];
+        const OptionItem& window_item = *drawn_rows[at].item;
         if (!window_item.screen_row.has_value()
             || row_index_of(*window_item.screen_row) < first_row_) {
             continue;
         }
         const RowCount phys = row_index_of(*window_item.screen_row) - first_row_;
-        if (phys >= rows || emitted[phys.size()])
+        if (phys >= rows)
             continue;
-        emitted[phys.size()] = true;
+        Line& line = lines[row_after(phys)];
+        if (line.emitted)
+            continue;
+        line.emitted = true;
         const OptionItem* it = row_at(phys);
         const bool has_ring = at_root && it != nullptr && it->rings_at_root();
         r.classic = classic_row(
             osd_row_at(phys),
-            composed[phys.size()],
-            it != nullptr && it->selectable_index.has_value() && *it->selectable_index == sel_,
-            it != nullptr && it->disabled,
-            leftchar_of(osd_row_at(phys), has_ring),
-            has_ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight)
-                     : OsdRenderer::kArrowNone
+            line.text,
+            {.inverted = it != nullptr
+                 && it->selectable_index.has_value()
+                 && *it->selectable_index == sel_,
+             .stippled = it != nullptr && it->disabled,
+             .leftchar = leftchar_of(osd_row_at(phys), has_ring),
+             .arrow = has_ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight)
+                               : OsdRenderer::kArrowNone}
         );
     }
 
     for (RowCount r{}; r < rows; r += kOneRow) {
-        if (emitted[r.size()] || out.count >= out.rows.size())
+        Line& line = lines[row_after(r)];
+        if (line.emitted || out.count >= out.rows.size())
             continue;
         const OptionItem* it = row_at(r);
         const bool has_ring = at_root && it != nullptr && it->rings_at_root();
         PageRow& pr = out.rows[out.count++];
         pr.classic = classic_row(
             osd_row_at(r),
-            composed[r.size()],
-            it != nullptr && it->selectable_index.has_value() && *it->selectable_index == sel_,
-            it != nullptr && it->disabled,
-            leftchar_of(osd_row_at(r), has_ring),
-            has_ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight)
-                     : OsdRenderer::kArrowNone
+            line.text,
+            {.inverted = it != nullptr
+                 && it->selectable_index.has_value()
+                 && *it->selectable_index == sel_,
+             .stippled = it != nullptr && it->disabled,
+             .leftchar = leftchar_of(osd_row_at(r), has_ring),
+             .arrow = has_ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight)
+                               : OsdRenderer::kArrowNone}
         );
         pr.has_hd = false;
     }
@@ -188,25 +202,19 @@ void ClassicOptionsView::track_viewport() noexcept {
 
 Transition ClassicOptionsView::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(ClassicOptionsView);
+    const OptionsKeys keys = OptionsKeys::of(ev);
 
-    if (ev.buttons.has_any({UiEvent::Menu})) {
+    if (keys.menu) {
         return Transition{Transition::Kind::CloseAll};
     }
 
-    const bool select = ev.buttons.has_any({UiEvent::Select});
-    const bool plus = ev.buttons.has_any({UiEvent::Plus});
-    const bool minus = ev.buttons.has_any({UiEvent::Minus});
-    const bool back = ev.buttons.has_any({UiEvent::Back});
-    const bool right = ev.buttons.has_any({UiEvent::Right});
-    const bool left = ev.buttons.has_any({UiEvent::Left});
-    const bool recent = ev.buttons.has_any({UiEvent::Recent});
     const bool at_root = (model_.page() == proto::kRootSubmenu);
 
-    if (back || (left && !at_root)) {
+    if (keys.back || (keys.left && !at_root)) {
         return at_root ? Transition{Transition::Kind::Leave} : Transition{Transition::Kind::Pop};
     }
 
-    if (recent && !select && !plus && !minus) {
+    if (keys.recent && !keys.select && !keys.plus && !keys.minus) {
         const OptionItem* it = model_.at_selectable(sel_);
         if (it != nullptr && !it->disabled && it->opens_browser()) {
             return surface_.open_recents(*it);
@@ -214,13 +222,9 @@ Transition ClassicOptionsView::handle(const UiEvent& ev) {
         surface_.refuse();
         return Transition{};
     }
-    if (!select && !plus && !minus) {
-        if (at_root && right) {
-            return Transition{Transition::Kind::Replace, PageId::System};
-        }
-        if (at_root && left) {
-            return Transition{Transition::Kind::Replace, PageId::Misc, ItemId{3}};
-        }
+    if (keys.no_row_key()) {
+        if (const std::optional<Transition> ring = ring_transition(at_root, keys))
+            return *ring;
         return Transition{};
     }
 
@@ -236,8 +240,8 @@ Transition ClassicOptionsView::handle(const UiEvent& ev) {
     }
 
     const OptionItem::Press press{
-        .select = select,
-        .minus = minus,
+        .select = keys.select,
+        .minus = keys.minus,
         .at_root = at_root,
         .value = status_field(it->bits)
     };

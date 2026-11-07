@@ -11,6 +11,7 @@
 #include <string_view>
 
 #include "os/small_file.h"
+#include "os/types.h"
 
 namespace mister::os {
 
@@ -18,27 +19,33 @@ inline constexpr const char* kWritebackCpumaskPath = "/sys/bus/workqueue/devices
 
 inline constexpr const char* kUnboundCpumaskPath = "/sys/devices/virtual/workqueue/cpumask";
 
-inline constexpr std::uint64_t kCifsMagic = 0xFF534D42u;
-inline constexpr std::uint64_t kSmb2Magic = 0xFE534D42u;
-inline constexpr std::uint64_t kSmbMagic = 0x517Bu;
-inline constexpr std::uint64_t kNfsMagic = 0x6969u;
+inline constexpr FsMagic kCifsMagic{0xFF534D42u};
+inline constexpr FsMagic kSmb2Magic{0xFE534D42u};
+inline constexpr FsMagic kSmbMagic{0x517Bu};
+inline constexpr FsMagic kNfsMagic{0x6969u};
 
-struct WritebackProbe {
-    std::optional<std::uint64_t> fs_magic;
-    std::optional<std::uint64_t> cpumask;
-    std::optional<std::uint64_t> unbound_cpumask;
+struct WritebackPaths {
+    const char* dir = "/";
+    const char* cpumask = kWritebackCpumaskPath;
+    const char* unbound = kUnboundCpumaskPath;
 };
 
-[[nodiscard]] constexpr std::optional<std::uint64_t> effective_writeback_cpus(
+struct WritebackProbe {
+    std::optional<FsMagic> fs_magic;
+    std::optional<CpuSet> cpumask;
+    std::optional<CpuSet> unbound_cpumask;
+};
+
+[[nodiscard]] constexpr std::optional<CpuSet> effective_writeback_cpus(
     const WritebackProbe& p
 ) noexcept {
     if (!p.cpumask || !p.unbound_cpumask)
         return std::nullopt;
-    const std::uint64_t both = *p.cpumask & *p.unbound_cpumask;
-    return both != 0 ? both : *p.unbound_cpumask;
+    const CpuSet both = p.cpumask->intersect(*p.unbound_cpumask);
+    return both.empty() ? *p.unbound_cpumask : both;
 }
 
-[[nodiscard]] constexpr std::optional<std::uint64_t> cpumask_from(std::string_view text) noexcept {
+[[nodiscard]] constexpr std::optional<CpuSet> cpumask_from(std::string_view text) noexcept {
     while (!text.empty() && (text.back() == '\n' || text.back() == ' '))
         text.remove_suffix(1);
     if (text.empty())
@@ -56,19 +63,19 @@ struct WritebackProbe {
             return std::nullopt;
         mask = (mask << 32) | word;
         if (comma == std::string_view::npos)
-            return mask;
+            return CpuSet{mask};
         text.remove_prefix(comma + 1);
     }
 }
 
-[[nodiscard]] constexpr bool is_network_fs(std::uint64_t fs_magic) noexcept {
+[[nodiscard]] constexpr bool is_network_fs(FsMagic fs_magic) noexcept {
     return fs_magic == kCifsMagic
         || fs_magic == kSmb2Magic
         || fs_magic == kSmbMagic
         || fs_magic == kNfsMagic;
 }
 
-[[nodiscard]] inline std::optional<std::uint64_t> read_cpumask(const char* path) noexcept {
+[[nodiscard]] inline std::optional<CpuSet> read_cpumask(const char* path) noexcept {
     std::array<char, 512> buf{};
     const auto got = read_small_file(path, std::span<char>(buf));
     if (!got || *got >= buf.size())
@@ -77,16 +84,14 @@ struct WritebackProbe {
 }
 
 [[nodiscard]] inline WritebackProbe read_writeback_probe(
-    const char* dir,
-    const char* cpumask_path,
-    const char* unbound_path
+    const WritebackPaths& paths = {}
 ) noexcept {
     WritebackProbe p{};
     struct statfs fs{};
-    if (::statfs(dir, &fs) == 0)
-        p.fs_magic = static_cast<std::uint64_t>(static_cast<std::uint32_t>(fs.f_type));
-    p.cpumask = read_cpumask(cpumask_path);
-    p.unbound_cpumask = read_cpumask(unbound_path);
+    if (::statfs(paths.dir, &fs) == 0)
+        p.fs_magic = FsMagic{static_cast<std::uint32_t>(fs.f_type)};
+    p.cpumask = read_cpumask(paths.cpumask);
+    p.unbound_cpumask = read_cpumask(paths.unbound);
     return p;
 }
 

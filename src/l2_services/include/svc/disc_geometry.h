@@ -7,6 +7,7 @@
 
 #include "infra/seat.h"
 #include "proto/types.h"
+#include "svc/chd_geometry.h"
 #include "svc/toc.h"
 #include "svc/types.h"
 
@@ -24,7 +25,7 @@ struct DiscGeometry {
 
     Toc toc{};
 
-    std::uint32_t hunk_bytes = 0;
+    ChdGeometry chd{};
     bool mounted = false;
 
     [[nodiscard]] std::optional<TrackIndex> track_for_lba(Lba lba) const noexcept {
@@ -35,7 +36,7 @@ struct DiscGeometry {
         return svc::seek_time(from_lba, to_lba);
     }
 
-    [[nodiscard]] std::uint32_t chd_hunk_bytes() const noexcept { return hunk_bytes; }
+    [[nodiscard]] std::uint32_t chd_hunk_bytes() const noexcept { return chd.hunk_detail(); }
 };
 
 }

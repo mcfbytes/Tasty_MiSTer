@@ -242,7 +242,7 @@ public:
 
     struct Companion {
         std::array<std::string, 2> paths{};
-        std::uint64_t size = 0;
+        proto::FileSize size{};
     };
 
     [[nodiscard]] virtual std::optional<Companion> companion(

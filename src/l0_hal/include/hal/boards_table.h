@@ -101,7 +101,7 @@ inline constexpr BoardProfile kDe10Profile{
     .video = {.i2c_buses = I2cBusRange{.first = 0u, .last = 2u}, .vsync_device = "/dev/fb0"},
     .kernel = {.doorbell_prefix = "mister_doorbell", .sd_block = "mmcblk0"},
     .threads = kDe10ThreadMap,
-    .main_cpu = 0,
+    .main_cpu = os::CpuId{0},
     .verified = true,
 
     .timing =
@@ -152,7 +152,7 @@ consteval BoardProfile placeholder_row(
         .video = {.i2c_buses = kUnmeasured, .vsync_device = nullptr},
         .kernel = {},
         .threads = kDe10ThreadMap,
-        .main_cpu = 0,
+        .main_cpu = os::CpuId{0},
         .verified = false,
         .timing =
             {.word_ns = kUnmeasured,
@@ -414,7 +414,7 @@ static_assert(
 );
 
 static_assert(
-    max_cpu(kDe10Profile.threads) == 1,
+    max_cpu(kDe10Profile.threads) == os::CpuId{1},
     "item: the DE10-Nano row's map is 2x Cortex-A9. A row naming "
     "CPU2+ belongs to another board, which gets its own table in its "
     "own row, never an edit to this one; re-read the runtime sysconf "

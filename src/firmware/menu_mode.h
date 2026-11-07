@@ -118,7 +118,7 @@ private:
     StderrVoice voice_{};
     Ex<os::ProcessTitle> title_;
     std::array<const char*, 3> boot_argv_{};
-    std::size_t boot_argc_ = 2;
+    std::size_t boot_argc_ = kCompanionArg;
 
     std::optional<ProcessStandup::StopSignals> stop_signals_{};
 };

@@ -382,10 +382,11 @@ inline void CoreOptionCells::publish_option_table(infra::OptRef<cores::Core> cor
                 }
             }
         }
-        const std::size_t pages = std::size(option_scratch_.page_title);
-        for (std::size_t i = 0; i < p.option_pages.size() && i < pages; ++i) {
-            (void)option_scratch_.page_title[i].assign(p.option_pages[i]);
-        }
+        proto::for_each_page(p.option_pages, [&](proto::SubmenuNo no, std::string_view page) {
+            const auto title = option_scratch_.page_title.find(no);
+            if (title)
+                (void)title->assign(page);
+        });
     }
     option_cell_.publish(option_scratch_);
 }

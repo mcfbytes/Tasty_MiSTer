@@ -28,13 +28,13 @@ struct ConfStrEntry {
     TASTY_SEAT_EXEMPT(const_shared);
     char letter = 0;
     std::uint8_t selentry = 0;
-    std::uint8_t digit = 0;
-    bool has_digit = false;
+
+    std::optional<FileSlotDigit> digit{};
     bool opensave = false;
     bool store_name = false;
     std::string ext;
 
-    std::uint8_t ioctl_index = 0;
+    IoIndex ioctl_index{};
 
     std::uint32_t load_addr = 0;
     std::string addon;
@@ -43,7 +43,7 @@ struct ConfStrEntry {
 
 struct ConfStrFileRow {
     std::string_view ext;
-    std::uint8_t ioctl_index = 0;
+    IoIndex ioctl_index{};
     std::uint32_t load_addr = 0;
     bool opensave = false;
     std::string_view addon{};
@@ -437,6 +437,11 @@ public:
         char type,
         std::uint8_t index
     ) noexcept;
+    [[nodiscard]] static FileSlotHit find_slot_in(
+        std::span<const ConfStrEntry> slots,
+        char type,
+        FileSlotDigit digit
+    ) noexcept;
 
     std::optional<ConfStrFileRow> menu_pick(ItemOrdinal item, IoIndex drawn) const noexcept;
 
@@ -452,7 +457,7 @@ public:
         ConfStrFileRow row,
         std::string_view filename
     ) noexcept {
-        return WideIoIndex::of(IoIndex{row.ioctl_index}, ext_subindex(filename, row.ext));
+        return WideIoIndex::of(row.ioctl_index, ext_subindex(filename, row.ext));
     }
 
     [[nodiscard]] static WideIoIndex wire_index(

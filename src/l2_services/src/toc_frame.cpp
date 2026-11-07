@@ -6,24 +6,16 @@
 #include <utility>
 
 #include "infra/endian.h"
+#include "svc/msf.h"
 
 namespace mister::svc {
 
 namespace {
 
-constexpr std::uint32_t kFramesPerSecond = 75;
-
-std::uint32_t bcd8(std::uint32_t v) noexcept {
-    constexpr std::uint32_t kRadix = 10;
-    constexpr unsigned kNibbleBits = 4;
-    return (((v / kRadix) % kRadix) << kNibbleBits) | (v % kRadix);
-}
-
 std::uint32_t msf_word(Lba lba) noexcept {
-    constexpr std::uint32_t kSecondsPerMinute = 60;
     constexpr unsigned kMinuteShift = 8;
-    const std::uint32_t sec = lba.v / kFramesPerSecond;
-    return (bcd8(sec / kSecondsPerMinute) << kMinuteShift) | bcd8(sec % kSecondsPerMinute);
+    const Msf pos = Msf::of_lba_bcd_masked(lba.v);
+    return (std::uint32_t{pos.m} << kMinuteShift) | pos.s;
 }
 
 struct FrameWriter {
@@ -55,14 +47,13 @@ std::array<std::byte, kTocFrameBytes> build_toc_frame(
     constexpr std::size_t kRowOffMsf = 8;
     constexpr std::uint16_t kMetaResetBit = 0x4u;
     constexpr unsigned kAudioFlagShift = 16;
-    constexpr unsigned kBcdShift = 8;
     constexpr std::uint32_t kInclusiveEnd = 1;
     constexpr std::uint32_t kFrameTracks = kTocFrameTracks;
 
     FrameWriter w;
 
-    const std::uint32_t last = std::min<std::uint32_t>(toc.last, kFrameTracks);
-    w.u32(0, (bcd8(last) << kBcdShift) | last);
+    const TrackCount last = std::min(toc.last, TrackCount{kFrameTracks});
+    w.u32(0, last.bcd_over_binary_word());
     w.u32(kOffDiscEnd, toc.end.v);
     w.u32(kOffDiscEndMsf, msf_word(toc.end));
     w.u16(kOffLibcrypt, meta.libcrypt_mask);
@@ -71,17 +62,17 @@ std::array<std::byte, kTocFrameBytes> build_toc_frame(
         md |= kMetaResetBit;
     w.u16(kOffMeta, md);
 
-    for (std::uint32_t i = 0; i < last; ++i) {
-        const Track& t = toc.tracks[i];
-        const std::size_t base = kHeaderBytes + kRowBytes * i;
-        const Lba start_sent = (i != 0) ? t.start : Lba{};
+    last.for_each_index([&](TrackIndex i) {
+        const Track& t = toc.at(i);
+        const std::size_t base = kHeaderBytes + i.row_offset(kRowBytes);
+        const Lba start_sent = (i != TrackIndex{}) ? t.start : Lba{};
         w.u32(base, start_sent.v);
         w.u32(base + kRowOffEnd, t.end.v - kInclusiveEnd);
         std::uint32_t bcd = msf_word(start_sent + t.pregap);
         if (t.type == TrackType::Cdda)
             bcd |= 1u << kAudioFlagShift;
         w.u32(base + kRowOffMsf, bcd);
-    }
+    });
     return w.bytes;
 }
 

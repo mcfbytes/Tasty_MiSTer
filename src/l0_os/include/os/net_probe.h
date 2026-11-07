@@ -16,10 +16,17 @@ struct NetPresence {
 
 [[nodiscard]] Ex<NetPresence> net_presence();
 
+inline constexpr std::uint8_t kLinkLocalOctet0 = 169;
+inline constexpr std::uint8_t kLinkLocalOctet1 = 254;
+
 struct Ipv4If {
     std::string_view name;
     std::uint8_t octet0 = 0;
     std::uint8_t octet1 = 0;
+
+    [[nodiscard]] constexpr bool is_link_local() const noexcept {
+        return octet0 == kLinkLocalOctet0 && octet1 == kLinkLocalOctet1;
+    }
 };
 
 NetPresence net_presence_from_list(std::span<const Ipv4If> ifs) noexcept;

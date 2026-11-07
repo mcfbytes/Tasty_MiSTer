@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -27,6 +28,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
+#include "os/deadline.h"
 #include "proto/block_slots.h"
 #include "proto/core_session.h"
 #include "proto/link_op.h"
@@ -176,7 +178,7 @@ public:
         return {};
     }
 
-    void drop(std::uint64_t t0, proto::BlockSlotMask channel_borrows) {
+    void drop(std::chrono::nanoseconds t0, proto::BlockSlotMask channel_borrows) {
         TASTY_SEAT_BODY(CoreTenancy);
         if (current_.has_value()) {
 
@@ -199,7 +201,7 @@ public:
             current_.reset();
             adopted_slot_ = proto::LinkOp::AdoptCore::kNoSlot;
             adopted_gen_ = 0;
-            retire_due_ns_ = clock().now().count() + kCoreRetireBoundNs;
+            retire_due_ = os::Deadline::in(clock(), kCoreRetireBoundNs);
             retire_t0_ = t0;
             retire_logs_ = true;
         }
@@ -211,7 +213,7 @@ public:
         const bool polling = end == RetireEnd::Poll || end == RetireEnd::Round;
         if (retiring_.gen != 0) {
             const bool home = poll_retiree_(retiring_);
-            const bool expired = clock().now().count() >= retire_due_ns_;
+            const bool expired = retire_due_.expired(clock());
             if (home) {
                 release_retiree_(retiring_);
                 retiring_ = Retiree{};
@@ -233,14 +235,15 @@ public:
         binder_.release_feeder();
         if (retire_logs_) {
             retire_logs_ = false;
-            constexpr std::uint64_t kNsPerMs = 1'000'000;
-            const LogRec::CoreUnload unloaded{sat_u32((log_now_ns() - retire_t0_) / kNsPerMs)};
+            const LogRec::CoreUnload unloaded{ms_of(log_now() - retire_t0_).count()};
             log_lane_.push(unloaded, log_now_ns());
         }
     }
 
 private:
-    static constexpr std::int64_t kCoreRetireBoundNs = 2 * proto::BlockSlots::kStagingDeadlineNs;
+    static constexpr std::chrono::nanoseconds kCoreRetireBoundNs{
+        2 * proto::BlockSlots::kStagingDeadlineNs
+    };
 
     [[nodiscard]] const os::IClock& clock() const noexcept { return clock_; }
 
@@ -336,8 +339,8 @@ private:
     Retiree retiring_{};
 
     std::array<Retiree, kMaxAbandonedCores> abandoned_{};
-    std::int64_t retire_due_ns_ = 0;
-    std::uint64_t retire_t0_ = 0;
+    os::Deadline retire_due_ = os::Deadline::immediate();
+    std::chrono::nanoseconds retire_t0_{};
     bool retire_logs_ = false;
     bool drop_owed_ = false;
     Tally tally_{};

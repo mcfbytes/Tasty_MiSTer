@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "app/event.h"
+#include "app/log_clock.h"
 #include "app/types.h"
 #include "infra/error.h"
 #include "infra/log_lane.h"
@@ -108,7 +109,7 @@ private:
     CorrelationTag tag_{};
 
     xthread::LogLane::Producer log_lane_;
-    std::uint64_t last_transition_ns_ = 0;
+    LogStamp last_transition_{};
 };
 
 }

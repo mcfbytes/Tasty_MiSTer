@@ -1,31 +1,48 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+
+#include "cores/cheat_unit.h"
+#include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
 inline constexpr std::size_t kCheatTableBytes = 2048;
 
+inline constexpr CheatUnits kCheatDefaultMaxActive{128};
+
 struct CheatGeometry {
-    std::uint32_t unit = 16;
-    std::uint16_t max_active = 128;
+    CheatUnit unit{};
+    CheatUnits max_active = kCheatDefaultMaxActive;
+    friend constexpr bool operator==(CheatGeometry, CheatGeometry) = default;
 };
+
+[[nodiscard]] constexpr CheatGeometry clamp_cheat_geometry(CheatGeometry asked) noexcept {
+    CheatGeometry g;
+    if (!asked.unit.empty())
+        g.unit = asked.unit;
+    const CheatUnits want = asked.max_active == CheatUnits{} ? kCheatDefaultMaxActive
+                                                             : asked.max_active;
+
+    g.max_active = std::min(want, g.unit.count_of(proto::FileSize{kCheatTableBytes}));
+    return g;
+}
 
 [[nodiscard]] constexpr CheatGeometry clamp_cheat_geometry(
     std::int32_t unit,
     std::int32_t max_active
 ) noexcept {
-    CheatGeometry g;
-    g.unit = static_cast<std::uint32_t>(unit > 0 ? unit : 16);
-
-    std::int64_t max = max_active > 0 ? max_active : 128;
-    if (max * static_cast<std::int64_t>(g.unit) > static_cast<std::int64_t>(kCheatTableBytes)) {
-        max = static_cast<std::int64_t>(kCheatTableBytes / g.unit);
-    }
-    g.max_active = static_cast<std::uint16_t>(max);
-    return g;
+    return clamp_cheat_geometry(
+        CheatGeometry{
+            .unit = unit > 0 ? CheatUnit{static_cast<std::uint32_t>(unit)} : CheatUnit{},
+            .max_active = max_active > 0 ? CheatUnits{static_cast<std::uint32_t>(max_active)}
+                                         : kCheatDefaultMaxActive
+        }
+    );
 }
 
 }

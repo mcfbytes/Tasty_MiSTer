@@ -7,6 +7,8 @@
 
 #include "app/hd_rect.h"
 #include "app/hd_theme.h"
+#include "app/px_plane.h"
+#include "app/rgb_rows.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -25,24 +27,18 @@ public:
     void open(const HdTheme& theme) noexcept;
 
     [[nodiscard]] HdRect scale(
-        std::span<const std::byte> rgb,
+        RgbRows src,
         std::uint16_t src_w,
-        std::uint16_t src_h,
-        std::uint16_t src_line,
-        std::span<std::uint16_t> frame,
-        std::uint32_t stride_px,
+        PxPlane dst,
         HdRect game,
         HdRect picture,
         bool report
     ) noexcept;
 
     void scale_rows(
-        std::span<const std::byte> rgb,
+        RgbRows src,
         std::uint16_t src_w,
-        std::uint16_t src_h,
-        std::uint16_t src_line,
-        std::span<std::uint16_t> frame,
-        std::uint32_t stride_px,
+        PxPlane dst,
         HdRect game,
         HdRect picture,
         std::int32_t y0,
@@ -50,10 +46,8 @@ public:
     ) noexcept;
 
     void scale_target_rows(
-        std::span<const std::byte> rgb,
+        RgbRows src,
         std::uint16_t src_w,
-        std::uint16_t src_h,
-        std::uint16_t src_line,
         HdRect picture,
         const BackdropScalerTarget& target,
         std::int32_t y0,
@@ -62,12 +56,9 @@ public:
 
 private:
     void paint_band_(
-        std::span<const std::byte> rgb,
+        RgbRows src,
         std::uint16_t src_w,
-        std::uint16_t src_h,
-        std::uint16_t src_line,
-        std::span<std::uint16_t> frame,
-        std::uint32_t stride_px,
+        PxPlane dst,
         HdRect game,
         HdRect picture,
         std::int32_t y0,

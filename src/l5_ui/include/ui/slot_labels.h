@@ -19,4 +19,14 @@ protected:
     ISlotLabels& operator=(const ISlotLabels&) = default;
 };
 
+[[nodiscard]] constexpr proto::FieldValue choice_slot(
+    const ISlotLabels& labels,
+    proto::FieldValue value,
+    proto::FieldCount count
+) noexcept {
+    if (!value.within(count))
+        return proto::FieldValue{};
+    return labels.has_label(value) ? value : proto::FieldValue{};
+}
+
 }

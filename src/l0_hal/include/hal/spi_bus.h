@@ -10,6 +10,7 @@
 #include "hal/mailbox.h"
 #include "hal/reg.h"
 #include "hal/spi_output_observer.h"
+#include "hal/spi_sample.h"
 #include "infra/seat.h"
 
 namespace mister::xthread {
@@ -19,6 +20,18 @@ struct RtStats;
 namespace mister::hal {
 
 inline constexpr std::uint32_t kCoreIdMagic = 0x5CA623u;
+
+namespace gpo {
+inline constexpr SpiOutput kData{SpiOutput::kData};
+inline constexpr SpiOutput kStrobe{1u << 17};
+inline constexpr SpiOutput kFpgaEnable{1u << 18};
+inline constexpr SpiOutput kOsdEnable{1u << 19};
+inline constexpr SpiOutput kIoEnable{1u << 20};
+inline constexpr SpiOutput kDiskLed{1u << 29};
+inline constexpr SpiOutput kCoreReset{1u << 30};
+inline constexpr SpiOutput kCoreEnable{1u << 31};
+inline constexpr SpiOutput kCsMask{kFpgaEnable.with(kOsdEnable).with(kIoEnable)};
+}
 
 class SpiBus final : public ILinkPort {
     TASTY_SEAT_RESIDENT(RT);
@@ -103,11 +116,11 @@ public:
 private:
     SpiBus() = default;
 
-    void store_gpo(std::uint32_t v) noexcept;
-    void commit_gpo(std::uint32_t v) noexcept;
-    std::uint32_t read_gpi() const noexcept;
+    void store_gpo(SpiOutput v) noexcept;
+    void commit_gpo(SpiOutput v) noexcept;
+    [[nodiscard]] GpiWord read_gpi() const noexcept;
 
-    [[nodiscard]] Ex<std::uint32_t> spin_ack(bool want, bool counts = true) noexcept;
+    [[nodiscard]] Ex<GpiWord> spin_ack(bool want, bool counts = true) noexcept;
 
     enum class Post : std::uint8_t { None, Rising, Falling };
     [[nodiscard]] Ex<void> refuse_if_posted_() const noexcept;

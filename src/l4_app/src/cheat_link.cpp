@@ -19,7 +19,7 @@ void CheatLink::content_loaded(
     TASTY_SEAT_BODY(CheatLink);
     if (core != nullptr) {
         if (cores::ICheatSink* sink = core->cheat_sink(); sink != nullptr) {
-            if (auto r = sink->apply({}, 16); !r) {
+            if (auto r = sink->apply({}, cores::kCheatDefaultUnit); !r) {
                 ++refusals_;
             }
         }

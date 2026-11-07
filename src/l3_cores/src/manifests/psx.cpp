@@ -129,7 +129,7 @@ static_assert(
     "metadata bit 2, not status bit 0"
 );
 static_assert(
-    kPsx.staging.save_pre_bytes == 128 * 1024,
+    kPsx.staging.save_pre_bytes == proto::FileSize{128 * 1024},
     "psx.cpp:429,437: user_io_file_mount(buf, 2, 1, MCD_SIZE); user_io.cpp:2241-2246"
 );
 static_assert(

@@ -144,7 +144,7 @@ public:
         FabricGeneration fabric_gen{};
     };
 
-    [[nodiscard]] std::optional<std::uint32_t> claim_sector(const Claim& c) noexcept;
+    [[nodiscard]] std::optional<hal::LwOffset> claim_sector(const Claim& c) noexcept;
 
     [[nodiscard]] proto::LinkOp::AdoptCore build(const Ask& ask);
 
@@ -238,7 +238,7 @@ public:
         std::span<const proto::IrqBinding> irqs,
         std::span<const proto::AxiLwDecl> lw,
         std::span<proto::IrqBinding> out,
-        std::optional<std::uint32_t> owned
+        std::optional<hal::LwOffset> owned
     ) noexcept;
 
     [[nodiscard]] static Ex<LwSector> grant_sector(
@@ -372,7 +372,7 @@ private:
     ) const noexcept;
 
     void drop_unbuilt_sector_() noexcept;
-    [[nodiscard]] std::optional<std::uint32_t> unbuilt_cause_() const noexcept;
+    [[nodiscard]] std::optional<hal::LwOffset> unbuilt_cause_() const noexcept;
     [[nodiscard]] bool sector_leased_() const noexcept;
     void revoke_sector_() noexcept;
     void grant_osd_(
@@ -389,6 +389,8 @@ private:
         FabricGeneration fabric_gen,
         std::uint16_t gen
     ) noexcept;
+
+    static constexpr std::size_t kNodeNameCap = 48;
 
     void pin_sys_line_(os::UioLine line) noexcept;
     [[nodiscard]] bool sys_leased_() const noexcept;
@@ -442,9 +444,9 @@ private:
 
     struct DirReads {
         struct Entry {
-            std::uint32_t offset = 0;
-            std::uint32_t size = 0;
+            proto::AxiLwDecl decl{};
             std::optional<Ex<Directory>> read{};
+            friend constexpr bool operator==(const Entry&, const Entry&) = default;
         };
 
         std::array<Entry, 4> rows{};

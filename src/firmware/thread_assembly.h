@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -114,16 +115,16 @@ public:
         return rt_exited_.load(std::memory_order_acquire);
     }
 
-    [[nodiscard]] Ex<void> join_rt_within(std::int64_t deadline_ns);
-    [[nodiscard]] Ex<void> join_io_within(std::int64_t deadline_ns);
+    [[nodiscard]] Ex<void> join_rt_within(std::chrono::nanoseconds deadline);
+    [[nodiscard]] Ex<void> join_io_within(std::chrono::nanoseconds deadline);
 
-    [[nodiscard]] Ex<void> stop_and_join_rt(std::int64_t deadline_ns);
+    [[nodiscard]] Ex<void> stop_and_join_rt(std::chrono::nanoseconds deadline);
 
     [[nodiscard]] Ex<void> rt_result() const noexcept { return rt_result_; }
 
     struct StopBudget {
-        std::int64_t rt_ns;
-        std::int64_t io_ns;
+        std::chrono::nanoseconds rt;
+        std::chrono::nanoseconds io;
     };
 
     void stop() noexcept;
@@ -138,7 +139,7 @@ public:
     const RtEvidence& evidence() const noexcept { return ev_; }
 
     long tid(SeatTag s) const noexcept {
-        return tid_[seat_index(s)].load(std::memory_order_acquire);
+        return seats_[seat_index(s)].tid.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] bool io_wedged() const noexcept { return io_poisoned_; }
@@ -179,10 +180,15 @@ private:
     const hal::ThreadMap& threads_;
 
     std::array<char, hal::kCommNameMax + 1> comm_prefix_ = process_comm_();
-    std::array<pthread_t, hal::kThreadSeats> thread_{};
-    std::array<bool, hal::kThreadSeats> live_{};
+
+    struct LiveSeat {
+        pthread_t handle{};
+        std::atomic<long> tid{0};
+        bool live = false;
+    };
+
+    std::array<LiveSeat, hal::kThreadSeats> seats_{};
     bool io_poisoned_ = false;
-    std::array<std::atomic<long>, hal::kThreadSeats> tid_{};
 
     Ex<void> rt_result_{};
     xthread::WakeFlag own_main_wake_{};

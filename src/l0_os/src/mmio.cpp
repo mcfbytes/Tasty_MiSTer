@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "os/mmio_region.h"
+#include "os/path_buf.h"
 #include "os/uio_handle.h"
 
 #include "infra/persist.h"
@@ -9,7 +10,7 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <cstdio>
+#include <cstdint>
 #include <cstring>
 #include <span>
 #include <string_view>
@@ -24,12 +25,12 @@ static_assert(sizeof(off_t) >= 8, "MmioRegion needs a 64-bit off_t");
 
 struct DevMem {
     int fd = -1;
-    std::uint32_t open_errno = 0;
+    int open_errno = 0;
 
     DevMem() {
         fd = ::open("/dev/mem", kDevMemFlags);
         if (fd < 0)
-            open_errno = static_cast<std::uint32_t>(errno);
+            open_errno = errno;
     }
 };
 
@@ -49,10 +50,11 @@ constexpr unsigned kMaxUioNodes = 64;
 [[nodiscard]] Ex<void> read_uio_name(const char* root, unsigned idx, std::span<char> out) {
     if (out.empty())
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    char path[128];
-    const int n = std::snprintf(path, sizeof path, "%s/uio%u/name", root, idx);
-    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof path) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(n)});
+    char path[kUioSysfsPathBuf];
+    if (!format_path(std::span<char>(path), "%s/uio%u/name", root, idx)) {
+        return std::unexpected(
+            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(sizeof path)}
+        );
     }
 
     const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
@@ -74,15 +76,15 @@ constexpr unsigned kMaxUioNodes = 64;
 }
 
 int find_uio_node_under(const char* sysfs_root, std::string_view name) noexcept {
-    if (name.empty() || name.size() >= 48)
+    char want[kUioNodeNameBuf];
+    if (name.empty() || name.size() >= sizeof want)
         return -1;
-    char want[48];
     std::memcpy(want, name.data(), name.size());
     want[name.size()] = '\0';
 
     for (unsigned i = 0; i < kMaxUioNodes; ++i) {
-        char have[48];
-        if (!read_uio_name(sysfs_root, i, std::span(have)))
+        char have[kUioNodeNameBuf];
+        if (!read_uio_name(sysfs_root, i, std::span<char>(have)))
             continue;
         if (std::string_view{have} == want)
             return static_cast<int>(i);
@@ -96,28 +98,26 @@ int find_uio_node(std::string_view name) noexcept {
 
 namespace {
 
-int find_doorbell_uio_node(const UioLineSpace& space, unsigned line) {
-    char want[48];
-    const int n = std::snprintf(
-        want,
-        sizeof want,
-        "%.*s%u",
-        static_cast<int>(space.node_prefix.size()),
-        space.node_prefix.data(),
-        line + 1
-    );
-    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof want)
+int find_doorbell_uio_node(const UioLineSpace& space, UioLine line) {
+    char want[kUioNodeNameBuf];
+    if (!format_path(
+            std::span<char>(want),
+            "%.*s%u",
+            static_cast<int>(space.node_prefix.size()),
+            space.node_prefix.data(),
+            to_ordinal(line) + 1
+        )) {
         return -1;
-    char root[128];
-    const int r = std::snprintf(
-        root,
-        sizeof root,
-        "%.*s",
-        static_cast<int>(space.sysfs_root.size()),
-        space.sysfs_root.data()
-    );
-    if (r <= 0 || static_cast<std::size_t>(r) >= sizeof root)
+    }
+    char root[kUioSysfsPathBuf];
+    if (!format_path(
+            std::span<char>(root),
+            "%.*s",
+            static_cast<int>(space.sysfs_root.size()),
+            space.sysfs_root.data()
+        )) {
         return -1;
+    }
     return find_uio_node_under(root, want);
 }
 
@@ -152,7 +152,7 @@ Ex<MmioRegion> MmioRegion::map(PhysAddr phys, std::size_t len, Attr attr, Access
 
     const DevMem& d = dev_mem();
     if (d.fd < 0) {
-        return std::unexpected(Error{Errc::uio_open, ERR_SITE(), d.open_errno});
+        return std::unexpected(infra::errno_error(Errc::uio_open, ERR_SITE(), d.open_errno));
     }
     return map_fd(d.fd, phys, len, access);
 }
@@ -162,16 +162,14 @@ Ex<MmioRegion> MmioRegion::map_fd(int fd, PhysAddr offset, std::size_t len, Acce
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), 0});
     }
 
-    if ((static_cast<std::size_t>(offset.v) & (page_size() - 1)) != 0) {
+    if (offset.misaligned_to(page_size())) {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), low32(offset)});
     }
 
     const int prot = access == Access::ReadOnly ? PROT_READ : (PROT_READ | PROT_WRITE);
-    void* p = ::mmap(nullptr, len, prot, MAP_SHARED, fd, static_cast<off_t>(offset.v));
+    void* p = ::mmap(nullptr, len, prot, MAP_SHARED, fd, offset.file_offset());
     if (p == MAP_FAILED) {
-        return std::unexpected(
-            Error{Errc::mmap_failed, ERR_SITE(), static_cast<std::uint32_t>(errno)}
-        );
+        return std::unexpected(infra::errno_error(Errc::mmap_failed, ERR_SITE(), errno));
     }
 
     MmioRegion r;
@@ -183,47 +181,43 @@ Ex<MmioRegion> MmioRegion::map_fd(int fd, PhysAddr offset, std::size_t len, Acce
 }
 
 Ex<UioHandle> UioHandle::open(UioLine line, const UioLineSpace& space) {
-    const unsigned n = std::to_underlying(line);
-    if (n >= space.lines || space.node_prefix.empty()) {
+    const std::uint32_t n = to_ordinal(line);
+    if (!space.contains(line) || space.node_prefix.empty()) {
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), n});
     }
 
-    const int idx = find_doorbell_uio_node(space, n);
+    const int idx = find_doorbell_uio_node(space, line);
     if (idx < 0) {
 
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), n});
     }
 
-    char path[160];
-    const int w = std::snprintf(
-        path,
-        sizeof path,
-        "%.*s/uio%d",
-        static_cast<int>(space.dev_dir.size()),
-        space.dev_dir.data(),
-        idx
-    );
-    if (w <= 0 || static_cast<std::size_t>(w) >= sizeof path) {
+    char path[kUioDevPathBuf];
+    if (!format_path(
+            std::span<char>(path),
+            "%.*s/uio%d",
+            static_cast<int>(space.dev_dir.size()),
+            space.dev_dir.data(),
+            idx
+        )) {
         return std::unexpected(Error{Errc::uio_open, ERR_SITE(), n});
     }
 
     const int fd = ::open(path, O_RDWR | O_CLOEXEC | O_NONBLOCK);
     if (fd < 0) {
-        return std::unexpected(
-            Error{Errc::uio_open, ERR_SITE(), static_cast<std::uint32_t>(errno)}
-        );
+        return std::unexpected(infra::errno_error(Errc::uio_open, ERR_SITE(), errno));
     }
     return adopt(line, UniqueFd{fd});
 }
 
 Ex<UioHandle> UioHandle::adopt(UioLine line, UniqueFd fd) {
     if (!fd.valid()) {
-        return std::unexpected(Error{Errc::uio_open, ERR_SITE(), std::to_underlying(line)});
+        return std::unexpected(Error{Errc::uio_open, ERR_SITE(), to_ordinal(line)});
     }
 
     const int flags = ::fcntl(fd.get(), F_GETFL);
     if (flags < 0 || (flags & O_NONBLOCK) == 0) {
-        return std::unexpected(Error{Errc::uio_open, ERR_SITE(), std::to_underlying(line)});
+        return std::unexpected(Error{Errc::uio_open, ERR_SITE(), to_ordinal(line)});
     }
     UioHandle h;
     h.fd_ = std::move(fd);
@@ -239,11 +233,7 @@ Ex<std::uint32_t> UioLineRef::consume() const {
         const int e = errno;
 
         return std::unexpected(
-            Error{
-                e == EAGAIN ? Errc::would_block : Errc::io,
-                ERR_SITE(),
-                static_cast<std::uint32_t>(e)
-            }
+            infra::errno_error(e == EAGAIN ? Errc::would_block : Errc::io, ERR_SITE(), e)
         );
     }
     if (n != static_cast<ssize_t>(sizeof count)) {
@@ -256,7 +246,7 @@ Ex<void> UioLineRef::rearm() const {
     const std::uint32_t enable = 1;
     const ssize_t w = ::write(fd_, &enable, sizeof enable);
     if (w < 0) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+        return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), errno));
     }
     if (w != static_cast<ssize_t>(sizeof enable)) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(w)});

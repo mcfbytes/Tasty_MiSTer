@@ -8,16 +8,6 @@
 namespace mister::hal {
 namespace {
 
-constexpr std::uint8_t ctr_minus(std::uint8_t c, std::uint32_t n) noexcept {
-    constexpr std::uint32_t kCounterMask = 0x7;
-    return static_cast<std::uint8_t>((c - n) & kCounterMask);
-}
-
-constexpr std::uint8_t ctr_plus(std::uint8_t c, std::uint32_t n) noexcept {
-    constexpr std::uint32_t kCounterMask = 0x7;
-    return static_cast<std::uint8_t>((c + n) & kCounterMask);
-}
-
 bool plausible(const ScalerHeader& h) noexcept {
     constexpr unsigned kMinHeaderSize = 64;
     constexpr unsigned kMaxHeaderSize = 4096;
@@ -39,26 +29,23 @@ std::size_t frame_end(std::size_t base, const ScalerHeader& h) noexcept {
 }
 
 void ScalerProbe::restart(std::int64_t now) noexcept {
-    sides_ = {};
+    sides_ = {ProbeSide{ScalerBuffers::kStrideLarge}, ProbeSide{ScalerBuffers::kStrideSmall}};
     start_ns_ = now;
 }
 
 void ScalerProbe::read(const ScalerBuffers& window) noexcept {
-    constexpr std::size_t kSides = 2;
-    for (std::size_t side = 0; side < kSides; ++side) {
-        ProbeSide& p = sides_[side];
-        const std::size_t stride = side == 0 ? ScalerBuffers::kStrideLarge
-                                             : ScalerBuffers::kStrideSmall;
-        for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
-            const auto h = window.header(i * stride);
+    for (ProbeSide& side : sides_) {
+        for (std::size_t i = 0; i < side.buffers.size(); ++i) {
+            ProbeBuffer& b = side.buffers[i];
+            const auto h = window.header(i * side.stride);
             if (!h || !h->supported())
                 continue;
-            p.triple[i] = h->triple_buffered();
-            if (!p.seen[i]) {
-                p.first[i] = h->frame_counter();
-                p.seen[i] = true;
-            } else if (h->frame_counter() != p.first[i]) {
-                p.moved[i] = true;
+            b.triple = h->triple_buffered();
+            if (!b.seen) {
+                b.first = h->frame_counter();
+                b.seen = true;
+            } else if (h->frame_counter() != b.first) {
+                b.moved = true;
             }
         }
     }
@@ -67,10 +54,10 @@ void ScalerProbe::read(const ScalerBuffers& window) noexcept {
 ScalerProbe::Verdict ScalerProbe::decide(std::int64_t now) noexcept {
     const auto triple_live = [](const ProbeSide& p, std::size_t n) {
         std::size_t moved = 0;
-        for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
-            if (!p.moved[i])
+        for (const ProbeBuffer& b : p.buffers) {
+            if (!b.moved)
                 continue;
-            if (!p.triple[i])
+            if (!b.triple)
                 return false;
             ++moved;
         }
@@ -79,7 +66,7 @@ ScalerProbe::Verdict ScalerProbe::decide(std::int64_t now) noexcept {
     const ProbeSide& large = sides_[0];
     if (triple_live(large, ScalerBuffers::kBuffers))
         return Verdict::Large;
-    if (!large.triple[0] && large.moved[0])
+    if (!large.buffers[0].triple && large.buffers[0].moved)
         return Verdict::LargeLowlat;
     if (now - start_ns_ < kProbeNs)
         return Verdict::Pending;
@@ -92,7 +79,107 @@ ScalerProbe::Verdict ScalerProbe::decide(std::int64_t now) noexcept {
 }
 
 ScalerProbe::BufMask ScalerProbe::moved(std::size_t stride) const noexcept {
-    return sides_[stride == ScalerBuffers::kStrideSmall ? 1 : 0].moved;
+
+    const ProbeSide* side = &sides_[0];
+    for (const ProbeSide& p : sides_)
+        if (p.stride == stride)
+            side = &p;
+    BufMask out{};
+    for (std::size_t i = 0; i < out.size(); ++i)
+        out[i] = side->buffers[i].moved;
+    return out;
+}
+
+namespace {
+using Headers = std::array<ScalerHeader, ScalerBuffers::kBuffers>;
+constexpr std::size_t kNoBuffer = ScalerBuffers::kBuffers;
+
+std::size_t newest_buffer(const Headers& h, HeaderCtr::Lag lo, HeaderCtr::Lag hi) noexcept {
+    for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
+        bool ahead = true;
+        for (std::size_t j = 0; j < ScalerBuffers::kBuffers; ++j) {
+            if (j == i)
+                continue;
+            ahead = ahead && h[i].frame_counter().lead_over(h[j].frame_counter()).in_range(lo, hi);
+        }
+        if (ahead)
+            return i;
+    }
+    return kNoBuffer;
+}
+
+struct WovenSpan {
+    HeaderCtr::Lag lo;
+    HeaderCtr::Lag hi;
+};
+
+inline constexpr std::array<WovenSpan, 2> kWovenSpans{{{{2}, {4}}, {{1}, {3}}}};
+inline constexpr HeaderCtr::Lag kWovenMinLag{2};
+inline constexpr HeaderCtr::Lag kOneFrame{1};
+
+std::optional<ScalerProbe::Pick> woven_pick(const Headers& h, std::size_t top) noexcept {
+    constexpr std::uint8_t kCounterModulus = HeaderCtr::kMask + 1;
+    HeaderCtr::Lag lo{kCounterModulus};
+    HeaderCtr::Lag hi{};
+    std::size_t near = top;
+    for (std::size_t j = 0; j < ScalerBuffers::kBuffers; ++j) {
+        if (j == top)
+            continue;
+        const HeaderCtr::Lag d = h[top].frame_counter().lead_over(h[j].frame_counter());
+        hi = std::max(hi, d);
+        if (d < lo)
+            lo = d;
+        if (d.at_least(kWovenMinLag)
+            && (near == top || d < h[top].frame_counter().lead_over(h[near].frame_counter())))
+            near = j;
+    }
+    for (const WovenSpan& span : kWovenSpans) {
+        if (lo != span.lo || hi != span.hi)
+            continue;
+        return ScalerProbe::Pick{
+            .buf = near,
+            .lag = h[top].frame_counter().lead_over(h[near].frame_counter()),
+            .woven = true
+        };
+    }
+    return std::nullopt;
+}
+
+std::optional<ScalerProbe::Pick> holding_pick(
+    const Headers& h,
+    const ScalerProbe::BufMask& live
+) noexcept {
+    const auto ctr = [&h](std::size_t i) {
+        return h[i].frame_counter();
+    };
+    const auto holding = [&](HeaderCtr c) {
+        std::size_t at = kNoBuffer;
+        for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
+            if (!live[i] || ctr(i) != c)
+                continue;
+            if (at != kNoBuffer)
+                return kNoBuffer;
+            at = i;
+        }
+        return at;
+    };
+    std::size_t done = kNoBuffer;
+    for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
+        if (!live[i] || holding(ctr(i)) != i || holding(ctr(i).plus(kOneFrame)) == kNoBuffer)
+            continue;
+        if (done == kNoBuffer || ctr(i).lead_over(ctr(done)) == kOneFrame)
+            done = i;
+    }
+    if (done == kNoBuffer)
+        return std::nullopt;
+    return ScalerProbe::Pick{
+        .buf = done,
+        .lag = kOneFrame,
+        .woven = false,
+        .prev = holding(ctr(done).minus(kOneFrame))
+    };
+}
+
 }
 
 std::optional<ScalerProbe::Pick> ScalerProbe::pick_complete(
@@ -100,84 +187,17 @@ std::optional<ScalerProbe::Pick> ScalerProbe::pick_complete(
     const BufMask& live
 ) noexcept {
     const bool all_live = std::all_of(live.begin(), live.end(), [](bool l) { return l; });
-    const auto newest = [&h](std::uint32_t lo, std::uint32_t hi) {
-        for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
-            bool ahead = true;
-            for (std::size_t j = 0; j < ScalerBuffers::kBuffers; ++j) {
-                if (j == i)
-                    continue;
-                const auto d = ctr_minus(h[i].frame_counter(), h[j].frame_counter());
-                ahead = ahead && d >= lo && d <= hi;
-            }
-            if (ahead)
-                return i;
-        }
-        return ScalerBuffers::kBuffers;
-    };
     for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i)
         if (!all_live && live[i] && h[i].interlaced() && h[i].supported())
             return std::nullopt;
-    constexpr std::uint32_t kAheadMin = 1;
-    constexpr std::uint32_t kAheadMax = 4;
-    constexpr std::uint8_t kCounterModulus = 8;
-
-    enum : std::uint8_t {
-        kWovenLoWide = 2,
-        kWovenHiWide = 4,
-        kWovenLoNarrow = 1,
-        kWovenHiNarrow = 3
-    };
-
-    constexpr std::uint8_t kWovenMinLag = 2;
-    if (const std::size_t top = all_live ? newest(kAheadMin, kAheadMax) : ScalerBuffers::kBuffers;
-        top != ScalerBuffers::kBuffers && h[top].interlaced()) {
-        std::uint8_t lo = kCounterModulus;
-        std::uint8_t hi = 0;
-        std::size_t near = top;
-        for (std::size_t j = 0; j < ScalerBuffers::kBuffers; ++j) {
-            if (j == top)
-                continue;
-            const auto d = ctr_minus(h[top].frame_counter(), h[j].frame_counter());
-            hi = std::max(hi, d);
-            if (d < lo)
-                lo = d;
-            if (d >= kWovenMinLag
-                && (near == top || d < ctr_minus(h[top].frame_counter(), h[near].frame_counter())))
-                near = j;
-        }
-        if ((lo == kWovenLoWide && hi == kWovenHiWide)
-            || (lo == kWovenLoNarrow && hi == kWovenHiNarrow))
-            return Pick{
-                .buf = near,
-                .lag = ctr_minus(h[top].frame_counter(), h[near].frame_counter()),
-                .woven = true
-            };
+    constexpr HeaderCtr::Lag kAheadMin{1};
+    constexpr HeaderCtr::Lag kAheadMax{4};
+    if (const std::size_t top = all_live ? newest_buffer(h, kAheadMin, kAheadMax) : kNoBuffer;
+        top != kNoBuffer && h[top].interlaced()) {
+        if (auto woven = woven_pick(h, top))
+            return woven;
     }
-    constexpr std::size_t kNone = ScalerBuffers::kBuffers;
-    const auto ctr = [&h](std::size_t i) {
-        return h[i].frame_counter();
-    };
-    const auto holding = [&](std::uint8_t c) {
-        std::size_t at = kNone;
-        for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
-            if (!live[i] || ctr(i) != c)
-                continue;
-            if (at != kNone)
-                return kNone;
-            at = i;
-        }
-        return at;
-    };
-    std::size_t done = kNone;
-    for (std::size_t i = 0; i < ScalerBuffers::kBuffers; ++i) {
-        if (!live[i] || holding(ctr(i)) != i || holding(ctr_plus(ctr(i), 1)) == kNone)
-            continue;
-        if (done == kNone || ctr_minus(ctr(i), ctr(done)) == 1)
-            done = i;
-    }
-    if (done == kNone)
-        return std::nullopt;
-    return Pick{.buf = done, .lag = 1, .woven = false, .prev = holding(ctr_minus(ctr(done), 1))};
+    return holding_pick(h, live);
 }
 
 std::optional<ScalerProbe::Verdict> ScalerProbe::still(

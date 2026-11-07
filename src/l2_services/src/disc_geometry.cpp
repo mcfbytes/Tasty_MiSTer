@@ -45,9 +45,9 @@ std::size_t find_group(std::int32_t sector) noexcept {
 
 std::optional<TrackIndex> track_for_lba(const Toc& toc, Lba lba) noexcept {
 
-    for (std::uint8_t i = 0; i < toc.last && i < kMaxTracks; ++i) {
-        if (lba < toc.tracks[i].end)
-            return TrackIndex{i};
+    for (TrackIndex i{}; toc.last.contains(i); i = i + TrackCount{1}) {
+        if (lba < toc.at(i).end)
+            return i;
     }
     return std::nullopt;
 }

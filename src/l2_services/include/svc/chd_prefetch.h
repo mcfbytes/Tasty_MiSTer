@@ -15,16 +15,15 @@
 #include "infra/loan_channel.h"
 #include "infra/spsc_ring.h"
 #include "infra/wake_flag.h"
+#include "svc/chd_geometry.h"
 #include "svc/chd_source.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
 
-inline constexpr std::uint32_t kNoPrefetchHunk = 0xFFFFFFFFu;
-
 struct PrefetchSlot {
     TASTY_SEAT_MEDIATOR(Any, Any);
-    std::uint32_t hunk = kNoPrefetchHunk;
+    HunkIndex hunk{HunkIndex::none()};
 };
 
 static_assert(sizeof(PrefetchSlot) == 4, "item: the slot names a hunk; the INDEX names the buffer");
@@ -33,12 +32,15 @@ inline constexpr std::size_t kPrefetchMinDepth = 8;
 inline constexpr std::size_t kPrefetchMaxDepth = 64;
 inline constexpr std::size_t kPrefetchBudgetBytes = 16u * 1024u * 1024u;
 
-inline constexpr std::uint32_t kPrefetchLookBehind = 16;
-inline constexpr std::uint32_t kPrefetchForwardSpan = 16;
+inline constexpr HunkCount kPrefetchLookBehind{16};
+inline constexpr HunkCount kPrefetchForwardSpan{16};
+inline constexpr HunkCount kPrefetchMinHunks = HunkCount::of_slots(kPrefetchMinDepth);
+inline constexpr HunkCount kPrefetchMaxHunks = HunkCount::of_slots(kPrefetchMaxDepth);
 
-inline constexpr std::size_t kPrefetchRingFloor = kPrefetchLookBehind + kPrefetchForwardSpan;
+inline constexpr HunkCount kPrefetchRingFloorHunks = kPrefetchLookBehind + kPrefetchForwardSpan;
+inline constexpr HunkCount kOneHunk{1};
 
-inline constexpr int kPrefetchTopUpMs = 40;
+inline constexpr infra::ParkTimeout kPrefetchTopUpMs{40};
 
 static_assert(
     (kPrefetchMaxDepth & (kPrefetchMaxDepth - 1)) == 0,
@@ -46,39 +48,39 @@ static_assert(
 );
 static_assert(kPrefetchMinDepth <= kPrefetchMaxDepth, "the floor cannot exceed the ceiling");
 static_assert(
-    kPrefetchForwardSpan >= kPrefetchMinDepth,
+    kPrefetchForwardSpan >= kPrefetchMinHunks,
     "the speculation budget cannot be tighter than the SPRINT floor, or the sprint "
     "goes idle before it satisfies the three measured floors item pins it to"
 );
 static_assert(
-    kPrefetchLookBehind + kPrefetchForwardSpan <= kPrefetchMaxDepth,
+    kPrefetchRingFloorHunks <= kPrefetchMaxHunks,
     "both budgets are carved out of the ring at its widest"
 );
 static_assert(
-    kPrefetchLookBehind < kPrefetchRingFloor,
+    kPrefetchLookBehind < kPrefetchRingFloorHunks,
     "the look-behind is carved OUT of the ring at every derivable depth: it cannot "
     "consume the whole thing even at the floor, or the producer has no runway at all"
 );
 
-constexpr std::size_t derive_depth(std::size_t budget, std::size_t hunk_bytes) noexcept {
-    if (hunk_bytes == 0)
+constexpr std::size_t derive_depth(std::size_t budget, proto::FileSize hunk_bytes) noexcept {
+    if (hunk_bytes.empty())
         return 0;
-    const std::size_t raw = budget / hunk_bytes;
-    if (raw < kPrefetchRingFloor)
+    const std::size_t raw = hunk_bytes.blocks_in(budget);
+    if (HunkCount::of_slots(raw) < kPrefetchRingFloorHunks)
         return 0;
     return raw < kPrefetchMaxDepth ? raw : kPrefetchMaxDepth;
 }
 
 static_assert(
-    kPrefetchRingFloor - kPrefetchLookBehind >= 1,
+    kPrefetchRingFloorHunks - kPrefetchLookBehind >= kOneHunk,
     "at the floor: the producer must keep at least one hunk of runway"
 );
 static_assert(
-    kPrefetchRingFloor <= kPrefetchMaxDepth,
+    kPrefetchRingFloorHunks <= kPrefetchMaxHunks,
     "the floor cannot exceed the ring's compile-time capacity"
 );
 static_assert(
-    kPrefetchMaxDepth - kPrefetchLookBehind >= kPrefetchRingFloor - kPrefetchLookBehind,
+    kPrefetchMaxHunks - kPrefetchLookBehind >= kPrefetchRingFloorHunks - kPrefetchLookBehind,
     "at the ceiling: the forward span is monotone non-decreasing in depth"
 );
 
@@ -94,9 +96,8 @@ struct ChdMedia {
     TASTY_SEAT_MEDIATOR(Any, Any);
     std::unique_ptr<IChdSource> src{};
 
-    std::uint32_t hunk_bytes = 0;
-    std::uint32_t hunk_count = 0;
-    std::uint32_t forward_span = 0;
+    ChdGeometry geo{};
+    HunkCount forward_span{};
 };
 
 struct ChdAttach {
@@ -154,11 +155,7 @@ public:
 
     [[nodiscard]] bool settle_park() noexcept;
 
-    [[nodiscard]] Ex<void> attach(
-        std::unique_ptr<IChdSource> src,
-        std::uint32_t hunk_bytes,
-        std::uint32_t hunk_count
-    ) noexcept;
+    [[nodiscard]] Ex<void> attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) noexcept;
 
     bool parked() const noexcept { return parked_.load(std::memory_order_acquire); }
 
@@ -171,9 +168,9 @@ public:
 
     std::size_t depth() const noexcept { return depth_; }
 
-    [[nodiscard]] const std::byte* take(std::uint32_t hunk) noexcept;
+    [[nodiscard]] const std::byte* take(HunkIndex hunk) noexcept;
 
-    void submit(std::uint32_t hunk) noexcept;
+    void submit(HunkIndex hunk) noexcept;
 
     void note_miss() noexcept { misses_.add(); }
 
@@ -187,12 +184,12 @@ public:
 
 private:
     [[nodiscard]] bool sprinting_() const noexcept {
-        return (next_ - tracking_) < static_cast<std::uint32_t>(kPrefetchMinDepth);
+        return (next_ - tracking_) < HunkCount::of_slots(kPrefetchMinDepth);
     }
 
     void reset_consumer_() noexcept;
 
-    void rest_(infra::ParkTimeout ms, std::uint32_t want, bool watch_free) noexcept;
+    void rest_(infra::ParkTimeout ms, HunkIndex want, bool watch_free) noexcept;
     void release_media_() noexcept;
 
     void take_attaches_() noexcept;
@@ -201,12 +198,12 @@ private:
 
     [[nodiscard]] Ex<void> hand_over_(ChdMedia&& media) noexcept;
     void kick_worker_() noexcept;
-    std::size_t evict_(std::uint32_t current) noexcept;
+    std::size_t evict_(HunkIndex current) noexcept;
 
     xthread::WakeFlag wake_{};
 
     Chan chan_{wake_, xthread::Polled{}};
-    std::atomic<std::uint32_t> want_hunk_{kNoPrefetchHunk};
+    std::atomic<HunkIndex> want_hunk_{HunkIndex::none()};
     std::atomic<bool> park_req_{false};
     std::atomic<bool> parked_{true};
 
@@ -218,16 +215,18 @@ private:
 
     using Lease = xthread::SlotPool<ChdMedia, kChdMediaLeases, kSeatMediatorB>::Lease;
 
+    struct HeldLease {
+        TASTY_SEAT_RESIDENT(Io);
+        Lease lease{};
+        std::uint32_t seq = 0;
+
+        ~HeldLease() { (void)lease.release(); }
+    };
+
     struct Commander {
         TASTY_SEAT_RESIDENT(Io);
-        Lease leases[kChdMediaLeases]{};
-        std::uint32_t lease_seq[kChdMediaLeases]{};
+        HeldLease leases[kChdMediaLeases]{};
         std::uint32_t sent = 0;
-
-        ~Commander() {
-            for (auto& l : leases)
-                (void)l.release();
-        }
     };
 
     static_assert(
@@ -237,32 +236,31 @@ private:
     Commander cmd_{};
 
     std::unique_ptr<IChdSource> src_{};
-    std::uint32_t hunk_count_ = 0;
-    std::uint32_t forward_span_ = 0;
-    std::uint32_t worker_hunk_bytes_ = 0;
+    ChdGeometry geo_{};
+    HunkCount forward_span_{};
     std::uint32_t taken_ = 0;
-    std::uint32_t next_ = 0;
-    std::uint32_t tracking_ = kNoPrefetchHunk;
+    HunkIndex next_{};
+    HunkIndex tracking_{HunkIndex::none()};
     bool disabled_ = false;
 
     bool rests_ = false;
     bool rest_parked_ = false;
     bool watch_free_ = false;
     infra::ParkTimeout rest_ms_ = infra::kNoWait;
-    std::uint32_t want_seen_ = kNoPrefetchHunk;
+    HunkIndex want_seen_{HunkIndex::none()};
 
     Chan::Job held_{};
 
     std::unique_ptr<std::byte[]> slab_{};
-    std::size_t hunk_bytes_ = 0;
+    std::size_t hunk_extent_{};
 
     std::size_t depth_ = 0;
 
     Chan::Loan resident_[kPrefetchMaxDepth]{};
 
-    std::uint32_t resident_hunk_[kPrefetchMaxDepth]{};
+    HunkIndex resident_hunk_[kPrefetchMaxDepth]{};
     std::size_t resident_count_ = 0;
-    std::uint32_t want_ = kNoPrefetchHunk;
+    HunkIndex want_{HunkIndex::none()};
 
     bool poisoned_ = false;
 };

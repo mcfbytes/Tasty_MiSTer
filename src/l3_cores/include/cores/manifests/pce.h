@@ -62,8 +62,8 @@ inline constexpr svc::CuePolicy kPceCdCuePolicy{
 };
 
 inline constexpr auto kPceCdSeekFastPaths = std::to_array<CdProfile::SeekFastPath>({
-    {.count = 120, .latency_ticks = 0},
-    {.count = 252, .latency_ticks = 5},
+    {.count = SectorCount{120}, .latency_ticks = 0},
+    {.count = SectorCount{252}, .latency_ticks = 5},
 });
 
 inline constexpr CdProfile kPceCdProfile{

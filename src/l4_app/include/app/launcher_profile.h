@@ -8,6 +8,7 @@
 
 #include "infra/ascii.h"
 #include "infra/seat.h"
+#include "os/types.h"
 
 namespace mister::app {
 
@@ -19,7 +20,7 @@ struct LauncherProfile {
     std::string_view front_end_image;
     std::string_view scanout_device;
     std::string_view tty;
-    int vt = 0;
+    os::VtNumber vt{};
 };
 
 inline constexpr std::array<LauncherProfile, 1> kLaunchers{{
@@ -28,7 +29,7 @@ inline constexpr std::array<LauncherProfile, 1> kLaunchers{{
      .front_end_image = "zaparoo/menu_zaparoo.rbf",
      .scanout_device = "/dev/zaparoo-scanout",
      .tty = "/dev/tty7",
-     .vt = 7},
+     .vt = os::VtNumber{7}},
 }};
 
 constexpr const LauncherProfile* launcher_for_main(std::string_view cfg_main) noexcept {

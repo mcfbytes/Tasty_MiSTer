@@ -21,7 +21,6 @@ constexpr std::uint16_t kFmtRxB = 0b10000;
 constexpr std::uint16_t kFbEn = 0x8000;
 
 constexpr std::uint32_t kFbPixels = 1920u * 1080u;
-constexpr std::uint32_t kPixelOff = 4096;
 
 }
 
@@ -34,7 +33,7 @@ Ex<void> HpsFramebuffer::publish_(
     std::uint32_t hmax,
     std::uint32_t vmin,
     std::uint32_t vmax,
-    std::uint32_t stride
+    RowBytes stride
 ) noexcept {
     const auto [addr_lo, addr_hi] = pixels.low_halves();
     const std::array<std::uint16_t, 10> words{
@@ -47,7 +46,7 @@ Ex<void> HpsFramebuffer::publish_(
         static_cast<std::uint16_t>(hmax),
         static_cast<std::uint16_t>(vmin),
         static_cast<std::uint16_t>(vmax),
-        static_cast<std::uint16_t>(stride),
+        static_cast<std::uint16_t>(stride.v),
     };
     return wire_.publish(proto::UioOp::SetFbuf, words);
 }
@@ -57,13 +56,22 @@ void HpsFramebuffer::write_mode_param_(
     unsigned rb,
     std::uint32_t w,
     std::uint32_t h,
-    std::uint32_t stride
+    RowBytes stride
 ) noexcept {
     const int fd = ::open(mode_param_.c_str(), O_WRONLY | O_CLOEXEC | O_TRUNC);
     if (fd < 0)
         return;
     char line[64];
-    const int n = std::snprintf(line, sizeof line, "%u %u %u %u %u\n", fmt, rb, w, h, stride);
+    const int n = std::snprintf(
+        line,
+        sizeof line,
+        "%u %u %u %u %s\n",
+        fmt,
+        rb,
+        w,
+        h,
+        stride.text().c_str()
+    );
     if (n > 0 && ::write(fd, line, static_cast<std::size_t>(n)) < 0)
         ++refused_;
     (void)::close(fd);
@@ -82,11 +90,11 @@ Ex<void> HpsFramebuffer::raise() noexcept {
     height_ = oh / scale;
     raised_ = true;
     viewing_ = false;
-    write_mode_param_(kName8888, 1, width_, height_, width_ * kBytes8888);
+    write_mode_param_(kName8888, 1, width_, height_, RowBytes{width_ * kBytes8888});
     if (held_)
         return {};
     return publish_(
-        os::PhysAddr{fb_.phys.v + kPixelOff},
+        fb_.phys.advanced(kFramebufferPageBytes),
         static_cast<std::uint16_t>(kFmtRxB | kFmt8888),
         width_,
         height_,
@@ -94,7 +102,7 @@ Ex<void> HpsFramebuffer::raise() noexcept {
         ow - 1,
         0,
         oh - 1,
-        width_ * kBytes8888
+        RowBytes{std::size_t{width_} * kBytes8888}
     );
 }
 
@@ -104,7 +112,7 @@ Ex<void> HpsFramebuffer::raise_view(const FbView& view) noexcept {
     const std::uint32_t oh = output_.output_height();
     if (fb_.len == 0 || ow == 0 || oh == 0)
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    const std::uint64_t bytes = std::uint64_t{view.height} * view.stride;
+    const std::uint64_t bytes = rows_span(view.stride, view.height);
     if (view.offset > fb_.len || bytes > fb_.len - view.offset)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), view.offset});
     const std::uint16_t fmt = view.format == FbView::FbFormat::Rgb565
@@ -117,7 +125,7 @@ Ex<void> HpsFramebuffer::raise_view(const FbView& view) noexcept {
     if (held_)
         return {};
     return publish_(
-        os::PhysAddr{fb_.phys.v + view.offset},
+        fb_.phys.advanced(view.offset),
         fmt,
         view.width,
         view.height,
@@ -230,10 +238,20 @@ bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
     }
     const auto uw = static_cast<std::uint32_t>(w);
     const auto uh = static_cast<std::uint32_t>(h);
-    const std::uint32_t stride = (uw * bpp + kStrideAlignMask) & ~kStrideAlignMask;
+    const RowBytes stride{(uw * bpp + kStrideAlignMask) & ~kStrideAlignMask};
     width_ = uw;
     height_ = uh;
-    if (!publish_(os::PhysAddr{fb_.phys.v + kPixelOff}, sc, uw, uh, hmin, hmax, vmin, vmax, stride))
+    if (!publish_(
+            fb_.phys.advanced(kFramebufferPageBytes),
+            sc,
+            uw,
+            uh,
+            hmin,
+            hmax,
+            vmin,
+            vmax,
+            stride
+        ))
         ++refused_;
     if (write_param)
         write_mode_param_(static_cast<unsigned>(fmt), static_cast<unsigned>(rb), uw, uh, stride);

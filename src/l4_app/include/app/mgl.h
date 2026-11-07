@@ -2,8 +2,11 @@
 #pragma once
 
 #include <array>
+#include <chrono>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <tuple>
@@ -15,49 +18,18 @@
 #include "app/types.h"
 #include "infra/fixed_str.h"
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "infra/message_sum.h"
 #include "infra/path_text.h"
 #include "os/clock.h"
 #include "os/deadline.h"
+#include "proto/types.h"
 #include "infra/seat.h"
+#include "app/mgl_item.h"
 
 namespace mister::app {
 
 class NameConfig;
-
-struct MglItem {
-    TASTY_SEAT_EXEMPT(component);
-    enum class Kind : std::uint8_t { Load, Reset, kCount };
-    enum class Slot : std::uint8_t { File, Image };
-
-    static constexpr std::size_t kPathMax = infra::kPathMax;
-    static constexpr std::size_t kStore = kPathMax + 8;
-
-    struct Load {
-        static constexpr Kind kKind = Kind::Load;
-        Slot slot = Slot::File;
-        std::uint8_t index = 0;
-        std::uint16_t delay_s = 0;
-
-        FixedStr<kPathMax, StrFit::Clip> path{};
-    };
-
-    struct Reset {
-        static constexpr Kind kKind = Kind::Reset;
-        std::uint16_t delay_s = 0;
-        std::uint8_t hold_s = 0;
-        std::uint8_t pad_ = 0;
-    };
-
-    using Alternatives = std::tuple<Load, Reset>;
-
-    Kind kind = Kind::Load;
-    std::uint8_t pad_ = 0;
-    alignas(2) std::array<std::byte, kStore> store{};
-};
-
-static_assert(infra::MessageSum<MglItem> && infra::alternatives_are_total<MglItem>());
-static_assert(sizeof(MglItem) == 2 + MglItem::kStore, "kind, pad and store");
 
 enum class MglState : std::uint8_t {
     Armed,
@@ -97,10 +69,10 @@ public:
     [[nodiscard]] CoreScope scope() const noexcept { return scope_; }
 
     void remember(
-        std::uint8_t i,
+        MglItemNo i,
         const RememberedStem& stem,
         RememberedSlot slot,
-        std::uint8_t ioctl_index
+        proto::IoIndex ioctl_index
     ) noexcept;
 
     [[nodiscard]] std::uint32_t remembered() const noexcept { return remembered_; }
@@ -127,9 +99,9 @@ public:
 
     [[nodiscard]] std::uint8_t count() const noexcept { return count_; }
 
-    [[nodiscard]] std::uint8_t current() const noexcept { return current_; }
+    [[nodiscard]] MglItemNo current() const noexcept { return current_; }
 
-    [[nodiscard]] const MglItem& item(std::uint8_t i) const noexcept { return entries_[i].item; }
+    [[nodiscard]] const MglItem& item(MglItemNo i) const noexcept { return entries_[i].item; }
 
     void on(const MglItem::Load&) noexcept {
         TASTY_SEAT_BODY(MglPlayer);
@@ -148,9 +120,9 @@ private:
 
     [[nodiscard]] Ex<void> publish_load_();
 
-    [[nodiscard]] std::uint16_t delay_of_(std::uint8_t i) const noexcept;
+    [[nodiscard]] DelaySeconds delay_of_(MglItemNo i) const noexcept;
 
-    [[nodiscard]] std::uint8_t hold_of_(std::uint8_t i) const noexcept;
+    [[nodiscard]] std::uint8_t hold_of_(MglItemNo i) const noexcept;
     void record_publish(CorrelationTag tag) noexcept;
     void record_wire_publish(bool pushed) noexcept;
 
@@ -160,7 +132,7 @@ private:
 
     struct RememberAt {
         RememberedSlot slot = RememberedSlot::File;
-        std::uint8_t ioctl_index = 0;
+        proto::IoIndex ioctl_index{};
     };
 
     struct PlaylistEntry {
@@ -173,12 +145,12 @@ private:
     std::uint32_t remembered_ = 0;
     std::uint32_t remember_failures_ = 0;
     CoreScope scope_{};
-    std::array<PlaylistEntry, kMaxItems> entries_{};
+    infra::IndexedArray<PlaylistEntry, kMaxItems, MglItemNo> entries_{};
     PathText file_home_{};
     PathText image_home_{};
     PathBase base_ = PathBase::Home;
     std::uint8_t count_ = 0;
-    std::uint8_t current_ = 0;
+    MglItemNo current_{};
     std::uint32_t publishes_ = 0;
     std::uint32_t drops_ = 0;
     CorrelationTag last_tag_{};

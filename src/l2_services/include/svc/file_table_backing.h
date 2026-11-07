@@ -21,6 +21,8 @@ class FileTableBacking final : public IDiscBacking {
 public:
     [[nodiscard]] std::uint16_t count() const noexcept { return file_count_; }
 
+    [[nodiscard]] bool holds(OpenFileId id) const noexcept { return id < OpenFileId{file_count_}; }
+
     [[nodiscard]] OpenFileId push(std::unique_ptr<IFile> f) noexcept {
         files_[file_count_] = std::move(f);
         return OpenFileId{file_count_++};

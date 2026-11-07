@@ -163,7 +163,7 @@ private:
 
     void unmount_save_channel();
 
-    void release_channel_slots_(std::uint16_t mask, std::size_t keep) noexcept;
+    void release_channel_slots_(proto::BlockSlotMask mask, std::size_t keep) noexcept;
 
     void begin_detach_(proto::SlotIndex slot) noexcept;
     void release_save_slots_() noexcept;
@@ -173,7 +173,7 @@ private:
         bool manual,
         infra::OptRef<cores::Core> core
     );
-    [[nodiscard]] std::uint64_t save_extent_of_(proto::SlotIndex slot) const noexcept;
+    [[nodiscard]] proto::FileSize save_extent_of_(proto::SlotIndex slot) const noexcept;
 
     [[nodiscard]] Ex<void> apply_bind_slot_(
         proto::SlotIndex slot,
@@ -191,7 +191,7 @@ private:
 
     [[nodiscard]] cores::MountStatus mount_body_(infra::OptRef<cores::Core> core) noexcept;
     [[nodiscard]] static cores::SaveExtent save_body_(
-        std::uint64_t size_bytes,
+        proto::FileSize size_bytes,
         bool exists = false
     ) noexcept;
 
@@ -246,7 +246,7 @@ private:
         "T-RT type; it must stay small"
     );
 
-    std::uint16_t channel_slots_ = 0;
+    proto::BlockSlotMask channel_slots_{};
 
     proto::BlockSlotMask channel_borrows_{};
     Tally tally_{};
@@ -330,7 +330,7 @@ inline ILinkEncoder::Outcome SlotBindings::on(
         const InternedFile* const file = ctx.inbox.file(a.path);
         if (file == nullptr)
             return ILinkEncoder::Outcome::Dropped;
-        size = proto::FileSize{file->size_bytes};
+        size = file->size_bytes;
     }
     const proto::PathId path_id{a.path.v};
     if (!a.bracketed) {
@@ -458,7 +458,7 @@ inline void SlotBindings::drop_bindings() noexcept {
     for (OwedSaveBind& owed : owed_save_)
         owed.strand();
 
-    channel_slots_ = 0;
+    channel_slots_ = {};
     slots_.reset_all();
 
     release_save_slots_();
@@ -562,8 +562,8 @@ inline void SlotBindings::bind_core_roles(infra::OptRef<cores::Core> core) noexc
     return SaveBind::Waiting;
 }
 
-inline std::uint64_t SlotBindings::save_extent_of_(proto::SlotIndex slot) const noexcept {
-    return save_src_ == nullptr ? 0 : save_src_->size_of(slot).v;
+inline proto::FileSize SlotBindings::save_extent_of_(proto::SlotIndex slot) const noexcept {
+    return save_src_ == nullptr ? proto::FileSize{} : save_src_->size_of(slot);
 }
 
 inline void SlotBindings::begin_detach_(proto::SlotIndex si) noexcept {
@@ -616,11 +616,7 @@ inline ILinkEncoder::Outcome SlotBindings::perform_bound_mount_(
     } else if (image.has_value()) {
         r = core->mount(
             bm.index,
-            cores::MountedPath{
-                proto::PathId{0},
-                image->path.view(),
-                proto::FileSize{image->size_bytes}
-            }
+            cores::MountedPath{proto::PathId{0}, image->path.view(), image->size_bytes}
         );
     } else {
         r = std::unexpected(Error{Errc::not_found, ERR_SITE(), bm.index.v});
@@ -643,7 +639,7 @@ inline ILinkEncoder::Outcome SlotBindings::apply_save_bind_(
     const bool pendable = si.v < SaveImageSource::kSlots;
 
     OwedSaveBind& owed = owed_save_[pendable ? si.v : kOffSlot];
-    owed.arm(bind.act_gen, save_body_(0));
+    owed.arm(bind.act_gen, save_body_(proto::FileSize{}));
     if (bind.bind != proto::LinkOp::SlotBind::Attach) {
         begin_detach_(si);
 
@@ -651,18 +647,18 @@ inline ILinkEncoder::Outcome SlotBindings::apply_save_bind_(
             && save_src_->attach_state(si) == SaveImageSource::Attach::Attached;
         owed.answer(
             refused ? cores::SaveVerdict::Declined : cores::SaveVerdict::Known,
-            save_body_(0)
+            save_body_(proto::FileSize{})
         );
         return ILinkEncoder::Outcome::Encoded;
     }
     const InternedFile* const file = inbox.file(bind.path);
     if (file == nullptr) {
-        owed.answer(cores::SaveVerdict::Declined, save_body_(0));
+        owed.answer(cores::SaveVerdict::Declined, save_body_(proto::FileSize{}));
         return ILinkEncoder::Outcome::Dropped;
     }
     auto bound = bind_save_(si, file->path.view(), bind.manual, core);
     if (!bound) {
-        owed.answer(cores::SaveVerdict::Declined, save_body_(0));
+        owed.answer(cores::SaveVerdict::Declined, save_body_(proto::FileSize{}));
         return ILinkEncoder::Outcome::Dropped;
     }
     switch (*bound) {
@@ -675,7 +671,7 @@ inline ILinkEncoder::Outcome SlotBindings::apply_save_bind_(
         case SaveBind::Waiting:
             break;
         case SaveBind::Declined:
-            owed.answer(cores::SaveVerdict::Declined, save_body_(0));
+            owed.answer(cores::SaveVerdict::Declined, save_body_(proto::FileSize{}));
             break;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -699,7 +695,10 @@ inline void SlotBindings::settle_save_binds_() noexcept {
         const bool known = state == Attach::Attached;
         owed_save_[i].answer(
             known ? cores::SaveVerdict::Known : cores::SaveVerdict::Declined,
-            save_body_(known ? save_extent_of_(si) : 0, known && save_src_->exists(si))
+            save_body_(
+                known ? save_extent_of_(si) : proto::FileSize{},
+                known && save_src_->exists(si)
+            )
         );
     }
 }
@@ -759,7 +758,10 @@ inline cores::MountStatus SlotBindings::mount_body_(infra::OptRef<cores::Core> c
     return body;
 }
 
-inline cores::SaveExtent SlotBindings::save_body_(std::uint64_t size_bytes, bool exists) noexcept {
+inline cores::SaveExtent SlotBindings::save_body_(
+    proto::FileSize size_bytes,
+    bool exists
+) noexcept {
     cores::SaveExtent body{};
     body.size_bytes = size_bytes;
     body.exists = exists;
@@ -810,7 +812,7 @@ inline void SlotBindings::mount_save_channel(
         return;
 
     SaveChannelRoles roles{channel};
-    const std::uint16_t previous = channel_slots_;
+    const proto::BlockSlotMask previous = channel_slots_;
     unmount_save_channel();
 
     release_channel_slots_(previous, plan->mounts().size());
@@ -868,7 +870,7 @@ inline void SlotBindings::mount_save_channel(
             session_tally_.last_error = r.error();
             continue;
         }
-        channel_slots_ = static_cast<std::uint16_t>(channel_slots_ | (1u << si.v));
+        channel_slots_ = channel_slots_.with(si);
         log_lane_.push(LogRec::Mount{si.v}, log_now_ns());
     }
 }
@@ -876,9 +878,9 @@ inline void SlotBindings::mount_save_channel(
 inline void SlotBindings::unmount_save_channel() {
     proto::NoBlockRoles none;
     for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
-        if ((channel_slots_ & (1u << i)) == 0u)
-            continue;
         const proto::SlotIndex si{i};
+        if (!channel_slots_.has(si))
+            continue;
         slots_.bind_server(si, proto::SlotServer::Session);
         if (auto r = apply_bind_slot_(
                 si,
@@ -890,17 +892,20 @@ inline void SlotBindings::unmount_save_channel() {
             r)
             log_lane_.push(LogRec::Unmount{si.v}, log_now_ns());
     }
-    channel_slots_ = 0;
+    channel_slots_ = {};
 }
 
-inline void SlotBindings::release_channel_slots_(std::uint16_t mask, std::size_t keep) noexcept {
+inline void SlotBindings::release_channel_slots_(
+    proto::BlockSlotMask mask,
+    std::size_t keep
+) noexcept {
 
     proto::NoBlockRoles none;
     (void)slots_.install_completions(none);
     for (std::uint8_t i = 0; i < proto::kBlockSlots; ++i) {
-        if ((mask & (1u << i)) == 0u)
-            continue;
         const proto::SlotIndex si{i};
+        if (!mask.has(si))
+            continue;
         if (i >= keep && storage_life_) {
             if (!slots_.submit_detach(si, none))
                 ++tally_.stage_refusals;

@@ -13,7 +13,7 @@ Ex<proto::SessionParams> StreamLoadHost::stream_opening(IoIndex) {
 
 void StreamLoadHost::stream_closed(const StreamLoadEnd& end) noexcept {
     TASTY_SEAT_BODY(StreamLoadHost);
-    last_index_ = static_cast<std::uint16_t>(end.index.v);
+    last_index_ = end.index;
     ++transfers_;
     chunks_ += static_cast<std::uint32_t>((end.bytes.v + kChunkBytes - 1) / kChunkBytes);
     tx_.closed(end);

@@ -11,6 +11,7 @@
 #include <array>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace mister::proto {
 
@@ -25,20 +26,7 @@ constexpr std::array<std::uint8_t, kBlockStagingBytes> kFfPage = [] {
     return a;
 }();
 
-enum : std::uint32_t { kReadOnlyBit = 0x80 };
-
-enum : std::int64_t { kNsPerUs = 1000, kMaxLateUs = 0xFFFF'FFFF };
-
-[[nodiscard]] Ex<void> write32_byte(ILinkFrame& frame, std::uint32_t v) {
-    constexpr unsigned kWordBits = std::numeric_limits<std::uint32_t>::digits;
-    constexpr unsigned kByteBits = std::numeric_limits<std::uint8_t>::digits;
-    for (unsigned shift = 0; shift < kWordBits; shift += kByteBits) {
-        const std::uint32_t byte = (v >> shift) & std::numeric_limits<std::uint8_t>::max();
-        if (auto r = frame.word(static_cast<std::uint16_t>(byte)); !r)
-            return r;
-    }
-    return {};
-}
+enum : std::int64_t { kNsPerUs = 1000, kMaxLateUs = std::numeric_limits<std::uint32_t>::max() };
 
 }
 
@@ -58,22 +46,15 @@ Ex<void> BlockSlots::announce(SlotIndex slot, FileSize size_bytes, bool writable
     SpiFrame frame{link};
     if (auto r = frame.begin(UioOp::SetSdInfo); !r)
         return r;
-    constexpr unsigned kHalfBits = std::numeric_limits<std::uint32_t>::digits;
-    const auto lo = static_cast<std::uint32_t>(
-        size_bytes.v & std::numeric_limits<std::uint32_t>::max()
-    );
-    const auto hi = static_cast<std::uint32_t>(size_bytes.v >> kHalfBits);
-    if (link.io_version() != hal::IoVersion{0}) {
-        if (auto r = DiscAnnounce::write32_word(frame, lo); !r)
-            return r;
-        if (auto r = DiscAnnounce::write32_word(frame, hi); !r)
-            return r;
-    } else {
-        if (auto r = write32_byte(frame, lo); !r)
-            return r;
-        if (auto r = write32_byte(frame, hi); !r)
-            return r;
-    }
+    const std::uint32_t lo = size_bytes.low_word();
+    const std::uint32_t hi = size_bytes.high_word();
+
+    const hal::Width framing = link.io_version() != hal::IoVersion{0} ? hal::Width::Word
+                                                                      : hal::Width::Byte;
+    if (auto r = emit_u32(frame, lo, framing); !r)
+        return r;
+    if (auto r = emit_u32(frame, hi, framing); !r)
+        return r;
     if (auto r = frame.end(); !r)
         return r;
 
@@ -81,10 +62,10 @@ Ex<void> BlockSlots::announce(SlotIndex slot, FileSize size_bytes, bool writable
         ++diag_.unencodable_announce;
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
     }
-    const auto parm = static_cast<std::uint16_t>((1u << slot.v) | (writable ? 0u : kReadOnlyBit));
+    const SdStatParameter parm = SdStatParameter::of(slot, writable);
     if (auto r = frame.begin(UioOp::SetSdStat); !r)
         return r;
-    if (auto r = frame.word(parm); !r)
+    if (auto r = frame.word(parm.v); !r)
         return r;
     return frame.end();
 }
@@ -211,19 +192,19 @@ BlockSlots::Refill BlockSlots::refill_resident(
         if (n.error().code == Errc::would_block && answer_owed && clock_.has_value()) {
 
             const std::int64_t now = now_ns();
-            if (records_[slot].resident_due_ns == 0)
-                records_[slot].resident_due_ns = now + kAnswerDeadlineNs;
-            if (now < records_[slot].resident_due_ns)
+            if (records_[slot].resident_due == kNoDue)
+                records_[slot].resident_due = due_after(now, kAnswerDeadlineNs);
+            if (now < due_ns_of(records_[slot].resident_due))
                 return Refill::Defer;
             ++diag_.answer_expiries;
             note_answer_wait_(kAnswerDeadlineNs);
         }
-        records_[slot].resident_due_ns = 0;
+        records_[slot].resident_due = kNoDue;
         return Refill::Miss;
     }
-    if (records_[slot].resident_due_ns != 0)
-        note_answer_wait_(now_ns() - (records_[slot].resident_due_ns - kAnswerDeadlineNs));
-    records_[slot].resident_due_ns = 0;
+    if (records_[slot].resident_due != kNoDue)
+        note_answer_wait_(now_ns() - (due_ns_of(records_[slot].resident_due) - kAnswerDeadlineNs));
+    records_[slot].resident_due = kNoDue;
     auto got = static_cast<std::uint32_t>(*n);
     if (got > kBlockStagingBytes)
         got = kBlockStagingBytes;
@@ -288,7 +269,7 @@ bool BlockSlots::submit_fill(
     p.base = base;
     p.block_size = BlockSize{block_size};
     p.answer_owed = answer_owed;
-    p.due_ns = now_ns() + (answer_owed ? kAnswerDeadlineNs : kPrefetchDeadlineNs);
+    p.due = due_after(now_ns(), answer_owed ? kAnswerDeadlineNs : kPrefetchDeadlineNs);
     return true;
 }
 
@@ -368,7 +349,7 @@ void BlockSlots::gate_commit_(
     p.epoch = records_[slot].epoch;
     p.offset = offset;
     p.len = len;
-    p.due_ns = now_ns() + kAnswerDeadlineNs;
+    p.due = due_after(now_ns(), kAnswerDeadlineNs);
 }
 
 bool BlockSlots::submit_attach(SlotIndex slot, IBlockRoles& roles) noexcept {
@@ -415,7 +396,7 @@ bool BlockSlots::submit_lifecycle_(SlotIndex slot, const StorageRequest& r) noex
     p.state = SlotGate::State::Staging;
     p.seq = seq;
     p.epoch = records_[slot].epoch;
-    p.due_ns = now_ns() + kStagingDeadlineNs;
+    p.due = due_after(now_ns(), kStagingDeadlineNs);
     return true;
 }
 
@@ -611,7 +592,7 @@ unsigned BlockSlots::install_completions(IBlockRoles& roles) noexcept {
     for (unsigned i = 0; i < kBlockSlots; ++i) {
         const SlotIndex slot = SlotIndex::of(i);
         const SlotGate& p = records_[slot].gate;
-        if (p.state != SlotGate::State::Idle && clock_.has_value() && now >= p.due_ns) {
+        if (p.state != SlotGate::State::Idle && clock_.has_value() && now >= due_ns_of(p.due)) {
             expire(slot);
         }
     }
@@ -619,18 +600,18 @@ unsigned BlockSlots::install_completions(IBlockRoles& roles) noexcept {
 }
 
 BlockSlots::Blank BlockSlots::no_half_answer(SlotIndex slot) noexcept {
-    std::int64_t& due = records_[slot].no_half_due_ns;
+    std::chrono::steady_clock::time_point& due = records_[slot].no_half_due;
     if (!clock_) {
         ++diag_.no_half_substitutes;
-        due = 0;
+        due = kNoDue;
         return Blank::Static;
     }
     const std::int64_t now = now_ns();
-    if (due == 0)
-        due = now + kAnswerDeadlineNs;
-    if (now < due)
+    if (due == kNoDue)
+        due = due_after(now, kAnswerDeadlineNs);
+    if (now < due_ns_of(due))
         return Blank::Deferred;
-    due = 0;
+    due = kNoDue;
     ++diag_.no_half_substitutes;
     return Blank::Static;
 }
@@ -648,7 +629,7 @@ BlockSlots::Blank BlockSlots::substitute_blank(
             return no_half_answer(slot);
         records_[slot].window.half = free_half;
     }
-    records_[slot].no_half_due_ns = 0;
+    records_[slot].no_half_due = kNoDue;
     ++diag_.blank_filled;
     if (!chan_)
         return Blank::NoBuffer;
@@ -671,15 +652,14 @@ BlockSlots::Blank BlockSlots::substitute_blank(
     std::span<const std::uint8_t> serve,
     std::uint32_t offset,
     std::uint32_t nbytes,
-    std::uint16_t ack,
+    SectorAck ack,
     std::uint32_t blks,
     bool count_blocks
 ) {
     hal::ISpiTransport& link = link_;
     hal::Selected cs(link, hal::ChipSelect::Io);
 
-    const auto cmd = static_cast<std::uint16_t>(static_cast<std::uint16_t>(UioOp::SectorRd) | ack);
-    if (auto r = link.transfer(hal::SpiWord{cmd}); !r) {
+    if (auto r = link.transfer(ack.with_opcode(UioOp::SectorRd)); !r) {
         return std::unexpected(r.error());
     }
     if (serve.size() < static_cast<std::size_t>(offset) + nbytes) {
@@ -694,7 +674,7 @@ BlockSlots::Blank BlockSlots::substitute_blank(
     return {};
 }
 
-Ex<bool> BlockSlots::answer_read(SlotIndex slot, Lba lba, std::uint32_t nbytes, std::uint16_t ack) {
+Ex<bool> BlockSlots::answer_read(SlotIndex slot, Lba lba, std::uint32_t nbytes, SectorAck ack) {
     if (!slot.below<kBlockSlots>() || nbytes == 0)
         return false;
 
@@ -711,7 +691,8 @@ Ex<bool> BlockSlots::answer_read(SlotIndex slot, Lba lba, std::uint32_t nbytes, 
         && w.covers(lba, BlockCount{blks}, BlockCount{window_blocks});
     if (!hit)
         return false;
-    const std::uint32_t offset = w.block_size.span_of(lba - w.base).v;
+
+    const std::uint32_t offset = w.block_size.offset_of(lba - w.base);
     const std::span<const std::uint8_t> serve = chan_ ? chan_->half(slot, w.half)
                                                       : std::span<const std::uint8_t>{};
     if (auto r = emit_read_data_phase_(slot, serve, offset, nbytes, ack, blks, true); !r) {
@@ -724,7 +705,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
     const SdRequest& req,
     std::uint32_t block_size,
     std::uint32_t window_blocks,
-    std::uint16_t ack,
+    SectorAck ack,
     const BlockBacking& backing
 ) {
     const std::uint32_t blks = req.block_count.v;
@@ -741,7 +722,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
     bool cached = hit;
     Blank blank = Blank::Filled;
     if (hit) {
-        offset = w.block_size.span_of(req.lba - w.base).v;
+        offset = w.block_size.offset_of(req.lba - w.base);
     } else if (res) {
         const Refill r = refill_resident(req.slot, req.lba, block_size, *res, true);
         cached = r == Refill::Hit;
@@ -806,7 +787,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_read(
 Ex<BlockSlots::Pass> BlockSlots::serve_write(
     const SdRequest& req,
     std::uint32_t block_size,
-    std::uint16_t ack,
+    SectorAck ack,
     const BlockBacking& backing
 ) {
     hal::ISpiTransport& link = link_;
@@ -827,10 +808,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve_write(
     {
         hal::Selected cs(link, hal::ChipSelect::Io);
 
-        const auto cmd = static_cast<std::uint16_t>(
-            static_cast<std::uint16_t>(UioOp::SectorWr) | ack
-        );
-        if (auto r = link.transfer(hal::SpiWord{cmd}); !r) {
+        if (auto r = link.transfer(ack.with_opcode(UioOp::SectorWr)); !r) {
             return std::unexpected(r.error());
         }
         const std::span<std::uint8_t> drain = chan_->half_mut(req.slot, drain_half);
@@ -912,7 +890,7 @@ Ex<BlockSlots::Pass> BlockSlots::serve(const SpiBlockPoll::Decode& d, IBlockRole
     auto pass = d.req.write ? serve_write(d.req, bytes, d.ack, backing)
                             : serve_read(d.req, bytes, d.window_blocks.v, d.ack, backing);
     if (pass && *pass == Pass::Answered)
-        records_[d.req.slot].no_half_due_ns = 0;
+        records_[d.req.slot].no_half_due = kNoDue;
     return pass;
 }
 

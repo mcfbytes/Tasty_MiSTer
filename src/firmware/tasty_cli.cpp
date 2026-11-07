@@ -153,240 +153,317 @@ const char* tasty_verb_name(TastyVerb v) noexcept {
     return "?";
 }
 
+namespace {
+
+constexpr std::size_t kVerbArg = 1;
+constexpr std::size_t kOperandArg = 2;
+constexpr std::size_t kFirstOptionArg = 3;
+
+constexpr std::size_t kOptionWidth = 2;
+
+constexpr std::uint32_t kVsyncAdjustOff = 0;
+constexpr std::uint32_t kVsyncAdjustMatch = 1;
+
+struct VerbRow {
+    std::string_view name;
+    TastyVerb verb;
+    bool takes_movie;
+};
+
+inline constexpr VerbRow kVerbRows[] = {
+    {"play", TastyVerb::Play, true},
+    {"info", TastyVerb::Info, true},
+    {"check", TastyVerb::Check, true},
+    {"status", TastyVerb::Status, false},
+    {"stop", TastyVerb::Stop, false},
+};
+
+enum class OptStep : std::uint8_t { NotMine, Flag, Valued, Refused, Finish };
+
+struct OptResult {
+    OptStep step = OptStep::NotMine;
+    TastyRefusal::Code bad = TastyRefusal::UnknownOption;
+};
+
+constexpr OptResult kNotMine{};
+
+constexpr OptResult taken_flag() noexcept {
+    return OptResult{OptStep::Flag, TastyRefusal::UnknownOption};
+}
+
+constexpr OptResult taken_valued() noexcept {
+    return OptResult{OptStep::Valued, TastyRefusal::UnknownOption};
+}
+
+constexpr OptResult refused(TastyRefusal::Code bad) noexcept {
+    return OptResult{OptStep::Refused, bad};
+}
+
+[[nodiscard]] OptResult take_path_option(std::string_view o, const char* p, TastyArgs& a) noexcept {
+    if (eq(o, "--rom")) {
+        if (p == nullptr || !a.rom.assign(p))
+            return refused(TastyRefusal::BadRom);
+        return taken_valued();
+    }
+    if (eq(o, "--core")) {
+        if (p == nullptr || !a.core.assign(p))
+            return refused(TastyRefusal::BadCore);
+        return taken_valued();
+    }
+    if (eq(o, "--record")) {
+        if (p == nullptr)
+            return refused(TastyRefusal::BadRecord);
+        app::PathText path{};
+        if (!path.assign(p))
+            return refused(TastyRefusal::BadRecord);
+        a.record = path;
+        return taken_valued();
+    }
+    if (eq(o, "--save")) {
+        app::PathText save{};
+        if (p == nullptr || !save.assign(p))
+            return refused(TastyRefusal::BadSave);
+        a.save = save;
+        return taken_valued();
+    }
+    return kNotMine;
+}
+
+[[nodiscard]] OptResult take_time_option(std::string_view o, const char* p, TastyArgs& a) noexcept {
+    if (eq(o, "--lead")) {
+        if (p == nullptr)
+            return refused(TastyRefusal::BadLead);
+        const auto n = infra::parse_int<std::int32_t>(p);
+        if (!n)
+            return refused(TastyRefusal::BadLead);
+        a.lead = app::MovieFrame{*n};
+        return taken_valued();
+    }
+    if (eq(o, "--phase")) {
+        if (p == nullptr)
+            return refused(TastyRefusal::BadPhase);
+        const auto n = infra::parse_int<std::uint32_t>(p);
+        if (!n)
+            return refused(TastyRefusal::BadPhase);
+        a.phase_us = std::chrono::microseconds{*n};
+        return taken_valued();
+    }
+    if (eq(o, "--stop-at")) {
+        if (p == nullptr)
+            return refused(TastyRefusal::BadStopAt);
+        const auto n = infra::parse_int<std::uint32_t>(p);
+        if (!n || *n == 0)
+            return refused(TastyRefusal::BadStopAt);
+        a.stop_at = app::movie_frame_from_wire(*n);
+        return taken_valued();
+    }
+    if (eq(o, "--linger") || eq(o, "--return-after")) {
+        if (p == nullptr)
+            return refused(TastyRefusal::BadLinger);
+        const auto n = infra::parse_int<std::uint32_t>(p);
+        if (!n)
+            return refused(TastyRefusal::BadLinger);
+        a.return_after_s = std::chrono::seconds{*n};
+        return taken_valued();
+    }
+    if (eq(o, "--vsync-adjust")) {
+        if (p == nullptr)
+            return refused(TastyRefusal::BadVsyncAdjust);
+        const auto n = infra::parse_int<std::uint32_t>(p);
+        if (!n || *n > kVsyncAdjustMatch)
+            return refused(TastyRefusal::BadVsyncAdjust);
+        a.vsync_adjust = *n == kVsyncAdjustOff ? app::VsyncAdjust::Off : app::VsyncAdjust::Match;
+        return taken_valued();
+    }
+    return kNotMine;
+}
+
+[[nodiscard]] OptResult take_fill_option(std::string_view o, const char* p, TastyArgs& a) noexcept {
+    if (!eq(o, "--ram-init"))
+        return kNotMine;
+    if (p == nullptr)
+        return refused(TastyRefusal::BadRamInit);
+    const std::string_view s{p};
+    using Fill = cores::IMovieCodec::RamFill;
+    if (s == "zero")
+        a.ram_fill = Fill::Zero;
+    else if (s == "ff")
+        a.ram_fill = Fill::Ff;
+    else if (s == "random")
+        a.ram_fill = Fill::Random;
+    else
+        return refused(TastyRefusal::BadRamInit);
+    return taken_valued();
+}
+
+[[nodiscard]] OptResult take_record_option(
+    std::string_view o,
+    const char* p,
+    TastyArgs& a,
+    bool& rec_opt
+) noexcept {
+    using R = TastyRefusal;
+    if (eq(o, "--codec")) {
+        const auto c = p != nullptr ? app::parse_rec_codec(p) : std::nullopt;
+        if (!c)
+            return refused(R::BadCodec);
+        a.rec.codec = *c;
+        rec_opt = true;
+        return taken_valued();
+    }
+    if (eq(o, "--motion")) {
+        const auto m = p != nullptr ? app::parse_rec_motion(p) : std::nullopt;
+        if (!m)
+            return refused(R::BadMotion);
+        a.rec.motion = *m;
+        rec_opt = true;
+        return taken_valued();
+    }
+    if (eq(o, "--scale")) {
+        const auto s = p != nullptr ? app::parse_rec_scale(p) : std::nullopt;
+        if (!s)
+            return refused(R::BadScale);
+        a.rec.scale = *s;
+        rec_opt = true;
+        return taken_valued();
+    }
+    if (eq(o, "--every")) {
+        const auto n = p != nullptr ? app::parse_rec_every(p) : std::nullopt;
+        if (!n)
+            return refused(R::BadEvery);
+        a.rec.every = *n;
+        rec_opt = true;
+        return taken_valued();
+    }
+    if (eq(o, "--from")) {
+        if (p == nullptr)
+            return refused(R::BadFrom);
+        const auto n = infra::parse_int<std::int32_t>(p);
+        if (!n || *n < 0)
+            return refused(R::BadFrom);
+        a.rec.from_frame = app::MovieFrame{*n};
+        rec_opt = true;
+        return taken_valued();
+    }
+    if (eq(o, "--to")) {
+        if (p == nullptr)
+            return refused(R::BadTo);
+        const auto n = infra::parse_int<std::int32_t>(p);
+        if (!n || *n < 0)
+            return refused(R::BadTo);
+        a.rec.to_frame = app::MovieFrame{*n};
+        rec_opt = true;
+        return taken_valued();
+    }
+    if (eq(o, "--segment")) {
+        const auto n = p != nullptr ? app::parse_rec_size(p) : std::nullopt;
+        if (!n || *n == 0 || !app::rec_segment_ok(*n))
+            return refused(R::BadSegment);
+        a.rec.segment_bytes = *n;
+        rec_opt = true;
+        return taken_valued();
+    }
+    return kNotMine;
+}
+
+[[nodiscard]] OptResult take_flag_option(std::string_view o, TastyArgs& a) noexcept {
+    if (eq(o, "--stay")) {
+        a.stay = true;
+        return taken_flag();
+    }
+    if (eq(o, "--loop")) {
+        a.loop = true;
+        return taken_flag();
+    }
+    if (eq(o, "--strict")) {
+        a.strict = true;
+        return taken_flag();
+    }
+    if (eq(o, "--no-splash")) {
+        a.no_splash = true;
+        return taken_flag();
+    }
+    if (eq(o, "--hashes"))
+        return taken_flag();
+    if (eq(o, "--hashes-only")) {
+        a.hashes_only = true;
+        return taken_flag();
+    }
+    if (eq(o, "--help") || eq(o, "-h")) {
+        a.verb = TastyVerb::Help;
+        return OptResult{OptStep::Finish, TastyRefusal::UnknownOption};
+    }
+    return kNotMine;
+}
+
+}
+
 [[nodiscard]] Ex<TastyArgs> parse_tasty_args(std::span<const char* const> argv) noexcept {
-
-    constexpr std::size_t kVerbArg = 1;
-    constexpr std::size_t kOperandArg = 2;
-    constexpr std::size_t kFirstOptionArg = 3;
-
-    constexpr std::size_t kOptionWidth = 2;
-    TastyArgs a{};
     if (argv.size() <= kVerbArg)
         return fail(TastyRefusal::NoVerb);
     std::string_view v0{argv[kVerbArg]};
+    TastyArgs a{};
     std::size_t i = kOperandArg;
     if (eq(v0, "help") || eq(v0, "--help") || eq(v0, "-h")) {
         a.verb = TastyVerb::Help;
         return a;
     }
-    if (eq(v0, "play")) {
-        a.verb = TastyVerb::Play;
-        if (argv.size() <= kOperandArg)
-            return fail(TastyRefusal::NoMovie);
-        if (!a.movie.assign(argv[kOperandArg]))
-            return fail(TastyRefusal::MovieTooLong);
-        i = kFirstOptionArg;
-    } else if (eq(v0, "info")) {
-        a.verb = TastyVerb::Info;
-        if (argv.size() <= kOperandArg)
-            return fail(TastyRefusal::NoMovie);
-        if (!a.movie.assign(argv[kOperandArg]))
-            return fail(TastyRefusal::MovieTooLong);
-        i = kFirstOptionArg;
-    } else if (eq(v0, "check")) {
-        a.verb = TastyVerb::Check;
-        if (argv.size() <= kOperandArg)
-            return fail(TastyRefusal::NoMovie);
-        if (!a.movie.assign(argv[kOperandArg]))
-            return fail(TastyRefusal::MovieTooLong);
-        i = kFirstOptionArg;
-    } else if (eq(v0, "status")) {
-        a.verb = TastyVerb::Status;
-    } else if (eq(v0, "stop")) {
-        a.verb = TastyVerb::Stop;
-    } else if (eq(v0, "rec")) {
+    if (eq(v0, "rec")) {
         if (argv.size() <= kOperandArg)
             return fail(TastyRefusal::NoRecAction);
-        std::string_view sub{argv[kOperandArg]};
-        if (eq(sub, "start")) {
+        const std::string_view sub{argv[kOperandArg]};
+        if (eq(sub, "start"))
             a.verb = TastyVerb::RecStart;
-            i = kFirstOptionArg;
-        } else if (eq(sub, "stop")) {
+        else if (eq(sub, "stop"))
             a.verb = TastyVerb::RecStop;
-            i = kFirstOptionArg;
-        } else {
+        else
             return fail(TastyRefusal::BadRecAction);
-        }
+        i = kFirstOptionArg;
     } else {
-        return fail(TastyRefusal::UnknownVerb);
+        const VerbRow* row = nullptr;
+        for (const VerbRow& r : kVerbRows)
+            if (v0 == r.name) {
+                row = &r;
+                break;
+            }
+        if (row == nullptr)
+            return fail(TastyRefusal::UnknownVerb);
+        a.verb = row->verb;
+        if (row->takes_movie) {
+            if (argv.size() <= kOperandArg)
+                return fail(TastyRefusal::NoMovie);
+            if (!a.movie.assign(argv[kOperandArg]))
+                return fail(TastyRefusal::MovieTooLong);
+            i = kFirstOptionArg;
+        }
     }
 
     bool rec_opt = false;
     while (i < argv.size()) {
-        std::string_view o{argv[i]};
-        auto need = [&]() -> const char* {
-            if (i + 1 >= argv.size())
-                return nullptr;
-            return argv[i + 1];
-        };
-        if (eq(o, "--rom")) {
-            const char* p = need();
-            if (p == nullptr || !a.rom.assign(p))
-                return fail(TastyRefusal::BadRom);
-            i += kOptionWidth;
-        } else if (eq(o, "--core")) {
-            const char* p = need();
-            if (p == nullptr || !a.core.assign(p))
-                return fail(TastyRefusal::BadCore);
-            i += kOptionWidth;
-        } else if (eq(o, "--record")) {
-            const char* p = need();
-            if (p == nullptr)
-                return fail(TastyRefusal::BadRecord);
-            app::PathText path{};
-            if (!path.assign(p))
-                return fail(TastyRefusal::BadRecord);
-            a.record = path;
-            i += kOptionWidth;
-        } else if (eq(o, "--lead")) {
-            const char* p = need();
-            if (p == nullptr)
-                return fail(TastyRefusal::BadLead);
-            const auto n = infra::parse_int<std::int32_t>(p);
-            if (!n)
-                return fail(TastyRefusal::BadLead);
-            a.lead = *n;
-            i += kOptionWidth;
-        } else if (eq(o, "--phase")) {
-            const char* p = need();
-            if (p == nullptr)
-                return fail(TastyRefusal::BadPhase);
-            const auto n = infra::parse_int<std::uint32_t>(p);
-            if (!n)
-                return fail(TastyRefusal::BadPhase);
-            a.phase_us = *n;
-            i += kOptionWidth;
-        } else if (eq(o, "--stop-at")) {
-            const char* p = need();
-            if (p == nullptr)
-                return fail(TastyRefusal::BadStopAt);
-            const auto n = infra::parse_int<std::uint32_t>(p);
-            if (!n || *n == 0)
-                return fail(TastyRefusal::BadStopAt);
-            a.stop_at = *n;
-            i += kOptionWidth;
-        } else if (eq(o, "--linger") || eq(o, "--return-after")) {
-            const char* p = need();
-            if (p == nullptr)
-                return fail(TastyRefusal::BadLinger);
-            const auto n = infra::parse_int<std::uint32_t>(p);
-            if (!n)
-                return fail(TastyRefusal::BadLinger);
-            a.return_after_s = *n;
-            i += kOptionWidth;
-        } else if (eq(o, "--vsync-adjust")) {
-            const char* p = need();
-            if (p == nullptr)
-                return fail(TastyRefusal::BadVsyncAdjust);
-            const auto n = infra::parse_int<std::uint32_t>(p);
-            if (!n || *n > 1)
-                return fail(TastyRefusal::BadVsyncAdjust);
-            a.vsync_adjust = *n == 0 ? app::VsyncAdjust::Off : app::VsyncAdjust::Match;
-            i += kOptionWidth;
-        } else if (eq(o, "--stay")) {
-            a.stay = true;
-            ++i;
-        } else if (eq(o, "--loop")) {
-            a.loop = true;
-            ++i;
-        } else if (eq(o, "--ram-init")) {
-            const char* p = need();
-            if (p == nullptr)
-                return fail(TastyRefusal::BadRamInit);
-            const std::string_view s{p};
-            using Fill = cores::IMovieCodec::RamFill;
-            if (s == "zero")
-                a.ram_fill = Fill::Zero;
-            else if (s == "ff")
-                a.ram_fill = Fill::Ff;
-            else if (s == "random")
-                a.ram_fill = Fill::Random;
-            else
-                return fail(TastyRefusal::BadRamInit);
-            i += kOptionWidth;
-        } else if (eq(o, "--save")) {
-            const char* p = need();
-            app::PathText save{};
-            if (p == nullptr || !save.assign(p))
-                return fail(TastyRefusal::BadSave);
-            a.save = save;
-            i += kOptionWidth;
-        } else if (eq(o, "--strict")) {
-            a.strict = true;
-            ++i;
-        } else if (eq(o, "--help") || eq(o, "-h")) {
-            a.verb = TastyVerb::Help;
-            return a;
-        } else if (eq(o, "--no-splash")) {
-            a.no_splash = true;
-            ++i;
-        } else if (eq(o, "--hashes")) {
-            ++i;
-        } else if (eq(o, "--hashes-only")) {
-            a.hashes_only = true;
-            ++i;
-        } else if (eq(o, "--codec")) {
-            const char* p = need();
-            const auto c = p != nullptr ? app::parse_rec_codec(p) : std::nullopt;
-            if (!c)
-                return fail(TastyRefusal::BadCodec);
-            a.rec.codec = *c;
-            rec_opt = true;
-            i += kOptionWidth;
-        } else if (eq(o, "--motion")) {
-            const char* p = need();
-            const auto m = p != nullptr ? app::parse_rec_motion(p) : std::nullopt;
-            if (!m)
-                return fail(TastyRefusal::BadMotion);
-            a.rec.motion = *m;
-            rec_opt = true;
-            i += kOptionWidth;
-        } else if (eq(o, "--scale")) {
-            const char* p = need();
-            const auto s = p != nullptr ? app::parse_rec_scale(p) : std::nullopt;
-            if (!s)
-                return fail(TastyRefusal::BadScale);
-            a.rec.scale = *s;
-            rec_opt = true;
-            i += kOptionWidth;
-        } else if (eq(o, "--every")) {
-            const char* p = need();
-            const auto n = p != nullptr ? app::parse_rec_every(p) : std::nullopt;
-            if (!n)
-                return fail(TastyRefusal::BadEvery);
-            a.rec.every = *n;
-            rec_opt = true;
-            i += kOptionWidth;
-        } else if (eq(o, "--from")) {
-            const char* p = need();
-            if (p == nullptr)
-                return fail(TastyRefusal::BadFrom);
-            const auto n = infra::parse_int<std::int32_t>(p);
-            if (!n || *n < 0)
-                return fail(TastyRefusal::BadFrom);
-            a.rec.from_frame = app::MovieFrame{*n};
-            rec_opt = true;
-            i += kOptionWidth;
-        } else if (eq(o, "--to")) {
-            const char* p = need();
-            if (p == nullptr)
-                return fail(TastyRefusal::BadTo);
-            const auto n = infra::parse_int<std::int32_t>(p);
-            if (!n || *n < 0)
-                return fail(TastyRefusal::BadTo);
-            a.rec.to_frame = app::MovieFrame{*n};
-            rec_opt = true;
-            i += kOptionWidth;
-        } else if (eq(o, "--segment")) {
-            const char* p = need();
-            const auto n = p != nullptr ? app::parse_rec_size(p) : std::nullopt;
-            if (!n || *n == 0 || !app::rec_segment_ok(*n))
-                return fail(TastyRefusal::BadSegment);
-            a.rec.segment_bytes = *n;
-            rec_opt = true;
-            i += kOptionWidth;
-        } else {
-            return fail(TastyRefusal::UnknownOption);
+        const std::string_view o{argv[i]};
+        const char* const p = i + 1 < argv.size() ? argv[i + 1] : nullptr;
+        OptResult r = take_path_option(o, p, a);
+        if (r.step == OptStep::NotMine)
+            r = take_time_option(o, p, a);
+        if (r.step == OptStep::NotMine)
+            r = take_fill_option(o, p, a);
+        if (r.step == OptStep::NotMine)
+            r = take_record_option(o, p, a, rec_opt);
+        if (r.step == OptStep::NotMine)
+            r = take_flag_option(o, a);
+        switch (r.step) {
+            case OptStep::NotMine:
+                return fail(TastyRefusal::UnknownOption);
+            case OptStep::Refused:
+                return fail(r.bad);
+            case OptStep::Finish:
+                return a;
+            case OptStep::Flag:
+                ++i;
+                break;
+            case OptStep::Valued:
+                i += kOptionWidth;
+                break;
         }
     }
     if (!app::rec_bounds_ok(a.rec))

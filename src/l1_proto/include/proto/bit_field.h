@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 #include "proto/types.h"
@@ -21,7 +22,7 @@ struct BitField {
     }
 
     constexpr std::uint32_t mask() const noexcept {
-        return width >= 32 ? 0xFFFF'FFFFu : ((1u << width) - 1u);
+        return width >= 32 ? std::numeric_limits<std::uint32_t>::max() : ((1u << width) - 1u);
     }
 
     friend constexpr bool operator==(BitField, BitField) = default;

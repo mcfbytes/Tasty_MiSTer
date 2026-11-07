@@ -6,8 +6,10 @@
 #include <optional>
 #include <span>
 
+#include "proto/types.h"
 #include "proto/uio_opcodes.h"
 #include "svc/disc_engine.h"
+#include "svc/msf.h"
 
 namespace mister::cores::cdwire {
 
@@ -17,17 +19,14 @@ inline constexpr std::uint8_t kUioCdSet = static_cast<std::uint8_t>(proto::UioOp
 inline constexpr std::uint16_t kCddGetCmd = 0;
 inline constexpr std::uint16_t kCddGetSendData = 1;
 
-struct Msf {
-    std::uint32_t m = 0, s = 0, f = 0;
-};
-
-constexpr Msf lba_to_msf(std::int32_t lba) noexcept {
-    const std::uint32_t v = lba > 0 ? static_cast<std::uint32_t>(lba) : 0u;
-    return Msf{(v / 75u) / 60u, (v / 75u) % 60u, v % 75u};
-}
+using Msf = svc::Msf;
 
 constexpr std::uint8_t bcd(std::uint32_t v) noexcept {
-    return static_cast<std::uint8_t>(((v / 10u) << 4) | (v % 10u));
+    return proto::PackedBcd::unmasked_byte(v);
+}
+
+constexpr std::uint8_t bcd(svc::TrackNumber n) noexcept {
+    return n.bcd_byte();
 }
 
 std::uint64_t sega_compose(std::uint16_t w0, std::uint16_t w1, std::uint16_t w2) noexcept;

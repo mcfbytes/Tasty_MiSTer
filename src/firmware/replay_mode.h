@@ -114,7 +114,7 @@ private:
         bool take_play(const TastySession::PlayAsk& ask) noexcept override;
         void take_stop() noexcept override;
         [[nodiscard]] app::FrameCount frames() const noexcept override;
-        [[nodiscard]] std::uint32_t movie_frames() const noexcept override;
+        [[nodiscard]] app::FrameCount movie_frames() const noexcept override;
         [[nodiscard]] bool refused() const noexcept override;
         [[nodiscard]] bool active() const noexcept override;
         [[nodiscard]] const char* refusal_why() const noexcept override;

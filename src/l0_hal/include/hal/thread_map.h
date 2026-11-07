@@ -7,11 +7,11 @@
 #include <span>
 #include <string_view>
 
+#include "hal/types.h"
 #include "infra/seat.h"
+#include "os/types.h"
 
 namespace mister::hal {
-
-enum class SchedPolicy : std::uint8_t { Fifo, Other };
 
 enum class SpawnKind : std::uint8_t { PromoteInPlace, Create };
 
@@ -20,7 +20,7 @@ enum class DdrMapping : std::uint8_t { None, Owner };
 struct ThreadRole {
     TASTY_SEAT_EXEMPT(const_shared);
     SeatTag seat;
-    int cpu;
+    os::CpuId cpu;
     SchedPolicy policy;
     int prio;
     std::size_t stack_bytes;
@@ -69,82 +69,82 @@ inline constexpr std::size_t kHdOsdStackBytes = 2u * 1024u * 1024u;
 
 inline constexpr ThreadMap kDe10ThreadMap{{
     {.seat = SeatTag::RT,
-     .cpu = 1,
+     .cpu = os::CpuId{1},
      .policy = SchedPolicy::Fifo,
      .prio = 40,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Frame,
-     .cpu = 1,
+     .cpu = os::CpuId{1},
      .policy = SchedPolicy::Fifo,
      .prio = 35,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Input,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 25,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Pcm,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 22,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create,
      .ddr = DdrMapping::Owner},
     {.seat = SeatTag::Prefetch,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 20,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Diag,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kOtherStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Ui,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kOtherStackBytes,
      .spawn = SpawnKind::Create,
      .ddr = DdrMapping::Owner},
     {.seat = SeatTag::Io,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 23,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create,
      .ddr = DdrMapping::Owner},
     {.seat = SeatTag::Capture,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
      .prio = 21,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Encode,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kRecorderStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::RecWrite,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kRecorderStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::Launcher,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kLauncherStackBytes,
      .spawn = SpawnKind::Create},
     {.seat = SeatTag::HdOsd,
-     .cpu = 0,
+     .cpu = os::CpuId{0},
      .policy = SchedPolicy::Other,
      .prio = 0,
      .stack_bytes = kHdOsdStackBytes,
@@ -230,7 +230,7 @@ constexpr bool rt_cpu_reserved(
     const ThreadMap& m,
     std::span<const SeatTag> allowed = kRtCpuSeats
 ) noexcept {
-    const int rt = seat_of(m, SeatTag::RT).cpu;
+    const os::CpuId rt = seat_of(m, SeatTag::RT).cpu;
     for (const ThreadRole& r : m) {
         if (r.cpu != rt)
             continue;
@@ -302,8 +302,8 @@ constexpr bool names_fit_comm(const std::array<SeatNameRow, kSeatTagCount>& rows
     return true;
 }
 
-constexpr int max_cpu(const ThreadMap& m) noexcept {
-    int hi = 0;
+constexpr os::CpuId max_cpu(const ThreadMap& m) noexcept {
+    os::CpuId hi{0};
     for (const ThreadRole& r : m) {
         if (r.cpu > hi)
             hi = r.cpu;
@@ -311,17 +311,17 @@ constexpr int max_cpu(const ThreadMap& m) noexcept {
     return hi;
 }
 
-constexpr bool cpus_within(const ThreadMap& m, long online_cpus) noexcept {
-    if (online_cpus <= 0)
+constexpr bool cpus_within(const ThreadMap& m, std::size_t online_cpus) noexcept {
+    if (online_cpus == 0)
         return false;
     for (const ThreadRole& r : m) {
-        if (r.cpu < 0 || static_cast<long>(r.cpu) >= online_cpus)
+        if (!r.cpu.below(online_cpus))
             return false;
     }
     return true;
 }
 
-constexpr bool main_off_rt_cpu(const ThreadMap& m, int main_cpu) noexcept {
+constexpr bool main_off_rt_cpu(const ThreadMap& m, os::CpuId main_cpu) noexcept {
     if (main_cpu == seat_of(m, SeatTag::RT).cpu)
         return false;
     for (const ThreadRole& r : m) {

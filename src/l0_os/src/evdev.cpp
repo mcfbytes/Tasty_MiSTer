@@ -11,7 +11,7 @@ namespace mister::os {
 Ex<std::size_t> Evdev::read(std::span<input_event> out) const noexcept {
     const ssize_t n = ::read(fd_.get(), out.data(), out.size_bytes());
     if (n < 0)
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
     return static_cast<std::size_t>(n);
 }
 

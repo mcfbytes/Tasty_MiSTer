@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <type_traits>
@@ -45,7 +46,9 @@ public:
         requires infra::AlternativeOf<A, UiRequest>
     [[nodiscard]] CorrelationTag push(const A& alt) noexcept {
         const CorrelationTag tag{ui_.next_tag};
-        ui_.next_tag = (ui_.next_tag == 0xFFFF'FFFFu) ? 1u : ui_.next_tag + 1u;
+        ui_.next_tag = (ui_.next_tag == std::numeric_limits<std::uint32_t>::max())
+            ? 1u
+            : ui_.next_tag + 1u;
         if (!ring_.push(infra::make<UiRequest>(alt, UiRequest::Head{tag})))
             return kUncaused;
         if constexpr (std::is_same_v<A, UiRequest::LoadFile>) {

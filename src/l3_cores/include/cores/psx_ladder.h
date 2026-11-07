@@ -69,7 +69,7 @@ private:
     bool stage_assets_ = false;
     proto::LinkOp::StageDiscPayload facts_{};
     proto::ActKey ss_gen_{};
-    std::int64_t ss_due_ns_ = 0;
+    std::chrono::nanoseconds ss_due_ns_{};
 };
 
 }

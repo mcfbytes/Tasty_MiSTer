@@ -2,11 +2,15 @@
 #pragma once
 
 #include <array>
+#include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 #include "infra/seat.h"
 #include "proto/types.h"
+#include "svc/types.h"
 #include "ui/ui_event.h"
 
 namespace mister::os {
@@ -20,8 +24,6 @@ class KeyDecoder {
 
 public:
     explicit KeyDecoder(const os::IClock& clock) noexcept : clock_(&clock) {}
-
-    static constexpr std::uint32_t kUpstroke = 0x400000u;
 
     void push_raw(proto::KeyCode code) noexcept;
 
@@ -39,7 +41,7 @@ public:
 
     bool repeat_all() const noexcept { return repeat_all_; }
 
-    bool pending() const noexcept { return count_ != 0 || db_pending_ != 0; }
+    bool pending() const noexcept { return !ring_.empty() || db_pending_ != proto::KeyCode{}; }
 
     std::uint32_t dropped() const noexcept { return dropped_; }
 
@@ -49,33 +51,75 @@ public:
 
     static bool repeatable(proto::KeyCode code) noexcept;
 
+    [[nodiscard]] static constexpr bool is_make(proto::KeyCode code, svc::EvdevCode key) noexcept {
+        return !code.is_release() && svc::EvdevCode::of(code) == key;
+    }
+
 private:
-    static constexpr unsigned kQueue = 32;
-
-    void enqueue(proto::KeyCode code, bool synth) noexcept;
-
-    std::optional<UiEvent> deliver_(std::uint32_t code, std::int64_t now, bool first) noexcept;
-
-    std::optional<UiEvent> accept_(std::uint32_t code, std::int64_t now) noexcept;
-
-    const os::IClock* clock_;
+    static constexpr std::size_t kQueue = 32;
 
     struct QueuedKey {
-        std::uint32_t code = 0;
+        proto::KeyCode code{};
         bool synth = false;
     };
 
-    std::array<QueuedKey, kQueue> queue_{};
-    unsigned head_ = 0;
-    unsigned count_ = 0;
+    class KeyRing {
+        TASTY_SEAT_EXEMPT(component);
+
+    public:
+        bool push(QueuedKey k) noexcept {
+            bool dropped = false;
+            if (count_ == kQueue) {
+                head_ = (head_ + 1u) % kQueue;
+                --count_;
+                dropped = true;
+            }
+            queue_[(head_ + count_) % kQueue] = k;
+            ++count_;
+            return dropped;
+        }
+
+        [[nodiscard]] bool empty() const noexcept { return count_ == 0; }
+
+        [[nodiscard]] std::size_t size() const noexcept { return count_; }
+
+        [[nodiscard]] QueuedKey& head() noexcept { return queue_[head_]; }
+
+        [[nodiscard]] const QueuedKey& head() const noexcept { return queue_[head_]; }
+
+        QueuedKey take() noexcept {
+            const QueuedKey k = queue_[head_];
+            head_ = (head_ + 1u) % kQueue;
+            --count_;
+            return k;
+        }
+
+    private:
+        std::array<QueuedKey, kQueue> queue_{};
+        std::size_t head_ = 0;
+        std::size_t count_ = 0;
+    };
+
+    void enqueue(proto::KeyCode code, bool synth) noexcept;
+
+    std::optional<UiEvent> deliver_(
+        proto::KeyCode code,
+        std::chrono::nanoseconds now,
+        bool first
+    ) noexcept;
+
+    std::optional<UiEvent> accept_(proto::KeyCode code, std::chrono::nanoseconds now) noexcept;
+
+    const os::IClock* clock_;
+    KeyRing ring_;
     bool ini_select_ = false;
     bool repeat_all_ = false;
     std::uint32_t dropped_ = 0;
 
-    std::uint32_t last_seen_ = 0;
-    std::uint32_t db_pending_ = 0;
-    std::int64_t db_at_ns_ = 0;
-    std::int64_t repeat_at_ns_ = 0;
+    proto::KeyCode last_seen_{};
+    proto::KeyCode db_pending_{};
+    std::chrono::nanoseconds db_at_{};
+    std::chrono::nanoseconds repeat_at_{};
     std::uint16_t hold_cnt_ = 0;
 };
 

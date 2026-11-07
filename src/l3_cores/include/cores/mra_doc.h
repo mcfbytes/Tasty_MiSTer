@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -8,6 +9,7 @@
 
 #include "cores/cheat_geometry.h"
 #include "cores/mra_cheat.h"
+#include "cores/mra_map_word.h"
 #include "cores/rom.h"
 #include "cores/switch_table.h"
 #include "proto/rotation_dir.h"

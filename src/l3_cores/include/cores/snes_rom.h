@@ -6,55 +6,47 @@
 #include <span>
 #include <string_view>
 
+#include "cores/snes_header_fields.h"
+#include "cores/types.h"
+#include "infra/endian.h"
 #include "proto/types.h"
 
 namespace mister::cores::snes {
 
-inline constexpr std::uint32_t kLoRomHeader = 0x007fc0;
-inline constexpr std::uint32_t kHiRomHeader = 0x00ffc0;
-inline constexpr std::uint32_t kExHiRomHeader = 0x40ffc0;
-inline constexpr std::uint32_t kNoHeader = 0;
+inline constexpr HeaderAddr kLoRomHeader{0x007fc0};
+inline constexpr HeaderAddr kHiRomHeader{0x00ffc0};
+inline constexpr HeaderAddr kExHiRomHeader{0x40ffc0};
+inline constexpr HeaderAddr kNoHeader{};
+
+inline constexpr HeaderAddr kImageStart{};
+
+inline constexpr HeaderScore kRefused{};
+
+inline constexpr std::uint32_t kCopierHeaderBytes = 512;
 
 [[nodiscard]] constexpr std::uint32_t copier_offset(proto::FileSize file_size) noexcept {
-    return (file_size.v & 512u) ? 512u : 0u;
+    return (file_size.v & kCopierHeaderBytes) ? kCopierHeaderBytes : 0u;
 }
 
-[[nodiscard]] std::uint32_t score_header(
+inline constexpr ResetVector kResetVectorFloor{0x8000};
+
+[[nodiscard]] HeaderScore score_header(
     std::span<const std::uint8_t> image,
-    std::uint32_t addr
+    HeaderAddr addr
 ) noexcept;
 
-[[nodiscard]] std::uint32_t find_header(std::span<const std::uint8_t> image) noexcept;
+[[nodiscard]] HeaderAddr find_header(std::span<const std::uint8_t> image) noexcept;
 
-inline constexpr std::uint32_t kHeaderWindowBytes = 64;
+inline constexpr HeaderLen kHeaderWindow{64};
 
-[[nodiscard]] std::uint16_t window_reset_vector(std::span<const std::uint8_t> hdr) noexcept;
+inline constexpr HeaderLen kOneByte{1};
 
-[[nodiscard]] constexpr std::uint32_t resetop_addr(
-    std::uint32_t addr,
-    std::uint16_t resetvector
-) noexcept {
-    return (addr & ~0x7fffu) | (resetvector & 0x7fffu);
-}
-
-[[nodiscard]] std::uint32_t score_window(
-    std::span<const std::uint8_t> hdr,
-    std::uint8_t resetop,
-    std::uint32_t addr
-) noexcept;
-
-[[nodiscard]] std::uint32_t pick_header(
-    std::uint32_t score_lo,
-    std::uint32_t score_hi,
-    std::uint32_t score_ex
-) noexcept;
-
-inline constexpr std::uint32_t kSignatureProbe = 0x7FC0;
+inline constexpr HeaderAddr kSignatureProbe{0x7FC0};
 inline constexpr std::string_view kBsxBiosMagic{"Satellaview BS-X     "};
 inline constexpr std::string_view kSufamiMagic{"BANDAI SFC-ADX"};
 inline constexpr std::string_view kSufamiBackupMagic{"SFC-ADX BACKUP"};
-inline constexpr std::uint32_t kSufamiStride = 1024 * 1024;
-inline constexpr std::uint32_t kSufamiBackupOffset = 0x10;
+inline constexpr HeaderLen kSufamiStride{1024 * 1024};
+inline constexpr HeaderLen kSufamiBackupOffset{0x10};
 
 extern const std::array<std::uint8_t, 32> kCc92Signature;
 extern const std::array<std::uint8_t, 32> kPf94TenKSignature;
@@ -69,8 +61,32 @@ struct CartSniff {
     bool pf94 = false;
 };
 
-inline constexpr std::uint32_t kTypingWindowBack = 16;
-inline constexpr std::uint32_t kTypingWindowBytes = 96;
+struct SufamiScan {
+    bool bios = false;
+    bool base = false;
+    bool turbo = false;
+    HeaderAddr addr{};
+    friend constexpr bool operator==(SufamiScan, SufamiScan) = default;
+};
+
+[[nodiscard]] SufamiScan sufami_walk(std::span<const std::uint8_t> payload) noexcept;
+
+inline constexpr HeaderLen kTypingWindowBack{16};
+inline constexpr HeaderLen kTypingWindow{96};
+
+struct ImageWindow {
+    std::span<const std::uint8_t> bytes;
+    HeaderAddr base;
+
+    [[nodiscard]] std::uint8_t after(HeaderAddr addr, HeaderLen ahead) const noexcept;
+
+    [[nodiscard]] std::uint8_t before(HeaderAddr addr, HeaderLen back) const noexcept;
+};
+
+[[nodiscard]] ImageWindow typing_window(
+    std::span<const std::uint8_t> image,
+    HeaderAddr addr
+) noexcept;
 
 struct TypingBytes {
     std::uint8_t size_field = 0;
@@ -80,9 +96,8 @@ struct TypingBytes {
 };
 
 [[nodiscard]] TypingBytes type_cart(
-    std::span<const std::uint8_t> window,
-    std::uint32_t window_base,
-    std::uint32_t addr,
+    const ImageWindow& window,
+    HeaderAddr addr,
     std::uint32_t payload,
     const CartSniff& sniff
 ) noexcept;
@@ -90,7 +105,7 @@ struct TypingBytes {
 inline constexpr std::uint32_t kHeaderBlockBytes = 512;
 
 [[nodiscard]] std::array<std::uint8_t, kHeaderBlockBytes> header_block(
-    std::uint32_t addr,
+    HeaderAddr addr,
     std::uint32_t payload,
     const TypingBytes* typing
 ) noexcept;

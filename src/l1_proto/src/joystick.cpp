@@ -91,9 +91,9 @@ Ex<bool> JoystickPort::submit(
 ) {
     if (!prev_.find(player))
         return bad_player(player, ERR_SITE());
-    const JoyMask composed = buttons | autofire;
+    const JoyMask composed = buttons.with(autofire);
 
-    const bool new_dir = (composed | prev_[player]).any(kDirections);
+    const bool new_dir = composed.with(prev_[player]).any(kDirections);
 
     if (composed == prev_[player])
         return false;

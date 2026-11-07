@@ -4,10 +4,11 @@
 namespace mister::cores {
 
 Ex<std::span<std::byte>> MailboxWindow::at(std::size_t off, std::size_t n) const {
-    constexpr std::size_t kMax = std::numeric_limits<std::uint32_t>::max();
+    constexpr std::size_t kMax = kMailboxPageMax;
     if (off > kMax || n > kMax) {
+
         return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off & 0xFFFF'FFFFu)}
+            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)}
         );
     }
     if (window_.data() == nullptr

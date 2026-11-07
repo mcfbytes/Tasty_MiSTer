@@ -2,7 +2,7 @@
 #include "ui/progress_page.h"
 
 #include <algorithm>
-#include <cstring>
+#include <array>
 
 #include "ui/osd_renderer.h"
 
@@ -16,9 +16,7 @@ std::string_view progress_leaf(std::string_view path) noexcept {
 }
 
 ProgressPage::ProgressPage(std::string_view name) noexcept {
-    const std::string_view leaf = progress_leaf(name);
-    std::copy(leaf.begin(), leaf.end(), name_);
-    name_len_ = static_cast<std::uint8_t>(leaf.size());
+    (void)name_.assign(progress_leaf(name));
 }
 
 void ProgressPage::set_progress(cores::Progress progress) noexcept {
@@ -37,10 +35,10 @@ bool ProgressPage::describe(app::PageDescription& out) const {
     out = {};
     (void)out.title.assign("Loading");
     constexpr std::uint8_t kDescribedRows = 2;
-    out.total = kDescribedRows;
-    out.row_count = kDescribedRows;
+    out.total = RowCount::of(kDescribedRows);
+    out.row_count = RowCount::of(kDescribedRows);
     out.rows[0].kind = app::PageDescription::RowKind::Text;
-    (void)out.rows[0].label.assign(std::string_view{name_, name_len_});
+    (void)out.rows[0].label.assign(name_.view());
     out.rows[1].kind = app::PageDescription::RowKind::Bar;
     if (last_.total != 0) {
         constexpr std::uint32_t kPercent = 100;
@@ -53,15 +51,14 @@ bool ProgressPage::describe(app::PageDescription& out) const {
 void ProgressPage::render(OsdRenderer& out) const {
     TASTY_SEAT_BODY(ProgressPage);
     out.set_title("Loading");
-    char line[kProgressNameMax + 1];
+    std::array<char, kProgressNameMax + 1> line{};
     line[0] = ' ';
-    std::memcpy(line + 1, name_, name_len_);
-    constexpr unsigned kOsdRows = 8;
-    for (unsigned r = 0; r < kOsdRows; ++r) {
-        const OsdRow row{static_cast<std::uint8_t>(r)};
-        if (r == kProgressNameRow) {
-            out.text(row, std::string_view(line, 1u + name_len_));
-        } else if (r == kProgressBarRow) {
+    std::copy(name_.view().begin(), name_.view().end(), line.begin() + 1);
+    for (RowCount r{}; r < kProgressOsdRows; r += kOneRow) {
+        const OsdRow row = osd_row_at(r);
+        if (row == kProgressNameRow) {
+            out.text(row, std::string_view(line.data(), 1u + name_.size()));
+        } else if (row == kProgressBarRow) {
             out.progress(row, step_);
         } else {
             out.text(row, std::string_view{});

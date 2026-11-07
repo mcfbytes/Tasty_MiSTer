@@ -25,4 +25,7 @@ inline constexpr const char* kFileStem = "ATARIST";
 inline constexpr const char* kFileExt = ".CFG";
 inline constexpr std::uint8_t kSlotCount = 9;
 
+inline constexpr std::size_t kPreviewChars = 64;
+inline constexpr std::size_t kTosExtChars = 4;
+
 }

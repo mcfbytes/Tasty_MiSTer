@@ -134,9 +134,11 @@ enum class Admit : std::uint8_t {
 
 Admit admit_entry(std::string_view name, bool is_dir, bool at_root, const ScanFilter& f);
 
+inline constexpr std::string_view kExtDot = ".";
+
 struct ZipMember {
-    std::string_view name;
-    std::uint64_t size = 0;
+    std::string name;
+    proto::FileSize size{};
     bool is_dir = false;
 };
 

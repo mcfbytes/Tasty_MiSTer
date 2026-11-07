@@ -24,6 +24,38 @@
 
 namespace mister::cores {
 
+struct PsxGameId {
+    TASTY_SEAT_EXEMPT(component);
+    static constexpr std::size_t kChars = 11;
+    FixedStr<kChars, StrFit::Clip> text{};
+
+    [[nodiscard]] std::string_view view() const noexcept { return text.view(); }
+
+    [[nodiscard]] bool empty() const noexcept { return text.empty(); }
+
+    void clear() noexcept { text.clear(); }
+
+    void assign(std::span<const std::uint8_t> hit, std::size_t raw_len) noexcept {
+        char id[kChars] = {};
+        std::size_t size = raw_len > kChars ? kChars : raw_len;
+        for (std::size_t i = 0; i < size; ++i)
+            id[i] = static_cast<char>(hit[i]);
+        if (raw_len == kChars) {
+            if (id[4] == '_')
+                id[4] = '-';
+            if (id[8] == '.') {
+                id[8] = id[9];
+                id[9] = id[10];
+                id[10] = '\0';
+                --size;
+            }
+        }
+        if (size > 10)
+            size = 10;
+        (void)text.assign(std::string_view{id, size});
+    }
+};
+
 class PsxCore final : public Core,
                       public IStagingCore,
                       public ISectorKick,
@@ -126,6 +158,10 @@ private:
     void warm_window_(std::int64_t lba0, std::size_t sectors) noexcept;
 
     [[nodiscard]] bool scan_disc_identity_();
+
+    [[nodiscard]] bool scan_root_();
+
+    [[nodiscard]] svc::DiscRegion licence_region_(std::span<const std::uint8_t> sector) const;
     svc::DiscMountState refresh_disc_() noexcept;
     [[nodiscard]] Ex<void> finish_mount_();
 
@@ -147,7 +183,7 @@ private:
     FixedStr<1024, StrFit::Reject> image_path_{};
 
     StagePlan plan_{};
-    FixedStr<11, StrFit::Clip> game_id_{};
+    PsxGameId game_id_{};
     svc::DiscRegion region_ = svc::DiscRegion::Unknown;
 
     std::uint32_t kicks_ = 0;

@@ -13,6 +13,7 @@
 #include <string_view>
 
 #include "app/session_owner.h"
+#include "hal/axi.h"
 #include "hal/region_id.h"
 #include "hal/thread_map.h"
 #include "infra/persist.h"
@@ -29,11 +30,19 @@ std::atomic<int> g_exit_code TASTY_PERSIST(proc, tasty_exit_code){0};
 static_assert(std::atomic<int>::is_always_lock_free);
 
 enum class HomeLane : int { Idle = 0, Open = 1, Stopping = 2, Left = 3 };
-std::atomic<int> g_home_owed TASTY_PERSIST(proc, tasty_home_owed){0};
+std::atomic<HomeLane> g_home_owed TASTY_PERSIST(proc, tasty_home_owed){HomeLane::Idle};
 std::atomic<int> g_deferred_stop TASTY_PERSIST(proc, tasty_deferred_stop){0};
+static_assert(std::atomic<HomeLane>::is_always_lock_free);
 static_assert(std::atomic<int>::is_always_lock_free);
 
-alignas(16) unsigned char g_fatal_stack[32 * 1024] TASTY_PERSIST(proc, tasty_fatal_stack){};
+inline constexpr std::size_t kFatalStackBytes = 32 * 1024;
+#if !defined(__GLIBC__)
+static_assert(
+    kFatalStackBytes >= SIGSTKSZ,
+    "the fatal handler's alternate stack must hold one signal frame"
+);
+#endif
+alignas(16) unsigned char g_fatal_stack[kFatalStackBytes] TASTY_PERSIST(proc, tasty_fatal_stack){};
 
 class TastyVoice final : public IReportVoice {
 public:
@@ -41,12 +50,6 @@ public:
 };
 
 const TastyVoice kTastyVoice{};
-
-hal::PhysRegion video_fb_region(std::span<const hal::PhysRegion> regions) noexcept {
-    if (regions.size() != hal::kRegionCount)
-        return hal::PhysRegion{};
-    return regions[static_cast<std::size_t>(hal::RegionId::VideoFb)];
-}
 
 }
 
@@ -60,18 +63,18 @@ using fw::HomeLane;
 extern "C" void on_tasty_stop(int sig) {
     if (fw::ProcessStandup::latch_stop())
         return;
-    const int lane = fw::g_home_owed.load(std::memory_order_seq_cst);
-    if (lane == static_cast<int>(HomeLane::Open)) {
+    const HomeLane lane = fw::g_home_owed.load(std::memory_order_seq_cst);
+    if (lane == HomeLane::Open) {
         (void)fw::tasty_launch_home();
-        ::_exit(128 + sig);
+        ::_exit(fw::kSignalExitBase + sig);
     }
 
-    if (lane == static_cast<int>(HomeLane::Stopping))
+    if (lane == HomeLane::Stopping)
         fw::g_deferred_stop.store(sig, std::memory_order_seq_cst);
 }
 
 extern "C" void on_tasty_fatal(int sig) {
-    if (fw::g_home_owed.load(std::memory_order_seq_cst) == static_cast<int>(HomeLane::Open))
+    if (fw::g_home_owed.load(std::memory_order_seq_cst) == HomeLane::Open)
         (void)fw::tasty_launch_home();
     sigset_t set;
     ::sigemptyset(&set);
@@ -82,7 +85,7 @@ extern "C" void on_tasty_fatal(int sig) {
     ::sigemptyset(&sa.sa_mask);
     (void)::sigaction(sig, &sa, nullptr);
     (void)::raise(sig);
-    ::_exit(128 + sig);
+    ::_exit(fw::kSignalExitBase + sig);
 }
 
 }
@@ -94,29 +97,29 @@ const std::atomic<int>& tasty_owner_stop_flag() noexcept {
 }
 
 void tasty_owe_home() noexcept {
-    g_home_owed.store(static_cast<int>(HomeLane::Open), std::memory_order_seq_cst);
+    g_home_owed.store(HomeLane::Open, std::memory_order_seq_cst);
 }
 
 bool tasty_home_may_launch() noexcept {
-    const int lane = g_home_owed.load(std::memory_order_seq_cst);
-    return lane != static_cast<int>(HomeLane::Stopping) && lane != static_cast<int>(HomeLane::Left);
+    const HomeLane lane = g_home_owed.load(std::memory_order_seq_cst);
+    return lane != HomeLane::Stopping && lane != HomeLane::Left;
 }
 
 int tasty_stop_and_owe() noexcept {
     g_deferred_stop.store(0, std::memory_order_seq_cst);
-    g_home_owed.store(static_cast<int>(HomeLane::Stopping), std::memory_order_seq_cst);
+    g_home_owed.store(HomeLane::Stopping, std::memory_order_seq_cst);
     bool gone = false;
     if (const auto stopped = tasty_stop_stock())
         gone = *stopped;
     if (!gone) {
-        g_home_owed.store(static_cast<int>(HomeLane::Left), std::memory_order_seq_cst);
+        g_home_owed.store(HomeLane::Left, std::memory_order_seq_cst);
         tasty_say("tasty: the menu was left running");
         return 1;
     }
     tasty_owe_home();
     if (const int sig = g_deferred_stop.exchange(0, std::memory_order_seq_cst)) {
         (void)tasty_launch_home();
-        ::_exit(128 + sig);
+        ::_exit(kSignalExitBase + sig);
     }
     return 0;
 }
@@ -204,13 +207,13 @@ ReplayMode::Exit ReplayMode::prepare() {
     if (!lock) {
         if (lock.error().code == Errc::busy) {
             tasty_say(tasty_busy_text());
-            return 2;
+            return kExitBusyOwner;
         }
         report("tasty lock", lock.error());
-        return 2;
+        return kExitBusyOwner;
     }
     home_.emplace();
-    home_->lock_fd = *lock;
+    home_->lock_fd = std::move(*lock);
     if (const int held = tasty_stop_and_owe())
         return held;
     (void)tasty_write_pid(::getpid(), args_.movie.view());
@@ -309,7 +312,8 @@ ReplayMode::Owner::Owner(
            .vfs = plat.vfs,
            .stop = ProcessStandup::stop_latch(),
            .exit_code = g_exit_code,
-           .video_fb = video_fb_region(plat.regions),
+           .video_fb = hal::declared_region(plat.regions, hal::RegionId::VideoFb)
+                           .value_or(hal::PhysRegion{}),
            .direct_video_ini = device.owner_.direct_video_ini_cell()},
           args
       } {
@@ -326,7 +330,7 @@ bool ReplayMode::FeederReplay::take_play(const TastySession::PlayAsk& ask) noexc
     app::ReplayFeeder::Play p{};
     p.movie = ask.movie;
     p.rom = ask.rom;
-    p.phase_us = ask.phase_us;
+    p.phase = ask.phase_us;
     p.lead = ask.lead;
     p.stop_at = ask.stop_at;
     p.ram_fill = ask.ram_fill;
@@ -346,7 +350,7 @@ app::FrameCount ReplayMode::FeederReplay::frames() const noexcept {
     return f.pushed();
 }
 
-std::uint32_t ReplayMode::FeederReplay::movie_frames() const noexcept {
+app::FrameCount ReplayMode::FeederReplay::movie_frames() const noexcept {
     TASTY_SEAT_BODY(FeederReplay);
     return f.movie_frames();
 }

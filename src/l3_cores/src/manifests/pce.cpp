@@ -80,11 +80,11 @@ static_assert(
     "req: exactly the two per-title fast paths"
 );
 static_assert(
-    kPceCdSeekFastPaths[0].count == 120 && kPceCdSeekFastPaths[0].latency_ticks == 0,
+    kPceCdSeekFastPaths[0].count == SectorCount{120} && kPceCdSeekFastPaths[0].latency_ticks == 0,
     "pcecdd.cpp:657-661: HuVideo cnt==120 -> latency 0"
 );
 static_assert(
-    kPceCdSeekFastPaths[1].count == 252 && kPceCdSeekFastPaths[1].latency_ticks == 5,
+    kPceCdSeekFastPaths[1].count == SectorCount{252} && kPceCdSeekFastPaths[1].latency_ticks == 5,
     "pcecdd.cpp:663-667: Sherlock Holmes cnt==252 -> latency 5"
 );
 

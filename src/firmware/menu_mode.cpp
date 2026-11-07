@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <memory>
+#include <utility>
 #include <string_view>
 
 #include "app/link_session.h"
@@ -77,8 +78,7 @@ MenuMode::MenuMode(int argc, char** argv) noexcept
         report("ProcessTitle::create", title_.error());
 
     boot_argv_ = {argv[0], (argc > 1) ? argv[1] : "", nullptr};
-    constexpr int kCompanionArg = 2;
-    if (argc > kCompanionArg) {
+    if (std::cmp_greater(argc, kCompanionArg)) {
         boot_argv_[kCompanionArg] = argv[kCompanionArg];
         boot_argc_ = kCompanionArg + 1;
     }

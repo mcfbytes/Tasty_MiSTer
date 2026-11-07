@@ -17,6 +17,12 @@ int icmp_full(std::string_view a, std::string_view b) {
     return icmp_n(a, b, std::max(a.size(), b.size()) + 1);
 }
 
+inline constexpr std::string_view kAltStem = "MiSTer_";
+inline constexpr std::string_view kAltSuffix = ".ini";
+inline constexpr std::size_t kAltPathBytes = 63;
+inline constexpr std::size_t kAltLabelBytes = 5;
+inline constexpr std::size_t kAltLabelPad = 4;
+
 }
 
 AltIniIndex AltIniIndex::scan(std::span<const std::string> root_dirents) {
@@ -27,14 +33,15 @@ AltIniIndex AltIniIndex::scan(std::span<const std::string> root_dirents) {
         if (found >= kMaxAltInis)
             break;
 
-        if (icmp_n(d, "MiSTer_", 7) != 0)
+        if (icmp_n(d, kAltStem.data(), kAltStem.size()) != 0)
             continue;
-        if (!iequals(std::string_view{d}.substr(d.size() - 4), ".ini"))
+        if (!iequals(std::string_view{d}.substr(d.size() - kAltSuffix.size()), kAltSuffix)) {
             continue;
+        }
         idx.names_[found] = d;
 
-        if (idx.names_[found].size() > 63)
-            idx.names_[found].resize(63);
+        if (idx.names_[found].size() > kAltPathBytes)
+            idx.names_[found].resize(kAltPathBytes);
         ++found;
     }
 
@@ -52,7 +59,8 @@ AltIniIndex AltIniIndex::scan(std::span<const std::string> root_dirents) {
 }
 
 std::string_view AltIniIndex::name_for(std::uint8_t alt) const {
-    if (alt == 0 || alt >= 4)
+
+    if (alt == 0 || alt > kMaxAltInis)
         return "MiSTer.ini";
     return names_[alt - 1];
 }
@@ -65,9 +73,9 @@ std::string AltIniIndex::label_for(std::uint8_t alt) const {
     if (name.empty())
         return " -- ";
 
-    char label[6] = {};
-    const std::string_view tail = name.substr(7);
-    const std::size_t n = std::min<std::size_t>(tail.size(), 5);
+    char label[kAltLabelBytes + 1] = {};
+    const std::string_view tail = name.substr(kAltStem.size());
+    const std::size_t n = std::min<std::size_t>(tail.size(), kAltLabelBytes);
     for (std::size_t k = 0; k < n; ++k)
         label[k] = tail[k];
 
@@ -88,11 +96,11 @@ std::string AltIniIndex::label_for(std::uint8_t alt) const {
     if (iequals(stem, "alt_3"))
         return "Alt3";
 
-    for (std::size_t k = 0; k < 4; ++k) {
+    for (std::size_t k = 0; k < kAltLabelPad; ++k) {
         if (label[k] == '\0')
             label[k] = ' ';
     }
-    label[4] = '\0';
+    label[kAltLabelPad] = '\0';
     return std::string{label};
 }
 

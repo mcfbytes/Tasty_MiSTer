@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "cores/cd_dialect_facts.h"
@@ -9,6 +10,9 @@
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
 #include "cores/cdwire.h"
+#include "cores/sega_cdd_stat.h"
+#include "cores/types.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 
@@ -25,37 +29,41 @@ private:
         TASTY_SEAT_RESIDENT(RT);
 
     public:
-        [[nodiscard]] std::int32_t at(std::int32_t head) const noexcept { return head + lead_; }
+        [[nodiscard]] HeadLba at(HeadLba head) const noexcept { return head + lead_; }
 
-        void locate() noexcept { lead_ = 0; }
+        void locate() noexcept { lead_ = SectorCount{}; }
 
         void reprime() noexcept { primed_ = false; }
 
-        [[nodiscard]] std::int32_t frame_sectors() noexcept {
-            const std::int32_t n = primed_ ? 1 : 2;
+        [[nodiscard]] SectorCount frame_sectors() noexcept {
+            const SectorCount n = primed_ ? SectorCount{1} : SectorCount{2};
             primed_ = true;
             return n;
         }
 
-        void read(std::int32_t n) noexcept { lead_ += n - 1; }
+        void read(SectorCount n) noexcept { lead_ += n - SectorCount{1}; }
 
     private:
-        std::int32_t lead_ = 0;
+        SectorCount lead_{};
         bool primed_ = false;
     };
 
     struct Cdd {
-        std::uint8_t status = 0x0B;
-        std::uint8_t stat[9] = {0xB, 0, 0, 0, 0, 0, 0, 0, 0};
+        static constexpr std::uint8_t kNoDisc = 0x0B;
+
+        Cdd() noexcept { stat.set_status(kNoDisc); }
+
+        std::uint8_t status = kNoDisc;
+        SegaCddStat stat{};
         std::uint8_t comm[10] = {};
         bool is_data = true;
         bool loaded = false;
         bool has_command = false;
         std::uint32_t latency = 10;
-        std::int32_t lba = 0;
+        HeadLba lba{};
         CddaRead cdda{};
-        std::uint32_t track = 0;
-        std::int32_t scan_offset = 0;
+        svc::TrackIndex track{};
+        SectorCount scan_offset{};
     };
 
     [[nodiscard]] Ex<void> do_accept(
@@ -69,13 +77,7 @@ private:
     bool do_streaming(const svc::DiscGeometry& geom) const noexcept override;
 
     DriveView do_drive_view(const svc::DiscGeometry&) const noexcept override {
-        return DriveView{
-            st_.status,
-            svc::TrackIndex{static_cast<std::uint8_t>(st_.track)},
-            st_.lba,
-            st_.cdda.at(st_.lba),
-            st_.is_data
-        };
+        return DriveView{st_.status, st_.track, st_.lba, st_.cdda.at(st_.lba), st_.is_data};
     }
 
     std::size_t do_command_word_count() const noexcept override { return 3; }
@@ -100,18 +102,21 @@ private:
 
     std::span<const std::uint8_t> subcode_stage_();
     void command_exec_(const svc::DiscGeometry& geom);
-    void seek_(std::int32_t lba, bool play, const svc::DiscGeometry& geom);
+    void seek_(HeadLba lba, bool play, const svc::DiscGeometry& geom);
 
     bool can_send_ready_(svc::TrackType type, bool skip_mode1, ICdLink& link);
 
-    void hint_at_(std::int32_t lba, const svc::DiscGeometry& geom) noexcept;
+    void hint_at_(HeadLba lba, const svc::DiscGeometry& geom) noexcept;
     void pump_pipeline_(const svc::DiscGeometry& geom) noexcept;
+
+    static constexpr std::size_t kFramePairBytes = 2 * svc::kCdDataSize;
+    static constexpr std::size_t kSubcodeStageBytes = 100;
 
     CdDialectFacts facts_;
     CdEngineStats stats_{};
 
-    std::uint8_t sec_buf_[2352 + 2352] = {};
-    std::uint8_t sub_buf_[100] = {};
+    std::uint8_t sec_buf_[kFramePairBytes] = {};
+    std::uint8_t sub_buf_[kSubcodeStageBytes] = {};
     Cdd st_{};
 
     std::uint8_t speed_index_ = 0;

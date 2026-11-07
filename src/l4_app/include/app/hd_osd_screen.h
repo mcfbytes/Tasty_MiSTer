@@ -88,8 +88,9 @@ private:
     std::uint32_t out_w_ = 0;
     std::uint32_t out_h_ = 0;
     std::uint32_t stale_drops_ = 0;
-    int guarded_vt_ = 0;
-    int hushed_vt_ = 0;
+
+    std::optional<os::VtNumber> guarded_vt_{};
+    std::optional<os::VtNumber> hushed_vt_{};
     bool open_ = false;
     bool intends_ = false;
     bool covers_ = false;

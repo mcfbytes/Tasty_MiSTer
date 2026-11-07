@@ -6,6 +6,8 @@
 
 #include "app/frame_stamp.h"
 #include "app/rec_control.h"
+#include "app/picture_row.h"
+#include "app/rgb_rows.h"
 #include "app/types.h"
 #include "infra/spsc_ring.h"
 
@@ -18,7 +20,7 @@ struct SidecarMsg {
     std::uint8_t pad_ = 0;
     ControlGeneration gen{};
     std::uint16_t width = 0;
-    std::uint16_t height = 0;
+    PictureRows height{};
     std::uint32_t hash = 0;
     std::int32_t segment = -1;
     std::int32_t seg_frame = -1;

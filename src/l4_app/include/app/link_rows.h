@@ -151,7 +151,7 @@ struct BindOutcome {
 [[nodiscard]] inline BindOutcome bind_link_rows(
     std::span<const LinkRow> rows,
     LinkTxChannel<SeatTag::Main>& tx,
-    [[maybe_unused]] std::uint32_t gen
+    [[maybe_unused]] proto::BindGeneration gen
 ) noexcept {
     BindOutcome out{};
     for (const LinkRow& row : rows) {

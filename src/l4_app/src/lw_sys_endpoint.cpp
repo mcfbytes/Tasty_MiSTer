@@ -177,7 +177,7 @@ bool LwSysEndpoint::read_snapshot_(proto::StatusSnapshot& into) noexcept {
     const std::uint32_t f0 = port_().read(SysBlock::Reg::Stflg);
     for (std::uint32_t i = 0; i < SysBlock::kSnapshotWords; ++i) {
         const std::uint32_t w = port_().read(SysBlock::status(i));
-        into.words[2 * i] = static_cast<std::uint16_t>(w & 0xFFFFu);
+        into.words[2 * i] = static_cast<std::uint16_t>(w);
         into.words[2 * i + 1] = static_cast<std::uint16_t>(w >> 16);
     }
     const std::uint32_t f1 = port_().read(SysBlock::Reg::Stflg);

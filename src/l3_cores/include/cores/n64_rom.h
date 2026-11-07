@@ -36,7 +36,12 @@ using RomHeader = std::span<const std::uint8_t, kHeaderBytes>;
 }
 
 inline constexpr std::size_t kInternalNameOffset = 0x20;
+
+inline constexpr std::size_t kControllerOffset = 0x34;
+inline constexpr std::size_t kControllerCount = 4;
 inline constexpr std::size_t kCartIdOffset = 0x3b;
+
+inline constexpr std::size_t kCartIdRegionOffset = kCartIdOffset + 3;
 inline constexpr std::size_t kCartIdRevisionOffset = 0x3f;
 
 inline constexpr std::size_t kCartIdChars = 6;

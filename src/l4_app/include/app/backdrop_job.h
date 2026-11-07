@@ -9,6 +9,7 @@
 #include "app/backdrop_scaler.h"
 #include "app/flip_buffer.h"
 #include "app/hd_rect.h"
+#include "app/px_plane.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -21,8 +22,7 @@ public:
     enum class Step : std::uint8_t { Idle, Scale, Copy };
 
     struct Canvas {
-        std::span<std::uint16_t> frame{};
-        std::uint32_t stride_px = 0;
+        PxPlane frame{};
         HdRect game{};
         HdRect picture{};
         std::array<BackdropScalerTarget, 2> targets{};

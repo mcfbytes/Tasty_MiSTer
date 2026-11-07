@@ -164,9 +164,6 @@ public:
         return "unknown";
     }
 
-    static constexpr std::uint8_t kModeNever = kVideoModeNever;
-    static constexpr std::uint8_t kModeCustom = kVideoModeCustom;
-
     using Stats = VideoPumpStats;
 
     [[nodiscard]] Stats stats() const noexcept { return stats_cell_.sample().value; }
@@ -184,7 +181,7 @@ public:
 private:
     struct FamilyMode {
         bool configured = false;
-        std::uint8_t index = kVideoModeCustom;
+        VideoModeIndex index = kVideoModeIndexCustom;
         svc::video_timing::StoredMode stored{};
         bool have_raw_pll = false;
         svc::PllBlock raw_pll{};
@@ -252,7 +249,7 @@ private:
     std::int64_t last_apply_ns_ = -1;
     std::uint32_t geo_polls_ = 0;
     std::uint32_t geo_edges_ = 0;
-    std::uint32_t geo_gen_seen_ = 0;
+    svc::Generation geo_gen_seen_{};
     std::uint16_t scrw_ = 0;
     std::uint16_t scrh_ = 0;
     svc::VscaleMode vscale_mode_ = svc::VscaleMode::Fit;

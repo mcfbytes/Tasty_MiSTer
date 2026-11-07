@@ -73,8 +73,7 @@ std::span<const std::reference_wrapper<IHdRow>> HdMediaPlan::rows() const {
 std::optional<RowKey> HdMediaPlan::SlotRow::key() const {
     TASTY_SEAT_BODY(SlotRow);
 
-    constexpr std::uint32_t kSlotKeyBase = 0x3'0000u;
-    return RowKey{kSlotKeyBase | to_item(plan_.focus_at_(at_)).v};
+    return RowKey::in_space(RowKeySpace::Slot, to_item(plan_.focus_at_(at_)));
 }
 
 app::PageDescription::Row HdMediaPlan::SlotRow::describe() const {

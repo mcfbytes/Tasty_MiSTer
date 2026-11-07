@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -10,14 +11,17 @@
 
 #include "cores/mount_status.h"
 #include "cores/save_extent.h"
+#include "cores/wire_word.h"
+#include "hal/types.h"
 #include "infra/error.h"
 #include "infra/message_sum.h"
 #include "proto/link_op.h"
 #include "proto/status_word.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
-inline constexpr std::int64_t kSaveStateHoldBoundNs = 20'000'000'000;
+inline constexpr std::chrono::nanoseconds kSaveStateHoldBound{20'000'000'000};
 
 class ILadderHost {
 public:
@@ -34,7 +38,7 @@ public:
     [[nodiscard]] virtual Ex<proto::FileId> intern_bytes(
         std::span<const std::uint8_t> bytes,
         std::string_view ext,
-        std::uint32_t load_addr
+        hal::FabricAddr load_addr
     ) = 0;
 
     [[nodiscard]] virtual Ex<proto::FileId> intern_piece(
@@ -43,12 +47,12 @@ public:
         std::uint64_t,
         std::uint64_t
     ) {
-        return intern_bytes(bytes, ext, 0);
+        return intern_bytes(bytes, ext, hal::FabricAddr{});
     }
 
     [[nodiscard]] virtual std::size_t link_in_flight() const noexcept { return 0; }
 
-    [[nodiscard]] virtual std::size_t link_word_bytes() const noexcept { return 1; }
+    [[nodiscard]] virtual WireWordBytes link_word_bytes() const noexcept { return {}; }
 
     [[nodiscard]] virtual Ex<proto::FileId> intern_whole(
         std::vector<std::uint8_t>&&,
@@ -63,7 +67,7 @@ public:
 
     [[nodiscard]] virtual Ex<proto::FileId> intern_path(
         std::string_view path,
-        std::uint64_t size_bytes
+        proto::FileSize size
     ) = 0;
 
     [[nodiscard]] virtual proto::ActKey next_generation() noexcept = 0;

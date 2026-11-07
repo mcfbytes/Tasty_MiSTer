@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "infra/pause_latch.h"
+
 namespace mister::app {
 
 class ParkReceipt {
@@ -13,14 +15,14 @@ public:
     ParkReceipt& operator=(ParkReceipt&&) noexcept = default;
     ~ParkReceipt() = default;
 
-    [[nodiscard]] std::uint32_t gen() const noexcept { return gen_; }
+    [[nodiscard]] xthread::PauseGen gen() const noexcept { return gen_; }
 
 private:
     friend class SwitchPark;
 
-    explicit ParkReceipt(std::uint32_t at_gen) noexcept : gen_(at_gen) {}
+    explicit ParkReceipt(xthread::PauseGen at_gen) noexcept : gen_(at_gen) {}
 
-    std::uint32_t gen_;
+    xthread::PauseGen gen_;
 };
 
 }

@@ -12,7 +12,6 @@
 namespace mister::os {
 
 class MmioRegion {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     enum class Attr : std::uint8_t { Device, UncachedNormal };

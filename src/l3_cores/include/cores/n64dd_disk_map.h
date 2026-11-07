@@ -36,7 +36,7 @@ public:
 
     [[nodiscard]] std::uint32_t ram_bytes() const noexcept { return ram_ok_ ? ram_bytes_ : 0; }
 
-    [[nodiscard]] std::uint8_t disk_type() const noexcept { return disk_type_; }
+    [[nodiscard]] DiskType disk_type() const noexcept { return disk_type_; }
 
     template <class Fn>
     void for_each_ram_run(std::uint64_t ram_off, std::uint64_t len, Fn&& fn) const {
@@ -71,7 +71,7 @@ private:
     std::size_t count_ = 0;
     std::size_t ram_count_ = 0;
     std::uint32_t ram_bytes_ = 0;
-    std::uint8_t disk_type_ = 0;
+    DiskType disk_type_{};
     bool ram_ok_ = false;
 };
 

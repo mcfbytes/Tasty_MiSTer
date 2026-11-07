@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -34,7 +35,7 @@ public:
     static constexpr hal::WordOffset kCounterWord{0};
     static constexpr hal::WordOffset kSizeWord{1};
 
-    static constexpr std::uint32_t kSentinel = 0xFFFF'FFFFu;
+    static constexpr std::uint32_t kSentinel = std::numeric_limits<std::uint32_t>::max();
 
     static constexpr std::chrono::nanoseconds kScanPeriod{std::chrono::seconds{1}};
 

@@ -64,27 +64,25 @@ void StartChain::plan_chain_(const Facts& f, const svc::Vfs& vfs) {
 void StartChain::plan_boot_images_(bool slot0_held, std::string_view home, const svc::Vfs& vfs) {
     if (home.empty())
         return;
-    const auto image = [&](std::string_view name, unsigned slot) {
+    const auto image = [&](std::string_view name, proto::WideIoIndex dest) {
         std::string path(home);
         path += '/';
         path.append(name);
         if (!vfs.file_exists(path) || image_count_ >= images_.size())
             return;
-        if (auto s = file_(
-                path,
-                proto::WideIoIndex{static_cast<std::uint16_t>(slot << 6)},
-                proto::FileSize{}
-            ))
+        if (auto s = file_(path, dest, proto::FileSize{}))
             images_[image_count_++] = *s;
     };
-    for (unsigned i = slot0_held ? 1u : 0u; i < 4; ++i) {
+
+    for (std::uint8_t i = slot0_held ? std::uint8_t{1} : std::uint8_t{0}; i < kNumberedBootImages;
+         ++i) {
         std::string name = "boot";
         name += static_cast<char>('0' + i);
         name += ".vhd";
-        image(name, i);
+        image(name, proto::WideIoIndex::of(proto::IoIndex{}, i));
     }
     if (!slot0_held)
-        image("boot.vhd", 0);
+        image("boot.vhd", proto::WideIoIndex{});
 }
 
 std::string StartChain::core_home(std::string_view name, const svc::Vfs& vfs) {

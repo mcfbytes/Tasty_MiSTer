@@ -7,8 +7,8 @@ namespace mister::app {
 
 void JoyLevelEmitter::publish(bool muted) {
 
-    std::uint32_t seen = tally_.joy_seen();
-    std::uint32_t players = tally_.joy_players();
+    svc::JoyMask seen{};
+    std::uint32_t players = 0;
 
     if (reset_seen_.take(wire_.edge_reset())) {
         for (PlayerLevel& level : levels_)
@@ -22,13 +22,14 @@ void JoyLevelEmitter::publish(bool muted) {
         const svc::PlayerIndex p{i};
         PlayerLevel& level = levels_[p];
         const svc::JoyMask mask = svc_.joy_mask(p);
-        if (mask.v != 0u) {
-            seen |= mask.v;
+        if (!mask.empty()) {
+            seen = seen.with(mask);
             players |= (1u << i);
         }
-        level.autofire = wire_.joy(p).autofire;
 
-        wire_.publish_joy(p, mask, wire_.joy(p).autofire);
+        const JoyLevel held = wire_.joy(p);
+        level.autofire = held.autofire;
+        wire_.publish_joy(p, JoyLevel{mask, held.autofire});
         if (mask != level.armed_mask || level.autofire != level.armed_autofire) {
             level.armed_mask = mask;
             level.armed_autofire = level.autofire;
@@ -56,7 +57,7 @@ void JoyLevelEmitter::publish(bool muted) {
                 continue;
             const proto::LinkOp::JoyRelease rel{
                 .player = proto::PlayerIndex{i},
-                .mask = grabbed ? level.armed_mask | level.autofire : level.armed_mask
+                .mask = grabbed ? level.armed_mask.with(level.autofire) : level.armed_mask
             };
             if (!muted && inbox_.push(rel))
                 wire_.note_activity();
@@ -64,7 +65,7 @@ void JoyLevelEmitter::publish(bool muted) {
             level.zero_armed = false;
         }
     }
-    tally_.store_joy(seen, players);
+    tally_.merge_joy(seen, players);
 }
 
 }

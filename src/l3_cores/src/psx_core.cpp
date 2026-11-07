@@ -20,6 +20,14 @@ constexpr std::uint32_t kSectorBytes = static_cast<std::uint32_t>(svc::kCdDataSi
 constexpr std::int64_t kRootFolderLba = 150 + 22;
 constexpr std::int64_t kLicenseLba = 154;
 
+constexpr std::int64_t kRootDirSectors = 25;
+
+inline constexpr std::string_view
+    kLicenceText = "          Licensed  by          Sony Computer Entertainment ";
+
+constexpr std::size_t kLicenceOffset = kLicenceText.size();
+static_assert(kLicenceOffset == 60);
+
 struct PrefixRegion {
     const char* prefix;
     svc::DiscRegion region;
@@ -105,7 +113,7 @@ Ex<void> PsxCore::on_mount(IoIndex slot, const MountedPath& p) {
         return {};
     }
     plan_ = StagePlan{};
-    game_id_ = {};
+    game_id_.clear();
     region_ = svc::DiscRegion::Unknown;
     image_path_.clear();
 
@@ -148,19 +156,17 @@ Ex<void> PsxCore::finish_mount_() {
         return {};
 
     const svc::Toc& toc = geom_.toc;
-    plan_.data_first_track = toc.last != 0 && toc.tracks[0].type != svc::TrackType::Cdda;
-    plan_.game_id = game_id_;
-    plan_.disc_size_bytes = static_cast<std::uint64_t>(toc.end.v) * kSectorBytes;
+    plan_.data_first_track = toc.last != svc::TrackCount{}
+        && toc.at(svc::TrackIndex{}).type != svc::TrackType::Cdda;
+    plan_.game_id = game_id_.text;
+    plan_.disc_size_bytes = proto::FileSize{static_cast<std::uint64_t>(toc.end.v) * kSectorBytes};
     return {};
 }
 
-bool PsxCore::scan_disc_identity_() {
-    if (scan_done_)
-        return true;
+bool PsxCore::scan_root_() {
     std::uint8_t sector[kSectorBytes];
     svc::DiscRegion prefix_region = scan_prefix_region_;
-
-    for (std::int64_t lba = scan_lba_; lba < kRootFolderLba + 25; ++lba) {
+    for (std::int64_t lba = scan_lba_; lba < kRootFolderLba + kRootDirSectors; ++lba) {
 
         if (!serve_sector_(lba, std::span<std::uint8_t>{sector, kSectorBytes})) {
             scan_lba_ = lba;
@@ -182,52 +188,43 @@ bool PsxCore::scan_disc_identity_() {
         const std::span<const std::uint8_t> end = find_bytes(start, std::string_view{";1", 2});
         if (end.empty())
             continue;
-
-        char id[12] = {};
-        const std::size_t id_len = start.size() - end.size();
-        std::size_t size = id_len;
-        if (size > 11)
-            size = 11;
-        std::memcpy(id, start.data(), size);
-        if (id_len == 11) {
-            if (id[4] == '_')
-                id[4] = '-';
-            if (id[8] == '.') {
-                id[8] = id[9];
-                id[9] = id[10];
-                id[10] = '\0';
-                --size;
-            }
-        }
-        if (size > 10)
-            size = 10;
-        id[size] = '\0';
-        (void)game_id_.assign(std::string_view{id, size});
+        game_id_.assign(start, start.size() - end.size());
         break;
     }
-    if (game_id_.view().empty())
+    if (game_id_.empty())
         prefix_region = svc::DiscRegion::Unknown;
+    scan_prefix_region_ = prefix_region;
+    scan_lba_ = kRootFolderLba + kRootDirSectors;
+    return true;
+}
 
+svc::DiscRegion PsxCore::licence_region_(std::span<const std::uint8_t> sector) const {
+    const std::span<const std::uint8_t> lic = find_bytes(sector, kLicenceText);
+    if (lic.empty())
+        return svc::DiscRegion::Unknown;
+    const std::uint8_t* tail = lic.data() + kLicenceOffset;
+    if (std::memcmp(tail, "Amer  ica ", 10) == 0)
+        return svc::DiscRegion::Usa;
+    if (std::memcmp(tail, "Inc.", 4) == 0)
+        return svc::DiscRegion::Japan;
+    if (std::memcmp(tail, "Euro pe", 7) == 0)
+        return svc::DiscRegion::Europe;
+    return svc::DiscRegion::Unknown;
+}
+
+bool PsxCore::scan_disc_identity_() {
+    if (scan_done_)
+        return true;
+    if (!scan_root_())
+        return false;
+    std::uint8_t sector[kSectorBytes];
     if (!serve_sector_(kLicenseLba, std::span<std::uint8_t>{sector, kSectorBytes})) {
-        scan_lba_ = kRootFolderLba + 25;
-        scan_prefix_region_ = prefix_region;
         return false;
     }
-    const std::span<const std::uint8_t> lic = find_bytes(
-        std::span<const std::uint8_t>{sector, kSectorBytes},
-        std::string_view{"          Licensed  by          Sony Computer Entertainment ", 60}
+    const svc::DiscRegion licence = licence_region_(
+        std::span<const std::uint8_t>{sector, kSectorBytes}
     );
-    svc::DiscRegion region = svc::DiscRegion::Unknown;
-    if (!lic.empty()) {
-        const std::uint8_t* tail = lic.data() + 60;
-        if (std::memcmp(tail, "Amer  ica ", 10) == 0)
-            region = svc::DiscRegion::Usa;
-        else if (std::memcmp(tail, "Inc.", 4) == 0)
-            region = svc::DiscRegion::Japan;
-        else if (std::memcmp(tail, "Euro pe", 7) == 0)
-            region = svc::DiscRegion::Europe;
-    }
-    region_ = region != svc::DiscRegion::Unknown ? region : prefix_region;
+    region_ = licence != svc::DiscRegion::Unknown ? licence : scan_prefix_region_;
     scan_done_ = true;
     return true;
 }

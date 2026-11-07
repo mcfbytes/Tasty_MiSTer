@@ -10,7 +10,7 @@ Ex<void> FramePadEncoder::digital(UioOp opcode, JoyMask map) {
     ILinkFrame& frame = *frame_;
     if (auto e = frame.begin(opcode); !e)
         return e;
-    if (auto e = frame.word(static_cast<std::uint16_t>(map.v & 0xFFFFu)); !e)
+    if (auto e = frame.word(static_cast<std::uint16_t>(map.v)); !e)
         return e;
 
     if (auto e = frame.word(static_cast<std::uint16_t>(map.v >> 16)); !e)

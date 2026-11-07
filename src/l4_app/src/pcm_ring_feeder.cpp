@@ -2,6 +2,7 @@
 #include "app/pcm_ring_feeder.h"
 
 #include <cstring>
+#include <limits>
 #include <utility>
 
 #include "cores/pcm_source_factory.h"
@@ -58,7 +59,7 @@ Ex<void> PcmRingFeeder::adopt_ring(hal::FpgaMemory&& ring) noexcept {
 
     const std::size_t len = ring.region().len;
 
-    if (len == 0 || (len & (len - 1)) != 0 || len > 0xFFFF'FFFFu) {
+    if (len == 0 || (len & (len - 1)) != 0 || len > std::numeric_limits<std::uint32_t>::max()) {
         return std::unexpected(
             Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(len)}
         );

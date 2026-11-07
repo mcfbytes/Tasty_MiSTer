@@ -30,7 +30,6 @@ class Block;
 
 template <Access A>
 class Reg {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     Reg() = default;

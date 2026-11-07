@@ -29,21 +29,16 @@ struct StatusEdit {
             fatal(Error{Errc::slot_range, ERR_SITE(), start.v}, "status edit");
         }
         for (unsigned i = 0; i < width; ++i) {
-            const unsigned n = start.v + i;
-            const auto m = static_cast<std::uint16_t>(1u << (n % 16u));
-            e.mask.words[n / 16u] = static_cast<std::uint16_t>(e.mask.words[n / 16u] | m);
-            if (i < 32u && ((value.v >> i) & 1u) != 0u) {
-                e.bits.words[n / 16u] = static_cast<std::uint16_t>(e.bits.words[n / 16u] | m);
-            }
+            const StatusBit n{static_cast<std::uint8_t>(start.v + i)};
+            e.mask = e.mask.with(n, true);
+            if (i < 32u && ((value.v >> i) & 1u) != 0u)
+                e.bits = e.bits.with(n, true);
         }
         return e;
     }
 
     [[nodiscard]] static constexpr StatusEdit whole(const StatusWord& w) noexcept {
-        StatusEdit e{.bits = w, .mask = {}};
-        for (auto& m : e.mask.words)
-            m = 0xFFFFu;
-        return e;
+        return StatusEdit{.bits = w, .mask = StatusWord::all()};
     }
 
     [[nodiscard]] constexpr StatusWord over(const StatusWord& w) const noexcept {

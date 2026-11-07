@@ -9,6 +9,7 @@
 #include "app/mra_facts.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::svc {
 class Vfs;
@@ -21,7 +22,6 @@ enum class RememberedSlot : std::uint8_t { File, Mount };
 inline constexpr std::size_t kRememberedBlob = 1024;
 
 class RememberedStem {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     static constexpr std::size_t kMax = 64;
@@ -51,14 +51,14 @@ private:
 [[nodiscard]] std::string remembered_blob_name(
     const RememberedStem& stem,
     RememberedSlot s,
-    std::uint8_t index
+    proto::IoIndex index
 );
 
 [[nodiscard]] std::string read_remembered_path(
     const svc::Vfs& vfs,
     const RememberedStem& stem,
     RememberedSlot s,
-    std::uint8_t index
+    proto::IoIndex index
 );
 
 }

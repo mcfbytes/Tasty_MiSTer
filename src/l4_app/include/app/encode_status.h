@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "app/lat_stat.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -16,8 +17,7 @@ struct EncodeStatus {
         std::uint32_t dups = 0;
         std::uint32_t keys = 0;
         std::uint32_t chunk_full = 0;
-        std::uint32_t enc_us_last = 0;
-        std::uint32_t enc_us_max = 0;
+        LatStat enc_us{};
         std::uint32_t budget_pct = 0;
         std::uint32_t me_cut = 0;
         std::uint32_t arena_kib = 0;
@@ -37,15 +37,14 @@ struct EncodeStatus {
     std::uint32_t frames = 0;
     std::uint32_t rows = 0;
     std::uint32_t ring_full = 0;
-    std::uint32_t hash_us_last = 0;
-    std::uint32_t hash_us_max = 0;
+    LatStat hash_us{};
     Video video{};
 };
 
 constexpr void to_json(infra::JsonOut& o, const EncodeStatus& e) noexcept {
     o.field("hashed", e.frames);
-    o.field("hash_us", e.hash_us_last);
-    o.field("hash_us_max", e.hash_us_max);
+    o.field("hash_us", e.hash_us.last.count());
+    o.field("hash_us_max", e.hash_us.max.count());
     o.field("enc_held", e.ring_full);
 }
 
@@ -58,8 +57,8 @@ constexpr void to_json(infra::JsonOut& o, const EncodeStatus::Video& v) noexcept
     o.field("encoded", v.encoded);
     o.field("dups", v.dups);
     o.field("keys", v.keys);
-    o.field("enc_us", v.enc_us_last);
-    o.field("enc_us_max", v.enc_us_max);
+    o.field("enc_us", v.enc_us.last.count());
+    o.field("enc_us_max", v.enc_us.max.count());
     o.field("budget_pct", v.budget_pct);
     o.field("me_rad", v.me_rad);
     o.field("me_cut", v.me_cut);

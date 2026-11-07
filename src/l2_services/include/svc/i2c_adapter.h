@@ -8,6 +8,10 @@
 
 namespace mister::svc::adv7513 {
 
+constexpr std::uint32_t addr_detail(os::I2cAddr a) noexcept {
+    return std::uint32_t{a.v};
+}
+
 class II2cAdapter {
 public:
     virtual ~II2cAdapter() = default;

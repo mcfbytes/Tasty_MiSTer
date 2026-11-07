@@ -4,7 +4,10 @@
 #include "proto/spi_frame.h"
 #include "proto/uio_opcodes.h"
 
+#include <span>
 #include <string_view>
+
+#include "infra/endian.h"
 
 namespace mister::proto {
 
@@ -30,8 +33,8 @@ Ex<CoreType> CoreSession::accept_identity(const Ex<hal::CoreIdentity>& id) {
         return std::unexpected(id.error());
     }
 
-    dual_sdram_ = id->dual_sdram || id->type_byte == 0xA8;
-    type_ = fold_core_type(id->type_byte);
+    dual_sdram_ = id->dual_sdram();
+    type_ = fold_core_type(id->type);
 
     caps_ = signals_->latch_capabilities();
     if (type_ == CoreType::Unknown) {
@@ -173,7 +176,9 @@ Ex<void> CoreSession::send_rtc_image(const RtcImage& image) {
     if (auto r = frame.begin(UioOp::Rtc); !r)
         return fail(r.error());
     for (unsigned i = 0; i < 8; i += 2) {
-        const auto w = static_cast<std::uint16_t>((image.rtc[i + 1] << 8) | image.rtc[i]);
+        const auto w = infra::load_le<std::uint16_t>(
+            std::span<const std::uint8_t>(image.rtc).subspan(i).first<2>()
+        );
         if (auto r = frame.word(w); !r)
             return fail(r.error());
     }
@@ -182,7 +187,7 @@ Ex<void> CoreSession::send_rtc_image(const RtcImage& image) {
 
     if (auto r = frame.begin(UioOp::Timestamp); !r)
         return fail(r.error());
-    if (auto r = frame.word(static_cast<std::uint16_t>(image.stamp & 0xFFFFu)); !r) {
+    if (auto r = frame.word(static_cast<std::uint16_t>(image.stamp)); !r) {
         return fail(r.error());
     }
     if (auto r = frame.word(static_cast<std::uint16_t>(image.stamp >> 16)); !r) {

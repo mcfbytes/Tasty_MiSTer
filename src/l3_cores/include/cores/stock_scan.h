@@ -3,9 +3,26 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 namespace mister::cores::stock_scan {
+
+enum class Radix : std::uint8_t { Auto = 0, Oct = 8, Dec = 10, Hex = 16 };
+
+[[nodiscard]] constexpr int base_of(Radix r) noexcept {
+    return static_cast<int>(r);
+}
+
+inline constexpr std::uint64_t kUnsignedLongMax = std::numeric_limits<std::uint32_t>::max();
+inline constexpr std::uint32_t kLongMax = static_cast<std::uint32_t>(
+    std::numeric_limits<std::int32_t>::max()
+);
+inline constexpr std::uint32_t kLongMinMagnitude = kLongMax + 1u;
+
+inline constexpr std::uint64_t kLongMagnitudeBound = kLongMinMagnitude;
+
+inline constexpr long long kAtoiAccumulatorCap = 100'000'000'000ll;
 
 [[nodiscard]] constexpr bool is_c_space(char c) noexcept {
     return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
@@ -36,8 +53,9 @@ struct Parse {
     bool any = false;
 };
 
-[[nodiscard]] constexpr Parse parse(std::string_view s, int base, std::uint64_t cap) noexcept {
+[[nodiscard]] constexpr Parse parse(std::string_view s, Radix radix, std::uint64_t cap) noexcept {
     Parse p;
+    int base = base_of(radix);
     std::size_t i = 0;
     while (i < s.size() && is_c_space(s[i]))
         ++i;
@@ -45,7 +63,7 @@ struct Parse {
         p.neg = (s[i] == '-');
         ++i;
     }
-    if (base == 16 || base == 0) {
+    if (radix == Radix::Hex || radix == Radix::Auto) {
         if (i + 1 < s.size() && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
             if (i + 2 < s.size() && digit_val(s[i + 2]) >= 0 && digit_val(s[i + 2]) < 16) {
                 i += 2;
@@ -55,7 +73,7 @@ struct Parse {
                 p.any = true;
                 return p;
             }
-        } else if (base == 0) {
+        } else if (radix == Radix::Auto) {
             base = (i < s.size() && s[i] == '0') ? 8 : 10;
         }
     }
@@ -78,26 +96,27 @@ struct Parse {
 
 }
 
-[[nodiscard]] constexpr Scan scan_ul(std::string_view s, int base) noexcept {
-    const detail::Parse p = detail::parse(s, base, 0xFFFF'FFFFull);
+[[nodiscard]] constexpr Scan scan_ul(std::string_view s, Radix radix) noexcept {
+    const detail::Parse p = detail::parse(s, radix, kUnsignedLongMax);
     if (!p.any)
         return Scan{};
-    std::uint32_t v = p.over ? 0xFFFF'FFFFu : static_cast<std::uint32_t>(p.mag);
+    std::uint32_t v = p.over ? static_cast<std::uint32_t>(kUnsignedLongMax)
+                             : static_cast<std::uint32_t>(p.mag);
     if (p.neg && !p.over)
         v = 0u - v;
     return Scan{v, p.used};
 }
 
-[[nodiscard]] constexpr Scan scan_l(std::string_view s, int base) noexcept {
-    const detail::Parse p = detail::parse(s, base, 0x8000'0000ull);
+[[nodiscard]] constexpr Scan scan_l(std::string_view s, Radix radix) noexcept {
+    const detail::Parse p = detail::parse(s, radix, kLongMagnitudeBound);
     if (!p.any)
         return Scan{};
     std::uint32_t v = 0;
     if (p.neg) {
-        v = (p.over || p.mag >= 0x8000'0000ull) ? 0x8000'0000u
-                                                : 0u - static_cast<std::uint32_t>(p.mag);
+        v = (p.over || p.mag >= kLongMinMagnitude) ? kLongMinMagnitude
+                                                   : 0u - static_cast<std::uint32_t>(p.mag);
     } else {
-        v = (p.over || p.mag > 0x7FFF'FFFFull) ? 0x7FFF'FFFFu : static_cast<std::uint32_t>(p.mag);
+        v = (p.over || p.mag > kLongMax) ? kLongMax : static_cast<std::uint32_t>(p.mag);
     }
     return Scan{v, p.used};
 }
@@ -113,7 +132,7 @@ struct Parse {
     }
     long long acc = 0;
     while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
-        if (acc < 100000000000ll)
+        if (acc < kAtoiAccumulatorCap)
             acc = acc * 10 + (s[i] - '0');
         ++i;
     }

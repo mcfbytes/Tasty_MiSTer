@@ -11,6 +11,7 @@ namespace mister::cores {
 struct SaveImage {
     TASTY_SEAT_EXEMPT(component);
     proto::WideIoIndex index{};
+
     std::uint32_t size = 0;
     friend constexpr bool operator==(const SaveImage&, const SaveImage&) = default;
 };

@@ -8,11 +8,14 @@
 #include <string>
 #include <utility>
 
+#include "app/board_ops.h"
 #include "app/config_apply.h"
 #include "cores/registry.h"
 
 namespace mister::app {
 namespace {
+
+inline constexpr std::size_t kProcMountsTextMax = 1u << 20;
 
 bool mount_present(std::string_view needle) {
     if (needle.empty())
@@ -32,7 +35,7 @@ bool mount_present(std::string_view needle) {
         if (n == 0)
             break;
         text.append(buf, static_cast<std::size_t>(n));
-        if (text.size() > (1u << 20))
+        if (text.size() > kProcMountsTextMax)
             break;
     }
     (void)::close(fd);
@@ -53,10 +56,10 @@ CoreIni::Resolved CoreIni::resolve(std::string_view conf_name, const MraFacts& f
     svc::ConfigSnapshot& cfg = out.cfg;
     if (replay_) {
 
-        const std::uint8_t dv = svc::direct_video_resolved(cfg);
-        dv_cell_.publish(dv);
+        const svc::DirectVideo dv = svc::direct_video_resolved(cfg);
+        dv_cell_.publish(svc::wire_of(dv));
         cfg.waitmount[0] = '\0';
-        if (!strict_ && dv != 0)
+        if (!strict_ && dv != svc::DirectVideo::Off)
             cfg.direct_video = 0;
     }
     if (!boot_pending_)
@@ -91,11 +94,7 @@ bool CoreIni::wait_for_mount_(std::string_view needle) {
             return true;
         if (waited >= kBudgetMs)
             return false;
-        if (sleeper_) {
-            sleeper_->sleep_ms(kPollMs);
-        } else {
-            ::usleep(static_cast<::useconds_t>(kPollMs) * 1000u);
-        }
+        sleep_ms(sleeper_, std::chrono::milliseconds{kPollMs});
     }
 }
 

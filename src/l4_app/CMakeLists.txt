@@ -189,6 +189,7 @@ if(TASTY_WITH_HDOSD)
 endif()
 
 tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
+  app/px_plane.h
   app/avi_encoder.h
   app/avi_format.h
   app/avi_write_status.h

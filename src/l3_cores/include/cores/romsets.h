@@ -6,30 +6,12 @@
 #include <string_view>
 #include <vector>
 
+#include "cores/neogeo_file_index.h"
 #include "cores/romset_alias.h"
 #include "infra/seat.h"
+#include "cores/romset_index.h"
 
 namespace mister::cores::neogeo {
-
-inline constexpr std::size_t kRomsetIndexMax = 1000;
-
-inline constexpr std::uint32_t kVromSize = 16u * 1024u * 1024u;
-
-struct RomsetEntry {
-    std::string name;
-
-    std::string altname;
-    bool hide = false;
-};
-
-struct RomsetIndex {
-    TASTY_SEAT_EXEMPT(component);
-    std::vector<RomsetEntry> entries;
-
-    void scan(std::string_view xml);
-
-    [[nodiscard]] RomsetAlias lookup(std::string_view key) const;
-};
 
 [[nodiscard]] std::string sidecar_altname(std::string_view xml);
 
@@ -37,15 +19,15 @@ struct RomsetIndex {
 
 [[nodiscard]] std::string get_romset(std::string_view path);
 
-enum class FileClass : std::uint8_t { Raw, EightBit, Fix, Spr };
-
 struct RomsetFile {
-    std::string name;
-    FileClass file_class = FileClass::Raw;
-    std::uint8_t index = 0;
+    std::string name{};
+    std::string path{};
+    FileIndex index = FileIndex::Bios;
     std::uint32_t offset = 0;
     std::uint32_t size = 0;
     std::uint32_t expand = 0;
+    FileClass file_class = FileClass::Raw;
+    bool swap = false;
 };
 
 struct RomsetConfig {

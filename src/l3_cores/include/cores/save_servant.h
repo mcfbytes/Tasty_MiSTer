@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "cores/save_image.h"
+#include "cores/wire_word.h"
 #include "proto/save_act.h"
 
 namespace mister::cores {
@@ -18,7 +19,7 @@ public:
     [[nodiscard]] virtual proto::SaveAct start(
         const SaveImage& image,
         std::string_view rel,
-        std::uint8_t word_bytes
+        WireWordBytes word
     ) noexcept = 0;
 
     [[nodiscard]] virtual proto::SaveAct resume(

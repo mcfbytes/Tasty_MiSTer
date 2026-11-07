@@ -2,25 +2,25 @@
 #include "cores/st_config.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 
+#include "cores/st_ctrl.h"
 #include "cores/st_sysctrl.h"
 #include "infra/byte_view.h"
+#include "infra/endian.h"
+#include "infra/indexed_array.h"
 
 namespace mister::cores {
 
 namespace {
 
 std::uint32_t get_u32(std::span<const std::byte> img, std::size_t off) noexcept {
-    return static_cast<std::uint32_t>(img[off])
-        | (static_cast<std::uint32_t>(img[off + 1]) << 8)
-        | (static_cast<std::uint32_t>(img[off + 2]) << 16)
-        | (static_cast<std::uint32_t>(img[off + 3]) << 24);
+    return infra::load_le<std::uint32_t>(img.subspan(off).first<4>());
 }
 
 void put_u32(std::span<std::byte> img, std::size_t off, std::uint32_t v) noexcept {
-    for (std::size_t i = 0; i < 4; ++i)
-        img[off + i] = static_cast<std::byte>((v >> (8 * i)) & 0xFFu);
+    infra::store_le<std::uint32_t>(img.subspan(off).first<4>(), v);
 }
 
 std::string_view get_str(std::span<const std::byte> img, std::size_t off) noexcept {
@@ -32,21 +32,27 @@ void put_str(std::span<std::byte> img, std::size_t off, std::string_view s) noex
 }
 
 struct Line {
-    char buf[64]{};
+    std::array<char, st_cfg::kPreviewChars> buf{};
     std::size_t len = 0;
 
     void add(std::string_view s) noexcept {
-        const std::size_t n = std::min(s.size(), sizeof(buf) - 1 - len);
-        std::memcpy(buf + len, s.data(), n);
+        const std::size_t n = std::min(s.size(), buf.size() - 1 - len);
+        std::memcpy(buf.data() + len, s.data(), n);
         len += n;
         buf[len] = '\0';
     }
 
-    std::string_view view() const noexcept { return {buf, len}; }
+    std::string_view view() const noexcept { return {buf.data(), len}; }
 };
 
-constexpr std::string_view kMemNames[8] = {"512kb", "1mb", "2mb", "4mb", "8mb", "14mb", "--", "--"};
-constexpr std::string_view kChipsetShort[4] = {"ST", "STe", "MST", "ST+"};
+constexpr std::array<std::string_view, st_ctrl::CtrlWord::kMemConfigCount> kMemNames =
+    {"512kb", "1mb", "2mb", "4mb", "8mb", "14mb", "--", "--"};
+constexpr std::array<std::string_view, st_ctrl::CtrlWord::kChoiceCount> kChipsetShort =
+    {"ST", "STe", "MST", "ST+"};
+constexpr std::array<std::string_view, st_ctrl::CtrlWord::kChoiceCount> kAspectNames =
+    {"A0 ", "A1 ", "A2 ", "A3 "};
+constexpr std::array<std::string_view, st_ctrl::CtrlWord::kChoiceCount> kScanNames =
+    {"", "S1 ", "S2 ", "S3 "};
 constexpr std::string_view kEmptySlot = "< empty slot >";
 
 }
@@ -109,35 +115,39 @@ FixedStr<kConfigPreviewChars, StrFit::Clip> StConfig::preview(ConfigBlob blob) n
 
     std::array<std::byte, st_cfg::kBytes> tmp{};
     std::memcpy(tmp.data(), blob.bytes.data(), std::min(blob.bytes.size(), tmp.size()));
-    const std::uint32_t sc = get_u32(tmp, st_cfg::kSystemCtrl);
+    const st_ctrl::CtrlWord sc{get_u32(tmp, st_cfg::kSystemCtrl)};
     Line line;
-    line.add(kMemNames[(sc >> 1) & 7u]);
+    line.add(infra::at_index(kMemNames, sc.mem_config()));
     line.add(" ");
     if (!get_str(tmp, st_cfg::kAcsiImg0).empty())
         line.add("H0 ");
     if (!get_str(tmp, st_cfg::kAcsiImg1).empty())
         line.add("H1 ");
-    const std::uint32_t chipset = (sc >> 23) & 3u;
-    line.add(kChipsetShort[chipset]);
+    const auto chipset = sc.chipset();
+    line.add(infra::at_index(kChipsetShort, chipset));
     line.add(" ");
-    if (chipset == 0 && (sc & st_ctrl::kBlitter) != 0)
+    if (chipset == st_ctrl::CtrlWord::kChipsetSt && sc.has(st_ctrl::CtrlWord::kBlitter)) {
         line.add("B ");
-    if ((sc & st_ctrl::kViking) != 0)
+    }
+    if (sc.has(st_ctrl::CtrlWord::kViking))
         line.add("V ");
-    const unsigned ar = ((sc & st_ctrl::kVideoAspect1) != 0 ? 1u : 0u)
-        | ((sc & st_ctrl::kVideoAspect2) != 0 ? 2u : 0u);
-    line.add(ar == 0 ? "A0 " : ar == 1 ? "A1 " : ar == 2 ? "A2 " : "A3 ");
-    line.add((sc & st_ctrl::kVideoColor) != 0 ? "C " : (sc & st_ctrl::kMde60) != 0 ? "M6 " : "M ");
-    if ((sc & st_ctrl::kBorder) == 0)
+    line.add(infra::at_index(kAspectNames, sc.aspect()));
+    line.add(
+        sc.has(st_ctrl::CtrlWord::kVideoColor)  ? "C "
+            : sc.has(st_ctrl::CtrlWord::kMde60) ? "M6 "
+                                                : "M "
+    );
+    if (!sc.has(st_ctrl::CtrlWord::kBorder))
         line.add("F ");
-    const std::uint32_t sl = (sc >> 20) & 3u;
-    if (sl != 0)
-        line.add(sl == 1 ? "S1 " : sl == 2 ? "S2 " : "S3 ");
-    line.add((sc & st_ctrl::kStereo) != 0 ? "AS " : "AM ");
+    line.add(infra::at_index(kScanNames, sc.scanlines()));
+    line.add(sc.has(st_ctrl::CtrlWord::kStereo) ? "AS " : "AM ");
 
     if (const auto tos = get_str(tmp, st_cfg::kTosImg); !tos.empty()) {
         const std::string_view leaf = leaf_of(tos);
-        line.add(leaf.size() >= 4 ? leaf.substr(0, leaf.size() - 4) : leaf);
+        line.add(
+            leaf.size() >= st_cfg::kTosExtChars ? leaf.substr(0, leaf.size() - st_cfg::kTosExtChars)
+                                                : leaf
+        );
     }
     (void)out.assign(line.view());
     return out;

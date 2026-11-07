@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/spi_block_poll.h"
 #include "hal/selected.h"
+#include "infra/endian.h"
 #include "proto/block_server.h"
 #include "proto/uio_opcodes.h"
 
+#include <array>
 #include <cstring>
 #include <span>
 
@@ -55,7 +57,6 @@ enum CsdLayout : unsigned {
     kCsdSizeShift0 = 9,
     kCsdSizeShift1 = 17,
     kCsdSizeShift2 = 25,
-    kByteBits = 8,
     kPairBytes = 2,
     kSdhcPermanently = 1,
     kStockBlockBytes = 512,
@@ -75,13 +76,21 @@ enum StockRequest : std::uint16_t {
     kStockDisk2Read = 0x0200,
     kStockDisk3 = 0x2400,
     kStockDisk3Read = 0x0400,
-    kDisk1 = 1,
-    kDisk2 = 2,
-    kDisk3 = 3,
-    kStockAckShift = 8,
     kLbaHalfBits = 16,
-    kAckSlotShift = 8,
 };
+
+struct StockDiskRow {
+    StockRequest any;
+    StockRequest read;
+    DiskUnit unit;
+};
+
+inline constexpr std::array<StockDiskRow, 4> kStockDisks{{
+    {kStockDisk0, kStockDisk0Read, DiskUnit{0}},
+    {kStockDisk1, kStockDisk1Read, DiskUnit{1}},
+    {kStockDisk2, kStockDisk2Read, DiskUnit{2}},
+    {kStockDisk3, kStockDisk3Read, DiskUnit{3}},
+}};
 
 [[nodiscard]] Ex<void> write_framed(
     hal::ISpiTransport& link,
@@ -90,10 +99,10 @@ enum StockRequest : std::uint16_t {
 ) {
     if (width == hal::Width::Word) {
         for (std::size_t i = 0; i + 1 < bytes.size(); i += kPairBytes) {
-            const std::uint16_t low = bytes[i];
-            const std::uint16_t high = bytes[i + 1];
-            const hal::SpiWord w{static_cast<std::uint16_t>(low | (high << kByteBits))};
-            if (auto r = link.transfer(w); !r) {
+            const auto pair_word = infra::load_le<std::uint16_t>(
+                bytes.subspan(i).first<kPairBytes>()
+            );
+            if (auto r = link.transfer(hal::SpiWord{pair_word}); !r) {
                 return std::unexpected(r.error());
             }
         }
@@ -189,7 +198,7 @@ Lba lba_of_words(hal::SpiWord low, hal::SpiWord high) noexcept {
             d.req.block_count = c.block_count();
             d.req.write = c.writes();
             d.block_size = c.block_size();
-            d.ack = static_cast<std::uint16_t>(c.slot().v << kAckSlotShift);
+            d.ack = SectorAck::of(c.slot());
             d.decoded = c.decoded();
         } else {
 
@@ -212,28 +221,20 @@ Lba lba_of_words(hal::SpiWord low, hal::SpiWord high) noexcept {
 
                 config_request = ((rq & kStockConfig) == kStockConfig);
 
-                int disk = -1;
+                std::optional<DiskUnit> disk;
                 bool read = false;
-                if ((rq & kStockDisk0) != 0u) {
-                    disk = 0;
-                    read = (rq & kStockDisk0Read) != 0u;
-                } else if ((rq & kStockDisk1) != 0u) {
-                    disk = kDisk1;
-                    read = (rq & kStockDisk1Read) != 0u;
-                } else if ((rq & kStockDisk2) != 0u) {
-                    disk = kDisk2;
-                    read = (rq & kStockDisk2Read) != 0u;
-                } else if ((rq & kStockDisk3) != 0u) {
-                    disk = kDisk3;
-                    read = (rq & kStockDisk3Read) != 0u;
+                for (const StockDiskRow& row : kStockDisks) {
+                    if ((rq & row.any) == 0u)
+                        continue;
+                    disk = row.unit;
+                    read = (rq & row.read) != 0u;
+                    break;
                 }
 
-                d.ack = (rq & kStockNoAck) != 0u
-                    ? std::uint16_t{0}
-                    : static_cast<std::uint16_t>((disk + 1) << kStockAckShift);
+                d.ack = (rq & kStockNoAck) != 0u || !disk ? SectorAck{} : SectorAck::stock(*disk);
 
-                if (disk >= 0) {
-                    d.req.slot = SlotIndex{static_cast<std::uint8_t>(disk)};
+                if (disk) {
+                    d.req.slot = SlotIndex{disk->v};
                     d.req.write = !read;
                     d.decoded = true;
                     ++diag_.stock_requests;
@@ -268,15 +269,16 @@ Lba lba_of_words(hal::SpiWord low, hal::SpiWord high) noexcept {
     }
 
     BlockCount blks = d.req.block_count;
-    if (size.span_of(blks) > BlockSize{kBlockStagingBytes}) {
+    const BlockCount staging_blocks = size.blocks_in(BlockSize{kBlockStagingBytes});
+    if (!size.empty() && blks > staging_blocks) {
         ++diag_.oversize_requests;
-        blks = size.blocks_in(BlockSize{kBlockStagingBytes});
+        blks = staging_blocks;
         if (blks == BlockCount{})
             blks = BlockCount{1};
         d.req.block_count = blks;
     }
 
-    BlockCount window_blocks = size.blocks_in(BlockSize{kBlockStagingBytes});
+    BlockCount window_blocks = staging_blocks;
     const BlockCount geo_window = geo.window_blocks;
     if (geo_window != BlockCount{} && geo_window < window_blocks)
         window_blocks = geo_window;

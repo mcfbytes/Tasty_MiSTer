@@ -7,7 +7,7 @@ namespace mister::cores {
 
 ServantSet make_servants(const svc::Vfs& vfs) {
     ServantSet set{};
-    set[static_cast<std::size_t>(ServantId::Msu1)] = std::make_unique<MsuMachine>(vfs);
+    set[ServantId::Msu1] = std::make_unique<MsuMachine>(vfs);
     return set;
 }
 

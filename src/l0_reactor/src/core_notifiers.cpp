@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "reactor/core_notifiers.h"
 
+#include <limits>
 #include <utility>
 
 namespace mister::reactor {
@@ -46,7 +47,7 @@ void CoreNotifiers::retire_(bool refused_only) noexcept {
         if (refused_only && !e.refused)
             continue;
         if (!exec_.remove_notifier(e.slot)) {
-            if (release_failures_ != 0xFFFF'FFFFu)
+            if (release_failures_ != std::numeric_limits<std::uint32_t>::max())
                 ++release_failures_;
             e.refused = true;
             continue;

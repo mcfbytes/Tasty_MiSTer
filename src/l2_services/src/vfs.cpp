@@ -388,7 +388,7 @@ std::vector<DirEntry> zip_folder_entries(
         if (!in_same_folder(folder, m.name))
             continue;
 
-        std::string_view sub = m.name.substr(folder.size());
+        std::string_view sub = std::string_view{m.name}.substr(folder.size());
         if (!sub.empty() && sub.front() == '/')
             sub.remove_prefix(1);
         if (sub.empty())
@@ -405,7 +405,7 @@ std::vector<DirEntry> zip_folder_entries(
         e.name = std::string(sub);
         e.is_dir = (verdict == Admit::KeepDir);
         e.is_zip_member = true;
-        e.size = FileSize{m.size};
+        e.size = m.size;
         out.push_back(std::move(e));
     }
 
@@ -431,12 +431,13 @@ bool dirent_less(const DirEntry& a, const DirEntry& b) noexcept {
     if (a.is_dir != b.is_dir)
         return a.is_dir;
 
+    constexpr std::size_t kExtStrip = kExtDot.size() + 3;
     std::size_t l1 = a.name.size();
     std::size_t l2 = b.name.size();
-    if (l1 > 4 && a.name[l1 - 4] == '.')
-        l1 -= 4;
-    if (l2 > 4 && b.name[l2 - 4] == '.')
-        l2 -= 4;
+    if (l1 > kExtStrip && a.name[l1 - kExtStrip] == kExtDot.front())
+        l1 -= kExtStrip;
+    if (l2 > kExtStrip && b.name[l2 - kExtStrip] == kExtDot.front())
+        l2 -= kExtStrip;
 
     const int r = icompare_n(a.name, b.name, (l1 < l2) ? l1 : l2);
     if (r != 0)
@@ -669,15 +670,7 @@ Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) c
         auto listing = zip_list(std::string(zs.archive));
         if (!listing)
             return std::unexpected(listing.error());
-
-        std::vector<detail::ZipMember> members;
-        members.reserve(listing->names.size());
-        for (std::size_t i = 0; i < listing->names.size(); ++i) {
-            members.push_back(
-                detail::ZipMember{listing->names[i], listing->sizes[i], listing->dirs[i] != 0}
-            );
-        }
-        return detail::zip_folder_entries(zs.member, members, f);
+        return detail::zip_folder_entries(zs.member, listing->members, f);
     }
 
     ::DIR* d = ::opendir(full.c_str());

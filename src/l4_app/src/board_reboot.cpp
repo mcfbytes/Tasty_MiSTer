@@ -14,11 +14,7 @@ Ex<void> BoardReboot::reboot(bool cold) {
     TASTY_SEAT_BODY(BoardReboot);
     ++reboots_;
     ::sync();
-    if (sleeper_) {
-        sleeper_->sleep_ms(kSettleMs);
-    } else {
-        ::usleep(static_cast<::useconds_t>(kSettleMs) * 1000u);
-    }
+    sleep_ms(sleeper_, std::chrono::milliseconds{kSettleMs});
 
     if (handoff_)
         (void)handoff_->write_reboot_flag(!cold);

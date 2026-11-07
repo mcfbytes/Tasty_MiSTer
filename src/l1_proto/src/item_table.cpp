@@ -1,14 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/item_table.h"
 #include "proto/conf_str.h"
+#include "proto/status_word.h"
 #include "conf_str_detail.h"
 
 #include <cctype>
+#include <limits>
 #include <optional>
 
 namespace mister::proto {
 
 namespace {
+
+constexpr std::uint32_t kStatusBits = proto::StatusWord::kBits;
+
+constexpr std::uint32_t kMaxFieldWidth = 8;
+
+constexpr std::uint32_t kUpperBankFirstBit = 32;
+
+constexpr std::uint32_t kMaxSpans = std::numeric_limits<std::uint16_t>::max();
+
+constexpr std::size_t kMaxTextSpan = std::numeric_limits<std::uint16_t>::max();
+
+constexpr std::size_t kMaxSubfields = std::numeric_limits<std::uint8_t>::max();
+
+constexpr std::size_t kFirstItemField = 2;
 
 [[nodiscard]] std::optional<Scan> scan_u32(std::string_view s, std::size_t pos) {
     std::size_t p = pos;
@@ -22,15 +38,15 @@ namespace {
     const std::size_t first_digit = p;
     std::uint64_t acc = 0;
     while (p < s.size() && s[p] >= '0' && s[p] <= '9') {
-        if (acc <= 0xFFFF'FFFFull) {
+        if (acc <= std::numeric_limits<std::uint32_t>::max()) {
             acc = acc * 10u + static_cast<std::uint64_t>(s[p] - '0');
         }
         ++p;
     }
     if (p == first_digit)
         return std::nullopt;
-    if (acc > 0xFFFF'FFFFull)
-        acc = 0xFFFF'FFFFull;
+    if (acc > std::numeric_limits<std::uint32_t>::max())
+        acc = std::numeric_limits<std::uint32_t>::max();
     std::uint32_t v = static_cast<std::uint32_t>(acc);
     if (neg)
         v = 0u - v;
@@ -71,7 +87,7 @@ mister::proto::BitField decode_bits(
             }
         }
         if (ranged) {
-            if (start > 127 || end > 127 || end <= start)
+            if (start >= kStatusBits || end >= kStatusBits || end <= start)
                 return {};
         } else {
 
@@ -79,7 +95,7 @@ mister::proto::BitField decode_bits(
             if (!only)
                 return {};
             start = only->value;
-            if (start > 127)
+            if (start >= kStatusBits)
                 return {};
             end = start;
         }
@@ -96,14 +112,14 @@ mister::proto::BitField decode_bits(
             end = start;
         }
         if (ex == ExShift::Plus32) {
-            start += 32;
-            end += 32;
+            start += kUpperBankFirstBit;
+            end += kUpperBankFirstBit;
         }
-        if (start > 127 || end > 127 || (!sng && end <= start))
+        if (start >= kStatusBits || end >= kStatusBits || (!sng && end <= start))
             return {};
     }
 
-    if (end - start > 8)
+    if (end - start > kMaxFieldWidth)
         return {};
     return BitField{
         StatusBit{static_cast<std::uint8_t>(start)},
@@ -152,6 +168,104 @@ char at(std::string_view s, std::size_t i) noexcept {
     return i < s.size() ? s[i] : '\0';
 }
 
+struct PrefixDecode {
+    std::string_view token;
+    std::uint32_t cond_overflows = 0;
+};
+
+PrefixDecode decode_prefixes(std::string_view field, Item& it) {
+    std::string_view p = field;
+    std::uint32_t cond_overflows = 0;
+
+    while (p.size() > 2) {
+        const CondRule* cr = nullptr;
+        for (const CondRule& c : kCondRules) {
+            if (c.letter == p[0]) {
+                cr = &c;
+                break;
+            }
+        }
+        if (!cr)
+            break;
+        if (it.cond_count < kMaxConds) {
+            it.conds[it.cond_count++] = Cond{
+                cr->effect,
+                cr->acts_when_set,
+                decode_hd_selector(p.substr(1))
+            };
+        } else {
+            ++cond_overflows;
+        }
+        p.remove_prefix(2);
+    }
+
+    if (!p.empty() && p[0] == 'P') {
+        const int n = at(p, 1) - '0';
+
+        const SubmenuNo page_no{static_cast<std::uint8_t>(static_cast<unsigned>(n))};
+        if (at(p, 2) != ',') {
+            it.page = page_no;
+            p.remove_prefix(p.size() >= 2 ? 2 : p.size());
+        } else {
+            it.declares_page = true;
+            it.declared_page = page_no;
+        }
+    }
+    return PrefixDecode{p, cond_overflows};
+}
+
+void decode_tail(std::string_view p, Item& it) noexcept {
+    switch (it.kind) {
+        case ItemKind::Option:
+
+            it.hps_marker = (at(p, 1) == 'X');
+            {
+                const std::size_t off = it.hps_marker ? 2u : 1u;
+                it.bits = decode_bit_ref(
+                    p.substr(off < p.size() ? off : p.size()),
+                    it.hps_marker ? ExShift::None : it.ex
+                );
+            }
+            break;
+        case ItemKind::Toggle:
+        case ItemKind::ToggleClose:
+            it.bits = decode_bit_ref(p.substr(p.empty() ? 0 : 1), it.ex);
+            break;
+        case ItemKind::FileSlot:
+        case ItemKind::MountSlot: {
+
+            std::size_t idx = 1;
+            if (it.kind == ItemKind::FileSlot && at(p, idx) == 'S') {
+                it.opensave = true;
+                ++idx;
+            }
+            if (at(p, idx) == 'C') {
+                it.store_name = true;
+                ++idx;
+            }
+            const char d = at(p, idx);
+            if (d >= '0' && d <= '9')
+                it.digit = FileSlotDigit{static_cast<std::uint8_t>(d - '0')};
+            break;
+        }
+        case ItemKind::Addon:
+        case ItemKind::JoyNames:
+        case ItemKind::Cheats:
+        case ItemKind::Info:
+        case ItemKind::Version:
+        case ItemKind::CfgVer:
+        case ItemKind::NoOsd:
+        case ItemKind::PageDecl:
+        case ItemKind::Separator:
+        case ItemKind::Dip:
+        case ItemKind::DefMra:
+        case ItemKind::Turbo:
+        case ItemKind::Unknown:
+        case ItemKind::kCount:
+            break;
+    }
+}
+
 }
 
 BitField decode_bit_ref(std::string_view spec, ExShift ex) noexcept {
@@ -191,7 +305,7 @@ std::string_view ItemTable::subfield(const Item& it, unsigned n) const noexcept 
 Ex<ItemTable> ItemTable::parse(std::string_view raw) {
     ItemTable t;
 
-    if (raw.size() > 0xFFFFu) {
+    if (raw.size() > kMaxTextSpan) {
         return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 0});
     }
     if (!raw.empty())
@@ -207,7 +321,7 @@ Ex<ItemTable> ItemTable::parse(std::string_view raw) {
     };
     t.name_ = fields.empty() ? TextSpan{} : span_of(fields[0]);
 
-    for (std::size_t i = 2; i < fields.size(); ++i) {
+    for (std::size_t i = kFirstItemField; i < fields.size(); ++i) {
         const std::string_view f = fields[i];
 
         if (f.empty()) {
@@ -223,44 +337,9 @@ Ex<ItemTable> ItemTable::parse(std::string_view raw) {
             it.kind = pre->kind;
             it.ex = pre->ex;
         } else {
-
-            while (p.size() > 2) {
-                const CondRule* cr = nullptr;
-                for (const CondRule& c : kCondRules) {
-                    if (c.letter == p[0]) {
-                        cr = &c;
-                        break;
-                    }
-                }
-                if (!cr)
-                    break;
-                if (it.cond_count < kMaxConds) {
-                    it.conds[it.cond_count++] = Cond{
-                        cr->effect,
-                        cr->acts_when_set,
-                        decode_hd_selector(p.substr(1))
-                    };
-                } else {
-                    ++t.cond_overflows_;
-                }
-                p.remove_prefix(2);
-            }
-
-            if (!p.empty() && p[0] == 'P') {
-                const int n = at(p, 1) - '0';
-
-                const SubmenuNo page_no{
-                    static_cast<std::uint8_t>(static_cast<unsigned>(n) & 0xFFu)
-                };
-                if (at(p, 2) != ',') {
-                    it.page = page_no;
-                    p.remove_prefix(p.size() >= 2 ? 2 : p.size());
-                } else {
-                    it.declares_page = true;
-                    it.declared_page = page_no;
-                }
-            }
-
+            const PrefixDecode decoded = decode_prefixes(f, it);
+            p = decoded.token;
+            t.cond_overflows_ += decoded.cond_overflows;
             if (const ItemRule* r = match_rule(p, MatchPhase::AfterPrefixes)) {
                 it.kind = r->kind;
                 it.ex = r->ex;
@@ -270,7 +349,7 @@ Ex<ItemTable> ItemTable::parse(std::string_view raw) {
 
         const auto subs = split(p, ',');
 
-        if (subs.size() > 255 || t.spans_.size() + subs.size() > 0xFFFFu) {
+        if (subs.size() > kMaxSubfields || t.spans_.size() + subs.size() > kMaxSpans) {
             return std::unexpected(Error{Errc::bad_confstr, ERR_SITE(), 1});
         }
         it.subfield_first = static_cast<std::uint16_t>(t.spans_.size());
@@ -278,57 +357,7 @@ Ex<ItemTable> ItemTable::parse(std::string_view raw) {
         for (std::string_view s : subs)
             t.spans_.push_back(span_of(s));
 
-        switch (it.kind) {
-            case ItemKind::Option:
-
-                it.hps_marker = (at(p, 1) == 'X');
-                {
-                    const std::size_t off = it.hps_marker ? 2u : 1u;
-                    it.bits = decode_bit_ref(
-                        p.substr(off < p.size() ? off : p.size()),
-                        it.hps_marker ? ExShift::None : it.ex
-                    );
-                }
-                break;
-            case ItemKind::Toggle:
-            case ItemKind::ToggleClose:
-                it.bits = decode_bit_ref(p.substr(p.empty() ? 0 : 1), it.ex);
-                break;
-            case ItemKind::FileSlot:
-            case ItemKind::MountSlot: {
-
-                std::size_t idx = 1;
-                if (it.kind == ItemKind::FileSlot && at(p, idx) == 'S') {
-                    it.opensave = true;
-                    ++idx;
-                }
-                if (at(p, idx) == 'C') {
-                    it.store_name = true;
-                    ++idx;
-                }
-                const char d = at(p, idx);
-                if (d >= '0' && d <= '9') {
-                    it.digit = static_cast<std::uint8_t>(d - '0');
-                    it.has_digit = true;
-                }
-                break;
-            }
-            case ItemKind::Addon:
-            case ItemKind::JoyNames:
-            case ItemKind::Cheats:
-            case ItemKind::Info:
-            case ItemKind::Version:
-            case ItemKind::CfgVer:
-            case ItemKind::NoOsd:
-            case ItemKind::PageDecl:
-            case ItemKind::Separator:
-            case ItemKind::Dip:
-            case ItemKind::DefMra:
-            case ItemKind::Turbo:
-            case ItemKind::Unknown:
-            case ItemKind::kCount:
-                break;
-        }
+        decode_tail(p, it);
         t.items_.push_back(it);
     }
     return t;

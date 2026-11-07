@@ -18,7 +18,7 @@ void SpiStatusDecoder::service() noexcept {
         const auto head = link_->transfer(word(UioOp::GetStatus));
         if (!head)
             return;
-        const auto stchg = static_cast<std::uint8_t>(head->v & 0xFFu);
+        const auto stchg = static_cast<std::uint8_t>(head->v);
         if ((stchg & 0xF0u) != 0xA0u || (stchg & 0x0Fu) == last_)
             return;
         nibble = static_cast<std::uint8_t>(stchg & 0x0Fu);

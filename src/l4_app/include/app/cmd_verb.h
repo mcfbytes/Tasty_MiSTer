@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string_view>
 
 #include "app/rec_control.h"
+#include "app/types.h"
 #include "proto/volume_cmd.h"
 
 namespace mister::app {
@@ -45,8 +47,8 @@ struct CmdVerb {
     struct TasPlay {
         std::string_view movie;
         std::string_view rom;
-        std::optional<std::uint32_t> phase_us;
-        std::optional<std::int32_t> lead;
+        std::optional<std::chrono::microseconds> phase;
+        std::optional<MovieFrame> lead;
     };
 
     struct TasStop {};

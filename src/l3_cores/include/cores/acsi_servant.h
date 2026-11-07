@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "cores/disk_servant.h"
+#include "cores/scsi_cdb.h"
 #include "cores/types.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
@@ -31,6 +32,7 @@ class AcsiServant final : public IDiskServant {
 public:
     static constexpr std::size_t kTargets = 2;
     static constexpr std::uint32_t kBlockBytes = 512;
+    static constexpr proto::BlockSize kBlock{kBlockBytes};
     static constexpr std::uint32_t kChunkBlocks = 128;
     static constexpr std::size_t kChunkBytes = kChunkBlocks * kBlockBytes;
     static constexpr std::size_t kReplyBytes = 512;
@@ -71,19 +73,47 @@ private:
         std::unique_ptr<svc::IDiskImage> owned{};
         infra::OptRef<svc::IDiskImage> image{};
         FixedStr<kInquiryNameBytes + 1, StrFit::Clip> name{};
-        std::uint8_t asc = 0;
+        SenseCode asc = SenseCode::None;
     };
 
     enum class Transfer : std::uint8_t { None, Read, Write };
 
+    struct Command {
+        Transfer transfer = Transfer::None;
+        proto::Lba lba{};
+        proto::BlockCount length{};
+        proto::BlockCount chunk_blocks{};
+        std::size_t chunk_len = 0;
+        std::size_t chunk_off = 0;
+        std::size_t reply_len = 0;
+        bool reply_owed = false;
+        std::size_t in_len = 0;
+        ScsiStatus status = ScsiStatus::Good;
+        bool ack_owed = false;
+        bool nak_owed = false;
+    };
+
     void dispatch_(Slot& slot);
-    void answer_(Slot& slot, std::uint8_t status, std::uint8_t asc);
-    void read_blocks_(Slot& slot, std::uint64_t lba, std::uint32_t length);
-    void write_blocks_(Slot& slot, std::uint64_t lba, std::uint32_t length);
+
+    void answer_ready_(Slot& slot, const Cdb& cdb);
+    void answer_read_capacity_(Slot& slot, const Cdb& cdb);
+    void answer_sense_(Slot& slot, const Cdb& cdb);
+    void answer_inquiry_(Slot& slot, const Cdb& cdb);
+    void answer_mode_sense_(Slot& slot, const Cdb& cdb);
+    void answer_blocks_(Slot& slot, const Cdb& cdb);
+    void answer_(Slot& slot, ScsiStatus status, SenseCode asc);
+    void read_blocks_(Slot& slot, const Cdb& cdb);
+    void write_blocks_(Slot& slot, const Cdb& cdb);
 
     void memory_write_(std::span<const std::byte> src);
-    void ack_(std::uint8_t status);
+    void ack_(ScsiStatus status);
     void nak_();
+
+    [[nodiscard]] proto::BlockCount block_count_(const Slot& slot) const noexcept;
+
+    [[nodiscard]] static constexpr std::uint64_t image_offset(proto::Lba lba) noexcept {
+        return kBlock.position_of(lba);
+    }
 
     void forget_command_() noexcept;
     [[nodiscard]] proto::DiskAct next_act_(std::span<std::byte, proto::kDiskActBytes> bytes);
@@ -99,18 +129,7 @@ private:
     std::array<std::byte, kChunkBytes> chunk_{};
 
     AcsiTarget target_{};
-    Transfer transfer_ = Transfer::None;
-    std::uint64_t lba_ = 0;
-    std::uint32_t length_ = 0;
-    std::uint32_t chunk_blocks_ = 0;
-    std::size_t chunk_len_ = 0;
-    std::size_t chunk_off_ = 0;
-    std::size_t reply_len_ = 0;
-    bool reply_owed_ = false;
-    std::size_t in_len_ = 0;
-    std::uint8_t status_ = 0;
-    bool ack_owed_ = false;
-    bool nak_owed_ = false;
+    Command cmd_{};
 
     std::uint32_t commands_ = 0;
     std::uint32_t naks_ = 0;

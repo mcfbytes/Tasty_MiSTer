@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <utility>
 
+#include "infra/mint_guard.h"
 #include "infra/seat.h"
 
 namespace mister::xthread {
@@ -122,11 +123,11 @@ public:
     SpscRing& operator=(const SpscRing&) = delete;
 
     [[nodiscard]] Producer producer() noexcept {
-        return mint_(kProducerMinted) ? Producer{this} : Producer{};
+        return minted_.mint(infra::MintGuard::End::first) ? Producer{this} : Producer{};
     }
 
     [[nodiscard]] Consumer consumer() noexcept {
-        return mint_(kConsumerMinted) ? Consumer{this} : Consumer{};
+        return minted_.mint(infra::MintGuard::End::second) ? Consumer{this} : Consumer{};
     }
 
     bool push(const T& v) noexcept {
@@ -166,18 +167,8 @@ public:
     }
 
 private:
-    static constexpr std::uint8_t kProducerMinted = 1;
-    static constexpr std::uint8_t kConsumerMinted = 2;
-
-    [[nodiscard]] bool mint_(std::uint8_t side) noexcept {
-        if ((minted_ & side) != 0)
-            return false;
-        minted_ = static_cast<std::uint8_t>(minted_ | side);
-        return true;
-    }
-
     alignas(64) std::atomic<std::uint32_t> head_{0};
-    std::uint8_t minted_ = 0;
+    infra::MintGuard minted_{};
     alignas(64) std::atomic<std::uint32_t> tail_{0};
     alignas(64) T slots_[N];
 };

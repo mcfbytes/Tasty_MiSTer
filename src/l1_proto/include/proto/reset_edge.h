@@ -17,7 +17,6 @@ enum class ResetSource : std::uint8_t {
 };
 
 struct ResetEdge {
-    TASTY_SEAT_EXEMPT(component);
     ResetSource source{};
     StatusBit bit{};
     bool ex = false;

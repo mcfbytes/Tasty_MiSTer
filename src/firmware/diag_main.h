@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 #include "diag_sampler.h"
@@ -15,7 +16,7 @@
 
 namespace mister::fw {
 
-inline constexpr unsigned kDiagSliceMs = 50;
+inline constexpr std::chrono::milliseconds kDiagSlice{50};
 
 class DiagMain final : public xthread::SeatMain<DiagMain> {
     TASTY_SEAT_RESIDENT(Diag);

@@ -8,11 +8,11 @@
 namespace mister::cores {
 
 static_assert(
-    kCheatTableBytes % CheatGeometry{}.unit == 0,
+    CheatGeometry{}.unit.whole(proto::FileSize{kCheatTableBytes}),
     "req: the default unit divides the table exactly"
 );
 static_assert(
-    clamp_cheat_geometry(16, 128).max_active == 128,
+    clamp_cheat_geometry(16, 128).max_active == kCheatDefaultMaxActive,
     "req: the default pair sits ON the cap, not under it"
 );
 

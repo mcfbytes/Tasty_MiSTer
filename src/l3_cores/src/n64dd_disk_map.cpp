@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include "infra/indexed_array.h"
+
 namespace mister::cores::n64dd {
 
 Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
@@ -11,28 +13,29 @@ Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
     m.ram_ok_ = false;
     m.ram_bytes_ = 0;
     m.disk_type_ = area.disk_type;
-    if (area.disk_type >= kDiskTypes) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), area.disk_type});
+    if (!area.disk_type.is_known()) {
+        return std::unexpected(area.disk_type.refusal(Errc::bad_format, ERR_SITE()));
     }
-    const auto& sys = area.sys;
+    const SystemBlockView sys{area.sys};
+    const DiskType type = area.disk_type;
     std::uint64_t source = 0;
     std::uint32_t lba = 0;
     std::uint32_t starting_block = 0;
     for (std::uint32_t vzone = 0; vzone < kZones; ++vzone) {
-        const std::uint32_t pzone = kVzoneToPzone[area.disk_type][vzone];
+        const std::uint32_t pzone = infra::at_index(kVzoneToPzone, type)[vzone];
         const Zone& zone = kZoneTable[pzone];
         const std::uint32_t block_bytes = std::uint32_t{zone.sector_bytes} * kSectorsPerBlock;
-        const std::uint32_t defect_start = pzone != 0 ? sys[0x07 + pzone] : 0u;
-        const std::uint32_t defect_stop = sys[0x07 + pzone + 1];
+        const std::uint32_t defect_start = pzone != 0 ? sys.defect_start(pzone) : 0u;
+        const std::uint32_t defect_stop = sys.defect_stop(pzone);
         std::array<bool, 158> bad_track{};
         std::uint32_t listed = 0;
         for (std::uint32_t d = defect_start; d < defect_stop; ++d) {
 
-            if (0x20u + d >= sys.size()) {
+            if (!sys.has_defect_entry(d)) {
                 m.count_ = 0;
                 return std::unexpected(Error{Errc::bad_format, ERR_SITE(), d});
             }
-            const std::uint32_t t = sys[0x20 + d];
+            const std::uint32_t t = sys.defect_entry(d);
             if (t < zone.tracks)
                 bad_track[t] = true;
             ++listed;
@@ -85,14 +88,14 @@ Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
     std::uint64_t ram = 0;
     for (std::size_t i = 0; i < m.count_; ++i) {
         const Step& s = m.steps_[i];
-        if (!s.good || s.lba < kRamStartLba[area.disk_type])
+        if (!s.good || s.lba < infra::at_index(kRamStartLba, type))
             continue;
         m.ram_step_[m.ram_count_] = static_cast<std::uint16_t>(i);
         m.ram_base_[m.ram_count_] = static_cast<std::uint32_t>(ram);
         ++m.ram_count_;
         ram += std::uint64_t{s.zone_bytes} * kSectorsPerBlock;
     }
-    m.ram_bytes_ = kRamBytes[area.disk_type];
+    m.ram_bytes_ = infra::at_index(kRamBytes, type);
     m.ram_ok_ = m.ram_bytes_ != 0 && ram == m.ram_bytes_;
     return {};
 }

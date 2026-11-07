@@ -5,6 +5,7 @@
 
 #include "infra/counter.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -32,9 +33,9 @@ public:
 
     [[nodiscard]] std::uint32_t joy_players() const noexcept { return joy_players_.get(); }
 
-    void store_joy(std::uint32_t seen, std::uint32_t players) noexcept {
-        joy_seen_.set(seen);
-        joy_players_.set(players);
+    void merge_joy(proto::JoyMask seen, std::uint32_t players) noexcept {
+        joy_seen_.set(joy_seen_.get() | seen.v);
+        joy_players_.set(joy_players_.get() | players);
     }
 
     [[nodiscard]] std::uint32_t rounds() const noexcept { return rounds_.get(); }

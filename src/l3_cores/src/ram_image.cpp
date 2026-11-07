@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include "infra/crc32.h"
+
 namespace mister::cores {
 namespace {
 
@@ -16,19 +18,26 @@ public:
 
     [[nodiscard]] std::uint64_t draw() noexcept {
         const std::uint64_t hi = step_();
-        return hi << 32 | step_();
+        return hi << kWordBits | step_();
     }
 
 private:
+    static constexpr std::uint64_t kMultiplier = 6364136223846793005ull;
+    static constexpr std::uint64_t kIncrement = 1;
+    static constexpr unsigned kWordBits = 32;
+    static constexpr unsigned kXsrHighShift = 18;
+    static constexpr unsigned kXsrLowShift = 27;
+    static constexpr unsigned kRotateShift = 59;
+    static constexpr unsigned kRotateMask = 31;
+
     std::uint32_t step_() noexcept {
         const std::uint64_t s = state_;
-        state_ = s * 6364136223846793005ull + kIncrement;
-        const auto xorshift = static_cast<std::uint32_t>((s >> 18 ^ s) >> 27);
-        const auto rotate = static_cast<std::uint32_t>(s >> 59);
-        return xorshift >> rotate | xorshift << (-rotate & 31u);
+        state_ = s * kMultiplier + kIncrement;
+        const auto xorshift = static_cast<std::uint32_t>((s >> kXsrHighShift ^ s) >> kXsrLowShift);
+        const auto rotate = static_cast<std::uint32_t>(s >> kRotateShift);
+        return xorshift >> rotate | xorshift << (-rotate & kRotateMask);
     }
 
-    static constexpr std::uint64_t kIncrement = 1;
     std::uint64_t state_ = 0;
 };
 
@@ -37,7 +46,8 @@ public:
     explicit Lfsr(std::uint32_t seed) noexcept : iter_(seed) {}
 
     [[nodiscard]] std::uint8_t draw() noexcept {
-        iter_ = iter_ >> 1 ^ (((iter_ & 1u) - 1u) & 0xedb88320u);
+
+        iter_ = iter_ >> 1 ^ (((iter_ & 1u) - 1u) & detail::kReflectedPolynomial);
         return static_cast<std::uint8_t>(iter_);
     }
 
@@ -46,23 +56,35 @@ private:
 };
 
 std::vector<std::uint8_t> low_entropy_bytes(Pcg32& rng, std::uint32_t size) {
+
+    constexpr std::uint32_t kPickerMask = 3;
+    constexpr std::uint32_t kNibbleMask = 15;
+    constexpr std::uint32_t kHighBitOffset = 8;
+    constexpr std::uint32_t kByteValueMask = 255;
+    constexpr std::uint32_t kBitMask = 7;
+    constexpr std::uint32_t kLowFlipPeriod = 511;
+    constexpr std::uint32_t kHighFlipPeriod = 2047;
     std::vector<std::uint8_t> data(size);
-    const auto lobit = static_cast<std::uint32_t>(rng.draw() & 3);
-    const auto hibit = static_cast<std::uint32_t>((lobit + 8 + (rng.draw() & 3)) & 15);
-    auto lovalue = static_cast<std::uint8_t>(rng.draw() & 255);
-    auto hivalue = static_cast<std::uint8_t>(rng.draw() & 255);
-    if ((rng.draw() & 3) == 0)
+    const auto lobit = static_cast<std::uint32_t>(rng.draw() & kPickerMask);
+    const auto hibit = static_cast<std::uint32_t>(
+        (lobit + kHighBitOffset + (rng.draw() & kPickerMask)) & kNibbleMask
+    );
+    auto lovalue = static_cast<std::uint8_t>(rng.draw() & kByteValueMask);
+    auto hivalue = static_cast<std::uint8_t>(rng.draw() & kByteValueMask);
+    if ((rng.draw() & kPickerMask) == 0)
         lovalue = 0;
-    if ((rng.draw() & 1) == 0)
+    if ((rng.draw() & 1u) == 0)
         hivalue = static_cast<std::uint8_t>(~lovalue);
     for (std::uint32_t address = 0; address < size; ++address) {
         auto value = (address & 1u << lobit) != 0 ? lovalue : hivalue;
         if ((address & 1u << hibit) != 0)
             value = static_cast<std::uint8_t>(~value);
-        if ((rng.draw() & 511) == 0)
-            value ^= static_cast<std::uint8_t>(1u << (rng.draw() & 7));
-        if ((rng.draw() & 2047) == 0)
-            value ^= static_cast<std::uint8_t>(1u << (rng.draw() & 7));
+        if ((rng.draw() & kLowFlipPeriod) == 0) {
+            value ^= static_cast<std::uint8_t>(1u << (rng.draw() & kBitMask));
+        }
+        if ((rng.draw() & kHighFlipPeriod) == 0) {
+            value ^= static_cast<std::uint8_t>(1u << (rng.draw() & kBitMask));
+        }
         data[address] = value;
     }
     return data;

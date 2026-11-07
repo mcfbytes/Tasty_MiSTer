@@ -8,7 +8,6 @@
 namespace mister::proto {
 
 struct DeclaredLine {
-    TASTY_SEAT_EXEMPT(const_shared);
     std::uint8_t klass = 0;
     std::uint8_t pool = 0;
     std::uint32_t cause_off = 0;

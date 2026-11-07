@@ -3,6 +3,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -480,7 +481,7 @@ private:
     SwitchPark switch_park_;
     QuiesceAck park_{};
 
-    std::uint32_t dropped_gen_ = 0;
+    xthread::PauseGen dropped_gen_{};
     std::uint32_t holds_at_drop_ = 0;
     proto::BindGeneration torn_gen_{};
     proto::BindGeneration torn_done_{};
@@ -501,7 +502,7 @@ private:
     bool core_ready_ = true;
 
     xthread::LogLane::Producer log_lane_;
-    std::uint64_t load_start_ns_ = 0;
+    std::chrono::nanoseconds load_start_{};
 
     const LadderStateCell& ladder_cell_;
 

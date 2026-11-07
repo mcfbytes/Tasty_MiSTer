@@ -98,7 +98,6 @@ constexpr const MapKindSpec& map_spec(MapKind k) noexcept {
 }
 
 class MapStore {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     MapStore() noexcept = default;

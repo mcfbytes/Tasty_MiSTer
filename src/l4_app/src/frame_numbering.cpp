@@ -8,45 +8,46 @@
 
 namespace mister::app {
 
+namespace {
+
+constexpr std::int64_t kPeriodWeight = 7;
+constexpr std::int64_t kPeriodSamples = kPeriodWeight + 1;
+
+constexpr CoreFrameGap kWovenStep{2};
+
+}
+
 void FrameNumbering::restart() noexcept {
     last_.reset();
-    ext_ = 0;
-    anchor_off_ = -1;
-    cell_off_ = 0;
+    ext_ = WideCoreFrame{};
+    anchor_off_ = kBeforeFirstCopy;
+    cell_off_ = CoreFrameGap{};
     cell_epoch_ = 0;
     nvotes_ = 0;
 }
 
-std::uint64_t FrameNumbering::core_frame() const noexcept {
-    return static_cast<std::uint64_t>(static_cast<std::int64_t>(ext_) + anchor_off_);
-}
-
 MovieFrame FrameNumbering::movie_of(
     const CoreFrameRecord& cell,
-    std::uint64_t core
+    WideCoreFrame core
 ) const noexcept {
     if (cell.movie_frame == kNoMovieFrame)
         return kNoMovieFrame;
-    const WideMovieFrame m = wide_frame(cell.movie_frame)
-        + MovieSpan{
-            static_cast<std::int64_t>(core) + cell_off_ - static_cast<std::int64_t>(cell.core_frame)
-        };
+    const CoreFrameGap since_cell = core + cell_off_ - WideCoreFrame::numbered(cell.core_frame);
+    const WideMovieFrame m = wide_frame(cell.movie_frame) + since_cell.movie_span();
     constexpr WideMovieFrame kFloor{-std::numeric_limits<std::int32_t>::max()};
     return std::max(m, kFloor).narrowed();
 }
 
 bool FrameNumbering::anchor(
     const CoreFrameRecord& cell,
-    std::int64_t lag,
+    CoreFrameGap lag,
     bool vote,
     bool anchored
 ) noexcept {
 
-    const std::int64_t off = static_cast<std::int64_t>(cell.core_frame)
-        - lag
-        - static_cast<std::int64_t>(ext_);
+    const CoreFrameGap off = WideCoreFrame::numbered(cell.core_frame) - lag - ext_;
 
-    if (!anchored || cell.epoch != cell_epoch_ || off > anchor_off_ + 1 || off < anchor_off_ - 1)
+    if (!anchored || cell.epoch != cell_epoch_ || (off - anchor_off_).beyond(kOneFrame))
         nvotes_ = vote_next_ = 0;
     if (!vote && nvotes_ != 0)
         return false;
@@ -64,91 +65,88 @@ bool FrameNumbering::anchor(
             anchor_off_ = *v;
         }
     }
-    cell_off_ = 0;
+    cell_off_ = CoreFrameGap{};
     cell_epoch_ = cell.epoch;
     return true;
 }
 
 void FrameNumbering::rebase_(
     const CoreFrameRecord& cell,
-    std::uint64_t core,
-    std::int64_t lag
+    WideCoreFrame core,
+    CoreFrameGap lag
 ) noexcept {
 
-    cell_off_ = static_cast<std::int64_t>(cell.core_frame) - lag - static_cast<std::int64_t>(core);
+    cell_off_ = WideCoreFrame::numbered(cell.core_frame) - lag - core;
     cell_epoch_ = cell.epoch;
 }
 
 bool FrameNumbering::cross_check_(
     const CoreFrameRecord& cell,
-    std::uint64_t core,
-    std::int64_t lag
+    WideCoreFrame core,
+    CoreFrameGap lag
 ) const noexcept {
-    const std::int64_t d = static_cast<std::int64_t>(cell.core_frame)
-        - lag
-        - (static_cast<std::int64_t>(core) + cell_off_);
-    return d > 1 || d < -1;
+    const WideCoreFrame by_cell = WideCoreFrame::numbered(cell.core_frame) - lag;
+    const WideCoreFrame ours = core + cell_off_;
+    return (by_cell - ours).beyond(kOneFrame);
 }
 
 FrameNumbering::Gap FrameNumbering::frames_since(
-    std::uint8_t ctr,
+    hal::HeaderCtr ctr,
     std::int64_t now,
     const CoreFrameRecord* cell,
-    std::int64_t lag,
-    std::int64_t behind,
+    CoreFrameGap lag,
+    CoreFrameGap behind,
     bool woven,
     bool anchored,
     std::int64_t& period_ns
 ) noexcept {
     if (!last_) {
         last_ = LastCtr{ctr, now};
-        return {1, false};
+        return {CoreFrameCount{1}, false};
     }
-    const std::uint32_t d = ctr_minus(ctr, last_->ctr);
+    const CoreFrameGap d = ctr_distance(last_->ctr, ctr);
     const std::int64_t dt = now - last_->seen_ns;
-    std::uint32_t n = d;
+    CoreFrameGap n = d;
     bool estimated = false;
-    const std::int64_t est = (dt + period_ns / 2) / period_ns;
-    if (est >= 7) {
+    const CoreFrameGap est{(dt + period_ns / 2) / period_ns};
+    if (est >= kCtrReach) {
 
-        n = d + 8u * static_cast<std::uint32_t>((est - d + 4) / 8);
+        n = unwrapped_near(d, est);
         if (anchored && cell != nullptr && cell->epoch == cell_epoch_) {
-            const std::int64_t last = static_cast<std::int64_t>(ext_) + anchor_off_ + cell_off_;
-            const std::int64_t by_cell = static_cast<std::int64_t>(cell->core_frame) - lag - last;
+            const WideCoreFrame last = current_() + cell_off_;
+            const CoreFrameGap by_cell = WideCoreFrame::numbered(cell->core_frame) - lag - last;
 
-            if (by_cell + 1 >= est)
-                n = d
-                    + 8u
-                        * static_cast<std::uint32_t>(
-                            std::max<std::int64_t>(0, (by_cell - std::int64_t{d} + 4) / 8)
-                        );
+            if (by_cell + kOneFrame >= est)
+                n = unwrapped_near(d, by_cell);
         }
         estimated = true;
         nvotes_ = vote_next_ = 0;
     } else if (
-        const std::uint32_t step = woven ? 2u : 1u;
-        d == step && behind == 0 && dt > 0 && dt < std::int64_t{step + 1} * period_ns
+        const CoreFrameGap step = woven ? kWovenStep : kOneFrame; d == step
+        && behind == CoreFrameGap{}
+        && dt > 0
+        && dt < (step + kOneFrame).lasting_ns(period_ns)
     ) {
 
-        period_ns = (7 * period_ns + dt / step) / 8;
+        period_ns = (kPeriodWeight * period_ns + step.period_ns_of(dt)) / kPeriodSamples;
     }
     last_ = LastCtr{ctr, now};
-    return {n, estimated};
+    return {n.core_frames(), estimated};
 }
 
 FrameNumbering::Stamped FrameNumbering::stamp(
-    std::uint8_t ctr,
+    hal::HeaderCtr ctr,
     std::int64_t now,
     const CoreFrameRecord* cell,
     const std::optional<CoreFrameRecord>& last_cell,
     bool anchored,
-    std::int64_t lag
+    CoreFrameGap lag
 ) noexcept {
     Stamped out{};
     FrameStamp& s = out.stamp;
     s.header_ctr = ctr;
     s.capture_ns = now;
-    const std::uint64_t core = core_frame();
+    const WideCoreFrame core = current_();
     s.core_frame = core;
 
     if (cell == nullptr && anchored && last_cell && last_cell->epoch == cell_epoch_)

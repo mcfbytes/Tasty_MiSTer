@@ -262,10 +262,12 @@ static_assert(every_item_kind_maps_exactly_once());
     return OptionItem::Kind::Unknown;
 }
 
+inline constexpr std::uint32_t kStatusFieldBits = 24;
+
 proto::FieldValue cycle_value(
     BitField bits,
     proto::FieldValue current,
-    int dir,
+    CycleDir dir,
     const ISlotLabels* labels
 );
 

@@ -25,6 +25,9 @@ public:
     enum : unsigned { kLogFileMode = 0644, kTerminatorBytes = 2 };
 
     static constexpr std::size_t kMaxLine = 4095;
+    static constexpr std::size_t kRecordMax = kMaxLine - 1;
+
+    static constexpr std::size_t kTruncRecordMax = 96;
     static_assert(kMaxLine + 1 <= PIPE_BUF, "one record must still be one atomic write");
     static_assert(
         infra::JsonOut::kCapacity == kMaxLine - 1,
@@ -45,51 +48,32 @@ public:
     [[gnu::format(printf, 2, 3)]]
     void appendf(const char* fmt, ...) noexcept {
         char buf[kMaxLine + 1];
-        constexpr std::size_t kRecordMax = sizeof buf - kTerminatorBytes;
         va_list ap;
         va_start(ap, fmt);
-        int n = std::vsnprintf(buf, sizeof buf - 1, fmt, ap);
+        const int n = std::vsnprintf(buf, sizeof buf - 1, fmt, ap);
         va_end(ap);
         if (n < 0) {
             drops_.fetch_add(1, std::memory_order_relaxed);
             return;
         }
-        auto len = static_cast<std::size_t>(n);
+        const auto len = static_cast<std::size_t>(n);
         if (len > kRecordMax) {
             truncations_.fetch_add(1, std::memory_order_relaxed);
-            n = std::snprintf(
-                buf,
-                sizeof buf - 1,
-                "{\"t\":\"trunc\",\"need\":%u,\"max\":%u}",
-                static_cast<unsigned>(len),
-                static_cast<unsigned>(kRecordMax)
-            );
-            len = (n < 0) ? 0u : static_cast<std::size_t>(n);
-            if (len > kRecordMax)
-                len = kRecordMax;
+            trunc_record_(len);
+            return;
         }
         buf[len] = '\n';
-        emit_(buf, len + 1);
+        emit_(std::string_view(buf, len + 1));
     }
 
     void append(infra::JsonOut& o) noexcept {
         if (!o.overflowed()) {
             const std::string_view line = o.take_line();
-            emit_(line.data(), line.size());
+            emit_(line);
             return;
         }
         truncations_.fetch_add(1, std::memory_order_relaxed);
-        char buf[96];
-        const int n = std::snprintf(
-            buf,
-            sizeof buf - 1,
-            "{\"t\":\"trunc\",\"need\":%u,\"max\":%u}",
-            static_cast<unsigned>(o.need()),
-            static_cast<unsigned>(infra::JsonOut::kCapacity)
-        );
-        const auto len = n < 0 ? 0u : static_cast<std::size_t>(n);
-        buf[len] = '\n';
-        emit_(buf, len + 1);
+        trunc_record_(o.need());
     }
 
     std::uint32_t drops() const noexcept { return drops_.load(std::memory_order_relaxed); }
@@ -99,20 +83,38 @@ public:
     }
 
 private:
-    void emit_(const char* line, std::size_t len) noexcept {
+    void trunc_record_(std::size_t need) noexcept {
+        char buf[kTruncRecordMax];
+        const int n = std::snprintf(
+            buf,
+            sizeof buf - 1,
+            kTruncFormat,
+            static_cast<unsigned>(need),
+            static_cast<unsigned>(kRecordMax)
+        );
+        std::size_t len = n < 0 ? 0u : static_cast<std::size_t>(n);
+        if (len > sizeof buf - kTerminatorBytes)
+            len = sizeof buf - kTerminatorBytes;
+        buf[len] = '\n';
+        emit_(std::string_view(buf, len + 1));
+    }
+
+    void emit_(std::string_view line) noexcept {
         if (echo_stderr_) {
-            const auto e = ::write(STDERR_FILENO, line, len);
+            const auto e = ::write(STDERR_FILENO, line.data(), line.size());
             (void)e;
         }
         if (!fd_.valid()) {
             drops_.fetch_add(1, std::memory_order_relaxed);
             return;
         }
-        if (::write(fd_.get(), line, len) != static_cast<::ssize_t>(len)) {
+        if (::write(fd_.get(), line.data(), line.size()) != static_cast<::ssize_t>(line.size())) {
 
             drops_.fetch_add(1, std::memory_order_relaxed);
         }
     }
+
+    static constexpr const char* kTruncFormat = "{\"t\":\"trunc\",\"need\":%u,\"max\":%u}";
 
     UniqueFd fd_;
 

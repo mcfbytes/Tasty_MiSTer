@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "svc/config.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -132,8 +133,9 @@ struct ConfigSnapshot {
     ParseError parse_errors[kMaxParseErrors]{};
 };
 
-[[nodiscard]] constexpr std::uint8_t direct_video_resolved(const ConfigSnapshot& c) noexcept {
-    return c.direct_video == 2 ? std::uint8_t{0} : c.direct_video;
+[[nodiscard]] constexpr DirectVideo direct_video_resolved(const ConfigSnapshot& c) noexcept {
+
+    return direct_video_of(c.direct_video) == DirectVideo::On ? DirectVideo::On : DirectVideo::Off;
 }
 
 }

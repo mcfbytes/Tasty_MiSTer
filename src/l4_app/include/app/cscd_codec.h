@@ -20,8 +20,10 @@ public:
     static constexpr std::size_t kHeadBytes = 2;
     static constexpr std::uint8_t kKeyBit = 0x01;
 
+    static constexpr std::size_t kRowAlign = 4;
+
     [[nodiscard]] static constexpr std::size_t row_bytes(std::uint32_t w) noexcept {
-        return (std::size_t{w} * 3u + 3u) & ~std::size_t{3};
+        return (std::size_t{w} * kRgbPixelBytes + (kRowAlign - 1)) & ~(kRowAlign - 1);
     }
 
     [[nodiscard]] static constexpr std::size_t picture_bytes(
@@ -31,12 +33,16 @@ public:
         return row_bytes(w) * h;
     }
 
+    static constexpr std::size_t kLzoOverheadDiv = 16;
+    static constexpr std::size_t kLzoOverheadFloor = 64;
+    static constexpr std::size_t kLzoOverheadTail = 3;
+
     [[nodiscard]] static constexpr std::size_t payload_bound(
         std::uint32_t w,
         std::uint32_t h
     ) noexcept {
         const std::size_t n = picture_bytes(w, h);
-        return kHeadBytes + n + n / 16u + 64u + 3u;
+        return kHeadBytes + n + n / kLzoOverheadDiv + kLzoOverheadFloor + kLzoOverheadTail;
     }
 
     CscdCodec() noexcept = default;
@@ -89,13 +95,7 @@ public:
 
     [[nodiscard]] std::span<const std::byte> dup() noexcept override;
 
-    static void half_scale(
-        const std::byte* rgb,
-        std::size_t line,
-        std::uint16_t w,
-        std::uint16_t h,
-        std::byte* dst
-    ) noexcept;
+    static void half_scale(RgbRows src, std::uint16_t src_w, std::span<std::byte> dst) noexcept;
 
 private:
     [[nodiscard]] std::size_t pack_(

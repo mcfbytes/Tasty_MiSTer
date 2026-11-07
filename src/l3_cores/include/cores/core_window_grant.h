@@ -15,7 +15,6 @@ class ICoreWindow;
 inline constexpr std::size_t kMaxCoreWindows = 4;
 
 struct CoreWindowGrant {
-    TASTY_SEAT_EXEMPT(component);
 
     struct Row {
         std::string_view name{};

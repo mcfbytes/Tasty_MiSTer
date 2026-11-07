@@ -33,7 +33,7 @@ public:
         std::vector<std::uint8_t>&& bytes,
         std::string_view ext,
         std::string_view path,
-        std::uint32_t load_addr,
+        hal::FabricAddr load_addr,
         svc::Crc32 crc = {},
         std::uint64_t whole = 0,
         std::uint64_t offset = 0
@@ -45,7 +45,7 @@ public:
 
     [[nodiscard]] Ex<proto::FileId> intern_path(
         std::string_view path,
-        std::uint64_t size_bytes,
+        proto::FileSize size,
         svc::Crc32 crc = {},
         std::uint32_t aux = 0
     );
@@ -55,7 +55,7 @@ public:
         std::vector<std::uint8_t>&& bytes,
         std::string_view ext,
         std::string_view path,
-        std::uint32_t load_addr
+        hal::FabricAddr load_addr
     );
 
     void send_staged(std::uint32_t at) noexcept { slab_.producer().send_staged(at); }

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "cores/core_support.h"
+#include "cores/file_tx.h"
 #include "cores/uef.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
@@ -20,7 +21,7 @@ class ElectronCore final : public Core {
 public:
     ElectronCore(const CoreProfile& p, const HostServices& h) : Core(p, h) {}
 
-    static constexpr std::size_t kChunkBytes = 4096;
+    static constexpr std::size_t kChunkBytes = kFileTxChunkBytes;
 
     static constexpr std::size_t kMaxImageBytes = 16u * 1024u * 1024u;
 
@@ -30,7 +31,7 @@ public:
 
     [[nodiscard]] std::uint32_t last_numbits() const noexcept { return last_numbits_; }
 
-    [[nodiscard]] std::uint16_t last_index() const noexcept { return last_index_; }
+    [[nodiscard]] proto::IoIndex last_index() const noexcept { return last_index_; }
 
 private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
@@ -51,7 +52,7 @@ private:
     std::uint64_t bytes_sent_ = 0;
     std::uint32_t transfers_ = 0;
     std::uint32_t last_numbits_ = 0;
-    std::uint16_t last_index_ = 0;
+    proto::IoIndex last_index_{};
     std::vector<std::uint8_t> image_;
     std::uint8_t buf_[kChunkBytes]{};
 };

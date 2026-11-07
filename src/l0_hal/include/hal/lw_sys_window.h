@@ -16,7 +16,6 @@
 namespace mister::hal {
 
 class LwSysWindow {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     [[nodiscard]] static Ex<LwSysWindow> discover(
@@ -47,15 +46,16 @@ public:
 
     template <class Layout>
     [[nodiscard]] Ex<RegisterWindow<Layout>> map(std::uint32_t rel) const {
-        if ((rel & kWordAlignMask) != 0u || Layout::kSize > size_ || rel > size_ - Layout::kSize) {
+        const LwOffset at_rel{rel};
+        if (!at_rel.dword_aligned() || !at_rel.fits(size_, Layout::kSize)) {
             return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), rel});
         }
-        const std::uint32_t at = off_.v + rel;
+        const LwOffset at = off_.plus(rel);
         if (image_.empty())
-            return RegisterWindow<Layout>::map(lw_, LwOffset{at});
+            return RegisterWindow<Layout>::map(lw_, at);
         const std::size_t words = (Layout::kSize + kWordAlignMask) / kWordBytes;
         return RegisterWindow<Layout>::borrow(
-            reg::Block::over(image_.subspan(at / kWordBytes, words))
+            reg::Block::over(image_.subspan(at.dword_index(), words))
         );
     }
 
@@ -78,10 +78,7 @@ private:
     ) noexcept {
         if (board_len == 0)
             return Error{Errc::dt_missing, ERR_SITE(), off.v};
-        if (size < sizeof(std::uint32_t)
-            || (off.v & kWordAlignMask) != 0u
-            || size > board_len
-            || static_cast<std::size_t>(off.v) > board_len - size) {
+        if (size < sizeof(std::uint32_t) || !off.dword_aligned() || !off.fits(board_len, size)) {
             return Error{Errc::bad_format, ERR_SITE(), off.v};
         }
         return std::nullopt;

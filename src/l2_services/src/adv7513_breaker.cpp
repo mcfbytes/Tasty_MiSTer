@@ -3,6 +3,14 @@
 
 namespace mister::svc::adv7513 {
 
+namespace {
+
+constexpr std::uint8_t op_byte(os::I2cAddr a, bool write) noexcept {
+    return static_cast<std::uint8_t>(unsigned{a.v} | (write ? I2cBreaker::kOpWrite : 0u));
+}
+
+}
+
 Ex<std::uint8_t> I2cBreaker::probe(unsigned bus, os::I2cAddr addr) {
     TASTY_SEAT_BODY(I2cBreaker);
     return inner_->probe(bus, addr);
@@ -17,10 +25,10 @@ Ex<std::uint8_t> I2cBreaker::read(os::I2cAddr addr, os::I2cReg reg) {
     TASTY_SEAT_BODY(I2cBreaker);
     if (open_) {
         ++refused_;
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), addr.v});
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), addr_detail(addr)});
     }
     auto r = inner_->read(addr, reg);
-    note(r.has_value(), addr.v, reg, r ? nullptr : &r.error());
+    note(r.has_value(), op_byte(addr, false), reg, r ? nullptr : &r.error());
     return r;
 }
 
@@ -28,15 +36,10 @@ Ex<void> I2cBreaker::write(os::I2cAddr addr, os::I2cReg reg, std::uint8_t val) {
     TASTY_SEAT_BODY(I2cBreaker);
     if (open_) {
         ++refused_;
-        return std::unexpected(Error{Errc::would_block, ERR_SITE(), addr.v});
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), addr_detail(addr)});
     }
     auto r = inner_->write(addr, reg, val);
-    note(
-        r.has_value(),
-        static_cast<std::uint8_t>(addr.v | kOpWrite),
-        reg,
-        r ? nullptr : &r.error()
-    );
+    note(r.has_value(), op_byte(addr, true), reg, r ? nullptr : &r.error());
     return r;
 }
 

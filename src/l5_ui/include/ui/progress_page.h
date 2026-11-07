@@ -8,15 +8,19 @@
 #include <string_view>
 
 #include "app/page_description.h"
+#include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "ui/page.h"
 
 namespace mister::ui {
 
-inline constexpr unsigned kProgressNameRow = 3;
-inline constexpr unsigned kProgressBarRow = 4;
+inline constexpr proto::OsdRow kProgressNameRow{3};
+inline constexpr proto::OsdRow kProgressBarRow{4};
 
 inline constexpr std::size_t kProgressNameMax = 27;
+
+inline constexpr RowCount kProgressOsdRows{8};
+inline constexpr std::chrono::milliseconds kProgressDeadMan{10000};
 
 std::string_view progress_leaf(std::string_view path) noexcept;
 
@@ -34,8 +38,8 @@ public:
     PageFacts facts() const override {
         TASTY_SEAT_BODY(ProgressPage);
         PageFacts f{};
-        f.osd_rows = RowCount{8};
-        f.auto_pop = std::chrono::milliseconds{10000};
+        f.osd_rows = kProgressOsdRows;
+        f.auto_pop = kProgressDeadMan;
         f.takes_input_focus = false;
         f.allows_popups = true;
         return f;
@@ -68,8 +72,7 @@ public:
     }
 
 private:
-    char name_[kProgressNameMax]{};
-    std::uint8_t name_len_ = 0;
+    FixedStr<kProgressNameMax + 1, StrFit::Clip> name_{};
     std::uint8_t step_ = 0;
 
     cores::Progress last_{};

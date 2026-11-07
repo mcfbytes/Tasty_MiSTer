@@ -69,14 +69,14 @@ private:
         std::uint32_t hmax,
         std::uint32_t vmin,
         std::uint32_t vmax,
-        std::uint32_t stride
+        RowBytes stride
     ) noexcept;
     void write_mode_param_(
         unsigned fmt,
         unsigned rb,
         std::uint32_t w,
         std::uint32_t h,
-        std::uint32_t stride
+        RowBytes stride
     ) noexcept;
 
     svc::VideoService::IVideoWireSink& wire_;

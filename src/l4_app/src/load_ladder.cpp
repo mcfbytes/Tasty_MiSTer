@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/load_ladder.h"
 
+#include "infra/endian.h"
+
 #include <algorithm>
 #include <limits>
 #include <span>
@@ -100,7 +102,7 @@ LoadLadder::Pass LoadLadder::open_(Host& h) {
         pc_ = job_.total != 0 ? Pc::Chunk : Pc::Fill;
         return Pass::Stepped;
     }
-    auto id = h.inbox.intern_file_path(path_.view(), job_.total);
+    auto id = h.inbox.intern_file_path(path_.view(), proto::FileSize{job_.total});
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : Pass::Failed;
     const proto::LinkOp::FileTx op{
@@ -246,7 +248,7 @@ LoadLadder::Pass LoadLadder::facts_(Host& h) {
 LoadLadder::Pass LoadLadder::mount_(Host& h) {
     if (h.inbox.ring().size() >= proto::kLinkTxCapacity)
         return Pass::Waiting;
-    auto id = h.inbox.intern_file_path(job_.save.view(), job_.save_bytes);
+    auto id = h.inbox.intern_file_path(job_.save.view(), proto::FileSize{job_.save_bytes});
     if (!id) {
         if (id.error().code == Errc::would_block)
             return Pass::Waiting;
@@ -269,7 +271,7 @@ LoadLadder::Pass LoadLadder::mount_(Host& h) {
 LoadLadder::Pass LoadLadder::close_(Host& h) {
     if (job_.row.bracket == cores::RowBracket::None)
         return notify_(h);
-    auto id = h.inbox.intern_file_path(path_.view(), job_.total, key_.value());
+    auto id = h.inbox.intern_file_path(path_.view(), proto::FileSize{job_.total}, key_.value());
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
     const proto::LinkOp::FileTx op{
@@ -290,19 +292,16 @@ LoadLadder::Pass LoadLadder::notify_(Host& h) {
     if (n.armed) {
         if (h.inbox.ring().size() >= proto::kLinkTxCapacity)
             return Pass::Waiting;
-        std::vector<std::uint8_t> words;
-        words.reserve(2u * n.words.size());
-        for (const std::uint16_t w : n.words) {
-            words.push_back(static_cast<std::uint8_t>(w & 0xFFu));
-            words.push_back(static_cast<std::uint8_t>(w >> 8));
-        }
-        auto id = h.inbox.intern_file(std::move(words), {}, path_.view(), 0);
+
+        std::vector<std::uint8_t> words(n.words.size() * sizeof(std::uint16_t));
+        infra::store_le_run(std::span<const std::uint16_t>(n.words), std::span(words));
+        auto id = h.inbox.intern_file(std::move(words), {}, path_.view(), hal::FabricAddr{});
         if (!id)
             return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
         const proto::LinkOp::StagePayload op{
             .payload = *id,
             .dest = proto::WideIoIndex{cores::PostNotify::kIndex},
-            .copy_word = n.copies() ? cores::PostNotify::kCopyWord : std::uint8_t{0}
+            .copy_word = n.copy_word()
         };
         if (!h.inbox.push(op))
             return Pass::Waiting;

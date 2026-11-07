@@ -10,7 +10,6 @@
 namespace mister::os {
 
 class Deadline {
-    TASTY_SEAT_EXEMPT(component);
 
 public:
     static Deadline in(const IClock& c, std::chrono::nanoseconds d) {

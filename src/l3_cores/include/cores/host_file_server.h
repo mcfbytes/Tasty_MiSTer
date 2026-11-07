@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 
@@ -12,6 +13,12 @@
 #include "svc/vfs.h"
 
 namespace mister::cores {
+
+inline constexpr std::uint32_t kMailboxPageMax = std::numeric_limits<std::uint32_t>::max();
+
+[[nodiscard]] constexpr std::uint32_t mailbox_page_len(std::size_t n) noexcept {
+    return n > kMailboxPageMax ? kMailboxPageMax : static_cast<std::uint32_t>(n);
+}
 
 [[nodiscard]] constexpr bool mailbox_span_fits(
     std::uint32_t off,
@@ -37,11 +44,10 @@ public:
             if (!mailbox_span_fits(
                     static_cast<std::uint32_t>(Protocol::kDataOffset),
                     static_cast<std::uint32_t>(Protocol::kDataLength),
-                    page.size() > 0xFFFF'FFFFu ? 0xFFFF'FFFFu
-                                               : static_cast<std::uint32_t>(page.size())
+                    mailbox_page_len(page.size())
                 )) {
                 return std::unexpected(
-                    Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(page.size())}
+                    Error{Errc::slot_range, ERR_SITE(), mailbox_page_len(page.size())}
                 );
             }
             window_ = MailboxWindow{page.subspan(Protocol::kDataOffset, Protocol::kDataLength)};

@@ -9,6 +9,30 @@ constexpr std::int64_t kMsNs = 1'000'000;
 
 }
 
+std::chrono::milliseconds NtscCadence::next_gap(bool pal) noexcept {
+    std::chrono::milliseconds gap = kLongGap;
+    switch (step_) {
+        case Step::Unprimed:
+            gap = kShortGap;
+            step_ = Step::Wrapped;
+            break;
+        case Step::Wrapped:
+            step_ = Step::FirstLong;
+            break;
+        case Step::FirstLong:
+            step_ = Step::SecondLong;
+            break;
+        case Step::SecondLong:
+            step_ = Step::Short;
+            break;
+        case Step::Short:
+            gap = kShortGap;
+            step_ = Step::FirstLong;
+            break;
+    }
+    return pal ? kPalGap : gap;
+}
+
 Ex<void> CheatEngine::apply(std::span<const std::uint8_t> table, std::uint32_t unit) {
     TASTY_SEAT_BODY(CheatEngine);
     ++applies_;
@@ -54,12 +78,13 @@ CheatTick CheatEngine::tick(bool loaded, bool pal, bool enabled, bool gs_pressed
         return CheatTick::Idle;
     }
 
-    const std::int64_t gap = pal ? kPalGapMs : (adj_ > 1 ? 17 : 16);
-    if (adj_ > 3 || --adj_ == 0)
-        adj_ = 3;
+    const std::int64_t gap_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    cadence_.next_gap(pal)
+    )
+                                    .count();
 
     const std::int64_t base = (due_ns_ == 0 || due_ns_ + kMaxLagMs * kMsNs < now) ? now : due_ns_;
-    due_ns_ = base + gap * kMsNs;
+    due_ns_ = base + gap_ns;
 
     if (count_ == 0 || !enabled)
         return CheatTick::Idle;
@@ -86,11 +111,12 @@ CheatTick CheatEngine::tick(bool loaded, bool pal, bool enabled, bool gs_pressed
 }
 
 int CheatEngine::execute_(CheatCode& c, bool gs_pressed) noexcept {
-    const std::size_t span = c.span_bytes();
-    if (span == 0)
+    std::array<std::uint8_t, ByteMask::kBytes> mem{};
+    const std::span<std::uint8_t> reach = c.mask.reach(mem);
+    if (reach.empty())
         return -1;
 
-    if (c.address >= window_->size() || c.address + span > window_->size())
+    if (c.address >= window_->size() || c.address + reach.size() > window_->size())
         return -1;
 
     if (c.boot_code) {
@@ -102,16 +128,12 @@ int CheatEngine::execute_(CheatCode& c, bool gs_pressed) noexcept {
         return 1;
 
     if (!c.cmp_type || *c.cmp_type != Compare::Always) {
-        std::uint8_t mem[4] = {};
-        auto got = window_->read(
-            c.address,
-            std::as_writable_bytes(std::span<std::uint8_t>(mem, span))
-        );
+        auto got = window_->read(c.address, std::as_writable_bytes(reach));
         if (!got) {
             ++wire_faults_;
             return 1;
         }
-        const int r = compare_(std::span<const std::uint8_t>(mem, span), c);
+        const int r = compare_(reach, c);
         if (r != 1)
             return r;
     }
@@ -122,14 +144,10 @@ int CheatEngine::execute_(CheatCode& c, bool gs_pressed) noexcept {
 int CheatEngine::compare_(std::span<const std::uint8_t> mem, const CheatCode& c) noexcept {
     std::uint32_t old_masked = 0;
     std::uint32_t new_masked = 0;
-    for (std::size_t i = 0; i < mem.size(); ++i) {
-        old_masked <<= 8;
-        new_masked <<= 8;
-        if ((c.cmp_mask & (1u << i)) != 0u) {
-            old_masked |= mem[i];
-            new_masked |= (c.replace >> (i * 8)) & 0xffu;
-        }
-    }
+    c.mask.for_each_masked(mem, c.replace, [&](std::uint8_t m, std::uint8_t r) {
+        old_masked = (old_masked << 8) | m;
+        new_masked = (new_masked << 8) | r;
+    });
     if (!c.cmp_type)
         return -1;
     switch (*c.cmp_type) {
@@ -154,12 +172,6 @@ int CheatEngine::compare_(std::span<const std::uint8_t> mem, const CheatCode& c)
 }
 
 bool CheatEngine::write_back_(const CheatCode& c) noexcept {
-    std::uint8_t out[4] = {};
-
-    const auto put = [&out, &c](std::size_t from, std::size_t n) {
-        for (std::size_t i = 0; i < n; ++i)
-            out[i] = static_cast<std::uint8_t>((c.replace >> ((from + i) * 8)) & 0xffu);
-    };
     const auto poke = [this](std::size_t at, std::span<const std::uint8_t> b) {
         auto r = window_->write(at, std::as_bytes(b));
         if (!r) {
@@ -170,28 +182,14 @@ bool CheatEngine::write_back_(const CheatCode& c) noexcept {
         return true;
     };
 
-    if (c.cmp_mask == 0xf && (c.address & 0x3u) == 0u) {
-        put(0, 4);
-        return poke(c.address, std::span<const std::uint8_t>(out, 4));
-    }
-    if (c.cmp_mask == 0x3 && (c.address & 0x1u) == 0u) {
-        put(0, 2);
-        return poke(c.address, std::span<const std::uint8_t>(out, 2));
-    }
-
     bool ok = true;
-    for (std::size_t i = 0; i < 4;) {
-        if ((c.cmp_mask & (1u << i)) == 0u) {
-            ++i;
-            continue;
-        }
-        std::size_t n = 0;
-        while (i + n < 4 && (c.cmp_mask & (1u << (i + n))) != 0u)
-            ++n;
-        put(i, n);
-        ok = poke(c.address + i, std::span<const std::uint8_t>(out, n)) && ok;
-        i += n;
-    }
+    c.mask.for_each_run([&](ByteRun run) {
+        ok = poke(
+                 c.address + run.at,
+                 std::span<const std::uint8_t>(c.replace).subspan(run.at, run.len)
+             )
+            && ok;
+    });
     return ok;
 }
 

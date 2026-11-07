@@ -106,12 +106,12 @@ std::optional<CmdVerb::TasPlay> parse_tas_play(std::string_view args) {
         const auto p = small_int(*phase);
         if (!p || *p < 0)
             return std::nullopt;
-        v.phase_us = static_cast<std::uint32_t>(*p);
+        v.phase = std::chrono::microseconds{*p};
         if (const auto lead = next_token(args)) {
             const auto l = small_int(*lead);
             if (!l)
                 return std::nullopt;
-            v.lead = *l;
+            v.lead = MovieFrame{*l};
         }
     }
     if (!lstrip(args).empty())

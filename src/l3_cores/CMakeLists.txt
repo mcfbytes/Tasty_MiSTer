@@ -121,6 +121,21 @@ if(TASTY_CDDA_DUMP)
 endif()
 
 tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
+  cores/saturn_cdd_frame.h
+  cores/saturn_mode.h
+  cores/scsi_cdb.h
+  cores/sega_cdd_stat.h
+  cores/fnv1a64.h
+  cores/md_cmd_flags.h
+  cores/mra_lane.h
+  cores/mra_map_word.h
+  cores/n64_detect.h
+  cores/n64dd_disk_type.h
+  cores/neogeo_file_index.h
+  cores/snes_cart_type.h
+  cores/st_ctrl.h
+  cores/st_option_row_index.h
+  cores/wire_word.h
   cores/addressed_load.h
   cores/generic_profile.h
   cores/acsi_servant.h
@@ -183,7 +198,9 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/saturn_ladder.h
   cores/neogeocd_ladder.h
   cores/cdi_ladder.h
+  cores/cd_msf.h
   cores/cdwire.h
+  cores/cheat_unit.h
   cores/cheat_geometry.h
   cores/cheat_lookup.h
   cores/cheat_records.h
@@ -315,6 +332,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/snes_core.h
   cores/sgb_core.h
   cores/mailbox_carriage.h
+  cores/snes_header_fields.h
   cores/snes_rom.h
   cores/msu_wire.h
   cores/msu_machine.h

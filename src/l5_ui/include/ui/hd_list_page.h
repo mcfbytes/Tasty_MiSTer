@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "app/page_description.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/hd_plan.h"
@@ -47,7 +48,7 @@ public:
 
     [[nodiscard]] RowCount rows_dropped() const noexcept;
 
-    static constexpr RowCount kMaxRows{64};
+    static constexpr RowCount kMaxRows = menu_mask_rows();
 
 private:
     struct Slots {
@@ -60,6 +61,20 @@ private:
         [[nodiscard]] RowIndex end() const noexcept { return row_after(addressed()); }
     };
 
+    template <std::size_t Extent>
+    struct RowSet {
+        infra::IndexedArray<RowIndex, Extent, RowIndex> at{};
+        RowCount n{};
+
+        void add(RowIndex r) noexcept {
+            if (n < RowCount::of(Extent))
+                at[row_after(n)] = r;
+            n += kOneRow;
+        }
+
+        [[nodiscard]] RowIndex operator[](RowIndex i) const noexcept { return at[i]; }
+    };
+
     [[nodiscard]] Slots slots_() const;
     [[nodiscard]] IHdRow& row_(const Slots& s, RowIndex slot) const;
     [[nodiscard]] bool shown_(const Slots& s, RowIndex slot) const;
@@ -68,14 +83,14 @@ private:
     [[nodiscard]] std::optional<RowIndex> recalled_() const;
 
     struct Window {
-        std::array<RowIndex, app::PageDescription::kMaxRows> slot{};
-        std::uint8_t count = 0;
-        std::uint8_t pinned = 0;
-        std::uint16_t first = 0;
-        std::uint16_t total = 0;
+        infra::IndexedArray<RowIndex, app::PageDescription::kMaxRows, RowIndex> slot{};
+        RowCount count{};
+        RowCount pinned{};
+        RowIndex first{};
+        RowCount total{};
     };
 
-    [[nodiscard]] Window window_(std::uint16_t prev_first) const;
+    [[nodiscard]] Window window_(RowIndex prev_first) const;
     void focus_(RowIndex i);
 
     void refocus_();

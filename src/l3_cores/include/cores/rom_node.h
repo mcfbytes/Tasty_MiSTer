@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 
+#include "cores/mra_map_word.h"
 #include "svc/types.h"
 
 namespace mister::cores::mra {
@@ -18,8 +19,7 @@ struct RomNode {
     std::int32_t offset = 0;
     std::int32_t length = -1;
     std::int32_t repeat = 1;
-    std::uint32_t map = 0;
-    std::uint32_t map_digits = 0;
+    MapWord map{};
     bool xor_op = false;
     std::string text;
     int input = 0;

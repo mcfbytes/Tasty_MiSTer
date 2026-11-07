@@ -78,7 +78,7 @@ Ex<bool> InputEmitter::release(proto::ILinkFrame& frame, PlayerIndex player, Joy
 }
 
 JoyMask InputEmitter::PlayerMasks::composed(bool grabbed) const noexcept {
-    return grabbed ? JoyMask{joy_.v | autofire_.v} : joy_;
+    return grabbed ? joy_.with(autofire_) : joy_;
 }
 
 void InputEmitter::set_joy_mask(PlayerIndex player, JoyMask mask) noexcept {

@@ -39,19 +39,9 @@ std::string_view stem_of(std::string_view name) {
 }
 
 Fnv1aHex fnv1a64_hex(std::string_view basename) {
-    std::uint64_t h = 0xcbf29ce484222325ull;
-    for (char c : basename) {
-        h ^= static_cast<std::uint8_t>(c);
-        h *= 0x100000001b3ull;
-    }
-    constexpr char kHex[] = "0123456789abcdef";
-    char digits[16];
-    for (int i = 15; i >= 0; --i) {
-        digits[static_cast<std::size_t>(i)] = kHex[h & 0xF];
-        h >>= 4;
-    }
+    const auto digits = Fnv1a64::digest_of(basename).hex();
     Fnv1aHex out;
-    (void)out.assign(std::string_view{digits, sizeof digits});
+    (void)out.assign(std::string_view{digits.data(), digits.size()});
     return out;
 }
 
@@ -129,11 +119,11 @@ Ex<SavePath> NvramStore::path_for(std::string_view partition) const {
         return std::unexpected(p.error());
     switch (policy_.naming) {
         case SaveNaming::PerDiscFnv1a:
-            return per_disc_path(*p, false);
+            return per_disc_path(*p);
         case SaveNaming::PerCore:
-            return per_core_path(*p, false);
+            return per_core_path(*p);
         case SaveNaming::PerCoreIndexed:
-            return per_core_path(*p, true);
+            return per_core_indexed_path(*p);
         case SaveNaming::PerImagePartition:
             return per_image_path(*p);
     }
@@ -147,28 +137,45 @@ Ex<SavePath> NvramStore::stock_path_for(std::string_view partition) const {
     if (policy_.naming != SaveNaming::PerDiscFnv1a) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     }
-    return per_disc_path(*p, true);
+    return stock_disc_path(*p);
 }
 
-Ex<SavePath> NvramStore::per_disc_path(const SavePartition&, bool stock) const {
+Ex<SavePath> NvramStore::per_disc_path(const SavePartition&) const {
     SavePath out;
     bool ok = out.assign(policy_.force_sd_root ? "/media/fat/saves/" : "saves/");
     ok = ok && out.append(policy_.directory);
     ok = ok && out.append("/");
     ok = ok && out.append(policy_.prefix);
-    if (!stock) {
-        ok = ok && out.append("-");
-        ok = ok && out.append(fnv1a64_hex(image_.view()).view());
-    }
+    ok = ok && out.append("-");
+    ok = ok && out.append(fnv1a64_hex(image_.view()).view());
     ok = ok && out.append(".");
     ok = ok && out.append(policy_.extension);
     return built(ok, out);
 }
 
-Ex<SavePath> NvramStore::per_core_path(const SavePartition& p, bool indexed) const {
+Ex<SavePath> NvramStore::stock_disc_path(const SavePartition&) const {
+    SavePath out;
+    bool ok = out.assign(policy_.force_sd_root ? "/media/fat/saves/" : "saves/");
+    ok = ok && out.append(policy_.directory);
+    ok = ok && out.append("/");
+    ok = ok && out.append(policy_.prefix);
+    ok = ok && out.append(".");
+    ok = ok && out.append(policy_.extension);
+    return built(ok, out);
+}
+
+Ex<SavePath> NvramStore::per_core_path(const SavePartition&) const {
     SavePath out;
     bool ok = out.assign(policy_.prefix);
-    if (indexed && p.index != 0)
+    ok = ok && out.append(".");
+    ok = ok && out.append(policy_.extension);
+    return built(ok, out);
+}
+
+Ex<SavePath> NvramStore::per_core_indexed_path(const SavePartition& p) const {
+    SavePath out;
+    bool ok = out.assign(policy_.prefix);
+    if (p.index != 0)
         ok = ok && append_index(out, p.index);
     ok = ok && out.append(".");
     ok = ok && out.append(policy_.extension);
@@ -201,7 +208,7 @@ SavePath pick_disc_path(
     if (!f)
         return own;
     auto size = (*f)->size();
-    if (!size || size->v != length.v)
+    if (!size || *size != length)
         return own;
     return stock;
 }

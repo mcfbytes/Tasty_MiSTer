@@ -2,10 +2,12 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 
 #include "cores/core_window_decl.h"
+#include "cores/types.h"
 #include "cores/post_notify.h"
 #include "infra/error.h"
 #include "proto/types.h"
@@ -16,8 +18,6 @@ enum class RowDest : std::uint8_t { Window, Fio, Notify, Payload };
 
 enum class RowBracket : std::uint8_t { AroundWithLength, None };
 
-inline constexpr std::uint8_t kPhysicalAddr = 0xFF;
-
 struct TransferRow {
     RowDest dest = RowDest::Fio;
     bool shaped = false;
@@ -25,7 +25,7 @@ struct TransferRow {
     bool byte_words = false;
     proto::WideIoIndex index{};
     std::uint32_t addr = 0;
-    std::uint8_t window = kPhysicalAddr;
+    WindowRef window = WindowRef::physical();
     RowBracket bracket = RowBracket::AroundWithLength;
     std::uint8_t stride = 1;
     std::uint8_t lane = 0;
@@ -46,12 +46,14 @@ struct TransferRow {
     std::span<const CoreWindowDecl> windows,
     std::uint64_t aperture_base
 ) {
-    if (r.window == kPhysicalAddr)
+    const auto slot = r.window.slot();
+    if (!slot)
         return r.addr;
-    if (r.window >= windows.size())
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), r.window});
-    const std::uint64_t a = aperture_base + windows[r.window].region.offset + r.addr;
-    if (a > 0xFFFF'FFFFu)
+    const auto window = slot->in(windows);
+    if (!window)
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), r.addr});
+    const std::uint64_t a = aperture_base + window->region.offset + r.addr;
+    if (a > std::numeric_limits<std::uint32_t>::max())
         return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), r.addr});
     return static_cast<std::uint32_t>(a);
 }

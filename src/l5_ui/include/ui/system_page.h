@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string_view>
 
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/confirm_host.h"
@@ -41,32 +44,49 @@ enum class SystemItem : std::uint8_t {
     Exit = 9,
 };
 
-[[nodiscard]] constexpr std::optional<SystemItem> system_item_from_raw(std::uint32_t raw) noexcept {
-    switch (raw) {
-        case 0:
-            return SystemItem::Core;
-        case 1:
-            return SystemItem::SwitchStorage;
-        case 2:
-            return SystemItem::RemapKeyboard;
-        case 3:
-            return SystemItem::DefineJoystick;
-        case 4:
-            return SystemItem::Scripts;
-        case 5:
-            return SystemItem::Help;
-        case 6:
-            return SystemItem::SaveSettings;
-        case 7:
-            return SystemItem::Reboot;
-        case 8:
-            return SystemItem::UseHd;
-        case 9:
-            return SystemItem::Exit;
-        default:
-            return std::nullopt;
-    }
+inline constexpr std::size_t kSystemItemTotal = 10;
+inline constexpr infra::IndexedArray<SystemItem, kSystemItemTotal, RowIndex> kSystemItems = [] {
+    constexpr std::array<SystemItem, kSystemItemTotal> order{
+        SystemItem::Core,
+        SystemItem::SwitchStorage,
+        SystemItem::RemapKeyboard,
+        SystemItem::DefineJoystick,
+        SystemItem::Scripts,
+        SystemItem::Help,
+        SystemItem::SaveSettings,
+        SystemItem::Reboot,
+        SystemItem::UseHd,
+        SystemItem::Exit
+    };
+    infra::IndexedArray<SystemItem, kSystemItemTotal, RowIndex> t;
+    for (std::size_t i = 0; i < kSystemItemTotal; ++i)
+        t[RowIndex::of(i)] = order[i];
+    return t;
+}();
+inline constexpr RowCount kSystemItemCount = RowCount::of(kSystemItemTotal);
+
+[[nodiscard]] constexpr std::optional<SystemItem> system_item_of(RowIndex row) noexcept {
+    const auto item = kSystemItems.find(row);
+    if (!item)
+        return std::nullopt;
+    return *item;
 }
+
+[[nodiscard]] constexpr RowIndex system_row_of(SystemItem it) noexcept {
+    for (std::size_t i = 0; i < kSystemItemTotal; ++i)
+        if (kSystemItems[RowIndex::of(i)] == it)
+            return RowIndex::of(i);
+    return RowIndex::of(kSystemItemTotal);
+}
+
+consteval bool system_items_are_dense() {
+    for (std::size_t i = 0; i < kSystemItemTotal; ++i)
+        if (system_row_of(kSystemItems[RowIndex::of(i)]) != RowIndex::of(i))
+            return false;
+    return !system_item_of(RowIndex::of(kSystemItemTotal)).has_value();
+}
+
+static_assert(system_items_are_dense());
 
 class SystemPage final : public Page, private IConfirmHost {
     TASTY_SEAT_RESIDENT(Ui);
@@ -81,14 +101,12 @@ public:
 
     MenuMask mask() const override {
         TASTY_SEAT_BODY(SystemPage);
-        std::uint64_t m = 0x3FFu;
-        if (!facts_.core_loaded) {
-            m &= ~(std::uint64_t{1} << static_cast<unsigned>(SystemItem::SaveSettings));
-        }
-        if (!facts_.hd_switchable) {
-            m &= ~(std::uint64_t{1} << static_cast<unsigned>(SystemItem::UseHd));
-        }
-        return MenuMask{m};
+        MenuMask m = dense_mask(kSystemItemCount);
+        if (!facts_.core_loaded)
+            m = m.without_row(system_row_of(SystemItem::SaveSettings));
+        if (!facts_.hd_switchable)
+            m = m.without_row(system_row_of(SystemItem::UseHd));
+        return m;
     }
 
     void set_selection(RowIndex i) override {
@@ -105,6 +123,8 @@ public:
         TASTY_SEAT_BODY(SystemPage);
         PageFacts f{};
         f.allows_cfg_switch = true;
+
+        f.repeat_all_keys = item_selected(SystemItem::Reboot);
         return f;
     }
 
@@ -128,9 +148,7 @@ private:
         return launches_ ? launches_->browser : infra::OptRef<BrowserLaunch>{};
     }
 
-    bool item_selected(SystemItem it) const noexcept {
-        return sel_.v == static_cast<std::uint32_t>(it);
-    }
+    bool item_selected(SystemItem it) const noexcept { return sel_ == system_row_of(it); }
 
     template <class Visit>
     void for_each_row(Visit&& visit) const;

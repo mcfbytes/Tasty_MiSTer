@@ -9,10 +9,11 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <cstdlib>
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
-#include <expected>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,32 +21,64 @@
 namespace mister::os {
 namespace {
 
-constexpr long kPollStartNs = 200'000;
-constexpr long kPollMaxNs = 10'000'000;
-constexpr int kGraceMs = 500;
+constexpr std::chrono::nanoseconds kPollStart{200'000};
+constexpr std::chrono::nanoseconds kPollMax{10'000'000};
+constexpr std::chrono::milliseconds kGrace{500};
+constexpr std::chrono::milliseconds kGraceSlice{10};
+constexpr std::chrono::nanoseconds::rep kRampFactor = 2;
 
-void sleep_ns(long ns) noexcept {
-    struct timespec ts{0, ns};
+constexpr int kExecFailedCode = 127;
+
+void sleep_ns(std::chrono::nanoseconds d) noexcept {
+    const auto secs = std::chrono::duration_cast<std::chrono::seconds>(d);
+    timespec ts{};
+    ts.tv_sec = static_cast<std::time_t>(secs.count());
+    ts.tv_nsec = static_cast<long>((d - secs).count());
     while (::clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, &ts) == EINTR) {
     }
 }
 
-constexpr long ramp(long ns) noexcept {
-    return ns >= kPollMaxNs / 2 ? kPollMaxNs : ns * 2;
+constexpr std::chrono::nanoseconds ramp(std::chrono::nanoseconds d) noexcept {
+    return d >= kPollMax / kRampFactor ? kPollMax : d * kRampFactor;
 }
 
-struct Reaped {
-    int rc;
-    int status;
+struct ReapOutcome {
+    enum class State : std::uint8_t { reaped, running, failed };
+    State state = State::running;
+    int status = 0;
+    int error = 0;
+
+    [[nodiscard]] static constexpr ReapOutcome reaped(int st) noexcept {
+        return {State::reaped, st, 0};
+    }
+
+    [[nodiscard]] static constexpr ReapOutcome running() noexcept { return {State::running, 0, 0}; }
+
+    [[nodiscard]] static constexpr ReapOutcome failed(int e) noexcept {
+        return {State::failed, 0, e};
+    }
+
+    [[nodiscard]] ChildProcessExit exit() const noexcept {
+        if (WIFSIGNALED(status))
+            return ChildProcessExit{.signalled = true, .code = WTERMSIG(status)};
+        return ChildProcessExit{
+            .signalled = false,
+            .code = WIFEXITED(status) ? WEXITSTATUS(status) : 0
+        };
+    }
 };
 
-[[nodiscard]] Reaped try_reap(::pid_t pid) noexcept {
+[[nodiscard]] ReapOutcome try_reap(::pid_t pid) noexcept {
     int status = 0;
     for (;;) {
         const ::pid_t r = ::waitpid(pid, &status, WNOHANG);
         if (r < 0 && errno == EINTR)
             continue;
-        return Reaped{static_cast<int>(r), r > 0 ? status : 0};
+        if (r > 0)
+            return ReapOutcome::reaped(status);
+        if (r == 0)
+            return ReapOutcome::running();
+        return ReapOutcome::failed(errno);
     }
 }
 
@@ -56,10 +89,6 @@ std::vector<char*> to_argv(std::span<const char* const> argv) {
         args.push_back(const_cast<char*>(a));
     args.push_back(nullptr);
     return args;
-}
-
-int decode(int status) noexcept {
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
 constexpr const char* kShell = "/bin/sh";
@@ -91,16 +120,35 @@ std::string script_path(const char* file) {
     }
 }
 
-std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
+struct SpawnOutcome {
+    enum class State : std::uint8_t { started, refused, exec_failed };
+    State state = State::refused;
+    ::pid_t pid = -1;
+    int error = 0;
+
+    [[nodiscard]] static constexpr SpawnOutcome started(::pid_t p) noexcept {
+        return {State::started, p, 0};
+    }
+
+    [[nodiscard]] static constexpr SpawnOutcome refused(int e) noexcept {
+        return {State::refused, -1, e};
+    }
+
+    [[nodiscard]] static constexpr SpawnOutcome exec_failed() noexcept {
+        return {State::exec_failed, -1, 0};
+    }
+};
+
+SpawnOutcome spawn_child(const std::vector<char*>& args) {
     ::pid_t pid = -1;
     int e = ::posix_spawnp(&pid, args[0], nullptr, nullptr, args.data(), environ);
     if (e == 0)
-        return pid;
+        return SpawnOutcome::started(pid);
     if (e != ENOEXEC)
-        return std::unexpected(e);
+        return SpawnOutcome::refused(e);
     std::string file = script_path(args[0]);
     if (file.empty())
-        return std::unexpected(e);
+        return SpawnOutcome::exec_failed();
     std::vector<char*> sh;
     sh.reserve(args.size() + 1);
     sh.push_back(const_cast<char*>(kShell));
@@ -108,13 +156,13 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
     sh.insert(sh.end(), args.begin() + 1, args.end());
     e = ::posix_spawn(&pid, kShell, nullptr, nullptr, sh.data(), environ);
     if (e != 0)
-        return std::unexpected(e);
-    return pid;
+        return SpawnOutcome::refused(e);
+    return SpawnOutcome::started(pid);
 }
 
 }
 
-[[nodiscard]] Ex<int> run_sync(
+[[nodiscard]] Ex<ChildProcessExit> run_sync(
     std::span<const char* const> argv,
     std::chrono::milliseconds timeout
 ) {
@@ -123,15 +171,17 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
 
     std::vector<char*> args = to_argv(argv);
 
-    const auto spawned = spawn_child(args);
-    if (!spawned) {
-        const int e = spawned.error();
-        if (never_started(e)) {
-            return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(e)});
+    const SpawnOutcome sp = spawn_child(args);
+    if (sp.state == SpawnOutcome::State::refused) {
+        if (never_started(sp.error)) {
+            return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), sp.error));
         }
-        return 127;
+        return ChildProcessExit{.signalled = false, .code = kExecFailedCode};
     }
-    const ::pid_t pid = *spawned;
+    if (sp.state == SpawnOutcome::State::exec_failed) {
+        return ChildProcessExit{.signalled = false, .code = kExecFailedCode};
+    }
+    const ::pid_t pid = sp.pid;
 
     int status = 0;
 
@@ -141,36 +191,33 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
             if (r < 0 && errno == EINTR)
                 continue;
             if (r < 0) {
-                return std::unexpected(
-                    Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)}
-                );
+                return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
             }
-            return decode(status);
+            return ReapOutcome::reaped(status).exit();
         }
     }
 
-    const std::int64_t bound_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(timeout)
-                                      .count();
-    long ivl = kPollStartNs;
-    for (std::int64_t waited_ns = 0; waited_ns < bound_ns; waited_ns += ivl, ivl = ramp(ivl)) {
-        const Reaped re = try_reap(pid);
-        if (re.rc > 0)
-            return decode(re.status);
-        if (re.rc < 0) {
-            return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+    const auto bound = std::chrono::duration_cast<std::chrono::nanoseconds>(timeout);
+    std::chrono::nanoseconds ivl = kPollStart;
+    for (std::chrono::nanoseconds waited{}; waited < bound; waited += ivl, ivl = ramp(ivl)) {
+        const ReapOutcome re = try_reap(pid);
+        if (re.state == ReapOutcome::State::reaped)
+            return re.exit();
+        if (re.state == ReapOutcome::State::failed) {
+            return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), re.error));
         }
         sleep_ns(ivl);
     }
 
-    if (const Reaped re = try_reap(pid); re.rc > 0)
-        return decode(re.status);
+    if (const ReapOutcome re = try_reap(pid); re.state == ReapOutcome::State::reaped)
+        return re.exit();
 
     (void)::kill(pid, SIGTERM);
-    for (int waited = 0; waited < kGraceMs; waited += 10) {
-        if (try_reap(pid).rc > 0) {
+    for (std::chrono::milliseconds waited{}; waited < kGrace; waited += kGraceSlice) {
+        if (try_reap(pid).state == ReapOutcome::State::reaped) {
             return std::unexpected(Error{Errc::timeout, ERR_SITE(), 0});
         }
-        sleep_ns(kPollMaxNs);
+        sleep_ns(kPollMax);
     }
     (void)::kill(pid, SIGKILL);
 
@@ -199,7 +246,7 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
 
     ::posix_spawnattr_t attr;
     if (const int e = ::posix_spawnattr_init(&attr); e != 0) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(e)});
+        return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), e));
     }
     ::pid_t mid = -1;
     int e = ::posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
@@ -207,7 +254,7 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
         e = ::posix_spawn(&mid, kShell, nullptr, &attr, args.data(), environ);
     (void)::posix_spawnattr_destroy(&attr);
     if (e != 0) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(e)});
+        return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), e));
     }
 
     int status = 0;
@@ -216,12 +263,12 @@ std::expected<::pid_t, int> spawn_child(const std::vector<char*>& args) {
         if (r < 0 && errno == EINTR)
             continue;
         if (r < 0) {
-            return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
+            return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
         }
         break;
     }
 
-    if (decode(status) != 0) {
+    if (ReapOutcome::reaped(status).exit().code != 0) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }
     return {};

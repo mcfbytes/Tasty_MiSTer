@@ -34,7 +34,7 @@
     "\"mrem\":%u,\"kovf\":%u,\"uik\":%u,\"uikd\":%u," \
     "\"qdrop\":%u,\"rej\":%u," \
     "\"btn\":%u,\"btnq\":%u," \
-    "\"pl\":{\"live\":%u,\"gh\":%u," \
+    "\"pl\":{\"live\":%s,\"gh\":%u," \
     "\"k\":[%u,%u,%u,%u,%u,%u]}}," \
     "\"mgl\":{\"fi\":%u,\"ab\":%u,\"arm\":%u,\"pub\":%u,\"r0\":%u}," \
     "\"ftx\":{\"n\":%u,\"b\":%llu,\"idx\":%u," \
@@ -115,7 +115,7 @@
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
-        TASTY_RTSTATS_U32_MAX, 63u, 6u, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
+        TASTY_RTSTATS_U32_MAX, "63", 6u, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \
         TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, TASTY_RTSTATS_U32_MAX, \

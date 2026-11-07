@@ -2,6 +2,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstddef>
 #include <optional>
@@ -46,9 +47,9 @@ public:
     struct PlayAsk {
         std::string_view movie{};
         std::string_view rom{};
-        std::optional<std::int32_t> lead{};
-        std::optional<std::uint32_t> phase_us{};
-        std::optional<std::uint32_t> stop_at{};
+        std::optional<app::MovieFrame> lead{};
+        std::optional<std::chrono::microseconds> phase_us{};
+        std::optional<app::MovieFrame> stop_at{};
         std::optional<cores::IMovieCodec::RamFill> ram_fill{};
         bool seeded_save = false;
         bool set_settings = true;
@@ -63,7 +64,7 @@ public:
         virtual void take_stop() noexcept = 0;
 
         [[nodiscard]] virtual app::FrameCount frames() const noexcept = 0;
-        [[nodiscard]] virtual std::uint32_t movie_frames() const noexcept = 0;
+        [[nodiscard]] virtual app::FrameCount movie_frames() const noexcept = 0;
 
         [[nodiscard]] virtual bool refused() const noexcept { return false; }
 
@@ -137,6 +138,18 @@ private:
 
     [[nodiscard]] bool video_reloaded_() const noexcept;
     [[nodiscard]] bool menu_ready_() const noexcept;
+
+    [[nodiscard]] bool begin_play_() noexcept;
+
+    [[nodiscard]] bool run_head_() noexcept;
+
+    void advance_splash_(std::chrono::nanoseconds now) noexcept;
+
+    void on_replay_end_(
+        app::ReplayEnd end,
+        app::EpochFail epoch_fail,
+        std::chrono::nanoseconds now
+    ) noexcept;
     void fail_(int rc, const char* why) noexcept;
 
     [[nodiscard]] bool copy_seed_() noexcept;
@@ -153,8 +166,8 @@ private:
     os::MonotonicClock clock_{};
     TastySplash splash_{};
     Stage stage_ = Stage::HideOsd;
-    std::int64_t stage_ns_ = 0;
-    std::int64_t last_status_ns_ = 0;
+    std::chrono::nanoseconds stage_ns_{};
+    std::chrono::nanoseconds last_status_ns_{};
     app::PathText core_path_{};
     app::PathText menu_path_{};
     char last_status_[768]{};

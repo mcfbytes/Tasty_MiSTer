@@ -3,106 +3,69 @@
 #include "ui/key_decoder.h"
 #include "ui/ui_event.h"
 
-#include <bit>
+#include <chrono>
 #include <cstddef>
 #include <linux/input-event-codes.h>
 
 #include "os/clock.h"
 
 namespace mister::ui {
-namespace {
-
-constexpr std::uint64_t bit(std::uint32_t i) noexcept {
-    return i < 64 ? (std::uint64_t{1} << i) : 0u;
-}
-
-}
-
 bool Navigator::selectable(RowIndex i) const noexcept {
-    return (mask_.v & bit(i.v)) != 0;
+    return mask_.has(i);
 }
 
 bool Navigator::move(Direction d) noexcept {
-    if (mask_.v == 0)
+    if (mask_ == MenuMask{})
         return false;
 
-    const std::uint32_t before = index_.v;
-    std::uint32_t idx = before;
-
-    if (d == Direction::Down) {
-        const std::uint64_t above = (idx + 1 < 64) ? bit(idx + 1) : 0u;
-        if (above != 0 && mask_.v >= above) {
-            do {
-                ++idx;
-            } while (idx < 64 && !selectable(RowIndex{idx}));
-            if (idx >= 64)
-                idx = before;
-        } else {
-            idx = 0;
-            while (idx < 64 && !selectable(RowIndex{idx}))
-                ++idx;
-            if (idx >= 64)
-                idx = before;
-        }
-    } else {
-        const bool entered_at_zero = (idx == 0);
-        if (!entered_at_zero) {
-            do {
-                --idx;
-            } while (idx != 0 && !selectable(RowIndex{idx}));
-        }
-        if (entered_at_zero || (idx == 0 && !selectable(RowIndex{0}))) {
-            std::uint32_t highest = idx;
-            for (std::uint32_t i = 0; i < 64; ++i) {
-                if (selectable(RowIndex{i}))
-                    highest = i;
-            }
-            idx = highest;
-        }
-    }
-
-    index_ = RowIndex{idx};
-    return idx != before;
+    const RowIndex before = index_;
+    std::optional<RowIndex> to = d == Direction::Down ? mask_.next_after(index_)
+                                                      : mask_.prev_before(index_);
+    if (!to)
+        to = d == Direction::Down ? mask_.lowest() : mask_.highest();
+    if (to)
+        index_ = *to;
+    return index_ != before;
 }
 
 bool Navigator::move_tier(Direction d, MenuMask run) noexcept {
-    const std::uint64_t out = mask_.v & ~run.v;
-    if (out == 0 || run.v == 0)
+    const MenuMask out = mask_.without(run);
+    if (out == MenuMask{} || run == MenuMask{})
         return false;
-    const std::uint32_t before = index_.v;
-    const int top = 63 - std::countl_zero(run.v);
-    const int bottom = std::countr_zero(run.v);
-    std::uint64_t past = 0;
+    const RowIndex before = index_;
+    std::optional<RowIndex> to;
     if (d == Direction::Down) {
-        past = top < 63 ? out & ~((std::uint64_t{2} << top) - 1) : 0;
-        index_ = RowIndex{static_cast<std::uint32_t>(std::countr_zero(past != 0 ? past : out))};
+        to = out.next_after(*run.highest());
+        if (!to)
+            to = out.lowest();
     } else {
-        past = out & ((std::uint64_t{1} << bottom) - 1);
-        index_ = RowIndex{
-            static_cast<std::uint32_t>(63 - std::countl_zero(past != 0 ? past : out))
-        };
+        to = out.prev_before(*run.lowest());
+        if (!to)
+            to = out.highest();
     }
-    return index_.v != before;
+    if (to)
+        index_ = *to;
+    return index_ != before;
 }
 
 bool Navigator::move_strip(Direction d, MenuMask run) noexcept {
-    const std::uint64_t in = mask_.v & run.v;
-    const std::uint32_t at = index_.v;
-    if (at >= 64)
+    const MenuMask in = mask_.only(run);
+    if (in == MenuMask{})
         return false;
-    const std::uint64_t side = d == Direction::Down ? in & ~((std::uint64_t{2} << at) - 1)
-                                                    : in & ((std::uint64_t{1} << at) - 1);
-    if (side == 0)
+    if (index_.v >= menu_mask_rows().v)
         return false;
-    const int to = d == Direction::Down ? std::countr_zero(side) : 63 - std::countl_zero(side);
-    index_ = RowIndex{static_cast<std::uint32_t>(to)};
+    const std::optional<RowIndex> to = d == Direction::Down ? in.next_after(index_)
+                                                            : in.prev_before(index_);
+    if (!to)
+        return false;
+    index_ = *to;
     return true;
 }
 
 namespace {
 
 struct DecodeRow {
-    std::uint16_t code;
+    svc::EvdevCode code;
     KeyEdge edge;
     std::uint16_t button;
 };
@@ -150,9 +113,9 @@ static_assert(one_row_per_edge(kFullTable));
 static_assert(one_row_per_edge(kIniSelectTable));
 
 template <std::size_t N>
-std::uint16_t lookup(const DecodeRow (&t)[N], std::uint32_t code) noexcept {
-    const KeyEdge edge = (code & KeyDecoder::kUpstroke) != 0 ? KeyEdge::Break : KeyEdge::Make;
-    const std::uint16_t k = static_cast<std::uint16_t>(code & 0xFFFFu);
+std::uint16_t lookup(const DecodeRow (&t)[N], proto::KeyCode code) noexcept {
+    const KeyEdge edge = code.is_release() ? KeyEdge::Break : KeyEdge::Make;
+    const svc::EvdevCode k = svc::EvdevCode::of(code);
     for (const DecodeRow& r : t) {
         if (r.code == k && r.edge == edge)
             return r.button;
@@ -160,44 +123,42 @@ std::uint16_t lookup(const DecodeRow (&t)[N], std::uint32_t code) noexcept {
     return UiEvent::None;
 }
 
-bool ascii_printable(std::uint32_t code) noexcept {
-    if ((code & KeyDecoder::kUpstroke) != 0)
+bool ascii_printable(proto::KeyCode code) noexcept {
+    if (code.is_release())
         return false;
-    const std::uint32_t k = code & 0xFFFFu;
-    if (k >= KEY_1 && k <= KEY_0)
+    const svc::EvdevCode k = svc::EvdevCode::of(code);
+    using E = svc::EvdevCode;
+    if (k.between(E{KEY_1}, E{KEY_0}))
         return true;
-    if (k >= KEY_Q && k <= KEY_P)
+    if (k.between(E{KEY_Q}, E{KEY_P}))
         return true;
-    if (k >= KEY_A && k <= KEY_L)
+    if (k.between(E{KEY_A}, E{KEY_L}))
         return true;
-    if (k >= KEY_Z && k <= KEY_M)
+    if (k.between(E{KEY_Z}, E{KEY_M}))
         return true;
-    return k == KEY_MINUS || k == KEY_EQUAL || k == KEY_SPACE;
+    return k == E{KEY_MINUS} || k == E{KEY_EQUAL} || k == E{KEY_SPACE};
 }
 
-bool is_cursor(std::uint32_t code) noexcept {
-    if ((code & KeyDecoder::kUpstroke) != 0)
+bool is_cursor(proto::KeyCode code) noexcept {
+    if (code.is_release())
         return false;
-    const std::uint32_t k = code & 0xFFFFu;
-    return k == KEY_UP || k == KEY_DOWN || k == KEY_LEFT || k == KEY_RIGHT;
+    const svc::EvdevCode k = svc::EvdevCode::of(code);
+    using E = svc::EvdevCode;
+    return k == E{KEY_UP} || k == E{KEY_DOWN} || k == E{KEY_LEFT} || k == E{KEY_RIGHT};
 }
 
-bool held_make(std::uint32_t code) noexcept {
-    return (code & KeyDecoder::kUpstroke) == 0 && code != 0;
-}
-
-std::int64_t ms_ns(unsigned ms) noexcept {
-    return static_cast<std::int64_t>(ms) * 1000000;
+bool held_make(proto::KeyCode code) noexcept {
+    return !code.is_release() && code != proto::KeyCode{};
 }
 
 }
 
 UiButtonMask KeyDecoder::decode(proto::KeyCode code, bool ini_select) noexcept {
-    return UiButtonMask{ini_select ? lookup(kIniSelectTable, code.v) : lookup(kFullTable, code.v)};
+    return UiButtonMask{ini_select ? lookup(kIniSelectTable, code) : lookup(kFullTable, code)};
 }
 
 bool KeyDecoder::repeatable(proto::KeyCode code) noexcept {
-    return ascii_printable(code.v) || is_cursor(code.v);
+    return ascii_printable(code) || is_cursor(code);
 }
 
 void KeyDecoder::push_raw(proto::KeyCode code) noexcept {
@@ -209,113 +170,105 @@ void KeyDecoder::push_synth(proto::KeyCode code) noexcept {
 }
 
 void KeyDecoder::enqueue(proto::KeyCode code, bool synth) noexcept {
-    if (count_ == kQueue) {
-        head_ = (head_ + 1) % kQueue;
-        --count_;
+    if (ring_.push(QueuedKey{.code = code, .synth = synth}))
         ++dropped_;
-    }
-    const unsigned tail = (head_ + count_) % kQueue;
-    queue_[tail] = QueuedKey{.code = code.v, .synth = synth};
-    ++count_;
 }
 
 void KeyDecoder::reset() noexcept {
-    head_ = 0;
-    count_ = 0;
-    last_seen_ = 0;
-    db_pending_ = 0;
-    db_at_ns_ = 0;
-    repeat_at_ns_ = 0;
+    ring_ = KeyRing{};
+    last_seen_ = proto::KeyCode{};
+    db_pending_ = proto::KeyCode{};
+    db_at_ = std::chrono::nanoseconds{};
+    repeat_at_ = std::chrono::nanoseconds{};
     hold_cnt_ = 0;
 }
 
 std::optional<UiEvent> KeyDecoder::deliver_(
-    std::uint32_t code,
-    std::int64_t now,
+    proto::KeyCode code,
+    std::chrono::nanoseconds now,
     bool first
 ) noexcept {
-    std::uint32_t c = 0;
+    proto::KeyCode c{};
     if (first) {
         c = code;
         hold_cnt_ = 1;
-        repeat_at_ns_ = now + ms_ns(kRepeatDelayMs);
+        repeat_at_ = now + kRepeatDelay;
     }
-    if ((code & kUpstroke) != 0 || code == 0) {
+    if (code.is_release() || code == proto::KeyCode{}) {
         hold_cnt_ = 0;
-        repeat_at_ns_ = now + ms_ns(kRepeatDelayMs);
-    } else if (now >= repeat_at_ns_) {
-        repeat_at_ns_ = now + ms_ns(kRepeatRateMs);
-        if (repeatable(proto::KeyCode{code}) || repeat_all_) {
+        repeat_at_ = now + kRepeatDelay;
+    } else if (now >= repeat_at_) {
+        repeat_at_ = now + kRepeatRate;
+        if (repeatable(code) || repeat_all_) {
             c = code;
             ++hold_cnt_;
         }
     }
-    if (c == 0)
+    if (c == proto::KeyCode{})
         return std::nullopt;
 
     UiEvent ev{};
     ev.kind = UiEvent::Kind::Key;
-    ev.raw = proto::KeyCode{c};
-    ev.buttons = decode(proto::KeyCode{c}, ini_select_);
+    ev.raw = c;
+    ev.buttons = decode(c, ini_select_);
     ev.repeat_depth = hold_cnt_;
     return ev;
 }
 
-std::optional<UiEvent> KeyDecoder::accept_(std::uint32_t code, std::int64_t now) noexcept {
+std::optional<UiEvent> KeyDecoder::accept_(
+    proto::KeyCode code,
+    std::chrono::nanoseconds now
+) noexcept {
     last_seen_ = code;
-    db_at_ns_ = now + ms_ns(kDebounceMs);
+    db_at_ = now + kDebounce;
     return deliver_(code, now, true);
 }
 
 std::optional<UiEvent> KeyDecoder::pop() noexcept {
-    const std::int64_t now = clock_->now().count();
+    const std::chrono::nanoseconds now = clock_->now();
 
-    if (db_pending_ != 0 && now >= db_at_ns_) {
-        const std::uint32_t bounced = db_pending_;
-        db_pending_ = 0;
-        db_at_ns_ = 0;
+    if (db_pending_ != proto::KeyCode{} && now >= db_at_) {
+        const proto::KeyCode bounced = db_pending_;
+        db_pending_ = proto::KeyCode{};
+        db_at_ = std::chrono::nanoseconds{};
 
-        if (held_make(bounced) && count_ == 0) {
-            queue_[head_] = QueuedKey{.code = bounced, .synth = false};
-            count_ = 1;
+        if (held_make(bounced) && ring_.empty()) {
+            (void)ring_.push(QueuedKey{.code = bounced, .synth = false});
         }
         if (bounced != last_seen_)
             return accept_(bounced, now);
     }
-    if (count_ == 0)
+    if (ring_.empty())
         return std::nullopt;
 
-    if (!queue_[head_].synth && now < db_at_ns_) {
+    if (!ring_.head().synth && now < db_at_) {
         bool swallowed = false;
-        while (count_ != 0 && !queue_[head_].synth) {
-            const std::uint32_t c = queue_[head_].code;
-            if (!swallowed && count_ == 1 && held_make(c) && c == last_seen_)
+        while (!ring_.empty() && !ring_.head().synth) {
+            const proto::KeyCode c = ring_.head().code;
+            if (!swallowed && ring_.size() == 1 && held_make(c) && c == last_seen_)
                 break;
             db_pending_ = c;
-            head_ = (head_ + 1) % kQueue;
-            --count_;
+            (void)ring_.take();
             swallowed = true;
         }
-        if (swallowed || count_ == 0)
+        if (swallowed || ring_.empty())
             return std::nullopt;
     }
 
     std::optional<UiEvent> ev;
     for (;;) {
-        const std::uint32_t c1 = queue_[head_].code;
-        if (queue_[head_].synth) {
+        const proto::KeyCode c1 = ring_.head().code;
+        if (ring_.head().synth) {
             ev = deliver_(c1, now, true);
         } else if (c1 != last_seen_) {
             ev = accept_(c1, now);
         } else {
             ev = deliver_(c1, now, false);
         }
-        const bool stays = held_make(c1) && count_ == 1;
-        if (!stays) {
-            head_ = (head_ + 1) % kQueue;
-            --count_;
-        }
-        if (ev.has_value() || stays || count_ == 0)
+        const bool stays = held_make(c1) && ring_.size() == 1;
+        if (!stays)
+            (void)ring_.take();
+        if (ev.has_value() || stays || ring_.empty())
             return ev;
     }
 }

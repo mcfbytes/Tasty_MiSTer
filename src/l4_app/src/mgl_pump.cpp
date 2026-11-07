@@ -2,6 +2,7 @@
 #include "app/mgl_pump.h"
 
 #include "app/identity_latch.h"
+#include "app/mgl_item_dispatch.h"
 #include "app/info_sink.h"
 #include "app/rbf_resolve.h"
 #include "app/session_identity.h"
@@ -101,8 +102,8 @@ void MglPump::latch_remember_() {
     const RememberedStem stem = identity_.copy(id) ? id.stem
                                                    : RememberedStem::of(table->core_name(), {});
     const std::vector<proto::ConfStrEntry> slots = proto::ConfStr::slots_of(*table);
-    for (std::uint8_t i = 0; i < player_.count(); ++i) {
-        const auto ld = infra::as<MglItem::Load>(player_.item(i));
+    for (MglItemNo i{}; i.below(player_.count()); i = i.next()) {
+        const auto ld = load_of(player_.item(i));
         if (!ld)
             continue;
         const bool file = ld->slot == MglItem::Slot::File;
@@ -129,11 +130,7 @@ bool MglPump::take_playlist(std::string_view path) noexcept {
     TASTY_SEAT_BODY(MglPump);
     const PublishOnExit publish_on_exit{this};
 
-    const std::string_view p = path;
-    const std::size_t n = p.size() < kPathMax ? p.size() : kPathMax - 1;
-    std::memcpy(latch_, p.data(), n);
-    latch_[n] = '\0';
-    latch_len_ = static_cast<std::uint16_t>(n);
+    (void)latch_.assign(path);
 
     if (pending_)
         ++stats_.superseded;
@@ -186,10 +183,9 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
     } else {
 
         const Mgl& mgl = *armed_doc_;
-        const auto slot = mgl.slot == Mgl::Slot::Image ? MglItem::Slot::Image : MglItem::Slot::File;
         doc = player_.adopt(
             infra::make<MglItem>(MglItem::Load{
-                .slot = slot,
+                .slot = mgl.slot,
                 .index = mgl.index,
                 .delay_s = mgl.delay_s,
                 .path = mgl.path
@@ -212,12 +208,9 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
         return;
     }
 
-    for (std::uint8_t i = 0; i < player_.count(); ++i) {
-
-        if (const auto ld = infra::as<MglItem::Load>(player_.item(i));
-            ld && ld->slot == MglItem::Slot::File) {
+    for (MglItemNo i{}; i.below(player_.count()); i = i.next()) {
+        if (is_file_load(player_.item(i)))
             ++stats_.file_items;
-        }
     }
     player_.arm(clock_);
     busy_since_.reset();
@@ -344,7 +337,7 @@ void MglPump::tick() {
 
 void MglPump::begin_read() {
     pending_ = false;
-    const std::string_view path{latch_, latch_len_};
+    const std::string_view path = latch_.view();
 
     if (state_ != State::Idle)
         ++stats_.superseded;
@@ -353,8 +346,8 @@ void MglPump::begin_read() {
     load_tag_ = kUncaused;
     retries_used_ = 0;
     doc_len_ = 0;
-    rbf_len_ = 0;
-    want_len_ = 0;
+    rbf_.clear();
+    want_.clear();
 
     armed_doc_ = std::move(latched_doc_);
     latched_doc_.reset();
@@ -365,31 +358,19 @@ void MglPump::begin_read() {
     }
 
     if (path.empty()) {
-        ++stats_.read_failures;
-        last_error_ = Errc::bad_format;
-        if (info_)
-            info_->info(InfoId::CoreLoadFailed);
-        last_info_ = InfoId::CoreLoadFailed;
+        fail_read_(Errc::bad_format);
         return;
     }
 
     auto f = vfs_.open(path, svc::OpenMode::ReadWhole);
     if (!f) {
-        ++stats_.read_failures;
-        last_error_ = f.error().code;
-        if (info_)
-            info_->info(InfoId::CoreLoadFailed);
-        last_info_ = InfoId::CoreLoadFailed;
+        fail_read_(f.error().code);
         return;
     }
     auto sz = (*f)->size();
     if (!sz || sz->v == 0 || sz->v > kMglDocMax) {
 
-        ++stats_.read_failures;
-        last_error_ = sz ? Errc::bad_format : sz.error().code;
-        if (info_)
-            info_->info(InfoId::CoreLoadFailed);
-        last_info_ = InfoId::CoreLoadFailed;
+        fail_read_(sz ? Errc::bad_format : sz.error().code);
         return;
     }
     auto got = (*f)->read_at(
@@ -397,11 +378,7 @@ void MglPump::begin_read() {
         std::as_writable_bytes(std::span(doc_)).first(static_cast<std::size_t>(sz->v))
     );
     if (!got || *got == 0) {
-        ++stats_.read_failures;
-        last_error_ = got ? Errc::io : got.error().code;
-        if (info_)
-            info_->info(InfoId::CoreLoadFailed);
-        last_info_ = InfoId::CoreLoadFailed;
+        fail_read_(got ? Errc::io : got.error().code);
         return;
     }
     doc_len_ = static_cast<std::uint32_t>(*got);
@@ -420,11 +397,9 @@ bool MglPump::resolve_and_load(std::string_view want) {
         doc_len_ = 0;
         return false;
     }
-    want_len_ = static_cast<std::uint16_t>(want.size() < kPathMax ? want.size() : kPathMax - 1);
-    std::memcpy(want_, want.data(), want_len_);
-    want_[want_len_] = '\0';
+    (void)want_.assign(want);
 
-    if (auto r = resolve_rbf(std::string_view{want_, want_len_}); !r) {
+    if (auto r = resolve_rbf(want_.view()); !r) {
         ++stats_.no_rbf;
         last_error_ = r.error().code;
         if (info_)
@@ -444,7 +419,7 @@ bool MglPump::publish_load() {
     UiRequest::LoadCore req{};
 
     req.xml = XmlKind::Rbf;
-    if (!req.path.assign(std::string_view{rbf_, rbf_len_})) {
+    if (!req.path.assign(rbf_.view())) {
         abandon(InfoId::CoreLoadFailed, Errc::bad_format);
         return false;
     }
@@ -465,7 +440,7 @@ void MglPump::pump_advance() {
 
     for (unsigned i = 0; i < kAdvanceCap; ++i) {
         const MglState before = player_.state();
-        const std::uint8_t before_item = player_.current();
+        const MglItemNo before_item = player_.current();
         const std::uint32_t before_pub = player_.publishes();
         const std::uint32_t before_drop = player_.drops();
         const std::uint32_t before_saved = player_.remembered();
@@ -520,6 +495,14 @@ void MglPump::abandon(InfoId id, Errc code) {
     );
 }
 
+void MglPump::fail_read_(Errc code) noexcept {
+    ++stats_.read_failures;
+    last_error_ = code;
+    if (info_)
+        info_->info(InfoId::CoreLoadFailed);
+    last_info_ = InfoId::CoreLoadFailed;
+}
+
 Ex<void> MglPump::resolve_rbf(std::string_view want) {
     std::string_view dir;
     std::string_view stem;
@@ -530,16 +513,12 @@ Ex<void> MglPump::resolve_rbf(std::string_view want) {
         return std::unexpected(found.error());
     const std::string_view best = *found;
 
-    std::size_t n = 0;
+    rbf_.clear();
     if (!dir.empty()) {
-        n = dir.size() < kPathMax - 2 ? dir.size() : kPathMax - 2;
-        std::memcpy(rbf_, dir.data(), n);
-        rbf_[n++] = '/';
+        (void)rbf_.assign(dir);
+        (void)rbf_.append("/");
     }
-    const std::size_t m = best.size() < kPathMax - 1 - n ? best.size() : kPathMax - 1 - n;
-    std::memcpy(rbf_ + n, best.data(), m);
-    rbf_[n + m] = '\0';
-    rbf_len_ = static_cast<std::uint16_t>(n + m);
+    (void)rbf_.append(best);
     return {};
 }
 

@@ -9,6 +9,8 @@
 
 #include "infra/error.h"
 #include "infra/opt_ref.h"
+#include "infra/unique_fd.h"
+#include "os/types.h"
 #include "tasty_cli.h"
 
 namespace mister::svc {
@@ -31,8 +33,13 @@ inline constexpr const char* kMisterCmdPath = "/dev/MiSTer_cmd";
 inline constexpr const char* kStockMisterPath = "/media/fat/MiSTer";
 inline constexpr const char* kMenuRbfName = "menu.rbf";
 
-[[nodiscard]] Ex<int> tasty_lock_owner() noexcept;
-void tasty_unlock(int fd) noexcept;
+inline constexpr int kSignalExitBase = 128;
+
+inline constexpr int kExitBusyOwner = 2;
+
+[[nodiscard]] Ex<UniqueFd> tasty_lock_owner() noexcept;
+
+void tasty_unlock(UniqueFd& fd) noexcept;
 [[nodiscard]] Ex<void> tasty_write_pid(int pid, std::string_view movie = {}) noexcept;
 [[nodiscard]] std::optional<int> tasty_read_pid() noexcept;
 [[nodiscard]] std::optional<std::string> tasty_read_movie() noexcept;
@@ -57,18 +64,18 @@ void tasty_set_home_image(const char* exe, const char* arg) noexcept;
 
 void warn_writeback_cpumask(
     const os::WritebackProbe& wb,
-    int rt_cpu,
+    os::CpuId rt_cpu,
     const char* prog,
     std::FILE* out
 ) noexcept;
 
 [[nodiscard]] std::string_view tasty_record_dir(std::string_view record) noexcept;
 
-void tasty_warn_record_writeback(std::string_view record, int rt_cpu) noexcept;
+void tasty_warn_record_writeback(std::string_view record, os::CpuId rt_cpu) noexcept;
 
 void tasty_warn_record_writeback(
     std::string_view record,
-    int rt_cpu,
+    os::CpuId rt_cpu,
     const char* cpumask_path,
     const char* unbound_path,
     std::FILE* out
@@ -80,7 +87,7 @@ void tasty_adopt_owner_comm() noexcept;
 void tasty_set_stock_comm(const char* comm) noexcept;
 
 struct ReturnHome {
-    int lock_fd = -1;
+    UniqueFd lock_fd{};
     bool armed = true;
     infra::OptRef<int> spawned{};
     ReturnHome() noexcept;

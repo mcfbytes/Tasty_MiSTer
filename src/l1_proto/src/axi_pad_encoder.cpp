@@ -6,6 +6,18 @@
 
 namespace mister::proto {
 
+namespace {
+
+[[nodiscard]] constexpr hal::UioRegFile::UioOp pad_op(UioOp op) noexcept {
+    return static_cast<hal::UioRegFile::UioOp>(byte(op));
+}
+
+[[nodiscard]] constexpr hal::UioRegFile::UioIndex pad_index(std::uint8_t index) noexcept {
+    return static_cast<hal::UioRegFile::UioIndex>(index);
+}
+
+}
+
 Ex<void> AxiPadEncoder::digital(UioOp opcode, JoyMask map) {
     TASTY_SEAT_BODY(AxiPadEncoder);
     if (!block_.honours(opcode))
@@ -68,7 +80,10 @@ Ex<void> AxiPadEncoder::settle_(PadLevels::Slot level) {
 Ex<void> AxiPadEncoder::store_(UioOp opcode, std::uint8_t index, std::uint32_t word) {
     if (!trusted_)
         return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), proto::word(opcode).v});
-    const auto off = static_cast<std::uint32_t>(hal::UioRegFile::at(byte(opcode), index));
+
+    const auto off = static_cast<std::uint32_t>(
+        hal::UioRegFile::at(pad_op(opcode), pad_index(index))
+    );
     const auto reg = pad_.at<hal::reg::WO>(off);
     if (!reg)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), off});

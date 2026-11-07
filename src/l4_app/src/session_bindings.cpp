@@ -13,10 +13,7 @@ namespace mister::app {
 namespace {
 
 std::uint32_t le32(std::span<const std::uint8_t> b, std::size_t off) noexcept {
-    return static_cast<std::uint32_t>(b[off])
-        | (static_cast<std::uint32_t>(b[off + 1]) << 8)
-        | (static_cast<std::uint32_t>(b[off + 2]) << 16)
-        | (static_cast<std::uint32_t>(b[off + 3]) << 24);
+    return infra::load_le<std::uint32_t>(b.subspan(off).first<4>());
 }
 
 }
@@ -50,7 +47,7 @@ void SessionBindings::bind_identity(
 
     FixedStr<kButtonListCap, StrFit::Clip>* const out[3] = {&id.j, &id.jn, &id.jp};
     std::size_t at = 0;
-    for (unsigned f = 0; f < 4 && at <= blob.size(); ++f) {
+    for (unsigned f = 0; f < kIdentityFields && at <= blob.size(); ++f) {
         std::size_t end = at;
         while (end < blob.size() && blob[end] != 0)
             ++end;
@@ -71,13 +68,17 @@ void SessionBindings::bind_uart(
     uart_ = Uart{};
     if (op.mode != proto::TxSlabId{}) {
         const auto b = inbox.bytes(op.mode);
-        if (b.size() == 4)
+        if (b.size() == Uart::kModeBytes)
             uart_.mode = le32(b, 0);
     }
     if (op.speeds != proto::TxSlabId{}) {
         const auto b = inbox.bytes(op.speeds);
-        if (b.size() == 12)
-            uart_.speeds = std::array<std::uint32_t, 3>{le32(b, 0), le32(b, 4), le32(b, 8)};
+        if (b.size() == Uart::kSpeedsBytes)
+            uart_.speeds = std::array<cores::BaudRate, Uart::kSpeedCount>{
+                cores::BaudRate{le32(b, 0)},
+                cores::BaudRate{le32(b, Uart::kModeBytes)},
+                cores::BaudRate{le32(b, 2 * Uart::kModeBytes)}
+            };
     }
 
     uart_.capable = op.capable;

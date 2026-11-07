@@ -104,7 +104,8 @@ bool ConfigSaves::intern_rel_at_(proto::FileId id, std::string_view rel) {
         }
     }
     const bool has_bytes = !buf.empty();
-    return inbox_.intern_file_at(id, std::move(buf), ".CFG", rel, 0).has_value() && has_bytes;
+    return inbox_.intern_file_at(id, std::move(buf), ".CFG", rel, hal::FabricAddr{}).has_value()
+        && has_bytes;
 }
 
 void ConfigSaves::order_slot_previews(const std::byte* pack, std::size_t len) {
@@ -187,8 +188,8 @@ void ConfigSaves::save_config(CorrelationTag tag) {
     std::byte bytes[16];
     for (unsigned i = 0; i < proto::StatusRegister::kWords; ++i) {
         const std::uint16_t w = sample.value.words[i];
-        bytes[2 * i] = static_cast<std::byte>(w & 0xFFu);
-        bytes[2 * i + 1] = static_cast<std::byte>((w >> 8) & 0xFFu);
+        bytes[2 * i] = static_cast<std::byte>(w);
+        bytes[2 * i + 1] = static_cast<std::byte>((w >> 8));
     }
     std::string rel = "config/";
     rel.append(stem.view());

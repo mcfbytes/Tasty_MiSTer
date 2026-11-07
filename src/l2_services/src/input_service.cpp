@@ -5,18 +5,26 @@
 
 namespace mister::svc {
 
+std::uint32_t fnv1a_32(std::string_view bytes, std::uint32_t seed) noexcept {
+    std::uint32_t h = seed;
+    for (const char c : bytes) {
+        h ^= static_cast<std::uint8_t>(c);
+        h *= kFnvPrime;
+    }
+    return h;
+}
+
 namespace {
 
 std::uint32_t key_hash(std::string_view key) noexcept {
     if (key.empty())
         return 0u;
-    std::uint32_t h = 0x811c9dc5u;
-    for (const char c : key) {
-        h ^= static_cast<std::uint8_t>(c);
-        h *= 0x01000193u;
-    }
+    const std::uint32_t h = fnv1a_32(key);
     return h == 0u ? 1u : h;
 }
+
+constexpr std::uint32_t kPadBoundaryByte = 0xFFu;
+
 }
 
 void InputService::refresh_slot_census() noexcept {
@@ -124,9 +132,9 @@ void InputService::maybe_assign_slot(InputDevice& dev) {
         return;
     const DeviceReport& r = dev.report();
     bool claim = false;
-    for (std::uint8_t i = 0; i < r.key_count && !claim; ++i) {
-        const KeyEdge& e = r.keys[i];
-        if (!e.pressed || e.code < 256)
+    for (std::size_t i = 0; i < r.keys.count() && !claim; ++i) {
+        const KeyEdge& e = r.keys.at(i);
+        if (!e.pressed || e.code.is_key())
             continue;
         claim = dev.matches_sys_button(e.code);
     }
@@ -157,7 +165,7 @@ void InputService::recompute_joy_masks() {
         const auto slot = players_.slot_of(d.identity());
         if (!slot)
             continue;
-        joy_mask_[*slot] = joy_mask_[*slot] | d.report().buttons;
+        joy_mask_[*slot] = joy_mask_[*slot].with(d.report().buttons);
     }
 }
 
@@ -174,13 +182,10 @@ RumblePadSet InputService::rumble_pads() const noexcept {
             continue;
         out.players = out.players.with(*s);
 
-        std::uint32_t h = out.pads[s->v] != 0 ? out.pads[s->v] : 2166136261u;
-        for (const char c : PlayerSlots::key_of(d.identity())) {
-            h ^= static_cast<std::uint8_t>(c);
-            h *= 16777619u;
-        }
-        h ^= 0xFFu;
-        h *= 16777619u;
+        const std::uint32_t seed = out.pads[s->v] != 0 ? out.pads[s->v] : kFnvOffsetBasis;
+        std::uint32_t h = fnv1a_32(PlayerSlots::key_of(d.identity()), seed);
+        h ^= kPadBoundaryByte;
+        h *= kFnvPrime;
         out.pads[s->v] = h != 0 ? h : 1u;
     }
     return out;

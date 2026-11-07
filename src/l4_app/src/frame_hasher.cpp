@@ -5,18 +5,23 @@
 
 #include <algorithm>
 
+#include "app/log_clock.h"
 #include "infra/byte_view.h"
 
 namespace mister::app {
 
 std::uint32_t FrameHasher::hash_rows(const RawFrameSlot& s) noexcept {
     uLong crc = ::crc32(0L, Z_NULL, 0);
-    if (s.pixels.empty())
+    if (s.rgb.bytes.empty())
         return static_cast<std::uint32_t>(crc);
-    const std::size_t row = static_cast<std::size_t>(s.width) * 3u;
-    const auto* p = infra::byte_cast<const std::uint8_t>(s.pixels).data();
-    for (std::uint32_t y = 0; y < s.height; ++y)
-        crc = ::crc32(crc, p + static_cast<std::size_t>(y) * s.line, static_cast<uInt>(row));
+    const RowBytes row = rgb_row_of(s.width);
+    s.rgb.each_row(row, [&](std::span<const std::byte> line) {
+        crc = ::crc32(
+            crc,
+            infra::byte_cast<const std::uint8_t>(line).data(),
+            static_cast<uInt>(line.size())
+        );
+    });
     return static_cast<std::uint32_t>(crc);
 }
 
@@ -66,7 +71,7 @@ bool FrameHasher::chunk_(const RawFrameSlot& s, bool real, SidecarMsg& m) noexce
 bool FrameHasher::emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept {
     m.kind = SidecarKind::Row;
     m.width = s.width;
-    m.height = s.height;
+    m.height = s.rgb.rows;
     std::uint32_t k = 0;
     for (std::uint8_t r = 0; r < s.runs; ++r) {
         const FrameStampRun& run = s.run[r];
@@ -77,7 +82,7 @@ bool FrameHasher::emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept {
             m.stamp = run.stamp_at(i);
             if (s.stamp.movie_frame >= MovieFrame{}) {
                 const WideMovieFrame mf = wide_frame(s.stamp.movie_frame)
-                    - MovieSpan{static_cast<std::int64_t>(s.stamp.core_frame - m.stamp.core_frame)};
+                    - (s.stamp.core_frame - m.stamp.core_frame).movie_span();
                 m.stamp.movie_frame = std::max(mf, kNoWideMovieFrame).narrowed();
             }
             if (!chunk_(s, false, m) || !push_(m))
@@ -108,14 +113,13 @@ bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
     }
     if (!emit_runs_(s, m))
         return false;
-    const bool real = s.stamp.dup == DupReason::None && !s.pixels.empty();
+    const bool real = s.stamp.dup == DupReason::None && !s.rgb.bytes.empty();
     if (real && !hashed_) {
-        const std::int64_t t0 = w_.clock.now().count();
+        const std::chrono::nanoseconds t0 = w_.clock.now();
         cur_hash_ = hash_rows(s);
         hashed_ = true;
         ++st_.frames;
-        st_.hash_us_last = static_cast<std::uint32_t>((w_.clock.now().count() - t0) / 1000);
-        st_.hash_us_max = std::max(st_.hash_us_max, st_.hash_us_last);
+        st_.hash_us.note(us_of(w_.clock.now() - t0));
     }
     m.stamp = s.stamp;
     m.hash = real ? cur_hash_ : prev_hash_;

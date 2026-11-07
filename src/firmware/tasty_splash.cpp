@@ -9,6 +9,7 @@
 #include "infra/endian.h"
 #include "os/mmio_region.h"
 
+#include "app/fb_view.h"
 #include "app/video_pump.h"
 #include "hal/phys_region.h"
 #include "svc/video_service.h"
@@ -78,11 +79,12 @@ bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
     TASTY_SEAT_BODY(TastySplash);
     if (!fb_ || width == 0 || height == 0)
         return false;
-    const std::size_t need = kPixelOff + static_cast<std::size_t>(width) * height * 4u;
+    const std::size_t need = app::kFramebufferPageBytes
+        + static_cast<std::size_t>(width) * height * 4u;
     if (fb_region_.len == 0 || need > fb_region_.len)
         return false;
     auto view = fb_->view(0, need);
-    const std::span<std::byte> px = view.subspan(kPixelOff);
+    const std::span<std::byte> px = view.subspan(app::kFramebufferPageBytes);
     const auto put = [px, width](std::uint32_t y, std::uint32_t x, std::uint32_t c) {
         infra::store_le<std::uint32_t>(px.subspan((std::size_t{y} * width + x) * 4u).first<4>(), c);
     };
@@ -139,7 +141,9 @@ Ex<void> TastySplash::show(
     TASTY_SEAT_BODY(TastySplash);
     const std::uint32_t w = width != 0 ? width : kDefaultW;
     const std::uint32_t h = height != 0 ? height : kDefaultH;
-    const std::uint32_t addr = static_cast<std::uint32_t>(fb_region_.phys.v + kPixelOff);
+    const std::uint32_t addr = static_cast<std::uint32_t>(
+        fb_region_.phys.v + app::kFramebufferPageBytes
+    );
     const std::array<std::uint16_t, 10> words{
         kFbEnWord,
         static_cast<std::uint16_t>(addr),

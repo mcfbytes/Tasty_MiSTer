@@ -10,15 +10,16 @@ namespace mister::app {
 
 static_assert(cores::kCheatTableBytes == 2048, "req / req: CHEAT_SIZE is 128 * 16 bytes total");
 static_assert(
-    cores::CheatGeometry{}.unit == 16 && cores::CheatGeometry{}.max_active == 128,
+    cores::CheatGeometry{}.unit == cores::CheatUnit{16}
+        && cores::CheatGeometry{}.max_active == cores::CheatUnits{128},
     "req: 16-byte units, 128 active codes, by default"
 );
 static_assert(
-    cores::clamp_cheat_geometry(0, 0).unit == 16,
+    cores::clamp_cheat_geometry(0, 0).unit == cores::CheatUnit{16},
     "req: a non-positive unit falls back to 16"
 );
 static_assert(
-    cores::clamp_cheat_geometry(32, 500).max_active == 64,
+    cores::clamp_cheat_geometry(32, 500).max_active == cores::CheatUnits{64},
     "req: max_active is clamped so max * unit <= CHEAT_SIZE"
 );
 static_assert(
@@ -60,7 +61,7 @@ void CheatStore::reset_() noexcept {
     recs_.clear();
     archive_.clear();
     geom_ = cores::CheatGeometry{};
-    loaded_ = 0;
+    loaded_ = cores::CheatUnits{};
     blob_ = CheatBlob{};
 }
 
@@ -125,21 +126,18 @@ Ex<void> CheatStore::open(
 void CheatStore::take(const CheatCatalog& cat) {
     TASTY_SEAT_BODY(CheatStore);
     reset_();
-    geom_ = cores::clamp_cheat_geometry(
-        static_cast<std::int32_t>(cat.unit),
-        static_cast<std::int32_t>(cat.max_active)
-    );
+    geom_ = cores::clamp_cheat_geometry(cat.geometry);
     const std::size_t rows = cat.count <= CheatCatalog::kMaxRows ? cat.count
                                                                  : CheatCatalog::kMaxRows;
     for (std::size_t i = 0; i < rows; ++i) {
         const CheatCatalog::Row& src = cat.rows[i];
-        const std::size_t end = static_cast<std::size_t>(src.offset) + src.len;
+        const std::size_t end = std::size_t{src.offset} + src.len;
         if (end > CheatCatalog::kArenaBytes) {
             ++refusals_;
             continue;
         }
 
-        if (geom_.unit == 0 || src.len % geom_.unit != 0) {
+        if (!geom_.unit.whole(proto::FileSize{src.len})) {
             ++refusals_;
             continue;
         }
@@ -185,8 +183,8 @@ void CheatStore::publish_() noexcept {
         pos += r.bytes.size();
     }
     blob_.len = static_cast<std::uint16_t>(pos);
-    blob_.unit = geom_.unit;
-    loaded_ = geom_.unit != 0 ? pos / geom_.unit : 0;
+    blob_.unit = geom_.unit.v;
+    loaded_ = geom_.unit.count_of(proto::FileSize{pos});
     blob_cell_->publish(blob_);
 }
 
@@ -216,14 +214,15 @@ Ex<bool> CheatStore::toggle(std::size_t i) {
                 } else if (auto sz = (*f)->size(); !sz) {
                     ++refusals_;
                 } else {
-                    const std::uint64_t len = sz->v;
 
-                    if (len == 0 || geom_.unit == 0 || len % geom_.unit != 0) {
+                    if (!sz->within(proto::FileSize{1}, proto::FileSize{cores::kCheatTableBytes})
+                        || !geom_.unit.whole(*sz)) {
                         ++refusals_;
-                    } else if (len / geom_.unit + loaded_ > geom_.max_active) {
+                    } else if (geom_.unit.count_of(*sz) + loaded_ > geom_.max_active) {
                         ++refusals_;
                     } else {
-                        std::vector<std::uint8_t> buf(static_cast<std::size_t>(len));
+
+                        std::vector<std::uint8_t> buf(static_cast<std::size_t>(sz->v));
                         auto got = (*f)->read_at(0, std::as_writable_bytes(std::span{buf}));
                         if (!got || *got != buf.size()) {
                             ++refusals_;

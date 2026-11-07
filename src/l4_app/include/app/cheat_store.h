@@ -46,12 +46,12 @@ public:
         return recs_.size();
     }
 
-    [[nodiscard]] std::size_t loaded() const noexcept {
+    [[nodiscard]] cores::CheatUnits loaded() const noexcept {
         TASTY_SEAT_BODY(CheatStore);
         return loaded_;
     }
 
-    [[nodiscard]] std::uint32_t unit() const noexcept {
+    [[nodiscard]] cores::CheatUnit unit() const noexcept {
         TASTY_SEAT_BODY(CheatStore);
         return geom_.unit;
     }
@@ -90,7 +90,7 @@ private:
     cores::CheatGeometry geom_{};
     std::string archive_;
     CheatBlob blob_{};
-    std::size_t loaded_ = 0;
+    cores::CheatUnits loaded_{};
     std::uint32_t refusals_ = 0;
     std::uint32_t opens_ = 0;
 };

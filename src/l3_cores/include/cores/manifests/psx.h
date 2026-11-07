@@ -115,7 +115,7 @@ inline constexpr StagingPolicy kPsxStaging{
     .disc_slot = disc_slot_of(kPsxSlots),
     .save_slot = IoIndex{2},
     .save_dest = WideIoIndex{},
-    .save_pre_bytes = 128 * 1024,
+    .save_pre_bytes = proto::FileSize{128 * 1024},
 };
 
 inline constexpr auto kPsxServices = std::to_array<LinkDecoderDecl>({

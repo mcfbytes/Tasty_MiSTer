@@ -3,14 +3,24 @@
 
 #include <cerrno>
 #include <ctime>
+#include <optional>
 
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::proto {
 
-[[nodiscard]] Ex<RtcImage> rtc_image_at(std::uint32_t unix_seconds) noexcept {
+namespace {
+
+[[nodiscard]] PackedBcd bcd(int v) noexcept {
+    return PackedBcd::of(static_cast<std::uint8_t>(v)).value_or(PackedBcd{});
+}
+
+}
+
+[[nodiscard]] Ex<RtcImage> rtc_image_at(std::time_t unix_seconds) noexcept {
     TASTY_SEAT(Main);
-    const std::time_t t = static_cast<std::time_t>(unix_seconds);
+    const std::time_t t = unix_seconds;
     std::tm local{};
     if (::localtime_r(&t, &local) == nullptr) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
@@ -29,19 +39,16 @@ namespace mister::proto {
     RtcImage image;
     image.stamp = static_cast<std::uint32_t>(static_cast<std::uint64_t>(shifted));
 
-    const auto bcd = [](int v) {
-        return static_cast<std::uint8_t>((v % 10) | ((v / 10) << 4));
-    };
-    image.rtc[0] = bcd(local.tm_sec);
-    image.rtc[1] = bcd(local.tm_min);
-    image.rtc[2] = bcd(local.tm_hour);
-    image.rtc[3] = bcd(local.tm_mday);
-    image.rtc[4] = bcd(local.tm_mon + 1);
-    image.rtc[5] = static_cast<std::uint8_t>(
-        (local.tm_year % 10) | (((local.tm_year / 10) % 10) << 4)
-    );
-    image.rtc[6] = static_cast<std::uint8_t>(local.tm_wday);
-    image.rtc[7] = 0x40;
+    image.put(RtcField::Sec, bcd(local.tm_sec));
+    image.put(RtcField::Min, bcd(local.tm_min));
+    image.put(RtcField::Hour, bcd(local.tm_hour));
+    image.put(RtcField::Mday, bcd(local.tm_mday));
+    image.put(RtcField::Mon, bcd(local.tm_mon + 1));
+
+    constexpr int kYearsPerCentury = 100;
+    image.put(RtcField::Year, bcd(local.tm_year % kYearsPerCentury));
+    image.put_binary(RtcField::Wday, static_cast<std::uint8_t>(local.tm_wday));
+    image.put_binary(RtcField::Control, kRtcControl);
     return image;
 }
 

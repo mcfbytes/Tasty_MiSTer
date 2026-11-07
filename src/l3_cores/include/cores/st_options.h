@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 namespace mister::cores {
 
@@ -37,5 +38,11 @@ enum class StOption : std::uint8_t {
     YmAudio,
     kCount,
 };
+
+[[nodiscard]] constexpr std::optional<StOption> option_of(std::uint8_t id) noexcept {
+    if (id >= static_cast<std::uint8_t>(StOption::kCount))
+        return std::nullopt;
+    return static_cast<StOption>(id);
+}
 
 }

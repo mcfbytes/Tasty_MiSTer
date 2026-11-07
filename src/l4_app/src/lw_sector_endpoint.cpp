@@ -18,6 +18,14 @@
 
 namespace mister::app {
 
+svc::ISectorProgram::Source LwSectorEndpoint::answer_(proto::Lba lba) const noexcept {
+    return grant_.program->answer(*disc_, lba.v);
+}
+
+void LwSectorEndpoint::write_lba_(Port& port, hal::SectorBlock::Reg reg, proto::Lba lba) noexcept {
+    port.write(reg, lba.v);
+}
+
 LwSectorEndpoint::LwSectorEndpoint(const Wiring& w) noexcept : w_(w) {}
 
 LwSectorEndpoint::~LwSectorEndpoint() {
@@ -103,7 +111,7 @@ void LwSectorEndpoint::bind_(const SectorGrant& g, std::uint32_t gen) noexcept {
     recheck_ = true;
     tally_.on_lw = 1;
     for (const Card& c : cards_)
-        if (c.bytes != 0)
+        if (c.is_bound())
             tally_.cards_on_lw |= 1u << c.slot;
     answer_bind_(g.gen);
 }
@@ -114,12 +122,15 @@ void LwSectorEndpoint::answer_bind_(std::uint16_t gen) noexcept {
 }
 
 void LwSectorEndpoint::bind_cards_(const SectorGrant& g) noexcept {
-    constexpr std::uint32_t kWordBytes = 4;
-    constexpr std::uint32_t kSaveSlotCount = 4;
+    constexpr std::uint32_t kWordBytes = hal::SectorBlock::kWordBytes;
     for (std::size_t i = 0; i < cards_.size(); ++i) {
         const SectorCard& in = g.cards[i];
         cards_[i] = Card{};
-        if (!w_.saves || in.frame_words == 0 || in.image.len == 0 || in.slot >= kSaveSlotCount)
+
+        if (!w_.saves
+            || in.frame_words == 0
+            || in.image.len == 0
+            || in.slot >= hal::SectorBlock::kCardSlots)
             continue;
         auto image = w_.image_backing.empty()
             ? hal::FpgaMemory::map(in.image, os::MmioRegion::Access::ReadOnly)
@@ -130,7 +141,7 @@ void LwSectorEndpoint::bind_cards_(const SectorGrant& g) noexcept {
         }
         cards_[i] = Card{
             .slot = in.slot,
-            .bytes = static_cast<std::uint32_t>(in.frame_words) * kWordBytes,
+            .bytes = proto::BlockSize{static_cast<std::uint32_t>(in.frame_words) * kWordBytes},
             .image = std::move(*image)
         };
     }
@@ -139,7 +150,7 @@ void LwSectorEndpoint::bind_cards_(const SectorGrant& g) noexcept {
 std::uint32_t LwSectorEndpoint::enables_() const noexcept {
     std::uint32_t en = hal::SectorBlock::kCtrlEnable;
     for (const Card& c : cards_)
-        if (c.bytes != 0)
+        if (c.is_bound())
             en |= hal::SectorBlock::ctrl_enable_slot(c.slot);
     return en;
 }
@@ -237,31 +248,34 @@ bool LwSectorEndpoint::cause_names_route_(std::uint32_t w) const noexcept {
         return true;
     const hal::SectorBlock::SdStat st = hal::SectorBlock::sdstat(w);
     return st.valid && std::ranges::any_of(cards_, [&st](const Card& c) noexcept {
-               return c.bytes != 0 && c.slot == st.slot;
+               return c.is_bound() && c.slot == st.slot;
            });
 }
 
 LwSectorEndpoint::Request LwSectorEndpoint::read_request_() noexcept {
-    constexpr std::uint32_t kBaseBlockBytes = 128;
+
+    constexpr std::uint32_t kBaseBlockBytes = proto::SdStatusWord::kMinBlockBytes;
     using hal::SectorBlock;
     const std::uint32_t req = port_().read(SectorBlock::Reg::Req);
     if ((req & SectorBlock::kReqPending) == 0u)
         return {};
     if (SectorBlock::sdstat_reads(req, grant_.program->slot().v)) {
-        return {.pending = true, .lba = port_().read(SectorBlock::Reg::Lba)};
+        return {.pending = true, .lba = proto::Lba{port_().read(SectorBlock::Reg::Lba)}};
     }
     const SectorBlock::SdStat st = SectorBlock::sdstat(req);
     if (!st.valid || st.count != 0 || st.rd == st.wr)
         return {};
     for (std::size_t i = 0; i < cards_.size(); ++i) {
         const Card& c = cards_[i];
-        if (c.bytes == 0 || c.slot != st.slot || (kBaseBlockBytes << st.blksz) != c.bytes)
+        if (!c.is_bound()
+            || c.slot != st.slot
+            || proto::BlockSize{kBaseBlockBytes << st.blksz} != c.bytes)
             continue;
         return {
             .pending = true,
             .card = i,
             .write = st.wr,
-            .lba = port_().read(SectorBlock::lba_slot(c.slot))
+            .lba = proto::Lba{port_().read(SectorBlock::lba_slot(c.slot))}
         };
     }
     return {};
@@ -299,7 +313,7 @@ void LwSectorEndpoint::service_request_() noexcept {
         serve_card_(cards_[*q.card], q.write, q.lba, t0);
         return;
     }
-    const std::uint32_t lba = q.lba;
+    const proto::Lba lba = q.lba;
     fill_frame_(lba);
     if (!lease_())
         return;
@@ -315,12 +329,12 @@ void LwSectorEndpoint::service_request_() noexcept {
     const auto us = std::chrono::duration_cast<std::chrono::microseconds>(clock_.now() - t0);
     tally_.lat_max_us = std::max(tally_.lat_max_us, static_cast<std::uint32_t>(us.count()));
     publish_();
-    ahead_from_ = lba + 1u;
+    ahead_from_ = lba + proto::BlockCount{1u};
     ahead_done_ = 0;
 }
 
 void LwSectorEndpoint::peek_more_() noexcept {
-    if (std::ranges::none_of(cards_, [](const Card& c) noexcept { return c.bytes != 0; }))
+    if (std::ranges::none_of(cards_, [](const Card& c) noexcept { return c.is_bound(); }))
         return;
     if ((port_().read(hal::SectorBlock::Reg::Req) & hal::SectorBlock::kReqPending) != 0u) {
         recheck_ = true;
@@ -328,16 +342,16 @@ void LwSectorEndpoint::peek_more_() noexcept {
 }
 
 std::uint32_t LwSectorEndpoint::frame_bytes_() const noexcept {
-    constexpr std::uint32_t kWordBytes = 4;
+    constexpr std::uint32_t kWordBytes = hal::SectorBlock::kWordBytes;
     return std::min<std::uint32_t>(
         static_cast<std::uint32_t>(grant_.frame_words) * kWordBytes,
         static_cast<std::uint32_t>(svc::kDiscSlotBytes)
     );
 }
 
-void LwSectorEndpoint::fill_frame_(std::uint32_t lba) noexcept {
+void LwSectorEndpoint::fill_frame_(proto::Lba lba) noexcept {
     const std::uint32_t n = frame_bytes_();
-    const svc::ISectorProgram::Source src = grant_.program->answer(*disc_, lba);
+    const svc::ISectorProgram::Source src = answer_(lba);
     if (!src.engine) {
         std::memset(frame_.data, src.fill, n);
         return;
@@ -351,9 +365,9 @@ void LwSectorEndpoint::fill_frame_(std::uint32_t lba) noexcept {
     }
 }
 
-void LwSectorEndpoint::read_engine_(svc::DiscReadSlot& s, std::uint32_t lba) noexcept {
+void LwSectorEndpoint::read_engine_(svc::DiscReadSlot& s, proto::Lba lba) noexcept {
     s.gen = svc::Generation{};
-    s.lba = proto::Lba{lba};
+    s.lba = lba;
     s.form = grant_.program->form();
     s.want = static_cast<std::uint16_t>(svc::disc_form_bytes(s.form));
     s.got = 0;
@@ -361,9 +375,9 @@ void LwSectorEndpoint::read_engine_(svc::DiscReadSlot& s, std::uint32_t lba) noe
     w_.discs.serve_on_io(s);
 }
 
-bool LwSectorEndpoint::take_ahead_(std::uint32_t lba) noexcept {
+bool LwSectorEndpoint::take_ahead_(proto::Lba lba) noexcept {
     for (Ahead& a : ahead_) {
-        if (!a.live || a.slot.lba.v != lba)
+        if (!a.live || a.slot.lba != lba)
             continue;
         a.live = false;
         if (!a.slot.ok)
@@ -378,11 +392,12 @@ bool LwSectorEndpoint::take_ahead_(std::uint32_t lba) noexcept {
 
 void LwSectorEndpoint::read_ahead_one_() noexcept {
     while (ahead_done_ < kReadAhead) {
-        const std::uint32_t lba = ahead_from_ + static_cast<std::uint32_t>(ahead_done_++);
-        if (!grant_.program->answer(*disc_, lba).engine)
+        const proto::BlockCount n{static_cast<std::uint32_t>(ahead_done_++)};
+        const proto::Lba lba = ahead_from_ + n;
+        if (!answer_(lba).engine)
             continue;
         const bool held = std::ranges::any_of(ahead_, [lba](const Ahead& a) noexcept {
-            return a.live && a.slot.lba.v == lba;
+            return a.live && a.slot.lba == lba;
         });
         if (held)
             continue;
@@ -398,10 +413,10 @@ void LwSectorEndpoint::read_ahead_one_() noexcept {
 
 bool LwSectorEndpoint::store_frame_(
     hal::SectorBlock::Reg begin,
-    std::uint32_t lba,
+    proto::Lba lba,
     std::span<const std::byte> bytes
 ) noexcept {
-    constexpr std::uint32_t kWordBytes = 4;
+    constexpr std::uint32_t kWordBytes = hal::SectorBlock::kWordBytes;
     constexpr unsigned kByteBits = 8;
     using hal::SectorBlock;
     Port& port = port_();
@@ -413,7 +428,7 @@ bool LwSectorEndpoint::store_frame_(
             w |= std::to_integer<std::uint32_t>(b[lane]) << (kByteBits * lane);
         return w;
     };
-    port.write(begin, lba);
+    write_lba_(port, begin, lba);
     std::uint32_t from = 0;
     std::uint32_t dropped = 0;
     SectorBlock::Accept last{};
@@ -451,7 +466,7 @@ bool LwSectorEndpoint::store_frame_(
 void LwSectorEndpoint::serve_card_(
     const Card& c,
     bool write,
-    std::uint32_t lba,
+    proto::Lba lba,
     std::chrono::nanoseconds t0
 ) noexcept {
     if (!write) {
@@ -461,7 +476,7 @@ void LwSectorEndpoint::serve_card_(
         const bool whole = store_frame_(
             hal::SectorBlock::begin_slot(c.slot),
             lba,
-            std::span<const std::byte>(card_buf_.data(), c.bytes)
+            c.bytes.block_of(std::span<const std::byte>{card_buf_})
         );
         peek_more_();
         release_();
@@ -498,10 +513,8 @@ void LwSectorEndpoint::note_card_latency_(std::chrono::nanoseconds t0) noexcept 
 }
 
 svc::ISaveFilesOnIo::Save LwSectorEndpoint::save_of_(const Card& c) noexcept {
-    constexpr std::uint32_t kSaveSlotCount = 4;
-    constexpr std::uint32_t kSaveSlotMask = kSaveSlotCount - 1;
-    const svc::ISaveFilesOnIo::Save f = w_.saves->save_on_io(proto::SlotIndex{c.slot});
-    SaveState& s = saves_[c.slot & kSaveSlotMask];
+    const svc::ISaveFilesOnIo::Save f = w_.saves->save_on_io(c.save_slot());
+    SaveState& s = saves_[c.save_slot()];
     if (s.gen != f.gen) {
         s.gen = f.gen;
         s.rule = proto::SaveSlotRule::at_mount(f.exists, f.size, f.growable);
@@ -509,18 +522,16 @@ svc::ISaveFilesOnIo::Save LwSectorEndpoint::save_of_(const Card& c) noexcept {
     return f;
 }
 
-void LwSectorEndpoint::fill_card_(const Card& c, std::uint32_t lba) noexcept {
-    constexpr std::uint32_t kSaveSlotCount = 4;
-    constexpr std::uint32_t kSaveSlotMask = kSaveSlotCount - 1;
+void LwSectorEndpoint::fill_card_(const Card& c, proto::Lba lba) noexcept {
     constexpr unsigned kEraseByte = 0xFF;
     const std::span<std::uint8_t> out = infra::byte_cast<std::uint8_t>(
-        std::span<std::byte>(card_buf_.data(), c.bytes)
+        c.bytes.block_of(std::span<std::byte>{card_buf_})
     );
     const svc::ISaveFilesOnIo::Save f = save_of_(c);
-    const proto::SaveSlotRule& rule = saves_[c.slot & kSaveSlotMask].rule;
-    const std::uint64_t at = static_cast<std::uint64_t>(lba) * c.bytes;
+    const proto::SaveSlotRule& rule = saves_[c.save_slot()].rule;
     if (f.file && !rule.deferred_create) {
-        const auto n = f.file->read_at(at, out);
+
+        const auto n = f.file->read_at(c.offset_of(lba), out);
         if (n && *n > 0) {
             const std::size_t got = std::min(*n, out.size());
             std::memset(out.data() + got, 0, out.size() - got);
@@ -531,28 +542,26 @@ void LwSectorEndpoint::fill_card_(const Card& c, std::uint32_t lba) noexcept {
     if (!rule.deferred_create) {
         std::memset(out.data(), 0, out.size());
     } else if (grant_.blank && grant_.blank->declared()) {
-        const std::uint64_t key = static_cast<std::uint64_t>(lba) * grant_.blank->lba_bytes.v;
+        const std::uint64_t key = grant_.blank->lba_bytes.position_of(lba);
         cores::render_blank(*grant_.blank, key, out);
     } else {
         std::memset(out.data(), kEraseByte, out.size());
     }
 }
 
-bool LwSectorEndpoint::copy_image_(const Card& c, std::uint32_t lba) noexcept {
-    const std::uint64_t at = static_cast<std::uint64_t>(lba) * c.bytes;
+bool LwSectorEndpoint::copy_image_(const Card& c, proto::Lba lba) noexcept {
+    const std::uint64_t at = c.offset_of(lba);
     if (at > c.image->region().len)
         return false;
-    const auto n = c.image->read_at(
-        static_cast<std::size_t>(at),
-        std::span<std::byte>(card_buf_.data(), c.bytes)
-    );
-    return n && *n == c.bytes;
+    const std::span<std::byte> block = c.bytes.block_of(std::span<std::byte>{card_buf_});
+    const auto n = c.image->read_at(static_cast<std::size_t>(at), block);
+    return n && *n == block.size();
 }
 
-bool LwSectorEndpoint::store_wack_(const Card& c, std::uint32_t lba) noexcept {
+bool LwSectorEndpoint::store_wack_(const Card& c, proto::Lba lba) noexcept {
     using hal::SectorBlock;
     for (unsigned attempt = 0; attempt <= kMaxResends; ++attempt) {
-        port_().write(SectorBlock::wack_slot(c.slot), lba);
+        write_lba_(port_(), SectorBlock::wack_slot(c.slot), lba);
         const SectorBlock::Accept a = SectorBlock::accept(port_().read(SectorBlock::Reg::Accept));
         if (a.drops != 0)
             tally_.drops += a.drops;
@@ -564,19 +573,13 @@ bool LwSectorEndpoint::store_wack_(const Card& c, std::uint32_t lba) noexcept {
     return false;
 }
 
-void LwSectorEndpoint::persist_card_(const Card& c, std::uint32_t lba) noexcept {
-    constexpr std::uint32_t kSaveSlotCount = 4;
-    constexpr std::uint32_t kSaveSlotMask = kSaveSlotCount - 1;
+void LwSectorEndpoint::persist_card_(const Card& c, proto::Lba lba) noexcept {
     const svc::ISaveFilesOnIo::Save f = save_of_(c);
-    proto::SaveSlotRule& rule = saves_[c.slot & kSaveSlotMask].rule;
+    proto::SaveSlotRule& rule = saves_[c.save_slot()].rule;
     const std::span<const std::uint8_t> src = infra::byte_cast<const std::uint8_t>(
-        std::span<const std::byte>(card_buf_.data(), c.bytes)
+        c.bytes.block_of(std::span<const std::byte>{card_buf_})
     );
-    const proto::SaveSlotRule::Plan plan = rule.plan_write(
-        proto::Lba{lba},
-        proto::BlockSize{c.bytes},
-        c.bytes
-    );
+    const proto::SaveSlotRule::Plan plan = rule.plan_write(lba, c.bytes, c.bytes.v);
     if (!f.file) {
         ++tally_.card_fails;
     } else if (plan.act == proto::SaveSlotRule::Act::Discard) {

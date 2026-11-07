@@ -23,7 +23,7 @@ public:
     [[nodiscard]] Ex<std::uint8_t> read(os::I2cReg reg) override {
         TASTY_SEAT_BODY(SubMap);
         if (!a_) {
-            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), addr_.v});
+            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), addr_detail(addr_)});
         }
         return a_->read(addr_, reg);
     }
@@ -31,7 +31,7 @@ public:
     [[nodiscard]] Ex<void> write(os::I2cReg reg, std::uint8_t val) override {
         TASTY_SEAT_BODY(SubMap);
         if (!a_) {
-            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), addr_.v});
+            return std::unexpected(Error{Errc::negotiation, ERR_SITE(), addr_detail(addr_)});
         }
         return a_->write(addr_, reg, val);
     }

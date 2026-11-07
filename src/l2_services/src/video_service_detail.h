@@ -31,6 +31,48 @@ static_assert(
 
 constexpr std::uint32_t kSearchCeiling = 1u << 20;
 
+constexpr int kCellGranRnd = 4;
+
+constexpr float kPercentScale = 100.0f;
+
+constexpr float kCvtRbMinVBlankUs = 460.0f;
+constexpr float kCvtMinVSyncBackPorchUs = 550.0f;
+constexpr int kCvtRbHBlank = 160;
+constexpr int kCvtRbHSync = 32;
+constexpr int kCvtRbHBackPorch = 80;
+constexpr int kCvtMinVBporch = 6;
+constexpr int kCvtVFrontPorch = 3;
+constexpr int kCvtRbVFrontPorch = 3;
+
+constexpr float kCvtCPrime = 30.0f;
+constexpr float kCvtMPrime = 300.0f;
+constexpr float kCvtHSyncPct = 0.08f;
+constexpr float kCvtMinIdealDutyPct = 20.0f;
+
+constexpr std::uint32_t kCvtPixelRepeatWidth = 2048;
+constexpr std::uint32_t kCvtFallbackWidth = 1920;
+constexpr std::uint32_t kCvtFallbackLines = 1080;
+
+constexpr int kCvtDefaultVSync = 10;
+
+struct AspectRule {
+    int arx;
+    int ary;
+    int vsync;
+
+    [[nodiscard]] constexpr int width_at(int h) const noexcept {
+        return ((h * arx) / (ary * kCellGranRnd)) * kCellGranRnd;
+    }
+};
+
+constexpr AspectRule kCvtAspectRules[] = {
+    {4, 3, 4},
+    {16, 9, 5},
+    {16, 10, 6},
+    {5, 4, 7},
+    {15, 9, 7},
+};
+
 }
 
 }

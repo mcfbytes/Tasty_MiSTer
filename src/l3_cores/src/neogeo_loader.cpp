@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <span>
 
 #include "cores/neo_file.h"
@@ -71,9 +72,9 @@ namespace {
     return s.size() >= tail.size() && iequal(s.substr(s.size() - tail.size()), tail);
 }
 
-[[nodiscard]] neogeo::Shape shape_of(const neogeo::RomEntry& e) noexcept {
+[[nodiscard]] neogeo::Shape shape_of(const neogeo::RomsetFile& e) noexcept {
     using neogeo::FileClass;
-    switch (e.cls) {
+    switch (e.file_class) {
         case FileClass::Fix:
             return neogeo::Shape::Fix;
         case FileClass::Spr:
@@ -108,10 +109,10 @@ void NeoGeoLoader::reset_walk_() noexcept {
     config_ = 0;
 }
 
-Ex<LoadPlan> NeoGeoLoader::plan_romset(std::span<const neogeo::RomEntry> entries) {
+Ex<LoadPlan> NeoGeoLoader::plan_romset(std::span<const neogeo::RomsetFile> entries) {
     LoadPlan p{};
     reset_walk_();
-    for (const neogeo::RomEntry& e : entries) {
+    for (const neogeo::RomsetFile& e : entries) {
         if (auto r = add_entry_(p, e); !r)
             return std::unexpected(r.error());
     }
@@ -153,14 +154,20 @@ Ex<LoadPlan> NeoGeoLoader::plan_cart_(std::string_view pick, const proto::Status
         if (!status.get_bit(neogeo::kOriginalBiosBit) && exists_(uni))
             bios = "uni-bios.rom";
         const std::string path = neogeo::make_path(home, bios);
-        const neogeo::RomEntry e{.path = path, .index = 0, .offset = 0, .size = 0x20000};
+        const neogeo::RomsetFile
+            e{.path = path, .index = neogeo::FileIndex::Bios, .offset = 0, .size = 0x20000};
         if (auto r = add_entry_(p, e); !r)
             return std::unexpected(r.error());
     }
     if (auto r = flush_crom_(p); !r)
         return std::unexpected(r.error());
     const std::string sfix = neogeo::make_path(home, "sfix.sfix");
-    const neogeo::RomEntry fix{.path = sfix, .index = 2, .cls = neogeo::FileClass::Fix};
+    const neogeo::FileIndex sfix_index{neogeo::FileIndex::Sfix};
+    const neogeo::RomsetFile fix{
+        .path = sfix,
+        .index = sfix_index,
+        .file_class = sfix_index.class_of()
+    };
     if (auto r = add_entry_(p, fix); !r)
         return std::unexpected(r.error());
     if (auto r = add_lo_rom_(p, home); !r)
@@ -195,8 +202,12 @@ Ex<LoadPlan> NeoGeoLoader::plan_cd_(std::string_view pick, const proto::StatusWo
         if (!status.get_bit(neogeo::kOriginalBiosBit) && exists_(uni))
             bios = "uni-bioscd.rom";
         const std::string path = neogeo::make_path(home, bios);
-        const neogeo::RomEntry
-            e{.path = path, .index = 0, .offset = 0, .size = neogeo::kCdBiosBytes};
+        const neogeo::RomsetFile e{
+            .path = path,
+            .index = neogeo::FileIndex::Bios,
+            .offset = 0,
+            .size = neogeo::kCdBiosBytes
+        };
         if (auto r = add_entry_(p, e); !r)
             return std::unexpected(r.error());
     }
@@ -249,10 +260,11 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_neo_(LoadPlan& p, std::string
     const neogeo::NeoCartConfig q = neogeo::resolve_quirks(*hdr);
     const std::uint32_t expand = q.vrom_mirror ? 0u : neogeo::kVromSize;
     std::uint32_t off = static_cast<std::uint32_t>(neogeo::kNeoHeaderBytes);
-    const auto tx = [&](std::uint32_t size, neogeo::RomEntry e) -> Ex<void> {
+    const auto tx = [&](std::uint32_t size, neogeo::RomsetFile e) -> Ex<void> {
         e.path = pick;
         e.offset = off;
         e.size = size;
+        e.file_class = e.index.class_of();
         off += size;
         if (size == 0)
             return {};
@@ -261,25 +273,24 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_neo_(LoadPlan& p, std::string
             return std::unexpected(r.error());
         return {};
     };
-    using neogeo::FileClass;
-    if (auto r = tx(hdr->p_size, {.index = 4}); !r)
+    if (auto r = tx(hdr->p_size, {.index = neogeo::FileIndex::Prom}); !r)
         return std::unexpected(r.error());
-    if (auto r = tx(hdr->s_size, {.index = 8, .cls = FileClass::Fix}); !r)
+    if (auto r = tx(hdr->s_size, {.index = neogeo::FileIndex::Srom}); !r)
         return std::unexpected(r.error());
-    if (auto r = tx(hdr->m_size, {.index = 9}); !r)
+    if (auto r = tx(hdr->m_size, {.index = neogeo::FileIndex::M1}); !r)
         return std::unexpected(r.error());
-    if (auto r = tx(hdr->v1_size, {.index = 16, .expand = expand}); !r)
+    if (auto r = tx(hdr->v1_size, {.index = neogeo::FileIndex::VromFirst, .expand = expand}); !r)
         return std::unexpected(r.error());
     neogeo::RomsetConfig cfg{};
     cfg.use_pcm = 1;
     if (hdr->v2_size != 0) {
         cfg.use_pcm = 0;
-        if (auto r = tx(hdr->v2_size, {.index = 48, .expand = expand}); !r)
+        if (auto r = tx(hdr->v2_size, {.index = neogeo::FileIndex::VromB, .expand = expand}); !r)
             return std::unexpected(r.error());
     } else if (hdr->v1_size > neogeo::kVromSize) {
         cfg.use_pcm = 2;
     }
-    if (auto r = tx(hdr->c_size, {.index = 15, .cls = FileClass::Spr, .swap = true}); !r)
+    if (auto r = tx(hdr->c_size, {.index = neogeo::FileIndex::Sprite, .swap = true}); !r)
         return std::unexpected(r.error());
     cfg.hw_type = q.hw_type;
     cfg.cmc = q.cmc;
@@ -339,22 +350,12 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_xml_(
     if (!plan.found)
         return std::nullopt;
 
-    std::vector<std::string> paths;
-    const auto load = [&](const neogeo::RomsetFile& f) -> Ex<std::uint32_t> {
-        paths.push_back(neogeo::make_path(root, f.name));
-        const neogeo::RomEntry e{
-            .path = paths.back(),
-            .index = f.index,
-            .offset = f.offset,
-            .size = f.size,
-            .cls = f.file_class,
-            .expand = f.expand
-        };
-        return add_entry_(p, e);
+    const auto load = [&](neogeo::RomsetFile& f) -> Ex<std::uint32_t> {
+        f.path = neogeo::make_path(root, f.name);
+        return add_entry_(p, f);
     };
-    paths.reserve(plan.files.size() + 8u);
     int loaded = 0;
-    for (const neogeo::RomsetFile& f : plan.files) {
+    for (neogeo::RomsetFile& f : plan.files) {
         auto r = load(f);
         if (!r)
             return std::unexpected(r.error());
@@ -366,7 +367,8 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_xml_(
 
         if (!plan.no_files_declared && plan.vromb_offset != 0 && !plan.force_pcm)
             cfg.use_pcm = 0;
-        for (const neogeo::RomsetFile& f : neogeo::fallback_files(plan)) {
+        std::vector<neogeo::RomsetFile> fallback = neogeo::fallback_files(plan);
+        for (neogeo::RomsetFile& f : fallback) {
             auto r = load(f);
             if (!r)
                 return std::unexpected(r.error());
@@ -390,7 +392,9 @@ std::optional<NeoGeoLoader::Span> NeoGeoLoader::entry_span_(
         return std::nullopt;
     const std::uint64_t rest = fs->v > offset ? fs->v - offset : 0u;
     if (size == 0)
-        size = static_cast<std::uint32_t>(std::min<std::uint64_t>(rest, 0xFFFF'FFFFu));
+        size = static_cast<std::uint32_t>(
+            std::min<std::uint64_t>(rest, std::numeric_limits<std::uint32_t>::max())
+        );
     return Span{.size = size, .rest = rest};
 }
 
@@ -426,7 +430,7 @@ Ex<TransferRow*> NeoGeoLoader::add_row_(LoadPlan& p, std::string_view path, RowD
     TransferRow& r = p.rows[p.count];
     r = TransferRow{};
     r.dest = dest;
-    r.window = kMemWindow;
+    r.window = WindowRef::at(neogeo::kMemWindowSlot);
     r.bracket = RowBracket::None;
     r.source = paths_[p.count].view();
     ++p.count;
@@ -442,8 +446,8 @@ Ex<void> NeoGeoLoader::add_notify_(LoadPlan& p, const PostNotify& n) {
     return {};
 }
 
-Ex<std::uint32_t> NeoGeoLoader::add_entry_(LoadPlan& p, const neogeo::RomEntry& e) {
-    if (e.index >= neogeo::kCromFirstIndex)
+Ex<std::uint32_t> NeoGeoLoader::add_entry_(LoadPlan& p, const neogeo::RomsetFile& e) {
+    if (e.index.is_crom())
         return add_crom_(p, e);
     if (auto r = flush_crom_(p); !r)
         return std::unexpected(r.error());
@@ -455,7 +459,7 @@ Ex<std::uint32_t> NeoGeoLoader::add_entry_(LoadPlan& p, const neogeo::RomEntry& 
         return 0u;
     }
     std::uint32_t sz = *first;
-    if (e.index == neogeo::kPromIndex && is_prom_name(e.path)) {
+    if (e.index == neogeo::FileIndex::Prom && is_prom_name(e.path)) {
         const std::size_t slash = e.path.rfind('/');
         const std::string sibling = slash == std::string_view::npos
             ? std::string("prom1")
@@ -472,7 +476,7 @@ Ex<std::uint32_t> NeoGeoLoader::add_entry_(LoadPlan& p, const neogeo::RomEntry& 
 Ex<void> NeoGeoLoader::flush_crom_(LoadPlan& p) {
     if (crom_sz_ == 0)
         return {};
-    const PostNotify n = neogeo::make_notify(neogeo::kCromNotifyIndex, crom_sz_);
+    const PostNotify n = neogeo::make_notify(neogeo::FileIndex::Sprite, crom_sz_);
     crom_sz_ = 0;
     if (last_crom_ < p.count) {
         p.rows[last_crom_].notify = n;
@@ -482,13 +486,13 @@ Ex<void> NeoGeoLoader::flush_crom_(LoadPlan& p) {
     return add_notify_(p, n);
 }
 
-Ex<std::uint32_t> NeoGeoLoader::add_crom_(LoadPlan& p, const neogeo::RomEntry& e) {
+Ex<std::uint32_t> NeoGeoLoader::add_crom_(LoadPlan& p, const neogeo::RomsetFile& e) {
     const auto s = entry_span_(e.path, e.offset, e.size);
     if (!s || s->size == 0) {
         ++skipped_;
         return 0u;
     }
-    const std::uint32_t end = neogeo::crom_offset(e.index) + 2u * s->size;
+    const std::uint32_t end = e.index.crom_offset() + 2u * s->size;
     crom_sz_ = std::max(crom_sz_, end);
     const auto readable = static_cast<std::uint32_t>(std::min<std::uint64_t>(s->size, s->rest));
     if (readable == 0) {
@@ -501,10 +505,10 @@ Ex<std::uint32_t> NeoGeoLoader::add_crom_(LoadPlan& p, const neogeo::RomEntry& e
     TransferRow& row = **r;
     row.shaped = true;
     row.shape = static_cast<std::uint8_t>(neogeo::Shape::Crom);
-    row.index = proto::WideIoIndex{e.index};
-    row.addr = neogeo::crom_offset(e.index);
+    row.index = e.index.wide();
+    row.addr = e.index.crom_offset();
     row.stride = 2;
-    row.lane = neogeo::crom_lane(e.index);
+    row.lane = e.index.crom_lane();
     row.file_offset = e.offset;
     row.file_len = readable;
     row.extent = 2u * readable;
@@ -515,7 +519,7 @@ Ex<std::uint32_t> NeoGeoLoader::add_crom_(LoadPlan& p, const neogeo::RomEntry& e
 Ex<std::uint32_t> NeoGeoLoader::add_rom_(
     LoadPlan& p,
     std::string_view path,
-    const neogeo::RomEntry& e,
+    const neogeo::RomsetFile& e,
     std::uint32_t concat
 ) {
     const auto s = entry_span_(path, e.offset, e.size);
@@ -530,10 +534,10 @@ Ex<std::uint32_t> NeoGeoLoader::add_rom_(
     const neogeo::RomPlace place = neogeo::rom_place(e.index, concat);
     row.shaped = shape != neogeo::Shape::None;
     row.shape = static_cast<std::uint8_t>(shape);
-    row.index = proto::WideIoIndex{e.index};
+    row.index = e.index.wide();
     row.window = place.window;
     row.addr = place.offset;
-    row.fill = row.shaped ? 0u : neogeo::rom_fill(e.index);
+    row.fill = row.shaped ? 0u : e.index.vrom_fill();
     row.file_offset = e.offset;
     row.file_len = neogeo::stock_read_len(s->size, extent, s->rest);
     row.extent = extent;
@@ -545,10 +549,11 @@ Ex<void> NeoGeoLoader::add_fill_(LoadPlan& p) {
     if (!r)
         return std::unexpected(r.error());
     TransferRow& row = **r;
-    row.index = proto::WideIoIndex{neogeo::kFillIndex};
+    const neogeo::FileIndex fill_index{neogeo::FileIndex::Fill};
+    row.index = fill_index.wide();
     row.fill = neogeo::kFillPattern;
     row.extent = neogeo::kFillBytes;
-    row.notify = neogeo::make_notify(neogeo::kFillIndex, neogeo::kFillBytes, true);
+    row.notify = neogeo::make_notify(fill_index, neogeo::kFillBytes, true);
     return {};
 }
 
@@ -561,7 +566,8 @@ Ex<bool> NeoGeoLoader::add_lo_rom_(LoadPlan& p, std::string_view home) {
     if (!r)
         return std::unexpected(r.error());
     TransferRow& row = **r;
-    row.index = proto::WideIoIndex{neogeo::kLoRomIndex};
+    const neogeo::FileIndex lo_index{neogeo::FileIndex::LoRom};
+    row.index = lo_index.wide();
     row.byte_words = true;
     row.file_len = static_cast<std::uint32_t>(
         std::min<std::uint64_t>(s->rest, neogeo::kLoRomBytes)

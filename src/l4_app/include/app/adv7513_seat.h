@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -50,8 +51,8 @@ public:
         std::uint8_t quirk = 0;
     };
 
-    static constexpr std::uint32_t kReprobeFirstMs = 1'000;
-    static constexpr std::uint32_t kReprobeMaxMs = 64'000;
+    static constexpr std::chrono::milliseconds kReprobeFirstMs{1'000};
+    static constexpr std::chrono::milliseconds kReprobeMaxMs{64'000};
 
     Adv7513Seat(
         const os::IClock& clock,
@@ -110,7 +111,7 @@ private:
 
     bool probed_ = false;
     std::int64_t next_probe_ns_ = 0;
-    std::uint32_t probe_backoff_ms_ = kReprobeFirstMs;
+    std::chrono::milliseconds probe_backoff_ms_ = kReprobeFirstMs;
     std::int64_t attached_ns_ = 0;
 
     std::uint32_t writes_base_ = 0;

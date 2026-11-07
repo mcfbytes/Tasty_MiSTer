@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -27,14 +28,7 @@ public:
     enum class Pass : std::uint8_t { Stepped, Waiting, Done, Failed };
     enum class Pc : std::uint8_t { Next, Window, Send, Echo, Over };
 
-    static constexpr std::uint16_t kSendChunk = 4096;
-
-    static constexpr std::int64_t kEchoFloorNs = 2'000'000'000;
-    static constexpr std::int64_t kEchoNsPerMiB = 2'000'000'000;
-
-    [[nodiscard]] static constexpr std::int64_t echo_bound_ns(std::uint64_t bytes) noexcept {
-        return kEchoFloorNs + static_cast<std::int64_t>((bytes * kEchoNsPerMiB) >> 20);
-    }
+    static constexpr EchoRate kEcho{std::chrono::seconds{2}, std::chrono::seconds{2}};
 
     struct Host {
         LoadLadder::Host rung;

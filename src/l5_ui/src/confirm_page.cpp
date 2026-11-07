@@ -37,24 +37,18 @@ bool ConfirmPage::walk(PageWalk& out) const {
             return classic_row(
                 osd_row_at(at.before()),
                 body[at],
-                false,
-                false,
-                std::nullopt,
-                OsdRenderer::kArrowNone
+                {.arrow = OsdRenderer::kArrowNone}
             );
         }
         const RowIndex i = choice_of(at);
         return classic_row(
             osd_row_at(at.before()),
             choices[i],
-            sel_ == i,
-            false,
-            std::nullopt,
-            OsdRenderer::kArrowNone
+            {.inverted = sel_ == i, .arrow = OsdRenderer::kArrowNone}
         );
     };
 
-    const RowRange window = rows(RowIndex::of(win.first), RowCount::of(win.count));
+    const RowRange window = rows(win.first, win.count);
     for (const RowIndex at : window) {
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;

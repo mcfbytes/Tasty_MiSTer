@@ -35,7 +35,7 @@ void report(const char* what, const Error& e) {
             buf + n,
             sizeof buf - static_cast<std::size_t>(n),
             " seat=%s",
-            seat_name(static_cast<SeatTag>(e.detail))
+            seat_name(seat::detail::tag_from_detail(e.detail))
         );
     }
     if (const IReportVoice* const voice = g_report_voice.load(std::memory_order_acquire)) {

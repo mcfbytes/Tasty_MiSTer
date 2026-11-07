@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <string_view>
 
@@ -13,7 +14,7 @@ namespace mister::cores {
 
 enum class MountState : std::uint8_t { Done, Pending, Failed };
 
-inline constexpr std::int64_t kDiscMountBoundNs = 5'000'000'000;
+inline constexpr std::chrono::nanoseconds kDiscMountBoundNs = std::chrono::seconds{5};
 
 class IStagingCore {
 public:

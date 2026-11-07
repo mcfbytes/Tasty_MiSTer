@@ -103,7 +103,7 @@ public:
         SlotIndex slot,
         Lba lba,
         std::uint32_t nbytes,
-        std::uint16_t ack
+        SectorAck ack
     );
 
     [[nodiscard]] Ex<Pass> serve(const SpiBlockPoll::Decode& d, IBlockRoles& roles);
@@ -192,13 +192,13 @@ private:
         const SdRequest& req,
         std::uint32_t block_size,
         std::uint32_t window_blocks,
-        std::uint16_t ack,
+        SectorAck ack,
         const BlockBacking& backing
     );
     [[nodiscard]] Ex<Pass> serve_write(
         const SdRequest& req,
         std::uint32_t block_size,
-        std::uint16_t ack,
+        SectorAck ack,
         const BlockBacking& backing
     );
 
@@ -207,7 +207,7 @@ private:
         std::span<const std::uint8_t> serve,
         std::uint32_t offset,
         std::uint32_t nbytes,
-        std::uint16_t ack,
+        SectorAck ack,
         std::uint32_t blks,
         bool count_blocks
     );

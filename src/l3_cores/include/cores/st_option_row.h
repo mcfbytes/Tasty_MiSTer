@@ -9,6 +9,7 @@
 
 #include "cores/option_row_view.h"
 #include "cores/option_rows.h"
+#include "cores/st_ctrl.h"
 #include "cores/st_options.h"
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -20,9 +21,8 @@ class StOptionRow {
 
 public:
     struct Facts {
-        std::uint32_t system_ctrl = 0;
+        st_ctrl::CtrlWord system_ctrl{};
         std::uint32_t ext_ctrl = 0;
-        std::array<bool, 2> floppy_in{};
         std::array<std::string_view, 2> floppy{};
         std::array<bool, 2> hdd_bound{};
         std::array<std::string_view, 2> acsi{};
@@ -31,7 +31,7 @@ public:
     };
 
     struct Write {
-        std::optional<std::uint32_t> system_ctrl{};
+        std::optional<st_ctrl::CtrlWord> system_ctrl{};
         std::optional<std::uint32_t> ext_ctrl{};
     };
 
@@ -131,7 +131,7 @@ class StOptionRowFloppy final : public StOptionRow {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    constexpr StOptionRowFloppy(StOption id, std::uint8_t drive) noexcept
+    constexpr StOptionRowFloppy(StOption id, st_ctrl::StSlot drive) noexcept
         : StOptionRow(id),
           drive_(drive) {}
 
@@ -141,7 +141,7 @@ private:
         std::span<char> text
     ) const noexcept override;
 
-    std::uint8_t drive_;
+    st_ctrl::StSlot drive_;
 };
 
 class StOptionRowHdd final : public StOptionRow {

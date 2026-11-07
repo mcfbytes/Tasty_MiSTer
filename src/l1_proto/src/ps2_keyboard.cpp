@@ -21,19 +21,20 @@ Ex<void> Ps2Keyboard::key_event(HidUsage hid_usage, bool pressed) {
 
     const bool was_down = down_[idx];
     down_[idx] = pressed;
-    const int press = !pressed ? 0 : (was_down ? 2 : 1);
+    const Press press = !pressed ? Press::kRelease : (was_down ? Press::kRepeat : Press::kMake);
+    const bool set1 = scan_set_ == ScanSet::kSet1;
 
-    const std::array<std::uint32_t, 256>& table = (scan_set_ == 1) ? kEv2Ps2Set1 : kEv2Ps2Set2;
+    const std::array<std::uint32_t, 256>& table = set1 ? kEv2Ps2Set1 : kEv2Ps2Set2;
     const std::uint32_t code = table[idx];
     if (code == NONE)
         return {};
 
-    const auto low = static_cast<std::uint8_t>(code & 0xFFu);
+    const auto low = static_cast<std::uint8_t>(code);
 
     if (low == 0xE1) {
 
-        if (press != 1) {
-            if (scan_set_ == 1) {
+        if (press != Press::kMake) {
+            if (set1) {
                 static constexpr std::uint8_t kSeq[] = {0xE1, 0x1D, 0x45, 0xE1, 0x9D, 0xC5};
                 push_frame(kSeq, 6);
             } else {
@@ -47,9 +48,9 @@ Ex<void> Ps2Keyboard::key_event(HidUsage hid_usage, bool pressed) {
 
     if (low == 0xE2) {
 
-        if (press <= 1) {
-            const bool make = (press == 1);
-            if (scan_set_ == 1) {
+        if (press != Press::kRepeat) {
+            const bool make = press == Press::kMake;
+            if (set1) {
                 static constexpr std::uint8_t kMake[] = {0xE0, 0x2A, 0xE0, 0x37};
                 static constexpr std::uint8_t kBreak[] = {0xE0, 0xB7, 0xE0, 0xAA};
                 if (make)
@@ -68,7 +69,7 @@ Ex<void> Ps2Keyboard::key_event(HidUsage hid_usage, bool pressed) {
         return {};
     }
 
-    if (press > 1 && !ps2_control_)
+    if (press == Press::kRepeat && !ps2_control_)
         return {};
 
     std::array<std::uint8_t, 3> buf{};
@@ -77,7 +78,7 @@ Ex<void> Ps2Keyboard::key_event(HidUsage hid_usage, bool pressed) {
         buf[n++] = 0xE0;
     std::uint8_t final_low = low;
     if (!pressed) {
-        if (scan_set_ == 1)
+        if (set1)
             final_low = static_cast<std::uint8_t>(low | 0x80u);
         else
             buf[n++] = 0xF0;
@@ -109,7 +110,7 @@ bool Ps2Keyboard::next_frame(Ps2Frame& out) noexcept {
         out.stream = Ps2Stream::KeyboardReply;
         out.len = 1;
         out.bytes = {};
-        out.bytes[0] = *code;
+        out.bytes[0] = byte_of(*code);
         return true;
     }
     return false;
@@ -123,78 +124,98 @@ Ex<void> Ps2Keyboard::accept_control(std::uint16_t word0) {
 
 void Ps2Keyboard::end_control() noexcept {
     ps2_control_ = false;
-    scan_set_ = 2;
+    scan_set_ = ScanSet::kSet2;
     port_.end();
 }
 
 void Ps2Keyboard::decode_control(std::uint8_t kbd_ctl) {
+
+    constexpr std::uint8_t kScanCodeGet = 0;
+    constexpr auto kMaxScanSetByte = static_cast<std::uint8_t>(ScanSet::kSet3);
     if (!port_.awaiting_param()) {
         switch (port_.command()) {
-            case 0xFF:
-                scan_set_ = 2;
-                port_.reply(0xFA);
-                port_.reply(0xAA);
-                break;
-            case 0xF2:
-                port_.reply(0xFA);
-                port_.reply(0xAB);
-                port_.reply(0x83);
-                break;
-            case 0xF0:
-                port_.reply(0xFA);
+            case Ps2Command::kReset:
+                scan_set_ = ScanSet::kSet2;
+                port_.reply(Ps2Reply::kAck);
+                port_.reply(Ps2Reply::kBatOk);
+                return;
+            case Ps2Command::kReadId:
+                port_.reply(Ps2Reply::kAck);
+                port_.reply(Ps2Reply::kIdFirst);
+                port_.reply(Ps2Reply::kIdSecond);
+                return;
+            case Ps2Command::kScanCodeOrRemote:
+                port_.reply(Ps2Reply::kAck);
                 port_.expect_param();
-                break;
-            case 0xF6:
-                port_.reply(0xFA);
-                scan_set_ = 2;
-                break;
-            case 0xF3:
-                port_.reply(0xFA);
+                return;
+            case Ps2Command::kSetDefaults:
+                port_.reply(Ps2Reply::kAck);
+                scan_set_ = ScanSet::kSet2;
+                return;
+            case Ps2Command::kTypematicOrSampleRate:
+                port_.reply(Ps2Reply::kAck);
                 port_.expect_param();
-                break;
-            case 0xF4:
-            case 0xF5:
-            case 0xFA:
-                port_.reply(0xFA);
-                break;
-            case 0xED:
-                port_.reply(0xFA);
+                return;
+            case Ps2Command::kEnable:
+            case Ps2Command::kDisable:
+            case Ps2Command::kEnableTypematic:
+                port_.reply(Ps2Reply::kAck);
+                return;
+            case Ps2Command::kSetLeds:
+                port_.reply(Ps2Reply::kAck);
                 port_.expect_param();
-                break;
-            case 0xEE:
-                port_.reply(0xEE);
-                break;
-            default:
-                port_.reply(0xFE);
-                break;
+                return;
+            case Ps2Command::kEcho:
+                port_.reply(Ps2Reply::kEcho);
+                return;
+            case Ps2Command::kNone:
+            case Ps2Command::kSetResolution:
+            case Ps2Command::kSetScaling:
+            case Ps2Command::kStreamMode:
+            case Ps2Command::kStatusRequest:
+                port_.reply(Ps2Reply::kResend);
+                return;
         }
+        port_.reply(Ps2Reply::kResend);
     } else {
         switch (port_.command()) {
-            case 0xED:
+            case Ps2Command::kSetLeds:
 
-                port_.reply(0xFA);
+                port_.reply(Ps2Reply::kAck);
                 port_.param_done();
-                break;
-            case 0xF0:
+                return;
+            case Ps2Command::kScanCodeOrRemote:
                 port_.param_done();
-                if (kbd_ctl <= 3) {
-                    port_.reply(0xFA);
-                    if (kbd_ctl == 0)
-                        port_.reply(scan_set_);
+                if (kbd_ctl <= kMaxScanSetByte) {
+                    port_.reply(Ps2Reply::kAck);
+                    if (kbd_ctl == kScanCodeGet)
+                        port_.reply(scan_set_reply(scan_set_));
                     else
-                        scan_set_ = kbd_ctl;
+                        scan_set_ = scan_set_of(kbd_ctl);
                 } else {
-                    port_.reply(0xFE);
+                    port_.reply(Ps2Reply::kResend);
                 }
-                break;
-            case 0xF3:
-                port_.reply(0xFA);
+                return;
+            case Ps2Command::kTypematicOrSampleRate:
+                port_.reply(Ps2Reply::kAck);
                 port_.param_done();
-                break;
-            default:
+                return;
+            case Ps2Command::kNone:
+            case Ps2Command::kReset:
+            case Ps2Command::kReadId:
+            case Ps2Command::kSetDefaults:
+            case Ps2Command::kEnable:
+            case Ps2Command::kDisable:
+            case Ps2Command::kEnableTypematic:
+            case Ps2Command::kEcho:
+            case Ps2Command::kSetResolution:
+            case Ps2Command::kSetScaling:
+            case Ps2Command::kStreamMode:
+            case Ps2Command::kStatusRequest:
                 port_.param_done();
-                break;
+                return;
         }
+        port_.param_done();
     }
 }
 }

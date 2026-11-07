@@ -10,6 +10,7 @@
 #include <type_traits>
 
 #include "app/identity_record.h"
+#include "cores/types.h"
 #include "app/link_tx_reader.h"
 #include "app/mra_facts.h"
 #include "infra/error.h"
@@ -29,6 +30,8 @@ class SessionBindings {
 
 public:
     static constexpr std::size_t kIdentityNameCap = 64;
+
+    static constexpr std::size_t kIdentityFields = 4;
     static constexpr std::size_t kButtonListCap = kLinkTxSlabBytes;
     static constexpr std::size_t kCapTokenCap = 96;
 
@@ -49,11 +52,15 @@ public:
     };
 
     struct Uart {
+
+        static constexpr std::size_t kSpeedCount = 3;
+        static constexpr std::size_t kModeBytes = sizeof(std::uint32_t);
+        static constexpr std::size_t kSpeedsBytes = kSpeedCount * kModeBytes;
         bool capable = false;
         FixedStr<kCapTokenCap, StrFit::Clip> uart_token{};
         FixedStr<kCapTokenCap, StrFit::Clip> midi_token{};
         std::optional<std::uint32_t> mode{};
-        std::optional<std::array<std::uint32_t, 3>> speeds{};
+        std::optional<std::array<cores::BaudRate, kSpeedCount>> speeds{};
     };
 
     struct Doorbells {
@@ -68,7 +75,7 @@ public:
 
     struct Mount {
         decltype(InternedFile::path) path{};
-        std::uint64_t size_bytes = 0;
+        proto::FileSize size_bytes{};
     };
 
     void bind_facts(const proto::LinkOp::BindFacts& op, const ILinkTxReader& inbox) noexcept;

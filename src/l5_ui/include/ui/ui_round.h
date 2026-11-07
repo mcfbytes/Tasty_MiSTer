@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 
 #include "app/conf_str_cell.h"
 #include "app/info_decoder.h"
@@ -141,10 +142,10 @@ public:
 
     const app::UiPageCell& page_cell() const noexcept { return page_cell_; }
 
-    static constexpr std::int64_t kOsdLongPressNs = 3'000'000'000;
+    static constexpr std::chrono::milliseconds kOsdLongPress{3000};
 
-    static constexpr std::int64_t kOsdClassicHoldNs = 1'000'000'000;
-    static constexpr std::int64_t kUserLongPressNs = 1'500'000'000;
+    static constexpr std::chrono::milliseconds kOsdClassicHold{1000};
+    static constexpr std::chrono::milliseconds kUserLongPress{1500};
 
     std::uint32_t button_edges() const noexcept { return button_edges_; }
 
@@ -184,11 +185,50 @@ private:
     void ask_user_reset_();
 
     struct ButtonMachine {
-        bool last = false;
-        bool consumed = false;
-        std::int64_t long_at_ns = 0;
+        TASTY_SEAT_EXEMPT(component);
 
-        std::int64_t pressed_at_ns = 0;
+        bool press_edge(
+            bool level,
+            std::chrono::nanoseconds now,
+            std::chrono::milliseconds hold
+        ) noexcept {
+            if (!level || last_)
+                return false;
+            long_at_ = now + hold;
+            pressed_at_ = now;
+            return true;
+        }
+
+        bool long_ready(bool level, std::chrono::nanoseconds now) noexcept {
+            if (!level || consumed_ || now < long_at_)
+                return false;
+            consumed_ = true;
+            return true;
+        }
+
+        [[nodiscard]] std::optional<std::chrono::nanoseconds> release_hold(
+            bool level,
+            std::chrono::nanoseconds now
+        ) const noexcept {
+            if (level || !last_)
+                return std::nullopt;
+            return now - pressed_at_;
+        }
+
+        [[nodiscard]] bool consumed() const noexcept { return consumed_; }
+
+        void end_sample(bool level) noexcept {
+            if (!level)
+                consumed_ = false;
+            last_ = level;
+        }
+
+    private:
+        bool last_ = false;
+        bool consumed_ = false;
+        std::chrono::nanoseconds long_at_{};
+
+        std::chrono::nanoseconds pressed_at_{};
     };
 
     ButtonMachine osd_btn_{};

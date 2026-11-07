@@ -60,6 +60,8 @@ struct BuildEnv;
 struct HdPlanInputs;
 struct PageContext;
 
+inline constexpr HdMask kMt32Present{1};
+
 class MenuModel : public app::IOsdClose {
     TASTY_SEAT_RESIDENT(Ui);
 
@@ -301,7 +303,7 @@ private:
 
     void drop_pages_() noexcept;
 
-    static void disarm_launches_(PageContext& ctx) noexcept;
+    void disarm_launches_(PageContext& ctx) noexcept;
 
     void latch_browse_home() noexcept;
     [[nodiscard]] std::string_view browse_home() const noexcept;
@@ -311,6 +313,17 @@ private:
 
     bool push_info(PageContext& ctx, app::InfoId id);
     void place_overlay(std::unique_ptr<Page> p);
+
+    struct KeyPhase {
+        bool did = false;
+        bool round_over = false;
+    };
+
+    KeyPhase pump_key_(PageContext& ctx);
+
+    std::unique_ptr<Page> make_core_options_page_(proto::SubmenuNo page);
+
+    std::unique_ptr<Page> make_core_settings_page_(proto::SubmenuNo page);
 
     bool show_progress(PageContext& ctx, cores::Progress progress);
 
@@ -330,7 +343,7 @@ private:
 
     app::RecentGames recent_games_{};
 
-    std::array<std::uint16_t, kHdWindowDepths> hd_window_first_{};
+    std::array<RowIndex, kHdWindowDepths> hd_window_first_{};
     Navigator nav_;
     HdKeyRemap remap_;
     HdFocusMemory hd_focus_;

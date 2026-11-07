@@ -33,14 +33,7 @@ public:
 
     static constexpr std::int64_t kSaveBoundNs = 5'000'000'000;
 
-    static constexpr std::uint16_t kPayloadChunk = 4096;
-
-    static constexpr std::int64_t kEchoFloorNs = 2'000'000'000;
-    static constexpr std::int64_t kEchoNsPerMiB = 250'000'000;
-
-    [[nodiscard]] static constexpr std::int64_t echo_bound_ns(std::uint64_t bytes) noexcept {
-        return kEchoFloorNs + static_cast<std::int64_t>((bytes * kEchoNsPerMiB) >> 20);
-    }
+    static constexpr EchoRate kEcho{std::chrono::seconds{2}, std::chrono::milliseconds{250}};
 
     struct Host {
         LoadLadder::Host rung;
@@ -115,7 +108,7 @@ private:
     std::span<const cores::CoreWindowDecl> windows_;
     std::optional<LoadLadder> ladder_;
     std::optional<cores::PayloadPieces> pieces_;
-    std::uint64_t echo_bytes_ = 0;
+    proto::FileSize echo_bytes_{};
     std::size_t row_ = 0;
     proto::ActKey16 act_{};
     proto::ActKey save_gen_{};

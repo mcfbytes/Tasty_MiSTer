@@ -15,7 +15,6 @@ class PosixFile;
 }
 
 class DurableWrite {
-    TASTY_SEAT_EXEMPT(const_shared);
 
 public:
     explicit DurableWrite(std::string_view root_path) : root_path_(root_path) {}

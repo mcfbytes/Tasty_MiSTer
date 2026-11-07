@@ -13,7 +13,7 @@
 namespace mister::ui {
 
 std::size_t format_key_value(std::span<char> out, std::string_view name, std::string_view value) {
-    const std::size_t w = kOptionRowWidth;
+    const std::size_t w = kClassicRowColumns;
     if (out.size() < w + 1)
         return 0;
 
@@ -276,7 +276,7 @@ void OsdRenderer::text(
 }
 
 void OsdRenderer::key_value(OsdRow row, std::string_view name, std::string_view value) {
-    char buf[kOptionRowWidth + 1] = {};
+    char buf[kClassicRowColumns + 1] = {};
     const std::size_t n = format_key_value(std::span<char>(buf, sizeof buf), name, value);
     text(row, std::string_view(buf, n), false);
 }
@@ -379,7 +379,7 @@ void OsdRenderer::composite_status_bar(const StatusBarFacts& facts) {
 
     text(proto::OsdSurface::kStatusRow, std::string_view{}, true);
 
-    char str[40] = {};
+    char str[kStatusBarBytes] = {};
     std::size_t len = 0;
     if (facts.splash) {
         static constexpr char kSplash[] = "       www.MiSTerFPGA.org       ";

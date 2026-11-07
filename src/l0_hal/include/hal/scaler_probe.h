@@ -23,7 +23,7 @@ public:
 
     struct Pick {
         std::size_t buf = 0;
-        std::uint8_t lag = 0;
+        HeaderCtr::Lag lag{};
         bool woven = false;
         std::size_t prev = ScalerBuffers::kBuffers;
     };
@@ -48,14 +48,22 @@ public:
     ) noexcept;
 
 private:
-    struct ProbeSide {
-        std::array<std::uint8_t, ScalerBuffers::kBuffers> first{};
-        BufMask seen{};
-        BufMask moved{};
-        BufMask triple{};
+    struct ProbeBuffer {
+        HeaderCtr first{};
+        bool seen = false;
+        bool moved = false;
+        bool triple = false;
     };
 
-    std::array<ProbeSide, 2> sides_{};
+    struct ProbeSide {
+        std::size_t stride;
+        std::array<ProbeBuffer, ScalerBuffers::kBuffers> buffers{};
+    };
+
+    std::array<ProbeSide, 2> sides_{
+        ProbeSide{ScalerBuffers::kStrideLarge},
+        ProbeSide{ScalerBuffers::kStrideSmall}
+    };
     std::int64_t start_ns_ = 0;
 };
 

@@ -2,6 +2,7 @@
 #include "menu_block.h"
 
 #include "app/hd_look_ini.h"
+#include "hal/axi.h"
 #include "infra/opt_ref.h"
 #include "os/process_title.h"
 
@@ -19,15 +20,6 @@ static_assert(
     "item: the host sampler runs inside ui::UiRound::round, which "
     "is UiMain's last tick seat."
 );
-
-namespace {
-
-hal::PhysRegion video_fb_region(std::span<const hal::PhysRegion> regions) noexcept {
-    if (regions.size() != hal::kRegionCount)
-        return hal::PhysRegion{};
-    return regions[static_cast<std::size_t>(hal::RegionId::VideoFb)];
-}
-}
 
 MenuBlock::MenuBlock(
     const BootParts& plat,
@@ -53,7 +45,11 @@ MenuBlock::MenuBlock(
               .diag = parts.wires.diag
           }
       },
-      hps_fb_{parts.wires.video.wire(), parts.wires.video, video_fb_region(plat.regions)},
+      hps_fb_{
+          parts.wires.video.wire(),
+          parts.wires.video,
+          hal::declared_region(plat.regions, hal::RegionId::VideoFb).value_or(hal::PhysRegion{})
+      },
       browse_source_{plat.vfs},
 
       ui_model_{ui::MenuModel::Wiring{

@@ -8,7 +8,7 @@ namespace mister::app {
 SessionMachine::SessionMachine(EventQueue<SeatTag::RT>& events, xthread::LogLane& lane) noexcept
     : events_(events.producer()),
       log_lane_(lane.producer()),
-      last_transition_ns_(log_now_ns()) {}
+      last_transition_(log_now_ns()) {}
 
 void SessionMachine::transition(SessionState to) {
 
@@ -20,17 +20,16 @@ void SessionMachine::transition(SessionState to) {
         events_.push(Event::SessionEnded{}, Event::Head{ERR_SITE(), {}, tag_});
     }
 
-    const std::uint64_t now = log_now_ns();
-    const std::uint64_t dwell_us = (now - last_transition_ns_) / 1000u;
-    last_transition_ns_ = now;
+    const LogStamp now{log_now_ns()};
+    const StatusMicros dwell = us_between(last_transition_, now);
+    last_transition_ = now;
     log_lane_.push(
         LogRec::SessionTransition{
-            .dwell_us = dwell_us > 0xFFFFFFFFull ? 0xFFFFFFFFu
-                                                 : static_cast<std::uint32_t>(dwell_us),
+            .dwell_us = dwell.count(),
             .from = static_cast<std::uint8_t>(from),
             .to = static_cast<std::uint8_t>(to)
         },
-        now
+        now.count()
     );
 }
 

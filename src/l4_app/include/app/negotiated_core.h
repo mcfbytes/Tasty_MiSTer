@@ -43,6 +43,10 @@ struct CoreProfile;
 
 namespace mister::app {
 
+inline constexpr proto::FileSize kManifestDocMax{16u << 20};
+
+inline constexpr std::size_t kCoreCfgBytes = 16;
+
 class NegotiatedCore final {
     TASTY_SEAT_RESIDENT(Main);
 
@@ -325,7 +329,7 @@ private:
         std::string rel = "config/";
         rel += core_name;
         rel += ".CFG";
-        return intern_exact(vfs_, inbox_, rel, 16);
+        return intern_exact(vfs_, inbox_, rel, kCoreCfgBytes);
     }
 
     const LinkRxChannel<SeatTag::Main>& rx_;

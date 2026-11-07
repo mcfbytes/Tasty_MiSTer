@@ -7,6 +7,18 @@
 #include "proto/link_op.h"
 
 namespace mister::app {
+
+using WholeMs = std::chrono::duration<unsigned, std::milli>;
+using WholeUs = std::chrono::duration<::useconds_t, std::micro>;
+
+void sleep_ms(infra::OptRef<ISleeper> sleeper, std::chrono::milliseconds ms) noexcept {
+    if (sleeper) {
+        sleeper->sleep_ms(std::chrono::duration_cast<WholeMs>(ms).count());
+    } else {
+        ::usleep(std::chrono::duration_cast<WholeUs>(ms).count());
+    }
+}
+
 bool push_gating(
     LinkTxChannel<SeatTag::Main>& inbox,
     OwnerTally& tally,
@@ -17,11 +29,7 @@ bool push_gating(
         if (inbox.push(op))
             return true;
 
-        if (sleeper) {
-            sleeper->sleep_ms(1);
-        } else {
-            ::usleep(1000u);
-        }
+        sleep_ms(sleeper, std::chrono::milliseconds{1});
     }
     ++tally.op_drops;
     return false;

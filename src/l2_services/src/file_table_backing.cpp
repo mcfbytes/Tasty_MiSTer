@@ -5,10 +5,8 @@ namespace mister::svc {
 
 namespace {
 
-std::uint64_t cue_file_pos(const Track& t) noexcept {
-    const std::int64_t pos = static_cast<std::int64_t>(t.start.v)
-            * static_cast<std::int64_t>(t.sector_size)
-        - t.offset;
+std::uint64_t cue_file_pos(const Track& t, Lba at) noexcept {
+    const std::int64_t pos = cue_byte_pos(t, at);
     return pos > 0 ? static_cast<std::uint64_t>(pos) : 0u;
 }
 
@@ -23,10 +21,7 @@ Ex<void> FileTableBacking::do_read_payload(
     IFile* f = resident_(t.backing);
     if (f == nullptr)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), t.backing.v});
-    const std::int64_t pos = static_cast<std::int64_t>(lba.v)
-            * static_cast<std::int64_t>(t.sector_size)
-        - t.offset
-        + static_cast<std::int64_t>(s_off);
+    const std::int64_t pos = cue_byte_pos(t, lba) + static_cast<std::int64_t>(s_off);
     if (pos < 0)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba.v});
     auto rd = f->read_at(static_cast<std::uint64_t>(pos), out);
@@ -43,7 +38,7 @@ Ex<void> FileTableBacking::do_read_payload(
 void FileTableBacking::advise_first_window(const Track& t0) noexcept {
     if (IFile* const f = resident_(t0.backing)) {
         constexpr std::uint64_t kFirstWindowBytes = 1u * 1024u * 1024u;
-        (void)f->advise(IFile::Access::WillNeed, cue_file_pos(t0), kFirstWindowBytes);
+        (void)f->advise(IFile::Access::WillNeed, cue_file_pos(t0, t0.start), kFirstWindowBytes);
     }
 }
 
@@ -51,9 +46,7 @@ void FileTableBacking::advise_ahead(Lba lba, const Track& t, std::uint32_t secto
     IFile* const f = resident_(t.backing);
     if (f == nullptr)
         return;
-    const std::int64_t pos = static_cast<std::int64_t>(lba.v)
-            * static_cast<std::int64_t>(t.sector_size)
-        - t.offset;
+    const std::int64_t pos = cue_byte_pos(t, lba);
     if (pos < 0)
         return;
     const std::uint64_t len = static_cast<std::uint64_t>(sectors) * t.sector_size;

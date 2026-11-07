@@ -136,10 +136,10 @@ public:
 
     [[nodiscard]] const BoardReboot& board_reboot() const noexcept { return reboot_; }
 
-    static constexpr std::uint32_t kStartBoundMs = 5000;
+    static constexpr std::chrono::milliseconds kStartBoundMs{5000};
 
     void set_identity_poll_budget(std::uint32_t n) noexcept;
-    void set_start_bound_ms(std::uint32_t ms) noexcept;
+    void set_start_bound_ms(std::chrono::milliseconds ms) noexcept;
     void set_readiness_poll_budget(std::uint32_t n) noexcept;
 
     bool set_front_end_image(std::string_view rel) noexcept { return front_end_image_.assign(rel); }
@@ -343,8 +343,13 @@ private:
     void finish_ladder_(const OwnerLadder::Ended& end);
     void drop_ladder_();
     void note_memsz_(const UiRequest::LoadCore& req) noexcept;
-    void release_and_await_identity_(std::uint32_t gen) noexcept;
-    void order_bind_decoders_(proto::LinkOp::DecoderTable table, std::uint32_t gen) noexcept;
+    void release_and_await_identity_(proto::BindGeneration gen) noexcept;
+    void order_bind_decoders_(
+        proto::LinkOp::DecoderTable table,
+        proto::BindGeneration gen
+    ) noexcept;
+
+    [[nodiscard]] bool owes_switch_(proto::BindGeneration gen) const noexcept;
     void order_hold_reset_() noexcept;
     void forget_core_() noexcept;
 
@@ -437,7 +442,7 @@ private:
     os::MonotonicClock default_clock_{};
     const os::IClock& clock_;
     std::uint32_t identity_poll_budget_ = 0;
-    std::uint32_t start_bound_ms_ = kStartBoundMs;
+    std::chrono::milliseconds start_bound_ = kStartBoundMs;
 
     bool before_seats_ = false;
 
@@ -462,7 +467,7 @@ private:
     LauncherLatch launcher_;
     FabricCell& cell_;
     std::uint16_t cookie_ = 0;
-    std::uint32_t fabric_gen_ = 0;
+    FabricGeneration fabric_gen_{};
     const hal::PhysRegion aperture_;
     BootRestore boot_restore_ = BootRestore::None;
     const BoardOps ops_{};

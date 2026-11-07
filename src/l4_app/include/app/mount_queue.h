@@ -125,7 +125,7 @@ public:
 private:
     friend struct MountQueueTestAccess;
 
-    static constexpr std::int64_t kSaveMountBoundNs = cores::kDiscMountBoundNs;
+    static constexpr std::int64_t kSaveMountBoundNs = cores::kDiscMountBoundNs.count();
 
     void arm_ladder_(Host& host, const MountAsk& ask, const cores::CoreFactory& row);
     void arm_plain_mount_(Host& host, const MountAsk& ask);

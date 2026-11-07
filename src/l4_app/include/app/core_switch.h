@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <utility>
 
@@ -30,6 +29,7 @@
 #include "infra/error.h"
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
+#include "infra/pause_gen.h"
 #include "infra/pause_latch.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -43,6 +43,10 @@ class Vfs;
 }
 
 namespace mister::app {
+
+[[nodiscard]] constexpr xthread::PauseGen pause_gen_of(proto::BindGeneration gen) noexcept {
+    return xthread::PauseGen{gen.v};
+}
 
 class CoreSwitch {
     TASTY_SEAT_RESIDENT(Main);
@@ -149,7 +153,7 @@ public:
 
     [[nodiscard]] bool receipt_owed() const noexcept;
 
-    [[nodiscard]] std::optional<std::uint32_t> try_program(Host& host);
+    [[nodiscard]] std::optional<proto::BindGeneration> try_program(Host& host);
 
     [[nodiscard]] bool refuse_in_switch(UiRequest::Kind kind, CorrelationTag tag) noexcept;
 
@@ -159,7 +163,7 @@ public:
 
     [[nodiscard]] bool program_owed() const noexcept;
 
-    [[nodiscard]] std::uint32_t gen() const noexcept { return gen_; }
+    [[nodiscard]] proto::BindGeneration bind_generation() const noexcept { return gen_; }
 
     [[nodiscard]] const UiRequest::LoadCore& pending() const noexcept { return pending_; }
 
@@ -210,12 +214,6 @@ private:
         CorrelationTag tag{};
     };
 
-    static constexpr std::uint32_t kMaxGen = 0xFFFFu;
-    static_assert(
-        kMaxGen <= std::numeric_limits<std::uint16_t>::max(),
-        "the gen must reach T-RT through the ApplyCore op untruncated"
-    );
-
     static constexpr std::int64_t kPauseDeadlineNs = 1'000'000'000;
 
     static constexpr std::int64_t kLeaseHoldWarnNs = 1'000'000'000;
@@ -227,15 +225,11 @@ private:
 
     static constexpr bool pauses_at_receipt(SeatTag s) noexcept { return s == SeatTag::Io; }
 
-    [[nodiscard]] static proto::BindGeneration as_generation_(std::uint32_t gen) noexcept {
-        return proto::BindGeneration{static_cast<std::uint16_t>(gen)};
-    }
-
-    void pause_seats_(std::uint32_t gen, bool at_receipt) noexcept;
+    void pause_seats_(proto::BindGeneration gen, bool at_receipt) noexcept;
     [[nodiscard]] bool hold_on_lease_() noexcept;
     void resume_seats_() noexcept;
-    [[nodiscard]] bool seats_paused_(std::uint32_t gen) const noexcept;
-    [[nodiscard]] bool mapping_owner_late_(std::uint32_t gen) const noexcept;
+    [[nodiscard]] bool seats_paused_(proto::BindGeneration gen) const noexcept;
+    [[nodiscard]] bool mapping_owner_late_(proto::BindGeneration gen) const noexcept;
 
     Programmed program_(const ParkReceipt& receipt, AllLeasesHome home, Host& host);
     void publish_refusal_(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept;
@@ -259,7 +253,7 @@ private:
     OwnerTally& owner_tally_;
     Tally tally_{};
     StepArg pending_step_arg_{};
-    std::uint32_t gen_ = 0;
+    proto::BindGeneration gen_{};
     UiRequest::LoadCore pending_{};
     CorrelationTag pending_tag_{};
     bool switch_standing_ = false;
@@ -277,7 +271,7 @@ private:
     std::array<GrantedSeat, hal::kThreadSeats> seats_{};
 
     std::optional<ParkReceipt> receipt_{};
-    std::uint32_t minted_ = 0;
+    proto::BindGeneration minted_{};
 
     std::optional<proto::LinkOp> last_order_{};
     os::Deadline pause_due_ = os::Deadline::immediate();
@@ -374,9 +368,9 @@ inline CoreSwitch::Asked CoreSwitch::ask(
         return Asked::NoRoom;
     }
 
-    const std::uint32_t next = (gen_ >= kMaxGen) ? 1u : gen_ + 1u;
+    const proto::BindGeneration next = gen_.next();
     ++tally_.switches_asked;
-    park_.ask(next);
+    park_.ask(pause_gen_of(next));
     gen_ = next;
 
     host.switch_minted(req);
@@ -389,7 +383,7 @@ inline CoreSwitch::Asked CoreSwitch::ask(
 
     pause_seats_(gen_, false);
     receipt_.reset();
-    minted_ = 0;
+    minted_ = proto::BindGeneration{};
     lease_hold_.reset();
     host.drop_core_acts();
     pending_ = req;
@@ -425,10 +419,10 @@ inline bool CoreSwitch::push_last_order() noexcept {
     return true;
 }
 
-inline void CoreSwitch::pause_seats_(std::uint32_t gen, bool at_receipt) noexcept {
+inline void CoreSwitch::pause_seats_(proto::BindGeneration gen, bool at_receipt) noexcept {
     for (const GrantedSeat& s : seats_)
         if (s.granted() && pauses_at_receipt(s.seat) == at_receipt)
-            s.latch->pause(gen);
+            s.latch->pause(pause_gen_of(gen));
 }
 
 inline void CoreSwitch::resume_seats_() noexcept {
@@ -437,16 +431,18 @@ inline void CoreSwitch::resume_seats_() noexcept {
             s.latch->resume();
 }
 
-inline bool CoreSwitch::seats_paused_(std::uint32_t gen) const noexcept {
+inline bool CoreSwitch::seats_paused_(proto::BindGeneration gen) const noexcept {
     for (const GrantedSeat& s : seats_)
-        if (s.granted() && !s.latch->paused_at(gen))
+        if (s.granted() && !s.latch->paused_at(pause_gen_of(gen)))
             return false;
     return true;
 }
 
-inline bool CoreSwitch::mapping_owner_late_(std::uint32_t gen) const noexcept {
+inline bool CoreSwitch::mapping_owner_late_(proto::BindGeneration gen) const noexcept {
     for (const GrantedSeat& s : seats_)
-        if (s.granted() && s.ddr == hal::DdrMapping::Owner && !s.latch->paused_at(gen))
+        if (s.granted()
+            && s.ddr == hal::DdrMapping::Owner
+            && !s.latch->paused_at(pause_gen_of(gen)))
             return true;
     return false;
 }
@@ -458,14 +454,14 @@ inline bool CoreSwitch::program_owed() const noexcept {
 
 inline bool CoreSwitch::receipt_owed() const noexcept {
     TASTY_SEAT_BODY(CoreSwitch);
-    return switch_standing_ && minted_ != gen_ && park_.answered(gen_).has_value();
+    return switch_standing_ && minted_ != gen_ && park_.answered(pause_gen_of(gen_)).has_value();
 }
 
 inline unsigned CoreSwitch::take_park_acks() {
     TASTY_SEAT_BODY(CoreSwitch);
     if (!switch_standing_ || minted_ == gen_)
         return 0;
-    auto receipt = park_.answered(gen_);
+    auto receipt = park_.answered(pause_gen_of(gen_));
     if (!receipt)
         return 0;
     minted_ = gen_;
@@ -477,7 +473,7 @@ inline unsigned CoreSwitch::take_park_acks() {
     return 1;
 }
 
-inline std::optional<std::uint32_t> CoreSwitch::try_program(Host& host) {
+inline std::optional<proto::BindGeneration> CoreSwitch::try_program(Host& host) {
     TASTY_SEAT_BODY(CoreSwitch);
     if (!receipt_ || readiness_.recovering())
         return std::nullopt;
@@ -514,10 +510,7 @@ inline std::optional<std::uint32_t> CoreSwitch::try_program(Host& host) {
         readiness_.clear_owed();
     }
     if (p == Programmed::Failed) {
-        end(proto::LinkOp::ApplyCore{
-            .loaded = pending_step_arg_.loaded,
-            .gen = as_generation_(gen_)
-        });
+        end(proto::LinkOp::ApplyCore{.loaded = pending_step_arg_.loaded, .gen = gen_});
         return std::nullopt;
     }
     return gen_;
@@ -546,9 +539,9 @@ inline bool CoreSwitch::hold_on_lease_() noexcept {
         builder_.count_lease_hold(true);
         std::fprintf(
             stderr,
-            "mister: core switch %u held: an LW lease (T-IO's sector, T-UI's OSD) is "
+            "mister: core switch %s held: an LW lease (T-IO's sector, T-UI's OSD) is "
             "still out; the FPGA is not programmed while it is\n",
-            static_cast<unsigned>(gen_)
+            gen_.text().c_str()
         );
         advise_switch_held_();
     }
@@ -626,10 +619,7 @@ inline void CoreSwitch::order_teardown() noexcept {
     TASTY_SEAT_BODY(CoreSwitch);
     order_(proto::LinkOp::DropCore{});
     (void)order_refusable_(
-        proto::LinkOp::BindDecoders{
-            .table = proto::LinkOp::DecoderTable::Census,
-            .gen = as_generation_(gen_)
-        }
+        proto::LinkOp::BindDecoders{.table = proto::LinkOp::DecoderTable::Census, .gen = gen_}
     );
     order_(proto::LinkOp::HoldReset{});
 }

@@ -2,10 +2,14 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+#include <string_view>
 #include <type_traits>
 
 #include "cores/option_row.h"
 #include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
+#include "proto/types.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "infra/opt_ref.h"
@@ -27,7 +31,20 @@ struct OptionTable {
     std::uint8_t count = 0;
     Row rows[cores::kMaxOptionRows] = {};
 
-    FixedStr<cores::kOptionTitleChars + 1, StrFit::Clip> page_title[cores::kMaxOptionPages] = {};
+    infra::IndexedArray<
+        FixedStr<cores::kOptionTitleChars + 1, StrFit::Clip>,
+        cores::kMaxOptionPages,
+        proto::SubmenuNo>
+        page_title{};
+
+    [[nodiscard]] constexpr std::optional<std::string_view> title(
+        proto::SubmenuNo page
+    ) const noexcept {
+        const auto declared = page_title.find(page);
+        if (!declared || declared->view().empty())
+            return std::nullopt;
+        return declared->view();
+    }
 };
 
 static_assert(std::is_trivially_copyable_v<OptionTable>);

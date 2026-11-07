@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/video_ini.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdio>
 
@@ -43,7 +44,7 @@ VideoIni absent_video_ini(const VideoIni::Force& force, const VideoIni& last) {
 VideoIni parse_video_ini(const svc::ConfigSnapshot& snap, const VideoIni::Force& force) {
     VideoIni ini{};
 
-    ini.direct_video_ini = svc::direct_video_resolved(snap);
+    ini.direct_video_ini = static_cast<std::uint8_t>(svc::direct_video_resolved(snap));
 
     const bool dv_on = ini.direct_video_ini != 0 && !(force.replay && !force.strict_direct_video);
     ini.wire.direct_video = dv_on;
@@ -58,8 +59,9 @@ VideoIni parse_video_ini(const svc::ConfigSnapshot& snap, const VideoIni::Force&
             && num <= 4095
             && den >= 1
             && den <= 4095) {
-            ini.ar_cust[i * 2] = static_cast<std::uint16_t>(num);
-            ini.ar_cust[i * 2 + 1] = static_cast<std::uint16_t>(den);
+            const std::array<std::uint32_t, 2> terms{num, den};
+            for (std::size_t j = 0; j < terms.size(); ++j)
+                ini.ar_cust[i * 2 + j] = static_cast<std::uint16_t>(terms[j]);
         } else {
             ini.ar_cust[i * 2] = 0;
             ini.ar_cust[i * 2 + 1] = 0;
@@ -92,7 +94,9 @@ VideoIni parse_video_ini(const svc::ConfigSnapshot& snap, const VideoIni::Force&
     ini.init.hdmi_game_mode = snap.hdmi_game_mode != 0;
     ini.init.hdr = hdr_mode_of(snap);
     ini.init.hdmi_limited = snap.hdmi_limited != 0;
-    ini.init.ypbpr = (snap.vga_mode_int == 1) && ini.direct_video && ini.direct_video_ini == 1;
+    ini.init.ypbpr = (vga_mode_of(snap.vga_mode_int) == VgaMode::YPbPr)
+        && ini.direct_video
+        && ini.direct_video_ini == 1;
     ini.init.dvi_mode = snap.dvi_mode == 1;
     ini.init.hdmi_audio_96k = snap.hdmi_audio_96k != 0;
 

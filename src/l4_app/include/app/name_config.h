@@ -35,7 +35,7 @@ public:
     [[nodiscard]] Ex<void> save_path(
         const RememberedStem& stem,
         Slot s,
-        std::uint8_t index,
+        proto::IoIndex index,
         std::string_view path
     );
 

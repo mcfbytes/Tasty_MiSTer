@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "app/log_clock.h"
 #include "app/types.h"
 #include "infra/fixed_str.h"
 #include "infra/json_out.h"
@@ -53,19 +54,19 @@ struct ReplayStatus {
     std::uint32_t link_errors = 0;
     MovieFrame first_late_frame = kNoMovieFrame;
     MovieFrame first_underrun_frame = kNoMovieFrame;
-    std::uint32_t apply_min_us = 0;
-    std::uint32_t apply_max_us = 0;
-    std::uint32_t epoch_delay_us = 0;
+    StatusMicros apply_min_us{};
+    StatusMicros apply_max_us{};
+    StatusMicros epoch_delay_us{};
     std::uint32_t epoch_edge = 0;
     std::uint32_t blk_late = 0;
     std::uint32_t blk_late_max_us = 0;
     std::uint32_t lost = 0;
     std::uint32_t delayed = 0;
-    std::uint32_t gap_max_us = 0;
+    StatusMicros gap_max_us{};
     MovieFrame gap_frame = kNoMovieFrame;
-    std::uint32_t late_gap_us = 0;
-    std::uint32_t late_into_us = 0;
-    std::uint32_t late_edge_us = 0;
+    StatusMicros late_gap_us{};
+    StatusMicros late_into_us{};
+    StatusMicros late_edge_us{};
     std::uint32_t late_depth = 0;
     std::int32_t depth_min = -1;
     MovieFrame depth_min_frame = kNoMovieFrame;
@@ -110,19 +111,19 @@ constexpr void to_json(infra::JsonOut& o, const ReplayStatus& s) noexcept {
     o.field("drops", s.pad_drops);
     o.field("stale", s.stale);
     o.field("link_err", s.link_errors);
-    o.field("min_us", s.apply_min_us);
-    o.field("max_us", s.apply_max_us);
-    o.field("epoch_us", s.epoch_delay_us);
+    o.field("min_us", s.apply_min_us.count());
+    o.field("max_us", s.apply_max_us.count());
+    o.field("epoch_us", s.epoch_delay_us.count());
     o.field("epoch", s.epoch_edge);
     o.field("blk_late", s.blk_late);
     o.field("blk_max_us", s.blk_late_max_us);
     o.field("lost", s.lost);
     o.field("delayed", s.delayed);
-    o.field("gap_max_us", s.gap_max_us);
+    o.field("gap_max_us", s.gap_max_us.count());
     o.field("gap_frame", s.gap_frame);
-    o.field("late_gap_us", s.late_gap_us);
-    o.field("late_into_us", s.late_into_us);
-    o.field("late_edge_us", s.late_edge_us);
+    o.field("late_gap_us", s.late_gap_us.count());
+    o.field("late_into_us", s.late_into_us.count());
+    o.field("late_edge_us", s.late_edge_us.count());
     o.field("late_depth", s.late_depth);
     o.field("depth_min", s.depth_min);
     o.field("depth_min_frame", s.depth_min_frame);

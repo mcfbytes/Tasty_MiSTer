@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 
+#include "app/raw_key_edge.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "os/key_injector.h"
 #include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -33,26 +35,29 @@ public:
 
     [[nodiscard]] bool active() const noexcept { return active_; }
 
-    void key(std::uint16_t code, bool down) noexcept;
+    void key(svc::EvdevCode code, bool down) noexcept;
 
-    void pad(std::size_t slot, proto::JoyMask level) noexcept;
+    void pad(svc::DeviceSlot slot, svc::JoyMask level) noexcept;
 
-    void reseat_pad(std::size_t slot, proto::JoyMask level) noexcept;
+    void reseat_pad(svc::DeviceSlot slot, svc::JoyMask level) noexcept;
 
     [[nodiscard]] const Counters& counters() const noexcept { return n_; }
 
 private:
-    void sync_(std::uint16_t code) noexcept;
-    [[nodiscard]] std::uint32_t pad_any_() const noexcept;
+    void sync_(svc::EvdevCode code) noexcept;
+    [[nodiscard]] svc::JoyMask pad_any_() const noexcept;
     void release_all_() noexcept;
+
+    void inject_(svc::EvdevCode code, bool down) noexcept;
 
     os::IKeyInjector& out_;
     bool active_ = false;
     bool opened_ = false;
-    std::uint64_t down_[4] = {};
-    std::uint64_t kbd_down_[4] = {};
-    std::array<std::uint32_t, kPadSlots> pad_level_{};
-    std::uint32_t pad_or_ = 0;
+    KeyDownSet sent_{};
+    KeyDownSet held_{};
+
+    infra::IndexedArray<svc::JoyMask, kPadSlots, svc::DeviceSlot> pad_level_{};
+    svc::JoyMask pad_or_{};
     Counters n_{};
 };
 

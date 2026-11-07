@@ -6,7 +6,9 @@
 #include "cores/file_slot.h"
 #include "infra/ascii.h"
 #include "infra/byte_view.h"
+#include "proto/types.h"
 #include "svc/file.h"
+#include "svc/msf.h"
 
 namespace mister::cores {
 namespace {
@@ -34,11 +36,11 @@ constexpr std::uint32_t kLibCryptSectors[16] = {
 };
 
 std::uint8_t bcd_to_dec(std::uint8_t bcd) {
-    return static_cast<std::uint8_t>((bcd >> 4) * 10 + (bcd & 0x0F));
+    return proto::PackedBcd{bcd}.value();
 }
 
 std::uint32_t msf_to_lba(std::uint32_t m, std::uint32_t s, std::uint32_t f) {
-    return (m * 60 + s) * 75 + f;
+    return (m * svc::kSecondsPerMinute + s) * svc::kFramesPerSecond + f;
 }
 
 std::string_view psx_dir_of(std::string_view path) {
@@ -225,7 +227,7 @@ Ex<bool> PsxLadder::on_step() {
 
             if (sub_ == 0) {
                 ss_gen_ = next_gen();
-                ss_due_ns_ = now_ns() + kSaveStateHoldBoundNs;
+                ss_due_ns_ = now_ns() + kSaveStateHoldBound;
                 sub_ = host_.order_savestates(image_, ss_gen_) ? 1 : 2;
             }
             if (sub_ == 1) {
@@ -259,7 +261,7 @@ Ex<bool> PsxLadder::on_step() {
 
         case Rung::Eject:
 
-            if (!order_announce_disc(0))
+            if (!order_announce_disc(proto::FileSize{}))
                 return false;
             rung_ = Rung::Done;
             return true;

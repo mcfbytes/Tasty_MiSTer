@@ -2,8 +2,10 @@
 #include "cores/rom_set_assembler.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
-#include <cstring>
+#include <optional>
+#include <span>
 
 #include "cores/assembled_rom.h"
 #include "cores/mra_doc.h"
@@ -20,15 +22,16 @@ RomSetAssembler::RomSetAssembler(const svc::Vfs& vfs, std::string_view mame_root
 
 void RomSetAssembler::rom_start() noexcept {
     data_.clear();
-    romblkl_ = 0;
-    romlen_.fill(0);
-    unitlen_ = 1;
+    romblkl_ = RomOffset{};
+    for (RomOffset& lane_end : romlen_)
+        lane_end = RomOffset{};
+    unitlen_ = UnitLen{};
     inside_ilv_ = false;
     md5_ = Md5{};
     error_overwritten_ = false;
     runs_.clear();
-    run_total_ = 0;
-    hw_ = 0;
+    run_total_ = RomLength{};
+    hw_ = RomOffset{};
     sized_out_ = false;
 }
 
@@ -63,13 +66,11 @@ AssembledRom RomSetAssembler::assemble(const Rom& rom) {
 }
 
 void RomSetAssembler::part_node(const Rom& rom, const RomNode& n) {
-    constexpr std::uint32_t kMaxUnitLen = 8;
 
-    if (!inside_ilv_ && n.map != 0) {
-        const std::uint32_t digits = (n.map_digits > kMaxUnitLen) ? kMaxUnitLen : n.map_digits;
-        unitlen_ = static_cast<int>(digits);
+    if (!inside_ilv_ && !n.map.is_none()) {
+        unitlen_ = UnitLen::of_map_digits(n.map.digits);
         for (std::size_t i = 1; i < kRomLanes; ++i) {
-            romlen_[i] = romlen_[0];
+            romlen_[LaneIndex::at(i)] = romlen_[LaneIndex{}];
         }
     }
 
@@ -80,7 +81,7 @@ void RomSetAssembler::part_node(const Rom& rom, const RomNode& n) {
         ran = fill_run(n);
     if (ran) {
         if (!inside_ilv_)
-            unitlen_ = 1;
+            unitlen_ = UnitLen::one();
         return;
     }
     if (n.repeat > kRepeatCap) {
@@ -94,7 +95,7 @@ void RomSetAssembler::part_node(const Rom& rom, const RomNode& n) {
         text_part(n);
     }
     if (!inside_ilv_)
-        unitlen_ = 1;
+        unitlen_ = UnitLen::one();
 }
 
 void RomSetAssembler::file_part(const Rom& rom, const RomNode& n) {
@@ -133,173 +134,149 @@ void RomSetAssembler::file_part(const Rom& rom, const RomNode& n) {
 void RomSetAssembler::text_part(const RomNode& n) {
     const std::vector<std::uint8_t> bin = hex_bytes(n.text);
     for (int i = 0; i < n.repeat; ++i) {
-        (void)scatter(bin.data(), static_cast<int>(bin.size()), n.map);
+        (void)scatter(bin, n.map);
     }
 }
 
 bool RomSetAssembler::fill_run(const RomNode& n) {
 
-    if (n.repeat > kFillRepeatCap || inside_ilv_ || unitlen_ != 1 || n.map > 1)
+    if (n.repeat > kFillRepeatCap || inside_ilv_ || unitlen_ != UnitLen{} || !n.map.plain())
         return false;
-    if (hw_ > romlen_[0])
+    if (hw_ > romlen_[LaneIndex{}])
         return false;
     std::vector<std::uint8_t> pat = hex_bytes(n.text);
-    const std::uint64_t len = static_cast<std::uint64_t>(n.repeat) * pat.size();
-    if (static_cast<std::uint64_t>(romlen_[0]) + len > kStagedRomMax)
+    const std::optional<RomLength> len = romlen_[LaneIndex{}]
+                                             .repeats_within(kStagedRomMax, pat, n.repeat);
+    if (!len)
         return false;
-    if (len == 0)
+    if (len->empty())
         return true;
-    if (!ensure_writable(static_cast<std::size_t>(romlen_[0] - run_total_)))
+    if (!ensure_writable(romlen_[LaneIndex{}] - run_total_))
         return true;
 
-    constexpr std::size_t kTile = 64 * 1024;
     std::vector<std::uint8_t> tile;
-    tile.reserve(std::max<std::size_t>(1, kTile / pat.size()) * pat.size());
+    tile.reserve(std::max<std::size_t>(1, kFillTileBytes / pat.size()) * pat.size());
     while (tile.size() + pat.size() <= tile.capacity()) {
         tile.insert(tile.end(), pat.begin(), pat.end());
     }
-    std::uint64_t left = len;
-    while (left != 0) {
-        const std::size_t k = static_cast<std::size_t>(std::min<std::uint64_t>(left, tile.size()));
-        md5_.update(std::span<const std::uint8_t>(tile.data(), k));
-        left -= k;
+    for (RomLength left = *len; !left.empty();) {
+        const std::span<const std::uint8_t> k = left.first_of(std::span<const std::uint8_t>(tile));
+        md5_.update(k);
+        left -= RomLength::of(k);
     }
-    runs_.push_back(
-        FillRun{
-            .at = static_cast<std::uint32_t>(romlen_[0]),
-            .len = static_cast<std::uint32_t>(len),
-            .pattern = std::move(pat)
-        }
-    );
-    romlen_[0] += static_cast<int>(len);
-    run_total_ += static_cast<int>(len);
-    hw_ = romlen_[0];
+    runs_.push_back(FillRun{.at = romlen_[LaneIndex{}], .len = *len, .pattern = std::move(pat)});
+    romlen_[LaneIndex{}] += *len;
+    run_total_ += *len;
+    hw_ = romlen_[LaneIndex{}];
     return true;
 }
 
 bool RomSetAssembler::flatten_runs() {
 
-    const std::size_t dense = data_.size() + static_cast<std::size_t>(run_total_);
+    const RomOffset dense = data_.extent() + run_total_;
     if (dense > kStagedRomMax)
         return refuse_size();
     RomBytes flat;
     if (!flat.resize(dense))
         return refuse_size();
-    std::size_t w = 0;
-    std::size_t from = 0;
+    RomOffset w{};
+    RomOffset from{};
     for (const FillRun& r : runs_) {
-        const std::size_t dense_at = r.at - (w - from);
-        std::memcpy(flat.data() + w, data_.data() + from, dense_at - from);
+        const RomOffset dense_at = r.at - (w - from);
+        flat.write(w, (dense_at - from).first_of(data_.from(from)));
         w += dense_at - from;
         from = dense_at;
-        for (std::uint32_t i = 0; i < r.len; ++i) {
-            flat[w + i] = r.pattern[i % r.pattern.size()];
-        }
+        r.write_to(flat.slice(w, r.len), RomLength{});
         w += r.len;
     }
-    std::memcpy(flat.data() + w, data_.data() + from, data_.size() - from);
+    flat.write(w, data_.from(from));
     data_ = std::move(flat);
-    romblkl_ = static_cast<int>(data_.size());
+    romblkl_ = data_.extent();
     runs_.clear();
-    run_total_ = 0;
+    run_total_ = RomLength{};
     return true;
 }
 
 void RomSetAssembler::patch_node(const RomNode& n) {
     const std::vector<std::uint8_t> bin = hex_bytes(n.text);
 
-    const std::uint16_t len = static_cast<std::uint16_t>(bin.size());
-    if (n.offset < 0)
+    const std::span<const std::uint8_t> patch = std::span(bin).first(
+        static_cast<std::uint16_t>(bin.size())
+    );
+    const std::optional<RomOffset> at = RomOffset::of_attribute(n.offset);
+    if (!at)
         return;
-    if (static_cast<std::int64_t>(n.offset) + len > romlen_[0])
+    const RomOffset end = *at + RomLength::of(patch);
+    if (end > romlen_[LaneIndex{}])
         return;
 
-    std::uint64_t skipped = 0;
+    RomLength skipped{};
     {
         bool overlaps = false;
         for (const FillRun& r : runs_) {
-            const std::uint64_t end = static_cast<std::uint64_t>(r.at) + r.len;
-            if (end <= static_cast<std::uint64_t>(n.offset)) {
+            if (r.end() <= *at) {
                 skipped += r.len;
                 continue;
             }
-            if (static_cast<std::uint64_t>(n.offset) + len > r.at)
+            if (end > r.at)
                 overlaps = true;
             break;
         }
         if (overlaps) {
             if (!flatten_runs())
                 return;
-            skipped = 0;
+            skipped = RomLength{};
         }
     }
-    const std::size_t off = static_cast<std::size_t>(n.offset) - static_cast<std::size_t>(skipped);
+    const std::span<std::uint8_t> dst = data_.slice(*at - skipped, RomLength::of(patch));
     if (!n.xor_op) {
-        for (std::size_t i = 0; i < len; ++i) {
-            data_[off + i] = bin[i];
-        }
+        std::ranges::copy(patch.first(dst.size()), dst.begin());
     } else {
-        for (std::size_t i = 0; i < len; ++i) {
-            data_[off + i] ^= bin[i];
+        for (std::size_t i = 0; i < dst.size(); ++i) {
+            dst[i] ^= patch[i];
         }
     }
 }
 
 void RomSetAssembler::interleave_start(const RomNode& n) noexcept {
-    constexpr std::uint32_t kMaxUnitLen = 8;
-    constexpr int kByteBits = 8;
-    constexpr int kMaxUnitLenInt = static_cast<int>(kMaxUnitLen);
-    constexpr int kByteBitsMask = kByteBits - 1;
-    constexpr int kMaxOutputBits = 64;
     inside_ilv_ = true;
-    bool valid = true;
-    if (n.input != kByteBits)
-        valid = false;
-    if (n.output < kByteBits || n.output > kMaxOutputBits || (n.output & kByteBitsMask) != 0)
-        valid = false;
-    if (n.output < n.input)
-        valid = false;
-    unitlen_ = (n.input != 0) ? n.output / n.input : 1;
-    if (unitlen_ < 0 || unitlen_ > kMaxUnitLenInt)
-        valid = false;
-    if (!valid)
-        unitlen_ = 1;
+
+    unitlen_ = UnitLen::of_interleave(n.input, n.output).value_or(UnitLen{});
     for (std::size_t i = 1; i < kRomLanes; ++i) {
-        romlen_[i] = romlen_[0];
+        romlen_[LaneIndex::at(i)] = romlen_[LaneIndex{}];
     }
 }
 
 void RomSetAssembler::interleave_end() noexcept {
     inside_ilv_ = false;
-    unitlen_ = 1;
+    unitlen_ = UnitLen{};
 }
 
-bool RomSetAssembler::grow_for(std::size_t idx, int chunk) {
-    const int at = romlen_[idx] - run_total_;
-    if (at + chunk > romblkl_) {
-        const std::int64_t want = static_cast<std::int64_t>(romblkl_)
-            + (at + chunk > romblkl_ + kRomGrowBlock ? chunk : 0)
-            + kRomGrowBlock;
-        if (want > static_cast<std::int64_t>(kStagedRomMax))
+bool RomSetAssembler::grow_for(LaneIndex lane, RomLength reserve) {
+    const RomOffset at = romlen_[lane] - run_total_;
+    if (at + reserve > romblkl_) {
+        const RomLength overshoot = at + reserve > romblkl_ + kRomGrowBlock ? reserve : RomLength{};
+        const RomOffset want = romblkl_ + overshoot + kRomGrowBlock;
+        if (want > kStagedRomMax)
             return refuse_size();
-        romblkl_ = static_cast<int>(want);
+        romblkl_ = want;
 
-        if (!data_.resize(static_cast<std::size_t>(romblkl_)))
+        if (!data_.resize(romblkl_))
             return refuse_size();
     }
     return true;
 }
 
-bool RomSetAssembler::ensure_writable(std::size_t hi) {
-    if (hi <= data_.size())
+bool RomSetAssembler::ensure_writable(RomOffset hi) {
+    if (hi <= data_.extent())
         return true;
-    std::size_t blk = static_cast<std::size_t>(romblkl_);
+    RomOffset blk = romblkl_;
     while (blk < hi) {
         blk += kRomGrowBlock;
     }
     if (blk > kStagedRomMax)
         return refuse_size();
-    romblkl_ = static_cast<int>(blk);
+    romblkl_ = blk;
     if (!data_.resize(blk))
         return refuse_size();
     return true;
@@ -315,69 +292,35 @@ bool RomSetAssembler::refuse_size() {
     return false;
 }
 
-int RomSetAssembler::scatter(const std::uint8_t* src, int chunk, std::uint32_t map) {
-    constexpr unsigned kNibbleBits = 4;
-    constexpr std::uint32_t kNibbleMask = 0xF;
+int RomSetAssembler::scatter(std::span<const std::uint8_t> src, MapWord map) {
 
-    md5_.update(std::span<const std::uint8_t>(src, static_cast<std::size_t>(chunk)));
-    if (map == 0)
-        map = 1;
-    std::size_t idx = 0;
-    std::uint32_t map_reg = map;
-    for (int i = 0; i < unitlen_; ++i) {
-        if ((map_reg & kNibbleMask) != 0)
-            break;
-        map_reg >>= kNibbleBits;
-        ++idx;
-    }
-    if (idx >= static_cast<std::size_t>(unitlen_))
+    md5_.update(src);
+    const std::optional<MapWalk> walk = map.walk(unitlen_);
+    if (!walk)
         return 0;
+    const LaneIndex lane = walk->lane;
 
-    assert(runs_.empty() || romlen_[idx] >= static_cast<int>(runs_.back().at + runs_.back().len));
-    const int base = romlen_[idx] - run_total_;
-    if (!grow_for(idx, chunk * unitlen_))
+    assert(runs_.empty() || romlen_[lane] >= runs_.back().end());
+    const RomOffset base = romlen_[lane] - run_total_;
+    const RomLength chunk = RomLength::of(src);
+    if (!grow_for(lane, unitlen_.span_of(chunk)))
         return 0;
-    std::array<std::uint8_t, kRomLanes> offsets{};
-    int bytes_in_iter = 0;
-    map_reg = map;
-    bool first = true;
-    int gaps = 0;
-    for (int i = 0; i < unitlen_; ++i) {
-        if ((map_reg & kNibbleMask) != 0) {
-            offsets[static_cast<std::size_t>(bytes_in_iter)] = static_cast<std::uint8_t>(
-                static_cast<int>(idx) + static_cast<int>(map_reg & kNibbleMask) - 1 + gaps
-            );
-            ++bytes_in_iter;
-            first = false;
-        } else if (!first) {
-            ++gaps;
-        }
-        map_reg >>= kNibbleBits;
-    }
-    if (chunk > 0) {
+    const LaneWrites& writes = walk->writes;
+    if (!chunk.empty()) {
 
-        int max_off = 0;
-        for (int i = 0; i < bytes_in_iter; ++i) {
-            max_off = std::max(max_off, static_cast<int>(offsets[static_cast<std::size_t>(i)]));
-        }
-        const int units = (chunk + bytes_in_iter - 1) / bytes_in_iter;
-        const std::size_t hi = static_cast<std::size_t>(base)
-            + static_cast<std::size_t>(units - 1) * static_cast<std::size_t>(unitlen_)
-            + static_cast<std::size_t>(max_off)
-            + 1;
+        const RomOffset hi = base + writes.reach(chunk, unitlen_);
         if (!ensure_writable(hi))
             return 0;
-        hw_ = std::max(hw_, static_cast<int>(hi) + run_total_);
+        hw_ = std::max(hw_, hi + run_total_);
     }
-    std::size_t at = static_cast<std::size_t>(base);
-    while (chunk > 0) {
+    RomOffset at = base;
+    for (auto next = src.begin(); next != src.end();) {
 
-        for (int i = 0; i < bytes_in_iter && chunk > 0; ++i) {
-            data_[at + offsets[static_cast<std::size_t>(i)]] = *src++;
-            --chunk;
+        for (std::size_t i = 0; i < writes.size() && next != src.end(); ++i) {
+            data_[at + writes.offset(i)] = *next++;
         }
-        romlen_[idx] += unitlen_;
-        at += static_cast<std::size_t>(unitlen_);
+        romlen_[lane] += unitlen_.bytes();
+        at += unitlen_.bytes();
     }
     return 1;
 }
@@ -387,7 +330,7 @@ int RomSetAssembler::stream_file(
     std::uint32_t crc,
     std::int32_t start,
     int length,
-    std::uint32_t map
+    MapWord map
 ) {
     auto f = vfs_.open_zip_by_crc(fname, svc::Crc32{crc});
     if (!f)
@@ -405,23 +348,19 @@ int RomSetAssembler::stream_file(
     if (length > 0 && static_cast<std::uint64_t>(length) < bytes2send) {
         bytes2send = static_cast<std::uint64_t>(length);
     }
-    std::array<std::uint8_t, 8192> buf{};
+    std::array<std::uint8_t, kStreamChunkBytes> buf{};
     while (bytes2send != 0) {
-        const int chunk = (bytes2send > buf.size()) ? static_cast<int>(buf.size())
-                                                    : static_cast<int>(bytes2send);
-
-        std::memset(buf.data(), 0, static_cast<std::size_t>(chunk));
-        auto rd = (*f)->read_at(
-            off,
-            std::as_writable_bytes(
-                std::span<std::uint8_t>(buf.data(), static_cast<std::size_t>(chunk))
-            )
+        const std::span<std::uint8_t> chunk = std::span(buf).first(
+            static_cast<std::size_t>(std::min<std::uint64_t>(bytes2send, buf.size()))
         );
+
+        std::ranges::fill(chunk, 0);
+        auto rd = (*f)->read_at(off, std::as_writable_bytes(chunk));
         (void)rd;
-        if (scatter(buf.data(), chunk, map) == 0)
+        if (scatter(chunk, map) == 0)
             return 0;
-        bytes2send -= static_cast<std::uint64_t>(chunk);
-        off += static_cast<std::uint64_t>(chunk);
+        bytes2send -= chunk.size();
+        off += chunk.size();
     }
     return 1;
 }
@@ -459,10 +398,13 @@ AssembledRom RomSetAssembler::finish(const Rom& rom) {
             clear_error();
         }
     }
-    if ((same || none) && !sized_out_ && romlen_[0] > 0 && (!data_.empty() || !runs_.empty())) {
+    if ((same || none)
+        && !sized_out_
+        && romlen_[LaneIndex{}] > RomOffset{}
+        && (!data_.empty() || !runs_.empty())) {
         out.send = true;
 
-        (void)data_.resize(static_cast<std::size_t>(romlen_[0] - run_total_));
+        (void)data_.resize(romlen_[LaneIndex{}] - run_total_);
         out.bytes = std::move(data_);
         out.runs = std::move(runs_);
     }

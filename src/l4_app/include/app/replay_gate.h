@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 
@@ -117,6 +118,9 @@ private:
     [[nodiscard]] bool live_() const noexcept;
     [[nodiscard]] std::int64_t now_ns_() const noexcept;
 
+    [[nodiscard]] std::chrono::nanoseconds end_to_edge_() const noexcept;
+    [[nodiscard]] std::chrono::nanoseconds into_frame_() const noexcept;
+
     [[nodiscard]] Ex<proto::FrameCount> read_counter_() noexcept;
 
     Wiring w_;
@@ -134,7 +138,7 @@ private:
     std::uint8_t release_ports_ = 0;
     std::uint8_t rom_index_ = 0xFF;
     bool vsync_ok_ = false;
-    std::int32_t lead_ = 0;
+    MovieSpan lead_{};
     std::int64_t offset_ns_ = 0;
     std::int64_t period_ns_ = 0;
     std::int64_t line0_ns_ = 0;
@@ -154,7 +158,7 @@ private:
     std::int64_t end_ns_ = 0;
     std::int64_t prev_edge_ns_ = 0;
     std::int64_t read_ns_ = 0;
-    std::int64_t edge_gap_ns_ = 0;
+    std::chrono::nanoseconds edge_gap_{};
     std::uint32_t blk_seen_ = 0;
     std::uint32_t blk_base_ = 0;
     bool epoch_known_ = false;
@@ -165,7 +169,7 @@ private:
     std::uint32_t round_words_ = 0;
     std::optional<std::uint32_t> queued_{};
     std::int64_t tick_ns_ = 0;
-    std::int64_t gap_ns_ = 0;
+    std::chrono::nanoseconds gap_{};
     WideMovieFrame mf_ = kNoWideMovieFrame;
     WideMovieFrame covered_ = kNoWideMovieFrame;
     WideMovieFrame underrun_at_ = kNoWideMovieFrame;
