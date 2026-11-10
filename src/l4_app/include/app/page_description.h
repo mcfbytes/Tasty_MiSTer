@@ -7,17 +7,12 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "app/tier_set.h"
 #include "app/types.h"
 #include "infra/fixed_str.h"
 #include "infra/indexed_array.h"
 
 namespace mister::app {
-
-enum class RowTier : std::uint8_t { Place, Verb, Shelf };
-
-[[nodiscard]] constexpr std::uint8_t tier_bit(RowTier t) noexcept {
-    return static_cast<std::uint8_t>(1u << static_cast<unsigned>(t));
-}
 
 struct PageDescription {
     static constexpr std::size_t kMaxRows = 12;

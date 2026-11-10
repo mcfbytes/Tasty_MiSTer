@@ -8,7 +8,8 @@
 
 #include "app/rec_control.h"
 #include "app/types.h"
-#include "proto/volume_cmd.h"
+#include "proto/types.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -37,10 +38,19 @@ struct CmdVerb {
         bool scaled = false;
     };
 
-    struct Volume {
-        proto::VolumeCmd cmd = proto::VolumeCmd::Relative;
-        std::int8_t arg = 0;
+    struct VolumeMute {
+        bool on = false;
     };
+
+    struct VolumeAttenuation {
+        proto::Attenuation attenuation{};
+    };
+
+    struct VolumeNudge {
+        proto::VolumeStep step = proto::VolumeStep::Louder;
+    };
+
+    struct VolumeToggle {};
 
     struct RtStats {};
 
@@ -48,7 +58,7 @@ struct CmdVerb {
         std::string_view movie;
         std::string_view rom;
         std::optional<std::chrono::microseconds> phase;
-        std::optional<MovieFrame> lead;
+        std::optional<FrameCount> lead;
     };
 
     struct TasStop {};

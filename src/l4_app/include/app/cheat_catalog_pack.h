@@ -6,6 +6,6 @@
 
 namespace mister::app {
 
-void pack_cheat_catalog(const cores::ICheatRecords& records, CheatCatalog& out) noexcept;
+[[nodiscard]] CheatCatalog pack_cheat_catalog(const cores::ICheatRecords& records) noexcept;
 
 }

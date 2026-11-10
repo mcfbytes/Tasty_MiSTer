@@ -2,7 +2,6 @@
 #include "cores/n64dd_ram_save.h"
 
 #include <algorithm>
-#include <cstring>
 
 #include "cores/n64_path.h"
 #include "infra/endian.h"
@@ -10,50 +9,27 @@
 namespace mister::cores::n64dd {
 namespace {
 
-[[nodiscard]] bool read_exact(svc::IFile& f, std::uint64_t off, std::span<std::byte> dst) {
-    std::size_t got = 0;
-    while (got < dst.size()) {
-        auto n = f.read_at(off + got, dst.subspan(got));
-        if (!n || *n == 0)
-            return false;
-        got += *n;
-    }
-    return true;
-}
-
-[[nodiscard]] Ex<void> write_all(svc::IFile& f, std::uint64_t off, std::span<const std::byte> src) {
-    std::size_t put = 0;
-    while (put < src.size()) {
-        auto n = f.write_at(off + put, src.subspan(put));
-        if (!n)
-            return std::unexpected(n.error());
-        if (*n == 0)
-            return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(put)});
-        put += *n;
-    }
-    return {};
-}
-
-[[nodiscard]] std::uint32_t marker_offset(std::uint32_t k) noexcept {
-    const std::uint32_t head = k / (2u * kTracksPerHead);
-    const std::uint32_t track = (k / 2u) % kTracksPerHead;
-    return flat_offset(track, head, k % 2u, 0) + kDirtyFlagOffset;
+[[nodiscard]] FlatOffset marker_offset(std::uint32_t k) noexcept {
+    return FlatBlock::of_index(k).offset().advanced_by(kDirtyFlagOffset);
 }
 
 }
 
-bool ram_save_path(std::string_view disk_path, std::string_view core_dir, SavePath& out) noexcept {
+std::optional<svc::SlotPathText> ram_save_path(
+    std::string_view disk_path,
+    std::string_view core_dir
+) noexcept {
     const std::string_view leaf = n64::path_leaf(disk_path);
     const std::size_t dot = leaf.rfind('.');
-    out.clear();
+    svc::SlotPathText out{};
     bool ok = out.assign("saves/");
     ok = ok && out.append(core_dir);
     ok = ok && out.append("/");
     ok = ok && out.append(dot == std::string_view::npos ? leaf : leaf.substr(0, dot));
     ok = ok && out.append(".ram");
     if (!ok)
-        out.clear();
-    return ok;
+        return std::nullopt;
+    return out;
 }
 
 const WindowJobBuild kRamSaveKind = &build_ram_save_job;
@@ -65,28 +41,19 @@ bool write_ram_save_order(
     std::string_view core_dir
 ) noexcept {
     RamSaveJob::Order o{};
-    if (disk_path.size() > sizeof o.disk_path || core_dir.size() > sizeof o.core_dir) {
+    if (!o.disk_path.assign(disk_path) || !o.core_dir.assign(core_dir))
         return false;
-    }
     o.load_addr = load_addr;
-    o.path_len = static_cast<std::uint16_t>(disk_path.size());
-    o.core_len = static_cast<std::uint8_t>(core_dir.size());
-    std::memcpy(o.disk_path, disk_path.data(), disk_path.size());
-    std::memcpy(o.core_dir, core_dir.data(), core_dir.size());
-    return order.put(o);
+    order.put(o);
+    return true;
 }
 
 IWindowJob* build_ram_save_job(JobArena& arena, const WindowJobOrder& order) noexcept {
     seat_assert<SeatTag::Io>(ERR_SITE(), "build_ram_save_job off T-IO");
     const auto o = order.as<RamSaveJob::Order>();
-    if (!o || o->path_len > sizeof o->disk_path || o->core_len > sizeof o->core_dir) {
+    if (!o)
         return nullptr;
-    }
-    return arena.emplace<RamSaveJob>(
-        o->load_addr,
-        std::string_view(o->disk_path, o->path_len),
-        std::string_view(o->core_dir, o->core_len)
-    );
+    return arena.emplace<RamSaveJob>(o->load_addr, o->disk_path.view(), o->core_dir.view());
 }
 
 RamSaveJob::RamSaveJob(
@@ -149,20 +116,21 @@ Ex<void> RamSaveJob::open_(ICoreWindow& window, const svc::Vfs& vfs) {
     w.area = *area;
     if (auto m = DiskMap::build_into(w.map, w.area); !m)
         return std::unexpected(m.error());
-    total_ = w.map.ram_bytes();
+    total_ = proto::FileSize{w.map.ram_bytes()};
 
-    if (total_ == 0) {
+    if (total_.empty()) {
         phase_ = Phase::Done;
         return {};
     }
-    if (!ram_save_path(disk_path_.view(), core_dir_.view(), w.ram_path)) {
+    const auto ram_path = ram_save_path(disk_path_.view(), core_dir_.view());
+    if (!ram_path)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 2});
-    }
+    w.ram_path = *ram_path;
 
     std::array<std::byte, kDirtyMarkerBytes> mark{};
     for (std::uint32_t k = 0; k < kFlatBlocks; ++k) {
-        if (auto r = window.read(marker_offset(k), mark); !r)
-            return std::unexpected(r.error());
+        if (auto r = marker_offset(k).read_via(window, mark); !r)
+            return r;
         const bool dirty = std::all_of(mark.begin(), mark.end(), [](std::byte b) {
             return b == std::byte{kDirtyMagic};
         });
@@ -174,7 +142,7 @@ Ex<void> RamSaveJob::open_(ICoreWindow& window, const svc::Vfs& vfs) {
     if (vfs.file_exists(w.ram_path.view())) {
         auto in = vfs.open(w.ram_path.view(), svc::OpenMode::ReadWhole);
         const auto size = in ? (*in)->size() : Ex<svc::FileSize>{std::unexpected(in.error())};
-        if (size && size->v == total_) {
+        if (size && *size == total_) {
             w.in = std::move(*in);
             phase_ = Phase::Compare;
         }
@@ -185,10 +153,10 @@ Ex<void> RamSaveJob::open_(ICoreWindow& window, const svc::Vfs& vfs) {
 Ex<void> RamSaveJob::gather_(ICoreWindow& window, std::uint64_t off, std::size_t n) {
     Work& w = *work_;
     Ex<void> got{};
-    w.map.for_each_ram_run(off, n, [&](std::uint32_t flat, std::size_t at, std::size_t len) {
+    w.map.for_each_ram_run(off, n, [&](FlatOffset flat, std::size_t at, std::size_t len) {
         if (!got)
             return;
-        auto r = window.read(flat, std::span(w.image).subspan(at, len));
+        auto r = flat.read_via(window, std::span(w.image).subspan(at, len));
         if (!r)
             got = std::unexpected(r.error());
     });
@@ -197,10 +165,14 @@ Ex<void> RamSaveJob::gather_(ICoreWindow& window, std::uint64_t off, std::size_t
 
 Ex<void> RamSaveJob::compare_step_(ICoreWindow& window) {
     Work& w = *work_;
-    const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(kStepBytes, total_ - off_));
+    const auto remaining = total_.after_header(proto::FileSize{off_});
+    const auto n = static_cast<std::size_t>(
+        std::min<std::uint64_t>(kStepBytes, remaining.length_of(proto::BlockCount{1}))
+    );
     if (auto r = gather_(window, off_, n); !r)
         return r;
-    const bool same = read_exact(*w.in, off_, std::span(w.file).first(n))
+    const bool same = svc::read_exact(*w.in, proto::FileSize{off_}, std::span(w.file).first(n))
+                          .has_value()
         && std::memcmp(w.image.data(), w.file.data(), n) == 0;
     if (!same) {
         w.in.reset();
@@ -209,7 +181,7 @@ Ex<void> RamSaveJob::compare_step_(ICoreWindow& window) {
         return {};
     }
     off_ += n;
-    if (off_ < total_)
+    if (proto::FileSize{off_} < total_)
         return {};
     w.in.reset();
     matched_ = true;
@@ -231,13 +203,17 @@ Ex<void> RamSaveJob::write_step_(ICoreWindow& window, const svc::Vfs& vfs) {
             return std::unexpected(out.error());
         w.out = std::move(*out);
     }
-    const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(kStepBytes, total_ - off_));
+    const auto remaining = total_.after_header(proto::FileSize{off_});
+    const auto n = static_cast<std::size_t>(
+        std::min<std::uint64_t>(kStepBytes, remaining.length_of(proto::BlockCount{1}))
+    );
     if (auto r = gather_(window, off_, n); !r)
         return r;
-    if (auto r = write_all(*w.out, off_, std::span(w.image).first(n)); !r)
+    if (auto r = svc::write_all(*w.out, proto::FileSize{off_}, std::span(w.image).first(n)); !r) {
         return r;
+    }
     off_ += n;
-    if (off_ < total_)
+    if (proto::FileSize{off_} < total_)
         return {};
     w.out.reset();
     wrote_ = true;
@@ -250,8 +226,8 @@ Ex<void> RamSaveJob::clear_(ICoreWindow& window) {
     for (std::uint32_t k = 0; k < kFlatBlocks; ++k) {
         if (!work_->dirty.test(k))
             continue;
-        if (auto r = window.write(marker_offset(k), zero); !r)
-            return std::unexpected(r.error());
+        if (auto r = marker_offset(k).write_via(window, zero); !r)
+            return r;
         ++cleared_;
     }
     phase_ = Phase::Done;

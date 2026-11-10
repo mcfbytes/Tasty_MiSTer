@@ -2,11 +2,16 @@
 #include "hal/axi.h"
 
 #include "hal/fpga_memory.h"
+#include "hal/phys_region.h"
+#include "os/map_length.h"
+#include "os/path_buf.h"
 #include "os/small_file.h"
 #include "os/uio_handle.h"
 
+#include "infra/byte_view.h"
 #include "infra/parse_int.h"
 #include "infra/persist.h"
+#include "infra/unique_fd.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -14,12 +19,26 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <optional>
 #include <string_view>
 
 namespace mister::hal {
+
+namespace {
+
+[[nodiscard]] std::optional<UniqueFd> open_uio_node(os::UioMinor minor) noexcept {
+    std::array<char, os::kUioDevPathBuf> path{};
+    if (!os::format_path(std::span<char>(path), "/dev/uio%s", minor.text().c_str())) {
+        return std::nullopt;
+    }
+    const int raw = ::open(path.data(), O_RDWR | O_CLOEXEC);
+    if (raw < 0)
+        return std::nullopt;
+    return std::optional<UniqueFd>{UniqueFd{raw}};
+}
+
+}
 
 namespace detail {
 namespace {
@@ -74,23 +93,18 @@ std::size_t page_size() noexcept {
         return std::unexpected(Error{Errc::mmap_failed, ERR_SITE(), os::low32(phys)});
     }
 
-    const int idx = os::find_uio_node(uio_name);
-    if (idx >= 0) {
-        char path[32];
-        const int w = std::snprintf(path, sizeof path, "/dev/uio%d", idx);
-        if (w > 0 && static_cast<std::size_t>(w) < sizeof path) {
-            const int fd = ::open(path, O_RDWR | O_CLOEXEC);
-            if (fd >= 0) {
-                auto pages = os::MmioRegion::map_fd(
-                    fd,
-                    os::PhysAddr{0},
-                    len,
-                    os::MmioRegion::Access::ReadWrite
-                );
-                ::close(fd);
-                if (pages)
-                    return MappedRegs{std::move(*pages), 0, true};
-            }
+    const auto idx = os::find_uio_node(uio_name);
+    if (idx) {
+        if (const auto fd = open_uio_node(*idx)) {
+
+            auto pages = os::MmioRegion::map_uio(
+                fd->get(),
+                os::MmioRegion::UioMapIndex{0},
+                os::MapLength{len},
+                os::MmioRegion::Access::ReadWrite
+            );
+            if (pages)
+                return MappedRegs{std::move(*pages), 0, true};
         }
     }
 
@@ -134,16 +148,22 @@ bool is_word_aligned(const std::byte* p) noexcept {
 namespace {
 
 template <class T>
-std::optional<T> uio_map_attr(const char* root, int idx, const char* leaf) noexcept {
-    char path[160];
-    const int n = std::snprintf(path, sizeof path, "%s/uio%d/maps/map0/%s", root, idx, leaf);
-    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof path)
+std::optional<T> uio_map_attr(const char* root, os::UioMinor minor, const char* leaf) noexcept {
+    std::array<char, os::kUioMapAttrPathBuf> path{};
+    if (!os::format_path(
+            std::span<char>(path),
+            "%s/uio%s/maps/map0/%s",
+            root,
+            minor.text().c_str(),
+            leaf
+        )) {
         return std::nullopt;
+    }
     std::array<char, 32> buf{};
-    const auto got = os::read_small_file(path, std::span<char>(buf));
-    if (!got || *got == 0 || *got >= buf.size())
+    const auto got = os::read_small_file(path.data(), std::span<char>(buf));
+    if (!got || got->empty() || got->size() >= buf.size())
         return std::nullopt;
-    std::string_view text = infra::trim_line_end(std::string_view(buf.data(), *got));
+    std::string_view text = infra::trim_line_end(infra::as_text(*got));
 
     if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
         text.remove_prefix(2);
@@ -153,46 +173,34 @@ std::optional<T> uio_map_attr(const char* root, int idx, const char* leaf) noexc
 
 }
 
-ApertureChoice resolve_aperture(const char* sysfs_root, const PhysRegion& r) noexcept {
-    ApertureChoice c;
+std::optional<ApertureNode> resolve_aperture(const char* sysfs_root, const PhysRegion& r) noexcept {
     if (r.len == 0)
-        return c;
+        return std::nullopt;
 
-    const int idx = os::find_uio_node_under(sysfs_root, kApertureUioName);
-    if (idx < 0)
-        return c;
+    const auto idx = os::find_uio_node_under(sysfs_root, kApertureUioName);
+    if (!idx)
+        return std::nullopt;
 
-    const auto addr = uio_map_attr<std::uint32_t>(sysfs_root, idx, "addr");
-    const auto size = uio_map_attr<std::uint32_t>(sysfs_root, idx, "size");
+    const auto addr = uio_map_attr<std::uint32_t>(sysfs_root, *idx, "addr");
+    const auto size = uio_map_attr<std::uint32_t>(sysfs_root, *idx, "size");
     if (!addr || !size)
-        return c;
+        return std::nullopt;
 
     if (os::PhysAddr{*addr} != kFpgaMemBase)
-        return c;
+        return std::nullopt;
     const std::uint64_t off = r.phys.v - kFpgaMemBase.v;
-    if (off > *size || r.len > (*size - off))
-        return c;
+    if (!span_fits<std::uint64_t>(off, r.len, *size))
+        return std::nullopt;
 
-    c.via_uio = true;
-    c.node = idx;
-    c.node_base = os::PhysAddr{*addr};
-    c.node_size = *size;
-    return c;
+    return ApertureNode{.minor = *idx, .base = os::PhysAddr{*addr}, .size = *size};
 }
 
 Ex<FpgaMemory> FpgaMemory::map_aperture(PhysRegion r, os::MmioRegion::Access access) {
-    const ApertureChoice choice = resolve_aperture(os::kUioClassRoot, r);
-    if (choice.via_uio) {
-        char path[32];
-        const int w = std::snprintf(path, sizeof path, "/dev/uio%d", choice.node);
-        if (w > 0 && static_cast<std::size_t>(w) < sizeof path) {
-            const int fd = ::open(path, O_RDWR | O_CLOEXEC);
-            if (fd >= 0) {
-                auto mem = map_uio(fd, choice.node_base, r, access);
-                ::close(fd);
-                if (mem)
-                    return mem;
-            }
+    if (const auto node = resolve_aperture(os::kUioClassRoot, r)) {
+        if (const auto fd = open_uio_node(node->minor)) {
+
+            if (auto mem = map_uio(fd->get(), node->base, r, access))
+                return mem;
         }
     }
 
@@ -243,7 +251,12 @@ struct UioMapping {
     }
     const auto lead = static_cast<std::size_t>(gap);
 
-    auto pages = os::MmioRegion::map_fd(fd, os::PhysAddr{0}, lead + r.len, access);
+    auto pages = os::MmioRegion::map_uio(
+        fd,
+        os::MmioRegion::UioMapIndex{0},
+        os::MapLength{lead + r.len},
+        access
+    );
     if (!pages)
         return std::unexpected(pages.error());
     return UioMapping{std::move(*pages), lead};
@@ -317,7 +330,7 @@ std::span<std::byte> FpgaMemory::view(std::size_t off, std::size_t len) {
             "FpgaMemory::view unmapped"
         );
     }
-    if (off > region_.len || len > region_.len - off) {
+    if (!span_fits(off, len, region_.len)) {
         fatal(
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(off)},
             "FpgaMemory::view out of range"

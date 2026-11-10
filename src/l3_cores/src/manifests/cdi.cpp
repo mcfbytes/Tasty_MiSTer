@@ -2,6 +2,7 @@
 #include "cores/cdi_ladder.h"
 #include "cores/manifests/cdi.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -34,23 +35,25 @@ static_assert(
     "CDi.sv CONF_STR: S0,CUECHD,Load CD; user_io.cpp:3253 disk 0 is the CD"
 );
 static_assert(
-    kCdi.staging.disc_slot == IoIndex{0} && kCdi.staging.save_slot == IoIndex{1},
+    kCdi.staging.disc_slot == IoIndex{0}
+        && kCdi.staging.save
+        && kCdi.staging.save->slot == IoIndex{1},
     "cdi.cpp:492-497: the save is index 1; cdi.cpp:1152-1153 the disc index 0"
 );
 static_assert(
-    kCdi.staging.save_pre_bytes == proto::FileSize{8 * 1024},
+    kCdi.staging.save && kCdi.staging.save->pre_bytes == proto::FileSize{8 * 1024},
     "cdi.cpp:25,497: TIMEKEEPER_SIZE (8 * 1024) is the pre_size"
 );
 static_assert(
-    kCdi.staging.save_pre_on_empty,
+    kCdi.staging.save && kCdi.staging.save->pre_on_empty,
     "CDi.sv:322 never writes a 0-size timekeeper: an empty file gets the pre-size too"
 );
 static_assert(
-    kCdi.staging.start_save_dir == std::string_view{"games/CD-i"},
+    kCdi.staging.save && kCdi.staging.save->start_dir == std::string_view{"games/CD-i"},
     "stock cdi_load_root_nvram: its last_dir"
 );
 static_assert(
-    kCdi.staging.save_dest == WideIoIndex{},
+    kCdi.staging.save && !kCdi.staging.save->bracket,
     "cdi.cpp:497: a plain user_io_file_mount, no download bracket"
 );
 static_assert(
@@ -67,12 +70,14 @@ static_assert(
 );
 
 consteval bool cdi_start_chain_is_stock() {
-    constexpr std::string_view kNames[] =
-        {"boot0.rom", "boot1.rom", "boot2.rom", "boot3.rom", "boot.rom"};
-    constexpr std::uint8_t kDest[] = {0x00, 0x40, 0x80, 0xC0, 0x00};
-    if (kCdi.start_assets.size() != 5)
+    constexpr auto kNames = std::to_array<std::string_view>(
+        {"boot0.rom", "boot1.rom", "boot2.rom", "boot3.rom", "boot.rom"}
+    );
+    constexpr auto kDest = std::to_array<std::uint8_t>({0x00, 0x40, 0x80, 0xC0, 0x00});
+    static_assert(kNames.size() == kDest.size());
+    if (kCdi.start_assets.size() != kNames.size())
         return false;
-    for (std::size_t i = 0; i < 5; ++i) {
+    for (std::size_t i = 0; i < kNames.size(); ++i) {
         const BootAsset& r = kCdi.start_assets[i];
         if (r.name != kNames[i] || r.dest.v != kDest[i] || r.subdir != kCdi.name)
             return false;
@@ -93,7 +98,7 @@ static_assert(
     "cdi.cpp:1066: check_scramble runs on every track sector read"
 );
 
-static_assert(cdi::kBlockBytes == 2568 && cdi::kSubcodeBytes == 216);
+static_assert(cdi::kBlockBytes == 2568 && cdi::kSubcodeAreaBytes == 216);
 
 static_assert(
     cdi::hunk_window(0) == 0

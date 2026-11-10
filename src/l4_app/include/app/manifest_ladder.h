@@ -7,6 +7,9 @@
 #include <optional>
 #include <string_view>
 
+#include "app/echo_rate.h"
+#include "app/echo_wait.h"
+#include "app/file_intern.h"
 #include "app/load_ladder.h"
 #include "app/load_window_map.h"
 #include "app/path_text.h"
@@ -36,7 +39,7 @@ public:
         ILoadWindowMap<seat_owner::Main>& map;
         hal::PhysRegion aperture;
         WindowTally& windows;
-        std::int64_t now_ns = 0;
+        std::chrono::nanoseconds now_ns{};
     };
 
     ManifestLadder(std::unique_ptr<cores::IManifestStager> stager, PathText rel) noexcept
@@ -44,11 +47,6 @@ public:
           rel_(rel) {}
 
     [[nodiscard]] Pass step(Host& h);
-
-    [[nodiscard]] bool wants_pass(
-        const LinkTxChannel<SeatTag::Main>& inbox,
-        const FileTxLevelCell* level
-    ) const noexcept;
 
     [[nodiscard]] bool wants_pass(
         const LinkTxChannel<SeatTag::Main>& inbox,
@@ -78,8 +76,10 @@ private:
     Pc pc_ = Pc::Next;
     std::optional<LoadLadder> load_{};
     std::optional<cores::SendBracket> bracket_{};
-    proto::ActKey16 act_{};
-    std::int64_t echo_due_ns_ = 0;
+
+    std::optional<FileIntern> send_file_{};
+
+    EchoWait echo_wait_{};
     Errc failure_ = Errc::io;
 };
 

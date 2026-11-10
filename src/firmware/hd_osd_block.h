@@ -12,6 +12,7 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "open_verdict.h"

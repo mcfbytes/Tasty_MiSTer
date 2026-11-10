@@ -4,12 +4,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <string_view>
 
 #include "cores/types.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "proto/block_geometry.h"
 #include "proto/image_source.h"
 #include "proto/types.h"
@@ -31,20 +31,28 @@ public:
     };
 
     class MountPlan {
+        TASTY_SEAT_EXEMPT(component);
+
     public:
-        static constexpr std::size_t kMaxMounts = proto::kMaxAnnounceableSlot + 1;
+        static constexpr std::size_t kMaxMounts = proto::kAnnounceableSlots;
 
         void add(Ex<Mount> m) noexcept {
-            if (count_ < kMaxMounts)
-                mounts_[count_++] = m;
+            if (count_ >= kMaxMounts)
+                return;
+            if (m)
+                claimed_ = claimed_.with(m->slot());
+            mounts_[count_++] = m;
         }
 
         [[nodiscard]] std::span<const Ex<Mount>> mounts() const noexcept {
             return std::span<const Ex<Mount>>{mounts_.data(), count_};
         }
 
+        [[nodiscard]] proto::BlockSlotMask claimed() const noexcept { return claimed_; }
+
     private:
         std::array<Ex<Mount>, kMaxMounts> mounts_{};
+        proto::BlockSlotMask claimed_{};
         std::size_t count_ = 0;
     };
 
@@ -52,7 +60,7 @@ public:
 
     virtual ~ISaveChannel() = default;
 
-    [[nodiscard]] virtual std::optional<MountPlan> claim_mount_plan() = 0;
+    [[nodiscard]] virtual infra::OptRef<const MountPlan> mount_plan() const noexcept = 0;
 
     [[nodiscard]] virtual svc::IStorageBackend& backend() noexcept = 0;
 

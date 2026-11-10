@@ -2,10 +2,12 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "svc/i2c_adapter.h"
+#include "svc/types.h"
 
 namespace mister::svc::adv7513 {
 
@@ -18,12 +20,17 @@ public:
     static constexpr std::uint8_t kOpWrite = 0x80;
 
     struct Failure {
-        std::uint8_t op = 0;
+        os::I2cAddr addr{};
+        bool write = false;
         os::I2cReg reg{};
-        std::uint16_t err = 0;
+        OsErrno err{};
+
+        [[nodiscard]] constexpr std::uint8_t op_byte() const noexcept {
+            return static_cast<std::uint8_t>(addr.v | (write ? I2cBreaker::kOpWrite : 0u));
+        }
     };
 
-    explicit I2cBreaker(II2cAdapter& inner) noexcept : inner_(&inner) {}
+    explicit I2cBreaker(II2cAdapter& inner) noexcept : inner_(inner) {}
 
     I2cBreaker(const I2cBreaker&) = delete;
     I2cBreaker& operator=(const I2cBreaker&) = delete;
@@ -45,21 +52,21 @@ public:
 
     std::uint32_t refused() const noexcept { return refused_; }
 
-    const Failure& first() const noexcept { return first_; }
+    const std::optional<Failure>& first() const noexcept { return first_; }
 
-    std::uint16_t last_errno() const noexcept { return last_errno_; }
+    OsErrno last_errno() const noexcept { return last_errno_; }
 
 private:
-    void note(bool ok, std::uint8_t op, os::I2cReg reg, const Error* e) noexcept;
+    void note(bool ok, os::I2cAddr addr, bool write, os::I2cReg reg, const Error* e) noexcept;
 
-    II2cAdapter* inner_;
+    II2cAdapter& inner_;
     bool open_ = false;
     std::uint32_t run_ = 0;
     std::uint32_t failures_ = 0;
     std::uint32_t trips_ = 0;
     std::uint32_t refused_ = 0;
-    Failure first_{};
-    std::uint16_t last_errno_ = 0;
+    std::optional<Failure> first_{};
+    OsErrno last_errno_{};
 };
 
 }

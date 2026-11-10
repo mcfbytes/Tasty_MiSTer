@@ -5,8 +5,10 @@
 #include <optional>
 
 #include "app/park_receipt.h"
+#include "infra/observed.h"
 #include "infra/opt_ref.h"
 #include "infra/pause_latch.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 

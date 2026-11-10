@@ -11,7 +11,7 @@ WindowJobService::Chan::Loan WindowJobService::acquire_() noexcept {
 
 void WindowJobService::send_(Chan::Loan&& loan, cores::WindowJobBuild kind) noexcept {
     loan->build = kind;
-    loan->ok = false;
+    loan->fault.reset();
     rt_.armed = true;
     chan_.send(std::move(loan));
 }
@@ -23,6 +23,7 @@ bool WindowJobService::arm_osd_open(cores::IWindowSave& role) noexcept {
         rt_.refusals.add(1);
         return false;
     }
+
     const cores::WindowJobBuild job = role.on_osd_open(loan->order);
     if (job == nullptr)
         return false;
@@ -40,6 +41,7 @@ bool WindowJobService::arm_reset_edge(
         rt_.refusals.add(1);
         return false;
     }
+
     const cores::WindowJobBuild job = role.on_reset_edge(edge, loan->order);
     if (job == nullptr)
         return false;
@@ -67,7 +69,7 @@ std::optional<proto::ActKey> WindowJobService::service(
     seat_assert<SeatTag::RT>(ERR_SITE(), "WindowJobService::service off T-RT");
     if (auto done = chan_.reap()) {
         rt_.armed = false;
-        if (done.completed() && done->ok) {
+        if (done.completed() && !done->fault) {
             rt_.ok.add(1);
         } else {
             rt_.failed.add(1);
@@ -100,13 +102,12 @@ void WindowJobService::forget_held() noexcept {
     rt_.held_index = proto::IoIndex{};
 }
 
-void WindowJobService::finish_(bool ok, Error err) noexcept {
+void WindowJobService::finish_(std::optional<Error> fault) noexcept {
     WindowJobSlot& slot = *io_.job;
     io_.running.reset();
     slot.build = nullptr;
     io_.window.reset();
-    slot.ok = ok;
-    slot.err = err;
+    slot.fault = fault;
     io_.job.complete();
     io_.job = Chan::Job{};
 }
@@ -119,7 +120,7 @@ void WindowJobService::serve() noexcept {
         WindowJobSlot& slot = *io_.job;
         io_.running.reset(slot.build ? slot.build(slot.arena, slot.order) : nullptr);
         if (!io_.running) {
-            finish_(false, Error{Errc::bad_format, ERR_SITE(), 0});
+            finish_(Error{Errc::bad_format, ERR_SITE(), 0});
             return;
         }
     }
@@ -127,18 +128,18 @@ void WindowJobService::serve() noexcept {
     if (!io_.window) {
         auto w = Window::open(*map_, aperture_, hal::to_phys(job.window_addr()), job.window_len());
         if (!w) {
-            finish_(false, w.error());
+            finish_(w.error());
             return;
         }
         io_.window.emplace(std::move(*w));
     }
     auto more = job.step(*io_.window, *vfs_);
     if (!more) {
-        finish_(false, more.error());
+        finish_(more.error());
         return;
     }
     if (!*more)
-        finish_(true, Error{Errc::io, infra::kNoSite, 0});
+        finish_(std::nullopt);
 }
 
 bool WindowJobService::idle() const noexcept {

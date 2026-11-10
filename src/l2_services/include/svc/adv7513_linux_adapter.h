@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/i2c_device.h"
 #include "svc/i2c_adapter.h"
@@ -32,7 +33,7 @@ private:
         std::optional<os::I2cDevice> dev{};
     };
 
-    Slot* find(os::I2cAddr addr) noexcept;
+    infra::OptRef<Slot> find(os::I2cAddr addr) noexcept;
 
     std::array<Slot, 4> slots_{};
 };

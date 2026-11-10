@@ -13,6 +13,7 @@
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/seat_main.h"
+#include "proto/types.h"
 
 namespace mister::reactor {
 class Executive;
@@ -61,7 +62,7 @@ public:
           replay_ring_(std::move(wiring.replay_ring)),
           frames_(wiring.frames),
           scanout_(wiring.scanout),
-          round_budget_words_(timing.round_budget_words) {}
+          round_budget_words_(proto::FioWordCount{timing.round_budget_words}) {}
 
     RtMain(const RtMain&) = delete;
     RtMain& operator=(const RtMain&) = delete;
@@ -100,11 +101,36 @@ public:
     static constexpr unsigned kInputOpBudget = 2 * 6;
 
 private:
+    class FioRoundBudget final {
+    public:
+        explicit constexpr FioRoundBudget(proto::FioWordCount whole) noexcept : left_(whole) {}
+
+        constexpr void spend(proto::FioWordCount words) noexcept {
+            left_ = left_.saturating_sub(words);
+        }
+
+        [[nodiscard]] constexpr proto::FioWordCount remaining() const noexcept { return left_; }
+
+    private:
+        proto::FioWordCount left_;
+    };
+
+    class OpRoundBudget final {
+    public:
+        explicit constexpr OpRoundBudget(unsigned ops) noexcept : ops_left_(ops) {}
+
+        [[nodiscard]] constexpr bool exhausted() const noexcept { return ops_left_ == 0; }
+
+        constexpr void take() noexcept { --ops_left_; }
+
+    private:
+        unsigned ops_left_;
+    };
+
     template <SeatTag Producer>
-    unsigned drain_(
+    void drain_(
         LinkTxChannel<Producer>& inbox,
-        unsigned already,
-        unsigned budget,
+        OpRoundBudget& budget,
         bool windows_closed
     ) noexcept;
 
@@ -122,6 +148,8 @@ private:
     [[nodiscard]] bool session_live_() const noexcept;
     [[nodiscard]] bool wire_held_() const noexcept;
 
+    [[nodiscard]] bool transfer_holds_() const noexcept;
+
     reactor::Executive& exec_;
     infra::OptRef<LinkSession> session_{};
 
@@ -138,7 +166,7 @@ private:
     infra::OptRef<ScanoutRelay> scanout_{};
     bool stopping_ = false;
     Ex<void> result_{};
-    std::uint32_t round_budget_words_;
+    proto::FioWordCount round_budget_words_;
 };
 
 static_assert(xthread::SeatBody<RtMain>);

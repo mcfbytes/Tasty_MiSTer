@@ -2,17 +2,15 @@
 #pragma once
 
 #include <chrono>
-#include <cstdint>
 #include <string_view>
 
+#include "cores/mount_state.h"
 #include "cores/stage_plan.h"
 #include "infra/error.h"
 #include "proto/link_op.h"
 #include "proto/types.h"
 
 namespace mister::cores {
-
-enum class MountState : std::uint8_t { Done, Pending, Failed };
 
 inline constexpr std::chrono::nanoseconds kDiscMountBoundNs = std::chrono::seconds{5};
 

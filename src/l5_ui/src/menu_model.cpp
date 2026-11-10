@@ -48,7 +48,7 @@
 #include "ui/hd_settings_plan.h"
 #include "ui/hd_slot_sheet_plan.h"
 #include "ui/joymap_page.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 #include "ui/osd_renderer.h"
 #include "ui/script_launch.h"
 #include "ui/script_policy.h"
@@ -63,95 +63,37 @@
 
 namespace mister::ui {
 
-void PageStack::push(std::unique_ptr<Page> p) {
-    if (p == nullptr)
-        return;
-    pages_.push_back(static_cast<std::unique_ptr<Page>&&>(p));
-}
-
-ItemId PageStack::pop() {
-    if (pages_.empty())
-        return kNoItem;
-    retired_refusals_ += pages_.back()->refusals();
-    pages_.pop_back();
-    const ItemId focus = pending_focus_;
-    pending_focus_ = kNoItem;
-    return focus;
-}
-
-void PageStack::replace(std::unique_ptr<Page> p) {
-    if (!pages_.empty()) {
-        retired_refusals_ += pages_.back()->refusals();
-        pages_.pop_back();
-    }
-    push(static_cast<std::unique_ptr<Page>&&>(p));
-}
-
-void PageStack::clear() noexcept {
-    for (const std::unique_ptr<Page>& p : pages_)
-        retired_refusals_ += p->refusals();
-    pages_.clear();
-    pending_focus_ = kNoItem;
-}
-
-std::uint32_t PageStack::page_refusals() const noexcept {
-    std::uint32_t n = retired_refusals_;
-    for (const std::unique_ptr<Page>& p : pages_)
-        n += p->refusals();
-    return n;
-}
-
-bool PageStack::any_bt_pairing() const noexcept {
-    for (const std::unique_ptr<Page>& p : pages_) {
-        if (p->bt_pairing_active())
-            return true;
-    }
-    return false;
-}
-
-bool PageStack::any_runs_a_process() const noexcept {
-    for (const std::unique_ptr<Page>& p : pages_) {
-        if (p->runs_a_process())
-            return true;
-    }
-    return false;
-}
-
-bool PageStack::any_takes_focus() const noexcept {
-    return focus_top() != nullptr;
-}
-
-const Page* PageStack::focus_top() const noexcept {
-    for (auto it = pages_.rbegin(); it != pages_.rend(); ++it) {
-        if ((*it)->facts().takes_input_focus)
-            return it->get();
-    }
-    return nullptr;
-}
-
 bool MenuModel::global_hotkeys_allowed() const noexcept {
-    const Page* p = stack_.focus_top();
-    return p == nullptr || p->facts().allows_global_hotkeys;
+    const auto p = stack_.focus_top();
+    return !p || p->facts().allows_global_hotkeys;
 }
 
 bool MenuModel::popups_visible() const noexcept {
-    const Page* top = stack_.top();
-    if (top == nullptr)
+    const auto top = stack_.top();
+    if (!top)
         return true;
     return top->facts().allows_popups;
 }
 
 bool MenuModel::menu_present() const noexcept {
-    const Page* top = stack_.top();
-    return top != nullptr && top->facts().counts_as_menu_present;
+    const auto top = stack_.top();
+    return top && top->facts().counts_as_menu_present;
 }
 
 bool MenuModel::allow_cfg_switch() const {
-    const Page* top = stack_.top();
-    return top != nullptr && top->facts().allows_cfg_switch;
+    const auto top = stack_.top();
+    return top && top->facts().allows_cfg_switch;
 }
 
 namespace {
+
+[[nodiscard]] constexpr char persisted_letter(
+    const std::optional<app::RememberedSlot>& slot
+) noexcept {
+    if (!slot)
+        return '\0';
+    return *slot == app::RememberedSlot::Mount ? 'S' : 'F';
+}
 
 std::optional<std::string_view> declared_title(
     const proto::ItemTable& items,
@@ -167,8 +109,8 @@ std::optional<std::string_view> declared_title(
 }
 
 void MenuModel::seed_navigator() noexcept {
-    const Page* top = stack_.top();
-    if (top == nullptr) {
+    const auto top = stack_.top();
+    if (!top) {
         nav_.set_mask(MenuMask{});
         return;
     }
@@ -177,13 +119,19 @@ void MenuModel::seed_navigator() noexcept {
 }
 
 void MenuModel::arm_auto_pop(const PageContext& ctx) noexcept {
-    deadlines_.arm(infra::opt_ref_of<const Page>(stack_.top()), ctx.clock);
+
+    const PageStack& pages = stack_;
+    deadlines_.arm(pages.top(), ctx.clock);
 }
 
 std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext& ctx) {
     switch (id) {
-        case PageId::System:
-            return make_system_page(page_facts_(ctx.sys));
+        case PageId::System: {
+
+            SessionFacts session = ctx.session;
+            session.in_hd_tree = hd_tree();
+            return make_system_page(ctx.sys, session);
+        }
         case PageId::CoreOptions:
             return make_core_options_page_(focus.submenu());
         case PageId::Browser: {
@@ -197,8 +145,8 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
                 ++root_refusals_;
                 return nullptr;
             }
-            const Page* parent = stack_.top();
-            const RowCount h = parent != nullptr ? parent->osd_height() : kFullOsdRows;
+            const auto parent = stack_.top();
+            const RowCount h = parent ? parent->osd_height() : kFullOsdRows;
             return std::make_unique<BrowserPage>(
                 *ctx.storage,
                 static_cast<BrowserSession::Request&&>(*req),
@@ -218,23 +166,17 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             }
             ScriptLaunch::Request req = static_cast<ScriptLaunch::Request&&>(*armed);
 
-            switch (script_policy_for(req.kind).gate_open(ctx.bt)) {
+            const IScriptPolicy& policy = script_policy_for(req.kind());
+            switch (policy.gate_open(ctx.bt)) {
                 case IScriptPolicy::OpenGate::Refuse:
                     ++bt_refusals_;
                     return nullptr;
                 case IScriptPolicy::OpenGate::NoAdapter:
-                    return make_info_page(
-                        app::InfoId::BluetoothUnavailable,
-                        std::chrono::milliseconds{0}
-                    );
+                    return make_info_page(app::InfoId::BluetoothUnavailable);
                 case IScriptPolicy::OpenGate::Proceed:
                     break;
             }
-            return std::make_unique<ScriptRunPage>(
-                req.kind,
-                static_cast<std::string&&>(req.argv0),
-                req.bt_reset
-            );
+            return std::make_unique<ScriptRunPage>(static_cast<ScriptLaunch::Request&&>(req));
         }
         case PageId::Cheats: {
 
@@ -259,7 +201,7 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
         }
         case PageId::ArcadeDip: {
 
-            if (mirror_.dip_table().count == 0) {
+            if (mirror_.dip_table().labels.count.empty()) {
                 ++root_refusals_;
                 return nullptr;
             }
@@ -276,11 +218,11 @@ std::unique_ptr<Page> MenuModel::make_page(PageId id, ItemId focus, PageContext&
             spec.files = ctx.files;
             spec.front_end = binding_.front_end();
             if (ctx.identity) {
-                app::SessionIdentity cid{};
-                if (ctx.identity->copy(cid)) {
-                    spec.front_end = cid.front_end;
-                    spec.core = cid.core;
-                    spec.j_names = std::string(cid.j_names.view());
+                const std::optional<app::SessionIdentity> cid = ctx.identity->copy();
+                if (cid) {
+                    spec.front_end = cid->front_end;
+                    spec.core = std::string(cid->core.view());
+                    spec.j_names = std::string(cid->j_names.view());
                 }
             }
             return std::make_unique<JoyMapPage>(static_cast<JoyMapPage::Spec&&>(spec));
@@ -415,12 +357,11 @@ std::unique_ptr<Page> MenuModel::make_core_options_page_(proto::SubmenuNo page) 
 }
 
 std::unique_ptr<Page> MenuModel::make_core_settings_page_(proto::SubmenuNo page) {
-    CoreSettingsPage::Spec spec{};
     if (mirror_.option_table().count == 0 || page.v >= cores::kMaxOptionPages) {
         ++root_refusals_;
         return nullptr;
     }
-    spec.table = &mirror_.option_table();
+    CoreSettingsPage::Spec spec{mirror_.option_table()};
     spec.page = page;
 
     const std::optional<std::string_view> declared = mirror_.option_table().title(page);
@@ -466,7 +407,7 @@ app::RecentGames::Played MenuModel::played_record_() const noexcept {
         .path = p.path.view(),
         .title = p.title.view(),
         .ioctl_index = p.ioctl_index,
-        .slot = p.slot_letter
+        .slot = persisted_letter(p.slot)
     };
 }
 
@@ -506,35 +447,37 @@ void MenuModel::apply(const Transition& t, PageContext& ctx) {
             if (from_hd)
                 p->set_selection(system_row_of(SystemItem::Exit));
             stack_.push(static_cast<std::unique_ptr<Page>&&>(p));
-            forget_hd_window_(stack_.depth() - 1);
-            if (Page* top = stack_.top())
+            forget_hd_window_(stack_.top_level());
+            if (auto top = stack_.top())
                 top->on_enter(ctx);
 
             if (from_hd && binding_.front_end()) {
-                if (Page* sys = stack_.top())
+                if (auto sys = stack_.top())
                     apply(sys->open_root_child(ctx), ctx);
             }
             break;
         }
-        case Transition::Kind::Pop:
+        case Transition::Kind::Pop: {
 
-            stack_.set_pending_focus(t.focus);
-            (void)stack_.pop();
-            forget_hd_window_(stack_.depth());
+            const StackDepth popped = stack_.top_level();
+            stack_.pop();
+            forget_hd_window_(popped);
             break;
+        }
         case Transition::Kind::Replace: {
 
             if (t.page == PageId::HdMenu) {
                 style_.choose_hd();
                 stack_.clear();
+                open_root_(ctx, true);
                 break;
             }
             auto p = make_page(t.page, t.focus, ctx);
             if (p == nullptr)
                 return;
             stack_.replace(static_cast<std::unique_ptr<Page>&&>(p));
-            forget_hd_window_(stack_.depth() - 1);
-            if (Page* top = stack_.top())
+            forget_hd_window_(stack_.top_level());
+            if (auto top = stack_.top())
                 top->on_enter(ctx);
             break;
         }
@@ -542,31 +485,23 @@ void MenuModel::apply(const Transition& t, PageContext& ctx) {
 
             stack_.clear();
             break;
+        case Transition::Kind::Reopen:
+
+            stack_.clear();
+            open_root_(ctx, true);
+            break;
         case Transition::Kind::Leave:
 
             if (stack_.bottom_id() == PageId::HdMenu && stack_.depth() > 1) {
-                stack_.set_pending_focus(t.focus);
-                (void)stack_.pop();
+                stack_.pop();
             } else {
                 stack_.clear();
             }
             break;
     }
-
-    if (stack_.empty() && style_.take_reopen())
-        open_root_(ctx, true);
     seed_navigator();
     arm_auto_pop(ctx);
     repaint_ = true;
-}
-
-SystemFacts MenuModel::page_facts_(const SystemFacts& f) const noexcept {
-    SystemFacts out = f;
-    if (hd_tree()) {
-        out.hd_switchable = false;
-        out.in_hd_tree = true;
-    }
-    return out;
 }
 
 bool MenuModel::hd_tree() const noexcept {
@@ -576,22 +511,23 @@ bool MenuModel::hd_tree() const noexcept {
 }
 
 bool MenuModel::describe_top(app::PageDescription& out) {
-    const Page* top = stack_.top();
-    if (top == nullptr)
+    const auto top = stack_.top();
+    if (!top)
         return false;
-    const std::size_t depth = stack_.depth();
-    const bool remember = depth >= 1 && depth <= kHdWindowDepths;
-    out.first = remember ? hd_window_first_[depth - 1] : RowIndex{};
+    const StackDepth level = stack_.top_level();
+
+    const auto window = hd_window_first_.find(level);
+    out.first = window ? *window : RowIndex{};
     if (!top->describe(out))
         return false;
-    if (remember)
-        hd_window_first_[depth - 1] = out.first;
+    if (window)
+        *window = out.first;
 
-    if (depth > 1) {
+    if (level.above_bottom()) {
         out.hub = {};
-        const Page* hub = stack_.bottom();
-        if (hub != nullptr && hub->describe_hub(out))
-            out.hub.depth = static_cast<std::uint8_t>(std::min<std::size_t>(depth - 1, 0xFF));
+        const auto hub = stack_.bottom();
+        if (hub && hub->describe_hub(out))
+            out.hub.depth = level.hub_depth();
     }
 
     if (stack_.top_id() == PageId::CoreOptions
@@ -613,10 +549,9 @@ void MenuModel::on_request_done(
     PageContext& ctx
 ) {
     const infra::OptRef<app::UiRequestRing> asks = ctx.ui_requests;
-    app::SessionIdentity cid{};
-    const std::span<const cores::FileSlot> slots = identity_.copy(cid)
-        ? cid.slots
-        : std::span<const cores::FileSlot>{};
+    const std::optional<app::SessionIdentity> cid = identity_.copy();
+    const std::span<const cores::FileSlot> slots = cid ? cid->slots
+                                                       : std::span<const cores::FileSlot>{};
     const bool recorded = now_playing_
                               .on_done(asks ? asks->pending(tag) : std::nullopt, slots, unix_time);
     if (asks)
@@ -659,17 +594,17 @@ void MenuModel::on_core_load_done(proto::CorrelationTag tag, PageContext& ctx) {
         asks->forget(tag);
 }
 
-void MenuModel::forget_hd_window_(std::size_t depth0) noexcept {
-    if (depth0 < kHdWindowDepths)
-        hd_window_first_[depth0] = RowIndex{};
+void MenuModel::forget_hd_window_(StackDepth level) noexcept {
+    if (auto window = hd_window_first_.find(level))
+        *window = RowIndex{};
 }
 
 bool MenuModel::show_progress(PageContext& ctx, cores::Progress progress) {
-    Page* top = stack_.top();
-    IProgressView* view = top != nullptr ? top->progress_view() : nullptr;
+    const auto top = stack_.top();
+    const auto view = top ? top->progress_view() : infra::OptRef<IProgressView>{};
     if (progress.total == 0) {
         transfers_.clear();
-        if (view == nullptr)
+        if (!view)
             return false;
         stack_.pop();
         seed_navigator();
@@ -680,7 +615,7 @@ bool MenuModel::show_progress(PageContext& ctx, cores::Progress progress) {
         return true;
     }
     transfers_.begin(ctx);
-    if (view != nullptr) {
+    if (view) {
         view->set_progress(progress);
 
         arm_auto_pop(ctx);
@@ -695,10 +630,10 @@ bool MenuModel::show_progress(PageContext& ctx, cores::Progress progress) {
     auto p = make_progress_page(transfers_.name());
     if (p == nullptr)
         return false;
-    if (IProgressView* v = p->progress_view(); v != nullptr)
+    if (auto v = p->progress_view())
         v->set_progress(progress);
     place_overlay(static_cast<std::unique_ptr<Page>&&>(p));
-    if (Page* t = stack_.top())
+    if (auto t = stack_.top())
         t->on_enter(ctx);
     seed_navigator();
     arm_auto_pop(ctx);
@@ -707,21 +642,21 @@ bool MenuModel::show_progress(PageContext& ctx, cores::Progress progress) {
 }
 
 void MenuModel::place_overlay(std::unique_ptr<Page> p) {
-    const Page* top = stack_.top();
-    if (top != nullptr && !top->facts().takes_input_focus) {
+    const auto top = stack_.top();
+    if (top && !top->facts().takes_input_focus) {
         stack_.replace(static_cast<std::unique_ptr<Page>&&>(p));
     } else {
         stack_.push(static_cast<std::unique_ptr<Page>&&>(p));
     }
-    forget_hd_window_(stack_.depth() - 1);
+    forget_hd_window_(stack_.top_level());
 }
 
 bool MenuModel::push_info(PageContext& ctx, app::InfoId id) {
-    auto p = make_info_page(id, std::chrono::milliseconds{0});
+    auto p = make_info_page(id);
     if (p == nullptr)
         return false;
     place_overlay(static_cast<std::unique_ptr<Page>&&>(p));
-    if (Page* top = stack_.top())
+    if (auto top = stack_.top())
         top->on_enter(ctx);
     seed_navigator();
 
@@ -735,8 +670,8 @@ MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
 
     std::optional<UiEvent> ev;
     if (ctx.keys) {
-        const Page* rt = stack_.top();
-        ctx.keys->set_repeat_all(rt != nullptr && rt->facts().repeat_all_keys);
+        const auto rt = stack_.top();
+        ctx.keys->set_repeat_all(rt && rt->facts().repeat_all_keys);
         ev = ctx.keys->pop();
     }
     if (!ev.has_value())
@@ -760,7 +695,7 @@ MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
     if (buttons.has_any({kRearm})) {
         ++help_rearms_;
         if (ctx.clock) {
-            deadlines_.rearm_help(ctx.clock->now());
+            deadlines_.rearm_help(ctx.clock->now().time_since_epoch());
         }
     }
 
@@ -784,8 +719,8 @@ MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
     bool routed = false;
     if (KeyDecoder::is_make(ev->raw, svc::EvdevCode{KEY_F11})) {
         routed = true;
-        const Page* run = stack_.top();
-        const bool mid_script = run != nullptr && run->holds_pairing_hotkey();
+        const auto run = stack_.top();
+        const bool mid_script = run && run->holds_live_script();
         if (mid_script) {
             ++bt_refusals_;
         } else {
@@ -794,13 +729,13 @@ MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
         }
     }
 
-    Page* top = stack_.top();
+    auto top = stack_.top();
     if (routed)
-        top = nullptr;
+        top = std::nullopt;
 
-    const HdKeyRemap::Axis axis = top != nullptr ? remap_.axis(*this, buttons) : HdKeyRemap::Axis{};
+    const HdKeyRemap::Axis axis = top ? remap_.axis(*this, buttons) : HdKeyRemap::Axis{};
     const bool across = axis.move != HdKeyRemap::Axis::Move::None;
-    if (top != nullptr) {
+    if (top) {
         bool moved = false;
         if (across) {
             moved = remap_.apply(axis, nav_);
@@ -815,7 +750,7 @@ MenuModel::KeyPhase MenuModel::pump_key_(PageContext& ctx) {
         }
     }
 
-    if (top != nullptr) {
+    if (top) {
         UiEvent forwarded = *ev;
         constexpr std::uint16_t kSides = UiEvent::Left | UiEvent::Right;
         forwarded.buttons = across ? buttons.without({kSides}) : buttons;
@@ -843,7 +778,7 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
     ++pumps_;
 
     sync_cells();
-    stamp_facts(ctx);
+    stamp_session(ctx);
 
     bool cleared_this_round = false;
     if (invalidate_) {
@@ -857,9 +792,9 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
     if (!binding_.ui_capable())
         return false;
 
-    if (Page* top = stack_.top()) {
+    if (auto top = stack_.top()) {
         const MenuMask before = top->mask();
-        top->on_facts(page_facts_(ctx.sys));
+        top->on_facts(ctx.sys, ctx.session);
 
         if (top->mask() != before) {
             nav_.set_mask(top->mask());
@@ -873,7 +808,7 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
 
     bool did = false;
 
-    if (Page* top = stack_.top()) {
+    if (auto top = stack_.top()) {
         const Transition t = top->on_tick(ctx);
         if (t.kind != Transition::Kind::Stay) {
             apply(t, ctx);
@@ -884,11 +819,10 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
         }
     }
 
-    if (ctx.clock && deadlines_.fired(ctx.clock->now())) {
+    if (ctx.clock && deadlines_.fired(ctx.clock->now().time_since_epoch())) {
         deadlines_.consume_pop();
         if (!stack_.empty()) {
-            stack_.set_pending_focus(kNoItem);
-            (void)stack_.pop();
+            stack_.pop();
             seed_navigator();
             arm_auto_pop(ctx);
             repaint_ = true;
@@ -912,20 +846,25 @@ bool MenuModel::pump(PageContext& ctx, OsdRenderer& out) {
 
     if (repaint_) {
         repaint_ = false;
-        if (Page* top = stack_.top()) {
+        if (auto top = stack_.top()) {
             out.set_height(top->osd_height());
 
             const bool strip = top->facts().has_title_strip || menu_has_focus();
             out.set_stripe(strip ? OsdRenderer::Stripe::Title : OsdRenderer::Stripe::Blank);
-            static_cast<const Page*>(top)->render(out);
+            top->render(out);
+
+            proto::InfoWindow window = top->info_window().value_or(proto::InfoWindow{});
+            if (!window.empty())
+                window.y = ctx.session.info_origin;
+            out.publish_info_window(window);
             did = true;
         }
     }
 
     if (binding_.front_end() && ctx.clock) {
-        if (deadlines_.take_status_tick(ctx.clock->now())) {
+        if (deadlines_.take_status_tick(ctx.clock->now().time_since_epoch())) {
 
-            ctx.status.sdram_cfg = sdram_latch_.cfg();
+            ctx.status.sdram_cfg = sdram_cfg();
             out.composite_status_bar(ctx.status);
             did = true;
         }
@@ -940,7 +879,7 @@ void MenuModel::on_core_loaded(proto::CoreType type, bool front_end, PageContext
 
     set_front_end(front_end);
     latch_browse_home();
-    stamp_facts(ctx);
+    stamp_session(ctx);
 
     stack_.clear();
     hd_focus_.clear();
@@ -962,8 +901,8 @@ void MenuModel::on_hd_mask(HdMask m, bool front_end, infra::OptRef<app::UiReques
     if (!(m == hd_mask_)) {
         hd_mask_ = m;
 
-        Page* top = stack_.top();
-        if (auto co = top != nullptr ? top->mask_rebuild() : infra::OptRef<IMaskRebuild>{}) {
+        const auto top = stack_.top();
+        if (auto co = top ? top->mask_rebuild() : infra::OptRef<IMaskRebuild>{}) {
             co->rebuild(items_, build_env(co->page()));
             seed_navigator();
         }
@@ -1068,17 +1007,14 @@ app::RememberedStem MenuModel::file_stem() const noexcept {
     return binding_.file_stem(items_.core_name());
 }
 
-void MenuModel::stamp_facts(PageContext& ctx) const noexcept {
-    ctx.sys.core_loaded = binding_.ui_capable() && !binding_.front_end();
-    ctx.sys.front_end = binding_.front_end();
+void MenuModel::stamp_session(PageContext& ctx) const noexcept {
+    ctx.session.core_loaded = binding_.ui_capable() && !binding_.front_end();
+    ctx.session.front_end = binding_.front_end();
 
     const std::string_view name = binding_.front_end() ? std::string_view{} : browse_home();
-    std::size_t n = name.size();
-    if (n > sizeof(ctx.sys.core_dir) - 1)
-        n = sizeof(ctx.sys.core_dir) - 1;
-    for (std::size_t i = 0; i < n; ++i)
-        ctx.sys.core_dir[i] = name[i];
-    ctx.sys.core_dir[n] = '\0';
+    (void)ctx.session.core_dir.assign(name);
+
+    ctx.session.in_hd_tree = hd_tree();
 }
 
 bool MenuModel::cells_pending() const noexcept {
@@ -1144,27 +1080,27 @@ BuildEnv MenuModel::build_env(proto::SubmenuNo page) const noexcept {
     env.file_stem = binding_.front_end() ? app::RememberedStem{} : file_stem();
 
     {
-        app::SessionIdentity cid{};
-        if (identity_.copy(cid)) {
-            if (!cid.cue_dir.empty())
-                env.cue_dir = cid.cue_dir;
+        const std::optional<app::SessionIdentity> cid = identity_.copy();
+        if (cid) {
+            if (!cid->cue_dir.empty())
+                env.cue_dir = cid->cue_dir;
 
             constexpr std::size_t kSlotsInAByte = std::numeric_limits<std::uint8_t>::max();
-            env.slots = cid.slots.first(std::min(cid.slots.size(), kSlotsInAByte));
-            env.image_no_zip = cid.image_no_zip;
+            env.slots = cid->slots.first(std::min(cid->slots.size(), kSlotsInAByte));
+            env.image_no_zip = cid->image_no_zip;
         }
     }
 
     env.cheats_available = cheats_.count() != 0;
     env.manual_available = false;
-    env.dip_count = mirror_.dip_table().count;
+    env.dip_count = mirror_.dip_table().labels.count;
     env.conf_gen = mirror_.conf_gen();
     return env;
 }
 
 bool MenuModel::core_options_available() const {
     OptionsModel probe;
-    (void)probe.build(items_, build_env(proto::kRootSubmenu));
+    probe.build(items_, build_env(proto::kRootSubmenu));
     return probe.selectable_count().v != 0 && !probe.empty_page();
 }
 
@@ -1222,12 +1158,12 @@ void MenuModel::open_root_(PageContext& ctx, bool hd_allowed) {
             p->set_selection(system_row_of(SystemItem::Exit));
         }
         stack_.push(static_cast<std::unique_ptr<Page>&&>(p));
-        forget_hd_window_(stack_.depth() - 1);
-        if (Page* top = stack_.top())
+        forget_hd_window_(stack_.top_level());
+        if (auto top = stack_.top())
             top->on_enter(ctx);
 
         if (binding_.front_end() && row.page == PageId::System) {
-            if (Page* sys = stack_.top())
+            if (auto sys = stack_.top())
                 apply(sys->open_root_child(ctx), ctx);
         }
         seed_navigator();
@@ -1249,9 +1185,7 @@ void MenuModel::open_bt_pairing(PageContext& ctx) {
         ++bt_refusals_;
         return;
     }
-    ScriptLaunch::Request req;
-    req.kind = ScriptKind::BtPair;
-    req.bt_reset = ctx.bt_reset_before_pair;
+    ScriptLaunch::Request req = ScriptLaunch::Request::bt_pair(ctx.bt_reset_before_pair);
     (void)ctx.launches.script->arm(static_cast<ScriptLaunch::Request&&>(req));
     const auto kind = osd_open() ? Transition::Kind::Replace : Transition::Kind::Push;
     apply(Transition{kind, PageId::ScriptRun}, ctx);

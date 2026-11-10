@@ -10,8 +10,8 @@
 
 namespace mister::svc {
 
-consteval std::array<std::uint8_t, kCdDataSize - 12> make_sector_scramble() {
-    std::array<std::uint8_t, kCdDataSize - 12> t{};
+consteval std::array<std::uint8_t, kRawFrameBytes - 12> make_sector_scramble() {
+    std::array<std::uint8_t, kRawFrameBytes - 12> t{};
     unsigned reg = 1;
     for (auto& byte : t) {
         unsigned out = 0;
@@ -31,7 +31,7 @@ class SectorDescrambler final : public IFrameShaper {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    void shape(proto::Lba lba, std::span<std::byte, kCdFrameSize> frame) const noexcept override;
+    void shape(proto::Lba lba, std::span<std::byte, kFullFrameBytes> frame) const noexcept override;
 };
 
 }

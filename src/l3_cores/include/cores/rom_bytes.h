@@ -10,6 +10,7 @@
 
 #include "cores/types.h"
 #include "infra/byte_view.h"
+#include "infra/error.h"
 #include "infra/indexed_span.h"
 #include "infra/seat.h"
 #include "os/anon_mapping.h"
@@ -34,7 +35,7 @@ public:
     RomBytes(const RomBytes&) = delete;
     RomBytes& operator=(const RomBytes&) = delete;
 
-    [[nodiscard]] bool resize(RomOffset end) noexcept;
+    [[nodiscard]] Ex<void> resize(RomOffset end) noexcept;
 
     void clear() noexcept { end_ = RomOffset{}; }
 

@@ -11,6 +11,8 @@
 #include "infra/indexed_array.h"
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
+#include "infra/polled.h"
+#include "infra/pool_slot.h"
 #include "infra/seat.h"
 #include "proto/block_geometry.h"
 #include "proto/storage_channel.h"
@@ -29,7 +31,6 @@ struct StorageCounters {
     std::uint32_t errors = 0;
     std::uint32_t refusals = 0;
     std::uint32_t depth_max = 0;
-    std::uint32_t state = 0;
     std::uint32_t misrouted = 0;
 };
 
@@ -41,10 +42,10 @@ class StorageService final : public proto::IStorageChannel,
 
 public:
     static constexpr unsigned kSlots = proto::kBlockSlots;
-    static constexpr unsigned kHalves = 2;
     static constexpr std::uint32_t kHalfBytes = proto::kBlockStagingBytes;
 
-    using Data = xthread::LoanChannel<BlockHalf, kSlots * kHalves, SeatTag::RT, SeatTag::Io>;
+    using Data = xthread::
+        LoanChannel<BlockHalf, kSlots * proto::ArenaHalf::kCount, SeatTag::RT, SeatTag::Io>;
     using Ctl = xthread::LoanChannel<BlockCtl, kSlots, SeatTag::RT, SeatTag::Io>;
 
     StorageService() noexcept : data_(xthread::Polled{}), ctl_(xthread::Polled{}) {}
@@ -105,7 +106,9 @@ public:
 
     [[nodiscard]] Data& data_channel_for_test() noexcept { return data_; }
 
-    [[nodiscard]] proto::StorageSeq submit(const proto::StorageRequest&) noexcept override;
+    [[nodiscard]] std::optional<proto::StorageSeq> submit(
+        const proto::StorageRequest&
+    ) noexcept override;
     [[nodiscard]] std::optional<proto::StorageCompletion> reap() noexcept override;
     [[nodiscard]] std::span<const std::uint8_t> half(
         proto::SlotIndex,
@@ -128,7 +131,9 @@ private:
     struct DataHand {
         std::uint8_t v = 0;
 
-        [[nodiscard]] constexpr bool exists() const noexcept { return v < kSlots * kHalves; }
+        [[nodiscard]] static constexpr DataHand of(xthread::PoolSlot slot) noexcept {
+            return DataHand{slot.v};
+        }
 
         friend constexpr bool operator==(DataHand, DataHand) = default;
     };
@@ -139,7 +144,10 @@ private:
         proto::ArenaHalf half;
 
         [[nodiscard]] static constexpr HandAt of(DataHand hand) noexcept {
-            return HandAt{proto::SlotIndex::of(hand.v / kHalves), proto::ArenaHalf::of(hand.v)};
+            return HandAt{
+                proto::SlotIndex::of(static_cast<std::size_t>(hand.v) / proto::ArenaHalf::kCount),
+                proto::ArenaHalf::of(hand.v)
+            };
         }
     };
 
@@ -208,7 +216,8 @@ private:
             void forget() noexcept { bound_.reset(); }
 
         private:
-            infra::IndexedArray<Data::Loan, kHalves, proto::ArenaHalf> data_hands_{};
+            infra::IndexedArray<Data::Loan, proto::ArenaHalf::kCount, proto::ArenaHalf>
+                data_hands_{};
             Ctl::Loan ctl_hand_{};
             infra::OptRef<IStorageBackend> bound_{};
             Generation gen_{};
@@ -231,20 +240,18 @@ private:
 
             void attached(
                 infra::OptRef<IStorageBackend> file,
-                proto::FileSize size,
-                bool exists,
+                std::optional<proto::FileSize> extent,
                 bool growable
             ) noexcept {
                 save_ = ISaveFilesOnIo::Save{
                     .file = file,
-                    .size = size,
-                    .exists = exists,
+                    .extent = extent,
                     .growable = growable,
-                    .gen = save_.gen + 1
+                    .gen = save_.gen.next()
                 };
             }
 
-            void detached() noexcept { save_ = ISaveFilesOnIo::Save{.gen = save_.gen + 1}; }
+            void detached() noexcept { save_ = ISaveFilesOnIo::Save{.gen = save_.gen.next()}; }
 
             [[nodiscard]] const ISaveFilesOnIo::Save& save() const noexcept { return save_; }
 

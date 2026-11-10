@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "svc/pll_solver.h"
+#include "svc/pll_block.h"
 
 namespace mister::svc {
 

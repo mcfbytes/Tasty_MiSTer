@@ -18,7 +18,7 @@ constexpr std::size_t kInlineRecent = 5;
 
 HdHomePlan::HdHomePlan(const HdPlanInputs& in)
     : ctx_(in.ctx),
-      cores_(make_system_page(in.ctx.sys)),
+      cores_(make_system_page(in.ctx.sys, in.ctx.session)),
       launch_(in),
       pair_(in.ctx, app::RowTier::Verb),
       all_row_(

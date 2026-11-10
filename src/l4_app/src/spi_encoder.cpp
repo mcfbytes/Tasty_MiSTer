@@ -17,7 +17,7 @@
 #include "hal/spi_transport.h"
 #include "proto/block_slots.h"
 #include "proto/core_session.h"
-#include "proto/joystick.h"
+#include "proto/joystick_port.h"
 #include "proto/link_op.h"
 #include "proto/osd_surface.h"
 #include "proto/ps2_frame.h"
@@ -43,7 +43,8 @@ SpiEncoder::SpiEncoder(
     OsdWire& osd,
     proto::BlockSlots& slots,
     VideoWire& video,
-    svc::InputEmitter& em
+    svc::InputEmitter& em,
+    SessionTally& session_tally
 ) noexcept
     : link_(link),
       signals_(signals),
@@ -51,7 +52,8 @@ SpiEncoder::SpiEncoder(
       osd_(osd),
       slots_(slots),
       video_(video),
-      em_(em) {}
+      em_(em),
+      session_tally_(session_tally) {}
 
 ILinkEncoder::Outcome SpiEncoder::encode(const proto::LinkOp& op, const LinkOpCtx& ctx) noexcept {
     TASTY_SEAT_BODY(SpiEncoder);
@@ -118,7 +120,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
             std::span<const std::uint8_t>(sampled.b, sizeof sampled.b)
         );
     } else {
-        const auto bytes = ctx.inbox.bytes(a.bytes);
+        const auto bytes = ctx.tx.bytes(a.bytes);
         flushed = osd.flush_row(link, row, bytes);
     }
     if (!flushed) {
@@ -243,7 +245,7 @@ ILinkEncoder::Outcome SpiEncoder::on(
     TASTY_SEAT_BODY(SpiEncoder);
 
     proto::Link link{link_};
-    if (!video_.emit(link, a.block, a.gen, infra::OptRef<proto::IResetFence>{ctx.fence})) {
+    if (!video_.emit(link, a, infra::OptRef<proto::IResetFence>{ctx.fence})) {
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -290,7 +292,8 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (!ctx.roles || !ctx.roles->acts) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    if (!ctx.roles->acts->set_dip_counted(ctx.core, a.row, a.choice)) {
+    if (const auto r = ctx.roles->acts->set_dip_counted(ctx.core, a.row, a.choice); !r) {
+        session_tally_.last_error = r.error();
         return ILinkEncoder::Outcome::Dropped;
     }
     return ILinkEncoder::Outcome::Encoded;
@@ -304,8 +307,11 @@ ILinkEncoder::Outcome SpiEncoder::on(
     if (!ctx.roles || !ctx.roles->acts) {
         return ILinkEncoder::Outcome::Dropped;
     }
-    const bool ok = ctx.roles->acts->set_option_counted(ctx.core, a.row, a.choice);
-    return ok ? ILinkEncoder::Outcome::Encoded : ILinkEncoder::Outcome::Dropped;
+    if (const auto r = ctx.roles->acts->set_option_counted(ctx.core, a.row, a.choice); !r) {
+        session_tally_.last_error = r.error();
+        return ILinkEncoder::Outcome::Dropped;
+    }
+    return ILinkEncoder::Outcome::Encoded;
 }
 
 ILinkEncoder::Outcome SpiEncoder::on(

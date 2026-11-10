@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/ini_key_edit.h"
 
+#include "infra/ascii.h"
+
 #include <cstddef>
 #include <optional>
 
@@ -10,20 +12,6 @@ namespace {
 
 bool is_blank(char c) noexcept {
     return c == ' ' || c == '\t';
-}
-
-char lower(char c) noexcept {
-    return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 32) : c;
-}
-
-bool iequals(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        if (lower(a[i]) != lower(b[i]))
-            return false;
-    }
-    return true;
 }
 
 std::string_view skip_blanks(std::string_view s) noexcept {
@@ -49,7 +37,7 @@ std::optional<ValueSpan> value_span(std::string_view line, std::string_view key)
     std::size_t i = 0;
     while (i < line.size() && is_blank(line[i]))
         ++i;
-    if (line.size() - i <= key.size() || !iequals(line.substr(i, key.size()), key))
+    if (line.size() - i <= key.size() || !infra::ieq(line.substr(i, key.size()), key))
         return std::nullopt;
     i += key.size();
     if (line[i] != '=' && !is_blank(line[i]))
@@ -100,7 +88,7 @@ std::string ini_set_key(std::string_view text, std::string_view key, std::string
                                                                   : value_span(line, key);
         if (name) {
             in_section = true;
-            in_main = iequals(*name, "MiSTer");
+            in_main = infra::ieq(*name, "MiSTer");
             out.append(text.substr(pos, next - pos));
             if (in_main && insert_at == std::string::npos) {
                 if (nl == std::string_view::npos) {

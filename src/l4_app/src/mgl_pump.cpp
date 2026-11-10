@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/mgl_pump.h"
 
+#include "app/mgl_slot_remember.h"
+
 #include "app/identity_latch.h"
 #include "app/mgl_item_dispatch.h"
 #include "app/info_sink.h"
@@ -27,15 +29,16 @@ namespace {
 
 using namespace std::chrono_literals;
 
-void split_rbf(std::string_view want, std::string_view& dir, std::string_view& stem) {
+struct RbfName {
+    std::string_view dir;
+    std::string_view stem;
+};
+
+[[nodiscard]] RbfName split_rbf(std::string_view want) {
     const std::size_t slash = want.rfind('/');
-    if (slash == std::string_view::npos) {
-        dir = {};
-        stem = want;
-        return;
-    }
-    dir = want.substr(0, slash);
-    stem = want.substr(slash + 1);
+    if (slash == std::string_view::npos)
+        return RbfName{.dir = {}, .stem = want};
+    return RbfName{.dir = want.substr(0, slash), .stem = want.substr(slash + 1)};
 }
 
 std::string games_home(const svc::Vfs& vfs, std::string_view dir) {
@@ -48,6 +51,18 @@ std::string games_home(const svc::Vfs& vfs, std::string_view dir) {
         return *p;
     return games;
 }
+
+struct IsFileItem {
+    using Result = bool;
+
+    [[nodiscard]] bool on(const MglItem::Load& load, const MglItem::Head&) noexcept {
+        return load.slot == MglItem::Slot::File;
+    }
+
+    [[nodiscard]] bool on(const MglItem::Reset&, const MglItem::Head&) noexcept { return false; }
+
+    [[nodiscard]] bool misrouted(const MglItem&) noexcept { return false; }
+};
 
 }
 
@@ -65,13 +80,13 @@ MglPump::MglPump(const svc::Vfs& vfs, const os::IClock& clock, Wiring wiring) no
       ) {}
 
 void MglPump::bind_homes() {
-    SessionIdentity id{};
-    bool bound = identity_.copy(id);
-    if (bound) {
+    const std::optional<SessionIdentity> id = identity_.copy();
+    bool bound = id.has_value();
+    if (id) {
 
-        const std::string file_home = games_home(vfs_, home_name(id));
-        const std::string image_home = !id.cue_dir.empty() ? games_home(vfs_, id.cue_dir)
-                                                           : file_home;
+        const std::string file_home = games_home(vfs_, home_name(*id));
+        const std::string image_home = !id->cue_dir.empty() ? games_home(vfs_, id->cue_dir)
+                                                            : file_home;
         bound = player_.set_homes(file_home, image_home);
     }
     if (bound)
@@ -93,37 +108,15 @@ void MglPump::latch_remember_() {
 
     if (player_.scope().gen.v == 0 || conf_scratch_.truncated)
         return;
-    const auto table = proto::ItemTable::parse(
-        std::string_view(conf_scratch_.text, conf_scratch_.len)
-    );
+    const auto table = proto::ItemTable::parse(conf_scratch_.view());
     if (!table)
         return;
-    SessionIdentity id{};
-    const RememberedStem stem = identity_.copy(id) ? id.stem
-                                                   : RememberedStem::of(table->core_name(), {});
+    const std::optional<SessionIdentity> id = identity_.copy();
+    const RememberedStem stem = id ? id->stem : RememberedStem::of(table->core_name(), {});
     const std::vector<proto::ConfStrEntry> slots = proto::ConfStr::slots_of(*table);
-    for (MglItemNo i{}; i.below(player_.count()); i = i.next()) {
-        const auto ld = load_of(player_.item(i));
-        if (!ld)
-            continue;
-        const bool file = ld->slot == MglItem::Slot::File;
-        const proto::FileSlotHit hit = proto::ConfStr::find_slot_in(
-            slots,
-            file ? 'F' : 'S',
-            ld->index
-        );
-
-        if (!hit.entry || !hit.entry->store_name)
-            continue;
-        if (!file && hit.how != proto::FileSlotMatch::Exact)
-            continue;
-        player_.remember(
-            i,
-            stem,
-            file ? RememberedSlot::File : RememberedSlot::Mount,
-            hit.entry->ioctl_index
-        );
-    }
+    SlotRemember remember{player_, slots, stem};
+    for (MglItemNo i{}; i.below(player_.count()); i = i.next())
+        infra::dispatch<MglItemRoutes>(player_.item(i), remember, i);
 }
 
 bool MglPump::take_playlist(std::string_view path) noexcept {
@@ -177,26 +170,19 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
         return;
     }
 
-    Ex<void> doc;
     if (!armed_doc_) {
-        doc = player_.parse(std::string_view{doc_, doc_len_}, true);
+        player_.parse(std::string_view{doc_, doc_len_}, true);
     } else {
 
         const Mgl& mgl = *armed_doc_;
-        doc = player_.adopt(
-            infra::make<MglItem>(MglItem::Load{
-                .slot = mgl.slot,
-                .index = mgl.index,
-                .delay_s = mgl.delay_s,
-                .path = mgl.path
-            }),
+        player_.adopt(
+            infra::make<MglItem>(
+                MglItem::Load{.slot = mgl.slot, .index = mgl.index, .path = mgl.path},
+                MglItem::Head{.delay_s = mgl.delay_s}
+            ),
             MglPlayer::PathBase::Card,
             true
         );
-    }
-    if (!doc) {
-        abandon(InfoId::CoreLoadFailed, doc.error().code);
-        return;
     }
     armed_doc_.reset();
     bind_homes();
@@ -208,10 +194,10 @@ void MglPump::on_core_loaded(CorrelationTag tag, bool mgl_capable) {
         return;
     }
 
-    for (MglItemNo i{}; i.below(player_.count()); i = i.next()) {
-        if (is_file_load(player_.item(i)))
+    IsFileItem is_file;
+    for (MglItemNo i{}; i.below(player_.count()); i = i.next())
+        if (infra::dispatch<MglItemRoutes>(player_.item(i), is_file))
             ++stats_.file_items;
-    }
     player_.arm(clock_);
     busy_since_.reset();
     enter(State::Playing);
@@ -504,9 +490,7 @@ void MglPump::fail_read_(Errc code) noexcept {
 }
 
 Ex<void> MglPump::resolve_rbf(std::string_view want) {
-    std::string_view dir;
-    std::string_view stem;
-    split_rbf(want, dir, stem);
+    const auto [dir, stem] = split_rbf(want);
 
     auto found = resolve_rbf_name(vfs_, dir, stem, false);
     if (!found)

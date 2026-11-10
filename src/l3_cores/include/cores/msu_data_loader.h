@@ -5,6 +5,7 @@
 #include <span>
 
 #include "cores/loader.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
@@ -26,7 +27,7 @@ public:
         ICoreWindow& window
     ) override;
 
-    [[nodiscard]] Ex<void> finish(ICoreWindow*) override {
+    [[nodiscard]] Ex<void> finish(infra::OptRef<ICoreWindow>) override {
         TASTY_SEAT_BODY(MsuDataLoader);
         return {};
     }

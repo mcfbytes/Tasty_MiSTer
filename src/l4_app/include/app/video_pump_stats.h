@@ -2,8 +2,12 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "app/types.h"
+#include "os/types.h"
+#include "infra/telemetry.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -17,6 +21,28 @@ enum class VideoI2cOutcome : std::uint8_t {
     Noemit,
     Failed,
 };
+
+[[nodiscard]] constexpr const char* video_i2c_outcome_name(VideoI2cOutcome o) noexcept {
+    switch (o) {
+        case VideoI2cOutcome::Unwired:
+            return "unwired";
+        case VideoI2cOutcome::Absent:
+            return "absent";
+        case VideoI2cOutcome::Ambiguous:
+            return "ambiguous";
+        case VideoI2cOutcome::Present:
+            return "present";
+        case VideoI2cOutcome::Configured:
+            return "configured";
+        case VideoI2cOutcome::Verified:
+            return "verified";
+        case VideoI2cOutcome::Noemit:
+            return "noemit";
+        case VideoI2cOutcome::Failed:
+            return "failed";
+    }
+    return "unknown";
+}
 
 inline constexpr std::uint8_t kI2cBusNeverAcked = 0xFFu;
 
@@ -42,28 +68,34 @@ struct VideoPumpStats {
     VideoI2cOutcome i2c = VideoI2cOutcome::Unwired;
 
     std::uint8_t i2c_bus = kI2cBusNeverAcked;
-    std::uint32_t i2c_writes = 0;
-    std::uint32_t i2c_errors = 0;
-    std::uint8_t i2c_fail_reg = 0;
+    svc::Tally i2c_writes{};
+    svc::Tally i2c_errors{};
+    std::optional<os::I2cReg> i2c_fail_reg{};
 
     std::uint8_t i2c_first_op = 0;
-    std::uint8_t i2c_first_reg = 0;
-    std::uint16_t i2c_first_errno = 0;
-    std::uint16_t i2c_last_errno = 0;
+    std::optional<os::I2cReg> i2c_first_reg{};
+    svc::OsErrno i2c_first_errno{};
+    svc::OsErrno i2c_last_errno{};
     std::uint32_t i2c_verify_errors = 0;
     std::uint32_t i2c_poll_errors = 0;
     std::uint32_t i2c_reprobes = 0;
-    std::uint32_t i2c_trips = 0;
+    svc::Tally i2c_trips{};
     bool i2c_breaker_open = false;
 
     std::uint32_t spd_sends = 0;
     std::uint32_t spd_disables = 0;
     std::uint32_t spd_skips_dv = 0;
     std::uint32_t spd_noname = 0;
-    std::uint8_t spd_fail_reg = 0;
+    std::optional<os::I2cReg> spd_fail_reg{};
 
     std::uint32_t filter_loads = 0;
     std::uint32_t family_switches = 0;
 };
+
+[[nodiscard]] inline os::I2cReg reg_for_print(std::optional<os::I2cReg> reg) noexcept {
+    return reg.value_or(os::I2cReg{});
+}
+
+using VideoStatsCell = xthread::Telemetry<VideoPumpStats, SeatTag::Ui>;
 
 }

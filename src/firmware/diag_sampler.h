@@ -7,14 +7,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
+
+#include "app/png_encoder.h"
 
 #include "app/cmd_fifo.h"
 #include "reactor/frame_clock.h"
 #include "reactor/round_timing.h"
 #include "reactor/round_trace.h"
 #include "app/mgl_pump.h"
-#include "app/osd_wire.h"
+#include "app/ui_page_record.h"
 #include "app/doorbell_cell.h"
 #include "app/event.h"
 #include "app/diag_counters.h"
@@ -33,16 +38,20 @@
 #include "app/replay_status.h"
 #include "app/hd_osd_status.h"
 #include "diag_records.h"
+#include "main_sess_cells.h"
 #include "rt_evidence.h"
+#include "sess_view.h"
 #include "infra/counter.h"
 #include "infra/diag_log.h"
 #include "infra/log_lane.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/rt_stats.h"
 #include "infra/wake_flag.h"
 #include "hal/thread_map.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "proto/types.h"
 
 namespace mister::app {
 class IFrameSource;
@@ -72,7 +81,7 @@ struct DiagStats {
     xthread::Counter drains{};
     xthread::Telemetry<std::uint64_t, SeatTag::Diag> heartbeat_last{};
     xthread::Counter heartbeat_stalls{};
-    xthread::Telemetry<std::uint64_t, SeatTag::Diag> rss_bytes{};
+    xthread::Telemetry<proto::FileSize, SeatTag::Diag> rss_bytes{};
     xthread::Counter rss_over_ceiling{};
 };
 
@@ -86,15 +95,11 @@ public:
     using Main = xthread::Telemetry<T, SeatTag::Main>;
 
     struct DeviceCells {
-        const Main<std::uint32_t>& mgl_row0;
+        const xthread::Counter& mgl_row0;
         const Main<app::LoadWindowCounts>& window_counts;
         const app::BayCountsCell& bay_counts;
         const app::DiagCountersCell& diag;
-        const Main<std::uint32_t>& pause_expiries;
-        const Main<std::uint32_t>& recover_polls;
-        const Main<std::uint32_t>& save_write_failures;
-        const Main<app::FallbackCounts>& fallbacks;
-        const Main<std::uint32_t>& ini_write_failures;
+        MainSessCells sess;
         const app::DoorbellStatsCell& doorbell;
         const reactor::RoundTimingCell& round_timing;
         reactor::RoundTraceLane& round_traces;
@@ -109,22 +114,10 @@ public:
     struct Sources {
         infra::OptRef<const app::CmdFifoCell> fifo{};
         infra::OptRef<const app::MglPumpCell> mgl{};
-        const Main<std::uint32_t>& mgl_row0;
-        const Main<app::LoadWindowCounts>& window_counts;
-        const app::BayCountsCell& bay_counts;
+        DeviceCells device;
         const app::VideoStatsCell& video_stats;
         const app::VideoGeometryCell& video_geometry;
-        app::VideoWire& video_wire;
-        const app::DiagCountersCell& diag;
-        const Main<std::uint32_t>& pause_expiries;
-        const Main<std::uint32_t>& recover_polls;
-        const Main<std::uint32_t>& save_write_failures;
-        const Main<app::FallbackCounts>& fallbacks;
-        const Main<std::uint32_t>& ini_write_failures;
-        const app::DoorbellStatsCell& doorbell;
-        const reactor::RoundTimingCell& round_timing;
-        reactor::RoundTraceLane& round_traces;
-        infra::OptRef<const reactor::FrameCell> frames{};
+        const app::VideoWire& video_wire;
         infra::OptRef<const app::UiPageCell> ui_pages{};
         infra::OptRef<const app::HdOsdStatusCell> hd{};
         const app::ReplayStatusCell& replay;
@@ -132,31 +125,26 @@ public:
         const app::EncodeStatusCell& rec_encode;
         const app::RecWriteStatusCell& rec_write;
         const app::AviWriteStatusCell& rec_avi;
-        app::ScreenshotQueue& screenshots;
-        infra::OptRef<const app::SectorRouteCell> sector_route{};
-        infra::OptRef<const app::OsdRouteCell> osd_route{};
-        infra::OptRef<const app::SysRouteCell> sys_route{};
-        infra::OptRef<xthread::MainLogLane> main_log{};
     };
 
     struct Services {
         infra::OptRef<app::IFrameSource> frame_source{};
         infra::OptRef<const app::InputSample> input_sample{};
         infra::OptRef<app::InputBuild> input_build{};
-        infra::OptRef<svc::ChdPrefetch> prefetch{};
+        infra::OptRef<const svc::ChdPrefetch> prefetch{};
     };
 
-    DiagSampler(
-        xthread::RtStats& stats,
-        app::EventQueue<SeatTag::RT>& events,
-        const Main<RtEvidence>& ev,
-        const xthread::WakeFlag& quiescing,
-        const xthread::Telemetry<bool, SeatTag::RT>& transitioning,
-        xthread::DiagLog& diag,
-        xthread::LogLane& rt_lane,
-        const Sources& sources,
-        const Services& services
-    ) noexcept;
+    struct Wiring {
+        xthread::RtStats& stats;
+        const app::EventQueue<SeatTag::RT>& events;
+        const Main<RtEvidence>& ev;
+        const xthread::WakeFlag& quiescing;
+        const xthread::Telemetry<bool, SeatTag::RT>& transitioning;
+        xthread::DiagLog& diag;
+        xthread::LogLane& rt_lane;
+    };
+
+    DiagSampler(const Wiring& wiring, const Sources& sources, const Services& services) noexcept;
 
     DiagSampler(const DiagSampler&) = delete;
     DiagSampler& operator=(const DiagSampler&) = delete;
@@ -164,8 +152,6 @@ public:
     bool open_diag(const char* path) noexcept { return diag_.open(path); }
 
     const xthread::DiagLog& diag() const noexcept { return diag_; }
-
-    xthread::DiagLog& diag_sink() noexcept { return diag_; }
 
     xthread::LogLane* rt_log_lane() noexcept { return &lane_rt_; }
 
@@ -198,9 +184,16 @@ public:
 
     void render_final() noexcept;
 
+    struct RssSample {
+        proto::FileSize rss_bytes{};
+        proto::FileSize ceiling_bytes{};
+
+        [[nodiscard]] constexpr bool over() const noexcept { return rss_bytes > ceiling_bytes; }
+    };
+
     [[nodiscard]] std::uint64_t rss_ceiling_now() const noexcept;
 
-    void observe_rss(std::uint64_t rss, std::uint64_t ceiling) noexcept;
+    void observe_rss(RssSample reading) noexcept;
     static constexpr unsigned kRssOverSamples = 2;
 
     void on(const LogRec::DeadlineMiss& a, const LogRec::Head& h) noexcept;
@@ -254,9 +247,23 @@ private:
 
     CdInstruments cd_instruments() const noexcept;
 
-    void render_records(const char* reason) noexcept;
+    enum class RecordReason : std::uint8_t { Cmd, Alarm, Final };
 
-    void render_rtstats(const char* reason, const app::DiagCounters& dc) noexcept;
+    [[nodiscard]] static constexpr const char* name(RecordReason r) noexcept {
+        switch (r) {
+            case RecordReason::Cmd:
+                return "cmd";
+            case RecordReason::Alarm:
+                return "alarm";
+            case RecordReason::Final:
+                return "final";
+        }
+        std::unreachable();
+    }
+
+    void render_records(RecordReason reason) noexcept;
+
+    void render_rtstats(RecordReason reason, const app::DiagCounters& dc) noexcept;
 
     template <DiagRecord R>
     void emit_(const R& r, const RecordCtx& ctx) noexcept;
@@ -312,14 +319,47 @@ private:
     static constexpr TraceLines kTraceLinesPerWindow{16};
 
     using LossCounts = std::array<std::uint32_t, infra::ordinal(LogRec::Kind::kCount)>;
-    void voice_log_losses_(const LossCounts& losses, LossCounts& last, const char* src) noexcept;
+
+    using LossMoves = std::
+        array<std::optional<std::uint32_t>, infra::ordinal(LogRec::Kind::kCount)>;
+
+    struct LossWatch {
+        TASTY_SEAT_RESIDENT(Diag);
+
+        LossCounts last{};
+
+        [[nodiscard]] LossMoves moved(const LossCounts& losses) noexcept {
+            LossMoves out{};
+            for (std::size_t k = 0; k < last.size(); ++k) {
+                if (losses[k] == last[k])
+                    continue;
+                last[k] = losses[k];
+                out[k] = losses[k];
+            }
+            return out;
+        }
+    };
+
+    enum class LogLaneId : std::uint8_t { Rt, Main };
+
+    [[nodiscard]] static constexpr const char* name(LogLaneId l) noexcept {
+        switch (l) {
+            case LogLaneId::Rt:
+                return "log";
+            case LogLaneId::Main:
+                return "log_main";
+        }
+        std::unreachable();
+    }
+
+    void voice_log_losses_(const LossMoves& moved, LogLaneId lane) noexcept;
 
     std::uint64_t rt_evidence_mask() const noexcept;
     unsigned rt_name_mask() const noexcept;
     unsigned rt_first_errno() const noexcept;
 
     xthread::RtStats& stats_;
-    app::EventQueue<SeatTag::RT>& events_;
+    const app::EventQueue<SeatTag::RT>& events_;
 
     const Main<RtEvidence>& ev_cell_;
     Main<RtEvidence>::Reader ev_reader_{};
@@ -328,13 +368,14 @@ private:
     const xthread::WakeFlag& quiescing_;
     const xthread::Telemetry<bool, SeatTag::RT>& transitioning_;
 
-    app::VideoWire& video_wire_;
+    const app::VideoWire& video_wire_;
     infra::OptRef<app::InputBuild> input_build_{};
     infra::OptRef<const app::InputSample> input_{};
-    infra::OptRef<svc::ChdPrefetch> prefetch_{};
+    infra::OptRef<const svc::ChdPrefetch> prefetch_{};
 
     infra::OptRef<const reactor::FrameCell> frames_{};
     app::ScreenshotQueue& shots_;
+    app::PngEncoder png_;
 
     infra::OptRef<app::IFrameSource> frame_src_{};
     std::string shot_dir_;
@@ -342,7 +383,7 @@ private:
     std::uint32_t shots_failed_ = 0;
     infra::OptRef<const app::CmdFifoCell> fifo_stats_{};
     infra::OptRef<const app::MglPumpCell> mgl_stats_{};
-    const xthread::Telemetry<std::uint32_t, SeatTag::Main>& mgl_row0_;
+    const xthread::Counter& mgl_row0_;
     const xthread::Telemetry<app::LoadWindowCounts, SeatTag::Main>& window_counts_;
     const app::VideoStatsCell& video_stats_;
     const app::VideoGeometryCell& video_geo_;
@@ -365,8 +406,7 @@ private:
     infra::OptRef<xthread::MainLogLane> lane_main_{};
     xthread::MainLogLane::Consumer main_rx_;
 
-    LossCounts last_log_loss_{};
-    LossCounts last_main_loss_{};
+    std::array<LossWatch, 2> loss_watch_{};
     std::uint32_t log_misrouted_ = 0;
     std::uint32_t last_log_misrouted_ = 0;
     std::uint32_t diag_seq_ = 0;
@@ -379,7 +419,7 @@ private:
     std::uint32_t last_rss_over_ = 0;
     unsigned rss_over_streak_ = 0;
     std::uint32_t last_spin_ = 0;
-    std::uint32_t last_ring_[kNumRings] = {};
+    std::array<std::uint32_t, infra::ordinal(xthread::RtStats::Ring::kCount)> last_ring_{};
     std::uint32_t last_dlm_ = 0;
     DiagRecords records_;
     DiagStats diag_stats_{};

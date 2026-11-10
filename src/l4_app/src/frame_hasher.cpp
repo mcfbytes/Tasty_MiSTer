@@ -1,28 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/frame_hasher.h"
 
-#include <zlib.h>
-
 #include <algorithm>
 
 #include "app/log_clock.h"
+#include "app/raw_frame_dispatch.h"
 #include "infra/byte_view.h"
+#include "infra/message_sum.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
-std::uint32_t FrameHasher::hash_rows(const RawFrameSlot& s) noexcept {
-    uLong crc = ::crc32(0L, Z_NULL, 0);
+svc::Crc32 FrameHasher::hash_rows(const RawFrameSlot::Frame& s) noexcept {
+    svc::Crc32 crc{};
     if (s.rgb.bytes.empty())
-        return static_cast<std::uint32_t>(crc);
+        return crc;
     const RowBytes row = rgb_row_of(s.width);
     s.rgb.each_row(row, [&](std::span<const std::byte> line) {
-        crc = ::crc32(
-            crc,
-            infra::byte_cast<const std::uint8_t>(line).data(),
-            static_cast<uInt>(line.size())
-        );
+        crc = svc::crc32_extend(crc, infra::byte_cast<const std::uint8_t>(line));
     });
-    return static_cast<std::uint32_t>(crc);
+    return crc;
 }
 
 bool FrameHasher::idle() const noexcept {
@@ -46,46 +43,57 @@ void FrameHasher::release() noexcept {
 }
 
 bool FrameHasher::push_(const SidecarMsg& m) noexcept {
-    if (w_.out.push(m)) {
-        if (m.kind == SidecarKind::Row)
-            ++st_.rows;
+    if (w_.out.push(m))
         return true;
-    }
     ++st_.ring_full;
     dirty_ = true;
     return false;
 }
 
-bool FrameHasher::chunk_(const RawFrameSlot& s, bool real, SidecarMsg& m) noexcept {
+bool FrameHasher::push_row_(const SidecarMsg::Row& row, ControlGeneration gen) noexcept {
+    if (!push_(infra::make<SidecarMsg>(row, SidecarMsg::Head{gen})))
+        return false;
+    ++st_.rows;
+    return true;
+}
+
+template <class A>
+bool FrameHasher::chunk_(
+    const A& s,
+    ControlGeneration gen,
+    bool real,
+    SidecarMsg::Row& row
+) noexcept {
     if (!chunked_) {
-        if (!w_.video.chunk(s, real, m.stamp.core_frame, m.stamp.movie_frame))
+        if (!w_.video.chunk(s, gen, real, row.stamp.core_frame, row.stamp.movie_frame))
             return false;
         chunked_ = true;
     }
     const AviEncoder::Position p = w_.video.position();
-    m.segment = p.segment;
-    m.seg_frame = p.lost ? -1 : p.frame;
+    row.segment = p.segment;
+    row.seg_frame = p.lost ? -1 : p.frame;
     return true;
 }
 
-bool FrameHasher::emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept {
-    m.kind = SidecarKind::Row;
-    m.width = s.width;
-    m.height = s.rgb.rows;
+template <class A>
+bool FrameHasher::emit_runs_(const A& s, ControlGeneration gen) noexcept {
+    SidecarMsg::Row row{};
+    row.width = s.width;
+    row.height = s.rgb.rows;
     std::uint32_t k = 0;
     for (std::uint8_t r = 0; r < s.runs; ++r) {
         const FrameStampRun& run = s.run[r];
         for (CoreFrameCount i{}; i < run.count; i += CoreFrameCount{1}, ++k) {
             if (k < next_)
                 continue;
-            m.hash = prev_hash_;
-            m.stamp = run.stamp_at(i);
+            row.hash = prev_hash_;
+            row.stamp = run.stamp_at(i);
             if (s.stamp.movie_frame >= MovieFrame{}) {
                 const WideMovieFrame mf = wide_frame(s.stamp.movie_frame)
-                    - (s.stamp.core_frame - m.stamp.core_frame).movie_span();
-                m.stamp.movie_frame = std::max(mf, kNoWideMovieFrame).narrowed();
+                    - (s.stamp.core_frame - row.stamp.core_frame).movie_span();
+                row.stamp.movie_frame = std::max(mf, kNoWideMovieFrame).narrowed();
             }
-            if (!chunk_(s, false, m) || !push_(m))
+            if (!chunk_(s, gen, false, row) || !push_row_(row, gen))
                 return false;
             ++next_;
             chunked_ = false;
@@ -94,41 +102,58 @@ bool FrameHasher::emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept {
     return true;
 }
 
-bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
-    SidecarMsg m{};
-    m.gen = s.gen;
-    if (s.kind == RawKind::Close && !emit_runs_(s, m))
-        return false;
-    if (s.kind != RawKind::Frame) {
-        if (!chunked_) {
-            if (!(s.kind == RawKind::Open ? w_.video.open(s) : w_.video.close(s)))
-                return false;
-        }
-        chunked_ = true;
-        m.kind = s.kind == RawKind::Open ? SidecarKind::Open : SidecarKind::Close;
-        m.path = s.path;
-        if (s.kind == RawKind::Open)
-            prev_hash_ = 0;
-        return push_(m);
-    }
-    if (!emit_runs_(s, m))
+bool FrameHasher::on(const RawFrameSlot::Frame& s, ControlGeneration head) noexcept {
+    if (!emit_runs_(s, head))
         return false;
     const bool real = s.stamp.dup == DupReason::None && !s.rgb.bytes.empty();
     if (real && !hashed_) {
-        const std::chrono::nanoseconds t0 = w_.clock.now();
+        const auto t0 = w_.clock.now();
         cur_hash_ = hash_rows(s);
         hashed_ = true;
         ++st_.frames;
         st_.hash_us.note(us_of(w_.clock.now() - t0));
     }
-    m.stamp = s.stamp;
-    m.hash = real ? cur_hash_ : prev_hash_;
-    if (!chunk_(s, real, m) || !push_(m))
+    SidecarMsg::Row row{};
+    row.width = s.width;
+    row.height = s.rgb.rows;
+    row.hash = real ? cur_hash_ : prev_hash_;
+    row.stamp = s.stamp;
+    if (!chunk_(s, head, real, row) || !push_row_(row, head))
         return false;
 
     if (!w_.video.position().lost)
-        prev_hash_ = m.hash;
+        prev_hash_ = row.hash;
     return true;
+}
+
+bool FrameHasher::on(const RawFrameSlot::Open& s, ControlGeneration head) noexcept {
+    if (!chunked_) {
+        if (!w_.video.open(s, head))
+            return false;
+    }
+    chunked_ = true;
+    prev_hash_ = {};
+    return push_(infra::make<SidecarMsg>(SidecarMsg::Open{.path = s.path}, SidecarMsg::Head{head}));
+}
+
+bool FrameHasher::on(const RawFrameSlot::Close& s, ControlGeneration head) noexcept {
+    if (!emit_runs_(s, head))
+        return false;
+    if (!chunked_) {
+        if (!w_.video.close(s, head))
+            return false;
+    }
+    chunked_ = true;
+    return push_(infra::make<SidecarMsg>(SidecarMsg::Close{}, SidecarMsg::Head{head}));
+}
+
+bool FrameHasher::misrouted(const RawFrameSlot&) noexcept {
+    TASTY_SEAT_BODY(FrameHasher);
+    return true;
+}
+
+bool FrameHasher::emit_(const RawFrameSlot& s) noexcept {
+    return app::dispatch(s, *this);
 }
 
 void FrameHasher::serve() noexcept {
@@ -144,7 +169,6 @@ void FrameHasher::serve() noexcept {
         if (!job_)
             break;
         const bool done = emit_(*job_);
-        w_.writer_wake.kick_if_armed();
         if (!done) {
             w_.video.note_held();
             break;

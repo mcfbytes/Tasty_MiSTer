@@ -2,8 +2,10 @@
 #include "proto/conf_str_caps.h"
 #include "conf_str_detail.h"
 
-#include <cctype>
+#include <array>
 #include <charconv>
+
+#include "infra/ascii.h"
 
 namespace mister::proto {
 
@@ -32,28 +34,39 @@ constexpr std::string_view kAxiToken = "AXI:";
     return out;
 }
 
-bool starts_with_icase(std::string_view s, std::string_view prefix) {
-    if (s.size() < prefix.size())
-        return false;
-    for (std::size_t i = 0; i < prefix.size(); ++i) {
-        const auto a = static_cast<unsigned char>(s[i]);
-        const auto b = static_cast<unsigned char>(prefix[i]);
-        if (std::toupper(a) != std::toupper(b))
+struct CauseToken {
+    reactor::Cause cause;
+    std::string_view token;
+};
+
+constexpr std::array<CauseToken, 4> kCauseTokens{{
+    {reactor::Cause::Blk, "BLK"},
+    {reactor::Cause::Fifo, "FIFO"},
+    {reactor::Cause::Ring, "RING"},
+    {reactor::Cause::CoreTick, "TICK"},
+}};
+
+consteval bool cause_rows_join() noexcept {
+    for (std::size_t i = 0; i < kCauseTokens.size(); ++i) {
+        if (kCauseTokens[i].token.empty())
             return false;
+        for (std::size_t j = i + 1; j < kCauseTokens.size(); ++j) {
+            if (kCauseTokens[i].cause == kCauseTokens[j].cause)
+                return false;
+            if (kCauseTokens[i].token == kCauseTokens[j].token)
+                return false;
+        }
     }
     return true;
 }
 
+static_assert(cause_rows_join(), "IRQ class tokens: one row per declarable cause");
+
 std::optional<reactor::Cause> cause_from(std::string_view name) {
-    using reactor::Cause;
-    if (name == "BLK")
-        return Cause::Blk;
-    if (name == "FIFO")
-        return Cause::Fifo;
-    if (name == "RING")
-        return Cause::Ring;
-    if (name == "TICK")
-        return Cause::CoreTick;
+    for (const CauseToken& row : kCauseTokens) {
+        if (row.token == name)
+            return row.cause;
+    }
     return std::nullopt;
 }
 
@@ -102,9 +115,8 @@ std::optional<reactor::Cause> cause_from(std::string_view name) {
 }
 
 std::string_view ConfStrCaps::try_ss(std::string_view rest, hal::PhysRegion aperture) {
-    if (!starts_with_icase(rest, kSsToken))
+    if (!infra::istarts_with(rest, kSsToken))
         return rest;
-    constexpr std::uint32_t kMaxSaveStateBytes = 128u * 1024u * 1024u;
     std::size_t p = kSsToken.size();
     const Scan base_scan = scan_hex(rest, p);
     p = base_scan.pos;
@@ -120,23 +132,14 @@ std::string_view ConfStrCaps::try_ss(std::string_view rest, hal::PhysRegion aper
         size = size_scan.value;
     }
 
-    const std::optional<hal::FabricAddr> at = hal::to_fabric(aperture.phys);
-    const std::uint32_t low = at ? at->v : 0u;
-    const auto end = static_cast<std::uint32_t>(low + aperture.len);
-    const bool valid = at.has_value()
-        && size > 0
-        && size <= kMaxSaveStateBytes
-        && base >= low
-        && base < end
-        && (base + size) < end;
-    ss_ = valid ? std::optional<SaveStateDecl>(SaveStateDecl{hal::FabricAddr{base}, size})
-                : std::nullopt;
+    const SaveStateDecl draft{hal::FabricAddr{base}, size};
+    ss_ = draft.within(aperture) ? std::optional<SaveStateDecl>(draft) : std::nullopt;
     caps_.push_back({Capability::Kind::SaveState, std::string(rest.substr(0, p))});
     return rest.substr(next);
 }
 
 std::string_view ConfStrCaps::try_uart(std::string_view rest) {
-    if (!starts_with_icase(rest, kUartToken))
+    if (!infra::istarts_with(rest, kUartToken))
         return rest;
     const std::size_t p = scan_speed_list(rest, kUartToken.size());
     caps_.push_back({Capability::Kind::Uart, std::string(rest.substr(0, p))});
@@ -144,7 +147,7 @@ std::string_view ConfStrCaps::try_uart(std::string_view rest) {
 }
 
 std::string_view ConfStrCaps::try_midi(std::string_view rest) {
-    if (!starts_with_icase(rest, kMidiToken))
+    if (!infra::istarts_with(rest, kMidiToken))
         return rest;
     const std::size_t p = scan_speed_list(rest, kMidiToken.size());
     caps_.push_back({Capability::Kind::Midi, std::string(rest.substr(0, p))});
@@ -222,13 +225,19 @@ Ex<std::string_view> ConfStrCaps::try_axi(std::string_view rest) {
     if (parts.size() == kAxiMinParts) {
 
         axi_unkinded_.push_back(AxiUnkindedDecl{AxiRawBase{*addr}, *size});
-    } else if (parts[kAxiKindIndex] == "LW") {
-        axi_lw_.push_back(AxiLwDecl{hal::LwOffset{*addr}, *size});
-    } else if (parts[kAxiKindIndex] == "DDR") {
-        axi_ddr_.push_back(AxiDdrDecl{hal::FabricAddr{*addr}, *size});
     } else {
+        switch (axi_kind_of(parts[kAxiKindIndex])) {
+            case AxiKind::Lw:
+                axi_lw_.push_back(AxiLwDecl{hal::LwOffset{*addr}, *size});
+                break;
+            case AxiKind::Ddr:
+                axi_ddr_.push_back(AxiDdrDecl{hal::FabricAddr{*addr}, *size});
+                break;
+            case AxiKind::Unknown:
 
-        ++axi_unknown_kinds_;
+                ++axi_unknown_kinds_;
+                break;
+        }
     }
     caps_.push_back({Capability::Kind::Axi, std::string(rest.substr(0, seg_end))});
     return rest.substr(seg_end);

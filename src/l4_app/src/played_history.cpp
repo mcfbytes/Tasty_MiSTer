@@ -3,9 +3,9 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <cstring>
 #include <span>
 
+#include "app/text_field.h"
 #include "app/ui_write_lane.h"
 #include "infra/byte_view.h"
 #include "infra/endian.h"
@@ -21,16 +21,6 @@ constexpr std::string_view kRel = "config/played.dat";
     return e.code == Errc::not_found || (e.code == Errc::os && e.detail == ENOENT);
 }
 
-void put_field(std::span<char> dst, std::string_view s) {
-    const std::size_t n = std::min(s.size(), dst.size() - 1);
-    std::memcpy(dst.data(), s.data(), n);
-    dst[n] = '\0';
-}
-
-std::string_view get_field(const char* p, std::size_t cap) {
-    return std::string_view{p, ::strnlen(p, cap)};
-}
-
 }
 
 Ex<void> PlayedHistory::load() {
@@ -40,7 +30,7 @@ Ex<void> PlayedHistory::load() {
     records_.clear();
 
     std::vector<std::byte> buf(kFileBytes, std::byte{0});
-    auto f = vfs_->open(kRel, svc::OpenMode::ReadWhole);
+    auto f = vfs_.open(kRel, svc::OpenMode::ReadWhole);
     if (!f) {
 
         if (!no_file_yet(f.error())) {
@@ -91,11 +81,11 @@ Ex<void> PlayedHistory::load() {
                                                       .subspan(kHeaderBytes + i * sizeof(Stored))
                                                       .first<sizeof(Stored)>());
         Record r;
-        r.core_image.assign(get_field(s.core_image, kCoreImageCap));
-        r.core_name.assign(get_field(s.core_name, kCoreNameCap));
-        r.path.assign(get_field(s.path, kPathCap));
-        r.title.assign(get_field(s.title, kTitleCap));
-        r.ioctl_index = s.ioctl_index;
+        r.core_image.assign(TextField{std::span{s.core_image}}.text());
+        r.core_name.assign(TextField{std::span{s.core_name}}.text());
+        r.path.assign(TextField{std::span{s.path}}.text());
+        r.title.assign(TextField{std::span{s.title}}.text());
+        r.ioctl_index = proto::IoIndex{s.ioctl_index};
         r.slot = s.slot;
         r.unix_time = s.unix_time;
         if (!names_a_game(r) || !fields_fit(r)) {
@@ -143,14 +133,17 @@ Ex<void> PlayedHistory::save_() {
                 .first<8>(),
             r.unix_time
         );
-        put_field(std::span{rec + offsetof(Stored, core_image), kCoreImageCap}, r.core_image);
-        put_field(std::span{rec + offsetof(Stored, core_name), kCoreNameCap}, r.core_name);
-        put_field(std::span{rec + offsetof(Stored, path), kPathCap}, r.path);
-        put_field(std::span{rec + offsetof(Stored, title), kTitleCap}, r.title);
-        rec[offsetof(Stored, ioctl_index)] = static_cast<char>(r.ioctl_index);
+        const auto record = std::span<char, kRecordBytes>{rec, kRecordBytes};
+        TextField{record.subspan<offsetof(Stored, core_image), kCoreImageCap>()}.assign(
+            r.core_image
+        );
+        TextField{record.subspan<offsetof(Stored, core_name), kCoreNameCap>()}.assign(r.core_name);
+        TextField{record.subspan<offsetof(Stored, path), kPathCap>()}.assign(r.path);
+        TextField{record.subspan<offsetof(Stored, title), kTitleCap>()}.assign(r.title);
+        rec[offsetof(Stored, ioctl_index)] = r.ioctl_index.record_byte();
         rec[offsetof(Stored, slot)] = r.slot;
     }
-    const auto r = writes_->arm(kRel, buf, VerdictSink::Played);
+    const auto r = writes_.arm(kRel, buf, VerdictSink::Played);
     if (!r)
         ++errors_;
     return r;

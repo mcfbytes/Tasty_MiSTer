@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
+#include "app/output_size.h"
 
 namespace mister::app {
 
@@ -11,8 +11,7 @@ public:
     IOutputGeometry(const IOutputGeometry&) = delete;
     IOutputGeometry& operator=(const IOutputGeometry&) = delete;
 
-    [[nodiscard]] virtual std::uint16_t output_width() const noexcept = 0;
-    [[nodiscard]] virtual std::uint16_t output_height() const noexcept = 0;
+    [[nodiscard]] virtual OutputSize output_size() const noexcept = 0;
 
 protected:
     IOutputGeometry() = default;

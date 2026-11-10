@@ -13,12 +13,12 @@
 #include "app/page_description.h"
 #include "app/recents_store.h"
 #include "infra/opt_ref.h"
+#include "infra/utf8.h"
 #include "svc/vfs.h"
 #include "ui/browse_source.h"
 #include "ui/browser_host.h"
 #include "ui/draw_classic.h"
 #include "ui/page_row.h"
-#include "ui/page_window.h"
 #include "ui/page_walk.h"
 #include "ui/key_decoder.h"
 #include "ui/menu_model.h"
@@ -53,9 +53,9 @@ struct DisplayStem {
 
 DisplayStem display_stem(const BrowserEntry& e, bool cores) noexcept {
     const std::string_view name{e.altname};
-    if (e.is_dir && cores && !name.empty() && name.front() == '_')
+    if (e.is_dir() && cores && !name.empty() && name.front() == '_')
         return DisplayStem{name.substr(1), 1, 0};
-    if (e.from_zip && name.size() > kZipSuffixChars)
+    if (e.is_zip_dir() && name.size() > kZipSuffixChars)
         return DisplayStem{name.substr(0, name.size() - kZipSuffixChars), 0, kZipSuffixChars};
     return DisplayStem{name, 0, 0};
 }
@@ -83,65 +83,65 @@ std::string display_name(const BrowserEntry& e, bool cores) {
     if (e.altname.size() > kNameTrimAt)
         s[kNameTrimAt] = kMoreMarker;
     std::memcpy(s.data() + kNameCol, stem.view.data(), len);
-    if (e.is_dir) {
-        if (e.altname == "..") {
+    switch (e.kind) {
+        case EntryKind::UpDir:
             std::memcpy(s.data() + kUpTagCol, kUpTag.data(), kUpTag.size());
-        } else if (e.from_zip) {
+            break;
+        case EntryKind::ZipDir:
             std::memcpy(s.data() + kKindTagCol, kZipTag.data(), kZipTag.size());
-        } else {
+            break;
+        case EntryKind::Dir:
+        case EntryKind::Recent:
             std::memcpy(s.data() + kKindTagCol, kDirTag.data(), kDirTag.size());
-        }
-    } else if (!e.datecode.empty()) {
+            break;
+        case EntryKind::File: {
+            if (e.datecode.empty())
+                break;
 
-        const auto digit = [&](std::size_t i) {
-            return i < kDatecodeChars && e.datecode.size() > i ? e.datecode[i] : ' ';
-        };
-        char* d = s.data() + kDatecodeCol;
-        *d++ = ' ';
-        *d++ = e.datecode[0];
-        *d++ = digit(1);
-        *d++ = '.';
-        *d++ = digit(2);
-        *d++ = digit(3);
-        *d++ = '.';
-        *d++ = digit(4);
-        *d = digit(5);
-        if (e.altname.size() >= kDatecodeMarkAt) {
-            s[kDatecodeMarkAt] = kMoreMarker;
-            s[kNameTrimAt] = ' ';
+            const auto digit = [&](std::size_t i) {
+                return i < kDatecodeChars && e.datecode.size() > i ? e.datecode[i] : ' ';
+            };
+            char* d = s.data() + kDatecodeCol;
+            *d++ = ' ';
+            *d++ = e.datecode[0];
+            *d++ = digit(1);
+            *d++ = '.';
+            *d++ = digit(2);
+            *d++ = digit(3);
+            *d++ = '.';
+            *d++ = digit(4);
+            *d = digit(5);
+            if (e.altname.size() >= kDatecodeMarkAt) {
+                s[kDatecodeMarkAt] = kMoreMarker;
+                s[kNameTrimAt] = ' ';
+            }
+            break;
         }
     }
     return s;
 }
 
 std::string hd_entry_label(const BrowserEntry& e, bool cores) {
-    if (e.altname == "..")
+    if (e.is_up())
         return "Up";
     return display_stem(e, cores).str();
 }
 
 namespace {
 
-std::string_view utf8_prefix(std::string_view s, std::size_t cap) noexcept {
-    constexpr unsigned kUtf8ContinuationMask = 0xC0u;
-    constexpr unsigned kUtf8Continuation = 0x80u;
-    if (s.size() <= cap)
-        return s;
-    std::size_t n = cap;
-    while (n > 0 && (static_cast<unsigned char>(s[n]) & kUtf8ContinuationMask) == kUtf8Continuation)
-        --n;
-    return s.substr(0, n);
-}
-
 app::PageDescription::RowIcon icon_of(const BrowserEntry& e) noexcept {
-    if (e.recent)
-        return app::PageDescription::RowIcon::Recent;
-    if (e.altname == "..")
-        return app::PageDescription::RowIcon::Up;
-    if (e.from_zip)
-        return app::PageDescription::RowIcon::Archive;
-    if (e.is_dir)
-        return app::PageDescription::RowIcon::Folder;
+    switch (e.kind) {
+        case EntryKind::Recent:
+            return app::PageDescription::RowIcon::Recent;
+        case EntryKind::UpDir:
+            return app::PageDescription::RowIcon::Up;
+        case EntryKind::ZipDir:
+            return app::PageDescription::RowIcon::Archive;
+        case EntryKind::Dir:
+            return app::PageDescription::RowIcon::Folder;
+        case EntryKind::File:
+            return app::PageDescription::RowIcon::None;
+    }
     return app::PageDescription::RowIcon::None;
 }
 
@@ -194,7 +194,7 @@ void BrowserPage::on_enter(PageContext& ctx) {
     clock_ = ctx.clock;
     recents_ = ctx.recents;
 
-    (void)session_.open(*src_, static_cast<BrowserSession::Request&&>(req_));
+    (void)session_.open(src_, static_cast<BrowserSession::Request&&>(req_));
 
     if (session_.request().recents_first)
         (void)open_recents_list();
@@ -217,7 +217,7 @@ bool BrowserPage::walk(PageWalk& out) const {
     const RowIndex first = session_.view().viewport().first;
     const RowIndex selected = session_.view().viewport().selected;
 
-    const app::HdWindow win = window_page(out.page, selected, count);
+    const app::HdWindow win = out.window(selected, count);
     const RowRange hd_rows = rows(win.first, win.count);
 
     if (!session_.filter().empty())
@@ -254,15 +254,15 @@ bool BrowserPage::walk(PageWalk& out) const {
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
         (void)r.hd.label.assign(
-            utf8_prefix(hd_entry_label(e, cores), decltype(r.hd.label)::kCapacity)
+            infra::utf8_prefix(hd_entry_label(e, cores), decltype(r.hd.label)::kCapacity)
         );
-        r.hd.kind = e.is_dir ? app::PageDescription::RowKind::Submenu
-                             : app::PageDescription::RowKind::Action;
+        r.hd.kind = e.is_dir() ? app::PageDescription::RowKind::Submenu
+                               : app::PageDescription::RowKind::Action;
         r.hd.icon = icon_of(e);
         r.hd.enabled = !e.stippled;
         r.hd.selected = at == selected;
 
-        if (!e.is_dir && !e.datecode.empty())
+        if (!e.is_dir() && !e.datecode.empty())
             (void)r.hd.value.assign(hd_date_value(e.datecode));
         if (at < first || at - first >= height)
             continue;
@@ -330,17 +330,13 @@ Transition BrowserPage::handle(const UiEvent& ev) {
 
         session_.note_navigation();
         (void)session_.rescan();
-        const BrowserEntry* e = session_.view().selected();
+        const auto e = session_.view().selected();
 
-        if (e != nullptr
-            && e->recent
-            && session_.entries().size() > 1
-            && session_.entries()[1].is_dir
-            && session_.entries()[1].name == "..") {
+        if (e && e->is_recent() && session_.entries().size() > 1 && session_.entries()[1].is_up()) {
             session_.view().select(RowIndex{} + kOneRow);
             return select_current();
         }
-        if (e != nullptr && e->is_dir && e->name == "..")
+        if (e && e->is_up())
             return select_current();
         return Transition{};
     }
@@ -383,6 +379,7 @@ Transition BrowserPage::open_recents_list() {
         e.dir = static_cast<std::string&&>(r.dir);
         e.name = static_cast<std::string&&>(r.name);
         e.altname = static_cast<std::string&&>(r.label);
+        e.kind = EntryKind::File;
         e.stippled = !r.exists;
         mapped.push_back(static_cast<BrowserEntry&&>(e));
     }
@@ -411,9 +408,9 @@ Transition BrowserPage::handle_recents(const UiEvent& ev) {
     if (navigate_(ev))
         return Transition{};
     if (ev.buttons.has_any({UiEvent::Select})) {
-        const BrowserEntry* e = session_.view().selected();
+        const auto e = session_.view().selected();
 
-        if (e == nullptr || e->stippled) {
+        if (!e || e->stippled) {
             ++refusals_;
             return Transition{};
         }
@@ -451,18 +448,18 @@ bool BrowserPage::navigate_(const UiEvent& ev) {
 
 Transition BrowserPage::select_current() {
     const infra::OptRef<IBrowserHost> host = session_.request().host;
-    const BrowserEntry* e = session_.view().selected();
-    if (e == nullptr) {
+    const auto e = session_.view().selected();
+    if (!e) {
         ++refusals_;
         return Transition{};
     }
 
-    if (e->recent)
+    if (e->is_recent())
         return open_recents_list();
 
-    if (e->is_dir) {
+    if (e->is_dir()) {
 
-        if (session_.request().cd_descend && e->name != ".." && src_ != nullptr) {
+        if (session_.request().cd_descend && !e->is_up()) {
             std::string child = session_.path();
             if (!child.empty())
                 child.push_back('/');
@@ -472,11 +469,11 @@ Transition BrowserPage::select_current() {
             f.directories = false;
             f.files = true;
             f.zip_as_directory = false;
-            if (auto listing = src_->scan(child, f); listing && listing->size() == 1) {
+            if (auto listing = src_.scan(child, f); listing && listing->size() == 1) {
                 BrowserEntry picked;
                 picked.name = (*listing)[0].name;
                 picked.altname = picked.name;
-                picked.is_dir = false;
+                picked.kind = EntryKind::File;
                 child.push_back('/');
                 child.append(picked.name);
                 return host ? host->on_picked(picked, child) : Transition{Transition::Kind::Pop};

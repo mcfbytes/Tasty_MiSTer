@@ -3,7 +3,7 @@
 
 #include <string_view>
 
-#include "cores/staging_core.h"
+#include "cores/mount_state.h"
 #include "proto/types.h"
 
 namespace mister::cores {

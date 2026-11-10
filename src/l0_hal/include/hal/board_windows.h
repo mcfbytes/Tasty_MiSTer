@@ -17,15 +17,10 @@
 #include "hal/reg_block.h"
 #include "hal/reg_lend.h"
 #include "hal/register_window.h"
+#include "hal/taken_window.h"
 #include "hal/window_decl.h"
 
 namespace mister::hal {
-
-template <class Layout>
-struct TakenWindow {
-    RegisterWindow<Layout> regs;
-    WindowClaim claim;
-};
 
 struct WindowImage {
     WindowId id;
@@ -39,11 +34,6 @@ public:
     [[nodiscard]] static Ex<BoardWindows> open(
         const BoardProfile& profile,
         FallbackNotice notice = FallbackNotice::Announce
-    );
-
-    [[nodiscard]] static Ex<BoardWindows> attach(
-        const BoardProfile& profile,
-        std::span<const WindowImage> images
     );
 
     BoardWindows(BoardWindows&& o) noexcept
@@ -84,7 +74,14 @@ public:
     }
 
 private:
+    friend struct BoardWindowsTestAccess;
+
     explicit BoardWindows(const BoardProfile& profile) : profile_(&profile) {}
+
+    [[nodiscard]] static Ex<BoardWindows> attach(
+        const BoardProfile& profile,
+        std::span<const WindowImage> images
+    );
 
     [[nodiscard]] Ex<reg::Block> lead_of(WindowId id, std::size_t need) const;
 

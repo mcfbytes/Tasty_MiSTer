@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -12,7 +11,9 @@
 #include "cores/core_profile.h"
 #include "cores/ladder_context.h"
 #include "cores/st_media_fact.h"
+#include "cores/st_slot.h"
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "svc/file.h"
 
 namespace mister::cores {
@@ -30,7 +31,7 @@ public:
 
     [[nodiscard]] std::span<const std::string> next_slot_paths() const noexcept override {
         TASTY_SEAT_BODY(StMediaLadder);
-        return paths_;
+        return std::span<const std::string>(paths_.begin(), paths_.size());
     }
 
     static constexpr std::uint64_t kTosReadCap = 1024u * 1024u;
@@ -58,22 +59,24 @@ private:
 
     void restore_();
     [[nodiscard]] bool order_fact_(StMediaFact::Verb verb, Rung next);
-    [[nodiscard]] Ex<bool> order_mount_(std::uint8_t slot, std::string_view path, Rung next);
-    [[nodiscard]] Ex<bool> bind_acsi_(std::uint8_t slot, std::string_view path, Rung next);
+    [[nodiscard]] Ex<bool> order_mount_(st_ctrl::StSlot slot, std::string_view path, Rung next);
+    [[nodiscard]] Ex<bool> bind_acsi_(st_ctrl::StSlot slot, std::string_view path, Rung next);
 
     [[nodiscard]] std::vector<std::uint8_t> read_tos_() const;
     [[nodiscard]] std::vector<std::uint8_t> read_cart_() const;
-    [[nodiscard]] Ex<bool> intern_(std::uint8_t index, std::vector<std::uint8_t>&& bytes);
-    [[nodiscard]] Ex<bool> order_file_(std::uint8_t index, Rung answer);
+    [[nodiscard]] Ex<bool> intern_(st_ctrl::StSlot slot, std::vector<std::uint8_t>&& bytes);
+    [[nodiscard]] Ex<bool> order_file_(st_ctrl::StSlot slot, Rung answer);
     [[nodiscard]] Ex<bool> await_file_(Rung next);
 
     Rung rung_ = Rung::Done;
     bool cold_ = false;
-    std::uint8_t slot_ = 0;
+    std::string config_;
+    st_ctrl::StSlot slot_{};
     proto::FileId file_{};
     proto::ActKey act_{};
     std::chrono::nanoseconds due_ns_{};
-    std::array<std::string, kLadderCarrySlots> paths_{};
+
+    infra::IndexedArray<std::string, st_ctrl::StSlot::kCount, st_ctrl::StSlot> paths_{};
 };
 
 }

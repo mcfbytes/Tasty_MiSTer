@@ -19,7 +19,7 @@ public:
     using Port = LinkPort<LinkEvent::Ps2Control, LinkEvent::Ps2ControlEnded>;
 
     SpiPs2Decoder(hal::ISpiTransport& link, ILinkRouter& router) noexcept
-        : link_(&link),
+        : link_(link),
           out_{router} {}
 
     void probe() noexcept;
@@ -37,7 +37,7 @@ public:
 private:
     void count_error_() noexcept { errors_.add(1); }
 
-    hal::ISpiTransport* link_;
+    hal::ISpiTransport& link_;
     Port out_;
     bool ps2_control_ = false;
     static constexpr std::uint16_t kLedPollTicks = 100;

@@ -27,7 +27,7 @@ public:
 
     [[nodiscard]] svc::DiscMountState arm_mount(
         svc::DiscOp op,
-        const svc::CuePolicy* policy,
+        infra::OptRef<const svc::CuePolicy> policy,
         std::string_view path
     ) noexcept;
 

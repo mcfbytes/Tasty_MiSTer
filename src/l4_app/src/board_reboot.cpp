@@ -39,7 +39,8 @@ void BoardReboot::settle(bool cold) {
 
     if (owed_)
         return;
-    const std::uint16_t seq = ++seq_;
+    const proto::RebootSeq seq = seq_.next();
+    seq_ = seq;
     const proto::LinkOp::RebootNow quiesce{.cold = cold, .quiesce = true, .seq = seq};
     owed_ = OwedReboot{.cold = cold, .ordered = order_refusable_(quiesce), .seq = seq};
     due_ = os::Deadline::in(clock_, std::chrono::nanoseconds{kDrainBoundNs});

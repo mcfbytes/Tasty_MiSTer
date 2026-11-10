@@ -3,46 +3,16 @@
 
 namespace mister::cores::n64 {
 
-namespace {
-
-constexpr std::int64_t kMsNs = 1'000'000;
-
-}
-
-std::chrono::milliseconds NtscCadence::next_gap(bool pal) noexcept {
-    std::chrono::milliseconds gap = kLongGap;
-    switch (step_) {
-        case Step::Unprimed:
-            gap = kShortGap;
-            step_ = Step::Wrapped;
-            break;
-        case Step::Wrapped:
-            step_ = Step::FirstLong;
-            break;
-        case Step::FirstLong:
-            step_ = Step::SecondLong;
-            break;
-        case Step::SecondLong:
-            step_ = Step::Short;
-            break;
-        case Step::Short:
-            gap = kShortGap;
-            step_ = Step::FirstLong;
-            break;
-    }
-    return pal ? kPalGap : gap;
-}
-
-Ex<void> CheatEngine::apply(std::span<const std::uint8_t> table, std::uint32_t unit) {
+Ex<void> CheatEngine::apply(std::span<const std::uint8_t> table, CheatUnit unit) {
     TASTY_SEAT_BODY(CheatEngine);
     ++applies_;
     if (table.empty()) {
         count_ = 0;
         return {};
     }
-    if (unit != CheatCode::kBytes) {
+    if (unit != CheatUnit{CheatCode::kBytes}) {
         count_ = 0;
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), unit});
+        return std::unexpected(unit.refused(Errc::bad_format, ERR_SITE()));
     }
     std::size_t n = table.size() / CheatCode::kBytes;
     if (n > CheatCode::kMax) {
@@ -64,84 +34,86 @@ void CheatEngine::rearm_boot_codes() noexcept {
         return;
     for (std::uint32_t i = 0; i < count_; ++i)
         codes_[i].boot_code_done = false;
-    due_ns_ = clock_->now().count() + kResetGapMs * kMsNs;
+    due_ = clock_.now() + kResetGap;
 }
 
-CheatTick CheatEngine::tick(bool loaded, bool pal, bool enabled, bool gs_pressed) noexcept {
+CheatTick CheatEngine::tick(const CheatGates& gates) noexcept {
     TASTY_SEAT_BODY(CheatEngine);
-    const std::int64_t now = clock_->now().count();
-    if (due_ns_ != 0 && now < due_ns_)
+    const os::RawMonotonicClock::time_point now = clock_.now();
+    if (due_ && now < *due_)
         return CheatTick::Idle;
 
-    if (!loaded) {
-        due_ns_ = now + kNoGameGapMs * kMsNs;
+    if (!gates.loaded) {
+        due_ = now + kNoGameGap;
         return CheatTick::Idle;
     }
 
-    const std::int64_t gap_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                    cadence_.next_gap(pal)
-    )
-                                    .count();
+    const std::chrono::nanoseconds gap = cadence_.next_gap(gates.system);
 
-    const std::int64_t base = (due_ns_ == 0 || due_ns_ + kMaxLagMs * kMsNs < now) ? now : due_ns_;
-    due_ns_ = base + gap_ns;
+    const os::RawMonotonicClock::time_point base = (!due_ || *due_ + kMaxLag < now) ? now : *due_;
+    due_ = base + gap;
 
-    if (count_ == 0 || !enabled)
+    if (count_ == 0 || !gates.enabled)
         return CheatTick::Idle;
-    if (window_ == nullptr) {
+    if (!window_) {
         ++window_refusals_;
         return CheatTick::Idle;
     }
 
     ++passes_;
     for (std::uint32_t i = 0; i < count_; ++i) {
-        const int r = execute_(codes_[i], gs_pressed);
-        if (r == 0) {
+        switch (execute_(codes_[i], gates.gs_pressed)) {
+            case CodeOutcome::Unfulfilled:
 
-            while (i + 1 < count_ && codes_[i + 1].chained())
-                ++i;
-            continue;
+                while (i + 1 < count_ && codes_[i + 1].chained())
+                    ++i;
+                continue;
+            case CodeOutcome::Done:
+                continue;
+            case CodeOutcome::Invalid:
+                ++invalids_;
+                return CheatTick::Invalid;
         }
-        if (r == 1)
-            continue;
-        ++invalids_;
-        return CheatTick::Invalid;
     }
     return CheatTick::Ran;
 }
 
-int CheatEngine::execute_(CheatCode& c, bool gs_pressed) noexcept {
+CheatEngine::CodeOutcome CheatEngine::execute_(CheatCode& c, bool gs_pressed) noexcept {
     std::array<std::uint8_t, ByteMask::kBytes> mem{};
     const std::span<std::uint8_t> reach = c.mask.reach(mem);
     if (reach.empty())
-        return -1;
+        return CodeOutcome::Invalid;
 
     if (c.address >= window_->size() || c.address + reach.size() > window_->size())
-        return -1;
+        return CodeOutcome::Invalid;
 
     if (c.boot_code) {
         if (c.boot_code_done)
-            return 1;
+            return CodeOutcome::Done;
         c.boot_code_done = true;
     }
     if (c.gs_button && !gs_pressed)
-        return 1;
+        return CodeOutcome::Done;
 
     if (!c.cmp_type || *c.cmp_type != Compare::Always) {
         auto got = window_->read(c.address, std::as_writable_bytes(reach));
         if (!got) {
             ++wire_faults_;
-            return 1;
+
+            return CodeOutcome::Done;
         }
-        const int r = compare_(reach, c);
-        if (r != 1)
+        const CodeOutcome r = compare_(reach, c);
+        if (r != CodeOutcome::Done)
             return r;
     }
     (void)write_back_(c);
-    return 1;
+    return CodeOutcome::Done;
 }
 
-int CheatEngine::compare_(std::span<const std::uint8_t> mem, const CheatCode& c) noexcept {
+CheatEngine::CodeOutcome CheatEngine::compare_(
+    std::span<const std::uint8_t> mem,
+    const CheatCode& c
+) noexcept {
     std::uint32_t old_masked = 0;
     std::uint32_t new_masked = 0;
     c.mask.for_each_masked(mem, c.replace, [&](std::uint8_t m, std::uint8_t r) {
@@ -149,26 +121,26 @@ int CheatEngine::compare_(std::span<const std::uint8_t> mem, const CheatCode& c)
         new_masked = (new_masked << 8) | r;
     });
     if (!c.cmp_type)
-        return -1;
+        return CodeOutcome::Invalid;
     switch (*c.cmp_type) {
         case Compare::Equal:
-            return new_masked == old_masked ? 1 : 0;
+            return new_masked == old_masked ? CodeOutcome::Done : CodeOutcome::Unfulfilled;
         case Compare::Greater:
-            return new_masked > old_masked ? 1 : 0;
+            return new_masked > old_masked ? CodeOutcome::Done : CodeOutcome::Unfulfilled;
         case Compare::Less:
-            return new_masked < old_masked ? 1 : 0;
+            return new_masked < old_masked ? CodeOutcome::Done : CodeOutcome::Unfulfilled;
         case Compare::GreaterEq:
-            return new_masked >= old_masked ? 1 : 0;
+            return new_masked >= old_masked ? CodeOutcome::Done : CodeOutcome::Unfulfilled;
         case Compare::LessEq:
-            return new_masked <= old_masked ? 1 : 0;
+            return new_masked <= old_masked ? CodeOutcome::Done : CodeOutcome::Unfulfilled;
         case Compare::NotEq:
-            return new_masked != old_masked ? 1 : 0;
+            return new_masked != old_masked ? CodeOutcome::Done : CodeOutcome::Unfulfilled;
         case Compare::Always:
         case Compare::Empty:
-            return -1;
+            return CodeOutcome::Invalid;
     }
 
-    return -1;
+    return CodeOutcome::Invalid;
 }
 
 bool CheatEngine::write_back_(const CheatCode& c) noexcept {

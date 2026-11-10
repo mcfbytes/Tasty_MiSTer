@@ -5,7 +5,8 @@
 #include <optional>
 
 #include "svc/modeline.h"
-#include "svc/pll_solver.h"
+#include "svc/pll_block.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -23,7 +24,7 @@ struct ParsedMode {
     Modeline mode{};
     ModeRequest how = ModeRequest::PresetIndex;
 
-    std::uint32_t preset_index = 0;
+    PresetIndex preset_index{};
 
     std::optional<PllBlock> raw_pll{};
 };

@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "infra/seat.h"
+#include "hal/phys_region.h"
 #include "hal/reg.h"
 #include "hal/reg_field.h"
 #include "hal/reg_lend.h"
@@ -64,8 +65,7 @@ public:
     [[nodiscard]] std::optional<Reg<A>> at(std::uint32_t byte_off) const noexcept {
         if (base_ == nullptr
             || (byte_off & kWordAlignMask) != 0u
-            || len_ < sizeof(std::uint32_t)
-            || static_cast<std::size_t>(byte_off) > len_ - sizeof(std::uint32_t)) {
+            || !span_fits(static_cast<std::size_t>(byte_off), sizeof(std::uint32_t), len_)) {
             return std::nullopt;
         }
         return Reg<A>(reinterpret_cast<volatile std::uint32_t*>(base_ + byte_off));

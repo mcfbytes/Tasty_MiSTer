@@ -12,6 +12,8 @@ inline constexpr std::size_t kUioNodeNameBuf = 48;
 
 inline constexpr std::size_t kUioSysfsPathBuf = 128;
 
+inline constexpr std::size_t kUioMapAttrPathBuf = 160;
+
 inline constexpr std::size_t kUioDevPathBuf = 160;
 
 inline constexpr std::size_t kVtTtyPathBuf = 16;

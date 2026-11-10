@@ -24,19 +24,20 @@ class CueWavSource final : public IPcmSource {
 public:
     static constexpr std::uint32_t kMaxCueBytes = 256u * 1024u;
 
-    static constexpr std::uint32_t kSectorBytes = 2352;
-
     CueWavSource(const svc::Vfs& vfs, std::string_view rom_path) noexcept;
 
     [[nodiscard]] Ex<PcmExtent> open(svc::TrackNumber track) override;
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override;
+    [[nodiscard]] Ex<std::span<std::byte>> read_at(
+        std::uint64_t off,
+        std::span<std::byte> dst
+    ) override;
     void close() noexcept override;
 
     [[nodiscard]] std::string_view cue_path() const noexcept { return cue_.view(); }
 
     [[nodiscard]] std::string_view base_dir() const noexcept { return base_.view(); }
 
-    [[nodiscard]] std::uint8_t track_count() const noexcept { return sheet_.track_count(); }
+    [[nodiscard]] svc::TrackCount track_count() const noexcept { return sheet_.track_count(); }
 
     [[nodiscard]] bool parsed() const noexcept { return parsed_; }
 

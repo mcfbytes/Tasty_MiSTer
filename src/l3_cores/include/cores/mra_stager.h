@@ -13,8 +13,10 @@
 #include "cores/arcade_facts.h"
 #include "cores/fill_run.h"
 #include "cores/manifest_stager.h"
+#include "cores/mra_nvram_decl.h"
 #include "cores/rom_bytes.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
@@ -86,7 +88,7 @@ private:
     enum class Leg : std::uint8_t { Roms, Dips, Done };
 
     struct Window {
-        std::uint8_t index = 0;
+        proto::WideIoIndex index{};
         std::uint32_t bytes = 0;
         bool staged = false;
         bool torn = false;

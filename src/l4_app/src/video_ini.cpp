@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/video_ini.h"
 
-#include <array>
 #include <cstddef>
 #include <cstdio>
 
@@ -29,6 +28,18 @@ svc::adv7513::HdrMode hdr_mode_of(const svc::ConfigSnapshot& snap) noexcept {
     return svc::adv7513::HdrMode::DciP3;
 }
 
+[[nodiscard]] AspectRatio aspect_ratio_of(const char* text) noexcept {
+    unsigned num = 0;
+    unsigned den = 0;
+    if (text[0] == '\0' || std::sscanf(text, "%u:%u", &num, &den) != 2)
+        return AspectRatio{};
+    const auto numerator = AspectTerm::of(num);
+    const auto denominator = AspectTerm::of(den);
+    if (!numerator || !denominator)
+        return AspectRatio{};
+    return AspectRatio{*numerator, *denominator};
+}
+
 }
 
 VideoIni absent_video_ini(const VideoIni::Force& force, const VideoIni& last) {
@@ -50,28 +61,13 @@ VideoIni parse_video_ini(const svc::ConfigSnapshot& snap, const VideoIni::Force&
     ini.wire.direct_video = dv_on;
     ini.spd_quirk = snap.spd_quirk;
 
-    for (std::size_t i = 0; i < 2; ++i) {
-        std::uint32_t num = 0, den = 0;
-        const char* t = snap.custom_aspect_ratio[i];
-        if (t[0] != '\0'
-            && std::sscanf(t, "%u:%u", &num, &den) == 2
-            && num >= 1
-            && num <= 4095
-            && den >= 1
-            && den <= 4095) {
-            const std::array<std::uint32_t, 2> terms{num, den};
-            for (std::size_t j = 0; j < terms.size(); ++j)
-                ini.ar_cust[i * 2 + j] = static_cast<std::uint16_t>(terms[j]);
-        } else {
-            ini.ar_cust[i * 2] = 0;
-            ini.ar_cust[i * 2 + 1] = 0;
-        }
-    }
+    for (std::size_t i = 0; i < ini.ar_cust.size(); ++i)
+        ini.ar_cust[i] = aspect_ratio_of(snap.custom_aspect_ratio[i]);
 
-    ini.vfilter_seeds[0] = snap.vfilter_default;
-    ini.vfilter_seeds[1] = snap.vfilter_vertical_default;
-    ini.vfilter_seeds[2] = snap.vfilter_scanlines_default;
-    ini.vfilter_seeds[3] = snap.vfilter_interlace_default;
+    ini.vfilter_seeds.horz = snap.vfilter_default;
+    ini.vfilter_seeds.vert = snap.vfilter_vertical_default;
+    ini.vfilter_seeds.scan = snap.vfilter_scanlines_default;
+    ini.vfilter_seeds.ilace = snap.vfilter_interlace_default;
 
     ini.spec_pal = snap.video_mode_pal;
     ini.spec_ntsc = snap.video_mode_ntsc;

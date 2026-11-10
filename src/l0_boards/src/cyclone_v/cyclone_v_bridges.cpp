@@ -7,6 +7,7 @@
 #include "boards/cyclone_v/cyclone_v_programmer.h"
 #include "boards/cyclone_v/cyclone_v_windows.h"
 #include "hal/board_windows.h"
+#include "hal/taken_window.h"
 #include "hal/boards_table.h"
 
 namespace mister::boards::cyclone_v {
@@ -33,10 +34,10 @@ static_assert(
 );
 
 Bridges::Bridges(
-    hal::RegisterWindow<SdrCtl> sdr,
-    hal::RegisterWindow<RstMgr> rst,
-    hal::RegisterWindow<SysMgr> sys,
-    hal::RegisterWindow<Nic301> nic
+    hal::TakenWindow<SdrCtl> sdr,
+    hal::TakenWindow<RstMgr> rst,
+    hal::TakenWindow<SysMgr> sys,
+    hal::TakenWindow<Nic301> nic
 )
     : sdr_(std::move(sdr)),
       rst_(std::move(rst)),
@@ -56,47 +57,30 @@ Ex<Bridges> Bridges::open(hal::BoardWindows& windows) {
     auto nic = windows.take<Nic301>(cyclone_v::id(Window::Nic301));
     if (!nic)
         return std::unexpected(nic.error());
-    Bridges
-        b(std::move(sdr->regs), std::move(rst->regs), std::move(sys->regs), std::move(nic->regs));
-    b.claims_ = {
-        std::move(sdr->claim),
-        std::move(rst->claim),
-        std::move(sys->claim),
-        std::move(nic->claim)
-    };
-    return b;
-}
-
-Bridges Bridges::over(
-    hal::RegisterWindow<SdrCtl> sdr,
-    hal::RegisterWindow<RstMgr> rst,
-    hal::RegisterWindow<SysMgr> sys,
-    hal::RegisterWindow<Nic301> nic
-) {
-    return Bridges(std::move(sdr), std::move(rst), std::move(sys), std::move(nic));
+    return Bridges(std::move(*sdr), std::move(*rst), std::move(*sys), std::move(*nic));
 }
 
 void Bridges::apply(std::span<const BridgeStep> steps) {
     for (const BridgeStep& step : steps) {
         switch (step.block) {
             case BridgeBlock::Sdr: {
-                hal::RegisterWindow<SdrCtl>::Transaction t(sdr_);
-                sdr_.write(SdrCtl::Reg::FpgaPortRst, step.value);
+                hal::RegisterWindow<SdrCtl>::Transaction t(sdr_.regs);
+                sdr_.regs.write(SdrCtl::Reg::FpgaPortRst, step.value);
                 break;
             }
             case BridgeBlock::RstMgr: {
-                hal::RegisterWindow<RstMgr>::Transaction t(rst_);
-                rst_.write(RstMgr::Reg::BrgModReset, step.value);
+                hal::RegisterWindow<RstMgr>::Transaction t(rst_.regs);
+                rst_.regs.write(RstMgr::Reg::BrgModReset, step.value);
                 break;
             }
             case BridgeBlock::SysMgr: {
-                hal::RegisterWindow<SysMgr>::Transaction t(sys_);
-                sys_.write(SysMgr::Reg::FpgaIntfGrpModule, step.value);
+                hal::RegisterWindow<SysMgr>::Transaction t(sys_.regs);
+                sys_.regs.write(SysMgr::Reg::FpgaIntfGrpModule, step.value);
                 break;
             }
             case BridgeBlock::Nic301: {
-                hal::RegisterWindow<Nic301>::Transaction t(nic_);
-                nic_.write(Nic301::Reg::Remap, step.value);
+                hal::RegisterWindow<Nic301>::Transaction t(nic_.regs);
+                nic_.regs.write(Nic301::Reg::Remap, step.value);
                 break;
             }
         }
@@ -117,8 +101,8 @@ Ex<void> Bridges::post_program() {
 
 Ex<void> Bridges::request_board_reset() {
     TASTY_SEAT_BODY(Bridges);
-    hal::RegisterWindow<RstMgr>::Transaction t(rst_);
-    rst_.write(RstMgr::Reg::Ctrl, RstMgr::kResetRequest);
+    hal::RegisterWindow<RstMgr>::Transaction t(rst_.regs);
+    rst_.regs.write(RstMgr::Reg::Ctrl, RstMgr::kResetRequest);
     return {};
 }
 

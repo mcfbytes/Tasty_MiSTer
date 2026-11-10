@@ -82,14 +82,15 @@ std::optional<Crc32> parse_crc_name(std::string_view filename, std::string_view 
 
 ZipSplit zip_split(std::string_view path) noexcept {
     constexpr std::size_t kZipSuffixChars = 4;
-    const std::size_t z = detail::ifind(path, ".zip");
-    if (z == std::string_view::npos)
+    const std::optional<infra::TextOffset> z = infra::ifind(path, ".zip");
+    if (!z)
         return {};
-    const std::size_t end = z + kZipSuffixChars;
+    const infra::TextOffset end = z->advanced(infra::ByteCount{kZipSuffixChars});
+    const infra::TextOffset member_at = end.advanced(infra::ByteCount{1});
     ZipSplit s;
     s.zipped = true;
-    s.archive = path.substr(0, end);
-    s.member = (end < path.size()) ? path.substr(end + 1) : std::string_view{};
+    s.archive = end.prefix_of(path);
+    s.member = member_at.inside(path) ? member_at.suffix_after(path) : std::string_view{};
     return s;
 }
 

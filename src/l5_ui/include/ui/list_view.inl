@@ -15,7 +15,11 @@ RowCount ListView<T>::page_step() const noexcept {
 
 template <class T>
 void ListView<T>::recentre() noexcept {
-    view_ = Viewport::centre(view_.selected, items_.size(), height_, policy_);
+    view_ = Viewport::centre(
+        view_.selected,
+        ListWindow{.items = items_.size(), .height = height_},
+        policy_
+    );
 }
 
 template <class T>

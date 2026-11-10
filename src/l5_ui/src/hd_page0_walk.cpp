@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/hd_page0_walk.h"
 
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 #include "ui/place_facts.h"
 
 namespace mister::ui {
@@ -17,7 +17,7 @@ SlotFocus HdPage0Walk::focus_of(const OptionItem& it) const {
     TASTY_SEAT_BODY(HdPage0Walk);
     return SlotFocus{
         it.mounts_image() ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
-        proto::IoIndex{it.ioctl_index}
+        it.ioctl_index
     };
 }
 
@@ -30,7 +30,8 @@ bool HdPage0Walk::run(
     TASTY_SEAT_BODY(HdPage0Walk);
     const BuildEnv page0 = page0_of(env);
     placer_.reset();
-    if (attempt && model_.build(table, page0).has_value()) {
+    if (attempt) {
+        model_.build(table, page0);
         placer_.emplace(model_, page0.slots, verbs, PlaceFacts{});
     }
     return placer_.has_value();

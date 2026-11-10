@@ -5,7 +5,7 @@
 #include "ui/hd_label.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/now_playing.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 #include "ui/page_context.h"
 #include "ui/place_facts.h"
 
@@ -69,7 +69,7 @@ void HdSlotSheetPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) 
 bool HdSlotSheetPlan::ejectable_() const {
     if (!slot_ || !slot_->mounts_image())
         return false;
-    return !now_playing_.mounted_image(proto::IoIndex{slot_->ioctl_index}).empty();
+    return !now_playing_.mounted_image(slot_->ioctl_index).empty();
 }
 
 PageId HdSlotSheetPlan::id() const {
@@ -124,18 +124,18 @@ Transition HdSlotSheetPlan::ChooseRow::select() {
     return plan_.picks_->open(*plan_.slot_, true);
 }
 
-bool HdSlotSheetPlan::RecentRow::shown() const {
-    TASTY_SEAT_BODY(RecentRow);
+bool HdSlotSheetPlan::RecentFilesRow::shown() const {
+    TASTY_SEAT_BODY(RecentFilesRow);
     return plan_.has_slot_() && plan_.ctx_.recents.has_value() && plan_.has_recent_;
 }
 
-app::PageDescription::Row HdSlotSheetPlan::RecentRow::describe() const {
-    TASTY_SEAT_BODY(RecentRow);
+app::PageDescription::Row HdSlotSheetPlan::RecentFilesRow::describe() const {
+    TASTY_SEAT_BODY(RecentFilesRow);
     return row_of("Recent files", app::PageDescription::RowKind::Submenu);
 }
 
-Transition HdSlotSheetPlan::RecentRow::select() {
-    TASTY_SEAT_BODY(RecentRow);
+Transition HdSlotSheetPlan::RecentFilesRow::select() {
+    TASTY_SEAT_BODY(RecentFilesRow);
     if (!shown())
         return Transition{};
     return plan_.picks_->open_recents(*plan_.slot_);

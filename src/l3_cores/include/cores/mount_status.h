@@ -3,8 +3,8 @@
 
 #include <cstdint>
 
-#include "cores/staging_core.h"
-#include "infra/fixed_str.h"
+#include "cores/mount_state.h"
+#include "cores/stage_plan.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 
@@ -14,9 +14,7 @@ struct MountStatus {
     TASTY_SEAT_EXEMPT(const_shared);
     proto::ActKey generation{};
     MountState state = MountState::Pending;
-    bool data_first_track = false;
-    proto::FileSize disc_size_bytes{};
-    FixedStr<11, StrFit::Clip> game_id{};
+    StagePlan plan{};
 };
 
 enum class MountVerdict : std::uint8_t { Done, Failed };

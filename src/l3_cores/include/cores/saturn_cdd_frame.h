@@ -6,18 +6,18 @@
 #include <cstdint>
 #include <span>
 
-#include "cores/saturn_ring.h"
-#include "cores/saturn_seek.h"
 #include "cores/types.h"
 #include "infra/seat.h"
+#include "svc/track.h"
 #include "svc/types.h"
 
 namespace mister::cores {
 
 struct SaturnCddFrame {
     TASTY_SEAT_EXEMPT(component);
-    static constexpr std::size_t kBytes = saturn::kFrameBytes;
-    static constexpr std::size_t kSumBytes = saturn::kFrameSumBytes;
+
+    static constexpr std::size_t kBytes = 12;
+    static constexpr std::size_t kSumBytes = 11;
     static constexpr std::size_t kChecksumAt = kSumBytes;
 
     enum class Field : std::uint8_t {
@@ -56,10 +56,12 @@ struct SaturnCddFrame {
 
     static constexpr std::size_t kFadBytes = 3;
 
+    static constexpr SectorCount kPregap = SectorCount::of(svc::kRedBookPregap);
+
     [[nodiscard]] static constexpr std::array<std::uint8_t, kFadBytes> fad_bytes(
         HeadLba head
     ) noexcept {
-        const auto fad = static_cast<std::uint32_t>((head + SectorCount{saturn::kFadToLbaBias}).v);
+        const auto fad = static_cast<std::uint32_t>((head + kPregap).v);
         return {
             static_cast<std::uint8_t>(fad >> 16),
             static_cast<std::uint8_t>(fad >> 8),
@@ -67,17 +69,40 @@ struct SaturnCddFrame {
         };
     }
 
+    struct Checksum {
+        std::uint8_t v = 0;
+
+        [[nodiscard]] constexpr std::uint8_t byte() const noexcept { return v; }
+
+        [[nodiscard]] constexpr bool matches(std::uint8_t byte) const noexcept { return v == byte; }
+
+        constexpr void store(std::span<std::uint8_t, 1> dst) const noexcept { dst[0] = byte(); }
+
+        friend constexpr bool operator==(Checksum, Checksum) = default;
+    };
+
+    [[nodiscard]] static constexpr Checksum checksum(
+        std::span<const std::uint8_t, kSumBytes> payload
+    ) noexcept {
+        std::uint8_t sum = 0;
+        for (const std::uint8_t b : payload)
+            sum = static_cast<std::uint8_t>(sum + b);
+        return Checksum{static_cast<std::uint8_t>(~sum)};
+    }
+
     std::array<std::uint8_t, kBytes> bytes{};
 
-    [[nodiscard]] constexpr std::uint8_t checksum() const noexcept {
-        return saturn::frame_checksum(std::span<const std::uint8_t>(bytes).first<kSumBytes>());
+    [[nodiscard]] constexpr Checksum checksum() const noexcept {
+        return checksum(std::span<const std::uint8_t>(bytes).first<kSumBytes>());
     }
 
     [[nodiscard]] constexpr bool checksum_ok() const noexcept {
-        return bytes[kChecksumAt] == checksum();
+        return checksum().matches(bytes[kChecksumAt]);
     }
 
-    constexpr void seal() noexcept { bytes[kChecksumAt] = checksum(); }
+    constexpr void seal() noexcept {
+        checksum().store(std::span<std::uint8_t, 1>(bytes.data() + kChecksumAt, 1));
+    }
 
     constexpr void set(Field f, std::uint8_t value) noexcept {
         bytes[static_cast<std::size_t>(f)] = value;
@@ -108,7 +133,7 @@ struct SaturnCddFrame {
             | std::uint32_t{b(CommField::FadLow)};
         Comm out{};
         out.command = b(CommField::Command);
-        out.head = HeadLba{static_cast<std::int32_t>(fad) - saturn::kFadToLbaBias};
+        out.head = HeadLba::of(proto::Lba{fad}) - kPregap;
         out.index = b(CommField::Index);
         out.track = svc::TrackNumber{b(CommField::Track)};
         out.speed = b(CommField::Speed);

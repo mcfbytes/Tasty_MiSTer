@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -12,6 +13,7 @@
 #include "app/recents_store.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::os {
 class IClock;
@@ -32,7 +34,7 @@ public:
         std::string_view core_image{};
         std::string_view path{};
         std::string_view title{};
-        std::uint8_t ioctl_index = 0;
+        proto::IoIndex ioctl_index{};
         char slot = 0;
 
         [[nodiscard]] bool names_a_game() const noexcept { return slot != 0 && !path.empty(); }
@@ -44,7 +46,7 @@ public:
         std::string rbf;
         std::string path;
         std::string title;
-        std::uint8_t ioctl_index = 0;
+        proto::IoIndex ioctl_index{};
         char slot = 0;
         bool session = false;
     };
@@ -93,7 +95,7 @@ private:
     struct Source {
         std::string core;
         RecentsStore::ListId id{};
-        std::int64_t mtime = 0;
+        std::chrono::sys_seconds mtime{};
         std::vector<RecentsStore::Entry> entries;
     };
 

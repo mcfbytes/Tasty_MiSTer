@@ -19,19 +19,19 @@ class ProgressImageSink final : public proto::IImageSink {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    explicit ProgressImageSink(proto::SpiImageSink& inner) noexcept : inner_(&inner) {}
+    explicit ProgressImageSink(proto::SpiImageSink& inner) noexcept : inner_(inner) {}
 
     [[nodiscard]] Ex<void> begin(
         proto::WideIoIndex index,
         const proto::SessionParams& params
     ) override {
         TASTY_SEAT_BODY(ProgressImageSink);
-        return inner_->begin(index, params);
+        return inner_.begin(index, params);
     }
 
     [[nodiscard]] Ex<void> write(std::span<const std::uint8_t> data) override {
         TASTY_SEAT_BODY(ProgressImageSink);
-        auto r = inner_->write(data);
+        auto r = inner_.write(data);
         if (r)
             count(data.size());
         return r;
@@ -39,7 +39,7 @@ public:
 
     [[nodiscard]] Ex<std::size_t> write_taken(std::span<const std::uint8_t> data) override {
         TASTY_SEAT_BODY(ProgressImageSink);
-        auto r = inner_->write_taken(data);
+        auto r = inner_.write_taken(data);
         if (r)
             count(*r);
         return r;
@@ -50,21 +50,23 @@ public:
         if (closing_) {
             IBracketClose& c = *closing_;
             closing_.reset();
-            c.before_close();
+            c.before_close(remounts_saves_);
         }
-        return inner_->end();
+        return inner_.end();
     }
 
     void arm(
         cores::ILoadProgress& sink,
         std::uint64_t total,
-        IBracketClose* closing = nullptr
+        infra::OptRef<IBracketClose> closing = {},
+        bool remounts_saves = false
     ) noexcept {
         TASTY_SEAT_BODY(ProgressImageSink);
         sent_ = 0;
         armed_ = true;
-        closing_ = infra::opt_ref_of(closing);
-        tick_.bind(&sink);
+        closing_ = closing;
+        remounts_saves_ = remounts_saves;
+        tick_.bind(infra::OptRef<cores::ILoadProgress>{sink});
         tick_.begin(proto::FileSize{total});
     }
 
@@ -79,19 +81,21 @@ public:
     void disarm() noexcept {
         TASTY_SEAT_BODY(ProgressImageSink);
         closing_.reset();
+        remounts_saves_ = false;
         if (!armed_)
             return;
         armed_ = false;
         tick_.finish();
-        tick_.bind(nullptr);
+        tick_.bind({});
     }
 
     [[nodiscard]] bool armed() const noexcept { return armed_; }
 
 private:
-    proto::SpiImageSink* inner_;
+    proto::SpiImageSink& inner_;
     cores::ProgressTicker tick_{};
     infra::OptRef<IBracketClose> closing_{};
+    bool remounts_saves_ = false;
     std::uint64_t sent_ = 0;
     bool armed_ = false;
 };

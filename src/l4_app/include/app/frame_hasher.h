@@ -7,10 +7,11 @@
 #include "app/encode_status.h"
 #include "app/raw_frame_slot.h"
 #include "app/sidecar_msg.h"
+#include "app/types.h"
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
 #include "os/clock.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -19,9 +20,9 @@ class FrameHasher {
 
 public:
     struct Wiring {
+
         RawFrameChannel& channel;
         SidecarRing& out;
-        xthread::WakeFlag& writer_wake;
         EncodeStatusCell& status;
         const os::IClock& clock;
         AviEncoder& video;
@@ -48,22 +49,39 @@ public:
 
     [[nodiscard]] const EncodeStatus& status() const noexcept { return st_; }
 
-    [[nodiscard]] static std::uint32_t hash_rows(const RawFrameSlot& s) noexcept;
+    using Result = bool;
+    Result on(const RawFrameSlot::Open& s, ControlGeneration head) noexcept;
+    Result on(const RawFrameSlot::Frame& s, ControlGeneration head) noexcept;
+    Result on(const RawFrameSlot::Close& s, ControlGeneration head) noexcept;
+    Result misrouted(const RawFrameSlot& m) noexcept;
 
 private:
     [[nodiscard]] bool emit_(const RawFrameSlot& s) noexcept;
-    [[nodiscard]] bool emit_runs_(const RawFrameSlot& s, SidecarMsg& m) noexcept;
+
+    template <class A>
+    [[nodiscard]] bool emit_runs_(const A& s, ControlGeneration gen) noexcept;
+
     [[nodiscard]] bool push_(const SidecarMsg& m) noexcept;
 
-    [[nodiscard]] bool chunk_(const RawFrameSlot& s, bool real, SidecarMsg& m) noexcept;
+    [[nodiscard]] bool push_row_(const SidecarMsg::Row& row, ControlGeneration gen) noexcept;
+
+    template <class A>
+    [[nodiscard]] bool chunk_(
+        const A& s,
+        ControlGeneration gen,
+        bool real,
+        SidecarMsg::Row& row
+    ) noexcept;
+
+    [[nodiscard]] svc::Crc32 hash_rows(const RawFrameSlot::Frame& s) noexcept;
 
     Wiring w_;
     RawFrameChannel::Job job_{};
     std::uint32_t next_ = 0;
     bool hashed_ = false;
     bool chunked_ = false;
-    std::uint32_t cur_hash_ = 0;
-    std::uint32_t prev_hash_ = 0;
+    svc::Crc32 cur_hash_{};
+    svc::Crc32 prev_hash_{};
     EncodeStatus st_{};
     bool dirty_ = false;
 };

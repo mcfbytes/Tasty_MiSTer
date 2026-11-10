@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/video_service.h"
+#include "svc/cvt.h"
 #include "svc/pll_params.h"
+#include "svc/pll_solver.h"
+#include "svc/yc_table.h"
 
-#include <cctype>
 #include <charconv>
-#include <cstring>
 
+#include "infra/ascii.h"
 #include "video_service_detail.h"
 
 namespace mister::svc {
@@ -92,18 +94,6 @@ std::int64_t strtoull_prefix(std::string_view s) {
     return static_cast<std::int64_t>(v);
 }
 
-bool iequals(std::string_view a, std::string_view b) {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const auto x = static_cast<unsigned char>(a[i]);
-        const auto y = static_cast<unsigned char>(b[i]);
-        if (std::tolower(x) != std::tolower(y))
-            return false;
-    }
-    return true;
-}
-
 constexpr std::size_t kMaxTokens = 32;
 
 struct TokenList {
@@ -182,19 +172,19 @@ std::optional<ModeSpec> scan_mode(std::string_view spec) {
 [[nodiscard]] Ex<void> apply_mode_flags(const ModeSpec& s, Modeline& m) {
     for (std::size_t i = 0; i < s.flags.count; ++i) {
         const std::string_view flag = s.flags.items[i];
-        if (iequals(flag, "+vsync"))
+        if (infra::ieq(flag, "+vsync"))
             m.vpol = true;
-        else if (iequals(flag, "-vsync"))
+        else if (infra::ieq(flag, "-vsync"))
             m.vpol = false;
-        else if (iequals(flag, "+hsync"))
+        else if (infra::ieq(flag, "+hsync"))
             m.hpol = true;
-        else if (iequals(flag, "-hsync"))
+        else if (infra::ieq(flag, "-hsync"))
             m.hpol = false;
-        else if (iequals(flag, "cvt"))
+        else if (infra::ieq(flag, "cvt"))
             m.rb = rb_byte(ReducedBlanking::Off);
-        else if (iequals(flag, "cvtrb"))
+        else if (infra::ieq(flag, "cvtrb"))
             m.rb = rb_byte(ReducedBlanking::On);
-        else if (iequals(flag, "pr"))
+        else if (infra::ieq(flag, "pr"))
             m.pixel_repeat = true;
         else
             return std::unexpected(
@@ -210,13 +200,6 @@ std::optional<ModeSpec> scan_mode(std::string_view spec) {
 
 }
 
-std::string_view YcMode::key_view() const noexcept {
-    std::size_t n = 0;
-    while (n < key.size() && key[n] != '\0')
-        ++n;
-    return std::string_view(key.data(), n);
-}
-
 std::vector<YcMode> parse_yc(std::string_view text, std::string_view core_name) {
     std::vector<YcMode> out;
     out.reserve(kYcMaxEntries);
@@ -230,8 +213,7 @@ std::vector<YcMode> parse_yc(std::string_view text, std::string_view core_name) 
         if (!line.empty() && line.back() == '\r')
             line.remove_suffix(1);
 
-        const bool match = line.size() >= core_name.size()
-            && iequals(line.substr(0, core_name.size()), core_name);
+        const bool match = infra::istarts_with(line, core_name);
         if (match) {
             const std::size_t eq = line.find('=');
 
@@ -241,9 +223,7 @@ std::vector<YcMode> parse_yc(std::string_view text, std::string_view core_name) 
                     ++v;
                 }
                 YcMode e{};
-                const std::string_view k = line.substr(0, eq);
-                const std::size_t n = (k.size() < e.key.size() - 1) ? k.size() : e.key.size() - 1;
-                std::memcpy(e.key.data(), k.data(), n);
+                (void)e.key.assign(line.substr(0, eq));
                 e.phase_inc = strtoull_prefix(line.substr(v));
 
                 if (e.phase_inc != 0)
@@ -265,8 +245,8 @@ std::optional<std::int64_t> yc_lookup(
 ) {
 
     for (const YcMode& e : table) {
-        const std::string_view k = e.key_view();
-        if (iequals(k, key) || iequals(k, key_expanded))
+        const std::string_view k = e.key.view();
+        if (infra::ieq(k, key) || infra::ieq(k, key_expanded))
             return e.phase_inc;
     }
     return std::nullopt;
@@ -282,7 +262,7 @@ VideoService VideoService::create(Wiring w, adv7513::Io io) {
 }
 
 VideoService VideoService::create() {
-    return VideoService(Wiring{});
+    return VideoService(Wiring{}, adv7513::Io{});
 }
 
 Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) const {
@@ -303,7 +283,7 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
     if (cnt == kArityPreset) {
 
         out.how = ModeRequest::PresetIndex;
-        out.preset_index = s.val[kTokenWidth];
+        out.preset_index = PresetIndex::of(s.val[kTokenWidth]);
         return out;
     }
 
@@ -328,17 +308,19 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
 
     if (cnt >= kArityRaw) {
 
-        video_timing::assign_timings(
+        m = video_timing::with_timings(
             m,
             std::span<const std::uint32_t, kModelineTimings>(
                 s.val.data() + item(ModelineItem::Hact),
                 kModelineTimings
             )
         );
-        PllBlock pll{};
-        for (std::size_t i = 0; i < pll.size(); ++i)
-            pll[i] = s.val[item(ModelineItem::PllFirst) + i];
-        out.raw_pll = pll;
+        out.raw_pll = PllBlock::from_item_words(
+            std::span<const std::uint32_t, PllBlock::kItemWords>(
+                s.val.data() + item(ModelineItem::PllFirst),
+                PllBlock::kItemWords
+            )
+        );
         if (cnt > item(ModelineItem::Hpol)) {
             m.hpol = (s.val[item(ModelineItem::Hpol)] != 0);
         }
@@ -360,7 +342,7 @@ Ex<video_timing::ParsedMode> VideoService::parse_mode(std::string_view spec) con
     }
 
     if (cnt == kArityTimings || cnt == kArityTimingsPolarity) {
-        video_timing::assign_timings(
+        m = video_timing::with_timings(
             m,
             std::span<const std::uint32_t, kModelineTimings>(s.val.data(), kModelineTimings)
         );
@@ -402,22 +384,14 @@ Ex<void> VideoService::apply(const Modeline& m, PllBlock pll, Modeline::WireOpti
     );
 }
 
-void VideoService::set_filter_slots(std::span<const bool> enabled) noexcept {
-    for (std::size_t i = 0; i < filter_slots_.size(); ++i) {
-        filter_slots_[i] = (i < enabled.size()) && enabled[i];
-    }
-}
-
 Ex<void> VideoService::poll_resolution() {
 
     if (!sampler_)
         return err(Errc::negotiation, ERR_SITE());
 
-    const bool force = force_next_;
-    auto s = sampler_->sample(force);
+    auto s = sampler_->sample();
     if (!s)
         return err(s.error().code, ERR_SITE(), s.error().detail);
-    force_next_ = false;
 
     const bool res_changed = (s->res != gate_.last_res);
     gate_.last_res = s->res;
@@ -432,12 +406,6 @@ Ex<void> VideoService::poll_resolution() {
     const bool changed = gate_.vi_seen && (res_changed || fb_changed);
     if (changed)
         res_gen_ = res_gen_.next();
-
-    const bool flt_force = changed;
-    if (s->flt_flags != 0 && (flt_force || gate_.last_flt_flags != s->flt_flags)) {
-        gate_.last_flt_flags = s->flt_flags;
-        vfilter_ = video_timing::select_vfilter(gate_.last, std::span<const bool>(filter_slots_));
-    }
 
     return {};
 }

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "cores/staging_core.h"
+
 #include "cores/neogeocd_ladder.h"
 
 namespace mister::cores {
@@ -16,7 +18,7 @@ Ex<bool> NeoGeoCdLadder::on_step() {
 
             if (mount_bounded(std::string_view{}) == MountState::Pending)
                 return false;
-            rung_ = image_.empty() ? Rung::Reset : Rung::Walk;
+            rung_ = image_path().empty() ? Rung::Reset : Rung::Walk;
             return false;
 
         case Rung::Walk:
@@ -28,7 +30,7 @@ Ex<bool> NeoGeoCdLadder::on_step() {
 
         case Rung::MountDisc: {
 
-            const MountState ms = mount_bounded(image_);
+            const MountState ms = mount_bounded(image_path());
             if (ms == MountState::Pending)
                 return false;
             report_.disc_mounted = ms == MountState::Done;
@@ -40,7 +42,7 @@ Ex<bool> NeoGeoCdLadder::on_step() {
 
             if (!order_reset())
                 return false;
-            if (image_.empty()) {
+            if (image_path().empty()) {
                 rung_ = Rung::Done;
                 return true;
             }
@@ -49,7 +51,7 @@ Ex<bool> NeoGeoCdLadder::on_step() {
 
         case Rung::Release:
 
-            if (!order_status_bit0(false))
+            if (!release_reset_())
                 return false;
             rung_ = Rung::Done;
             return true;
@@ -64,7 +66,7 @@ bool NeoGeoCdLadder::walk_answered_() {
     if (!walk_gen_)
         walk_gen_ = next_gen();
     if (!walk_ordered_) {
-        if (host_.order_walk(profile_.staging.disc_slot, image_, walk_gen_)) {
+        if (host_.order_walk(profile_.staging.disc_slot, image_path(), walk_gen_)) {
             walk_ordered_ = true;
             return false;
         }

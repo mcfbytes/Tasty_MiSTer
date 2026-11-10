@@ -30,23 +30,23 @@ public:
 
     void wake(RoundSpan latency) noexcept { wake_ = latency; }
 
-    void mark(RoundTiming::Cause at, RoundSpan took) noexcept {
+    void mark(RoundTiming::Blame at, RoundSpan took) noexcept {
         if (!marks_.push(RoundTrace::Mark{at, took}))
             marks_lost_ = true;
     }
 
-    [[gnu::cold]] void record(MonoInstant finish, RoundTiming::Cause cause) noexcept;
+    [[gnu::cold]] void record(MonoInstant finish, RoundTiming::Blame blame) noexcept;
 
-    void end(MonoInstant finish, RoundTiming::Cause cause) noexcept {
+    void end(MonoInstant finish, RoundTiming::Blame blame) noexcept {
         const RoundSpan took = round_span(finish - start_);
-        lead_[seq_.lead_slot<RoundTrace::kLeadUp>()] = RoundTrace::LeadUp{start_, took, cause};
+        lead_[seq_.lead_slot<RoundTrace::kLeadUp>()] = RoundTrace::LeadUp{start_, took, blame};
     }
 
     [[nodiscard]] RoundTraceLane& lane() noexcept { return lane_; }
 
 private:
     template <class A>
-    void push_(MonoInstant finish, RoundTiming::Cause cause) noexcept;
+    void push_(MonoInstant finish, RoundTiming::Blame blame) noexcept;
 
     RoundTraceLane lane_{};
     RoundTraceLane::Producer tx_ = lane_.producer();

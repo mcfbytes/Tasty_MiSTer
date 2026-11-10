@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <memory>
 
+#include "app/stdout_paths.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -23,14 +24,9 @@ public:
 
     StdoutRouter() noexcept = default;
 
-    StdoutRouter(const char* null_path, const char* debug_path) noexcept
-        : null_path_(null_path),
-          debug_path_(debug_path) {}
+    explicit StdoutRouter(StdoutPaths paths) noexcept : paths_(paths) {}
 
-    void set_paths(const char* null_path, const char* debug_path) noexcept {
-        null_path_ = null_path;
-        debug_path_ = debug_path;
-    }
+    void set_paths(StdoutPaths paths) noexcept { paths_ = paths; }
 
     ~StdoutRouter();
 
@@ -44,8 +40,7 @@ public:
     Sink sink() const noexcept { return sink_; }
 
 private:
-    const char* null_path_ = "/dev/null";
-    const char* debug_path_ = "/tmp/debug.txt";
+    StdoutPaths paths_{};
 
     struct FileCloser {
         void operator()(std::FILE* f) const noexcept { (void)std::fclose(f); }

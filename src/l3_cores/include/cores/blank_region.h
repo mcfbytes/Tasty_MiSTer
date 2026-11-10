@@ -5,10 +5,13 @@
 #include <cstdint>
 #include <span>
 
+#include "proto/types.h"
+
 namespace mister::cores {
 
 struct BlankRegion {
-    std::uint32_t offset_bytes;
+    proto::Lba block;
+    std::uint32_t within;
     std::span<const std::byte> bytes;
 };
 

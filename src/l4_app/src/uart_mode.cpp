@@ -6,65 +6,47 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <cctype>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <string>
 #include <vector>
 
+#include "cores/stock_scan.h"
 #include "infra/ascii.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
 namespace {
 
+using cores::stock_scan::Radix;
+using cores::stock_scan::scan_ul;
+
 bool file_exists(const char* path) noexcept {
     struct stat st{};
     return ::stat(path, &st) == 0;
 }
 
-[[nodiscard]] Ex<std::size_t> copy_name(std::span<char> dst, std::string_view src) noexcept {
-    if (dst.empty())
-        return 0u;
-    const std::size_t n = src.size() < dst.size() - 1 ? src.size() : dst.size() - 1;
-    if (n != 0)
-        std::memcpy(dst.data(), src.data(), n);
-    dst[n] = '\0';
-    return n;
-}
-
 }
 
 UartPersist clamp_uart_modes(UartPersist p) noexcept {
-    constexpr std::uint8_t kLocalMidiLinkMax = 3;
-    constexpr std::uint8_t kNetworkMidiLinkMin = 4;
-    constexpr std::uint8_t kNetworkMidiLinkMax = 6;
 
-    const auto ml = static_cast<std::uint8_t>(p.midilink);
-
-    if (p.mode == UartMode::Modem && (ml < kNetworkMidiLinkMin || ml > kNetworkMidiLinkMax)) {
+    if (p.mode == UartMode::Modem && !is_network(p.midilink))
         p.midilink = MidiLinkMode::Tcp;
-    }
 
-    if (p.mode == UartMode::Midi && ml > kLocalMidiLinkMax) {
+    if (p.mode == UartMode::Midi && !is_local(p.midilink))
         p.midilink = MidiLinkMode::FSynth;
-    }
 
-    if (p.mode != UartMode::Midi && p.mode != UartMode::Modem) {
+    if (p.mode != UartMode::Midi && p.mode != UartMode::Modem)
         p.midilink = MidiLinkMode::FSynth;
-    }
     return p;
 }
 
 void parse_baud_token(
     std::string_view token,
-    std::span<std::uint32_t, kBaudTableSize> out
+    std::span<cores::BaudRate, kBaudTableSize> out
 ) noexcept {
     constexpr std::size_t kKeywordLen = 4;
-    constexpr unsigned kDecimalBase = 10;
-    for (auto& v : out)
-        v = 0;
+    for (auto& speed : out)
+        speed = {};
 
     std::size_t p = 0;
     const std::size_t n = token.size();
@@ -77,21 +59,9 @@ void parse_baud_token(
 
     for (std::size_t i = 0; i < kBaudTokenMax && p < n; ++i) {
 
-        char num[24] = {};
-        std::size_t k = 0;
-        std::size_t q = p;
-        while (q < n && (token[q] == ' ' || token[q] == '+' || token[q] == '-')) {
-            if (k + 1 < sizeof num)
-                num[k++] = token[q];
-            ++q;
-        }
-        while (q < n && std::isdigit(static_cast<unsigned char>(token[q]))) {
-            if (k + 1 < sizeof num)
-                num[k++] = token[q];
-            ++q;
-        }
-        out[i] = static_cast<std::uint32_t>(std::strtoul(num, nullptr, kDecimalBase));
-        p = q;
+        const cores::stock_scan::Scan scanned = scan_ul(token.substr(p), Radix::Dec);
+        out[i] = cores::BaudRate{scanned.value};
+        p += scanned.used;
 
         if (p < n && token[p] == '(') {
             ++p;
@@ -119,28 +89,20 @@ Ex<MidiLinkMode> UartModeController::probe_midilink() const {
 }
 
 Ex<void> UartModeController::set_mode(proto::ILinkFrame& frame, UartMode m) {
-    constexpr std::uint8_t kModeMask = 0x0F;
-    constexpr std::uint8_t kModeModemA = 4;
-    constexpr std::uint8_t kModeModemB = 5;
-    constexpr std::uint32_t kWordMask = 0xFFFFu;
-    constexpr unsigned kWordBits = 16;
     seat_assert<SeatTag::RT>(ERR_SITE(), "UartModeController::set_mode off T-RT");
 
-    const auto raw = static_cast<std::uint8_t>(static_cast<std::uint8_t>(m) & kModeMask);
-    const auto masked = static_cast<UartMode>(raw);
-    const std::uint32_t baud = baud_for(masked).v;
+    const UartMode masked = masked_mode(m);
+    const cores::BaudRate baud = baud_for(masked);
+    const BaudWords words = BaudWords::of(baud);
 
     {
         if (auto r = frame.begin(proto::UioOp::SetUart); !r)
             return r;
-        const std::uint16_t wire = (raw == kModeModemA || raw == kModeModemB)
-            ? std::uint16_t{1}
-            : static_cast<std::uint16_t>(raw);
-        if (auto r = frame.word(wire); !r)
+        if (auto r = frame.word(wire_mode(masked)); !r)
             return r;
-        if (auto r = frame.word(static_cast<std::uint16_t>(baud & kWordMask)); !r)
+        if (auto r = frame.word(words.lo_); !r)
             return r;
-        if (auto r = frame.word(static_cast<std::uint16_t>((baud >> kWordBits) & kWordMask)); !r)
+        if (auto r = frame.word(words.hi_); !r)
             return r;
         if (auto r = frame.end(); !r)
             return r;
@@ -149,15 +111,15 @@ Ex<void> UartModeController::set_mode(proto::ILinkFrame& frame, UartMode m) {
     ++rt_.stats.mode_writes;
 
     UartHandoff::Mode a{};
-    a.baud = cores::BaudRate{baud};
-    (void)copy_name(a.core, rt_.core_name);
-    (void)copy_name(a.rbf, rt_.rbf_name);
+    a.baud = baud;
+    (void)a.core.assign(rt_.core_name.view());
+    (void)a.rbf.assign(rt_.rbf_name.view());
     a.mode = masked;
     post_(infra::make<UartHandoff>(a));
     return {};
 }
 
-Ex<void> UartModeController::set_midilink(MidiLinkMode ml) {
+void UartModeController::set_midilink(MidiLinkMode ml) {
     seat_assert<SeatTag::RT>(ERR_SITE(), "UartModeController::set_midilink off T-RT");
 
     const bool usb = rt_.usb_ser_latched ? rt_.usb_ser_present : file_exists("/dev/ttyUSB0");
@@ -167,7 +129,6 @@ Ex<void> UartModeController::set_midilink(MidiLinkMode ml) {
 
     post_(infra::make<UartHandoff>(UartHandoff::MidiLink{ml}));
     rt_.midilink = ml;
-    return {};
 }
 
 void UartModeController::post_(const UartHandoff& h) noexcept {
@@ -180,9 +141,9 @@ Ex<void> UartModeController::reset_uart(proto::ILinkFrame&) {
     return unimplemented(ERR_SITE());
 }
 
-void UartModeController::bind_identity(std::string_view core, std::string_view rbf) noexcept {
-    (void)copy_name(rt_.core_name, core);
-    (void)copy_name(rt_.rbf_name, rbf);
+void UartModeController::bind_identity(CoreNames names) noexcept {
+    (void)rt_.core_name.assign(names.effective);
+    (void)rt_.rbf_name.assign(names.conf_str);
 }
 
 void UartModeController::latch_usb_ser(bool present) noexcept {
@@ -193,49 +154,47 @@ void UartModeController::latch_usb_ser(bool present) noexcept {
 Ex<void> UartModeController::load_for_core(
     proto::ILinkFrame& frame,
     bool uart_capable,
-    std::string_view uart_token,
-    std::string_view midi_token,
-    const UartPersistFiles* files,
+    UartTokens tokens,
+    const UartPersistFiles& files,
     cores::BaudRate default_baud
 ) {
-    constexpr std::uint32_t kMidiBaud = 31250;
+    constexpr cores::BaudRate kMidiBaud{31250};
     constexpr std::size_t kModemSpeedSlot = 2;
 
-    rt_.idx = {};
-    parse_baud_token(uart_token, std::span<std::uint32_t, kBaudTableSize>(rt_.uart_table));
-    parse_baud_token(midi_token, std::span<std::uint32_t, kBaudTableSize>(rt_.midi_table));
+    rt_.uart = BaudSpaceState{};
+    rt_.midi = BaudSpaceState{};
+    rt_.mlink = BaudSpaceState{kMlinkSpeeds};
+    parse_baud_token(tokens.uart, std::span<cores::BaudRate, kBaudTableSize>(rt_.uart.table));
+    parse_baud_token(tokens.midi, std::span<cores::BaudRate, kBaudTableSize>(rt_.midi.table));
 
-    if (!midi_token.empty() && rt_.midi_table[0] == 0)
-        rt_.midi_table[0] = kMidiBaud;
+    if (!tokens.midi.empty() && rt_.midi.empty())
+        rt_.midi.table[0] = kMidiBaud;
     rt_.uart_capable = uart_capable;
     ++rt_.stats.loads;
 
     std::uint32_t word = 0;
     if (uart_capable) {
-        if (rt_.uart_table[0] == 0) {
+        if (rt_.uart.empty()) {
 
-            rt_.uart_table[0] = default_baud.v;
+            rt_.uart.table[0] = default_baud;
 
-            if (rt_.midi_table[0] == 0)
-                rt_.midi_table[0] = kMidiBaud;
+            if (rt_.midi.empty())
+                rt_.midi.table[0] = kMidiBaud;
         }
 
         std::array<cores::BaudRate, 3> speeds{};
-        if (files != nullptr && files->ready) {
-            if (files->have_mode)
-                word = files->mode;
-            if (files->have_speeds) {
-                speeds = files->speeds;
-            }
-        }
+        if (files.mode.has_value())
+            word = *files.mode;
+        if (files.speeds.has_value())
+            speeds = *files.speeds;
 
-        (void)validate_baud(UartMode::Ppp, speeds[0]);
-        (void)validate_baud(UartMode::Midi, speeds[1]);
+        validate_baud(UartMode::Ppp, speeds[0]);
+        validate_baud(UartMode::Midi, speeds[1]);
 
-        (void)validate_baud(
+        validate_baud(
             UartMode::Modem,
-            speeds[kModemSpeedSlot].v != 0 ? speeds[kModemSpeedSlot]
-                                           : cores::BaudRate{rt_.uart_table[0]}
+            speeds[kModemSpeedSlot] != cores::BaudRate{} ? speeds[kModemSpeedSlot]
+                                                         : rt_.uart.table[0]
         );
     }
 
@@ -249,7 +208,7 @@ Ex<void> UartModeController::load_for_core(
 
     const UartPersist p = clamp_uart_modes(unpack_uart_persist(word));
 
-    keep(set_midilink(p.midilink));
+    set_midilink(p.midilink);
     keep(set_mode(frame, p.mode));
     return first;
 }
@@ -259,37 +218,69 @@ Ex<void> UartModeController::save_for_core(std::string_view) const {
     return unimplemented(ERR_SITE());
 }
 
-std::span<const std::uint32_t> UartModeController::baud_table(BaudSpace s) const {
-    if (s == BaudSpace::Mlink)
-        return kMlinkSpeeds;
-    const auto& t = (s == BaudSpace::Midi) ? rt_.midi_table : rt_.uart_table;
-
-    std::size_t n = 0;
-    while (n < t.size() && t[n] != 0)
-        ++n;
-    return std::span<const std::uint32_t>(t.data(), n);
+UartModeController::BaudSpaceState& UartModeController::space_of_(BaudSpace s) noexcept {
+    switch (s) {
+        case BaudSpace::Uart:
+            return rt_.uart;
+        case BaudSpace::Midi:
+            return rt_.midi;
+        case BaudSpace::Mlink:
+            return rt_.mlink;
+    }
+    return rt_.uart;
 }
 
-Ex<void> UartModeController::validate_baud(UartMode m, cores::BaudRate baud) {
-    const BaudSpace s = baud_space_for(m);
-    const auto bauds = baud_table(s);
-    std::size_t idx = 0;
-    for (std::size_t i = 0; i < bauds.size(); ++i) {
+const UartModeController::BaudSpaceState& UartModeController::space_of_(
+    BaudSpace s
+) const noexcept {
+    switch (s) {
+        case BaudSpace::Uart:
+            return rt_.uart;
+        case BaudSpace::Midi:
+            return rt_.midi;
+        case BaudSpace::Mlink:
+            return rt_.mlink;
+    }
+    return rt_.uart;
+}
 
-        if (bauds[i] == baud.v) {
-            idx = i;
+std::span<const cores::BaudRate> UartModeController::offered_(
+    const BaudSpaceState& s
+) const noexcept {
+
+    std::size_t n = 0;
+    while (n < s.table.size() && s.table[n] != cores::BaudRate{})
+        ++n;
+    return std::span<const cores::BaudRate>(s.table.data(), n);
+}
+
+cores::BaudRate UartModeController::latched_(const BaudSpaceState& s) const noexcept {
+    return s.latched.chosen(offered_(s));
+}
+
+void UartModeController::latch_(BaudSpaceState& s, cores::BaudRate baud) const noexcept {
+    const auto speeds = offered_(s);
+    std::size_t at = 0;
+    for (std::size_t i = 0; i < speeds.size(); ++i) {
+
+        if (speeds[i] == baud) {
+            at = i;
             break;
         }
     }
-    rt_.idx[static_cast<std::size_t>(s)] = static_cast<std::uint32_t>(idx);
-    return {};
+    s.latched = BaudSpaceState::Slot::of(at);
+}
+
+std::span<const cores::BaudRate> UartModeController::baud_table(BaudSpace s) const {
+    return offered_(space_of_(s));
+}
+
+void UartModeController::validate_baud(UartMode m, cores::BaudRate baud) {
+    latch_(space_of_(baud_space_for(m)), baud);
 }
 
 cores::BaudRate UartModeController::baud_for(UartMode m) const noexcept {
-    const BaudSpace s = baud_space_for(m);
-    const auto bauds = baud_table(s);
-    const std::size_t i = rt_.idx[static_cast<std::size_t>(s)];
-    return cores::BaudRate{i < bauds.size() ? bauds[i] : 0u};
+    return latched_(space_of_(baud_space_for(m)));
 }
 
 }

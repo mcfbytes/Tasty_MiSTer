@@ -8,9 +8,9 @@
 
 namespace mister::os {
 
-class IVtConsole {
+class IVtSwitch {
 public:
-    virtual ~IVtConsole() = default;
+    virtual ~IVtSwitch() = default;
 
     [[nodiscard]] virtual std::optional<VtNumber> active() noexcept = 0;
 
@@ -20,6 +20,18 @@ public:
 
     virtual void restore_text(const char* tty) noexcept = 0;
 
+protected:
+    IVtSwitch() = default;
+    IVtSwitch(const IVtSwitch&) = default;
+    IVtSwitch& operator=(const IVtSwitch&) = default;
+};
+
+class IVtMode {
+public:
+    virtual ~IVtMode() = default;
+
+    [[nodiscard]] virtual std::optional<VtNumber> active() noexcept = 0;
+
     [[nodiscard]] virtual std::optional<bool> text_mode(VtNumber vt) noexcept = 0;
 
     virtual void graphics(VtNumber vt) noexcept = 0;
@@ -27,6 +39,11 @@ public:
     virtual void text(VtNumber vt) noexcept = 0;
 
     virtual void cursor(VtNumber vt, bool shown) noexcept = 0;
+
+protected:
+    IVtMode() = default;
+    IVtMode(const IVtMode&) = default;
+    IVtMode& operator=(const IVtMode&) = default;
 };
 
 }

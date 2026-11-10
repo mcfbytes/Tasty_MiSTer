@@ -2,33 +2,31 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "cores/mra_cheat_records.h"
 #include "cores/mra_doc.h"
+#include "cores/mra_nvram_decl.h"
+#include "cores/nvram_save.h"
 #include "infra/error.h"
+#include "proto/types.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
 
 inline constexpr std::uint64_t kNvramCap = 1024u * 1024u;
 
-inline constexpr std::uint8_t kDipIndex = 254;
+inline constexpr proto::WideIoIndex kDipIndex{254};
 
 struct ArcadeFacts {
     mra::SwitchTable switches{};
-    mra::MraCheatRecords cheats{};
-    std::uint32_t cheats_dropped = 0;
-    std::string btn_names;
-    std::string btn_defaults;
     std::string dip_name;
     std::string nvm_name;
-    int nvram_index = 0;
-    int nvram_size = 0;
+
+    std::optional<mra::NvramSave> nvram{};
     mra::DipWord dip_cur{};
-    std::string error;
 };
 
 struct ArcadeDocument {
@@ -45,12 +43,10 @@ struct ArcadeDocument {
     const svc::Vfs& vfs
 );
 
-[[nodiscard]] ArcadeDocument read_arcade_document(
+[[nodiscard]] Ex<ArcadeDocument> read_arcade_document(
     std::string_view text,
     std::string_view path,
     const svc::Vfs& vfs
 );
-
-[[nodiscard]] bool nvram_declared(int index, int size) noexcept;
 
 }

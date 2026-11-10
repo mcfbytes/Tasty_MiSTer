@@ -22,12 +22,12 @@
 #include "app/owner_push.h"
 #include "app/durable_write.h"
 #include "app/hd_look.h"
-#include "app/durable_write_service.h"
 #include "app/ini_parse.h"
 #include "app/link_event_dispatch.h"
 #include "app/link_rows.h"
 #include "app/mra_facts.h"
-#include "app/pending_load.h"
+#include "app/bitstream_resolve.h"
+#include "app/load_request.h"
 #include "app/remembered_path.h"
 #include "app/sdram_size_code.h"
 #include "app/stream_io.h"
@@ -72,6 +72,19 @@ namespace {
     };
 }
 
+[[nodiscard]] CoreBuilder builder_over(const SessionOwner::Link& link) noexcept {
+    const CoreBuilder::Wiring wiring{
+        .bay = link.bay,
+        .releases = link.bay_releases,
+        .terms = link.core_terms,
+        .sectors = link.sectors,
+        .osds = link.osds,
+        .sys = link.sys
+    };
+    return link.doorbell_source ? CoreBuilder::over_source(wiring, *link.doorbell_source)
+                                : CoreBuilder::on_board(wiring);
+}
+
 }
 
 constexpr infra::ParkTimeout kLastOrderRetryMs{1};
@@ -94,10 +107,7 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
       status_cell_(link.status_cell),
       mount_status_cell_(link.mount_status_cell),
       save_extent_cell_(link.save_extent_cell),
-      clock_(
-          link.clock.has_value() ? static_cast<const os::IClock&>(*link.clock)
-                                 : static_cast<const os::IClock&>(default_clock_)
-      ),
+      clock_(link.clock),
       programmer_(link.programmer),
       readiness_(link.pin_levels, programmer_),
       vfs_(link.storage),
@@ -131,7 +141,7 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .sleeper = ops_.sleeper
           }
       ),
-      companion_(vfs_, negotiated_, tally_, aperture_.phys.v, link.companion_binds),
+      companion_(vfs_, negotiated_, tally_, aperture_.phys, link.companion_binds),
       window_map_(link.window_map),
       ftx_level_cell_(link.file_tx_level_cell),
       belt_(
@@ -159,7 +169,6 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
               .ladder = ladder_,
               .belt = belt_,
               .owner_tally = tally_,
-              .mgl_row0_cell = mgl_row0_cell_,
               .act_keys = act_keys_,
               .status_cell = status_cell_,
               .boot_restore = boot_restore_,
@@ -184,23 +193,7 @@ SessionOwner::SessionOwner(SwitchPark& park, const Link& link) noexcept
           },
           *this
       ),
-      builder_(
-          link.bay,
-          link.bay_releases,
-          link.core_terms,
-          link.doorbell_source,
-          CoreBuilder::SectorCells{
-              .grant = link.sector_grant,
-              .route = link.sector_route,
-              .wake = link.io_wake
-          },
-          CoreBuilder::OsdCells{.grant = link.osd_grant, .route = link.osd_route},
-          CoreBuilder::SysCells{
-              .grant = link.sys_grant,
-              .route = link.sys_route,
-              .wake = link.io_wake
-          }
-      ),
+      builder_(builder_over(link)),
       reboot_(clock_, inbox_, tally_, link.boot_handoff, link.ops.reset, link.ops.sleeper),
       switch_(
           CoreSwitch::Wiring{
@@ -252,7 +245,7 @@ infra::OptRef<const LauncherProfile> SessionOwner::launcher() const noexcept {
     return launcher_.profile();
 }
 
-const SessionOwner::Count& SessionOwner::pause_expiries_cell() const noexcept {
+const xthread::Counter& SessionOwner::pause_expiries_cell() const noexcept {
     return switch_.pause_expiries_cell();
 }
 
@@ -364,13 +357,13 @@ void SessionOwner::program_() {
     if (rebooting_() && switch_.switch_standing() && !switch_.last_order_owed())
         end_rebooting_switch_();
     const bool receipt_held = switch_.receipt_held();
-    const std::uint32_t expiries = switch_.tally().pause_expiries;
+    const std::uint32_t expiries = switch_.pause_expiries_cell().get();
     const auto programmed_gen = switch_.try_program(*this);
 
     if (receipt_held && !switch_.receipt_held() && !rebooting_()) {
         phase_edge_(
-            switch_.tally().pause_expiries != expiries ? phase::Stimulus::PauseExpired
-                                                       : phase::Stimulus::ParkComplete
+            switch_.pause_expiries_cell().get() != expiries ? phase::Stimulus::PauseExpired
+                                                            : phase::Stimulus::ParkComplete
         );
 
         phase::Facts f = facts_of(switch_, negotiated_, reboot_, Errc::negotiation);
@@ -384,7 +377,9 @@ void SessionOwner::program_() {
 }
 
 void SessionOwner::swap_launcher_() {
-    const auto req = launcher_.swap_to_image(launcher_swap_held_(), launcher_swap_room_());
+    const auto req = launcher_.swap_to_image(
+        LauncherLatch::SwapGate{.held = launcher_swap_held_(), .room = launcher_swap_room_()}
+    );
     if (!req)
         return;
     if (rebooting_()) {
@@ -460,7 +455,7 @@ void SessionOwner::on(const UiRequest::SaveCoreConfig& req, const UiRequest::Hea
 void SessionOwner::on(const UiRequest::LoadCoreConfig& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    saves_.load_slot(req.slot, head.tag);
+    load_core_config_(req.slot, head.tag);
 }
 
 void SessionOwner::on(const UiRequest::LoadFile& req, const UiRequest::Head& head) {
@@ -525,7 +520,7 @@ void SessionOwner::on(const UiRequest::UnmountImage& req, const UiRequest::Head&
 void SessionOwner::on(const UiRequest::SetOsdStyle& req, const UiRequest::Head& head) {
     if (!admit_(req, head.tag))
         return;
-    saves_.set_ini_key("osd_style", req.style != 0 ? "1" : "0");
+    saves_.set_ini_key("osd_style", req.style == OsdStyle::Hd ? "1" : "0");
 }
 
 void SessionOwner::on(const UiRequest::SetHdLook& req, const UiRequest::Head& head) {
@@ -544,10 +539,10 @@ void SessionOwner::on(const UiRequest::SdramDetected& req, const UiRequest::Head
 
     if (handoff_ && !handoff_->write_sdram_cfg(sdram_word(code, false)))
         ++tally_.sdram_write_failures;
-    set_boot_cookie(sdram_word(code, true));
+    set_boot_cookie(proto::MemSizeCookie{sdram_word(code, true)});
 }
 
-void SessionOwner::set_boot_cookie(std::uint16_t c) {
+void SessionOwner::set_boot_cookie(proto::MemSizeCookie c) {
     cookie_ = c;
     publish_fabric_();
 }
@@ -555,7 +550,7 @@ void SessionOwner::set_boot_cookie(std::uint16_t c) {
 void SessionOwner::note_memsz_(const UiRequest::LoadCore& req) noexcept {
     if (req.path.empty() || names_front_end_image(req.path.view(), req.xml))
         return;
-    if (!proto::OsdMask{cookie_}.has(kSdramCookieMeasured))
+    if (!proto::OsdMask{cookie_.v}.has(kSdramCookieMeasured))
         ++tally_.memsz_unmeasured;
 }
 
@@ -577,7 +572,7 @@ void SessionOwner::on(const UiRequest::ResetCore& req, const UiRequest::Head& he
     const bool clears = req.edge.toggles_reset_bit();
     const proto::LinkOp::CoreReset op{.edge = req.edge};
     const auto row = cores::find_core(negotiated_.core_name().view());
-    if (row && (*row)->profile->reset.ejects(req.edge)) {
+    if (row && row->profile.reset.ejects(req.edge)) {
         const bool carried = ladder_.noreset();
         if (clears)
             ladder_.clear_noreset();
@@ -585,7 +580,7 @@ void SessionOwner::on(const UiRequest::ResetCore& req, const UiRequest::Head& he
             *this,
             MountAsk{
                 UiRequest::Kind::UnmountImage,
-                (*row)->profile->staging.disc_slot,
+                row->profile.staging.disc_slot,
                 PathText{},
                 head.tag
             }
@@ -598,8 +593,8 @@ void SessionOwner::on(const UiRequest::ResetCore& req, const UiRequest::Head& he
         return;
     }
 
-    if (row && (*row)->profile->reset.ladders && (*row)->profile->reset.reacts(req.edge)) {
-        if (!ladder_.arm_core(req.edge, {}, **row, ladder_host_, Owed{kKind, head.tag}))
+    if (row && row->profile.reset.ladders && row->profile.reset.reacts(req.edge)) {
+        if (!ladder_.arm_core(req.edge, {}, *row, ladder_host_, Owed{kKind, head.tag}))
             publish_refusal(kKind, Errc::core_load, head.tag);
         return;
     }
@@ -740,7 +735,7 @@ void SessionOwner::fall_back_to_front_end_() {
 void SessionOwner::publish_fabric_() {
     FabricState st{};
     st.gen = fabric_gen_;
-    st.cookie = cookie_;
+    st.cookie = cookie_.v;
     st.configured = programmer_.programmed();
     st.bridges_down = programmer_.bridges_down();
     st.load_ok = readiness_.load_ok();
@@ -790,7 +785,11 @@ void SessionOwner::finish_pick_(UiRequest::Kind asked, CorrelationTag tag, Conte
 
 void SessionOwner::run_load_(const PickedLoad& load) {
     if (const auto gen = attach_row_savestates(load.opensave, load.content.path.view())) {
-        hold_for_savestates(load, *gen, clock_.now() + cores::kSaveStateHoldBound);
+        hold_for_savestates(
+            load,
+            *gen,
+            clock_.now().time_since_epoch() + cores::kSaveStateHoldBound
+        );
         return;
     }
     after_content_(content_.run_attached_load(load, *this));
@@ -801,7 +800,7 @@ void SessionOwner::step_savestate_hold_() {
     if (!hold)
         return;
     if (!savestates_answered_(hold->gen)) {
-        if (clock_.now() < hold->due)
+        if (clock_.now().time_since_epoch() < hold->due)
             return;
         ++tally_.savestate_hold_expiries;
     }
@@ -875,7 +874,7 @@ bool SessionOwner::arm_open_save(
 ) {
     TASTY_SEAT_BODY(SessionOwner);
     const auto core = cores::find_core(negotiated_.core_name().view());
-    if (core && (*core)->profile->staging.order != cores::StageOrder::None)
+    if (core && core->profile.staging.order != cores::StageOrder::None)
         return false;
     if (mounts_.save_mount_live() || mounts_.mount_held() || ladder_.live()) {
         ++tally_.open_saves_skipped;
@@ -935,14 +934,11 @@ bool SessionOwner::prime_replay_save_(std::string_view path, bool seeded) {
     if (seeded) {
         std::string from(replay_save_root_.view());
         from += "/seed.sav";
-        auto f = vfs_.open(from, svc::OpenMode::ReadWhole);
-        const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
-        if (!sz)
+
+        auto bytes = read_file(vfs_, from);
+        if (!bytes)
             return false;
-        auto buf = read_whole(**f, *sz);
-        if (!buf)
-            return false;
-        seed = std::move(*buf);
+        seed = std::move(*bytes);
     }
     return durable_write(vfs_, path, std::as_bytes(std::span<const std::uint8_t>(seed)))
         .has_value();
@@ -1055,7 +1051,7 @@ void SessionOwner::manifest_done() {
 void SessionOwner::offer_(BeltOrders&& orders) {
     if (belt_.offer(std::move(orders)) || !log_)
         return;
-    (void)log_->push(LogRec::Refusal{Errc::busy, ERR_SITE()}, log_now_ns_());
+    (void)log_->push(LogRec::Refusal{Errc::busy, ERR_SITE()}, log_now_());
 }
 
 bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, proto::ActKey gen) {
@@ -1065,15 +1061,22 @@ bool SessionOwner::order_walk(proto::IoIndex slot, std::string_view path, proto:
     content_.content_owed() = Owed{};
     belt_.refuse_walk(gen);
     const auto row = cores::find_core(negotiated_.core_name().view());
-    if (!row || (*row)->make_loader == nullptr)
+    if (!row || row->make_loader == nullptr)
         return true;
     const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
-    auto loader = (*row)->make_loader(
-        cores::LoaderContext{vfs_, *(*row)->profile, turbo, content_.loader_memo(), aperture_}
+    auto loader = row->make_loader(
+        cores::LoaderContext{
+            vfs_,
+            row->profile,
+            turbo,
+            content_.loader_memo(),
+            aperture_,
+            infra::OptRef<const proto::StatusCell>{status_cell_}
+        }
     );
-    const cores::LoadAsk ask{.index = proto::WideIoIndex{slot.v}, .path = path, .disc = true};
+    const cores::LoadAsk ask{.index = proto::WideIoIndex::of(slot), .path = path, .disc = true};
     const auto plan = loader->plan(ask, ladder_host_.status_word());
-    auto w = plan ? LoadWalk::start(std::move(loader), *plan, (*row)->profile->windows)
+    auto w = plan ? LoadWalk::start(std::move(loader), *plan, row->profile.windows)
                   : Ex<LoadWalk>{std::unexpected(plan.error())};
     if (!w) {
         ++tally_.files_failed;
@@ -1133,7 +1136,7 @@ cores::ILadderHost& SessionOwner::ladder_host() noexcept {
 bool SessionOwner::arm_loader(
     const ContentRequest& req,
     std::string_view save,
-    std::uint64_t save_bytes
+    proto::FileSize save_bytes
 ) {
     TASTY_SEAT_BODY(SessionOwner);
     ContentPick::Armed a = content_.arm_loader(req, save, save_bytes);
@@ -1165,7 +1168,7 @@ void SessionOwner::finish_ladder_(const OwnerLadder::Ended& end) {
     const Event::Head head{ERR_SITE(), {}, kUncaused};
     if (end.ok) {
         if (end.touched)
-            owner_events_.push(Event::SdActivity{.slot = end.index.v}, head);
+            owner_events_.push(Event::SdActivity{.index = end.index}, head);
         publish_done(end.owed.which, end.owed.tag);
     } else {
         owner_events_.push(Event::InfoRequest{.id = InfoId::ImageMountFailed}, head);
@@ -1192,8 +1195,7 @@ void SessionOwner::drop_ladder_() {
     made_.reset();
     reset_owed_.reset();
 
-    if (boot_restore_ == BootRestore::Laddered)
-        boot_restore_ = BootRestore::Asked;
+    boot_restore_ = BootRestore::None;
     negotiated_.clear_core_name();
 }
 
@@ -1219,11 +1221,7 @@ bool SessionOwner::build_has_manifest_(const proto::ConfStr& cs) const {
         || !boot_companion_.view().empty();
 }
 
-void SessionOwner::order_make_core_(
-    bool fabric,
-    bool identity_bound,
-    const svc::ConfigSnapshot& cfg
-) {
+void SessionOwner::order_make_core_(const MakeCoreFacts& facts, const svc::ConfigSnapshot& cfg) {
     belt_.drop_manifest();
     const std::string_view rel = make_core_rel_();
 
@@ -1237,7 +1235,7 @@ void SessionOwner::order_make_core_(
             .manifest = {.path = built_from, .text = negotiated_.manifest_text()},
             .irqs = conf ? conf->irq_bindings() : std::span<const proto::IrqBinding>{},
             .lw = conf ? conf->lw_windows() : std::span<const proto::AxiLwDecl>{},
-            .fabric = fabric,
+            .fabric = facts.fabric,
             .fabric_gen = fabric_gen_,
             .mount_slots = conf ? conf->mount_slot_mask() : proto::BlockSlotMask{}
         }
@@ -1248,10 +1246,10 @@ void SessionOwner::order_make_core_(
         ? build_doc_facts(vfs_, negotiated_.manifest_text(), built_from)
         : cores::ManifestDocFacts{};
 
-    const IdentityRecord::Stamp stamp = identity_stamp_ = next_identity_stamp(identity_stamp_);
+    const IdentityRecord::Stamp stamp = identity_stamp_ = identity_stamp_.next();
     op.identity = stamp;
     const IdentityRecord::Inputs in{
-        .identity_bound = identity_bound,
+        .identity_bound = facts.identity_bound,
         .fields = conf ? bind_identity_fields(*conf) : std::array<std::string_view, 4>{},
         .button_override = {doc.buttons_names, doc.buttons_default},
         .gamepad_defaults = cfg.gamepad_defaults != 0,
@@ -1345,65 +1343,35 @@ void SessionOwner::expect_boot_negotiate() noexcept {
     phase_edge_(phase::Stimulus::BootAdopt);
 }
 
-void SessionOwner::on_slot_names_(const proto::LinkEvent::SaveBytes& e) {
-
-    const SlotAsker who = e.tag               ? SlotAsker::Load
-        : boot_restore_ == BootRestore::Asked ? SlotAsker::Boot
-                                              : SlotAsker::Refresh;
-    if (e.status != proto::SaveStatus::Bytes) {
-        refuse_slot_names_(who, e.tag);
-        return;
-    }
-
-    const auto path = rx_.bytes(e.rel_path);
-    preview_slot_names_(rx_.bytes(e.payload));
-    if (who == SlotAsker::Refresh)
-        return;
-    bind_slot_answer_(who == SlotAsker::Boot, e.tag, infra::as_text(path));
-}
-
-void SessionOwner::refuse_slot_names_(SlotAsker who, CorrelationTag tag) {
-    if (who == SlotAsker::Load) {
-        publish_refusal(UiRequest::Kind::LoadCoreConfig, Errc::not_found, tag);
-    }
-    if (who == SlotAsker::Boot)
-        finish_boot_restore_();
-}
-
-void SessionOwner::preview_slot_names_(std::span<const std::uint8_t> pack) {
-    if (!pack.empty()) {
-        const std::span<const std::byte> previews = infra::byte_cast<const std::byte>(pack);
-        saves_.order_slot_previews(previews.data(), previews.size());
-    }
-}
-
-void SessionOwner::bind_slot_answer_(bool boot, CorrelationTag tag, std::string_view path) {
+void SessionOwner::load_core_config_(cores::ConfigSlot slot, CorrelationTag tag) {
     const auto row = cores::find_core(negotiated_.core_name().view());
-    const bool boots = row && (*row)->profile->reset.restore_boots;
+    const bool boots = row && row->profile.reset.restore_boots;
 
     if (boots && ladder_.live()) {
-        if (tag)
-            publish_refusal(UiRequest::Kind::LoadCoreConfig, Errc::would_block, tag);
-        if (boot)
-            finish_boot_restore_();
+        publish_refusal(UiRequest::Kind::LoadCoreConfig, Errc::would_block, tag);
         return;
     }
-    const cores::ConfigSlot slot = boot ? cores::ConfigSlot{} : saves_.load_slot_slot();
-    const bool laddered = saves_.bind_slot_config(slot, path) && boots && arm_restore_ladder_(path);
+    switch (saves_.load_slot(slot, tag)) {
+        case SlotLoad::NoRole:
+            publish_refusal(UiRequest::Kind::LoadCoreConfig, Errc::not_found, tag);
+            return;
+        case SlotLoad::Refused:
+            return;
+        case SlotLoad::Bound:
+            break;
+    }
 
-    if (boot && laddered) {
-        boot_restore_ = BootRestore::Laddered;
-        return;
+    saves_.publish_slot_previews();
+    if (boots && !arm_restore_ladder_(saves_.slot_rel(slot))) {
+        publish_refusal(UiRequest::Kind::LoadCoreConfig, Errc::would_block, tag);
     }
-    if (boot)
-        finish_boot_restore_();
 }
 
 bool SessionOwner::arm_restore_ladder_(std::string_view config) {
     const auto row = cores::find_core(negotiated_.core_name().view());
     if (!row)
         return false;
-    return ladder_.arm_core(std::nullopt, config, **row, ladder_host_, Owed{});
+    return ladder_.arm_core(std::nullopt, config, *row, ladder_host_, Owed{});
 }
 
 void SessionOwner::finish_boot_restore_() noexcept {
@@ -1414,10 +1382,6 @@ void SessionOwner::finish_boot_restore_() noexcept {
 void SessionOwner::on(const proto::LinkEvent::SaveBytes& e) {
     if (e.status == proto::SaveStatus::Nothing)
         return;
-    if (e.which == proto::SaveKind::SlotNames) {
-        on_slot_names_(e);
-        return;
-    }
     saves_.on_save_bytes(e);
 }
 
@@ -1480,7 +1444,11 @@ void SessionOwner::on(const proto::LinkEvent::CoreMade& m) noexcept {
         refuse_started_switch_(m.err, phase::Stimulus::CoreRefused);
         return;
     }
-    made_ = MadeFacts{.restore_owed = m.restore_owed, .cheat_records = m.cheat_records};
+    const auto row = negotiated_.load_row();
+    made_ = MadeFacts{
+        .restore_owed = m.restore_owed,
+        .cheat_records = row && row->manifest_doc.has_value()
+    };
     phase_edge_(phase::Stimulus::CoreMade);
 
     if (arm_manifest_())
@@ -1511,17 +1479,20 @@ void SessionOwner::finish_core_made_() noexcept {
     static constexpr CheatCatalog kNoCheats{};
     const MadeFacts made = std::exchange(made_, std::nullopt).value_or(MadeFacts{});
     cheat_catalog_cell_.publish(made.cheat_records ? negotiated_.cheats() : kNoCheats);
+    boot_restore_ = BootRestore::None;
     if (made.restore_owed) {
 
-        boot_restore_ = BootRestore::Asked;
-        if (saves_.order_save_ask(
-                proto::SaveKind::SlotNames,
-                cores::ConfigSlot{},
-                CorrelationTag{},
-                true
-            ))
+        const auto row = cores::find_core(negotiated_.core_name().view());
+        const bool boots = row && row->profile.reset.restore_boots;
+        const cores::ConfigSlot slot{};
+        if (saves_.load_slot(slot, CorrelationTag{}) == SlotLoad::Bound
+            && boots
+            && !ladder_.live()
+            && arm_restore_ladder_(saves_.slot_rel(slot))) {
+
+            boot_restore_ = BootRestore::Laddered;
             return;
-        boot_restore_ = BootRestore::None;
+        }
     }
     order_session_up_();
 }
@@ -1530,6 +1501,8 @@ void SessionOwner::order_session_up_() noexcept {
     if (rebooting_())
         return refuse_rebooting_(phase::Stimulus::SessionUp);
     phase_edge_(phase::Stimulus::SessionUp);
+
+    saves_.publish_slot_previews();
     const std::vector<RememberedFile> remembered = read_remembered_files_();
 
     const bool index0_taken = std::ranges::any_of(remembered, [](const RememberedFile& f) noexcept {
@@ -1564,10 +1537,13 @@ void SessionOwner::order_session_up_() noexcept {
     const std::string rbf = start_rbf_();
 
     const bool slot0_held = mounts_.read_remembered_mounts(remembered_files_);
-    const StartChain chain = StartChain::plan(
-        start_facts_(rbf, index0_taken, slot0_held, !remembered.empty(), ladder),
-        vfs_
-    );
+    const SessionUpFacts session_up{
+        .index0_taken = index0_taken,
+        .slot0_held = slot0_held,
+        .remembered = !remembered.empty(),
+        .ladder = ladder
+    };
+    const StartChain chain = StartChain::plan(start_facts_(rbf, session_up), vfs_);
 
     const bool held = chain.holds_reset() && bind_.reset_level(true);
     order_remembered_files_(remembered);
@@ -1626,13 +1602,7 @@ void SessionOwner::order_remembered_files_(std::span<const RememberedFile> files
     }
 }
 
-StartChain::Facts SessionOwner::start_facts_(
-    std::string_view rbf,
-    bool index0_taken,
-    bool slot0_held,
-    bool remembered,
-    bool ladder
-) const {
+StartChain::Facts SessionOwner::start_facts_(std::string_view rbf, const SessionUpFacts& up) const {
     const std::string_view home = negotiated_.core_name().view();
     const cores::CoreProfile& p = cores::profile_for(home);
     return StartChain::Facts{
@@ -1642,10 +1612,10 @@ StartChain::Facts SessionOwner::start_facts_(
         .rbf = rbf,
         .manifest_load = negotiated_.made_with_manifest(),
         .generic_identity = negotiated_.generic_identity(),
-        .index0_taken = index0_taken,
-        .remembered = remembered,
-        .ladder = ladder,
-        .slot0_held = slot0_held
+        .index0_taken = up.index0_taken,
+        .remembered = up.remembered,
+        .ladder = up.ladder,
+        .slot0_held = up.slot0_held
     };
 }
 
@@ -1703,12 +1673,19 @@ void SessionOwner::order_rbf_tail_(
                                                                : path.substr(dot);
     LoadKey key(buf.size());
     key.feed(buf);
-    const auto id = inbox_.intern_file(std::move(buf), ext, path, hal::FabricAddr{}, key.value());
+    const auto id = inbox_.intern_file(
+        FileIntern{
+            .bytes = std::move(buf),
+            .ext = ext,
+            .path = path,
+            .crc = key.value(),
+            .edge = ContentEdge::Silent
+        }
+    );
     if (!id) {
         ++tally_.files_failed;
         return;
     }
-    (void)inbox_.stamp_edge(*id, ContentEdge::Silent);
 
     if (!content_.order_content_tx(
             *id,
@@ -1807,7 +1784,7 @@ void SessionOwner::on(const proto::LinkEvent::ConfStr& c) {
     bind_.facts(negotiated_.pending_facts());
     bind_.uart(effective_name(name, negotiated_.pending_facts()), &cs);
 
-    order_make_core_(fabric, identity_bound, cfg);
+    order_make_core_(MakeCoreFacts{.fabric = fabric, .identity_bound = identity_bound}, cfg);
 }
 
 void SessionOwner::arm_replay_ini(bool strict) noexcept {
@@ -2027,25 +2004,25 @@ void SessionOwner::judge_(const phase::SwitchPhase::Taken& t, phase::Stimulus on
                 .under = static_cast<std::uint8_t>(t.under),
                 .stimulus = static_cast<std::uint8_t>(on)
             },
-            log_now_ns_()
+            log_now_()
         );
     }
     if constexpr (kSeatChecksEnabled) {
         char text[112];
-        const auto name = [](std::string_view v) {
+        const auto width = [](std::string_view v) {
             return static_cast<int>(v.size());
         };
-        const std::string_view s = phase::kStimulusNames[static_cast<std::size_t>(on)];
-        const std::string_view p = phase::kPhaseNames[static_cast<std::size_t>(t.at)];
-        const std::string_view u = phase::kPhaseNames[static_cast<std::size_t>(t.under)];
+        const std::string_view s = phase::name(on);
+        const std::string_view p = phase::name(t.at);
+        const std::string_view u = phase::name(t.under);
         if (t.at == t.under) {
             (void)std::snprintf(
                 text,
                 sizeof text,
                 "SWITCH PHASE: tolerated %.*s in %.*s",
-                name(s),
+                width(s),
                 s.data(),
-                name(p),
+                width(p),
                 p.data()
             );
         } else {
@@ -2053,11 +2030,11 @@ void SessionOwner::judge_(const phase::SwitchPhase::Taken& t, phase::Stimulus on
                 text,
                 sizeof text,
                 "SWITCH PHASE: tolerated %.*s in %.*s over %.*s",
-                name(s),
+                width(s),
                 s.data(),
-                name(p),
+                width(p),
                 p.data(),
-                name(u),
+                width(u),
                 u.data()
             );
         }
@@ -2099,14 +2076,14 @@ void SessionOwner::log_conf_str_(const proto::LinkEvent::ConfStr& c) noexcept {
             .bind_gen = c.bind_gen.v,
             .phase = static_cast<std::uint8_t>(phase::kind(phase_.now)),
             .under = static_cast<std::uint8_t>(phase::kind(phase_.stage())),
-            .awaited = static_cast<std::uint8_t>(awaited ? 1 : 0)
+            .awaited = awaited
         },
-        log_now_ns_()
+        log_now_()
     );
 }
 
-std::uint64_t SessionOwner::log_now_ns_() const noexcept {
-    return static_cast<std::uint64_t>(clock_.now().count());
+std::chrono::nanoseconds SessionOwner::log_now_() const noexcept {
+    return clock_.now().time_since_epoch();
 }
 
 void SessionOwner::phase_after_watch_(bool reboot) noexcept {

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +43,7 @@
 #include "ui/status_view.h"
 #include "ui/transfer_tracker.h"
 #include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -119,7 +119,8 @@ public:
     struct Wiring {
         const app::ConfStrCell& conf_str;
         const proto::StatusCell& status;
-        const app::DipCell& dip;
+        const app::DipLabelsCell& dip_labels;
+        const app::DipChoicesCell& dip_choices;
         const app::OptionCell& option;
         const app::LauncherStateCell& launcher;
         const app::ConfigSlotCell& config_slot;
@@ -134,7 +135,8 @@ public:
               CoreCellMirror::Wiring{
                   w.conf_str,
                   w.status,
-                  w.dip,
+                  w.dip_labels,
+                  w.dip_choices,
                   w.option,
                   w.config_slot,
                   w.tx_digest,
@@ -268,7 +270,9 @@ public:
 
     HdMask hd_mask() const noexcept { return hd_mask_; }
 
-    proto::OsdMask sdram_cfg() const noexcept { return sdram_latch_.cfg(); }
+    proto::OsdMask sdram_cfg() const noexcept {
+        return sdram_latch_.cfg().value_or(proto::OsdMask{});
+    }
 
     std::uint32_t sdram_ask_refusals() const noexcept { return sdram_latch_.refusals(); }
 
@@ -290,15 +294,13 @@ public:
 
 private:
     void open_root_(PageContext& ctx, bool hd_allowed);
-
-    SystemFacts page_facts_(const SystemFacts& f) const noexcept;
     void apply(const Transition& t, PageContext& ctx);
 
-    void forget_hd_window_(std::size_t depth0) noexcept;
+    void forget_hd_window_(StackDepth level) noexcept;
 
     void sync_cells();
 
-    void stamp_facts(PageContext& ctx) const noexcept;
+    void stamp_session(PageContext& ctx) const noexcept;
     void seed_navigator() noexcept;
 
     void drop_pages_() noexcept;
@@ -343,7 +345,7 @@ private:
 
     app::RecentGames recent_games_{};
 
-    std::array<RowIndex, kHdWindowDepths> hd_window_first_{};
+    infra::IndexedArray<RowIndex, kHdWindowDepths, StackDepth> hd_window_first_{};
     Navigator nav_;
     HdKeyRemap remap_;
     HdFocusMemory hd_focus_;

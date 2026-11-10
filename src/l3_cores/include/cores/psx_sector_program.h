@@ -15,11 +15,11 @@ public:
     constexpr PsxSectorProgram() noexcept = default;
 
     [[nodiscard]] proto::SlotIndex slot() const noexcept override;
-    [[nodiscard]] std::uint32_t frame_bytes() const noexcept override;
+    [[nodiscard]] proto::BlockSize frame_bytes() const noexcept override;
     [[nodiscard]] svc::DiscForm form() const noexcept override;
     [[nodiscard]] Source answer(
         const svc::DiscGeometry& disc,
-        std::int64_t lba
+        proto::Lba lba
     ) const noexcept override;
 };
 

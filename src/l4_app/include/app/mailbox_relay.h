@@ -15,6 +15,7 @@
 #include "proto/link.h"
 #include "proto/mailbox_frame.h"
 #include "proto/mailbox_poll.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -37,7 +38,7 @@ public:
         const proto::MailboxFrameDecl& frame
     ) noexcept override;
 
-    void bind(proto::MailboxPoll poll, std::uint16_t gen) noexcept;
+    void bind(proto::MailboxPoll poll, proto::CompanionBindGen gen) noexcept;
 
     void forget() noexcept;
 
@@ -45,7 +46,7 @@ public:
 
     void park_now() noexcept;
 
-    [[nodiscard]] bool worker_idle() const noexcept { return chan_.outbound() == 0; }
+    [[nodiscard]] bool worker_idle() const noexcept { return chan_.outbound() == 0 && !held_; }
 
     [[nodiscard]] bool polling() const noexcept { return polling_; }
 
@@ -72,12 +73,16 @@ private:
 
     Chan chan_;
 
+    std::optional<Chan::Job> held_{};
+    bool held_awaited_ = false;
+
     std::optional<std::uint16_t> last_head_{};
     static_assert(std::is_trivially_copyable_v<decltype(last_head_)>);
     bool polling_ = false;
-    std::uint16_t gen_ = 0;
+    proto::CompanionBindGen gen_{};
     std::uint16_t round_ = 0;
     xthread::Counter polls_, forwarded_, declines_, stale_, acts_, refusals_, wire_faults_;
+    xthread::Counter none_acts_;
 };
 
 }

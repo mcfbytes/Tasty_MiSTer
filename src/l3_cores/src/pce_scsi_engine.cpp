@@ -1,17 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/pce_scsi_engine.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 #include "cd_core_detail.h"
 #include "cores/cd_engine.h"
 #include "cores/cd_head_prime.h"
+#include "cores/cd_msf.h"
 #include "cores/cdwire.h"
-#include "infra/byte_view.h"
+#include "cores/pce_command.h"
+#include "cores/pce_dir_info_reply.h"
+#include "cores/pce_sense_reply.h"
+#include "cores/pce_subq.h"
+#include "cores/pce_subq_reply.h"
+#include "cores/subcode_q_frame.h"
+#include "infra/endian.h"
 #include "infra/error.h"
 #include "proto/spi_fio_queue.h"
 #include "proto/types.h"
+#include "svc/toc.h"
 
 namespace mister::cores {
 
@@ -25,26 +36,8 @@ constexpr std::uint8_t kPceStatePause = 4;
 constexpr std::uint16_t kPceStatusGood = 0;
 constexpr std::uint16_t kPceStatusCheckCond = 1;
 
-constexpr std::uint8_t kPceCommTestUnit = 0x00;
-constexpr std::uint8_t kPceCommRequestSense = 0x03;
-constexpr std::uint8_t kPceCommRead6 = 0x08;
-constexpr std::uint8_t kPceCommModeSelect6 = 0x15;
-constexpr std::uint8_t kPceCommSapsp = 0xD8;
-constexpr std::uint8_t kPceCommSapep = 0xD9;
-constexpr std::uint8_t kPceCommPause = 0xDA;
-constexpr std::uint8_t kPceCommReadSubq = 0xDD;
-constexpr std::uint8_t kPceCommGetDirInfo = 0xDE;
-
-constexpr std::uint8_t kSenseNotReady = 0x2;
-constexpr std::uint8_t kSenseIllegalRequest = 0x5;
-constexpr std::uint8_t kNseNoDisc = 0x0B;
-constexpr std::uint8_t kNseInvalidCommand = 0x20;
-constexpr std::uint8_t kPceCddaModeSilent = 0x00;
-constexpr std::uint8_t kPceCddaModeLoop = 0x01;
-constexpr std::uint8_t kPceCddaModeInterrupt = 0x02;
-
-constexpr std::size_t kPceCddaFrame = kRawFrame + 2;
-constexpr std::size_t kPceSubFrame = kSubBytes + 4;
+constexpr std::size_t kPceCddaFrame = svc::kRawFrameBytes + 2;
+constexpr std::size_t kPceSubFrame = svc::kSubcodeBytes + 4;
 constexpr std::size_t kStatusCommandWords = 1 + CdEngine::kMaxStatusWords;
 static_assert(
     2 * (kPceCddaFrame + kPceSubFrame) + 12 + 2 * 2 * kStatusCommandWords
@@ -69,18 +62,33 @@ static_assert(
 
 }
 
-Ex<void> PceScsiEngine::do_notify_disc(bool loaded, const svc::DiscGeometry&) {
+void PceScsiEngine::do_notify_disc(bool loaded, const svc::DiscGeometry&) noexcept {
 
     st_.loaded = loaded;
     st_.state = loaded ? kPceStateIdle : kPceStateNoDisc;
     if (loaded)
         st_.latency = 10;
-    return {};
 }
 
 bool PceScsiEngine::do_streaming(const svc::DiscGeometry&) const noexcept {
 
     return st_.latency == 0 && st_.state == kPceStateRead;
+}
+
+CdDriveState PceScsiEngine::drive_state_() const noexcept {
+    switch (st_.state) {
+        case kPceStateNoDisc:
+            return CdDriveState::NoDisc;
+        case kPceStateIdle:
+            return CdDriveState::Stopped;
+        case kPceStateRead:
+            return CdDriveState::Reading;
+        case kPceStatePlay:
+            return CdDriveState::Playing;
+        case kPceStatePause:
+            return CdDriveState::Paused;
+    }
+    return CdDriveState::Stopped;
 }
 
 Ex<void> PceScsiEngine::do_push_sector(CdDialectPorts& p) {
@@ -90,26 +98,23 @@ Ex<void> PceScsiEngine::do_push_sector(CdDialectPorts& p) {
     return read_send_(p);
 }
 
-std::size_t PceScsiEngine::do_status_words(
-    std::uint64_t frame,
-    std::span<std::uint16_t, CdEngine::kMaxStatusWords> out
-) const noexcept {
-
-    out[0] = static_cast<std::uint16_t>(frame);
-    out[1] = static_cast<std::uint16_t>((frame >> 16));
-    return 2;
-}
-
 Ex<void> PceScsiEngine::do_accept(std::span<const std::uint16_t> w, CdDialectPorts& p) {
 
     switch (w[6] & 0xFFu) {
-        case 0:
+        case 0: {
 
-            for (std::size_t i = 0; i < 7; ++i) {
-                st_.comm[2 * i] = static_cast<std::uint8_t>(w[i]);
-                st_.comm[2 * i + 1] = static_cast<std::uint8_t>(w[i] >> 8);
+            std::array<std::uint8_t, PceCommand::kBytes> raw{};
+            for (std::size_t i = 0; i < PceCommand::kWords; ++i) {
+                infra::store_le<std::uint16_t>(
+                    std::span<std::uint8_t, sizeof(std::uint16_t)>(
+                        raw.data() + i + i,
+                        sizeof(std::uint16_t)
+                    ),
+                    w[i]
+                );
             }
-            return command_exec_(p);
+            return command_exec_(PceCommand::of(raw), p);
+        }
         case 1:
 
             return send_status_(0, p.link);
@@ -124,33 +129,21 @@ Ex<void> PceScsiEngine::do_accept(std::span<const std::uint16_t> w, CdDialectPor
 }
 
 Ex<void> PceScsiEngine::send_status_(std::uint16_t status, ICdLink& link) {
-    const auto w = cdwire::pce_set_words(status, st_.region, false);
-    return send_frame_words_(
-        static_cast<std::uint64_t>(w[0]) | (static_cast<std::uint64_t>(w[1]) << 16),
-        link
-    );
+    return send_status_words_(cdwire::pce_set_words(status, st_.region, false), link);
 }
 
 Ex<void> PceScsiEngine::send_data_request_(ICdLink& link) {
-    const auto w = cdwire::pce_set_words(0, st_.region, true);
-    return send_frame_words_(
-        static_cast<std::uint64_t>(w[0]) | (static_cast<std::uint64_t>(w[1]) << 16),
-        link
-    );
+    return send_status_words_(cdwire::pce_set_words(0, st_.region, true), link);
 }
 
 svc::TrackIndex PceScsiEngine::track_by_lba_(HeadLba lba, const svc::DiscGeometry& geom) const {
     return track_scan(geom.toc, lba);
 }
 
-std::uint32_t PceScsiEngine::seek_ticks_(
-    HeadLba from,
-    HeadLba to,
-    const svc::DiscGeometry& geom
-) const {
+std::uint32_t PceScsiEngine::seek_ticks_(HeadMove move, const svc::DiscGeometry& geom) const {
 
-    const std::optional<Lba> a = from.readable();
-    const std::optional<Lba> b = to.readable();
+    const std::optional<Lba> a = move.from.readable();
+    const std::optional<Lba> b = move.to.readable();
     if (!a || !b)
         return 0;
     const std::uint32_t ms = geom.seek_time(*a, *b).count();
@@ -192,7 +185,7 @@ void PceScsiEngine::hint_at_(HeadLba lba, bool doubled, const svc::DiscGeometry&
 
     prime_head(
         facts_.disc,
-        static_cast<std::int32_t>(at->v),
+        *at,
         {.form = data ? svc::DiscForm::UserData : svc::DiscForm::RawFrame,
          .pair = doubled && !data,
          .subcode = true}
@@ -206,47 +199,32 @@ void PceScsiEngine::build_subcode_frame_(HeadLba lba, const svc::DiscGeometry& g
         bool have = false;
         const std::optional<Lba> at = lba.readable();
         if (at) {
-            have = facts_.disc.take(
-                       svc::DiscForm::Subcode,
-                       *at,
-                       std::as_writable_bytes(std::span(m.subc, kSubBytes))
-                   )
-                != 0;
+            have = facts_.disc
+                       .take(
+                           svc::DiscAsk{.form = svc::DiscForm::Subcode, .lba = *at},
+                           std::as_writable_bytes(std::span(m.subc, svc::kSubcodeBytes))
+                       )
+                       .is_bytes();
             if (const std::optional<Lba> next = (lba + SectorCount{1}).readable()) {
-                facts_.disc.hint(svc::DiscForm::Subcode, *next);
+                facts_.disc.hint(svc::DiscAsk{.form = svc::DiscForm::Subcode, .lba = *next});
             }
         }
         if (!have) {
             if (at)
                 ++stats_.subcode_substitutes;
 
-            for (auto& b : m.subc)
-                b = 0;
-            m.subc[12] = 1;
-            m.subc[13] = bcd(m.track.number());
-            m.subc[14] = 1;
+            PceSubq q;
+            q.set_track(m.track.number());
             const svc::Toc& toc = geom.toc;
 
             const HeadLba base = head_of(toc.at(m.track).start);
 
-            const Msf rel = stock_msf_of(m.lba - base);
-            m.subc[15] = bcd(rel.m);
-            m.subc[16] = bcd(rel.s);
-            m.subc[17] = bcd(rel.f);
-            const Msf am = msf_of(m.lba + kPregapSectors);
-            m.subc[19] = bcd(am.m);
-            m.subc[20] = bcd(am.s);
-            m.subc[21] = bcd(am.f);
-
-            std::uint8_t msb = 0, lsb = 0;
-            for (std::size_t i = 12; i < 22; ++i) {
-                std::uint8_t x = static_cast<std::uint8_t>(m.subc[i] ^ msb);
-                x = static_cast<std::uint8_t>(x ^ (x >> 4));
-                msb = static_cast<std::uint8_t>(lsb ^ (x >> 3) ^ static_cast<std::uint8_t>(x << 4));
-                lsb = static_cast<std::uint8_t>(x ^ static_cast<std::uint8_t>(x << 5));
-            }
-            m.subc[22] = static_cast<std::uint8_t>(msb ^ 0xFF);
-            m.subc[23] = static_cast<std::uint8_t>(lsb ^ 0xFF);
+            q.set_relative(stock_msf_of(m.lba - base));
+            q.set_absolute(msf_of(m.lba + kPregapSectors));
+            q.seal();
+            const auto block = SubcodeQFrame{}.wire_block(q.bytes());
+            for (std::size_t i = 0; i < svc::kSubcodeBytes; ++i)
+                m.subc[i] = block[i];
         }
         m.subc_lba = lba;
     }
@@ -254,9 +232,8 @@ void PceScsiEngine::build_subcode_frame_(HeadLba lba, const svc::DiscGeometry& g
     sub_buf_[1] = 0x00;
     sub_buf_[2] = 0x00;
     sub_buf_[3] = 0x80;
-    const auto il = cdwire::interleave_subcode(std::span<const std::uint8_t, 96>(m.subc));
-    for (std::size_t i = 0; i < kSubBytes; ++i)
-        sub_buf_[4 + i] = il[i];
+    for (std::size_t i = 0; i < svc::kSubcodeBytes; ++i)
+        sub_buf_[4 + i] = m.subc[i];
 }
 
 Ex<void> PceScsiEngine::read_send_(CdDialectPorts& p) {
@@ -277,19 +254,18 @@ Ex<void> PceScsiEngine::read_send_(CdDialectPorts& p) {
         sec_buf_[0] = 0x00;
         sec_buf_[1] = 0x08 | 0x80;
         if (const std::optional<Lba> at = m.lba.readable()) {
-            if (facts_.disc.take(
-                    svc::DiscForm::UserData,
-                    *at,
-                    std::as_writable_bytes(std::span(sec_buf_ + 2, kUserData))
-                )
-                == 0) {
+            const svc::DiscTake got = facts_.disc.take(
+                svc::DiscAsk{.form = svc::DiscForm::UserData, .lba = *at},
+                std::as_writable_bytes(std::span(sec_buf_ + 2, svc::kUserDataBytes))
+            );
+            if (!got.is_bytes()) {
                 ++stats_.substitutes;
             }
             if (const std::optional<Lba> next = (m.lba + SectorCount{1}).readable()) {
-                facts_.disc.hint(svc::DiscForm::UserData, *next);
+                facts_.disc.hint(svc::DiscAsk{.form = svc::DiscForm::UserData, .lba = *next});
             }
         }
-        if (auto r = send_frame(p.link, facts_.profile.io.data, std::span(sec_buf_, kUserData + 2));
+        if (auto r = send_frame(p.link, io_.data, std::span(sec_buf_, svc::kUserDataBytes + 2));
             !r) {
             return r;
         }
@@ -323,7 +299,7 @@ void PceScsiEngine::pump_pipeline_(const svc::DiscGeometry& geom) noexcept {
 
     prime_head(
         facts_.disc,
-        static_cast<std::int32_t>(head->v),
+        *head,
         {.form = data ? svc::DiscForm::UserData : svc::DiscForm::RawFrame, .subcode = true}
     );
 }
@@ -334,26 +310,19 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
 
     pump_pipeline_(p.geom);
 
-    m.subq[0] = 0x0A;
-    m.subq[1] = 0x00 | 0x80;
-    m.subq[2] = static_cast<std::uint8_t>(
-        m.state == kPceStatePause ? 2 : (m.state == kPceStatePlay ? 0 : 3)
+    PceSubqReply subq;
+    subq.set_play_state(
+        m.state == kPceStatePause ? PceSubqReply::PlayState::Paused
+                                  : (m.state == kPceStatePlay ? PceSubqReply::PlayState::Playing
+                                                              : PceSubqReply::PlayState::Stopped)
     );
-    m.subq[3] = 0;
-    m.subq[4] = bcd(m.track.number());
-    m.subq[5] = 1;
+    subq.set_track(m.track.number());
     {
 
         const HeadLba base = head_of(toc.at(m.track).start);
 
-        const Msf rel = stock_msf_of(m.lba - base);
-        m.subq[6] = bcd(rel.m);
-        m.subq[7] = bcd(rel.s);
-        m.subq[8] = bcd(rel.f);
-        const Msf am = msf_of(m.lba + kPregapSectors);
-        m.subq[9] = bcd(am.m);
-        m.subq[10] = bcd(am.s);
-        m.subq[11] = bcd(am.f);
+        subq.set_relative(stock_msf_of(m.lba - base));
+        subq.set_absolute(msf_of(m.lba + kPregapSectors));
     }
 
     bool subq_send = false;
@@ -392,34 +361,30 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
                     sec_buf_[0] = 0x30;
                     sec_buf_[1] = 0x09;
                     if (const std::optional<Lba> at = m.lba.readable()) {
-                        if (facts_.disc.take(
-                                svc::DiscForm::RawFrame,
-                                *at,
-                                std::as_writable_bytes(std::span(sec_buf_ + 2, kRawFrame))
-                            )
-                            == 0) {
+                        const svc::DiscTake got = facts_.disc.take(
+                            svc::DiscAsk{.form = svc::DiscForm::RawFrame, .lba = *at},
+                            std::as_writable_bytes(std::span(sec_buf_ + 2, svc::kRawFrameBytes))
+                        );
+                        if (!got.is_bytes()) {
                             ++stats_.substitutes;
                         }
                         if (const std::optional<Lba> next = (m.lba + SectorCount{1}).readable()) {
-                            facts_.disc.hint(svc::DiscForm::RawFrame, *next);
+                            facts_.disc.hint(
+                                svc::DiscAsk{.form = svc::DiscForm::RawFrame, .lba = *next}
+                            );
                         }
                     }
                     if (auto r = send_frame(
                             p.link,
-                            facts_.profile.io.cdda,
-                            std::span(sec_buf_, kRawFrame + 2)
+                            io_.cdda,
+                            std::span(sec_buf_, svc::kRawFrameBytes + 2)
                         );
                         !r) {
                         return r;
                     }
                     ++stats_.cdda_sectors;
                     build_subcode_frame_(m.lba, p.geom);
-                    if (auto r = send_frame(
-                            p.link,
-                            facts_.profile.io.subcode,
-                            std::span(sub_buf_, 100)
-                        );
-                        !r) {
+                    if (auto r = send_frame(p.link, io_.subcode, std::span(sub_buf_, 100)); !r) {
                         return r;
                     }
                 }
@@ -430,7 +395,7 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
             const bool past_end = m.cdda.past_end(m.lba);
             const bool data_hit = toc.at(m.track).type != TrackType::Cdda;
             if (past_end || data_hit || m.track > toc.last.next_index()) {
-                if (m.cdda_mode == kPceCddaModeLoop) {
+                if (m.cdda_mode == PceCommand::CddaMode::Loop) {
                     m.lba = m.cdda.start();
                     hint_at_(m.lba, false, p.geom);
                 } else {
@@ -452,7 +417,7 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
         m.subq_pend = false;
 
         build_subcode_frame_(m.lba, p.geom);
-        if (auto r = send_frame(p.link, facts_.profile.io.subcode, std::span(sub_buf_, 100)); !r) {
+        if (auto r = send_frame(p.link, io_.subcode, std::span(sub_buf_, 100)); !r) {
             return r;
         }
         if (m.latency > 0)
@@ -464,7 +429,7 @@ Ex<void> PceScsiEngine::update_(CdDialectPorts& p) {
 
     if (subq_send) {
 
-        if (auto r = send_frame(p.link, facts_.profile.io.data, std::span(m.subq, 12)); !r) {
+        if (auto r = send_frame(p.link, io_.data, subq.bytes()); !r) {
             return r;
         }
         return send_status_(kPceStatusGood, p.link);
@@ -485,171 +450,112 @@ void PceScsiEngine::do_reset_machine() noexcept {
     m.data_req = false;
     m.can_read_next = false;
     m.cdda.clear();
-    m.cdda_mode = kPceCddaModeSilent;
+    m.cdda_mode = PceCommand::CddaMode::Silent;
     m.int_pend = false;
     m.subq_pend = false;
     m.stat = 0;
 }
 
-Ex<void> PceScsiEngine::command_exec_(CdDialectPorts& p) {
+Ex<void> PceScsiEngine::command_exec_(const PceCommand& command, CdDialectPorts& p) {
 
     auto& m = st_;
     const svc::Toc& toc = p.geom.toc;
     m.int_pend = false;
 
-    const auto decode_target = [&](bool clamp_track) -> HeadLba {
-        switch (m.comm[9] & 0xC0u) {
-            case 0x40: {
+    const std::optional<PceCommand::Opcode> op = command.opcode();
+    if (!op) {
+        m.sense.raise(SenseKey::IllegalRequest, Asc::InvalidCommand);
+        m.has_status = false;
+        return send_status_(kPceStatusCheckCond, p.link);
+    }
 
-                const std::uint32_t mm = proto::PackedBcd{m.comm[2]}.value();
-                const std::uint32_t ss = proto::PackedBcd{m.comm[3]}.value();
-                const std::uint32_t ff = proto::PackedBcd{m.comm[4]}.value();
-                return HeadLba{static_cast<std::int32_t>(
-                           ff
-                           + ss * svc::kFramesPerSecond
-                           + mm * svc::kSecondsPerMinute * svc::kFramesPerSecond
-                       )}
-                - kPregapSectors;
-            }
-            case 0x80: {
-                std::uint32_t track = proto::PackedBcd{m.comm[2]}.value();
-                if (track == 0)
-                    track = 1;
-                if (clamp_track) {
-
-                    return head_of(toc.at(toc.last.clamped_number(track).index()).start);
-                }
-                if (!toc.last.contains(svc::TrackIndex::of(track - 1))) {
-                    return head_of(toc.end);
-                }
-                return head_of(toc.at(svc::TrackIndex::of(track - 1)).start);
-            }
-            default:
-                return HeadLba{static_cast<std::int32_t>(
-                    (static_cast<std::uint32_t>(m.comm[3]) << 16)
-                    | (static_cast<std::uint32_t>(m.comm[4]) << 8)
-                    | m.comm[5]
-                )};
-        }
-    };
-
-    switch (m.comm[0]) {
-        case kPceCommTestUnit:
+    switch (*op) {
+        case PceCommand::TestUnit:
             if (m.state == kPceStateNoDisc) {
-                m.sense.raise(kSenseNotReady, kNseNoDisc);
+                m.sense.raise(SenseKey::NotReady, Asc::NoDisc);
                 return send_status_(kPceStatusCheckCond, p.link);
             }
             return send_status_(kPceStatusGood, p.link);
 
-        case kPceCommRequestSense: {
+        case PceCommand::RequestSense: {
 
-            std::uint8_t buf[20] = {};
-            buf[0] = 18;
-            buf[1] = 0x80;
-            buf[2] = 0x70;
             const ScsiSense::Block sense = m.sense.take();
-            buf[4] = sense.key;
-            buf[9] = 0x0A;
-            buf[14] = sense.asc;
-            buf[15] = sense.ascq;
-            buf[16] = sense.fru;
-            if (auto r = send_frame(p.link, facts_.profile.io.data, std::span(buf, 20)); !r) {
+            PceSenseReply reply;
+            reply.set_key(sense_key_byte(sense.key));
+            reply.set_asc(asc_byte(sense.asc));
+            if (auto r = send_frame(p.link, io_.data, reply.bytes()); !r) {
                 return r;
             }
             return send_status_(kPceStatusGood, p.link);
         }
 
-        case kPceCommGetDirInfo: {
+        case PceCommand::GetDirInfo: {
 
-            std::uint8_t buf[6] = {};
-            buf[0] = 4;
-            buf[1] = 0x80;
-            switch (m.comm[1]) {
-                case 1: {
-                    const Msf msf = msf_of(head_of(toc.end) + kPregapSectors);
-                    buf[2] = bcd(msf.m);
-                    buf[3] = bcd(msf.s);
-                    buf[4] = bcd(msf.f);
-                    buf[5] = 0;
+            PceDirInfoReply reply;
+            switch (command.dir_info().value_or(PceCommand::DirInfo::Summary)) {
+                case PceCommand::DirInfo::DiscEnd:
+                    reply.set_disc_end(msf_of(head_of(toc.end) + kPregapSectors));
+                    break;
+                case PceCommand::DirInfo::Track: {
+
+                    const svc::Track& tk = toc.at(command.clamped_track(toc).index());
+                    reply.set_track(msf_of(head_of(tk.start) + kPregapSectors), tk.type);
                     break;
                 }
-                case 2: {
-
-                    const svc::TrackNumber track = toc.last.clamped_number(
-                        proto::PackedBcd{m.comm[2]}.value()
-                    );
-                    const svc::Track& tk = toc.at(track.index());
-                    const Msf msf = msf_of(head_of(tk.start) + kPregapSectors);
-                    buf[2] = bcd(msf.m);
-                    buf[3] = bcd(msf.s);
-                    buf[4] = bcd(msf.f);
-                    buf[5] = static_cast<std::uint8_t>(static_cast<std::uint8_t>(tk.type) << 2);
-                    break;
-                }
-                case 0:
-                default:
-                    buf[2] = 1;
-                    buf[3] = toc.last.bcd_byte();
-                    buf[4] = 0;
-                    buf[5] = 0;
+                case PceCommand::DirInfo::Summary:
+                    reply.set_summary(toc.last);
                     break;
             }
-            if (auto r = send_frame(p.link, facts_.profile.io.data, std::span(buf, 6)); !r) {
+            if (auto r = send_frame(p.link, io_.data, reply.bytes()); !r) {
                 return r;
             }
             return send_status_(kPceStatusGood, p.link);
         }
 
-        case kPceCommRead6: {
-            const HeadLba new_lba{static_cast<std::int32_t>(
-                ((static_cast<std::uint32_t>(m.comm[1]) << 16)
-                 | (static_cast<std::uint32_t>(m.comm[2]) << 8)
-                 | m.comm[3])
-                & 0x1FFFFFu
-            )};
-            const SectorCount cnt{m.comm[4] ? static_cast<std::int32_t>(m.comm[4]) : 256};
-            m.track = track_by_lba_(new_lba, p.geom);
+        case PceCommand::Read6: {
+            const PceCommand::ReadOperands operands = command.read6();
+            m.track = track_by_lba_(operands.head, p.geom);
 
             bool matched = false;
-            for (const auto& fp : facts_.profile.seek_fast_paths) {
-                if (m.lba == new_lba && cnt == fp.count) {
+            for (const auto& fp : row_.seek_fast_paths) {
+                if (m.lba == operands.head && operands.count == fp.count) {
                     m.latency = fp.latency_ticks;
                     matched = true;
                     break;
                 }
             }
             if (!matched) {
-                if (m.comm[13] & 0x80u) {
+                if (command.fast_seek()) {
                     m.latency = 0;
                 } else {
-                    m.latency = seek_ticks_(m.lba, new_lba, p.geom);
+                    m.latency = seek_ticks_(HeadMove{m.lba, operands.head}, p.geom);
                     m.audio_delay = 0;
                 }
             }
-            m.lba = new_lba;
+            m.lba = operands.head;
             hint_at_(m.lba, false, p.geom);
-            m.cnt = cnt;
+            m.cnt = operands.count;
             m.can_read_next = true;
             m.state = kPceStateRead;
             break;
         }
 
-        case kPceCommModeSelect6:
-            if (m.comm[4]) {
+        case PceCommand::ModeSelect6:
+            if (command.requests_data()) {
                 m.data_req = true;
             } else {
                 return send_status_(kPceStatusGood, p.link);
             }
             break;
 
-        case kPceCommSapsp: {
-            const HeadLba new_lba = decode_target(true);
-            if (m.comm[13] & 0x80u) {
+        case PceCommand::Sapsp: {
+            const HeadLba new_lba = command.target(true, toc);
+            if (command.fast_seek()) {
                 m.latency = 0;
                 m.audio_delay = 0;
             } else {
 
-                const std::uint32_t seek = seek_ticks_(m.lba, new_lba, p.geom);
+                const std::uint32_t seek = seek_ticks_(HeadMove{m.lba, new_lba}, p.geom);
                 m.audio_delay = static_cast<std::uint32_t>(220.0f / 13.33f);
                 if (seek > m.audio_delay) {
                     m.latency = seek - m.audio_delay;
@@ -662,20 +568,21 @@ Ex<void> PceScsiEngine::command_exec_(CdDialectPorts& p) {
             hint_at_(m.lba, true, p.geom);
             m.track = track_by_lba_(new_lba, p.geom);
             m.cdda.play(new_lba, head_of(toc.end));
-            m.cdda_mode = m.comm[1];
+            m.cdda_mode = command.cdda_mode();
             m.cdda_first = 1;
-            m.state = (m.cdda_mode == kPceCddaModeSilent) ? kPceStatePause : kPceStatePlay;
+            m.state = (m.cdda_mode == PceCommand::CddaMode::Silent) ? kPceStatePause
+                                                                    : kPceStatePlay;
             m.stat = kPceStatusGood;
             m.has_status = true;
             break;
         }
 
-        case kPceCommSapep: {
-            const HeadLba new_lba = decode_target(false);
-            m.cdda_mode = m.comm[1];
+        case PceCommand::Sapep: {
+            const HeadLba new_lba = command.target(false, toc);
+            m.cdda_mode = command.cdda_mode();
             m.cdda.set_end(new_lba);
-            m.state = (m.cdda_mode == kPceCddaModeSilent) ? kPceStateIdle : kPceStatePlay;
-            if (m.cdda_mode == kPceCddaModeInterrupt) {
+            m.state = (m.cdda_mode == PceCommand::CddaMode::Silent) ? kPceStateIdle : kPceStatePlay;
+            if (m.cdda_mode == PceCommand::CddaMode::Interrupt) {
                 m.int_pend = true;
             } else {
                 return send_status_(kPceStatusGood, p.link);
@@ -683,18 +590,13 @@ Ex<void> PceScsiEngine::command_exec_(CdDialectPorts& p) {
             break;
         }
 
-        case kPceCommPause:
+        case PceCommand::Pause:
             m.state = kPceStatePause;
             return send_status_(kPceStatusGood, p.link);
 
-        case kPceCommReadSubq:
+        case PceCommand::ReadSubq:
             m.subq_pend = true;
             break;
-
-        default:
-            m.sense.raise(kSenseIllegalRequest, kNseInvalidCommand);
-            m.has_status = false;
-            return send_status_(kPceStatusCheckCond, p.link);
     }
     return {};
 }

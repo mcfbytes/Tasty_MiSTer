@@ -6,6 +6,8 @@
 
 #include <array>
 #include <cstdio>
+#include <optional>
+#include <string>
 
 #include "os/types.h"
 #include "svc/video_service.h"
@@ -20,121 +22,97 @@ constexpr std::uint16_t kFmtPal8 = 0b00011;
 constexpr std::uint16_t kFmtRxB = 0b10000;
 constexpr std::uint16_t kFbEn = 0x8000;
 
-constexpr std::uint32_t kFbPixels = 1920u * 1080u;
+constexpr PictureSize kFbFrame{PicturePixels::of(1920), PictureRows::of(1080)};
 
 }
 
-Ex<void> HpsFramebuffer::publish_(
-    os::PhysAddr pixels,
-    std::uint16_t fmt,
-    std::uint32_t w,
-    std::uint32_t h,
-    std::uint32_t hmin,
-    std::uint32_t hmax,
-    std::uint32_t vmin,
-    std::uint32_t vmax,
-    RowBytes stride
-) noexcept {
-    const auto [addr_lo, addr_hi] = pixels.low_halves();
+FbScanWindow FbScanWindow::centred(const FbView& picture, PictureSize out) noexcept {
+    return FbScanWindow{picture.size.centre_in(out)};
+}
+
+Ex<void> HpsFramebuffer::publish_(const FbView& picture, FbScanWindow window) noexcept {
+    const auto [addr_lo, addr_hi] = fb_.phys.advanced(picture.offset).low_halves();
+    std::uint16_t sc = 0;
+    switch (picture.format) {
+        case FbView::FbFormat::Argb8888:
+            sc = kFmt8888;
+            break;
+        case FbView::FbFormat::Argb1555:
+            sc = kFmt1555;
+            break;
+        case FbView::FbFormat::Rgb565:
+            sc = kFmt565;
+            break;
+        case FbView::FbFormat::Pal8:
+            sc = kFmtPal8;
+            break;
+    }
+    if (picture.red_blue_swap)
+        sc |= kFmtRxB;
+    const auto [hmin, hmax, vmin, vmax] = fb_scan_words(window);
     const std::array<std::uint16_t, 10> words{
-        static_cast<std::uint16_t>(kFbEn | fmt),
+        static_cast<std::uint16_t>(kFbEn | sc),
         addr_lo,
         addr_hi,
-        static_cast<std::uint16_t>(w),
-        static_cast<std::uint16_t>(h),
-        static_cast<std::uint16_t>(hmin),
-        static_cast<std::uint16_t>(hmax),
-        static_cast<std::uint16_t>(vmin),
-        static_cast<std::uint16_t>(vmax),
-        static_cast<std::uint16_t>(stride.v),
+        picture.size.pixels().wire_word(),
+        picture.size.lines().wire_word(),
+        hmin,
+        hmax,
+        vmin,
+        vmax,
+        picture.stride.wire_word(),
     };
     return wire_.publish(proto::UioOp::SetFbuf, words);
 }
 
-void HpsFramebuffer::write_mode_param_(
-    unsigned fmt,
-    unsigned rb,
-    std::uint32_t w,
-    std::uint32_t h,
-    RowBytes stride
-) noexcept {
+void HpsFramebuffer::write_mode_param_(const FbView& picture) noexcept {
+    const std::string line = picture.mode_line();
     const int fd = ::open(mode_param_.c_str(), O_WRONLY | O_CLOEXEC | O_TRUNC);
     if (fd < 0)
         return;
-    char line[64];
-    const int n = std::snprintf(
-        line,
-        sizeof line,
-        "%u %u %u %u %s\n",
-        fmt,
-        rb,
-        w,
-        h,
-        stride.text().c_str()
-    );
-    if (n > 0 && ::write(fd, line, static_cast<std::size_t>(n)) < 0)
+    if (::write(fd, line.data(), line.size()) < 0)
         ++refused_;
     (void)::close(fd);
 }
 
 Ex<void> HpsFramebuffer::raise() noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
-    constexpr std::uint32_t kBigOutputScale = 2, kBytes8888 = 4;
-    constexpr int kName8888 = 8888;
-    const std::uint32_t ow = output_.output_width();
-    const std::uint32_t oh = output_.output_height();
-    if (fb_.len == 0 || ow == 0 || oh == 0)
+    constexpr std::size_t kBytes8888 = 4;
+    const PictureSize out = output_size_();
+    if (fb_.len == 0 || out.width.empty() || out.rows.empty())
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    const std::uint32_t scale = ow * oh > kFbPixels ? kBigOutputScale : 1u;
-    width_ = ow / scale;
-    height_ = oh / scale;
+    const PictureSize picture_size = out.halved_if(!out.fits_scaler_frame(kFbFrame));
+    picture_ = FbView::of(
+        picture_size,
+        picture_size.stride_bytes(PixelBytes::of(kBytes8888)),
+        FbView::FbFormat::Argb8888,
+        true
+    );
     raised_ = true;
     viewing_ = false;
-    write_mode_param_(kName8888, 1, width_, height_, RowBytes{width_ * kBytes8888});
+    write_mode_param_(picture_);
     if (held_)
         return {};
-    return publish_(
-        fb_.phys.advanced(kFramebufferPageBytes),
-        static_cast<std::uint16_t>(kFmtRxB | kFmt8888),
-        width_,
-        height_,
-        0,
-        ow - 1,
-        0,
-        oh - 1,
-        RowBytes{std::size_t{width_} * kBytes8888}
-    );
+    return publish_(picture_, FbScanWindow::whole(out));
 }
 
 Ex<void> HpsFramebuffer::raise_view(const FbView& view) noexcept {
     TASTY_SEAT_BODY(HpsFramebuffer);
-    const std::uint32_t ow = output_.output_width();
-    const std::uint32_t oh = output_.output_height();
-    if (fb_.len == 0 || ow == 0 || oh == 0)
+    const PictureSize out = output_size_();
+    if (fb_.len == 0 || out.width.empty() || out.rows.empty())
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
-    const std::uint64_t bytes = rows_span(view.stride, view.height);
+    const std::uint64_t bytes = rows_span(view.stride, view.size.lines());
     if (view.offset > fb_.len || bytes > fb_.len - view.offset)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), view.offset});
-    const std::uint16_t fmt = view.format == FbView::FbFormat::Rgb565
-        ? kFmt565
-        : static_cast<std::uint16_t>(kFmtRxB | kFmt8888);
-    width_ = view.width;
-    height_ = view.height;
+    picture_ = view;
+
+    if (picture_.format != FbView::FbFormat::Rgb565)
+        picture_.red_blue_swap = true;
     raised_ = true;
     viewing_ = true;
     if (held_)
         return {};
-    return publish_(
-        fb_.phys.advanced(view.offset),
-        fmt,
-        view.width,
-        view.height,
-        0,
-        ow - 1,
-        0,
-        oh - 1,
-        view.stride
-    );
+    return publish_(picture_, FbScanWindow::whole(out));
 }
 
 Ex<void> HpsFramebuffer::drop() noexcept {
@@ -157,104 +135,87 @@ bool HpsFramebuffer::take_fb_cmd(std::string_view line) noexcept {
 
     constexpr std::size_t kCmdDigitAt = 6;
     constexpr char kCmd2 = '2';
-    constexpr unsigned kBpp8888 = 4, kBpp16 = 2, kBpp8 = 1;
-    constexpr std::uint32_t kCentre = 2, kStrideAlignMask = 16 - 1u;
-    ++fb_cmds_;
+    constexpr std::size_t kBytes8888 = 4, kBytes16 = 2, kBytes8 = 1;
+    constexpr std::size_t kStrideAlign = 16;
     if (!raised_ || held_ || viewing_) {
         ++refused_;
         return true;
     }
-    const std::uint32_t ow = output_.output_width();
-    const std::uint32_t oh = output_.output_height();
+    const PictureSize out = output_size_();
     const std::string text(line);
     int fmt = 0;
     int rb = 0;
     int div = -1;
     int w = -1;
     int h = -1;
-    std::uint32_t hmin = 0;
-    std::uint32_t hmax = ow - 1;
-    std::uint32_t vmin = 0;
-    std::uint32_t vmax = oh - 1;
+    PictureSize size{};
     bool accept = false;
+    bool centred = false;
     bool write_param = true;
     if (std::sscanf(text.c_str(), "fb_cmd0 %d %d %d", &fmt, &rb, &div) == kDivisorFields
         || std::sscanf(text.c_str(), "fb_cmd2 %d %d %d", &fmt, &rb, &div) == kDivisorFields) {
         if (div >= kMinDivisor && div <= kMaxDivisor) {
-            w = static_cast<int>(ow) / div;
-            h = static_cast<int>(oh) / div;
+            size = PictureSize{out.pixels().divided_by(div), out.lines().divided_by(div)};
             accept = true;
             write_param = text.size() > kCmdDigitAt && text[kCmdDigitAt] != kCmd2;
         }
     } else if (
         std::sscanf(text.c_str(), "fb_cmd1 %d %d %d %d", &fmt, &rb, &w, &h) == kGeometryFields
     ) {
-        if (w < kMinSide || w > static_cast<int>(ow))
-            w = static_cast<int>(ow);
-        if (h < kMinSide || h > static_cast<int>(oh))
-            h = static_cast<int>(oh);
 
-        int d = 1;
-        while (w * (d + 1) <= static_cast<int>(ow) && h * (d + 1) <= static_cast<int>(oh))
-            ++d;
-        hmin = (ow - static_cast<std::uint32_t>(w * d)) / kCentre;
-        vmin = (oh - static_cast<std::uint32_t>(h * d)) / kCentre;
-        hmax = hmin + static_cast<std::uint32_t>(w * d) - 1u;
-        vmax = vmin + static_cast<std::uint32_t>(h * d) - 1u;
+        w = out.pixels().clamp_side(w, kMinSide);
+        h = out.lines().clamp_side(h, kMinSide);
+        const PictureSize wanted{PicturePixels::of(w), PictureRows::of(h)};
+        size = out.clamped_multiple_of(wanted, PicturePixels::of(kMinSide));
         accept = true;
+        centred = true;
     }
-    std::uint16_t sc = 0;
-    unsigned bpp = 0;
-    if (accept) {
-        switch (fmt) {
-            case kName8888:
-                bpp = kBpp8888;
-                sc = kFmt8888;
-                break;
-            case kName1555:
-                bpp = kBpp16;
-                sc = kFmt1555;
-                break;
-            case kName565:
-                bpp = kBpp16;
-                sc = kFmt565;
-                break;
-            case kNamePal8:
-                bpp = kBpp8;
-                sc = kFmtPal8;
-                rb = 0;
-                break;
-            default:
-                accept = false;
-        }
+    std::optional<FbView::FbFormat> format;
+    switch (fmt) {
+        case kName8888:
+            format = FbView::FbFormat::Argb8888;
+            break;
+        case kName1555:
+            format = FbView::FbFormat::Argb1555;
+            break;
+        case kName565:
+            format = FbView::FbFormat::Rgb565;
+            break;
+        case kNamePal8:
+            format = FbView::FbFormat::Pal8;
+            break;
+        default:
+            break;
     }
-    if (!accept) {
+    if (!accept || !format) {
         ++refused_;
         return true;
     }
-    if (rb != 0) {
-        sc |= kFmtRxB;
-        rb = 1;
+    std::size_t bpp = 0;
+    switch (*format) {
+        case FbView::FbFormat::Argb8888:
+            bpp = kBytes8888;
+            break;
+        case FbView::FbFormat::Argb1555:
+            bpp = kBytes16;
+            break;
+        case FbView::FbFormat::Rgb565:
+            bpp = kBytes16;
+            break;
+        case FbView::FbFormat::Pal8:
+            bpp = kBytes8;
+            break;
     }
-    const auto uw = static_cast<std::uint32_t>(w);
-    const auto uh = static_cast<std::uint32_t>(h);
-    const RowBytes stride{(uw * bpp + kStrideAlignMask) & ~kStrideAlignMask};
-    width_ = uw;
-    height_ = uh;
-    if (!publish_(
-            fb_.phys.advanced(kFramebufferPageBytes),
-            sc,
-            uw,
-            uh,
-            hmin,
-            hmax,
-            vmin,
-            vmax,
-            stride
-        ))
+    const RowBytes stride = size.stride_bytes(PixelBytes::of(bpp), RowAlign::of(kStrideAlign));
+    const FbView
+        picture = FbView::of(size, stride, *format, *format != FbView::FbFormat::Pal8 && rb != 0);
+    picture_ = picture;
+    const FbScanWindow window = centred ? FbScanWindow::centred(picture, out)
+                                        : FbScanWindow::whole(out);
+    if (!publish_(picture, window))
         ++refused_;
     if (write_param)
-        write_mode_param_(static_cast<unsigned>(fmt), static_cast<unsigned>(rb), uw, uh, stride);
+        write_mode_param_(picture);
     return true;
 }
 

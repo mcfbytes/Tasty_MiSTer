@@ -11,6 +11,7 @@
 
 namespace mister::app {
 class VideoPump;
+struct OutputSize;
 }
 
 namespace mister::fw {
@@ -25,12 +26,8 @@ public:
     static constexpr std::chrono::nanoseconds kShowNs{std::chrono::seconds{2}};
 
     [[nodiscard]] Ex<void> map(const hal::PhysRegion& fb) noexcept;
-    [[nodiscard]] bool blit(std::uint32_t width, std::uint32_t height) noexcept;
-    [[nodiscard]] Ex<void> show(
-        app::VideoPump& video,
-        std::uint32_t width,
-        std::uint32_t height
-    ) noexcept;
+    [[nodiscard]] bool blit(app::OutputSize out) noexcept;
+    [[nodiscard]] Ex<void> show(app::VideoPump& video, app::OutputSize out) noexcept;
     [[nodiscard]] Ex<void> hide(app::VideoPump& video) noexcept;
 
     [[nodiscard]] bool mapped() const noexcept { return fb_.has_value(); }

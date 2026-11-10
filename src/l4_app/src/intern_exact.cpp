@@ -17,13 +17,13 @@ proto::TxSlabId intern_exact(
     std::size_t want
 ) {
     if (rel.empty() || want == 0 || want > kLinkTxSlabBytes)
-        return {};
+        return proto::TxSlabId::kNone;
     auto f = vfs.open(rel, svc::OpenMode::ReadWhole);
     if (!f)
-        return {};
+        return proto::TxSlabId::kNone;
     auto sz = (*f)->size();
     if (!sz || sz->v != want)
-        return {};
+        return proto::TxSlabId::kNone;
     std::uint8_t buf[kLinkTxSlabBytes]{};
     std::size_t off = 0;
     while (off < want) {
@@ -32,11 +32,11 @@ proto::TxSlabId intern_exact(
             std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(off))
         );
         if (!n || *n == 0)
-            return {};
+            return proto::TxSlabId::kNone;
         off += *n;
     }
     const auto id = inbox.intern(std::span<const std::uint8_t>(buf, want));
-    return id ? *id : proto::TxSlabId{};
+    return id ? *id : proto::TxSlabId::kNone;
 }
 
 }

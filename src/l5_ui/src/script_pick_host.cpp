@@ -6,7 +6,6 @@
 #include "ui/browse_source.h"
 #include "ui/browser_entry.h"
 #include "ui/page_launches.h"
-#include "ui/script_kind.h"
 #include "ui/script_launch.h"
 
 namespace mister::ui {
@@ -30,10 +29,8 @@ Transition ScriptPickHost::on_picked(const BrowserEntry&, std::string_view path)
         ++refusals_;
         return Transition{Transition::Kind::Pop};
     }
-    ScriptLaunch::Request req;
-    req.kind = ScriptKind::Script;
-    req.argv0 = std::string(b_.storage->root_path()) + "/" + std::string(path);
-    script->pending = static_cast<ScriptLaunch::Request&&>(req);
+    const std::string argv0 = std::string(b_.storage->root_path()) + "/" + std::string(path);
+    script->pending = ScriptLaunch::Request::script(argv0);
     return Transition{Transition::Kind::Replace, PageId::ScriptRun};
 }
 

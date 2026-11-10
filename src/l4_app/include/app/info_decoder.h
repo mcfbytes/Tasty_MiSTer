@@ -39,7 +39,7 @@ private:
     ConfStrCell::Reader reader_{};
     ConfStrText scratch_{};
     proto::ItemTable table_{};
-    std::optional<std::size_t> row_{};
+    std::optional<proto::ItemOrdinal> row_{};
     proto::BindGeneration gen_{};
     std::uint32_t decoded_ = 0;
     std::uint32_t stale_ = 0;

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
+#include <optional>
 #include <string_view>
-#include <utility>
 
 #include "app/link_rx_channel.h"
 #include "app/mount_status_cell.h"
+#include "app/owed_save_bind.h"
 #include "app/path_text.h"
 #include "cores/mount_status.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
+#include "os/deadline.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -21,7 +22,7 @@ class OwedMount {
 public:
     using Cell = MountStatusCell;
 
-    OwedMount(Cell& cell, LinkRxChannel<SeatTag::Main>& rx) noexcept : cell_(cell), rx_(rx) {}
+    OwedMount(Cell& cell, LinkRxChannel<SeatTag::Main>& rx) noexcept : owed_(cell, rx) {}
 
     OwedMount(const OwedMount&) = delete;
     OwedMount& operator=(const OwedMount&) = delete;
@@ -29,79 +30,58 @@ public:
 
     ~OwedMount() { strand(); }
 
-    [[nodiscard]] bool owed() const noexcept { return static_cast<bool>(gen_); }
+    [[nodiscard]] bool owed() const noexcept { return owed_.owed(); }
 
-    [[nodiscard]] proto::ActKey generation() const noexcept { return gen_; }
+    [[nodiscard]] proto::ActKey generation() const noexcept { return owed_.generation(); }
 
     [[nodiscard]] std::string_view path() const noexcept { return path_.view(); }
 
     [[nodiscard]] proto::SlotIndex slot() const noexcept { return slot_; }
 
-    [[nodiscard]] bool parked() const noexcept { return parked_; }
+    [[nodiscard]] bool parked() const noexcept { return !quiesce_.has_value(); }
 
-    void mark_parked() noexcept { parked_ = true; }
+    void mark_parked() noexcept { quiesce_.reset(); }
 
-    [[nodiscard]] std::int64_t quiesce_deadline_ns() const noexcept { return quiesce_deadline_ns_; }
+    [[nodiscard]] std::optional<os::Deadline> quiesce() const noexcept { return quiesce_; }
 
     void arm(
         proto::ActKey generation,
         const cores::MountStatus& on_strand,
         proto::SlotIndex slot,
         std::string_view path,
-        bool parked,
-        std::int64_t quiesce_deadline_ns
+        std::optional<os::Deadline> quiesce
     ) noexcept {
-        if (gen_ && gen_ != generation)
-            strand();
-        gen_ = generation;
-        strand_body_ = on_strand;
+        owed_.arm(generation, on_strand);
         slot_ = slot;
         (void)path_.assign(path);
-        parked_ = parked;
-        quiesce_deadline_ns_ = quiesce_deadline_ns;
+        quiesce_ = quiesce;
     }
 
     void answer(cores::MountVerdict v, const cores::MountStatus& payload) noexcept {
-        if (!gen_)
+        if (!owed_.owed())
             return;
-        publish_(std::exchange(gen_, proto::ActKey{}), v, payload);
+        owed_.answer(v, payload);
         forget_();
     }
 
     void strand() noexcept {
-        if (!gen_)
+        if (!owed_.owed())
             return;
-        publish_(std::exchange(gen_, proto::ActKey{}), cores::MountVerdict::Failed, strand_body_);
+        owed_.strand();
         forget_();
     }
 
 private:
-    void publish_(
-        proto::ActKey generation,
-        cores::MountVerdict v,
-        cores::MountStatus body
-    ) noexcept {
-        set_verdict(body, v);
-        body.generation = generation;
-        cell_.publish(body);
-        rx_.request_wake();
-    }
-
     void forget_() noexcept {
         slot_ = {};
         path_.clear();
-        parked_ = false;
-        quiesce_deadline_ns_ = 0;
+        quiesce_.reset();
     }
 
-    Cell& cell_;
-    LinkRxChannel<SeatTag::Main>& rx_;
-    cores::MountStatus strand_body_{};
+    OwedAnswer<Cell, cores::MountVerdict::Failed> owed_;
     FixedStr<kPathMax, StrFit::Clip> path_{};
-    std::int64_t quiesce_deadline_ns_ = 0;
-    proto::ActKey gen_{};
+    std::optional<os::Deadline> quiesce_{};
     proto::SlotIndex slot_{};
-    bool parked_ = false;
 };
 
 }

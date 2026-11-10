@@ -2,10 +2,10 @@
 #include "ui/config_slots_page.h"
 
 #include <array>
+#include <span>
 #include <string>
 #include <utility>
 
-#include "ui/page_window.h"
 #include "ui/draw_classic.h"
 #include "ui/menu_model.h"
 #include "ui/osd_renderer.h"
@@ -55,7 +55,7 @@ bool ConfigSlotsPage::selectable(cores::ConfigSlot slot) const noexcept {
         return false;
     if (mode_ == Mode::Save || slot.v == 0)
         return true;
-    return ((table_->exists >> slot.v) & 1u) != 0;
+    return table_->exists.has(slot);
 }
 
 SlotChoice ConfigSlotsPage::choice_of(RowIndex at) const noexcept {
@@ -143,27 +143,29 @@ bool ConfigSlotsPage::walk(PageWalk& out) const {
         bool is_back = false;
     };
 
-    std::array<Drawn, kMaxPageRows> drawn{};
-    std::uint8_t drawn_n = 0;
-    std::uint16_t selected = 0;
+    std::array<Drawn, kMaxPageRows> storage{};
+    const RowSpan<Drawn> drawn_out{std::span<Drawn>{storage}};
+    RowCount drawn_n{};
+    RowIndex selected{};
     for (const RowIndex r : rows(height)) {
         const OsdRow at = osd_row_at(r.before());
         std::string text = row_text(at);
         if (blank_text(text))
             continue;
-        Drawn& d = drawn[drawn_n];
+        Drawn& d = drawn_out[row_after(drawn_n)];
         d.row = at;
         d.text = std::move(text);
         d.slot = slot_at(at);
         d.is_back = at == last_osd_row(height);
         if (d.slot && d.slot == sel.slot)
-            selected = drawn_n;
+            selected = row_after(drawn_n);
         if (d.is_back && sel.back())
-            selected = drawn_n;
-        ++drawn_n;
+            selected = row_after(drawn_n);
+        drawn_n += kOneRow;
     }
 
-    const app::HdWindow win = window_page(out.page, RowIndex::of(selected), RowCount::of(drawn_n));
+    const app::HdWindow win = out.window(selected, drawn_n);
+    const RowSpan<const Drawn> drawn{std::span<const Drawn>{storage}};
 
     const auto inverted = [&](OsdRow row) {
         const std::optional<cores::ConfigSlot> slot = slot_at(row);
@@ -174,7 +176,7 @@ bool ConfigSlotsPage::walk(PageWalk& out) const {
 
     const RowRange window = rows(win.first, win.count);
     for (const RowIndex at : window) {
-        const Drawn& d = drawn[at.v];
+        const Drawn& d = drawn[at];
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
         (void)r.hd.label.assign(plain_label(d.text));
@@ -196,16 +198,17 @@ bool ConfigSlotsPage::walk(PageWalk& out) const {
         );
     }
 
-    std::uint8_t di = 0;
+    const RowRange drawn_rows = rows(drawn_n);
+    RowIndex di{};
     for (const RowIndex r : rows(height)) {
         const OsdRow at = osd_row_at(r.before());
-        const bool drawn_here = di < drawn_n && drawn[di].row == at;
-        if (drawn_here && window.contains(RowIndex::of(di))) {
-            ++di;
+        const bool drawn_here = drawn_rows.contains(di) && drawn[di].row == at;
+        if (drawn_here && window.contains(di)) {
+            di = di.next();
             continue;
         }
         if (drawn_here)
-            ++di;
+            di = di.next();
         out.rows[out.count++].classic = classic_row(
             at,
             row_text(at),

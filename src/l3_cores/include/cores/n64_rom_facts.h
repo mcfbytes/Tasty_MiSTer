@@ -4,13 +4,12 @@
 #include <array>
 #include <cstdint>
 
-#include "cores/n64_db.h"
+#include "cores/n64_detect_flags.h"
 #include "cores/n64_rom.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "svc/types.h"
-#include "cores/n64_detect_flags.h"
 
 namespace mister::cores::n64 {
 

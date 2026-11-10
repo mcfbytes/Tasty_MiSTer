@@ -10,10 +10,6 @@
 
 namespace mister::svc {
 
-namespace detail {
-class PosixFile;
-}
-
 class DurableWrite {
 
 public:
@@ -21,7 +17,9 @@ public:
 
     [[nodiscard]] Ex<void> replace(std::string_view tmp_rel, std::string_view final_rel) const;
 
-    void sync_parent_dir(std::string_view rel) const noexcept;
+    void sync_parent_dir(std::string_view path) const noexcept;
+
+    void sync_dir_containing(const std::string& abs) const noexcept { sync_dir_of_(abs); }
 
     struct DurabilityLog {
         std::uint64_t file_syncs = 0;
@@ -33,12 +31,9 @@ public:
 
     [[nodiscard]] static DurabilityLog log() noexcept;
 
-private:
-    friend class Vfs;
-    friend class detail::PosixFile;
-
     static void note_file_sync() noexcept;
 
+private:
     void sync_dir_of_(const std::string& path) const noexcept;
 
     std::string root_path_;

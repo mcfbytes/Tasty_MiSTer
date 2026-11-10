@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "svc/spinner_policy.h"
 #include "svc/types.h"
 
 namespace mister::svc {

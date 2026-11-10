@@ -10,6 +10,7 @@
 #include "cores/cd_command_words.h"
 #include "cores/cd_profile.h"
 #include "cores/cd_sector_act.h"
+#include "cores/cdwire.h"
 #include "cores/core_profile.h"
 #include "cores/host_services.h"
 #include "hal/spi_transport.h"
@@ -45,7 +46,7 @@ public:
     );
 
     [[nodiscard]] Ex<void> send_status(std::span<const std::uint16_t> words);
-    bool can_send_data(std::uint16_t selector);
+    bool can_send_data(cdwire::Selector selector);
     [[nodiscard]] bool egress_idle() const noexcept;
     [[nodiscard]] std::uint32_t egress_abandons() const noexcept;
     [[nodiscard]] Ex<void> submit_sector(const CdSectorAct& act);

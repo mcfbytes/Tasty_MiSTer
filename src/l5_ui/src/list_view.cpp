@@ -3,29 +3,24 @@
 
 namespace mister::ui {
 
-Viewport Viewport::centre(
-    RowIndex selected,
-    RowCount count,
-    RowCount height,
-    ViewportPolicy p
-) noexcept {
+Viewport Viewport::centre(RowIndex selected, ListWindow window, ViewportPolicy p) noexcept {
     Viewport v{};
-    if (count.empty() || height.empty())
+    if (window.items.empty() || window.height.empty())
         return v;
 
-    const RowIndex sel = selected >= row_after(count) ? last_row(count) : selected;
+    const RowIndex sel = selected >= row_after(window.items) ? last_row(window.items) : selected;
     v.selected = sel;
 
-    const RowCount max_first = saturating_sub(count, height);
+    const RowCount max_first = saturating_sub(window.items, window.height);
 
     RowIndex first{};
     if (p.lookahead) {
 
-        const RowCount half = height.half();
+        const RowCount half = window.height.half();
         first = (sel.before() > half) ? sel - half : RowIndex{};
     } else {
 
-        first = (sel.before() >= height) ? sel - height + kOneRow : RowIndex{};
+        first = (sel.before() >= window.height) ? sel - window.height + kOneRow : RowIndex{};
     }
 
     if (first.before() > max_first)

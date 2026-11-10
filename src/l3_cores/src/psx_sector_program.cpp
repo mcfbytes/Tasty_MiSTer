@@ -10,8 +10,8 @@ proto::SlotIndex PsxSectorProgram::slot() const noexcept {
     return manifests::kPsx.staging.disc_slot.block_slot();
 }
 
-std::uint32_t PsxSectorProgram::frame_bytes() const noexcept {
-    return static_cast<std::uint32_t>(svc::kCdDataSize);
+proto::BlockSize PsxSectorProgram::frame_bytes() const noexcept {
+    return proto::BlockSize{static_cast<std::uint32_t>(svc::kRawFrameBytes)};
 }
 
 svc::DiscForm PsxSectorProgram::form() const noexcept {
@@ -20,7 +20,7 @@ svc::DiscForm PsxSectorProgram::form() const noexcept {
 
 PsxSectorProgram::Source PsxSectorProgram::answer(
     const svc::DiscGeometry& disc,
-    std::int64_t lba
+    proto::Lba lba
 ) const noexcept {
     const PsxSectorMap::Answer a = PsxSectorMap{disc}.classify(lba);
     if (a == PsxSectorMap::Answer::Engine)

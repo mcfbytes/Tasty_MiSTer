@@ -80,7 +80,7 @@ public:
     void arm() noexcept {
         if constexpr (kSeatChecksEnabled) {
             if (armed_.exchange(true, std::memory_order_seq_cst))
-                fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "WakeFlag armed while armed");
+                fatal(Error{Errc::contract, ERR_SITE(), 0}, "WakeFlag armed while armed");
         } else {
             armed_.store(true, std::memory_order_seq_cst);
         }
@@ -90,7 +90,7 @@ public:
     void disarm() noexcept {
         if constexpr (kSeatChecksEnabled) {
             if (!armed_.exchange(false, std::memory_order_relaxed))
-                fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "WakeFlag disarmed while disarmed");
+                fatal(Error{Errc::contract, ERR_SITE(), 0}, "WakeFlag disarmed while disarmed");
         } else {
             armed_.store(false, std::memory_order_relaxed);
         }
@@ -174,7 +174,5 @@ private:
 };
 
 using WakeFlag = BasicWakeFlag<EventFdKick>;
-
-struct Polled {};
 
 }

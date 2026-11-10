@@ -2,16 +2,22 @@
 #pragma once
 
 #include <array>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <span>
 #include <vector>
 
 #include "infra/endian.h"
 #include "infra/error.h"
+#include "infra/indexed_array.h"
+#include "svc/joy_bit.h"
 #include "svc/map_store.h"
 #include "svc/packed_keys.h"
+#include "svc/sys_button.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -30,29 +36,44 @@ namespace mister::svc {
 
 static_assert(packed_word(packed_keys_of(0x01230131u)) == 0x01230131u, "the word round-trips");
 
-inline constexpr std::size_t kJoyWords = 32;
-using JoyWords = std::array<PackedKeys, kJoyWords>;
-static_assert(sizeof(JoyWords) == 128, "req: the Joystick blob is exactly 128 bytes");
-static_assert(JoyWords{}.size() == kJoyWords, "the word count names the array's extent");
+[[nodiscard]] inline std::span<const std::byte> as_bytes(const SysWords& words) noexcept {
+    return std::as_bytes(std::span<const PackedKeys>{words.begin(), words.size()});
+}
+
+[[nodiscard]] inline std::span<const std::byte> as_bytes(const WireWords& words) noexcept {
+    return std::as_bytes(std::span<const PackedKeys>{words.begin(), words.size()});
+}
+
+[[nodiscard]] inline WireWords as_wire_words(const SysWords& words) noexcept {
+    WireWords out{};
+    std::memcpy(&out, as_bytes(words).data(), sizeof out);
+    return out;
+}
+
+[[nodiscard]] inline SysWords as_sys_words(const WireWords& words) noexcept {
+    SysWords out{};
+    std::memcpy(&out, as_bytes(words).data(), sizeof out);
+    return out;
+}
 
 struct ButtonMap {
     MapKind kind = MapKind::Joystick;
     std::vector<std::byte> blob;
 
-    [[nodiscard]] Ex<JoyWords> words() const {
+    [[nodiscard]] Ex<WireWords> words() const {
         if (kind != MapKind::Joystick || blob.size() != map_spec(MapKind::Joystick).bytes) {
             return std::unexpected(
                 Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(blob.size())}
             );
         }
         constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
-        JoyWords out{};
-        for (std::size_t i = 0; i < out.size(); ++i) {
-            out[i] = packed_keys_of(
-                infra::load_le<std::uint32_t>(
-                    std::span<const std::byte>(blob).subspan(i * kWordBytes).first<kWordBytes>()
-                )
-            );
+        WireWords out{};
+        std::span<const std::byte> in = blob;
+        JoyBit bit{};
+        while (!in.empty()) {
+            out[bit] = packed_keys_of(infra::load_le<std::uint32_t>(in.first<kWordBytes>()));
+            in = in.subspan(kWordBytes);
+            bit = bit.next();
         }
         return out;
     }

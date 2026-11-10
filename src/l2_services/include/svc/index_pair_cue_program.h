@@ -15,6 +15,8 @@ class IndexPairCueProgram final : public ICueProgram {
 
 private:
     [[nodiscard]] Ex<void> parse(std::string_view cue_path, const CueMount& m) const override;
+    void shift_chd_toc_(Toc& toc, TrackCount count) const override;
+    [[nodiscard]] bool pregap_in_own_file_() const override;
 };
 
 }

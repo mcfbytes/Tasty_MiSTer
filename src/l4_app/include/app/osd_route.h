@@ -10,8 +10,8 @@
 namespace mister::app {
 
 struct OsdRoute {
-    std::uint32_t leased = 0;
-    std::uint32_t on_lw = 0;
+    bool leased = false;
+    bool on_lw = false;
     std::uint32_t frames = 0;
     std::uint32_t rows = 0;
     std::uint32_t revoked = 0;

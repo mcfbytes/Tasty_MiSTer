@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
-#include <string_view>
-
-#include "svc/types.h"
 #include "app/cheat_call.h"
 #include "app/tx_digest_cell.h"
 
@@ -18,13 +14,7 @@ class ICheatApply {
 public:
     virtual ~ICheatApply() = default;
 
-    virtual void content_loaded(
-        cores::Core* core,
-        TxDigest::Kind kind,
-        std::string_view path,
-        svc::Crc32 crc,
-        bool same_game
-    ) noexcept = 0;
+    virtual void content_loaded(cores::Core& core, const TxDigest& loaded) noexcept = 0;
 
     [[nodiscard]] virtual bool apply_cheats_counted(const CheatCall& call) noexcept = 0;
 

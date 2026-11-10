@@ -10,8 +10,8 @@ namespace mister::svc {
 
 struct GeometryGate {
     ResWord last_res{};
-    std::uint8_t last_fb_crc = 0;
-    std::uint16_t last_flt_flags = 0;
+    FbParCrc last_fb_crc{};
+    FltFlags last_flt_flags{};
     bool vi_seen = false;
     VideoSample last{};
     ScalingPolicy policy{};

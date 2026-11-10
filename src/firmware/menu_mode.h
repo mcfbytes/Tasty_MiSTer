@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
-#include <cstddef>
 #include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 
+#include "app/boot_args.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -39,7 +37,7 @@ public:
         return Traits{
             .program = "mister",
             .windows_notice = hal::FallbackNotice::Announce,
-            .boot_args = {boot_argv_.data(), boot_argc_},
+            .boot_args = boot_args_,
             .stop_ends_ladder = false,
             .not_ready_quits_clean = true
         };
@@ -117,8 +115,8 @@ private:
 
     StderrVoice voice_{};
     Ex<os::ProcessTitle> title_;
-    std::array<const char*, 3> boot_argv_{};
-    std::size_t boot_argc_ = kCompanionArg;
+
+    app::BootArgs boot_args_{};
 
     std::optional<ProcessStandup::StopSignals> stop_signals_{};
 };

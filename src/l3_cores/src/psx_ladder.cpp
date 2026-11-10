@@ -3,6 +3,7 @@
 
 #include <cstddef>
 
+#include "cores/cd_msf.h"
 #include "cores/file_slot.h"
 #include "infra/ascii.h"
 #include "infra/byte_view.h"
@@ -16,36 +17,29 @@ namespace {
 constexpr std::size_t kSbiHeader = 4;
 constexpr std::size_t kSbiBlock = 14;
 
-constexpr std::uint32_t kLibCryptSectors[16] = {
-    14105,
-    14231,
-    14485,
-    14579,
-    14649,
-    14899,
-    15056,
-    15130,
-    15242,
-    15312,
-    15378,
-    15628,
-    15919,
-    16031,
-    16101,
-    16167,
+constexpr IoIndex kCapturedMenuRow{1};
+
+constexpr HeadLba kLibCryptSectors[16] = {
+    HeadLba{14105},
+    HeadLba{14231},
+    HeadLba{14485},
+    HeadLba{14579},
+    HeadLba{14649},
+    HeadLba{14899},
+    HeadLba{15056},
+    HeadLba{15130},
+    HeadLba{15242},
+    HeadLba{15312},
+    HeadLba{15378},
+    HeadLba{15628},
+    HeadLba{15919},
+    HeadLba{16031},
+    HeadLba{16101},
+    HeadLba{16167},
 };
 
 std::uint8_t bcd_to_dec(std::uint8_t bcd) {
     return proto::PackedBcd{bcd}.value();
-}
-
-std::uint32_t msf_to_lba(std::uint32_t m, std::uint32_t s, std::uint32_t f) {
-    return (m * svc::kSecondsPerMinute + s) * svc::kFramesPerSecond + f;
-}
-
-std::string_view psx_dir_of(std::string_view path) {
-    const auto slash = path.rfind('/');
-    return slash == std::string_view::npos ? std::string_view{} : path.substr(0, slash);
 }
 
 }
@@ -54,9 +48,10 @@ void PsxLadder::decide_stage_edge_() {
     stage_save_ = false;
     stage_assets_ = false;
     facts_.reset = false;
-    if (!mount_answer().data_first_track)
+    if (!mount_answer().plan.data_first_track)
         return;
-    const std::string_view cur_dir = psx_dir_of(image_);
+
+    const std::string_view cur_dir = dir_or_empty(image_path());
     if (!last_dir_.empty() && cur_dir == last_dir_)
         return;
 
@@ -73,7 +68,7 @@ void PsxLadder::decide_stage_edge_() {
 
 std::uint16_t PsxLadder::scan_libcrypt_() const {
     std::unique_ptr<svc::IFile> sbi;
-    const std::string_view game_id = mount_answer().game_id.view();
+    const std::string_view game_id = mount_answer().plan.game_id.view();
     if (!game_id.empty()) {
         std::string zipped = "games/";
         zipped.append(profile_.name);
@@ -83,11 +78,9 @@ std::uint16_t PsxLadder::scan_libcrypt_() const {
         if (auto f = vfs_.open(zipped, svc::OpenMode::Read))
             sbi = std::move(*f);
     }
-    if (sbi == nullptr && !image_.empty()) {
-        std::string cand{
-            image_.size() > 4 ? std::string_view{image_}.substr(0, image_.size() - 4)
-                              : std::string_view{image_}
-        };
+    if (sbi == nullptr && !image_path().empty()) {
+        const std::string_view img = image_path();
+        std::string cand{img.size() > 4 ? img.substr(0, img.size() - 4) : img};
         cand += ".sbi";
         if (auto f = vfs_.open(cand, svc::OpenMode::Read))
             sbi = std::move(*f);
@@ -105,11 +98,12 @@ std::uint16_t PsxLadder::scan_libcrypt_() const {
         const std::size_t pos = kSbiHeader + i * kSbiBlock;
         if (pos + 3 > sz)
             break;
-        const std::uint32_t lba = msf_to_lba(
+        const svc::Msf msf{
             bcd_to_dec(buf[pos]),
             bcd_to_dec(buf[pos + 1]),
             bcd_to_dec(buf[pos + 2])
-        );
+        };
+        const HeadLba lba = HeadLba::of(msf);
         for (unsigned m = 0; m < 16; ++m) {
             if (kLibCryptSectors[m] == lba)
                 mask |= static_cast<std::uint16_t>(1u << (15 - m));
@@ -118,24 +112,24 @@ std::uint16_t PsxLadder::scan_libcrypt_() const {
     return mask;
 }
 
-std::uint16_t PsxLadder::menu_file_index() const {
-    std::uint16_t ext_idx = 0;
-    const std::string_view ext = ext_of(image_);
+WideIoIndex PsxLadder::menu_file_index() const {
+    std::uint8_t ext_idx = 0;
+    const std::string_view ext = ext_of(image_path());
     const std::string_view want = ext.empty() ? ext : ext.substr(1);
     for (const FileSlot& s : profile_.slots) {
-        if (s.index.v != profile_.staging.disc_slot.v)
+        if (s.index != profile_.staging.disc_slot)
             continue;
         const std::string_view fields = s.extensions;
         for (std::size_t o = 0; o + 3 <= fields.size(); o += 3) {
             const std::string_view cand = fields.substr(o, 3);
             if (infra::ieq(cand, want)) {
-                ext_idx = static_cast<std::uint16_t>(o / 3);
+                ext_idx = static_cast<std::uint8_t>(o / 3);
                 break;
             }
         }
         break;
     }
-    return static_cast<std::uint16_t>((static_cast<std::uint32_t>(ext_idx) << 6) | 1u);
+    return WideIoIndex::of(kCapturedMenuRow, ext_idx);
 }
 
 Ex<bool> PsxLadder::on_step() {
@@ -143,13 +137,13 @@ Ex<bool> PsxLadder::on_step() {
     switch (rung_) {
         case Rung::MountDisc: {
 
-            if (image_.empty()) {
+            if (image_path().empty()) {
                 if (mount_bounded(std::string_view{}) == MountState::Pending)
                     return false;
                 rung_ = Rung::Eject;
                 return false;
             }
-            const MountState ms = mount_bounded(image_);
+            const MountState ms = mount_bounded(image_path());
             if (ms == MountState::Pending)
                 return false;
             if (ms == MountState::Failed) {
@@ -195,26 +189,19 @@ Ex<bool> PsxLadder::on_step() {
 
             const bool automount_off = host_.status_word().get_bit(proto::StatusBit{63});
             if (stage_save_ && !automount_off) {
-                if (save_path_.empty()) {
 
-                    std::string dir = "saves/";
-                    dir.append(profile_.name);
-                    if (auto r = vfs_.ensure_dir(dir); !r)
-                        return std::unexpected(r.error());
-                    save_path_ = dir;
-                    save_path_ += '/';
-                    save_path_.append(base_of(image_dir_));
-                    save_path_ += ".sav";
-                }
-                if (!prepare_save(save_path_))
+                if (auto r = resolve_dir_save_(image_dir()); !r)
+                    return std::unexpected(r.error());
+                if (!prepare_save(save_name()))
                     return false;
 
                 if (sub_ == 0) {
-                    if (!order_set_index(WideIoIndex{profile_.staging.save_slot.v}))
+                    if (!profile_.staging.save
+                        || !order_set_index(WideIoIndex::of(profile_.staging.save->slot)))
                         return false;
                     sub_ = 1;
                 }
-                if (!order_mount_save(save_path_, false))
+                if (!order_mount_save(save_name(), false))
                     return false;
                 report_.save_mounted = true;
                 sub_ = 0;
@@ -228,7 +215,7 @@ Ex<bool> PsxLadder::on_step() {
             if (sub_ == 0) {
                 ss_gen_ = next_gen();
                 ss_due_ns_ = now_ns() + kSaveStateHoldBound;
-                sub_ = host_.order_savestates(image_, ss_gen_) ? 1 : 2;
+                sub_ = host_.order_savestates(image_path(), ss_gen_) ? 1 : 2;
             }
             if (sub_ == 1) {
                 if (!host_.savestates_answered().at_or_past(ss_gen_)) {
@@ -248,11 +235,11 @@ Ex<bool> PsxLadder::on_step() {
         case Rung::Announce: {
 
             if (sub_ == 0) {
-                if (!order_set_index(WideIoIndex{menu_file_index()}))
+                if (!order_set_index(menu_file_index()))
                     return false;
                 sub_ = 1;
             }
-            if (!order_announce_disc(mount_answer().disc_size_bytes))
+            if (!order_announce_disc(mount_answer().plan.disc_size_bytes))
                 return false;
             sub_ = 0;
             rung_ = Rung::Done;

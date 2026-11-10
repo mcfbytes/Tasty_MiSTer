@@ -9,6 +9,7 @@
 #include "infra/seat.h"
 #include "proto/mailbox_act.h"
 #include "proto/mailbox_frame.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -16,7 +17,8 @@ inline constexpr std::size_t kMailboxDepth = 4;
 
 struct MailboxSlot {
     TASTY_SEAT_MEDIATOR(Any, Any);
-    std::uint16_t gen = 0;
+
+    proto::CompanionBindGen gen{};
     std::uint16_t round = 0;
     proto::MailboxFrame frame{};
     proto::MailboxAct act{};

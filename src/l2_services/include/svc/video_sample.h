@@ -3,29 +3,13 @@
 
 #include <cstdint>
 
+#include "svc/aspect_raw.h"
+#include "svc/fb_par_crc.h"
 #include "svc/resolution.h"
 #include "svc/res_word.h"
+#include "svc/types.h"
 
 namespace mister::svc {
-
-struct AspectRaw {
-    std::uint16_t arx_raw = 0;
-    std::uint16_t ary_raw = 0;
-    static constexpr std::uint16_t kArxyFlag = 0x1000;
-    static constexpr std::uint16_t kValueMask = 0x0FFF;
-
-    [[nodiscard]] constexpr bool arxy() const noexcept { return (arx_raw & kArxyFlag) != 0; }
-
-    [[nodiscard]] constexpr std::uint16_t arx() const noexcept {
-        return static_cast<std::uint16_t>(arx_raw & kValueMask);
-    }
-
-    [[nodiscard]] constexpr std::uint16_t ary() const noexcept {
-        return static_cast<std::uint16_t>(ary_raw & kValueMask);
-    }
-
-    friend constexpr bool operator==(AspectRaw, AspectRaw) = default;
-};
 
 struct VideoSample {
     ResWord res{};
@@ -34,11 +18,11 @@ struct VideoSample {
     std::uint16_t pixrep = 0, de_h = 0, de_v = 0;
     std::uint32_t frame_clocks = 0;
 
-    std::uint8_t fb_crc = 0;
+    FbParCrc fb_crc{};
     AspectRaw aspect{};
     std::uint16_t fb_fmt = 0, fb_width = 0, fb_height = 0;
 
-    std::uint16_t flt_flags = 0;
+    FltFlags flt_flags{};
 
     [[nodiscard]] bool interlaced() const noexcept { return res.interlaced(); }
 

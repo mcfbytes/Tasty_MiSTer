@@ -123,10 +123,10 @@ public:
 
     [[nodiscard]] ClaimSetCounts counts() const noexcept {
         return ClaimSetCounts{
-            claimed_.load(std::memory_order_relaxed),
-            refused_.load(std::memory_order_relaxed),
-            returned_.load(std::memory_order_relaxed),
-            high_water_.load(std::memory_order_relaxed)
+            .claimed = claimed_.load(std::memory_order_relaxed),
+            .refused = refused_.load(std::memory_order_relaxed),
+            .returned = returned_.load(std::memory_order_relaxed),
+            .high_water = high_water_.load(std::memory_order_relaxed)
         };
     }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "svc/video_service.h"
+#include "svc/video_wire_emit.h"
 
+#include "svc/filter_kernel.h"
 #include "video_service_detail.h"
 
 namespace mister::svc {

@@ -29,17 +29,12 @@ struct StreamFile {
 
 [[nodiscard]] Ex<void> stream_read(svc::IFile& f, proto::FileSize off, std::span<std::byte> dst);
 
-[[nodiscard]] Ex<void> stream_write(
-    svc::IFile& f,
-    proto::FileSize off,
-    std::span<const std::byte> src
-);
+[[nodiscard]] Ex<std::vector<std::uint8_t>> read_whole(svc::IFile& f, proto::FileSize size);
 
-[[nodiscard]] Ex<void> stream_sync(svc::IFile& f);
-
-[[nodiscard]] std::optional<std::vector<std::uint8_t>> read_whole(
-    svc::IFile& f,
-    proto::FileSize size
+[[nodiscard]] Ex<std::vector<std::uint8_t>> read_file(
+    const svc::Vfs& vfs,
+    std::string_view rel,
+    std::optional<proto::FileSize> cap = std::nullopt
 );
 
 }

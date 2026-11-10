@@ -4,12 +4,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <string_view>
 
 #include "proto/osd_surface.h"
 #include "proto/types.h"
 #include "ui/types.h"
+#include "infra/fixed_str.h"
 #include "infra/seat.h"
 
 namespace mister::ui {
@@ -20,6 +20,8 @@ using proto::OsdRow;
 
 enum class Glyph : std::uint8_t {
     SubmenuArrow = 0x16,
+    CheatOn = 0x1A,
+    CheatOff = 0x1B,
     ArrowUp = 0x11,
     ArrowDown = 0x10,
     BarFilled = 0x7F,
@@ -50,20 +52,20 @@ inline constexpr std::size_t kTitleBytes = 256;
 
 inline constexpr std::size_t kStatusBarBytes = 40;
 
-std::size_t format_key_value(std::span<char> out, std::string_view name, std::string_view value);
+[[nodiscard]] FixedStr<kClassicRowColumns + 1, StrFit::Clip> format_key_value(
+    std::string_view name,
+    std::string_view value
+) noexcept;
 
 class OsdRenderer {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    explicit OsdRenderer(proto::OsdSurface& surface) noexcept : surface_(&surface) {}
+    explicit OsdRenderer(proto::OsdSurface& surface) noexcept : surface_(surface) {}
 
     void set_height(RowCount rows) noexcept { height_ = rows; }
 
-    void set_visible_rows(proto::OsdRowCount n) noexcept {
-        if (surface_ != nullptr)
-            surface_->set_visible_rows(n);
-    }
+    void set_visible_rows(proto::OsdRowCount n) noexcept { surface_.set_visible_rows(n); }
 
     RowCount height() const noexcept { return height_; }
 
@@ -80,6 +82,10 @@ public:
     enum class Stripe : std::uint8_t { Title, Blank };
 
     void set_stripe(Stripe s) noexcept { stripe_ = s; }
+
+    void publish_info_window(const proto::InfoWindow& w) noexcept {
+        surface_.publish_info_window(w);
+    }
 
     void clear();
 
@@ -101,7 +107,7 @@ public:
 
     void composite_status_bar(const StatusBarFacts& facts);
 
-    proto::OsdSurface& surface() noexcept { return *surface_; }
+    proto::OsdSurface& surface() noexcept { return surface_; }
 
     std::uint32_t publishes() const noexcept { return publishes_; }
 
@@ -120,7 +126,7 @@ private:
     void stage_from_surface(OsdRow row);
     void commit(OsdRow row);
 
-    proto::OsdSurface* surface_;
+    proto::OsdSurface& surface_;
     RowCount height_ = kFullOsdRows;
     std::uint8_t scratch_[proto::OsdSurface::kRowBytes]{};
     std::uint8_t title_[kTitleBytes]{};

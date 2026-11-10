@@ -19,12 +19,12 @@ void SpiOsdMaskDecoder::service() noexcept {
 
     OsdMask m{};
     {
-        hal::Selected cs(*link_, hal::ChipSelect::Io);
-        if (auto r = link_->transfer(word(UioOp::GetOsdMask)); !r) {
+        hal::Selected cs(link_, hal::ChipSelect::Io);
+        if (auto r = link_.transfer(word(UioOp::GetOsdMask)); !r) {
             ++errors_;
             return;
         }
-        auto w = link_->transfer(hal::SpiWord{0});
+        auto w = link_.transfer(hal::SpiWord{0});
         if (!w) {
             ++errors_;
             return;

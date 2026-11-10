@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace mister::hal {
 
@@ -29,22 +30,25 @@ struct SysBlock {
     }
 
     enum StflgBits : std::uint32_t {
-        kHeadMask = 0xFF,
         kFlagMask = 0x0F,
         kMarkMask = 0xFFF0,
-        kMark = 0xA0
+        kMark = 0xA0,
+        kSeqShift = 16
     };
 
-    static constexpr std::uint8_t head(std::uint32_t stflg) noexcept {
-        return static_cast<std::uint8_t>(stflg & kHeadMask);
-    }
+    struct Stflg {
+        std::uint16_t seq;
+        std::uint8_t flag;
+        friend constexpr bool operator==(const Stflg&, const Stflg&) = default;
+    };
 
-    static constexpr bool stflg_valid(std::uint32_t stflg) noexcept {
-        return (stflg & kMarkMask) == kMark;
-    }
-
-    static constexpr std::uint8_t flag(std::uint32_t stflg) noexcept {
-        return static_cast<std::uint8_t>(stflg & kFlagMask);
+    [[nodiscard]] static constexpr std::optional<Stflg> decode(std::uint32_t stflg) noexcept {
+        if ((stflg & kMarkMask) != kMark)
+            return std::nullopt;
+        return Stflg{
+            static_cast<std::uint16_t>(stflg >> kSeqShift),
+            static_cast<std::uint8_t>(stflg & kFlagMask)
+        };
     }
 };
 
@@ -53,12 +57,7 @@ static_assert(
         && static_cast<std::size_t>(SysBlock::Reg::Id) + 4 == SysBlock::kSize,
     "lw_sys_status.sv's register map"
 );
-static_assert(
-    SysBlock::stflg_valid(0x0001'00A1u)
-        && SysBlock::flag(0x0001'00A1u) == 1
-        && SysBlock::head(0x0001'00A1u) == 0xA1
-        && !SysBlock::stflg_valid(0xDEADBEEFu),
-    "STFLG {seq 1, A, flag 1}"
-);
+static_assert(SysBlock::decode(0x0001'00A1u) == SysBlock::Stflg{1, 1}, "STFLG {seq 1, A, flag 1}");
+static_assert(!SysBlock::decode(0xDEADBEEFu), "the unmarked word decodes to nothing");
 
 }

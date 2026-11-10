@@ -20,8 +20,7 @@ PcmMain::PcmMain(
     infra::OptRef<xthread::WakeFlag> asker
 ) noexcept
     : feeder_(feeder),
-      relay_(mailbox ? &mailbox->relay : nullptr),
-      host_(mailbox ? &mailbox->host : nullptr),
+      mailbox_(std::move(mailbox)),
       wake_(fds.wake()),
       stop_(std::move(fds).take_stop()),
       cmds_(commands),
@@ -49,31 +48,31 @@ void PcmMain::serve() noexcept {
 }
 
 void PcmMain::serve_mailbox_() noexcept {
-    if (relay_ == nullptr)
+    if (!mailbox_)
         return;
-    host_->serve();
-    relay_->serve_worker(*host_);
-    host_->refill_one();
+    mailbox_->host.serve();
+    mailbox_->relay.serve_worker(mailbox_->host);
+    mailbox_->host.refill_one();
 }
 
 bool PcmMain::mailbox_rest_() const noexcept {
-    return relay_ == nullptr || (relay_->worker_idle() && host_->rest());
+    return !mailbox_ || (mailbox_->relay.worker_idle() && mailbox_->host.rest());
 }
 
 void PcmMain::on_pause() noexcept {
     paused_cmd_drops_ += drain_();
     feeder_.park_now();
-    if (relay_ != nullptr) {
-        relay_->park_now();
-        host_->release();
+    if (mailbox_) {
+        mailbox_->relay.park_now();
+        mailbox_->host.release();
     }
 }
 
 void PcmMain::settle() noexcept {
     (void)drain_();
     feeder_.release();
-    if (host_ != nullptr)
-        host_->release();
+    if (mailbox_)
+        mailbox_->host.release();
 }
 
 bool PcmMain::idle() const noexcept {

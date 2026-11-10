@@ -66,12 +66,15 @@ std::uint32_t HdDisplayPlan::commands_published() const noexcept {
 Transition HdDisplayPlan::ClassicAction::on_yes() {
     TASTY_SEAT_BODY(ClassicAction);
     plan_.style_.choose_classic();
-    if (!push_ask(plan_.ctx_.ui_requests, app::UiRequest::SetOsdStyle{.style = 0})) {
+    if (!push_ask(
+            plan_.ctx_.ui_requests,
+            app::UiRequest::SetOsdStyle{.style = app::OsdStyle::Classic}
+        )) {
         ++plan_.refusals_;
     } else {
         ++plan_.published_;
     }
-    return Transition{Transition::Kind::CloseAll};
+    return Transition{Transition::Kind::Reopen};
 }
 
 app::PageDescription::Row HdDisplayPlan::LookRow::describe() const {
@@ -86,13 +89,13 @@ app::PageDescription::Row HdDisplayPlan::LookRow::describe() const {
 
 Transition HdDisplayPlan::LookRow::select() {
     TASTY_SEAT_BODY(LookRow);
-    return step(1);
+    return step(CycleDir::Next);
 }
 
-Transition HdDisplayPlan::LookRow::step(int delta) {
+Transition HdDisplayPlan::LookRow::step(CycleDir dir) {
     TASTY_SEAT_BODY(LookRow);
     const app::HdLook look = plan_.style_.look();
-    const std::uint8_t next = app::hd_look_step(field_, look, delta);
+    const std::uint8_t next = app::hd_look_step(field_, look, dir);
     if (next == app::hd_look_get(look, field_))
         return Transition{};
     plan_.style_.choose_look(field_, next);

@@ -8,7 +8,6 @@
 #include "ui/draw_classic.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_row.h"
-#include "ui/page_window.h"
 #include "ui/page_walk.h"
 #include "ui/ui_event.h"
 
@@ -26,7 +25,7 @@ bool ConfirmPage::walk(PageWalk& out) const {
     const RowCount total = body.size() + choices.size();
     const RowIndex selected = choices.empty() ? RowIndex{} : row_after(body.size()) + sel_.before();
 
-    const app::HdWindow win = window_page(out.page, selected, total);
+    const app::HdWindow win = out.window(selected, total);
 
     const auto choice_of = [&](RowIndex at) {
         return RowIndex{} + (at - row_after(body.size()));

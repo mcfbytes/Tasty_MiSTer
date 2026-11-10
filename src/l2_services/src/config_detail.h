@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <limits>
 #include <span>
-#include <string_view>
 #include <type_traits>
 
 #include "infra/indexed_array.h"
@@ -389,25 +388,5 @@ static_assert(defaults_agree(), "Option::def must agree with ConfigSnapshot's in
 }
 
 using ArrayAppendSeen = infra::IndexedArray<bool, kNumIniOptions + kNumExtOptions, RowId>;
-
-constexpr unsigned char lower_ascii(unsigned char c) {
-    return (c >= 'A' && c <= 'Z') ? static_cast<unsigned char>(c + 32) : c;
-}
-
-constexpr int icmp_n(std::string_view a, std::string_view b, std::size_t n) {
-    for (std::size_t k = 0; k < n; ++k) {
-        const unsigned char ca = k < a.size() ? lower_ascii(static_cast<unsigned char>(a[k])) : 0u;
-        const unsigned char cb = k < b.size() ? lower_ascii(static_cast<unsigned char>(b[k])) : 0u;
-        if (ca != cb)
-            return ca < cb ? -1 : 1;
-        if (ca == 0)
-            return 0;
-    }
-    return 0;
-}
-
-constexpr bool iequals(std::string_view a, std::string_view b) {
-    return a.size() == b.size() && icmp_n(a, b, a.size()) == 0;
-}
 
 }

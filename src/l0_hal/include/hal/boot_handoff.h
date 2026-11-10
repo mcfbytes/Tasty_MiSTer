@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -16,6 +17,13 @@ public:
     virtual ~IBootHandoff() = default;
 
     [[nodiscard]] virtual Ex<HandoffPage> handoff() = 0;
+
+    [[nodiscard]] std::optional<SdramCfg> boot_cookie() {
+        const Ex<HandoffPage> page = handoff();
+        if (!page)
+            return std::nullopt;
+        return page->sdram;
+    }
 
     [[nodiscard]] virtual Ex<void> write_env(
         std::string_view core_name,

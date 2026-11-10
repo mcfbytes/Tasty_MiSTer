@@ -3,21 +3,14 @@
 
 #include <cstring>
 #include <limits>
-#include <string>
 #include <vector>
 
 #include "cores/wav_data.h"
+#include "svc/track.h"
 
 namespace mister::cores::mdp {
 
 namespace {
-
-std::string cue_path_of(std::string_view rom_path) {
-    const std::size_t dot = rom_path.rfind('.');
-    std::string out{dot == std::string_view::npos ? rom_path : rom_path.substr(0, dot)};
-    out += ".cue";
-    return out;
-}
 
 std::string_view base_dir_of(std::string_view rom_path) {
     const std::size_t slash = rom_path.rfind('/');
@@ -27,7 +20,11 @@ std::string_view base_dir_of(std::string_view rom_path) {
 }
 
 CueWavSource::CueWavSource(const svc::Vfs& vfs, std::string_view rom_path) noexcept : vfs_(&vfs) {
-    (void)cue_.assign(cue_path_of(rom_path));
+
+    const std::size_t dot = rom_path.rfind('.');
+    const auto stem = dot == std::string_view::npos ? rom_path : rom_path.substr(0, dot);
+    (void)cue_.assign(stem);
+    (void)cue_.append(".cue");
     (void)base_.assign(base_dir_of(rom_path));
 }
 
@@ -93,8 +90,8 @@ Ex<PcmExtent> CueWavSource::open(svc::TrackNumber track) {
     close();
     if (auto r = ensure_parsed_(); !r)
         return std::unexpected(r.error());
-    const CueSheet::Track* t = sheet_.track(track);
-    if (t == nullptr || t->wav_path.empty()) {
+    const auto t = sheet_.track(track);
+    if (!t || t->wav_path.empty()) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), track.v});
     }
     auto f = vfs_->open(t->wav_path.view(), svc::OpenMode::Read);
@@ -112,16 +109,19 @@ Ex<PcmExtent> CueWavSource::open(svc::TrackNumber track) {
     PcmExtent ex{};
     ex.bytes = data_size_;
 
-    ex.loop_byte = static_cast<std::uint32_t>(t->loop_sector * kSectorBytes);
+    ex.loop_byte = static_cast<std::uint32_t>(t->loop_sector * svc::kRawFrameBytes);
     ex.loops = t->loops;
     return ex;
 }
 
-Ex<std::size_t> CueWavSource::read_at(std::uint64_t off, std::span<std::byte> dst) {
+Ex<std::span<std::byte>> CueWavSource::read_at(std::uint64_t off, std::span<std::byte> dst) {
     TASTY_SEAT_BODY(CueWavSource);
     if (wav_ == nullptr)
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
-    return wav_->read_at(static_cast<std::uint64_t>(data_start_) + off, dst);
+    auto got = wav_->read_at(static_cast<std::uint64_t>(data_start_) + off, dst);
+    if (!got)
+        return std::unexpected(got.error());
+    return dst.first(*got);
 }
 
 void CueWavSource::close() noexcept {

@@ -30,9 +30,8 @@ void InfoDecoder::refresh_() {
     row_.reset();
     if (scratch_.truncated)
         return;
-    const std::size_t len = scratch_.len <= sizeof(scratch_.text) ? scratch_.len
-                                                                  : sizeof(scratch_.text);
-    auto parsed = proto::ItemTable::parse(std::string_view{scratch_.text, len});
+
+    auto parsed = proto::ItemTable::parse(scratch_.view());
     if (!parsed)
         return;
     table_ = std::move(*parsed);
@@ -47,8 +46,9 @@ std::string_view InfoDecoder::info_text_(const proto::LinkEvent::PolledWord& w) 
         ++stale_;
         return {};
     }
-    const std::string_view text = row_.has_value() ? table_.subfield(table_.items()[*row_], index)
-                                                   : std::string_view{};
+    const std::string_view text = row_.has_value()
+        ? table_.subfield(table_.items()[proto::ItemTable::index_of(*row_)], index)
+        : std::string_view{};
     if (text.empty()) {
         ++unmapped_;
         return {};

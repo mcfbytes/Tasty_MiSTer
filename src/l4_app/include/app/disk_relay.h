@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <utility>
 
 #include "app/disk_slot.h"
 #include "app/path_text.h"
@@ -13,6 +14,7 @@
 #include "infra/counter.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
+#include "infra/polled.h"
 #include "infra/loan_channel.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
@@ -33,14 +35,19 @@ public:
     static constexpr std::uint32_t kMaxRoundWords = 1u + proto::kDiskActBytes / 2u;
     static_assert(kMaxRoundWords <= proto::tightest_round_budget_words());
 
-    explicit DiskRelay(xthread::Polled) noexcept : chan_(xthread::Polled{}) {}
+    explicit DiskRelay(xthread::Polled, std::unique_ptr<cores::IDiskServant> servant) noexcept
+        : io_{.servant = std::move(servant)},
+          chan_(xthread::Polled{}) {}
 
-    explicit DiskRelay(xthread::WakeFlag& io_wake) noexcept : chan_(io_wake) {}
+    explicit DiskRelay(
+        xthread::WakeFlag& io_wake,
+        std::unique_ptr<cores::IDiskServant> servant
+    ) noexcept
+        : io_{.servant = std::move(servant)},
+          chan_(io_wake) {}
 
     DiskRelay(const DiskRelay&) = delete;
     DiskRelay& operator=(const DiskRelay&) = delete;
-
-    void install(std::unique_ptr<cores::IDiskServant> servant) noexcept;
 
     void seal_boot_pump() noexcept { sealed_ = true; }
 
@@ -60,36 +67,31 @@ public:
     void pump_on_caller() noexcept;
 
     using Loan = Chan::Loan;
-    void on(
-        const DiskSlot::Ask::Bind& a,
-        const DiskSlot::Ask::Head& h,
-        Loan& l,
-        proto::Link* link
-    ) noexcept;
+    void on(const DiskSlot::Ask::Bind& a, const RelayStamp& h, Loan& l, proto::Link* link) noexcept;
     void on(
         const DiskSlot::Ask::Command& a,
-        const DiskSlot::Ask::Head& h,
+        const RelayStamp& h,
         Loan& l,
         proto::Link* link
     ) noexcept;
     void on(
         const DiskSlot::Ask::Resume& a,
-        const DiskSlot::Ask::Head& h,
+        const RelayStamp& h,
         Loan& l,
         proto::Link* link
     ) noexcept;
     void on(
         const DiskSlot::Ask::Release& a,
-        const DiskSlot::Ask::Head& h,
+        const RelayStamp& h,
         Loan& l,
         proto::Link* link
     ) noexcept;
     void misrouted(const DiskSlot::Ask& m, Loan& l, proto::Link* link) noexcept;
 
-    void on(const DiskSlot::Ask::Bind& a, const DiskSlot::Ask::Head& h, Job& job) noexcept;
-    void on(const DiskSlot::Ask::Command& a, const DiskSlot::Ask::Head& h, Job& job) noexcept;
-    void on(const DiskSlot::Ask::Resume& a, const DiskSlot::Ask::Head& h, Job& job) noexcept;
-    void on(const DiskSlot::Ask::Release& a, const DiskSlot::Ask::Head& h, Job& job) noexcept;
+    void on(const DiskSlot::Ask::Bind& a, const RelayStamp& h, Job& job) noexcept;
+    void on(const DiskSlot::Ask::Command& a, const RelayStamp& h, Job& job) noexcept;
+    void on(const DiskSlot::Ask::Resume& a, const RelayStamp& h, Job& job) noexcept;
+    void on(const DiskSlot::Ask::Release& a, const RelayStamp& h, Job& job) noexcept;
     void misrouted(const DiskSlot::Ask& m, Job& job) noexcept;
 
     [[nodiscard]] bool command_open() const noexcept { return rt_.command_open; }
@@ -123,19 +125,32 @@ private:
         bool sent = false;
     };
 
+    struct StaleLanding {
+        DiskRelay& relay;
+
+        void on(const DiskSlot::Ask::Command&, const RelayStamp&) noexcept {
+            relay.close_command_();
+        }
+
+        void on(const DiskSlot::Ask::Resume&, const RelayStamp&) noexcept {
+            relay.close_command_();
+        }
+
+        void misrouted(const DiskSlot::Ask&) noexcept {}
+    };
+
     void land_(Chan::Loan&& l, proto::Link* link) noexcept;
     [[nodiscard]] bool write_(proto::Link& link, const proto::DiskAct& a, DiskSlot& s) noexcept;
 
     [[nodiscard]] bool send_orders_() noexcept;
     void poll_(proto::Link& link, const proto::DiskPollDecl& poll) noexcept;
-    void act_(const DiskSlot::Ask::Head& h, Loan& l, proto::Link* link) noexcept;
+    void act_(const RelayStamp& h, Loan& l, proto::Link* link) noexcept;
     void close_command_() noexcept;
 
-    void begin_(const DiskSlot::Ask::Head& h) noexcept;
+    void begin_(const RelayStamp& h) noexcept;
 
     struct Rt {
-        std::uint16_t gen = 1;
-        std::uint16_t epoch = 1;
+        RelayStamp stamp{CoreGen{1}, ActEpoch{1}};
         bool command_open = false;
         std::optional<proto::DiskUnit> open_unit{};
         bool release_owed = false;
@@ -145,7 +160,7 @@ private:
 
     struct Io {
         std::unique_ptr<cores::IDiskServant> servant{};
-        std::uint16_t served_gen = 0;
+        RelayStamp served{};
     };
 
     bool sealed_ = false;

@@ -1,33 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
 #include <type_traits>
 
-#include "cores/dip_row.h"
-#include "cores/switch_table.h"
+#include "app/dip_choices.h"
+#include "app/dip_labels.h"
 #include "infra/seat.h"
-#include "infra/telemetry.h"
 #include "proto/types.h"
 
 namespace mister::app {
 
-struct DipTable {
+class DipTable {
     TASTY_SEAT_EXEMPT(const_shared);
 
-    struct Row {
-        char name[cores::mra::kDipTextChars + 1] = {};
-        proto::DipChoiceCount choices{};
-        proto::DipChoice current{};
-        char ids[cores::mra::kMaxDipIds][cores::mra::kDipTextChars + 1] = {};
-    };
+public:
+    DipLabels labels{};
+    DipChoices choices{};
 
-    std::uint8_t count = 0;
-    Row rows[cores::mra::kMaxDipRows] = {};
+    [[nodiscard]] constexpr const DipLabels::Row& row(proto::DipRowIndex at) const noexcept {
+        return at.pick(labels.rows);
+    }
+
+    [[nodiscard]] constexpr proto::DipChoice current(proto::DipRowIndex at) const noexcept {
+        return at.pick(choices.current);
+    }
 };
 
 static_assert(std::is_trivially_copyable_v<DipTable>);
-
-using DipCell = xthread::Telemetry<DipTable, SeatTag::RT>;
 
 }

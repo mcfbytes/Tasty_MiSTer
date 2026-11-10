@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 #include "cores/n64_db.h"
@@ -36,7 +37,7 @@ public:
     [[nodiscard]] DetectOutcome run(const RomFacts& facts, LoadFacts& slab);
 
     void reset() noexcept {
-        tags_ = DbTags{};
+        match_.reset();
         detected_ = DetectFlags{};
         info_.clear();
     }
@@ -45,17 +46,17 @@ public:
 
     [[nodiscard]] std::string_view info() const noexcept { return info_.view(); }
 
-    [[nodiscard]] const DbTags& tags() const noexcept { return tags_; }
+    [[nodiscard]] const std::optional<DbMatch>& match() const noexcept { return match_; }
 
 private:
-    [[nodiscard]] DetectFlags lookup_and_apply_(LoadFacts& slab, DbKey kind, std::string_view key);
+    [[nodiscard]] DetectFlags lookup_and_apply_(LoadFacts& slab, const DbKey& key);
     void apply_tags_(LoadFacts& slab, const DbTags& t);
     [[nodiscard]] bool apply_homebrew_(const RomFacts& facts, LoadFacts& slab);
     void apply_unknown_defaults_(LoadFacts& slab);
     void apply_ipl3_(LoadFacts& slab, const Ipl3Detect& d, DetectFlags& detected);
 
     N64DbReader& reader_;
-    DbTags tags_{};
+    std::optional<DbMatch> match_{};
     DetectFlags detected_{};
     FixedStr<kInfoChars + 1, StrFit::Clip> info_{};
 };

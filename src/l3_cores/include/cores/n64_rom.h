@@ -8,9 +8,12 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
+#include "infra/ascii.h"
 #include "infra/fixed_str.h"
+#include "infra/seat.h"
 
 namespace mister::cores::n64 {
 
@@ -52,16 +55,15 @@ using InternalName = FixedStr<kInternalNameChars + 1, StrFit::Reject>;
 
 namespace detail {
 
-[[nodiscard]] constexpr bool ascii_alnum(std::uint8_t c) noexcept {
-    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
-}
-
-[[nodiscard]] constexpr bool ascii_space(std::uint8_t c) noexcept {
-    return c == ' ' || (c >= 0x09 && c <= 0x0d);
-}
-
 [[nodiscard]] constexpr char hex_digit(std::uint8_t nibble) noexcept {
     return static_cast<char>(nibble < 10 ? '0' + nibble : 'A' + (nibble - 10));
+}
+
+constexpr void reverse_words(std::span<std::uint8_t> data) noexcept {
+    for (std::size_t i = 0; i + 4 <= data.size(); i += 4) {
+        std::swap(data[i], data[i + 3]);
+        std::swap(data[i + 1], data[i + 2]);
+    }
 }
 
 }
@@ -106,25 +108,16 @@ namespace detail {
     }
 }
 
-constexpr void normalize(std::span<std::uint8_t> data, ByteOrder order) noexcept {
-    const std::size_t size = data.size();
-    switch (order) {
-        case ByteOrder::ByteSwapped:
-            for (std::size_t i = 0; i + 2 <= size; i += 2) {
-                std::swap(data[i], data[i + 1]);
-            }
-            break;
-        case ByteOrder::Little:
-            for (std::size_t i = 0; i + 4 <= size; i += 4) {
-                std::swap(data[i], data[i + 3]);
-                std::swap(data[i + 1], data[i + 2]);
-            }
-            break;
-        case ByteOrder::Big:
-        case ByteOrder::Unknown:
-            break;
-    }
-}
+class IWordOrder {
+public:
+    virtual ~IWordOrder() = default;
+    virtual constexpr void normalize(std::span<std::uint8_t> data) const noexcept = 0;
+
+protected:
+    IWordOrder() = default;
+    IWordOrder(const IWordOrder&) = default;
+    IWordOrder& operator=(const IWordOrder&) = default;
+};
 
 [[nodiscard]] constexpr CartId cart_id(RomHeader header) noexcept {
     CartId out;
@@ -132,8 +125,8 @@ constexpr void normalize(std::span<std::uint8_t> data, ByteOrder order) noexcept
     std::array<char, kCartIdChars> buf{};
     bool any_named = false;
     for (std::size_t i = 0; i < 4; ++i) {
-        const std::uint8_t c = header[kCartIdOffset + i];
-        buf[i] = detail::ascii_alnum(c) ? static_cast<char>(c) : '?';
+        const char c = static_cast<char>(header[kCartIdOffset + i]);
+        buf[i] = infra::ascii_alnum(c) ? c : '?';
         any_named = any_named || buf[i] != '?';
     }
     if (!any_named)
@@ -157,7 +150,7 @@ constexpr void normalize(std::span<std::uint8_t> data, ByteOrder order) noexcept
     std::size_t budget = kInternalNameChars + 1;
     if (field[0] == 0)
         return out;
-    while (detail::ascii_space(field[begin])) {
+    while (infra::ascii_space(static_cast<char>(field[begin]))) {
         if (--budget == 0)
             return out;
         ++begin;
@@ -169,7 +162,7 @@ constexpr void normalize(std::span<std::uint8_t> data, ByteOrder order) noexcept
     while (len < budget && field[begin + len] != 0)
         ++len;
 
-    while (len > 1 && detail::ascii_space(field[begin + len - 1]))
+    while (len > 1 && infra::ascii_space(static_cast<char>(field[begin + len - 1])))
         --len;
     len = std::min(len, kInternalNameChars);
 

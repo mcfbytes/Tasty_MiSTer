@@ -13,7 +13,10 @@ class IFrameShaper {
 public:
     virtual ~IFrameShaper() = default;
 
-    virtual void shape(proto::Lba lba, std::span<std::byte, kCdFrameSize> frame) const noexcept = 0;
+    virtual void shape(
+        proto::Lba lba,
+        std::span<std::byte, kFullFrameBytes> frame
+    ) const noexcept = 0;
 };
 
 }

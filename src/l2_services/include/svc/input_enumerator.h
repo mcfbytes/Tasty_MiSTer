@@ -10,6 +10,7 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "svc/deadzone_rule.h"
+#include "svc/device_match.h"
 #include "svc/device_table.h"
 #include "svc/input_device.h"
 #include "svc/joy_plan.h"
@@ -23,13 +24,15 @@ namespace mister::svc {
 class Vfs;
 class IAnalogReshape;
 
+inline constexpr std::string_view kDefaultInputDir = "/dev/input";
+
 class InputEnumerator {
     TASTY_SEAT_RESIDENT(Diag);
 
 public:
-    [[nodiscard]] static InputEnumerator create();
+    [[nodiscard]] static InputEnumerator create(std::string_view input_dir);
 
-    [[nodiscard]] static InputEnumerator create(const Vfs& storage);
+    [[nodiscard]] static InputEnumerator create(const Vfs& storage, std::string_view input_dir);
 
     [[nodiscard]] Ex<void> enumerate();
 
@@ -53,16 +56,14 @@ public:
 
     [[nodiscard]] DeviceTable take_table() noexcept;
 
-    void set_input_dir(std::string_view dir) { input_dir_ = dir; }
-
     const std::string& input_dir() const noexcept { return input_dir_; }
 
     void set_cfg_no_merge_rules(std::span<const NoMergeRule> rows);
 
     void set_cfg_deadzone_rules(std::span<const DeadzoneRule> rows);
-    void set_spinner(Vid vid, Pid pid) noexcept;
+    void set_spinner(SpinnerPolicy spinner) noexcept;
 
-    void set_unique_mapping(std::span<const std::uint32_t> rows);
+    void set_unique_mapping(std::span<const VidPidKey> rows);
 
     const JoyPlan& joy_plan() const noexcept { return joy_plan_; }
 
@@ -75,7 +76,6 @@ public:
         unsigned mouse_fixups = 0;
         unsigned empty_id_skips = 0;
         unsigned overflow = 0;
-        unsigned axis_range_zero = 0;
         unsigned rejected = 0;
     };
 
@@ -84,20 +84,21 @@ public:
     unsigned rejected_nodes() const noexcept { return stats_.rejected; }
 
 private:
-    InputEnumerator() = default;
+    explicit InputEnumerator(std::string_view input_dir) noexcept : input_dir_(input_dir) {}
 
-    explicit InputEnumerator(const Vfs& storage) noexcept : maps_(storage) {}
+    InputEnumerator(const Vfs& storage, std::string_view input_dir) noexcept
+        : maps_(storage),
+          input_dir_(input_dir) {}
 
     DeviceTable table_{};
     MapStore maps_;
-    std::string input_dir_ = "/dev/input";
+    std::string input_dir_;
     std::vector<NoMergeRule> cfg_no_merge_;
     std::vector<DeadzoneRule> cfg_deadzone_;
     JoyPlan joy_plan_{};
     infra::OptRef<const IAnalogReshape> reshape_;
-    std::vector<std::uint32_t> unique_rows_;
-    Vid spinner_vid_{};
-    Pid spinner_pid_{};
+    std::vector<VidPidKey> unique_rows_;
+    SpinnerPolicy spinner_{};
     Stats stats_{};
 };
 

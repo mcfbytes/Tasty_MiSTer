@@ -31,8 +31,6 @@ public:
     virtual void set_selection(RowIndex i) = 0;
     [[nodiscard]] virtual RowIndex selection() const = 0;
 
-    [[nodiscard]] virtual RowIndex first_row() const noexcept = 0;
-
     [[nodiscard]] virtual bool empty() const = 0;
 
     [[nodiscard]] virtual std::uint32_t refusals() const noexcept { return 0; }

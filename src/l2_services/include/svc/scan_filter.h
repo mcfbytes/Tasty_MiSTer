@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <optional>
 #include <string_view>
 
 namespace mister::svc {
@@ -11,7 +12,8 @@ struct ScanFilter {
     bool directories = true;
     bool files = true;
     bool zip_as_directory = true;
-    bool romset_browse = false;
+
+    std::optional<std::string_view> archive_browse = std::nullopt;
 };
 
 }

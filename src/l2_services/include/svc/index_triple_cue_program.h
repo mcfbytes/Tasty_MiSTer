@@ -15,6 +15,7 @@ class IndexTripleCueProgram final : public ICueProgram {
 
 private:
     [[nodiscard]] Ex<void> parse(std::string_view cue_path, const CueMount& m) const override;
+    void shift_chd_toc_(Toc& toc, TrackCount count) const override;
 };
 
 }

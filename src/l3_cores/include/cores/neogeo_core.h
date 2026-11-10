@@ -21,7 +21,7 @@ class NeoGeoCore final : public Core, public IStagingCore, public ICdServiceRows
 public:
     NeoGeoCore(const CoreProfile& profile, const CdProfile& cd, const HostServices& host)
         : Core(profile, host),
-          drive_(cd, host, nullptr) {}
+          drive_(cd, host, {}) {}
 
     [[nodiscard]] bool cd_mode() const noexcept { return cd_mode_; }
 

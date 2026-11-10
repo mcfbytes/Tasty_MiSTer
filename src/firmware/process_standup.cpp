@@ -11,12 +11,13 @@
 #include <cstdlib>
 #include <memory>
 #include <new>
-#include <span>
+#include <optional>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 
 #include "assembly.h"
+#include "wedge_record.h"
 #include "board_parts.h"
 #include "census.h"
 #include "hub.h"
@@ -26,6 +27,7 @@
 #include "app/board_ops.h"
 #include "app/board_reboot.h"
 #include "infra/error.h"
+#include "infra/heartbeat.h"
 #include "infra/opt_ref.h"
 #include "infra/persist.h"
 #include "infra/rt_stats.h"
@@ -38,6 +40,7 @@
 #include "hal/link_port.h"
 #include "hal/link_timing.h"
 #include "hal/program_geometry.h"
+#include "os/task_sched.h"
 #include "svc/vfs.h"
 
 using mister::fw::report;
@@ -70,15 +73,16 @@ constinit reactor::RoundTimer round_timer TASTY_PERSIST(proc, main_round_timer){
 constinit xthread::LogLane rt_lane TASTY_PERSIST(proc, main_rt_lane){};
 
 [[noreturn]] void exit_io_wedged(const fw::ThreadAssembly& assembly, const fw::SessionMode& mode) {
-    char line[96];
-    const int n = std::snprintf(
-        line,
-        sizeof line,
-        "{\"t\":\"wedge\",\"seat\":\"T-IO\",\"tid\":%ld}\n",
-        assembly.tid(SeatTag::Io)
+    infra::JsonOut out;
+    to_json(
+        out,
+        fw::WedgeRecord{
+            .seat = SeatTag::Io,
+            .tid = assembly.tid(SeatTag::Io),
+            .at = fw::WedgeAt::Io
+        }
     );
-    if (n > 0)
-        mode.voice().wedged(std::string_view(line, static_cast<std::size_t>(n)));
+    mode.voice().wedged(out.take_line());
     ::_exit(fw::kRtWedgeExitStatus);
 }
 
@@ -88,38 +92,30 @@ constinit xthread::LogLane rt_lane TASTY_PERSIST(proc, main_rt_lane){};
     const Error& why,
     const fw::SessionMode& mode
 ) {
-    char state = '?';
-    const char* wchan = "?";
-    int policy = -1;
-    int prio = -1;
-    const auto sched = fw::read_thread_sched(assembly.tid(SeatTag::RT));
-    if (sched) {
-        state = sched->state;
-        wchan = sched->wchan.size() != 0 ? sched->wchan.c_str() : "-";
-        policy = sched->policy ? fw::sched_policy_field(*sched->policy) : -1;
-        prio = sched->rt_priority;
+    const std::optional<os::KernelTid> rt_tid = assembly.tid(SeatTag::RT);
+    std::optional<os::TaskSched> sched{};
+    if (rt_tid) {
+        if (const auto row = os::read_task_sched(*rt_tid); row)
+            sched = *row;
     }
-    const auto hb = static_cast<unsigned long long>(
-        rt_stats.heartbeat.load(std::memory_order_relaxed)
+    const unsigned long long hb = rt_stats.heartbeat.load(std::memory_order_relaxed);
+    const auto deadline = std::chrono::duration_cast<std::chrono::milliseconds>(
+        fw::kRtStopDeadlineNs
     );
-    const auto deadline_ms = static_cast<long long>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(fw::kRtStopDeadlineNs).count()
-    );
-    assembly.diag().diag_sink().appendf(
-        "{\"t\":\"wedge\",\"seat\":\"T-RT\",\"tid\":%ld,\"state\":\"%c\",\"wchan\":\"%s\","
-        "\"policy\":%d,\"prio\":%d,\"hb\":%llu,\"deadline_ms\":%lld,\"err\":%u,\"site\":%u,"
-        "\"exit\":%d}",
-        assembly.tid(SeatTag::RT),
-        state,
-        wchan,
-        policy,
-        prio,
-        hb,
-        deadline_ms,
-        static_cast<unsigned>(why.code),
-        static_cast<unsigned>(why.site),
-        fw::kRtWedgeExitStatus
-    );
+    const fw::WedgeRecord wedge{
+        .seat = SeatTag::RT,
+        .tid = rt_tid,
+        .sched = sched,
+        .heartbeat = infra::Heartbeat{hb},
+        .deadline = deadline,
+        .why = why,
+        .at = fw::WedgeAt::Rt,
+        .exit = fw::ExitCode::Wedged
+    };
+    infra::JsonOut out;
+    to_json(out, wedge);
+    assembly.diag_log().append(out);
+    const long long deadline_ms = deadline.count();
     char line[256];
     const int n = std::snprintf(
         line,
@@ -127,8 +123,8 @@ constinit xthread::LogLane rt_lane TASTY_PERSIST(proc, main_rt_lane){};
         "%s: T-RT wedged in %c-state on %s, %lld ms after a stop "
         "(heartbeat %llu); teardown SKIPPED, exit %d\n",
         mode.traits().program,
-        state,
-        wchan,
+        wedge.state_text(),
+        wedge.wchan_text(),
         deadline_ms,
         hb,
         fw::kRtWedgeExitStatus
@@ -200,10 +196,7 @@ int ProcessStandup::ExitPath::fail() const {
         if (owed == app::ExitReboot::Cold)
             session_->reboot_at_exit(ColdRebootCause::UnconfiguredFabric);
         {
-
             const mister::SeatScope stands_in_for_rt{mister::SeatTag::RT};
-            if (session_->io_ == IoSeat::Stopped)
-                sup.settle_writes();
             session_->warn_if_unconfigured();
         }
     } else {
@@ -282,13 +275,26 @@ int ProcessStandup::run() {
 
 ProcessStandup::Exit ProcessStandup::prelude() noexcept {
 
-    if (auto r = fw::rt_memory_init(fw::RtMode::Required, ev_); !r) {
-        return mode_.refused(r.error(), {"mlockall(MCL_CURRENT|MCL_FUTURE)", " — arch §6"});
+    const fw::MemoryPolicyOutcome policy = fw::rt_memory_init(fw::RtMode::Required);
+    ev_.kernel = policy.kernel;
+    ev_.kernel_rt = policy.kernel_rt;
+    ev_.trim_pin = policy.trim_pin;
+    ev_.mmap_pin = policy.mmap_pin;
+    ev_.mem_lock = policy.mem_lock;
+    ev_.vm_compaction = policy.vm;
+    if (!policy.verdict) {
+        return mode_.refused(
+            policy.verdict.error(),
+            {"mlockall(MCL_CURRENT|MCL_FUTURE)", " — arch §6"}
+        );
     }
 
     fw::warn_vm_compaction(ev_.vm_compaction, mode_.traits().program, stderr);
 
-    fw::prefault_current_stack(hal::kFifoStackBytes, ev_);
+    const fw::StackPrefault stack = fw::prefault_current_stack(hal::kFifoStackBytes);
+    ev_.main_stack_prefault = stack.outcome;
+    ev_.main_stack_prefault_bytes = stack.bytes;
+    ev_.stack_rlimit_bytes = stack.rlimit;
     return {};
 }
 
@@ -306,16 +312,20 @@ ProcessStandup::Exit ProcessStandup::identify_board() {
     board_ = infra::OptRef<const hal::BoardProfile>{board};
     mode_.voice().board(board, *compatible);
 
-    if (auto t = fw::rt_topology_init(board.threads, fw::RtMode::Required, ev_); !t) {
+    const fw::TopologyOutcome topology = fw::rt_topology_init(board.threads, fw::RtMode::Required);
+    ev_.online_cpus = topology.online;
+    ev_.cpu_coverage = topology.coverage;
+    ev_.cpu_topology = topology.topology;
+    if (!topology.verdict) {
         return mode_.refused(
-            t.error(),
+            topology.verdict.error(),
             {"the board's thread map names a CPU this board does "
              "not have (sysconf(_SC_NPROCESSORS_ONLN))",
              " — item"}
         );
     }
 
-    fw::pin_current_cpu(board.main_cpu, ev_.main_affinity);
+    ev_.main_affinity = fw::pin_current_cpu(board.main_cpu);
 
     if (auto c = fw::verify_census(); !c) {
         return mode_.refused(c.error(), {"LinkDecoderDecl census drift", " (arch §2)"});
@@ -385,7 +395,7 @@ ProcessStandup::Exit ProcessStandup::gate_fabric() {
 
 ProcessStandup::Exit ProcessStandup::open_storage() {
 
-    auto vfs = svc::Vfs::create(svc::StorageRoot{});
+    auto vfs = svc::Vfs::create(svc::RootChoice::Sd);
     if (!vfs) {
         report("Vfs::create", vfs.error());
         return exit_.fail();
@@ -444,7 +454,7 @@ ProcessStandup::Exit ProcessStandup::assemble_hub() {
     app::LinkSession& session = hub_->link_session();
     app::SessionOwner& owner = hub_->owner();
 
-    exit_ = ExitPath{link, session, owner.board_reboot(), IoSeat::Stopped, mode_};
+    exit_ = ExitPath{link, session, owner.board_reboot(), mode_};
     mode_.voice().kernel(ev_.kernel);
     return {};
 }
@@ -456,7 +466,7 @@ ProcessStandup::Exit ProcessStandup::run_boot_ladder() {
 
         const mister::SeatScope boot_stands_in_for_rt{mister::SeatTag::RT};
 
-        const std::span<const char* const> boot_args = mode_.traits().boot_args;
+        const app::BootArgs boot_args = mode_.traits().boot_args;
 
         if (const Ex<void> silenced = mode_.before_boot(session); !silenced) {
             report("MAIN: StdoutRouter::install_initial_silence", silenced.error());
@@ -471,9 +481,7 @@ ProcessStandup::Exit ProcessStandup::run_boot_ladder() {
         {
 
             const mister::SeatScope main_as_main{mister::SeatTag::Main};
-            owner.latch_boot_companion(
-                boot_args.size() > kCompanionArg ? boot_args[kCompanionArg] : ""
-            );
+            owner.latch_boot_companion(boot_args.companion.value_or(""));
             if (*b)
                 owner.service_boot(**b);
             else
@@ -540,9 +548,7 @@ ProcessStandup::Exit ProcessStandup::run_boot_ladder() {
 
 ProcessStandup::Exit ProcessStandup::spawn_seats() {
     app::LinkSession& session = hub_->link_session();
-    app::SessionOwner& owner = hub_->owner();
     fw::ThreadAssembly& assembly = hub_->threads();
-    hal::ILinkPort& link = parts_->link();
 
     if (auto s = assembly.spawn(fw::RtMode::Required, hub_->seat_mains()); !s) {
         report("ThreadAssembly::spawn", s.error());
@@ -553,8 +559,6 @@ ProcessStandup::Exit ProcessStandup::spawn_seats() {
             exit_io_wedged(assembly, mode_);
         return exit_.fail();
     }
-
-    exit_ = ExitPath{link, session, owner.board_reboot(), IoSeat::Running, mode_};
 
     session.seal_boot_pump();
 

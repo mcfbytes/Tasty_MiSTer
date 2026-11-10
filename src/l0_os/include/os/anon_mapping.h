@@ -5,6 +5,7 @@
 #include <span>
 #include <utility>
 
+#include "infra/error.h"
 #include "infra/seat.h"
 
 namespace mister::os {
@@ -30,7 +31,7 @@ public:
         return *this;
     }
 
-    [[nodiscard]] bool resize(std::size_t bytes) noexcept;
+    [[nodiscard]] Ex<void> resize(std::size_t bytes) noexcept;
     void release() noexcept;
 
     [[nodiscard]] std::span<std::byte> view() const noexcept { return map_; }

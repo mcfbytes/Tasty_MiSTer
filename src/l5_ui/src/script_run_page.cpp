@@ -26,11 +26,9 @@ constexpr RowCount kOutputRows = kFullOsdRows - kLegendRows;
 constexpr proto::OsdRow kRenewNoticeRow{7};
 }
 
-ScriptRunPage::ScriptRunPage(ScriptKind kind, std::string argv0, bool bt_reset) noexcept
-    : kind_(kind),
-      policy_(script_policy_for(kind)),
-      argv0_(static_cast<std::string&&>(argv0)),
-      bt_reset_(bt_reset) {}
+ScriptRunPage::ScriptRunPage(ScriptRequest request) noexcept
+    : policy_(script_policy_for(request.kind())),
+      request_(static_cast<ScriptRequest&&>(request)) {}
 
 bool ScriptRunPage::bt_pairing_active() const {
     TASTY_SEAT_BODY(ScriptRunPage);
@@ -39,7 +37,7 @@ bool ScriptRunPage::bt_pairing_active() const {
 
 void ScriptRunPage::on_enter(PageContext& ctx) {
     TASTY_SEAT_BODY(ScriptRunPage);
-    if (!runner_.start(kind_, argv0_, bt_reset_, ctx.bt))
+    if (!runner_.start(request_, ctx.bt))
         ++refusals_;
 }
 
@@ -151,10 +149,8 @@ Transition ScriptRunPage::on_tick(PageContext& ctx) {
         if (!ctx.bt->renew_pairings())
             ++refusals_;
         if (ctx.launches.script) {
-            ScriptLaunch::Request req;
-            req.kind = ScriptKind::BtPair;
-            req.bt_reset = bt_reset_;
-            ctx.launches.script->pending = static_cast<ScriptLaunch::Request&&>(req);
+
+            ctx.launches.script->pending = request_;
             return Transition{Transition::Kind::Replace, PageId::ScriptRun};
         }
         ++refusals_;

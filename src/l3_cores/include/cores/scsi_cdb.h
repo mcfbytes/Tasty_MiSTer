@@ -69,17 +69,36 @@ struct Cdb {
     static constexpr std::uint8_t kLongBytes = 10;
     static constexpr unsigned kLunShift = 5;
     static constexpr std::uint32_t kShortLbaMask = 0x1F'FFFF;
-    static constexpr std::uint32_t kShortZeroLengthBlocks = 256;
+    static constexpr std::uint32_t kShortZeroLength = 256;
     static constexpr std::size_t kShortLengthAt = 4;
     static constexpr std::size_t kLongLbaAt = 2;
     static constexpr std::size_t kLongLengthAt = 7;
     static constexpr std::size_t kLbaBytes = sizeof(std::uint32_t);
     static constexpr std::size_t kLongLengthBytes = sizeof(std::uint16_t);
 
+    struct AllocBytes {
+        std::uint16_t v = 0;
+
+        [[nodiscard]] constexpr std::span<const std::byte> words_of(
+            std::span<const std::byte> reply
+        ) const noexcept {
+            return reply.first((v / sizeof(std::uint16_t)) * sizeof(std::uint16_t));
+        }
+
+        [[nodiscard]] constexpr std::byte reply_length_byte(AllocBytes header) const noexcept {
+            return static_cast<std::byte>(static_cast<std::uint8_t>(v - header.v));
+        }
+
+        friend constexpr bool operator==(AllocBytes, AllocBytes) = default;
+    };
+
     ScsiOpcode opcode = ScsiOpcode::TestReady;
     std::uint8_t lun = 0;
     proto::Lba lba{};
-    proto::BlockCount length{};
+    proto::BlockCount transfer{};
+    AllocBytes alloc{};
+
+    [[nodiscard]] constexpr bool lun0() const noexcept { return lun == 0; }
 
     [[nodiscard]] constexpr bool writes() const noexcept {
         return opcode == ScsiOpcode::Write6 || opcode == ScsiOpcode::Write10;
@@ -102,15 +121,23 @@ struct Cdb {
             out.lba = proto::Lba{
                 infra::load_be<std::uint32_t>(raw.subspan<kLongLbaAt, kLbaBytes>())
             };
-            out.length = proto::BlockCount{
+            out.transfer = proto::BlockCount{
                 infra::load_be<std::uint16_t>(raw.subspan<kLongLengthAt, kLongLengthBytes>())
             };
-        } else {
-            out.lba = proto::Lba{
-                infra::load_be<std::uint32_t>(raw.subspan<0, kLbaBytes>()) & kShortLbaMask
-            };
-            const std::uint32_t n = std::to_integer<std::uint8_t>(raw[kShortLengthAt]);
-            out.length = proto::BlockCount{n == 0 ? kShortZeroLengthBlocks : n};
+            return out;
+        }
+        out.lba = proto::Lba{
+            infra::load_be<std::uint32_t>(raw.subspan<0, kLbaBytes>()) & kShortLbaMask
+        };
+        const std::uint8_t n = std::to_integer<std::uint8_t>(raw[kShortLengthAt]);
+        if (*op == ScsiOpcode::Read6 || *op == ScsiOpcode::Write6) {
+            out.transfer = proto::BlockCount{n == 0 ? kShortZeroLength : n};
+        } else if (
+            *op == ScsiOpcode::Inquiry
+            || *op == ScsiOpcode::ModeSense
+            || *op == ScsiOpcode::RequestSense
+        ) {
+            out.alloc = n == 0 ? AllocBytes{kShortZeroLength} : AllocBytes{n};
         }
         return out;
     }

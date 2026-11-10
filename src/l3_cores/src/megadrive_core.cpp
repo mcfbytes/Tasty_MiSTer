@@ -24,37 +24,43 @@ void MegaDriveCore::on_set_pending_file_path(std::string_view path) noexcept {
     (void)path_.assign(path);
 }
 
-IPcmFeed* MegaDriveCore::feed() noexcept {
-    ICoreWindow* w = host().windows.named(manifests::kMdPlusWindows[0].region.name);
-    return w == nullptr ? nullptr : w->pcm_feed();
+infra::OptRef<IPcmFeed> MegaDriveCore::feed() noexcept {
+    const infra::OptRef<ICoreWindow> w = host().windows.named(
+        manifests::kMdPlusWindows[0].region.name
+    );
+    return w ? w->pcm_feed() : infra::OptRef<IPcmFeed>{};
 }
 
 void MegaDriveCore::rearm_feed_() {
-    IPcmFeed* fd = feed();
-    if (fd == nullptr)
+    const infra::OptRef<IPcmFeed> fd = feed();
+    if (!fd)
         return;
     ++feed_arms_;
-    ack_pending_ = false;
+
+    play_.stranded();
     paused_ = false;
     current_track_.reset();
-    rearm_ticks_ = 0;
 
-    (void)pending_feed_.assign(path_.view());
-    feed_rearm_pending_ = true;
+    detail::SheetAct next{};
+    (void)next.name.assign(path_.view());
+    sheet_.arm(mint_(), next);
     retry_feed_(*fd);
 }
 
 void MegaDriveCore::retry_feed_(IPcmFeed& fd) noexcept {
-    if (!feed_rearm_pending_)
+    if (!sheet_.owed())
         return;
     if (!fd.ready_for_source()) {
         ++feed_deferrals_;
         return;
     }
-    feed_rearm_pending_ = false;
-    if (auto r = fd.set_sheet(pending_feed_.view()); !r)
+    const std::string_view name = sheet_.act().name.view();
+    if (auto r = fd.set_sheet(name); !r) {
         ++feed_refusals_;
-    pending_feed_.clear();
+        sheet_.declined();
+        return;
+    }
+    sheet_.answered();
 }
 
 Ex<proto::SessionParams> MegaDriveCore::stream_opening(IoIndex) {
@@ -81,26 +87,34 @@ Ex<void> MegaDriveCore::on_mount(IoIndex, const MountedPath&) {
     return unimplemented(ERR_SITE());
 }
 
-bool MegaDriveCore::read_status_(Status& out) noexcept {
+MegaDriveCore::Status MegaDriveCore::Status::of(hal::SpiWord word0, hal::SpiWord word1) noexcept {
+    Status s{};
+    const std::uint8_t track_byte = static_cast<std::uint8_t>(word0.v >> 8);
+
+    if (track_byte != 0)
+        s.track = svc::TrackNumber::of(track_byte);
+    s.flags = md::CmdFlags{static_cast<std::uint8_t>(word0.v)};
+    s.fade = static_cast<std::uint8_t>(word1.v >> 8);
+
+    s.volume = static_cast<std::uint8_t>(word1.v);
+    return s;
+}
+
+std::optional<MegaDriveCore::Status> MegaDriveCore::read_status_() noexcept {
     hal::ISpiTransport& link = host().link;
     hal::Selected cs(link, hal::ChipSelect::Io);
     const auto w0 = link.transfer(hal::SpiWord{kCmdStatus});
     if (!w0) {
         ++wire_faults_;
-        return false;
+        return std::nullopt;
     }
     const auto w1 = link.transfer(hal::SpiWord{0});
     if (!w1) {
         ++wire_faults_;
-        return false;
+        return std::nullopt;
     }
     ++status_reads_;
-    out.track = static_cast<std::uint8_t>((w0->v >> 8));
-    out.flags = md::CmdFlags{static_cast<std::uint8_t>(w0->v)};
-    out.fade = static_cast<std::uint8_t>((w1->v >> 8));
-
-    out.volume = static_cast<std::uint8_t>(w1->v);
-    return true;
+    return Status::of(*w0, *w1);
 }
 
 namespace {
@@ -152,38 +166,35 @@ void MegaDriveCore::pump_(IPcmFeed& fd) noexcept {
     fd.observe_read_point(read_point);
 }
 
-bool MegaDriveCore::settle_ack_(IPcmFeed& fd) noexcept {
-    if (!ack_pending_)
-        return false;
-    const PcmFeedState s = fd.state();
-    if (s.served == served_before_ || !s.primed)
-        return false;
-    current_track_ = s.playing ? std::optional<svc::TrackNumber>{ack_track_} : std::nullopt;
-    ack_pending_ = false;
-    send_ack_(current_track_, s.playing);
-    return true;
-}
-
 void MegaDriveCore::answer_no_play_() noexcept {
-    ack_pending_ = false;
     current_track_.reset();
     send_ack_(std::nullopt, false);
+}
+
+void MegaDriveCore::hold_play_() noexcept {
+
+    if (!sheet_.waited_past())
+        return;
+    paused_ = false;
+    ++play_refusals_;
+    answer_no_play_();
 }
 
 void MegaDriveCore::arm_play_(IPcmFeed& fd, svc::TrackNumber track, bool loop) noexcept {
     paused_ = false;
 
-    if (feed_rearm_pending_ || !fd.can_serve()) {
+    if (!fd.can_serve()) {
+        play_.arm(mint_(), detail::PlayAct{.track = track, .loop = loop});
+        play_.declined();
         ++play_refusals_;
         answer_no_play_();
         return;
     }
 
-    served_before_ = fd.state().served;
-    ack_track_ = track;
-    ack_ticks_ = 0;
-    ack_pending_ = true;
+    const detail::PlayAct ask{.track = track, .loop = loop, .served_before = fd.state().served};
+    play_.arm(mint_(), ask);
     if (auto r = fd.play(track, loop); !r) {
+        play_.declined();
         ++play_refusals_;
         answer_no_play_();
     }
@@ -191,50 +202,60 @@ void MegaDriveCore::arm_play_(IPcmFeed& fd, svc::TrackNumber track, bool loop) n
 
 void MegaDriveCore::service_pcm_tick() noexcept {
     TASTY_SEAT_BODY(MegaDriveCore);
-    IPcmFeed* fdp = feed();
-    if (fdp == nullptr)
+    const infra::OptRef<IPcmFeed> fdp = feed();
+    if (!fdp)
         return;
     IPcmFeed& fd = *fdp;
     retry_feed_(fd);
 
-    Status st{};
-    if (!read_status_(st))
+    const std::optional<Status> st = read_status_();
+    if (!st)
         return;
 
-    if (ack_pending_) {
-        if (settle_ack_(fd)) {
-            pump_(fd);
-        } else if (++ack_ticks_ >= kAckTicks) {
+    if (play_.owed()) {
+        const PcmFeedState s = fd.state();
+        if (!s.primed || s.served == play_.act().served_before) {
+            if (!play_.waited_past())
+                return;
             ++ack_timeouts_;
+            play_.stranded();
             answer_no_play_();
+            return;
         }
+        current_track_ = s.playing ? std::optional<svc::TrackNumber>{play_.act().track}
+                                   : std::nullopt;
+        play_.answered();
+        send_ack_(current_track_, s.playing);
+        pump_(fd);
         return;
     }
-    if (st.flags.none()) {
+    if (st->flags.none()) {
         pump_(fd);
         return;
     }
 
-    if (st.flags.has(md::CmdFlags::Play)) {
-        if (st.track == 0) {
+    if (st->flags.has(md::CmdFlags::Play)) {
+        if (!st->track) {
 
             send_ack_(current_track_, fd.state().playing);
             return;
         }
 
-        if (feed_rearm_pending_ && ++rearm_ticks_ < kAckTicks)
+        if (sheet_.owed()) {
+            hold_play_();
             return;
-        arm_play_(fd, svc::TrackNumber{st.track}, st.flags.has(md::CmdFlags::Loop));
+        }
+        arm_play_(fd, *st->track, st->flags.has(md::CmdFlags::Loop));
         return;
     }
-    if (st.flags.has(md::CmdFlags::Stop)) {
+    if (st->flags.has(md::CmdFlags::Stop)) {
 
-        if (st.fade == 0) {
+        if (st->fade == 0) {
             paused_ = true;
             if (auto r = fd.stop(); !r)
                 paused_ = false;
         }
-    } else if (st.flags.has(md::CmdFlags::Resume)) {
+    } else if (st->flags.has(md::CmdFlags::Resume)) {
         paused_ = false;
         (void)fd.resume();
     }

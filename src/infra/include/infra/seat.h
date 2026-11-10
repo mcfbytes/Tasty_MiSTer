@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <utility>
 
 #include "infra/error.h"
 
@@ -58,7 +57,10 @@ inline constexpr int const_shared = 1;
 inline constexpr int boot = 2;
 }
 
-using SeatNameRow = std::pair<SeatTag, const char*>;
+struct SeatNameRow {
+    SeatTag tag;
+    const char* name;
+};
 
 inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatNames{{
     {SeatTag::Unbound, "UNBOUND"},
@@ -78,52 +80,20 @@ inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatNames{{
     {SeatTag::Main, "MAIN"},
 }};
 
-consteval bool seat_name_rows_are_ordinal() {
+template <class Row>
+consteval bool tags_are_ordinal(const std::array<Row, kSeatTagCount>& rows) {
     for (std::size_t i = 0; i < kSeatTagCount; ++i) {
-        if (static_cast<std::size_t>(kSeatNames[i].first) != i)
+        if (static_cast<std::size_t>(rows[i].tag) != i)
             return false;
     }
     return true;
 }
 
-static_assert(seat_name_rows_are_ordinal(), "kSeatNames: row i names tag i, one row per tag");
+static_assert(tags_are_ordinal(kSeatNames), "kSeatNames: row i names tag i, one row per tag");
 
 constexpr const char* seat_name(SeatTag t) noexcept {
     const auto i = static_cast<std::size_t>(t);
-    return i < kSeatTagCount ? kSeatNames[i].second : "?";
-}
-
-inline constexpr std::array<SeatNameRow, kSeatTagCount> kSeatRoles{{
-    {SeatTag::Unbound, "unbound"},
-    {SeatTag::RT, "link"},
-    {SeatTag::Frame, "frame"},
-    {SeatTag::Input, "input"},
-    {SeatTag::Pcm, "pcm"},
-    {SeatTag::Prefetch, "prefetch"},
-    {SeatTag::Diag, "diag"},
-    {SeatTag::Ui, "ui"},
-    {SeatTag::Io, "io"},
-    {SeatTag::Capture, "capture"},
-    {SeatTag::Encode, "encode"},
-    {SeatTag::RecWrite, "recwrite"},
-    {SeatTag::Launcher, "launcher"},
-    {SeatTag::HdOsd, "hdosd"},
-    {SeatTag::Main, "main"},
-}};
-
-consteval bool seat_role_rows_are_ordinal() {
-    for (std::size_t i = 0; i < kSeatTagCount; ++i) {
-        if (static_cast<std::size_t>(kSeatRoles[i].first) != i)
-            return false;
-    }
-    return true;
-}
-
-static_assert(seat_role_rows_are_ordinal(), "kSeatRoles: row i names tag i, one row per tag");
-
-constexpr const char* seat_role(SeatTag t) noexcept {
-    const auto i = static_cast<std::size_t>(t);
-    return i < kSeatTagCount ? kSeatRoles[i].second : "?";
+    return i < kSeatTagCount ? kSeatNames[i].name : "?";
 }
 
 [[nodiscard]] SeatTag current_seat() noexcept;

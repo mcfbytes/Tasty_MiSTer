@@ -6,6 +6,7 @@
 #include <span>
 
 #include "app/interned_file.h"
+#include "infra/opt_ref.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -17,7 +18,10 @@ public:
     [[nodiscard]] virtual std::span<const std::uint8_t> bytes(
         proto::TxSlabId id
     ) const noexcept = 0;
-    [[nodiscard]] virtual const InternedFile* file(proto::FileId id) const noexcept = 0;
+
+    [[nodiscard]] virtual infra::OptRef<const InternedFile> file(
+        proto::FileId id
+    ) const noexcept = 0;
 
 protected:
     constexpr ILinkTxReader() noexcept = default;

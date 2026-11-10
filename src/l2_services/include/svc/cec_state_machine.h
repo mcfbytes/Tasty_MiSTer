@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -36,6 +37,8 @@ struct CecLength {
         );
     }
 
+    [[nodiscard]] constexpr bool has_opcode() const noexcept { return v >= kHeaderBytes; }
+
     friend constexpr bool operator==(CecLength, CecLength) = default;
 };
 
@@ -66,13 +69,9 @@ class CecStateMachine {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    [[nodiscard]] Ex<void> poll_deadline();
+    [[nodiscard]] Ex<void> poll_deadline(const adv7513::Io& io);
 
     std::uint32_t max_rx_depth_seen() const noexcept { return max_rx_depth_; }
-
-    explicit CecStateMachine(const adv7513::Io& io = adv7513::kUnboundIo) noexcept : io_(io) {}
-
-    explicit CecStateMachine(const adv7513::Io&&) = delete;
 
     CecState state() const noexcept { return state_; }
 
@@ -84,14 +83,17 @@ public:
 
     std::uint32_t rx_rejected() const noexcept { return rx_rejected_; }
 
-    static constexpr std::uint32_t kReleasePulseUs = 200;
+    static constexpr std::chrono::microseconds kReleasePulse{200};
     static constexpr unsigned kRxBuffers = 3;
 
 private:
-    [[nodiscard]] Ex<CecMessage> decode_rx(os::I2cReg header, CecLength length);
+    [[nodiscard]] Ex<CecMessage> decode_rx(
+        const adv7513::Io& io,
+        os::I2cReg header,
+        CecLength length
+    );
 
     std::uint32_t max_rx_depth_ = 0;
-    const adv7513::Io& io_;
     CecState state_ = CecState::Disabled;
     std::optional<CecMessage> last_{};
     std::uint32_t rx_released_ = 0;

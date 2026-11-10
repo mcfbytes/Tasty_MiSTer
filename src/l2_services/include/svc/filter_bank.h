@@ -3,8 +3,8 @@
 
 #include <array>
 
-#include "svc/filter_store.h"
-#include "svc/video_service.h"
+#include "svc/filter_kernel.h"
+#include "svc/filter_phase.h"
 
 namespace mister::svc {
 

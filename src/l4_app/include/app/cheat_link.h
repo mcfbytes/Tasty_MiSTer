@@ -2,7 +2,6 @@
 #pragma once
 
 #include <cstdint>
-#include <string_view>
 
 #include "svc/types.h"
 #include "app/cheat_apply.h"
@@ -21,13 +20,7 @@ public:
     CheatLink(const CheatLink&) = delete;
     CheatLink& operator=(const CheatLink&) = delete;
 
-    void content_loaded(
-        cores::Core* core,
-        TxDigest::Kind kind,
-        std::string_view path,
-        svc::Crc32 crc,
-        bool same_game
-    ) noexcept override;
+    void content_loaded(cores::Core& core, const TxDigest& loaded) noexcept override;
     [[nodiscard]] bool apply_cheats_counted(const CheatCall& call) noexcept override;
 
     [[nodiscard]] const TxDigestCell& tx_digest_cell() const noexcept { return digest_cell_; }

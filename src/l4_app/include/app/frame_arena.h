@@ -5,7 +5,9 @@
 #include <span>
 
 #include "infra/error.h"
+#include "infra/pool_slot.h"
 #include "infra/seat.h"
+#include "infra/slot_pool.h"
 #include "os/anon_mapping.h"
 
 namespace mister::app {
@@ -27,6 +29,8 @@ public:
     void release() noexcept;
 
     [[nodiscard]] std::span<std::byte> stripe(std::size_t i) const noexcept;
+
+    [[nodiscard]] std::span<std::byte> stripe(xthread::PoolSlot slot) const noexcept;
 
     [[nodiscard]] std::size_t slot_bytes() const noexcept { return slot_bytes_; }
 

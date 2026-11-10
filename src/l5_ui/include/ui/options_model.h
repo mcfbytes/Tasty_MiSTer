@@ -6,11 +6,11 @@
 #include <span>
 #include <vector>
 
-#include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
 #include "ui/build_env.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 #include "ui/types.h"
 
 namespace mister::ui {
@@ -19,7 +19,7 @@ class OptionsModel {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    [[nodiscard]] Ex<void> build(const proto::ItemTable& table, const BuildEnv& env);
+    void build(const proto::ItemTable& table, const BuildEnv& env);
 
     std::span<const std::unique_ptr<OptionItem>> items() const noexcept { return items_; }
 
@@ -31,7 +31,7 @@ public:
 
     RowCount rows_beyond_mask() const noexcept { return beyond_mask_; }
 
-    const OptionItem* at_selectable(RowIndex index) const;
+    infra::OptRef<const OptionItem> at_selectable(RowIndex index) const;
 
     bool empty_page() const noexcept { return drawn_.empty(); }
 

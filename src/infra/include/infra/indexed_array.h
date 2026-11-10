@@ -4,6 +4,7 @@
 #include <array>
 #include <concepts>
 #include <cstddef>
+#include <span>
 #include <type_traits>
 #include <utility>
 
@@ -54,6 +55,16 @@ public:
     constexpr auto begin() const noexcept { return elems_.begin(); }
 
     constexpr auto end() const noexcept { return elems_.end(); }
+
+    template <ArrayIndex Count>
+    [[nodiscard]] constexpr std::span<T> prefix(Count count) noexcept {
+        return std::span<T>(elems_).first(static_cast<std::size_t>(count.v));
+    }
+
+    template <ArrayIndex Count>
+    [[nodiscard]] constexpr std::span<const T> prefix(Count count) const noexcept {
+        return std::span<const T>(elems_).first(static_cast<std::size_t>(count.v));
+    }
 
 private:
     std::array<T, N> elems_{};

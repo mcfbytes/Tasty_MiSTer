@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <type_traits>
 
 #include "app/types.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "os/raw_monotonic_clock.h"
 
 namespace mister::app {
 
@@ -23,13 +25,13 @@ static_assert(std::is_nothrow_default_constructible_v<FabricState>);
 
 using FabricCell = xthread::Telemetry<FabricState, SeatTag::Main>;
 
-inline constexpr std::int64_t kFabricStaleNs = 5'000'000'000;
+inline constexpr std::chrono::nanoseconds kFabricStale = std::chrono::seconds{5};
 
 class FabricStateView {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    void refresh(const FabricCell& cell, std::int64_t now_ns) noexcept;
+    void refresh(const FabricCell& cell, os::RawMonotonicClock::time_point now) noexcept;
 
     [[nodiscard]] bool configured() const noexcept { return last_.configured && !stale_; }
 
@@ -52,7 +54,7 @@ public:
 private:
     FabricCell::Reader reader_{};
     FabricState last_{};
-    std::int64_t fresh_ns_ = 0;
+    os::RawMonotonicClock::time_point fresh_{};
     std::uint32_t expiries_ = 0;
     bool has_sample_ = false;
     bool stale_ = false;

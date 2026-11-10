@@ -4,6 +4,8 @@
 #include <array>
 #include <cstdint>
 
+#include "cores/saturn_slot_ring.h"
+
 namespace mister::cores {
 
 struct SaturnModeWord {
@@ -36,8 +38,8 @@ struct SaturnModeWord {
         return SaturnModeWord{static_cast<std::uint16_t>(v | flag.v)};
     }
 
-    [[nodiscard]] constexpr SaturnModeWord with_slot(std::uint8_t slot) const noexcept {
-        const std::uint16_t nib = static_cast<std::uint16_t>(slot & kSlotMask);
+    [[nodiscard]] constexpr SaturnModeWord with_slot(SaturnSlotRing::Slot slot) const noexcept {
+        const std::uint16_t nib = slot.mode_nibble();
         const std::uint16_t both = static_cast<std::uint16_t>(
             (nib << kSlotShift) | (nib << kSecondSlotShift)
         );

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <string>
 #include <string_view>
 
 #include "ui/page.h"
@@ -20,8 +19,6 @@ public:
     virtual Transition on_eject() { return Transition{}; }
 
     virtual Transition on_clear() { return Transition{}; }
-
-    virtual std::string display_alias(std::string_view, bool) const { return {}; }
 
 protected:
     IBrowserHost() = default;

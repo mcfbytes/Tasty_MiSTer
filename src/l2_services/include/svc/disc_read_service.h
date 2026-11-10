@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -16,10 +17,12 @@
 #include "infra/telemetry.h"
 #include "svc/disc_counters.h"
 #include "svc/disc_geometry.h"
+#include "svc/disc_identity_role.h"
 #include "svc/disc_mount_slot.h"
 #include "svc/disc_mounter.h"
 #include "svc/disc_read_slot.h"
 #include "svc/disc_reader.h"
+#include "svc/disc_take.h"
 #include "svc/io_coworker.h"
 
 namespace mister::svc {
@@ -56,8 +59,9 @@ public:
 
     [[nodiscard]] DiscMountState arm_mount(
         DiscOp op,
-        const CuePolicy* policy,
-        std::string_view path
+        infra::OptRef<const CuePolicy> policy,
+        std::string_view path,
+        infra::OptRef<const IDiscIdentity> identity = {}
     ) noexcept;
 
     void release() noexcept;
@@ -67,15 +71,9 @@ public:
     [[nodiscard]] const DiscGeometry& geometry() noexcept;
     [[nodiscard]] const DiscCounters& counters() noexcept;
 
-    [[nodiscard]] std::size_t take(
-        DiscForm form,
-        proto::Lba lba,
-        std::span<std::byte> dst
-    ) noexcept;
+    [[nodiscard]] DiscTake take(DiscAsk ask, std::span<std::byte> dst) noexcept;
 
-    void hint(DiscForm form, proto::Lba lba) noexcept;
-
-    [[nodiscard]] bool take_read_failed(DiscForm form, proto::Lba lba) noexcept;
+    void hint(DiscAsk ask) noexcept;
 
     [[nodiscard]] std::uint32_t not_resident() const noexcept { return not_resident_.get(); }
 
@@ -100,22 +98,10 @@ public:
 
 private:
     void drain_() noexcept;
-    [[nodiscard]] bool issue_(DiscForm form, std::uint32_t lba) noexcept;
+    [[nodiscard]] bool issue_(DiscAsk ask) noexcept;
     [[nodiscard]] bool evict_oldest_resident_() noexcept;
-    [[nodiscard]] bool in_flight_(DiscForm form, std::uint32_t lba) const noexcept;
+    [[nodiscard]] bool in_flight_(DiscAsk ask) const noexcept;
     void serve_(DiscReadSlot& s) noexcept;
-
-    struct Inflight {
-        std::uint32_t lba = 0;
-        DiscForm form = DiscForm::RawFrame;
-        bool live = false;
-    };
-
-    struct FailedRead {
-        std::uint32_t lba = 0;
-        DiscForm form = DiscForm::RawFrame;
-        bool live = false;
-    };
 
     void poll_mounts_() noexcept;
     void serve_mounts_io_() noexcept;
@@ -165,8 +151,8 @@ private:
 
         [[nodiscard]] const DiscReadSlot& read() const noexcept { return *loan_; }
 
-        [[nodiscard]] bool matches(DiscForm form, proto::Lba lba) const noexcept {
-            return loan_ && (*loan_).lba == lba && (*loan_).form == form;
+        [[nodiscard]] bool matches(DiscAsk ask) const noexcept {
+            return loan_ && read().ask() == ask;
         }
 
         [[nodiscard]] bool older_than(const Resident& other, Arrival now) const noexcept {
@@ -180,8 +166,8 @@ private:
 
     std::array<Resident, kDiscReadDepth> resident_{};
     Arrival arrivals_{};
-    Inflight inflight_[kDiscReadDepth]{};
-    FailedRead failed_{};
+
+    std::array<std::optional<DiscAsk>, kDiscReadDepth> inflight_{};
     Generation gen_{};
     xthread::Counter not_resident_, stale_drops_, refusals_, reads_, read_errors_, evictions_;
 };

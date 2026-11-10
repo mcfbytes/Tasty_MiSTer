@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "app/capture_arm.h"
 #include "infra/fixed_str.h"
 #include "svc/types.h"
 
@@ -12,7 +13,7 @@ namespace mister::app {
 inline constexpr std::size_t kCaptureIdCap = 128;
 
 struct CaptureHit {
-    std::uint32_t token = 0;
+    CaptureToken token{};
     std::uint32_t unique_hash = 0;
     svc::EvdevCode code{};
     svc::DeviceSlot device_ordinal{};

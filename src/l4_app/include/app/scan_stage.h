@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -9,6 +8,7 @@
 
 #include "app/replay_stage.h"
 #include "cores/movie_codec.h"
+#include "infra/fixed_str.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
@@ -27,12 +27,6 @@ public:
     [[nodiscard]] Step stop(Ctx ctx) noexcept override;
 
 private:
-    struct Line {
-        std::array<char, cores::IMovieCodec::kLineMax + 1> text{};
-        std::uint16_t len = 0;
-        bool clipped = false;
-    };
-
     [[nodiscard]] Step read_lines_(Ctx ctx) noexcept;
     [[nodiscard]] std::optional<PlayRefusal> on_line_(
         Ctx ctx,
@@ -45,9 +39,9 @@ private:
         bool clipped
     ) noexcept;
     static void note_frame_(
-        ReplayPlay& play,
+        ReplayPlay::ScannedMovie& scan,
         std::uint32_t f,
-        const cores::IMovieCodec::Frame& fr
+        const cores::MovieFrame& fr
     ) noexcept;
     [[nodiscard]] Step finish_scan_(Ctx ctx) noexcept;
 
@@ -56,7 +50,8 @@ private:
     std::uint64_t off_ = 0;
     bool in_log_ = false;
     bool log_done_ = false;
-    Line line_{};
+
+    FixedStr<cores::kMovieLineMax + 2, StrFit::Clip> line_{};
 };
 
 }

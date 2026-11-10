@@ -101,19 +101,19 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) n
     if (!opened())
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
 
-    depth_ = 0;
+    depth_ = HunkCount{};
     hunk_extent_ = 0;
     poisoned_ = false;
 
-    const std::size_t depth = derive_depth(kPrefetchBudgetBytes, geo.hunk_bytes);
-    if (depth == 0) {
+    const std::optional<HunkCount> depth = derive_depth(kPrefetchBudgetBytes, geo.hunk_bytes);
+    if (!depth) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
     }
 
     if (slab_ == nullptr) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), geo.hunk_detail()});
     }
-    if (geo.hunk_extent() * depth > kPrefetchBudgetBytes) {
+    if (geo.extent_of(*depth) > kPrefetchBudgetBytes) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), geo.hunk_detail()});
     }
 
@@ -125,24 +125,24 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) n
     want_hunk_.store(HunkIndex::none(), std::memory_order_release);
 
     hunk_extent_ = geo.hunk_extent();
-    depth_ = depth;
+    depth_ = *depth;
 
-    const HunkCount avail = HunkCount::of_slots(depth_) - kPrefetchLookBehind;
+    const HunkCount avail = depth_ - kPrefetchLookBehind;
     ChdMedia media;
     media.src = std::move(src);
     media.geo = geo;
     media.forward_span = avail < kPrefetchForwardSpan ? avail : kPrefetchForwardSpan;
 
-    if (!chan_.set_live(static_cast<std::uint8_t>(depth_))) {
-        depth_ = 0;
+    if (!chan_.set_live(static_cast<std::uint8_t>(depth_.v))) {
+        depth_ = HunkCount{};
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-    for (std::size_t i = 0; i < depth_; ++i)
+    for (HunkCount seeded{}; seeded < depth_; seeded += kOneHunk)
         chan_.send(chan_.acquire());
 
     if (auto r = hand_over_(std::move(media)); !r) {
         (void)chan_.reclaim_all_parked();
-        depth_ = 0;
+        depth_ = HunkCount{};
         return r;
     }
 
@@ -153,10 +153,9 @@ Ex<void> ChdPrefetch::attach(std::unique_ptr<IChdSource> src, ChdGeometry geo) n
 }
 
 bool ChdPrefetch::reap_leases_() noexcept {
-    const std::uint32_t taken = attaches_taken_.load(std::memory_order_acquire);
-    for (std::size_t i = 0; i < kChdMediaLeases; ++i) {
-        HeldLease& held = cmd_.leases[i];
-        if (held.lease && static_cast<std::int32_t>(taken - held.seq) >= 0)
+    const HandoverSeq taken = attaches_taken_.load(std::memory_order_acquire);
+    for (HeldLease& held : cmd_.leases) {
+        if (held.lease && taken.reached(held.seq))
             held.lease.reset();
     }
     return media_.available() != 0;
@@ -168,12 +167,12 @@ Ex<void> ChdPrefetch::hand_over_(ChdMedia&& media) noexcept {
     if (!lease)
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     *lease = std::move(media);
-    const std::uint8_t idx = media_.index_of(lease.get());
+    const xthread::PoolSlot idx = *media_.index_of(lease.get());
     if (!attaches_.push(ChdAttach{idx})) {
         *lease = ChdMedia{};
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-    ++cmd_.sent;
+    cmd_.sent = cmd_.sent.next();
     cmd_.leases[idx].seq = cmd_.sent;
     cmd_.leases[idx].lease = std::move(lease);
     return {};
@@ -181,17 +180,16 @@ Ex<void> ChdPrefetch::hand_over_(ChdMedia&& media) noexcept {
 
 void ChdPrefetch::take_attaches_() noexcept {
     while (const auto a = attaches_.pop()) {
-        if (a->lease < kChdMediaLeases) {
-            held_ = Chan::Job{};
-            ChdMedia& m = media_.at(a->lease);
-            src_ = std::move(m.src);
-            geo_ = m.geo;
-            forward_span_ = m.forward_span;
-            next_ = HunkIndex{};
-            tracking_ = HunkIndex::none();
-            disabled_ = false;
-        }
-        attaches_taken_.store(++taken_, std::memory_order_release);
+        held_ = Chan::Job{};
+        ChdMedia& m = media_.at(a->lease);
+        src_ = std::move(m.src);
+        geo_ = m.geo;
+        forward_span_ = m.forward_span;
+        next_ = HunkIndex{};
+        tracking_ = HunkIndex::none();
+        disabled_ = false;
+        taken_ = taken_.next();
+        attaches_taken_.store(taken_, std::memory_order_release);
     }
 }
 
@@ -259,11 +257,10 @@ void ChdPrefetch::serve() noexcept {
     }
 
     const HunkIndex h = next_;
-    const std::size_t hunk_bytes = geo_.hunk_extent();
-    std::byte* dst = slab_.get() + static_cast<std::size_t>(job.index()) * hunk_bytes;
+    const std::span<std::byte> dst = slot_bytes_(job.slot());
     constexpr std::int64_t kNsPerMicrosecond = 1000;
     const std::int64_t t0 = decode_now_ns();
-    auto r = src_->read_hunk(h, std::span<std::byte>(dst, hunk_bytes));
+    auto r = src_->read_hunk(h, dst);
     decode_us_.add(static_cast<std::uint32_t>((decode_now_ns() - t0) / kNsPerMicrosecond));
     if (!r) {
         errors_.add();
@@ -276,7 +273,7 @@ void ChdPrefetch::serve() noexcept {
     job->hunk = h;
     job.complete();
     job = Chan::Job{};
-    next_ = next_ + HunkCount{1};
+    next_ = next_ + kOneHunk;
 
     if (!sprinting_())
         rest_(kPrefetchTopUpMs, want, false);
@@ -295,16 +292,6 @@ void ChdPrefetch::park_now() noexcept {
     parked_.store(true, std::memory_order_release);
 }
 
-void ChdPrefetch::submit(HunkIndex hunk) noexcept {
-    if (depth_ == 0 || poisoned_)
-        return;
-    if (hunk == want_)
-        return;
-    want_ = hunk;
-    want_hunk_.store(hunk, std::memory_order_release);
-    kick_worker_();
-}
-
 void ChdPrefetch::kick_worker_() noexcept {
     wake_.kick_if_armed();
 }
@@ -314,12 +301,11 @@ std::size_t ChdPrefetch::evict_(HunkIndex current) noexcept {
     const HunkCount behind = current - HunkIndex{};
     const HunkCount look = behind < kPrefetchLookBehind ? behind : kPrefetchLookBehind;
     const HunkIndex lo = current - look;
-    const HunkCount span{static_cast<std::uint32_t>(depth_)};
     std::size_t w = 0;
     std::size_t released = 0;
     for (std::size_t i = 0; i < resident_count_; ++i) {
         const HunkIndex h = resident_hunk_[i];
-        const bool in_window = h >= lo && (h - lo) < span;
+        const bool in_window = h >= lo && (h - lo) < depth_;
         if (!in_window) {
             chan_.send(std::move(resident_[i]));
             ++released;
@@ -334,9 +320,16 @@ std::size_t ChdPrefetch::evict_(HunkIndex current) noexcept {
     return released;
 }
 
-const std::byte* ChdPrefetch::take(HunkIndex hunk) noexcept {
-    if (depth_ == 0 || poisoned_)
-        return nullptr;
+std::span<std::byte> ChdPrefetch::slot_bytes_(xthread::PoolSlot slot) const noexcept {
+    return slot.subspan_of(
+        std::span<std::byte>(slab_.get(), kPrefetchBudgetBytes),
+        xthread::SlotStride{hunk_extent_}
+    );
+}
+
+std::span<const std::byte> ChdPrefetch::take(HunkIndex hunk) noexcept {
+    if (!attached() || poisoned_)
+        return {};
 
     bool kicked = false;
     if (hunk != want_) {
@@ -351,7 +344,7 @@ const std::byte* ChdPrefetch::take(HunkIndex hunk) noexcept {
         if (!l)
             break;
 
-        if (!l.completed() || resident_count_ >= depth_) {
+        if (!l.completed() || HunkCount::of_slots(resident_count_) >= depth_) {
             chan_.send(std::move(l));
             continue;
         }
@@ -365,11 +358,16 @@ const std::byte* ChdPrefetch::take(HunkIndex hunk) noexcept {
     for (std::size_t i = 0; i < resident_count_; ++i) {
         if (resident_hunk_[i] == hunk) {
             hits_.add();
-            return slab_.get()
-                + static_cast<std::size_t>(chan_.index_of(resident_[i])) * hunk_extent_;
+            return slot_bytes_(*chan_.index_of(resident_[i]));
         }
     }
-    return nullptr;
+    return {};
+}
+
+PrefetchState ChdPrefetch::state() const noexcept {
+    if (!opened())
+        return PrefetchState::Closed;
+    return parked() ? PrefetchState::Parked : PrefetchState::Running;
 }
 
 PrefetchCounters ChdPrefetch::counters() const noexcept {
@@ -381,10 +379,7 @@ PrefetchCounters ChdPrefetch::counters() const noexcept {
 
     c.drops = chan_.breaches();
     c.errors = errors_.get();
-    constexpr std::uint32_t kClosed = 0;
-    constexpr std::uint32_t kParked = 1;
-    constexpr std::uint32_t kRunning = 2;
-    c.state = !opened() ? kClosed : (parked() ? kParked : kRunning);
+    c.state = state();
     c.decode_us = decode_us_.get();
     c.evictions = evictions_.get();
     return c;

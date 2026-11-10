@@ -15,6 +15,7 @@ struct Transition {
         Pop,
         Replace,
         CloseAll,
+        Reopen,
         Leave,
     };
     Kind kind = Kind::Stay;

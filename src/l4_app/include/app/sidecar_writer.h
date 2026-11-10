@@ -6,7 +6,8 @@
 
 #include "app/rec_write_status.h"
 #include "app/sidecar_msg.h"
-#include "infra/park_timeout.h"
+#include "infra/errno.h"
+#include "infra/error.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
 #include "os/anon_mapping.h"
@@ -18,14 +19,12 @@ class SidecarWriter {
 
 public:
     struct Wiring {
-        SidecarRing& in;
         RecWriteStatusCell& status;
     };
 
     static constexpr std::size_t kBufBytes = 64u * 1024u;
 
     static constexpr std::size_t kSpillBytes = 64u * 1024u * 1024u;
-    static constexpr unsigned kMsgsPerPass = 256;
 
     static constexpr const char* kHeader = "core_frame\theader_ctr\tcapture_ns\tdup_reason\tmovie_"
                                            "frame\thash\twidth\theight\tsegment\t"
@@ -38,9 +37,15 @@ public:
     SidecarWriter(const SidecarWriter&) = delete;
     SidecarWriter& operator=(const SidecarWriter&) = delete;
 
-    void serve() noexcept;
-    [[nodiscard]] bool idle() const noexcept;
-    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
+    void on(const SidecarMsg& m) noexcept;
+
+    void on(const SidecarMsg::Open& o, const SidecarMsg::Head& head) noexcept;
+    void on(const SidecarMsg::Row& row, const SidecarMsg::Head& head) noexcept;
+    void on(const SidecarMsg::Close& c, const SidecarMsg::Head& head) noexcept;
+
+    void misrouted(const SidecarMsg& m) noexcept;
+
+    void publish() noexcept;
 
     void release() noexcept;
 
@@ -49,10 +54,8 @@ public:
     [[nodiscard]] std::size_t mapped_bytes() const noexcept { return buf_.size(); }
 
 private:
-    void open_(const SidecarMsg& m) noexcept;
-    void row_(const SidecarMsg& m) noexcept;
     void close_() noexcept;
-    void fail_(int err) noexcept;
+    void fail_(infra::Errno err) noexcept;
     void flush_() noexcept;
     void sync_() noexcept;
     [[nodiscard]] bool grow_(std::size_t need) noexcept;

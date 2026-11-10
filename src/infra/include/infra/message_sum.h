@@ -86,6 +86,12 @@ template <MessageSum M>
     return m.kind;
 }
 
+template <HasHead M>
+[[nodiscard]] constexpr typename M::Head head_of(const M& m) noexcept {
+    static_assert(alternatives_are_total<M>(), "a message sum whose alternatives are not total");
+    return m.head;
+}
+
 template <class E>
     requires std::is_enum_v<E>
 [[nodiscard]] constexpr std::size_t ordinal(E e) noexcept {

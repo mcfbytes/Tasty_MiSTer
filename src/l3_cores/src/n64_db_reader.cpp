@@ -6,6 +6,7 @@
 
 #include "cores/manifests/n64.h"
 #include "cores/n64_db.h"
+#include "cores/n64_path.h"
 
 namespace mister::cores {
 
@@ -17,32 +18,25 @@ namespace {
 
 }
 
-n64::DbTags N64DbReader::scan(n64::DbKey kind, std::string_view key) {
+std::optional<n64::DbMatch> N64DbReader::scan(const n64::DbKey& key) {
     TASTY_SEAT_BODY(N64DbReader);
-    for (std::string_view name : n64::kDbFileNames) {
-        const n64::DbTags t = scan_file_(name, kind, key);
-        if (t.found)
-            return t;
-    }
-    return {};
+    for (std::string_view name : n64::kDbFileNames)
+        if (auto match = scan_file_(name, key))
+            return match;
+    return std::nullopt;
 }
 
-n64::DbTags N64DbReader::scan_file_(std::string_view name, n64::DbKey kind, std::string_view key) {
-    const std::string_view dir = core_dir_;
-    if (dir.size() + 1 + name.size() > kRelChars)
-        return {};
-    char rel[kRelChars];
-    std::memcpy(rel, dir.data(), dir.size());
-    rel[dir.size()] = '/';
-    std::memcpy(rel + dir.size() + 1, name.data(), name.size());
-    const std::string_view rel_view(rel, dir.size() + 1 + name.size());
-    const svc::SearchPolicy policy{manifests::kN64HomeDir, true};
-    auto path = vfs_.resolve(rel_view, policy);
+std::optional<n64::DbMatch> N64DbReader::scan_file_(std::string_view name, const n64::DbKey& key) {
+    const auto rel = n64::core_relative(core_dir_, name);
+    if (!rel)
+        return std::nullopt;
+    const svc::SearchPolicy policy{kCoreHomeDir, true};
+    auto path = vfs_.resolve(rel->view(), policy);
     if (!path)
-        return {};
+        return std::nullopt;
     auto file = vfs_.open(*path, svc::OpenMode::ReadWhole);
     if (!file)
-        return {};
+        return std::nullopt;
 
     std::uint64_t off = 0;
     std::size_t carry = 0;
@@ -53,12 +47,12 @@ n64::DbTags N64DbReader::scan_file_(std::string_view name, n64::DbKey kind, std:
             std::as_writable_bytes(std::span<char>(buf_ + carry, kChunkBytes - carry))
         );
         if (!got)
-            return {};
+            return std::nullopt;
         const bool eof = (*got == 0);
         std::size_t filled = carry + *got;
         off += *got;
         if (filled == 0)
-            return {};
+            return std::nullopt;
 
         if (skipping) {
             std::size_t i = 0;
@@ -67,7 +61,7 @@ n64::DbTags N64DbReader::scan_file_(std::string_view name, n64::DbKey kind, std:
             if (i == filled) {
                 carry = 0;
                 if (eof)
-                    return {};
+                    return std::nullopt;
                 continue;
             }
             skipping = false;
@@ -93,11 +87,10 @@ n64::DbTags N64DbReader::scan_file_(std::string_view name, n64::DbKey kind, std:
             }
         }
 
-        const n64::DbTags t = n64::lookup(std::string_view(buf_, cut), kind, key);
-        if (t.found)
-            return t;
+        if (auto match = n64::lookup(std::string_view(buf_, cut), key))
+            return match;
         if (eof)
-            return {};
+            return std::nullopt;
         carry = filled - cut;
         std::memmove(buf_, buf_ + cut, carry);
     }

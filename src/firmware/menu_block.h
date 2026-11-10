@@ -12,6 +12,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "launcher_block.h"
+#include "menu_info_sink.h"
 #include "session_mode.h"
 #include "stores_block.h"
 #include "svc/config_snapshot.h"
@@ -62,6 +63,8 @@ private:
 
     ui::MenuModel ui_model_;
     ui::PageContext ui_context_;
+
+    MenuInfoSink info_sink_{ui_model_, ui_context_};
     HostFacts host_facts_;
     UiSink ui_sink_;
 

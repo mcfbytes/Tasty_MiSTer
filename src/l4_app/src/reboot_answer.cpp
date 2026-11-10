@@ -12,10 +12,7 @@ RebootAnswer::After RebootAnswer::on_reboot_now(const proto::LinkOp::RebootNow& 
     TASTY_SEAT_BODY(RebootAnswer);
     if (a.quiesce) {
 
-        rebooting_ = true;
-        reboot_answered_ = false;
-        reset_held_ = false;
-        reboot_seq_ = a.seq;
+        quiesce_ = RebootState{RebootPhase::Quiescing, a.seq};
         hold_reset_once_saved_();
 
         return After::EndStartAndFail;
@@ -25,31 +22,31 @@ RebootAnswer::After RebootAnswer::on_reboot_now(const proto::LinkOp::RebootNow& 
 
 void RebootAnswer::answer_reboot(Host& host) noexcept {
     TASTY_SEAT_BODY(RebootAnswer);
-    if (!rebooting_ || reboot_answered_)
+    if (quiesce_.phase == RebootPhase::Idle || quiesce_.phase == RebootPhase::Answered)
         return;
     hold_reset_once_saved_();
-    if (!reset_held_ || !io_settled_())
+    if (quiesce_.phase != RebootPhase::ResetHeld || !io_settled_())
         return;
 
-    reboot_answered_ = host.reboot_push_quiesced(reboot_seq_);
+    if (host.reboot_push_quiesced(quiesce_.seq))
+        quiesce_.phase = RebootPhase::Answered;
 }
 
 void RebootAnswer::hold_reset_once_saved_() {
-    if (reset_held_ || !nvram_.saves_drained())
+    if (quiesce_.phase != RebootPhase::Quiescing || !nvram_.saves_drained())
         return;
     signals_.set_core_reset(true);
-    reset_held_ = true;
+    quiesce_.phase = RebootPhase::ResetHeld;
 }
 
 bool RebootAnswer::io_settled_() const noexcept {
     return (!storage_life_ || storage_life_->quiesced())
-        && nvram_.writes_settled()
         && nvram_.saves_drained()
         && (!window_jobs_ || !window_jobs_->busy());
 }
 
 RebootAnswer::After RebootAnswer::perform_reboot_() const noexcept {
-    if (!rebooting_) {
+    if (quiesce_.phase == RebootPhase::Idle) {
         return After::CountStale;
     }
 

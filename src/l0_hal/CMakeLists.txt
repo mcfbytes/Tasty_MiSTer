@@ -47,6 +47,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/phys_region.h
   hal/pin_levels.h
   hal/program_geometry.h
+  hal/reboot_flag.h
   hal/reg.h
   hal/reg_block.h
   hal/reg_field.h
@@ -55,6 +56,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/scaler_buffers.h
   hal/scaler_header.h
   hal/scaler_probe.h
+  hal/sdram_cfg.h
   hal/selected.h
   hal/spi_bus.h
   hal/spi_output_observer.h
@@ -65,6 +67,7 @@ tasty_add_header_checks(tasty_hal_header_checks LIB mister_hal HEADERS
   hal/osd_block.h
   hal/sys_block.h
   hal/sys_directory.h
+  hal/taken_window.h
   hal/thread_map.h
   hal/types.h
   hal/unmeasured.h

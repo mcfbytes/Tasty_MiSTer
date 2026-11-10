@@ -5,15 +5,15 @@
 
 namespace mister::reactor {
 
-void RoundRecorder::record(MonoInstant finish, RoundTiming::Cause cause) noexcept {
-    if (cause.lifecycle != 0)
-        push_<RoundTrace::SlowLifecycle>(finish, cause);
+void RoundRecorder::record(MonoInstant finish, RoundTiming::Blame blame) noexcept {
+    if (!blame.lifecycle_marks.empty())
+        push_<RoundTrace::SlowLifecycle>(finish, blame);
     else
-        push_<RoundTrace::SlowSteady>(finish, cause);
+        push_<RoundTrace::SlowSteady>(finish, blame);
 }
 
 template <class A>
-void RoundRecorder::push_(MonoInstant finish, RoundTiming::Cause cause) noexcept {
+void RoundRecorder::push_(MonoInstant finish, RoundTiming::Blame blame) noexcept {
     if (!tx_.admit<A>())
         return;
     A a{.round = {
@@ -21,7 +21,7 @@ void RoundRecorder::push_(MonoInstant finish, RoundTiming::Cause cause) noexcept
             .end = finish,
             .seq = seq_,
             .wake = wake_,
-            .cause = cause,
+            .blame = blame,
             .marks_lost = marks_lost_
         }};
     for (RoundTrace::Mark& m : a.round.marks) {

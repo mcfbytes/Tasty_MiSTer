@@ -21,7 +21,7 @@ class SpiImageSink final : public IImageSink {
 
 public:
     explicit SpiImageSink(hal::ISpiTransport& link, infra::OptRef<SpiFioQueue> queue = {}) noexcept
-        : link_(&link),
+        : link_(link),
           queue_(queue) {}
 
     [[nodiscard]] Ex<void> begin(WideIoIndex index, const SessionParams& params) override;
@@ -32,7 +32,7 @@ public:
     [[nodiscard]] bool active() const noexcept { return ds_.has_value() && ds_->active(); }
 
 private:
-    hal::ISpiTransport* link_;
+    hal::ISpiTransport& link_;
     infra::OptRef<SpiFioQueue> queue_;
     std::optional<DownloadSession> ds_;
 };

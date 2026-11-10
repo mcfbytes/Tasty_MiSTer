@@ -4,13 +4,11 @@
 #include <cstdint>
 
 #include "cores/stream_load_end.h"
+#include "cores/types.h"
 #include "infra/error.h"
 #include "proto/session_params.h"
-#include "proto/types.h"
 
 namespace mister::cores {
-
-using proto::IoIndex;
 
 enum class StreamLoadKind : std::uint8_t { Stream, Window };
 

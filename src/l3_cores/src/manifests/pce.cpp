@@ -18,8 +18,8 @@ static_assert(
     "pcecdd.cpp:15: PCECD_SUBCODE_IO_INDEX == 4 (MegaCD uses 3)"
 );
 static_assert(
-    kPceCdIoIndices.info == IoIndex{},
-    "pcecd publishes no disc descriptor: the info slot stays default"
+    !kPceCdIoIndices.info.has_value(),
+    "pcecd publishes no disc descriptor: the info slot stays absent"
 );
 static_assert(
     kPceCdIoIndices.cdda == kMegaCdIoIndices.subcode
@@ -29,7 +29,7 @@ static_assert(
 static_assert(kPceCdIoIndices.data == kMegaCdIoIndices.data, "req: the data index is the shared 2");
 
 static_assert(
-    kPceCdProfile.dialect == CdDialect::PceScsi,
+    std::holds_alternative<CdProfile::PceScsiFacts>(kPceCdProfile.row),
     "req: PCE-CD speaks SCSI sub-opcodes over UIO_CD_GET"
 );
 
@@ -70,13 +70,10 @@ static_assert(
     "user-visible on-disk contract MegaCD disagrees with"
 );
 static_assert(kPceCdCuePolicy.wav_header_skip, "pcecdd.cpp:129: the .wav sniff sets hdr = 44");
-static_assert(
-    !kPceCdProfile.sniff_sega_disc_system && !kPceCdCuePolicy.sniff_sega_disc_system,
-    "req is MegaCD-only; PCE-CD never sniffs"
-);
+static_assert(!kPceCdCuePolicy.sniff_sega_disc_system, "req is MegaCD-only; PCE-CD never sniffs");
 
 static_assert(
-    kPceCdProfile.seek_fast_paths.size() == 2,
+    std::get<CdProfile::PceScsiFacts>(kPceCdProfile.row).seek_fast_paths.size() == 2,
     "req: exactly the two per-title fast paths"
 );
 static_assert(

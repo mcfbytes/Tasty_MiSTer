@@ -4,22 +4,6 @@
 namespace mister::app {
 namespace {
 
-[[nodiscard]] bool empty(HdRect r) noexcept {
-    return r.w <= 0 || r.h <= 0;
-}
-
-[[nodiscard]] HdRect unite(HdRect a, HdRect b) noexcept {
-    if (empty(a))
-        return b;
-    if (empty(b))
-        return a;
-    const std::int32_t x0 = a.x < b.x ? a.x : b.x;
-    const std::int32_t y0 = a.y < b.y ? a.y : b.y;
-    const std::int32_t x1 = (a.x + a.w) > (b.x + b.w) ? (a.x + a.w) : (b.x + b.w);
-    const std::int32_t y1 = (a.y + a.h) > (b.y + b.h) ? (a.y + a.h) : (b.y + b.h);
-    return HdRect{x0, y0, x1 - x0, y1 - y0};
-}
-
 std::size_t region_index(HdDirtyLedger::Region region) noexcept {
     return static_cast<std::size_t>(region);
 }
@@ -34,16 +18,12 @@ void HdDirtyLedger::reset(HdRect panel, HdRect band, HdRect game) noexcept {
     }
 }
 
-void HdDirtyLedger::invalidate(HdRect panel, HdRect band, HdRect game) noexcept {
-    reset(panel, band, game);
-}
-
 void HdDirtyLedger::mark(Region region, HdRect dirty) noexcept {
-    if (empty(dirty))
+    if (dirty.is_empty())
         return;
     const std::size_t r = region_index(region);
     for (const FlipBuffer b : kFlipBuffers)
-        stale_[b][r] = unite(stale_[b][r], dirty);
+        stale_[b][r] = stale_[b][r].union_with(dirty);
 }
 
 HdRect HdDirtyLedger::peek(FlipBuffer buffer, Region region) const noexcept {

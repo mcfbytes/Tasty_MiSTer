@@ -3,6 +3,8 @@
 
 #include <chrono>
 
+#include "os/raw_monotonic_clock.h"
+
 namespace mister::os {
 
 class IDelay {
@@ -11,7 +13,7 @@ public:
 
     virtual void sleep_for(std::chrono::microseconds d) = 0;
 
-    virtual void sleep_until(std::chrono::nanoseconds at) = 0;
+    virtual void sleep_until(RawMonotonicClock::time_point at) = 0;
 
 protected:
     IDelay() = default;

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "hal/phys_region.h"
 #include "hal/types.h"
 #include "os/types.h"
 
@@ -19,11 +20,9 @@ struct DoorbellPolicy {
     }
 
     [[nodiscard]] constexpr bool cause_in_aperture(LwOffset off, std::size_t len) const noexcept {
-        if (cause_span == 0 || len == 0 || len > cause_span)
+        if (cause_span == 0 || len == 0 || off < cause_base)
             return false;
-        if (off < cause_base)
-            return false;
-        return off.distance_to(cause_base) <= cause_span - len;
+        return span_fits<std::size_t>(off.distance_to(cause_base), len, cause_span);
     }
 };
 

@@ -8,7 +8,7 @@
 #include <limits>
 
 #include "app/input_wire.h"
-#include "proto/joystick.h"
+#include "proto/joystick_port.h"
 
 namespace mister::app {
 

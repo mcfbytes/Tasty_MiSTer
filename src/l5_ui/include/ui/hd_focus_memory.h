@@ -41,8 +41,8 @@ private:
         [[nodiscard]] bool matches(FocusKey other) const noexcept { return key == other; }
     };
 
-    [[nodiscard]] static constexpr std::size_t next_slot(std::size_t slot) noexcept {
-        return (slot + 1u) % kEntries;
+    [[nodiscard]] static constexpr std::size_t next_entry(std::size_t entry) noexcept {
+        return (entry + 1u) % kEntries;
     }
 
     std::array<Entry, kEntries> entries_{};

@@ -94,6 +94,7 @@ constexpr void to_json(infra::JsonOut& o, const BayView& v) noexcept {
     o.field("mcnew", v.cd.card_creates);
     o.field("mcdisc", v.cd.card_discards);
     o.field("mcfail", v.cd.card_fails);
+    o.field("mcmiss", v.cd.card_misses);
     o.field("mclat", v.cd.card_lat_max_us);
     o.field("lwbref", v.bridge_refusals);
     o.field("sysok", v.sys_grants);

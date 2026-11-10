@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
+
 #include "app/board_ops.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -15,7 +17,9 @@ class BoardReset final : public app::IBoardReset {
     TASTY_SEAT_RESIDENT(Main);
 
 public:
-    static constexpr unsigned kResetSettleMs = 5000;
+    static constexpr std::chrono::milliseconds kResetSettle{5000};
+
+    static constexpr std::chrono::milliseconds kPollSlice{100};
 
     explicit BoardReset(
         hal::IBridgeSequencer& bridges,

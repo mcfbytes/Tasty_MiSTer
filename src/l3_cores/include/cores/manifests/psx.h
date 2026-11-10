@@ -4,6 +4,7 @@
 #include "cores/core_grant.h"
 #include "cores/boot_ladder.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -12,48 +13,72 @@
 #include "cores/cd_census_rows.h"
 #include "cores/cd_core.h"
 #include "cores/core_profile.h"
+#include "cores/psx_disc_identity.h"
 #include "cores/psx_sector_program.h"
-#include "svc/disc_engine.h"
+#include "svc/cue_policy.h"
+#include "svc/track.h"
 
 namespace mister::cores::manifests {
 
 extern const CoreProfile kPsx;
 
-consteval std::array<std::byte, 8192> psx_mcd_header_image() {
-    std::array<std::byte, 8192> img{};
-    constexpr std::size_t kFrame = 128;
-    auto at = [&img](std::size_t frame, std::size_t off) -> std::byte& {
-        return img[frame * kFrame + off];
-    };
+inline constexpr std::size_t kMcdFrameBytes = 128;
+inline constexpr std::size_t kMcdFrames = 64;
 
-    for (std::size_t f : {std::size_t{0}, std::size_t{63}}) {
-        at(f, 0) = std::byte{'M'};
-        at(f, 1) = std::byte{'C'};
-    }
+inline constexpr std::size_t kMcdImageBytes = kMcdFrameBytes * kMcdFrames;
 
-    for (std::size_t f = 1; f <= 15; ++f) {
-        at(f, 0) = std::byte{0xA0};
-        at(f, 8) = std::byte{0xFF};
-        at(f, 9) = std::byte{0xFF};
-    }
+inline constexpr std::size_t kMcdMagicFrame = 0;
+inline constexpr std::size_t kMcdTestWriteFrame = 63;
+inline constexpr std::size_t kMcdFirstFreeFrame = 1;
+inline constexpr std::size_t kMcdLastFreeFrame = 15;
+inline constexpr std::size_t kMcdFirstBrokenFrame = 16;
+inline constexpr std::size_t kMcdLastBrokenFrame = 35;
 
-    for (std::size_t f = 16; f <= 35; ++f) {
-        for (std::size_t i = 0; i < 4; ++i)
-            at(f, i) = std::byte{0xFF};
-        at(f, 8) = std::byte{0xFF};
-        at(f, 9) = std::byte{0xFF};
-    }
+inline constexpr std::size_t kMcdBlockPtrOffset = 8;
+inline constexpr std::size_t kMcdBrokenListBytes = 4;
 
-    for (std::size_t f = 0; f < 64; ++f) {
+struct McdFrame {
+    std::array<std::byte, kMcdFrameBytes> bytes{};
+
+    constexpr void seal() noexcept {
         std::byte x{};
-        for (std::size_t i = 0; i < kFrame - 1; ++i)
-            x ^= at(f, i);
-        at(f, kFrame - 1) = x;
+        for (std::size_t i = 0; i < kMcdFrameBytes - 1; ++i)
+            x ^= bytes[i];
+        bytes[kMcdFrameBytes - 1] = x;
     }
+};
+
+consteval std::array<std::byte, kMcdImageBytes> psx_mcd_header_image() {
+    std::array<McdFrame, kMcdFrames> frames{};
+
+    for (std::size_t f : {kMcdMagicFrame, kMcdTestWriteFrame}) {
+        frames[f].bytes[0] = std::byte{'M'};
+        frames[f].bytes[1] = std::byte{'C'};
+    }
+
+    for (std::size_t f = kMcdFirstFreeFrame; f <= kMcdLastFreeFrame; ++f) {
+        frames[f].bytes[0] = std::byte{0xA0};
+        frames[f].bytes[kMcdBlockPtrOffset] = std::byte{0xFF};
+        frames[f].bytes[kMcdBlockPtrOffset + 1] = std::byte{0xFF};
+    }
+
+    for (std::size_t f = kMcdFirstBrokenFrame; f <= kMcdLastBrokenFrame; ++f) {
+        for (std::size_t i = 0; i < kMcdBrokenListBytes; ++i)
+            frames[f].bytes[i] = std::byte{0xFF};
+        frames[f].bytes[kMcdBlockPtrOffset] = std::byte{0xFF};
+        frames[f].bytes[kMcdBlockPtrOffset + 1] = std::byte{0xFF};
+    }
+    for (McdFrame& frame : frames)
+        frame.seal();
+
+    std::array<std::byte, kMcdImageBytes> img{};
+    auto out = img.begin();
+    for (const McdFrame& frame : frames)
+        out = std::ranges::copy(frame.bytes, out).out;
     return img;
 }
 
-inline constexpr std::array<std::byte, 8192> kPsxMcdHeader = psx_mcd_header_image();
+inline constexpr std::array<std::byte, kMcdImageBytes> kPsxMcdHeader = psx_mcd_header_image();
 
 inline constexpr BlankSaveSpec kPsxBlankSave{
     .fill = std::byte{0x00},
@@ -64,9 +89,7 @@ inline constexpr BlankSaveSpec kPsxBlankSave{
 
 inline constexpr svc::CuePolicy kPsxCuePolicy{
     .sub_naming = svc::CuePolicy::SubNaming::None,
-    .track_close = svc::CuePolicy::TrackClose::ProvisionalInclusive,
-    .pregap_model = svc::CuePolicy::PregapModel::IndexTriple,
-    .post_load_shift = svc::CuePolicy::PostLoadTocShift::FakeLeadInPregap150,
+    .program = svc::CuePolicy::Program::IndexTriple,
 };
 
 inline constexpr auto kPsxStartAssets = stock_start_chain("PSX");
@@ -113,9 +136,11 @@ inline constexpr StagingPolicy kPsxStaging{
     .order = StageOrder::Psx,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kPsxSlots),
-    .save_slot = IoIndex{2},
-    .save_dest = WideIoIndex{},
-    .save_pre_bytes = proto::FileSize{128 * 1024},
+    .save = SaveMountPolicy{
+        .slot = IoIndex{2},
+        .pre_bytes = proto::FileSize{128 * 1024},
+
+    },
 };
 
 inline constexpr auto kPsxServices = std::to_array<LinkDecoderDecl>({
@@ -144,12 +169,13 @@ inline constexpr CoreProfile kPsx{
     .tasty_playable = true,
 
     .block_drain_budget = 1,
-    .block_sector_floor = {.bytes = static_cast<std::uint32_t>(svc::kCdDataSize)},
+    .block_sector_floor = proto::SectorFloor::at(proto::BlockSize{svc::kRawFrameBytes}),
     .image_rows_no_zip = true,
 
     .cheats = {.reset_on_remount = true},
     .file_tx_whole = true,
     .sector_program = infra::OptRef<const svc::ISectorProgram>{kPsxSectorProgram},
+    .disc_identity = infra::OptRef<const svc::IDiscIdentity>{kPsxDiscIdentity},
 };
 
 std::unique_ptr<Core> make_psx(const CoreProfile& p, const CoreGrant& g);

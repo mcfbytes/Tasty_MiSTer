@@ -13,7 +13,6 @@
 #include "infra/seat.h"
 #include "app/doorbell_cell.h"
 #include "app/doorbell_lines.h"
-#include "app/link_rows.h"
 #include "app/progress_image_sink.h"
 #include "infra/log_lane.h"
 #include "reactor/core_notifiers.h"

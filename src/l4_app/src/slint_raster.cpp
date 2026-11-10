@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/slint_raster.h"
 
+#include "infra/decimal_text.h"
+#include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/persist.h"
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
 #include <memory>
 #include <optional>
 #include <span>
-#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "app/hd_badge_view.h"
+#include "app/hd_captions.h"
 #include "app/hd_crumb.h"
 #include "app/hd_help.h"
 #include "app/hd_metrics.h"
@@ -104,6 +105,26 @@ Plat*& shared_platform() {
     return slint::SharedString{s};
 }
 
+[[nodiscard]] HdCaption cue_text(RowCount at, RowCount total) {
+    const infra::DecimalText at_text{at.size()};
+    const infra::DecimalText total_text{total.size()};
+    HdCaption out{};
+    (void)out.assign(at_text.view());
+    (void)out.append(" / ");
+    (void)out.append(total_text.view());
+    return out;
+}
+
+[[nodiscard]] constexpr std::string_view status_text(HdStatusSlots slots) noexcept {
+    if (slots.bluetooth && slots.rt)
+        return "BT  RT";
+    if (slots.bluetooth)
+        return "BT";
+    if (slots.rt)
+        return "RT";
+    return {};
+}
+
 [[nodiscard]] MenuRow hub_row(const PageDescription::Hub& hub, std::size_t i) {
     const PageDescription::Hub::Item& item = hub.items[i];
     MenuRow out;
@@ -132,27 +153,24 @@ Plat*& shared_platform() {
 ) {
     constexpr std::size_t kPass = 3;
     static_assert(2 * kPass <= HdDirty::kMaxRects);
+    const HdRect panel{0, 0, panel_w, panel_h};
     const std::size_t end = std::min<std::size_t>(out.count + kPass, HdDirty::kMaxRects);
     for (auto piece : region.rectangles()) {
-        const auto pw = static_cast<std::int32_t>(piece.size.width);
-        const auto ph = static_cast<std::int32_t>(piece.size.height);
-        const std::int32_t x0 = std::max(0, static_cast<std::int32_t>(piece.origin.x));
-        const std::int32_t y0 = std::max(0, static_cast<std::int32_t>(piece.origin.y));
-        const std::int32_t x1 = std::min(panel_w, piece.origin.x + pw);
-        const std::int32_t y1 = std::min(panel_h, piece.origin.y + ph);
-        if (pw <= 0 || ph <= 0 || x1 <= x0 || y1 <= y0)
+        const HdRect box =
+            HdRect{
+                static_cast<std::int32_t>(piece.origin.x),
+                static_cast<std::int32_t>(piece.origin.y),
+                static_cast<std::int32_t>(piece.size.width),
+                static_cast<std::int32_t>(piece.size.height)
+            }
+                .intersect(panel);
+        if (box.is_empty())
             continue;
         if (out.count < end) {
-            out.rects[out.count++] = HdRect{x0, y0, x1 - x0, y1 - y0};
+            out.rects[out.count++] = box;
             continue;
         }
-        HdRect& last = out.rects[end - 1];
-        const std::int32_t lx1 = std::max(last.x + last.w, x1);
-        const std::int32_t ly1 = std::max(last.y + last.h, y1);
-        last.x = std::min(last.x, x0);
-        last.y = std::min(last.y, y0);
-        last.w = lx1 - last.x;
-        last.h = ly1 - last.y;
+        out.rects[end - 1] = out.rects[end - 1].union_with(box);
     }
     return out;
 }
@@ -168,7 +186,7 @@ struct Scene {
     std::shared_ptr<slint::VectorModel<MenuRow>> hub{};
     std::shared_ptr<slint::VectorModel<HelpItem>> help{};
     std::optional<HdOsdStatus::Badge> badge{};
-    std::string status_text;
+    HdStatusSlots status_slots{};
     bool drawn = false;
 };
 
@@ -265,7 +283,7 @@ struct SlintRasterOf<C>::Impl {
 
     void apply_size() {
         const HdRect box = hd_menu_box(layout);
-        if (!scene || !scene->ui || box.w <= 0 || box.h <= 0)
+        if (!scene || !scene->ui || box.is_empty())
             return;
         const auto pw = static_cast<std::uint32_t>(box.w);
         const auto ph = static_cast<std::uint32_t>(box.h);
@@ -282,9 +300,12 @@ struct SlintRasterOf<C>::Impl {
 
     void adopt_layout(const HdLayout& next) {
         layout = next;
-        const auto w = static_cast<std::uint32_t>(std::max(0, next.surface.w));
-        const auto h = static_cast<std::uint32_t>(std::max(0, hd_menu_box(next).h));
-        card_metrics = hd_snap_type(hd_metrics(w, h), traits.pixel_em);
+        const HdRect card = hd_menu_box(next);
+        const auto size = OutputSize{
+            OutputPixels::of(std::max(0, next.surface.w)),
+            OutputPixels::of(std::max(0, card.h))
+        };
+        card_metrics = hd_snap_type(hd_metrics(size), traits.pixel_em);
         metrics = hd_under_band(card_metrics, next.band.h);
     }
 
@@ -302,7 +323,7 @@ struct SlintRasterOf<C>::Impl {
 
     [[nodiscard]] bool ensure() {
         const HdRect box = hd_menu_box(layout);
-        if (!have_theme || box.w <= 0 || box.h <= 0)
+        if (!have_theme || box.is_empty())
             return have_theme;
         if (shared_platform() == nullptr) {
             auto made = std::make_unique<Plat>();
@@ -414,23 +435,17 @@ struct SlintRasterOf<C>::Impl {
         set_if(ui->get_cue_shown(), plan.cue, [&](bool v) { ui->set_cue_shown(v); });
         set_if(ui->get_cue_up(), plan.cue_up, [&](bool v) { ui->set_cue_up(v); });
         set_if(ui->get_cue_down(), plan.cue_down, [&](bool v) { ui->set_cue_down(v); });
-        char cue[24];
-        std::snprintf(cue, sizeof(cue), "%u / %u", plan.cue_at.v, plan.cue_total.v);
-        set_if(ui->get_cue_text(), slint::SharedString{cue}, [&](const slint::SharedString& v) {
-            ui->set_cue_text(v);
-        });
+        set_if(
+            ui->get_cue_text(),
+            shared(cue_text(plan.cue_at, plan.cue_total).view()),
+            [&](const slint::SharedString& v) { ui->set_cue_text(v); }
+        );
         set_if(
             ui->get_caption_text(),
             shared(hd_now_playing(hd_crumb_core(page.crumb.view())).view()),
             [&](const slint::SharedString& v) { ui->set_caption_text(v); }
         );
-        const HdScrollCounts counts = hd_scroll_counts(
-            page.first.v,
-            static_cast<std::uint32_t>(
-                std::min<std::size_t>(page.row_count.size(), PageDescription::kMaxRows)
-            ),
-            plan.cue_total.v
-        );
+        const HdScrollCounts counts = hd_scroll_counts(page.first, page.listed(), plan.cue_total);
         set_if(
             ui->get_above_text(),
             shared(counts.above.view()),
@@ -451,7 +466,7 @@ struct SlintRasterOf<C>::Impl {
             shared(counts.below_n.view()),
             [&](const slint::SharedString& v) { ui->set_below_count(v); }
         );
-        const auto rows = std::span{page.rows}.first(page.row_count.size());
+        const auto rows = std::span{page.rows}.first(page.listed().size());
         const bool shelf = std::ranges::any_of(rows, [](const PageDescription::Row& r) {
             return r.tier == RowTier::Shelf;
         });
@@ -469,17 +484,19 @@ struct SlintRasterOf<C>::Impl {
         std::vector<MenuRow> main;
         std::vector<MenuRow> pinned;
         std::vector<MenuRow> choices;
-        for (std::uint32_t i = 0; i < plan.main_count.v; ++i)
-            main.push_back(menu_row(page.rows[i], theme));
-        for (std::uint32_t i = 0; i < plan.pinned_count.v; ++i)
-            pinned.push_back(menu_row(page.rows[plan.pinned_first.v + i], theme));
-        for (std::uint32_t i = 0; i < plan.choice_count.v; ++i)
-            choices.push_back(menu_row(page.rows[plan.choice_first.v + i], theme));
+        for (RowIndex i{}; i < RowIndex{} + plan.main_count; i += kOneRow)
+            main.push_back(menu_row(page.row(i), theme));
+        for (RowIndex i = plan.pinned_first; i < plan.pinned_first + plan.pinned_count;
+             i += kOneRow)
+            pinned.push_back(menu_row(page.row(i), theme));
+        for (RowIndex i = plan.choice_first; i < plan.choice_first + plan.choice_count;
+             i += kOneRow)
+            choices.push_back(menu_row(page.row(i), theme));
         put<MenuRow>(scene->rows, std::move(main), [&](auto m) { ui->set_entries(m); });
         put<MenuRow>(scene->pinned, std::move(pinned), [&](auto m) { ui->set_pinned_entries(m); });
         put<MenuRow>(scene->choices, std::move(choices), [&](auto m) { ui->set_choices(m); });
 
-        const bool walks = layout.band.h > 0 && page.hub.depth == 0;
+        const bool walks = !layout.band.is_empty() && page.hub.depth == 0;
         const HdHelp help = hd_help(
             page.footer.view(),
             plan.steps  ? HdHelp::Lr::Change
@@ -518,14 +535,9 @@ struct SlintRasterOf<C>::Impl {
             (*scene->ui)->set_badge_state(static_cast<int>(badge.badge));
             scene->badge = badge.badge;
         }
-        std::string text;
-        if (badge.slots.bluetooth)
-            text = "BT";
-        if (badge.slots.rt)
-            text += text.empty() ? "RT" : "  RT";
-        if (scene->status_text != text) {
-            (*scene->ui)->set_status_text(shared(text));
-            scene->status_text = std::move(text);
+        if (scene->status_slots != badge.slots) {
+            (*scene->ui)->set_status_text(shared(status_text(badge.slots)));
+            scene->status_slots = badge.slots;
         }
     }
 };
@@ -538,9 +550,12 @@ template <class C>
 SlintRasterOf<C>::~SlintRasterOf() {
     if (!impl_ || !impl_->scene)
         return;
+
     if (current_seat() != SeatTag::HdOsd) {
-        (void)impl_->scene.release();
-        return;
+        fatal(
+            Error{Errc::negotiation, ERR_SITE(), 0},
+            "SlintRasterOf: a Slint scene outlived the panel seat"
+        );
     }
     impl_->drop_scene();
 }
@@ -558,29 +573,27 @@ template <class C>
 HdDirty SlintRasterOf<C>::render_(
     const PageDescription& page,
     const HdBadgeView& badge,
-    std::span<std::uint16_t> panel,
-    std::uint32_t stride_px
+    PxPlane panel
 ) {
     if (!impl_->ensure())
         return {};
     const HdRect box = hd_menu_box(impl_->layout);
     const auto ph = box.h;
     const auto pw = box.w;
-    const auto need = static_cast<std::size_t>(stride_px) * static_cast<std::size_t>(ph);
-    if (pw <= 0 || ph <= 0 || stride_px == 0 || panel.size() < need)
+    if (box.is_empty() || !panel.bounds().contains(HdRect{0, 0, pw, ph}))
         return {};
-    auto* pixels = reinterpret_cast<slint_plat::Rgb565Pixel*>(panel.data());
+    auto* pixels = reinterpret_cast<slint_plat::Rgb565Pixel*>(panel.pixels.data());
     const auto draw = [&](HdDirty so_far) {
         slint_plat::update_timers_and_animations();
         const auto region = impl_->plat->adapter->renderer_.render(
-            std::span<slint_plat::Rgb565Pixel>{pixels, panel.size()},
-            stride_px
+            std::span<slint_plat::Rgb565Pixel>{pixels, panel.pixels.size()},
+            panel.row_px
         );
         return dirty_rects(region, pw, ph, so_far);
     };
 
     impl_->sync_band(page);
-    const bool band_pass = impl_->layout.band.h > 0 && impl_->scene->drawn;
+    const bool band_pass = !impl_->layout.band.is_empty() && impl_->scene->drawn;
     HdDirty out = band_pass ? draw({}) : HdDirty{};
     impl_->sync(page);
     impl_->sync_badge(badge);

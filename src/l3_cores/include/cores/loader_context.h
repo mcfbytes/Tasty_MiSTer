@@ -6,6 +6,7 @@
 #include "hal/phys_region.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/status_cell.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
@@ -22,6 +23,8 @@ struct LoaderContext {
     LoaderMemo& memo;
 
     hal::PhysRegion aperture{os::PhysAddr{0}, 0, nullptr};
+
+    infra::OptRef<const proto::StatusCell> status_cell{};
 };
 
 using MakeLoader = std::unique_ptr<ILoader> (*)(const LoaderContext&);

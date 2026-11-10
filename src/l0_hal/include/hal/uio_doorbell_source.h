@@ -11,6 +11,7 @@
 #include "hal/types.h"
 #include "os/types.h"
 #include "os/uio_handle.h"
+#include "os/uio_line_space.h"
 
 namespace mister::hal {
 

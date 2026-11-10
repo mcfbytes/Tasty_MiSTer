@@ -104,7 +104,7 @@ struct RxOrder {
         return err(r.error().code, ERR_SITE(), r.error().detail);
     }
     if (io.delay) {
-        io.delay->sleep_for(std::chrono::microseconds{CecStateMachine::kReleasePulseUs});
+        io.delay->sleep_for(CecStateMachine::kReleasePulse);
     }
     if (auto r = io.cec->write(kCecRegRxBuffers, kRxReleaseBracket); !r) {
         return err(r.error().code, ERR_SITE(), r.error().detail);
@@ -114,22 +114,26 @@ struct RxOrder {
 
 }
 
-Ex<CecMessage> CecStateMachine::decode_rx(os::I2cReg hdr_reg, CecLength length) {
+Ex<CecMessage> CecStateMachine::decode_rx(
+    const adv7513::Io& io,
+    os::I2cReg hdr_reg,
+    CecLength length
+) {
     CecMessage msg{};
     msg.length = length;
-    auto h = io_.cec->read(hdr_reg);
+    auto h = io.cec->read(hdr_reg);
     if (!h)
         return err(h.error().code, ERR_SITE(), h.error().detail);
     msg.header = *h;
-    if (length.v > 1) {
-        auto op = io_.cec->read(hdr_reg.plus(1));
+    if (length.has_opcode()) {
+        auto op = io.cec->read(hdr_reg.plus(1));
         if (!op)
             return err(op.error().code, ERR_SITE(), op.error().detail);
         msg.opcode = *op;
     }
     const std::span<std::uint8_t> payload = length.payload_of(msg.data);
     for (std::size_t i = 0; i < payload.size(); ++i) {
-        auto d = io_.cec->read(hdr_reg.plus(CecLength::kHeaderBytes + i));
+        auto d = io.cec->read(hdr_reg.plus(CecLength::kHeaderBytes + i));
         if (!d)
             return err(d.error().code, ERR_SITE(), d.error().detail);
         payload[i] = *d;
@@ -137,29 +141,29 @@ Ex<CecMessage> CecStateMachine::decode_rx(os::I2cReg hdr_reg, CecLength length) 
     return msg;
 }
 
-Ex<void> CecStateMachine::poll_deadline() {
+Ex<void> CecStateMachine::poll_deadline(const adv7513::Io& io) {
     last_.reset();
 
     if (state_ == CecState::Disabled || state_ == CecState::AwaitingInit) {
         return {};
     }
-    if (!io_.cec || !io_.main || !io_.hdmi) {
+    if (!io.cec || !io.main || !io.hdmi) {
         return err(Errc::negotiation, ERR_SITE());
     }
 
     if (state_ != CecState::Idle)
         return {};
 
-    if (!io_.hdmi->hdmi_int_asserted())
+    if (!io.hdmi->hdmi_int_asserted())
         return {};
 
-    auto ready_reg = io_.cec->read(kCecRegRxReady);
+    auto ready_reg = io.cec->read(kCecRegRxReady);
     if (!ready_reg)
         return err(ready_reg.error().code, ERR_SITE(), ready_reg.error().detail);
     const RxReady ready = RxReady::of(*ready_reg);
     if (ready.empty()) {
 
-        if (auto r = io_.main->write(kMainRegInt1Status, kCecIntRxRdyMask); !r) {
+        if (auto r = io.main->write(kMainRegInt1Status, kCecIntRxRdyMask); !r) {
             return err(r.error().code, ERR_SITE(), r.error().detail);
         }
         return {};
@@ -169,7 +173,7 @@ Ex<void> CecStateMachine::poll_deadline() {
     if (depth > max_rx_depth_)
         max_rx_depth_ = depth;
 
-    auto order = io_.cec->read(kCecRegRxStatus);
+    auto order = io.cec->read(kCecRegRxStatus);
     if (!order)
         return err(order.error().code, ERR_SITE(), order.error().detail);
 
@@ -178,11 +182,11 @@ Ex<void> CecStateMachine::poll_deadline() {
         return {};
     const RxSlot slot = *selected;
 
-    auto len_raw = io_.cec->read(slot.regs().length);
+    auto len_raw = io.cec->read(slot.regs().length);
     if (!len_raw)
         return err(len_raw.error().code, ERR_SITE(), len_raw.error().detail);
     if (const auto length = CecLength::of(*len_raw)) {
-        auto msg = decode_rx(slot.regs().header, *length);
+        auto msg = decode_rx(io, slot.regs().header, *length);
         if (!msg)
             return std::unexpected(msg.error());
         last_ = *msg;
@@ -190,11 +194,11 @@ Ex<void> CecStateMachine::poll_deadline() {
         ++rx_rejected_;
     }
 
-    if (auto r = release_rx(io_, slot); !r)
+    if (auto r = release_rx(io, slot); !r)
         return r;
     ++rx_released_;
 
-    if (auto r = io_.main->write(kMainRegInt1Status, slot.bit()); !r) {
+    if (auto r = io.main->write(kMainRegInt1Status, slot.bit()); !r) {
         return err(r.error().code, ERR_SITE(), r.error().detail);
     }
     return {};

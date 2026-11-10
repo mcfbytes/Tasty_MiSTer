@@ -46,14 +46,20 @@ public:
             return {Kind::Refuse, Next::Hash, PlayRefusal{why, detail}};
         }
 
+        [[nodiscard]] static Step refuse(PlayRefusal::Why why, LeadRefusal detail) noexcept {
+            return {Kind::Refuse, Next::Hash, detail.refused(why)};
+        }
+
         [[nodiscard]] static Step done() noexcept { return {Kind::Done, Next::Hash, {}}; }
     };
 
     struct Ctx {
         ReplayWiring& w;
-        ReplayPlay& play;
-
-        [[nodiscard]] std::int64_t now_ns() const noexcept { return w.clock.now().count(); }
+        const ReplayPlay::Request& request;
+        ReplayPlay::ScannedMovie& scan;
+        ReplayPlay::ArmPlan& arm;
+        ReplayPlay::Report& report;
+        ReplayPlay::Run& run;
     };
 
     virtual ~IReplayStage() = default;

@@ -17,7 +17,10 @@ public:
 
     [[nodiscard]] virtual Ex<PcmExtent> open(svc::TrackNumber track) = 0;
 
-    [[nodiscard]] virtual Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) = 0;
+    [[nodiscard]] virtual Ex<std::span<std::byte>> read_at(
+        std::uint64_t off,
+        std::span<std::byte> dst
+    ) = 0;
 
     virtual void close() noexcept = 0;
 

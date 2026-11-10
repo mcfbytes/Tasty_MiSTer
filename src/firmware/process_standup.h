@@ -35,8 +35,6 @@ class ProcessStandup {
 public:
     using Exit = std::optional<int>;
 
-    enum class IoSeat : std::uint8_t { Stopped, Running };
-
     enum class ColdRebootCause : std::uint8_t { UnconfiguredFabric, ExecFailed };
 
     class StopSignals {
@@ -65,12 +63,10 @@ public:
             SessionStage(
                 app::LinkSession& sup,
                 app::BoardReboot& reboot,
-                IoSeat io,
                 const SessionMode& mode
             ) noexcept
                 : sup_(sup),
                   reboot_(reboot),
-                  io_(io),
                   mode_(mode) {}
 
             void reboot_at_exit(ColdRebootCause why) const;
@@ -81,7 +77,6 @@ public:
             friend class ExitPath;
             std::reference_wrapper<app::LinkSession> sup_;
             std::reference_wrapper<app::BoardReboot> reboot_;
-            IoSeat io_;
             std::reference_wrapper<const SessionMode> mode_;
         };
 
@@ -93,11 +88,10 @@ public:
             hal::ILinkPort& link,
             app::LinkSession& sup,
             app::BoardReboot& reboot,
-            IoSeat io,
             const SessionMode& mode
         ) noexcept
             : link_(link),
-              session_(std::in_place, sup, reboot, io, mode) {}
+              session_(std::in_place, sup, reboot, mode) {}
 
         [[nodiscard]] int fail() const;
 
@@ -117,6 +111,11 @@ public:
 
     [[nodiscard]] int run();
 
+    static bool latch_stop() noexcept;
+
+    [[nodiscard]] static const std::atomic<int>& stop_latch() noexcept;
+
+private:
     [[nodiscard]] Exit prelude() noexcept;
     [[nodiscard]] Exit identify_board();
     [[nodiscard]] Exit open_platform();
@@ -128,11 +127,6 @@ public:
     [[nodiscard]] Ex<void> supervise();
     [[nodiscard]] int shut_down(const Ex<void>& ran);
 
-    static bool latch_stop() noexcept;
-
-    [[nodiscard]] static const std::atomic<int>& stop_latch() noexcept;
-
-private:
     struct MainStopSignal final : app::IStopSignal {
         bool stop_requested() const override;
     };

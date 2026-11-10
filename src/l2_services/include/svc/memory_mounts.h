@@ -37,7 +37,7 @@ private:
     struct Blob {
         std::string path;
         std::span<const std::byte> blob;
-        Crc32 crc{};
+        Crc32 crc = Crc32::kUndeclared;
         std::shared_ptr<std::atomic<std::uint32_t>> hints;
     };
 

@@ -43,7 +43,7 @@ struct ResetEdge {
     }
 
     [[nodiscard]] constexpr bool toggles_reset_bit() const noexcept {
-        return source == ResetSource::OsdToggle && bit == StatusBit{0};
+        return source == ResetSource::OsdToggle && bit == kResetBit;
     }
 
     friend constexpr bool operator==(ResetEdge, ResetEdge) = default;

@@ -50,7 +50,6 @@ public:
     MenuMask mask() const override;
     void set_selection(RowIndex i) override;
     RowIndex selection() const override;
-    RowIndex first_row() const noexcept override;
     bool empty() const override;
 
     std::uint32_t refusals() const noexcept override;

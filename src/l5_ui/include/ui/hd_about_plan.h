@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
 #include <functional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -28,13 +28,21 @@ public:
     std::string_view title() const override;
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
 
-    void refresh(const SystemFacts& facts) override;
+    void refresh(const SystemFacts& facts, const SessionFacts& session) override;
 
 private:
-    void build_();
-    [[nodiscard]] std::string_view kernel_word_() const noexcept;
+    struct AboutFacts {
+        std::string version;
+        std::string os_version;
+        std::string kernel;
+        std::string storage;
+        friend bool operator==(const AboutFacts&, const AboutFacts&) = default;
+    };
 
-    SystemFacts facts_{};
+    [[nodiscard]] static AboutFacts about_of(const SystemFacts& facts);
+    void build_();
+
+    AboutFacts shown_{};
     std::vector<HdValueRow> rows_;
     std::vector<std::reference_wrapper<IHdRow>> refs_;
 };

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "proto/types.h"
 
@@ -16,12 +17,12 @@ class ICoreOptionActs {
 public:
     virtual ~ICoreOptionActs() = default;
 
-    [[nodiscard]] virtual bool set_dip_counted(
+    [[nodiscard]] virtual Ex<void> set_dip_counted(
         infra::OptRef<cores::Core> core,
         proto::DipRowIndex row,
         proto::DipChoice choice
     ) noexcept = 0;
-    [[nodiscard]] virtual bool set_option_counted(
+    [[nodiscard]] virtual Ex<void> set_option_counted(
         infra::OptRef<cores::Core> core,
         proto::OptionRowIndex row,
         proto::FieldValue choice

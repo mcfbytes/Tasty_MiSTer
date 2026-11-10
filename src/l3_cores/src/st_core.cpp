@@ -9,13 +9,14 @@
 
 #include "cores/disk_port.h"
 #include "cores/st_media_fact.h"
-#include "cores/st_option_row_index.h"
+#include "infra/byte_view.h"
 #include "infra/indexed_array.h"
 #include "infra/indexed_span.h"
 #include "proto/link.h"
 #include "proto/spi_frame.h"
 #include "proto/download_session.h"
 #include "proto/image_bracket.h"
+#include "proto/status_word.h"
 #include "proto/uio_opcodes.h"
 
 namespace mister::cores {
@@ -39,6 +40,26 @@ constexpr auto kDiskSlots = std::array{
     return proto::DiskUnit{target.v};
 }
 
+[[nodiscard]] constexpr proto::FileSize file_size_of(std::span<const std::uint8_t> bytes) noexcept {
+    return proto::FileSize{bytes.size()};
+}
+
+[[nodiscard]] constexpr proto::FileSize file_size_of(std::span<const std::byte> bytes) noexcept {
+    return proto::FileSize{bytes.size()};
+}
+
+static_assert(
+    st_ctrl::CtrlWord::of(
+        proto::BitField{proto::StatusBit{31}, 9}
+            .write(st_ctrl::CtrlWord{}.status_word(), proto::FieldValue{0x1FF})
+    )
+    == st_ctrl::CtrlWord{0x8000'0000u}
+);
+static_assert(
+    proto::BitField{proto::StatusBit{32}, 1}.read(st_ctrl::CtrlWord{0xFFFF'FFFFu}.status_word())
+    == proto::FieldValue{}
+);
+
 }
 
 StCore::StCore(const CoreProfile& p, const HostServices& h) : Core(p, h) {}
@@ -48,8 +69,8 @@ Ex<void> StCore::push_control_() {
     if (auto r = frame.begin(proto::UioOp::SetStatus2); !r)
         return r;
     const std::uint16_t payload[4] = {
-        static_cast<std::uint16_t>(cfg_.system_ctrl),
-        static_cast<std::uint16_t>((cfg_.system_ctrl >> 16)),
+        static_cast<std::uint16_t>(cfg_.system_ctrl.v),
+        static_cast<std::uint16_t>((cfg_.system_ctrl.v >> 16)),
         static_cast<std::uint16_t>(cfg_.ext_ctrl),
         static_cast<std::uint16_t>((cfg_.ext_ctrl >> 16)),
     };
@@ -69,7 +90,7 @@ Ex<void> StCore::update_sysctrl_(st_ctrl::CtrlWord ctrl) {
 }
 
 void StCore::store_sysctrl_(st_ctrl::CtrlWord ctrl) noexcept {
-    cfg_.system_ctrl = ctrl.v;
+    cfg_.system_ctrl = ctrl;
 }
 
 Ex<void> StCore::set_system_ctrl(std::uint32_t ctrl) {
@@ -105,10 +126,7 @@ Ex<void> StCore::on_apply_load_facts(std::span<const std::uint8_t> facts) {
 
             if (host().disk)
                 host().disk->abandon_command();
-            if (auto r = update_sysctrl_(
-                    st_ctrl::CtrlWord{cfg_.system_ctrl}.with(st_ctrl::CtrlWord::kCpuReset)
-                );
-                !r) {
+            if (auto r = update_sysctrl_(cfg_.system_ctrl.with(st_ctrl::CtrlWord::kCpuReset)); !r) {
                 return r;
             }
             if (!f->cold) {
@@ -123,15 +141,11 @@ Ex<void> StCore::on_apply_load_facts(std::span<const std::uint8_t> facts) {
         case StMediaFact::Verb::NoCart:
             return tx_cart_(kBlankCart);
         case StMediaFact::Verb::Release:
-            return update_sysctrl_(
-                st_ctrl::CtrlWord{cfg_.system_ctrl}.without(st_ctrl::CtrlWord::kCpuReset)
-            );
+            return update_sysctrl_(cfg_.system_ctrl.without(st_ctrl::CtrlWord::kCpuReset));
         case StMediaFact::Verb::kCount:
             break;
     }
-    return std::unexpected(
-        Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(f->verb)}
-    );
+    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), detail_of(f->verb)});
 }
 
 Ex<void> StCore::clear_low_ram_() {
@@ -175,16 +189,14 @@ Ex<void> StCore::tx_tos_(std::span<const std::uint8_t> bytes, std::string_view e
 }
 
 Ex<void> StCore::tx_cart_from_(std::span<const std::uint8_t> image) {
-    if (st_ctrl::CtrlWord{cfg_.system_ctrl}.has(st_ctrl::CtrlWord::kDongle)) {
+    if (cfg_.system_ctrl.has(st_ctrl::CtrlWord::kDongle)) {
         return tx_cart_(kBlankCart);
     }
     if (image.size() != kCartBufferBytes) {
-        return std::unexpected(
-            Error{Errc::bad_format, ERR_SITE(), static_cast<std::uint32_t>(image.size())}
-        );
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), file_size_of(image).detail()});
     }
 
-    return tx_cart_(image.subspan(4));
+    return tx_cart_(image.subspan(sizeof(std::uint32_t)));
 }
 
 Ex<void> StCore::tx_cart_(std::span<const std::uint8_t> rom) {
@@ -209,7 +221,7 @@ Ex<void> StCore::insert_disk_(st_ctrl::StSlot slot, std::string_view path) {
     FixedStr<kPathBytes, StrFit::Clip>& img = infra::at_index(floppy_img_, slot);
     (void)img.assign(path);
 
-    const st_ctrl::CtrlWord sc{cfg_.system_ctrl};
+    const st_ctrl::CtrlWord sc = cfg_.system_ctrl;
     const st_ctrl::CtrlWord::Bit bit = st_ctrl::write_protect_bit(slot);
     store_sysctrl_(img.empty() ? sc.with(bit) : sc.without(bit));
     return push_control_();
@@ -219,7 +231,7 @@ Ex<void> StCore::eject_hdd_(AcsiTarget target) {
     if (host().disk)
         host().disk->abandon_command_on(unit_of(target));
     (void)cfg_.acsi_img[target].assign({});
-    store_sysctrl_(st_ctrl::CtrlWord{cfg_.system_ctrl}.without(st_ctrl::acsi_enable_bit(target)));
+    store_sysctrl_(cfg_.system_ctrl.without(st_ctrl::acsi_enable_bit(target)));
     acsi_[target] = AcsiBind{};
     auto pushed = push_control_();
     if (host().disk)
@@ -229,7 +241,7 @@ Ex<void> StCore::eject_hdd_(AcsiTarget target) {
 
 MountState StCore::mount_slot(proto::SlotIndex slot, std::string_view path) {
     TASTY_SEAT_BODY(StCore);
-    const auto disk_slot = st_ctrl::StSlot::of(IoIndex{slot.v});
+    const auto disk_slot = st_ctrl::StSlot::of(slot.io_index());
     if (!disk_slot)
         return MountState::Failed;
     const auto target = disk_slot->acsi_target();
@@ -249,7 +261,7 @@ MountState StCore::mount_slot(proto::SlotIndex slot, std::string_view path) {
     acsi_[*target].out = false;
     const st_ctrl::CtrlWord::Bit enable = st_ctrl::acsi_enable_bit(*target);
     acsi_[*target].bound = answer == MountState::Done && !path.empty();
-    const st_ctrl::CtrlWord sc{cfg_.system_ctrl};
+    const st_ctrl::CtrlWord sc = cfg_.system_ctrl;
     store_sysctrl_(acsi_[*target].bound ? sc.with(enable) : sc.without(enable));
     if (auto r = push_control_(); !r)
         return MountState::Failed;
@@ -261,15 +273,15 @@ Ex<void> StCore::on_mount(IoIndex slot, const MountedPath& p) {
     if (!disk_slot)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
     if (disk_slot->is_disk())
-        return insert_disk_(*disk_slot, p.display);
+        return insert_disk_(*disk_slot, p.path);
     if (*disk_slot == st_ctrl::StSlot::Tos) {
 
-        (void)cfg_.tos_img.assign(p.display);
+        (void)cfg_.tos_img.assign(p.path);
         return {};
     }
     if (*disk_slot == st_ctrl::StSlot::Cart) {
 
-        (void)cart_img_.assign(p.display);
+        (void)cart_img_.assign(p.path);
         return {};
     }
     return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot.v});
@@ -281,83 +293,78 @@ void StCore::on_set_pending_file_ext(std::string_view ext) noexcept {
 
 Ex<void> StCore::on_file_tx(IoIndex index, std::span<const std::uint8_t> bytes) {
     bytes_sent_ = 0;
-    if (index == kTosSlot)
+    const auto slot = st_ctrl::StSlot::of(index);
+    if (slot == st_ctrl::StSlot::Tos)
         return tx_tos_(bytes, ext_.view());
-    if (index == kCartSlot)
+    if (slot == st_ctrl::StSlot::Cart)
         return tx_cart_from_(bytes);
     return unimplemented(ERR_SITE());
 }
 
-FixedStr<kConfigNameChars, StrFit::Clip> StCore::file_name(ConfigSlot slot) const noexcept {
+Ex<void> StCore::apply(ConfigBlob value) {
     TASTY_SEAT_BODY(StCore);
-    FixedStr<kConfigNameChars, StrFit::Clip> name{};
-    if (slot.v >= st_cfg::kSlotCount)
-        return name;
-    char buf[kConfigNameChars]{};
-    (void)std::snprintf(
-        buf,
-        sizeof(buf),
-        "%s%c%s",
-        st_cfg::kFileStem,
-        static_cast<char>('0' + slot.v),
-        st_cfg::kFileExt
-    );
-    (void)name.assign(buf);
-    return name;
-}
-
-std::span<const std::byte> StCore::snapshot() noexcept {
-    TASTY_SEAT_BODY(StCore);
-    cfg_.encode(image_, cart_img_.view());
-    return image_;
-}
-
-Ex<void> StCore::restore(ConfigBlob blob) {
-    TASTY_SEAT_BODY(StCore);
-
+    StConfig next = StConfig::defaults();
+    if (!value.bytes.empty()) {
+        if (value.bytes.size() != infra::bytes_of(next).size()) {
+            return std::unexpected(
+                Error{Errc::bad_format, ERR_SITE(), file_size_of(value.bytes).detail()}
+            );
+        }
+        std::memcpy(&next, value.bytes.data(), sizeof next);
+    }
     if (auto r = eject_all_(); !r)
         return r;
-    cfg_ = StConfig::defaults();
-    cfg_.overlay(blob.bytes, cart_img_.view(), image_);
-
-    if (const auto cart = StConfig::cart_of(image_); !cart.empty()) {
-        (void)cart_img_.assign(cart);
-    }
+    cfg_ = next;
+    if (!cfg_.cart_img.empty())
+        (void)cart_img_.assign(cfg_.cart_img.view());
     return {};
 }
 
-FixedStr<kConfigPreviewChars, StrFit::Clip> StCore::preview(ConfigBlob blob) const noexcept {
+std::span<const std::byte> StCore::value(std::span<std::byte> dst) const noexcept {
     TASTY_SEAT_BODY(StCore);
-    return StConfig::preview(blob);
+    if (dst.size() < infra::bytes_of(cfg_).size())
+        return {};
+    StConfig v = cfg_;
+    (void)v.cart_img.assign(cart_img_.view());
+    std::memcpy(dst.data(), &v, sizeof v);
+    return dst.first(sizeof v);
 }
 
 std::uint32_t StCore::word_(WordId w) const noexcept {
-    return w == WordId{0} ? cfg_.system_ctrl : cfg_.ext_ctrl;
+    return w == WordId{0} ? cfg_.system_ctrl.v : cfg_.ext_ctrl;
 }
 
-Ex<void> StCore::push_word_(WordId w, std::uint32_t v) {
-    return w == WordId{0} ? update_sysctrl_(st_ctrl::CtrlWord{v}) : set_ext_ctrl(v);
+Ex<void> StCore::push_word_(WordId w, st_ctrl::CtrlWord v) {
+    if (w == WordId{0})
+        return update_sysctrl_(v);
+
+    std::uint32_t ext = 0;
+    v.store_raw(std::span<std::uint32_t, 1>(&ext, 1));
+    return set_ext_ctrl(ext);
 }
 
 OptionRowView StCore::option_view(proto::OptionRowIndex index) noexcept {
     TASTY_SEAT_BODY(StCore);
-    const infra::IndexedSpan<const OptionRow, StRowPos> rows{profile().option_rows};
-    const auto found = rows.find(row_pos(index));
+    const infra::IndexedSpan<const OptionRow, proto::OptionRowIndex> rows{profile().option_rows};
+    const auto found = rows.find(index);
     if (!found)
         return {};
     const OptionRow& r = *found;
-    switch (r.kind) {
+    switch (r.kind()) {
         case OptionRow::Kind::Cycle: {
-            if (!r.bits.valid()) {
+            const OptionRow::CycleArm* cycle = r.cycle_arm();
+            if (cycle == nullptr)
+                return {};
+            if (!cycle->bits.valid()) {
                 const auto o = option_of(r.id);
                 if (!o)
                     return {};
-                return StOptionRow::of(*o).cycle_view(facts_(), r);
+                return StOptionRow::of(*o).cycle_view(facts_(), *cycle);
             }
-            const auto cur = static_cast<std::uint8_t>(
-                (word_(r.word) >> r.bits.start.v) & r.bits.mask()
+            const proto::FieldValue cur = cycle->bits.read(
+                st_ctrl::CtrlWord{word_(cycle->word)}.status_word()
             );
-            return {cur, false, cur < r.values.size() ? r.values[cur] : std::string_view{}};
+            return OptionRowView::cycle(cur, cycle->value_name(cur));
         }
         case OptionRow::Kind::File: {
             const auto o = option_of(r.id);
@@ -376,48 +383,57 @@ OptionRowView StCore::option_view(proto::OptionRowIndex index) noexcept {
 }
 
 StOptionRow::Facts StCore::facts_() const noexcept {
-    return {
-        .system_ctrl = st_ctrl::CtrlWord{cfg_.system_ctrl},
+    StOptionRow::Facts f{
+        .system_ctrl = cfg_.system_ctrl,
         .ext_ctrl = cfg_.ext_ctrl,
         .floppy =
             {infra::at_index(floppy_img_, st_ctrl::StSlot::FloppyA).view(),
              infra::at_index(floppy_img_, st_ctrl::StSlot::FloppyB).view()},
-        .hdd_bound = {acsi_[AcsiTarget{0}].bound, acsi_[AcsiTarget{1}].bound},
-        .acsi = {cfg_.acsi_img[AcsiTarget{0}].view(), cfg_.acsi_img[AcsiTarget{1}].view()},
         .tos = cfg_.tos_img.view(),
         .cart = cart_img_.view()
     };
+
+    for (std::uint8_t t = 0; t < kAcsiTargets; ++t) {
+        const AcsiTarget target{t};
+        f.acsi[target] = StOptionRow::AcsiFact{
+            .bound = acsi_[target].bound,
+            .path = cfg_.acsi_img[target].view()
+        };
+    }
+    return f;
 }
 
 Ex<void> StCore::set_option(proto::OptionRowIndex index, proto::FieldValue choice) {
     TASTY_SEAT_BODY(StCore);
-    const infra::IndexedSpan<const OptionRow, StRowPos> rows{profile().option_rows};
-    const auto found = rows.find(row_pos(index));
+    const infra::IndexedSpan<const OptionRow, proto::OptionRowIndex> rows{profile().option_rows};
+    const auto found = rows.find(index);
     if (!found) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), index.v});
     }
     const OptionRow& r = *found;
     const auto o = option_of(r.id);
     if (!o)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.id});
-    switch (r.kind) {
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.id.wire()});
+    switch (r.kind()) {
         case OptionRow::Kind::Cycle: {
-            const std::uint32_t pick = choice.v;
-            if (pick >= r.choice_count()) {
-                return std::unexpected(Error{Errc::slot_range, ERR_SITE(), (pick << 8) | index.v});
+            const OptionRow::CycleArm* cycle = r.cycle_arm();
+            if (cycle == nullptr)
+                break;
+
+            if (!choice.within(cycle->choice_count())) {
+                return std::unexpected(OptionDetail::of(choice, index).refuse(ERR_SITE()));
             }
-            if (!r.bits.valid()) {
-                const auto w = StOptionRow::of(*o).cycle_set(
-                    facts_(),
-                    static_cast<std::uint8_t>(pick)
-                );
+            if (!cycle->bits.valid()) {
+                const auto w = StOptionRow::of(*o).cycle_set(facts_(), choice);
                 if (!w)
                     return std::unexpected(w.error());
                 return apply_write_(*w);
             }
-            const std::uint32_t field = r.bits.mask() << r.bits.start.v;
-            const std::uint32_t v = (word_(r.word) & ~field) | ((pick << r.bits.start.v) & field);
-            return push_word_(r.word, v);
+            const proto::StatusWord next = cycle->bits.write(
+                st_ctrl::CtrlWord{word_(cycle->word)}.status_word(),
+                choice
+            );
+            return push_word_(cycle->word, st_ctrl::CtrlWord::of(next));
         }
         case OptionRow::Kind::Action:
         case OptionRow::Kind::File:

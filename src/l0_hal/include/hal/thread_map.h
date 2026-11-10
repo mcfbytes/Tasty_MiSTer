@@ -8,7 +8,9 @@
 #include <string_view>
 
 #include "hal/types.h"
+#include "infra/error.h"
 #include "infra/seat.h"
+#include "infra/seat_role.h"
 #include "os/types.h"
 
 namespace mister::hal {
@@ -16,6 +18,8 @@ namespace mister::hal {
 enum class SpawnKind : std::uint8_t { PromoteInPlace, Create };
 
 enum class DdrMapping : std::uint8_t { None, Owner };
+
+enum class PauseEdge : std::uint8_t { Ask, Receipt };
 
 struct ThreadRole {
     TASTY_SEAT_EXEMPT(const_shared);
@@ -26,6 +30,7 @@ struct ThreadRole {
     std::size_t stack_bytes;
     SpawnKind spawn;
     DdrMapping ddr = DdrMapping::None;
+    PauseEdge pause_at = PauseEdge::Ask;
 };
 
 inline constexpr std::size_t kThreadSeats = kSeatTagCount - 2;
@@ -118,7 +123,8 @@ inline constexpr ThreadMap kDe10ThreadMap{{
      .prio = 23,
      .stack_bytes = kFifoStackBytes,
      .spawn = SpawnKind::Create,
-     .ddr = DdrMapping::Owner},
+     .ddr = DdrMapping::Owner,
+     .pause_at = PauseEdge::Receipt},
     {.seat = SeatTag::Capture,
      .cpu = os::CpuId{0},
      .policy = SchedPolicy::Fifo,
@@ -259,6 +265,22 @@ constexpr bool ddr_owners_are(
     return true;
 }
 
+inline constexpr std::array kReceiptPauseSeats{SeatTag::Io};
+
+constexpr bool pause_edges_are(
+    const ThreadMap& m,
+    std::span<const SeatTag> receipt = kReceiptPauseSeats
+) noexcept {
+    for (const ThreadRole& r : m) {
+        bool listed = false;
+        for (const SeatTag t : receipt)
+            listed = listed || t == r.seat;
+        if ((r.pause_at == PauseEdge::Receipt) != listed)
+            return false;
+    }
+    return true;
+}
+
 constexpr bool policy_prio_consistent(const ThreadMap& m) noexcept {
     for (const ThreadRole& r : m) {
         if (r.policy == SchedPolicy::Fifo) {
@@ -292,11 +314,11 @@ constexpr SeatTag highest_fifo_seat(const ThreadMap& m) noexcept {
     return best != nullptr ? best->seat : m[0].seat;
 }
 
-constexpr bool names_fit_comm(const std::array<SeatNameRow, kSeatTagCount>& rows) noexcept {
-    for (const SeatNameRow& r : rows) {
-        if (r.second == nullptr || name_len(r.second) == 0)
+constexpr bool names_fit_comm(const std::array<SeatRoleRow, kSeatTagCount>& rows) noexcept {
+    for (const SeatRoleRow& r : rows) {
+        if (r.role == nullptr || name_len(r.role) == 0)
             return false;
-        if (name_len(r.second) > kCommRoleMax)
+        if (name_len(r.role) > kCommRoleMax)
             return false;
     }
     return true;
@@ -333,8 +355,8 @@ constexpr bool main_off_rt_cpu(const ThreadMap& m, os::CpuId main_cpu) noexcept 
 
 void adopt_placement(const ThreadMap& m, SeatTag seat) noexcept;
 
-bool widen_self_affinity() noexcept;
+[[nodiscard]] Ex<void> widen_self_affinity() noexcept;
 
-bool restore_self_affinity() noexcept;
+[[nodiscard]] Ex<void> restore_self_affinity() noexcept;
 
 }

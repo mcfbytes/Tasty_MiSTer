@@ -3,22 +3,15 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
+
+#include "infra/ascii.h"
 
 namespace mister::cores::mdp {
 namespace {
 
-constexpr char lower(char c) noexcept {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-[[nodiscard]] bool iprefix(std::string_view line, std::string_view lit) noexcept {
-    if (line.size() < lit.size())
-        return false;
-    for (std::size_t i = 0; i < lit.size(); ++i) {
-        if (lower(line[i]) != lower(lit[i]))
-            return false;
-    }
-    return true;
+[[nodiscard]] svc::TrackCount count_through(svc::TrackNumber n) noexcept {
+    return n.index() - svc::TrackIndex{} + svc::TrackCount{1};
 }
 
 [[nodiscard]] std::string_view trim(std::string_view s) noexcept {
@@ -61,18 +54,9 @@ void join_into(
     std::string_view dir,
     std::string_view name
 ) noexcept {
-    char buf[CueSheet::kPathMax];
-    std::size_t n = 0;
-    const auto put = [&](std::string_view s) noexcept {
-        for (const char c : s) {
-            if (n + 1 < sizeof buf)
-                buf[n++] = c;
-        }
-    };
-    put(dir);
-    put("/");
-    put(name);
-    (void)out.assign(std::string_view{buf, n});
+    (void)out.assign(dir);
+    (void)out.append("/");
+    (void)out.append(name);
 }
 
 [[nodiscard]] std::string_view next_record(std::string_view& text) noexcept {
@@ -89,9 +73,9 @@ void join_into(
 
 void CueSheet::parse(std::string_view text, std::string_view base_dir) noexcept {
     tracks_ = {};
-    num_tracks_ = 0;
+    num_tracks_ = svc::TrackCount{};
 
-    std::uint8_t cur_track = 0;
+    std::optional<svc::TrackNumber> cur_track;
     FixedStr<kPathMax, StrFit::Clip> cur_file{};
 
     while (!text.empty()) {
@@ -99,7 +83,7 @@ void CueSheet::parse(std::string_view text, std::string_view base_dir) noexcept 
         if (line.empty())
             continue;
 
-        if (iprefix(line, "FILE ")) {
+        if (infra::istarts_with(line, "FILE ")) {
             const std::size_t q1 = line.find('"');
             if (q1 == std::string_view::npos)
                 continue;
@@ -107,34 +91,35 @@ void CueSheet::parse(std::string_view text, std::string_view base_dir) noexcept 
             if (q2 == std::string_view::npos)
                 continue;
             join_into(cur_file, base_dir, line.substr(q1 + 1, q2 - q1 - 1));
-        } else if (iprefix(line, "TRACK ")) {
+        } else if (infra::istarts_with(line, "TRACK ")) {
             const std::int32_t tn = parse_int(line.substr(6));
             if (tn >= 1 && tn <= kMaxTracks) {
-                cur_track = static_cast<std::uint8_t>(tn);
-                num_tracks_ = std::max(num_tracks_, cur_track);
+                cur_track = svc::TrackNumber::of(tn);
+                num_tracks_ = std::max(num_tracks_, count_through(*cur_track));
             }
-        } else if (iprefix(line, "REM NOLOOP")) {
+        } else if (infra::istarts_with(line, "REM NOLOOP")) {
 
-            if (cur_track >= 1) {
-                tracks_[cur_track].loops = false;
-                tracks_[cur_track].loop_sector = 0;
+            if (cur_track) {
+                tracks_[*cur_track].loops = false;
+                tracks_[*cur_track].loop_sector = 0;
             }
-        } else if (iprefix(line, "REM LOOP")) {
-            if (cur_track >= 1) {
-                tracks_[cur_track].loops = true;
+        } else if (infra::istarts_with(line, "REM LOOP")) {
+            if (cur_track) {
+                tracks_[*cur_track].loops = true;
                 std::string_view tail = line.substr(8);
                 while (!tail.empty() && (tail.front() == ' ' || tail.front() == '\t')) {
                     tail.remove_prefix(1);
                 }
                 const bool digit = !tail.empty() && tail.front() >= '0' && tail.front() <= '9';
-                tracks_[cur_track].loop_sector = digit ? static_cast<std::uint32_t>(parse_int(tail))
-                                                       : 0u;
+                tracks_[*cur_track].loop_sector = digit
+                    ? static_cast<std::uint32_t>(parse_int(tail))
+                    : 0u;
             }
-        } else if (iprefix(line, "INDEX 01") || iprefix(line, "INDEX 1 ")) {
-            if (cur_track >= 1 && !cur_file.empty()) {
-                tracks_[cur_track].wav_path = cur_file;
+        } else if (infra::istarts_with(line, "INDEX 01") || infra::istarts_with(line, "INDEX 1 ")) {
+            if (cur_track && !cur_file.empty()) {
+                tracks_[*cur_track].wav_path = cur_file;
 
-                tracks_[cur_track].loops = true;
+                tracks_[*cur_track].loops = true;
             }
         }
     }

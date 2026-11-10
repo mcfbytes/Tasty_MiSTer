@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <ctime>
+#include <string>
 #include <string_view>
 
 #include "app/rec_control.h"
@@ -10,7 +11,6 @@
 #include "app/recorder_status.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
-#include "infra/wake_flag.h"
 
 namespace mister::xthread {
 class DiagLog;
@@ -24,11 +24,12 @@ class RecorderControl {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
+    using Chan = RecControlChannel;
+
     static constexpr std::string_view kRoot = "/media/";
 
     struct Wiring {
-        infra::OptRef<RecControlCell> control{};
-        infra::OptRef<xthread::WakeFlag> capture_wake{};
+        infra::OptRef<Chan> control{};
         infra::OptRef<const RecorderStatusCell> status{};
         infra::OptRef<const RecWriteStatusCell> writer{};
         infra::OptRef<xthread::DiagLog> diag{};
@@ -36,7 +37,9 @@ public:
         std::string_view root = kRoot;
     };
 
-    explicit RecorderControl(const Wiring& w) noexcept : w_(w) {}
+    explicit RecorderControl(const Wiring& w) noexcept
+        : w_(w),
+          requests_(w_.control ? w_.control->owner() : Chan::Owner{}) {}
 
     RecorderControl(const RecorderControl&) = delete;
     RecorderControl& operator=(const RecorderControl&) = delete;
@@ -63,6 +66,8 @@ public:
 
     [[nodiscard]] ControlGeneration generation() const noexcept { return gen_; }
 
+    [[nodiscard]] RecVerdict last_verdict() const noexcept { return last_verdict_; }
+
 private:
     [[nodiscard]] std::string name_() const;
     [[nodiscard]] bool request_(
@@ -78,11 +83,14 @@ private:
         RecOptions opt
     ) noexcept;
 
+    void reap_() noexcept;
+
     Wiring w_;
+    Chan::Owner requests_{};
     ControlGeneration gen_{};
     RecorderStatusCell::Reader status_seen_{};
-    ControlGeneration logged_answer_{};
     ControlGeneration logged_end_{};
+    RecVerdict last_verdict_ = RecVerdict::None;
 };
 
 }

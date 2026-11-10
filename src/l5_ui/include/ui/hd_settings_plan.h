@@ -15,7 +15,7 @@
 #include "ui/hd_rows/hd_ask_row.h"
 #include "ui/hd_rows/hd_push_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
-#include "ui/page.h"
+#include "ui/system_page.h"
 
 namespace mister::ui {
 
@@ -33,7 +33,7 @@ public:
     PageId id() const override;
     std::string_view title() const override;
     std::span<const std::reference_wrapper<IHdRow>> rows() const override;
-    void refresh(const SystemFacts& facts) override;
+    void refresh(const SystemFacts& facts, const SessionFacts& session) override;
     RowCount pinned() const noexcept override;
     std::uint32_t refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
@@ -66,7 +66,7 @@ private:
     };
 
     PageContext& ctx_;
-    std::unique_ptr<Page> sys_;
+    std::unique_ptr<SystemPage> sys_;
     std::uint32_t refusals_ = 0;
     std::uint32_t published_ = 0;
     RebootAction reboot_action_{*this};

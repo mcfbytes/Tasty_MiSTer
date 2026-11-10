@@ -9,6 +9,7 @@
 namespace mister::svc {
 
 struct CuePolicy;
+class IDiscIdentity;
 
 enum class DiscOp : std::uint8_t { Mount, Unmount, Release };
 
@@ -25,30 +26,33 @@ public:
     [[nodiscard]] bool apply(
         DiscOp op,
         infra::OptRef<const CuePolicy> policy,
-        std::string_view path
+        std::string_view path,
+        infra::OptRef<const IDiscIdentity> identity = {}
     ) noexcept {
         switch (op) {
             case DiscOp::Mount:
-                return mount(policy, path);
+                return do_mount(policy, path, identity);
             case DiscOp::Unmount:
-                return unmount(policy);
+                return do_unmount(policy);
             case DiscOp::Release:
-                release();
+                do_release();
                 return false;
         }
         return false;
     }
 
-    [[nodiscard]] virtual bool mount(
-        infra::OptRef<const CuePolicy> policy,
-        std::string_view path
-    ) noexcept = 0;
-    [[nodiscard]] virtual bool unmount(infra::OptRef<const CuePolicy> policy) noexcept = 0;
-
-    virtual void release() noexcept = 0;
-
 protected:
     IDiscMounter() = default;
+
+private:
+    [[nodiscard]] virtual bool do_mount(
+        infra::OptRef<const CuePolicy> policy,
+        std::string_view path,
+        infra::OptRef<const IDiscIdentity> identity
+    ) noexcept = 0;
+    [[nodiscard]] virtual bool do_unmount(infra::OptRef<const CuePolicy> policy) noexcept = 0;
+
+    virtual void do_release() noexcept = 0;
 };
 
 }

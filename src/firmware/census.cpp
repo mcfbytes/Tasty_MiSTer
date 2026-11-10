@@ -10,12 +10,12 @@ namespace mister::fw {
     const std::span<const cores::CoreFactory> table = cores::core_table();
 
     for (std::size_t i = 0; i < table.size(); ++i) {
-        const cores::CoreProfile* p = table[i].profile;
-        if (p == nullptr || p->services.empty())
+        const cores::CoreProfile& p = table[i].profile;
+        if (p.services.empty())
             continue;
         const DocCensus* doc = nullptr;
         for (const DocCensus& d : kDocCensus) {
-            if (d.core == p->name) {
+            if (d.core == p.name) {
                 doc = &d;
                 break;
             }
@@ -25,7 +25,7 @@ namespace mister::fw {
                 Error{Errc::negotiation, ERR_SITE(), static_cast<std::uint32_t>(i)}
             );
         }
-        if (auto r = cores::assert_services_match_census(*p, doc->rows); !r) {
+        if (auto r = cores::assert_services_match_census(p, doc->rows); !r) {
             return r;
         }
     }
@@ -33,7 +33,7 @@ namespace mister::fw {
     for (std::size_t i = 0; i < kDocCensus.size(); ++i) {
         bool found = false;
         for (const cores::CoreFactory& f : table) {
-            if (f.profile != nullptr && f.profile->name == kDocCensus[i].core) {
+            if (f.profile.name == kDocCensus[i].core) {
                 found = true;
                 break;
             }

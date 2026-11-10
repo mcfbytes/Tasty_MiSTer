@@ -16,6 +16,7 @@ add_library(mister_fw_assembly STATIC
   recorder_block.cpp
   replay_block.cpp
   report.cpp
+  thread_assembly.cpp
   ui_main.cpp
 )
 target_include_directories(mister_fw_assembly PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -25,6 +26,7 @@ target_link_libraries(mister_fw_assembly
 
 add_library(mister_fw_menu STATIC
   hd_osd_block.cpp
+  host_facts.cpp
   launcher_block.cpp
   menu_block.cpp
   menu_mode.cpp

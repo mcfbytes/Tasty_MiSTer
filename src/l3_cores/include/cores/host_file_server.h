@@ -3,33 +3,16 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <span>
 #include <string_view>
 
 #include "cores/host_file_sandbox.h"
+#include "cores/mailbox_req_id.h"
 #include "cores/mailbox_window.h"
 #include "infra/error.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
-
-inline constexpr std::uint32_t kMailboxPageMax = std::numeric_limits<std::uint32_t>::max();
-
-[[nodiscard]] constexpr std::uint32_t mailbox_page_len(std::size_t n) noexcept {
-    return n > kMailboxPageMax ? kMailboxPageMax : static_cast<std::uint32_t>(n);
-}
-
-[[nodiscard]] constexpr bool mailbox_span_fits(
-    std::uint32_t off,
-    std::uint32_t n,
-    std::uint32_t len
-) noexcept {
-    return n <= len && off <= len - n;
-}
-
-static_assert(mailbox_span_fits(0x0FF0u, 0x0010u, 0x1000u));
-static_assert(!mailbox_span_fits(0xFFFF'FFF0u, 0x0000'0020u, 0x0000'1000u));
 
 template <class Protocol>
 class HostFileServer {
@@ -41,16 +24,14 @@ public:
         if constexpr (Protocol::kDataLength == 0u) {
             return {};
         } else {
-            if (!mailbox_span_fits(
-                    static_cast<std::uint32_t>(Protocol::kDataOffset),
-                    static_cast<std::uint32_t>(Protocol::kDataLength),
-                    mailbox_page_len(page.size())
-                )) {
-                return std::unexpected(
-                    Error{Errc::slot_range, ERR_SITE(), mailbox_page_len(page.size())}
-                );
-            }
-            window_ = MailboxWindow{page.subspan(Protocol::kDataOffset, Protocol::kDataLength)};
+            constexpr MailboxSpan kDataWindow{
+                .off = {Protocol::kDataOffset},
+                .len = {Protocol::kDataLength}
+            };
+            const MailboxLen page_len = mailbox_len(page.size());
+            if (!kDataWindow.fits(page_len))
+                return page_refused(page_len);
+            window_ = MailboxWindow{kDataWindow.of(page)};
             return {};
         }
     }
@@ -65,7 +46,7 @@ public:
     };
 
     [[nodiscard]] Ex<MailboxOutcome> on_mailbox_edge(
-        std::uint16_t req_id,
+        MailboxReqId req_id,
         std::span<const std::byte> request,
         std::span<std::byte> reply_out
     ) {
@@ -88,7 +69,7 @@ public:
 private:
     HostFileSandbox sandbox_;
     MailboxWindow window_;
-    std::uint16_t last_req_id_ = 0xFFFF;
+    MailboxReqId last_req_id_{};
 };
 
 }

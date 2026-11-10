@@ -56,10 +56,6 @@ public:
     }
 
     [[nodiscard]] virtual bool posted() const noexcept { return false; }
-
-    virtual void widen_ack_bound() noexcept {}
-
-    virtual void restore_ack_bound() noexcept {}
 };
 
 }

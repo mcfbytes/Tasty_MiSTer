@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 #include "infra/error.h"
@@ -18,8 +19,8 @@ struct PassNames {
     std::string_view core_name;
 
     std::string_view orig_core_name;
-    bool is_arcade = false;
-    bool arcade_vertical = false;
+
+    std::span<const std::string_view> core_sections{};
 };
 
 struct PassOutcome {

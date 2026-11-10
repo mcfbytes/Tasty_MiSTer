@@ -4,6 +4,11 @@
 #include <cstdint>
 #include <expected>
 #include <type_traits>
+#include <utility>
+
+namespace mister::infra {
+struct Errno;
+}
 
 namespace mister {
 
@@ -41,14 +46,26 @@ enum class Errc : std::uint16_t {
     stale,
     busy,
     seat_absent,
+    contract,
 };
 
+namespace detail {
+
+[[nodiscard]] constexpr std::uint16_t errc_code(Errc e) noexcept {
+    return std::to_underlying(e);
+}
+
+}
+
+using detail::errc_code;
+
 static_assert(
-    static_cast<std::uint16_t>(Errc::unimplemented) == 22
-    && static_cast<std::uint16_t>(Errc::aperture_range) == 23
-    && static_cast<std::uint16_t>(Errc::stale) == 24
-    && static_cast<std::uint16_t>(Errc::busy) == 25
-    && static_cast<std::uint16_t>(Errc::seat_absent) == 26
+    detail::errc_code(Errc::unimplemented) == 22
+    && detail::errc_code(Errc::aperture_range) == 23
+    && detail::errc_code(Errc::stale) == 24
+    && detail::errc_code(Errc::busy) == 25
+    && detail::errc_code(Errc::seat_absent) == 26
+    && detail::errc_code(Errc::contract) == 27
 );
 
 namespace infra {
@@ -67,6 +84,8 @@ struct Error {
     Errc code;
     infra::ErrorSite site;
     std::uint32_t detail;
+
+    [[nodiscard]] constexpr infra::Errno os_errno() const noexcept;
 };
 
 static_assert(std::is_trivially_copyable_v<Error> && sizeof(Error) == 8);

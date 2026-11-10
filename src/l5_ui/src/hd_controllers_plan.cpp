@@ -14,10 +14,10 @@ namespace {
 std::string core_name_of(const HdPlanInputs& in) {
     if (!in.ctx.identity)
         return {};
-    app::SessionIdentity id{};
-    if (!in.ctx.identity->copy(id))
+    const std::optional<app::SessionIdentity> id = in.ctx.identity->copy();
+    if (!id)
         return {};
-    return std::string(id.core);
+    return std::string(id->core.view());
 }
 
 std::string define_label_of(const HdPlanInputs& in) {

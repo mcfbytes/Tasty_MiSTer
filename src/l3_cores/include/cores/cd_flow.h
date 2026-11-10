@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "cores/cd_drive_state.h"
 #include "cores/types.h"
 #include "svc/types.h"
 
@@ -16,7 +17,8 @@ struct CdFlow {
     std::uint32_t idle_ticks = 0;
 
     std::uint32_t gated_ticks = 0;
-    std::uint8_t drive_state = 0;
+
+    CdDriveState drive_state = CdDriveState::NoDisc;
     svc::TrackIndex drive_track{};
     HeadLba drive_lba{};
 

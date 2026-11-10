@@ -8,6 +8,7 @@
 #include "cores/load_ask.h"
 #include "cores/load_plan.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "proto/status_word.h"
 
 namespace mister::cores {
@@ -36,7 +37,7 @@ public:
 
     [[nodiscard]] virtual Ex<bool> conclude(const TransferRow& row, ICoreWindow& window);
 
-    [[nodiscard]] virtual Ex<void> finish(ICoreWindow* window) = 0;
+    [[nodiscard]] virtual Ex<void> finish(infra::OptRef<ICoreWindow> window) = 0;
 
     [[nodiscard]] virtual std::span<const std::uint8_t> facts() const noexcept = 0;
 

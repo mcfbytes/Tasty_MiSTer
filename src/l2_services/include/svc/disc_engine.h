@@ -16,15 +16,20 @@
 #include "svc/chd_backing.h"
 #include "svc/chd_meta_row.h"
 #include "svc/chd_source.h"
+#include "svc/chd_track.h"
 #include "svc/cue_policy.h"
 #include "svc/cue_program.h"
 #include "svc/disc_counters.h"
 #include "svc/disc_file_access.h"
 #include "svc/file_table_backing.h"
 #include "svc/disc_geometry.h"
+#include "svc/disc_reader.h"
 #include "svc/frame_shaper.h"
+#include "svc/sector_header.h"
+#include "svc/data_sector_sealer.h"
 #include "svc/image_opener.h"
 #include "svc/msf.h"
+#include "svc/subcode_interleaver.h"
 #include "svc/subcode_sidecar.h"
 #include "svc/toc.h"
 #include "svc/track.h"
@@ -61,14 +66,19 @@ public:
         std::unique_ptr<IChdSource> prefetch_source = nullptr
     );
 
-    [[nodiscard]] Ex<std::size_t> read_sector(Lba lba, std::span<std::byte> dst);
+    [[nodiscard]] Ex<std::span<std::byte>> read_sector(Lba lba, std::span<std::byte> dst);
 
-    [[nodiscard]] Ex<std::size_t> read_subcode(Lba lba, std::span<std::byte> dst);
+    [[nodiscard]] Ex<std::span<std::byte>> read_subcode(Lba lba, std::span<std::byte> dst);
 
-    [[nodiscard]] Ex<std::size_t> read_user_data(Lba lba, std::span<std::byte> dst);
-    [[nodiscard]] Ex<std::size_t> read_raw_frame(Lba lba, std::span<std::byte> dst);
+    [[nodiscard]] Ex<std::span<std::byte>> read_user_data(Lba lba, std::span<std::byte> dst);
 
-    [[nodiscard]] Ex<std::size_t> read_full_frame(Lba lba, std::span<std::byte> dst);
+    [[nodiscard]] Ex<std::span<std::byte>> read_raw_frame(
+        Lba lba,
+        std::span<std::byte> dst,
+        SectorHeader header = {}
+    );
+
+    [[nodiscard]] Ex<std::span<std::byte>> read_full_frame(Lba lba, std::span<std::byte> dst);
 
     static constexpr CddaOrder kWireCddaOrder = CddaOrder::LittleEndian;
 
@@ -82,9 +92,7 @@ public:
 
     SeekTime seek_time(Lba from_lba, Lba to_lba) const;
 
-    void prefetch_hint(Lba lba);
-
-    static constexpr std::uint32_t kAdviseAheadSectors = kFramesPerSecond;
+    static constexpr proto::BlockCount kAdviseAheadSectors{kFramesPerSecond};
 
     void advise_ahead(Lba lba) noexcept;
 
@@ -103,12 +111,7 @@ public:
     std::uint32_t prefetch_refusals() const noexcept { return chd_.prefetch_refusals(); }
 
 private:
-    DiscEngine(
-        CuePolicy p,
-        ChdPrefetch& prefetch,
-        infra::OptRef<const Vfs> vfs,
-        infra::OptRef<const IImageOpener> opener
-    );
+    DiscEngine(CuePolicy p, ChdPrefetch& prefetch, DiscFileAccess files_io);
 
     enum class Form : std::uint8_t { Native, UserData, RedBook };
 
@@ -130,10 +133,22 @@ private:
     void open_sub_or_cdg_(std::string_view cue_path);
     [[nodiscard]] Ex<void> mount_iso(std::string_view iso_path);
 
+    void hold_single_track_(
+        TrackType type,
+        proto::BlockSize sector_size,
+        FileSize sz,
+        std::unique_ptr<IFile> f
+    );
+
     [[nodiscard]] Ex<void> declare_iso_2048(std::unique_ptr<IFile> f, FileSize sz);
 
     [[nodiscard]] Ex<void> mount_chd_path(std::string_view chd_path);
-    [[nodiscard]] Ex<std::size_t> read_form(Lba lba, std::span<std::byte> dst, Form form);
+    [[nodiscard]] Ex<std::span<std::byte>> read_form(
+        Lba lba,
+        std::span<std::byte> dst,
+        Form form,
+        SectorHeader header = {}
+    );
 
     void normalize_cdda_(const Track& t, Form form, std::span<std::byte> frame) const noexcept;
 
@@ -154,6 +169,10 @@ private:
 
     std::unique_ptr<IFrameShaper> frame_shaper_;
     std::unique_ptr<IFrameShaper> sub_shaper_;
+
+    std::optional<SubcodeInterleaver> block_shaper_;
+
+    std::optional<DataSectorSealer> sector_sealer_;
 
     ChdBacking chd_;
 };

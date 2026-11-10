@@ -40,4 +40,8 @@ struct StMediaFact {
 
 static_assert(sizeof(StMediaFact) == 4);
 
+[[nodiscard]] constexpr std::uint32_t detail_of(StMediaFact::Verb verb) noexcept {
+    return static_cast<std::uint32_t>(verb);
+}
+
 }

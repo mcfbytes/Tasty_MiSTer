@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/pad_levels.h"
 
+#include "proto/stick_pos.h"
+
 namespace mister::proto {
 
 Ex<void> PadLevels::replay(PadLevels::Slot level, ILinkPadEncoder& to) const {
@@ -10,11 +12,7 @@ Ex<void> PadLevels::replay(PadLevels::Slot level, ILinkPadEncoder& to) const {
     const Reg r = reg(level);
     if (is_digital(level))
         return to.digital(r.opcode, JoyMask{*w});
-    return to.stick(
-        r.opcode,
-        r.index,
-        StickPos{static_cast<std::uint8_t>(*w), static_cast<std::uint8_t>((*w >> 8))}
-    );
+    return to.stick(r.opcode, r.index, StickPos::from_packed(*w));
 }
 
 }

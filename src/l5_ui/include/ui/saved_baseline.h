@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <optional>
 #include <vector>
 
 #include "infra/seat.h"
@@ -28,9 +29,12 @@ public:
     [[nodiscard]] bool unsaved(const StatusView& live) const noexcept;
 
 private:
-    StatusView words_{};
-    std::vector<proto::BitField> fields_;
-    bool held_ = false;
+    struct Held {
+        StatusView words{};
+        std::vector<proto::BitField> fields;
+    };
+
+    std::optional<Held> held_;
 };
 
 }

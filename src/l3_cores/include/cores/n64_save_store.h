@@ -7,12 +7,16 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <type_traits>
 #include <string_view>
 
 #include "cores/n64_save_order.h"
 #include "cores/n64_save_plan.h"
 #include "cores/n64_memory_type.h"
-#include "cores/n64_save_extent.h"
+#include "cores/n64_rom.h"
+#include "cores/save_row_count.h"
+#include "cores/save_word_reverse.h"
+#include "cores/n64_save_layout.h"
 #include "cores/types.h"
 #include "infra/error.h"
 #include "infra/indexed_array.h"
@@ -117,7 +121,9 @@ private:
     [[nodiscard]] bool migrate_(const SaveOrder& o);
     [[nodiscard]] Ex<void> create_(const SaveOrder& o, std::size_t bytes);
 
-    const svc::Vfs* vfs_;
+    [[nodiscard]] bool all_blank_(std::span<const std::uint8_t> image) const noexcept;
+
+    const svc::Vfs& vfs_;
 
     SavePlan plan_{};
     SaveLayout layout_{};
@@ -133,6 +139,8 @@ private:
     std::uint8_t blank_[kMaxPartitionBytes]{};
     std::uint8_t scratch_[kMaxSliceBytes]{};
     std::uint8_t compare_[kMaxSliceBytes]{};
+
+    SaveWordReverse word_reverse_{};
 };
 
 }

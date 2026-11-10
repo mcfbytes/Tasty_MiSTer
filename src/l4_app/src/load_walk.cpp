@@ -33,7 +33,7 @@ Ex<LoadWalk> LoadWalk::start(
 
 bool LoadWalk::wants_pass(
     const LinkTxChannel<SeatTag::Main>& inbox,
-    const FileTxLevelCell* level
+    const FileTxLevelCell& level
 ) const noexcept {
     TASTY_SEAT_BODY(LoadWalk);
     switch (pc_) {
@@ -41,18 +41,15 @@ bool LoadWalk::wants_pass(
             return false;
         case Pc::Rung:
             return ladder_ && ladder_->wants_pass(inbox, level);
-        case Pc::Echo: {
-            if (level == nullptr)
-                return false;
-            const auto s = level->sample();
-            return s && s.value.payload && s.value.act == act_.widen();
-        }
+        case Pc::Echo:
+            return echo_wait_.ready(level);
         case Pc::SaveWait:
             return false;
         case Pc::Pieces:
             return inbox.ring().size() < cores::PayloadPieces::kAhead;
         case Pc::Hold:
         case Pc::Row:
+        case Pc::Notify:
         case Pc::Save:
         case Pc::Release:
             return inbox.ring().size() < proto::kLinkTxCapacity;
@@ -74,6 +71,8 @@ LoadWalk::Pass LoadWalk::step(Host& h) {
             return pieces_step_(h);
         case Pc::Echo:
             return echo_(h);
+        case Pc::Notify:
+            return notify_(h, plan_.rows[row_].notify);
         case Pc::Save:
             return save_(h);
         case Pc::SaveWait:
@@ -89,7 +88,7 @@ LoadWalk::Pass LoadWalk::step(Host& h) {
 bool LoadWalk::status_bit0_(Host& h, bool asserted) {
     return h.rung.inbox.push(
         proto::LinkOp::WriteStatus{
-            .start = proto::StatusBit{0},
+            .start = proto::kResetBit,
             .width = 1,
             .value = asserted ? 1u : 0u
         }
@@ -134,27 +133,25 @@ LoadWalk::Pass LoadWalk::row_step_(Host& h) {
 }
 
 LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
-    if (h.map == nullptr)
-        return fail_(h);
 
     std::unique_ptr<svc::IFile> file;
-    if (!r.source.empty() || r.file_len != 0) {
+    if (!r.source.empty() || !r.file_len.empty()) {
         auto f = h.vfs.open(r.source, svc::OpenMode::ReadWhole);
         if (!f)
             return skip_(r);
         file = std::move(*f);
     }
-    const auto phys = cores::row_address(r, windows_, h.aperture.phys.v);
-    if (!phys)
+    const auto fabric = cores::row_address(r, windows_, h.aperture.phys);
+    if (!fabric)
         return fail_(h);
-    const std::uint64_t extent = r.extent != 0 ? r.extent : std::uint64_t{r.file_len} * r.stride;
-    auto w = LoadWindow<seat_owner::Main>::open(*h.map, h.aperture, os::PhysAddr{*phys}, extent);
+    const std::uint64_t extent = r.extent_bytes(r.file_len).length_of(proto::BlockCount{1});
+    auto w = LoadWindow<seat_owner::Main>::open(h.map, h.aperture, hal::to_phys(*fabric), extent);
     if (!w)
         return fail_(h);
     std::optional<LoadWindow<seat_owner::Main>> mirror{};
     if (r.mirror != 0) {
         auto m = LoadWindow<seat_owner::Main>::open(
-            *h.map,
+            h.map,
             h.aperture,
             os::PhysAddr{r.mirror},
             extent
@@ -173,7 +170,7 @@ LoadWalk::Pass LoadWalk::window_(Host& h, const cores::TransferRow& r) {
         LoadLadder::Job{
             .loader = std::move(loader_),
             .file = std::move(file),
-            .total = r.file_len,
+            .total = r.file_len.length_of(proto::BlockCount{1}),
             .wire_index = r.index,
             .act = act,
             .row = quiet,
@@ -204,20 +201,15 @@ LoadWalk::Pass LoadWalk::rung_(Host& h) {
         next_row_();
         return Pass::Stepped;
     }
-    pc_ = Pc::Row;
-    const Pass sent = notify_(h, r.notify);
-    if (sent == Pass::Waiting) {
-
-        plan_.rows[row_].dest = cores::RowDest::Notify;
-    }
-    return sent == Pass::Waiting ? Pass::Stepped : sent;
+    pc_ = Pc::Notify;
+    return notify_(h, r.notify);
 }
 
 LoadWalk::Pass LoadWalk::payload_(Host& h, const cores::TransferRow& r) {
     auto file = h.vfs.open(r.source, svc::OpenMode::ReadWhole);
     if (!file)
         return skip_(r);
-    std::vector<std::uint8_t> raw(r.file_len);
+    std::vector<std::uint8_t> raw(r.file_len.length_of(proto::BlockCount{1}));
     std::size_t got = 0;
     while (got < raw.size()) {
         auto n = (*file)->read_at(
@@ -228,21 +220,24 @@ LoadWalk::Pass LoadWalk::payload_(Host& h, const cores::TransferRow& r) {
             break;
         got += *n;
     }
-    raw.resize(std::max<std::size_t>(got, r.extent), std::uint8_t{0});
-    std::uint16_t chunk = kStockFileTxChunk;
+    raw.resize(
+        std::max<std::size_t>(got, r.extent.length_of(proto::BlockCount{1})),
+        std::uint8_t{0}
+    );
+    cores::WireChunk window = kStockFileTxChunk;
     if (r.byte_words) {
 
         std::vector<std::uint8_t> wide(2u * raw.size(), std::uint8_t{0});
         for (std::size_t i = 0; i < raw.size(); ++i)
             wide[2u * i] = raw[i];
         raw = std::move(wide);
-        chunk = static_cast<std::uint16_t>(2u * kStockFileTxChunk);
+        window = window.per_byte_word();
     }
     const std::uint64_t bytes = raw.size();
     auto p = cores::PayloadPieces::of_bytes(
         std::move(raw),
         {},
-        {.dest = r.index, .chunk = cores::WireChunk::of(chunk), .act = next_act_(h)}
+        {.dest = r.index, .chunk = window, .act = echo_wait_.mint(h.owner)}
     );
     if (!p)
         return fail_(h);
@@ -253,23 +248,16 @@ LoadWalk::Pass LoadWalk::payload_(Host& h, const cores::TransferRow& r) {
 }
 
 LoadWalk::Pass LoadWalk::pieces_step_(Host& h) {
-    const cores::PayloadPieces::Pass pass = pieces_->step(h.owner);
-    if (pass == cores::PayloadPieces::Pass::Waiting)
+    const proto::ActKey16 act = pieces_->act();
+    auto pass = pieces_->step(h.owner);
+    if (pass && *pass == cores::PayloadPieces::Pass::Waiting)
         return Pass::Waiting;
     pieces_.reset();
-    if (pass == cores::PayloadPieces::Pass::Failed)
+    if (!pass)
         return fail_(h);
-    echo_due_ns_ = h.now_ns + echo_bound(echo_bytes_, kEcho).count();
+    echo_wait_.arm(act, h.now_ns, echo_bytes_, kEcho);
     pc_ = Pc::Echo;
     return Pass::Stepped;
-}
-
-proto::ActKey16 LoadWalk::next_act_(Host& h) {
-    proto::ActKey16 act{};
-    while (!act || act == act_)
-        act = h.owner.next_generation().narrow();
-    act_ = act;
-    return act;
 }
 
 LoadWalk::Pass LoadWalk::notify_(Host& h, const cores::PostNotify& n) {
@@ -288,8 +276,7 @@ LoadWalk::Pass LoadWalk::send_(
     auto id = h.owner.intern_bytes(bytes, {}, hal::FabricAddr{});
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : fail_(h);
-    const proto::ActKey16 prev = act_;
-    const proto::ActKey16 act = next_act_(h);
+    const proto::ActKey16 act = echo_wait_.mint(h.owner);
     if (!h.rung.inbox.push(
             proto::LinkOp::StagePayload{
                 .payload = *id,
@@ -298,10 +285,9 @@ LoadWalk::Pass LoadWalk::send_(
                 .act = act
             }
         )) {
-        act_ = prev;
         return Pass::Waiting;
     }
-    echo_due_ns_ = h.now_ns + echo_bound(notify.copy_bytes(), kEcho).count();
+    echo_wait_.arm(act, h.now_ns, notify.copy_bytes(), kEcho);
     landed_ = false;
     pc_ = Pc::Echo;
     return Pass::Stepped;
@@ -309,8 +295,7 @@ LoadWalk::Pass LoadWalk::send_(
 
 LoadWalk::Pass LoadWalk::skip_(const cores::TransferRow& r) {
     if (r.notify.armed && landed_) {
-        plan_.rows[row_].dest = cores::RowDest::Notify;
-        pc_ = Pc::Row;
+        pc_ = Pc::Notify;
         return Pass::Stepped;
     }
     next_row_();
@@ -318,15 +303,17 @@ LoadWalk::Pass LoadWalk::skip_(const cores::TransferRow& r) {
 }
 
 LoadWalk::Pass LoadWalk::echo_(Host& h) {
-    const auto s = h.rung.level != nullptr ? h.rung.level->sample() : FileTxLevelCell::Sample{};
-    if (!s || !s.value.payload || s.value.act != act_.widen()) {
-        if (h.now_ns < echo_due_ns_)
+    switch (echo_wait_.poll(h.rung.level, h.now_ns)) {
+        case EchoWait::Answer::Waiting:
             return Pass::Waiting;
-        stalled_ = true;
-        return fail_(h);
+        case EchoWait::Answer::Answered:
+            break;
+        case EchoWait::Answer::Dropped:
+            return fail_(h);
+        case EchoWait::Answer::TimedOut:
+            stalled_ = true;
+            return fail_(h);
     }
-    if (!s.value.open)
-        return fail_(h);
     next_row_();
     return Pass::Stepped;
 }
@@ -336,19 +323,14 @@ LoadWalk::Pass LoadWalk::save_(Host& h) {
         pc_ = Pc::Release;
         return Pass::Stepped;
     }
-    if (save_due_ns_ == 0)
+    if (save_due_ns_ == std::chrono::nanoseconds{})
         save_due_ns_ = h.now_ns + kSaveBoundNs;
     auto id = h.owner.intern_path(plan_.frame.save, proto::FileSize{});
-    if (!id || *id == proto::FileId{})
+    if (!id)
         return Pass::Waiting;
     const proto::ActKey g = h.owner.next_generation();
     if (!h.rung.inbox.push(
-            proto::LinkOp::BindSlot{
-                .slot = proto::SlotIndex{0},
-                .bind = proto::LinkOp::SlotBind::Attach,
-                .path = *id,
-                .act_gen = g
-            }
+            proto::LinkOp::AttachSave{.slot = proto::SlotIndex{0}, .path = *id, .act = g}
         )) {
         return Pass::Waiting;
     }
@@ -361,7 +343,7 @@ LoadWalk::Pass LoadWalk::save_wait_(Host& h) {
     const cores::SaveExtent e = h.owner.save_extent();
     if (e.generation == save_gen_ && e.answer == cores::SaveAnswer::Known) {
         auto id = h.owner.intern_path(plan_.frame.save, e.size_bytes);
-        if (!id || *id == proto::FileId{})
+        if (!id)
             return Pass::Waiting;
         if (!h.rung.inbox.push(
                 proto::LinkOp::BindSlot{
@@ -387,7 +369,9 @@ LoadWalk::Pass LoadWalk::save_wait_(Host& h) {
 }
 
 LoadWalk::Pass LoadWalk::release_(Host& h) {
-    if (plan_.frame.release_reset && !status_bit0_(h, false))
+
+    const bool release = plan_.frame.release_reset || failed_;
+    if (release && !status_bit0_(h, false))
         return Pass::Waiting;
     pc_ = Pc::Over;
     return failed_ ? Pass::Failed : Pass::Done;
@@ -399,30 +383,21 @@ LoadWalk::Pass LoadWalk::fail_(Host& h) {
     pieces_.reset();
     if (plan_.frame.hold_reset) {
         pc_ = Pc::Release;
-        plan_.frame.release_reset = true;
         return release_(h);
     }
     pc_ = Pc::Over;
     return Pass::Failed;
 }
 
-bool LoadWalk::wants_pass(
-    const LinkTxChannel<SeatTag::Main>& inbox,
-    const FileTxLevelCell& level
-) const noexcept {
-    TASTY_SEAT_BODY(LoadWalk);
-    return wants_pass(inbox, &level);
-}
-
 Rung::Pass LoadWalk::step(const RungEdges& edges, cores::ILadderHost& owner) {
     TASTY_SEAT_BODY(LoadWalk);
     Host h{
-        .rung = LoadLadder::Host{edges.inbox, &edges.level, edges.events},
+        .rung = LoadLadder::Host{edges.inbox, edges.level, edges.events},
         .owner = owner,
-        .map = &edges.window_map,
+        .map = edges.window_map,
         .aperture = edges.aperture,
         .vfs = edges.vfs,
-        .now_ns = edges.clock.now().count()
+        .now_ns = edges.clock.now().time_since_epoch()
     };
     switch (step(h)) {
         case Pass::Stepped:

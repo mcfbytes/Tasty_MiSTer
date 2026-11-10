@@ -3,7 +3,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -77,14 +76,14 @@ public:
     [[nodiscard]] Ex<proto::FileId> intern_piece(
         std::span<const std::uint8_t> bytes,
         std::string_view ext,
-        std::uint64_t whole,
+        proto::FileSize whole,
         std::uint64_t offset
     ) override;
     [[nodiscard]] Ex<proto::FileId> intern_whole(
         std::vector<std::uint8_t>&& bytes,
         std::string_view path
     ) override;
-    [[nodiscard]] std::optional<bool> file_tx_answer(proto::ActKey act) override;
+    [[nodiscard]] cores::FileTxAnswer file_tx_answer(proto::ActKey act) override;
     [[nodiscard]] bool order_load_facts(std::span<const std::uint8_t> facts) override;
     [[nodiscard]] std::size_t link_in_flight() const noexcept override;
     [[nodiscard]] cores::WireWordBytes link_word_bytes() const noexcept override;

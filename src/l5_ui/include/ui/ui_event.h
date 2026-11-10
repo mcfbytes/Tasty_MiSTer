@@ -9,9 +9,6 @@
 namespace mister::ui {
 
 struct UiEvent {
-    enum class Kind : std::uint8_t { Key, Tick, CoreEvent };
-
-    Kind kind = Kind::Key;
     proto::KeyCode raw{};
 
     enum Button : std::uint16_t {

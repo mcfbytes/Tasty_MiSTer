@@ -12,6 +12,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/types.h"
+#include "os/uio_line_space.h"
 
 namespace mister::svc {
 class Vfs;

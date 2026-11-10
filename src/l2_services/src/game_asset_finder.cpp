@@ -16,7 +16,7 @@
 namespace mister::svc {
 
 using detail::compose;
-using detail::ifind;
+using infra::ifind;
 using detail::path_is_regular;
 using detail::zip_archive_opens;
 using infra::iends_with;
@@ -62,7 +62,7 @@ std::optional<std::string> asset_in_same_dir(const std::string& rom_full, std::s
 }
 
 std::optional<std::string> asset_by_crc(Crc32 crc, std::string_view ext, const std::string& dir) {
-    if (crc.v == 0)
+    if (!crc.declared())
         return std::nullopt;
     ::DIR* d = ::opendir(dir.c_str());
     if (d == nullptr)
@@ -107,7 +107,7 @@ Ex<std::string> GameAssetFinder::find(const AssetQuery& q) const {
     const std::string cd_dir = cd_layout ? compose(root_path_, q.cd_asset_dir) : core_dir;
 
     std::string path;
-    if (ifind(q.rom_path, q.ext) == std::string_view::npos) {
+    if (!ifind(q.rom_path, q.ext)) {
         path = retarget_extension(compose(root_path_, q.rom_path), "", q.ext);
     }
     if (!path.empty() && valid_asset(path, q.require_zip))

@@ -5,6 +5,7 @@
 
 #include "app/negotiated_core.h"
 #include "app/owner_push.h"
+#include "infra/path_parts.h"
 
 namespace mister::app {
 
@@ -25,7 +26,9 @@ Ex<proto::FileId> LadderHostAdapter::intern_bytes(
 ) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     std::vector<std::uint8_t> buf(bytes.begin(), bytes.end());
-    auto id = edges_.inbox.intern_file(std::move(buf), ext, std::string_view{}, load_addr);
+    auto id = edges_.inbox.intern_file(
+        FileIntern{.bytes = std::move(buf), .ext = ext, .load_addr = load_addr}
+    );
     if (!id)
         return std::unexpected(id.error());
     return *id;
@@ -34,19 +37,17 @@ Ex<proto::FileId> LadderHostAdapter::intern_bytes(
 Ex<proto::FileId> LadderHostAdapter::intern_piece(
     std::span<const std::uint8_t> bytes,
     std::string_view ext,
-    std::uint64_t whole,
+    proto::FileSize whole,
     std::uint64_t offset
 ) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     std::vector<std::uint8_t> buf(bytes.begin(), bytes.end());
     return edges_.inbox.intern_file(
-        std::move(buf),
-        ext,
-        std::string_view{},
-        hal::FabricAddr{},
-        svc::Crc32{},
-        whole,
-        offset
+        FileIntern{
+            .bytes = std::move(buf),
+            .ext = ext,
+            .piece = {.whole = whole, .offset = proto::FileSize{offset}}
+        }
     );
 }
 
@@ -64,18 +65,17 @@ Ex<proto::FileId> LadderHostAdapter::intern_whole(
     std::string_view path
 ) {
     TASTY_SEAT_BODY(LadderHostAdapter);
-    const std::size_t dot = path.rfind('.');
-    const std::string_view ext = dot == std::string_view::npos ? std::string_view{}
-                                                               : path.substr(dot);
-    return edges_.inbox.intern_file(std::move(bytes), ext, path, hal::FabricAddr{});
+    return edges_.inbox.intern_file(
+        FileIntern{.bytes = std::move(bytes), .ext = infra::extension(path), .path = path}
+    );
 }
 
-std::optional<bool> LadderHostAdapter::file_tx_answer(proto::ActKey act) {
+cores::FileTxAnswer LadderHostAdapter::file_tx_answer(proto::ActKey act) {
     TASTY_SEAT_BODY(LadderHostAdapter);
     const FileTxLevel level = edges_.ftx_level_cell.sample().value;
     if (!act || level.stream_act != act)
-        return std::nullopt;
-    return level.stream_served;
+        return cores::FileTxAnswer::Pending;
+    return level.stream_served ? cores::FileTxAnswer::Served : cores::FileTxAnswer::Dropped;
 }
 
 bool LadderHostAdapter::order_load_facts(std::span<const std::uint8_t> facts) {

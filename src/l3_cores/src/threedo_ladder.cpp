@@ -10,15 +10,6 @@ constexpr std::uint8_t kKanjiGroup = 1;
 
 Ex<bool> ThreeDoLadder::on_step() {
     TASTY_SEAT_BODY(ThreeDoLadder);
-    auto r = rung();
-    if (!r && bit0_asserted_) {
-        bit0_asserted_ = false;
-        (void)order_status_bit0(false);
-    }
-    return r;
-}
-
-Ex<bool> ThreeDoLadder::rung() {
     switch (rung_) {
         case Rung::Unload:
 
@@ -39,9 +30,8 @@ Ex<bool> ThreeDoLadder::rung() {
 
         case Rung::ResetHold:
 
-            if (!order_status_bit0(true))
+            if (!hold_reset_())
                 return false;
-            bit0_asserted_ = true;
             rung_ = Rung::Bios;
             row_i_ = 0;
             return false;
@@ -98,11 +88,11 @@ Ex<bool> ThreeDoLadder::rung() {
 
         case Rung::MountDisc: {
 
-            if (image_.empty()) {
+            if (image_path().empty()) {
                 rung_ = Rung::ResetRelease;
                 return false;
             }
-            const MountState ms = mount_bounded(image_);
+            const MountState ms = mount_bounded(image_path());
             if (ms == MountState::Pending)
                 return false;
             if (ms == MountState::Failed) {
@@ -116,17 +106,11 @@ Ex<bool> ThreeDoLadder::rung() {
 
         case Rung::MountSave: {
 
-            if (save_path_.empty()) {
-                auto sp = save_path_for(image_);
-                if (!sp)
-                    return std::unexpected(sp.error());
-                save_path_ = *sp;
-            }
-            if (!prepare_save(save_path_))
+            auto m = mount_save_rung_();
+            if (!m)
+                return std::unexpected(m.error());
+            if (!*m)
                 return false;
-            if (!order_mount_save(save_path_, true))
-                return false;
-            report_.save_mounted = true;
             rung_ = Rung::DiscInfo;
             return false;
         }
@@ -140,9 +124,8 @@ Ex<bool> ThreeDoLadder::rung() {
 
         case Rung::ResetRelease:
 
-            if (!order_status_bit0(false))
+            if (!release_reset_())
                 return false;
-            bit0_asserted_ = false;
             rung_ = Rung::Done;
             return true;
 

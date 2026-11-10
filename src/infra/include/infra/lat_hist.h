@@ -14,10 +14,7 @@ class LatHist {
 public:
     void record(std::chrono::nanoseconds d) noexcept {
         ++count_;
-        sum_ += d;
-        if (d < min_ || count_ == 1)
-            min_ = d;
-        if (d > max_)
+        if (d > max_ || count_ == 1)
             max_ = d;
     }
 
@@ -27,7 +24,7 @@ public:
 
 private:
     std::uint64_t count_ = 0;
-    std::chrono::nanoseconds sum_{}, min_{}, max_{};
+    std::chrono::nanoseconds max_{};
 };
 
 }

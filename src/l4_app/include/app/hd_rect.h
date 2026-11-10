@@ -13,6 +13,18 @@ struct HdRect {
 
     [[nodiscard]] constexpr bool is_empty() const noexcept { return w <= 0 || h <= 0; }
 
+    [[nodiscard]] constexpr bool contains(const HdRect& o) const noexcept {
+        if (is_empty() || o.is_empty())
+            return false;
+        const std::int64_t ox1 = std::int64_t{o.x} + o.w;
+        const std::int64_t oy1 = std::int64_t{o.y} + o.h;
+        return o.x >= x && o.y >= y && ox1 <= std::int64_t{x} + w && oy1 <= std::int64_t{y} + h;
+    }
+
+    [[nodiscard]] constexpr HdRect placed_in(const HdRect& panel) const noexcept {
+        return HdRect{x + panel.x, y + panel.y, w, h};
+    }
+
     [[nodiscard]] constexpr HdRect intersect(const HdRect& o) const noexcept {
         if (is_empty() || o.is_empty())
             return {};

@@ -5,17 +5,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <span>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include "cores/arcade_facts.h"
 #include "cores/core_grant.h"
 #include "cores/core_support.h"
-#include "cores/cheat_records.h"
 #include "cores/dip_switches.h"
-#include "cores/mra_cheat_records.h"
 #include "cores/mra_doc.h"
 #include "cores/save_upload.h"
 #include "cores/stream_load_host.h"
@@ -36,10 +33,7 @@ inline constexpr CoreProfile kArcadeProfile{
     .undeclared_role = SlotRole::Save,
 };
 
-class ArcadeCore final : public Core,
-                         public IDipSwitches,
-                         public ICheatRecords,
-                         public ISaveUpload {
+class ArcadeCore final : public Core, public IDipSwitches, public ISaveUpload {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
@@ -66,21 +60,6 @@ public:
         dip_saved_ = dip_cur_;
     }
 
-    [[nodiscard]] CheatGeometry cheat_geometry() const noexcept override {
-        TASTY_SEAT_BODY(ArcadeCore);
-        return cheats_.cheat_geometry();
-    }
-
-    [[nodiscard]] std::size_t cheat_count() const noexcept override {
-        TASTY_SEAT_BODY(ArcadeCore);
-        return cheats_.cheat_count();
-    }
-
-    [[nodiscard]] std::string_view cheat_name(std::size_t i) const noexcept override;
-    [[nodiscard]] std::span<const std::uint8_t> cheat_bytes(std::size_t i) const noexcept override;
-
-    [[nodiscard]] std::uint32_t cheats_dropped() const noexcept { return cheats_dropped_; }
-
     [[nodiscard]] std::string_view save_file_name() const noexcept override {
         TASTY_SEAT_BODY(ArcadeCore);
         return nvm_name_;
@@ -102,40 +81,26 @@ private:
     std::uint64_t on_last_tx_bytes() const noexcept override;
     svc::Crc32 on_last_tx_crc() const noexcept override;
 
-    ButtonOverride on_button_override() const noexcept override {
-        return {btn_names_, btn_defaults_};
-    }
-
     [[nodiscard]] infra::OptRef<IDipSwitches> on_dip_switches() noexcept override {
         return infra::OptRef<IDipSwitches>{*this};
     }
 
     [[nodiscard]] infra::OptRef<ISaveUpload> on_save_upload() noexcept override {
-        return nvram_declared_() ? infra::OptRef<ISaveUpload>{*this} : infra::OptRef<ISaveUpload>{};
-    }
-
-    [[nodiscard]] infra::OptRef<ICheatRecords> on_cheat_records() noexcept override {
-        return infra::OptRef<ICheatRecords>{*this};
+        return nvram_ ? infra::OptRef<ISaveUpload>{*this} : infra::OptRef<ISaveUpload>{};
     }
 
     [[nodiscard]] Ex<void> on_osd_closed() override { return {}; }
 
     [[nodiscard]] Ex<void> send_dips_();
-    [[nodiscard]] bool nvram_declared_() const noexcept;
     [[nodiscard]] proto::DipChoice current_choice_(const mra::DipRow& d) const noexcept;
 
     StreamLoadHost stream_;
-    std::string btn_names_;
-    std::string btn_defaults_;
     std::string dip_name_;
     std::string nvm_name_;
     mra::SwitchTable switches_{};
-    mra::MraCheatRecords cheats_{};
-    std::uint32_t cheats_dropped_ = 0;
     mra::DipWord dip_cur_{};
     mra::DipWord dip_saved_{};
-    int nvram_index_ = 0;
-    int nvram_size_ = 0;
+    std::optional<mra::NvramSave> nvram_{};
 };
 
 std::unique_ptr<Core> make_arcade(const CoreProfile& p, const CoreGrant& g);

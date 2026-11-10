@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "app/frame_source.h"
-#include "app/video_pump.h"
+#include "app/video_geometry_record.h"
 #include "infra/error.h"
+#include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "hal/fpga_memory.h"
 #include "hal/boards_table.h"
@@ -51,11 +53,11 @@ public:
     [[nodiscard]] std::uint32_t refusals() const noexcept;
 
     [[nodiscard]] std::uint32_t refusals(Refusal why) const noexcept {
-        return refused_[static_cast<std::size_t>(why)];
+        return refused_[infra::ordinal(why)];
     }
 
 private:
-    static constexpr std::size_t kRefusalKinds = static_cast<std::size_t>(Refusal::Count);
+    static constexpr std::size_t kRefusalKinds = infra::ordinal(Refusal::Count);
 
     [[nodiscard]] std::unexpected<Error> refuse(Refusal why, infra::ErrorSite site) noexcept;
 
@@ -63,7 +65,7 @@ private:
     const VideoGeometryCell& geometry_;
     std::uint32_t captures_ = 0;
     std::uint32_t torn_ = 0;
-    std::uint32_t refused_[kRefusalKinds] = {};
+    std::array<std::uint32_t, kRefusalKinds> refused_{};
 };
 
 static_assert(

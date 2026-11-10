@@ -11,6 +11,7 @@
 #include "cores/cdi_block.h"
 #include "cores/core_support.h"
 #include "cores/staging_core.h"
+#include "cores/toc_entry.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
@@ -28,7 +29,7 @@ class CdiCore final : public Core, public IStagingCore, public proto::IBlockServ
 public:
     CdiCore(const CoreProfile& profile, const svc::CuePolicy& cue, const HostServices& host)
         : Core(profile, host),
-          cue_(&cue) {}
+          cue_(cue) {}
 
     [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return geom_; }
 
@@ -36,7 +37,7 @@ public:
 
     [[nodiscard]] DiscType disc_type() const noexcept { return disc_type_; }
 
-    [[nodiscard]] std::size_t toc_entries() const noexcept { return toc_count_; }
+    [[nodiscard]] std::size_t toc_entries() const noexcept { return toc_.size(); }
 
     [[nodiscard]] std::uint32_t declines() const noexcept { return declines_; }
 
@@ -87,18 +88,18 @@ private:
     }
 
     enum class Answer : std::uint8_t { TocArea, Track, LeadOut };
-    [[nodiscard]] Answer classify_(std::int32_t lba) const noexcept;
+    [[nodiscard]] Answer classify_(HeadLba lba) const noexcept;
 
     [[nodiscard]] bool serve_block_(
-        std::int32_t lba,
+        HeadLba lba,
         std::span<std::uint8_t, cdi::kBlockBytes> out
     ) noexcept;
-    void warm_(std::int32_t lba0, std::size_t blocks) noexcept;
+    void warm_(HeadLba first, SectorCount blocks) noexcept;
     svc::DiscMountState refresh_disc_() noexcept;
 
     [[nodiscard]] MountState finish_mount_();
 
-    const svc::CuePolicy* cue_;
+    const svc::CuePolicy& cue_;
 
     infra::OptRef<svc::DiscReadService> discs_{};
     infra::OptRef<proto::CoreSession> session_{};
@@ -111,8 +112,9 @@ private:
     bool audio_cd_ = false;
 
     DiscType disc_type_ = DiscType::CdRom;
-    std::array<cdi::TocEntry, cdi::kTocEntries> toc_{};
-    std::size_t toc_count_ = 0;
+
+    std::array<cdi::TocEntry, cdi::kTocEntries> toc_rows_{};
+    std::span<const cdi::TocEntry> toc_{};
     StagePlan plan_{};
     std::uint32_t declines_ = 0;
     std::uint32_t failed_reads_ = 0;

@@ -8,9 +8,12 @@
 #include <type_traits>
 #include <utility>
 
+#include "infra/indexed_array.h"
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -45,7 +48,7 @@ private:
     using Job = typename Channel::Job;
 
 public:
-    using Index = std::uint8_t;
+    using Index = proto::SlotIndex;
     static constexpr std::size_t kCapacity = N;
 
     class Producer {
@@ -55,7 +58,7 @@ public:
         Producer(typename Channel::Owner owner, std::uint8_t live) noexcept
             : owner_(std::move(owner)) {
             const SeatScope wiring{ProducerSeat};
-            live_ok_ = owner_.set_live(live);
+            live_ok_ = owner_.set_live(live).has_value();
         }
 
         Producer(const Producer&) = delete;
@@ -73,28 +76,28 @@ public:
             const Loan l = owner_.reap();
             if (!l)
                 return std::nullopt;
-            return owner_.index_of(l);
+            return xthread::index_as<proto::SlotIndex>(*owner_.index_of(l));
         }
 
         [[nodiscard]] std::optional<Index> stage() noexcept {
             Loan l = owner_.acquire();
             if (!l)
                 return std::nullopt;
-            const Index i = owner_.index_of(l);
+            const Index i = xthread::index_as<proto::SlotIndex>(*owner_.index_of(l));
             staged_[i] = std::move(l);
             return i;
         }
 
         [[nodiscard]] infra::OptRef<Body> staged(Index i) noexcept {
             seat_assert<ProducerSeat>(ERR_SITE(), "RingSlab::staged off the producer seat");
-            if (i >= N || !staged_[i])
+            if (!i.below<N>() || !staged_[i])
                 return {};
             return infra::OptRef<Body>{staged_[i]->body};
         }
 
         void unstage(Index i) noexcept {
             seat_assert<ProducerSeat>(ERR_SITE(), "RingSlab::unstage off the producer seat");
-            if (i < N)
+            if (i.below<N>())
                 staged_[i] = Loan{};
         }
 
@@ -114,7 +117,7 @@ public:
 
     private:
         typename Channel::Owner owner_;
-        Loan staged_[N]{};
+        infra::IndexedArray<Loan, N, Index> staged_{};
         bool live_ok_ = false;
     };
 
@@ -150,17 +153,16 @@ public:
                 Job j = worker_.take();
                 if (!j)
                     return;
-                const Index i = j.index();
-                hand_[i] = std::move(j);
+                hand_[xthread::index_as<proto::SlotIndex>(j.slot())] = std::move(j);
                 ++held_;
             }
         }
 
-        [[nodiscard]] infra::OptRef<const Body> held(Index i) const noexcept {
+        [[nodiscard]] infra::OptRef<const Body> held(proto::SlotIndex slot) const noexcept {
             seat_assert<ConsumerSeat>(ERR_SITE(), "RingSlab::held off the consumer seat");
-            if (i >= N || !hand_[i])
+            if (!slot.below<N>() || !hand_[slot])
                 return {};
-            return infra::OptRef<const Body>{hand_[i]->body};
+            return infra::OptRef<const Body>{hand_[slot]->body};
         }
 
     private:
@@ -169,7 +171,7 @@ public:
         }
 
         typename Channel::Worker worker_;
-        Job hand_[N]{};
+        infra::IndexedArray<Job, N, proto::SlotIndex> hand_{};
         std::size_t held_ = 0;
     };
 

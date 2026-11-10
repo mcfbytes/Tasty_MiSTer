@@ -5,12 +5,13 @@
 #include <span>
 #include <string_view>
 
-#include "app/input_decode.h"
+#include "app/device_table_loans.h"
 #include "app/input_wire.h"
 #include "hal/boards_table.h"
 #include "svc/input_enumerator.h"
 #include "svc/vfs.h"
 #include "infra/counter.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -27,7 +28,11 @@ public:
         std::uint32_t rejected = 0;
     };
 
-    InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view input_dir = {});
+    InputBuild(
+        const svc::Vfs& vfs,
+        InputWire& wire,
+        std::string_view input_dir = svc::kDefaultInputDir
+    );
     InputBuild(const InputBuild&) = delete;
     InputBuild& operator=(const InputBuild&) = delete;
 
@@ -40,8 +45,6 @@ public:
     const svc::InputEnumerator& enumerator() const noexcept { return en_; }
 
     DeviceTableLoans& tables() noexcept { return tables_; }
-
-    void note_watch_failure() noexcept { n_enum_fail_.add(1); }
 
     Counts counts() const noexcept;
 
@@ -66,7 +69,7 @@ static_assert(
     "which is why enumeration never moves onto the decode lane."
 );
 static_assert(
-    InputBuild::kSeat != InputDecode::kSeat,
+    InputBuild::kSeat != SeatTag::Input,
     "build and decode must be TWO seats: the table is built whole on one and "
     "installed whole on the other, and on one seat the build would run inside "
     "the decode round it is meant to stay out of."

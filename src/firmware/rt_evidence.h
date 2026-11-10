@@ -13,6 +13,12 @@
 
 namespace mister::fw {
 
+struct SeatEvidence {
+    RtSetup sched{};
+    RtSetup affinity{};
+    RtSetup name{};
+};
+
 struct RtEvidence {
     TASTY_SEAT_MEDIATOR(Any, Diag);
     RtSetup mem_lock;
@@ -25,8 +31,7 @@ struct RtEvidence {
     long online_cpus = 0;
     RtSetup main_affinity;
 
-    std::array<RtSetup, hal::kThreadSeats> seat_sched{};
-    std::array<RtSetup, hal::kThreadSeats> seat_affinity{};
+    std::array<SeatEvidence, hal::kThreadSeats> seats{};
 
     RtSetup main_stack_prefault;
     std::size_t main_stack_prefault_bytes = 0;
@@ -39,22 +44,19 @@ struct RtEvidence {
     os::KernelRt kernel = os::KernelRt::Unknown;
 
     os::VmCompaction vm_compaction;
-
-    RtSetup seat_name[hal::kThreadSeats];
 };
 
 struct RtEvidenceRow {
-    using SeatRows = std::array<RtSetup, hal::kThreadSeats>;
     RtSetup RtEvidence::* field = nullptr;
-    SeatRows RtEvidence::* per_seat = nullptr;
+    RtSetup SeatEvidence::* per_seat = nullptr;
     SeatTag seat{};
 
     constexpr const RtSetup& of(const RtEvidence& ev) const noexcept {
-        return per_seat != nullptr ? (ev.*per_seat)[hal::row_index(seat)] : ev.*field;
+        return per_seat != nullptr ? (ev.seats[hal::row_index(seat)].*per_seat) : ev.*field;
     }
 
     constexpr RtSetup& of(RtEvidence& ev) const noexcept {
-        return per_seat != nullptr ? (ev.*per_seat)[hal::row_index(seat)] : ev.*field;
+        return per_seat != nullptr ? (ev.seats[hal::row_index(seat)].*per_seat) : ev.*field;
     }
 
     constexpr bool named() const noexcept { return (field != nullptr) != (per_seat != nullptr); }
@@ -71,11 +73,11 @@ constexpr RtEvidenceRow process_row(RtSetup RtEvidence::* f) noexcept {
 }
 
 constexpr RtEvidenceRow sched_row(SeatTag s) noexcept {
-    return {nullptr, &RtEvidence::seat_sched, s};
+    return {nullptr, &SeatEvidence::sched, s};
 }
 
 constexpr RtEvidenceRow affinity_row(SeatTag s) noexcept {
-    return {nullptr, &RtEvidence::seat_affinity, s};
+    return {nullptr, &SeatEvidence::affinity, s};
 }
 
 inline constexpr std::size_t kRtEvidenceRows = 30;

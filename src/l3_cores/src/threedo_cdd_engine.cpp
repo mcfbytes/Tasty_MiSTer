@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/threedo_cdd_engine.h"
 
+#include <array>
 #include <cstring>
 
 #include "cd_core_detail.h"
 #include "cores/cd_head_prime.h"
+#include "cores/cd_msf.h"
 #include "infra/byte_view.h"
 
 namespace mister::cores {
 
 namespace {
 
-constexpr std::uint8_t kCommNop = 0x00;
-constexpr std::uint8_t kCommRead = 0x10;
-constexpr std::uint8_t kCommNext = 0x20;
+constexpr std::array<std::uint16_t, 4> kStatusWords{};
+
 constexpr std::uint8_t kDiscDaOrCdrom = 0x00;
 
 constexpr std::size_t kHeaderBytes = 16;
@@ -21,55 +22,65 @@ constexpr std::size_t kChecksumBytes = 2;
 constexpr std::size_t kInfoTailBytes = 128;
 constexpr std::size_t kInfoTailOffset = 1024;
 
-constexpr std::int32_t lba_from_command(std::span<const std::uint8_t, 8> c) noexcept {
-    const std::int32_t raw = (static_cast<std::int32_t>(c[1]) << 16)
-        | (static_cast<std::int32_t>(c[2]) << 8)
-        | static_cast<std::int32_t>(c[3]);
-    if (c[4] != 0)
-        return raw;
-    return static_cast<std::int32_t>(
-        static_cast<std::uint32_t>(c[1]) * svc::kSecondsPerMinute * svc::kFramesPerSecond
-        + static_cast<std::uint32_t>(c[2]) * svc::kFramesPerSecond
-        + c[3]
+}
+
+ThreeDoCddEngine::CddCommand ThreeDoCddEngine::CddCommand::of(
+    std::span<const std::uint16_t, kWords> words
+) noexcept {
+
+    const auto byte = [words](std::size_t at) noexcept {
+        const std::uint16_t word = words[at / 2];
+        return static_cast<std::uint8_t>(at % 2 == 0 ? word & 0xFF : word >> 8);
+    };
+
+    CddCommand out;
+    switch (byte(0)) {
+        case static_cast<std::uint8_t>(Op::Nop):
+            out.op = Op::Nop;
+            break;
+        case static_cast<std::uint8_t>(Op::Read):
+            out.op = Op::Read;
+            break;
+        case static_cast<std::uint8_t>(Op::Next):
+            out.op = Op::Next;
+            break;
+        default:
+            break;
+    }
+
+    const std::uint32_t raw = (std::uint32_t{byte(1)} << 16)
+        | (std::uint32_t{byte(2)} << 8)
+        | std::uint32_t{byte(3)};
+    out.target = byte(4) != 0 ? HeadLba::of(proto::Lba{raw})
+                              : HeadLba::of(svc::Msf{byte(1), byte(2), byte(3)});
+    out.blocks = SectorCount::of(
+        proto::BlockCount{(std::uint32_t{byte(5)} << 8) | std::uint32_t{byte(6)}}
     );
-}
-
-constexpr std::int32_t blocks_from_command(std::span<const std::uint8_t, 8> c) noexcept {
-    return (static_cast<std::int32_t>(c[5]) << 8) | static_cast<std::int32_t>(c[6]);
-}
-
+    return out;
 }
 
 Ex<void> ThreeDoCddEngine::do_accept(std::span<const std::uint16_t> words, CdDialectPorts& p) {
-
-    for (std::size_t i = 0; i < 4; ++i) {
-        comm_[2 * i] = static_cast<std::uint8_t>(words[i]);
-        comm_[2 * i + 1] = static_cast<std::uint8_t>(words[i] >> 8);
-    }
-    command_exec_(p.geom);
+    command_exec_(CddCommand::of(words.first<CddCommand::kWords>()), p.geom);
     return {};
 }
 
-void ThreeDoCddEngine::command_exec_(const svc::DiscGeometry& geom) {
-    const std::span<const std::uint8_t, 8> c{comm_};
-    const std::int32_t cmd_lba = lba_from_command(c);
-    const std::int32_t cmd_blocks = blocks_from_command(c);
-    switch (comm_[0]) {
-        case kCommNop:
+void ThreeDoCddEngine::command_exec_(const CddCommand& command, const svc::DiscGeometry& geom) {
+    switch (command.op) {
+        case Op::Nop:
             break;
-        case kCommRead:
-            lba_ = HeadLba{cmd_lba} - kPregapSectors;
+        case Op::Read:
+            lba_ = command.target - kPregapSectors;
             hint_at_(lba_, geom);
             track_ = track_scan(geom.toc, lba_);
             read_pend_ = true;
-            block_reads_ = SectorCount{cmd_blocks};
+            block_reads_ = command.blocks;
             break;
-        case kCommNext:
+        case Op::Next:
 
             if (block_reads_ > SectorCount{})
                 read_pend_ = true;
             break;
-        default:
+        case Op::Refused:
             read_pend_ = false;
             break;
     }
@@ -79,7 +90,7 @@ Ex<void> ThreeDoCddEngine::do_tick(CdDialectPorts& p) {
 
     if (read_pend_ && p.egress_busy()) {
         ++stats_.busy_ticks;
-        return send_frame_words_(0, p.link);
+        return send_status_words_(kStatusWords, p.link);
     }
     if (read_pend_) {
         state_ = State::Read;
@@ -87,7 +98,7 @@ Ex<void> ThreeDoCddEngine::do_tick(CdDialectPorts& p) {
     } else {
         state_ = State::Idle;
     }
-    if (auto r = send_frame_words_(0, p.link); !r)
+    if (auto r = send_status_words_(kStatusWords, p.link); !r)
         return r;
     return update_(p);
 }
@@ -106,7 +117,7 @@ Ex<void> ThreeDoCddEngine::update_(CdDialectPorts& p) {
     if (toc.last.contains(track_) && toc.at(track_).type == svc::TrackType::Mode1) {
         const svc::Track& tk = toc.at(track_);
 
-        if (toc.sector_size == kUserData || lba_ < head_of(tk.start)) {
+        if (toc.sector_size == svc::kUserDataBytes || lba_ < head_of(tk.start)) {
             const Msf msf = msf_of(lba_ + kPregapSectors);
             std::uint8_t header[kHeaderBytes];
             header[0] = 0x00;
@@ -139,17 +150,20 @@ Ex<void> ThreeDoCddEngine::data_sector_send_(
         std::memcpy(sec_buf_, header.data(), header.size());
 
     std::uint16_t crc = 0;
-    for (std::size_t i = 0; i < kUserData; ++i) {
+    for (std::size_t i = 0; i < svc::kUserDataBytes; ++i) {
         crc = static_cast<std::uint16_t>(crc + sec_buf_[kHeaderBytes + i]);
     }
-    sec_buf_[kHeaderBytes + kUserData] = static_cast<std::uint8_t>(crc);
-    sec_buf_[kHeaderBytes + kUserData + 1] = static_cast<std::uint8_t>(crc >> 8);
+    sec_buf_[kHeaderBytes + svc::kUserDataBytes] = static_cast<std::uint8_t>(crc);
+    sec_buf_[kHeaderBytes + svc::kUserDataBytes + 1] = static_cast<std::uint8_t>(crc >> 8);
 
     ++stats_.data_sectors;
     return p.link.send_data(
         facts_.profile.io.data,
         std::as_bytes(
-            std::span<const std::uint8_t>(sec_buf_ + kHeaderBytes, kUserData + kChecksumBytes)
+            std::span<const std::uint8_t>(
+                sec_buf_ + kHeaderBytes,
+                svc::kUserDataBytes + kChecksumBytes
+            )
         )
     );
 }
@@ -162,8 +176,9 @@ void ThreeDoCddEngine::hint_at_(HeadLba lba, const svc::DiscGeometry& geom) noex
 
     prime_head(
         facts_.disc,
-        static_cast<std::int32_t>(at->v),
-        {.form = toc.sector_size == kUserData ? svc::DiscForm::UserData : svc::DiscForm::RawFrame}
+        *at,
+        {.form = toc.sector_size == svc::kUserDataBytes ? svc::DiscForm::UserData
+                                                        : svc::DiscForm::RawFrame}
     );
 }
 
@@ -177,24 +192,18 @@ void ThreeDoCddEngine::read_data_(const svc::DiscGeometry& geom) {
     if (!at)
         return;
 
-    const bool got = toc.sector_size == kUserData
-        ? facts_.disc.take(
-              svc::DiscForm::UserData,
-              *at,
-              std::as_writable_bytes(std::span<std::uint8_t>(sec_buf_ + kHeaderBytes, kUserData))
-          ) != 0
-        : facts_.disc.take(
-              svc::DiscForm::RawFrame,
-              *at,
-              std::as_writable_bytes(std::span<std::uint8_t>(sec_buf_, kRawFrame))
-          ) != 0;
+    const svc::DiscForm form = toc.sector_size == svc::kUserDataBytes ? svc::DiscForm::UserData
+                                                                      : svc::DiscForm::RawFrame;
+    const std::span<std::uint8_t> dst = form == svc::DiscForm::UserData
+        ? std::span<std::uint8_t>(sec_buf_ + kHeaderBytes, svc::kUserDataBytes)
+        : std::span<std::uint8_t>(sec_buf_, svc::kRawFrameBytes);
+    const bool got = facts_.disc
+                         .take(svc::DiscAsk{.form = form, .lba = *at}, std::as_writable_bytes(dst))
+                         .is_bytes();
     if (!got)
         ++stats_.substitutes;
     if (const std::optional<svc::Lba> next = (head + SectorCount{1}).readable()) {
-        facts_.disc.hint(
-            toc.sector_size == kUserData ? svc::DiscForm::UserData : svc::DiscForm::RawFrame,
-            *next
-        );
+        facts_.disc.hint(svc::DiscAsk{.form = form, .lba = *next});
     }
 }
 
@@ -242,17 +251,13 @@ Ex<void> ThreeDoCddEngine::build_disc_info(
     return {};
 }
 
-Ex<std::size_t> ThreeDoCddEngine::do_disc_descriptor(
-    std::span<std::byte> out,
+Ex<std::span<const std::byte>> ThreeDoCddEngine::do_disc_descriptor(
+    std::span<std::byte, kMaxDescriptorBytes> out,
     const svc::DiscGeometry& geom
 ) {
-    if (out.size() < kDiscInfoBytes) {
-        return std::unexpected(Error{Errc::core_load, ERR_SITE(), 1});
-    }
-    if (auto r = build_disc_info(out.subspan<0, kDiscInfoBytes>(), geom); !r) {
+    if (auto r = build_disc_info(out, geom); !r)
         return std::unexpected(r.error());
-    }
-    return kDiscInfoBytes;
+    return std::span<const std::byte>(out);
 }
 
 Ex<void> ThreeDoCddEngine::do_push_sector(CdDialectPorts&) {
@@ -260,7 +265,7 @@ Ex<void> ThreeDoCddEngine::do_push_sector(CdDialectPorts&) {
     return {};
 }
 
-Ex<void> ThreeDoCddEngine::do_notify_disc(bool loaded, const svc::DiscGeometry& geom) {
+void ThreeDoCddEngine::do_notify_disc(bool loaded, const svc::DiscGeometry& geom) noexcept {
 
     loaded_ = loaded;
 
@@ -269,7 +274,6 @@ Ex<void> ThreeDoCddEngine::do_notify_disc(bool loaded, const svc::DiscGeometry& 
 
     if (!loaded)
         do_reset_machine();
-    return {};
 }
 
 void ThreeDoCddEngine::do_reset_machine() noexcept {
@@ -289,19 +293,29 @@ CdEngine::DriveView ThreeDoCddEngine::do_drive_view(const svc::DiscGeometry& geo
     const svc::Toc& toc = geom.toc;
     const bool is_data = toc.last.contains(track_) && toc.at(track_).type != svc::TrackType::Cdda;
 
-    return DriveView{static_cast<std::uint8_t>(state_), track_, lba_, lba_, is_data};
+    return DriveView{
+        .state = drive_state_(),
+        .track = track_,
+        .lba = lba_,
+        .audio_lba = lba_,
+        .is_data = is_data
+    };
 }
 
-std::size_t ThreeDoCddEngine::do_status_words(
-    std::uint64_t,
-    std::span<std::uint16_t, kMaxStatusWords> out
-) const noexcept {
-
-    out[0] = 0;
-    out[1] = 0;
-    out[2] = 0;
-    out[3] = 0;
-    return 4;
+CdDriveState ThreeDoCddEngine::drive_state_() const noexcept {
+    switch (state_) {
+        case State::Idle:
+            return CdDriveState::Stopped;
+        case State::Open:
+            return CdDriveState::Open;
+        case State::Read:
+            return CdDriveState::Reading;
+        case State::Pause:
+            return CdDriveState::Paused;
+        case State::Stop:
+            return CdDriveState::Stopped;
+    }
+    return CdDriveState::Stopped;
 }
 
 }

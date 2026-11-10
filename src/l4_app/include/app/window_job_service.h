@@ -13,6 +13,7 @@
 #include "infra/error.h"
 #include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 #include "hal/phys_region.h"
 #include "proto/reset_edge.h"
@@ -25,8 +26,8 @@ namespace mister::app {
 struct WindowJobSlot {
     TASTY_SEAT_MEDIATOR(Any, Any);
     cores::WindowJobBuild build = nullptr;
-    Error err{Errc::io, infra::kNoSite, 0};
-    bool ok = false;
+
+    std::optional<Error> fault{};
     cores::WindowJobOrder order;
     cores::JobArena arena;
 };
@@ -102,7 +103,7 @@ private:
 
     [[nodiscard]] Chan::Loan acquire_() noexcept;
     void send_(Chan::Loan&& loan, cores::WindowJobBuild kind) noexcept;
-    void finish_(bool ok, Error err) noexcept;
+    void finish_(std::optional<Error> fault) noexcept;
 
     struct Rt {
         bool armed = false;

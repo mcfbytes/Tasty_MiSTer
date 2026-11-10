@@ -66,21 +66,14 @@ SessionRows::SessionRows(const Wiring& w) noexcept
     return rebind_census(rows, owner);
 }
 
-std::uint8_t SessionRows::issued_params(proto::user_io::PollShape s) noexcept {
+proto::ParamSet SessionRows::issued_params(proto::user_io::PollShape s) noexcept {
     TASTY_SEAT_BODY(SessionRows);
-    switch (s) {
-        case proto::user_io::PollShape::InfoPoll:
-        case proto::user_io::PollShape::F12ModPoll:
-            return 0x01;
-        case proto::user_io::PollShape::RumblePoll:
+    if (s != proto::user_io::PollShape::RumblePoll)
+        return proto::ParamSet{};
 
-            if (const auto m = rumble_pads_reader_.take_if_changed(input_.rumble_pads_cell()))
-                rumble_pads_ = *m;
-            return rumble_pads_;
-        case proto::user_io::PollShape::kCount:
-            break;
-    }
-    return 0;
+    if (const auto m = rumble_pads_reader_.take_if_changed(input_.rumble_pads_cell()))
+        rumble_pads_ = *m;
+    return rumble_pads_.as_param_set();
 }
 
 std::size_t SessionRows::put_census_row_(

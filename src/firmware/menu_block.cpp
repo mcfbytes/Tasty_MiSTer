@@ -30,7 +30,7 @@ MenuBlock::MenuBlock(
 )
     : diag_path_{plat.diag_path},
       bt_{parts.wires.bt},
-      trace_{parts.wires.events},
+      trace_{parts.wires.events, parts.wires.owner_events},
       ui_writes_{plat.vfs, parts.wires.io_wake},
       stores_{plat, parts.cells.cheat_blob, ui_writes_},
       mgl_pump_{
@@ -55,10 +55,11 @@ MenuBlock::MenuBlock(
       ui_model_{ui::MenuModel::Wiring{
           .conf_str = parts.cells.conf_str,
           .status = parts.session.link.status_cell(),
-          .dip = parts.session.link.dip_cell(),
+          .dip_labels = parts.session.link.dip_labels_cell(),
+          .dip_choices = parts.session.link.dip_choices_cell(),
           .option = parts.session.link.option_cell(),
           .launcher = launcher.launcher_state_,
-          .config_slot = parts.session.link.config_slot_cell(),
+          .config_slot = parts.session.owner.config_slot_cell(),
           .tx_digest = parts.cells.cheat_link.tx_digest_cell(),
           .cheat_catalog = parts.cells.cheat_catalog,
           .cheats = stores_.cheats_,
@@ -77,7 +78,7 @@ MenuBlock::MenuBlock(
       },
       host_facts_{plat.vfs, parts.wires.clock, ui_model_, plat.kernel_rt},
       ui_sink_{UiSink::Wiring{
-          .menu = infra::OptRef{ui_model_},
+          .menu = ui_model_,
           .ctx = ui_context_,
           .trace = trace_,
           .mgl = mgl_pump_,
@@ -102,6 +103,8 @@ MenuBlock::MenuBlock(
               .conf_str = parts.cells.conf_str,
               .hd = hd_.screen(),
               .writes = infra::OptRef<app::UiWriteLane>{ui_writes_},
+              .video = infra::OptRef<const app::VideoPump>{parts.wires.video},
+              .fb = infra::OptRef<const app::HpsFramebuffer>{hps_fb_},
           }
       },
       save_states_{app::SaveStateAttach::Wiring{
@@ -123,7 +126,11 @@ MenuBlock::MenuBlock(
           .fb = hps_fb_,
           .video = parts.wires.video,
           .osd = ui_model_
-      }} {}
+      }} {
+
+    mgl_pump_.set_info(infra::OptRef<app::InfoSink>{info_sink_});
+    ui_context_.info = infra::OptRef<app::InfoSink>{info_sink_};
+}
 
 SessionMode::Face::Parts MenuBlock::parts() noexcept {
     return Parts{
@@ -132,7 +139,6 @@ SessionMode::Face::Parts MenuBlock::parts() noexcept {
         .shot_sink = infra::OptRef<app::IEventSink>{ui_sink_},
         .mgl = infra::OptRef<app::MglPump>{mgl_pump_},
         .fb = infra::OptRef<app::HpsFramebuffer>{hps_fb_},
-        .uart = true,
         .bt = bt_,
         .launcher_screen = infra::OptRef{launcher_screen_},
         .ui_round = infra::OptRef<app::IUiRoundPort>{ui_round_},

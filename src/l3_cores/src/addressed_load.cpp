@@ -1,32 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/addressed_load.h"
 
-#include <limits>
-
 #include "hal/fabric_region.h"
 
 namespace mister::cores {
 
 std::optional<TransferRow> AddressedLoad::window_row(
     hal::FabricAddr addr,
-    std::uint64_t bytes,
+    proto::FileSize bytes,
     proto::WideIoIndex index,
     const hal::PhysRegion& aperture
 ) noexcept {
-    if (addr == hal::FabricAddr{} || bytes > std::numeric_limits<std::uint32_t>::max()) {
+
+    if (addr == hal::FabricAddr{} || bytes.high_word() != 0)
         return std::nullopt;
-    }
 
     if (!hal::resolve_load_region(aperture, hal::to_phys(addr), 1))
         return std::nullopt;
     TransferRow r{};
     r.dest = RowDest::Window;
     r.index = index;
-
     r.addr = addr.v;
     r.window = WindowRef::physical();
     r.bracket = RowBracket::AroundWithLength;
-    r.file_len = static_cast<std::uint32_t>(bytes);
+    r.file_len = bytes;
     return r;
 }
 
@@ -39,7 +36,7 @@ Ex<LoadPlan> AddressedLoad::plan(const LoadAsk& ask, const proto::StatusWord&) {
         p.rows[0] = TransferRow{.index = ask.index};
         return p;
     }
-    p.rows[0] = window_row(ask.load_addr, ask.size.v, ask.index, aperture_)
+    p.rows[0] = window_row(ask.load_addr, ask.size, ask.index, aperture_)
                     .value_or(TransferRow{.index = ask.index});
     return p;
 }
@@ -48,7 +45,7 @@ void AddressedLoad::shape(const TransferRow&, std::span<std::uint8_t>, std::uint
     TASTY_SEAT_BODY(AddressedLoad);
 }
 
-Ex<void> AddressedLoad::finish(ICoreWindow*) {
+Ex<void> AddressedLoad::finish(infra::OptRef<ICoreWindow>) {
     TASTY_SEAT_BODY(AddressedLoad);
     return {};
 }

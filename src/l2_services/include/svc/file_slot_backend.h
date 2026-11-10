@@ -12,15 +12,16 @@
 #include "svc/file.h"
 #include "svc/slot_path.h"
 #include "svc/storage_backend.h"
-#include "svc/vfs.h"
 
 namespace mister::svc {
+
+class Vfs;
 
 class FileSlotBackend final : public IStorageBackend {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    explicit FileSlotBackend(const Vfs& vfs) noexcept : vfs_(&vfs) {}
+    explicit FileSlotBackend(const Vfs& vfs) noexcept : vfs_(vfs) {}
 
     FileSlotBackend(const FileSlotBackend&) = delete;
     FileSlotBackend& operator=(const FileSlotBackend&) = delete;
@@ -42,7 +43,7 @@ public:
     void release(proto::SlotIndex slot) noexcept override;
 
 private:
-    const Vfs* vfs_;
+    const Vfs& vfs_;
     SlotPathText path_{};
     std::unique_ptr<IFile> file_{};
 };

@@ -28,14 +28,14 @@ struct alignas(MonoInstant) RoundTrace {
     static_assert(kMarks >= kMaxServices + kOwnMarks.size(), "a full sweep plus Steps and Tail");
 
     struct Mark {
-        RoundTiming::Cause at{};
+        RoundTiming::Blame at{};
         RoundSpan took{};
     };
 
     struct LeadUp {
         MonoInstant start{};
         RoundSpan took{};
-        RoundTiming::Cause cause{};
+        RoundTiming::Blame blame{};
     };
 
     struct Round {
@@ -43,7 +43,7 @@ struct alignas(MonoInstant) RoundTrace {
         MonoInstant end{};
         RoundSeq seq{};
         RoundSpan wake{};
-        RoundTiming::Cause cause{};
+        RoundTiming::Blame blame{};
         bool marks_lost = false;
         std::array<std::byte, 3> pad_{};
         std::array<Mark, kMarks> marks{};

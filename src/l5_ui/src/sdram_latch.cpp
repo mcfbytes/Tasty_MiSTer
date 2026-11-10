@@ -12,12 +12,12 @@ void SdramLatch::on_mask(
 ) noexcept {
     TASTY_SEAT_BODY(SdramLatch);
 
-    if (front_end && cfg_ == proto::OsdMask{} && m.osd_word().has(proto::kSdramPresent)) {
+    if (front_end && !cfg_.has_value() && m.osd_word().has(proto::kSdramPresent)) {
         cfg_ = m.osd_word();
     }
 
-    if (front_end && cfg_ != proto::OsdMask{} && !reported_) {
-        if (push_ask(asks, app::UiRequest::SdramDetected{.osd_mask = cfg_})) {
+    if (front_end && cfg_.has_value() && !reported_) {
+        if (push_ask(asks, app::UiRequest::SdramDetected{.osd_mask = *cfg_})) {
             reported_ = true;
         } else {
             ++refusals_;

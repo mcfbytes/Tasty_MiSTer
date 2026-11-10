@@ -6,13 +6,14 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
-#include "proto/joystick.h"
-#include "proto/user_io/rumble_poll.h"
+#include "proto/joystick_port.h"
+#include "proto/user_io/rumble_motors.h"
 #include "svc/device_match.h"
 #include "svc/input_device.h"
 #include "svc/deadzone_rule.h"
@@ -27,8 +28,6 @@
 
 namespace mister::svc {
 
-inline constexpr unsigned kMaxDevices = 32;
-
 inline constexpr std::uint32_t kFnvOffsetBasis = 0x811c9dc5u;
 inline constexpr std::uint32_t kFnvPrime = 0x01000193u;
 [[nodiscard]] std::uint32_t fnv1a_32(
@@ -36,58 +35,13 @@ inline constexpr std::uint32_t kFnvPrime = 0x01000193u;
     std::uint32_t seed = kFnvOffsetBasis
 ) noexcept;
 
-struct MouseFixupRule {
-    DeviceMatch match;
-    QuirkId quirk;
-    const char* why;
-};
-
-std::optional<MouseFixupRule> find_mouse_fixup(Vid vid, Pid pid);
-
-enum class NameMatch : std::uint8_t {
-    Any = 0,
-    Exact,
-    Contains,
-    ContainsCs,
-};
-
-enum class AdmitAction : std::uint8_t {
-    Reject = 0,
-    Assign,
-};
-
-struct AdmissionRule {
-    Vid vid;
-    Pid pid;
-    const char* name;
-    NameMatch name_match;
-    AdmitAction action;
-    QuirkId quirk;
-    const char* why;
-};
-
-std::span<const AdmissionRule> admission_rules();
-
-struct NodeFacts {
-    Vid vid{};
-    Pid pid{};
-    std::string_view name{};
-};
-
-struct Admission {
-    bool accept = true;
-    QuirkId quirk = QuirkId::None;
-};
-
-Admission admit_node(const NodeFacts& f);
-
 class InputService final : public IRumbleOut {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
     static constexpr bool kBornGrabbed = true;
 
-    [[nodiscard]] static InputService create();
+    [[nodiscard]] static Ex<InputService> open(std::string_view input_dir);
 
     void install(DeviceTable& incoming) noexcept;
 
@@ -128,7 +82,7 @@ public:
     const InputCounters& counters() const noexcept { return counters_; }
 
 private:
-    InputService() = default;
+    explicit InputService(HotplugWatch watch) noexcept : hotplug_(std::move(watch)) {}
 
     void note_report(InputDevice& dev);
     void recompute_joy_masks();
@@ -139,7 +93,7 @@ private:
 
     DeviceTable table_{};
     PlayerSlots players_;
-    HotplugWatch hotplug_{};
+    HotplugWatch hotplug_;
 
     bool grabbed_ = kBornGrabbed;
     bool cfg_rumble_ = true;

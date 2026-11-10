@@ -2,17 +2,26 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <tuple>
 
 #include "app/types.h"
+#include "cores/movie_codec.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
 inline constexpr std::size_t kReplayPorts = 4;
+
+inline constexpr proto::IoIndex kNoRomSlot{0xFF};
+
+using ArmMicros = std::chrono::duration<std::uint32_t, std::micro>;
+using CodecNs = std::chrono::duration<std::uint32_t, std::nano>;
 
 struct ReplayMsg {
     TASTY_SEAT_EXEMPT(component);
@@ -24,30 +33,29 @@ struct ReplayMsg {
 
     static constexpr std::size_t kStore = 24;
 
-    enum class P0Parity : std::uint8_t { Any, Even, Odd, AfterSilence };
-
-    enum class PowerOnEvent : std::uint8_t { LoadEnd, ResetPulse };
+    using P0Parity = cores::IReplayCore::Parity;
+    using PowerOnEvent = cores::IReplayCore::PowerOnEvent;
 
     struct Arm {
         static constexpr Kind kKind = Kind::Arm;
-        std::uint8_t ports = 0;
-        std::uint8_t rom_index = 0xFF;
+        svc::PlayerMask ports{};
+        proto::IoIndex rom_index = kNoRomSlot;
         bool vsync_ok = false;
         P0Parity p0 = P0Parity::Any;
-        std::int16_t lead = 0;
+        ArmLead lead{};
         PowerOnEvent event = PowerOnEvent::LoadEnd;
-        std::uint8_t late_frames = 0;
-        std::uint32_t offset_us = 0;
-        std::uint32_t period_ns = 0;
-        std::uint32_t line0_ns = 0;
-        std::uint32_t poweron_ns = 0;
+        cores::LateFrames late_frames{};
+        ArmMicros offset_us{};
+        CodecNs period_ns{};
+        CodecNs line0_ns{};
+        CodecNs poweron_ns{};
     };
 
     struct Input {
         static constexpr Kind kKind = Kind::Input;
         MovieFrame first{};
         MovieFrame last{};
-        std::array<std::uint32_t, kReplayPorts> mask{};
+        std::array<proto::JoyMask, kReplayPorts> mask{};
     };
 
     struct End {

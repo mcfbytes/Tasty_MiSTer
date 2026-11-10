@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/rt_main.h"
 
-#include <algorithm>
-
 #include "app/input_emit.h"
 #include "app/input_wire.h"
 #include "app/osd_wire.h"
+#include "app/delivered.h"
 #include "app/link_session.h"
 #include "app/link_op_facts.h"
 #include "app/core_frame_counter.h"
@@ -69,11 +68,16 @@ void RtMain::serve() noexcept {
         return;
     }
     round(tick);
-    if (wire_held_()) {
+
+    if (transfer_holds_()) {
         exec_.end_round(false);
         return;
     }
     exec_.service_round();
+    if (wire_held_()) {
+        exec_.end_round(false);
+        return;
+    }
 
     const bool drained = drain_fio_();
     const bool wrote = !drained
@@ -90,23 +94,26 @@ void RtMain::settle() noexcept {
 
 bool RtMain::drain_fio_() noexcept {
 
-    std::uint32_t spent = replay_ ? replay_->take_round_words() : 0u;
+    FioRoundBudget budget{round_budget_words_};
+    if (replay_)
+        budget.spend(replay_->take_round_words());
     if (frames_)
-        spent += frames_->take_round_words();
+        budget.spend(frames_->take_round_words());
     if (scanout_)
-        spent += scanout_->take_round_words();
+        budget.spend(scanout_->take_round_words());
     if (!session_)
         return false;
 
-    spent += session_->saves().take_round_words();
+    budget.spend(session_->saves().take_round_words());
     proto::SpiFioQueue& q = session_->binder().fio_queue();
     if (session_->park().engaged()) {
         q.abandon();
         return false;
     }
-    session_->service_saves(round_budget_words_ - std::min(spent, round_budget_words_));
-    spent += session_->saves().take_round_words();
-    return q.drain(round_budget_words_ - std::min(spent, round_budget_words_)) != 0;
+
+    session_->service_saves(budget.remaining());
+    budget.spend(session_->saves().take_round_words());
+    return q.drain(budget.remaining()) != proto::FioWordCount{};
 }
 
 void RtMain::round(bool tick) {
@@ -153,32 +160,31 @@ void RtMain::drain_ops() noexcept {
     const bool save_window = session_->saves().holds_fio();
 
     bool closed = session_->park().engaged();
-    unsigned n = 0;
+    OpRoundBudget link_ops{kLinkOpBudget};
     if (!save_window) {
-        n += drain_(session_->link_inbox(), n, kLinkOpBudget, closed);
+        drain_(session_->link_inbox(), link_ops, closed);
         closed = closed || session_->park().engaged();
-        n += drain_(session_->ui_inbox(), n, kLinkOpBudget, closed);
+        drain_(session_->ui_inbox(), link_ops, closed);
     }
 
     if (wire_)
         wire_->consume_kick();
-    (void)drain_(session_->input_inbox(), 0, kInputOpBudget, closed);
+    OpRoundBudget input_ops{kInputOpBudget};
+    drain_(session_->input_inbox(), input_ops, closed);
 }
 
 template <SeatTag Producer>
-unsigned RtMain::drain_(
+void RtMain::drain_(
     LinkTxChannel<Producer>& inbox,
-    unsigned already,
-    unsigned budget,
+    OpRoundBudget& budget,
     bool windows_closed
 ) noexcept {
     constexpr bool pads = Producer == SeatTag::Input;
-    unsigned got = 0;
-    while (already + got < budget && !wire_held_()) {
+    while (!budget.exhausted() && !wire_held_()) {
         const auto op = inbox.pop();
         if (!op)
             break;
-        ++got;
+        budget.take();
 
         if (pads && replay_ && replay_->suppresses(*op))
             continue;
@@ -187,7 +193,8 @@ unsigned RtMain::drain_(
         const Delivered d = session_->deliver(*op, inbox, windows_closed);
 
         if (replay_ && session_->held().tally().downloads_closed != ends) {
-            replay_->note_download_end(session_->last_download_index());
+            if (const auto end = session_->last_download())
+                replay_->note_download_end(*end);
         }
 
         if (replay_ && session_->tally().resets_pulsed != resets)
@@ -196,7 +203,6 @@ unsigned RtMain::drain_(
         if (d.round_spent && round_cost_for(infra::kind_of(*op)) == RoundCost::Payload)
             break;
     }
-    return got;
 }
 
 void RtMain::scanout_step_() noexcept {
@@ -229,7 +235,7 @@ void RtMain::replay_step_() noexcept {
     const proto::LateAnswers late = session_ ? session_->take_late_answers() : proto::LateAnswers{};
     replay_->tick(
         replay_ready_(),
-        core_edge_seq_().v,
+        core_edge_seq_(),
         late,
         static_cast<std::uint32_t>(replay_ring_.size())
     );
@@ -272,10 +278,9 @@ Ex<void> RtMain::pump_boot() {
         }
         drain_ops();
 
-        s.streams().pump_on_caller();
         s.disks().pump_on_caller();
         s.settle_boot_slot_mount();
-        s.binder().service_on_caller(s.clock().now().count());
+        s.binder().service_on_caller(s.clock().now().time_since_epoch().count());
         if (s.session_starting()) {
             return std::unexpected(
                 Error{Errc::would_block, ERR_SITE(), static_cast<std::uint32_t>(s.state())}
@@ -291,6 +296,10 @@ bool RtMain::switch_window_() const noexcept {
 
 bool RtMain::wire_held_() const noexcept {
     return session_ && session_->wire_held();
+}
+
+bool RtMain::transfer_holds_() const noexcept {
+    return session_ && session_->wire_hold() == LinkSession::WireHold::Transfer;
 }
 
 bool RtMain::session_live_() const noexcept {

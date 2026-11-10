@@ -23,7 +23,7 @@ svc::DiscMountState CdDiscSlot::refresh(infra::OptRef<CdEngine> engine) noexcept
         if (st == svc::DiscMountState::Mounted || st == svc::DiscMountState::Failed) {
             geom_ = discs_->geometry();
             if (engine) {
-                (void)engine->notify_disc(st == svc::DiscMountState::Mounted, geom_);
+                engine->notify_disc(st == svc::DiscMountState::Mounted, geom_);
             }
         }
     }
@@ -33,7 +33,7 @@ svc::DiscMountState CdDiscSlot::refresh(infra::OptRef<CdEngine> engine) noexcept
 
 svc::DiscMountState CdDiscSlot::arm_mount(
     svc::DiscOp op,
-    const svc::CuePolicy* policy,
+    infra::OptRef<const svc::CuePolicy> policy,
     std::string_view path
 ) noexcept {
     return discs_->arm_mount(op, policy, path);

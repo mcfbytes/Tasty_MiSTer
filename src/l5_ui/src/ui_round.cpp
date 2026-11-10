@@ -5,10 +5,13 @@
 #include <cstdint>
 
 #include "app/hd_osd_screen.h"
+#include "app/hps_framebuffer.h"
+#include "app/info_origin.h"
 #include "app/page_description.h"
 #include "app/link_event_dispatch.h"
 #include "app/recents_store.h"
 #include "app/ui_write_lane.h"
+#include "app/video_pump.h"
 #include "ui/host_sampler.h"
 #include "ui/key_decoder.h"
 #include "ui/osd_visible_file.h"
@@ -70,7 +73,7 @@ bool UiRound::poll_buttons(bool link_work) {
             return false;
         settling_ = false;
     }
-    const std::chrono::nanoseconds now = clock_.now();
+    const std::chrono::nanoseconds now = clock_.now().time_since_epoch();
 
     {
         const bool but = osd_held_;
@@ -81,7 +84,8 @@ bool UiRound::poll_buttons(bool link_work) {
             ++button_longs_;
             input_.note_button_action();
 
-            if (model_.stack().top_id() == PageId::ScriptRun) {
+            const auto top = model_.stack().top();
+            if (top && top->takes_osd_button_backspace()) {
                 decoder_.push_synth(proto::KeyCode{KEY_BACKSPACE}.with_release());
                 ++button_injects_;
                 drained = true;
@@ -228,13 +232,18 @@ app::UiRoundEdge UiRound::compose_(bool link_work) {
     if (poll_buttons(link_work))
         drained = true;
 
-    const bool deadline_due = model_.deadline_due(clock_.now());
-    const Page* top = model_.stack().top();
-    const bool page_poll = top != nullptr && top->facts().wake_every_round;
+    const bool deadline_due = model_.deadline_due(clock_.now().time_since_epoch());
+    const auto top = model_.stack().top();
+    const bool page_poll = top && top->facts().wake_every_round;
 
     const bool hd_switchable = hd_ && hd_->available();
-    if (hd_switchable != ctx_.sys.hd_switchable)
+    if (hd_switchable != ctx_.session.hd_switchable)
         model_.request_repaint();
+
+    ctx_.session.info_origin = app::info_origin_y(
+        video_ && video_->direct_video(),
+        fb_ && fb_->raised()
+    );
     const bool idle = !drained
         && !page_poll
         && !decoder_.pending()
@@ -244,8 +253,10 @@ app::UiRoundEdge UiRound::compose_(bool link_work) {
     if (!idle) {
         ++pumps_;
 
-        sampler_.sample(ctx_.sys, ctx_.status);
-        ctx_.sys.hd_switchable = hd_switchable;
+        const HostSample host = sampler_.snapshot();
+        ctx_.sys = host.sys;
+        ctx_.status = host.bar;
+        ctx_.session.hd_switchable = hd_switchable;
         ++samples_;
 
         (void)model_.pump(ctx_, renderer_);
@@ -260,7 +271,7 @@ app::UiRoundEdge UiRound::compose_(bool link_work) {
             .bluetooth = ctx_.status.bluetooth,
             .rt = ctx_.sys.kernel == os::KernelRt::PreemptRt
         };
-        hd_->tick(page, model_.pause_badge(), slots, model_.style().look());
+        hd_->tick(infra::opt_ref_of(page), model_.pause_badge(), slots, model_.style().look());
         model_.set_hd_root(hd_->available());
     }
     return app::UiRoundEdge{

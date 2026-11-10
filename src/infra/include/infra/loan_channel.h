@@ -4,12 +4,15 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
 #include "infra/error.h"
 #include "infra/mint_guard.h"
 #include "infra/opt_ref.h"
+#include "infra/polled.h"
+#include "infra/pool_slot.h"
 #include "infra/seat.h"
 #include "infra/slot_pool.h"
 #include "infra/spsc_ring.h"
@@ -32,7 +35,7 @@ class LoanChannel {
         "requires-clause that keeps T-RT from sleeping on this object"
     );
     static_assert(OwnerSeat != WorkerSeat, "a crossing needs two seats");
-    static_assert(N > 0 && N <= 128, "a handoff indexes with a uint8_t and 0xFF is kNoIndex");
+    static_assert(N > 0 && N <= 128, "a handoff carries a PoolSlot, one byte wide");
     static_assert((N & (N - 1)) == 0, "SpscRing requires a power-of-two capacity");
     static_assert(
         std::is_trivially_copyable_v<Slot> || ResetsOnReap<Slot>,
@@ -46,7 +49,7 @@ class LoanChannel {
 
 public:
     struct Handoff {
-        std::uint8_t index = 0;
+        PoolSlot slot{};
         bool done = false;
     };
 
@@ -156,14 +159,14 @@ public:
         [[nodiscard]] explicit operator bool() const noexcept { return ch_ != nullptr; }
 
         [[nodiscard]] Slot* get() const noexcept {
-            return ch_ == nullptr ? nullptr : &ch_->pool_.at(h_.index);
+            return ch_ == nullptr ? nullptr : &ch_->pool_.at(h_.slot);
         }
 
         [[nodiscard]] Slot& operator*() const noexcept { return *checked_(); }
 
         [[nodiscard]] Slot* operator->() const noexcept { return checked_(); }
 
-        [[nodiscard]] std::uint8_t index() const noexcept { return h_.index; }
+        [[nodiscard]] PoolSlot slot() const noexcept { return h_.slot; }
 
         void complete() noexcept { h_.done = true; }
 
@@ -176,7 +179,7 @@ public:
             if constexpr (kSeatChecksEnabled)
                 if (ch_ == nullptr)
                     fatal(Error{Errc::slot_range, ERR_SITE(), 0}, "empty Job");
-            return &ch_->pool_.at(h_.index);
+            return &ch_->pool_.at(h_.slot);
         }
 
         void finish_() noexcept {
@@ -226,13 +229,13 @@ public:
             return ch_->reclaim_all_parked();
         }
 
-        [[nodiscard]] bool set_live(std::uint8_t n) noexcept { return ch_->set_live(n); }
+        [[nodiscard]] Ex<void> set_live(std::uint8_t n) noexcept { return ch_->set_live(n); }
 
         [[nodiscard]] Census census() const noexcept { return ch_->census(); }
 
         [[nodiscard]] std::uint8_t live() const noexcept { return ch_->live(); }
 
-        [[nodiscard]] std::uint8_t index_of(const Loan& l) const noexcept {
+        [[nodiscard]] std::optional<PoolSlot> index_of(const Loan& l) const noexcept {
             return ch_->index_of(l);
         }
 
@@ -343,7 +346,8 @@ public:
     }
 
     [[nodiscard]] std::uint32_t breaches() const noexcept {
-        return breaches_.load(std::memory_order_relaxed) + pool_.refused_returns();
+        const SlotPoolCounters& counters = pool_;
+        return breaches_.load(std::memory_order_relaxed) + counters.refusals();
     }
 
     [[nodiscard]] Loan acquire() noexcept {
@@ -361,7 +365,8 @@ public:
         if (s == nullptr)
             return;
         bump_(loans_, -1);
-        if (!out_.push(Handoff{pool_.index_of(s), 0})) {
+        const auto slot = pool_.index_of(s);
+        if (!slot || !out_.push(Handoff{.slot = *slot, .done = false})) {
             breaches_.fetch_add(1, std::memory_order_relaxed);
             reset_(*s);
             (void)Lease{s, typename Pool::Return{&pool_}};
@@ -376,13 +381,11 @@ public:
         if (!h)
             return Loan{};
         bump_(loans_, 1);
-        return Loan{this, Lease{&pool_.at(h->index), typename Pool::Return{&pool_}}, h->done};
+        return Loan{this, Lease{&pool_.at(h->slot), typename Pool::Return{&pool_}}, h->done};
     }
 
-    static constexpr std::uint8_t kNoIndex = Pool::kNoIndex;
-
-    [[nodiscard]] std::uint8_t index_of(const Loan& l) const noexcept {
-        return l.get() == nullptr ? kNoIndex : pool_.index_of(l.get());
+    [[nodiscard]] std::optional<PoolSlot> index_of(const Loan& l) const noexcept {
+        return pool_.index_of(l.get());
     }
 
     [[nodiscard]] Job take() noexcept {
@@ -434,49 +437,51 @@ public:
             const auto h = back_.pop();
             if (!h)
                 break;
-            reset_(pool_.at(h->index));
-            (void)Lease{&pool_.at(h->index), typename Pool::Return{&pool_}};
+            reset_(pool_.at(h->slot));
+            (void)Lease{&pool_.at(h->slot), typename Pool::Return{&pool_}};
         }
         for (std::size_t i = 0; i < N; ++i) {
             const auto h = out_.pop();
             if (!h)
                 break;
-            reset_(pool_.at(h->index));
-            (void)Lease{&pool_.at(h->index), typename Pool::Return{&pool_}};
+            reset_(pool_.at(h->slot));
+            (void)Lease{&pool_.at(h->slot), typename Pool::Return{&pool_}};
         }
         jobs_.store(0, std::memory_order_relaxed);
         live_ = N;
         return pool_.available();
     }
 
-    [[nodiscard]] bool set_live(std::uint8_t n) noexcept {
+    [[nodiscard]] Ex<void> set_live(std::uint8_t n) noexcept {
         seat_assert<OwnerSeat>(ERR_SITE(), "LoanChannel::set_live off the owner seat");
         if (n == 0 || n > N)
-            return false;
+            return std::unexpected(Error{Errc::slot_range, ERR_SITE(), n});
 
         if (pool_.available() != live_)
-            return false;
+            return std::unexpected(Error{Errc::busy, ERR_SITE(), 0});
         for (auto& r : reserved_)
             r.reset();
         for (std::size_t i = 0; i < N; ++i)
             reserved_[i] = pool_.acquire();
-        for (std::size_t i = 0; i < N; ++i)
-            if (pool_.index_of(reserved_[i].get()) < n)
+        for (std::size_t i = 0; i < N; ++i) {
+            const std::optional<PoolSlot> slot = pool_.index_of(reserved_[i].get());
+            if (slot && slot->within(PoolSize{n}))
                 reserved_[i].reset();
+        }
         live_ = n;
-        return true;
+        return {};
     }
 
     [[nodiscard]] Census census() const noexcept {
         seat_assert<OwnerSeat>(ERR_SITE(), "LoanChannel::census off the owner seat");
         return Census{
-            static_cast<std::uint8_t>(pool_.available()),
-            loans_.load(std::memory_order_relaxed),
-            static_cast<std::uint8_t>(out_.size()),
-            jobs_.load(std::memory_order_relaxed),
-            static_cast<std::uint8_t>(back_.size()),
-            live_,
-            breaches()
+            .idle = static_cast<std::uint8_t>(pool_.available()),
+            .held_by_owner = loans_.load(std::memory_order_relaxed),
+            .outbound = static_cast<std::uint8_t>(out_.size()),
+            .held_by_worker = jobs_.load(std::memory_order_relaxed),
+            .inbound = static_cast<std::uint8_t>(back_.size()),
+            .live = live_,
+            .breaches = breaches()
         };
     }
 

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
 
 #include "app/input_wire.h"
 #include "infra/diag_log.h"
+#include "infra/indexed_array.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/link_event.h"
 #include "proto/types.h"
@@ -17,7 +18,7 @@ class RumbleRelay {
     TASTY_SEAT_RESIDENT(Input);
 
 public:
-    RumbleRelay(svc::IRumbleOut& out, RumblePadsCell& pads, xthread::DiagLog& diag) noexcept
+    RumbleRelay(svc::IRumbleOut& out, RumblePlayersCell& pads, xthread::DiagLog& diag) noexcept
         : out_(out),
           pads_(pads),
           diag_(diag) {}
@@ -30,7 +31,9 @@ public:
     void on(const proto::LinkEvent::PolledWord& w) noexcept;
 
     [[nodiscard]] std::uint16_t last_applied(proto::PlayerIndex player) const noexcept {
-        return player.v < last_.size() ? last_[player.v] : std::uint16_t{0};
+        if (const infra::OptRef<const Seen> held = seen_.find(player))
+            return held->word;
+        return std::uint16_t{0};
     }
 
     [[nodiscard]] std::uint32_t applied() const noexcept { return applied_; }
@@ -46,13 +49,19 @@ public:
     [[nodiscard]] std::uint32_t reapplied() const noexcept { return reapplied_; }
 
 private:
-    void apply_(std::uint8_t player, std::uint16_t word) noexcept;
+    void apply_(svc::PlayerIndex player, std::uint16_t word) noexcept;
 
     svc::IRumbleOut& out_;
-    RumblePadsCell& pads_;
+    RumblePlayersCell& pads_;
     xthread::DiagLog& diag_;
-    std::array<std::uint16_t, svc::kMaxPlayers> last_{};
-    svc::RumblePadSet pads_seen_{};
+
+    struct Seen {
+        svc::PadSignature pad{};
+        std::uint16_t word = 0;
+    };
+
+    infra::IndexedArray<Seen, svc::kMaxPlayers, svc::PlayerIndex> seen_{};
+    svc::PlayerMask seen_players_{};
     std::uint32_t applied_ = 0;
     std::uint32_t repeats_ = 0;
     std::uint32_t no_device_ = 0;

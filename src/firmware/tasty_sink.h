@@ -5,6 +5,7 @@
 
 #include "app/event.h"
 #include "app/event_sink.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -18,8 +19,8 @@ class TastySink final : public app::IEventSink {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    TastySink(app::VideoPump& video, const app::IdentityLatch* identity) noexcept
-        : video_(&video),
+    TastySink(app::VideoPump& video, infra::OptRef<const app::IdentityLatch> identity) noexcept
+        : video_(video),
           identity_(identity) {}
 
     TastySink(const TastySink&) = delete;
@@ -32,7 +33,6 @@ public:
     void on(const app::Event::SdActivity& a, const app::Event::Head& h);
     void on(const app::Event::InfoRequest& a, const app::Event::Head& h);
     void on(const app::Event::ProgressUpdate& a, const app::Event::Head& h);
-    void on(const app::Event::DeadlineMiss& a, const app::Event::Head& h);
     void on(const app::Event::RequestRefused& a, const app::Event::Head& h);
     void on(const app::Event::ConfStrOnlySession& a, const app::Event::Head& h);
     void on(const app::Event::SessionAdvisory& a, const app::Event::Head& h);
@@ -43,10 +43,17 @@ public:
 
     [[nodiscard]] std::uint32_t event_misrouted() const noexcept { return event_misrouted_; }
 
+    [[nodiscard]] std::uint32_t event_unhandled_drops() const noexcept {
+        return event_unhandled_drops_;
+    }
+
 private:
-    app::VideoPump* video_;
-    const app::IdentityLatch* identity_;
+    void note_unhandled_() noexcept;
+
+    app::VideoPump& video_;
+    infra::OptRef<const app::IdentityLatch> identity_;
     std::uint32_t event_misrouted_ = 0;
+    std::uint32_t event_unhandled_drops_ = 0;
     bool ram_image_said_ = false;
 };
 

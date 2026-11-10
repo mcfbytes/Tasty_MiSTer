@@ -9,7 +9,7 @@
 #include "app/conf_str_cell.h"
 #include "app/event.h"
 #include "app/mgl.h"
-#include "app/mgl_doc.h"
+#include "app/mgl_player.h"
 #include "app/name_config.h"
 #include "app/path_text.h"
 #include "app/types.h"
@@ -80,6 +80,8 @@ public:
     MglPump& operator=(const MglPump&) = delete;
 
     void set_remember(MglRemember r) noexcept { remember_ = r; }
+
+    void set_info(infra::OptRef<InfoSink> info) noexcept { info_ = info; }
 
     [[nodiscard]] MglRemember remember() const noexcept { return remember_; }
 

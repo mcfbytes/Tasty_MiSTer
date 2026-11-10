@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/dips_page.h"
 
-#include <cstring>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "app/hd_window.h"
 #include "ui/draw_classic.h"
@@ -12,7 +12,6 @@
 #include "ui/osd_renderer.h"
 #include "ui/page_context.h"
 #include "ui/page_row.h"
-#include "ui/page_window.h"
 #include "ui/page_walk.h"
 #include "ui/ui_event.h"
 
@@ -42,16 +41,17 @@ Layout layout_for(RowCount count, RowCount rows) noexcept {
 
 }
 
-std::string dip_row_text(const app::DipTable::Row& row) {
-    const char* id = row.current.within(row.choices) ? row.current.pick(row.ids) : "";
+std::string dip_row_text(const app::DipLabels::Row& row, proto::DipChoice current) {
+    const std::string_view id = current.within(row.choices) ? current.pick(row.ids).view()
+                                                            : std::string_view{};
     std::string s;
     s.push_back(' ');
-    std::string_view name{row.name};
+    std::string_view name = row.name.view();
     while (!name.empty() && name.back() == ' ')
         name.remove_suffix(1);
     s.append(name);
     s.push_back(':');
-    const std::size_t idlen = std::strlen(id);
+    const std::size_t idlen = id.size();
 
     if (s.size() + idlen < kClassicRowColumns)
         s.append(kClassicRowColumns - idlen - s.size(), ' ');
@@ -90,13 +90,13 @@ bool DipsPage::walk(PageWalk& out) const {
     out.title_arrow = OsdRenderer::kArrowNone;
     out.count = 0;
 
-    const RowCount count = RowCount::of(table_->count);
+    const RowCount count = RowCount::of(table_->labels.count);
     const RowCount height = osd_height();
     const Layout l = layout_for(count, height);
     const RowCount total = count + kOneRow;
     const RowIndex selected = sel_ <= reset_row() ? sel_ : RowIndex{};
 
-    const app::HdWindow win = window_page(out.page, selected, total);
+    const app::HdWindow win = out.window(selected, total);
     const RowCount win_first = win.first.before();
     const RowCount win_count = win.count;
     const RowCount win_last = win_first + win_count;
@@ -117,9 +117,10 @@ bool DipsPage::walk(PageWalk& out) const {
         std::string s;
         bool selected_row = false;
         if (virt >= l.lead && virt - l.lead < count) {
-            const RowCount i = virt - l.lead;
-            s = dip_row_text(table_->rows[i.v]);
-            selected_row = sel_ == row_after(i);
+            const RowIndex dip_row = row_after(virt - l.lead);
+            const proto::DipRowIndex dip_at = dip_row_of(dip_row);
+            s = dip_row_text(table_->row(dip_at), table_->current(dip_at));
+            selected_row = sel_ == dip_row;
         } else if (virt == l.reset) {
             s = "       Reset to apply";
             selected_row = sel_ == reset_row();
@@ -141,13 +142,16 @@ bool DipsPage::walk(PageWalk& out) const {
         PageRow& r = out.rows[out.count++];
         r.has_hd = true;
         if (at.before() < count) {
-            const app::DipTable::Row& d = table_->rows[at.v];
-            std::string_view name{d.name};
+            const proto::DipRowIndex dip_at = dip_row_of(at);
+            const app::DipLabels::Row& d = table_->row(dip_at);
+            std::string_view name = d.name.view();
             while (!name.empty() && name.back() == ' ')
                 name.remove_suffix(1);
             (void)r.hd.label.assign(name);
             r.hd.kind = app::PageDescription::RowKind::Value;
-            const char* id = d.current.within(d.choices) ? d.current.pick(d.ids) : "";
+            const proto::DipChoice current = table_->current(dip_at);
+            const std::string_view id = current.within(d.choices) ? current.pick(d.ids).view()
+                                                                  : std::string_view{};
             (void)r.hd.value.assign(id);
             r.hd.selected = sel_ == at;
         } else {
@@ -179,7 +183,7 @@ void DipsPage::track_viewport() noexcept {
     const RowCount height = osd_height();
     if (height.empty())
         return;
-    const Layout l = layout_for(RowCount::of(table_->count), height);
+    const Layout l = layout_for(RowCount::of(table_->labels.count), height);
     if (l.total <= height) {
         first_row_ = RowIndex{};
         return;
@@ -208,19 +212,19 @@ Transition DipsPage::handle(const UiEvent& ev) {
     if (sel_ == reset_row()) {
 
         save_dips();
-        push_op(proto::LinkOp::PulseOption{.bit = proto::StatusBit{0}});
+        push_op(proto::LinkOp::PulseOption{.bit = proto::kResetBit});
         return Transition{Transition::Kind::CloseAll};
     }
     if (sel_ < reset_row()) {
-        const RowSpan<const app::DipTable::Row> dip_rows{table_->rows};
-        const app::DipTable::Row& row = dip_rows[sel_];
+        const proto::DipRowIndex dip_at = dip_row_of(sel_);
+        const app::DipLabels::Row& row = table_->row(dip_at);
         if (row.choices.empty()) {
             ++refusals_;
             return Transition{};
         }
 
-        const proto::DipChoice next = row.current.next(row.choices);
-        push_op(proto::LinkOp::SetDip{.row = dip_row_of(sel_), .choice = next});
+        const proto::DipChoice next = table_->current(dip_at).next(row.choices);
+        push_op(proto::LinkOp::SetDip{.row = dip_at, .choice = next});
         return Transition{};
     }
     ++refusals_;

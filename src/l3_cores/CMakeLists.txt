@@ -15,6 +15,7 @@ set(TASTY_CORES_TASTY
   src/pcm_source_factory.cpp
   src/megadrive_core.cpp
   src/nvram_store.cpp
+  src/disc_save_migration.cpp
   src/wav_data.cpp
   src/psx_core.cpp
   src/psx_sector_map.cpp
@@ -27,10 +28,12 @@ set(TASTY_CORES_TASTY
   src/msu_machine.cpp
   src/msu_companion.cpp
   src/msu_data_loader.cpp
-  src/mailbox_servants.cpp
+  src/servant_id.cpp
   src/disk_servant.cpp
   src/movie_archive.cpp
+  src/json_flatten.cpp
   src/movie_codec.cpp
+  src/movie_system.cpp
   src/nes_movie_codec.cpp
   src/nes_bk2_codec.cpp
   src/rom_digest.cpp
@@ -58,6 +61,11 @@ set(TASTY_CORES_EXTRA
   src/cdwire.cpp
   src/sega_cdd_engine.cpp
   src/pce_scsi_engine.cpp
+  src/pce_command.cpp
+  src/pce_subq.cpp
+  src/pce_subq_reply.cpp
+  src/pce_sense_reply.cpp
+  src/pce_dir_info_reply.cpp
   src/saturn_stock_toc.cpp
   src/megacd_ladder.cpp
   src/pcecd_ladder.cpp
@@ -66,16 +74,21 @@ set(TASTY_CORES_EXTRA
   src/neogeocd_ladder.cpp
   src/cdi_ladder.cpp
   src/electron_core.cpp
-  src/host_file_server.cpp
+  src/host_file_sandbox.cpp
+  src/mailbox_window.cpp
   src/minimig_core.cpp
   src/mra_doc.cpp
   src/mra_stager.cpp
   src/n64_cheat_engine.cpp
   src/n64_core.cpp
+  src/n64_cpak.cpp
   src/n64_db_reader.cpp
+  src/n64_detect.cpp
+  src/n64_load_facts.cpp
   src/n64_loader.cpp
   src/n64_save_store.cpp
   src/n64_saves.cpp
+  src/word_reverse.cpp
   src/n64dd_disk_map.cpp
   src/n64dd_expander.cpp
   src/n64dd_ram_save.cpp
@@ -85,7 +98,7 @@ set(TASTY_CORES_EXTRA
   src/neogeo_loader.cpp
   src/neogeo_core.cpp
   src/neo_transform.cpp
-  src/rom_assembly.cpp
+  src/rom_set_assembler.cpp
   src/rom_bytes.cpp
   src/cdi_core.cpp
   src/cdi_block.cpp
@@ -125,16 +138,17 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/saturn_mode.h
   cores/scsi_cdb.h
   cores/sega_cdd_stat.h
+  cores/sega_frame_word.h
   cores/fnv1a64.h
   cores/md_cmd_flags.h
   cores/mra_lane.h
+  cores/interleave_widths.h
   cores/mra_map_word.h
   cores/n64_detect.h
   cores/n64dd_disk_type.h
   cores/neogeo_file_index.h
   cores/snes_cart_type.h
   cores/st_ctrl.h
-  cores/st_option_row_index.h
   cores/wire_word.h
   cores/addressed_load.h
   cores/generic_profile.h
@@ -173,12 +187,14 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/cd_profile.h
   cores/cd_sector_act.h
   cores/cd_service_rows.h
+  cores/cd_speed_index.h
   cores/cd_tick_periods.h
   cores/cd_wire_link.h
   cores/cd_wire_port.h
   cores/ladder_context.h
   cores/ladder_host.h
   cores/mount_status.h
+  cores/mount_state.h
   cores/save_extent.h
   cores/save_copy_level.h
   cores/stream_load.h
@@ -225,6 +241,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/stock_scan.h
   cores/host_file_sandbox.h
   cores/host_file_server.h
+  cores/mailbox_req_id.h
   cores/host_services.h
   cores/core_grant.h
   cores/core_manifest.h
@@ -233,12 +250,14 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/mdp_source.h
   cores/pcm_source_factory.h
   cores/megadrive_core.h
+  cores/owed_answer.h
   cores/md5.h
   cores/minimig_core.h
   cores/mounted_path.h
   cores/mra_cheat.h
   cores/mra_cheat_records.h
   cores/mra_doc.h
+  cores/mra_nvram_decl.h
   cores/mra_stager.h
   cores/manifest_act.h
   cores/manifest_counts.h
@@ -248,6 +267,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/cheat_engine.h
   cores/cheat_engine_row.h
   cores/n64_analog.h
+  cores/n64_byte_mask.h
   cores/n64_cheat_code.h
   cores/n64_cheat_engine.h
   cores/n64_core.h
@@ -256,6 +276,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/n64_loader.h
   cores/n64_cpak.h
   cores/n64_db.h
+  cores/n64_db_match.h
   cores/n64_db_reader.h
   cores/n64_db_tags.h
   cores/n64_ipl3.h
@@ -264,13 +285,15 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/n64_patch_table.h
   cores/n64_rom.h
   cores/n64_save_layout.h
-  cores/n64_save_extent.h
+  cores/n64_layout_key_source.h
   cores/n64_save_layout_key.h
   cores/n64_save_attach.h
   cores/n64_save_order.h
   cores/n64_save_plan.h
   cores/n64_save_store.h
   cores/n64_memory_type.h
+  cores/save_row_count.h
+  cores/save_rows.h
   cores/n64_saves.h
   cores/n64_path.h
   cores/n64dd_disk_map.h
@@ -282,13 +305,25 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/window_job.h
   cores/window_job_order.h
   cores/job_arena.h
-  cores/neo_file.h
+  cores/neo_header.h
+  cores/neo_quirk.h
   cores/neogeo_alias_source.h
   cores/neogeo_loader.h
   cores/neogeo_core.h
   cores/neo_transform.h
+  cores/fix_shape.h
+  cores/i_rom_shape.h
+  cores/spr_dbl_shape.h
+  cores/spr_dbl_swap_shape.h
+  cores/spr_shape.h
   cores/nvram_store.h
+  cores/disc_save_migration.h
   cores/pce_scsi_engine.h
+  cores/pce_command.h
+  cores/pce_subq.h
+  cores/pce_subq_reply.h
+  cores/pce_sense_reply.h
+  cores/pce_dir_info_reply.h
   cores/scsi_sense.h
   cores/cdda_play_range.h
   cores/saturn_slot_ring.h
@@ -306,6 +341,7 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/psx_sector_program.h
   cores/cdi_core.h
   cores/cdi_block.h
+  cores/toc_entry.h
   cores/rom.h
   cores/saturn_cue.h
   cores/saturn_cdd_engine.h
@@ -315,11 +351,24 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/save_channel.h
   cores/save_partition.h
   cores/rom_node.h
+  cores/file_part.h
+  cores/interleave_end.h
+  cores/interleave_start.h
+  cores/part_common.h
+  cores/patch.h
+  cores/text_part.h
   cores/rom_bytes.h
   cores/rom_set_assembler.h
+  cores/browse_dirs.h
+  cores/entry_lookup.h
   cores/romset_alias.h
+  cores/romset_drop.h
+  cores/romset_no_match.h
+  cores/romset_retype.h
+  cores/romset_config.h
+  cores/romset_file.h
   cores/romset_files.h
-  cores/romsets.h
+  cores/romset_plan.h
   cores/registry.h
   cores/save_image.h
   cores/save_servant.h
@@ -342,23 +391,35 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/mailbox_rows.h
   cores/mailbox_census_rows.h
   cores/mailbox_servant.h
-  cores/mailbox_servants.h
+  cores/servant_id.h
   cores/companion_ask.h
   cores/companion_plan.h
   cores/companion_load.h
   cores/movie_archive.h
   cores/movie_codec.h
+  cores/i_movie_format.h
+  cores/i_replay_core.h
+  cores/movie_command_mask.h
+  cores/movie_facts.h
+  cores/movie_frame.h
+  cores/movie_region.h
+  cores/movie_refusal.h
+  cores/movie_rerecord_count.h
   cores/movie_system.h
+  cores/nes_fm2_codec.h
   cores/nes_movie_codec.h
   cores/nes_bk2_codec.h
   cores/digest_value.h
   cores/rom_digest.h
-  cores/ram_image.h
+  cores/ram_image_recipe.h
   cores/snes_movie_codec.h
   cores/snes_lsmv_codec.h
   cores/snes_bk2_codec.h
   cores/megadrive_movie_codec.h
+  cores/megadrive_bk2_format.h
+  cores/megadrive_gmv_format.h
   cores/psx_movie_codec.h
+  cores/psx_bk2_format.h
   cores/st_config.h
   cores/st_config_layout.h
   cores/st_core.h
@@ -380,7 +441,6 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/manifests/megadrive.h
   cores/manifests/n64.h
   cores/manifests/neogeo.h
-  cores/manifests/neogeocd_fragment.h
   cores/manifests/pce.h
   cores/manifests/psx.h
   cores/manifests/snes.h
@@ -388,5 +448,6 @@ tasty_add_header_checks(tasty_l3_header_checks LIB mister_cores HEADERS
   cores/manifests/threedo.h
   cores/manifests/saturn.h
   cores/manifests/cdi.h
+  cores/role_row.h
 )
 

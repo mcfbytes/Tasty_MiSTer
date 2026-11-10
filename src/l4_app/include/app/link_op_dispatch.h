@@ -6,9 +6,9 @@
 #include <utility>
 
 #include "app/link_encoder.h"
+#include "app/delivered.h"
 #include "app/link_op_ctx.h"
 #include "app/link_op_facts.h"
-#include "app/types.h"
 #include "infra/message_sum.h"
 #include "proto/link_op.h"
 
@@ -117,7 +117,16 @@ concept LinkOpSessionSink = std::same_as<typename S::Result, ILinkEncoder::Outco
                s.on(std::declval<const proto::LinkOp::SessionUp&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
-               s.on(std::declval<const proto::LinkOp::SetVolume&>(), c)
+               s.on(std::declval<const proto::LinkOp::SetMute&>(), c)
+           } -> std::same_as<ILinkEncoder::Outcome>;
+           {
+               s.on(std::declval<const proto::LinkOp::SetAttenuation&>(), c)
+           } -> std::same_as<ILinkEncoder::Outcome>;
+           {
+               s.on(std::declval<const proto::LinkOp::NudgeVolume&>(), c)
+           } -> std::same_as<ILinkEncoder::Outcome>;
+           {
+               s.on(std::declval<const proto::LinkOp::ToggleMute&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
                s.on(std::declval<const proto::LinkOp::CoreReset&>(), c)
@@ -166,6 +175,12 @@ concept LinkOpMountSink = std::same_as<typename S::Result, ILinkEncoder::Outcome
            {
                s.on(std::declval<const proto::LinkOp::StageCheats&>(), c)
            } -> std::same_as<ILinkEncoder::Outcome>;
+           {
+               s.on(std::declval<const proto::LinkOp::AttachSave&>(), c)
+           } -> std::same_as<ILinkEncoder::Outcome>;
+           {
+               s.on(std::declval<const proto::LinkOp::DetachSave&>(), c)
+           } -> std::same_as<ILinkEncoder::Outcome>;
            { s.misrouted(m, c) } -> std::same_as<ILinkEncoder::Outcome>;
        };
 
@@ -174,9 +189,6 @@ concept LinkOpOptionsSink = std::same_as<typename S::Result, ILinkEncoder::Outco
     && requires(S& s, const proto::LinkOp& m, const LinkOpCtx& c, typename S::Host& h) {
            {
                s.on(std::declval<const proto::LinkOp::BindSlotConfig&>(), c, h)
-           } -> std::same_as<ILinkEncoder::Outcome>;
-           {
-               s.on(std::declval<const proto::LinkOp::BindSlotPreviews&>(), c, h)
            } -> std::same_as<ILinkEncoder::Outcome>;
            {
                s.on(std::declval<const proto::LinkOp::SaveAsk&>(), c, h)

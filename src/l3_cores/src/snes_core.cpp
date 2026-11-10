@@ -3,35 +3,18 @@
 #include "cores/core_adopt.h"
 
 #include "cores/manifests/snes.h"
+#include "infra/ascii.h"
 #include "infra/byte_view.h"
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstring>
 #include <limits>
 
 namespace mister::cores {
 
-namespace {
-
-bool iequal(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const auto ca = static_cast<unsigned char>(a[i]);
-        const auto cb = static_cast<unsigned char>(b[i]);
-        if (std::tolower(ca) != std::tolower(cb))
-            return false;
-    }
-    return true;
-}
-
-}
-
 SnesCore::SnesCore(const CoreProfile& p, const HostServices& h)
     : Core(p, h),
-      data_host_(kGenericProfile, h),
       mailbox_(MailboxCarriage::granted(h, manifests::kSnesMailboxFrame)) {}
 
 Ex<void> SnesCore::do_adopt(const CoreAdopt&) {
@@ -41,7 +24,7 @@ Ex<void> SnesCore::do_adopt(const CoreAdopt&) {
 
 void SnesCore::on_set_pending_file_ext(std::string_view ext) noexcept {
     (void)ext_.assign(ext);
-    data_host_.set_pending_file_ext(ext);
+    stream_.set_pending_ext(ext);
 }
 
 Ex<void> SnesCore::on_mount(IoIndex, const MountedPath&) {
@@ -57,9 +40,12 @@ Ex<void> SnesCore::on_file_tx(IoIndex index, std::span<const std::uint8_t> bytes
     Arm arm = Arm::Raw;
     const std::string_view ext = ext_.view();
     if (total != 0 && !ext.empty()) {
-        if (index.v == 0 || iequal(ext, ".SMC") || iequal(ext, ".SFC") || iequal(ext, ".BIN")) {
+        if (index == IoIndex{}
+            || infra::ieq(ext, ".SMC")
+            || infra::ieq(ext, ".SFC")
+            || infra::ieq(ext, ".BIN")) {
             arm = Arm::Rom;
-        } else if (iequal(ext, ".BS") || iequal(ext, ".SPC")) {
+        } else if (infra::ieq(ext, ".BS") || infra::ieq(ext, ".SPC")) {
             arm = Arm::Refused;
         }
     }
@@ -129,7 +115,11 @@ Ex<void> SnesCore::tx_rom_(IoIndex index, std::span<const std::uint8_t> bytes) {
 
     proto::SessionParams params{};
     params.ext = ext_.view();
-    auto session = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{index.v}, params);
+    auto session = proto::ImageBracket::open(
+        image_sink(),
+        proto::WideIoIndex::of(index, 0),
+        params
+    );
     if (!session)
         return std::unexpected(session.error());
     last_index_ = static_cast<std::uint16_t>(index.v);
@@ -140,17 +130,16 @@ Ex<void> SnesCore::tx_rom_(IoIndex index, std::span<const std::uint8_t> bytes) {
         return r;
     bytes_sent_ += hdr.size();
 
-    if (auto r = stream_mirrored_(*session, bytes, base, payload); !r)
+    if (auto r = stream_mirrored_(*session, image); !r)
         return r;
     return session->end();
 }
 
 Ex<void> SnesCore::stream_mirrored_(
     proto::ImageBracket& session,
-    std::span<const std::uint8_t> bytes,
-    std::uint32_t base,
-    std::uint32_t payload
+    std::span<const std::uint8_t> image
 ) {
+    const auto payload = static_cast<std::uint32_t>(image.size());
     const std::uint32_t padded = snes::mirrored_size(payload);
     std::uint32_t pos = 0;
     while (pos < padded) {
@@ -167,8 +156,8 @@ Ex<void> SnesCore::stream_mirrored_(
             }
             const std::uint32_t take = std::min(avail, chunk - filled);
             const std::size_t got = read_window_(
-                bytes,
-                static_cast<std::uint64_t>(base) + src,
+                image,
+                src,
                 std::span<std::uint8_t>(buf_ + filled, static_cast<std::size_t>(take))
             );
             filled += static_cast<std::uint32_t>(got);
@@ -185,7 +174,11 @@ Ex<void> SnesCore::tx_raw_(IoIndex index, std::span<const std::uint8_t> bytes) {
     proto::SessionParams params{};
     params.ext = ext_.view();
 
-    auto session = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{index.v}, params);
+    auto session = proto::ImageBracket::open(
+        image_sink(),
+        proto::WideIoIndex::of(index, 0),
+        params
+    );
     if (!session)
         return std::unexpected(session.error());
     last_index_ = static_cast<std::uint16_t>(index.v);

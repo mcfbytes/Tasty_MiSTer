@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "infra/message_sum.h"
+
 namespace mister::cores::snes {
 
 enum class CartChip : std::uint8_t {
@@ -26,15 +28,16 @@ enum class CartChip : std::uint8_t {
     Gsu,
     Cc92,
     Pf94,
+    kCount,
 };
 
 struct CartChipRow {
-    CartChip chip;
+    CartChip kind;
     std::uint8_t h1;
     std::uint8_t ram;
 };
 
-inline constexpr std::array<CartChipRow, 18> kCartChips = {{
+inline constexpr std::array<CartChipRow, infra::ordinal(CartChip::kCount)> kCartChips = {{
     {CartChip::None, 0x00, 0},
     {CartChip::Dsp1, 0x84, 0},
     {CartChip::Dsp1b, 0x80, 0},
@@ -54,6 +57,10 @@ inline constexpr std::array<CartChipRow, 18> kCartChips = {{
     {CartChip::Cc92, 0xE4, 3},
     {CartChip::Pf94, 0xF4, 3},
 }};
+static_assert(
+    infra::rows_are_ordinal(kCartChips),
+    "kCartChips: exactly one row per CartChip, at its own ordinal"
+);
 
 struct CartRomType {
 
@@ -71,10 +78,8 @@ struct CartRomType {
     }
 
     [[nodiscard]] constexpr CartRomType with(CartChip chip) const noexcept {
-        for (const CartChipRow& row : kCartChips)
-            if (row.chip == chip)
-                return CartRomType{static_cast<std::uint8_t>(v | row.h1), row.ram, row.ram != 0};
-        return *this;
+        const CartChipRow& row = kCartChips[infra::ordinal(chip)];
+        return CartRomType{static_cast<std::uint8_t>(v | row.h1), row.ram, row.ram != 0};
     }
 
     [[nodiscard]] constexpr CartRomType with_ram(std::uint8_t nibble) const noexcept {

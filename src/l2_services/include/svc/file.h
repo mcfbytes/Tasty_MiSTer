@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -11,14 +12,6 @@
 namespace mister::svc {
 
 using proto::FileSize;
-
-enum class FileKind : std::uint8_t {
-    Real,
-    BlockDev,
-    Shm,
-    Zip,
-    Memory,
-};
 
 enum class OpenMode : std::uint8_t { Read, ReadWhole, ReadWrite, Create, Truncate, Sync };
 
@@ -36,9 +29,14 @@ public:
         std::span<const std::byte> src
     ) = 0;
 
+    template <class Off>
+        requires std::same_as<Off, FileSize>
+    [[nodiscard]] auto read_at(Off off, std::span<std::byte> dst) {
+        return read_at(off.template file_word<std::uint64_t>(), dst);
+    }
+
     [[nodiscard]] virtual Ex<FileSize> size() const = 0;
     [[nodiscard]] virtual Ex<void> flush() = 0;
-    virtual FileKind kind() const noexcept = 0;
 
     enum class Access : std::uint8_t { Sequential, WillNeed };
 
@@ -48,10 +46,46 @@ public:
         return {};
     }
 
+    [[nodiscard]] Ex<void> advise(Access access, FileSize off, FileSize len) {
+        return advise(access, off.file_word<std::uint64_t>(), len.file_word<std::uint64_t>());
+    }
+
 protected:
     IFile() = default;
     IFile(const IFile&) = default;
     IFile& operator=(const IFile&) = default;
 };
+
+[[nodiscard]] inline Ex<void> read_exact(IFile& f, proto::FileSize off, std::span<std::byte> dst) {
+    std::size_t got = 0;
+    while (got < dst.size()) {
+        const auto n = f.read_at(proto::detail::positional_word(off), dst.subspan(got));
+        if (!n)
+            return std::unexpected(n.error());
+        if (*n == 0)
+            return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
+        off += proto::FileSize{*n};
+        got += *n;
+    }
+    return {};
+}
+
+[[nodiscard]] inline Ex<void> write_all(
+    IFile& f,
+    proto::FileSize off,
+    std::span<const std::byte> src
+) {
+    std::size_t put = 0;
+    while (put < src.size()) {
+        const auto n = f.write_at(proto::detail::positional_word(off), src.subspan(put));
+        if (!n)
+            return std::unexpected(n.error());
+        if (*n == 0)
+            return std::unexpected(Error{Errc::short_write, ERR_SITE(), 0});
+        off += proto::FileSize{*n};
+        put += *n;
+    }
+    return {};
+}
 
 }

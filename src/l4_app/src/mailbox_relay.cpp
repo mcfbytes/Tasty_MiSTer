@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/mailbox_relay.h"
 
+#include "app/mailbox_act_writer.h"
+
 #include <algorithm>
-#include <array>
 #include <span>
 
 #include "hal/selected.h"
 #include "hal/spi_transport.h"
+#include "infra/message_sum.h"
 #include "proto/spi_fio_queue.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::app {
 
-void MailboxRelay::bind(proto::MailboxPoll poll, std::uint16_t gen) noexcept {
+void MailboxRelay::bind(proto::MailboxPoll poll, proto::CompanionBindGen gen) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, A);
     gen_ = gen;
     if (poll != proto::MailboxPoll::Keep)
@@ -21,7 +24,7 @@ void MailboxRelay::bind(proto::MailboxPoll poll, std::uint16_t gen) noexcept {
 void MailboxRelay::forget() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, A);
     polling_ = false;
-    gen_ = 0;
+    gen_ = proto::CompanionBindGen::none();
     last_head_.reset();
 }
 
@@ -33,13 +36,18 @@ void MailboxRelay::service_rt(
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, A);
     ++round_;
     const std::size_t widest = queue.bracket_windows(proto::kMailboxActBytes);
+    const proto::SpiFioQueue::ActShape ask{
+        .windows = proto::WindowCount{widest},
+        .bytes = proto::FileSize{proto::kMailboxActBytes},
+        .brackets = proto::BracketCount{1}
+    };
     for (unsigned i = 0; i < kReapPerRound; ++i) {
-        if (!queue.fits(widest, proto::kMailboxActBytes, 1))
+        if (!queue.fits(ask))
             break;
         const Chan::Loan done = chan_.reap();
         if (!done)
             break;
-        if (!done.completed() || done->gen != gen_ || gen_ == 0) {
+        if (!done.completed() || done->gen != gen_ || gen_.is_none()) {
             stale_.add();
             last_head_.reset();
             continue;
@@ -52,7 +60,7 @@ void MailboxRelay::service_rt(
     bool moved = true;
     {
 
-        const auto op = link.command(hal::ChipSelect::Io, frame.poll_opcode);
+        const auto op = link.command(frame.poll_opcode);
         if (!op) {
             wire_faults_.add();
             return;
@@ -87,37 +95,43 @@ void MailboxRelay::service_rt(
 }
 
 void MailboxRelay::write_(proto::SpiFioQueue& queue, const MailboxSlot& s) noexcept {
-    using Kind = proto::MailboxAct::Kind;
-    const proto::MailboxAct& a = s.act;
-    if (a.kind == Kind::None)
-        return;
-    bool ok = false;
-    if (a.kind == Kind::Command) {
-        const std::array<std::uint16_t, 4> w{a.opcode, a.words[0], a.words[1], a.words[2]};
-        ok = queue.append_command(w).has_value();
-    } else {
-        const std::size_t n = std::min<std::size_t>(a.len, s.bytes.size());
-        const proto::SpiFioQueue::Bracket b[] = {{a.index, std::span(s.bytes).first(n)}};
-        ok = queue.append(b).has_value();
-    }
-    if (ok) {
-        acts_.add();
-    } else {
-        refusals_.add();
-    }
+    detail::ActWriter
+        w{queue, std::span<const std::uint8_t>(s.bytes), acts_, refusals_, none_acts_};
+    infra::dispatch<infra::AllRouted>(s.act, w);
 }
 
 void MailboxRelay::serve_worker(CompanionHost& host) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, B);
-    while (Chan::Job job = chan_.take()) {
-        const auto s = host.servant_for(job->gen);
-        job->act = s ? s->serve(job->frame, std::span(job->bytes)) : proto::MailboxAct{};
-        job.complete();
+    for (;;) {
+        if (!held_) {
+            Chan::Job job = chan_.take();
+            if (!job)
+                return;
+            held_ = std::move(job);
+            held_awaited_ = false;
+        }
+
+        const auto s = host.servant_for((**held_).gen);
+        if (!s && host.awaits_bind((**held_).gen) && !held_awaited_) {
+            held_awaited_ = true;
+            return;
+        }
+        (**held_).act = s ? s->serve((**held_).frame, std::span((**held_).bytes))
+                          : proto::MailboxAct{};
+        held_->complete();
+        held_.reset();
+        held_awaited_ = false;
     }
 }
 
 void MailboxRelay::park_now() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(MailboxRelay, B);
+    if (held_) {
+        (**held_).act = {};
+        held_->complete();
+        held_.reset();
+        held_awaited_ = false;
+    }
     while (Chan::Job job = chan_.take()) {
         job->act = {};
         job.complete();

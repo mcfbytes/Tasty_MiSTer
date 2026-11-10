@@ -29,7 +29,7 @@ struct ScanOptions {
     bool include_dirs = false;
     bool cores_only = false;
 
-    bool romset_browse = false;
+    std::optional<std::string_view> archive_browse;
     bool no_enter = false;
     bool no_zip = false;
 };
@@ -115,12 +115,15 @@ public:
     std::uint32_t refusals() const noexcept { return refusals_; }
 
 private:
-    static std::string_view entry_name(const BrowserEntry& e) {
-        TASTY_SEAT_BODY(BrowserSession);
-        return e.altname;
-    }
-
     [[nodiscard]] Ex<void> scan_list(std::string_view type_filter);
+
+    enum class NameField : std::uint8_t { Name, Altname };
+
+    [[nodiscard]] std::optional<RowIndex> find_named(
+        std::string_view name,
+        NameField field,
+        bool dirs_only
+    ) const;
     void position_on(std::string_view raw_name);
     void select_dir_named(std::string_view name);
     void seek_letter(char c);
@@ -141,7 +144,7 @@ private:
     std::optional<std::chrono::nanoseconds> filter_deadline_{};
     std::uint32_t scans_ = 0;
     std::uint32_t refusals_ = 0;
-    ListView<BrowserEntry> view_{{}, &BrowserSession::entry_name, {}};
+    ListView<BrowserEntry> view_{{}};
 };
 
 }

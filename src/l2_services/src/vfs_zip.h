@@ -7,9 +7,9 @@
 #include <string>
 #include <vector>
 
+#include "browse_rules.h"
 #include "infra/error.h"
 #include "svc/vfs.h"
-#include "vfs_detail.h"
 
 namespace mister::svc::detail {
 
@@ -24,7 +24,7 @@ struct ZipListing {
 );
 [[nodiscard]] Ex<std::unique_ptr<IFile>> zip_open_member_by_crc(
     const std::string& archive,
-    std::uint32_t crc
+    Crc32 crc
 );
 
 [[nodiscard]] bool zip_archive_opens(const std::string& archive);

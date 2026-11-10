@@ -3,7 +3,6 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <string_view>
 
 #include "app/mra_facts.h"
@@ -34,18 +33,11 @@ struct IdentityRecord {
     SessionIdentity identity{};
 
     bool mgl_playable = true;
-    cores::BaudRate uart_default_baud{115200};
+    cores::BaudRate uart_default_baud{cores::kDefaultUartBaud};
     Stamp stamp{};
 };
 
 using IdentityRecordCell = xthread::Telemetry<IdentityRecord, SeatTag::Main>;
-
-[[nodiscard]] constexpr IdentityRecord::Stamp next_identity_stamp(
-    IdentityRecord::Stamp s
-) noexcept {
-    const auto v = static_cast<std::uint16_t>(s.v + 1u);
-    return IdentityRecord::Stamp{v == 0 ? std::uint16_t{1} : v};
-}
 
 [[nodiscard]] IdentityRecord build_identity_record(
     const IdentityRecord::Inputs& in,

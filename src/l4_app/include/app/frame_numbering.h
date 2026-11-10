@@ -10,6 +10,7 @@
 #include "app/frame_stamp.h"
 #include "app/types.h"
 #include "hal/types.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -42,15 +43,16 @@ public:
 
     [[nodiscard]] WideCoreFrame core_frame() const noexcept { return current_(); }
 
+    [[nodiscard]] std::int64_t period() const noexcept { return period_ns_; }
+
     [[nodiscard]] Gap frames_since(
         hal::HeaderCtr ctr,
         std::int64_t now,
-        const CoreFrameRecord* cell,
+        infra::OptRef<const CoreFrameRecord> cell,
         CoreFrameGap lag,
         CoreFrameGap behind,
         bool woven,
-        bool anchored,
-        std::int64_t& period_ns
+        bool anchored
     ) noexcept;
 
     void advance(CoreFrameCount n) noexcept { ext_ += CoreFrameGap::of_count(n); }
@@ -65,7 +67,7 @@ public:
     [[nodiscard]] Stamped stamp(
         hal::HeaderCtr ctr,
         std::int64_t now,
-        const CoreFrameRecord* cell,
+        infra::OptRef<const CoreFrameRecord> cell,
         const std::optional<CoreFrameRecord>& last_cell,
         bool anchored,
         CoreFrameGap lag
@@ -77,6 +79,8 @@ public:
 
 private:
     static constexpr CoreFrameGap kBeforeFirstCopy{-1};
+
+    static constexpr std::int64_t kDefaultPeriodNs = 16'666'667;
 
     [[nodiscard]] WideCoreFrame current_() const noexcept { return ext_ + anchor_off_; }
 
@@ -90,6 +94,8 @@ private:
     std::optional<LastCtr> last_{};
     WideCoreFrame ext_{};
     CoreFrameGap anchor_off_ = kBeforeFirstCopy;
+
+    std::int64_t period_ns_ = kDefaultPeriodNs;
     std::array<CoreFrameGap, kAnchorVotes> votes_{};
     std::uint8_t nvotes_ = 0;
     std::uint8_t vote_next_ = 0;

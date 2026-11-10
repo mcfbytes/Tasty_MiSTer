@@ -13,8 +13,6 @@ namespace mister::cores::neogeo {
 
 inline constexpr std::size_t kRomsetIndexMax = 1000;
 
-inline constexpr std::uint32_t kVromSize = 16u * 1024u * 1024u;
-
 struct RomsetEntry {
     std::string name;
 

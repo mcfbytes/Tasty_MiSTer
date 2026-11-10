@@ -8,10 +8,11 @@
 
 #include "cores/types.h"
 #include "infra/error.h"
+#include "os/child_process.h"
 
 namespace mister::app::proc {
 
-[[nodiscard]] Ex<int> uartmode_script(std::uint8_t mode);
+[[nodiscard]] Ex<os::ChildProcessExit> uartmode_script(std::uint8_t mode);
 [[nodiscard]] Ex<void> mlinkutil_baud(cores::BaudRate baud);
 [[nodiscard]] Ex<void> mlinkutil_soundfont(std::string_view relative_path);
 

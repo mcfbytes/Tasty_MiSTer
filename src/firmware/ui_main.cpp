@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui_main.h"
 
-#include "boot_parts.h"
+#include "infra/wired_end.h"
 #include "app/bt_pump.h"
 #include "app/cmd_fifo.h"
 #include "app/event.h"
@@ -26,10 +26,12 @@
 
 namespace mister::fw {
 
+using infra::wired_end;
+
 UiMain::UiMain(
     app::EventQueue<SeatTag::RT>& events,
     xthread::ParkFds fds,
-    app::UartModeController::Handoffs& handoffs,
+    infra::OptRef<app::UartModeController::Handoffs> handoffs,
     const Wiring& wiring,
     xthread::WakeFlag& asker
 ) noexcept
@@ -45,7 +47,6 @@ UiMain::UiMain(
       replay_(wiring.replay),
       recorder_(wiring.recorder),
       launcher_screen_(wiring.launcher_screen),
-      uart_(wiring.uart),
       ui_sink_(wiring.ui_sink),
       ui_round_(wiring.ui_round),
       owner_tick_(wiring.owner_tick),
@@ -69,9 +70,9 @@ void UiMain::start() noexcept {
 
 void UiMain::drain_events_() noexcept {
     while (auto e = events_.pop())
-        ui_sink_.deliver(*e);
+        ui_sink_.deliver_from(*e, SeatTag::RT);
     while (auto e = owner_events_.pop())
-        ui_sink_.deliver(*e);
+        ui_sink_.deliver_from(*e, SeatTag::Main);
 }
 
 void UiMain::serve() noexcept {
@@ -101,8 +102,8 @@ void UiMain::serve() noexcept {
         ui_writes_->tick(verdicts_);
     if (owner_tick_)
         owner_tick_->tick();
-    if (uart_) {
-        while (const auto h = uart_handoffs_.pop())
+    if (uart_handoffs_) {
+        while (const auto h = uart_handoffs_->pop())
             infra::dispatch<app::UartHandoffRoutes>(*h, uart_performer_);
     }
     const std::optional<app::UiRoundEdge> edge = ui_round_

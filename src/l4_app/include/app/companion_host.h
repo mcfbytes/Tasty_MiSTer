@@ -4,12 +4,13 @@
 #include <cstdint>
 
 #include "app/companion_bind.h"
-#include "cores/mailbox_servants.h"
+#include "cores/servant_id.h"
 #include "infra/counter.h"
 #include "infra/inbox.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -31,7 +32,11 @@ public:
 
     void serve() noexcept;
 
-    [[nodiscard]] infra::OptRef<cores::IMailboxServant> servant_for(std::uint16_t gen) noexcept;
+    [[nodiscard]] infra::OptRef<cores::IMailboxServant> servant_for(
+        proto::CompanionBindGen gen
+    ) noexcept;
+
+    [[nodiscard]] bool awaits_bind(proto::CompanionBindGen gen) const noexcept;
     void refill_one() noexcept;
     [[nodiscard]] bool rest() const noexcept;
 
@@ -51,7 +56,7 @@ private:
     Binds binds_;
     cores::ServantSet servants_{};
     infra::OptRef<cores::IMailboxServant> held_{};
-    std::uint16_t bound_gen_ = 0;
+    proto::CompanionBindGen bound_gen_{};
     xthread::Counter attaches_, applied_, unheld_;
 };
 

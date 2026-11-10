@@ -62,7 +62,7 @@ struct FabricRegion {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     const std::uint64_t base = aperture.phys.v;
     const std::uint64_t extent = aperture.len;
-    if (addr.v < base || len > extent || addr.v - base > extent - len) {
+    if (addr.v < base || !span_fits(addr.v - base, len, extent)) {
         return std::unexpected(Error{Errc::aperture_range, ERR_SITE(), os::low32(addr)});
     }
     return PhysRegion{addr, static_cast<std::size_t>(len), "load-window"};

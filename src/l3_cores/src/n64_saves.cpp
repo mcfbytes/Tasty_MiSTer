@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/n64_saves.h"
+#include "cores/save_row_count.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace mister::cores::n64 {
@@ -21,19 +23,20 @@ std::string_view stem_of(std::string_view name) noexcept {
 SaveChannel::SaveChannel(const svc::Vfs& vfs) noexcept : io_(vfs) {}
 
 Ex<void> SaveChannel::plan(
-    const ISaveLayout& live,
+    const ILayoutKeySource& live,
     std::string_view image_path,
     std::string_view core_dir,
     std::span<const SavePartition> declared
 ) {
     clear();
 
-    layout_key_ = live.layout_key(declared.size());
+    layout_key_ = live.layout_key(SaveRowCount::of(declared.size()));
     layout_set_ = true;
 
-    pending_plan_ = 0;
-    if (declared.empty())
+    if (declared.empty()) {
+        mount_plan_.emplace();
         return {};
+    }
     if (declared.size() > kMaxSaveRows) {
         return std::unexpected(
             Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(declared.size())}
@@ -60,7 +63,13 @@ Ex<void> SaveChannel::plan(
     if (!ok)
         stock.clear();
 
-    pending_plan_ = store_->partitions().size();
+    mount_plan_.emplace();
+    const SaveRowCount n = SaveRowCount::of(
+        std::min<std::size_t>(store_->partitions().size(), MountPlan::kMaxMounts)
+    );
+    for (SaveRow row{}; row != n.end(); row = row.next()) {
+        mount_plan_->add(mount_at(row));
+    }
     return {};
 }
 
@@ -74,27 +83,25 @@ void SaveChannel::clear() noexcept {
     layout_key_ = SaveLayoutKey{};
     layout_set_ = false;
     total_ = 0;
-    pending_plan_.reset();
+    mount_plan_.reset();
 }
 
-std::optional<ISaveChannel::MountPlan> SaveChannel::claim_mount_plan() {
-    TASTY_SEAT_BODY(SaveChannel);
-    const auto n = std::exchange(pending_plan_, std::nullopt);
-    if (!n)
-        return std::nullopt;
+void SaveChannel::forget_plan() noexcept {
+    mount_plan_.reset();
+}
 
-    MountPlan out{};
-    for (std::size_t i = 0; i < *n && i < MountPlan::kMaxMounts; ++i) {
-        out.add(mount_at(SaveRow{static_cast<std::uint8_t>(i)}));
-    }
-    return out;
+infra::OptRef<const ISaveChannel::MountPlan> SaveChannel::mount_plan() const noexcept {
+    TASTY_SEAT_BODY(SaveChannel);
+    if (!mount_plan_)
+        return {};
+    return infra::OptRef<const MountPlan>{*mount_plan_};
 }
 
 Ex<ISaveChannel::Mount> SaveChannel::mount_at(SaveRow row) {
     TASTY_SEAT_BODY(SaveChannel);
     const auto order = orders_.find(row);
     if (!store_.has_value() || !order || row.v >= store_->partitions().size()) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), row.v});
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), detail_of(row)});
     }
     const SavePartition& p = store_->partitions()[row.v];
     auto path = store_->path_for(p.name);
@@ -104,13 +111,16 @@ Ex<ISaveChannel::Mount> SaveChannel::mount_at(SaveRow row) {
     }
     SaveOrder& o = *order;
     o.path = *path;
-    if (p.length == 0 || p.length > create_cap(row)) {
+    const CreateImage image = p.suffix == save_suffix(MemoryType::Cpak) ? CreateImage::ControllerPak
+                                                                        : CreateImage::Blank;
+
+    if (p.length > create_cap(row) || !SaveOrder::create_fits(image, proto::FileSize{p.length})) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), p.length});
     }
 
     o.offset = p.offset;
-    o.create = p.length;
-    o.cpak = p.suffix == save_suffix(MemoryType::Cpak);
+    o.bytes = p.length;
+    o.create = image;
     o.row = row;
     plan_.rows[row] = SavePlan::Row{
         .length = proto::FileSize{p.length},
@@ -168,11 +178,11 @@ proto::ImageTag SaveChannel::request_tag(proto::SlotIndex) const noexcept {
     return layout_key_.to_tag();
 }
 
-void SaveChannel::note_layout(const ISaveLayout& live) noexcept {
+void SaveChannel::note_layout(const ILayoutKeySource& live) noexcept {
     TASTY_SEAT_BODY(SaveChannel);
     if (!store_.has_value())
         return;
-    layout_key_ = live.layout_key(store_->partitions().size());
+    layout_key_ = live.layout_key(SaveRowCount::of(store_->partitions().size()));
     layout_set_ = true;
 }
 

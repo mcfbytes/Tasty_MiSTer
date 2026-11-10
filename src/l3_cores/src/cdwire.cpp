@@ -6,7 +6,7 @@
 #include <optional>
 #include <span>
 
-#include "svc/disc_engine.h"
+#include "svc/track.h"
 
 namespace mister::cores {
 
@@ -98,15 +98,11 @@ std::array<std::uint16_t, 3> sega_set_words(std::uint64_t frame) noexcept {
     };
 }
 
-std::optional<std::uint16_t> sega_send_data_query(TrackType type, bool skip_mode1) noexcept {
-    constexpr unsigned kSendDataTypeShift = 2;
+std::optional<Selector> sega_send_data_query(TrackType type, bool skip_mode1) noexcept {
 
     if (skip_mode1 && type == TrackType::Mode1)
         return std::nullopt;
-    return static_cast<std::uint16_t>(
-        kCddGetSendData
-        | (static_cast<std::uint16_t>(static_cast<std::uint8_t>(type)) << kSendDataTypeShift)
-    );
+    return Selector::send_data_query(type);
 }
 
 std::array<std::uint16_t, 2> pce_set_words(
@@ -123,30 +119,6 @@ std::array<std::uint16_t, 2> pce_set_words(
             (region ? kPceRegionBit : 0u) | (data_request ? kPceDataRequestBit : 0u)
         )
     };
-}
-
-std::array<std::uint8_t, 96> interleave_subcode(std::span<const std::uint8_t, 96> raw) noexcept {
-    constexpr std::size_t kSubcodeBytes = 96;
-    constexpr std::size_t kSubcodeChannels = 8;
-    constexpr std::size_t kSubcodeChannelStride = 12;
-    constexpr unsigned kChannelBits = 3;
-    constexpr unsigned kTopBit = 7;
-    constexpr unsigned kBitIndexMask = 7;
-
-    std::array<std::uint8_t, 96> out{};
-    for (std::size_t i = 0; i < kSubcodeBytes; ++i) {
-        unsigned code = 0;
-        for (std::size_t j = 0; j < kSubcodeChannels; ++j) {
-            const unsigned bit = (static_cast<unsigned>(
-                                      raw[j * kSubcodeChannelStride + (i >> kChannelBits)]
-                                  )
-                                  >> (kTopBit - (i & kBitIndexMask)))
-                & 1u;
-            code |= bit << (kTopBit - j);
-        }
-        out[i] = static_cast<std::uint8_t>(code);
-    }
-    return out;
 }
 
 }

@@ -30,9 +30,9 @@ namespace detail {
         return standard_label_matches(v, "off") || standard_label_matches(v, "no");
     };
     if (is_off(v0) && is_on(v1))
-        return ItemProbe{bits.start, 1, 1};
+        return ItemProbe::of(bits, FieldValue{1});
     if (is_on(v0) && is_off(v1))
-        return ItemProbe{bits.start, 1, 0};
+        return ItemProbe::of(bits, FieldValue{});
     return std::nullopt;
 }
 

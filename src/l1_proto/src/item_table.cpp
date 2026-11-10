@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/item_table.h"
-#include "proto/conf_str.h"
+#include "proto/item_rule.h"
 #include "proto/status_word.h"
 #include "conf_str_detail.h"
 
@@ -8,13 +8,15 @@
 #include <limits>
 #include <optional>
 
+#include "infra/ascii.h"
+
 namespace mister::proto {
 
 namespace {
 
 constexpr std::uint32_t kStatusBits = proto::StatusWord::kBits;
 
-constexpr std::uint32_t kMaxFieldWidth = 8;
+constexpr std::uint32_t kMaxFieldSpan = 8;
 
 constexpr std::uint32_t kUpperBankFirstBit = 32;
 
@@ -119,7 +121,7 @@ mister::proto::BitField decode_bits(
             return {};
     }
 
-    if (end - start > kMaxFieldWidth)
+    if (end - start > kMaxFieldSpan)
         return {};
     return BitField{
         StatusBit{static_cast<std::uint8_t>(start)},
@@ -136,17 +138,8 @@ bool head_matches(std::string_view field, const mister::proto::ItemRule& r) noex
             return field == r.head;
         case HeadMatch::Prefix:
             return field.starts_with(r.head);
-        case HeadMatch::PrefixIcase: {
-            if (field.size() < r.head.size())
-                return false;
-            for (std::size_t i = 0; i < r.head.size(); ++i) {
-                if (std::toupper(static_cast<unsigned char>(field[i]))
-                    != std::toupper(static_cast<unsigned char>(r.head[i]))) {
-                    return false;
-                }
-            }
-            return true;
-        }
+        case HeadMatch::PrefixIcase:
+            return mister::infra::istarts_with(field, r.head);
     }
     return false;
 }
@@ -245,7 +238,7 @@ void decode_tail(std::string_view p, Item& it) noexcept {
             }
             const char d = at(p, idx);
             if (d >= '0' && d <= '9')
-                it.digit = FileSlotDigit{static_cast<std::uint8_t>(d - '0')};
+                it.digit = FileSlotDigit::from(static_cast<std::uint32_t>(d - '0'));
             break;
         }
         case ItemKind::Addon:
@@ -272,9 +265,9 @@ BitField decode_bit_ref(std::string_view spec, ExShift ex) noexcept {
     return decode_bits(spec, ex, false);
 }
 
-std::uint8_t decode_hd_selector(std::string_view after_letter) noexcept {
+StatusBit decode_hd_selector(std::string_view after_letter) noexcept {
     const BitField b = decode_bits(after_letter, ExShift::None, true);
-    return b.valid() ? b.start.v : 0;
+    return b.valid() ? b.start : StatusBit{};
 }
 
 Visibility evaluate(const Item& it, OsdMask hdmask) noexcept {
@@ -282,7 +275,7 @@ Visibility evaluate(const Item& it, OsdMask hdmask) noexcept {
     for (std::uint8_t i = 0; i < it.cond_count && i < kMaxConds; ++i) {
         const Cond& c = it.conds[i];
 
-        const bool set = c.bit < 16 && ((static_cast<unsigned>(hdmask.v) >> c.bit) & 1u) != 0u;
+        const bool set = hdmask.has(c.bit);
         if (set != c.acts_when_set)
             continue;
         if (c.effect == CondEffect::Hide)

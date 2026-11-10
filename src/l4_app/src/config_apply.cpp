@@ -2,6 +2,7 @@
 #include "app/config_apply.h"
 
 #include "app/types.h"
+#include "infra/ascii.h"
 
 #include "svc/config_snapshot.h"
 #include "svc/vfs.h"
@@ -9,41 +10,24 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <cctype>
 #include <climits>
 #include <utility>
 
 namespace mister::app {
 
-namespace {
-
-bool ieq(std::string_view a, std::string_view b) {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const auto ca = static_cast<unsigned char>(a[i]);
-        const auto cb = static_cast<unsigned char>(b[i]);
-        if (std::tolower(ca) != std::tolower(cb))
-            return false;
-    }
-    return true;
-}
-
-}
-
 void apply_vga_mode_fixup(svc::ConfigSnapshot& cfg) noexcept {
     const std::string_view v(cfg.vga_mode);
     if (v.empty())
         return;
-    if (ieq(v, "rgb"))
+    if (infra::ieq(v, "rgb"))
         cfg.vga_mode_int = wire_of(VgaMode::Rgb);
-    if (ieq(v, "ypbpr"))
+    if (infra::ieq(v, "ypbpr"))
         cfg.vga_mode_int = wire_of(VgaMode::YPbPr);
-    if (ieq(v, "svideo"))
+    if (infra::ieq(v, "svideo"))
         cfg.vga_mode_int = wire_of(VgaMode::SVideo);
-    if (ieq(v, "cvbs"))
+    if (infra::ieq(v, "cvbs"))
         cfg.vga_mode_int = wire_of(VgaMode::Cvbs);
-    if (ieq(v, "subcarrier")) {
+    if (infra::ieq(v, "subcarrier")) {
         cfg.vga_mode_int = wire_of(VgaMode::Subcarrier);
         cfg.csync = 1;
         cfg.forced_scandoubler = 0;
@@ -76,11 +60,12 @@ std::optional<std::string> alternate_executable(
         return std::nullopt;
     }
 
-    if (ieq(*resolved, self_exe))
+    if (infra::ieq(*resolved, self_exe))
         return std::nullopt;
 
     char real[PATH_MAX] = {};
-    if (::realpath(resolved->c_str(), real) != nullptr && ieq(std::string_view(real), self_exe)) {
+    if (::realpath(resolved->c_str(), real) != nullptr
+        && infra::ieq(std::string_view(real), self_exe)) {
         return std::nullopt;
     }
     return std::optional<std::string>(std::move(*resolved));

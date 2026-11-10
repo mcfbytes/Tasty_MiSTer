@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/idle_blank.h"
 
+#include <chrono>
+
 namespace mister::app {
 
-void IdleBlank::set_timeout_minutes(std::uint16_t m) noexcept {
+void IdleBlank::set_timeout_minutes(std::chrono::minutes m) noexcept {
     if (m == minutes_)
         return;
     minutes_ = m;
@@ -11,11 +13,11 @@ void IdleBlank::set_timeout_minutes(std::uint16_t m) noexcept {
 }
 
 std::optional<bool> IdleBlank::tick(
-    std::int64_t now_ns,
+    os::RawMonotonicClock::time_point now,
     std::uint32_t activity,
     bool grabbed
 ) noexcept {
-    if (minutes_ == 0) {
+    if (minutes_ == std::chrono::minutes{}) {
 
         if (!blanked_)
             return std::nullopt;
@@ -31,7 +33,7 @@ std::optional<bool> IdleBlank::tick(
 
     if (!armed_ || moved || !grabbed) {
         armed_ = true;
-        deadline_ns_ = now_ns + static_cast<std::int64_t>(minutes_) * 60'000'000'000LL;
+        deadline_ = now + minutes_;
         if (blanked_) {
             blanked_ = false;
             ++wakes_;
@@ -40,7 +42,7 @@ std::optional<bool> IdleBlank::tick(
         return std::nullopt;
     }
 
-    if (now_ns >= deadline_ns_ && !blanked_) {
+    if (now >= deadline_ && !blanked_) {
         blanked_ = true;
         ++blanks_;
         return false;

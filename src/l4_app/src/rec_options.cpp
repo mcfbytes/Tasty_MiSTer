@@ -1,32 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/rec_options.h"
 
-#include <cctype>
 #include <charconv>
 #include <cstdio>
 #include <limits>
 
+#include "infra/ascii.h"
 #include "infra/parse_int.h"
 
 namespace mister::app {
-namespace {
-
-bool eq_ci(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const auto ca = static_cast<unsigned char>(a[i]);
-        const auto cb = static_cast<unsigned char>(b[i]);
-        if (std::tolower(ca) != std::tolower(cb))
-            return false;
-    }
-    return true;
-}
-
-}
 
 const char* rec_codec_name(RecCodec c) noexcept {
-    return c == RecCodec::Zmbv ? "zmbv" : "cscd";
+    return rec_codec_facts(c).name.data();
+}
+
+bool rec_codec_available(RecCodec c) noexcept {
+    return rec_codec_facts(c).available;
 }
 
 const char* rec_scale_name(RecScale s) noexcept {
@@ -56,43 +45,42 @@ const char* rec_motion_name(RecMotion m) noexcept {
 }
 
 std::optional<RecCodec> parse_rec_codec(std::string_view s) noexcept {
-    if (eq_ci(s, "cscd"))
-        return RecCodec::Cscd;
-    if (eq_ci(s, "zmbv"))
-        return RecCodec::Zmbv;
+    for (const RecCodecFacts& row : kRecCodecFacts)
+        if (infra::ieq(s, row.name))
+            return row.kind;
     return std::nullopt;
 }
 
 std::optional<RecScale> parse_rec_scale(std::string_view s) noexcept {
-    if (eq_ci(s, "auto"))
+    if (infra::ieq(s, "auto"))
         return RecScale::Auto;
-    if (eq_ci(s, "native"))
+    if (infra::ieq(s, "native"))
         return RecScale::Native;
-    if (eq_ci(s, "half"))
+    if (infra::ieq(s, "half"))
         return RecScale::Half;
     return std::nullopt;
 }
 
 std::optional<RecMotion> parse_rec_motion(std::string_view s) noexcept {
-    if (eq_ci(s, "auto"))
+    if (infra::ieq(s, "auto"))
         return RecMotion::Auto;
-    if (eq_ci(s, "off"))
+    if (infra::ieq(s, "off"))
         return RecMotion::Off;
-    if (eq_ci(s, "small"))
+    if (infra::ieq(s, "small"))
         return RecMotion::Small;
-    if (eq_ci(s, "full"))
+    if (infra::ieq(s, "full"))
         return RecMotion::Full;
     return std::nullopt;
 }
 
-std::optional<std::uint16_t> parse_rec_every(std::string_view s) noexcept {
+std::optional<RecEvery> parse_rec_every(std::string_view s) noexcept {
     const auto v = infra::parse_int<unsigned>(s);
-    if (!v || *v == 0 || *v > kRecEveryMax)
+    if (!v)
         return std::nullopt;
-    return static_cast<std::uint16_t>(*v);
+    return RecEvery::of(*v);
 }
 
-std::optional<std::uint64_t> parse_rec_size(std::string_view s) noexcept {
+std::optional<proto::FileSize> parse_rec_size(std::string_view s) noexcept {
     if (s.empty())
         return std::nullopt;
     std::uint64_t v = 0;
@@ -117,23 +105,22 @@ std::optional<std::uint64_t> parse_rec_size(std::string_view s) noexcept {
     }
     if (mul != 1 && v > std::numeric_limits<std::uint64_t>::max() / mul)
         return std::nullopt;
-    return v * mul;
+    return proto::FileSize{v * mul};
 }
 
 FixedStr<160, StrFit::Reject> format_rec_options(const RecOptions& o) noexcept {
     char buf[160];
-    const unsigned every = o.every == 0 ? 1u : o.every;
     const int n = std::snprintf(
         buf,
         sizeof buf,
-        "codec=%s scale=%s motion=%s every=%u from=%s to=%s segment=%llu",
+        "codec=%s scale=%s motion=%s every=%u from=%s to=%s segment=%s",
         rec_codec_name(o.codec),
         rec_scale_name(o.scale),
         rec_motion_name(o.motion),
-        every,
+        o.every.count<unsigned>(),
         o.from_frame.text().c_str(),
         o.to_frame.text().c_str(),
-        static_cast<unsigned long long>(o.segment_bytes)
+        o.segment_bytes.text().c_str()
     );
     FixedStr<160, StrFit::Reject> out;
     if (n > 0 && static_cast<std::size_t>(n) < sizeof buf)

@@ -3,10 +3,10 @@
 
 #include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
 
+#include "app/boot_args.h"
 #include "app/cmd_verb_sink.h"
 #include "app/event_sink.h"
 #include "app/hd_osd_status.h"
@@ -42,8 +42,6 @@ class UiWriteLane;
 
 namespace mister::fw {
 
-inline constexpr std::size_t kCompanionArg = 2;
-
 struct BootParts;
 class RecorderBlock;
 class ReplayBlock;
@@ -64,7 +62,6 @@ public:
             infra::OptRef<app::IEventSink> shot_sink{};
             infra::OptRef<app::MglPump> mgl{};
             infra::OptRef<app::HpsFramebuffer> fb{};
-            bool uart = false;
             infra::OptRef<app::BtPump> bt{};
             infra::OptRef<app::LauncherScreen> launcher_screen{};
             infra::OptRef<app::IUiRoundPort> ui_round{};
@@ -120,7 +117,7 @@ public:
         const char* program;
         hal::FallbackNotice windows_notice;
 
-        std::span<const char* const> boot_args;
+        app::BootArgs boot_args;
 
         bool stop_ends_ladder;
 

@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstring>
+#include <span>
 
 #include "infra/byte_view.h"
 #include "svc/vfs.h"
@@ -35,7 +36,7 @@ std::string read_remembered_path(
     auto n = (*f)->read_at(0, blob);
     if (!n || *n == 0)
         return {};
-    return std::string{infra::text_until_nul(blob.data(), kRememberedBlob)};
+    return std::string{infra::text_until_nul(std::span{blob})};
 }
 
 }

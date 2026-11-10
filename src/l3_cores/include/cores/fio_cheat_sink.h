@@ -27,7 +27,7 @@ public:
         : link_(&link),
           queue_(queue) {}
 
-    [[nodiscard]] Ex<void> apply(std::span<const std::uint8_t> table, std::uint32_t unit) override;
+    [[nodiscard]] Ex<void> apply(std::span<const std::uint8_t> table, CheatUnit unit) override;
 
     [[nodiscard]] std::uint32_t sends() const noexcept {
         TASTY_SEAT_BODY(FioCheatSink);

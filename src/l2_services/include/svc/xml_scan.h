@@ -8,10 +8,6 @@ namespace mister::svc::xml {
 
 inline constexpr std::size_t kMaxAttrs = 16;
 
-[[nodiscard]] constexpr char lower(char c) noexcept {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
 [[nodiscard]] constexpr bool is_space(char c) noexcept {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 }

@@ -16,22 +16,22 @@ public:
         return Deadline{c.now() + d};
     }
 
-    static Deadline immediate() { return Deadline{std::chrono::nanoseconds{0}}; }
+    static Deadline immediate() { return Deadline{RawMonotonicClock::time_point{}}; }
 
     bool expired(const IClock& c) const { return c.now() >= at_; }
 
-    std::chrono::nanoseconds at() const noexcept { return at_; }
+    RawMonotonicClock::time_point at() const noexcept { return at_; }
 
-    std::chrono::nanoseconds remaining(std::chrono::nanoseconds now) const noexcept {
+    std::chrono::nanoseconds remaining(RawMonotonicClock::time_point now) const noexcept {
         return at_ - now;
     }
 
     [[nodiscard]] Ex<void> sleep_until() const;
 
 private:
-    explicit Deadline(std::chrono::nanoseconds at) : at_(at) {}
+    explicit Deadline(RawMonotonicClock::time_point at) : at_(at) {}
 
-    std::chrono::nanoseconds at_;
+    RawMonotonicClock::time_point at_;
 };
 
 }

@@ -147,44 +147,9 @@ void LinuxVtConsole::restore_text(const char* tty) noexcept {
     restore_text_op(tty);
 }
 
-std::optional<bool> LinuxVtConsole::text_mode(VtNumber vt) noexcept {
-    TASTY_SEAT_BODY(LinuxVtConsole);
-    return text_mode_op(vt);
-}
-
-void LinuxVtConsole::graphics(VtNumber vt) noexcept {
-    TASTY_SEAT_BODY(LinuxVtConsole);
-    graphics_op(vt);
-}
-
-void LinuxVtConsole::text(VtNumber vt) noexcept {
-    TASTY_SEAT_BODY(LinuxVtConsole);
-    text_op(vt);
-}
-
-void LinuxVtConsole::cursor(VtNumber vt, bool shown) noexcept {
-    TASTY_SEAT_BODY(LinuxVtConsole);
-    cursor_op(vt, shown);
-}
-
 std::optional<VtNumber> UiVtConsole::active() noexcept {
     TASTY_SEAT_BODY(UiVtConsole);
     return active_op();
-}
-
-Ex<void> UiVtConsole::activate(VtNumber vt) noexcept {
-    TASTY_SEAT_BODY(UiVtConsole);
-    return activate_op(vt);
-}
-
-void UiVtConsole::blank(const char* tty) noexcept {
-    TASTY_SEAT_BODY(UiVtConsole);
-    blank_op(tty);
-}
-
-void UiVtConsole::restore_text(const char* tty) noexcept {
-    TASTY_SEAT_BODY(UiVtConsole);
-    restore_text_op(tty);
 }
 
 std::optional<bool> UiVtConsole::text_mode(VtNumber vt) noexcept {

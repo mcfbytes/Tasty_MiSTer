@@ -11,6 +11,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "app/session_owner.h"
 #include "hal/axi.h"
@@ -25,9 +26,6 @@
 namespace mister::fw {
 
 namespace {
-
-std::atomic<int> g_exit_code TASTY_PERSIST(proc, tasty_exit_code){0};
-static_assert(std::atomic<int>::is_always_lock_free);
 
 enum class HomeLane : int { Idle = 0, Open = 1, Stopping = 2, Left = 3 };
 std::atomic<HomeLane> g_home_owed TASTY_PERSIST(proc, tasty_home_owed){HomeLane::Idle};
@@ -170,10 +168,12 @@ void ReplayMode::title_process() noexcept {
 
 ReplayMode::Exit ReplayMode::prepare() {
     tasty_arm_owner_signals();
-    if (!tasty_resolve_args(args_)) {
+    auto resolved = tasty_resolve_args(args_);
+    if (!resolved) {
         tasty_say("tasty: cannot resolve paths");
         return 1;
     }
+    args_ = std::move(*resolved);
     if (args_.verb == TastyVerb::Play) {
         if (::access(args_.movie.c_str(), R_OK) != 0) {
             char buf[app::kPathMax + 32];
@@ -183,9 +183,10 @@ ReplayMode::Exit ReplayMode::prepare() {
         }
         auto vfs = svc::Vfs::create_at("/");
         if (vfs) {
-            const int pf = tasty_prepare_play(*vfs, args_);
-            if (pf != 0)
-                return pf;
+            auto rom = tasty_prepare_play(*vfs, args_);
+            if (!rom)
+                return 1;
+            args_.rom = *rom;
         } else if (args_.rom.empty()) {
             tasty_say("tasty: pass --rom");
             return 1;
@@ -264,9 +265,10 @@ void ReplayMode::QuietVoice::wedged(std::string_view line) const noexcept {
 }
 
 int ReplayMode::exit_status(const Ex<void>& ran) const noexcept {
-    const int rc = g_exit_code.load(std::memory_order_relaxed);
-    if (rc != 0)
-        return rc;
+
+    const RunExit recorded = run_exit_.sample().value;
+    if (failed(recorded))
+        return process_status(recorded);
     return ran ? 0 : 1;
 }
 
@@ -287,7 +289,7 @@ std::unique_ptr<SessionMode::Tail> ReplayMode::tail(
     ReplayBlock& replay,
     RecorderBlock& rec
 ) {
-    return std::make_unique<Owner>(plat, device, replay, rec, args_);
+    return std::make_unique<Owner>(plat, device, replay, rec, run_exit_, args_);
 }
 
 ReplayMode::Owner::Owner(
@@ -295,6 +297,7 @@ ReplayMode::Owner::Owner(
     DeviceBlock& device,
     ReplayBlock& replay,
     RecorderBlock& rec,
+    RunExitCell& run_exit,
     const TastyArgs& args
 )
     : feeder_{replay.replay_feeder_},
@@ -311,7 +314,7 @@ ReplayMode::Owner::Owner(
            .main_stop = device.main_stop_,
            .vfs = plat.vfs,
            .stop = ProcessStandup::stop_latch(),
-           .exit_code = g_exit_code,
+           .run_exit = run_exit,
            .video_fb = hal::declared_region(plat.regions, hal::RegionId::VideoFb)
                            .value_or(hal::PhysRegion{}),
            .direct_video_ini = device.owner_.direct_video_ini_cell()},
@@ -325,18 +328,9 @@ ReplayMode::Owner::Owner(
     device.owner_.set_remembered_files(app::SessionOwner::RememberedFiles::Ignore);
 }
 
-bool ReplayMode::FeederReplay::take_play(const TastySession::PlayAsk& ask) noexcept {
+bool ReplayMode::FeederReplay::take_play(const app::ReplayFeeder::Play& play) noexcept {
     TASTY_SEAT_BODY(FeederReplay);
-    app::ReplayFeeder::Play p{};
-    p.movie = ask.movie;
-    p.rom = ask.rom;
-    p.phase = ask.phase_us;
-    p.lead = ask.lead;
-    p.stop_at = ask.stop_at;
-    p.ram_fill = ask.ram_fill;
-    p.seeded_save = ask.seeded_save;
-    p.set_settings = ask.set_settings;
-    (void)f.take_play(p);
+    (void)f.take_play(play);
     return f.last_refusal() == app::ReplayFeeder::Refusal::None;
 }
 
@@ -365,26 +359,24 @@ bool ReplayMode::FeederReplay::active() const noexcept {
     return f.stage() != app::ReplayFeeder::Stage::Idle;
 }
 
-const char* ReplayMode::FeederReplay::refusal_why() const noexcept {
+std::optional<ReplayRefusal> ReplayMode::FeederReplay::refusal() const noexcept {
     TASTY_SEAT_BODY(FeederReplay);
-    if (f.last_refusal() == app::ReplayFeeder::Refusal::Movie)
-        return tasty_movie_refusal_token(f.last_refusal_detail());
-    return app::ReplayFeeder::refusal_name(f.last_refusal());
-}
+    const app::ReplayFeeder::Refusal why = f.last_refusal();
+    if (why == app::ReplayFeeder::Refusal::None)
+        return std::nullopt;
+    ReplayRefusal r{
+        .why = why,
+        .setting = f.last_setting(),
+        .setting_offered = f.last_setting_offered(),
+        .path = f.refusal_path()
+    };
+    if (why == app::ReplayFeeder::Refusal::Movie) {
 
-std::string_view ReplayMode::FeederReplay::refusal_setting() const noexcept {
-    TASTY_SEAT_BODY(FeederReplay);
-    return f.last_setting();
-}
-
-bool ReplayMode::FeederReplay::refusal_setting_offered() const noexcept {
-    TASTY_SEAT_BODY(FeederReplay);
-    return f.last_setting_offered();
-}
-
-std::string_view ReplayMode::FeederReplay::refusal_path() const noexcept {
-    TASTY_SEAT_BODY(FeederReplay);
-    return f.refusal_path();
+        r.movie = cores::movie_refusal_of(
+            Error{Errc::bad_format, infra::kNoSite, f.last_refusal_detail()}
+        );
+    }
+    return r;
 }
 
 std::size_t ReplayMode::FeederReplay::settings_set() const noexcept {

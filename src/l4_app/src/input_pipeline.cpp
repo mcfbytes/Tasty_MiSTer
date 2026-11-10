@@ -5,8 +5,6 @@
 #include <type_traits>
 #include <utility>
 
-#include "app/link_tx_channel.h"
-
 namespace mister::app {
 
 static_assert(
@@ -16,6 +14,7 @@ static_assert(
         InputWire&,
         InputBuild&,
         InputEmit&,
+        svc::InputService,
         os::IClock&,
         InputDecode::Wiring>,
     "the intended constructor must still exist"
@@ -30,13 +29,14 @@ InputPipeline::InputPipeline(
     InputWire& wire,
     InputBuild& build,
     InputEmit& emit,
+    svc::InputService service,
     os::IClock& clock,
     InputDecode::Wiring decode_wiring
 ) noexcept
     : wire_(wire),
       build_(build),
       emit_(emit),
-      service_(open_service_(build)),
+      service_(std::move(service)),
       decode_(std::move(fds), wire, service_, build.tables(), clock, decode_wiring),
       sample_{
           infra::OptRef<const InputDecode::CountsCell>{decode_.counts_cell()},
@@ -44,133 +44,9 @@ InputPipeline::InputPipeline(
           infra::OptRef<const InputWire>{wire_}
       } {}
 
-svc::InputService InputPipeline::open_service_(InputBuild& build) noexcept {
-    svc::InputService s = svc::InputService::create();
-    if (auto w = s.hotplug().open(build.enumerator().input_dir()); !w) {
-        build.note_watch_failure();
-    }
-    return s;
-}
-
 void InputPipeline::latch_cfg(std::span<const svc::DeadzoneRule> deadzones, bool rumble) noexcept {
     service_.apply_deadzone_rules(deadzones);
     service_.set_cfg_rumble(rumble);
-}
-
-void InputEmit::on_rt_round(bool tick, CoreEdgeSeq core_edge_seq, bool live) {
-
-    TASTY_SEAT_BODY(InputEmit);
-    n_rt_rounds_.add(1);
-
-    const InputGateBits gates = wire_.gates();
-    em_.set_gates(
-        InputWire::has(gates, InputWire::kGateGrabbed),
-        InputWire::has(gates, InputWire::kGateOsdVisible)
-    );
-
-    if (core_edge_seq != wm_core_edge_seq_) {
-        wm_core_edge_seq_ = core_edge_seq;
-        ps2_.forget();
-    }
-
-    if (live) {
-        if (tick)
-            ps2_.probe();
-        ps2_.service();
-    }
-    counts_cell_.publish(counts());
-}
-
-void InputEmit::apply_edge_reset() {
-    TASTY_SEAT_BODY(InputEmit);
-    if (reset_seen_.take(wire_.edge_reset())) {
-        em_.joysticks().reset_edges();
-        n_edge_reset_.add(1);
-        counts_cell_.publish(counts());
-    }
-}
-
-InputEmit::Counts InputEmit::counts() const noexcept {
-    Counts c{};
-    c.rt_rounds = n_rt_rounds_.get();
-    c.rt_errors = ps2_.errors();
-    c.edge_resets = n_edge_reset_.get();
-    return c;
-}
-
-InputBuild::InputBuild(const svc::Vfs& vfs, InputWire& wire, std::string_view input_dir)
-    : wire_(wire),
-      en_(svc::InputEnumerator::create(vfs)) {
-    if (!input_dir.empty())
-        en_.set_input_dir(input_dir);
-
-    if (auto e = en_.enumerate(); !e) {
-        n_enum_fail_.add(1);
-    }
-
-    (void)en_.load_maps_for(std::string_view{}, false);
-
-    {
-        const SeatScope stands_in_for_diag{kSeat};
-        if (auto loan = tx_.acquire())
-            hand_over_(std::move(loan));
-    }
-
-    wire_.publish_gates(
-        svc::InputService::kBornGrabbed ? InputWire::kGateGrabbed : InputGateBits{},
-        InputWire::kGateOsdVisible
-    );
-}
-
-void InputBuild::set_cfg_deadzone_rules(std::span<const svc::DeadzoneRule> rows) {
-    en_.set_cfg_deadzone_rules(rows);
-}
-
-void InputBuild::hand_over_(DeviceTableLoans::Loan loan) {
-    svc::DeviceTable t = en_.take_table();
-    std::swap(*loan, t);
-    tx_.send(std::move(loan));
-}
-
-bool InputBuild::rebind_round() {
-
-    TASTY_SEAT_BODY(InputBuild);
-
-    while (tx_.reap()) {
-    }
-    if (!wire_.requested(InputWire::kReqHotplug))
-        return false;
-
-    auto loan = tx_.acquire();
-    if (!loan) {
-        wire_.note_rebuild_refused();
-        return false;
-    }
-
-    wire_.clear_request(InputWire::kReqHotplug);
-
-    if (auto e = en_.enumerate(); !e) {
-        n_enum_fail_.add(1);
-    }
-    {
-
-        const InputWire::CoreNameCell core = wire_.core_name();
-
-        const auto reshape = wire_.analog_reshape();
-        (void)en_.load_maps_for(core.view(), core.front_end, reshape, wire_.joy_plan());
-    }
-    hand_over_(std::move(loan));
-    wire_.note_rebuild_done();
-    wire_.wake();
-    return true;
-}
-
-InputBuild::Counts InputBuild::counts() const noexcept {
-    Counts c{};
-    c.enumerate_failures = n_enum_fail_.get();
-    c.devices = en_.stats().devices;
-    c.rejected = en_.rejected_nodes();
-    return c;
 }
 
 InputStats collect_input_stats(const InputSample& s, const InputBuild::Counts& b) noexcept {
@@ -188,18 +64,7 @@ InputStats collect_input_stats(const InputSample& s, const InputBuild::Counts& b
         out.joy_seen = d.joy_seen;
         out.joy_players = d.joy_players;
         out.captures = d.captures;
-        out.mapped = d.mapped;
-        out.slotted = d.slotted;
-        out.mask_changes = d.mask_changes;
-        out.axis_edges = d.axis_edges;
-        out.mouse_remainder = d.mouse_remainder;
-        out.key_overflows = d.key_overflows;
-        out.quirk_drops = d.quirk_drops;
-        out.slot_live = d.slot_live;
-        out.slot_ghosts = d.slot_ghosts;
-        for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
-            out.slot_hash[i] = d.slot_hash[i];
-        }
+        out.service = d.service;
     }
     out.enumerate_failures = b.enumerate_failures;
     out.devices = b.devices;

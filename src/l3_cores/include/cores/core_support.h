@@ -7,7 +7,6 @@
 #include <span>
 #include <string_view>
 
-#include "cores/button_override.h"
 #include "cores/core_profile.h"
 #include "cores/fio_cheat_sink.h"
 #include "cores/host_services.h"
@@ -28,7 +27,6 @@ class IBlockServer;
 namespace mister::cores {
 
 struct CoreAdopt;
-class ICheatRecords;
 class ISaveChannel;
 
 class IStagingCore;
@@ -87,8 +85,6 @@ public:
         return on_apply_load_facts(facts);
     }
 
-    [[nodiscard]] ButtonOverride button_override() const noexcept { return on_button_override(); }
-
     [[nodiscard]] infra::OptRef<IStagingCore> staging_core() noexcept { return on_staging_core(); }
 
     [[nodiscard]] infra::OptRef<ISlotMount> slot_mount() noexcept { return on_slot_mount(); }
@@ -121,11 +117,7 @@ public:
 
     [[nodiscard]] infra::OptRef<IOptionRows> options() noexcept { return on_options(); }
 
-    [[nodiscard]] ICheatSink* cheat_sink() noexcept { return on_cheat_sink(); }
-
-    [[nodiscard]] infra::OptRef<ICheatRecords> cheat_records() noexcept {
-        return on_cheat_records();
-    }
+    [[nodiscard]] ICheatSink& cheat_sink() noexcept { return on_cheat_sink(); }
 
     [[nodiscard]] infra::OptRef<ICheatEngine> cheat_engine() noexcept { return on_cheat_engine(); }
 
@@ -187,8 +179,6 @@ private:
         return unimplemented(ERR_SITE());
     }
 
-    [[nodiscard]] virtual ButtonOverride on_button_override() const noexcept { return {}; }
-
     [[nodiscard]] virtual infra::OptRef<IStagingCore> on_staging_core() noexcept { return {}; }
 
     [[nodiscard]] virtual infra::OptRef<ISlotMount> on_slot_mount() noexcept { return {}; }
@@ -219,9 +209,7 @@ private:
 
     [[nodiscard]] virtual infra::OptRef<IOptionRows> on_options() noexcept { return {}; }
 
-    [[nodiscard]] virtual ICheatSink* on_cheat_sink() noexcept { return &fio_cheats_; }
-
-    [[nodiscard]] virtual infra::OptRef<ICheatRecords> on_cheat_records() noexcept { return {}; }
+    [[nodiscard]] virtual ICheatSink& on_cheat_sink() noexcept { return fio_cheats_; }
 
     [[nodiscard]] virtual infra::OptRef<ICheatEngine> on_cheat_engine() noexcept { return {}; }
 
@@ -243,14 +231,16 @@ private:
     bool adopted_ = false;
 };
 
-[[nodiscard]] inline Core* bound_core(reactor::CoreState& st) noexcept {
-    return st.owner ? static_cast<Core*>(st.owner.operator->()) : nullptr;
+[[nodiscard]] inline infra::OptRef<Core> bound_core(reactor::CoreState& st) noexcept {
+    if (!st.owner)
+        return {};
+    return infra::OptRef<Core>{static_cast<Core&>(*st.owner)};
 }
 
 template <const CoreProfile& kProfile>
-[[nodiscard]] inline Core* bound_core(reactor::CoreState& st) noexcept {
-    Core* c = bound_core(st);
-    return (c != nullptr && &c->profile() == &kProfile) ? c : nullptr;
+[[nodiscard]] inline infra::OptRef<Core> bound_core(reactor::CoreState& st) noexcept {
+    const infra::OptRef<Core> c = bound_core(st);
+    return (c && &c->profile() == &kProfile) ? c : infra::OptRef<Core>{};
 }
 
 }

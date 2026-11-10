@@ -1,64 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/megadrive_movie_codec.h"
+#include "cores/movie_codec.h"
+#include "cores/megadrive_bk2_format.h"
+#include "cores/megadrive_gmv_format.h"
 
 #include <algorithm>
 #include <bit>
 #include <cerrno>
-#include <charconv>
 #include <string>
-#include <system_error>
+#include <utility>
 
 #include "cores/movie_archive.h"
+#include "cores/movie_refusal.h"
+#include "infra/ascii.h"
 #include "infra/byte_view.h"
 #include "infra/endian.h"
+#include "infra/parse_int.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
 namespace mister::cores {
 namespace {
 
-using CR = IMovieCodec::Refusal;
+using CR = MovieRefusal;
 using Pad = MegaDriveMovieCodec::Pad;
 using Sys = MegaDriveMovieCodec::Sys;
 using Layout = MegaDriveMovieCodec::Layout;
+using GpgxRegion = MegaDriveMovieCodec::Layout::GpgxRegion;
+using CoreRegion = MegaDriveMovieCodec::Layout::CoreRegion;
 
-Error refuse(CR r, infra::ErrorSite site) {
-    return Error{Errc::bad_format, site, static_cast<std::uint32_t>(r)};
-}
-
-std::string_view trim(std::string_view s) {
-    while (!s.empty() && (s.back() == '\r' || s.back() == ' ' || s.back() == '\t'))
-        s.remove_suffix(1);
-    while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
-        s.remove_prefix(1);
-    return s;
-}
-
-std::optional<std::uint32_t> decimal(std::string_view s, std::size_t digits) {
-    if (s.empty() || s.size() > digits)
-        return std::nullopt;
-    std::uint32_t v = 0;
-    const char* const end = s.data() + s.size();
-    const auto [at, ec] = std::from_chars(s.data(), end, v);
-    if (ec != std::errc{} || at != end)
-        return std::nullopt;
-    return v;
-}
-
-bool iequal(std::string_view a, std::string_view b) {
-    constexpr char kCaseBit = 'a' - 'A';
-    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
-               const auto lo = [](char c) {
-                   return c >= 'A' && c <= 'Z' ? static_cast<char>(c + kCaseBit) : c;
-               };
-               return lo(x) == lo(y);
-           });
-}
+constexpr MovieRevision kBizHawkRevision{2};
 
 std::optional<bool> boolean(std::string_view v) {
-    if (v == "1" || iequal(v, "true"))
+    if (v == "1" || infra::ieq(v, "true"))
         return true;
-    if (v == "0" || iequal(v, "false"))
+    if (v == "0" || infra::ieq(v, "false"))
         return false;
     return std::nullopt;
 }
@@ -74,19 +50,24 @@ std::optional<DigestValue> read_digest(std::string_view v) {
     return std::nullopt;
 }
 
-std::optional<std::uint8_t> gpgx_region(std::string_view v) {
-    constexpr unsigned kRegionJapanPal = 4;
+[[nodiscard]] Ex<GpgxRegion> gpgx_region(std::string_view v) {
     constexpr std::size_t kGpgxRegionDigits = 1;
-    static constexpr std::array<std::string_view, 5>
+    constexpr std::size_t kJapanPal = 4;
+    static constexpr std::array<std::string_view, kJapanPal + 1>
         kNames{"Autodetect", "USA", "Europe", "Japan_NTSC", "Japan_PAL"};
-    std::optional<std::uint32_t> n = decimal(v, kGpgxRegionDigits);
-    for (std::size_t i = 0; !n && i < kNames.size(); ++i)
-        if (iequal(v, kNames[i]))
-            n = static_cast<std::uint32_t>(i);
-    if (!n || *n > kRegionJapanPal)
-        return std::nullopt;
-
-    return static_cast<std::uint8_t>(*n);
+    static constexpr std::array<GpgxRegion, kJapanPal>
+        kRegions{GpgxRegion::Auto, GpgxRegion::Usa, GpgxRegion::Europe, GpgxRegion::JapanNtsc};
+    std::optional<std::size_t> code = v.size() <= kGpgxRegionDigits
+        ? infra::parse_int<std::uint32_t>(v)
+        : std::nullopt;
+    for (std::size_t i = 0; !code && i < kNames.size(); ++i)
+        if (infra::ieq(v, kNames[i]))
+            code = i;
+    if (!code || *code > kJapanPal)
+        return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
+    if (*code == kJapanPal)
+        return std::unexpected(movie_refusal(CR::Setting, ERR_SITE()));
+    return kRegions[*code];
 }
 
 struct Group {
@@ -118,10 +99,9 @@ std::optional<Group> read_group(std::string_view g, unsigned player) {
     const char prefix[kPrefixBytes] = {'P', static_cast<char>('0' + player), ' '};
     for (std::size_t i = 0; i < n; ++i) {
         const std::string_view name = names[i];
-        if (name.size() < kPrefixBytes
-            || name.substr(0, kPrefixBytes) != std::string_view(prefix, kPrefixBytes))
+        if (!name.starts_with(std::string_view(prefix, kPrefixBytes)))
             return std::nullopt;
-        if (name.substr(kPrefixBytes) != MegaDriveMovieCodec::kPadName[i])
+        if (name.substr(kPrefixBytes) != MegaDriveBk2Format::kPadName[i])
             return std::nullopt;
     }
     return Group{.pad = n == kSixButtonBits ? Pad::Six : Pad::Three, .reset_first = false};
@@ -170,27 +150,31 @@ std::size_t width(Pad p) {
     return p == Pad::Six ? kSixButtonBits : p == Pad::Three ? kThreeButtonBits : 0u;
 }
 
+using LogGroup = std::optional<Pad>;
+
 struct SettingRule {
-    std::uint8_t lo;
-    std::uint8_t width;
+    proto::BitField field;
     std::uint8_t allowed;
     std::string_view name;
 };
 
 constexpr std::array<SettingRule, 8> kRules{{
-    {4, 1, 0x01, "Swap Joysticks"},
-    {37, 3, 0x01, "Multitap"},
-    {18, 2, 0x01, "Mouse"},
-    {21, 2, 0x01, "Keyboard"},
-    {40, 2, 0x01, "Gun Control"},
-    {62, 2, 0x01, "SNAC"},
-    {61, 1, 0x01, "Pause When OSD is Open"},
-    {12, 1, 0x01, "TMSS"},
+    {{proto::StatusBit{4}, 1}, 0x01, "Swap Joysticks"},
+    {{proto::StatusBit{37}, 3}, 0x01, "Multitap"},
+    {{proto::StatusBit{18}, 2}, 0x01, "Mouse"},
+    {{proto::StatusBit{21}, 2}, 0x01, "Keyboard"},
+    {{proto::StatusBit{40}, 2}, 0x01, "Gun Control"},
+    {{proto::StatusBit{62}, 2}, 0x01, "SNAC"},
+    {{proto::StatusBit{61}, 1}, 0x01, "Pause When OSD is Open"},
+    {{proto::StatusBit{12}, 1}, 0x01, "TMSS"},
 }};
-constexpr std::uint8_t kSixButtonLo = 5;
-constexpr std::uint8_t kRegionLo = 6;
-constexpr std::uint8_t kAutoRegionLo = 8;
-constexpr std::uint8_t kPriorityLo = 27;
+constexpr proto::BitField kSixButtonField{proto::StatusBit{5}, 1};
+
+constexpr proto::BitField kRegionField{proto::StatusBit{6}, 2};
+
+constexpr proto::BitField kAutoRegionField{proto::StatusBit{8}, 2};
+
+constexpr proto::BitField kPriorityField{proto::StatusBit{27}, 2};
 constexpr unsigned kAutoDisabled = 2;
 constexpr unsigned kUsJpEu = 2;
 
@@ -212,25 +196,33 @@ struct Line {
     std::array<char, kGmvLineMax> c{};
 };
 
+struct GmvPlayers {
+    Pad p1 = Pad::Three;
+    Pad p2 = Pad::Three;
+
+    [[nodiscard]] Pad layout() const noexcept {
+        return p1 == Pad::Six || p2 == Pad::Six ? Pad::Six : Pad::Three;
+    }
+
+    [[nodiscard]] bool six() const noexcept { return layout() == Pad::Six; }
+};
+
 class GmvText final : public svc::IFile {
 public:
     GmvText(
         std::unique_ptr<svc::IFile> file,
         std::uint64_t frames,
         std::string head,
-        bool six,
-        bool xyzm1,
-        bool xyzm2
+        GmvPlayers players
     )
         : file_(std::move(file)),
           frames_(frames),
           head_(std::move(head)),
-          six_(six),
-          xyzm_{xyzm1, xyzm2},
+          players_(players),
           line_(0) {
         constexpr std::size_t kLogPorts = 2;
         constexpr std::size_t kLineFraming = 4;
-        line_ = kLogPorts * width(six ? Pad::Six : Pad::Three) + kLineFraming;
+        line_ = kLogPorts * width(players_.layout()) + kLineFraming;
     }
 
     [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
@@ -289,8 +281,6 @@ public:
 
     [[nodiscard]] Ex<void> flush() override { return {}; }
 
-    svc::FileKind kind() const noexcept override { return file_->kind(); }
-
 private:
     [[nodiscard]] Line render_(const std::byte* b) const {
         constexpr std::size_t kThreeButtonBits = 8;
@@ -301,14 +291,15 @@ private:
         std::size_t at = 0;
         out.c[at++] = '|';
         for (unsigned p = 0; p < kLogPorts; ++p) {
+            const Pad kind = p == 0 ? players_.p1 : players_.p2;
             const auto pad = static_cast<unsigned>(b[p]);
             const auto xyzm = static_cast<unsigned>(b[kGmvXyzmAt]) >> (kXyzmBits * p);
             for (std::size_t i = 0; i < kThreeButtonBits; ++i)
-                out.c[at++] = (pad >> i) & 1u ? '.' : MegaDriveMovieCodec::kPadMnemonic[i];
-            if (six_) {
+                out.c[at++] = (pad >> i) & 1u ? '.' : MegaDriveBk2Format::kPadMnemonic[i];
+            if (players_.six()) {
                 for (std::size_t i = 0; i < kXyzmBits; ++i) {
-                    const bool down = xyzm_[p] && ((xyzm >> i) & 1u) == 0;
-                    out.c[at++] = down ? MegaDriveMovieCodec::kPadMnemonic[kThreeButtonBits + i]
+                    const bool down = kind == Pad::Six && ((xyzm >> i) & 1u) == 0;
+                    out.c[at++] = down ? MegaDriveBk2Format::kPadMnemonic[kThreeButtonBits + i]
                                        : '.';
                 }
             }
@@ -321,18 +312,17 @@ private:
     std::unique_ptr<svc::IFile> file_;
     std::uint64_t frames_;
     std::string head_;
-    bool six_;
-    std::array<bool, 2> xyzm_;
+    GmvPlayers players_;
     std::uint64_t line_;
 };
 
-std::string pad_key(unsigned player, bool six) {
+std::string pad_key(unsigned player, const GmvPlayers& players) {
     std::string k = "#";
-    for (std::size_t i = 0; i < width(six ? Pad::Six : Pad::Three); ++i) {
+    for (std::size_t i = 0; i < width(players.layout()); ++i) {
         k += 'P';
         k += static_cast<char>('0' + player);
         k += ' ';
-        k += MegaDriveMovieCodec::kPadName[i];
+        k += MegaDriveBk2Format::kPadName[i];
         k += '|';
     }
     return k;
@@ -347,17 +337,21 @@ Layout Layout::of(std::uint16_t b) noexcept {
     constexpr unsigned kResetFirstShift = 6;
     constexpr unsigned kGmvShift = 7;
     constexpr unsigned kRegionShift = 8;
-    constexpr unsigned kRegionMask = 0x7;
-    constexpr unsigned kPalKeyShift = 11;
-    constexpr unsigned kPlatformShift = 12;
-    constexpr unsigned kCoreShift = 13;
+    constexpr unsigned kRegionMask = 0x3;
+    constexpr unsigned kPalKeyShift = 10;
+    constexpr unsigned kPlatformShift = 11;
+    constexpr unsigned kCoreShift = 12;
+
+    constexpr std::size_t kRegionCodes = kRegionMask + 1;
+    static constexpr std::array<GpgxRegion, kRegionCodes>
+        kRegionByCode{GpgxRegion::Auto, GpgxRegion::Usa, GpgxRegion::Europe, GpgxRegion::JapanNtsc};
     Layout l{};
     l.p1 = static_cast<Pad>(b & kPadMask);
     l.p2 = static_cast<Pad>((b >> kP2Shift) & kPadMask);
     l.sys = static_cast<Sys>((b >> kSysShift) & kPadMask);
     l.reset_first = ((b >> kResetFirstShift) & 1u) != 0;
     l.gmv = ((b >> kGmvShift) & 1u) != 0;
-    l.region = static_cast<std::uint8_t>((b >> kRegionShift) & kRegionMask);
+    l.region = kRegionByCode[(b >> kRegionShift) & kRegionMask];
     l.pal_key = ((b >> kPalKeyShift) & 1u) != 0;
     l.platform = ((b >> kPlatformShift) & 1u) != 0;
     l.core = ((b >> kCoreShift) & 1u) != 0;
@@ -370,21 +364,34 @@ std::uint16_t Layout::bits() const noexcept {
     constexpr unsigned kResetFirstShift = 6;
     constexpr unsigned kGmvShift = 7;
     constexpr unsigned kRegionShift = 8;
-    constexpr unsigned kRegionMask = 0x7;
-    constexpr unsigned kPalKeyShift = 11;
-    constexpr unsigned kPlatformShift = 12;
-    constexpr unsigned kCoreShift = 13;
+    constexpr unsigned kPalKeyShift = 10;
+    constexpr unsigned kPlatformShift = 11;
+    constexpr unsigned kCoreShift = 12;
     return static_cast<std::uint16_t>(
         static_cast<unsigned>(p1)
         | static_cast<unsigned>(p2) << kP2Shift
         | static_cast<unsigned>(sys) << kSysShift
         | unsigned{reset_first} << kResetFirstShift
         | unsigned{gmv} << kGmvShift
-        | unsigned{region & kRegionMask} << kRegionShift
+        | unsigned{std::to_underlying(region)} << kRegionShift
         | unsigned{pal_key} << kPalKeyShift
         | unsigned{platform} << kPlatformShift
         | unsigned{core} << kCoreShift
     );
+}
+
+std::optional<CoreRegion> Layout::core_region() const noexcept {
+    switch (region) {
+        case GpgxRegion::Usa:
+            return CoreRegion::Usa;
+        case GpgxRegion::Europe:
+            return CoreRegion::Europe;
+        case GpgxRegion::JapanNtsc:
+            return CoreRegion::Japan;
+        case GpgxRegion::Auto:
+            break;
+    }
+    return std::nullopt;
 }
 
 Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv) {
@@ -401,27 +408,29 @@ Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv) {
     if (!size)
         return std::unexpected(size.error());
     if (size->v < kGmvHead)
-        return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+        return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
     std::array<std::byte, kGmvHead> h{};
     const auto got = gmv->read_at(0, h);
     if (!got)
         return std::unexpected(got.error());
     if (*got != h.size())
-        return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+        return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
     const auto byte = [&](std::size_t i) {
         return static_cast<unsigned>(h[i]);
     };
     if (infra::as_text(std::span(h).first(kGmvMagic.size())) != kGmvMagic)
-        return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+        return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
 
-    const bool six1 = byte(kGmvPlayer1At) == '6', six2 = byte(kGmvPlayer2At) == '6';
-    const bool six = six1 || six2;
+    const GmvPlayers players{
+        byte(kGmvPlayer1At) == '6' ? Pad::Six : Pad::Three,
+        byte(kGmvPlayer2At) == '6' ? Pad::Six : Pad::Three
+    };
 
     constexpr std::uint64_t kLogPorts = 2;
     constexpr std::uint64_t kLineFraming = 4;
-    const std::uint64_t line = kLogPorts * width(six ? Pad::Six : Pad::Three) + kLineFraming;
+    const std::uint64_t line = kLogPorts * width(players.layout()) + kLineFraming;
     if ((size->v - kGmvHead) / kGmvFrameBytes * line > MovieArchiveFormat::kLogMax)
-        return std::unexpected(refuse(CR::TooLong, ERR_SITE()));
+        return std::unexpected(movie_refusal(CR::TooLong, ERR_SITE()));
     const auto rerecords = infra::load_le<std::uint32_t>(
         std::span(h).subspan<kGmvRerecordsAt, kGmvRerecordsBytes>()
     );
@@ -436,57 +445,50 @@ Ex<std::unique_ptr<svc::IFile>> open_gmv_text(std::unique_ptr<svc::IFile> gmv) {
         + "\nGmvFlags "
         + std::to_string(byte(kGmvFlagsAt))
         + "\nLogKey:"
-        + pad_key(kMultitapFirstPlayer, six)
-        + pad_key(kMaxPlayers, six)
+        + pad_key(kMultitapFirstPlayer, players)
+        + pad_key(kMaxPlayers, players)
         + "\n";
     const std::uint64_t frames = (size->v - kGmvHead) / kGmvFrameBytes;
     return std::unique_ptr<svc::IFile>(
-        std::make_unique<GmvText>(std::move(gmv), frames, std::move(head), six, six1, six2)
+        std::make_unique<GmvText>(std::move(gmv), frames, std::move(head), players)
     );
 }
 
-const MovieArchiveFormat* MegaDriveMovieCodec::archive() const noexcept {
-    return &kBk2Archive;
+infra::OptRef<const MovieArchiveFormat> MegaDriveBk2Format::archive() const noexcept {
+    return infra::OptRef<const MovieArchiveFormat>{kBk2Archive};
 }
 
-Ex<std::unique_ptr<svc::IFile>> MegaDriveMovieCodec::open_movie(
+Ex<std::unique_ptr<svc::IFile>> MegaDriveGmvFormat::open_movie(
     const svc::Vfs& vfs,
     std::string_view path
 ) const {
     auto f = vfs.open(path, svc::OpenMode::Read);
 
     if (!f && f.error().code == Errc::bad_format)
-        return std::unexpected(refuse(CR::Archive, ERR_SITE()));
+        return std::unexpected(movie_refusal(MovieRefusal::Archive, ERR_SITE()));
     if (!f)
         return std::unexpected(f.error());
-    std::array<std::byte, kGmvMagic.size()> m{};
-    const auto got = (*f)->read_at(0, m);
-    if (!got)
-        return std::unexpected(got.error());
-    if (*got == m.size() && infra::as_text(std::span(m)) == kGmvMagic) {
-        return open_gmv_text(std::move(*f));
-    }
-    f->reset();
-    return open_movie_archive(vfs, path, kBk2Archive);
+    return open_gmv_text(std::move(*f));
 }
 
-bool MegaDriveMovieCodec::starts_log(std::string_view line) const noexcept {
+bool MegaDriveGmvFormat::rom_matches(const DigestValue& d, const MovieFacts& f) const noexcept {
+    (void)d;
+    return !f.digest;
+}
+
+bool MegaDriveBk2Format::starts_log(std::string_view line) const noexcept {
     return !line.empty() && line.front() == '|';
 }
 
-bool MegaDriveMovieCodec::ends_log(std::string_view line) const noexcept {
-    return trim(line) == "[/Input]";
+bool MegaDriveBk2Format::ends_log(std::string_view line) const noexcept {
+    return IMovieFormat::trim(line) == "[/Input]";
 }
 
-Ex<IMovieCodec::Facts> MegaDriveMovieCodec::header_line(
+Ex<MovieFacts> MegaDriveBk2Format::header_line(
     std::string_view line,
-    const Facts& so_far
+    const MovieFacts& so_far
 ) const noexcept {
     constexpr std::string_view kLogKeyPrefix = "LogKey:";
-    constexpr unsigned kPort2Bit = 2;
-    constexpr unsigned kRegionAuto = 0;
-    constexpr unsigned kRegionEu = 2;
-    constexpr unsigned kRegionJapanPal = 4;
     constexpr std::size_t kGpgxRegionDigits = 1;
     constexpr std::size_t kFlagDigits = 3;
     constexpr std::uint32_t kFlagsMax = 0xFF;
@@ -494,10 +496,9 @@ Ex<IMovieCodec::Facts> MegaDriveMovieCodec::header_line(
     constexpr std::uint32_t kGmvFlagMultitap = 0x20;
     constexpr std::uint32_t kGmvFlagPal = 0x80;
     constexpr unsigned kDigitsGmvVersion = 3;
-    constexpr std::uint8_t kBizHawkVersion = 2;
-    Facts f = so_far;
-    Layout l = Layout::of(f.layout);
-    line = trim(line);
+    MovieFacts f = so_far;
+    Layout l = f.layout.view_as<Layout>();
+    line = IMovieFormat::trim(line);
     if (line.empty())
         return f;
 
@@ -505,341 +506,342 @@ Ex<IMovieCodec::Facts> MegaDriveMovieCodec::header_line(
         || line == "@CoreText"
         || line == "@SaveRam"
         || line.starts_with("SavestateBinaryBase64Blob")) {
-        return std::unexpected(refuse(CR::Savestate, ERR_SITE()));
+        return std::unexpected(movie_refusal(CR::Savestate, ERR_SITE()));
     }
     if (line.starts_with(kLogKeyPrefix)) {
         const auto k = read_log_key(line.substr(kLogKeyPrefix.size()), l);
         if (!k || (l.gmv && k->sys != Sys::None))
-            return std::unexpected(refuse(CR::PortType, ERR_SITE()));
+            return std::unexpected(movie_refusal(CR::PortType, ERR_SITE()));
         l = *k;
-        f.ports = static_cast<std::uint8_t>(
-            (l.p1 != Pad::None ? 1u : 0u) | (l.p2 != Pad::None ? kPort2Bit : 0u)
-        );
-        f.layout = l.bits();
+        svc::PlayerMask ports{};
+        if (l.p1 != Pad::None)
+            ports = ports.with(svc::kPlayers[0]);
+        if (l.p2 != Pad::None)
+            ports = ports.with(svc::kPlayers[1]);
+        f.ports = ports;
+        f.layout = FormatLayout::of(l.bits());
         return f;
     }
-    if (line.size() > kLineMax)
+    if (line.size() > kMovieLineMax)
         return f;
     const std::size_t sp = line.find(' ');
     const std::string_view key = line.substr(0, sp);
-    const std::string_view val = sp == std::string_view::npos ? std::string_view{}
-                                                              : trim(line.substr(sp + 1));
+    const std::string_view val = sp == std::string_view::npos
+        ? std::string_view{}
+        : IMovieFormat::trim(line.substr(sp + 1));
     const auto set_region = [&] {
-        const bool pal = l.region == kRegionEu || (l.region == kRegionAuto && l.pal_key);
-        f.region = pal ? Region::Pal : Region::Ntsc;
+        const bool pal = l.region == GpgxRegion::Europe
+            || (l.region == GpgxRegion::Auto && l.pal_key);
+        f.region = pal ? MovieRegion::Pal : MovieRegion::Ntsc;
     };
 
     const bool gmv_key = key.starts_with("Gmv");
-    if (gmv_key != l.gmv && (key != "GmvVersion" || f.version != 0 || l.bits() != 0))
-        return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+    if (gmv_key != l.gmv && (key != "GmvVersion" || !f.version.unset() || l.bits() != 0))
+        return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
     if (key == "MovieVersion") {
         if (!val.starts_with("BizHawk v2"))
-            return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
-        f.version = kBizHawkVersion;
+            return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
+        f.version = kBizHawkRevision;
     } else if (key == "Platform") {
-        if (val != "GEN")
-            return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+        if (val != kPlatformName)
+            return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
         l.platform = true;
     } else if (key == "Core") {
 
         if (val != "Genplus-gx")
-            return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+            return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
         l.core = true;
     } else if (key == "StartsFromSavestate" || key == "StartsFromSaveRam") {
         const auto b = boolean(val);
         if (!b)
-            return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+            return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
         if (*b)
-            return std::unexpected(refuse(CR::Savestate, ERR_SITE()));
-    } else if (key == "SHA1" || (key == "MD5" && !f.has_digest)) {
+            return std::unexpected(movie_refusal(CR::Savestate, ERR_SITE()));
+    } else if (key == "SHA1" || (key == "MD5" && !f.digest)) {
         const auto d = read_digest(val);
         if (!d)
-            return std::unexpected(refuse(CR::Checksum, ERR_SITE()));
+            return std::unexpected(movie_refusal(CR::Checksum, ERR_SITE()));
         f.digest = *d;
-        f.has_digest = true;
     } else if (key == "PAL") {
         const auto b = boolean(val);
         if (!b)
-            return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+            return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
         l.pal_key = *b;
         set_region();
     } else if (key == "SyncSettings.o.Region" || key == "SyncSettings.Region") {
         const auto r = gpgx_region(val);
         if (!r)
-            return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
-        if (*r == kRegionJapanPal)
-            return std::unexpected(refuse(CR::Setting, ERR_SITE()));
-
+            return std::unexpected(r.error());
         l.region = *r;
         set_region();
     } else if (key == "SyncSettings.o.ForceVDP" || key == "SyncSettings.ForceVDP") {
-        const auto v = decimal(val, kGpgxRegionDigits);
-        if (!(v == 0u || iequal(val, "Disabled")))
-            return std::unexpected(refuse(CR::Setting, ERR_SITE()));
+        const auto v = val.size() <= kGpgxRegionDigits ? infra::parse_int<std::uint32_t>(val)
+                                                       : std::nullopt;
+        if (!(v == 0u || infra::ieq(val, "Disabled")))
+            return std::unexpected(movie_refusal(CR::Setting, ERR_SITE()));
     } else if (key == "SyncSettings.o.LoadBIOS" || key == "SyncSettings.LoadBIOS") {
         const auto b = boolean(val);
         if (!b || *b)
-            return std::unexpected(refuse(CR::Setting, ERR_SITE()));
+            return std::unexpected(movie_refusal(CR::Setting, ERR_SITE()));
     } else if (key == "GmvVersion") {
-        const auto v = decimal(val, kDigitsGmvVersion);
+        const auto v = val.size() <= kDigitsGmvVersion ? infra::parse_int<std::uint32_t>(val)
+                                                       : std::nullopt;
         if (!v || *v < '0' || *v > 'Z')
-            return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
-        f.version = static_cast<std::uint16_t>(*v);
+            return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
+        f.version = MovieRevision{static_cast<std::uint16_t>(*v)};
         l.gmv = true;
     } else if (key == "GmvPlayers") {
         const std::size_t sp2 = val.find(' ');
-        const auto a = decimal(val.substr(0, sp2), kFlagDigits);
-        const auto b = sp2 == std::string_view::npos ? std::nullopt
-                                                     : decimal(val.substr(sp2 + 1), kFlagDigits);
+        const std::string_view a_field = val.substr(0, sp2);
+        const auto a = a_field.size() <= kFlagDigits ? infra::parse_int<std::uint32_t>(a_field)
+                                                     : std::nullopt;
+        std::optional<std::uint32_t> b;
+        if (sp2 != std::string_view::npos) {
+            const std::string_view b_field = val.substr(sp2 + 1);
+            if (b_field.size() <= kFlagDigits)
+                b = infra::parse_int<std::uint32_t>(b_field);
+        }
         const auto ok = [](std::optional<std::uint32_t> c) {
             return c == std::uint32_t{'3'} || c == std::uint32_t{'6'};
         };
         if (!ok(a) || !ok(b))
-            return std::unexpected(refuse(CR::PortType, ERR_SITE()));
+            return std::unexpected(movie_refusal(CR::PortType, ERR_SITE()));
     } else if (key == "GmvFlags") {
-        const auto v = decimal(val, kFlagDigits);
+        const auto v = val.size() <= kFlagDigits ? infra::parse_int<std::uint32_t>(val)
+                                                 : std::nullopt;
         if (!v || *v > kFlagsMax || !l.gmv)
-            return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+            return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
 
-        if (f.version >= 'A') {
+        if (f.version >= MovieRevision::of_char('A')) {
             if ((*v & kGmvFlagSavestate) != 0)
-                return std::unexpected(refuse(CR::Savestate, ERR_SITE()));
+                return std::unexpected(movie_refusal(CR::Savestate, ERR_SITE()));
             if ((*v & kGmvFlagMultitap) != 0)
-                return std::unexpected(refuse(CR::Multitap, ERR_SITE()));
-            f.region = (*v & kGmvFlagPal) != 0 ? Region::Pal : Region::Ntsc;
+                return std::unexpected(movie_refusal(CR::Multitap, ERR_SITE()));
+            f.region = (*v & kGmvFlagPal) != 0 ? MovieRegion::Pal : MovieRegion::Ntsc;
         }
     }
-    note_rerecords(key, val, f);
-    f.layout = l.bits();
+    if (const auto n = rerecord_count(key, val))
+        f.rerecords = n;
+    f.layout = FormatLayout::of(l.bits());
     return f;
 }
 
-Ex<void> MegaDriveMovieCodec::finish_header(const Facts& f) const noexcept {
-    constexpr unsigned kRegionAuto = 0;
-    constexpr unsigned kRegionEu = 2;
-    constexpr std::uint8_t kBizHawkVersion = 2;
-    const Layout l = Layout::of(f.layout);
+Ex<void> MegaDriveBk2Format::finish_header(const MovieFacts& f) const noexcept {
+    const Layout l = f.layout.view_as<Layout>();
     if (l.p1 == Pad::None)
-        return std::unexpected(refuse(CR::PortType, ERR_SITE()));
+        return std::unexpected(movie_refusal(CR::PortType, ERR_SITE()));
     if (l.gmv)
         return {};
-    if (f.version != kBizHawkVersion || !l.platform || !l.core)
-        return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
+    if (f.version != kBizHawkRevision || !l.platform || !l.core)
+        return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
 
-    if (l.region != kRegionAuto && l.pal_key != (l.region == kRegionEu))
-        return std::unexpected(refuse(CR::NotAMovie, ERR_SITE()));
-    if (!f.has_digest)
-        return std::unexpected(refuse(CR::Checksum, ERR_SITE()));
+    if (l.region != GpgxRegion::Auto && l.pal_key != (l.region == GpgxRegion::Europe))
+        return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
+    if (!f.digest)
+        return std::unexpected(movie_refusal(CR::Checksum, ERR_SITE()));
     return {};
 }
 
-Ex<IMovieCodec::Frame> MegaDriveMovieCodec::frame(
+Ex<MovieFrame> MegaDriveBk2Format::frame(
     std::string_view line,
-    const Facts& f
+    const MovieFacts& f
 ) const noexcept {
     constexpr std::size_t kSystemGroupBits = 2;
-    constexpr std::uint32_t kLogCommandSoft = 0x1;
-    constexpr std::uint32_t kLogCommandHard = 0x2;
+    constexpr std::size_t kGroupsMax = 3;
     while (!line.empty() && line.back() == '\r')
         line.remove_suffix(1);
-    if (line.size() > kLineMax || !starts_log(line))
-        return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
-    const Layout l = Layout::of(f.layout);
-    std::array<std::size_t, 3> widths{};
-    std::array<int, 3> role{};
-    std::size_t groups = 0;
-    const auto add = [&](std::size_t w, int r) {
-        widths[groups] = w;
-        role[groups++] = r;
+    if (line.size() > kMovieLineMax || !starts_log(line))
+        return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
+    const Layout l = f.layout.view_as<Layout>();
+
+    std::array<LogGroup, kGroupsMax> groups{};
+    std::size_t groups_n = 0;
+    const auto add = [&](LogGroup g) {
+        groups[groups_n++] = g;
     };
     if (l.sys == Sys::First)
-        add(kSystemGroupBits, -1);
-    add(width(l.p1), 0);
+        add(std::nullopt);
+    add(l.p1);
     if (l.p2 != Pad::None)
-        add(width(l.p2), 1);
+        add(l.p2);
     if (l.sys == Sys::Last)
-        add(kSystemGroupBits, -1);
-    Frame out{};
+        add(std::nullopt);
+    MovieFrame out{};
     std::string_view rest = line.substr(1);
-    for (std::size_t g = 0; g < groups; ++g) {
+    std::size_t pad = 0;
+    for (std::size_t g = 0; g < groups_n; ++g) {
+        const LogGroup group = groups[g];
+        const std::size_t columns = group ? width(*group) : kSystemGroupBits;
         const std::size_t bar = rest.find('|');
-        if (bar != widths[g])
-            return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
+        if (bar != columns)
+            return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
         const std::string_view field = rest.substr(0, bar);
         rest.remove_prefix(bar + 1);
-        if (role[g] < 0) {
+        if (!group) {
             const std::string_view names = l.reset_first ? "rP" : "Pr";
             for (std::size_t i = 0; i < kSystemGroupBits; ++i) {
                 if (field[i] == '.')
                     continue;
                 if (field[i] != names[i])
-                    return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
+                    return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
 
-                out.commands = static_cast<std::uint8_t>(
-                    out.commands | (names[i] == 'r' ? kLogCommandSoft : kLogCommandHard)
-                );
+                out.commands = names[i] == 'r' ? out.commands.with_reset()
+                                               : out.commands.with_power();
             }
             continue;
         }
-        std::uint32_t m = 0;
+        proto::JoyMask m{};
         for (std::size_t i = 0; i < field.size(); ++i) {
             if (field[i] == '.')
                 continue;
             if (field[i] != kPadMnemonic[i])
-                return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
-            m |= 1u << kPadBit[i];
+                return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
+            m = m.with(kPadBit[i].mask());
         }
-        out.mask[static_cast<std::size_t>(role[g])] = m;
+        out.mask[pad++] = m;
     }
 
     if (!rest.empty() && rest != "|")
-        return std::unexpected(refuse(CR::BadLine, ERR_SITE()));
+        return std::unexpected(movie_refusal(CR::BadLine, ERR_SITE()));
     return out;
 }
 
-IMovieCodec::SettingNeeds MegaDriveMovieCodec::setting_needs(const Facts& f) const noexcept {
-    constexpr unsigned kRegionAuto = 0;
-    constexpr unsigned kRegionEu = 2;
-    constexpr std::uint8_t kOptionWidth = 2;
-    constexpr std::uint8_t kSixButtonWidth = 1;
-    constexpr std::size_t kCoreRegionCodes = 4;
+ReplayLead MegaDriveBk2Format::default_lead(const MovieFacts& f) const noexcept {
+
+    return f.layout.view_as<Layout>().gmv ? MegaDriveGmvFormat::kGensLead : kGpgxLead;
+}
+
+IReplayCore::SettingNeeds MegaDriveMovieCodec::setting_needs(const MovieFacts& f) const noexcept {
+    constexpr std::uint8_t kRegionAuto = 0;
+    constexpr std::uint8_t kRegionEu = 2;
     const auto one = [](std::uint8_t v) {
         return static_cast<std::uint16_t>(1u << v);
     };
     SettingNeeds out{};
     for (const SettingRule& r : kRules) {
         out.add(
-            {.lo = r.lo,
-             .width = r.width,
-             .allowed = r.allowed,
-             .preferred = static_cast<std::uint8_t>(std::countr_zero(r.allowed)),
+            {.field = r.field,
+             .allowed = proto::ValueSet{r.allowed},
+             .preferred = proto::FieldValue{static_cast<std::uint32_t>(
+                 std::countr_zero(r.allowed)
+             )},
              .name = r.name}
         );
     }
-    const Layout l = Layout::of(f.layout);
+    const Layout l = f.layout.view_as<Layout>();
     const std::uint8_t six = l.p1 == Pad::Six || l.p2 == Pad::Six ? 1u : 0u;
     out.add(
-        {.lo = kSixButtonLo,
-         .width = kSixButtonWidth,
-         .allowed = one(six),
-         .preferred = six,
+        {.field = kSixButtonField,
+         .allowed = proto::ValueSet{one(six)},
+         .preferred = proto::FieldValue{six},
          .name = "6 Buttons Mode"}
     );
 
-    if ((!l.gmv && l.region == kRegionAuto) || (l.gmv && f.region != Region::Pal)) {
+    if ((!l.gmv && l.region == GpgxRegion::Auto) || (l.gmv && f.region != MovieRegion::Pal)) {
 
         out.add(
-            {.lo = kAutoRegionLo,
-             .width = kOptionWidth,
-             .allowed = one(kRegionAuto),
-             .preferred = kRegionAuto,
+            {.field = kAutoRegionField,
+             .allowed = proto::ValueSet{one(kRegionAuto)},
+             .preferred = proto::FieldValue{kRegionAuto},
              .name = "Auto Region"}
         );
         out.add(
-            {.lo = kPriorityLo,
-             .width = kOptionWidth,
-             .allowed = one(kUsJpEu),
-             .preferred = kUsJpEu,
+            {.field = kPriorityField,
+             .allowed = proto::ValueSet{one(kUsJpEu)},
+             .preferred = proto::FieldValue{kUsJpEu},
              .name = "Priority"}
         );
         return out;
     }
     out.add(
-        {.lo = kAutoRegionLo,
-         .width = kOptionWidth,
-         .allowed = one(kAutoDisabled),
-         .preferred = kAutoDisabled,
+        {.field = kAutoRegionField,
+         .allowed = proto::ValueSet{one(kAutoDisabled)},
+         .preferred = proto::FieldValue{kAutoDisabled},
          .name = "Auto Region"}
     );
     if (l.gmv) {
         out.add(
-            {.lo = kRegionLo,
-             .width = kOptionWidth,
-             .allowed = one(kRegionEu),
-             .preferred = kRegionEu,
+            {.field = kRegionField,
+             .allowed = proto::ValueSet{one(kRegionEu)},
+             .preferred = proto::FieldValue{kRegionEu},
              .name = "Region"}
         );
         return out;
     }
-    static constexpr std::array<std::uint8_t, kCoreRegionCodes> kCoreRegion{0, 1, 2, 0};
-    const bool known = l.region < kCoreRegion.size();
-    const std::uint8_t want = known ? kCoreRegion[l.region] : 0;
+
+    const std::optional<CoreRegion> core = l.core_region();
+    if (!core) {
+        out.add(
+            {.field = kRegionField,
+             .allowed = proto::ValueSet{},
+             .preferred = proto::FieldValue{},
+             .name = "Region"}
+        );
+        return out;
+    }
+    const std::uint8_t want = std::to_underlying(*core);
     out.add(
-        {.lo = kRegionLo,
-         .width = kOptionWidth,
-         .allowed = known ? one(want) : std::uint16_t{0},
-         .preferred = want,
+        {.field = kRegionField,
+         .allowed = proto::ValueSet{one(want)},
+         .preferred = proto::FieldValue{want},
          .name = "Region"}
     );
     return out;
 }
 
-IMovieCodec::Raster MegaDriveMovieCodec::raster(const Facts& f) const noexcept {
+IReplayCore::Raster MegaDriveMovieCodec::raster(const MovieFacts& f) const noexcept {
     constexpr std::uint32_t kPalFramePeriodNs = 20'120'134;
     constexpr std::uint32_t kPalLine0Ns = 3'535'487;
     constexpr std::uint32_t kNtscFramePeriodNs = 16'688'154;
     constexpr std::uint32_t kNtscLine0Ns = 1'783'467;
 
-    if (f.region == Region::Pal)
-        return {.period_ns = kPalFramePeriodNs, .line0_ns = kPalLine0Ns};
-    return {.period_ns = kNtscFramePeriodNs, .line0_ns = kNtscLine0Ns};
+    if (f.region == MovieRegion::Pal)
+        return {
+            .period_ns = std::chrono::nanoseconds{kPalFramePeriodNs},
+            .line0_ns = std::chrono::nanoseconds{kPalLine0Ns}
+        };
+    return {
+        .period_ns = std::chrono::nanoseconds{kNtscFramePeriodNs},
+        .line0_ns = std::chrono::nanoseconds{kNtscLine0Ns}
+    };
 }
 
-IMovieCodec::PowerOn MegaDriveMovieCodec::power_on(const Facts& f) const noexcept {
+IReplayCore::PowerOn MegaDriveMovieCodec::power_on(const MovieFacts& f) const noexcept {
     constexpr std::uint64_t kHalf = 2;
     constexpr std::uint64_t kPalHalfLines = 626;
     constexpr std::uint64_t kNtscHalfLines = 524;
     constexpr std::uint64_t kPowerOnLineTriple = 3;
     constexpr std::uint64_t kActiveLines = 224;
-    const bool pal = f.region == Region::Pal;
+    const bool pal = f.region == MovieRegion::Pal;
     const std::uint64_t lines2 = pal ? kPalHalfLines : kNtscHalfLines;
 
-    const std::uint64_t phase2 = Layout::of(f.layout).gmv
+    const std::uint64_t phase2 = f.layout.view_as<Layout>().gmv
         ? lines2 / kHalf
         : kPowerOnLineTriple * lines2 / kHalf - kHalf * kActiveLines;
     return {
-        .clocks = kHoldClk + phase2 * kLineClk / kHalf,
-        .clock_hz = pal ? kClkMdPalHz : kClkMdNtscHz,
-        .lo = 0,
-        .width = 0,
-        .when = 0,
-        .late_frames = kLateFrames
+        .clocks = CoreClocks{kHoldClk + phase2 * kLineClk / kHalf},
+        .clock_hz = ClockHz{pal ? kClkMdPalHz : kClkMdNtscHz},
+        .late_frames = LateFrames{kLateFrames}
     };
 }
 
-std::int32_t MegaDriveMovieCodec::default_lead(const Facts& f) const noexcept {
-    return Layout::of(f.layout).gmv ? kGensLead : kGpgxLead;
-}
-
-std::optional<IMovieCodec::DigestSpan> MegaDriveMovieCodec::rom_digest_span(
+std::optional<IMovieFormat::DigestSpan> MegaDriveBk2Format::rom_digest_span(
     std::span<const std::uint8_t> head,
     proto::FileSize size
 ) const noexcept {
-    constexpr std::uint64_t kMinRomBytes = 0x200;
-    constexpr std::uint64_t kKiB = 1024;
-    constexpr std::uint64_t kCopierHeaderBytes = 512;
-    constexpr std::uint64_t kSmdHeaderBytes = 128;
+    constexpr proto::FileSize kMinRomBytes{0x200};
     constexpr std::size_t kSmdMarkerLo = 8;
     constexpr std::size_t kSmdMarkerHi = 9;
     constexpr std::uint8_t kSmdMarkerLoByte = 0xAA;
     constexpr std::uint8_t kSmdMarkerHiByte = 0xBB;
-    const std::uint64_t bytes = size.v;
 
-    if (bytes < kMinRomBytes
-        || bytes % kKiB == kCopierHeaderBytes
-        || bytes % kKiB == kSmdHeaderBytes)
+    if (size < kMinRomBytes || !copier_header(size).empty())
         return std::nullopt;
     if (head.size() > kSmdMarkerHi
         && head[kSmdMarkerLo] == kSmdMarkerLoByte
         && head[kSmdMarkerHi] == kSmdMarkerHiByte)
         return std::nullopt;
-    return DigestSpan{.offset = 0, .length = bytes};
-}
-
-bool MegaDriveMovieCodec::rom_matches(const DigestValue& d, const Facts& f) const noexcept {
-    if (Layout::of(f.layout).gmv && !f.has_digest)
-        return true;
-    return IMovieCodec::rom_matches(d, f);
+    return span_past(size, proto::FileSize{});
 }
 
 }

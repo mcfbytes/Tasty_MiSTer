@@ -51,23 +51,21 @@ class CoreSession {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    CoreSession(hal::ISpiTransport& link, hal::ICoreSignals& signals, IResetFence* fence = nullptr)
-        : link_(&link),
-          signals_(&signals) {
-        status_.fence_with(fence);
+    [[nodiscard]] static CoreSession detached(
+        hal::ISpiTransport& link,
+        hal::ICoreSignals& signals,
+        IResetFence* fence = nullptr
+    ) {
+        return CoreSession(link, signals, fence);
     }
 
-    CoreSession(
+    [[nodiscard]] static CoreSession adopted(
         hal::ISpiTransport& link,
         hal::ICoreSignals& signals,
         MemSizeCookie cookie,
         IResetFence* fence = nullptr
-    )
-        : link_(&link),
-          signals_(&signals),
-          phase_(SessionPhase::Start),
-          cookie_(cookie) {
-        status_.fence_with(fence);
+    ) {
+        return CoreSession(link, signals, cookie, fence);
     }
 
     SessionPhase phase() const noexcept { return phase_; }
@@ -77,6 +75,14 @@ public:
     [[nodiscard]] Ex<CoreType> accept_identity(const Ex<hal::CoreIdentity>& id);
 
     [[nodiscard]] Ex<void> configure_after_identity();
+
+    [[nodiscard]] Ex<bool> settle_configure();
+
+    [[nodiscard]] bool configure_posted() const noexcept {
+        return memsz_post_ != MemSizePost::None;
+    }
+
+    void abandon_configure() noexcept;
 
     [[nodiscard]] Ex<void> set_memory_size(MemSizeCookie cookie);
 
@@ -92,7 +98,10 @@ public:
 
     [[nodiscard]] Ex<void> release_reset();
 
-    void refuse() noexcept { phase_ = SessionPhase::Failed; }
+    void refuse() noexcept {
+        abandon_configure();
+        phase_ = SessionPhase::Failed;
+    }
 
     CoreType type() const noexcept { return type_; }
 
@@ -127,6 +136,27 @@ public:
     [[nodiscard]] Ex<void> flush_status();
 
 private:
+    enum class MemSizePost : std::uint8_t { None, Opcode, Cookie };
+
+    CoreSession(hal::ISpiTransport& link, hal::ICoreSignals& signals, IResetFence* fence)
+        : link_(&link),
+          signals_(&signals) {
+        status_.fence_with(fence);
+    }
+
+    CoreSession(
+        hal::ISpiTransport& link,
+        hal::ICoreSignals& signals,
+        MemSizeCookie cookie,
+        IResetFence* fence
+    )
+        : link_(&link),
+          signals_(&signals),
+          phase_(SessionPhase::Start),
+          cookie_(cookie) {
+        status_.fence_with(fence);
+    }
+
     [[nodiscard]] Ex<void> fail(Error e);
     [[nodiscard]] bool ladder_window_() const noexcept;
 
@@ -137,6 +167,7 @@ private:
     CoreType type_ = CoreType::Unknown;
     bool dual_sdram_ = false;
     bool suppress_status_wire_ = false;
+    MemSizePost memsz_post_ = MemSizePost::None;
     std::uint32_t deferred_bursts_ = 0;
     hal::CoreCapabilities caps_{};
     StatusRegister status_;

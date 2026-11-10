@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "hal/spi_bus.h"
 
+#include <chrono>
 #include <ctime>
 #include <new>
 #include <type_traits>
@@ -17,11 +18,10 @@ namespace {
     return SpiOutput{w.v & gpo::kCsMask.v};
 }
 
-std::uint64_t now_ns() noexcept {
+std::chrono::nanoseconds now_ns() noexcept {
     timespec ts{};
     ::clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-    return static_cast<std::uint64_t>(ts.tv_sec) * 1'000'000'000ull
-        + static_cast<std::uint64_t>(ts.tv_nsec);
+    return std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec};
 }
 
 }
@@ -41,9 +41,9 @@ GpiWord SpiBus::read_gpi() const noexcept {
     return GpiWord{gpi_reg_.read()};
 }
 
-Ex<GpiWord> SpiBus::spin_ack(bool want, bool counts) noexcept {
+Ex<GpiWord> SpiBus::spin_ack(AckLevel want, Timeout on_timeout) noexcept {
     unsigned budget = ack_soft_spins_;
-    std::uint64_t limit = 0;
+    std::chrono::nanoseconds limit{};
     bool armed = false;
     for (;;) {
         GpiWord gpi = read_gpi();
@@ -51,19 +51,20 @@ Ex<GpiWord> SpiBus::spin_ack(bool want, bool counts) noexcept {
 
             return std::unexpected(Error{Errc::fpga_not_ready, ERR_SITE(), detail_of(gpi)});
         }
-        if (gpi.test(kGpiAckField) == want)
+
+        if (gpi.test(kGpiAckField) == (want == AckLevel::Raised))
             return gpi;
         if (--budget != 0u)
             continue;
         budget = ack_soft_spins_;
-        const std::uint64_t now = now_ns();
+        const std::chrono::nanoseconds now = now_ns();
         if (!armed) {
-            limit = now + (start_bound_ ? start_ack_timeout_ns_ : ack_timeout_ns_);
+            limit = now + ack_timeout_ns_;
             armed = true;
             continue;
         }
         if (now >= limit) {
-            if (counts && stats_)
+            if (on_timeout == Timeout::Counted && stats_)
                 stats_->spin_timeouts.add();
             return std::unexpected(Error{Errc::spi_timeout, ERR_SITE(), detail_of(gpi)});
         }
@@ -82,7 +83,6 @@ Ex<SpiBus> SpiBus::open(Mailbox mailbox, xthread::RtStats* stats) {
     bus.stats_ = infra::opt_ref_of(stats);
     bus.ack_soft_spins_ = timing.ack_soft_spins;
     bus.ack_timeout_ns_ = timing.ack_timeout_ns;
-    bus.start_ack_timeout_ns_ = timing.start_ack_timeout_ns;
 
     bus.mailbox_ = std::move(mailbox).consume();
 
@@ -107,7 +107,6 @@ SpiBus SpiBus::attach_registers(
     bus.stats_ = infra::opt_ref_of(stats);
     bus.ack_soft_spins_ = timing.ack_soft_spins;
     bus.ack_timeout_ns_ = timing.ack_timeout_ns;
-    bus.start_ack_timeout_ns_ = timing.start_ack_timeout_ns;
     bus.commit_gpo(SpiOutput{});
     return bus;
 }
@@ -234,7 +233,8 @@ Ex<SpiWord> SpiBus::handshake_(SpiWord out, bool guarded) noexcept {
     const SpiOutput gpo = gpo_.without(gpo::kData).without(gpo::kStrobe).with_data(out);
     commit_gpo(gpo);
     commit_gpo(gpo.with(gpo::kStrobe));
-    if (auto ack = spin_ack(true, !guarded); !ack) {
+    if (auto ack = spin_ack(AckLevel::Raised, guarded ? Timeout::Guarded : Timeout::Counted);
+        !ack) {
         if (guarded && ack.error().code == Errc::spi_timeout) {
             post_ = Post::Rising;
             return std::unexpected(ack.error());
@@ -244,14 +244,14 @@ Ex<SpiWord> SpiBus::handshake_(SpiWord out, bool guarded) noexcept {
         return std::unexpected(ack.error());
     }
     commit_gpo(gpo);
-    const auto sample = spin_ack(false, !guarded);
+    const auto sample = spin_ack(AckLevel::Dropped, guarded ? Timeout::Guarded : Timeout::Counted);
     if (!sample) {
         if (guarded && sample.error().code == Errc::spi_timeout)
             post_ = Post::Falling;
         return std::unexpected(sample.error());
     }
 
-    return gpi_data(*sample);
+    return sample->data();
 }
 
 Ex<void> SpiBus::post(SpiWord out) {
@@ -335,7 +335,7 @@ Ex<void> SpiBus::block_read(std::span<std::uint8_t> data) {
         for (std::size_t i = 0; i < n; ++i) {
             store_gpo(gpo.with(gpo::kStrobe));
             store_gpo(gpo);
-            const SpiWord w = gpi_data(read_gpi());
+            const SpiWord w = read_gpi().data();
             data[2u * i] = static_cast<std::uint8_t>(w.v);
             data[2u * i + 1u] = static_cast<std::uint8_t>(w.v >> 8);
         }
@@ -343,7 +343,7 @@ Ex<void> SpiBus::block_read(std::span<std::uint8_t> data) {
         for (std::size_t i = 0; i < n; ++i) {
             store_gpo(gpo.with(gpo::kStrobe));
             store_gpo(gpo);
-            data[i] = static_cast<std::uint8_t>(gpi_data(read_gpi()).v);
+            data[i] = static_cast<std::uint8_t>(read_gpi().data().v);
         }
     }
 

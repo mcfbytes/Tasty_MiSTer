@@ -12,7 +12,7 @@
 #include "app/xml_kind.h"
 #include "app/path_text.h"
 #include "app/types.h"
-#include "cores/ram_image.h"
+#include "cores/ram_image_recipe.h"
 #include "cores/types.h"
 #include "infra/fixed_str.h"
 #include "infra/message_sum.h"
@@ -21,6 +21,8 @@
 #include "proto/types.h"
 
 namespace mister::app {
+
+enum class OsdStyle : std::uint8_t { Classic = 0, Hd = 1 };
 
 struct UiRequest {
     TASTY_SEAT_EXEMPT(component);
@@ -130,7 +132,7 @@ struct UiRequest {
 
     struct SetOsdStyle {
         static constexpr Kind kKind = Kind::SetOsdStyle;
-        std::uint8_t style = 0;
+        OsdStyle style = OsdStyle::Classic;
     };
 
     struct SdramDetected {

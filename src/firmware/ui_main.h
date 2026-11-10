@@ -50,14 +50,13 @@ public:
 
     struct Wires {
         xthread::WakeFlag& wake;
-        app::UartModeController::Handoffs& uart_handoffs;
+        infra::OptRef<app::UartModeController::Handoffs> uart_handoffs;
     };
 
     struct Wiring {
         infra::OptRef<app::CmdFifo> fifo{};
         infra::OptRef<app::MglPump> mgl{};
         app::VideoPump& video;
-        bool uart = false;
         app::IEventSink& ui_sink;
         app::EventQueue<SeatTag::Main>& owner_events;
         infra::OptRef<app::BtPump> bt{};
@@ -82,7 +81,7 @@ public:
     UiMain(
         app::EventQueue<SeatTag::RT>& events,
         xthread::ParkFds fds,
-        app::UartModeController::Handoffs& handoffs,
+        infra::OptRef<app::UartModeController::Handoffs> handoffs,
         const Wiring& wiring,
         xthread::WakeFlag& asker
     ) noexcept;
@@ -97,7 +96,7 @@ public:
 
     void serve() noexcept;
 
-    [[nodiscard]] bool idle() const noexcept { return uart_handoffs_.empty(); }
+    [[nodiscard]] bool idle() const noexcept { return !uart_handoffs_ || uart_handoffs_->empty(); }
 
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
 
@@ -137,7 +136,6 @@ private:
     app::ReplayFeeder& replay_;
     app::RecorderControl& recorder_;
     const infra::OptRef<app::LauncherScreen> launcher_screen_;
-    const bool uart_;
     app::UartPerformer uart_performer_{};
     app::IEventSink& ui_sink_;
     const infra::OptRef<app::IUiRoundPort> ui_round_;
@@ -154,7 +152,7 @@ private:
     std::uint32_t paused_link_drops_ = 0;
     std::uint32_t roundless_link_drops_ = 0;
 
-    app::UartModeController::Handoffs& uart_handoffs_;
+    const infra::OptRef<app::UartModeController::Handoffs> uart_handoffs_;
     xthread::SeatPark park_;
 };
 

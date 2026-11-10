@@ -13,11 +13,12 @@ Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
     m.ram_ok_ = false;
     m.ram_bytes_ = 0;
     m.disk_type_ = area.disk_type;
-    if (!area.disk_type.is_known()) {
-        return std::unexpected(area.disk_type.refusal(Errc::bad_format, ERR_SITE()));
-    }
     const SystemBlockView sys{area.sys};
     const DiskType type = area.disk_type;
+
+    if (!type.in_range()) {
+        return std::unexpected(type.refusal(Errc::bad_format, ERR_SITE()));
+    }
     std::uint64_t source = 0;
     std::uint32_t lba = 0;
     std::uint32_t starting_block = 0;
@@ -47,10 +48,11 @@ Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
         for (std::uint32_t zti = 0; zti < zone.tracks; ++zti) {
             const std::uint32_t zone_track = zone.head != 0 ? zone.tracks - 1u - zti : zti;
             const std::uint32_t track = zone.track_offset + zone_track;
+            const std::uint16_t flat_track = static_cast<std::uint16_t>(track);
+            const DiskHead head{zone.head};
             if (bad_track[zone_track]) {
                 m.steps_[m.count_++] = Step{
-                    .track = static_cast<std::uint16_t>(track),
-                    .head = zone.head,
+                    .where = FlatBlock{DiskTrack{flat_track}, head, TrackBlock{}},
                     .zone_bytes = static_cast<std::uint8_t>(zone.sector_bytes)
                 };
                 continue;
@@ -60,13 +62,12 @@ Ex<void> DiskMap::build_into(DiskMap& m, const SystemArea& area) noexcept {
                     m.count_ = 0;
                     return std::unexpected(Error{Errc::bad_format, ERR_SITE(), lba});
                 }
-                const bool dev_system = area.development
-                    && (lba == 2 || lba == 3 || lba == 10 || lba == 11);
+                const bool dev_system = area.development()
+                    && std::ranges::find(kDevSystemLbas, lba) != kDevSystemLbas.end();
+                const TrackBlock track_block{static_cast<std::uint8_t>(starting_block ^ block)};
                 m.steps_[m.count_++] = Step{
-                    .track = static_cast<std::uint16_t>(track),
+                    .where = FlatBlock{DiskTrack{flat_track}, head, track_block},
                     .lba = static_cast<std::uint16_t>(lba),
-                    .head = zone.head,
-                    .flat_block = static_cast<std::uint8_t>(starting_block ^ block),
                     .copy_bytes = static_cast<std::uint8_t>(
                         dev_system ? kDevSystemSectorBytes : zone.sector_bytes
                     ),

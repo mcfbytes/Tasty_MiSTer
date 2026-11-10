@@ -18,11 +18,13 @@
 #include "infra/seat.h"
 #include "recorder_block.h"
 #include "replay_block.h"
+#include "run_exit.h"
 #include "session_mode.h"
 #include "tasty_cli.h"
 #include "tasty_ctl.h"
 #include "tasty_entry.h"
 #include "tasty_osd.h"
+#include "tasty_refusal.h"
 #include "tasty_session.h"
 #include "tasty_sink.h"
 
@@ -52,7 +54,7 @@ public:
         return Traits{
             .program = "tasty",
             .windows_notice = hal::FallbackNotice::Quiet,
-            .boot_args = kBootArgv,
+            .boot_args = app::BootArgs{},
             .stop_ends_ladder = true,
             .not_ready_quits_clean = false
         };
@@ -81,8 +83,6 @@ public:
     [[nodiscard]] int exit_status(const Ex<void>& ran) const noexcept override;
 
 private:
-    static constexpr const char* kBootArgv[2] = {"tasty", ""};
-
     class QuietVoice final : public Voice {
         TASTY_SEAT_EXEMPT(boot);
 
@@ -111,16 +111,13 @@ private:
         explicit FeederReplay(app::ReplayFeeder& feeder) noexcept : f(feeder) {}
 
         app::ReplayFeeder& f;
-        bool take_play(const TastySession::PlayAsk& ask) noexcept override;
+        bool take_play(const app::ReplayFeeder::Play& play) noexcept override;
         void take_stop() noexcept override;
         [[nodiscard]] app::FrameCount frames() const noexcept override;
         [[nodiscard]] app::FrameCount movie_frames() const noexcept override;
         [[nodiscard]] bool refused() const noexcept override;
         [[nodiscard]] bool active() const noexcept override;
-        [[nodiscard]] const char* refusal_why() const noexcept override;
-        [[nodiscard]] std::string_view refusal_setting() const noexcept override;
-        [[nodiscard]] bool refusal_setting_offered() const noexcept override;
-        [[nodiscard]] std::string_view refusal_path() const noexcept override;
+        [[nodiscard]] std::optional<ReplayRefusal> refusal() const noexcept override;
         [[nodiscard]] std::size_t settings_set() const noexcept override;
         [[nodiscard]] std::string setting_line(std::size_t i) const override;
     };
@@ -146,7 +143,7 @@ private:
 
     public:
         explicit Sink(DeviceBlock& device) noexcept
-            : tasty_sink_{device.video_pump_, &device.session_.identity()} {}
+            : tasty_sink_{device.video_pump_, infra::OptRef{device.session_.identity()}} {}
 
         [[nodiscard]] Parts parts() noexcept override {
             return Parts{.osd_close = null_osd_, .ui_sink = tasty_sink_};
@@ -172,6 +169,7 @@ private:
             DeviceBlock& device,
             ReplayBlock& replay,
             RecorderBlock& rec,
+            RunExitCell& run_exit,
             const TastyArgs& args
         );
 
@@ -187,6 +185,8 @@ private:
     TastyArgs args_;
     QuietVoice voice_{args_};
     std::optional<ArgvArea> area_;
+
+    RunExitCell run_exit_{};
 
     std::optional<ReturnHome> home_{};
 };

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -9,6 +9,7 @@
 
 #include "app/all_leases_home.h"
 #include "app/park_receipt.h"
+#include "infra/ascii.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "proto/types.h"
@@ -21,6 +22,7 @@ class IFpgaProgrammer;
 }
 
 namespace mister::svc {
+class IFile;
 class Vfs;
 }
 
@@ -41,6 +43,8 @@ struct PayloadWindow {
     proto::FileSize fsz
 );
 
+[[nodiscard]] Ex<PayloadWindow> read_payload_window(svc::IFile& f, proto::FileSize size);
+
 class BitstreamProgrammer {
     TASTY_SEAT_RESIDENT(Main);
 
@@ -54,9 +58,10 @@ public:
         : programmer_(&programmer),
           bridges_(&bridges),
           vfs_(&vfs),
-          chunk_bytes_(
-              std::clamp(geometry.chunk_bytes, 1u, static_cast<std::uint32_t>(kProgramBufferBytes))
-          ) {}
+          chunk_bytes_(geometry.chunk_bytes.clamped<std::uint32_t>(
+              hal::ChunkBytes{1u},
+              hal::ChunkBytes{static_cast<std::uint32_t>(kProgramBufferBytes)}
+          )) {}
 
     BitstreamProgrammer(const BitstreamProgrammer&) = delete;
     BitstreamProgrammer& operator=(const BitstreamProgrammer&) = delete;
@@ -81,19 +86,17 @@ private:
     const svc::Vfs* vfs_;
     bool bridges_down_ = false;
     std::uint32_t chunk_bytes_;
-    alignas(64) std::byte buf_[kProgramBufferBytes];
+    alignas(64) std::array<std::byte, kProgramBufferBytes> buf_{};
 };
 
 consteval bool program_geometry_fits_every_board() {
     return hal::every_measured(
         &hal::BoardProfile::program,
         [](const hal::ProgramGeometry& p) consteval {
-            const auto g = hal::ProgramGeometryValues::measured(p);
-            if (g.chunk_bytes == 0u || g.chunk_bytes > kProgramBufferBytes)
-                return false;
-            if (g.quantum == 0u || g.chunk_bytes % g.quantum != 0u)
-                return false;
-            return g.align != 0u && alignof(BitstreamProgrammer) % g.align == 0u;
+            return p.is_valid(
+                infra::ByteCount{kProgramBufferBytes},
+                hal::AlignBytes{alignof(BitstreamProgrammer)}
+            );
         }
     );
 }

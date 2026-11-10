@@ -38,10 +38,10 @@ template <ByteLike B = const std::byte>
     return byte_cast<B>(std::span<const char>(s.data(), s.size()));
 }
 
-template <ByteLike B>
-[[nodiscard]] inline std::string_view text_until_nul(const B* p, std::size_t cap) noexcept {
-    const char* c = reinterpret_cast<const char*>(p);
-    return {c, ::strnlen(c, cap)};
+template <ByteLike B, std::size_t N>
+[[nodiscard]] inline std::string_view text_until_nul(std::span<B, N> field) noexcept {
+    const char* c = reinterpret_cast<const char*>(field.data());
+    return {c, ::strnlen(c, field.size())};
 }
 
 template <class T>

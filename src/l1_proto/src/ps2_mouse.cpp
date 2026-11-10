@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/ps2_mouse.h"
 
+#include <optional>
 #include <span>
 
 #include "infra/endian.h"
+#include "proto/mouse_delta.h"
 
 namespace mister::proto {
 
@@ -84,35 +86,37 @@ Ps2Mouse::Packet Ps2Mouse::Packet::of(MouseDelta delta, MouseButtons buttons) no
 }
 
 Ex<void> Ps2Mouse::motion(MouseDelta delta, MouseButtons buttons) {
-    (void)packets_.push(Packet::of(delta, buttons));
+    if (!packets_.push(Packet::of(delta, buttons))) {
+        drops_.add();
+        return std::unexpected(Error{Errc::would_block, ERR_SITE(), kPacketQueueCap});
+    }
     return {};
 }
 
-bool Ps2Mouse::next_frame(Ps2Frame& out) noexcept {
+std::optional<Ps2Frame> Ps2Mouse::next_frame() noexcept {
     if (const auto p = packets_.pop()) {
-        out.stream = Ps2Stream::MousePacket;
-        out.len = 6;
-        out.bytes = {};
-        const std::span<std::uint8_t, kPs2FrameBytes> bytes{out.bytes};
+        Ps2Frame frame;
+        frame.stream = Ps2Stream::MousePacket;
+        frame.len = 6;
+        const std::span<std::uint8_t, kPs2FrameBytes> bytes{frame.bytes};
         constexpr std::size_t kWordBytes = 2;
         infra::store_le<std::uint16_t>(bytes.first<kWordBytes>(), p->word0);
         infra::store_le<std::uint16_t>(bytes.subspan(kWordBytes).first<kWordBytes>(), p->word1);
         infra::store_le<std::uint16_t>(bytes.subspan(2 * kWordBytes).first<kWordBytes>(), p->word2);
-        return true;
+        return frame;
     }
     if (const auto code = port_.next_reply()) {
-        out.stream = Ps2Stream::MouseReply;
-        out.len = 1;
-        out.bytes = {};
-        out.bytes[0] = byte_of(*code);
-        return true;
+        Ps2Frame frame;
+        frame.stream = Ps2Stream::MouseReply;
+        frame.len = 1;
+        frame.bytes[0] = byte_of(*code);
+        return frame;
     }
-    return false;
+    return std::nullopt;
 }
 
-Ex<void> Ps2Mouse::accept_control(std::uint16_t word1) {
+void Ps2Mouse::accept_control(std::uint16_t word1) {
     port_.accept(word1, [this](std::uint8_t byte) { decode_control(byte); });
-    return {};
 }
 
 void Ps2Mouse::end_control() noexcept {

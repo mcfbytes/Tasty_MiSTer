@@ -11,6 +11,7 @@
 
 #include "infra/affine.h"
 #include "infra/json_name.h"
+#include "infra/json_width.h"
 
 namespace mister::infra {
 
@@ -31,6 +32,13 @@ public:
         put_(t.view());
         put_("\",\"seq\":");
         number_(seq, std::numeric_limits<std::uint32_t>::max());
+        comma_ = true;
+    }
+
+    constexpr void begin_record(JsonName t) noexcept {
+        put_("{\"t\":\"");
+        put_(t.view());
+        put_('"');
         comma_ = true;
     }
 
@@ -65,7 +73,9 @@ public:
     }
 
     template <class E>
-        requires std::is_enum_v<E>
+        requires(
+            std::is_enum_v<E> && !requires(JsonOut& o, JsonName k, E e) { json_field(o, k, e); }
+        )
     constexpr void field(JsonName key, E v) noexcept {
         key_(key);
         using U = std::underlying_type_t<E>;
@@ -91,11 +101,17 @@ public:
         value_(v);
     }
 
-    constexpr void str(JsonName key, std::string_view v, std::size_t worst) noexcept {
+    template <class T>
+        requires requires(JsonOut& o, const T& t) { json_elem(o, t); }
+    constexpr void elem(const T& t) noexcept {
+        json_elem(*this, t);
+    }
+
+    constexpr void str(JsonName key, std::string_view v, JsonWidth worst) noexcept {
         key_(key);
         put_('"');
         if (measure_) {
-            need_ += worst;
+            need_ += worst.bytes_;
         } else {
             put_(v);
         }
@@ -213,6 +229,11 @@ private:
     bool measure_ = false;
     bool overflow_ = false;
 };
+
+template <std::size_t N>
+[[nodiscard]] consteval JsonWidth json_longest(const std::array<const char*, N>& names) noexcept {
+    return JsonWidth::longest(names);
+}
 
 template <class T>
 [[nodiscard]] consteval std::size_t json_worst_len() {

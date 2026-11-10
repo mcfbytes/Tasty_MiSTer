@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <utility>
 
 #include "hal/types.h"
@@ -76,6 +79,19 @@ enum class UioOp : std::uint16_t {
 
 [[nodiscard]] constexpr hal::SpiWord word(UioOp op) noexcept {
     return hal::SpiWord{static_cast<std::uint16_t>(op)};
+}
+
+template <class WordSet>
+[[nodiscard]] constexpr std::array<std::uint16_t, 1 + WordSet::kCount> command_words(
+    UioOp op,
+    const WordSet& data
+) noexcept {
+    std::array<std::uint16_t, 1 + WordSet::kCount> words{};
+    words[0] = word(op).v;
+    const std::span<const std::uint16_t, WordSet::kCount> tail = data.data();
+    for (std::size_t i = 0; i < tail.size(); ++i)
+        words[i + 1] = tail[i];
+    return words;
 }
 
 [[nodiscard]] constexpr std::uint8_t byte(UioOp op) noexcept {

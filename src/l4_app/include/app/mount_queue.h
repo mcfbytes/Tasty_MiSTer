@@ -50,7 +50,7 @@ public:
         [[nodiscard]] virtual bool arm_loader(
             const ContentRequest& req,
             std::string_view save,
-            std::uint64_t save_bytes
+            proto::FileSize save_bytes
         ) = 0;
         virtual void perform_content(const ContentRequest& req) = 0;
         virtual void launch_content(const ContentRequest& cr) = 0;
@@ -138,6 +138,11 @@ private:
     void arm_boot_image_(const MountAsk& ask);
     [[nodiscard]] bool start_mounts_live_() const noexcept;
     void finish_save_mount_(Host& host, bool ok, bool quiet = false);
+
+    [[nodiscard]] bool on_known_(Host& host, proto::SlotIndex slot);
+    void on_timeout_(Host& host, proto::SlotIndex slot);
+    void advance_unmount_(Host& host, proto::SlotIndex slot);
+    void advance_attach_(Host& host, proto::SlotIndex slot);
 
     [[nodiscard]] bool mount_busy_() const noexcept;
     void publish_refusal_(UiRequest::Kind which, Errc code, CorrelationTag tag) noexcept;

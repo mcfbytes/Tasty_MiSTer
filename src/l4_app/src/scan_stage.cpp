@@ -9,6 +9,7 @@
 
 #include "app/replay_msg.h"
 #include "app/video_pump.h"
+#include "proto/types.h"
 #include "svc/file.h"
 #include "svc/vfs.h"
 
@@ -28,11 +29,12 @@ IReplayStage::Step ScanStage::stop(Ctx) noexcept {
 
 IReplayStage::Step ScanStage::enter(Ctx ctx) noexcept {
     TASTY_SEAT_BODY(ScanStage);
-    ReplayPlay& play = ctx.play;
-    auto f = play.codec->open_movie(*ctx.w.vfs, play.movie.view());
+    const ReplayPlay::Request& req = ctx.request;
+    ReplayPlay::ScannedMovie& scan = ctx.scan;
+    auto f = req.codec->format().open_movie(*ctx.w.vfs, req.movie.view());
     if (!f) {
 
-        if (play.codec->archive() != nullptr && f.error().code == Errc::bad_format)
+        if (req.codec->format().archive().has_value() && f.error().code == Errc::bad_format)
             return Step::refuse(Refusal::Movie, f.error().detail);
         return Step::refuse(Refusal::MovieIo, static_cast<std::uint32_t>(f.error().code));
     }
@@ -41,16 +43,12 @@ IReplayStage::Step ScanStage::enter(Ctx ctx) noexcept {
         return Step::refuse(Refusal::MovieIo, static_cast<std::uint32_t>(size.error().code));
     file_ = std::move(*f);
     file_size_ = size->v;
-    play.runs.clear();
+    scan = {};
     off_ = 0;
-    line_ = Line{};
-    play.facts = {};
+    line_.clear();
     in_log_ = false;
     log_done_ = false;
-    play.scanned = 0;
-    play.movie_frames = FrameCount{};
-    play.tries = 0;
-    play.vsync_ok = ctx.w.video.output_locked();
+    scan.vsync_ok = ctx.w.video.output_locked();
     return Step::stay();
 }
 
@@ -60,22 +58,22 @@ IReplayStage::Step ScanStage::tick(Ctx ctx) noexcept {
 }
 
 IReplayStage::Step ScanStage::read_lines_(Ctx ctx) noexcept {
-    ReplayPlay& play = ctx.play;
     std::array<std::byte, ReplayPlay::kReadChunk> buf;
     std::uint32_t spent = 0;
     while (spent < ReplayPlay::kTickBudget) {
         if (off_ >= file_size_) {
-            if (line_.len != 0 || line_.clipped) {
-                const Line l = line_;
-                line_ = Line{};
-                if (const auto r = on_line_(ctx, std::string_view(l.text.data(), l.len), l.clipped))
+            if (!line_.empty() || line_.clipped()) {
+                if (const auto r = on_line_(ctx, line_.view(), line_.clipped()))
                     return Step::refuse(r->why, r->detail);
+                line_.clear();
             }
             return finish_scan_(ctx);
         }
         const auto got = file_->read_at(off_, buf);
         if (!got || *got == 0) {
-            if (!got && got.error().code == Errc::bad_format && play.codec->archive() != nullptr)
+            if (!got
+                && ctx.request.codec->format().archive().has_value()
+                && got.error().code == Errc::bad_format)
                 return Step::refuse(Refusal::Movie, got.error().detail);
             return Step::refuse(
                 Refusal::MovieIo,
@@ -86,17 +84,12 @@ IReplayStage::Step ScanStage::read_lines_(Ctx ctx) noexcept {
         for (std::size_t i = 0; i < *got; ++i) {
             const char c = static_cast<char>(buf[i]);
             if (c == '\n') {
-                const Line l = line_;
-                line_ = Line{};
-                if (const auto r = on_line_(ctx, std::string_view(l.text.data(), l.len), l.clipped))
+                if (const auto r = on_line_(ctx, line_.view(), line_.clipped()))
                     return Step::refuse(r->why, r->detail);
+                line_.clear();
                 continue;
             }
-            if (line_.len < line_.text.size()) {
-                line_.text[line_.len++] = c;
-            } else {
-                line_.clipped = true;
-            }
+            (void)line_.append(std::string_view{&c, 1});
         }
         off_ += *got;
     }
@@ -112,7 +105,7 @@ std::optional<PlayRefusal> ScanStage::on_line_(
         line.remove_suffix(1);
     if (line.empty() && !clipped)
         return std::nullopt;
-    if (in_log_ && (log_done_ || ctx.play.codec->ends_log(line))) {
+    if (in_log_ && (log_done_ || ctx.request.codec->format().ends_log(line))) {
         log_done_ = true;
         return std::nullopt;
     }
@@ -124,52 +117,53 @@ std::optional<PlayRefusal> ScanStage::scan_line_(
     std::string_view line,
     bool clipped
 ) noexcept {
-    using CR = cores::IMovieCodec::Refusal;
-    ReplayPlay& play = ctx.play;
+    using CR = cores::MovieRefusal;
+    const ReplayPlay::Request& req = ctx.request;
+    ReplayPlay::ScannedMovie& scan = ctx.scan;
     if (!in_log_) {
-        if (!play.codec->starts_log(line)) {
-            const auto f = play.codec->header_line(line, play.facts);
+        if (!req.codec->format().starts_log(line)) {
+            const auto f = req.codec->format().header_line(line, scan.facts);
             if (!f)
                 return PlayRefusal{Refusal::Movie, f.error().detail};
-            play.facts = *f;
+            scan.facts = *f;
             return std::nullopt;
         }
-        if (const auto e = play.codec->finish_header(play.facts); !e)
+        if (const auto e = req.codec->format().finish_header(scan.facts); !e)
             return PlayRefusal{Refusal::Movie, e.error().detail};
         in_log_ = true;
     }
     if (clipped)
         return PlayRefusal{Refusal::Movie, static_cast<std::uint32_t>(CR::BadLine)};
-    const auto fr = play.codec->frame(line, play.facts);
+    const auto fr = req.codec->format().frame(line, scan.facts);
     if (!fr)
         return PlayRefusal{Refusal::Movie, fr.error().detail};
 
-    if (play.scanned > 0 && fr->commands != 0)
-        return PlayRefusal{Refusal::Command, play.scanned};
-    if (++play.scanned > ReplayPlay::kMaxFrames)
-        return PlayRefusal{Refusal::TooLong, play.scanned};
-    if (const std::uint32_t f = play.scanned - 1;
-        !play.stop_at || movie_frame_from_wire(f) < *play.stop_at)
-        note_frame_(play, f, *fr);
+    if (scan.scanned > 0 && fr->commands.has_any())
+        return PlayRefusal{Refusal::Command, scan.scanned};
+    if (++scan.scanned > ReplayPlay::kMaxFrames)
+        return PlayRefusal{Refusal::TooLong, scan.scanned};
+    if (const std::uint32_t f = scan.scanned - 1;
+        !req.stop_at || movie_frame_from_wire(f) < *req.stop_at)
+        note_frame_(scan, f, *fr);
     return std::nullopt;
 }
 
 void ScanStage::note_frame_(
-    ReplayPlay& play,
+    ReplayPlay::ScannedMovie& scan,
     std::uint32_t f,
-    const cores::IMovieCodec::Frame& fr
+    const cores::MovieFrame& fr
 ) noexcept {
-    std::array<std::uint32_t, kReplayPorts> m{};
+    std::array<proto::JoyMask, kReplayPorts> m{};
     for (std::size_t p = 0; p < kReplayPorts && p < fr.mask.size(); ++p)
         m[p] = fr.mask[p];
-    if (!play.runs.empty()) {
-        ReplayMsg::Input& run = play.runs.back();
+    if (!scan.runs.empty()) {
+        ReplayMsg::Input& run = scan.runs.back();
         if (run.mask == m && run.last - run.first + FrameCount{1} < ReplayPlay::kRunSplit) {
             run.last = movie_frame_from_wire(f);
             return;
         }
     }
-    play.runs.push_back(
+    scan.runs.push_back(
         ReplayMsg::Input{
             .first = movie_frame_from_wire(f),
             .last = movie_frame_from_wire(f),
@@ -179,26 +173,26 @@ void ScanStage::note_frame_(
 }
 
 IReplayStage::Step ScanStage::finish_scan_(Ctx ctx) noexcept {
-    ReplayPlay& play = ctx.play;
-    if (!in_log_ || play.scanned == 0) {
+    const ReplayPlay::Request& req = ctx.request;
+    ReplayPlay::ScannedMovie& scan = ctx.scan;
+    if (!in_log_ || scan.scanned == 0) {
         return Step::refuse(
             Refusal::Movie,
-            static_cast<std::uint32_t>(cores::IMovieCodec::Refusal::NotAMovie)
+            static_cast<std::uint32_t>(cores::MovieRefusal::NotAMovie)
         );
     }
-    const FrameCount scanned = movie_frame_from_wire(play.scanned) - MovieFrame{};
-    play.movie_frames = play.stop_at ? std::min(scanned, *play.stop_at - MovieFrame{}) : scanned;
+    const FrameCount scanned = movie_frame_from_wire(scan.scanned) - MovieFrame{};
+    scan.movie_frames = req.stop_at ? std::min(scanned, *req.stop_at - MovieFrame{}) : scanned;
 
     file_.reset();
-    play.runs.shrink_to_fit();
-    const cores::IMovieCodec::Raster r = play.codec->raster(play.facts);
-    if (play.offset_us == 0)
-        play.offset_us = r.period_ns / 2000;
-    if (!ReplayPlay::phase_fits(
-            std::chrono::microseconds{play.offset_us},
-            std::chrono::nanoseconds{r.period_ns}
-        ))
-        return Step::refuse(Refusal::Phase, play.offset_us);
+    scan.runs.shrink_to_fit();
+    const cores::IReplayCore::Raster r = req.codec->core().raster(scan.facts);
+    const CodecNs period = std::chrono::duration_cast<CodecNs>(r.period_ns);
+    scan.offset_us = req.offset_us == ArmMicros::zero()
+        ? std::chrono::duration_cast<ArmMicros>(period / 2)
+        : req.offset_us;
+    if (!ReplayPlay::phase_fits(scan.offset_us, period))
+        return Step::refuse(Refusal::Phase, scan.offset_us.count());
     return Step::enter(Step::Next::Hash);
 }
 

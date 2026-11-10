@@ -4,6 +4,7 @@
 #include <string_view>
 
 #include "app/page_description.h"
+#include "app/tier_set.h"
 #include "infra/seat.h"
 #include "ui/hd_row.h"
 

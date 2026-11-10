@@ -4,46 +4,23 @@
 #include "app/input_wire.h"
 
 #include <cstdio>
-#include <cstring>
+#include <chrono>
 #include <memory>
-#include <string>
 #include <cerrno>
 #include <ctime>
 #include <utility>
-#include <vector>
 
+#include "app/ini_parse.h"
 #include "infra/byte_view.h"
 #include "svc/config.h"
 #include "svc/config_parser.h"
 #include "svc/filter_store.h"
+#include "svc/pll_solver.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
 
 namespace {
-
-Ex<std::vector<std::byte>> read_all(const svc::Vfs& vfs, std::string_view path) {
-    auto f = vfs.open(path, svc::OpenMode::ReadWhole);
-    if (!f)
-        return std::unexpected(f.error());
-    auto sz = (*f)->size();
-    if (!sz)
-        return std::unexpected(sz.error());
-    std::vector<std::byte> buf(static_cast<std::size_t>(sz->v));
-    std::size_t off = 0;
-    while (off < buf.size()) {
-        auto n = (*f)->read_at(off, std::span<std::byte>(buf).subspan(off));
-        if (!n)
-            return std::unexpected(n.error());
-        if (*n == 0) {
-            return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(off)}
-            );
-        }
-        off += *n;
-    }
-    return buf;
-}
 
 std::uint32_t fpix_detail(double f) noexcept {
     constexpr double kFpixHzCeiling = 4.0e9;
@@ -85,11 +62,11 @@ VideoPump::VideoPump(
       ),
       activity_(wiring.activity) {
 
-    video_->set_hdmi_capable(false);
+    video_->hdmi().set_hdmi_capable(false);
 }
 
 Adv7513Seat::Host VideoPump::seat_host() noexcept {
-    return Adv7513Seat::Host{*video_, wire_, stats_, last_error_};
+    return Adv7513Seat::Host{video_->hdmi(), wire_, stats_, last_error_};
 }
 
 void VideoPump::take_edge(Adv7513Seat::Edge e) noexcept {
@@ -102,26 +79,20 @@ void VideoPump::take_edge(Adv7513Seat::Edge e) noexcept {
 void VideoPump::load_filters() {
 
     auto set = std::make_unique<svc::FilterSet>();
-    const svc::ScalerSeeds seeds{
-        ini_.vfilter_seeds[0],
-        ini_.vfilter_seeds[1],
-        ini_.vfilter_seeds[2],
-        ini_.vfilter_seeds[3]
-    };
-    svc::load_filter_set(vfs_, std::string_view{core_name_, core_name_len_}, seeds, *set);
+    svc::ScalerSeeds seeds{};
+    seeds[svc::ScalerSlotIndex::of(svc::VFilter::Horz)] = ini_.vfilter_seeds.horz;
+    seeds[svc::ScalerSlotIndex::of(svc::VFilter::Vert)] = ini_.vfilter_seeds.vert;
+    seeds[svc::ScalerSlotIndex::of(svc::VFilter::Scanlines)] = ini_.vfilter_seeds.scan;
+    seeds[svc::ScalerSlotIndex::of(svc::VFilter::Ilace)] = ini_.vfilter_seeds.ilace;
+    svc::load_filter_set(vfs_, core_name_.view(), seeds, *set);
     wire_.publish_filters(*set);
-    filter_mode_ = set->modes[0];
-    const auto enabled = set->enabled();
-    video_->set_filter_slots(enabled);
+    filter_mode_ = set->filter_mode();
     ++stats_.filter_loads;
     publish_scaling_policy();
 }
 
 void VideoPump::latch_spec(std::string_view spec) noexcept {
-    spec_len_ = static_cast<std::uint16_t>(spec.size() < kSpecMax ? spec.size() : kSpecMax - 1);
-    std::memcpy(spec_, spec.data(), spec_len_);
-    spec_[spec_len_] = '\0';
-    spec_valid_ = true;
+    (void)spec_.assign(spec);
 }
 
 void VideoPump::force_vsync_adjust(VsyncAdjust v) noexcept {
@@ -170,7 +141,7 @@ void VideoPump::on_core_loaded(bool front_end) {
     ini_read_ = false;
 
     filters_pending_ = true;
-    filter_mode_ = 0;
+    filter_mode_ = svc::ScalerSlotMode::off();
 
     families_valid_ = false;
 
@@ -221,7 +192,7 @@ void VideoPump::tick() {
 }
 
 void VideoPump::publish_monitoring() noexcept {
-    seat_.report(stats_);
+    Adv7513Seat::apply(seat_.report(), stats_);
     stats_cell_.publish(stats_);
 
     GeometryRecord g{};
@@ -246,20 +217,20 @@ void VideoPump::publish_scaling_policy() noexcept {
     p.filter_mode = filter_mode_;
     p.front_end = front_end_;
     wire_.publish_policy(p);
-    wire_.publish_ar_custom(ini_.ar_cust);
+    wire_.publish_ar_custom(ar_custom_words(ini_.ar_cust));
     wire_.publish_shadow_mask(0x0000);
 }
 
 void VideoPump::service_idle_blank() {
 
-    const auto want = idle_.tick(
-        clock_.now().count(),
-        activity_.activity_seq(),
-        activity_.input_grabbed()
-    );
+    const auto want = idle_.tick(clock_.now(), activity_.activity_seq(), activity_.input_grabbed());
     if (!want.has_value())
         return;
-    if (auto r = video_->request_power(*want); !r)
+
+    const auto bus = seat_.bus();
+    if (!bus)
+        return;
+    if (auto r = video_->hdmi().request_power(*bus, *want); !r)
         last_error_ = r.error();
 }
 
@@ -270,12 +241,7 @@ void VideoPump::service_recovery() {
 }
 
 void VideoPump::set_core_name(std::string_view name) noexcept {
-    constexpr std::size_t kCap = sizeof(core_name_) - 1;
-    const std::size_t n = name.size() < kCap ? name.size() : kCap;
-    for (std::size_t i = 0; i < n; ++i)
-        core_name_[i] = name[i];
-    core_name_[n] = '\0';
-    core_name_len_ = static_cast<std::uint8_t>(n);
+    (void)core_name_.assign(name);
 }
 
 void VideoPump::note_i2c(I2cOutcome o) noexcept {
@@ -298,7 +264,8 @@ void VideoPump::service_mode_phase() {
     }
 
     constexpr std::int64_t kNsPerMs = 1'000'000;
-    const std::int64_t elapsed_ms = (clock_.now().count() - stage_ns_) / kNsPerMs;
+    const std::int64_t elapsed_ms = (clock_.now().time_since_epoch().count() - stage_ns_)
+        / kNsPerMs;
     if (elapsed_ms < kModeSettleMs)
         return;
 
@@ -310,7 +277,7 @@ void VideoPump::load_spec_from_ini() {
     ini_read_ = true;
     ++stats_.ini_reads;
 
-    auto bytes = read_all(vfs_, "MiSTer.ini");
+    auto bytes = read_ini_whole(vfs_);
     if (!bytes) {
         ini_ = absent_video_ini(ini_force_, ini_);
         return;
@@ -319,7 +286,7 @@ void VideoPump::load_spec_from_ini() {
     svc::config_parser::PassNames names{};
     const auto snap = svc::config_parser::parse_two_pass(infra::as_text(std::span(*bytes)), names);
     ini_ = parse_video_ini(snap, ini_force_);
-    idle_.set_timeout_minutes(snap.hdmi_off);
+    idle_.set_timeout_minutes(std::chrono::minutes{snap.hdmi_off});
 
     const std::string_view spec{snap.video_mode};
     if (spec.empty())
@@ -340,11 +307,7 @@ Ex<void> VideoPump::apply_now() {
     take_edge(seat_.configure(
         seat_host(),
         ini_.init,
-        Adv7513Seat::Spd{
-            std::string_view{core_name_, core_name_len_},
-            ini_.direct_video,
-            ini_.spd_quirk
-        }
+        Adv7513Seat::Spd{core_name_.view(), ini_.direct_video, ini_.spd_quirk}
     ));
 
     resolve_families();
@@ -368,8 +331,7 @@ void VideoPump::resolve_families() {
         families_valid_ = true;
         return;
     }
-    const std::string_view def = spec_valid_ ? std::string_view{spec_, spec_len_}
-                                             : std::string_view{};
+    const std::string_view def = spec_.view();
     family(svc::VmodeFamily::Default) = resolve_one(def, true);
     family(svc::VmodeFamily::Pal) = resolve_one(ini_.spec_pal, false);
     family(svc::VmodeFamily::Ntsc) = resolve_one(ini_.spec_ntsc, false);
@@ -382,11 +344,10 @@ VideoPump::FamilyMode VideoPump::resolve_one(std::string_view spec, bool count_f
         if (auto parsed = video_->parse_mode(spec)) {
             out.stored = svc::video_timing::store_mode(
                 *parsed,
-                support_fhd_,
-                video_->supports_pr()
+                {.full_hd = support_fhd_, .pixel_repeat = video_->supports_pr()}
             );
             if (parsed->how == svc::ModeRequest::PresetIndex) {
-                out.index = VideoModeIndex{static_cast<std::uint8_t>(parsed->preset_index)};
+                out.index = VideoModeIndex::from_preset(parsed->preset_index);
             }
             if (parsed->raw_pll) {
                 out.have_raw_pll = true;
@@ -398,7 +359,9 @@ VideoPump::FamilyMode VideoPump::resolve_one(std::string_view spec, bool count_f
     }
     if (count_fallback)
         ++stats_.parse_fallbacks;
-    out.stored = svc::video_timing::preset_fallback(support_fhd_, video_->supports_pr());
+    out.stored = svc::video_timing::preset_fallback(
+        {.full_hd = support_fhd_, .pixel_repeat = video_->supports_pr()}
+    );
     constexpr VideoModeIndex kPresetDefault{0};
     constexpr VideoModeIndex kPreset1080p60{8};
     out.index = support_fhd_ ? kPreset1080p60 : kPresetDefault;
@@ -422,17 +385,16 @@ void VideoPump::service_family_switch() {
     const std::uint32_t vtime = video_->info().vtime;
     const auto choice = svc::video_timing::select_family(
         vtime,
-        ini_.vsync_adjust != VsyncAdjust::Off,
-        family(svc::VmodeFamily::Pal).configured,
-        family(svc::VmodeFamily::Ntsc).configured
+        {.switching = ini_.vsync_adjust != VsyncAdjust::Off,
+         .have_pal = family(svc::VmodeFamily::Pal).configured,
+         .have_ntsc = family(svc::VmodeFamily::Ntsc).configured}
     );
     double fpix_mhz = 0.0;
     if (choice.adjustable) {
         if (const auto est = svc::video_timing::estimate_fpix(
                 family(choice.family).stored.mode,
                 vtime,
-                ini_.refresh_min,
-                ini_.refresh_max
+                {.min_hz = ini_.refresh_min, .max_hz = ini_.refresh_max}
             )) {
             fpix_mhz = *est;
         }
@@ -485,7 +447,7 @@ Ex<void> VideoPump::apply_family(svc::VmodeFamily f, double fpix_mhz) {
     }
     ++stats_.applies;
     output_locked_ = ini_.vsync_adjust == VsyncAdjust::LowLag && adjusted;
-    last_apply_ns_ = clock_.now().count();
+    last_apply_ns_ = clock_.now().time_since_epoch().count();
 
     if (seat_.attached() && seat_.init_ok()) {
         pending_mode_ = fm.stored.mode;

@@ -12,6 +12,7 @@
 namespace mister::svc {
 
 class IFilterResend;
+struct ScalerSlotMode;
 
 struct GeometryPass {
     VideoSample sample{};
@@ -31,7 +32,7 @@ public:
     ProbeOps(const ProbeOps&) = delete;
     ProbeOps& operator=(const ProbeOps&) = delete;
 
-    [[nodiscard]] Ex<std::uint16_t> emit_filter_mode(std::uint8_t mode);
+    [[nodiscard]] Ex<std::uint16_t> emit_filter_mode(ScalerSlotMode mode);
 
     [[nodiscard]] Ex<std::uint16_t> emit_shadow_mask(std::uint16_t flag_word);
 
@@ -48,6 +49,38 @@ public:
     );
 
 private:
+    struct VresStep {
+        ResWord res{};
+        bool res_changed = false;
+        bool vi_seen = false;
+    };
+
+    struct FbParStep {
+        FbParCrc crc{};
+        bool fb_changed = false;
+    };
+
+    struct VfilterStep {
+        FltFlags flags{};
+        bool tail_deferred = false;
+    };
+
+    [[nodiscard]] Ex<VresStep> read_vres_(const GeometryGate& gate, bool force, GeometryPass& pass);
+    [[nodiscard]] Ex<FbParStep> read_fb_par_(
+        const GeometryGate& gate,
+        bool force,
+        bool res_changed,
+        GeometryPass& pass
+    );
+    [[nodiscard]] Ex<void> send_yc_(bool force, GeometryPass& pass);
+    [[nodiscard]] Ex<VfilterStep> send_vfilter_(
+        const GeometryGate& gate,
+        bool resend,
+        IFilterResend& filters,
+        GeometryPass& pass
+    );
+    [[nodiscard]] Ex<void> send_scaling_(const ScalingPolicy& policy, const VideoSample& sample);
+
     proto::Link& link_;
 };
 

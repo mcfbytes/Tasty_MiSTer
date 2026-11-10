@@ -10,7 +10,6 @@
 #include <string>
 
 #include "app/core_builder.h"
-#include "app/doorbell_lines.h"
 #include "app/intern_exact.h"
 #include "app/link_tx_reader.h"
 #include "app/session_bindings.h"
@@ -80,24 +79,17 @@ void BindTail::doorbells(
 ) {
     TASTY_SEAT_BODY(BindTail);
 
-    std::array<proto::IrqBinding, kMaxDoorbellRows> irqs{};
-    const std::size_t declared = CoreBuilder::rt_rows(conf.irq_bindings(), lw, irqs, owned);
+    const CoreBuilder::RtRows rt = CoreBuilder::rt_rows(conf.irq_bindings(), lw, owned);
+    proto::LinkOp::BindDoorbells op{.declared = rt.declared.wire_byte()};
 
-    const std::size_t rows = std::min(declared, kMaxDoorbellRows);
-    proto::LinkOp::BindDoorbells op{
-        .declared = static_cast<std::uint8_t>(
-            std::min<std::size_t>(declared, std::numeric_limits<std::uint8_t>::max())
-        )
-    };
-    if (rows != 0) {
+    if (!rt.count.empty()) {
         std::array<std::uint8_t, kLinkTxSlabBytes> packed{};
-        std::memcpy(packed.data(), irqs.data(), rows * sizeof(proto::IrqBinding));
-        const auto id = inbox_.intern(
-            std::span<const std::uint8_t>(packed.data(), rows * sizeof(proto::IrqBinding))
-        );
+        const std::size_t bytes = rt.count.bytes_of<proto::IrqBinding>();
+        std::memcpy(packed.data(), rt.rows.data(), bytes);
+        const auto id = inbox_.intern(std::span<const std::uint8_t>(packed.data(), bytes));
         if (id) {
             op.table = *id;
-            op.rows = static_cast<std::uint8_t>(rows);
+            op.rows = rt.count.wire_byte();
         } else {
             ++tally_.doorbell_intern_refusals;
         }

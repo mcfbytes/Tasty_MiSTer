@@ -3,103 +3,103 @@
 
 #include <chrono>
 #include <cstdint>
+#include <tuple>
 
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "hal/fact.h"
+#include "hal/fact_field.h"
 
 namespace mister::hal {
 
 struct LinkTiming {
-    Fact<std::uint32_t> word_ns;
-    Fact<std::uint32_t> beat_ns;
-    Fact<std::uint32_t> base_round_ns;
-    Fact<std::uint32_t> sleep_ns;
+    Fact<std::chrono::nanoseconds> word_ns;
+    Fact<std::chrono::nanoseconds> beat_ns;
+    Fact<std::chrono::nanoseconds> base_round_ns;
+    Fact<std::chrono::nanoseconds> sleep_ns;
     Fact<std::uint32_t> round_budget_words;
     Fact<std::uint32_t> load_budget_words;
     Fact<std::uint32_t> ack_soft_spins;
-    Fact<std::uint64_t> ack_timeout_ns;
-    Fact<std::uint64_t> start_ack_timeout_ns;
+    Fact<std::chrono::nanoseconds> ack_timeout_ns;
 };
 
 class LinkTimingValues {
 
 public:
-    LinkTimingValues() = delete;
-
     [[nodiscard]] static Ex<LinkTimingValues> resolve(
         const LinkTiming& t,
         infra::ErrorSite site
     ) noexcept;
 
-    [[nodiscard]] static consteval LinkTimingValues measured(const LinkTiming& t) {
-        return LinkTimingValues{
-            t.word_ns.value(),
-            t.beat_ns.value(),
-            t.base_round_ns.value(),
-            t.sleep_ns.value(),
-            t.round_budget_words.value(),
-            t.load_budget_words.value(),
-            t.ack_soft_spins.value(),
-            t.ack_timeout_ns.value(),
-            t.start_ack_timeout_ns.value()
-        };
-    }
+    [[nodiscard]] static consteval LinkTimingValues measured(const LinkTiming& t) noexcept;
 
-    std::uint32_t word_ns;
-    std::uint32_t beat_ns;
-    std::uint32_t base_round_ns;
-    std::uint32_t sleep_ns;
+    [[nodiscard]] static constexpr const auto& rows() noexcept { return kFields; }
+
+    std::chrono::nanoseconds word_ns;
+    std::chrono::nanoseconds beat_ns;
+    std::chrono::nanoseconds base_round_ns;
+    std::chrono::nanoseconds sleep_ns;
     std::uint32_t round_budget_words;
     std::uint32_t load_budget_words;
     std::uint32_t ack_soft_spins;
-    std::uint64_t ack_timeout_ns;
-    std::uint64_t start_ack_timeout_ns;
+    std::chrono::nanoseconds ack_timeout_ns;
+
+    [[nodiscard]] constexpr std::chrono::nanoseconds round_cost(
+        std::uint32_t words
+    ) const noexcept {
+        return word_ns * words + base_round_ns + sleep_ns;
+    }
 
 private:
-    constexpr LinkTimingValues(
-        std::uint32_t word,
-        std::uint32_t beat,
-        std::uint32_t base,
-        std::uint32_t sleep,
-        std::uint32_t budget,
-        std::uint32_t load,
-        std::uint32_t spins,
-        std::uint64_t timeout,
-        std::uint64_t start_timeout
-    ) noexcept
-        : word_ns(word),
-          beat_ns(beat),
-          base_round_ns(base),
-          sleep_ns(sleep),
-          round_budget_words(budget),
-          load_budget_words(load),
-          ack_soft_spins(spins),
-          ack_timeout_ns(timeout),
-          start_ack_timeout_ns(start_timeout) {}
+    static constexpr auto kFields = std::tuple{
+        fact_row(FactField::TimingWordNs, &LinkTiming::word_ns, &LinkTimingValues::word_ns),
+        fact_row(FactField::TimingBeatNs, &LinkTiming::beat_ns, &LinkTimingValues::beat_ns),
+        fact_row(
+            FactField::TimingBaseRoundNs,
+            &LinkTiming::base_round_ns,
+            &LinkTimingValues::base_round_ns
+        ),
+        fact_row(FactField::TimingSleepNs, &LinkTiming::sleep_ns, &LinkTimingValues::sleep_ns),
+        fact_row(
+            FactField::TimingRoundBudgetWords,
+            &LinkTiming::round_budget_words,
+            &LinkTimingValues::round_budget_words
+        ),
+        fact_row(
+            FactField::TimingLoadBudgetWords,
+            &LinkTiming::load_budget_words,
+            &LinkTimingValues::load_budget_words
+        ),
+        fact_row(
+            FactField::TimingAckSoftSpins,
+            &LinkTiming::ack_soft_spins,
+            &LinkTimingValues::ack_soft_spins
+        ),
+        fact_row(
+            FactField::TimingAckTimeoutNs,
+            &LinkTiming::ack_timeout_ns,
+            &LinkTimingValues::ack_timeout_ns
+        ),
+    };
+
+    constexpr LinkTimingValues() noexcept = default;
 };
 
-constexpr bool all_measured(const LinkTiming& t) noexcept {
-    return t.word_ns.measured()
-        && t.beat_ns.measured()
-        && t.base_round_ns.measured()
-        && t.sleep_ns.measured()
-        && t.round_budget_words.measured()
-        && t.load_budget_words.measured()
-        && t.ack_soft_spins.measured()
-        && t.ack_timeout_ns.measured()
-        && t.start_ack_timeout_ns.measured();
+static_assert(
+    rows_are_distinct(LinkTimingValues::rows(), "timing."),
+    "each LinkTiming row names one timing FactField, and no field twice"
+);
+
+consteval LinkTimingValues LinkTimingValues::measured(const LinkTiming& t) noexcept {
+    LinkTimingValues values{};
+    fill_rows_measured(values, kFields, t);
+    return values;
+}
+
+[[nodiscard]] constexpr bool all_measured(const LinkTiming& t) noexcept {
+    return every_row_measured(LinkTimingValues::rows(), t);
 }
 
 inline constexpr std::chrono::nanoseconds kLoadWire{std::chrono::milliseconds{10}};
-
-constexpr std::uint64_t round_cost_ns(
-    std::uint32_t word_ns,
-    std::uint32_t base_round_ns,
-    std::uint32_t sleep_ns,
-    std::uint32_t words
-) noexcept {
-    return std::uint64_t{words} * word_ns + base_round_ns + sleep_ns;
-}
 
 }

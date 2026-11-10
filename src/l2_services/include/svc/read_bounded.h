@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -14,6 +15,8 @@ class IFile;
 class Vfs;
 
 [[nodiscard]] Ex<std::vector<std::byte>> read_bounded(IFile& file, std::uint64_t cap);
+
+[[nodiscard]] std::span<std::byte> read_bounded_partial(IFile& file, std::span<std::byte> dst);
 
 [[nodiscard]] Ex<std::vector<std::byte>> read_bounded(
     const Vfs& vfs,

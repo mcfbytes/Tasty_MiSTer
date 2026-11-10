@@ -103,10 +103,9 @@ Ex<AssetWait> PceCdLadder::load_pce_bios(const BootAsset& row) {
             break;
     }
 
-    const WideIoIndex dest = (marker_seen_ && row.dest_if_marker.v != 0) ? row.dest_if_marker
-                                                                         : row.dest;
+    const WideIoIndex dest = row.dest_for(marker_seen_);
 
-    const auto region = static_cast<std::uint8_t>(swap | us_cart);
+    const proto::RegionCode region{static_cast<std::uint8_t>(swap | us_cart)};
     auto p = PayloadPieces::of_bytes(
         std::move(payload),
         {},
@@ -133,13 +132,13 @@ Ex<bool> PceCdLadder::on_step() {
     switch (rung_) {
         case Rung::MountDisc: {
 
-            if (image_.empty()) {
+            if (image_path().empty()) {
                 if (mount_bounded(std::string_view{}) == MountState::Pending)
                     return false;
                 rung_ = Rung::Eject;
                 return false;
             }
-            const MountState ms = mount_bounded(image_);
+            const MountState ms = mount_bounded(image_path());
             if (ms == MountState::Pending)
                 return false;
             if (ms == MountState::Failed) {
@@ -170,17 +169,11 @@ Ex<bool> PceCdLadder::on_step() {
 
         case Rung::Bios: {
 
-            if (!save_ready_) {
-                if (save_path_.empty()) {
-                    auto sp = save_path_for(image_);
-                    if (!sp)
-                        return std::unexpected(sp.error());
-                    save_path_ = *sp;
-                }
-                if (!prepare_save(save_path_))
-                    return false;
-                save_ready_ = true;
-            }
+            auto ready = prepare_save_once_();
+            if (!ready)
+                return std::unexpected(ready.error());
+            if (!*ready)
+                return false;
 
             const auto rows = profile_.boot_assets;
             while (row_i_ < rows.size() && rows[row_i_].group == 0) {
@@ -193,7 +186,7 @@ Ex<bool> PceCdLadder::on_step() {
                 ++row_i_;
                 if (*hit == AssetWait::Ready) {
 
-                    if (!order_mount_save(save_path_, false))
+                    if (!order_mount_save(save_name(), false))
                         return false;
                     report_.save_mounted = true;
                     report_.bios_found = true;
@@ -226,23 +219,15 @@ Ex<bool> PceCdLadder::on_step() {
                     return false;
                 sub_ = 1;
             }
-            if (!order_status_bit0(true))
+            if (!hold_reset_())
                 return false;
-            bit0_asserted_ = true;
-            pulse_release_ns_ = now_ns()
-                + std::chrono::microseconds{profile_.staging.reset_pulse_us};
             sub_ = 0;
             rung_ = Rung::PulseRelease;
             return false;
 
         case Rung::PulseRelease:
-            if (bit0_asserted_) {
-                if (now_ns() < pulse_release_ns_)
-                    return false;
-                if (!order_status_bit0(false))
-                    return false;
-                bit0_asserted_ = false;
-            }
+            if (!pulse_reset_(std::chrono::microseconds{profile_.staging.reset_pulse_us}))
+                return false;
             rung_ = Rung::Done;
             return true;
 

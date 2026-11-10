@@ -13,12 +13,14 @@
 #include "app/event.h"
 #include "app/idle_blank.h"
 #include "app/output_geometry.h"
+#include "app/session_identity.h"
 #include "app/video_geometry_record.h"
 #include "app/video_ini.h"
 #include "app/video_pump_stats.h"
 #include "app/video_wire.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "svc/filter_store.h"
 #include "os/clock.h"
 #include "hal/hdmi_int.h"
 #include "hal/video_out_decl.h"
@@ -35,8 +37,6 @@ class Vfs;
 namespace mister::app {
 
 class InputWire;
-
-using VideoStatsCell = xthread::Telemetry<VideoPumpStats, SeatTag::Ui>;
 
 class VideoPump : public IOutputGeometry {
     TASTY_SEAT_RESIDENT(Ui);
@@ -112,14 +112,9 @@ public:
 
     [[nodiscard]] bool ini_read() const noexcept { return ini_read_; }
 
-    [[nodiscard]] std::uint16_t output_width() const noexcept override {
+    [[nodiscard]] OutputSize output_size() const noexcept override {
         TASTY_SEAT_BODY(VideoPump);
-        return scrw_;
-    }
-
-    [[nodiscard]] std::uint16_t output_height() const noexcept override {
-        TASTY_SEAT_BODY(VideoPump);
-        return scrh_;
+        return OutputSize{OutputPixels::of(scrw_), OutputPixels::of(scrh_)};
     }
 
     void set_core_name(std::string_view name) noexcept;
@@ -142,28 +137,6 @@ public:
 
     using I2cOutcome = VideoI2cOutcome;
 
-    static const char* i2c_outcome_name(I2cOutcome o) noexcept {
-        switch (o) {
-            case I2cOutcome::Unwired:
-                return "unwired";
-            case I2cOutcome::Absent:
-                return "absent";
-            case I2cOutcome::Ambiguous:
-                return "ambiguous";
-            case I2cOutcome::Present:
-                return "present";
-            case I2cOutcome::Configured:
-                return "configured";
-            case I2cOutcome::Verified:
-                return "verified";
-            case I2cOutcome::Noemit:
-                return "noemit";
-            case I2cOutcome::Failed:
-                return "failed";
-        }
-        return "unknown";
-    }
-
     using Stats = VideoPumpStats;
 
     [[nodiscard]] Stats stats() const noexcept { return stats_cell_.sample().value; }
@@ -174,7 +147,7 @@ public:
 
     std::optional<Error> last_error() const noexcept { return last_error_; }
 
-    std::string_view resolved_spec() const noexcept { return std::string_view{spec_, spec_len_}; }
+    std::string_view resolved_spec() const noexcept { return spec_.view(); }
 
     std::int64_t last_apply_ns() const noexcept { return last_apply_ns_; }
 
@@ -235,7 +208,6 @@ private:
 
     bool i2c_held_ = false;
     bool pending_ = false;
-    bool spec_valid_ = false;
     bool ini_read_ = false;
     bool override_latched_ = false;
     bool support_fhd_ = false;
@@ -245,7 +217,6 @@ private:
     std::uint32_t emit_watermark_ = 0;
     std::int64_t stage_ns_ = 0;
     svc::Modeline pending_mode_{};
-    std::uint16_t spec_len_ = 0;
     std::int64_t last_apply_ns_ = -1;
     std::uint32_t geo_polls_ = 0;
     std::uint32_t geo_edges_ = 0;
@@ -256,17 +227,16 @@ private:
     std::uint8_t vscale_border_ = 0;
     bool front_end_ = false;
 
-    std::uint8_t filter_mode_ = 0;
+    svc::ScalerSlotMode filter_mode_{};
     bool filters_pending_ = false;
 
     std::array<FamilyMode, 3> families_{};
     bool families_valid_ = false;
 
     bool output_locked_ = false;
-    char spec_[kSpecMax]{};
+    FixedStr<kSpecMax, StrFit::Clip> spec_{};
 
-    char core_name_[64]{};
-    std::uint8_t core_name_len_ = 0;
+    FixedStr<SessionIdentity::kMax, StrFit::Clip> core_name_{};
 };
 
 }

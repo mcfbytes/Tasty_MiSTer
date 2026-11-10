@@ -28,8 +28,6 @@ public:
 
     [[nodiscard]] static Ex<ScalerBuffers> map(const PhysRegion& scaler_out);
 
-    [[nodiscard]] static ScalerBuffers borrow(std::span<std::byte> backing);
-
     ScalerBuffers(ScalerBuffers&&) noexcept = default;
     ScalerBuffers& operator=(ScalerBuffers&&) noexcept = default;
     ScalerBuffers(const ScalerBuffers&) = delete;
@@ -45,11 +43,14 @@ public:
     [[nodiscard]] bool uio_bound() const noexcept { return mem_.uio_bound(); }
 
 private:
+    friend struct ScalerBuffersTestAccess;
+
     explicit ScalerBuffers(FpgaMemory m) noexcept : mem_(std::move(m)) {}
 
+    [[nodiscard]] static ScalerBuffers borrow(std::span<std::byte> backing);
     FpgaMemory mem_;
 };
 
-void copy_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept;
+void copy_wide(std::span<std::byte> dst, std::span<const std::byte> src) noexcept;
 
 }

@@ -1,32 +1,39 @@
 add_library(mister_services STATIC
+  src/admission_rule.cpp
   src/adv7513_breaker.cpp
   src/adv7513_bus.cpp
   src/adv7513_reg_write.cpp
   src/alt_ini_index.cpp
   src/asset_name.cpp
+  src/browse_rules.cpp
   src/crc32_extend.cpp
   src/audio_service.cpp
   src/cec_state_machine.cpp
   src/chd_backing.cpp
   src/chd_prefetch.cpp
   src/chd_source.cpp
+  src/chd_track.cpp
   src/config.cpp
   src/config_field.cpp
   src/config_parser.cpp
   src/cue_programs.cpp
+  src/cvt.cpp
+  src/data_sector_sealer.cpp
+  src/deadzone_rule.cpp
+  src/device_facts.cpp
   src/disc_engine.cpp
   src/disc_file_access.cpp
   src/disc_geometry.cpp
   src/disc_read_service.cpp
   src/disc_store.cpp
   src/disk_format_row.cpp
-  src/vfs_durable_write.cpp
   src/disk_image.cpp
+  src/durable_write_backend.cpp
   src/edid_store.cpp
+  src/entropy.cpp
   src/file_slot_backend.cpp
   src/file_table_backing.cpp
   src/filter_store.cpp
-  src/frame_shapers.cpp
   src/gzip_inflate.cpp
   src/hotplug_watch.cpp
   src/input_device.cpp
@@ -35,17 +42,25 @@ add_library(mister_services STATIC
   src/input_rules.cpp
   src/input_service.cpp
   src/io_main.cpp
+  src/joy_plan.cpp
   src/map_store.cpp
   src/mapping_wizard.cpp
   src/modeline.cpp
+  src/mouse_fixup_rule.cpp
+  src/no_merge_rule.cpp
   src/option_codec.cpp
   src/player_slots.cpp
   src/pll_solver.cpp
+  src/posix_file.cpp
   src/prefetch_main.cpp
   src/raw_disk_image.cpp
   src/read_bounded.cpp
+  src/rumble_channel.cpp
+  src/rw_interleaver.cpp
   src/scaling_words.cpp
+  src/sector_descrambler.cpp
   src/storage_service.cpp
+  src/subcode_interleaver.cpp
   src/subcode_sidecar.cpp
   src/toc_frame.cpp
   src/game_asset_finder.cpp
@@ -95,7 +110,9 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/modeline_item.h
   svc/msf.h
   svc/packed_keys.h
-  svc/rumble_pad_set.h
+  svc/pad_signature.h
+    svc/rumble_pad_set.h
+  svc/admission_rule.h
   svc/adv7513_breaker.h
   svc/adv7513_bus.h
   svc/adv7513_init_options.h
@@ -117,6 +134,8 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/block_ctl.h
   svc/block_half.h
   svc/button_map.h
+  svc/joy_bit.h
+  svc/sys_button.h
   svc/cec_state_machine.h
   svc/chd_backing.h
   svc/chd_geometry.h
@@ -130,30 +149,37 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/cue_mount.h
   svc/cue_policy.h
   svc/cue_program.h
+  svc/cvt.h
   svc/deadzone_rule.h
   svc/device_identity.h
   svc/device_match.h
+  svc/spinner_policy.h
   svc/device_report.h
   svc/dir_entry.h
+  svc/disc_ask.h
   svc/disc_backing.h
   svc/disc_counters.h
   svc/disc_engine.h
   svc/disc_file_access.h
   svc/disc_geometry.h
+  svc/disc_identity_role.h
   svc/disc_mount_slot.h
   svc/disc_mounter.h
   svc/disc_read_service.h
   svc/disc_read_slot.h
   svc/disc_reader.h
   svc/disc_store.h
+  svc/disc_take.h
   svc/disk_codec.h
   svc/disk_format_row.h
   svc/disk_image.h
   svc/durable_write.h
   svc/edid_store.h
+  svc/entropy.h
   svc/file.h
   svc/file_table_backing.h
   svc/filter_bank.h
+  svc/filter_bank_index.h
   svc/filter_resend.h
   svc/filter_send_plan.h
   svc/filter_set.h
@@ -175,6 +201,7 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/input_emitter.h
   svc/input_enumerator.h
   svc/input_service.h
+  svc/input_service_counts.h
   svc/but_sw_wire.h
   svc/rumble_out.h
   svc/resolution.h
@@ -183,12 +210,14 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/map_store.h
   svc/mapping_wizard.h
   svc/modeline.h
+  svc/mouse_fixup_rule.h
   svc/no_merge_rule.h
   svc/option_codec.h
   svc/parse_error.h
   svc/per_core_setting.h
   svc/player_slots.h
   svc/quirk_id.h
+  svc/pll_block.h
   svc/pll_params.h
   svc/pll_solver.h
   svc/prefetch_main.h
@@ -198,13 +227,14 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/rw_interleaver.h
   svc/scan_filter.h
   svc/sector_descrambler.h
+  svc/sector_header.h
   svc/sector_program.h
-  svc/pending_writes.h
   svc/read_bounded.h
   svc/search_policy.h
   svc/io_coworker.h
   svc/io_main.h
   svc/file_slot_backend.h
+  svc/filter_format.h
   svc/sentinel_cue_program.h
   svc/slot_path.h
   svc/stick_cal.h
@@ -216,12 +246,15 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/subcode_sidecar.h
   svc/toc.h
   svc/toc_frame.h
+  svc/track_row.h
   svc/track.h
   svc/types.h
   svc/unbound_disc.h
   svc/memory_mounts.h
   svc/vfs.h
   svc/video_sample.h
+  svc/aspect_raw.h
+  svc/fb_par_crc.h
   svc/video_service.h
   svc/video_timing.h
   svc/parsed_mode.h
@@ -231,5 +264,8 @@ tasty_add_header_checks(tasty_l2_header_checks LIB mister_services HEADERS
   svc/xml_scanner.h
   svc/xml_tag.h
   svc/xml_token.h
+  svc/filter_kernel.h
+  svc/video_wire_emit.h
+  svc/yc_table.h
 )
 

@@ -6,6 +6,7 @@
 #include <optional>
 #include <utility>
 
+#include "app/lw_block_endpoint.h"
 #include "app/osd_grant.h"
 #include "app/osd_route.h"
 #include "hal/osd_block.h"
@@ -17,7 +18,7 @@
 
 namespace mister::app {
 
-class LwOsdEndpoint {
+class LwOsdEndpoint : public LwBlockEndpoint<OsdGrant, OsdRoute, SeatTag::Ui> {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -40,17 +41,11 @@ public:
         infra::OptRef<Port> port{};
     };
 
-    explicit LwOsdEndpoint(const Wiring& w) noexcept : w_(w) {}
-
-    void serve() noexcept;
-
-    void on_pause() noexcept;
-    void on_resume() noexcept;
-    void on_stop() noexcept;
+    explicit LwOsdEndpoint(const Wiring& w) noexcept
+        : LwBlockEndpoint<OsdGrant, OsdRoute, SeatTag::Ui>(w.grant),
+          w_(w) {}
 
     [[nodiscard]] const OsdRoute& route() const noexcept { return tally_; }
-
-    [[nodiscard]] bool bound() const noexcept { return bound_gen_ != 0; }
 
 private:
     static constexpr proto::OsdRowCount kRows = proto::OsdSurface::kPageRows;
@@ -81,26 +76,28 @@ private:
         hal::RegisterWindow<hal::OsdBlock> regs_;
     };
 
-    void take_grant_() noexcept;
-    void bind_(const OsdGrant& g, std::uint32_t gen) noexcept;
-    void unbind_() noexcept;
+    using Base = LwBlockEndpoint<OsdGrant, OsdRoute, SeatTag::Ui>;
+    void publish_hook_(const OsdRoute& r) noexcept override;
+    void prepare_hook_(const OsdGrant& g) noexcept override;
+    [[nodiscard]] bool arm_hook_(const OsdGrant& g) noexcept override;
+    void bind_hook_(const OsdGrant& g) noexcept override;
+    void bound_hook_() noexcept override;
+    void answer_hook_(std::uint16_t) noexcept override;
+    void unbind_hook_() noexcept override;
+    void serve_bound_() noexcept override;
+    [[nodiscard]] bool idle_bound_hook_() const noexcept override;
+
     void store_frame_() noexcept;
     [[nodiscard]] bool store_row_(proto::OsdRow row) noexcept;
     [[nodiscard]] std::uint32_t ctrl_() const noexcept;
     [[nodiscard]] proto::OsdRowCount bound_rows_() const noexcept;
-    [[nodiscard]] bool lease_() noexcept;
-    void release_() noexcept;
-    void publish_() noexcept;
     [[nodiscard]] Port& port_() noexcept;
 
     Wiring w_;
-    OsdGrantCell::Reader grant_rd_{};
-    std::uint32_t bound_gen_ = 0;
     std::optional<BlockPort> block_{};
     proto::OsdRowCells<std::uint32_t, kRows.size()> stored_{};
     std::uint32_t ctrl_stored_ = 0;
     proto::OsdSurface::Row row_{};
-    OsdRoute tally_{};
 };
 
 }

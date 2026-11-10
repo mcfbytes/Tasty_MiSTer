@@ -32,7 +32,7 @@ bool OwnerLadder::moved() const noexcept {
 
 bool OwnerLadder::start_armed() const noexcept {
     TASTY_SEAT_BODY(OwnerLadder);
-    return start_;
+    return kind_ == LadderKind::Start;
 }
 
 bool OwnerLadder::noreset() const noexcept {
@@ -60,17 +60,17 @@ bool OwnerLadder::arm(
         .vfs = vfs_,
         .host = host,
         .clock = clock_,
-        .image_path = ask.path.view(),
         .last_dir = last_dir_,
         .noreset = noreset_,
-        .slot = ask.index,
-        .slot_paths = slot_paths_
+        .slot_paths = slot_paths_,
+        .arm = cores::LadderContext::MountArm{ask.index, ask.path.view()}
     };
-    ladder_ = row.make_ladder != nullptr ? row.make_ladder(*row.profile, ctx) : nullptr;
+    ladder_ = row.make_ladder != nullptr ? row.make_ladder(row.profile, ctx) : nullptr;
     if (ladder_ == nullptr)
         return false;
 
     last_dir_.assign(ladder_->next_last_dir());
+    kind_ = LadderKind::Mount;
     moved_ = true;
     owed_ = Owed{ask.which, ask.tag};
     index_ = ask.index;
@@ -116,11 +116,10 @@ std::optional<OwnerLadder::Ended> OwnerLadder::finish_(bool ok) {
     if (rep.savestate_hold_expired)
         ++tally_.savestate_hold_expiries;
 
-    const bool touched = (!start_ && !core_) || rep.save_mounted || rep.save_detached;
+    const bool touched = kind_ == LadderKind::Mount || rep.save_mounted || rep.save_detached;
     ladder_.reset();
     moved_ = false;
-    start_ = false;
-    core_ = false;
+    kind_ = LadderKind::None;
     return Ended{
         .ok = ok,
         .touched = touched,
@@ -146,8 +145,7 @@ void OwnerLadder::drop() {
         ladder_.reset();
     }
     moved_ = false;
-    start_ = false;
-    core_ = false;
+    kind_ = LadderKind::None;
     last_dir_.clear();
     noreset_ = false;
     for (std::string& p : slot_paths_)
@@ -163,27 +161,26 @@ bool OwnerLadder::arm_start(
     if (core_name.empty() || ladder_ != nullptr)
         return false;
     const auto row = cores::find_core(core_name.view());
-    if (!row || (*row)->make_ladder == nullptr)
+    if (!row || row->make_ladder == nullptr)
         return false;
-    const cores::StagingPolicy& sp = (*row)->profile->staging;
-    if (sp.start_save_dir.empty() && (*row)->profile->start_assets.empty())
+    const cores::StagingPolicy& sp = row->profile.staging;
+    const bool start_save = sp.save && !sp.save->start_dir.empty();
+    if (!start_save && row->profile.start_assets.empty())
         return false;
     const cores::LadderContext ctx{
         .vfs = vfs_,
         .host = host,
         .clock = clock_,
-        .image_path = {},
         .last_dir = {},
         .noreset = false,
-        .at_core_start = true,
-        .index0_taken = index0_taken
+        .arm = cores::LadderContext::CoreStartArm{index0_taken}
     };
-    ladder_ = (*row)->make_ladder(*(*row)->profile, ctx);
+    ladder_ = row->make_ladder(row->profile, ctx);
     if (ladder_ == nullptr)
         return false;
-    start_ = true;
+    kind_ = LadderKind::Start;
     owed_ = Owed{};
-    index_ = sp.save_slot;
+    index_ = sp.save ? sp.save->slot : proto::IoIndex{};
     last_dir_.assign(ladder_->next_last_dir());
     moved_ = true;
     ++tally_.ladders_run;
@@ -201,21 +198,23 @@ bool OwnerLadder::arm_core(
     TASTY_SEAT_BODY(OwnerLadder);
     if (ladder_ != nullptr || row.make_ladder == nullptr)
         return false;
-    const cores::LadderContext ctx{
+    cores::LadderContext ctx{
         .vfs = vfs_,
         .host = host,
         .clock = clock_,
-        .image_path = config,
         .last_dir = last_dir_,
         .noreset = noreset_,
-        .reset = reset,
-        .restore = !reset.has_value(),
         .slot_paths = slot_paths_
     };
-    ladder_ = row.make_ladder(*row.profile, ctx);
+    if (reset) {
+        ctx.arm = cores::LadderContext::ResetArm{*reset};
+    } else {
+        ctx.arm = cores::LadderContext::RestoreArm{config};
+    }
+    ladder_ = row.make_ladder(row.profile, ctx);
     if (ladder_ == nullptr)
         return false;
-    core_ = true;
+    kind_ = LadderKind::Core;
     owed_ = owed;
     index_ = {};
     moved_ = true;

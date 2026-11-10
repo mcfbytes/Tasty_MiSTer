@@ -22,15 +22,11 @@ public:
     static constexpr bool fits = sizeof(T) <= sizeof(Room);
 
     template <class T>
-    [[nodiscard]] bool put(const T& v) noexcept {
+    void put(const T& v) noexcept {
         static_assert(std::is_trivially_copyable_v<T>);
-        if constexpr (!fits<T>) {
-            return false;
-        } else {
-            infra::store_native<T>(std::span<std::byte, sizeof(T)>(room_.b, sizeof(T)), v);
-            len_ = sizeof(T);
-            return true;
-        }
+        static_assert(fits<T>, "a window job's order record must fit the order");
+        infra::store_native<T>(std::span<std::byte, sizeof(T)>(room_.b, sizeof(T)), v);
+        len_ = sizeof(T);
     }
 
     template <class T>

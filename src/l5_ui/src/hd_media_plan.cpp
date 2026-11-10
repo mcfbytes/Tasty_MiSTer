@@ -7,7 +7,7 @@
 #include "ui/hd_label.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/now_playing.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 #include "ui/place_facts.h"
 
 namespace mister::ui {
@@ -83,7 +83,7 @@ app::PageDescription::Row HdMediaPlan::SlotRow::describe() const {
     r.kind = app::PageDescription::RowKind::Submenu;
     (void)r.label.assign(hd_label(it.label));
 
-    const proto::IoIndex index{it.ioctl_index};
+    const proto::IoIndex index = it.ioctl_index;
     const std::string_view path = it.mounts_image() ? plan_.now_playing_.mounted_image(index)
                                                     : plan_.now_playing_.loaded_file(index);
     (void)r.value.assign(path.empty() ? std::string_view{"(none)"} : file_name_of(path));

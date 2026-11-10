@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/lw_sector_endpoint.h"
 
-#include <fcntl.h>
-#include <poll.h>
-#include <sys/epoll.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -12,68 +8,93 @@
 
 #include "cores/blank_save_spec.h"
 #include "infra/byte_view.h"
-#include "infra/lease_order.h"
-#include "infra/unique_fd.h"
+#include "proto/sd_stat.h"
+#include "reactor/cause_decode.h"
 #include "reactor/notifier.h"
 
 namespace mister::app {
 
 svc::ISectorProgram::Source LwSectorEndpoint::answer_(proto::Lba lba) const noexcept {
-    return grant_.program->answer(*disc_, lba.v);
+    return grant_.program->answer(*disc_, lba);
 }
 
 void LwSectorEndpoint::write_lba_(Port& port, hal::SectorBlock::Reg reg, proto::Lba lba) noexcept {
     port.write(reg, lba.v);
 }
 
-LwSectorEndpoint::LwSectorEndpoint(const Wiring& w) noexcept : w_(w) {}
-
-LwSectorEndpoint::~LwSectorEndpoint() {
-    if (line_.fd() >= 0 && w_.doorbells >= 0) {
-        (void)::epoll_ctl(w_.doorbells, EPOLL_CTL_DEL, line_.fd(), nullptr);
-    }
-}
+LwSectorEndpoint::LwSectorEndpoint(const Wiring& w) noexcept : Base(w.grant), w_(w) {}
 
 void LwSectorEndpoint::serve() noexcept {
     TASTY_SEAT_BODY(LwSectorEndpoint);
-    take_grant_();
-    take_geometry_();
-    if (bound_gen_ == 0)
-        return;
-    service_request_();
+    Base::serve();
 }
 
 bool LwSectorEndpoint::idle() const noexcept {
     TASTY_SEAT_BODY(LwSectorEndpoint);
-
-    if (const auto g = w_.grant.generation(); g != 0 && g != grant_rd_.seen())
-        return false;
-    return bound_gen_ == 0 || (!recheck_ && ahead_done_ >= kReadAhead);
+    return Base::idle();
 }
 
 void LwSectorEndpoint::on_pause() noexcept {
     TASTY_SEAT_BODY(LwSectorEndpoint);
-    unbind_();
+    Base::on_pause();
 }
 
 void LwSectorEndpoint::on_stop() noexcept {
     TASTY_SEAT_BODY(LwSectorEndpoint);
-    unbind_();
+    Base::on_stop();
 }
 
 void LwSectorEndpoint::on_resume() noexcept {
     TASTY_SEAT_BODY(LwSectorEndpoint);
-    grant_rd_.forget();
+    Base::on_resume();
 }
 
-void LwSectorEndpoint::take_grant_() noexcept {
-    const auto g = grant_rd_.take_if_changed(w_.grant);
-    if (!g)
-        return;
+void LwSectorEndpoint::publish_hook_(const SectorRoute& r) noexcept {
+    w_.route.publish(r);
+}
 
-    unbind_();
-    if (g->live())
-        bind_(*g, grant_rd_.seen());
+void LwSectorEndpoint::prepare_hook_(const SectorGrant& g) noexcept {
+    bind_cards_(g);
+    if (!w_.port)
+        block_.emplace(hal::reg::Block::redeem(g.block));
+}
+
+bool LwSectorEndpoint::arm_hook_(const SectorGrant& g) noexcept {
+    if (line_.open(g.line, w_.doorbells))
+        return true;
+    store_ctrl_(0);
+    return false;
+}
+
+void LwSectorEndpoint::bind_hook_(const SectorGrant&) noexcept {
+    store_ctrl_(enables_() | hal::SectorBlock::kCtrlAbort);
+}
+
+void LwSectorEndpoint::bound_hook_() noexcept {
+    recheck_ = true;
+    for (const Card& c : cards_)
+        if (c.is_bound())
+            tally_.cards_on_lw = tally_.cards_on_lw.with(c.save_slot());
+}
+
+void LwSectorEndpoint::answer_hook_(std::uint16_t gen) noexcept {
+    tally_.bind_gen = gen;
+    publish_();
+}
+
+void LwSectorEndpoint::unbind_hook_() noexcept {
+    line_.close();
+    block_.reset();
+    cards_ = {};
+    recheck_ = false;
+    for (Ahead& a : ahead_)
+        a.live = false;
+    ahead_done_ = kReadAhead;
+    tally_.cards_on_lw = {};
+}
+
+bool LwSectorEndpoint::idle_bound_hook_() const noexcept {
+    return !recheck_ && ahead_done_ >= kReadAhead;
 }
 
 void LwSectorEndpoint::take_geometry_() noexcept {
@@ -84,41 +105,6 @@ void LwSectorEndpoint::take_geometry_() noexcept {
     for (Ahead& a : ahead_)
         a.live = false;
     ahead_done_ = kReadAhead;
-}
-
-void LwSectorEndpoint::bind_(const SectorGrant& g, std::uint32_t gen) noexcept {
-    grant_ = g;
-    bound_gen_ = gen;
-    bind_cards_(g);
-    if (!w_.port)
-        block_.emplace(hal::reg::Block::redeem(g.block));
-
-    if (!lease_()) {
-        answer_bind_(g.gen);
-        return;
-    }
-    if (!arm_line_(g)) {
-        store_ctrl_(0);
-        release_();
-        unbind_();
-        ++tally_.bind_refusals;
-        answer_bind_(g.gen);
-        return;
-    }
-
-    store_ctrl_(enables_() | hal::SectorBlock::kCtrlAbort);
-    release_();
-    recheck_ = true;
-    tally_.on_lw = 1;
-    for (const Card& c : cards_)
-        if (c.is_bound())
-            tally_.cards_on_lw |= 1u << c.slot;
-    answer_bind_(g.gen);
-}
-
-void LwSectorEndpoint::answer_bind_(std::uint16_t gen) noexcept {
-    tally_.bind_gen = gen;
-    publish_();
 }
 
 void LwSectorEndpoint::bind_cards_(const SectorGrant& g) noexcept {
@@ -155,67 +141,9 @@ std::uint32_t LwSectorEndpoint::enables_() const noexcept {
     return en;
 }
 
-bool LwSectorEndpoint::arm_line_(const SectorGrant& g) noexcept {
-    if (w_.doorbells < 0)
-        return false;
-    const int fd = ::fcntl(g.line.fd(), F_DUPFD_CLOEXEC, 0);
-    auto line = os::UioHandle::adopt(g.line.line(), UniqueFd{fd});
-    if (!line)
-        return false;
-    epoll_event ev{};
-    ev.events = EPOLLIN;
-    ev.data.fd = line->fd();
-    if (::epoll_ctl(w_.doorbells, EPOLL_CTL_ADD, line->fd(), &ev) != 0)
-        return false;
-    line_ = std::move(*line);
-    (void)line_.borrow().consume();
-    (void)line_.borrow().rearm();
-    return true;
-}
-
 void LwSectorEndpoint::store_ctrl_(std::uint32_t v) noexcept {
     port_().write(hal::SectorBlock::Reg::Ctrl, v);
     (void)port_().read(hal::SectorBlock::Reg::Ctrl);
-}
-
-void LwSectorEndpoint::unbind_() noexcept {
-    if (bound_gen_ == 0)
-        return;
-    if (line_.fd() >= 0 && w_.doorbells >= 0) {
-        (void)::epoll_ctl(w_.doorbells, EPOLL_CTL_DEL, line_.fd(), nullptr);
-    }
-    line_ = os::UioHandle{};
-    block_.reset();
-    grant_ = SectorGrant{};
-    cards_ = {};
-    bound_gen_ = 0;
-    recheck_ = false;
-    for (Ahead& a : ahead_)
-        a.live = false;
-    ahead_done_ = kReadAhead;
-    tally_.on_lw = 0;
-    tally_.cards_on_lw = 0;
-    publish_();
-}
-
-bool LwSectorEndpoint::lease_() noexcept {
-    tally_.leased = 1;
-    publish_();
-    if (xthread::LeaseOrder::grant_unchanged(w_.grant, bound_gen_))
-        return true;
-    tally_.leased = 0;
-    ++tally_.revoked;
-    unbind_();
-    return false;
-}
-
-void LwSectorEndpoint::release_() noexcept {
-    tally_.leased = 0;
-    publish_();
-}
-
-void LwSectorEndpoint::publish_() noexcept {
-    w_.route.publish(tally_);
 }
 
 LwSectorEndpoint::Port& LwSectorEndpoint::port_() noexcept {
@@ -224,65 +152,46 @@ LwSectorEndpoint::Port& LwSectorEndpoint::port_() noexcept {
     return *block_;
 }
 
-bool LwSectorEndpoint::line_rang_() const noexcept {
-    if (line_.fd() < 0)
-        return false;
-    pollfd p{line_.fd(), POLLIN, 0};
-    return ::poll(&p, 1, 0) > 0 && (p.revents & POLLIN) != 0;
-}
-
-std::uint32_t LwSectorEndpoint::drain_cause_(bool rang) noexcept {
-    if (rang)
-        (void)line_.borrow().consume();
-    const std::uint32_t w = port_().read(hal::SectorBlock::Reg::Cause);
-    if (rang)
-        (void)line_.borrow().rearm();
-    return w;
-}
-
 bool LwSectorEndpoint::cause_names_route_(std::uint32_t w) const noexcept {
     const reactor::CauseDecode d = reactor::decode_cause_checked(w);
-    if (d.refused || d.cause != reactor::Cause::Blk)
+    if (d.is_refused() || d.cause() != reactor::Cause::Blk)
         return false;
-    if (hal::SectorBlock::sdstat_reads(w, grant_.program->slot().v))
+    const proto::SdStat st = proto::SdStat::of(proto::SdRegisterWord{w}.status());
+    if (st.reads_one(grant_.program->slot()))
         return true;
-    const hal::SectorBlock::SdStat st = hal::SectorBlock::sdstat(w);
     return st.valid && std::ranges::any_of(cards_, [&st](const Card& c) noexcept {
-               return c.is_bound() && c.slot == st.slot;
+               return c.is_bound() && proto::SlotIndex::of(c.slot) == st.slot;
            });
 }
 
-LwSectorEndpoint::Request LwSectorEndpoint::read_request_() noexcept {
-
-    constexpr std::uint32_t kBaseBlockBytes = proto::SdStatusWord::kMinBlockBytes;
+std::optional<LwSectorEndpoint::Request> LwSectorEndpoint::read_request_() noexcept {
     using hal::SectorBlock;
     const std::uint32_t req = port_().read(SectorBlock::Reg::Req);
     if ((req & SectorBlock::kReqPending) == 0u)
-        return {};
-    if (SectorBlock::sdstat_reads(req, grant_.program->slot().v)) {
-        return {.pending = true, .lba = proto::Lba{port_().read(SectorBlock::Reg::Lba)}};
+        return std::nullopt;
+    const proto::SdStat st = proto::SdStat::of(proto::SdRegisterWord{req}.status());
+    if (st.reads_one(grant_.program->slot())) {
+        return Request{.lba = proto::Lba{port_().read(SectorBlock::Reg::Lba)}};
     }
-    const SectorBlock::SdStat st = SectorBlock::sdstat(req);
-    if (!st.valid || st.count != 0 || st.rd == st.wr)
-        return {};
-    for (std::size_t i = 0; i < cards_.size(); ++i) {
-        const Card& c = cards_[i];
-        if (!c.is_bound()
-            || c.slot != st.slot
-            || proto::BlockSize{kBaseBlockBytes << st.blksz} != c.bytes)
+    if (!st.valid || !st.is_one_block() || st.rd == st.wr)
+        return std::nullopt;
+    for (const Card& c : cards_) {
+        if (!c.is_bound() || c.save_slot() != st.slot || st.block_size != c.bytes)
             continue;
-        return {
-            .pending = true,
-            .card = i,
-            .write = st.wr,
+        return Request{
+            .card = infra::OptRef<const Card>{c},
+            .dir = st.wr ? BlockDir::Write : BlockDir::Read,
             .lba = proto::Lba{port_().read(SectorBlock::lba_slot(c.slot))}
         };
     }
-    return {};
+
+    ++tally_.card_misses;
+    return std::nullopt;
 }
 
-void LwSectorEndpoint::service_request_() noexcept {
-    const bool rang = line_rang_();
+void LwSectorEndpoint::serve_bound_() noexcept {
+    take_geometry_();
+    const bool rang = line_.rang();
     if (!rang && !recheck_) {
         read_ahead_one_();
         return;
@@ -291,7 +200,7 @@ void LwSectorEndpoint::service_request_() noexcept {
     const auto t0 = clock_.now();
     if (!lease_())
         return;
-    const std::uint32_t cause = drain_cause_(rang);
+    const std::uint32_t cause = line_.drain(rang, port_(), hal::SectorBlock::Reg::Cause);
 
     if ((rang || cause != 0u) && !cause_names_route_(cause)) {
         release_();
@@ -299,21 +208,21 @@ void LwSectorEndpoint::service_request_() noexcept {
         publish_();
         return;
     }
-    const Request q = read_request_();
+    const std::optional<Request> q = read_request_();
     release_();
-    if (rang && !q.pending) {
+    if (rang && !q) {
         ++tally_.spurious;
         publish_();
     }
-    if (!q.pending) {
+    if (!q) {
         read_ahead_one_();
         return;
     }
-    if (q.card) {
-        serve_card_(cards_[*q.card], q.write, q.lba, t0);
+    if (q->card) {
+        serve_card_(*q->card, q->dir, q->lba, t0);
         return;
     }
-    const proto::Lba lba = q.lba;
+    const proto::Lba lba = q->lba;
     fill_frame_(lba);
     if (!lease_())
         return;
@@ -465,11 +374,11 @@ bool LwSectorEndpoint::store_frame_(
 
 void LwSectorEndpoint::serve_card_(
     const Card& c,
-    bool write,
+    BlockDir dir,
     proto::Lba lba,
-    std::chrono::nanoseconds t0
+    os::RawMonotonicClock::time_point t0
 ) noexcept {
-    if (!write) {
+    if (dir == BlockDir::Read) {
         fill_card_(c, lba);
         if (!lease_())
             return;
@@ -503,7 +412,7 @@ void LwSectorEndpoint::serve_card_(
     persist_card_(c, lba);
 }
 
-void LwSectorEndpoint::note_card_latency_(std::chrono::nanoseconds t0) noexcept {
+void LwSectorEndpoint::note_card_latency_(os::RawMonotonicClock::time_point t0) noexcept {
     const auto us = std::chrono::duration_cast<std::chrono::microseconds>(clock_.now() - t0);
     tally_.card_lat_max_us = std::max(
         tally_.card_lat_max_us,
@@ -517,7 +426,12 @@ svc::ISaveFilesOnIo::Save LwSectorEndpoint::save_of_(const Card& c) noexcept {
     SaveState& s = saves_[c.save_slot()];
     if (s.gen != f.gen) {
         s.gen = f.gen;
-        s.rule = proto::SaveSlotRule::at_mount(f.exists, f.size, f.growable);
+        const bool exists = f.extent.has_value();
+        s.rule = proto::SaveSlotRule::at_mount(
+            exists,
+            f.extent.value_or(proto::FileSize{}),
+            f.growable
+        );
     }
     return f;
 }
@@ -582,31 +496,41 @@ void LwSectorEndpoint::persist_card_(const Card& c, proto::Lba lba) noexcept {
     const proto::SaveSlotRule::Plan plan = rule.plan_write(lba, c.bytes, c.bytes.v);
     if (!f.file) {
         ++tally_.card_fails;
-    } else if (plan.act == proto::SaveSlotRule::Act::Discard) {
-        ++tally_.card_discards;
-    } else if (plan.act == proto::SaveSlotRule::Act::Create) {
-        if (auto e = f.file->create(src.first(plan.len)); e) {
-            rule.created(*e);
-            ++tally_.card_creates;
-        } else {
-            ++tally_.card_fails;
-        }
-    } else if (auto n = f.file->write_at(plan.offset, src.first(plan.len)); n && *n == plan.len) {
-        rule.wrote(plan.offset, plan.len);
-    } else {
-        ++tally_.card_fails;
+        publish_();
+        return;
+    }
+
+    switch (plan.act) {
+        case proto::SaveSlotRule::Act::Discard:
+            ++tally_.card_discards;
+            break;
+        case proto::SaveSlotRule::Act::Create:
+            if (auto e = f.file->create(src.first(plan.len)); e) {
+                rule.created(*e);
+                ++tally_.card_creates;
+            } else {
+                ++tally_.card_fails;
+            }
+            break;
+        case proto::SaveSlotRule::Act::Write:
+            if (auto n = f.file->write_at(plan.offset, src.first(plan.len)); n && *n == plan.len) {
+                rule.wrote(plan.offset, plan.len);
+            } else {
+                ++tally_.card_fails;
+            }
+            break;
     }
     publish_();
 }
 
 void LwSectorEndpoint::read_counts_() noexcept {
-    constexpr unsigned kByteBits = 8;
-    constexpr std::uint32_t kByteMask = 0xFFu;
-    const std::uint32_t c = port_().read(hal::SectorBlock::Reg::Counts);
-    tally_.fab_rejected = (c >> (3 * kByteBits)) & kByteMask;
-    tally_.fab_skipped = (c >> (2 * kByteBits)) & kByteMask;
-    tally_.fab_aborted = (c >> kByteBits) & kByteMask;
-    tally_.fab_reset_fills = c & kByteMask;
+    const hal::SectorBlock::Counts c = hal::SectorBlock::counts(
+        port_().read(hal::SectorBlock::Reg::Counts)
+    );
+    tally_.fab_rejected = c.rejected;
+    tally_.fab_skipped = c.skipped;
+    tally_.fab_aborted = c.aborted;
+    tally_.fab_reset_fills = c.reset_fills;
 }
 
 }

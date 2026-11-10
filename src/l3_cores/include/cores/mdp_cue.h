@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
 #include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
+#include "infra/opt_ref.h"
 #include "infra/path_text.h"
 #include "infra/seat.h"
 #include "svc/types.h"
@@ -31,17 +33,17 @@ public:
 
     void parse(std::string_view text, std::string_view base_dir) noexcept;
 
-    [[nodiscard]] std::uint8_t track_count() const noexcept { return num_tracks_; }
+    [[nodiscard]] svc::TrackCount track_count() const noexcept { return num_tracks_; }
 
-    [[nodiscard]] const Track* track(svc::TrackNumber n) const noexcept {
-        if (n.v < 1 || n.v > num_tracks_)
-            return nullptr;
-        return &tracks_[n.v];
+    [[nodiscard]] infra::OptRef<const Track> track(svc::TrackNumber n) const noexcept {
+        if (!num_tracks_.contains(n.index()))
+            return {};
+        return infra::OptRef<const Track>{tracks_[n]};
     }
 
 private:
-    std::array<Track, kMaxTracks + 1> tracks_{};
-    std::uint8_t num_tracks_ = 0;
+    infra::IndexedArray<Track, kMaxTracks + 1, svc::TrackNumber> tracks_{};
+    svc::TrackCount num_tracks_{};
 };
 
 }

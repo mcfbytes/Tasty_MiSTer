@@ -3,7 +3,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <vector>
 
 #include "cores/core_support.h"
 #include "cores/file_tx.h"
@@ -53,7 +52,6 @@ private:
     std::uint32_t transfers_ = 0;
     std::uint32_t last_numbits_ = 0;
     proto::IoIndex last_index_{};
-    std::vector<std::uint8_t> image_;
     std::uint8_t buf_[kChunkBytes]{};
 };
 

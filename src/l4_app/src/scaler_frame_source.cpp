@@ -20,13 +20,13 @@ ScalerFrameSource::ScalerFrameSource(
 
 std::uint32_t ScalerFrameSource::refusals() const noexcept {
     std::uint32_t n = 0;
-    for (std::size_t i = 0; i < kRefusalKinds; ++i)
-        n += refused_[i];
+    for (const std::uint32_t count : refused_)
+        n += count;
     return n;
 }
 
 std::unexpected<Error> ScalerFrameSource::refuse(Refusal why, infra::ErrorSite site) noexcept {
-    ++refused_[static_cast<std::size_t>(why)];
+    ++refused_[infra::ordinal(why)];
     return std::unexpected(Error{Errc::bad_format, site, static_cast<std::uint32_t>(why)});
 }
 
@@ -47,10 +47,10 @@ Ex<IFrameSource::Frame> ScalerFrameSource::capture(bool scaled) {
     const std::size_t line = head.line;
     const std::size_t off = head.header_size;
 
-    if (w == 0 || h == 0 || line < static_cast<std::size_t>(w) * 3u || off < ScalerHeader::kBytes)
+    if (!head.consistent())
         return refuse(Refusal::Corrupt, ERR_SITE());
 
-    const std::size_t bytes = line * h;
+    const std::size_t bytes = head.image_bytes();
     if (!hal::span_fits(off, bytes, window_.region().len))
         return refuse(Refusal::Oversize, ERR_SITE());
 

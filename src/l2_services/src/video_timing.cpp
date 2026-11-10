@@ -3,11 +3,13 @@
 
 #include <cmath>
 
-#include "video_service_detail.h"
-
 namespace mister::svc {
 
 namespace {
+
+constexpr double kFpixMinMhz = static_cast<double>(2.f);
+constexpr double kFpixMaxMhz = static_cast<double>(300.f);
+static_assert(kFpixMinMhz == 2.0 && kFpixMaxMhz == 300.0);
 
 constexpr PresetMode kVmodes[kNumVmodes] = {
     {{1280, 110, 40, 220, 720, 5, 5, 20}, 74.25, 4, 0},
@@ -28,15 +30,26 @@ constexpr PresetMode kVmodes[kNumVmodes] = {
     {{1280, 24, 16, 40, 1440, 3, 5, 33}, 120.75, 0, 1},
 };
 
+constexpr PresetMode kTvmodes[kNumTvmodes] = {
+    {{640, 30, 60, 70, 240, 4, 4, 14}, 12.587, 0, 0},
+    {{640, 16, 96, 48, 480, 8, 4, 33}, 25.175, 0, 0},
+    {{640, 30, 60, 70, 288, 6, 4, 14}, 12.587, 0, 0},
+    {{640, 16, 96, 48, 576, 2, 4, 42}, 25.175, 0, 0},
+};
+
 }
 
 std::span<const PresetMode> vmodes() noexcept {
     return std::span<const PresetMode>(kVmodes, kNumVmodes);
 }
 
+std::span<const PresetMode> tvmodes() noexcept {
+    return std::span<const PresetMode>(kTvmodes, kNumTvmodes);
+}
+
 namespace video_timing {
 
-void assign_timings(Modeline& m, std::span<const std::uint32_t, 8> t) noexcept {
+Modeline with_timings(Modeline m, std::span<const std::uint32_t, kModelineTimings> t) noexcept {
     m.hact = t[0];
     m.hfp = t[1];
     m.hs = t[2];
@@ -45,11 +58,11 @@ void assign_timings(Modeline& m, std::span<const std::uint32_t, 8> t) noexcept {
     m.vfp = t[5];
     m.vs = t[6];
     m.vbp = t[7];
+    return m;
 }
 
 Modeline preset_modeline(const PresetMode& p) noexcept {
-    Modeline m{};
-    assign_timings(m, p.vpar);
+    Modeline m = with_timings(Modeline{}, p.vpar);
     m.vic = p.vic;
     m.pixel_repeat = (p.pr != 0);
     m.fpix_mhz = p.fpix_mhz;
@@ -63,16 +76,16 @@ constexpr double kFabricClockHz = 100'000'000.0;
 constexpr float kFabricClockHzF = 100'000'000.0f;
 constexpr double kHzPerMhz = 1'000'000.0;
 
-StoredMode apply_preset(std::uint32_t mode, bool supports_pr) {
-    constexpr std::uint32_t kPresetDefault = 0;
-    constexpr std::uint32_t kPreset1080p60 = 8;
-    if (mode >= kNumVmodes)
-        mode = kPresetDefault;
+constexpr PresetIndex kPresetDefault{0};
+constexpr PresetIndex kPreset1080p60{8};
 
-    if (kVmodes[mode].pr == 1 && !supports_pr)
-        mode = kPreset1080p60;
+StoredMode apply_preset(PresetIndex preset, bool pixel_repeat) {
+    const std::span<const PresetMode> table = vmodes();
 
-    const PresetMode& p = kVmodes[mode];
+    if (preset.in(table).pr == 1 && !pixel_repeat)
+        preset = kPreset1080p60;
+
+    const PresetMode& p = preset.in(table);
     StoredMode out{};
     out.mode = preset_modeline(p);
     out.mode.rb = 1;
@@ -81,7 +94,7 @@ StoredMode apply_preset(std::uint32_t mode, bool supports_pr) {
 
 }
 
-StoredMode store_mode(const ParsedMode& parsed, bool support_fhd, bool supports_pr) {
+StoredMode store_mode(const ParsedMode& parsed, CoreVideoCaps caps) {
     if (parsed.how != ModeRequest::PresetIndex) {
 
         StoredMode out{};
@@ -90,8 +103,7 @@ StoredMode store_mode(const ParsedMode& parsed, bool support_fhd, bool supports_
         out.explicitly_requested = false;
         return out;
     }
-    (void)support_fhd;
-    StoredMode out = apply_preset(parsed.preset_index, supports_pr);
+    StoredMode out = apply_preset(parsed.preset_index, caps.pixel_repeat);
 
     out.mode.hpol = parsed.mode.hpol;
     out.mode.vpol = parsed.mode.vpol;
@@ -99,37 +111,39 @@ StoredMode store_mode(const ParsedMode& parsed, bool support_fhd, bool supports_
     return out;
 }
 
-StoredMode preset_fallback(bool support_fhd, bool supports_pr) {
-    constexpr std::uint32_t kPresetDefault = 0;
-    constexpr std::uint32_t kPreset1080p60 = 8;
-    StoredMode out = apply_preset(support_fhd ? kPreset1080p60 : kPresetDefault, supports_pr);
+StoredMode preset_fallback(CoreVideoCaps caps) {
+    StoredMode out = apply_preset(
+        caps.full_hd ? kPreset1080p60 : kPresetDefault,
+        caps.pixel_repeat
+    );
     out.explicitly_requested = false;
     return out;
 }
 
-VFilter select_vfilter(const VideoSample& s, std::span<const bool> slot_enabled) {
+VFilter select_vfilter(const VideoSample& s, ScalerSlots<bool> slot_enabled) {
 
     const auto has = [&](VFilter f) {
-        const auto i = static_cast<std::size_t>(f);
-        return i < slot_enabled.size() && slot_enabled[i];
+        return slot_enabled[ScalerSlotIndex::of(f)];
     };
-    constexpr std::uint32_t kFltScanlinesMask = 0x30;
     if (s.interlaced()) {
         return has(VFilter::Ilace) ? VFilter::Ilace : VFilter::Horz;
     }
-    if ((s.flt_flags & kFltScanlinesMask) && has(VFilter::Scanlines))
+    if (s.flt_flags.core_scanlines() && has(VFilter::Scanlines))
         return VFilter::Scanlines;
     if (has(VFilter::Vert))
         return VFilter::Vert;
     return VFilter::Horz;
 }
 
-std::optional<double> estimate_fpix(
-    const Modeline& m,
-    std::uint32_t vtime,
-    double refresh_min,
-    double refresh_max
-) {
+bool RefreshBand::contains(float hz) const noexcept {
+    if (min_hz != 0.0 && hz < static_cast<float>(min_hz))
+        return false;
+    if (max_hz != 0.0 && hz > static_cast<float>(max_hz))
+        return false;
+    return true;
+}
+
+std::optional<double> estimate_fpix(const Modeline& m, std::uint32_t vtime, RefreshBand band) {
 
     if (vtime == 0)
         return std::nullopt;
@@ -142,9 +156,7 @@ std::optional<double> estimate_fpix(
         return std::nullopt;
 
     const float hz = kFabricClockHzF / static_cast<float>(vtime);
-    if (refresh_min != 0.0 && hz < static_cast<float>(refresh_min))
-        return std::nullopt;
-    if (refresh_max != 0.0 && hz > static_cast<float>(refresh_max))
+    if (!band.contains(hz))
         return std::nullopt;
     return fpix;
 }
@@ -201,23 +213,18 @@ bool rotation_needs_buffered_scaler(
         * static_cast<std::int64_t>(s.htime);
 }
 
-FamilyChoice select_family(
-    std::uint32_t vtime,
-    bool vsync_adjust,
-    bool have_pal,
-    bool have_ntsc
-) noexcept {
+FamilyChoice select_family(std::uint32_t vtime, FamilyConfig cfg) noexcept {
 
     FamilyChoice out{};
-    if (vtime == 0 || !vsync_adjust)
+    if (vtime == 0 || !cfg.switching)
         return out;
-    if (have_pal || have_ntsc) {
+    if (cfg.have_pal || cfg.have_ntsc) {
         if (vtime > kPalVtimeTicks) {
-            out.family = have_pal ? VmodeFamily::Pal : VmodeFamily::Ntsc;
-            out.adjustable = have_pal;
+            out.family = cfg.have_pal ? VmodeFamily::Pal : VmodeFamily::Ntsc;
+            out.adjustable = cfg.have_pal;
         } else {
-            out.family = have_ntsc ? VmodeFamily::Ntsc : VmodeFamily::Pal;
-            out.adjustable = have_ntsc;
+            out.family = cfg.have_ntsc ? VmodeFamily::Ntsc : VmodeFamily::Pal;
+            out.adjustable = cfg.have_ntsc;
         }
         return out;
     }

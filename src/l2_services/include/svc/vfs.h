@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -29,16 +30,26 @@ namespace mister::svc {
 
 using proto::FileSize;
 
+struct UsbSlot {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] std::string path() const;
+    friend constexpr bool operator==(UsbSlot, UsbSlot) = default;
+};
+
+enum class RootChoice { Sd, Usb };
+
 struct StorageRoot {
-    bool usb = false;
-    std::uint8_t usb_index = 0;
+    std::optional<UsbSlot> usb;
+
+    [[nodiscard]] bool on_usb() const noexcept { return usb.has_value(); }
 };
 
 class Vfs {
     TASTY_SEAT_EXEMPT(const_shared);
 
 public:
-    [[nodiscard]] static Ex<Vfs> create(StorageRoot root);
+    [[nodiscard]] static Ex<Vfs> create(RootChoice choice);
 
     [[nodiscard]] static Ex<Vfs> create_at(std::string_view root_path);
 
@@ -63,7 +74,7 @@ public:
     [[nodiscard]] Ex<void> mount_memory(
         std::string_view path,
         std::span<const std::byte> blob,
-        Crc32 crc = {}
+        Crc32 crc = Crc32::kUndeclared
     );
 
     [[nodiscard]] std::uint32_t memory_sequential_hints(std::string_view path) const noexcept;
@@ -73,7 +84,7 @@ public:
     bool dir_exists(std::string_view path) const noexcept;
     bool file_exists(std::string_view path) const noexcept;
 
-    [[nodiscard]] Ex<std::int64_t> modified(std::string_view path) const;
+    [[nodiscard]] Ex<std::chrono::sys_seconds> modified(std::string_view path) const;
 
     [[nodiscard]] Ex<void> ensure_dir(std::string_view rel) const;
 
@@ -81,7 +92,7 @@ public:
         return durable_.replace(tmp_rel, final_rel);
     }
 
-    void sync_parent_dir(std::string_view rel) const noexcept { durable_.sync_parent_dir(rel); }
+    void sync_parent_dir(std::string_view path) const noexcept { durable_.sync_parent_dir(path); }
 
     using DurabilityLog = DurableWrite::DurabilityLog;
     static DurabilityLog durability_log() noexcept;

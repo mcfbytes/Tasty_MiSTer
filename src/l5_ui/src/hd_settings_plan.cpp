@@ -18,7 +18,7 @@ constexpr std::array<std::string_view, 1> kRebootBody{"Reboot MiSTer?"};
 
 HdSettingsPlan::HdSettingsPlan(const HdPlanInputs& in)
     : ctx_(in.ctx),
-      sys_(make_system_page(in.ctx.sys)),
+      sys_(make_system_page(in.ctx.sys, in.ctx.session)),
       controllers_(HdPushRow::Spec{.label = "Controllers", .page = PageId::HdControllers}),
       display_(HdPushRow::Spec{.label = "Display", .page = PageId::HdDisplay}),
       about_(HdPushRow::Spec{.label = "About", .page = PageId::HdAbout}),
@@ -57,10 +57,10 @@ std::span<const std::reference_wrapper<IHdRow>> HdSettingsPlan::rows() const {
     return refs_;
 }
 
-void HdSettingsPlan::refresh(const SystemFacts& facts) {
+void HdSettingsPlan::refresh(const SystemFacts& facts, const SessionFacts& session) {
     TASTY_SEAT_BODY(HdSettingsPlan);
     if (sys_ != nullptr)
-        sys_->on_facts(facts);
+        sys_->on_facts(facts, session);
 }
 
 RowCount HdSettingsPlan::pinned() const noexcept {

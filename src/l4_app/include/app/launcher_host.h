@@ -10,6 +10,7 @@
 #include "app/launcher_fb_ack.h"
 #include "app/launcher_state.h"
 #include "app/scanout_channel.h"
+#include "app/scanout_lease.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
@@ -30,7 +31,7 @@ public:
         LauncherStateCell& state;
         const LauncherFbAckCell& fb_ack;
         ScanoutChannel::Asker scanout;
-        os::IVtConsole& console;
+        os::IVtSwitch& console;
         const os::IClock& clock;
     };
 
@@ -43,7 +44,7 @@ public:
         unsigned strikes = 3;
     };
 
-    static constexpr int kExitReload = 42;
+    static constexpr os::ChildProcessExit::ExitStatus kExitReload{42};
 
     struct Counters {
         std::uint32_t spawns = 0;
@@ -51,10 +52,10 @@ public:
         std::uint32_t exits = 0;
         std::uint32_t kills = 0;
         std::uint32_t strikes = 0;
-        std::uint32_t leases = 0;
-        std::uint32_t refusals = 0;
-        std::uint32_t bursts = 0;
-        std::uint32_t invalid_packets = 0;
+        svc::Tally leases{};
+        svc::Tally refusals{};
+        svc::Tally bursts{};
+        svc::Tally invalid_packets{};
         std::uint32_t stale_swept = 0;
     };
 
@@ -78,7 +79,13 @@ public:
     LauncherHost(Fds fds, Wiring w, const Timing& t) noexcept
         : w_(std::move(w)),
           t_(t),
-          epoll_(std::move(fds.epoll_)) {}
+          epoll_(std::move(fds.epoll_)),
+          lease_(
+              {.state = w_.state,
+               .fb_ack = w_.fb_ack,
+               .scanout = w_.scanout,
+               .hold_limit = t_.fb_ack_limit}
+          ) {}
 
     LauncherHost(Fds fds, Wiring w) noexcept
         : LauncherHost(std::move(fds), std::move(w), Timing{}) {}
@@ -98,16 +105,24 @@ public:
 
     [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
 
-    [[nodiscard]] const Counters& counters() const noexcept { return n_; }
+    [[nodiscard]] Counters counters() const noexcept {
+        Counters c = n_;
+        const ScanoutLease::Tally& t = lease_.tally_counts();
+        c.leases = t.leases;
+        c.refusals = t.refusals;
+        c.bursts = t.bursts;
+        c.invalid_packets = t.invalid_packets;
+        return c;
+    }
 
     [[nodiscard]] bool child_running() const noexcept { return child_.has_value(); }
 
-    [[nodiscard]] bool lease_open() const noexcept { return lease_.valid(); }
+    [[nodiscard]] bool lease_open() const noexcept { return lease_.open(); }
 
 private:
     using Ns = std::chrono::nanoseconds;
 
-    [[nodiscard]] Ns now_() const noexcept { return w_.clock.now(); }
+    [[nodiscard]] Ns now_() const noexcept { return w_.clock.now().time_since_epoch(); }
 
     void step_() noexcept;
     void take_demand_() noexcept;
@@ -118,17 +133,15 @@ private:
     void settle_() noexcept;
     void reap_() noexcept;
     void on_exit_(const os::ChildProcessExit& e) noexcept;
+    void on_spawn_failure_() noexcept;
+    [[nodiscard]] bool end_attempt_() noexcept;
+    void strike_(Ns now) noexcept;
     void begin_stop_() noexcept;
     void release_screen_(bool restore_console) noexcept;
     void sweep_stale_() noexcept;
-    void serve_lease_() noexcept;
-    void grant_() noexcept;
-    void finish_grant_() noexcept;
-    void on_packet_(const std::byte* data, std::size_t n) noexcept;
-    void deliver_answers_() noexcept;
-    void close_lease_() noexcept;
+
+    void sync_lease_() noexcept;
     void watch_(int fd) noexcept;
-    void unwatch_(int fd) noexcept;
     void publish_() noexcept;
 
     Wiring w_;
@@ -137,11 +150,7 @@ private:
     LauncherDemandCell::Reader demand_seen_{};
     LauncherDemand demand_{};
     std::optional<os::ChildProcess> child_{};
-    UniqueFd lease_{};
-    bool lease_granted_ = false;
-    bool request_waiting_ = false;
-    bool burst_in_flight_ = false;
-    std::optional<UioBurst> held_ask_{};
+    ScanoutLease lease_;
     LauncherState state_{};
     bool paused_ = false;
     bool stopping_ = false;
@@ -155,7 +164,6 @@ private:
     std::optional<Ns> kill_at_{};
     std::optional<Ns> settle_by_{};
     std::optional<Ns> ack_by_{};
-    std::optional<Ns> grant_by_{};
     Ns spawned_at_{};
     Counters n_{};
 };

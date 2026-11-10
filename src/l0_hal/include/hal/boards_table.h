@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -16,6 +17,8 @@
 #include "hal/window_decl.h"
 
 namespace mister::hal {
+
+using std::literals::chrono_literals::operator""ns;
 
 inline constexpr std::array<std::string_view, 3> kDe10Compatible = {
     "terasic,de10-nano",
@@ -105,17 +108,20 @@ inline constexpr BoardProfile kDe10Profile{
     .verified = true,
 
     .timing =
-        {.word_ns = 1'250u,
-         .beat_ns = 3'900u,
-         .base_round_ns = 155'000u,
-         .sleep_ns = 75'000u,
+        {.word_ns = 1'250ns,
+         .beat_ns = 3'900ns,
+         .base_round_ns = 155'000ns,
+         .sleep_ns = 75'000ns,
          .round_budget_words = 460u,
          .load_budget_words = 8'000u,
          .ack_soft_spins = 4'096u,
-         .ack_timeout_ns = std::uint64_t{10'000'000u},
-         .start_ack_timeout_ns = std::uint64_t{250'000'000u}},
+         .ack_timeout_ns = 10'000'000ns},
     .memory = {.fpga_ddr = DdrCoherency::NonCoherent, .write_combine = WriteCombine::Allowed},
-    .program = {.chunk_bytes = 64u * 1'024u, .quantum = 32u, .align = 4u},
+    .program = {
+        .chunk_bytes = ChunkBytes{64u * 1'024u},
+        .quantum = QuantumBytes{32u},
+        .align = AlignBytes{4u}
+    },
 };
 
 inline constexpr std::array<std::string_view, 2> kDe25Compatible = {
@@ -162,8 +168,7 @@ consteval BoardProfile placeholder_row(
              .round_budget_words = kUnmeasured,
              .load_budget_words = kUnmeasured,
              .ack_soft_spins = kUnmeasured,
-             .ack_timeout_ns = kUnmeasured,
-             .start_ack_timeout_ns = kUnmeasured},
+             .ack_timeout_ns = kUnmeasured},
         .memory = {.fpga_ddr = kUnmeasured, .write_combine = kUnmeasured},
         .program = {.chunk_bytes = kUnmeasured, .quantum = kUnmeasured, .align = kUnmeasured},
     };
@@ -362,6 +367,13 @@ static_assert(
 );
 
 static_assert(
+    every_thread_map([](const ThreadMap& m) { return pause_edges_are(m); }),
+    "every board's PauseEdge::Receipt rows are exactly kReceiptPauseSeats: a seat that "
+    "pauses at the ask before T-RT queued the teardown's jobs drains nothing, and a seat "
+    "that waits for a receipt after the jobs would hold every switch to its deadline."
+);
+
+static_assert(
     every_thread_map([](const ThreadMap& m) { return policy_prio_consistent(m); }),
     "item / item: `policy` and `prio` are ONE decision. A "
     "SchedPolicy::Fifo row must carry a POSIX priority in 1..99 and "
@@ -396,10 +408,10 @@ static_assert(
 );
 
 static_assert(
-    names_fit_comm(kSeatNames),
-    "item: every seat name must be non-empty and <= 15 chars, "
+    names_fit_comm(kSeatRoles),
+    "item: every seat's comm ROLE must be non-empty and <= 15 chars, "
     "because pthread_setname_np takes 16 bytes INCLUDING the NUL "
-    "(glibc returns ERANGE; the kernel truncates). A name that does "
+    "(glibc returns ERANGE; the kernel truncates). A role that does "
     "not survive is a /proc witness that no longer matches this "
     "table, which is the only channel RT engagement is verified on "
     "(arch §7 retraction 7)."
@@ -435,8 +447,7 @@ static_assert(
 consteval bool boards_ack_bounds_nonzero() {
     return every_measured(&BoardProfile::timing, [](const LinkTiming& t) consteval {
         return t.ack_soft_spins.value() != 0u
-            && t.ack_timeout_ns.value() != 0u
-            && t.start_ack_timeout_ns.value() >= t.ack_timeout_ns.value();
+            && t.ack_timeout_ns.value() != std::chrono::nanoseconds::zero();
     });
 }
 

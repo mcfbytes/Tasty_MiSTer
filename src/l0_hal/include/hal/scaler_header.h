@@ -59,6 +59,18 @@ struct ScalerHeader {
         return type == kTypeImage && format == kFormatRgb24;
     }
 
+    [[nodiscard]] constexpr bool consistent() const noexcept {
+        constexpr std::uint32_t kRgbBytesPerPixel = 3;
+        return width != 0
+            && height != 0
+            && std::uint32_t{width} * kRgbBytesPerPixel <= std::uint32_t{line}
+        && header_size >= kBytes;
+    }
+
+    [[nodiscard]] constexpr std::size_t image_bytes() const noexcept {
+        return std::size_t{line} * std::size_t{height};
+    }
+
     [[nodiscard]] constexpr HeaderCtr frame_counter() const noexcept {
         constexpr unsigned kFrameCounterShift = 5;
         return HeaderCtr{

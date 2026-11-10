@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -9,6 +10,7 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "svc/packed_keys.h"
 
 namespace mister::svc {
 
@@ -41,42 +43,48 @@ struct MapKindSpec {
     PathPolicy paths;
 };
 
-inline constexpr MapKindSpec kMapKinds[] = {
-
-    {MapKind::Joystick,
-     128,
-     true,
-     "input_",
-     StemSource::Id,
-     true,
-     "_v3.map",
-     PathPolicy::InputsThenConfig},
-    {MapKind::Advanced,
-     768,
-     true,
-     "advanced_input_",
-     StemSource::Id,
-     true,
-     "_v1.map",
-     PathPolicy::InputsOnly},
-    {MapKind::Keyboard, 256, false, "kbd_", StemSource::Id, false, ".map", PathPolicy::ConfigOnly},
-    {MapKind::Gun,
-     2048,
-     true,
-     "input_",
-     StemSource::Id,
-     false,
-     "_jk.map",
-     PathPolicy::InputsThenConfig},
-    {MapKind::GunCal,
-     16,
-     true,
-     "gun_cal_",
-     StemSource::VidPid,
-     false,
-     "_v2.cfg",
-     PathPolicy::ConfigOnly},
-};
+inline constexpr auto kMapKinds = std::to_array<MapKindSpec>({
+    {.kind = MapKind::Joystick,
+     .bytes = 128,
+     .core_prefix = true,
+     .infix = "input_",
+     .stem = StemSource::Id,
+     .mod_suffix = true,
+     .suffix = "_v3.map",
+     .paths = PathPolicy::InputsThenConfig},
+    {.kind = MapKind::Advanced,
+     .bytes = 768,
+     .core_prefix = true,
+     .infix = "advanced_input_",
+     .stem = StemSource::Id,
+     .mod_suffix = true,
+     .suffix = "_v1.map",
+     .paths = PathPolicy::InputsOnly},
+    {.kind = MapKind::Keyboard,
+     .bytes = 256,
+     .core_prefix = false,
+     .infix = "kbd_",
+     .stem = StemSource::Id,
+     .mod_suffix = false,
+     .suffix = ".map",
+     .paths = PathPolicy::ConfigOnly},
+    {.kind = MapKind::Gun,
+     .bytes = 2048,
+     .core_prefix = true,
+     .infix = "input_",
+     .stem = StemSource::Id,
+     .mod_suffix = false,
+     .suffix = "_jk.map",
+     .paths = PathPolicy::InputsThenConfig},
+    {.kind = MapKind::GunCal,
+     .bytes = 16,
+     .core_prefix = true,
+     .infix = "gun_cal_",
+     .stem = StemSource::VidPid,
+     .mod_suffix = false,
+     .suffix = "_v2.cfg",
+     .paths = PathPolicy::ConfigOnly},
+});
 
 static_assert(
     std::size(kMapKinds) == static_cast<std::size_t>(MapKind::kCount),
@@ -117,6 +125,12 @@ public:
         std::string_view core,
         const DeviceIdentity& id,
         MapKind kind,
+        bool mod
+    ) const;
+
+    [[nodiscard]] Ex<WireWords> load_joy_words(
+        std::string_view core,
+        const DeviceIdentity& id,
         bool mod
     ) const;
     [[nodiscard]] Ex<void> save(

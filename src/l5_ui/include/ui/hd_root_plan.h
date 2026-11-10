@@ -53,13 +53,13 @@ public:
     RowCount pinned() const noexcept override;
     bool remembers_focus() const noexcept override;
     bool hub() const noexcept override;
-    void refresh(const SystemFacts& facts) override;
+    void refresh(const SystemFacts& facts, const SessionFacts& session) override;
     infra::OptRef<IHdRewalk> rewalker() override;
     void rewalk(const proto::ItemTable& table, const BuildEnv& env) override;
     std::uint32_t refusals() const noexcept override;
     [[nodiscard]] std::uint32_t commands_published() const noexcept;
 
-    enum class Slot : std::uint8_t {
+    enum class RootRow : std::uint8_t {
         Resume,
         Load,
         Media,
@@ -71,25 +71,51 @@ public:
         Settings,
         MainMenu
     };
-    static constexpr Slot kSlots[] = {
-        Slot::Resume,
-        Slot::Load,
-        Slot::Media,
-        Slot::Recent,
-        Slot::Cheats,
-        Slot::Reset,
-        Slot::Separator,
-        Slot::CoreSettings,
-        Slot::Settings,
-        Slot::MainMenu
+
+    struct RootRowSpec {
+        RootRow row;
+        bool pinned;
     };
 
-    static constexpr std::size_t kRows = std::size(kSlots);
+    static constexpr RootRowSpec kRootRows[] = {
+        {RootRow::Resume, false},
+        {RootRow::Load, false},
+        {RootRow::Media, false},
+        {RootRow::Recent, false},
+        {RootRow::Cheats, false},
+        {RootRow::Reset, false},
+        {RootRow::Separator, false},
+        {RootRow::CoreSettings, true},
+        {RootRow::Settings, true},
+        {RootRow::MainMenu, true}
+    };
+
+    static constexpr std::size_t kRows = std::size(kRootRows);
     static constexpr std::size_t kReserved = 2;
     static_assert(kRows + kReserved <= app::PageDescription::kMaxRows);
 
-    static constexpr std::uint8_t kPinned = 3;
+    static constexpr std::uint8_t kPinned = [] consteval {
+        std::uint8_t pinned = 0;
+        for (const RootRowSpec& r : kRootRows) {
+            if (r.pinned)
+                ++pinned;
+        }
+        return pinned;
+    }();
     static_assert(kPinned <= kRows);
+
+    static_assert(
+        [] consteval {
+            bool pinned_seen = false;
+            for (const RootRowSpec& r : kRootRows) {
+                if (!r.pinned && pinned_seen)
+                    return false;
+                pinned_seen = pinned_seen || r.pinned;
+            }
+            return true;
+        }(),
+        "the pinned rows must be the tail of kRootRows"
+    );
 
     static constexpr app::RowTier kTier = app::RowTier::Verb;
 
@@ -134,7 +160,7 @@ private:
 
     void walk_(const proto::ItemTable& table, const BuildEnv& env);
 
-    [[nodiscard]] IHdRow& row_for_(Slot slot) noexcept;
+    [[nodiscard]] IHdRow& row_for_(RootRow row) noexcept;
 
     void gate_() noexcept;
     Transition reset_yes_();
@@ -144,7 +170,6 @@ private:
     const NowPlaying& now_playing_;
     const app::RecentGames& recent_games_;
     const CoreVerbs& verbs_;
-    const bool front_end_;
     const bool table_settings_;
     SlotPickHost::Env env_;
     HdPage0Walk page0_;

@@ -4,9 +4,14 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 
 namespace mister::os {
+
+int FfEffectId::erase_on(int fd) const noexcept {
+    return ::ioctl(fd, EVIOCRMFF, v);
+}
 
 Ex<std::size_t> Evdev::read(std::span<input_event> out) const noexcept {
     const ssize_t n = ::read(fd_.get(), out.data(), out.size_bytes());
@@ -29,18 +34,26 @@ std::optional<input_id> Evdev::id() const noexcept {
     return info;
 }
 
-std::optional<std::size_t> Evdev::name(std::span<char> out) const noexcept {
+std::optional<std::string_view> Evdev::name(std::span<char> out) const noexcept {
     const int n = ::ioctl(fd_.get(), EVIOCGNAME(out.size()), out.data());
     if (n < 0)
         return std::nullopt;
-    return static_cast<std::size_t>(n);
+    const std::size_t len = std::min<std::size_t>(
+        static_cast<std::size_t>(n),
+        out.empty() ? 0 : out.size() - 1
+    );
+    return infra::text_until_nul(out.first(len));
 }
 
-std::optional<std::size_t> Evdev::uniq(std::span<char> out) const noexcept {
+std::optional<std::string_view> Evdev::uniq(std::span<char> out) const noexcept {
     const int n = ::ioctl(fd_.get(), EVIOCGUNIQ(out.size()), out.data());
     if (n < 0)
         return std::nullopt;
-    return static_cast<std::size_t>(n);
+    const std::size_t len = std::min<std::size_t>(
+        static_cast<std::size_t>(n),
+        out.empty() ? 0 : out.size() - 1
+    );
+    return infra::text_until_nul(out.first(len));
 }
 
 std::optional<int> Evdev::effect_count() const noexcept {
@@ -57,16 +70,34 @@ bool Evdev::has_ff(unsigned code) const noexcept {
     return (ff[code / 8u] & (1u << (code % 8u))) != 0u;
 }
 
-bool Evdev::grab(bool on) const noexcept {
-    return ::ioctl(fd_.get(), EVIOCGRAB, on ? 1 : 0) >= 0;
+Ex<void> Evdev::grab(bool on) const noexcept {
+    if (::ioctl(fd_.get(), EVIOCGRAB, on ? 1 : 0) < 0) {
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
+    }
+    return {};
 }
 
-bool Evdev::erase_effect(int id) const noexcept {
-    return ::ioctl(fd_.get(), EVIOCRMFF, id) >= 0;
+Ex<void> Evdev::erase_effect(FfEffectId id) const noexcept {
+    if (id.erase_on(fd_.get()) < 0) {
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
+    }
+    return {};
 }
 
-bool Evdev::upload_effect(ff_effect& e) const noexcept {
-    return ::ioctl(fd_.get(), EVIOCSFF, &e) >= 0;
+Ex<FfEffectId> Evdev::upload_effect(const ff_effect& e) const noexcept {
+    ff_effect uploaded = e;
+    if (::ioctl(fd_.get(), EVIOCSFF, &uploaded) < 0) {
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
+    }
+    return FfEffectId::from_kernel(uploaded.id);
+}
+
+Ex<void> Evdev::play(FfEffectId id) const noexcept {
+    const input_event play = id.play_event();
+    if (::write(fd_.get(), &play, sizeof play) < 0) {
+        return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
+    }
+    return {};
 }
 
 }

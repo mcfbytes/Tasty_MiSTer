@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -53,6 +55,8 @@ class Core;
 
 namespace mister::app {
 
+class BindTail;
+
 class CoreBuilder {
     TASTY_SEAT_RESIDENT(Main);
 
@@ -68,70 +72,35 @@ public:
         proto::BlockSlotMask mount_slots{};
     };
 
-    CoreBuilder(CoreBay& bay, const BayReleasesCell& releases, const CoreTerms& terms) noexcept
-        : CoreBuilder(bay, releases, terms, infra::OptRef<hal::IDoorbellSource>{}) {}
-
-    CoreBuilder(
-        CoreBay& bay,
-        const BayReleasesCell& releases,
-        const CoreTerms& terms,
-        hal::IDoorbellSource& src
-    ) noexcept
-        : CoreBuilder(bay, releases, terms, infra::OptRef<hal::IDoorbellSource>{src}) {}
-
-    CoreBuilder(
-        CoreBay& bay,
-        const BayReleasesCell& releases,
-        const CoreTerms& terms,
-        infra::OptRef<hal::IDoorbellSource> src
-    ) noexcept
-        : CoreBuilder(bay, releases, terms, src, SectorCells{}) {}
-
     struct SectorCells {
-        infra::OptRef<SectorGrantCell> grant{};
-        infra::OptRef<const SectorRouteCell> route{};
+        SectorGrantCell& grant;
+        const SectorRouteCell& route;
         infra::OptRef<xthread::WakeFlag> wake{};
     };
 
     struct OsdCells {
-        infra::OptRef<OsdGrantCell> grant{};
-        infra::OptRef<const OsdRouteCell> route{};
+        OsdGrantCell& grant;
+        const OsdRouteCell& route;
     };
 
-    CoreBuilder(
-        CoreBay& bay,
-        const BayReleasesCell& releases,
-        const CoreTerms& terms,
-        infra::OptRef<hal::IDoorbellSource> src,
-        SectorCells sectors
-    ) noexcept
-        : CoreBuilder(bay, releases, terms, src, sectors, OsdCells{}) {}
-
-    CoreBuilder(
-        CoreBay& bay,
-        const BayReleasesCell& releases,
-        const CoreTerms& terms,
-        infra::OptRef<hal::IDoorbellSource> src,
-        SectorCells sectors,
-        OsdCells osds
-    ) noexcept
-        : CoreBuilder(bay, releases, terms, src, sectors, osds, SysCells{}) {}
-
     struct SysCells {
-        infra::OptRef<SysGrantCell> grant{};
-        infra::OptRef<const SysRouteCell> route{};
+        SysGrantCell& grant;
+        const SysRouteCell& route;
         infra::OptRef<xthread::WakeFlag> wake{};
     };
 
-    CoreBuilder(
-        CoreBay& bay,
-        const BayReleasesCell& releases,
-        const CoreTerms& terms,
-        infra::OptRef<hal::IDoorbellSource> src,
-        SectorCells sectors,
-        OsdCells osds,
-        SysCells sys
-    ) noexcept;
+    struct Wiring {
+        CoreBay& bay;
+        const BayReleasesCell& releases;
+        const CoreTerms& terms;
+        std::optional<SectorCells> sectors{};
+        std::optional<OsdCells> osds{};
+        std::optional<SysCells> sys{};
+    };
+
+    [[nodiscard]] static CoreBuilder on_board(Wiring wiring) noexcept;
+
+    [[nodiscard]] static CoreBuilder over_source(Wiring wiring, hal::IDoorbellSource& src) noexcept;
     CoreBuilder(const CoreBuilder&) = delete;
     CoreBuilder& operator=(const CoreBuilder&) = delete;
     ~CoreBuilder();
@@ -156,29 +125,30 @@ public:
 
     [[nodiscard]] std::optional<AllLeasesHome> nothing_lent() const noexcept;
 
-    [[nodiscard]] cores::CoreWindowGrant grant_windows(
-        BuiltCore& into,
-        const cores::CoreProfile& profile
+    struct GrantedWindows {
+
+        struct Row {
+            std::string_view name{};
+            std::optional<CoreWindow> mapped{};
+            infra::OptRef<cores::ICoreWindow> borrowed{};
+        };
+
+        std::array<Row, cores::kMaxCoreWindows> rows{};
+        std::optional<hal::FpgaMemory> fed_ring{};
+    };
+
+    [[nodiscard]] GrantedWindows grant_windows(const cores::CoreProfile& profile) noexcept;
+
+    [[nodiscard]] static cores::CoreWindowGrant adopt_windows(
+        BuiltCore& slot,
+        GrantedWindows windows
     ) noexcept;
 
-    static void open_doorbells(
+    [[nodiscard]] static DoorbellLines open_doorbells(
         hal::IDoorbellSource& src,
         const hal::DoorbellPolicy& policy,
-        std::span<const proto::IrqBinding> irqs,
-        DoorbellLines& into
+        std::span<const proto::IrqBinding> irqs
     ) noexcept;
-
-    [[nodiscard]] std::uint32_t builds() const noexcept { return builds_; }
-
-    [[nodiscard]] std::uint32_t bay_full() const noexcept { return bay_full_; }
-
-    [[nodiscard]] std::uint32_t frees() const noexcept { return frees_; }
-
-    [[nodiscard]] std::uint32_t window_refusals() const noexcept { return window_refusals_; }
-
-    [[nodiscard]] std::uint32_t pad_grants() const noexcept { return pad_grants_; }
-
-    [[nodiscard]] std::uint32_t pad_refusals() const noexcept { return pad_refusals_; }
 
     [[nodiscard]] static constexpr bool may_carry_pads(const proto::AxiLwDecl& decl) noexcept {
         return decl.size >= hal::SysDirectory::kSize;
@@ -196,11 +166,6 @@ public:
     ) noexcept;
 
     [[nodiscard]] static Ex<LwPads> grant_pads(
-        hal::PhysRegion lw_window,
-        std::span<std::uint32_t> lw_image,
-        const proto::AxiLwDecl& decl
-    ) noexcept;
-    [[nodiscard]] static Ex<LwPads> grant_pads(
         const Directory& dir,
         const proto::AxiLwDecl& decl
     ) noexcept;
@@ -209,24 +174,11 @@ public:
 
     [[nodiscard]] std::uint32_t directory_reads() const noexcept { return directory_reads_; }
 
-    [[nodiscard]] std::uint32_t sector_grants() const noexcept { return sector_grants_; }
-
-    [[nodiscard]] std::uint32_t sector_refusals() const noexcept { return sector_refusals_; }
-
-    [[nodiscard]] std::uint32_t card_grants() const noexcept { return card_grants_; }
-
-    [[nodiscard]] std::uint32_t card_refusals() const noexcept { return card_refusals_; }
-
     [[nodiscard]] static bool card_admitted(
         const cores::CoreProfile& profile,
         const proto::SectorBlockDecl::Card& card,
         proto::SlotIndex block_slot
     ) noexcept;
-
-    [[nodiscard]] std::uint32_t lease_holds() const noexcept { return lease_holds_; }
-
-    [[nodiscard]] std::uint32_t lease_long_holds() const noexcept { return lease_long_holds_; }
-
     void count_lease_hold(bool long_hold) noexcept;
 
     [[nodiscard]] static bool fabric_owned(
@@ -234,22 +186,63 @@ public:
         std::span<const proto::AxiLwDecl> lw
     ) noexcept;
 
-    static std::size_t rt_rows(
+    struct RtRows {
+
+        struct RtRowCount {
+            std::size_t v = 0;
+
+            [[nodiscard]] constexpr RtRowCount next() const noexcept { return RtRowCount{v + 1}; }
+
+            [[nodiscard]] constexpr std::size_t size() const noexcept { return v; }
+
+            [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
+            template <class T>
+            [[nodiscard]] constexpr std::size_t bytes_of() const noexcept {
+                return v * sizeof(T);
+            }
+
+            template <class T, std::size_t N>
+            [[nodiscard]] constexpr std::span<const T> prefix_of(
+                const std::array<T, N>& rows
+            ) const noexcept {
+                return std::span<const T>(rows).first(v);
+            }
+
+            template <class T, std::size_t N>
+            [[nodiscard]] constexpr std::span<const T> prefix_of(
+                const T (&rows)[N]
+            ) const noexcept {
+                return std::span<const T>(rows).first(v);
+            }
+
+            friend constexpr bool operator==(RtRowCount, RtRowCount) = default;
+
+        private:
+            friend class BindTail;
+
+            [[nodiscard]] constexpr std::uint8_t wire_byte() const noexcept {
+                return static_cast<std::uint8_t>(
+                    std::min(v, static_cast<std::size_t>(std::numeric_limits<std::uint8_t>::max()))
+                );
+            }
+        };
+
+        std::array<proto::IrqBinding, kMaxDoorbellRows> rows{};
+        RtRowCount count{};
+        RtRowCount declared{};
+
+        [[nodiscard]] std::span<const proto::IrqBinding> table() const noexcept {
+            return count.prefix_of(rows);
+        }
+    };
+
+    [[nodiscard]] static RtRows rt_rows(
         std::span<const proto::IrqBinding> irqs,
         std::span<const proto::AxiLwDecl> lw,
-        std::span<proto::IrqBinding> out,
         std::optional<hal::LwOffset> owned
     ) noexcept;
 
-    [[nodiscard]] static Ex<LwSector> grant_sector(
-        hal::PhysRegion lw_window,
-        std::span<std::uint32_t> lw_image,
-        const proto::AxiLwDecl& decl,
-        std::span<const proto::IrqBinding> irqs,
-        const svc::ISectorProgram& program,
-        hal::IDoorbellSource& src,
-        const hal::DoorbellPolicy& policy
-    ) noexcept;
     [[nodiscard]] static Ex<LwSector> grant_sector(
         const Directory& dir,
         const proto::AxiLwDecl& decl,
@@ -271,8 +264,6 @@ public:
         const cores::CoreProfile& profile
     ) noexcept;
 
-    [[nodiscard]] std::uint32_t poll_retirements() const noexcept { return poll_retirements_; }
-
     [[nodiscard]] static bool fabric_route(std::string_view name, bool manifest) noexcept;
 
     void raise_sector() noexcept;
@@ -287,17 +278,6 @@ public:
 
     [[nodiscard]] bool bridge_refused() noexcept;
 
-    [[nodiscard]] std::uint32_t bridge_refusals() const noexcept { return bridge_refusals_; }
-
-    [[nodiscard]] std::uint32_t osd_grants() const noexcept { return osd_grants_; }
-
-    [[nodiscard]] std::uint32_t osd_refusals() const noexcept { return osd_refusals_; }
-
-    [[nodiscard]] static Ex<LwOsd> grant_osd(
-        hal::PhysRegion lw_window,
-        std::span<std::uint32_t> lw_image,
-        const proto::AxiLwDecl& decl
-    ) noexcept;
     [[nodiscard]] static Ex<LwOsd> grant_osd(
         const Directory& dir,
         const proto::AxiLwDecl& decl
@@ -313,20 +293,6 @@ public:
 
     [[nodiscard]] bool osd_abandoned() const noexcept { return osd_ && osd_->fabric_lost; }
 
-    [[nodiscard]] std::uint32_t sys_grants() const noexcept { return sys_grants_; }
-
-    [[nodiscard]] std::uint32_t sys_refusals() const noexcept { return sys_refusals_; }
-
-    [[nodiscard]] std::uint32_t sys_pin_refusals() const noexcept { return sys_pin_refusals_; }
-
-    [[nodiscard]] static Ex<LwSys> grant_sys(
-        hal::PhysRegion lw_window,
-        std::span<std::uint32_t> lw_image,
-        const proto::AxiLwDecl& decl,
-        hal::IDoorbellSource& src,
-        const hal::DoorbellPolicy& policy,
-        std::span<const proto::IrqBinding> taken = {}
-    ) noexcept;
     [[nodiscard]] static Ex<LwSys> grant_sys(
         const Directory& dir,
         const proto::AxiLwDecl& decl,
@@ -345,20 +311,24 @@ public:
 
     [[nodiscard]] std::uint32_t leased() const noexcept;
 
+    [[nodiscard]] const BayCounts& counts() const noexcept { return counts_; }
+
     [[nodiscard]] const BayCountsCell& counts_cell() const noexcept { return counts_cell_; }
 
 private:
+    CoreBuilder(Wiring wiring, infra::OptRef<hal::IDoorbellSource> seam) noexcept;
+
+    [[nodiscard]] hal::IDoorbellSource& source_() noexcept;
+
     void drop_windows(const ParkReceipt& receipt) noexcept;
     void free_(proto::CoreBaySlot slot) noexcept;
     void publish_counts_() noexcept;
-
-    [[nodiscard]] hal::IDoorbellSource& doorbell_source_() noexcept;
-    void open_doorbells_(BuiltCore& into, std::span<const proto::IrqBinding> irqs) noexcept;
     [[nodiscard]] Ex<Directory> directory_(const proto::AxiLwDecl& decl) noexcept;
     [[nodiscard]] std::optional<proto::LaneBlockDecl> find_lane_(
         std::span<const proto::AxiLwDecl> lw
     ) noexcept;
-    void grant_pads_(BuiltCore& into, std::span<const proto::AxiLwDecl> lw) noexcept;
+
+    [[nodiscard]] std::optional<LwPads> grant_pads_(std::span<const proto::AxiLwDecl> lw) noexcept;
 
     void grant_sector_(
         std::span<const proto::IrqBinding> irqs,
@@ -366,7 +336,11 @@ private:
         const cores::CoreProfile& profile,
         FabricGeneration fabric_gen
     ) noexcept;
-    void grant_cards_(LwSector& into, const cores::CoreProfile& profile) noexcept;
+
+    [[nodiscard]] std::array<LwSector::Card, proto::SectorBlockDecl::kCards> grant_cards_(
+        const proto::SectorBlockDecl& block,
+        const cores::CoreProfile& profile
+    ) noexcept;
     [[nodiscard]] Ex<hal::PhysRegion> card_region_(
         const proto::SectorBlockDecl::Card& card
     ) const noexcept;
@@ -399,47 +373,30 @@ private:
     CoreBay& bay_;
     const BayReleasesCell& releases_;
     const CoreTerms& terms_;
+
+    infra::OptRef<hal::IDoorbellSource> seam_{};
+
     hal::UioDoorbellSource uio_doorbells_{};
-    hal::IDoorbellSource& doorbells_;
     BayReleasesCell::Reader released_{};
     BayReleases levels_{};
     infra::IndexedArray<CoreBay::Lease, kCoreBaySlots, proto::CoreBaySlot> held_{};
     std::uint16_t gen_ = 0;
-    std::uint32_t builds_ = 0;
-    std::uint32_t bay_full_ = 0;
-    std::uint32_t frees_ = 0;
-    std::uint32_t window_refusals_ = 0;
-    std::uint32_t pad_grants_ = 0;
-    std::uint32_t pad_refusals_ = 0;
-    std::uint32_t sector_grants_ = 0;
-    std::uint32_t sector_refusals_ = 0;
-    std::uint32_t card_grants_ = 0;
-    std::uint32_t card_refusals_ = 0;
     bool claimed_ = false;
-    std::uint32_t lease_holds_ = 0;
-    std::uint32_t lease_long_holds_ = 0;
-    SectorCells sectors_{};
+    std::optional<SectorCells> sectors_{};
     std::optional<LwSector> sector_{};
     bool sector_revoked_ = true;
 
     std::uint16_t lent_gen_ = 0;
-    std::uint32_t lent_cards_ = 0;
+    proto::BlockSlotMask lent_cards_{};
     std::uint16_t judged_gen_ = 0;
-    std::uint32_t bridge_refusals_ = 0;
-    std::uint32_t poll_retirements_ = 0;
-    std::uint32_t osd_grants_ = 0;
-    std::uint32_t osd_refusals_ = 0;
-    OsdCells osds_{};
+    std::optional<OsdCells> osds_{};
     std::optional<LwOsd> osd_{};
     bool osd_revoked_ = true;
-    SysCells sys_cells_{};
+    std::optional<SysCells> sys_cells_{};
     std::optional<LwSys> sys_{};
     bool sys_revoked_ = true;
     std::uint16_t lent_sys_gen_ = 0;
     std::uint16_t judged_sys_gen_ = 0;
-    std::uint32_t sys_grants_ = 0;
-    std::uint32_t sys_refusals_ = 0;
-    std::uint32_t sys_pin_refusals_ = 0;
     std::uint32_t directory_reads_ = 0;
 
     struct DirReads {
@@ -454,6 +411,8 @@ private:
 
     DirReads dir_reads_{};
     std::optional<proto::LaneBlockDecl> lane_{};
+
+    BayCounts counts_{};
     BayCountsCell counts_cell_{};
 };
 

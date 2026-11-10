@@ -12,7 +12,7 @@ Ex<void> HeldPadEncoder::digital(UioOp opcode, JoyMask map) {
 
 Ex<void> HeldPadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) {
     TASTY_SEAT_BODY(HeldPadEncoder);
-    return hold_(opcode, index, PadLevels::stick_word(pos));
+    return hold_(opcode, index, pos.packed());
 }
 
 std::uint32_t HeldPadEncoder::link_words(UioOp, bool) const noexcept {

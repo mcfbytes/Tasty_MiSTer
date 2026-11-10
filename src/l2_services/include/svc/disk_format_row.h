@@ -6,6 +6,7 @@
 #include <span>
 #include <string_view>
 
+#include "infra/opt_ref.h"
 #include "proto/types.h"
 #include "svc/disk_codec.h"
 
@@ -23,7 +24,7 @@ struct DiskFormatRow {
 
 inline constexpr std::size_t kDiskMagicProbeBytes = 64;
 
-[[nodiscard]] const DiskFormatRow* select_disk_format(
+[[nodiscard]] infra::OptRef<const DiskFormatRow> select_disk_format(
     std::span<const DiskFormatRow> rows,
     std::string_view path,
     proto::FileSize size,

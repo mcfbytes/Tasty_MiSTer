@@ -7,16 +7,23 @@
 #include "app/page_description.h"
 #include "ui/confirm_launch.h"
 #include "ui/confirm_page.h"
+#include "ui/hd_label.h"
 #include "ui/page_context.h"
 #include "ui/script_launch.h"
 #include "ui/hd_rows/hd_action.h"
 #include "ui/hd_rows/hd_ask_row.h"
 #include "ui/hd_rows/hd_close_row.h"
 #include "ui/hd_rows/hd_gated_row.h"
+#include "ui/hd_rows/hd_option_row.h"
 #include "ui/hd_rows/hd_pair_row.h"
 #include "ui/hd_rows/hd_push_row.h"
+#include "ui/hd_rows/hd_save_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
 #include "ui/hd_rows/hd_value_row.h"
+#include "ui/options_model.h"
+#include "ui/option_item.h"
+#include "ui/options_surface.h"
+#include "ui/saved_baseline.h"
 
 namespace mister::ui {
 namespace {
@@ -140,9 +147,9 @@ Transition HdGatedRow::select() {
     return row_.select();
 }
 
-Transition HdGatedRow::step(int delta) {
+Transition HdGatedRow::step(CycleDir dir) {
     TASTY_SEAT_BODY(HdGatedRow);
-    return row_.step(delta);
+    return row_.step(dir);
 }
 
 bool HdPairRow::shown() const {
@@ -164,11 +171,59 @@ Transition HdPairRow::select() {
     TASTY_SEAT_BODY(HdPairRow);
     if (!ctx_.launches.script)
         return Transition{};
-    ScriptLaunch::Request req;
-    req.kind = ScriptKind::BtPair;
-    req.bt_reset = ctx_.bt_reset_before_pair;
-    ctx_.launches.script->pending = static_cast<ScriptLaunch::Request&&>(req);
+    ctx_.launches.script->pending = ScriptLaunch::Request::bt_pair(ctx_.bt_reset_before_pair);
     return Transition{Transition::Kind::Push, PageId::ScriptRun};
+}
+
+std::optional<RowKey> HdOptionRow::key() const {
+    TASTY_SEAT_BODY(HdOptionRow);
+    return RowKey::ordinal(item_.item);
+}
+
+OptionItem::Look HdOptionRow::look_() const {
+    return OptionItem::Look{.flat = false, .value = host_.field(item_.bits)};
+}
+
+Row HdOptionRow::describe() const {
+    TASTY_SEAT_BODY(HdOptionRow);
+
+    const std::optional<Row> described = item_.describe(look_());
+    if (!described)
+        return Row{};
+    Row r = *described;
+    (void)r.label.assign(hd_label(r.label.view()));
+    return r;
+}
+
+Transition HdOptionRow::select() {
+    TASTY_SEAT_BODY(HdOptionRow);
+    return item_.select(host_);
+}
+
+Transition HdOptionRow::step(CycleDir dir) {
+    TASTY_SEAT_BODY(HdOptionRow);
+    return item_.step(dir, host_.field(item_.bits), host_);
+}
+
+std::optional<RowKey> HdSaveRow::key() const {
+    TASTY_SEAT_BODY(HdSaveRow);
+    return RowKey::save();
+}
+
+Row HdSaveRow::describe() const {
+    TASTY_SEAT_BODY(HdSaveRow);
+    Row r{};
+    r.kind = RowKind::Action;
+    (void)r.label.assign("Save settings");
+    if (baseline_.unsaved(host_.live_words()))
+        (void)r.value.assign("Unsaved");
+    return r;
+}
+
+Transition HdSaveRow::select() {
+    TASTY_SEAT_BODY(HdSaveRow);
+    host_.save_config();
+    return Transition{};
 }
 
 }

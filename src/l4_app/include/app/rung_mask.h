@@ -31,7 +31,11 @@ public:
 
     [[nodiscard]] constexpr bool any(RungMask m) const noexcept { return (bits_ & m.bits_) != 0; }
 
-    [[nodiscard]] constexpr std::uint16_t bits() const noexcept { return bits_; }
+    [[nodiscard]] constexpr bool within(RungMask m) const noexcept {
+        return (bits_ & ~m.bits_) == 0;
+    }
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return bits_ == 0; }
 
     friend constexpr bool operator==(RungMask, RungMask) noexcept = default;
 

@@ -27,39 +27,53 @@ enum class TastyVerb : std::uint8_t {
     RecStop,
 };
 
-struct TastyRefusal {
-    enum Code : std::uint32_t {
-        NoVerb = 1,
-        NoMovie,
-        MovieTooLong,
-        NoRecAction,
-        BadRecAction,
-        UnknownVerb,
-        BadRom = 10,
-        BadCore,
-        BadRecord,
-        BadLead,
-        BadLinger,
-        BadVsyncAdjust,
-        BadStopAt,
-        BadRamInit,
-        BadPhase,
-        UnknownOption = 20,
-        CheckNoRom,
-        BadCodec,
-        BadScale,
-        BadEvery,
-        BadFrom,
-        BadTo,
-        BadSegment,
-        BadRecBounds,
-        RecOptionsWithoutRecord,
-        BadMotion,
-        SliceOnRecStart,
-        BadSave,
-        SaveNotPlay,
-    };
+enum class TastyRefusal : std::uint32_t {
+    NoVerb = 1,
+    NoMovie,
+    MovieTooLong,
+    NoRecAction,
+    BadRecAction,
+    UnknownVerb,
+    BadRom,
+    BadCore,
+    BadRecord,
+    BadLead,
+    BadLinger,
+    BadVsyncAdjust,
+    BadStopAt,
+    BadRamInit,
+    BadPhase,
+    UnknownOption,
+    CheckNoRom,
+    BadCodec,
+    BadScale,
+    BadEvery,
+    BadFrom,
+    BadTo,
+    BadSegment,
+    BadRecBounds,
+    RecOptionsWithoutRecord,
+    BadMotion,
+    SliceOnRecStart,
+    BadSave,
+    SaveNotPlay,
+    kCount,
 };
+
+[[nodiscard]] constexpr std::optional<TastyRefusal> tasty_refusal_of(
+    std::uint32_t detail
+) noexcept {
+    if (detail == 0 || detail >= static_cast<std::uint32_t>(TastyRefusal::kCount)) {
+        return std::nullopt;
+    }
+    return static_cast<TastyRefusal>(detail);
+}
+
+[[nodiscard]] constexpr std::uint32_t tasty_refusal_detail(TastyRefusal r) noexcept {
+    return static_cast<std::uint32_t>(r);
+}
+
+inline constexpr std::chrono::seconds kDefaultLinger{30};
 
 struct TastyArgs {
     TastyVerb verb = TastyVerb::Play;
@@ -69,15 +83,16 @@ struct TastyArgs {
 
     std::optional<app::PathText> record{};
 
-    std::optional<app::MovieFrame> lead{};
+    std::optional<app::FrameCount> lead{};
 
     std::optional<std::chrono::microseconds> phase_us{};
 
     std::optional<app::MovieFrame> stop_at{};
-    std::optional<cores::IMovieCodec::RamFill> ram_fill{};
+    std::optional<cores::IReplayCore::RamFill> ram_fill{};
 
     std::optional<app::PathText> save{};
-    std::chrono::seconds return_after_s{30};
+
+    std::chrono::seconds linger = kDefaultLinger;
     app::VsyncAdjust vsync_adjust = app::VsyncAdjust::Off;
     bool stay = false;
     bool strict = false;

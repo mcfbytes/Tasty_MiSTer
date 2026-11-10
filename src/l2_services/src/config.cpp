@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "config_detail.h"
+#include "infra/ascii.h"
 #include "svc/config.h"
 #include "svc/config_snapshot.h"
 #include "svc/option_codec.h"
@@ -11,7 +12,7 @@
 namespace mister::svc {
 namespace {
 
-using detail::iequals;
+using infra::ieq;
 using detail::kExtSchema;
 using detail::kSchema;
 
@@ -77,7 +78,7 @@ static_assert(ext_rows_are_scalar(), "an ext row must be a fixed-width scalar ty
 consteval bool ext_names_are_new() {
     for (const Option& e : kExtSchema) {
         for (const Option& o : kSchema) {
-            if (iequals(e.name, o.name))
+            if (ieq(e.name, o.name))
                 return false;
         }
     }

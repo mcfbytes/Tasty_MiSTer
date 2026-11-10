@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
 #include <string_view>
+
+#include "os/types.h"
 
 namespace mister::cores {
 
 struct CompanionAsk {
     std::string_view path{};
     bool mailbox_live = false;
-    std::uint64_t aperture_base = 0;
+    os::PhysAddr aperture_base{};
 };
 
 }

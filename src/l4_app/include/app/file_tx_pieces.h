@@ -5,9 +5,9 @@
 #include <memory>
 #include <optional>
 #include <string_view>
-#include <vector>
 
 #include "svc/types.h"
+#include "app/file_intern.h"
 #include "app/file_tx_level.h"
 #include "app/link_tx_channel.h"
 #include "app/load_key.h"
@@ -32,6 +32,7 @@ public:
         std::uint64_t from = 0;
         svc::Crc32 crc{};
         bool shaped = false;
+        bool remounts_saves = false;
     };
 
     [[nodiscard]] static Ex<FileTxPieces> start(
@@ -116,7 +117,7 @@ private:
     std::unique_ptr<svc::IFile> file_;
     std::unique_ptr<cores::ILoader> loader_;
     cores::TransferRow row_;
-    std::optional<std::vector<std::uint8_t>> staged_{};
+    std::optional<FileIntern> staged_{};
     std::uint64_t total_;
     std::uint64_t sent_ = 0;
     std::uint64_t keyed_to_ = 0;

@@ -18,11 +18,6 @@ struct OsdBlockDecl {
 };
 
 [[nodiscard]] Ex<OsdBlockDecl> find_osd_block(
-    const hal::RegisterWindow<hal::SysDirectory>& dir,
-    std::uint32_t window_size
-) noexcept;
-
-[[nodiscard]] Ex<OsdBlockDecl> find_osd_block(
     const SysDirectoryImage& dir,
     std::uint32_t window_size
 ) noexcept;

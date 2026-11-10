@@ -17,14 +17,16 @@ namespace mister::hal {
 
 inline constexpr std::string_view kApertureUioName = "mister_ddr_aperture";
 
-struct ApertureChoice {
-    bool via_uio = false;
-    int node = -1;
-    os::PhysAddr node_base{};
-    std::size_t node_size = 0;
+struct ApertureNode {
+    os::UioMinor minor{};
+    os::PhysAddr base{};
+    std::size_t size = 0;
 };
 
-[[nodiscard]] ApertureChoice resolve_aperture(const char* sysfs_root, const PhysRegion& r) noexcept;
+[[nodiscard]] std::optional<ApertureNode> resolve_aperture(
+    const char* sysfs_root,
+    const PhysRegion& r
+) noexcept;
 
 class FpgaMemory {
     TASTY_SEAT_EXEMPT(component);
@@ -82,7 +84,5 @@ private:
     bool uio_bound_ = false;
     os::MmioRegion::Access access_ = os::MmioRegion::Access::ReadWrite;
 };
-
-void copy_to_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept;
 
 }

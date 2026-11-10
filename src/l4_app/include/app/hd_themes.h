@@ -11,176 +11,14 @@
 #include "app/hd_layout.h"
 #include "app/hd_look.h"
 #include "app/hd_style.h"
+#include "app/hd_template_traits.h"
 #include "app/hd_theme.h"
-#include "app/page_description.h"
+#include "app/tier_set.h"
+#include "app/types.h"
+#include "infra/decimal_text.h"
+#include "infra/fixed_str.h"
 
 namespace mister::app {
-
-enum class HdTemplateId : std::uint8_t { Zaparoo, QuickBar, Guide, Pixel };
-
-struct HdTemplateTraits {
-    std::string_view family;
-    std::string_view subtitle_sep;
-    std::uint8_t panel_pct;
-
-    std::uint8_t strip_panel_pct;
-
-    std::uint8_t horizontal_tiers = 0;
-
-    std::uint8_t backdrop_ramp_pct = 100;
-
-    std::uint8_t pixel_em = 0;
-
-    std::uint8_t band_pct = 0;
-
-    HdGround ground = HdGround::Primary;
-};
-
-inline constexpr std::array<HdTemplateTraits, 4> kHdTemplateTraits{{
-    {.family = "Noto Sans",
-     .subtitle_sep = "\u00B7  ",
-     .panel_pct = 36,
-     .strip_panel_pct = 36,
-     .horizontal_tiers = 0},
-    {.family = "Noto Sans",
-     .subtitle_sep = "\u00B7  ",
-     .panel_pct = 36,
-     .strip_panel_pct = 100,
-     .horizontal_tiers = tier_bit(RowTier::Verb) | tier_bit(RowTier::Shelf),
-     .band_pct = 20},
-    {.family = "Noto Sans",
-     .subtitle_sep = "\u00B7  ",
-     .panel_pct = 36,
-     .strip_panel_pct = 36,
-     .horizontal_tiers = 0,
-     .backdrop_ramp_pct = 35},
-    {.family = "Pixel Operator 8",
-     .subtitle_sep = " \u00B7 ",
-     .panel_pct = 50,
-     .strip_panel_pct = 50,
-     .horizontal_tiers = 0,
-     .pixel_em = 8,
-     .ground = HdGround::WindowShade},
-}};
-
-inline constexpr std::size_t kHdTemplateCount = kHdTemplateTraits.size();
-
-static_assert(
-    static_cast<std::size_t>(HdTemplateId::Pixel) + 1 == kHdTemplateCount,
-    "one traits row per template, in HdTemplateId order"
-);
-
-static_assert(
-    std::ranges::all_of(
-        kHdTemplateTraits,
-        [](const HdTemplateTraits& t) {
-            constexpr std::uint8_t kPanelPctMax = 100;
-            return !t.family.empty()
-                && t.panel_pct > 0
-                && t.panel_pct <= kPanelPctMax
-                && t.strip_panel_pct > 0
-                && t.strip_panel_pct <= kPanelPctMax;
-        }
-    ),
-    "every traits row names a family and a panel width of 1-100%"
-);
-static_assert(
-    std::ranges::all_of(
-        kHdTemplateTraits,
-        [](const HdTemplateTraits& t) {
-            constexpr std::uint8_t kRampPctMax = 100;
-            return t.backdrop_ramp_pct > 0 && t.backdrop_ramp_pct <= kRampPctMax;
-        }
-    ),
-    "a backdrop ramp is 1-100% of the theme's dim"
-);
-static_assert(
-    std::ranges::all_of(
-        kHdTemplateTraits,
-        [](const HdTemplateTraits& t) {
-            constexpr std::uint8_t kPixelEmMax = 16;
-            return t.pixel_em <= kPixelEmMax && (t.pixel_em & (t.pixel_em - 1)) == 0;
-        }
-    ),
-    "a pixel em is 0 or a power of two up to 16"
-);
-static_assert(
-    std::ranges::none_of(
-        kHdTemplateTraits,
-        [](const HdTemplateTraits& t) {
-            return (t.horizontal_tiers & tier_bit(RowTier::Place)) != 0;
-        }
-    ),
-    "a place row may step on Left/Right; only verb and shelf tiers run across"
-);
-static_assert(
-    std::ranges::all_of(
-        kHdTemplateTraits,
-        [](const HdTemplateTraits& t) {
-            return t.strip_panel_pct == t.panel_pct || t.horizontal_tiers != 0;
-        }
-    ),
-    "a strip width differs from the panel width only where some tier runs across"
-);
-static_assert(
-    std::ranges::all_of(
-        kHdTemplateTraits,
-        [](const HdTemplateTraits& t) {
-            constexpr std::uint8_t kBandPctMax = 50;
-            return t.band_pct == 0
-                || (t.band_pct <= kBandPctMax
-                    && (t.horizontal_tiers & tier_bit(RowTier::Verb)) != 0);
-        }
-    ),
-    "a band draws the hub's verb rows across, at most half the output high"
-);
-
-[[nodiscard]] constexpr const HdTemplateTraits& hd_template_traits(HdTemplateId id) noexcept {
-    return kHdTemplateTraits[static_cast<std::size_t>(id)];
-}
-
-[[nodiscard]] constexpr bool hd_runs_across(
-    const HdTemplateTraits& traits,
-    const PageDescription& page
-) noexcept {
-    const RowIndex end = RowIndex{} + page.listed();
-    for (RowIndex i{}; i < end; i += RowCount::of(1))
-        if ((traits.horizontal_tiers & tier_bit(page.row(i).tier)) != 0)
-            return true;
-    return false;
-}
-
-[[nodiscard]] constexpr bool hd_runs_band(
-    const HdTemplateTraits& traits,
-    const PageDescription& page
-) noexcept {
-    return traits.band_pct != 0 && page.hub.count != 0;
-}
-
-[[nodiscard]] constexpr std::uint8_t hd_panel_pct(
-    const HdTemplateTraits& traits,
-    const PageDescription& page
-) noexcept {
-    if (hd_runs_band(traits, page))
-        return traits.panel_pct;
-    return hd_runs_across(traits, page) ? traits.strip_panel_pct : traits.panel_pct;
-}
-
-[[nodiscard]] constexpr HdLayout hd_page_layout(
-    const HdTemplateTraits& traits,
-    const PageDescription& page,
-    std::uint32_t w,
-    std::uint32_t h,
-    HdGameDisplay display
-) noexcept {
-    return layout_for(
-        w,
-        h,
-        hd_panel_pct(traits, page),
-        display,
-        hd_runs_band(traits, page) ? traits.band_pct : std::uint8_t{0}
-    );
-}
 
 struct HdLayoutDecl {
     std::string_view name;
@@ -262,27 +100,14 @@ static_assert(
 }
 
 inline constexpr auto kHdOpacityNames = [] {
-    constexpr unsigned kTextBase = 10, kFullPercent = 100;
-    constexpr char kTextZero = '0', kPercentSign = '%', kTextEnd = '\0';
-    std::array<std::array<char, 4>, kHdOpacityMax - kHdOpacityMin + 1> names{};
-    for (std::size_t i = 0; i < names.size(); ++i) {
-        const auto pct = static_cast<unsigned>(kHdOpacityMin + i);
-        auto& n = names[i];
-        if (pct >= kFullPercent) {
-            n = {
-                static_cast<char>(kTextZero + pct / kFullPercent),
-                static_cast<char>(kTextZero + pct / kTextBase % kTextBase),
-                static_cast<char>(kTextZero + pct % kTextBase),
-                kPercentSign
-            };
-        } else {
-            n = {
-                static_cast<char>(kTextZero + pct / kTextBase),
-                static_cast<char>(kTextZero + pct % kTextBase),
-                kPercentSign,
-                kTextEnd
-            };
-        }
+    constexpr std::string_view kPercentSuffix = "%";
+
+    std::array<FixedStr<5, StrFit::Reject>, kHdOpacityMax - kHdOpacityMin + 1> names{};
+    std::uint8_t pct = kHdOpacityMin;
+    for (auto& name : names) {
+        (void)name.assign(infra::DecimalText{pct}.view());
+        (void)name.append(kPercentSuffix);
+        ++pct;
     }
     return names;
 }();
@@ -317,7 +142,7 @@ static_assert(
     return t;
 }
 
-[[nodiscard]] constexpr std::uint8_t hd_horizontal_tiers(HdLayoutIndex layout) noexcept {
+[[nodiscard]] constexpr TierSet hd_horizontal_tiers(HdLayoutIndex layout) noexcept {
     return hd_template_traits(hd_layout_decl(layout).tmpl).horizontal_tiers;
 }
 
@@ -346,48 +171,30 @@ static_assert(
         }
         case HdLookField::GameDisplay:
             return kHdGameDisplays[at.display];
-        case HdLookField::Opacity: {
-            const auto& n = kHdOpacityNames[at.opacity - kHdOpacityMin];
-            return {n.data(), n[3] == '\0' ? 3u : 4u};
-        }
+        case HdLookField::Opacity:
+            return kHdOpacityNames[at.opacity - kHdOpacityMin].view();
     }
     return {};
 }
 
-[[nodiscard]] constexpr std::uint8_t hd_look_step(HdLookField f, HdLook look, int delta) noexcept {
+[[nodiscard]] constexpr std::uint8_t hd_look_step(
+    HdLookField f,
+    HdLook look,
+    CycleDir dir
+) noexcept {
     if (f == HdLookField::Opacity) {
         const unsigned at = hd_opacity_of(look);
         const unsigned up = (at / kHdOpacityStep + 1u) * kHdOpacityStep;
         const unsigned down = (at - 1u) / kHdOpacityStep * kHdOpacityStep;
         return static_cast<std::uint8_t>(
-            delta < 0 ? std::max<unsigned>(down, kHdOpacityMin)
-                      : std::min<unsigned>(up, kHdOpacityMax)
+            dir == CycleDir::Back ? std::max<unsigned>(down, kHdOpacityMin)
+                                  : std::min<unsigned>(up, kHdOpacityMax)
         );
     }
     const auto count = static_cast<unsigned>(hd_look_choices(f));
     const unsigned held = hd_look_get(look, f);
     const unsigned at = held < count ? held : 0u;
-    return static_cast<std::uint8_t>((at + (delta < 0 ? count - 1u : 1u)) % count);
-}
-
-struct HdThemeDecl {
-    HdLayoutIndex layout{};
-    HdColors colors{};
-};
-
-inline constexpr std::array<HdThemeDecl, 8> kHdThemes{{
-    {.layout = HdLayoutIndex{0}, .colors = HdColors{0}},
-    {.layout = HdLayoutIndex{0}, .colors = HdColors{2}},
-    {.layout = HdLayoutIndex{0}, .colors = HdColors{3}},
-    {.layout = HdLayoutIndex{0}, .colors = HdColors{4}},
-    {.layout = HdLayoutIndex{0}, .colors = HdColors{5}},
-    {.layout = HdLayoutIndex{1}, .colors = HdColors{0}},
-    {.layout = HdLayoutIndex{2}, .colors = HdColors{0}},
-    {.layout = HdLayoutIndex{3}, .colors = HdColors{0}},
-}};
-
-[[nodiscard]] constexpr const HdThemeDecl& hd_theme(std::uint8_t index) noexcept {
-    return kHdThemes[index < kHdThemes.size() ? index : 0u];
+    return static_cast<std::uint8_t>((at + (dir == CycleDir::Back ? count - 1u : 1u)) % count);
 }
 
 }

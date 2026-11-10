@@ -55,19 +55,20 @@ Ex<void> NddExpander::place_(const DiskMap::Step& s, ICoreWindow& window) {
             );
         }
     };
-    const auto put = [&](std::uint32_t block) -> Ex<void> {
-        const std::uint32_t off = flat_offset(s.track, s.head, block, 0);
-        auto w = window.write(off, std::as_bytes(std::span<const std::uint8_t>(image_)));
-        if (!w)
-            return std::unexpected(w.error());
-        return {};
+    const auto put = [&](TrackBlock block) -> Ex<void> {
+        const FlatBlock at{s.where.track, s.where.head, block};
+        const auto bytes = std::as_bytes(std::span<const std::uint8_t>(image_));
+        return at.offset().write_via(window, bytes);
     };
     image_.fill(0);
     if (!s.good) {
         mark();
-        if (auto r = put(0); !r)
-            return r;
-        return put(1);
+        constexpr std::uint8_t kBlocksPerTrack = 2;
+        for (std::uint8_t block = 0; block < kBlocksPerTrack; ++block) {
+            if (auto r = put(TrackBlock{block}); !r)
+                return r;
+        }
+        return {};
     }
     for (std::uint32_t sec = 0; sec < kSectorsPerBlock; ++sec) {
         std::memcpy(
@@ -78,7 +79,7 @@ Ex<void> NddExpander::place_(const DiskMap::Step& s, ICoreWindow& window) {
     }
     if (s.bad_lba)
         mark();
-    return put(s.flat_block);
+    return put(s.where.block);
 }
 
 }

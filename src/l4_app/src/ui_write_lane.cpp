@@ -35,7 +35,7 @@ Ex<void> UiWriteLane::arm(
     if (!bytes.empty())
         std::memcpy(loan->data, bytes.data(), bytes.size());
 
-    Shadow& sh = ui_.shadow[chan_.index_of(loan)];
+    Shadow& sh = ui_.shadow[*chan_.index_of(loan)];
     (void)sh.rel.assign(rel);
     sh.len = loan->len;
     sh.held = bytes.size() <= kShadowBytes;
@@ -52,7 +52,7 @@ Ex<void> UiWriteLane::arm(
 void UiWriteLane::tick(VerdictSinks sinks) noexcept {
     seat_assert<SeatTag::Ui>(ERR_SITE(), "UiWriteLane::tick off T-UI");
     while (auto done = chan_.reap()) {
-        Shadow& sh = ui_.shadow[chan_.index_of(done)];
+        Shadow& sh = ui_.shadow[*chan_.index_of(done)];
         sh.live = false;
         const bool ok = done.completed() && done->ok;
         if (ok) {

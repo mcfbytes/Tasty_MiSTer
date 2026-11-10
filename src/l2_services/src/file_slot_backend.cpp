@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "infra/byte_view.h"
+#include "svc/vfs.h"
 
 namespace mister::svc {
 
@@ -35,9 +36,9 @@ Ex<proto::FileSize> FileSlotBackend::open_extent(
     const std::string_view path = path_.view();
 
     if (const std::size_t slash = path.rfind('/'); slash != std::string_view::npos && slash > 0) {
-        (void)vfs_->ensure_dir(path.substr(0, slash));
+        (void)vfs_.ensure_dir(path.substr(0, slash));
     }
-    auto f = vfs_->open(path, OpenMode::ReadWrite);
+    auto f = vfs_.open(path, OpenMode::ReadWrite);
     if (!f) {
 
         if (f.error().code == Errc::os && f.error().detail == ENOENT) {
@@ -78,7 +79,7 @@ Ex<proto::FileSize> FileSlotBackend::create(std::span<const std::uint8_t> first)
     if (path.empty())
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 
-    auto f = vfs_->open(path, OpenMode::Create);
+    auto f = vfs_.open(path, OpenMode::Create);
     if (!f)
         return std::unexpected(f.error());
     auto n = (*f)->write_at(0, as_bytes_const(first));
@@ -91,7 +92,7 @@ Ex<proto::FileSize> FileSlotBackend::create(std::span<const std::uint8_t> first)
     }
     if (auto r = (*f)->flush(); !r)
         return std::unexpected(r.error());
-    vfs_->sync_parent_dir(path);
+    vfs_.sync_parent_dir(path);
     file_ = std::move(*f);
     return proto::FileSize{first.size()};
 }

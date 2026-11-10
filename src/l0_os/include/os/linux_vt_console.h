@@ -8,7 +8,7 @@
 
 namespace mister::os {
 
-class LinuxVtConsole final : public IVtConsole {
+class LinuxVtConsole final : public IVtSwitch {
     TASTY_SEAT_RESIDENT(Launcher);
 
 public:
@@ -16,10 +16,6 @@ public:
     [[nodiscard]] Ex<void> activate(VtNumber vt) noexcept override;
     void blank(const char* tty) noexcept override;
     void restore_text(const char* tty) noexcept override;
-    [[nodiscard]] std::optional<bool> text_mode(VtNumber vt) noexcept override;
-    void graphics(VtNumber vt) noexcept override;
-    void text(VtNumber vt) noexcept override;
-    void cursor(VtNumber vt, bool shown) noexcept override;
 };
 
 }

@@ -10,16 +10,13 @@
 
 namespace mister::svc {
 
-enum class OffsetUnit : std::uint8_t { CueBytes, ChdSectors };
-
 struct Toc {
     TASTY_SEAT_MEDIATOR(Any, Any);
     Track tracks[kMaxTracks]{};
 
     TrackCount last{};
     Lba end{};
-    std::uint32_t sector_size = kCdDataSize;
-    OffsetUnit offset_unit = OffsetUnit::CueBytes;
+    std::uint32_t sector_size = kRawFrameBytes;
     bool has_subcode = false;
 
     [[nodiscard]] constexpr Track& at(TrackIndex index) noexcept {
@@ -28,6 +25,15 @@ struct Toc {
 
     [[nodiscard]] constexpr const Track& at(TrackIndex index) const noexcept {
         return infra::at_index(std::span<const Track, kMaxTracks>(tracks), index);
+    }
+
+    constexpr void close(TrackCount count) noexcept {
+        last = count;
+        Track& lead_out = at(count.next_index());
+        lead_out.number = count.next_index().number();
+        lead_out.type = TrackType::Cdda;
+        lead_out.start = end;
+        lead_out.end = end;
     }
 };
 

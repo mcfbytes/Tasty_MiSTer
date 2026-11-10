@@ -6,89 +6,63 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <optional>
 
 #include "infra/error.h"
-#include "infra/fixed_str.h"
+#include "os/kernel_rt.h"
 #include "os/vm_compaction.h"
+#include "stack_extent.h"
+#include "rt_setup.h"
 #include "diag_main.h"
 #include "ui_main.h"
 #include "reactor/executive.h"
 #include "hal/boards_table.h"
-#include "svc/input_service.h"
+#include "svc/device_table.h"
 #include "infra/seat.h"
 
 namespace mister::fw {
 
-struct RtSetup;
-struct RtEvidence;
-
 enum class RtMode : std::uint8_t { Required, BestEffort };
 
-void pin_current_cpu(os::CpuId cpu, RtSetup& out) noexcept;
+struct TopologyOutcome {
+    long online = 0;
+    RtSetup coverage{};
+    RtSetup topology{};
+    Ex<void> verdict{};
+};
 
-[[nodiscard]] Ex<void> verify_cpu_topology(
+[[nodiscard]] RtSetup pin_current_cpu(os::CpuId cpu) noexcept;
+
+[[nodiscard]] RtSetup confirm_current_cpu(os::CpuId cpu) noexcept;
+
+[[nodiscard]] TopologyOutcome verify_cpu_topology(
     const hal::ThreadMap& m,
     long online_cpus,
-    RtMode mode,
-    RtEvidence& ev
+    RtMode mode
 ) noexcept;
 
-[[nodiscard]] Ex<void> rt_topology_init(
-    const hal::ThreadMap& m,
-    RtMode mode,
-    RtEvidence& ev
-) noexcept;
+[[nodiscard]] TopologyOutcome rt_topology_init(const hal::ThreadMap& m, RtMode mode) noexcept;
 
-[[nodiscard]] Ex<void> rt_memory_init(RtMode mode, RtEvidence& ev);
+struct MemoryPolicyOutcome {
+    os::KernelRt kernel = os::KernelRt::Unknown;
+    RtSetup kernel_rt{};
+    RtSetup trim_pin{};
+    RtSetup mmap_pin{};
+    RtSetup mem_lock{};
+    os::VmCompaction vm{};
+    Ex<void> verdict{};
+};
+
+[[nodiscard]] MemoryPolicyOutcome rt_memory_init(RtMode mode);
 
 void warn_vm_compaction(const os::VmCompaction& vm, const char* prog, std::FILE* out) noexcept;
 
-inline constexpr std::size_t kStackPageBytes = 4096;
-
-inline constexpr std::size_t kStackPrefaultReserveBytes = 64u * 1024u;
-
-struct StackExtent {
-    std::size_t used = 0;
-    std::size_t mapped = 0;
+struct StackPrefault {
+    RtSetup outcome{};
+    std::size_t bytes = 0;
     std::uint64_t rlimit = 0;
-
-    [[nodiscard]] constexpr std::size_t bound(bool growable) const noexcept {
-        if (growable && rlimit > mapped) {
-            return rlimit > static_cast<std::uint64_t>(SIZE_MAX) ? SIZE_MAX
-                                                                 : static_cast<std::size_t>(rlimit);
-        }
-        return mapped;
-    }
-
-    [[nodiscard]] constexpr std::size_t span(std::size_t requested, bool growable) const noexcept {
-        std::uint64_t limit = bound(growable);
-        if (rlimit < limit)
-            limit = rlimit;
-        const std::uint64_t floor = static_cast<std::uint64_t>(used) + kStackPrefaultReserveBytes;
-        if (limit <= floor)
-            return 0;
-        const std::uint64_t room = limit - floor;
-        return room < requested ? static_cast<std::size_t>(room) : requested;
-    }
 };
 
-void prefault_current_stack(std::size_t requested, RtEvidence& ev) noexcept;
-
-struct SchedInfo {
-
-    std::optional<hal::SchedPolicy> policy{};
-    int rt_priority = -1;
-    char state = '?';
-    FixedStr<31, StrFit::Clip> wchan;
-};
-
-[[nodiscard]] Ex<SchedInfo> read_thread_sched(long tid);
-
-[[nodiscard]] constexpr int sched_policy_field(hal::SchedPolicy p) noexcept {
-    constexpr int kSchedFifoField = 1;
-    return p == hal::SchedPolicy::Fifo ? kSchedFifoField : 0;
-}
+[[nodiscard]] StackPrefault prefault_current_stack(std::size_t requested) noexcept;
 
 inline constexpr int kRtWedgeExitStatus = 75;
 
@@ -98,9 +72,7 @@ inline constexpr std::chrono::nanoseconds kIoStopDeadlineNs{std::chrono::seconds
 
 inline constexpr std::chrono::nanoseconds kRtJoinSliceNs{std::chrono::milliseconds{20}};
 
-[[nodiscard]] Ex<std::uint64_t> read_vm_rss_bytes();
-
-inline constexpr std::size_t kInputWorstCaseFds = svc::kMaxDevices + 1;
+inline constexpr std::size_t kInputWorstCaseFds = svc::DeviceTable::kMaxDevices + 1;
 static_assert(
     kInputWorstCaseFds > reactor::Executive::kMaxBorrowedFds,
     "item / arch amendment 2026-08-18, RULE 1: the executive's "

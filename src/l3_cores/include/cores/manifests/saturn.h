@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include "cores/cd_census_rows.h"
@@ -18,6 +19,7 @@
 #include "cores/cd_tick_periods.h"
 #include "cores/core_profile.h"
 #include "cores/saturn_cue.h"
+#include "svc/search_policy.h"
 
 namespace mister::cores::manifests {
 
@@ -55,30 +57,26 @@ inline constexpr CdTickPeriods kSaturnTicks{
 
 inline constexpr CdIoIndices kSaturnIoIndices{
     .data = IoIndex{8},
-    .cdda = IoIndex{},
-    .subcode = IoIndex{},
+    .cdda = std::nullopt,
+    .subcode = std::nullopt,
     .info = IoIndex{0xC},
 };
 
 inline constexpr auto kSaturnQuirks = std::to_array<CdQuirkRow>({
-    {0x20, "T-8126H", CdQuirk::TocStartsAtIndex1},
-    {0x20, "T-8120G", CdQuirk::TocStartsAtIndex1},
-    {0x20, "T-8112H", CdQuirk::TocStartsAtIndex1},
-    {0x20, "T-99901G", CdQuirk::TocStartsAtIndex1},
-    {0x20, "T-8112G", CdQuirk::TocStartsAtIndex1},
-    {0x20, "T-5008H", CdQuirk::ReadSkipsSeek},
-    {0x20, "T-10609G", CdQuirk::ReadSkipsSeek},
+    {.offset = 0x20, .id = "T-8126H", .quirk = CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-8120G", .quirk = CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-8112H", .quirk = CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-99901G", .quirk = CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-8112G", .quirk = CdQuirk::TocStartsAtIndex1},
+    {.offset = 0x20, .id = "T-5008H", .quirk = CdQuirk::ReadSkipsSeek},
+    {.offset = 0x20, .id = "T-10609G", .quirk = CdQuirk::ReadSkipsSeek},
 });
 
 inline constexpr CdProfile kSaturnProfile{
-    .dialect = CdDialect::SaturnRing,
-    .crc_start = 0,
     .io = kSaturnIoIndices,
     .cue = saturn::kSaturnCuePolicy,
     .ticks = kSaturnTicks,
-    .sniff_sega_disc_system = false,
-    .seek_fast_paths = {},
-    .quirks = kSaturnQuirks,
+    .row = CdProfile::SaturnFacts{.quirks = kSaturnQuirks},
 };
 
 inline constexpr auto kSaturnSlots = std::to_array<FileSlot>({
@@ -101,8 +99,6 @@ inline constexpr auto kSaturnWindows = std::to_array<CoreWindowDecl>({
     {.region = {0x1100'0000u, 0x0000'4000u, "saturn-cd-buf"}, .feeds_pcm = false},
 });
 
-inline constexpr svc::SearchDir kSaturnHomeDir[] = {svc::SearchDir::CoreDir};
-
 inline constexpr std::string_view kSaturnDiscWords[] = {"disc"};
 
 inline constexpr auto kSaturnBootAssets = std::to_array<BootAsset>({
@@ -121,7 +117,7 @@ inline constexpr auto kSaturnBootAssets = std::to_array<BootAsset>({
      .dest = WideIoIndex{0},
      .group = 0},
     {.name = "boot.rom",
-     .where = kSaturnHomeDir,
+     .where = kCoreHomeDir,
      .optional = true,
      .anchor = AssetAnchor::Search,
      .subdir = "Saturn",
@@ -143,8 +139,9 @@ consteval std::array<std::byte, 128> make_record() {
 
 inline constexpr std::array<std::byte, 128> kRecord = make_record();
 
+inline constexpr proto::Lba kSecondCopyLba{128};
 inline constexpr std::array<BlankRegion, 1> kSecondCopy{
-    {{.offset_bytes = 128u * 512u, .bytes = kRecord}}
+    {{.block = kSecondCopyLba, .within = 0, .bytes = kRecord}}
 };
 }
 
@@ -158,9 +155,11 @@ inline constexpr StagingPolicy kSaturnStaging{
     .order = StageOrder::Saturn,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kSaturnSlots),
-    .save_slot = IoIndex{1},
-    .save_dest = WideIoIndex{4},
-    .save_name_disc_words = kSaturnDiscWords,
+    .save = SaveMountPolicy{
+        .slot = IoIndex{1},
+        .bracket = WideIoIndex{4},
+        .disc_words = kSaturnDiscWords,
+    },
 };
 
 inline constexpr CoreProfile kSaturn{

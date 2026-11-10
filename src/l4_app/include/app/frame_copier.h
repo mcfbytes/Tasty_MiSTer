@@ -21,28 +21,17 @@
 #include "app/recorder_status.h"
 #include "app/replay_status.h"
 #include "app/types.h"
-#include "app/video_pump.h"
+#include "app/video_geometry_record.h"
 #include "hal/scaler_buffers.h"
 #include "hal/scaler_header.h"
 #include "hal/scaler_probe.h"
+#include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "os/delay.h"
 
 namespace mister::app {
-
-struct HeaderKey {
-    hal::ScalerHeader fields{};
-
-    [[nodiscard]] static constexpr HeaderKey of(const hal::ScalerHeader& h) noexcept {
-        return HeaderKey{h};
-    }
-
-    [[nodiscard]] constexpr hal::ScalerHeader header() const noexcept { return fields; }
-
-    friend constexpr bool operator==(const HeaderKey&, const HeaderKey&) = default;
-};
 
 class FrameCopier {
     TASTY_SEAT_RESIDENT(Capture);
@@ -52,7 +41,7 @@ public:
         const os::IClock& clock;
 
         os::IDelay& delay;
-        const RecControlCell& control;
+        RecControlChannel& control;
         RecorderStatusCell& status;
         FrameDemandCell& demand;
         const CoreFrameCell& frames;
@@ -60,11 +49,11 @@ public:
         const RecWriteStatusCell& writer;
         const AviWriteStatusCell& avi_writer;
         const VideoGeometryCell& video;
+
         RawFrameChannel& channel;
     };
 
     static constexpr infra::ParkTimeout kPollMs{4};
-    static constexpr std::int64_t kDefaultPeriodNs = 16'666'667;
 
     static constexpr std::int64_t kParkPeriods = 12;
 
@@ -74,7 +63,8 @@ public:
 
     FrameCopier(const Wiring& w, std::optional<hal::ScalerBuffers> window) noexcept
         : w_(w),
-          window_(std::move(window)) {}
+          window_(std::move(window)),
+          requests_(w_.control.worker()) {}
 
     FrameCopier(const FrameCopier&) = delete;
     FrameCopier& operator=(const FrameCopier&) = delete;
@@ -92,14 +82,14 @@ public:
     using Pick = hal::ScalerProbe::Pick;
 
 private:
-    struct Heads {
-        std::array<hal::ScalerHeader, hal::ScalerBuffers::kBuffers> h{};
-        bool ok = false;
-    };
+    using Chan = RecControlChannel;
 
-    void sample_control_() noexcept;
-    void answer_(ControlGeneration gen, RecVerdict v) noexcept;
-    void begin_(const RecControl& c) noexcept;
+    void drain_control_() noexcept;
+    void take_request_(Chan::Job job) noexcept;
+    void answer_(Chan::Job& job, RecVerdict v) noexcept;
+
+    void answer_pending_(RecVerdict v) noexcept;
+    void begin_(Chan::Job& job) noexcept;
     void end_(RecVerdict why) noexcept;
     void set_demand_(bool on) noexcept;
     void reap_() noexcept;
@@ -113,13 +103,19 @@ private:
     void note_replay_(const ReplayStatus& r) noexcept;
     [[nodiscard]] bool replay_before_epoch_() const noexcept;
 
-    [[nodiscard]] Heads read_heads_() const noexcept;
+    [[nodiscard]] std::optional<std::array<hal::ScalerHeader, hal::ScalerBuffers::kBuffers>>
+    read_heads_() const noexcept;
 
-    [[nodiscard]] std::size_t base_(std::size_t buf) const noexcept { return buf * gen_.stride; }
+    [[nodiscard]] std::size_t base_(std::size_t buf) const noexcept {
+        return buf * hal::stride_bytes(gen_.stride);
+    }
 
     void poll_triple_(std::int64_t now) noexcept;
 
-    void track_(const Heads& hd, std::int64_t now) noexcept;
+    void track_(
+        const std::array<hal::ScalerHeader, hal::ScalerBuffers::kBuffers>& hd,
+        std::int64_t now
+    ) noexcept;
     void track_reset_(const BufMask& live, std::int64_t now) noexcept;
     void poll_lowlat_(std::int64_t now) noexcept;
 
@@ -137,7 +133,7 @@ private:
 
     [[nodiscard]] bool open_armed_(
         const FrameStamp& s,
-        const CoreFrameRecord* cell,
+        infra::OptRef<const CoreFrameRecord> cell,
         std::uint32_t fields,
         std::int64_t now
     ) noexcept;
@@ -146,7 +142,7 @@ private:
         return gen_.lowlat ? CoreFrameGap{} : CoreFrameGap::of_lead(gen_.lag_steps) + behind;
     }
 
-    void attach_pending_(RawFrameSlot& slot) noexcept;
+    void attach_pending_(RawFrameSlot::Close& slot) noexcept;
     void defer_(const FrameStampRun& run) noexcept;
     [[nodiscard]] bool geometry_ok_(const hal::ScalerHeader& h) const noexcept;
 
@@ -157,7 +153,8 @@ private:
 
     Wiring w_;
     std::optional<hal::ScalerBuffers> window_;
-    RecControlCell::Reader control_seen_{};
+    Chan::Worker requests_{};
+    std::optional<Chan::Job> answering_{};
     RecorderStatus st_{};
     bool dirty_ = false;
     bool demand_on_ = false;
@@ -170,7 +167,7 @@ private:
         bool from_arm = false;
         bool open_sent = false;
         bool close_sent = false;
-        std::size_t stride = 0;
+        hal::ScalerStride stride = hal::ScalerStride::Large;
         bool lowlat = false;
         std::size_t regrow_bytes = 0;
 
@@ -194,10 +191,9 @@ private:
     RecGeneration gen_{};
 
     hal::ScalerProbe probe_{};
-    std::int64_t period_ns_ = kDefaultPeriodNs;
 
     struct BufferWatch {
-        HeaderKey key{};
+        hal::ScalerHeader last{};
         std::chrono::nanoseconds seen{};
     };
 

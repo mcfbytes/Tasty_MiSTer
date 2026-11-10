@@ -14,7 +14,9 @@ namespace mister::ui {
 HdOptionsView::HdOptionsView(IOptionsSurface& surface, const Spec& spec) noexcept
     : surface_(surface),
       spec_(spec),
-      list_(make_list_()) {}
+      list_(make_list_()) {
+    TASTY_SEAT_BODY(HdOptionsView);
+}
 
 HdOptionsView::~HdOptionsView() = default;
 
@@ -68,11 +70,6 @@ void HdOptionsView::set_selection(RowIndex i) {
 RowIndex HdOptionsView::selection() const {
     TASTY_SEAT_BODY(HdOptionsView);
     return list_->selection();
-}
-
-RowIndex HdOptionsView::first_row() const noexcept {
-    TASTY_SEAT_BODY(HdOptionsView);
-    return RowIndex{};
 }
 
 bool HdOptionsView::empty() const {

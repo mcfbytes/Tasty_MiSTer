@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 
@@ -25,6 +26,8 @@ struct StSlot {
             return std::nullopt;
         return StSlot{io.v};
     }
+
+    [[nodiscard]] constexpr proto::IoIndex io() const noexcept { return proto::IoIndex{v}; }
 
     [[nodiscard]] constexpr bool is_floppy() const noexcept {
         return *this == FloppyA || *this == FloppyB;
@@ -51,5 +54,7 @@ inline constexpr StSlot StSlot::Acsi0{2};
 inline constexpr StSlot StSlot::Acsi1{3};
 inline constexpr StSlot StSlot::Tos{4};
 inline constexpr StSlot StSlot::Cart{5};
+
+inline constexpr std::array<StSlot, 2> kAcsiSlots{StSlot::Acsi0, StSlot::Acsi1};
 
 }

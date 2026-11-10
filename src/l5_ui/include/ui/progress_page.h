@@ -9,6 +9,7 @@
 
 #include "app/page_description.h"
 #include "infra/fixed_str.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/page.h"
 
@@ -50,9 +51,9 @@ public:
         return MenuMask{};
     }
 
-    IProgressView* progress_view() override {
+    infra::OptRef<IProgressView> progress_view() override {
         TASTY_SEAT_BODY(ProgressPage);
-        return this;
+        return infra::opt_ref_of<IProgressView>(this);
     }
 
     void set_progress(cores::Progress progress) noexcept override;
@@ -73,7 +74,7 @@ public:
 
 private:
     FixedStr<kProgressNameMax + 1, StrFit::Clip> name_{};
-    std::uint8_t step_ = 0;
+    std::uint32_t step_ = 0;
 
     cores::Progress last_{};
 };

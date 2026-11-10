@@ -14,10 +14,10 @@ inline constexpr svc::CuePolicy kSaturnCuePolicy{
     .sniff_sega_disc_system = false,
     .layout = svc::CuePolicy::Layout::Console,
 
-    .track_close = svc::CuePolicy::TrackClose::SentinelPregapRelative,
-    .pregap_model = svc::CuePolicy::PregapModel::SingleAccumulator,
-    .post_load_shift = svc::CuePolicy::PostLoadTocShift::None,
+    .program = svc::CuePolicy::Program::SentinelPregapRelative,
     .iso_sizing = svc::CuePolicy::IsoSizing::ProbeVolumeDescriptor,
+
+    .frame_shaping = svc::CuePolicy::FrameShaping::SealDataSector,
 };
 
 static_assert(

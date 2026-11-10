@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <utility>
 
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
@@ -26,6 +27,8 @@ class RecentsStore;
 class UiRequestRing;
 }
 
+#include "ui/reboot_hold.h"
+
 namespace mister::ui {
 
 class IBrowseSource;
@@ -42,9 +45,11 @@ enum class SystemItem : std::uint8_t {
     Reboot = 7,
     UseHd = 8,
     Exit = 9,
+
+    kCount,
 };
 
-inline constexpr std::size_t kSystemItemTotal = 10;
+inline constexpr std::size_t kSystemItemTotal = std::to_underlying(SystemItem::kCount);
 inline constexpr infra::IndexedArray<SystemItem, kSystemItemTotal, RowIndex> kSystemItems = [] {
     constexpr std::array<SystemItem, kSystemItemTotal> order{
         SystemItem::Core,
@@ -92,7 +97,9 @@ class SystemPage final : public Page, private IConfirmHost {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    explicit SystemPage(const SystemFacts& f) noexcept : facts_(f) {}
+    explicit SystemPage(const SystemFacts& f, const SessionFacts& s) noexcept
+        : facts_(f),
+          session_(s) {}
 
     PageId id() const override {
         TASTY_SEAT_BODY(SystemPage);
@@ -102,10 +109,10 @@ public:
     MenuMask mask() const override {
         TASTY_SEAT_BODY(SystemPage);
         MenuMask m = dense_mask(kSystemItemCount);
-        if (!facts_.core_loaded)
-            m = m.without_row(system_row_of(SystemItem::SaveSettings));
-        if (!facts_.hd_switchable)
-            m = m.without_row(system_row_of(SystemItem::UseHd));
+        if (!session_.core_loaded)
+            m = m.without(system_row_of(SystemItem::SaveSettings));
+        if (!session_.shows_hd_switch())
+            m = m.without(system_row_of(SystemItem::UseHd));
         return m;
     }
 
@@ -133,9 +140,14 @@ public:
     bool walk(PageWalk& out) const override;
     Transition handle(const UiEvent& ev) override;
 
-    void on_facts(const SystemFacts& f) override {
+    Transition open_root_child(PageContext&) override;
+
+    Transition open_scripts(PageContext&);
+
+    void on_facts(const SystemFacts& f, const SessionFacts& s) override {
         TASTY_SEAT_BODY(SystemPage);
         facts_ = f;
+        session_ = s;
     }
 
     std::uint32_t refusals() const noexcept override {
@@ -156,8 +168,6 @@ private:
     Transition open_scripts_confirm();
     Transition open_scripts_browser(Transition::Kind kind);
     Transition open_core_browser(bool recents_first);
-    Transition open_root_child(PageContext&) override;
-    Transition open_scripts(PageContext&) override;
     Transition reboot_release(const UiEvent& ev);
     Transition use_hd_();
     [[nodiscard]] bool ask_reboot_();
@@ -170,13 +180,12 @@ private:
     Transition on_confirm(RowIndex choice) override;
 
     SystemFacts facts_{};
+    SessionFacts session_{};
     RowIndex sel_{};
     std::uint32_t refusals_ = 0;
     std::uint32_t published_ = 0;
 
-    bool reboot_req_ = false;
-    bool cold_sent_ = false;
-    std::uint8_t reboot_off_ = 0;
+    RebootHold reboot_{};
 
     infra::OptRef<PageLaunches> launches_{};
     infra::OptRef<const IBrowseSource> storage_{};
@@ -188,7 +197,7 @@ private:
     CorePickHost core_pick_{};
 };
 
-std::unique_ptr<Page> make_system_page(const SystemFacts& facts);
+std::unique_ptr<SystemPage> make_system_page(const SystemFacts& facts, const SessionFacts& session);
 
 OsdRow system_item_row(SystemItem it) noexcept;
 

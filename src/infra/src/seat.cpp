@@ -33,7 +33,7 @@ namespace seat::detail {
         seat_name(want),
         seat_name(got)
     );
-    fatal(Error{Errc::negotiation, site, detail}, what);
+    fatal(Error{Errc::contract, site, detail}, what);
 }
 
 }

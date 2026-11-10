@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 #include <utility>
 
 #include "proto/storage_completion_dispatch.h"
@@ -46,6 +47,7 @@ proto::StorageStatus status_of(Errc e) noexcept {
         case Errc::stale:
         case Errc::busy:
         case Errc::seat_absent:
+        case Errc::contract:
             return proto::StorageStatus::Refused;
     }
 
@@ -226,7 +228,7 @@ void StorageService::on(const Req::Attach& a, const Req::Head& h, Work& w) noexc
         } else {
             st = status_of(e.error().code);
         }
-        served->attached(w.backend, proto::FileSize{e ? e->v : 0}, e.has_value(), a.growable);
+        served->attached(w.backend, e ? std::optional{*e} : std::nullopt, a.growable);
     }
     finish_(st, w, infra::make<Cmp>(c, answer_head(h, st)));
 }
@@ -306,17 +308,20 @@ void StorageService::own_all_() noexcept {
     rt_.owned = true;
     for (std::size_t n = 0; n < Data::capacity(); ++n) {
         Data::Loan l = data_.acquire();
-        const DataHand hand{data_.index_of(l)};
-        if (hand.exists()) {
-            const HandAt at = HandAt::of(hand);
-            rt_.slots[at.slot].hand(at.half) = std::move(l);
-        }
+
+        const auto slot = data_.index_of(l);
+        if (!slot)
+            break;
+        const HandAt at = HandAt::of(DataHand::of(*slot));
+        rt_.slots[at.slot].hand(at.half) = std::move(l);
     }
     for (std::size_t n = 0; n < Ctl::capacity(); ++n) {
         Ctl::Loan l = ctl_.acquire();
-        const std::uint8_t i = ctl_.index_of(l);
-        if (i < kSlots)
-            rt_.slots[proto::SlotIndex{i}].ctl() = std::move(l);
+        const auto slot = ctl_.index_of(l);
+        if (!slot)
+            break;
+        const proto::SlotIndex i = xthread::index_as<proto::SlotIndex>(*slot);
+        rt_.slots[i].ctl() = std::move(l);
     }
 }
 
@@ -326,13 +331,16 @@ bool StorageService::home_(proto::SlotIndex slot) const noexcept {
     return rt_.slots[slot].home();
 }
 
-proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexcept {
+std::optional<proto::StorageSeq> StorageService::submit(const proto::StorageRequest& req) noexcept {
     AdmitReader reader{};
     const Admit a = infra::dispatch<proto::StorageRequestRoutes>(req, reader);
 
-    if (!a.known || !rt_.slots.find(a.head.slot) || a.half.v >= kHalves || a.head.seq.v == 0) {
+    if (!a.known
+        || !rt_.slots.find(a.head.slot)
+        || !a.half.exists()
+        || a.head.seq == proto::StorageSeq::kRefused) {
         refusals_.add();
-        return proto::StorageSeq{0};
+        return std::nullopt;
     }
     own_all_();
     Rt::Slot& bind = rt_.slots[a.head.slot];
@@ -341,7 +349,7 @@ proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexc
         Data::Loan& l = bind.hand(a.half);
         if (!l) {
             refusals_.add();
-            return proto::StorageSeq{0};
+            return std::nullopt;
         }
         l->ask = req;
         l->backend = bind.bound();
@@ -351,7 +359,7 @@ proto::StorageSeq StorageService::submit(const proto::StorageRequest& req) noexc
         Ctl::Loan& l = bind.ctl();
         if (!l) {
             refusals_.add();
-            return proto::StorageSeq{0};
+            return std::nullopt;
         }
         l->ask = req;
         switch (a.stamp) {
@@ -392,14 +400,14 @@ std::optional<proto::StorageCompletion> StorageService::reap() noexcept {
         Cmp c{};
         if (Ctl::Loan l = ctl_.reap()) {
 
-            const proto::SlotIndex slot{ctl_.index_of(l)};
+            const proto::SlotIndex slot = xthread::index_as<proto::SlotIndex>(*ctl_.index_of(l));
             completed = l.completed();
             if (completed)
                 c = l->answer;
             l->backend.reset();
             rt_.slots[slot].ctl() = std::move(l);
         } else if (Data::Loan d = data_.reap()) {
-            const HandAt at = HandAt::of(DataHand{data_.index_of(d)});
+            const HandAt at = HandAt::of(DataHand::of(*data_.index_of(d)));
             completed = d.completed();
             if (completed)
                 c = d->answer;
@@ -421,7 +429,7 @@ std::span<const std::uint8_t> StorageService::half(
     proto::SlotIndex slot,
     proto::ArenaHalf which
 ) const noexcept {
-    if (!rt_.slots.find(slot) || which.v >= kHalves || !rt_.owned)
+    if (!rt_.slots.find(slot) || !which.exists() || !rt_.owned)
         return {};
     const Data::Loan& l = rt_.slots[slot].hand(which);
     if (!l)
@@ -433,7 +441,7 @@ std::span<std::uint8_t> StorageService::half_mut(
     proto::SlotIndex slot,
     proto::ArenaHalf which
 ) noexcept {
-    if (!rt_.slots.find(slot) || which.v >= kHalves)
+    if (!rt_.slots.find(slot) || !which.exists())
         return {};
     own_all_();
     const Data::Loan& l = rt_.slots[slot].hand(which);
@@ -510,7 +518,6 @@ StorageCounters StorageService::counters() const noexcept {
     c.errors = errors_.get();
     c.refusals = refusals_.get();
     c.depth_max = depth_max_.get();
-    c.state = quiesced() ? 1u : 2u;
     c.misrouted = request_misrouted_.get();
     return c;
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -9,6 +11,7 @@
 #include <string>
 
 #include "infra/error.h"
+#include "proto/types.h"
 #include "svc/file.h"
 #include "svc/types.h"
 
@@ -29,6 +32,29 @@ static_assert(method_of(0) == ZipMethod::Stored);
 static_assert(method_of(8) == ZipMethod::Deflate);
 static_assert(!method_of(12).has_value(), "bzip2 is not handled by this reader");
 
+struct MemberOrdinal {
+    std::uint64_t v = 0;
+
+    template <std::integral Word>
+    constexpr void stamp_into(Word& slot) const noexcept {
+        slot = static_cast<Word>(v);
+    }
+
+    friend constexpr bool operator==(MemberOrdinal, MemberOrdinal) = default;
+};
+
+struct ArchiveLocator {
+    proto::FileSize directory_offset{};
+    MemberOrdinal ordinal{};
+
+    [[nodiscard]] constexpr std::array<std::uint64_t, 2> to_unz() const noexcept {
+        std::array<std::uint64_t, 2> words{};
+        directory_offset.stamp_into(words[0]);
+        ordinal.stamp_into(words[1]);
+        return words;
+    }
+};
+
 struct ArchiveEntry {
     std::string name;
     std::uint64_t size = 0;
@@ -38,6 +64,8 @@ struct ArchiveEntry {
     bool encrypted = false;
 
     bool plausible = true;
+
+    ArchiveLocator at{};
 };
 
 class IArchive {
@@ -46,7 +74,7 @@ public:
 
     [[nodiscard]] virtual std::span<const ArchiveEntry> entries() const noexcept = 0;
 
-    [[nodiscard]] virtual Ex<std::unique_ptr<IFile>> open(std::size_t index) const = 0;
+    [[nodiscard]] virtual Ex<std::unique_ptr<IFile>> open(const ArchiveEntry& entry) const = 0;
 
 protected:
     IArchive() = default;

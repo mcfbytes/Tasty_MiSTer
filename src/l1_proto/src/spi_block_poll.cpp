@@ -6,49 +6,18 @@
 #include "proto/uio_opcodes.h"
 
 #include <array>
-#include <cstring>
 #include <span>
 
 namespace mister::proto {
 
 namespace {
 
-constexpr std::uint8_t kCid[16] = {
-    0x3e,
-    0x00,
-    0x00,
-    0x34,
-    0x38,
-    0x32,
-    0x44,
-    0x00,
-    0x00,
-    0x73,
-    0x2f,
-    0x6f,
-    0x93,
-    0x00,
-    0xc7,
-    0xcd
-};
-constexpr std::uint8_t kCsd[16] = {
-    0xf1,
-    0x40,
-    0x40,
-    0x0a,
-    0x80,
-    0x7f,
-    0xe5,
-    0xe9,
-    0x00,
-    0x00,
-    0x59,
-    0x5b,
-    0x32,
-    0x00,
-    0x0e,
-    0x40
-};
+constexpr auto kCid = std::to_array<std::uint8_t>(
+    {0x3e, 0x00, 0x00, 0x34, 0x38, 0x32, 0x44, 0x00, 0x00, 0x73, 0x2f, 0x6f, 0x93, 0x00, 0xc7, 0xcd}
+);
+constexpr auto kCsd = std::to_array<std::uint8_t>(
+    {0xf1, 0x40, 0x40, 0x0a, 0x80, 0x7f, 0xe5, 0xe9, 0x00, 0x00, 0x59, 0x5b, 0x32, 0x00, 0x0e, 0x40}
+);
 
 enum CsdLayout : unsigned {
     kCsdSizeByte0 = 6,
@@ -131,9 +100,8 @@ Lba lba_of_words(hal::SpiWord low, hal::SpiWord high) noexcept {
 
 [[nodiscard]] Ex<void> SpiBlockPoll::send_config() {
     hal::ISpiTransport& link = wiring_.link;
-    std::uint8_t csd[sizeof(kCsd)];
-    std::memcpy(csd, kCsd, sizeof(csd));
     const std::uint64_t size0 = wiring_.slot0_file_bytes ? *wiring_.slot0_file_bytes : 0;
+    std::array<std::uint8_t, kCsd.size()> csd = kCsd;
     csd[kCsdSizeByte0] = static_cast<std::uint8_t>(size0 >> kCsdSizeShift0);
     csd[kCsdSizeByte1] = static_cast<std::uint8_t>(size0 >> kCsdSizeShift1);
     csd[kCsdSizeByte2] = static_cast<std::uint8_t>(size0 >> kCsdSizeShift2);

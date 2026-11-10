@@ -2,18 +2,17 @@
 #include "tasty_cli.h"
 
 #include <cstdio>
+#include <optional>
 
 #include "infra/parse_int.h"
 
 namespace mister::fw {
 namespace {
 
-bool eq(std::string_view a, const char* b) noexcept {
-    return a == std::string_view(b);
-}
+constexpr const char* kBadArguments = "bad arguments (try tasty help)";
 
-[[nodiscard]] Ex<TastyArgs> fail(TastyRefusal::Code r) noexcept {
-    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), r});
+[[nodiscard]] Ex<TastyArgs> fail(TastyRefusal r) noexcept {
+    return std::unexpected(Error{Errc::bad_format, ERR_SITE(), tasty_refusal_detail(r)});
 }
 
 }
@@ -68,7 +67,10 @@ void tasty_print_usage(std::FILE* out) noexcept {
 }
 
 const char* tasty_args_refusal(std::uint32_t detail) noexcept {
-    switch (detail) {
+    const std::optional<TastyRefusal> r = tasty_refusal_of(detail);
+    if (!r)
+        return kBadArguments;
+    switch (*r) {
         case TastyRefusal::NoVerb:
             return "no verb (try tasty help)";
         case TastyRefusal::NoMovie:
@@ -126,9 +128,10 @@ const char* tasty_args_refusal(std::uint32_t detail) noexcept {
             return "--save needs a file";
         case TastyRefusal::SaveNotPlay:
             return "--save seeds a movie's battery save; use it with tasty play";
-        default:
-            return "bad arguments (try tasty help)";
+        case TastyRefusal::kCount:
+            return kBadArguments;
     }
+    return kBadArguments;
 }
 
 const char* tasty_verb_name(TastyVerb v) noexcept {
@@ -178,222 +181,302 @@ inline constexpr VerbRow kVerbRows[] = {
     {"stop", TastyVerb::Stop, false},
 };
 
-enum class OptStep : std::uint8_t { NotMine, Flag, Valued, Refused, Finish };
-
-struct OptResult {
-    OptStep step = OptStep::NotMine;
-    TastyRefusal::Code bad = TastyRefusal::UnknownOption;
+struct RecRow {
+    std::string_view name;
+    TastyVerb verb;
 };
 
-constexpr OptResult kNotMine{};
+inline constexpr RecRow kRecRows[] = {
+    {"start", TastyVerb::RecStart},
+    {"stop", TastyVerb::RecStop},
+};
 
-constexpr OptResult taken_flag() noexcept {
-    return OptResult{OptStep::Flag, TastyRefusal::UnknownOption};
+using RamFill = cores::IReplayCore::RamFill;
+
+struct FillRow {
+    std::string_view name;
+    RamFill fill;
+};
+
+inline constexpr FillRow kFillRows[] = {
+    {"zero", RamFill::Zero},
+    {"ff", RamFill::Ff},
+    {"random", RamFill::Random},
+};
+
+[[nodiscard]] constexpr std::optional<RamFill> ram_fill_of(std::string_view word) noexcept {
+    for (const FillRow& row : kFillRows)
+        if (row.name == word)
+            return row.fill;
+    return std::nullopt;
 }
 
-constexpr OptResult taken_valued() noexcept {
-    return OptResult{OptStep::Valued, TastyRefusal::UnknownOption};
+enum class OptionArity : std::uint8_t {
+    Flag,
+    Accepted,
+    Value,
+    Finish,
+};
+
+using OptionTake = bool (*)(std::string_view word, TastyArgs& a) noexcept;
+
+enum class OptionUse : std::uint8_t { Run, Record };
+
+struct OptionRow {
+    std::string_view name;
+    OptionArity arity = OptionArity::Flag;
+    TastyRefusal refusal = TastyRefusal::UnknownOption;
+    OptionUse use = OptionUse::Run;
+    std::optional<OptionTake> take{};
+    std::optional<bool TastyArgs::*> field{};
+
+    [[nodiscard]] static constexpr OptionRow flag(
+        std::string_view name,
+        bool TastyArgs::* field
+    ) noexcept {
+        OptionRow r{};
+        r.name = name;
+        r.arity = OptionArity::Flag;
+        r.field = field;
+        return r;
+    }
+
+    [[nodiscard]] static constexpr OptionRow accepted(std::string_view name) noexcept {
+        OptionRow r{};
+        r.name = name;
+        r.arity = OptionArity::Accepted;
+        return r;
+    }
+
+    [[nodiscard]] static constexpr OptionRow finish(std::string_view name) noexcept {
+        OptionRow r{};
+        r.name = name;
+        r.arity = OptionArity::Finish;
+        return r;
+    }
+
+    [[nodiscard]] static constexpr OptionRow valued(
+        std::string_view name,
+        TastyRefusal refusal,
+        OptionTake take,
+        OptionUse use = OptionUse::Run
+    ) noexcept {
+        OptionRow r{};
+        r.name = name;
+        r.arity = OptionArity::Value;
+        r.refusal = refusal;
+        r.use = use;
+        r.take = take;
+        return r;
+    }
+
+    [[nodiscard]] constexpr bool well_formed() const noexcept {
+        switch (arity) {
+            case OptionArity::Flag:
+                return field.has_value() && !take.has_value();
+            case OptionArity::Accepted:
+            case OptionArity::Finish:
+                return !field.has_value() && !take.has_value();
+            case OptionArity::Value:
+                return !field.has_value()
+                    && take.has_value()
+                    && refusal != TastyRefusal::UnknownOption
+                    && refusal != TastyRefusal::kCount;
+        }
+        return false;
+    }
+};
+
+[[nodiscard]] bool take_rom(std::string_view word, TastyArgs& a) noexcept {
+    return a.rom.assign(word);
 }
 
-constexpr OptResult refused(TastyRefusal::Code bad) noexcept {
-    return OptResult{OptStep::Refused, bad};
+[[nodiscard]] bool take_core(std::string_view word, TastyArgs& a) noexcept {
+    return a.core.assign(word);
 }
 
-[[nodiscard]] OptResult take_path_option(std::string_view o, const char* p, TastyArgs& a) noexcept {
-    if (eq(o, "--rom")) {
-        if (p == nullptr || !a.rom.assign(p))
-            return refused(TastyRefusal::BadRom);
-        return taken_valued();
-    }
-    if (eq(o, "--core")) {
-        if (p == nullptr || !a.core.assign(p))
-            return refused(TastyRefusal::BadCore);
-        return taken_valued();
-    }
-    if (eq(o, "--record")) {
-        if (p == nullptr)
-            return refused(TastyRefusal::BadRecord);
-        app::PathText path{};
-        if (!path.assign(p))
-            return refused(TastyRefusal::BadRecord);
-        a.record = path;
-        return taken_valued();
-    }
-    if (eq(o, "--save")) {
-        app::PathText save{};
-        if (p == nullptr || !save.assign(p))
-            return refused(TastyRefusal::BadSave);
-        a.save = save;
-        return taken_valued();
-    }
-    return kNotMine;
+[[nodiscard]] bool take_record(std::string_view word, TastyArgs& a) noexcept {
+    app::PathText path{};
+    if (!path.assign(word))
+        return false;
+    a.record = path;
+    return true;
 }
 
-[[nodiscard]] OptResult take_time_option(std::string_view o, const char* p, TastyArgs& a) noexcept {
-    if (eq(o, "--lead")) {
-        if (p == nullptr)
-            return refused(TastyRefusal::BadLead);
-        const auto n = infra::parse_int<std::int32_t>(p);
-        if (!n)
-            return refused(TastyRefusal::BadLead);
-        a.lead = app::MovieFrame{*n};
-        return taken_valued();
-    }
-    if (eq(o, "--phase")) {
-        if (p == nullptr)
-            return refused(TastyRefusal::BadPhase);
-        const auto n = infra::parse_int<std::uint32_t>(p);
-        if (!n)
-            return refused(TastyRefusal::BadPhase);
-        a.phase_us = std::chrono::microseconds{*n};
-        return taken_valued();
-    }
-    if (eq(o, "--stop-at")) {
-        if (p == nullptr)
-            return refused(TastyRefusal::BadStopAt);
-        const auto n = infra::parse_int<std::uint32_t>(p);
-        if (!n || *n == 0)
-            return refused(TastyRefusal::BadStopAt);
-        a.stop_at = app::movie_frame_from_wire(*n);
-        return taken_valued();
-    }
-    if (eq(o, "--linger") || eq(o, "--return-after")) {
-        if (p == nullptr)
-            return refused(TastyRefusal::BadLinger);
-        const auto n = infra::parse_int<std::uint32_t>(p);
-        if (!n)
-            return refused(TastyRefusal::BadLinger);
-        a.return_after_s = std::chrono::seconds{*n};
-        return taken_valued();
-    }
-    if (eq(o, "--vsync-adjust")) {
-        if (p == nullptr)
-            return refused(TastyRefusal::BadVsyncAdjust);
-        const auto n = infra::parse_int<std::uint32_t>(p);
-        if (!n || *n > kVsyncAdjustMatch)
-            return refused(TastyRefusal::BadVsyncAdjust);
-        a.vsync_adjust = *n == kVsyncAdjustOff ? app::VsyncAdjust::Off : app::VsyncAdjust::Match;
-        return taken_valued();
-    }
-    return kNotMine;
+[[nodiscard]] bool take_save(std::string_view word, TastyArgs& a) noexcept {
+    app::PathText save{};
+    if (!save.assign(word))
+        return false;
+    a.save = save;
+    return true;
 }
 
-[[nodiscard]] OptResult take_fill_option(std::string_view o, const char* p, TastyArgs& a) noexcept {
-    if (!eq(o, "--ram-init"))
-        return kNotMine;
-    if (p == nullptr)
-        return refused(TastyRefusal::BadRamInit);
-    const std::string_view s{p};
-    using Fill = cores::IMovieCodec::RamFill;
-    if (s == "zero")
-        a.ram_fill = Fill::Zero;
-    else if (s == "ff")
-        a.ram_fill = Fill::Ff;
-    else if (s == "random")
-        a.ram_fill = Fill::Random;
-    else
-        return refused(TastyRefusal::BadRamInit);
-    return taken_valued();
+[[nodiscard]] bool take_lead(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<std::int32_t> n = infra::parse_int<std::int32_t>(word);
+    if (!n)
+        return false;
+    a.lead = app::FrameCount{*n};
+    return true;
 }
 
-[[nodiscard]] OptResult take_record_option(
-    std::string_view o,
-    const char* p,
-    TastyArgs& a,
-    bool& rec_opt
-) noexcept {
-    using R = TastyRefusal;
-    if (eq(o, "--codec")) {
-        const auto c = p != nullptr ? app::parse_rec_codec(p) : std::nullopt;
-        if (!c)
-            return refused(R::BadCodec);
-        a.rec.codec = *c;
-        rec_opt = true;
-        return taken_valued();
-    }
-    if (eq(o, "--motion")) {
-        const auto m = p != nullptr ? app::parse_rec_motion(p) : std::nullopt;
-        if (!m)
-            return refused(R::BadMotion);
-        a.rec.motion = *m;
-        rec_opt = true;
-        return taken_valued();
-    }
-    if (eq(o, "--scale")) {
-        const auto s = p != nullptr ? app::parse_rec_scale(p) : std::nullopt;
-        if (!s)
-            return refused(R::BadScale);
-        a.rec.scale = *s;
-        rec_opt = true;
-        return taken_valued();
-    }
-    if (eq(o, "--every")) {
-        const auto n = p != nullptr ? app::parse_rec_every(p) : std::nullopt;
-        if (!n)
-            return refused(R::BadEvery);
-        a.rec.every = *n;
-        rec_opt = true;
-        return taken_valued();
-    }
-    if (eq(o, "--from")) {
-        if (p == nullptr)
-            return refused(R::BadFrom);
-        const auto n = infra::parse_int<std::int32_t>(p);
-        if (!n || *n < 0)
-            return refused(R::BadFrom);
-        a.rec.from_frame = app::MovieFrame{*n};
-        rec_opt = true;
-        return taken_valued();
-    }
-    if (eq(o, "--to")) {
-        if (p == nullptr)
-            return refused(R::BadTo);
-        const auto n = infra::parse_int<std::int32_t>(p);
-        if (!n || *n < 0)
-            return refused(R::BadTo);
-        a.rec.to_frame = app::MovieFrame{*n};
-        rec_opt = true;
-        return taken_valued();
-    }
-    if (eq(o, "--segment")) {
-        const auto n = p != nullptr ? app::parse_rec_size(p) : std::nullopt;
-        if (!n || *n == 0 || !app::rec_segment_ok(*n))
-            return refused(R::BadSegment);
-        a.rec.segment_bytes = *n;
-        rec_opt = true;
-        return taken_valued();
-    }
-    return kNotMine;
+[[nodiscard]] bool take_phase(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<std::uint32_t> n = infra::parse_int<std::uint32_t>(word);
+    if (!n)
+        return false;
+    a.phase_us = std::chrono::microseconds{*n};
+    return true;
 }
 
-[[nodiscard]] OptResult take_flag_option(std::string_view o, TastyArgs& a) noexcept {
-    if (eq(o, "--stay")) {
-        a.stay = true;
-        return taken_flag();
+[[nodiscard]] bool take_stop_at(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<std::uint32_t> n = infra::parse_int<std::uint32_t>(word);
+    if (!n || *n == 0)
+        return false;
+    a.stop_at = app::movie_frame_from_wire(*n);
+    return true;
+}
+
+[[nodiscard]] bool take_linger(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<std::uint32_t> n = infra::parse_int<std::uint32_t>(word);
+    if (!n)
+        return false;
+    a.linger = std::chrono::seconds{*n};
+    return true;
+}
+
+[[nodiscard]] bool take_vsync_adjust(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<std::uint32_t> n = infra::parse_int<std::uint32_t>(word);
+    if (!n || *n > kVsyncAdjustMatch)
+        return false;
+    a.vsync_adjust = *n == kVsyncAdjustOff ? app::VsyncAdjust::Off : app::VsyncAdjust::Match;
+    return true;
+}
+
+[[nodiscard]] bool take_ram_init(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<RamFill> fill = ram_fill_of(word);
+    if (!fill)
+        return false;
+    a.ram_fill = *fill;
+    return true;
+}
+
+[[nodiscard]] bool take_codec(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<app::RecCodec> codec = app::parse_rec_codec(word);
+    if (!codec)
+        return false;
+    a.rec.codec = *codec;
+    return true;
+}
+
+[[nodiscard]] bool take_motion(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<app::RecMotion> motion = app::parse_rec_motion(word);
+    if (!motion)
+        return false;
+    a.rec.motion = *motion;
+    return true;
+}
+
+[[nodiscard]] bool take_scale(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<app::RecScale> scale = app::parse_rec_scale(word);
+    if (!scale)
+        return false;
+    a.rec.scale = *scale;
+    return true;
+}
+
+[[nodiscard]] bool take_every(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<app::RecEvery> every = app::parse_rec_every(word);
+    if (!every)
+        return false;
+    a.rec.every = *every;
+    return true;
+}
+
+[[nodiscard]] bool take_from(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<std::int32_t> n = infra::parse_int<std::int32_t>(word);
+    if (!n || *n < 0)
+        return false;
+    a.rec.from_frame = app::MovieFrame{*n};
+    return true;
+}
+
+[[nodiscard]] bool take_to(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<std::int32_t> n = infra::parse_int<std::int32_t>(word);
+    if (!n || *n < 0)
+        return false;
+    a.rec.to_frame = app::MovieFrame{*n};
+    return true;
+}
+
+[[nodiscard]] bool take_segment(std::string_view word, TastyArgs& a) noexcept {
+    const std::optional<proto::FileSize> bytes = app::parse_rec_size(word);
+    if (!bytes || bytes->empty() || !app::rec_segment_ok(*bytes))
+        return false;
+    a.rec.segment_bytes = *bytes;
+    return true;
+}
+
+inline constexpr OptionRow kOptionRows[] = {
+    OptionRow::valued("--rom", TastyRefusal::BadRom, take_rom),
+    OptionRow::valued("--core", TastyRefusal::BadCore, take_core),
+    OptionRow::valued("--record", TastyRefusal::BadRecord, take_record),
+    OptionRow::valued("--save", TastyRefusal::BadSave, take_save),
+    OptionRow::valued("--lead", TastyRefusal::BadLead, take_lead),
+    OptionRow::valued("--phase", TastyRefusal::BadPhase, take_phase),
+    OptionRow::valued("--stop-at", TastyRefusal::BadStopAt, take_stop_at),
+    OptionRow::valued("--linger", TastyRefusal::BadLinger, take_linger),
+    OptionRow::valued("--vsync-adjust", TastyRefusal::BadVsyncAdjust, take_vsync_adjust),
+    OptionRow::valued("--ram-init", TastyRefusal::BadRamInit, take_ram_init),
+    OptionRow::valued("--codec", TastyRefusal::BadCodec, take_codec, OptionUse::Record),
+    OptionRow::valued("--motion", TastyRefusal::BadMotion, take_motion, OptionUse::Record),
+    OptionRow::valued("--scale", TastyRefusal::BadScale, take_scale, OptionUse::Record),
+    OptionRow::valued("--every", TastyRefusal::BadEvery, take_every, OptionUse::Record),
+    OptionRow::valued("--from", TastyRefusal::BadFrom, take_from, OptionUse::Record),
+    OptionRow::valued("--to", TastyRefusal::BadTo, take_to, OptionUse::Record),
+    OptionRow::valued("--segment", TastyRefusal::BadSegment, take_segment, OptionUse::Record),
+    OptionRow::flag("--stay", &TastyArgs::stay),
+    OptionRow::flag("--loop", &TastyArgs::loop),
+    OptionRow::flag("--strict", &TastyArgs::strict),
+    OptionRow::flag("--no-splash", &TastyArgs::no_splash),
+    OptionRow::accepted("--hashes"),
+    OptionRow::flag("--hashes-only", &TastyArgs::hashes_only),
+    OptionRow::finish("--help"),
+
+    OptionRow::valued("--return-after", TastyRefusal::BadLinger, take_linger),
+    OptionRow::finish("-h"),
+};
+
+template <class Row, std::size_t N>
+[[nodiscard]] consteval bool words_named_once(const Row (&rows)[N]) noexcept {
+    for (std::size_t i = 0; i < N; ++i) {
+        if (rows[i].name.empty())
+            return false;
+        for (std::size_t j = i + 1; j < N; ++j)
+            if (rows[i].name == rows[j].name)
+                return false;
     }
-    if (eq(o, "--loop")) {
-        a.loop = true;
-        return taken_flag();
-    }
-    if (eq(o, "--strict")) {
-        a.strict = true;
-        return taken_flag();
-    }
-    if (eq(o, "--no-splash")) {
-        a.no_splash = true;
-        return taken_flag();
-    }
-    if (eq(o, "--hashes"))
-        return taken_flag();
-    if (eq(o, "--hashes-only")) {
-        a.hashes_only = true;
-        return taken_flag();
-    }
-    if (eq(o, "--help") || eq(o, "-h")) {
-        a.verb = TastyVerb::Help;
-        return OptResult{OptStep::Finish, TastyRefusal::UnknownOption};
-    }
-    return kNotMine;
+    return true;
+}
+
+static_assert(words_named_once(kVerbRows), "every verb row names a distinct verb word");
+static_assert(words_named_once(kRecRows), "every rec row names a distinct subverb");
+static_assert(words_named_once(kFillRows), "every ram-init row names a distinct fill");
+static_assert(words_named_once(kOptionRows), "every option row names a distinct option word");
+
+[[nodiscard]] consteval bool options_are_well_formed() noexcept {
+    for (const OptionRow& row : kOptionRows)
+        if (!row.well_formed())
+            return false;
+    return true;
+}
+
+static_assert(options_are_well_formed(), "an option row must carry the payload its arity reads");
+
+template <class Row, std::size_t N>
+[[nodiscard]] const Row* row_named(const Row (&rows)[N], std::string_view word) noexcept {
+    for (const Row& row : rows)
+        if (row.name == word)
+            return &row;
+    return nullptr;
 }
 
 }
@@ -401,23 +484,20 @@ constexpr OptResult refused(TastyRefusal::Code bad) noexcept {
 [[nodiscard]] Ex<TastyArgs> parse_tasty_args(std::span<const char* const> argv) noexcept {
     if (argv.size() <= kVerbArg)
         return fail(TastyRefusal::NoVerb);
-    std::string_view v0{argv[kVerbArg]};
+    const std::string_view v0{argv[kVerbArg]};
     TastyArgs a{};
     std::size_t i = kOperandArg;
-    if (eq(v0, "help") || eq(v0, "--help") || eq(v0, "-h")) {
+    if (v0 == "help" || v0 == "--help" || v0 == "-h") {
         a.verb = TastyVerb::Help;
         return a;
     }
-    if (eq(v0, "rec")) {
+    if (v0 == "rec") {
         if (argv.size() <= kOperandArg)
             return fail(TastyRefusal::NoRecAction);
-        const std::string_view sub{argv[kOperandArg]};
-        if (eq(sub, "start"))
-            a.verb = TastyVerb::RecStart;
-        else if (eq(sub, "stop"))
-            a.verb = TastyVerb::RecStop;
-        else
+        const RecRow* const rec = row_named(kRecRows, argv[kOperandArg]);
+        if (rec == nullptr)
             return fail(TastyRefusal::BadRecAction);
+        a.verb = rec->verb;
         i = kFirstOptionArg;
     } else {
         const VerbRow* row = nullptr;
@@ -438,37 +518,37 @@ constexpr OptResult refused(TastyRefusal::Code bad) noexcept {
         }
     }
 
-    bool rec_opt = false;
+    bool record_option = false;
     while (i < argv.size()) {
-        const std::string_view o{argv[i]};
-        const char* const p = i + 1 < argv.size() ? argv[i + 1] : nullptr;
-        OptResult r = take_path_option(o, p, a);
-        if (r.step == OptStep::NotMine)
-            r = take_time_option(o, p, a);
-        if (r.step == OptStep::NotMine)
-            r = take_fill_option(o, p, a);
-        if (r.step == OptStep::NotMine)
-            r = take_record_option(o, p, a, rec_opt);
-        if (r.step == OptStep::NotMine)
-            r = take_flag_option(o, a);
-        switch (r.step) {
-            case OptStep::NotMine:
-                return fail(TastyRefusal::UnknownOption);
-            case OptStep::Refused:
-                return fail(r.bad);
-            case OptStep::Finish:
-                return a;
-            case OptStep::Flag:
+        const OptionRow* const row = row_named(kOptionRows, argv[i]);
+        if (row == nullptr)
+            return fail(TastyRefusal::UnknownOption);
+        switch (row->arity) {
+            case OptionArity::Flag:
+                a.*(*row->field) = true;
                 ++i;
                 break;
-            case OptStep::Valued:
+            case OptionArity::Accepted:
+                ++i;
+                break;
+            case OptionArity::Finish:
+                a.verb = TastyVerb::Help;
+                return a;
+            case OptionArity::Value: {
+                if (i + 1 >= argv.size())
+                    return fail(row->refusal);
+                if (!(*row->take)(std::string_view{argv[i + 1]}, a))
+                    return fail(row->refusal);
+                if (row->use == OptionUse::Record)
+                    record_option = true;
                 i += kOptionWidth;
                 break;
+            }
         }
     }
     if (!app::rec_bounds_ok(a.rec))
         return fail(TastyRefusal::BadRecBounds);
-    if (!a.record && rec_opt)
+    if (!a.record && record_option)
         return fail(TastyRefusal::RecOptionsWithoutRecord);
 
     if (a.verb == TastyVerb::RecStart

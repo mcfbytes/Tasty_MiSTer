@@ -6,11 +6,14 @@
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "infra/wired_end.h"
 #include "svc/config.h"
 #include "svc/config_snapshot.h"
 #include "svc/deadzone_rule.h"
 
 namespace mister::fw {
+
+using infra::wired_end;
 
 using namespace mister;
 
@@ -19,22 +22,10 @@ DiagSampler::Sources Hub::diag_sources_(const BootParts& plat) noexcept {
     const DeviceBlock::Parts p = device_.parts();
     const SessionMode::Face::Parts& f = face_parts_;
     return DiagSampler::Sources{
-        .mgl_row0 = d.mgl_row0,
-        .window_counts = d.window_counts,
-        .bay_counts = d.bay_counts,
+        .device = d,
         .video_stats = p.wires.video.stats_cell(),
         .video_geometry = p.wires.video.geometry_cell(),
         .video_wire = p.wires.video.wire(),
-        .diag = d.diag,
-        .pause_expiries = d.pause_expiries,
-        .recover_polls = d.recover_polls,
-        .save_write_failures = d.save_write_failures,
-        .fallbacks = d.fallbacks,
-        .ini_write_failures = d.ini_write_failures,
-        .doorbell = d.doorbell,
-        .round_timing = d.round_timing,
-        .round_traces = d.round_traces,
-        .frames = d.frames,
         .ui_pages = f.ui_pages,
         .hd = f.hd,
         .replay = replay_.replay_status_,
@@ -42,11 +33,6 @@ DiagSampler::Sources Hub::diag_sources_(const BootParts& plat) noexcept {
         .rec_encode = rec_.encode_status_,
         .rec_write = rec_.rec_write_status_,
         .rec_avi = rec_.avi_write_status_,
-        .screenshots = d.screenshots,
-        .sector_route = d.sector_route,
-        .osd_route = d.osd_route,
-        .sys_route = d.sys_route,
-        .main_log = d.main_log,
     };
 }
 
@@ -110,13 +96,12 @@ Hub::Hub(const BootParts& plat, app::IStopSignal& stop, SessionMode& mode)
               .rt_lane = plat.rt_lane,
               .transitioning = device_.transitioning_
           },
-          UiMain::Wires{.wake = device_.ui_wake_, .uart_handoffs = device_.uart_handoffs_},
+          UiMain::Wires{.wake = device_.ui_wake_, .uart_handoffs = device_.uart_handoffs()},
 
           UiMain::Wiring{
               .fifo = fifo_ ? infra::OptRef<app::CmdFifo>{*fifo_} : infra::OptRef<app::CmdFifo>{},
               .mgl = face_parts_.mgl,
               .video = device_.video_pump_,
-              .uart = face_parts_.uart,
               .ui_sink = face_parts_.ui_sink,
               .owner_events = device_.owner_events_,
               .bt = face_parts_.bt,

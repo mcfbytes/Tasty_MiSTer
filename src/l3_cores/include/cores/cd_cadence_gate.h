@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
+#include <optional>
 
 #include "cores/cd_tick_periods.h"
 #include "infra/seat.h"
@@ -17,7 +19,7 @@ public:
         : ticks_(ticks),
           clock_(c) {}
 
-    [[nodiscard]] bool admit(bool active, std::uint8_t speed_index) noexcept;
+    [[nodiscard]] bool admit(bool active, CdSpeedIndex speed_index) noexcept;
 
     [[nodiscard]] std::uint32_t gated_ticks() const noexcept { return gated_ticks_; }
 
@@ -25,7 +27,7 @@ private:
     CdTickPeriods ticks_;
     const os::IClock& clock_;
 
-    std::int64_t next_due_ns_ = 0;
+    std::optional<os::RawMonotonicClock::time_point> next_due_{};
     std::uint32_t gated_ticks_ = 0;
 };
 

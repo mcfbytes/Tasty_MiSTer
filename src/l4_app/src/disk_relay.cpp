@@ -2,6 +2,7 @@
 #include "app/disk_relay.h"
 #include "proto/link.h"
 
+#include <concepts>
 #include <span>
 #include <utility>
 
@@ -16,14 +17,15 @@ namespace {
 
 using Ask = DiskSlot::Ask;
 
-[[nodiscard]] Ask ask_of(const auto& alt, std::uint16_t gen, std::uint16_t epoch) noexcept {
-    return infra::make<Ask>(alt, Ask::Head{.gen = gen, .epoch = epoch});
+[[nodiscard]] Ask ask_of(const auto& alt, RelayStamp stamp) noexcept {
+    return infra::make<Ask>(alt, stamp);
 }
 
-}
+struct CommandLegs {
+    template <class A>
+    static constexpr bool routed = std::same_as<A, Ask::Command> || std::same_as<A, Ask::Resume>;
+};
 
-void DiskRelay::install(std::unique_ptr<cores::IDiskServant> servant) noexcept {
-    io_.servant = std::move(servant);
 }
 
 void DiskRelay::service_rt(proto::Link& link, const proto::DiskPollDecl& poll) noexcept {
@@ -80,9 +82,7 @@ void DiskRelay::abandon_command() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
     if (!rt_.command_open)
         return;
-    do
-        ++rt_.epoch;
-    while (rt_.epoch == 0);
+    rt_.stamp = rt_.stamp.next_epoch();
     close_command_();
     rt_.abandoned.add();
 }
@@ -96,9 +96,7 @@ void DiskRelay::abandon_command_on(proto::DiskUnit unit) noexcept {
 
 void DiskRelay::forget() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
-    do
-        ++rt_.gen;
-    while (rt_.gen == 0);
+    rt_.stamp = rt_.stamp.next_core();
     close_command_();
     rt_.orders = {};
 
@@ -116,21 +114,19 @@ void DiskRelay::close_command_() noexcept {
 void DiskRelay::land_(Chan::Loan&& l, proto::Link* link) noexcept {
     if (!l.completed()) {
         rt_.stale.add();
-        const bool ours = l->ask.head.gen == rt_.gen && l->ask.head.epoch == rt_.epoch;
-        if (ours
-            && (infra::kind_of(l->ask) == Ask::Kind::Command
-                || infra::kind_of(l->ask) == Ask::Kind::Resume)) {
-            close_command_();
+        if (l->ask.head.matches(rt_.stamp)) {
+            StaleLanding stale{*this};
+            infra::dispatch<CommandLegs>(l->ask, stale);
         }
         return;
     }
     infra::dispatch<infra::AllRouted>(l->ask, *this, l, link);
 }
 
-void DiskRelay::on(const Ask::Bind& a, const Ask::Head& h, Chan::Loan& l, proto::Link*) noexcept {
+void DiskRelay::on(const Ask::Bind& a, const RelayStamp& h, Chan::Loan& l, proto::Link*) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
     const infra::OptRef<Order> order = rt_.orders.find(a.unit);
-    if (h.gen != rt_.gen || !order) {
+    if (!h.same_core(rt_.stamp) || !order) {
         rt_.stale.add();
         return;
     }
@@ -143,7 +139,7 @@ void DiskRelay::on(const Ask::Bind& a, const Ask::Head& h, Chan::Loan& l, proto:
 
 void DiskRelay::on(
     const Ask::Command&,
-    const Ask::Head& h,
+    const RelayStamp& h,
     Chan::Loan& l,
     proto::Link* link
 ) noexcept {
@@ -153,7 +149,7 @@ void DiskRelay::on(
 
 void DiskRelay::on(
     const Ask::Resume&,
-    const Ask::Head& h,
+    const RelayStamp& h,
     Chan::Loan& l,
     proto::Link* link
 ) noexcept {
@@ -161,7 +157,7 @@ void DiskRelay::on(
     act_(h, l, link);
 }
 
-void DiskRelay::on(const Ask::Release&, const Ask::Head&, Chan::Loan&, proto::Link*) noexcept {
+void DiskRelay::on(const Ask::Release&, const RelayStamp&, Chan::Loan&, proto::Link*) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, A);
 }
 
@@ -170,8 +166,8 @@ void DiskRelay::misrouted(const Ask&, Chan::Loan&, proto::Link*) noexcept {
     rt_.stale.add();
 }
 
-void DiskRelay::act_(const Ask::Head& h, Chan::Loan& l, proto::Link* link) noexcept {
-    if (h.gen != rt_.gen || h.epoch != rt_.epoch) {
+void DiskRelay::act_(const RelayStamp& h, Chan::Loan& l, proto::Link* link) noexcept {
+    if (!h.matches(rt_.stamp)) {
         rt_.stale.add();
         return;
     }
@@ -192,7 +188,7 @@ void DiskRelay::act_(const Ask::Head& h, Chan::Loan& l, proto::Link* link) noexc
         close_command_();
         return;
     }
-    l->ask = ask_of(Ask::Resume{}, rt_.gen, rt_.epoch);
+    l->ask = ask_of(Ask::Resume{}, rt_.stamp);
     l->act = {};
     chan_.send(std::move(l));
 }
@@ -244,7 +240,7 @@ bool DiskRelay::send_orders_() noexcept {
         Chan::Loan l = chan_.acquire();
         if (!l)
             return false;
-        l->ask = ask_of(Ask::Release{}, rt_.gen, rt_.epoch);
+        l->ask = ask_of(Ask::Release{}, rt_.stamp);
         l->act = {};
         chan_.send(std::move(l));
         rt_.release_owed = false;
@@ -261,7 +257,7 @@ bool DiskRelay::send_orders_() noexcept {
             return false;
         Ask::Bind b{.unit = unit, .seq = o.seq};
         (void)b.path.assign(o.path.view());
-        l->ask = ask_of(b, rt_.gen, rt_.epoch);
+        l->ask = ask_of(b, rt_.stamp);
         l->act = {};
         l->bound = cores::MountState::Pending;
         chan_.send(std::move(l));
@@ -301,7 +297,7 @@ void DiskRelay::poll_(proto::Link& link, const proto::DiskPollDecl& poll) noexce
         rt_.declines.add();
         return;
     }
-    l->ask = ask_of(c, rt_.gen, rt_.epoch);
+    l->ask = ask_of(c, rt_.stamp);
     l->act = {};
     chan_.send(std::move(l));
     rt_.command_open = true;
@@ -326,37 +322,35 @@ void DiskRelay::pump_on_caller() noexcept {
     serve();
 }
 
-void DiskRelay::begin_(const Ask::Head& h) noexcept {
-    if (h.gen == io_.served_gen)
+void DiskRelay::begin_(const RelayStamp& h) noexcept {
+    if (h.same_core(io_.served))
         return;
-    if (io_.servant)
-        io_.servant->release();
-    io_.served_gen = h.gen;
+    io_.servant->release();
+    io_.served = h;
 }
 
-void DiskRelay::on(const Ask::Bind& a, const Ask::Head& h, Job& job) noexcept {
+void DiskRelay::on(const Ask::Bind& a, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
     begin_(h);
-    job->bound = io_.servant ? io_.servant->bind(a.unit, a.path.view()) : cores::MountState::Failed;
+    job->bound = io_.servant->bind(a.unit, a.path.view());
 }
 
-void DiskRelay::on(const Ask::Command& a, const Ask::Head& h, Job& job) noexcept {
+void DiskRelay::on(const Ask::Command& a, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
     begin_(h);
-    job->act = io_.servant ? io_.servant->start(a.state, job->bytes) : proto::DiskAct::none();
+    job->act = io_.servant->start(a.state, job->bytes);
 }
 
-void DiskRelay::on(const Ask::Resume&, const Ask::Head& h, Job& job) noexcept {
+void DiskRelay::on(const Ask::Resume&, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
     begin_(h);
-    job->act = io_.servant ? io_.servant->resume(job->bytes) : proto::DiskAct::none();
+    job->act = io_.servant->resume(job->bytes);
 }
 
-void DiskRelay::on(const Ask::Release&, const Ask::Head& h, Job&) noexcept {
+void DiskRelay::on(const Ask::Release&, const RelayStamp& h, Job&) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(DiskRelay, B);
     begin_(h);
-    if (io_.servant)
-        io_.servant->release();
+    io_.servant->release();
 }
 
 void DiskRelay::misrouted(const Ask&, Job& job) noexcept {

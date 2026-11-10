@@ -27,8 +27,8 @@ void RoundTimer::begin(std::int64_t t_wake_ns) noexcept {
     round_start_ns_ = t_wake_ns;
     last_mark_ns_ = t_wake_ns;
     longest_ns_ = -1;
-    longest_ = {};
-    lifecycle_ = 0;
+    longest_blame_ = {};
+    lifecycle_ = {};
     in_round_ = true;
     recorder_.begin(MonoInstant{std::chrono::nanoseconds{t_wake_ns}});
 }
@@ -44,40 +44,44 @@ void RoundTimer::wake(std::int64_t latency_ns, std::uint64_t missed_ticks) noexc
     recorder_.wake(round_span(std::chrono::nanoseconds{latency_ns}));
 }
 
-void RoundTimer::mark(RoundSegment seg, std::size_t index, std::int64_t now_ns) noexcept {
+void RoundTimer::mark(RoundSegment seg, ServiceSlot row, std::int64_t now_ns) noexcept {
     if (!in_round_)
         return;
     const std::int64_t d = now_ns - last_mark_ns_;
-    const RoundTiming::Cause at{seg, static_cast<std::uint8_t>(index), 0, 0};
+    const RoundTiming::Blame at{seg, row};
     if (d > longest_ns_) {
         longest_ns_ = d;
-        longest_ = at;
+        longest_blame_ = at;
     }
     recorder_.mark(at, round_span(std::chrono::nanoseconds{d}));
     last_mark_ns_ = now_ns;
 }
 
+void RoundTimer::mark(RoundSegment seg, std::int64_t now_ns) noexcept {
+    mark(seg, ServiceSlot{}, now_ns);
+}
+
 void RoundTimer::note_lifecycle(RoundLifecycle why) noexcept {
-    lifecycle_ = static_cast<std::uint8_t>(lifecycle_ | static_cast<std::uint8_t>(why));
+    lifecycle_ = lifecycle_.with(why);
 }
 
 std::int64_t RoundTimer::end(std::int64_t t_end_ns) noexcept {
     const std::int64_t t = t_end_ns > 0 ? t_end_ns : last_mark_ns_;
     if (!in_round_)
         return t;
-    mark(RoundSegment::Tail, 0, t);
+    mark(RoundSegment::Tail, t);
     const std::uint64_t dur = non_negative(t - round_start_ns_);
-    RoundTiming::Cause cause = longest_;
-    cause.lifecycle = lifecycle_;
-    if (lifecycle_ != 0) {
-        record_(acc_.lifecycle, dur, cause);
+    RoundTiming::Blame blame = longest_blame_;
+    blame.lifecycle_marks = lifecycle_;
+    if (!lifecycle_.empty()) {
+        record_(acc_.lifecycle, dur, blame);
         acc_.all_life_rounds = sat_add(acc_.all_life_rounds, 1);
         if (dur > acc_.all_life_max_ns) {
             acc_.all_life_max_ns = dur;
-            acc_.all_life_cause = cause;
+            acc_.all_life_blame = blame;
         }
     } else {
-        std::uint32_t& h = acc_.all_steady_hist[record_(acc_.steady, dur, cause)];
+        std::uint32_t& h = acc_.all_steady_hist[record_(acc_.steady, dur, blame)];
         h = sat_add(h, 1);
         if (acc_.all_steady_rounds != kU32Max)
             acc_.all_steady_sum_ns += dur;
@@ -86,14 +90,14 @@ std::int64_t RoundTimer::end(std::int64_t t_end_ns) noexcept {
             acc_.all_steady_over_1ms = sat_add(acc_.all_steady_over_1ms, 1);
         if (dur > acc_.all_steady_max_ns) {
             acc_.all_steady_max_ns = dur;
-            acc_.all_steady_cause = cause;
+            acc_.all_steady_blame = blame;
             acc_.steady_max_epoch = acc_.epoch + 1;
         }
     }
     const MonoInstant finish{std::chrono::nanoseconds{t}};
     if (dur > kOverNs)
-        recorder_.record(finish, cause);
-    recorder_.end(finish, cause);
+        recorder_.record(finish, blame);
+    recorder_.end(finish, blame);
     in_round_ = false;
     if (t - epoch_start_ns_ >= kEpochNs)
         close_epoch_(t);
@@ -109,7 +113,7 @@ void RoundTimer::flush(std::int64_t now_ns) noexcept {
 std::size_t RoundTimer::record_(
     RoundTiming::Dist& d,
     std::uint64_t ns,
-    RoundTiming::Cause c
+    RoundTiming::Blame blame
 ) noexcept {
     if (d.n == 0 || ns < d.min_ns)
         d.min_ns = ns;
@@ -117,7 +121,7 @@ std::size_t RoundTimer::record_(
     d.sum_ns += ns;
     if (ns > d.max_ns) {
         d.max_ns = ns;
-        d.max_cause = c;
+        d.max_blame = blame;
     }
     if (ns > kOverNs)
         d.over_1ms = sat_add(d.over_1ms, 1);

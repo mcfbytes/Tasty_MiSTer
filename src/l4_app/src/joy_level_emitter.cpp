@@ -8,15 +8,15 @@ namespace mister::app {
 void JoyLevelEmitter::publish(bool muted) {
 
     svc::JoyMask seen{};
-    std::uint32_t players = 0;
+    svc::PlayerMask players{};
 
     if (reset_seen_.take(wire_.edge_reset())) {
         for (PlayerLevel& level : levels_)
             level.posted = {};
     }
     wm_gates_ = wire_.gates();
-    const bool grabbed = InputWire::has(wm_gates_, InputWire::kGateGrabbed);
-    const bool osd_visible = InputWire::has(wm_gates_, InputWire::kGateOsdVisible);
+    const bool grabbed = wm_gates_.has(InputWire::kGateGrabbed);
+    const bool osd_visible = wm_gates_.has(InputWire::kGateOsdVisible);
 
     for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
         const svc::PlayerIndex p{i};
@@ -24,7 +24,7 @@ void JoyLevelEmitter::publish(bool muted) {
         const svc::JoyMask mask = svc_.joy_mask(p);
         if (!mask.empty()) {
             seen = seen.with(mask);
-            players |= (1u << i);
+            players = players.with(p);
         }
 
         const JoyLevel held = wire_.joy(p);

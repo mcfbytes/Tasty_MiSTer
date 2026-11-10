@@ -7,7 +7,7 @@ class IBracketClose {
 public:
     virtual ~IBracketClose() = default;
 
-    virtual void before_close() noexcept = 0;
+    virtual void before_close(bool remounts_saves) noexcept = 0;
 
 protected:
     IBracketClose() = default;

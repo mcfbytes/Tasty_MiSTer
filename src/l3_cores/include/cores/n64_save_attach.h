@@ -27,13 +27,15 @@ struct SaveAttach {
         std::span<const std::byte> bytes
     ) noexcept {
         if (bytes.size() == sizeof(SaveOrder)) {
-            return SaveAttach{
-                infra::load_native<SaveOrder>(bytes.first<sizeof(SaveOrder)>()),
-                std::nullopt
-            };
+            const SaveOrder order = infra::load_native<SaveOrder>(bytes.first<sizeof(SaveOrder)>());
+            if (!SaveOrder::create_fits(order.create, proto::FileSize{order.bytes}))
+                return std::nullopt;
+            return SaveAttach{order, std::nullopt};
         }
         if (bytes.size() == sizeof(Planned)) {
             const auto both = infra::load_native<Planned>(bytes.first<sizeof(Planned)>());
+            if (!SaveOrder::create_fits(both.order.create, proto::FileSize{both.order.bytes}))
+                return std::nullopt;
             return SaveAttach{both.order, both.plan};
         }
         return std::nullopt;

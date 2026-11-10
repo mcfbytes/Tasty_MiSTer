@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <sched.h>
+
 #include <array>
 #include <compare>
 #include <concepts>
@@ -10,6 +12,7 @@
 #include "infra/decimal_text.h"
 #include "infra/error.h"
 #include "infra/hex_text.h"
+#include "infra/json_out.h"
 #include "infra/seat.h"
 
 namespace mister::os {
@@ -34,12 +37,24 @@ struct PhysAddr {
         return static_cast<std::int64_t>(v);
     }
 
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite site) const noexcept {
+        return Error{code, site, static_cast<std::uint32_t>(v)};
+    }
+
     friend constexpr bool operator==(PhysAddr, PhysAddr) = default;
     friend constexpr auto operator<=>(PhysAddr, PhysAddr) = default;
 };
 
 [[nodiscard]] constexpr std::uint32_t low32(PhysAddr a) noexcept {
     return static_cast<std::uint32_t>(a.v);
+}
+
+[[nodiscard]] constexpr Error address_error(
+    Errc code,
+    infra::ErrorSite site,
+    PhysAddr at
+) noexcept {
+    return at.refusal(code, site);
 }
 
 struct VtNumber {
@@ -77,8 +92,9 @@ struct CpuSet {
 
 static_assert(sizeof(CpuSet) == 8);
 
+inline constexpr std::uint8_t kCpuMaskGroupBits = 32;
+
 struct CpuId {
-    static constexpr std::uint8_t kGroupWidth = 32;
     std::uint8_t v = 0;
 
     [[nodiscard]] constexpr CpuSet as_set() const noexcept {
@@ -90,7 +106,7 @@ struct CpuId {
     }
 
     [[nodiscard]] constexpr CpuId next() const noexcept {
-        return CpuId{static_cast<std::uint8_t>(v < kGroupWidth ? v + 1 : kGroupWidth)};
+        return CpuId{static_cast<std::uint8_t>(v < kCpuMaskGroupBits ? v + 1 : kCpuMaskGroupBits)};
     }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
@@ -103,22 +119,73 @@ struct CpuId {
 
 static_assert(sizeof(CpuId) == 1);
 
+#if CPU_SETSIZE > UINT8_MAX
+
+static_assert(UINT8_MAX < CPU_SETSIZE, "a CpuId can never name a cpu past the libc cpu_set_t");
+
+[[nodiscard]] inline cpu_set_t cpu_set_of(CpuId cpu) noexcept {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu.v, &set);
+    return set;
+}
+
+[[nodiscard]] inline bool cpu_set_has(const cpu_set_t& set, CpuId cpu) noexcept {
+    return CPU_ISSET(cpu.v, &set) != 0;
+}
+#else
+
+[[nodiscard]] inline cpu_set_t cpu_set_of(CpuId cpu) noexcept {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    if (cpu.v < CPU_SETSIZE)
+        CPU_SET(cpu.v, &set);
+    return set;
+}
+
+[[nodiscard]] inline bool cpu_set_has(const cpu_set_t& set, CpuId cpu) noexcept {
+    return cpu.v < CPU_SETSIZE && CPU_ISSET(cpu.v, &set) != 0;
+}
+#endif
+
+enum class SchedPolicy : std::uint8_t { Fifo, Other };
+
+[[nodiscard]] constexpr SchedPolicy sched_policy_of(int policy) noexcept {
+    return policy == SCHED_FIFO ? SchedPolicy::Fifo : SchedPolicy::Other;
+}
+
+[[nodiscard]] constexpr int sched_policy_field(SchedPolicy policy) noexcept {
+    return policy == SchedPolicy::Fifo ? SCHED_FIFO : 0;
+}
+
+constexpr void json_field(infra::JsonOut& o, infra::JsonName key, SchedPolicy policy) noexcept {
+    o.field(key, sched_policy_field(policy));
+}
+
 enum class UioLine : std::uint8_t {};
 
 [[nodiscard]] constexpr std::uint32_t to_ordinal(UioLine line) noexcept {
     return static_cast<std::uint32_t>(line);
 }
 
-struct UioLineSpace {
-    std::string_view node_prefix;
-    std::uint32_t lines = 0;
-    std::string_view sysfs_root = "/sys/class/uio";
-    std::string_view dev_dir = "/dev";
+[[nodiscard]] constexpr UioLine pool_line_at(
+    std::uint32_t ordinal,
+    std::uint32_t first_line
+) noexcept {
+    return static_cast<UioLine>(ordinal - first_line);
+}
 
-    [[nodiscard]] constexpr bool contains(UioLine line) const noexcept {
-        return to_ordinal(line) < lines;
+struct UioMinor {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr infra::DecimalText text() const noexcept {
+        return infra::DecimalText{v};
     }
+
+    friend constexpr bool operator==(UioMinor, UioMinor) = default;
 };
+
+static_assert(sizeof(UioMinor) == 4);
 
 struct KernelIrq {
     std::uint32_t v = 0;
@@ -126,19 +193,18 @@ struct KernelIrq {
 };
 
 struct CpuMask {
-    static constexpr std::uint32_t kBits = 32;
     std::uint32_t v = 0;
 
     [[nodiscard]] static constexpr CpuMask of(CpuId cpu) noexcept {
-        return CpuMask{cpu.v < kBits ? (1u << cpu.v) : 0u};
+        return CpuMask{cpu.v < kCpuMaskGroupBits ? (1u << cpu.v) : 0u};
     }
 
     [[nodiscard]] static constexpr CpuMask below(CpuId cpu) noexcept {
-        return CpuMask{cpu.v >= kBits ? ~std::uint32_t{0} : ((1u << cpu.v) - 1u)};
+        return CpuMask{cpu.v >= kCpuMaskGroupBits ? ~std::uint32_t{0} : ((1u << cpu.v) - 1u)};
     }
 
     [[nodiscard]] constexpr bool contains(CpuId cpu) const noexcept {
-        return cpu.v < kBits && (v & (1u << cpu.v)) != 0u;
+        return cpu.v < kCpuMaskGroupBits && (v & (1u << cpu.v)) != 0u;
     }
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }

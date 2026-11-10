@@ -12,6 +12,8 @@ namespace mister::cores {
 
 struct WireChunk {
     static constexpr std::uint16_t kOneWrite = 0;
+
+    static constexpr std::size_t kBytesPerWideWord = 2;
     std::uint16_t v = kOneWrite;
 
     [[nodiscard]] static constexpr WireChunk single() noexcept { return WireChunk{}; }
@@ -24,6 +26,10 @@ struct WireChunk {
     }
 
     [[nodiscard]] constexpr bool one_write() const noexcept { return v == kOneWrite; }
+
+    [[nodiscard]] constexpr WireChunk per_byte_word() const noexcept {
+        return of(kBytesPerWideWord * v);
+    }
 
     [[nodiscard]] constexpr std::size_t whole_within(std::size_t cap) const noexcept {
         if (v >= cap)

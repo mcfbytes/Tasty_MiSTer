@@ -2,8 +2,13 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "app/lat_stat.h"
+#include "app/percent.h"
+#include "app/rec_options.h"
+#include "app/scale_governor.h"
+#include "app/step_count.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -18,15 +23,16 @@ struct EncodeStatus {
         std::uint32_t keys = 0;
         std::uint32_t chunk_full = 0;
         LatStat enc_us{};
-        std::uint32_t budget_pct = 0;
+        Percent budget_pct{};
         std::uint32_t me_cut = 0;
         std::uint32_t arena_kib = 0;
         std::uint16_t segment = 0;
-        std::uint8_t scale = 0;
-        std::uint8_t steps = 0;
-        std::uint8_t fell_behind = 0;
-        std::uint8_t recovered = 0;
-        std::uint8_t held = 0;
+
+        std::optional<PictureScale> scale{};
+        StepCount steps{};
+        bool fell_behind = false;
+        StepCount recovered{};
+        bool held = false;
         std::uint8_t queue_max = 0;
         std::uint8_t rate_rolls = 0;
         std::uint8_t me_rad = 0;
@@ -49,7 +55,7 @@ constexpr void to_json(infra::JsonOut& o, const EncodeStatus& e) noexcept {
 }
 
 constexpr void to_json(infra::JsonOut& o, const EncodeStatus::Video& v) noexcept {
-    o.field("scale", v.scale);
+    o.field("scale", picture_scale_digit(v.scale));
     o.field("steps", v.steps);
     o.field("recovered", v.recovered);
     o.field("held", v.held);

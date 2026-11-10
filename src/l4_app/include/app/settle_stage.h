@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 
@@ -8,6 +9,7 @@
 #include "app/replay_stage.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "os/raw_monotonic_clock.h"
 #include "proto/status_word.h"
 
 namespace mister::proto {
@@ -31,14 +33,14 @@ private:
     [[nodiscard]] bool set_unmet_(
         Ctx ctx,
         const proto::StatusWord& live,
-        const cores::IMovieCodec::SettingNeeds& needs,
+        const cores::IReplayCore::SettingNeeds& needs,
         infra::OptRef<const proto::ItemTable> labels
     ) noexcept;
     [[nodiscard]] std::optional<proto::IoIndex> rom_slot_(Ctx ctx) noexcept;
     static void load_checkpoints_(Ctx ctx) noexcept;
 
     bool waiting_ = false;
-    std::int64_t since_ns_ = 0;
+    os::RawMonotonicClock::time_point since_{};
     ConfStrText conf_{};
 };
 

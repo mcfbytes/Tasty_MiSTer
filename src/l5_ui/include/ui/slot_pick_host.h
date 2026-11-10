@@ -15,6 +15,7 @@
 #include "ui/browser_host.h"
 #include "ui/browser_session.h"
 #include "ui/page.h"
+#include "ui/slot_focus.h"
 
 namespace mister::app {
 class InfoSink;
@@ -77,7 +78,7 @@ public:
     Transition open(const OptionItem& it, bool offer_recent = false);
     Transition open_recents(const OptionItem& it);
 
-    Transition pick(const OptionItem& it, std::string_view path, std::string_view label);
+    Transition pick(const OptionItem& it, std::string_view path);
 
     Transition eject(const OptionItem& it);
 
@@ -102,14 +103,13 @@ private:
 
     void unmount_pending_();
     app::RecentsStore::ListId recents_id_for_pending() const noexcept;
-    void ask_mount(std::uint8_t slot, std::string_view path);
+    void ask_mount(proto::IoIndex slot, std::string_view path);
 
     const Env& env_;
     const Borrows b_;
     std::unique_ptr<app::RomsetAliasReader> romsets_;
 
-    bool pending_mounts_ = false;
-    std::uint8_t pending_slot_ = 0;
+    SlotFocus pending_slot_{};
     proto::ItemOrdinal pending_item_{};
     proto::BindGeneration pending_gen_{};
     bool pending_store_ = false;

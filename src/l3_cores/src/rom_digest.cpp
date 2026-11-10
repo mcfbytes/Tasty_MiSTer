@@ -36,6 +36,8 @@ constexpr std::array<std::uint32_t, 64> kSha256K{
     0xc67178f2u
 };
 
+constexpr std::size_t kBlockBytes = 64;
+
 std::uint32_t be32(const std::uint8_t* p) {
     constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
     return infra::load_be<std::uint32_t>(std::span<const std::uint8_t, kWordBytes>(p, kWordBytes));
@@ -57,10 +59,10 @@ int hex(char c) {
 std::optional<DigestValue> parse_hex_digest(std::string_view text, DigestKind kind) noexcept {
     constexpr std::size_t kHexPerByte = 2;
     constexpr unsigned kNibbleBits = 4;
-    DigestValue v{.kind = kind, .len = digest_len(kind)};
-    if (text.size() != kHexPerByte * v.len)
+    DigestValue v{.kind = kind};
+    if (text.size() != kHexPerByte * v.size())
         return std::nullopt;
-    for (std::size_t i = 0; i < v.len; ++i) {
+    for (std::size_t i = 0; i < v.size(); ++i) {
         const int hi = hex(text[kHexPerByte * i]);
         const int lo = hex(text[kHexPerByte * i + 1]);
         if (hi < 0 || lo < 0)
@@ -97,6 +99,7 @@ void RomDigest::sha1_block_(const std::uint8_t* p) noexcept {
     constexpr std::size_t kSha1Stage3 = 3 * kSha1Stage;
     constexpr int kSha1StepRot = 5;
     constexpr int kSha1BRot = 30;
+
     constexpr std::size_t kSha1Back3 = 3;
     constexpr std::size_t kSha1Back8 = 8;
     constexpr std::size_t kSha1Back14 = 14;
@@ -218,7 +221,6 @@ void RomDigest::block_(const std::uint8_t* p) noexcept {
 }
 
 void RomDigest::update(std::span<const std::uint8_t> data) noexcept {
-    constexpr std::size_t kBlockBytes = 64;
     switch (kind_) {
         case DigestKind::Md5:
             md5_.update(data);
@@ -248,7 +250,6 @@ void RomDigest::update(std::span<const std::uint8_t> data) noexcept {
 }
 
 DigestValue RomDigest::finish() noexcept {
-    constexpr std::size_t kBlockBytes = 64;
     constexpr std::size_t kLengthAt = 56;
     constexpr std::size_t kLengthBytes = 8;
     constexpr std::uint8_t kPadMarker = 0x80;
@@ -256,7 +257,7 @@ DigestValue RomDigest::finish() noexcept {
     constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
     constexpr unsigned kTopByteShift = 24;
     constexpr unsigned kTopBitShift = 56;
-    DigestValue out{.kind = kind_, .len = digest_len(kind_)};
+    DigestValue out{.kind = kind_};
     switch (kind_) {
         case DigestKind::Md5: {
             const auto d = md5_.digest();
@@ -264,7 +265,7 @@ DigestValue RomDigest::finish() noexcept {
             return out;
         }
         case DigestKind::Crc32: {
-            for (std::size_t i = 0; i < out.len; ++i)
+            for (std::size_t i = 0; i < out.size(); ++i)
                 out.bytes[i] = static_cast<std::uint8_t>(h_[0] >> (kTopByteShift - kByteBits * i));
             return out;
         }
@@ -288,7 +289,7 @@ DigestValue RomDigest::finish() noexcept {
     for (std::size_t i = 0; i < kLengthBytes; ++i)
         tail_[kLengthAt + i] = static_cast<std::uint8_t>(bits >> (kTopBitShift - kByteBits * i));
     block_(tail_.data());
-    for (std::size_t i = 0; i < out.len; ++i)
+    for (std::size_t i = 0; i < out.size(); ++i)
         out.bytes[i] = static_cast<std::uint8_t>(
             h_[i / kWordBytes] >> (kTopByteShift - kByteBits * (i % kWordBytes))
         );

@@ -9,7 +9,10 @@
 #include "app/verdict_sinks.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
 #include "infra/loan_channel.h"
+#include "infra/polled.h"
+#include "infra/pool_slot.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "svc/io_coworker.h"
@@ -89,7 +92,7 @@ private:
 
     struct Ui {
         std::uint32_t seq = 0;
-        Shadow shadow[kDepth]{};
+        infra::IndexedArray<Shadow, kDepth, xthread::PoolSlot> shadow{};
         std::uint32_t refusals = 0;
         std::uint32_t failures = 0;
         std::uint32_t writes = 0;

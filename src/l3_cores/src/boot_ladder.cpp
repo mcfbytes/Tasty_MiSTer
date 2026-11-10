@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/boot_ladder.h"
 
+#include "cores/staging_core.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <utility>
+#include <variant>
 
 #include "cores/file_tx.h"
+#include "infra/path_parts.h"
 #include "svc/file.h"
 
 namespace mister::cores {
@@ -15,19 +19,33 @@ BootLadder::BootLadder(const CoreProfile& profile, const LadderContext& ctx)
     : profile_(profile),
       vfs_(ctx.vfs),
       host_(ctx.host),
-      clock_(ctx.clock),
-      core_start_(ctx.at_core_start),
-      index0_taken_(ctx.at_core_start && ctx.index0_taken) {
-    if (ctx.at_core_start)
-        start_rows_ = profile.start_assets;
-    image_.assign(ctx.image_path);
-    image_dir_.assign(dir_of(ctx.image_path));
+      clock_(ctx.clock) {
+    switch (ctx.kind()) {
+        case LadderContext::ArmKind::CoreStart: {
+            const auto& start = std::get<LadderContext::CoreStartArm>(ctx.arm);
+            core_start_ = true;
+            index0_taken_ = start.index0_taken;
+            start_rows_ = profile.start_assets;
+            break;
+        }
+        case LadderContext::ArmKind::Mount: {
+            const auto& mount = std::get<LadderContext::MountArm>(ctx.arm);
+            image_.assign(mount.image);
+            image_dir_.assign(dir_of(mount.image));
 
-    report_.same_game = !ctx.image_path.empty()
-        && !ctx.last_dir.empty()
-        && ctx.image_path.starts_with(ctx.last_dir);
+            report_.same_game = !mount.image.empty()
+                && !ctx.last_dir.empty()
+                && mount.image.starts_with(ctx.last_dir);
 
-    report_.bios_found = report_.same_game;
+            report_.bios_found = report_.same_game;
+            break;
+        }
+        case LadderContext::ArmKind::Reset:
+        case LadderContext::ArmKind::Restore:
+            break;
+        case LadderContext::ArmKind::kCount:
+            break;
+    }
 }
 
 Ex<bool> BootLadder::step() {
@@ -43,7 +61,13 @@ Ex<bool> BootLadder::step() {
     if (core_start_ && !steps_at_core_start())
         return finish_acts_();
     auto r = on_step();
-    if (!r || !*r)
+    if (!r) {
+
+        if (reset_held_())
+            (void)release_reset_();
+        return r;
+    }
+    if (!*r)
         return r;
     return finish_acts_();
 }
@@ -69,13 +93,10 @@ bool BootLadder::finish_acts_() {
         && cl.reset_on_mount
         && (!report_.same_game || cl.reset_on_remount);
     if (owed) {
-        proto::FileId id{};
-        if (auto r = host_.intern_path(image_, proto::FileSize{}); r && *r != proto::FileId{})
-            id = *r;
 
-        if (id != proto::FileId{}) {
+        if (const auto id = host_.intern_path(image_, proto::FileSize{})) {
             if (!host_.order(
-                    proto::LinkOp::StageCheats{.path = id, .same_game = report_.same_game}
+                    proto::LinkOp::StageCheats{.path = *id, .same_game = report_.same_game}
                 )) {
                 return false;
             }
@@ -86,27 +107,24 @@ bool BootLadder::finish_acts_() {
 }
 
 std::chrono::nanoseconds BootLadder::now_ns() const {
-    return clock_.now();
+    return clock_.now().time_since_epoch();
 }
 
 std::string_view BootLadder::dir_of(std::string_view path) {
-    const auto slash = path.rfind('/');
-    if (slash == std::string_view::npos)
-        return path;
-    return path.substr(0, slash);
+    const std::optional<std::string_view> dir = infra::dirname(path);
+    return dir ? *dir : path;
+}
+
+std::string_view BootLadder::dir_or_empty(std::string_view path) {
+    return infra::dirname(path).value_or(std::string_view{});
 }
 
 std::string_view BootLadder::base_of(std::string_view path) {
-    const auto slash = path.rfind('/');
-    return slash == std::string_view::npos ? path : path.substr(slash + 1);
+    return infra::basename(path);
 }
 
 std::string_view BootLadder::ext_of(std::string_view path) {
-    const std::string_view name = base_of(path);
-    const auto dot = name.rfind('.');
-    if (dot == std::string_view::npos)
-        return {};
-    return name.substr(dot);
+    return infra::extension(path);
 }
 
 std::string BootLadder::strip_disc_word(std::string path, std::span<const std::string_view> words) {
@@ -208,15 +226,14 @@ Ex<AssetWait> BootLadder::load_row(const BootAsset& row) {
         auto f = vfs_.open(load_path_.view(), svc::OpenMode::ReadWhole);
         const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
 
-        if (!sz || (row.exact_size.v != 0 && sz->v != row.exact_size.v)) {
+        if (!sz || !row.accepts(*sz)) {
             load_path_.clear();
             return AssetWait::Miss;
         }
-        const WideIoIndex dest = (marker_seen_ && row.dest_if_marker.v != 0) ? row.dest_if_marker
-                                                                             : row.dest;
+        const WideIoIndex dest = row.dest_for(marker_seen_);
         auto p = PayloadPieces::of_file(
             std::move(*f),
-            sz->v,
+            *sz,
             ext_of(load_path_.view()),
             {.dest = dest, .chunk = WireChunk::of(kFileTxChunkBytes), .progress = true}
         );
@@ -228,19 +245,21 @@ Ex<AssetWait> BootLadder::load_row(const BootAsset& row) {
 }
 
 Ex<AssetWait> BootLadder::step_pieces_() {
-    const PayloadPieces::Pass pass = pieces_->step(host_);
-    if (pass == PayloadPieces::Pass::Waiting)
+    auto pass = pieces_->step(host_);
+    if (!pass) {
+        const proto::FileSize sent = pieces_->sent();
+        pieces_.reset();
+        load_path_.clear();
+
+        if (sent.empty())
+            return AssetWait::Miss;
+        return std::unexpected(pass.error());
+    }
+    if (*pass == PayloadPieces::Pass::Waiting)
         return AssetWait::Pending;
-    const std::uint64_t size = pieces_->size();
-    const std::uint64_t sent = pieces_->sent();
+    const proto::FileSize size = pieces_->size();
     pieces_.reset();
     load_path_.clear();
-
-    if (pass == PayloadPieces::Pass::Failed && sent == 0)
-        return AssetWait::Miss;
-    if (pass == PayloadPieces::Pass::Failed) {
-        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    }
     report_.bytes_downloaded += size;
     ++report_.assets_loaded;
     return AssetWait::Ready;
@@ -254,22 +273,80 @@ bool BootLadder::group_gates(std::uint8_t group) const {
     return false;
 }
 
-Ex<std::string> BootLadder::save_path_for(std::string_view image) {
-    std::string dir = "saves/";
-    dir.append(profile_.name);
-    if (auto r = vfs_.ensure_dir(dir); !r)
+Ex<std::string> BootLadder::save_root_() {
+    std::string root = "saves/";
+    root.append(profile_.name);
+    if (auto r = vfs_.ensure_dir(root); !r)
         return std::unexpected(r.error());
-    std::string path = dir;
+    return root;
+}
+
+Ex<std::string> BootLadder::save_path_for(std::string_view image) {
+    auto root = save_root_();
+    if (!root)
+        return std::unexpected(root.error());
+    std::string path = *root;
     path += '/';
-    std::string_view name = base_of(image);
-    const auto dot = name.rfind('.');
-    if (dot == std::string_view::npos) {
-        path.append(name);
-    } else {
-        path.append(name.substr(0, dot));
-    }
+    path.append(infra::stem(image));
     path += ".sav";
-    return strip_disc_word(std::move(path), profile_.staging.save_name_disc_words);
+    const std::optional<SaveMountPolicy>& save = profile_.staging.save;
+    return strip_disc_word(
+        std::move(path),
+        save ? save->disc_words : std::span<const std::string_view>{}
+    );
+}
+
+Ex<std::string> BootLadder::dir_save_path_for(std::string_view dir) {
+    auto root = save_root_();
+    if (!root)
+        return std::unexpected(root.error());
+    std::string path = *root;
+    path += '/';
+    path.append(base_of(dir));
+    path += ".sav";
+    return path;
+}
+
+Ex<void> BootLadder::resolve_save_() {
+    if (!save_path_.empty())
+        return {};
+    auto sp = save_path_for(image_);
+    if (!sp)
+        return std::unexpected(sp.error());
+    save_path_ = std::move(*sp);
+    return {};
+}
+
+Ex<void> BootLadder::resolve_dir_save_(std::string_view dir) {
+    if (!save_path_.empty())
+        return {};
+    auto sp = dir_save_path_for(dir);
+    if (!sp)
+        return std::unexpected(sp.error());
+    save_path_ = std::move(*sp);
+    return {};
+}
+
+Ex<bool> BootLadder::prepare_save_once_() {
+    if (save_ready_)
+        return true;
+    if (auto r = resolve_save_(); !r)
+        return std::unexpected(r.error());
+    if (!prepare_save(save_path_))
+        return false;
+    save_ready_ = true;
+    return true;
+}
+
+Ex<bool> BootLadder::mount_save_rung_() {
+    if (auto r = resolve_save_(); !r)
+        return std::unexpected(r.error());
+    if (!prepare_save(save_path_))
+        return false;
+    if (!order_mount_save(save_path_, true))
+        return false;
+    report_.save_mounted = true;
+    return true;
 }
 
 MountState BootLadder::mount_bounded(std::string_view path) {
@@ -281,7 +358,7 @@ MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_vie
         proto::FileId id{};
         if (!path.empty()) {
             auto r = host_.intern_path(path, proto::FileSize{});
-            if (!r || *r == proto::FileId{})
+            if (!r)
                 return MountState::Failed;
             id = *r;
         }
@@ -318,18 +395,16 @@ MountState BootLadder::mount_slot_bounded(proto::SlotIndex slot, std::string_vie
 }
 
 bool BootLadder::prepare_save(std::string_view path) {
+    const std::optional<SaveMountPolicy>& save = profile_.staging.save;
+    if (!save)
+        return false;
     if (!save_gen_) {
         auto id = host_.intern_path(path, proto::FileSize{});
-        if (!id || *id == proto::FileId{})
+        if (!id)
             return false;
         const proto::ActKey g = next_gen();
         if (!host_.order(
-                proto::LinkOp::BindSlot{
-                    .slot = profile_.staging.save_slot.block_slot(),
-                    .bind = proto::LinkOp::SlotBind::Attach,
-                    .path = *id,
-                    .act_gen = g
-                }
+                proto::LinkOp::AttachSave{.slot = save->slot.block_slot(), .path = *id, .act = g}
             )) {
             return false;
         }
@@ -356,21 +431,20 @@ bool BootLadder::prepare_save(std::string_view path) {
 }
 
 bool BootLadder::order_mount_save(std::string_view path, bool bracketed) {
-    proto::LinkOp::BindSlot op{
-        .slot = profile_.staging.save_slot.block_slot(),
-        .bracketed = bracketed
-    };
+    const std::optional<SaveMountPolicy>& save = profile_.staging.save;
+    if (!save)
+        return false;
+    proto::LinkOp::BindSlot op{.slot = save->slot.block_slot(), .bracketed = bracketed};
     if (path.empty()) {
 
         op.bind = proto::LinkOp::SlotBind::Unmount;
         return host_.order(op);
     }
 
-    const StagingPolicy& sp = profile_.staging;
-    const bool pre = save_size_ == proto::FileSize{} && (!save_exists_ || sp.save_pre_on_empty);
-    const proto::FileSize size = pre ? sp.save_pre_bytes : save_size_;
+    const bool pre = save_size_ == proto::FileSize{} && (!save_exists_ || save->pre_on_empty);
+    const proto::FileSize size = pre ? save->pre_bytes : save_size_;
     auto id = host_.intern_path(path, size);
-    if (!id || *id == proto::FileId{})
+    if (!id)
         return false;
     op.bind = proto::LinkOp::SlotBind::Mount;
     op.path = *id;
@@ -384,7 +458,7 @@ bool BootLadder::order_announce_disc(proto::FileSize size_bytes) {
     };
     if (size_bytes != proto::FileSize{}) {
         auto id = host_.intern_path(image_, size_bytes);
-        if (!id || *id == proto::FileId{})
+        if (!id)
             return false;
         op.path = *id;
     }
@@ -408,6 +482,31 @@ bool BootLadder::order_status_bit0(bool asserted) {
             .value = asserted ? 1u : 0u
         }
     );
+}
+
+bool BootLadder::hold_reset_() {
+    if (bit0_asserted_)
+        return true;
+    if (!order_status_bit0(true))
+        return false;
+    bit0_asserted_ = true;
+    reset_hold_ns_ = now_ns();
+    return true;
+}
+
+bool BootLadder::release_reset_() {
+    if (!order_status_bit0(false))
+        return false;
+    bit0_asserted_ = false;
+    return true;
+}
+
+bool BootLadder::pulse_reset_(std::chrono::microseconds pulse) {
+    if (!bit0_asserted_)
+        return true;
+    if (now_ns() - reset_hold_ns_ < pulse)
+        return false;
+    return release_reset_();
 }
 
 bool BootLadder::order_reset() {

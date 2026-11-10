@@ -4,16 +4,29 @@
 namespace mister::proto {
 
 void SpiIdentifyDecoder::service() noexcept {
-    const Ex<hal::CoreIdentity> id = signals_->identify();
-    if (session_->phase() == SessionPhase::Start) {
-        if (const auto t = session_->accept_identity(id); !t) {
+
+    if (session_.configure_posted()) {
+        const auto settled = session_.settle_configure();
+        if (!settled) {
+            refuse_(settled.error(), true);
+            return;
+        }
+        if (!*settled)
+            return;
+    }
+    const Ex<hal::CoreIdentity> id = signals_.identify();
+    if (session_.phase() == SessionPhase::Start) {
+        if (const auto t = session_.accept_identity(id); !t) {
             refuse_(t.error(), true);
             return;
         }
-        if (const auto r = session_->configure_after_identity(); !r) {
+        if (const auto r = session_.configure_after_identity(); !r) {
             refuse_(r.error(), true);
             return;
         }
+
+        if (session_.configure_posted())
+            return;
     } else if (!id) {
         refuse_(id.error(), false);
         return;
@@ -22,8 +35,8 @@ void SpiIdentifyDecoder::service() noexcept {
         LinkEvent::IdentityMatched{
             .dual_sdram = id->dual_sdram(),
             .type_byte = id->type,
-            .bind_gen = *gen_,
-            .wide = session_->capabilities().width == hal::Width::Word
+            .bind_gen = gen_,
+            .wide = session_.capabilities().width == hal::Width::Word
         }
     );
 }
@@ -31,7 +44,7 @@ void SpiIdentifyDecoder::service() noexcept {
 void SpiIdentifyDecoder::refuse_(const Error& e, bool at_accept) noexcept {
     (void)out_.push(
         LinkEvent::IdentityMismatch{
-            .bind_gen = *gen_,
+            .bind_gen = gen_,
             .err = e.code,
             .raw_word = e.detail,
             .at_accept = at_accept

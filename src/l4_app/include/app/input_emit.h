@@ -3,7 +3,6 @@
 
 #include <cstdint>
 
-#include "app/input_decode.h"
 #include "app/input_wire.h"
 #include "app/types.h"
 #include "hal/spi_transport.h"
@@ -86,7 +85,7 @@ static_assert(
 static_assert(
     hal::every_thread_map([](const hal::ThreadMap& m) {
         return hal::seat_of(m, InputEmit::kSeat).policy == hal::SchedPolicy::Fifo
-            && hal::seat_of(m, InputEmit::kSeat).prio > hal::seat_of(m, InputDecode::kSeat).prio;
+            && hal::seat_of(m, InputEmit::kSeat).prio > hal::seat_of(m, SeatTag::Input).prio;
     }),
     "item: this lane DRAINS what the decode lane publishes, on "
     "the round the executive owns. At or below the decode lane's "
@@ -95,7 +94,7 @@ static_assert(
 );
 static_assert(
     hal::every_thread_map([](const hal::ThreadMap& m) {
-        return hal::seat_of(m, InputEmit::kSeat).cpu != hal::seat_of(m, InputDecode::kSeat).cpu;
+        return hal::seat_of(m, InputEmit::kSeat).cpu != hal::seat_of(m, SeatTag::Input).cpu;
     }),
     "item: the producer and the consumer of InputWire sit on "
     "DIFFERENT cores — that is what makes every cell's wait-free "

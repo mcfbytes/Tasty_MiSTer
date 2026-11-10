@@ -26,13 +26,13 @@ public:
         ILinkRouter& router,
         const IOsdFocus& focus
     ) noexcept
-        : link_(&link),
-          focus_(&focus),
+        : link_(link),
+          focus_(focus),
           out_(router) {}
 
     void service() noexcept;
 
-    [[nodiscard]] bool active() const noexcept { return focus_->osd_focused(); }
+    [[nodiscard]] bool active() const noexcept { return focus_.osd_focused(); }
 
     void forget(bool front_end) noexcept {
         seen_ = false;
@@ -46,8 +46,8 @@ public:
     [[nodiscard]] std::uint32_t errors() const noexcept { return errors_; }
 
 private:
-    hal::ISpiTransport* link_;
-    const IOsdFocus* focus_;
+    hal::ISpiTransport& link_;
+    const IOsdFocus& focus_;
     Port out_;
     OsdMask mask_{};
     bool seen_ = false;

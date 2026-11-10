@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cores/staging_core.h"
+#include "cores/mount_state.h"
 #include "proto/disk_poll_decl.h"
 #include "proto/types.h"
 

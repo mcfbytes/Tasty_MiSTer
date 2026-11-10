@@ -24,7 +24,7 @@ void CompanionHost::on(const CompanionBind::Attach& a) noexcept {
     held_ = infra::opt_ref_of(servants_[a.servant].get());
     if (held_)
         held_->begin_core();
-    bound_gen_ = 0;
+    bound_gen_ = proto::CompanionBindGen::none();
     attaches_.add();
 }
 
@@ -43,13 +43,20 @@ void CompanionHost::misrouted(const CompanionBind&) noexcept {
     TASTY_SEAT_BODY(CompanionHost);
 }
 
-infra::OptRef<cores::IMailboxServant> CompanionHost::servant_for(std::uint16_t gen) noexcept {
+infra::OptRef<cores::IMailboxServant> CompanionHost::servant_for(
+    proto::CompanionBindGen gen
+) noexcept {
     TASTY_SEAT_BODY(CompanionHost);
     if (gen != bound_gen_ || !held_)
         serve();
-    if (gen == bound_gen_ && gen != 0)
+    if (gen == bound_gen_ && !gen.is_none())
         return held_;
     return {};
+}
+
+bool CompanionHost::awaits_bind(proto::CompanionBindGen gen) const noexcept {
+    TASTY_SEAT_BODY(CompanionHost);
+    return gen != bound_gen_ && gen.at_or_past(bound_gen_);
 }
 
 void CompanionHost::refill_one() noexcept {

@@ -20,32 +20,34 @@ void TastySink::deliver(const app::Event& e) {
 
 void TastySink::on(const app::Event::CoreLoaded& a, const app::Event::Head&) {
     TASTY_SEAT_BODY(TastySink);
-    app::SessionIdentity id{};
-    if (identity_ != nullptr && identity_->copy(id)) {
-        video_->set_core_name(id.core);
-    } else {
-        video_->set_core_name(std::string_view{});
-    }
-    video_->on_core_loaded(a.front_end);
+    const std::optional<app::SessionIdentity> id = identity_ ? identity_->copy() : std::nullopt;
+    video_.set_core_name(id ? id->core.view() : std::string_view{});
+    video_.on_core_loaded(a.front_end);
 }
 
 void TastySink::on(const app::Event::SessionFailed&, const app::Event::Head&) {
-    video_->on_session_over();
+    video_.on_session_over();
 }
 
 void TastySink::on(const app::Event::SessionEnded&, const app::Event::Head&) {
-    video_->on_session_over();
+    video_.on_session_over();
 }
 
-void TastySink::on(const app::Event::SdActivity&, const app::Event::Head&) {}
+void TastySink::on(const app::Event::SdActivity&, const app::Event::Head&) {
+    note_unhandled_();
+}
 
-void TastySink::on(const app::Event::InfoRequest&, const app::Event::Head&) {}
+void TastySink::on(const app::Event::InfoRequest&, const app::Event::Head&) {
+    note_unhandled_();
+}
 
-void TastySink::on(const app::Event::ProgressUpdate&, const app::Event::Head&) {}
+void TastySink::on(const app::Event::ProgressUpdate&, const app::Event::Head&) {
+    note_unhandled_();
+}
 
-void TastySink::on(const app::Event::DeadlineMiss&, const app::Event::Head&) {}
-
-void TastySink::on(const app::Event::RequestRefused&, const app::Event::Head&) {}
+void TastySink::on(const app::Event::RequestRefused&, const app::Event::Head&) {
+    note_unhandled_();
+}
 
 void TastySink::on(const app::Event::RamImageDeclined& a, const app::Event::Head&) {
     if (ram_image_said_)
@@ -60,11 +62,21 @@ void TastySink::on(const app::Event::RamImageDeclined& a, const app::Event::Head
     );
 }
 
-void TastySink::on(const app::Event::ConfStrOnlySession&, const app::Event::Head&) {}
+void TastySink::on(const app::Event::ConfStrOnlySession&, const app::Event::Head&) {
+    note_unhandled_();
+}
 
-void TastySink::on(const app::Event::RequestDone&, const app::Event::Head&) {}
+void TastySink::on(const app::Event::RequestDone&, const app::Event::Head&) {
+    note_unhandled_();
+}
 
-void TastySink::on(const app::Event::SessionAdvisory&, const app::Event::Head&) {}
+void TastySink::on(const app::Event::SessionAdvisory&, const app::Event::Head&) {
+    note_unhandled_();
+}
+
+void TastySink::note_unhandled_() noexcept {
+    ++event_unhandled_drops_;
+}
 
 void TastySink::misrouted(const app::Event&) noexcept {
     TASTY_SEAT_BODY(TastySink);

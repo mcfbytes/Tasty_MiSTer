@@ -41,7 +41,7 @@ struct SaveSlotRule {
         std::uint32_t sz
     ) const noexcept {
         if (deferred_create) {
-            if (lba.v != 0)
+            if (lba != Lba{})
                 return Plan{};
             return Plan{.act = Act::Create, .offset = 0, .len = sz};
         }
@@ -49,7 +49,7 @@ struct SaveSlotRule {
         const std::uint64_t size_in_blocks = block_size.v == 0 ? 0 : size.v / block_size.v;
         if (sz == 0 || static_cast<std::uint64_t>(lba.v) > size_in_blocks)
             return Plan{};
-        const std::uint64_t offset = static_cast<std::uint64_t>(lba.v) * block_size.v;
+        const std::uint64_t offset = block_size.position_of(lba);
         std::uint32_t len = sz;
         if (!growable) {
             const std::uint64_t rem = size.v > offset ? size.v - offset : 0;

@@ -14,9 +14,9 @@ void CompanionSlot::make() {
     const auto hint = negotiated_.made_with_manifest() ? cores::LoadHint::XmlManifest
                                                        : cores::LoadHint::None;
     const auto row = cores::find_core(negotiated_.core_name().view(), hint);
-    if (!row || (*row)->make_companion == nullptr)
+    if (!row || row->make_companion == nullptr)
         return;
-    companion_ = (*row)->make_companion(vfs_);
+    companion_ = row->make_companion(vfs_);
     if (!binds_ || companion_ == nullptr)
         return;
     attached_ = binds_->push(
@@ -49,13 +49,11 @@ Ex<CompanionWalk> CompanionSlot::plan(std::string_view path) {
     auto plan = companion_->plan(ask);
     if (!plan)
         return std::unexpected(plan.error());
-    gen_ = static_cast<std::uint16_t>(gen_ + 1u);
-    if (gen_ == 0)
-        gen_ = 1;
+    gen_ = gen_.next();
     return CompanionWalk::start(
         *plan,
         gen_,
-        plan->loads ? companion_->loader() : nullptr,
+        plan->load ? companion_->loader() : nullptr,
         negotiated_.loaded_profile().windows,
         attached_ ? binds_ : infra::OptRef<CompanionHost::Binds>{}
     );

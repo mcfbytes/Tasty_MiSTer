@@ -30,7 +30,7 @@ BackdropSampler::Image BackdropJob::read(
         return img;
     const bool usable = img.width != 0 && img.rgb.covers(rgb_row_of(img.width), img.rgb.rows);
     const HdRect game = canvas_game(c);
-    if (!usable || game.w <= 0 || game.h <= 0)
+    if (!usable || game.is_empty())
         return img;
     img_ = img;
     canvas_ = c;
@@ -71,7 +71,7 @@ void BackdropJob::begin_copy(FlipBuffer buffer, HdRect box, const Canvas& c) noe
     if (busy() || !whole_)
         return;
     const HdRect clipped = canvas_game(Canvas{.frame = c.frame, .game = box});
-    if (clipped.w <= 0 || clipped.h <= 0)
+    if (clipped.is_empty())
         return;
     canvas_ = c;
     box_ = clipped;

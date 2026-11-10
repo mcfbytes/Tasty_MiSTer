@@ -5,26 +5,12 @@
 
 #include "app/session_identity.h"
 #include "proto/conf_str.h"
+#include "infra/utf8.h"
 #include "ui/game_slot.h"
 #include "ui/game_title.h"
 #include "ui/options_model.h"
 
 namespace mister::ui {
-
-namespace {
-
-std::string_view whole_points(std::string_view s, std::size_t cap) noexcept {
-    if (s.size() <= cap)
-        return s;
-    std::size_t n = cap;
-    constexpr unsigned kContinuationMask = 0xC0u;
-    constexpr unsigned kContinuationTag = 0x80u;
-    while (n > 0 && (static_cast<unsigned char>(s[n]) & kContinuationMask) == kContinuationTag)
-        --n;
-    return s.substr(0, n);
-}
-
-}
 
 bool NowPlaying::on_done(
     infra::OptRef<const app::UiRequestRing::Pending> ask,
@@ -37,11 +23,12 @@ bool NowPlaying::on_done(
         return false;
     }
     const app::UiRequestRing::Pending& p = *ask;
-    if (p.slot == 0)
+    if (!p.slot)
         return false;
+    const app::RememberedSlot slot = *p.slot;
     File* at = nullptr;
     for (File& f : files_)
-        if (f.used && f.slot == p.slot && f.index == p.index)
+        if (f.used && f.slot == slot && f.index == p.index)
             at = &f;
     if (p.path.empty()) {
         if (at != nullptr)
@@ -51,19 +38,20 @@ bool NowPlaying::on_done(
             at = &files_[next_file_];
             next_file_ = (next_file_ + 1) % kFiles;
         }
-        *at = File{.slot = p.slot, .index = p.index, .used = true, .path = p.path};
+        *at = File{.slot = slot, .index = p.index, .used = true, .path = p.path};
     }
 
-    const bool save = p.slot == 'S' && cores::role_of(slots, p.index) == cores::SlotRole::Save;
+    const bool save = slot == app::RememberedSlot::Mount
+        && cores::role_of(slots, p.index) == cores::SlotRole::Save;
     if (!p.game || save)
         return false;
     game_ = true;
     const std::string title = game_title(p.path.view());
-    (void)title_.assign(whole_points(title, Title::kCapacity));
+    (void)title_.assign(infra::utf8_prefix(title, Title::kCapacity));
     last_ = Played{
         .core_image = core_image_,
-        .slot_letter = p.slot,
-        .ioctl_index = p.index.v,
+        .slot = slot,
+        .ioctl_index = p.index,
         .path = p.path,
         .title = title_,
         .unix_time = unix_time
@@ -81,7 +69,10 @@ void NowPlaying::on_core_loaded(infra::OptRef<const app::UiRequestRing::Pending>
     primary_ = PrimaryRead{};
 }
 
-std::string_view NowPlaying::file_of_(char slot, proto::IoIndex index) const noexcept {
+std::string_view NowPlaying::file_of_(
+    app::RememberedSlot slot,
+    proto::IoIndex index
+) const noexcept {
     for (const File& f : files_)
         if (f.used && f.slot == slot && f.index == index)
             return f.path.view();
@@ -93,10 +84,9 @@ std::string_view NowPlaying::idle_line(const proto::ItemTable& items, const Buil
     if (!primary_.read || primary_.gen != env.conf_gen || primary_.mask != env.hdmask) {
         bool has = false;
         OptionsModel root;
-        if (root.build(items, env)) {
-            const GameSlot slot(root, env.slots);
-            has = slot.row() != nullptr;
-        }
+        root.build(items, env);
+        const GameSlot slot(root, env.slots);
+        has = slot.row().has_value();
         primary_ = PrimaryRead{.gen = env.conf_gen, .mask = env.hdmask, .read = true, .has = has};
     }
     return primary_.has ? kNoGame : std::string_view{};

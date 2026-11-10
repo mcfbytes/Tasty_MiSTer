@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "app/page_description.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
 #include "ui/options_view.h"
@@ -36,7 +37,7 @@ public:
     void set_selection(RowIndex i) override;
     RowIndex selection() const override;
 
-    RowIndex first_row() const noexcept override;
+    RowIndex first_row() const noexcept;
     bool empty() const override;
 
 private:
@@ -49,7 +50,7 @@ private:
 
     struct Drawn {
         app::PageDescription::Row hd;
-        const OptionItem* item;
+        infra::OptRef<const OptionItem> item;
     };
 
     struct DrawnList {
@@ -66,7 +67,7 @@ private:
 
     void compose_lines(RowSpan<Line> lines) const;
 
-    const OptionItem* row_at(RowCount row) const;
+    infra::OptRef<const OptionItem> row_at(RowCount row) const;
 
     template <class Visit>
     void for_each_drawn(Visit&& visit) const;

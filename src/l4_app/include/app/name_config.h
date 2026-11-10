@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
-#include <cstdint>
-#include <span>
 #include <string>
 #include <string_view>
 
@@ -43,7 +42,7 @@ public:
 
     [[nodiscard]] Ex<void> remember_scripts_confirm();
 
-    bool read_card_cid(std::span<std::byte, kCidLen> out) const;
+    [[nodiscard]] Ex<std::array<std::byte, kCidLen>> read_card_cid() const;
 
 private:
     const svc::Vfs* vfs_;

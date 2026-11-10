@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <compare>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <ranges>
 #include <span>
 
 #include "app/picture_row.h"
@@ -13,6 +16,18 @@ namespace mister::app {
 struct RowBytes {
     std::size_t v = 0;
 
+    struct Indices {
+        std::size_t v = 0;
+
+        [[nodiscard]] constexpr auto begin() const noexcept {
+            return std::views::iota(std::size_t{0}, v).begin();
+        }
+
+        [[nodiscard]] constexpr auto end() const noexcept {
+            return std::views::iota(std::size_t{0}, v).end();
+        }
+    };
+
     [[nodiscard]] constexpr bool lacks(RowBytes row) const noexcept { return v < row.v; }
 
     [[nodiscard]] constexpr std::span<const std::byte> head(
@@ -20,6 +35,8 @@ struct RowBytes {
     ) const noexcept {
         return line.first(v);
     }
+
+    [[nodiscard]] constexpr Indices indices() const noexcept { return Indices{v}; }
 
     [[nodiscard]] constexpr std::uint32_t span_u32(std::uint32_t rows) const noexcept {
         return static_cast<std::uint32_t>(v * rows);
@@ -35,6 +52,11 @@ struct RowBytes {
         if (height == PictureRows{1})
             return true;
         return v > 0 && v >= row.v && height.fits_in((extent - row.v) / v + 1u);
+    }
+
+    [[nodiscard]] constexpr std::uint16_t wire_word() const noexcept {
+        constexpr std::size_t kWordMask = 0xFFFFu;
+        return static_cast<std::uint16_t>(v & kWordMask);
     }
 
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
@@ -65,6 +87,10 @@ inline constexpr std::size_t kRgb565PixelBytes = 2;
 
 [[nodiscard]] constexpr std::size_t rows_span(RowBytes row, std::uint32_t rows) noexcept {
     return row.v * static_cast<std::size_t>(rows);
+}
+
+[[nodiscard]] constexpr std::size_t rows_span(RowBytes row, PictureRow at) noexcept {
+    return row.v * static_cast<std::size_t>(at.v);
 }
 
 [[nodiscard]] constexpr std::size_t rows_span(RowBytes row, PictureRows rows) noexcept {

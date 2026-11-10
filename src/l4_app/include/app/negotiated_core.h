@@ -20,15 +20,16 @@
 #include "app/link_tx_channel.h"
 #include "app/mra_facts.h"
 #include "app/path_text.h"
-#include "app/pending_load.h"
+#include "app/bitstream_resolve.h"
 #include "app/remembered_path.h"
 #include "app/ui_request.h"
 #include "app/xml_kind.h"
-#include "cores/ram_image.h"
+#include "cores/ram_image_recipe.h"
 #include "hal/phys_region.h"
 #include "infra/byte_view.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/conf_str.h"
 #include "proto/core_session.h"
@@ -85,16 +86,11 @@ public:
             raw.append(infra::as_text(bytes));
         }
 
-        constexpr std::size_t cap = sizeof(ConfStrText::text);
-        const std::size_t n = raw.size() > cap ? cap : raw.size();
-        ConfStrText text{};
-        text.truncated = c.read == proto::LinkEvent::ConfStrRead::Truncated;
-        text.gen = c.bind_gen;
-        text.len = static_cast<std::uint16_t>(n);
-        if (n != 0)
-            std::memcpy(text.text, raw.data(), n);
-        std::memset(text.text + n, 0, cap - n);
-        conf_str_cell_.publish(text);
+        ConfStrText body{};
+        body.truncated = c.read == proto::LinkEvent::ConfStrRead::Truncated;
+        body.gen = c.bind_gen;
+        (void)body.text.assign(raw);
+        conf_str_cell_.publish(body);
 
         conf_str_.reset();
         pending_ram_image_ = {};
@@ -113,39 +109,11 @@ public:
     [[nodiscard]] proto::TxSlabId key_names(
         const proto::ConfStr& cs,
         const UiRequest::LoadCore& pending
-    ) {
-        TASTY_SEAT_BODY(NegotiatedCore);
-        const std::string_view name = cs.name();
+    );
 
-        remembered_stem_ = RememberedStem::of(name, pending_facts_);
-        elect_defmra_(cs.default_manifest(), pending);
-        const proto::TxSlabId cfg = intern_saved_cfg_(effective_name(name, pending_facts_));
+    void latch_mra_facts(const UiRequest::LoadCore& pending);
 
-        (void)saved_cfg_stem_.assign(effective_name(name, pending_facts_));
-        return cfg;
-    }
-
-    void latch_mra_facts(const UiRequest::LoadCore& pending) {
-        TASTY_SEAT_BODY(NegotiatedCore);
-        facts_pending_ = false;
-        pending_facts_ = MraFacts{};
-        defmra_rel_.clear();
-        if (pending.xml != XmlKind::Mra || pending.path.empty()) {
-            intern_manifest_({});
-            return;
-        }
-        pending_facts_ = mra_facts_at(vfs_, pending.path.view());
-        facts_pending_ = true;
-        intern_manifest_(pending.path.view());
-    }
-
-    void forget() noexcept {
-        TASTY_SEAT_BODY(NegotiatedCore);
-
-        conf_str_.reset();
-        pending_ram_image_ = {};
-        core_live_ = false;
-    }
+    void forget() noexcept;
 
     void hold_ram_image(const cores::RamImageRecipe& recipe) noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
@@ -162,12 +130,7 @@ public:
         core_name_.clear();
     }
 
-    void note_build(std::string_view built_from) {
-        TASTY_SEAT_BODY(NegotiatedCore);
-        made_with_manifest_ = !built_from.empty();
-        if (!made_with_manifest_ || !manifest_rel_.assign(built_from))
-            manifest_rel_ = PathText{};
-    }
+    void note_build(std::string_view built_from);
 
     void note_made(bool made) noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
@@ -237,15 +200,7 @@ public:
     [[nodiscard]] std::string defmra_elected(
         std::string_view text,
         const UiRequest::LoadCore& pending
-    ) const {
-        TASTY_SEAT_BODY(NegotiatedCore);
-        if (pending.xml == XmlKind::Mra)
-            return {};
-        std::string rel = default_manifest_rel(text);
-        if (rel.empty() || !vfs_.file_exists(rel))
-            return {};
-        return rel;
-    }
+    ) const;
 
     [[nodiscard]] std::string_view defmra_rel() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
@@ -272,7 +227,7 @@ public:
         return made_with_manifest_;
     }
 
-    [[nodiscard]] const cores::CoreFactory* load_row() const;
+    [[nodiscard]] infra::OptRef<const cores::CoreFactory> load_row() const;
 
     [[nodiscard]] const cores::CoreProfile& loaded_profile() const;
     [[nodiscard]] bool owns_loader() const;
@@ -282,12 +237,7 @@ public:
         return manifest_rel_;
     }
 
-    [[nodiscard]] std::string_view manifest_text() const noexcept {
-        TASTY_SEAT_BODY(NegotiatedCore);
-        if (manifest_doc_.empty())
-            return {};
-        return infra::as_text(std::span(manifest_doc_));
-    }
+    [[nodiscard]] std::string_view manifest_text() const noexcept;
 
     [[nodiscard]] const CheatCatalog& cheats() const noexcept {
         TASTY_SEAT_BODY(NegotiatedCore);
@@ -300,37 +250,11 @@ public:
     }
 
 private:
-    void intern_manifest_(std::string_view rel) {
-        manifest_doc_ = read_manifest_(rel);
-        pack_manifest_cheats_(manifest_doc_);
-    }
-
+    void intern_manifest_(std::string_view rel);
     [[nodiscard]] std::vector<std::uint8_t> read_manifest_(std::string_view rel) const;
     void pack_manifest_cheats_(std::span<const std::uint8_t> doc);
-
-    void elect_defmra_(std::string_view text, const UiRequest::LoadCore& pending) {
-        defmra_rel_.clear();
-
-        if (pending.xml == XmlKind::Mra)
-            return;
-        pending_facts_ = MraFacts{};
-        intern_manifest_({});
-        const std::string rel = defmra_elected(text, pending);
-        if (rel.empty())
-            return;
-        pending_facts_ = mra_facts_at(vfs_, rel);
-        defmra_rel_ = rel;
-        intern_manifest_(rel);
-    }
-
-    [[nodiscard]] proto::TxSlabId intern_saved_cfg_(std::string_view core_name) {
-        if (core_name.empty())
-            return {};
-        std::string rel = "config/";
-        rel += core_name;
-        rel += ".CFG";
-        return intern_exact(vfs_, inbox_, rel, kCoreCfgBytes);
-    }
+    void elect_defmra_(std::string_view text, const UiRequest::LoadCore& pending);
+    [[nodiscard]] proto::TxSlabId intern_saved_cfg_(std::string_view core_name);
 
     const LinkRxChannel<SeatTag::Main>& rx_;
     ConfStrCell& conf_str_cell_;

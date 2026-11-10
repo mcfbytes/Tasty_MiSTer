@@ -37,7 +37,9 @@ public:
 
     [[nodiscard]] Ex<void> write(std::span<const std::uint8_t> piece);
 
-    [[nodiscard]] Ex<std::size_t> write_taken(std::span<const std::uint8_t> piece);
+    [[nodiscard]] Ex<std::span<const std::uint8_t>> write_taken(
+        std::span<const std::uint8_t> piece
+    );
 
     [[nodiscard]] Ex<void> close(
         infra::OptRef<IStreamLoad> live,

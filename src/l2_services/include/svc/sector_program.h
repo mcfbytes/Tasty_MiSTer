@@ -18,11 +18,11 @@ public:
     };
 
     [[nodiscard]] virtual proto::SlotIndex slot() const noexcept = 0;
-    [[nodiscard]] virtual std::uint32_t frame_bytes() const noexcept = 0;
+    [[nodiscard]] virtual proto::BlockSize frame_bytes() const noexcept = 0;
     [[nodiscard]] virtual DiscForm form() const noexcept = 0;
     [[nodiscard]] virtual Source answer(
         const DiscGeometry& disc,
-        std::int64_t lba
+        proto::Lba lba
     ) const noexcept = 0;
 
 protected:

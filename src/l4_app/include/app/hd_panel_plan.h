@@ -99,28 +99,33 @@ inline constexpr RowCount kOneRow = RowCount::of(1);
     const std::int32_t frame = kFrameSides * (m.card_pad + m.stroke);
     const std::int32_t bottom = m.help_top - m.gap;
     std::int32_t fixed = 0;
-    std::int32_t halves = (p.main_count - p.main_seps).extent(kHalvesPerRow)
-        + p.main_seps.extent(kHalvesPerSeparator);
+    RowExtent halves = (p.main_count - p.main_seps).extent(RowPitch{kHalvesPerRow})
+        + p.main_seps.extent(RowPitch{kHalvesPerSeparator});
     if (!p.main_count.empty())
         fixed += frame;
     if (!p.pinned_count.empty()) {
         fixed += frame + m.gap;
-        halves += (p.pinned_count - p.pinned_seps).extent(kHalvesPerRow)
-            + p.pinned_seps.extent(kHalvesPerSeparator);
+        halves = halves
+            + (p.pinned_count - p.pinned_seps).extent(RowPitch{kHalvesPerRow})
+            + p.pinned_seps.extent(RowPitch{kHalvesPerSeparator});
     }
     if (!p.choice_count.empty()) {
         const RowCount rows = p.choice_stacked ? p.choice_count : kOneRow;
-        p.choice_h = rows.extent(m.button_h) + (rows - kOneRow).extent(m.gap);
+        p.choice_h = (rows.extent(RowPitch{m.button_h}) + (rows - kOneRow).extent(RowPitch{m.gap}))
+                         .over(0);
         fixed += p.choice_h + (!p.main_count.empty() ? m.gap : 0);
     }
     const std::int32_t room = bottom - m.list_top - fixed;
     p.row_h = m.row_h;
-    if (halves > 0 && room > 0)
-        p.row_h = std::min(m.row_h, kHalvesPerRow * room / halves);
+    if (!halves.empty() && room > 0)
+        p.row_h = std::min(m.row_h, halves.share_of(kHalvesPerRow * room));
     p.sep_h = hd_sep_h(p.row_h);
 
     const auto block = [&](RowCount rows, RowCount seps) {
-        return rows.empty() ? 0 : frame + (rows - seps).extent(p.row_h) + seps.extent(p.sep_h);
+        return rows.empty()
+            ? 0
+            : ((rows - seps).extent(RowPitch{p.row_h}) + seps.extent(RowPitch{p.sep_h}))
+                  .over(frame);
     };
     p.main_y = m.list_top;
     p.main_h = block(p.main_count, p.main_seps);

@@ -9,6 +9,7 @@
 #include "app/uio_burst.h"
 #include "hal/spi_transport.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -30,10 +31,10 @@ public:
     bool collect() noexcept;
     void step(Wire wire) noexcept;
 
-    [[nodiscard]] std::uint32_t take_round_words() noexcept {
+    [[nodiscard]] proto::FioWordCount take_round_words() noexcept {
         const std::uint32_t w = round_words_;
         round_words_ = 0;
-        return w;
+        return proto::FioWordCount{w};
     }
 
     [[nodiscard]] std::uint32_t bursts() const noexcept { return bursts_; }

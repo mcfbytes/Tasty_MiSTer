@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/conf_str.h"
+#include "proto/item_rule.h"
 #include "conf_str_detail.h"
 
-#include <cctype>
+#include <array>
 #include <limits>
 #include <optional>
+
+#include "infra/ascii.h"
 
 namespace mister::proto {
 
@@ -129,6 +132,11 @@ bool addon_after(const ItemTable& ast, const Item* addon) noexcept {
 
 }
 
+IoIndex ConfStrEntry::default_index() const noexcept {
+    return letter == SlotLetter::Load ? IoIndex{static_cast<std::uint8_t>(selentry + 1u)}
+                                      : IoIndex{};
+}
+
 void ConfStr::walk_items() {
     slots_ = slots_of(ast_);
 }
@@ -151,7 +159,8 @@ std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
 
         if (it.kind == ItemKind::FileSlot || it.kind == ItemKind::MountSlot) {
             ConfStrEntry fs{};
-            fs.letter = (it.kind == ItemKind::FileSlot) ? 'F' : 'S';
+            fs.letter = (it.kind == ItemKind::FileSlot) ? ConfStrEntry::SlotLetter::Load
+                                                        : ConfStrEntry::SlotLetter::Mount;
             fs.selentry = static_cast<std::uint8_t>(selentry);
             fs.digit = it.digit;
             fs.opensave = it.opensave;
@@ -161,10 +170,8 @@ std::vector<ConfStrEntry> ConfStr::slots_of(const ItemTable& ast) {
                 fs.ext.assign(ext.data(), ext.size());
             }
 
-            fs.ioctl_index = fs.digit ? fs.digit->io_index()
-                : (fs.letter == 'F')  ? IoIndex{static_cast<std::uint8_t>(selentry + 1u)}
-                                      : IoIndex{};
-            if (fs.letter == 'F')
+            fs.ioctl_index = fs.digit ? fs.digit->io_index() : fs.default_index();
+            if (fs.carries_load_addr())
                 fs.load_addr = parse_load_addr(ast.subfield(it, 3));
             const Item* addon = bound_addon(items, n);
             fs.addon = std::string{addon_list(ast, addon)};
@@ -210,54 +217,48 @@ std::uint32_t parse_load_addr(std::string_view field) noexcept {
     return negate ? 0u - u : u;
 }
 
-FileSlotHit ConfStr::find_file_slot(char type, std::uint8_t index) const noexcept {
-    return find_slot_in(slots_, type, index);
+FileSlotHit ConfStr::find_file_slot(
+    ConfStrEntry::SlotLetter letter,
+    FileSlotDigit digit
+) const noexcept {
+    return find_slot_in(slots_, letter, digit);
 }
 
 FileSlotHit ConfStr::find_slot_in(
     std::span<const ConfStrEntry> slots,
-    char type,
-    std::uint8_t index
-) noexcept {
-    return find_slot_in(slots, type, FileSlotDigit{index});
-}
-
-FileSlotHit ConfStr::find_slot_in(
-    std::span<const ConfStrEntry> slots,
-    char type,
+    ConfStrEntry::SlotLetter letter,
     FileSlotDigit digit
 ) noexcept {
-    constexpr int kCaseBit = 0x20;
-    const char want = (type >= 'a' && type <= 'z') ? static_cast<char>(type - kCaseBit) : type;
     const ConfStrEntry* hit = nullptr;
     for (const ConfStrEntry& s : slots) {
 
-        if (s.letter == want && FileSlotDigit::or_zero(s.digit) == digit)
+        if (s.letter == letter && FileSlotDigit::or_zero(s.digit) == digit)
             hit = &s;
     }
     if (hit != nullptr)
         return FileSlotHit{infra::opt_ref_of(hit), FileSlotMatch::Exact};
 
     for (const ConfStrEntry& s : slots) {
-        if (s.selentry == 0 && s.letter == want)
+        if (s.selentry == 0 && s.letter == letter)
             return FileSlotHit{infra::OptRef<const ConfStrEntry>{s}, FileSlotMatch::RowZero};
     }
     return FileSlotHit{};
 }
 
 FileSlotHit ConfStr::find_load_slot(FileSlotDigit digit) const noexcept {
-    return find_file_slot('F', digit.v);
+    return find_slot_in(slots_, ConfStrEntry::SlotLetter::Load, digit);
 }
 
 std::optional<ConfStrFileRow> ConfStr::menu_pick(ItemOrdinal item, IoIndex drawn) const noexcept {
     const auto items = ast_.items();
-    if (item.v >= items.size())
+    const std::size_t row = ItemTable::index_of(item);
+    if (row >= items.size())
         return std::nullopt;
-    const Item& it = items[item.v];
+    const Item& it = items[row];
     if (it.kind != ItemKind::FileSlot)
         return std::nullopt;
 
-    const Item* addon = bound_addon(items, item.v);
+    const Item* addon = bound_addon(items, row);
     return ConfStrFileRow{
         ast_.subfield(it, 1),
         drawn,
@@ -312,7 +313,7 @@ std::uint8_t ConfStr::ext_subindex(std::string_view filename, std::string_view e
     if (dot == std::string_view::npos)
         return 0;
 
-    char e[kExtGroup] = {' ', ' ', ' '};
+    std::array<char, kExtGroup> e{' ', ' ', ' '};
     for (std::size_t i = 0; i < kExtGroup && dot + 1 + i < filename.size(); ++i) {
         e[i] = filename[dot + 1 + i];
     }
@@ -326,9 +327,7 @@ std::uint8_t ConfStr::ext_subindex(std::string_view filename, std::string_view e
                 break;
             if (c == '?')
                 continue;
-            const auto a = static_cast<unsigned char>(c);
-            const auto b = static_cast<unsigned char>(e[i]);
-            if (std::toupper(a) != std::toupper(b)) {
+            if (infra::ascii_lower(c) != infra::ascii_lower(e[i])) {
                 found = false;
                 break;
             }

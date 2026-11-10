@@ -4,29 +4,25 @@
 #include "cores/cd_service_rows.h"
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
-#include "reactor/link_decoder.h"
+#include "cores/role_row.h"
+#include "infra/seat.h"
 
 namespace mister::cores {
 
 namespace detail {
 
-template <const CoreProfile& kProfile>
-[[nodiscard]] inline infra::OptRef<ICdServiceRows> rows_for(reactor::CoreState& st) noexcept {
-    Core* c = bound_core<kProfile>(st);
-    if (c == nullptr)
-        return {};
-    return c->cd_service_rows();
-}
+struct CdServiceRole {
+    TASTY_SEAT_RESIDENT(RT);
 
-template <const CoreProfile& kProfile>
-class ServiceTickRow final : public reactor::ILinkDecoder {
-public:
-    void service(reactor::CoreState& st) const override {
-        if (const auto r = rows_for<kProfile>(st))
+    void service(Core& c) const noexcept {
+        if (const auto r = c.cd_service_rows())
             r->service_tick();
     }
 };
 
 }
+
+template <const CoreProfile& kProfile>
+inline constexpr detail::RoleRow<kProfile, detail::CdServiceRole> kCdServiceTick{};
 
 }

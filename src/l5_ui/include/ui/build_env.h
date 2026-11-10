@@ -22,7 +22,7 @@ struct BuildEnv {
     bool flat = false;
     bool cheats_available = false;
     bool manual_available = false;
-    std::uint8_t dip_count = 0;
+    proto::DipRowCount dip_count{};
     RowCount osd_rows{16};
 
     std::string_view core_dir{};

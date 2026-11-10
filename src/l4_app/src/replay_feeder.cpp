@@ -34,14 +34,15 @@ void ReplayFeeder::refuse_(PlayRefusal why) noexcept {
     ++refusals_;
     active_.reset();
     play_.release_movie();
+    const std::string_view setting = play_.report.last_setting;
     w_.diag.appendf(
         "{\"t\":\"tas\",\"k\":\"refused\",\"why\":\"%s\",\"detail\":%u,\"setting\":\"%.*s\"}",
         PlayRefusal::name(why.why),
         why.detail,
-        static_cast<int>(play_.last_setting.size()),
-        play_.last_setting.data()
+        static_cast<int>(setting.size()),
+        setting.data()
     );
-    play_.log_end(w_.diag, ReplayStatus{.gen = play_.gen, .end = ReplayEnd::Refused});
+    log_end(w_.diag, ReplayStatus{.gen = play_.run.gen, .end = ReplayEnd::Refused}, play_.run);
 }
 
 void ReplayFeeder::apply_(IReplayStage::Step step) noexcept {
@@ -70,9 +71,9 @@ void ReplayFeeder::drive_(IReplayStage::Step step) noexcept {
 
 bool ReplayFeeder::take_play(const Play& p) noexcept {
     TASTY_SEAT_BODY(ReplayFeeder);
-    play_.last_setting = {};
-    play_.last_setting_offered = false;
-    play_.refusal_path.clear();
+    play_.report.last_setting = {};
+    play_.report.last_setting_offered = false;
+    play_.report.refusal_path.clear();
     if (active_) {
         ++refusals_;
         last_refusal_ = Refusal::Busy;
@@ -80,50 +81,46 @@ bool ReplayFeeder::take_play(const Play& p) noexcept {
         w_.diag.appendf("{\"t\":\"tas\",\"k\":\"refused\",\"why\":\"busy\"}");
         return true;
     }
+
+    play_.run.tries = 0;
     if (!w_.vfs) {
         refuse_(PlayRefusal{Refusal::NotWired});
         return true;
     }
-    if (!play_.movie.assign(p.movie) || p.movie.empty()) {
+    if (!play_.request.movie.assign(p.movie) || p.movie.empty()) {
         refuse_(PlayRefusal{Refusal::MovieIo});
         return true;
     }
-    play_.codec = w_.identity.copy(ident_)
-        ? infra::opt_ref_of(cores::movie_codec_for(ident_.rbf, p.movie))
-        : infra::OptRef<const cores::IMovieCodec>{};
-    if (!play_.codec) {
+    const std::optional<SessionIdentity> id = w_.identity.copy();
+    play_.request.codec = id ? cores::movie_codec_for(id->rbf.view(), p.movie)
+                             : infra::OptRef<const cores::MovieCodec>{};
+    if (!play_.request.codec) {
         refuse_(PlayRefusal{Refusal::NoCodec});
         return true;
     }
-    if (!play_.rom.assign(p.rom) || p.rom.empty()) {
+    if (!play_.request.rom.assign(p.rom) || p.rom.empty()) {
         refuse_(PlayRefusal{Refusal::RomIo});
         return true;
     }
-    const cores::IMovieCodec::LeadRange range = play_.codec->lead_range();
+    const cores::IReplayCore::LeadRange range = play_.request.codec->core().lead_range();
 
-    const std::optional<std::int32_t> lead = p.lead ? std::optional<std::int32_t>{p.lead->v}
-                                                    : std::nullopt;
-    if (lead && (*lead < range.min || *lead > range.max)) {
-        refuse_(PlayRefusal{Refusal::Lead, static_cast<std::uint32_t>(*lead)});
+    if (p.lead && !range.admits(p.lead->as_lead())) {
+        refuse_(LeadRefusal::of(*p.lead).refused(Refusal::Lead));
         return true;
     }
     if (p.stop_at && *p.stop_at == MovieFrame{}) {
         refuse_(
-            PlayRefusal{
-                Refusal::Movie,
-                static_cast<std::uint32_t>(cores::IMovieCodec::Refusal::NotAMovie)
-            }
+            PlayRefusal{Refusal::Movie, static_cast<std::uint32_t>(cores::MovieRefusal::NotAMovie)}
         );
         return true;
     }
-    play_.lead_override = lead;
-    play_.stop_at = p.stop_at;
-    play_.ram_fill = p.ram_fill;
-    play_.seeded_save = p.seeded_save;
-    play_.set_ok = p.set_settings;
-    play_.set.clear();
-    play_.offset_us = p.phase ? std::chrono::duration_cast<ReplayPlay::ArmMicros>(*p.phase).count()
-                              : 0u;
+    play_.request.lead_override = p.lead;
+    play_.request.stop_at = p.stop_at;
+    play_.request.ram_fill = p.ram_fill;
+    play_.request.seeded_save = p.seeded_save;
+    play_.request.set_ok = p.set_settings;
+    play_.request.offset_us = p.phase ? saturated<ArmMicros>(*p.phase) : ArmMicros{};
+    play_.report.set.clear();
     active_ = std::make_unique<ScanStage>();
     apply_(active_->enter(ctx_()));
     return true;

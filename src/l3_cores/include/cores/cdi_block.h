@@ -7,6 +7,9 @@
 #include <span>
 
 #include "cores/cd_msf.h"
+#include "cores/q_control.h"
+#include "cores/toc_entry.h"
+#include "cores/toc_point.h"
 #include "cores/types.h"
 #include "infra/endian.h"
 #include "proto/block_geometry.h"
@@ -15,12 +18,12 @@
 
 namespace mister::cores::cdi {
 
-inline constexpr std::size_t kSectorBytes = svc::kCdDataSize;
+inline constexpr std::size_t kSectorBytes = svc::kRawFrameBytes;
 
 inline constexpr std::size_t kQBytes = 24;
 inline constexpr std::size_t kRwBytes = 192;
-inline constexpr std::size_t kSubcodeBytes = kQBytes + kRwBytes;
-inline constexpr std::size_t kBlockBytes = kSectorBytes + kSubcodeBytes;
+inline constexpr std::size_t kSubcodeAreaBytes = kQBytes + kRwBytes;
+inline constexpr std::size_t kBlockBytes = kSectorBytes + kSubcodeAreaBytes;
 inline constexpr std::uint32_t kBlockSize32{kBlockBytes};
 inline constexpr std::size_t kRawSubcodeBytes = 96;
 
@@ -71,6 +74,21 @@ struct QFrame {
 
     std::array<std::uint8_t, kQBytes> bytes{};
 
+    constexpr QFrame() = default;
+
+    constexpr explicit QFrame(QControl control) noexcept {
+        control.store(
+            std::span<std::uint8_t, sizeof(std::uint16_t)>(bytes.data(), sizeof(std::uint16_t))
+        );
+    }
+
+    constexpr QFrame(QControl control, TocPoint point) noexcept : QFrame{control} {
+        constexpr std::size_t at = static_cast<std::size_t>(Field::Index) * sizeof(std::uint16_t);
+        point.store(
+            std::span<std::uint8_t, sizeof(std::uint16_t)>(bytes.data() + at, sizeof(std::uint16_t))
+        );
+    }
+
     constexpr void set(Field f, unsigned v) noexcept {
         const std::size_t at = static_cast<std::size_t>(f) * sizeof(std::uint16_t);
         infra::store_be<std::uint16_t>(
@@ -111,18 +129,20 @@ inline constexpr std::array<std::uint8_t, 15> kBootHeader =
     {0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x02, 0x16};
 
 inline constexpr std::size_t kTocEntries = 306;
-using TocEntry = std::array<std::uint8_t, 5>;
+inline constexpr std::size_t kTocRowBytes = 5;
 
-[[nodiscard]] QFrame compose_q(std::int32_t lba, const svc::Toc& toc) noexcept;
+static_assert(sizeof(TocEntry) == kTocRowBytes, "the record is the five bytes a TOC row carries");
 
-[[nodiscard]] QFrame compose_toc_q(std::int32_t lba, std::span<const TocEntry> entries) noexcept;
+[[nodiscard]] QFrame compose_q(HeadLba lba, const svc::Toc& toc) noexcept;
+
+[[nodiscard]] QFrame compose_toc_q(HeadLba lba, std::span<const TocEntry> entries) noexcept;
 
 void widen_rw(
     std::span<const std::uint8_t, kRawSubcodeBytes> symbols,
     std::span<std::uint8_t, kRwBytes> rw
 ) noexcept;
 
-std::size_t build_toc(
+[[nodiscard]] std::span<const TocEntry> build_toc(
     const svc::Toc& toc,
     DiscType disc_type,
     std::span<TocEntry, kTocEntries> out

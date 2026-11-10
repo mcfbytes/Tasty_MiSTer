@@ -3,24 +3,19 @@
 #include "svc/analog_reshape.h"
 
 #include <fcntl.h>
-#include <unistd.h>
 
 #include <cerrno>
 #include <cmath>
 #include <utility>
 
+#include "infra/indexed_array.h"
 #include "input_rules.h"
 #include "input_service_detail.h"
+#include "svc/sys_button.h"
 
 namespace mister::svc {
 
 namespace {
-
-constexpr std::size_t kSysBtnCntOk = 21;
-constexpr std::size_t kSysBtnCntEsc = 22;
-
-constexpr std::size_t kSysAxisFirst = 24;
-constexpr unsigned kSysAxisWords = 4;
 
 const AxisCal kNullAxis{};
 
@@ -28,31 +23,30 @@ const AxisCal kNullAxis{};
 
 namespace {
 
-AxisTable cache_axes(const os::Evdev& ev) {
-    AxisTable axes{};
+AxisSlots cache_slots(const os::Evdev& ev) {
+    AxisSlots slots{};
     for (unsigned code = 0; code < kAxisCount; ++code) {
         const std::optional<input_absinfo> info = ev.abs_info(code);
         if (!info)
             continue;
-        AxisCal cal{};
+        AxisCal& cal = slots[AxisPosition{code}].cal;
         cal.min = info->minimum;
         cal.max = info->maximum;
         cal.flat = info->flat;
         cal.fuzz = info->fuzz;
-        axes[code] = cal;
     }
-    return axes;
+    return slots;
 }
 
+OsdCombo::Claim claim_of(
+    SysButton word,
+    const SysWords& sys,
+    EvdevCode code,
+    bool pressed
+) noexcept {
+    return OsdCombo::Claim{sys[word] == PackedKeys::lone(code), pressed};
 }
 
-namespace {
-
-bool reports_rumble(const os::Evdev& ev) noexcept {
-    if (!ev.effect_count())
-        return false;
-    return ev.has_ff(FF_RUMBLE);
-}
 }
 
 Ex<InputDevice> InputDevice::open(std::string_view devnode) {
@@ -61,7 +55,9 @@ Ex<InputDevice> InputDevice::open(std::string_view devnode) {
     }
     std::string path(devnode);
 
-    os::Evdev ev(::open(path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC));
+    os::Evdev ev = os::Evdev::adopt(
+        UniqueFd{::open(path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC)}
+    );
     if (!ev.valid())
         return std::unexpected(os_error(ERR_SITE()));
 
@@ -76,18 +72,14 @@ Ex<InputDevice> InputDevice::open(std::string_view devnode) {
             dev.facts_.id.bustype = id->bustype;
         }
         char name[128] = {};
-        if (ev.name(name)) {
-            name[sizeof name - 1] = 0;
-            dev.facts_.id.name = name;
-        }
+        if (const auto got = ev.name(name))
+            dev.facts_.id.name = *got;
 
         char uniq[32] = {};
-        if (ev.uniq(uniq)) {
-            uniq[sizeof uniq - 1] = 0;
-            dev.facts_.uniq = uniq;
-        }
-        dev.axes_ = cache_axes(ev);
-        dev.rumble_ = reports_rumble(ev);
+        if (const auto got = ev.uniq(uniq))
+            dev.facts_.uniq = *got;
+        dev.axes_ = cache_slots(ev);
+        dev.rumble_ = RumbleChannel::probe(ev);
     }
     dev.ev_ = std::move(ev);
     return dev;
@@ -102,7 +94,7 @@ Ex<InputDevice> InputDevice::adopt(
     if (fd < 0)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
     InputDevice dev;
-    dev.ev_ = os::Evdev{fd};
+    dev.ev_ = os::Evdev::adopt(UniqueFd{fd});
     dev.facts_.devname = devnode;
     dev.facts_.mouse = mouse;
     dev.facts_.id = id;
@@ -110,10 +102,16 @@ Ex<InputDevice> InputDevice::adopt(
 }
 
 const AxisCal& InputDevice::axis(EvdevCode code) const {
-    const auto slot = code.axis_position<kAxisCount>();
+    const auto slot = AxisPosition::of<kAxisCount>(code);
     if (!slot)
         return kNullAxis;
-    return axes_[*slot];
+    return axes_[*slot].cal;
+}
+
+void InputDevice::replace_axes(const AxisTable& table) noexcept {
+    for (std::size_t row = 0; row < kAxisCount; ++row) {
+        axes_[AxisPosition{row}].cal = table[row];
+    }
 }
 
 StickCal InputDevice::stick_cal(StickIndex stick) const noexcept {
@@ -121,7 +119,7 @@ StickCal InputDevice::stick_cal(StickIndex stick) const noexcept {
     return s ? s->cal() : StickCal{};
 }
 
-const JoyWords& DeviceMaps::install_sys(const JoyWords& words) noexcept {
+const SysWords& DeviceMaps::install_sys(const SysWords& words) noexcept {
     sys = words;
     if (packed_word(sys[kSysBtnCntEsc]) == 0)
         sys[kSysBtnCntEsc] = sys[kSysBtnCntOk];
@@ -129,12 +127,12 @@ const JoyWords& DeviceMaps::install_sys(const JoyWords& words) noexcept {
 }
 
 std::span<const PackedKeys> DeviceMaps::wire_view() const noexcept {
-    static constexpr JoyWords kUnset{};
+    static constexpr WireWords kUnset{};
     return wire ? std::span<const PackedKeys>{*wire} : std::span<const PackedKeys>{kUnset};
 }
 
-void InputDevice::install_sys_map(const JoyWords& words) noexcept {
-    const JoyWords& fixed = maps_.install_sys(words);
+void InputDevice::install_sys_map(const SysWords& words) noexcept {
+    const SysWords& fixed = maps_.install_sys(words);
 
     maps_.set_menu(rules::derive_menu_map(fixed, facts_.quirk != QuirkId::Wheel));
 }
@@ -142,8 +140,8 @@ void InputDevice::install_sys_map(const JoyWords& words) noexcept {
 bool InputDevice::matches_sys_button(EvdevCode code) const noexcept {
     if (code.is_unset())
         return false;
-    for (std::size_t i = 0; i <= 11; ++i) {
-        const PackedKeys packed = maps_.sys[i];
+    for (SysButton word{}; is_pad_control(word); word = word.next()) {
+        const PackedKeys packed = maps_.sys[word];
         if (packed == PackedKeys{})
             continue;
         if (packed.lo == code || packed.hi == code)
@@ -165,62 +163,17 @@ bool InputDevice::has_nonzero_joy_map() const noexcept {
 Ex<void> InputDevice::set_grabbed(bool on) {
     if (!ev_.valid())
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    if (!ev_.grab(on)) {
-        return std::unexpected(os_error(ERR_SITE()));
-    }
+    const Ex<void> grabbed = ev_.grab(on);
+    if (!grabbed)
+        return grabbed;
     grabbed_ = on;
     return {};
 }
 
-ff_effect make_rumble_effect(
-    QuirkId quirk,
-    std::int16_t id,
-    proto::user_io::RumbleMotors motors
-) noexcept {
-    ff_effect e{};
-    e.type = FF_RUMBLE;
-    e.id = id;
-    e.direction = quirk == QuirkId::Wheel ? 0x4000 : 0x0000;
-    e.u.rumble.strong_magnitude = motors.strong;
-    e.u.rumble.weak_magnitude = motors.weak;
-    e.replay.length = kRumbleLengthMs;
-    e.replay.delay = 0;
-    return e;
-}
-
-Ex<void> InputDevice::set_rumble(proto::user_io::RumbleMotors motors) {
-    if (!rumble_ || !ev_.valid())
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    if (motors.strong == 0 && motors.weak == 0) {
-        if (rumble_id_ == -1)
-            return {};
-        const bool removed = ev_.erase_effect(static_cast<int>(rumble_id_));
-        rumble_id_ = -1;
-        if (!removed)
-            return std::unexpected(os_error(ERR_SITE()));
-        return {};
-    }
-    ff_effect e = make_rumble_effect(facts_.quirk, rumble_id_, motors);
-    if (!ev_.upload_effect(e))
-        return std::unexpected(os_error(ERR_SITE()));
-    rumble_id_ = e.id;
-    input_event play{};
-    play.type = EV_FF;
-    play.code = static_cast<std::uint16_t>(rumble_id_);
-    play.value = 1;
-    if (::write(ev_.fd(), &play, sizeof play) < 0)
-        return std::unexpected(os_error(ERR_SITE()));
-    return {};
-}
-
 bool InputDevice::release_for_handover() noexcept {
-    bool ok = true;
-    if (rumble_id_ != -1) {
-        ok = ev_.valid() && ev_.erase_effect(static_cast<int>(rumble_id_));
-        rumble_id_ = -1;
-    }
+    bool ok = rumble_.release(ev_);
     if (grabbed_) {
-        ok = ev_.valid() && ev_.grab(false) && ok;
+        ok = ev_.valid() && ev_.grab(false).has_value() && ok;
         grabbed_ = false;
     }
     return ok;
@@ -242,45 +195,37 @@ void InputDevice::push_key_edge(EvdevCode code, bool pressed) noexcept {
 void InputDevice::track_osd_combo(EvdevCode code, bool pressed) noexcept {
     if (code.is_unset())
         return;
-    const std::uint8_t was = osd_combo_;
-    if (maps_.sys[kSysBtnCntEsc] == PackedKeys::lone(code)) {
-        if (pressed)
-            osd_combo_ |= 2u;
-        else
-            osd_combo_ = static_cast<std::uint8_t>(osd_combo_ & ~2u);
-    }
-    if (maps_.sys[kSysBtnCntOk] == PackedKeys::lone(code)) {
-        if (pressed)
-            osd_combo_ |= 1u;
-        else
-            osd_combo_ = static_cast<std::uint8_t>(osd_combo_ & ~1u);
-    }
-    if (code.is_key() || was == osd_combo_)
+    const OsdCombo::Claims claims{
+        .escape = claim_of(kSysBtnCntEsc, maps_.sys, code, pressed),
+        .ok = claim_of(kSysBtnCntOk, maps_.sys, code, pressed)
+    };
+    const OsdCombo::Turn turn = osd_.update(claims);
+
+    if (code.is_key())
         return;
-    if (was != 3u && osd_combo_ == 3u) {
+    if (turn == OsdCombo::Turn::made) {
         if (report_.osd_makes != 0xFFu)
             ++report_.osd_makes;
-    } else if (was == 3u && osd_combo_ != 3u) {
+    } else if (turn == OsdCombo::Turn::broken) {
         if (report_.osd_breaks != 0xFFu)
             ++report_.osd_breaks;
     }
 }
 
-void InputDevice::synth_axis(EvdevCode code, std::int32_t value, const AxisCal& cal) noexcept {
-    const auto slot = code.axis_position<kAxisCount>();
-    if (!slot)
-        return;
+void InputDevice::synth_axis(AxisPosition slot, EvdevCode code, std::int32_t value) noexcept {
 
     if (is_pdsp_like(facts_.quirk))
         return;
+    AxisSlot& state = axes_[slot];
+    const AxisCal& cal = state.cal;
 
-    std::uint8_t edge = 0;
+    AxisSlot::Edge edge = AxisSlot::Edge::none;
     if ((cal.max == 1 && cal.min == -1) || (cal.max == 2 && cal.min == 0)) {
 
         if (value == cal.min)
-            edge = 1;
+            edge = AxisSlot::Edge::low;
         if (value == cal.max)
-            edge = 2;
+            edge = AxisSlot::Edge::high;
     } else {
 
         const std::int32_t range = cal.max - cal.min + 1;
@@ -288,32 +233,28 @@ void InputDevice::synth_axis(EvdevCode code, std::int32_t value, const AxisCal& 
         const std::int32_t threshold = range / 4;
 
         bool only_max = true;
-        for (unsigned nn = 0; nn < kSysAxisWords; ++nn) {
-            const PackedKeys w = maps_.sys[kSysAxisFirst + nn];
+        for (const SysButton axis : kSysAxisCluster) {
+            const PackedKeys w = maps_.sys[axis];
             if (w != PackedKeys{} && w.lo == code)
                 only_max = false;
         }
         if (value < center - threshold && !only_max)
-            edge = 1;
+            edge = AxisSlot::Edge::low;
         if (value > center + threshold)
-            edge = 2;
+            edge = AxisSlot::Edge::high;
     }
 
-    const std::uint8_t last = axis_edge_[*slot];
+    const AxisSlot::Edge last = state.edge;
     if (last == edge)
         return;
-    axis_edge_[*slot] = edge;
-
-    const auto edge_code = [code](std::uint8_t e) {
-        return e == 1 ? code.key_emu_min() : code.key_emu_max();
-    };
-    if (last != 0) {
-        push_key_edge(edge_code(last), false);
+    state.edge = edge;
+    if (last != AxisSlot::Edge::none) {
+        push_key_edge(AxisSlot::code_of(last, code), false);
         if (report_.axis_edges != 0xFFFFu)
             ++report_.axis_edges;
     }
-    if (edge != 0) {
-        push_key_edge(edge_code(edge), true);
+    if (edge != AxisSlot::Edge::none) {
+        push_key_edge(AxisSlot::code_of(edge, code), true);
         if (report_.axis_edges != 0xFFFFu)
             ++report_.axis_edges;
     }
@@ -356,28 +297,28 @@ std::int32_t normalize_axis(std::int32_t value, const AxisCal& cal) {
     else if (v > cal.max)
         v = cal.max;
     v -= (cal.min + cal.max) / 2;
-    v = (v * 127) / hrange;
-    if (v < -127)
-        v = -127;
-    else if (v > 127)
-        v = 127;
+    v = (v * AnalogXy::kAxisMax) / hrange;
+    if (v < -AnalogXy::kAxisMax)
+        v = -AnalogXy::kAxisMax;
+    else if (v > AnalogXy::kAxisMax)
+        v = AnalogXy::kAxisMax;
     return v;
 }
 
 struct StickAxis {
     StickIndex stick;
-    bool is_y;
+    AnalogXy::Axis axis;
 };
 
 std::optional<StickAxis> stick_of(EvdevCode code) {
     if (code == EvdevCode{ABS_X})
-        return StickAxis{kLeftStick, false};
+        return StickAxis{kLeftStick, AnalogXy::Axis::X};
     if (code == EvdevCode{ABS_Y})
-        return StickAxis{kLeftStick, true};
+        return StickAxis{kLeftStick, AnalogXy::Axis::Y};
     if (code == EvdevCode{ABS_RX})
-        return StickAxis{kRightStick, false};
+        return StickAxis{kRightStick, AnalogXy::Axis::X};
     if (code == EvdevCode{ABS_RY})
-        return StickAxis{kRightStick, true};
+        return StickAxis{kRightStick, AnalogXy::Axis::Y};
     return std::nullopt;
 }
 
@@ -398,11 +339,11 @@ void InputDevice::decode_key(const input_event& ev) noexcept {
 
 void InputDevice::decode_rel(const input_event& ev) noexcept {
     if (ev.code == REL_X)
-        report_.rel_x += ev.value;
+        report_.motion.dx += ev.value;
     else if (ev.code == REL_Y)
-        report_.rel_y += ev.value;
+        report_.motion.dy += ev.value;
     else if (ev.code == REL_WHEEL)
-        report_.rel_wheel += ev.value;
+        report_.motion.wheel += ev.value;
     else
         return;
     report_.mouse_changed = true;
@@ -410,36 +351,32 @@ void InputDevice::decode_rel(const input_event& ev) noexcept {
 
 void InputDevice::decode_abs(const input_event& ev) noexcept {
     const EvdevCode code{ev.code};
+    const auto pos = AxisPosition::of<kAxisCount>(code);
     const auto sa = stick_of(code);
 
-    const AxisCal& cal = axis(code);
+    const AxisCal& cal = pos ? axes_[*pos].cal : kNullAxis;
     if (!sa) {
-        synth_axis(code, ev.value, cal);
+        if (pos)
+            synth_axis(*pos, code, ev.value);
         return;
     }
     const StickIndex stick = sa->stick;
-    const bool is_y = sa->is_y;
+    const AnalogXy::Axis axis = sa->axis;
     StickState& st = sticks_[stick];
     const std::int32_t v = normalize_axis(ev.value, cal);
-    if (is_y)
-        st.raw.y = v;
-    else
-        st.raw.x = v;
+    st.raw = axis == AnalogXy::Axis::X ? AnalogXy{v, st.raw.y} : AnalogXy{st.raw.x, v};
 
     st.learn(rules::is_diagonal(st.raw));
-    if (const auto slot = code.axis_position<kAxisCount>()) {
-        const std::int32_t axis_value = is_y ? st.raw.y : st.raw.x;
-        const std::int32_t seen = axis_value < 0 ? -axis_value : axis_value;
-        if (seen > axes_[*slot].seen_max)
-            axes_[*slot].seen_max = seen;
+    if (pos) {
+        const auto seen = static_cast<std::int32_t>(magnitude(st.raw, axis));
+        AxisCal& cached = axes_[*pos].cal;
+        if (seen > cached.seen_max)
+            cached.seen_max = seen;
     }
 
     const StickCal sc = st.cal();
-    rules::DeadzoneParams dp{};
-    dp.deadzone = deadzone_;
-    dp.max_cardinal = sc.max_cardinal;
-    dp.max_range = sc.max_range;
-    AnalogXy xy = rules::apply_deadzone(st.raw, dp);
+
+    AnalogXy xy = rules::apply_deadzone(st.raw, rules::DeadzoneParams{deadzone_, sc});
 
     if (reshape_)
         xy = reshape_->reshape(xy, cal, sc);
@@ -449,7 +386,8 @@ void InputDevice::decode_abs(const input_event& ev) noexcept {
     }
     report_.stick[stick] = xy;
 
-    synth_axis(code, ev.value, cal);
+    if (pos)
+        synth_axis(*pos, code, ev.value);
 }
 
 Ex<unsigned> InputDevice::drain() {

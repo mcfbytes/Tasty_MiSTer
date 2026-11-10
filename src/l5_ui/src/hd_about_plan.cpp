@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/hd_about_plan.h"
 
-#include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "ui/free_space.h"
 #include "ui/hd_plan_inputs.h"
@@ -17,6 +17,18 @@ constexpr std::string_view kLinuxLabel = "Linux";
 constexpr std::string_view kKernelLabel = "Kernel";
 constexpr std::string_view kStorageLabel = "Storage";
 
+std::string_view kernel_word(KernelRt kernel) noexcept {
+    switch (kernel) {
+        case KernelRt::PreemptRt:
+            return "PREEMPT_RT";
+        case KernelRt::NotRt:
+            return "Not RT";
+        case KernelRt::Unknown:
+            break;
+    }
+    return "Unknown";
+}
+
 std::string storage_word(const SystemFacts& f) {
     std::string s = f.storage_usb ? "USB" : (f.storage_sd_fallback ? "SD (fallback)" : "SD");
     s += ", ";
@@ -24,19 +36,18 @@ std::string storage_word(const SystemFacts& f) {
     return s;
 }
 
-bool same_facts(const SystemFacts& a, const SystemFacts& b) {
-    constexpr std::uint64_t kBytesPerMiB = 1024ull * 1024ull;
-    return std::string_view(a.version) == std::string_view(b.version)
-        && std::string_view(a.os_version) == std::string_view(b.os_version)
-        && a.avail.v / kBytesPerMiB == b.avail.v / kBytesPerMiB
-        && a.storage_usb == b.storage_usb
-        && a.storage_sd_fallback == b.storage_sd_fallback
-        && a.kernel == b.kernel;
 }
 
+auto HdAboutPlan::about_of(const SystemFacts& facts) -> AboutFacts {
+    return AboutFacts{
+        .version = std::string{facts.version.view()},
+        .os_version = std::string{facts.os_version.view()},
+        .kernel = std::string{kernel_word(facts.kernel)},
+        .storage = storage_word(facts)
+    };
 }
 
-HdAboutPlan::HdAboutPlan(const HdPlanInputs& in) : facts_(in.ctx.sys) {
+HdAboutPlan::HdAboutPlan(const HdPlanInputs& in) : shown_(about_of(in.ctx.sys)) {
     TASTY_SEAT_BODY(HdAboutPlan);
     build_();
 }
@@ -49,24 +60,12 @@ void HdAboutPlan::build_() {
         (void)v.assign(text);
         rows_.emplace_back(HdValueRow::Spec{.label = label, .value = v});
     };
-    add(kVersionLabel, facts_.version);
-    add(kLinuxLabel, facts_.os_version);
-    add(kKernelLabel, kernel_word_());
-    add(kStorageLabel, storage_word(facts_));
+    add(kVersionLabel, shown_.version);
+    add(kLinuxLabel, shown_.os_version);
+    add(kKernelLabel, shown_.kernel);
+    add(kStorageLabel, shown_.storage);
     for (HdValueRow& row : rows_)
         refs_.emplace_back(row);
-}
-
-std::string_view HdAboutPlan::kernel_word_() const noexcept {
-    switch (facts_.kernel) {
-        case KernelRt::PreemptRt:
-            return "PREEMPT_RT";
-        case KernelRt::NotRt:
-            return "Not RT";
-        case KernelRt::Unknown:
-            break;
-    }
-    return "Unknown";
 }
 
 PageId HdAboutPlan::id() const {
@@ -84,11 +83,13 @@ std::span<const std::reference_wrapper<IHdRow>> HdAboutPlan::rows() const {
     return refs_;
 }
 
-void HdAboutPlan::refresh(const SystemFacts& facts) {
+void HdAboutPlan::refresh(const SystemFacts& facts, const SessionFacts& session) {
     TASTY_SEAT_BODY(HdAboutPlan);
-    if (same_facts(facts_, facts))
+    (void)session;
+    AboutFacts next = about_of(facts);
+    if (next == shown_)
         return;
-    facts_ = facts;
+    shown_ = std::move(next);
     build_();
 }
 

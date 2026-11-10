@@ -37,6 +37,11 @@ public:
     std::span<const OptionItem* const> slots() const noexcept { return slots_; }
 
 private:
+    struct Placed {
+        const OptionItem* item;
+        Placement placement;
+    };
+
     [[nodiscard]] Placement classify_(
         const OptionItem& item,
         const CoreVerbs& verbs,
@@ -45,9 +50,8 @@ private:
 
     [[nodiscard]] bool resets_the_game_(const OptionItem& item) const;
 
-    const OptionsModel& walk_;
     GameSlot game_;
-    std::vector<Placement> placed_;
+    std::vector<Placed> placed_;
     std::vector<const OptionItem*> slots_;
 };
 

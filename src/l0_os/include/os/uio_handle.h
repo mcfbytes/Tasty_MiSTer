@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 #include "infra/error.h"
@@ -9,15 +10,19 @@
 #include "os/types.h"
 #include "infra/seat.h"
 #include "os/uio_line_ref.h"
+#include "os/uio_line_space.h"
 
 namespace mister::os {
 
 inline constexpr const char* kUioClassRoot = "/sys/class/uio";
 static_assert(UioLineSpace{}.sysfs_root == std::string_view{kUioClassRoot});
 
-[[nodiscard]] int find_uio_node(std::string_view name) noexcept;
+[[nodiscard]] std::optional<UioMinor> find_uio_node(std::string_view name) noexcept;
 
-[[nodiscard]] int find_uio_node_under(const char* sysfs_root, std::string_view name) noexcept;
+[[nodiscard]] std::optional<UioMinor> find_uio_node_under(
+    const char* sysfs_root,
+    std::string_view name
+) noexcept;
 
 class UioHandle {
 

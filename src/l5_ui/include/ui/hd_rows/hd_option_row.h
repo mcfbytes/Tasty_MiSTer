@@ -5,7 +5,7 @@
 
 #include "infra/seat.h"
 #include "ui/hd_row.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 
 namespace mister::ui {
 
@@ -22,11 +22,10 @@ public:
     std::optional<RowKey> key() const override;
     app::PageDescription::Row describe() const override;
     Transition select() override;
-    Transition step(int delta) override;
+    Transition step(CycleDir dir) override;
 
 private:
     [[nodiscard]] OptionItem::Look look_() const;
-    [[nodiscard]] OptionItem::Press press_(bool select, bool minus) const;
 
     const OptionItem& item_;
     IOptionsSurface& host_;

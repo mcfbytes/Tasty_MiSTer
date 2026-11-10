@@ -7,6 +7,7 @@ target_link_libraries(mister_infra PRIVATE tasty_options)
 
 tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/ascii.h
+  infra/byte_offset.h
   infra/byte_view.h
   infra/claim_set.h
   infra/counted_lane.h
@@ -15,14 +16,17 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/endian.h
   infra/diag_log.h
   infra/error.h
+  infra/errno.h
   infra/fixed_ring.h
   infra/fixed_str.h
+  infra/heartbeat.h
   infra/inbox.h
   infra/affine.h
   infra/indexed_array.h
   infra/indexed_span.h
   infra/json_name.h
   infra/json_out.h
+  infra/json_width.h
   infra/lat_hist.h
   infra/park_timeout.h
   infra/log_lane.h
@@ -34,13 +38,16 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/park_fds.h
   infra/park_like.h
   infra/parse_int.h
+  infra/path_parts.h
   infra/path_text.h
   infra/lease_order.h
   infra/pause_latch.h
   infra/persist.h
+  infra/pool_slot.h
   infra/posix_compat.h
   infra/rt_latency.h
   infra/rt_stats.h
+  infra/service_slot.h
   infra/seat.h
   infra/seat_main.h
   infra/seat_owner_io.h
@@ -50,11 +57,14 @@ tasty_add_header_checks(tasty_infra_header_checks LIB mister_infra HEADERS
   infra/seq_cell.h
   infra/never_park.h
   infra/slot_pool.h
+  infra/slot_stride.h
   infra/loan_channel.h
   infra/spsc_ring.h
   infra/telemetry.h
   infra/unique_fd.h
+  infra/utf8.h
   infra/kick_policy.h
   infra/wake_flag.h
+  infra/wired_end.h
 )
 

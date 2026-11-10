@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "board_reset.h"
 
-#include <unistd.h>
+#include <chrono>
 
+#include "app/board_ops.h"
 #include "hal/bridge_sequencer.h"
 
 namespace mister::fw {
@@ -12,14 +13,13 @@ void BoardReset::board_reset() {
 
     if (!bridges_.request_board_reset())
         return;
+
     if (sleeper_) {
-        sleeper_->sleep_ms(kResetSettleMs);
+        app::sleep_ms(sleeper_, kResetSettle);
         return;
     }
-    constexpr unsigned kPollSliceMs = 100;
-    constexpr useconds_t kPollSliceUs = kPollSliceMs * 1000;
-    for (unsigned ms = 0; ms < kResetSettleMs; ms += kPollSliceMs) {
-        ::usleep(kPollSliceUs);
+    for (auto waited = std::chrono::milliseconds{}; waited < kResetSettle; waited += kPollSlice) {
+        app::sleep_ms(infra::OptRef<app::ISleeper>{}, kPollSlice);
     }
 }
 

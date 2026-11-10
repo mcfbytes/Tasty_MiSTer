@@ -5,8 +5,10 @@
 #include <cstdint>
 
 #include "infra/seat.h"
+#include "reactor/round_lifecycle.h"
 #include "reactor/round_recorder.h"
 #include "reactor/round_timing.h"
+#include "reactor/service_slot.h"
 
 namespace mister::reactor {
 
@@ -23,7 +25,9 @@ public:
 
     void begin(std::int64_t t_wake_ns) noexcept;
     void wake(std::int64_t latency_ns, std::uint64_t missed_ticks) noexcept;
-    void mark(RoundSegment seg, std::size_t index, std::int64_t now_ns) noexcept;
+    void mark(RoundSegment seg, ServiceSlot row, std::int64_t now_ns) noexcept;
+
+    void mark(RoundSegment seg, std::int64_t now_ns) noexcept;
     void note_lifecycle(RoundLifecycle why) noexcept;
 
     std::int64_t end(std::int64_t t_end_ns) noexcept;
@@ -44,7 +48,7 @@ private:
     static std::size_t record_(
         RoundTiming::Dist& d,
         std::uint64_t ns,
-        RoundTiming::Cause c
+        RoundTiming::Blame blame
     ) noexcept;
     void close_epoch_(std::int64_t now_ns) noexcept;
 
@@ -53,8 +57,8 @@ private:
     std::int64_t round_start_ns_ = 0;
     std::int64_t last_mark_ns_ = 0;
     std::int64_t longest_ns_ = -1;
-    RoundTiming::Cause longest_{};
-    std::uint8_t lifecycle_ = 0;
+    RoundTiming::Blame longest_blame_{};
+    RoundLifecycleSet lifecycle_{};
     bool in_round_ = false;
     RoundTimingCell cell_{};
     RoundRecorder recorder_{};

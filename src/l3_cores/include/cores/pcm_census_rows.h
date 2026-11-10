@@ -4,25 +4,18 @@
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
 #include "cores/pcm_wire_rows.h"
-#include "reactor/core_state.h"
+#include "cores/role_row.h"
 #include "infra/seat.h"
-#include "reactor/link_decoder.h"
 
 namespace mister::cores {
 
 namespace detail {
 
-template <const CoreProfile& kProfile>
-class WireTickRow final : public reactor::ILinkDecoder {
+struct PcmWireRole {
     TASTY_SEAT_RESIDENT(RT);
 
-public:
-    void service(reactor::CoreState& st) const override {
-        TASTY_SEAT_BODY(WireTickRow);
-        Core* c = bound_core<kProfile>(st);
-        if (c == nullptr)
-            return;
-        if (const auto r = c->pcm_wire_rows())
+    void service(Core& c) const noexcept {
+        if (const auto r = c.pcm_wire_rows())
             r->service_pcm_tick();
     }
 };
@@ -30,6 +23,6 @@ public:
 }
 
 template <const CoreProfile& kProfile>
-inline constexpr detail::WireTickRow<kProfile> kPcmWireTick{};
+inline constexpr detail::RoleRow<kProfile, detail::PcmWireRole> kPcmWireTick{};
 
 }

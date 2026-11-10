@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 #include "cores/n64dd_geometry.h"
@@ -50,14 +51,21 @@ struct DiskType {
 
     static constexpr std::uint8_t kCount = static_cast<std::uint8_t>(kDiskTypes);
 
-    [[nodiscard]] static constexpr DiskType of_byte(std::uint8_t byte) noexcept {
-        return DiskType{static_cast<std::uint8_t>(byte & kTypeMask)};
+    [[nodiscard]] constexpr bool in_range() const noexcept { return v < kCount; }
+
+    [[nodiscard]] static constexpr std::optional<DiskType> from_byte(std::uint8_t byte) noexcept {
+        const auto type = static_cast<std::uint8_t>(byte & kTypeMask);
+        if (type >= kCount)
+            return std::nullopt;
+        return DiskType{type};
     }
 
-    [[nodiscard]] constexpr bool is_known() const noexcept { return v < kCount; }
+    [[nodiscard]] constexpr Error refusal(Errc errc, infra::ErrorSite site) const noexcept {
+        return Error{errc, site, v};
+    }
 
-    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
-        return Error{code, at, v};
+    [[nodiscard]] constexpr std::uint32_t detail() const noexcept {
+        return static_cast<std::uint32_t>(v);
     }
 
     friend constexpr bool operator==(DiskType, DiskType) = default;
@@ -78,8 +86,8 @@ struct SystemBlockView {
 
     [[nodiscard]] constexpr std::uint8_t type_byte() const noexcept { return v[kTypeOffset]; }
 
-    [[nodiscard]] constexpr DiskType type() const noexcept {
-        return DiskType::of_byte(type_byte());
+    [[nodiscard]] constexpr std::optional<DiskType> type() const noexcept {
+        return DiskType::from_byte(type_byte());
     }
 
     [[nodiscard]] constexpr bool type_in_range() const noexcept {

@@ -29,9 +29,9 @@ class CoreSettingsPage final : public Page, public IBrowserHost {
 public:
     struct Spec {
 
-        const app::OptionTable* table;
+        const app::OptionTable& table;
         proto::SubmenuNo page{};
-        std::string title;
+        std::string title{};
 
         bool mt32_available = false;
 
@@ -100,7 +100,7 @@ private:
     };
 
     void rebuild();
-    void ask_mount(std::uint8_t slot, std::string_view path);
+    void ask_mount(proto::IoIndex slot, std::string_view path);
 
     void ask_reset(proto::ResetEdge edge);
     template <class A>
@@ -113,7 +113,7 @@ private:
     [[nodiscard]] std::string compose(const Line& l) const;
 
     [[nodiscard]] app::PageDescription::Row hd_row(
-        const Line* line,
+        infra::OptRef<const Line> line,
         std::string_view text,
         bool stippled
     ) const;
@@ -122,9 +122,12 @@ private:
 
     [[nodiscard]] std::string cycle_value(const app::OptionTable::Row& r) const;
 
-    [[nodiscard]] std::string value_label(const cores::OptionRow& d, proto::FieldValue slot) const;
+    [[nodiscard]] std::string value_label(
+        const cores::OptionRow::CycleArm& d,
+        proto::FieldValue slot
+    ) const;
     [[nodiscard]] proto::FieldValue drawn_choice(const app::OptionTable::Row& r) const;
-    [[nodiscard]] const Line* line_for_ordinal(RowIndex o) const noexcept;
+    [[nodiscard]] infra::OptRef<const Line> line_for_ordinal(RowIndex o) const noexcept;
     [[nodiscard]] RowIndex exit_drawn() const noexcept;
 
     [[nodiscard]] RowIndex exit_ordinal() const noexcept { return row_after(selectable_); }
@@ -133,7 +136,7 @@ private:
     Transition open_browser(const app::OptionTable::Row& r, bool recents_first);
     Transition leave();
 
-    const app::OptionTable* table_;
+    const app::OptionTable& table_;
     proto::SubmenuNo page_;
     std::string title_;
     bool mt32_available_;
@@ -153,7 +156,7 @@ private:
     RowIndex sel_{};
     RowIndex first_row_{};
     bool armed_ = false;
-    std::uint8_t pending_slot_ = 0;
+    proto::IoIndex pending_slot_{};
     std::uint32_t refusals_ = 0;
     std::uint32_t published_ = 0;
 };

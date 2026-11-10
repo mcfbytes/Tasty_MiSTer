@@ -12,10 +12,8 @@
 #include "hal/scaler_buffers.h"
 #include "hal/scaler_header.h"
 #include "hal/scaler_probe.h"
-#include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
-#include "os/clock.h"
 
 namespace mister::app {
 
@@ -33,11 +31,11 @@ public:
         bool same = false;
         bool lowlat = false;
         bool stuck = false;
-        std::uint8_t stride_mib = 0;
+        std::uint16_t stride_mib = 0;
         std::uint32_t torn = 0;
     };
 
-    BackdropSampler(hal::ScalerBuffers window, const os::IClock* clock) noexcept;
+    explicit BackdropSampler(hal::ScalerBuffers window) noexcept;
 
     [[nodiscard]] bool note_applies(std::uint32_t applies, std::int64_t now) noexcept;
     void restart(std::int64_t now) noexcept;
@@ -59,7 +57,6 @@ private:
     [[nodiscard]] bool copy_frame_() noexcept;
 
     hal::ScalerBuffers window_;
-    infra::OptRef<const os::IClock> clock_{};
     hal::ScalerProbe probe_{};
     Phase phase_ = Phase::Probe;
     bool have_applies_ = false;
@@ -71,9 +68,8 @@ private:
     bool same_ = false;
     std::uint32_t applies_ = 0;
     std::uint32_t torn_ = 0;
-    std::size_t stride_ = 0;
-    std::optional<std::size_t> known_stride_{};
-    std::uint8_t stride_mib_ = 0;
+    hal::ScalerStride stride_ = hal::ScalerStride::Large;
+    std::optional<hal::ScalerStride> known_stride_{};
     std::int64_t next_poll_ = 0;
     std::uint16_t width_ = 0;
     std::uint16_t height_ = 0;

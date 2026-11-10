@@ -10,8 +10,7 @@ std::string_view rbf_text(std::string_view xml) noexcept {
     std::string_view out;
     bool inside = false;
     XmlScanner scan{xml};
-    Attr attrs[kMaxAttrs];
-    while (const auto t = scan.next_token(attrs)) {
+    while (const auto t = scan.next_token()) {
         switch (t->kind) {
             case Token::Kind::Text:
 

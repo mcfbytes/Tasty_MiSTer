@@ -5,6 +5,7 @@
 
 #include "app/core_block_roles.h"
 #include "cores/core_support.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/no_block_roles.h"
 #include "proto/spi_block_decoder.h"
@@ -20,7 +21,7 @@ public:
 
     void service(reactor::CoreState& st) const override {
         TASTY_SEAT_BODY(CoreBlockRow);
-        if (cores::Core* core = cores::bound_core(st)) {
+        if (const infra::OptRef<cores::Core> core = cores::bound_core(st)) {
             CoreBlockRoles roles{*core};
             d_->service(roles);
         } else {

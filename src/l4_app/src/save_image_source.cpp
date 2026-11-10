@@ -1,33 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/save_image_source.h"
 
+#include <utility>
+
 #include "infra/byte_view.h"
 
 namespace mister::app {
+namespace {
 
-static_assert(SaveImageSource::kSlots == 7, "one backend initializer per announceable slot");
-
-SaveImageSource::SaveImageSource(const svc::Vfs& vfs) noexcept
-    : backends_{
-          svc::FileSlotBackend{vfs},
-          svc::FileSlotBackend{vfs},
-          svc::FileSlotBackend{vfs},
-          svc::FileSlotBackend{vfs},
-          svc::FileSlotBackend{vfs},
-          svc::FileSlotBackend{vfs},
-          svc::FileSlotBackend{vfs}
-      } {}
-
-SaveImageSource::Binding* SaveImageSource::find(proto::SlotIndex slot) {
-    if (slot.v >= kSlots)
-        return nullptr;
-    return &bindings_[slot.v];
+template <std::size_t... I>
+std::array<svc::FileSlotBackend, sizeof...(I)> make_backends(
+    std::index_sequence<I...>,
+    const svc::Vfs& vfs
+) noexcept {
+    return std::array<svc::FileSlotBackend, sizeof...(I)>{((void)I, svc::FileSlotBackend{vfs})...};
 }
 
-const SaveImageSource::Binding* SaveImageSource::find(proto::SlotIndex slot) const {
-    if (slot.v >= kSlots)
-        return nullptr;
-    return &bindings_[slot.v];
+}
+
+SaveImageSource::SaveImageSource(const svc::Vfs& vfs) noexcept
+    : backends_{make_backends(std::make_index_sequence<kSlots>{}, vfs)} {}
+
+infra::OptRef<SaveImageSource::Binding> SaveImageSource::find(proto::SlotIndex slot) {
+    return bindings_.find(slot);
+}
+
+infra::OptRef<const SaveImageSource::Binding> SaveImageSource::find(proto::SlotIndex slot) const {
+    return bindings_.find(slot);
 }
 
 bool SaveImageSource::bind(
@@ -36,8 +35,8 @@ bool SaveImageSource::bind(
     bool manual,
     const cores::BlankSaveSpec& blank
 ) noexcept {
-    Binding* b = find(slot);
-    if (b == nullptr)
+    const auto b = find(slot);
+    if (!b)
         return false;
 
     if (b->attach != Attach::Detached)
@@ -60,18 +59,18 @@ bool SaveImageSource::bind(
 
 void SaveImageSource::unbind_all() {
     for (unsigned i = 0; i < kSlots; ++i) {
-        (void)bind(proto::SlotIndex{static_cast<std::uint8_t>(i)}, {});
+        (void)bind(proto::SlotIndex::of(i), {});
     }
 }
 
 std::string_view SaveImageSource::path_of(proto::SlotIndex slot) const {
-    const Binding* b = find(slot);
-    return b == nullptr ? std::string_view{} : b->path.view();
+    const auto b = find(slot);
+    return b ? b->path.view() : std::string_view{};
 }
 
 proto::SlotAttributes SaveImageSource::attributes(proto::SlotIndex slot) const {
-    const Binding* b = find(slot);
-    if (b == nullptr || b->path.view().empty())
+    const auto b = find(slot);
+    if (!b || b->path.view().empty())
         return proto::SlotAttributes{};
     const bool pre = !b->manual;
     return proto::SlotAttributes{
@@ -82,31 +81,31 @@ proto::SlotAttributes SaveImageSource::attributes(proto::SlotIndex slot) const {
 }
 
 bool SaveImageSource::manual(proto::SlotIndex slot) const noexcept {
-    const Binding* b = find(slot);
-    return b != nullptr && b->manual;
+    const auto b = find(slot);
+    return b.has_value() && b->manual;
 }
 
 void SaveImageSource::owe_close(proto::SlotIndex slot) noexcept {
     TASTY_SEAT_BODY(SaveImageSource);
-    if (Binding* b = find(slot); b != nullptr)
+    if (const auto b = find(slot))
         b->close_owed = true;
 }
 
 bool SaveImageSource::close_owed(proto::SlotIndex slot) const noexcept {
-    const Binding* b = find(slot);
-    return b != nullptr && b->close_owed;
+    const auto b = find(slot);
+    return b.has_value() && b->close_owed;
 }
 
 proto::FileSize SaveImageSource::size_of(proto::SlotIndex slot) const {
-    const Binding* b = find(slot);
-    if (b == nullptr || !b->exists)
+    const auto b = find(slot);
+    if (!b || !b->exists)
         return proto::FileSize{};
     return b->size;
 }
 
 bool SaveImageSource::exists(proto::SlotIndex slot) const noexcept {
-    const Binding* b = find(slot);
-    return b != nullptr && b->exists;
+    const auto b = find(slot);
+    return b.has_value() && b->exists;
 }
 
 void SaveImageSource::note_attached(
@@ -115,8 +114,8 @@ void SaveImageSource::note_attached(
     proto::FileSize size
 ) noexcept {
     TASTY_SEAT_BODY(SaveImageSource);
-    Binding* b = find(slot);
-    if (b == nullptr)
+    const auto b = find(slot);
+    if (!b)
         return;
     b->exists = exists;
     b->size = exists ? size : proto::FileSize{};
@@ -125,8 +124,8 @@ void SaveImageSource::note_attached(
 
 void SaveImageSource::note_detached(proto::SlotIndex slot) noexcept {
     TASTY_SEAT_BODY(SaveImageSource);
-    Binding* b = find(slot);
-    if (b == nullptr)
+    const auto b = find(slot);
+    if (!b)
         return;
     b->exists = false;
     b->size = proto::FileSize{};
@@ -139,25 +138,25 @@ void SaveImageSource::note_detached(proto::SlotIndex slot) noexcept {
 }
 
 SaveImageSource::Attach SaveImageSource::attach_state(proto::SlotIndex slot) const noexcept {
-    const Binding* b = find(slot);
-    return b == nullptr ? Attach::Detached : b->attach;
+    const auto b = find(slot);
+    return b ? b->attach : Attach::Detached;
 }
 
 void SaveImageSource::mark(proto::SlotIndex slot, Attach state) noexcept {
     TASTY_SEAT_BODY(SaveImageSource);
-    if (Binding* b = find(slot); b != nullptr)
+    if (const auto b = find(slot))
         b->attach = state;
 }
 
-svc::IStorageBackend* SaveImageSource::backend(proto::SlotIndex slot) noexcept {
-    if (slot.v >= kSlots)
-        return nullptr;
-    return &backends_[slot.v];
+infra::OptRef<svc::IStorageBackend> SaveImageSource::backend(proto::SlotIndex slot) noexcept {
+    if (!slot.below<kSlots>())
+        return {};
+    return infra::OptRef<svc::IStorageBackend>{infra::at_index(backends_, slot)};
 }
 
 std::span<const std::byte> SaveImageSource::order(proto::SlotIndex slot) const noexcept {
-    const Binding* b = find(slot);
-    if (b == nullptr)
+    const auto b = find(slot);
+    if (!b)
         return {};
     return infra::text_bytes(b->path.view());
 }
@@ -167,10 +166,10 @@ bool SaveImageSource::fill_blank(
     proto::Lba lba,
     std::span<std::uint8_t> window
 ) {
-    const Binding* b = find(slot);
-    if (b == nullptr || !b->blank.declared())
+    const auto b = find(slot);
+    if (!b || !b->blank.declared())
         return false;
-    cores::render_blank(b->blank, static_cast<std::uint64_t>(lba.v) * b->blank.lba_bytes.v, window);
+    cores::render_blank(b->blank, b->blank.lba_bytes.position_of(lba), window);
     return true;
 }
 

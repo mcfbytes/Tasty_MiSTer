@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "app/page_description.h"
+#include "app/tier_set.h"
 #include "infra/seat.h"
 #include "ui/navigator.h"
 #include "ui/transition.h"
@@ -31,16 +31,6 @@ public:
         bool dropped = false;
     };
 
-    struct Across {
-        std::uint8_t v = 0;
-
-        [[nodiscard]] constexpr bool any() const noexcept { return v != 0; }
-
-        [[nodiscard]] constexpr bool draws(app::RowTier t) const noexcept {
-            return (v & app::tier_bit(t)) != 0;
-        }
-    };
-
     struct Axis {
         enum class Move : std::uint8_t { None, Strip, Tier };
         Move move = Move::None;
@@ -49,11 +39,11 @@ public:
     };
 
     [[nodiscard]] Axis axis(const MenuModel& model, UiButtonMask buttons);
-    [[nodiscard]] Axis axis_of(const Page& top, Across across, UiButtonMask buttons);
+    [[nodiscard]] Axis axis_of(const Page& top, app::TierSet across, UiButtonMask buttons);
 
     bool apply(const Axis& a, Navigator& nav) noexcept;
 
-    void pin_across(Across across) noexcept { pinned_across_ = across; }
+    void pin_across(app::TierSet across) noexcept { pinned_across_ = across; }
 
     [[nodiscard]] Refresh refresh(const MenuModel& model, const UiEvent& ev);
     [[nodiscard]] static Settled settle(const Transition& answer, std::size_t depth) noexcept;
@@ -70,7 +60,7 @@ private:
     std::uint32_t steps_ = 0;
     std::uint32_t backs_ = 0;
     std::uint32_t axes_ = 0;
-    std::optional<Across> pinned_across_;
+    std::optional<app::TierSet> pinned_across_;
 };
 
 }

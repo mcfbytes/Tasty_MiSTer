@@ -16,28 +16,31 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/evdev.h"
-#include "proto/user_io/rumble_poll.h"
+#include "os/ff_effect_id.h"
+#include "proto/user_io/rumble_motors.h"
 #include "svc/analog_xy.h"
 #include "svc/axis_cal.h"
+#include "svc/axis_position.h"
+#include "svc/axis_slot.h"
 #include "svc/button_map.h"
 #include "svc/device_facts.h"
 #include "svc/device_identity.h"
 #include "svc/device_report.h"
+#include "svc/osd_combo.h"
 #include "svc/quirk_id.h"
+#include "svc/rumble_channel.h"
 #include "svc/stick_cal.h"
 #include "svc/stick_state.h"
 #include "svc/types.h"
 
 namespace mister::svc {
 
-struct ButtonMap;
-
 class IAnalogReshape;
 
 inline constexpr unsigned kAxisCount = 64;
-
-inline constexpr std::uint16_t kRumbleLengthMs = 0x7FFF;
 using AxisTable = std::array<AxisCal, kAxisCount>;
+
+using AxisSlots = infra::IndexedArray<AxisSlot, kAxisCount, AxisPosition>;
 
 inline constexpr EvdevCode kKeyEmuBase{EvdevCode::kKeyEmuBase};
 
@@ -50,13 +53,13 @@ static_assert(
 
 struct DeviceMaps {
     TASTY_SEAT_EXEMPT(component);
-    std::optional<JoyWords> wire{};
-    JoyWords sys{};
-    JoyWords menu{};
+    std::optional<WireWords> wire{};
+    SysWords sys{};
+    WireWords menu{};
 
-    const JoyWords& install_sys(const JoyWords& words) noexcept;
+    const SysWords& install_sys(const SysWords& words) noexcept;
 
-    void set_menu(JoyWords m) noexcept { menu = m; }
+    void set_menu(WireWords m) noexcept { menu = m; }
 
     std::span<const PackedKeys> wire_view() const noexcept;
 
@@ -67,12 +70,6 @@ static_assert(
     std::is_trivially_copyable_v<DeviceMaps>,
     "the map trio crosses the T-DIAG -> T-INPUT handover by value"
 );
-
-[[nodiscard]] ff_effect make_rumble_effect(
-    QuirkId quirk,
-    std::int16_t id,
-    proto::user_io::RumbleMotors motors
-) noexcept;
 
 class InputDevice {
     TASTY_SEAT_EXEMPT(component);
@@ -121,15 +118,15 @@ public:
 
     const AxisCal& axis(EvdevCode code) const;
 
-    void install_joy_map(const JoyWords& words) noexcept { maps_.wire = words; }
+    void install_joy_map(const WireWords& words) noexcept { maps_.wire = words; }
 
     bool has_joy_map() const noexcept { return maps_.wire_present(); }
 
     std::span<const PackedKeys> joy_map() const noexcept { return maps_.wire_view(); }
 
-    void install_sys_map(const JoyWords& words) noexcept;
+    void install_sys_map(const SysWords& words) noexcept;
 
-    std::span<const PackedKeys> sys_map() const noexcept { return maps_.sys; }
+    const SysWords& sys_map() const noexcept { return maps_.sys; }
 
     std::span<const PackedKeys> menu_map() const noexcept { return maps_.menu; }
 
@@ -152,9 +149,11 @@ public:
 
     [[nodiscard]] Ex<void> set_grabbed(bool on);
 
-    bool has_rumble() const noexcept { return rumble_; }
+    bool has_rumble() const noexcept { return rumble_.capable(); }
 
-    [[nodiscard]] Ex<void> set_rumble(proto::user_io::RumbleMotors motors);
+    [[nodiscard]] Ex<void> set_rumble(proto::user_io::RumbleMotors motors) {
+        return rumble_.play(ev_, facts_.quirk, motors);
+    }
 
     [[nodiscard]] bool release_for_handover() noexcept;
 
@@ -166,42 +165,34 @@ public:
 private:
     friend struct InputDeviceTestAccess;
 
-    void replace_axes(const AxisTable& table) noexcept { axes_ = table; }
-
-    void mark_rumble(bool on) noexcept { rumble_ = on; }
-
-    void mark_rumble_id(std::int16_t id) noexcept { rumble_id_ = id; }
+    void replace_axes(const AxisTable& table) noexcept;
 
     void mark_grabbed(bool on) noexcept { grabbed_ = on; }
-
-    std::int16_t rumble_id() const noexcept { return rumble_id_; }
 
     InputDevice() = default;
     void mark_down(EvdevCode code, bool on) noexcept;
 
     void push_key_edge(EvdevCode code, bool pressed) noexcept;
     void track_osd_combo(EvdevCode code, bool pressed) noexcept;
-    void synth_axis(EvdevCode code, std::int32_t value, const AxisCal& cal) noexcept;
+    void synth_axis(AxisPosition slot, EvdevCode code, std::int32_t value) noexcept;
 
     void decode_key(const input_event& ev) noexcept;
     void decode_rel(const input_event& ev) noexcept;
     void decode_abs(const input_event& ev) noexcept;
     os::Evdev ev_{};
     DeviceFacts facts_{};
+    RumbleChannel rumble_{};
+    OsdCombo osd_{};
     bool mod_ = false;
     bool grabbed_ = false;
-    bool rumble_ = false;
-    std::int16_t rumble_id_ = -1;
     Deadzone deadzone_{};
     infra::OptRef<const IAnalogReshape> reshape_;
     proto::MouseButtons mouse_buttons_{};
-    std::uint8_t osd_combo_ = 0;
     bool keys_changed_ = false;
 
     DeviceMaps maps_{};
-    AxisTable axes_{};
+    AxisSlots axes_{};
     KeyDownSet<kDownWords> down_{};
-    std::array<std::uint8_t, kAxisCount> axis_edge_{};
     infra::IndexedArray<StickState, kSticks.size(), StickIndex> sticks_{};
     JoyMask joy_prev_{};
     JoyMask menu_prev_{};

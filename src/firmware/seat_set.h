@@ -5,9 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <tuple>
 
 #include "seat_row.h"
+#include "seat_slots.h"
 #include "hal/thread_map.h"
 
 namespace mister::app {
@@ -34,9 +34,6 @@ namespace mister::fw {
 
 class DiagMain;
 class UiMain;
-
-template <class... Rows>
-struct SeatList {};
 
 using SeatMainList = SeatList<
     SeatRow<SeatTag::RT, app::RtMain>,
@@ -86,40 +83,6 @@ static_assert(
     rows_seat_each_once(SeatMainList{}),
     "every seat has exactly one main row: a missing row leaves a seat unspawnable"
 );
-
-template <class List>
-class SeatSlots;
-
-template <class... Rows>
-class SeatSlots<SeatList<Rows...>> {
-public:
-    constexpr SeatSlots() noexcept = default;
-
-    template <class... M>
-        requires(sizeof...(M) > 0)
-    constexpr explicit SeatSlots(M*... mains) noexcept {
-        (bind(mains), ...);
-    }
-
-    template <class M>
-    constexpr void bind(M* main) noexcept {
-        std::get<M*>(slots_) = main;
-    }
-
-    template <class M>
-    [[nodiscard]] constexpr M* get() const noexcept {
-        return std::get<M*>(slots_);
-    }
-
-    [[nodiscard]] constexpr bool bound(SeatTag s) const noexcept {
-        bool hit = false;
-        ((Rows::seat == s ? (hit = get<typename Rows::Main>() != nullptr) : false), ...);
-        return hit;
-    }
-
-private:
-    std::tuple<typename Rows::Main*...> slots_{};
-};
 
 using MainSlots = SeatSlots<SeatMainList>;
 

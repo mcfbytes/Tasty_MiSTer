@@ -10,6 +10,7 @@
 
 #include "app/block_poll_route.h"
 #include "app/core_block_row.h"
+#include "app/input_wire.h"
 #include "app/sys_grant.h"
 #include "infra/error.h"
 #include "infra/opt_ref.h"
@@ -142,7 +143,7 @@ public:
     [[nodiscard]] const Tally& tally() const noexcept { return tally_; }
 
 private:
-    [[nodiscard]] std::uint8_t issued_params(proto::user_io::PollShape s) noexcept override;
+    [[nodiscard]] proto::ParamSet issued_params(proto::user_io::PollShape s) noexcept override;
 
     [[nodiscard]] std::size_t put_census_row_(
         std::span<reactor::LinkDecoderDecl> out,
@@ -176,8 +177,8 @@ private:
     proto::DecoderRow<proto::user_io::PollReader> info_row_{info_poll_};
     proto::user_io::PollReader rumble_poll_;
 
-    xthread::Telemetry<std::uint8_t, SeatTag::Input>::Reader rumble_pads_reader_{};
-    std::uint8_t rumble_pads_ = 0;
+    RumblePlayersCell::Reader rumble_pads_reader_{};
+    svc::PlayerMask rumble_pads_{};
     proto::DecoderRow<proto::user_io::PollReader> rumble_row_{rumble_poll_};
     BlockPollRoute block_poll_ = BlockPollRoute::Link;
 

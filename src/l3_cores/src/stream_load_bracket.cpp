@@ -62,7 +62,9 @@ Ex<void> StreamLoadBracket::write(std::span<const std::uint8_t> piece) {
     return {};
 }
 
-Ex<std::size_t> StreamLoadBracket::write_taken(std::span<const std::uint8_t> piece) {
+Ex<std::span<const std::uint8_t>> StreamLoadBracket::write_taken(
+    std::span<const std::uint8_t> piece
+) {
     TASTY_SEAT_BODY(StreamLoadBracket);
     if (!bracket_)
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), index_.v});
@@ -76,7 +78,7 @@ Ex<std::size_t> StreamLoadBracket::write_taken(std::span<const std::uint8_t> pie
         if (*r < n)
             break;
     }
-    return taken;
+    return piece.first(taken);
 }
 
 Ex<void> StreamLoadBracket::close(

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "app/hd_epoch.h"
 #include "app/hd_look.h"
 #include "app/hd_osd_status.h"
 #include "app/hd_status_slots.h"
@@ -16,7 +17,7 @@ namespace mister::app {
 
 struct HdOsdAsk {
     bool open = false;
-    std::uint32_t epoch = 0;
+    HdEpoch epoch{};
     HdSurface surface{};
     std::uint32_t video_applies = 0;
     PageDescription page{};

@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "infra/error.h"
+#include "proto/bit_field.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
 
@@ -14,7 +15,11 @@ struct StatusEdit {
     StatusWord mask{};
 
     [[nodiscard]] static constexpr StatusEdit bit(StatusBit b, bool value) noexcept {
-        return field(b, 1, FieldValue{value ? 1u : 0u});
+        return field(BitField{b, 1}, FieldValue{value ? 1u : 0u});
+    }
+
+    [[nodiscard]] static constexpr StatusEdit field(BitField bits, FieldValue value) noexcept {
+        return field(bits.start, bits.width, value);
     }
 
     [[nodiscard]] static constexpr StatusEdit field(
@@ -28,11 +33,12 @@ struct StatusEdit {
         if (start.v >= StatusWord::kBits || width > StatusWord::kBits - start.v) {
             fatal(Error{Errc::slot_range, ERR_SITE(), start.v}, "status edit");
         }
-        for (unsigned i = 0; i < width; ++i) {
-            const StatusBit n{static_cast<std::uint8_t>(start.v + i)};
+        unsigned i = 0;
+        for (const StatusBit n : BitField{start, static_cast<std::uint8_t>(width)}.each_bit()) {
             e.mask = e.mask.with(n, true);
             if (i < 32u && ((value.v >> i) & 1u) != 0u)
                 e.bits = e.bits.with(n, true);
+            ++i;
         }
         return e;
     }

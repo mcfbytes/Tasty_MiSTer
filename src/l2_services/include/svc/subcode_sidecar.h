@@ -27,7 +27,7 @@ public:
 
     [[nodiscard]] Found open_sub_or_cdg(std::string_view cue_path, const DiscFileAccess& io);
 
-    [[nodiscard]] Ex<std::size_t> read(proto::Lba lba, std::span<std::byte> dst);
+    [[nodiscard]] Ex<std::span<std::byte>> read(proto::Lba lba, std::span<std::byte> dst);
 
     void reset() noexcept {
         sub_.reset();
@@ -36,7 +36,14 @@ public:
     }
 
 private:
-    [[nodiscard]] Ex<std::size_t> read_cdg_subcode_(std::uint32_t at, std::span<std::byte> dst);
+    [[nodiscard]] proto::BlockCount record_at(proto::Lba lba) const noexcept {
+        return lba > sub_origin_ ? lba - sub_origin_ : proto::BlockCount{};
+    }
+
+    [[nodiscard]] Ex<std::span<std::byte>> read_cdg_subcode_(
+        proto::BlockCount at,
+        std::span<std::byte> dst
+    );
 
     std::unique_ptr<IFile> sub_;
 

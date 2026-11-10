@@ -10,17 +10,17 @@ void MenuCoreBinding::set_core_type(proto::CoreType t) noexcept {
 }
 
 void MenuCoreBinding::latch_home(const app::IdentityLatch& identity) noexcept {
-    app::SessionIdentity id{};
-    if (identity.copy(id)) {
-        if (!browse_home_.assign(app::home_name(id)))
-            browse_home_.clear();
-        file_stem_ = id.stem;
-        pause_rule_ = id.pause;
+    const std::optional<app::SessionIdentity> id = identity.copy();
+    if (!id) {
+        browse_home_.clear();
+        file_stem_ = app::RememberedStem{};
+        pause_rule_ = cores::PauseOnOsd::Option;
         return;
     }
-    browse_home_.clear();
-    file_stem_ = app::RememberedStem{};
-    pause_rule_ = cores::PauseOnOsd::Option;
+    if (!browse_home_.assign(app::home_name(*id)))
+        browse_home_.clear();
+    file_stem_ = id->stem;
+    pause_rule_ = id->pause;
 }
 
 std::string_view MenuCoreBinding::browse_home(std::string_view core_name) const noexcept {

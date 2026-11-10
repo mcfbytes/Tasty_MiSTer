@@ -16,7 +16,27 @@ public:
     [[nodiscard]] virtual bool on(const CmdVerb::VideoMode& v) noexcept = 0;
     [[nodiscard]] virtual bool on(const CmdVerb::FbCmd& v) noexcept = 0;
     [[nodiscard]] virtual bool on(const CmdVerb::Screenshot& v) noexcept = 0;
-    [[nodiscard]] virtual bool on(const CmdVerb::Volume& v) noexcept = 0;
+
+    [[nodiscard]] virtual bool on(const CmdVerb::VolumeMute& v) noexcept {
+        (void)v;
+        return false;
+    }
+
+    [[nodiscard]] virtual bool on(const CmdVerb::VolumeAttenuation& v) noexcept {
+        (void)v;
+        return false;
+    }
+
+    [[nodiscard]] virtual bool on(const CmdVerb::VolumeNudge& v) noexcept {
+        (void)v;
+        return false;
+    }
+
+    [[nodiscard]] virtual bool on(const CmdVerb::VolumeToggle& v) noexcept {
+        (void)v;
+        return false;
+    }
+
     [[nodiscard]] virtual bool on(const CmdVerb::RtStats& v) noexcept = 0;
     [[nodiscard]] virtual bool on(const CmdVerb::TasPlay& v) noexcept = 0;
     [[nodiscard]] virtual bool on(const CmdVerb::TasStop& v) noexcept = 0;

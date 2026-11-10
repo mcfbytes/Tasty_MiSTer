@@ -4,15 +4,16 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <string_view>
 #include <type_traits>
 
+#include "app/remembered_path.h"
 #include "app/ui_request.h"
 #include "infra/inbox.h"
 #include "infra/message_sum.h"
 #include "infra/opt_ref.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 
@@ -30,7 +31,7 @@ public:
         CorrelationTag tag{};
         UiRequest::Kind which{};
         proto::IoIndex index{};
-        char slot = 0;
+        std::optional<RememberedSlot> slot{};
         bool game = false;
         PathText path{};
     };
@@ -45,24 +46,22 @@ public:
     template <class A>
         requires infra::AlternativeOf<A, UiRequest>
     [[nodiscard]] CorrelationTag push(const A& alt) noexcept {
-        const CorrelationTag tag{ui_.next_tag};
-        ui_.next_tag = (ui_.next_tag == std::numeric_limits<std::uint32_t>::max())
-            ? 1u
-            : ui_.next_tag + 1u;
+        const CorrelationTag tag = ui_.next_tag;
+        ui_.next_tag = tag.next();
         if (!ring_.push(infra::make<UiRequest>(alt, UiRequest::Head{tag})))
             return kUncaused;
         if constexpr (std::is_same_v<A, UiRequest::LoadFile>) {
             ui_.last_load = alt.path;
             ++ui_.load_asks;
-            note_({tag, A::kKind, alt.index, 'F', true, alt.path});
+            note_({tag, A::kKind, alt.index, RememberedSlot::File, true, alt.path});
         } else if constexpr (std::is_same_v<A, UiRequest::LoadFileByDigit>) {
-            note_({tag, A::kKind, proto::IoIndex{alt.digit.v}, 'F', true, alt.path});
+            note_({tag, A::kKind, alt.digit.io_index(), RememberedSlot::File, true, alt.path});
         } else if constexpr (std::is_same_v<A, UiRequest::MountImage>) {
-            note_({tag, A::kKind, alt.index, 'S', true, alt.path});
+            note_({tag, A::kKind, alt.index, RememberedSlot::Mount, true, alt.path});
         } else if constexpr (std::is_same_v<A, UiRequest::UnmountImage>) {
-            note_({tag, A::kKind, alt.index, 'S', false, PathText{}});
+            note_({tag, A::kKind, alt.index, RememberedSlot::Mount, false, PathText{}});
         } else if constexpr (std::is_same_v<A, UiRequest::LoadCore>) {
-            note_({tag, A::kKind, proto::IoIndex{}, 0, false, alt.path});
+            note_({tag, A::kKind, proto::IoIndex{}, std::nullopt, false, alt.path});
         }
         return tag;
     }
@@ -82,7 +81,7 @@ public:
 
 private:
     struct Ui {
-        std::uint32_t next_tag = 1;
+        CorrelationTag next_tag{1};
         PathText last_load{};
         std::uint32_t load_asks = 0;
         std::array<Pending, kPending> pending{};
@@ -122,7 +121,7 @@ inline void UiRequestRing::note_(const Pending& p) noexcept {
             at = &e;
             break;
         }
-        if (ui_.next_tag - e.tag.v > ui_.next_tag - at->tag.v)
+        if (e.tag.minted_before(at->tag))
             at = &e;
     }
     if (at->tag != kUncaused)

@@ -5,6 +5,7 @@
 #include "svc/config_snapshot.h"
 #include "svc/option_codec.h"
 #include "config_detail.h"
+#include "infra/ascii.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -17,8 +18,8 @@ namespace mister::svc {
 
 namespace {
 
-using detail::icmp_n;
-using detail::iequals;
+using infra::icompare_n;
+using infra::ieq;
 using detail::RowId;
 using detail::kExtSchema;
 using detail::kSchema;
@@ -34,77 +35,47 @@ constexpr bool is_space(char c) {
     return c == ' ' || c == '\t';
 }
 
-class MsgBuf {
-public:
-    void put(std::string_view s) {
-        for (const char ch : s) {
-            if (len_ + 1 >= kParseErrorChars)
-                return;
-            buf_[len_++] = ch;
-        }
-    }
-
-    const char* data() const { return buf_; }
-
-    std::size_t size() const { return len_; }
-
-private:
-    char buf_[kParseErrorChars]{};
-    std::size_t len_ = 0;
-};
-
-void record(ConfigSnapshot& into, ParseError::Kind kind, const MsgBuf& msg) {
+void record(
+    ConfigSnapshot& into,
+    ParseError::Kind kind,
+    std::string_view name,
+    std::string_view value
+) {
 
     if (into.parse_error_count >= kMaxParseErrors)
         return;
+    const std::string_view words = wording_for(kind);
     ParseError& slot = into.parse_errors[into.parse_error_count];
     slot.kind = kind;
-    (void)slot.text.assign(std::string_view{msg.data(), msg.size()});
+    FixedStr<kParseErrorChars, StrFit::Clip> msg;
+    (void)msg.append(name);
+    (void)msg.append(": ");
+    if (words.front() == '\'') {
+        (void)msg.append("'");
+        (void)msg.append(value);
+    }
+    (void)msg.append(words);
+    slot.text = msg;
     ++into.parse_error_count;
 }
 
 void record_unknown(ConfigSnapshot& into, std::string_view key) {
-    MsgBuf m;
-    m.put(key);
-    m.put(": unknown option");
-    record(into, ParseError::Kind::UnknownOption, m);
+    record(into, ParseError::Kind::UnknownOption, key, {});
 }
 
-void record_value(
+void record_diag(
     ConfigSnapshot& into,
-    ParseError::Kind kind,
-    std::string_view name,
-    std::string_view value,
-    std::string_view what
+    const Option& o,
+    const char* text,
+    std::optional<ParseError::Kind> kind
 ) {
-    MsgBuf m;
-    m.put(name);
-    m.put(": '");
-    m.put(value);
-    m.put("' ");
-    m.put(what);
-    record(into, kind, m);
-}
-
-void record_diag(ConfigSnapshot& into, const Option& o, const char* text, ParseDiag diag) {
-    switch (diag) {
-        case ParseDiag::None:
-            break;
-        case ParseDiag::NotANumber:
-            record_value(into, ParseError::Kind::NotANumber, o.name, text, "not a number");
-            break;
-        case ParseDiag::OutOfRange:
-            record_value(into, ParseError::Kind::OutOfRange, o.name, text, "out of range");
-            break;
-        case ParseDiag::InvalidFormat:
-            record_value(into, ParseError::Kind::InvalidFormat, o.name, text, "invalid format");
-            break;
-    }
+    if (kind)
+        record(into, *kind, o.name, text);
 }
 
 void assign_number(const Option& o, const char* text, ConfigField out, ConfigSnapshot& into) {
     const ParsedValue v = codec_for(o.type).parse(o, text);
-    record_diag(into, o, text, v.diag);
+    record_diag(into, o, text, v.error);
     out.store(v.bits);
 }
 
@@ -143,27 +114,34 @@ SectionVerdict classify_section(std::string_view raw, const config_parser::PassN
     const std::string_view orig = names.orig_core_name.empty() ? names.core_name
                                                                : names.orig_core_name;
 
-    if (iequals(name, "MiSTer")
-        || (names.is_arcade && iequals(name, "arcade"))
-        || (names.arcade_vertical && iequals(name, "arcade_vertical"))) {
+    if (ieq(name, "MiSTer")) {
+        v.kind = SectionMatch::ExactCoreName;
+        v.matched = true;
+        return v;
+    }
+    for (const std::string_view own : names.core_sections) {
+        if (!ieq(name, own))
+            continue;
         v.kind = SectionMatch::ExactCoreName;
         v.matched = true;
         return v;
     }
 
     const bool wildcard = (wc_pos != std::string_view::npos);
-    const bool hit = wildcard ? (icmp_n(name, orig, wc_pos) == 0 || icmp_n(name, cur, wc_pos) == 0)
-                              : (iequals(name, orig) || iequals(name, cur));
+    const bool hit = wildcard ? (icompare_n(name, orig, infra::ByteCount{wc_pos}) == 0
+                                 || icompare_n(name, cur, infra::ByteCount{wc_pos}) == 0)
+                              : (ieq(name, orig) || ieq(name, cur));
     if (hit) {
         v.kind = wildcard ? SectionMatch::PrefixWildcard : SectionMatch::ExactCoreName;
         v.matched = true;
         return v;
     }
 
-    if (eq_pos != std::string_view::npos && icmp_n(name, "video", eq_pos) == 0) {
+    if (eq_pos != std::string_view::npos
+        && icompare_n(name, "video", infra::ByteCount{eq_pos}) == 0) {
         v.video_header = true;
         const std::string_view mode = name.substr(eq_pos + 1);
-        if (iequals(mode, names.video_qualified)) {
+        if (ieq(mode, names.video_qualified)) {
 
             v.kind = (names.video_qualified == names.video_unqualified)
                 ? SectionMatch::VideoUnqualified
@@ -240,12 +218,12 @@ void parse_var(std::string_view line, ConfigSnapshot& into, detail::ArrayAppendS
 
     std::optional<RowId> found;
     for (std::size_t j = 0; j < std::size(kSchema); ++j) {
-        if (iequals(key, kSchema[j].name))
+        if (ieq(key, kSchema[j].name))
             found = RowId::classic(j);
     }
 
     for (std::size_t j = 0; !found && j < std::size(kExtSchema); ++j) {
-        if (iequals(key, kExtSchema[j].name)) {
+        if (ieq(key, kExtSchema[j].name)) {
             found = RowId::extension(j);
         }
     }

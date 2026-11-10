@@ -7,96 +7,77 @@ namespace mister::cores {
 namespace {
 
 struct SettingRule {
-    std::uint8_t lo;
-    std::uint8_t width;
+    proto::BitField field;
     std::uint8_t allowed;
     std::string_view name;
 };
 
 constexpr std::array<SettingRule, 8> kRules{{
-    {7, 1, 0x01, "Swap Joysticks"},
-    {8, 1, 0x01, "SNAC"},
-    {43, 1, 0x01, "Miracle Piano"},
-    {17, 1, 0x01, "Multitap"},
-    {5, 2, 0x01, "Mouse"},
-    {25, 2, 0x01, "Super Scope"},
-    {4, 1, 0x01, "CPU Speed"},
-    {18, 1, 0x01, "SuperFX Speed"},
+    {{proto::StatusBit{7}, 1}, 0x01, "Swap Joysticks"},
+    {{proto::StatusBit{8}, 1}, 0x01, "SNAC"},
+    {{proto::StatusBit{43}, 1}, 0x01, "Miracle Piano"},
+    {{proto::StatusBit{17}, 1}, 0x01, "Multitap"},
+    {{proto::StatusBit{5}, 2}, 0x01, "Mouse"},
+    {{proto::StatusBit{25}, 2}, 0x01, "Super Scope"},
+    {{proto::StatusBit{4}, 1}, 0x01, "CPU Speed"},
+    {{proto::StatusBit{18}, 1}, 0x01, "SuperFX Speed"},
 }};
 
-constexpr std::uint8_t kVideoRegionLo = 14;
-constexpr std::uint8_t kInitialWramLo = 21;
+constexpr proto::BitField kVideoRegionField{proto::StatusBit{14}, 2};
+constexpr proto::BitField kInitialWramField{proto::StatusBit{21}, 2};
 
 }
 
-IMovieCodec::SettingNeeds SnesMovieCodec::setting_needs(const Facts& f) const noexcept {
+IReplayCore::SettingNeeds SnesMovieCodec::setting_needs(const MovieFacts& f) const noexcept {
     SettingNeeds out{};
     for (const SettingRule& r : kRules) {
         out.add(
-            {.lo = r.lo,
-             .width = r.width,
-             .allowed = r.allowed,
-             .preferred = static_cast<std::uint8_t>(std::countr_zero(r.allowed)),
+            {.field = r.field,
+             .allowed = proto::ValueSet{r.allowed},
+             .preferred = proto::FieldValue{static_cast<std::uint32_t>(
+                 std::countr_zero(r.allowed)
+             )},
              .name = r.name}
         );
     }
 
-    const std::uint8_t want = f.region == Region::Pal ? 2u : 1u;
+    const std::uint8_t want = f.region == MovieRegion::Pal ? 2u : 1u;
     out.add(
-        {.lo = kVideoRegionLo,
-         .width = 2,
-         .allowed = static_cast<std::uint16_t>(1u << want),
-         .preferred = want,
+        {.field = kVideoRegionField,
+         .allowed = proto::ValueSet{static_cast<std::uint16_t>(1u << want)},
+         .preferred = proto::FieldValue{want},
          .name = "Video Region"}
     );
-    if (const auto fill = do_recorder_wram(f)) {
-        const auto v = static_cast<std::uint8_t>(*fill);
-        out.add(
-            {.lo = kInitialWramLo,
-             .width = 2,
-             .allowed = static_cast<std::uint16_t>(1u << v),
-             .preferred = v,
-             .name = "Initial WRAM"}
-        );
-    }
+    if (f.recorder_ram_fill)
+        out.add(SettingNeed::only(kInitialWramField, *f.recorder_ram_fill, "Initial WRAM"));
     return out;
 }
 
-IMovieCodec::Raster SnesMovieCodec::raster(const Facts& f) const noexcept {
+IReplayCore::Raster SnesMovieCodec::raster(const MovieFacts& f) const noexcept {
 
-    if (f.region == Region::Pal)
-        return {.period_ns = 19'997'209, .line0_ns = 3'277'233};
-    return {.period_ns = 16'639'266, .line0_ns = 1'596'106};
+    if (f.region == MovieRegion::Pal)
+        return {
+            .period_ns = std::chrono::nanoseconds{19'997'209},
+            .line0_ns = std::chrono::nanoseconds{3'277'233}
+        };
+    return {
+        .period_ns = std::chrono::nanoseconds{16'639'266},
+        .line0_ns = std::chrono::nanoseconds{1'596'106}
+    };
 }
 
-IMovieCodec::PowerOn SnesMovieCodec::power_on(const Facts&) const noexcept {
+IReplayCore::PowerOn SnesMovieCodec::power_on(const MovieFacts&) const noexcept {
 
     return {.p0 = Parity::Odd};
 }
 
-std::optional<IMovieCodec::DigestSpan> SnesMovieCodec::past_header(
-    std::uint64_t size,
-    std::uint64_t header
+std::optional<IMovieFormat::DigestSpan> SnesMovieCodec::past_header(
+    proto::FileSize size,
+    proto::FileSize header
 ) noexcept {
-    if (size < header || size - header < kRomMin)
+    if (size.after_header(header) < proto::FileSize{kRomMin})
         return std::nullopt;
-    return DigestSpan{.offset = header, .length = size - header};
-}
-
-std::string_view SnesMovieCodec::trim(std::string_view s) noexcept {
-    while (!s.empty() && (s.back() == '\r' || s.back() == ' ' || s.back() == '\t'))
-        s.remove_suffix(1);
-    while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
-        s.remove_prefix(1);
-    return s;
-}
-
-SnesMovieCodec::KeyValue SnesMovieCodec::split(std::string_view line) noexcept {
-    line = trim(line);
-    const std::size_t sp = line.find(' ');
-    if (sp == std::string_view::npos)
-        return {line, {}};
-    return {line.substr(0, sp), trim(line.substr(sp + 1))};
+    return span_past(size, header);
 }
 
 }

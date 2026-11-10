@@ -30,11 +30,7 @@ Ex<void> FramePadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) 
 
     if (port_.wire().analog_word) {
 
-        const auto w = static_cast<std::uint16_t>(
-            static_cast<std::uint16_t>(static_cast<std::uint16_t>(pos.y) << 8)
-            | static_cast<std::uint16_t>(pos.x)
-        );
-        if (auto e = frame.word(w); !e)
+        if (auto e = frame.word(pos.packed()); !e)
             return e;
         return frame.end();
     }

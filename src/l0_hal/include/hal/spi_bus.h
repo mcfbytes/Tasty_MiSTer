@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 
 #include "infra/error.h"
@@ -39,14 +40,6 @@ class SpiBus final : public ILinkPort {
 public:
     [[nodiscard]] static Ex<SpiBus> open(Mailbox mailbox, xthread::RtStats* stats = nullptr);
 
-    static SpiBus attach_registers(
-        reg::Reg<reg::WO> gpo,
-        reg::Reg<reg::RO> gpi,
-        ISpiOutputObserver* obs,
-        const LinkTimingValues& timing,
-        xthread::RtStats* stats = nullptr
-    ) noexcept;
-
     ~SpiBus() override = default;
     SpiBus(SpiBus&&) noexcept = default;
     SpiBus& operator=(SpiBus&&) noexcept = default;
@@ -84,16 +77,6 @@ public:
         return post_ != Post::None;
     }
 
-    void widen_ack_bound() noexcept override {
-        TASTY_SEAT_BODY(SpiBus);
-        start_bound_ = true;
-    }
-
-    void restore_ack_bound() noexcept override {
-        TASTY_SEAT_BODY(SpiBus);
-        start_bound_ = false;
-    }
-
     bool ready() const override;
     [[nodiscard]] Ex<ButtonMask> buttons();
     void set_disk_led(bool on);
@@ -114,13 +97,30 @@ public:
     SpiOutput gpo_shadow() const noexcept { return gpo_; }
 
 private:
+    friend struct SpiBusTestAccess;
+
     SpiBus() = default;
+
+    static SpiBus attach_registers(
+        reg::Reg<reg::WO> gpo,
+        reg::Reg<reg::RO> gpi,
+        ISpiOutputObserver* obs,
+        const LinkTimingValues& timing,
+        xthread::RtStats* stats = nullptr
+    ) noexcept;
 
     void store_gpo(SpiOutput v) noexcept;
     void commit_gpo(SpiOutput v) noexcept;
     [[nodiscard]] GpiWord read_gpi() const noexcept;
 
-    [[nodiscard]] Ex<GpiWord> spin_ack(bool want, bool counts = true) noexcept;
+    enum class AckLevel : std::uint8_t { Raised, Dropped };
+
+    enum class Timeout : std::uint8_t { Counted, Guarded };
+
+    [[nodiscard]] Ex<GpiWord> spin_ack(
+        AckLevel want,
+        Timeout on_timeout = Timeout::Counted
+    ) noexcept;
 
     enum class Post : std::uint8_t { None, Rising, Falling };
     [[nodiscard]] Ex<void> refuse_if_posted_() const noexcept;
@@ -139,9 +139,7 @@ private:
     MailboxClaims::Claim mailbox_;
 
     unsigned ack_soft_spins_ = 0;
-    std::uint64_t ack_timeout_ns_ = 0;
-    std::uint64_t start_ack_timeout_ns_ = 0;
-    bool start_bound_ = false;
+    std::chrono::nanoseconds ack_timeout_ns_{};
 };
 
 }

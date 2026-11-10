@@ -18,6 +18,7 @@
 #include "cores/transfer_row.h"
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 #include "svc/file.h"
 
 namespace mister::app {
@@ -44,7 +45,7 @@ public:
 
     struct Host {
         LinkTxChannel<SeatTag::Main>& inbox;
-        const FileTxLevelCell* level;
+        const FileTxLevelCell& level;
         EventQueue<SeatTag::Main>::Producer events;
     };
 
@@ -60,7 +61,7 @@ public:
         std::optional<LoadWindow<seat_owner::Main>> mirror{};
 
         PathText save{};
-        std::uint64_t save_bytes = 0;
+        proto::FileSize save_bytes{};
     };
 
     [[nodiscard]] static Ex<LoadLadder> start(
@@ -70,11 +71,6 @@ public:
     );
 
     [[nodiscard]] Pass step(Host& h);
-
-    [[nodiscard]] bool wants_pass(
-        const LinkTxChannel<SeatTag::Main>& inbox,
-        const FileTxLevelCell* level
-    ) const noexcept;
 
     [[nodiscard]] bool wants_pass(
         const LinkTxChannel<SeatTag::Main>& inbox,
@@ -111,7 +107,7 @@ private:
     [[nodiscard]] Pass cut_(Host& h);
 
     void progress_(Host& h, bool edge) noexcept;
-    [[nodiscard]] std::uint32_t bracket_length_() const noexcept;
+    [[nodiscard]] proto::FileSize bracket_length_() const noexcept;
 
     Job job_;
     LoadWindow<seat_owner::Main> window_;
@@ -121,6 +117,7 @@ private:
     std::uint64_t off_ = 0;
     std::uint64_t fill_off_ = 0;
     std::uint64_t extent_ = 0;
+    bool facts_pushed_ = false;
     Pc pc_ = Pc::Open;
 };
 

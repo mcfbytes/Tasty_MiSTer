@@ -6,6 +6,7 @@
 #include <span>
 
 #include "cores/cd_sector_act.h"
+#include "cores/cdwire.h"
 #include "cores/core_profile.h"
 #include "infra/error.h"
 
@@ -22,7 +23,7 @@ public:
 
     [[nodiscard]] virtual Ex<void> send_status(std::span<const std::uint16_t> words) = 0;
 
-    [[nodiscard]] virtual bool can_send_data(std::uint16_t) { return true; }
+    [[nodiscard]] virtual bool can_send_data(cdwire::Selector) { return true; }
 
     [[nodiscard]] virtual bool egress_bound() const noexcept { return false; }
 

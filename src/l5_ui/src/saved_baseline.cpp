@@ -7,40 +7,41 @@ namespace mister::ui {
 
 void SavedBaseline::take(const proto::ItemTable& items, const StatusView& live) {
     TASTY_SEAT_BODY(SavedBaseline);
-    if (held_)
+    if (held_.has_value())
         return;
     rebase(items, live);
 }
 
 void SavedBaseline::rebase(const proto::ItemTable& items, const StatusView& live) {
     TASTY_SEAT_BODY(SavedBaseline);
-    fields_.clear();
+    if (!held_.has_value())
+        held_.emplace();
+    Held& base = *held_;
+    base.fields.clear();
     for (const proto::Item& it : items.items()) {
         if (it.kind == proto::ItemKind::Option && it.bits.valid())
-            fields_.push_back(it.bits);
+            base.fields.push_back(it.bits);
     }
-    words_ = live;
-    held_ = true;
+    base.words = live;
 }
 
 void SavedBaseline::clear() noexcept {
     TASTY_SEAT_BODY(SavedBaseline);
-    fields_.clear();
-    words_ = StatusView{};
-    held_ = false;
+    held_.reset();
 }
 
 bool SavedBaseline::held() const noexcept {
     TASTY_SEAT_BODY(SavedBaseline);
-    return held_;
+    return held_.has_value();
 }
 
 bool SavedBaseline::unsaved(const StatusView& live) const noexcept {
     TASTY_SEAT_BODY(SavedBaseline);
-    if (!held_)
+    if (!held_.has_value())
         return false;
-    for (const proto::BitField f : fields_) {
-        if (words_.field(f) != live.field(f))
+    const Held& base = *held_;
+    for (const proto::BitField f : base.fields) {
+        if (base.words.field(f) != live.field(f))
             return true;
     }
     return false;

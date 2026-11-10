@@ -41,6 +41,10 @@ static_assert(
     "item[9..20] holds the twelve PLL words"
 );
 static_assert(
+    kModelinePllWords == PllBlock::kItemWords,
+    "a PllBlock's writes are exactly the item[9..20] slots"
+);
+static_assert(
     item(ModelineItem::Vbp) - item(ModelineItem::Hact) + 1 == kModelineTimings,
     "item[1..8] holds the eight timings"
 );

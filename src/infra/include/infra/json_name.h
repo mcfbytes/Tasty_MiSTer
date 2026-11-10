@@ -39,15 +39,4 @@ template <std::size_t N>
     return true;
 }
 
-template <std::size_t N>
-[[nodiscard]] consteval std::size_t json_longest(const std::array<const char*, N>& names) {
-    std::size_t best = 0;
-    for (const char* n : names) {
-        const std::size_t len = std::string_view(n).size();
-        if (len > best)
-            best = len;
-    }
-    return best;
-}
-
 }

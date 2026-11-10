@@ -7,20 +7,17 @@
 #include <string>
 #include <vector>
 
-#include "ui/page_window.h"
 #include "app/page_description.h"
 #include "ui/draw_classic.h"
 #include "ui/options_model.h"
 #include "ui/options_keys.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 #include "ui/options_surface.h"
 #include "ui/osd_renderer.h"
 #include "ui/page_walk.h"
 #include "ui/ui_event.h"
 
 namespace mister::ui {
-
-namespace {}
 
 ClassicOptionsView::ClassicOptionsView(IOptionsSurface& surface) noexcept
     : surface_(surface),
@@ -80,7 +77,7 @@ ClassicOptionsView::DrawnList ClassicOptionsView::compose_drawn() const {
             row.selected = true;
             list.selected = RowIndex::of(list.rows.size());
         }
-        list.rows.push_back(Drawn{.hd = row, .item = &it});
+        list.rows.push_back(Drawn{.hd = row, .item = infra::OptRef<const OptionItem>{it}});
     });
     return list;
 }
@@ -110,7 +107,7 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
 
     const RowSpan<const Drawn> drawn_rows{std::span<const Drawn>{drawn.rows}};
     const RowCount total = RowCount::of(drawn.rows.size());
-    const app::HdWindow win = window_page(out.page, drawn.selected, total);
+    const app::HdWindow win = out.window(drawn.selected, total);
     out.page.row_count = win.count;
 
     std::vector<Line> storage(rows.size());
@@ -123,7 +120,7 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
         PageRow& r = out.rows[out.count++];
         r.hd = drawn_rows[at].hd;
         r.has_hd = true;
-        const OptionItem& window_item = *drawn_rows[at].item;
+        const OptionItem& window_item = drawn_rows[at].item.value();
         if (!window_item.screen_row.has_value()
             || row_index_of(*window_item.screen_row) < first_row_) {
             continue;
@@ -135,15 +132,13 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
         if (line.emitted)
             continue;
         line.emitted = true;
-        const OptionItem* it = row_at(phys);
-        const bool has_ring = at_root && it != nullptr && it->rings_at_root();
+        const infra::OptRef<const OptionItem> it = row_at(phys);
+        const bool has_ring = at_root && it && it->rings_at_root();
         r.classic = classic_row(
             osd_row_at(phys),
             line.text,
-            {.inverted = it != nullptr
-                 && it->selectable_index.has_value()
-                 && *it->selectable_index == sel_,
-             .stippled = it != nullptr && it->disabled,
+            {.inverted = it && it->selectable_index.has_value() && *it->selectable_index == sel_,
+             .stippled = it && it->disabled,
              .leftchar = leftchar_of(osd_row_at(phys), has_ring),
              .arrow = has_ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight)
                                : OsdRenderer::kArrowNone}
@@ -154,16 +149,14 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
         Line& line = lines[row_after(r)];
         if (line.emitted || out.count >= out.rows.size())
             continue;
-        const OptionItem* it = row_at(r);
-        const bool has_ring = at_root && it != nullptr && it->rings_at_root();
+        const infra::OptRef<const OptionItem> it = row_at(r);
+        const bool has_ring = at_root && it && it->rings_at_root();
         PageRow& pr = out.rows[out.count++];
         pr.classic = classic_row(
             osd_row_at(r),
             line.text,
-            {.inverted = it != nullptr
-                 && it->selectable_index.has_value()
-                 && *it->selectable_index == sel_,
-             .stippled = it != nullptr && it->disabled,
+            {.inverted = it && it->selectable_index.has_value() && *it->selectable_index == sel_,
+             .stippled = it && it->disabled,
              .leftchar = leftchar_of(osd_row_at(r), has_ring),
              .arrow = has_ring ? (OsdRenderer::kArrowLeft | OsdRenderer::kArrowRight)
                                : OsdRenderer::kArrowNone}
@@ -173,13 +166,14 @@ bool ClassicOptionsView::walk(PageWalk& out) const {
     return true;
 }
 
-const OptionItem* ClassicOptionsView::row_at(RowCount row) const {
+infra::OptRef<const OptionItem> ClassicOptionsView::row_at(RowCount row) const {
     const RowIndex drawn = first_row_ + row;
     for (const std::unique_ptr<OptionItem>& it : model_.items()) {
-        if (it->screen_row.has_value() && row_index_of(*it->screen_row) == drawn)
-            return it.get();
+        if (it->screen_row.has_value() && row_index_of(*it->screen_row) == drawn) {
+            return infra::OptRef<const OptionItem>{*it};
+        }
     }
-    return nullptr;
+    return {};
 }
 
 void ClassicOptionsView::track_viewport() noexcept {
@@ -189,8 +183,8 @@ void ClassicOptionsView::track_viewport() noexcept {
         return;
     if (sel_ == RowIndex{})
         first_row_ = RowIndex{};
-    const OptionItem* it = model_.at_selectable(sel_);
-    if (it == nullptr || !it->screen_row.has_value())
+    const infra::OptRef<const OptionItem> it = model_.at_selectable(sel_);
+    if (!it || !it->screen_row.has_value())
         return;
     const RowIndex drawn = row_index_of(*it->screen_row);
     if (drawn < first_row_) {
@@ -215,8 +209,8 @@ Transition ClassicOptionsView::handle(const UiEvent& ev) {
     }
 
     if (keys.recent && !keys.select && !keys.plus && !keys.minus) {
-        const OptionItem* it = model_.at_selectable(sel_);
-        if (it != nullptr && !it->disabled && it->opens_browser()) {
+        const infra::OptRef<const OptionItem> it = model_.at_selectable(sel_);
+        if (it && !it->disabled && it->opens_browser()) {
             return surface_.open_recents(*it);
         }
         surface_.refuse();
@@ -228,8 +222,8 @@ Transition ClassicOptionsView::handle(const UiEvent& ev) {
         return Transition{};
     }
 
-    const OptionItem* it = model_.at_selectable(sel_);
-    if (it == nullptr) {
+    const infra::OptRef<const OptionItem> it = model_.at_selectable(sel_);
+    if (!it) {
         surface_.refuse();
         return Transition{};
     }
@@ -239,13 +233,9 @@ Transition ClassicOptionsView::handle(const UiEvent& ev) {
         return Transition{};
     }
 
-    const OptionItem::Press press{
-        .select = keys.select,
-        .minus = keys.minus,
-        .at_root = at_root,
-        .value = status_field(it->bits)
-    };
-    return it->activate(press, surface_);
+    if (keys.select)
+        return it->select(surface_);
+    return it->step(keys.minus ? CycleDir::Back : CycleDir::Next, status_field(it->bits), surface_);
 }
 
 MenuMask ClassicOptionsView::mask() const {

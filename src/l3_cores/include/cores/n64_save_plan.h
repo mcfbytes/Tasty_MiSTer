@@ -5,8 +5,9 @@
 #include <type_traits>
 
 #include "cores/n64_memory_type.h"
-#include "cores/n64_save_extent.h"
+#include "cores/n64_save_layout.h"
 #include "cores/nvram_store.h"
+#include "cores/save_row_count.h"
 #include "cores/types.h"
 #include "infra/indexed_array.h"
 #include "infra/seat.h"

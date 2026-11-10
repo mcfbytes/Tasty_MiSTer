@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -18,6 +19,7 @@
 #include "proto/block_server.h"
 #include "proto/image_source.h"
 #include "proto/late_answers.h"
+#include "proto/slot_attributes.h"
 #include "proto/slot_record.h"
 #include "proto/spi_block_poll.h"
 #include "proto/storage_channel.h"
@@ -115,8 +117,8 @@ public:
 
     unsigned install_completions(IBlockRoles& roles) noexcept;
 
-    [[nodiscard]] bool submit_attach(SlotIndex slot, IBlockRoles& roles) noexcept;
-    [[nodiscard]] bool submit_detach(SlotIndex slot, IBlockRoles& roles) noexcept;
+    [[nodiscard]] Ex<void> submit_attach(SlotIndex slot, IBlockRoles& roles) noexcept;
+    [[nodiscard]] Ex<void> submit_detach(SlotIndex slot, IBlockRoles& roles) noexcept;
 
     [[nodiscard]] bool slot_busy(SlotIndex slot) const noexcept {
         return slot.below<kBlockSlots>() && records_[slot].gate.state != SlotGate::State::Idle;
@@ -185,19 +187,42 @@ private:
     using Window = SlotRecord::Window;
     using SlotGate = SlotRecord::SlotGate;
 
+    [[nodiscard]] SlotGate fetching_gate_(
+        SlotIndex slot,
+        StorageSeq seq,
+        Lba base,
+        BlockSize block_size,
+        bool answer_owed
+    ) const noexcept;
+    [[nodiscard]] SlotGate staging_gate_(SlotIndex slot, StorageSeq seq) const noexcept;
+
+    [[nodiscard]] std::optional<StorageSeq> submit_(const StorageRequest& r) noexcept;
+
     [[nodiscard]] Ex<void> send_config();
     [[nodiscard]] Ex<void> announce(SlotIndex slot, FileSize size_bytes, bool writable);
 
+    struct MountSizes {
+        FileSize file_bytes{};
+        FileSize size_bytes{};
+    };
+
+    void mount_row_(
+        SlotIndex slot,
+        const SlotAttributes& attr,
+        MountSizes sizes,
+        PathId path_id
+    ) noexcept;
+
     [[nodiscard]] Ex<Pass> serve_read(
         const SdRequest& req,
-        std::uint32_t block_size,
-        std::uint32_t window_blocks,
+        BlockSize block_size,
+        BlockCount window_blocks,
         SectorAck ack,
         const BlockBacking& backing
     );
     [[nodiscard]] Ex<Pass> serve_write(
         const SdRequest& req,
-        std::uint32_t block_size,
+        BlockSize block_size,
         SectorAck ack,
         const BlockBacking& backing
     );
@@ -205,10 +230,10 @@ private:
     [[nodiscard]] Ex<void> emit_read_data_phase_(
         SlotIndex slot,
         std::span<const std::uint8_t> serve,
-        std::uint32_t offset,
-        std::uint32_t nbytes,
+        std::size_t offset,
+        std::size_t nbytes,
         SectorAck ack,
-        std::uint32_t blks,
+        BlockCount blks,
         bool count_blocks
     );
 
@@ -216,7 +241,7 @@ private:
     Refill refill_resident(
         SlotIndex slot,
         Lba base,
-        std::uint32_t block_size,
+        BlockSize block_size,
         IBlockServer& src,
         bool answer_owed
     );
@@ -224,7 +249,7 @@ private:
     [[nodiscard]] bool submit_fill(
         SlotIndex slot,
         Lba base,
-        std::uint32_t block_size,
+        BlockSize block_size,
         bool answer_owed,
         const BlockBacking& backing
     ) noexcept;
@@ -250,7 +275,7 @@ private:
         std::uint64_t offset,
         std::uint32_t len
     ) noexcept;
-    [[nodiscard]] bool submit_lifecycle_(SlotIndex slot, const StorageRequest& r) noexcept;
+    [[nodiscard]] Ex<void> submit_lifecycle_(SlotIndex slot, const StorageRequest& r) noexcept;
     [[nodiscard]] StorageRequest::Head request_head_(
         SlotIndex slot,
         const BlockBacking& backing
@@ -259,7 +284,7 @@ private:
 
     [[nodiscard]] bool stale_(SlotIndex slot, const StorageCompletion::Head& h) noexcept;
     void expire(SlotIndex slot) noexcept;
-    [[nodiscard]] std::int64_t now_ns() const noexcept;
+    [[nodiscard]] os::RawMonotonicClock::time_point now_at_() const noexcept;
 
     enum class Blank : std::uint8_t { Filled, NoBuffer, Deferred, Static };
     [[nodiscard]] Blank substitute_blank(SlotIndex slot, Lba lba, const BlockBacking& backing);
@@ -294,7 +319,7 @@ private:
     infra::OptRef<const os::IClock> clock_;
     bool storage_live_ = false;
     BlockSlotMask lw_slots_{};
-    std::uint32_t next_seq_ = 1;
+    StorageSeq next_seq_{1};
     infra::OptRef<IImageSource> source_;
 
     SpiBlockPoll block_poll_{SpiBlockPoll::Wiring{

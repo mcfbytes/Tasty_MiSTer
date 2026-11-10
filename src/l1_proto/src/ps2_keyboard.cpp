@@ -1,19 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/ps2_keyboard.h"
 
+#include <array>
+#include <optional>
+#include <span>
+
 #include "ps2_scancodes.h"
 
 namespace mister::proto {
 
-void Ps2Keyboard::push_frame(const std::uint8_t* bytes, std::uint8_t len) {
+void Ps2Keyboard::push_frame(std::span<const std::uint8_t> bytes) {
 
-    Frame f;
-    const std::uint8_t n = (len < kMaxFrameBytes) ? len : kMaxFrameBytes;
-    for (std::uint8_t i = 0; i < n; ++i)
-        f.bytes[i] = bytes[i];
-    f.len = n;
-    if (!frames_.push(f))
-        ++drop_overflow_;
+    Ps2Frame frame;
+    frame.stream = Ps2Stream::KeyboardFrame;
+    for (const std::uint8_t byte : bytes) {
+        if (frame.len == kMaxFrameBytes)
+            break;
+        frame.bytes[frame.len] = byte;
+        ++frame.len;
+    }
+    if (!frames_.push(frame))
+        drops_.add();
 }
 
 Ex<void> Ps2Keyboard::key_event(HidUsage hid_usage, bool pressed) {
@@ -35,12 +42,15 @@ Ex<void> Ps2Keyboard::key_event(HidUsage hid_usage, bool pressed) {
 
         if (press != Press::kMake) {
             if (set1) {
-                static constexpr std::uint8_t kSeq[] = {0xE1, 0x1D, 0x45, 0xE1, 0x9D, 0xC5};
-                push_frame(kSeq, 6);
+                static constexpr auto kSeq = std::to_array<std::uint8_t>(
+                    {0xE1, 0x1D, 0x45, 0xE1, 0x9D, 0xC5}
+                );
+                push_frame(kSeq);
             } else {
-                static constexpr std::uint8_t kSeq[] =
-                    {0xE1, 0x14, 0x77, 0xE1, 0xF0, 0x14, 0xF0, 0x77};
-                push_frame(kSeq, 8);
+                static constexpr auto kSeq = std::to_array<std::uint8_t>(
+                    {0xE1, 0x14, 0x77, 0xE1, 0xF0, 0x14, 0xF0, 0x77}
+                );
+                push_frame(kSeq);
             }
         }
         return {};
@@ -51,19 +61,23 @@ Ex<void> Ps2Keyboard::key_event(HidUsage hid_usage, bool pressed) {
         if (press != Press::kRepeat) {
             const bool make = press == Press::kMake;
             if (set1) {
-                static constexpr std::uint8_t kMake[] = {0xE0, 0x2A, 0xE0, 0x37};
-                static constexpr std::uint8_t kBreak[] = {0xE0, 0xB7, 0xE0, 0xAA};
+                static constexpr auto kMake = std::to_array<std::uint8_t>({0xE0, 0x2A, 0xE0, 0x37});
+                static constexpr auto kBreak = std::to_array<std::uint8_t>(
+                    {0xE0, 0xB7, 0xE0, 0xAA}
+                );
                 if (make)
-                    push_frame(kMake, 4);
+                    push_frame(kMake);
                 else
-                    push_frame(kBreak, 4);
+                    push_frame(kBreak);
             } else {
-                static constexpr std::uint8_t kMake[] = {0xE0, 0x12, 0xE0, 0x7C};
-                static constexpr std::uint8_t kBreak[] = {0xE0, 0xF0, 0x7C, 0xE0, 0xF0, 0x12};
+                static constexpr auto kMake = std::to_array<std::uint8_t>({0xE0, 0x12, 0xE0, 0x7C});
+                static constexpr auto kBreak = std::to_array<std::uint8_t>(
+                    {0xE0, 0xF0, 0x7C, 0xE0, 0xF0, 0x12}
+                );
                 if (make)
-                    push_frame(kMake, 4);
+                    push_frame(kMake);
                 else
-                    push_frame(kBreak, 6);
+                    push_frame(kBreak);
             }
         }
         return {};
@@ -84,7 +98,7 @@ Ex<void> Ps2Keyboard::key_event(HidUsage hid_usage, bool pressed) {
             buf[n++] = 0xF0;
     }
     buf[n++] = final_low;
-    push_frame(buf.data(), n);
+    push_frame(std::span<const std::uint8_t>{buf}.first(n));
     return {};
 }
 
@@ -99,27 +113,22 @@ unsigned Ps2Keyboard::release_all() {
     return released;
 }
 
-bool Ps2Keyboard::next_frame(Ps2Frame& out) noexcept {
-    if (const auto f = frames_.pop()) {
-        out.stream = Ps2Stream::KeyboardFrame;
-        out.len = f->len;
-        out.bytes = f->bytes;
-        return true;
-    }
+std::optional<Ps2Frame> Ps2Keyboard::next_frame() noexcept {
+    if (auto frame = frames_.pop())
+        return frame;
     if (const auto code = port_.next_reply()) {
-        out.stream = Ps2Stream::KeyboardReply;
-        out.len = 1;
-        out.bytes = {};
-        out.bytes[0] = byte_of(*code);
-        return true;
+        Ps2Frame frame;
+        frame.stream = Ps2Stream::KeyboardReply;
+        frame.len = 1;
+        frame.bytes[0] = byte_of(*code);
+        return frame;
     }
-    return false;
+    return std::nullopt;
 }
 
-Ex<void> Ps2Keyboard::accept_control(std::uint16_t word0) {
+void Ps2Keyboard::accept_control(std::uint16_t word0) {
     ps2_control_ = true;
     port_.accept(word0, [this](std::uint8_t byte) { decode_control(byte); });
-    return {};
 }
 
 void Ps2Keyboard::end_control() noexcept {

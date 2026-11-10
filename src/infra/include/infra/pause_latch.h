@@ -5,14 +5,13 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "infra/observed.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "infra/pause_gen.h"
 
 namespace mister::xthread {
-
-struct Observed {};
 
 template <KickPolicy Kick = EventFdKick>
 class BasicPauseLatch {

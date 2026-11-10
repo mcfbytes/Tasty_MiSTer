@@ -17,17 +17,17 @@ struct ViewportPolicy {
     bool browse_expand = false;
 };
 
+struct ListWindow {
+    RowCount items{};
+    RowCount height{};
+};
+
 struct Viewport {
     TASTY_SEAT_RESIDENT(Ui);
     RowIndex first{};
     RowIndex selected{};
 
-    static Viewport centre(
-        RowIndex selected,
-        RowCount count,
-        RowCount height,
-        ViewportPolicy p
-    ) noexcept;
+    static Viewport centre(RowIndex selected, ListWindow window, ViewportPolicy p) noexcept;
 };
 
 enum class Wrap : bool { No, Yes };
@@ -37,19 +37,18 @@ class ListView {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    using NameOf = std::string_view (*)(const T&);
-
-    ListView(std::span<const T> items, NameOf name_of, ViewportPolicy p) noexcept
+    ListView(std::span<const T> items, ViewportPolicy p = {}) noexcept
         : items_(RowSpan<const T>{items}),
-          name_of_(name_of),
           policy_(p) {}
 
     RowCount count() const noexcept { return items_.size(); }
 
     const Viewport& viewport() const noexcept { return view_; }
 
-    const T* selected() const noexcept {
-        return view_.selected < row_after(items_.size()) ? &items_[view_.selected] : nullptr;
+    infra::OptRef<const T> selected() const noexcept {
+        return infra::opt_ref_of<const T>(
+            view_.selected < row_after(items_.size()) ? &items_[view_.selected] : nullptr
+        );
     }
 
     void set_height(RowCount h) noexcept { height_ = h; }
@@ -81,7 +80,6 @@ public:
 
 private:
     RowSpan<const T> items_;
-    NameOf name_of_;
     ViewportPolicy policy_;
     Viewport view_{};
     RowCount height_{kFullOsdRows};

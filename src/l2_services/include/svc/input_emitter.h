@@ -11,16 +11,18 @@
 #include "proto/axi_pad_encoder.h"
 #include "proto/frame_pad_encoder.h"
 #include "proto/held_pad_encoder.h"
-#include "proto/joystick.h"
+#include "proto/joystick_port.h"
 #include "proto/link_frame.h"
+#include "svc/axis_cal.h"
 #include "svc/types.h"
 #include "infra/seat.h"
 
 namespace mister::svc {
 
-inline constexpr unsigned kMaxPlayersEmit = 6;
-
-struct AxisCal;
+struct PadGates {
+    bool grabbed = false;
+    bool osd_visible = false;
+};
 
 class InputEmitter {
     TASTY_SEAT_RESIDENT(RT);
@@ -31,14 +33,11 @@ public:
     InputEmitter(const InputEmitter&) = delete;
     InputEmitter& operator=(const InputEmitter&) = delete;
 
-    void set_gates(bool grabbed, bool osd_visible) noexcept {
-        grabbed_ = grabbed;
-        osd_visible_ = osd_visible;
-    }
+    void set_gates(PadGates gates) noexcept { gates_ = gates; }
 
-    bool grabbed() const noexcept { return grabbed_; }
+    bool grabbed() const noexcept { return gates_.grabbed; }
 
-    bool osd_visible() const noexcept { return osd_visible_; }
+    bool osd_visible() const noexcept { return gates_.osd_visible; }
 
     void set_joy_mask(PlayerIndex player, JoyMask mask) noexcept;
     JoyMask joy_mask(PlayerIndex player) const noexcept;
@@ -95,7 +94,23 @@ public:
     unsigned axis_range_zero() const noexcept { return axis_range_zero_; }
 
 private:
-    void release_held_(proto::ILinkFrame& frame) noexcept;
+    [[nodiscard]] proto::ILinkPadEncoder& route() noexcept {
+        if (lw_)
+            return *lw_;
+        if (held_)
+            return *held_;
+        return framed_;
+    }
+
+    [[nodiscard]] const proto::ILinkPadEncoder& route() const noexcept {
+        if (lw_)
+            return *lw_;
+        if (held_)
+            return *held_;
+        return framed_;
+    }
+
+    void release_held_(proto::ILinkPadEncoder& to, proto::ILinkFrame& frame) noexcept;
 
     proto::JoystickPort joy_{};
 
@@ -103,7 +118,6 @@ private:
     std::optional<proto::HeldPadEncoder> held_{};
     proto::AxiBlockDecl pad_block_{};
     std::optional<proto::AxiPadEncoder> lw_{};
-    proto::ILinkPadEncoder* route_ = &framed_;
 
     class PlayerMasks {
         TASTY_SEAT_RESIDENT(RT);
@@ -137,9 +151,8 @@ private:
         bool zero_armed_ = true;
     };
 
-    infra::IndexedArray<PlayerMasks, kMaxPlayersEmit, PlayerIndex> masks_{};
-    bool grabbed_ = false;
-    bool osd_visible_ = false;
+    infra::IndexedArray<PlayerMasks, kMaxPlayers, PlayerIndex> masks_{};
+    PadGates gates_{};
     unsigned axis_range_zero_ = 0;
 };
 

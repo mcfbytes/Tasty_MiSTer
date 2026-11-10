@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
@@ -16,7 +17,9 @@ public:
 
     Framebuffer() noexcept = default;
 
-    explicit Framebuffer(int fd) noexcept : fd_(fd) {}
+    [[nodiscard]] static Framebuffer adopt(UniqueFd fd) noexcept {
+        return Framebuffer{std::move(fd)};
+    }
 
     [[nodiscard]] bool valid() const noexcept { return fd_.valid(); }
 
@@ -25,6 +28,8 @@ public:
     [[nodiscard]] Wait wait_vsync() const noexcept;
 
 private:
+    explicit Framebuffer(UniqueFd fd) noexcept : fd_(std::move(fd)) {}
+
     UniqueFd fd_{};
 };
 

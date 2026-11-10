@@ -21,7 +21,7 @@ namespace mister::app {
 
 struct LinkOpCtx {
 
-    const ILinkTxReader& inbox;
+    const ILinkTxReader& tx;
     bool windows_closed = false;
     bool live = false;
 

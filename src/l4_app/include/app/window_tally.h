@@ -18,7 +18,7 @@ public:
 
     void refused(Errc why) noexcept {
         ++counts_.refusals;
-        counts_.refusal_code = static_cast<std::uint16_t>(why);
+        counts_.refusal = why;
     }
 
     void opened() noexcept { ++counts_.windows; }

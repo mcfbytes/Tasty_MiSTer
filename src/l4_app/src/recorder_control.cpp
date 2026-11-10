@@ -5,8 +5,9 @@
 
 #include <climits>
 #include <cstdlib>
-#include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 
 #include "app/identity_latch.h"
 #include "app/session_identity.h"
@@ -19,10 +20,6 @@ namespace {
 bool is_dir(const std::string& p) noexcept {
     struct stat st{};
     return ::stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
-}
-
-bool ends_with(std::string_view s, std::string_view t) noexcept {
-    return s.size() >= t.size() && s.substr(s.size() - t.size()) == t;
 }
 
 }
@@ -45,16 +42,19 @@ RecPath RecorderControl::resolve(
         (void)::localtime_r(&now, &tm);
         char stamp[32];
         (void)std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", &tm);
-        file = std::string(name.empty() ? "rec" : name) + "_" + stamp + ".frames.tsv";
+        file = std::string(name.empty() ? "rec" : name) + "_" + stamp;
+        file += RecordingName::kSidecarSuffix;
     } else {
         const auto slash = a.rfind('/');
         dir = slash == std::string::npos ? std::string(".") : a.substr(0, slash + 1);
         file = a.substr(slash == std::string::npos ? 0 : slash + 1);
 
-        if (ends_with(file, ".avi") && file.size() > 4)
-            file.resize(file.size() - 4);
-        if (!ends_with(file, ".tsv"))
-            file += ".frames.tsv";
+        if (file.size() > RecordingName::kAviSuffix.size()
+            && file.ends_with(RecordingName::kAviSuffix)) {
+            file.resize(file.size() - RecordingName::kAviSuffix.size());
+        }
+        if (!RecordingName::names_sidecar(file))
+            file += RecordingName::kSidecarSuffix;
     }
     char real[PATH_MAX];
     if (::realpath(dir.c_str(), real) == nullptr)
@@ -67,12 +67,10 @@ RecPath RecorderControl::resolve(
     if (r.size() <= want.size() || r.compare(0, want.size(), want) != 0)
         return out;
 
-    std::string base = r + file;
-    base.resize(base.size() - (ends_with(base, ".frames.tsv") ? 11u : 4u));
-    if (RecPath seg{}; !seg.assign(base + "_000.avi"))
+    const std::optional<RecordingName> rec = RecordingName::from_sidecar(r + file);
+    if (!rec || !rec->fits())
         return out;
-    (void)out.assign(r + file);
-    return out;
+    return rec->sidecar();
 }
 
 bool RecorderControl::publish_(
@@ -82,28 +80,36 @@ bool RecorderControl::publish_(
     RecOptions opt
 ) noexcept {
     TASTY_SEAT_BODY(RecorderControl);
-    if (!w_.control)
+    if (!requests_)
         return false;
-    RecControl c{};
+    auto loan = requests_.acquire();
+    if (!loan) {
+
+        reap_();
+        loan = requests_.acquire();
+    }
+    if (!loan) {
+        if (w_.diag)
+            w_.diag->appendf("{\"t\":\"rec\",\"k\":\"refused\",\"why\":\"queue\"}");
+        return false;
+    }
     gen_ = gen_.next_live();
-    c.gen = gen_;
-    c.op = op;
-    c.mode = mode;
-    c.opt = opt;
-    (void)c.path.assign(path);
-    w_.control->publish(c);
-    if (w_.capture_wake)
-        w_.capture_wake->kick();
+    loan->gen = gen_;
+    loan->op = op;
+    loan->mode = mode;
+    loan->opt = opt;
+    loan->verdict = RecVerdict::None;
+    (void)loan->path.assign(path);
+    requests_.send(std::move(loan));
     return true;
 }
 
 std::string RecorderControl::name_() const {
     std::string name = "rec";
     if (w_.identity) {
-
-        auto id = std::make_unique<SessionIdentity>();
-        if (w_.identity->copy(*id) && id->core[0] != '\0')
-            name = id->core;
+        const std::optional<SessionIdentity> id = w_.identity->copy();
+        if (id && !id->core.empty())
+            name.assign(id->core.view());
     }
     return name;
 }
@@ -150,41 +156,53 @@ bool RecorderControl::take_disarm() noexcept {
     return true;
 }
 
-void RecorderControl::tick() noexcept {
-    TASTY_SEAT_BODY(RecorderControl);
-    if (!w_.status)
+void RecorderControl::reap_() noexcept {
+    if (!requests_)
         return;
     RecorderStatus s{};
-    if (!status_seen_.take_if_changed(*w_.status, s))
-        return;
-    if (!w_.diag)
-        return;
-    if (s.verdict != RecVerdict::None && s.answered != logged_answer_) {
-        logged_answer_ = s.answered;
-        const char* remedy = rec_verdict_remedy(s.verdict);
+    if (w_.status)
+        (void)w_.status->sample_into(s);
+    for (;;) {
+        auto loan = requests_.reap();
+        if (!loan)
+            return;
+        last_verdict_ = loan->verdict;
+        if (!w_.diag || loan->verdict == RecVerdict::None)
+            continue;
+        const char* remedy = rec_verdict_remedy(loan->verdict);
         w_.diag->appendf(
             "{\"t\":\"rec\",\"k\":\"verdict\",\"gen\":%s,\"v\":\"%s\",\"stride_mib\":%u,"
             "\"lowlat\":%u%s%s%s}",
-            s.answered.text().c_str(),
-            rec_verdict_name(s.verdict),
+            loan->gen.text().c_str(),
+            rec_verdict_name(loan->verdict),
             static_cast<unsigned>(s.stride_mib),
-            static_cast<unsigned>(s.lowlat),
+            s.lowlat ? 1u : 0u,
             remedy != nullptr ? ",\"remedy\":\"" : "",
             remedy != nullptr ? remedy : "",
             remedy != nullptr ? "\"" : ""
         );
     }
+}
+
+void RecorderControl::tick() noexcept {
+    TASTY_SEAT_BODY(RecorderControl);
+    reap_();
+    if (!w_.status || !w_.diag)
+        return;
+    RecorderStatus s{};
+    if (!status_seen_.take_if_changed(*w_.status, s))
+        return;
     if (s.end != RecVerdict::None && s.gen != logged_end_) {
         logged_end_ = s.gen;
         RecWriteStatus ws{};
         if (w_.writer)
             (void)w_.writer->sample_into(ws);
         w_.diag->appendf(
-            "{\"t\":\"rec\",\"k\":\"end\",\"gen\":%s,\"why\":\"%s\",%s,\"werr\":%d}",
+            "{\"t\":\"rec\",\"k\":\"end\",\"gen\":%s,\"why\":\"%s\",%s,\"werr\":%s}",
             s.gen.text().c_str(),
             rec_verdict_name(s.end),
             format_recorder_status(s).c_str(),
-            static_cast<int>(ws.err)
+            ws.err.text().c_str()
         );
     }
 }

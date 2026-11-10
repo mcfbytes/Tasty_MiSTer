@@ -12,16 +12,23 @@
 #include "app/owner_tick.h"
 #include "app/encode_status.h"
 #include "app/path_text.h"
+#include "app/play_refusal.h"
 #include "app/recorder_status.h"
+#include "app/replay_feeder.h"
 #include "app/replay_status.h"
+#include "app/step_count.h"
+#include "cores/movie_codec.h"
 #include "cores/movie_system.h"
 #include "hal/phys_region.h"
+#include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "os/monotonic_clock.h"
+#include "run_exit.h"
 #include "tasty_cli.h"
+#include "tasty_refusal.h"
 #include "tasty_splash.h"
 
 namespace mister::app {
@@ -29,7 +36,6 @@ class IdentityLatch;
 template <SeatTag Seat>
 class LinkTxChannel;
 class RecorderControl;
-class ReplayFeeder;
 class UiRequestRing;
 class VideoPump;
 }
@@ -40,27 +46,19 @@ class Vfs;
 
 namespace mister::fw {
 
+using StatusText = FixedStr<768, StrFit::Reject>;
+
 class TastySession final : public app::IOwnerTick {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    struct PlayAsk {
-        std::string_view movie{};
-        std::string_view rom{};
-        std::optional<app::MovieFrame> lead{};
-        std::optional<std::chrono::microseconds> phase_us{};
-        std::optional<app::MovieFrame> stop_at{};
-        std::optional<cores::IMovieCodec::RamFill> ram_fill{};
-        bool seeded_save = false;
-        bool set_settings = true;
-    };
-
     class Replay {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
         virtual ~Replay() = default;
-        virtual bool take_play(const PlayAsk& ask) noexcept = 0;
+
+        virtual bool take_play(const app::ReplayFeeder::Play& play) noexcept = 0;
         virtual void take_stop() noexcept = 0;
 
         [[nodiscard]] virtual app::FrameCount frames() const noexcept = 0;
@@ -70,13 +68,9 @@ public:
 
         [[nodiscard]] virtual bool active() const noexcept { return true; }
 
-        [[nodiscard]] virtual const char* refusal_why() const noexcept { return "none"; }
-
-        [[nodiscard]] virtual std::string_view refusal_setting() const noexcept { return {}; }
-
-        [[nodiscard]] virtual bool refusal_setting_offered() const noexcept { return false; }
-
-        [[nodiscard]] virtual std::string_view refusal_path() const noexcept { return {}; }
+        [[nodiscard]] virtual std::optional<ReplayRefusal> refusal() const noexcept {
+            return std::nullopt;
+        }
 
         [[nodiscard]] virtual std::size_t settings_set() const noexcept { return 0; }
 
@@ -99,7 +93,8 @@ public:
         xthread::WakeFlag& main_stop;
         const svc::Vfs& vfs;
         const std::atomic<int>& stop;
-        std::atomic<int>& exit_code;
+
+        RunExitCell& run_exit;
         hal::PhysRegion video_fb{};
 
         const xthread::Telemetry<std::uint8_t, SeatTag::Main>& direct_video_ini;
@@ -150,7 +145,7 @@ private:
         app::EpochFail epoch_fail,
         std::chrono::nanoseconds now
     ) noexcept;
-    void fail_(int rc, const char* why) noexcept;
+    void fail_(const char* why) noexcept;
 
     [[nodiscard]] bool copy_seed_() noexcept;
     static constexpr proto::FileSize kSeedMax{1u << 20};
@@ -170,8 +165,8 @@ private:
     std::chrono::nanoseconds last_status_ns_{};
     app::PathText core_path_{};
     app::PathText menu_path_{};
-    char last_status_[768]{};
-    unsigned last_status_n_ = 0;
+
+    StatusText last_status_{};
     bool rec_only_ = false;
     bool splash_ok_ = false;
     bool play_started_ = false;
@@ -184,8 +179,8 @@ private:
     bool resampled_ = false;
 
     std::optional<app::ControlGeneration> said_gen_{};
-    std::uint8_t said_steps_ = 0;
-    std::uint8_t said_recovered_ = 0;
+    app::StepCount said_steps_{};
+    app::StepCount said_recovered_{};
     unsigned hide_tries_ = 0;
     std::uint32_t id_gen_ = 0;
     std::uint32_t video_edges_ = 0;

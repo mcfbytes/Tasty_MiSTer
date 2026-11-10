@@ -57,7 +57,7 @@ private:
 
         app::PageDescription::Row describe() const override;
         Transition select() override;
-        Transition step(int delta) override;
+        Transition step(CycleDir dir) override;
 
     private:
         HdDisplayPlan& plan_;

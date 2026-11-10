@@ -23,7 +23,7 @@ class RebootAnswer {
 public:
     class Host {
     public:
-        [[nodiscard]] virtual bool reboot_push_quiesced(std::uint16_t seq) noexcept = 0;
+        [[nodiscard]] virtual bool reboot_push_quiesced(proto::RebootSeq seq) noexcept = 0;
 
     protected:
         Host() = default;
@@ -51,9 +51,16 @@ public:
 
     void answer_reboot(Host& host) noexcept;
 
-    [[nodiscard]] bool rebooting() const noexcept { return rebooting_; }
+    [[nodiscard]] bool rebooting() const noexcept { return quiesce_.phase != RebootPhase::Idle; }
 
 private:
+    enum class RebootPhase : std::uint8_t { Idle, Quiescing, ResetHeld, Answered };
+
+    struct RebootState {
+        RebootPhase phase = RebootPhase::Idle;
+        proto::RebootSeq seq{};
+    };
+
     [[nodiscard]] After perform_reboot_() const noexcept;
     [[nodiscard]] bool io_settled_() const noexcept;
     void hold_reset_once_saved_();
@@ -62,10 +69,7 @@ private:
     const NvramUpload& nvram_;
     infra::OptRef<WindowJobService> window_jobs_{};
     infra::OptRef<svc::IStorageLifecycle> storage_life_{};
-    bool rebooting_ = false;
-    bool reboot_answered_ = false;
-    bool reset_held_ = false;
-    std::uint16_t reboot_seq_ = 0;
+    RebootState quiesce_{};
 };
 
 }

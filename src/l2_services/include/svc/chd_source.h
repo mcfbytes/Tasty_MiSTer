@@ -8,7 +8,6 @@
 #include <span>
 
 #include "infra/error.h"
-#include "proto/types.h"
 #include "svc/chd_geometry.h"
 #include "svc/types.h"
 
@@ -34,18 +33,6 @@ protected:
     IChdSource(const IChdSource&) = default;
     IChdSource& operator=(const IChdSource&) = default;
 };
-
-struct ChdTrack {
-    TrackNumber number{};
-    proto::BlockCount frames{};
-    proto::BlockCount pregap{};
-    proto::BlockCount postgap{};
-    char type[32]{};
-    char subtype[32]{};
-    char pgtype[32]{};
-};
-
-[[nodiscard]] std::optional<ChdTrack> parse_chd_track(const ChdMetaRow& row) noexcept;
 
 [[nodiscard]] Ex<std::unique_ptr<IChdSource>> open_chd(std::unique_ptr<IFile> file);
 

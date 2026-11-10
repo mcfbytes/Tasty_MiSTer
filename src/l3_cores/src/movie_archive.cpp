@@ -6,6 +6,7 @@
 #include <optional>
 #include <vector>
 
+#include "cores/json_flatten.h"
 #include "cores/movie_codec.h"
 #include "infra/byte_view.h"
 #include "infra/crc32.h"
@@ -17,17 +18,13 @@ namespace mister::cores {
 namespace {
 
 using Use = MovieArchiveFormat::Use;
-using CR = IMovieCodec::Refusal;
+using CR = MovieRefusal;
 
 constexpr std::string_view kBom = "\xEF\xBB\xBF";
 
-std::unexpected<Error> refuse(CR r, infra::ErrorSite site) {
-    return std::unexpected(Error{Errc::bad_format, site, static_cast<std::uint32_t>(r)});
-}
-
 std::unexpected<Error> lower(const Error& e) {
     if (e.code == Errc::bad_format || e.code == Errc::stale)
-        return refuse(CR::Archive, e.site);
+        return std::unexpected(movie_refusal(CR::Archive, e.site));
     return std::unexpected(e);
 }
 
@@ -57,22 +54,32 @@ std::size_t common_dir(std::span<const svc::ArchiveEntry> es) noexcept {
     return !p.empty() && is_sep(p.back()) ? p.size() : 0;
 }
 
-struct Named {
-    std::string stem;
+struct Member {
+    std::size_t index = 0;
+    std::optional<std::string> stem;
     bool zst = false;
-    bool unlisted = false;
 };
 
-Named name_of(std::string_view name, std::size_t cut, MovieArchiveFormat::Naming naming) {
-    if (!name.empty() && is_sep(name.back()))
-        return {{}, false, true};
-    if (naming == MovieArchiveFormat::Naming::Exact)
-        return {std::string(name), false, false};
+Member member_of(
+    const svc::ArchiveEntry& e,
+    std::size_t index,
+    MovieArchiveFormat::Naming naming,
+    std::size_t cut
+) {
+    Member m{.index = index, .stem = std::nullopt};
+    if (!e.name.empty() && is_sep(e.name.back()))
+        return m;
+    if (naming == MovieArchiveFormat::Naming::Exact) {
+        m.stem = e.name;
+        return m;
+    }
+    std::string_view name = e.name;
     name.remove_prefix(cut);
-    const bool zst = name.ends_with(".zst");
+    m.zst = name.ends_with(".zst");
     std::string stem(name.substr(0, name.find('.')));
     std::ranges::replace(stem, '\\', '/');
-    return {std::move(stem), zst, false};
+    m.stem = std::move(stem);
+    return m;
 }
 
 std::optional<Use> rule_for(const MovieArchiveFormat& f, std::string_view stem) noexcept {
@@ -84,12 +91,12 @@ std::optional<Use> rule_for(const MovieArchiveFormat& f, std::string_view stem) 
 }
 
 bool readable(const svc::ArchiveEntry& e) noexcept {
-    return !e.encrypted && e.plausible && (e.method == 0 || e.method == 8);
+    return !e.encrypted && e.plausible && svc::method_of(e.method).has_value();
 }
 
 [[nodiscard]] Ex<std::string> read_whole(const svc::IArchive& a, std::size_t index) {
     const svc::ArchiveEntry& e = a.entries()[index];
-    auto f = a.open(index);
+    auto f = a.open(e);
     if (!f)
         return lower(f.error());
     std::string out(static_cast<std::size_t>(e.size), '\0');
@@ -99,13 +106,13 @@ bool readable(const svc::ArchiveEntry& e) noexcept {
         if (!got)
             return lower(got.error());
         if (*got == 0)
-            return refuse(CR::Archive, ERR_SITE());
+            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
         done += *got;
     }
     const auto bytes = std::as_bytes(std::span(out));
     const std::span<const std::uint8_t> u = infra::byte_cast<const std::uint8_t>(bytes);
     if (svc::crc32_extend({}, u) != e.crc)
-        return refuse(CR::Archive, ERR_SITE());
+        return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
     return out;
 }
 
@@ -123,171 +130,31 @@ std::string short_lines(std::string_view text) {
         text = nl == std::string_view::npos ? std::string_view{} : text.substr(nl + 1);
         if (line.ends_with('\r'))
             line.remove_suffix(1);
-        if (line.size() <= IMovieCodec::kLineMax)
+        if (line.size() <= kMovieLineMax)
             out.append(line).append(1, '\n');
     }
     return out;
 }
 
-class Flattener {
-public:
-    Flattener(std::string_view in, std::string_view prefix, std::size_t cap)
-        : in_(in),
-          path_(prefix),
-          cap_(cap) {}
-
-    [[nodiscard]] Ex<std::string> run() {
-        ws_();
-        if (pos_ < in_.size()) {
-            if (!value_(0))
-                return refuse(over_ ? CR::TooLong : CR::Archive, ERR_SITE());
-            ws_();
-            if (pos_ != in_.size())
-                return refuse(CR::Archive, ERR_SITE());
-        }
-        return std::move(out_);
-    }
-
-private:
-    void ws_() noexcept {
-        while (pos_ < in_.size()
-               && (in_[pos_] == ' ' || in_[pos_] == '\t' || in_[pos_] == '\n' || in_[pos_] == '\r'))
-            ++pos_;
-    }
-
-    bool eat_(char c) noexcept {
-        ws_();
-        if (pos_ < in_.size() && in_[pos_] == c) {
-            ++pos_;
-            return true;
-        }
-        return false;
-    }
-
-    std::optional<std::string_view> string_() noexcept {
-        if (!eat_('"'))
-            return std::nullopt;
-        const std::size_t start = pos_;
-        while (pos_ < in_.size()) {
-            const char c = in_[pos_];
-            if (static_cast<unsigned char>(c) < 0x20)
-                return std::nullopt;
-            if (c == '\\') {
-                pos_ += 2;
-                continue;
-            }
-            if (c == '"') {
-                const std::string_view s = in_.substr(start, pos_ - start);
-                ++pos_;
-                return s;
-            }
-            ++pos_;
-        }
-        return std::nullopt;
-    }
-
-    std::optional<std::string_view> scalar_() noexcept {
-        ws_();
-        const std::size_t start = pos_;
-        for (const std::string_view w : {"true", "false", "null"}) {
-            if (in_.substr(pos_).starts_with(w)) {
-                pos_ += w.size();
-                return in_.substr(start, w.size());
-            }
-        }
-        while (pos_ < in_.size()
-               && (std::string_view("+-.0123456789eE").find(in_[pos_]) != std::string_view::npos))
-            ++pos_;
-        if (pos_ == start)
-            return std::nullopt;
-        return in_.substr(start, pos_ - start);
-    }
-
-    bool emit_(std::string_view v) {
-        if (path_.size() + 2 + v.size() > IMovieCodec::kLineMax)
-            return true;
-        if (!all_printable(path_) || path_.find(' ') != std::string::npos || !all_printable(v))
-            return true;
-        out_.append(path_).append(1, ' ').append(v).append(1, '\n');
-        over_ = out_.size() > cap_;
-        return !over_;
-    }
-
-    bool value_(std::size_t depth) {
-        ws_();
-        if (pos_ >= in_.size())
-            return false;
-        const char c = in_[pos_];
-        if (c == '{' || c == '[') {
-            if (depth == MovieArchiveFormat::kJsonDepth)
-                return false;
-            const bool obj = c == '{';
-            ++pos_;
-            if (eat_(obj ? '}' : ']'))
-                return true;
-            for (std::size_t i = 0;; ++i) {
-                const std::size_t keep = path_.size();
-                if (obj) {
-                    const auto k = string_();
-                    if (!k || !eat_(':'))
-                        return false;
-                    path_.append(1, '.').append(*k);
-                } else {
-                    path_.append(1, '.').append(std::to_string(i));
-                }
-                if (!value_(depth + 1))
-                    return false;
-                path_.resize(keep);
-                if (eat_(','))
-                    continue;
-                return eat_(obj ? '}' : ']');
-            }
-        }
-        const auto v = c == '"' ? string_() : scalar_();
-        return v && emit_(*v);
-    }
-
-    std::string_view in_;
-    std::string path_;
-    std::size_t cap_;
-    std::string out_;
-    std::size_t pos_ = 0;
-    bool over_ = false;
-};
-
 class MovieText final : public svc::IFile {
 public:
-    MovieText(
+    [[nodiscard]] static Ex<std::unique_ptr<svc::IFile>> open(
         std::unique_ptr<svc::IArchive> archive,
         std::string head,
         std::unique_ptr<svc::IFile> log,
         const svc::ArchiveEntry& entry
-    )
-        : archive_(std::move(archive)),
-          head_(std::move(head)),
-          log_(std::move(log)),
-          member_size_(entry.size),
-          crc_want_(entry.crc) {}
-
-    [[nodiscard]] Ex<void> start() {
-        std::array<std::byte, 3> b{};
-        const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(3, member_size_));
-        const auto got = log_->read_at(0, std::span(b).first(want));
-        if (!got)
-            return lower(got.error());
-        if (*got != want)
-            return refuse(CR::Archive, ERR_SITE());
-        account_(0, std::span<const std::byte>(b).first(want));
-        if (!crc_ok_())
-            return refuse(CR::Archive, ERR_SITE());
-        if (want == 3 && infra::as_text(std::span(b).first(3)) == kBom)
-            base_ = 3;
-        return {};
+    ) {
+        std::unique_ptr<MovieText> text(
+            new MovieText(std::move(archive), std::move(head), std::move(log), entry)
+        );
+        if (auto r = text->prime_(); !r)
+            return std::unexpected(r.error());
+        return std::unique_ptr<svc::IFile>(std::move(text));
     }
 
     [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
         if (bad_)
-            return refuse(CR::Archive, ERR_SITE());
+            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
         std::size_t done = 0;
         if (off < head_.size()) {
             const auto n = static_cast<std::size_t>(
@@ -307,7 +174,7 @@ public:
         account_(at, std::span<const std::byte>(dst.subspan(done, *got)));
         if (!crc_ok_()) {
             bad_ = true;
-            return refuse(CR::Archive, ERR_SITE());
+            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
         }
         return done + *got;
     }
@@ -322,13 +189,39 @@ public:
 
     [[nodiscard]] Ex<void> flush() override { return {}; }
 
-    svc::FileKind kind() const noexcept override { return svc::FileKind::Zip; }
-
     [[nodiscard]] Ex<void> advise(Access a, std::uint64_t, std::uint64_t) override {
         return log_->advise(a, 0, 0);
     }
 
 private:
+    MovieText(
+        std::unique_ptr<svc::IArchive> archive,
+        std::string head,
+        std::unique_ptr<svc::IFile> log,
+        const svc::ArchiveEntry& entry
+    )
+        : archive_(std::move(archive)),
+          head_(std::move(head)),
+          log_(std::move(log)),
+          member_size_(entry.size),
+          crc_want_(entry.crc) {}
+
+    [[nodiscard]] Ex<void> prime_() {
+        std::array<std::byte, 3> b{};
+        const std::size_t want = static_cast<std::size_t>(std::min<std::uint64_t>(3, member_size_));
+        const auto got = log_->read_at(0, std::span(b).first(want));
+        if (!got)
+            return lower(got.error());
+        if (*got != want)
+            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
+        account_(0, std::span<const std::byte>(b).first(want));
+        if (!crc_ok_())
+            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
+        if (want == 3 && infra::as_text(std::span(b).first(3)) == kBom)
+            base_ = 3;
+        return {};
+    }
+
     void account_(std::uint64_t at, std::span<const std::byte> b) noexcept {
         if (at > crc_pos_ || at + b.size() <= crc_pos_)
             return;
@@ -364,9 +257,9 @@ private:
             return std::string{};
         case Use::Lines: {
             if (e.size > MovieArchiveFormat::kLinesMax)
-                return refuse(CR::TooLong, ERR_SITE());
+                return std::unexpected(movie_refusal(CR::TooLong, ERR_SITE()));
             if (!readable(e))
-                return refuse(CR::Archive, ERR_SITE());
+                return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
             const auto text = read_whole(a, i);
             if (!text)
                 return std::unexpected(text.error());
@@ -374,13 +267,13 @@ private:
         }
         case Use::Json: {
             if (e.size > MovieArchiveFormat::kJsonMax)
-                return refuse(CR::TooLong, ERR_SITE());
+                return std::unexpected(movie_refusal(CR::TooLong, ERR_SITE()));
             if (!readable(e))
-                return refuse(CR::Archive, ERR_SITE());
+                return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
             const auto text = read_whole(a, i);
             if (!text)
                 return std::unexpected(text.error());
-            return flatten_json(strip_bom(*text), stem, room);
+            return flatten_json(strip_bom(*text), stem, JsonCap{room});
         }
         case Use::Value:
             if (e.size <= MovieArchiveFormat::kValueMax && readable(e)) {
@@ -390,26 +283,18 @@ private:
                 std::string_view v = strip_bom(*text);
                 while (!v.empty() && (v.back() == '\n' || v.back() == '\r'))
                     v.remove_suffix(1);
-                if (all_printable(v) && stem.size() + 1 + v.size() <= IMovieCodec::kLineMax)
+                if (all_printable(v) && stem.size() + 1 + v.size() <= kMovieLineMax)
                     return std::string(stem) + ' ' + std::string(v) + '\n';
             }
             [[fallthrough]];
         case Use::Presence:
-            if (stem.size() + 1 > IMovieCodec::kLineMax)
+            if (stem.size() + 1 > kMovieLineMax)
                 return std::string{};
             return '@' + std::string(stem) + '\n';
     }
     return std::string{};
 }
 
-}
-
-[[nodiscard]] Ex<std::string> flatten_json(
-    std::string_view json,
-    std::string_view prefix,
-    std::size_t cap
-) {
-    return Flattener(json, prefix, cap).run();
 }
 
 [[nodiscard]] Ex<std::unique_ptr<svc::IFile>> open_movie_archive(
@@ -420,70 +305,66 @@ private:
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     const std::span<const svc::ArchiveEntry> es = archive->entries();
     if (es.size() > MovieArchiveFormat::kMembersMax)
-        return refuse(CR::TooLong, ERR_SITE());
+        return std::unexpected(movie_refusal(CR::TooLong, ERR_SITE()));
 
     const std::size_t cut = format.naming == MovieArchiveFormat::Naming::BizHawkLump
         ? common_dir(es)
         : 0;
-    std::vector<Named> names;
-    names.reserve(es.size());
+    std::vector<Member> members;
+    members.reserve(es.size());
     std::optional<std::size_t> log;
     for (std::size_t i = 0; i < es.size(); ++i) {
-        Named n = name_of(es[i].name, cut, format.naming);
-        if (n.unlisted) {
-            names.push_back(std::move(n));
-            continue;
-        }
+        Member m = member_of(es[i], i, format.naming, cut);
 
-        if (n.stem.empty() || !all_printable(n.stem)) {
-            n.unlisted = true;
-            names.push_back(std::move(n));
+        if (m.stem && (m.stem->empty() || !all_printable(*m.stem)))
+            m.stem.reset();
+        if (!m.stem) {
+            members.push_back(std::move(m));
             continue;
         }
-        for (const Named& m : names) {
-            if (!m.unlisted && m.stem == n.stem && m.zst == n.zst)
-                return refuse(CR::Archive, ERR_SITE());
+        for (const Member& seen : members) {
+            if (seen.stem && *seen.stem == *m.stem && seen.zst == m.zst)
+                return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
         }
-        const std::optional<Use> use = rule_for(format, n.stem);
-        if (!n.zst && use == Use::Log) {
+        const std::optional<Use> use = rule_for(format, *m.stem);
+        if (!m.zst && use == Use::Log) {
             if (log)
-                return refuse(CR::Archive, ERR_SITE());
+                return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
             log = i;
         }
-        names.push_back(std::move(n));
+        members.push_back(std::move(m));
     }
 
-    for (Named& n : names) {
-        if (!n.zst || n.unlisted)
+    for (Member& m : members) {
+        if (!m.stem || !m.zst)
             continue;
-        const Use use = rule_for(format, n.stem).value_or(Use::Presence);
+        const Use use = rule_for(format, *m.stem).value_or(Use::Presence);
         if (use == Use::Skip || use == Use::Presence)
             continue;
-        const bool plain = std::ranges::any_of(names, [&](const Named& m) {
-            return !m.unlisted && !m.zst && m.stem == n.stem;
+        const bool plain = std::ranges::any_of(members, [&](const Member& o) {
+            return o.stem && !o.zst && *o.stem == *m.stem;
         });
         if (!plain)
-            return refuse(CR::Archive, ERR_SITE());
-        n.unlisted = true;
+            return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
+        m.stem.reset();
     }
     if (!log)
-        return refuse(CR::NotAMovie, ERR_SITE());
+        return std::unexpected(movie_refusal(CR::NotAMovie, ERR_SITE()));
     const svc::ArchiveEntry& le = es[*log];
     if (le.size > MovieArchiveFormat::kLogMax)
-        return refuse(CR::TooLong, ERR_SITE());
+        return std::unexpected(movie_refusal(CR::TooLong, ERR_SITE()));
     if (!readable(le))
-        return refuse(CR::Archive, ERR_SITE());
+        return std::unexpected(movie_refusal(CR::Archive, ERR_SITE()));
 
     std::string head;
-    for (std::size_t i = 0; i < es.size(); ++i) {
-        const Named& n = names[i];
-        if (n.unlisted)
+    for (const Member& m : members) {
+        if (!m.stem)
             continue;
-        const Use use = n.zst ? Use::Presence : rule_for(format, n.stem).value_or(format.others);
+        const Use use = m.zst ? Use::Presence : rule_for(format, *m.stem).value_or(format.others);
         const auto text = head_member(
             *archive,
-            i,
-            n.stem,
+            m.index,
+            *m.stem,
             use,
             MovieArchiveFormat::kHeadMax - head.size()
         );
@@ -491,16 +372,13 @@ private:
             return std::unexpected(text.error());
         head.append(*text);
         if (head.size() > MovieArchiveFormat::kHeadMax)
-            return refuse(CR::TooLong, ERR_SITE());
+            return std::unexpected(movie_refusal(CR::TooLong, ERR_SITE()));
     }
 
-    auto f = archive->open(*log);
+    auto f = archive->open(es[*log]);
     if (!f)
         return lower(f.error());
-    auto text = std::make_unique<MovieText>(std::move(archive), std::move(head), std::move(*f), le);
-    if (auto r = text->start(); !r)
-        return std::unexpected(r.error());
-    return std::unique_ptr<svc::IFile>(std::move(text));
+    return MovieText::open(std::move(archive), std::move(head), std::move(*f), le);
 }
 
 [[nodiscard]] Ex<std::unique_ptr<svc::IFile>> open_movie_archive(
@@ -513,10 +391,8 @@ private:
         const Error e = a.error();
         if (e.code != Errc::bad_format)
             return std::unexpected(e);
-        return refuse(
-            e.detail == static_cast<std::uint32_t>(E2BIG) ? CR::TooLong : CR::Archive,
-            e.site
-        );
+        const CR why = e.detail == static_cast<std::uint32_t>(E2BIG) ? CR::TooLong : CR::Archive;
+        return std::unexpected(movie_refusal(why, e.site));
     }
     return open_movie_archive(std::move(*a), format);
 }

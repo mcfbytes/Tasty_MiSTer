@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -16,8 +17,12 @@
 #include "svc/disc_engine.h"
 #include "svc/image_opener.h"
 #include "svc/disc_geometry.h"
+#include "svc/disc_identity_role.h"
 #include "svc/disc_mounter.h"
 #include "svc/disc_reader.h"
+#include "svc/sector_header.h"
+#include "svc/vfs.h"
+#include "svc/vfs_image_opener.h"
 
 namespace mister::svc {
 
@@ -30,12 +35,6 @@ public:
     using GeomCell = xthread::Telemetry<DiscGeometry, SeatTag::Io>;
     using CountCell = xthread::Telemetry<DiscCounters, SeatTag::Io>;
 
-    DiscStore(const Vfs& vfs, GeomCell& geom, CountCell& counters, ChdPrefetch& prefetch) noexcept
-        : vfs_(vfs),
-          geom_(geom),
-          counters_(counters),
-          prefetch_(prefetch) {}
-
     DiscStore(
         const IImageOpener& opener,
         GeomCell& geom,
@@ -47,33 +46,51 @@ public:
           counters_(counters),
           prefetch_(prefetch) {}
 
-    [[nodiscard]] Ex<std::size_t> read_form(
+    DiscStore(const Vfs& vfs, GeomCell& geom, CountCell& counters, ChdPrefetch& prefetch)
+        : owned_opener_(std::make_unique<VfsImageOpener>(vfs)),
+          opener_(*owned_opener_),
+          geom_(geom),
+          counters_(counters),
+          prefetch_(prefetch) {}
+
+    [[nodiscard]] Ex<std::span<std::byte>> read_form(
         DiscForm form,
         proto::Lba lba,
-        std::span<std::byte> dst
+        std::span<std::byte> dst,
+        SectorHeader header = {}
     ) override;
-    [[nodiscard]] bool mount(
-        infra::OptRef<const CuePolicy> policy,
-        std::string_view path
-    ) noexcept override;
-    [[nodiscard]] bool unmount(infra::OptRef<const CuePolicy> policy) noexcept override;
-    void release() noexcept override;
 
     [[nodiscard]] bool mounted_for_test() const noexcept;
 
 private:
-    [[nodiscard]] bool ensure_engine_(infra::OptRef<const CuePolicy> policy) noexcept;
-    void publish_() noexcept;
+    [[nodiscard]] bool do_mount(
+        infra::OptRef<const CuePolicy> policy,
+        std::string_view path,
+        infra::OptRef<const IDiscIdentity> identity
+    ) noexcept override;
+    [[nodiscard]] bool do_unmount(infra::OptRef<const CuePolicy> policy) noexcept override;
+    void do_release() noexcept override;
 
-    infra::OptRef<const Vfs> vfs_;
-    infra::OptRef<const IImageOpener> opener_;
+    [[nodiscard]] bool ensure_engine_(infra::OptRef<const CuePolicy> policy) noexcept;
+
+    [[nodiscard]] Ex<std::span<std::byte>> read_engine_(
+        DiscForm form,
+        proto::Lba lba,
+        std::span<std::byte> dst,
+        SectorHeader header
+    );
+
+    void publish_(infra::OptRef<const IDiscIdentity> identity = {}) noexcept;
+
+    std::unique_ptr<IImageOpener> owned_opener_;
+    const IImageOpener& opener_;
     GeomCell& geom_;
     CountCell& counters_;
     ChdPrefetch& prefetch_;
 
     infra::OptRef<const CuePolicy> policy_;
 
-    std::uint32_t next_lba_ = 0;
+    proto::Lba next_lba_{};
     std::optional<DiscEngine> engine_;
 };
 

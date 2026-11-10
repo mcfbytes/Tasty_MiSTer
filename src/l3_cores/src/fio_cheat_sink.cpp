@@ -16,7 +16,7 @@ static_assert(
     "req: the default pair sits ON the cap, not under it"
 );
 
-Ex<void> FioCheatSink::apply(std::span<const std::uint8_t> table, std::uint32_t unit) {
+Ex<void> FioCheatSink::apply(std::span<const std::uint8_t> table, CheatUnit unit) {
     TASTY_SEAT_BODY(FioCheatSink);
 
     (void)unit;

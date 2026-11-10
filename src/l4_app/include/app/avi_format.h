@@ -6,13 +6,15 @@
 #include <cstdint>
 #include <span>
 
+#include "app/picture_pixels.h"
+#include "app/picture_row.h"
 #include "app/rec_options.h"
 
 namespace mister::app::avi {
 
 struct Fields {
-    std::uint16_t width = 0;
-    std::uint16_t height = 0;
+    PicturePixels width{};
+    PictureRows rows{};
     RecCodec codec = RecCodec::Cscd;
     std::uint32_t rate = 0;
     std::uint32_t scale = 0;
@@ -41,7 +43,7 @@ inline constexpr std::uint32_t kVtimeMax = kTickHz / 20;
 }
 
 using Header = std::array<std::byte, kHeaderBytes>;
-void header(const Fields& f, Header& out) noexcept;
+[[nodiscard]] Header header(const Fields& f) noexcept;
 
 void chunk_head(std::uint32_t payload, std::span<std::byte, kChunkHead> out) noexcept;
 

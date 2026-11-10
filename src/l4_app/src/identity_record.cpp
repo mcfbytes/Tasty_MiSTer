@@ -16,15 +16,6 @@ static_assert(
     "the name T-RT latched and the name the cell holds clip at one width"
 );
 
-void copy_cstr(char (&dst)[SessionIdentity::kMax], std::string_view src) noexcept {
-    const std::size_t n = src.size() < SessionIdentity::kMax ? src.size()
-                                                             : SessionIdentity::kMax - 1;
-    for (std::size_t i = 0; i < n; ++i)
-        dst[i] = src[i];
-    for (std::size_t i = n; i < SessionIdentity::kMax; ++i)
-        dst[i] = '\0';
-}
-
 }
 
 IdentityRecord build_identity_record(
@@ -53,8 +44,8 @@ IdentityRecord build_identity_record(
         (void)id.j_names.assign(lists.j);
     }
     id.joy.stick_dpad = !p.suppress_stick_dpad;
-    copy_cstr(id.core, eff);
-    copy_cstr(id.rbf, name);
+    (void)id.core.assign(eff);
+    (void)id.rbf.assign(name);
     id.stem = RememberedStem::of(name, facts);
     id.setname_same_dir = facts.setname_same_dir;
     id.front_end = p.is_front_end;

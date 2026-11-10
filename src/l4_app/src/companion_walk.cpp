@@ -7,24 +7,25 @@ namespace mister::app {
 
 Ex<CompanionWalk> CompanionWalk::start(
     const cores::CompanionPlan& plan,
-    std::uint16_t gen,
+    proto::CompanionBindGen gen,
     std::unique_ptr<cores::ILoader> loader,
     std::span<const cores::CoreWindowDecl> windows,
     infra::OptRef<CompanionHost::Binds> binds
 ) {
-    if (gen == 0 || (plan.loads && loader == nullptr))
+    if (gen.is_none() || (plan.load && loader == nullptr))
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     CompanionWalk w(plan, gen, std::move(loader), windows, binds);
-    if (!w.stem_.assign(plan.stem) || !w.source_.assign(plan.row.source))
+    if (!w.stem_.assign(plan.stem) || (plan.load && !w.source_.assign(plan.load->row.source)))
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 1});
     w.plan_.stem = {};
-    w.plan_.row.source = {};
+    if (w.plan_.load)
+        w.plan_.load->row.source = {};
     return w;
 }
 
 bool CompanionWalk::wants_pass(
     const LinkTxChannel<SeatTag::Main>& inbox,
-    const FileTxLevelCell* level
+    const FileTxLevelCell& level
 ) const noexcept {
     TASTY_SEAT_BODY(CompanionWalk);
     switch (pc_) {
@@ -47,7 +48,7 @@ CompanionWalk::Pass CompanionWalk::step(Host& h) {
         case Pc::Bind:
             return bind_(h);
         case Pc::Before:
-            return write_(h, plan_.before, proto::MailboxPoll::Off, Pc::Load);
+            return write_(h, plan_.load->before, proto::MailboxPoll::Off, Pc::Load);
         case Pc::Load:
             return load_(h);
         case Pc::After:
@@ -67,13 +68,13 @@ CompanionWalk::Pass CompanionWalk::bind_(Host& h) {
             return Pass::Waiting;
         bound_ = true;
     }
-    pc_ = plan_.loads ? Pc::Before : Pc::After;
+    pc_ = plan_.load ? Pc::Before : Pc::After;
     return Pass::Stepped;
 }
 
 CompanionWalk::Pass CompanionWalk::write_(
     Host& h,
-    const std::array<std::uint16_t, 3>& words,
+    const proto::MailboxWords& words,
     proto::MailboxPoll poll,
     Pc next
 ) {
@@ -88,7 +89,7 @@ CompanionWalk::Pass CompanionWalk::write_(
 CompanionWalk::Pass CompanionWalk::load_(Host& h) {
     if (!walk_) {
         cores::LoadPlan p{};
-        p.rows[0] = plan_.row;
+        p.rows[0] = plan_.load->row;
         p.rows[0].source = source_.view();
         p.count = 1;
         auto w = LoadWalk::start(std::move(loader_), p, windows_);
@@ -109,25 +110,17 @@ CompanionWalk::Pass CompanionWalk::load_(Host& h) {
     return Pass::Stepped;
 }
 
-bool CompanionWalk::wants_pass(
-    const LinkTxChannel<SeatTag::Main>& inbox,
-    const FileTxLevelCell& level
-) const noexcept {
-    TASTY_SEAT_BODY(CompanionWalk);
-    return wants_pass(inbox, &level);
-}
-
 Rung::Pass CompanionWalk::step(const RungEdges& edges, cores::ILadderHost& owner) {
     TASTY_SEAT_BODY(CompanionWalk);
     Host h{
         .load =
             LoadWalk::Host{
-                .rung = LoadLadder::Host{edges.inbox, &edges.level, edges.events},
+                .rung = LoadLadder::Host{edges.inbox, edges.level, edges.events},
                 .owner = owner,
-                .map = &edges.window_map,
+                .map = edges.window_map,
                 .aperture = edges.aperture,
                 .vfs = edges.vfs,
-                .now_ns = edges.clock.now().count()
+                .now_ns = edges.clock.now().time_since_epoch()
             },
         .binds = binds_
     };

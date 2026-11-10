@@ -9,27 +9,23 @@
 #include "cores/n64_cpak.h"
 #include "cores/n64_save_attach.h"
 #include "cores/n64_save_layout_key.h"
-#include "cores/n64_rom.h"
 
 namespace mister::cores::n64 {
-namespace {
 
-bool all_blank(const std::uint8_t* p, std::size_t n) noexcept {
-    if (n == 0)
+SaveChannelStore::SaveChannelStore(const svc::Vfs& vfs) noexcept : vfs_(vfs) {}
+
+bool SaveChannelStore::all_blank_(std::span<const std::uint8_t> image) const noexcept {
+    if (image.empty())
         return true;
-    const std::uint8_t head = p[0];
+    const std::uint8_t head = image[0];
     if (head != 0x00 && head != 0xFF)
         return false;
-    for (std::size_t i = 1; i < n; ++i) {
-        if (p[i] != head)
+    for (std::size_t i = 1; i < image.size(); ++i) {
+        if (image[i] != head)
             return false;
     }
     return true;
 }
-
-}
-
-SaveChannelStore::SaveChannelStore(const svc::Vfs& vfs) noexcept : vfs_(&vfs) {}
 
 void SaveChannelStore::adopt_(const SavePlan& plan) noexcept {
     plan_ = plan;
@@ -51,19 +47,25 @@ void SaveChannelStore::note_tag(proto::ImageTag tag) noexcept {
 }
 
 Ex<std::size_t> SaveChannelStore::render_(const SaveOrder& o) {
-    const std::size_t sz = o.create;
-    if (sz == 0 || sz > sizeof blank_) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), o.create});
-    }
+    const std::size_t sz = o.bytes;
     std::memset(blank_, 0, sz);
     if (migrate_(o))
         return sz;
-    if (o.cpak && sz == cpak::kImageBytes) {
-        auto serial = cpak::random_serial();
-        if (!serial)
-            return std::unexpected(serial.error());
-        cpak::render(*serial, std::span<std::uint8_t, cpak::kImageBytes>(blank_, sz));
-        return sz;
+    switch (o.create) {
+        case CreateImage::ControllerPak: {
+            auto serial = cpak::random_serial();
+            if (!serial)
+                return std::unexpected(serial.error());
+            cpak::render(
+                *serial,
+                std::span<std::uint8_t, cpak::kImageBytes>(blank_, cpak::kImageBytes)
+            );
+            return sz;
+        }
+        case CreateImage::Blank:
+            break;
+        case CreateImage::Never:
+            std::unreachable();
     }
     std::memset(blank_, 0xFF, sz);
     return sz;
@@ -71,9 +73,9 @@ Ex<std::size_t> SaveChannelStore::render_(const SaveOrder& o) {
 
 bool SaveChannelStore::migrate_(const SaveOrder& o) {
     const std::string_view old = plan_.stock.view();
-    if (old.empty() || !vfs_->file_exists(old))
+    if (old.empty() || !vfs_.file_exists(old))
         return false;
-    auto f = vfs_->open(old, svc::OpenMode::ReadWhole);
+    auto f = vfs_.open(old, svc::OpenMode::ReadWhole);
     if (!f)
         return false;
     auto on_disk = (*f)->size();
@@ -82,16 +84,16 @@ bool SaveChannelStore::migrate_(const SaveOrder& o) {
     const std::uint64_t end = std::min<std::uint64_t>(on_disk->v, kMaxPartitionBytes);
     if (o.offset >= end)
         return false;
-    const std::size_t sz = o.create;
+    const std::size_t sz = o.bytes;
     const auto want = static_cast<std::size_t>(std::min<std::uint64_t>(sz, end - o.offset));
     auto got = (*f)->read_at(
         o.offset,
         std::as_writable_bytes(std::span<std::uint8_t>(blank_, want))
     );
-    if (!got || *got == 0 || all_blank(blank_, sz))
+    if (!got || *got == 0 || all_blank_(std::span<const std::uint8_t>(blank_, sz)))
         return false;
     if (plan_.rows[o.row].byteswap)
-        normalize(std::span<std::uint8_t>(blank_, *got), ByteOrder::Little);
+        word_reverse_.normalize(std::span<std::uint8_t>(blank_, *got));
     if (*got < sz)
         std::memset(blank_ + *got, 0xFF, sz - *got);
     ++migrated_;
@@ -101,35 +103,25 @@ bool SaveChannelStore::migrate_(const SaveOrder& o) {
 Ex<void> SaveChannelStore::create_(const SaveOrder& o, std::size_t bytes) {
     const std::string_view rel = o.path.view();
     if (const std::size_t slash = rel.rfind('/'); slash != std::string_view::npos && slash > 0) {
-        if (auto r = vfs_->ensure_dir(rel.substr(0, slash)); !r)
+        if (auto r = vfs_.ensure_dir(rel.substr(0, slash)); !r)
             return r;
     }
     tmp_.clear();
     if (!tmp_.assign(rel) || !tmp_.append(".tmp")) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-    auto f = vfs_->open(tmp_.view(), svc::OpenMode::Truncate);
+    auto f = vfs_.open(tmp_.view(), svc::OpenMode::Truncate);
     if (!f)
         return std::unexpected(f.error());
     const std::span<const std::byte> image = std::as_bytes(
         std::span<const std::uint8_t>(blank_, bytes)
     );
-    std::size_t off = 0;
-    while (off < image.size()) {
-        auto n = (*f)->write_at(off, image.subspan(off));
-        if (!n)
-            return std::unexpected(n.error());
-        if (*n == 0) {
-            return std::unexpected(
-                Error{Errc::short_write, ERR_SITE(), static_cast<std::uint32_t>(off)}
-            );
-        }
-        off += *n;
-    }
+    if (auto r = svc::write_all(**f, proto::FileSize{}, image); !r)
+        return r;
     if (auto r = (*f)->flush(); !r)
         return r;
     f->reset();
-    if (auto r = vfs_->replace(tmp_.view(), rel); !r)
+    if (auto r = vfs_.replace(tmp_.view(), rel); !r)
         return r;
     ++creates_;
     return {};
@@ -146,25 +138,28 @@ Ex<proto::FileSize> SaveChannelStore::open_extent(
     if (!attach)
         return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), slot.v});
     const SaveOrder& o = attach->order;
+
+    if (o.bytes > kMaxPartitionBytes)
+        return std::unexpected(o.row.refused(Errc::mount_failed, ERR_SITE()));
     const auto part = parts_.find(o.row);
     if (!part)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), o.row.v});
+        return std::unexpected(o.row.refused(Errc::slot_range, ERR_SITE()));
     part->claim(slot);
 
     part->close();
     if (attach->plan)
         adopt_(*attach->plan);
     if (o.path.view().empty()) {
-        return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), o.row.v});
+        return std::unexpected(o.row.refused(Errc::mount_failed, ERR_SITE()));
     }
-    if (o.create != 0 && !vfs_->file_exists(o.path.view())) {
+    if (o.create != CreateImage::Never && !vfs_.file_exists(o.path.view())) {
         auto n = render_(o);
         if (!n)
             return std::unexpected(n.error());
         if (auto r = create_(o, *n); !r)
             return std::unexpected(r.error());
     }
-    return part->open(*vfs_, o.path.view());
+    return part->open(vfs_, o.path.view());
 }
 
 void SaveChannelStore::release(proto::SlotIndex slot) noexcept {
@@ -210,7 +205,7 @@ Ex<std::size_t> SaveChannelStore::read_at(std::uint64_t offset, std::span<std::u
         if (!got)
             break;
         if (plan_.rows[hit->row].byteswap) {
-            normalize(dst.subspan(done, *got), ByteOrder::Little);
+            word_reverse_.normalize(dst.subspan(done, *got));
         }
 
         if (*got < want)
@@ -258,7 +253,7 @@ Ex<std::size_t> SaveChannelStore::write_at(
 
         std::memcpy(scratch_, src.data() + done, fits);
         if (plan_.rows[hit->row].byteswap) {
-            normalize(std::span<std::uint8_t>(scratch_, fits), ByteOrder::Little);
+            word_reverse_.normalize(std::span<std::uint8_t>(scratch_, fits));
         }
 
         auto existing = f->read_at(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 
@@ -34,7 +35,7 @@ public:
 private:
     os::IClock& clock_;
     MouseAccumulator acc_{};
-    std::int64_t last_mouse_ns_ = 0;
+    os::RawMonotonicClock::time_point last_mouse_{};
     bool mouse_pending_ = false;
     svc::MouseMotion carry_{};
 };

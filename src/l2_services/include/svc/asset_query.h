@@ -9,7 +9,8 @@ namespace mister::svc {
 
 struct AssetQuery {
     std::string_view rom_path;
-    Crc32 crc{};
+
+    Crc32 crc = Crc32::kUndeclared;
     std::string_view ext;
     std::string_view core_dir;
 

@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/cheats_page.h"
 
-#include <cstdio>
+#include <format>
 #include <span>
 
 #include "app/cheat_store.h"
 #include "infra/ascii.h"
-#include "ui/page_window.h"
 #include "app/page_description.h"
 #include "ui/draw_classic.h"
 #include "ui/menu_model.h"
@@ -19,23 +18,19 @@
 namespace mister::ui {
 
 static_assert(
-    static_cast<unsigned char>(0x1A) == 26 && static_cast<unsigned char>(0x1B) == 27,
+    glyph_code(Glyph::CheatOn) == 26 && glyph_code(Glyph::CheatOff) == 27,
     "req: the enabled/disabled glyph pair"
 );
 static_assert(
-    static_cast<unsigned>(Glyph::ArrowUp) == 17 && static_cast<unsigned>(Glyph::ArrowDown) == 16,
+    glyph_code(Glyph::ArrowUp) == 17 && glyph_code(Glyph::ArrowDown) == 16,
     "req: the first/last-row scroll arrows, shared with recents"
 );
 static_assert(
-    static_cast<unsigned>(Glyph::SubmenuArrow) == 0x16,
+    glyph_code(Glyph::SubmenuArrow) == 0x16,
     "req / req: the truncation continuation glyph"
 );
 
 namespace {
-
-std::string_view name_of_row(const app::CheatRow& r) noexcept {
-    return r.name;
-}
 
 constexpr std::string_view kGgSuffix = ".gg";
 
@@ -43,16 +38,12 @@ bool ends_with_gg(std::string_view s) noexcept {
     return infra::iends_with(s, kGgSuffix);
 }
 
-constexpr char kOnGlyph = static_cast<char>(0x1A);
-constexpr char kOffGlyph = static_cast<char>(0x1B);
-constexpr char kMoreGlyph = static_cast<char>(0x16);
-
 }
 
 std::string cheat_row_text(const app::CheatRow& row) {
     std::string s;
     s.push_back(' ');
-    s.push_back(row.enabled ? kOnGlyph : kOffGlyph);
+    s.push_back(glyph_char(row.enabled ? Glyph::CheatOn : Glyph::CheatOff));
     s.push_back(' ');
     s.append(row.name);
 
@@ -60,21 +51,19 @@ std::string cheat_row_text(const app::CheatRow& row) {
         s.resize(s.size() - kGgSuffix.size());
     if (s.size() > kClassicRowColumns) {
         s.resize(kClassicRowColumns);
-        s.push_back(kMoreGlyph);
+        s.push_back(glyph_char(Glyph::SubmenuArrow));
     }
     return s;
 }
 
 std::string CheatsPage::title_text() const {
     TASTY_SEAT_BODY(CheatsPage);
-    char b[32];
-    std::snprintf(b, sizeof(b), "Cheats (%s)", store_->loaded().text().c_str());
-    return b;
+    return std::format("Cheats ({})", store_->loaded().text().c_str());
 }
 
 CheatsPage::CheatsPage(app::CheatStore& store) noexcept
     : store_(&store),
-      view_(rows_, &name_of_row, ViewportPolicy{}) {}
+      view_(rows_, ViewportPolicy{}) {}
 
 void CheatsPage::refresh_() {
     TASTY_SEAT_BODY(CheatsPage);
@@ -116,7 +105,7 @@ bool CheatsPage::walk(PageWalk& out) const {
     const RowSpan<const app::CheatRow> cheat_rows{std::span<const app::CheatRow>{rows_}};
     const RowCount count = RowCount::of(rows_.size());
     const RowIndex end = row_after(count);
-    const app::HdWindow win = window_page(out.page, sel, count);
+    const app::HdWindow win = out.window(sel, count);
     const RowRange window = rows(win.first, win.count);
     const RowRange viewport = rows(first, height);
 

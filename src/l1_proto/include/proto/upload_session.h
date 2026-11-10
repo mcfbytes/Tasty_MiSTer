@@ -29,7 +29,7 @@ public:
 
     bool active() const noexcept { return bracket_.active(); }
 
-    WideIoIndex index() const noexcept { return WideIoIndex{bracket_.index()}; }
+    WideIoIndex index() const noexcept { return bracket_.index(); }
 
 private:
     explicit UploadSession(FioBracket&& b) noexcept : bracket_(std::move(b)) {}

@@ -14,13 +14,13 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
-#include "ui/script_kind.h"
 
 namespace mister::ui {
 
 class IBtOps;
 
 class IScriptPolicy;
+class ScriptRequest;
 
 class ScriptRunner {
     TASTY_SEAT_RESIDENT(Ui);
@@ -34,12 +34,7 @@ public:
     ScriptRunner(const ScriptRunner&) = delete;
     ScriptRunner& operator=(const ScriptRunner&) = delete;
 
-    [[nodiscard]] Ex<void> start(
-        ScriptKind kind,
-        std::string_view argv0,
-        bool bt_reset = false,
-        infra::OptRef<IBtOps> bt = {}
-    );
+    [[nodiscard]] Ex<void> start(const ScriptRequest& req, infra::OptRef<IBtOps> bt = {});
 
     [[nodiscard]] Ex<void> pump();
 

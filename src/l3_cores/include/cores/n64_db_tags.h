@@ -8,48 +8,14 @@
 #include <string_view>
 
 #include "infra/ascii.h"
+#include "infra/seat.h"
 
-#include "cores/n64_patch_table.h"
-#include "cores/n64_rom.h"
 #include "cores/n64_memory_type.h"
+#include "cores/n64_options.h"
+#include "cores/n64_patch_table.h"
+#include "cores/n64_system_type.h"
 
 namespace mister::cores::n64 {
-
-enum class SystemType : std::uint32_t {
-    Ntsc = 0,
-    Pal,
-    Unknown,
-};
-
-enum class Cic : std::uint32_t {
-    Nus6101 = 0,
-    Nus6102,
-    Nus7101,
-    Nus7102,
-    Nus6103,
-    Nus7103,
-    Nus6105,
-    Nus7105,
-    Nus6106,
-    Nus7106,
-    Nus8303,
-    Nus8401,
-    Nus5167,
-    NusDdus,
-    Nus5101,
-    Unknown,
-};
-
-enum class PadType : std::uint32_t {
-    Pad = 0,
-    Unplugged,
-    PadWithCpak,
-    PadWithRpak,
-    Snac,
-    PadWithTpak,
-    Keyboard,
-    Mouse,
-};
 
 enum class Tag : std::uint8_t {
     Eeprom512 = 0,
@@ -166,19 +132,87 @@ static_assert(
 
 inline constexpr std::string_view kTagSeparators = "| ";
 
+struct FeatureRow {
+    Tag tag;
+    StatusField field;
+    std::string_view info;
+    std::optional<PadType> pad;
+    bool from_header;
+};
+
+inline constexpr std::array<FeatureRow, 5> kFeatureRows{{
+    {Tag::Tpak, opt::kTpak, "\nTransfer Pak \x96", PadType::PadWithTpak, true},
+    {Tag::Cpak, opt::kCpak, "\nController Pak \x96", PadType::PadWithCpak, true},
+    {Tag::Rpak, opt::kRpak, "\nRumble Pak \x96", PadType::PadWithRpak, true},
+    {Tag::Rtc, opt::kRtc, "\nRTC \x96", std::nullopt, true},
+    {Tag::NoEpak, opt::kNoEpak, "\nDisable Exp. Pak \x96", std::nullopt, false},
+}};
+
+[[nodiscard]] constexpr const FeatureRow* feature_row(Tag t) noexcept {
+    for (std::size_t i = 0; i < kFeatureRows.size(); ++i)
+        if (kFeatureRows[i].tag == t)
+            return &kFeatureRows[i];
+    return nullptr;
+}
+
+namespace detail {
+
+[[nodiscard]] consteval bool feature_rows_are_one_per_tag() noexcept {
+    for (std::size_t i = 0; i < kFeatureRows.size(); ++i) {
+        const FeatureRow& r = kFeatureRows[i];
+        if (r.info.empty() || !feature_row(r.tag))
+            return false;
+        for (std::size_t j = i + 1; j < kFeatureRows.size(); ++j) {
+            const FeatureRow& o = kFeatureRows[j];
+            if (r.tag == o.tag || r.field.lo == o.field.lo)
+                return false;
+        }
+    }
+    return true;
+}
+
+}
+
+static_assert(
+    detail::feature_rows_are_one_per_tag(),
+    "a feature tag needs exactly one row, and one status field"
+);
+
+struct FeatureSet {
+    TASTY_SEAT_EXEMPT(component);
+    std::array<bool, kFeatureRows.size()> named{};
+
+    [[nodiscard]] constexpr bool has(Tag t) const noexcept {
+        const FeatureRow* row = feature_row(t);
+        return row && named[static_cast<std::size_t>(row - kFeatureRows.data())];
+    }
+
+    constexpr void add(Tag t) noexcept {
+        if (const FeatureRow* row = feature_row(t))
+            named[static_cast<std::size_t>(row - kFeatureRows.data())] = true;
+    }
+
+    friend constexpr bool operator==(const FeatureSet&, const FeatureSet&) = default;
+};
+
+struct UnknownTagCount {
+    TASTY_SEAT_EXEMPT(component);
+    std::uint16_t v = 0;
+
+    constexpr void add() noexcept { ++v; }
+
+    [[nodiscard]] constexpr bool none() const noexcept { return v == 0; }
+
+    friend constexpr bool operator==(UnknownTagCount, UnknownTagCount) = default;
+};
+
 struct DbTags {
     MemoryType save_type = MemoryType::None;
     SystemType system = SystemType::Unknown;
     Cic cic = Cic::Unknown;
     PadType preferred_pad = PadType::Pad;
-    bool no_epak = false;
-    bool cpak = false;
-    bool rpak = false;
-    bool tpak = false;
-    bool rtc = false;
-    bool found = false;
-    bool malformed = false;
-    std::uint16_t unknown_tags = 0;
+    FeatureSet features{};
+    UnknownTagCount unknown_tags{};
     PatchTable patches{};
 
     [[nodiscard]] constexpr bool complete() const noexcept {
@@ -204,6 +238,13 @@ constexpr void prefer_pad(DbTags& out, PadType p) noexcept {
 }
 
 constexpr void apply_tag(DbTags& out, Tag t) noexcept {
+
+    if (const FeatureRow* row = feature_row(t)) {
+        out.features.add(t);
+        if (const auto pad = row->pad)
+            prefer_pad(out, *pad);
+        return;
+    }
     switch (t) {
         case Tag::Eeprom512:
             out.save_type = MemoryType::Eeprom512;
@@ -220,23 +261,12 @@ constexpr void apply_tag(DbTags& out, Tag t) noexcept {
         case Tag::Flash128k:
             out.save_type = MemoryType::Flash128k;
             break;
+
         case Tag::NoEpak:
-            out.no_epak = true;
-            break;
         case Tag::Cpak:
-            out.cpak = true;
-            prefer_pad(out, PadType::PadWithCpak);
-            break;
         case Tag::Rpak:
-            out.rpak = true;
-            prefer_pad(out, PadType::PadWithRpak);
-            break;
         case Tag::Tpak:
-            out.tpak = true;
-            prefer_pad(out, PadType::PadWithTpak);
-            break;
         case Tag::Rtc:
-            out.rtc = true;
             break;
         case Tag::Ntsc:
             out.system = SystemType::Ntsc;
@@ -300,7 +330,7 @@ constexpr void apply_tag(DbTags& out, Tag t) noexcept {
             out.cic = Cic::Nus5101;
             break;
         case Tag::Unknown:
-            ++out.unknown_tags;
+            out.unknown_tags.add();
             break;
     }
 }
@@ -321,7 +351,7 @@ constexpr void apply_tag(DbTags& out, Tag t) noexcept {
     const std::size_t n = tag.size();
 
     auto scan_hex = [&]() -> std::optional<std::uint32_t> {
-        while (i < n && detail::ascii_space(static_cast<std::uint8_t>(tag[i])))
+        while (i < n && infra::ascii_space(tag[i]))
             ++i;
         std::size_t width = 0;
         bool negate = false;
@@ -400,40 +430,6 @@ constexpr void apply_tag(DbTags& out, Tag t) noexcept {
     if (out.system == SystemType::Unknown && out.cic != Cic::Unknown)
         out.system = SystemType::Ntsc;
     return out;
-}
-
-[[nodiscard]] constexpr std::string_view system_text(SystemType v) noexcept {
-    switch (v) {
-        case SystemType::Ntsc:
-            return "NTSC";
-        case SystemType::Pal:
-            return "PAL";
-        case SystemType::Unknown:
-            break;
-    }
-    return "Unknown";
-}
-
-[[nodiscard]] constexpr std::string_view cic_text(Cic v) noexcept {
-    constexpr std::array<std::string_view, 15> kNames = {
-        "6101",
-        "6102",
-        "7101",
-        "7102",
-        "6103",
-        "7103",
-        "6105",
-        "7105",
-        "6106",
-        "7106",
-        "8303",
-        "8401",
-        "5167",
-        "DDUS",
-        "5101",
-    };
-    const auto i = static_cast<std::size_t>(v);
-    return i < kNames.size() ? kNames[i] : std::string_view{"Unknown"};
 }
 
 }

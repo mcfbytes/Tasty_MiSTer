@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -44,6 +45,12 @@ public:
         std::span<const std::uint8_t> bytes{};
     };
 
+    struct ActShape {
+        WindowCount windows{};
+        FileSize bytes{};
+        BracketCount brackets{};
+    };
+
     struct Stats {
         std::uint32_t acts = 0;
         std::uint32_t windows = 0;
@@ -71,11 +78,7 @@ public:
         return 3u + (bytes == 0 ? 1u : (bytes + piece_bytes - 1u) / piece_bytes);
     }
 
-    [[nodiscard]] bool fits(
-        std::size_t windows,
-        std::size_t bytes,
-        std::size_t brackets
-    ) const noexcept;
+    [[nodiscard]] bool fits(ActShape act) const noexcept;
 
     [[nodiscard]] std::size_t bracket_windows(std::size_t bytes) const noexcept;
 
@@ -85,9 +88,9 @@ public:
 
     [[nodiscard]] Ex<void> append_command(std::span<const std::uint16_t> words);
 
-    std::uint32_t drain(std::uint32_t budget_words) noexcept;
+    [[nodiscard]] FioWordCount drain(FioWordCount budget_words) noexcept;
 
-    std::uint32_t flush() noexcept;
+    [[nodiscard]] FioWordCount flush() noexcept;
 
     void abandon() noexcept;
 
@@ -124,8 +127,8 @@ private:
     struct Emitter {
         TASTY_SEAT_RESIDENT(RT);
         using Result = Ex<void>;
-        hal::ISpiTransport* link;
-        const std::uint8_t* slab;
+        hal::ISpiTransport& link;
+        std::span<const std::uint8_t, kSlabBytes> slab;
         WideIoIndex latched{};
         std::optional<DownloadSession> open{};
         [[nodiscard]] Ex<void> on(const FioWindow::Index& i) noexcept;
@@ -163,17 +166,21 @@ private:
     [[nodiscard]] std::uint32_t cost_(const FioWindow& w) const noexcept;
     void abandon_() noexcept;
     void reset_abandon_() noexcept;
+
+    [[nodiscard]] ActShape shape_of(std::span<const Bracket> act) const noexcept;
+
+    [[nodiscard]] std::size_t piece_bytes() const noexcept;
     [[nodiscard]] Ex<void> place_(std::span<const Bracket> act);
     void restart_if_idle_() noexcept;
 
-    hal::ISpiTransport* link_;
+    hal::ISpiTransport& link_;
     std::uint32_t piece_words_;
     std::array<std::uint8_t, kSlabBytes> slab_{};
     std::array<FioWindow, kWindows> q_{};
     std::size_t head_ = 0;
     std::size_t size_ = 0;
     std::size_t slab_used_ = 0;
-    Emitter wire_{link_, slab_.data()};
+    Emitter wire_{link_, std::span<const std::uint8_t, kSlabBytes>(slab_)};
     Stats stats_{};
     ResetTerms terms_ = ResetTerms::framework();
     bool held_ = false;
@@ -206,8 +213,7 @@ consteval bool load_budget_fits_every_board() {
     return hal::every_measured(&hal::BoardProfile::timing, [](const hal::LinkTiming& g) consteval {
         const auto t = hal::LinkTimingValues::measured(g);
         return t.load_budget_words >= t.round_budget_words
-            && std::chrono::nanoseconds{std::uint64_t{t.load_budget_words} * t.word_ns}
-            <= hal::kLoadWire;
+            && t.word_ns * t.load_budget_words <= hal::kLoadWire;
     });
 }
 
@@ -220,8 +226,7 @@ consteval bool fio_budget_fits_every_board() {
     return hal::every_measured(&hal::BoardProfile::timing, [](const hal::LinkTiming& g) consteval {
         const auto t = hal::LinkTimingValues::measured(g);
         return 1 + SpiFioQueue::kPieceWords <= t.round_budget_words
-            && hal::round_cost_ns(t.word_ns, t.base_round_ns, t.sleep_ns, t.round_budget_words)
-            < static_cast<std::uint64_t>(reactor::kTickNs);
+            && t.round_cost(t.round_budget_words) < std::chrono::nanoseconds{reactor::kTickNs};
     });
 }
 

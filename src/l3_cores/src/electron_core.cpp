@@ -1,32 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/electron_core.h"
 #include "cores/core_adopt.h"
+#include "infra/ascii.h"
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cstring>
-#include <utility>
 
 #include "svc/gzip_inflate.h"
 
 namespace mister::cores {
-
-namespace {
-
-bool iequal(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const auto ca = static_cast<unsigned char>(a[i]);
-        const auto cb = static_cast<unsigned char>(b[i]);
-        if (std::tolower(ca) != std::tolower(cb))
-            return false;
-    }
-    return true;
-}
-
-}
 
 Ex<void> ElectronCore::do_adopt(const CoreAdopt&) {
 
@@ -40,7 +23,7 @@ void ElectronCore::on_set_pending_file_ext(std::string_view ext) noexcept {
 Ex<void> ElectronCore::on_file_tx(IoIndex index, std::span<const std::uint8_t> bytes) {
     bytes_sent_ = 0;
 
-    if (iequal(ext_.view(), ".UEF"))
+    if (infra::ieq(ext_.view(), ".UEF"))
         return tx_uef_(index, bytes);
     return tx_raw_(index, bytes);
 }
@@ -50,15 +33,8 @@ Ex<std::span<const std::uint8_t>> ElectronCore::materialize_(std::span<const std
     if (total < 2)
         return std::span<const std::uint8_t>{};
 
-    if (bytes[0] == 0x1F && bytes[1] == 0x8B) {
-        auto inflated = svc::inflate_gzip(bytes, kMaxImageBytes);
-        if (!inflated)
-            return std::unexpected(inflated.error());
-        if (!inflated->ok)
-            return std::span<const std::uint8_t>{};
-        image_ = std::move(inflated->data);
-        return std::span<const std::uint8_t>{image_};
-    }
+    if (svc::GzipInflater::is_gzip(bytes))
+        return std::span<const std::uint8_t>{};
 
     if (total > kMaxImageBytes)
         return std::span<const std::uint8_t>{};
@@ -68,7 +44,11 @@ Ex<std::span<const std::uint8_t>> ElectronCore::materialize_(std::span<const std
 Ex<void> ElectronCore::tx_uef_(IoIndex index, std::span<const std::uint8_t> bytes) {
     proto::SessionParams params{};
     params.ext = ext_.view();
-    auto session = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{index.v}, params);
+    auto session = proto::ImageBracket::open(
+        image_sink(),
+        proto::WideIoIndex::of(index, 0),
+        params
+    );
     if (!session)
         return std::unexpected(session.error());
     last_index_ = index;
@@ -96,7 +76,7 @@ Ex<void> ElectronCore::tx_uef_(IoIndex index, std::span<const std::uint8_t> byte
             for (unsigned bit = 0; bit < 8; ++bit) {
                 val = static_cast<std::uint8_t>(val << 1);
                 val = static_cast<std::uint8_t>(
-                    val | uef::bit_at(image, cache, ((addr + p) << 3) + bit)
+                    val | uef::bit_at(image, cache, uef::TapeBit{((addr + p) << 3) + bit})
                 );
             }
             buf_[p] = val;
@@ -113,7 +93,11 @@ Ex<void> ElectronCore::tx_raw_(IoIndex index, std::span<const std::uint8_t> byte
     proto::SessionParams params{};
     params.ext = ext_.view();
 
-    auto session = proto::ImageBracket::open(image_sink(), proto::WideIoIndex{index.v}, params);
+    auto session = proto::ImageBracket::open(
+        image_sink(),
+        proto::WideIoIndex::of(index, 0),
+        params
+    );
     if (!session)
         return std::unexpected(session.error());
     last_index_ = index;

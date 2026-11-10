@@ -2,7 +2,7 @@ add_library(mister_boards STATIC
   src/agilex_5/agilex5_bridges.cpp
   src/agilex_5/agilex5_programmer.cpp
   src/cyclone_v/cyclone_v_bridges.cpp
-  src/cyclone_v/cyclone_v_handoff.cpp
+  src/cyclone_v/cyclone_v_uboot_handoff_page.cpp
   src/cyclone_v/cyclone_v_programmer.cpp
   src/refusing_link_port.cpp
   src/spi_sbc/spi_sbc_bridges.cpp
@@ -19,7 +19,7 @@ tasty_add_header_checks(tasty_boards_header_checks LIB mister_boards HEADERS
   boards/agilex_5/agilex5_bridges.h
   boards/agilex_5/agilex5_programmer.h
   boards/cyclone_v/cyclone_v_bridges.h
-  boards/cyclone_v/cyclone_v_handoff.h
+  boards/cyclone_v/cyclone_v_uboot_handoff_page.h
   boards/cyclone_v/cyclone_v_programmer.h
   boards/cyclone_v/cyclone_v_windows.h
   boards/refusing_link_port.h

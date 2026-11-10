@@ -23,9 +23,9 @@ constexpr void to_json(infra::JsonOut& o, const reactor::RoundTrace::Round& r) n
     o.field("t0", r.start.time_since_epoch().count());
     o.field("t1", r.end.time_since_epoch().count());
     o.field("wk", r.wake.count());
-    o.field("sc", r.cause.seg);
-    o.field("si", r.cause.index);
-    o.field("lk", r.cause.lifecycle);
+    o.field("sc", r.blame.seg);
+    o.field("si", r.blame.index);
+    o.field("lk", r.blame.lifecycle_marks);
     o.field("ml", r.marks_lost);
     o.begin_array("m");
     for (const reactor::RoundTrace::Mark& m : r.marks) {
@@ -42,9 +42,9 @@ constexpr void to_json(infra::JsonOut& o, const reactor::RoundTrace::Round& r) n
             continue;
         o.elem(l.start.time_since_epoch().count());
         o.elem(l.took.count());
-        o.elem(infra::ordinal(l.cause.seg));
-        o.elem(l.cause.index);
-        o.elem(l.cause.lifecycle);
+        o.elem(infra::ordinal(l.blame.seg));
+        o.elem(l.blame.index);
+        o.elem(l.blame.lifecycle_marks);
     }
     o.end_array();
 }

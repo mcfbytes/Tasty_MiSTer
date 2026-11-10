@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/adv7513_reg_write.h"
+#include "svc/adv7513_bus.h"
 #include "svc/adv7513_init_options.h"
 #include "svc/modeline.h"
 
@@ -116,8 +117,20 @@ template <std::size_t N>
     return table;
 }
 
-constexpr std::uint8_t int0_value(const InitOptions& o) noexcept {
-    return o.has_hdmi_int ? kInt0HdmiBits : 0x00;
+template <std::size_t N>
+[[nodiscard]] constexpr std::array<RegWrite, N> patch_row(
+    std::array<RegWrite, N> table,
+    RegWrite row
+) {
+    for (RegWrite& w : table) {
+        if (w.reg == row.reg)
+            w = row;
+    }
+    return table;
+}
+
+constexpr IntBits int0_value(const InitOptions& o) noexcept {
+    return o.has_hdmi_int ? IntBits::hotplug() : IntBits{};
 }
 
 constexpr std::uint8_t color_space_value(const InitOptions& o) noexcept {
@@ -149,7 +162,7 @@ std::array<RegWrite, kInitTableSize> init_table(const InitOptions& o) {
         kRegGameModeHdr,
         static_cast<std::uint8_t>(o.hdmi_game_mode ? kGameModeHdrOn : 0x00u)
     );
-    rows = patch_row(std::move(rows), kRegIntEnable, int0_value(o));
+    rows = patch_row(std::move(rows), int0_value(o).write_row(kRegIntEnable));
     return rows;
 }
 

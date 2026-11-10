@@ -6,6 +6,7 @@
 #include <functional>
 #include <string_view>
 
+#include "app/cmd_line.h"
 #include "app/cmd_verb_sink.h"
 #include "infra/fixed_str.h"
 #include "infra/error.h"
@@ -16,11 +17,6 @@
 namespace mister::app {
 
 inline constexpr const char* kCmdFifoPath = "/dev/MiSTer_cmd";
-inline constexpr std::size_t kCmdLineMax = 1024;
-
-enum class CmdLineOutcome : std::uint8_t { Routed, Unrouted, Unrecognised };
-
-[[nodiscard]] CmdLineOutcome deliver_cmd_line(std::string_view line, ICmdVerbSink& sink) noexcept;
 
 struct CmdFifoStats {
     std::uint32_t reads = 0;

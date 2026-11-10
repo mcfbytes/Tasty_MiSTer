@@ -28,13 +28,13 @@ constexpr std::size_t kWorkBytes = LZO1X_1_MEM_COMPRESS;
 
 }
 
-Ex<void> CscdCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
+Ex<void> CscdCodec::begin(PictureSize size) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
     end();
-    if (w == 0 || h == 0 || lzo_init() != LZO_E_OK)
+    if (size.empty() || lzo_init() != LZO_E_OK)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     constexpr std::size_t kStripePlanes = 2;
-    const std::size_t pic = picture_bytes(w, h);
+    const std::size_t pic = picture_bytes(size);
     const std::size_t total = up(pic) * kStripePlanes + up(kWorkBytes) + up(dup_cap(pic));
     if (auto r = arena_.reserve(1, total); !r)
         return r;
@@ -43,8 +43,7 @@ Ex<void> CscdCodec::begin(std::uint16_t w, std::uint16_t h) noexcept {
     delta_ = stripe.subspan(up(pic), up(pic));
     work_ = stripe.subspan(kStripePlanes * up(pic), up(kWorkBytes));
     dup_ = stripe.subspan(kStripePlanes * up(pic) + up(kWorkBytes), up(dup_cap(pic)));
-    width_ = w;
-    height_ = h;
+    size_ = size;
 
     lzo_uint n = 0;
     std::byte* tmp = delta_.data();
@@ -72,7 +71,7 @@ void CscdCodec::end() noexcept {
     arena_.release();
     prev_ = delta_ = work_ = dup_ = {};
     dup_len_ = 0;
-    width_ = height_ = 0;
+    size_ = PictureSize{};
 }
 
 std::span<const std::byte> CscdCodec::dup() noexcept {
@@ -86,14 +85,12 @@ std::span<const std::byte> CscdCodec::encode(
     std::span<std::byte> out
 ) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
-    if (!open()
-        || !rgb.covers(rgb_row_of(width_), PictureRows{height_})
-        || out.size() < payload_bound(width_, height_))
+    const PicturePixels width = size_.width;
+    if (!open() || !rgb.covers(rgb_row_of(width), size_.rows) || out.size() < payload_bound(size_))
         return {};
-    const RowBytes row{row_bytes(width_)};
-    const std::size_t w = width_;
-    const RowBytes line = rgb_row_of(w);
-    const PictureRows height{height_};
+    const RowBytes row{row_bytes(width)};
+    const RowBytes line = rgb_row_of(width);
+    const PictureRows height = size_.rows;
     auto* const prev_bytes = infra::byte_cast<std::uint8_t>(prev_).data();
     auto* const delta_bytes = infra::byte_cast<std::uint8_t>(delta_).data();
     for_each_row(height, [&](PictureRow y) {
@@ -101,8 +98,8 @@ std::span<const std::byte> CscdCodec::encode(
         const std::size_t at = row_start(row, y.flipped_in(height));
         auto* p = prev_bytes + at;
         auto* d = delta_bytes + at;
-        for (std::size_t x = 0; x < w; ++x) {
-            const std::size_t px = kRgbPixelBytes * x;
+        std::size_t px = 0;
+        for (PicturePixels x{}; x < width; x += PicturePixels{1}) {
             const std::uint8_t b = s[px + 2], g = s[px + 1], r = s[px];
             d[px] = static_cast<std::uint8_t>(b - p[px]);
             d[px + 1] = static_cast<std::uint8_t>(g - p[px + 1]);
@@ -110,67 +107,42 @@ std::span<const std::byte> CscdCodec::encode(
             p[px] = b;
             p[px + 1] = g;
             p[px + 2] = r;
+            px += kRgbPixelBytes;
         }
     });
-    return out.first(pack_(key ? prev_.data() : delta_.data(), key, out));
+    const std::size_t picture = picture_bytes(size_);
+    return pack_(key ? prev_.first(picture) : delta_.first(picture), key, out);
 }
 
 std::span<const std::byte> CscdCodec::rekey(std::span<std::byte> out) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
-    if (!open() || out.size() < payload_bound(width_, height_))
+    if (!open() || out.size() < payload_bound(size_))
         return {};
-    return out.first(pack_(prev_.data(), true, out));
+    return pack_(prev_.first(picture_bytes(size_)), true, out);
 }
 
-std::size_t CscdCodec::pack_(const std::byte* src, bool key, std::span<std::byte> out) noexcept {
+std::span<const std::byte> CscdCodec::pack_(
+    std::span<const std::byte> src,
+    bool key,
+    std::span<std::byte> out
+) noexcept {
     TASTY_SEAT_BODY(CscdCodec);
+    const std::size_t picture = picture_bytes(size_);
+    if (src.size() != picture || out.size() < payload_bound(size_))
+        return {};
     out[0] = key ? std::byte{kKeyBit} : std::byte{0};
     out[1] = std::byte{0};
     lzo_uint n = 0;
-    const std::size_t pic = picture_bytes(width_, height_);
     if (lzo1x_1_compress(
-            infra::byte_cast<const std::uint8_t>(std::span<const std::byte>(src, pic)).data(),
-            pic,
+            infra::byte_cast<const std::uint8_t>(src).data(),
+            src.size(),
             infra::byte_cast<std::uint8_t>(out).data() + kHeadBytes,
             &n,
             work_.data()
         )
         != LZO_E_OK)
-        return 0;
-    return kHeadBytes + n;
-}
-
-void CscdCodec::half_scale(RgbRows src, std::uint16_t src_w, std::span<std::byte> dst) noexcept {
-    constexpr std::size_t kHalf = 2;
-    constexpr unsigned kBoxPixels = 4;
-    constexpr unsigned kBoxShift = 2;
-    constexpr unsigned kBoxRound = kBoxPixels / 2;
-    const std::size_t w = src_w;
-    const std::size_t ow = w / kHalf;
-    const PictureRows oh = src.rows.halved();
-    const RowBytes out_row = rgb_row_of(ow);
-    auto* const out_bytes = infra::byte_cast<std::uint8_t>(dst.first(rows_span(out_row, oh)))
-                                .data();
-    const RowBytes row = rgb_row_of(w);
-    for_each_row(oh, [&](PictureRow y) {
-        const auto* a = infra::byte_cast<const std::uint8_t>(row.head(src.from_row(y.doubled())))
-                            .data();
-        const auto* b = infra::byte_cast<const std::uint8_t>(
-                            src.from_row(y.doubled() + PictureRows{1})
-        )
-                            .data();
-        auto* o = out_bytes + row_start(out_row, y);
-        for (std::size_t x = 0; x < ow * kRgbPixelBytes; ++x) {
-            const std::size_t c = (x / kRgbPixelBytes) * (kHalf * kRgbPixelBytes)
-                + x % kRgbPixelBytes;
-            const unsigned sum = kBoxRound
-                + a[c]
-                + a[c + kRgbPixelBytes]
-                + b[c]
-                + b[c + kRgbPixelBytes];
-            o[x] = static_cast<std::uint8_t>(sum >> kBoxShift);
-        }
-    });
+        return {};
+    return out.first(kHeadBytes + n);
 }
 
 }

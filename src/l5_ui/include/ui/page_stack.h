@@ -6,9 +6,9 @@
 #include <memory>
 #include <vector>
 
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/page.h"
-#include "ui/types.h"
 
 namespace mister::ui {
 
@@ -20,9 +20,13 @@ public:
 
     std::size_t depth() const noexcept { return pages_.size(); }
 
-    Page* top() noexcept { return pages_.empty() ? nullptr : pages_.back().get(); }
+    [[nodiscard]] StackDepth top_level() const noexcept {
+        return StackDepth::of(pages_.size() - 1);
+    }
 
-    const Page* top() const noexcept { return pages_.empty() ? nullptr : pages_.back().get(); }
+    infra::OptRef<Page> top() noexcept { return infra::opt_ref_of(top_()); }
+
+    infra::OptRef<const Page> top() const noexcept { return infra::opt_ref_of<const Page>(top_()); }
 
     PageId top_id() const noexcept { return pages_.empty() ? PageId::None : pages_.back()->id(); }
 
@@ -30,33 +34,27 @@ public:
         return pages_.empty() ? PageId::None : pages_.front()->id();
     }
 
-    const Page* bottom() const noexcept { return pages_.empty() ? nullptr : pages_.front().get(); }
+    infra::OptRef<const Page> bottom() const noexcept {
+        return infra::opt_ref_of<const Page>(pages_.empty() ? nullptr : pages_.front().get());
+    }
 
     static constexpr std::size_t kBeneathTopFromEnd = 2;
 
-    Page* beneath() noexcept {
-        return pages_.size() >= kBeneathTopFromEnd
-            ? pages_[pages_.size() - kBeneathTopFromEnd].get()
-            : nullptr;
-    }
+    infra::OptRef<Page> beneath() noexcept { return infra::opt_ref_of(beneath_()); }
 
-    const Page* beneath() const noexcept {
-        return pages_.size() >= kBeneathTopFromEnd
-            ? pages_[pages_.size() - kBeneathTopFromEnd].get()
-            : nullptr;
+    infra::OptRef<const Page> beneath() const noexcept {
+        return infra::opt_ref_of<const Page>(beneath_());
     }
 
     PageId beneath_top_id() const noexcept {
-        const Page* under = beneath();
-        return under == nullptr ? PageId::None : under->id();
+        const auto under = beneath();
+        return under.has_value() ? under->id() : PageId::None;
     }
 
     void push(std::unique_ptr<Page> p);
-    ItemId pop();
+    void pop();
     void replace(std::unique_ptr<Page> p);
     void clear() noexcept;
-
-    void set_pending_focus(ItemId f) noexcept { pending_focus_ = f; }
 
     std::uint32_t page_refusals() const noexcept;
 
@@ -66,11 +64,28 @@ public:
 
     bool any_takes_focus() const noexcept;
 
-    const Page* focus_top() const noexcept;
+    infra::OptRef<const Page> focus_top() const noexcept;
 
 private:
+    [[nodiscard]] Page* top_() noexcept { return pages_.empty() ? nullptr : pages_.back().get(); }
+
+    [[nodiscard]] const Page* top_() const noexcept {
+        return pages_.empty() ? nullptr : pages_.back().get();
+    }
+
+    [[nodiscard]] Page* beneath_() noexcept {
+        return pages_.size() >= kBeneathTopFromEnd
+            ? pages_[pages_.size() - kBeneathTopFromEnd].get()
+            : nullptr;
+    }
+
+    [[nodiscard]] const Page* beneath_() const noexcept {
+        return pages_.size() >= kBeneathTopFromEnd
+            ? pages_[pages_.size() - kBeneathTopFromEnd].get()
+            : nullptr;
+    }
+
     std::vector<std::unique_ptr<Page>> pages_;
-    ItemId pending_focus_ = kNoItem;
     std::uint32_t retired_refusals_ = 0;
 };
 

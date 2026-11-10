@@ -6,25 +6,30 @@ add_library(mister_ui STATIC
   src/config_slots_page.cpp
   src/confirm_page.cpp
   src/core_cell_mirror.cpp
+  src/core_options_page.cpp
   src/core_pick_host.cpp
   src/core_settings_page.cpp
+  src/cycle_value.cpp
   src/dips_page.cpp
   src/draw_classic.cpp
   src/event_trace.cpp
+  src/fb_terminal_host.cpp
   src/game_slot.cpp
   src/hd_key_remap.cpp
   src/hd_label.cpp
   src/info_page.cpp
   src/joymap_page.cpp
+  src/key_decoder.cpp
   src/list_view.cpp
   src/menu_core_binding.cpp
   src/menu_model.cpp
   src/navigator.cpp
   src/option_items.cpp
-  src/options_page.cpp
+  src/options_model.cpp
   src/osd_renderer.cpp
-  src/page.cpp
   src/page_deadlines.cpp
+  src/page_stack.cpp
+  src/page_walk.cpp
   src/progress_page.cpp
   src/script_policy.cpp
   src/script_pick_host.cpp
@@ -33,6 +38,7 @@ add_library(mister_ui STATIC
   src/sdram_latch.cpp
   src/show_edge_latch.cpp
   src/slot_pick_host.cpp
+  src/status_view.cpp
   src/system_page.cpp
   src/transfer_tracker.cpp
   src/ui_round.cpp
@@ -61,6 +67,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/core_pick_host.h
   ui/core_options_page.h
   ui/core_settings_page.h
+  ui/cycle_value.h
   ui/cheats_page.h
   ui/dips_page.h
   ui/draw_classic.h
@@ -79,6 +86,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/menu_model.h
   ui/navigator.h
   ui/option_host.h
+  ui/option_item.h
   ui/option_items/addon_item.h
   ui/option_items/cfg_ver_item.h
   ui/option_items/cheats_item.h
@@ -99,7 +107,6 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/option_items/unknown_item.h
   ui/option_items/version_item.h
   ui/options_model.h
-  ui/options_page.h
   ui/osd_renderer.h
   ui/osd_style_preference.h
   ui/osd_visible_file.h
@@ -129,6 +136,7 @@ tasty_add_header_checks(tasty_ui_header_checks LIB mister_ui HEADERS
   ui/status_bar_facts.h
   ui/status_view.h
   ui/system_facts.h
+  ui/reboot_hold.h
   ui/system_page.h
   ui/transfer_tracker.h
   ui/transition.h

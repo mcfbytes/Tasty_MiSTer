@@ -13,20 +13,6 @@
 
 namespace mister::cores {
 
-inline constexpr CoreProfile kMenuProfile{
-    .kind = CoreKind::Menu,
-    .name = "MENU",
-    .rbf = "",
-    .services = {},
-    .slots = {},
-    .boot_assets = {},
-    .start = StartRule::None,
-    .signatures = {},
-    .is_front_end = true,
-    .tasty_playable = true,
-    .undeclared_start_mount = StartMount::Unmodelled,
-};
-
 class GenericCore final : public Core {
     TASTY_SEAT_RESIDENT(RT);
 

@@ -32,7 +32,7 @@ Ex<void> AxiPadEncoder::stick(UioOp opcode, std::uint8_t index, StickPos pos) {
     TASTY_SEAT_BODY(AxiPadEncoder);
     if (!block_.honours(opcode))
         return otherwise_.stick(opcode, index, pos);
-    const std::uint32_t word = PadLevels::stick_word(pos);
+    const std::uint32_t word = pos.packed();
     const PadLevels::Slot s = PadLevels::level_of(opcode, index);
     if (PadLevels::is_level(s))
         return level_(s, word);

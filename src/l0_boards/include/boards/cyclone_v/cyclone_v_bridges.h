@@ -1,19 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <span>
 
 #include "infra/error.h"
+#include "hal/board_windows.h"
 #include "hal/bridge_sequencer.h"
 #include "hal/register_window.h"
-#include "hal/window_decl.h"
+#include "hal/taken_window.h"
 #include "infra/seat.h"
-
-namespace mister::hal {
-class BoardWindows;
-}
 
 namespace mister::boards::cyclone_v {
 
@@ -80,34 +76,24 @@ class Bridges final : public hal::IBridgeSequencer {
 public:
     [[nodiscard]] static Ex<Bridges> open(hal::BoardWindows& windows);
 
-    static Bridges over(
-        hal::RegisterWindow<SdrCtl> sdr,
-        hal::RegisterWindow<RstMgr> rst,
-        hal::RegisterWindow<SysMgr> sys,
-        hal::RegisterWindow<Nic301> nic
-    );
-
     [[nodiscard]] Ex<void> pre_program() override;
     [[nodiscard]] Ex<void> post_program() override;
 
     [[nodiscard]] Ex<void> request_board_reset() override;
 
 private:
-    Bridges() = default;
     Bridges(
-        hal::RegisterWindow<SdrCtl> sdr,
-        hal::RegisterWindow<RstMgr> rst,
-        hal::RegisterWindow<SysMgr> sys,
-        hal::RegisterWindow<Nic301> nic
+        hal::TakenWindow<SdrCtl> sdr,
+        hal::TakenWindow<RstMgr> rst,
+        hal::TakenWindow<SysMgr> sys,
+        hal::TakenWindow<Nic301> nic
     );
     void apply(std::span<const BridgeStep> steps);
 
-    hal::RegisterWindow<SdrCtl> sdr_;
-    hal::RegisterWindow<RstMgr> rst_;
-    hal::RegisterWindow<SysMgr> sys_;
-    hal::RegisterWindow<Nic301> nic_;
-
-    std::array<hal::WindowClaim, 4> claims_{};
+    hal::TakenWindow<SdrCtl> sdr_;
+    hal::TakenWindow<RstMgr> rst_;
+    hal::TakenWindow<SysMgr> sys_;
+    hal::TakenWindow<Nic301> nic_;
 };
 
 }

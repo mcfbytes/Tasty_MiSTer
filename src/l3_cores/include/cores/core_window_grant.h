@@ -23,15 +23,13 @@ struct CoreWindowGrant {
 
     std::array<Row, kMaxCoreWindows> rows{};
 
-    [[nodiscard]] ICoreWindow* named(std::string_view name) const noexcept {
+    [[nodiscard]] infra::OptRef<ICoreWindow> named(std::string_view name) const noexcept {
         for (const Row& row : rows) {
             if (row.name.empty() || row.name != name)
                 continue;
-            if (!row.window)
-                return nullptr;
-            return &*row.window;
+            return row.window;
         }
-        return nullptr;
+        return {};
     }
 
     [[nodiscard]] std::size_t count() const noexcept {
@@ -41,11 +39,13 @@ struct CoreWindowGrant {
         return n;
     }
 
-    [[nodiscard]] static CoreWindowGrant single(std::string_view name, ICoreWindow* w) noexcept {
+    [[nodiscard]] static CoreWindowGrant single(
+        std::string_view name,
+        infra::OptRef<ICoreWindow> w
+    ) noexcept {
         CoreWindowGrant g;
         g.rows[0].name = name;
-        if (w != nullptr)
-            g.rows[0].window = infra::OptRef<ICoreWindow>{*w};
+        g.rows[0].window = w;
         return g;
     }
 };

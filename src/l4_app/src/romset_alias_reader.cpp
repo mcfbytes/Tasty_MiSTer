@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "cores/file_slot.h"
-#include "cores/neogeo_alias_source.h"
 #include "infra/byte_view.h"
 #include "svc/read_bounded.h"
 #include "svc/vfs.h"
@@ -32,16 +31,11 @@ std::optional<std::string> RomsetAliasReader::read_prefix(
     return std::string(infra::as_text(std::span(*bytes)));
 }
 
-RomsetAlias RomsetAliasReader::query(
-    std::string_view dir,
-    std::string_view home,
-    std::string_view entry,
-    std::string_view key
-) {
+RomsetAlias RomsetAliasReader::query(BrowseDirs dirs, EntryLookup entry) {
     TASTY_SEAT_BODY(RomsetAliasReader);
     if (!source_)
         return {};
-    return source_->query(*this, dir, home, entry, key);
+    return source_->query(*this, dirs, entry);
 }
 
 }

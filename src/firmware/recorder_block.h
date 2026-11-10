@@ -23,6 +23,7 @@
 #include "boot_parts.h"
 #include "device_block.h"
 #include "hal/scaler_buffers.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "os/nanosleep_delay.h"
@@ -53,17 +54,19 @@ private:
     );
 
 public:
-    app::RecControlCell rec_control_{};
+    xthread::WakeFlag capture_wake_{};
+    app::RecControlChannel rec_control_{capture_wake_, xthread::Polled{}};
     app::RecorderStatusCell rec_status_{};
     app::EncodeStatusCell encode_status_{};
     app::RecWriteStatusCell rec_write_status_{};
-    xthread::WakeFlag capture_wake_{};
     xthread::WakeFlag encode_wake_{};
     xthread::WakeFlag rec_write_wake_{};
     app::RawFrameChannel raw_frames_{encode_wake_, xthread::Polled{}};
-    app::SidecarRing sidecar_ring_{};
+
+    app::SidecarRing sidecar_ring_{rec_write_wake_};
     app::AviWriteStatusCell avi_write_status_{};
     app::ChunkChannel chunks_{rec_write_wake_, xthread::Polled{}};
+
     os::ThreadCpuClock encode_cpu_{};
     os::NanosleepDelay encode_delay_{};
     os::NanosleepDelay capture_delay_{};

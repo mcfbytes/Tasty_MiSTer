@@ -3,7 +3,6 @@
 
 #include <array>
 #include <cstdint>
-#include <span>
 
 #include "infra/error.h"
 #include "hal/types.h"
@@ -24,12 +23,14 @@ public:
     static constexpr unsigned kBits = StatusWord::kBits;
     static constexpr unsigned kWords = StatusWord::kWords;
 
+    [[nodiscard]] static constexpr bool holds(StatusBit bit) noexcept { return bit.v < kBits; }
+
     void write(const StatusEdit& edit) noexcept;
 
     void set_bit(StatusBit bit, bool value);
     bool get_bit(StatusBit bit) const;
 
-    void adopt(std::span<const std::uint16_t, kWords> words) noexcept;
+    void adopt(const StatusWord& word) noexcept;
 
     void fence_with(IResetFence* fence) noexcept { fence_ = infra::opt_ref_of(fence); }
 

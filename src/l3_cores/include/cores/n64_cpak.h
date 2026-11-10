@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <fcntl.h>
-#include <unistd.h>
-
 #include <array>
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -14,7 +10,6 @@
 #include "cores/n64_memory_type.h"
 #include "infra/endian.h"
 #include "infra/error.h"
-#include "infra/unique_fd.h"
 
 namespace mister::cores::n64::cpak {
 
@@ -137,29 +132,6 @@ constexpr void render(
     }
 }
 
-[[nodiscard]] inline Ex<Serial> random_serial() {
-    UniqueFd fd{::open("/dev/urandom", O_RDONLY | O_CLOEXEC)};
-    if (!fd.valid()) {
-        return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-    }
-    Serial out{};
-    std::size_t got = 0;
-    while (got < out.size()) {
-        const ssize_t n = ::read(fd.get(), out.data() + got, out.size() - got);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
-        }
-
-        if (n == 0) {
-            return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(got)}
-            );
-        }
-        got += static_cast<std::size_t>(n);
-    }
-    return out;
-}
+[[nodiscard]] Ex<Serial> random_serial();
 
 }

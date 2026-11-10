@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <string_view>
-
 #include "cores/romset_alias.h"
+#include "cores/romset_alias_source.h"
 
 namespace mister::app {
 
 using RomsetAlias = cores::RomsetAlias;
 
+using cores::alias_of;
+using cores::drops;
+
+using cores::BrowseDirs;
+using cores::EntryLookup;
+
 class IRomsetAliases {
 public:
     virtual ~IRomsetAliases() = default;
 
-    [[nodiscard]] virtual RomsetAlias query(
-        std::string_view dir,
-        std::string_view home,
-        std::string_view entry,
-        std::string_view key
-    ) = 0;
+    [[nodiscard]] virtual RomsetAlias query(BrowseDirs dirs, EntryLookup entry) = 0;
 
 protected:
     IRomsetAliases() = default;

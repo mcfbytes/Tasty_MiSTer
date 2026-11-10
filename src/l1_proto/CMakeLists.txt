@@ -8,20 +8,26 @@ add_library(mister_proto STATIC
   src/conf_str_caps.cpp
   src/core_session.cpp
   src/download_session.cpp
+  src/fio_bracket.cpp
+  src/upload_session.cpp
   src/frame_counter_read.cpp
-  src/image_sink.cpp
+  src/image_bracket.cpp
+  src/spi_image_sink.cpp
   src/item_table.cpp
-  src/joystick.cpp
+  src/joystick_port.cpp
   src/link.cpp
   src/link_ops.cpp
-  src/osd.cpp
+  src/osd_surface.cpp
+  src/osd_transport.cpp
   src/pad_levels.cpp
   src/ps2_keyboard.cpp
   src/ps2_mouse.cpp
+  src/ps2_wire.cpp
   src/rtc_image.cpp
   src/spi_ps2_decoder.cpp
   src/savestate_engine.cpp
-  src/savestate_primer.cpp
+  src/save_state_name.cpp
+  src/save_primer.cpp
   src/spi_block_decoder.cpp
   src/spi_block_poll.cpp
   src/spi_conf_str_decoder.cpp
@@ -49,6 +55,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/block_server.h
   proto/block_slots.h
   proto/disc_announce.h
+  proto/fixed_block_roles.h
   proto/late_answers.h
   proto/no_block_roles.h
   proto/conf_str.h
@@ -80,6 +87,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/image_source.h
   proto/irq_binding.h
   proto/item_probe.h
+  proto/item_rule.h
   proto/item_table.h
   proto/link_event.h
   proto/link_op.h
@@ -87,16 +95,18 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/decoder_row.h
   proto/session_live.h
   proto/link_router.h
-  proto/save_ask.h
-  proto/joystick.h
+  proto/save_kind.h
+  proto/joystick_port.h
   proto/link_pad_encoder.h
   proto/held_pad_encoder.h
   proto/pad_levels.h
   proto/frame_pad_encoder.h
+  proto/info_window.h
   proto/osd_surface.h
   proto/osd_target.h
   proto/osd_transport.h
   proto/ps2_command_port.h
+  proto/mouse_delta.h
   proto/ps2_keyboard.h
   proto/ps2_mouse.h
   proto/ps2_frame.h
@@ -111,8 +121,9 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/ps2_wire.h
   proto/save_request.h
   proto/save_state_decl.h
+  proto/save_state_name.h
   proto/savestate_engine.h
-  proto/savestate_primer.h
+  proto/save_primer.h
   proto/sd_request.h
   proto/sector_floor.h
   proto/session_params.h
@@ -152,7 +163,6 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/osd_opcodes.h
   proto/link_route.h
   proto/upload_session.h
-  proto/volume_cmd.h
   proto/rotation_dir.h
   proto/reset_edge.h
   proto/reset_fence.h
@@ -160,7 +170,7 @@ tasty_add_header_checks(tasty_proto_header_checks LIB mister_proto HEADERS
   proto/rtc_image.h
   proto/user_io/poll_shape.h
   proto/user_io/poll_reader.h
-  proto/user_io/rumble_poll.h
+  proto/user_io/rumble_motors.h
   proto/user_io/poll_params.h
 )
 

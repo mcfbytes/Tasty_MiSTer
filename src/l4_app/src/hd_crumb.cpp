@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/hd_crumb.h"
 
-#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <string>
 #include <string_view>
+
+#include "infra/utf8.h"
 
 namespace mister::app {
 namespace {
@@ -29,15 +30,10 @@ FixedStr<48, StrFit::Clip> hd_crumb(std::string_view core_name, std::string_view
         core_name = "CORE";
     std::string tail(kSeparator);
     tail += ascii_upper(title);
-    std::size_t keep = 0;
-    if (tail.size() < kCapacity) {
-        keep = std::min(core_name.size(), kCapacity - tail.size());
-        while (keep > 0
-               && keep < core_name.size()
-               && (static_cast<unsigned char>(core_name[keep]) & 0xC0u) == 0x80u)
-            --keep;
-    }
-    std::string text = ascii_upper(core_name.substr(0, keep));
+    std::string_view head;
+    if (tail.size() < kCapacity)
+        head = infra::utf8_prefix(core_name, kCapacity - tail.size());
+    std::string text = ascii_upper(head);
     text += tail;
     (void)out.assign(text);
     return out;

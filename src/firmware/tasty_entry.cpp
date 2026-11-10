@@ -49,7 +49,10 @@ int cmd_check(const mister::fw::TastyArgs& a) {
     auto vfs = mister::svc::Vfs::create_at("/");
     if (!vfs)
         return print_err(vfs.error(), "Vfs");
-    return mister::fw::tasty_check_movie(*vfs, a.movie.view(), a.rom.view());
+    return mister::fw::tasty_check_movie(
+        *vfs,
+        mister::fw::TastyFiles{.movie = a.movie.view(), .rom = a.rom.view()}
+    );
 }
 
 int cmd_rec_start_client(const mister::fw::TastyArgs& a) {
@@ -128,11 +131,12 @@ int mister::fw::run_tasty(std::span<const char* const> argv, std::optional<ArgvA
         std::fprintf(stderr, "tasty: %s\n", mister::fw::tasty_args_refusal(parsed.error().detail));
         return 1;
     }
-    if (!mister::fw::tasty_resolve_args(*parsed)) {
+    auto resolved = mister::fw::tasty_resolve_args(*parsed);
+    if (!resolved) {
         std::fprintf(stderr, "tasty: cannot resolve paths\n");
         return 1;
     }
-    const mister::fw::TastyArgs& a = *parsed;
+    const mister::fw::TastyArgs& a = *resolved;
     switch (a.verb) {
         case mister::fw::TastyVerb::Help:
             mister::fw::tasty_print_usage(stdout);

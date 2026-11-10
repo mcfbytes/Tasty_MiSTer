@@ -2,17 +2,20 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 #include "cores/fill_run.h"
 #include "cores/rom_bytes.h"
 #include "cores/types.h"
 #include "hal/types.h"
+#include "proto/types.h"
 
 namespace mister::cores::mra {
 
 struct AssembledRom {
-    int index = 0;
+
+    std::optional<proto::WideIoIndex> index{};
     hal::FabricAddr address{};
     bool send = false;
 

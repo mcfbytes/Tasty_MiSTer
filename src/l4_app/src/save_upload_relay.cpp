@@ -18,10 +18,6 @@ namespace {
 
 }
 
-void SaveUploadRelay::install(std::unique_ptr<cores::ISaveServant> servant) noexcept {
-    io_.servant = std::move(servant);
-}
-
 bool SaveUploadRelay::order(const cores::SaveImage& image, std::string_view rel) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, A);
     if (image.size == 0 || rel.empty() || !rt_.order.rel.assign(rel)) {
@@ -60,9 +56,7 @@ void SaveUploadRelay::service_rt(std::uint32_t budget_words, bool fio_free) noex
 
 void SaveUploadRelay::forget() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, A);
-    do
-        ++rt_.gen;
-    while (rt_.gen == 0);
+    rt_.stamp = rt_.stamp.next_core();
     cut_();
     rt_.order.owed = false;
 
@@ -80,8 +74,8 @@ bool SaveUploadRelay::drained() const noexcept {
     return settled() && c.outbound == 0 && c.held_by_worker == 0;
 }
 
-std::uint32_t SaveUploadRelay::take_round_words() noexcept {
-    return std::exchange(rt_.round_words, 0u);
+proto::FioWordCount SaveUploadRelay::take_round_words() noexcept {
+    return proto::FioWordCount{std::exchange(rt_.round_words, 0u)};
 }
 
 void SaveUploadRelay::yield_to_reset() noexcept {
@@ -101,9 +95,7 @@ void SaveUploadRelay::cut_() noexcept {
     if (!rt_.pull_out)
         return;
     rt_.pull_out = false;
-    do
-        ++rt_.epoch;
-    while (rt_.epoch == 0);
+    rt_.stamp = rt_.stamp.next_epoch();
 }
 
 void SaveUploadRelay::end_pull_() noexcept {
@@ -119,9 +111,7 @@ void SaveUploadRelay::start_() noexcept {
     Loan l = chan_.acquire();
     if (!l)
         return;
-    do
-        ++rt_.epoch;
-    while (rt_.epoch == 0);
+    rt_.stamp = rt_.stamp.next_epoch();
     rt_.width = link_.width();
     const Ask::Start s{
         .size = rt_.order.image.size,
@@ -138,8 +128,8 @@ void SaveUploadRelay::start_() noexcept {
 }
 
 void SaveUploadRelay::land_(Loan&& l) noexcept {
-    const Ask::Head h = l->ask.head;
-    if (h.gen != rt_.gen || h.epoch != rt_.epoch) {
+    const RelayStamp h = l->ask.head;
+    if (!h.matches(rt_.stamp)) {
         rt_.stale.add();
         return;
     }
@@ -221,20 +211,16 @@ void SaveUploadRelay::serve() noexcept {
     }
 }
 
-void SaveUploadRelay::on(const Ask::Start& a, const Ask::Head& h, Job& job) noexcept {
+void SaveUploadRelay::on(const Ask::Start& a, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, B);
     io_.serving = h;
-    if (!io_.servant) {
-        job->act = done(false);
-        return;
-    }
     const cores::SaveImage image{.index = proto::WideIoIndex{a.index}, .size = a.size};
     job->act = io_.servant->start(image, job->rel.view(), a.word_bytes);
 }
 
-void SaveUploadRelay::on(const Ask::Resume&, const Ask::Head& h, Job& job) noexcept {
+void SaveUploadRelay::on(const Ask::Resume&, const RelayStamp& h, Job& job) noexcept {
     TASTY_SEAT_BODY_MEDIATOR(SaveUploadRelay, B);
-    if (!io_.servant || h.gen != io_.serving.gen || h.epoch != io_.serving.epoch) {
+    if (!h.matches(io_.serving)) {
         job->act = done(false);
         return;
     }

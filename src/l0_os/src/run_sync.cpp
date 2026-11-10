@@ -13,10 +13,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "child_spawn.h"
 
 namespace mister::os {
 namespace {
@@ -27,7 +30,7 @@ constexpr std::chrono::milliseconds kGrace{500};
 constexpr std::chrono::milliseconds kGraceSlice{10};
 constexpr std::chrono::nanoseconds::rep kRampFactor = 2;
 
-constexpr int kExecFailedCode = 127;
+constexpr ChildProcessExit::ExitStatus kExecFailed{127};
 
 void sleep_ns(std::chrono::nanoseconds d) noexcept {
     const auto secs = std::chrono::duration_cast<std::chrono::seconds>(d);
@@ -59,12 +62,7 @@ struct ReapOutcome {
     }
 
     [[nodiscard]] ChildProcessExit exit() const noexcept {
-        if (WIFSIGNALED(status))
-            return ChildProcessExit{.signalled = true, .code = WTERMSIG(status)};
-        return ChildProcessExit{
-            .signalled = false,
-            .code = WIFEXITED(status) ? WEXITSTATUS(status) : 0
-        };
+        return ChildProcessExit::from_wait_status(ChildProcessExit::WaitStatus{status});
     }
 };
 
@@ -93,8 +91,8 @@ std::vector<char*> to_argv(std::span<const char* const> argv) {
 
 constexpr const char* kShell = "/bin/sh";
 
-bool never_started(int e) noexcept {
-    return e == EAGAIN || e == ENOMEM;
+bool never_started(const Error& e) noexcept {
+    return e.detail == std::uint32_t{EAGAIN} || e.detail == std::uint32_t{ENOMEM};
 }
 
 std::string script_path(const char* file) {
@@ -124,28 +122,68 @@ struct SpawnOutcome {
     enum class State : std::uint8_t { started, refused, exec_failed };
     State state = State::refused;
     ::pid_t pid = -1;
-    int error = 0;
+    Error error{};
 
     [[nodiscard]] static constexpr SpawnOutcome started(::pid_t p) noexcept {
-        return {State::started, p, 0};
+        return {State::started, p, {}};
     }
 
-    [[nodiscard]] static constexpr SpawnOutcome refused(int e) noexcept {
+    [[nodiscard]] static constexpr SpawnOutcome refused(Error e) noexcept {
         return {State::refused, -1, e};
     }
 
     [[nodiscard]] static constexpr SpawnOutcome exec_failed() noexcept {
-        return {State::exec_failed, -1, 0};
+        return {State::exec_failed, -1, {}};
     }
 };
 
+class ChildSpawnAttr {
+public:
+    explicit ChildSpawnAttr(bool new_session = false) noexcept {
+        if (const int e = ::posix_spawnattr_init(&attr_); e != 0) {
+            err_ = infra::errno_error(Errc::io, ERR_SITE(), e);
+            return;
+        }
+        inited_ = true;
+        if (auto e = detail::set_child_signal_state(
+                attr_,
+                detail::ChildSignalReset::stop_set,
+                new_session
+            );
+            !e)
+            err_ = e.error();
+    }
+
+    ~ChildSpawnAttr() {
+        if (inited_)
+            (void)::posix_spawnattr_destroy(&attr_);
+    }
+
+    ChildSpawnAttr(const ChildSpawnAttr&) = delete;
+    ChildSpawnAttr& operator=(const ChildSpawnAttr&) = delete;
+
+    [[nodiscard]] bool ok() const noexcept { return !err_.has_value(); }
+
+    [[nodiscard]] const Error& error() const noexcept { return *err_; }
+
+    [[nodiscard]] posix_spawnattr_t* get() noexcept { return &attr_; }
+
+private:
+    posix_spawnattr_t attr_{};
+    std::optional<Error> err_{};
+    bool inited_ = false;
+};
+
 SpawnOutcome spawn_child(const std::vector<char*>& args) {
+    ChildSpawnAttr attr;
+    if (!attr.ok())
+        return SpawnOutcome::refused(attr.error());
     ::pid_t pid = -1;
-    int e = ::posix_spawnp(&pid, args[0], nullptr, nullptr, args.data(), environ);
+    int e = ::posix_spawnp(&pid, args[0], nullptr, attr.get(), args.data(), environ);
     if (e == 0)
         return SpawnOutcome::started(pid);
     if (e != ENOEXEC)
-        return SpawnOutcome::refused(e);
+        return SpawnOutcome::refused(infra::errno_error(Errc::io, ERR_SITE(), e));
     std::string file = script_path(args[0]);
     if (file.empty())
         return SpawnOutcome::exec_failed();
@@ -154,9 +192,9 @@ SpawnOutcome spawn_child(const std::vector<char*>& args) {
     sh.push_back(const_cast<char*>(kShell));
     sh.push_back(file.data());
     sh.insert(sh.end(), args.begin() + 1, args.end());
-    e = ::posix_spawn(&pid, kShell, nullptr, nullptr, sh.data(), environ);
+    e = ::posix_spawn(&pid, kShell, nullptr, attr.get(), sh.data(), environ);
     if (e != 0)
-        return SpawnOutcome::refused(e);
+        return SpawnOutcome::refused(infra::errno_error(Errc::io, ERR_SITE(), e));
     return SpawnOutcome::started(pid);
 }
 
@@ -173,13 +211,12 @@ SpawnOutcome spawn_child(const std::vector<char*>& args) {
 
     const SpawnOutcome sp = spawn_child(args);
     if (sp.state == SpawnOutcome::State::refused) {
-        if (never_started(sp.error)) {
-            return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), sp.error));
-        }
-        return ChildProcessExit{.signalled = false, .code = kExecFailedCode};
+        if (never_started(sp.error))
+            return std::unexpected(sp.error);
+        return ChildProcessExit::exited(kExecFailed);
     }
     if (sp.state == SpawnOutcome::State::exec_failed) {
-        return ChildProcessExit{.signalled = false, .code = kExecFailedCode};
+        return ChildProcessExit::exited(kExecFailed);
     }
     const ::pid_t pid = sp.pid;
 
@@ -244,15 +281,11 @@ SpawnOutcome spawn_child(const std::vector<char*>& args) {
         args.push_back(const_cast<char*>(a));
     args.push_back(nullptr);
 
-    ::posix_spawnattr_t attr;
-    if (const int e = ::posix_spawnattr_init(&attr); e != 0) {
-        return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), e));
-    }
+    ChildSpawnAttr attr{true};
+    if (!attr.ok())
+        return std::unexpected(attr.error());
     ::pid_t mid = -1;
-    int e = ::posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
-    if (e == 0)
-        e = ::posix_spawn(&mid, kShell, nullptr, &attr, args.data(), environ);
-    (void)::posix_spawnattr_destroy(&attr);
+    const int e = ::posix_spawn(&mid, kShell, nullptr, attr.get(), args.data(), environ);
     if (e != 0) {
         return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), e));
     }
@@ -268,7 +301,7 @@ SpawnOutcome spawn_child(const std::vector<char*>& args) {
         break;
     }
 
-    if (ReapOutcome::reaped(status).exit().code != 0) {
+    if (!ReapOutcome::reaped(status).exit().succeeded()) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }
     return {};

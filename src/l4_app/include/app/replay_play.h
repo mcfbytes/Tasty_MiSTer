@@ -34,8 +34,6 @@ struct ReplayPlay {
     };
 
     static constexpr std::uint32_t kMaxFrames = 1u << 20;
-
-    using ArmMicros = std::chrono::duration<std::uint32_t, std::micro>;
     static constexpr std::chrono::microseconds kPhaseMin{1000};
     static constexpr std::chrono::microseconds kPhaseGuard{2000};
 
@@ -52,47 +50,69 @@ struct ReplayPlay {
     static constexpr std::uint32_t kTickBudget = 64 * 1024;
     static constexpr unsigned kEpochTries = 3;
     static constexpr std::size_t kCheckpoints = 64;
-    static constexpr std::int64_t kAnswerNs = 2'000'000'000;
-    static constexpr std::int64_t kPowerOnNs = 20'000'000'000;
-    static constexpr std::int64_t kDiscSettleNs = 2'000'000'000;
+    static constexpr std::chrono::nanoseconds kAnswerNs{2'000'000'000};
+    static constexpr std::chrono::nanoseconds kPowerOnNs{20'000'000'000};
+    static constexpr std::chrono::nanoseconds kDiscSettleNs{2'000'000'000};
 
-    void log_end(xthread::DiagLog& diag, const ReplayStatus& s) const noexcept;
+    struct Request {
+        infra::OptRef<const cores::MovieCodec> codec{};
+        PathText movie{};
+        PathText rom{};
+        ArmMicros offset_us{};
 
-    void release_movie() noexcept { runs = {}; }
+        std::optional<FrameCount> lead_override{};
+        std::optional<MovieFrame> stop_at{};
+        std::optional<cores::IReplayCore::RamFill> ram_fill{};
+        bool seeded_save = false;
+        bool set_ok = false;
+    };
 
-    ControlGeneration gen{};
-    infra::OptRef<const cores::IMovieCodec> codec{};
-    cores::IMovieCodec::Facts facts{};
-    PathText movie{};
-    PathText rom{};
-    std::uint32_t offset_us = 0;
-    std::optional<std::int32_t> lead_override{};
-    std::optional<MovieFrame> stop_at{};
-    std::optional<cores::IMovieCodec::RamFill> ram_fill{};
-    bool seeded_save = false;
-    bool set_ok = false;
-    std::vector<SetSetting> set{};
-    std::int32_t lead = 0;
-    std::uint32_t poweron_ns = 0;
-    ReplayMsg::P0Parity p0 = ReplayMsg::P0Parity::Any;
-    ReplayMsg::PowerOnEvent event = ReplayMsg::PowerOnEvent::LoadEnd;
-    bool vsync_ok = false;
-    std::uint8_t rom_index = 0xFF;
+    struct ScannedMovie {
+        cores::MovieFacts facts{};
 
-    std::uint32_t scanned = 0;
-    FrameCount pushed{};
-    FrameCount movie_frames{};
+        std::vector<ReplayMsg::Input> runs{};
 
-    std::vector<ReplayMsg::Input> runs{};
-    unsigned tries = 0;
+        std::uint32_t scanned = 0;
+        FrameCount movie_frames{};
+        ArmMicros offset_us{};
+        bool vsync_ok = false;
+    };
 
-    std::array<MovieFrame, kCheckpoints> checks{};
-    std::size_t n_checks = 0;
-    std::size_t next_check = 0;
+    struct ArmPlan {
+        FrameCount lead{};
 
-    std::string_view last_setting{};
-    bool last_setting_offered = false;
-    std::string refusal_path{};
+        ArmLead lead_field{};
+        CodecNs poweron_ns{};
+        ReplayMsg::P0Parity p0 = ReplayMsg::P0Parity::Any;
+        ReplayMsg::PowerOnEvent event = ReplayMsg::PowerOnEvent::LoadEnd;
+        proto::IoIndex rom_index = kNoRomSlot;
+        std::array<MovieFrame, kCheckpoints> checks{};
+        std::size_t n_checks = 0;
+        std::size_t next_check = 0;
+    };
+
+    struct Run {
+        ControlGeneration gen{};
+        FrameCount pushed{};
+        unsigned tries = 0;
+    };
+
+    struct Report {
+        std::string_view last_setting{};
+        bool last_setting_offered = false;
+        std::string refusal_path{};
+        std::vector<SetSetting> set{};
+    };
+
+    void release_movie() noexcept { scan.runs = {}; }
+
+    Request request{};
+    ScannedMovie scan{};
+    ArmPlan arm{};
+    Report report{};
+    Run run{};
 };
+
+void log_end(xthread::DiagLog& diag, const ReplayStatus& s, const ReplayPlay::Run& run) noexcept;
 
 }

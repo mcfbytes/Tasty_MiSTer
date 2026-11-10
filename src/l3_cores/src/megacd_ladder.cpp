@@ -26,32 +26,21 @@ Ex<bool> MegaCdLadder::on_step() {
             rung_ = Rung::PulseAssert;
             return false;
 
-        case Rung::PulseAssert:
+        case Rung::PulseAssert: {
 
-            if (!bit0_asserted_) {
-                if (!order_status_bit0(true))
-                    return false;
-                bit0_asserted_ = true;
-                pulse_release_ns_ = now_ns()
-                    + std::chrono::microseconds{profile_.staging.reset_pulse_us};
-            }
-            if (profile_.staging.reset_pulse_us == 0) {
-                if (!order_status_bit0(false))
-                    return false;
-                bit0_asserted_ = false;
-            }
+            const std::chrono::microseconds pulse{profile_.staging.reset_pulse_us};
+            if (!hold_reset_())
+                return false;
+            if (pulse == std::chrono::microseconds::zero() && !release_reset_())
+                return false;
             rung_ = Rung::PulseRelease;
             return false;
+        }
 
         case Rung::PulseRelease:
 
-            if (bit0_asserted_) {
-                if (now_ns() < pulse_release_ns_)
-                    return false;
-                if (!order_status_bit0(false))
-                    return false;
-                bit0_asserted_ = false;
-            }
+            if (!pulse_reset_(std::chrono::microseconds{profile_.staging.reset_pulse_us}))
+                return false;
 
             if (!order_reset())
                 return false;
@@ -89,11 +78,11 @@ Ex<bool> MegaCdLadder::on_step() {
 
         case Rung::MountDisc: {
 
-            if (image_.empty()) {
+            if (image_path().empty()) {
                 rung_ = Rung::Done;
                 return true;
             }
-            const MountState ms = mount_bounded(image_);
+            const MountState ms = mount_bounded(image_path());
             if (ms == MountState::Pending)
                 return false;
             if (ms == MountState::Failed) {
@@ -130,17 +119,11 @@ Ex<bool> MegaCdLadder::on_step() {
 
         case Rung::MountSave: {
 
-            if (save_path_.empty()) {
-                auto sp = save_path_for(image_);
-                if (!sp)
-                    return std::unexpected(sp.error());
-                save_path_ = *sp;
-            }
-            if (!prepare_save(save_path_))
+            auto m = mount_save_rung_();
+            if (!m)
+                return std::unexpected(m.error());
+            if (!*m)
                 return false;
-            if (!order_mount_save(save_path_, true))
-                return false;
-            report_.save_mounted = true;
             rung_ = Rung::Done;
             return true;
         }

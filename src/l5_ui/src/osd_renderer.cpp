@@ -12,19 +12,19 @@
 
 namespace mister::ui {
 
-std::size_t format_key_value(std::span<char> out, std::string_view name, std::string_view value) {
-    const std::size_t w = kClassicRowColumns;
-    if (out.size() < w + 1)
-        return 0;
-
-    std::fill_n(out.begin(), w, ' ');
-    out[w] = '\0';
+FixedStr<kClassicRowColumns + 1, StrFit::Clip> format_key_value(
+    std::string_view name,
+    std::string_view value
+) noexcept {
+    constexpr std::size_t w = kClassicRowColumns;
+    std::array<char, w> row{};
+    std::fill(row.begin(), row.end(), ' ');
 
     std::size_t n = std::min(name.size(), w - 1);
     while (n > 1 && name[n - 1] == ' ')
         --n;
     for (std::size_t i = 0; i < n; ++i)
-        out[i + 1] = name[i];
+        row[i + 1] = name[i];
     std::size_t len = n + 1;
 
     const std::size_t vlen = std::min(value.size(), w);
@@ -32,16 +32,18 @@ std::size_t format_key_value(std::span<char> out, std::string_view name, std::st
     if (len + vlen > w - 1) {
         len = (vlen < w - 1) ? (w - 1 - vlen) : 1;
     }
-    out[len] = ':';
+    row[len] = ':';
     ++len;
 
     const std::size_t pad_to = (w > vlen) ? (w - vlen) : 0;
     for (std::size_t i = len; i < pad_to; ++i)
-        out[i] = ' ';
+        row[i] = ' ';
     for (std::size_t i = 0; i < vlen; ++i)
-        out[pad_to + i] = value[i];
+        row[pad_to + i] = value[i];
 
-    return w;
+    FixedStr<kClassicRowColumns + 1, StrFit::Clip> out;
+    (void)out.assign(std::string_view{row.data(), row.size()});
+    return out;
 }
 
 namespace {
@@ -243,25 +245,25 @@ void OsdRenderer::stage_row(
 }
 
 void OsdRenderer::stage_from_surface(OsdRow row) {
-    const auto cur = static_cast<const proto::OsdSurface&>(*surface_).row(row);
+    const auto cur = static_cast<const proto::OsdSurface&>(surface_).row(row);
     std::memcpy(scratch_, cur.data(), proto::OsdSurface::kRowBytes);
 }
 
 void OsdRenderer::commit(OsdRow row) {
     if (!proto::OsdSurface::kMaxRows.covers(row))
         return;
-    const auto dst = surface_->row(row);
+    const auto dst = surface_.row(row);
     if (std::memcmp(dst.data(), scratch_, proto::OsdSurface::kRowBytes) == 0) {
         ++suppressed_;
         return;
     }
     std::memcpy(dst.data(), scratch_, proto::OsdSurface::kRowBytes);
-    surface_->publish(row);
+    surface_.publish(row);
     ++publishes_;
 }
 
 void OsdRenderer::clear() {
-    surface_->clear();
+    surface_.clear();
 }
 
 void OsdRenderer::text(
@@ -276,9 +278,7 @@ void OsdRenderer::text(
 }
 
 void OsdRenderer::key_value(OsdRow row, std::string_view name, std::string_view value) {
-    char buf[kClassicRowColumns + 1] = {};
-    const std::size_t n = format_key_value(std::span<char>(buf, sizeof buf), name, value);
-    text(row, std::string_view(buf, n), false);
+    text(row, format_key_value(name, value).view(), false);
 }
 
 void OsdRenderer::glyph(OsdRow row, unsigned col, Glyph g) {
@@ -389,11 +389,11 @@ void OsdRenderer::composite_status_bar(const StatusBarFacts& facts) {
         static constexpr char kPrefix[] = " MiSTer      ";
         len = sizeof(kPrefix) - 1;
         std::memcpy(str, kPrefix, len);
-        for (std::size_t i = 0; i < sizeof facts.clock && facts.clock[i] != '\0'; ++i) {
-            if (len + 1 >= sizeof str)
-                break;
-            str[len++] = facts.clock[i];
-        }
+        const std::string_view clock = facts.clock.view();
+        const std::size_t clock_room = sizeof str - 1 - len;
+        const std::size_t clock_n = std::min(clock.size(), clock_room);
+        std::copy_n(clock.data(), clock_n, str + len);
+        len += clock_n;
 
         std::size_t n = kIconColumn;
 

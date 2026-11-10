@@ -41,7 +41,6 @@ private:
     };
 
     [[nodiscard]] Ex<bool> on_step() override;
-    [[nodiscard]] Ex<bool> rung();
 
     Rung rung_ = Rung::Unload;
     bool stage_ = false;

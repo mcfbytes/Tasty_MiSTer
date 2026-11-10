@@ -10,6 +10,7 @@
 #include "app/hd_layout.h"
 #include "app/hd_rect.h"
 #include "app/hd_theme.h"
+#include "app/types.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -46,12 +47,7 @@ class HdGlass {
 public:
     static constexpr std::size_t kRects = 2;
 
-    void relayout(
-        const HdTheme& theme,
-        const HdLayout& layout,
-        std::int32_t w,
-        std::int32_t h
-    ) noexcept;
+    void relayout(const HdTheme& theme, const HdLayout& layout) noexcept;
 
     [[nodiscard]] bool active() const noexcept { return active_; }
 
@@ -69,7 +65,7 @@ public:
 
 private:
     HdGlassKernel kernel_{};
-    std::uint16_t q8_ = 0;
+    DimQ8 dim_{};
     std::uint16_t fill_ = 0;
     bool active_ = false;
     std::array<GlassRect, kRects> glass_{};

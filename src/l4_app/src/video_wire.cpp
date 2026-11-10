@@ -44,31 +44,29 @@ Ex<void> VideoWire::stage(proto::UioOp opcode, std::span<const std::uint16_t> wo
 
 Ex<void> VideoWire::emit(
     proto::Link& link,
-    std::uint8_t slot,
-    std::uint32_t gen,
+    const proto::LinkOp::SetVideoMode& mode,
     infra::OptRef<proto::IResetFence> fence
 ) {
 
     if (prelude_running() && !pre_replaying_) {
-        pre_parked_slot_ = slot;
-        pre_parked_gen_ = gen;
-        pre_parked_ = true;
+        parked_ = mode;
         ++pre_.parked;
         publish_prelude();
         return {};
     }
+    const std::size_t slot = mode.block;
     if (slot >= kSlots) {
         emit_rejected_.add();
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), slot});
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), mode.block});
     }
 
     BlockPayload local{};
-    if (gen == 0u
-        || table_[slot].try_read(local) != gen
+    if (mode.gen == 0u
+        || table_[slot].try_read(local) != mode.gen
         || local.count == 0u
         || local.count > kWords) {
         stale_.add();
-        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), gen});
+        return std::unexpected(Error{Errc::negotiation, ERR_SITE(), mode.gen});
     }
     const std::uint8_t count = local.count;
     const auto r = svc::emit_video_words(
@@ -150,20 +148,18 @@ VideoWire::Stats VideoWire::stats() const noexcept {
     return s;
 }
 
-namespace {
-constexpr std::int64_t kMs = 1'000'000;
-}
-
 void VideoWire::on_rt_round(
     proto::Link& link,
     std::int64_t now_ns,
     infra::OptRef<proto::IResetFence> fence
 ) {
+
+    const os::RawMonotonicClock::time_point now{std::chrono::nanoseconds{now_ns}};
     svc::ProbeOps ops{link};
     geo_rounds_.add();
 
-    if (auto v = policy_seen_.take_if_changed(policy_))
-        policy_bits_ = *v;
+    if (auto v = policy_seen_.take_if_changed(policy_cell_))
+        policy_ = *v;
     if (auto v = ar_cust_seen_.take_if_changed(ar_cust_))
         ar_cust_bits_ = *v;
     if (auto v = shadow_seen_.take_if_changed(shadow_mask_))
@@ -173,23 +169,23 @@ void VideoWire::on_rt_round(
         return;
 
     if (fs_.active()) {
-        fs_.step(stream_ports_(&link));
+        fs_.step(stream_ports_(), link);
         return;
     }
 
     if (service_filter_publish(link))
         return;
 
-    if (geo_next_ns_ == 0) {
-        geo_next_ns_ = now_ns + kGeoFirstPeriodMs * kMs;
+    if (!geo_next_) {
+        geo_next_ = now + kGeoFirstPeriod;
         return;
     }
-    if (now_ns < geo_next_ns_)
+    if (now < *geo_next_)
         return;
 
-    geo_next_ns_ += kGeoPeriodMs * kMs;
-    if (geo_next_ns_ <= now_ns) {
-        geo_next_ns_ = now_ns + kGeoPeriodMs * kMs;
+    *geo_next_ += kGeoPeriod;
+    if (*geo_next_ <= now) {
+        *geo_next_ = now + kGeoPeriod;
         geo_late_.add();
     }
 
@@ -221,15 +217,13 @@ void VideoWire::reset_geometry(std::uint32_t core_seq) noexcept {
 
     geo_force_next_ = true;
 
-    geo_next_ns_ = 0;
+    geo_next_.reset();
 
     geo_cell_.invalidate();
 }
 
-Ex<svc::VideoSample> VideoWire::sample(bool force) {
+Ex<svc::VideoSample> VideoWire::sample() {
     geo_reads_.add();
-    if (force)
-        request_force();
 
     if (const auto s = geo_cell_.sample()) {
         sampled_seq_ = s.value.core_seq;
@@ -258,7 +252,7 @@ void VideoWire::arm_prelude() noexcept {
     pre_barrier_ = 0;
     pre_flt_barrier_ = 0;
 
-    pre_parked_ = false;
+    parked_.reset();
     pre_.hdmi_int = 0;
     pre_.gamma_cap = 0;
     pre_.af_flags = 0;
@@ -278,13 +272,12 @@ void VideoWire::replay_parked_(
     infra::OptRef<proto::IResetFence> fence,
     bool with_but_sw
 ) noexcept {
-    const std::uint8_t slot = pre_parked_slot_;
-    const std::uint32_t gen = pre_parked_gen_;
-    pre_parked_ = false;
+    const proto::LinkOp::SetVideoMode mode = *parked_;
+    parked_.reset();
 
     pre_replaying_ = true;
     pre_in_block_ = !with_but_sw;
-    (void)emit(link, slot, gen, fence);
+    (void)emit(link, mode, fence);
     pre_in_block_ = false;
     pre_replaying_ = false;
 }
@@ -339,7 +332,8 @@ bool VideoWire::step_prelude(proto::Link& link, infra::OptRef<proto::IResetFence
                 return true;
             }
 
-            const std::uint8_t mode = flt_have_ ? flt_local_.modes[0] : policy().filter_mode;
+            const svc::ScalerSlotMode mode = flt_have_ ? flt_local_.filter_mode()
+                                                       : policy().filter_mode;
             auto f = ops.emit_filter_mode(mode);
             if (!f) {
 
@@ -347,25 +341,25 @@ bool VideoWire::step_prelude(proto::Link& link, infra::OptRef<proto::IResetFence
                 pre_step_ = PreludeStep::Burst;
                 break;
             }
-            pre_.flt_flags = static_cast<std::uint16_t>(*f);
+            pre_.flt_flags = *f;
+            const svc::FltFlags flt{*f};
 
-            if (*f != 0)
-                geo_gate_.last_flt_flags = *f;
-            if (*f == 0) {
+            if (flt.present())
+                geo_gate_.last_flt_flags = flt;
+            if (!flt.present()) {
                 ++pre_.coeff_skips;
                 pre_step_ = PreludeStep::Burst;
                 break;
             }
             if (flt_have_) {
                 svc::VideoSample s{};
-                s.flt_flags = *f;
+                s.flt_flags = flt;
                 if (!fs_.arm(
-                        stream_ports_(nullptr),
-                        *f,
+                        stream_ports_(),
+                        flt,
                         select_slot(s),
-                        true,
-                        false,
-                        svc::ScalingWords{}
+                        FilterStream::Counting::Prelude,
+                        std::nullopt
                     )) {
 
                     if (auto e = svc::emit_filter_coeff_chunk(link.frame(), {}); !e)
@@ -376,7 +370,7 @@ bool VideoWire::step_prelude(proto::Link& link, infra::OptRef<proto::IResetFence
                 }
             } else {
 
-                fs_.arm_generated(*f, true);
+                fs_.arm_generated(flt, FilterStream::Counting::Prelude);
             }
             pre_step_ = PreludeStep::FltCoef;
             break;
@@ -384,7 +378,7 @@ bool VideoWire::step_prelude(proto::Link& link, infra::OptRef<proto::IResetFence
 
         case PreludeStep::FltCoef: {
 
-            fs_.step(stream_ports_(&link));
+            fs_.step(stream_ports_(), link);
             if (!fs_.active())
                 pre_step_ = PreludeStep::Burst;
             break;
@@ -392,7 +386,7 @@ bool VideoWire::step_prelude(proto::Link& link, infra::OptRef<proto::IResetFence
 
         case PreludeStep::Burst: {
 
-            if (!pre_parked_) {
+            if (!parked_) {
                 ++pre_barrier_;
                 ++pre_.barrier_waits;
                 if (pre_barrier_ < kBarrierRounds) {
@@ -465,7 +459,7 @@ bool VideoWire::step_prelude(proto::Link& link, infra::OptRef<proto::IResetFence
 
             ++pre_.completions;
 
-            if (pre_parked_)
+            if (parked_)
                 replay_parked_(link, fence, true);
             break;
         }
@@ -509,17 +503,24 @@ bool VideoWire::service_filter_publish(proto::Link& link) {
     if (!consume_filters())
         return false;
 
-    auto f = ops.emit_filter_mode(flt_local_.modes[0]);
+    auto f = ops.emit_filter_mode(flt_local_.filter_mode());
     if (!f) {
         flt_stream_errors_.add();
         return true;
     }
-    if (*f == 0)
+    const svc::FltFlags flt{*f};
+    if (!flt.present())
         return true;
-    geo_gate_.last_flt_flags = *f;
+    geo_gate_.last_flt_flags = flt;
     svc::VideoSample s = geo_gate_.last;
-    s.flt_flags = *f;
-    if (!fs_.arm(stream_ports_(nullptr), *f, select_slot(s), false, false, svc::ScalingWords{})) {
+    s.flt_flags = flt;
+    if (!fs_.arm(
+            stream_ports_(),
+            flt,
+            select_slot(s),
+            FilterStream::Counting::Stream,
+            std::nullopt
+        )) {
 
         if (auto e = svc::emit_filter_coeff_chunk(link.frame(), {}); !e)
             flt_stream_errors_.add();
@@ -529,18 +530,17 @@ bool VideoWire::service_filter_publish(proto::Link& link) {
 
 bool FilterStream::arm(
     const Ports& p,
-    std::uint16_t flt_flags,
+    svc::FltFlags flt_flags,
     svc::VFilter slot,
-    bool in_prelude,
-    bool with_tail,
-    const svc::ScalingWords& tw
+    Counting where_counted,
+    std::optional<svc::ScalingWords> tail
 ) noexcept {
-    const std::uint16_t v = static_cast<std::uint16_t>(flt_flags & kFilterVerMask);
+    const svc::FilterFormat fmt = flt_flags.format();
     const svc::FilterBank& h = p.set.bank(svc::VFilter::Horz);
     const svc::FilterBank& b = p.set.bank(slot);
     const bool send_h = !svc::same_digest(h, p.sent_horiz);
     const bool send_v = !svc::same_digest(b, p.sent_vert);
-    const svc::FilterSendPlan planned = svc::plan_filter_banks(h, b, v, send_h, send_v);
+    const svc::FilterSendPlan planned = svc::plan_filter_banks(h, b, fmt, send_h, send_v);
     if (planned.count == 0) {
 
         p.sent_horiz = h;
@@ -548,25 +548,24 @@ bool FilterStream::arm(
         return false;
     }
     plan = planned;
-    ver = v;
+    format = fmt;
     vert_slot = slot;
     seg_i = 0;
     cursor = 0;
     generated = false;
-    prelude = in_prelude;
-    tail = with_tail;
-    tail_words = tw;
+    counting = where_counted;
+    tail_words = tail;
     armed = true;
     p.streams.add();
     return true;
 }
 
-void FilterStream::arm_generated(std::uint16_t flt_flags, bool in_prelude) noexcept {
+void FilterStream::arm_generated(svc::FltFlags flt_flags, Counting where_counted) noexcept {
     generated = true;
-    prelude = in_prelude;
-    ver = static_cast<std::uint16_t>(flt_flags & kFilterVerMask);
+    counting = where_counted;
+    format = flt_flags.format();
     cursor = 0;
-    tail = false;
+    tail_words.reset();
     armed = true;
 }
 
@@ -574,54 +573,53 @@ bool VideoWire::plan_filter_send(const svc::VideoSample& s, bool resend) {
 
     if (!flt_have_)
         return false;
-    svc::ScalingWords tw{};
+
+    std::optional<svc::ScalingWords> tail;
     if (resend)
-        tw = svc::scaling_words(s, geo_gate_.policy);
-    return fs_.arm(stream_ports_(nullptr), s.flt_flags, select_slot(s), false, resend, tw);
+        tail = svc::scaling_words(s, geo_gate_.policy);
+    return fs_
+        .arm(stream_ports_(), s.flt_flags, select_slot(s), FilterStream::Counting::Stream, tail);
 }
 
-void FilterStream::step(const Ports& p) noexcept {
+void FilterStream::step(const Ports& p, proto::Link& link) noexcept {
     constexpr std::size_t kChunkWords = VideoWire::kCoeffChunkWords;
     std::uint16_t buf[kChunkWords];
     std::size_t n = 0;
-    const std::size_t total = generated ? svc::filter_coeff_word_count(ver)
-                                        : svc::filter_bank_word_count(ver);
+    const std::size_t total = generated ? svc::filter_coeff_word_count(format)
+                                        : svc::filter_bank_word_count(format);
     if (generated) {
         const std::size_t remaining = total - cursor;
         n = remaining < kChunkWords ? remaining : kChunkWords;
         for (std::size_t i = 0; i < n; ++i)
-            buf[i] = svc::filter_coeff_word(ver, cursor + i);
+            buf[i] = svc::filter_coeff_word(format, svc::FilterBankWordIndex{cursor + i});
     } else {
         const svc::FilterSendPlan::Seg& seg = plan.segs[seg_i];
-        const svc::FilterBank& b = seg.vert ? p.set.bank(vert_slot)
-                                            : p.set.bank(svc::VFilter::Horz);
-        const auto& ph = seg.adaptive ? b.adaptive : b.phases;
+        const svc::FilterBank& b = svc::is_vert(seg.bank) ? p.set.bank(vert_slot)
+                                                          : p.set.bank(svc::VFilter::Horz);
+        const auto& ph = svc::is_adaptive(seg.bank) ? b.adaptive : b.phases;
         const std::size_t remaining = total - cursor;
         n = remaining < kChunkWords ? remaining : kChunkWords;
         for (std::size_t i = 0; i < n; ++i) {
             buf[i] = svc::filter_bank_word(
                 std::span<const svc::FilterPhase>(ph),
-                ver,
+                format,
                 seg.bank,
-                cursor + i
+                svc::FilterBankWordIndex{cursor + i}
             );
         }
     }
 
-    if (auto r = svc::emit_filter_coeff_chunk(
-            p.link->frame(),
-            std::span<const std::uint16_t>(buf, n)
-        );
+    if (auto r = svc::emit_filter_coeff_chunk(link.frame(), std::span<const std::uint16_t>(buf, n));
         !r) {
 
         p.errors.add();
-        if (prelude)
+        if (counting == Counting::Prelude)
             ++p.pre.errors;
         armed = false;
-        tail = false;
+        tail_words.reset();
         return;
     }
-    if (prelude) {
+    if (counting == Counting::Prelude) {
         ++p.pre.chunks;
         p.pre.coeff_words += static_cast<std::uint32_t>(n);
     } else {
@@ -652,30 +650,31 @@ void FilterStream::step(const Ports& p) noexcept {
         p.sent_horiz = p.set.bank(svc::VFilter::Horz);
         p.sent_vert = p.set.bank(vert_slot);
     }
-    if (tail) {
-        tail = false;
+    if (tail_words) {
+        const svc::ScalingWords tw = *tail_words;
+        tail_words.reset();
 
         {
-            if (auto r = p.link->command(proto::UioOp::SetHeight); !r) {
+            if (auto r = link.command(proto::UioOp::SetHeight); !r) {
                 p.errors.add();
                 return;
             }
-            if (auto r = p.link->word(tail_words.height); !r) {
+            if (auto r = link.word(tw.height); !r) {
                 p.errors.add();
                 return;
             }
         }
         {
-            if (auto r = p.link->command(proto::UioOp::SetWidth); !r) {
+            if (auto r = link.command(proto::UioOp::SetWidth); !r) {
                 p.errors.add();
                 return;
             }
-            if (auto r = p.link->word(tail_words.width); !r) {
+            if (auto r = link.word(tw.width); !r) {
                 p.errors.add();
                 return;
             }
         }
-        p.link->close();
+        link.close();
     }
 }
 
@@ -692,7 +691,7 @@ VideoWire::FilterStats VideoWire::filter_stats() const noexcept {
 }
 
 void VideoWire::publish_prelude() noexcept {
-    pre_.step = static_cast<std::uint8_t>(pre_step_);
+    pre_.step = pre_step_;
     prelude_cell_.publish(pre_);
 }
 

@@ -4,16 +4,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <optional>
 
 #include "svc/config.h"
+#include "svc/parse_error.h"
 
 namespace mister::svc {
 
-enum class ParseDiag : std::uint8_t { None, NotANumber, OutOfRange, InvalidFormat };
-
 struct ParsedValue {
     std::uint32_t bits = 0;
-    ParseDiag diag = ParseDiag::None;
+    std::optional<ParseError::Kind> error{};
 };
 
 enum class FieldShape : std::uint8_t {

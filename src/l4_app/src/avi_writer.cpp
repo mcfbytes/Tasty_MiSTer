@@ -9,6 +9,8 @@
 #include <limits>
 
 #include "app/log_clock.h"
+#include "infra/errno.h"
+#include "os/write_all.h"
 
 namespace mister::app {
 
@@ -84,17 +86,17 @@ void AviWriter::open_(const ChunkSlot& s) noexcept {
 
     if (index_.bytes() == 0) {
         if (auto r = index_.reserve(1, kMaxEntries * avi::kIndexEntry); !r)
-            return fail_(ENOMEM);
+            return fail_(infra::Errno{ENOMEM});
     }
 
     const int fd = ::open(s.path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
     if (fd < 0)
-        return fail_(errno);
+        return fail_(infra::Errno{errno});
     fd_.reset(fd);
     entries_ = 0;
     f_ = avi::Fields{};
-    f_.width = s.width;
-    f_.height = s.height;
+    f_.width = s.size.width;
+    f_.rows = s.size.rows;
     f_.codec = s.codec;
     f_.rate = avi::kTickHz;
     frame_mul_ = s.frame_mul == 0 ? 1 : s.frame_mul;
@@ -102,9 +104,8 @@ void AviWriter::open_(const ChunkSlot& s) noexcept {
     rate_known_ = false;
     if (avi::plausible_vtime(s.vtime))
         learn_rate_(s.vtime);
-    avi::Header h{};
-    avi::header(f_, h);
-    if (!write_all_(h.data(), h.size()))
+    const auto h = avi::header(f_);
+    if (!write_all_(h))
         return;
     pos_ = avi::kHeaderBytes;
     st_.state = RecWriteState::Open;
@@ -118,7 +119,7 @@ void AviWriter::refuse_(const ChunkSlot& s) noexcept {
         st_ = AviWriteStatus{};
         st_.gen = s.gen;
     }
-    fail_(ENOMEM);
+    fail_(infra::Errno{ENOMEM});
 }
 
 void AviWriter::data_(const ChunkSlot& s) noexcept {
@@ -127,18 +128,18 @@ void AviWriter::data_(const ChunkSlot& s) noexcept {
         dirty_ = true;
         return;
     }
-    if (!write_all_(s.bytes.data(), s.used)) {
+    if (!write_all_(s.bytes.first(s.used))) {
         st_.dropped += s.chunks;
         return;
     }
     std::byte* const idx = index_.stripe(0).data();
     std::uint64_t at = pos_;
     for (std::uint32_t i = 0; i < s.chunks; ++i) {
-        const std::uint32_t word = ChunkSlot::desc_word(s.desc, i);
-        const std::uint32_t len = word & ~ChunkSlot::kKey;
+        const ChunkDesc desc = ChunkSlot::desc_word(s.desc, i);
+        const std::uint32_t len = desc.payload();
         if (entries_ < kMaxEntries) {
             avi::index_entry(
-                (word & ChunkSlot::kKey) != 0,
+                desc.key(),
                 static_cast<std::uint32_t>(at - avi::kMoviFourcc),
                 len,
                 std::span<std::byte, avi::kIndexEntry>(
@@ -166,7 +167,7 @@ void AviWriter::finalize_() noexcept {
     std::array<std::byte, avi::kChunkHead> head{};
     avi::index_head(entries_, head);
     const std::size_t body = std::size_t{entries_} * avi::kIndexEntry;
-    if (write_all_(head.data(), head.size()) && write_all_(index_.stripe(0).data(), body)) {
+    if (write_all_(head) && write_all_(index_.stripe(0).first(body))) {
         f_.index_bytes = avi::kChunkHead + body;
         write_header_();
         if (fd_.valid()) {
@@ -202,20 +203,14 @@ void AviWriter::learn_rate_(std::uint32_t vtime) noexcept {
     for (std::size_t i = 0; i < nunrated_; ++i) {
         Unrated& u = unrated_[i];
         u.f.scale = f_.scale;
-        avi::Header h{};
-        avi::header(u.f, h);
-        std::size_t off = 0;
-        while (off < h.size()) {
-            const ssize_t
-                w = ::pwrite(u.fd.get(), h.data() + off, h.size() - off, static_cast<off_t>(off));
-            if (w < 0 && errno == EINTR)
-                continue;
-            if (w <= 0)
-                break;
-            off += static_cast<std::size_t>(w);
-        }
-        if (off == h.size())
+        const auto h = avi::header(u.f);
+        if (const auto wrote = os::rewrite_head(u.fd, h); wrote) {
             ++st_.header_rewrites;
+        } else if (!st_.err.is_set()) {
+
+            st_.err = wrote.error().os_errno();
+            dirty_ = true;
+        }
     }
     drop_unrated_();
 }
@@ -229,46 +224,30 @@ void AviWriter::drop_unrated_() noexcept {
 }
 
 void AviWriter::write_header_() noexcept {
-    avi::Header h{};
-    avi::header(f_, h);
-    std::size_t off = 0;
-    while (off < h.size() && fd_.valid()) {
-        const ssize_t
-            w = ::pwrite(fd_.get(), h.data() + off, h.size() - off, static_cast<off_t>(off));
-        if (w < 0 && errno == EINTR)
-            continue;
-        if (w <= 0)
-            return fail_(w < 0 ? errno : EIO);
-        off += static_cast<std::size_t>(w);
-    }
+    const auto h = avi::header(f_);
+    if (const auto wrote = os::rewrite_head(fd_, h); !wrote)
+        return fail_(wrote.error().os_errno());
     ++st_.header_rewrites;
     dirty_ = true;
 }
 
 void AviWriter::sync_() noexcept {
     if (::fdatasync(fd_.get()) != 0 && errno != EINVAL)
-        return fail_(errno);
+        return fail_(infra::Errno{errno});
     ++st_.syncs;
     dirty_ = true;
 }
 
-bool AviWriter::write_all_(const std::byte* p, std::size_t n) noexcept {
-    std::size_t off = 0;
-    while (off < n && fd_.valid()) {
-        const ssize_t w = ::write(fd_.get(), p + off, n - off);
-        if (w < 0 && errno == EINTR)
-            continue;
-        if (w <= 0) {
-            fail_(w < 0 ? errno : EIO);
-            return false;
-        }
-        off += static_cast<std::size_t>(w);
+bool AviWriter::write_all_(std::span<const std::byte> bytes) noexcept {
+    if (const auto wrote = os::write_all(fd_, bytes); !wrote) {
+        fail_(wrote.error().os_errno());
+        return false;
     }
-    return off == n;
+    return true;
 }
 
-void AviWriter::fail_(int err) noexcept {
-    if (st_.err == 0)
+void AviWriter::fail_(infra::Errno err) noexcept {
+    if (!st_.err.is_set())
         st_.err = err;
     st_.state = RecWriteState::Failed;
     fd_.reset();

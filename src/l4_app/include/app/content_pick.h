@@ -40,7 +40,7 @@
 #include "cores/file_slot.h"
 #include "cores/loader_context.h"
 #include "cores/loader_memo.h"
-#include "cores/ram_image.h"
+#include "cores/ram_image_recipe.h"
 #include "cores/registry.h"
 #include "hal/phys_region.h"
 #include "infra/error.h"
@@ -54,10 +54,15 @@
 #include "proto/status_cell.h"
 #include "proto/types.h"
 #include "svc/file.h"
+#include "svc/gzip_inflate.h"
 
 namespace mister::svc {
 class Vfs;
 struct DirEntry;
+}
+
+namespace mister::cores {
+struct TransferRow;
 }
 
 namespace mister::app {
@@ -126,8 +131,6 @@ public:
         std::uint32_t long_wait_drops = 0;
     };
 
-    using Count = xthread::Telemetry<std::uint32_t, SeatTag::Main>;
-
     struct Wiring {
         LinkTxChannel<SeatTag::Main>& inbox;
         const FileTxLevelCell& ftx_level_cell;
@@ -139,7 +142,6 @@ public:
         const OwnerLadder& ladder;
         const LoadBelt& belt;
         OwnerTally& owner_tally;
-        Count& mgl_row0_cell;
         ActKeys& act_keys;
         const proto::StatusCell& status_cell;
         const BootRestore& boot_restore;
@@ -176,7 +178,7 @@ public:
     [[nodiscard]] Armed arm_loader(
         const ContentRequest& req,
         std::string_view save = {},
-        std::uint64_t save_bytes = 0
+        proto::FileSize save_bytes = {}
     );
 
     [[nodiscard]] std::optional<ContentRequest> content_for(
@@ -235,6 +237,16 @@ private:
 
     [[nodiscard]] Armed arm_walk_(const ContentRequest& req, const cores::CoreFactory& row);
 
+    [[nodiscard]] std::optional<Armed> arm_window_row_(
+        const cores::TransferRow& row,
+        std::unique_ptr<svc::IFile>& file,
+        std::unique_ptr<cores::ILoader>& loader,
+        svc::FileSize size,
+        const ContentRequest& req,
+        std::string_view save,
+        proto::FileSize save_bytes
+    );
+
     [[nodiscard]] std::optional<PathText> zip_member_(
         const proto::ConfStrFileRow& row,
         std::string_view path
@@ -256,7 +268,6 @@ private:
     const OwnerLadder& ladder_;
     const LoadBelt& belt_;
     OwnerTally& owner_tally_;
-    Count& mgl_row0_cell_;
     ActKeys& act_keys_;
     const proto::StatusCell& status_cell_;
     const BootRestore& boot_restore_;
@@ -267,6 +278,8 @@ private:
     std::optional<ContentWatch> watch_{};
 
     cores::LoaderMemo loader_memo_{};
+
+    svc::GzipInflater inflater_{};
     Tally tally_{};
 };
 

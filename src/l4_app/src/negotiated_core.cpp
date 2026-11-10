@@ -4,66 +4,111 @@
 #include <memory>
 
 #include "app/cheat_catalog_pack.h"
+#include "app/stream_io.h"
 #include "cores/cheat_records.h"
 #include "cores/core_profile.h"
 #include "cores/manifest_doc_role.h"
 #include "cores/registry.h"
 #include "infra/byte_view.h"
-#include "svc/file.h"
 
 namespace mister::app {
 
-const cores::CoreFactory* NegotiatedCore::load_row() const {
+proto::TxSlabId NegotiatedCore::key_names(
+    const proto::ConfStr& cs,
+    const UiRequest::LoadCore& pending
+) {
+    TASTY_SEAT_BODY(NegotiatedCore);
+    const std::string_view name = cs.name();
+
+    remembered_stem_ = RememberedStem::of(name, pending_facts_);
+    elect_defmra_(cs.default_manifest(), pending);
+    const proto::TxSlabId cfg = intern_saved_cfg_(effective_name(name, pending_facts_));
+
+    (void)saved_cfg_stem_.assign(effective_name(name, pending_facts_));
+    return cfg;
+}
+
+void NegotiatedCore::latch_mra_facts(const UiRequest::LoadCore& pending) {
+    TASTY_SEAT_BODY(NegotiatedCore);
+    facts_pending_ = false;
+    pending_facts_ = MraFacts{};
+    defmra_rel_.clear();
+    if (pending.xml != XmlKind::Mra || pending.path.empty()) {
+        intern_manifest_({});
+        return;
+    }
+    pending_facts_ = mra_facts_at(vfs_, pending.path.view());
+    facts_pending_ = true;
+    intern_manifest_(pending.path.view());
+}
+
+void NegotiatedCore::forget() noexcept {
+    TASTY_SEAT_BODY(NegotiatedCore);
+
+    conf_str_.reset();
+    pending_ram_image_ = {};
+    core_live_ = false;
+}
+
+void NegotiatedCore::note_build(std::string_view built_from) {
+    TASTY_SEAT_BODY(NegotiatedCore);
+    made_with_manifest_ = !built_from.empty();
+    if (!made_with_manifest_ || !manifest_rel_.assign(built_from))
+        manifest_rel_ = PathText{};
+}
+
+std::string NegotiatedCore::defmra_elected(
+    std::string_view text,
+    const UiRequest::LoadCore& pending
+) const {
+    TASTY_SEAT_BODY(NegotiatedCore);
+    if (pending.xml == XmlKind::Mra)
+        return {};
+    std::string rel = default_manifest_rel(text);
+    if (rel.empty() || !vfs_.file_exists(rel))
+        return {};
+    return rel;
+}
+
+std::string_view NegotiatedCore::manifest_text() const noexcept {
+    TASTY_SEAT_BODY(NegotiatedCore);
+    if (manifest_doc_.empty())
+        return {};
+    return infra::as_text(std::span(manifest_doc_));
+}
+
+infra::OptRef<const cores::CoreFactory> NegotiatedCore::load_row() const {
     TASTY_SEAT_BODY(NegotiatedCore);
     const auto hint = made_with_manifest() ? cores::LoadHint::XmlManifest : cores::LoadHint::None;
-    const auto row = cores::find_core(core_name().view(), hint);
-    return row ? *row : nullptr;
+    return cores::find_core(core_name().view(), hint);
 }
 
 const cores::CoreProfile& NegotiatedCore::loaded_profile() const {
     TASTY_SEAT_BODY(NegotiatedCore);
     const auto hint = made_with_manifest() ? cores::LoadHint::XmlManifest : cores::LoadHint::None;
-    const auto row = cores::find_core(core_name().view(), hint);
-    return row ? *(*row)->profile : cores::profile_for({});
+    return cores::profile_for(core_name().view(), hint);
 }
 
 bool NegotiatedCore::owns_loader() const {
     TASTY_SEAT_BODY(NegotiatedCore);
-    const cores::CoreFactory* row = load_row();
-    return row != nullptr && row->make_loader != nullptr;
+    const auto row = load_row();
+    return row && row->make_loader != nullptr;
+}
+
+void NegotiatedCore::intern_manifest_(std::string_view rel) {
+    manifest_doc_ = read_manifest_(rel);
+    pack_manifest_cheats_(manifest_doc_);
 }
 
 std::vector<std::uint8_t> NegotiatedCore::read_manifest_(std::string_view rel) const {
     TASTY_SEAT_BODY(NegotiatedCore);
-    std::vector<std::uint8_t> buf;
-    if (!rel.empty()) {
-        auto f = vfs_.open(rel, svc::OpenMode::ReadWhole);
-        if (f) {
-            auto sz = (*f)->size();
-            const auto role = cores::manifest_doc_role();
-            const proto::FileSize max_doc = role ? proto::FileSize{role->doc_max()}
-                                                 : kManifestDocMax;
-            if (sz && *sz != proto::FileSize{} && *sz <= max_doc) {
-                buf.resize(static_cast<std::size_t>(sz->v));
-                std::size_t off = 0;
-                bool ok = true;
-                while (off < buf.size()) {
-                    auto n = (*f)->read_at(
-                        off,
-                        std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(off))
-                    );
-                    if (!n || *n == 0) {
-                        ok = false;
-                        break;
-                    }
-                    off += *n;
-                }
-                if (!ok)
-                    buf.clear();
-            }
-        }
-    }
-    return buf;
+    if (rel.empty())
+        return {};
+    const auto role = cores::manifest_doc_role();
+    const proto::FileSize max_doc = role ? proto::FileSize{role->doc_max()} : kManifestDocMax;
+
+    auto doc = read_file(vfs_, rel, max_doc);
+    return doc ? std::move(*doc) : std::vector<std::uint8_t>{};
 }
 
 void NegotiatedCore::pack_manifest_cheats_(std::span<const std::uint8_t> doc) {
@@ -74,7 +119,31 @@ void NegotiatedCore::pack_manifest_cheats_(std::span<const std::uint8_t> doc) {
         return;
     }
     const std::unique_ptr<cores::ICheatRecords> records = role->cheats_of(infra::as_text(doc));
-    pack_cheat_catalog(*records, cheats_);
+    cheats_ = pack_cheat_catalog(*records);
+}
+
+void NegotiatedCore::elect_defmra_(std::string_view text, const UiRequest::LoadCore& pending) {
+    defmra_rel_.clear();
+
+    if (pending.xml == XmlKind::Mra)
+        return;
+    pending_facts_ = MraFacts{};
+    intern_manifest_({});
+    const std::string rel = defmra_elected(text, pending);
+    if (rel.empty())
+        return;
+    pending_facts_ = mra_facts_at(vfs_, rel);
+    defmra_rel_ = rel;
+    intern_manifest_(rel);
+}
+
+proto::TxSlabId NegotiatedCore::intern_saved_cfg_(std::string_view core_name) {
+    if (core_name.empty())
+        return {};
+    std::string rel = "config/";
+    rel += core_name;
+    rel += ".CFG";
+    return intern_exact(vfs_, inbox_, rel, kCoreCfgBytes);
 }
 
 }

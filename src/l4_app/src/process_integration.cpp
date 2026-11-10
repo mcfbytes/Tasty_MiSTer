@@ -17,7 +17,13 @@
 
 namespace mister::app::proc {
 
-[[nodiscard]] Ex<int> uartmode_script(std::uint8_t mode) {
+namespace {
+
+constexpr os::ChildProcessExit::ExitStatus kExecFailed{127};
+
+}
+
+[[nodiscard]] Ex<os::ChildProcessExit> uartmode_script(std::uint8_t mode) {
 
     char n[8] = {};
     const int len = std::snprintf(n, sizeof n, "%u", static_cast<unsigned>(mode));
@@ -28,10 +34,12 @@ namespace mister::app::proc {
     if (!rc)
         return std::unexpected(rc.error());
 
-    if (!rc->signalled && rc->code == 127) {
+    if (rc->exited_with(os::ChildProcessExit::ExitStatus{kExecFailed})) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     }
-    return rc->code;
+    if (rc->reap_failed())
+        return std::unexpected(Error{Errc::os, ERR_SITE(), 0});
+    return *rc;
 }
 
 [[nodiscard]] Ex<void> mlinkutil_baud(cores::BaudRate) {
@@ -61,7 +69,7 @@ namespace mister::app::proc {
     auto rc = os::run_sync(argv);
     if (!rc)
         return std::unexpected(rc.error());
-    if (!rc->signalled && rc->code == 127)
+    if (rc->exited_with(kExecFailed))
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
@@ -72,7 +80,7 @@ namespace mister::app::proc {
     auto rc = os::run_sync(argv);
     if (!rc)
         return std::unexpected(rc.error());
-    if (!rc->signalled && rc->code == 127)
+    if (rc->exited_with(kExecFailed))
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
@@ -88,7 +96,7 @@ namespace mister::app::proc {
     auto rc = os::run_sync(argv);
     if (!rc)
         return std::unexpected(rc.error());
-    if (!rc->signalled && rc->code == 127)
+    if (rc->exited_with(kExecFailed))
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
@@ -104,19 +112,29 @@ namespace mister::app::proc {
     auto rc = os::run_sync(argv);
     if (!rc)
         return std::unexpected(rc.error());
-    if (!rc->signalled && rc->code == 127)
+    if (rc->exited_with(kExecFailed))
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 127});
     return {};
 }
 
 void widen_ui_affinity() noexcept {
-    if (!hal::widen_self_affinity())
-        std::fprintf(stderr, "mister: T-UI affinity widen not applied\n");
+    if (const auto w = hal::widen_self_affinity(); !w)
+        std::fprintf(
+            stderr,
+            "mister: T-UI affinity widen not applied (Errc=%u detail=%u)\n",
+            static_cast<unsigned>(w.error().code),
+            w.error().detail
+        );
 }
 
 void restore_ui_affinity() noexcept {
-    if (!hal::restore_self_affinity())
-        std::fprintf(stderr, "mister: T-UI affinity narrow not applied\n");
+    if (const auto n = hal::restore_self_affinity(); !n)
+        std::fprintf(
+            stderr,
+            "mister: T-UI affinity narrow not applied (Errc=%u detail=%u)\n",
+            static_cast<unsigned>(n.error().code),
+            n.error().detail
+        );
 }
 
 [[nodiscard]] Ex<void> write_tmp_handoff(const char* path, std::string_view data) {

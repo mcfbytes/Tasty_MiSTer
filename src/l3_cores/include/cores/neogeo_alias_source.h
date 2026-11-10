@@ -3,16 +3,14 @@
 
 #include <cstdint>
 #include <string>
-#include <string_view>
 
-#include "cores/romsets.h"
+#include "cores/romset_alias_source.h"
+#include "cores/romset_index.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
 
-class IRomsetFiles;
-
-class NeoGeoAliasSource final {
+class NeoGeoAliasSource final : public IRomsetAliasSource {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
@@ -20,16 +18,14 @@ public:
 
     [[nodiscard]] RomsetAlias query(
         IRomsetFiles& files,
-        std::string_view dir,
-        std::string_view home,
-        std::string_view entry,
-        std::string_view key
-    );
+        BrowseDirs dirs,
+        EntryLookup entry
+    ) override;
 
     std::uint32_t index_scans() const noexcept { return scans_; }
 
 private:
-    void ensure_index(IRomsetFiles& files, std::string_view dir, std::string_view home);
+    void ensure_index(IRomsetFiles& files, BrowseDirs dirs);
 
     std::string indexed_dir_;
     bool indexed_ = false;

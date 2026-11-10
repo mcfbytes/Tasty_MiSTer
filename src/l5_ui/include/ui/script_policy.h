@@ -12,6 +12,7 @@
 namespace mister::ui {
 
 class IBtOps;
+class ScriptRequest;
 
 class IScriptPolicy {
 public:
@@ -27,9 +28,9 @@ public:
 
     virtual bool is_pairing() const noexcept = 0;
 
-    [[nodiscard]] virtual Ex<Spawn> resolve(std::string_view argv0) const = 0;
+    [[nodiscard]] virtual Ex<Spawn> resolve(const ScriptRequest& req) const = 0;
 
-    virtual void before_spawn(bool bt_reset, infra::OptRef<IBtOps> bt) const = 0;
+    virtual void before_spawn(const ScriptRequest& req, infra::OptRef<IBtOps> bt) const = 0;
     virtual void stop(std::string_view title) const = 0;
     virtual std::string_view running_footer() const noexcept = 0;
     virtual bool renews_on_back() const noexcept = 0;

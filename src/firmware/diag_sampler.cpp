@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "diag_sampler.h"
 
-#include "assembly.h"
-#include "boot_parts.h"
+#include "infra/wired_end.h"
 #include "rt_evidence.h"
 #include "infra/seat.h"
 #include "round_trace_record.h"
 #include "rtstats_format.h"
+#include "os/vm_status.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -17,6 +17,7 @@
 #include <limits>
 #include <optional>
 #include <tuple>
+#include <utility>
 
 #include "app/event.h"
 #include "app/log_clock.h"
@@ -26,14 +27,15 @@
 #include "app/input_pipeline.h"
 #include "app/screenshot_queue.h"
 #include "svc/chd_prefetch.h"
+#include "svc/input_service_counts.h"
 
 namespace mister::fw {
 
+using infra::wired_end;
+
 namespace {
 
-enum RingSlot : std::size_t { kRingCmd, kRingEvent, kRingPrefetch, kRingLog };
-
-static_assert(kRingLog + 1 == kNumRings);
+using Ring = xthread::RtStats::Ring;
 
 template <std::same_as<std::uint8_t>... Bytes>
 [[nodiscard]] constexpr std::uint32_t pack_bytes(Bytes... bytes) noexcept {
@@ -44,16 +46,11 @@ template <std::same_as<std::uint8_t>... Bytes>
 }
 
 DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
+    const DiagSampler::DeviceCells& d = sources.device;
     return DiagRecords{
-        SessRecord{
-            sources.pause_expiries,
-            sources.recover_polls,
-            sources.save_write_failures,
-            sources.fallbacks,
-            sources.ini_write_failures
-        },
-        BayRecord{sources.bay_counts, sources.sector_route, sources.osd_route, sources.sys_route},
-        RndRecord{sources.round_timing},
+        SessRecord{d.sess},
+        BayRecord{d.bay_counts, d.sector_route, d.osd_route, d.sys_route},
+        RndRecord{d.round_timing},
         TasRecord{sources.replay},
         RecRecord{sources.rec_capture, sources.rec_encode, sources.rec_write, sources.rec_avi},
         HdRecord{sources.hd},
@@ -61,58 +58,75 @@ DiagRecords make_records(const DiagSampler::Sources& sources) noexcept {
     };
 }
 
+[[nodiscard]] constexpr std::chrono::duration<std::uint32_t, std::milli> epoch_ms_of(
+    const reactor::RoundTiming& t
+) noexcept {
+    constexpr auto kMaxMs = std::numeric_limits<std::uint32_t>::max();
+    const std::uint64_t ms = std::chrono::floor<std::chrono::duration<std::uint64_t, std::milli>>(
+                                 std::chrono::duration<std::uint64_t, std::nano>{t.epoch_ns}
+    )
+                                 .count();
+    return std::chrono::duration<std::uint32_t, std::milli>{
+        ms > kMaxMs ? kMaxMs : static_cast<std::uint32_t>(ms)
+    };
+}
+
+static_assert(
+    epoch_ms_of(reactor::RoundTiming{.epoch_ns = 1'000'000}).count() == 1,
+    "a millisecond is one millisecond, not a raw nano count"
+);
+static_assert(
+    epoch_ms_of(reactor::RoundTiming{.epoch_ns = std::numeric_limits<std::uint64_t>::max()}).count()
+        == std::numeric_limits<std::uint32_t>::max(),
+    "the record's field saturates, as the %u slot requires"
+);
+
 }
 
 DiagSampler::DiagSampler(
-    xthread::RtStats& stats,
-    app::EventQueue<SeatTag::RT>& events,
-    const xthread::Telemetry<RtEvidence, SeatTag::Main>& ev,
-    const xthread::WakeFlag& quiescing,
-    const xthread::Telemetry<bool, SeatTag::RT>& transitioning,
-    xthread::DiagLog& diag,
-    xthread::LogLane& rt_lane,
+    const Wiring& wiring,
     const Sources& sources,
     const Services& services
 ) noexcept
-    : stats_(stats),
-      events_(events),
-      ev_cell_(ev),
-      quiescing_(quiescing),
-      transitioning_(transitioning),
+    : stats_(wiring.stats),
+      events_(wiring.events),
+      ev_cell_(wiring.ev),
+      quiescing_(wiring.quiescing),
+      transitioning_(wiring.transitioning),
       video_wire_(sources.video_wire),
       input_build_(services.input_build),
       input_(services.input_sample),
       prefetch_(services.prefetch),
-      frames_(sources.frames),
-      shots_(sources.screenshots),
+      frames_(sources.device.frames),
+      shots_(sources.device.screenshots),
       frame_src_(services.frame_source),
       fifo_stats_(sources.fifo),
       mgl_stats_(sources.mgl),
-      mgl_row0_(sources.mgl_row0),
-      window_counts_(sources.window_counts),
+      mgl_row0_(sources.device.mgl_row0),
+      window_counts_(sources.device.window_counts),
       video_stats_(sources.video_stats),
       video_geo_(sources.video_geometry),
-      diag_cell_(sources.diag),
+      diag_cell_(sources.device.diag),
       rec_capture_(sources.rec_capture),
       rec_encode_(sources.rec_encode),
-      doorbell_cell_(sources.doorbell),
-      round_timing_(sources.round_timing),
-      round_traces_(sources.round_traces),
+      doorbell_cell_(sources.device.doorbell),
+      round_timing_(sources.device.round_timing),
+      round_traces_(sources.device.round_traces),
       trace_rx_(wired_end(
-          sources.round_traces.consumer(),
+          sources.device.round_traces.consumer(),
           "T-DIAG: round trace lane consumer minted twice"
       )),
       ui_pages_(sources.ui_pages),
-      diag_(diag),
-      lane_rt_(rt_lane),
-      log_rx_(wired_end(rt_lane.consumer(), "T-DIAG: RT log lane consumer minted twice")),
-      lane_main_(sources.main_log),
+      diag_(wiring.diag),
+      lane_rt_(wiring.rt_lane),
+      log_rx_(wired_end(wiring.rt_lane.consumer(), "T-DIAG: RT log lane consumer minted twice")),
+      lane_main_(sources.device.main_log),
       main_rx_(
-          sources.main_log ? wired_end(
-                                 sources.main_log->consumer(),
-                                 "T-DIAG: MAIN log lane consumer minted twice"
-                             )
-                           : xthread::MainLogLane::Consumer{}
+          sources.device.main_log ? wired_end(
+                                        sources.device.main_log->consumer(),
+                                        "T-DIAG: MAIN log lane consumer minted twice"
+                                    )
+                                  : xthread::MainLogLane::Consumer{}
       ),
       records_(make_records(sources)) {}
 
@@ -124,17 +138,17 @@ std::uint64_t DiagSampler::rss_ceiling_now() const noexcept {
     return rss_ceiling_bytes(cap_kib, chunk_kib);
 }
 
-void DiagSampler::observe_rss(std::uint64_t rss, std::uint64_t ceiling) noexcept {
-    diag_stats_.rss_bytes.publish(rss);
-    rss_over_streak_ = rss > ceiling ? rss_over_streak_ + 1 : 0;
+void DiagSampler::observe_rss(RssSample reading) noexcept {
+    diag_stats_.rss_bytes.publish(reading.rss_bytes);
+    rss_over_streak_ = reading.over() ? rss_over_streak_ + 1 : 0;
 
     if (rss_over_streak_ == kRssOverSamples) {
         diag_stats_.rss_over_ceiling.add();
         std::fprintf(
             stderr,
-            "memory use %llu bytes is over the expected ceiling %llu\n",
-            static_cast<unsigned long long>(rss),
-            static_cast<unsigned long long>(ceiling)
+            "memory use %s bytes is over the expected ceiling %s\n",
+            reading.rss_bytes.text().c_str(),
+            reading.ceiling_bytes.text().c_str()
         );
     }
 }
@@ -166,14 +180,19 @@ void DiagSampler::sample(bool stopping) noexcept {
     }
 
     const std::uint64_t ceiling = rss_ceiling_now();
-    if (auto rss = read_vm_rss_bytes())
-        observe_rss(*rss, ceiling);
+    if (auto rss = os::read_vm_rss_bytes())
+        observe_rss(
+            RssSample{
+                .rss_bytes = proto::FileSize::of(*rss),
+                .ceiling_bytes = proto::FileSize{ceiling}
+            }
+        );
 
     if (prefetch_) {
-        stats_.ring_drops[kRingPrefetch].set(prefetch_->counters().drops);
+        stats_.drops(Ring::prefetch).set(prefetch_->counters().drops);
     }
 
-    stats_.ring_drops[kRingLog].set(lane_rt_.losses().total());
+    stats_.drops(Ring::log).set(lane_rt_.losses().total());
 
     diag_stats_.drains.add();
 
@@ -209,29 +228,30 @@ void DiagSampler::sample(bool stopping) noexcept {
             last_spin_ = stats_.spin_timeouts.get();
             alarm = true;
         }
-        for (std::size_t r = 0; r < kNumRings; ++r) {
-            if (stats_.ring_drops[r].get() != last_ring_[r]) {
-                last_ring_[r] = stats_.ring_drops[r].get();
+        for (const Ring r : {Ring::cmd, Ring::event, Ring::prefetch, Ring::log}) {
+            const std::size_t slot = infra::ordinal(r);
+            const std::uint32_t n = stats_.drops(r).get();
+            if (n != last_ring_[slot]) {
+                last_ring_[slot] = n;
                 alarm = true;
             }
         }
 
         std::uint32_t dlm = 0;
-        for (std::size_t i = 0; i < kMaxServices; ++i) {
-            const std::uint32_t n = stats_.deadline_miss[i].get();
-            dlm = app::sat_u32(std::uint64_t{dlm} + n);
+        for (const xthread::Counter& miss : stats_.deadline_miss) {
+            dlm = app::sat_u32(std::uint64_t{dlm} + miss.get());
         }
 
         if (dlm > last_dlm_)
             alarm = true;
         last_dlm_ = dlm;
         if (alarm)
-            render_records("alarm");
+            render_records(RecordReason::Alarm);
 
         if (const std::uint32_t d = stats_.dump_requests.load(std::memory_order_relaxed);
             d != last_dump_) {
             last_dump_ = d;
-            render_records("cmd");
+            render_records(RecordReason::Cmd);
         }
     }
 
@@ -247,7 +267,7 @@ void DiagSampler::answer() noexcept {
         if (const std::uint32_t d = stats_.dump_requests.load(std::memory_order_relaxed);
             d != last_dump_) {
             last_dump_ = d;
-            render_records("cmd");
+            render_records(RecordReason::Cmd);
         }
     }
     drain_screenshots();
@@ -258,7 +278,7 @@ void DiagSampler::render_final() noexcept {
         return;
     drain_round_traces();
     voice_trace_drops_();
-    render_records("final");
+    render_records(RecordReason::Final);
 }
 
 void DiagSampler::drain_screenshots() noexcept {
@@ -266,7 +286,13 @@ void DiagSampler::drain_screenshots() noexcept {
         bool ok = false;
         if (frame_src_) {
             if (auto frame = frame_src_->capture(req->scaled != 0); frame) {
-                const auto png = app::encode_png_rgb24(frame->width, frame->height, frame->rgb);
+                const auto png = png_.encode(
+                    app::PictureSize{
+                        app::PicturePixels::of(frame->width),
+                        app::PictureRows{static_cast<std::uint16_t>(frame->height)}
+                    },
+                    frame->rgb
+                );
                 if (!png.empty()) {
                     std::string path;
 
@@ -318,7 +344,7 @@ void DiagSampler::line_(
         "{\"t\":\"log\",\"k\":%u,\"sev\":%u,\"ts\":%llu,\"a\":%u,\"b\":%u}",
         static_cast<unsigned>(k),
         static_cast<unsigned>(h.sev),
-        static_cast<unsigned long long>(h.t_ns),
+        static_cast<unsigned long long>(h.t.count()),
         a,
         b
     );
@@ -329,23 +355,23 @@ void DiagSampler::render_log_rec(const LogRec& r) noexcept {
 }
 
 void DiagSampler::on(const LogRec::DeadlineMiss& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.over_ns, a.slot);
+    line_(a.kKind, h, a.over.count(), a.slot.wire());
 }
 
 void DiagSampler::on(const LogRec::SessionTransition& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.dwell_us, pack_bytes(a.from, a.to));
+    line_(a.kKind, h, a.dwell.count(), pack_bytes(a.from, a.to));
 }
 
 void DiagSampler::on(const LogRec::StagingRung& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.rung_us, a.rung_pc);
+    line_(a.kKind, h, a.rung.count(), a.rung_pc);
 }
 
 void DiagSampler::on(const LogRec::CoreLoad& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.load_ms, 0);
+    line_(a.kKind, h, a.load.count(), 0);
 }
 
 void DiagSampler::on(const LogRec::CoreUnload& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.detach_ms, 0);
+    line_(a.kKind, h, a.detach.count(), 0);
 }
 
 void DiagSampler::on(const LogRec::Mount& a, const LogRec::Head& h) noexcept {
@@ -361,7 +387,7 @@ void DiagSampler::on(const LogRec::Refusal& a, const LogRec::Head& h) noexcept {
         "{\"t\":\"log\",\"k\":%u,\"sev\":%u,\"ts\":%llu,\"a\":%u,\"b\":%u}",
         static_cast<unsigned>(a.kKind),
         static_cast<unsigned>(h.sev),
-        static_cast<unsigned long long>(h.t_ns),
+        static_cast<unsigned long long>(h.t.count()),
         static_cast<unsigned>(a.code),
         static_cast<unsigned>(a.site)
     );
@@ -384,7 +410,7 @@ void DiagSampler::on(const LogRec::PhaseTolerated& a, const LogRec::Head& h) noe
 }
 
 void DiagSampler::on(const LogRec::ConfStrArrived& a, const LogRec::Head& h) noexcept {
-    line_(a.kKind, h, a.bind_gen, pack_bytes(a.phase, a.under, a.awaited));
+    line_(a.kKind, h, a.bind_gen, pack_bytes(a.phase, a.under, std::uint8_t{a.awaited}));
 }
 
 static_assert(LogRecSink<DiagSampler>);
@@ -401,7 +427,10 @@ void DiagSampler::drain_log_lane() noexcept {
             break;
         render_log_rec(*r);
     }
-    voice_log_losses_(lane_rt_.losses().per_kind, last_log_loss_, "log");
+    voice_log_losses_(
+        loss_watch_[static_cast<std::size_t>(LogLaneId::Rt)].moved(lane_rt_.losses().per_kind),
+        LogLaneId::Rt
+    );
     if (lane_main_) {
         for (std::size_t n = 0; n < xthread::kMainLogLaneCap; ++n) {
             const std::optional<LogRec> r = main_rx_.pop();
@@ -409,7 +438,12 @@ void DiagSampler::drain_log_lane() noexcept {
                 break;
             render_log_rec(*r);
         }
-        voice_log_losses_(lane_main_->losses().per_kind, last_main_loss_, "log_main");
+        voice_log_losses_(
+            loss_watch_[static_cast<std::size_t>(LogLaneId::Main)].moved(
+                lane_main_->losses().per_kind
+            ),
+            LogLaneId::Main
+        );
     }
 
     if (log_misrouted_ != last_log_misrouted_) {
@@ -508,46 +542,44 @@ void DiagSampler::misrouted(const reactor::RoundTrace&) noexcept {
     trace_misroutes_ = trace_misroutes_.added();
 }
 
-void DiagSampler::voice_log_losses_(
-    const LossCounts& losses,
-    LossCounts& last,
-    const char* src
-) noexcept {
-    for (std::size_t k = 0; k < infra::ordinal(LogRec::Kind::kCount); ++k) {
-        const auto lost = static_cast<LogRec::Kind>(k);
-        const std::uint32_t l = losses[k];
-        if (l == last[k])
+void DiagSampler::voice_log_losses_(const LossMoves& moved, LogLaneId lane) noexcept {
+    for (std::size_t k = 0; k < moved.size(); ++k) {
+        if (!moved[k])
             continue;
-        last[k] = l;
+        const auto lost = static_cast<LogRec::Kind>(k);
 
         render_log_rec(
             infra::make<LogRec>(
-                LogRec::RingLoss{.losses = l, .lost = lost},
-                LogRec::Head{xthread::sev_of(LogRec::Kind::RingLoss), {}, app::log_now_ns()}
+                LogRec::RingLoss{.losses = *moved[k], .lost = lost},
+                LogRec::Head{
+                    xthread::sev_of(LogRec::Kind::RingLoss),
+                    {},
+                    app::log_stamp(app::log_now())
+                }
             )
         );
         diag_.appendf(
             "{\"t\":\"drops\",\"src\":\"%s\",\"kind\":%u,\"n\":%u}",
-            src,
+            name(lane),
             static_cast<unsigned>(k),
-            l
+            *moved[k]
         );
     }
 }
 
 DiagSampler::CdInstruments DiagSampler::cd_instruments() const noexcept {
     CdInstruments c{};
-    for (std::size_t i = 0; i < kMaxServices; ++i) {
+    for (ServiceSlot i{}; i.index() < kMaxServices; i = i.next()) {
         const std::uint32_t n = stats_.deadline_miss[i].get();
         if (n == 0)
             continue;
-        c.deadline_slots |= (1u << i);
+        c.deadline_slots |= (1u << i.wire());
 
         c.deadline_misses = app::sat_u32(std::uint64_t{c.deadline_misses} + n);
     }
     if (prefetch_) {
         const svc::PrefetchCounters p = prefetch_->counters();
-        c.prefetch_state = p.state;
+        c.prefetch_state = std::to_underlying(p.state);
         c.hits = p.hits;
         c.misses = p.misses;
         c.decodes = p.decodes;
@@ -568,7 +600,7 @@ unsigned DiagSampler::rt_name_mask() const noexcept {
     static_assert(hal::kThreadSeats <= 32, "rt.nm is one 32-bit word");
     unsigned m = 0;
     for (std::size_t i = 0; i < hal::kThreadSeats; ++i) {
-        if (ev_.seat_name[i].applied)
+        if (ev_.seats[i].name.applied)
             m |= (1u << i);
     }
     return m;
@@ -578,7 +610,7 @@ unsigned DiagSampler::rt_first_errno() const noexcept {
     return fw::rt_first_errno(ev_);
 }
 
-void DiagSampler::render_records(const char* reason) noexcept {
+void DiagSampler::render_records(RecordReason reason) noexcept {
 
     if (auto fresh = ev_reader_.take_if_changed(ev_cell_))
         ev_ = *fresh;
@@ -589,7 +621,9 @@ void DiagSampler::render_records(const char* reason) noexcept {
         const app::LoadWindowCounts w = window_counts_.sample().value;
         dc.file_tx_window = w.windows;
         dc.file_tx_window_refusals = w.refusals;
-        dc.file_tx_window_refusal_code = w.refusal_code;
+        dc.file_tx_window_refusal_code = 0;
+        if (w.refusal)
+            dc.file_tx_window_refusal_code = static_cast<std::uint16_t>(*w.refusal);
     }
     render_rtstats(reason, dc);
     const RecordCtx ctx{dc};
@@ -614,7 +648,7 @@ void DiagSampler::emit_(const R& r, const RecordCtx& ctx) noexcept {
     diag_.append(o);
 }
 
-void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc) noexcept {
+void DiagSampler::render_rtstats(RecordReason reason, const app::DiagCounters& dc) noexcept {
 
     const app::DoorbellStats db = doorbell_cell_.sample().value;
     const std::uint32_t ev_lost_edge = app::delivery_losses(events_.losses(), app::Delivery::Edge);
@@ -667,10 +701,20 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         "{\"t\":\"trunc\"} marker"
     );
 
+    static_assert(
+        std::string_view{kRtstatsReasonWorstCase}.size()
+                >= std::string_view{name(RecordReason::Cmd)}.size()
+            && std::string_view{kRtstatsReasonWorstCase}.size()
+                >= std::string_view{name(RecordReason::Alarm)}.size()
+            && std::string_view{kRtstatsReasonWorstCase}.size()
+                >= std::string_view{name(RecordReason::Final)}.size(),
+        "TASTY_RTSTATS_WORST_ARGS must budget every RecordReason name"
+    );
+
     static_assert(reactor::round_bucket_edge_us(reactor::kRoundBuckets - 1) == 536871u);
     static_assert(infra::ordinal(reactor::RoundSegment::kCount) - 1 == 4u);
     static_assert(kMaxServices - 1 == 23u);
-    static_assert(reactor::kRoundLifecycleAll == 7u);
+    static_assert(reactor::kRoundLifecycleAll.mask() == 7u);
 
     const bool have_input = input_.has_value();
     const app::InputBuild::Counts build_counts = (have_input && input_build_)
@@ -680,11 +724,11 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         have_input ? *input_ : app::InputSample{},
         build_counts
     );
-    constexpr std::uint64_t kNsPerUs = 1000;
     static_assert(svc::kMaxPlayers == 6);
-    const auto& [hash0, hash1, hash2, hash3, hash4, hash5] = ips.slot_hash;
+    const svc::InputServiceCounts& isc = ips.service;
+    const auto [hash0, hash1, hash2, hash3, hash4, hash5] = svc::printed_hashes(isc.slot_hash);
     const app::MglPumpStats ms = (mgl_stats_) ? mgl_stats_->sample().value : app::MglPumpStats{};
-    const std::uint32_t mgl_row0 = mgl_row0_.sample().value;
+    const std::uint32_t mgl_row0 = mgl_row0_.get();
 
     const app::UiPageRecord up = (ui_pages_) ? ui_pages_->sample().value : app::UiPageRecord{};
 
@@ -695,16 +739,16 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
     diag_.appendf(
         TASTY_RTSTATS_FMT,
         diag_seq_,
-        reason,
+        name(reason),
         static_cast<unsigned long long>(stats_.heartbeat.load(std::memory_order_relaxed)),
         static_cast<unsigned long long>(diag_stats_.drains.get()),
-        static_cast<unsigned long long>(diag_stats_.rss_bytes.sample().value),
+        diag_stats_.rss_bytes.sample().value.text().c_str(),
         diag_stats_.heartbeat_stalls.get(),
         diag_stats_.rss_over_ceiling.get(),
-        stats_.ring_drops[kRingCmd].get(),
-        stats_.ring_drops[kRingEvent].get(),
-        stats_.ring_drops[kRingPrefetch].get(),
-        stats_.ring_drops[kRingLog].get(),
+        stats_.drops(Ring::cmd).get(),
+        stats_.drops(Ring::event).get(),
+        stats_.drops(Ring::prefetch).get(),
+        stats_.drops(Ring::log).get(),
         stats_.spin_timeouts.get(),
         stats_.spurious_causes.get(),
         static_cast<unsigned>(events_.depth()),
@@ -717,7 +761,7 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         static_cast<unsigned>(dc.ladder_live),
         static_cast<unsigned>(dc.ladder_pc),
         dc.ladder_rungs,
-        static_cast<unsigned long long>(dc.ladder_bytes),
+        dc.ladder_bytes.text().c_str(),
         dc.ladder_assets,
         static_cast<unsigned>(dc.ladder_bios_found),
         static_cast<unsigned>(dc.ladder_disc_mounted),
@@ -757,25 +801,25 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         ps.afilter_skips,
         static_cast<unsigned>(ps.tail_fail),
         static_cast<unsigned>(ps.step),
-        app::VideoPump::i2c_outcome_name(vs.i2c),
+        app::video_i2c_outcome_name(vs.i2c),
         static_cast<unsigned>(vs.i2c_bus),
-        vs.i2c_writes,
-        vs.i2c_errors,
-        static_cast<unsigned>(vs.i2c_fail_reg),
+        vs.i2c_writes.v,
+        vs.i2c_errors.v,
+        static_cast<unsigned>(app::reg_for_print(vs.i2c_fail_reg).v),
         static_cast<unsigned>(vs.i2c_first_op),
-        static_cast<unsigned>(vs.i2c_first_reg),
-        static_cast<unsigned>(vs.i2c_first_errno),
-        static_cast<unsigned>(vs.i2c_last_errno),
+        static_cast<unsigned>(app::reg_for_print(vs.i2c_first_reg).v),
+        vs.i2c_first_errno.v,
+        vs.i2c_last_errno.v,
         vs.i2c_verify_errors,
         vs.i2c_poll_errors,
         vs.i2c_reprobes,
-        vs.i2c_trips,
+        vs.i2c_trips.v,
         static_cast<unsigned>(vs.i2c_breaker_open),
         vs.spd_sends,
         vs.spd_disables,
         vs.spd_skips_dv,
         vs.spd_noname,
-        static_cast<unsigned>(vs.spd_fail_reg),
+        static_cast<unsigned>(app::reg_for_print(vs.spd_fail_reg).v),
         ips.rounds,
         ips.events,
         ips.keys_emitted,
@@ -791,37 +835,37 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         ips.rt_errors,
         ips.devices,
         ips.registered,
-        ips.mapped,
-        ips.slotted,
+        isc.mapped.v,
+        isc.slotted.v,
         ips.gates.v,
-        ips.mask_changes,
-        ips.joy_seen,
-        ips.joy_players,
-        ips.axis_edges,
-        ips.mouse_remainder,
-        ips.key_overflows,
+        isc.mask_recomputes.v,
+        ips.joy_seen.v,
+        ips.joy_players.v,
+        isc.axis_edges.v,
+        isc.mouse_remainder_bytes.v,
+        isc.key_overflows.v,
         ips.ui_keys,
         ips.ui_keys_dropped,
-        ips.quirk_drops,
+        isc.quirk_drops.v,
         ips.rejected,
         0u,
         ips.button_actions,
-        ips.slot_live.text().c_str(),
-        ips.slot_ghosts,
-        hash0,
-        hash1,
-        hash2,
-        hash3,
-        hash4,
-        hash5,
+        isc.live.text().c_str(),
+        isc.ghost_slots.v,
+        hash0.text().c_str(),
+        hash1.text().c_str(),
+        hash2.text().c_str(),
+        hash3.text().c_str(),
+        hash4.text().c_str(),
+        hash5.text().c_str(),
         ms.file_items,
         ms.abandoned,
         ms.armed,
         ms.publishes,
         mgl_row0,
         dc.file_tx_count,
-        static_cast<unsigned long long>(dc.file_tx_bytes),
-        static_cast<unsigned>(dc.file_tx_index),
+        dc.file_tx_bytes.text().c_str(),
+        static_cast<unsigned>(dc.file_tx_index.fio_byte()),
         dc.file_tx_window,
         dc.file_tx_window_refusals,
         static_cast<unsigned>(dc.file_tx_window_refusal_code),
@@ -857,20 +901,20 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         rt_first_errno(),
 
         rnd.epoch,
-        reactor::round_us(rnd.epoch_ns / kNsPerUs),
+        epoch_ms_of(rnd).count(),
         rnd.steady.n,
         reactor::round_us(rnd.steady.min_ns),
         reactor::round_us(rnd.steady.max_ns),
         reactor::round_p99_us(rnd.steady),
         rnd.steady.over_1ms,
-        static_cast<unsigned>(rnd.steady.max_cause.seg),
-        static_cast<unsigned>(rnd.steady.max_cause.index),
+        static_cast<unsigned>(rnd.steady.max_blame.seg),
+        static_cast<unsigned>(rnd.steady.max_blame.index.wire()),
         rnd.lifecycle.n,
         reactor::round_us(rnd.lifecycle.max_ns),
         reactor::round_p99_us(rnd.lifecycle),
-        static_cast<unsigned>(rnd.lifecycle.max_cause.seg),
-        static_cast<unsigned>(rnd.lifecycle.max_cause.index),
-        static_cast<unsigned>(rnd.lifecycle.max_cause.lifecycle),
+        static_cast<unsigned>(rnd.lifecycle.max_blame.seg),
+        static_cast<unsigned>(rnd.lifecycle.max_blame.index.wire()),
+        static_cast<unsigned>(rnd.lifecycle.max_blame.lifecycle_marks.mask()),
         rnd.wake.n,
         reactor::round_avg_us(rnd.wake),
         reactor::round_us(rnd.wake.max_ns),
@@ -878,15 +922,15 @@ void DiagSampler::render_rtstats(const char* reason, const app::DiagCounters& dc
         rnd.tick_overruns,
         rnd.all_steady_rounds,
         reactor::round_us(rnd.all_steady_max_ns),
-        static_cast<unsigned>(rnd.all_steady_cause.seg),
-        static_cast<unsigned>(rnd.all_steady_cause.index),
+        static_cast<unsigned>(rnd.all_steady_blame.seg),
+        static_cast<unsigned>(rnd.all_steady_blame.index.wire()),
         rnd.steady_max_epoch,
         rnd.all_steady_over_1ms,
         rnd.all_life_rounds,
         reactor::round_us(rnd.all_life_max_ns),
-        static_cast<unsigned>(rnd.all_life_cause.seg),
-        static_cast<unsigned>(rnd.all_life_cause.index),
-        static_cast<unsigned>(rnd.all_life_cause.lifecycle),
+        static_cast<unsigned>(rnd.all_life_blame.seg),
+        static_cast<unsigned>(rnd.all_life_blame.index.wire()),
+        static_cast<unsigned>(rnd.all_life_blame.lifecycle_marks.mask()),
         reactor::round_us(rnd.all_wake_max_ns),
         cd.deadline_misses,
         cd.deadline_slots,

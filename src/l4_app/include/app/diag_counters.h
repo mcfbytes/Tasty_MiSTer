@@ -3,15 +3,17 @@
 
 #include <cstdint>
 
+#include "app/link_condition.h"
+#include "cores/cd_drive_state.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
 struct DiagCounters {
-
-    std::uint8_t link = 0;
+    LinkCondition link{};
     std::uint32_t core_shutdowns = 0;
     std::uint8_t stage_status_change = 0;
 
@@ -26,19 +28,19 @@ struct DiagCounters {
 
     std::uint32_t last_error_detail = 0;
 
-    std::uint8_t ladder_live = 0;
+    bool ladder_live = false;
 
     std::uint8_t ladder_pc = 0;
     std::uint32_t ladder_rungs = 0;
-    std::uint64_t ladder_bytes = 0;
+    proto::FileSize ladder_bytes{};
     std::uint32_t ladder_assets = 0;
     bool ladder_bios_found = false;
     bool ladder_disc_mounted = false;
     bool ladder_save_mounted = false;
 
     std::uint32_t file_tx_count = 0;
-    std::uint64_t file_tx_bytes = 0;
-    std::uint16_t file_tx_index = 0;
+    proto::FileSize file_tx_bytes{};
+    proto::WideIoIndex file_tx_index{};
 
     std::uint32_t file_tx_window = 0;
     std::uint32_t file_tx_window_refusals = 0;
@@ -80,10 +82,12 @@ struct DiagCounters {
 
     std::uint32_t cd_busy_ticks = 0;
     std::uint32_t cd_egress_abandons = 0;
-    std::uint8_t cd_drive_state = 0;
+
+    cores::CdDriveState cd_drive_state = cores::CdDriveState::NoDisc;
     bool cd_drive_is_data = true;
     std::uint32_t status_reply_refusals = 0;
-    std::uint32_t status_lw = 0;
+
+    bool status_lw = false;
     std::uint32_t status_lw_adopts = 0;
     std::uint32_t status_lw_stale = 0;
 
@@ -96,7 +100,7 @@ struct DiagCounters {
 
     std::uint32_t fed_refusals = 0;
 
-    std::uint32_t pads_on_lw = 0;
+    bool pads_on_lw = false;
 
     std::uint32_t osd_page_rows_link = 0;
     std::uint32_t osd_status_rows_link = 0;

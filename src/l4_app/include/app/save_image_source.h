@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -8,6 +9,8 @@
 
 #include "cores/core_profile.h"
 #include "infra/error.h"
+#include "infra/indexed_array.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/block_geometry.h"
 #include "proto/image_source.h"
@@ -21,7 +24,11 @@ class SaveImageSource final : public proto::IImageSource {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr unsigned kSlots = proto::kMaxAnnounceableSlot + 1;
+    static constexpr unsigned kSlots = proto::kAnnounceableSlots;
+
+    [[nodiscard]] static constexpr bool holds(proto::SlotIndex slot) noexcept {
+        return slot.below<kSlots>();
+    }
 
     enum class Attach : std::uint8_t { Detached, Attaching, Attached, Detaching };
 
@@ -57,7 +64,7 @@ public:
 
     void mark(proto::SlotIndex slot, Attach state) noexcept;
 
-    [[nodiscard]] svc::IStorageBackend* backend(proto::SlotIndex slot) noexcept;
+    [[nodiscard]] infra::OptRef<svc::IStorageBackend> backend(proto::SlotIndex slot) noexcept;
 
     [[nodiscard]] std::span<const std::byte> order(proto::SlotIndex slot) const noexcept;
 
@@ -72,12 +79,12 @@ private:
         cores::BlankSaveSpec blank{};
     };
 
-    Binding* find(proto::SlotIndex slot);
-    const Binding* find(proto::SlotIndex slot) const;
+    infra::OptRef<Binding> find(proto::SlotIndex slot);
+    infra::OptRef<const Binding> find(proto::SlotIndex slot) const;
 
-    Binding bindings_[kSlots]{};
+    infra::IndexedArray<Binding, kSlots, proto::SlotIndex> bindings_{};
 
-    svc::FileSlotBackend backends_[kSlots];
+    std::array<svc::FileSlotBackend, kSlots> backends_;
 };
 
 }

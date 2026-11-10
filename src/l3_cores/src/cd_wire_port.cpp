@@ -2,6 +2,7 @@
 #include "cores/cd_wire_port.h"
 
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -30,7 +31,7 @@ namespace mister::cores {
 
 namespace {
 
-constexpr std::uint32_t kSubcodeBracketWords = 2 + 2 + (1 + (kSubBytes + 2) / 2) + 2;
+constexpr std::uint32_t kSubcodeBracketWords = 2 + 2 + (1 + (svc::kSubcodeBytes + 2) / 2) + 2;
 constexpr std::uint32_t kFirstRoundWords = kSubcodeBracketWords
     + 2
     + 2
@@ -38,7 +39,7 @@ constexpr std::uint32_t kFirstRoundWords = kSubcodeBracketWords
     + proto::SpiFioQueue::kPieceWords;
 static_assert(kSubcodeBracketWords == 56 && kFirstRoundWords == 453);
 static_assert(
-    (kSubBytes + 2) + 2 * kRawFrame <= proto::SpiFioQueue::kSlabBytes,
+    (svc::kSubcodeBytes + 2) + 2 * svc::kRawFrameBytes <= proto::SpiFioQueue::kSlabBytes,
     "the primed pair and its subcode frame fit one act"
 );
 
@@ -49,13 +50,8 @@ consteval bool cd_split_fits_every_board() {
     return hal::every_measured(&hal::BoardProfile::timing, [](const hal::LinkTiming& g) consteval {
         const auto t = hal::LinkTimingValues::measured(g);
         return kFirstRoundWords <= t.round_budget_words
-            && hal::round_cost_ns(
-                   t.word_ns,
-                   t.base_round_ns,
-                   t.sleep_ns,
-                   t.round_budget_words + kInlineFrameWords
-               )
-            < static_cast<std::uint64_t>(reactor::kTickNs);
+            && t.round_cost(t.round_budget_words + kInlineFrameWords)
+            < std::chrono::nanoseconds{reactor::kTickNs};
     });
 }
 
@@ -66,6 +62,10 @@ static_assert(
 );
 
 constexpr std::size_t kStatusCommandWords = 1 + CdEngine::kMaxStatusWords;
+static_assert(
+    CdEngine::kMaxStatusWords == 6,
+    "UIO_CD_SET frames one opcode word plus the engine's six-word status ceiling"
+);
 
 }
 
@@ -138,11 +138,11 @@ Ex<void> CdWirePort::send_data(
     const auto q = fio_queue_;
     if (q && (!q->idle() || payload.size() > kInlineFrameBytes)) {
         const proto::SpiFioQueue::Bracket b{
-            proto::WideIoIndex{io_index.v},
+            proto::WideIoIndex::of(io_index),
             infra::byte_cast<const std::uint8_t>(payload)
         };
         if (q->append(std::span(&b, 1))) {
-            if (cdda_cap_ && io_index.v == cd_.io.cdda.v)
+            if (cdda_cap_ && cd_.io.cdda == io_index)
                 cdda_cap_->append(payload);
             return {};
         }
@@ -156,10 +156,10 @@ Ex<void> CdWirePort::bracket_inline(
     std::span<const std::byte> payload,
     proto::IImageSink& sink
 ) {
-    if (cdda_cap_ && io_index.v == cd_.io.cdda.v) {
+    if (cdda_cap_ && cd_.io.cdda == io_index) {
         cdda_cap_->append(payload);
     }
-    auto ds = proto::ImageBracket::open(sink, proto::WideIoIndex{io_index.v});
+    auto ds = proto::ImageBracket::open(sink, proto::WideIoIndex::of(io_index));
     if (!ds)
         return std::unexpected(ds.error());
 
@@ -183,17 +183,17 @@ Ex<void> CdWirePort::submit_sector(const CdSectorAct& act) {
     const auto q = fio_queue_;
     if (!q)
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), act.index.v});
-    if (cdda_cap_ && act.index.v == cd_.io.cdda.v)
+    if (cdda_cap_ && cd_.io.cdda == act.index)
         cdda_cap_->append(std::as_bytes(act.sector));
     std::array<proto::SpiFioQueue::Bracket, 2> b{};
     std::size_t n = 0;
     if (!act.subcode.empty())
-        b[n++] = {proto::WideIoIndex{act.sub_index.v}, act.subcode};
-    b[n++] = {proto::WideIoIndex{act.index.v}, act.sector};
+        b[n++] = {proto::WideIoIndex::of(act.sub_index), act.subcode};
+    b[n++] = {proto::WideIoIndex::of(act.index), act.sector};
     return q->submit(std::span(b.data(), n));
 }
 
-bool CdWirePort::can_send_data(std::uint16_t selector) {
+bool CdWirePort::can_send_data(cdwire::Selector selector) {
     TASTY_SEAT_BODY(CdWirePort);
     hal::ISpiTransport& link = link_;
     hal::Selected cs(link, hal::ChipSelect::Io);
@@ -201,7 +201,7 @@ bool CdWirePort::can_send_data(std::uint16_t selector) {
         ++wire_faults_;
         return false;
     }
-    if (auto r = link.transfer(hal::SpiWord{selector}); !r) {
+    if (auto r = link.transfer(selector.word()); !r) {
         ++wire_faults_;
         return false;
     }
@@ -216,6 +216,9 @@ bool CdWirePort::can_send_data(std::uint16_t selector) {
 Ex<void> CdWirePort::send_status(std::span<const std::uint16_t> words) {
     TASTY_SEAT_BODY(CdWirePort);
     const std::size_t n = words.size();
+
+    if (n > CdEngine::kMaxStatusWords)
+        return std::unexpected(Error{Errc::contract, ERR_SITE(), 0});
 
     if (const auto q = fio_queue_; q && !q->idle()) {
         std::uint16_t cmd[kStatusCommandWords] = {cdwire::kUioCdSet};
@@ -254,12 +257,10 @@ std::optional<CdCommandWords> CdWirePort::read_command_edge(CdEngine& eng) noexc
             failed = true;
         } else {
             const auto req = static_cast<std::uint8_t>(first->v);
-
-            static_cast<void>(eng.on_command_edge(req));
-            wanted = eng.command_wanted();
+            wanted = eng.on_command_edge(req);
             if (const auto sel = eng.command_selector(); wanted && sel) {
 
-                if (auto r = link.transfer(hal::SpiWord{*sel}); !r) {
+                if (auto r = link.transfer(sel->word()); !r) {
                     ++wire_faults_;
                     failed = true;
                 }

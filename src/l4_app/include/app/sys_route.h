@@ -10,8 +10,8 @@
 namespace mister::app {
 
 struct SysRoute {
-    std::uint32_t leased = 0;
-    std::uint32_t on_lw = 0;
+    bool leased = false;
+    bool on_lw = false;
     std::uint32_t drains = 0;
     std::uint32_t snapshots = 0;
     std::uint32_t retries = 0;

@@ -3,10 +3,13 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
+#include <span>
 
 #include "infra/error.h"
 #include "infra/fixed_ring.h"
 #include "infra/seat.h"
+#include "proto/frame_drops.h"
 #include "proto/ps2_command_port.h"
 #include "proto/ps2_frame.h"
 #include "proto/types.h"
@@ -35,9 +38,9 @@ class Ps2Keyboard {
 public:
     [[nodiscard]] Ex<void> key_event(HidUsage hid_usage, bool pressed);
 
-    [[nodiscard]] bool next_frame(Ps2Frame& out) noexcept;
+    [[nodiscard]] std::optional<Ps2Frame> next_frame() noexcept;
 
-    [[nodiscard]] Ex<void> accept_control(std::uint16_t word0);
+    void accept_control(std::uint16_t word0);
 
     void end_control() noexcept;
 
@@ -47,7 +50,7 @@ public:
 
     static constexpr std::size_t capacity() noexcept { return kFrameQueueCap; }
 
-    std::uint32_t frames_dropped_overflow() const noexcept { return drop_overflow_; }
+    FrameDrops overflow_drops() const noexcept { return drops_; }
 
     unsigned release_all();
 
@@ -57,15 +60,9 @@ private:
 
     static constexpr std::uint8_t kMaxFrameBytes = kPs2FrameBytes;
     static constexpr std::uint8_t kFrameQueueCap = 32;
-
-    struct Frame {
-        std::array<std::uint8_t, kMaxFrameBytes> bytes{};
-        std::uint8_t len = 0;
-    };
-
-    infra::FixedRing<Frame, kFrameQueueCap> frames_{};
-    std::uint32_t drop_overflow_ = 0;
-    void push_frame(const std::uint8_t* bytes, std::uint8_t len);
+    infra::FixedRing<Ps2Frame, kFrameQueueCap> frames_{};
+    FrameDrops drops_{};
+    void push_frame(std::span<const std::uint8_t> bytes);
 
     bool ps2_control_ = false;
     Ps2CommandPort port_;

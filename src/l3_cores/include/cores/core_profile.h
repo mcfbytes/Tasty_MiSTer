@@ -9,6 +9,7 @@
 #include "cores/blank_save_spec.h"
 #include "cores/boot_asset.h"
 #include "cores/cheat_lookup.h"
+#include "cores/config_codec.h"
 #include "cores/core_init_step.h"
 #include "cores/core_window_decl.h"
 #include "cores/file_slot.h"
@@ -19,8 +20,10 @@
 #include "cores/staging_policy.h"
 #include "cores/start_rule.h"
 #include "cores/types.h"
+#include "infra/ascii.h"
 #include "infra/error.h"
 #include "proto/sector_floor.h"
+#include "proto/types.h"
 #include "reactor/link_decoder_decl.h"
 #include "svc/disk_format_row.h"
 #include "infra/opt_ref.h"
@@ -29,6 +32,7 @@
 namespace mister::svc {
 class IAnalogReshape;
 class ISectorProgram;
+class IDiscIdentity;
 }
 
 namespace mister::cores {
@@ -76,14 +80,17 @@ struct SizeRow {
 };
 
 template <class T>
-constexpr const T* size_dispatch(std::span<const SizeRow<T>> rows, std::uint32_t size) {
+constexpr infra::OptRef<const T> size_dispatch(
+    std::span<const SizeRow<T>> rows,
+    std::uint32_t size
+) {
     for (const auto& r : rows) {
         const std::uint32_t lo = r.size_bytes - r.tolerance;
         const std::uint32_t hi = r.size_bytes + r.tolerance;
         if (size >= lo && size <= hi)
-            return &r.value;
+            return infra::OptRef<const T>{r.value};
     }
-    return nullptr;
+    return {};
 }
 
 struct CoreProfile {
@@ -129,7 +136,7 @@ struct CoreProfile {
 
     bool suppresses_mgl = false;
 
-    BaudRate default_uart_baud{115200};
+    BaudRate default_uart_baud{kDefaultUartBaud};
 
     std::string_view cue_browse_dir{};
 
@@ -147,6 +154,17 @@ struct CoreProfile {
 
     bool file_tx_whole = false;
 
+    struct GzipContent {
+        std::string_view ext{};
+        proto::FileSize cap{};
+
+        [[nodiscard]] bool wants(std::string_view file_ext) const noexcept {
+            return !ext.empty() && infra::ieq(file_ext, ext);
+        }
+    };
+
+    GzipContent gzip_content{};
+
     ResetRow reset{};
 
     StartMount undeclared_start_mount = StartMount::Generic;
@@ -156,6 +174,10 @@ struct CoreProfile {
     HostPolicy host{};
 
     infra::OptRef<const svc::ISectorProgram> sector_program{};
+
+    infra::OptRef<const svc::IDiscIdentity> disc_identity{};
+
+    infra::OptRef<const IConfigCodec> config_codec{};
 };
 
 [[nodiscard]] constexpr StartMount start_mount_of(const CoreProfile& p, IoIndex index) {

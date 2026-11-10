@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "cores/n64_memory_type.h"
+#include "cores/save_row_count.h"
 #include "proto/types.h"
 
 namespace mister::cores::n64 {

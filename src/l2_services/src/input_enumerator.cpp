@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/input_enumerator.h"
+#include "svc/admission_rule.h"
 #include "svc/analog_reshape.h"
 #include "svc/button_map.h"
-#include "svc/input_service.h"
 #include "svc/vfs.h"
 
 #include <dirent.h>
@@ -14,16 +14,13 @@
 #include <utility>
 
 #include "input_rules.h"
+#include "input_service_detail.h"
 
 namespace mister::svc {
 
 namespace {
 
 constexpr std::string_view kProcDevices = "/proc/bus/input/devices";
-
-Error os_error(infra::ErrorSite site) {
-    return Error{Errc::os, site, static_cast<std::uint32_t>(errno)};
-}
 
 [[nodiscard]] Ex<std::string> read_all(std::string_view path) {
     std::string name(path);
@@ -46,16 +43,14 @@ Error os_error(infra::ErrorSite site) {
     return out;
 }
 
-constexpr std::size_t kJoyMapBytes = map_spec(MapKind::Joystick).bytes;
-
 }
 
-InputEnumerator InputEnumerator::create() {
-    return InputEnumerator();
+InputEnumerator InputEnumerator::create(std::string_view input_dir) {
+    return InputEnumerator(input_dir);
 }
 
-InputEnumerator InputEnumerator::create(const Vfs& storage) {
-    return InputEnumerator(storage);
+InputEnumerator InputEnumerator::create(const Vfs& storage, std::string_view input_dir) {
+    return InputEnumerator(storage, input_dir);
 }
 
 DeviceTable InputEnumerator::take_table() noexcept {
@@ -84,7 +79,7 @@ Ex<void> InputEnumerator::enumerate() {
         if (!name.starts_with("event") && !name.starts_with("mouse"))
             continue;
         ++seen;
-        if (table_.devices.size() >= kMaxDevices) {
+        if (table_.full()) {
 
             ++stats_.overflow;
             continue;
@@ -117,7 +112,10 @@ bool InputEnumerator::admit_and_adopt(InputDevice&& dev) {
         return false;
     }
     dev.set_quirk(adm.quirk);
-    table_.devices.push_back(std::move(dev));
+    if (!table_.add(std::move(dev))) {
+        ++stats_.overflow;
+        return false;
+    }
     return true;
 }
 
@@ -137,8 +135,7 @@ Ex<void> InputEnumerator::resolve_identities() {
         proc = std::move(*text);
     }
 
-    const rules::SpinnerPolicy spin{spinner_vid_, spinner_pid_};
-    const rules::MergeStats st = rules::resolve_identities(slots, proc, cfg_no_merge_, spin);
+    const rules::MergeStats st = rules::resolve_identities(slots, proc, cfg_no_merge_, spinner_);
     const rules::UniquePolicy unique{false, false, unique_rows_};
     stats_.mouse_fixups = st.mouse_fixups;
     stats_.empty_id_skips = st.empty_id_skips;
@@ -153,18 +150,7 @@ Ex<void> InputEnumerator::resolve_identities() {
 
 void InputEnumerator::apply_deadzones() noexcept {
     for (InputDevice& d : table_.devices) {
-        const DeviceIdentity& id = d.identity();
-        d.set_deadzone(
-            rules::deadzone_for(
-                d.quirk(),
-                id.vid,
-                id.pid,
-                id.id,
-                d.sysfs(),
-                id.merge_id,
-                cfg_deadzone_
-            )
-        );
+        d.set_deadzone(rules::deadzone_for(d.facts(), cfg_deadzone_));
     }
 }
 
@@ -179,32 +165,30 @@ Ex<void> InputEnumerator::load_maps_for(
 
     const bool axis_emu = joy.stick_dpad;
 
-    const ButtonMap fallback_sys = rules::default_sys_map();
-    ButtonMap zero_map;
-    zero_map.kind = MapKind::Joystick;
-    zero_map.blob.assign(kJoyMapBytes, std::byte{0});
+    const SysWords fallback_sys = rules::default_sys_map();
+    const WireWords zero_map{};
 
     std::uint32_t mapped = 0;
     for (InputDevice& d : table_.devices) {
 
-        const ButtonMap* sys = &fallback_sys;
-        ButtonMap sys_file;
-        if (auto m = maps_.load(std::string_view{}, d.identity(), MapKind::Joystick, d.mod()); m) {
-            sys_file = std::move(*m);
+        const SysWords* sys = &fallback_sys;
+        SysWords sys_file{};
+        if (auto m = maps_.load_joy_words(std::string_view{}, d.identity(), d.mod()); m) {
+            sys_file = as_sys_words(*m);
             sys = &sys_file;
         }
-        if (const auto w = sys->words())
-            d.install_sys_map(*w);
+        d.install_sys_map(*sys);
 
         d.set_reshape(reshape);
 
-        const ButtonMap* wire = sys;
-        ButtonMap core_file;
-        ButtonMap derived;
+        WireWords sys_as_wire = as_wire_words(*sys);
+        const WireWords* wire = &sys_as_wire;
+        WireWords core_file{};
+        WireWords derived{};
         if (!core.empty()) {
-            if (auto m = maps_.load(core, d.identity(), MapKind::Joystick, d.mod()); m) {
+            if (auto m = maps_.load_joy_words(core, d.identity(), d.mod()); m) {
 
-                core_file = std::move(*m);
+                core_file = *m;
                 wire = &core_file;
             } else if (is_pdsp_like(d.quirk())) {
 
@@ -216,8 +200,7 @@ Ex<void> InputEnumerator::load_maps_for(
             }
         }
 
-        if (const auto w = wire->words())
-            d.install_joy_map(*w);
+        d.install_joy_map(*wire);
         if (d.has_nonzero_joy_map())
             ++mapped;
     }
@@ -228,12 +211,8 @@ Ex<void> InputEnumerator::load_maps_for(
 }
 
 Ex<void> InputEnumerator::adopt(InputDevice&& dev) {
-    if (table_.devices.size() >= kMaxDevices) {
-        return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(table_.devices.size())}
-        );
-    }
-    table_.devices.push_back(std::move(dev));
+    if (auto r = table_.add(std::move(dev)); !r)
+        return r;
     stats_.devices = static_cast<unsigned>(table_.devices.size());
     return {};
 }
@@ -247,12 +226,11 @@ void InputEnumerator::set_cfg_no_merge_rules(std::span<const NoMergeRule> rows) 
     cfg_no_merge_.assign(rows.begin(), rows.end());
 }
 
-void InputEnumerator::set_spinner(Vid vid, Pid pid) noexcept {
-    spinner_vid_ = vid;
-    spinner_pid_ = pid;
+void InputEnumerator::set_spinner(SpinnerPolicy spinner) noexcept {
+    spinner_ = spinner;
 }
 
-void InputEnumerator::set_unique_mapping(std::span<const std::uint32_t> rows) {
+void InputEnumerator::set_unique_mapping(std::span<const VidPidKey> rows) {
     unique_rows_.assign(rows.begin(), rows.end());
 }
 

@@ -9,7 +9,7 @@
 namespace mister::app {
 
 struct FrameDemand {
-    std::uint8_t on = 0;
+    bool on = false;
     std::uint8_t pad_[3]{};
 };
 

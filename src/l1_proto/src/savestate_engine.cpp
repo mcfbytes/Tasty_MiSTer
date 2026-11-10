@@ -1,25 +1,35 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/savestate_engine.h"
 
+#include <array>
 #include <utility>
 
 namespace mister::proto {
 
 namespace {
 
-enum : std::size_t { kPathSlack = 8 };
-
 enum : std::uint64_t {
     kHeaderWords = 2,
     kDwordBytes = 4,
 };
 
+struct SlotNameRow {
+    StateSlot slot;
+    const char* name;
+};
+
+constexpr auto kSlotNameRows = std::to_array<SlotNameRow>({
+    {StateSlot{0}, "savestate-0"},
+    {StateSlot{1}, "savestate-1"},
+    {StateSlot{2}, "savestate-2"},
+    {StateSlot{3}, "savestate-3"},
+});
+static_assert(kSlotNameRows.size() == SaveStateEngine::kSlots, "one name per state slot");
+
 constexpr infra::IndexedArray<const char*, SaveStateEngine::kSlots, StateSlot> make_slot_names() {
     infra::IndexedArray<const char*, SaveStateEngine::kSlots, StateSlot> names{};
-    constexpr const char* kText[] = {"savestate-0", "savestate-1", "savestate-2", "savestate-3"};
-    std::size_t i = 0;
-    for (const StateSlot slot : kStateSlots)
-        names[slot] = kText[i++];
+    for (const SlotNameRow& row : kSlotNameRows)
+        names[row.slot] = row.name;
     return names;
 }
 
@@ -32,86 +42,19 @@ bool exceeds_four_slot_span(const SaveStateDecl& ss, hal::PhysRegion aperture) n
     return span >= end;
 }
 
-std::string compose_path(std::string_view subdir, std::string_view stem, unsigned digit) {
-    std::string out;
-    out.reserve(SaveStateEngine::kDir.size() + subdir.size() + stem.size() + kPathSlack);
-    out.append(SaveStateEngine::kDir);
-    out.push_back('/');
-    out.append(subdir);
-    out.push_back('/');
-    out.append(stem);
-    if (digit != 0u) {
-        out.push_back('_');
-        out.push_back(static_cast<char>('0' + static_cast<int>(digit)));
-    }
-    out.append(SaveStateEngine::kExt);
-    return out;
-}
-
-}
-
-std::string SaveStateEngine::slot_file(
-    std::string_view subdir,
-    std::string_view stem,
-    unsigned digit
-) {
-    return compose_path(subdir, stem, digit);
 }
 
 bool SaveStateEngine::window_valid(const SaveStateDecl& ss) const noexcept {
-    if (ss.size == 0u || ss.size > kMaxSlotBytes)
-        return false;
-    const std::uint64_t low = aperture_.phys.v;
-    const std::uint64_t end = aperture_.phys.v + std::uint64_t{aperture_.len};
-    const std::uint64_t base = hal::to_phys(ss.base).v;
-    if (base < low || base >= end)
-        return false;
-    const std::uint64_t ss_end = base + std::uint64_t{ss.size};
-    return ss_end < end;
-}
-
-std::string SaveStateEngine::savestate_dir(const SaveTarget& target) {
-    const std::string_view subdir = target.arcade ? kArcadeSubdir : target.core_name;
-    std::string out;
-    out.reserve(kDir.size() + subdir.size() + 1u);
-    out.append(kDir);
-    out.push_back('/');
-    out.append(subdir);
-    return out;
-}
-
-std::string SaveStateEngine::savestate_stem(std::string_view rom_path) {
-    const std::size_t slash = rom_path.find_last_of('/');
-    std::string_view base = (slash == std::string_view::npos) ? rom_path
-                                                              : rom_path.substr(slash + 1u);
-    const std::size_t dot = base.find_last_of('.');
-    if (dot != std::string_view::npos)
-        base = base.substr(0, dot);
-    return std::string(base);
-}
-
-std::string SaveStateEngine::savestate_path(const SaveTarget& target, StateSlot slot) {
-    if (!slot.valid()) {
-        fatal(Error{Errc::slot_range, ERR_SITE(), slot.digit()}, "savestate slot");
-    }
-    const std::string_view subdir = target.arcade ? kArcadeSubdir : target.core_name;
-    return compose_path(subdir, savestate_stem(target.rom_path), slot.digit());
-}
-
-std::string SaveStateEngine::savestate_path_stock(const SaveTarget& target) {
-    const std::string_view subdir = target.arcade ? kArcadeSubdir : target.core_name;
-    return compose_path(subdir, savestate_stem(target.rom_path), 0u);
+    return ss.within(aperture_);
 }
 
 Ex<void> SaveStateEngine::arm(const SaveTarget& target) {
-    const std::string_view subdir = target.arcade ? kArcadeSubdir : target.core_name;
-    std::string stem = savestate_stem(target.rom_path);
 
-    if (subdir.empty() || stem.empty()) {
+    std::optional<SaveStateName> name = SaveStateName::of(target);
+    if (!name) {
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), 0});
     }
-    subdir_.assign(subdir);
-    stem_ = std::move(stem);
+    files_ = std::move(*name);
     armed_ = true;
     return {};
 }
@@ -129,7 +72,7 @@ std::uint32_t SaveStateEngine::shadow_counter(StateSlot slot) const {
 }
 
 std::string SaveStateEngine::path_for(StateSlot slot) const {
-    return compose_path(subdir_, stem_, slot.digit());
+    return files_.path(slot);
 }
 
 hal::PhysRegion SaveStateEngine::region_for(const SaveStateDecl& ss, StateSlot slot) {
@@ -250,7 +193,7 @@ Ex<void> SaveStateEngine::poll() {
     if (!mapped_ || !armed_)
         return {};
 
-    const auto now = env_.clock.now();
+    const std::chrono::nanoseconds now = env_.clock.now().time_since_epoch();
     if (next_scan_ && now < *next_scan_)
         return {};
     next_scan_ = now + kScanPeriod;

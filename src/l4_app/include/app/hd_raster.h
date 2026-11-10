@@ -2,17 +2,16 @@
 #pragma once
 
 #include <array>
-#include <cstdint>
 #include <memory>
-#include <span>
 
 #include "app/hd_badge_view.h"
 #include "app/hd_dirty.h"
 #include "app/hd_layout.h"
 #include "app/hd_rect.h"
+#include "app/hd_template_traits.h"
 #include "app/hd_theme.h"
-#include "app/hd_themes.h"
 #include "app/page_description.h"
+#include "app/px_plane.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -28,14 +27,9 @@ public:
         return open_(theme, layout);
     }
 
-    HdDirty render(
-        const PageDescription& page,
-        const HdBadgeView& badge,
-        std::span<std::uint16_t> panel,
-        std::uint32_t stride_px
-    ) {
+    HdDirty render(const PageDescription& page, const HdBadgeView& badge, PxPlane panel) {
         TASTY_SEAT_BODY(HdRaster);
-        return render_(page, badge, panel, stride_px);
+        return render_(page, badge, panel);
     }
 
     void close() {
@@ -53,8 +47,7 @@ private:
     virtual HdDirty render_(
         const PageDescription& page,
         const HdBadgeView& badge,
-        std::span<std::uint16_t> panel,
-        std::uint32_t stride_px
+        PxPlane panel
     ) = 0;
     virtual void close_() = 0;
     virtual void relayout_(const HdLayout& layout) = 0;

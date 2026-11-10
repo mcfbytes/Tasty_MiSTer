@@ -10,6 +10,7 @@
 #include "app/input_wire.h"
 #include "app/link_tx_channel.h"
 #include "app/osd_wire.h"
+#include "app/ui_page_record.h"
 #include "app/ui_round_port.h"
 #include "os/clock.h"
 #include "proto/link_event.h"
@@ -27,6 +28,8 @@
 namespace mister::app {
 class HdOsdScreen;
 class UiWriteLane;
+class VideoPump;
+class HpsFramebuffer;
 }
 
 namespace mister::ui {
@@ -50,6 +53,9 @@ public:
         infra::OptRef<app::HdOsdScreen> hd{};
 
         infra::OptRef<app::UiWriteLane> writes{};
+
+        infra::OptRef<const app::VideoPump> video{};
+        infra::OptRef<const app::HpsFramebuffer> fb{};
     };
 
     UiRound(
@@ -66,6 +72,8 @@ public:
           ctx_(ctx),
           input_(input),
           hd_(w.hd),
+          video_(w.video),
+          fb_(w.fb),
           ui_tx_(w.link_tx),
           clock_(clock),
           sampler_(w.sampler),
@@ -257,6 +265,9 @@ private:
     app::InputWire& input_;
 
     infra::OptRef<app::HdOsdScreen> hd_{};
+
+    infra::OptRef<const app::VideoPump> video_{};
+    infra::OptRef<const app::HpsFramebuffer> fb_{};
     app::LinkTxChannel<SeatTag::Ui>& ui_tx_;
     std::uint32_t ui_tx_drops_ = 0;
     std::uint32_t link_event_misrouted_ = 0;

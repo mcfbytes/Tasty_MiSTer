@@ -18,53 +18,51 @@
 
 namespace mister::app::phase {
 
-using Gen = proto::BindGeneration;
-
 struct Idle {};
 
 struct Asked {
-    Gen gen;
+    proto::BindGeneration gen;
 };
 
 struct Parking {
-    Gen gen;
+    proto::BindGeneration gen;
 };
 
 struct Programming {
-    Gen gen;
+    proto::BindGeneration gen;
     bool loaded = false;
 };
 
 struct AwaitIdentity {
-    Gen gen;
+    proto::BindGeneration gen;
     std::uint32_t tries = 0;
     std::optional<os::Deadline> bound{};
 };
 
 struct AwaitConfStr {
-    Gen gen;
+    proto::BindGeneration gen;
     bool loaded = false;
     std::optional<os::Deadline> bound{};
 };
 
 struct Building {
-    Gen gen;
+    proto::BindGeneration gen;
     proto::BindGeneration conf_gen;
     std::optional<os::Deadline> bound{};
 };
 
 struct Tail {
-    Gen gen;
+    proto::BindGeneration gen;
     proto::BindGeneration conf_gen;
 };
 
 struct Up {
-    Gen gen;
+    proto::BindGeneration gen;
     proto::BindGeneration conf_gen;
 };
 
 struct Refused {
-    Gen gen;
+    proto::BindGeneration gen;
     Errc why = Errc::negotiation;
     bool front_end = false;
     bool by_bridge = false;
@@ -83,7 +81,7 @@ using Stage = std::variant<
     Refused>;
 
 struct Recovering {
-    Gen gen;
+    proto::BindGeneration gen;
     Stage under{};
 };
 
@@ -171,6 +169,10 @@ inline constexpr auto kPhaseNames = std::to_array<std::string_view>(
 );
 static_assert(kPhaseNames.size() == kPhases);
 
+[[nodiscard]] constexpr std::string_view name(PhaseKind k) noexcept {
+    return kPhaseNames[static_cast<std::size_t>(k)];
+}
+
 enum class Stimulus : std::uint8_t {
     LoadCore,
     FrontEnd,
@@ -221,6 +223,10 @@ inline constexpr auto kStimulusNames = std::to_array<std::string_view>(
      "ProbeOkBuilding", "ProbeExhausted",   "Reboot",         "RebootQuiesced", "PauseWedged"}
 );
 static_assert(kStimulusNames.size() == kStimuli);
+
+[[nodiscard]] constexpr std::string_view name(Stimulus s) noexcept {
+    return kStimulusNames[static_cast<std::size_t>(s)];
+}
 
 enum class Origin : std::uint8_t { Design, Tree, Tolerance, Refusal };
 
@@ -493,7 +499,7 @@ static_assert(
 }
 
 struct Facts {
-    Gen gen;
+    proto::BindGeneration gen;
     bool loaded = false;
     proto::BindGeneration conf_gen{};
     Errc why = Errc::negotiation;
@@ -542,7 +548,7 @@ template <std::size_t... I>
     return make_indexed(k, f, std::make_index_sequence<kPhases>{});
 }
 
-[[nodiscard]] constexpr std::optional<Gen> gen_of(const Arm& p) noexcept {
+[[nodiscard]] constexpr std::optional<proto::BindGeneration> gen_of(const Arm& p) noexcept {
     using K = PhaseKind;
     switch (kind(p)) {
         case K::Idle:
@@ -750,9 +756,9 @@ static_assert(
 
 [[nodiscard]] consteval bool overlay_moves_stage_by_rows(std::size_t pair) {
     const PhaseKind o = pair < kStages ? PhaseKind::Recovering : PhaseKind::Rebooting;
-    const Facts f{.gen = Gen{1}, .loaded = true};
+    const Facts f{.gen = proto::BindGeneration{1}, .loaded = true};
     Facts own = f;
-    own.gen = Gen{2};
+    own.gen = proto::BindGeneration{2};
     const Stage stage = stage_of(make(static_cast<PhaseKind>(pair % kStages), own));
     const PhaseKind was = kind(stage);
     for (std::size_t i = 0; i < kStimuli; ++i) {
@@ -824,7 +830,7 @@ struct SwitchPhase {
         Origin origin = Origin::Design;
         PhaseKind at = PhaseKind::Idle;
         PhaseKind under = PhaseKind::Idle;
-        std::optional<Gen> gen{};
+        std::optional<proto::BindGeneration> gen{};
     };
 
     constexpr Taken take(Stimulus on, const Facts& f) noexcept {
@@ -927,7 +933,7 @@ private:
 
 [[nodiscard]] consteval bool wedge_rests_only_a_loaded_wait() {
     for (const bool loaded : {false, true}) {
-        const Facts f{.gen = Gen{1}, .loaded = loaded};
+        const Facts f{.gen = proto::BindGeneration{1}, .loaded = loaded};
         for (std::size_t st = 0; st < kStages; ++st) {
             const auto k = static_cast<PhaseKind>(st);
             const PhaseKind rest = k == PhaseKind::AwaitConfStr && loaded ? PhaseKind::Idle : k;

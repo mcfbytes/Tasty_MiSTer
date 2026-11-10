@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <vector>
 
 #include "svc/types.h"
+#include "app/file_intern.h"
 #include "app/interned_file.h"
 #include "app/ring_slab.h"
 #include "app/types.h"
@@ -29,33 +32,15 @@ public:
     FileBytes(const FileBytes&) = delete;
     FileBytes& operator=(const FileBytes&) = delete;
 
-    [[nodiscard]] Ex<proto::FileId> intern(
-        std::vector<std::uint8_t>&& bytes,
-        std::string_view ext,
-        std::string_view path,
-        hal::FabricAddr load_addr,
-        svc::Crc32 crc = {},
-        std::uint64_t whole = 0,
-        std::uint64_t offset = 0
-    );
+    [[nodiscard]] Ex<proto::FileId> intern(FileIntern&& file);
 
-    [[nodiscard]] bool stamp_save(proto::FileId file, proto::FileId save) noexcept;
-
-    [[nodiscard]] bool stamp_edge(proto::FileId file, ContentEdge edge) noexcept;
+    [[nodiscard]] bool stamp_remount(proto::FileId file) noexcept;
 
     [[nodiscard]] Ex<proto::FileId> intern_path(
         std::string_view path,
         proto::FileSize size,
         svc::Crc32 crc = {},
         std::uint32_t aux = 0
-    );
-
-    [[nodiscard]] Ex<proto::FileId> intern_at(
-        proto::FileId id,
-        std::vector<std::uint8_t>&& bytes,
-        std::string_view ext,
-        std::string_view path,
-        hal::FabricAddr load_addr
     );
 
     void send_staged(std::uint32_t at) noexcept { slab_.producer().send_staged(at); }
@@ -66,19 +51,22 @@ public:
 
     void take_sent() noexcept { slab_.consumer().take_sent(); }
 
-    [[nodiscard]] const InternedFile* get(proto::FileId id) const noexcept;
+    [[nodiscard]] infra::OptRef<const InternedFile> get(proto::FileId id) const noexcept;
 
 private:
     using Slab = RingSlab<InternedFile, kPool, Producer, SeatTag::RT>;
 
-    [[nodiscard]] Ex<std::uint8_t> stage_(std::string_view path) noexcept;
+    [[nodiscard]] static std::optional<proto::SlotIndex> pooled_slot_(proto::FileId id) noexcept;
+
+    [[nodiscard]] infra::OptRef<InternedFile> staged_payload_(proto::FileId id) noexcept;
+
+    [[nodiscard]] Ex<proto::SlotIndex> stage_(std::string_view path) noexcept;
     void reap_all_() noexcept;
     [[nodiscard]] std::uint16_t live_files_() const noexcept;
 
     Slab slab_;
-    std::vector<std::uint8_t> heap_[kPool]{};
-    InternedFile config_[InternedFile::kConfigSlots]{};
-    std::vector<std::uint8_t> config_heap_[InternedFile::kConfigSlots]{};
+
+    std::array<std::vector<std::uint8_t>, kPool> heap_{};
 };
 
 extern template class FileBytes<SeatTag::Main>;

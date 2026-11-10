@@ -6,6 +6,7 @@
 
 #include "app/durable_write.h"
 #include "app/event.h"
+#include "infra/polled.h"
 #include "svc/file.h"
 
 namespace mister::app {
@@ -81,11 +82,7 @@ void SaveStateAttach::take_ask_(const Ask& ask) noexcept {
     copy_.invalidate();
     ui_.held = ask.generation;
     ui_.facts.live = false;
-    const proto::SaveStateEngine::SaveTarget target{
-        ask.core_name.view(),
-        ask.rom_path.view(),
-        ask.arcade
-    };
+    const proto::SaveTarget target{ask.core_name.view(), ask.rom_path.view(), ask.arcade};
     if (!ui_.engine.arm(target) || !ui_.engine.window_valid(ask.decl)) {
         ui_.engine.disarm();
         answer_(false);
@@ -114,10 +111,11 @@ void SaveStateAttach::reap_() noexcept {
     if (!done)
         return;
     ui_.out = false;
-    bool attached = done.completed() && done->ok && !ui_.stale;
+
+    const bool stale = done->abort_at != ui_.abort_level;
+    bool attached = done.completed() && done->ok && !stale;
     if (done.completed() && done->aborted)
         ++ui_.facts.prime_aborts;
-    ui_.stale = false;
 
     if (attached) {
         attached = (ui_.engine.mapped() ? ui_.engine.rebind(done->decl)
@@ -182,8 +180,8 @@ void SaveStateAttach::on_ui_pause() noexcept {
     copy_.invalidate();
     ui_.raised = false;
     if (ui_.out) {
-        ui_.stale = true;
-        abort_.publish(++ui_.abort_level);
+        ui_.abort_level = ui_.abort_level.next();
+        abort_.publish(ui_.abort_level);
     }
 
     ui_.engine.disarm();
@@ -219,11 +217,7 @@ void SaveStateAttach::serve() noexcept {
         if (!io_.job)
             return;
         const PrimeOrder& order = *io_.job;
-        const proto::SaveStateEngine::SaveTarget target{
-            order.core_name.view(),
-            order.rom_path.view(),
-            order.arcade
-        };
+        const proto::SaveTarget target{order.core_name.view(), order.rom_path.view(), order.arcade};
         if (auto begun = io_.primer.begin(env, target, order.decl); !begun)
             finish_(false, begun.error());
         return;

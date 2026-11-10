@@ -40,15 +40,13 @@ public:
         return chd_->track_metadata(index);
     }
 
-    [[nodiscard]] Ex<std::size_t> read_subcode(
+    [[nodiscard]] Ex<std::span<std::byte>> read_subcode(
         proto::Lba lba,
         const Track& t,
         std::span<std::byte> dst
     );
 
     [[nodiscard]] bool prefetch_off() const noexcept { return !chd_ || geo_.hunk_bytes.empty(); }
-
-    void prefetch_hint(proto::Lba lba, const Track& t);
 
     [[nodiscard]] bool prefetch_opened() const noexcept { return prefetch_.get().opened(); }
 
@@ -101,7 +99,7 @@ private:
 
     std::reference_wrapper<ChdPrefetch> prefetch_;
 
-    std::size_t prefetch_depth_ = 0;
+    HunkCount prefetch_depth_{};
     std::uint32_t sync_decompress_ = 0;
 
     std::uint32_t park_timeouts_ = 0;

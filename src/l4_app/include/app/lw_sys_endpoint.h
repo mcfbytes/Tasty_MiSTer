@@ -6,6 +6,8 @@
 #include <optional>
 #include <utility>
 
+#include "app/lw_block_endpoint.h"
+#include "app/lw_line.h"
 #include "app/sys_grant.h"
 #include "app/sys_route.h"
 #include "hal/reg_block.h"
@@ -14,13 +16,13 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/monotonic_clock.h"
-#include "os/uio_handle.h"
 #include "proto/status_snapshot.h"
 #include "svc/io_coworker.h"
 
 namespace mister::app {
 
-class LwSysEndpoint final : public svc::IIoCoworker {
+class LwSysEndpoint final : public svc::IIoCoworker,
+                            public LwBlockEndpoint<SysGrant, SysRoute, SeatTag::Io> {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
@@ -46,7 +48,6 @@ public:
     };
 
     explicit LwSysEndpoint(const Wiring& w) noexcept;
-    ~LwSysEndpoint() override;
 
     void serve() noexcept override;
     [[nodiscard]] bool idle() const noexcept override;
@@ -55,8 +56,6 @@ public:
     void on_stop() noexcept override;
 
     [[nodiscard]] const SysRoute& route() const noexcept { return tally_; }
-
-    [[nodiscard]] bool bound() const noexcept { return bound_gen_ != 0; }
 
 private:
     class BlockPort final : public Port {
@@ -75,32 +74,28 @@ private:
         hal::RegisterWindow<hal::SysBlock> regs_;
     };
 
-    void take_grant_() noexcept;
-    void bind_(const SysGrant& g, std::uint32_t gen) noexcept;
-    void unbind_() noexcept;
-    void answer_bind_(std::uint16_t gen) noexcept;
-    [[nodiscard]] bool arm_line_(const SysGrant& g) noexcept;
-    [[nodiscard]] bool lease_() noexcept;
-    void release_() noexcept;
-    void publish_() noexcept;
-    [[nodiscard]] Port& port_() noexcept;
-    [[nodiscard]] bool line_rang_() const noexcept;
-    [[nodiscard]] std::uint32_t drain_cause_(bool rang) noexcept;
+    using Base = LwBlockEndpoint<SysGrant, SysRoute, SeatTag::Io>;
+    void publish_hook_(const SysRoute& r) noexcept override;
+    void prepare_hook_(const SysGrant& g) noexcept override;
+    [[nodiscard]] bool arm_hook_(const SysGrant& g) noexcept override;
+    void bind_hook_(const SysGrant& g) noexcept override;
+    void bound_hook_() noexcept override;
+    void answer_hook_(std::uint16_t gen) noexcept override;
+    void unbind_hook_() noexcept override;
+    void serve_bound_() noexcept override;
+    [[nodiscard]] bool idle_bound_hook_() const noexcept override;
 
-    [[nodiscard]] bool read_snapshot_(proto::StatusSnapshot& into) noexcept;
+    [[nodiscard]] Port& port_() noexcept;
+
+    [[nodiscard]] std::optional<proto::StatusSnapshot> read_snapshot_() noexcept;
     void serve_status_(bool rang) noexcept;
 
     Wiring w_;
-    SysGrantCell::Reader grant_rd_{};
-    SysGrant grant_{};
-    std::uint32_t bound_gen_ = 0;
     std::optional<BlockPort> block_{};
-    os::UioHandle line_{};
+    LwLine line_{};
     bool recheck_ = false;
-    std::optional<std::uint32_t> sent_stflg_{};
-    proto::StatusSnapshot snap_{};
+    std::optional<hal::SysBlock::Stflg> sent_stflg_{};
     os::MonotonicClock clock_{};
-    SysRoute tally_{};
 };
 
 }

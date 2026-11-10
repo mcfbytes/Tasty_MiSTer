@@ -2,12 +2,14 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <tuple>
 
 #include "infra/error.h"
 #include "infra/message_sum.h"
+#include "infra/rt_stats.h"
 #include "infra/seat.h"
 
 namespace mister {
@@ -41,19 +43,19 @@ struct LogRec {
     struct Head {
         LogSev sev = LogSev::info;
         std::uint8_t pad_[7]{};
-        std::uint64_t t_ns = 0;
+        std::chrono::nanoseconds t{};
     };
 
     struct DeadlineMiss {
         static constexpr Kind kKind = Kind::DeadlineMiss;
-        std::uint32_t over_ns = 0;
-        std::uint16_t slot = 0;
-        std::uint8_t pad_[2]{};
+        std::chrono::duration<std::uint32_t, std::nano> over{};
+        ServiceSlot slot{};
+        std::uint8_t pad_[3]{};
     };
 
     struct SessionTransition {
         static constexpr Kind kKind = Kind::SessionTransition;
-        std::uint32_t dwell_us = 0;
+        std::chrono::duration<std::uint32_t, std::micro> dwell{};
         std::uint8_t from = 0;
         std::uint8_t to = 0;
         std::uint8_t pad_[2]{};
@@ -61,29 +63,41 @@ struct LogRec {
 
     struct StagingRung {
         static constexpr Kind kKind = Kind::StagingRung;
-        std::uint32_t rung_us = 0;
+        std::chrono::duration<std::uint32_t, std::micro> rung{};
         std::uint16_t rung_pc = 0;
         std::uint8_t pad_[2]{};
     };
 
     struct CoreLoad {
         static constexpr Kind kKind = Kind::CoreLoad;
-        std::uint32_t load_ms = 0;
+        std::chrono::duration<std::uint32_t, std::milli> load{};
     };
 
     struct CoreUnload {
         static constexpr Kind kKind = Kind::CoreUnload;
-        std::uint32_t detach_ms = 0;
+        std::chrono::duration<std::uint32_t, std::milli> detach{};
     };
 
     struct Mount {
         static constexpr Kind kKind = Kind::Mount;
         std::uint8_t slot = 0;
+
+        constexpr Mount() = default;
+
+        template <class S>
+            requires requires(const S& s) { s.detail(); }
+        constexpr explicit Mount(S at) noexcept : slot(static_cast<std::uint8_t>(at.detail())) {}
     };
 
     struct Unmount {
         static constexpr Kind kKind = Kind::Unmount;
         std::uint8_t slot = 0;
+
+        constexpr Unmount() = default;
+
+        template <class S>
+            requires requires(const S& s) { s.detail(); }
+        constexpr explicit Unmount(S at) noexcept : slot(static_cast<std::uint8_t>(at.detail())) {}
     };
 
     struct Refusal {
@@ -128,7 +142,7 @@ struct LogRec {
         std::uint16_t bind_gen = 0;
         std::uint8_t phase = 0;
         std::uint8_t under = 0;
-        std::uint8_t awaited = 0;
+        bool awaited = false;
         std::uint8_t pad_[3]{};
     };
 

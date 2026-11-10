@@ -10,7 +10,7 @@ namespace mister::os {
 class NanosleepDelay final : public IDelay {
 public:
     void sleep_for(std::chrono::microseconds d) override;
-    void sleep_until(std::chrono::nanoseconds at) override;
+    void sleep_until(RawMonotonicClock::time_point at) override;
 };
 
 }

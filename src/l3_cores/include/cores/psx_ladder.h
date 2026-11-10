@@ -56,7 +56,7 @@ private:
 
     [[nodiscard]] Ex<bool> on_step() override;
 
-    [[nodiscard]] std::uint16_t menu_file_index() const;
+    [[nodiscard]] WideIoIndex menu_file_index() const;
 
     void decide_stage_edge_();
     [[nodiscard]] std::uint16_t scan_libcrypt_() const;

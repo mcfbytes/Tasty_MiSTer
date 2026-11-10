@@ -24,6 +24,13 @@ constexpr std::array<StOptionRowPlain, sizeof...(I)> plain_rows(
     return {StOptionRowPlain{static_cast<StOption>(I)}...};
 }
 
+constexpr proto::FieldValue kOnSlot{1};
+constexpr proto::FieldValue kAspectFullScreen{1};
+constexpr proto::FieldValue kAspectArc1{2};
+constexpr proto::FieldValue kAspectArc2{3};
+constexpr proto::FieldValue kCropFullSlot{0};
+constexpr proto::FieldValue kCrop216Slot{2};
+
 constexpr std::size_t kIds = 256;
 constinit const std::array<StOptionRowPlain, kIds> kPlain = plain_rows(
     std::make_index_sequence<kIds>{}
@@ -41,57 +48,78 @@ constinit const StOptionRowCartridge kCartridge{};
 
 }
 
-OptionRowView StOptionRowBlitter::on_cycle_view(const Facts& f, const OptionRow& r) const noexcept {
+OptionRowView StOptionRowBlitter::on_cycle_view(
+    const Facts& f,
+    const OptionRow::CycleArm& r
+) const noexcept {
     const st_ctrl::CtrlWord sc = f.system_ctrl;
     const bool ste = sc.chipset() != st_ctrl::CtrlWord::kChipsetSt;
     const bool bit = sc.has(st_ctrl::CtrlWord::kBlitter);
-    return {static_cast<std::uint8_t>(bit ? 1 : 0), ste, r.values[(bit || ste) ? 1 : 0]};
+    return {static_cast<std::uint8_t>(bit ? 1 : 0), ste, r.values[(bit || ste) ? 1u : 0u]};
 }
 
-Ex<StOptionRow::Write> StOptionRowBlitter::on_cycle_set(const Facts& f, std::uint8_t choice) const {
+Ex<StOptionRow::Write> StOptionRowBlitter::on_cycle_set(
+    const Facts& f,
+    proto::FieldValue choice
+) const {
     const st_ctrl::CtrlWord sc = f.system_ctrl;
 
     if (sc.has(st_ctrl::CtrlWord::kSte))
         return Write{};
     return Write{
-        .system_ctrl = (choice & 1u) != 0 ? sc.with(st_ctrl::CtrlWord::kBlitter)
-                                          : sc.without(st_ctrl::CtrlWord::kBlitter)
+        .system_ctrl = choice == kOnSlot ? sc.with(st_ctrl::CtrlWord::kBlitter)
+                                         : sc.without(st_ctrl::CtrlWord::kBlitter)
     };
 }
 
-OptionRowView StOptionRowViking::on_cycle_view(const Facts& f, const OptionRow& r) const noexcept {
+OptionRowView StOptionRowViking::on_cycle_view(
+    const Facts& f,
+    const OptionRow::CycleArm& r
+) const noexcept {
     const st_ctrl::CtrlWord sc = f.system_ctrl;
     const bool room = sc.mem_config() <= st_ctrl::CtrlWord::kMem8M;
     const bool bit = sc.has(st_ctrl::CtrlWord::kViking);
-    return {static_cast<std::uint8_t>(bit ? 1 : 0), !room, r.values[(bit && room) ? 1 : 0]};
+    return {static_cast<std::uint8_t>(bit ? 1 : 0), !room, r.values[(bit && room) ? 1u : 0u]};
 }
 
-Ex<StOptionRow::Write> StOptionRowViking::on_cycle_set(const Facts& f, std::uint8_t choice) const {
+Ex<StOptionRow::Write> StOptionRowViking::on_cycle_set(
+    const Facts& f,
+    proto::FieldValue choice
+) const {
     const st_ctrl::CtrlWord sc = f.system_ctrl;
     return Write{
-        .system_ctrl = (choice & 1u) != 0 ? sc.with(st_ctrl::CtrlWord::kViking)
-                                          : sc.without(st_ctrl::CtrlWord::kViking)
+        .system_ctrl = choice == kOnSlot ? sc.with(st_ctrl::CtrlWord::kViking)
+                                         : sc.without(st_ctrl::CtrlWord::kViking)
     };
 }
 
-OptionRowView StOptionRowAspect::on_cycle_view(const Facts& f, const OptionRow& r) const noexcept {
+OptionRowView StOptionRowAspect::on_cycle_view(
+    const Facts& f,
+    const OptionRow::CycleArm& r
+) const noexcept {
     const auto ar = f.system_ctrl.aspect();
     return {ar.v, false, infra::at_index(r.values, ar)};
 }
 
-Ex<StOptionRow::Write> StOptionRowAspect::on_cycle_set(const Facts& f, std::uint8_t choice) const {
+Ex<StOptionRow::Write> StOptionRowAspect::on_cycle_set(
+    const Facts& f,
+    proto::FieldValue choice
+) const {
     st_ctrl::CtrlWord v = f.system_ctrl.without(st_ctrl::CtrlWord::kVideoAspect1)
                               .without(st_ctrl::CtrlWord::kVideoAspect2);
-    if ((choice & 1u) != 0)
+
+    const bool first = choice == kAspectFullScreen || choice == kAspectArc2;
+    const bool second = choice == kAspectArc1 || choice == kAspectArc2;
+    if (first)
         v = v.with(st_ctrl::CtrlWord::kVideoAspect1);
-    if ((choice & 2u) != 0)
+    if (second)
         v = v.with(st_ctrl::CtrlWord::kVideoAspect2);
     return Write{.system_ctrl = v};
 }
 
 OptionRowView StOptionRowVideoCrop::on_cycle_view(
     const Facts& f,
-    const OptionRow& r
+    const OptionRow::CycleArm& r
 ) const noexcept {
     const st_ctrl::CtrlWord sc = f.system_ctrl;
 
@@ -103,15 +131,15 @@ OptionRowView StOptionRowVideoCrop::on_cycle_view(
 
 Ex<StOptionRow::Write> StOptionRowVideoCrop::on_cycle_set(
     const Facts& f,
-    std::uint8_t choice
+    proto::FieldValue choice
 ) const {
     const st_ctrl::CtrlWord sc = f.system_ctrl;
 
     return Write{
-        .system_ctrl = choice != 0 ? sc.with(st_ctrl::CtrlWord::kBorder)
-                                   : sc.without(st_ctrl::CtrlWord::kBorder),
-        .ext_ctrl = choice == 2 ? f.ext_ctrl | st_ctrl::kExtCrop216
-                                : f.ext_ctrl & ~st_ctrl::kExtCrop216
+        .system_ctrl = choice == kCropFullSlot ? sc.without(st_ctrl::CtrlWord::kBorder)
+                                               : sc.with(st_ctrl::CtrlWord::kBorder),
+        .ext_ctrl = choice == kCrop216Slot ? f.ext_ctrl | st_ctrl::kExtCrop216
+                                           : f.ext_ctrl & ~st_ctrl::kExtCrop216
     };
 }
 
@@ -133,11 +161,11 @@ OptionRowView StOptionRowFloppy::on_file_view(const Facts& f, std::span<char> te
 }
 
 OptionRowView StOptionRowHdd::on_file_view(const Facts& f, std::span<char>) const noexcept {
-    const bool bound = infra::at_index(f.hdd_bound, target_);
+    const StOptionRow::AcsiFact& disk = f.acsi[target_];
     return {
-        static_cast<std::uint8_t>(bound ? 1 : 0),
+        static_cast<std::uint8_t>(disk.bound ? 1 : 0),
         false,
-        bound ? StConfig::leaf_of(infra::at_index(f.acsi, target_)) : kNoDisk
+        disk.bound ? StConfig::leaf_of(disk.path) : kNoDisk
     };
 }
 
@@ -199,7 +227,7 @@ const StOptionRow& StOptionRow::of(StOption o) noexcept {
     return kPlain[static_cast<std::uint8_t>(o)];
 }
 
-OptionRowView StOptionRow::cycle_view(const Facts& f, const OptionRow& r) const noexcept {
+OptionRowView StOptionRow::cycle_view(const Facts& f, const OptionRow::CycleArm& r) const noexcept {
     TASTY_SEAT_BODY(StOptionRow);
     return on_cycle_view(f, r);
 }
@@ -209,12 +237,12 @@ OptionRowView StOptionRow::file_view(const Facts& f, std::span<char> text) const
     return on_file_view(f, text);
 }
 
-Ex<StOptionRow::Write> StOptionRow::cycle_set(const Facts& f, std::uint8_t choice) const {
+Ex<StOptionRow::Write> StOptionRow::cycle_set(const Facts& f, proto::FieldValue choice) const {
     TASTY_SEAT_BODY(StOptionRow);
     return on_cycle_set(f, choice);
 }
 
-OptionRowView StOptionRow::on_cycle_view(const Facts&, const OptionRow&) const noexcept {
+OptionRowView StOptionRow::on_cycle_view(const Facts&, const OptionRow::CycleArm&) const noexcept {
     return {};
 }
 
@@ -222,7 +250,7 @@ OptionRowView StOptionRow::on_file_view(const Facts&, std::span<char>) const noe
     return {};
 }
 
-Ex<StOptionRow::Write> StOptionRow::on_cycle_set(const Facts&, std::uint8_t) const {
+Ex<StOptionRow::Write> StOptionRow::on_cycle_set(const Facts&, proto::FieldValue) const {
     return std::unexpected(Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(id_)});
 }
 

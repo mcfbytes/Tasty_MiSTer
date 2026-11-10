@@ -18,15 +18,15 @@ class AxiStatusDecoder {
 
 public:
     AxiStatusDecoder(CoreSession& session, StatusCell& cell, const ISessionLive& live) noexcept
-        : session_(&session),
-          cell_(&cell),
-          live_(&live) {}
+        : session_(session),
+          cell_(cell),
+          live_(live) {}
 
     void bind(infra::OptRef<const StatusSnapshotCell> src, std::uint16_t gen) noexcept;
 
     void service() noexcept;
 
-    [[nodiscard]] bool active() const noexcept { return live_->session_live(); }
+    [[nodiscard]] bool active() const noexcept { return live_.session_live(); }
 
     [[nodiscard]] std::uint8_t last() const noexcept { return last_; }
 
@@ -37,9 +37,9 @@ public:
     [[nodiscard]] std::uint32_t stale() const noexcept { return stale_; }
 
 private:
-    CoreSession* session_;
-    StatusCell* cell_;
-    const ISessionLive* live_;
+    CoreSession& session_;
+    StatusCell& cell_;
+    const ISessionLive& live_;
     infra::OptRef<const StatusSnapshotCell> src_{};
     StatusSnapshotCell::Reader reader_{};
     std::uint16_t gen_ = 0;
@@ -48,7 +48,6 @@ private:
     std::uint32_t adopted_ = 0;
     std::uint32_t stale_ = 0;
     StatusSnapshot scratch_{};
-    StatusWord words_{};
     StatusWord published_{};
 };
 

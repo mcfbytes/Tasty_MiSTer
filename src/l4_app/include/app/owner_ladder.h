@@ -97,8 +97,9 @@ private:
     std::string last_dir_;
     bool noreset_ = false;
     bool moved_ = false;
-    bool start_ = false;
-    bool core_ = false;
+
+    enum class LadderKind : std::uint8_t { None, Mount, Start, Core };
+    LadderKind kind_ = LadderKind::None;
 
     std::array<std::string, cores::kLadderCarrySlots> slot_paths_{};
     Owed owed_{};

@@ -4,6 +4,7 @@
 #include "cores/core_adopt.h"
 #include "cores/mounted_path.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
@@ -13,7 +14,8 @@ CdCore::CdCore(const CoreProfile& profile, const CdProfile& cd, const HostServic
       drive_(
           cd,
           host,
-          profile.windows.empty() ? nullptr : host.windows.named(profile.windows[0].region.name)
+          profile.windows.empty() ? infra::OptRef<ICoreWindow>{}
+                                  : host.windows.named(profile.windows[0].region.name)
       ) {}
 
 Ex<void> CdCore::do_adopt(const CoreAdopt&) {
@@ -22,10 +24,7 @@ Ex<void> CdCore::do_adopt(const CoreAdopt&) {
 
 MountState CdCore::mount_disc(std::string_view path) {
     TASTY_SEAT_BODY(CdCore);
-    if (!mount(
-            profile().staging.disc_slot,
-            MountedPath{proto::PathId{}, path, proto::FileSize{}}
-        )) {
+    if (!mount(profile().staging.disc_slot, MountedPath{path, proto::FileSize{}})) {
         return MountState::Failed;
     }
     return drive_.disc_mount_state();

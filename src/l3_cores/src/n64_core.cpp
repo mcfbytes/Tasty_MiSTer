@@ -8,8 +8,11 @@
 #include "cores/manifests/n64.h"
 #include "cores/n64_load_facts.h"
 #include "cores/n64dd_ram_save.h"
+#include "cores/save_row_count.h"
+#include "cores/save_rows.h"
 #include "cores/stream_load_end.h"
 #include "infra/endian.h"
+#include "infra/indexed_array.h"
 #include "proto/core_session.h"
 
 namespace mister::cores {
@@ -19,7 +22,6 @@ N64Core::N64Core(const CoreProfile& p, const HostServices& h)
       cheats_(h.clock, h.windows.named(manifests::kN64Windows[0].region.name)),
       saves_(h.vfs) {}
 
-using n64::MemoryType;
 using n64::SystemType;
 
 Ex<void> N64Core::do_adopt(const CoreAdopt& a) {
@@ -41,9 +43,14 @@ void N64Core::service_cheat_tick() noexcept {
         return;
 
     saves_.note_layout(*this);
-    const bool pal = read_(n64::opt::kSysType) == static_cast<std::uint32_t>(SystemType::Pal);
 
-    const n64::CheatTick t = cheats_.tick(loaded_, pal, cheats_enabled_(), false);
+    const proto::FieldValue sys_choice = read_(n64::opt::kSysType);
+    const proto::FieldValue pal_choice{static_cast<std::uint32_t>(SystemType::Pal)};
+    const SystemType system = sys_choice == pal_choice ? SystemType::Pal : SystemType::Ntsc;
+
+    const n64::CheatTick t = cheats_.tick(
+        {.loaded = loaded_, .system = system, .enabled = cheats_enabled_(), .gs_pressed = false}
+    );
     if (t == n64::CheatTick::Invalid)
         disable_cheats_();
 }
@@ -97,6 +104,8 @@ void N64Core::stream_closed(const StreamLoadEnd& end) noexcept {
 }
 
 Ex<void> N64Core::on_apply_load_facts(std::span<const std::uint8_t> facts) {
+
+    saves_.forget_plan();
     const auto decoded = n64::LoadFacts::of(facts);
     if (decoded && decoded->kind == n64::FactsKind::Disk) {
         disk_addr_ = decoded->load_addr;
@@ -116,70 +125,38 @@ Ex<void> N64Core::on_apply_load_facts(std::span<const std::uint8_t> facts) {
         return {};
     if (f.kind == n64::FactsKind::IplBoot) {
 
-        if (!saves_.plan(*this, rom_path_.view(), profile().name, {}))
-            ++save_plan_errors_;
+        adopt_save_plan_(n64::SaveRows{});
         return {};
     }
 
     if (auto r = session_->flush_status(); !r)
         return r;
 
-    plan_saves_();
+    adopt_save_plan_(f.saves);
     return {};
 }
 
-void N64Core::plan_saves_() {
-    SavePartition rows[NvramStore::kMaxPartitions]{};
-    std::size_t n = 0;
+void N64Core::adopt_save_plan_(const n64::SaveRows& plan) {
 
-    if (const MemoryType cart = cart_save_type_(); cart != MemoryType::None) {
-        rows[n++] = n64::save_partition("cart", cart);
-    }
+    infra::IndexedArray<SavePartition, n64::kMaxSaveRows, SaveRow> mounts{};
+    const n64::SaveRowCount n = plan.count.fits() ? plan.count
+                                                  : n64::SaveRowCount::of(n64::kMaxSaveRows);
+    SaveRow row{};
+    for (; row != n.end(); row = row.next())
+        mounts[row] = n64::save_row_partition(infra::at_index(plan.kinds, row), plan.cart);
 
-    const bool tpak = read_(n64::opt::kTpak) != 0;
-    const bool cpak = read_(n64::opt::kCpak) != 0;
-    const auto pak_row = [](std::string_view name, MemoryType t, std::uint8_t digit) {
-        SavePartition row = n64::save_partition(name, t);
-        row.index = digit;
-        return row;
-    };
-    std::uint8_t digit = 0;
-
-    if (tpak) {
-        rows[n++] = pak_row("tpak", MemoryType::Tpak, ++digit);
-    } else if (cpak) {
-        rows[n++] = pak_row("pak1", MemoryType::Cpak, ++digit);
-    }
-    if (cpak) {
-        for (const std::string_view name : {"pak2", "pak3", "pak4"}) {
-            rows[n++] = pak_row(name, MemoryType::Cpak, ++digit);
-        }
-    }
-
-    if (auto r = saves_.plan(
-            *this,
-            rom_path_.view(),
-            profile().name,
-            std::span<const SavePartition>(rows, n)
-        );
-        !r) {
+    if (auto r = saves_.plan(*this, rom_path_.view(), profile().name, mounts.prefix(n)); !r) {
         ++save_plan_errors_;
         saves_.clear();
     }
 }
 
-std::uint32_t N64Core::read_(n64::StatusField f) const noexcept {
-    const proto::StatusRegister& st = session_->status();
-    std::uint32_t v = 0;
-    for (std::uint8_t i = 0; i < f.width; ++i) {
-        if (st.get_bit(proto::StatusBit{static_cast<std::uint8_t>(f.lo + i)}))
-            v |= (1u << i);
-    }
-    return v;
+proto::FieldValue N64Core::read_(n64::StatusField f) const noexcept {
+    return f.read(session_->status().value());
 }
 
 bool N64Core::cheats_enabled_() const noexcept {
-    return read_(n64::opt::kCheats) == 0;
+    return read_(n64::opt::kCheats) == proto::FieldValue{};
 }
 
 void N64Core::disable_cheats_() noexcept {
@@ -193,18 +170,13 @@ void N64Core::disable_cheats_() noexcept {
     );
 }
 
-n64::SaveLayoutKey N64Core::layout_key(std::size_t rows) const noexcept {
+n64::SaveLayoutKey N64Core::layout_key(n64::SaveRowCount rows) const noexcept {
     TASTY_SEAT_BODY(N64Core);
     return n64::SaveLayoutKey{
-        cart_save_type_(),
-        read_(n64::opt::kTpak) != 0,
-        n64::SaveRowCount::of(rows)
+        n64::save_type_of(read_(n64::opt::kSaveType)),
+        read_(n64::opt::kTpak) != proto::FieldValue{},
+        rows
     };
-}
-
-n64::MemoryType N64Core::cart_save_type_() const noexcept {
-    const auto v = static_cast<MemoryType>(read_(n64::opt::kSaveType));
-    return n64::save_size(v) != 0 ? v : MemoryType::None;
 }
 
 WindowJobBuild N64Core::order_ram_save_(WindowJobOrder& order) noexcept {
@@ -217,7 +189,7 @@ WindowJobBuild N64Core::order_ram_save_(WindowJobOrder& order) noexcept {
 
 WindowJobBuild N64Core::on_osd_open(WindowJobOrder& order) noexcept {
     TASTY_SEAT_BODY(N64Core);
-    if (!loaded_ || read_(n64::opt::kAutosave) != 0)
+    if (!loaded_ || read_(n64::opt::kAutosave) != proto::FieldValue{})
         return {};
     return order_ram_save_(order);
 }

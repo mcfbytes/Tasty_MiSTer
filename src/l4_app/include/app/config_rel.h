@@ -2,7 +2,6 @@
 #pragma once
 
 #include <cstddef>
-#include <cstring>
 #include <string_view>
 
 #include "infra/fixed_str.h"
@@ -16,13 +15,9 @@ inline FixedStr<kConfigRelCap, StrFit::Reject> config_rel(
     std::string_view name
 ) {
     FixedStr<kConfigRelCap, StrFit::Reject> rel;
-    char buf[kConfigRelCap];
-    const std::size_t n = dir.size() + name.size();
-    if (name.empty() || n > decltype(rel)::kCapacity)
+    if (name.empty() || !rel.assign(dir))
         return rel;
-    std::memcpy(buf, dir.data(), dir.size());
-    std::memcpy(buf + dir.size(), name.data(), name.size());
-    if (!rel.assign(std::string_view{buf, n}))
+    if (!rel.append(name))
         rel.clear();
     return rel;
 }

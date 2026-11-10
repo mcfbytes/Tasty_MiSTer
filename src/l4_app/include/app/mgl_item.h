@@ -11,6 +11,7 @@
 #include <tuple>
 
 #include "app/mgl_delay.h"
+#include "app/mgl_hold.h"
 #include "app/path_text.h"
 #include "app/remembered_path.h"
 #include "app/types.h"
@@ -44,23 +45,9 @@ struct MglItemNo {
     friend constexpr auto operator<=>(MglItemNo, MglItemNo) = default;
 };
 
-inline constexpr proto::FileSlotDigit kMglIndexMax{15};
-
-[[nodiscard]] constexpr bool mgl_index_in_range(proto::FileSlotDigit d) noexcept {
-    return d <= kMglIndexMax;
-}
-
-[[nodiscard]] constexpr proto::IoIndex mount_index_of(proto::FileSlotDigit d) noexcept {
-    return d.io_index();
-}
-
 static_assert(
     DelaySeconds::of(70000) == DelaySeconds{65535},
     "a `delay=` past the field's 16 bits saturates, as strtoul's answer did"
-);
-static_assert(
-    mgl_index_in_range(proto::FileSlotDigit{15}) && !mgl_index_in_range(proto::FileSlotDigit{16}),
-    "the CONF_STR selector's 4-bit namespace: 15 is the last index an item may name"
 );
 
 struct MglItem {
@@ -71,19 +58,21 @@ struct MglItem {
     static constexpr std::size_t kPathMax = infra::kPathMax;
     static constexpr std::size_t kStore = kPathMax + 8;
 
+    struct Head {
+        DelaySeconds delay_s{};
+    };
+
     struct Load {
         static constexpr Kind kKind = Kind::Load;
         Slot slot = Slot::File;
         proto::FileSlotDigit index{};
-        DelaySeconds delay_s{};
 
         FixedStr<kPathMax, StrFit::Clip> path{};
     };
 
     struct Reset {
         static constexpr Kind kKind = Kind::Reset;
-        DelaySeconds delay_s{};
-        std::uint8_t hold_s = 0;
+        ResetHold hold_s{};
         std::uint8_t pad_ = 0;
     };
 
@@ -91,10 +80,18 @@ struct MglItem {
 
     Kind kind = Kind::Load;
     std::uint8_t pad_ = 0;
+    Head head{};
     alignas(std::uint16_t) std::array<std::byte, kStore> store{};
 };
 
-static_assert(infra::MessageSum<MglItem> && infra::alternatives_are_total<MglItem>());
-static_assert(sizeof(MglItem) == 2 + MglItem::kStore, "kind, pad and store");
+static_assert(
+    infra::MessageSum<MglItem>
+    && infra::HasHead<MglItem>
+    && infra::alternatives_are_total<MglItem>()
+);
+static_assert(
+    sizeof(MglItem) == 2 + sizeof(MglItem::Head) + MglItem::kStore,
+    "kind, pad, head and store"
+);
 
 }

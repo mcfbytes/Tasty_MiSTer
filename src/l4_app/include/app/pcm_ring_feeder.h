@@ -16,13 +16,15 @@
 #include "cores/pcm_source.h"
 #include "infra/counter.h"
 #include "infra/error.h"
-#include "infra/fixed_str.h"
 #include "infra/inbox.h"
+#include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
+#include "infra/pool_slot.h"
 #include "infra/seat.h"
 #include "infra/slot_pool.h"
 #include "infra/telemetry.h"
+#include "app/path_text.h"
 #include "app/pcm_command.h"
 #include "os/clock.h"
 #include "hal/fpga_memory.h"
@@ -64,7 +66,7 @@ struct PcmMedia {
     TASTY_SEAT_MEDIATOR(Any, Any);
     std::optional<hal::FpgaMemory> ring{};
 
-    FixedStr<1024, StrFit::Clip> sheet{};
+    PathText sheet{};
 };
 
 class PcmRingFeeder final : public cores::ICoreWindow, public cores::IPcmFeed {
@@ -78,9 +80,9 @@ public:
         Commands& commands,
         infra::OptRef<const svc::Vfs> vfs
     ) noexcept
-        : clock_(&clock),
+        : clock_(clock),
           vfs_(vfs),
-          commands_(&commands) {}
+          commands_(commands) {}
 
     ~PcmRingFeeder() override = default;
 
@@ -139,7 +141,7 @@ public:
     [[nodiscard]] Ex<std::size_t> read(std::size_t off, std::span<std::byte> dst) const override;
     void publish() noexcept override;
     [[nodiscard]] std::size_t size() const noexcept override;
-    [[nodiscard]] cores::IPcmFeed* pcm_feed() noexcept override;
+    [[nodiscard]] infra::OptRef<cores::IPcmFeed> pcm_feed() noexcept override;
 
     [[nodiscard]] std::uint32_t wakes() const noexcept { return wakes_.get(); }
 
@@ -167,18 +169,17 @@ private:
     void release_media_() noexcept;
     void drop_ring_() noexcept;
     void release_source_() noexcept;
-    [[nodiscard]] PcmMedia* leased_(std::uint8_t lease) noexcept;
     void reset_playback_() noexcept;
     void publish_state_() noexcept;
     [[nodiscard]] std::uint32_t prefill_target_() const noexcept;
 
     [[nodiscard]] std::size_t write_ring_(std::size_t n) noexcept;
 
-    const os::IClock* clock_;
+    const os::IClock& clock_;
 
     infra::OptRef<const svc::Vfs> vfs_{};
 
-    Commands* const commands_;
+    Commands& commands_;
     xthread::Telemetry<std::uint32_t, SeatTag::RT> read_point_{};
     xthread::Telemetry<cores::PcmFeedState, SeatTag::Pcm> state_{};
 
@@ -210,7 +211,7 @@ private:
 
     struct Commander {
         TASTY_SEAT_RESIDENT(RT);
-        HeldLease held[kPcmMediaLeases]{};
+        infra::IndexedArray<HeldLease, kPcmMediaLeases, xthread::PoolSlot> held{};
         std::uint32_t sent = 0;
 
         ~Commander() {

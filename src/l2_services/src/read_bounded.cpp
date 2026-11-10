@@ -35,4 +35,15 @@ Ex<std::vector<std::byte>> read_bounded(const Vfs& vfs, std::string_view path, s
     return read_bounded(**f, cap);
 }
 
+std::span<std::byte> read_bounded_partial(IFile& file, std::span<std::byte> dst) {
+    std::size_t got = 0;
+    while (got < dst.size()) {
+        auto n = file.read_at(got, dst.subspan(got));
+        if (!n || *n == 0)
+            break;
+        got += *n;
+    }
+    return dst.first(got);
+}
+
 }

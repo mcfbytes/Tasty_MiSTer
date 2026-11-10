@@ -7,6 +7,9 @@
 
 #include "app/frame_arena.h"
 #include "app/frame_codec.h"
+#include "app/picture_size.h"
+#include "app/rec_options.h"
+#include "app/row_bytes.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -15,33 +18,32 @@ class CscdCodec final : public IFrameCodec {
     TASTY_SEAT_RESIDENT(Encode);
 
 public:
-    static constexpr bool kAvailable = true;
+    static constexpr bool kAvailable = rec_codec_facts(RecCodec::Cscd).available;
 
     static constexpr std::size_t kHeadBytes = 2;
     static constexpr std::uint8_t kKeyBit = 0x01;
 
     static constexpr std::size_t kRowAlign = 4;
 
-    [[nodiscard]] static constexpr std::size_t row_bytes(std::uint32_t w) noexcept {
-        return (std::size_t{w} * kRgbPixelBytes + (kRowAlign - 1)) & ~(kRowAlign - 1);
+    [[nodiscard]] static constexpr std::size_t row_bytes(PicturePixels w) noexcept {
+        return rows_span(w.row_bytes(PixelBytes::of(kRgbPixelBytes), RowAlign::of(kRowAlign)), 1);
     }
 
-    [[nodiscard]] static constexpr std::size_t picture_bytes(
-        std::uint32_t w,
-        std::uint32_t h
-    ) noexcept {
-        return row_bytes(w) * h;
+    [[nodiscard]] static constexpr std::size_t picture_bytes(PictureSize size) noexcept {
+        return rows_span(RowBytes{row_bytes(size.width)}, size.rows);
     }
+
+    static_assert(
+        rec_codec_facts(RecCodec::Cscd).bytes_per_pixel == PixelBytes::of(kRgbPixelBytes)
+    );
+    static_assert(rec_codec_facts(RecCodec::Cscd).row_align == RowAlign::of(kRowAlign));
 
     static constexpr std::size_t kLzoOverheadDiv = 16;
     static constexpr std::size_t kLzoOverheadFloor = 64;
     static constexpr std::size_t kLzoOverheadTail = 3;
 
-    [[nodiscard]] static constexpr std::size_t payload_bound(
-        std::uint32_t w,
-        std::uint32_t h
-    ) noexcept {
-        const std::size_t n = picture_bytes(w, h);
+    [[nodiscard]] static constexpr std::size_t payload_bound(PictureSize size) noexcept {
+        const std::size_t n = picture_bytes(size);
         return kHeadBytes + n + n / kLzoOverheadDiv + kLzoOverheadFloor + kLzoOverheadTail;
     }
 
@@ -62,27 +64,22 @@ public:
         return {};
     }
 
-    [[nodiscard]] Ex<void> begin(std::uint16_t w, std::uint16_t h) noexcept override;
+    [[nodiscard]] Ex<void> begin(PictureSize size) noexcept override;
     void end() noexcept override;
 
     [[nodiscard]] bool open() const noexcept override {
         TASTY_SEAT_BODY(CscdCodec);
-        return width_ != 0;
+        return !size_.empty();
     }
 
-    [[nodiscard]] std::uint16_t width() const noexcept override {
+    [[nodiscard]] PictureSize size() const noexcept override {
         TASTY_SEAT_BODY(CscdCodec);
-        return width_;
-    }
-
-    [[nodiscard]] std::uint16_t height() const noexcept override {
-        TASTY_SEAT_BODY(CscdCodec);
-        return height_;
+        return size_;
     }
 
     [[nodiscard]] std::size_t max_payload() const noexcept override {
         TASTY_SEAT_BODY(CscdCodec);
-        return payload_bound(width_, height_);
+        return payload_bound(size_);
     }
 
     [[nodiscard]] std::span<const std::byte> encode(
@@ -95,11 +92,9 @@ public:
 
     [[nodiscard]] std::span<const std::byte> dup() noexcept override;
 
-    static void half_scale(RgbRows src, std::uint16_t src_w, std::span<std::byte> dst) noexcept;
-
 private:
-    [[nodiscard]] std::size_t pack_(
-        const std::byte* src,
+    [[nodiscard]] std::span<const std::byte> pack_(
+        std::span<const std::byte> src,
         bool key,
         std::span<std::byte> out
     ) noexcept;
@@ -110,8 +105,7 @@ private:
     std::span<std::byte> work_{};
     std::span<std::byte> dup_{};
     std::size_t dup_len_ = 0;
-    std::uint16_t width_ = 0;
-    std::uint16_t height_ = 0;
+    PictureSize size_{};
 };
 
 }

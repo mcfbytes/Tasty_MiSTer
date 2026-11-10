@@ -1,30 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/generic_core.h"
 
-#include <array>
 #include <memory>
 
 namespace mister::cores {
-
-namespace {
-
-constexpr std::array<LinkDecoderDecl, 0> kNoServices{};
-constexpr std::array<FileSlot, 0> kNoSlots{};
-constexpr std::array<BootAsset, 0> kNoAssets{};
-constexpr std::array<SignatureRow, 0> kNoSignatures{};
-
-}
-
-const CoreProfile kGenericProfile{
-    .kind = CoreKind::Generic,
-    .name = "",
-    .rbf = "",
-    .services = kNoServices,
-    .slots = kNoSlots,
-    .boot_assets = kNoAssets,
-    .signatures = kNoSignatures,
-    .undeclared_role = SlotRole::Save,
-};
 
 Ex<void> GenericCore::do_adopt(const CoreAdopt&) {
 

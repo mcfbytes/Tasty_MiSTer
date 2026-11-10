@@ -13,31 +13,32 @@ std::optional<PlayerIndex> PlayerSlots::slot_of(const DeviceIdentity& id) const 
     const std::string_view key = key_of(id);
     if (key.empty())
         return std::nullopt;
-    for (std::uint8_t i = 0; i < kMaxPlayers; ++i) {
-        if (!bound_[i].empty() && bound_[i] == key)
-            return PlayerIndex{i};
+    for (const PlayerIndex player : kPlayers) {
+        if (bound_[player].view() == key)
+            return player;
     }
     return std::nullopt;
 }
 
 Ex<void> PlayerSlots::assign(const DeviceIdentity& id, PlayerIndex player) {
-    if (player.v >= kMaxPlayers) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), player.v});
-    }
+    const auto slot = bound_.find(player);
+    if (!slot)
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
 
-    const std::string_view key = key_of(id);
-    for (std::uint8_t i = 0; i < kMaxPlayers; ++i) {
-        if (i != player.v && !bound_[i].empty() && bound_[i] == key)
-            bound_[i].clear();
+    if (!slot->assign(key_of(id)))
+        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
+
+    for (const PlayerIndex other : kPlayers) {
+        if (other != player && bound_[other] == *slot)
+            bound_[other].clear();
     }
-    bound_[player.v] = key;
     return {};
 }
 
 std::optional<PlayerIndex> PlayerSlots::first_free(PlayerMask live_mask) const {
-    for (std::uint8_t i = 0; i < kMaxPlayers; ++i) {
-        if (!live_mask.has(PlayerIndex{i}))
-            return PlayerIndex{i};
+    for (const PlayerIndex player : kPlayers) {
+        if (!live_mask.has(player))
+            return player;
     }
     return std::nullopt;
 }

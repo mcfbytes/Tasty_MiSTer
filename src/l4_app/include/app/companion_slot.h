@@ -9,9 +9,11 @@
 #include "app/companion_walk.h"
 #include "app/negotiated_core.h"
 #include "app/owner_tally.h"
-#include "cores/msu_companion.h"
+#include "cores/companion.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "os/types.h"
+#include "proto/types.h"
 
 namespace mister::svc {
 class Vfs;
@@ -27,7 +29,7 @@ public:
         const svc::Vfs& vfs,
         const NegotiatedCore& negotiated,
         OwnerTally& tally,
-        std::uint64_t aperture_base,
+        os::PhysAddr aperture_base,
         infra::OptRef<CompanionHost::Binds> binds
     ) noexcept
         : vfs_(vfs),
@@ -50,11 +52,11 @@ private:
     const svc::Vfs& vfs_;
     const NegotiatedCore& negotiated_;
     OwnerTally& tally_;
-    std::uint64_t aperture_base_;
+    os::PhysAddr aperture_base_;
     infra::OptRef<CompanionHost::Binds> binds_;
-    std::unique_ptr<cores::MsuCompanion> companion_{};
+    std::unique_ptr<cores::ICompanion> companion_{};
     bool attached_ = false;
-    std::uint16_t gen_ = 0;
+    proto::CompanionBindGen gen_{};
 };
 
 }

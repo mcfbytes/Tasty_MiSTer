@@ -61,7 +61,12 @@ inline void render_blank(
     std::memset(out.data(), std::to_integer<int>(spec.fill), out.size());
     detail::blank_paste(base_offset, out, 0, spec.header);
     for (const BlankRegion& r : spec.regions) {
-        detail::blank_paste(base_offset, out, r.offset_bytes, r.bytes);
+        detail::blank_paste(
+            base_offset,
+            out,
+            spec.lba_bytes.position_of(r.block) + r.within,
+            r.bytes
+        );
     }
 }
 

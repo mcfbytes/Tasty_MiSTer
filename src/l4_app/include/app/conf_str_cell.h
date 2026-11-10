@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
+#include <string_view>
 #include <type_traits>
 
+#include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "proto/core_session.h"
@@ -13,16 +14,18 @@ namespace mister::app {
 
 struct ConfStrText {
     TASTY_SEAT_EXEMPT(const_shared);
-    std::uint16_t len = 0;
+
+    FixedStr<proto::CoreSession::kConfStrCap + 1, StrFit::Clip> text{};
 
     proto::BindGeneration gen{};
 
     bool truncated = false;
-    char text[proto::CoreSession::kConfStrCap] = {};
+
+    [[nodiscard]] std::string_view view() const noexcept { return text.view(); }
 };
 
 static_assert(
-    sizeof(ConfStrText::text) == proto::CoreSession::kConfStrCap,
+    decltype(ConfStrText::text)::kCapacity == proto::CoreSession::kConfStrCap,
     "the cell and the acquisition bound are the same number, joined "
     "here so they cannot drift"
 );

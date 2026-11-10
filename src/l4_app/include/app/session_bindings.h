@@ -103,11 +103,6 @@ public:
         record_ = no_record_;
     }
 
-    void spend_uart_files() noexcept {
-        uart_.mode.reset();
-        uart_.speeds.reset();
-    }
-
     void bind_generation(proto::BindGeneration g) noexcept { gen_ = g; }
 
     [[nodiscard]] const proto::BindGeneration& generation() const noexcept { return gen_; }

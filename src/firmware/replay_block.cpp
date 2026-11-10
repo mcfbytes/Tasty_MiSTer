@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "replay_block.h"
 
+#include "infra/wired_end.h"
+
 namespace mister::fw {
+
+using infra::wired_end;
 
 ReplayBlock::ReplayBlock(
     const BootParts& plat,

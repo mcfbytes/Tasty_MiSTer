@@ -12,7 +12,7 @@ void CoreFrameCounter::sample_demand_() noexcept {
 
     if (!demand_seen_.take_if_changed(*w_.demand, d))
         return;
-    if (d.on == 0)
+    if (!d.on)
         based_ = false;
     demand_ = d;
 }
@@ -24,19 +24,19 @@ Ex<proto::FrameCount> CoreFrameCounter::read() noexcept {
     if (!r)
         return r;
     read_this_round_ = true;
-    const std::int64_t now = w_.clock.now().count();
+    const std::int64_t now = w_.clock.now().time_since_epoch().count();
     if (!r->supported) {
-        if (rec_.supported != 0)
+        if (rec_.supported)
             dirty_ = true;
-        rec_.supported = 0;
+        rec_.supported = false;
         based_ = false;
         return r;
     }
-    if (!based_ || rec_.supported == 0 || now - last_read_ns_ > kRebaseNs) {
+    if (!based_ || !rec_.supported || now - last_read_ns_ > kRebaseNs) {
         rec_.core_frame = r->count;
         rec_.edge_ns = now;
         ++rec_.epoch;
-        rec_.supported = 1;
+        rec_.supported = true;
         based_ = true;
         dirty_ = true;
     } else if (const auto d = static_cast<std::uint8_t>(r->count - last_raw_); d != 0) {

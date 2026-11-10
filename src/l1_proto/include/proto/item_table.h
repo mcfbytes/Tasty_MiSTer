@@ -51,7 +51,7 @@ enum class CondEffect : std::uint8_t { Hide, Disable };
 struct Cond {
     CondEffect effect = CondEffect::Hide;
     bool acts_when_set = false;
-    std::uint8_t bit = 0;
+    StatusBit bit{};
     friend constexpr bool operator==(Cond, Cond) = default;
 };
 
@@ -93,6 +93,10 @@ class ItemTable {
 public:
     [[nodiscard]] static Ex<ItemTable> parse(std::string_view raw);
 
+    [[nodiscard]] static constexpr std::size_t index_of(ItemOrdinal item) noexcept {
+        return item.v;
+    }
+
     [[nodiscard]] std::span<const Item> items() const noexcept { return items_; }
 
     [[nodiscard]] std::string_view core_name() const noexcept { return text(name_); }
@@ -105,11 +109,11 @@ public:
 
     [[nodiscard]] std::string_view subfield(const Item& it, unsigned n) const noexcept;
 
-    [[nodiscard]] std::optional<std::size_t> info_row() const noexcept {
+    [[nodiscard]] std::optional<ItemOrdinal> info_row() const noexcept {
         for (std::size_t i = 0; i < items_.size(); ++i) {
             const std::string_view raw = text(items_[i].raw);
             if (!raw.empty() && raw.front() == 'I')
-                return i;
+                return ItemOrdinal{static_cast<std::uint16_t>(i)};
         }
         return std::nullopt;
     }

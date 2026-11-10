@@ -16,16 +16,15 @@ namespace mister::hal {
     if (!read) {
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), read.error().detail});
     }
-    const std::size_t total = *read;
-    if (total == 0) {
+    if (read->empty()) {
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), 0});
     }
-    if (total == buf.size() || buf[total - 1] != '\0') {
+    if (read->size() == buf.size() || read->back() != '\0') {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
     CompatibleBlob blob;
-    if (const auto r = blob.assign(std::span<const char>(buf.data(), total)); !r) {
+    if (const auto r = blob.assign(*read); !r) {
         return std::unexpected(r.error());
     }
     return blob;

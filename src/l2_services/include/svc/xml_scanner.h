@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <optional>
-#include <span>
 #include <string_view>
 
 #include "svc/xml_attr.h"
@@ -17,9 +17,9 @@ class XmlScanner {
 public:
     explicit XmlScanner(std::string_view xml) noexcept : xml_(xml) {}
 
-    [[nodiscard]] std::optional<Token> next_token(std::span<Attr, kMaxAttrs> attrs) noexcept;
+    [[nodiscard]] std::optional<Token> next_token() noexcept;
 
-    [[nodiscard]] std::optional<Tag> next_tag(std::span<Attr, kMaxAttrs> attrs) noexcept;
+    [[nodiscard]] std::optional<Tag> next_tag() noexcept;
 
     [[nodiscard]] std::size_t pos() const noexcept { return pos_; }
 
@@ -28,6 +28,7 @@ private:
 
     std::string_view xml_;
     std::size_t pos_ = 0;
+    std::array<Attr, kMaxAttrs> attrs_{};
 };
 
 }

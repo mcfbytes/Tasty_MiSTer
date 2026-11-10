@@ -6,6 +6,8 @@ add_library(mister_app STATIC
   src/backdrop_sampler.cpp
   src/backdrop_scaler.cpp
   src/bitstream_programmer.cpp
+  src/bitstream_resolve.cpp
+  src/board_ops.cpp
   src/board_reboot.cpp
   src/bt_pump.cpp
   src/capture_main.cpp
@@ -13,6 +15,7 @@ add_library(mister_app STATIC
   src/cheat_link.cpp
   src/cheat_store.cpp
   src/cmd_fifo.cpp
+  src/cmd_line.cpp
   src/companion_host.cpp
   src/companion_walk.cpp
   src/config_apply.cpp
@@ -26,6 +29,9 @@ add_library(mister_app STATIC
   src/core_frame_counter.cpp
   src/core_init.cpp
   src/core_builder.cpp
+  src/core_switch.cpp
+  src/core_option_cells.cpp
+  src/core_tenancy.cpp
   src/lw_sector_endpoint.cpp
   src/lw_osd_endpoint.cpp
   src/lw_sys_endpoint.cpp
@@ -34,16 +40,15 @@ add_library(mister_app STATIC
   src/dev_mem_window_map.cpp
   src/durable_write.cpp
   src/ini_key_edit.cpp
-  src/durable_write_service.cpp
   src/encode_main.cpp
   src/fabric_state.cpp
   src/file_bytes.cpp
-  src/file_stream_service.cpp
   src/file_tx_pieces.cpp
   src/frame_arena.cpp
   src/frame_copier.cpp
   src/frame_numbering.cpp
   src/frame_hasher.cpp
+  src/half_scaler.cpp
   src/hd_crumb.cpp
   src/hd_dirty_ledger.cpp
   src/hd_osd_main.cpp
@@ -58,14 +63,17 @@ add_library(mister_app STATIC
   src/idle_blank.cpp
   src/info_decoder.cpp
   src/ini_parse.cpp
+  src/input_build.cpp
   src/input_decode.cpp
-  src/joy_level_emitter.cpp
-  src/mouse_divider.cpp
+  src/input_emit.cpp
   src/input_main.cpp
   src/input_pipeline.cpp
   src/input_wire.cpp
+  src/joy_level_emitter.cpp
+  src/mouse_divider.cpp
   src/intern_exact.cpp
   src/launcher_host.cpp
+  src/launcher_latch.cpp
   src/launcher_key_bridge.cpp
   src/launcher_main.cpp
   src/launcher_screen.cpp
@@ -86,20 +94,20 @@ add_library(mister_app STATIC
   src/flat_save_servant.cpp
   src/save_upload_relay.cpp
   src/mailbox_relay.cpp
-  src/mgl.cpp
+  src/mgl_player.cpp
   src/mgl_pump.cpp
   src/mount_queue.cpp
   src/name_config.cpp
   src/negotiated_core.cpp
-  src/osd_rows.cpp
   src/osd_wire.cpp
   src/owner_ladder.cpp
   src/pcm_main.cpp
   src/pcm_ring_feeder.cpp
-  src/pending_load.cpp
+  src/png_encoder.cpp
   src/process_integration.cpp
   src/quiesce_ack.cpp
   src/rbf_resolve.cpp
+  src/readiness_watch.cpp
   src/rec_options.cpp
   src/rec_write_main.cpp
   src/recents_store.cpp
@@ -125,17 +133,22 @@ add_library(mister_app STATIC
   src/rt_park.cpp
   src/save_flush.cpp
   src/save_image_source.cpp
+  src/scale_governor.cpp
   src/scaler_frame_source.cpp
+  src/scanout_lease.cpp
   src/scanout_packet.cpp
   src/scanout_relay.cpp
   src/screenshot_pump.cpp
   src/session_bindings.cpp
   src/session_machine.cpp
+  src/slot_bindings.cpp
   src/session_rows.cpp
   src/session_owner.cpp
   src/sidecar_writer.cpp
   src/spi_encoder.cpp
+  src/spi_osd_rows.cpp
   src/start_chain.cpp
+  src/stdout_router.cpp
   src/stream_io.cpp
   src/uart_mode.cpp
   src/uart_performer.cpp
@@ -189,17 +202,24 @@ if(TASTY_WITH_HDOSD)
 endif()
 
 tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
+  app/baud_words.h
+  app/mgl_hold.h
+  app/percent.h
+  app/percents.h
+  app/ratio.h
   app/px_plane.h
   app/avi_encoder.h
   app/avi_format.h
   app/avi_write_status.h
   app/avi_writer.h
   app/bitstream_programmer.h
+  app/bitstream_resolve.h
   app/capture_main.h
   app/chunk_slot.h
   app/core_frame_counter.h
   app/cscd_codec.h
   app/frame_codec.h
+  app/rec_every.h
   app/rec_options.h
   app/zmbv_codec.h
   app/core_frame_record.h
@@ -211,9 +231,12 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/frame_demand.h
   app/frame_hasher.h
   app/frame_stamp.h
+  app/half_scaler.h
   app/raw_frame_slot.h
   app/rec_control.h
   app/rec_write_main.h
+  app/scale_governor.h
+  app/step_count.h
   app/backdrop_job.h
   app/backdrop_sampler.h
   app/backdrop_scaler.h
@@ -239,6 +262,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/hd_visible_stats.h
   app/hd_style.h
   app/hd_surface.h
+  app/hd_template_traits.h
   app/hd_theme.h
   app/hd_themes.h
   app/hd_tick_pacer.h
@@ -246,6 +270,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/hps_framebuffer.h
   app/output_geometry.h
   app/page_description.h
+  app/tier_set.h
   app/launcher_demand.h
   app/launcher_fb_ack.h
   app/launcher_host.h
@@ -257,6 +282,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/launcher_screen.h
   app/launcher_state.h
   app/scanout_channel.h
+  app/scanout_lease.h
   app/scanout_packet.h
   app/scanout_relay.h
   app/uio_burst.h
@@ -273,6 +299,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/cheat_row.h
   app/cheat_store.h
   app/cmd_fifo.h
+  app/cmd_line.h
   app/cmd_verb.h
   app/cmd_verb_sink.h
   app/xml_kind.h
@@ -285,10 +312,10 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/core_window.h
   app/durable_write.h
   app/ini_key_edit.h
-  app/durable_write_service.h
   app/window_job_service.h
   app/save_state_attach.h
   app/save_state_facts.h
+  app/device_table_loans.h
   app/event.h
   app/fabric_state.h
   app/park_receipt.h
@@ -301,13 +328,13 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/slot_bindings.h
   app/core_tenancy.h
   app/held_transfer.h
-  app/file_stream_service.h
   app/event_sink.h
   app/owner_tick.h
   app/ui_round_port.h
   app/frame_source.h
   app/game_id.h
   app/info_sink.h
+  app/info_origin.h
   app/input_build.h
   app/input_decode.h
   app/input_decode_tally.h
@@ -322,12 +349,13 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/input_wire.h
   app/load_request.h
   app/mgl.h
+  app/mgl_player.h
   app/mgl_pump.h
   app/mra_facts.h
   app/name_config.h
   app/remembered_path.h
   app/osd_row_tally.h
-  app/osd_rows.h
+  app/spi_osd_rows.h
   app/osd_wire.h
   app/ui_page_record.h
   app/path_text.h
@@ -337,7 +365,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/disk_slot.h
   app/disk_relay.h
   app/flat_save_servant.h
-  app/save_slot.h
+  app/save_upload_slot.h
   app/save_upload_relay.h
   app/mailbox_relay.h
   app/companion_bind.h
@@ -345,12 +373,12 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/companion_walk.h
   app/addon_send.h
   app/recents_store.h
+  app/text_field.h
   app/recent_games.h
   app/played_history.h
   app/ui_write_lane.h
   app/write_verdict.h
   app/verdict_sinks.h
-  app/mgl_doc.h
   app/romset_alias_reader.h
   app/romset_aliases.h
   app/process_integration.h
@@ -384,6 +412,8 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/identity_record.h
   app/info_decoder.h
   app/rumble_relay.h
+  app/echo_rate.h
+  app/echo_wait.h
   app/rung.h
   app/rung_edges.h
   app/rung_rows.h
@@ -415,6 +445,7 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/link_event_facts.h
   app/link_event_dispatch.h
   app/link_encoder.h
+  app/delivered.h
   app/link_op_facts.h
   app/link_op_ctx.h
   app/encoder_roles.h
@@ -423,11 +454,12 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/link_op_dispatch.h
   app/link_op_producers.h
   app/link_producers.h
-  app/pending_load.h
   app/link_binder.h
   app/link_rows.h
   app/doorbell_lines.h
   app/lw_pads.h
+  app/lw_line.h
+  app/lw_block_endpoint.h
   app/lw_sector.h
   app/lw_sector_endpoint.h
   app/sector_grant.h
@@ -443,13 +475,14 @@ tasty_add_header_checks(tasty_app_header_checks LIB mister_app HEADERS
   app/session_identity.h
   app/session_machine.h
   app/session_rows.h
-  app/session_seats.h
+  app/supervisor_parts.h
   app/stream_io.h
   app/session_owner.h
   app/main_pass.h
   app/link_session.h
   app/load_key.h
   app/spi_encoder.h
+  app/stdout_paths.h
   app/stdout_router.h
   app/types.h
   app/uart_handoff.h

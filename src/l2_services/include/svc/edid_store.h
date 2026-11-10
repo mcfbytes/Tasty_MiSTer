@@ -2,8 +2,10 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 #include "infra/error.h"
@@ -13,45 +15,68 @@
 
 namespace mister::svc {
 
-struct EdidBlock {
-    std::array<std::byte, 256> bytes{};
-    bool valid = false;
+inline constexpr std::size_t kEdidSegmentBytes = 256;
+inline constexpr std::size_t kEdidBlocksPerSegment = 2;
+
+inline constexpr std::size_t kMaxEdidSegments = 8;
+
+using EdidSegment = std::array<std::byte, kEdidSegmentBytes>;
+
+struct EdidSegmentCount {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] static constexpr EdidSegmentCount announced_by(const EdidSegment& base) noexcept {
+        constexpr std::size_t kExtCountOffset = 126;
+        const std::size_t blocks = 1u + std::to_integer<std::uint8_t>(base[kExtCountOffset]);
+        const std::size_t segments = (blocks + kEdidBlocksPerSegment - 1u) / kEdidBlocksPerSegment;
+        return EdidSegmentCount{
+            static_cast<std::uint8_t>(segments > kMaxEdidSegments ? kMaxEdidSegments : segments)
+        };
+    }
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr std::span<const EdidSegment> prefix_of(
+        std::span<const EdidSegment> all
+    ) const noexcept {
+        return all.first(v);
+    }
+
+    friend constexpr bool operator==(EdidSegmentCount, EdidSegmentCount) = default;
 };
+
+static_assert(kMaxEdidSegments <= std::size_t{255}, "a segment count is one byte");
 
 class EdidStore {
     TASTY_SEAT_EXEMPT(component);
 
 public:
-    [[nodiscard]] Ex<void> refresh();
+    [[nodiscard]] Ex<void> refresh(const adv7513::Io& io);
 
-    const EdidBlock& current() const noexcept { return edid_; }
+    [[nodiscard]] std::optional<std::span<const std::byte>> current() const noexcept;
 
     Generation generation() const noexcept { return gen_; }
 
-    explicit EdidStore(const adv7513::Io& io = adv7513::kUnboundIo) noexcept : io_(io) {}
-
-    explicit EdidStore(const adv7513::Io&&) = delete;
-
-    static constexpr std::uint32_t kReadyTimeoutMs = 500;
-    static constexpr std::uint32_t kReadyPollUs = 10000;
-    static constexpr std::uint32_t kTriggerSettleUs = 1000;
-    static constexpr std::uint32_t kRetryDelayUs = 100000;
+    static constexpr std::chrono::milliseconds kReadyTimeout{500};
+    static constexpr std::chrono::microseconds kReadyPoll{10'000};
+    static constexpr std::chrono::microseconds kTriggerSettle{1'000};
+    static constexpr std::chrono::milliseconds kRetryDelay{100};
     static constexpr int kMaxRetries = 20;
-
-    static constexpr std::size_t kMaxSegments = 8;
 
     std::uint32_t ready_timeouts() const noexcept { return ready_timeouts_; }
 
     std::span<const std::byte> full() const noexcept;
 
 private:
-    [[nodiscard]] Ex<bool> read_segment(std::uint8_t segment, std::span<std::byte> out);
+    [[nodiscard]] Ex<bool> read_segment(
+        const adv7513::Io& io,
+        std::uint8_t segment,
+        std::span<std::byte> out
+    );
 
-    EdidBlock edid_{};
     Generation gen_{};
-    const adv7513::Io& io_;
-    std::array<std::byte, 256 * kMaxSegments> full_{};
-    std::size_t full_len_ = 0;
+    std::array<EdidSegment, kMaxEdidSegments> segments_{};
+    EdidSegmentCount segments_live_{};
     std::uint32_t ready_timeouts_ = 0;
 };
 

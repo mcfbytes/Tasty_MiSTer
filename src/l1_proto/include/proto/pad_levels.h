@@ -9,7 +9,7 @@
 #include "infra/error.h"
 #include "infra/indexed_array.h"
 #include "infra/seat.h"
-#include "proto/joystick.h"
+#include "proto/joystick_port.h"
 #include "proto/stick_pos.h"
 #include "proto/link_pad_encoder.h"
 #include "proto/uio_opcodes.h"
@@ -54,10 +54,6 @@ public:
             if (kRegs[i].opcode == opcode && kRegs[i].index == index)
                 return slot_at(i);
         return not_a_level();
-    }
-
-    [[nodiscard]] static constexpr std::uint32_t stick_word(StickPos pos) noexcept {
-        return (static_cast<std::uint32_t>(pos.y) << 8) | pos.x;
     }
 
     void put(Slot level, std::uint32_t word) noexcept { words_[level] = word; }

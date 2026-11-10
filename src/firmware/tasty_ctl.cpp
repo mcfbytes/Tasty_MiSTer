@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +39,7 @@
 #include "infra/message_sum.h"
 #include "infra/parse_int.h"
 #include "infra/persist.h"
+#include "os/writeback_paths.h"
 #include "os/writeback_probe.h"
 #include "svc/file.h"
 #include "svc/scan_filter.h"
@@ -47,24 +49,24 @@ namespace mister::fw {
 namespace {
 
 void report_unhashable(
-    const cores::IMovieCodec& codec,
+    const cores::MovieCodec& codec,
     std::string_view rom,
     const Error& e
 ) noexcept {
-    using CR = cores::IMovieCodec::Refusal;
+    using CR = cores::MovieRefusal;
     const int n = static_cast<int>(rom.size());
-    const auto why = static_cast<CR>(e.detail);
-    const std::string_view images = codec.disc_images();
-    if (e.code != Errc::bad_format)
+    const std::optional<CR> why = cores::movie_refusal_of(e);
+    const std::string_view images = codec.core().disc_images();
+    if (!why)
         std::fprintf(stderr, "tasty: cannot read rom %.*s\n", n, rom.data());
-    else if (why == CR::ChdUnsupported)
+    else if (*why == CR::ChdUnsupported)
         std::fprintf(
             stderr,
             "tasty: this build of tasty cannot read .chd disc images: %.*s\n",
             n,
             rom.data()
         );
-    else if (why == CR::Disk && !images.empty())
+    else if (*why == CR::Disk && !images.empty())
         std::fprintf(
             stderr,
             "tasty: cannot hash disc image %.*s; use %.*s\n",
@@ -111,6 +113,23 @@ Error os_err() noexcept {
     return Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)};
 }
 
+[[nodiscard]] Ex<app::PathText> resolved_path(app::PathText p) noexcept {
+    if (p.empty())
+        return p;
+    if (p.view()[0] != '/') {
+        char cwd[PATH_MAX];
+        if (::getcwd(cwd, sizeof cwd) == nullptr)
+            return std::unexpected(os_err());
+        const std::string absolute = std::string(cwd) + "/" + std::string(p.view());
+        if (!p.assign(absolute))
+            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    }
+    char real[PATH_MAX];
+    if (::realpath(p.c_str(), real) != nullptr && !p.assign(real))
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    return p;
+}
+
 bool comm_matches(int pid, std::string_view want) noexcept {
     char path[64];
     std::snprintf(path, sizeof path, "/proc/%d/comm", pid);
@@ -132,60 +151,32 @@ bool comm_is_mister(int pid) noexcept {
     return comm_matches(pid, g_stock_comm);
 }
 
-std::optional<timespec> mono_deadline(unsigned seconds) noexcept {
-    timespec out{};
-    if (::clock_gettime(CLOCK_MONOTONIC, &out) != 0)
-        return std::nullopt;
-    out.tv_sec += static_cast<time_t>(seconds);
-    return out;
+timespec to_timespec(std::chrono::steady_clock::duration d) noexcept {
+    const auto whole = std::chrono::duration_cast<std::chrono::duration<std::time_t>>(d);
+    const auto part = std::chrono::duration_cast<std::chrono::duration<long, std::nano>>(d - whole);
+    timespec ts{};
+    ts.tv_sec = whole.count();
+    ts.tv_nsec = part.count();
+    return ts;
 }
 
-void sleep_until(const timespec& deadline) noexcept {
-    while (::clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &deadline, nullptr) == EINTR) {
+void sleep_until(std::chrono::steady_clock::time_point deadline) noexcept {
+    const timespec wake = to_timespec(deadline.time_since_epoch());
+    while (::clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &wake, nullptr) == EINTR) {
     }
 }
 
-void sleep_remaining(unsigned seconds) noexcept {
-    timespec left{};
-    left.tv_sec = static_cast<time_t>(seconds);
-    while (::nanosleep(&left, &left) != 0 && errno == EINTR) {
-    }
+bool deadline_passed(std::chrono::steady_clock::time_point deadline) noexcept {
+    return std::chrono::steady_clock::now() >= deadline;
 }
 
-bool deadline_passed(const timespec& deadline) noexcept {
-    timespec now{};
-    if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-        return true;
-    if (now.tv_sec != deadline.tv_sec)
-        return now.tv_sec > deadline.tv_sec;
-    return now.tv_nsec >= deadline.tv_nsec;
+void sleep_poll_slice(std::chrono::steady_clock::time_point deadline) noexcept {
+    constexpr std::chrono::milliseconds kPollSlice{50};
+    sleep_until(std::min(std::chrono::steady_clock::now() + kPollSlice, deadline));
 }
 
-void sleep_poll_slice(const timespec& deadline) noexcept {
-    timespec now{};
-    if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-        return;
-    timespec slice = now;
-    constexpr long kPollNs = 50L * 1000L * 1000L;
-    constexpr long kSecNs = 1000L * 1000L * 1000L;
-    slice.tv_nsec += kPollNs;
-    if (slice.tv_nsec >= kSecNs) {
-        slice.tv_sec += 1;
-        slice.tv_nsec -= kSecNs;
-    }
-    if (slice.tv_sec > deadline.tv_sec
-        || (slice.tv_sec == deadline.tv_sec && slice.tv_nsec > deadline.tv_nsec))
-        slice = deadline;
-    sleep_until(slice);
-}
-
-void sleep_grace(unsigned seconds) noexcept {
-    const std::optional<timespec> deadline = mono_deadline(seconds);
-    if (!deadline) {
-        sleep_remaining(seconds);
-        return;
-    }
-    sleep_until(*deadline);
+void sleep_grace(std::chrono::seconds grace) noexcept {
+    sleep_until(std::chrono::steady_clock::now() + grace);
 }
 
 bool comm_is_owner(int pid) noexcept {
@@ -242,7 +233,7 @@ struct Digested {
 
 Digested digest_of(
     const svc::Vfs& vfs,
-    const cores::IMovieCodec::DigestSource& src,
+    const cores::IMovieFormat::DigestSource& src,
     cores::DigestKind kind
 ) {
     auto f = vfs.open(src.file, svc::OpenMode::Read);
@@ -256,8 +247,8 @@ Digested digest_of(
         alts[i].update(std::span<const std::uint8_t>(src.alt_prefixes[i]));
     constexpr std::size_t kDigestChunk = 64 * 1024;
     std::vector<std::uint8_t> buf(kDigestChunk);
-    std::uint64_t off = src.span.offset;
-    std::uint64_t left = src.span.length;
+    std::uint64_t off = src.span.offset.length_of(proto::BlockCount{1});
+    std::uint64_t left = src.span.length.length_of(proto::BlockCount{1});
     while (left != 0) {
         const std::size_t n = left < buf.size() ? static_cast<std::size_t>(left) : buf.size();
         const auto got = (*f)->read_at(off, std::as_writable_bytes(std::span(buf.data(), n)));
@@ -276,14 +267,14 @@ Digested digest_of(
 }
 
 bool digest_matches(
-    const cores::IMovieCodec& codec,
+    const cores::IMovieFormat& format,
     const Digested& d,
-    const cores::IMovieCodec::Facts& facts
+    const cores::MovieFacts& facts
 ) {
-    if (d.value && codec.rom_matches(*d.value, facts))
+    if (d.value && format.rom_matches(*d.value, facts))
         return true;
     for (const auto& a : d.alts) {
-        if (codec.rom_matches(a, facts))
+        if (format.rom_matches(a, facts))
             return true;
     }
     return false;
@@ -291,16 +282,15 @@ bool digest_matches(
 
 enum class RomConsider : std::int8_t { No, Match, PathTooLong };
 
-int lookup_rom(
+[[nodiscard]] Ex<app::PathText> lookup_rom(
     const svc::Vfs& vfs,
-    const cores::IMovieCodec& codec,
-    const cores::IMovieCodec::Facts& facts,
-    std::string_view folder,
-    app::PathText& rom
+    const cores::IMovieFormat& format,
+    const cores::MovieFacts& facts,
+    std::string_view folder
 ) {
-    if (!facts.has_digest) {
+    if (!facts.digest) {
         std::fprintf(stderr, "tasty: this movie names no ROM checksum; pass --rom\n");
-        return 1;
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     const std::string rel = std::string("media/fat/games/") + std::string(folder);
     const svc::ScanFilter filt{};
@@ -308,24 +298,25 @@ int lookup_rom(
     std::uint64_t hashed = 0;
 
     bool stopped = false;
+    app::PathText rom{};
 
     auto consider = [&](const std::string& child) -> RomConsider {
         ++seen;
-        auto src = codec.digest_source(vfs, child);
+        auto src = format.digest_source(vfs, child);
         if (!src)
             return RomConsider::No;
         std::uint64_t prefix_n = src->prefix.size();
         for (const auto& a : src->alt_prefixes)
             prefix_n += a.size();
-        const std::uint64_t span_n = src->span.length;
+        const std::uint64_t span_n = src->span.length.length_of(proto::BlockCount{1});
 
         if (prefix_n > kRomHashBytes - hashed || span_n > kRomHashBytes - hashed - prefix_n) {
             stopped = true;
             return RomConsider::No;
         }
         hashed += prefix_n + span_n;
-        const auto d = digest_of(vfs, *src, facts.digest.kind);
-        if (!digest_matches(codec, d, facts))
+        const auto d = digest_of(vfs, *src, facts.digest->kind);
+        if (!digest_matches(format, d, facts))
             return RomConsider::No;
         return rom.assign(child) ? RomConsider::Match : RomConsider::PathTooLong;
     };
@@ -357,10 +348,10 @@ int lookup_rom(
     for (std::size_t i = 0; r == RomConsider::No && !stopped && i < subdirs.size(); ++i)
         r = walk(subdirs[i], false);
     if (r == RomConsider::Match)
-        return 0;
+        return rom;
     if (r == RomConsider::PathTooLong) {
         std::fprintf(stderr, "tasty: the matching ROM path is too long; pass --rom\n");
-        return 1;
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     if (stopped)
         std::fprintf(
@@ -378,7 +369,7 @@ int lookup_rom(
             static_cast<int>(folder.size()),
             folder.data()
         );
-    return 1;
+    return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 }
 
 struct LogCount {
@@ -388,12 +379,12 @@ struct LogCount {
 
 LogCount count_log_frames(
     const svc::Vfs& vfs,
-    const cores::IMovieCodec& codec,
+    const cores::IMovieFormat& format,
     std::string_view movie,
-    const cores::IMovieCodec::Facts& facts
+    const cores::MovieFacts& facts
 ) {
     bool capped = false;
-    auto f = codec.open_movie(vfs, movie);
+    auto f = format.open_movie(vfs, movie);
     if (!f)
         return {};
     constexpr std::size_t kLineChunk = 4096;
@@ -410,15 +401,15 @@ LogCount count_log_frames(
         if (!row.empty() && row.back() == '\r')
             row.remove_suffix(1);
         if (!in) {
-            if (!codec.starts_log(row))
+            if (!format.starts_log(row))
                 return;
             in = true;
         }
-        if (codec.ends_log(row)) {
+        if (format.ends_log(row)) {
             stop = true;
             return;
         }
-        if (!codec.frame(row, facts))
+        if (!format.frame(row, facts))
             return;
         if (n >= kCap) {
             capped = true;
@@ -440,7 +431,7 @@ LogCount count_log_frames(
             if (ch == '\n') {
                 take(line);
                 line.clear();
-            } else if (line.size() < cores::IMovieCodec::kLineMax) {
+            } else if (line.size() < cores::kMovieLineMax) {
                 line.push_back(ch);
             }
         }
@@ -454,16 +445,12 @@ LogCount count_log_frames(
 
 }
 
-void tasty_set_ctl_paths(const char* lock, const char* pid, const char* status) noexcept {
-    if (lock != nullptr)
-        g_lock_path = lock;
-    if (pid != nullptr)
-        g_pid_path = pid;
-    if (status != nullptr) {
-        g_status_path = status;
-        std::snprintf(g_status_tmp_buf, sizeof g_status_tmp_buf, "%s.tmp", status);
-        g_status_tmp_path = g_status_tmp_buf;
-    }
+void tasty_set_ctl_paths(CtlPaths paths) noexcept {
+    g_lock_path = paths.lock;
+    g_pid_path = paths.pid;
+    g_status_path = paths.status;
+    std::snprintf(g_status_tmp_buf, sizeof g_status_tmp_buf, "%s.tmp", paths.status);
+    g_status_tmp_path = g_status_tmp_buf;
 }
 
 void tasty_set_owner_comm(const char* comm) noexcept {
@@ -480,11 +467,9 @@ void tasty_set_stock_comm(const char* comm) noexcept {
         g_stock_comm = comm;
 }
 
-void tasty_set_home_image(const char* exe, const char* arg) noexcept {
-    if (exe != nullptr && exe[0] != '\0')
-        std::snprintf(g_home_exe, sizeof g_home_exe, "%s", exe);
-    if (arg != nullptr && arg[0] != '\0')
-        std::snprintf(g_home_menu, sizeof g_home_menu, "%s", arg);
+void tasty_set_home_image(HomeImage image) noexcept {
+    std::snprintf(g_home_exe, sizeof g_home_exe, "%s", image.exe);
+    std::snprintf(g_home_menu, sizeof g_home_menu, "%s", image.arg);
 }
 
 [[nodiscard]] Ex<UniqueFd> tasty_lock_owner() noexcept {
@@ -661,21 +646,18 @@ std::string tasty_busy_text() noexcept {
     ::closedir(d);
     for (unsigned i = 0; i < n; ++i)
         (void)::kill(pids[i], SIGTERM);
-    constexpr unsigned kTermGraceSeconds = 2;
-    constexpr unsigned kKillGraceSeconds = 3;
+    constexpr std::chrono::seconds kTermGrace{2};
+    constexpr std::chrono::seconds kKillGrace{3};
     if (n != 0)
-        sleep_grace(kTermGraceSeconds);
+        sleep_grace(kTermGrace);
     for (unsigned i = 0; i < n; ++i) {
         if (::kill(pids[i], 0) == 0)
             (void)::kill(pids[i], SIGKILL);
     }
-    if (const std::optional<timespec> deadline = mono_deadline(kKillGraceSeconds)) {
-        for (unsigned i = 0; i < n; ++i) {
-            while (::kill(pids[i], 0) == 0 && !deadline_passed(*deadline))
-                sleep_poll_slice(*deadline);
-        }
-    } else {
-        sleep_remaining(kKillGraceSeconds);
+    const auto deadline = std::chrono::steady_clock::now() + kKillGrace;
+    for (unsigned i = 0; i < n; ++i) {
+        while (::kill(pids[i], 0) == 0 && !deadline_passed(deadline))
+            sleep_poll_slice(deadline);
     }
     for (unsigned i = 0; i < n; ++i) {
         if (::kill(pids[i], 0) == 0)
@@ -824,125 +806,123 @@ int tasty_run_client(TastyVerb v) noexcept {
     return 0;
 }
 
-const char* tasty_movie_refusal_token(std::uint32_t codec_refusal) noexcept {
-    using R = cores::IMovieCodec::Refusal;
-    if (codec_refusal >= infra::ordinal(R::kCount))
-        return "movie";
-    switch (static_cast<R>(codec_refusal)) {
+const char* tasty_movie_refusal_sentence(cores::MovieRefusal why) noexcept {
+    using R = cores::MovieRefusal;
+    switch (why) {
         case R::NotAMovie:
-            return "not_a_movie";
+            return "this file is not a movie tasty can read; check that it is the movie itself "
+                   "and complete";
         case R::Savestate:
-            return "savestate";
+            return "this movie starts from a savestate or saved game, not from power-on";
         case R::Binary:
-            return "binary";
+            return "this .fm2 keeps its input in binary; save it again as text from FCEUX";
         case R::Disk:
-            return "disk";
+            return "this movie is for a disk add-on such as the Famicom Disk System, which tasty "
+                   "does not play";
         case R::PortType:
-            return "port_type";
+            return "this movie uses a controller other than the standard pad, which tasty does "
+                   "not replay";
         case R::Multitap:
-            return "multitap";
+            return "this movie has more than two players (a Four Score or multitap), which tasty "
+                   "does not replay";
         case R::Checksum:
-            return "bad_checksum";
+            return "the movie's ROM checksum is missing or unreadable, so tasty cannot confirm "
+                   "the ROM";
         case R::Command:
-            return "command";
+            return "this movie presses reset or power after it starts, which tasty does not "
+                   "replay";
         case R::TooLong:
-            return "too_long";
+            return "this movie is longer than tasty can play";
         case R::BadLine:
-            return "bad_line";
+            return "a line of this movie's input cannot be read; the file may be damaged";
         case R::Setting:
-            return "movie_setting";
+            return "this movie was recorded with an emulator setting, such as its region, that "
+                   "this core cannot match";
         case R::Archive:
-            return "archive";
+            return "this movie archive cannot be opened; check that the file is complete";
         case R::Subframe:
-            return "subframe";
+            return "this movie uses sub-frame input, which tasty does not replay";
         case R::System:
-            return "system";
+            return "this movie is for another console than the one tasty runs it on";
         case R::ChdUnsupported:
-            return "rom_chd";
+            return "this build of tasty cannot read .chd disc images";
         case R::None:
         case R::kCount:
-            return "movie";
+            return nullptr;
     }
-    return "movie";
-}
-
-const char* tasty_refusal_sentence(std::string_view why) noexcept {
-    struct Row {
-        std::string_view why;
-        const char* sentence;
-    };
-
-    static constexpr Row kRows[] = {
-        {"not_a_movie",
-         "this file is not a movie tasty can read; check that it is the movie itself and complete"},
-        {"savestate", "this movie starts from a savestate or saved game, not from power-on"},
-        {"binary", "this .fm2 keeps its input in binary; save it again as text from FCEUX"},
-        {"disk",
-         "this movie is for a disk add-on such as the Famicom Disk System, which tasty "
-         "does not play"},
-        {"port_type",
-         "this movie uses a controller other than the standard pad, which tasty does "
-         "not replay"},
-        {"multitap",
-         "this movie has more than two players (a Four Score or multitap), which tasty "
-         "does not replay"},
-        {"bad_checksum",
-         "the movie's ROM checksum is missing or unreadable, so tasty cannot "
-         "confirm the ROM"},
-        {"command",
-         "this movie presses reset or power after it starts, which tasty does not "
-         "replay"},
-        {"too_long", "this movie is longer than tasty can play"},
-        {"bad_line", "a line of this movie's input cannot be read; the file may be damaged"},
-        {"movie_setting",
-         "this movie was recorded with an emulator setting, such as its region, "
-         "that this core cannot match"},
-        {"archive", "this movie archive cannot be opened; check that the file is complete"},
-        {"subframe", "this movie uses sub-frame input, which tasty does not replay"},
-        {"system", "this movie is for another console than the one tasty runs it on"},
-        {"rom_chd", "this build of tasty cannot read .chd disc images"},
-        {"movie_io", "the movie file cannot be read"},
-        {"rom_io", "the ROM file cannot be read; check the --rom path"},
-        {"rom_size", "the ROM is larger than tasty hashes, or not a ROM this movie's format names"},
-        {"no_codec", "no movie format tasty knows plays this file on this core"},
-        {"lead", "the --lead value is outside what this movie's format allows"},
-        {"phase", "--phase must be at least 1000 us and leave 2000 us before the next frame"},
-    };
-    for (const Row& r : kRows)
-        if (r.why == why)
-            return r.sentence;
     return nullptr;
 }
 
-int tasty_preflight_rom(const svc::Vfs& vfs, std::string_view movie, std::string_view rom) {
-    const std::string why = cores::movie_unplayable_reason(vfs, movie);
+const char* tasty_refusal_sentence(app::PlayRefusal::Why why) noexcept {
+    using W = app::PlayRefusal::Why;
+    switch (why) {
+        case W::NoCodec:
+            return "no movie format tasty knows plays this file on this core";
+        case W::MovieIo:
+            return "the movie file cannot be read";
+        case W::RomIo:
+            return "the ROM file cannot be read; check the --rom path";
+        case W::RomSize:
+            return "the ROM is larger than tasty hashes, or not a ROM this movie's format names";
+        case W::Checksum:
+            return "the ROM on the card is not the one the movie was recorded with";
+        case W::Phase:
+            return "--phase must be at least 1000 us and leave 2000 us before the next frame";
+        case W::Lead:
+            return "the --lead value is outside what this movie's format allows";
+        case W::Command:
+            return "this movie presses reset or power after it starts, which tasty does not "
+                   "replay";
+        case W::TooLong:
+            return "this movie is longer than tasty can play";
+        case W::RomKind:
+            return "this disc image cannot be hashed; use a Redump .cue/.bin or a chdman .chd of "
+                   "one";
+        case W::RomChd:
+            return "this build of tasty cannot read .chd disc images";
+        case W::None:
+        case W::Busy:
+        case W::NotWired:
+        case W::Movie:
+        case W::Setting:
+        case W::Slot:
+        case W::PowerOn:
+        case W::Firmware:
+        case W::kCount:
+            return nullptr;
+    }
+    return nullptr;
+}
+
+int tasty_preflight_rom(const svc::Vfs& vfs, TastyFiles files) {
+    const std::string why = cores::movie_unplayable_reason(vfs, files.movie);
     if (!why.empty()) {
         std::fprintf(stderr, "tasty: %s\n", why.c_str());
         return 1;
     }
-    const auto sys = cores::movie_system_for(vfs, movie);
+    const auto sys = cores::movie_system_for(vfs, files.movie);
     if (!sys || !sys->codec)
         return 0;
-    auto src = sys->codec->digest_source(vfs, rom);
+    auto src = sys->codec->format().digest_source(vfs, files.rom);
     if (src)
         return 0;
-    report_unhashable(*sys->codec, rom, src.error());
+    report_unhashable(*sys->codec, files.rom, src.error());
     return 1;
 }
 
-int tasty_check_movie(const svc::Vfs& vfs, std::string_view movie, std::string_view rom) {
-    if (!vfs.file_exists(movie)) {
+int tasty_check_movie(const svc::Vfs& vfs, TastyFiles files) {
+    if (!vfs.file_exists(files.movie)) {
         std::fprintf(
             stderr,
             "tasty: missing movie %.*s\n",
-            static_cast<int>(movie.size()),
-            movie.data()
+            static_cast<int>(files.movie.size()),
+            files.movie.data()
         );
         return 1;
     }
-    const auto sys = cores::movie_system_for(vfs, movie);
+    const auto sys = cores::movie_system_for(vfs, files.movie);
     if (!sys || !sys->codec) {
-        const std::string why = cores::movie_unplayable_reason(vfs, movie);
+        const std::string why = cores::movie_unplayable_reason(vfs, files.movie);
         if (!why.empty()) {
             std::fprintf(stderr, "tasty: %s\n", why.c_str());
             return 1;
@@ -950,49 +930,53 @@ int tasty_check_movie(const svc::Vfs& vfs, std::string_view movie, std::string_v
         std::fprintf(
             stderr,
             "tasty: no codec for %.*s\n",
-            static_cast<int>(movie.size()),
-            movie.data()
+            static_cast<int>(files.movie.size()),
+            files.movie.data()
         );
         return 1;
     }
-    auto facts = cores::read_movie_facts(vfs, *sys->codec, movie);
+    auto facts = cores::read_movie_facts(vfs, sys->codec->format(), files.movie);
     if (!facts) {
-        const char* s = facts.error().code == Errc::bad_format
-            ? tasty_refusal_sentence(tasty_movie_refusal_token(facts.error().detail))
-            : nullptr;
+        const std::optional<cores::MovieRefusal> why = cores::movie_refusal_of(facts.error());
+        const char* s = why ? tasty_movie_refusal_sentence(*why) : nullptr;
         if (s != nullptr) {
             std::fprintf(stderr, "tasty: %s\n", s);
         } else {
             std::fprintf(
                 stderr,
                 "tasty: cannot read movie %.*s\n",
-                static_cast<int>(movie.size()),
-                movie.data()
+                static_cast<int>(files.movie.size()),
+                files.movie.data()
             );
         }
         return 1;
     }
-    if (!facts->has_digest) {
+    if (!facts->digest) {
         std::printf("no checksum in this movie\n");
         return 0;
     }
-    if (!vfs.file_exists(rom)) {
-        std::fprintf(stderr, "tasty: missing rom %.*s\n", static_cast<int>(rom.size()), rom.data());
+    if (!vfs.file_exists(files.rom)) {
+        std::fprintf(
+            stderr,
+            "tasty: missing rom %.*s\n",
+            static_cast<int>(files.rom.size()),
+            files.rom.data()
+        );
         return 1;
     }
-    auto src = sys->codec->digest_source(vfs, rom);
+    auto src = sys->codec->format().digest_source(vfs, files.rom);
     if (!src) {
-        report_unhashable(*sys->codec, rom, src.error());
+        report_unhashable(*sys->codec, files.rom, src.error());
         return 1;
     }
-    const auto got = digest_of(vfs, *src, facts->digest.kind);
+    const auto got = digest_of(vfs, *src, facts->digest->kind);
     if (!got.value) {
         if (got.fail == DigestFail::Open)
             std::fprintf(
                 stderr,
                 "tasty: cannot open rom %.*s\n",
-                static_cast<int>(rom.size()),
-                rom.data()
+                static_cast<int>(files.rom.size()),
+                files.rom.data()
             );
         else
             std::fprintf(
@@ -1002,7 +986,7 @@ int tasty_check_movie(const svc::Vfs& vfs, std::string_view movie, std::string_v
             );
         return 1;
     }
-    if (digest_matches(*sys->codec, got, *facts)) {
+    if (digest_matches(sys->codec->format(), got, *facts)) {
         std::printf("rom matches\n");
         return 0;
     }
@@ -1011,7 +995,7 @@ int tasty_check_movie(const svc::Vfs& vfs, std::string_view movie, std::string_v
     return kExitRomMismatch;
 }
 
-int tasty_prepare_play(const svc::Vfs& vfs, TastyArgs& a) {
+[[nodiscard]] Ex<app::PathText> tasty_prepare_play(const svc::Vfs& vfs, const TastyArgs& a) {
 
     if (a.loop && a.record && !a.record->empty()) {
         std::fprintf(
@@ -1019,59 +1003,60 @@ int tasty_prepare_play(const svc::Vfs& vfs, TastyArgs& a) {
             "tasty: --loop and --record do not mix; drop --loop to record one "
             "pass\n"
         );
-        return 1;
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     const auto sys = cores::movie_system_for(vfs, a.movie.view());
     if (!sys || !sys->codec) {
         std::fprintf(stderr, "tasty: no codec for %s\n", a.movie.c_str());
-        return 1;
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-    if (a.ram_fill && !sys->codec->ram_fill_need(*a.ram_fill)) {
+    if (a.ram_fill && !sys->codec->core().ram_fill_need(*a.ram_fill)) {
         std::fprintf(
             stderr,
             "tasty: this movie's core has no RAM-init setting; --ram-init works "
             "only where it has one (NES: RAM Clear)\n"
         );
-        return 1;
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
-    auto facts = cores::read_movie_facts(vfs, *sys->codec, a.movie.view());
+    auto facts = cores::read_movie_facts(vfs, sys->codec->format(), a.movie.view());
     if (!facts) {
         std::fprintf(stderr, "tasty: cannot read movie %s\n", a.movie.c_str());
-        return 1;
+        return std::unexpected(facts.error());
     }
-    const app::MovieFrame lead = a.lead.value_or(app::MovieFrame{sys->codec->default_lead(*facts)});
-    const auto range = sys->codec->lead_range();
-    constexpr auto kArmMin = static_cast<std::int32_t>(std::numeric_limits<std::int16_t>::min());
-    constexpr auto kArmMax = static_cast<std::int32_t>(std::numeric_limits<std::int16_t>::max());
-    if (lead < app::MovieFrame{range.min}
-        || lead > app::MovieFrame{range.max}
-        || lead < app::MovieFrame{kArmMin}
-        || lead > app::MovieFrame{kArmMax}) {
+    const cores::ReplayLead lead = a.lead ? a.lead->as_lead()
+                                          : sys->codec->format().default_lead(*facts);
+    const auto range = sys->codec->core().lead_range();
+    if (!range.admits(lead) || !app::ArmLead::of(lead)) {
         std::fprintf(
             stderr,
-            "tasty: --lead %s is outside %d..%d for this movie; "
+            "tasty: --lead %s is outside %s for this movie; "
             "pass a lead inside that range\n",
             lead.text().c_str(),
-            static_cast<int>(range.min),
-            static_cast<int>(range.max)
+            range.text().c_str()
         );
-        return 1;
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
     if (a.phase_us) {
         if (!app::ReplayFeeder::phase_fits(
                 *a.phase_us,
-                std::chrono::nanoseconds{sys->codec->raster(*facts).period_ns}
+                sys->codec->core().raster(*facts).period_ns
             )) {
-            std::fprintf(stderr, "tasty: %s\n", tasty_refusal_sentence("phase"));
-            return 1;
+            std::fprintf(
+                stderr,
+                "tasty: %s\n",
+                tasty_refusal_sentence(app::PlayRefusal::Why::Phase)
+            );
+            return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
         }
     }
     if (a.rom.empty()) {
-        const std::string_view named = sys->codec->games_folder();
+        const std::string_view named = sys->codec->core().games_folder();
         const std::string_view folder = named.empty() ? sys->conf_str_name : named;
-        return lookup_rom(vfs, *sys->codec, *facts, folder, a.rom);
+        return lookup_rom(vfs, sys->codec->format(), *facts, folder);
     }
-    return tasty_preflight_rom(vfs, a.movie.view(), a.rom.view());
+    if (tasty_preflight_rom(vfs, TastyFiles{.movie = a.movie.view(), .rom = a.rom.view()}) != 0)
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    return a.rom;
 }
 
 int tasty_info_movie(const svc::Vfs& vfs, std::string_view movie) {
@@ -1094,7 +1079,7 @@ int tasty_info_movie(const svc::Vfs& vfs, std::string_view movie) {
         );
         return 1;
     }
-    auto facts = cores::read_movie_facts(vfs, *sys->codec, movie);
+    auto facts = cores::read_movie_facts(vfs, sys->codec->format(), movie);
     if (!facts) {
         std::fprintf(
             stderr,
@@ -1110,10 +1095,10 @@ int tasty_info_movie(const svc::Vfs& vfs, std::string_view movie) {
         sys->conf_str_name.data(),
         cores::movie_system_supported(*sys) ? "yes" : "no"
     );
-    const LogCount count = count_log_frames(vfs, *sys->codec, movie, *facts);
+    const LogCount count = count_log_frames(vfs, sys->codec->format(), movie, *facts);
     std::printf(count.capped ? "frames %u or more\n" : "frames %u\n", count.frames);
-    if (facts->has_rerecords)
-        std::printf("rerecords %u\n", facts->rerecords);
+    if (facts->rerecords)
+        std::printf("rerecords %s\n", facts->rerecords->text().c_str());
     else
         std::printf("rerecords unknown\n");
     return 0;
@@ -1151,40 +1136,26 @@ bool tasty_mkdir_p(std::string_view path) noexcept {
     return true;
 }
 
-bool tasty_resolve_args(TastyArgs& a) noexcept {
-    auto one = [](app::PathText p) noexcept -> std::optional<app::PathText> {
-        if (p.empty())
-            return p;
-        if (p.view()[0] != '/') {
-            char cwd[PATH_MAX];
-            if (::getcwd(cwd, sizeof cwd) == nullptr)
-                return std::nullopt;
-            const std::string abs = std::string(cwd) + "/" + std::string(p.view());
-            if (!p.assign(abs))
-                return std::nullopt;
-        }
-        char real[PATH_MAX];
-        if (::realpath(p.c_str(), real) != nullptr) {
-            if (!p.assign(real))
-                return std::nullopt;
-        }
-        return p;
-    };
-    const auto movie = one(a.movie);
-    const auto rom = one(a.rom);
-    const auto core = one(a.core);
-    if (!movie || !rom || !core)
-        return false;
-    a.movie = *movie;
-    a.rom = *rom;
-    a.core = *core;
-    if (!a.record)
-        return true;
-    const auto record = one(*a.record);
+[[nodiscard]] Ex<TastyArgs> tasty_resolve_args(TastyArgs args) noexcept {
+    auto movie = resolved_path(args.movie);
+    if (!movie)
+        return std::unexpected(movie.error());
+    auto rom = resolved_path(args.rom);
+    if (!rom)
+        return std::unexpected(rom.error());
+    auto core = resolved_path(args.core);
+    if (!core)
+        return std::unexpected(core.error());
+    args.movie = *movie;
+    args.rom = *rom;
+    args.core = *core;
+    if (!args.record)
+        return args;
+    auto record = resolved_path(*args.record);
     if (!record)
-        return false;
-    a.record = *record;
-    return true;
+        return std::unexpected(record.error());
+    args.record = *record;
+    return args;
 }
 
 std::optional<app::PathText> tasty_prepare_record(
@@ -1282,29 +1253,18 @@ std::string_view tasty_record_dir(std::string_view record) noexcept {
 void tasty_warn_record_writeback(
     std::string_view record,
     os::CpuId rt_cpu,
-    const char* cpumask_path,
-    const char* unbound_path,
+    os::WritebackPaths paths,
     std::FILE* out
 ) noexcept {
     app::PathText dir{};
     if (!dir.assign(tasty_record_dir(record)))
         return;
-    warn_writeback_cpumask(
-        os::read_writeback_probe(os::WritebackPaths{dir.c_str(), cpumask_path, unbound_path}),
-        rt_cpu,
-        "tasty",
-        out
-    );
+    paths.dir = dir.c_str();
+    warn_writeback_cpumask(os::read_writeback_probe(paths), rt_cpu, "tasty", out);
 }
 
 void tasty_warn_record_writeback(std::string_view record, os::CpuId rt_cpu) noexcept {
-    tasty_warn_record_writeback(
-        record,
-        rt_cpu,
-        os::kWritebackCpumaskPath,
-        os::kUnboundCpumaskPath,
-        stderr
-    );
+    tasty_warn_record_writeback(record, rt_cpu, os::WritebackPaths{}, stderr);
 }
 
 }

@@ -5,14 +5,13 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "svc/disc_engine.h"
+#include "svc/toc.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
 inline constexpr std::size_t kTocFrameBytes = 1600;
 inline constexpr std::size_t kTocFrameTracks = 99;
-
-enum class DiscRegion : std::uint8_t { Unknown = 0, Japan = 1, Usa = 2, Europe = 3 };
 
 struct TocFrameMeta {
     DiscRegion region = DiscRegion::Unknown;

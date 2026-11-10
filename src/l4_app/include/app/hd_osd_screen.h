@@ -10,6 +10,8 @@
 #include "app/hd_osd_status.h"
 #include "app/hd_status_slots.h"
 #include "app/hd_surface.h"
+#include "app/output_geometry.h"
+#include "app/video_pump_stats.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
@@ -19,7 +21,6 @@
 namespace mister::app {
 
 class HpsFramebuffer;
-class VideoPump;
 
 class HdOsdScreen {
     TASTY_SEAT_RESIDENT(Ui);
@@ -31,9 +32,10 @@ public:
         HdFlipChannel& flips;
         xthread::WakeFlag& wake;
         HpsFramebuffer& fb;
-        const VideoPump& video;
+        const IOutputGeometry& output;
+        const VideoStatsCell& stats;
         const os::IClock& clock;
-        infra::OptRef<os::IVtConsole> vt{};
+        infra::OptRef<os::IVtMode> vt{};
     };
 
     explicit HdOsdScreen(const Wiring& w) noexcept : w_(w) {}
@@ -42,7 +44,7 @@ public:
     HdOsdScreen& operator=(const HdOsdScreen&) = delete;
 
     void tick(
-        const PageDescription* page,
+        infra::OptRef<const PageDescription> page,
         HdOsdStatus::Badge badge,
         HdStatusSlots slots = {},
         HdLook look = {}
@@ -83,10 +85,9 @@ private:
     HdLook look_{};
     HdLook look_sent_{};
     HdSurface surface_{};
-    std::uint32_t epoch_ = 0;
+    HdEpoch epoch_{};
     std::uint32_t applies_seen_ = 0;
-    std::uint32_t out_w_ = 0;
-    std::uint32_t out_h_ = 0;
+    OutputSize out_{};
     std::uint32_t stale_drops_ = 0;
 
     std::optional<os::VtNumber> guarded_vt_{};

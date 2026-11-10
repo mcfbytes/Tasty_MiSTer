@@ -3,6 +3,7 @@
 
 #include <span>
 
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
@@ -20,13 +21,13 @@ class GameSlot final {
 public:
     GameSlot(const OptionsModel& root, std::span<const cores::FileSlot> slots);
 
-    const OptionItem* row() const noexcept { return row_; }
+    infra::OptRef<const OptionItem> row() const noexcept { return row_; }
 
-    const OptionItem* disc_row() const noexcept { return disc_row_; }
+    infra::OptRef<const OptionItem> disc_row() const noexcept { return disc_row_; }
 
 private:
-    const OptionItem* row_;
-    const OptionItem* disc_row_;
+    infra::OptRef<const OptionItem> row_{};
+    infra::OptRef<const OptionItem> disc_row_{};
 };
 
 }

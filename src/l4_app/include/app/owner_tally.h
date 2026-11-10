@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "infra/counter.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -38,7 +39,7 @@ struct OwnerTally {
 
     std::uint32_t fabric_wedges = 0;
 
-    std::uint32_t mgl_row0 = 0;
+    xthread::Counter mgl_row0{};
 
     std::uint32_t files_loaded = 0;
     std::uint32_t start_assets_ordered = 0;
@@ -57,9 +58,9 @@ struct OwnerTally {
 
     std::uint32_t config_saves = 0;
 
-    std::uint32_t save_write_failures = 0;
+    xthread::Counter save_write_failures{};
 
-    std::uint32_t ini_write_failures = 0;
+    xthread::Counter ini_write_failures{};
 
     std::uint32_t memsz_unmeasured = 0;
 

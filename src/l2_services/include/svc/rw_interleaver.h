@@ -10,7 +10,7 @@ class RwInterleaver final : public IFrameShaper {
     TASTY_SEAT_RESIDENT(Io);
 
 public:
-    void shape(proto::Lba lba, std::span<std::byte, kCdFrameSize> frame) const noexcept override;
+    void shape(proto::Lba lba, std::span<std::byte, kFullFrameBytes> frame) const noexcept override;
 };
 
 }

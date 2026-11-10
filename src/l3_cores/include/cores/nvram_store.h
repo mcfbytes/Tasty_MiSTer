@@ -7,17 +7,15 @@
 #include <string_view>
 
 #include "cores/save_partition.h"
-#include "cores/fnv1a64.h"
+#include "cores/types.h"
 #include "infra/error.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
-#include "proto/types.h"
-#include "svc/vfs.h"
 
 namespace mister::cores {
 
 struct PartitionHit {
-    std::uint8_t index = 0;
+    SaveRow row{};
     std::uint64_t offset = 0;
 };
 
@@ -25,7 +23,6 @@ enum class SaveNaming : std::uint8_t {
     PerDiscFnv1a,
     PerCore,
     PerCoreIndexed,
-
     PerImagePartition,
 
 };
@@ -43,13 +40,6 @@ using SavePath = FixedStr<kMaxSavePathChars + 1, StrFit::Reject>;
 using Fnv1aHex = FixedStr<17, StrFit::Reject>;
 
 [[nodiscard]] Fnv1aHex fnv1a64_hex(std::string_view basename);
-
-[[nodiscard]] SavePath pick_disc_path(
-    const svc::Vfs& vfs,
-    const SavePath& own,
-    const SavePath& stock,
-    proto::FileSize length
-);
 
 class NvramStore {
     TASTY_SEAT_RESIDENT(RT);

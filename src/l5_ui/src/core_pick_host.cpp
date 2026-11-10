@@ -9,28 +9,6 @@
 
 namespace mister::ui {
 
-namespace {
-
-app::XmlKind xml_kind_of_path(std::string_view s) {
-    if (s.size() <= 4)
-        return app::XmlKind::Rbf;
-    const std::string_view tail = s.substr(s.size() - 4);
-    auto ieq = [](std::string_view a, std::string_view b) {
-        for (std::size_t i = 0; i < a.size(); ++i) {
-            if ((a[i] | 0x20) != (b[i] | 0x20))
-                return false;
-        }
-        return true;
-    };
-    if (ieq(tail, ".mra"))
-        return app::XmlKind::Mra;
-    if (ieq(tail, ".mgl"))
-        return app::XmlKind::Mgl;
-    return app::XmlKind::Rbf;
-}
-
-}
-
 void CorePickHost::bind(Borrows b) noexcept {
     TASTY_SEAT_BODY(CorePickHost);
     b_ = b;
@@ -44,7 +22,7 @@ Transition CorePickHost::on_cancel() {
 bool CorePickHost::deliver_pick_(std::string_view path) {
     if (!b_.route)
         return false;
-    switch (xml_kind_of_path(path)) {
+    switch (app::xml_kind_of(path)) {
         case app::XmlKind::Mgl:
             return b_.route->on(app::CmdVerb::Playlist{path});
         case app::XmlKind::Mra:
@@ -61,13 +39,11 @@ Transition CorePickHost::on_picked(const BrowserEntry& e, std::string_view path)
         ++refusals_;
         return Transition{Transition::Kind::CloseAll};
     }
-    if (b_.recents
-        && !b_.recents->update(
-            "",
-            app::RecentsStore::ListId{app::RecentsStore::ListId::Kind::Cores, 0},
-            path,
-            e.altname
-        )) {
+    const app::RecentsStore::ListId cores_list{
+        app::RecentsStore::ListId::Kind::Cores,
+        proto::IoIndex{}
+    };
+    if (b_.recents && !b_.recents->update("", cores_list, path, e.altname)) {
         ++refusals_;
     }
 

@@ -67,8 +67,6 @@ class AddonSend final : public Rung {
 public:
     enum class Pass : std::uint8_t { Waiting, Done };
 
-    static constexpr std::uint16_t kChunk = 4096;
-
     struct Entry {
         std::string ext;
         AddonDest dest{};

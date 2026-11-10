@@ -8,6 +8,7 @@
 #include "infra/opt_ref.h"
 #include "infra/unique_fd.h"
 #include "hal/cause_reg.h"
+#include "reactor/cause_decode.h"
 #include "reactor/cause_set.h"
 #include "hal/register_window.h"
 #include "os/uio_handle.h"
@@ -27,34 +28,28 @@ inline constexpr std::uint32_t kClasses = kBlk | kFifo | kRing | kTick | kSys;
 inline constexpr std::uint32_t kReserved = ~(kPayload | kClasses);
 }
 
-struct CauseDecode {
-    Cause cause = Cause::None;
-    bool refused = false;
-    friend constexpr bool operator==(CauseDecode, CauseDecode) = default;
-};
-
 constexpr CauseDecode decode_cause_checked(std::uint32_t word) noexcept {
     if ((word & cause_word::kReserved) != 0u)
-        return {Cause::None, true};
+        return CauseDecode::refused();
     const std::uint32_t classes = word & cause_word::kClasses;
     if (classes == 0u) {
-        return {Cause::None, (word & cause_word::kPayload) != 0u};
+        return (word & cause_word::kPayload) != 0u ? CauseDecode::refused() : CauseDecode::idle();
     }
     if ((classes & (classes - 1u)) != 0u)
-        return {Cause::None, true};
+        return CauseDecode::refused();
     if (classes == cause_word::kFifo)
-        return {Cause::Fifo, false};
+        return CauseDecode::of(Cause::Fifo);
     if (classes == cause_word::kBlk)
-        return {Cause::Blk, false};
+        return CauseDecode::of(Cause::Blk);
     if (classes == cause_word::kRing)
-        return {Cause::Ring, false};
+        return CauseDecode::of(Cause::Ring);
     if (classes == cause_word::kSys)
-        return {Cause::Sys, false};
-    return {Cause::CoreTick, false};
+        return CauseDecode::of(Cause::Sys);
+    return CauseDecode::of(Cause::CoreTick);
 }
 
 constexpr Cause decode_cause(std::uint32_t word) noexcept {
-    return decode_cause_checked(word).cause;
+    return decode_cause_checked(word).cause();
 }
 
 class Notifier {
@@ -82,7 +77,7 @@ public:
 
     CauseDecode drain_checked();
 
-    Cause drain() { return drain_checked().cause; }
+    Cause drain() { return drain_checked().cause(); }
 
 private:
     enum class Kind : std::uint8_t { Doorbell, Ticker, Frame, Test };

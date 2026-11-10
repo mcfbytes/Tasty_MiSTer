@@ -10,6 +10,7 @@
 #include "cores/cd_dialect_facts.h"
 #include "cores/cd_dialect_ports.h"
 #include "cores/cd_engine.h"
+#include "cores/cd_io_indices.h"
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
 #include "cores/core_window.h"
@@ -22,9 +23,11 @@
 #include "cores/saturn_seek.h"
 #include "cores/saturn_slot_ring.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "svc/disc_read_service.h"
+#include "svc/sector_header.h"
 #include "svc/track.h"
 
 namespace mister::cores {
@@ -33,14 +36,19 @@ class SaturnCddEngine final : public CdEngine {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr std::size_t kSlotBytes = 4096;
-    static constexpr std::size_t kSlots = 4;
-
     static constexpr std::size_t kBootHeaderBytes = 256;
 
-    SaturnCddEngine(const CdDialectFacts& facts, const os::IClock& c, ICoreWindow* window)
+    SaturnCddEngine(
+        const CdDialectFacts& facts,
+        const CdProfile::SaturnFacts& row,
+        const os::IClock& c,
+        infra::OptRef<ICoreWindow> window,
+        DescriptorIo io
+    )
         : CdEngine(facts.profile.ticks, c, 255),
           facts_(facts),
+          row_(row),
+          io_(io),
           window_(window) {
         reset_status_();
     }
@@ -53,7 +61,8 @@ public:
 
     [[nodiscard]] bool header_owed() const noexcept { return header_owed_; }
 
-    [[nodiscard]] std::span<const std::uint8_t, saturn::kFrameBytes> status_frame() const noexcept {
+    [[nodiscard]] std::span<const std::uint8_t, SaturnCddFrame::kBytes>
+    status_frame() const noexcept {
         return stat_.bytes;
     }
 
@@ -79,32 +88,29 @@ private:
 
     [[nodiscard]] Ex<void> do_push_sector(CdDialectPorts&) override { return {}; }
 
-    [[nodiscard]] Ex<void> do_notify_disc(bool loaded, const svc::DiscGeometry& geom) override;
+    void do_notify_disc(bool loaded, const svc::DiscGeometry& geom) noexcept override;
     void do_reset_machine() noexcept override;
     bool do_streaming(const svc::DiscGeometry& geom) const noexcept override;
     DriveView do_drive_view(const svc::DiscGeometry& geom) const noexcept override;
 
+    [[nodiscard]] CdDriveState drive_state_(bool is_data) const noexcept;
+
     std::size_t do_command_word_count() const noexcept override { return 6; }
 
-    std::optional<std::uint16_t> do_command_selector() const noexcept override {
+    std::optional<cdwire::Selector> do_command_selector() const noexcept override {
         return std::nullopt;
     }
 
     void do_after_command_round() noexcept override {}
 
-    std::size_t do_status_words(
-        std::uint64_t frame,
-        std::span<std::uint16_t, kMaxStatusWords> out
-    ) const noexcept override;
-
     [[nodiscard]] CdEngineStats do_stats() const noexcept override { return stats_; }
 
-    [[nodiscard]] std::uint8_t do_speed_index() const noexcept override {
-        return static_cast<std::uint8_t>(speed_);
+    [[nodiscard]] CdSpeedIndex do_speed_index() const noexcept override {
+        return CdSpeedIndex{static_cast<std::uint8_t>(speed_)};
     }
 
-    [[nodiscard]] Ex<std::size_t> do_disc_descriptor(
-        std::span<std::byte> out,
+    [[nodiscard]] Ex<std::span<const std::byte>> do_disc_descriptor(
+        std::span<std::byte, kMaxDescriptorBytes> out,
         const svc::DiscGeometry& geom
     ) override;
 
@@ -119,7 +125,7 @@ private:
     ) noexcept;
     [[nodiscard]] Ex<void> update_(CdDialectPorts& p);
     [[nodiscard]] Ex<Sent> read_pass_(CdDialectPorts& p);
-    [[nodiscard]] Ex<Sent> data_sector_send_(bool synth_header, CdDialectPorts& p);
+    [[nodiscard]] Ex<Sent> data_sector_send_(CdDialectPorts& p);
     [[nodiscard]] Ex<Sent> audio_sector_send_(CdDialectPorts& p);
     [[nodiscard]] Ex<void> ring_sector_send_(CdDialectPorts& p);
     [[nodiscard]] Ex<void> send_mode_(SaturnModeWord mode, ICdLink& link);
@@ -147,9 +153,14 @@ private:
         const svc::DiscGeometry& geom
     ) const noexcept;
 
-    CdDialectFacts facts_;
+    [[nodiscard]] static svc::SectorHeader header_for_(HeadLba head) noexcept;
 
-    ICoreWindow* window_;
+    CdDialectFacts facts_;
+    const CdProfile::SaturnFacts& row_;
+
+    DescriptorIo io_;
+
+    infra::OptRef<ICoreWindow> window_;
     CdEngineStats stats_{};
 
     SaturnCddFrame comm_{};
@@ -179,11 +190,11 @@ private:
     std::uint32_t declines_ = 0;
 
     struct AudioSector {
-        std::array<std::uint8_t, saturn::kSectorBytes> data{};
+        std::array<std::uint8_t, svc::kRawFrameBytes> data{};
         std::optional<HeadLba> lba{};
     };
 
-    std::uint8_t sec_[saturn::kSectorBytes] = {};
+    std::uint8_t sec_[svc::kRawFrameBytes] = {};
     std::array<AudioSector, 2> aud_{};
     std::uint8_t header_[kBootHeaderBytes] = {};
 };

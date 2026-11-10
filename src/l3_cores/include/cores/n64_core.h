@@ -9,15 +9,17 @@
 #include "cores/cheat_engine.h"
 #include "cores/core_support.h"
 #include "cores/n64_cheat_engine.h"
-#include "cores/n64_db_tags.h"
 #include "cores/n64_file_route.h"
+#include "cores/n64_layout_key_source.h"
 #include "cores/n64_options.h"
 #include "cores/n64_saves.h"
+#include "cores/save_rows.h"
 #include "cores/stream_load.h"
 #include "cores/window_job.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::cores {
 
@@ -25,7 +27,7 @@ class N64Core final : public Core,
                       public ICheatEngine,
                       public IStreamLoad,
                       public IWindowSave,
-                      private n64::ISaveLayout {
+                      private n64::ILayoutKeySource {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
@@ -76,7 +78,7 @@ private:
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
     [[nodiscard]] Ex<void> do_reset() override;
 
-    [[nodiscard]] ICheatSink* on_cheat_sink() noexcept override { return &cheats_; }
+    [[nodiscard]] ICheatSink& on_cheat_sink() noexcept override { return cheats_; }
 
     [[nodiscard]] infra::OptRef<ICheatEngine> on_cheat_engine() noexcept override {
         return infra::OptRef<ICheatEngine>{*this};
@@ -105,19 +107,18 @@ private:
 
     [[nodiscard]] WindowJobBuild order_ram_save_(WindowJobOrder& order) noexcept;
 
-    [[nodiscard]] n64::SaveLayoutKey layout_key(std::size_t rows) const noexcept override;
+    [[nodiscard]] n64::SaveLayoutKey layout_key(n64::SaveRowCount rows) const noexcept override;
 
     [[nodiscard]] std::uint64_t on_last_tx_bytes() const noexcept override { return bytes_sent_; }
 
     [[nodiscard]] svc::Crc32 on_last_tx_crc() const noexcept override { return crc32_; }
 
-    void plan_saves_();
+    void adopt_save_plan_(const n64::SaveRows& plan);
 
-    [[nodiscard]] std::uint32_t read_(n64::StatusField f) const noexcept;
+    [[nodiscard]] proto::FieldValue read_(n64::StatusField f) const noexcept;
 
     [[nodiscard]] bool cheats_enabled_() const noexcept;
     void disable_cheats_() noexcept;
-    [[nodiscard]] n64::MemoryType cart_save_type_() const noexcept;
 
     infra::OptRef<proto::CoreSession> session_{};
     bool turbo_core_ = false;

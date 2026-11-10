@@ -31,7 +31,7 @@ class CdDrive final : public ICdDiagnostics {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    CdDrive(const CdProfile& cd, const HostServices& host, ICoreWindow* window);
+    CdDrive(const CdProfile& cd, const HostServices& host, infra::OptRef<ICoreWindow> window);
     ~CdDrive() override;
     CdDrive(const CdDrive&) = delete;
     CdDrive& operator=(const CdDrive&) = delete;
@@ -46,7 +46,7 @@ public:
 
     [[nodiscard]] Ex<void> eject_for_cart();
 
-    const CdProfile& cd_profile() const noexcept { return *cd_; }
+    const CdProfile& cd_profile() const noexcept { return cd_; }
 
     CdEngine* engine() noexcept { return engine_.get(); }
 
@@ -81,7 +81,7 @@ private:
         return engine_ ? infra::OptRef<CdEngine>{*engine_} : infra::OptRef<CdEngine>{};
     }
 
-    const CdProfile* cd_;
+    const CdProfile& cd_;
     infra::OptRef<svc::DiscReadService> granted_discs_{};
     CdWirePort wire_;
     CdDiscSlot slot_;

@@ -42,11 +42,6 @@ struct AxiBlockDecl {
 };
 
 [[nodiscard]] Ex<AxiBlockDecl> find_pad_block(
-    const hal::RegisterWindow<hal::SysDirectory>& dir,
-    std::uint32_t window_size
-) noexcept;
-
-[[nodiscard]] Ex<AxiBlockDecl> find_pad_block(
     const SysDirectoryImage& dir,
     std::uint32_t window_size
 ) noexcept;

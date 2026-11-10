@@ -22,12 +22,9 @@ ProgressPage::ProgressPage(std::string_view name) noexcept {
 void ProgressPage::set_progress(cores::Progress progress) noexcept {
     TASTY_SEAT_BODY(ProgressPage);
     last_ = progress;
-    if (progress.total == 0)
+    if (progress.dismisses())
         return;
-    const std::uint64_t s = static_cast<std::uint64_t>(progress.done)
-        * kProgressMax
-        / progress.total;
-    step_ = static_cast<std::uint8_t>(std::min<std::uint64_t>(s, kProgressMax));
+    step_ = progress.scaled(kProgressMax);
 }
 
 bool ProgressPage::describe(app::PageDescription& out) const {
@@ -40,10 +37,10 @@ bool ProgressPage::describe(app::PageDescription& out) const {
     out.rows[0].kind = app::PageDescription::RowKind::Text;
     (void)out.rows[0].label.assign(name_.view());
     out.rows[1].kind = app::PageDescription::RowKind::Bar;
-    if (last_.total != 0) {
+    if (!last_.dismisses()) {
         constexpr std::uint32_t kPercent = 100;
-        const std::uint32_t pct = static_cast<std::uint32_t>(last_.done) * kPercent / last_.total;
-        out.rows[1].fill = static_cast<std::uint8_t>(std::min<std::uint32_t>(kPercent, pct));
+
+        out.rows[1].fill = static_cast<std::uint8_t>(last_.scaled(kPercent));
     }
     return true;
 }

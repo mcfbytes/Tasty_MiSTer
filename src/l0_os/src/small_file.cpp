@@ -11,7 +11,7 @@
 
 namespace mister::os {
 
-[[nodiscard]] Ex<std::size_t> read_small_file(const char* path, std::span<char> buf) noexcept {
+[[nodiscard]] Ex<std::span<char>> read_small_file(const char* path, std::span<char> buf) noexcept {
     const int fd = ::open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         return std::unexpected(infra::errno_error(Errc::os, ERR_SITE(), errno));
@@ -30,7 +30,7 @@ namespace mister::os {
             break;
         got += static_cast<std::size_t>(n);
     }
-    return got;
+    return buf.first(got);
 }
 
 }

@@ -11,7 +11,7 @@
 #include "infra/seat.h"
 #include "hal/types.h"
 #include "infra/spsc_ring.h"
-#include "proto/save_ask.h"
+#include "proto/save_kind.h"
 #include "proto/types.h"
 #include "proto/user_io/poll_shape.h"
 
@@ -89,8 +89,6 @@ struct LinkEvent {
         static constexpr Kind kKind = Kind::CoreMade;
         bool made = false;
         bool restore_owed = false;
-        bool cheat_records = false;
-        std::uint8_t pad_{};
         BindGeneration bind_gen{};
         Errc err{};
     };
@@ -132,7 +130,7 @@ struct LinkEvent {
 
     struct RebootQuiesced {
         static constexpr Kind kKind = Kind::RebootQuiesced;
-        std::uint16_t seq = 0;
+        RebootSeq seq{};
         std::uint8_t pad_[2]{};
     };
 

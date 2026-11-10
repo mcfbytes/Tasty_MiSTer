@@ -15,7 +15,13 @@ std::unique_ptr<Core> make_n64(const CoreProfile& p, const CoreGrant& g) {
 }
 
 std::unique_ptr<ILoader> make_n64_loader(const LoaderContext& ctx) {
-    return std::make_unique<N64Loader>(ctx.vfs, ctx.profile.name, ctx.turbo, ctx.memo);
+    return std::make_unique<N64Loader>(
+        ctx.vfs,
+        ctx.profile.name,
+        ctx.turbo,
+        ctx.memo,
+        ctx.status_cell
+    );
 }
 
 static_assert(kN64.kind == CoreKind::N64);

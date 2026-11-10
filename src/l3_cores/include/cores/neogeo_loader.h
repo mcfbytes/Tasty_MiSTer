@@ -11,10 +11,17 @@
 #include <vector>
 
 #include "cores/core_profile.h"
+#include "cores/fix_shape.h"
+#include "cores/i_rom_shape.h"
 #include "cores/loader.h"
-#include "cores/romsets.h"
+#include "cores/neo_transform.h"
+#include "cores/romset_file.h"
+#include "cores/spr_dbl_shape.h"
+#include "cores/spr_dbl_swap_shape.h"
+#include "cores/spr_shape.h"
 #include "cores/types.h"
 #include "infra/fixed_str.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/status_word.h"
 #include "svc/vfs.h"
@@ -106,7 +113,7 @@ public:
     static constexpr CoreWindowSlot kRomWindow = neogeo::kRomWindowSlot;
     static constexpr std::size_t kPathChars = 1024;
 
-    explicit NeoGeoLoader(const svc::Vfs& vfs, const CoreProfile* profile = nullptr) noexcept
+    explicit NeoGeoLoader(const svc::Vfs& vfs, const CoreProfile& profile) noexcept
         : vfs_(&vfs),
           profile_(profile) {}
 
@@ -116,7 +123,7 @@ public:
 
     void shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t off) override;
 
-    [[nodiscard]] Ex<void> finish(ICoreWindow*) override {
+    [[nodiscard]] Ex<void> finish(infra::OptRef<ICoreWindow>) override {
         TASTY_SEAT_BODY(NeoGeoLoader);
         return {};
     }
@@ -170,15 +177,16 @@ private:
         std::string_view home
     );
 
+    [[nodiscard]] neogeo::IRomShape* shaper_(neogeo::Shape kind) noexcept;
+
     const svc::Vfs* vfs_;
-    const CoreProfile* profile_;
+    const CoreProfile& profile_;
     std::array<FixedStr<kPathChars, StrFit::Reject>, kMaxTransferRows> paths_{};
     FixedStr<kPathChars, StrFit::Reject> save_{};
-    std::vector<std::uint16_t> in_;
-    std::vector<std::uint16_t> out_;
-    std::vector<std::uint8_t> bytes_;
-    std::vector<std::uint8_t> fix_out_;
-    std::vector<std::uint32_t> dwords_;
+    neogeo::FixShape fix_shape_{};
+    neogeo::SprShape spr_shape_{};
+    neogeo::SprDblShape spr_dbl_shape_{};
+    neogeo::SprDblSwapShape spr_dbl_swap_shape_{};
     std::uint32_t skipped_ = 0;
     std::uint32_t crom_sz_ = 0;
     std::size_t last_crom_ = 0;

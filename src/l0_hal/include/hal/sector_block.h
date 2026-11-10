@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "hal/types.h"
+
 namespace mister::hal {
 
 struct SectorBlock {
@@ -60,46 +62,6 @@ struct SectorBlock {
         return static_cast<Reg>(kLbaSlotBase + kWordBytes * (s & (kCardSlots - 1u)));
     }
 
-    struct SdStat {
-        bool valid = false;
-        std::uint8_t count = 0;
-        std::uint8_t blksz = 0;
-        std::uint8_t slot = 0;
-        bool wr = false;
-        bool rd = false;
-    };
-
-    enum SdBits : std::uint32_t {
-        kSdValid = 0x8000,
-        kSdCountShift = 9,
-        kSdCountMask = 0x3F,
-        kSdBlkszShift = 6,
-        kSdBlkszMask = 7,
-        kSdSlotShift = 2,
-        kSdSlotMask = 0xF,
-        kSdOpMask = 3,
-        kSdWr = 2,
-        kSdRd = 1,
-    };
-
-    static constexpr SdStat sdstat(std::uint32_t w) noexcept {
-        return SdStat{
-            .valid = (w & kSdValid) != 0u,
-            .count = static_cast<std::uint8_t>((w >> kSdCountShift) & kSdCountMask),
-            .blksz = static_cast<std::uint8_t>((w >> kSdBlkszShift) & kSdBlkszMask),
-            .slot = static_cast<std::uint8_t>((w >> kSdSlotShift) & kSdSlotMask),
-            .wr = (w & kSdWr) != 0u,
-            .rd = (w & kSdRd) != 0u
-        };
-    }
-
-    static constexpr bool sdstat_reads(std::uint32_t w, std::uint8_t slot) noexcept {
-        return (w & kSdValid) != 0u
-            && ((w >> kSdSlotShift) & kSdSlotMask) == (slot & kSdSlotMask)
-            && (w & kSdOpMask) == kSdRd
-            && ((w >> kSdCountShift) & kSdCountMask) == 0u;
-    }
-
     static constexpr Reg data(std::uint32_t i) noexcept {
         return static_cast<Reg>(kDataBase + kWordBytes * i);
     }
@@ -123,6 +85,28 @@ struct SectorBlock {
             .first_drop = static_cast<std::uint16_t>(w & kAcceptDropMask)
         };
     }
+
+    struct Counts {
+        EventCount8 rejected{};
+        EventCount8 skipped{};
+        EventCount8 aborted{};
+        EventCount8 reset_fills{};
+    };
+
+    enum CountsBits : std::uint32_t {
+        kCountsRejectedShift = 24,
+        kCountsSkippedShift = 16,
+        kCountsAbortedShift = 8,
+    };
+
+    static constexpr Counts counts(std::uint32_t w) noexcept {
+        return Counts{
+            .rejected = EventCount8::of_lane(w, kCountsRejectedShift),
+            .skipped = EventCount8::of_lane(w, kCountsSkippedShift),
+            .aborted = EventCount8::of_lane(w, kCountsAbortedShift),
+            .reset_fills = EventCount8::of_lane(w, 0)
+        };
+    }
 };
 
 static_assert(
@@ -140,18 +124,11 @@ static_assert(
     "lw_sector.sv's SEC2 offsets and per-slot enables"
 );
 static_assert(
-    SectorBlock::sdstat(0x80CAu).slot == 2
-        && SectorBlock::sdstat(0x80CAu).wr
-        && !SectorBlock::sdstat(0x80CAu).rd
-        && SectorBlock::sdstat(0x80CAu).blksz == 3,
-    "PSX card 1's one-block write: slot 2, 1 KB"
-);
-static_assert(
-    SectorBlock::sdstat_reads(0x80C5u, 1)
-        && !SectorBlock::sdstat_reads(0x80C5u, 0)
-        && !SectorBlock::sdstat_reads(0x80C6u, 1)
-        && !SectorBlock::sdstat_reads(0x82C5u, 1),
-    "PSX slot 1's one-block read, and nothing else"
+    SectorBlock::counts(0x04030201u).rejected == EventCount8{4}
+        && SectorBlock::counts(0x04030201u).skipped == EventCount8{3}
+        && SectorBlock::counts(0x04030201u).aborted == EventCount8{2}
+        && SectorBlock::counts(0x04030201u).reset_fills == EventCount8{1},
+    "COUNTS: one event byte per field, high to low"
 );
 
 }

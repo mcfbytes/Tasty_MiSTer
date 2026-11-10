@@ -3,6 +3,7 @@
 
 #include <bit>
 #include <cstdlib>
+#include <optional>
 #include <span>
 
 #include "infra/endian.h"
@@ -15,14 +16,14 @@ bool has_hex_prefix(const char* text) {
     return text[0] == '0' && (text[1] == 'x' || text[1] == 'X');
 }
 
-ParseDiag diagnose(const char* end, bool out_of_range, bool invalid_format) {
+std::optional<ParseError::Kind> diagnose(const char* end, bool out_of_range, bool invalid_format) {
     if (*end != '\0')
-        return ParseDiag::NotANumber;
+        return ParseError::Kind::NotANumber;
     if (out_of_range)
-        return ParseDiag::OutOfRange;
+        return ParseError::Kind::OutOfRange;
     if (invalid_format)
-        return ParseDiag::InvalidFormat;
-    return ParseDiag::None;
+        return ParseError::Kind::InvalidFormat;
+    return std::nullopt;
 }
 
 ParsedValue parse_unsigned_row(const Option& o, const char* text, bool invalid_format) {

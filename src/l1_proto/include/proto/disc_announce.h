@@ -29,7 +29,7 @@ struct DiscAnnounce {
             return r;
         if (auto r = frame.end(); !r)
             return r;
-        if (slot.v > kMaxAnnounceableSlot) {
+        if (slot > kLastAnnounceableSlot) {
             return std::unexpected(Error{Errc::negotiation, ERR_SITE(), slot.v});
         }
 
@@ -65,7 +65,7 @@ struct DiscAnnounce {
         if (auto r = slots.install_disc(slot, size_bytes, roles); !r)
             return r;
         auto r = two_word_form(frame, slot, size_bytes);
-        if (!r && r.error().code == Errc::negotiation && slot.v > kMaxAnnounceableSlot) {
+        if (!r && r.error().code == Errc::negotiation && slot > kLastAnnounceableSlot) {
             slots.count_unencodable_announce();
         }
         return r;

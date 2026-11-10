@@ -23,7 +23,7 @@ std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g) {
     return std::make_unique<SgbCore>(p, g.services, kSgbMailboxFrame);
 }
 
-std::unique_ptr<MsuCompanion> make_msu_companion(const svc::Vfs& vfs) {
+std::unique_ptr<ICompanion> make_msu_companion(const svc::Vfs& vfs) {
     return std::make_unique<MsuCompanion>(vfs);
 }
 
@@ -63,10 +63,7 @@ static_assert(
     "user_io.cpp:3223: snes_poll runs on every user_io_poll pass, ungated"
 );
 static_assert(
-    kSnesMailboxFrame.poll_opcode == msu::kCdGet
-        && msu::kCdGet == 0x34
-        && kSnesMailboxFrame.words == msu::kFrameWords
-        && proto::well_formed(kSnesMailboxFrame),
+    msu::kFrameWords == 4 && proto::well_formed(kSnesMailboxFrame),
     "snes.cpp:536-541: spi_uio_cmd_cont(UIO_CD_GET), then three spi_w(0)"
 );
 static_assert(
@@ -77,16 +74,19 @@ static_assert(
     "snes.cpp:471-473 + user_io.h:63: UIO_CD_SET with MSU_CD_SET/TRACK_MOUNTED/DATA_BASE"
 );
 static_assert(
-    msu::set_enable(true) == std::array<std::uint16_t, 3>{0x8001, 0, 0}
-        && msu::set_enable(false) == std::array<std::uint16_t, 3>{0x0001, 0, 0},
+    msu::set_enable(true) == mister::proto::MailboxWords{0x8001, 0, 0}
+        && msu::set_enable(false) == mister::proto::MailboxWords{0x0001, 0, 0},
     "snes.cpp:528: (has_cd << 15) | MSU_CD_SET, low word first (snes.cpp:481-488)"
 );
+
+inline constexpr std::uint32_t kMsuDataBaseAt = 0x2060'0000u;
 static_assert(
-    msu::set_data_base(0x2060'0000u) == std::array<std::uint16_t, 3>{0x0003, 0, 0x2060},
+    msu::set_data_base(hal::FabricAddr{kMsuDataBaseAt})
+        == mister::proto::MailboxWords{0x0003, 0, 0x2060},
     "snes.cpp:524: (0x20600000ULL << 16) | MSU_DATA_BASE"
 );
 static_assert(
-    msu::set_track_size(0x0001'2345u) == std::array<std::uint16_t, 3>{0x0002, 0x2345, 1},
+    msu::set_track_size(0x0001'2345u) == mister::proto::MailboxWords{0x0002, 0x2345, 1},
     "snes.cpp:558: (f_audio.size << 16) | MSU_AUDIO_TRACK_MOUNTED"
 );
 static_assert(
@@ -104,7 +104,8 @@ static_assert(
     && msu::window_offset(msu::kGapAt) == msu::kGapAt + msu::kGapBytes
 );
 static_assert(
-    kSnesWindows[0].region.offset + msu::kDataBound + msu::kGapBytes == 0x1F80'0000u
+    msu::kDataBound + proto::FileSize{kSnesWindows[0].region.offset + msu::kGapBytes}
+            == proto::FileSize{0x1F80'0000u}
         && msu::kStockDataBound == 0x1F20'0000u,
     "SNES.sv:1411,1417: the data span ends where the save-state DDR at $3F80.0000 "
     "starts; stock's snes.cpp:522 bound overruns it"

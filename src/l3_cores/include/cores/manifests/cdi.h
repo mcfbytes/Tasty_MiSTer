@@ -16,9 +16,7 @@ namespace mister::cores::manifests {
 
 inline constexpr svc::CuePolicy kCdiCuePolicy{
     .sub_naming = svc::CuePolicy::SubNaming::ImageSubOrCdg,
-    .track_close = svc::CuePolicy::TrackClose::ProvisionalInclusive,
-    .pregap_model = svc::CuePolicy::PregapModel::IndexPair,
-    .post_load_shift = svc::CuePolicy::PostLoadTocShift::Uniform150,
+    .program = svc::CuePolicy::Program::IndexPair,
     .frame_shaping = svc::CuePolicy::FrameShaping::DescrambleByHeader,
 };
 
@@ -37,11 +35,12 @@ inline constexpr StagingPolicy kCdiStaging{
     .order = StageOrder::Cdi,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kCdiSlots),
-    .save_slot = IoIndex{1},
-    .save_dest = WideIoIndex{},
-    .save_pre_bytes = proto::FileSize{8 * 1024},
-    .save_pre_on_empty = true,
-    .start_save_dir = "games/CD-i",
+    .save = SaveMountPolicy{
+        .slot = IoIndex{1},
+        .pre_bytes = proto::FileSize{8 * 1024},
+        .pre_on_empty = true,
+        .start_dir = "games/CD-i",
+    },
 };
 
 inline constexpr CoreProfile kCdi{
@@ -58,7 +57,7 @@ inline constexpr CoreProfile kCdi{
     .blank_save = {.fill = std::byte{0xFF}, .header = {}, .regions = {}, .generic_ff = true},
     .staging = kCdiStaging,
     .block_drain_budget = 1,
-    .block_sector_floor = {.bytes = static_cast<std::uint32_t>(cdi::kBlockBytes)},
+    .block_sector_floor = proto::SectorFloor::at(proto::BlockSize{cdi::kBlockBytes}),
     .image_rows_no_zip = true,
     .cheats = {},
     .file_tx_whole = true,

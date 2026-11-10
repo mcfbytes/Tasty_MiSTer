@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
 #include <span>
 
 #include "infra/error.h"
-#include "proto/types.h"
+#include "svc/disc_ask.h"
 
 namespace mister::svc {
-
-enum class DiscForm : std::uint8_t { UserData, RawFrame, Subcode, FullFrame };
 
 class IDiscReader {
 public:
@@ -20,10 +16,11 @@ public:
     IDiscReader(IDiscReader&&) = delete;
     IDiscReader& operator=(IDiscReader&&) = delete;
 
-    [[nodiscard]] virtual Ex<std::size_t> read_form(
+    [[nodiscard]] virtual Ex<std::span<std::byte>> read_form(
         DiscForm form,
         proto::Lba lba,
-        std::span<std::byte> dst
+        std::span<std::byte> dst,
+        SectorHeader header = {}
     ) = 0;
 
 protected:

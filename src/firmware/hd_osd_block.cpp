@@ -54,9 +54,10 @@ HdOsdBlock::HdOsdBlock(
           .flips = hd_flips_,
           .wake = hd_wake_,
           .fb = fb,
-          .video = video,
+          .output = video,
+          .stats = video.stats_cell(),
           .clock = clock,
-          .vt = infra::OptRef<os::IVtConsole>{hd_vt_console_}
+          .vt = infra::OptRef<os::IVtMode>{hd_vt_console_}
       }} {
 
     if (!hd_raster_)

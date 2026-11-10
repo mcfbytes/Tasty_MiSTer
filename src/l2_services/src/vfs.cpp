@@ -10,14 +10,16 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <optional>
-#include <set>
-#include <type_traits>
 #include <utility>
 
+#include "browse_rules.h"
 #include "infra/unique_fd.h"
 #include "os/block_device.h"
+#include "posix_file.h"
 #include "svc/game_asset_finder.h"
 #include "vfs_detail.h"
 #include "vfs_stat.h"
@@ -28,7 +30,6 @@ static_assert(sizeof(::off_t) >= 8, "_FILE_OFFSET_BITS=64 is required (warnings.
 namespace mister::svc {
 
 using detail::compose;
-using detail::ifind;
 using detail::path_exists;
 using detail::path_is_dir;
 using detail::path_is_regular;
@@ -38,7 +39,6 @@ using detail::zip_make_archive;
 using detail::zip_open_member;
 using detail::zip_open_member_by_crc;
 
-using infra::iends_with;
 using infra::ieq;
 using infra::istarts_with;
 
@@ -56,14 +56,8 @@ constexpr std::uint8_t kUsbSearchSlots = 6;
 
 constexpr unsigned long kExt4SuperMagic = 0xEF53UL;
 
-std::string usb_path(std::uint8_t n) {
-    std::string s = "/media/usb";
-    s.push_back(static_cast<char>('0' + n));
-    return s;
-}
-
-bool usb_mounted(std::uint8_t n) {
-    const std::string path = usb_path(n);
+bool usb_mounted(UsbSlot slot) {
+    const std::string path = slot.path();
 
     struct ::stat self{};
     if (::stat(path.c_str(), &self) != 0)
@@ -127,133 +121,6 @@ std::optional<std::string> fold_case_lookup(std::string_view base, std::string_v
 
 }
 
-namespace detail {
-class PosixFile final : public IFile {
-public:
-    PosixFile(
-        UniqueFd fd,
-        FileKind kind,
-        std::optional<std::uint64_t> fixed_size,
-        std::string path,
-        bool unlink_at_close
-    )
-        : fd_(static_cast<UniqueFd&&>(fd)),
-          path_(std::move(path)),
-          fixed_size_(fixed_size),
-          kind_(kind),
-          unlink_at_close_(unlink_at_close) {}
-
-    ~PosixFile() override {
-
-        if (unlink_at_close_ && !path_.empty())
-            ::unlink(path_.c_str());
-    }
-
-    PosixFile(const PosixFile&) = delete;
-    PosixFile& operator=(const PosixFile&) = delete;
-
-    [[nodiscard]] Ex<std::size_t> read_at(std::uint64_t off, std::span<std::byte> dst) override {
-        std::size_t done = 0;
-        while (done < dst.size()) {
-            const ::ssize_t n = ::pread(
-                fd_.get(),
-                dst.data() + done,
-                dst.size() - done,
-                static_cast<::off_t>(off + done)
-            );
-            if (n < 0) {
-                if (errno == EINTR)
-                    continue;
-                const auto e = static_cast<std::uint32_t>(errno);
-                return std::unexpected(Error{Errc::os, ERR_SITE(), e});
-            }
-
-            if (n == 0)
-                break;
-            done += static_cast<std::size_t>(n);
-        }
-        return done;
-    }
-
-    [[nodiscard]] Ex<std::size_t> write_at(
-        std::uint64_t off,
-        std::span<const std::byte> src
-    ) override {
-        std::size_t done = 0;
-        while (done < src.size()) {
-            const ::ssize_t n = ::pwrite(
-                fd_.get(),
-                src.data() + done,
-                src.size() - done,
-                static_cast<::off_t>(off + done)
-            );
-            if (n < 0) {
-                if (errno == EINTR)
-                    continue;
-                const auto e = static_cast<std::uint32_t>(errno);
-                return std::unexpected(Error{Errc::os, ERR_SITE(), e});
-            }
-            if (n == 0) {
-                return std::unexpected(
-                    Error{Errc::short_write, ERR_SITE(), static_cast<std::uint32_t>(done)}
-                );
-            }
-            done += static_cast<std::size_t>(n);
-        }
-        return done;
-    }
-
-    [[nodiscard]] Ex<FileSize> size() const override {
-
-        if (fixed_size_)
-            return FileSize{*fixed_size_};
-        struct ::stat st{};
-        if (::fstat(fd_.get(), &st) != 0) {
-            const auto e = static_cast<std::uint32_t>(errno);
-            return std::unexpected(Error{Errc::os, ERR_SITE(), e});
-        }
-        return FileSize{static_cast<std::uint64_t>(st.st_size)};
-    }
-
-    [[nodiscard]] Ex<void> flush() override {
-
-        DurableWrite::note_file_sync();
-        if (::fsync(fd_.get()) != 0) {
-            const auto e = static_cast<std::uint32_t>(errno);
-
-            if (e != EINVAL && e != EROFS) {
-                return std::unexpected(Error{Errc::os, ERR_SITE(), e});
-            }
-        }
-        return {};
-    }
-
-    FileKind kind() const noexcept override { return kind_; }
-
-    [[nodiscard]] Ex<void> advise(Access a, std::uint64_t off, std::uint64_t len) override {
-        const int advice = (a == Access::Sequential) ? POSIX_FADV_SEQUENTIAL : POSIX_FADV_WILLNEED;
-        const int rc = ::posix_fadvise(
-            fd_.get(),
-            static_cast<::off_t>(off),
-            static_cast<::off_t>(len),
-            advice
-        );
-        if (rc != 0)
-            return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(rc)});
-        return {};
-    }
-
-private:
-    UniqueFd fd_;
-    std::string path_;
-    std::optional<std::uint64_t> fixed_size_{};
-    FileKind kind_ = FileKind::Real;
-    bool unlink_at_close_ = false;
-
-    static_assert(std::is_trivially_copyable_v<decltype(fixed_size_)>);
-};
-}
-
 namespace {
 
 int open_flags(OpenMode m) {
@@ -287,176 +154,20 @@ constexpr ::mode_t kCreateMode = S_IRWXU | S_IRWXG | S_IRWXO;
 
 }
 
-namespace detail {
-
-Admit admit_entry(std::string_view name, bool is_dir, bool at_root, const ScanFilter& f) {
-    if (f.romset_browse) {
-
-        if (!is_dir && iends_with(name, ".zip"))
-            is_dir = true;
-        if (!iends_with(name, ".neo") && !is_dir)
-            return Admit::Reject;
-        if (name == "..") {
-            if (at_root)
-                return Admit::Reject;
-        } else if (istarts_with(name, ".")) {
-            return Admit::Reject;
-        }
-        return is_dir ? Admit::KeepDir : Admit::KeepFile;
-    }
-
-    if (is_dir) {
-
-        if (name == "System Volume Information")
-            return Admit::Reject;
-        if (name == "..") {
-            if (at_root)
-                return Admit::Reject;
-        } else if (istarts_with(name, ".")) {
-            return Admit::Reject;
-        }
-
-        return f.directories ? Admit::KeepDir : Admit::Reject;
-    }
-
-    if (istarts_with(name, "."))
-        return Admit::Reject;
-    if (ieq(name, "menu.rbf"))
-        return Admit::Reject;
-    if (istarts_with(name, "menu_20"))
-        return Admit::Reject;
-    if (istarts_with(name, "boot") && iends_with(name, ".rom")) {
-        constexpr std::size_t kBootRomLen = 8;
-        constexpr std::size_t kBootRomDigitLen = 9;
-        constexpr std::size_t kBootRomDigitPos = 4;
-        const bool digit = name.size() == kBootRomDigitLen
-            && name[kBootRomDigitPos] >= '0'
-            && name[kBootRomDigitPos] <= '9';
-        if (name.size() == kBootRomLen || digit)
-            return Admit::Reject;
-    }
-
-    if (!f.extensions.empty()) {
-
-        if (f.zip_as_directory && f.directories && iends_with(name, ".zip")) {
-            return Admit::KeepDir;
-        }
-        if (!asset_name::extension_matches(name, f.extensions))
-            return Admit::Reject;
-    }
-    return f.files ? Admit::KeepFile : Admit::Reject;
+std::string UsbSlot::path() const {
+    std::string s = "/media/usb";
+    s.push_back(static_cast<char>('0' + v));
+    return s;
 }
 
-bool is_dot_component(std::string_view n) noexcept {
-    return n == "." || n == "..";
-}
-
-std::vector<DirEntry> zip_folder_entries(
-    std::string_view folder,
-    std::span<const ZipMember> members,
-    const ScanFilter& f
-) {
-    std::vector<DirEntry> out;
-
-    std::set<std::string, std::less<>> seen_dirs;
-    const auto already_seen = [&seen_dirs](std::string_view n) {
-        return seen_dirs.find(n) != seen_dirs.end();
-    };
-
-    for (const ZipMember& m : members) {
-
-        if (const auto rel = relative_member(folder, m.name)) {
-            const std::size_t slash = rel->find('/');
-            if (slash != std::string_view::npos) {
-                const std::string_view dirname = rel->substr(0, slash);
-                if (!rel->empty()
-                    && rel->front() != '/'
-                    && !is_dot_component(dirname)
-                    && !already_seen(dirname)) {
-                    seen_dirs.emplace(dirname);
-                    if (f.directories) {
-                        DirEntry e;
-                        e.name = std::string(dirname);
-                        e.is_dir = true;
-                        e.is_zip_member = true;
-                        out.push_back(std::move(e));
-                    }
-                }
-            }
-        }
-
-        if (!in_same_folder(folder, m.name))
-            continue;
-
-        std::string_view sub = std::string_view{m.name}.substr(folder.size());
-        if (!sub.empty() && sub.front() == '/')
-            sub.remove_prefix(1);
-        if (sub.empty())
-            continue;
-
-        if (m.is_dir)
-            continue;
-
-        const detail::Admit verdict = admit_entry(sub, false, folder.empty(), f);
-        if (verdict == Admit::Reject)
-            continue;
-
-        DirEntry e;
-        e.name = std::string(sub);
-        e.is_dir = (verdict == Admit::KeepDir);
-        e.is_zip_member = true;
-        e.size = m.size;
-        out.push_back(std::move(e));
-    }
-
-    DirEntry up;
-    up.name = "..";
-    up.is_dir = true;
-    up.is_zip_member = true;
-    out.push_back(std::move(up));
-
-    std::stable_sort(out.begin(), out.end(), dirent_less);
-    return out;
-}
-
-bool dirent_less(const DirEntry& a, const DirEntry& b) noexcept {
-
-    const bool a_up = a.is_dir && a.name == "..";
-    const bool b_up = b.is_dir && b.name == "..";
-    if (a_up || b_up) {
-        if (a_up && b_up)
-            return false;
-        return a_up;
-    }
-    if (a.is_dir != b.is_dir)
-        return a.is_dir;
-
-    constexpr std::size_t kExtStrip = kExtDot.size() + 3;
-    std::size_t l1 = a.name.size();
-    std::size_t l2 = b.name.size();
-    if (l1 > kExtStrip && a.name[l1 - kExtStrip] == kExtDot.front())
-        l1 -= kExtStrip;
-    if (l2 > kExtStrip && b.name[l2 - kExtStrip] == kExtDot.front())
-        l2 -= kExtStrip;
-
-    const int r = icompare_n(a.name, b.name, (l1 < l2) ? l1 : l2);
-    if (r != 0)
-        return r < 0;
-    if (l1 != l2)
-        return l1 < l2;
-
-    return false;
-}
-
-}
-
-Ex<Vfs> Vfs::create(StorageRoot root) {
-    if (!root.usb)
-        return Vfs{StorageRoot{false, 0}, std::string(kSdRoot)};
+Ex<Vfs> Vfs::create(RootChoice choice) {
+    if (choice == RootChoice::Sd)
+        return Vfs{StorageRoot{}, std::string(kSdRoot)};
 
     for (std::uint8_t i = 0; i < kUsbRootSlots; ++i) {
-        if (usb_mounted(i))
-            return Vfs{StorageRoot{true, i}, usb_path(i)};
+        const UsbSlot slot{i};
+        if (usb_mounted(slot))
+            return Vfs{StorageRoot{.usb = slot}, slot.path()};
     }
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 }
@@ -473,7 +184,7 @@ Ex<Vfs> Vfs::create_at(std::string_view root_path) {
             Error{Errc::not_found, ERR_SITE(), static_cast<std::uint32_t>(ENOENT)}
         );
     }
-    return Vfs{StorageRoot{false, 0}, std::move(path)};
+    return Vfs{StorageRoot{}, std::move(path)};
 }
 
 Ex<std::string> Vfs::resolve(std::string_view rel, const SearchPolicy& policy) const {
@@ -509,7 +220,8 @@ Ex<std::string> Vfs::resolve(std::string_view rel, const SearchPolicy& policy) c
             case SearchDir::UsbPrefixed:
 
                 for (std::uint8_t i = 0; i < kUsbSearchSlots; ++i) {
-                    if (auto p = probe(usb_path(i)))
+                    const std::string usb_dir = UsbSlot{i}.path();
+                    if (auto p = probe(usb_dir))
                         return *p;
                 }
                 break;
@@ -581,24 +293,22 @@ Ex<std::unique_ptr<IFile>> Vfs::open_backend_(std::string_view path, OpenMode mo
         return std::unexpected(Error{Errc::os, ERR_SITE(), e});
     }
 
-    FileKind kind = FileKind::Real;
+    detail::FileKind kind = detail::FileKind::Real;
     std::optional<std::uint64_t> fixed;
 
     if (istarts_with(full, "/dev/shm/")) {
 
-        kind = FileKind::Shm;
+        kind = detail::FileKind::Shm;
     } else if (S_ISBLK(st.st_mode) || (st.st_rdev != 0 && st.st_size == 0)) {
 
-        kind = FileKind::BlockDev;
-        const auto bytes = os::BlockDevice{fd.get()}.size_bytes();
-        if (!bytes) {
-            const auto e = static_cast<std::uint32_t>(errno);
-            return std::unexpected(Error{Errc::os, ERR_SITE(), e});
-        }
+        kind = detail::FileKind::BlockDev;
+        const Ex<std::uint64_t> bytes = os::BlockDevice::borrow(fd.get()).size_bytes();
+        if (!bytes)
+            return std::unexpected(bytes.error());
         fixed = *bytes;
     }
 
-    const bool unlink_at_close = (kind == FileKind::Shm) && mode_creates(mode);
+    const bool unlink_at_close = (kind == detail::FileKind::Shm) && mode_creates(mode);
     return std::unique_ptr<IFile>(
         new detail::PosixFile(static_cast<UniqueFd&&>(fd), kind, fixed, full, unlink_at_close)
     );
@@ -617,7 +327,7 @@ std::uint32_t Vfs::memory_sequential_hints(std::string_view path) const noexcept
 }
 
 Ex<std::unique_ptr<IFile>> Vfs::open_zip_by_crc(std::string_view path, Crc32 crc) const {
-    if (crc.v != 0) {
+    if (crc.declared()) {
         const std::string full = compose(root_path_, path);
         const asset_name::ZipSplit zs = asset_name::zip_split(full);
         if (zs.zipped && !zs.member.empty() && !detail::has_nested_zip(full)) {
@@ -625,7 +335,7 @@ Ex<std::unique_ptr<IFile>> Vfs::open_zip_by_crc(std::string_view path, Crc32 crc
             const std::string prefix = std::string(zs.archive) + "/";
             if (auto hit = memory_.open_by_crc_under(prefix, crc))
                 return hit;
-            if (auto hit = zip_open_member_by_crc(std::string(zs.archive), crc.v)) {
+            if (auto hit = zip_open_member_by_crc(std::string(zs.archive), crc)) {
                 return hit;
             }
         }
@@ -649,13 +359,14 @@ bool Vfs::file_exists(std::string_view path) const noexcept {
     return path_is_regular(compose(root_path_, path));
 }
 
-Ex<std::int64_t> Vfs::modified(std::string_view path) const {
+Ex<std::chrono::sys_seconds> Vfs::modified(std::string_view path) const {
     const std::string full = compose(root_path_, path);
     struct ::stat st{};
     if (::stat(full.c_str(), &st) != 0) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
-    return static_cast<std::int64_t>(st.st_mtim.tv_sec);
+
+    return std::chrono::sys_seconds{std::chrono::seconds{st.st_mtim.tv_sec}};
 }
 
 Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) const {
@@ -680,7 +391,8 @@ Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) c
     }
 
     std::vector<DirEntry> out;
-    const bool at_root = dir.empty();
+    const detail::BrowseDepth depth = dir.empty() ? detail::BrowseDepth::Root
+                                                  : detail::BrowseDepth::Nested;
 
     for (;;) {
         errno = 0;
@@ -697,15 +409,13 @@ Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) c
         if (name == ".")
             continue;
 
-        bool is_dir = false;
-        bool known = false;
+        std::optional<detail::EntryKind> kind;
         bool have_st = false;
         struct ::stat st{};
         if (de->d_type == DT_DIR) {
-            is_dir = true;
-            known = true;
+            kind = detail::EntryKind::Dir;
         } else if (de->d_type == DT_REG) {
-            known = true;
+            kind = detail::EntryKind::File;
         }
         if (de->d_type == DT_LNK || de->d_type == DT_REG || de->d_type == DT_UNKNOWN) {
             std::string child = full;
@@ -714,18 +424,16 @@ Ex<std::vector<DirEntry>> Vfs::scan(std::string_view dir, const ScanFilter& f) c
             if (::stat(child.c_str(), &st) == 0) {
                 have_st = true;
                 if (S_ISDIR(st.st_mode)) {
-                    is_dir = true;
-                    known = true;
+                    kind = detail::EntryKind::Dir;
                 } else if (S_ISREG(st.st_mode)) {
-                    is_dir = false;
-                    known = true;
+                    kind = detail::EntryKind::File;
                 }
             }
         }
-        if (!known)
+        if (!kind)
             continue;
 
-        const detail::Admit verdict = detail::admit_entry(name, is_dir, at_root, f);
+        const detail::Admit verdict = detail::admit_entry(name, *kind, depth, f);
         if (verdict == detail::Admit::Reject)
             continue;
 
@@ -767,7 +475,8 @@ Ex<void> Vfs::ensure_dir(std::string_view rel) const {
         cur.append(comp);
 
         if (::mkdir(cur.c_str(), kCreateMode) == 0) {
-            durable_.sync_dir_of_(cur);
+
+            durable_.sync_dir_containing(cur);
         } else if (errno != EEXIST) {
             const auto e = static_cast<std::uint32_t>(errno);
             return std::unexpected(Error{Errc::os, ERR_SITE(), e});

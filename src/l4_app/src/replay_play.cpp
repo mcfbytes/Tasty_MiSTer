@@ -5,11 +5,11 @@
 
 namespace mister::app {
 
-void ReplayPlay::log_end(xthread::DiagLog& diag, const ReplayStatus& s) const noexcept {
+void log_end(xthread::DiagLog& diag, const ReplayStatus& s, const ReplayPlay::Run& run) noexcept {
     diag.appendf(
         "{\"t\":\"tas\",\"k\":\"end\",%s,\"tries\":%u}",
         format_replay_status(s).c_str(),
-        tries
+        run.tries
     );
 }
 

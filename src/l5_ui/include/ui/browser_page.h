@@ -9,6 +9,7 @@
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
+#include "ui/browse_source.h"
 #include "ui/browser_session.h"
 #include "ui/page.h"
 
@@ -30,7 +31,7 @@ public:
         RowCount height,
         infra::OptRef<const os::IClock> clock
     ) noexcept
-        : src_(&src),
+        : src_(src),
           req_(static_cast<BrowserSession::Request&&>(req)),
           height_(height),
           clock_(clock) {}
@@ -90,11 +91,11 @@ private:
     Transition open_recents_list();
 
     std::chrono::nanoseconds now_ns() const noexcept {
-        return clock_ ? clock_->now() : std::chrono::nanoseconds::zero();
+        return clock_ ? clock_->now().time_since_epoch() : std::chrono::nanoseconds::zero();
     }
 
     BrowserSession session_{};
-    const IBrowseSource* src_;
+    const IBrowseSource& src_;
     BrowserSession::Request req_{};
     RowCount height_{kFullOsdRows};
     infra::OptRef<const os::IClock> clock_;

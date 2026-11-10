@@ -10,7 +10,10 @@
 #include "cores/cdwire.h"
 #include "cores/types.h"
 #include "infra/error.h"
-#include "svc/disc_engine.h"
+#include "svc/msf.h"
+#include "svc/toc.h"
+#include "svc/track.h"
+#include "svc/types.h"
 
 namespace mister::cores {
 
@@ -23,10 +26,6 @@ namespace {
 ) {
     return link.send_data(idx, std::as_bytes(f));
 }
-
-constexpr std::size_t kUserData = 2048;
-constexpr std::size_t kRawFrame = svc::kCdDataSize;
-constexpr std::size_t kSubBytes = 96;
 
 inline constexpr SectorCount kPregapSectors = SectorCount::of(svc::kRedBookPregap);
 

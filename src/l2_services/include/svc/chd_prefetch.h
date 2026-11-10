@@ -5,11 +5,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 
 #include "infra/counter.h"
 #include "infra/error.h"
 #include "infra/inbox.h"
+#include "infra/indexed_array.h"
 #include "infra/park_timeout.h"
+#include "infra/polled.h"
+#include "infra/pool_slot.h"
 #include "infra/rt_stats.h"
 #include "infra/slot_pool.h"
 #include "infra/loan_channel.h"
@@ -28,14 +33,15 @@ struct PrefetchSlot {
 
 static_assert(sizeof(PrefetchSlot) == 4, "item: the slot names a hunk; the INDEX names the buffer");
 
-inline constexpr std::size_t kPrefetchMinDepth = 8;
-inline constexpr std::size_t kPrefetchMaxDepth = 64;
+inline constexpr HunkCount kPrefetchMinHunks{8};
+inline constexpr HunkCount kPrefetchMaxHunks{64};
+
+inline constexpr std::size_t kPrefetchMinDepth = kPrefetchMinHunks.v;
+inline constexpr std::size_t kPrefetchMaxDepth = kPrefetchMaxHunks.v;
 inline constexpr std::size_t kPrefetchBudgetBytes = 16u * 1024u * 1024u;
 
 inline constexpr HunkCount kPrefetchLookBehind{16};
 inline constexpr HunkCount kPrefetchForwardSpan{16};
-inline constexpr HunkCount kPrefetchMinHunks = HunkCount::of_slots(kPrefetchMinDepth);
-inline constexpr HunkCount kPrefetchMaxHunks = HunkCount::of_slots(kPrefetchMaxDepth);
 
 inline constexpr HunkCount kPrefetchRingFloorHunks = kPrefetchLookBehind + kPrefetchForwardSpan;
 inline constexpr HunkCount kOneHunk{1};
@@ -62,13 +68,16 @@ static_assert(
     "consume the whole thing even at the floor, or the producer has no runway at all"
 );
 
-constexpr std::size_t derive_depth(std::size_t budget, proto::FileSize hunk_bytes) noexcept {
+constexpr std::optional<HunkCount> derive_depth(
+    std::size_t budget,
+    proto::FileSize hunk_bytes
+) noexcept {
     if (hunk_bytes.empty())
-        return 0;
-    const std::size_t raw = hunk_bytes.blocks_in(budget);
-    if (HunkCount::of_slots(raw) < kPrefetchRingFloorHunks)
-        return 0;
-    return raw < kPrefetchMaxDepth ? raw : kPrefetchMaxDepth;
+        return std::nullopt;
+    const HunkCount derived = HunkCount::of_slots(hunk_bytes.blocks_in(budget));
+    if (derived < kPrefetchRingFloorHunks)
+        return std::nullopt;
+    return derived < kPrefetchMaxHunks ? derived : kPrefetchMaxHunks;
 }
 
 static_assert(
@@ -102,7 +111,13 @@ struct ChdMedia {
 
 struct ChdAttach {
     TASTY_SEAT_EXEMPT(component);
-    std::uint8_t lease = 0;
+    xthread::PoolSlot lease{};
+};
+
+enum class PrefetchState : std::uint32_t {
+    Closed,
+    Parked,
+    Running,
 };
 
 struct PrefetchCounters {
@@ -112,13 +127,31 @@ struct PrefetchCounters {
     std::uint32_t seeks = 0;
     std::uint32_t drops = 0;
     std::uint32_t errors = 0;
-    std::uint32_t state = 0;
+    PrefetchState state = PrefetchState::Closed;
 
     std::uint32_t decode_us = 0;
     std::uint32_t evictions = 0;
 };
 
 class ChdPrefetch {
+
+    struct HandoverSeq {
+        std::uint32_t v = 0;
+
+        [[nodiscard]] constexpr HandoverSeq next() const noexcept { return HandoverSeq{v + 1}; }
+
+        [[nodiscard]] constexpr bool reached(HandoverSeq target) const noexcept {
+            return static_cast<std::int32_t>(v - target.v) >= 0;
+        }
+
+        friend constexpr bool operator==(HandoverSeq, HandoverSeq) = default;
+    };
+
+    static_assert(
+        std::atomic<HandoverSeq>::is_always_lock_free,
+        "the handover count crosses T-IO and T-PREFETCH: its atomic never takes a lock"
+    );
+
     using Chan = xthread::
         LoanChannel<PrefetchSlot, kPrefetchMaxDepth, SeatTag::Io, SeatTag::Prefetch>;
 
@@ -164,16 +197,15 @@ public:
         return !parked.load(std::memory_order_acquire) && park_req.load(std::memory_order_acquire);
     }
 
-    bool attached() const noexcept { return depth_ != 0; }
+    bool attached() const noexcept { return depth_ != HunkCount{}; }
 
-    std::size_t depth() const noexcept { return depth_; }
+    HunkCount depth() const noexcept { return depth_; }
 
-    [[nodiscard]] const std::byte* take(HunkIndex hunk) noexcept;
-
-    void submit(HunkIndex hunk) noexcept;
+    [[nodiscard]] std::span<const std::byte> take(HunkIndex hunk) noexcept;
 
     void note_miss() noexcept { misses_.add(); }
 
+    [[nodiscard]] PrefetchState state() const noexcept;
     [[nodiscard]] PrefetchCounters counters() const noexcept;
 
     [[nodiscard]] bool holds_slot_for_test() const noexcept { return static_cast<bool>(held_); }
@@ -184,7 +216,7 @@ public:
 
 private:
     [[nodiscard]] bool sprinting_() const noexcept {
-        return (next_ - tracking_) < HunkCount::of_slots(kPrefetchMinDepth);
+        return (next_ - tracking_) < kPrefetchMinHunks;
     }
 
     void reset_consumer_() noexcept;
@@ -200,6 +232,8 @@ private:
     void kick_worker_() noexcept;
     std::size_t evict_(HunkIndex current) noexcept;
 
+    [[nodiscard]] std::span<std::byte> slot_bytes_(xthread::PoolSlot slot) const noexcept;
+
     xthread::WakeFlag wake_{};
 
     Chan chan_{wake_, xthread::Polled{}};
@@ -208,7 +242,8 @@ private:
     std::atomic<bool> parked_{true};
 
     xthread::Inbox<ChdAttach, kChdAttachDepth> attaches_{wake_};
-    std::atomic<std::uint32_t> attaches_taken_{0};
+
+    std::atomic<HandoverSeq> attaches_taken_{HandoverSeq{}};
     xthread::SlotPool<ChdMedia, kChdMediaLeases, kSeatMediatorB> media_{};
 
     xthread::Counter hits_, misses_, decodes_, decode_us_, evictions_, seeks_, errors_;
@@ -218,15 +253,15 @@ private:
     struct HeldLease {
         TASTY_SEAT_RESIDENT(Io);
         Lease lease{};
-        std::uint32_t seq = 0;
+        HandoverSeq seq{};
 
         ~HeldLease() { (void)lease.release(); }
     };
 
     struct Commander {
         TASTY_SEAT_RESIDENT(Io);
-        HeldLease leases[kChdMediaLeases]{};
-        std::uint32_t sent = 0;
+        infra::IndexedArray<HeldLease, kChdMediaLeases, xthread::PoolSlot> leases{};
+        HandoverSeq sent{};
     };
 
     static_assert(
@@ -238,7 +273,7 @@ private:
     std::unique_ptr<IChdSource> src_{};
     ChdGeometry geo_{};
     HunkCount forward_span_{};
-    std::uint32_t taken_ = 0;
+    HandoverSeq taken_{};
     HunkIndex next_{};
     HunkIndex tracking_{HunkIndex::none()};
     bool disabled_ = false;
@@ -254,7 +289,7 @@ private:
     std::unique_ptr<std::byte[]> slab_{};
     std::size_t hunk_extent_{};
 
-    std::size_t depth_ = 0;
+    HunkCount depth_{};
 
     Chan::Loan resident_[kPrefetchMaxDepth]{};
 

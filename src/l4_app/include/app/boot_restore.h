@@ -5,6 +5,6 @@
 
 namespace mister::app {
 
-enum class BootRestore : std::uint8_t { None, Asked, Laddered };
+enum class BootRestore : std::uint8_t { None, Laddered };
 
 }

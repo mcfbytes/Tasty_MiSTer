@@ -119,7 +119,7 @@ Ex<void> SessionBindings::bind_record(
         record_ = no_record_;
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
-    if (record_.stamp.v == 0 || record_.stamp != op.identity) {
+    if (record_.stamp.is_none() || record_.stamp != op.identity) {
         record_ = no_record_;
         return std::unexpected(Error{Errc::negotiation, ERR_SITE(), op.identity.v});
     }
@@ -132,8 +132,8 @@ Ex<std::optional<SessionBindings::Mount>> SessionBindings::decode_mount(
 ) noexcept {
     if (op.image == proto::FileId{})
         return std::optional<Mount>{};
-    const InternedFile* const file = inbox.file(op.image);
-    if (file == nullptr || file->path.empty()) {
+    const infra::OptRef<const InternedFile> file = inbox.file(op.image);
+    if (!file || file->path.empty()) {
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), op.image.v});
     }
     return std::optional<Mount>{Mount{file->path, file->size_bytes}};

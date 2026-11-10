@@ -19,14 +19,13 @@ struct StickState {
     float max_range_sq = 0.0f;
 
     void learn(bool diagonal) noexcept {
-        const std::int32_t ax = raw.x < 0 ? -raw.x : raw.x;
-        const std::int32_t ay = raw.y < 0 ? -raw.y : raw.y;
-        const auto card = static_cast<float>(ax > ay ? ax : ay);
+        const float card = magnitude_cardinal(raw);
         if (card > max_cardinal)
             max_cardinal = card;
         if (diagonal) {
-            const auto rr = static_cast<float>(ax) * static_cast<float>(ax)
-                + static_cast<float>(ay) * static_cast<float>(ay);
+            const auto ax = magnitude(raw, AnalogXy::Axis::X);
+            const auto ay = magnitude(raw, AnalogXy::Axis::Y);
+            const auto rr = ax * ax + ay * ay;
             if (rr > max_range_sq)
                 max_range_sq = rr;
         }

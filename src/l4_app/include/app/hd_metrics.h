@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <utility>
 
+#include "app/output_size.h"
+
 namespace mister::app {
 
 [[nodiscard]] constexpr std::int32_t hd_sep_h(std::int32_t row_h) noexcept {
@@ -45,18 +47,18 @@ struct HdMetrics {
     std::int32_t track_h = 0;
 };
 
-[[nodiscard]] constexpr std::int32_t hd_tier(std::uint32_t h) noexcept {
+[[nodiscard]] constexpr std::int32_t hd_tier(OutputPixels h) noexcept {
     constexpr std::array<std::pair<std::uint32_t, std::int32_t>, 4> kCeilings{
         {{400, 240}, {520, 480}, {660, 540}, {900, 720}}
     };
     constexpr std::int32_t kTop = 1080;
     for (const auto& [below, tier] : kCeilings)
-        if (h < below)
+        if (h < OutputPixels::of(below))
             return tier;
     return kTop;
 }
 
-[[nodiscard]] constexpr HdMetrics hd_metrics(std::uint32_t w, std::uint32_t h) noexcept {
+[[nodiscard]] constexpr HdMetrics hd_metrics(OutputSize out) noexcept {
     struct Rung {
         std::int32_t tier;
         std::int32_t hero, title, section, body, caption, small;
@@ -78,11 +80,11 @@ struct HdMetrics {
                            kHelpBar = 56, kGap = 12, kRowH = 42, kRowPad = 12, kCardPad = 7,
                            kGlyph = 24, kIcon = 18, kButtonH = 56, kTrackH = 8;
 
-    constexpr std::uint64_t kInsetPct = 5, kPct = 100, kInsetRound = kPct / 2;
+    constexpr std::uint8_t kInsetPct = 5;
     constexpr std::int32_t kMille = 1000, kMilleRound = kMille / 2, kStrokeMille = 2,
                            kFocusMille = 4, kRingMille = 6, kPressMille = 8;
     HdMetrics m{};
-    m.tier = hd_tier(h);
+    m.tier = hd_tier(out.h);
     Rung r = kLadder[kDefaultRung];
     for (const Rung& x : kLadder)
         if (x.tier == m.tier)
@@ -90,7 +92,7 @@ struct HdMetrics {
     const auto k = [t = m.tier](std::int32_t base720) {
         return (base720 * t + kBaseTier / kHalf) / kBaseTier;
     };
-    const auto ih = static_cast<std::int32_t>(h);
+    const std::int32_t ih = out.bounds().h;
     m.font_hero = r.hero;
     m.font_title = r.title;
     m.font_section = r.section;
@@ -99,8 +101,14 @@ struct HdMetrics {
     m.font_small = r.small;
     m.radius_md = r.radius_md;
     m.radius_sm = r.radius_sm;
-    m.inset_x = static_cast<std::int32_t>((std::uint64_t{w} * kInsetPct + kInsetRound) / kPct);
-    m.inset_y = static_cast<std::int32_t>((std::uint64_t{h} * kInsetPct + kInsetRound) / kPct);
+    const HdRect insets =
+        OutputSize{
+            .w = out.w.percent_rounded(Percent::of(kInsetPct)),
+            .h = out.h.percent_rounded(Percent::of(kInsetPct))
+        }
+            .bounds();
+    m.inset_x = insets.w;
+    m.inset_y = insets.h;
     m.pad_right = k(kPadRight);
     m.header_gap = k(kHeaderGap);
     m.list_top = m.inset_y + k(kListTop);

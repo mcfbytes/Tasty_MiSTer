@@ -3,7 +3,6 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <utility>
 
 #include "app/link_rx_channel.h"
@@ -13,32 +12,35 @@
 
 namespace mister::app {
 
-class OwedSaveBind {
+template <class CellT, auto kStrand>
+class OwedAnswer {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    using Cell = SaveExtentCell;
+    using Cell = CellT;
+    using Level = typename Cell::value_type;
+    using Verdict = decltype(kStrand);
 
-    OwedSaveBind(Cell& cell, LinkRxChannel<SeatTag::Main>& rx) noexcept : cell_(cell), rx_(rx) {}
+    OwedAnswer(Cell& cell, LinkRxChannel<SeatTag::Main>& rx) noexcept : cell_(cell), rx_(rx) {}
 
-    OwedSaveBind(const OwedSaveBind&) = delete;
-    OwedSaveBind& operator=(const OwedSaveBind&) = delete;
-    OwedSaveBind(OwedSaveBind&&) = delete;
+    OwedAnswer(const OwedAnswer&) = delete;
+    OwedAnswer& operator=(const OwedAnswer&) = delete;
+    OwedAnswer(OwedAnswer&&) = delete;
 
-    ~OwedSaveBind() { strand(); }
+    ~OwedAnswer() { strand(); }
 
     [[nodiscard]] bool owed() const noexcept { return static_cast<bool>(gen_); }
 
     [[nodiscard]] proto::ActKey generation() const noexcept { return gen_; }
 
-    void arm(proto::ActKey generation, const cores::SaveExtent& on_strand) noexcept {
+    void arm(proto::ActKey generation, const Level& on_strand) noexcept {
         if (gen_ && gen_ != generation)
             strand();
         gen_ = generation;
         strand_body_ = on_strand;
     }
 
-    void answer(cores::SaveVerdict v, const cores::SaveExtent& payload) noexcept {
+    void answer(Verdict v, const Level& payload) noexcept {
         if (!gen_)
             return;
         publish_(std::exchange(gen_, proto::ActKey{}), v, payload);
@@ -47,11 +49,11 @@ public:
     void strand() noexcept {
         if (!gen_)
             return;
-        publish_(std::exchange(gen_, proto::ActKey{}), cores::SaveVerdict::Declined, strand_body_);
+        publish_(std::exchange(gen_, proto::ActKey{}), kStrand, strand_body_);
     }
 
 private:
-    void publish_(proto::ActKey generation, cores::SaveVerdict v, cores::SaveExtent body) noexcept {
+    void publish_(proto::ActKey generation, Verdict v, Level body) noexcept {
         set_verdict(body, v);
         body.generation = generation;
         cell_.publish(body);
@@ -60,9 +62,11 @@ private:
 
     Cell& cell_;
     LinkRxChannel<SeatTag::Main>& rx_;
-    cores::SaveExtent strand_body_{};
+    Level strand_body_{};
     proto::ActKey gen_{};
 };
+
+using OwedSaveBind = OwedAnswer<SaveExtentCell, cores::SaveVerdict::Declined>;
 
 template <std::size_t N>
 [[nodiscard]] std::array<OwedSaveBind, N> make_owed_saves(

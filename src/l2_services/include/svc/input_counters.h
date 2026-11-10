@@ -3,10 +3,9 @@
 
 #include <cstdint>
 
-#include "infra/counter.h"
-#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "svc/device_report.h"
+#include "svc/input_service_counts.h"
 #include "svc/types.h"
 
 namespace mister::svc {
@@ -17,72 +16,37 @@ public:
 
     void note_drain(const DeviceReport& r) noexcept {
         if (r.keys.dropped() != 0)
-            n_key_overflow_.add(r.keys.dropped());
+            counts_.key_overflows.add(Tally{r.keys.dropped()});
         if (r.mouse_remainder != 0)
-            n_mouse_rem_.add(r.mouse_remainder);
+            counts_.mouse_remainder_bytes.add(Tally{r.mouse_remainder});
         if (r.axis_edges != 0)
-            n_axis_edges_.add(r.axis_edges);
+            counts_.axis_edges.add(Tally{r.axis_edges});
         if (r.quirk_drops != 0)
-            n_quirk_drops_.add(r.quirk_drops);
+            counts_.quirk_drops.add(Tally{r.quirk_drops});
     }
 
-    void note_mask_recompute() noexcept { n_mask_recompute_.add(1); }
+    void note_mask_recompute() noexcept { counts_.mask_recomputes.add(); }
 
-    void note_grab_failure() noexcept { n_grab_fail_.add(1); }
+    void note_grab_failure() noexcept { counts_.grab_failures.add(); }
 
-    void set_mapped(std::uint32_t n) noexcept { n_mapped_.set(n); }
+    void set_mapped(std::uint32_t n) noexcept { counts_.mapped.set(Tally{n}); }
 
     void set_bound(std::uint32_t bound, PlayerMask live) noexcept {
-        n_slotted_.set(bound);
-        n_live_mask_.set(live.v);
+        counts_.slotted.set(Tally{bound});
+        counts_.live = live;
     }
 
-    void set_slot_hash(PlayerIndex player, std::uint32_t h) noexcept {
-        if (const auto c = n_slot_hash_.find(player))
-            c->set(h);
+    void set_slot_hash(PlayerIndex player, KeyHash h) noexcept {
+        if (const auto slot = counts_.slot_hash.find(player))
+            *slot = h;
     }
 
-    void set_ghosts(std::uint32_t n) noexcept { n_ghost_.set(n); }
+    void set_ghosts(std::uint32_t n) noexcept { counts_.ghost_slots.set(Tally{n}); }
 
-    std::uint32_t mapped_devices() const noexcept { return n_mapped_.get(); }
-
-    std::uint32_t slotted_devices() const noexcept { return n_slotted_.get(); }
-
-    std::uint32_t mask_recomputes() const noexcept { return n_mask_recompute_.get(); }
-
-    std::uint32_t axis_edges() const noexcept { return n_axis_edges_.get(); }
-
-    std::uint32_t mouse_remainder_bytes() const noexcept { return n_mouse_rem_.get(); }
-
-    std::uint32_t key_overflows() const noexcept { return n_key_overflow_.get(); }
-
-    std::uint32_t quirk_drops() const noexcept { return n_quirk_drops_.get(); }
-
-    std::uint32_t grab_failures() const noexcept { return n_grab_fail_.get(); }
-
-    PlayerMask live_slot_mask() const noexcept {
-        return PlayerMask{static_cast<std::uint8_t>(n_live_mask_.get())};
-    }
-
-    std::uint32_t slot_key_hash(PlayerIndex player) const noexcept {
-        const auto c = n_slot_hash_.find(player);
-        return c ? c->get() : 0u;
-    }
-
-    std::uint32_t ghost_slots() const noexcept { return n_ghost_.get(); }
+    [[nodiscard]] const InputServiceCounts& record() const noexcept { return counts_; }
 
 private:
-    xthread::Counter n_mapped_{};
-    xthread::Counter n_slotted_{};
-    xthread::Counter n_mask_recompute_{};
-    xthread::Counter n_axis_edges_{};
-    xthread::Counter n_mouse_rem_{};
-    xthread::Counter n_key_overflow_{};
-    xthread::Counter n_quirk_drops_{};
-    xthread::Counter n_grab_fail_{};
-    xthread::Counter n_live_mask_{};
-    infra::IndexedArray<xthread::Counter, kMaxPlayers, PlayerIndex> n_slot_hash_{};
-    xthread::Counter n_ghost_{};
+    InputServiceCounts counts_{};
 };
 
 }

@@ -15,7 +15,8 @@
 #include "cores/cd_profile.h"
 #include "cores/cd_tick_periods.h"
 #include "cores/core_profile.h"
-#include "svc/disc_engine.h"
+#include "svc/cue_policy.h"
+#include "svc/search_policy.h"
 
 namespace mister::cores::manifests {
 
@@ -51,6 +52,7 @@ inline constexpr CdIoIndices kPceCdIoIndices{
     .data = IoIndex{2},
     .cdda = IoIndex{3},
     .subcode = IoIndex{4},
+    .info = std::nullopt,
 };
 
 inline constexpr svc::CuePolicy kPceCdCuePolicy{
@@ -59,6 +61,7 @@ inline constexpr svc::CuePolicy kPceCdCuePolicy{
     .sub_naming = svc::CuePolicy::SubNaming::ImageFilename,
     .wav_header_skip = true,
     .sniff_sega_disc_system = false,
+    .subcode_shaping = svc::CuePolicy::SubcodeShaping::Interleave,
 };
 
 inline constexpr auto kPceCdSeekFastPaths = std::to_array<CdProfile::SeekFastPath>({
@@ -67,15 +70,12 @@ inline constexpr auto kPceCdSeekFastPaths = std::to_array<CdProfile::SeekFastPat
 });
 
 inline constexpr CdProfile kPceCdProfile{
-    .dialect = CdDialect::PceScsi,
-    .crc_start = 0,
     .io = kPceCdIoIndices,
     .cue = kPceCdCuePolicy,
     .ticks = kPceCdTicks,
-    .sniff_sega_disc_system = false,
-    .seek_fast_paths = kPceCdSeekFastPaths,
 
     .reset = proto::ResetTerms::framework().with_raised(proto::StatusBit{16}),
+    .row = CdProfile::PceScsiFacts{.seek_fast_paths = kPceCdSeekFastPaths},
 };
 
 inline constexpr auto kPceCdSlots = std::to_array<FileSlot>({
@@ -105,8 +105,6 @@ inline constexpr auto kPceCdSignatures = std::to_array<SignatureRow>({
             "region bit set (SetRegion, pcecd.cpp:188)"},
 });
 
-inline constexpr svc::SearchDir kPceCdHomeDir[] = {svc::SearchDir::CoreDir};
-
 inline constexpr auto kPceCdBootAssets = std::to_array<BootAsset>({
 
     {.name = "cd_bios.rom",
@@ -122,7 +120,7 @@ inline constexpr auto kPceCdBootAssets = std::to_array<BootAsset>({
      .loader = AssetLoader::PceBios},
 
     {.name = "cd_bios.rom",
-     .where = kPceCdHomeDir,
+     .where = kCoreHomeDir,
      .optional = true,
      .anchor = AssetAnchor::Search,
      .subdir = "TGFX16-CD",
@@ -155,8 +153,10 @@ inline constexpr StagingPolicy kPceCdStaging{
     .order = StageOrder::PceCd,
     .reset_pulse_us = 100'000,
     .disc_slot = disc_slot_of(kPceCdSlots),
-    .save_slot = IoIndex{0},
-    .save_dest = WideIoIndex{0},
+    .save = SaveMountPolicy{
+        .slot = IoIndex{0},
+
+    },
 };
 
 inline constexpr CoreProfile kPceCd{

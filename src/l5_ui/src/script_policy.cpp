@@ -5,7 +5,7 @@
 #include "ui/bt_ops.h"
 #include "ui/bt_pair_policy.h"
 #include "ui/script_file_policy.h"
-#include "ui/system_page.h"
+#include "ui/script_launch.h"
 
 namespace mister::ui {
 
@@ -26,13 +26,14 @@ bool ScriptFilePolicy::is_pairing() const noexcept {
     return false;
 }
 
-Ex<IScriptPolicy::Spawn> ScriptFilePolicy::resolve(std::string_view argv0) const {
+Ex<IScriptPolicy::Spawn> ScriptFilePolicy::resolve(const ScriptRequest& req) const {
+    const std::string_view argv0 = req.argv0();
     if (argv0.empty())
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     return Spawn{std::string(argv0), std::string(basename_of(argv0))};
 }
 
-void ScriptFilePolicy::before_spawn(bool, infra::OptRef<IBtOps>) const {}
+void ScriptFilePolicy::before_spawn(const ScriptRequest&, infra::OptRef<IBtOps>) const {}
 
 void ScriptFilePolicy::stop(std::string_view title) const {
     if (!title.empty())
@@ -48,11 +49,7 @@ bool ScriptFilePolicy::renews_on_back() const noexcept {
 }
 
 Transition ScriptFilePolicy::exit_transition() const {
-    return Transition{
-        Transition::Kind::Pop,
-        PageId::None,
-        ItemId{static_cast<std::uint16_t>(SystemItem::Scripts)}
-    };
+    return Transition{Transition::Kind::Pop};
 }
 
 IScriptPolicy::OpenGate BtPairPolicy::gate_open(infra::OptRef<IBtOps> bt) const {
@@ -69,12 +66,12 @@ bool BtPairPolicy::is_pairing() const noexcept {
     return true;
 }
 
-Ex<IScriptPolicy::Spawn> BtPairPolicy::resolve(std::string_view) const {
+Ex<IScriptPolicy::Spawn> BtPairPolicy::resolve(const ScriptRequest&) const {
     return Spawn{"/usr/sbin/btpair", "Bluetooth"};
 }
 
-void BtPairPolicy::before_spawn(bool bt_reset, infra::OptRef<IBtOps> bt) const {
-    if (bt_reset && bt)
+void BtPairPolicy::before_spawn(const ScriptRequest& req, infra::OptRef<IBtOps> bt) const {
+    if (req.reset_adapter() && bt)
         (void)bt->reset_adapter();
 }
 

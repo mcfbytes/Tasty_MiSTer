@@ -12,6 +12,7 @@
 #include "cores/st_ctrl.h"
 #include "cores/st_options.h"
 #include "infra/error.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
@@ -20,12 +21,16 @@ class StOptionRow {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
+    struct AcsiFact {
+        bool bound = false;
+        std::string_view path{};
+    };
+
     struct Facts {
         st_ctrl::CtrlWord system_ctrl{};
         std::uint32_t ext_ctrl = 0;
         std::array<std::string_view, 2> floppy{};
-        std::array<bool, 2> hdd_bound{};
-        std::array<std::string_view, 2> acsi{};
+        infra::IndexedArray<AcsiFact, 2, AcsiTarget> acsi{};
         std::string_view tos{};
         std::string_view cart{};
     };
@@ -37,10 +42,13 @@ public:
 
     [[nodiscard]] static const StOptionRow& of(StOption o) noexcept;
 
-    [[nodiscard]] OptionRowView cycle_view(const Facts& f, const OptionRow& r) const noexcept;
+    [[nodiscard]] OptionRowView cycle_view(
+        const Facts& f,
+        const OptionRow::CycleArm& r
+    ) const noexcept;
 
     [[nodiscard]] OptionRowView file_view(const Facts& f, std::span<char> text) const noexcept;
-    [[nodiscard]] Ex<Write> cycle_set(const Facts& f, std::uint8_t choice) const;
+    [[nodiscard]] Ex<Write> cycle_set(const Facts& f, proto::FieldValue choice) const;
 
     StOptionRow(const StOptionRow&) = delete;
     StOptionRow& operator=(const StOptionRow&) = delete;
@@ -53,13 +61,13 @@ protected:
 private:
     [[nodiscard]] virtual OptionRowView on_cycle_view(
         const Facts& f,
-        const OptionRow& r
+        const OptionRow::CycleArm& r
     ) const noexcept;
     [[nodiscard]] virtual OptionRowView on_file_view(
         const Facts& f,
         std::span<char> text
     ) const noexcept;
-    [[nodiscard]] virtual Ex<Write> on_cycle_set(const Facts& f, std::uint8_t choice) const;
+    [[nodiscard]] virtual Ex<Write> on_cycle_set(const Facts& f, proto::FieldValue choice) const;
 
     StOption id_;
 };
@@ -80,9 +88,9 @@ public:
 private:
     [[nodiscard]] OptionRowView on_cycle_view(
         const Facts& f,
-        const OptionRow& r
+        const OptionRow::CycleArm& r
     ) const noexcept override;
-    [[nodiscard]] Ex<Write> on_cycle_set(const Facts& f, std::uint8_t choice) const override;
+    [[nodiscard]] Ex<Write> on_cycle_set(const Facts& f, proto::FieldValue choice) const override;
 };
 
 class StOptionRowViking final : public StOptionRow {
@@ -94,9 +102,9 @@ public:
 private:
     [[nodiscard]] OptionRowView on_cycle_view(
         const Facts& f,
-        const OptionRow& r
+        const OptionRow::CycleArm& r
     ) const noexcept override;
-    [[nodiscard]] Ex<Write> on_cycle_set(const Facts& f, std::uint8_t choice) const override;
+    [[nodiscard]] Ex<Write> on_cycle_set(const Facts& f, proto::FieldValue choice) const override;
 };
 
 class StOptionRowAspect final : public StOptionRow {
@@ -108,9 +116,9 @@ public:
 private:
     [[nodiscard]] OptionRowView on_cycle_view(
         const Facts& f,
-        const OptionRow& r
+        const OptionRow::CycleArm& r
     ) const noexcept override;
-    [[nodiscard]] Ex<Write> on_cycle_set(const Facts& f, std::uint8_t choice) const override;
+    [[nodiscard]] Ex<Write> on_cycle_set(const Facts& f, proto::FieldValue choice) const override;
 };
 
 class StOptionRowVideoCrop final : public StOptionRow {
@@ -122,9 +130,9 @@ public:
 private:
     [[nodiscard]] OptionRowView on_cycle_view(
         const Facts& f,
-        const OptionRow& r
+        const OptionRow::CycleArm& r
     ) const noexcept override;
-    [[nodiscard]] Ex<Write> on_cycle_set(const Facts& f, std::uint8_t choice) const override;
+    [[nodiscard]] Ex<Write> on_cycle_set(const Facts& f, proto::FieldValue choice) const override;
 };
 
 class StOptionRowFloppy final : public StOptionRow {

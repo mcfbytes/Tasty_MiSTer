@@ -59,7 +59,7 @@ struct ReplayStatus {
     StatusMicros epoch_delay_us{};
     std::uint32_t epoch_edge = 0;
     std::uint32_t blk_late = 0;
-    std::uint32_t blk_late_max_us = 0;
+    StatusMicros blk_late_max_us{};
     std::uint32_t lost = 0;
     std::uint32_t delayed = 0;
     StatusMicros gap_max_us{};
@@ -116,7 +116,7 @@ constexpr void to_json(infra::JsonOut& o, const ReplayStatus& s) noexcept {
     o.field("epoch_us", s.epoch_delay_us.count());
     o.field("epoch", s.epoch_edge);
     o.field("blk_late", s.blk_late);
-    o.field("blk_max_us", s.blk_late_max_us);
+    o.field("blk_max_us", s.blk_late_max_us.count());
     o.field("lost", s.lost);
     o.field("delayed", s.delayed);
     o.field("gap_max_us", s.gap_max_us.count());

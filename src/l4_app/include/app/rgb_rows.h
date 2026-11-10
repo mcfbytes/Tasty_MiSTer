@@ -7,12 +7,17 @@
 #include <cstdint>
 #include <span>
 
+#include "app/picture_pixels.h"
 #include "app/picture_row.h"
 #include "app/row_bytes.h"
 
 namespace mister::app {
 
 inline constexpr std::size_t kRgbPixelBytes = 3;
+
+[[nodiscard]] constexpr RowBytes rgb_row_of(PicturePixels pixels) noexcept {
+    return pixels.row_bytes(PixelBytes::of(kRgbPixelBytes));
+}
 
 [[nodiscard]] constexpr RowBytes rgb_row_of(std::size_t pixels) noexcept {
     return RowBytes{pixels * kRgbPixelBytes};
@@ -22,6 +27,8 @@ struct RgbRows {
     std::span<const std::byte> bytes{};
     RowBytes stride{};
     PictureRows rows{};
+
+    std::array<std::byte, 6> pad_{};
 
     [[nodiscard]] constexpr std::span<const std::byte> from_row(PictureRow row) const noexcept {
         return bytes.subspan(row_start(stride, row));

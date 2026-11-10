@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -26,11 +27,11 @@ struct Command {
     std::uint8_t words;
 };
 
-inline constexpr Command kCommands[] = {{0x57, 12}, {0x59, 6}, {0x5B, 11}};
+inline constexpr auto kCommands = std::to_array<Command>({{0x57, 12}, {0x59, 6}, {0x5B, 11}});
 
 [[nodiscard]] std::optional<UioBurst> decode(std::span<const std::byte> packet) noexcept;
 
-[[nodiscard]] std::size_t encode_reply(
+[[nodiscard]] std::span<const std::byte> encode_reply(
     const UioBurst& answered,
     std::span<std::byte, kMaxPacketBytes> out
 ) noexcept;

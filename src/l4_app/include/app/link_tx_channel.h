@@ -29,7 +29,7 @@ class LinkTxChannel final : public ILinkTxReader {
     );
 
 public:
-    using Bytes = LinkBytes<20, kLinkTxSlabBytes, Producer, SeatTag::RT>;
+    using Bytes = LinkBytes<proto::TxSlabId, 20, kLinkTxSlabBytes, Producer, SeatTag::RT>;
 
     LinkTxChannel() noexcept = default;
     LinkTxChannel(const LinkTxChannel&) = delete;
@@ -66,35 +66,20 @@ public:
     [[nodiscard]] bool drained() const noexcept { return tx_.pushed() == tx_.popped(); }
 
     [[nodiscard]] Ex<proto::TxSlabId> intern(std::span<const std::uint8_t> bytes) noexcept {
-        const Ex<std::uint16_t> id = bytes_.intern(bytes);
-        if (!id)
-            return std::unexpected(id.error());
-        return proto::TxSlabId{*id};
+        return bytes_.intern(bytes);
     }
 
     [[nodiscard]] std::span<const std::uint8_t> bytes(proto::TxSlabId id) const noexcept override {
         TASTY_SEAT_BODY_MEDIATOR(LinkTxChannel, B);
-        return bytes_.get(id.v);
+        return bytes_.get(id);
     }
 
-    [[nodiscard]] Ex<proto::FileId> intern_file(
-        std::vector<std::uint8_t>&& bytes,
-        std::string_view ext,
-        std::string_view path,
-        hal::FabricAddr load_addr,
-        svc::Crc32 crc = {},
-        std::uint64_t whole = 0,
-        std::uint64_t offset = 0
-    ) {
-        return files_.intern(std::move(bytes), ext, path, load_addr, crc, whole, offset);
+    [[nodiscard]] Ex<proto::FileId> intern_file(FileIntern&& file) {
+        return files_.intern(std::move(file));
     }
 
-    [[nodiscard]] bool stamp_save(proto::FileId file, proto::FileId save) noexcept {
-        return files_.stamp_save(file, save);
-    }
-
-    [[nodiscard]] bool stamp_edge(proto::FileId file, ContentEdge edge) noexcept {
-        return files_.stamp_edge(file, edge);
+    [[nodiscard]] bool stamp_remount(proto::FileId file) noexcept {
+        return files_.stamp_remount(file);
     }
 
     [[nodiscard]] Ex<proto::FileId> intern_file_path(
@@ -106,21 +91,11 @@ public:
         return files_.intern_path(path, size, crc, aux);
     }
 
-    [[nodiscard]] Ex<proto::FileId> intern_file_at(
-        proto::FileId id,
-        std::vector<std::uint8_t>&& bytes,
-        std::string_view ext,
-        std::string_view path,
-        hal::FabricAddr load_addr
-    ) {
-        return files_.intern_at(id, std::move(bytes), ext, path, load_addr);
-    }
-
     [[nodiscard]] std::size_t retained_file_bytes() const noexcept {
         return files_.retained_bytes();
     }
 
-    [[nodiscard]] const InternedFile* file(proto::FileId id) const noexcept override {
+    [[nodiscard]] infra::OptRef<const InternedFile> file(proto::FileId id) const noexcept override {
         TASTY_SEAT_BODY_MEDIATOR(LinkTxChannel, B);
         return files_.get(id);
     }

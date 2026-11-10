@@ -3,13 +3,14 @@
 
 #include <cstdint>
 
+#include "proto/types.h"
 #include "proto/user_io/poll_shape.h"
 
 namespace mister::proto::user_io {
 
 class IPollParams {
 public:
-    [[nodiscard]] virtual std::uint8_t issued_params(PollShape s) noexcept = 0;
+    [[nodiscard]] virtual proto::ParamSet issued_params(PollShape s) noexcept = 0;
 
 protected:
     IPollParams() = default;

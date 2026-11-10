@@ -64,8 +64,11 @@ struct PageContext {
     infra::OptRef<const app::IdentityLatch> identity{};
 
     bool bt_reset_before_pair = false;
+
     SystemFacts sys{};
     StatusBarFacts status{};
+
+    SessionFacts session{};
 };
 
 }

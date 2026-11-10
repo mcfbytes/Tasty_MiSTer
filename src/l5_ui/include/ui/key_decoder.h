@@ -23,6 +23,10 @@ class KeyDecoder {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
+    static constexpr std::chrono::milliseconds kDebounce{20};
+    static constexpr std::chrono::milliseconds kRepeatDelay{500};
+    static constexpr std::chrono::milliseconds kRepeatRate{50};
+
     explicit KeyDecoder(const os::IClock& clock) noexcept : clock_(&clock) {}
 
     void push_raw(proto::KeyCode code) noexcept;
@@ -41,7 +45,7 @@ public:
 
     bool repeat_all() const noexcept { return repeat_all_; }
 
-    bool pending() const noexcept { return !ring_.empty() || db_pending_ != proto::KeyCode{}; }
+    bool pending() const noexcept { return !ring_.empty() || db_pending_.has_value(); }
 
     std::uint32_t dropped() const noexcept { return dropped_; }
 
@@ -117,7 +121,7 @@ private:
     std::uint32_t dropped_ = 0;
 
     proto::KeyCode last_seen_{};
-    proto::KeyCode db_pending_{};
+    std::optional<proto::KeyCode> db_pending_;
     std::chrono::nanoseconds db_at_{};
     std::chrono::nanoseconds repeat_at_{};
     std::uint16_t hold_cnt_ = 0;

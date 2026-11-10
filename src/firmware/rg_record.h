@@ -38,11 +38,11 @@ struct RgRecord {
         if (!page)
             return std::nullopt;
         return View{
-            page->recent_build_us,
-            page->recent_update_us_max,
-            page->lane_refusals,
-            page->lane_failures,
-            page->store_errors
+            .build_us = page->recent_build_us,
+            .update_us_max = page->recent_update_us_max,
+            .lane_refusals = page->lane_refusals,
+            .lane_failures = page->lane_failures,
+            .store_errors = page->store_errors
         };
     }
 };

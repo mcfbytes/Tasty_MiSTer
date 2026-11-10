@@ -4,7 +4,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
+#include "proto/types.h"
 #include "svc/types.h"
 
 namespace mister::svc {
@@ -12,12 +14,6 @@ namespace mister::svc {
 inline constexpr std::uint32_t kFramesPerSecond = 75;
 inline constexpr std::uint32_t kSecondsPerMinute = 60;
 inline constexpr std::uint32_t kFramesPerMinute = kFramesPerSecond * kSecondsPerMinute;
-
-[[nodiscard]] constexpr std::uint8_t packed_bcd_byte(std::uint8_t v) noexcept {
-    constexpr unsigned kRadix = 10;
-    constexpr unsigned kNibbleBits = 4;
-    return static_cast<std::uint8_t>(((v / kRadix) << kNibbleBits) | (v % kRadix));
-}
 
 struct Msf {
     std::uint8_t m = 0, s = 0, f = 0;
@@ -32,8 +28,7 @@ struct Msf {
     }
 
     [[nodiscard]] static constexpr Msf of_lba_bcd_masked(std::uint32_t position_frames) noexcept {
-        constexpr std::uint32_t kRadix = 10;
-        constexpr unsigned kNibbleBits = 4;
+        using Bcd = proto::PackedBcd;
         const std::uint32_t seconds = position_frames / kFramesPerSecond;
         constexpr std::size_t kFields = 3;
         const std::array<std::uint32_t, kFields> digits{
@@ -44,7 +39,8 @@ struct Msf {
         std::array<std::uint8_t, kFields> packed{};
         for (std::size_t i = 0; i < digits.size(); ++i) {
             packed[i] = static_cast<std::uint8_t>(
-                (((digits[i] / kRadix) % kRadix) << kNibbleBits) | (digits[i] % kRadix)
+                (((digits[i] / Bcd::kRadix) % Bcd::kRadix) << Bcd::kNibbleBits)
+                | (digits[i] % Bcd::kRadix)
             );
         }
         return Msf{packed.front(), packed[1], packed.back()};
@@ -67,10 +63,26 @@ struct Msf {
         const std::int32_t rem = lba - static_cast<std::int32_t>(mm) * kPerMinute;
 
         return Msf{
-            packed_bcd_byte(mm),
-            packed_bcd_byte(static_cast<std::uint8_t>(rem / kFps)),
-            packed_bcd_byte(static_cast<std::uint8_t>(rem % kFps))
+            proto::PackedBcd::unmasked_byte(mm),
+            proto::PackedBcd::unmasked_byte(static_cast<std::uint8_t>(rem / kFps)),
+            proto::PackedBcd::unmasked_byte(static_cast<std::uint8_t>(rem % kFps))
         };
+    }
+
+    [[nodiscard]] static constexpr Msf of_minute(TrackCount count) noexcept {
+        return Msf{count.v, 0, 0};
+    }
+
+    [[nodiscard]] static constexpr proto::Lba lba_from_bcd(
+        std::span<const std::byte, 3> bytes
+    ) noexcept {
+        const auto digit = [](std::byte b) {
+            return proto::PackedBcd{std::to_integer<std::uint8_t>(b)}.value();
+        };
+        const auto minute = digit(bytes.front());
+        const auto second = digit(bytes[1]);
+        const auto frame = digit(bytes.back());
+        return proto::Lba{minute * kFramesPerMinute + second * kFramesPerSecond + frame};
     }
 
     friend constexpr bool operator==(Msf, Msf) = default;
@@ -90,9 +102,6 @@ static_assert(
 );
 static_assert(Msf::of_wrapped(150) == Msf{0, 0x02, 0x00}, "the cdi form packs its bytes");
 static_assert(Msf::of_wrapped(450'000).m == 0xA0, "100 minutes wraps the packed minute byte");
-
-constexpr Msf TrackCount::as_minute() const noexcept {
-    return Msf{v, 0, 0};
-}
+static_assert(Msf::of_minute(TrackCount{12}) == Msf{12, 0, 0}, "the count is the minute byte");
 
 }

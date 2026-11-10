@@ -18,6 +18,10 @@ public:
         return parse(cue_path, m);
     }
 
+    void shift_chd_toc(Toc& toc, TrackCount count) const { shift_chd_toc_(toc, count); }
+
+    [[nodiscard]] bool pregap_in_own_file() const { return pregap_in_own_file_(); }
+
 protected:
     ICueProgram() = default;
     ICueProgram(const ICueProgram&) = default;
@@ -25,6 +29,10 @@ protected:
 
 private:
     [[nodiscard]] virtual Ex<void> parse(std::string_view cue_path, const CueMount& m) const = 0;
+
+    virtual void shift_chd_toc_(Toc&, TrackCount) const {}
+
+    [[nodiscard]] virtual bool pregap_in_own_file_() const { return false; }
 };
 
 }

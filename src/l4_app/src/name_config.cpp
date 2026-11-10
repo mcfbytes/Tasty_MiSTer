@@ -6,7 +6,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <iterator>
 
 #include "app/durable_write.h"
 #include "infra/unique_fd.h"
@@ -38,19 +42,28 @@ Ex<void> NameConfig::save_path(
     return durable_write(*vfs_, "config/" + remembered_blob_name(stem, s, index), blob);
 }
 
-bool NameConfig::read_card_cid(std::span<std::byte, kCidLen> out) const {
+Ex<std::array<std::byte, NameConfig::kCidLen>> NameConfig::read_card_cid() const {
     TASTY_SEAT_BODY(NameConfig);
+    std::array<std::byte, kCidLen> out{};
     const UniqueFd fd{::open(cid_path_.c_str(), O_RDONLY | O_CLOEXEC)};
     if (fd.get() < 0)
-        return false;
+        return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), errno));
 
-    return ::read(fd.get(), out.data(), kCidLen) == static_cast<ssize_t>(kCidLen);
+    const ssize_t got = ::read(fd.get(), out.data(), kCidLen);
+    if (got < 0)
+        return std::unexpected(infra::errno_error(Errc::io, ERR_SITE(), errno));
+    if (got != std::ssize(out)) {
+        return std::unexpected(
+            Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(got)}
+        );
+    }
+    return out;
 }
 
 bool NameConfig::scripts_confirm_skippable() const {
     TASTY_SEAT_BODY(NameConfig);
-    std::array<std::byte, kCidLen> live{};
-    if (!read_card_cid(live))
+    const auto live = read_card_cid();
+    if (!live)
         return false;
     auto f = vfs_->open("config/script_confirm", svc::OpenMode::ReadWhole);
     if (!f)
@@ -60,13 +73,15 @@ bool NameConfig::scripts_confirm_skippable() const {
     if (!n || *n == 0)
         return false;
 
-    return std::memcmp(live.data(), stored.data(), kCidLen) == 0;
+    return std::memcmp(live->data(), stored.data(), kCidLen) == 0;
 }
 
 Ex<void> NameConfig::remember_scripts_confirm() {
     TASTY_SEAT_BODY(NameConfig);
-    std::array<std::byte, kCidLen> live{};
-    (void)read_card_cid(live);
+
+    const std::array<std::byte, kCidLen> live = read_card_cid().value_or(
+        std::array<std::byte, kCidLen>{}
+    );
     return durable_write(*vfs_, "config/script_confirm", live);
 }
 

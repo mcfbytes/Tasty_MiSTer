@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/neogeo_alias_source.h"
 
-#include <cctype>
 #include <cstddef>
 #include <span>
 
-#include "cores/neo_file.h"
+#include "cores/neo_header.h"
 #include "cores/romset_files.h"
+#include "cores/romset_plan.h"
+#include "infra/ascii.h"
 #include "infra/byte_view.h"
 
 namespace mister::cores {
@@ -16,19 +17,6 @@ namespace {
 constexpr std::string_view kIndexName = "romsets.xml";
 constexpr std::string_view kSidecarName = "romset.xml";
 constexpr std::string_view kHeaderExt = ".neo";
-
-bool iends_with(std::string_view s, std::string_view suffix) noexcept {
-    if (suffix.size() > s.size())
-        return false;
-    const std::string_view tail = s.substr(s.size() - suffix.size());
-    for (std::size_t i = 0; i < suffix.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(tail[i]))
-            != std::tolower(static_cast<unsigned char>(suffix[i]))) {
-            return false;
-        }
-    }
-    return true;
-}
 
 std::string join(std::string_view dir, std::string_view name) {
     if (dir.empty())
@@ -41,47 +29,43 @@ std::string join(std::string_view dir, std::string_view name) {
 
 }
 
-void NeoGeoAliasSource::ensure_index(
-    IRomsetFiles& files,
-    std::string_view dir,
-    std::string_view home
-) {
-    if (indexed_ && indexed_dir_ == dir)
+void NeoGeoAliasSource::ensure_index(IRomsetFiles& files, BrowseDirs dirs) {
+    if (indexed_ && indexed_dir_ == dirs.dir)
         return;
-    auto xml = files.read_prefix(join(dir, kIndexName), kDocMaxBytes);
+    auto xml = files.read_prefix(join(dirs.dir, kIndexName), kDocMaxBytes);
     if (!xml)
-        xml = files.read_prefix(join(home, kIndexName), kDocMaxBytes);
+        xml = files.read_prefix(join(dirs.home, kIndexName), kDocMaxBytes);
     index_.scan(xml ? std::string_view(*xml) : std::string_view{});
-    indexed_dir_ = std::string(dir);
+    indexed_dir_ = std::string(dirs.dir);
     indexed_ = true;
     ++scans_;
 }
 
-RomsetAlias NeoGeoAliasSource::query(
-    IRomsetFiles& files,
-    std::string_view dir,
-    std::string_view home,
-    std::string_view entry,
-    std::string_view key
-) {
+RomsetAlias NeoGeoAliasSource::query(IRomsetFiles& files, BrowseDirs dirs, EntryLookup entry) {
     TASTY_SEAT_BODY(NeoGeoAliasSource);
-    if (iends_with(entry, kHeaderExt)) {
+    if (infra::iends_with(entry.raw_name, kHeaderExt)) {
 
-        const auto bytes = files.read_prefix(join(dir, entry), neogeo::kNeoHeaderBytes);
+        const auto bytes = files.read_prefix(
+            join(dirs.dir, entry.raw_name),
+            neogeo::kNeoHeaderBytes
+        );
         if (!bytes)
-            return {};
+            return RomsetNoMatch{};
         const auto hdr = neogeo::parse_neo_header(infra::text_bytes<const std::uint8_t>(*bytes));
         if (!hdr)
-            return {};
-        return RomsetAlias{.drop = false, .alias = std::string(neogeo::name_view(*hdr))};
+            return RomsetNoMatch{};
+        return RomsetRetype{std::string(neogeo::name_view(*hdr))};
     }
-    if (const auto xml = files.read_prefix(join(join(dir, entry), kSidecarName), kDocMaxBytes)) {
+    if (const auto xml = files.read_prefix(
+            join(join(dirs.dir, entry.raw_name), kSidecarName),
+            kDocMaxBytes
+        )) {
         std::string alias = neogeo::sidecar_altname(*xml);
         if (!alias.empty())
-            return RomsetAlias{.drop = false, .alias = std::move(alias)};
+            return RomsetRetype{std::move(alias)};
     }
-    ensure_index(files, dir, home);
-    return index_.lookup(key);
+    ensure_index(files, dirs);
+    return index_.lookup(entry.key);
 }
 
 }

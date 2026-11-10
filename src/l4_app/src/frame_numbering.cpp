@@ -2,9 +2,10 @@
 #include "app/frame_numbering.h"
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 
-#include "frame_ctr_detail.h"
+#include "hal/types.h"
 
 namespace mister::app {
 
@@ -15,12 +16,25 @@ constexpr std::int64_t kPeriodSamples = kPeriodWeight + 1;
 
 constexpr CoreFrameGap kWovenStep{2};
 
+constexpr CoreFrameGap kOneFrame{1};
+
+constexpr CoreFrameGap kCtrReach = CoreFrameGap::of_lead(hal::HeaderCtr::kReach);
+
+constexpr CoreFrameGap kCtrTurn = kCtrReach + kOneFrame;
+
+constexpr CoreFrameGap kCtrHalfTurn = kCtrTurn.halved();
+
+[[nodiscard]] constexpr CoreFrameGap unwrapped_near(CoreFrameGap lead, CoreFrameGap near) noexcept {
+    return lead + std::max(CoreFrameGap{}, (near - lead + kCtrHalfTurn).truncated_to(kCtrTurn));
+}
+
 }
 
 void FrameNumbering::restart() noexcept {
     last_.reset();
     ext_ = WideCoreFrame{};
     anchor_off_ = kBeforeFirstCopy;
+    period_ns_ = kDefaultPeriodNs;
     cell_off_ = CoreFrameGap{};
     cell_epoch_ = 0;
     nvotes_ = 0;
@@ -93,26 +107,25 @@ bool FrameNumbering::cross_check_(
 FrameNumbering::Gap FrameNumbering::frames_since(
     hal::HeaderCtr ctr,
     std::int64_t now,
-    const CoreFrameRecord* cell,
+    infra::OptRef<const CoreFrameRecord> cell,
     CoreFrameGap lag,
     CoreFrameGap behind,
     bool woven,
-    bool anchored,
-    std::int64_t& period_ns
+    bool anchored
 ) noexcept {
     if (!last_) {
         last_ = LastCtr{ctr, now};
         return {CoreFrameCount{1}, false};
     }
-    const CoreFrameGap d = ctr_distance(last_->ctr, ctr);
+    const CoreFrameGap d = CoreFrameGap::of_lead(ctr.lead_over(last_->ctr));
     const std::int64_t dt = now - last_->seen_ns;
     CoreFrameGap n = d;
     bool estimated = false;
-    const CoreFrameGap est{(dt + period_ns / 2) / period_ns};
+    const CoreFrameGap est{(dt + period_ns_ / 2) / period_ns_};
     if (est >= kCtrReach) {
 
         n = unwrapped_near(d, est);
-        if (anchored && cell != nullptr && cell->epoch == cell_epoch_) {
+        if (anchored && cell && cell->epoch == cell_epoch_) {
             const WideCoreFrame last = current_() + cell_off_;
             const CoreFrameGap by_cell = WideCoreFrame::numbered(cell->core_frame) - lag - last;
 
@@ -125,10 +138,11 @@ FrameNumbering::Gap FrameNumbering::frames_since(
         const CoreFrameGap step = woven ? kWovenStep : kOneFrame; d == step
         && behind == CoreFrameGap{}
         && dt > 0
-        && dt < (step + kOneFrame).lasting_ns(period_ns)
+        && std::chrono::nanoseconds{dt}
+            < (step + kOneFrame).lasting_ns(std::chrono::nanoseconds{period_ns_})
     ) {
 
-        period_ns = (kPeriodWeight * period_ns + step.period_ns_of(dt)) / kPeriodSamples;
+        period_ns_ = (kPeriodWeight * period_ns_ + step.period_ns_of(dt)) / kPeriodSamples;
     }
     last_ = LastCtr{ctr, now};
     return {n.core_frames(), estimated};
@@ -137,7 +151,7 @@ FrameNumbering::Gap FrameNumbering::frames_since(
 FrameNumbering::Stamped FrameNumbering::stamp(
     hal::HeaderCtr ctr,
     std::int64_t now,
-    const CoreFrameRecord* cell,
+    infra::OptRef<const CoreFrameRecord> cell,
     const std::optional<CoreFrameRecord>& last_cell,
     bool anchored,
     CoreFrameGap lag
@@ -149,9 +163,9 @@ FrameNumbering::Stamped FrameNumbering::stamp(
     const WideCoreFrame core = current_();
     s.core_frame = core;
 
-    if (cell == nullptr && anchored && last_cell && last_cell->epoch == cell_epoch_)
+    if (!cell && anchored && last_cell && last_cell->epoch == cell_epoch_)
         s.movie_frame = movie_of(*last_cell, core);
-    if (cell == nullptr || !anchored)
+    if (!cell || !anchored)
         return out;
     if (cell->epoch != cell_epoch_) {
         rebase_(*cell, core, lag);

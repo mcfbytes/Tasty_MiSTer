@@ -40,6 +40,4 @@ struct Io {
     infra::OptRef<const os::IClock> clock{};
 };
 
-inline constexpr Io kUnboundIo{};
-
 }

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 
+#include "proto/info_window.h"
 #include "proto/types.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -36,6 +37,12 @@ public:
 
     std::uint32_t refusals() const noexcept;
 
+    void publish_info_window(const InfoWindow& w) noexcept;
+
+    [[nodiscard]] const xthread::Telemetry<InfoWindow>& info_window_cell() const noexcept {
+        return info_window_;
+    }
+
     void clear() noexcept;
 
     void set_visible_rows(OsdRowCount n) noexcept;
@@ -49,9 +56,11 @@ private:
 
     struct Ui {
         OsdRowCells<std::array<std::uint8_t, kRowBytes>, kMaxRows.size()> rows{};
+        InfoWindow last_info_window{};
     };
 
     xthread::Telemetry<VisibleRows> visible_rows_{};
+    xthread::Telemetry<InfoWindow> info_window_{};
     Ui ui_{};
     OsdRowCells<xthread::Telemetry<Row>, kMaxRows.size()> published_{};
 

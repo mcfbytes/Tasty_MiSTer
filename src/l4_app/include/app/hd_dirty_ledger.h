@@ -19,7 +19,6 @@ public:
     enum class Region : std::uint8_t { Game, Panel, Band };
 
     void reset(HdRect panel, HdRect band, HdRect game) noexcept;
-    void invalidate(HdRect panel, HdRect band, HdRect game) noexcept;
     void mark(Region region, HdRect dirty) noexcept;
     [[nodiscard]] HdRect peek(FlipBuffer buffer, Region region) const noexcept;
     [[nodiscard]] HdRect take(FlipBuffer buffer, Region region) noexcept;

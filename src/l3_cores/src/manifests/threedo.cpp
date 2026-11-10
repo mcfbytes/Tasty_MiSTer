@@ -14,7 +14,7 @@ using namespace std::chrono_literals;
 static_assert(kThreeDoIoIndices.data == IoIndex{8}, "3do.h:78: CD_DATA_IO_INDEX == 0x8");
 static_assert(kThreeDoIoIndices.info == IoIndex{0xC}, "3do.h:79: CD_INFO_IO_INDEX == 0xC");
 static_assert(
-    kThreeDoIoIndices.cdda == IoIndex{} && kThreeDoIoIndices.subcode == IoIndex{},
+    !kThreeDoIoIndices.cdda.has_value() && !kThreeDoIoIndices.subcode.has_value(),
     "3docdd.cpp:609-612: the CD-DA arm is commented out and no "
     "subcode is ever assembled, so neither slot exists"
 );
@@ -25,13 +25,8 @@ static_assert(
 );
 
 static_assert(
-    kThreeDoProfile.dialect == CdDialect::ThreeDo,
+    std::holds_alternative<CdProfile::ThreeDoFacts>(kThreeDoProfile.row),
     "spec 1.5.2.1: 3DO reads 4 command words and writes 4 status words"
-);
-static_assert(kThreeDoProfile.crc_start == 0, "3docdd.cpp: this dialect carries no BCD checksum");
-static_assert(
-    kThreeDoProfile.seek_fast_paths.empty(),
-    "3docdd.cpp:486-534: no per-title seek fast paths in this family"
 );
 
 static_assert(
@@ -139,12 +134,12 @@ static_assert(
 
 static_assert(kThreeDo.staging.order == StageOrder::ThreeDo);
 static_assert(
-    kThreeDo.staging.save_dest == WideIoIndex{4},
+    kThreeDo.staging.save && kThreeDo.staging.save->bracket == WideIoIndex{4},
     "3do.h:77 / 3do.cpp:80: SAVE_IO_INDEX 0x4, the empty-window "
     "download that TRIGGERS the save mount"
 );
 static_assert(
-    kThreeDo.staging.save_slot == IoIndex{0},
+    kThreeDo.staging.save && kThreeDo.staging.save->slot == IoIndex{0},
     "3do.cpp:89: user_io_file_mount(buf, 0, 1)"
 );
 static_assert(
@@ -153,9 +148,10 @@ static_assert(
     "is HELD across the ladder, so there is no pulse to time"
 );
 static_assert(
-    kThreeDo.staging.save_name_disc_words.size() == 2
-        && kThreeDo.staging.save_name_disc_words[0] == std::string_view{"disc"}
-        && kThreeDo.staging.save_name_disc_words[1] == std::string_view{"disk"},
+    kThreeDo.staging.save
+        && kThreeDo.staging.save->disc_words.size() == 2
+        && kThreeDo.staging.save->disc_words[0] == std::string_view{"disc"}
+        && kThreeDo.staging.save->disc_words[1] == std::string_view{"disk"},
     "3do.cpp:61-62: `disc` is searched before `disk`, and the "
     "search ORDER decides which run is cut from a name holding both"
 );
@@ -248,7 +244,7 @@ static_assert(
     "SEGADISCSYSTEM one MegaCD's"
 );
 static_assert(
-    kThreeDoCuePolicy.track_close == svc::CuePolicy::TrackClose::SentinelPregapRelative,
+    kThreeDoCuePolicy.program == svc::CuePolicy::Program::SentinelPregapRelative,
     "3docdd.cpp:226 closes at the accumulated pregap and :237 at "
     "`start - pregap`; MegaCD/PCE-CD close at the INDEX 00 position"
 );

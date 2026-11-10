@@ -8,10 +8,11 @@
 #include <span>
 #include <string_view>
 
-#include "infra/ascii.h"
-
+#include "cores/n64_db_match.h"
 #include "cores/n64_db_tags.h"
+#include "cores/n64_detect_flags.h"
 #include "cores/n64_rom.h"
+#include "infra/ascii.h"
 
 namespace mister::cores::n64 {
 
@@ -22,14 +23,6 @@ inline constexpr std::array<std::string_view, 2> kDbFileNames = {
 
 inline constexpr std::size_t kMd5HexChars = 32;
 inline constexpr std::string_view kCartIdPrefix = "ID:";
-
-enum class DbKey : std::uint8_t {
-    Md5,
-    CartridgeId,
-};
-
-inline constexpr std::uint8_t kDetectRegionBit = 1;
-inline constexpr std::uint8_t kDetectDbBit = 2;
 
 namespace detail {
 
@@ -61,7 +54,7 @@ namespace detail {
         return 0;
     const std::string_view lp = line.substr(kCartIdPrefix.size());
     for (std::size_t i = 0; i < kCartIdChars && i < lp.size(); ++i) {
-        if (i != 0 && detail::ascii_space(static_cast<std::uint8_t>(lp[i])))
+        if (i != 0 && infra::ascii_space(lp[i]))
             return i;
         if (lp[i] != '_' && lp[i] != cart_id[i])
             return 0;
@@ -80,6 +73,41 @@ namespace detail {
     return line.substr(at < line.size() ? at : line.size());
 }
 
+class DbKey {
+public:
+    [[nodiscard]] static constexpr DbKey md5(std::string_view hex) noexcept {
+        return DbKey{Grammar::Md5, hex};
+    }
+
+    [[nodiscard]] static constexpr DbKey cart_id(std::string_view id) noexcept {
+        return DbKey{Grammar::Cart, id};
+    }
+
+    [[nodiscard]] constexpr std::optional<std::string_view> tail(
+        std::string_view line
+    ) const noexcept {
+        switch (grammar_) {
+            case Grammar::Md5:
+                return md5_tail(line, text_);
+            case Grammar::Cart:
+                return cart_id_tail(line, text_);
+        }
+        return std::nullopt;
+    }
+
+    friend constexpr bool operator==(const DbKey&, const DbKey&) = default;
+
+private:
+    enum class Grammar : std::uint8_t { Md5, Cart };
+
+    constexpr DbKey(Grammar grammar, std::string_view text) noexcept
+        : grammar_(grammar),
+          text_(text) {}
+
+    Grammar grammar_;
+    std::string_view text_;
+};
+
 [[nodiscard]] constexpr std::optional<std::string_view> tags_of(std::string_view tail) noexcept {
     const std::size_t blanks = tail.find_first_not_of(" \t");
     if (blanks == 0 || blanks == std::string_view::npos)
@@ -93,12 +121,10 @@ namespace detail {
     return body;
 }
 
-[[nodiscard]] constexpr DbTags lookup(
+[[nodiscard]] constexpr std::optional<DbMatch> lookup(
     std::string_view text,
-    DbKey kind,
-    std::string_view key
+    const DbKey& key
 ) noexcept {
-    DbTags out;
     std::size_t pos = 0;
     while (pos < text.size()) {
         std::size_t end = pos;
@@ -113,54 +139,44 @@ namespace detail {
         if (line.empty() || line.front() == '#' || line.front() == ';')
             continue;
 
-        const auto tail = kind == DbKey::Md5 ? md5_tail(line, key) : cart_id_tail(line, key);
+        const auto tail = key.tail(line);
         if (!tail)
             continue;
 
         const auto body = tags_of(*tail);
-        if (!body) {
-            out.found = true;
-            out.malformed = true;
-            return out;
-        }
-        out = parse_tags(*body);
-        out.found = true;
-        return out;
+        if (!body)
+            return DbMatch{};
+        return DbMatch{parse_tags(*body)};
     }
-    return out;
+    return std::nullopt;
 }
 
-[[nodiscard]] constexpr DbTags lookup_in_order(
+[[nodiscard]] constexpr std::optional<DbMatch> lookup_in_order(
     std::span<const std::string_view> texts,
-    DbKey kind,
-    std::string_view key
+    const DbKey& key
 ) noexcept {
-    DbTags out;
-    for (std::string_view text : texts) {
-        out = lookup(text, kind, key);
-        if (out.found)
-            return out;
-    }
-    return out;
+    for (std::string_view text : texts)
+        if (const auto match = lookup(text, key))
+            return match;
+    return std::nullopt;
 }
 
 [[nodiscard]] constexpr bool cart_id_lookupable(std::string_view cart_id) noexcept {
     if (cart_id.size() < kCartIdChars)
         return false;
     for (std::size_t i = 0; i < kCartIdChars; ++i)
-        if (!detail::ascii_alnum(static_cast<std::uint8_t>(cart_id[i])))
+        if (!infra::ascii_alnum(cart_id[i]))
             return false;
     return true;
 }
 
-[[nodiscard]] constexpr std::uint8_t detect_level(const DbTags& tags, bool auto_detect) noexcept {
-    if (!tags.found)
-        return 0;
-    if (tags.malformed)
-        return kDetectDbBit;
+[[nodiscard]] constexpr DetectFlags detect_level(const DbMatch& match, bool auto_detect) noexcept {
+    const DetectFlags db = DetectFlags{}.with(DetectFlag::Db);
+    if (!match.tags)
+        return db;
     if (!auto_detect)
-        return kDetectDbBit | kDetectRegionBit;
-    return tags.complete() ? (kDetectDbBit | kDetectRegionBit) : kDetectDbBit;
+        return db.with(DetectFlag::Region);
+    return match.tags->complete() ? db.with(DetectFlag::Region) : db;
 }
 
 }

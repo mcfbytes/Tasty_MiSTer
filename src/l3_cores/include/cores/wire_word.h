@@ -7,7 +7,6 @@
 
 #include "hal/types.h"
 #include "infra/seat.h"
-#include "cores/wire_chunk.h"
 
 namespace mister::cores {
 

@@ -7,6 +7,7 @@
 
 #include "app/page_description.h"
 #include "cores/progress.h"
+#include "proto/info_window.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "ui/page_facts.h"
@@ -88,7 +89,7 @@ public:
         PageWalk w{.page = page, .rows = rows};
         if (!source.walk(w))
             return false;
-        (void)copy_hd_rows(w);
+        (void)w.copy_hd_rows();
         out = page;
         return true;
     }
@@ -102,19 +103,21 @@ public:
 
     virtual Transition handle(const UiEvent&) = 0;
 
-    virtual void on_facts(const struct SystemFacts&) {}
+    virtual void on_facts(const struct SystemFacts&, const struct SessionFacts&) {}
 
-    virtual class IProgressView* progress_view() { return nullptr; }
+    [[nodiscard]] virtual std::optional<proto::InfoWindow> info_window() const { return {}; }
+
+    virtual infra::OptRef<IProgressView> progress_view() { return {}; }
 
     virtual infra::OptRef<IMaskRebuild> mask_rebuild() { return {}; }
 
-    virtual bool holds_pairing_hotkey() const { return false; }
+    virtual bool holds_live_script() const { return false; }
+
+    virtual bool takes_osd_button_backspace() const { return false; }
 
     virtual Transition on_tick(PageContext&) { return Transition{}; }
 
     virtual Transition open_root_child(PageContext&) { return Transition{}; }
-
-    virtual Transition open_scripts(PageContext&) { return Transition{}; }
 
     virtual MenuMask mask() const { return MenuMask{}; }
 

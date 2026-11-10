@@ -1,19 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <atomic>
-#include <cstddef>
 #include <cstdint>
-#include <span>
-#include <string_view>
+#include <optional>
 
 #include "app/session_identity.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
-
-namespace mister::svc {
-class IAnalogReshape;
-}
 
 namespace mister::app {
 
@@ -25,34 +18,14 @@ public:
     IdentityLatch(const IdentityLatch&) = delete;
     IdentityLatch& operator=(const IdentityLatch&) = delete;
 
-    void publish(
-        std::string_view core,
-        std::string_view rbf,
-        const RememberedStem& stem,
-        const svc::JoyPlan& joy,
-        std::string_view j_names,
-        bool front_end,
-        bool suppress_analog_followup,
-        infra::OptRef<const svc::IAnalogReshape> analog_reshape,
-        std::string_view cue_dir,
-        infra::OptRef<const cores::CheatLookup> cheats,
-        std::span<const cores::FileSlot> slots,
-        const GameId& game_id = {},
-        bool setname_same_dir = false,
-        bool image_no_zip = false,
-        cores::PauseOnOsd pause = cores::PauseOnOsd::Option
-    ) noexcept;
-
     void publish(const SessionIdentity& id) noexcept;
 
-    [[nodiscard]] bool copy(SessionIdentity& out) const noexcept;
+    [[nodiscard]] std::optional<SessionIdentity> copy() const noexcept;
 
     [[nodiscard]] std::uint32_t generation() const noexcept { return cell_.generation(); }
 
 private:
     xthread::Telemetry<SessionIdentity, SeatTag::RT> cell_{};
-
-    SessionIdentity scratch_{};
 };
 
 }

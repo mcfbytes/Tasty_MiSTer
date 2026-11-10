@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "app/hd_rect.h"
+#include "app/output_size.h"
 
 namespace mister::app {
 
@@ -54,36 +55,39 @@ struct HdLayout {
 }
 
 [[nodiscard]] constexpr HdLayout layout_for(
-    std::uint32_t w,
-    std::uint32_t h,
+    OutputSize out,
     std::uint8_t panel_pct,
     HdGameDisplay display,
     std::uint8_t band_pct = 0
 ) noexcept {
 
-    constexpr std::uint64_t kLayoutPercent = 100, kMinPanelPctOfHeight = 60, kMaxBandPct = 50;
+    constexpr std::uint8_t kMinPanelPctOfHeight = 60, kMaxBandPct = 50;
     HdLayout L{};
-    if (h == 0 || w == 0)
+    if (out.empty())
         return L;
-    const auto ih = static_cast<std::int32_t>(h);
-    const auto iw = static_cast<std::int32_t>(w);
-    const auto pct = std::min<std::uint64_t>(panel_pct, kLayoutPercent);
-    const auto panel_w = static_cast<std::int32_t>(std::min<std::uint64_t>(
-        w,
-        std::max<std::uint64_t>(
-            std::uint64_t{w} * pct / kLayoutPercent,
-            std::uint64_t{h} * kMinPanelPctOfHeight / kLayoutPercent
+    const HdRect frame = out.bounds();
+    const std::int32_t ih = frame.h;
+    const OutputPixels panel_w = std::min(
+        out.w,
+        std::max(
+            out.w.percent(Percent::of(panel_pct)),
+            OutputPixels::percent_of_height(out.h, Percent::of(kMinPanelPctOfHeight))
         )
-    ));
-    const auto band_h = static_cast<std::int32_t>(
-        std::uint64_t{h} * std::min<std::uint64_t>(band_pct, kMaxBandPct) / kLayoutPercent
     );
-    L.surface = {.x = 0, .y = 0, .w = iw, .h = ih};
+    const std::int32_t panel_px = OutputSize{panel_w, out.h}.bounds().w;
+    const std::int32_t band_h =
+        OutputSize{
+            .w = out.w,
+            .h = out.h.percent(Percent::of(std::min<std::uint8_t>(band_pct, kMaxBandPct)))
+        }
+            .bounds()
+            .h;
+    L.surface = frame;
     if (band_h > 0)
-        L.band = {.x = 0, .y = 0, .w = iw, .h = band_h};
-    L.panel = {.x = 0, .y = band_h, .w = panel_w, .h = ih - band_h};
+        L.band = {.x = 0, .y = 0, .w = frame.w, .h = band_h};
+    L.panel = {.x = 0, .y = band_h, .w = panel_px, .h = ih - band_h};
     L.picture = hd_contain_4x3(display == HdGameDisplay::Squeeze ? hd_beside_panel(L) : L.surface);
-    const std::int32_t x0 = std::max(L.picture.x, panel_w);
+    const std::int32_t x0 = std::max(L.picture.x, panel_px);
     const std::int32_t y0 = std::max(L.picture.y, band_h);
     const std::int32_t x1 = L.picture.x + L.picture.w;
     const std::int32_t y1 = L.picture.y + L.picture.h;

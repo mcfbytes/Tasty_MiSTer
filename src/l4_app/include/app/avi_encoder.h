@@ -10,13 +10,17 @@
 #include "app/cscd_codec.h"
 #include "app/encode_status.h"
 #include "app/frame_arena.h"
+#include "app/half_scaler.h"
+#include "app/picture_size.h"
 #include "app/raw_frame_slot.h"
 #include "app/rec_control.h"
+#include "app/scale_governor.h"
 #include "app/zmbv_codec.h"
 #include "infra/opt_ref.h"
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "os/clock.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -25,7 +29,9 @@ class AviEncoder {
 
 public:
     struct Wiring {
+
         infra::OptRef<ChunkChannel> out{};
+
         infra::OptRef<const RawFrameChannel> raw{};
         infra::OptRef<const os::IClock> clock{};
         infra::OptRef<const os::IClock> cpu{};
@@ -35,22 +41,18 @@ public:
         std::uint64_t segment_bytes = 1ull << 30;
         std::uint32_t segment_frames = kSegmentFrames;
         std::uint32_t key_interval = 300;
-        std::int64_t budget_window_ns = 2'000'000'000;
-        std::uint32_t budget_pct = 50;
+
+        std::chrono::nanoseconds budget_window = ScaleGovernor::Limits{}.budget_window;
+        Percent budget_pct = ScaleGovernor::Limits{}.budget_pct;
 
         std::uint32_t rate_frames = 60;
-
-        std::int64_t recover_ns = 4'000'000'000;
+        std::chrono::nanoseconds recover = ScaleGovernor::Limits{}.recover;
     };
 
     static constexpr std::uint32_t kSegmentFrames = kChunksPerSegment;
 
-    static constexpr std::uint8_t kFullScale = 1;
-    static constexpr std::uint8_t kHalfScale = 2;
-
-    static constexpr std::uint8_t kSustainWindows = 3;
-
-    static constexpr std::uint8_t kRecoverDoublings = 3;
+    static constexpr std::uint8_t kSustainWindows = ScaleGovernor::kSustainWindows;
+    static constexpr std::uint8_t kRecoverDoublings = ScaleGovernor::kRecoverDoublings;
 
     static constexpr std::int64_t kFlushNs = 250'000'000;
     static constexpr std::size_t kMinSlotBytes = 1024u * 1024u;
@@ -68,11 +70,20 @@ public:
         bool lost = false;
     };
 
-    [[nodiscard]] bool open(const RawFrameSlot& s) noexcept;
-    [[nodiscard]] bool close(const RawFrameSlot& s) noexcept;
+    [[nodiscard]] bool open(const RawFrameSlot::Open& s, ControlGeneration gen) noexcept;
+    [[nodiscard]] bool close(const RawFrameSlot::Close& s, ControlGeneration gen) noexcept;
 
     [[nodiscard]] bool chunk(
-        const RawFrameSlot& s,
+        const RawFrameSlot::Frame& s,
+        ControlGeneration gen,
+        bool real,
+        WideCoreFrame core_frame,
+        MovieFrame movie_frame
+    ) noexcept;
+
+    [[nodiscard]] bool chunk(
+        const RawFrameSlot::Close& s,
+        ControlGeneration gen,
         bool real,
         WideCoreFrame core_frame,
         MovieFrame movie_frame
@@ -109,12 +120,8 @@ private:
     void flush_() noexcept;
     [[nodiscard]] bool all_home_() const noexcept;
     [[nodiscard]] bool size_roll_(std::size_t payload_max) const noexcept;
-    void budget_(std::int64_t cpu_ns, std::int64_t now) noexcept;
-    void step_half_(bool behind, std::int64_t now) noexcept;
 
-    [[nodiscard]] bool too_soon_(std::int64_t now) const noexcept;
-
-    void recover_(std::size_t queued, std::size_t depth, std::int64_t now) noexcept;
+    void note_governor_(const ScaleGovernor::Change& ch) noexcept;
     [[nodiscard]] std::int64_t frame_budget_ns_(std::uint32_t vtime) const noexcept;
     [[nodiscard]] std::int64_t now_() const noexcept;
     [[nodiscard]] std::chrono::nanoseconds cpu_now_() const noexcept;
@@ -122,25 +129,24 @@ private:
     [[nodiscard]] IFrameCodec& codec_for_(RecCodec c) noexcept;
     [[nodiscard]] bool chunk_one_(
         IFrameCodec& codec,
-        const RawFrameSlot& s,
+        const RawFrameSlot::Frame& s,
         bool real,
         std::uint32_t cand,
         std::uint32_t run,
         bool stable
     ) noexcept;
 
-    [[nodiscard]] RgbRows picture_of_(const RawFrameSlot& s) noexcept;
+    [[nodiscard]] PictureSize picture_size_(const RawFrameSlot::Frame& s) const noexcept;
 
     Wiring w_;
     Limits lim_{};
     CscdCodec cscd_{};
     ZmbvCodec zmbv_{};
     RecOptions opt_{};
-    std::uint64_t seg_limit_ = 0;
+    proto::FileSize seg_limit_{};
     IFrameCodec* codec_ = &cscd_;
-    bool step_ = true;
     std::uint16_t frame_mul_ = 1;
-    FrameArena half_{};
+    HalfScaler half_{};
     FrameArena chunks_{};
     std::size_t data_cap_ = 0;
     EncodeStatus::Video st_{};
@@ -149,7 +155,6 @@ private:
     bool active_ = false;
     ControlGeneration gen_{};
     RecPath sidecar_{};
-    std::uint8_t scale_ = 1;
     bool need_roll_ = false;
     bool broken_ = false;
 
@@ -171,14 +176,11 @@ private:
     Position pos_{};
     bool held_ = false;
 
-    enum class HalfCause : std::uint8_t { None, Queue, Held };
-    HalfCause cause_ = HalfCause::None;
-    std::int64_t calm_ns_ = 0;
-    std::int64_t returned_ns_ = -1;
-
-    std::int64_t win_start_ = -1;
-    std::int64_t win_cpu_ = 0;
-    std::uint8_t win_over_ = 0;
+    ScaleGovernor gov_{ScaleGovernor::Limits{
+        .budget_window = lim_.budget_window,
+        .budget_pct = lim_.budget_pct,
+        .recover = lim_.recover,
+    }};
 };
 
 }

@@ -22,24 +22,24 @@ public:
         StatusCell& cell,
         const ISessionLive& live
     ) noexcept
-        : link_(&link),
-          session_(&session),
-          cell_(&cell),
-          live_(&live) {}
+        : link_(link),
+          session_(session),
+          cell_(cell),
+          live_(live) {}
 
     void service() noexcept;
 
-    [[nodiscard]] bool active() const noexcept { return live_->session_live(); }
+    [[nodiscard]] bool active() const noexcept { return live_.session_live(); }
 
     [[nodiscard]] std::uint8_t last() const noexcept { return last_; }
 
     [[nodiscard]] std::uint32_t flush_refusals() const noexcept { return flush_refusals_; }
 
 private:
-    hal::ISpiTransport* link_;
-    CoreSession* session_;
-    StatusCell* cell_;
-    const ISessionLive* live_;
+    hal::ISpiTransport& link_;
+    CoreSession& session_;
+    StatusCell& cell_;
+    const ISessionLive& live_;
     std::uint8_t last_ = 0;
     std::uint32_t flush_refusals_ = 0;
     StatusWord words_{};

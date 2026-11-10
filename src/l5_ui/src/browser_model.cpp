@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "app/romset_aliases.h"
+#include "infra/ascii.h"
 #include "infra/opt_ref.h"
 #include "ui/browse_source.h"
 #include "ui/browser_entry.h"
@@ -17,64 +18,21 @@ namespace {
 
 constexpr std::string_view kDotExt = ".ext";
 
-char lower(char c) noexcept {
-    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-}
-
-bool ieq(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        if (lower(a[i]) != lower(b[i]))
-            return false;
-    }
-    return true;
-}
-
-bool istarts_with(std::string_view s, std::string_view p) noexcept {
-    return s.size() >= p.size() && ieq(s.substr(0, p.size()), p);
-}
-
-bool iends_with(std::string_view s, std::string_view p) noexcept {
-    return s.size() >= p.size() && ieq(s.substr(s.size() - p.size()), p);
-}
-
-bool icontains(std::string_view s, std::string_view needle) noexcept {
-    if (needle.empty())
-        return true;
-    if (needle.size() > s.size())
-        return false;
-    for (std::size_t i = 0; i + needle.size() <= s.size(); ++i) {
-        if (ieq(s.substr(i, needle.size()), needle))
-            return true;
-    }
-    return false;
-}
-
-int icompare_n(std::string_view a, std::string_view b, std::size_t n) noexcept {
-    for (std::size_t i = 0; i < n; ++i) {
-        const int d = lower(a[i]) - lower(b[i]);
-        if (d != 0)
-            return d;
-    }
-    return 0;
-}
-
-int icompare(std::string_view a, std::string_view b) noexcept {
-    const std::size_t n = a.size() < b.size() ? a.size() : b.size();
-    const int r = icompare_n(a, b, n);
-    if (r != 0)
-        return r;
-    return (a.size() < b.size()) ? -1 : (a.size() > b.size() ? 1 : 0);
+EntryKind kind_of(const svc::DirEntry& d) noexcept {
+    if (!d.is_dir)
+        return EntryKind::File;
+    if (d.name == "..")
+        return EntryKind::UpDir;
+    if (!d.is_zip_member && infra::iends_with(d.name, ".zip"))
+        return EntryKind::ZipDir;
+    return EntryKind::Dir;
 }
 
 bool entry_less(const BrowserEntry& a, const BrowserEntry& b) noexcept {
-    const bool a_up = a.is_dir && a.altname == "..";
-    const bool b_up = b.is_dir && b.altname == "..";
-    if (a_up || b_up)
-        return a_up && !b_up;
-    if (a.is_dir != b.is_dir)
-        return a.is_dir;
+    if (a.is_up() || b.is_up())
+        return a.is_up() && !b.is_up();
+    if (a.is_dir() != b.is_dir())
+        return a.is_dir();
 
     std::size_t l1 = a.altname.size();
     std::size_t l2 = b.altname.size();
@@ -83,17 +41,15 @@ bool entry_less(const BrowserEntry& a, const BrowserEntry& b) noexcept {
     if (l2 > kDotExt.size() && b.altname[l2 - kDotExt.size()] == '.')
         l2 -= kDotExt.size();
 
-    const int r = icompare_n(a.altname, b.altname, l1 < l2 ? l1 : l2);
+    const std::weak_ordering r = infra::icompare(a.altname.substr(0, l1), b.altname.substr(0, l2));
     if (r != 0)
         return r < 0;
-    if (l1 != l2)
-        return l1 < l2;
-    return icompare(a.datecode, b.datecode) < 0;
+    return infra::icompare(a.datecode, b.datecode) < 0;
 }
 
 char group_char(const BrowserEntry& e, bool cores) noexcept {
     char c = e.altname.empty() ? '\0' : e.altname[0];
-    if (c == '_' && e.is_dir && cores)
+    if (c == '_' && e.is_dir() && cores)
         c = e.altname.size() > 1 ? e.altname[1] : '\0';
     return static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
 }
@@ -102,8 +58,7 @@ BrowserEntry recent_entry_row() {
     BrowserEntry e;
     e.name = "Recent";
     e.altname = "Recent";
-    e.is_dir = true;
-    e.recent = true;
+    e.kind = EntryKind::Recent;
     return e;
 }
 
@@ -140,8 +95,8 @@ Ex<void> BrowserSession::open(const IBrowseSource& src, Request req) {
     } else {
         home_ = resolve_content_home();
 
-        const bool under_home = istarts_with(path_, home_);
-        const bool is_home = ieq(home_, path_);
+        const bool under_home = infra::istarts_with(path_, home_);
+        const bool is_home = infra::ieq(home_, path_);
         const bool exists = src_->file_exists(path_) || src_->dir_exists(path_);
         if (!under_home || is_home || !exists) {
             req_.scan.no_enter = false;
@@ -236,8 +191,8 @@ void BrowserSession::type_ahead(char c, std::chrono::nanoseconds now) {
 }
 
 std::string BrowserSession::selected_full_path() const {
-    const BrowserEntry* e = view_.selected();
-    if (e == nullptr)
+    const auto e = view_.selected();
+    if (!e)
         return {};
 
     if (recents_mode_)
@@ -279,7 +234,7 @@ Ex<void> BrowserSession::scan_list(std::string_view type_filter) {
     f.directories = req_.scan.include_dirs || req_.scan.cores_only;
     f.files = true;
     f.zip_as_directory = req_.scan.include_dirs && !req_.scan.no_zip;
-    f.romset_browse = req_.scan.romset_browse;
+    f.archive_browse = req_.scan.archive_browse;
 
     ++scans_;
     auto listing = src_->scan(path_, f);
@@ -287,7 +242,8 @@ Ex<void> BrowserSession::scan_list(std::string_view type_filter) {
         return std::unexpected(listing.error());
 
     for (svc::DirEntry& d : *listing) {
-        if (!type_filter.empty() && !icontains(d.name, type_filter))
+
+        if (!type_filter.empty() && !infra::icontains(d.name, type_filter))
             continue;
 
         if (d.is_dir
@@ -298,10 +254,9 @@ Ex<void> BrowserSession::scan_list(std::string_view type_filter) {
             continue;
         }
         BrowserEntry b;
-        b.is_dir = d.is_dir;
-        b.from_zip = d.is_dir && !d.is_zip_member && iends_with(d.name, ".zip");
+        b.kind = kind_of(d);
         b.name = static_cast<std::string&&>(d.name);
-        if (req_.scan.romset_browse) {
+        if (req_.scan.archive_browse) {
             if (!assign_romset_display(b))
                 continue;
         } else {
@@ -320,19 +275,12 @@ Ex<void> BrowserSession::scan_list(std::string_view type_filter) {
 }
 
 void BrowserSession::assign_display(BrowserEntry& e) const {
-    if (req_.host) {
-        std::string alias = req_.host->display_alias(e.name, e.is_dir);
-        if (!alias.empty()) {
-            e.altname = static_cast<std::string&&>(alias);
-            return;
-        }
-    }
     e.altname = e.name;
-    if (e.is_dir)
+    if (e.is_dir())
         return;
 
-    const bool xml = iends_with(e.altname, ".mgl") || iends_with(e.altname, ".mra");
-    const bool rbf = iends_with(e.altname, ".rbf");
+    const bool xml = infra::iends_with(e.altname, ".mgl") || infra::iends_with(e.altname, ".mra");
+    const bool rbf = infra::iends_with(e.altname, ".rbf");
     if (rbf || xml) {
         e.altname.resize(e.altname.size() - kDotExt.size());
         if (rbf) {
@@ -364,51 +312,55 @@ void BrowserSession::assign_display(BrowserEntry& e) const {
 bool BrowserSession::assign_romset_display(BrowserEntry& e) const {
     e.altname = e.name;
 
-    e.from_zip = false;
-    if (iends_with(e.altname, ".zip"))
+    if (e.kind == EntryKind::ZipDir)
+        e.kind = EntryKind::Dir;
+    if (infra::iends_with(e.altname, ".zip"))
         e.altname.resize(e.altname.size() - kDotExt.size());
     if (!req_.aliases || e.name == "..")
         return true;
-    const app::RomsetAlias ra = req_.aliases->query(path_, home_, e.name, e.altname);
-    if (ra.drop)
+    const app::RomsetAlias ra = req_.aliases->query(
+        app::BrowseDirs{path_, home_},
+        app::EntryLookup{e.name, e.altname}
+    );
+    if (app::drops(ra))
         return false;
-    if (ra.alias) {
-        e.is_dir = false;
-        e.altname = *ra.alias;
+    if (const auto alias = app::alias_of(ra)) {
+        e.kind = EntryKind::File;
+        e.altname = *alias;
     }
     return true;
 }
 
-void BrowserSession::position_on(std::string_view raw_name) {
-    std::size_t pos = entries_.size();
-    for (std::size_t i = 0; i < entries_.size(); ++i) {
-        if (entries_[i].recent)
+std::optional<RowIndex> BrowserSession::find_named(
+    std::string_view name,
+    NameField field,
+    bool dirs_only
+) const {
+    const RowSpan<const BrowserEntry> list{entries_};
+    std::optional<RowIndex> folded;
+    for (const RowIndex i : rows(list.size())) {
+        const BrowserEntry& e = list[i];
+        if (e.is_recent() || (dirs_only && !e.is_dir()))
             continue;
-        if (entries_[i].name == raw_name) {
-            pos = i;
-            break;
-        }
-        if (ieq(entries_[i].name, raw_name))
-            pos = i;
+        const std::string_view have = field == NameField::Altname ? e.altname : e.name;
+        if (have == name)
+            return i;
+        if (infra::ieq(have, name))
+            folded = i;
     }
-    if (pos < entries_.size())
-        view_.select(RowIndex::of(pos));
+    return folded;
+}
+
+void BrowserSession::position_on(std::string_view raw_name) {
+    if (const std::optional<RowIndex> at = find_named(raw_name, NameField::Name, false)) {
+        view_.select(*at);
+    }
 }
 
 void BrowserSession::select_dir_named(std::string_view name) {
-    std::size_t pos = entries_.size();
-    for (std::size_t i = 0; i < entries_.size(); ++i) {
-        if (!entries_[i].is_dir || entries_[i].recent)
-            continue;
-        if (entries_[i].altname == name) {
-            pos = i;
-            break;
-        }
-        if (ieq(entries_[i].altname, name))
-            pos = i;
+    if (const std::optional<RowIndex> at = find_named(name, NameField::Altname, true)) {
+        view_.select(*at);
     }
-    if (pos < entries_.size())
-        view_.select(RowIndex::of(pos));
 }
 
 void BrowserSession::seek_letter(char c) {
@@ -428,14 +380,14 @@ void BrowserSession::next_group() {
     if (recents_mode_)
         return;
     const bool cores = req_.scan.cores_only;
-    const BrowserEntry* cur = view_.selected();
-    if (cur == nullptr)
+    const auto cur = view_.selected();
+    if (!cur)
         return;
     const char cur_char = group_char(*cur, cores);
-    const bool cur_dir = cur->is_dir;
+    const bool cur_dir = cur->is_dir();
     (void)view_.select_next(
         [&](const BrowserEntry& e) {
-            return group_char(e, cores) != cur_char || e.is_dir != cur_dir;
+            return group_char(e, cores) != cur_char || e.is_dir() != cur_dir;
         },
         Wrap::No
     );
@@ -444,8 +396,8 @@ void BrowserSession::next_group() {
 char BrowserSession::selected_group() const noexcept {
     if (recents_mode_)
         return '\0';
-    const BrowserEntry* e = view_.selected();
-    if (e == nullptr || e->recent)
+    const auto e = view_.selected();
+    if (!e || e->is_recent())
         return '\0';
     const char c = group_char(*e, req_.scan.cores_only);
     return c >= 'A' && c <= 'Z' ? c : '#';
@@ -459,13 +411,13 @@ void BrowserSession::prev_group() {
     const RowIndex cur = view_.viewport().selected;
     if (cur >= row_after(list.size()) || cur == RowIndex{})
         return;
-    const bool cur_dir = list[cur].is_dir;
+    const bool cur_dir = list[cur].is_dir();
     char cur_char = group_char(list[cur], cores);
     bool saw_change = false;
     for (RowIndex i = cur; i > RowIndex{};) {
         i -= kOneRow;
         const BrowserEntry& e = list[i];
-        if (group_char(e, cores) != cur_char || e.is_dir != cur_dir) {
+        if (group_char(e, cores) != cur_char || e.is_dir() != cur_dir) {
             if (saw_change) {
                 view_.select(i + kOneRow);
                 return;

@@ -8,18 +8,15 @@ void StatusRegister::set_bit(StatusBit bit, bool value) {
     if (bit.v >= kBits) {
         fatal(Error{Errc::slot_range, ERR_SITE(), bit.v}, "status bit");
     }
-
-    const std::size_t w = bit.v / StatusWord::kBitsPerWord;
     const StatusWord next = shadow_.with(bit, value);
-    if (next.words[w] != shadow_.words[w]) {
+    if (next != shadow_) {
         shadow_ = next;
         dirty_ = true;
     }
 }
 
-void StatusRegister::adopt(std::span<const std::uint16_t, kWords> words) noexcept {
-    for (unsigned i = 0; i < kWords; ++i)
-        shadow_.words[i] = words[i];
+void StatusRegister::adopt(const StatusWord& word) noexcept {
+    shadow_ = word;
     dirty_ = true;
 }
 

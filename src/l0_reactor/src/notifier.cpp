@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "reactor/cause_decode.h"
 #include "reactor/notifier.h"
 
 #include <sys/timerfd.h>
@@ -96,40 +97,40 @@ CauseDecode Notifier::drain_checked() {
             std::uint64_t expirations = 0;
             const ssize_t n = read_exact(fd_.get(), &expirations, sizeof expirations);
             if (n != static_cast<ssize_t>(sizeof expirations))
-                return {};
-            return {Cause::Tick, false};
+                return CauseDecode::idle();
+            return CauseDecode::of(Cause::Tick);
         }
         case Kind::Frame: {
 
             std::uint64_t edges = 0;
             const ssize_t n = read_exact(fd_.get(), &edges, sizeof edges);
             if (n != static_cast<ssize_t>(sizeof edges))
-                return {};
-            return {Cause::Frame, false};
+                return CauseDecode::idle();
+            return CauseDecode::of(Cause::Frame);
         }
         case Kind::Test: {
             std::uint64_t v = 0;
             const ssize_t n = read_exact(fd_.get(), &v, sizeof v);
             if (n != static_cast<ssize_t>(sizeof v))
-                return {};
-            return {delivers_, false};
+                return CauseDecode::idle();
+            return CauseDecode::of(delivers_);
         }
         case Kind::Doorbell: {
 
             if (!uio_.consume())
-                return {};
+                return CauseDecode::idle();
             const std::uint32_t word = cause_ ? cause_->read(hal::CauseReg::Reg::Cause) : 0u;
             const CauseDecode d = decode_cause_checked(word);
 
             (void)uio_.rearm();
 
-            if (d.cause != Cause::None && d.cause != delivers_) {
-                return {Cause::None, true};
+            if (d.cause() != Cause::None && d.cause() != delivers_) {
+                return CauseDecode::refused();
             }
             return d;
         }
     }
-    return {};
+    return CauseDecode::idle();
 }
 
 }

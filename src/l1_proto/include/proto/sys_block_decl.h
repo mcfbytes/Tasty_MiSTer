@@ -23,11 +23,6 @@ struct SysBlockDecl {
 };
 
 [[nodiscard]] Ex<SysBlockDecl> find_sys_block(
-    const hal::RegisterWindow<hal::SysDirectory>& dir,
-    std::uint32_t window_size
-) noexcept;
-
-[[nodiscard]] Ex<SysBlockDecl> find_sys_block(
     const SysDirectoryImage& dir,
     std::uint32_t window_size
 ) noexcept;

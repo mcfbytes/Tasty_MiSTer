@@ -2,18 +2,19 @@
 #include "ui/recent_launch.h"
 
 #include <array>
+#include <optional>
 
 #include "app/cmd_verb_sink.h"
-#include "app/mgl_doc.h"
+#include "app/mgl.h"
 #include "app/session_identity.h"
 #include "infra/ascii.h"
+#include "proto/types.h"
 #include "ui/confirm_launch.h"
 #include "ui/confirm_page.h"
 #include "ui/hd_page0_walk.h"
-#include "ui/game_title.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/now_playing.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 #include "ui/page_context.h"
 #include "ui/slot_focus.h"
 
@@ -22,12 +23,20 @@ namespace {
 
 constexpr std::array<std::string_view, 2> kYesNo{"Yes", "No"};
 
-app::Mgl document_of(const app::RecentGames::Record& r) {
+static_assert(
+    kYesNo[RecentLaunch::row_of(RecentLaunch::YesNo::Yes).v] == "Yes"
+    && kYesNo[RecentLaunch::row_of(RecentLaunch::YesNo::No).v] == "No"
+);
+
+std::optional<app::Mgl> document_of(const app::RecentGames::Record& r) {
+    const std::optional<proto::FileSlotDigit> digit = proto::FileSlotDigit::from(r.ioctl_index);
+    if (!digit)
+        return std::nullopt;
     app::Mgl doc;
     (void)doc.rbf.assign(r.rbf);
     (void)doc.path.assign(r.path);
     doc.slot = r.slot == 'S' ? app::MglItem::Slot::Image : app::MglItem::Slot::File;
-    doc.index = proto::FileSlotDigit{r.ioctl_index};
+    doc.index = *digit;
     doc.delay_s = app::DelaySeconds{};
     return doc;
 }
@@ -70,10 +79,7 @@ infra::OptRef<const OptionItem> RecentLaunch::slot_for_(const app::RecentGames::
     if (!infra::ieq(r.core, running_core_))
         return {};
     return page0_.slot_row(
-        SlotFocus{
-            r.slot == 'S' ? SlotFocus::Kind::Image : SlotFocus::Kind::File,
-            proto::IoIndex{r.ioctl_index}
-        }
+        SlotFocus{r.slot == 'S' ? SlotFocus::Kind::Image : SlotFocus::Kind::File, r.ioctl_index}
     );
 }
 
@@ -81,11 +87,13 @@ Transition RecentLaunch::launch(const app::RecentGames::Record& r) {
     TASTY_SEAT_BODY(RecentLaunch);
 
     if (const infra::OptRef<const OptionItem> slot = slot_for_(r); slot && picks_) {
-        const std::string title{game_title(r.path)};
-        return picks_->pick(*slot, r.path, title);
+        return picks_->pick(*slot, r.path);
     }
 
-    if (!ctx_.route || !ctx_.route->on(document_of(r))) {
+    const std::optional<app::Mgl> doc = document_of(r);
+    if (!doc)
+        return Transition{Transition::Kind::CloseAll};
+    if (!ctx_.route || !ctx_.route->on(*doc)) {
         ++refusals_;
         return Transition{};
     }
@@ -108,7 +116,7 @@ bool RecentLaunch::ask(
     spec.body = body;
     spec.choices = kYesNo;
     spec.host = infra::OptRef<IConfirmHost>{host};
-    spec.initial = RowIndex{1};
+    spec.initial = row_of(YesNo::No);
     ctx_.launches.confirm->pending = spec;
     return true;
 }

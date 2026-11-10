@@ -17,9 +17,17 @@ class RecWriteMain final : public xthread::SeatMain<RecWriteMain> {
     TASTY_SEAT_RESIDENT(RecWrite);
 
 public:
-    RecWriteMain(SidecarWriter& writer, AviWriter& avi, xthread::ParkFds fds) noexcept
+    static constexpr unsigned kSidecarMsgsPerPass = 256;
+
+    RecWriteMain(
+        SidecarWriter& writer,
+        AviWriter& avi,
+        SidecarRing& sidecar,
+        xthread::ParkFds fds
+    ) noexcept
         : writer_(writer),
           avi_(avi),
+          sidecar_(sidecar),
           wake_(fds.wake()),
           stop_(std::move(fds).take_stop()),
           park_(wake_, stop_) {}
@@ -35,11 +43,11 @@ public:
 
     void serve() noexcept;
 
-    [[nodiscard]] bool idle() const noexcept { return writer_.idle() && avi_.idle(); }
+    [[nodiscard]] bool idle() const noexcept { return sidecar_.empty() && avi_.idle(); }
 
     [[nodiscard]] bool stopping() const noexcept { return stop_.ever_requested(); }
 
-    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept;
+    [[nodiscard]] infra::ParkTimeout park_ms() const noexcept { return avi_.park_ms(); }
 
     [[nodiscard]] xthread::SeatPark& park() noexcept { return park_; }
 
@@ -55,6 +63,7 @@ public:
 private:
     SidecarWriter& writer_;
     AviWriter& avi_;
+    SidecarRing& sidecar_;
     xthread::WakeFlag& wake_;
     xthread::WakeFlag stop_;
     xthread::SeatPark park_;

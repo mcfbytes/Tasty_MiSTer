@@ -12,7 +12,10 @@
 #include "cores/cd_flow.h"
 #include "cores/mounted_path.h"
 #include "infra/error.h"
-#include "svc/disc_engine.h"
+#include "infra/opt_ref.h"
+#include "svc/cue_policy.h"
+#include "svc/disc_counters.h"
+#include "svc/disc_mounter.h"
 
 namespace mister::cores {
 
@@ -57,13 +60,16 @@ Ex<void> CdDrive::stage_disc_payload(
     if (engine_ == nullptr)
         return {};
     std::byte frame[CdEngine::kMaxDescriptorBytes]{};
-    auto n = engine_->disc_descriptor(frame, slot_.geometry());
-    if (!n)
-        return std::unexpected(n.error());
-    if (*n == 0)
+    const auto written = engine_->disc_descriptor(frame, slot_.geometry());
+    if (!written)
+        return std::unexpected(written.error());
+    if (written->empty())
         return {};
 
-    return wire_.bracket_inline(cd_->io.info, std::span<const std::byte>(frame, *n), sink);
+    const std::optional<IoIndex> info = cd_.io.info;
+    if (!info)
+        return {};
+    return wire_.bracket_inline(*info, *written, sink);
 }
 
 void CdDrive::set_region(std::uint8_t region) {
@@ -89,36 +95,35 @@ std::optional<CdFlow> CdDrive::cd_flow() const noexcept {
         return std::nullopt;
     const CdEngine::DriveView d = e->drive_view(slot_.geometry());
     const CdEngineStats c = e->stats();
+
     return CdFlow{
-        c.flow_waits,
-        c.cdda_sectors,
-        c.data_sectors,
-        c.idle_ticks,
-        e->gated_ticks(),
-        d.state,
-        d.track,
-        d.lba,
-        d.audio_lba,
-        c.substitutes,
-        c.subcode_substitutes,
-        slot_.not_resident(),
-        d.is_data,
-        c.busy_ticks,
-        wire_.egress_abandons()
+        .waits = c.flow_waits,
+        .cdda_sectors = c.cdda_sectors,
+        .data_sectors = c.data_sectors,
+        .idle_ticks = c.idle_ticks,
+        .gated_ticks = e->gated_ticks(),
+        .drive_state = d.state,
+        .drive_track = d.track,
+        .drive_lba = d.lba,
+        .drive_audio_lba = d.audio_lba,
+        .substitutes = c.substitutes,
+        .subcode_substitutes = c.subcode_substitutes,
+        .not_resident = slot_.not_resident(),
+        .drive_is_data = d.is_data,
+        .busy_ticks = c.busy_ticks,
+        .egress_abandons = wire_.egress_abandons()
     };
 }
 
-CdDrive::CdDrive(const CdProfile& cd, const HostServices& host, ICoreWindow* window)
-    : cd_(&cd),
+CdDrive::CdDrive(const CdProfile& cd, const HostServices& host, infra::OptRef<ICoreWindow> window)
+    : cd_(cd),
       granted_discs_(host.discs),
       wire_(cd, host) {
 
     if (!granted_discs_)
         return;
 
-    if (auto e = make_cd_engine(*cd_, *granted_discs_, host.clock, window)) {
-        engine_ = std::move(*e);
-    }
+    engine_ = make_cd_engine(cd_, *granted_discs_, host.clock, window);
 }
 
 CdDrive::~CdDrive() = default;
@@ -128,13 +133,8 @@ Ex<void> CdDrive::adopt() {
     if (!granted_discs_)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
 
-    if (!engine_) {
-        return std::unexpected(
-            Error{Errc::core_load, ERR_SITE(), static_cast<std::uint32_t>(cd_->dialect)}
-        );
-    }
     slot_.adopt(granted_discs_);
-    wire_.declare_resets(cd_->reset);
+    wire_.declare_resets(cd_.reset);
     return {};
 }
 
@@ -145,7 +145,7 @@ void CdDrive::retire() noexcept {
 Ex<void> CdDrive::reset() {
 
     if (engine_)
-        return engine_->reset();
+        engine_->reset();
     return {};
 }
 
@@ -155,10 +155,14 @@ Ex<void> CdDrive::arm_disc(const MountedPath& p) {
         return std::unexpected(Error{Errc::core_load, ERR_SITE(), 0});
     }
 
-    const auto op = p.display.empty() ? svc::DiscOp::Unmount : svc::DiscOp::Mount;
-    const svc::DiscMountState st = slot_.arm_mount(op, &cd_->cue, p.display);
+    const auto op = p.path.empty() ? svc::DiscOp::Unmount : svc::DiscOp::Mount;
+    const svc::DiscMountState st = slot_.arm_mount(
+        op,
+        infra::OptRef<const svc::CuePolicy>{cd_.cue},
+        p.path
+    );
     if (st == svc::DiscMountState::Failed) {
-        (void)engine_->notify_disc(false, slot_.geometry());
+        engine_->notify_disc(false, slot_.geometry());
         return std::unexpected(Error{Errc::mount_failed, ERR_SITE(), 0});
     }
     (void)slot_.refresh(engine_ref_());
@@ -170,13 +174,15 @@ Ex<void> CdDrive::eject_for_cart() {
 
     if (!slot_.bound() || !engine_ || !engine_->cart_load_ejects())
         return {};
-    (void)slot_.arm_mount(svc::DiscOp::Unmount, &cd_->cue, std::string_view{});
+    (void)slot_.arm_mount(
+        svc::DiscOp::Unmount,
+        infra::OptRef<const svc::CuePolicy>{cd_.cue},
+        std::string_view{}
+    );
     (void)slot_.refresh(engine_ref_());
-    if (auto n = engine_->notify_disc(false, slot_.geometry()); !n)
-        return std::unexpected(n.error());
+    engine_->notify_disc(false, slot_.geometry());
 
-    if (auto r = engine_->reset(); !r)
-        return std::unexpected(r.error());
+    engine_->reset();
     (void)engine_->apply_pending_reset();
     return {};
 }

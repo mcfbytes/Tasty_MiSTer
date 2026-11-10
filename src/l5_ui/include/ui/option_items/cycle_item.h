@@ -5,13 +5,13 @@
 #include <string>
 #include <string_view>
 
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 
 namespace mister::ui {
 
 class CycleItem final : public OptionItem {
 public:
-    CycleItem() noexcept : OptionItem(Kind::Option) {}
+    CycleItem() noexcept : OptionItem(Kind::Cycle) {}
 
     [[nodiscard]] std::string_view shown_value(const Look& look) const;
 
@@ -19,7 +19,8 @@ private:
     Carry on_build(const Source& in, const BuildEnv& env) override;
     std::string on_compose(const Look& look) const override;
     std::optional<app::PageDescription::Row> on_describe(const Look& look) const override;
-    Transition on_activate(const Press& press, IOptionHost& host) const override;
+    Transition on_select(IOptionHost& host) const override;
+    Transition on_step(CycleDir dir, proto::FieldValue value, IOptionHost& host) const override;
 };
 
 }

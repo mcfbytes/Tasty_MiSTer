@@ -28,16 +28,16 @@ std::size_t frame_end(std::size_t base, const ScalerHeader& h) noexcept {
 
 }
 
-void ScalerProbe::restart(std::int64_t now) noexcept {
-    sides_ = {ProbeSide{ScalerBuffers::kStrideLarge}, ProbeSide{ScalerBuffers::kStrideSmall}};
-    start_ns_ = now;
+void ScalerProbe::restart(os::RawMonotonicClock::time_point now) noexcept {
+    sides_ = {ProbeSide{ScalerStride::Large}, ProbeSide{ScalerStride::Small}};
+    start_ = now;
 }
 
 void ScalerProbe::read(const ScalerBuffers& window) noexcept {
     for (ProbeSide& side : sides_) {
         for (std::size_t i = 0; i < side.buffers.size(); ++i) {
             ProbeBuffer& b = side.buffers[i];
-            const auto h = window.header(i * side.stride);
+            const auto h = window.header(i * stride_bytes(side.stride));
             if (!h || !h->supported())
                 continue;
             b.triple = h->triple_buffered();
@@ -51,7 +51,7 @@ void ScalerProbe::read(const ScalerBuffers& window) noexcept {
     }
 }
 
-ScalerProbe::Verdict ScalerProbe::decide(std::int64_t now) noexcept {
+ScalerProbe::Verdict ScalerProbe::decide(os::RawMonotonicClock::time_point now) noexcept {
     const auto triple_live = [](const ProbeSide& p, std::size_t n) {
         std::size_t moved = 0;
         for (const ProbeBuffer& b : p.buffers) {
@@ -63,30 +63,27 @@ ScalerProbe::Verdict ScalerProbe::decide(std::int64_t now) noexcept {
         }
         return moved >= n;
     };
-    const ProbeSide& large = sides_[0];
+    const ProbeSide& large = side_of(ScalerStride::Large);
     if (triple_live(large, ScalerBuffers::kBuffers))
         return Verdict::Large;
     if (!large.buffers[0].triple && large.buffers[0].moved)
         return Verdict::LargeLowlat;
-    if (now - start_ns_ < kProbeNs)
+    if (now - start_ < kProbeNs)
         return Verdict::Pending;
     constexpr std::uint32_t kLiveTriple = 2;
     if (triple_live(large, kLiveTriple))
         return Verdict::Large;
-    if (triple_live(sides_[1], kLiveTriple))
+    if (triple_live(side_of(ScalerStride::Small), kLiveTriple))
         return Verdict::Small;
     return Verdict::Dead;
 }
 
-ScalerProbe::BufMask ScalerProbe::moved(std::size_t stride) const noexcept {
+ScalerProbe::BufMask ScalerProbe::moved(ScalerStride stride) const noexcept {
 
-    const ProbeSide* side = &sides_[0];
-    for (const ProbeSide& p : sides_)
-        if (p.stride == stride)
-            side = &p;
+    const ProbeSide& side = side_of(stride);
     BufMask out{};
     for (std::size_t i = 0; i < out.size(); ++i)
-        out[i] = side->buffers[i].moved;
+        out[i] = side.buffers[i].moved;
     return out;
 }
 
@@ -202,23 +199,25 @@ std::optional<ScalerProbe::Pick> ScalerProbe::pick_complete(
 
 std::optional<ScalerProbe::Verdict> ScalerProbe::still(
     const ScalerBuffers& window,
-    std::optional<std::size_t> known
+    std::optional<ScalerStride> known
 ) noexcept {
     const auto head = window.header(0);
     if (!head || !plausible(*head))
         return std::nullopt;
     if (!head->triple_buffered())
         return Verdict::LargeLowlat;
-    const bool small_first = known == ScalerBuffers::kStrideSmall;
-    constexpr std::size_t kSides = 2;
-    const std::array<std::size_t, kSides> order = small_first
-        ? std::array{ScalerBuffers::kStrideSmall, ScalerBuffers::kStrideLarge}
-        : std::array{ScalerBuffers::kStrideLarge, ScalerBuffers::kStrideSmall};
-    for (const std::size_t stride : order) {
+
+    const bool small_first = known == ScalerStride::Small;
+    const std::array<Verdict, 2> order = small_first ? std::array{Verdict::Small, Verdict::Large}
+                                                     : std::array{Verdict::Large, Verdict::Small};
+    for (const Verdict verdict : order) {
+        const auto layout = layout_of(verdict);
+        if (!layout)
+            continue;
         std::array<ScalerHeader, ScalerBuffers::kBuffers> hs{};
         bool whole = true;
         for (std::size_t i = 0; i < hs.size() && whole; ++i) {
-            const auto h = window.header(i * stride);
+            const auto h = window.header(i * stride_bytes(layout->stride));
             whole = h
                 && plausible(*h)
                 && h->triple_buffered()
@@ -230,7 +229,7 @@ std::optional<ScalerProbe::Verdict> ScalerProbe::still(
                 hs[i] = *h;
         }
         if (whole && pick_complete(hs))
-            return stride == ScalerBuffers::kStrideLarge ? Verdict::Large : Verdict::Small;
+            return verdict;
     }
     return std::nullopt;
 }
@@ -252,15 +251,15 @@ bool ScalerProbe::port_stuck(ScalerBuffers& window) noexcept {
             if (!plausible(h))
                 continue;
             const std::size_t at = off + i;
-            for (const std::size_t stride :
-                 {ScalerBuffers::kStrideLarge, ScalerBuffers::kStrideSmall}) {
-                const std::size_t base = at - at % stride;
+            for (const ScalerStride stride : {ScalerStride::Large, ScalerStride::Small}) {
+                const std::size_t width = stride_bytes(stride);
+                const std::size_t base = at - at % width;
                 const std::size_t end = frame_end(base, h);
                 if (end <= at || end - at > kMaxShort || (end - at) % kBeat != 0)
                     continue;
                 if (const auto b = window.header(base); b && b->supported())
                     continue;
-                const std::size_t large = at - at % ScalerBuffers::kStrideLarge;
+                const std::size_t large = at - at % stride_bytes(ScalerStride::Large);
                 if (large != base) {
                     const auto l = window.header(large);
                     if (l && plausible(*l) && base < frame_end(large, *l))

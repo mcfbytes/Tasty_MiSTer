@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -34,12 +35,16 @@ struct HciDevListReq {
     HciDevReq req[kHciMaxDev];
 };
 
+static_assert(sizeof(HciDevReq) == 8, "the kernel's hci_dev_req is a u16 id + pad + u32 opt");
+static_assert(offsetof(HciDevReq, dev_opt) == 4, "dev_opt sits at offset 4 in hci_dev_req");
+static_assert(offsetof(HciDevListReq, req) == 4, "the entry array starts after dev_num and pad");
+
 }
 
 bool hci_devlist_any_up(std::span<const std::byte> reply) noexcept {
-    constexpr std::size_t kHdrBytes = 4;
-    constexpr std::size_t kReqBytes = 8;
-    constexpr std::size_t kOptOff = 4;
+    constexpr std::size_t kHdrBytes = offsetof(HciDevListReq, req);
+    constexpr std::size_t kReqBytes = sizeof(HciDevReq);
+    constexpr std::size_t kOptOff = offsetof(HciDevReq, dev_opt);
     if (reply.size() < kHdrBytes)
         return false;
 

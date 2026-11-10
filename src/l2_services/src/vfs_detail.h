@@ -4,40 +4,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include "infra/ascii.h"
 #include "svc/asset_name.h"
-#include "svc/vfs.h"
 
 namespace mister::svc::detail {
-
-constexpr std::size_t ifind(std::string_view hay, std::string_view needle) noexcept {
-    if (needle.empty())
-        return 0;
-    if (hay.size() < needle.size())
-        return std::string_view::npos;
-    for (std::size_t i = 0; i + needle.size() <= hay.size(); ++i) {
-        if (infra::ieq(hay.substr(i, needle.size()), needle))
-            return i;
-    }
-    return std::string_view::npos;
-}
-
-constexpr int icompare_n(std::string_view a, std::string_view b, std::size_t n) noexcept {
-    for (std::size_t i = 0; i < n; ++i) {
-        const char ca = (i < a.size()) ? infra::ascii_lower(a[i]) : '\0';
-        const char cb = (i < b.size()) ? infra::ascii_lower(b[i]) : '\0';
-        if (ca != cb)
-            return (ca < cb) ? -1 : 1;
-        if (ca == '\0')
-            return 0;
-    }
-    return 0;
-}
 
 inline std::string compose(std::string_view root, std::string_view path) {
     if (!path.empty() && path.front() == '/')
@@ -54,7 +27,7 @@ inline bool has_nested_zip(std::string_view path) noexcept {
     const asset_name::ZipSplit s = asset_name::zip_split(path);
     if (!s.zipped)
         return false;
-    return ifind(path.substr(s.archive.size()), ".zip") != std::string_view::npos;
+    return infra::ifind(path.substr(s.archive.size()), ".zip").has_value();
 }
 
 constexpr std::optional<std::string_view> relative_member(
@@ -74,7 +47,7 @@ constexpr std::optional<std::string_view> relative_member(
 constexpr bool in_same_folder(std::string_view folder, std::string_view path) noexcept {
     const std::size_t p = path.rfind('/');
     const std::size_t len = (p == std::string_view::npos) ? 0 : p;
-    return folder.size() == len && icompare_n(path, folder, len) == 0;
+    return folder.size() == len && infra::icompare_n(path, folder, infra::ByteCount{len}) == 0;
 }
 
 constexpr std::optional<std::uint32_t> scan_hex8(std::string_view f) noexcept {
@@ -125,29 +98,5 @@ constexpr std::optional<std::uint32_t> scan_hex8(std::string_view f) noexcept {
         return std::nullopt;
     return negate ? static_cast<std::uint32_t>(0u - v) : v;
 }
-
-enum class Admit : std::uint8_t {
-    Reject,
-    KeepFile,
-    KeepDir,
-};
-
-Admit admit_entry(std::string_view name, bool is_dir, bool at_root, const ScanFilter& f);
-
-inline constexpr std::string_view kExtDot = ".";
-
-struct ZipMember {
-    std::string name;
-    proto::FileSize size{};
-    bool is_dir = false;
-};
-
-std::vector<DirEntry> zip_folder_entries(
-    std::string_view folder,
-    std::span<const ZipMember> members,
-    const ScanFilter& f
-);
-
-bool dirent_less(const DirEntry& a, const DirEntry& b) noexcept;
 
 }

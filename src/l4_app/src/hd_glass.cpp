@@ -59,20 +59,14 @@ void hd_glass_compose(
     );
 }
 
-void HdGlass::relayout(
-    const HdTheme& theme,
-    const HdLayout& layout,
-    std::int32_t w,
-    std::int32_t h
-) noexcept {
+void HdGlass::relayout(const HdTheme& theme, const HdLayout& layout) noexcept {
     TASTY_SEAT_BODY(HdGlass);
     const HdThemeGlass& g = theme.glass;
     active_ = false;
     glass_ = {};
     if (!g.on() || layout.game.is_empty())
         return;
-    const HdRect surface{0, 0, w, h};
-    const HdRect picture = layout.picture.intersect(surface);
+    const HdRect picture = layout.picture.intersect(layout.surface);
     glass_ = {
         GlassRect{.rect = picture.intersect(layout.panel)},
         GlassRect{.rect = picture.intersect(layout.band)}
@@ -95,7 +89,7 @@ void HdGlass::relayout(
         .ground_pre = hd_scale_565(hd_pack565(g.ground), g.opacity),
         .plate_pre = hd_scale_565(hd_pack565(g.plate), g.opacity)
     };
-    q8_ = hd_under_q8(g.opacity, g.under_dim);
+    dim_ = g.under_q8();
     fill_ = hd_scale_565(hd_pack565(theme.primary), 100u - g.opacity);
     under_.assign(total, fill_);
     row_.assign(static_cast<std::size_t>(widest), 0);
@@ -123,7 +117,7 @@ std::array<BackdropScalerTarget, HdGlass::kRects> HdGlass::targets() noexcept {
         out[i] = BackdropScalerTarget{
             .px = std::span{under_}.subspan(g.base, n),
             .rect = g.rect,
-            .q8 = q8_,
+            .dim = dim_,
             .fill = fill_
         };
     }

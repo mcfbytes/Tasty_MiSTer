@@ -6,18 +6,18 @@ namespace mister::proto {
 void SpiBlockDecoder::service(IBlockRoles& roles) {
     ++counters_.passes;
     for (unsigned i = 0; i < budget_; ++i) {
-        auto d = slots_->poll_block(roles, std::nullopt);
+        auto d = slots_.poll_block(roles, std::nullopt);
         if (!d) {
             ++counters_.errors;
-            counters_.err_code = static_cast<std::uint16_t>(d.error().code);
+            counters_.err_code = errc_code(d.error().code);
             break;
         }
         if (!d->decoded)
             break;
-        auto r = slots_->serve(*d, roles);
+        auto r = slots_.serve(*d, roles);
         if (!r) {
             ++counters_.errors;
-            counters_.err_code = static_cast<std::uint16_t>(r.error().code);
+            counters_.err_code = errc_code(r.error().code);
             break;
         }
         if (*r == BlockSlots::Pass::Deferred) {

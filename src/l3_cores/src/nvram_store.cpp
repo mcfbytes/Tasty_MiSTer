@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/nvram_store.h"
 
+#include "cores/fnv1a64.h"
+
 namespace mister::cores {
 namespace {
 
@@ -12,19 +14,6 @@ std::string_view base_of(std::string_view path) {
 std::string_view stem_of(std::string_view name) {
     const auto dot = name.rfind('.');
     return dot == std::string_view::npos ? name : name.substr(0, dot);
-}
-
-[[nodiscard]] bool append_index(SavePath& out, std::uint8_t v) {
-    char d[3];
-    std::size_t n = 0;
-    do {
-        d[n++] = static_cast<char>('0' + (v % 10));
-        v = static_cast<std::uint8_t>(v / 10);
-    } while (v != 0);
-    bool ok = true;
-    while (n-- != 0)
-        ok = ok && out.append(std::string_view{&d[n], 1});
-    return ok;
 }
 
 [[nodiscard]] Ex<SavePath> built(bool ok, const SavePath& out) {
@@ -107,7 +96,7 @@ Ex<PartitionHit> NvramStore::resolve(std::uint64_t absolute_offset) const {
     for (std::uint8_t i = 0; i < count_; ++i) {
         const std::uint64_t end = static_cast<std::uint64_t>(table_[i].offset) + table_[i].length;
         if (absolute_offset < end) {
-            return PartitionHit{i, absolute_offset - table_[i].offset};
+            return PartitionHit{SaveRow{i}, absolute_offset - table_[i].offset};
         }
     }
     return std::unexpected(Error{Errc::not_found, ERR_SITE(), count_});
@@ -175,8 +164,8 @@ Ex<SavePath> NvramStore::per_core_path(const SavePartition&) const {
 Ex<SavePath> NvramStore::per_core_indexed_path(const SavePartition& p) const {
     SavePath out;
     bool ok = out.assign(policy_.prefix);
-    if (p.index != 0)
-        ok = ok && append_index(out, p.index);
+    if (p.digit)
+        ok = ok && out.append(p.digit->text().view());
     ok = ok && out.append(".");
     ok = ok && out.append(policy_.extension);
     return built(ok, out);
@@ -188,29 +177,12 @@ Ex<SavePath> NvramStore::per_image_path(const SavePartition& p) const {
     ok = ok && out.append(policy_.directory);
     ok = ok && out.append("/");
     ok = ok && out.append(stem_of(image_.view()));
-    if (p.index != 0) {
+    if (p.digit) {
         ok = ok && out.append("_");
-        ok = ok && append_index(out, p.index);
+        ok = ok && out.append(p.digit->text().view());
     }
     ok = ok && out.append(p.suffix);
     return built(ok, out);
-}
-
-SavePath pick_disc_path(
-    const svc::Vfs& vfs,
-    const SavePath& own,
-    const SavePath& stock,
-    proto::FileSize length
-) {
-    if (vfs.file_exists(own.view()) || !vfs.file_exists(stock.view()))
-        return own;
-    auto f = vfs.open(stock.view(), svc::OpenMode::Read);
-    if (!f)
-        return own;
-    auto size = (*f)->size();
-    if (!size || *size != length)
-        return own;
-    return stock;
 }
 
 }

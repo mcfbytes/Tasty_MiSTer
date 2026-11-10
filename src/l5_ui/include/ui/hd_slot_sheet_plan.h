@@ -60,11 +60,11 @@ private:
         HdSlotSheetPlan& plan_;
     };
 
-    class RecentRow final : public IHdRow {
+    class RecentFilesRow final : public IHdRow {
         TASTY_SEAT_RESIDENT(Ui);
 
     public:
-        explicit RecentRow(HdSlotSheetPlan& plan) noexcept : plan_(plan) {}
+        explicit RecentFilesRow(HdSlotSheetPlan& plan) noexcept : plan_(plan) {}
 
         bool shown() const override;
         app::PageDescription::Row describe() const override;
@@ -110,7 +110,7 @@ private:
     std::uint32_t refusals_ = 0;
 
     ChooseRow choose_{*this};
-    RecentRow recent_{*this};
+    RecentFilesRow recent_{*this};
     EjectRow eject_{*this};
     std::array<std::reference_wrapper<IHdRow>, 3> refs_{choose_, recent_, eject_};
 };

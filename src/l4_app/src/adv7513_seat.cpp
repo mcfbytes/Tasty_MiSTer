@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "app/video_wire.h"
-#include "svc/video_service.h"
+#include "svc/hdmi_link.h"
 
 namespace mister::app {
 
@@ -43,9 +43,9 @@ void Adv7513Seat::on_core_loaded(Host h) {
     init_pending_ = true;
     ints_armed_ = false;
     prelude_done_seen_ = h.wire.prelude_stats().completions;
-    h.video.set_hdmi_capable(false);
-    hpd_gen_seen_ = h.video.hotplug_generation().v;
-    audio_gen_seen_ = h.video.audio_generation().v;
+    h.hdmi.set_hdmi_capable(false);
+    hpd_gen_seen_ = h.hdmi.hotplug_generation();
+    audio_gen_seen_ = h.hdmi.audio_generation();
 }
 
 Adv7513Seat::Edge Adv7513Seat::hotplug(Host h, const svc::adv7513::InitOptions& init) {
@@ -58,31 +58,31 @@ Adv7513Seat::Edge Adv7513Seat::hotplug(Host h, const svc::adv7513::InitOptions& 
             return Edge::None;
         ints_armed_ = true;
         const bool has_int = ps.hdmi_int != 0;
-        h.video.set_hdmi_capable(has_int);
+        h.hdmi.set_hdmi_capable(has_int);
         if (has_int) {
             if (auto r = adv_->arm_interrupts(true); !r)
                 h.last_error = r.error();
         }
     }
-    if (!h.video.hdmi_capable())
+    if (!h.hdmi.hdmi_capable())
         return Edge::None;
 
-    const std::int64_t now = clock_.now().count();
+    const std::int64_t now = clock_.now().time_since_epoch().count();
     if (now < next_hpd_ns_)
         return Edge::None;
     next_hpd_ns_ = now + 100'000'000;
     const std::uint32_t failed_before = breaker_.failures();
-    if (auto r = h.video.poll_hotplug(); !r)
+    if (auto r = h.hdmi.poll_hotplug(*adv_); !r)
         h.last_error = r.error();
     h.stats.i2c_poll_errors += breaker_.failures() - failed_before;
 
     Edge out = Edge::None;
-    if (const auto g = h.video.hotplug_generation().v; g != hpd_gen_seen_) {
+    if (const auto g = h.hdmi.hotplug_generation(); g != hpd_gen_seen_) {
         hpd_gen_seen_ = g;
         init_pending_ = true;
         out = Edge::Owed;
     }
-    if (const auto g = h.video.audio_generation().v; g != audio_gen_seen_) {
+    if (const auto g = h.hdmi.audio_generation(); g != audio_gen_seen_) {
         audio_gen_seen_ = g;
         if (auto r = adv_->configure_audio(init); !r) {
             h.last_error = r.error();
@@ -105,7 +105,7 @@ Adv7513Seat::Edge Adv7513Seat::configure(
     init_pending_ = false;
 
     if (want_init)
-        h.video.clear_init_owed();
+        h.hdmi.clear_init_owed();
 
     if (!adv_)
         return Edge::None;
@@ -114,9 +114,8 @@ Adv7513Seat::Edge Adv7513Seat::configure(
         return Edge::None;
 
     svc::adv7513::InitOptions opts = init;
-    opts.has_hdmi_int = h.video.hdmi_capable();
+    opts.has_hdmi_int = h.hdmi.hdmi_capable();
     const auto r = adv_->configure(opts);
-    sync_counters(h.stats);
     if (!r) {
         h.last_error = r.error();
         init_ok_ = false;
@@ -132,10 +131,11 @@ Adv7513Seat::Edge Adv7513Seat::configure(
 
 bool Adv7513Seat::attach(Host h) {
     breaker_.reset();
-    auto b = svc::adv7513::Adv7513Bus::attach(breaker_, board_, probe_);
+    auto o = svc::adv7513::Adv7513Bus::attach(breaker_, board_);
+    probe_ = std::move(o.report);
     h.stats.i2c_bus = probe_.bus.value_or(kI2cBusNeverAcked);
-    if (!b) {
-        h.last_error = b.error();
+    if (!o.bus) {
+        h.last_error = o.bus.error();
         h.stats.i2c = probe_.presence == svc::adv7513::Presence::Ambiguous
             ? VideoI2cOutcome::Ambiguous
             : VideoI2cOutcome::Absent;
@@ -144,16 +144,14 @@ bool Adv7513Seat::attach(Host h) {
         schedule_reprobe();
         return false;
     }
-    adv_.emplace(std::move(*b));
+    adv_.emplace(std::move(*o.bus));
     h.stats.i2c = VideoI2cOutcome::Present;
-    attached_ns_ = clock_.now().count();
-
-    h.video.attach();
+    attached_ns_ = clock_.now().time_since_epoch().count();
     return true;
 }
 
 void Adv7513Seat::schedule_reprobe() noexcept {
-    next_probe_ns_ = (clock_.now() + probe_backoff_ms_).count();
+    next_probe_ns_ = (clock_.now() + probe_backoff_ms_).time_since_epoch().count();
     probe_backoff_ms_ = probe_backoff_ms_ >= kReprobeMaxMs / 2 ? kReprobeMaxMs
                                                                : probe_backoff_ms_ * 2;
 }
@@ -164,19 +162,20 @@ Adv7513Seat::Edge Adv7513Seat::recover(Host h) {
     if (adv_) {
         if (!breaker_.tripped())
             return Edge::None;
-        sync_counters(h.stats);
-        writes_base_ = h.stats.i2c_writes;
-        errors_base_ = h.stats.i2c_errors;
+        observe_bus();
+        writes_base_ = bus_.writes;
+        errors_base_ = bus_.errors;
         adv_.reset();
         init_ok_ = false;
         h.stats.i2c = VideoI2cOutcome::Failed;
 
-        if (clock_.now() - std::chrono::nanoseconds{attached_ns_} >= kReprobeMaxMs)
+        if (clock_.now().time_since_epoch() - std::chrono::nanoseconds{attached_ns_}
+            >= kReprobeMaxMs)
             probe_backoff_ms_ = kReprobeFirstMs;
         schedule_reprobe();
         return Edge::Lost;
     }
-    if (clock_.now().count() < next_probe_ns_)
+    if (clock_.now().time_since_epoch().count() < next_probe_ns_)
         return Edge::None;
     ++h.stats.i2c_reprobes;
     if (!attach(h))
@@ -185,26 +184,45 @@ Adv7513Seat::Edge Adv7513Seat::recover(Host h) {
     return Edge::Owed;
 }
 
-void Adv7513Seat::sync_counters(VideoPumpStats& stats) noexcept {
-    if (!adv_)
-        return;
-    stats.i2c_writes = writes_base_ + adv_->writes();
-    stats.i2c_errors = errors_base_ + adv_->errors();
-    if (stats.i2c_fail_reg == 0)
-        stats.i2c_fail_reg = adv_->fail_reg().v;
-    if (stats.spd_fail_reg == 0)
-        stats.spd_fail_reg = adv_->spd_fail_reg().v;
+void Adv7513Seat::observe_bus() noexcept {
+    bus_ = fold_bus();
 }
 
-void Adv7513Seat::report(VideoPumpStats& stats) noexcept {
-    sync_counters(stats);
-    const auto& f = breaker_.first();
-    stats.i2c_first_op = f.op;
-    stats.i2c_first_reg = f.reg.v;
-    stats.i2c_first_errno = f.err;
-    stats.i2c_last_errno = breaker_.last_errno();
-    stats.i2c_trips = breaker_.trips();
-    stats.i2c_breaker_open = breaker_.tripped();
+Adv7513Seat::BusReport Adv7513Seat::fold_bus() const noexcept {
+    BusReport r = bus_;
+    if (adv_) {
+        r.writes = writes_base_.sum(svc::Tally{adv_->writes()});
+        r.errors = errors_base_.sum(svc::Tally{adv_->errors()});
+        if (!r.fail_reg)
+            r.fail_reg = adv_->fail_reg();
+        if (!r.spd_fail_reg)
+            r.spd_fail_reg = adv_->spd_fail_reg();
+    }
+    return r;
+}
+
+Adv7513Seat::BusReport Adv7513Seat::report() const noexcept {
+    BusReport r = fold_bus();
+    r.first = breaker_.first();
+    r.last_errno = breaker_.last_errno();
+    r.trips = svc::Tally{breaker_.trips()};
+    r.breaker_open = breaker_.tripped();
+    return r;
+}
+
+void Adv7513Seat::apply(const BusReport& r, VideoPumpStats& stats) noexcept {
+    stats.i2c_writes = r.writes;
+    stats.i2c_errors = r.errors;
+    stats.i2c_fail_reg = r.fail_reg;
+    stats.spd_fail_reg = r.spd_fail_reg;
+    if (r.first) {
+        stats.i2c_first_op = r.first->op_byte();
+        stats.i2c_first_reg = r.first->reg;
+        stats.i2c_first_errno = r.first->err;
+    }
+    stats.i2c_last_errno = r.last_errno;
+    stats.i2c_trips = r.trips;
+    stats.i2c_breaker_open = r.breaker_open;
 }
 
 void Adv7513Seat::send_spd(Host h, const Spd& spd) {
@@ -232,7 +250,6 @@ void Adv7513Seat::send_spd(Host h, const Spd& spd) {
             ++h.stats.spd_sends;
     }
 
-    sync_counters(h.stats);
     if (!r) {
 
         h.last_error = r.error();
@@ -243,7 +260,6 @@ std::optional<VideoI2cOutcome> Adv7513Seat::program_mode(Host h, const svc::Mode
     if (!adv_)
         return std::nullopt;
     auto r = adv_->set_mode(m, false);
-    sync_counters(h.stats);
     if (!r) {
         h.last_error = r.error();
         return VideoI2cOutcome::Failed;

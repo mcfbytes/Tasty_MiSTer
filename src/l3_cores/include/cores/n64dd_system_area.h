@@ -4,6 +4,7 @@
 #include <array>
 #include <bitset>
 #include <cstdint>
+#include <string_view>
 
 #include "cores/n64dd_disk_type.h"
 #include "cores/n64dd_geometry.h"
@@ -20,10 +21,13 @@ struct SystemArea {
     std::bitset<kLbaCount> bad_lba{};
     FixedStr<5, StrFit::Reject> disk_id{};
     DiskType disk_type{};
-    bool development = false;
     bool cart_expansion = false;
     Region region = Region::Unknown;
+
+    [[nodiscard]] bool development() const noexcept { return region == Region::Development; }
 };
+
+[[nodiscard]] std::string_view root_ipl_name(Region region) noexcept;
 
 [[nodiscard]] Ex<SystemArea> read_system_area(svc::IFile& file);
 

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstddef>
-#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -14,15 +12,29 @@ namespace mister::cores::mra {
 inline constexpr std::size_t kMaxDipIds = 32;
 inline constexpr std::size_t kDipTextChars = 31;
 
+struct DipChoiceRow {
+    std::string id;
+    DipWord val{};
+};
+
+struct DipField {
+    int start = 0;
+    int width = 0;
+
+    [[nodiscard]] constexpr DipWord mask() const noexcept {
+        return DipWord::ones(width).shifted(start);
+    }
+
+    [[nodiscard]] constexpr DipWord place(DipWord val) const noexcept { return val.shifted(start); }
+
+    friend constexpr bool operator==(DipField, DipField) = default;
+};
+
 struct DipRow {
     std::string name;
-    int start = 0;
-    int size = 0;
-    int num = 0;
+    DipField field{};
     bool has_val = false;
-    DipWord mask{};
-    std::vector<std::string> ids;
-    std::array<DipWord, kMaxDipIds> val{};
+    std::vector<DipChoiceRow> choices;
 };
 
 }

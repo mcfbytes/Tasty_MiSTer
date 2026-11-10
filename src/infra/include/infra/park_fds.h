@@ -50,10 +50,8 @@ public:
     }
 
     [[nodiscard]] WakeFlag take_stop() && noexcept {
-        if constexpr (kSeatChecksEnabled) {
-            if (stop_wire_)
-                fatal(Error{Errc::negotiation, ERR_SITE(), 0}, "ParkFds: a borrowed stop taken");
-        }
+        if (stop_wire_)
+            fatal(Error{Errc::contract, ERR_SITE(), 0}, "ParkFds: a borrowed stop taken");
         return std::move(stop_);
     }
 

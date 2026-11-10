@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/event_trace.h"
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
@@ -50,27 +51,57 @@ consteval bool request_names_are_ordinal() {
 
 static_assert(request_names_are_ordinal(), "UiRequest::Kind changed: name it here at its ordinal");
 
-constexpr const char* kErrcNames[] = {
-    "spi_timeout",  "spi_nak",     "fpga_not_ready", "io",
-    "not_found",    "short_read",  "short_write",    "bad_format",
-    "mount_failed", "bad_confstr", "bad_opcode",     "slot_range",
-    "negotiation",  "mmap_failed", "uio_open",       "dt_missing",
-    "bridge_state", "os",          "core_load",      "cancelled",
-    "would_block",  "timeout",     "unimplemented",  "aperture_range",
-    "stale",        "busy",        "seat_absent",
+struct ErrcName {
+    Errc errc;
+    const char* name;
 };
-constexpr std::size_t kErrcCount = sizeof(kErrcNames) / sizeof(kErrcNames[0]);
-static_assert(
-    kErrcCount == infra::ordinal(Errc::seat_absent) + 1,
-    "Errc grew: name it here (item)"
-);
 
-const char* name_or(const char* const* table, std::size_t count, std::size_t idx) noexcept {
-    return idx < count ? table[idx] : "?";
+constexpr auto kErrcNames = std::to_array<ErrcName>({
+    {Errc::spi_timeout, "spi_timeout"},
+    {Errc::spi_nak, "spi_nak"},
+    {Errc::fpga_not_ready, "fpga_not_ready"},
+    {Errc::io, "io"},
+    {Errc::not_found, "not_found"},
+    {Errc::short_read, "short_read"},
+    {Errc::short_write, "short_write"},
+    {Errc::bad_format, "bad_format"},
+    {Errc::mount_failed, "mount_failed"},
+    {Errc::bad_confstr, "bad_confstr"},
+    {Errc::bad_opcode, "bad_opcode"},
+    {Errc::slot_range, "slot_range"},
+    {Errc::negotiation, "negotiation"},
+    {Errc::mmap_failed, "mmap_failed"},
+    {Errc::uio_open, "uio_open"},
+    {Errc::dt_missing, "dt_missing"},
+    {Errc::bridge_state, "bridge_state"},
+    {Errc::os, "os"},
+    {Errc::core_load, "core_load"},
+    {Errc::cancelled, "cancelled"},
+    {Errc::would_block, "would_block"},
+    {Errc::timeout, "timeout"},
+    {Errc::unimplemented, "unimplemented"},
+    {Errc::aperture_range, "aperture_range"},
+    {Errc::stale, "stale"},
+    {Errc::busy, "busy"},
+    {Errc::seat_absent, "seat_absent"},
+    {Errc::contract, "contract"},
+});
+
+consteval bool errc_names_are_ordinal() {
+    if (std::size(kErrcNames) != infra::ordinal(Errc::contract) + 1)
+        return false;
+    for (std::size_t i = 0; i < std::size(kErrcNames); ++i) {
+        if (infra::ordinal(kErrcNames[i].errc) != i)
+            return false;
+    }
+    return true;
 }
 
+static_assert(errc_names_are_ordinal(), "Errc changed: name it here at its ordinal (item)");
+
 const char* errc_name(Errc c) noexcept {
-    return name_or(kErrcNames, kErrcCount, infra::ordinal(c));
+    const std::size_t i = infra::ordinal(c);
+    return i < std::size(kErrcNames) ? kErrcNames[i].name : "?";
 }
 
 const char* request_name(app::UiRequest::Kind k) noexcept {
@@ -105,8 +136,9 @@ void EventTrace::write_(
     app::Event::Kind k,
     const app::Event::Head& h
 ) noexcept {
-    const auto depth = static_cast<unsigned>(queue_->depth());
-    const auto lost = queue_->losses().of(k);
+    const bool main_lane = lane_ == SeatTag::Main && main_.has_value();
+    const auto depth = static_cast<unsigned>(main_lane ? main_->depth() : rt_->depth());
+    const auto lost = main_lane ? main_->losses().of(k) : rt_->losses().of(k);
     log_.appendf(
         "{\"t\":\"ev\",\"k\":\"%s\",%s"
         "\"site\":%u,\"tag\":%u,\"depth\":%u,\"lost\":%u,"
@@ -150,7 +182,7 @@ void EventTrace::record(const app::Event::SdActivity& a, const app::Event::Head&
     if (!admit_())
         return;
     char f[kEventFieldBytes];
-    std::snprintf(f, sizeof f, "\"slot\":%u,", static_cast<unsigned>(a.slot));
+    std::snprintf(f, sizeof f, "\"slot\":%s,", a.index.text().c_str());
     write_("SdActivity", f, app::Event::SdActivity::kKind, h);
 }
 
@@ -174,14 +206,6 @@ void EventTrace::record(const app::Event::ProgressUpdate& a, const app::Event::H
         static_cast<unsigned>(a.progress.total)
     );
     write_("ProgressUpdate", f, app::Event::ProgressUpdate::kKind, h);
-}
-
-void EventTrace::record(const app::Event::DeadlineMiss& a, const app::Event::Head& h) noexcept {
-    if (!admit_())
-        return;
-    char f[kEventFieldBytes];
-    std::snprintf(f, sizeof f, "\"slot\":%u,", static_cast<unsigned>(a.slot));
-    write_("DeadlineMiss", f, app::Event::DeadlineMiss::kKind, h);
 }
 
 void EventTrace::record(const app::Event::RequestRefused& a, const app::Event::Head& h) noexcept {
@@ -242,10 +266,11 @@ void EventTrace::record(const app::Event::RequestDone& a, const app::Event::Head
 void EventTrace::record_misrouted() noexcept {
     if (!admit_())
         return;
+    const bool main_lane = lane_ == SeatTag::Main && main_.has_value();
     log_.appendf(
         "{\"t\":\"ev\",\"k\":\"?\",\"depth\":%u,"
         "\"suppressed\":%u,\"seq\":%u}",
-        static_cast<unsigned>(queue_->depth()),
+        static_cast<unsigned>(main_lane ? main_->depth() : rt_->depth()),
         static_cast<unsigned>(suppressed_),
         static_cast<unsigned>(seq_)
     );

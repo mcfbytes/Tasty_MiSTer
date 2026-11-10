@@ -14,6 +14,7 @@
 #include "infra/seat.h"
 #include "os/uio_handle.h"
 #include "proto/sector_block_decl.h"
+#include "proto/types.h"
 #include "svc/sector_program.h"
 
 namespace mister::app {
@@ -36,16 +37,16 @@ struct LwSector {
     FabricGeneration fabric_gen{};
     bool fabric_lost = false;
 
-    [[nodiscard]] std::uint16_t card_slots() const noexcept {
-        std::uint16_t m = 0;
+    [[nodiscard]] proto::BlockSlotMask card_slots() const noexcept {
+        proto::BlockSlotMask m{};
         for (const Card& c : cards)
             if (c.image.len != 0)
-                m = static_cast<std::uint16_t>(m | (1u << (c.decl.slot.v & 15u)));
+                m = m.with(c.decl.slot);
         return m;
     }
 
-    [[nodiscard]] std::uint16_t bridge_slots() const noexcept {
-        return static_cast<std::uint16_t>(card_slots() | (1u << (block.slot.v & 15u)));
+    [[nodiscard]] proto::BlockSlotMask bridge_slots() const noexcept {
+        return card_slots().with(block.slot);
     }
 };
 

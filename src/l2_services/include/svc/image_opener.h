@@ -5,7 +5,7 @@
 #include <string_view>
 
 #include "infra/error.h"
-#include "svc/vfs.h"
+#include "svc/file.h"
 
 namespace mister::svc {
 

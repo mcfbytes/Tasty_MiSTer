@@ -35,7 +35,7 @@ public:
         return wire_.send_status(words);
     }
 
-    bool can_send_data(std::uint16_t selector) override {
+    bool can_send_data(cdwire::Selector selector) override {
         TASTY_SEAT_BODY(CdWireLink);
         return wire_.can_send_data(selector);
     }

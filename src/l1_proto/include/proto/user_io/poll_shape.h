@@ -7,6 +7,8 @@
 
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "proto/types.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto::user_io {
 
@@ -16,13 +18,13 @@ enum class Condition : std::uint8_t { NonZero, MaskedChangedSinceLast, kCount };
 
 enum class CommandForm : std::uint8_t { Bare, ParamInHighByte, kCount };
 
-enum class Cadence : std::uint8_t { Census, SessionStart, kCount };
+inline constexpr proto::ParamSet kBareRowParams{0x01};
 
-inline constexpr std::uint8_t kMaxPollParams = 6;
+enum class Cadence : std::uint8_t { Census, SessionStart, kCount };
 
 struct PollShapeRow {
     PollShape shape;
-    std::uint8_t opcode;
+    UioOp opcode;
     std::uint16_t mask;
     Condition push_when;
     SeatTag sink;
@@ -32,30 +34,30 @@ struct PollShapeRow {
 };
 
 inline constexpr auto kPollShapes = std::to_array<PollShapeRow>({
-    {PollShape::InfoPoll,
-     0x36,
-     0x00FF,
-     Condition::NonZero,
-     SeatTag::Ui,
-     CommandForm::Bare,
-     1,
-     Cadence::Census},
-    {PollShape::RumblePoll,
-     0x3F,
-     0xFFFF,
-     Condition::MaskedChangedSinceLast,
-     SeatTag::Input,
-     CommandForm::ParamInHighByte,
-     kMaxPollParams,
-     Cadence::Census},
-    {PollShape::F12ModPoll,
-     0x43,
-     0xFFFF,
-     Condition::MaskedChangedSinceLast,
-     SeatTag::Input,
-     CommandForm::Bare,
-     1,
-     Cadence::SessionStart},
+    {.shape = PollShape::InfoPoll,
+     .opcode = UioOp::InfoGet,
+     .mask = 0x00FF,
+     .push_when = Condition::NonZero,
+     .sink = SeatTag::Ui,
+     .form = CommandForm::Bare,
+     .params = 1,
+     .cadence = Cadence::Census},
+    {.shape = PollShape::RumblePoll,
+     .opcode = UioOp::GetRumble,
+     .mask = 0xFFFF,
+     .push_when = Condition::MaskedChangedSinceLast,
+     .sink = SeatTag::Input,
+     .form = CommandForm::ParamInHighByte,
+     .params = kMaxPollParams,
+     .cadence = Cadence::Census},
+    {.shape = PollShape::F12ModPoll,
+     .opcode = UioOp::GetF12Mod,
+     .mask = 0xFFFF,
+     .push_when = Condition::MaskedChangedSinceLast,
+     .sink = SeatTag::Input,
+     .form = CommandForm::Bare,
+     .params = 1,
+     .cadence = Cadence::SessionStart},
 });
 
 consteval bool poll_rows_are_ordinal() {
@@ -85,19 +87,20 @@ static_assert(poll_rows_fit_their_form(), "a Bare row issues one parameter; none
     return kPollShapes[infra::ordinal(s)];
 }
 
-[[nodiscard]] constexpr std::uint16_t command_word(
+[[nodiscard]] constexpr hal::SpiWord command_word(
     const PollShapeRow& r,
     std::uint8_t param
 ) noexcept {
+    const hal::SpiWord opcode = word(r.opcode);
     switch (r.form) {
         case CommandForm::Bare:
-            return r.opcode;
+            return opcode;
         case CommandForm::ParamInHighByte:
-            return static_cast<std::uint16_t>(r.opcode | (param << 8));
+            return opcode.with_high_byte(param);
         case CommandForm::kCount:
             break;
     }
-    return r.opcode;
+    return opcode;
 }
 
 [[nodiscard]] constexpr bool guard_passes(

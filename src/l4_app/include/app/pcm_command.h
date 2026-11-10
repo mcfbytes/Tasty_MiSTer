@@ -7,7 +7,9 @@
 #include <tuple>
 
 #include "infra/message_sum.h"
+#include "infra/pool_slot.h"
 #include "infra/seat.h"
+#include "infra/slot_pool.h"
 
 namespace mister::app {
 
@@ -33,12 +35,12 @@ struct PcmCommand {
 
     struct AttachRing {
         static constexpr Kind kKind = Kind::AttachRing;
-        std::uint8_t lease = 0;
+        xthread::PoolSlot lease{};
     };
 
     struct AttachSource {
         static constexpr Kind kKind = Kind::AttachSource;
-        std::uint8_t lease = 0;
+        xthread::PoolSlot lease{};
     };
 
     using Alternatives = std::tuple<Play, Stop, Resume, AttachRing, AttachSource>;

@@ -24,6 +24,18 @@ class RecentLaunch final {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
+    enum class YesNo : std::uint8_t { Yes, No };
+
+    [[nodiscard]] static constexpr RowIndex row_of(YesNo answer) noexcept {
+        switch (answer) {
+            case YesNo::Yes:
+                return RowIndex{0};
+            case YesNo::No:
+                return RowIndex{1};
+        }
+        return RowIndex{};
+    }
+
     explicit RecentLaunch(const HdPlanInputs& in);
     RecentLaunch(const RecentLaunch&) = delete;
     RecentLaunch& operator=(const RecentLaunch&) = delete;

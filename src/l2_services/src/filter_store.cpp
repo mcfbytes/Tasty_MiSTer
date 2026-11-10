@@ -2,18 +2,25 @@
 #include "svc/filter_store.h"
 
 #include "svc/filter_bank.h"
+#include "svc/filter_kernel.h"
 #include "svc/filter_send_plan.h"
 #include "svc/filter_set.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
 
 #include "infra/ascii.h"
 #include "infra/byte_view.h"
+#include "proto/link.h"
 #include "svc/vfs.h"
 
 namespace mister::svc {
+
+Ex<void> ScalerSlotMode::write_to(proto::Link& link) const {
+    return link.write_byte(v);
+}
 
 namespace {
 
@@ -82,8 +89,8 @@ bool same_digest(const FilterBank& a, const FilterBank& b) noexcept {
     return a.is_adaptive == b.is_adaptive && a.phases == b.phases && a.adaptive == b.adaptive;
 }
 
-bool parse_video_filter(std::string_view text, FilterBank& out) {
-    out = FilterBank{};
+FilterParse parse_video_filter(std::string_view text) {
+    FilterParse parsed{};
 
     std::array<FilterPhase, kFilterPhases * 2> phases{};
     int count = 0;
@@ -109,7 +116,8 @@ bool parse_video_filter(std::string_view text, FilterBank& out) {
             if (count
                 >= (is_adaptive ? static_cast<int>(kFilterPhases) * 2
                                 : static_cast<int>(kFilterPhases))) {
-                return false;
+                parsed.outcome = FilterParseOutcome::OverCap;
+                return parsed;
             }
             for (std::size_t k = 0; k < 4; ++k) {
                 phases[static_cast<std::size_t>(count)].t[k] = static_cast<std::int16_t>(
@@ -120,6 +128,7 @@ bool parse_video_filter(std::string_view text, FilterBank& out) {
         }
     }
 
+    FilterBank& out = parsed.bank;
     bool valid = false;
     if (is_adaptive) {
         out.is_adaptive = true;
@@ -136,9 +145,10 @@ bool parse_video_filter(std::string_view text, FilterBank& out) {
         out.is_adaptive = false;
         const FilterPhase nn[2] = {FilterPhase{{0, 256, 0, 0}}, FilterPhase{{0, 0, 256, 0}}};
         (void)scale_phases(out.phases.data(), nn, 2);
+        parsed.outcome = FilterParseOutcome::NearestNeighbour;
     }
     out.digest_valid = true;
-    return valid;
+    return parsed;
 }
 
 FilterBank nearest_neighbour_bank() {
@@ -149,42 +159,38 @@ FilterBank nearest_neighbour_bank() {
     return b;
 }
 
-std::string_view ScalerSlot::name_view() const noexcept {
-    std::size_t n = 0;
-    while (n < name.size() && name[n] != '\0')
-        ++n;
-    return {name.data(), n};
-}
-
-std::array<ScalerSlot, kScalerSlots> decode_scaler_cfg(
+ScalerSlots<ScalerSlot> decode_scaler_cfg(
     std::span<const std::byte> blob,
     const ScalerSeeds& seeds
 ) {
-    std::array<ScalerSlot, kScalerSlots> out{};
+    ScalerSlots<ScalerSlot> out{};
     if (!blob.empty()) {
 
         constexpr std::size_t kStride = 1 + kScalerNameCap;
-        for (std::size_t s = 0; s < kScalerSlots; ++s) {
-            const std::size_t base = s * kStride;
+        for (const ScalerSlotIndex slot : kScalerSlotOrder) {
+            const std::size_t base = slot.offset(kStride);
             if (base < blob.size())
-                out[s].mode = static_cast<std::uint8_t>(blob[base]);
-            for (std::size_t i = 0; i < kScalerNameCap && base + 1 + i < blob.size(); ++i) {
-                out[s].name[i] = static_cast<char>(blob[base + 1 + i]);
-            }
+                out[slot].mode = ScalerSlotMode::of(blob[base]);
+            const std::size_t name_at = base + 1;
+            if (name_at >= blob.size())
+                continue;
+
+            const std::string_view field = infra::as_text(
+                blob.subspan(name_at, std::min(kScalerNameCap, blob.size() - name_at))
+            );
+            (void)out[slot].name.assign(field.substr(0, field.find('\0')));
         }
 
-        if (out[0].mode > 1)
+        if (!out[ScalerSlotIndex::of(VFilter::Horz)].mode.legal())
             out = {};
         return out;
     }
-    const std::string_view sv[kScalerSlots] = {seeds.horz, seeds.vert, seeds.scan, seeds.ilace};
-    for (std::size_t s = 0; s < kScalerSlots; ++s) {
-        if (sv[s].empty())
+    for (const ScalerSlotIndex slot : kScalerSlotOrder) {
+        const std::string_view seed = seeds[slot];
+        if (seed.empty())
             continue;
-        const std::size_t n = sv[s].size() < kScalerNameCap - 1 ? sv[s].size() : kScalerNameCap - 1;
-        for (std::size_t i = 0; i < n; ++i)
-            out[s].name[i] = sv[s][i];
-        out[s].mode = 1;
+        (void)out[slot].name.assign(seed);
+        out[slot].mode = ScalerSlotMode::from_file();
     }
     return out;
 }
@@ -203,80 +209,64 @@ void load_filter_set(
     const auto blob = read_file(vfs, cfg_path);
     const auto slots = decode_scaler_cfg(std::span<const std::byte>(blob), seeds);
 
-    for (std::size_t s = 0; s < kScalerSlots; ++s) {
+    for (const ScalerSlotIndex slot : kScalerSlotOrder) {
 
         std::string path{"filters/"};
-        path += slots[s].name_view();
+        path += slots[slot].name.view();
         if (path.size() > kScalerNameCap)
             path.resize(kScalerNameCap);
         const auto bytes = read_file(vfs, path);
         const std::string_view text = bytes.empty() ? std::string_view{}
                                                     : infra::as_text(std::span(bytes));
-        const bool ok = parse_video_filter(text, out.banks[s]);
-        out.modes[s] = ok ? slots[s].mode : 0;
+        const FilterParse parsed = parse_video_filter(text);
+        out.slots[slot].bank = parsed.bank;
+        out.slots[slot].mode = parsed.parsed() ? slots[slot].mode : ScalerSlotMode::off();
     }
+}
+
+namespace {
+
+struct StoredPhases {
+    std::span<const FilterPhase> phases;
+
+    [[nodiscard]] constexpr const std::array<std::int16_t, kFilterTaps>& taps(
+        FilterPhaseIndex phase
+    ) const noexcept {
+        return phase.taps(phases);
+    }
+};
+
 }
 
 std::uint16_t filter_bank_word(
     std::span<const FilterPhase> phases,
-    std::uint16_t ver,
-    std::uint32_t bank,
-    std::size_t i
+    FilterFormat fmt,
+    FilterWireBank bank,
+    FilterBankWordIndex i
 ) noexcept {
-    const std::size_t enc = ver & kFilterEncodingMask;
-    if (enc == 0u)
-        return 0;
-    if (enc == kFilterEncodingBytes) {
-
-        const std::size_t per_bank = (kFilterPhases / kFilterBytePhaseStep) * kFilterTaps;
-        const std::size_t iter = i / kFilterTaps;
-        const std::size_t tap = i % kFilterTaps;
-        const std::size_t addr = static_cast<std::size_t>(bank) * per_bank
-            + iter * kFilterTaps
-            + tap;
-        const int t = phases[iter * kFilterBytePhaseStep].t[tap];
-        return static_cast<std::uint16_t>(
-            (static_cast<std::uint32_t>(t >> 1) & kFilterValueMask9)
-            | (static_cast<std::uint32_t>(addr) << kFilterAddrShift)
-        );
-    }
-
-    const bool full = (ver & kFilterFullPrecisionBit) != 0;
-    const std::size_t skip = full ? 1u : kFilterCoarsePhaseStep;
-    const int shift = full ? 0 : 1;
-    const std::size_t per_bank = full ? kFilterPhases * kFilterTaps
-                                      : kFilterCoarsePhases * kFilterTaps;
-    const std::size_t base = static_cast<std::size_t>(bank) * per_bank;
-    const std::size_t pair = i / kFilterWordsPerEntry;
-    const std::size_t iter = pair / kFilterTaps;
-    const std::size_t tap = pair % kFilterTaps;
-    if ((i & 1u) == 0u) {
-        return static_cast<std::uint16_t>(base + iter * kFilterTaps + tap);
-    }
-    const int t = phases[iter * skip].t[tap];
-    return static_cast<std::uint16_t>(static_cast<std::uint32_t>(t >> shift) & kFilterValueMask10);
+    return detail::filter_word(fmt, StoredPhases{phases}, base_index(bank), i);
 }
 
 FilterSendPlan plan_filter_banks(
     const FilterBank& horiz,
     const FilterBank& vert,
-    std::uint16_t ver,
+    FilterFormat fmt,
     bool send_horiz,
     bool send_vert
 ) noexcept {
     FilterSendPlan p{};
-    if ((ver & kFilterEncodingMask) == 0u)
+    if (fmt.encoding == FilterEncoding::None)
         return p;
     if (send_horiz)
-        p.segs[p.count++] = {false, false, 0};
+        p.segs[p.count++] = {FilterWireBank::Horiz};
     if (send_vert)
-        p.segs[p.count++] = {true, false, 1};
-    if ((ver & kFilterEncodingMask) == 3u) {
+        p.segs[p.count++] = {FilterWireBank::Vert};
+    if (fmt.encoding == FilterEncoding::WordsAdaptive) {
 
         if (horiz.is_adaptive && send_horiz) {
-            p.segs[p.count++] = {false, true, 2};
+            p.segs[p.count++] = {FilterWireBank::AdaptiveHoriz};
         } else if (vert.is_adaptive && send_vert) {
-            p.segs[p.count++] = {true, true, 3};
+            p.segs[p.count++] = {FilterWireBank::AdaptiveVert};
         }
     }
     return p;

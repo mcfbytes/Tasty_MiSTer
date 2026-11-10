@@ -36,10 +36,6 @@ namespace {
     );
 }
 
-[[nodiscard]] Rgb888 grey_of(std::uint8_t level) noexcept {
-    return rgb_from_channels({level, level, level});
-}
-
 using Rgb = std::array<std::uint8_t, 3>;
 
 struct Lch {
@@ -320,10 +316,8 @@ void derive_window(const HdStyle& style, HdTheme& t) noexcept {
 
 constexpr float kWindowShade = 0.5f;
 
-std::uint16_t under_grey(std::uint8_t v, std::uint16_t q8) noexcept {
-    constexpr unsigned kQ8Shift = 8;
-    const unsigned c = (static_cast<unsigned>(v) * q8) >> kQ8Shift;
-    return hd_pack565(grey_of(static_cast<std::uint8_t>(c)));
+std::uint16_t under_grey(std::uint8_t v, DimQ8 dim) noexcept {
+    return hd_pack565(grey_of(dim.apply(ColorChannel{v})));
 }
 
 struct GlassPair {
@@ -332,11 +326,11 @@ struct GlassPair {
     double floor = 0.0;
 };
 
-bool glass_holds(std::span<const GlassPair> pairs, std::uint16_t q8) noexcept {
+bool glass_holds(std::span<const GlassPair> pairs, DimQ8 dim) noexcept {
     for (const GlassPair& p : pairs) {
         const Rgb888 ink = shown_565(p.ink);
         const auto at = [&](std::uint8_t v) {
-            return unpack_565(static_cast<std::uint16_t>(p.fill_pre + under_grey(v, q8)));
+            return unpack_565(static_cast<std::uint16_t>(p.fill_pre + under_grey(v, dim)));
         };
         constexpr std::uint8_t kDarkest = 0;
         constexpr std::uint8_t kLightest = 255;
@@ -470,6 +464,14 @@ Rgb888 hd_ground_fill(const HdTheme& t, HdGround ground) noexcept {
     return ground == HdGround::WindowShade ? slint_darker(t.window, kWindowShade) : t.primary;
 }
 
+DimQ8 HdThemeGlass::under_q8() const noexcept {
+    constexpr std::uint8_t kPercent = 100;
+    const std::uint8_t capped = std::min(opacity, kPercent);
+    return DimQ8::of_percents(
+        {.open = Percent::of(kPercent - capped), .under = Percent::of(under_dim)}
+    );
+}
+
 HdThemeGlass hd_glass_keys(const HdTheme& t, HdGround ground, std::uint8_t opacity) noexcept {
     constexpr std::size_t kTakenRoles = 32;
     HdThemeGlass g{};
@@ -525,7 +527,7 @@ HdThemeGlass hd_glass_keys(const HdTheme& t, HdGround ground, std::uint8_t opaci
     }};
     g.under_dim = 0;
     for (std::uint8_t d = kPercentFull; d > 0; --d) {
-        if (glass_holds(pairs, hd_under_q8(opacity, d))) {
+        if (glass_holds(pairs, g.with_under(d).under_q8())) {
             g.under_dim = d;
             break;
         }

@@ -102,12 +102,9 @@ std::string StartChain::core_home(std::string_view name, const svc::Vfs& vfs) {
 
 bool StartChain::plan_composite_(std::string_view rbf, const svc::Vfs& vfs) {
     auto src = stream_open(vfs, rbf, svc::OpenMode::Read);
-    if (!src || src->size < kContainerHeader)
+    if (!src)
         return false;
-    std::byte hdr[kContainerHeaderBytes];
-    if (!stream_read(*src->f, proto::FileSize{}, std::span<std::byte>(hdr, sizeof(hdr))))
-        return false;
-    const auto w = container_window(std::span<const std::byte>(hdr, sizeof(hdr)), src->size);
+    const auto w = read_payload_window(*src->f, src->size);
     if (!w || w->base != kContainerHeader)
         return false;
     const proto::FileSize tail = w->base + w->length;

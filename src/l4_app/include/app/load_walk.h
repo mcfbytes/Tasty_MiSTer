@@ -2,11 +2,14 @@
 #pragma once
 
 #include <cstddef>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
 
+#include "app/echo_rate.h"
+#include "app/echo_wait.h"
 #include "app/load_ladder.h"
 #include "app/load_window_map.h"
 #include "app/rung.h"
@@ -29,19 +32,30 @@ class LoadWalk final : public Rung {
 public:
     enum class Pass : std::uint8_t { Stepped, Waiting, Done, Failed };
 
-    enum class Pc : std::uint8_t { Hold, Row, Rung, Pieces, Echo, Save, SaveWait, Release, Over };
+    enum class Pc : std::uint8_t {
+        Hold,
+        Row,
+        Rung,
+        Pieces,
+        Echo,
+        Notify,
+        Save,
+        SaveWait,
+        Release,
+        Over
+    };
 
-    static constexpr std::int64_t kSaveBoundNs = 5'000'000'000;
+    static constexpr std::chrono::nanoseconds kSaveBoundNs{5'000'000'000};
 
     static constexpr EchoRate kEcho{std::chrono::seconds{2}, std::chrono::milliseconds{250}};
 
     struct Host {
         LoadLadder::Host rung;
         cores::ILadderHost& owner;
-        ILoadWindowMap<seat_owner::Main>* map;
+        ILoadWindowMap<seat_owner::Main>& map;
         hal::PhysRegion aperture;
         const svc::Vfs& vfs;
-        std::int64_t now_ns = 0;
+        std::chrono::nanoseconds now_ns{};
     };
 
     [[nodiscard]] static Ex<LoadWalk> start(
@@ -51,11 +65,6 @@ public:
     );
 
     [[nodiscard]] Pass step(Host& h);
-
-    [[nodiscard]] bool wants_pass(
-        const LinkTxChannel<SeatTag::Main>& inbox,
-        const FileTxLevelCell* level
-    ) const noexcept;
 
     [[nodiscard]] bool wants_pass(
         const LinkTxChannel<SeatTag::Main>& inbox,
@@ -91,7 +100,6 @@ private:
         std::span<const std::uint8_t> bytes,
         const cores::PostNotify& notify
     );
-    [[nodiscard]] proto::ActKey16 next_act_(Host& h);
     [[nodiscard]] Pass notify_(Host& h, const cores::PostNotify& n);
     [[nodiscard]] Pass rung_(Host& h);
     [[nodiscard]] Pass echo_(Host& h);
@@ -104,16 +112,16 @@ private:
     void next_row_() noexcept;
 
     std::unique_ptr<cores::ILoader> loader_;
-    cores::LoadPlan plan_;
+
+    const cores::LoadPlan plan_;
     std::span<const cores::CoreWindowDecl> windows_;
     std::optional<LoadLadder> ladder_;
     std::optional<cores::PayloadPieces> pieces_;
+    EchoWait echo_wait_{};
     proto::FileSize echo_bytes_{};
     std::size_t row_ = 0;
-    proto::ActKey16 act_{};
     proto::ActKey save_gen_{};
-    std::int64_t save_due_ns_ = 0;
-    std::int64_t echo_due_ns_ = 0;
+    std::chrono::nanoseconds save_due_ns_{};
     bool failed_ = false;
     bool stalled_ = false;
     bool landed_ = false;

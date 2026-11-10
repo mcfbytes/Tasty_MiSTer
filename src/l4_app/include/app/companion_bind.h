@@ -8,9 +8,10 @@
 #include <tuple>
 
 #include "app/path_text.h"
-#include "cores/mailbox_servants.h"
+#include "cores/servant_id.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -26,7 +27,7 @@ struct CompanionBind {
     struct Bind {
         static constexpr Kind kKind = Kind::Bind;
         PathText stem{};
-        std::uint16_t gen = 0;
+        proto::CompanionBindGen gen{};
         bool present = false;
         std::uint8_t pad_{};
     };

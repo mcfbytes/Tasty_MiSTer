@@ -5,6 +5,7 @@
 
 #include "app/link_encoder.h"
 #include "app/lw_pads.h"
+#include "app/session_tally.h"
 #include "infra/opt_ref.h"
 #include "proto/link.h"
 #include "proto/link_op.h"
@@ -41,7 +42,8 @@ public:
         OsdWire& osd,
         proto::BlockSlots& slots,
         VideoWire& video,
-        svc::InputEmitter& em
+        svc::InputEmitter& em,
+        SessionTally& session_tally
     ) noexcept;
 
     using Result = ILinkEncoder::Outcome;
@@ -90,6 +92,8 @@ private:
     proto::BlockSlots& slots_;
     VideoWire& video_;
     svc::InputEmitter& em_;
+
+    SessionTally& session_tally_;
     std::uint32_t link_op_misrouted_ = 0;
 };
 

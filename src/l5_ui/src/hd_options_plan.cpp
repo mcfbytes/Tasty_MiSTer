@@ -1,27 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/hd_options_plan.h"
 
-#include <optional>
-#include <utility>
-
-#include "app/page_description.h"
-#include "app/session_identity.h"
-#include "ui/hd_label.h"
 #include "ui/option_host.h"
 #include "ui/options_model.h"
+#include "ui/option_item.h"
 #include "ui/options_surface.h"
 #include "ui/placement.h"
-#include "ui/saved_baseline.h"
 
 namespace mister::ui {
 namespace {
 
-using Row = app::PageDescription::Row;
-using RowKind = app::PageDescription::RowKind;
-
 class SelectProbe final : public IOptionHost {
 public:
     void refuse() override { refused = true; }
+
+    proto::FieldValue field(proto::BitField) const override { return {}; }
 
     void write_status(proto::BitField, proto::FieldValue) override {}
 
@@ -29,77 +22,11 @@ public:
 
     Transition open_browser(const OptionItem&) override { return Transition{}; }
 
+    PageId subpage_page() const override { return PageId::None; }
+
     bool refused = false;
 };
 
-Transition own(Transition t) noexcept {
-    if (t.kind == Transition::Kind::Push && t.page == PageId::CoreOptions) {
-        t.page = PageId::HdCoreSettings;
-    }
-    return t;
-}
-
-}
-
-std::optional<RowKey> HdOptionRow::key() const {
-    TASTY_SEAT_BODY(HdOptionRow);
-    return RowKey{item_.item.v};
-}
-
-OptionItem::Look HdOptionRow::look_() const {
-    return OptionItem::Look{.flat = false, .value = host_.field(item_.bits)};
-}
-
-OptionItem::Press HdOptionRow::press_(bool select, bool minus) const {
-    return OptionItem::Press{
-        .select = select,
-        .minus = minus,
-        .at_root = host_.model().page() == proto::kRootSubmenu,
-        .value = host_.field(item_.bits)
-    };
-}
-
-Row HdOptionRow::describe() const {
-    TASTY_SEAT_BODY(HdOptionRow);
-
-    const std::optional<Row> own = item_.describe(look_());
-    if (!own)
-        return Row{};
-    Row r = *own;
-    (void)r.label.assign(hd_label(r.label.view()));
-    return r;
-}
-
-Transition HdOptionRow::select() {
-    TASTY_SEAT_BODY(HdOptionRow);
-    return own(item_.activate(press_(true, false), host_));
-}
-
-Transition HdOptionRow::step(int delta) {
-    TASTY_SEAT_BODY(HdOptionRow);
-    return own(item_.activate(press_(false, delta < 0), host_));
-}
-
-std::optional<RowKey> HdSaveRow::key() const {
-    TASTY_SEAT_BODY(HdSaveRow);
-    constexpr std::uint32_t kSaveKey = 0x1'0000u;
-    return RowKey{kSaveKey};
-}
-
-Row HdSaveRow::describe() const {
-    TASTY_SEAT_BODY(HdSaveRow);
-    Row r{};
-    r.kind = RowKind::Action;
-    (void)r.label.assign("Save settings");
-    if (baseline_.unsaved(host_.live_words()))
-        (void)r.value.assign("Unsaved");
-    return r;
-}
-
-Transition HdSaveRow::select() {
-    TASTY_SEAT_BODY(HdSaveRow);
-    host_.save_config();
-    return Transition{};
 }
 
 HdOptionsPlan::HdOptionsPlan(IOptionsSurface& surface, const HdOptionsView::Spec& spec)
@@ -146,7 +73,7 @@ bool HdOptionsPlan::acts_(const OptionItem& it) const {
     if (it.disabled)
         return false;
     SelectProbe probe;
-    (void)it.activate(OptionItem::Press{.select = true, .at_root = true}, probe);
+    (void)it.select(probe);
     return !probe.refused;
 }
 

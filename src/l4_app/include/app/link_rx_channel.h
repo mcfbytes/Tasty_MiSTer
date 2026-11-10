@@ -9,6 +9,7 @@
 #include "app/link_bytes.h"
 #include "infra/inbox.h"
 #include "infra/message_sum.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "proto/link_event.h"
@@ -26,7 +27,7 @@ class LinkRxChannel {
     );
 
 public:
-    using Bytes = LinkBytes<16, kLinkRxSlabBytes, SeatTag::RT, Consumer>;
+    using Bytes = LinkBytes<proto::RxSlabId, 16, kLinkRxSlabBytes, SeatTag::RT, Consumer>;
 
     LinkRxChannel() noexcept : rx_(xthread::Polled{}) {}
 
@@ -37,10 +38,7 @@ public:
 
     [[nodiscard]] Ex<proto::RxSlabId> intern(std::span<const std::uint8_t> bytes) noexcept {
         TASTY_SEAT_BODY_MEDIATOR(LinkRxChannel, A);
-        const Ex<std::uint16_t> id = bytes_.intern(bytes);
-        if (!id)
-            return std::unexpected(id.error());
-        return proto::RxSlabId{*id};
+        return bytes_.intern(bytes);
     }
 
     [[nodiscard]] bool can_intern(std::size_t bytes, unsigned chunks) const noexcept {
@@ -76,7 +74,7 @@ public:
     }
 
     [[nodiscard]] std::span<const std::uint8_t> bytes(proto::RxSlabId id) const noexcept {
-        return bytes_.get(id.v);
+        return bytes_.get(id);
     }
 
     [[nodiscard]] std::size_t size() const noexcept { return rx_.size(); }

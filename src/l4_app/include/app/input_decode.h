@@ -3,11 +3,11 @@
 
 #include <sys/epoll.h>
 
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
 
+#include "app/device_table_loans.h"
 #include "app/input_decode_tally.h"
 #include "app/input_wire.h"
 #include "app/joy_level_emitter.h"
@@ -19,7 +19,6 @@
 #include "app/rumble_relay.h"
 #include "infra/error.h"
 #include "infra/indexed_array.h"
-#include "infra/loan_channel.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
 #include "infra/park_timeout.h"
@@ -33,6 +32,7 @@
 #include "infra/wake_flag.h"
 #include "hal/boards_table.h"
 #include "svc/device_table.h"
+#include "svc/input_service_counts.h"
 #include "svc/input_service.h"
 #include "svc/types.h"
 #include "infra/seat.h"
@@ -42,15 +42,10 @@ class DiagLog;
 }
 
 namespace mister::app {
-static_assert(LauncherKeyBridge::kPadSlots >= svc::kMaxDevices);
 template <SeatTag Seat>
 class LinkTxChannel;
 template <SeatTag Seat>
 class LinkRxChannel;
-
-inline constexpr std::size_t kTableLeases = 2;
-using DeviceTableLoans = xthread::
-    LoanChannel<svc::DeviceTable, kTableLeases, SeatTag::Diag, SeatTag::Input>;
 
 struct DeviceInputState {
     svc::JoyMask prev_menu{};
@@ -68,20 +63,11 @@ struct InputDecodeCounts {
     std::uint32_t kicks = 0;
     std::uint32_t fd_evictions = 0;
     std::uint32_t registered = 0;
-    std::uint32_t joy_seen = 0;
-    std::uint32_t joy_players = 0;
+    svc::JoyMask joy_seen{};
+    svc::PlayerMask joy_players{};
     std::uint32_t captures = 0;
 
-    std::uint32_t mapped = 0;
-    std::uint32_t slotted = 0;
-    std::uint32_t mask_changes = 0;
-    std::uint32_t axis_edges = 0;
-    std::uint32_t mouse_remainder = 0;
-    std::uint32_t key_overflows = 0;
-    std::uint32_t quirk_drops = 0;
-    svc::PlayerMask slot_live{};
-    std::uint32_t slot_ghosts = 0;
-    std::uint32_t slot_hash[svc::kMaxPlayers]{};
+    svc::InputServiceCounts service{};
 };
 
 class InputDecode {
@@ -161,10 +147,6 @@ public:
 
     int epoll_fd() const noexcept { return epfd_.get(); }
 
-    std::size_t registered_fds() const noexcept {
-        return registered_.load(std::memory_order_relaxed);
-    }
-
     std::uint32_t joy_ui_keys() const noexcept { return joy_ui_keys_; }
 
     proto::Ps2Keyboard& keyboard() noexcept { return kbd_; }
@@ -195,6 +177,7 @@ private:
     unsigned flush_ps2_frames_();
     void flush_mouse_();
     void sweep_dropped_keys_();
+    void note_dropped_mouse_();
 
     [[nodiscard]] bool is_osd_toggle_(svc::EvdevCode code) const noexcept;
     bool apply_requests();
@@ -226,10 +209,12 @@ private:
 
     MouseDivider mouse_divider_;
     JoyLevelEmitter joy_;
-    std::uint32_t wm_frame_drops_ = 0;
+    proto::FrameDrops wm_frame_drops_{};
+    proto::FrameDrops wm_mouse_drops_{};
     bool sweep_owed_ = false;
 
-    infra::IndexedArray<DeviceInputState, svc::kMaxDevices, svc::DeviceSlot> devices_{};
+    infra::IndexedArray<DeviceInputState, svc::DeviceTable::kMaxDevices, svc::DeviceSlot>
+        devices_{};
 
     svc::JoyMask osdbtn_{};
     std::uint32_t joy_ui_keys_ = 0;
@@ -237,7 +222,7 @@ private:
 
     UniqueFd epfd_;
 
-    std::atomic<std::uint32_t> registered_{0};
+    std::uint32_t registered_ = 0;
     svc::Generation seen_gen_{};
 
     static constexpr std::uint32_t kEvictRearmCredit = 4;
@@ -245,7 +230,7 @@ private:
 
     CaptureArmCell::Reader arm_reader_{};
     CaptureArm arm_{};
-    std::uint32_t capture_served_ = 0;
+    CaptureToken capture_served_{};
 
     int stop_fd_ = -1;
     infra::OptRef<xthread::WakeFlag> pause_wake_;

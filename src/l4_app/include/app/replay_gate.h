@@ -14,12 +14,14 @@
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "proto/frame_counter_read.h"
-#include "proto/joystick.h"
+#include "proto/joystick_port.h"
 #include "proto/late_answers.h"
 #include "proto/link_op.h"
 #include "proto/spi_frame.h"
+#include "proto/types.h"
 #include "reactor/frame_clock.h"
 #include "reactor/tick.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 class InputEmitter;
@@ -48,16 +50,18 @@ public:
 
     static constexpr std::uint32_t kAliasFrames = 200;
 
-    static constexpr std::int64_t kEndSlackNs = 50'000;
+    static constexpr std::chrono::nanoseconds kTickNs{reactor::kTickNs};
+
+    static constexpr std::chrono::nanoseconds kEndSlackNs{50'000};
 
     static constexpr std::uint32_t kFloorBack = 1;
 
-    static constexpr std::int64_t kSilenceSlackNs = 2 * reactor::kTickNs;
-    static constexpr std::int64_t kSilenceWindowNs = 1'000'000'000;
+    static constexpr std::chrono::nanoseconds kSilenceSlackNs = 2 * kTickNs;
+    static constexpr std::chrono::nanoseconds kSilenceWindowNs{1'000'000'000};
 
-    static constexpr std::int64_t kSlipNs = 2 * reactor::kTickNs;
+    static constexpr std::chrono::nanoseconds kSlipNs = 2 * kTickNs;
 
-    static constexpr std::int64_t kGapNs = 2 * reactor::kTickNs;
+    static constexpr std::chrono::nanoseconds kGapNs = 2 * kTickNs;
 
     explicit ReplayGate(const Wiring& w) noexcept : w_(w) {}
 
@@ -66,16 +70,16 @@ public:
 
     void tick(
         bool ready,
-        std::uint32_t core_edge_seq,
+        CoreEdgeSeq core_edge_seq,
         proto::LateAnswers late = {},
         std::optional<std::uint32_t> queued = std::nullopt
     ) noexcept;
     [[nodiscard]] bool wants_record() const noexcept;
 
-    [[nodiscard]] std::uint32_t take_round_words() noexcept {
+    [[nodiscard]] proto::FioWordCount take_round_words() noexcept {
         const std::uint32_t w = round_words_;
         round_words_ = 0;
-        return w;
+        return proto::FioWordCount{w};
     }
 
     void on(const ReplayMsg::Arm& a, const ReplayMsg::Head& h) noexcept;
@@ -85,7 +89,7 @@ public:
 
     void settle() noexcept;
 
-    void note_download_end(std::uint8_t wire_index) noexcept;
+    void note_download_end(proto::IoIndex wire_index) noexcept;
 
     void note_core_reset() noexcept;
 
@@ -96,6 +100,24 @@ public:
     [[nodiscard]] const ReplayStatus& status() const noexcept { return status_; }
 
 private:
+    struct EpochPick {
+        std::int64_t j;
+        std::int64_t hi;
+    };
+
+    struct EpochRule {
+        std::chrono::nanoseconds poweron{};
+        std::chrono::nanoseconds period{};
+        std::chrono::nanoseconds line0{};
+        ReplayMsg::P0Parity p0 = ReplayMsg::P0Parity::Any;
+        cores::LateFrames late_frames{};
+
+        [[nodiscard]] EpochPick pick(
+            std::chrono::nanoseconds delay,
+            std::uint32_t first_count
+        ) const noexcept;
+    };
+
     void sample_control_() noexcept;
     [[nodiscard]] bool sample_ref_() noexcept;
     void begin_run_() noexcept;
@@ -105,10 +127,10 @@ private:
     void apply_(const ReplayMsg::Input& r) noexcept;
     void write_(const ReplayMsg::Input& r) noexcept;
     void write_masks_(
-        const std::array<std::uint32_t, kReplayPorts>& mask,
-        std::uint8_t ports
+        const std::array<proto::JoyMask, kReplayPorts>& mask,
+        svc::PlayerMask ports
     ) noexcept;
-    void force_release_(std::uint8_t ports) noexcept;
+    void force_release_(svc::PlayerMask ports) noexcept;
     void count_write_(const Ex<bool>& out, std::uint32_t held_before) noexcept;
     void note_late_(MovieFrame first) noexcept;
     void note_gap_() noexcept;
@@ -116,10 +138,11 @@ private:
     void disarm_(ReplayEnd why, bool release) noexcept;
     [[nodiscard]] bool pre_epoch_(MovieFrame frame) const noexcept;
     [[nodiscard]] bool live_() const noexcept;
-    [[nodiscard]] std::int64_t now_ns_() const noexcept;
 
     [[nodiscard]] std::chrono::nanoseconds end_to_edge_() const noexcept;
     [[nodiscard]] std::chrono::nanoseconds into_frame_() const noexcept;
+
+    [[nodiscard]] std::chrono::nanoseconds since_offset_() const noexcept;
 
     [[nodiscard]] Ex<proto::FrameCount> read_counter_() noexcept;
 
@@ -133,42 +156,39 @@ private:
 
     ReplayLevel level_ = ReplayLevel::Idle;
     ControlGeneration gen_{};
-    std::uint8_t ports_ = 0;
+    svc::PlayerMask ports_{};
 
-    std::uint8_t release_ports_ = 0;
-    std::uint8_t rom_index_ = 0xFF;
+    svc::PlayerMask release_ports_{};
+    proto::IoIndex rom_index_ = kNoRomSlot;
     bool vsync_ok_ = false;
     MovieSpan lead_{};
-    std::int64_t offset_ns_ = 0;
-    std::int64_t period_ns_ = 0;
-    std::int64_t line0_ns_ = 0;
-    std::int64_t poweron_ns_ = 0;
-    std::uint8_t late_frames_ = 0;
-    ReplayMsg::P0Parity p0_ = ReplayMsg::P0Parity::Any;
+    std::chrono::nanoseconds offset_ns_{};
+
+    EpochRule rule_{};
     ReplayMsg::PowerOnEvent event_ = ReplayMsg::PowerOnEvent::LoadEnd;
     std::uint32_t floor_back_ = kFloorBack;
-    std::int64_t alias_ns_ = 0;
-    std::uint32_t edge_seq_ = 0;
+    std::chrono::nanoseconds alias_ns_{};
+    CoreEdgeSeq edge_seq_{};
 
     std::uint32_t last_raw_ = 0;
     std::uint32_t wrap_mask_ = 0;
     std::uint32_t frames_ = 0;
-    std::int64_t edge_ns_ = 0;
-    std::int64_t last_sample_ns_ = 0;
-    std::int64_t end_ns_ = 0;
-    std::int64_t prev_edge_ns_ = 0;
-    std::int64_t read_ns_ = 0;
+    os::RawMonotonicClock::time_point edge_{};
+    os::RawMonotonicClock::time_point last_sample_{};
+    os::RawMonotonicClock::time_point end_{};
+    os::RawMonotonicClock::time_point prev_edge_{};
+    std::optional<os::RawMonotonicClock::time_point> read_{};
     std::chrono::nanoseconds edge_gap_{};
     std::uint32_t blk_seen_ = 0;
     std::uint32_t blk_base_ = 0;
     bool epoch_known_ = false;
     std::uint32_t epoch_ = 0;
 
-    std::int64_t now_ = 0;
+    os::RawMonotonicClock::time_point now_{};
     bool ready_ = false;
     std::uint32_t round_words_ = 0;
     std::optional<std::uint32_t> queued_{};
-    std::int64_t tick_ns_ = 0;
+    std::optional<os::RawMonotonicClock::time_point> tick_{};
     std::chrono::nanoseconds gap_{};
     WideMovieFrame mf_ = kNoWideMovieFrame;
     WideMovieFrame covered_ = kNoWideMovieFrame;

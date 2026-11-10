@@ -9,12 +9,12 @@
 #include <string_view>
 
 #include "app/cmd_verb_sink.h"
-#include "ui/page_window.h"
 #include "app/page_description.h"
-#include "app/pending_load.h"
+#include "app/bitstream_resolve.h"
 #include "app/name_config.h"
 #include "app/recents_store.h"
 #include "app/ui_request_ring.h"
+#include "infra/message_sum.h"
 #include "infra/opt_ref.h"
 #include "ui/draw_classic.h"
 #include "ui/free_space.h"
@@ -80,27 +80,100 @@ std::string_view plain_label(std::string_view t) noexcept {
     return t;
 }
 
+struct SystemRowFact {
+    SystemItem item;
+    proto::OsdRow line;
+    std::string_view text;
+    std::string_view hd_label;
+    std::string_view hd_value;
+    app::PageDescription::RowKind kind;
+};
+
+constexpr std::array<SystemRowFact, kSystemItemTotal> kSystemRows{{
+    {SystemItem::Core, proto::OsdRow{0}, kRowCore, {}, {}, app::PageDescription::RowKind::Submenu},
+    {SystemItem::SwitchStorage,
+     proto::OsdRow{5},
+     {},
+     {},
+     {},
+     app::PageDescription::RowKind::Action},
+    {SystemItem::RemapKeyboard,
+     proto::OsdRow{7},
+     kRowRemap,
+     {},
+     {},
+     app::PageDescription::RowKind::Action},
+    {SystemItem::DefineJoystick,
+     proto::OsdRow{8},
+     kRowJoy,
+     {},
+     {},
+     app::PageDescription::RowKind::Submenu},
+    {SystemItem::Scripts,
+     proto::OsdRow{9},
+     kRowScripts,
+     {},
+     {},
+     app::PageDescription::RowKind::Submenu},
+    {SystemItem::Help, proto::OsdRow{10}, kRowHelp, {}, {}, app::PageDescription::RowKind::Action},
+    {SystemItem::SaveSettings,
+     proto::OsdRow{11},
+     kRowSave,
+     {},
+     {},
+     app::PageDescription::RowKind::Submenu},
+    {SystemItem::Reboot,
+     proto::OsdRow{12},
+     kRowReboot,
+     kHdRebootLabel,
+     kHdRebootValue,
+     app::PageDescription::RowKind::Action},
+    {SystemItem::UseHd,
+     proto::OsdRow{14},
+     kRowUseHd,
+     {},
+     {},
+     app::PageDescription::RowKind::Action},
+    {SystemItem::Exit, proto::OsdRow{15}, kStdExit, {}, {}, app::PageDescription::RowKind::Action},
+}};
+
+consteval bool system_rows_are_ordinal() {
+    if (kSystemRows.size() != infra::ordinal(SystemItem::kCount))
+        return false;
+    for (std::size_t i = 0; i < kSystemRows.size(); ++i)
+        if (infra::ordinal(kSystemRows[i].item) != i)
+            return false;
+    return true;
+}
+
+static_assert(system_rows_are_ordinal(), "kSystemRows names every SystemItem, in ordinal order");
+
+consteval bool system_rows_ascend() {
+    for (std::size_t i = 1; i < kSystemRows.size(); ++i)
+        if (!(kSystemRows[i - 1].line < kSystemRows[i].line))
+            return false;
+    return true;
+}
+
+static_assert(system_rows_ascend(), "kSystemRows' lines ascend with its ordinals");
+
+[[nodiscard]] constexpr const SystemRowFact* find_system_row(SystemItem it) noexcept {
+    const std::size_t i = infra::ordinal(it);
+    return i < kSystemRows.size() ? &kSystemRows[i] : nullptr;
+}
+
+[[nodiscard]] constexpr std::string_view system_row_label(SystemItem it) noexcept {
+    const SystemRowFact* const row = find_system_row(it);
+    return row ? row->text : std::string_view{};
+}
+
 app::PageDescription::RowKind system_row_kind(std::optional<SystemItem> item) noexcept {
     if (!item.has_value())
         return app::PageDescription::RowKind::Text;
-    switch (*item) {
-        case SystemItem::Core:
-        case SystemItem::DefineJoystick:
-        case SystemItem::Scripts:
-        case SystemItem::SaveSettings:
-            return app::PageDescription::RowKind::Submenu;
-        case SystemItem::SwitchStorage:
-        case SystemItem::RemapKeyboard:
-        case SystemItem::Help:
-        case SystemItem::Reboot:
-        case SystemItem::UseHd:
-        case SystemItem::Exit:
-            break;
-    }
-    return app::PageDescription::RowKind::Action;
-}
+    const SystemRowFact* const row = find_system_row(*item);
 
-constexpr std::uint8_t kItemRow[10] = {0, 5, 7, 8, 9, 10, 11, 12, 14, 15};
+    return row ? row->kind : app::PageDescription::RowKind::Action;
+}
 
 constexpr std::string_view kScriptsWarningBody[] = {
     "",
@@ -139,24 +212,47 @@ void SystemPage::on_enter(PageContext& ctx) {
 
 namespace {
 
-constexpr proto::OsdRow kLineCore{0};
 constexpr proto::OsdRow kLineVersion{1};
 constexpr proto::OsdRow kLineGapTop{2};
 constexpr proto::OsdRow kLineStorage{3};
 constexpr proto::OsdRow kLineSpace{4};
-constexpr proto::OsdRow kLineSwitch{5};
 constexpr proto::OsdRow kLineGapMid{6};
-constexpr proto::OsdRow kLineRemap{7};
-constexpr proto::OsdRow kLineJoystick{8};
-constexpr proto::OsdRow kLineScripts{9};
-constexpr proto::OsdRow kLineHelp{10};
-constexpr proto::OsdRow kLineSave{11};
-constexpr proto::OsdRow kLineReboot{12};
 constexpr proto::OsdRow kLineKernel{13};
-constexpr proto::OsdRow kLineUseHd{14};
-constexpr proto::OsdRow kLineExit{15};
+constexpr std::array<proto::OsdRow, 6>
+    kTextOnlyLines{kLineVersion, kLineGapTop, kLineStorage, kLineSpace, kLineGapMid, kLineKernel};
 
-constexpr std::string_view kColdHead = " Cold";
+inline constexpr std::size_t kClassicPageRows = std::size(kTextOnlyLines) + kSystemRows.size();
+static_assert(
+    RowCount::of(kClassicPageRows) == kFullOsdRows,
+    "the item rows and the text-only rows fill the classic page"
+);
+
+consteval bool rows_partition_the_classic_page() {
+    std::array<bool, kClassicPageRows> drawn{};
+    const auto claim = [&drawn](proto::OsdRow row) {
+        for (std::size_t i = 0; i < drawn.size(); ++i) {
+            if (row != proto::OsdRow::of(i))
+                continue;
+            if (drawn[i])
+                return false;
+            drawn[i] = true;
+            return true;
+        }
+        return false;
+    };
+    for (const proto::OsdRow row : kTextOnlyLines)
+        if (!claim(row))
+            return false;
+    for (const SystemRowFact& fact : kSystemRows)
+        if (!claim(fact.line))
+            return false;
+    for (const bool d : drawn)
+        if (!d)
+            return false;
+    return true;
+}
+
+static_assert(rows_partition_the_classic_page(), "the item rows and text rows tile the OSD");
 constexpr RowIndex kConfirmCancel{0};
 constexpr RowIndex kConfirmRememberScripts{2};
 }
@@ -164,18 +260,25 @@ constexpr RowIndex kConfirmRememberScripts{2};
 template <class Visit>
 void SystemPage::for_each_row(Visit&& visit) const {
     std::array<char, kClassicRowCap> s{};
-    visit(kLineCore, SystemItem::Core, std::string_view{kRowCore}, false);
 
-    if (facts_.os_version[0] != '\0') {
+    const auto draw_item = [&](SystemItem it, std::string_view text, bool stippled) {
+        visit(system_item_row(it), it, text, stippled);
+    };
+    const auto draw_label = [&](SystemItem it) {
+        draw_item(it, system_row_label(it), false);
+    };
+    draw_label(SystemItem::Core);
+
+    if (!facts_.os_version.empty()) {
         std::snprintf(
             s.data(),
             s.size(),
             " MiSTer v%s,  OS v%s",
-            facts_.version,
-            facts_.os_version
+            facts_.version.c_str(),
+            facts_.os_version.c_str()
         );
     } else {
-        std::snprintf(s.data(), s.size(), "       MiSTer v%s", facts_.version);
+        std::snprintf(s.data(), s.size(), "       MiSTer v%s", facts_.version.c_str());
     }
     visit(kLineVersion, std::nullopt, std::string_view{s.data()}, false);
     visit(kLineGapTop, std::nullopt, std::string_view{}, false);
@@ -199,39 +302,33 @@ void SystemPage::for_each_row(Visit&& visit) const {
     const std::string space = "   Available space: "
         + format_free_space(facts_.avail, FreeSpaceStyle::Classic);
     visit(kLineSpace, std::nullopt, space, false);
-    visit(kLineSwitch, SystemItem::SwitchStorage, switch_to, switch_stippled);
+    draw_item(SystemItem::SwitchStorage, switch_to, switch_stippled);
 
     visit(kLineGapMid, std::nullopt, std::string_view{}, false);
-    visit(kLineRemap, SystemItem::RemapKeyboard, std::string_view{kRowRemap}, false);
-    visit(kLineJoystick, SystemItem::DefineJoystick, std::string_view{kRowJoy}, false);
-    visit(kLineScripts, SystemItem::Scripts, std::string_view{kRowScripts}, false);
-    visit(kLineHelp, SystemItem::Help, std::string_view{kRowHelp}, false);
-    visit(
-        kLineSave,
+    draw_label(SystemItem::RemapKeyboard);
+    draw_label(SystemItem::DefineJoystick);
+    draw_label(SystemItem::Scripts);
+    draw_label(SystemItem::Help);
+
+    draw_item(
         SystemItem::SaveSettings,
-        facts_.core_loaded ? std::string_view{kRowSave} : std::string_view{},
+        session_.core_loaded ? system_row_label(SystemItem::SaveSettings) : std::string_view{},
         false
     );
 
-    if (reboot_req_) {
-        std::snprintf(s.data(), s.size(), " Cold Reboot");
-        visit(
-            kLineReboot,
-            SystemItem::Reboot,
-            std::string_view{s.data() + kColdHead.size() - reboot_off_},
-            false
-        );
+    if (const auto tail = reboot_.tail()) {
+        draw_item(SystemItem::Reboot, *tail, false);
     } else {
-        visit(kLineReboot, SystemItem::Reboot, std::string_view{kRowReboot}, false);
+        draw_label(SystemItem::Reboot);
     }
     visit(kLineKernel, std::nullopt, std::string_view{kernel_row(facts_.kernel)}, false);
 
-    if (facts_.hd_switchable) {
-        visit(kLineUseHd, SystemItem::UseHd, std::string_view{kRowUseHd}, false);
+    if (session_.shows_hd_switch()) {
+        draw_label(SystemItem::UseHd);
     } else {
-        visit(kLineUseHd, std::nullopt, std::string_view{}, false);
+        visit(system_item_row(SystemItem::UseHd), std::nullopt, std::string_view{}, false);
     }
-    visit(kLineExit, SystemItem::Exit, std::string_view{kStdExit}, false);
+    draw_label(SystemItem::Exit);
 }
 
 bool SystemPage::walk(PageWalk& out) const {
@@ -240,17 +337,17 @@ bool SystemPage::walk(PageWalk& out) const {
     out.title_arrow = OsdRenderer::kArrowLeft;
     out.count = 0;
 
-    std::uint16_t total = 0;
-    std::uint16_t selected = 0;
+    RowCount total{};
+    RowIndex selected{};
     for_each_row([&](proto::OsdRow, std::optional<SystemItem> item, std::string_view text, bool) {
         if (text.empty())
             return;
         if (item.has_value() && item_selected(*item))
-            selected = total;
-        ++total;
+            selected = row_after(total);
+        total += kOneRow;
     });
 
-    const app::HdWindow win = window_page(out.page, RowIndex::of(selected), RowCount::of(total));
+    const app::HdWindow win = out.window(selected, total);
 
     const RowRange window = rows(win.first, win.count);
     RowIndex at{};
@@ -271,9 +368,11 @@ bool SystemPage::walk(PageWalk& out) const {
             {.inverted = item.has_value() && item_selected(*item), .stippled = stippled}
         );
         r.has_hd = true;
-        if (item == SystemItem::Reboot) {
-            (void)r.hd.label.assign(kHdRebootLabel);
-            (void)r.hd.value.assign(kHdRebootValue);
+
+        const SystemRowFact* const fact = item.has_value() ? find_system_row(*item) : nullptr;
+        if (fact != nullptr && !fact->hd_label.empty()) {
+            (void)r.hd.label.assign(fact->hd_label);
+            (void)r.hd.value.assign(fact->hd_value);
         } else {
             (void)r.hd.label.assign(plain_label(text));
         }
@@ -308,7 +407,7 @@ Transition SystemPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(SystemPage);
 
     if (ev.buttons.has_any({UiEvent::Menu})) {
-        if (facts_.front_end && !facts_.in_hd_tree)
+        if (session_.front_end && !session_.in_hd_tree)
             return open_core_browser(false);
         return Transition{Transition::Kind::CloseAll};
     }
@@ -316,7 +415,7 @@ Transition SystemPage::handle(const UiEvent& ev) {
     if (ev.buttons.has_any({UiEvent::Left})) {
         (void)reboot_release(ev);
 
-        if (facts_.front_end)
+        if (session_.front_end)
             return Transition{Transition::Kind::Stay};
         return Transition{Transition::Kind::Replace, PageId::CoreOptions};
     }
@@ -342,7 +441,7 @@ Transition SystemPage::handle(const UiEvent& ev) {
             return open_scripts_confirm();
         case SystemItem::SaveSettings: {
 
-            if (!facts_.core_loaded) {
+            if (!session_.core_loaded) {
                 ++refusals_;
                 return Transition{};
             }
@@ -356,16 +455,9 @@ Transition SystemPage::handle(const UiEvent& ev) {
         }
         case SystemItem::Reboot: {
 
-            reboot_req_ = true;
-            constexpr unsigned kRepeatsPerSlide = 3;
-            const unsigned off = ev.repeat_depth / kRepeatsPerSlide;
-            if (off > kColdHead.size()) {
-
-                if (!cold_sent_ && ask_reboot_())
-                    cold_sent_ = true;
-            } else {
-                reboot_off_ = static_cast<std::uint8_t>(off);
-            }
+            const RebootHold::Step step = reboot_.hold({ev.repeat_depth});
+            if (step.ask_cold && ask_reboot_())
+                reboot_.ask_landed();
             return Transition{};
         }
         case SystemItem::UseHd:
@@ -379,33 +471,51 @@ Transition SystemPage::handle(const UiEvent& ev) {
 
             ++refusals_;
             return Transition{};
+        case SystemItem::kCount:
+
+            break;
     }
 
     ++refusals_;
     return Transition{};
 }
 
+RebootHold::Step RebootHold::hold(RepeatDepth depth) noexcept {
+    TASTY_SEAT_BODY(RebootHold);
+    if (phase_ == Phase::Idle)
+        phase_ = Phase::Sliding;
+    slide_ = ColdSlide::at(depth);
+
+    return Step{slide_, phase_ != Phase::ColdSent && ColdSlide::past_head(depth)};
+}
+
+bool RebootHold::release(RepeatDepth depth) noexcept {
+    TASTY_SEAT_BODY(RebootHold);
+    if (phase_ == Phase::Idle || !depth.released())
+        return false;
+    phase_ = Phase::Idle;
+    slide_ = ColdSlide{};
+    return true;
+}
+
 Transition SystemPage::reboot_release(const UiEvent& ev) {
-    if (reboot_req_ && ev.repeat_depth == 0) {
-        reboot_req_ = false;
-        cold_sent_ = false;
-        reboot_off_ = 0;
-        const app::CmdVerb::LoadCore menu{app::kFrontEndImage, app::CmdVerb::RbfOrMra::Rbf};
-        if (route_ && route_->on(menu)) {
-            ++published_;
-        } else {
-            ++refusals_;
-        }
+    if (!reboot_.release({ev.repeat_depth}))
+        return Transition{};
+    const app::CmdVerb::LoadCore menu{app::kFrontEndImage, app::CmdVerb::RbfOrMra::Rbf};
+    if (route_ && route_->on(menu)) {
+        ++published_;
+    } else {
+        ++refusals_;
     }
     return Transition{};
 }
 
 Transition SystemPage::use_hd_() {
-    if (!facts_.hd_switchable) {
+    if (!session_.shows_hd_switch()) {
         ++refusals_;
         return Transition{};
     }
-    if (!push_ask(ui_requests_, app::UiRequest::SetOsdStyle{.style = 1})) {
+    if (!push_ask(ui_requests_, app::UiRequest::SetOsdStyle{.style = app::OsdStyle::Hd})) {
         ++refusals_;
     } else {
         ++published_;
@@ -450,7 +560,7 @@ Transition SystemPage::open_scripts_browser(Transition::Kind kind) {
     r.scan.include_dirs = true;
 
     r.home_path = "Scripts";
-    r.games_dir = facts_.core_dir;
+    r.games_dir.assign(session_.core_dir.view());
     r.host = infra::opt_ref_of(static_cast<IBrowserHost*>(&script_pick_));
     browser->pending = static_cast<BrowserSession::Request&&>(r);
 
@@ -476,15 +586,16 @@ Transition SystemPage::open_core_browser(bool recents_first) {
     BrowserSession::Request r;
     r.extensions = "RBFMRAMGL";
     r.scan.cores_only = true;
-    r.recents = app::RecentsStore::ListId{app::RecentsStore::ListId::Kind::Cores, 0};
+    const app::RecentsStore::ListId cores_list{
+        app::RecentsStore::ListId::Kind::Cores,
+        proto::IoIndex{}
+    };
+    r.recents = cores_list;
     r.recents_first = recents_first;
     r.host = infra::opt_ref_of(static_cast<IBrowserHost*>(&core_pick_));
     if (recents_first) {
 
-        if (!recents_
-            || recents_
-                   ->load("", app::RecentsStore::ListId{app::RecentsStore::ListId::Kind::Cores, 0})
-                   .empty()) {
+        if (!recents_ || recents_->load("", cores_list).empty()) {
             ++refusals_;
             return Transition{};
         }
@@ -505,39 +616,47 @@ Transition SystemPage::on_confirm(RowIndex choice) {
     return open_scripts_browser(Transition::Kind::Replace);
 }
 
-std::unique_ptr<Page> make_system_page(const SystemFacts& facts) {
-    return std::unique_ptr<Page>(new SystemPage(facts));
+std::unique_ptr<SystemPage> make_system_page(
+    const SystemFacts& facts,
+    const SessionFacts& session
+) {
+    return std::make_unique<SystemPage>(facts, session);
 }
 
 const char* system_row_text(SystemRow r) noexcept {
+
+    const auto text = [](SystemItem it) {
+        const std::string_view label = system_row_label(it);
+        return label.empty() ? "" : label.data();
+    };
     switch (r) {
         case SystemRow::Title:
             return kTitle;
         case SystemRow::Core:
-            return kRowCore;
+            return text(SystemItem::Core);
         case SystemRow::Remap:
-            return kRowRemap;
+            return text(SystemItem::RemapKeyboard);
         case SystemRow::Joystick:
-            return kRowJoy;
+            return text(SystemItem::DefineJoystick);
         case SystemRow::Scripts:
-            return kRowScripts;
+            return text(SystemItem::Scripts);
         case SystemRow::Help:
-            return kRowHelp;
+            return text(SystemItem::Help);
         case SystemRow::Save:
-            return kRowSave;
+            return text(SystemItem::SaveSettings);
         case SystemRow::Reboot:
-            return kRowReboot;
+            return text(SystemItem::Reboot);
         case SystemRow::UseHd:
-            return kRowUseHd;
+            return text(SystemItem::UseHd);
         case SystemRow::Exit:
-            return kStdExit;
+            return text(SystemItem::Exit);
     }
     return "";
 }
 
 OsdRow system_item_row(SystemItem it) noexcept {
-    const auto i = static_cast<unsigned>(it);
-    return OsdRow{(i < std::size(kItemRow)) ? kItemRow[i] : std::uint8_t{0}};
+    const SystemRowFact* const row = find_system_row(it);
+    return row ? row->line : OsdRow{};
 }
 
 }

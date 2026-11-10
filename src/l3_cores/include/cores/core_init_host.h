@@ -3,13 +3,18 @@
 
 namespace mister::cores {
 
-class CoreInitHost {
+class ICoreInitHost {
 public:
-    virtual ~CoreInitHost() = default;
+    virtual ~ICoreInitHost() = default;
 
     virtual void reset_video_geometry() = 0;
     virtual void arm_video_prelude() = 0;
     virtual void publish_core_identity() = 0;
+
+protected:
+    ICoreInitHost() = default;
+    ICoreInitHost(const ICoreInitHost&) = default;
+    ICoreInitHost& operator=(const ICoreInitHost&) = default;
 };
 
 }

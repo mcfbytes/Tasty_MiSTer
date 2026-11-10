@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 
+#include "app/picture_size.h"
 #include "app/rec_options.h"
 #include "app/rgb_rows.h"
 #include "infra/error.h"
@@ -25,11 +26,11 @@ public:
     virtual void restart(const RecOptions& opt) noexcept = 0;
     virtual void arm(infra::OptRef<const os::IClock> clock, std::int64_t budget_ns) noexcept = 0;
     [[nodiscard]] virtual Search search() const noexcept = 0;
-    [[nodiscard]] virtual Ex<void> begin(std::uint16_t w, std::uint16_t h) noexcept = 0;
+
+    [[nodiscard]] virtual Ex<void> begin(PictureSize size) noexcept = 0;
     virtual void end() noexcept = 0;
     [[nodiscard]] virtual bool open() const noexcept = 0;
-    [[nodiscard]] virtual std::uint16_t width() const noexcept = 0;
-    [[nodiscard]] virtual std::uint16_t height() const noexcept = 0;
+    [[nodiscard]] virtual PictureSize size() const noexcept = 0;
     [[nodiscard]] virtual std::size_t max_payload() const noexcept = 0;
 
     [[nodiscard]] virtual std::span<const std::byte> encode(

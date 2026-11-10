@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 
 #include "cores/cd_census_rows.h"
@@ -16,7 +17,8 @@
 #include "cores/cd_profile.h"
 #include "cores/cd_tick_periods.h"
 #include "cores/core_profile.h"
-#include "svc/disc_engine.h"
+#include "svc/cue_policy.h"
+#include "svc/search_policy.h"
 
 namespace mister::cores::manifests {
 
@@ -49,8 +51,8 @@ inline constexpr CdTickPeriods kThreeDoTicks{
 
 inline constexpr CdIoIndices kThreeDoIoIndices{
     .data = IoIndex{8},
-    .cdda = IoIndex{},
-    .subcode = IoIndex{},
+    .cdda = std::nullopt,
+    .subcode = std::nullopt,
     .info = IoIndex{0xC},
 };
 
@@ -61,20 +63,15 @@ inline constexpr svc::CuePolicy kThreeDoCuePolicy{
     .wav_header_skip = false,
     .sniff_sega_disc_system = false,
     .layout = svc::CuePolicy::Layout::Console,
-    .track_close = svc::CuePolicy::TrackClose::SentinelPregapRelative,
-    .pregap_model = svc::CuePolicy::PregapModel::SingleAccumulator,
-    .post_load_shift = svc::CuePolicy::PostLoadTocShift::None,
+    .program = svc::CuePolicy::Program::SentinelPregapRelative,
     .iso_sizing = svc::CuePolicy::IsoSizing::Declared2048,
 };
 
 inline constexpr CdProfile kThreeDoProfile{
-    .dialect = CdDialect::ThreeDo,
-    .crc_start = 0,
     .io = kThreeDoIoIndices,
     .cue = kThreeDoCuePolicy,
     .ticks = kThreeDoTicks,
-    .sniff_sega_disc_system = false,
-    .seek_fast_paths = {},
+    .row = CdProfile::ThreeDoFacts{},
 };
 
 inline constexpr auto kThreeDoSlots = std::to_array<FileSlot>({
@@ -85,8 +82,6 @@ inline constexpr auto kThreeDoSlots = std::to_array<FileSlot>({
      .required = false,
      .role = SlotRole::Disc},
 });
-
-inline constexpr svc::SearchDir kThreeDoHomeDir[] = {svc::SearchDir::CoreDir};
 
 inline constexpr std::string_view kThreeDoDiscWords[] = {"disc", "disk"};
 
@@ -107,7 +102,7 @@ inline constexpr auto kThreeDoBootAssets = std::to_array<BootAsset>({
      .dest = WideIoIndex{0},
      .group = 0},
     {.name = "boot.rom",
-     .where = kThreeDoHomeDir,
+     .where = kCoreHomeDir,
      .optional = true,
      .anchor = AssetAnchor::Search,
      .subdir = "3DO",
@@ -173,9 +168,11 @@ inline constexpr StagingPolicy kThreeDoStaging{
     .order = StageOrder::ThreeDo,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kThreeDoSlots),
-    .save_slot = IoIndex{0},
-    .save_dest = WideIoIndex{4},
-    .save_name_disc_words = kThreeDoDiscWords,
+    .save = SaveMountPolicy{
+        .slot = IoIndex{0},
+        .bracket = WideIoIndex{4},
+        .disc_words = kThreeDoDiscWords,
+    },
 };
 
 inline constexpr CoreProfile kThreeDo{

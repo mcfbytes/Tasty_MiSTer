@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <string_view>
+#include <vector>
 
 #include "app/mra_facts.h"
 #include "infra/error.h"
@@ -11,9 +14,15 @@
 
 namespace mister::svc {
 class Vfs;
+class IFile;
 }
 
 namespace mister::app {
+
+inline constexpr std::uint64_t kIniCap = 1u << 20;
+
+[[nodiscard]] Ex<std::vector<std::byte>> read_ini_whole(const svc::Vfs& vfs);
+[[nodiscard]] Ex<std::vector<std::byte>> read_ini_whole(svc::IFile& file);
 
 using ConfigCell = xthread::Telemetry<svc::ConfigSnapshot, SeatTag::Main>;
 

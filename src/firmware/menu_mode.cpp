@@ -5,7 +5,6 @@
 
 #include <cstdio>
 #include <memory>
-#include <utility>
 #include <string_view>
 
 #include "app/link_session.h"
@@ -41,6 +40,18 @@ const char* irq_pin_verdict(hal::IrqPinOutcome o) {
     return "?";
 }
 
+const char* kernel_label(os::KernelRt kernel) noexcept {
+    switch (kernel) {
+        case os::KernelRt::PreemptRt:
+            return "RT";
+        case os::KernelRt::NotRt:
+            return "non-RT";
+        case os::KernelRt::Unknown:
+            return "unknown";
+    }
+    return "?";
+}
+
 void announce_irq_pin(const hal::IrqPinResult& r) {
     const int alen = static_cast<int>(r.action.size());
     if (r.outcome == hal::IrqPinOutcome::Applied) {
@@ -72,16 +83,11 @@ void announce_irq_pin(const hal::IrqPinResult& r) {
 }
 
 MenuMode::MenuMode(int argc, char** argv) noexcept
-    : title_(os::ProcessTitle::create(argc, argv, environ)) {
+    : title_(os::ProcessTitle::create(argc, argv, environ)),
+      boot_args_(app::BootArgs::from_argv(argc, argv)) {
 
     if (!title_)
         report("ProcessTitle::create", title_.error());
-
-    boot_argv_ = {argv[0], (argc > 1) ? argv[1] : "", nullptr};
-    if (std::cmp_greater(argc, kCompanionArg)) {
-        boot_argv_[kCompanionArg] = argv[kCompanionArg];
-        boot_argc_ = kCompanionArg + 1;
-    }
 }
 
 std::unique_ptr<SessionMode::Front> MenuMode::front(const BootParts& plat) {
@@ -214,18 +220,12 @@ void MenuMode::storage_ready(svc::Vfs& vfs) {
 }
 
 void MenuMode::StderrVoice::kernel(os::KernelRt kernel) const {
-    std::fprintf(
-        stderr,
-        "mister: kernel: %s\n",
-        kernel == os::KernelRt::PreemptRt   ? "RT"
-            : kernel == os::KernelRt::NotRt ? "non-RT"
-                                            : "unknown"
-    );
+    std::fprintf(stderr, "mister: kernel: %s\n", kernel_label(kernel));
 }
 
 Ex<void> MenuMode::before_boot(app::LinkSession& session) {
-    app::StdoutRouter* router = session.boot_stdout_router();
-    if (router == nullptr)
+    const infra::OptRef<app::StdoutRouter> router = session.boot_stdout_router();
+    if (!router)
         return {};
     return router->install_initial_silence();
 }

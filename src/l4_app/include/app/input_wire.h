@@ -9,6 +9,7 @@
 
 #include "infra/counter.h"
 #include "infra/error.h"
+#include "infra/fixed_str.h"
 #include "infra/indexed_array.h"
 #include "infra/opt_ref.h"
 #include "infra/spsc_ring.h"
@@ -19,6 +20,7 @@
 #include "app/raw_key_edge.h"
 #include "app/types.h"
 #include "hal/types.h"
+#include "proto/frame_drops.h"
 #include "svc/input_service.h"
 #include "svc/joy_plan.h"
 #include "svc/types.h"
@@ -49,7 +51,7 @@ struct JoyLevel {
 using CaptureArmCell = xthread::Telemetry<CaptureArm, SeatTag::Ui>;
 using CaptureHitCell = xthread::Telemetry<CaptureHit, SeatTag::Input>;
 
-using RumblePadsCell = xthread::Telemetry<std::uint8_t, SeatTag::Input>;
+using RumblePlayersCell = xthread::Telemetry<svc::PlayerMask, SeatTag::Input>;
 
 class InputWire final {
     TASTY_SEAT_MEDIATOR(Input, Any);
@@ -59,9 +61,6 @@ public:
     static constexpr InputGateBits kGateOsdVisible{1u << 1};
 
     static constexpr InputGateBits kGateKeysDropped{1u << 2};
-
-    static constexpr InputRequestBits kReqGrabOn{1u << 1};
-    static constexpr InputRequestBits kReqGrabApply{1u << 2};
 
     static constexpr InputRequestBits kReqHotplug{1u << 4};
 
@@ -97,9 +96,9 @@ public:
 
     std::uint32_t keys_dropped() const noexcept { return keys_dropped_.get(); }
 
-    void note_key_drop(unsigned n) noexcept {
-        keys_dropped_.add(n);
-        publish_gates(kGateKeysDropped, {});
+    void note_key_drop(proto::FrameDrops n) noexcept {
+        keys_dropped_.add(n.v);
+        raise_gate(kGateKeysDropped);
     }
 
     void note_key_sweep(unsigned released) noexcept {
@@ -116,22 +115,16 @@ public:
     struct CoreNameCell {
 
         CoreNameCell() noexcept = default;
-        char name[kCoreNameCap] = {};
-        std::uint8_t len = 0;
+
+        FixedStr<kCoreNameCap, StrFit::Clip> name{};
         bool front_end = false;
 
-        std::string_view view() const noexcept { return std::string_view(name, len); }
+        std::string_view view() const noexcept { return name.view(); }
     };
 
     void publish_core_name(std::string_view name, bool front_end) noexcept {
         CoreNameCell c{};
-        std::size_t n = name.size();
-        if (n > kCoreNameCap - 1u)
-            n = kCoreNameCap - 1u;
-        for (std::size_t i = 0; i < n; ++i)
-            c.name[i] = name[i];
-        c.name[n] = '\0';
-        c.len = static_cast<std::uint8_t>(n);
+        (void)c.name.assign(name);
         c.front_end = front_end;
         name_cell_.publish(c);
     }
@@ -150,11 +143,11 @@ public:
 
     const CaptureHitCell& capture_hit() const noexcept { return capture_hit_; }
 
-    RumblePadsCell& rumble_pads_cell() noexcept { return rumble_pads_; }
+    RumblePlayersCell& rumble_pads_cell() noexcept { return rumble_pads_; }
 
-    const RumblePadsCell& rumble_pads_cell() const noexcept { return rumble_pads_; }
+    const RumblePlayersCell& rumble_pads_cell() const noexcept { return rumble_pads_; }
 
-    std::uint8_t rumble_pads() const noexcept { return rumble_pads_.sample().value; }
+    svc::PlayerMask rumble_pads() const noexcept { return rumble_pads_.sample().value; }
 
     void publish_analog_reshape(infra::OptRef<const svc::IAnalogReshape> r) noexcept {
         reshape_.publish(r);
@@ -168,19 +161,21 @@ public:
 
     const xthread::WakeFlag& edge_reset() const noexcept { return edge_reset_; }
 
-    void publish_gates(InputGateBits set, InputGateBits clear) noexcept {
-        std::uint32_t g = gates_.load(std::memory_order_relaxed);
-        g = (g | set.v) & ~clear.v;
-        gates_.store(g, std::memory_order_release);
+    void set_gate(InputGateBits bit, bool on) noexcept {
+        const InputGateBits cur{gates_.load(std::memory_order_relaxed)};
+        gates_.store((on ? cur.with(bit) : cur.without(bit)).v, std::memory_order_release);
     }
 
-    InputGateBits gates() const noexcept { return {gates_.load(std::memory_order_acquire)}; }
-
-    static constexpr bool has(InputGateBits word, InputGateBits bit) noexcept {
-        return (word.v & bit.v) != 0u;
+    void raise_gate(InputGateBits bit) noexcept {
+        const InputGateBits cur{gates_.load(std::memory_order_relaxed)};
+        gates_.store(cur.with(bit).v, std::memory_order_release);
     }
 
-    bool gated(InputGateBits bit) const noexcept { return has(gates(), bit); }
+    InputGateBits gates() const noexcept {
+        return InputGateBits{gates_.load(std::memory_order_acquire)};
+    }
+
+    bool gated(InputGateBits bit) const noexcept { return gates().has(bit); }
 
     void note_activity() noexcept { activity_seq_.add(1u); }
 
@@ -190,12 +185,14 @@ public:
 
     void update_osd_request(bool on) noexcept {
         std::uint32_t cur = req_.load(std::memory_order_relaxed);
-        std::uint32_t next = 0;
+        InputRequestBits next{};
         do {
-            next = (cur & ~kReqOsdOn.v) | kReqOsdApply.v | (on ? kReqOsdOn.v : 0u);
+            next = InputRequestBits{cur}.without(kReqOsdOn).with(kReqOsdApply);
+            if (on)
+                next = next.with(kReqOsdOn);
         } while (!req_.compare_exchange_weak(
             cur,
-            next,
+            next.v,
             std::memory_order_release,
             std::memory_order_relaxed
         ));
@@ -203,18 +200,18 @@ public:
 
     [[nodiscard]] std::optional<bool> take_osd_request() noexcept {
         std::uint32_t cur = req_.load(std::memory_order_acquire);
-        std::uint32_t next = 0;
+        InputRequestBits next{};
         do {
-            if ((cur & kReqOsdApply.v) == 0u)
+            if (!InputRequestBits{cur}.has(kReqOsdApply))
                 return std::nullopt;
-            next = cur & ~kReqOsdApply.v;
+            next = InputRequestBits{cur}.without(kReqOsdApply);
         } while (!req_.compare_exchange_weak(
             cur,
-            next,
+            next.v,
             std::memory_order_acq_rel,
             std::memory_order_acquire
         ));
-        return (cur & kReqOsdOn.v) != 0u;
+        return InputRequestBits{cur}.has(kReqOsdOn);
     }
 
     void request(InputRequestBits set) noexcept { req_.fetch_or(set.v, std::memory_order_release); }
@@ -223,13 +220,11 @@ public:
         req_.fetch_and(~clear.v, std::memory_order_release);
     }
 
-    InputRequestBits requests() const noexcept { return {req_.load(std::memory_order_acquire)}; }
-
-    static constexpr bool has(InputRequestBits word, InputRequestBits bit) noexcept {
-        return (word.v & bit.v) != 0u;
+    InputRequestBits requests() const noexcept {
+        return InputRequestBits{req_.load(std::memory_order_acquire)};
     }
 
-    bool requested(InputRequestBits bit) const noexcept { return has(requests(), bit); }
+    bool requested(InputRequestBits bit) const noexcept { return requests().has(bit); }
 
     bool arm_kick() noexcept { return !kick_armed_.exchange(true, std::memory_order_acq_rel); }
 
@@ -256,10 +251,6 @@ public:
     void note_rebuild_refused() noexcept { rebuilds_refused_.add(1u); }
 
     void note_rebuild_done() noexcept { rebuilds_done_.add(1u); }
-
-    static void bump(std::atomic<std::uint32_t>& c, std::uint32_t by) noexcept {
-        c.store(c.load(std::memory_order_relaxed) + by, std::memory_order_relaxed);
-    }
 
     std::uint32_t rebuilds_refused() const noexcept { return rebuilds_refused_.get(); }
 
@@ -300,7 +291,7 @@ private:
 
     CaptureArmCell capture_arm_{};
     CaptureHitCell capture_hit_{};
-    RumblePadsCell rumble_pads_{};
+    RumblePlayersCell rumble_pads_{};
 
     xthread::WakeFlag ctrl_{};
 

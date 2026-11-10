@@ -13,7 +13,6 @@ namespace mister::app {
 
 namespace {
 
-constexpr std::string_view kRecentTag = "_recent_";
 constexpr std::string_view kDateTag = "_20";
 
 using infra::ieq;
@@ -29,51 +28,7 @@ bool iless(std::string_view a, std::string_view b) noexcept {
 }
 
 std::int64_t now_ns(infra::OptRef<const os::IClock> clock) {
-    return clock ? static_cast<std::int64_t>(clock->now().count()) : 0;
-}
-
-struct RecentsFile {
-    std::string core;
-    RecentsStore::ListId id{};
-    bool ok = false;
-};
-
-RecentsFile parse_recents_name(std::string_view name) {
-    constexpr std::size_t kExtLen = 4;
-    constexpr std::size_t kMaxRecentDigits = 3;
-    constexpr unsigned kDecimal = 10;
-    constexpr unsigned kMountIndexBase = 500;
-    RecentsFile out;
-    if (name.size() <= kExtLen + 1 || !ieq(name.substr(name.size() - kExtLen), ".cfg"))
-        return out;
-    const std::string_view stem = name.substr(0, name.size() - kExtLen);
-    const std::size_t at = stem.rfind(kRecentTag);
-    if (at == std::string_view::npos || at == 0)
-        return out;
-    const std::string_view digits = stem.substr(at + kRecentTag.size());
-    if (digits.empty() || digits.size() > kMaxRecentDigits)
-        return out;
-    unsigned idx = 0;
-    for (const char c : digits) {
-        if (c < '0' || c > '9')
-            return out;
-        idx = idx * kDecimal + static_cast<unsigned>(c - '0');
-    }
-    out.core = std::string{stem.substr(0, at)};
-    const auto slot = static_cast<std::uint8_t>(
-        idx >= kMountIndexBase ? idx - kMountIndexBase : idx
-    );
-    out.id = RecentsStore::ListId{
-        idx >= kMountIndexBase ? RecentsStore::ListId::Kind::Mount
-                               : RecentsStore::ListId::Kind::File,
-        slot
-    };
-    out.ok = true;
-    return out;
-}
-
-bool same_list(const RecentsStore::ListId& a, const RecentsStore::ListId& b) noexcept {
-    return a.kind == b.kind && a.slot == b.slot;
+    return clock ? static_cast<std::int64_t>(clock->now().time_since_epoch().count()) : 0;
 }
 
 std::string datecode_of(std::string_view image) {
@@ -198,21 +153,24 @@ void RecentGames::read_sources_(const svc::Vfs& files, RecentsStore& recents) {
 
     struct Found {
         std::string name;
-        RecentsFile rf;
-        std::int64_t mtime = 0;
+        RecentsStore::ListId id{};
+        std::string core;
+        std::chrono::sys_seconds mtime{};
     };
 
     std::vector<Found> found;
     for (const svc::DirEntry& e : *entries) {
         if (e.is_dir)
             continue;
-        Found f;
-        f.rf = parse_recents_name(e.name);
-        if (!f.rf.ok)
+        const auto list = RecentsStore::ListId::from_file_name(e.name);
+        if (!list)
             continue;
+        Found f;
         f.name = e.name;
+        f.core = list->first;
+        f.id = list->second;
         const auto m = files.modified(std::string{"config/"} + e.name);
-        f.mtime = m ? *m : 0;
+        f.mtime = m ? *m : std::chrono::sys_seconds{};
         found.push_back(std::move(f));
     }
     std::sort(found.begin(), found.end(), [](const Found& a, const Found& b) {
@@ -225,8 +183,8 @@ void RecentGames::read_sources_(const svc::Vfs& files, RecentsStore& recents) {
 
     for (const Found& f : found) {
         Source s;
-        s.core = f.rf.core;
-        s.id = f.rf.id;
+        s.core = f.core;
+        s.id = f.id;
         s.mtime = f.mtime;
         s.entries = recents.load(s.core, s.id);
         sources_.push_back(std::move(s));
@@ -249,12 +207,12 @@ void RecentGames::reread_source_(
         return;
     const RecentsStore::ListId id{
         session.slot == 'S' ? RecentsStore::ListId::Kind::Mount : RecentsStore::ListId::Kind::File,
-        session.ioctl_index
+        proto::IoIndex{session.ioctl_index}
     };
 
     bool found = false;
     for (Source& s : sources_) {
-        if (!ieq(s.core, core) || !same_list(s.id, id))
+        if (!ieq(s.core, core) || s.id != id)
             continue;
         s.entries = recents.load(s.core, s.id);
         const auto m = files.modified("config/" + RecentsStore::file_name(s.core, s.id));
@@ -272,7 +230,7 @@ void RecentGames::reread_source_(
     s.core = core;
     s.id = id;
     const auto m = files.modified("config/" + RecentsStore::file_name(core, id));
-    s.mtime = m ? *m : 0;
+    s.mtime = m ? *m : std::chrono::sys_seconds{};
     s.entries = recents.load(core, id);
     ++rereads_;
     if (s.entries.empty())
@@ -311,7 +269,7 @@ void RecentGames::assemble_(
         r.rbf = recent_rbf_prefix(session.core_image);
         r.path.assign(session.path);
         r.title.assign(session.title);
-        r.ioctl_index = session.ioctl_index;
+        r.ioctl_index = proto::IoIndex{session.ioctl_index};
         r.slot = session.slot;
         r.session = true;
         emit(std::move(r));
@@ -328,7 +286,7 @@ void RecentGames::assemble_(
         r.rbf = recent_rbf_prefix(h.core_image);
         r.path = h.path;
         r.title = h.title;
-        r.ioctl_index = h.ioctl_index;
+        r.ioctl_index = proto::IoIndex{h.ioctl_index};
         r.slot = h.slot;
         emit(std::move(r));
     }

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "cores/ladder_host.h"
+#include "cores/wire_chunk.h"
 #include "cores/wire_word.h"
 #include "infra/error.h"
 #include "infra/seat.h"
@@ -30,7 +31,7 @@ public:
 
     static constexpr std::size_t kAhead = 6;
 
-    enum class Pass : std::uint8_t { Waiting, Done, Failed };
+    enum class Pass : std::uint8_t { Waiting, Done };
 
     struct Frame {
         proto::WideIoIndex dest{};
@@ -42,7 +43,7 @@ public:
 
     [[nodiscard]] static Ex<PayloadPieces> of_file(
         std::unique_ptr<svc::IFile> file,
-        std::uint64_t size,
+        proto::FileSize size,
         std::string_view ext,
         const Frame& frame
     );
@@ -63,17 +64,19 @@ public:
         return chunk.whole_within(cap);
     }
 
-    [[nodiscard]] Pass step(ILadderHost& host);
+    [[nodiscard]] Ex<Pass> step(ILadderHost& host);
 
-    [[nodiscard]] std::uint64_t size() const noexcept { return size_; }
+    [[nodiscard]] proto::FileSize size() const noexcept { return size_; }
 
-    [[nodiscard]] std::uint64_t sent() const noexcept { return sent_; }
+    [[nodiscard]] proto::FileSize sent() const noexcept { return proto::FileSize{sent_}; }
+
+    [[nodiscard]] proto::ActKey16 act() const noexcept { return frame_.act; }
 
 private:
     PayloadPieces(
         std::unique_ptr<svc::IFile> file,
         std::vector<std::uint8_t> bytes,
-        std::uint64_t size,
+        proto::FileSize size,
         std::string_view ext,
         const Frame& frame
     )
@@ -83,18 +86,19 @@ private:
           ext_(ext),
           frame_(frame) {}
 
-    [[nodiscard]] bool stage_(std::size_t n);
-    [[nodiscard]] Pass fail_(ILadderHost& host);
+    [[nodiscard]] Ex<void> stage_(std::size_t n);
+    [[nodiscard]] Ex<Pass> fail_(ILadderHost& host);
 
     std::unique_ptr<svc::IFile> file_;
     std::vector<std::uint8_t> bytes_;
     std::optional<std::vector<std::uint8_t>> staged_{};
-    std::uint64_t size_ = 0;
+    proto::FileSize size_{};
     std::uint64_t sent_ = 0;
     std::optional<WireWordBytes> word_bytes_{};
     std::string ext_;
     Frame frame_;
     Pass end_ = Pass::Waiting;
+    std::optional<Error> failure_{};
     bool cut_owed_ = false;
 };
 

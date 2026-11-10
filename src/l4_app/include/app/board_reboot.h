@@ -48,7 +48,7 @@ public:
     struct OwedReboot {
         bool cold = true;
         bool ordered = false;
-        std::uint16_t seq = 0;
+        proto::RebootSeq seq{};
     };
 
     struct Tally {
@@ -68,7 +68,7 @@ public:
 
     [[nodiscard]] const os::Deadline& due() const noexcept { return due_; }
 
-    [[nodiscard]] std::uint16_t seq() const noexcept { return seq_; }
+    [[nodiscard]] proto::RebootSeq seq() const noexcept { return seq_; }
 
     [[nodiscard]] bool failed() const noexcept { return failed_; }
 
@@ -85,7 +85,7 @@ private:
     infra::OptRef<IBoardReset> reset_{};
     infra::OptRef<ISleeper> sleeper_{};
     std::uint32_t reboots_ = 0;
-    std::uint16_t seq_ = 0;
+    proto::RebootSeq seq_{};
     std::optional<OwedReboot> owed_{};
     os::Deadline due_ = os::Deadline::immediate();
     bool failed_ = false;

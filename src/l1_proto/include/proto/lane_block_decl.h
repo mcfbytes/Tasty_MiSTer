@@ -38,9 +38,5 @@ struct LaneBlockDecl {
     const SysDirectoryImage& dir,
     std::uint32_t window_size
 ) noexcept;
-[[nodiscard]] Ex<LaneBlockDecl> find_lane_block(
-    const hal::RegisterWindow<hal::SysDirectory>& dir,
-    std::uint32_t window_size
-) noexcept;
 
 }

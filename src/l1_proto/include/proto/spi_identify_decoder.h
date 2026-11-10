@@ -24,21 +24,23 @@ public:
         ILinkRouter& router,
         const BindGeneration& gen
     ) noexcept
-        : signals_(&signals),
-          session_(&session),
-          gen_(&gen),
+        : signals_(signals),
+          session_(session),
+          gen_(gen),
           out_(router) {}
 
     void service() noexcept;
 
-    [[nodiscard]] bool active() const noexcept { return !session_->negotiating(); }
+    [[nodiscard]] bool active() const noexcept {
+        return session_.configure_posted() || !session_.negotiating();
+    }
 
 private:
     void refuse_(const Error& e, bool at_accept) noexcept;
 
-    hal::ICoreSignals* signals_;
-    CoreSession* session_;
-    const BindGeneration* gen_;
+    hal::ICoreSignals& signals_;
+    CoreSession& session_;
+    const BindGeneration& gen_;
     Port out_;
 };
 

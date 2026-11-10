@@ -61,7 +61,7 @@ inline constexpr RungMask kSourced{
 };
 
 constexpr bool sourced(RungMask m) noexcept {
-    return (m.bits() & ~kSourced.bits()) == 0;
+    return m.within(kSourced);
 }
 
 static_assert(
@@ -144,7 +144,7 @@ public:
 
     [[nodiscard]] bool any_live(RungMask m) const noexcept { return live().any(m); }
 
-    [[nodiscard]] bool empty() const noexcept { return live().bits() == 0; }
+    [[nodiscard]] bool empty() const noexcept { return live().empty(); }
 
     [[nodiscard]] const std::optional<LoadWalk>& walk() const noexcept { return walk_; }
 

@@ -25,7 +25,7 @@ void HdFocusMemory::remember(FocusKey key, Focus focus) noexcept {
         return;
     }
     entries_[oldest_] = Entry{key, focus};
-    oldest_ = next_slot(oldest_);
+    oldest_ = next_entry(oldest_);
     ++evictions_;
 }
 

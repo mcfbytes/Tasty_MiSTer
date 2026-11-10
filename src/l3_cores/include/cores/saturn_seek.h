@@ -4,7 +4,6 @@
 #include <cstdint>
 
 #include "cores/types.h"
-#include "svc/types.h"
 
 namespace mister::cores::saturn {
 
@@ -31,10 +30,9 @@ constexpr SeekTicks SeekTicks::of_distance(SectorCount diff) noexcept {
     return SeekTicks{diff.v / kSeekLbaPerTick.v};
 }
 
-inline constexpr std::int32_t kFadToLbaBias = 150;
-inline constexpr std::int32_t kSeekOriginLead = 4;
+inline constexpr SectorCount kSeekOriginLead{4};
 
-inline constexpr std::int32_t kReadHeadLead = 4;
+inline constexpr SectorCount kReadHeadLead{4};
 
 [[nodiscard]] constexpr SeekTicks seek_ticks(SectorCount diff, bool cross_track) noexcept {
     const SectorCount mag = diff.magnitude();
@@ -60,13 +58,8 @@ inline constexpr std::int32_t kReadHeadLead = 4;
     return n;
 }
 
-[[nodiscard]] constexpr SeekTicks seek_delay_ticks(
-    HeadLba from,
-    HeadLba to,
-    svc::TrackIndex track_from,
-    svc::TrackIndex track_to
-) noexcept {
-    return seek_ticks(to - from, track_from != track_to);
+[[nodiscard]] constexpr SeekTicks seek_delay_ticks(HeadMove move, bool cross_track) noexcept {
+    return seek_ticks(move.distance(), cross_track);
 }
 
 inline constexpr SeekTicks kSeekMinTicks{2};

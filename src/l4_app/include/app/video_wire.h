@@ -2,8 +2,10 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <type_traits>
 
@@ -19,6 +21,7 @@
 #include "hal/boards_table.h"
 #include "hal/link_timing.h"
 #include "proto/link.h"
+#include "os/raw_monotonic_clock.h"
 #include "reactor/tick.h"
 #include "svc/filter_bank.h"
 #include "svc/filter_resend.h"
@@ -74,7 +77,17 @@ using ArCustomWords = std::array<std::uint16_t, kArCustomWords>;
     return w;
 }
 
-inline constexpr std::uint16_t kFilterVerMask = 0x000F;
+enum class PreludeStep : std::uint8_t {
+    Idle = 0,
+    Fbuf,
+    ArCust,
+    FltNum,
+    FltCoef,
+    Burst,
+    ShadowMask,
+    Tail,
+    Done
+};
 
 struct PreludeStats {
     std::uint32_t arms = 0;
@@ -96,7 +109,7 @@ struct PreludeStats {
     std::uint16_t sm_cap = 0;
 
     std::uint16_t tail_fail = 0;
-    std::uint8_t step = 0;
+    PreludeStep step = PreludeStep::Idle;
 };
 
 static_assert(std::is_trivially_copyable_v<PreludeStats>);
@@ -104,8 +117,9 @@ static_assert(std::is_trivially_copyable_v<PreludeStats>);
 struct FilterStream {
     TASTY_SEAT_RESIDENT(RT);
 
+    enum class Counting : std::uint8_t { Stream, Prelude };
+
     struct Ports {
-        proto::Link* link;
         const svc::FilterSet& set;
         svc::FilterBank& sent_horiz;
         svc::FilterBank& sent_vert;
@@ -117,27 +131,26 @@ struct FilterStream {
 
     bool armed = false;
     bool generated = false;
-    bool prelude = false;
-    bool tail = false;
-    std::uint16_t ver = 0;
+    Counting counting = Counting::Stream;
+    svc::FilterFormat format{};
     svc::FilterSendPlan plan{};
     std::uint8_t seg_i = 0;
     svc::VFilter vert_slot = svc::VFilter::Horz;
     std::size_t cursor = 0;
-    svc::ScalingWords tail_words{};
+
+    std::optional<svc::ScalingWords> tail_words{};
 
     bool arm(
         const Ports& p,
-        std::uint16_t flt_flags,
+        svc::FltFlags flt_flags,
         svc::VFilter slot,
-        bool in_prelude,
-        bool with_tail,
-        const svc::ScalingWords& tw
+        Counting where_counted,
+        std::optional<svc::ScalingWords> tail
     ) noexcept;
 
-    void arm_generated(std::uint16_t flt_flags, bool in_prelude) noexcept;
+    void arm_generated(svc::FltFlags flt_flags, Counting where_counted) noexcept;
 
-    void step(const Ports& p) noexcept;
+    void step(const Ports& p, proto::Link& link) noexcept;
 
     [[nodiscard]] bool active() const noexcept { return armed; }
 };
@@ -184,13 +197,12 @@ public:
 
     [[nodiscard]] Ex<void> emit(
         proto::Link& link,
-        std::uint8_t slot,
-        std::uint32_t gen,
+        const proto::LinkOp::SetVideoMode& mode,
         infra::OptRef<proto::IResetFence> fence = {}
     );
 
-    static constexpr std::int64_t kGeoFirstPeriodMs = 1000;
-    static constexpr std::int64_t kGeoPeriodMs = 500;
+    static constexpr std::chrono::milliseconds kGeoFirstPeriod{1000};
+    static constexpr std::chrono::milliseconds kGeoPeriod{500};
 
     void on_rt_round(
         proto::Link& link,
@@ -198,36 +210,22 @@ public:
         infra::OptRef<proto::IResetFence> fence = {}
     );
 
-    [[nodiscard]] Ex<svc::VideoSample> sample(bool force) override;
+    [[nodiscard]] Ex<svc::VideoSample> sample() override;
 
     [[nodiscard]] std::uint32_t sampled_core_seq() const noexcept { return sampled_seq_; }
 
-    void publish_policy(const svc::ScalingPolicy& p) noexcept { policy_.publish(p.to_bits()); }
+    void publish_policy(const svc::ScalingPolicy& p) noexcept { policy_cell_.publish(p); }
 
-    svc::ScalingPolicy policy() const noexcept {
-        return svc::ScalingPolicy::from_bits(policy_bits_);
-    }
+    svc::ScalingPolicy policy() const noexcept { return policy_; }
 
-    void request_force() noexcept { force_.request(); }
+    void request_force() noexcept override { force_.request(); }
 
     void reset_geometry(std::uint32_t core_seq) noexcept;
 
     static constexpr std::size_t kCoeffChunkWords = 64;
-    static constexpr std::int64_t kRoundBudgetNs = reactor::kTickNs / 2;
+    static constexpr std::chrono::nanoseconds kRoundBudgetNs{reactor::kTickNs / 2};
 
     static constexpr std::uint32_t kBarrierRounds = 1000;
-
-    enum class PreludeStep : std::uint8_t {
-        Idle = 0,
-        Fbuf,
-        ArCust,
-        FltNum,
-        FltCoef,
-        Burst,
-        ShadowMask,
-        Tail,
-        Done
-    };
 
     void arm_prelude() noexcept;
 
@@ -326,9 +324,8 @@ private:
     bool consume_filters();
     bool service_filter_publish(proto::Link& link);
 
-    [[nodiscard]] FilterStream::Ports stream_ports_(proto::Link* link) noexcept {
+    [[nodiscard]] FilterStream::Ports stream_ports_() noexcept {
         return {
-            .link = link,
             .set = flt_local_,
             .sent_horiz = sent_horiz_,
             .sent_vert = sent_vert_,
@@ -355,13 +352,13 @@ private:
     std::uint32_t geo_core_seq_ = 0;
     std::uint32_t sampled_seq_ = 0;
 
-    xthread::Telemetry<std::uint64_t, SeatTag::Ui> policy_{};
+    xthread::Telemetry<svc::ScalingPolicy, SeatTag::Ui> policy_cell_{};
     xthread::Telemetry<std::uint64_t, SeatTag::Ui> ar_cust_{};
     xthread::Telemetry<ShadowMaskWord, SeatTag::Ui> shadow_mask_{};
-    xthread::Telemetry<std::uint64_t, SeatTag::Ui>::Reader policy_seen_{};
+    xthread::Telemetry<svc::ScalingPolicy, SeatTag::Ui>::Reader policy_seen_{};
     xthread::Telemetry<std::uint64_t, SeatTag::Ui>::Reader ar_cust_seen_{};
     xthread::Telemetry<ShadowMaskWord, SeatTag::Ui>::Reader shadow_seen_{};
-    std::uint64_t policy_bits_ = 0;
+    svc::ScalingPolicy policy_{};
     std::uint64_t ar_cust_bits_ = 0;
     ShadowMaskWord shadow_mask_word_{};
     xthread::WakeFlag force_{};
@@ -388,9 +385,8 @@ private:
     PreludeStep pre_step_ = PreludeStep::Idle;
     std::uint32_t pre_barrier_ = 0;
     std::uint32_t pre_flt_barrier_ = 0;
-    std::uint8_t pre_parked_slot_ = 0;
-    std::uint32_t pre_parked_gen_ = 0;
-    bool pre_parked_ = false;
+
+    std::optional<proto::LinkOp::SetVideoMode> parked_;
 
     bool pre_replaying_ = false;
 
@@ -412,7 +408,8 @@ private:
 
     PreludeStats pre_{};
     xthread::Telemetry<PreludeStats, SeatTag::RT> prelude_cell_{};
-    std::int64_t geo_next_ns_ = 0;
+
+    std::optional<os::RawMonotonicClock::time_point> geo_next_{};
 
     bool geo_force_next_ = true;
     xthread::Counter geo_rounds_{};
@@ -434,8 +431,9 @@ private:
 
 consteval bool coeff_chunk_fits_every_board() {
     return hal::every_measured(&hal::BoardProfile::timing, [](const hal::LinkTiming& g) consteval {
-        const std::int64_t beat_ns = hal::LinkTimingValues::measured(g).beat_ns;
-        return std::int64_t{VideoWire::kCoeffChunkWords + 1} * beat_ns <= VideoWire::kRoundBudgetNs;
+        const std::chrono::nanoseconds beat = hal::LinkTimingValues::measured(g).beat_ns;
+        const std::int64_t beats = std::int64_t{VideoWire::kCoeffChunkWords} + 1;
+        return beat * beats <= VideoWire::kRoundBudgetNs;
     });
 }
 

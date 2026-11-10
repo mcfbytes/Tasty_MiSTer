@@ -23,9 +23,9 @@ namespace mister::app {
 struct SessionIdentity {
     static constexpr std::size_t kMax = 64;
 
-    char core[kMax] = {};
+    FixedStr<kMax, StrFit::Clip> core{};
 
-    char rbf[kMax] = {};
+    FixedStr<kMax, StrFit::Clip> rbf{};
 
     RememberedStem stem{};
 
@@ -55,7 +55,7 @@ struct SessionIdentity {
 };
 
 [[nodiscard]] inline std::string_view home_name(const SessionIdentity& id) noexcept {
-    return id.setname_same_dir ? std::string_view{id.rbf} : std::string_view{id.core};
+    return id.setname_same_dir ? id.rbf.view() : id.core.view();
 }
 
 static_assert(RememberedStem::kMax == SessionIdentity::kMax, "the stem clips as `core` does");

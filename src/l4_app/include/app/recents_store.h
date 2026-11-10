@@ -3,13 +3,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "app/write_verdict.h"
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::svc {
 class Vfs;
@@ -32,8 +35,17 @@ public:
 
     struct ListId {
         enum class Kind : std::uint8_t { Cores, File, Mount };
+
+        static constexpr proto::ListIndex kMountIndexBase{500};
         Kind kind = Kind::Cores;
-        std::uint8_t slot = 0;
+        proto::IoIndex slot{};
+
+        [[nodiscard]] std::string file_name(std::string_view core) const;
+
+        [[nodiscard]] static std::optional<std::pair<std::string, ListId>> from_file_name(
+            std::string_view name
+        );
+        friend constexpr bool operator==(ListId, ListId) = default;
     };
 
     struct Entry {

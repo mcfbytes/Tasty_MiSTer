@@ -7,6 +7,7 @@
 
 #include "infra/byte_view.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "hal/boot_handoff.h"
 
@@ -52,7 +53,7 @@ public:
 
     virtual bool programmed() const = 0;
 
-    virtual IBootHandoff* boot_handoff() noexcept { return nullptr; }
+    virtual infra::OptRef<IBootHandoff> boot_handoff() noexcept { return {}; }
 
 protected:
     [[nodiscard]] Ex<void> to_rest_(Ex<bool> started) {

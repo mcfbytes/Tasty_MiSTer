@@ -16,16 +16,14 @@ struct ResetTerms {
 
     [[nodiscard]] static constexpr ResetTerms framework() noexcept {
         ResetTerms t{};
-        t.held.words[0] = 1u;
+        t.held = t.held.with(kResetBit, true);
         t.buttons = 1u << 1;
         return t;
     }
 
     [[nodiscard]] constexpr ResetTerms with_raised(StatusBit bit) const noexcept {
         ResetTerms t = *this;
-        if (bit.v < StatusWord::kBits) {
-            t.raised.words[bit.v / 16u] |= static_cast<std::uint16_t>(1u << (bit.v % 16u));
-        }
+        t.raised = t.raised.with(bit, true);
         return t;
     }
 

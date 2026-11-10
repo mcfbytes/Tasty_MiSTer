@@ -3,12 +3,14 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "app/input_wire.h"
+#include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "svc/input_service.h"
@@ -18,15 +20,17 @@
 
 namespace mister::ui {
 
+enum class MapScope : std::uint8_t { System, Core };
+
 struct JoyMapPrompt {
     BlobWord word{};
-    char name[32] = {};
+    FixedStr<32, StrFit::Clip> name{};
 
-    std::string_view text() const noexcept { return std::string_view{name}; }
+    std::string_view text() const noexcept { return name.view(); }
 };
 
 [[nodiscard]] std::vector<JoyMapPrompt> build_joymap_prompts(
-    bool system_pass,
+    MapScope scope,
     std::string_view j_names
 );
 
@@ -74,13 +78,13 @@ public:
 
     std::size_t current() const noexcept { return cur_; }
 
-    bool locked() const noexcept { return locked_; }
+    bool locked() const noexcept { return lock_.has_value(); }
 
     bool done() const noexcept { return done_; }
 
     bool saved() const noexcept { return saved_; }
 
-    std::uint32_t arm_token() const noexcept { return token_; }
+    app::CaptureToken arm_token() const noexcept { return token_; }
 
     svc::MappingWizard wizard() const noexcept { return wizard_; }
 
@@ -95,21 +99,23 @@ private:
     void arm_next();
     void rebegin();
     void disarm();
+
+    bool wizard_advance_into(svc::MappingWizard::Step want);
     void record(const JoyMapPrompt& p, svc::EvdevCode code);
     bool duplicate_in_segment(const JoyMapPrompt& p, svc::EvdevCode code) const;
     Transition finish(bool save);
 
     Spec spec_;
+    MapScope scope_ = MapScope::Core;
     std::vector<JoyMapPrompt> prompts_;
     JoyMapBlob blob_{};
     std::size_t cur_ = 0;
-    std::uint32_t token_ = 0;
+    app::CaptureToken token_{};
     bool armed_ = false;
     bool done_ = false;
     bool saved_ = false;
 
-    bool locked_ = false;
-    app::CaptureHit lock_{};
+    std::optional<app::CaptureHit> lock_;
 
     svc::MappingWizard wizard_{};
     app::CaptureHitCell::Reader hit_reader_{};

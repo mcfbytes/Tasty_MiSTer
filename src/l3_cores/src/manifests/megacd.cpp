@@ -16,8 +16,8 @@ static_assert(
     "megacd.h:39: MCD_SUB_IO_INDEX == 3 (PCE-CD uses 4)"
 );
 static_assert(
-    kMegaCdIoIndices.info == IoIndex{},
-    "megacd publishes no disc descriptor: the info slot stays default"
+    !kMegaCdIoIndices.info.has_value(),
+    "megacd publishes no disc descriptor: the info slot stays absent"
 );
 static_assert(
     kMegaCdIoIndices.cdda != kMegaCdIoIndices.subcode,
@@ -25,24 +25,24 @@ static_assert(
 );
 
 static_assert(
-    kMegaCdProfile.dialect == CdDialect::SegaBcdNibble,
+    std::holds_alternative<CdProfile::SegaCddFacts>(kMegaCdProfile.row),
     "req: MegaCD is the SegaBcdNibble dialect"
 );
 static_assert(
-    kMegaCdProfile.crc_start == 0,
+    std::get<CdProfile::SegaCddFacts>(kMegaCdProfile.row).crc_start == 0,
     "megacd.cpp:43,:77: MegaCD crc_start seed is 0 (NeoGeoCD is 5)"
 );
 
 static_assert(
-    kMegaCdProfile.status_carries_is_data,
+    std::get<CdProfile::SegaCddFacts>(kMegaCdProfile.row).status_carries_is_data,
     "megacd.cpp:46: MegaCD ORs isData into word2 bit 8 (NeoGeoCD does not)"
 );
 static_assert(
-    kMegaCdProfile.ready_probe_skips_mode1,
+    std::get<CdProfile::SegaCddFacts>(kMegaCdProfile.row).ready_probe_skips_mode1,
     "megacd.cpp:288-290: MegaCD's MODE1 ready probe has no round trip (NeoGeoCD's does)"
 );
 static_assert(
-    !kMegaCdProfile.stream_on_data_track,
+    !std::get<CdProfile::SegaCddFacts>(kMegaCdProfile.row).stream_on_data_track,
     "megacd.cpp:32: MegaCD streams the CD-DA track (NeoGeoCD streams the data track)"
 );
 
@@ -87,7 +87,7 @@ static_assert(
 );
 
 static_assert(
-    kMegaCdProfile.sniff_sega_disc_system && kMegaCdCuePolicy.sniff_sega_disc_system,
+    kMegaCdCuePolicy.sniff_sega_disc_system,
     "megacdd.cpp:289: MegaCD sniffs \"SEGADISCSYSTEM\" for sector size"
 );
 static_assert(kSegaDiscSystem.size() == 14, "megacdd.cpp:289: memcmp length is 14 bytes");
@@ -97,7 +97,7 @@ static_assert(
 );
 
 static_assert(
-    kMegaCdProfile.seek_fast_paths.empty(),
+    !std::holds_alternative<CdProfile::PceScsiFacts>(kMegaCdProfile.row),
     "megacdd.cpp:878-887: MegaCD has no per-title seek fast paths"
 );
 
@@ -109,7 +109,7 @@ static_assert(
     "MegaCD.sv S0,CUECHD; megacdd.cpp:249-273 probes CUE then CHD"
 );
 static_assert(
-    kMegaCd.staging.save_slot == IoIndex{0},
+    kMegaCd.staging.save && kMegaCd.staging.save->slot == IoIndex{0},
     "megacd.cpp:92-97 / req: the save virtual disk is SD slot 0"
 );
 

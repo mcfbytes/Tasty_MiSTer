@@ -5,6 +5,7 @@
 #include "app/owner_push.h"
 #include "app/negotiated_core.h"
 #include "app/owner_ladder.h"
+#include "infra/path_parts.h"
 #include "svc/dir_entry.h"
 #include "svc/vfs.h"
 
@@ -21,7 +22,6 @@ ContentPick::ContentPick(const Wiring& w) noexcept
       ladder_(w.ladder),
       belt_(w.belt),
       owner_tally_(w.owner_tally),
-      mgl_row0_cell_(w.mgl_row0_cell),
       act_keys_(w.act_keys),
       status_cell_(w.status_cell),
       boot_restore_(w.boot_restore),
@@ -48,10 +48,10 @@ Ex<proto::ConfStrFileRow> ContentPick::resolve_load_(const UiRequest::LoadFileBy
         ? negotiated_.conf_str()->find_load_slot(r.digit)
         : proto::FileSlotHit{};
     if (!hit.entry)
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.digit.v});
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), r.digit.slot().detail()});
 
     if (hit.how == proto::FileSlotMatch::RowZero)
-        mgl_row0_cell_.publish(++owner_tally_.mgl_row0);
+        owner_tally_.mgl_row0.add();
     return proto::ConfStr::row_of(*hit.entry);
 }
 
@@ -232,27 +232,43 @@ ContentPick::After ContentPick::perform_content(const ContentRequest& req) {
         ++owner_tally_.files_failed;
         return {};
     }
-    const std::size_t dot = path.rfind('.');
-    const std::string_view ext = dot == std::string_view::npos ? std::string_view{}
-                                                               : path.substr(dot);
+    const std::string_view ext = infra::extension(path);
+
+    const cores::CoreProfile& profile = negotiated_.loaded_profile();
+    const bool unpacked = profile.gzip_content.wants(ext) && svc::GzipInflater::is_gzip(*buf);
+    if (unpacked) {
+        auto image = inflater_.inflate(*buf, profile.gzip_content.cap);
+        if (!image) {
+            ++owner_tally_.files_failed;
+            return {};
+        }
+        *buf = std::move(*image);
+    }
+    const std::uint64_t payload_bytes = buf->size();
     LoadKey key(buf->size());
     key.feed(*buf);
-    const auto id = inbox_.intern_file(std::move(*buf), ext, path, req.load_addr, key.value());
+    const auto id = inbox_.intern_file(
+        FileIntern{
+            .bytes = std::move(*buf),
+            .ext = ext,
+            .path = path,
+            .load_addr = req.load_addr,
+            .crc = key.value(),
+            .save = req.save,
+            .edge = req.edge
+        }
+    );
     if (!id) {
         ++owner_tally_.files_failed;
         return {};
     }
-    if (req.save != proto::FileId{} && !inbox_.stamp_save(*id, req.save))
-        ++owner_tally_.open_saves_skipped;
-    if (req.edge != ContentEdge::Content)
-        (void)inbox_.stamp_edge(*id, req.edge);
 
     ContentWatch watch{
         .file = std::move(*f),
-        .total = sz->v,
+        .total = payload_bytes,
         .crc = key.value(),
         .wire_index = req.slot,
-        .cut_on_hold = req.save != proto::FileId{} || req.edge != ContentEdge::Content
+        .cut_on_hold = unpacked || req.save != proto::FileId{} || req.edge != ContentEdge::Content
     };
     if (!watch.path.assign(path))
         watch.file.reset();
@@ -363,14 +379,14 @@ void ContentPick::watch_last_piece(FileTxPieces& pieces) {
 ContentPick::Armed ContentPick::arm_loader(
     const ContentRequest& req,
     std::string_view save,
-    std::uint64_t save_bytes
+    proto::FileSize save_bytes
 ) {
     TASTY_SEAT_BODY(ContentPick);
-    const cores::CoreFactory* row = negotiated_.load_row();
+    const auto row = negotiated_.load_row();
     const cores::MakeLoader make = cores::loader_for(row, req.load_addr);
     if (make == nullptr)
         return {};
-    const bool own = row != nullptr && row->make_loader != nullptr;
+    const bool own = row && row->make_loader != nullptr;
 
     if (own && belt_.any_live(kLoaderBusy))
         return Armed{.taken = true, .busy = true};
@@ -379,12 +395,10 @@ ContentPick::Armed ContentPick::arm_loader(
         return Armed{.taken = true};
     }
     content_owed_ = Owed{req.asked, req.tag};
-    if (own && cores::walks_romset(row->profile->slots, req.slot.io())) {
+    if (own && cores::walks_romset(row->profile.slots, req.slot.io())) {
         return arm_walk_(req, *row);
     }
-    const cores::CoreProfile& profile = row != nullptr
-        ? *row->profile
-        : cores::profile_for(negotiated_.core_name().view());
+    const cores::CoreProfile& profile = negotiated_.loaded_profile();
     const std::string_view path = req.path.view();
     auto f = vfs_.open(path, svc::OpenMode::ReadWhole);
     const auto sz = f ? (*f)->size() : Ex<svc::FileSize>{std::unexpected(f.error())};
@@ -393,7 +407,16 @@ ContentPick::Armed ContentPick::arm_loader(
         return Armed{.taken = true};
     }
     const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
-    auto loader = make(cores::LoaderContext{vfs_, profile, turbo, loader_memo_, aperture_});
+    auto loader = make(
+        cores::LoaderContext{
+            vfs_,
+            profile,
+            turbo,
+            loader_memo_,
+            aperture_,
+            infra::OptRef<const proto::StatusCell>{status_cell_}
+        }
+    );
     const cores::LoadAsk
         ask{.index = req.slot, .path = path, .size = *sz, .load_addr = req.load_addr};
     const auto plan = loader->plan(ask, status_cell_.sample().value);
@@ -416,57 +439,9 @@ ContentPick::Armed ContentPick::arm_loader(
     if (plain && r.dest != cores::RowDest::Window)
         return {};
     if (r.dest == cores::RowDest::Window) {
-        const std::uint64_t extent = std::max<std::uint64_t>(sz->v, r.extent);
-        auto w = LoadWindow<seat_owner::Main>::open(
-            window_map_,
-            aperture_,
-            os::PhysAddr{r.addr},
-            extent
-        );
-        std::optional<LoadWindow<seat_owner::Main>> mirror{};
-        if (w && r.mirror != 0) {
-            auto m = LoadWindow<seat_owner::Main>::open(
-                window_map_,
-                aperture_,
-                os::PhysAddr{r.mirror},
-                extent
-            );
-            if (m) {
-                mirror.emplace(std::move(*m));
-            } else {
-                w = std::unexpected(m.error());
-            }
-        }
-        if (w) {
-            LoadLadder::Job job{
-                .loader = std::move(loader),
-                .file = std::move(*f),
-                .total = sz->v,
-                .wire_index = req.slot,
-                .act = act_keys_.next(),
-                .row = r,
-                .mirror = std::move(mirror),
-                .save_bytes = save_bytes
-            };
-            if (!job.save.assign(save)) {
-                ++owner_tally_.files_failed;
-                return Armed{.taken = true};
-            }
-            auto l = LoadLadder::start(std::move(job), std::move(*w), path);
-            if (!l) {
-                ++owner_tally_.files_failed;
-                return Armed{.taken = true};
-            }
-            forget_watch();
-            return Armed{.taken = true, .orders = {.load = std::move(*l)}};
-        }
-        windows_.refused(w.error().code);
-        windows_.publish();
-
-        if (r.placed || r.mirror != 0) {
-            ++owner_tally_.files_failed;
-            return Armed{.taken = true};
-        }
+        auto armed = arm_window_row_(r, *f, loader, *sz, req, save, save_bytes);
+        if (armed)
+            return std::move(*armed);
 
         if (plain)
             return {};
@@ -480,13 +455,86 @@ ContentPick::Armed ContentPick::arm_loader(
     return Armed{.taken = true, .orders = {.pieces = std::move(*p)}};
 }
 
+std::optional<ContentPick::Armed> ContentPick::arm_window_row_(
+    const cores::TransferRow& row,
+    std::unique_ptr<svc::IFile>& file,
+    std::unique_ptr<cores::ILoader>& loader,
+    svc::FileSize size,
+    const ContentRequest& req,
+    std::string_view save,
+    proto::FileSize save_bytes
+) {
+    const std::uint64_t extent = std::max<std::uint64_t>(
+        size.v,
+        row.extent.length_of(proto::BlockCount{1})
+    );
+    auto w = LoadWindow<seat_owner::Main>::open(
+        window_map_,
+        aperture_,
+        os::PhysAddr{row.addr},
+        extent
+    );
+    std::optional<LoadWindow<seat_owner::Main>> mirror{};
+    if (w && row.mirror != 0) {
+        auto m = LoadWindow<seat_owner::Main>::open(
+            window_map_,
+            aperture_,
+            os::PhysAddr{row.mirror},
+            extent
+        );
+        if (m) {
+            mirror.emplace(std::move(*m));
+        } else {
+            w = std::unexpected(m.error());
+        }
+    }
+    if (!w) {
+        windows_.refused(w.error().code);
+        windows_.publish();
+
+        if (row.placed || row.mirror != 0) {
+            ++owner_tally_.files_failed;
+            return Armed{.taken = true};
+        }
+        return std::nullopt;
+    }
+    LoadLadder::Job job{
+        .loader = std::move(loader),
+        .file = std::move(file),
+        .total = size.v,
+        .wire_index = req.slot,
+        .act = act_keys_.next(),
+        .row = row,
+        .mirror = std::move(mirror),
+        .save_bytes = save_bytes
+    };
+    if (!job.save.assign(save)) {
+        ++owner_tally_.files_failed;
+        return Armed{.taken = true};
+    }
+    auto l = LoadLadder::start(std::move(job), std::move(*w), req.path.view());
+    if (!l) {
+        ++owner_tally_.files_failed;
+        return Armed{.taken = true};
+    }
+    forget_watch();
+    return Armed{.taken = true, .orders = {.load = std::move(*l)}};
+}
+
 ContentPick::Armed ContentPick::arm_walk_(
     const ContentRequest& req,
     const cores::CoreFactory& row
 ) {
     const bool turbo = negotiated_.conf_str() && negotiated_.conf_str()->declares_turbo();
     auto loader = row.make_loader(
-        cores::LoaderContext{vfs_, *row.profile, turbo, loader_memo_, aperture_}
+        cores::LoaderContext{
+            vfs_,
+            row.profile,
+            turbo,
+            loader_memo_,
+            aperture_,
+            infra::OptRef<const proto::StatusCell>{status_cell_}
+        }
     );
     const cores::LoadAsk ask{
         .index = req.slot,
@@ -494,7 +542,7 @@ ContentPick::Armed ContentPick::arm_walk_(
         .load_addr = req.load_addr
     };
     const auto plan = loader->plan(ask, status_cell_.sample().value);
-    auto w = plan ? LoadWalk::start(std::move(loader), *plan, row.profile->windows)
+    auto w = plan ? LoadWalk::start(std::move(loader), *plan, row.profile.windows)
                   : Ex<LoadWalk>{std::unexpected(plan.error())};
     if (!w) {
         ++owner_tally_.files_failed;

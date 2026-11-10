@@ -12,14 +12,13 @@
 #include <system_error>
 
 #include "infra/error.h"
+#include "proto/types.h"
 #include "svc/msf.h"
-#include "svc/toc.h"
+#include "svc/track.h"
 #include "svc/vfs.h"
 
 namespace mister::svc::disc::detail {
 
-inline constexpr std::size_t kSubcodeBytes = 96;
-inline constexpr std::size_t kUserDataBytes = 2048;
 inline constexpr std::uint32_t kMode2Cooked = 2336;
 inline constexpr TrackCount kMaxCueTracks{99};
 
@@ -33,21 +32,6 @@ inline constexpr std::string_view kExtCdg = ".cdg";
 
 [[nodiscard]] constexpr std::string_view past(std::string_view line, std::string_view kw) noexcept {
     return line.substr(kw.size());
-}
-
-inline char lower(char c) noexcept {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-inline bool ends_with_ci(std::string_view s, std::string_view suffix) noexcept {
-    if (s.size() < suffix.size())
-        return false;
-    const std::size_t off = s.size() - suffix.size();
-    for (std::size_t i = 0; i < suffix.size(); ++i) {
-        if (lower(s[off + i]) != lower(suffix[i]))
-            return false;
-    }
-    return true;
 }
 
 inline std::string_view dir_of(std::string_view path) noexcept {
@@ -82,7 +66,7 @@ inline std::optional<std::uint32_t> take_uint(
     return out;
 }
 
-inline std::optional<std::uint32_t> take_msf(std::string_view s) noexcept {
+inline std::optional<proto::BlockCount> take_msf(std::string_view s) noexcept {
     const auto m = take_uint(s, kCueFieldDigits);
     if (!m)
         return std::nullopt;
@@ -99,7 +83,9 @@ inline std::optional<std::uint32_t> take_msf(std::string_view s) noexcept {
     if (!f)
         return std::nullopt;
 
-    return *m * kSecondsPerMinute * kFramesPerSecond + *sec * kFramesPerSecond + *f;
+    return proto::BlockCount{
+        *m * kSecondsPerMinute * kFramesPerSecond + *sec * kFramesPerSecond + *f
+    };
 }
 
 struct CueFileDecl {
@@ -138,16 +124,6 @@ struct PendingFile {
         return std::move(file);
     }
 };
-
-inline void close_toc(Toc& toc, TrackCount count) noexcept {
-    toc.last = count;
-    toc.offset_unit = OffsetUnit::CueBytes;
-    Track& lead_out = toc.at(count.next_index());
-    lead_out.number = count.next_index().number();
-    lead_out.type = TrackType::Cdda;
-    lead_out.start = toc.end;
-    lead_out.end = toc.end;
-}
 
 class LineReader {
 public:

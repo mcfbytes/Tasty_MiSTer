@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <optional>
+
+#include "svc/pll_block.h"
 
 namespace mister::svc {
 
 struct PllParams;
-
-using PllBlock = std::array<std::uint32_t, 12>;
 
 namespace pll {
 

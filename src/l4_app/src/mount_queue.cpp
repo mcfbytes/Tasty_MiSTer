@@ -60,9 +60,9 @@ void MountQueue::arm_mount(Host& host, const MountAsk& ask) {
         publish_refusal_(ask.which, Errc::core_load, ask.tag);
         return;
     }
-    const cores::CoreFactory* row = negotiated_.load_row();
-    const cores::SlotRole role = row != nullptr ? cores::role_of(*row->profile, ask.index)
-                                                : cores::SlotRole::Image;
+    const auto row = negotiated_.load_row();
+    const cores::SlotRole role = row ? cores::role_of(row->profile, ask.index)
+                                     : cores::SlotRole::Image;
     if (role == cores::SlotRole::Disc || role == cores::SlotRole::Ladder) {
         arm_ladder_(host, ask, *row);
         return;
@@ -71,14 +71,14 @@ void MountQueue::arm_mount(Host& host, const MountAsk& ask) {
     if (cores::role_of(p, ask.index) == cores::SlotRole::Save) {
         ++tally_.mounts_armed;
         const cores::StagingPolicy& sp = p.staging;
-        const bool framed = sp.save_dest != proto::WideIoIndex{} && sp.save_slot == ask.index;
+        const bool framed = sp.save && sp.save->bracket && sp.save->slot == ask.index;
         MountAsk routed = ask;
         if (!framed && !routed.index_word)
             routed.index_word = pick_index_word_(ask.index, ask.path.view());
         save_mount_.emplace(
             SaveMount{
                 .ask = routed,
-                .due_ns = clock_.now().count() + kSaveMountBoundNs,
+                .due_ns = clock_.now().time_since_epoch().count() + kSaveMountBoundNs,
                 .bracketed = framed
             }
         );
@@ -95,7 +95,7 @@ std::optional<std::uint8_t> MountQueue::pick_index_word_(
         return std::nullopt;
     const proto::ConfStrEntry* row = nullptr;
     for (const proto::ConfStrEntry& e : negotiated_.conf_str()->file_slots())
-        if (e.letter == 'S' && e.ioctl_index == index)
+        if (e.letter == proto::ConfStrEntry::SlotLetter::Mount && e.ioctl_index == index)
             row = &e;
     if (row == nullptr)
         return std::nullopt;
@@ -122,7 +122,7 @@ void MountQueue::arm_plain_mount_(Host& host, const MountAsk& ask) {
                 size = *sz;
         }
         const auto id = inbox_.intern_file_path(path, size);
-        if (!id || *id == proto::FileId{}) {
+        if (!id) {
 
             ++owner_tally_.files_failed;
             ++tally_.mounts_refused;
@@ -145,116 +145,129 @@ void MountQueue::step_save_mount(Host& host) {
     if (!save_mount_)
         return;
     SaveMount& m = *save_mount_;
-    const proto::SlotIndex slot{m.ask.index.v};
-    const std::string_view path = m.ask.path.view();
+    const proto::SlotIndex slot = m.ask.index.block_slot();
 
-    if (m.gen) {
-        const cores::SaveExtent e = host.ladder_host().save_extent();
-        if (e.generation == m.gen && e.answer == cores::SaveAnswer::Declined)
-            m.gen = {};
-        if (e.generation == m.gen && e.answer == cores::SaveAnswer::Known) {
-            if (path.empty()) {
-                finish_save_mount_(host, true);
-                return;
-            }
-            if (m.then_load) {
-
-                if (!negotiated_.owns_loader()
-                    && host.arm_loader(*m.then_load, path, e.size_bytes.v)) {
-                    finish_save_mount_(host, true, true);
-                    return;
-                }
-
-                if (const auto id = host.ladder_host().intern_path(path, e.size_bytes);
-                    id && *id != proto::FileId{}) {
-                    ContentRequest load = *m.then_load;
-                    load.save = *id;
-                    host.perform_content(load);
-                    finish_save_mount_(host, true, true);
-                    return;
-                }
-            } else {
-                const auto id = host.ladder_host().intern_path(path, e.size_bytes);
-                if (id
-                    && *id != proto::FileId{}
-                    && host.ladder_host().order(
-                        proto::LinkOp::BindSlot{
-                            .slot = slot,
-                            .bind = proto::LinkOp::SlotBind::Mount,
-                            .bracketed = m.bracketed,
-                            .path = *id,
-                            .sends_index = m.ask.index_word.has_value(),
-                            .index_word = m.ask.index_word.value_or(0)
-                        }
-                    )) {
-                    finish_save_mount_(host, true);
-                    return;
-                }
-            }
-        }
-    }
-    if (clock_.now().count() >= m.due_ns) {
-
-        if (!path.empty() && m.gen)
-            (void)host.ladder_host().order(
-                proto::LinkOp::BindSlot{
-                    .slot = slot,
-                    .bind = proto::LinkOp::SlotBind::Detach,
-                    .act_gen = host.ladder_host().next_generation()
-                }
-            );
-        if (m.then_load) {
-
-            const ContentRequest load = *m.then_load;
-            ++owner_tally_.open_saves_skipped;
-            host.launch_content(load);
-            finish_save_mount_(host, false, true);
-            return;
-        }
-        finish_save_mount_(host, false);
+    if (m.gen && on_known_(host, slot))
+        return;
+    if (clock_.now().time_since_epoch().count() >= m.due_ns) {
+        on_timeout_(host, slot);
         return;
     }
     if (m.gen)
         return;
-    if (path.empty()) {
+    if (m.ask.path.view().empty()) {
+        advance_unmount_(host, slot);
+        return;
+    }
+    advance_attach_(host, slot);
+}
 
-        if (!m.unmounted) {
-            if (!host.ladder_host().order(
-                    proto::LinkOp::BindSlot{
-                        .slot = slot,
-                        .bind = proto::LinkOp::SlotBind::Unmount,
-                        .bracketed = m.bracketed,
-                        .sends_index = m.ask.index_word.has_value(),
-                        .index_word = m.ask.index_word.value_or(0)
-                    }
-                ))
-                return;
-            m.unmounted = true;
+bool MountQueue::on_known_(Host& host, proto::SlotIndex slot) {
+    if (!save_mount_ || !save_mount_->gen)
+        return false;
+    SaveMount& m = *save_mount_;
+    const std::string_view path = m.ask.path.view();
+    const cores::SaveExtent e = host.ladder_host().save_extent();
+    if (e.generation == m.gen && e.answer == cores::SaveAnswer::Declined)
+        m.gen = {};
+    if (e.generation != m.gen || e.answer != cores::SaveAnswer::Known)
+        return false;
+    if (path.empty()) {
+        finish_save_mount_(host, true);
+        return true;
+    }
+    if (m.then_load) {
+
+        if (!negotiated_.owns_loader() && host.arm_loader(*m.then_load, path, e.size_bytes)) {
+            finish_save_mount_(host, true, true);
+            return true;
         }
-        const proto::ActKey g = host.ladder_host().next_generation();
+
+        if (const auto id = host.ladder_host().intern_path(path, e.size_bytes); id) {
+            ContentRequest load = *m.then_load;
+            load.save = *id;
+            host.perform_content(load);
+            finish_save_mount_(host, true, true);
+            return true;
+        }
+        return false;
+    }
+    if (const auto id = host.ladder_host().intern_path(path, e.size_bytes); id) {
+        const proto::LinkOp::BindSlot op{
+            .slot = slot,
+            .bind = proto::LinkOp::SlotBind::Mount,
+            .bracketed = m.bracketed,
+            .path = *id,
+            .sends_index = m.ask.index_word.has_value(),
+            .index_word = m.ask.index_word.value_or(0)
+        };
+        if (host.ladder_host().order(op)) {
+            finish_save_mount_(host, true);
+            return true;
+        }
+    }
+    return false;
+}
+
+void MountQueue::on_timeout_(Host& host, proto::SlotIndex slot) {
+    if (!save_mount_)
+        return;
+    SaveMount& m = *save_mount_;
+    const std::string_view path = m.ask.path.view();
+    if (!path.empty() && m.gen)
+        (void)host.ladder_host().order(
+            proto::LinkOp::DetachSave{.slot = slot, .act = host.ladder_host().next_generation()}
+        );
+    if (m.then_load) {
+
+        const ContentRequest load = *m.then_load;
+        ++owner_tally_.open_saves_skipped;
+        host.launch_content(load);
+        finish_save_mount_(host, false, true);
+        return;
+    }
+    finish_save_mount_(host, false);
+}
+
+void MountQueue::advance_unmount_(Host& host, proto::SlotIndex slot) {
+    if (!save_mount_)
+        return;
+    SaveMount& m = *save_mount_;
+    if (!m.unmounted) {
         if (!host.ladder_host().order(
                 proto::LinkOp::BindSlot{
                     .slot = slot,
-                    .bind = proto::LinkOp::SlotBind::Detach,
-                    .act_gen = g
+                    .bind = proto::LinkOp::SlotBind::Unmount,
+                    .bracketed = m.bracketed,
+                    .sends_index = m.ask.index_word.has_value(),
+                    .index_word = m.ask.index_word.value_or(0)
                 }
             ))
             return;
-        m.gen = g;
-        return;
+        m.unmounted = true;
     }
+    const proto::ActKey g = host.ladder_host().next_generation();
+    if (!host.ladder_host().order(proto::LinkOp::DetachSave{.slot = slot, .act = g}))
+        return;
+    m.gen = g;
+}
+
+void MountQueue::advance_attach_(Host& host, proto::SlotIndex slot) {
+    if (!save_mount_)
+        return;
+    SaveMount& m = *save_mount_;
+    const std::string_view path = m.ask.path.view();
     const auto id = host.ladder_host().intern_path(path, proto::FileSize{});
-    if (!id || *id == proto::FileId{})
+    if (!id)
         return;
     const proto::ActKey g = host.ladder_host().next_generation();
 
     if (!host.ladder_host().order(
-            proto::LinkOp::BindSlot{
+            proto::LinkOp::AttachSave{
                 .slot = slot,
-                .bind = proto::LinkOp::SlotBind::Attach,
                 .manual = !m.bracketed && !m.then_load,
                 .path = *id,
-                .act_gen = g
+                .act = g
             }
         ))
         return;
@@ -264,14 +277,17 @@ void MountQueue::step_save_mount(Host& host) {
 void MountQueue::finish_save_mount_(Host& host, bool ok, bool quiet) {
     if (!save_mount_)
         return;
-    const std::uint8_t slot = save_mount_->ask.index.v;
+    const proto::IoIndex index = save_mount_->ask.index;
     const CorrelationTag tag = save_mount_->ask.tag;
     const UiRequest::Kind which = save_mount_->ask.which;
     quiet = quiet || save_mount_->start;
     save_mount_.reset();
     if (ok && !quiet) {
         ++tally_.save_mounts_done;
-        owner_events_.push(Event::SdActivity{.slot = slot}, Event::Head{ERR_SITE(), {}, kUncaused});
+        owner_events_.push(
+            Event::SdActivity{.index = index},
+            Event::Head{ERR_SITE(), {}, kUncaused}
+        );
         publish_done_(which, tag);
     } else if (!quiet) {
         owner_events_.push(
@@ -327,7 +343,7 @@ void MountQueue::arm_start_mount_(Host& host, const MountAsk& ask) {
             save_mount_.emplace(
                 SaveMount{
                     .ask = ask,
-                    .due_ns = clock_.now().count() + kSaveMountBoundNs,
+                    .due_ns = clock_.now().time_since_epoch().count() + kSaveMountBoundNs,
                     .bracketed = false,
                     .start = true
                 }
@@ -370,7 +386,7 @@ bool MountQueue::read_remembered_mounts(RememberedFiles files) {
         if (path.empty())
             continue;
 
-        slot0_held = slot0_held || digit == proto::FileSlotDigit{};
+        slot0_held = slot0_held || digit == proto::FileSlotDigit::zero();
         const proto::IoIndex io = digit.io_index();
         MountAsk ask{.which = UiRequest::Kind::MountImage, .index = io, .tag = kUncaused};
         ask.index_word = proto::WideIoIndex::of(
@@ -393,7 +409,7 @@ void MountQueue::queue_boot_images(const StartChain& chain) {
     for (const StartFile& f : chain.boot_images()) {
         MountAsk ask{
             .which = UiRequest::Kind::MountImage,
-            .index = proto::IoIndex{f.dest.sub()},
+            .index = proto::IoIndex{f.dest.sub().v},
             .path = f.path,
             .tag = kUncaused,
             .index_word = f.dest.fio_byte()
@@ -410,7 +426,7 @@ void MountQueue::arm_boot_image_(const MountAsk& ask) {
             save_mount_.emplace(
                 SaveMount{
                     .ask = ask,
-                    .due_ns = clock_.now().count() + kSaveMountBoundNs,
+                    .due_ns = clock_.now().time_since_epoch().count() + kSaveMountBoundNs,
                     .bracketed = false,
                     .start = true
                 }
@@ -427,7 +443,11 @@ void MountQueue::arm_boot_image_(const MountAsk& ask) {
 void MountQueue::arm_load_save(const MountAsk& ask, const ContentRequest& load) {
     TASTY_SEAT_BODY(MountQueue);
     save_mount_.emplace(
-        SaveMount{.ask = ask, .due_ns = clock_.now().count() + kSaveMountBoundNs, .then_load = load}
+        SaveMount{
+            .ask = ask,
+            .due_ns = clock_.now().time_since_epoch().count() + kSaveMountBoundNs,
+            .then_load = load
+        }
     );
 }
 

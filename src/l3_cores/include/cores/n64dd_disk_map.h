@@ -18,10 +18,8 @@ class DiskMap {
 
 public:
     struct Step {
-        std::uint16_t track = 0;
+        FlatBlock where{};
         std::uint16_t lba = 0;
-        std::uint8_t head = 0;
-        std::uint8_t flat_block = 0;
         std::uint8_t copy_bytes = 0;
         std::uint8_t zone_bytes = 0;
         bool good = false;
@@ -53,10 +51,10 @@ public:
                 if (hi <= at)
                     continue;
                 const std::uint64_t to = hi < end ? hi : end;
-                fn(flat_offset(s.track, s.head, s.flat_block, sec)
-                       + static_cast<std::uint32_t>(at - lo),
-                   static_cast<std::size_t>(at - ram_off),
-                   static_cast<std::size_t>(to - at));
+                const FlatOffset run = s.where.sector_offset(sec).advanced_by(
+                    static_cast<std::uint32_t>(at - lo)
+                );
+                fn(run, static_cast<std::size_t>(at - ram_off), static_cast<std::size_t>(to - at));
                 at = to;
             }
         }

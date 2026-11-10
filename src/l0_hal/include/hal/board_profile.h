@@ -26,6 +26,7 @@
 #include "hal/video_out_decl.h"
 #include "hal/window_decl.h"
 #include "os/types.h"
+#include "os/uio_line_space.h"
 
 namespace mister::hal {
 
@@ -112,8 +113,6 @@ constexpr bool fact_measured(const BoardProfile& profile, FactField f) noexcept 
             return profile.program.align.measured();
         case FactField::TimingLoadBudgetWords:
             return profile.timing.load_budget_words.measured();
-        case FactField::TimingStartAckTimeoutNs:
-            return profile.timing.start_ack_timeout_ns.measured();
     }
     return false;
 }

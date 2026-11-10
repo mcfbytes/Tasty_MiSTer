@@ -7,7 +7,6 @@
 #include <span>
 
 #include "infra/endian.h"
-#include "infra/lease_order.h"
 #include "proto/types.h"
 
 namespace mister::app {
@@ -27,45 +26,20 @@ constexpr proto::OsdRowCells<ImageRow, hal::OsdBlock::kImageRows> kImageRegs = [
 
 }
 
-void LwOsdEndpoint::serve() noexcept {
-    TASTY_SEAT_BODY(LwOsdEndpoint);
-    take_grant_();
-    if (bound_gen_ == 0)
-        return;
-    store_frame_();
+void LwOsdEndpoint::publish_hook_(const OsdRoute& r) noexcept {
+    w_.route.publish(r);
 }
 
-void LwOsdEndpoint::on_pause() noexcept {
-    TASTY_SEAT_BODY(LwOsdEndpoint);
-    unbind_();
-}
-
-void LwOsdEndpoint::on_stop() noexcept {
-    TASTY_SEAT_BODY(LwOsdEndpoint);
-    unbind_();
-}
-
-void LwOsdEndpoint::on_resume() noexcept {
-    TASTY_SEAT_BODY(LwOsdEndpoint);
-    grant_rd_.forget();
-}
-
-void LwOsdEndpoint::take_grant_() noexcept {
-    const auto g = grant_rd_.take_if_changed(w_.grant);
-    if (!g)
-        return;
-
-    unbind_();
-    if (g->live())
-        bind_(*g, grant_rd_.seen());
-}
-
-void LwOsdEndpoint::bind_(const OsdGrant& g, std::uint32_t gen) noexcept {
-    bound_gen_ = gen;
+void LwOsdEndpoint::prepare_hook_(const OsdGrant& g) noexcept {
     if (!w_.port)
         block_.emplace(hal::reg::Block::redeem(g.block));
-    if (!lease_())
-        return;
+}
+
+bool LwOsdEndpoint::arm_hook_(const OsdGrant&) noexcept {
+    return true;
+}
+
+void LwOsdEndpoint::bind_hook_(const OsdGrant&) noexcept {
     for (proto::OsdRow r{}; kRows.covers(r); r += proto::kOneOsdRow)
         (void)store_row_(r);
     const std::uint32_t ctrl = ctrl_();
@@ -73,21 +47,27 @@ void LwOsdEndpoint::bind_(const OsdGrant& g, std::uint32_t gen) noexcept {
     (void)port_().read(hal::OsdBlock::Reg::Ctrl);
     ctrl_stored_ = ctrl;
     tally_.ctrl = ctrl;
-    release_();
-    tally_.on_lw = 1;
+}
+
+void LwOsdEndpoint::bound_hook_() noexcept {
     ++tally_.frames;
     publish_();
 }
 
-void LwOsdEndpoint::unbind_() noexcept {
-    if (bound_gen_ == 0)
-        return;
+void LwOsdEndpoint::answer_hook_(std::uint16_t) noexcept {}
+
+void LwOsdEndpoint::unbind_hook_() noexcept {
     block_.reset();
-    bound_gen_ = 0;
     stored_ = {};
     ctrl_stored_ = 0;
-    tally_.on_lw = 0;
-    publish_();
+}
+
+void LwOsdEndpoint::serve_bound_() noexcept {
+    store_frame_();
+}
+
+bool LwOsdEndpoint::idle_bound_hook_() const noexcept {
+    return true;
 }
 
 void LwOsdEndpoint::store_frame_() noexcept {
@@ -148,26 +128,6 @@ proto::OsdRowCount LwOsdEndpoint::bound_rows_() const noexcept {
 std::uint32_t LwOsdEndpoint::ctrl_() const noexcept {
     const bool hr = w_.surface.visible_rows() > kLowresRows;
     return hal::OsdBlock::kCtrlLwSel | (hr ? hal::OsdBlock::kCtrlHr : 0u);
-}
-
-bool LwOsdEndpoint::lease_() noexcept {
-    tally_.leased = 1;
-    publish_();
-    if (xthread::LeaseOrder::grant_unchanged(w_.grant, bound_gen_))
-        return true;
-    tally_.leased = 0;
-    ++tally_.revoked;
-    unbind_();
-    return false;
-}
-
-void LwOsdEndpoint::release_() noexcept {
-    tally_.leased = 0;
-    publish_();
-}
-
-void LwOsdEndpoint::publish_() noexcept {
-    w_.route.publish(tally_);
 }
 
 LwOsdEndpoint::Port& LwOsdEndpoint::port_() noexcept {

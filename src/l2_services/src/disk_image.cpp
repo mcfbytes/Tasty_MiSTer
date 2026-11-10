@@ -3,6 +3,7 @@
 
 #include <array>
 
+#include "infra/opt_ref.h"
 #include "svc/raw_disk_image.h"
 
 namespace mister::svc {
@@ -26,9 +27,9 @@ Ex<std::unique_ptr<IDiskImage>> open_disk_image(
     if (!got)
         return std::unexpected(got.error());
 
-    const DiskFormatRow*
+    const infra::OptRef<const DiskFormatRow>
         row = select_disk_format(rows, path, *size, std::span<const std::byte>(head).first(*got));
-    if (row == nullptr) {
+    if (!row) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 

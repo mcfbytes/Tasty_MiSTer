@@ -7,35 +7,61 @@
 #include "svc/config_parser.h"
 #include "svc/vfs.h"
 
+#include <array>
+#include <span>
 #include <string>
-#include <vector>
 
 namespace mister::app {
 namespace {
 
-[[nodiscard]] Ex<std::vector<std::byte>> read_all(const svc::Vfs& vfs, std::string_view path) {
-    auto f = vfs.open(path, svc::OpenMode::ReadWhole);
-    if (!f)
-        return std::unexpected(f.error());
-    auto sz = (*f)->size();
-    if (!sz)
-        return std::unexpected(sz.error());
-    std::vector<std::byte> buf(static_cast<std::size_t>(sz->v));
-    std::size_t off = 0;
-    while (off < buf.size()) {
-        auto n = (*f)->read_at(off, std::span<std::byte>(buf).subspan(off));
-        if (!n)
-            return std::unexpected(n.error());
-        if (*n == 0) {
-            return std::unexpected(
-                Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(off)}
-            );
-        }
-        off += *n;
-    }
-    return buf;
+constexpr std::string_view kLoadKindSections[] = {"arcade", "arcade_vertical"};
+
+[[nodiscard]] std::span<const std::string_view> load_kind_sections(const MraFacts& facts) noexcept {
+    if (facts.is_arcade && facts.vertical)
+        return std::span{kLoadKindSections};
+    if (facts.is_arcade)
+        return std::span{kLoadKindSections}.first(1);
+    if (facts.vertical)
+        return std::span{kLoadKindSections}.last(1);
+    return {};
 }
 
+}
+
+[[nodiscard]] Ex<std::vector<std::byte>> read_ini_whole(svc::IFile& file) {
+    auto sz = file.size();
+    if (!sz)
+        return std::unexpected(sz.error());
+    const proto::FileSize size = *sz;
+    if (size > proto::FileSize{kIniCap})
+        return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
+    std::vector<std::byte> out;
+    std::array<std::byte, 4096> chunk{};
+
+    proto::FileSize got{};
+    while (got < size) {
+
+        auto n = file.read_at(got.length_of(proto::BlockCount{1}), chunk);
+        if (!n)
+            return std::unexpected(n.error());
+        if (*n == 0)
+            return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
+        const proto::FileSize answered{*n};
+        if (got + answered > size)
+            return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
+        out.insert(out.end(), chunk.data(), chunk.data() + *n);
+        got += answered;
+    }
+    if (got != size)
+        return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
+    return out;
+}
+
+[[nodiscard]] Ex<std::vector<std::byte>> read_ini_whole(const svc::Vfs& vfs) {
+    auto f = vfs.open("MiSTer.ini", svc::OpenMode::ReadWhole);
+    if (!f)
+        return std::unexpected(f.error());
+    return read_ini_whole(**f);
 }
 
 [[nodiscard]] svc::ConfigSnapshot parse_ini_for_core(
@@ -50,15 +76,14 @@ namespace {
         return next;
     }
     std::string text;
-    if (auto bytes = read_all(*vfs, "MiSTer.ini")) {
+    if (auto bytes = read_ini_whole(*vfs)) {
         text.assign(infra::as_text(std::span(*bytes)));
     }
     if (!text.empty()) {
         svc::config_parser::PassNames names{};
         names.core_name = effective_name(conf_str_name, facts);
         names.orig_core_name = conf_str_name;
-        names.is_arcade = facts.is_arcade;
-        names.arcade_vertical = facts.vertical;
+        names.core_sections = load_kind_sections(facts);
         next = svc::config_parser::parse_two_pass(text, names);
     }
     apply_vga_mode_fixup(next);

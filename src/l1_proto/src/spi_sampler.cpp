@@ -16,7 +16,7 @@ hal::PinLevels decoded(const hal::SpiSample& g) noexcept {
 }
 
 void SpiSampler::service(bool hold_buttons) noexcept {
-    hal::SpiSample g = src_->sample();
+    hal::SpiSample g = src_.sample();
     if (hold_buttons && seen_)
         g.buttons = last_.buttons;
     const bool first = !seen_;
@@ -29,7 +29,7 @@ void SpiSampler::service(bool hold_buttons) noexcept {
         }
     }
     if (first || g.ready != last_.ready || g.buttons != last_.buttons || g.hdmi != last_.hdmi) {
-        levels_->publish(decoded(g));
+        levels_.publish(decoded(g));
     }
     last_ = g;
     seen_ = true;

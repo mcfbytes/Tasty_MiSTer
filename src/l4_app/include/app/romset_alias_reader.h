@@ -17,7 +17,7 @@ class Vfs;
 
 namespace mister::cores {
 struct FileSlot;
-class NeoGeoAliasSource;
+class IRomsetAliasSource;
 }
 
 namespace mister::app {
@@ -33,12 +33,7 @@ public:
 
     void bind(const cores::FileSlot& slot);
 
-    [[nodiscard]] RomsetAlias query(
-        std::string_view dir,
-        std::string_view home,
-        std::string_view entry,
-        std::string_view key
-    ) override;
+    [[nodiscard]] RomsetAlias query(BrowseDirs dirs, EntryLookup entry) override;
 
     bool bound() const noexcept { return source_ != nullptr; }
 
@@ -46,7 +41,7 @@ private:
     std::optional<std::string> read_prefix(std::string_view path, std::uint64_t cap) override;
 
     const svc::Vfs* vfs_;
-    std::unique_ptr<cores::NeoGeoAliasSource> source_;
+    std::unique_ptr<cores::IRomsetAliasSource> source_;
 };
 
 }

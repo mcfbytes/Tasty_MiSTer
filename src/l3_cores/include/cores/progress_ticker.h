@@ -21,7 +21,7 @@ class ProgressTicker {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    void bind(ILoadProgress* sink) noexcept { sink_ = infra::opt_ref_of(sink); }
+    void bind(infra::OptRef<ILoadProgress> sink) noexcept { sink_ = sink; }
 
     void begin(proto::FileSize total) noexcept {
         step_ = 0;

@@ -1,22 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "proto/core_session.h"
-#include "hal/start_ack_bound.h"
 #include "proto/spi_frame.h"
 #include "proto/uio_opcodes.h"
 
 #include <span>
-#include <string_view>
-
-#include "infra/endian.h"
 
 namespace mister::proto {
 
-namespace {
-
-constexpr StatusBit kResetBit{0};
-}
-
 Ex<void> CoreSession::fail(Error e) {
+    abandon_configure();
     phase_ = SessionPhase::Failed;
     return std::unexpected(e);
 }
@@ -47,6 +39,8 @@ Ex<CoreType> CoreSession::accept_identity(const Ex<hal::CoreIdentity>& id) {
 }
 
 Ex<void> CoreSession::set_memory_size(MemSizeCookie cookie) {
+    if (memsz_post_ != MemSizePost::None)
+        return fail(Error{Errc::would_block, ERR_SITE(), 0});
     if (phase_ != SessionPhase::Identified) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 0});
     }
@@ -54,16 +48,74 @@ Ex<void> CoreSession::set_memory_size(MemSizeCookie cookie) {
     if (type_ != CoreType::EightBit) {
         return fail(Error{Errc::negotiation, ERR_SITE(), 1});
     }
-    SpiFrame frame{*link_};
-    if (auto r = frame.begin(UioOp::SetMemSz); !r)
-        return fail(r.error());
 
-    if (auto r = frame.word(cookie.v); !r)
-        return fail(r.error());
-    if (auto r = frame.end(); !r)
-        return fail(r.error());
+    link_->select(hal::ChipSelect::Io);
+    auto op = link_->transfer_or_post(word(UioOp::SetMemSz));
+    if (!op) {
+        link_->deselect();
+        return fail(op.error());
+    }
+    if (!*op) {
+        memsz_post_ = MemSizePost::Opcode;
+        return {};
+    }
+
+    auto data = link_->transfer_or_post(hal::SpiWord{cookie.v});
+    if (!data) {
+        link_->deselect();
+        return fail(data.error());
+    }
+    if (!*data) {
+        memsz_post_ = MemSizePost::Cookie;
+        return {};
+    }
+    link_->deselect();
     phase_ = SessionPhase::MemSized;
     return {};
+}
+
+void CoreSession::abandon_configure() noexcept {
+    if (memsz_post_ == MemSizePost::None)
+        return;
+    memsz_post_ = MemSizePost::None;
+    link_->abandon_post();
+    link_->deselect();
+}
+
+Ex<bool> CoreSession::settle_configure() {
+    if (memsz_post_ == MemSizePost::None) {
+        const Error e{Errc::negotiation, ERR_SITE(), 0};
+        (void)fail(e);
+        return std::unexpected(e);
+    }
+    auto done = link_->posted_done();
+    if (!done) {
+        (void)fail(done.error());
+        return std::unexpected(done.error());
+    }
+
+    if (!*done)
+        return false;
+
+    if (memsz_post_ == MemSizePost::Opcode) {
+        memsz_post_ = MemSizePost::None;
+        auto data = link_->transfer_or_post(hal::SpiWord{cookie_.v});
+        if (!data) {
+            link_->deselect();
+            (void)fail(data.error());
+            return std::unexpected(data.error());
+        }
+        if (!*data) {
+            memsz_post_ = MemSizePost::Cookie;
+            return false;
+        }
+    }
+    memsz_post_ = MemSizePost::None;
+    link_->deselect();
+    phase_ = SessionPhase::MemSized;
+    if (auto r = assert_reset(); !r)
+        return std::unexpected(r.error());
+    return true;
 }
 
 Ex<void> CoreSession::flush_status() {
@@ -88,8 +140,8 @@ void CoreSession::post(const StatusEdit& edit) noexcept {
 }
 
 Ex<void> CoreSession::pulse(StatusBit bit) {
-    if (bit.v >= StatusRegister::kBits) {
-        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), bit.v});
+    if (!StatusRegister::holds(bit)) {
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), bit.detail()});
     }
     if (auto r = apply(StatusEdit::bit(bit, true)); !r)
         return r;
@@ -103,7 +155,7 @@ Ex<void> CoreSession::pulse_reset() {
 Ex<void> CoreSession::adopt_from_core(const StatusWord& core) {
 
     const StatusWord echo = StatusEdit::bit(kResetBit, false).over(core);
-    status_.adopt(echo.words);
+    status_.adopt(echo);
     return flush_status();
 }
 
@@ -175,10 +227,7 @@ Ex<void> CoreSession::send_rtc_image(const RtcImage& image) {
     SpiFrame frame{*link_};
     if (auto r = frame.begin(UioOp::Rtc); !r)
         return fail(r.error());
-    for (unsigned i = 0; i < 8; i += 2) {
-        const auto w = infra::load_le<std::uint16_t>(
-            std::span<const std::uint8_t>(image.rtc).subspan(i).first<2>()
-        );
+    for (const std::uint16_t w : image.rtc_words()) {
         if (auto r = frame.word(w); !r)
             return fail(r.error());
     }
@@ -187,11 +236,9 @@ Ex<void> CoreSession::send_rtc_image(const RtcImage& image) {
 
     if (auto r = frame.begin(UioOp::Timestamp); !r)
         return fail(r.error());
-    if (auto r = frame.word(static_cast<std::uint16_t>(image.stamp)); !r) {
-        return fail(r.error());
-    }
-    if (auto r = frame.word(static_cast<std::uint16_t>(image.stamp >> 16)); !r) {
-        return fail(r.error());
+    for (const std::uint16_t w : image.stamp_words()) {
+        if (auto r = frame.word(w); !r)
+            return fail(r.error());
     }
     if (auto r = frame.end(); !r)
         return fail(r.error());
@@ -225,10 +272,11 @@ Ex<void> CoreSession::configure_after_identity() {
 
     if (type_ != CoreType::EightBit)
         return {};
-
-    hal::StartAckBound widened(*link_);
     if (auto r = set_memory_size(cookie_); !r)
         return r;
+
+    if (memsz_post_ != MemSizePost::None)
+        return {};
     return assert_reset();
 }
 

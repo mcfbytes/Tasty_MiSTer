@@ -4,10 +4,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
 #include "app/path_text.h"
+#include "app/remembered_path.h"
 #include "app/ui_request_ring.h"
 #include "infra/fixed_str.h"
 #include "infra/opt_ref.h"
@@ -33,8 +35,9 @@ public:
 
     struct Played {
         app::PathText core_image{};
-        char slot_letter = 0;
-        std::uint8_t ioctl_index = 0;
+
+        std::optional<app::RememberedSlot> slot{};
+        proto::IoIndex ioctl_index{};
         app::PathText path{};
         Title title{};
         std::int64_t unix_time = 0;
@@ -56,11 +59,11 @@ public:
     [[nodiscard]] std::string_view title() const noexcept { return title_.view(); }
 
     [[nodiscard]] std::string_view loaded_file(proto::IoIndex index) const noexcept {
-        return file_of_('F', index);
+        return file_of_(app::RememberedSlot::File, index);
     }
 
     [[nodiscard]] std::string_view mounted_image(proto::IoIndex index) const noexcept {
-        return file_of_('S', index);
+        return file_of_(app::RememberedSlot::Mount, index);
     }
 
     [[nodiscard]] std::string_view core_image() const noexcept { return core_image_.view(); }
@@ -73,7 +76,8 @@ public:
 
 private:
     struct File {
-        char slot = 0;
+
+        app::RememberedSlot slot = app::RememberedSlot::File;
         proto::IoIndex index{};
         bool used = false;
         app::PathText path{};
@@ -86,7 +90,10 @@ private:
         bool has = false;
     };
 
-    [[nodiscard]] std::string_view file_of_(char slot, proto::IoIndex index) const noexcept;
+    [[nodiscard]] std::string_view file_of_(
+        app::RememberedSlot slot,
+        proto::IoIndex index
+    ) const noexcept;
 
     std::array<File, kFiles> files_{};
     std::size_t next_file_ = 0;

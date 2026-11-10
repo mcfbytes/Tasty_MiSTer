@@ -2,7 +2,6 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdio>
 #include <string>
 #include <string_view>
 
@@ -46,9 +45,8 @@ struct MraFacts {
     if (facts.setname.empty())
         return out;
     (void)out.serial.assign(facts.setname.view());
-    char name[GameId::kNameCap] = {};
-    (void)std::snprintf(name, sizeof name, "%s.mra", out.serial.c_str());
-    (void)out.file.assign(name);
+    (void)out.file.assign(out.serial.view());
+    (void)out.file.append(".mra");
     out.enabled = enabled;
     return out;
 }

@@ -3,6 +3,7 @@
 
 #include <array>
 #include <bit>
+#include <compare>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -15,12 +16,22 @@
 #include "infra/decimal_text.h"
 #include "infra/endian.h"
 #include "infra/error.h"
+#include "infra/hex_text.h"
+#include "infra/json_out.h"
 #include "infra/seat.h"
+#include "proto/mouse_delta.h"
 #include "proto/types.h"
+
+namespace mister::xthread {
+struct ByteOffset;
+struct SlotStride;
+}
 
 namespace mister::svc {
 
-struct Msf;
+struct FilterBankIndex;
+struct FilterFormat;
+enum class FilterEncoding : std::uint8_t;
 
 using ::mister::infra::affine::operator+;
 using ::mister::infra::affine::operator-;
@@ -30,10 +41,32 @@ using ::mister::infra::affine::operator-=;
 
 enum class CddaOrder : std::uint8_t { LittleEndian, BigEndian };
 
+enum class DiscRegion : std::uint8_t { Unknown = 0, Japan = 1, Usa = 2, Europe = 3 };
+
 using proto::JoyMask;
 using proto::PlayerIndex;
 
+inline constexpr std::size_t kJoyWords = 32;
+
 inline constexpr unsigned kMaxPlayers = 6;
+
+inline constexpr std::array<PlayerIndex, kMaxPlayers> kPlayers = [] {
+    std::array<PlayerIndex, kMaxPlayers> players{};
+    for (std::uint8_t i = 0; i < kMaxPlayers; ++i)
+        players[i] = PlayerIndex{i};
+    return players;
+}();
+
+struct PlayerCount {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] static constexpr PlayerCount of(std::size_t n) noexcept {
+        return PlayerCount{static_cast<std::uint8_t>(n > kMaxPlayers ? kMaxPlayers : n)};
+    }
+
+    friend constexpr bool operator==(PlayerCount, PlayerCount) = default;
+    friend constexpr auto operator<=>(PlayerCount, PlayerCount) = default;
+};
 
 struct PlayerMask {
     std::uint8_t v = 0;
@@ -55,6 +88,22 @@ struct PlayerMask {
         return false;
     }
 
+    [[nodiscard]] constexpr PlayerMask with(PlayerMask other) const noexcept {
+        return PlayerMask{static_cast<std::uint8_t>(v | other.v)};
+    }
+
+    [[nodiscard]] constexpr proto::ParamSet as_param_set() const noexcept {
+        return proto::ParamSet{v};
+    }
+
+    [[nodiscard]] constexpr PlayerMask limited_to(PlayerCount slots) const noexcept {
+        if (slots.v >= kMaxPlayers)
+            return *this;
+        return PlayerMask{static_cast<std::uint8_t>(v & ((1u << slots.v) - 1u))};
+    }
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
     [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
 
     friend constexpr bool operator==(PlayerMask, PlayerMask) = default;
@@ -62,7 +111,49 @@ struct PlayerMask {
 
 static_assert(kMaxPlayers <= 8, "PlayerMask holds one bit per player slot");
 
+struct Tally {
+    TASTY_SEAT_EXEMPT(component);
+    std::uint32_t v = 0;
+
+    constexpr void add(Tally by = Tally{1}) noexcept { v += by.v; }
+
+    constexpr void set(Tally n) noexcept { v = n.v; }
+
+    [[nodiscard]] constexpr Tally sum(Tally by) const noexcept { return Tally{v + by.v}; }
+
+    friend constexpr void json_field(infra::JsonOut& o, infra::JsonName key, Tally t) noexcept {
+        o.field(key, t.v);
+    }
+
+    friend constexpr bool operator==(Tally, Tally) = default;
+};
+
+struct OsErrno {
+    std::uint16_t v = 0;
+    friend constexpr bool operator==(OsErrno, OsErrno) = default;
+};
+
+struct KeyHash {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr bool is_bound() const noexcept { return v != 0; }
+
+    [[nodiscard]] infra::DecimalText text() const noexcept { return infra::DecimalText{v}; }
+
+    friend constexpr void json_field(infra::JsonOut& o, infra::JsonName key, KeyHash h) noexcept {
+        o.field(key, h.v);
+    }
+
+    friend constexpr bool operator==(KeyHash, KeyHash) = default;
+};
+
 struct TrackIndex;
+
+struct CueField {
+    std::uint32_t v = 0;
+    friend constexpr bool operator==(CueField, CueField) = default;
+    friend constexpr auto operator<=>(CueField, CueField) = default;
+};
 
 struct TrackNumber {
     std::uint8_t v = 0;
@@ -82,9 +173,7 @@ struct TrackNumber {
 
     [[nodiscard]] constexpr TrackIndex index() const noexcept;
 
-    [[nodiscard]] constexpr bool matches(std::uint32_t decoded) const noexcept {
-        return v == decoded;
-    }
+    [[nodiscard]] constexpr bool matches(CueField decoded) const noexcept { return v == decoded.v; }
 
     friend constexpr bool operator==(TrackNumber, TrackNumber) = default;
     friend constexpr auto operator<=>(TrackNumber, TrackNumber) = default;
@@ -105,14 +194,12 @@ struct TrackCount {
     [[nodiscard]] constexpr TrackIndex next_index() const noexcept;
     [[nodiscard]] constexpr TrackIndex last_index() const noexcept;
 
-    [[nodiscard]] constexpr TrackNumber clamped_number(std::uint32_t decoded) const noexcept {
+    [[nodiscard]] constexpr TrackNumber clamped_number(CueField decoded) const noexcept {
         const std::uint8_t last = at_least_one().v;
-        if (decoded < 1)
+        if (decoded.v < 1)
             return TrackNumber{1};
-        return TrackNumber{decoded > last ? last : static_cast<std::uint8_t>(decoded)};
+        return TrackNumber{decoded.v > last ? last : static_cast<std::uint8_t>(decoded.v)};
     }
-
-    [[nodiscard]] constexpr Msf as_minute() const noexcept;
 
     [[nodiscard]] constexpr std::uint8_t bcd_byte() const noexcept {
         return proto::PackedBcd::unmasked_byte(v);
@@ -146,9 +233,9 @@ struct TrackIndex {
         return TrackIndex{static_cast<std::uint8_t>(i)};
     }
 
-    [[nodiscard]] constexpr std::size_t row_offset(std::size_t row_bytes) const noexcept {
-        return row_bytes * v;
-    }
+    [[nodiscard]] constexpr xthread::ByteOffset row_offset(
+        xthread::SlotStride row_bytes
+    ) const noexcept;
 
     [[nodiscard]] constexpr TrackNumber number() const noexcept {
         return TrackNumber{static_cast<std::uint8_t>(v + 1)};
@@ -250,6 +337,10 @@ struct EvdevCode {
         return lo.v <= v && v <= hi.v;
     }
 
+    [[nodiscard]] infra::HexText text() const noexcept {
+        return infra::HexText{v, infra::HexCase::Upper};
+    }
+
     friend constexpr bool operator==(EvdevCode, EvdevCode) = default;
     friend constexpr auto operator<=>(EvdevCode, EvdevCode) = default;
 };
@@ -261,6 +352,7 @@ static_assert(
 
 struct DeviceSlot {
     std::uint8_t v = 0;
+    static constexpr unsigned kCount = 32;
     friend constexpr bool operator==(DeviceSlot, DeviceSlot) = default;
 };
 
@@ -280,6 +372,10 @@ struct Deadzone {
 
     [[nodiscard]] constexpr bool swallows(std::int32_t magnitude) const noexcept {
         return magnitude <= v;
+    }
+
+    [[nodiscard]] constexpr bool swallows(float magnitude) const noexcept {
+        return magnitude <= static_cast<float>(v);
     }
 
     [[nodiscard]] constexpr float magnitude() const noexcept { return static_cast<float>(v); }
@@ -306,6 +402,10 @@ struct HunkCount {
 
     [[nodiscard]] static constexpr HunkCount of_slots(std::size_t n) noexcept {
         return HunkCount{static_cast<std::uint32_t>(n)};
+    }
+
+    [[nodiscard]] constexpr std::size_t bytes_at(std::size_t per_hunk) const noexcept {
+        return per_hunk * static_cast<std::size_t>(v);
     }
 
     friend constexpr bool operator==(HunkCount, HunkCount) = default;
@@ -348,6 +448,10 @@ static_assert(
 struct Crc32 {
     std::uint32_t v = 0;
 
+    static const Crc32 kUndeclared;
+
+    [[nodiscard]] constexpr bool declared() const noexcept { return v != 0; }
+
     [[nodiscard]] constexpr std::array<std::uint8_t, 4> to_be_bytes() const noexcept {
         return std::bit_cast<std::array<std::uint8_t, 4>>(
             std::endian::native == std::endian::little ? std::byteswap(v) : v
@@ -357,15 +461,23 @@ struct Crc32 {
     friend constexpr bool operator==(Crc32, Crc32) = default;
 };
 
+inline constexpr Crc32 Crc32::kUndeclared{0};
+
 [[nodiscard]] Crc32 crc32_extend(Crc32 running, std::span<const std::uint8_t> data) noexcept;
 
 struct Vid {
     std::uint16_t v = 0;
+
+    [[nodiscard]] infra::HexText text() const noexcept { return infra::HexText{v}; }
+
     friend constexpr bool operator==(Vid, Vid) = default;
 };
 
 struct Pid {
     std::uint16_t v = 0;
+
+    [[nodiscard]] infra::HexText text() const noexcept { return infra::HexText{v}; }
+
     friend constexpr bool operator==(Pid, Pid) = default;
 };
 
@@ -379,6 +491,96 @@ struct Generation {
 
     friend constexpr bool operator==(Generation, Generation) = default;
     friend constexpr auto operator<=>(Generation, Generation) = default;
+};
+
+struct FltFlags {
+    std::uint16_t v = 0;
+    static constexpr std::uint16_t kEncodingMask = 0x0003;
+    static constexpr std::uint16_t kFullPrecisionBit = 0x0004;
+    static constexpr std::uint16_t kCoreScanlinesMask = 0x0030;
+
+    [[nodiscard]] constexpr bool present() const noexcept { return v != 0; }
+
+    [[nodiscard]] constexpr FilterEncoding encoding() const noexcept {
+        return static_cast<FilterEncoding>(v & kEncodingMask);
+    }
+
+    [[nodiscard]] constexpr bool full_precision() const noexcept {
+        return (v & kFullPrecisionBit) != 0;
+    }
+
+    [[nodiscard]] constexpr bool core_scanlines() const noexcept {
+        return (v & kCoreScanlinesMask) != 0;
+    }
+
+    [[nodiscard]] constexpr FilterFormat format() const noexcept;
+    friend constexpr bool operator==(FltFlags, FltFlags) = default;
+};
+
+struct FilterTapCount {
+    std::size_t v = 0;
+    friend constexpr bool operator==(FilterTapCount, FilterTapCount) = default;
+};
+
+struct FilterTapIndex {
+    std::size_t v = 0;
+    friend constexpr bool operator==(FilterTapIndex, FilterTapIndex) = default;
+};
+
+struct FilterEntryWordCount {
+    std::size_t v = 0;
+    friend constexpr bool operator==(FilterEntryWordCount, FilterEntryWordCount) = default;
+};
+
+struct FilterBankWordCount {
+    std::size_t v = 0;
+    friend constexpr bool operator==(FilterBankWordCount, FilterBankWordCount) = default;
+};
+
+struct FilterIteration {
+    std::size_t v = 0;
+    friend constexpr bool operator==(FilterIteration, FilterIteration) = default;
+};
+
+struct FilterAddressGrid {
+    unsigned v = 0;
+    friend constexpr bool operator==(FilterAddressGrid, FilterAddressGrid) = default;
+};
+
+struct FilterBankWordIndex {
+    std::size_t v = 0;
+
+    [[nodiscard]] constexpr FilterIteration iteration(FilterTapCount taps) const noexcept {
+        return FilterIteration{v / taps.v};
+    }
+
+    [[nodiscard]] constexpr FilterTapIndex tap(FilterTapCount taps) const noexcept {
+        return FilterTapIndex{v % taps.v};
+    }
+
+    [[nodiscard]] constexpr FilterBankWordIndex pair(
+        FilterEntryWordCount words_per_entry
+    ) const noexcept {
+        return FilterBankWordIndex{v / words_per_entry.v};
+    }
+
+    [[nodiscard]] constexpr bool is_address(FilterEntryWordCount words_per_entry) const noexcept {
+        return v % words_per_entry.v == 0;
+    }
+
+    [[nodiscard]] constexpr FilterBankIndex bank(FilterBankWordCount per_bank) const noexcept;
+
+    [[nodiscard]] constexpr FilterBankWordIndex offset(
+        FilterBankWordCount per_bank
+    ) const noexcept {
+        return FilterBankWordIndex{v % per_bank.v};
+    }
+
+    [[nodiscard]] constexpr std::size_t wire_offset(FilterAddressGrid grid) const noexcept {
+        return v << grid.v;
+    }
+
+    friend constexpr bool operator==(FilterBankWordIndex, FilterBankWordIndex) = default;
 };
 
 enum class VscaleMode : std::uint8_t {
@@ -407,11 +609,67 @@ enum class DirectVideo : std::uint8_t { Off, On, Auto };
     }
 }
 
+inline constexpr std::size_t kNumVmodes = 15;
+
+struct PresetIndex {
+    std::uint8_t v = 0;
+
+    [[nodiscard]] static constexpr PresetIndex of(std::uint32_t raw) noexcept {
+        return PresetIndex{static_cast<std::uint8_t>(raw < kNumVmodes ? raw : 0)};
+    }
+
+    template <class T>
+    [[nodiscard]] constexpr const T& in(std::span<const T> table) const noexcept {
+        return table[v];
+    }
+
+    friend constexpr bool operator==(PresetIndex, PresetIndex) = default;
+};
+
+struct OpenFileId;
+
+struct OpenFileCount {
+    std::uint16_t v = 0;
+    using affine_count = OpenFileCount;
+
+    [[nodiscard]] constexpr bool contains(OpenFileId id) const noexcept;
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
+
+    [[nodiscard]] constexpr OpenFileId next_index() const noexcept;
+
+    [[nodiscard]] constexpr Error refusal(Errc code, infra::ErrorSite at) const noexcept {
+        return Error{code, at, v};
+    }
+
+    friend constexpr bool operator==(OpenFileCount, OpenFileCount) = default;
+    friend constexpr auto operator<=>(OpenFileCount, OpenFileCount) = default;
+};
+
 struct OpenFileId {
     std::uint16_t v = 0;
+    using affine_count = OpenFileCount;
     friend constexpr bool operator==(OpenFileId, OpenFileId) = default;
     friend constexpr auto operator<=>(OpenFileId, OpenFileId) = default;
 };
+
+constexpr OpenFileId OpenFileCount::next_index() const noexcept {
+    return OpenFileId{v};
+}
+
+constexpr bool OpenFileCount::contains(OpenFileId id) const noexcept {
+    return id.v < v;
+}
+
+static_assert(infra::affine::Count<OpenFileCount>, "an open-file count is a count");
+static_assert(
+    infra::affine::Position<OpenFileId>,
+    "an open-file id is a position over OpenFileCount"
+);
+static_assert(
+    OpenFileCount{3}.contains(OpenFileId{2}) && !OpenFileCount{3}.contains(OpenFileId{3}),
+    "contains is the id-vs-count guard"
+);
 
 namespace adv7513 {
 

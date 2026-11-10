@@ -3,10 +3,11 @@
 
 #include <cstddef>
 #include <optional>
-#include <string>
 #include <string_view>
 
 #include "infra/error.h"
+#include "infra/fixed_str.h"
+#include "infra/indexed_array.h"
 #include "infra/seat.h"
 #include "svc/types.h"
 
@@ -18,6 +19,8 @@ class PlayerSlots {
     TASTY_SEAT_EXEMPT(component);
 
 public:
+    PlayerSlots() = default;
+
     std::optional<PlayerIndex> slot_of(const DeviceIdentity& id) const;
     [[nodiscard]] Ex<void> assign(const DeviceIdentity& id, PlayerIndex player);
 
@@ -26,17 +29,15 @@ public:
     static std::string_view key_of(const DeviceIdentity& id) noexcept;
 
     std::string_view key_at(PlayerIndex player) const noexcept {
-        return player.v < kMaxPlayers ? std::string_view(bound_[player.v]) : std::string_view{};
-    }
-
-    PlayerSlots() {
-        for (std::string& b : bound_)
-            b.reserve(kKeyReserve);
+        const auto key = bound_.find(player);
+        return key ? key->view() : std::string_view{};
     }
 
 private:
     static constexpr std::size_t kKeyReserve = 128;
-    std::string bound_[kMaxPlayers]{};
+
+    using StickyKey = FixedStr<kKeyReserve, StrFit::Reject>;
+    infra::IndexedArray<StickyKey, kMaxPlayers, PlayerIndex> bound_{};
 };
 
 }

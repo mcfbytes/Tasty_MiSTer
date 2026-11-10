@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <span>
 
+#include "proto/bit_field.h"
 #include "proto/types.h"
 #include "infra/seat.h"
 
@@ -18,20 +19,32 @@ struct StatusWord {
     std::array<std::uint16_t, kWords> words{};
 
     [[nodiscard]] constexpr bool get_bit(StatusBit bit) const noexcept {
-        if (bit.v >= kBits)
+        if (!bit.within(kBits))
             return false;
-        return ((static_cast<unsigned>(words[bit.v / kBitsPerWord]) >> (bit.v % kBitsPerWord)) & 1u)
-            != 0u;
+        return bit_at(bit);
     }
 
     [[nodiscard]] constexpr bool has(StatusBit bit) const noexcept { return get_bit(bit); }
 
+    [[nodiscard]] constexpr FieldValue field(BitField bits) const noexcept {
+        std::uint32_t out = 0;
+        unsigned i = 0;
+        for (const StatusBit bit : bits.each_bit()) {
+            if (i >= BitField::kWordBits)
+                break;
+            if (bit.within(kBits) && bit_at(bit))
+                out |= 1u << i;
+            ++i;
+        }
+        return FieldValue{out};
+    }
+
     [[nodiscard]] constexpr StatusWord with(StatusBit bit, bool value) const noexcept {
-        if (bit.v >= kBits)
+        if (!bit.within(kBits))
             return *this;
         StatusWord out = *this;
-        const std::size_t w = bit.v / kBitsPerWord;
-        const auto mask = static_cast<std::uint16_t>(1u << (bit.v % kBitsPerWord));
+        const std::size_t w = bit.word_index(kBitsPerWord);
+        const auto mask = static_cast<std::uint16_t>(1u << bit.bit_index(kBitsPerWord));
         out.words[w] = value
             ? static_cast<std::uint16_t>(out.words[w] | mask)
             : static_cast<std::uint16_t>(out.words[w] & static_cast<std::uint16_t>(~mask));
@@ -55,7 +68,29 @@ struct StatusWord {
     }
 
     friend constexpr bool operator==(const StatusWord&, const StatusWord&) = default;
+
+private:
+    [[nodiscard]] constexpr bool bit_at(StatusBit bit) const noexcept {
+        return ((static_cast<unsigned>(words[bit.word_index(kBitsPerWord)])
+                 >> bit.bit_index(kBitsPerWord))
+                & 1u)
+            != 0u;
+    }
 };
+
+constexpr FieldValue BitField::read(const StatusWord& word) const noexcept {
+    return word.field(*this);
+}
+
+constexpr StatusWord BitField::write(StatusWord word, FieldValue value) const noexcept {
+    const unsigned span = width < kWordBits ? width : kWordBits;
+    unsigned i = 0;
+    for (const StatusBit at : BitField{start, static_cast<std::uint8_t>(span)}.each_bit()) {
+        word = word.with(at, ((value.v >> i) & 1u) != 0u);
+        ++i;
+    }
+    return word;
+}
 
 static_assert(sizeof(StatusWord) == 16);
 static_assert(StatusWord::kBits == StatusWord::kBitsPerWord * StatusWord::kWords);

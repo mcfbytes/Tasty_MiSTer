@@ -230,9 +230,26 @@ static_assert(
 namespace {
 constexpr std::size_t st_row(StOption o) noexcept {
     for (std::size_t i = 0; i < kStOptionRows.size(); ++i)
-        if (kStOptionRows[i].id == st_id(o) && kStOptionRows[i].kind != OptionRow::Kind::Separator)
+        if (kStOptionRows[i].id == tag_of(o)
+            && kStOptionRows[i].kind() != OptionRow::Kind::Separator)
             return i;
     return kStOptionRows.size();
+}
+
+constexpr const OptionRow::CycleArm& cycle_of(StOption o) noexcept {
+    return *kStOptionRows[st_row(o)].cycle_arm();
+}
+
+constexpr const OptionRow::FileArm& file_of(StOption o) noexcept {
+    return *kStOptionRows[st_row(o)].file_arm();
+}
+
+constexpr const OptionRow::LinkArm& link_of(StOption o) noexcept {
+    return *kStOptionRows[st_row(o)].link_arm();
+}
+
+constexpr const OptionRow::HostArm& host_of(StOption o) noexcept {
+    return *kStOptionRows[st_row(o)].host_arm();
 }
 
 constexpr std::size_t st_rows_on(proto::SubmenuNo page) noexcept {
@@ -282,73 +299,71 @@ static_assert(
     "menu.cpp:4824-4895: the config page's row ORDER"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::WriteProtect)].bits == proto::BitField{proto::StatusBit{6}, 2}
-        && kStOptionRows[st_row(StOption::WriteProtect)].values.size() == 4,
+    cycle_of(StOption::WriteProtect).bits == proto::BitField{proto::StatusBit{6}, 2}
+        && cycle_of(StOption::WriteProtect).values.size() == 4,
     "menu.cpp:4640,:4712-4714: (ctrl >> 6) & 3 over config_tos_wrprot[4]"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::Memory)].bits == proto::BitField{proto::StatusBit{1}, 3}
-        && kStOptionRows[st_row(StOption::Memory)].choice_count() == 6
-        && kStOptionRows[st_row(StOption::Memory)].values.size() == 8
-        && kStOptionRows[st_row(StOption::Memory)].arms_reset,
+    cycle_of(StOption::Memory).bits == proto::BitField{proto::StatusBit{1}, 3}
+        && cycle_of(StOption::Memory).choice_count() == proto::FieldCount{6}
+        && cycle_of(StOption::Memory).values.size() == 8
+        && cycle_of(StOption::Memory).arms_reset,
     "menu.cpp:4831,:4950-4953: tos_mem[(ctrl >> 1) & 7] shows eight names, a select "
     "wraps at 5, and the change arms need_reset"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::Chipset)].bits == proto::BitField{proto::StatusBit{23}, 2},
+    cycle_of(StOption::Chipset).bits == proto::BitField{proto::StatusBit{23}, 2},
     "menu.cpp:4840,:4965: bits 24:23, STE | MSTE"
 );
 static_assert(
-    !kStOptionRows[st_row(StOption::Blitter)].bits.valid()
-        && !kStOptionRows[st_row(StOption::Viking)].bits.valid()
-        && !kStOptionRows[st_row(StOption::Aspect)].bits.valid()
-        && !kStOptionRows[st_row(StOption::VideoCrop)].bits.valid(),
+    !cycle_of(StOption::Blitter).bits.valid()
+        && !cycle_of(StOption::Viking).bits.valid()
+        && !cycle_of(StOption::Aspect).bits.valid()
+        && !cycle_of(StOption::VideoCrop).bits.valid(),
     "menu.cpp:4845-4859,:4870-4872: four rows whose display is derived from more "
     "than one field, answered by StCore itself"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::Screen)].bits == proto::BitField{proto::StatusBit{8}, 1}
-        && kStOptionRows[st_row(StOption::Mono60)].bits == proto::BitField{proto::StatusBit{30}, 1}
-        && kStOptionRows[st_row(StOption::Scanlines)].bits
-            == proto::BitField{proto::StatusBit{20}, 2}
-        && kStOptionRows[st_row(StOption::Dongle)].bits == proto::BitField{proto::StatusBit{25}, 1}
-        && kStOptionRows[st_row(StOption::YmAudio)].bits
-            == proto::BitField{proto::StatusBit{22}, 1},
+    cycle_of(StOption::Screen).bits == proto::BitField{proto::StatusBit{8}, 1}
+        && cycle_of(StOption::Mono60).bits == proto::BitField{proto::StatusBit{30}, 1}
+        && cycle_of(StOption::Scanlines).bits == proto::BitField{proto::StatusBit{20}, 2}
+        && cycle_of(StOption::Dongle).bits == proto::BitField{proto::StatusBit{25}, 1}
+        && cycle_of(StOption::YmAudio).bits == proto::BitField{proto::StatusBit{22}, 1},
     "st_tos.h:37,:69,:57-59,:63,:56 — VIDEO_COLOR, MDE60, SCANLINES, DONGLE, STEREO"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::Scale)].word == kStExtCtrl
-        && kStOptionRows[st_row(StOption::Scale)].bits == proto::BitField{proto::StatusBit{11}, 2}
-        && kStOptionRows[st_row(StOption::Scale)].values.size() == 4,
+    cycle_of(StOption::Scale).word == kStExtCtrl
+        && cycle_of(StOption::Scale).bits == proto::BitField{proto::StatusBit{11}, 2}
+        && cycle_of(StOption::Scale).values.size() == 4,
     "menu.cpp:4876,:5020-5021: config_scale[(ext >> 11) & 3], the ONLY ext_ctrl row"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::FloppyA)].slot == IoIndex{0}
-        && kStOptionRows[st_row(StOption::FloppyB)].slot == IoIndex{1}
-        && kStOptionRows[st_row(StOption::Cartridge)].slot == IoIndex{5}
-        && kStOptionRows[st_row(StOption::Hdd0)].slot == IoIndex{2}
-        && kStOptionRows[st_row(StOption::Hdd1)].slot == IoIndex{3}
-        && kStOptionRows[st_row(StOption::Tos)].slot == IoIndex{4},
+    file_of(StOption::FloppyA).slot == IoIndex{0}
+        && file_of(StOption::FloppyB).slot == IoIndex{1}
+        && file_of(StOption::Cartridge).slot == IoIndex{5}
+        && file_of(StOption::Hdd0).slot == IoIndex{2}
+        && file_of(StOption::Hdd1).slot == IoIndex{3}
+        && file_of(StOption::Tos).slot == IoIndex{4},
     "the File rows name the manifest slots kAtariStSlots declares"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::FloppyA)].ejects_on_select
-        && kStOptionRows[st_row(StOption::Cartridge)].ejects_on_select
-        && !kStOptionRows[st_row(StOption::Hdd0)].ejects_on_select
-        && !kStOptionRows[st_row(StOption::Tos)].ejects_on_select,
+    file_of(StOption::FloppyA).ejects_on_select
+        && file_of(StOption::Cartridge).ejects_on_select
+        && !file_of(StOption::Hdd0).ejects_on_select
+        && !file_of(StOption::Tos).ejects_on_select,
     "menu.cpp:4691-4694,:4720-4723: an inserted floppy or cartridge ejects on select; "
     ":4926 browses an HDD with SCANO_UMOUNT; :4959 browses the TOS"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::ModifyConfig)].link == OptionRow::Link::SubPage
-        && kStOptionRows[st_row(StOption::ModifyConfig)].link_page == kStConfigPage
-        && kStOptionRows[st_row(StOption::LoadConfig)].link == OptionRow::Link::LoadConfig
-        && kStOptionRows[st_row(StOption::SaveConfig)].link == OptionRow::Link::SaveConfig
-        && kStOptionRows[st_row(StOption::Mt32Pi)].link == OptionRow::Link::Mt32Pi,
+    link_of(StOption::ModifyConfig).link == OptionRow::Link::SubPage
+        && link_of(StOption::ModifyConfig).link_page == kStConfigPage
+        && link_of(StOption::LoadConfig).link == OptionRow::Link::LoadConfig
+        && link_of(StOption::SaveConfig).link == OptionRow::Link::SaveConfig
+        && link_of(StOption::Mt32Pi).link == OptionRow::Link::Mt32Pi,
     "menu.cpp:4748-4776: the four links; :4658 shows MT32-pi only under OSD mask bit 0"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::JoySwap)].host == OptionRow::Host::JoySwap,
+    host_of(StOption::JoySwap).host == OptionRow::Host::JoySwap,
     "menu.cpp:4648,:4740: user_io_get_joyswap is the HOST's, not the ST's"
 );
 static_assert(
@@ -359,10 +374,10 @@ static_assert(
     "'Config'; an empty entry means the core name"
 );
 static_assert(
-    kStOptionRows[st_row(StOption::Hdd0)].browse_unmount
-        && kStOptionRows[st_row(StOption::Hdd1)].browse_unmount
-        && !kStOptionRows[st_row(StOption::Tos)].browse_unmount
-        && !kStOptionRows[st_row(StOption::FloppyA)].browse_unmount,
+    file_of(StOption::Hdd0).browse_unmount
+        && file_of(StOption::Hdd1).browse_unmount
+        && !file_of(StOption::Tos).browse_unmount
+        && !file_of(StOption::FloppyA).browse_unmount,
     "menu.cpp:4927 is the ONLY ST browse opened with SCANO_UMOUNT"
 );
 static_assert(

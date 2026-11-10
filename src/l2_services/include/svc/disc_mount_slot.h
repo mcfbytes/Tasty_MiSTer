@@ -9,6 +9,7 @@
 #include "infra/opt_ref.h"
 #include "infra/path_text.h"
 #include "infra/seat.h"
+#include "svc/disc_identity_role.h"
 #include "svc/disc_mounter.h"
 #include "svc/types.h"
 
@@ -24,10 +25,11 @@ struct DiscMountSlot {
     FixedStr<kDiscPathCap, StrFit::Reject> path{};
 
     infra::OptRef<const CuePolicy> policy{};
+
+    infra::OptRef<const IDiscIdentity> identity{};
     Generation gen{};
     DiscOp op = DiscOp::Mount;
     bool mounted = false;
-    bool done = false;
 };
 
 static_assert(std::is_trivially_copyable_v<DiscMountSlot>);

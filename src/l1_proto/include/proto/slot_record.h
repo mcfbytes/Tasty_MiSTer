@@ -5,26 +5,19 @@
 #include <cstdint>
 
 #include "infra/seat.h"
+#include "os/raw_monotonic_clock.h"
 #include "proto/block_geometry.h"
 #include "proto/types.h"
 
 namespace mister::proto {
 
-inline constexpr std::chrono::steady_clock::time_point kNoDue{};
+inline constexpr os::RawMonotonicClock::time_point kNoDue{};
 
-[[nodiscard]] constexpr std::chrono::steady_clock::time_point due_after(
-    std::int64_t now_ns,
-    std::int64_t span_ns
+[[nodiscard]] constexpr os::RawMonotonicClock::time_point due_after(
+    os::RawMonotonicClock::time_point now,
+    std::chrono::nanoseconds span
 ) noexcept {
-    return std::chrono::steady_clock::time_point{
-        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-            std::chrono::nanoseconds{now_ns + span_ns}
-        )
-    };
-}
-
-[[nodiscard]] constexpr std::int64_t due_ns_of(std::chrono::steady_clock::time_point at) noexcept {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(at.time_since_epoch()).count();
+    return now + span;
 }
 
 struct SlotRecord {
@@ -65,7 +58,7 @@ struct SlotRecord {
         std::uint64_t offset = 0;
         std::uint32_t len = 0;
 
-        std::chrono::steady_clock::time_point due{};
+        os::RawMonotonicClock::time_point due = kNoDue;
         bool answer_owed = false;
         bool blank_next = false;
     };
@@ -79,9 +72,9 @@ struct SlotRecord {
     std::uint8_t half_busy = 0;
     std::uint32_t epoch = 0;
 
-    std::chrono::steady_clock::time_point no_half_due{};
+    os::RawMonotonicClock::time_point no_half_due = kNoDue;
 
-    std::chrono::steady_clock::time_point resident_due{};
+    os::RawMonotonicClock::time_point resident_due = kNoDue;
 
     [[nodiscard]] bool half_held(ArenaHalf h) const noexcept {
         return (half_busy & h.mask<std::uint8_t>()) != 0;

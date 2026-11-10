@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cores/mra_doc.h"
 
+#include <limits>
 #include <tuple>
 #include <utility>
 
+#include "cores/arcade_facts.h"
+#include "cores/interleave_widths.h"
 #include "cores/stock_scan.h"
 #include "hal/types.h"
 #include "infra/ascii.h"
@@ -45,12 +48,32 @@ std::vector<std::uint8_t> hex_bytes(std::string_view text) {
     return out;
 }
 
+std::optional<proto::WideIoIndex> rom_index_of(std::string_view digits) noexcept {
+    const int n = stock_scan::scan_atoi(digits);
+    if (n < 0 || n > std::numeric_limits<std::uint8_t>::max())
+        return std::nullopt;
+    return proto::WideIoIndex{static_cast<std::uint16_t>(n)};
+}
+
+std::optional<proto::WideIoIndex> nvram_index_of(std::string_view digits) noexcept {
+    const std::uint32_t n = stock_scan::scan_ul(digits, stock_scan::Radix::Auto).value;
+    if (n == 0 || n > std::numeric_limits<std::uint8_t>::max())
+        return std::nullopt;
+    return proto::WideIoIndex{static_cast<std::uint16_t>(n)};
+}
+
+std::optional<proto::FileSize> nvram_size_of(std::string_view digits) noexcept {
+    const std::uint32_t n = stock_scan::scan_ul(digits, stock_scan::Radix::Auto).value;
+    if (n == 0 || n > kNvramCap)
+        return std::nullopt;
+    return proto::FileSize{n};
+}
+
 namespace {
 
 using stock_scan::is_c_space;
 using stock_scan::Radix;
 using stock_scan::Scan;
-using stock_scan::scan_atoi;
 using stock_scan::scan_ul;
 
 struct BitsScan {
@@ -191,7 +214,7 @@ enum class Element : std::uint8_t {
 }
 
 struct RomAttrs {
-    int index = 0;
+    std::optional<proto::WideIoIndex> index = proto::WideIoIndex{};
     std::string zips;
     std::string md5;
     hal::FabricAddr address{};
@@ -206,24 +229,23 @@ struct PendingNode {
 
     void reset() noexcept {
         part_name.clear();
-        offset = 0;
-        length = -1;
-        repeat = 1;
+        offset = RomOffset{};
+        length = std::nullopt;
+        repeat = RepeatCount{1};
         crc = svc::Crc32{};
     }
 
     std::string part_name;
     std::string part_zip;
-    std::int32_t offset = 0;
-    std::int32_t length = -1;
-    std::int32_t repeat = 1;
+    std::optional<RomOffset> offset = RomOffset{};
+    std::optional<RomLength> length{};
+    RepeatCount repeat{1};
     svc::Crc32 crc{};
 
     MapWord map{};
-    std::int32_t patch_addr = 0;
+    std::optional<RomOffset> patch_addr = RomOffset{};
     bool patch_xor = false;
-    int ilv_input = 0;
-    int ilv_output = 0;
+    InterleaveWidths ilv{};
 };
 
 struct Walk {
@@ -243,6 +265,7 @@ struct Walk {
     std::string acc;
     PendingNode node;
     DipRow dip{};
+    std::string dip_values_text;
     std::string cheatname;
 
     void start_resets() {
@@ -270,59 +293,122 @@ struct Walk {
         d.cheats.push_back(std::move(c));
     }
 
+    void reset_dip() {
+        dip = DipRow{};
+        dip_values_text.clear();
+    }
+
     void finish_dip() {
-        for (std::size_t n = 0; n < kMaxDipIds && std::cmp_less(n, dip.num); ++n) {
-            dip.val[n] = (dip.has_val ? dip.val[n] : DipWord{n}).shifted(dip.start);
+        std::string_view rest = dip_values_text;
+        std::size_t n = 0;
+        while (!rest.empty() && n < dip.choices.size()) {
+            const Scan r = scan_ul(rest, Radix::Auto);
+            if (r.used == 0)
+                break;
+            dip.choices[n].val = DipWord{r.value};
+            rest.remove_prefix(r.used);
+            while (!rest.empty() && (rest.front() == ' ' || rest.front() == ',')) {
+                rest.remove_prefix(1);
+            }
+            ++n;
+        }
+        for (std::size_t i = 0; i < dip.choices.size(); ++i) {
+            dip.choices[i].val = dip.field.place(dip.has_val ? dip.choices[i].val : DipWord{i});
         }
         if (d.switches.rows.size() < kMaxDipRows)
             d.switches.rows.push_back(std::move(dip));
-        dip = DipRow{};
+        reset_dip();
     }
 
-    void on_start(const xml::Tag& tag, const xml::Attr* attrs) {
+    void on_start(const xml::Tag& tag) {
         const Element el = element_of(tag.name);
         start_resets();
         RomAttrs rom;
         CheatAttrs geom;
         open_element(el);
 
-        for (std::size_t i = 0; i < tag.attr_count; ++i) {
-            const std::string_view an = attrs[i].name;
-            const std::string v = decode(attrs[i].value);
-            if (el == Element::Rom)
-                read_rom_attr(an, v, rom);
-            read_document_attr(el, an, v, geom);
-            if (insiderom) {
-                if (el == Element::Interleave)
-                    read_interleave_attr(an, v);
-                if (el == Element::Part)
-                    read_part_attr(an, v);
-                if (el == Element::Patch)
-                    read_patch_attr(an, v);
-            } else if (insidesw) {
-                read_switches_attr(el, an, v);
-            }
+        for (const xml::Attr& a : tag.attrs) {
+            read_attr(el, a.name, decode(a.value), rom, geom);
         }
 
         close_start(el, std::move(rom), geom);
+    }
+
+    void read_attr(
+        Element el,
+        std::string_view an,
+        const std::string& v,
+        RomAttrs& rom,
+        CheatAttrs& geom
+    ) {
+
+        if (insetname && ieq(an, "same_dir") && v == "1")
+            d.setname_same_dir = true;
+
+        const bool swallowed = insiderom || insidesw;
+        switch (el) {
+            case Element::Rom:
+                read_rom_attr(an, v, rom);
+                break;
+            case Element::Switches:
+                if (!insiderom)
+                    read_switches_default(an, v);
+                break;
+            case Element::Interleave:
+                if (insiderom)
+                    read_interleave_attr(an, v);
+                break;
+            case Element::Part:
+                if (insiderom)
+                    read_part_attr(an, v);
+                break;
+            case Element::Patch:
+                if (insiderom)
+                    read_patch_attr(an, v);
+                break;
+            case Element::Dip:
+                if (!insiderom && insidesw)
+                    read_dip_attr(an, v);
+                break;
+            case Element::Cheat:
+                if (!swallowed && insidecheats && ieq(an, "name"))
+                    cheatname = v;
+                break;
+            case Element::Buttons:
+                if (ieq(an, "names"))
+                    d.buttons_names = v;
+                if (ieq(an, "default"))
+                    d.buttons_default = v;
+                break;
+            case Element::Nvram:
+                if (!swallowed && !insidecheats)
+                    read_nvram_attr(an, v);
+                break;
+            case Element::Cheats:
+                if (!swallowed && !insidecheats)
+                    read_cheats_attr(an, v, geom);
+                break;
+            case Element::Setname:
+            case Element::Rotation:
+            case Element::None:
+                break;
+        }
     }
 
     void open_element(Element el) {
         switch (el) {
             case Element::Rom:
                 insiderom = true;
-                node.ilv_input = 0;
-                node.ilv_output = 0;
+                node.ilv = InterleaveWidths{};
                 node.map = MapWord{};
                 break;
             case Element::Switches:
                 insidesw = true;
                 d.switches = SwitchTable{};
-                dip = DipRow{};
+                reset_dip();
                 break;
             case Element::Interleave:
-                node.ilv_input = kInterleaveByteBits;
-                node.ilv_output = 0;
+                node.ilv = InterleaveWidths{.input = kInterleaveByteBits};
                 node.map = MapWord{};
                 break;
             case Element::Part:
@@ -330,7 +416,7 @@ struct Walk {
                 node.map = MapWord{};
                 break;
             case Element::Patch:
-                node.patch_addr = 0;
+                node.patch_addr = RomOffset{};
                 node.patch_xor = false;
                 break;
             case Element::Setname:
@@ -361,16 +447,16 @@ struct Walk {
         if (ieq(an, "md5"))
             rom.md5 = v;
         if (ieq(an, "index"))
-            rom.index = scan_atoi(v);
+            rom.index = rom_index_of(v);
         if (ieq(an, "address"))
             rom.address = hal::FabricAddr{scan_ul(v, Radix::Auto).value};
     }
 
     void read_interleave_attr(std::string_view an, const std::string& v) {
         if (ieq(an, "input"))
-            node.ilv_input = static_cast<int>(scan_ul(v, Radix::Auto).value);
+            node.ilv.input = BitWidth::of(scan_ul(v, Radix::Auto).value);
         if (ieq(an, "output"))
-            node.ilv_output = static_cast<int>(scan_ul(v, Radix::Auto).value);
+            node.ilv.output = BitWidth::of(scan_ul(v, Radix::Auto).value);
     }
 
     void read_part_attr(std::string_view an, const std::string& v) {
@@ -379,13 +465,20 @@ struct Walk {
         if (ieq(an, "name"))
             node.part_name = v;
         if (ieq(an, "offset")) {
-            node.offset = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+            node.offset = RomOffset::of_attribute(
+                static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value)
+            );
         }
         if (ieq(an, "length")) {
-            node.length = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+            node.length = RomLength::of_attribute(
+                static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value)
+            );
         }
         if (ieq(an, "repeat")) {
-            node.repeat = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+            node.repeat = RepeatCount::of_attribute(
+                              static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value)
+            )
+                              .value_or(RepeatCount{});
         }
         if (ieq(an, "crc"))
             node.crc = svc::Crc32{scan_ul(v, Radix::Hex).value};
@@ -399,21 +492,24 @@ struct Walk {
 
     void read_patch_attr(std::string_view an, const std::string& v) {
         if (ieq(an, "offset")) {
-            node.patch_addr = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
+            node.patch_addr = RomOffset::of_attribute(
+                static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value)
+            );
         }
         if (ieq(an, "operation") && ieq(v, "xor"))
             node.patch_xor = true;
     }
 
-    void read_switches_attr(Element el, std::string_view an, const std::string& v) {
-        if (el == Element::Switches && ieq(an, "default")) {
-            const std::vector<std::uint8_t> b = hex_bytes(v);
-            for (std::size_t k = 0; k < b.size() && k < std::tuple_size_v<DipWord::Bytes>; ++k) {
-                d.switches.dip_def = d.switches.dip_def.with_byte(k, b[k]);
-            }
-        }
-        if (el != Element::Dip)
+    void read_switches_default(std::string_view an, const std::string& v) {
+        if (!ieq(an, "default"))
             return;
+        const std::vector<std::uint8_t> b = hex_bytes(v);
+        for (std::size_t k = 0; k < b.size() && k < std::tuple_size_v<DipWord::Bytes>; ++k) {
+            d.switches.dip_def = d.switches.dip_def.with_byte(k, b[k]);
+        }
+    }
+
+    void read_dip_attr(std::string_view an, const std::string& v) {
         if (ieq(an, "name"))
             dip.name = capped(v);
         if (ieq(an, "bits")) {
@@ -429,162 +525,154 @@ struct Walk {
             if (!bad) {
                 if (r.num == 1)
                     e = b;
-                dip.start = b;
-                dip.mask = DipWord::ones(e - b + 1).shifted(b);
-                dip.size = e - b + 1;
+                dip.field = DipField{.start = b, .width = e - b + 1};
             }
         }
         if (ieq(an, "ids")) {
-            dip.ids.clear();
+            dip.choices.clear();
             std::string_view rest = v;
-            int n = 0;
-            while (!rest.empty() && n < static_cast<int>(kMaxDipIds)) {
+            while (!rest.empty() && dip.choices.size() < kMaxDipIds) {
                 const std::size_t comma = rest.find(',');
                 const std::size_t len = (comma == std::string_view::npos) ? rest.size() : comma;
-                dip.ids.push_back(capped(std::string(rest.substr(0, len))));
+                dip.choices.push_back(DipChoiceRow{.id = capped(std::string(rest.substr(0, len)))});
                 rest.remove_prefix(len);
                 if (!rest.empty() && rest.front() == ',')
                     rest.remove_prefix(1);
-                ++n;
             }
-            dip.num = n;
         }
         if (ieq(an, "values")) {
-            std::string_view rest = v;
-            std::size_t n = 0;
-            while (!rest.empty() && n < kMaxDipIds) {
-                const Scan r = scan_ul(rest, Radix::Auto);
-                if (r.used == 0)
-                    break;
-                dip.val[n] = DipWord{r.value};
-                rest.remove_prefix(r.used);
-                while (!rest.empty() && (rest.front() == ' ' || rest.front() == ',')) {
-                    rest.remove_prefix(1);
-                }
-                ++n;
-            }
+
+            dip_values_text = v;
             dip.has_val = true;
         }
     }
 
-    void read_document_attr(
-        Element el,
-        std::string_view an,
-        const std::string& v,
-        CheatAttrs& geom
-    ) {
-        if (el == Element::Buttons) {
-            if (ieq(an, "names"))
-                d.buttons_names = v;
-            if (ieq(an, "default"))
-                d.buttons_default = v;
-        }
-        if (insetname && ieq(an, "same_dir") && v == "1")
-            d.setname_same_dir = true;
+    void read_nvram_attr(std::string_view an, const std::string& v) {
+        if (ieq(an, "index"))
+            d.nvram_index = nvram_index_of(v);
+        if (ieq(an, "size"))
+            d.nvram_size = nvram_size_of(v);
+    }
 
-        if (insiderom || insidesw)
-            return;
-        if (insidecheats) {
-            if (el == Element::Cheat && ieq(an, "name"))
-                cheatname = v;
-            return;
-        }
-        if (el == Element::Nvram && ieq(an, "index")) {
-            d.nvram_index = static_cast<int>(scan_ul(v, Radix::Auto).value);
-        }
-        if (el == Element::Nvram && ieq(an, "size")) {
-            d.nvram_size = static_cast<int>(scan_ul(v, Radix::Auto).value);
-        }
-        if (el == Element::Cheats && ieq(an, "size")) {
+    void read_cheats_attr(std::string_view an, const std::string& v, CheatAttrs& geom) {
+        if (ieq(an, "size"))
             geom.size = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
-        }
-        if (el == Element::Cheats && ieq(an, "max")) {
+        if (ieq(an, "max"))
             geom.max = static_cast<std::int32_t>(scan_ul(v, Radix::Auto).value);
-        }
     }
 
     void close_start(Element el, RomAttrs&& rom, const CheatAttrs& geom) {
-        if (el == Element::Rom) {
-            Rom r;
-            r.index = rom.index;
-            r.zips = std::move(rom.zips);
-            r.md5 = std::move(rom.md5);
-            r.address = rom.address;
-            d.roms.push_back(std::move(r));
-        }
-        if (el == Element::Cheats) {
-            insidecheats = true;
-            d.cheats.clear();
-            d.cheats_dropped = 0;
-            d.cheat_geometry = clamp_cheat_geometry(geom.size, geom.max);
-        }
-        if (el == Element::Interleave && insiderom) {
-            RomNode n;
-            n.kind = RomNodeKind::InterleaveStart;
-            n.input = node.ilv_input;
-            n.output = node.ilv_output;
-            d.roms.back().nodes.push_back(std::move(n));
+        switch (el) {
+            case Element::Rom: {
+                Rom r;
+                r.index = rom.index;
+                r.zips = std::move(rom.zips);
+                r.md5 = std::move(rom.md5);
+                r.address = rom.address;
+                d.roms.push_back(std::move(r));
+                break;
+            }
+            case Element::Cheats:
+                insidecheats = true;
+                d.cheats.clear();
+                d.cheats_dropped = 0;
+                d.cheat_geometry = clamp_cheat_geometry(geom.size, geom.max);
+                break;
+            case Element::Interleave:
+                if (insiderom) {
+                    d.roms.back().nodes.emplace_back(InterleaveStart{.widths = node.ilv});
+                }
+                break;
+            case Element::None:
+            case Element::Switches:
+            case Element::Part:
+            case Element::Patch:
+            case Element::Dip:
+            case Element::Cheat:
+            case Element::Buttons:
+            case Element::Nvram:
+            case Element::Setname:
+            case Element::Rotation:
+                break;
         }
     }
 
     void on_end(std::string_view name) {
-        if (ieq(name, "nvram")) {
+        switch (element_of(name)) {
+            case Element::Nvram:
 
-            d.nvrams.push_back(
-                NvramDecl{
-                    .index = d.nvram_index,
-                    .size = d.nvram_size,
-                    .after = d.roms.size() - (insiderom ? 1u : 0u)
+                d.nvrams.push_back(
+                    NvramDecl{
+                        .save = d.nvram_save(),
+                        .after = d.roms.size() - (insiderom ? 1u : 0u)
+                    }
+                );
+                break;
+            case Element::Rom:
+                if (insiderom)
+                    d.roms.back().closed = true;
+                insiderom = false;
+                break;
+            case Element::Part:
+                if (insiderom) {
+                    const PartCommon common{.repeat = node.repeat, .map = node.map};
+                    if (!node.part_name.empty()) {
+                        d.roms.back().nodes.emplace_back(
+                            FilePart{
+                                .common = common,
+                                .name = node.part_name,
+                                .zips = node.part_zip,
+                                .crc = node.crc,
+                                .offset = node.offset,
+                                .length = node.length,
+                            }
+                        );
+                    } else {
+                        d.roms.back().nodes.emplace_back(
+                            TextPart{
+                                .common = common,
+                                .text = acc,
+                            }
+                        );
+                    }
                 }
-            );
-        }
-        if (ieq(name, "rom")) {
-            if (insiderom)
-                d.roms.back().closed = true;
-            insiderom = false;
-        }
-        if (ieq(name, "part") && insiderom) {
-            RomNode n;
-            if (!node.part_name.empty()) {
-                n.kind = RomNodeKind::FilePart;
-                n.name = node.part_name;
-                n.zips = node.part_zip;
-                n.crc = node.crc;
-                n.offset = node.offset;
-                n.length = node.length;
-            } else {
-                n.kind = RomNodeKind::TextPart;
-                n.text = acc;
-            }
-            n.repeat = node.repeat;
-            n.map = node.map;
-            d.roms.back().nodes.push_back(std::move(n));
-        }
-        if (ieq(name, "patch") && insiderom) {
-            RomNode n;
-            n.kind = RomNodeKind::Patch;
-            n.offset = node.patch_addr;
-            n.xor_op = node.patch_xor;
-            n.text = acc;
-            d.roms.back().nodes.push_back(std::move(n));
-        }
-        if (insidecheats && ieq(name, "cheat"))
-            finish_cheat();
-        if (insidesw && ieq(name, "dip"))
-            finish_dip();
-        if (ieq(name, "switches"))
-            insidesw = false;
-        if (ieq(name, "cheats"))
-            insidecheats = false;
-        if (ieq(name, "interleave")) {
-            if (insiderom) {
-                RomNode n;
-                n.kind = RomNodeKind::InterleaveEnd;
-                d.roms.back().nodes.push_back(std::move(n));
-            }
-            node.ilv_input = 0;
-            node.ilv_output = 0;
-            node.map = MapWord{};
+                break;
+            case Element::Patch:
+                if (insiderom) {
+                    d.roms.back().nodes.emplace_back(
+                        Patch{
+                            .text = acc,
+                            .address = node.patch_addr,
+                            .xor_op = node.patch_xor,
+                        }
+                    );
+                }
+                break;
+            case Element::Cheat:
+                if (insidecheats)
+                    finish_cheat();
+                break;
+            case Element::Dip:
+                if (insidesw)
+                    finish_dip();
+                break;
+            case Element::Switches:
+                insidesw = false;
+                break;
+            case Element::Cheats:
+                insidecheats = false;
+                break;
+            case Element::Interleave:
+                if (insiderom)
+                    d.roms.back().nodes.emplace_back(InterleaveEnd{});
+                node.ilv = InterleaveWidths{};
+                node.map = MapWord{};
+                break;
+            case Element::None:
+            case Element::Buttons:
+            case Element::Setname:
+            case Element::Rotation:
+                break;
         }
         end_common();
     }
@@ -659,11 +747,10 @@ void MraDoc::parse(std::string_view xml_text) {
     Walk w{*this};
 
     xml::XmlScanner scan{xml_text};
-    xml::Attr attrs[xml::kMaxAttrs];
-    while (const auto t = scan.next_token(attrs)) {
+    while (const auto t = scan.next_token()) {
         switch (t->kind) {
             case xml::Token::Kind::Start:
-                w.on_start(t->tag, attrs);
+                w.on_start(t->tag);
                 if (t->tag.self_closing)
                     w.on_end(t->tag.name);
                 break;

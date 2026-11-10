@@ -3,7 +3,6 @@
 
 #include <chrono>
 #include <cstddef>
-#include <array>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -18,7 +17,8 @@
 #include "os/clock.h"
 #include "hal/fpga_memory.h"
 #include "hal/phys_region.h"
-#include "proto/conf_str.h"
+#include "proto/save_state_decl.h"
+#include "proto/save_state_name.h"
 #include "proto/state_slot.h"
 
 namespace mister::proto {
@@ -29,8 +29,6 @@ class SaveStateEngine {
 public:
     static constexpr unsigned kSlots = kStateSlots.size();
 
-    static constexpr std::uint32_t kMaxSlotBytes = 128u * 1024u * 1024u;
-
     static constexpr std::size_t kHeaderBytes = 8;
     static constexpr hal::WordOffset kCounterWord{0};
     static constexpr hal::WordOffset kSizeWord{1};
@@ -38,10 +36,6 @@ public:
     static constexpr std::uint32_t kSentinel = std::numeric_limits<std::uint32_t>::max();
 
     static constexpr std::chrono::nanoseconds kScanPeriod{std::chrono::seconds{1}};
-
-    static constexpr std::string_view kDir = "savestates";
-    static constexpr std::string_view kArcadeSubdir = "Arcade";
-    static constexpr std::string_view kExt = ".ss";
 
     class ISaveStateFiles {
     public:
@@ -103,13 +97,6 @@ public:
     SaveStateEngine(const SaveStateEngine&) = delete;
     SaveStateEngine& operator=(const SaveStateEngine&) = delete;
 
-    struct SaveTarget {
-        TASTY_SEAT_EXEMPT(component);
-        std::string_view core_name;
-        std::string_view rom_path;
-        bool arcade = false;
-    };
-
     [[nodiscard]] Ex<void> arm(const SaveTarget& target);
     void disarm() noexcept;
 
@@ -125,13 +112,7 @@ public:
 
     bool window_valid(const SaveStateDecl& ss) const noexcept;
 
-    static std::string savestate_dir(const SaveTarget& target);
-    static std::string savestate_stem(std::string_view rom_path);
-    static std::string savestate_path(const SaveTarget& target, StateSlot slot);
-    static std::string savestate_path_stock(const SaveTarget& target);
-
     static hal::PhysRegion region_for(const SaveStateDecl& ss, StateSlot slot);
-    static std::string slot_file(std::string_view subdir, std::string_view stem, unsigned digit);
 
     bool mapped() const noexcept { return mapped_; }
 
@@ -172,8 +153,7 @@ private:
 
     infra::IndexedArray<Shadow, kSlots, StateSlot> shadows_{};
 
-    std::string subdir_;
-    std::string stem_;
+    SaveStateName files_;
     bool armed_ = false;
     bool mapped_ = false;
 

@@ -9,7 +9,6 @@
 
 #include "infra/indexed_array.h"
 #include "infra/message_sum.h"
-#include "ui/page_window.h"
 #include "ui/arc_label.h"
 #include "ui/browser_launch.h"
 #include "ui/config_slots_page.h"
@@ -28,30 +27,27 @@ namespace {
 
 constexpr const char kStdExit[] = "            exit";
 constexpr const char kStdBack[] = "            back";
-constexpr char kSubmenuArrow = '\x16';
 
 std::string_view plain_label(std::string_view t) noexcept {
     while (!t.empty() && t.front() == ' ')
         t.remove_prefix(1);
-    while (!t.empty() && (t.back() == ' ' || t.back() == kSubmenuArrow))
+    while (!t.empty() && (t.back() == ' ' || t.back() == glyph_char(Glyph::SubmenuArrow)))
         t.remove_suffix(1);
     return t;
 }
 
 class ResolvedLabels final : public ISlotLabels {
 public:
-    ResolvedLabels(const cores::OptionRow& d, const std::string_view (&arc)[2]) noexcept
-        : row_(&d),
+    ResolvedLabels(const cores::OptionRow::CycleArm& d, const std::string_view (&arc)[2]) noexcept
+        : cycle_(&d),
           arc_(&arc) {}
 
     bool has_label(proto::FieldValue v) const noexcept override {
-        if (!v.within(proto::FieldCount::of(row_->values.size())))
-            return false;
-        return !resolve_arc(infra::at_index(row_->values, v), *arc_).empty();
+        return !resolve_arc(cycle_->value_name(v), *arc_).empty();
     }
 
 private:
-    const cores::OptionRow* row_;
+    const cores::OptionRow::CycleArm* cycle_;
     const std::string_view (*arc_)[2];
 };
 
@@ -93,12 +89,12 @@ static_assert(
     "every Link names its target; a row without one would refuse silently"
 );
 
-constexpr const LinkTarget* link_target_of(cores::OptionRow::Link link) {
+constexpr infra::OptRef<const LinkTarget> link_target_of(cores::OptionRow::Link link) {
     for (const LinkTarget& t : kLinkTargets) {
         if (t.kind == link)
-            return &t;
+            return infra::OptRef<const LinkTarget>{t};
     }
-    return nullptr;
+    return {};
 }
 
 inline constexpr std::size_t kHostOffSlot = 0;
@@ -134,50 +130,48 @@ CoreSettingsPage::CoreSettingsPage(Spec s)
     rebuild();
 }
 
-std::string CoreSettingsPage::value_label(const cores::OptionRow& d, proto::FieldValue slot) const {
-    if (!slot.within(proto::FieldCount::of(d.values.size())))
-        return {};
-    return resolve_arc(infra::at_index(d.values, slot), arc_);
+std::string CoreSettingsPage::value_label(
+    const cores::OptionRow::CycleArm& d,
+    proto::FieldValue slot
+) const {
+    return resolve_arc(d.value_name(slot), arc_);
 }
 
 std::string CoreSettingsPage::cycle_value(const app::OptionTable::Row& r) const {
-    const cores::OptionRow& d = *r.decl;
+    const cores::OptionRow::CycleArm* d = r.decl->cycle_arm();
+    if (d == nullptr)
+        return {};
     const std::string resolved = resolve_arc(r.text.view(), arc_);
-    return resolved.empty() ? value_label(d, drawn_choice(r)) : resolved;
+    return resolved.empty() ? value_label(*d, drawn_choice(r)) : resolved;
 }
 
 proto::FieldValue CoreSettingsPage::drawn_choice(const app::OptionTable::Row& r) const {
-    const cores::OptionRow& d = *r.decl;
-    const std::uint32_t n = d.choice_count();
-    if (n == 0)
+    const cores::OptionRow::CycleArm* d = r.decl->cycle_arm();
+    if (d == nullptr)
+        return {};
+    const proto::FieldCount choices = d->choice_count();
+    if (choices == proto::FieldCount{})
         return {};
 
-    return choice_slot(
-        ResolvedLabels{d, arc_},
-        proto::FieldValue{r.current},
-        proto::FieldCount::of(n)
-    );
+    return choice_slot(ResolvedLabels{*d, arc_}, proto::FieldValue{r.current}, choices);
 }
 
 void CoreSettingsPage::rebuild() {
     lines_.clear();
     selectable_ = RowCount{};
-    if (table_ == nullptr)
-        return;
-    const std::size_t n = table_->count;
+    const std::size_t n = table_.count;
     for (std::size_t i = 0; i < n; ++i) {
-        const app::OptionTable::Row& row = table_->rows[i];
+        const app::OptionTable::Row& row = table_.rows[i];
         if (!row.decl || row.decl->page != page_)
             continue;
 
-        if (row.decl->kind == cores::OptionRow::Kind::Link
-            && row.decl->link == cores::OptionRow::Link::Mt32Pi
-            && !mt32_available_) {
+        const cores::OptionRow::LinkArm* link = row.decl->link_arm();
+        if (link != nullptr && link->link == cores::OptionRow::Link::Mt32Pi && !mt32_available_) {
             continue;
         }
         Line l;
         l.index = static_cast<std::uint8_t>(i);
-        l.selectable = row.decl->kind != cores::OptionRow::Kind::Separator;
+        l.selectable = row.decl->kind() != cores::OptionRow::Kind::Separator;
         if (l.selectable) {
             l.ordinal = row_after(selectable_);
             selectable_ += kOneRow;
@@ -193,12 +187,14 @@ RowIndex CoreSettingsPage::exit_drawn() const noexcept {
     return (content + kOneRow <= rows) ? row_after(rows - kOneRow) : row_after(content);
 }
 
-const CoreSettingsPage::Line* CoreSettingsPage::line_for_ordinal(RowIndex o) const noexcept {
+infra::OptRef<const CoreSettingsPage::Line> CoreSettingsPage::line_for_ordinal(
+    RowIndex o
+) const noexcept {
     for (const Line& l : lines_) {
         if (l.selectable && l.ordinal == o)
-            return &l;
+            return infra::OptRef<const CoreSettingsPage::Line>{l};
     }
-    return nullptr;
+    return {};
 }
 
 void CoreSettingsPage::on_enter(PageContext& ctx) {
@@ -207,11 +203,10 @@ void CoreSettingsPage::on_enter(PageContext& ctx) {
     link_tx_ = ctx.link_tx;
     browser_ = ctx.launches.browser;
     recents_ = ctx.recents;
-    core_dir_ = ctx.sys.core_dir;
+    core_dir_.assign(ctx.session.core_dir.view());
 }
 
-void CoreSettingsPage::ask_mount(std::uint8_t slot, std::string_view path) {
-    const proto::IoIndex index{slot};
+void CoreSettingsPage::ask_mount(proto::IoIndex index, std::string_view path) {
     const app::CoreScope scope{conf_gen_};
     const bool landed = path.empty()
         ? push_ask(asks_, app::UiRequest::UnmountImage{.index = index, .scope = scope})
@@ -239,10 +234,10 @@ MenuMask CoreSettingsPage::mask() const {
 }
 
 std::string CoreSettingsPage::compose(const Line& l) const {
-    const auto& tr = table_->rows[l.index];
+    const auto& tr = table_.rows[l.index];
     const cores::OptionRow& d = *tr.decl;
     std::string s;
-    switch (d.kind) {
+    switch (d.kind()) {
         case cores::OptionRow::Kind::Separator:
         case cores::OptionRow::Kind::kCount:
             return s;
@@ -252,15 +247,17 @@ std::string CoreSettingsPage::compose(const Line& l) const {
         case cores::OptionRow::Kind::Link:
             s.assign(d.label);
             s.resize(kArrowColumn, ' ');
-            s.push_back(kSubmenuArrow);
+            s.push_back(glyph_char(Glyph::SubmenuArrow));
             return s;
-        case cores::OptionRow::Kind::Host:
+        case cores::OptionRow::Kind::Host: {
             s.assign(d.label);
 
-            if (d.values.size() > kHostOnSlot) {
-                s.append(d.values[joyswap_ ? kHostOnSlot : kHostOffSlot]);
+            const cores::OptionRow::HostArm* host = d.host_arm();
+            if (host != nullptr && host->values.size() > kHostOnSlot) {
+                s.append(host->values[joyswap_ ? kHostOnSlot : kHostOffSlot]);
             }
             return s;
+        }
         case cores::OptionRow::Kind::Cycle: {
             s.assign(d.label);
             s.append(cycle_value(tr));
@@ -293,12 +290,14 @@ void CoreSettingsPage::for_each_row(Visit&& visit) const {
     const RowIndex last = std::max(row_after(content), exit_row + kOneRow);
     const RowSpan<const Line> lines{lines_};
     for (RowIndex drawn{}; drawn < last; drawn += kOneRow) {
-        const Line* line = drawn < row_after(content) ? &lines[drawn] : nullptr;
+        infra::OptRef<const Line> line{};
+        if (drawn < row_after(content))
+            line = infra::OptRef<const Line>{lines[drawn]};
         bool selected = false;
         bool stippled = false;
-        if (line != nullptr) {
+        if (line) {
             selected = line->selectable && sel_ == line->ordinal;
-            stippled = table_->rows[line->index].dimmed;
+            stippled = table_.rows[line->index].dimmed;
         } else if (drawn == exit_row) {
             selected = sel_ == exit_ordinal();
         }
@@ -308,22 +307,22 @@ void CoreSettingsPage::for_each_row(Visit&& visit) const {
 }
 
 app::PageDescription::Row CoreSettingsPage::hd_row(
-    const Line* line,
+    infra::OptRef<const Line> line,
     std::string_view text,
     bool stippled
 ) const {
     app::PageDescription::Row row;
     row.enabled = !stippled;
-    if (line == nullptr) {
+    if (!line) {
         row.kind = app::PageDescription::RowKind::Action;
         (void)row.label.assign(plain_label(text));
         return row;
     }
-    const app::OptionTable::Row& tr = table_->rows[line->index];
+    const app::OptionTable::Row& tr = table_.rows[line->index];
     const cores::OptionRow& d = *tr.decl;
-    row.kind = row_kind_of(d.kind);
+    row.kind = row_kind_of(d.kind());
     (void)row.label.assign(plain_label(d.label));
-    if (d.kind == cores::OptionRow::Kind::Cycle) {
+    if (d.kind() == cores::OptionRow::Kind::Cycle) {
         row.steps = true;
         (void)row.value.assign(cycle_value(tr));
     }
@@ -355,7 +354,7 @@ bool CoreSettingsPage::walk(PageWalk& out) const {
 
     struct Drawn {
         RowIndex drawn;
-        const Line* line;
+        infra::OptRef<const Line> line;
         std::string text;
         bool selected;
         bool stippled;
@@ -363,25 +362,27 @@ bool CoreSettingsPage::walk(PageWalk& out) const {
     };
 
     std::vector<Drawn> drawn_rows;
-    for_each_row(
-        [&](RowIndex drawn, const Line* line, std::string_view text, bool selected, bool stippled) {
-            drawn_rows.push_back(Drawn{drawn, line, std::string{text}, selected, stippled});
-        }
-    );
+    for_each_row([&](RowIndex drawn,
+                     infra::OptRef<const Line> line,
+                     std::string_view text,
+                     bool selected,
+                     bool stippled) {
+        drawn_rows.push_back(Drawn{drawn, line, std::string{text}, selected, stippled});
+    });
 
     const auto is_hd = [&](const Drawn& d) {
-        return d.line != nullptr || d.drawn == exit_row;
+        return d.line.has_value() || d.drawn == exit_row;
     };
-    std::uint16_t total = 0;
-    std::uint16_t selected = 0;
+    RowCount total{};
+    RowIndex selected{};
     for (const Drawn& d : drawn_rows) {
         if (!is_hd(d))
             continue;
         if (d.selected)
-            selected = total;
-        ++total;
+            selected = row_after(total);
+        total += kOneRow;
     }
-    const app::HdWindow win = window_page(out.page, RowIndex::of(selected), RowCount::of(total));
+    const app::HdWindow win = out.window(selected, total);
 
     const RowRange window = ui::rows(win.first, win.count);
     RowIndex at{};
@@ -455,10 +456,10 @@ void CoreSettingsPage::track_viewport() noexcept {
         first_row_ = RowIndex{};
     RowIndex drawn = exit_row;
     if (sel_ != exit_ordinal()) {
-        const Line* l = line_for_ordinal(sel_);
-        if (l == nullptr)
+        const infra::OptRef<const Line> l = line_for_ordinal(sel_);
+        if (!l)
             return;
-        drawn = RowIndex::of(l - lines_.data());
+        drawn = RowIndex::of(&*l - lines_.data());
     }
     if (drawn < first_row_) {
         first_row_ = drawn;
@@ -487,17 +488,16 @@ void CoreSettingsPage::ask_reset(proto::ResetEdge edge) {
 
 BrowserSession::Request CoreSettingsPage::browser_request(const app::OptionTable::Row& r) {
     BrowserSession::Request req;
+    const cores::OptionRow::FileArm* file = r.decl->file_arm();
+    const proto::IoIndex slot = file != nullptr ? file->slot : proto::IoIndex{};
     req.extensions = std::string(r.ext.view());
     req.scan.include_dirs = true;
-    req.policy.eject_on_backspace = r.decl->browse_unmount;
+    req.policy.eject_on_backspace = file != nullptr && file->browse_unmount;
     req.games_dir = core_dir_;
     req.recents_core = core_dir_;
-    req.recents = app::RecentsStore::ListId{
-        app::RecentsStore::ListId::Kind::Mount,
-        static_cast<std::uint8_t>(r.decl->slot.v)
-    };
+    req.recents = app::RecentsStore::ListId{app::RecentsStore::ListId::Kind::Mount, slot};
     req.host = infra::opt_ref_of(static_cast<IBrowserHost*>(this));
-    pending_slot_ = static_cast<std::uint8_t>(r.decl->slot.v);
+    pending_slot_ = slot;
     return req;
 }
 
@@ -549,15 +549,15 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
             return Transition{};
         return at_root ? Transition{Transition::Kind::Leave} : leave();
     }
-    const Line* l = line_for_ordinal(sel_);
-    if (l == nullptr || table_ == nullptr || !table_->rows[l->index].decl) {
+    const infra::OptRef<const Line> l = line_for_ordinal(sel_);
+    if (!l || !table_.rows[l->index].decl) {
         ++refusals_;
         return Transition{};
     }
-    const app::OptionTable::Row& tr = table_->rows[l->index];
+    const app::OptionTable::Row& tr = table_.rows[l->index];
     const cores::OptionRow& d = *tr.decl;
 
-    switch (d.kind) {
+    switch (d.kind()) {
         case cores::OptionRow::Kind::File: {
 
             if (!select && !recent) {
@@ -569,30 +569,34 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
                 ++refusals_;
                 return Transition{};
             }
-            if (d.ejects_on_select && tr.current != 0) {
-                ask_mount(static_cast<std::uint8_t>(d.slot.v), {});
+            const cores::OptionRow::FileArm* file = d.file_arm();
+            if (file != nullptr && file->ejects_on_select && tr.current != 0) {
+                ask_mount(file->slot, {});
                 return Transition{};
             }
             return open_browser(tr, !select && recent);
         }
         case cores::OptionRow::Kind::Cycle: {
-            const std::uint32_t n = d.choice_count();
-            if (n == 0) {
+            const cores::OptionRow::CycleArm* cycle = d.cycle_arm();
+            if (cycle == nullptr)
+                break;
+            const proto::FieldCount choices = cycle->choice_count();
+            if (choices == proto::FieldCount{}) {
                 ++refusals_;
                 return Transition{};
             }
 
-            const ResolvedLabels labels{d, arc_};
+            const ResolvedLabels labels{*cycle, arc_};
 
-            const proto::FieldCount slots = proto::FieldCount::of(d.values.size());
-            const proto::FieldCount choices = proto::FieldCount::of(n);
+            const proto::FieldCount slots = proto::FieldCount::of(cycle->values.size());
             const proto::FieldValue cur = choice_slot(labels, proto::FieldValue{tr.current}, slots);
             proto::FieldValue next = minus ? cur.cycled_back(choices) : cur.cycled_forward(choices);
 
             if (!minus) {
                 next = choice_slot(labels, next, slots);
             } else {
-                for (std::uint32_t i = 0; i < n && !labels.has_label(next); ++i) {
+                for (proto::FieldValue i{}; choices.holds(i) && !labels.has_label(next);
+                     i = i.cycled_forward(choices)) {
                     next = next.wrapped_back(choices);
                 }
                 if (!labels.has_label(next))
@@ -601,34 +605,40 @@ Transition CoreSettingsPage::handle(const UiEvent& ev) {
             push_op(
                 proto::LinkOp::SetCoreOption{.row = proto::OptionRowIndex{l->index}, .choice = next}
             );
-            if (d.arms_reset)
+            if (cycle->arms_reset)
                 armed_ = true;
             return Transition{};
         }
         case cores::OptionRow::Kind::Action: {
             if (!select)
                 return Transition{};
-            if (d.reset_act == cores::OptionRow::ResetAct::None) {
+            const cores::OptionRow::ActionArm* action = d.action_arm();
+            if (action == nullptr || action->reset_act == cores::OptionRow::ResetAct::None) {
                 ++refusals_;
                 return Transition{};
             }
 
             ask_reset(
-                proto::ResetEdge::option_action(d.reset_act == cores::OptionRow::ResetAct::Cold)
+                proto::ResetEdge::option_action(
+                    action->reset_act == cores::OptionRow::ResetAct::Cold
+                )
             );
             return Transition{Transition::Kind::CloseAll};
         }
         case cores::OptionRow::Kind::Link: {
             if (!select)
                 return Transition{};
+            const cores::OptionRow::LinkArm* link = d.link_arm();
 
-            const LinkTarget* const found = link_target_of(d.link);
-            if (found == nullptr || found->page == PageId::None) {
+            const infra::OptRef<const LinkTarget> found = link != nullptr
+                ? link_target_of(link->link)
+                : infra::OptRef<const LinkTarget>{};
+            if (!found || found->page == PageId::None || link == nullptr) {
                 ++refusals_;
                 return Transition{};
             }
             const LinkTarget& target = *found;
-            const ItemId focus = target.takes_row_argument ? item_submenu(d.link_page)
+            const ItemId focus = target.takes_row_argument ? item_submenu(link->link_page)
                                                            : target.item;
             return Transition{Transition::Kind::Push, target.page, focus};
         }

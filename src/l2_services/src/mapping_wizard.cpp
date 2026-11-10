@@ -3,13 +3,12 @@
 
 namespace mister::svc {
 
-Ex<void> MappingWizard::begin(const DeviceIdentity& id, MapKind kind) {
+void MappingWizard::begin(const DeviceIdentity& id, MapKind kind) {
     device_ = id;
     kind_ = kind;
     captured_ = std::nullopt;
 
     step_ = id.id.empty() ? Step::AwaitDevice : Step::AwaitButton;
-    return {};
 }
 
 void MappingWizard::on_device(const DeviceIdentity& id) {

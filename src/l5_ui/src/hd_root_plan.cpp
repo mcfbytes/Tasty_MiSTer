@@ -5,7 +5,7 @@
 #include <memory>
 
 #include "app/cmd_verb_sink.h"
-#include "app/pending_load.h"
+#include "app/bitstream_resolve.h"
 #include "app/recent_games.h"
 #include "app/session_identity.h"
 #include "app/ui_request.h"
@@ -13,7 +13,7 @@
 #include "ui/hd_label.h"
 #include "ui/hd_plan_inputs.h"
 #include "ui/now_playing.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 #include "ui/page_ask.h"
 #include "ui/page_context.h"
 #include "ui/place_facts.h"
@@ -39,7 +39,6 @@ HdRootPlan::HdRootPlan(const HdPlanInputs& in)
       now_playing_(in.now_playing),
       recent_games_(in.recent_games),
       verbs_(in.verbs),
-      front_end_(in.front_end),
       table_settings_(in.classic == PageId::CoreSettings),
       env_(in.env),
       resume_row_(HdCloseRow::Spec{.label = "Resume", .tier = kTier}),
@@ -78,57 +77,57 @@ HdRootPlan::HdRootPlan(const HdPlanInputs& in)
       ) {
     TASTY_SEAT_BODY(HdRootPlan);
     walk_(in.items, in.env);
-    refs_.reserve(std::size(kSlots));
-    for (const Slot slot : kSlots)
-        refs_.push_back(row_for_(slot));
+    refs_.reserve(std::size(kRootRows));
+    for (const RootRowSpec& spec : kRootRows)
+        refs_.push_back(row_for_(spec.row));
 
     if (has_reset_ && (!ctx_.ui_requests || !ctx_.launches.confirm))
         ++refusals_;
-    if (!front_end_ && (!ctx_.route || !ctx_.launches.confirm))
+    if (!ctx_.route || !ctx_.launches.confirm)
         ++refusals_;
 }
 
-IHdRow& HdRootPlan::row_for_(Slot slot) noexcept {
-    switch (slot) {
-        case Slot::Resume:
+IHdRow& HdRootPlan::row_for_(RootRow row) noexcept {
+    switch (row) {
+        case RootRow::Resume:
             return resume_gate_;
-        case Slot::Load:
+        case RootRow::Load:
             return load_row_;
-        case Slot::Media:
+        case RootRow::Media:
             return media_gate_;
-        case Slot::Recent:
+        case RootRow::Recent:
             return recent_gate_;
-        case Slot::Cheats:
+        case RootRow::Cheats:
             return cheats_gate_;
-        case Slot::Reset:
+        case RootRow::Reset:
             return reset_gate_;
-        case Slot::Separator:
+        case RootRow::Separator:
             return separator_;
-        case Slot::CoreSettings:
+        case RootRow::CoreSettings:
             return core_settings_gate_;
-        case Slot::Settings:
+        case RootRow::Settings:
             return settings_row_;
-        case Slot::MainMenu:
+        case RootRow::MainMenu:
             return main_menu_gate_;
     }
     return separator_;
 }
 
 void HdRootPlan::walk_(const proto::ItemTable& table, const BuildEnv& env) {
-    const bool walked = page0_.run(table, env, !front_end_, verbs_);
+    const bool walked = page0_.run(table, env, true, verbs_);
     const BuildEnv page0 = HdPage0Walk::page0_of(env);
     env_ = SlotPickHost::Env{page0};
     primary_ = std::nullopt;
     has_reset_ = has_cheats_ = has_settings_ = has_media_ = false;
-    if (!front_end_ && !walked)
+    if (!walked)
         ++refusals_;
     if (walked) {
         const Placer& placer = page0_.placer();
 
         const GameSlot& slot = placer.game();
-        const OptionItem* const pick = slot.disc_row() != nullptr ? slot.disc_row() : slot.row();
-        if (pick != nullptr)
-            primary_ = infra::OptRef<const OptionItem>{*pick};
+        const infra::OptRef<const OptionItem> pick = slot.disc_row() ? slot.disc_row() : slot.row();
+        if (pick)
+            primary_ = pick;
         for (const std::unique_ptr<OptionItem>& owned : page0_.model().items()) {
             const OptionItem& it = *owned;
             const Placement p = placer.of(it);
@@ -169,8 +168,8 @@ void HdRootPlan::gate_() noexcept {
     has_recent_ = !recent_games_.empty();
     cheats_ = resume_ && has_cheats_;
     reset_ = resume_ && has_reset_ && ctx_.ui_requests.has_value();
-    core_settings_ = !front_end_ && (table_settings_ || has_settings_);
-    main_menu_ = !front_end_ && ctx_.route.has_value();
+    core_settings_ = table_settings_ || has_settings_;
+    main_menu_ = ctx_.route.has_value();
 }
 
 PageId HdRootPlan::id() const {
@@ -203,9 +202,10 @@ bool HdRootPlan::hub() const noexcept {
     return true;
 }
 
-void HdRootPlan::refresh(const SystemFacts& facts) {
+void HdRootPlan::refresh(const SystemFacts& facts, const SessionFacts& session) {
     TASTY_SEAT_BODY(HdRootPlan);
     (void)facts;
+    (void)session;
     gate_();
 }
 
@@ -261,10 +261,8 @@ Transition HdRootPlan::MainMenuAction::on_yes() {
 }
 
 Transition HdRootPlan::reset_yes_() {
-    const app::UiRequest::ResetCore ask{
-        .edge = proto::ResetEdge::osd_toggle(proto::StatusBit{0}, false),
-        .scope = app::CoreScope{env_.conf_gen}
-    };
+    const proto::ResetEdge edge = proto::ResetEdge::osd_toggle(proto::kResetBit, false);
+    const app::UiRequest::ResetCore ask{.edge = edge, .scope = app::CoreScope{env_.conf_gen}};
     if (!has_reset_ || !push_ask(ctx_.ui_requests, ask)) {
         ++refusals_;
     } else {

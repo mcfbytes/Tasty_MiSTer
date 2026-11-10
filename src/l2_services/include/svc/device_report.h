@@ -17,7 +17,7 @@ struct DeviceReport {
     JoyMask menu_buttons{};
     infra::IndexedArray<AnalogXy, kSticks.size(), StickIndex> stick{};
     infra::IndexedArray<bool, kSticks.size(), StickIndex> stick_changed{};
-    int rel_x = 0, rel_y = 0, rel_wheel = 0;
+    MouseMotion motion{};
     proto::MouseButtons mouse_buttons{};
     bool mouse_changed = false;
 

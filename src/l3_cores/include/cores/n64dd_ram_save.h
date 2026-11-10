@@ -25,12 +25,11 @@
 
 namespace mister::cores::n64dd {
 
-using SavePath = FixedStr<svc::kSlotPathCap, StrFit::Reject>;
+inline constexpr std::size_t kCoreDirChars = 32;
 
-[[nodiscard]] bool ram_save_path(
+[[nodiscard]] std::optional<svc::SlotPathText> ram_save_path(
     std::string_view disk_path,
-    std::string_view core_dir,
-    SavePath& out
+    std::string_view core_dir
 ) noexcept;
 
 inline constexpr std::uint32_t kFlatBlocks = 2u * kTracksPerHead * 2u;
@@ -43,11 +42,8 @@ public:
 
     struct Order {
         hal::FabricAddr load_addr{};
-        std::uint16_t path_len = 0;
-        std::uint8_t core_len = 0;
-        std::uint8_t pad = 0;
-        char disk_path[svc::kSlotPathCap];
-        char core_dir[32];
+        svc::SlotPathText disk_path{};
+        FixedStr<kCoreDirChars, StrFit::Reject> core_dir{};
     };
 
     static_assert(std::is_trivially_copyable_v<Order> && WindowJobOrder::fits<Order>);
@@ -75,7 +71,7 @@ private:
         SystemArea area{};
         DiskMap map{};
         std::bitset<kFlatBlocks> dirty{};
-        SavePath ram_path{};
+        svc::SlotPathText ram_path{};
         std::unique_ptr<svc::IFile> in{};
         std::unique_ptr<svc::IFile> out{};
         std::array<std::byte, kStepBytes> image;
@@ -89,12 +85,12 @@ private:
     [[nodiscard]] Ex<void> clear_(ICoreWindow& window);
 
     hal::FabricAddr addr_;
-    SavePath disk_path_{};
-    FixedStr<32, StrFit::Reject> core_dir_{};
+    svc::SlotPathText disk_path_{};
+    FixedStr<kCoreDirChars, StrFit::Reject> core_dir_{};
     bool path_ok_ = false;
     Phase phase_ = Phase::Open;
     std::uint64_t off_ = 0;
-    std::uint32_t total_ = 0;
+    proto::FileSize total_{};
     std::uint32_t cleared_ = 0;
     bool wrote_ = false;
     bool matched_ = false;

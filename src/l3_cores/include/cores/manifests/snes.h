@@ -9,6 +9,7 @@
 #include "cores/core_profile.h"
 #include "cores/core_support.h"
 #include "cores/mailbox_census_rows.h"
+#include "cores/msu_wire.h"
 #include "proto/mailbox_frame_decl.h"
 
 namespace mister::cores::manifests {
@@ -25,7 +26,10 @@ inline constexpr auto kSnesServices = std::to_array<LinkDecoderDecl>({
     },
 });
 
-inline constexpr proto::MailboxFrameDecl kSnesMailboxFrame{.poll_opcode = 0x34, .words = 4};
+inline constexpr proto::MailboxFrameDecl kSnesMailboxFrame{
+    .poll_opcode = proto::UioOp::CdGet,
+    .words = msu::kFrameWords
+};
 
 inline constexpr auto kSnesWindows = std::to_array<CoreWindowDecl>({
     {.region = {0x0060'0000u, 0u, "snes-msu-data"}, .feeds_pcm = false},
@@ -82,6 +86,6 @@ std::unique_ptr<Core> make_snes(const CoreProfile& p, const CoreGrant& g);
 
 std::unique_ptr<Core> make_sgb(const CoreProfile& p, const CoreGrant& g);
 
-std::unique_ptr<MsuCompanion> make_msu_companion(const svc::Vfs& vfs);
+std::unique_ptr<ICompanion> make_msu_companion(const svc::Vfs& vfs);
 
 }

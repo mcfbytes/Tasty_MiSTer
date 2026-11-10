@@ -2,8 +2,8 @@
 #include "cores/msu_machine.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cstring>
+#include <optional>
 
 namespace mister::cores {
 
@@ -28,7 +28,7 @@ void MsuMachine::release() noexcept {
 
 void MsuMachine::close_() noexcept {
     file_.reset();
-    size_ = 0;
+    size_ = {};
     cursor_ = 0;
     drop_ahead_(0);
     fill_done_ = true;
@@ -45,41 +45,44 @@ proto::MailboxAct MsuMachine::serve(
     if (req == last_req_)
         return {};
     last_req_ = req;
-    const std::uint16_t command = frame.w[1];
     const std::uint32_t data = frame.w[2] | (std::uint32_t{frame.w[3]} << 16);
-    switch (command) {
-        case msu::kReqReset:
+    const std::optional<msu::Request> request = msu::request_of(frame);
+    if (!request) {
+        ++counts_.ignored;
+        return {};
+    }
+    switch (*request) {
+        case msu::Request::Reset:
             ++counts_.resets;
             return {};
-        case msu::kReqTrack:
-            return track_(data);
-        case msu::kReqSeek:
-            seek_(data);
+        case msu::Request::Track:
+            return track_(TrackNumber{data});
+        case msu::Request::Seek:
+            seek_(SectorIndex{data});
             return next_(bytes);
-        case msu::kReqNext:
+        case msu::Request::Next:
             return next_(bytes);
-        default:
-            ++counts_.ignored;
-            return {};
     }
+
+    return {};
 }
 
-proto::MailboxAct MsuMachine::track_(std::uint32_t track) noexcept {
+proto::MailboxAct MsuMachine::track_(TrackNumber track) noexcept {
     close_();
     ++counts_.tracks;
     char num[12]{};
-    const auto [end, ec] = std::to_chars(num, num + sizeof num, track);
-    const bool named = ec == std::errc{}
+    const std::string_view name = track.name_into(num);
+    const bool named = !name.empty()
         && path_.assign(stem_.view())
         && path_.append("-")
-        && path_.append(std::string_view(num, static_cast<std::size_t>(end - num)))
+        && path_.append(name)
         && path_.append(".pcm");
     if (named) {
-        if (auto f = vfs_->open(path_.view(), svc::OpenMode::Read)) {
+        if (auto f = vfs_.open(path_.view(), svc::OpenMode::Read)) {
             const auto sz = (*f)->size();
-            if (sz && sz->v != 0) {
+            if (sz && !sz->empty()) {
                 file_ = std::move(*f);
-                size_ = sz->v;
+                size_ = *sz;
                 fill_at_ = 0;
                 fill_done_ = false;
             }
@@ -87,15 +90,15 @@ proto::MailboxAct MsuMachine::track_(std::uint32_t track) noexcept {
     }
     if (file_ == nullptr)
         ++counts_.missing;
-    proto::MailboxAct act{};
-    act.kind = proto::MailboxAct::Kind::Command;
-    act.opcode = msu::kCdSet;
-    act.words = msu::set_track_size(static_cast<std::uint32_t>(size_));
-    return act;
+    const proto::MailboxAct::Command reply{
+        .opcode = proto::UioOp::CdSet,
+        .words = msu::set_track_size(size_.low_word())
+    };
+    return infra::make<proto::MailboxAct>(reply);
 }
 
-void MsuMachine::seek_(std::uint32_t sector) noexcept {
-    cursor_ = static_cast<std::uint32_t>(sector * static_cast<std::uint32_t>(msu::kSectorBytes));
+void MsuMachine::seek_(SectorIndex sector) noexcept {
+    cursor_ = sector.byte_of();
     for (std::size_t k = 0; k < held_; ++k) {
         if (ahead_[(head_ + k) % kAhead].off != cursor_)
             continue;
@@ -127,24 +130,25 @@ proto::MailboxAct MsuMachine::next_(
             --held_;
             ++counts_.ahead_hits;
         } else {
-            n = read_(cursor_, bytes);
+            const std::span<std::uint8_t> got = read_(cursor_, bytes);
+            n = got.size();
             ++counts_.sync_reads;
             drop_ahead_(cursor_ + n);
-            fill_done_ = n < msu::kSectorBytes;
+            fill_done_ = got.size() < msu::kSectorBytes;
         }
         cursor_ += n;
     }
     ++counts_.sectors;
-    proto::MailboxAct act{};
-    act.kind = proto::MailboxAct::Kind::Download;
-    act.index = proto::WideIoIndex{msu::kAudioIndex};
-    act.len = static_cast<std::uint16_t>(msu::kSectorBytes);
-    return act;
+    const proto::MailboxAct::Download reply{
+        .index = proto::WideIoIndex{msu::kAudioIndex},
+        .len = static_cast<std::uint16_t>(msu::kSectorBytes)
+    };
+    return infra::make<proto::MailboxAct>(reply);
 }
 
 bool MsuMachine::rest() const noexcept {
     TASTY_SEAT_BODY(MsuMachine);
-    return file_ == nullptr || fill_done_ || held_ == kAhead || fill_at_ >= size_;
+    return file_ == nullptr || fill_done_ || held_ == kAhead || proto::FileSize{fill_at_} >= size_;
 }
 
 void MsuMachine::refill_one() noexcept {
@@ -154,16 +158,16 @@ void MsuMachine::refill_one() noexcept {
     Sector& s = ahead_[(head_ + held_) % kAhead];
     s.bytes.fill(0);
     s.off = fill_at_;
-    const std::size_t n = read_(fill_at_, s.bytes);
-    s.got = static_cast<std::uint16_t>(n);
+    const std::span<std::uint8_t> got = read_(fill_at_, s.bytes);
+    s.got = static_cast<std::uint16_t>(got.size());
     ++held_;
     ++counts_.ahead_reads;
-    fill_at_ += n;
-    if (n < msu::kSectorBytes)
+    fill_at_ += got.size();
+    if (got.size() < msu::kSectorBytes)
         fill_done_ = true;
 }
 
-std::size_t MsuMachine::read_(std::uint64_t off, std::span<std::uint8_t> dst) noexcept {
+std::span<std::uint8_t> MsuMachine::read_(std::uint64_t off, std::span<std::uint8_t> dst) noexcept {
     std::size_t got = 0;
     while (got < dst.size()) {
         auto r = file_->read_at(off + got, std::as_writable_bytes(dst.subspan(got)));
@@ -175,7 +179,7 @@ std::size_t MsuMachine::read_(std::uint64_t off, std::span<std::uint8_t> dst) no
             break;
         got += *r;
     }
-    return got;
+    return dst.first(got);
 }
 
 }

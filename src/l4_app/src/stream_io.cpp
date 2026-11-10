@@ -50,30 +50,34 @@ template <class Buf, class Io>
     });
 }
 
-[[nodiscard]] Ex<void> stream_write(
-    svc::IFile& f,
-    proto::FileSize off,
-    std::span<const std::byte> src
-) {
-    return pump(off, src, Errc::short_write, [&f](auto at, auto rest) {
-        return f.write_at(at, rest);
-    });
-}
-
-[[nodiscard]] Ex<void> stream_sync(svc::IFile& f) {
-    return f.flush();
-}
-
-std::optional<std::vector<std::uint8_t>> read_whole(svc::IFile& f, proto::FileSize size) {
+Ex<std::vector<std::uint8_t>> read_whole(svc::IFile& f, proto::FileSize size) {
     std::vector<std::uint8_t> buf(static_cast<std::size_t>(size.v));
-    std::size_t off = 0;
-    while (off < buf.size()) {
-        auto n = f.read_at(off, std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(off)));
-        if (!n || *n == 0)
-            return std::nullopt;
-        off += *n;
+    if (auto r = stream_read(
+            f,
+            proto::FileSize{},
+            std::as_writable_bytes(std::span<std::uint8_t>(buf))
+        );
+        !r) {
+        return std::unexpected(r.error());
     }
     return buf;
+}
+
+Ex<std::vector<std::uint8_t>> read_file(
+    const svc::Vfs& vfs,
+    std::string_view rel,
+    std::optional<proto::FileSize> cap
+) {
+    auto f = vfs.open(rel, svc::OpenMode::ReadWhole);
+    if (!f)
+        return std::unexpected(f.error());
+    auto size = (*f)->size();
+    if (!size)
+        return std::unexpected(size.error());
+
+    if (cap && *size > *cap)
+        return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
+    return read_whole(**f, *size);
 }
 
 }

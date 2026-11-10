@@ -4,8 +4,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
-#include "app/hd_osd_status.h"
+#include "app/hd_visible_window.h"
 #include "app/log_clock.h"
 #include "infra/seat.h"
 
@@ -55,23 +56,24 @@ public:
 
     constexpr void copied(std::size_t bytes) noexcept { bytes_ += bytes; }
 
-    constexpr bool roll(std::uint64_t now, HdOsdStatus& out) noexcept {
+    [[nodiscard]] constexpr std::optional<HdVisibleWindow> roll(std::uint64_t now) noexcept {
         if (start_ == 0)
             start_ = now == 0 ? 1 : now;
         if (now < start_ || now - start_ < kWindowNs)
-            return false;
-        out.ask_n = n_;
-        out.ask_us_min = n_ == 0 ? StatusMicros::zero() : min_;
-        out.ask_us_max = max_;
-        out.ask_us_p50 = p50_();
-        out.inplace = inplace_;
-        out.flips = flips_;
-        out.bd_frames = bd_frames_;
+            return std::nullopt;
+        HdVisibleWindow w{};
+        w.ask_count = svc::Tally{n_};
+        w.ask_us_min = n_ == 0 ? StatusMicros::zero() : min_;
+        w.ask_us_max = max_;
+        w.ask_us_p50 = p50_();
+        w.inplace = svc::Tally{inplace_};
+        w.flips = svc::Tally{flips_};
+        w.bd_frames = svc::Tally{bd_frames_};
         const std::uint64_t kb = bytes_ / 1024u;
-        out.copy_kb = sat_u32(kb);
+        w.copy_kb = KibCount{sat_u32(kb)};
         *this = HdVisibleStats{};
         start_ = now == 0 ? 1 : now;
-        return true;
+        return w;
     }
 
 private:

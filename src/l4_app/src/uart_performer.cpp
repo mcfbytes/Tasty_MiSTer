@@ -21,16 +21,15 @@ void UartPerformer::on(const UartHandoff::MidiLink& a) {
     TASTY_SEAT_BODY(UartPerformer);
     for (const char* p : kMidiLinkRemovalOrder)
         (void)::unlink(p);
-    const auto i = static_cast<std::size_t>(a.mode);
-    if (i < kMidiLinkSentinels.size()) {
-        (void)proc::write_tmp_handoff(kMidiLinkSentinels[i], std::string_view{});
-    }
+    const infra::OptRef<const char* const> name = kMidiLinkSentinels.find(MidiLinkSlot::of(a.mode));
+    if (name)
+        (void)proc::write_tmp_handoff(*name, std::string_view{});
 }
 
 void UartPerformer::on(const UartHandoff::Mode& a) {
     TASTY_SEAT_BODY(UartPerformer);
-    (void)proc::write_tmp_handoff(kCoreNameFile, a.core);
-    (void)proc::write_tmp_handoff(kRbfNameFile, a.rbf);
+    (void)proc::write_tmp_handoff(kCoreNameFile, a.core.view());
+    (void)proc::write_tmp_handoff(kRbfNameFile, a.rbf.view());
     char sp[16] = {};
     const int len = std::snprintf(sp, sizeof sp, "%u", a.baud.v);
     (void)proc::write_tmp_handoff(
@@ -40,7 +39,8 @@ void UartPerformer::on(const UartHandoff::Mode& a) {
     script_spawns_.add(1);
     if (const auto r = proc::uartmode_script(static_cast<std::uint8_t>(a.mode)); !r) {
         script_failures_.add(1);
-    } else if (*r != 0) {
+    } else if (!r->succeeded()) {
+
         script_nonzero_.add(1);
     }
 }

@@ -5,6 +5,7 @@
 
 #include "app/event.h"
 #include "infra/diag_log.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::ui {
@@ -15,7 +16,13 @@ class EventTrace {
 public:
     static constexpr std::uint32_t kMaxPerSec = 64;
 
-    explicit EventTrace(app::EventQueue<SeatTag::RT>& queue) noexcept : queue_(&queue) {}
+    EventTrace(app::EventQueue<SeatTag::RT>& rt, app::EventQueue<SeatTag::Main>& main) noexcept
+        : rt_(&rt),
+          main_(main) {}
+
+    explicit EventTrace(app::EventQueue<SeatTag::RT>& rt) noexcept : rt_(&rt) {}
+
+    void lane(SeatTag from) noexcept { lane_ = from; }
 
     bool open(const char* path) noexcept { return log_.open(path); }
 
@@ -26,7 +33,6 @@ public:
     void record(const app::Event::SdActivity& a, const app::Event::Head& h) noexcept;
     void record(const app::Event::InfoRequest& a, const app::Event::Head& h) noexcept;
     void record(const app::Event::ProgressUpdate& a, const app::Event::Head& h) noexcept;
-    void record(const app::Event::DeadlineMiss& a, const app::Event::Head& h) noexcept;
     void record(const app::Event::RequestRefused& a, const app::Event::Head& h) noexcept;
     void record(const app::Event::ConfStrOnlySession& a, const app::Event::Head& h) noexcept;
     void record(const app::Event::SessionAdvisory& a, const app::Event::Head& h) noexcept;
@@ -50,7 +56,9 @@ private:
         const app::Event::Head& h
     ) noexcept;
 
-    app::EventQueue<SeatTag::RT>* queue_;
+    app::EventQueue<SeatTag::RT>* rt_;
+    infra::OptRef<app::EventQueue<SeatTag::Main>> main_{};
+    SeatTag lane_ = SeatTag::RT;
     xthread::DiagLog log_;
     std::uint32_t seq_ = 0;
     std::uint32_t suppressed_ = 0;

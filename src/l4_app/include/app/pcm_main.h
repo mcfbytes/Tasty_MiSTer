@@ -78,8 +78,8 @@ private:
     [[nodiscard]] bool mailbox_rest_() const noexcept;
 
     PcmRingFeeder& feeder_;
-    MailboxRelay* const relay_;
-    CompanionHost* const host_;
+
+    std::optional<Mailbox> mailbox_;
     xthread::WakeFlag& wake_;
     xthread::WakeFlag stop_;
     PcmRingFeeder::Commands& cmds_;

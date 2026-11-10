@@ -12,10 +12,7 @@ Ex<void> NeoGeoCore::do_adopt(const CoreAdopt&) {
 
 MountState NeoGeoCore::mount_disc(std::string_view path) {
     TASTY_SEAT_BODY(NeoGeoCore);
-    if (!mount(
-            profile().staging.disc_slot,
-            MountedPath{proto::PathId{}, path, proto::FileSize{}}
-        )) {
+    if (!mount(profile().staging.disc_slot, MountedPath{path, proto::FileSize{}})) {
         return MountState::Failed;
     }
     return drive_.disc_mount_state();

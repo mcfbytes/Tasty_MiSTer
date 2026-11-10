@@ -12,9 +12,17 @@
 
 namespace mister::app {
 
-BackdropSampler::BackdropSampler(hal::ScalerBuffers window, const os::IClock* clock) noexcept
-    : window_(std::move(window)),
-      clock_(infra::opt_ref_of(clock)) {}
+namespace {
+
+[[nodiscard]] os::RawMonotonicClock::time_point raw_instant(
+    std::chrono::nanoseconds since_epoch
+) noexcept {
+    return os::RawMonotonicClock::time_point{since_epoch};
+}
+
+}
+
+BackdropSampler::BackdropSampler(hal::ScalerBuffers window) noexcept : window_(std::move(window)) {}
 
 bool BackdropSampler::note_applies(std::uint32_t applies, std::int64_t now) noexcept {
     TASTY_SEAT_BODY(BackdropSampler);
@@ -29,7 +37,7 @@ bool BackdropSampler::note_applies(std::uint32_t applies, std::int64_t now) noex
 
 void BackdropSampler::restart(std::int64_t now) noexcept {
     TASTY_SEAT_BODY(BackdropSampler);
-    probe_.restart(now);
+    probe_.restart(raw_instant(std::chrono::nanoseconds{now}));
     phase_ = Phase::Probe;
     next_poll_ = 0;
     lowlat_ = false;
@@ -41,8 +49,7 @@ void BackdropSampler::restart(std::int64_t now) noexcept {
     torn_ = 0;
     width_ = height_ = line_ = 0;
     view_n_ = 0;
-    stride_ = 0;
-    stride_mib_ = 0;
+    stride_ = hal::ScalerStride::Large;
 }
 
 bool BackdropSampler::poll_due(std::int64_t now) const noexcept {
@@ -67,7 +74,7 @@ BackdropSampler::Image BackdropSampler::poll(std::int64_t now, bool copy) noexce
     if (phase_ == Phase::Probe && (next_poll_ == 0 || now >= next_poll_)) {
         probe_.read(window_);
         next_poll_ = now + kPollNs;
-        const auto verdict = probe_.decide(now);
+        const auto verdict = probe_.decide(raw_instant(std::chrono::nanoseconds{now}));
         if (verdict == hal::ScalerProbe::Verdict::Dead) {
             if (const auto held = hal::ScalerProbe::still(window_, known_stride_)) {
                 run_(*held, true);
@@ -96,12 +103,12 @@ BackdropSampler::Image BackdropSampler::poll(std::int64_t now, bool copy) noexce
 }
 
 void BackdropSampler::run_(hal::ScalerProbe::Verdict verdict, bool still) noexcept {
-    constexpr unsigned kMibShift = 20;
+    const auto layout = hal::ScalerProbe::layout_of(verdict);
+    if (!layout)
+        return;
     phase_ = Phase::Run;
-    lowlat_ = verdict == hal::ScalerProbe::Verdict::LargeLowlat;
-    stride_ = verdict == hal::ScalerProbe::Verdict::Small ? hal::ScalerBuffers::kStrideSmall
-                                                          : hal::ScalerBuffers::kStrideLarge;
-    stride_mib_ = static_cast<std::uint8_t>(stride_ >> kMibShift);
+    lowlat_ = layout->lowlat;
+    stride_ = layout->stride;
     still_ = still;
     if (still)
         still_marks_ = marks_();
@@ -112,7 +119,7 @@ void BackdropSampler::run_(hal::ScalerProbe::Verdict verdict, bool still) noexce
 BackdropSampler::Marks BackdropSampler::marks_() const noexcept {
     Marks out{};
     for (std::size_t i = 0; i < out.size(); ++i) {
-        const auto h = window_.header(i * stride_);
+        const auto h = window_.header(i * hal::stride_bytes(stride_));
         if (h && h->supported())
             out[i] = *h;
     }
@@ -132,14 +139,17 @@ BackdropSampler::Image BackdropSampler::image_(bool fresh) const noexcept {
     img.same = same_ && live_;
     img.lowlat = lowlat_;
     img.stuck = stuck_;
-    img.stride_mib = stride_mib_;
+
+    if (phase_ == Phase::Run)
+        img.stride_mib = hal::stride_mib(stride_);
     img.torn = torn_;
     return img;
 }
 
 bool BackdropSampler::copy_frame_() noexcept {
-    const auto load = [this](std::size_t buf) -> std::optional<hal::ScalerHeader> {
-        const auto h = window_.header(buf * stride_);
+    const std::size_t spacing = hal::stride_bytes(stride_);
+    const auto load = [this, spacing](std::size_t buf) -> std::optional<hal::ScalerHeader> {
+        const auto h = window_.header(buf * spacing);
         if (!h || !h->supported() || h->width == 0 || h->height == 0)
             return std::nullopt;
         if (RowBytes{h->line}.lacks(rgb_row_of(h->width)))
@@ -170,20 +180,16 @@ bool BackdropSampler::copy_frame_() noexcept {
     if (!header)
         return false;
     const std::size_t nbytes = std::size_t{header->line} * header->height;
-    if (nbytes == 0 || header->header_size > stride_ || nbytes > stride_ - header->header_size)
+    if (nbytes == 0 || header->header_size > spacing || nbytes > spacing - header->header_size)
         return false;
     if (cache_.size() < nbytes)
         cache_.resize(nbytes);
     if (prev_.size() < nbytes)
         prev_.resize(nbytes);
     const auto before = header->frame_counter();
-    if (clock_)
-        (void)clock_->now();
     if (!window_
-             .copy(buf * stride_ + header->header_size, std::span<std::byte>{prev_.data(), nbytes}))
+             .copy(buf * spacing + header->header_size, std::span<std::byte>{prev_.data(), nbytes}))
         return false;
-    if (clock_)
-        (void)clock_->now();
     same_ = have_prev_
         && nbytes == view_n_
         && header->width == width_
@@ -198,7 +204,7 @@ bool BackdropSampler::copy_frame_() noexcept {
     live_ = true;
     have_prev_ = true;
     if (lowlat_) {
-        const auto after = window_.header(buf * stride_);
+        const auto after = window_.header(buf * spacing);
         if (after && after->frame_counter() != before)
             ++torn_;
     }

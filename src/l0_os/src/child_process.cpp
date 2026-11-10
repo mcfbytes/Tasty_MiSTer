@@ -11,6 +11,8 @@
 #include <cerrno>
 #include <vector>
 
+#include "child_spawn.h"
+
 namespace mister::os {
 namespace {
 
@@ -69,17 +71,9 @@ int add_file_actions(posix_spawn_file_actions_t& fa, const ChildProcessSpec& spe
     return ::posix_spawn_file_actions_addclosefrom_np(&fa, first_closed);
 }
 
-int add_attributes(posix_spawnattr_t& attr) noexcept {
-    sigset_t none;
-    sigset_t all;
-    ::sigemptyset(&none);
-    ::sigfillset(&all);
-    if (const int rc = ::posix_spawnattr_setsigmask(&attr, &none))
-        return rc;
-    if (const int rc = ::posix_spawnattr_setsigdefault(&attr, &all))
-        return rc;
-    const short flags = POSIX_SPAWN_SETSID | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF;
-    return ::posix_spawnattr_setflags(&attr, flags);
+[[nodiscard]] Ex<void> add_attributes(posix_spawnattr_t& attr) noexcept {
+
+    return detail::set_child_signal_state(attr, detail::ChildSignalReset::every_signal, true);
 }
 
 }
@@ -95,8 +89,8 @@ Ex<ChildProcess> ChildProcess::spawn(const ChildProcessSpec& spec) {
         return os_error(ERR_SITE(), ENOMEM);
     if (const int rc = add_file_actions(o.fa, spec))
         return os_error(ERR_SITE(), rc);
-    if (const int rc = add_attributes(o.attr))
-        return os_error(ERR_SITE(), rc);
+    if (auto rc = add_attributes(o.attr); !rc)
+        return std::unexpected(rc.error());
 
     std::vector<char*> argv = terminated(spec.argv);
     std::vector<char*> envp = terminated(spec.envp);
@@ -162,6 +156,24 @@ Ex<void> ChildProcess::signal(int sig) noexcept {
     return os_error(ERR_SITE(), errno);
 }
 
+bool ChildProcessExit::WaitStatus::signalled() const noexcept {
+    return WIFSIGNALED(v) != 0;
+}
+
+ChildProcessExit::ExitStatus ChildProcessExit::WaitStatus::exit_status() const noexcept {
+    return ExitStatus{WIFEXITED(v) ? WEXITSTATUS(v) : 0};
+}
+
+ChildProcessExit::SignalNumber ChildProcessExit::WaitStatus::signal() const noexcept {
+    return SignalNumber{WTERMSIG(v)};
+}
+
+ChildProcessExit ChildProcessExit::from_wait_status(WaitStatus status) noexcept {
+    if (status.signalled())
+        return killed_by(status.signal());
+    return exited(status.exit_status());
+}
+
 std::optional<ChildProcessExit> ChildProcess::try_reap() noexcept {
     if (pid_ <= 0)
         return std::nullopt;
@@ -178,10 +190,8 @@ std::optional<ChildProcessExit> ChildProcess::try_reap() noexcept {
         pidfd_ = -1;
     }
     if (r < 0)
-        return ChildProcessExit{.signalled = true, .code = 0};
-    if (WIFSIGNALED(st))
-        return ChildProcessExit{.signalled = true, .code = WTERMSIG(st)};
-    return ChildProcessExit{.signalled = false, .code = WIFEXITED(st) ? WEXITSTATUS(st) : 0};
+        return ChildProcessExit::failed();
+    return ChildProcessExit::from_wait_status(ChildProcessExit::WaitStatus{st});
 }
 
 }

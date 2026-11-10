@@ -12,14 +12,13 @@
 namespace mister::app {
 
 using cores::CoreInitContext;
-using cores::CoreInitHost;
+using cores::ICoreInitHost;
 using cores::CoreInitStep;
 using cores::CoreTypeMask;
 using cores::FabricReg;
 using cores::InitPhase;
 using cores::InitStatus;
 using cores::OnError;
-using cores::kAnyDialect;
 using cores::kEightBitDialect;
 
 [[nodiscard]] Ex<void> init_reset_video_geometry(CoreInitContext& ctx);
@@ -58,483 +57,157 @@ inline constexpr std::string_view
                              "(input.cpp:6380), so closing this is a DIVERGENCE with its "
                              "own ledger row and a pass of its own";
 
-inline constexpr std::size_t kCoreInitStepCount = 46;
+inline constexpr auto kCoreInitBase = std::to_array<CoreInitStep>({
+    {.name = "video.reset_geometry",
+     .status = InitStatus::Satisfied,
+     .phase = InitPhase::CompletionArm,
+     .fn = &init_reset_video_geometry,
+     .site = "item/item - host state only; VideoWire::geo_gate_ "
+             "re-armed per core"},
+    {.name = "video.arm_prelude",
+     .status = InitStatus::Satisfied,
+     .phase = InitPhase::CompletionArm,
+     .fn = &init_arm_video_prelude,
+     .site = "item - arms the 8-opcode prelude; wire-silent at the arm"},
+    {.name = "status.flush",
+     .reg = FabricReg::Status,
+     .status = InitStatus::Satisfied,
+     .phase = InitPhase::CompletionArm,
+     .applies_to = kEightBitDialect,
+     .fn = &init_flush_status,
+     .site = "item - StatusRegister::flush, all 8 words; req "
+             "dialect gate"},
+    {.name = "identity.publish",
+     .status = InitStatus::Satisfied,
+     .phase = InitPhase::CompletionArm,
+     .fn = &init_publish_identity,
+     .site = "item/video-rule - the T-RT identity latch T-UI reads on the "
+             "CoreLoaded edge"},
+    {.name = "negotiate.sdram_sz",
+     .reg = FabricReg::SdramSz,
+     .status = InitStatus::SatisfiedElsewhere,
+     .phase = InitPhase::Negotiation,
+     .applies_to = kEightBitDialect,
+     .site = "CoreSession::set_memory_size (0x31), EightBit only"},
+    {.name = "apply.rtc",
+     .reg = FabricReg::Rtc,
+     .status = InitStatus::SatisfiedElsewhere,
+     .phase = InitPhase::Apply,
+     .applies_to = kEightBitDialect,
+     .site = "CoreSession::send_rtc_image (0x22), 4 words, EightBit only"},
+    {.name = "apply.timestamp",
+     .reg = FabricReg::Timestamp,
+     .status = InitStatus::SatisfiedElsewhere,
+     .phase = InitPhase::Apply,
+     .applies_to = kEightBitDialect,
+     .site = "CoreSession::send_rtc_image (0x24), 2 words, EightBit only"},
+    {.name = "apply.uart_mode",
+     .reg = FabricReg::UartMode,
+     .status = InitStatus::SatisfiedElsewhere,
+     .phase = InitPhase::Apply,
+     .site = "uart_mode.cpp:196 via the unconditional set_mode(None) at :372"},
+    {.name = "apply.uart_speed",
+     .reg = FabricReg::UartSpeed,
+     .status = InitStatus::SatisfiedElsewhere,
+     .phase = InitPhase::Apply,
+     .site = "uart_mode.cpp:196 - same 0x3B commit window"},
+    {.name = "late.cfg",
+     .reg = FabricReg::Cfg,
+     .status = InitStatus::WrittenLate,
+     .phase = InitPhase::PostLoad,
+     .site = "M2 F3 - VideoWire::step_prelude S6 (0x01), ~68 ms AFTER "
+             "CoreLoaded; stock sends it at user_io.cpp:1518, before the "
+             "reset release at :1696"},
+    {.name = "late.systop_cfg",
+     .reg = FabricReg::SysTopCfg,
+     .status = InitStatus::WrittenLate,
+     .phase = InitPhase::PostLoad,
+     .site = "M2 F3 - the same 0x01 window loads sys_top.v:288's separate cfg register"},
+    {.name = "late.scaler_flt",
+     .reg = FabricReg::ScalerFlt,
+     .status = InitStatus::WrittenLate,
+     .phase = InitPhase::PostLoad,
+     .site = "M2 F4 - VideoWire::step_prelude S2 (0x2B), after CoreLoaded"},
+    {.name = "late.img_size",
+     .reg = FabricReg::ImgSize,
+     .status = InitStatus::WrittenLate,
+     .phase = InitPhase::PostLoad,
+     .site = "block_slots.cpp:162 (0x1D) - mount only, never on a plain core load"},
+    {.name = "late.ioctl_index",
+     .reg = FabricReg::IoctlIndex,
+     .status = InitStatus::WrittenLate,
+     .phase = InitPhase::PostLoad,
+     .site = "download_session.cpp:131 (0x55) - download only"},
+    {.name = "late.ioctl_file_ext",
+     .reg = FabricReg::IoctlFileExt,
+     .status = InitStatus::WrittenLate,
+     .phase = InitPhase::PostLoad,
+     .site = "download_session.cpp:171 (0x56) - download only"},
+    {.name = "gap.joystick_0", .reg = FabricReg::Joystick0, .site = kGapIdleGuardedDigital},
+    {.name = "gap.joystick_1", .reg = FabricReg::Joystick1, .site = kGapIdleGuardedDigital},
+    {.name = "gap.joystick_2", .reg = FabricReg::Joystick2, .site = kGapIdleGuardedDigital},
+    {.name = "gap.joystick_3", .reg = FabricReg::Joystick3, .site = kGapIdleGuardedDigital},
+    {.name = "gap.joystick_4", .reg = FabricReg::Joystick4, .site = kGapIdleGuardedDigital},
+    {.name = "gap.joystick_5", .reg = FabricReg::Joystick5, .site = kGapIdleGuardedDigital},
+    {.name = "gap.joystick_l_analog_0",
+     .reg = FabricReg::JoystickLAnalog0,
+     .site = kGapIdleGuardedAnalogL},
+    {.name = "gap.joystick_l_analog_1",
+     .reg = FabricReg::JoystickLAnalog1,
+     .site = kGapIdleGuardedAnalogL},
+    {.name = "gap.joystick_l_analog_2",
+     .reg = FabricReg::JoystickLAnalog2,
+     .site = kGapIdleGuardedAnalogL},
+    {.name = "gap.joystick_l_analog_3",
+     .reg = FabricReg::JoystickLAnalog3,
+     .site = kGapIdleGuardedAnalogL},
+    {.name = "gap.joystick_l_analog_4",
+     .reg = FabricReg::JoystickLAnalog4,
+     .site = kGapIdleGuardedAnalogL},
+    {.name = "gap.joystick_l_analog_5",
+     .reg = FabricReg::JoystickLAnalog5,
+     .site = kGapIdleGuardedAnalogL},
+    {.name = "gap.joystick_r_analog_0",
+     .reg = FabricReg::JoystickRAnalog0,
+     .site = kGapIdleGuardedAnalogR},
+    {.name = "gap.joystick_r_analog_1",
+     .reg = FabricReg::JoystickRAnalog1,
+     .site = kGapIdleGuardedAnalogR},
+    {.name = "gap.joystick_r_analog_2",
+     .reg = FabricReg::JoystickRAnalog2,
+     .site = kGapIdleGuardedAnalogR},
+    {.name = "gap.joystick_r_analog_3",
+     .reg = FabricReg::JoystickRAnalog3,
+     .site = kGapIdleGuardedAnalogR},
+    {.name = "gap.joystick_r_analog_4",
+     .reg = FabricReg::JoystickRAnalog4,
+     .site = kGapIdleGuardedAnalogR},
+    {.name = "gap.joystick_r_analog_5",
+     .reg = FabricReg::JoystickRAnalog5,
+     .site = kGapIdleGuardedAnalogR},
+    {.name = "gap.paddle_0", .reg = FabricReg::Paddle0, .site = kGapIdleGuardedPaddle},
+    {.name = "gap.paddle_1", .reg = FabricReg::Paddle1, .site = kGapIdleGuardedPaddle},
+    {.name = "gap.paddle_2", .reg = FabricReg::Paddle2, .site = kGapIdleGuardedPaddle},
+    {.name = "gap.paddle_3", .reg = FabricReg::Paddle3, .site = kGapIdleGuardedPaddle},
+    {.name = "gap.paddle_4", .reg = FabricReg::Paddle4, .site = kGapIdleGuardedPaddle},
+    {.name = "gap.paddle_5", .reg = FabricReg::Paddle5, .site = kGapIdleGuardedPaddle},
+    {.name = "gap.spinner_0", .reg = FabricReg::Spinner0, .site = kGapIdleGuardedSpinner},
+    {.name = "gap.spinner_1", .reg = FabricReg::Spinner1, .site = kGapIdleGuardedSpinner},
+    {.name = "gap.spinner_2", .reg = FabricReg::Spinner2, .site = kGapIdleGuardedSpinner},
+    {.name = "gap.spinner_3", .reg = FabricReg::Spinner3, .site = kGapIdleGuardedSpinner},
+    {.name = "gap.spinner_4", .reg = FabricReg::Spinner4, .site = kGapIdleGuardedSpinner},
+    {.name = "gap.spinner_5", .reg = FabricReg::Spinner5, .site = kGapIdleGuardedSpinner},
+    {.name = "gap.gamma_en",
+     .reg = FabricReg::GammaEn,
+     .site = "M2 F2 - tasty's only 0x32 emitter is "
+             "ProbeOps::emit_gamma_probe's ZERO-PAYLOAD probe, and "
+             "hps_io.sv:528 writes gamma_en in the payload branch only. "
+             "Stock has the same hole (video.cpp:702 early-returns with "
+             "no <core>_gamma.cfg)"},
+});
+inline constexpr std::size_t kCoreInitStepCount = kCoreInitBase.size();
 
-inline constexpr std::array<CoreInitStep, kCoreInitStepCount> kCoreInitBase{{
-    CoreInitStep{
-        "video.reset_geometry",
-        FabricReg::None,
-        InitStatus::Satisfied,
-        InitPhase::CompletionArm,
-        kAnyDialect,
-        &init_reset_video_geometry,
-        OnError::Ignore,
-        "item/item - host state only; VideoWire::geo_gate_ "
-        "re-armed per core"
-    },
-    CoreInitStep{
-        "video.arm_prelude",
-        FabricReg::None,
-        InitStatus::Satisfied,
-        InitPhase::CompletionArm,
-        kAnyDialect,
-        &init_arm_video_prelude,
-        OnError::Ignore,
-        "item - arms the 8-opcode prelude; wire-silent at the arm"
-    },
-    CoreInitStep{
-        "status.flush",
-        FabricReg::Status,
-        InitStatus::Satisfied,
-        InitPhase::CompletionArm,
-        kEightBitDialect,
-        &init_flush_status,
-        OnError::Ignore,
-        "item - StatusRegister::flush, all 8 words; req "
-        "dialect gate"
-    },
-    CoreInitStep{
-        "identity.publish",
-        FabricReg::None,
-        InitStatus::Satisfied,
-        InitPhase::CompletionArm,
-        kAnyDialect,
-        &init_publish_identity,
-        OnError::Ignore,
-        "item/video-rule - the T-RT identity latch T-UI reads on the "
-        "CoreLoaded edge"
-    },
-    CoreInitStep{
-        "negotiate.sdram_sz",
-        FabricReg::SdramSz,
-        InitStatus::SatisfiedElsewhere,
-        InitPhase::Negotiation,
-        kEightBitDialect,
-        nullptr,
-        OnError::Ignore,
-        "CoreSession::set_memory_size (0x31), EightBit only"
-    },
-    CoreInitStep{
-        "apply.rtc",
-        FabricReg::Rtc,
-        InitStatus::SatisfiedElsewhere,
-        InitPhase::Apply,
-        kEightBitDialect,
-        nullptr,
-        OnError::Ignore,
-        "CoreSession::send_rtc_image (0x22), 4 words, EightBit only"
-    },
-    CoreInitStep{
-        "apply.timestamp",
-        FabricReg::Timestamp,
-        InitStatus::SatisfiedElsewhere,
-        InitPhase::Apply,
-        kEightBitDialect,
-        nullptr,
-        OnError::Ignore,
-        "CoreSession::send_rtc_image (0x24), 2 words, EightBit only"
-    },
-    CoreInitStep{
-        "apply.uart_mode",
-        FabricReg::UartMode,
-        InitStatus::SatisfiedElsewhere,
-        InitPhase::Apply,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        "uart_mode.cpp:196 via the unconditional set_mode(None) at "
-        ":372"
-    },
-    CoreInitStep{
-        "apply.uart_speed",
-        FabricReg::UartSpeed,
-        InitStatus::SatisfiedElsewhere,
-        InitPhase::Apply,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        "uart_mode.cpp:196 - same 0x3B commit window"
-    },
-    CoreInitStep{
-        "late.cfg",
-        FabricReg::Cfg,
-        InitStatus::WrittenLate,
-        InitPhase::PostLoad,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        "M2 F3 - VideoWire::step_prelude S6 (0x01), ~68 ms AFTER "
-        "CoreLoaded; stock sends it at user_io.cpp:1518, before the "
-        "reset release at :1696"
-    },
-    CoreInitStep{
-        "late.systop_cfg",
-        FabricReg::SysTopCfg,
-        InitStatus::WrittenLate,
-        InitPhase::PostLoad,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        "M2 F3 - the same 0x01 window loads sys_top.v:288's separate "
-        "cfg register"
-    },
-    CoreInitStep{
-        "late.scaler_flt",
-        FabricReg::ScalerFlt,
-        InitStatus::WrittenLate,
-        InitPhase::PostLoad,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        "M2 F4 - VideoWire::step_prelude S2 (0x2B), after "
-        "CoreLoaded"
-    },
-    CoreInitStep{
-        "late.img_size",
-        FabricReg::ImgSize,
-        InitStatus::WrittenLate,
-        InitPhase::PostLoad,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        "block_slots.cpp:162 (0x1D) - mount "
-        "only, never on a plain core load"
-    },
-    CoreInitStep{
-        "late.ioctl_index",
-        FabricReg::IoctlIndex,
-        InitStatus::WrittenLate,
-        InitPhase::PostLoad,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        "download_session.cpp:131 (0x55) - download only"
-    },
-    CoreInitStep{
-        "late.ioctl_file_ext",
-        FabricReg::IoctlFileExt,
-        InitStatus::WrittenLate,
-        InitPhase::PostLoad,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        "download_session.cpp:171 (0x56) - download only"
-    },
-    CoreInitStep{
-        "gap.joystick_0",
-        FabricReg::Joystick0,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedDigital
-    },
-    CoreInitStep{
-        "gap.joystick_1",
-        FabricReg::Joystick1,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedDigital
-    },
-    CoreInitStep{
-        "gap.joystick_2",
-        FabricReg::Joystick2,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedDigital
-    },
-    CoreInitStep{
-        "gap.joystick_3",
-        FabricReg::Joystick3,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedDigital
-    },
-    CoreInitStep{
-        "gap.joystick_4",
-        FabricReg::Joystick4,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedDigital
-    },
-    CoreInitStep{
-        "gap.joystick_5",
-        FabricReg::Joystick5,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedDigital
-    },
-    CoreInitStep{
-        "gap.joystick_l_analog_0",
-        FabricReg::JoystickLAnalog0,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogL
-    },
-    CoreInitStep{
-        "gap.joystick_l_analog_1",
-        FabricReg::JoystickLAnalog1,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogL
-    },
-    CoreInitStep{
-        "gap.joystick_l_analog_2",
-        FabricReg::JoystickLAnalog2,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogL
-    },
-    CoreInitStep{
-        "gap.joystick_l_analog_3",
-        FabricReg::JoystickLAnalog3,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogL
-    },
-    CoreInitStep{
-        "gap.joystick_l_analog_4",
-        FabricReg::JoystickLAnalog4,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogL
-    },
-    CoreInitStep{
-        "gap.joystick_l_analog_5",
-        FabricReg::JoystickLAnalog5,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogL
-    },
-    CoreInitStep{
-        "gap.joystick_r_analog_0",
-        FabricReg::JoystickRAnalog0,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogR
-    },
-    CoreInitStep{
-        "gap.joystick_r_analog_1",
-        FabricReg::JoystickRAnalog1,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogR
-    },
-    CoreInitStep{
-        "gap.joystick_r_analog_2",
-        FabricReg::JoystickRAnalog2,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogR
-    },
-    CoreInitStep{
-        "gap.joystick_r_analog_3",
-        FabricReg::JoystickRAnalog3,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogR
-    },
-    CoreInitStep{
-        "gap.joystick_r_analog_4",
-        FabricReg::JoystickRAnalog4,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogR
-    },
-    CoreInitStep{
-        "gap.joystick_r_analog_5",
-        FabricReg::JoystickRAnalog5,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedAnalogR
-    },
-    CoreInitStep{
-        "gap.paddle_0",
-        FabricReg::Paddle0,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedPaddle
-    },
-    CoreInitStep{
-        "gap.paddle_1",
-        FabricReg::Paddle1,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedPaddle
-    },
-    CoreInitStep{
-        "gap.paddle_2",
-        FabricReg::Paddle2,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedPaddle
-    },
-    CoreInitStep{
-        "gap.paddle_3",
-        FabricReg::Paddle3,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedPaddle
-    },
-    CoreInitStep{
-        "gap.paddle_4",
-        FabricReg::Paddle4,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedPaddle
-    },
-    CoreInitStep{
-        "gap.paddle_5",
-        FabricReg::Paddle5,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedPaddle
-    },
-    CoreInitStep{
-        "gap.spinner_0",
-        FabricReg::Spinner0,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedSpinner
-    },
-    CoreInitStep{
-        "gap.spinner_1",
-        FabricReg::Spinner1,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedSpinner
-    },
-    CoreInitStep{
-        "gap.spinner_2",
-        FabricReg::Spinner2,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedSpinner
-    },
-    CoreInitStep{
-        "gap.spinner_3",
-        FabricReg::Spinner3,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedSpinner
-    },
-    CoreInitStep{
-        "gap.spinner_4",
-        FabricReg::Spinner4,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedSpinner
-    },
-    CoreInitStep{
-        "gap.spinner_5",
-        FabricReg::Spinner5,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        kGapIdleGuardedSpinner
-    },
-    CoreInitStep{
-        "gap.gamma_en",
-        FabricReg::GammaEn,
-        InitStatus::DeclaredGap,
-        InitPhase::Never,
-        kAnyDialect,
-        nullptr,
-        OnError::Ignore,
-        "M2 F2 - tasty's only 0x32 emitter is "
-        "ProbeOps::emit_gamma_probe's ZERO-PAYLOAD probe, and "
-        "hps_io.sv:528 writes gamma_en in the payload branch only. "
-        "Stock has the same hole (video.cpp:702 early-returns with "
-        "no <core>_gamma.cfg)"
-    },
-}};
+static_assert(kCoreInitBase.size() == 46, "43 class-H registers + 3 host-only rows");
 
 [[nodiscard]] Ex<void> run_core_init(
     CoreInitContext& ctx,

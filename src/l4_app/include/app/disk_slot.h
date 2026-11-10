@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #include "app/path_text.h"
+#include "app/relay_stamp.h"
 #include "cores/staging_core.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
@@ -25,10 +26,7 @@ struct DiskSlot {
         TASTY_SEAT_EXEMPT(component);
         enum class Kind : std::uint8_t { Bind, Command, Resume, Release, kCount };
 
-        struct Head {
-            std::uint16_t gen = 0;
-            std::uint16_t epoch = 0;
-        };
+        using Head = RelayStamp;
 
         struct Bind {
             static constexpr Kind kKind = Kind::Bind;

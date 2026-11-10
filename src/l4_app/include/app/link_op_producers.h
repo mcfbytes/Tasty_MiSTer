@@ -100,7 +100,6 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::BindUart, BindTail>,
     OpProducer<proto::LinkOp::Kind::BindSlotConfig, ConfigSaves>,
     OpProducer<proto::LinkOp::Kind::BindMount, MountQueue, cores::StMediaLadder>,
-    OpProducer<proto::LinkOp::Kind::BindSlotPreviews, ConfigSaves>,
     OpProducer<proto::LinkOp::Kind::RebootNow, BoardReboot>,
     OpProducer<proto::LinkOp::Kind::ApplyCore, CoreSwitch, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::AbortSwitch, SessionOwner>,
@@ -131,12 +130,17 @@ using LinkOpProducers = std::tuple<
     OpProducer<proto::LinkOp::Kind::ApplyCheats, ui::CheatsPage>,
     OpProducer<proto::LinkOp::Kind::SetDip, ui::DipsPage>,
     OpProducer<proto::LinkOp::Kind::SetCoreOption, ui::CoreSettingsPage>,
-    OpProducer<proto::LinkOp::Kind::SetVolume, CmdRouter>,
+    OpProducer<proto::LinkOp::Kind::SetMute, CmdRouter>,
+    OpProducer<proto::LinkOp::Kind::SetAttenuation, CmdRouter>,
+    OpProducer<proto::LinkOp::Kind::NudgeVolume, CmdRouter>,
+    OpProducer<proto::LinkOp::Kind::ToggleMute, CmdRouter>,
     OpProducer<proto::LinkOp::Kind::AnnounceMount, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::SetWideIndex, cores::BootLadder>,
     OpProducer<proto::LinkOp::Kind::CoreReset, SessionOwner>,
     OpProducer<proto::LinkOp::Kind::LoadFacts, FileTxPieces, LadderHostAdapter, LoadLadder>,
-    OpProducer<proto::LinkOp::Kind::MailboxWrite, CompanionWalk>>;
+    OpProducer<proto::LinkOp::Kind::MailboxWrite, CompanionWalk>,
+    OpProducer<proto::LinkOp::Kind::AttachSave, LoadWalk, MountQueue, cores::BootLadder>,
+    OpProducer<proto::LinkOp::Kind::DetachSave, MountQueue>>;
 
 namespace detail {
 template <class T>

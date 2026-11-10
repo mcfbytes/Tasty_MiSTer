@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "ui/progress_page.h"
 
@@ -17,9 +18,7 @@ class TransferTracker final {
 public:
     void begin(const PageContext& ctx) noexcept;
 
-    [[nodiscard]] std::string_view name() const noexcept {
-        return std::string_view(name_, name_len_);
-    }
+    [[nodiscard]] std::string_view name() const noexcept { return name_.view(); }
 
     void clear() noexcept { in_transfer_ = false; }
 
@@ -28,8 +27,8 @@ public:
 private:
     bool in_transfer_ = false;
     std::uint32_t load_asks_seen_ = 0;
-    std::uint8_t name_len_ = 0;
-    char name_[kProgressNameMax]{};
+
+    FixedStr<kProgressNameMax + 1, StrFit::Clip> name_{};
 };
 
 }

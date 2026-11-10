@@ -33,13 +33,13 @@ public:
     };
 
     SpiBlockDecoder(ILinkRouter& router, BlockSlots& slots, const ISessionLive& live) noexcept
-        : slots_(&slots),
-          live_(&live),
+        : slots_(slots),
+          live_(live),
           out_(router) {}
 
     void service(IBlockRoles& roles);
 
-    [[nodiscard]] bool active() const noexcept { return live_->session_live(); }
+    [[nodiscard]] bool active() const noexcept { return live_.session_live(); }
 
     void bind_budget(unsigned budget) noexcept { budget_ = budget; }
 
@@ -50,8 +50,8 @@ public:
     [[nodiscard]] std::uint32_t osd_claims() const noexcept { return counters_.sectors; }
 
 private:
-    BlockSlots* slots_;
-    const ISessionLive* live_;
+    BlockSlots& slots_;
+    const ISessionLive& live_;
     Port out_;
     unsigned budget_ = kDrainBudget;
     SectorFloor floor_{};

@@ -3,8 +3,11 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string_view>
+
 #include "infra/seat.h"
+#include "svc/sys_button.h"
 
 namespace mister::svc {
 
@@ -18,14 +21,7 @@ struct JoyPlan {
         "item: the SYS_BTN_ button-word span is eight words wide"
     );
 
-    static constexpr std::array<std::int8_t, kWords> all_none() noexcept {
-        std::array<std::int8_t, kWords> a{};
-        for (std::int8_t& v : a)
-            v = kNone;
-        return a;
-    }
-
-    std::array<std::int8_t, kWords> src = all_none();
+    std::array<std::optional<SysButton>, kWords> src{};
     std::int8_t paddle_idx = kNone;
     bool present = false;
 

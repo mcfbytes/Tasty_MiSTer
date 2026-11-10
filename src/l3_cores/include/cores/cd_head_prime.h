@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
-
+#include "svc/disc_ask.h"
 #include "svc/disc_geometry.h"
 #include "svc/disc_read_service.h"
 #include "svc/disc_reader.h"
@@ -18,15 +17,13 @@ struct HeadPrime {
     bool subcode = false;
 };
 
-inline void prime_head(svc::DiscReadService& disc, std::int32_t lba, HeadPrime what) noexcept {
-    if (lba < 0)
-        return;
-    const svc::Lba at{static_cast<std::uint32_t>(lba)};
-    disc.hint(what.form, at);
-    if (what.pair)
-        disc.hint(what.form, svc::Lba{at.v + 1});
+inline void prime_head(svc::DiscReadService& disc, svc::Lba at, HeadPrime what) noexcept {
+    disc.hint(svc::DiscAsk{.form = what.form, .lba = at});
+    if (what.pair) {
+        disc.hint(svc::DiscAsk{.form = what.form, .lba = at + svc::Lba::affine_count{1}});
+    }
     if (what.subcode)
-        disc.hint(svc::DiscForm::Subcode, at);
+        disc.hint(svc::DiscAsk{.form = svc::DiscForm::Subcode, .lba = at});
 }
 
 }

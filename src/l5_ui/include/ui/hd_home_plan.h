@@ -16,7 +16,7 @@
 #include "ui/hd_rows/hd_pair_row.h"
 #include "ui/hd_rows/hd_push_row.h"
 #include "ui/hd_rows/hd_separator_row.h"
-#include "ui/page.h"
+#include "ui/system_page.h"
 
 namespace mister::ui {
 
@@ -54,7 +54,7 @@ private:
     };
 
     PageContext& ctx_;
-    std::unique_ptr<Page> cores_;
+    std::unique_ptr<SystemPage> cores_;
     std::uint32_t refusals_ = 0;
 
     RecentLaunch launch_;

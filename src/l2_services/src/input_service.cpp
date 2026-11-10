@@ -16,15 +16,26 @@ std::uint32_t fnv1a_32(std::string_view bytes, std::uint32_t seed) noexcept {
 
 namespace {
 
-std::uint32_t key_hash(std::string_view key) noexcept {
+KeyHash key_hash(std::string_view key) noexcept {
     if (key.empty())
-        return 0u;
+        return KeyHash{};
     const std::uint32_t h = fnv1a_32(key);
-    return h == 0u ? 1u : h;
+    return KeyHash{h == 0u ? 1u : h};
 }
 
 constexpr std::uint32_t kPadBoundaryByte = 0xFFu;
 
+}
+
+PadSignature PadSignature::of(std::string_view key) noexcept {
+    return none().folded(key);
+}
+
+PadSignature PadSignature::folded(std::string_view next_key) const noexcept {
+    const std::uint32_t seed = is_bound() ? v : kFnvOffsetBasis;
+    const std::uint32_t boundary_fold = fnv1a_32(next_key, seed) ^ kPadBoundaryByte;
+    const std::uint32_t signature = boundary_fold * kFnvPrime;
+    return PadSignature{signature != 0u ? signature : 1u};
 }
 
 void InputService::refresh_slot_census() noexcept {
@@ -39,17 +50,20 @@ void InputService::refresh_slot_census() noexcept {
     counters_.set_bound(bound, live);
 
     std::uint32_t ghosts = 0;
-    for (std::uint8_t i = 0; i < kMaxPlayers; ++i) {
-        const std::uint32_t h = key_hash(players_.key_at(PlayerIndex{i}));
-        counters_.set_slot_hash(PlayerIndex{i}, h);
-        if (h != 0u && !live.has(PlayerIndex{i}))
+    for (const PlayerIndex player : kPlayers) {
+        const KeyHash h = key_hash(players_.key_at(player));
+        counters_.set_slot_hash(player, h);
+        if (h.is_bound() && !live.has(player))
             ++ghosts;
     }
     counters_.set_ghosts(ghosts);
 }
 
-InputService InputService::create() {
-    return InputService();
+Ex<InputService> InputService::open(std::string_view input_dir) {
+    auto watch = HotplugWatch::open(input_dir);
+    if (!watch)
+        return std::unexpected(watch.error());
+    return InputService{std::move(*watch)};
 }
 
 void InputService::install(DeviceTable& incoming) noexcept {
@@ -76,10 +90,7 @@ void InputService::install(DeviceTable& incoming) noexcept {
 
 void InputService::apply_deadzone_rules(std::span<const DeadzoneRule> rows) noexcept {
     for (InputDevice& d : table_.devices) {
-        const DeviceIdentity& id = d.identity();
-        d.set_deadzone(
-            rules::deadzone_for(d.quirk(), id.vid, id.pid, id.id, d.sysfs(), id.merge_id, rows)
-        );
+        d.set_deadzone(rules::deadzone_for(d.facts(), rows));
     }
 }
 
@@ -96,7 +107,7 @@ proto::MouseButtons InputService::mouse_button_level() const noexcept {
 Ex<unsigned> InputService::on_fd_ready(int fd) {
     if (fd < 0)
         return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    if (hotplug_.valid() && fd == hotplug_.fd()) {
+    if (fd == hotplug_.fd()) {
         if (auto r = hotplug_.on_ready(); !r)
             return std::unexpected(r.error());
         return 0u;
@@ -182,11 +193,7 @@ RumblePadSet InputService::rumble_pads() const noexcept {
             continue;
         out.players = out.players.with(*s);
 
-        const std::uint32_t seed = out.pads[s->v] != 0 ? out.pads[s->v] : kFnvOffsetBasis;
-        std::uint32_t h = fnv1a_32(PlayerSlots::key_of(d.identity()), seed);
-        h ^= kPadBoundaryByte;
-        h *= kFnvPrime;
-        out.pads[s->v] = h != 0 ? h : 1u;
+        out.pads[*s] = out.pads[*s].folded(PlayerSlots::key_of(d.identity()));
     }
     return out;
 }
@@ -229,12 +236,8 @@ Ex<void> InputService::set_grabbed(bool on) {
 }
 
 Ex<void> InputService::adopt(InputDevice&& dev) {
-    if (table_.devices.size() >= kMaxDevices) {
-        return std::unexpected(
-            Error{Errc::slot_range, ERR_SITE(), static_cast<std::uint32_t>(table_.devices.size())}
-        );
-    }
-    table_.devices.push_back(std::move(dev));
+    if (auto r = table_.add(std::move(dev)); !r)
+        return r;
     devices_gen_ = devices_gen_.next();
     return {};
 }

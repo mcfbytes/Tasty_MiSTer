@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string_view>
 
@@ -28,6 +29,23 @@
 
 namespace mister::cores {
 
+struct OptionDetail {
+
+    std::uint32_t v = 0;
+
+    [[nodiscard]] static constexpr OptionDetail of(
+        proto::FieldValue pick,
+        proto::OptionRowIndex index
+    ) noexcept {
+
+        return OptionDetail{(pick.v << std::numeric_limits<std::uint8_t>::digits) | index.v};
+    }
+
+    [[nodiscard]] constexpr Error refuse(infra::ErrorSite at) const noexcept {
+        return Error{Errc::slot_range, at, v};
+    }
+};
+
 class StCore final : public Core,
                      public ISectorKick,
                      public ISlotMount,
@@ -37,13 +55,6 @@ class StCore final : public Core,
 
 public:
     StCore(const CoreProfile& p, const HostServices& h);
-
-    static constexpr IoIndex kFloppySlotA{0};
-    static constexpr IoIndex kFloppySlotB{1};
-    static constexpr IoIndex kAcsiSlot0{2};
-    static constexpr IoIndex kAcsiSlot1{3};
-    static constexpr IoIndex kTosSlot{4};
-    static constexpr IoIndex kCartSlot{5};
 
     static constexpr IoIndex kClearIndex{3};
     static constexpr proto::WideIoIndex kTosLargeIndex{0};
@@ -68,24 +79,9 @@ public:
 
     [[nodiscard]] MountState mount_slot(proto::SlotIndex slot, std::string_view path) override;
 
-    [[nodiscard]] std::uint8_t slot_count() const noexcept override {
-        TASTY_SEAT_BODY(StCore);
-        return st_cfg::kSlotCount;
-    }
-
-    [[nodiscard]] FixedStr<kConfigNameChars, StrFit::Clip> file_name(
-        ConfigSlot slot
-    ) const noexcept override;
-
-    [[nodiscard]] ConfigFit fit() const noexcept override {
-        TASTY_SEAT_BODY(StCore);
-        return ConfigFit::Partial;
-    }
-
-    [[nodiscard]] std::span<const std::byte> snapshot() noexcept override;
-    [[nodiscard]] Ex<void> restore(ConfigBlob blob) override;
-    [[nodiscard]] FixedStr<kConfigPreviewChars, StrFit::Clip> preview(
-        ConfigBlob blob
+    [[nodiscard]] Ex<void> apply(ConfigBlob value) override;
+    [[nodiscard]] std::span<const std::byte> value(
+        std::span<std::byte> dst
     ) const noexcept override;
 
     [[nodiscard]] std::span<const OptionRow> option_rows() const noexcept override {
@@ -99,7 +95,7 @@ public:
     [[nodiscard]] Ex<void> set_system_ctrl(std::uint32_t ctrl);
     [[nodiscard]] Ex<void> set_ext_ctrl(std::uint32_t ext);
 
-    [[nodiscard]] std::uint32_t system_ctrl() const noexcept { return cfg_.system_ctrl; }
+    [[nodiscard]] st_ctrl::CtrlWord system_ctrl() const noexcept { return cfg_.system_ctrl; }
 
     [[nodiscard]] std::uint32_t ext_ctrl() const noexcept { return cfg_.ext_ctrl; }
 
@@ -162,7 +158,7 @@ private:
     [[nodiscard]] Ex<void> eject_hdd_(AcsiTarget target);
     [[nodiscard]] Ex<void> eject_all_();
     [[nodiscard]] std::uint32_t word_(WordId w) const noexcept;
-    [[nodiscard]] Ex<void> push_word_(WordId w, std::uint32_t v);
+    [[nodiscard]] Ex<void> push_word_(WordId w, st_ctrl::CtrlWord v);
 
     [[nodiscard]] StOptionRow::Facts facts_() const noexcept;
     [[nodiscard]] Ex<void> apply_write_(const StOptionRow::Write& w);
@@ -186,7 +182,6 @@ private:
     std::uint32_t warm_resets_ = 0;
     std::uint32_t tos_refusals_ = 0;
     std::uint64_t bytes_sent_ = 0;
-    std::array<std::byte, st_cfg::kBytes> image_{};
 };
 
 }

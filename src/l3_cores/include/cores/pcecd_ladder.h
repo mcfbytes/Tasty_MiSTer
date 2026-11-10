@@ -43,7 +43,8 @@ private:
     [[nodiscard]] Ex<AssetWait> finish_pce_bios_();
 
     Rung rung_ = Rung::MountDisc;
-    std::uint8_t pce_region_ = 0;
+
+    proto::RegionCode pce_region_{};
 };
 
 }

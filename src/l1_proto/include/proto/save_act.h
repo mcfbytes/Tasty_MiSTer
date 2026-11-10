@@ -13,6 +13,8 @@ namespace mister::proto {
 
 inline constexpr std::size_t kSavePieceBytes = 512;
 
+inline constexpr std::size_t kSavePieceWords = kSavePieceBytes / 2u;
+
 struct SaveAct {
     TASTY_SEAT_EXEMPT(component);
 

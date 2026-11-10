@@ -49,7 +49,7 @@ private:
     const os::IClock* clock_;
     Probe probe_;
     State state_ = State::Unarmed;
-    std::chrono::nanoseconds due_{};
+    os::RawMonotonicClock::time_point due_{};
     Stats stats_{};
     infra::OptRef<xthread::DiagLog> diag_;
 };

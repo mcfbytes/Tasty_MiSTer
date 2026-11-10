@@ -2,18 +2,13 @@
 #pragma once
 
 #include <cerrno>
-#include <cstdint>
 
 #include "infra/error.h"
 
 namespace mister::svc {
 
-namespace {
-
-Error os_error(infra::ErrorSite site) {
-    return Error{Errc::os, site, static_cast<std::uint32_t>(errno)};
-}
-
+[[nodiscard]] inline Error os_error(infra::ErrorSite site) noexcept {
+    return infra::errno_error(Errc::os, site, errno);
 }
 
 }

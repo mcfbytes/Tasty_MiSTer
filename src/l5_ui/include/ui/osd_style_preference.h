@@ -22,22 +22,13 @@ public:
     void choose_classic() noexcept {
         TASTY_SEAT_BODY(OsdStylePreference);
         hd_ = false;
-        reopen_ = true;
         ++classic_choices_;
     }
 
     void choose_hd() noexcept {
         TASTY_SEAT_BODY(OsdStylePreference);
         hd_ = true;
-        reopen_ = true;
         ++hd_choices_;
-    }
-
-    [[nodiscard]] bool take_reopen() noexcept {
-        TASTY_SEAT_BODY(OsdStylePreference);
-        const bool r = reopen_;
-        reopen_ = false;
-        return r;
     }
 
     void boot_hd(bool hd) noexcept { hd_ = hd; }
@@ -64,7 +55,6 @@ public:
 private:
     bool hd_;
     app::HdLook look_;
-    bool reopen_ = false;
     std::uint32_t classic_choices_ = 0;
     std::uint32_t hd_choices_ = 0;
     std::uint32_t look_choices_ = 0;

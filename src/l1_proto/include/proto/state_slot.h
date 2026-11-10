@@ -9,6 +9,7 @@ namespace mister::proto {
 
 class SaveStateEngine;
 class SavePrimer;
+struct SaveStateName;
 
 struct StateSlot {
     std::uint8_t v = 0;
@@ -20,6 +21,7 @@ struct StateSlot {
 private:
     friend class SaveStateEngine;
     friend class SavePrimer;
+    friend struct SaveStateName;
 
     [[nodiscard]] constexpr std::uint32_t offset(std::uint32_t size) const noexcept {
         return std::uint32_t{v} * size;

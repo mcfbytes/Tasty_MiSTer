@@ -27,7 +27,7 @@ bool XmlScanner::skip_markup() noexcept {
     return true;
 }
 
-std::optional<Token> XmlScanner::next_token(std::span<Attr, kMaxAttrs> attrs) noexcept {
+std::optional<Token> XmlScanner::next_token() noexcept {
     for (;;) {
         const std::size_t lt = xml_.find('<', pos_);
         if (lt == std::string_view::npos) {
@@ -69,6 +69,7 @@ std::optional<Token> XmlScanner::next_token(std::span<Attr, kMaxAttrs> attrs) no
         if (tag.name.empty())
             return std::nullopt;
 
+        std::size_t filled = 0;
         for (;;) {
             while (pos_ < xml_.size() && is_space(xml_[pos_]))
                 ++pos_;
@@ -116,12 +117,13 @@ std::optional<Token> XmlScanner::next_token(std::span<Attr, kMaxAttrs> attrs) no
             ++pos_;
             if (name.empty())
                 continue;
-            if (tag.attr_count < kMaxAttrs) {
-                attrs[tag.attr_count++] = Attr{name, value};
+            if (filled < kMaxAttrs) {
+                attrs_[filled++] = Attr{name, value};
             } else if (tag.attrs_dropped != std::numeric_limits<std::uint8_t>::max()) {
                 ++tag.attrs_dropped;
             }
         }
+        tag.attrs = std::span<const Attr>{attrs_.data(), filled};
         Token t;
         t.kind = tag.closing ? Token::Kind::End : Token::Kind::Start;
         t.tag = tag;
@@ -129,8 +131,8 @@ std::optional<Token> XmlScanner::next_token(std::span<Attr, kMaxAttrs> attrs) no
     }
 }
 
-std::optional<Tag> XmlScanner::next_tag(std::span<Attr, kMaxAttrs> attrs) noexcept {
-    while (const auto t = next_token(attrs)) {
+std::optional<Tag> XmlScanner::next_tag() noexcept {
+    while (const auto t = next_token()) {
         if (t->kind == Token::Kind::Text || t->kind == Token::Kind::Markup)
             continue;
         return t->tag;

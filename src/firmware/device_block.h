@@ -22,7 +22,6 @@
 #include "app/core_frame_counter.h"
 #include "app/core_frame_record.h"
 #include "app/dev_mem_window_map.h"
-#include "app/durable_write_service.h"
 #include "app/event.h"
 #include "app/frame_demand.h"
 #include "app/input_main.h"
@@ -53,7 +52,7 @@
 #include "app/sector_grant.h"
 #include "app/sector_route.h"
 #include "app/session_owner.h"
-#include "app/session_seats.h"
+#include "app/supervisor_parts.h"
 #include "app/ui_write_lane.h"
 #include "app/video_pump.h"
 #include "app/window_job_service.h"
@@ -66,6 +65,7 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/park_fds.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
 #include "infra/unique_fd.h"
@@ -74,6 +74,7 @@
 #include "ladder_scope.h"
 #include "open_verdict.h"
 #include "os/clock.h"
+#include "os/monotonic_clock.h"
 #include "proto/osd_surface.h"
 #include "reactor/core_state.h"
 #include "reactor/frame_clock.h"
@@ -107,6 +108,7 @@ public:
             app::InputWire& input;
             app::OsdWire& osd;
             app::EventQueue<SeatTag::RT>& events;
+            app::EventQueue<SeatTag::Main>& owner_events;
             app::BtPump& bt;
             app::CoreFrameCounter& frames;
             app::InputEmit& input_emit;
@@ -158,6 +160,10 @@ public:
 
     [[nodiscard]] Parts parts() noexcept;
 
+    [[nodiscard]] infra::OptRef<app::UartModeController::Handoffs> uart_handoffs() noexcept {
+        return parts_.uart_handoffs;
+    }
+
     DeviceBlock(const BootParts& plat, app::IStopSignal& stop, const Parts::Frontend& front);
     DeviceBlock(const DeviceBlock&) = delete;
     DeviceBlock& operator=(const DeviceBlock&) = delete;
@@ -190,26 +196,9 @@ private:
         OpenVerdict& verdict
     );
 
-    static std::optional<svc::PrefetchMain> open_prefetch_main(
-        svc::ChdPrefetch& prefetch,
-        xthread::WakeFlag& main_wake,
-        OpenVerdict& verdict
-    );
-    static std::optional<app::PcmMain> open_pcm_main(
-        xthread::WakeFlag& pcm_wake,
-        app::PcmRingFeeder& feeder,
-        app::PcmRingFeeder::Commands& commands,
-        app::MailboxRelay& relay,
-        app::CompanionHost& host,
-        xthread::WakeFlag& main_wake,
-        OpenVerdict& verdict
-    );
-    static std::optional<svc::IoMain> open_io_main(
-        xthread::WakeFlag& io_wake,
-        xthread::WakeFlag& main_wake,
-        int doorbells,
-        OpenVerdict& verdict
-    );
+    [[nodiscard]] std::optional<svc::PrefetchMain> open_prefetch_main_();
+    [[nodiscard]] std::optional<app::PcmMain> open_pcm_main_();
+    [[nodiscard]] std::optional<svc::IoMain> open_io_main_();
 
     [[nodiscard]] app::SupervisorParts::Services services_() noexcept;
 
@@ -256,9 +245,7 @@ public:
 
     svc::UnboundDisc unbound_discs_{};
 
-    app::FileStreamService file_streams_;
-
-    app::DiskRelay disk_relay_{io_wake_};
+    app::DiskRelay disk_relay_;
 
     app::SaveUploadRelay save_relay_;
 
@@ -316,7 +303,6 @@ public:
     svc::DiscReadService discs_;
     app::LwSectorEndpoint lw_sector_;
     app::LwSysEndpoint lw_sys_;
-    app::DurableWriteService writes_;
     app::DevMemWindowMap<seat_owner::Io> io_window_map_{};
     app::WindowJobService window_jobs_;
     app::ScreenshotQueue shots_;

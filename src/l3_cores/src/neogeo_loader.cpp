@@ -2,13 +2,19 @@
 #include "cores/neogeo_loader.h"
 
 #include <algorithm>
-#include <cstring>
 #include <limits>
 #include <span>
 
-#include "cores/neo_file.h"
+#include "cores/neo_header.h"
+#include "cores/neo_quirk.h"
 #include "cores/neo_transform.h"
+#include "cores/neogeo_file_index.h"
+#include "cores/romset_file.h"
+#include "cores/romset_plan.h"
+#include "infra/ascii.h"
+#include "infra/byte_view.h"
 #include "infra/endian.h"
+#include "svc/read_bounded.h"
 #include "svc/search_policy.h"
 
 namespace mister::cores {
@@ -46,41 +52,23 @@ std::string save_path(std::string_view core, std::string_view pick) {
 
 namespace {
 
-[[nodiscard]] char lower(char c) noexcept {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-[[nodiscard]] bool iequal(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i)
-        if (lower(a[i]) != lower(b[i]))
-            return false;
-    return true;
-}
-
 [[nodiscard]] std::string_view last_component(std::string_view path) noexcept {
     const std::size_t slash = path.rfind('/');
     return slash == std::string_view::npos ? path : path.substr(slash + 1);
 }
 
 [[nodiscard]] bool is_prom_name(std::string_view path) noexcept {
-    return iequal(last_component(path), "prom");
-}
-
-[[nodiscard]] bool ends_with_ci(std::string_view s, std::string_view tail) noexcept {
-    return s.size() >= tail.size() && iequal(s.substr(s.size() - tail.size()), tail);
+    return infra::ieq(last_component(path), "prom");
 }
 
 [[nodiscard]] neogeo::Shape shape_of(const neogeo::RomsetFile& e) noexcept {
     using neogeo::FileClass;
-    switch (e.file_class) {
+    switch (e.index.class_of()) {
         case FileClass::Fix:
             return neogeo::Shape::Fix;
         case FileClass::Spr:
             return e.swap ? neogeo::Shape::SprDblSwap : neogeo::Shape::SprDbl;
         case FileClass::Raw:
-        case FileClass::EightBit:
             break;
     }
     return neogeo::Shape::None;
@@ -94,7 +82,7 @@ Ex<LoadPlan> NeoGeoLoader::plan(const LoadAsk& ask, const proto::StatusWord& sta
     TASTY_SEAT_BODY(NeoGeoLoader);
     if (ask.disc)
         return plan_cd_(ask.path, status);
-    if (profile_ != nullptr && walks_romset(profile_->slots, ask.index.io()))
+    if (walks_romset(profile_.slots, ask.index.io()))
         return plan_cart_(ask.path, status);
     LoadPlan p{};
     p.count = 1;
@@ -134,7 +122,7 @@ Ex<LoadPlan> NeoGeoLoader::plan_cart_(std::string_view pick, const proto::Status
         return std::unexpected(r.error());
 
     std::optional<std::uint32_t> applied;
-    if (ends_with_ci(pick, ".neo")) {
+    if (infra::iends_with(pick, ".neo")) {
         auto r = add_neo_(p, pick);
         if (!r)
             return std::unexpected(r.error());
@@ -162,12 +150,8 @@ Ex<LoadPlan> NeoGeoLoader::plan_cart_(std::string_view pick, const proto::Status
     if (auto r = flush_crom_(p); !r)
         return std::unexpected(r.error());
     const std::string sfix = neogeo::make_path(home, "sfix.sfix");
-    const neogeo::FileIndex sfix_index{neogeo::FileIndex::Sfix};
-    const neogeo::RomsetFile fix{
-        .path = sfix,
-        .index = sfix_index,
-        .file_class = sfix_index.class_of()
-    };
+    const neogeo::FileIndex sfix_index = neogeo::FileIndex::Sfix;
+    const neogeo::RomsetFile fix{.path = sfix, .index = sfix_index};
     if (auto r = add_entry_(p, fix); !r)
         return std::unexpected(r.error());
     if (auto r = add_lo_rom_(p, home); !r)
@@ -189,9 +173,7 @@ Ex<LoadPlan> NeoGeoLoader::plan_cd_(std::string_view pick, const proto::StatusWo
     LoadPlan p{};
     reset_walk_();
     p.frame.hold_reset = true;
-    const std::string home = home_(
-        profile_ != nullptr ? profile_->cue_browse_dir : std::string_view{}
-    );
+    const std::string home = home_(profile_.cue_browse_dir);
     if (auto r = add_notify_(p, neogeo::make_conf_notify(neogeo::kCdEnBit)); !r)
         return std::unexpected(r.error());
     if (romset != "debug") {
@@ -230,7 +212,7 @@ Ex<LoadPlan> NeoGeoLoader::plan_cd_(std::string_view pick, const proto::StatusWo
 }
 
 Ex<void> NeoGeoLoader::frame_save_(LoadPlan& p, std::string_view pick) {
-    const std::string_view core = profile_ != nullptr ? profile_->name : std::string_view{"NEOGEO"};
+    const std::string_view core = profile_.name;
     const std::string save = neogeo::save_path(core, pick);
     std::string dir = "saves/";
     dir.append(core);
@@ -245,26 +227,20 @@ Ex<void> NeoGeoLoader::frame_save_(LoadPlan& p, std::string_view pick) {
 Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_neo_(LoadPlan& p, std::string_view pick) {
     std::optional<neogeo::NeoHeader> hdr;
     if (auto f = vfs_->open(pick, svc::OpenMode::Read)) {
-        bytes_.assign(neogeo::kNeoHeaderBytes, 0);
-        std::size_t got = 0;
-        while (got < bytes_.size()) {
-            auto n = (*f)->read_at(got, std::as_writable_bytes(std::span(bytes_).subspan(got)));
-            if (!n || *n == 0)
-                break;
-            got += *n;
+        auto read = svc::read_bounded(**f, neogeo::kNeoHeaderBytes);
+        if (read) {
+            hdr = neogeo::parse_neo_header(infra::byte_cast<const std::uint8_t>(std::span(*read)));
         }
-        hdr = neogeo::parse_neo_header(std::span(bytes_).first(got));
     }
     if (!hdr)
         return std::nullopt;
-    const neogeo::NeoCartConfig q = neogeo::resolve_quirks(*hdr);
+    const neogeo::CartQuirks q = neogeo::resolve_quirks(*hdr);
     const std::uint32_t expand = q.vrom_mirror ? 0u : neogeo::kVromSize;
     std::uint32_t off = static_cast<std::uint32_t>(neogeo::kNeoHeaderBytes);
     const auto tx = [&](std::uint32_t size, neogeo::RomsetFile e) -> Ex<void> {
         e.path = pick;
         e.offset = off;
         e.size = size;
-        e.file_class = e.index.class_of();
         off += size;
         if (size == 0)
             return {};
@@ -281,7 +257,7 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_neo_(LoadPlan& p, std::string
         return std::unexpected(r.error());
     if (auto r = tx(hdr->v1_size, {.index = neogeo::FileIndex::VromFirst, .expand = expand}); !r)
         return std::unexpected(r.error());
-    neogeo::RomsetConfig cfg{};
+    neogeo::RomsetConfig cfg = q.config;
     cfg.use_pcm = 1;
     if (hdr->v2_size != 0) {
         cfg.use_pcm = 0;
@@ -292,14 +268,6 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_neo_(LoadPlan& p, std::string
     }
     if (auto r = tx(hdr->c_size, {.index = neogeo::FileIndex::Sprite, .swap = true}); !r)
         return std::unexpected(r.error());
-    cfg.hw_type = q.hw_type;
-    cfg.cmc = q.cmc;
-    cfg.pvc = q.pvc;
-    cfg.sma = q.sma;
-    cfg.xram = q.xram;
-    cfg.rom_wait = q.rom_wait;
-    cfg.p_wait = q.p_wait;
-    cfg.ms5p = q.ms5p;
     return neogeo::config_word(cfg, false);
 }
 
@@ -321,16 +289,14 @@ Ex<std::optional<std::uint32_t>> NeoGeoLoader::add_xml_(
     std::string doc;
     if (auto f = vfs_->open(xml, svc::OpenMode::ReadWhole)) {
         const auto sz = (*f)->size();
-        if (sz && sz->v <= kMaxXmlBytes) {
+        if (sz && sz->within(svc::FileSize{1u}, svc::FileSize{kMaxXmlBytes})) {
             doc.resize(static_cast<std::size_t>(sz->v));
-            std::size_t got = 0;
-            while (got < doc.size()) {
-                auto n = (*f)->read_at(got, std::as_writable_bytes(std::span(doc).subspan(got)));
-                if (!n || *n == 0)
-                    break;
-                got += *n;
-            }
-            doc.resize(got);
+
+            const auto got = svc::read_bounded_partial(
+                **f,
+                infra::byte_cast<std::byte>(std::span<char>(doc))
+            );
+            doc.resize(got.size());
         }
     }
     neogeo::RomsetPlan plan = neogeo::load_files(doc, neogeo::get_romset(pick));
@@ -405,9 +371,7 @@ bool NeoGeoLoader::exists_(std::string_view path) const {
 }
 
 std::string NeoGeoLoader::home_(std::string_view dir) const {
-    const std::string_view name = !dir.empty()
-        ? dir
-        : (profile_ != nullptr ? profile_->name : std::string_view{"NEOGEO"});
+    const std::string_view name = !dir.empty() ? dir : profile_.name;
     static constexpr svc::SearchDir kHome[] = {svc::SearchDir::CoreDir};
     if (auto r = vfs_->resolve(name, svc::SearchPolicy{kHome, true})) {
         const std::string& root = vfs_->root_path();
@@ -510,8 +474,8 @@ Ex<std::uint32_t> NeoGeoLoader::add_crom_(LoadPlan& p, const neogeo::RomsetFile&
     row.stride = 2;
     row.lane = e.index.crom_lane();
     row.file_offset = e.offset;
-    row.file_len = readable;
-    row.extent = 2u * readable;
+    row.file_len = proto::FileSize{readable};
+    row.extent = proto::FileSize{2u * readable};
     last_crom_ = p.count - 1;
     return end;
 }
@@ -539,8 +503,8 @@ Ex<std::uint32_t> NeoGeoLoader::add_rom_(
     row.addr = place.offset;
     row.fill = row.shaped ? 0u : e.index.vrom_fill();
     row.file_offset = e.offset;
-    row.file_len = neogeo::stock_read_len(s->size, extent, s->rest);
-    row.extent = extent;
+    row.file_len = proto::FileSize{neogeo::stock_read_len(s->size, extent, s->rest)};
+    row.extent = proto::FileSize{extent};
     return extent;
 }
 
@@ -549,10 +513,10 @@ Ex<void> NeoGeoLoader::add_fill_(LoadPlan& p) {
     if (!r)
         return std::unexpected(r.error());
     TransferRow& row = **r;
-    const neogeo::FileIndex fill_index{neogeo::FileIndex::Fill};
+    const neogeo::FileIndex fill_index = neogeo::FileIndex::Fill;
     row.index = fill_index.wide();
     row.fill = neogeo::kFillPattern;
-    row.extent = neogeo::kFillBytes;
+    row.extent = proto::FileSize{neogeo::kFillBytes};
     row.notify = neogeo::make_notify(fill_index, neogeo::kFillBytes, true);
     return {};
 }
@@ -566,56 +530,36 @@ Ex<bool> NeoGeoLoader::add_lo_rom_(LoadPlan& p, std::string_view home) {
     if (!r)
         return std::unexpected(r.error());
     TransferRow& row = **r;
-    const neogeo::FileIndex lo_index{neogeo::FileIndex::LoRom};
+    const neogeo::FileIndex lo_index = neogeo::FileIndex::LoRom;
     row.index = lo_index.wide();
     row.byte_words = true;
-    row.file_len = static_cast<std::uint32_t>(
-        std::min<std::uint64_t>(s->rest, neogeo::kLoRomBytes)
-    );
-    row.extent = neogeo::kLoRomBytes;
+    row.file_len = proto::FileSize{std::min<std::uint64_t>(s->rest, neogeo::kLoRomBytes)};
+    row.extent = proto::FileSize{neogeo::kLoRomBytes};
     return true;
+}
+
+neogeo::IRomShape* NeoGeoLoader::shaper_(neogeo::Shape kind) noexcept {
+    switch (kind) {
+        case neogeo::Shape::None:
+            return nullptr;
+        case neogeo::Shape::Crom:
+            return &spr_shape_;
+        case neogeo::Shape::Fix:
+            return &fix_shape_;
+        case neogeo::Shape::SprDbl:
+            return &spr_dbl_shape_;
+        case neogeo::Shape::SprDblSwap:
+            return &spr_dbl_swap_shape_;
+    }
+    return nullptr;
 }
 
 void NeoGeoLoader::shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t) {
     TASTY_SEAT_BODY(NeoGeoLoader);
-    const auto kind = static_cast<neogeo::Shape>(row.shape);
-    if (kind == neogeo::Shape::Fix) {
-        const auto n = static_cast<std::uint32_t>(piece.size());
-
-        bytes_.assign(neogeo::block32_extent(n), std::uint8_t{0});
-        fix_out_.resize(n);
-        std::memcpy(bytes_.data(), piece.data(), n);
-        neogeo::fix_convert(bytes_, fix_out_, n);
-        std::memcpy(piece.data(), fix_out_.data(), n);
+    neogeo::IRomShape* const shaper = shaper_(static_cast<neogeo::Shape>(row.shape));
+    if (shaper == nullptr)
         return;
-    }
-    const auto words = static_cast<std::uint32_t>(piece.size() / 2u);
-    const bool dbl = kind == neogeo::Shape::SprDbl || kind == neogeo::Shape::SprDblSwap;
-    if (!dbl && kind != neogeo::Shape::Crom)
-        return;
-    in_.assign(
-        dbl ? neogeo::block64_extent(words) : neogeo::block32_extent(words),
-        std::uint16_t{0}
-    );
-    out_.resize(words);
-    infra::load_le_run<std::uint16_t>(piece, std::span(in_).first(words));
-    if (kind == neogeo::Shape::SprDblSwap) {
-        dwords_.resize(in_.size() / 2u);
-        for (std::size_t i = 0; i < dwords_.size(); ++i) {
-            dwords_[i] = std::uint32_t{in_[2 * i]} | (std::uint32_t{in_[2 * i + 1]} << 16);
-        }
-        neogeo::spr_bswap(dwords_, static_cast<std::uint32_t>(piece.size() / 4u));
-        for (std::size_t i = 0; i < dwords_.size(); ++i) {
-            in_[2 * i] = static_cast<std::uint16_t>(dwords_[i]);
-            in_[2 * i + 1] = static_cast<std::uint16_t>(dwords_[i] >> 16);
-        }
-    }
-    if (dbl) {
-        neogeo::spr_convert_dbl(in_, out_, words);
-    } else {
-        neogeo::spr_convert(in_, out_, words);
-    }
-    infra::store_le_run<std::uint16_t>(std::span<const std::uint16_t>(out_).first(words), piece);
+    shaper->transform(piece);
 }
 
 }

@@ -10,25 +10,17 @@
 #include <span>
 #include <string_view>
 
+#include "infra/byte_view.h"
 #include "os/small_file.h"
 #include "os/types.h"
+#include "os/writeback_paths.h"
 
 namespace mister::os {
-
-inline constexpr const char* kWritebackCpumaskPath = "/sys/bus/workqueue/devices/writeback/cpumask";
-
-inline constexpr const char* kUnboundCpumaskPath = "/sys/devices/virtual/workqueue/cpumask";
 
 inline constexpr FsMagic kCifsMagic{0xFF534D42u};
 inline constexpr FsMagic kSmb2Magic{0xFE534D42u};
 inline constexpr FsMagic kSmbMagic{0x517Bu};
 inline constexpr FsMagic kNfsMagic{0x6969u};
-
-struct WritebackPaths {
-    const char* dir = "/";
-    const char* cpumask = kWritebackCpumaskPath;
-    const char* unbound = kUnboundCpumaskPath;
-};
 
 struct WritebackProbe {
     std::optional<FsMagic> fs_magic;
@@ -78,9 +70,9 @@ struct WritebackProbe {
 [[nodiscard]] inline std::optional<CpuSet> read_cpumask(const char* path) noexcept {
     std::array<char, 512> buf{};
     const auto got = read_small_file(path, std::span<char>(buf));
-    if (!got || *got >= buf.size())
+    if (!got || got->size() >= buf.size())
         return std::nullopt;
-    return cpumask_from(std::string_view(buf.data(), *got));
+    return cpumask_from(infra::as_text(*got));
 }
 
 [[nodiscard]] inline WritebackProbe read_writeback_probe(

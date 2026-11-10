@@ -9,7 +9,6 @@
 #include "app/path_text.h"
 #include "app/types.h"
 #include "hal/types.h"
-#include "cores/types.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "proto/types.h"
@@ -21,9 +20,6 @@ struct InternedFile {
     TASTY_SEAT_MEDIATOR(Any, Any);
 
     static constexpr std::uint16_t kRecycleSlots = 15;
-    static constexpr std::uint16_t kConfigSlots = 10;
-    static constexpr std::uint16_t kConfigBase = kRecycleSlots + 1;
-    static constexpr std::uint16_t kSlots = kConfigBase + kConfigSlots;
     static constexpr std::uint16_t kNone = 0;
 
     static constexpr std::uint16_t kMaxLiveFiles = 14;
@@ -31,10 +27,6 @@ struct InternedFile {
     static constexpr std::uint16_t kHeldOps = 1;
 
     static constexpr std::size_t kPieceBytes = 1024u * 1024u;
-
-    [[nodiscard]] static constexpr proto::FileId config_id(cores::ConfigSlot slot) noexcept {
-        return proto::FileId{static_cast<std::uint16_t>(kConfigBase + slot.v)};
-    }
 
     std::span<const std::uint8_t> bytes{};
     FixedStr<8, StrFit::Reject> ext{};
@@ -46,6 +38,8 @@ struct InternedFile {
     proto::FileId save{};
     std::uint32_t aux = 0;
     ContentEdge edge = ContentEdge::Content;
+
+    bool remounts_saves = false;
 };
 
 static_assert(std::is_trivially_copyable_v<InternedFile>, "a pooled slot is recycled in place");

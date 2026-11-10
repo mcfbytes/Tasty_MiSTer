@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 
@@ -45,8 +46,8 @@ inline constexpr std::size_t kLogLaneCap = 256;
 
 struct LogLaneHead {
     template <class A>
-    static constexpr LogRec::Head head(std::uint64_t t_ns) noexcept {
-        return {sev_of(A::kKind), {}, t_ns};
+    static constexpr LogRec::Head head(std::chrono::nanoseconds t) noexcept {
+        return {.sev = sev_of(A::kKind), .t = t};
     }
 };
 

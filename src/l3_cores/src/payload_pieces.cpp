@@ -12,15 +12,15 @@ namespace {
 
 using Phase = proto::LinkOp::StagePhase;
 
-bool fits(std::uint64_t size, WireChunk chunk) noexcept {
-    return !chunk.one_write() || size <= PayloadPieces::kPieceBytes;
+bool fits(proto::FileSize size, WireChunk chunk) noexcept {
+    return !chunk.one_write() || size <= proto::FileSize{PayloadPieces::kPieceBytes};
 }
 
 }
 
 Ex<PayloadPieces> PayloadPieces::of_file(
     std::unique_ptr<svc::IFile> file,
-    std::uint64_t size,
+    proto::FileSize size,
     std::string_view ext,
     const Frame& frame
 ) {
@@ -35,14 +35,14 @@ Ex<PayloadPieces> PayloadPieces::of_bytes(
     std::string_view ext,
     const Frame& frame
 ) {
-    const std::uint64_t size = bytes.size();
+    const proto::FileSize size = proto::FileSize{bytes.size()};
     if (!fits(size, frame.chunk)) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 1});
     }
     return PayloadPieces(nullptr, std::move(bytes), size, ext, frame);
 }
 
-bool PayloadPieces::stage_(std::size_t n) {
+Ex<void> PayloadPieces::stage_(std::size_t n) {
     std::vector<std::uint8_t> buf(n);
     if (file_ == nullptr) {
         std::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(sent_), n, buf.begin());
@@ -53,32 +53,40 @@ bool PayloadPieces::stage_(std::size_t n) {
                 sent_ + got,
                 std::as_writable_bytes(std::span<std::uint8_t>(buf).subspan(got))
             );
-            if (!r || *r == 0)
-                return false;
+            if (!r)
+                return std::unexpected(r.error());
+            if (*r == 0)
+                return std::unexpected(Error{Errc::short_read, ERR_SITE(), 0});
             got += *r;
         }
     }
     staged_ = std::move(buf);
-    return true;
+    return {};
 }
 
-PayloadPieces::Pass PayloadPieces::step(ILadderHost& host) {
+Ex<PayloadPieces::Pass> PayloadPieces::step(ILadderHost& host) {
+    if (failure_) {
+        if (cut_owed_)
+            return fail_(host);
+        return std::unexpected(*failure_);
+    }
     if (end_ != Pass::Waiting)
         return end_;
-    if (cut_owed_)
-        return fail_(host);
     if (!word_bytes_)
         word_bytes_ = host.link_word_bytes();
     while (host.link_in_flight() < kAhead) {
-        const std::uint64_t left = size_ - sent_;
-        const auto n = static_cast<std::size_t>(
-            std::min<std::uint64_t>(left, piece_bytes(frame_.chunk, *word_bytes_))
-        );
+        const proto::FileSize left = size_ - proto::FileSize{sent_};
+        const std::size_t n = left.clamp_write(0, piece_bytes(frame_.chunk, *word_bytes_));
         const bool first = sent_ == 0;
-        const bool last = n == left;
+        const bool last = proto::FileSize{n} == left;
 
-        if (!staged_ && !stage_(n))
-            return fail_(host);
+        if (!staged_) {
+            auto read = stage_(n);
+            if (!read) {
+                failure_ = std::move(read.error());
+                return fail_(host);
+            }
+        }
 
         proto::FileId id{};
         if (n != 0) {
@@ -88,8 +96,12 @@ PayloadPieces::Pass PayloadPieces::step(ILadderHost& host) {
                 size_,
                 sent_
             );
-            if (!r)
-                return r.error().code == Errc::would_block ? Pass::Waiting : fail_(host);
+            if (!r) {
+                if (r.error().code == Errc::would_block)
+                    return Pass::Waiting;
+                failure_ = r.error();
+                return fail_(host);
+            }
             id = *r;
         }
         proto::LinkOp::StagePayload op{
@@ -114,16 +126,16 @@ PayloadPieces::Pass PayloadPieces::step(ILadderHost& host) {
     return Pass::Waiting;
 }
 
-PayloadPieces::Pass PayloadPieces::fail_(ILadderHost& host) {
+Ex<PayloadPieces::Pass> PayloadPieces::fail_(ILadderHost& host) {
     if (sent_ == 0)
-        return end_ = Pass::Failed;
+        return std::unexpected(*failure_);
     cut_owed_ = true;
     proto::LinkOp::StagePayload cut{.dest = frame_.dest, .phase = Phase::Close};
     frame_.chunk.stamp(cut);
     if (!host.order(cut))
         return Pass::Waiting;
     cut_owed_ = false;
-    return end_ = Pass::Failed;
+    return std::unexpected(*failure_);
 }
 
 }

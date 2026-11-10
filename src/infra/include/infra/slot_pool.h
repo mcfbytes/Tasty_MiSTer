@@ -5,19 +5,31 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "infra/counter.h"
 #include "infra/indexed_array.h"
+#include "infra/pool_slot.h"
 #include "infra/seat.h"
 
 namespace mister::xthread {
 
+struct SlotPoolCounters {
+    [[nodiscard]] std::uint32_t refusals() const noexcept { return refused_returns_.get(); }
+
+protected:
+    Counter refused_returns_{};
+};
+
 template <class Slot, std::size_t N, SeatTag Owner>
-class SlotPool {
+class SlotPool;
+
+template <class Slot, std::size_t N, SeatTag Owner>
+class SlotPool : public SlotPoolCounters {
     TASTY_SEAT_MEDIATOR(Any, Any);
     static_assert(N > 0, "a pool with no slots can only refuse");
-    static_assert(N <= 255, "the free list indexes with a uint8_t, and 0xFF is kNoIndex");
+    static_assert(N <= 255, "the free list indexes with a uint8_t, and every slot is a PoolSlot");
     static_assert(
         Owner != SeatTag::Unbound,
         "the free list has no read-modify-write: ONE seat leases and returns, and "
@@ -38,7 +50,7 @@ public:
 
     SlotPool() noexcept {
         for (std::size_t i = 0; i < N; ++i)
-            free_[i] = static_cast<std::uint8_t>(i);
+            free_[PoolSlot::of(i)] = PoolSlot::of(i);
         free_count_ = N;
     }
 
@@ -50,43 +62,39 @@ public:
         const std::size_t n = free_count_.load(std::memory_order_relaxed);
         if (n == 0)
             return Lease{nullptr, Return{this}};
-        const std::uint8_t idx = free_[n - 1];
+        const PoolSlot idx = free_[PoolSlot::of(n - 1)];
         free_count_.store(n - 1, std::memory_order_relaxed);
         out_[idx] = true;
         return Lease{&slots_[idx], Return{this}};
     }
 
-    static constexpr std::uint8_t kNoIndex = 0xFF;
-
-    [[nodiscard]] std::uint8_t index_of(const Slot* s) const noexcept {
-        if (s == nullptr)
-            return kNoIndex;
-        return static_cast<std::uint8_t>(s - &slots_[0]);
+    [[nodiscard]] std::optional<PoolSlot> index_of(const Slot* s) const noexcept {
+        const Slot* const base = &slots_[PoolSlot::of(0)];
+        if (s == nullptr || s < base || s >= base + N)
+            return std::nullopt;
+        return PoolSlot::of(s - base);
     }
 
-    [[nodiscard]] Slot& at(std::uint8_t idx) noexcept { return slots_[idx]; }
+    [[nodiscard]] Slot& at(PoolSlot idx) noexcept { return slots_[idx]; }
 
-    [[nodiscard]] const Slot& at(std::uint8_t idx) const noexcept { return slots_[idx]; }
+    [[nodiscard]] const Slot& at(PoolSlot idx) const noexcept { return slots_[idx]; }
 
     template <infra::ArrayIndex Index>
-    [[nodiscard]] Slot& at(Index i) noexcept {
-        return slots_[static_cast<std::size_t>(i.v)];
-    }
-
-    template <infra::ArrayIndex Index>
-    [[nodiscard]] const Slot& at(Index i) const noexcept {
-        return slots_[static_cast<std::size_t>(i.v)];
-    }
-
-    [[nodiscard]] std::size_t available() const noexcept {
-        return free_count_.load(std::memory_order_relaxed);
+    [[nodiscard]] constexpr std::optional<PoolSlot> slot_of(Index index) const noexcept {
+        if (static_cast<std::size_t>(index.v) >= N)
+            return std::nullopt;
+        return PoolSlot::of(index.v);
     }
 
     static constexpr std::size_t capacity() noexcept { return N; }
 
     static constexpr SeatTag owner_seat() noexcept { return Owner; }
 
-    [[nodiscard]] std::uint32_t refused_returns() const noexcept { return refused_returns_.get(); }
+    [[nodiscard]] std::uint32_t refused_returns() const noexcept { return refusals(); }
+
+    [[nodiscard]] std::size_t available() const noexcept {
+        return free_count_.load(std::memory_order_relaxed);
+    }
 
 private:
     static void on_owner_(
@@ -103,22 +111,23 @@ private:
         if (s == nullptr)
             return;
         on_owner_(ERR_SITE(), "SlotPool lease returned off the owner seat");
-        const std::uint8_t idx = index_of(s);
+        const auto idx = index_of(s);
+        if (!idx)
+            return;
 
-        if (!out_[idx]) {
+        if (!out_[*idx]) {
             refused_returns_.add();
             return;
         }
-        out_[idx] = false;
+        out_[*idx] = false;
         const std::size_t n = free_count_.load(std::memory_order_relaxed);
-        free_[n] = idx;
+        free_[PoolSlot::of(n)] = *idx;
         free_count_.store(n + 1, std::memory_order_relaxed);
     }
 
-    Slot slots_[N]{};
-    std::uint8_t free_[N]{};
-    bool out_[N]{};
-    Counter refused_returns_{};
+    infra::IndexedArray<Slot, N, PoolSlot> slots_{};
+    infra::IndexedArray<PoolSlot, N, PoolSlot> free_{};
+    infra::IndexedArray<bool, N, PoolSlot> out_{};
     std::atomic<std::size_t> free_count_{0};
 };
 

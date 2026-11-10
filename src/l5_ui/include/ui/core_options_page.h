@@ -18,7 +18,7 @@
 #include "ui/options_surface.h"
 #include "ui/options_view.h"
 #include "ui/options_model.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 #include "ui/page.h"
 #include "ui/slot_pick_host.h"
 #include "ui/status_view.h"
@@ -112,7 +112,11 @@ public:
         return published_ + (picks_ ? picks_->commands_published() : 0u);
     }
 
-    RowIndex first_row() const noexcept { return view_->first_row(); }
+    RowIndex first_row() const noexcept {
+        if (classic_)
+            return classic_->first_row();
+        return RowIndex{};
+    }
 
 private:
     void first_walk_(const proto::ItemTable& table, const BuildEnv& env);
@@ -122,6 +126,8 @@ private:
     void toggle(BitField bits, bool ex) override;
 
     Transition open_browser(const OptionItem& it) override;
+
+    PageId subpage_page() const override;
 
     std::string_view heading() const override;
     proto::FieldValue field(BitField bits) const override;
@@ -146,6 +152,8 @@ private:
     std::uint32_t published_ = 0;
 
     std::unique_ptr<IOptionsView> view_;
+
+    infra::OptRef<ClassicOptionsView> classic_;
 };
 
 }

@@ -4,11 +4,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "app/avi_format.h"
 #include "app/avi_write_status.h"
 #include "app/chunk_slot.h"
 #include "app/frame_arena.h"
+#include "infra/errno.h"
+#include "infra/error.h"
 #include "infra/park_timeout.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
@@ -20,6 +23,7 @@ class AviWriter {
 
 public:
     struct Wiring {
+
         ChunkChannel& in;
         AviWriteStatusCell& status;
     };
@@ -52,8 +56,8 @@ private:
     [[nodiscard]] std::uint32_t scaled_vtime_(std::uint32_t vtime) const noexcept;
     void write_header_() noexcept;
     void sync_() noexcept;
-    void fail_(int err) noexcept;
-    [[nodiscard]] bool write_all_(const std::byte* p, std::size_t n) noexcept;
+    void fail_(infra::Errno err) noexcept;
+    [[nodiscard]] bool write_all_(std::span<const std::byte> bytes) noexcept;
 
     Wiring w_;
     UniqueFd fd_{};

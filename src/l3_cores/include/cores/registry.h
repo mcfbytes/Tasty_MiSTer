@@ -24,9 +24,8 @@
 namespace mister::cores {
 
 struct CoreFactory {
-    CoreKind kind;
-    std::string_view name;
-    const CoreProfile* profile;
+
+    const CoreProfile& profile;
     std::unique_ptr<Core> (*make)(const CoreProfile&, const CoreGrant&);
 
     MakeLadder make_ladder = nullptr;
@@ -42,21 +41,26 @@ std::span<const CoreFactory> core_table();
 
 enum class LoadHint : std::uint8_t { None, XmlManifest };
 
-[[nodiscard]] Ex<const CoreFactory*> find_core(std::string_view conf_str_name);
+[[nodiscard]] infra::OptRef<const CoreFactory> find_core(std::string_view conf_str_name);
 
-[[nodiscard]] Ex<const CoreFactory*> find_core(std::string_view conf_str_name, LoadHint hint);
+[[nodiscard]] infra::OptRef<const CoreFactory> find_core(
+    std::string_view conf_str_name,
+    LoadHint hint
+);
 
 infra::OptRef<const IManifestDocRole> manifest_doc_role();
 
 const CoreProfile& profile_for(std::string_view conf_str_name);
 
+const CoreProfile& profile_for(std::string_view conf_str_name, LoadHint hint);
+
 [[nodiscard]] constexpr MakeLoader loader_for(
-    const CoreFactory* row,
+    infra::OptRef<const CoreFactory> row,
     hal::FabricAddr load_addr
 ) noexcept {
-    if (row != nullptr && row->make_loader != nullptr)
+    if (row && row->make_loader != nullptr)
         return row->make_loader;
-    const CoreProfile& p = row != nullptr ? *row->profile : kGenericProfile;
+    const CoreProfile& p = row ? row->profile : kGenericProfile;
     if (load_addr == hal::FabricAddr{} || p.file_tx_whole)
         return nullptr;
     return &make_addressed_load;

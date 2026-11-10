@@ -20,7 +20,6 @@
 #include "cores/cd_diagnostics.h"
 #include "proto/block_server.h"
 #include "svc/disc_read_service.h"
-#include "svc/toc_frame.h"
 
 namespace mister::cores {
 
@@ -36,23 +35,16 @@ struct PsxGameId {
     void clear() noexcept { text.clear(); }
 
     void assign(std::span<const std::uint8_t> hit, std::size_t raw_len) noexcept {
-        char id[kChars] = {};
-        std::size_t size = raw_len > kChars ? kChars : raw_len;
-        for (std::size_t i = 0; i < size; ++i)
-            id[i] = static_cast<char>(hit[i]);
-        if (raw_len == kChars) {
-            if (id[4] == '_')
-                id[4] = '-';
-            if (id[8] == '.') {
-                id[8] = id[9];
-                id[9] = id[10];
-                id[10] = '\0';
-                --size;
-            }
+        text.clear();
+        const std::size_t n = raw_len > kChars ? kChars : raw_len;
+        const bool full = raw_len == kChars;
+        for (std::size_t i = 0; i < n; ++i) {
+
+            if (full && i == 8 && hit[i] == '.')
+                continue;
+            const char c = full && i == 4 && hit[i] == '_' ? '-' : static_cast<char>(hit[i]);
+            (void)text.append(std::string_view{&c, 1});
         }
-        if (size > 10)
-            size = 10;
-        (void)text.assign(std::string_view{id, size});
     }
 };
 
@@ -66,7 +58,7 @@ class PsxCore final : public Core,
 public:
     PsxCore(const CoreProfile& profile, const svc::CuePolicy& cue, const HostServices& host)
         : Core(profile, host),
-          cue_(&cue) {}
+          cue_(cue) {}
 
     [[nodiscard]] std::optional<svc::DiscCounters> disc_counters() const noexcept override {
         TASTY_SEAT_BODY(PsxCore);
@@ -82,9 +74,9 @@ public:
 
     [[nodiscard]] const svc::DiscGeometry& geometry() const noexcept { return geom_; }
 
-    [[nodiscard]] std::string_view game_id() const noexcept { return game_id_.view(); }
+    [[nodiscard]] std::string_view game_id() const noexcept { return geom_.identity.id.view(); }
 
-    [[nodiscard]] svc::DiscRegion region() const noexcept { return region_; }
+    [[nodiscard]] svc::DiscRegion region() const noexcept { return geom_.identity.region; }
 
     [[nodiscard]] std::uint32_t kicks() const noexcept { return kicks_; }
 
@@ -153,38 +145,28 @@ private:
         return infra::OptRef<const ICdDiagnostics>{*this};
     }
 
-    [[nodiscard]] bool serve_sector_(std::int64_t lba, std::span<std::uint8_t> out) noexcept;
+    [[nodiscard]] bool serve_sector_(proto::Lba lba, std::span<std::uint8_t> out) noexcept;
 
-    void warm_window_(std::int64_t lba0, std::size_t sectors) noexcept;
+    void warm_window_(proto::Lba lba0, std::size_t sectors) noexcept;
 
-    [[nodiscard]] bool scan_disc_identity_();
-
-    [[nodiscard]] bool scan_root_();
-
-    [[nodiscard]] svc::DiscRegion licence_region_(std::span<const std::uint8_t> sector) const;
     svc::DiscMountState refresh_disc_() noexcept;
-    [[nodiscard]] Ex<void> finish_mount_();
+
+    [[nodiscard]] bool finish_mount_();
 
     [[nodiscard]] bool copy_in_flight_() const noexcept;
 
-    const svc::CuePolicy* cue_;
+    infra::OptRef<const svc::CuePolicy> cue_;
 
     infra::OptRef<svc::DiscReadService> discs_{};
     svc::DiscCounters counters_{};
     svc::DiscReadService::CountCell::Reader counts_{};
     svc::DiscMountState mount_seen_ = svc::DiscMountState::Idle;
 
-    std::int64_t scan_lba_ = 0;
-    bool scan_done_ = false;
-    svc::DiscRegion scan_prefix_region_ = svc::DiscRegion::Unknown;
-
     svc::DiscGeometry geom_{};
 
     FixedStr<1024, StrFit::Reject> image_path_{};
 
     StagePlan plan_{};
-    PsxGameId game_id_{};
-    svc::DiscRegion region_ = svc::DiscRegion::Unknown;
 
     std::uint32_t kicks_ = 0;
     std::uint32_t held_kicks_ = 0;

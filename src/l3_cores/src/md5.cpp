@@ -31,6 +31,9 @@ constexpr std::array<unsigned, 64> kMdS = {
     4,  11, 16, 23, 6,  10, 15, 21, 6,  10, 15, 21, 6,  10, 15, 21, 6,  10, 15, 21,
 };
 
+constexpr std::size_t kBlockBytes = 64;
+constexpr std::size_t kDigestBytes = 16;
+
 [[nodiscard]] constexpr std::uint32_t rotl(std::uint32_t x, unsigned s) noexcept {
     constexpr unsigned kWordBits = 32;
     return (x << s) | (x >> (kWordBits - s));
@@ -48,6 +51,7 @@ void Md5::block(const std::uint8_t* p) noexcept {
     constexpr std::size_t kRoundsPerStage = 16;
     constexpr std::size_t kStage3Begin = 2 * kRoundsPerStage;
     constexpr std::size_t kStage4Begin = 3 * kRoundsPerStage;
+
     constexpr std::size_t kStage2Mul = 5;
     constexpr std::size_t kStage2Add = 1;
     constexpr std::size_t kStage3Mul = 3;
@@ -93,7 +97,6 @@ void Md5::block(const std::uint8_t* p) noexcept {
 }
 
 void Md5::update(std::span<const std::uint8_t> data) noexcept {
-    constexpr std::size_t kBlockBytes = 64;
     std::size_t fill = static_cast<std::size_t>(total_ % kBlockBytes);
     total_ += data.size();
     std::size_t i = 0;
@@ -116,13 +119,11 @@ void Md5::update(std::span<const std::uint8_t> data) noexcept {
 
 std::array<std::uint8_t, 16> Md5::digest() noexcept {
     constexpr unsigned kByteBits = 8;
-    constexpr std::size_t kBlockBytes = 64;
     constexpr std::size_t kLengthAt = 56;
     constexpr std::size_t kLengthBytes = 8;
     constexpr std::size_t kTwoBlockLengthAt = kBlockBytes + kLengthAt;
     constexpr std::uint8_t kPadMarker = 0x80;
     constexpr std::size_t kStateWords = 4;
-    constexpr std::size_t kDigestBytes = 16;
     const std::uint64_t bits = total_ * kByteBits;
     std::array<std::uint8_t, kBlockBytes> pad{};
     pad[0] = kPadMarker;
@@ -146,7 +147,6 @@ std::array<std::uint8_t, 16> Md5::digest() noexcept {
 }
 
 Md5Hex Md5::hex_str() noexcept {
-    constexpr std::size_t kDigestBytes = 16;
     constexpr unsigned kNibbleBits = 4;
     constexpr unsigned kNibbleMask = 0xF;
     static constexpr char kHex[] = "0123456789abcdef";

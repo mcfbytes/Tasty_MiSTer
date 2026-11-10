@@ -7,6 +7,7 @@
 
 #include "app/uio_burst.h"
 #include "infra/inbox.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 #include "infra/spsc_ring.h"
 #include "infra/wake_flag.h"

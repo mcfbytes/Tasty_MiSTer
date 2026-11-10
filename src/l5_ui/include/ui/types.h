@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <bit>
 #include <compare>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 #include "app/types.h"
@@ -23,7 +25,7 @@ using ::mister::infra::affine::operator-=;
 
 enum class KeyEdge : std::uint8_t { Make, Break };
 
-enum class CycleDir : std::int8_t { Next, Back };
+using app::CycleDir;
 
 struct ItemId {
     std::uint16_t v = 0;
@@ -38,7 +40,27 @@ struct ItemId {
 
 inline constexpr ItemId kNoItem{0};
 
+struct StackDepth {
+    std::size_t v = 0;
+
+    template <std::integral I>
+    [[nodiscard]] static constexpr StackDepth of(I n) noexcept {
+        return StackDepth{static_cast<std::size_t>(n)};
+    }
+
+    [[nodiscard]] constexpr bool above_bottom() const noexcept { return v != 0; }
+
+    [[nodiscard]] constexpr std::uint8_t hub_depth() const noexcept {
+        constexpr std::size_t kByteMax = std::numeric_limits<std::uint8_t>::max();
+        return static_cast<std::uint8_t>(v < kByteMax ? v : kByteMax);
+    }
+
+    friend constexpr bool operator==(StackDepth, StackDepth) = default;
+    friend constexpr auto operator<=>(StackDepth, StackDepth) = default;
+};
+
 using app::config_slot_of;
+using app::CycleDir;
 using app::dip_row_of;
 using app::last_osd_row;
 using app::osd_row_at;
@@ -110,29 +132,122 @@ inline constexpr RowCount kFullOsdRows{16};
     return row_after(count - kOneRow);
 }
 
-enum class RowKeySpace : std::uint32_t { Push = 0x2, Slot = 0x4 };
+enum class RowKeySpace : std::uint32_t {
+    Item = 0x0,
+    Save = 0x1,
+    Push = 0x2,
+    Slot = 0x4,
+    Recent = 0x8,
+};
+
+struct RowDigest {
+    std::uint32_t v = 0;
+    friend constexpr bool operator==(RowDigest, RowDigest) = default;
+};
 
 struct RowKey {
     std::uint32_t v = 0;
 
     [[nodiscard]] static constexpr RowKey in_space(RowKeySpace space, ItemId ordinal) noexcept {
-        constexpr unsigned kSpaceShift = 16;
-        return RowKey{(static_cast<std::uint32_t>(space) << kSpaceShift) | ordinal.v};
+        return RowKey{tag_of(space) | ordinal.v};
+    }
+
+    [[nodiscard]] static constexpr RowKey ordinal(proto::ItemOrdinal item) noexcept {
+        return RowKey{tag_of(RowKeySpace::Item) | item.v};
+    }
+
+    [[nodiscard]] static constexpr RowKey save() noexcept {
+        return in_space(RowKeySpace::Save, kNoItem);
+    }
+
+    [[nodiscard]] static constexpr RowKey hashed(RowKeySpace space, RowDigest digest) noexcept {
+        return RowKey{tag_of(space) | (digest.v & (tag_of(space) - 1u))};
     }
 
     friend constexpr bool operator==(RowKey, RowKey) = default;
+    friend constexpr auto operator<=>(RowKey, RowKey) noexcept = default;
+
+private:
+    [[nodiscard]] static constexpr std::uint32_t tag_of(RowKeySpace space) noexcept {
+        constexpr unsigned kOrdinalBits = 16;
+        return static_cast<std::uint32_t>(space) << kOrdinalBits;
+    }
 };
+
+static_assert(
+    RowKey::hashed(RowKeySpace::Recent, RowDigest{})
+    > RowKey::in_space(RowKeySpace::Push, ItemId{std::numeric_limits<std::uint16_t>::max()})
+);
+static_assert(
+    RowKey::hashed(RowKeySpace::Recent, RowDigest{})
+    > RowKey::in_space(RowKeySpace::Slot, ItemId{std::numeric_limits<std::uint16_t>::max()})
+);
+
+struct RowKeyBounds {
+    RowKey low;
+    RowKey high;
+};
+
+[[nodiscard]] consteval RowKeyBounds row_key_bounds(RowKeySpace space) noexcept {
+    constexpr ItemId kLastItem{std::numeric_limits<std::uint16_t>::max()};
+    constexpr proto::ItemOrdinal kLastOrdinal{std::numeric_limits<std::uint16_t>::max()};
+    constexpr RowDigest kLastHash{std::numeric_limits<std::uint32_t>::max()};
+    switch (space) {
+        case RowKeySpace::Item:
+            return RowKeyBounds{
+                RowKey::ordinal(proto::ItemOrdinal{}),
+                RowKey::ordinal(kLastOrdinal)
+            };
+        case RowKeySpace::Save:
+            return RowKeyBounds{RowKey::save(), RowKey::save()};
+        case RowKeySpace::Push:
+        case RowKeySpace::Slot:
+            return RowKeyBounds{
+                RowKey::in_space(space, ItemId{}),
+                RowKey::in_space(space, kLastItem)
+            };
+        case RowKeySpace::Recent:
+            return RowKeyBounds{
+                RowKey::hashed(RowKeySpace::Recent, RowDigest{}),
+                RowKey::hashed(RowKeySpace::Recent, kLastHash)
+            };
+    }
+    return RowKeyBounds{};
+}
+
+[[nodiscard]] consteval bool row_key_spaces_are_disjoint() noexcept {
+    constexpr std::array<RowKeySpace, 5> kSpaces{
+        RowKeySpace::Item,
+        RowKeySpace::Save,
+        RowKeySpace::Push,
+        RowKeySpace::Slot,
+        RowKeySpace::Recent
+    };
+    for (std::size_t i = 0; i < kSpaces.size(); ++i) {
+        for (std::size_t j = i + 1; j < kSpaces.size(); ++j) {
+            const RowKeyBounds a = row_key_bounds(kSpaces[i]);
+            const RowKeyBounds b = row_key_bounds(kSpaces[j]);
+            if (a.low <= b.high && b.low <= a.high)
+                return false;
+        }
+    }
+    return true;
+}
+
+static_assert(row_key_spaces_are_disjoint());
 
 struct MenuMask {
     std::uint64_t v = 0;
 
     [[nodiscard]] constexpr bool has(RowIndex r) const noexcept;
 
+    [[nodiscard]] static constexpr bool addresses(RowIndex r) noexcept;
+
     [[nodiscard]] constexpr MenuMask with(RowIndex r) const noexcept;
 
     [[nodiscard]] constexpr MenuMask only(MenuMask subset) const noexcept;
 
-    [[nodiscard]] constexpr MenuMask without_row(RowIndex r) const noexcept;
+    [[nodiscard]] constexpr MenuMask without(RowIndex r) const noexcept;
 
     [[nodiscard]] constexpr MenuMask without(MenuMask drop) const noexcept {
         return MenuMask{v & ~drop.v};
@@ -154,6 +269,10 @@ struct MenuMask {
     return RowCount{kBits};
 }
 
+constexpr bool MenuMask::addresses(RowIndex r) noexcept {
+    return r.before() < menu_mask_rows();
+}
+
 [[nodiscard]] constexpr MenuMask dense_mask(RowCount n) noexcept {
     if (n >= menu_mask_rows())
         return MenuMask{~std::uint64_t{0}};
@@ -161,30 +280,22 @@ struct MenuMask {
 }
 
 [[nodiscard]] constexpr MenuMask row_bit(RowIndex r) noexcept {
-    return r.before() < menu_mask_rows() ? MenuMask{std::uint64_t{1} << r.v} : MenuMask{};
-}
-
-[[nodiscard]] constexpr MenuMask with_row(MenuMask m, RowIndex r) noexcept {
-    return MenuMask{m.v | row_bit(r).v};
-}
-
-[[nodiscard]] constexpr bool has_row(MenuMask m, RowIndex r) noexcept {
-    return (m.v & row_bit(r).v) != 0;
+    return MenuMask::addresses(r) ? MenuMask{std::uint64_t{1} << r.v} : MenuMask{};
 }
 
 constexpr bool MenuMask::has(RowIndex r) const noexcept {
-    return has_row(*this, r);
+    return (v & row_bit(r).v) != 0;
 }
 
 constexpr MenuMask MenuMask::with(RowIndex r) const noexcept {
-    return with_row(*this, r);
+    return MenuMask{v | row_bit(r).v};
 }
 
 constexpr MenuMask MenuMask::only(MenuMask subset) const noexcept {
     return MenuMask{v & subset.v};
 }
 
-constexpr MenuMask MenuMask::without_row(RowIndex r) const noexcept {
+constexpr MenuMask MenuMask::without(RowIndex r) const noexcept {
     return MenuMask{v & ~row_bit(r).v};
 }
 
@@ -243,7 +354,7 @@ struct UiButtonMask {
 
 static_assert(last_row(RowCount{3}) == RowIndex{2});
 static_assert(rows(RowCount{3}).contains(RowIndex{2}) && !rows(RowCount{3}).contains(RowIndex{3}));
-static_assert(has_row(MenuMask{0b100u}, RowIndex{2}) && !has_row(MenuMask{0b100u}, RowIndex{64}));
+static_assert(MenuMask{0b100u}.has(RowIndex{2}) && !MenuMask{0b100u}.has(RowIndex{64}));
 static_assert(row_after(RowCount{3}) - RowIndex{} == RowCount{3});
 static_assert(dense_mask(RowCount{3}) == MenuMask{0b111u});
 static_assert(dense_mask(menu_mask_rows()) == MenuMask{~std::uint64_t{0}});
@@ -256,7 +367,7 @@ static_assert(MenuMask{0b1010u}.prev_before(RowIndex{3}) == RowIndex{1});
 static_assert(MenuMask{0b1010u}.prev_before(RowIndex{0}) == std::nullopt);
 static_assert(MenuMask{0b1010u}.prev_before(RowIndex{40}) == RowIndex{3});
 static_assert(MenuMask{0b1111u}.only(MenuMask{0b0101u}) == MenuMask{0b0101u});
-static_assert(MenuMask{0b1111u}.without_row(RowIndex{1}) == MenuMask{0b1101u});
+static_assert(MenuMask{0b1111u}.without(RowIndex{1}) == MenuMask{0b1101u});
 static_assert(MenuMask{}.with(RowIndex{2}) == MenuMask{0b100u});
 static_assert(!MenuMask{}.has(RowIndex{2}) && MenuMask{0b100u}.has(RowIndex{2}));
 static_assert(sizeof(MenuMask) == 8);

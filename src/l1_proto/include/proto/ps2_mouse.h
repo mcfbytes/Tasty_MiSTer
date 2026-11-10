@@ -2,10 +2,13 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "infra/error.h"
 #include "infra/fixed_ring.h"
 #include "infra/seat.h"
+#include "proto/frame_drops.h"
+#include "proto/mouse_delta.h"
 #include "proto/ps2_command_port.h"
 #include "proto/ps2_frame.h"
 #include "proto/types.h"
@@ -18,15 +21,17 @@ class Ps2Mouse {
 public:
     [[nodiscard]] Ex<void> motion(MouseDelta delta, MouseButtons buttons);
 
-    [[nodiscard]] bool next_frame(Ps2Frame& out) noexcept;
+    [[nodiscard]] std::optional<Ps2Frame> next_frame() noexcept;
 
-    [[nodiscard]] Ex<void> accept_control(std::uint16_t word1);
+    void accept_control(std::uint16_t word1);
 
     void end_control() noexcept;
 
     std::size_t queued() const noexcept { return packets_.size(); }
 
     static constexpr std::size_t capacity() noexcept { return kPacketQueueCap; }
+
+    FrameDrops overflow_drops() const noexcept { return drops_; }
 
 private:
     struct Packet {
@@ -37,6 +42,7 @@ private:
 
     static constexpr std::uint8_t kPacketQueueCap = 16;
     infra::FixedRing<Packet, kPacketQueueCap> packets_{};
+    FrameDrops drops_{};
 
     Ps2CommandPort port_;
 

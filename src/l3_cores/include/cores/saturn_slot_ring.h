@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "infra/seat.h"
@@ -13,27 +14,40 @@ class SaturnSlotRing {
 public:
     static constexpr std::uint8_t kSlots = 4;
 
-    [[nodiscard]] std::uint8_t write() const noexcept { return write_; }
+    struct Slot {
+        std::uint8_t v = 0;
 
-    [[nodiscard]] std::uint8_t take_read() noexcept {
-        const std::uint8_t at = read_;
-        read_ = wrap_(read_ + 1);
+        [[nodiscard]] constexpr std::size_t byte_offset() const noexcept {
+            constexpr std::size_t kSlotBytes = 4096;
+            return static_cast<std::size_t>(v) * kSlotBytes;
+        }
+
+        [[nodiscard]] constexpr Slot next() const noexcept {
+            return Slot{static_cast<std::uint8_t>((v + 1u) % kSlots)};
+        }
+
+        [[nodiscard]] constexpr std::uint8_t mode_nibble() const noexcept { return v; }
+
+        friend constexpr bool operator==(Slot, Slot) = default;
+    };
+
+    [[nodiscard]] Slot write() const noexcept { return write_; }
+
+    [[nodiscard]] Slot take_read() noexcept {
+        const Slot at = read_;
+        read_ = read_.next();
         return at;
     }
 
-    void advance_write() noexcept { write_ = wrap_(write_ + 1); }
+    void advance_write() noexcept { write_ = write_.next(); }
 
-    void skip_write() noexcept { ++write_; }
+    void skip_write() noexcept { write_ = write_.next(); }
 
-    void rewind() noexcept { write_ = read_ = 0; }
+    void rewind() noexcept { write_ = read_ = Slot{}; }
 
 private:
-    [[nodiscard]] static constexpr std::uint8_t wrap_(unsigned v) noexcept {
-        return static_cast<std::uint8_t>(v & (kSlots - 1u));
-    }
-
-    std::uint8_t write_ = 0;
-    std::uint8_t read_ = 0;
+    Slot write_{};
+    Slot read_{};
 };
 
 }

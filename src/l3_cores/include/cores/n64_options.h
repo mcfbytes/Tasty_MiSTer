@@ -4,6 +4,10 @@
 #include <array>
 #include <cstdint>
 
+#include "proto/status_edit.h"
+#include "proto/status_word.h"
+#include "proto/types.h"
+
 namespace mister::cores::n64 {
 
 struct StatusField {
@@ -12,6 +16,27 @@ struct StatusField {
 
     [[nodiscard]] constexpr std::uint8_t hi() const noexcept {
         return static_cast<std::uint8_t>(lo + width - 1);
+    }
+
+    template <typename Bits>
+    [[nodiscard]] constexpr proto::FieldValue read(const Bits& bits) const noexcept {
+        std::uint32_t v = 0;
+        for (std::uint8_t i = 0; i < width; ++i) {
+            if (bits.get_bit(proto::StatusBit{static_cast<std::uint8_t>(lo + i)}))
+                v |= 1u << i;
+        }
+        return proto::FieldValue{v};
+    }
+
+    [[nodiscard]] constexpr proto::FieldValue all() const noexcept {
+        return proto::FieldValue{(1u << width) - 1u};
+    }
+
+    [[nodiscard]] constexpr proto::StatusWord written(
+        proto::StatusWord w,
+        proto::FieldValue v
+    ) const noexcept {
+        return proto::StatusEdit::field(proto::StatusBit{lo}, width, v).over(w);
     }
 };
 

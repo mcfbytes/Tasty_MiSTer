@@ -5,17 +5,18 @@
 
 #include "infra/seat.h"
 #include "proto/mailbox_frame.h"
+#include "proto/uio_opcodes.h"
 
 namespace mister::proto {
 
 struct MailboxFrameDecl {
     TASTY_SEAT_EXEMPT(component);
-    std::uint16_t poll_opcode = 0;
+    UioOp poll_opcode = UioOp::Status;
     std::uint8_t words = 0;
 };
 
 [[nodiscard]] constexpr bool well_formed(const MailboxFrameDecl& d) noexcept {
-    return d.poll_opcode != 0 && d.words >= 1 && d.words <= kMailboxFrameWords;
+    return d.words >= 1 && d.words <= kMailboxFrameWords;
 }
 
 }

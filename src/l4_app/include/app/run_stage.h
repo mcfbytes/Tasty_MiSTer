@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -9,6 +10,7 @@
 #include "app/replay_stage.h"
 #include "app/replay_status.h"
 #include "infra/seat.h"
+#include "os/raw_monotonic_clock.h"
 
 namespace mister::app {
 
@@ -31,10 +33,10 @@ private:
     [[nodiscard]] Step finish_(Ctx ctx, const ReplayStatus& s) noexcept;
 
     Stage level_ = Stage::Arming;
-    std::int64_t since_ns_ = 0;
+    os::RawMonotonicClock::time_point since_{};
     std::size_t next_run_ = 0;
     bool end_pushed_ = false;
-    std::optional<std::int64_t> disc_ns_{};
+    std::optional<os::RawMonotonicClock::time_point> disc_{};
     ConfStrText conf_{};
 };
 

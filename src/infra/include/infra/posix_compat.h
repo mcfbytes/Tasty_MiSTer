@@ -7,14 +7,26 @@
 #include <sched.h>
 #include <unistd.h>
 
-#if !defined(__GLIBC__)
+#include "infra/persist.h"
+
+#if defined(__GLIBC__)
+#include <malloc.h>
+#else
 #include <errno.h>
 #include <fcntl.h>
-#include <time.h>
 #ifndef M_TRIM_THRESHOLD
 #define M_TRIM_THRESHOLD 0
 #define M_MMAP_MAX 0
 #endif
+#endif
+
+namespace mister::infra {
+
+#if defined(__GLIBC__)
+
+using ::mallopt;
+using ::pthread_attr_setaffinity_np;
+#else
 
 inline int mallopt(int, int) {
     return 0;
@@ -36,7 +48,7 @@ inline void set_stdout_file(std::FILE* f) noexcept {
     stdout = f;
 #else
 
-    static int original = -1;
+    static int original TASTY_PERSIST(proc, stdout_original) = -1;
     if (f == nullptr)
         return;
     const int fd = ::fileno(f);
@@ -49,4 +61,6 @@ inline void set_stdout_file(std::FILE* f) noexcept {
         original = ::fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 3);
     (void)::dup2(fd, STDOUT_FILENO);
 #endif
+}
+
 }

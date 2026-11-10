@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "cores/ram_image.h"
+#include "cores/ram_image_recipe.h"
 
 #include <algorithm>
 

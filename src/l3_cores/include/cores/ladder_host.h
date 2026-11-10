@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -22,6 +21,8 @@
 namespace mister::cores {
 
 inline constexpr std::chrono::nanoseconds kSaveStateHoldBound{20'000'000'000};
+
+enum class FileTxAnswer : std::uint8_t { Pending, Served, Dropped };
 
 class ILadderHost {
 public:
@@ -44,26 +45,22 @@ public:
     [[nodiscard]] virtual Ex<proto::FileId> intern_piece(
         std::span<const std::uint8_t> bytes,
         std::string_view ext,
-        std::uint64_t,
-        std::uint64_t
-    ) {
-        return intern_bytes(bytes, ext, hal::FabricAddr{});
-    }
+        proto::FileSize whole,
+        std::uint64_t offset
+    ) = 0;
 
-    [[nodiscard]] virtual std::size_t link_in_flight() const noexcept { return 0; }
+    [[nodiscard]] virtual std::size_t link_in_flight() const noexcept = 0;
 
-    [[nodiscard]] virtual WireWordBytes link_word_bytes() const noexcept { return {}; }
+    [[nodiscard]] virtual WireWordBytes link_word_bytes() const noexcept = 0;
 
     [[nodiscard]] virtual Ex<proto::FileId> intern_whole(
-        std::vector<std::uint8_t>&&,
-        std::string_view
-    ) {
-        return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
-    }
+        std::vector<std::uint8_t>&& bytes,
+        std::string_view path
+    ) = 0;
 
-    [[nodiscard]] virtual std::optional<bool> file_tx_answer(proto::ActKey) { return std::nullopt; }
+    [[nodiscard]] virtual FileTxAnswer file_tx_answer(proto::ActKey act) = 0;
 
-    [[nodiscard]] virtual bool order_load_facts(std::span<const std::uint8_t>) { return false; }
+    [[nodiscard]] virtual bool order_load_facts(std::span<const std::uint8_t> facts) = 0;
 
     [[nodiscard]] virtual Ex<proto::FileId> intern_path(
         std::string_view path,
@@ -74,16 +71,17 @@ public:
 
     [[nodiscard]] virtual MountStatus mount_status() = 0;
 
-    [[nodiscard]] virtual bool order_walk(proto::IoIndex, std::string_view, proto::ActKey) {
-        return false;
-    }
+    [[nodiscard]] virtual bool order_walk(
+        proto::IoIndex slot,
+        std::string_view path,
+        proto::ActKey gen
+    ) = 0;
 
-    [[nodiscard]] virtual MountStatus walk_status() { return {}; }
+    [[nodiscard]] virtual MountStatus walk_status() = 0;
 
-    [[nodiscard]] virtual bool order_savestates(std::string_view, proto::ActKey) { return false; }
+    [[nodiscard]] virtual bool order_savestates(std::string_view image, proto::ActKey gen) = 0;
 
-    [[nodiscard]] virtual proto::ActKey savestates_answered() { return {}; }
-
+    [[nodiscard]] virtual proto::ActKey savestates_answered() = 0;
     [[nodiscard]] virtual SaveExtent save_extent() = 0;
     [[nodiscard]] virtual proto::StatusWord status_word() = 0;
 

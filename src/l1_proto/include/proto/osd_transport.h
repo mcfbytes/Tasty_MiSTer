@@ -6,6 +6,7 @@
 
 #include "infra/error.h"
 #include "hal/spi_transport.h"
+#include "proto/info_window.h"
 #include "proto/osd_surface.h"
 #include "proto/link.h"
 #include "proto/osd_target.h"
@@ -26,10 +27,6 @@ class OsdTransport {
     TASTY_SEAT_RESIDENT(RT);
 
 public:
-    static constexpr std::uint32_t kFpgaEn = 1u << 18;
-    static constexpr std::uint32_t kOsdEn = 1u << 19;
-    static constexpr std::uint32_t kIoEn = 1u << 20;
-
     [[nodiscard]] Ex<void> flush_row(
         proto::Link& link,
         OsdRow r,
@@ -40,13 +37,7 @@ public:
 
     [[nodiscard]] Ex<void> enable(proto::Link& link, OsdMode mode);
 
-    [[nodiscard]] Ex<void> enable_info(
-        proto::Link& link,
-        std::uint16_t x,
-        std::uint16_t y,
-        std::uint16_t width,
-        std::uint16_t height
-    );
+    [[nodiscard]] Ex<void> enable_info(proto::Link& link, InfoWindow window);
 
     [[nodiscard]] Ex<void> set_rotation(proto::Link& link, OsdRotation rotate);
 
@@ -58,17 +49,6 @@ public:
     }
 
     OsdTarget target() const noexcept { return target_; }
-
-    static constexpr hal::SpiOutput select_mask(OsdTarget t) noexcept {
-        std::uint32_t m = kOsdEn | kIoEn | kFpgaEn;
-        if (targets(t, OsdTarget::Hdmi))
-            m &= ~kFpgaEn;
-        if (targets(t, OsdTarget::Vga))
-            m &= ~kIoEn;
-        return hal::SpiOutput{m};
-    }
-
-    static constexpr hal::SpiOutput kDeselectMask{kOsdEn | kIoEn | kFpgaEn};
 
     std::uint32_t unrouted_selects() const noexcept { return unrouted_selects_; }
 

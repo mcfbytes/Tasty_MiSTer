@@ -109,7 +109,7 @@ private:
     CorrelationTag tag_{};
 
     xthread::LogLane::Producer log_lane_;
-    LogStamp last_transition_{};
+    LogInstant last_transition_{};
 };
 
 }

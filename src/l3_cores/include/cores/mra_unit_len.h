@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 
+#include "cores/interleave_widths.h"
 #include "cores/mra_lane.h"
 #include "cores/types.h"
 
@@ -32,23 +33,15 @@ struct UnitLen {
     }
 
     [[nodiscard]] static constexpr std::optional<UnitLen> of_interleave(
-        int input,
-        int output
+        InterleaveWidths widths
     ) noexcept {
-        constexpr int kMaxOutputBits = 64;
-        constexpr int kByteBitsMask = kInterleaveByteBits - 1;
-        if (input != kInterleaveByteBits)
+        if (widths.input != kInterleaveByteBits)
             return std::nullopt;
-        if (output < kInterleaveByteBits
-            || output > kMaxOutputBits
-            || (output & kByteBitsMask) != 0)
+        if (widths.output < kInterleaveByteBits || !widths.output.is_byte_aligned()) {
             return std::nullopt;
-        if (output < input)
-            return std::nullopt;
-        const int unit = (input != 0) ? output / input : 1;
-        if (unit <= 0 || unit > static_cast<int>(kRomLanes))
-            return std::nullopt;
-        return UnitLen{static_cast<std::uint8_t>(unit)};
+        }
+
+        return UnitLen{widths.output.byte_lanes().v};
     }
 };
 

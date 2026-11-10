@@ -8,6 +8,7 @@
 
 #include "app/fb_view.h"
 #include "app/hd_rect.h"
+#include "app/output_size.h"
 #include "app/row_bytes.h"
 
 namespace mister::app {
@@ -19,9 +20,11 @@ struct HdSurface {
     FbView::FbFormat format = FbView::FbFormat::Rgb565;
     std::array<std::uint32_t, 2> slot{};
 
-    [[nodiscard]] constexpr HdRect bounds() const noexcept {
-        return HdRect{0, 0, static_cast<std::int32_t>(w), static_cast<std::int32_t>(h)};
+    [[nodiscard]] constexpr OutputSize size() const noexcept {
+        return OutputSize{OutputPixels::of(w), OutputPixels::of(h)};
     }
+
+    [[nodiscard]] constexpr HdRect bounds() const noexcept { return size().bounds(); }
 
     [[nodiscard]] constexpr bool stride_ok() const noexcept { return rgb565_row_holds(stride, w); }
 
@@ -47,25 +50,22 @@ struct HdSurface {
 
 [[nodiscard]] constexpr std::optional<HdSurface> fit_surface(
     std::size_t region_len,
-    std::uint32_t out_w,
-    std::uint32_t out_h
+    OutputSize out
 ) noexcept {
 
     constexpr std::uint64_t kFullPixels = 1920u * 1080u;
     constexpr std::uint32_t kBigOutputScale = 2;
 
-    constexpr std::uint32_t kMinWidth = 320;
-    constexpr std::uint32_t kMinHeight = 240;
+    constexpr std::uint32_t kMinWidth = 320, kMinHeight = 240;
     constexpr std::uint32_t kRowAlignMask = 16 - 1u;
     constexpr std::uint32_t kSlotAlignMask = kFramebufferSlotAlign - 1u;
-    if (out_w == 0 || out_h == 0)
+    if (out.empty())
         return std::nullopt;
-    std::uint32_t w = out_w;
-    std::uint32_t h = out_h;
-    if (std::uint64_t{out_w} * out_h > kFullPixels) {
-        w = out_w / kBigOutputScale;
-        h = out_h / kBigOutputScale;
-    }
+    OutputSize size = out;
+    if (size.area() > PixelCount::of(kFullPixels))
+        size = size.divided_by(kBigOutputScale);
+
+    const auto [w, h] = fb_axis_words(size.w, size.h);
     if (w < kMinWidth || h < kMinHeight)
         return std::nullopt;
     const RowBytes stride = rgb565_row_aligned(w, kRowAlignMask);

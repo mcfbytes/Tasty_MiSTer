@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <type_traits>
 
+#include "hal/sys_block.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
-#include "proto/status_register.h"
+#include "proto/status_word.h"
 
 namespace mister::proto {
 
 struct StatusSnapshot {
     TASTY_SEAT_EXEMPT(const_shared);
-    std::uint32_t stflg = 0;
-    std::array<std::uint16_t, StatusRegister::kWords> words{};
+    hal::SysBlock::Stflg stflg{};
+    StatusWord words{};
     std::uint16_t gen = 0;
 };
 

@@ -24,7 +24,7 @@ public:
         std::uint32_t open_failures = 0;
     };
 
-    static constexpr std::size_t kPadSlots = 32;
+    static constexpr std::size_t kPadSlots = svc::DeviceSlot::kCount;
 
     explicit LauncherKeyBridge(os::IKeyInjector& out) noexcept : out_(out) {}
 

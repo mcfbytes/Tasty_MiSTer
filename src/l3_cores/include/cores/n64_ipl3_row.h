@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include "cores/n64_db_tags.h"
+#include "cores/n64_system_type.h"
 
 namespace mister::cores::n64 {
 

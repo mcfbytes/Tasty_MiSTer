@@ -47,6 +47,10 @@ struct RtcImage {
         return image;
     }
 
+    [[nodiscard]] std::array<std::uint16_t, 4> rtc_words() const noexcept;
+
+    [[nodiscard]] std::array<std::uint16_t, 2> stamp_words() const noexcept;
+
     [[nodiscard]] constexpr bool operator==(const RtcImage&) const = default;
 };
 

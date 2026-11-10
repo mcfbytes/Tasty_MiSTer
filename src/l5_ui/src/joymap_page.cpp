@@ -5,11 +5,8 @@
 
 #include <algorithm>
 #include <array>
-#include <type_traits>
-#include <cstdio>
-#include <cstring>
-#include <iterator>
-#include <limits>
+#include <cstddef>
+#include <format>
 #include <span>
 #include <string>
 #include <vector>
@@ -62,23 +59,24 @@ constexpr proto::OsdRow kSkipRow{7};
 constexpr proto::OsdRow kCancelRow{8};
 constexpr proto::OsdRow kFinishRow{9};
 
-static_assert(kMaxNames * sizeof(JoyMapPrompt::name) - 1 <= app::SessionIdentity::kJNamesCap - 1);
+static_assert(
+    kMaxNames * decltype(JoyMapPrompt::name)::kCapacity + (kMaxNames - 1)
+    <= app::SessionIdentity::kJNamesCap - 1
+);
 
 }
 
-std::vector<JoyMapPrompt> build_joymap_prompts(bool system_pass, std::string_view j_names) {
+std::vector<JoyMapPrompt> build_joymap_prompts(MapScope scope, std::string_view j_names) {
     std::vector<JoyMapPrompt> out;
     const auto add = [&out](BlobWord word, std::string_view name) {
         JoyMapPrompt p{};
         p.word = word;
-        const std::size_t n = name.size() < sizeof p.name - 1 ? name.size() : sizeof p.name - 1;
-        std::memcpy(p.name, name.data(), n);
-        p.name[n] = '\0';
+        (void)p.name.assign(name);
         out.push_back(p);
     };
 
     BlobWord word{};
-    if (system_pass) {
+    if (scope == MapScope::System) {
         for (const std::string_view name : kWordNames) {
             add(word, name);
             word = word.next();
@@ -120,12 +118,12 @@ std::vector<JoyMapPrompt> build_joymap_prompts(bool system_pass, std::string_vie
     return out;
 }
 
-JoyMapPage::JoyMapPage(Spec spec) : spec_(static_cast<Spec&&>(spec)) {
+JoyMapPage::JoyMapPage(Spec spec)
+    : spec_(static_cast<Spec&&>(spec)),
+      scope_(spec_.front_end || spec_.core.empty() ? MapScope::System : MapScope::Core) {
     TASTY_SEAT_BODY(JoyMapPage);
-    const bool system_pass = spec_.front_end || spec_.core.empty();
-    spec_.front_end = system_pass;
-    prompts_ = build_joymap_prompts(system_pass, spec_.j_names);
-    (void)wizard_.begin(svc::DeviceIdentity{}, svc::MapKind::Joystick);
+    prompts_ = build_joymap_prompts(scope_, spec_.j_names);
+    wizard_.begin(svc::DeviceIdentity{}, svc::MapKind::Joystick);
     if (!spec_.wire || prompts_.empty()) {
         done_ = true;
         ++refusals_;
@@ -141,9 +139,8 @@ JoyMapPage::~JoyMapPage() {
 }
 
 void JoyMapPage::arm_next() {
-    if (++token_ == 0)
-        ++token_;
-    spec_.wire->capture_arm().publish(app::CaptureArm{token_, 1});
+    token_ = token_.next();
+    spec_.wire->capture_arm().publish(app::CaptureArm{.token = token_, .armed = true});
     armed_ = true;
     spec_.wire->wake();
 }
@@ -151,7 +148,7 @@ void JoyMapPage::arm_next() {
 void JoyMapPage::disarm() {
     if (!spec_.wire || !armed_)
         return;
-    spec_.wire->capture_arm().publish(app::CaptureArm{token_, 0});
+    spec_.wire->capture_arm().publish(app::CaptureArm{.token = token_, .armed = false});
     armed_ = false;
     spec_.wire->wake();
 }
@@ -210,9 +207,9 @@ Transition JoyMapPage::finish(bool save) {
         wizard_.cancel();
         return Transition{Transition::Kind::Pop};
     }
-    if (!locked_ || !spec_.files || lock_.id_clipped) {
+    if (!lock_ || !spec_.files || lock_->id_clipped) {
 
-        if (locked_)
+        if (lock_)
             ++refusals_;
         return Transition{Transition::Kind::Pop};
     }
@@ -222,14 +219,14 @@ Transition JoyMapPage::finish(bool save) {
     map.blob.resize(blob_.words().size() * sizeof(std::uint32_t));
     infra::store_le_run<std::uint32_t>(blob_.words(), std::span<std::byte>{map.blob});
     svc::DeviceIdentity id{};
-    id.vid = lock_.vid;
-    id.pid = lock_.pid;
-    id.id = std::string(lock_.id.view());
-    id.unique_hash = lock_.unique_hash;
-    id.unique_filenames = lock_.unique_filenames;
-    const std::string_view core = spec_.front_end ? std::string_view{}
-                                                  : std::string_view{spec_.core};
-    if (store.save(core, id, map, lock_.mod)) {
+    id.vid = lock_->vid;
+    id.pid = lock_->pid;
+    id.id = std::string(lock_->id.view());
+    id.unique_hash = lock_->unique_hash;
+    id.unique_filenames = lock_->unique_filenames;
+    const std::string_view core = scope_ == MapScope::System ? std::string_view{}
+                                                             : std::string_view{spec_.core};
+    if (store.save(core, id, map, lock_->mod)) {
         saved_ = true;
 
         spec_.wire->request(app::InputWire::kReqHotplug);
@@ -242,8 +239,6 @@ Transition JoyMapPage::finish(bool save) {
 
 Transition JoyMapPage::handle(const UiEvent& ev) {
     TASTY_SEAT_BODY(JoyMapPage);
-    if (ev.kind != UiEvent::Kind::Key)
-        return Transition{};
     if (done_) {
         if (ev.buttons.has_any({UiEvent::Select | UiEvent::Menu})) {
             return Transition{Transition::Kind::Pop};
@@ -252,7 +247,7 @@ Transition JoyMapPage::handle(const UiEvent& ev) {
     }
 
     if (KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_SPACE})) {
-        if (!locked_)
+        if (!lock_)
             return Transition{};
         ++cur_;
         if (cur_ >= prompts_.size())
@@ -264,7 +259,7 @@ Transition JoyMapPage::handle(const UiEvent& ev) {
 
     if (KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_ENTER})
         || KeyDecoder::is_make(ev.raw, svc::EvdevCode{KEY_KPENTER})) {
-        return finish(locked_);
+        return finish(lock_.has_value());
     }
     if (ev.buttons.has_any({UiEvent::Menu}))
         return finish(false);
@@ -280,15 +275,14 @@ Transition JoyMapPage::on_tick(PageContext&) {
         return Transition{};
     if (hit.token != token_)
         return Transition{};
-    if (!locked_) {
-        locked_ = true;
+    if (!lock_) {
         lock_ = hit;
         svc::DeviceIdentity id{};
         id.vid = hit.vid;
         id.pid = hit.pid;
         id.id = std::string(hit.id.view());
         wizard_.on_device(id);
-    } else if (hit.device_ordinal != lock_.device_ordinal || hit.id.view() != lock_.id.view()) {
+    } else if (hit.device_ordinal != lock_->device_ordinal || hit.id.view() != lock_->id.view()) {
 
         arm_next();
         return Transition{};
@@ -298,8 +292,14 @@ Transition JoyMapPage::on_tick(PageContext&) {
         return Transition{};
     }
     wizard_.on_button(hit.code);
-    (void)wizard_.advance();
-    (void)wizard_.advance();
+
+    if (!wizard_advance_into(svc::MappingWizard::Step::Confirm)
+        || !wizard_advance_into(svc::MappingWizard::Step::Persist)) {
+        ++refusals_;
+        rebegin();
+        arm_next();
+        return Transition{};
+    }
     record(prompts_[cur_], hit.code);
     ++cur_;
     if (cur_ >= prompts_.size())
@@ -309,16 +309,23 @@ Transition JoyMapPage::on_tick(PageContext&) {
     return Transition{};
 }
 
+bool JoyMapPage::wizard_advance_into(svc::MappingWizard::Step want) {
+    const auto step = wizard_.advance();
+    return step && *step == want;
+}
+
 void JoyMapPage::rebegin() {
     svc::DeviceIdentity id{};
-    id.vid = lock_.vid;
-    id.pid = lock_.pid;
-    id.id = std::string(lock_.id.view());
-    (void)wizard_.begin(id, svc::MapKind::Joystick);
+    id.vid = lock_->vid;
+    id.pid = lock_->pid;
+    id.id = std::string(lock_->id.view());
+    wizard_.begin(id, svc::MapKind::Joystick);
 }
 
 template <class Visit>
 void JoyMapPage::for_each_row(Visit&& visit) const {
+
+    constexpr std::ptrdiff_t kRoom = static_cast<std::ptrdiff_t>(kClassicRowCap) - 1;
     std::array<char, kClassicRowCap> s{};
     if (!done_ && cur_ < prompts_.size()) {
 
@@ -329,25 +336,26 @@ void JoyMapPage::for_each_row(Visit&& visit) const {
             / 2;
         if (pad < 0)
             pad = 0;
-        std::snprintf(
+        const auto out = std::format_to_n(
             s.data(),
-            s.size(),
-            "%*sPress: %.*s",
+            kRoom,
+            "{:>{}}Press: {}",
+            std::string_view{},
             pad,
-            "",
-            static_cast<int>(name.size()),
-            name.data()
+            name
         );
+        *out.out = '\0';
     }
     std::array<char, kClassicRowCap> idrow{};
-    if (locked_) {
-        std::snprintf(
+    if (lock_) {
+        const auto out = std::format_to_n(
             idrow.data(),
-            idrow.size(),
-            "   Joystick ID: %04x:%04x",
-            static_cast<unsigned>(lock_.vid.v),
-            static_cast<unsigned>(lock_.pid.v)
+            kRoom,
+            "   Joystick ID: {:0>4}:{:0>4}",
+            lock_->vid.text().c_str(),
+            lock_->pid.text().c_str()
         );
+        *out.out = '\0';
     }
     for (const RowIndex r : rows(kFullOsdRows)) {
         const proto::OsdRow at = osd_row_at(r.before());
@@ -358,7 +366,7 @@ void JoyMapPage::for_each_row(Visit&& visit) const {
         } else if (at == kSkipRow) {
             visit(
                 r,
-                locked_ ? std::string_view{"        Space \x16 Skip"} : std::string_view{},
+                lock_ ? std::string_view{"        Space \x16 Skip"} : std::string_view{},
                 RowRole::Legend
             );
         } else if (at == kCancelRow) {
@@ -417,7 +425,7 @@ bool JoyMapPage::walk(PageWalk& out) const {
         );
     }
 
-    std::uint16_t hd_total = 0;
+    RowCount hd_total{};
     const std::size_t hd_cap = std::min<std::size_t>(
         out.rows.size(),
         static_cast<std::size_t>(out.count) + app::PageDescription::kMaxRows
@@ -428,7 +436,7 @@ bool JoyMapPage::walk(PageWalk& out) const {
             text.remove_prefix(1);
         if (text.empty() || row.role == RowRole::Legend)
             continue;
-        ++hd_total;
+        hd_total += kOneRow;
         if (out.count >= hd_cap)
             continue;
         PageRow& r = out.rows[out.count++];
@@ -439,7 +447,7 @@ bool JoyMapPage::walk(PageWalk& out) const {
 
     const std::size_t captured = cur_ < prompts_.size() ? cur_ : prompts_.size();
     for (std::size_t i = captured; i-- > 0;) {
-        ++hd_total;
+        hd_total += kOneRow;
         if (out.count >= hd_cap)
             continue;
         PageRow& r = out.rows[out.count++];
@@ -447,17 +455,16 @@ bool JoyMapPage::walk(PageWalk& out) const {
         r.hd.kind = app::PageDescription::RowKind::Text;
         (void)r.hd.label.assign(prompts_[i].text());
         const svc::EvdevCode code = captured_code(i);
-        std::array<char, std::remove_cvref_t<decltype(r.hd.value)>::kCapacity> v{};
         if (code.is_unset()) {
-            std::snprintf(v.data(), v.size(), "%s", "skipped");
+            (void)r.hd.value.assign("skipped");
         } else {
-            std::snprintf(v.data(), v.size(), "0x%X", static_cast<unsigned>(code.v));
+            (void)r.hd.value.assign("0x");
+            (void)r.hd.value.append(code.text().c_str());
         }
-        (void)r.hd.value.assign(std::string_view{v.data()});
     }
 
     out.page.first = RowIndex{};
-    out.page.total = RowCount::of(hd_total);
+    out.page.total = hd_total;
     (void)out.page.footer.assign(legend);
     return true;
 }

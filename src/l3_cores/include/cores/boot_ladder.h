@@ -37,12 +37,12 @@ public:
         bool save_detached = false;
         bool region_written = false;
         bool savestate_hold_expired = false;
-        std::uint8_t region = 0;
+        proto::RegionCode region{};
         std::uint32_t assets_loaded = 0;
         std::uint32_t rungs = 0;
         std::uint32_t bios_missing = 0;
 
-        std::uint64_t bytes_downloaded = 0;
+        proto::FileSize bytes_downloaded{};
     };
 
     static constexpr std::uint8_t kDone = 0xFF;
@@ -74,7 +74,11 @@ protected:
 
     [[nodiscard]] virtual bool steps_at_core_start() const noexcept { return false; }
 
+    [[nodiscard]] bool core_start_armed() const noexcept { return core_start_; }
+
     static std::string_view dir_of(std::string_view path);
+
+    static std::string_view dir_or_empty(std::string_view path);
     static std::string_view base_of(std::string_view path);
 
     static std::string_view ext_of(std::string_view path);
@@ -90,6 +94,8 @@ protected:
 
     [[nodiscard]] Ex<std::string> save_path_for(std::string_view image);
 
+    [[nodiscard]] Ex<std::string> dir_save_path_for(std::string_view dir);
+
     [[nodiscard]] MountState mount_bounded(std::string_view path);
 
     [[nodiscard]] MountState mount_slot_bounded(proto::SlotIndex slot, std::string_view path);
@@ -101,6 +107,24 @@ protected:
     [[nodiscard]] bool prepare_save(std::string_view path);
 
     [[nodiscard]] proto::FileSize save_size() const noexcept { return save_size_; }
+
+    [[nodiscard]] std::string_view save_name() const noexcept { return save_path_; }
+
+    [[nodiscard]] Ex<void> resolve_save_();
+
+    [[nodiscard]] Ex<void> resolve_dir_save_(std::string_view dir);
+
+    [[nodiscard]] Ex<bool> prepare_save_once_();
+
+    [[nodiscard]] Ex<bool> mount_save_rung_();
+
+    [[nodiscard]] bool hold_reset_();
+
+    [[nodiscard]] bool release_reset_();
+
+    [[nodiscard]] bool pulse_reset_(std::chrono::microseconds pulse);
+
+    [[nodiscard]] bool reset_held_() const noexcept { return bit0_asserted_; }
 
     [[nodiscard]] bool order_mount_save(std::string_view path, bool bracketed);
     [[nodiscard]] bool order_announce_disc(proto::FileSize size_bytes);
@@ -121,9 +145,10 @@ protected:
     ILadderHost& host_;
     const os::IClock& clock_;
 
-    std::string image_;
-    std::string image_dir_;
-    std::string save_path_;
+    [[nodiscard]] std::string_view image_path() const noexcept { return image_; }
+
+    [[nodiscard]] std::string_view image_dir() const noexcept { return image_dir_; }
+
     FixedStr<1024, StrFit::Clip> load_path_{};
     std::optional<PayloadPieces> pieces_{};
 
@@ -131,14 +156,20 @@ protected:
 
     std::uint8_t sub_ = 0;
     bool marker_seen_ = false;
-    bool save_ready_ = false;
-    std::chrono::nanoseconds pulse_release_ns_{};
-    std::chrono::nanoseconds mount_due_ns_{};
-    bool bit0_asserted_ = false;
 
     Report report_{};
 
 private:
+    std::string image_;
+    std::string image_dir_;
+    std::string save_path_;
+    bool save_ready_ = false;
+    std::chrono::nanoseconds reset_hold_ns_{};
+    std::chrono::nanoseconds mount_due_ns_{};
+    bool bit0_asserted_ = false;
+
+    [[nodiscard]] Ex<std::string> save_root_();
+
     [[nodiscard]] bool finish_acts_();
 
     [[nodiscard]] Ex<bool> step_start_row_();

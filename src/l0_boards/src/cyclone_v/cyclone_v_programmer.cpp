@@ -3,6 +3,7 @@
 #include "boards/cyclone_v/cyclone_v_windows.h"
 
 #include "hal/board_windows.h"
+#include "hal/taken_window.h"
 #include "hal/boards_table.h"
 
 #include <fcntl.h>
@@ -16,6 +17,7 @@
 #include "infra/byte_view.h"
 #include "infra/endian.h"
 #include "infra/unique_fd.h"
+#include "os/map_length.h"
 
 namespace mister::boards::cyclone_v {
 namespace {
@@ -66,8 +68,8 @@ constexpr FpgaMgrMode mode_of(std::uint32_t stat) noexcept {
 }
 
 Programmer::Programmer(
-    hal::RegisterWindow<FpgaMgr> mgr,
-    hal::RegisterWindow<FpgaMgrData> data,
+    hal::TakenWindow<FpgaMgr> mgr,
+    hal::TakenWindow<FpgaMgrData> data,
     std::optional<hal::FpgaMemory> handoff
 )
     : mgr_(std::move(mgr)),
@@ -79,7 +81,11 @@ Programmer Programmer::over(
     hal::RegisterWindow<FpgaMgrData> data,
     hal::FpgaMemory handoff
 ) {
-    return Programmer(std::move(mgr), std::move(data), std::move(handoff));
+    return Programmer(
+        hal::TakenWindow<FpgaMgr>{std::move(mgr), hal::WindowClaim{}},
+        hal::TakenWindow<FpgaMgrData>{std::move(data), hal::WindowClaim{}},
+        std::move(handoff)
+    );
 }
 
 Ex<Programmer> Programmer::open(hal::BoardWindows& windows) {
@@ -93,9 +99,7 @@ Ex<Programmer> Programmer::open(hal::BoardWindows& windows) {
     auto hand = hal::FpgaMemory::map(kHandoffPage);
     if (!hand)
         return std::unexpected(hand.error());
-    Programmer p(std::move(mgr->regs), std::move(data->regs), std::move(*hand));
-    p.claims_ = {std::move(mgr->claim), std::move(data->claim)};
-    return p;
+    return Programmer(std::move(*mgr), std::move(*data), std::move(*hand));
 }
 
 Ex<Programmer> Programmer::open_at(const char* manager_dir) {
@@ -118,17 +122,30 @@ Ex<Programmer> Programmer::open_at(const char* manager_dir) {
     }
     UniqueFd owner(fd);
 
-    auto mgr_pages = os::MmioRegion::map_fd(owner.get(), kFpgaMgrBase, FpgaMgr::kSize);
+    using MapOffset = os::MmioRegion::MapOffset;
+    auto mgr_pages = os::MmioRegion::map_fd(
+        owner.get(),
+        MapOffset::of(kFpgaMgrBase),
+        os::MapLength{FpgaMgr::kSize}
+    );
     if (!mgr_pages)
         return std::unexpected(mgr_pages.error());
-    auto data_pages = os::MmioRegion::map_fd(owner.get(), kFpgaMgrDataBase, FpgaMgrData::kSize);
+    auto data_pages = os::MmioRegion::map_fd(
+        owner.get(),
+        MapOffset::of(kFpgaMgrDataBase),
+        os::MapLength{FpgaMgrData::kSize}
+    );
     if (!data_pages)
         return std::unexpected(data_pages.error());
-    auto hand_pages = os::MmioRegion::map_fd(owner.get(), kHandoffPage.phys, kHandoffPage.len);
+    auto hand_pages = os::MmioRegion::map_fd(
+        owner.get(),
+        MapOffset::of(kHandoffPage.phys),
+        os::MapLength{kHandoffPage.len}
+    );
     if (!hand_pages)
         return std::unexpected(hand_pages.error());
 
-    Programmer loader(
+    Programmer loader = Programmer::over(
         hal::RegisterWindow<FpgaMgr>::borrow(mgr_pages->base(), mgr_pages->length()),
         hal::RegisterWindow<FpgaMgrData>::borrow(data_pages->base(), data_pages->length()),
         hal::FpgaMemory::borrow(hand_pages->plain_bytes(), kHandoffPage)
@@ -140,9 +157,9 @@ Ex<Programmer> Programmer::open_at(const char* manager_dir) {
 }
 
 void Programmer::ctrl_update(FpgaCtrl clear, FpgaCtrl set) {
-    hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
-    const FpgaCtrl next = FpgaCtrl{mgr_.read(FpgaMgr::Reg::Ctrl)}.without(clear).with(set);
-    mgr_.write(FpgaMgr::Reg::Ctrl, next.v);
+    hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_.regs);
+    const FpgaCtrl next = FpgaCtrl{mgr_.regs.read(FpgaMgr::Reg::Ctrl)}.without(clear).with(set);
+    mgr_.regs.write(FpgaMgr::Reg::Ctrl, next.v);
 }
 
 void Programmer::set_cd_ratio(CdRatio ratio) {
@@ -150,26 +167,26 @@ void Programmer::set_cd_ratio(CdRatio ratio) {
 }
 
 FpgaMgrMode Programmer::mode() const {
-    return mode_of(mgr_.read(FpgaMgr::Reg::Stat));
+    return mode_of(mgr_.regs.read(FpgaMgr::Reg::Stat));
 }
 
 std::uint32_t Programmer::ext_nibble() {
-    return mgr_.read(FpgaMgr::Reg::GpioExtPorta) & kExtPortaMask;
+    return mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta) & kExtPortaMask;
 }
 
 void Programmer::dclk_arm_(std::uint32_t count) {
-    hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
+    hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_.regs);
 
-    if (mgr_.read(FpgaMgr::Reg::DclkStat) != 0u) {
-        mgr_.write(FpgaMgr::Reg::DclkStat, FpgaMgr::kDclkStatDone);
+    if (mgr_.regs.read(FpgaMgr::Reg::DclkStat) != 0u) {
+        mgr_.regs.write(FpgaMgr::Reg::DclkStat, FpgaMgr::kDclkStatDone);
     }
-    mgr_.write(FpgaMgr::Reg::DclkCnt, count);
+    mgr_.regs.write(FpgaMgr::Reg::DclkCnt, count);
 }
 
 bool Programmer::dclk_done_() {
-    if (mgr_.read(FpgaMgr::Reg::DclkStat) == 0u)
+    if (mgr_.regs.read(FpgaMgr::Reg::DclkStat) == 0u)
         return false;
-    mgr_.write(FpgaMgr::Reg::DclkStat, FpgaMgr::kDclkStatDone);
+    mgr_.regs.write(FpgaMgr::Reg::DclkStat, FpgaMgr::kDclkStatDone);
     return true;
 }
 
@@ -196,7 +213,7 @@ bool Programmer::rung_done_() {
 }
 
 Programmer::Awaited Programmer::await_(std::uint32_t polls) {
-    hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
+    hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_.regs);
     while (polls != 0u) {
         --polls;
         if (rung_done_())
@@ -212,7 +229,7 @@ Ex<bool> Programmer::program_begin() {
     tail_seen_ = false;
     step_ = StepPc::Idle;
 
-    const std::uint32_t msel = (mgr_.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatMselMask)
+    const std::uint32_t msel = (mgr_.regs.read(FpgaMgr::Reg::Stat) & FpgaMgr::kStatMselMask)
         >> FpgaMgr::kStatMselLsb;
 
     const bool wide = (msel & FpgaMgr::kMselWideMask) != 0u;
@@ -241,7 +258,7 @@ void Programmer::program_write(std::span<const std::byte> image) {
                 std::span<const std::byte, sizeof(std::uint32_t)>(src, sizeof(std::uint32_t))
             );
             src += sizeof w;
-            data_.write(
+            data_.regs.write(
                 static_cast<FpgaMgrData::Reg>(
                     static_cast<std::uint32_t>(k * sizeof(std::uint32_t))
                 ),
@@ -254,12 +271,12 @@ void Programmer::program_write(std::span<const std::byte> image) {
             std::span<const std::byte, sizeof(std::uint32_t)>(src, sizeof(std::uint32_t))
         );
         src += sizeof w;
-        data_.write(FpgaMgrData::Reg::Data, w);
+        data_.regs.write(FpgaMgrData::Reg::Data, w);
     }
     if (tail != 0) {
         std::uint32_t w = 0;
         std::memcpy(&w, src, tail);
-        data_.write(FpgaMgrData::Reg::Data, w);
+        data_.regs.write(FpgaMgrData::Reg::Data, w);
     }
 }
 
@@ -273,9 +290,9 @@ Ex<void> Programmer::poll_config_done() {
     std::uint32_t reg = 0;
     std::uint32_t i = 0;
     {
-        hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
+        hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_.regs);
         for (; i < FpgaMgr::kTimeoutCount; ++i) {
-            reg = mgr_.read(FpgaMgr::Reg::GpioExtPorta);
+            reg = mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta);
             if ((reg & kMask) == 0u)
                 break;
             if ((reg & kMask) != 0u)
@@ -327,11 +344,11 @@ Ex<bool> Programmer::program_step() {
                     return false;
                 {
 
-                    hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_);
-                    mgr_.write(FpgaMgr::Reg::GpioPortaEoi, FpgaMgr::kEoiAll);
+                    hal::RegisterWindow<FpgaMgr>::Transaction t(mgr_.regs);
+                    mgr_.regs.write(FpgaMgr::Reg::GpioPortaEoi, FpgaMgr::kEoiAll);
                 }
                 ctrl_update(kCtrlNone, kCtrlAxiCfgEn);
-                data_txn_.emplace(data_);
+                data_txn_.emplace(data_.regs);
                 step_ = StepPc::Idle;
                 return true;
             case StepPc::DclkEnterWait:
@@ -392,8 +409,7 @@ Programmer::Programmer(Programmer&& o) noexcept
       handoff_pages_(std::move(o.handoff_pages_)),
       mgr_(std::move(o.mgr_)),
       data_(std::move(o.data_)),
-      page_(std::move(o.page_)),
-      claims_(std::move(o.claims_)) {
+      page_(std::move(o.page_)) {
     if (o.data_txn_.has_value() || o.step_ != StepPc::Idle) {
         fatal(Error{Errc::bridge_state, ERR_SITE(), 0}, "Programmer: move mid-program");
     }
@@ -445,19 +461,19 @@ Ex<bool> Programmer::program_end() {
 
 bool Programmer::programmed() const {
     TASTY_SEAT_BODY(Programmer);
-    if ((mgr_.read(FpgaMgr::Reg::GpioExtPorta) & FpgaMgr::kMonId) == 0u) {
+    if ((mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta) & FpgaMgr::kMonId) == 0u) {
         return false;
     }
 
-    if ((mgr_.read(FpgaMgr::Reg::GpioExtPorta) & FpgaMgr::kMonId) == 0u) {
+    if ((mgr_.regs.read(FpgaMgr::Reg::GpioExtPorta) & FpgaMgr::kMonId) == 0u) {
         return false;
     }
     return mode() == FpgaMgrMode::User;
 }
 
 static_assert(
-    hal::board_by_id(hal::BoardId::De10Nano).program.quantum.value() == 32u
-    && hal::board_by_id(hal::BoardId::De10Nano).program.align.value() == 4u
+    hal::board_by_id(hal::BoardId::De10Nano).program.quantum.value() == hal::QuantumBytes{32u}
+    && hal::board_by_id(hal::BoardId::De10Nano).program.align.value() == hal::AlignBytes{4u}
 );
 
 }

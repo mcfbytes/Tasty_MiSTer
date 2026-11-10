@@ -5,7 +5,7 @@
 
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
-#include "proto/joystick.h"
+#include "proto/joystick_port.h"
 #include "proto/link_frame.h"
 #include "proto/link_pad_encoder.h"
 

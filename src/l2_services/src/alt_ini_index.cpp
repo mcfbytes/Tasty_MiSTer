@@ -1,21 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/alt_ini_index.h"
-#include "config_detail.h"
 
 #include <algorithm>
 #include <string>
 #include <span>
 
+#include "infra/ascii.h"
+#include "infra/indexed_array.h"
+
 namespace mister::svc {
 
 namespace {
-
-using detail::icmp_n;
-using detail::iequals;
-
-int icmp_full(std::string_view a, std::string_view b) {
-    return icmp_n(a, b, std::max(a.size(), b.size()) + 1);
-}
 
 inline constexpr std::string_view kAltStem = "MiSTer_";
 inline constexpr std::string_view kAltSuffix = ".ini";
@@ -33,9 +28,9 @@ AltIniIndex AltIniIndex::scan(std::span<const std::string> root_dirents) {
         if (found >= kMaxAltInis)
             break;
 
-        if (icmp_n(d, kAltStem.data(), kAltStem.size()) != 0)
+        if (infra::icompare_n(d, kAltStem, infra::ByteCount{kAltStem.size()}) != 0)
             continue;
-        if (!iequals(std::string_view{d}.substr(d.size() - kAltSuffix.size()), kAltSuffix)) {
+        if (!infra::ieq(std::string_view{d}.substr(d.size() - kAltSuffix.size()), kAltSuffix)) {
             continue;
         }
         idx.names_[found] = d;
@@ -50,7 +45,9 @@ AltIniIndex AltIniIndex::scan(std::span<const std::string> root_dirents) {
             const bool prev_empty = idx.names_[j - 1].empty();
             const bool cur_empty = idx.names_[j].empty();
             const bool swap_them = (prev_empty && !cur_empty)
-                || (!prev_empty && !cur_empty && icmp_full(idx.names_[j - 1], idx.names_[j]) > 0);
+                || (!prev_empty
+                    && !cur_empty
+                    && infra::icompare(idx.names_[j - 1], idx.names_[j]) > 0);
             if (swap_them)
                 idx.names_[j - 1].swap(idx.names_[j]);
         }
@@ -59,10 +56,10 @@ AltIniIndex AltIniIndex::scan(std::span<const std::string> root_dirents) {
 }
 
 std::string_view AltIniIndex::name_for(std::uint8_t alt) const {
-
-    if (alt == 0 || alt > kMaxAltInis)
+    const std::optional<AltIniSlot> slot = AltIniSlot::of(alt);
+    if (!slot)
         return "MiSTer.ini";
-    return names_[alt - 1];
+    return infra::at_index(names_, *slot);
 }
 
 std::string AltIniIndex::label_for(std::uint8_t alt) const {
@@ -87,13 +84,13 @@ std::string AltIniIndex::label_for(std::uint8_t alt) const {
     }
 
     const std::string_view stem{label};
-    if (iequals(stem, "alt"))
+    if (infra::ieq(stem, "alt"))
         return "Alt1";
-    if (iequals(stem, "alt_1"))
+    if (infra::ieq(stem, "alt_1"))
         return "Alt1";
-    if (iequals(stem, "alt_2"))
+    if (infra::ieq(stem, "alt_2"))
         return "Alt2";
-    if (iequals(stem, "alt_3"))
+    if (infra::ieq(stem, "alt_3"))
         return "Alt3";
 
     for (std::size_t k = 0; k < kAltLabelPad; ++k) {

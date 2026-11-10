@@ -1,44 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
-#include <cstddef>
 #include <cstdint>
 #include <span>
 
-#include "cores/n64_db_tags.h"
+#include "cores/bootcode_sum.h"
 #include "cores/n64_ipl3_row.h"
-#include "infra/endian.h"
+#include "cores/n64_system_type.h"
 
 namespace mister::cores::n64 {
-
-inline constexpr std::size_t kBootcodeBegin = 0x40;
-inline constexpr std::size_t kBootcodeAleckEnd = 0xc00;
-inline constexpr std::size_t kBootcodeEnd = 0x1000;
 
 struct Ipl3Detect {
     SystemType system = SystemType::Unknown;
     Cic cic = Cic::Unknown;
     bool known_signature = true;
 };
-
-[[nodiscard]] constexpr std::array<std::uint64_t, 2> bootcode_checksums(
-    std::span<const std::uint8_t> chunk
-) noexcept {
-    std::array<std::uint64_t, 2> sums{};
-    if (chunk.size() < kBootcodeEnd)
-        return sums;
-
-    std::uint64_t sum = 0;
-    std::size_t i = kBootcodeBegin;
-    for (; i < kBootcodeAleckEnd; i += 4)
-        sum += infra::load_le<std::uint32_t>(chunk.subspan(i).first<4>());
-    sums[1] = sum;
-    for (; i < kBootcodeEnd; i += 4)
-        sum += infra::load_le<std::uint32_t>(chunk.subspan(i).first<4>());
-    sums[0] = sum;
-    return sums;
-}
 
 [[nodiscard]] constexpr SystemType region_system(char region_code) noexcept {
     switch (region_code) {

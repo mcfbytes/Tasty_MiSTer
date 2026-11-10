@@ -4,6 +4,7 @@
 #include <array>
 #include <span>
 
+#include "infra/byte_view.h"
 #include "infra/parse_int.h"
 #include "os/small_file.h"
 
@@ -15,7 +16,7 @@ std::optional<long> read_one(const char* path) noexcept {
     const auto got = read_small_file(path, std::span<char>(buf));
     if (!got)
         return std::nullopt;
-    return sysctl_value_from(std::string_view(buf.data(), *got));
+    return sysctl_value_from(infra::as_text(*got));
 }
 
 }

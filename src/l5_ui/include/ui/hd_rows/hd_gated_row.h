@@ -18,7 +18,7 @@ public:
     std::optional<RowKey> key() const override;
     app::PageDescription::Row describe() const override;
     Transition select() override;
-    Transition step(int delta) override;
+    Transition step(CycleDir dir) override;
 
 private:
     IHdRow& row_;

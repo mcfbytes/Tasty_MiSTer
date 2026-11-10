@@ -1,10 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/pll_solver.h"
 #include "svc/pll_params.h"
-
-#include "video_service_detail.h"
+#include "svc/pll_payload.h"
 
 namespace mister::svc {
+
+namespace {
+
+constexpr double kFvcoStepMhz = static_cast<double>(50.f);
+constexpr double kFvcoMaxMhz = static_cast<double>(1500.f);
+constexpr double kKoBandLow = static_cast<double>(0.05f);
+constexpr double kKoBandHigh = static_cast<double>(0.95f);
+
+static_assert(kKoBandLow != 0.05);
+static_assert(kKoBandHigh != 0.95);
+static_assert(kFvcoStepMhz == 50.0 && kFvcoMaxMhz == 1500.0);
+
+constexpr std::uint32_t kSearchCeiling = 1u << 20;
+
+}
 
 std::uint32_t pll::encode_div(std::uint32_t div) {
 
@@ -88,18 +102,12 @@ PllParams pll::approximate(double f_out_mhz) {
 PllBlock pll::block(const PllParams& p) {
 
     PllBlock b{};
-    b[0] = pll_reg_word(PllReg::M);
-    b[1] = encode_div(p.m);
-    b[2] = pll_reg_word(PllReg::N);
-    b[3] = kPllNPayload;
-    b[4] = pll_reg_word(PllReg::C);
-    b[5] = encode_div(p.c);
-    b[6] = pll_reg_word(PllReg::ChargePump);
-    b[7] = kPllChargePumpValue;
-    b[8] = pll_reg_word(PllReg::Bandwidth);
-    b[9] = kPllBandwidthValue;
-    b[10] = pll_reg_word(PllReg::K);
-    b[11] = p.k;
+    b.writes[0] = PllWrite{PllReg::M, PllPayload{encode_div(p.m)}};
+    b.writes[1] = PllWrite{PllReg::N, kPllNPayload};
+    b.writes[2] = PllWrite{PllReg::C, PllPayload{encode_div(p.c)}};
+    b.writes[3] = PllWrite{PllReg::ChargePump, kPllChargePumpValue};
+    b.writes[4] = PllWrite{PllReg::Bandwidth, kPllBandwidthValue};
+    b.writes[5] = PllWrite{PllReg::K, PllPayload{p.k}};
     return b;
 }
 

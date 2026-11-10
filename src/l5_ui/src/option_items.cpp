@@ -7,8 +7,11 @@
 #include <vector>
 
 #include "app/page_description.h"
+#include "infra/opt_ref.h"
 #include "ui/arc_label.h"
+#include "ui/cycle_value.h"
 #include "ui/option_host.h"
+#include "ui/option_item.h"
 #include "ui/option_items/addon_item.h"
 #include "ui/option_items/cfg_ver_item.h"
 #include "ui/option_items/cheats_item.h"
@@ -28,7 +31,6 @@
 #include "ui/option_items/toggle_item.h"
 #include "ui/option_items/unknown_item.h"
 #include "ui/option_items/version_item.h"
-#include "ui/options_page.h"
 #include "ui/osd_renderer.h"
 #include "ui/slot_labels.h"
 
@@ -37,8 +39,13 @@ namespace {
 
 constexpr const char kStdExit[] = "            exit";
 constexpr const char kStdBack[] = "            back";
-constexpr const char kDipRow[] = " DIP Switches              \x16";
-constexpr char kSubmenuArrow = '\x16';
+
+std::string dip_row_label() {
+    std::string s = " DIP Switches";
+    s.resize(kArrowColumn, ' ');
+    s.push_back(glyph_char(Glyph::SubmenuArrow));
+    return s;
+}
 
 constexpr unsigned kFirstValueField = 2;
 
@@ -105,10 +112,14 @@ OptionItem::Carry plain_label(OptionItem& it, const OptionItem::Source& in) {
     return in.carry;
 }
 
+proto::IoIndex io_index_after(RowCount taken) noexcept {
+    return proto::IoIndex{static_cast<std::uint8_t>(taken.size() + 1u)};
+}
+
 OptionItem::Carry build_slot(
     OptionItem& it,
     const OptionItem::Source& in,
-    std::uint8_t default_index
+    proto::IoIndex default_index
 ) {
     it.label = std::string{field(in, 2)};
     it.ext_list = std::string{field(in, 1)};
@@ -116,7 +127,7 @@ OptionItem::Carry build_slot(
     it.addon_ext = std::string{in.carry.addon};
     it.addon_after = in.carry.addon_after;
     const proto::Item& src = source_item(in);
-    it.ioctl_index = src.digit ? src.digit->v : default_index;
+    it.ioctl_index = src.digit ? src.digit->io_index() : default_index;
     OptionItem::Carry next = in.carry;
     next.addon = {};
     next.addon_after = false;
@@ -130,15 +141,7 @@ std::string compose_slot(const OptionItem& it, std::string_view verb) {
     return std::string{verb} + ext;
 }
 
-Transition activate_slot(const OptionItem& it, const OptionItem::Press& press, IOptionHost& host) {
-    if (!press.select)
-        return refused(host);
-    return host.open_browser(it);
-}
-
-bool pulse_one_bit(const OptionItem& it, const OptionItem::Press& press, IOptionHost& host) {
-    if (!press.select)
-        return false;
+bool pulse_one_bit(const OptionItem& it, IOptionHost& host) {
     if (it.bits.width != 1) {
         host.refuse();
         return false;
@@ -167,7 +170,7 @@ std::unique_ptr<OptionItem> OptionItem::make(Kind k) {
             return std::make_unique<ToggleItem>();
         case Kind::ToggleClose:
             return std::make_unique<ToggleCloseItem>();
-        case Kind::Option:
+        case Kind::Cycle:
             return std::make_unique<CycleItem>();
         case Kind::Separator:
             return std::make_unique<SeparatorItem>();
@@ -214,9 +217,14 @@ std::optional<app::PageDescription::Row> OptionItem::describe(const Look& look) 
     return row;
 }
 
-Transition OptionItem::activate(const Press& press, IOptionHost& host) const {
+Transition OptionItem::select(IOptionHost& host) const {
     TASTY_SEAT_BODY(OptionItem);
-    return on_activate(press, host);
+    return on_select(host);
+}
+
+Transition OptionItem::step(CycleDir dir, proto::FieldValue value, IOptionHost& host) const {
+    TASTY_SEAT_BODY(OptionItem);
+    return on_step(dir, value, host);
 }
 
 OptionItem::Carry PageItem::on_build(const Source& in, const BuildEnv&) {
@@ -233,7 +241,7 @@ std::string PageItem::on_compose(const Look& look) const {
     if (look.flat) {
 
         s = " ";
-        s.push_back(kSubmenuArrow);
+        s.push_back(glyph_char(Glyph::SubmenuArrow));
         s += " ";
         s += label;
         s.resize(28, ' ');
@@ -241,7 +249,7 @@ std::string PageItem::on_compose(const Look& look) const {
 
         s = " " + label;
         s.resize(27, ' ');
-        s.push_back(kSubmenuArrow);
+        s.push_back(glyph_char(Glyph::SubmenuArrow));
     }
     return s;
 }
@@ -250,17 +258,19 @@ std::optional<app::PageDescription::Row> PageItem::on_describe(const Look&) cons
     return described(app::PageDescription::RowKind::Submenu, label);
 }
 
-Transition PageItem::on_activate(const Press& press, IOptionHost& host) const {
-    if (!press.select)
-        return Transition{};
+Transition PageItem::on_select(IOptionHost& host) const {
     if (target_page == proto::kRootSubmenu)
         return refused(host);
 
-    return Transition{Transition::Kind::Push, PageId::CoreOptions, item_submenu(target_page)};
+    return Transition{Transition::Kind::Push, host.subpage_page(), item_submenu(target_page)};
+}
+
+Transition PageItem::on_step(CycleDir, proto::FieldValue, IOptionHost&) const {
+    return Transition{};
 }
 
 OptionItem::Carry FileItem::on_build(const Source& in, const BuildEnv&) {
-    return build_slot(*this, in, static_cast<std::uint8_t>(in.taken.v + 1u));
+    return build_slot(*this, in, io_index_after(in.taken));
 }
 
 std::string FileItem::on_compose(const Look&) const {
@@ -272,12 +282,16 @@ std::optional<app::PageDescription::Row> FileItem::on_describe(const Look&) cons
     return described(app::PageDescription::RowKind::Action, std::string_view{text}.substr(1));
 }
 
-Transition FileItem::on_activate(const Press& press, IOptionHost& host) const {
-    return activate_slot(*this, press, host);
+Transition FileItem::on_select(IOptionHost& host) const {
+    return host.open_browser(*this);
+}
+
+Transition FileItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
+    return refused(host);
 }
 
 OptionItem::Carry ImageItem::on_build(const Source& in, const BuildEnv&) {
-    return build_slot(*this, in, 0u);
+    return build_slot(*this, in, proto::IoIndex{});
 }
 
 std::string ImageItem::on_compose(const Look&) const {
@@ -289,8 +303,12 @@ std::optional<app::PageDescription::Row> ImageItem::on_describe(const Look&) con
     return described(app::PageDescription::RowKind::Action, std::string_view{text}.substr(1));
 }
 
-Transition ImageItem::on_activate(const Press& press, IOptionHost& host) const {
-    return activate_slot(*this, press, host);
+Transition ImageItem::on_select(IOptionHost& host) const {
+    return host.open_browser(*this);
+}
+
+Transition ImageItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
+    return refused(host);
 }
 
 OptionItem::Carry CheatsItem::on_build(const Source& in, const BuildEnv& env) {
@@ -306,10 +324,12 @@ std::optional<app::PageDescription::Row> CheatsItem::on_describe(const Look&) co
     return described(app::PageDescription::RowKind::Submenu, label);
 }
 
-Transition CheatsItem::on_activate(const Press& press, IOptionHost& host) const {
-    if (!press.select)
-        return refused(host);
+Transition CheatsItem::on_select(IOptionHost&) const {
     return Transition{Transition::Kind::Push, PageId::Cheats};
+}
+
+Transition CheatsItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
+    return refused(host);
 }
 
 OptionItem::Carry ManualItem::on_build(const Source& in, const BuildEnv&) {
@@ -325,12 +345,16 @@ std::optional<app::PageDescription::Row> ManualItem::on_describe(const Look&) co
     return described(app::PageDescription::RowKind::Action, label);
 }
 
-Transition ManualItem::on_activate(const Press&, IOptionHost& host) const {
+Transition ManualItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition ManualItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
 OptionItem::Carry DipItem::on_build(const Source& in, const BuildEnv&) {
-    label = kDipRow;
+    label = dip_row_label();
     return in.carry;
 }
 
@@ -342,10 +366,12 @@ std::optional<app::PageDescription::Row> DipItem::on_describe(const Look&) const
     return described(app::PageDescription::RowKind::Submenu, label);
 }
 
-Transition DipItem::on_activate(const Press& press, IOptionHost& host) const {
-    if (!press.select)
-        return refused(host);
+Transition DipItem::on_select(IOptionHost&) const {
     return Transition{Transition::Kind::Push, PageId::ArcadeDip};
+}
+
+Transition DipItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
+    return refused(host);
 }
 
 OptionItem::Carry ToggleItem::on_build(const Source& in, const BuildEnv&) {
@@ -360,8 +386,12 @@ std::optional<app::PageDescription::Row> ToggleItem::on_describe(const Look&) co
     return described(app::PageDescription::RowKind::Action, label);
 }
 
-Transition ToggleItem::on_activate(const Press& press, IOptionHost& host) const {
-    (void)pulse_one_bit(*this, press, host);
+Transition ToggleItem::on_select(IOptionHost& host) const {
+    (void)pulse_one_bit(*this, host);
+    return Transition{};
+}
+
+Transition ToggleItem::on_step(CycleDir, proto::FieldValue, IOptionHost&) const {
     return Transition{};
 }
 
@@ -377,10 +407,14 @@ std::optional<app::PageDescription::Row> ToggleCloseItem::on_describe(const Look
     return described(app::PageDescription::RowKind::Action, label);
 }
 
-Transition ToggleCloseItem::on_activate(const Press& press, IOptionHost& host) const {
-    if (!pulse_one_bit(*this, press, host))
+Transition ToggleCloseItem::on_select(IOptionHost& host) const {
+    if (!pulse_one_bit(*this, host))
         return Transition{};
     return Transition{Transition::Kind::CloseAll};
+}
+
+Transition ToggleCloseItem::on_step(CycleDir, proto::FieldValue, IOptionHost&) const {
+    return Transition{};
 }
 
 OptionItem::Carry CycleItem::on_build(const Source& in, const BuildEnv& env) {
@@ -396,9 +430,7 @@ std::string_view CycleItem::shown_value(const Look& look) const {
 }
 
 std::string CycleItem::on_compose(const Look& look) const {
-    char row[kClassicRowColumns + 1] = {};
-    format_key_value(row, label, shown_value(look));
-    return std::string{row};
+    return std::string{format_key_value(label, shown_value(look)).view()};
 }
 
 std::optional<app::PageDescription::Row> CycleItem::on_describe(const Look& look) const {
@@ -408,18 +440,19 @@ std::optional<app::PageDescription::Row> CycleItem::on_describe(const Look& look
     return row;
 }
 
-Transition CycleItem::on_activate(const Press& press, IOptionHost& host) const {
+Transition CycleItem::on_select(IOptionHost& host) const {
+
+    return on_step(CycleDir::Next, host.field(bits), host);
+}
+
+Transition CycleItem::on_step(CycleDir dir, proto::FieldValue value, IOptionHost& host) const {
     if (!bits.valid())
         return refused(host);
     const SlotLabels labels{values};
-    const proto::FieldValue next = cycle_value(
-        bits,
-        press.value,
-        press.minus ? CycleDir::Back : CycleDir::Next,
-        &labels
-    );
-    constexpr std::uint32_t kStatusFieldMask = (std::uint32_t{1} << kStatusFieldBits) - 1u;
-    host.write_status(bits, proto::FieldValue{next.v & kStatusFieldMask});
+    const proto::FieldValue
+        next = cycle_value(bits, value, dir, infra::OptRef<const ISlotLabels>{labels});
+
+    host.write_status(bits, next);
     return Transition{};
 }
 
@@ -439,7 +472,11 @@ std::optional<app::PageDescription::Row> SeparatorItem::on_describe(const Look&)
     return described(app::PageDescription::RowKind::Separator, {});
 }
 
-Transition SeparatorItem::on_activate(const Press&, IOptionHost& host) const {
+Transition SeparatorItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition SeparatorItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
@@ -461,7 +498,11 @@ std::optional<app::PageDescription::Row> AddonItem::on_describe(const Look&) con
     return std::nullopt;
 }
 
-Transition AddonItem::on_activate(const Press&, IOptionHost& host) const {
+Transition AddonItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition AddonItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
@@ -477,7 +518,11 @@ std::optional<app::PageDescription::Row> DefMraItem::on_describe(const Look&) co
     return std::nullopt;
 }
 
-Transition DefMraItem::on_activate(const Press&, IOptionHost& host) const {
+Transition DefMraItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition DefMraItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
@@ -493,7 +538,11 @@ std::optional<app::PageDescription::Row> JoyNamesItem::on_describe(const Look&) 
     return std::nullopt;
 }
 
-Transition JoyNamesItem::on_activate(const Press&, IOptionHost& host) const {
+Transition JoyNamesItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition JoyNamesItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
@@ -509,7 +558,11 @@ std::optional<app::PageDescription::Row> InfoItem::on_describe(const Look&) cons
     return std::nullopt;
 }
 
-Transition InfoItem::on_activate(const Press&, IOptionHost& host) const {
+Transition InfoItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition InfoItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
@@ -525,7 +578,11 @@ std::optional<app::PageDescription::Row> VersionItem::on_describe(const Look&) c
     return std::nullopt;
 }
 
-Transition VersionItem::on_activate(const Press&, IOptionHost& host) const {
+Transition VersionItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition VersionItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
@@ -541,7 +598,11 @@ std::optional<app::PageDescription::Row> CfgVerItem::on_describe(const Look&) co
     return std::nullopt;
 }
 
-Transition CfgVerItem::on_activate(const Press&, IOptionHost& host) const {
+Transition CfgVerItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition CfgVerItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
@@ -557,7 +618,11 @@ std::optional<app::PageDescription::Row> NoOsdItem::on_describe(const Look&) con
     return std::nullopt;
 }
 
-Transition NoOsdItem::on_activate(const Press&, IOptionHost& host) const {
+Transition NoOsdItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition NoOsdItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
@@ -573,7 +638,11 @@ std::optional<app::PageDescription::Row> UnknownItem::on_describe(const Look&) c
     return std::nullopt;
 }
 
-Transition UnknownItem::on_activate(const Press&, IOptionHost& host) const {
+Transition UnknownItem::on_select(IOptionHost& host) const {
+    return refused(host);
+}
+
+Transition UnknownItem::on_step(CycleDir, proto::FieldValue, IOptionHost& host) const {
     return refused(host);
 }
 
@@ -594,8 +663,14 @@ std::optional<app::PageDescription::Row> ExitItem::on_describe(const Look&) cons
     );
 }
 
-Transition ExitItem::on_activate(const Press& press, IOptionHost&) const {
-    return press.at_root ? Transition{Transition::Kind::Leave} : Transition{Transition::Kind::Pop};
+Transition ExitItem::on_select(IOptionHost&) const {
+    return page == proto::kRootSubmenu ? Transition{Transition::Kind::Leave}
+                                       : Transition{Transition::Kind::Pop};
+}
+
+Transition ExitItem::on_step(CycleDir, proto::FieldValue, IOptionHost&) const {
+    return page == proto::kRootSubmenu ? Transition{Transition::Kind::Leave}
+                                       : Transition{Transition::Kind::Pop};
 }
 
 }

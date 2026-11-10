@@ -25,26 +25,26 @@ public:
         const ISessionLive& live,
         hal::PinLevelCell& levels
     ) noexcept
-        : src_(&src),
-          live_(&live),
+        : src_(src),
+          live_(live),
           out_(router),
-          levels_(&levels) {}
+          levels_(levels) {}
 
     void service(bool hold_buttons = false) noexcept;
 
-    [[nodiscard]] bool active() const noexcept { return live_->session_live(); }
+    [[nodiscard]] bool active() const noexcept { return live_.session_live(); }
 
-    [[nodiscard]] const hal::PinLevelCell& levels() const noexcept { return *levels_; }
+    [[nodiscard]] const hal::PinLevelCell& levels() const noexcept { return levels_; }
 
     [[nodiscard]] const hal::SpiSample& level() const noexcept { return last_; }
 
     [[nodiscard]] bool seen() const noexcept { return seen_; }
 
 private:
-    hal::ISpiSampleSource* src_;
-    const ISessionLive* live_;
+    hal::ISpiSampleSource& src_;
+    const ISessionLive& live_;
     Port out_;
-    hal::PinLevelCell* const levels_;
+    hal::PinLevelCell& levels_;
     hal::SpiSample last_{};
     bool seen_ = false;
 };

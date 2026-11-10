@@ -2,6 +2,7 @@
 #include "tasty_splash.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <span>
@@ -10,6 +11,7 @@
 #include "os/mmio_region.h"
 
 #include "app/fb_view.h"
+#include "app/picture_size.h"
 #include "app/video_pump.h"
 #include "hal/phys_region.h"
 #include "svc/video_service.h"
@@ -19,6 +21,9 @@
 #include "splash_embed.h"
 
 namespace mister::fw {
+
+using ::mister::infra::affine::operator-;
+
 namespace {
 
 constexpr std::uint32_t kLogo = 32;
@@ -75,19 +80,26 @@ Ex<void> TastySplash::map(const hal::PhysRegion& fb) noexcept {
     return {};
 }
 
-bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
+bool TastySplash::blit(app::OutputSize out) noexcept {
     TASTY_SEAT_BODY(TastySplash);
-    if (!fb_ || width == 0 || height == 0)
+    const app::PictureSize size = app::PictureSize::of(out);
+    const app::PixelBytes pixel_bytes = app::PixelBytes::of(sizeof(std::uint32_t));
+    if (!fb_ || size.empty())
         return false;
-    const std::size_t need = app::kFramebufferPageBytes
-        + static_cast<std::size_t>(width) * height * 4u;
+    const app::RowBytes stride = size.stride_bytes(pixel_bytes);
+    const std::size_t need = app::kFramebufferPageBytes + app::rows_span(stride, size.rows);
     if (fb_region_.len == 0 || need > fb_region_.len)
         return false;
     auto view = fb_->view(0, need);
     const std::span<std::byte> px = view.subspan(app::kFramebufferPageBytes);
-    const auto put = [px, width](std::uint32_t y, std::uint32_t x, std::uint32_t c) {
-        infra::store_le<std::uint32_t>(px.subspan((std::size_t{y} * width + x) * 4u).first<4>(), c);
-    };
+    const auto put =
+        [px, stride, pixel_bytes](app::PictureRows y, app::PicturePixels x, std::uint32_t c) {
+            const std::span<std::byte> line = px.subspan(app::rows_span(stride, y));
+            infra::store_le<std::uint32_t>(
+                x.pixel_at(line, pixel_bytes).first<sizeof(std::uint32_t)>(),
+                c
+            );
+        };
     auto* raw = static_cast<unsigned char*>(std::malloc(kSplashEmbedRaw));
     if (raw == nullptr)
         return false;
@@ -96,51 +108,53 @@ bool TastySplash::blit(std::uint32_t width, std::uint32_t height) noexcept {
         std::free(raw);
         return false;
     }
-    const std::uint32_t iw = kSplashEmbedW;
-    const std::uint32_t ih = kSplashEmbedH;
-    const std::uint64_t fit_w = static_cast<std::uint64_t>(height) * iw;
-    const std::uint64_t fit_h = static_cast<std::uint64_t>(width) * ih;
-    std::uint32_t dw = width;
-    std::uint32_t dh = height;
-    if (fit_w <= fit_h)
-        dw = static_cast<std::uint32_t>(fit_w / ih);
-    else
-        dh = static_cast<std::uint32_t>(fit_h / iw);
-    if (dw == 0 || dh == 0) {
+    const app::PictureSize source{
+        app::PicturePixels::of(kSplashEmbedW),
+        app::PictureRows::of(kSplashEmbedH)
+    };
+    const app::PictureFit fit{source};
+    const app::PictureSize drawn = fit.fitted_into(size).size();
+    if (drawn.empty()) {
         std::free(raw);
         return false;
     }
-    const std::uint32_t x0 = (width - dw) / 2;
-    const std::uint32_t y0 = (height - dh) / 2;
-    for (std::uint32_t y = 0; y < height; ++y) {
-        for (std::uint32_t x = 0; x < width; ++x) {
+    const app::HdRect box = drawn.centre_in(size);
+    const app::HdRect frame = out.bounds();
+    const app::RowBytes src_stride = source.stride_bytes(pixel_bytes);
+    const std::span<const std::byte> rgba = std::as_bytes(
+        std::span<const unsigned char>{raw, kSplashEmbedRaw}
+    );
+    for (std::int32_t y = 0; y < frame.h; ++y) {
+        for (std::int32_t x = 0; x < frame.w; ++x) {
             std::uint32_t c = kArgbBg;
-            if (x >= x0 && x < x0 + dw && y >= y0 && y < y0 + dh) {
-                const std::uint32_t lx = (x - x0) * iw / dw;
-                const std::uint32_t ly = (y - y0) * ih / dh;
-                if (lx < iw && ly < ih) {
-                    const unsigned char* p = raw + (static_cast<std::size_t>(ly) * iw + lx) * 4u;
-                    c = 0xFF000000u
-                        | (std::uint32_t{p[0]} << 16)
-                        | (std::uint32_t{p[1]} << 8)
-                        | std::uint32_t{p[2]};
-                }
+            if (x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h) {
+                const app::PictureRow sy = source.rows.sample_row(
+                    app::PictureRows::of(y - box.y),
+                    drawn.rows
+                );
+                const app::PicturePixels sx = source.width.sample_column(
+                    app::PicturePixels::of(x - box.x),
+                    drawn.width
+                );
+                const std::span<const std::byte> line = rgba.subspan(
+                    app::rows_span(src_stride, sy)
+                );
+                const std::span<const std::byte> at = sx.pixel_at(line, pixel_bytes);
+                c = 0xFF000000u
+                    | (std::to_integer<std::uint32_t>(at[0]) << 16)
+                    | (std::to_integer<std::uint32_t>(at[1]) << 8)
+                    | std::to_integer<std::uint32_t>(at[2]);
             }
-            put(y, x, c);
+            put(app::PictureRows::of(y), app::PicturePixels::of(x), c);
         }
     }
     std::free(raw);
     return true;
 }
 
-Ex<void> TastySplash::show(
-    app::VideoPump& video,
-    std::uint32_t width,
-    std::uint32_t height
-) noexcept {
+Ex<void> TastySplash::show(app::VideoPump& video, app::OutputSize out) noexcept {
     TASTY_SEAT_BODY(TastySplash);
-    const std::uint32_t w = width != 0 ? width : kDefaultW;
-    const std::uint32_t h = height != 0 ? height : kDefaultH;
+    const app::PictureSize size = app::PictureSize::of(out);
     const std::uint32_t addr = static_cast<std::uint32_t>(
         fb_region_.phys.v + app::kFramebufferPageBytes
     );
@@ -148,13 +162,13 @@ Ex<void> TastySplash::show(
         kFbEnWord,
         static_cast<std::uint16_t>(addr),
         static_cast<std::uint16_t>(addr >> 16),
-        static_cast<std::uint16_t>(w),
-        static_cast<std::uint16_t>(h),
+        size.width.wire_word(),
+        size.rows.wire_word(),
         0,
-        static_cast<std::uint16_t>(w - 1),
+        (size.width - app::PicturePixels{1}).wire_word(),
         0,
-        static_cast<std::uint16_t>(h - 1),
-        static_cast<std::uint16_t>(w * 4),
+        (size.rows - app::PictureRows{1}).wire_word(),
+        size.stride_bytes(app::PixelBytes::of(sizeof(std::uint32_t))).wire_word(),
     };
     return video.wire().publish(proto::UioOp::SetFbuf, words);
 }

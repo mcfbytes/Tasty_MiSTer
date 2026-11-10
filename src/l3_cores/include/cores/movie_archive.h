@@ -72,10 +72,4 @@ inline constexpr MovieArchiveFormat kLsmvArchive{
     const MovieArchiveFormat& format
 );
 
-[[nodiscard]] Ex<std::string> flatten_json(
-    std::string_view json,
-    std::string_view prefix,
-    std::size_t cap
-);
-
 }

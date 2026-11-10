@@ -16,7 +16,7 @@ public:
 
     explicit PsxSectorMap(const svc::DiscGeometry& disc) noexcept : disc_(disc) {}
 
-    [[nodiscard]] Answer classify(std::int64_t lba) const noexcept;
+    [[nodiscard]] Answer classify(proto::Lba lba) const noexcept;
 
     [[nodiscard]] static constexpr std::uint8_t fill_byte(Answer a) noexcept {
         return a == Answer::Zeros || a == Answer::Pregap ? 0x00 : 0xAA;

@@ -15,7 +15,7 @@ class IStorageChannel {
 public:
     virtual ~IStorageChannel() = default;
 
-    [[nodiscard]] virtual StorageSeq submit(const StorageRequest& req) noexcept = 0;
+    [[nodiscard]] virtual std::optional<StorageSeq> submit(const StorageRequest& req) noexcept = 0;
 
     [[nodiscard]] virtual std::optional<StorageCompletion> reap() noexcept = 0;
 

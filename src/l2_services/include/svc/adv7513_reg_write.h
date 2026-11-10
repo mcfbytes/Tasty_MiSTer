@@ -32,7 +32,6 @@ inline constexpr os::I2cReg kRegColorSpace{0x57};
 inline constexpr os::I2cReg kRegGameModeHdr{0x59};
 inline constexpr os::I2cReg kRegAudioMode{0xAF};
 
-inline constexpr std::uint8_t kInt0HdmiBits = 0xC0;
 inline constexpr std::uint8_t kAviAspectDefault = 0x08;
 inline constexpr std::uint8_t kGameModeOff = 0x10;
 inline constexpr std::uint8_t kGameModeOn = 0x12;

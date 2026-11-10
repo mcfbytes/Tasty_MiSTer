@@ -11,7 +11,6 @@
 #include "hal/spi_transport.h"
 #include "proto/fio_bracket.h"
 #include "proto/link_frame.h"
-#include "proto/upload_session.h"
 #include "proto/session_params.h"
 #include "proto/types.h"
 
@@ -71,7 +70,7 @@ public:
 
     bool active() const noexcept { return bracket_.active(); }
 
-    WideIoIndex index() const noexcept { return WideIoIndex{bracket_.index()}; }
+    WideIoIndex index() const noexcept { return bracket_.index(); }
 
 private:
     explicit DownloadSession(FioBracket&& b) noexcept : bracket_(std::move(b)) {}

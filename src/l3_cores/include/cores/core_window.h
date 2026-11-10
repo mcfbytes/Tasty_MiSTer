@@ -6,6 +6,7 @@
 
 #include "cores/pcm_feed.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 
 namespace mister::cores {
 
@@ -23,7 +24,7 @@ public:
 
     [[nodiscard]] virtual std::size_t size() const noexcept = 0;
 
-    [[nodiscard]] virtual IPcmFeed* pcm_feed() noexcept { return nullptr; }
+    [[nodiscard]] virtual infra::OptRef<IPcmFeed> pcm_feed() noexcept { return {}; }
 
 protected:
     ICoreWindow() = default;

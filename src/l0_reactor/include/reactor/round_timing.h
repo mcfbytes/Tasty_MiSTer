@@ -9,6 +9,8 @@
 
 #include "infra/seat.h"
 #include "infra/telemetry.h"
+#include "reactor/round_lifecycle.h"
+#include "reactor/service_slot.h"
 
 namespace mister::reactor {
 
@@ -16,14 +18,11 @@ inline constexpr std::size_t kRoundBuckets = 20;
 
 enum class RoundSegment : std::uint8_t { None, Steps, RowDoorbell, RowSwept, Tail, kCount };
 
-enum class RoundLifecycle : std::uint8_t { Rung = 1, Bind = 2, Switch = 4 };
-inline constexpr std::uint8_t kRoundLifecycleAll = 7;
-
 struct RoundTiming {
-    struct Cause {
+    struct Blame {
         RoundSegment seg = RoundSegment::None;
-        std::uint8_t index = 0;
-        std::uint8_t lifecycle = 0;
+        ServiceSlot index{};
+        RoundLifecycleSet lifecycle_marks{};
         std::uint8_t pad = 0;
     };
 
@@ -34,7 +33,7 @@ struct RoundTiming {
         std::uint32_t n = 0;
         std::uint32_t over_1ms = 0;
         std::uint32_t hist[kRoundBuckets] = {};
-        Cause max_cause{};
+        Blame max_blame{};
     };
 
     std::uint32_t epoch = 0;
@@ -42,7 +41,7 @@ struct RoundTiming {
     std::uint64_t epoch_ns = 0;
     Dist steady{}, lifecycle{}, wake{};
     std::uint64_t all_steady_max_ns = 0, all_life_max_ns = 0, all_wake_max_ns = 0;
-    Cause all_steady_cause{}, all_life_cause{};
+    Blame all_steady_blame{}, all_life_blame{};
     std::uint32_t all_steady_rounds = 0, all_life_rounds = 0;
     std::uint32_t all_steady_over_1ms = 0, tick_overruns = 0;
     std::uint64_t all_steady_sum_ns = 0;

@@ -11,6 +11,7 @@
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "proto/frame_counter_read.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -38,13 +39,13 @@ public:
 
     void settle(bool ready, std::uint32_t core_seq, MovieFrame movie_frame) noexcept;
 
-    [[nodiscard]] std::uint32_t take_round_words() noexcept {
+    [[nodiscard]] proto::FioWordCount take_round_words() noexcept {
         const std::uint32_t w = round_words_;
         round_words_ = 0;
-        return w;
+        return proto::FioWordCount{w};
     }
 
-    [[nodiscard]] bool demanded() const noexcept { return demand_.on != 0; }
+    [[nodiscard]] bool demanded() const noexcept { return demand_.on; }
 
     [[nodiscard]] const CoreFrameRecord& record() const noexcept { return rec_; }
 

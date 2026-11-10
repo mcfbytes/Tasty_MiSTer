@@ -33,8 +33,6 @@ public:
 
     [[nodiscard]] Ex<void> flush() override { return {}; }
 
-    FileKind kind() const noexcept override { return FileKind::Memory; }
-
     [[nodiscard]] Ex<void> advise(Access a, std::uint64_t, std::uint64_t) override {
         if (a == Access::Sequential)
             hints_->fetch_add(1, std::memory_order_relaxed);

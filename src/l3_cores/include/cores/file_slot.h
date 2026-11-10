@@ -4,17 +4,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 
+#include "cores/types.h"
 #include "infra/seat.h"
-#include "proto/types.h"
 
 namespace mister::cores {
 
-class NeoGeoAliasSource;
-
-using proto::IoIndex;
+class IRomsetAliasSource;
 
 enum class SlotRole : std::uint8_t { Image, Disc, Save, Ladder };
 
@@ -29,10 +28,10 @@ struct FileSlot {
     bool required = false;
     SlotRole role = SlotRole::Image;
 
-    bool romset_browse = false;
+    std::optional<std::string_view> romset_browse{};
     bool no_enter = false;
 
-    std::unique_ptr<NeoGeoAliasSource> (*romset_aliases)() = nullptr;
+    std::unique_ptr<IRomsetAliasSource> (*romset_aliases)() = nullptr;
 
     bool opens_zip = false;
 
@@ -41,14 +40,14 @@ struct FileSlot {
 
 [[nodiscard]] constexpr bool walks_romset(std::span<const FileSlot> slots, IoIndex index) {
     for (const FileSlot& s : slots) {
-        if (s.index.v == (index.v & 0x3Fu) && s.romset_browse)
+        if (s.index == index && s.romset_browse.has_value())
             return true;
     }
     return false;
 }
 
 [[nodiscard]] constexpr bool is_load_row(const FileSlot& s) {
-    return s.romset_browse;
+    return s.romset_browse.has_value();
 }
 
 [[nodiscard]] constexpr SlotRole role_of(

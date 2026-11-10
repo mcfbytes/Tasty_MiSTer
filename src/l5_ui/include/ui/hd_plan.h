@@ -15,6 +15,7 @@ namespace mister::ui {
 
 class IHdRewalk;
 struct SystemFacts;
+struct SessionFacts;
 
 class IHdPlan {
 public:
@@ -29,7 +30,10 @@ public:
 
     [[nodiscard]] virtual bool remembers_focus() const noexcept { return true; }
 
-    virtual void refresh(const SystemFacts& facts) { (void)facts; }
+    virtual void refresh(const SystemFacts& facts, const SessionFacts& session) {
+        (void)facts;
+        (void)session;
+    }
 
     virtual infra::OptRef<IHdRewalk> rewalker() { return {}; }
 

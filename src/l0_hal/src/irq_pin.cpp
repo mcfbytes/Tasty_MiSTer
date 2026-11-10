@@ -4,12 +4,17 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
-#include <cstdio>
+#include <string_view>
+#include <utility>
 
+#include "infra/byte_view.h"
 #include "infra/error.h"
+#include "infra/hex_text.h"
 #include "infra/parse_int.h"
 #include "infra/unique_fd.h"
+#include "os/path_buf.h"
 #include "os/small_file.h"
 
 namespace mister::hal {
@@ -80,8 +85,7 @@ struct IrqPath {
 
 IrqPath irq_path(const char* root, os::KernelIrq irq, const char* leaf) noexcept {
     IrqPath p{};
-    const int n = std::snprintf(p.text, sizeof p.text, "%s/irq/%u/%s", root, irq.v, leaf);
-    p.fits = n > 0 && static_cast<std::size_t>(n) < sizeof p.text;
+    p.fits = os::format_path(std::span<char>(p.text), "%s/irq/%u/%s", root, irq.v, leaf);
     return p;
 }
 
@@ -90,25 +94,28 @@ IrqPath irq_path(const char* root, os::KernelIrq irq, const char* leaf) noexcept
     const auto got = os::read_small_file(path, std::span<char>(buf));
     if (!got)
         return std::unexpected(got.error());
-    if (*got > kMaskCap)
+    if (got->size() > kMaskCap)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
-    const auto mask = parse_cpu_mask(std::string_view(buf, *got));
+    const auto mask = parse_cpu_mask(infra::as_text(*got));
     if (!mask)
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     return *mask;
 }
 
 [[nodiscard]] Ex<void> write_mask(const char* path, os::CpuMask mask) noexcept {
-    char text[16];
-    const int len = std::snprintf(text, sizeof text, "%x\n", mask.v);
+    std::array<char, 16> text{};
+    if (!os::format_path(std::span<char>(text), "%s\n", infra::HexText{mask.v}.c_str())) {
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
+    }
+    const std::string_view line{text.data()};
     const int fd = ::open(path, O_WRONLY | O_TRUNC | O_CLOEXEC);
     if (fd < 0) {
         return std::unexpected(Error{Errc::os, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
     UniqueFd guard{fd};
     for (;;) {
-        const ssize_t n = ::write(guard.get(), text, static_cast<std::size_t>(len));
-        if (n == len)
+        const ssize_t n = ::write(guard.get(), line.data(), line.size());
+        if (std::cmp_equal(n, line.size()))
             return {};
         if (n < 0 && errno == EINTR)
             continue;
@@ -129,8 +136,7 @@ using InterruptsBuf = char[kInterruptsCap + 1];
 InterruptsList read_interrupts(InterruptsBuf& buf, const char* proc_root) noexcept {
     InterruptsList l{};
     char path[kPathCap];
-    const int n = std::snprintf(path, sizeof path, "%s/interrupts", proc_root);
-    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof path) {
+    if (!os::format_path(std::span<char>(path), "%s/interrupts", proc_root)) {
         l.err = ENAMETOOLONG;
         return l;
     }
@@ -140,8 +146,10 @@ InterruptsList read_interrupts(InterruptsBuf& buf, const char* proc_root) noexce
         return l;
     }
     l.readable = true;
-    l.truncated = *got > kInterruptsCap;
-    l.text = std::string_view(buf, l.truncated ? kInterruptsCap : *got);
+    l.truncated = got->size() > kInterruptsCap;
+    l.text = infra::as_text(*got);
+    if (l.truncated)
+        l.text = l.text.substr(0, kInterruptsCap);
     return l;
 }
 

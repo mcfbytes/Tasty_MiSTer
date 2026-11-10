@@ -47,6 +47,10 @@ struct ChdGeometry {
         return static_cast<std::size_t>(hunk_bytes.v);
     }
 
+    [[nodiscard]] constexpr std::size_t extent_of(HunkCount n) const noexcept {
+        return n.bytes_at(hunk_extent());
+    }
+
     [[nodiscard]] constexpr std::uint32_t hunk_detail() const noexcept {
         return static_cast<std::uint32_t>(hunk_bytes.v);
     }

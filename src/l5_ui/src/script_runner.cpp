@@ -13,7 +13,7 @@
 
 #include "app/process_integration.h"
 #include "ui/bt_ops.h"
-#include "ui/fb_terminal_host.h"
+#include "ui/script_launch.h"
 #include "ui/script_policy.h"
 #include "ui/shell_bt_ops.h"
 
@@ -57,22 +57,17 @@ Ex<void> ShellBtOps::renew_pairings() {
     return app::proc::bluetoothd_renew();
 }
 
-Ex<void> ScriptRunner::start(
-    ScriptKind kind,
-    std::string_view argv0,
-    bool bt_reset,
-    infra::OptRef<IBtOps> bt
-) {
+Ex<void> ScriptRunner::start(const ScriptRequest& req, infra::OptRef<IBtOps> bt) {
     if (child_) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), 0});
     }
-    const IScriptPolicy& policy = script_policy_for(kind);
+    const IScriptPolicy& policy = script_policy_for(req.kind());
     finished_ = false;
     count_ = 0;
     for (auto& s : ring_)
         s.clear();
 
-    auto spawn = policy.resolve(argv0);
+    auto spawn = policy.resolve(req);
     if (!spawn)
         return std::unexpected(spawn.error());
     const std::string cmd = static_cast<std::string&&>(spawn->cmd);
@@ -80,7 +75,7 @@ Ex<void> ScriptRunner::start(
 
     widen_affinity();
 
-    policy.before_spawn(bt_reset, bt);
+    policy.before_spawn(req, bt);
 
     std::FILE* p = ::popen(cmd.c_str(), "r");
     if (p == nullptr) {
@@ -181,14 +176,6 @@ void ScriptRunner::widen_affinity() {
 
 void ScriptRunner::narrow_affinity() {
     app::proc::restore_ui_affinity();
-}
-
-Ex<void> FbTerminalHost::launch(std::string_view) {
-    return unimplemented(ERR_SITE());
-}
-
-Ex<bool> FbTerminalHost::reap() {
-    return unimplemented(ERR_SITE());
 }
 
 }

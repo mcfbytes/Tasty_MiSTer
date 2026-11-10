@@ -13,7 +13,7 @@ using namespace std::chrono_literals;
 static_assert(kSaturnIoIndices.data == IoIndex{8}, "saturn.h:117: CD_DATA_IO_INDEX == 0x8");
 static_assert(kSaturnIoIndices.info == IoIndex{0xC}, "saturn.h:118: BOOT_IO_INDEX == 0xC");
 static_assert(
-    kSaturnIoIndices.cdda == IoIndex{} && kSaturnIoIndices.subcode == IoIndex{},
+    !kSaturnIoIndices.cdda.has_value() && !kSaturnIoIndices.subcode.has_value(),
     "saturncdd.cpp:1363: CD-DA is a MODE WORD on the data index; no subcode slot"
 );
 static_assert(
@@ -23,16 +23,15 @@ static_assert(
 );
 
 static_assert(
-    kSaturnProfile.dialect == CdDialect::SaturnRing,
+    std::holds_alternative<CdProfile::SaturnFacts>(kSaturnProfile.row),
     "spec 1.5.2.1: Saturn reads 6 command words and writes 6 status words"
 );
 static_assert(
-    kSaturnProfile.crc_start == 0,
-    "saturncdd.cpp:1116-1120: stat[11] is ~sum(stat[0..10]), no BCD checksum"
+    std::get<CdProfile::SaturnFacts>(kSaturnProfile.row).quirks.size() == kSaturnQuirks.size(),
+    "saturncdd.cpp:1116-1120: the quirk rows are this dialect's own"
 );
-static_assert(kSaturnProfile.seek_fast_paths.empty(), "PCE-CD's table; Saturn has none");
 static_assert(
-    !kSaturnProfile.sniff_sega_disc_system,
+    !kSaturnProfile.cue.sniff_sega_disc_system,
     "saturncdd.cpp:369-376: the SEGADISCSYSTEM sniff is commented out"
 );
 
@@ -105,7 +104,8 @@ static_assert(
 static_assert(
     kSaturnSlots[1].role == SlotRole::Save
         && kSaturnSlots[1].index == IoIndex{1}
-        && kSaturnSlots[1].index == kSaturn.staging.save_slot,
+        && kSaturn.staging.save
+        && kSaturnSlots[1].index == kSaturn.staging.save->slot,
     "menu.cpp:2473,:2830: S1 browses saves and mounts on the save slot"
 );
 static_assert(
@@ -119,11 +119,11 @@ static_assert(
 
 static_assert(kSaturn.staging.order == StageOrder::Saturn);
 static_assert(
-    kSaturn.staging.save_slot == IoIndex{1},
+    kSaturn.staging.save && kSaturn.staging.save->slot == IoIndex{1},
     "sat.cpp:133: user_io_file_mount(buf, 1, 1) — slot 1, not 3DO's 0"
 );
 static_assert(
-    kSaturn.staging.save_dest == WideIoIndex{4},
+    kSaturn.staging.save && kSaturn.staging.save->bracket == WideIoIndex{4},
     "saturn.h:119 / sat.cpp:119: SAVE_IO_INDEX 0x4 frames the save mount"
 );
 static_assert(
@@ -131,8 +131,9 @@ static_assert(
     "sat.cpp:176 asserts bit 0 and :235 releases it: a HOLD, not a pulse"
 );
 static_assert(
-    kSaturn.staging.save_name_disc_words.size() == 1
-        && kSaturn.staging.save_name_disc_words[0] == std::string_view{"disc"},
+    kSaturn.staging.save
+        && kSaturn.staging.save->disc_words.size() == 1
+        && kSaturn.staging.save->disc_words[0] == std::string_view{"disc"},
     "sat.cpp:101: disc/Disc/DISC only — 3DO's 'disk' is not searched"
 );
 
@@ -168,7 +169,8 @@ static_assert(
 static_assert(
     kSaturnBlankSave.fill == std::byte{0x00}
         && kSaturnBlankSave.regions.size() == 1
-        && kSaturnBlankSave.regions[0].offset_bytes == 65'536,
+        && kSaturnBlankSave.regions[0].block == saturn_blank::kSecondCopyLba
+        && kSaturnBlankSave.regions[0].within == 0,
     "sat.cpp:289: the record at LBA 0 AND LBA 128 of 512-byte blocks"
 );
 

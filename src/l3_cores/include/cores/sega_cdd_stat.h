@@ -6,17 +6,69 @@
 #include <cstdint>
 #include <span>
 
+#include "cores/cd_drive_state.h"
 #include "cores/cdwire.h"
+#include "cores/sega_frame_word.h"
 #include "infra/seat.h"
 #include "svc/types.h"
 
 namespace mister::cores {
 
+enum class SegaCddStatus : std::uint8_t {
+    Stop = 0x00,
+    Play = 0x01,
+    Seek = 0x02,
+    Scan = 0x03,
+    Pause = 0x04,
+    Open = 0x05,
+    Toc = 0x09,
+    NoDisc = 0x0B,
+    End = 0x0C,
+    Tray = 0x0E,
+};
+
+[[nodiscard]] constexpr std::uint8_t wire_byte(SegaCddStatus s) noexcept {
+    return static_cast<std::uint8_t>(s);
+}
+
+[[nodiscard]] constexpr SegaCddStatus status_of(std::uint8_t byte) noexcept {
+    return static_cast<SegaCddStatus>(byte);
+}
+
+[[nodiscard]] constexpr CdDriveState drive_state_of(SegaCddStatus s, bool is_data) noexcept {
+    switch (s) {
+        case SegaCddStatus::Stop:
+            return CdDriveState::Stopped;
+        case SegaCddStatus::Play:
+            return is_data ? CdDriveState::Reading : CdDriveState::Playing;
+        case SegaCddStatus::Seek:
+            return CdDriveState::Seeking;
+        case SegaCddStatus::Scan:
+            return CdDriveState::Scanning;
+        case SegaCddStatus::Pause:
+            return CdDriveState::Paused;
+        case SegaCddStatus::Open:
+            return CdDriveState::Open;
+        case SegaCddStatus::Toc:
+            return CdDriveState::Toc;
+        case SegaCddStatus::NoDisc:
+            return CdDriveState::NoDisc;
+        case SegaCddStatus::End:
+            return CdDriveState::End;
+        case SegaCddStatus::Tray:
+            return CdDriveState::Open;
+    }
+    return CdDriveState::Stopped;
+}
+
+class SegaCddEngine;
+
 struct SegaCddStat {
+    friend class SegaCddEngine;
     TASTY_SEAT_EXEMPT(component);
     static constexpr std::size_t kBytes = 9;
-    static constexpr std::uint8_t kNibbleMask = 0x0F;
-    static constexpr unsigned kNibbleBits = 4;
+    static constexpr std::uint8_t kNibbleMask = mister::cores::kFrameNibbleMask;
+    static constexpr unsigned kNibbleBits = mister::cores::kFrameNibbleBits;
 
     static constexpr std::uint8_t kAbsent = 0x0A;
 
@@ -43,9 +95,11 @@ struct SegaCddStat {
 
     constexpr void set(Field f, std::uint8_t v) noexcept { bytes[static_cast<std::size_t>(f)] = v; }
 
-    [[nodiscard]] constexpr std::uint8_t status() const noexcept { return at(Field::Status); }
+    [[nodiscard]] constexpr SegaCddStatus status() const noexcept {
+        return status_of(at(Field::Status));
+    }
 
-    constexpr void set_status(std::uint8_t v) noexcept { set(Field::Status, v); }
+    constexpr void set_status(SegaCddStatus v) noexcept { set(Field::Status, wire_byte(v)); }
 
     [[nodiscard]] constexpr std::uint8_t subcommand() const noexcept {
         return at(Field::Subcommand);
@@ -107,6 +161,10 @@ struct SegaCddStat {
     friend constexpr bool operator==(SegaCddStat, SegaCddStat) = default;
 
 private:
+    [[nodiscard]] static constexpr std::size_t bcd_slot_index(BcdSlot slot) noexcept {
+        return static_cast<std::size_t>(slot);
+    }
+
     constexpr void set_digits_(BcdSlot slot, std::uint8_t packed) noexcept {
         const auto tens = static_cast<std::size_t>(Field::Bcd0Tens)
             + 2 * static_cast<std::size_t>(slot);

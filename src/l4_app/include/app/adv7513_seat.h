@@ -14,6 +14,7 @@
 #include "hal/video_out_decl.h"
 #include "os/clock.h"
 #include "os/nanosleep_delay.h"
+#include "os/types.h"
 #include "svc/adv7513_breaker.h"
 #include "svc/adv7513_bus.h"
 #include "svc/adv7513_init_options.h"
@@ -23,9 +24,10 @@
 #include "svc/adv7513_sub_map.h"
 #include "svc/i2c_adapter.h"
 #include "svc/modeline.h"
+#include "svc/types.h"
 
 namespace mister::svc {
-class VideoService;
+class HdmiLink;
 }
 
 namespace mister::app {
@@ -37,7 +39,7 @@ class Adv7513Seat final : public hal::IHdmiInterrupt {
 
 public:
     struct Host {
-        svc::VideoService& video;
+        svc::HdmiLink& hdmi;
         const VideoWire& wire;
         VideoPumpStats& stats;
         std::optional<Error>& last_error;
@@ -78,18 +80,38 @@ public:
 
     [[nodiscard]] std::optional<VideoI2cOutcome> program_mode(Host h, const svc::Modeline& m);
 
-    void report(VideoPumpStats& stats) noexcept;
+    struct BusReport {
+        svc::Tally writes{};
+        svc::Tally errors{};
+        std::optional<os::I2cReg> fail_reg{};
+        std::optional<os::I2cReg> spd_fail_reg{};
+        std::optional<svc::adv7513::I2cBreaker::Failure> first{};
+        svc::OsErrno last_errno{};
+        svc::Tally trips{};
+        bool breaker_open = false;
+    };
+
+    [[nodiscard]] BusReport report() const noexcept;
+
+    static void apply(const BusReport& r, VideoPumpStats& stats) noexcept;
 
     const svc::adv7513::ProbeReport& probe() const noexcept { return probe_; }
 
     bool attached() const noexcept { return adv_.has_value(); }
+
+    [[nodiscard]] infra::OptRef<svc::adv7513::Adv7513Bus> bus() noexcept {
+        if (!adv_)
+            return {};
+        return infra::OptRef<svc::adv7513::Adv7513Bus>{*adv_};
+    }
 
     bool init_ok() const noexcept { return init_ok_; }
 
 private:
     bool attach(Host h);
     void schedule_reprobe() noexcept;
-    void sync_counters(VideoPumpStats& stats) noexcept;
+    void observe_bus() noexcept;
+    [[nodiscard]] BusReport fold_bus() const noexcept;
     void send_spd(Host h, const Spd& spd);
 
     const os::IClock& clock_;
@@ -114,15 +136,17 @@ private:
     std::chrono::milliseconds probe_backoff_ms_ = kReprobeFirstMs;
     std::int64_t attached_ns_ = 0;
 
-    std::uint32_t writes_base_ = 0;
-    std::uint32_t errors_base_ = 0;
+    BusReport bus_{};
+
+    svc::Tally writes_base_{};
+    svc::Tally errors_base_{};
     bool init_pending_ = false;
     bool init_ok_ = false;
 
     bool ints_armed_ = false;
     std::uint32_t prelude_done_seen_ = 0;
-    std::uint32_t hpd_gen_seen_ = 0;
-    std::uint32_t audio_gen_seen_ = 0;
+    svc::Generation hpd_gen_seen_{};
+    svc::Generation audio_gen_seen_{};
     std::int64_t next_hpd_ns_ = 0;
 };
 

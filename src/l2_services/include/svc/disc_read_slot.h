@@ -6,23 +6,26 @@
 #include <type_traits>
 
 #include "infra/seat.h"
+#include "svc/disc_ask.h"
 #include "svc/disc_reader.h"
+#include "svc/sector_header.h"
+#include "svc/track.h"
 #include "svc/types.h"
 
 namespace mister::svc {
 
-inline constexpr std::size_t kDiscSlotBytes = 2448;
+inline constexpr std::size_t kDiscSlotBytes = kFullFrameBytes;
 
 constexpr std::size_t disc_form_bytes(DiscForm form) noexcept {
     switch (form) {
         case DiscForm::UserData:
-            return 2048;
+            return kUserDataBytes;
         case DiscForm::RawFrame:
-            return 2352;
+            return kRawFrameBytes;
         case DiscForm::Subcode:
-            return 96;
+            return kSubcodeBytes;
         case DiscForm::FullFrame:
-            return kDiscSlotBytes;
+            return kFullFrameBytes;
     }
     return 0;
 }
@@ -35,10 +38,15 @@ struct DiscReadSlot {
     Generation gen{};
     proto::Lba lba{};
     std::uint16_t want = 0;
+
     std::uint16_t got = 0;
     DiscForm form = DiscForm::RawFrame;
+
+    SectorHeader header{};
     bool ok = false;
     std::byte data[kDiscSlotBytes]{};
+
+    [[nodiscard]] constexpr DiscAsk ask() const noexcept { return DiscAsk{form, lba, header}; }
 };
 
 static_assert(std::is_trivially_copyable_v<DiscReadSlot>);

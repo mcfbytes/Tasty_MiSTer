@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/disk_format_row.h"
 
-#include <cctype>
+#include "infra/ascii.h"
 
 namespace mister::svc {
 
 namespace {
-
-bool iequal(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const auto ca = static_cast<unsigned char>(a[i]);
-        const auto cb = static_cast<unsigned char>(b[i]);
-        if (std::tolower(ca) != std::tolower(cb))
-            return false;
-    }
-    return true;
-}
 
 bool magic_hits(const DiskFormatRow& row, std::span<const std::byte> head) noexcept {
     if (row.magic.empty() || row.magic.size() > head.size())
@@ -49,7 +37,7 @@ std::string_view disk_path_extension(std::string_view path) noexcept {
     return leaf.substr(dot + 1);
 }
 
-const DiskFormatRow* select_disk_format(
+infra::OptRef<const DiskFormatRow> select_disk_format(
     std::span<const DiskFormatRow> rows,
     std::string_view path,
     proto::FileSize size,
@@ -57,18 +45,19 @@ const DiskFormatRow* select_disk_format(
 ) noexcept {
     for (const DiskFormatRow& row : rows) {
         if (magic_hits(row, head))
-            return &row;
+            return infra::OptRef<const DiskFormatRow>{row};
     }
     for (const DiskFormatRow& row : rows) {
         if (size_hits(row, size))
-            return &row;
+            return infra::OptRef<const DiskFormatRow>{row};
     }
     const std::string_view ext = disk_path_extension(path);
     for (const DiskFormatRow& row : rows) {
-        if (row.ext.empty() || iequal(row.ext, ext))
-            return &row;
+        if (row.ext.empty() || infra::ieq(row.ext, ext)) {
+            return infra::OptRef<const DiskFormatRow>{row};
+        }
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 }

@@ -103,7 +103,7 @@ private:
 
         const auto byte_off = static_cast<std::size_t>(off);
         if ((off & reg::Block::kWordAlignMask) != 0u
-            || byte_off > Layout::kSize - sizeof(std::uint32_t)) {
+            || !span_fits(byte_off, sizeof(std::uint32_t), Layout::kSize)) {
             fatal(Error{Errc::slot_range, ERR_SITE(), off}, "RegisterWindow: offset");
         }
         return byte_off;

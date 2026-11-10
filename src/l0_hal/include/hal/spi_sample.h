@@ -39,8 +39,4 @@ struct SpiSample {
     };
 }
 
-[[nodiscard]] constexpr SpiWord gpi_data(GpiWord gpi) noexcept {
-    return gpi.data();
-}
-
 }

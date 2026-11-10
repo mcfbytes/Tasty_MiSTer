@@ -2,6 +2,7 @@
 #pragma once
 
 #include <span>
+#include <string_view>
 
 #include "app/cmd_fifo.h"
 #include "hal/bridge_sequencer.h"
@@ -19,8 +20,10 @@
 #include "infra/rt_stats.h"
 #include "os/kernel_rt.h"
 #include "os/types.h"
+#include "os/uio_line_space.h"
 #include "reactor/executive.h"
 #include "reactor/round_timer.h"
+#include "svc/input_enumerator.h"
 #include "svc/vfs.h"
 #include "infra/error.h"
 
@@ -50,6 +53,8 @@ struct BootParts {
     xthread::LogLane& rt_lane;
     const svc::Vfs& vfs;
 
+    std::string_view input_dir = svc::kDefaultInputDir;
+
     RtEvidence& rt_evidence;
 
     os::KernelRt kernel_rt = os::KernelRt::Unknown;
@@ -60,12 +65,5 @@ struct BootParts {
     const char* cmd_fifo_path = app::kCmdFifoPath;
     const char* diag_path = kDiagPath;
 };
-
-template <class End>
-[[nodiscard]] End wired_end(End end, const char* what) noexcept {
-    if (!end)
-        fatal(Error{Errc::busy, ERR_SITE(), 0}, what);
-    return end;
-}
 
 }

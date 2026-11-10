@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
+#include <string_view>
 #include <utility>
 
 #include "infra/error.h"
@@ -12,6 +12,7 @@
 
 namespace mister::proto {
 
+class ILinkFrame;
 class DownloadSession;
 
 class FioBracket {
@@ -30,6 +31,10 @@ public:
         hal::SpiWord mode
     );
 
+    [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, IoIndex index);
+    [[nodiscard]] static Ex<void> set_index(ILinkFrame& frame, WideIoIndex index);
+    [[nodiscard]] static Ex<void> send_file_info(ILinkFrame& frame, std::string_view ext);
+
     ~FioBracket();
 
     FioBracket(FioBracket&& o) noexcept
@@ -44,17 +49,17 @@ public:
 
     [[nodiscard]] hal::ISpiTransport* link() const noexcept { return link_; }
 
-    [[nodiscard]] std::uint16_t index() const noexcept { return index_; }
+    [[nodiscard]] WideIoIndex index() const noexcept { return index_; }
 
 private:
     friend class DownloadSession;
 
     void detach() noexcept { link_ = nullptr; }
 
-    FioBracket(hal::ISpiTransport& link, std::uint16_t index) : link_(&link), index_(index) {}
+    FioBracket(hal::ISpiTransport& link, WideIoIndex index) : link_(&link), index_(index) {}
 
     hal::ISpiTransport* link_;
-    std::uint16_t index_;
+    WideIoIndex index_;
 };
 
 }

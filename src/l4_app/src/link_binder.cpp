@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/link_binder.h"
 
+#include "app/link_rows.h"
 #include "app/log_clock.h"
 #include "app/pcm_ring_feeder.h"
 
@@ -131,7 +132,7 @@ void LinkBinder::bind_one_doorbell(
             .klass = static_cast<std::uint8_t>(b.klass),
             .line = static_cast<std::uint8_t>(b.line)
         },
-        log_now_ns()
+        log_stamp(log_now())
     );
 }
 
@@ -143,7 +144,7 @@ void LinkBinder::fall_back(const proto::IrqBinding& b, Errc why) noexcept {
             .klass = static_cast<std::uint8_t>(b.klass),
             .line = static_cast<std::uint8_t>(b.line)
         },
-        log_now_ns()
+        log_stamp(log_now())
     );
 }
 

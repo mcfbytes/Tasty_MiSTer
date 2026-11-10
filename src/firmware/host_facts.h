@@ -4,7 +4,9 @@
 #include <chrono>
 
 #include "os/kernel_rt.h"
+#include "os/raw_monotonic_clock.h"
 #include "hal/thread_map.h"
+#include "ui/host_sample.h"
 #include "ui/host_sampler.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
@@ -19,8 +21,6 @@ class Vfs;
 
 namespace mister::ui {
 class MenuModel;
-struct StatusBarFacts;
-struct SystemFacts;
 }
 
 namespace mister::fw {
@@ -45,19 +45,21 @@ public:
     HostFacts(const HostFacts&) = delete;
     HostFacts& operator=(const HostFacts&) = delete;
 
-    void sample(ui::SystemFacts& sys, ui::StatusBarFacts& bar) override;
+    [[nodiscard]] ui::HostSample snapshot() override;
 
 private:
     const svc::Vfs& vfs_;
     bool splash_spent_ = false;
+
+    proto::FileSize avail_{};
     const os::IClock& clock_;
 
     const ui::MenuModel& menu_;
-    std::chrono::nanoseconds bt_probed_at_{};
+    os::RawMonotonicClock::time_point bt_probed_at_{};
     bool bt_probed_ = false;
     bool bt_up_ = false;
 
-    std::chrono::nanoseconds net_probed_at_{};
+    os::RawMonotonicClock::time_point net_probed_at_{};
     bool net_probed_ = false;
     bool net_wired_ = false;
     bool net_wifi_ = false;

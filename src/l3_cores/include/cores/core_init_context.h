@@ -13,13 +13,13 @@ class CoreSession;
 
 namespace mister::cores {
 
-class CoreInitHost;
+class ICoreInitHost;
 class Core;
 
 struct CoreInitContext {
     hal::ISpiTransport& link;
     proto::CoreSession& session;
-    CoreInitHost& host;
+    ICoreInitHost& host;
     infra::OptRef<Core> core{};
 };
 

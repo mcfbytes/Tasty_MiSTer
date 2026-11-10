@@ -141,30 +141,28 @@ std::uint32_t device_key(const svc::InputDevice& d) noexcept {
 
 void InputDecode::rebuild_registrations(Reseat bridge) {
 
-    registered_.store(0, std::memory_order_relaxed);
+    registered_ = 0;
     for (svc::InputDevice& d : svc_.devices()) {
         epoll_event ev{};
         ev.events = EPOLLIN;
         ev.data.fd = d.fd();
         (void)::epoll_ctl(epfd_.get(), EPOLL_CTL_DEL, d.fd(), &ev);
         if (::epoll_ctl(epfd_.get(), EPOLL_CTL_ADD, d.fd(), &ev) == 0) {
-            InputWire::bump(registered_, 1);
+            ++registered_;
         }
     }
     const int watch = svc_.hotplug().fd();
-    if (watch >= 0) {
-        epoll_event ev{};
-        ev.events = EPOLLIN;
-        ev.data.fd = watch;
-        (void)::epoll_ctl(epfd_.get(), EPOLL_CTL_DEL, watch, &ev);
-        if (::epoll_ctl(epfd_.get(), EPOLL_CTL_ADD, watch, &ev) == 0) {
-            InputWire::bump(registered_, 1);
-        }
+    epoll_event watch_ev{};
+    watch_ev.events = EPOLLIN;
+    watch_ev.data.fd = watch;
+    (void)::epoll_ctl(epfd_.get(), EPOLL_CTL_DEL, watch, &watch_ev);
+    if (::epoll_ctl(epfd_.get(), EPOLL_CTL_ADD, watch, &watch_ev) == 0) {
+        ++registered_;
     }
 
     std::size_t slot = 0;
     for (svc::InputDevice& d : svc_.devices()) {
-        if (slot >= svc::kMaxDevices)
+        if (slot >= svc::DeviceTable::kMaxDevices)
             break;
         const svc::DeviceSlot dev = device_slot_of(slot);
         DeviceInputState& state = devices_[dev];
@@ -179,7 +177,7 @@ void InputDecode::rebuild_registrations(Reseat bridge) {
         ++slot;
     }
 
-    for (; slot < svc::kMaxDevices; ++slot) {
+    for (; slot < svc::DeviceTable::kMaxDevices; ++slot) {
         const svc::DeviceSlot dev = device_slot_of(slot);
         DeviceInputState& state = devices_[dev];
         state.key = 0;
@@ -194,10 +192,6 @@ void InputDecode::rebuild_registrations(Reseat bridge) {
 unsigned InputDecode::take_tables_() noexcept {
     unsigned n = 0;
     while (auto job = tables_rx_.take()) {
-
-        if (job.index() >= kTableLeases) {
-            fatal(Error{Errc::slot_range, ERR_SITE(), job.index()}, "DeviceTableLoans::take");
-        }
         deregister_devices_();
         svc_.install(*job);
         job.complete();
@@ -214,25 +208,10 @@ void InputDecode::deregister_devices_() noexcept {
 
 bool InputDecode::apply_requests() {
     bool rebuilt = false;
-    const InputRequestBits req = wire_.requests();
-    if (InputWire::has(req, InputWire::kReqGrabApply)) {
-
-        const bool on = InputWire::has(req, InputWire::kReqGrabOn);
-        (void)svc_.set_grabbed(on);
-        wire_.publish_gates(
-            on ? InputWire::kGateGrabbed : InputGateBits{},
-            on ? InputGateBits{} : InputWire::kGateGrabbed
-        );
-        wire_.clear_request(InputWire::kReqGrabApply);
-    }
 
     const auto osd_on = wire_.take_osd_request();
-    if (osd_on) {
-        wire_.publish_gates(
-            *osd_on ? InputWire::kGateOsdVisible : InputGateBits{},
-            *osd_on ? InputGateBits{} : InputWire::kGateOsdVisible
-        );
-    }
+    if (osd_on)
+        wire_.set_gate(InputWire::kGateOsdVisible, *osd_on);
 
     if (take_tables_() != 0u) {
         rebuild_registrations(Reseat::Bridge);
@@ -251,9 +230,8 @@ void InputDecode::evict_fd(int fd) {
         return;
     (void)::epoll_ctl(epfd_.get(), EPOLL_CTL_DEL, fd, nullptr);
 
-    if (const std::uint32_t r = registered_.load(std::memory_order_relaxed); r != 0) {
-        registered_.store(r - 1, std::memory_order_relaxed);
-    }
+    if (registered_ != 0)
+        --registered_;
     tally_.eviction();
     if (rearm_credit_ != 0) {
         --rearm_credit_;
@@ -315,6 +293,7 @@ unsigned InputDecode::after_wait() {
     flush_mouse_();
     unsigned framed = flush_ps2_frames_();
     sweep_dropped_keys_();
+    note_dropped_mouse_();
     framed += flush_ps2_frames_();
     if (!muted_ && (published || rebuilt || framed != 0 || joy_.owes_publish())) {
 
@@ -366,7 +345,7 @@ InputDecode::ReadyFd InputDecode::drain_ready_fd(int fd, std::uint32_t events) {
             ++pos;
             continue;
         }
-        const svc::DeviceSlot slot = device_slot_of(pos < svc::kMaxDevices ? pos : 0u);
+        const svc::DeviceSlot slot = device_slot_of(pos < svc::DeviceTable::kMaxDevices ? pos : 0u);
         maybe_capture(d, slot);
         publish_from(d.report(), d.is_mouse(), slot);
         out.published = true;
@@ -382,8 +361,8 @@ void InputDecode::drain_link_events_() {
 }
 
 void InputDecode::on(const proto::LinkEvent::Ps2Control& c) {
-    (void)kbd_.accept_control(c.keyboard);
-    (void)mouse_.accept_control(c.mouse);
+    kbd_.accept_control(c.keyboard);
+    mouse_.accept_control(c.mouse);
 }
 
 void InputDecode::on(const proto::LinkEvent::Ps2ControlEnded&) noexcept {
@@ -446,26 +425,31 @@ void InputDecode::flush_mouse_() {
 
 unsigned InputDecode::flush_ps2_frames_() {
     unsigned pushed = 0;
-    proto::Ps2Frame frame{};
     if (muted_) {
 
-        while (kbd_.next_frame(frame)) {
+        while (kbd_.next_frame()) {
         }
-        while (mouse_.next_frame(frame)) {
+        while (mouse_.next_frame()) {
         }
         return pushed;
     }
 
-    while (inbox_.ring().size() < proto::kLinkTxCapacity && kbd_.next_frame(frame)) {
-        if (!inbox_.push(proto::LinkOp::Ps2Frame{frame})) {
-            wire_.note_key_drop(1u);
+    while (inbox_.ring().size() < proto::kLinkTxCapacity) {
+        const auto frame = kbd_.next_frame();
+        if (!frame)
+            break;
+        if (!inbox_.push(proto::LinkOp::Ps2Frame{*frame})) {
+            wire_.note_key_drop(proto::FrameDrops{1});
             return pushed;
         }
         ++pushed;
         wire_.note_activity();
     }
-    while (inbox_.ring().size() < proto::kLinkTxCapacity && mouse_.next_frame(frame)) {
-        if (!inbox_.push(proto::LinkOp::Ps2Frame{frame}))
+    while (inbox_.ring().size() < proto::kLinkTxCapacity) {
+        const auto frame = mouse_.next_frame();
+        if (!frame)
+            break;
+        if (!inbox_.push(proto::LinkOp::Ps2Frame{*frame}))
             return pushed;
         ++pushed;
     }
@@ -473,8 +457,8 @@ unsigned InputDecode::flush_ps2_frames_() {
 }
 
 void InputDecode::sweep_dropped_keys_() {
-    if (const std::uint32_t drops = kbd_.frames_dropped_overflow(); drops != wm_frame_drops_) {
-        wire_.note_key_drop(drops - wm_frame_drops_);
+    if (const proto::FrameDrops drops = kbd_.overflow_drops(); drops != wm_frame_drops_) {
+        wire_.note_key_drop(drops.since(wm_frame_drops_));
         wm_frame_drops_ = drops;
         sweep_owed_ = true;
         diag_.appendf(
@@ -490,8 +474,20 @@ void InputDecode::sweep_dropped_keys_() {
     sweep_owed_ = false;
     const unsigned released = kbd_.release_all();
 
-    wm_frame_drops_ = kbd_.frames_dropped_overflow();
+    wm_frame_drops_ = kbd_.overflow_drops();
     wire_.note_key_sweep(released);
+}
+
+void InputDecode::note_dropped_mouse_() {
+    const proto::FrameDrops drops = mouse_.overflow_drops();
+    if (drops == wm_mouse_drops_)
+        return;
+    wm_mouse_drops_ = drops;
+    diag_.appendf(
+        "{\"t\":\"input_drop\",\"ring\":\"mouse\",\"cap\":%u,\"dropped\":%s}",
+        static_cast<unsigned>(proto::Ps2Mouse::capacity()),
+        drops.text().c_str()
+    );
 }
 
 bool InputDecode::push_ui_edge(const RawKeyEdge& e) {
@@ -560,7 +556,7 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, svc::D
         }
     }
 
-    if (arm_.armed == 0) {
+    if (!arm_.armed) {
         for (std::uint8_t i = 0; i < r.osd_makes; ++i) {
             if (!push_ui_edge(RawKeyEdge{kKeyF12, true, 0}))
                 break;
@@ -579,7 +575,7 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, svc::D
     if (is_mouse) {
 
         if (svc_.grabbed()) {
-            mouse_divider_.accumulate(svc::MouseMotion{r.rel_x, r.rel_y, r.rel_wheel});
+            mouse_divider_.accumulate(r.motion);
         }
 
         mouse_divider_.note_buttons(svc_.mouse_button_level());
@@ -587,7 +583,7 @@ void InputDecode::publish_from(const svc::DeviceReport& r, bool is_mouse, svc::D
 }
 
 void InputDecode::maybe_capture(const svc::InputDevice& d, svc::DeviceSlot slot) {
-    if (arm_.armed == 0 || arm_.token == 0 || arm_.token == capture_served_)
+    if (!arm_.armed || arm_.token == CaptureToken{} || arm_.token == capture_served_)
         return;
     const svc::DeviceReport& r = d.report();
     for (std::size_t i = 0; i < r.keys.count(); ++i) {
@@ -682,7 +678,7 @@ void InputDecode::publish_joy_menu(
     if (launcher_keys_)
         launcher_keys_->pad(slot, now);
 
-    if (arm_.armed != 0 || bridging_ || !osd_visible) {
+    if (arm_.armed || bridging_ || !osd_visible) {
         osdbtn_ = {};
         return;
     }
@@ -735,22 +731,11 @@ InputDecode::Counts InputDecode::counts() const noexcept {
     c.mouse_packets = tally_.mouse_packets();
     c.kicks = tally_.kicks();
     c.fd_evictions = tally_.evictions();
-    c.registered = registered_.load(std::memory_order_relaxed);
+    c.registered = registered_;
     c.joy_seen = tally_.joy_seen();
     c.joy_players = tally_.joy_players();
     c.captures = tally_.captures();
-    c.mapped = svc_.counters().mapped_devices();
-    c.slotted = svc_.counters().slotted_devices();
-    c.mask_changes = svc_.counters().mask_recomputes();
-    c.axis_edges = svc_.counters().axis_edges();
-    c.mouse_remainder = svc_.counters().mouse_remainder_bytes();
-    c.key_overflows = svc_.counters().key_overflows();
-    c.quirk_drops = svc_.counters().quirk_drops();
-    c.slot_live = svc_.counters().live_slot_mask();
-    c.slot_ghosts = svc_.counters().ghost_slots();
-    for (std::uint8_t i = 0; i < svc::kMaxPlayers; ++i) {
-        c.slot_hash[i] = svc_.counters().slot_key_hash(svc::PlayerIndex{i});
-    }
+    c.service = svc_.counters().record();
     return c;
 }
 

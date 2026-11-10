@@ -4,6 +4,8 @@
 #include <cstdint>
 
 #include "app/types.h"
+#include "infra/errno.h"
+#include "infra/error.h"
 #include "infra/json_out.h"
 #include "infra/seat.h"
 #include "infra/telemetry.h"
@@ -16,7 +18,7 @@ struct RecWriteStatus {
     ControlGeneration gen{};
     RecWriteState state = RecWriteState::Idle;
     std::uint8_t pad_ = 0;
-    std::int32_t err = 0;
+    infra::Errno err{};
     std::uint32_t rows = 0;
     std::uint32_t dropped = 0;
     std::uint32_t syncs = 0;

@@ -3,6 +3,8 @@
 
 #include "hal/fpga_memory.h"
 
+#include "infra/error.h"
+
 #include <cstdint>
 #include <cstring>
 
@@ -33,25 +35,30 @@ Ex<void> ScalerBuffers::copy(std::size_t off, std::span<std::byte> dst) {
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), 0});
     if (dst.empty())
         return {};
-    const std::span<std::byte> src = mem_.view(off, dst.size());
-    copy_uncached(dst.data(), src.data(), dst.size());
+    copy_wide(dst, mem_.view(off, dst.size()));
     return {};
 }
 
-void copy_to_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept {
+void copy_wide(std::span<std::byte> dst, std::span<const std::byte> src) noexcept {
+    if (src.size() > dst.size()) {
+        fatal(Error{Errc::slot_range, ERR_SITE(), 0}, "hal::copy_wide past the destination span");
+    }
+    std::byte* out = dst.data();
+    const std::byte* in = src.data();
+    std::size_t n = src.size();
 #if defined(__arm__) && defined(__ARM_FP)
 
-    const bool aligned = ((reinterpret_cast<std::uintptr_t>(dst)
-                           | reinterpret_cast<std::uintptr_t>(src))
-                          & 7u)
-        == 0;
-    if (aligned) {
-        std::size_t blocks = n / 128u;
-        n -= blocks * 128u;
+    constexpr std::size_t kBlock = 128;
+    constexpr std::uintptr_t kAlign = 8;
+    const std::uintptr_t out_addr = reinterpret_cast<std::uintptr_t>(out);
+    const std::uintptr_t in_addr = reinterpret_cast<std::uintptr_t>(in);
+    if (((out_addr | in_addr) & (kAlign - 1)) == 0) {
+        std::size_t blocks = n / kBlock;
+        n -= blocks * kBlock;
         while (blocks-- != 0) {
             __asm__ volatile("vldmia %[s]!, {d0-d15}\n\t"
                              "vstmia %[d]!, {d0-d15}\n\t"
-                             : [s] "+r"(src), [d] "+r"(dst)
+                             : [s] "+r"(in), [d] "+r"(out)
                              :
                              : "d0",
                                "d1",
@@ -73,11 +80,7 @@ void copy_to_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexc
         }
     }
 #endif
-    std::memcpy(dst, src, n);
-}
-
-void copy_uncached(std::byte* dst, const std::byte* src, std::size_t n) noexcept {
-    copy_to_uncached(dst, src, n);
+    std::memcpy(out, in, n);
 }
 
 }

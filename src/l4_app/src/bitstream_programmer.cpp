@@ -35,6 +35,16 @@ namespace mister::app {
     return PayloadWindow{kContainerHeader, declared};
 }
 
+[[nodiscard]] Ex<PayloadWindow> read_payload_window(svc::IFile& f, proto::FileSize size) {
+    if (size < kContainerHeader)
+        return PayloadWindow{proto::FileSize{}, size};
+    std::array<std::byte, kContainerHeaderBytes> hdr{};
+    if (auto r = stream_read(f, proto::FileSize{}, std::span<std::byte>(hdr)); !r) {
+        return std::unexpected(r.error());
+    }
+    return container_window(std::span<const std::byte>(hdr), size);
+}
+
 Ex<void> BitstreamProgrammer::program(const ParkReceipt&, AllLeasesHome, std::string_view rel) {
     return run_(rel);
 }
@@ -52,21 +62,11 @@ Ex<void> BitstreamProgrammer::run_(std::string_view rel) {
     if (!src)
         return std::unexpected(src.error());
 
-    PayloadWindow win{proto::FileSize{}, src->size};
-    if (src->size >= kContainerHeader) {
-        std::byte hdr[kContainerHeaderBytes];
-        if (auto
-                r = stream_read(*src->f, proto::FileSize{}, std::span<std::byte>(hdr, sizeof(hdr)));
-            !r) {
-            return std::unexpected(r.error());
-        }
-        auto w = container_window(std::span<const std::byte>(hdr, sizeof(hdr)), src->size);
-        if (!w)
-            return std::unexpected(w.error());
-        win = *w;
-    }
+    auto win = read_payload_window(*src->f, src->size);
+    if (!win)
+        return std::unexpected(win.error());
 
-    if (win.length == proto::FileSize{}) {
+    if (win->length == proto::FileSize{}) {
         return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     }
 
@@ -77,13 +77,14 @@ Ex<void> BitstreamProgrammer::run_(std::string_view rel) {
         return std::unexpected(r.error());
     }
 
-    for (proto::FileSize pos{}; pos < win.length;) {
-        const auto left = std::min(win.length - pos, proto::FileSize{chunk_bytes_});
+    for (proto::FileSize pos{}; pos < win->length;) {
+        const auto left = std::min(win->length - pos, proto::FileSize{chunk_bytes_});
         const auto n = static_cast<std::size_t>(left.v);
-        if (auto r = stream_read(*src->f, win.base + pos, std::span<std::byte>(buf_, n)); !r) {
+        if (auto r = stream_read(*src->f, win->base + pos, std::span<std::byte>(buf_.data(), n));
+            !r) {
             return std::unexpected(r.error());
         }
-        if (auto r = programmer_->program_chunk(std::span<const std::byte>(buf_, n)); !r) {
+        if (auto r = programmer_->program_chunk(std::span<const std::byte>(buf_.data(), n)); !r) {
             return std::unexpected(r.error());
         }
         pos += proto::FileSize{n};

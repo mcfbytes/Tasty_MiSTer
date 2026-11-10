@@ -8,16 +8,33 @@
 
 #include "cores/core_support.h"
 #include "cores/md_cmd_flags.h"
+#include "cores/owed_answer.h"
 #include "cores/pcm_feed.h"
 #include "cores/pcm_wire_rows.h"
 #include "cores/stream_load.h"
 #include "cores/stream_tx_record.h"
+#include "hal/types.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 #include "proto/uio_opcodes.h"
 #include "svc/types.h"
 
 namespace mister::cores {
+
+namespace detail {
+
+struct PlayAct {
+    svc::TrackNumber track{};
+    bool loop = false;
+    std::uint32_t served_before = 0;
+};
+
+struct SheetAct {
+    FixedStr<1024, StrFit::Clip> name{};
+};
+
+}
 
 class MegaDriveCore final : public Core, public IPcmWireRows, public IStreamLoad {
     TASTY_SEAT_RESIDENT(RT);
@@ -52,13 +69,17 @@ public:
 
     [[nodiscard]] std::uint32_t feed_deferrals() const noexcept { return feed_deferrals_; }
 
-    [[nodiscard]] bool feed_rearm_pending() const noexcept { return feed_rearm_pending_; }
+    [[nodiscard]] bool feed_rearm_pending() const noexcept { return sheet_.owed(); }
 
     [[nodiscard]] std::uint32_t play_refusals() const noexcept { return play_refusals_; }
 
     [[nodiscard]] std::uint32_t ack_timeouts() const noexcept { return ack_timeouts_; }
 
-    [[nodiscard]] bool ack_pending() const noexcept { return ack_pending_; }
+    [[nodiscard]] svc::Tally stranded_drops() const noexcept {
+        return play_.stranded_drops().sum(sheet_.stranded_drops());
+    }
+
+    [[nodiscard]] bool ack_pending() const noexcept { return play_.owed(); }
 
     [[nodiscard]] std::optional<svc::TrackNumber> current_track() const noexcept {
         return current_track_;
@@ -68,10 +89,13 @@ public:
 
 private:
     struct Status {
-        std::uint8_t track = 0;
+
+        std::optional<svc::TrackNumber> track{};
         md::CmdFlags flags{};
         std::uint8_t fade = 0;
         std::uint8_t volume = 0;
+
+        [[nodiscard]] static Status of(hal::SpiWord word0, hal::SpiWord word1) noexcept;
     };
 
     [[nodiscard]] Ex<void> do_adopt(const CoreAdopt& a) override;
@@ -94,19 +118,21 @@ private:
 
     void service_pcm_tick() noexcept override;
 
-    [[nodiscard]] IPcmFeed* feed() noexcept;
+    [[nodiscard]] infra::OptRef<IPcmFeed> feed() noexcept;
     void rearm_feed_();
 
     void retry_feed_(IPcmFeed& fd) noexcept;
 
-    [[nodiscard]] bool read_status_(Status& out) noexcept;
+    [[nodiscard]] std::optional<Status> read_status_() noexcept;
     void send_ack_(std::optional<svc::TrackNumber> track, bool playing) noexcept;
     void pump_(IPcmFeed& fd) noexcept;
 
-    [[nodiscard]] bool settle_ack_(IPcmFeed& fd) noexcept;
+    void hold_play_() noexcept;
     void arm_play_(IPcmFeed& fd, svc::TrackNumber track, bool loop) noexcept;
 
     void answer_no_play_() noexcept;
+
+    [[nodiscard]] proto::ActKey mint_() noexcept { return next_gen_ = next_gen_.next(); }
 
     StreamTxRecord tx_;
     FixedStr<1024, StrFit::Clip> path_{};
@@ -123,17 +149,11 @@ private:
     proto::IoIndex last_index_{};
 
     std::optional<svc::TrackNumber> current_track_{};
-    svc::TrackNumber ack_track_{};
-    std::uint32_t served_before_ = 0;
-
-    std::uint32_t ack_ticks_ = 0;
-    bool ack_pending_ = false;
     bool paused_ = false;
 
-    FixedStr<1024, StrFit::Clip> pending_feed_{};
-    bool feed_rearm_pending_ = false;
-
-    std::uint32_t rearm_ticks_ = 0;
+    proto::ActKey next_gen_{};
+    detail::OwedAnswer<detail::PlayAct, kAckTicks> play_;
+    detail::OwedAnswer<detail::SheetAct, kAckTicks> sheet_;
 };
 
 }

@@ -20,6 +20,7 @@
 #include "app/companion_slot.h"
 #include "app/config_saves.h"
 #include "app/content_pick.h"
+#include "app/core_builder.h"
 #include "app/core_switch.h"
 #include "app/fabric_state.h"
 #include "app/fallback_counts.h"
@@ -52,9 +53,10 @@
 #include "app/window_tally.h"
 #include "cores/boot_ladder.h"
 #include "cores/companion_load.h"
+#include "infra/counter.h"
 #include "infra/log_lane.h"
 #include "infra/park_timeout.h"
-#include "os/monotonic_clock.h"
+#include "os/clock.h"
 #include "proto/status_cell.h"
 
 namespace mister::app {
@@ -92,7 +94,8 @@ public:
         const SaveExtentCell& save_extent_cell;
         const FileTxLevelCell& file_tx_level_cell;
         const hal::PinLevelCell& pin_levels;
-        infra::OptRef<const os::IClock> clock{};
+
+        const os::IClock& clock;
         infra::OptRef<SaveStateAttach::AskInbox> save_state_asks{};
         infra::OptRef<const SaveStateFactsCell> save_state_facts{};
         CoreBay& bay;
@@ -101,14 +104,9 @@ public:
         infra::OptRef<hal::IDoorbellSource> doorbell_source{};
         infra::OptRef<CompanionHost::Binds> companion_binds{};
 
-        infra::OptRef<SectorGrantCell> sector_grant{};
-        infra::OptRef<const SectorRouteCell> sector_route{};
-
-        infra::OptRef<OsdGrantCell> osd_grant{};
-        infra::OptRef<const OsdRouteCell> osd_route{};
-
-        infra::OptRef<SysGrantCell> sys_grant{};
-        infra::OptRef<const SysRouteCell> sys_route{};
+        std::optional<CoreBuilder::SectorCells> sectors{};
+        std::optional<CoreBuilder::OsdCells> osds{};
+        std::optional<CoreBuilder::SysCells> sys{};
 
         infra::OptRef<xthread::WakeFlag> io_wake{};
         infra::OptRef<xthread::MainLogLane> log_lane{};
@@ -152,7 +150,7 @@ public:
 
     void arm_replay_ini(bool strict) noexcept;
 
-    void set_boot_cookie(std::uint16_t c);
+    void set_boot_cookie(proto::MemSizeCookie c);
 
     void latch_boot_companion(std::string_view xml) noexcept;
 
@@ -227,17 +225,21 @@ public:
 
     [[nodiscard]] const OwnerTally& tally() const noexcept { return tally_; }
 
-    [[nodiscard]] const Count& pause_expiries_cell() const noexcept;
+    [[nodiscard]] const xthread::Counter& pause_expiries_cell() const noexcept;
     [[nodiscard]] const Count& recover_polls_cell() const noexcept;
 
-    [[nodiscard]] const Count& mgl_row0_cell() const noexcept { return mgl_row0_cell_; }
+    [[nodiscard]] const xthread::Counter& mgl_row0_cell() const noexcept { return tally_.mgl_row0; }
 
-    [[nodiscard]] const Count& save_write_failures_cell() const noexcept {
+    [[nodiscard]] const xthread::Counter& save_write_failures_cell() const noexcept {
         return saves_.save_write_failures_cell();
     }
 
-    [[nodiscard]] const Count& ini_write_failures_cell() const noexcept {
+    [[nodiscard]] const xthread::Counter& ini_write_failures_cell() const noexcept {
         return saves_.ini_write_failures_cell();
+    }
+
+    [[nodiscard]] const ConfigSlotCell& config_slot_cell() const noexcept {
+        return saves_.config_slot_cell();
     }
 
     [[nodiscard]] const Cell<FallbackCounts>& fallback_cell() const noexcept;
@@ -290,7 +292,7 @@ private:
     [[nodiscard]] bool arm_loader(
         const ContentRequest& req,
         std::string_view save,
-        std::uint64_t save_bytes
+        proto::FileSize save_bytes
     ) override;
     void perform_content(const ContentRequest& req) override;
     void launch_content(const ContentRequest& cr) override;
@@ -381,12 +383,17 @@ private:
     void order_session_up_() noexcept;
 
     [[nodiscard]] bool arm_restore_ladder_(std::string_view config);
+
+    struct SessionUpFacts {
+        bool index0_taken = false;
+        bool slot0_held = false;
+        bool remembered = false;
+        bool ladder = false;
+    };
+
     [[nodiscard]] StartChain::Facts start_facts_(
         std::string_view rbf,
-        bool index0_taken,
-        bool slot0_held,
-        bool remembered,
-        bool ladder
+        const SessionUpFacts& up
     ) const;
     [[nodiscard]] std::string start_rbf_() const;
     void order_start_chain_(const StartChain& chain);
@@ -402,17 +409,20 @@ private:
     void publish_fabric_();
     void step_savestate_hold_();
     [[nodiscard]] bool content_ordered_() const noexcept;
-    void order_make_core_(bool fabric, bool identity_bound, const svc::ConfigSnapshot& cfg);
+
+    struct MakeCoreFacts {
+        bool fabric = false;
+        bool identity_bound = false;
+    };
+
+    void order_make_core_(const MakeCoreFacts& facts, const svc::ConfigSnapshot& cfg);
     [[nodiscard]] std::string_view make_core_rel_() const noexcept;
     [[nodiscard]] bool build_has_manifest_(const proto::ConfStr& cs) const;
     [[nodiscard]] bool arm_manifest_();
     void abort_start_(Errc why) noexcept;
     void finish_core_made_() noexcept;
-    enum class SlotAsker : std::uint8_t { Load, Boot, Refresh };
-    void on_slot_names_(const proto::LinkEvent::SaveBytes& e);
-    void refuse_slot_names_(SlotAsker who, CorrelationTag tag);
-    void preview_slot_names_(std::span<const std::uint8_t> pack);
-    void bind_slot_answer_(bool boot, CorrelationTag tag, std::string_view path);
+
+    void load_core_config_(cores::ConfigSlot slot, CorrelationTag tag);
     void finish_boot_restore_() noexcept;
 
     void phase_edge_(phase::Stimulus on, Errc why = Errc::negotiation) noexcept;
@@ -424,7 +434,7 @@ private:
     void end_rebooting_switch_() noexcept;
     void refuse_rebooting_(phase::Stimulus on) noexcept;
     void log_conf_str_(const proto::LinkEvent::ConfStr& c) noexcept;
-    [[nodiscard]] std::uint64_t log_now_ns_() const noexcept;
+    [[nodiscard]] std::chrono::nanoseconds log_now_() const noexcept;
 
     [[nodiscard]] bool failed_apply_() const noexcept;
 
@@ -439,7 +449,6 @@ private:
     const proto::StatusCell& status_cell_;
     const MountStatusCell& mount_status_cell_;
     const SaveExtentCell& save_extent_cell_;
-    os::MonotonicClock default_clock_{};
     const os::IClock& clock_;
     std::uint32_t identity_poll_budget_ = 0;
     std::chrono::milliseconds start_bound_ = kStartBoundMs;
@@ -466,7 +475,7 @@ private:
     MountQueue mounts_;
     LauncherLatch launcher_;
     FabricCell& cell_;
-    std::uint16_t cookie_ = 0;
+    proto::MemSizeCookie cookie_{};
     FabricGeneration fabric_gen_{};
     const hal::PhysRegion aperture_;
     BootRestore boot_restore_ = BootRestore::None;
@@ -474,7 +483,6 @@ private:
     BindTail bind_;
     ConfigSaves saves_;
     infra::OptRef<hal::IBootHandoff> handoff_{};
-    Count mgl_row0_cell_{};
 
     struct MadeFacts {
         bool restore_owed = false;

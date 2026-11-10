@@ -5,38 +5,76 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <span>
+#include <tuple>
 
 #include "app/frame_stamp.h"
+#include "app/picture_pixels.h"
 #include "app/rec_control.h"
 #include "app/rgb_rows.h"
 #include "app/types.h"
 #include "infra/loan_channel.h"
+#include "infra/message_sum.h"
 #include "infra/seat.h"
 
 namespace mister::app {
 
-enum class RawKind : std::uint8_t { Open, Frame, Close };
-
 struct RawFrameSlot {
     TASTY_SEAT_MEDIATOR(Any, Any);
 
+    enum class Kind : std::uint8_t { Open, Frame, Close, kCount };
+
+    using Head = ControlGeneration;
+
     static constexpr std::size_t kMaxRuns = 4;
 
-    RawKind kind = RawKind::Frame;
-    std::uint8_t runs = 0;
-    std::uint8_t depth = 0;
-    ControlGeneration gen{};
-    std::array<FrameStampRun, kMaxRuns> run{};
-    FrameStamp stamp{};
-    std::uint16_t width = 0;
+    struct Open {
+        static constexpr Kind kKind = Kind::Open;
+        RecOptions opt{};
+        RecPath path{};
+        RecMode mode = RecMode::Hash;
+        std::array<std::byte, 3> pad_{};
+    };
 
-    RgbRows rgb{};
-    std::uint32_t vtime = 0;
-    RecMode mode = RecMode::Hash;
-    RecOptions opt{};
-    RecPath path{};
+    struct Frame {
+        static constexpr Kind kKind = Kind::Frame;
+        RgbRows rgb{};
+#if __SIZEOF_POINTER__ == 4
+
+        std::array<std::byte, 4> pad_ilp32_{};
+#endif
+        FrameStamp stamp{};
+        std::array<FrameStampRun, kMaxRuns> run{};
+        std::uint32_t vtime = 0;
+        PicturePixels width{};
+        std::uint8_t runs = 0;
+        std::uint8_t depth = 0;
+    };
+
+    struct Close {
+        static constexpr Kind kKind = Kind::Close;
+        RgbRows rgb{};
+#if __SIZEOF_POINTER__ == 4
+
+        std::array<std::byte, 4> pad_ilp32_{};
+#endif
+        FrameStamp stamp{};
+        std::array<FrameStampRun, kMaxRuns> run{};
+        PicturePixels width{};
+        std::uint8_t runs = 0;
+        std::array<std::byte, 5> pad_{};
+    };
+
+    using Alternatives = std::tuple<Open, Frame, Close>;
+    static constexpr std::size_t kStore = sizeof(Open);
+
+    Kind kind = Kind::Open;
+    std::array<std::byte, 1> pad_{};
+    Head head{};
+    std::array<std::byte, 4> pad2_{};
+    alignas(std::uint64_t) std::array<std::byte, kStore> store{};
 };
+
+static_assert(infra::MessageSum<RawFrameSlot> && infra::alternatives_are_total<RawFrameSlot>());
 
 inline constexpr std::size_t kRawFrameSlots = 32;
 inline constexpr std::size_t kRawStripeGranule = 2u << 20;

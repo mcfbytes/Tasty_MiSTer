@@ -8,13 +8,14 @@
 #include <string_view>
 
 #include "cores/movie_archive.h"
-#include "cores/nes_movie_codec.h"
+#include "cores/movie_codec.h"
 #include "cores/types.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::cores {
 
-class NesBk2Codec final : public NesMovieCodec {
+class NesBk2Codec final : public IMovieFormat {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
@@ -28,28 +29,29 @@ public:
     static constexpr std::uint8_t kLogKey = 0x04;
     static constexpr std::uint8_t kSha1 = 0x08;
 
-    static constexpr std::int32_t kNesHawkLead = -2;
-    static constexpr std::int32_t kLeadMin = -8;
-    static constexpr std::int32_t kLeadMax = 64;
+    static constexpr std::string_view kPlatformName = "NES";
 
-    [[nodiscard]] const MovieArchiveFormat* archive() const noexcept override {
-        return &kBk2Archive;
+    static constexpr ReplayLead kNesHawkLead{-2};
+
+    [[nodiscard]] infra::OptRef<const MovieArchiveFormat> archive() const noexcept override {
+        return infra::OptRef<const MovieArchiveFormat>{kBk2Archive};
     }
 
     [[nodiscard]] bool starts_log(std::string_view line) const noexcept override;
     [[nodiscard]] bool ends_log(std::string_view line) const noexcept override;
-    [[nodiscard]] Ex<Facts> header_line(
+    [[nodiscard]] Ex<MovieFacts> header_line(
         std::string_view line,
-        const Facts& so_far
+        const MovieFacts& so_far
     ) const noexcept override;
-    [[nodiscard]] Ex<void> finish_header(const Facts& f) const noexcept override;
-    [[nodiscard]] Ex<Frame> frame(std::string_view line, const Facts& f) const noexcept override;
+    [[nodiscard]] Ex<void> finish_header(const MovieFacts& f) const noexcept override;
+    [[nodiscard]] Ex<MovieFrame> frame(
+        std::string_view line,
+        const MovieFacts& f
+    ) const noexcept override;
 
-    [[nodiscard]] std::int32_t default_lead(const Facts&) const noexcept override {
+    [[nodiscard]] ReplayLead default_lead(const MovieFacts&) const noexcept override {
         return kNesHawkLead;
     }
-
-    [[nodiscard]] LeadRange lead_range() const noexcept override { return {kLeadMin, kLeadMax}; }
 
     [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
         std::span<const std::uint8_t> head,

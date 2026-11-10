@@ -40,9 +40,12 @@ void PollReader::start_beat() noexcept {
 }
 
 void PollReader::issue_(const PollShapeRow& row) noexcept {
-    const std::uint8_t issued = params_.issued_params(shape_);
+
+    const proto::ParamSet issued = row.form == CommandForm::ParamInHighByte
+        ? params_.issued_params(shape_)
+        : kBareRowParams;
     for (std::uint8_t p = 0; p < row.params; ++p) {
-        if ((issued & (1u << p)) != 0u) {
+        if (issued.has(proto::PollParam::of(p))) {
             beat_(row, p);
         } else {
             mirror_[p] = 0;
@@ -55,7 +58,7 @@ void PollReader::beat_(const PollShapeRow& row, std::uint8_t param) noexcept {
     {
         hal::Selected cs(link_, hal::ChipSelect::Io);
         ++polls_;
-        const auto r = link_.transfer(hal::SpiWord{command_word(row, param)});
+        const auto r = link_.transfer(command_word(row, param));
         if (!r) {
             ++errors_;
             return;

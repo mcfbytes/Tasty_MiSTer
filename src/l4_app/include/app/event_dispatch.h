@@ -15,7 +15,6 @@ concept EventUiSink = requires(S& s, const Event& m, const Event::Head& h) {
     s.on(std::declval<const Event::SdActivity&>(), h);
     s.on(std::declval<const Event::InfoRequest&>(), h);
     s.on(std::declval<const Event::ProgressUpdate&>(), h);
-    s.on(std::declval<const Event::DeadlineMiss&>(), h);
     s.on(std::declval<const Event::RequestRefused&>(), h);
     s.on(std::declval<const Event::ConfStrOnlySession&>(), h);
     s.on(std::declval<const Event::SessionAdvisory&>(), h);

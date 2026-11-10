@@ -26,6 +26,8 @@ class IoMain final : public xthread::SeatMain<IoMain> {
 public:
     static constexpr std::size_t kMaxCoworkers = 11;
 
+    static constexpr std::uint32_t kMaxCoworkersDetail = kMaxCoworkers;
+
     explicit IoMain(
         xthread::ParkFds fds,
         infra::OptRef<xthread::WakeFlag> asker = {},
@@ -36,8 +38,7 @@ public:
     IoMain(IoMain&&) = delete;
     IoMain& operator=(IoMain&&) = delete;
 
-    [[nodiscard]] bool add_coworker(IIoCoworker* c) noexcept;
-    void remove_coworker(IIoCoworker* c) noexcept;
+    [[nodiscard]] Ex<void> add_coworker(IIoCoworker& c) noexcept;
 
     [[nodiscard]] xthread::WakeFlag& wake() noexcept { return wake_; }
 

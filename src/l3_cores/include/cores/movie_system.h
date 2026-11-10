@@ -20,7 +20,7 @@ namespace mister::cores {
 struct MovieSystem {
     CoreKind kind = CoreKind::Generic;
     std::string_view conf_str_name{};
-    infra::OptRef<const IMovieCodec> codec{};
+    infra::OptRef<const MovieCodec> codec{};
 };
 
 [[nodiscard]] std::optional<MovieSystem> movie_system_for_path(
@@ -43,9 +43,9 @@ struct MovieSystem {
     std::string_view movie_path
 );
 [[nodiscard]] std::string movie_unplayable_reason(const svc::Vfs& vfs, std::string_view movie_path);
-[[nodiscard]] Ex<IMovieCodec::Facts> read_movie_facts(
+[[nodiscard]] Ex<MovieFacts> read_movie_facts(
     const svc::Vfs& vfs,
-    const IMovieCodec& codec,
+    const IMovieFormat& format,
     std::string_view movie_path
 );
 [[nodiscard]] bool movie_system_supported(const MovieSystem& sys) noexcept;

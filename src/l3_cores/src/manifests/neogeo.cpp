@@ -13,12 +13,12 @@ namespace mister::cores::manifests {
 
 using namespace std::chrono_literals;
 
-std::unique_ptr<NeoGeoAliasSource> make_neogeo_alias_source() {
+std::unique_ptr<IRomsetAliasSource> make_neogeo_alias_source() {
     return std::make_unique<NeoGeoAliasSource>();
 }
 
 std::unique_ptr<ILoader> make_neogeo_loader(const LoaderContext& ctx) {
-    return std::make_unique<NeoGeoLoader>(ctx.vfs, &ctx.profile);
+    return std::make_unique<NeoGeoLoader>(ctx.vfs, ctx.profile);
 }
 
 std::unique_ptr<Core> make_neogeo(const CoreProfile& p, const CoreGrant& g) {
@@ -53,7 +53,7 @@ static_assert(
     "the packed 3-char grammar"
 );
 static_assert(
-    kNeoGeo.slots[0].romset_browse && kNeoGeo.slots[0].no_enter,
+    kNeoGeo.slots[0].romset_browse.has_value() && kNeoGeo.slots[0].no_enter,
     "menu.cpp:2429: is_neogeo() sets SCANO_NEOGEO | SCANO_NOENTER on the F arm"
 );
 static_assert(
@@ -62,7 +62,12 @@ static_assert(
     "neogeo_get_altname per entry"
 );
 static_assert(
-    !kNeoGeo.slots[1].romset_browse && kNeoGeo.slots[1].role == SlotRole::Disc,
+    kNeoGeo.slots[0].romset_browse == std::string_view{"NEO"}
+        && !kNeoGeo.slots[1].romset_browse.has_value(),
+    "ScanDirectory's SCANO_NEOGEO arm admits the core's own set files, e.g. `.neo`"
+);
+static_assert(
+    !kNeoGeo.slots[1].romset_browse.has_value() && kNeoGeo.slots[1].role == SlotRole::Disc,
     "menu.cpp:2833-2836: every Neo Geo S pick is neocd_set_image"
 );
 static_assert(
@@ -75,7 +80,8 @@ static_assert(
 );
 
 static_assert(
-    kNeoGeoCdProfile.dialect == kMegaCdProfile.dialect,
+    std::holds_alternative<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row)
+        && std::holds_alternative<CdProfile::SegaCddFacts>(kMegaCdProfile.row),
     "neogeocd.cpp:13 drives megacd.h's cdd, the SAME machine"
 );
 static_assert(
@@ -85,15 +91,24 @@ static_assert(
     "megacdd.cpp:1034,1041,1060: SectorSend's indices are compiled once; neogeo.sv "
     "downloads CD data on index 2 and CD-DA on 4"
 );
-static_assert(kNeoGeoCdProfile.crc_start == 5, "neogeocd.cpp:23 CRC_START 5");
-static_assert(!kNeoGeoCdProfile.status_carries_is_data, "neogeocd.cpp:42: word 2 bit 8 stays 0");
 static_assert(
-    !kNeoGeoCdProfile.ready_probe_skips_mode1,
+    std::get<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).crc_start == 5,
+    "neogeocd.cpp:23 CRC_START 5"
+);
+static_assert(
+    !std::get<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).status_carries_is_data,
+    "neogeocd.cpp:42: word 2 bit 8 stays 0"
+);
+static_assert(
+    !std::get<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).ready_probe_skips_mode1,
     "neogeocd.cpp:160-169: every sector type asks the core first"
 );
-static_assert(kNeoGeoCdProfile.stream_on_data_track, "neogeocd.cpp:92: the data track streams");
 static_assert(
-    kNeoGeoCdProfile.sniff_sega_disc_system == kMegaCdProfile.sniff_sega_disc_system,
+    std::get<CdProfile::SegaCddFacts>(kNeoGeoCdProfile.row).stream_on_data_track,
+    "neogeocd.cpp:92: the data track streams"
+);
+static_assert(
+    kNeoGeoCdProfile.cue.sniff_sega_disc_system == kMegaCdCuePolicy.sniff_sega_disc_system,
     "the same LoadCUE (megacdd.cpp:285-296) sniffs for either core"
 );
 
@@ -127,7 +142,9 @@ static_assert(
     "menu.cpp:2833-2836: the S pick runs neocd_set_image"
 );
 static_assert(
-    kNeoGeo.staging.save_slot == IoIndex{0} && kNeoGeo.staging.save_dest == WideIoIndex{},
+    kNeoGeo.staging.save
+        && kNeoGeo.staging.save->slot == IoIndex{0}
+        && !kNeoGeo.staging.save->bracket,
     "neogeo_loader.cpp:1273 user_io_file_mount(path, 0, 1): SD 0, no bracket"
 );
 static_assert(

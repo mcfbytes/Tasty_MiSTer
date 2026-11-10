@@ -2,16 +2,18 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
+
+#include "hal/reboot_flag.h"
+#include "hal/sdram_cfg.h"
 
 namespace mister::hal {
 
 struct HandoffPage {
-    bool env_valid = false;
-    bool sdram_valid = false;
-    std::uint16_t sdram_cfg = 0;
-    bool altcfg_valid = false;
-    std::uint8_t altcfg = 0;
-    std::uint32_t reboot_flag = 0;
+    bool env = false;
+    std::optional<SdramCfg> sdram;
+    std::optional<std::uint8_t> altcfg;
+    RebootFlag reboot{};
 };
 
 }

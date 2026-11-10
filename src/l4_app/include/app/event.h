@@ -15,6 +15,7 @@
 #include "infra/error.h"
 #include "infra/message_sum.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::proto {
 enum class CoreType : std::uint8_t;
@@ -48,7 +49,6 @@ struct Event {
         SdActivity,
         InfoRequest,
         ProgressUpdate,
-        DeadlineMiss,
         RequestRefused,
         ConfStrOnlySession,
         SessionAdvisory,
@@ -82,7 +82,7 @@ struct Event {
 
     struct SdActivity {
         static constexpr Kind kKind = Kind::SdActivity;
-        std::uint8_t slot = 0;
+        proto::IoIndex index{};
     };
 
     struct InfoRequest {
@@ -93,11 +93,6 @@ struct Event {
     struct ProgressUpdate {
         static constexpr Kind kKind = Kind::ProgressUpdate;
         cores::Progress progress{};
-    };
-
-    struct DeadlineMiss {
-        static constexpr Kind kKind = Kind::DeadlineMiss;
-        std::uint16_t slot = 0;
     };
 
     struct RequestRefused {
@@ -138,7 +133,6 @@ struct Event {
         SdActivity,
         InfoRequest,
         ProgressUpdate,
-        DeadlineMiss,
         RequestRefused,
         ConfStrOnlySession,
         SessionAdvisory,
@@ -160,7 +154,7 @@ static_assert(
     "16 B: the head at 4, a 4-byte store every alternative fits"
 );
 static_assert(
-    infra::ordinal(Event::Kind::kCount) == 12,
+    infra::ordinal(Event::Kind::kCount) == 11,
     "Event::Kind changed cardinality: audit the per-kind loss consumers in "
     "firmware/diag_sampler.cpp"
 );
@@ -181,7 +175,6 @@ inline constexpr auto kDeliveryTable = std::to_array<DeliveryRow>({
     {Event::Kind::SdActivity, Delivery::Hint},
     {Event::Kind::InfoRequest, Delivery::Edge},
     {Event::Kind::ProgressUpdate, Delivery::Edge},
-    {Event::Kind::DeadlineMiss, Delivery::Edge},
     {Event::Kind::RequestRefused, Delivery::Edge},
     {Event::Kind::ConfStrOnlySession, Delivery::Edge},
     {Event::Kind::SessionAdvisory, Delivery::Edge},
@@ -207,9 +200,9 @@ using EventQueue = xthread::CountedLane<Event, 256, Producer, SeatTag::Ui>;
 template <class L>
 [[nodiscard]] constexpr std::uint32_t delivery_losses(const L& losses, Delivery d) noexcept {
     std::uint32_t n = 0;
-    for (std::size_t i = 0; i < static_cast<std::size_t>(Event::Kind::kCount); ++i) {
-        if (delivery_of(static_cast<Event::Kind>(i)) == d)
-            n += losses.per_kind[i];
+    for (const DeliveryRow& row : kDeliveryTable) {
+        if (row.delivery == d)
+            n += losses.of(row.kind);
     }
     return n;
 }

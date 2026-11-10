@@ -12,25 +12,18 @@
 
 namespace mister::svc {
 
-Ex<void> HotplugWatch::open(std::string_view dir) {
-    if (inotify_.valid())
-        return {};
-    inotify_.reset(::inotify_init1(IN_NONBLOCK | IN_CLOEXEC));
-    if (!inotify_.valid())
+Ex<HotplugWatch> HotplugWatch::open(std::string_view dir) {
+    UniqueFd inotify{::inotify_init1(IN_NONBLOCK | IN_CLOEXEC)};
+    if (!inotify.valid())
         return std::unexpected(os_error(ERR_SITE()));
     const std::string path(dir);
-    if (::inotify_add_watch(inotify_.get(), path.c_str(), IN_MODIFY | IN_CREATE | IN_DELETE) < 0) {
-        const Error e = os_error(ERR_SITE());
-        inotify_.reset();
-        return std::unexpected(e);
+    if (::inotify_add_watch(inotify.get(), path.c_str(), IN_MODIFY | IN_CREATE | IN_DELETE) < 0) {
+        return std::unexpected(os_error(ERR_SITE()));
     }
-    return {};
+    return HotplugWatch{std::move(inotify)};
 }
 
 Ex<void> HotplugWatch::on_ready() {
-    if (!inotify_.valid()) {
-        return std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    }
 
     alignas(struct inotify_event) char buf[4096];
     bool changed = false;

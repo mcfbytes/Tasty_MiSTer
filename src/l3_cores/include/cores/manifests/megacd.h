@@ -15,7 +15,9 @@
 #include "cores/cd_profile.h"
 #include "cores/cd_tick_periods.h"
 #include "cores/core_profile.h"
-#include "svc/disc_engine.h"
+#include "proto/types.h"
+#include "svc/cue_policy.h"
+#include "svc/search_policy.h"
 
 namespace mister::cores::manifests {
 
@@ -51,6 +53,7 @@ inline constexpr CdIoIndices kMegaCdIoIndices{
     .data = IoIndex{2},
     .cdda = IoIndex{4},
     .subcode = IoIndex{3},
+    .info = std::nullopt,
 };
 
 inline constexpr svc::CuePolicy kMegaCdCuePolicy{
@@ -59,16 +62,15 @@ inline constexpr svc::CuePolicy kMegaCdCuePolicy{
     .sub_naming = svc::CuePolicy::SubNaming::LastTrackFilename,
     .wav_header_skip = false,
     .sniff_sega_disc_system = true,
+    .subcode_shaping = svc::CuePolicy::SubcodeShaping::Interleave,
 };
 
 inline constexpr CdProfile kMegaCdProfile{
-    .dialect = CdDialect::SegaBcdNibble,
-    .crc_start = 0,
     .io = kMegaCdIoIndices,
     .cue = kMegaCdCuePolicy,
     .ticks = kMegaCdTicks,
-    .sniff_sega_disc_system = true,
-    .seek_fast_paths = {},
+
+    .row = CdProfile::SegaCddFacts{.crc_start = 0},
 };
 
 inline constexpr auto kMegaCdSlots = std::to_array<FileSlot>({
@@ -130,14 +132,16 @@ inline constexpr std::array<B, 64> kMegaCdExtFormat{{
 }};
 }
 
-inline constexpr std::uint32_t kMegaCdIntLba = 0xF;
-inline constexpr std::uint32_t kMegaCdExtLba = 0x40F;
+inline constexpr proto::Lba kMegaCdIntLba{0xF};
+inline constexpr proto::Lba kMegaCdExtLba{0x40F};
 inline constexpr std::uint32_t kMegaCdFormatOffset = 448;
 
 inline constexpr auto kMegaCdBlankRegions = std::to_array<BlankRegion>({
-    {.offset_bytes = kMegaCdIntLba * 512 + kMegaCdFormatOffset,
+    {.block = kMegaCdIntLba,
+     .within = kMegaCdFormatOffset,
      .bytes = megacd_blank::kMegaCdIntFormat},
-    {.offset_bytes = kMegaCdExtLba * 512 + kMegaCdFormatOffset,
+    {.block = kMegaCdExtLba,
+     .within = kMegaCdFormatOffset,
      .bytes = megacd_blank::kMegaCdExtFormat},
 });
 
@@ -146,8 +150,6 @@ inline constexpr BlankSaveSpec kMegaCdBlankSave{
     .header = {},
     .regions = kMegaCdBlankRegions,
 };
-
-inline constexpr svc::SearchDir kMegaCdHomeDir[] = {svc::SearchDir::CoreDir};
 
 inline constexpr auto kMegaCdBootAssets = std::to_array<BootAsset>({
 
@@ -161,7 +163,7 @@ inline constexpr auto kMegaCdBootAssets = std::to_array<BootAsset>({
      .group_required = true},
 
     {.name = "boot.rom",
-     .where = kMegaCdHomeDir,
+     .where = kCoreHomeDir,
      .optional = true,
      .anchor = AssetAnchor::Search,
      .subdir = "MEGACD",
@@ -190,8 +192,10 @@ inline constexpr StagingPolicy kMegaCdStaging{
     .order = StageOrder::MegaCd,
     .reset_pulse_us = 0,
     .disc_slot = disc_slot_of(kMegaCdSlots),
-    .save_slot = IoIndex{0},
-    .save_dest = WideIoIndex{5},
+    .save = SaveMountPolicy{
+        .slot = IoIndex{0},
+        .bracket = WideIoIndex{5},
+    },
 };
 
 inline constexpr CoreProfile kMegaCd{

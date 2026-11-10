@@ -2,12 +2,12 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
-#include <cstdio>
+#include <format>
 #include <string_view>
 
-#include "svc/types.h"
+#include "infra/ascii.h"
 #include "infra/fixed_str.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -29,50 +29,39 @@ struct GameId {
         const std::size_t slash = f.rfind('/');
         if (slash != std::string_view::npos)
             f = f.substr(slash + 1);
-        const auto ieq4 = [](std::string_view a, const char* b) noexcept {
-            for (std::size_t i = 0; i < 4; ++i) {
-                char c = a[i];
-                if (c >= 'A' && c <= 'Z')
-                    c = static_cast<char>(c - 'A' + 'a');
-                if (c != b[i])
-                    return false;
-            }
-            return true;
-        };
-        if (f.size() >= 4 && ieq4(f, "boot"))
+        if (infra::istarts_with(f, "boot"))
             return false;
         for (std::size_t i = 0; i + 4 <= f.size(); ++i) {
-            if (ieq4(f.substr(i, 4), "bios"))
+            if (infra::ieq(f.substr(i, 4), "bios"))
                 return false;
         }
         return true;
     }
 
     [[nodiscard]] Body body() const noexcept {
-        char buf[Body::kBufSize] = {};
-        std::size_t n = 0;
-        const auto room = [&]() noexcept {
-            return sizeof buf - n;
-        };
-        if (crc.v != 0) {
-            const int w = std::snprintf(buf + n, room(), "CRC32: %08X\n", crc.v);
-            if (w > 0)
-                n += static_cast<std::size_t>(w) < room() ? static_cast<std::size_t>(w)
-                                                          : room() - 1;
+        Body out{};
+        if (crc.declared()) {
+
+            char line[Body::kBufSize] = {};
+            const auto be = crc.to_be_bytes();
+            std::format_to_n(
+                line,
+                Body::kCapacity,
+                "CRC32: {:02X}{:02X}{:02X}{:02X}\n",
+                be[0],
+                be[1],
+                be[2],
+                be[3]
+            );
+            (void)out.append(line);
         }
         if (!serial.empty()) {
-            const int w = std::snprintf(buf + n, room(), "Serial: %s\n", serial.c_str());
-            if (w > 0)
-                n += static_cast<std::size_t>(w) < room() ? static_cast<std::size_t>(w)
-                                                          : room() - 1;
+            char line[Body::kBufSize] = {};
+            std::format_to_n(line, Body::kCapacity, "Serial: {}\n", serial.view());
+            (void)out.append(line);
         }
-        if (n == 0) {
-            const int w = std::snprintf(buf, sizeof buf, "# No game ID available\n");
-            if (w > 0)
-                n = static_cast<std::size_t>(w);
-        }
-        Body out{};
-        (void)out.assign(std::string_view{buf, n});
+        if (out.empty())
+            (void)out.assign("# No game ID available\n");
         return out;
     }
 };

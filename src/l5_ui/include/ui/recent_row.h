@@ -34,9 +34,6 @@ public:
 
     [[nodiscard]] const app::RecentGames::Record& record() const noexcept { return record_; }
 
-    static constexpr std::uint32_t kKeySpaceMask = 0xC000'0000u;
-    static constexpr std::uint32_t kKeySpace = 0x4000'0000u;
-
 private:
     RecentLaunch& launch_;
     app::RecentGames::Record record_;

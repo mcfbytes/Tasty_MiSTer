@@ -17,7 +17,7 @@ void PageDeadlines::arm(
     const std::chrono::milliseconds pop = top->facts().auto_pop;
     if (pop.count() == 0)
         return;
-    auto_pop_at_ = clock->now() + std::chrono::nanoseconds{pop};
+    auto_pop_at_ = clock->now().time_since_epoch() + std::chrono::nanoseconds{pop};
 }
 
 bool PageDeadlines::fired(std::chrono::nanoseconds now) const noexcept {

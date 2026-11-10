@@ -18,6 +18,8 @@
 #include "infra/error.h"
 #include "infra/opt_ref.h"
 #include "infra/seat.h"
+#include "proto/mailbox_act.h"
+#include "proto/types.h"
 
 namespace mister::app {
 
@@ -35,7 +37,7 @@ public:
 
     [[nodiscard]] static Ex<CompanionWalk> start(
         const cores::CompanionPlan& plan,
-        std::uint16_t gen,
+        proto::CompanionBindGen gen,
         std::unique_ptr<cores::ILoader> loader,
         std::span<const cores::CoreWindowDecl> windows,
         infra::OptRef<CompanionHost::Binds> binds
@@ -44,18 +46,13 @@ public:
     [[nodiscard]] Pass step(Host& h);
     [[nodiscard]] bool wants_pass(
         const LinkTxChannel<SeatTag::Main>& inbox,
-        const FileTxLevelCell* level
-    ) const noexcept;
-
-    [[nodiscard]] bool wants_pass(
-        const LinkTxChannel<SeatTag::Main>& inbox,
         const FileTxLevelCell& level
     ) const noexcept override;
     [[nodiscard]] Rung::Pass step(const RungEdges& edges, cores::ILadderHost& owner) override;
 
     [[nodiscard]] Pc pc() const noexcept { return pc_; }
 
-    [[nodiscard]] bool loads() const noexcept { return plan_.loads; }
+    [[nodiscard]] bool loads() const noexcept { return plan_.load.has_value(); }
 
     [[nodiscard]] bool loaded() const noexcept { return loaded_; }
 
@@ -64,7 +61,7 @@ public:
 private:
     CompanionWalk(
         const cores::CompanionPlan& plan,
-        std::uint16_t gen,
+        proto::CompanionBindGen gen,
         std::unique_ptr<cores::ILoader> loader,
         std::span<const cores::CoreWindowDecl> windows,
         infra::OptRef<CompanionHost::Binds> binds
@@ -78,7 +75,7 @@ private:
     [[nodiscard]] Pass bind_(Host& h);
     [[nodiscard]] Pass write_(
         Host& h,
-        const std::array<std::uint16_t, 3>& words,
+        const proto::MailboxWords& words,
         proto::MailboxPoll poll,
         Pc next
     );
@@ -91,7 +88,7 @@ private:
     std::span<const cores::CoreWindowDecl> windows_;
     infra::OptRef<CompanionHost::Binds> binds_;
     std::optional<LoadWalk> walk_{};
-    std::uint16_t gen_ = 0;
+    proto::CompanionBindGen gen_{};
     bool loaded_ = false;
     bool bound_ = false;
     Pc pc_ = Pc::Bind;

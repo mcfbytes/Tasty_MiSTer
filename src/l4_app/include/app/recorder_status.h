@@ -7,6 +7,7 @@
 
 #include "app/frame_stamp.h"
 #include "app/lat_stat.h"
+#include "app/rec_control.h"
 #include "app/types.h"
 #include "infra/fixed_str.h"
 #include "infra/json_out.h"
@@ -16,23 +17,6 @@
 namespace mister::app {
 
 enum class RecState : std::uint8_t { Idle, Probing, Armed, Recording, Closing };
-
-enum class RecVerdict : std::uint8_t {
-    None,
-    Started,
-    Stopped,
-    NoWindow,
-    NoLiveBuffer,
-    Busy,
-    WriterFailed,
-    CoreSwitch,
-    ReplayEnded,
-    NoCodec,
-    NoMemory,
-
-    ScalerPortStuck,
-    kCount,
-};
 
 inline constexpr std::array<const char*, 5>
     kRecStateNames{"idle", "probing", "armed", "recording", "closing"};
@@ -50,15 +34,13 @@ static_assert(infra::json_clean_names(kRecStateNames), "a name is rendered unesc
 
 struct RecorderStatus {
     ControlGeneration gen{};
-    ControlGeneration answered{};
     RecState state = RecState::Idle;
-    RecVerdict verdict = RecVerdict::None;
     RecVerdict end = RecVerdict::None;
     std::uint8_t stride_mib = 0;
-    std::uint8_t lowlat = 0;
-    std::uint8_t anchored = 0;
-    std::uint8_t avi = 0;
-    std::uint8_t interlaced = 0;
+    bool lowlat = false;
+    bool anchored = false;
+    bool avi = false;
+    bool interlaced = false;
     std::uint8_t depth = 0;
     std::uint16_t width = 0;
     std::uint16_t height = 0;

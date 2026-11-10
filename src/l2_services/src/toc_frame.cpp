@@ -7,6 +7,7 @@
 
 #include "infra/endian.h"
 #include "svc/msf.h"
+#include "svc/track_row.h"
 
 namespace mister::svc {
 
@@ -25,8 +26,8 @@ struct FrameWriter {
         infra::store_le<std::uint16_t>(std::span(bytes).subspan(off).first<sizeof(v)>(), v);
     }
 
-    void u32(std::size_t off, std::uint32_t v) noexcept {
-        infra::store_le<std::uint32_t>(std::span(bytes).subspan(off).first<sizeof(v)>(), v);
+    void u32(xthread::ByteOffset off, std::uint32_t v) noexcept {
+        infra::store_le<std::uint32_t>(off.slice_of<sizeof(v)>(std::span(bytes)), v);
     }
 };
 
@@ -53,9 +54,9 @@ std::array<std::byte, kTocFrameBytes> build_toc_frame(
     FrameWriter w;
 
     const TrackCount last = std::min(toc.last, TrackCount{kFrameTracks});
-    w.u32(0, last.bcd_over_binary_word());
-    w.u32(kOffDiscEnd, toc.end.v);
-    w.u32(kOffDiscEndMsf, msf_word(toc.end));
+    w.u32(xthread::ByteOffset{0}, last.bcd_over_binary_word());
+    w.u32(xthread::ByteOffset{kOffDiscEnd}, toc.end.v);
+    w.u32(xthread::ByteOffset{kOffDiscEndMsf}, msf_word(toc.end));
     w.u16(kOffLibcrypt, meta.libcrypt_mask);
     std::uint16_t md = std::to_underlying(meta.region);
     if (meta.reset_request)
@@ -64,14 +65,15 @@ std::array<std::byte, kTocFrameBytes> build_toc_frame(
 
     last.for_each_index([&](TrackIndex i) {
         const Track& t = toc.at(i);
-        const std::size_t base = kHeaderBytes + i.row_offset(kRowBytes);
+        const xthread::ByteOffset base = xthread::ByteOffset{kHeaderBytes}
+            + i.row_offset(xthread::SlotStride{kRowBytes});
         const Lba start_sent = (i != TrackIndex{}) ? t.start : Lba{};
         w.u32(base, start_sent.v);
-        w.u32(base + kRowOffEnd, t.end.v - kInclusiveEnd);
+        w.u32(base + xthread::ByteOffset{kRowOffEnd}, t.end.v - kInclusiveEnd);
         std::uint32_t bcd = msf_word(start_sent + t.pregap);
         if (t.type == TrackType::Cdda)
             bcd |= 1u << kAudioFlagShift;
-        w.u32(base + kRowOffMsf, bcd);
+        w.u32(base + xthread::ByteOffset{kRowOffMsf}, bcd);
     });
     return w.bytes;
 }

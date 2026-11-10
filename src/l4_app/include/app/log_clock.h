@@ -11,16 +11,16 @@ namespace mister::app {
 using StatusMicros = std::chrono::duration<std::uint32_t, std::micro>;
 using LogMillis = std::chrono::duration<std::uint32_t, std::milli>;
 
-using LogStamp = std::chrono::duration<std::uint64_t, std::nano>;
+using LogInstant = std::chrono::steady_clock::time_point;
 
-[[nodiscard]] inline std::chrono::nanoseconds log_now() noexcept {
+[[nodiscard]] inline LogInstant log_now() noexcept {
     timespec ts{};
     (void)::clock_gettime(CLOCK_MONOTONIC, &ts);
-    return std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec};
+    return LogInstant{std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec}};
 }
 
-[[nodiscard]] inline std::uint64_t log_now_ns() noexcept {
-    return static_cast<std::uint64_t>(log_now().count());
+[[nodiscard]] inline std::chrono::nanoseconds log_stamp(LogInstant at) noexcept {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(at.time_since_epoch());
 }
 
 [[nodiscard]] constexpr std::uint32_t sat_u32(std::uint64_t v) noexcept {
@@ -44,7 +44,7 @@ template <class To>
     return saturated<LogMillis>(span);
 }
 
-[[nodiscard]] constexpr StatusMicros us_between(LogStamp from, LogStamp to) noexcept {
+[[nodiscard]] constexpr StatusMicros us_between(LogInstant from, LogInstant to) noexcept {
     if (to <= from)
         return StatusMicros::zero();
     using WideMicros = std::chrono::duration<std::uint64_t, std::micro>;

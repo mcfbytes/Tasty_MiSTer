@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "cores/neo_file.h"
+#include "cores/neo_header.h"
+#include "cores/neo_quirk.h"
 
 #include "infra/byte_view.h"
 #include "infra/endian.h"
@@ -15,6 +16,7 @@ std::uint32_t get_u32(std::span<const std::uint8_t> b, std::size_t off) noexcept
 }
 
 std::optional<NeoHeader> parse_neo_header(std::span<const std::uint8_t> buf) noexcept {
+
     constexpr std::size_t kVersionAt = 3;
     constexpr std::size_t kPSizeAt = 4;
     constexpr std::size_t kSSizeAt = 8;
@@ -78,7 +80,8 @@ const std::array<NeoQuirk, kNeoQuirkCount> kNeoQuirks{{
     {0x3E7, 0, 0, 0, 0, 1, 0, 0, 0},
 }};
 
-NeoCartConfig resolve_quirks(const NeoHeader& hdr) noexcept {
+CartQuirks resolve_quirks(const NeoHeader& hdr) noexcept {
+
     constexpr std::uint32_t kNghKof99 = 0x0251;
     constexpr std::uint32_t kNghGarou = 0x0253;
     constexpr std::uint32_t kNghMslug3 = 0x0256;
@@ -86,14 +89,14 @@ NeoCartConfig resolve_quirks(const NeoHeader& hdr) noexcept {
     constexpr std::uint32_t kNghMslug5 = 0x0268;
     constexpr std::uint32_t kNghSvc = 0x0269;
     constexpr std::uint32_t kNghKof2003 = 0x0271;
-    constexpr std::uint32_t kSize9M = 9437184;
+    constexpr std::uint32_t kFinalReleasePromBytes = 9437184;
     constexpr std::uint32_t kSize8M = 8388608;
     constexpr std::uint32_t kSize5M = 5242880;
     constexpr std::uint32_t kSize512K = 524288;
     constexpr std::size_t kGarouhNameAt = 27;
     constexpr std::size_t kSvcsplusNameAt = 15;
     constexpr std::uint8_t kSmaGarouh = 3;
-    NeoCartConfig cfg{};
+    CartQuirks cfg{};
 
     for (const NeoQuirk& q : kNeoQuirks) {
         if (q.id != hdr.ngh)
@@ -102,21 +105,21 @@ NeoCartConfig resolve_quirks(const NeoHeader& hdr) noexcept {
         bool skip = false;
         switch (hdr.ngh) {
             case kNghKof99:
-                if (hdr.p_size != kSize9M)
+                if (hdr.p_size != kFinalReleasePromBytes)
                     skip = true;
                 break;
             case kNghGarou:
-                if (hdr.p_size != kSize9M)
+                if (hdr.p_size != kFinalReleasePromBytes)
                     skip = true;
                 if (hdr.name[kGarouhNameAt] == 'A') {
-                    cfg.sma = kSmaGarouh;
-                    cfg.cmc = 1;
+                    cfg.config.sma = kSmaGarouh;
+                    cfg.config.cmc = 1;
                     cfg.vrom_mirror = false;
                     skip = true;
                 }
                 break;
             case kNghMslug3:
-                if (hdr.p_size != kSize9M)
+                if (hdr.p_size != kFinalReleasePromBytes)
                     skip = true;
                 break;
             case kNghMslug4:
@@ -125,7 +128,7 @@ NeoCartConfig resolve_quirks(const NeoHeader& hdr) noexcept {
                 break;
             case kNghMslug5:
                 if (hdr.p_size == kSize5M)
-                    cfg.ms5p = 1;
+                    cfg.config.ms5p = 1;
                 if (hdr.p_size != kSize8M)
                     skip = true;
                 break;
@@ -133,13 +136,13 @@ NeoCartConfig resolve_quirks(const NeoHeader& hdr) noexcept {
                 if (hdr.p_size != kSize8M)
                     skip = true;
                 if (hdr.name[kSvcsplusNameAt] == 'S') {
-                    cfg.cmc = 0;
-                    cfg.pvc = 1;
+                    cfg.config.cmc = 0;
+                    cfg.config.pvc = 1;
                     skip = true;
                 }
                 break;
             case kNghKof2003:
-                if (hdr.p_size != kSize9M)
+                if (hdr.p_size != kFinalReleasePromBytes)
                     skip = true;
                 break;
             default:
@@ -148,14 +151,14 @@ NeoCartConfig resolve_quirks(const NeoHeader& hdr) noexcept {
         if (skip)
             break;
 
-        cfg.hw_type = q.hw;
-        cfg.cmc = q.cmc;
-        cfg.sma = q.sma;
-        cfg.pvc = q.pvc;
-        cfg.xram = q.xram;
+        cfg.config.hw_type = q.hw;
+        cfg.config.cmc = q.cmc;
+        cfg.config.sma = q.sma;
+        cfg.config.pvc = q.pvc;
+        cfg.config.xram = q.xram;
         cfg.vrom_mirror = !q.mir;
-        cfg.rom_wait = q.rwait;
-        cfg.p_wait = q.pwait;
+        cfg.config.rom_wait = q.rwait;
+        cfg.config.p_wait = q.pwait;
         break;
     }
     return cfg;

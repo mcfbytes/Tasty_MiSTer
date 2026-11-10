@@ -10,12 +10,21 @@ namespace mister::svc {
 
 using namespace disc::detail;
 
-Ex<std::size_t> SubcodeSidecar::read(Lba lba, std::span<std::byte> dst) {
+namespace {
 
-    const std::uint32_t at = lba > sub_origin_ ? (lba - sub_origin_).v : 0u;
+constexpr proto::BlockSize kRecordBytes{kSubcodeBytes};
+
+}
+
+Ex<std::span<std::byte>> SubcodeSidecar::read(Lba lba, std::span<std::byte> dst) {
+
+    const BlockCount at = record_at(lba);
     if (sub_cdg_)
         return read_cdg_subcode_(at, dst);
-    auto rd = sub_->read_at(std::uint64_t{at} * kSubcodeBytes, dst.subspan(0, kSubcodeBytes));
+    auto rd = sub_->read_at(
+        kRecordBytes.position_of(proto::Lba{} + at),
+        dst.subspan(0, kSubcodeBytes)
+    );
     if (!rd)
         return std::unexpected(rd.error());
     if (*rd != kSubcodeBytes) {
@@ -23,7 +32,7 @@ Ex<std::size_t> SubcodeSidecar::read(Lba lba, std::span<std::byte> dst) {
             Error{Errc::short_read, ERR_SITE(), static_cast<std::uint32_t>(*rd)}
         );
     }
-    return kSubcodeBytes;
+    return dst.first(kSubcodeBytes);
 }
 
 constexpr int kCdgColumnOffset[] = {0,       18 - 24,  5 - 48,   23 - 72,  4 - 96,   2 - 120,
@@ -34,11 +43,14 @@ constexpr int kCdgColumnOffset[] = {0,       18 - 24,  5 - 48,   23 - 72,  4 - 9
 constexpr std::uint32_t kCdgReach = 165;
 constexpr std::size_t kCdgSpan = 254;
 
-Ex<std::size_t> SubcodeSidecar::read_cdg_subcode_(std::uint32_t at, std::span<std::byte> dst) {
+Ex<std::span<std::byte>> SubcodeSidecar::read_cdg_subcode_(
+    BlockCount at,
+    std::span<std::byte> dst
+) {
     constexpr std::size_t kCdgColumns = std::size(kCdgColumnOffset);
     constexpr std::size_t kCdgPacks = kSubcodeBytes / kCdgColumns;
 
-    const std::uint64_t want = std::uint64_t{at} * kSubcodeBytes;
+    const std::uint64_t want = kRecordBytes.position_of(proto::Lba{} + at);
     const std::uint64_t base = want > kCdgReach ? want - kCdgReach : 0;
     std::byte buf[kCdgSpan]{};
     auto rd = sub_->read_at(base, std::span<std::byte>(buf, sizeof(buf)));
@@ -46,13 +58,12 @@ Ex<std::size_t> SubcodeSidecar::read_cdg_subcode_(std::uint32_t at, std::span<st
         return std::unexpected(rd.error());
     for (std::size_t pack = 0; pack < kCdgPacks; ++pack) {
         for (std::size_t col = 0; col < kCdgColumns; ++col) {
-            const std::ptrdiff_t rel = static_cast<std::ptrdiff_t>(pack * kCdgColumns)
-                + kCdgColumnOffset[col]
-                + static_cast<std::ptrdiff_t>(kCdgReach);
+            const std::ptrdiff_t rel = static_cast<std::ptrdiff_t>(pack * kCdgColumns + kCdgReach)
+                + kCdgColumnOffset[col];
             dst[pack * kCdgColumns + col] = buf[static_cast<std::size_t>(rel)];
         }
     }
-    return kSubcodeBytes;
+    return dst.first(kSubcodeBytes);
 }
 
 SubcodeSidecar::Found SubcodeSidecar::open_sub_or_cdg(

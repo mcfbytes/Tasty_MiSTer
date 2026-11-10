@@ -20,6 +20,14 @@ struct HdThemeGlass {
     std::uint8_t under_dim = 100;
 
     [[nodiscard]] constexpr bool on() const noexcept { return opacity < 100; }
+
+    [[nodiscard]] DimQ8 under_q8() const noexcept;
+
+    [[nodiscard]] constexpr HdThemeGlass with_under(std::uint8_t dim) const noexcept {
+        HdThemeGlass out = *this;
+        out.under_dim = dim;
+        return out;
+    }
 };
 
 inline constexpr float kHdBackdropDim = 0.4f;
@@ -86,14 +94,6 @@ enum class HdGround : std::uint8_t { Primary, WindowShade };
     const unsigned g = ((c >> kGreenPlace) & kGreenBits) * pct / kPercent;
     const unsigned b = (c & kBlueBits) * pct / kPercent;
     return static_cast<std::uint16_t>((r << kRedPlace) | (g << kGreenPlace) | b);
-}
-
-[[nodiscard]] constexpr std::uint16_t hd_under_q8(std::uint8_t opacity, std::uint8_t dim) noexcept {
-    constexpr unsigned kPercent = 100;
-    constexpr unsigned kQ8One = 256;
-    const unsigned o = opacity > kPercent ? kPercent : opacity;
-    const unsigned d = dim > kPercent ? kPercent : dim;
-    return static_cast<std::uint16_t>((kPercent - o) * d * kQ8One / (kPercent * kPercent));
 }
 
 [[nodiscard]] HdThemeGlass hd_glass_keys(

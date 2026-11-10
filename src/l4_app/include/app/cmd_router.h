@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "app/cmd_fifo.h"
+#include "app/cmd_line.h"
 #include "app/cmd_verb_sink.h"
 #include "app/hps_framebuffer.h"
 #include "app/xml_kind.h"
@@ -13,6 +13,7 @@
 #include "app/ui_request.h"
 #include "app/ui_request_ring.h"
 #include "app/video_pump.h"
+#include "infra/message_sum.h"
 #include "infra/opt_ref.h"
 #include "infra/rt_stats.h"
 #include "infra/seat.h"
@@ -85,11 +86,24 @@ public:
         return shots_.take(v.path, v.scaled);
     }
 
-    bool on(const CmdVerb::Volume& v) noexcept override {
+    bool on(const CmdVerb::VolumeMute& v) noexcept override {
         TASTY_SEAT_BODY(CmdRouter);
-        if (!link_tx_.push(proto::LinkOp::SetVolume{.cmd = v.cmd, .arg = v.arg}))
-            ++volume_drops_;
-        return true;
+        return push_volume(proto::LinkOp::SetMute{.on = v.on});
+    }
+
+    bool on(const CmdVerb::VolumeAttenuation& v) noexcept override {
+        TASTY_SEAT_BODY(CmdRouter);
+        return push_volume(proto::LinkOp::SetAttenuation{.attenuation = v.attenuation});
+    }
+
+    bool on(const CmdVerb::VolumeNudge& v) noexcept override {
+        TASTY_SEAT_BODY(CmdRouter);
+        return push_volume(proto::LinkOp::NudgeVolume{.step = v.step});
+    }
+
+    bool on(const CmdVerb::VolumeToggle&) noexcept override {
+        TASTY_SEAT_BODY(CmdRouter);
+        return push_volume(proto::LinkOp::ToggleMute{});
     }
 
     bool on(const CmdVerb::RtStats&) noexcept override {
@@ -133,6 +147,14 @@ public:
     [[nodiscard]] std::uint32_t load_core_drops() const noexcept { return load_core_drops_; }
 
 private:
+    template <class A>
+        requires infra::AlternativeOf<A, proto::LinkOp>
+    bool push_volume(const A& act) noexcept {
+        if (!link_tx_.push(act))
+            ++volume_drops_;
+        return true;
+    }
+
     infra::OptRef<MglPump> mgl_{};
     VideoPump& video_;
     infra::OptRef<HpsFramebuffer> fb_{};

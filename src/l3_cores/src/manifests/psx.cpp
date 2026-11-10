@@ -120,7 +120,8 @@ static_assert(
 static_assert(
     kPsx.staging.order == StageOrder::Psx
         && kPsx.staging.disc_slot == IoIndex{1}
-        && kPsx.staging.save_slot == IoIndex{2},
+        && kPsx.staging.save
+        && kPsx.staging.save->slot == IoIndex{2},
     "user_io.cpp:3251 slot 1 disc; psx.cpp:433 memcard on slot 2"
 );
 static_assert(
@@ -129,11 +130,11 @@ static_assert(
     "metadata bit 2, not status bit 0"
 );
 static_assert(
-    kPsx.staging.save_pre_bytes == proto::FileSize{128 * 1024},
+    kPsx.staging.save && kPsx.staging.save->pre_bytes == proto::FileSize{128 * 1024},
     "psx.cpp:429,437: user_io_file_mount(buf, 2, 1, MCD_SIZE); user_io.cpp:2241-2246"
 );
 static_assert(
-    !kPsx.staging.save_pre_on_empty,
+    kPsx.staging.save && !kPsx.staging.save->pre_on_empty,
     "user_io.cpp:2141,2245-2250: an existing empty card opens, so it announces its size, 0"
 );
 
@@ -165,28 +166,20 @@ static_assert(
     "psx.cpp:681: the generic file-tx arm, not the PCE loader"
 );
 static_assert(
-    kPsxBootAssets[0].exact_size.v == 512 * 1024 && kPsxBootAssets[1].exact_size.v == 512 * 1024,
+    kPsxBootAssets[0].exact_size == proto::FileSize{512 * 1024}
+        && kPsxBootAssets[1].exact_size == proto::FileSize{512 * 1024},
     "psx.cpp:680: `if (sz != 512*1024) return 0` — wrong size means "
     "no wire act and the next candidate is tried"
 );
 
 static_assert(
-    kPsxCuePolicy.track_close == svc::CuePolicy::TrackClose::ProvisionalInclusive,
-    "psx.cpp:315: end = table->end - 1, re-derived as each track lands"
-);
-static_assert(
-    kPsxCuePolicy.pregap_model == svc::CuePolicy::PregapModel::IndexTriple,
-    "psx.cpp:164-331: pregap accumulator + per-track flag + indexes[1]"
-);
-static_assert(
-    kPsxCuePolicy.post_load_shift == svc::CuePolicy::PostLoadTocShift::FakeLeadInPregap150,
-    "psx.cpp:136-156: CHD track 0 forced to a 150-sector lead-in, "
-    "later tracks re-chained start = prev.end + 1"
+    kPsxCuePolicy.program == svc::CuePolicy::Program::IndexTriple,
+    "psx.cpp:164-331 plus :315 and :136-156: the provisional close, the "
+    "three-field pregap model and the 150-sector CHD lead-in are one program"
 );
 static_assert(
     svc::unimplemented_axis(kPsxCuePolicy) == svc::CueAxis::None,
-    "phase B stage 2: the triple is a built program — and still "
-    "unreachable in the shipping binary until the registry row lands"
+    "the IndexTriple program is built"
 );
 static_assert(
     kPsxCuePolicy.sub_naming == svc::CuePolicy::SubNaming::None,

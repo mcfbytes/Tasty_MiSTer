@@ -5,18 +5,21 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <utility>
 
-#include "app/save_slot.h"
+#include "app/save_upload_slot.h"
 #include "cores/save_image.h"
 #include "cores/save_servant.h"
 #include "hal/spi_transport.h"
 #include "infra/counter.h"
 #include "infra/loan_channel.h"
+#include "infra/polled.h"
 #include "infra/seat.h"
 #include "infra/wake_flag.h"
 #include "proto/fio_tenant.h"
 #include "proto/save_act.h"
 #include "proto/spi_fio_queue.h"
+#include "proto/types.h"
 #include "proto/upload_session.h"
 #include "svc/io_coworker.h"
 
@@ -31,23 +34,31 @@ public:
     using Loan = Chan::Loan;
     using Ask = SaveUploadSlot::Ask;
 
-    static constexpr std::uint32_t kMaxRoundWords = 1u + proto::kSavePieceBytes / 2u;
+    static constexpr std::uint32_t kMaxRoundWords = 1u + proto::kSavePieceWords;
     static_assert(kMaxRoundWords <= proto::tightest_round_budget_words());
 
     static constexpr std::uint32_t kActLivenessRounds = 64;
 
-    explicit SaveUploadRelay(hal::ISpiTransport& link, xthread::Polled) noexcept
+    explicit SaveUploadRelay(
+        hal::ISpiTransport& link,
+        xthread::Polled,
+        std::unique_ptr<cores::ISaveServant> servant
+    ) noexcept
         : link_(link),
+          io_{.servant = std::move(servant)},
           chan_(xthread::Polled{}) {}
 
-    explicit SaveUploadRelay(hal::ISpiTransport& link, xthread::WakeFlag& io_wake) noexcept
+    explicit SaveUploadRelay(
+        hal::ISpiTransport& link,
+        xthread::WakeFlag& io_wake,
+        std::unique_ptr<cores::ISaveServant> servant
+    ) noexcept
         : link_(link),
+          io_{.servant = std::move(servant)},
           chan_(io_wake) {}
 
     SaveUploadRelay(const SaveUploadRelay&) = delete;
     SaveUploadRelay& operator=(const SaveUploadRelay&) = delete;
-
-    void install(std::unique_ptr<cores::ISaveServant> servant) noexcept;
 
     [[nodiscard]] bool order(const cores::SaveImage& image, std::string_view rel) noexcept;
 
@@ -59,7 +70,7 @@ public:
 
     [[nodiscard]] bool drained() const noexcept;
 
-    [[nodiscard]] std::uint32_t take_round_words() noexcept;
+    [[nodiscard]] proto::FioWordCount take_round_words() noexcept;
 
     [[nodiscard]] bool holds_fio() const noexcept override { return rt_.open.has_value(); }
 
@@ -69,8 +80,8 @@ public:
 
     [[nodiscard]] bool idle() const noexcept override { return chan_.outbound() == 0; }
 
-    void on(const Ask::Start& a, const Ask::Head& h, Job& job) noexcept;
-    void on(const Ask::Resume& a, const Ask::Head& h, Job& job) noexcept;
+    void on(const Ask::Start& a, const RelayStamp& h, Job& job) noexcept;
+    void on(const Ask::Resume& a, const RelayStamp& h, Job& job) noexcept;
     void misrouted(const Ask& m, Job& job) noexcept;
 
     [[nodiscard]] std::uint32_t started() const noexcept { return rt_.started.get(); }
@@ -106,11 +117,10 @@ private:
     void cut_() noexcept;
     void end_pull_() noexcept;
 
-    [[nodiscard]] Ask::Head head_() const noexcept { return {.gen = rt_.gen, .epoch = rt_.epoch}; }
+    [[nodiscard]] RelayStamp head_() const noexcept { return rt_.stamp; }
 
     struct Rt {
-        std::uint16_t gen = 1;
-        std::uint16_t epoch = 1;
+        RelayStamp stamp{CoreGen{1}, ActEpoch{1}};
         bool pull_out = false;
         hal::Width width = hal::Width::Byte;
         std::optional<proto::UploadSession> open{};
@@ -123,7 +133,7 @@ private:
 
     struct Io {
         std::unique_ptr<cores::ISaveServant> servant{};
-        Ask::Head serving{};
+        RelayStamp serving{};
     };
 
     hal::ISpiTransport& link_;

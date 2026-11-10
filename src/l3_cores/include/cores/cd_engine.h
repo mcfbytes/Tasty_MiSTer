@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -8,6 +9,7 @@
 #include <span>
 
 #include "cores/cd_cadence_gate.h"
+#include "cores/cd_drive_state.h"
 #include "cores/cd_link.h"
 #include "cores/cd_engine_stats.h"
 #include "cores/cd_profile.h"
@@ -15,6 +17,7 @@
 #include "cores/core_window.h"
 #include "cores/types.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "os/clock.h"
 #include "svc/disc_read_service.h"
@@ -38,13 +41,13 @@ public:
     CdEngine(const CdEngine&) = delete;
     CdEngine& operator=(const CdEngine&) = delete;
 
-    [[nodiscard]] Ex<void> on_command_edge(std::uint8_t req);
+    [[nodiscard]] bool on_command_edge(std::uint8_t req) noexcept;
 
     [[nodiscard]] Ex<void> on_tick(CdDialectPorts& p);
 
     [[nodiscard]] Ex<void> push_sector(CdDialectPorts& p);
 
-    [[nodiscard]] Ex<void> reset();
+    void reset() noexcept;
 
     [[nodiscard]] bool cart_load_ejects() const noexcept { return do_cart_load_ejects(); }
 
@@ -71,7 +74,7 @@ public:
 
     void set_region(bool region) noexcept { do_set_region(region); }
 
-    [[nodiscard]] Ex<void> notify_disc(bool loaded, const svc::DiscGeometry& geom);
+    void notify_disc(bool loaded, const svc::DiscGeometry& geom) noexcept;
 
     bool streaming(const svc::DiscGeometry& geom) const noexcept { return do_streaming(geom); }
 
@@ -94,19 +97,14 @@ public:
         return n < kMaxCommandWords ? n : kMaxCommandWords;
     }
 
-    std::optional<std::uint16_t> command_selector() const noexcept { return do_command_selector(); }
+    std::optional<cdwire::Selector> command_selector() const noexcept {
+        return do_command_selector();
+    }
 
     void after_command_round() noexcept { do_after_command_round(); }
 
-    std::size_t status_words(
-        std::uint64_t frame,
-        std::span<std::uint16_t, kMaxStatusWords> out
-    ) const noexcept {
-        return do_status_words(frame, out);
-    }
-
     struct DriveView {
-        std::uint8_t state = 0;
+        CdDriveState state = CdDriveState::NoDisc;
         svc::TrackIndex track{};
         HeadLba lba{};
 
@@ -118,8 +116,8 @@ public:
         return do_drive_view(geom);
     }
 
-    [[nodiscard]] Ex<std::size_t> disc_descriptor(
-        std::span<std::byte> out,
+    [[nodiscard]] Ex<std::span<const std::byte>> disc_descriptor(
+        std::span<std::byte, kMaxDescriptorBytes> out,
         const svc::DiscGeometry& geom
     ) {
         return do_disc_descriptor(out, geom);
@@ -130,10 +128,13 @@ protected:
         : cadence_(ticks, c),
           last_req_(req_seed) {}
 
-    [[nodiscard]] Ex<void> send_frame_words_(std::uint64_t frame, ICdLink& link) {
-        std::uint16_t words[kMaxStatusWords] = {};
-        const std::size_t n = status_words(frame, std::span<std::uint16_t, kMaxStatusWords>(words));
-        return link.send_status(std::span<const std::uint16_t>(words, n));
+    template <std::size_t N>
+    [[nodiscard]] Ex<void> send_status_words_(
+        const std::array<std::uint16_t, N>& words,
+        ICdLink& link
+    ) {
+        static_assert(N <= kMaxStatusWords, "a status frame is at most kMaxStatusWords");
+        return link.send_status(words);
     }
 
 private:
@@ -143,29 +144,25 @@ private:
     ) = 0;
     [[nodiscard]] virtual Ex<void> do_tick(CdDialectPorts& p) = 0;
     [[nodiscard]] virtual Ex<void> do_push_sector(CdDialectPorts& p) = 0;
-    [[nodiscard]] virtual Ex<void> do_notify_disc(bool loaded, const svc::DiscGeometry& geom) = 0;
+    virtual void do_notify_disc(bool loaded, const svc::DiscGeometry& geom) noexcept = 0;
     virtual void do_reset_machine() noexcept = 0;
     virtual bool do_streaming(const svc::DiscGeometry& geom) const noexcept = 0;
     virtual DriveView do_drive_view(const svc::DiscGeometry& geom) const noexcept = 0;
     virtual std::size_t do_command_word_count() const noexcept = 0;
-    virtual std::optional<std::uint16_t> do_command_selector() const noexcept = 0;
+    virtual std::optional<cdwire::Selector> do_command_selector() const noexcept = 0;
     virtual void do_after_command_round() noexcept = 0;
-    virtual std::size_t do_status_words(
-        std::uint64_t frame,
-        std::span<std::uint16_t, kMaxStatusWords> out
-    ) const noexcept = 0;
 
     [[nodiscard]] virtual CdEngineStats do_stats() const noexcept = 0;
 
-    [[nodiscard]] virtual std::uint8_t do_speed_index() const noexcept { return 0; }
+    [[nodiscard]] virtual CdSpeedIndex do_speed_index() const noexcept { return CdSpeedIndex{}; }
 
     virtual void do_set_region(bool) noexcept {}
 
-    [[nodiscard]] virtual Ex<std::size_t> do_disc_descriptor(
-        std::span<std::byte>,
+    [[nodiscard]] virtual Ex<std::span<const std::byte>> do_disc_descriptor(
+        std::span<std::byte, kMaxDescriptorBytes>,
         const svc::DiscGeometry&
     ) {
-        return std::size_t{0};
+        return std::span<const std::byte>{};
     }
 
     [[nodiscard]] virtual bool do_cart_load_ejects() const noexcept { return false; }
@@ -176,11 +173,11 @@ private:
     bool command_wanted_ = false;
 };
 
-Ex<std::unique_ptr<CdEngine>> make_cd_engine(
+std::unique_ptr<CdEngine> make_cd_engine(
     const CdProfile& profile,
     svc::DiscReadService& disc,
     const os::IClock& clock,
-    ICoreWindow* window = nullptr
+    infra::OptRef<ICoreWindow> window = {}
 );
 
 }

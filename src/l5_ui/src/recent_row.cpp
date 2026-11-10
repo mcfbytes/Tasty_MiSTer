@@ -36,7 +36,7 @@ std::optional<RowKey> RecentRow::key() const {
         h = (h ^ static_cast<std::uint8_t>(c)) * kFnvPrime;
     for (const char c : record_.path)
         h = (h ^ static_cast<std::uint8_t>(c)) * kFnvPrime;
-    return RowKey{kKeySpace | (h & ~kKeySpaceMask)};
+    return RowKey::hashed(RowKeySpace::Recent, RowDigest{h});
 }
 
 app::PageDescription::Row RecentRow::describe() const {
@@ -60,7 +60,8 @@ Transition RecentRow::select() {
 
 Transition RecentRow::on_confirm(RowIndex choice) {
     TASTY_SEAT_BODY(RecentRow);
-    if (choice != RowIndex{0})
+
+    if (choice != RecentLaunch::row_of(RecentLaunch::YesNo::Yes))
         return Transition{Transition::Kind::Pop};
     return launch_.launch(record_);
 }

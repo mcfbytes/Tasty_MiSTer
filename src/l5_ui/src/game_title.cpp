@@ -3,7 +3,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
+
+#include "infra/ascii.h"
 
 namespace mister::ui {
 
@@ -48,13 +49,6 @@ constexpr auto kPlaces = std::to_array<std::string_view>({
     "He",
 });
 
-bool same_letters(std::string_view a, std::string_view b) noexcept {
-    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
-               return std::tolower(static_cast<unsigned char>(x))
-                   == std::tolower(static_cast<unsigned char>(y));
-           });
-}
-
 std::string_view trimmed(std::string_view s) noexcept {
     while (!s.empty() && s.front() == ' ')
         s.remove_prefix(1);
@@ -70,7 +64,7 @@ bool names_places(std::string_view inside) noexcept {
         const std::size_t cut = inside.find_first_of(",+");
         const std::string_view item = trimmed(inside.substr(0, cut));
         if (std::ranges::none_of(kPlaces, [item](std::string_view p) {
-                return same_letters(p, item);
+                return infra::ieq(p, item);
             }))
             return false;
         if (cut == std::string_view::npos)

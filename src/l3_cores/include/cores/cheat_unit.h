@@ -38,6 +38,10 @@ struct CheatUnit {
 
     [[nodiscard]] constexpr bool empty() const noexcept { return v == 0; }
 
+    [[nodiscard]] constexpr Error refused(Errc code, infra::ErrorSite site) const noexcept {
+        return Error{code, site, v};
+    }
+
     friend constexpr bool operator==(CheatUnit, CheatUnit) = default;
 };
 

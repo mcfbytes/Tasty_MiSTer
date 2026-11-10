@@ -5,6 +5,7 @@
 #include <cstdint>
 
 #include "infra/seat.h"
+#include "proto/mouse_delta.h"
 #include "proto/types.h"
 #include "svc/types.h"
 

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <atomic>
-#include <cstdint>
 #include <memory>
 
 #include "infra/error.h"
@@ -21,10 +19,6 @@ class FrameClock {
 public:
     static Ex<std::unique_ptr<FrameClock>> open(const char* fbdev_path);
 
-    hal::FrameSeq seq() const noexcept {
-        return hal::FrameSeq{seq_.load(std::memory_order_acquire)};
-    }
-
     int eventfd() const noexcept { return frame_wake_.fd(); }
 
     [[nodiscard]] const FrameCell& frame_cell() const noexcept { return cell_; }
@@ -33,7 +27,8 @@ public:
 
 private:
     FrameClock() = default;
-    std::atomic<std::uint32_t> seq_{0};
+
+    hal::FrameSeq seq_{};
     FrameCell cell_{};
     os::Framebuffer fb_;
     xthread::WakeFlag frame_wake_{};

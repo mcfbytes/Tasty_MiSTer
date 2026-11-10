@@ -30,7 +30,7 @@ constexpr std::size_t kSenseLengthAt = 7;
 constexpr std::size_t kSenseAscAt = 12;
 constexpr std::size_t kInquiryVersionAt = 2;
 constexpr std::size_t kInquiryLengthAt = 4;
-constexpr std::uint32_t kInquiryHeaderBytes = 5;
+constexpr Cdb::AllocBytes kInquiryHeaderBytes{5};
 constexpr std::size_t kInquiryVendorAt = 8;
 constexpr std::size_t kInquiryProductAt = 16;
 constexpr std::size_t kInquiryProductBytes = 16;
@@ -40,9 +40,9 @@ constexpr std::size_t kModeExtentLengthAt = 3;
 constexpr std::size_t kModeBlockCountAt = 5;
 constexpr std::size_t kModeBlockCountBytes = 3;
 constexpr std::size_t kModeBlockSizeAt = 10;
-constexpr std::uint32_t kWordBytes = 2;
 constexpr std::size_t kDiskWordBytes = sizeof(std::uint32_t);
 constexpr std::size_t kTargetSelectAt = 10;
+constexpr unsigned kTargetShift = 5;
 constexpr std::uint8_t kUnitSelectBit = 0x01;
 
 constexpr std::string_view kVendor = "MISTer  ";
@@ -51,6 +51,20 @@ constexpr std::string_view kRevision = "ATH ";
 constexpr std::uint8_t u8(std::byte b) noexcept {
     return std::to_integer<std::uint8_t>(b);
 }
+
+struct AcsiState {
+    AcsiTarget target{};
+    std::optional<Cdb> cdb{};
+
+    [[nodiscard]] static std::optional<AcsiState> decode(
+        std::span<const std::byte, proto::kDiskStateBytes> block
+    ) noexcept {
+        const std::byte select = block[kTargetSelectAt];
+        if ((u8(select) & kUnitSelectBit) == 0)
+            return std::nullopt;
+        return AcsiState{AcsiTarget{u8(select >> kTargetShift)}, Cdb::decode(block)};
+    }
+};
 
 constexpr std::uint16_t wire_opcode(DmaOp op) noexcept {
     return static_cast<std::uint16_t>(op);
@@ -66,13 +80,6 @@ constexpr std::uint16_t wire_len(std::size_t n) noexcept {
 
 constexpr std::uint8_t sense_byte(SenseCode code) noexcept {
     return static_cast<std::uint8_t>(code);
-}
-
-std::span<const std::byte> whole_word_span(
-    std::span<const std::byte> reply,
-    proto::BlockCount length
-) noexcept {
-    return reply.first((static_cast<std::size_t>(length.v) / kWordBytes) * kWordBytes);
 }
 
 void put_text(std::span<std::byte> dst, std::string_view text, std::byte pad) noexcept {
@@ -97,27 +104,28 @@ AcsiServant::AcsiServant(
 
 Ex<void> AcsiServant::bind_target(
     AcsiTarget t,
-    svc::IDiskImage* img,
+    infra::OptRef<svc::IDiskImage> img,
     std::string_view name
 ) noexcept {
     const auto found = slot_.find(t);
     if (!found)
         return std::unexpected(Error{Errc::slot_range, ERR_SITE(), t.v});
     Slot& slot = *found;
-    slot.image = infra::opt_ref_of(img);
-    (void)slot.name.assign(img != nullptr ? name : std::string_view{});
+    slot.image.borrow(img);
+    (void)slot.name.assign(img ? name : std::string_view{});
     return {};
 }
 
 MountState AcsiServant::bind(proto::DiskUnit unit, std::string_view path) noexcept {
     TASTY_SEAT_BODY(AcsiServant);
-    const AcsiTarget target{unit.v};
+    const AcsiTarget target = AcsiTarget::of(unit);
     const auto found = slot_.find(target);
     if (!found)
         return MountState::Failed;
     Slot& slot = *found;
-    (void)bind_target(target, nullptr, {});
-    slot.owned.reset();
+
+    forget_command_();
+    (void)bind_target(target, {}, {});
     if (path.empty())
         return MountState::Done;
     if (!vfs_)
@@ -128,8 +136,8 @@ MountState AcsiServant::bind(proto::DiskUnit unit, std::string_view path) noexce
         img = svc::open_disk_image(*vfs_, path, formats_, svc::OpenMode::Read);
     if (!img)
         return MountState::Failed;
-    slot.owned = std::move(*img);
-    (void)bind_target(target, slot.owned.get(), StConfig::leaf_of(path));
+    slot.image.hold(std::move(*img));
+    (void)slot.name.assign(StConfig::leaf_of(path));
     return MountState::Done;
 }
 
@@ -137,9 +145,8 @@ void AcsiServant::release() noexcept {
     TASTY_SEAT_BODY(AcsiServant);
     forget_command_();
     for (Slot& slot : slot_) {
-        slot.image.reset();
+        slot.image.clear();
         (void)slot.name.assign(std::string_view{});
-        slot.owned.reset();
         slot.asc = SenseCode::None;
     }
 }
@@ -150,45 +157,31 @@ proto::DiskAct AcsiServant::start(
 ) noexcept {
     TASTY_SEAT_BODY(AcsiServant);
     forget_command_();
-    std::copy(state.begin(), state.end(), state_.begin());
-    if ((u8(state_[kTargetSelectAt]) & kUnitSelectBit) == 0)
+    const auto command = AcsiState::decode(state);
+    if (!command)
         return proto::DiskAct::none();
     ++commands_;
 
-    const AcsiTarget target{
-        static_cast<std::uint8_t>(u8(state_[kTargetSelectAt]) >> Cdb::kLunShift)
-    };
-    const auto found = slot_.find(target);
-    if (!found || !found->image || found->image->size() == proto::FileSize{}) {
+    const auto found = slot_.find(command->target);
+    infra::OptRef<svc::IDiskImage> image{};
+    if (found)
+        image = found->image.get();
+    if (!image || image->size() == proto::FileSize{}) {
         ++naks_;
         nak_();
     } else {
-        target_ = target;
-        dispatch_(*found);
+        target_ = command->target;
+        dispatch_(*found, command->cdb);
     }
-    return next_act_(bytes).with_unit(proto::DiskUnit{target.v});
+    return next_act_(bytes).with_unit(command->target.unit());
 }
 
 proto::DiskAct AcsiServant::resume(std::span<std::byte, proto::kDiskActBytes> bytes) noexcept {
     TASTY_SEAT_BODY(AcsiServant);
-    if (cmd_.transfer == Transfer::Write && cmd_.in_len != 0) {
-        std::memcpy(chunk_.data() + cmd_.chunk_off, bytes.data(), cmd_.in_len);
-        cmd_.chunk_off += cmd_.in_len;
-        cmd_.in_len = 0;
-        if (cmd_.chunk_off == cmd_.chunk_len) {
-            Slot& slot = slot_[target_];
-            const std::span<const std::byte> window = std::span(chunk_).first(cmd_.chunk_len);
-            auto put = slot.image ? slot.image->write_at(image_offset(cmd_.lba), window)
-                                  : Ex<std::size_t>{std::size_t{0}};
-            if (!put || *put != cmd_.chunk_len) {
-                ++io_faults_;
-                cmd_.transfer = Transfer::None;
-                answer_(slot, ScsiStatus::Check, SenseCode::WriteError);
-                return next_act_(bytes);
-            }
-            cmd_.lba += cmd_.chunk_blocks;
-            cmd_.chunk_len = 0;
-        }
+    if (auto* write = std::get_if<WriteTransfer>(&cmd_.transfer)) {
+
+        if (!write_take_in_(*write, bytes))
+            cmd_.transfer = std::monostate{};
     }
     return next_act_(bytes);
 }
@@ -216,8 +209,12 @@ void AcsiServant::answer_(Slot& slot, ScsiStatus status, SenseCode asc) {
     ack_(status);
 }
 
+svc::IDiskImage& AcsiServant::image_of_(const Slot& slot) noexcept {
+    return slot.image.get().value();
+}
+
 proto::BlockCount AcsiServant::block_count_(const Slot& slot) const noexcept {
-    return slot.image->size().whole_units(proto::FileSize{kBlockBytes});
+    return proto::end_lba(image_of_(slot).size(), kBlock) - proto::Lba{};
 }
 
 proto::DiskAct AcsiServant::next_act_(std::span<std::byte, proto::kDiskActBytes> bytes) {
@@ -228,10 +225,21 @@ proto::DiskAct AcsiServant::next_act_(std::span<std::byte, proto::kDiskActBytes>
             wire_len(std::exchange(cmd_.reply_len, 0))
         );
     }
-    if (cmd_.transfer == Transfer::Read)
-        return read_step_(bytes);
-    if (cmd_.transfer == Transfer::Write)
-        return write_step_(bytes);
+
+    if (auto* read = std::get_if<ReadTransfer>(&cmd_.transfer)) {
+        const auto act = read_step_(*read, bytes);
+        if (act)
+            return *act;
+        cmd_.transfer = std::monostate{};
+        return next_act_(bytes);
+    }
+    if (auto* write = std::get_if<WriteTransfer>(&cmd_.transfer)) {
+        const auto act = write_step_(*write, bytes);
+        if (act)
+            return *act;
+        cmd_.transfer = std::monostate{};
+        return next_act_(bytes);
+    }
     if (std::exchange(cmd_.ack_owed, false)) {
         return proto::DiskAct::signal(wire_opcode(DmaOp::Ack), true, signal_word(cmd_.status));
     }
@@ -241,8 +249,7 @@ proto::DiskAct AcsiServant::next_act_(std::span<std::byte, proto::kDiskActBytes>
     return proto::DiskAct::none();
 }
 
-void AcsiServant::dispatch_(Slot& slot) {
-    const auto cdb = Cdb::decode(std::span<const std::byte>(state_));
+void AcsiServant::dispatch_(Slot& slot, const std::optional<Cdb>& cdb) {
     if (!cdb)
         return answer_(slot, ScsiStatus::Check, SenseCode::InvalidCommand);
     reply_.fill(std::byte{0});
@@ -268,9 +275,9 @@ void AcsiServant::dispatch_(Slot& slot) {
 }
 
 void AcsiServant::answer_read_capacity_(Slot& slot, const Cdb& cdb) {
-    if (cdb.lun != 0)
+    if (!cdb.lun0())
         return answer_(slot, ScsiStatus::Check, SenseCode::InvalidLun);
-    const proto::BlockCount last = block_count_(slot) - proto::BlockCount{1};
+    const proto::Lba last = proto::end_lba(image_of_(slot).size(), kBlock).wrapping_prev();
     last.store_be32(std::span(reply_).first<kDiskWordBytes>());
     reply_[kCapacityBlockSizeAt] = std::byte{kBlockSizeCode};
     memory_write_(std::span<const std::byte>(reply_).first(kCapacityBytes));
@@ -278,13 +285,13 @@ void AcsiServant::answer_read_capacity_(Slot& slot, const Cdb& cdb) {
 }
 
 void AcsiServant::answer_ready_(Slot& slot, const Cdb& cdb) {
-    if (cdb.lun != 0)
+    if (!cdb.lun0())
         return answer_(slot, ScsiStatus::Check, SenseCode::InvalidLun);
     return answer_(slot, ScsiStatus::Good, SenseCode::None);
 }
 
 void AcsiServant::answer_sense_(Slot& slot, const Cdb& cdb) {
-    if (cdb.lun != 0)
+    if (!cdb.lun0())
         slot.asc = SenseCode::InvalidLun;
     reply_[kSenseLengthAt] = std::byte{kSenseAdditionalLength};
     if (slot.asc != SenseCode::None) {
@@ -297,7 +304,7 @@ void AcsiServant::answer_sense_(Slot& slot, const Cdb& cdb) {
 
 void AcsiServant::answer_inquiry_(Slot& slot, const Cdb& cdb) {
     reply_[kInquiryVersionAt] = std::byte{kInquiryScsi2};
-    reply_[kInquiryLengthAt] = (cdb.length - proto::BlockCount{kInquiryHeaderBytes}).low_byte();
+    reply_[kInquiryLengthAt] = cdb.alloc.reply_length_byte(kInquiryHeaderBytes);
     put_text(std::span(reply_).subspan(kInquiryVendorAt, kVendor.size()), kVendor, std::byte{' '});
     put_text(
         std::span(reply_).subspan(kInquiryProductAt, kInquiryProductBytes),
@@ -319,28 +326,28 @@ void AcsiServant::answer_inquiry_(Slot& slot, const Cdb& cdb) {
         serial_.view(),
         std::byte{' '}
     );
-    if (cdb.lun != 0)
+    if (!cdb.lun0())
         reply_[0] = std::byte{kInquiryNoDevice};
-    memory_write_(whole_word_span(reply_, cdb.length));
+    memory_write_(cdb.alloc.words_of(reply_));
     return answer_(slot, ScsiStatus::Good, SenseCode::None);
 }
 
 void AcsiServant::answer_mode_sense_(Slot& slot, const Cdb& cdb) {
-    if (cdb.lun != 0)
+    if (!cdb.lun0())
         return answer_(slot, ScsiStatus::Check, SenseCode::InvalidLun);
     reply_[kModeExtentLengthAt] = std::byte{kModeSenseExtentBytes};
     std::array<std::byte, kDiskWordBytes> count_be{};
     block_count_(slot).store_be32(std::span(count_be));
     std::copy_n(count_be.begin() + 1, kModeBlockCountBytes, reply_.begin() + kModeBlockCountAt);
     reply_[kModeBlockSizeAt] = std::byte{kBlockSizeCode};
-    memory_write_(whole_word_span(reply_, cdb.length));
+    memory_write_(cdb.alloc.words_of(reply_));
     return answer_(slot, ScsiStatus::Good, SenseCode::None);
 }
 
 void AcsiServant::answer_blocks_(Slot& slot, const Cdb& cdb) {
-    if (cdb.lun != 0)
+    if (!cdb.lun0())
         return answer_(slot, ScsiStatus::Check, SenseCode::InvalidLun);
-    if (!block_count_(slot).holds(cdb.lba, cdb.length)) {
+    if (!block_count_(slot).holds(cdb.lba, cdb.transfer)) {
         return answer_(slot, ScsiStatus::Check, SenseCode::LbaOutOfRange);
     }
     if (cdb.writes())
@@ -349,69 +356,100 @@ void AcsiServant::answer_blocks_(Slot& slot, const Cdb& cdb) {
 }
 
 void AcsiServant::read_blocks_(Slot&, const Cdb& cdb) {
-    cmd_.transfer = Transfer::Read;
-    cmd_.lba = cdb.lba;
-    cmd_.length = cdb.length;
+    cmd_.transfer = ReadTransfer{.lba = cdb.lba, .length = cdb.transfer};
 }
 
 void AcsiServant::write_blocks_(Slot& slot, const Cdb& cdb) {
-    if (!slot.image->writable())
+    if (!image_of_(slot).writable())
         return answer_(slot, ScsiStatus::Check, SenseCode::WriteProtected);
-    cmd_.transfer = Transfer::Write;
-    cmd_.lba = cdb.lba;
-    cmd_.length = cdb.length;
+    cmd_.transfer = WriteTransfer{.lba = cdb.lba, .length = cdb.transfer};
 }
 
-proto::DiskAct AcsiServant::read_step_(std::span<std::byte, proto::kDiskActBytes> bytes) {
+std::optional<proto::DiskAct> AcsiServant::read_step_(
+    ReadTransfer& arm,
+    std::span<std::byte, proto::kDiskActBytes> bytes
+) {
     Slot& slot = slot_[target_];
-    if (cmd_.chunk_off == cmd_.chunk_len) {
-        if (cmd_.length == proto::BlockCount{}) {
-            cmd_.transfer = Transfer::None;
+
+    if (!slot.image.get()) {
+        ++io_faults_;
+        answer_(slot, ScsiStatus::Check, SenseCode::ReadError);
+        return std::nullopt;
+    }
+    if (cmd_.chunk.off == cmd_.chunk.len) {
+        if (arm.length == proto::BlockCount{}) {
             answer_(slot, ScsiStatus::Good, SenseCode::None);
-            return next_act_(bytes);
+            return std::nullopt;
         }
-        const proto::BlockCount n = std::min<proto::BlockCount>(
-            cmd_.length,
-            proto::BlockCount{kChunkBlocks}
-        );
+        const proto::BlockCount n = std::min(arm.length, kChunkBlocks);
         const std::size_t want = kBlock.length_of(n);
-        const std::span<std::byte> window = std::span(chunk_).first(want);
-        auto got = slot.image ? slot.image->read_at(image_offset(cmd_.lba), window)
-                              : Ex<std::size_t>{std::size_t{0}};
+        const std::span<std::byte> filled = std::span(chunk_).first(want);
+
+        const auto image = slot.image.get();
+        auto got = image ? image->read_at(image_offset(arm.lba), filled)
+                         : Ex<std::size_t>{std::size_t{0}};
         if (!got || *got != want) {
             ++io_faults_;
-            cmd_.transfer = Transfer::None;
             answer_(slot, ScsiStatus::Check, SenseCode::ReadError);
-            return next_act_(bytes);
+            return std::nullopt;
         }
-        cmd_.chunk_len = want;
-        cmd_.chunk_off = 0;
-        cmd_.lba += n;
-        cmd_.length -= n;
+        cmd_.chunk.len = want;
+        cmd_.chunk.off = 0;
+        arm.lba += n;
+        arm.length -= n;
     }
-    const std::size_t k = std::min(proto::kDiskActBytes, cmd_.chunk_len - cmd_.chunk_off);
-    std::memcpy(bytes.data(), chunk_.data() + cmd_.chunk_off, k);
-    cmd_.chunk_off += k;
-    return proto::DiskAct::out(wire_opcode(DmaOp::WriteMemory), wire_len(k));
+    const std::size_t moved = std::min(proto::kDiskActBytes, cmd_.chunk.len - cmd_.chunk.off);
+    std::memcpy(bytes.data(), chunk_.data() + cmd_.chunk.off, moved);
+    cmd_.chunk.off += moved;
+    return proto::DiskAct::out(wire_opcode(DmaOp::WriteMemory), wire_len(moved));
 }
 
-proto::DiskAct AcsiServant::write_step_(std::span<std::byte, proto::kDiskActBytes> bytes) {
-    if (cmd_.chunk_len == 0) {
-        if (cmd_.length == proto::BlockCount{}) {
-            cmd_.transfer = Transfer::None;
+std::optional<proto::DiskAct> AcsiServant::write_step_(
+    WriteTransfer& arm,
+    std::span<std::byte, proto::kDiskActBytes>
+) {
+    if (cmd_.chunk.len == 0) {
+        if (arm.length == proto::BlockCount{}) {
             answer_(slot_[target_], ScsiStatus::Good, SenseCode::None);
-            return next_act_(bytes);
+            return std::nullopt;
         }
-        cmd_.chunk_blocks = std::min<proto::BlockCount>(
-            cmd_.length,
-            proto::BlockCount{kChunkBlocks}
-        );
-        cmd_.chunk_len = kBlock.length_of(cmd_.chunk_blocks);
-        cmd_.chunk_off = 0;
-        cmd_.length -= cmd_.chunk_blocks;
+        arm.chunk_blocks = std::min(arm.length, kChunkBlocks);
+        cmd_.chunk.len = kBlock.length_of(arm.chunk_blocks);
+        cmd_.chunk.off = 0;
+        arm.length -= arm.chunk_blocks;
     }
-    cmd_.in_len = std::min(proto::kDiskActBytes, cmd_.chunk_len - cmd_.chunk_off);
-    return proto::DiskAct::in(wire_opcode(DmaOp::ReadMemory), wire_len(cmd_.in_len));
+    arm.in_len = std::min(proto::kDiskActBytes, cmd_.chunk.len - cmd_.chunk.off);
+    return proto::DiskAct::in(wire_opcode(DmaOp::ReadMemory), wire_len(arm.in_len));
+}
+
+bool AcsiServant::write_take_in_(WriteTransfer& arm, std::span<const std::byte> bytes) {
+    if (arm.in_len == 0)
+        return true;
+
+    Slot& slot = slot_[target_];
+    if (!slot.image.get()) {
+        ++io_faults_;
+        answer_(slot, ScsiStatus::Check, SenseCode::WriteError);
+        return false;
+    }
+    std::memcpy(chunk_.data() + cmd_.chunk.off, bytes.data(), arm.in_len);
+    cmd_.chunk.off += arm.in_len;
+    arm.in_len = 0;
+    if (cmd_.chunk.off != cmd_.chunk.len)
+        return true;
+    const std::span<const std::byte> filled = std::span(chunk_).first(cmd_.chunk.len);
+
+    const auto image = slot.image.get();
+    auto put = image ? image->write_at(image_offset(arm.lba), filled)
+                     : Ex<std::size_t>{std::size_t{0}};
+    if (!put || *put != cmd_.chunk.len) {
+        ++io_faults_;
+        answer_(slot, ScsiStatus::Check, SenseCode::WriteError);
+        return false;
+    }
+    arm.lba += arm.chunk_blocks;
+    cmd_.chunk.len = 0;
+    return true;
 }
 
 }

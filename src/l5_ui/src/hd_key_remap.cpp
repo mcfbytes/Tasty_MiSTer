@@ -11,9 +11,9 @@
 namespace mister::ui {
 
 bool HdKeyRemap::selected_row_steps(const MenuModel& model) const {
-    const Page* top = model.stack().top();
+    const auto top = model.stack().top();
     app::PageDescription d{};
-    if (top == nullptr || !top->describe(d))
+    if (!top || !top->describe(d))
         return false;
     for (const RowIndex r : rows(d.listed())) {
         const app::PageDescription::Row& row = d.row(r);
@@ -23,13 +23,13 @@ bool HdKeyRemap::selected_row_steps(const MenuModel& model) const {
     return false;
 }
 
-HdKeyRemap::Axis HdKeyRemap::axis_of(const Page& top, Across across, UiButtonMask buttons) {
+HdKeyRemap::Axis HdKeyRemap::axis_of(const Page& top, app::TierSet across, UiButtonMask buttons) {
     TASTY_SEAT_BODY(HdKeyRemap);
     constexpr std::uint16_t kDirs = UiEvent::Up | UiEvent::Down | UiEvent::Left | UiEvent::Right;
     if (!across.any() || !buttons.has_any({kDirs}))
         return Axis{};
     const std::optional<Page::TierRun> run = top.tier_run(top.selection());
-    if (!run || !across.draws(run->tier))
+    if (!run || !across.has(run->tier))
         return Axis{};
     using D = Navigator::Direction;
     if (buttons.has_any({UiEvent::Left}))
@@ -45,16 +45,17 @@ HdKeyRemap::Axis HdKeyRemap::axis_of(const Page& top, Across across, UiButtonMas
 
 HdKeyRemap::Axis HdKeyRemap::axis(const MenuModel& model, UiButtonMask buttons) {
     TASTY_SEAT_BODY(HdKeyRemap);
-    const Page* top = model.stack().top();
-    if (top == nullptr || !model.hd_tree())
+    const auto top = model.stack().top();
+    if (!top || !model.hd_tree())
         return Axis{};
-    const Across across = pinned_across_
+    const app::TierSet across = pinned_across_
         ? *pinned_across_
-        : Across{app::hd_horizontal_tiers(model.style().look().layout)};
+        : app::hd_horizontal_tiers(model.style().look().layout);
     return axis_of(*top, across, buttons);
 }
 
 bool HdKeyRemap::apply(const Axis& a, Navigator& nav) noexcept {
+    TASTY_SEAT_BODY(HdKeyRemap);
     bool moved = false;
     switch (a.move) {
         case Axis::Move::None:
@@ -77,8 +78,8 @@ HdKeyRemap::Refresh HdKeyRemap::refresh(const MenuModel& model, const UiEvent& e
     if (!model.hd_tree())
         return out;
 
-    const Page* top = model.stack().top();
-    if (ev.buttons.has_any({UiEvent::Back}) && top != nullptr && top->back_is_idle())
+    const auto top = model.stack().top();
+    if (ev.buttons.has_any({UiEvent::Back}) && top && top->back_is_idle())
         out.ev.buttons = ev.buttons.without({UiEvent::Back})
                              .with({UiEvent::Menu | UiEvent::PadBack});
     if (out.ev.buttons.has_any({UiEvent::PadBack})) {
@@ -96,6 +97,7 @@ HdKeyRemap::Refresh HdKeyRemap::refresh(const MenuModel& model, const UiEvent& e
 }
 
 HdKeyRemap::Settled HdKeyRemap::settle(const Transition& answer, std::size_t depth) noexcept {
+    TASTY_SEAT_BODY(HdKeyRemap);
     const Transition back = depth > 1 ? Transition{Transition::Kind::Pop}
                                       : Transition{Transition::Kind::CloseAll};
     switch (answer.kind) {
@@ -103,6 +105,7 @@ HdKeyRemap::Settled HdKeyRemap::settle(const Transition& answer, std::size_t dep
         case Transition::Kind::Pop:
             return Settled{answer, false};
         case Transition::Kind::CloseAll:
+        case Transition::Kind::Reopen:
         case Transition::Kind::Leave:
             return Settled{back, false};
         case Transition::Kind::Push:

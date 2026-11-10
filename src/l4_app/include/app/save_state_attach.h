@@ -23,13 +23,23 @@
 #include "infra/telemetry.h"
 #include "infra/wake_flag.h"
 #include "os/clock.h"
-#include "proto/conf_str.h"
+#include "proto/save_state_decl.h"
 #include "proto/savestate_engine.h"
-#include "proto/savestate_primer.h"
+#include "proto/save_primer.h"
 #include "svc/io_coworker.h"
 #include "svc/vfs.h"
 
 namespace mister::app {
+
+struct PrimeAbortLevel {
+    std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr PrimeAbortLevel next() const noexcept {
+        return v + 1u == 0u ? PrimeAbortLevel{1u} : PrimeAbortLevel{v + 1u};
+    }
+
+    friend constexpr bool operator==(PrimeAbortLevel, PrimeAbortLevel) = default;
+};
 
 class SaveStateAttach final : public svc::IIoCoworker, public proto::SaveStateEngine::ISaveToast {
     TASTY_SEAT_MEDIATOR(Ui, Io);
@@ -54,7 +64,7 @@ public:
         bool arcade = false;
         bool ok = false;
         bool aborted = false;
-        std::uint32_t abort_at = 0;
+        PrimeAbortLevel abort_at{};
         Error err{Errc::io, infra::kNoSite, 0};
     };
 
@@ -157,7 +167,7 @@ private:
     UiSlotMap ui_map_;
     Chan chan_;
 
-    xthread::Telemetry<std::uint32_t, SeatTag::Ui> abort_{};
+    xthread::Telemetry<PrimeAbortLevel, SeatTag::Ui> abort_{};
 
     struct UiHalf {
         UiHalf(const hal::PhysRegion& aperture, const proto::SaveStateEngine::Environment& env)
@@ -165,10 +175,9 @@ private:
 
         proto::SaveStateEngine engine;
         bool out = false;
-        bool stale = false;
         bool raised = false;
         proto::ActKey held{};
-        std::uint32_t abort_level = 0;
+        PrimeAbortLevel abort_level{};
         SaveStateFacts facts{};
     } ui_;
 

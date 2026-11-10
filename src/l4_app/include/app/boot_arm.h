@@ -2,14 +2,17 @@
 #pragma once
 
 #include <cstdint>
-#include <span>
+#include <optional>
 
 #include "app/board_ops.h"
+#include "app/boot_args.h"
 #include "app/config_pair.h"
 #include "app/load_request.h"
+#include "app/stdout_paths.h"
 #include "app/stdout_router.h"
 #include "app/ui_request.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -27,30 +30,23 @@ public:
 
     [[nodiscard]] bool in_boot_state() const noexcept;
 
-    [[nodiscard]] Ex<LoadRequest> argv_request(std::span<const char* const> argv) const;
+    [[nodiscard]] Ex<LoadRequest> argv_request(const BootArgs& args) const;
 
     [[nodiscard]] UiRequest::LoadCore program(const LoadRequest& req);
 
-    [[nodiscard]] ExitReboot handoff_to_alternate_executable(
-        const char* exe,
-        std::span<const char* const> argv
-    );
+    [[nodiscard]] ExitReboot handoff_to_alternate_executable(const char* exe, const BootArgs& args);
 
     [[nodiscard]] Ex<void> re_exec(const LoadRequest& req);
 
     void hold_for_reboot();
 
-    void enable_stdout_routing(
-        const char* null_path = nullptr,
-        const char* debug_path = nullptr
-    ) noexcept {
+    void enable_stdout_routing(std::optional<StdoutPaths> paths = std::nullopt) noexcept {
         stdout_armed_ = true;
-        if (null_path != nullptr && debug_path != nullptr) {
-            stdout_router_.set_paths(null_path, debug_path);
-        }
+        if (paths)
+            stdout_router_.set_paths(*paths);
     }
 
-    [[nodiscard]] StdoutRouter* boot_stdout_router() noexcept;
+    [[nodiscard]] infra::OptRef<StdoutRouter> boot_stdout_router() noexcept;
 
     [[nodiscard]] bool stdout_armed() const noexcept override {
         TASTY_SEAT_BODY(BootArm);
@@ -63,7 +59,7 @@ public:
 
 private:
     void sync_and_hold_();
-    [[nodiscard]] ExitReboot handoff_exec_(const char* exe, std::span<const char* const> argv);
+    [[nodiscard]] ExitReboot handoff_exec_(const char* exe, const BootArgs& args);
     [[nodiscard]] Ex<void> re_exec_(const LoadRequest& req);
 
     const SessionMachine& machine_;

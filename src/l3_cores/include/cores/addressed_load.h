@@ -12,6 +12,7 @@
 #include "cores/transfer_row.h"
 #include "hal/phys_region.h"
 #include "infra/error.h"
+#include "infra/opt_ref.h"
 #include "infra/seat.h"
 #include "proto/status_word.h"
 #include "proto/types.h"
@@ -26,14 +27,14 @@ public:
 
     [[nodiscard]] static std::optional<TransferRow> window_row(
         hal::FabricAddr addr,
-        std::uint64_t bytes,
+        proto::FileSize bytes,
         proto::WideIoIndex index,
         const hal::PhysRegion& aperture
     ) noexcept;
 
     [[nodiscard]] Ex<LoadPlan> plan(const LoadAsk& ask, const proto::StatusWord& status) override;
     void shape(const TransferRow& row, std::span<std::uint8_t> piece, std::uint64_t off) override;
-    [[nodiscard]] Ex<void> finish(ICoreWindow* window) override;
+    [[nodiscard]] Ex<void> finish(infra::OptRef<ICoreWindow> window) override;
 
     [[nodiscard]] std::span<const std::uint8_t> facts() const noexcept override {
         TASTY_SEAT_BODY(AddressedLoad);

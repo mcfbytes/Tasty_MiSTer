@@ -3,6 +3,8 @@
 
 #include <cstdint>
 
+#include "svc/pll_payload.h"
+
 namespace mister::svc {
 
 enum class PllReg : std::uint32_t {
@@ -18,9 +20,9 @@ enum class PllReg : std::uint32_t {
     return static_cast<std::uint32_t>(r);
 }
 
-inline constexpr std::uint32_t kPllNPayload = 0x10000;
-inline constexpr std::uint32_t kPllChargePumpValue = 2;
-inline constexpr std::uint32_t kPllBandwidthValue = 7;
+[[nodiscard]] constexpr PllReg pll_reg_of(PllPayload word) noexcept {
+    return static_cast<PllReg>(word.v);
+}
 
 inline constexpr std::uint32_t kPllAsymmetricBit = 0x20000;
 inline constexpr unsigned kPllDivHalfShift = 8;

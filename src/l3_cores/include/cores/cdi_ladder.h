@@ -48,7 +48,6 @@ private:
 
     Rung rung_ = Rung::MountDisc;
     std::string last_dir_;
-    bool at_core_start_ = false;
 };
 
 }

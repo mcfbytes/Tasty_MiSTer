@@ -9,9 +9,9 @@
 
 #include "cores/core_support.h"
 #include "cores/file_tx.h"
-#include "cores/generic_core.h"
 #include "cores/mailbox_carriage.h"
 #include "cores/snes_rom.h"
+#include "cores/stream_load_host.h"
 #include "infra/fixed_str.h"
 #include "infra/seat.h"
 #include "proto/image_bracket.h"
@@ -56,7 +56,7 @@ private:
     }
 
     [[nodiscard]] infra::OptRef<IStreamLoad> on_window_load() noexcept override {
-        return data_host_.stream_load();
+        return infra::OptRef<IStreamLoad>{stream_};
     }
 
     [[nodiscard]] Ex<void> tx_rom_(IoIndex index, std::span<const std::uint8_t> bytes);
@@ -71,9 +71,7 @@ private:
     [[nodiscard]] static Analysis analyze_(std::span<const std::uint8_t> image) noexcept;
     [[nodiscard]] Ex<void> stream_mirrored_(
         proto::ImageBracket& session,
-        std::span<const std::uint8_t> bytes,
-        std::uint32_t base,
-        std::uint32_t payload
+        std::span<const std::uint8_t> image
     );
 
     FixedStr<8, StrFit::Clip> ext_{};
@@ -85,7 +83,7 @@ private:
 
     std::uint8_t buf_[kChunkBytes]{};
 
-    GenericCore data_host_;
+    StreamLoadHost stream_;
 
     std::optional<MailboxCarriage> mailbox_;
 };

@@ -6,15 +6,20 @@
 #include <vector>
 
 #include "app/file_bytes.h"
+#include "infra/path_parts.h"
 
 namespace mister::app {
 
 namespace {
 
-std::string_view ext_of(std::string_view path) noexcept {
-    const std::size_t dot = path.rfind('.');
-    return dot == std::string_view::npos ? std::string_view{} : path.substr(dot);
-}
+struct RestPlace {
+    proto::FileSize whole{};
+    proto::FileSize offset{};
+
+    [[nodiscard]] static RestPlace at_end(proto::FileSize whole, proto::FileSize at) noexcept {
+        return RestPlace{whole, at};
+    }
+};
 
 enum Refusal : std::uint32_t { kBadTotal, kBadPath, kPastEnd };
 
@@ -54,6 +59,7 @@ Ex<FileTxPieces> FileTxPieces::resume(
     p->keyed_to_ = total;
     p->crc_ = crc;
     p->pieces_ = 1;
+    p->facts_sent_ = false;
     return p;
 }
 
@@ -100,7 +106,7 @@ bool FileTxPieces::stage_() {
     }
     if (loader_ != nullptr) {
         loader_->shape(row_, buf, sent_);
-        if (sent_ + n == total_ && !loader_->finish(nullptr))
+        if (sent_ + n == total_ && !loader_->finish({}))
             return false;
     }
 
@@ -110,7 +116,7 @@ bool FileTxPieces::stage_() {
         );
         keyed_to_ = sent_ + n;
     }
-    staged_ = std::move(buf);
+    staged_ = FileIntern{.bytes = std::move(buf)};
     return true;
 }
 
@@ -144,7 +150,7 @@ FileTxPieces::Pass FileTxPieces::step(
 
     if (!staged_ && !stage_())
         return fail_(inbox);
-    const std::uint64_t n = staged_->size();
+    const std::uint64_t n = staged_->bytes.size();
     const bool last = sent_ + n == total_;
     const Phase phase = pieces_ == 0 ? (last ? Phase::Whole : Phase::Open)
                                      : (last ? Phase::Close : Phase::Piece);
@@ -157,18 +163,17 @@ FileTxPieces::Pass FileTxPieces::step(
         facts_sent_ = true;
     }
 
-    const std::uint64_t whole = n == 0 ? total_ : 0;
-    const std::uint64_t offset = n == 0 ? sent_ : 0;
+    const RestPlace rest = n == 0
+        ? RestPlace::at_end(proto::FileSize{total_}, proto::FileSize{sent_})
+        : RestPlace{};
     const svc::Crc32 crc = last ? crc_.value_or(key_.value()) : svc::Crc32{};
-    auto id = inbox.intern_file(
-        std::move(*staged_),
-        ext_of(path_.view()),
-        path_.view(),
-        hal::FabricAddr{},
-        crc,
-        whole,
-        offset
-    );
+
+    staged_->ext = infra::extension(path_.view());
+    staged_->path = path_.view();
+    staged_->crc = crc;
+    staged_->piece = {.whole = rest.whole, .offset = rest.offset};
+
+    auto id = inbox.intern_file(std::move(*staged_));
     if (!id) {
         if (id.error().code == Errc::would_block) {
             slab_full_at_ = inbox.ring().popped();
@@ -177,6 +182,9 @@ FileTxPieces::Pass FileTxPieces::step(
         return fail_(inbox);
     }
     staged_.reset();
+
+    if (last && facts_sent_)
+        (void)inbox.stamp_remount(*id);
     const proto::LinkOp::FileTx op{
         .wire_index = wire_index_.fio_byte(),
         .phase = phase,
@@ -188,7 +196,13 @@ FileTxPieces::Pass FileTxPieces::step(
     slab_full_at_.reset();
 
     if (last) {
-        last_ = LastOp{.act = act, .from = sent_, .crc = crc, .shaped = loader_ != nullptr};
+        last_ = LastOp{
+            .act = act,
+            .from = sent_,
+            .crc = crc,
+            .shaped = loader_ != nullptr,
+            .remounts_saves = facts_sent_
+        };
     } else {
         outstanding_ = Outstanding{.act = act, .from = sent_, .bytes = n};
     }

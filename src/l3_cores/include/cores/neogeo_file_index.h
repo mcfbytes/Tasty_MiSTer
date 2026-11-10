@@ -8,34 +8,26 @@
 
 namespace mister::cores::neogeo {
 
-enum class FileClass : std::uint8_t { Raw, EightBit, Fix, Spr };
+enum class FileClass : std::uint8_t { Raw, Fix, Spr };
 
 struct FileIndex {
-    enum Id : std::uint8_t {
-        Bios = 0,
-        LoRom = 1,
-        Sfix = 2,
-        Prom = 4,
-        Prom2 = 6,
-        Srom = 8,
-        M1 = 9,
-        Sprite = 15,
-        VromFirst = 16,
-        Fill = 18,
-        VromB = 48,
-        CromFirst = 64,
-    };
-
     std::uint8_t v = 0;
 
-    constexpr FileIndex() noexcept = default;
-
-    constexpr FileIndex(Id id) noexcept : v(static_cast<std::uint8_t>(id)) {}
+    static const FileIndex Bios;
+    static const FileIndex LoRom;
+    static const FileIndex Sfix;
+    static const FileIndex Prom;
+    static const FileIndex Prom2;
+    static const FileIndex Srom;
+    static const FileIndex M1;
+    static const FileIndex Sprite;
+    static const FileIndex VromFirst;
+    static const FileIndex Fill;
+    static const FileIndex VromB;
+    static const FileIndex CromFirst;
 
     [[nodiscard]] static constexpr FileIndex of(int value) noexcept {
-        FileIndex index{};
-        index.v = static_cast<std::uint8_t>(value);
-        return index;
+        return FileIndex{static_cast<std::uint8_t>(value)};
     }
 
     friend constexpr bool operator==(FileIndex, FileIndex) = default;
@@ -50,7 +42,7 @@ struct FileIndex {
 
     [[nodiscard]] constexpr std::uint32_t vrom_offset() const noexcept {
         constexpr std::uint32_t kStrideBytes = 0x8'0000u;
-        return static_cast<std::uint32_t>(v - VromFirst) * kStrideBytes;
+        return static_cast<std::uint32_t>(v - VromFirst.v) * kStrideBytes;
     }
 
     [[nodiscard]] constexpr std::uint32_t mirror_stride() const noexcept {
@@ -60,7 +52,7 @@ struct FileIndex {
 
     [[nodiscard]] constexpr std::uint32_t crom_offset() const noexcept {
         constexpr std::uint32_t kPairBytes = 0x10'0000u;
-        const std::uint32_t pair = static_cast<std::uint32_t>(v - CromFirst) >> 1u;
+        const std::uint32_t pair = static_cast<std::uint32_t>(v - CromFirst.v) >> 1u;
         return pair * kPairBytes;
     }
 
@@ -69,31 +61,52 @@ struct FileIndex {
     }
 
     [[nodiscard]] constexpr FileClass class_of() const noexcept {
-        if (v >= CromFirst || v == Sprite)
+        if (at_or_above(CromFirst) || *this == Sprite)
             return FileClass::Spr;
-        if (v == Sfix || v == Srom)
+        if (*this == Sfix || *this == Srom)
             return FileClass::Fix;
         return FileClass::Raw;
     }
 
-    [[nodiscard]] constexpr bool is_crom() const noexcept { return v >= CromFirst; }
+    [[nodiscard]] constexpr bool is_crom() const noexcept { return at_or_above(CromFirst); }
 
     [[nodiscard]] constexpr bool is_vrom() const noexcept {
-        return v >= VromFirst && v < CromFirst;
+        return at_or_above(VromFirst) && below(CromFirst);
     }
 
-    [[nodiscard]] constexpr bool is_prom() const noexcept { return v == Prom || v == Prom2; }
+    [[nodiscard]] constexpr bool is_prom() const noexcept {
+        return *this == Prom || *this == Prom2;
+    }
 
     [[nodiscard]] constexpr bool in_pcm_range() const noexcept {
-        return v >= VromB && v < CromFirst;
+        return at_or_above(VromB) && below(CromFirst);
     }
 
     [[nodiscard]] constexpr std::uint8_t vrom_fill() const noexcept {
         constexpr std::uint8_t kVromFill = 8;
         return is_vrom() ? kVromFill : 0u;
     }
+
+private:
+    [[nodiscard]] constexpr bool at_or_above(FileIndex slot) const noexcept { return v >= slot.v; }
+
+    [[nodiscard]] constexpr bool below(FileIndex slot) const noexcept { return v < slot.v; }
 };
 
+inline constexpr std::uint32_t kVromSize = 16u * 1024u * 1024u;
+
+inline constexpr FileIndex FileIndex::Bios{0};
+inline constexpr FileIndex FileIndex::LoRom{1};
+inline constexpr FileIndex FileIndex::Sfix{2};
+inline constexpr FileIndex FileIndex::Prom{4};
+inline constexpr FileIndex FileIndex::Prom2{6};
+inline constexpr FileIndex FileIndex::Srom{8};
+inline constexpr FileIndex FileIndex::M1{9};
+inline constexpr FileIndex FileIndex::Sprite{15};
+inline constexpr FileIndex FileIndex::VromFirst{16};
+inline constexpr FileIndex FileIndex::Fill{18};
+inline constexpr FileIndex FileIndex::VromB{48};
+inline constexpr FileIndex FileIndex::CromFirst{64};
 static_assert(sizeof(FileIndex) == 1);
 
 }

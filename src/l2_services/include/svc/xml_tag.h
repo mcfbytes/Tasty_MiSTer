@@ -2,7 +2,10 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string_view>
+
+#include "svc/xml_attr.h"
 
 namespace mister::svc::xml {
 
@@ -11,7 +14,7 @@ struct Tag {
     bool closing = false;
     bool self_closing = false;
 
-    std::uint8_t attr_count = 0;
+    std::span<const Attr> attrs{};
 
     std::uint8_t attrs_dropped = 0;
 };

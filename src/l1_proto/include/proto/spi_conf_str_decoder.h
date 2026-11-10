@@ -28,14 +28,14 @@ public:
         ILinkRouter& router,
         const BindGeneration& gen
     ) noexcept
-        : link_(&link),
-          session_(&session),
-          gen_(&gen),
+        : link_(link),
+          session_(session),
+          gen_(gen),
           out_(router) {}
 
     void service() noexcept;
 
-    [[nodiscard]] bool active() const noexcept { return session_->conf_str_window_open(); }
+    [[nodiscard]] bool active() const noexcept { return session_.conf_str_window_open(); }
 
     [[nodiscard]] std::uint32_t reads() const noexcept { return reads_; }
 
@@ -49,9 +49,9 @@ private:
     void refuse_(Errc code) noexcept;
     [[nodiscard]] bool push_body_(std::size_t n) noexcept;
 
-    hal::ISpiTransport* link_;
-    CoreSession* session_;
-    const BindGeneration* gen_;
+    hal::ISpiTransport& link_;
+    CoreSession& session_;
+    const BindGeneration& gen_;
     Port out_;
 
     std::array<std::uint8_t, CoreSession::kConfStrCap - 1> buf_{};

@@ -13,6 +13,7 @@
 #include "app/write_verdict.h"
 #include "infra/error.h"
 #include "infra/seat.h"
+#include "proto/types.h"
 
 namespace mister::svc {
 class Vfs;
@@ -33,7 +34,7 @@ public:
         std::string core_name;
         std::string path;
         std::string title;
-        std::uint8_t ioctl_index = 0;
+        proto::IoIndex ioctl_index{};
         char slot = 0;
         std::int64_t unix_time = 0;
     };
@@ -46,9 +47,7 @@ public:
     static constexpr std::uint32_t kMagic = 0x594C5047u;
     static constexpr std::uint16_t kVersion = 2;
 
-    PlayedHistory(const svc::Vfs& vfs, UiWriteLane& writes) noexcept
-        : vfs_(&vfs),
-          writes_(&writes) {}
+    PlayedHistory(const svc::Vfs& vfs, UiWriteLane& writes) noexcept : vfs_(vfs), writes_(writes) {}
 
     [[nodiscard]] Ex<void> load();
 
@@ -115,8 +114,8 @@ private:
 
     [[nodiscard]] Ex<void> save_();
 
-    const svc::Vfs* vfs_;
-    UiWriteLane* writes_;
+    const svc::Vfs& vfs_;
+    UiWriteLane& writes_;
     std::vector<Record> records_;
     bool loaded_ = false;
     std::uint32_t loads_ = 0;

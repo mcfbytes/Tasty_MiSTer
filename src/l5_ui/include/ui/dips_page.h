@@ -14,7 +14,7 @@
 
 namespace mister::ui {
 
-[[nodiscard]] std::string dip_row_text(const app::DipTable::Row& row);
+[[nodiscard]] std::string dip_row_text(const app::DipLabels::Row& row, proto::DipChoice current);
 
 class DipsPage final : public Page {
     TASTY_SEAT_RESIDENT(Ui);
@@ -56,7 +56,7 @@ public:
     std::uint32_t commands_published() const noexcept { return published_; }
 
 private:
-    RowIndex reset_row() const noexcept { return row_after(RowCount::of(table_->count)); }
+    RowIndex reset_row() const noexcept { return row_after(RowCount::of(table_->labels.count)); }
 
     void save_dips();
     template <class A>

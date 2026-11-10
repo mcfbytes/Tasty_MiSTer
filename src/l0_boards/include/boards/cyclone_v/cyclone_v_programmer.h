@@ -9,20 +9,18 @@
 #include <span>
 
 #include "infra/error.h"
-#include "boards/cyclone_v/cyclone_v_handoff.h"
+#include "infra/opt_ref.h"
+#include "boards/cyclone_v/cyclone_v_uboot_handoff_page.h"
+#include "hal/board_windows.h"
 #include "hal/boot_handoff.h"
 #include "hal/fpga_memory.h"
 #include "hal/fpga_programmer.h"
 #include "os/mmio_region.h"
 #include "hal/phys_region.h"
 #include "hal/register_window.h"
-#include "hal/window_decl.h"
+#include "hal/taken_window.h"
 #include "os/types.h"
 #include "infra/seat.h"
-
-namespace mister::hal {
-class BoardWindows;
-}
 
 namespace mister::boards::cyclone_v {
 
@@ -110,17 +108,19 @@ struct FpgaMgr {
     static constexpr std::uint32_t kDclkStatDone = 0x1;
 };
 
-inline constexpr CdRatio kCdRatioFor[2][3] = {
+enum class BusWidth : std::size_t { Wide, Narrow };
+
+inline constexpr std::array<std::array<CdRatio, 3>, 2> kCdRatioFor{{
     {CdRatio::One, CdRatio::Four, CdRatio::Eight},
     {CdRatio::One, CdRatio::Two, CdRatio::Four},
-};
+}};
 
 [[nodiscard]] constexpr std::optional<CdRatio> cd_ratio_of(std::uint32_t msel) noexcept {
-    const std::uint32_t column = (msel & FpgaMgr::kMselWideMask) != 0u ? 0u : 1u;
-    const std::uint32_t row = msel & FpgaMgr::kMselRungMask;
-    if (row >= std::size(kCdRatioFor[0]))
+    const auto width = (msel & FpgaMgr::kMselWideMask) != 0u ? BusWidth::Wide : BusWidth::Narrow;
+    const std::uint32_t rung = msel & FpgaMgr::kMselRungMask;
+    if (rung >= std::size(kCdRatioFor.front()))
         return std::nullopt;
-    return kCdRatioFor[column][row];
+    return kCdRatioFor[static_cast<std::size_t>(width)][rung];
 }
 
 struct FpgaMgrData {
@@ -138,14 +138,6 @@ class Programmer final : public hal::IFpgaProgrammer {
 public:
     [[nodiscard]] static Ex<Programmer> open(hal::BoardWindows& windows);
 
-    [[nodiscard]] static Ex<Programmer> open_at(const char* manager_dir);
-
-    static Programmer over(
-        hal::RegisterWindow<FpgaMgr> mgr,
-        hal::RegisterWindow<FpgaMgrData> data,
-        hal::FpgaMemory handoff
-    );
-
     Programmer(Programmer&& o) noexcept;
     Programmer& operator=(Programmer&&) = delete;
 
@@ -157,16 +149,26 @@ public:
 
     bool programmed() const override;
 
-    hal::IBootHandoff* boot_handoff() noexcept override {
+    infra::OptRef<hal::IBootHandoff> boot_handoff() noexcept override {
         TASTY_SEAT_BODY(Programmer);
-        return &page_;
+        return infra::OptRef<hal::IBootHandoff>{page_};
     }
 
 private:
+    friend struct ProgrammerTestAccess;
+
     Programmer(
+        hal::TakenWindow<FpgaMgr> mgr,
+        hal::TakenWindow<FpgaMgrData> data,
+        std::optional<hal::FpgaMemory> handoff
+    );
+
+    [[nodiscard]] static Ex<Programmer> open_at(const char* manager_dir);
+
+    static Programmer over(
         hal::RegisterWindow<FpgaMgr> mgr,
         hal::RegisterWindow<FpgaMgrData> data,
-        std::optional<hal::FpgaMemory> handoff
+        hal::FpgaMemory handoff
     );
 
     enum class StepPc : std::uint8_t {
@@ -201,15 +203,13 @@ private:
     std::optional<os::MmioRegion> data_pages_;
     std::optional<os::MmioRegion> handoff_pages_;
 
-    hal::RegisterWindow<FpgaMgr> mgr_;
-    hal::RegisterWindow<FpgaMgrData> data_;
+    hal::TakenWindow<FpgaMgr> mgr_;
+    hal::TakenWindow<FpgaMgrData> data_;
     UbootHandoffPage page_;
 
     std::optional<hal::RegisterWindow<FpgaMgrData>::Transaction> data_txn_;
     bool tail_seen_ = false;
     StepPc step_ = StepPc::Idle;
-
-    std::array<hal::WindowClaim, 2> claims_{};
 };
 
 static_assert(

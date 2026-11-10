@@ -6,6 +6,7 @@
 
 #include <cerrno>
 #include <ctime>
+#include <utility>
 
 namespace mister::reactor {
 
@@ -28,12 +29,12 @@ void back_off() {
 Ex<std::unique_ptr<FrameClock>> FrameClock::open(const char* fbdev_path) {
     if (fbdev_path == nullptr)
         return std::unexpected(Error{Errc::dt_missing, ERR_SITE(), 0});
-    const int fb = ::open(fbdev_path, O_RDWR | O_CLOEXEC);
-    if (fb < 0) {
+    UniqueFd fb{::open(fbdev_path, O_RDWR | O_CLOEXEC)};
+    if (!fb.valid()) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), static_cast<std::uint32_t>(errno)});
     }
     std::unique_ptr<FrameClock> fc(new FrameClock());
-    fc->fb_ = os::Framebuffer{fb};
+    fc->fb_ = os::Framebuffer::adopt(std::move(fb));
     if (auto w = fc->frame_wake_.open_fd(); !w) {
         return std::unexpected(Error{Errc::io, ERR_SITE(), w.error().detail});
     }
@@ -51,9 +52,9 @@ void FrameClock::wait_vsync() noexcept {
             back_off();
             return;
     }
-    const std::uint32_t n_seq = seq_.fetch_add(1, std::memory_order_release) + 1u;
+    seq_ = seq_.next();
 
-    cell_.publish(FrameRecord{hal::FrameSeq{n_seq}});
+    cell_.publish(FrameRecord{seq_});
     frame_wake_.kick();
 }
 

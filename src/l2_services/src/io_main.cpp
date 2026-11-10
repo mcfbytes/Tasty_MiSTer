@@ -11,24 +11,14 @@ IoMain::IoMain(xthread::ParkFds fds, infra::OptRef<xthread::WakeFlag> asker, int
       stop_(std::move(fds).take_stop()),
       park_(wake_, stop_, doorbells) {}
 
-bool IoMain::add_coworker(IIoCoworker* c) noexcept {
-    if (c == nullptr || n_coworkers_ >= kMaxCoworkers)
-        return false;
+Ex<void> IoMain::add_coworker(IIoCoworker& c) noexcept {
     for (std::uint8_t i = 0; i < n_coworkers_; ++i)
-        if (coworkers_[i] == c)
-            return false;
-    coworkers_[n_coworkers_++] = c;
-    return true;
-}
-
-void IoMain::remove_coworker(IIoCoworker* c) noexcept {
-    for (std::uint8_t i = 0; i < n_coworkers_; ++i) {
-        if (coworkers_[i] != c)
-            continue;
-        coworkers_[i] = coworkers_[--n_coworkers_];
-        coworkers_[n_coworkers_] = nullptr;
-        return;
-    }
+        if (coworkers_[i] == &c)
+            return std::unexpected(Error{Errc::busy, ERR_SITE(), 0});
+    if (n_coworkers_ >= kMaxCoworkers)
+        return std::unexpected(Error{Errc::slot_range, ERR_SITE(), kMaxCoworkersDetail});
+    coworkers_[n_coworkers_++] = &c;
+    return {};
 }
 
 void IoMain::start() noexcept {

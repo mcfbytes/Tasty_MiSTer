@@ -4,12 +4,17 @@
 #include <linux/input.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
+#include <string_view>
+#include <utility>
 
+#include "infra/byte_view.h"
 #include "infra/error.h"
 #include "infra/seat.h"
 #include "infra/unique_fd.h"
+#include "os/ff_effect_id.h"
 
 namespace mister::os {
 
@@ -19,7 +24,7 @@ class Evdev {
 public:
     Evdev() = default;
 
-    explicit Evdev(int fd) noexcept : fd_(fd) {}
+    [[nodiscard]] static Evdev adopt(UniqueFd fd) noexcept { return Evdev{std::move(fd)}; }
 
     Evdev(Evdev&&) noexcept = default;
     Evdev& operator=(Evdev&&) noexcept = default;
@@ -36,20 +41,24 @@ public:
 
     [[nodiscard]] std::optional<input_id> id() const noexcept;
 
-    [[nodiscard]] std::optional<std::size_t> name(std::span<char> out) const noexcept;
-    [[nodiscard]] std::optional<std::size_t> uniq(std::span<char> out) const noexcept;
+    [[nodiscard]] std::optional<std::string_view> name(std::span<char> out) const noexcept;
+    [[nodiscard]] std::optional<std::string_view> uniq(std::span<char> out) const noexcept;
 
     [[nodiscard]] std::optional<int> effect_count() const noexcept;
 
     [[nodiscard]] bool has_ff(unsigned code) const noexcept;
 
-    [[nodiscard]] bool grab(bool on) const noexcept;
+    [[nodiscard]] Ex<void> grab(bool on) const noexcept;
 
-    [[nodiscard]] bool erase_effect(int id) const noexcept;
+    [[nodiscard]] Ex<void> erase_effect(FfEffectId id) const noexcept;
 
-    [[nodiscard]] bool upload_effect(ff_effect& e) const noexcept;
+    [[nodiscard]] Ex<FfEffectId> upload_effect(const ff_effect& e) const noexcept;
+
+    [[nodiscard]] Ex<void> play(FfEffectId id) const noexcept;
 
 private:
+    explicit Evdev(UniqueFd fd) noexcept : fd_(std::move(fd)) {}
+
     UniqueFd fd_{};
 };
 

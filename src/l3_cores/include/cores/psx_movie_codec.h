@@ -4,22 +4,17 @@
 #include <array>
 #include <cstdint>
 #include <optional>
-#include <span>
 #include <string_view>
-#include <vector>
 
-#include "cores/movie_codec.h"
+#include "cores/i_replay_core.h"
+#include "cores/movie_facts.h"
 #include "cores/types.h"
 #include "infra/seat.h"
-#include "svc/track.h"
-
-namespace mister::svc {
-class IChdSource;
-}
+#include "proto/types.h"
 
 namespace mister::cores {
 
-class PsxMovieCodec final : public IMovieCodec {
+class PsxMovieCodec final : public IReplayCore {
     TASTY_SEAT_EXEMPT(boot);
 
 public:
@@ -46,63 +41,14 @@ public:
         {"R2", "R2", 13},
     }};
 
-    struct ColumnRole {
-        static constexpr std::uint8_t kPadCount = 14;
-        enum class MovieCommand : std::uint8_t {
-            Value = 0x40,
-            Reset = 0x41,
-            Power = 0x42,
-            Tray = 0x43,
-        };
-        std::uint8_t v = 0;
-
-        [[nodiscard]] static constexpr ColumnRole of(std::uint8_t role) noexcept {
-            return ColumnRole{role};
-        }
-
-        [[nodiscard]] static constexpr ColumnRole pad(std::uint8_t bit) noexcept {
-            return ColumnRole{bit};
-        }
-
-        [[nodiscard]] static constexpr ColumnRole command(MovieCommand c) noexcept {
-            return ColumnRole{static_cast<std::uint8_t>(c)};
-        }
-
-        [[nodiscard]] constexpr bool is_pad() const noexcept { return v < kPadCount; }
-
-        [[nodiscard]] constexpr std::uint32_t pad_mask() const noexcept { return 1u << v; }
-
-        [[nodiscard]] constexpr MovieCommand command() const noexcept {
-            return static_cast<MovieCommand>(v);
-        }
-
-        friend constexpr bool operator==(ColumnRole, ColumnRole) = default;
-    };
-
-    static constexpr std::uint32_t kPadBitMask = (1u << ColumnRole::kPadCount) - 1u;
-
-    struct CommandMask {
-        static constexpr std::uint8_t kReset = 0x1;
-        static constexpr std::uint8_t kPower = 0x2;
-        std::uint8_t v = 0;
-
-        [[nodiscard]] constexpr CommandMask with_reset() const noexcept {
-            return CommandMask{static_cast<std::uint8_t>(v | kReset)};
-        }
-
-        [[nodiscard]] constexpr CommandMask with_power() const noexcept {
-            return CommandMask{static_cast<std::uint8_t>(v | kPower)};
-        }
-
-        friend constexpr bool operator==(CommandMask, CommandMask) = default;
-    };
-
-    struct MovieTimecode {
-        static constexpr std::size_t kDigits = 2;
-        [[nodiscard]] static std::optional<std::uint32_t> parse(std::string_view s) noexcept;
-    };
-
-    static constexpr std::size_t kMaxFiles = 99;
+    static constexpr std::uint16_t kPadBitCount = 14;
+    static constexpr proto::JoyMask kPadBitMask{(1u << kPadBitCount) - 1u};
+    static constexpr ReplayLead kLeadMin{-120};
+    static constexpr ReplayLead kLeadMax{1200};
+    static_assert(
+        kLeadMin.fits_in<std::int16_t>() && kLeadMax.fits_in<std::int16_t>(),
+        "the Arm carries a 16-bit lead"
+    );
 
     enum class Emu : std::uint8_t { None, Octoshock, Nymashock };
 
@@ -119,43 +65,12 @@ public:
         [[nodiscard]] std::uint16_t bits() const noexcept;
     };
 
-    static constexpr std::size_t kTocPrefixBytes = 4 * (3 + 3 * 100);
+    [[nodiscard]] SettingNeeds setting_needs(const MovieFacts& f) const noexcept override;
+    [[nodiscard]] Raster raster(const MovieFacts& f) const noexcept override;
 
-    static constexpr std::uint64_t kKeySectors = 26;
-    static constexpr std::uint64_t kSectorBytes = svc::kCdDataSize;
-
-    static constexpr std::uint32_t kChdFrameBytes = static_cast<std::uint32_t>(svc::kCdFrameSize);
-    static constexpr std::uint32_t kChdHunkMax = 1u << 20;
-    static constexpr std::int32_t kLeadMin = -120;
-    static constexpr std::int32_t kLeadMax = 1200;
-    static_assert(kLeadMin >= INT16_MIN && kLeadMax <= INT16_MAX, "the Arm carries a 16-bit lead");
-
-    [[nodiscard]] const MovieArchiveFormat* archive() const noexcept override;
-    [[nodiscard]] bool starts_log(std::string_view line) const noexcept override;
-    [[nodiscard]] bool ends_log(std::string_view line) const noexcept override;
-    [[nodiscard]] Ex<Facts> header_line(
-        std::string_view line,
-        const Facts& so_far
-    ) const noexcept override;
-    [[nodiscard]] Ex<void> finish_header(const Facts& f) const noexcept override;
-    [[nodiscard]] Ex<Frame> frame(std::string_view line, const Facts& f) const noexcept override;
-    [[nodiscard]] SettingNeeds setting_needs(const Facts& f) const noexcept override;
-    [[nodiscard]] Raster raster(const Facts& f) const noexcept override;
-
-    [[nodiscard]] PowerOn power_on(const Facts& f) const noexcept override;
-    [[nodiscard]] std::int32_t default_lead(const Facts& f) const noexcept override;
+    [[nodiscard]] PowerOn power_on(const MovieFacts& f) const noexcept override;
 
     [[nodiscard]] LeadRange lead_range() const noexcept override { return {kLeadMin, kLeadMax}; }
-
-    [[nodiscard]] std::optional<DigestSpan> rom_digest_span(
-        std::span<const std::uint8_t> head,
-        proto::FileSize size
-    ) const noexcept override;
-
-    [[nodiscard]] Ex<DigestSource> digest_source(
-        const svc::Vfs& vfs,
-        std::string_view rom
-    ) const override;
 
     [[nodiscard]] std::string_view disc_images() const noexcept override {
         return "a Redump .cue/.bin or a chdman .chd of one";
@@ -163,31 +78,20 @@ public:
 
     [[nodiscard]] std::optional<Companion> companion(
         std::string_view rom,
-        const Facts& f
+        const MovieFacts& f
     ) const override;
 
-    [[nodiscard]] std::uint8_t rom_digit() const noexcept override { return 1; }
+    [[nodiscard]] proto::FileSlotDigit rom_slot_digit() const noexcept override {
+        return *proto::FileSlotDigit::from(1);
+    }
 
     [[nodiscard]] bool rom_is_disc() const noexcept override { return true; }
-
-    [[nodiscard]] static Ex<std::vector<std::uint8_t>> toc_prefix(
-        std::string_view cue,
-        std::span<const std::uint64_t> file_sizes
-    );
-
-    [[nodiscard]] static Ex<std::vector<std::uint8_t>> chd_key(svc::IChdSource& chd);
-
-    [[nodiscard]] static Error chd_open_error(const Error& e) noexcept;
 };
 
 consteval bool psx_pad_bits_are_a_permutation() {
-    unsigned seen = 0;
-    for (const PsxMovieCodec::Button& b : PsxMovieCodec::kButtons) {
-        const unsigned bit = b.bit.v;
-        if (bit > 13)
-            return false;
-        seen |= 1u << bit;
-    }
+    proto::JoyMask seen{};
+    for (const PsxMovieCodec::Button& b : PsxMovieCodec::kButtons)
+        seen = seen.with(b.bit.mask());
     return seen == PsxMovieCodec::kPadBitMask;
 }
 

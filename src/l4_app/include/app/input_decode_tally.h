@@ -5,7 +5,7 @@
 
 #include "infra/counter.h"
 #include "infra/seat.h"
-#include "proto/types.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -29,13 +29,13 @@ public:
 
     void capture() noexcept { captures_.add(1); }
 
-    [[nodiscard]] std::uint32_t joy_seen() const noexcept { return joy_seen_.get(); }
+    [[nodiscard]] svc::JoyMask joy_seen() const noexcept { return joy_seen_; }
 
-    [[nodiscard]] std::uint32_t joy_players() const noexcept { return joy_players_.get(); }
+    [[nodiscard]] svc::PlayerMask joy_players() const noexcept { return joy_players_; }
 
-    void merge_joy(proto::JoyMask seen, std::uint32_t players) noexcept {
-        joy_seen_.set(joy_seen_.get() | seen.v);
-        joy_players_.set(joy_players_.get() | players);
+    void merge_joy(svc::JoyMask seen, svc::PlayerMask players) noexcept {
+        joy_seen_ = joy_seen_.with(seen);
+        joy_players_ = joy_players_.with(players);
     }
 
     [[nodiscard]] std::uint32_t rounds() const noexcept { return rounds_.get(); }
@@ -62,8 +62,9 @@ private:
     xthread::Counter mouse_pkt_{};
     xthread::Counter kicks_{};
     xthread::Counter evicted_{};
-    xthread::Counter joy_seen_{};
-    xthread::Counter joy_players_{};
+
+    svc::JoyMask joy_seen_{};
+    svc::PlayerMask joy_players_{};
     xthread::Counter captures_{};
 };
 

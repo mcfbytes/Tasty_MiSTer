@@ -1,45 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/core_ini.h"
 
-#include <fcntl.h>
-#include <unistd.h>
-
-#include <cerrno>
+#include <array>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
+
+#include "core_ini_mounts.h"
+#include "os/small_file.h"
 
 #include "app/board_ops.h"
 #include "app/config_apply.h"
 #include "cores/registry.h"
 
 namespace mister::app {
-namespace {
+namespace detail {
 
-inline constexpr std::size_t kProcMountsTextMax = 1u << 20;
-
-bool mount_present(std::string_view needle) {
+bool mount_present(std::string_view needle, std::string_view path) {
     if (needle.empty())
         return true;
-    const int fd = ::open("/proc/mounts", O_RDONLY | O_CLOEXEC);
-    if (fd < 0)
+    std::array<char, kProcMountsTextMax> text{};
+    const std::string target{path};
+    const auto n = os::read_small_file(target.c_str(), std::span<char>(text));
+    if (!n)
         return false;
-    std::string text;
-    char buf[4096];
-    for (;;) {
-        const ::ssize_t n = ::read(fd, buf, sizeof buf);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
-            break;
-        }
-        if (n == 0)
-            break;
-        text.append(buf, static_cast<std::size_t>(n));
-        if (text.size() > kProcMountsTextMax)
-            break;
-    }
-    (void)::close(fd);
-    return text.find(needle) != std::string::npos;
+    return std::string_view(n->data(), n->size()).find(needle) != std::string_view::npos;
 }
 
 }
@@ -90,7 +76,7 @@ bool CoreIni::wait_for_mount_(std::string_view needle) {
     constexpr unsigned kPollMs = 1000;
     constexpr unsigned kBudgetMs = 60'000;
     for (unsigned waited = 0;; waited += kPollMs) {
-        if (mount_present(needle))
+        if (detail::mount_present(needle))
             return true;
         if (waited >= kBudgetMs)
             return false;

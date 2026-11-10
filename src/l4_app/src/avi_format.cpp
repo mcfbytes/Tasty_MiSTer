@@ -3,8 +3,10 @@
 
 #include <limits>
 
-#include "app/cscd_codec.h"
 #include "app/log_clock.h"
+#include "app/picture_size.h"
+#include "app/row_bytes.h"
+#include "infra/endian.h"
 
 namespace mister::app::avi {
 
@@ -17,15 +19,38 @@ struct Put {
     void u8(std::uint8_t v) noexcept { out[at++] = std::byte{v}; }
 
     void u16(std::uint16_t v) noexcept {
-        constexpr unsigned kByteBits = 8;
-        u8(static_cast<std::uint8_t>(v));
-        u8(static_cast<std::uint8_t>(v >> kByteBits));
+        infra::store_le(out.subspan(at).first<sizeof v>(), v);
+        at += sizeof v;
     }
 
     void u32(std::uint32_t v) noexcept {
-        constexpr unsigned kWordBits = 16;
-        u16(static_cast<std::uint16_t>(v));
-        u16(static_cast<std::uint16_t>(v >> kWordBits));
+        infra::store_le(out.subspan(at).first<sizeof v>(), v);
+        at += sizeof v;
+    }
+
+    void u16(PictureRows rows) noexcept {
+        rows.store_le16(out.subspan(at).first<sizeof(std::uint16_t)>());
+        at += sizeof(std::uint16_t);
+    }
+
+    void u32(PictureRows rows) noexcept {
+        rows.store_le32(out.subspan(at).first<sizeof(std::uint32_t)>());
+        at += sizeof(std::uint32_t);
+    }
+
+    void u16(PicturePixels width) noexcept {
+        width.store_le16(out.subspan(at).first<sizeof(std::uint16_t)>());
+        at += sizeof(std::uint16_t);
+    }
+
+    void u32(PicturePixels width) noexcept {
+        width.store_le32(out.subspan(at).first<sizeof(std::uint32_t)>());
+        at += sizeof(std::uint32_t);
+    }
+
+    void u16(BitsPerPixel bits) noexcept {
+        bits.store_le16(out.subspan(at).first<sizeof(std::uint16_t)>());
+        at += sizeof(std::uint16_t);
     }
 
     void cc(const char (&s)[5]) noexcept {
@@ -59,16 +84,14 @@ constexpr std::uint32_t clamp32(std::uint64_t v) noexcept {
 
 }
 
-void header(const Fields& f, Header& out) noexcept {
+Header header(const Fields& f) noexcept {
     constexpr std::size_t kAvihReservedBytes = 16;
     constexpr std::size_t kStrfTrailBytes = 16;
     constexpr std::uint32_t kMicrosPerSecond = 1'000'000;
-    constexpr std::uint16_t kBitsPerPixelZmbv = 32;
-    constexpr std::uint16_t kBitsPerPixelCscd = 24;
-    constexpr std::uint32_t kBytesPerPixelZmbv = 4;
     constexpr std::uint32_t kNoQuality = std::numeric_limits<std::uint32_t>::max();
     constexpr std::uint32_t kStreamCount = 1;
-    out.fill(std::byte{0});
+    const RecCodecFacts& facts = rec_codec_facts(f.codec);
+    Header out{};
     Put p{out};
     const std::uint32_t scale = f.scale != 0 ? f.scale : kDefaultVtime;
     const std::uint32_t rate = f.rate != 0 ? f.rate : kTickHz;
@@ -90,7 +113,7 @@ void header(const Fields& f, Header& out) noexcept {
     p.u32(kStreamCount);
     p.u32(f.max_chunk);
     p.u32(f.width);
-    p.u32(f.height);
+    p.u32(f.rows);
     p.at += kAvihReservedBytes;
     p.cc("LIST");
     p.u32(kStrl);
@@ -98,10 +121,7 @@ void header(const Fields& f, Header& out) noexcept {
     p.cc("strh");
     p.u32(kStrhBytes);
     p.cc("vids");
-    if (f.codec == RecCodec::Zmbv)
-        p.cc("ZMBV");
-    else
-        p.cc("CSCD");
+    p.cc(facts.fourcc);
     p.u32(0);
     p.u16(0);
     p.u16(0);
@@ -116,23 +136,20 @@ void header(const Fields& f, Header& out) noexcept {
     p.u16(0);
     p.u16(0);
     p.u16(f.width);
-    p.u16(f.height);
+    p.u16(f.rows);
     p.cc("strf");
     p.u32(kStrfBytes);
     p.u32(kStrfBytes);
     p.u32(f.width);
-    p.u32(f.height);
+    p.u32(f.rows);
     p.u16(1);
-    const bool zmbv = f.codec == RecCodec::Zmbv;
-    p.u16(zmbv ? kBitsPerPixelZmbv : kBitsPerPixelCscd);
-    if (zmbv)
-        p.cc("ZMBV");
-    else
-        p.cc("CSCD");
-    const std::uint32_t image = zmbv
-        ? static_cast<std::uint32_t>(f.width) * f.height * kBytesPerPixelZmbv
-        : static_cast<std::uint32_t>(CscdCodec::picture_bytes(f.width, f.height));
-    p.u32(image);
+    p.u16(facts.bits_per_pixel);
+    p.cc(facts.fourcc);
+    const std::size_t image_bytes = rows_span(
+        PictureSize{f.width, f.rows}.stride_bytes(facts.bytes_per_pixel, facts.row_align),
+        f.rows
+    );
+    p.u32(static_cast<std::uint32_t>(image_bytes));
     p.at += kStrfTrailBytes;
     p.cc("JUNK");
     p.u32(kMoviListAt - kJunkAt - kChunkHeadBytes);
@@ -140,6 +157,7 @@ void header(const Fields& f, Header& out) noexcept {
     p.cc("LIST");
     p.u32(clamp32(kListTypeBytes + f.movi_bytes));
     p.cc("movi");
+    return out;
 }
 
 void chunk_head(std::uint32_t payload, std::span<std::byte, kChunkHead> out) noexcept {

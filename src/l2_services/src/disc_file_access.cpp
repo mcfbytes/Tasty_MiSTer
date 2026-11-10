@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "svc/disc_file_access.h"
+#include "svc/vfs_image_opener.h"
 
 #include <algorithm>
 
 namespace mister::svc {
 
+DiscFileAccess::DiscFileAccess(const Vfs& vfs)
+    : owned_opener_(std::make_unique<VfsImageOpener>(vfs)),
+      opener_(*owned_opener_) {}
+
 Ex<std::unique_ptr<IFile>> DiscFileAccess::open_file(std::string_view path) const {
-    Ex<std::unique_ptr<IFile>> f = std::unexpected(Error{Errc::not_found, ERR_SITE(), 0});
-    if (opener_) {
-        f = opener_->open_read(path);
-    } else if (vfs_) {
-        f = vfs_->open(path, OpenMode::Read);
-    }
+    Ex<std::unique_ptr<IFile>> f = opener_.open_read(path);
     if (f)
         (void)(*f)->advise(IFile::Access::Sequential, 0, 0);
     return f;

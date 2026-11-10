@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "cores/romsets.h"
+#include "cores/romset_plan.h"
 
 #include "cores/stock_scan.h"
+#include "cores/neogeo_file_index.h"
+#include "cores/romset_alias.h"
+#include "cores/romset_file.h"
+#include "cores/romset_index.h"
 #include "infra/ascii.h"
 #include "svc/xml_scan.h"
 #include "svc/xml_scanner.h"
@@ -9,29 +13,13 @@
 namespace mister::cores::neogeo {
 
 namespace xml = svc::xml;
+using infra::icontains;
 using infra::ieq;
 
 namespace {
 
 using stock_scan::Radix;
 using stock_scan::scan_atoi;
-
-[[nodiscard]] bool icontains(std::string_view hay, std::string_view needle) noexcept {
-    if (needle.size() > hay.size())
-        return false;
-    for (std::size_t i = 0; i + needle.size() <= hay.size(); ++i) {
-        bool match = true;
-        for (std::size_t j = 0; j < needle.size(); ++j) {
-            if (xml::lower(hay[i + j]) != xml::lower(needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
 
 [[nodiscard]] std::string capped(std::string_view v, std::size_t n) {
     return std::string(v.substr(0, n));
@@ -46,8 +34,7 @@ void RomsetIndex::scan(std::string_view xml_text) {
     entries.clear();
 
     xml::XmlScanner scan{xml_text};
-    xml::Attr attrs[xml::kMaxAttrs];
-    while (const auto t = scan.next_token(attrs)) {
+    while (const auto t = scan.next_token()) {
         if (t->kind != xml::Token::Kind::Start)
             continue;
         if (!ieq(t->tag.name, "romset"))
@@ -56,19 +43,19 @@ void RomsetIndex::scan(std::string_view xml_text) {
             continue;
 
         RomsetEntry e;
-        for (std::size_t i = 0; i < t->tag.attr_count; ++i) {
-            if (!ieq(attrs[i].name, "name"))
+        for (const xml::Attr& a : t->tag.attrs) {
+            if (!ieq(a.name, "name"))
                 continue;
-            const std::string_view v = attrs[i].value;
+            const std::string_view v = a.value;
             e.name = (v.find(',') != std::string_view::npos)
                 ? capped("," + std::string(v) + ",", kNameCap)
                 : capped(v, kPlainCap);
             e.altname = "No name";
         }
-        for (std::size_t i = 0; i < t->tag.attr_count; ++i) {
-            if (ieq(attrs[i].name, "altname")) {
-                e.altname = capped(attrs[i].value, kPlainCap);
-            } else if (ieq(attrs[i].name, "hide")) {
+        for (const xml::Attr& a : t->tag.attrs) {
+            if (ieq(a.name, "altname")) {
+                e.altname = capped(a.value, kPlainCap);
+            } else if (ieq(a.name, "hide")) {
                 e.hide = true;
             }
         }
@@ -83,34 +70,33 @@ RomsetAlias RomsetIndex::lookup(std::string_view key) const {
         if (comma_form ? !icontains(e.name, needle) : !ieq(e.name, key))
             continue;
         if (e.hide)
-            return RomsetAlias{.drop = true, .alias = std::nullopt};
+            return RomsetDrop{};
 
         const bool first_member = !comma_form
             || (e.name.size() >= needle.size()
                 && ieq(std::string_view(e.name).substr(0, needle.size()), needle));
         if (first_member)
-            return RomsetAlias{.drop = false, .alias = e.altname};
-        return RomsetAlias{.drop = false, .alias = e.altname + " (" + std::string(key) + ")"};
+            return RomsetRetype{e.altname};
+        return RomsetRetype{e.altname + " (" + std::string(key) + ")"};
     }
-    return {};
+    return RomsetNoMatch{};
 }
 
 std::string sidecar_altname(std::string_view xml_text) {
     std::string out;
     xml::XmlScanner scan{xml_text};
-    xml::Attr attrs[xml::kMaxAttrs];
-    while (const auto t = scan.next_token(attrs)) {
+    while (const auto t = scan.next_token()) {
         if (t->kind != xml::Token::Kind::Start)
             continue;
         if (!ieq(t->tag.name, "romset"))
             continue;
-        for (std::size_t i = 0; i < t->tag.attr_count; ++i) {
-            if (ieq(attrs[i].name, "name"))
-                out = capped(attrs[i].value, kPlainCap);
+        for (const xml::Attr& a : t->tag.attrs) {
+            if (ieq(a.name, "name"))
+                out = capped(a.value, kPlainCap);
         }
-        for (std::size_t i = 0; i < t->tag.attr_count; ++i) {
-            if (ieq(attrs[i].name, "altname"))
-                out = capped(attrs[i].value, kPlainCap);
+        for (const xml::Attr& a : t->tag.attrs) {
+            if (ieq(a.name, "altname"))
+                out = capped(a.value, kPlainCap);
         }
     }
     return out;
@@ -157,12 +143,7 @@ struct LoadWalk {
     std::uint32_t file_size = 0;
 };
 
-void on_romset_start(
-    LoadWalk& w,
-    std::string_view romset,
-    const xml::Tag& tag,
-    const xml::Attr* attrs
-) {
+void on_romset_start(LoadWalk& w, std::string_view romset, const xml::Tag& tag) {
     w.file_cnt = 0;
     w.vromb_offset = 0;
     w.vrom_mirror = true;
@@ -171,9 +152,9 @@ void on_romset_start(
     if (!w.romsets_wrapper)
         w.in_correct = true;
 
-    for (std::size_t i = 0; i < tag.attr_count; ++i) {
-        const std::string_view an = attrs[i].name;
-        const std::string_view av = attrs[i].value;
+    for (const xml::Attr& a : tag.attrs) {
+        const std::string_view an = a.name;
+        const std::string_view av = a.value;
         if (w.romsets_wrapper && ieq(an, "name")) {
             w.in_correct = has_name(av, romset);
         } else if (ieq(an, "ct0")) {
@@ -224,20 +205,20 @@ void on_romset_start(
     }
 }
 
-void on_file_start(LoadWalk& w, const xml::Tag& tag, const xml::Attr* attrs) {
+void on_file_start(LoadWalk& w, const xml::Tag& tag) {
     w.file_offset = 0;
     w.file_size = 0;
     w.file_index = FileIndex::Bios;
     w.file_name.clear();
 
     bool use_index = false;
-    for (std::size_t i = 0; i < tag.attr_count; ++i) {
-        if (ieq(attrs[i].name, "index"))
+    for (const xml::Attr& a : tag.attrs) {
+        if (ieq(a.name, "index"))
             use_index = true;
     }
-    for (std::size_t i = 0; i < tag.attr_count; ++i) {
-        const std::string_view an = attrs[i].name;
-        const std::string_view av = attrs[i].value;
+    for (const xml::Attr& a : tag.attrs) {
+        const std::string_view an = a.name;
+        const std::string_view av = a.value;
         if (ieq(an, "name"))
             w.file_name = std::string(av);
         if (use_index) {
@@ -261,7 +242,6 @@ void on_file_end(LoadWalk& w) {
     if (w.in_file) {
         RomsetFile f;
         f.name = w.file_name;
-        f.file_class = w.file_index.class_of();
         f.index = w.file_index;
         f.offset = w.file_offset;
         f.size = w.file_size;
@@ -304,16 +284,15 @@ RomsetPlan load_files(std::string_view xml_text, std::string_view romset) {
     LoadWalk w;
 
     xml::XmlScanner scan{xml_text};
-    xml::Attr attrs[xml::kMaxAttrs];
-    while (const auto t = scan.next_token(attrs)) {
+    while (const auto t = scan.next_token()) {
         if (t->kind == xml::Token::Kind::Start) {
             const std::string_view name = t->tag.name;
             if (ieq(name, "romsets"))
                 w.romsets_wrapper = true;
             if (ieq(name, "romset"))
-                on_romset_start(w, romset, t->tag, attrs);
+                on_romset_start(w, romset, t->tag);
             if (w.in_correct && ieq(name, "file"))
-                on_file_start(w, t->tag, attrs);
+                on_file_start(w, t->tag);
             if (t->tag.self_closing && !handle_end(w, name))
                 break;
         } else if (t->kind == xml::Token::Kind::End) {
@@ -327,7 +306,7 @@ RomsetPlan load_files(std::string_view xml_text, std::string_view romset) {
 std::vector<RomsetFile> fallback_files(const RomsetPlan& plan) {
     const std::uint32_t expand = plan.vrom_mirror ? 0u : kVromSize;
     const auto row = [](std::string name, FileIndex index) {
-        return RomsetFile{.name = std::move(name), .index = index, .file_class = index.class_of()};
+        return RomsetFile{.name = std::move(name), .index = index};
     };
 
     const auto vrom = [&](FileIndex index) {

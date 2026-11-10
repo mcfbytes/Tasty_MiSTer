@@ -2,7 +2,6 @@
 #include "cores/registry.h"
 
 #include <array>
-#include <cctype>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -26,130 +25,70 @@
 #include "cores/manifests/uneon.h"
 #include "cores/manifests/x86.h"
 #include "hal/board_profile.h"
+#include "infra/ascii.h"
 
 namespace mister::cores {
 namespace {
 
 constexpr auto kCoreTable = std::to_array<CoreFactory>({
-    {.kind = CoreKind::Menu, .name = "MENU", .profile = &kMenuProfile, .make = &make_generic},
-    {.kind = CoreKind::MegaCd,
-     .name = "MEGACD",
-     .profile = &manifests::kMegaCd,
+    {.profile = kMenuProfile, .make = &make_generic},
+    {.profile = manifests::kMegaCd,
      .make = &manifests::make_megacd,
      .make_ladder = &manifests::make_megacd_ladder},
-    {.kind = CoreKind::PceCd,
-     .name = "TGFX16",
-     .profile = &manifests::kPceCd,
+    {.profile = manifests::kPceCd,
      .make = &manifests::make_pcecd,
      .make_ladder = &manifests::make_pcecd_ladder},
-    {.kind = CoreKind::Psx,
-     .name = "PSX",
-     .profile = &manifests::kPsx,
+    {.profile = manifests::kPsx,
      .make = &manifests::make_psx,
      .make_ladder = &manifests::make_psx_ladder},
-    {.kind = CoreKind::Snes,
-     .name = "SNES",
-     .profile = &manifests::kSnes,
+    {.profile = manifests::kSnes,
      .make = &manifests::make_snes,
      .make_companion = &manifests::make_msu_companion},
-    {.kind = CoreKind::Sgb,
-     .name = "SGB",
-     .profile = &manifests::kSgb,
+    {.profile = manifests::kSgb,
      .make = &manifests::make_sgb,
      .make_companion = &manifests::make_msu_companion},
-    {.kind = CoreKind::Electron,
-     .name = "AcornElectron",
-     .profile = &manifests::kElectron,
-     .make = &manifests::make_electron},
-    {.kind = CoreKind::AtariSt,
-     .name = "AtariST",
-     .profile = &manifests::kAtariSt,
+    {.profile = manifests::kElectron, .make = &manifests::make_electron},
+    {.profile = manifests::kAtariSt,
      .make = &manifests::make_st,
      .make_ladder = &manifests::make_st_ladder},
-    {.kind = CoreKind::ThreeDo,
-     .name = "3DO",
-     .profile = &manifests::kThreeDo,
+    {.profile = manifests::kThreeDo,
      .make = &manifests::make_threedo,
      .make_ladder = &manifests::make_threedo_ladder},
-    {.kind = CoreKind::MegaDrive,
-     .name = "MegaDrive",
-     .profile = &manifests::kMegaDrive,
-     .make = &manifests::make_megadrive},
-    {.kind = CoreKind::N64,
-     .name = "N64",
-     .profile = &manifests::kN64,
+    {.profile = manifests::kMegaDrive, .make = &manifests::make_megadrive},
+    {.profile = manifests::kN64,
      .make = &manifests::make_n64,
      .make_loader = &manifests::make_n64_loader},
-    {.kind = CoreKind::NeoGeo,
-     .name = "NEOGEO",
-     .profile = &manifests::kNeoGeo,
+    {.profile = manifests::kNeoGeo,
      .make = &manifests::make_neogeo,
      .make_ladder = &manifests::make_neogeo_ladder,
      .make_loader = &manifests::make_neogeo_loader},
-    {.kind = CoreKind::Ao486,
-     .name = "AO486",
-     .profile = &manifests::kAo486,
-     .make = &make_generic},
-    {.kind = CoreKind::Pc110,
-     .name = "PC110",
-     .profile = &manifests::kPc110,
-     .make = &make_generic},
-    {.kind = CoreKind::Z486, .name = "Z486", .profile = &manifests::kZ486, .make = &make_generic},
-    {.kind = CoreKind::Z386, .name = "Z386", .profile = &manifests::kZ386, .make = &make_generic},
-    {.kind = CoreKind::Pcxt, .name = "PCXT", .profile = &manifests::kPcxt, .make = &make_generic},
-    {.kind = CoreKind::Tandy1000,
-     .name = "Tandy1000",
-     .profile = &manifests::kTandy1000,
-     .make = &make_generic},
-    {.kind = CoreKind::Pcjr, .name = "PCjr", .profile = &manifests::kPcjr, .make = &make_generic},
-    {.kind = CoreKind::PcxtEga,
-     .name = "PCXT-EGA",
-     .profile = &manifests::kPcxtEga,
-     .make = &make_generic},
-    {.kind = CoreKind::Uneon,
-     .name = "Uneon",
-     .profile = &manifests::kUneon,
-     .make = &make_generic},
-    {.kind = CoreKind::Saturn,
-     .name = "Saturn",
-     .profile = &manifests::kSaturn,
+    {.profile = manifests::kAo486, .make = &make_generic},
+    {.profile = manifests::kPc110, .make = &make_generic},
+    {.profile = manifests::kZ486, .make = &make_generic},
+    {.profile = manifests::kZ386, .make = &make_generic},
+    {.profile = manifests::kPcxt, .make = &make_generic},
+    {.profile = manifests::kTandy1000, .make = &make_generic},
+    {.profile = manifests::kPcjr, .make = &make_generic},
+    {.profile = manifests::kPcxtEga, .make = &make_generic},
+    {.profile = manifests::kUneon, .make = &make_generic},
+    {.profile = manifests::kSaturn,
      .make = &manifests::make_saturn,
      .make_ladder = &manifests::make_saturn_ladder},
-    {.kind = CoreKind::Cdi,
-     .name = "CD-i",
-     .profile = &manifests::kCdi,
+    {.profile = manifests::kCdi,
      .make = &manifests::make_cdi,
      .make_ladder = &manifests::make_cdi_ladder},
 
-    {.kind = CoreKind::Arcade,
-     .name = "",
-     .profile = &kArcadeProfile,
+    {.profile = kArcadeProfile,
      .make = &make_arcade,
      .manifest_doc = infra::OptRef<const IManifestDocRole>{kMraRole}},
 });
 
-consteval bool table_names_agree() {
-    for (const CoreFactory& f : kCoreTable) {
-        if (f.profile == nullptr)
-            return false;
-        if (f.kind != f.profile->kind)
-            return false;
-        std::string_view a = f.name;
-        std::string_view b = f.profile->name;
-        if (a != b)
-            return false;
-    }
-    return true;
-}
-
-static_assert(table_names_agree(), "registry row name/kind must match its CoreProfile");
-
 consteval bool kinds_are_the_rows() {
     for (std::size_t i = 0; i < kCoreTable.size(); ++i) {
-        if (kCoreTable[i].kind == CoreKind::Generic)
+        if (kCoreTable[i].profile.kind == CoreKind::Generic)
             return false;
         for (std::size_t j = i + 1; j < kCoreTable.size(); ++j) {
-            if (kCoreTable[i].kind == kCoreTable[j].kind)
+            if (kCoreTable[i].profile.kind == kCoreTable[j].profile.kind)
                 return false;
         }
     }
@@ -166,7 +105,7 @@ static_assert(
 consteval std::size_t tasty_rows() {
     std::size_t n = 0;
     for (const CoreFactory& f : kCoreTable)
-        n += f.profile->tasty_playable ? 1u : 0u;
+        n += f.profile.tasty_playable ? 1u : 0u;
     return n;
 }
 
@@ -179,7 +118,7 @@ consteval bool tasty_names_join() {
     for (std::string_view want : kTastyNames) {
         std::size_t tagged = 0;
         for (const CoreFactory& f : kCoreTable)
-            tagged += (f.profile->tasty_playable && f.name == want) ? 1u : 0u;
+            tagged += (f.profile.tasty_playable && f.profile.name == want) ? 1u : 0u;
         if (tagged != 1)
             return false;
     }
@@ -194,7 +133,7 @@ static_assert(
 
 consteval bool generic_rows_start_no_mount() {
     for (const CoreFactory& f : kCoreTable)
-        if (f.make == &make_generic && f.profile->undeclared_start_mount != StartMount::Unmodelled)
+        if (f.make == &make_generic && f.profile.undeclared_start_mount != StartMount::Unmodelled)
             return false;
     return true;
 }
@@ -203,7 +142,7 @@ static_assert(generic_rows_start_no_mount(), "a make_generic row must not arm an
 
 consteval bool generic_rows_keep_the_class_route() {
     for (const CoreFactory& f : kCoreTable)
-        if (f.make == &make_generic && f.profile->undeclared_role != SlotRole::Image)
+        if (f.make == &make_generic && f.profile.undeclared_role != SlotRole::Image)
             return false;
     return true;
 }
@@ -213,9 +152,23 @@ static_assert(
     "a make_generic row must not route an undeclared slot to the slot service"
 );
 
+consteval bool rowless_profile_keeps_its_defaults() {
+    return kGenericProfile.kind == CoreKind::Generic
+        && kGenericProfile.name.empty()
+        && kGenericProfile.undeclared_role == SlotRole::Save
+        && kGenericProfile.undeclared_start_mount == StartMount::Generic
+        && kGenericProfile.start == StartRule::Chain;
+}
+
+static_assert(
+    rowless_profile_keeps_its_defaults(),
+    "kGenericProfile must stay Generic/nameless/Save/Generic/Chain: it is the answer "
+    "every rowless core is built over"
+);
+
 consteval bool no_row_defaults_to_a_disc() {
     for (const CoreFactory& f : kCoreTable)
-        if (f.profile->undeclared_role == SlotRole::Disc)
+        if (f.profile.undeclared_role == SlotRole::Disc)
             return false;
     return true;
 }
@@ -237,8 +190,8 @@ consteval bool block_fact_rows_are_generic(const CoreProfile& p) {
         && !p.suppress_analog_followup
         && !p.analog_reshape
         && p.cue_browse_dir.empty()
-        && p.default_uart_baud == BaudRate{115200}
-    && p.disk_formats.empty()
+        && p.default_uart_baud == kDefaultUartBaud
+        && p.disk_formats.empty()
         && p.option_rows.empty()
         && p.option_pages.empty()
         && p.init_additions.empty()
@@ -307,11 +260,9 @@ static_assert(manifests::kCdi.block_sector_floor.is_sector(2568));
 
 consteval bool staging_cores_declare_blank_save() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.profile == nullptr)
-            return false;
-        if (f.profile->staging.order == StageOrder::None)
+        if (f.profile.staging.order == StageOrder::None)
             continue;
-        if (!f.profile->blank_save.declared() && !f.profile->blank_save.generic_ff)
+        if (!f.profile.blank_save.declared() && !f.profile.blank_save.generic_ff)
             return false;
     }
     return true;
@@ -344,7 +295,7 @@ static_assert(boot_buffers_of(kTwoLayeredRows) == 3);
 
 consteval bool boot_buffers_fit_the_ceiling() {
     for (const CoreFactory& f : kCoreTable) {
-        if (boot_buffers_of(f.profile->boot_assets) > kMaxBootBuffers)
+        if (boot_buffers_of(f.profile.boot_assets) > kMaxBootBuffers)
             return false;
     }
     return true;
@@ -358,7 +309,7 @@ static_assert(
 
 consteval bool start_assets_fit_the_ceiling() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.profile->start_assets.size() > kMaxStartAssets)
+        if (f.profile.start_assets.size() > kMaxStartAssets)
             return false;
     }
     return true;
@@ -372,7 +323,7 @@ static_assert(
 
 consteval bool start_rule_matches_its_rows() {
     for (const CoreFactory& f : kCoreTable)
-        if ((f.profile->start == StartRule::Assets) == f.profile->start_assets.empty())
+        if ((f.profile.start == StartRule::Assets) == f.profile.start_assets.empty())
             return false;
     return true;
 }
@@ -390,7 +341,7 @@ consteval bool no_manifest_row_anchors_core_home() {
         return false;
     };
     for (const CoreFactory& f : kCoreTable)
-        if (anchored(f.profile->boot_assets) || anchored(f.profile->start_assets))
+        if (anchored(f.profile.boot_assets) || anchored(f.profile.start_assets))
             return false;
     return true;
 }
@@ -402,8 +353,8 @@ static_assert(
 
 consteval bool front_end_and_hint_rows_start_nothing() {
     for (const CoreFactory& f : kCoreTable)
-        if ((f.profile->is_front_end || f.profile->name.empty())
-            && f.profile->start != StartRule::None)
+        if ((f.profile.is_front_end || f.profile.name.empty())
+            && f.profile.start != StartRule::None)
             return false;
     return true;
 }
@@ -415,34 +366,34 @@ static_assert(
 
 consteval bool start_ladder_rows_take_assets() {
     for (const CoreFactory& f : kCoreTable)
-        if (!f.profile->staging.start_save_dir.empty() && f.profile->start != StartRule::Assets)
+        if (f.profile.staging.save
+            && !f.profile.staging.save->start_dir.empty()
+            && f.profile.start != StartRule::Assets)
             return false;
     return true;
 }
 
 static_assert(
     start_ladder_rows_take_assets(),
-    "a start ladder carries declared rows only: a start_save_dir row takes Assets"
+    "a start ladder carries declared rows only: a start-dir save takes Assets"
 );
 
 consteval bool manifest_windows_fit_every_sourced_aperture() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.profile == nullptr)
-            return false;
-        if (f.profile->windows.size() > kMaxCoreWindows)
+        if (f.profile.windows.size() > kMaxCoreWindows)
             return false;
         for (const hal::FpgaAperture& ap : hal::kBoardApertures) {
             if (ap.region.len == 0)
                 continue;
             std::array<hal::FabricRegion, kMaxCoreWindows> rows{};
             std::size_t n = 0;
-            for (const CoreWindowDecl& w : f.profile->windows)
+            for (const CoreWindowDecl& w : f.profile.windows)
                 rows[n++] = w.region;
             if (!hal::fabric_rows_well_formed(std::span(rows).first(n), ap))
                 return false;
         }
         std::size_t feeders = 0;
-        for (const CoreWindowDecl& w : f.profile->windows) {
+        for (const CoreWindowDecl& w : f.profile.windows) {
             if (w.region.name == nullptr || *w.region.name == '\0')
                 return false;
             feeders += w.feeds_pcm ? 1u : 0u;
@@ -451,9 +402,9 @@ consteval bool manifest_windows_fit_every_sourced_aperture() {
             return false;
     }
     for (std::size_t i = 0; i < kCoreTable.size(); ++i) {
-        for (const CoreWindowDecl& a : kCoreTable[i].profile->windows) {
+        for (const CoreWindowDecl& a : kCoreTable[i].profile.windows) {
             for (std::size_t j = i + 1; j < kCoreTable.size(); ++j) {
-                for (const CoreWindowDecl& b : kCoreTable[j].profile->windows) {
+                for (const CoreWindowDecl& b : kCoreTable[j].profile.windows) {
                     if (std::string_view(a.region.name) == std::string_view(b.region.name)) {
                         return false;
                     }
@@ -473,13 +424,11 @@ static_assert(
 
 consteval bool staging_rows_declare_a_ladder() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.profile == nullptr)
-            return false;
-        const bool staged = f.profile->staging.order != StageOrder::None;
-        const bool laddered = staged || ladder_rows(f.profile->slots) != 0;
+        const bool staged = f.profile.staging.order != StageOrder::None;
+        const bool laddered = staged || ladder_rows(f.profile.slots) != 0;
         if (laddered != (f.make_ladder != nullptr))
             return false;
-        if (f.profile->reset.ladders != (!staged && laddered))
+        if (f.profile.reset.ladders != (!staged && laddered))
             return false;
     }
     return true;
@@ -494,11 +443,11 @@ static_assert(
 
 consteval bool laddered_rows_declare_one_disc_slot() {
     for (const CoreFactory& f : kCoreTable) {
-        const std::size_t discs = disc_rows(f.profile->slots);
-        const bool staged = f.profile->staging.order != StageOrder::None;
+        const std::size_t discs = disc_rows(f.profile.slots);
+        const bool staged = f.profile.staging.order != StageOrder::None;
         if (discs != (staged ? 1u : 0u))
             return false;
-        if (discs == 1 && disc_slot_of(f.profile->slots) != f.profile->staging.disc_slot)
+        if (discs == 1 && disc_slot_of(f.profile.slots) != f.profile.staging.disc_slot)
             return false;
     }
     return true;
@@ -512,7 +461,7 @@ static_assert(
 
 consteval bool loader_rows_stream() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.make_loader != nullptr && f.profile->file_tx_whole)
+        if (f.make_loader != nullptr && f.profile.file_tx_whole)
             return false;
     }
     return true;
@@ -527,8 +476,9 @@ consteval bool loader_rows_keep_their_loader() {
     for (const CoreFactory& f : kCoreTable) {
         if (f.make_loader == nullptr)
             continue;
-        if (loader_for(&f, hal::FabricAddr{}) != f.make_loader
-            || loader_for(&f, hal::FabricAddr{1}) != f.make_loader)
+        const infra::OptRef<const CoreFactory> row{f};
+        if (loader_for(row, hal::FabricAddr{}) != f.make_loader
+            || loader_for(row, hal::FabricAddr{1}) != f.make_loader)
             return false;
     }
     return true;
@@ -541,7 +491,7 @@ static_assert(
 
 consteval bool companion_rows_declare_a_window() {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.make_companion != nullptr && f.profile->windows.empty())
+        if (f.make_companion != nullptr && f.profile.windows.empty())
             return false;
     }
     return true;
@@ -552,41 +502,32 @@ static_assert(
     "a row with a MAIN companion declares the window its sibling file loads into"
 );
 
-bool iequal(std::string_view a, std::string_view b) {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const auto ca = static_cast<unsigned char>(a[i]);
-        const auto cb = static_cast<unsigned char>(b[i]);
-        if (std::tolower(ca) != std::tolower(cb))
-            return false;
-    }
-    return true;
-}
-
 }
 
 std::span<const CoreFactory> core_table() {
     return kCoreTable;
 }
 
-[[nodiscard]] Ex<const CoreFactory*> find_core(std::string_view conf_str_name) {
+[[nodiscard]] infra::OptRef<const CoreFactory> find_core(std::string_view conf_str_name) {
     for (const CoreFactory& f : kCoreTable) {
-        if (f.name.empty())
+        if (f.profile.name.empty())
             continue;
-        if (iequal(f.name, conf_str_name))
-            return &f;
+        if (infra::ieq(f.profile.name, conf_str_name))
+            return infra::OptRef<const CoreFactory>{f};
     }
-    return std::unexpected(Error{Errc::core_load, ERR_SITE(), 0});
+    return {};
 }
 
-[[nodiscard]] Ex<const CoreFactory*> find_core(std::string_view conf_str_name, LoadHint hint) {
+[[nodiscard]] infra::OptRef<const CoreFactory> find_core(
+    std::string_view conf_str_name,
+    LoadHint hint
+) {
     if (hint == LoadHint::XmlManifest) {
         for (const CoreFactory& f : kCoreTable) {
-            if (f.kind == CoreKind::Arcade)
-                return &f;
+            if (f.profile.kind == CoreKind::Arcade)
+                return infra::OptRef<const CoreFactory>{f};
         }
-        return std::unexpected(Error{Errc::core_load, ERR_SITE(), 1});
+        return {};
     }
     return find_core(conf_str_name);
 }
@@ -600,13 +541,13 @@ infra::OptRef<const IManifestDocRole> manifest_doc_role() {
 }
 
 const CoreProfile& profile_for(std::string_view conf_str_name) {
-    for (const CoreFactory& f : kCoreTable) {
-        if (f.name.empty())
-            continue;
-        if (iequal(f.name, conf_str_name))
-            return *f.profile;
-    }
-    return kGenericProfile;
+    const auto row = find_core(conf_str_name);
+    return row ? row->profile : kGenericProfile;
+}
+
+const CoreProfile& profile_for(std::string_view conf_str_name, LoadHint hint) {
+    const auto row = find_core(conf_str_name, hint);
+    return row ? row->profile : kGenericProfile;
 }
 
 }

@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "input_rules.h"
 
+#include "infra/ascii.h"
+#include "infra/indexed_array.h"
 #include "infra/persist.h"
+#include "svc/joy_bit.h"
+#include "svc/map_store.h"
+#include "svc/sys_button.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <charconv>
@@ -13,208 +19,6 @@
 namespace mister::svc {
 
 namespace {
-
-constexpr Vid kVidSony{0x054C};
-constexpr Vid kVidNintendo{0x057E};
-
-constexpr NoMergeRule kNoMergeRules[] = {
-
-    {DeviceMatch{Vid{0x289B}, Pid{0x0057}, MatchArity::VidNotPid},
-     "req row 1: Raphnet, all PIDs EXCEPT 0x0057"},
-    {DeviceMatch{Vid{0x0E8F}, Pid{0x3013}, MatchArity::VidAndPid},
-     "req row 2: Mayflash SNES 2-port adapter"},
-    {DeviceMatch{Vid{0x16C0}, Pid{0x05E1}, MatchArity::VidAndPid},
-     "req row 3: XinMo XM-10 2-player encoder"},
-    {DeviceMatch{Vid{0x045E}, Pid{0x02A1}, MatchArity::VidAndPid},
-     "req row 4: Xbox 360 wireless receiver"},
-    {DeviceMatch{Vid{0x8282}, Pid{0x3201}, MatchArity::VidAndPid},
-     "req row 5: Irken JAMMA Expander / Mojo Retro"},
-    {DeviceMatch{Vid{0x1209}, Pid{0xFACA}, MatchArity::VidAndPid}, "req row 6: ControllaBLE"},
-    {DeviceMatch{Vid{0x16D0}, Pid{0x127E}, MatchArity::VidAndPid},
-     "req row 7: Reflex Adapt to USB"},
-    {DeviceMatch{Vid{0x16D0}, Pid{0x1460}, MatchArity::VidAndPid},
-     "req row 8: Reflex Adapt Classic2USB"},
-    {DeviceMatch{Vid{0x1209}, Pid{0x595A}, MatchArity::VidAndPid}, "req row 9: RetroZord adapter"},
-};
-
-constexpr MouseFixupRule kMouseFixupRules[] = {
-
-    {DeviceMatch{Vid{0x32BE}, Pid{0x1420}, MatchArity::VidAndPid},
-     QuirkId::Mssp,
-     "req Arcade Spinner TS-BSP01/Atari, prediv 3"},
-};
-
-consteval bool quirk_rows_are_vid_exact() {
-    for (const NoMergeRule& r : kNoMergeRules) {
-        if (r.match.vid == kAnyVid)
-            return false;
-    }
-    for (const MouseFixupRule& r : kMouseFixupRules) {
-        if (r.match.vid == kAnyVid)
-            return false;
-    }
-    return true;
-}
-
-static_assert(
-    quirk_rows_are_vid_exact(),
-    "a quirk row's vid is EXACT at every MatchArity — kAnyVid is the "
-    "ADMISSION table's notation only, and a zero-VID quirk row would "
-    "match every /dev/input/mouseN node (req)"
-);
-
-constexpr AdmissionRule kAdmissionRules[] = {
-
-    {kAnyVid,
-     kAnyPid,
-     "MiSTer virtual input",
-     NameMatch::Exact,
-     AdmitAction::Reject,
-     QuirkId::None,
-     "input.cpp:5207-5213 — skip our own uinput node (UINPUT_NAME)"},
-    {kVidSony,
-     kAnyPid,
-     "Motion",
-     NameMatch::Contains,
-     AdmitAction::Reject,
-     QuirkId::None,
-     "input.cpp:5268-5273 — DualShock/DualSense Motion Sensors: don't use Accelerometer"},
-
-    {kVidSony,
-     Pid{0x05C4},
-     "Touchpad",
-     NameMatch::Contains,
-     AdmitAction::Assign,
-     QuirkId::Ds4Touch,
-     "input.cpp:5280-5283 — DS4 v1 touchpad node"},
-    {kVidSony,
-     Pid{0x09CC},
-     "Touchpad",
-     NameMatch::Contains,
-     AdmitAction::Assign,
-     QuirkId::Ds4Touch,
-     "input.cpp:5280-5283 — DS4 v2 touchpad node"},
-    {kVidSony,
-     Pid{0x0BA0},
-     "Touchpad",
-     NameMatch::Contains,
-     AdmitAction::Assign,
-     QuirkId::Ds4Touch,
-     "input.cpp:5280-5283 — DS4 USB dongle touchpad node"},
-    {kVidSony,
-     Pid{0x0CE6},
-     "Touchpad",
-     NameMatch::Contains,
-     AdmitAction::Assign,
-     QuirkId::Ds4Touch,
-     "input.cpp:5280-5283 — DualSense touchpad node (THE rig device)"},
-    {kVidSony,
-     Pid{0x0268},
-     nullptr,
-     NameMatch::Any,
-     AdmitAction::Assign,
-     QuirkId::Ds3,
-     "input.cpp:5276 — DualShock 3"},
-    {kVidSony,
-     Pid{0x05C4},
-     nullptr,
-     NameMatch::Any,
-     AdmitAction::Assign,
-     QuirkId::Ds4,
-     "input.cpp:5278-5279 — DS4 v1"},
-    {kVidSony,
-     Pid{0x09CC},
-     nullptr,
-     NameMatch::Any,
-     AdmitAction::Assign,
-     QuirkId::Ds4,
-     "input.cpp:5278-5279 — DS4 v2"},
-    {kVidSony,
-     Pid{0x0BA0},
-     nullptr,
-     NameMatch::Any,
-     AdmitAction::Assign,
-     QuirkId::Ds4,
-     "input.cpp:5278-5279 — DS4 USB dongle"},
-    {kVidSony,
-     Pid{0x0CE6},
-     nullptr,
-     NameMatch::Any,
-     AdmitAction::Assign,
-     QuirkId::Ds4,
-     "input.cpp:5278-5279 — DualSense"},
-    {kVidNintendo,
-     Pid{0x0306},
-     "Accelerometer",
-     NameMatch::Contains,
-     AdmitAction::Reject,
-     QuirkId::None,
-     "input.cpp:5295-5300 — Wiimote accelerometer node"},
-    {kVidNintendo,
-     Pid{0x0330},
-     "Accelerometer",
-     NameMatch::Contains,
-     AdmitAction::Reject,
-     QuirkId::None,
-     "input.cpp:5295-5300 — Wii U pro accelerometer node"},
-    {kVidNintendo,
-     Pid{0x0306},
-     "Motion Plus",
-     NameMatch::Contains,
-     AdmitAction::Reject,
-     QuirkId::None,
-     "input.cpp:5302-5308 — Wiimote Motion Plus node"},
-    {kVidNintendo,
-     Pid{0x0330},
-     "Motion Plus",
-     NameMatch::Contains,
-     AdmitAction::Reject,
-     QuirkId::None,
-     "input.cpp:5302-5308 — Wii U pro Motion Plus node"},
-
-    {kVidNintendo,
-     kAnyPid,
-     " IMU",
-     NameMatch::ContainsCs,
-     AdmitAction::Reject,
-     QuirkId::None,
-     "input.cpp:5322-5327 — Nintendo IMU node"},
-    {Vid{0x3250},
-     Pid{0x1001},
-     nullptr,
-     NameMatch::Any,
-     AdmitAction::Assign,
-     QuirkId::AtariVcs,
-     "input.cpp:5484-5490 — Atari VCS joystick; `vcs_proc` is unported (item)"},
-};
-
-constexpr char lower_ascii(char c) {
-    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
-
-bool contains_sub(std::string_view hay, std::string_view needle, bool fold) {
-    if (needle.empty())
-        return true;
-    if (hay.size() < needle.size())
-        return false;
-    const std::size_t last = hay.size() - needle.size();
-    for (std::size_t i = 0; i <= last; ++i) {
-        std::size_t k = 0;
-        for (; k < needle.size(); ++k) {
-            char a = hay[i + k];
-            char b = needle[k];
-            if (fold) {
-                a = lower_ascii(a);
-                b = lower_ascii(b);
-            }
-            if (a != b)
-                break;
-        }
-        if (k == needle.size())
-            return true;
-    }
-    return false;
-}
 
 constexpr unsigned kHexNibbleBits = 4;
 constexpr std::uint32_t kHexRadix = 16;
@@ -229,7 +33,7 @@ std::optional<std::uint32_t> hex_token(std::string_view t, std::size_t max_digit
         return std::nullopt;
     std::uint32_t v = 0;
     for (const char c : t) {
-        const char l = lower_ascii(c);
+        const char l = infra::ascii_lower(c);
         const int d = (c >= '0' && c <= '9') ? c - '0' : (l >= 'a' && l <= 'f') ? l - 'a' + 10 : -1;
         if (d < 0)
             return std::nullopt;
@@ -241,19 +45,19 @@ std::optional<std::uint32_t> hex_token(std::string_view t, std::size_t max_digit
 std::optional<std::pair<bool, std::uint32_t>> vid_pid_token(std::string_view t) {
     if (t.empty())
         return std::nullopt;
-    const char head = lower_ascii(t[0]);
+    const char head = infra::ascii_lower(t[0]);
     if (head != 'v' && head != 'p')
         return std::nullopt;
     std::size_t i = 1;
     std::size_t n = 0;
-    while (i < t.size() && lower_ascii(t[i]) == 'i') {
+    while (i < t.size() && infra::ascii_lower(t[i]) == 'i') {
         ++i;
         ++n;
     }
     if (n == 0)
         return std::nullopt;
     n = 0;
-    while (i < t.size() && lower_ascii(t[i]) == 'd') {
+    while (i < t.size() && infra::ascii_lower(t[i]) == 'd') {
         ++i;
         ++n;
     }
@@ -265,51 +69,6 @@ std::optional<std::pair<bool, std::uint32_t>> vid_pid_token(std::string_view t) 
     return std::pair<bool, std::uint32_t>{head == 'v', *v};
 }
 
-}
-
-std::span<const NoMergeRule> no_merge_rules() {
-    return kNoMergeRules;
-}
-
-std::optional<MouseFixupRule> find_mouse_fixup(Vid vid, Pid pid) {
-    for (const MouseFixupRule& r : kMouseFixupRules) {
-        if (r.match.matches(vid, pid))
-            return r;
-    }
-    return std::nullopt;
-}
-
-std::span<const AdmissionRule> admission_rules() {
-    return kAdmissionRules;
-}
-
-Admission admit_node(const NodeFacts& f) {
-    for (const AdmissionRule& r : admission_rules()) {
-        if (r.vid != kAnyVid && r.vid != f.vid)
-            continue;
-        if (r.pid != kAnyPid && r.pid != f.pid)
-            continue;
-        switch (r.name_match) {
-            case NameMatch::Any:
-                break;
-            case NameMatch::Exact:
-                if (f.name != std::string_view(r.name))
-                    continue;
-                break;
-            case NameMatch::Contains:
-                if (!contains_sub(f.name, r.name, true))
-                    continue;
-                break;
-            case NameMatch::ContainsCs:
-                if (!contains_sub(f.name, r.name, false))
-                    continue;
-                break;
-        }
-        if (r.action == AdmitAction::Reject)
-            return Admission{false, QuirkId::None};
-        return Admission{true, r.quirk};
-    }
-    return Admission{true, QuirkId::None};
 }
 
 namespace rules {
@@ -348,17 +107,19 @@ std::string vid_pid(Vid vid, Pid pid) {
     return s;
 }
 
-long event_number(std::string_view devname) {
-    const auto pos = devname.find("/event");
+constexpr std::string_view kEventInfix = "/event";
+
+std::optional<unsigned> event_number(std::string_view devname) {
+    const auto pos = devname.find(kEventInfix);
     if (pos == std::string_view::npos)
-        return -1;
-    const char* first = devname.data() + pos + 6;
+        return std::nullopt;
+    const char* first = devname.data() + pos + kEventInfix.size();
     const char* last = devname.data() + devname.size();
-    unsigned long n = 0;
+    unsigned n = 0;
     const auto r = std::from_chars(first, last, n);
     if (r.ec != std::errc{} || r.ptr == first)
-        return -1;
-    return static_cast<long>(n);
+        return std::nullopt;
+    return n;
 }
 
 std::string_view basename_of(std::string_view path) {
@@ -391,13 +152,13 @@ struct IdstrUniqRule {
     bool teensy;
 };
 
-constexpr IdstrUniqRule kIdstrUniqRules[] = {
-    {Vid{0x2341}, kAnyPid, false},
-    {Vid{0x16C0}, kAnyPid, true},
-    {Vid{0x16D0}, Pid{0x127E}, false},
-    {Vid{0x16D0}, Pid{0x1460}, false},
-    {Vid{0x1209}, Pid{0x595A}, false},
-};
+constexpr auto kIdstrUniqRules = std::to_array<IdstrUniqRule>({
+    {.vid = Vid{0x2341}, .pid = kAnyPid, .teensy = false},
+    {.vid = Vid{0x16C0}, .pid = kAnyPid, .teensy = true},
+    {.vid = Vid{0x16D0}, .pid = Pid{0x127E}, .teensy = false},
+    {.vid = Vid{0x16D0}, .pid = Pid{0x1460}, .teensy = false},
+    {.vid = Vid{0x1209}, .pid = Pid{0x595A}, .teensy = false},
+});
 
 constexpr Vid kControllaVid{0x1209};
 constexpr Pid kControllaPids[] = {Pid{0xFACE}, Pid{0xFACA}};
@@ -483,15 +244,11 @@ void derive_idstr(DeviceFacts& slot) {
 
 bool wants_unique_mapping(const DeviceIdentity& id, const UniquePolicy& pol) {
     const VidPidKey device = VidPidKey::of(id.vid, id.pid);
-    for (const std::uint32_t row : pol.vidpids) {
-        if (row == 0)
+    for (const VidPidKey row : pol.vidpids) {
+        if (row == kVidPidEndRow)
             break;
-        if (pol.force
-            || pol.all
-            || VidPidKey::of(row) == VidPidKey::every_device()
-            || VidPidKey::of(row) == device) {
+        if (pol.force || pol.all || row == VidPidKey::every_device() || row == device)
             return true;
-        }
     }
     return false;
 }
@@ -582,24 +339,24 @@ bool bt_eligible(const DeviceFacts& slot) noexcept {
 
 void make_unique(FactsSpan slots, const DeviceMatch& match) {
     unsigned cnt = 0;
-    long lastmin = -1;
+    std::optional<unsigned> last;
     while (true) {
         std::size_t idx = slots.size();
-        long min = -1;
+        std::optional<unsigned> next;
         for (std::size_t i = 0; i < slots.size(); ++i) {
             if (!match.matches(slots[i]->id.vid, slots[i]->id.pid))
                 continue;
-            const long num = event_number(slots[i]->devname);
-            if (num < 0 || num <= lastmin)
+            const std::optional<unsigned> num = event_number(slots[i]->devname);
+            if (!num || (last && *num <= *last))
                 continue;
-            if (idx == slots.size() || num < min) {
-                min = num;
+            if (!next || *num < *next) {
+                next = num;
                 idx = i;
             }
         }
         if (idx == slots.size())
             break;
-        lastmin = min;
+        last = next;
         slots[idx]->id.merge_id.push_back('/');
         slots[idx]->id.merge_id += dec(cnt);
         slots[idx]->id.port_suffix = static_cast<std::uint8_t>(cnt);
@@ -717,13 +474,20 @@ std::string map_filename(std::string_view core, const DeviceIdentity& id, MapKin
 }
 
 MapPaths map_paths(std::string_view name, MapKind kind) {
-    const PathPolicy policy = map_spec(kind).paths;
     MapPaths p{};
-    if (policy != PathPolicy::ConfigOnly)
-        p.primary = "inputs/";
+
+    switch (map_spec(kind).paths) {
+        case PathPolicy::InputsThenConfig:
+            p.primary = "inputs/";
+            p.fallback = name;
+            break;
+        case PathPolicy::InputsOnly:
+            p.primary = "inputs/";
+            break;
+        case PathPolicy::ConfigOnly:
+            break;
+    }
     p.primary.append(name);
-    if (policy == PathPolicy::InputsThenConfig)
-        p.fallback = name;
     return p;
 }
 
@@ -740,22 +504,20 @@ bool is_diagonal(AnalogXy in) {
         return false;
     if (in.x == in.y || in.x == -in.y)
         return true;
-    const bool x_dominant = (in.x > in.y) == (in.x > -in.y);
-    const auto num = static_cast<float>(x_dominant ? in.y : in.x);
-    const auto den = static_cast<float>(x_dominant ? in.x : in.y);
+    const AnalogXy::Axis dom = dominant_axis(in);
+    const auto num = component(in, other_axis(dom));
+    const auto den = component(in, dom);
     return std::fabs(num / den) >= kDiagonalSlopeMin;
 }
 
 AnalogXy apply_deadzone(AnalogXy in, const DeadzoneParams& p) {
-    const auto x = static_cast<float>(in.x);
-    const auto y = static_cast<float>(in.y);
+    const auto x = component(in, AnalogXy::Axis::X);
+    const auto y = component(in, AnalogXy::Axis::Y);
     const float dz = p.deadzone.magnitude();
 
     if (p.deadzone <= kDeadzoneCheapBound) {
         if (p.deadzone != kDeadzoneNone) {
-            const std::int32_t dominant = ((in.x > in.y) == (in.x > -in.y)) ? in.x : in.y;
-            const std::int32_t mag = dominant < 0 ? -dominant : dominant;
-            if (p.deadzone.swallows(mag))
+            if (p.deadzone.swallows(magnitude_cardinal(in)))
                 return AnalogXy{0, 0};
         }
         return in;
@@ -770,10 +532,12 @@ AnalogXy apply_deadzone(AnalogXy in, const DeadzoneParams& p) {
         / std::fmax(std::fabs(std::sin(angle)), std::fabs(std::cos(angle)));
     const float cardinality = (kBoxRadiusDiag - box_radius) * kBoxRadiusDiagScale;
 
-    const float max_cardinal = p.max_cardinal > (kLearnedMaxFloorFactor * dz) ? p.max_cardinal
-                                                                              : kAxisScale;
-    const float max_diagonal = p.max_range > (kLearnedMaxFloorFactor * dz) ? p.max_range
-                                                                           : kAxisScale;
+    const float learned_cardinal = p.learned.max_cardinal;
+    const float learned_range = p.learned.max_range;
+    const float max_cardinal = learned_cardinal > (kLearnedMaxFloorFactor * dz) ? learned_cardinal
+                                                                                : kAxisScale;
+    const float max_diagonal = learned_range > (kLearnedMaxFloorFactor * dz) ? learned_range
+                                                                             : kAxisScale;
     const float range = cardinality * max_cardinal + (1.0f - cardinality) * max_diagonal;
 
     const float weight = 1.0f - std::fmax(range - radius, 0.0f) / (range - dz);
@@ -799,127 +563,121 @@ constexpr std::uint32_t kDefMmap[kJoyWords] = {
     0x0000013Cu, 0x0000013Cu, 0x01300131u, 0x00020000u, 0x00020001u, 0x00020003u, 0x00020004u,
     0x00020000u, 0x00020001u, 0u,          0u,
 };
-static_assert(sizeof kDefMmap == sizeof(JoyWords), "req: the Joystick blob is exactly 128 bytes");
+static_assert(sizeof kDefMmap == sizeof(SysWords), "req: the system map is exactly 128 bytes");
 
-constexpr std::size_t kBtnRight = 0;
-constexpr std::size_t kBtnLeft = 1;
-constexpr std::size_t kBtnDown = 2;
-constexpr std::size_t kBtnUp = 3;
-constexpr std::size_t kAxisX = 28;
-constexpr std::size_t kAxisY = 29;
+struct RouteRow {
+    SysButton sys;
+    JoyBit wire;
+};
 
-constexpr std::size_t kDirectionWords = 4;
+constexpr RouteRow kDirectionRoute[] = {
+    {kSysBtnRight, kJoyBitRight},
+    {kSysBtnLeft, kJoyBitLeft},
+    {kSysBtnDown, kJoyBitDown},
+    {kSysBtnUp, kJoyBitUp},
+};
 
-constexpr std::size_t kMenuFuncWord = 23;
+constexpr RouteRow kMenuRoute[] = {
+    {kSysBtnY, kJoyBitBtn3},
+    {kSysBtnX, kJoyBitBtn4},
+    {kSysBtnL, kJoyBitL},
+    {kSysBtnR, kJoyBitR},
+    {kSysBtnStart, kJoyBitL2},
+    {kSysBtnSelect, kJoyBitR2},
+};
 
-constexpr std::size_t kSysAxisFirst = 24;
-constexpr std::size_t kSysAxisWords = 4;
-
-ButtonMap encode_map(const JoyWords& w) {
-    ButtonMap m;
-    m.kind = MapKind::Joystick;
-    constexpr std::size_t kWordBytes = sizeof(std::uint32_t);
-    m.blob.resize(map_spec(MapKind::Joystick).bytes);
-    for (std::size_t i = 0; i < w.size(); ++i) {
-        infra::store_le<std::uint32_t>(
-            std::span<std::byte>(m.blob).subspan(i * kWordBytes).first<kWordBytes>(),
-            packed_word(w[i])
-        );
-    }
-    return m;
+void copy_low_halves(
+    const SysWords& sys_map,
+    std::span<const RouteRow> rows,
+    WireWords& w
+) noexcept {
+    for (const RouteRow& row : rows)
+        w[row.wire].lo = sys_map[row.sys].lo;
 }
 
-constexpr JoyWords default_words() noexcept {
-    JoyWords out{};
-    for (std::size_t i = 0; i < kJoyWords; ++i)
-        out[i] = packed_keys_of(kDefMmap[i]);
+void apply_axis_edges(
+    const SysWords& sys_map,
+    SysButton axis_word,
+    JoyBit min_edge,
+    JoyBit max_edge,
+    WireWords& w
+) noexcept {
+    const PackedKeys word = sys_map[axis_word];
+    if (word == PackedKeys{})
+        return;
+    const EvdevCode axis = word.lo;
+    w[min_edge].hi = axis.key_emu_min();
+    w[max_edge].hi = axis.key_emu_max();
+}
+
+constexpr SysWords default_words() noexcept {
+    SysWords out{};
+    SysButton word{};
+    for (const std::uint32_t packed : kDefMmap) {
+        out[word] = packed_keys_of(packed);
+        word = word.next();
+    }
     return out;
 }
 }
 
-ButtonMap default_sys_map() {
-    return encode_map(default_words());
+SysWords default_sys_map() {
+    return default_words();
 }
 
-ButtonMap derive_joy_map(std::span<const PackedKeys> sys_map, bool axis_emu, const JoyPlan& plan) {
-    JoyWords w{};
+WireWords derive_joy_map(const SysWords& sys_map, bool axis_emu, const JoyPlan& plan) {
+    WireWords w{};
 
-    if (sys_map.size() < kJoyWords)
-        return encode_map(w);
+    copy_low_halves(sys_map, kDirectionRoute, w);
 
-    w[kBtnRight] = PackedKeys{sys_map[kBtnRight].lo, EvdevCode{}};
-    w[kBtnLeft] = PackedKeys{sys_map[kBtnLeft].lo, EvdevCode{}};
-    w[kBtnDown] = PackedKeys{sys_map[kBtnDown].lo, EvdevCode{}};
-    w[kBtnUp] = PackedKeys{sys_map[kBtnUp].lo, EvdevCode{}};
-
-    if (sys_map[kAxisX] != PackedKeys{} && axis_emu) {
-        const EvdevCode axis = sys_map[kAxisX].lo;
-        w[kBtnLeft].hi = axis.key_emu_min();
-        w[kBtnRight].hi = axis.key_emu_max();
-    }
-    if (sys_map[kAxisY] != PackedKeys{} && axis_emu) {
-        const EvdevCode axis = sys_map[kAxisY].lo;
-        w[kBtnUp].hi = axis.key_emu_min();
-        w[kBtnDown].hi = axis.key_emu_max();
+    if (axis_emu) {
+        apply_axis_edges(sys_map, kSysBtnAxisX, kJoyBitLeft, kJoyBitRight, w);
+        apply_axis_edges(sys_map, kSysBtnAxisY, kJoyBitUp, kJoyBitDown, w);
     }
 
-    for (std::size_t j = JoyPlan::kFirstButtonWord; j < kJoyWords; ++j) {
-        const std::int8_t s = plan.src[j];
-        if (s < JoyPlan::kFirstButtonWord || s > JoyPlan::kLastButtonWord)
+    for (JoyBit bit = kJoyBitBtn1; bit < kJoyBitEnd; bit = bit.next()) {
+        const std::optional<SysButton> src = infra::at_index(plan.src, bit);
+        if (!src)
             continue;
-        w[j] = sys_map[static_cast<std::size_t>(s)];
+        w[bit] = sys_map[*src];
     }
-    return encode_map(w);
+    return w;
 }
 
-JoyWords derive_menu_map(std::span<const PackedKeys> sys_map, bool axis_keys) {
-    JoyWords w{};
-    if (sys_map.size() < kJoyWords)
-        return w;
+WireWords derive_menu_map(const SysWords& sys_map, bool axis_keys) {
+    WireWords w{};
 
-    for (std::size_t i = 0; i < kDirectionWords; ++i)
-        w[i] = PackedKeys{sys_map[i].lo, EvdevCode{}};
-    const EvdevCode ok = sys_map[kMenuFuncWord].lo;
-    const EvdevCode esc = sys_map[kMenuFuncWord].hi;
-    w[4].lo = ok.v != 0 ? ok : sys_map[4].lo;
-    w[5].lo = esc.v != 0 ? esc : sys_map[5].lo;
-    w[6].lo = sys_map[7].lo;
-    w[7].lo = sys_map[6].lo;
-    w[10].lo = sys_map[8].lo;
-    w[11].lo = sys_map[9].lo;
-    w[12].lo = sys_map[11].lo;
-    w[13].lo = sys_map[10].lo;
+    copy_low_halves(sys_map, kDirectionRoute, w);
+
+    const PackedKeys menu = sys_map[kSysBtnMenuFunc];
+    w[kJoyBitBtn1].lo = menu.lo.is_unset() ? sys_map[kSysBtnA].lo : menu.lo;
+    w[kJoyBitBtn2].lo = menu.hi.is_unset() ? sys_map[kSysBtnB].lo : menu.hi;
+    for (const RouteRow& row : kMenuRoute)
+        w[row.wire].lo = sys_map[row.sys].lo;
     if (axis_keys) {
-        if (sys_map[kAxisX] != PackedKeys{}) {
-            const EvdevCode axis = sys_map[kAxisX].lo;
-            w[kBtnLeft].hi = axis.key_emu_min();
-            w[kBtnRight].hi = axis.key_emu_max();
-        }
-        if (sys_map[kAxisY] != PackedKeys{}) {
-            const EvdevCode axis = sys_map[kAxisY].lo;
-            w[kBtnUp].hi = axis.key_emu_min();
-            w[kBtnDown].hi = axis.key_emu_max();
-        }
+        apply_axis_edges(sys_map, kSysBtnAxisX, kJoyBitLeft, kJoyBitRight, w);
+        apply_axis_edges(sys_map, kSysBtnAxisY, kJoyBitUp, kJoyBitDown, w);
     }
     return w;
 }
 
 JoyMask mask_for(std::span<const PackedKeys> joy_map, const KeyDownSet<kDownWords>& down) {
-    std::uint32_t mask = 0;
-    for (std::size_t i = 0; i < joy_map.size() && i < kJoyWords; ++i) {
-        const PackedKeys packed = joy_map[i];
-        if (packed == PackedKeys{})
-            continue;
-        for (const EvdevCode code : {packed.lo, packed.hi}) {
-            if (code.is_unset())
-                continue;
-            if (down.has(code)) {
-                mask |= (1u << i);
-                break;
+    JoyMask mask{};
+    JoyBit bit{};
+    for (const PackedKeys packed : joy_map.first(std::min(joy_map.size(), kJoyWords))) {
+        if (packed != PackedKeys{}) {
+            for (const EvdevCode code : {packed.lo, packed.hi}) {
+                if (code.is_unset())
+                    continue;
+                if (down.has(code)) {
+                    mask = mask.with(bit.mask());
+                    break;
+                }
             }
         }
+        bit = bit.next();
     }
-    return JoyMask{mask};
+    return mask;
 }
 
 Deadzone deadzone_class(QuirkId quirk) {
@@ -942,294 +700,29 @@ Deadzone deadzone_class(QuirkId quirk) {
     return kDeadzoneDefault;
 }
 
-bool deadzone_uid_matches(
-    std::string_view uid,
-    Vid vid,
-    Pid pid,
-    std::string_view id,
-    std::string_view sysfs,
-    std::string_view merge_id
-) {
+bool deadzone_uid_matches(std::string_view uid, const DeviceFacts& dev) {
     if (const auto v = hex_token(uid, kHexDigits32)) {
-        return VidPidKey::of(vid, pid) == VidPidKey::of(*v);
+
+        return VidPidKey::of(dev.id.vid, dev.id.pid) == VidPidKey{*v};
     }
     if (const auto vp = vid_pid_token(uid)) {
-        return vp->first ? vid.v == static_cast<std::uint16_t>(vp->second)
-                         : pid.v == static_cast<std::uint16_t>(vp->second);
+        return vp->first ? dev.id.vid.v == static_cast<std::uint16_t>(vp->second)
+                         : dev.id.pid.v == static_cast<std::uint16_t>(vp->second);
     }
 
-    return contains_sub(merge_id, uid, true)
-        || contains_sub(sysfs, uid, true)
-        || contains_sub(id, uid, true);
+    return infra::icontains(dev.id.merge_id, uid)
+        || infra::icontains(dev.sysfs, uid)
+        || infra::icontains(dev.id.id, uid);
 }
 
-Deadzone deadzone_for(
-    QuirkId quirk,
-    Vid vid,
-    Pid pid,
-    std::string_view id,
-    std::string_view sysfs,
-    std::string_view merge_id,
-    std::span<const DeadzoneRule> cfg
-) {
+Deadzone deadzone_for(const DeviceFacts& dev, std::span<const DeadzoneRule> cfg) {
     for (const DeadzoneRule& r : cfg) {
-        if (deadzone_uid_matches(r.uid.view(), vid, pid, id, sysfs, merge_id))
+        if (deadzone_uid_matches(r.uid.view(), dev))
             return r.deadzone;
     }
-    return deadzone_class(quirk);
+    return deadzone_class(dev.quirk);
 }
 
-}
-
-void DeviceFacts::inherit_identity_from(const DeviceFacts& src) {
-    id.vid = src.id.vid;
-    id.pid = src.id.pid;
-    id.version = src.id.version;
-    id.bustype = src.id.bustype;
-    id.source = src.id.source;
-    quirk = src.quirk;
-    id.name = src.id.name;
-    id.id = src.id.id;
-}
-
-std::optional<DeadzoneRule> parse_deadzone_rule(std::string_view line) {
-
-    const auto is_sep = [](char c) {
-        return c == ' ' || c == '\t' || c == ',';
-    };
-    std::size_t i = 0;
-    while (i < line.size() && !is_sep(line[i]))
-        ++i;
-    if (i == 0 || i > kDeadzoneUidChars)
-        return std::nullopt;
-    std::size_t j = i;
-    while (j < line.size() && is_sep(line[j]))
-        ++j;
-    if (j == i)
-        return std::nullopt;
-    const std::size_t digits = j;
-    std::uint32_t value = 0;
-    while (j < line.size() && line[j] >= '0' && line[j] <= '9') {
-        value = value < 0x1000u ? value * 10u + static_cast<std::uint32_t>(line[j] - '0') : value;
-        ++j;
-    }
-    if (j == digits || j != line.size())
-        return std::nullopt;
-    DeadzoneRule r{};
-    if (!r.uid.assign(line.substr(0, i)))
-        return std::nullopt;
-
-    r.deadzone = Deadzone::clamped(value);
-    return r;
-}
-
-std::vector<DeadzoneRule> parse_deadzone_rules(const ConfigSnapshot& cfg) {
-    std::vector<DeadzoneRule> out;
-    for (const auto& row : cfg.controller_deadzone) {
-        const std::string_view line{static_cast<const char*>(row)};
-        if (line.empty())
-            break;
-        if (auto r = parse_deadzone_rule(line))
-            out.push_back(*r);
-    }
-    return out;
-}
-
-namespace {
-
-constexpr std::size_t kMaxJoyButtons = 28;
-
-constexpr std::size_t kNameCap = 32;
-
-using NameBuf = std::array<char, kNameCap>;
-
-NameBuf substr_field(std::string_view s, std::size_t idx) noexcept {
-    NameBuf out{};
-    std::size_t field = 0;
-    std::size_t n = 0;
-    for (const char c : s) {
-        if (c == ',') {
-            if (field == idx)
-                break;
-            ++field;
-            continue;
-        }
-        if (field == idx && n + 1 < kNameCap)
-            out[n++] = c;
-    }
-    out[n] = '\0';
-    return out;
-}
-
-std::size_t buf_len(const NameBuf& b) noexcept {
-    std::size_t n = 0;
-    while (n + 1 < kNameCap && b[n] != '\0')
-        ++n;
-    return n;
-}
-
-std::string_view buf_view(const NameBuf& b) noexcept {
-    return std::string_view(b.data(), buf_len(b));
-}
-
-void trim_buf(NameBuf& b) noexcept {
-    std::size_t len = buf_len(b);
-    while (len > 0 && b[len - 1] == ' ')
-        b[--len] = '\0';
-    std::size_t lead = 0;
-    while (lead < len && b[lead] == ' ')
-        ++lead;
-    if (lead == 0)
-        return;
-    for (std::size_t i = 0; i + lead <= len; ++i)
-        b[i] = b[i + lead];
-}
-
-bool has_char(std::string_view s, char c) noexcept {
-    return s.find(c) != std::string_view::npos;
-}
-
-bool ieq(std::string_view a, std::string_view b) noexcept {
-    if (a.size() != b.size())
-        return false;
-    for (std::size_t i = 0; i < a.size(); ++i) {
-        const char ca = (a[i] >= 'A' && a[i] <= 'Z') ? static_cast<char>(a[i] + 32) : a[i];
-        const char cb = (b[i] >= 'A' && b[i] <= 'Z') ? static_cast<char>(b[i] + 32) : b[i];
-        if (ca != cb)
-            return false;
-    }
-    return true;
-}
-
-bool istarts(std::string_view s, std::string_view pre) noexcept {
-    return s.size() >= pre.size() && ieq(s.substr(0, pre.size()), pre);
-}
-
-int is_fire(std::string_view name) noexcept {
-    if (!istarts(name, "fire") && !istarts(name, "button"))
-        return 0;
-    if (ieq(name, "fire") || has_char(name, '1'))
-        return 1;
-    if (has_char(name, '2'))
-        return 2;
-    if (has_char(name, '3'))
-        return 3;
-    if (has_char(name, '4'))
-        return 4;
-    return 0;
-}
-
-std::int8_t sys_for_button_name(std::string_view n) noexcept {
-    constexpr std::int8_t kA = 4, kB = 5, kX = 6, kY = 7;
-    constexpr std::int8_t kL = 8, kR = 9, kSelect = 10, kStart = 11;
-    if (ieq(n, "A") || ieq(n, "Jump") || is_fire(n) == 1)
-        return kA;
-    if (ieq(n, "B") || is_fire(n) == 2)
-        return kB;
-    if (ieq(n, "X") || ieq(n, "C") || is_fire(n) == 3)
-        return kX;
-    if (ieq(n, "Y") || ieq(n, "D") || is_fire(n) == 4)
-        return kY;
-    if (ieq(n, "R") || ieq(n, "RT") || ieq(n, "Coin"))
-        return kR;
-    if (ieq(n, "L") || ieq(n, "LT"))
-        return kL;
-    if (ieq(n, "Select") || ieq(n, "Mode") || ieq(n, "Game Select") || ieq(n, "Start 2P"))
-        return kSelect;
-    if (ieq(n, "Start") || ieq(n, "Run") || ieq(n, "Pause") || ieq(n, "Start 1P"))
-        return kStart;
-    return JoyPlan::kNone;
-}
-
-}
-
-JoyPlan build_joy_plan(
-    std::string_view j_list,
-    std::string_view jn_list,
-    std::string_view jp_list,
-    bool gamepad_defaults
-) noexcept {
-    JoyPlan plan{};
-
-    std::array<NameBuf, kMaxJoyButtons> raw{};
-    std::array<NameBuf, kMaxJoyButtons> nnames{};
-    std::array<NameBuf, kMaxJoyButtons> pnames{};
-    std::size_t joy_count = 0;
-    if (!j_list.empty()) {
-        for (std::size_t n = 0; n < kMaxJoyButtons; ++n) {
-            raw[n] = substr_field(j_list, n);
-            if (raw[n][0] == '\0')
-                break;
-            nnames[n] = raw[n];
-            for (std::size_t i = 0; i < kNameCap; ++i) {
-                if (nnames[n][i] == '(') {
-                    nnames[n][i] = '\0';
-                    break;
-                }
-                if (nnames[n][i] == '\0')
-                    break;
-            }
-            trim_buf(nnames[n]);
-            if (nnames[n][0] == '\0')
-                break;
-            ++joy_count;
-        }
-    }
-
-    if (!jn_list.empty()) {
-        for (NameBuf& b : nnames)
-            b = NameBuf{};
-        for (std::size_t n = 0; n < joy_count; ++n) {
-            nnames[n] = substr_field(jn_list, n);
-            trim_buf(nnames[n]);
-        }
-    }
-
-    bool defaults = false;
-    if (!jp_list.empty()) {
-        defaults = gamepad_defaults;
-        for (std::size_t n = 0; n < joy_count; ++n) {
-            pnames[n] = substr_field(jp_list, n);
-            trim_buf(pnames[n]);
-        }
-    }
-
-    for (std::size_t i = 0, n = 0; i < joy_count; ++i) {
-        if (buf_view(raw[i]) == "-")
-            continue;
-
-        NameBuf btn = defaults ? pnames[n] : nnames[n];
-
-        for (std::size_t k = 0; k < kNameCap; ++k) {
-            if (btn[k] == '|') {
-                btn[k] = '\0';
-                break;
-            }
-            if (btn[k] == '\0')
-                break;
-        }
-
-        const std::int8_t sys = sys_for_button_name(buf_view(btn));
-        const std::size_t idx = i + 4;
-        if (sys >= JoyPlan::kFirstButtonWord
-            && sys <= JoyPlan::kLastButtonWord
-            && idx < JoyPlan::kWords) {
-            plan.src[idx] = sys;
-        }
-
-        const NameBuf& full = defaults ? pnames[n] : nnames[n];
-        const std::string_view fv = buf_view(full);
-        const std::size_t bar = fv.find('|');
-        if (plan.paddle_idx == JoyPlan::kNone
-            && bar != std::string_view::npos
-            && ieq(fv.substr(bar), "|P")) {
-            plan.paddle_idx = static_cast<std::int8_t>(idx);
-        }
-        ++n;
-    }
-
-    plan.present = (joy_count != 0);
-    return plan;
 }
 
 }

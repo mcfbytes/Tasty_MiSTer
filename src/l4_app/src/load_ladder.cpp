@@ -11,6 +11,7 @@
 #include "app/file_bytes.h"
 #include "cores/progress_ticker.h"
 #include "infra/message_sum.h"
+#include "infra/opt_ref.h"
 
 namespace mister::app {
 
@@ -20,8 +21,10 @@ Ex<LoadLadder> LoadLadder::start(
     std::string_view path
 ) {
     const cores::TransferRow& r = job.row;
-    const std::uint64_t placed = job.total * (r.stride == 0 ? 1u : r.stride);
-    const std::uint64_t extent = r.extent != 0 ? r.extent : placed;
+    const std::uint64_t placed = r.spread_bytes(proto::FileSize{job.total})
+                                     .length_of(proto::BlockCount{1});
+    const std::uint64_t extent = r.extent_bytes(proto::FileSize{job.total})
+                                     .length_of(proto::BlockCount{1});
 
     if (job.loader == nullptr
         || (job.file == nullptr && job.total != 0)
@@ -49,21 +52,30 @@ Ex<LoadLadder> LoadLadder::start(
 
 bool LoadLadder::wants_pass(
     const LinkTxChannel<SeatTag::Main>& inbox,
-    const FileTxLevelCell* level
+    const FileTxLevelCell& level
 ) const noexcept {
     TASTY_SEAT_BODY(LoadLadder);
-    if (pc_ == Pc::Over)
-        return false;
-    if (pc_ == Pc::AwaitOpen) {
-        if (level == nullptr)
+    switch (pc_) {
+        case Pc::Over:
             return false;
-        const auto s = level->sample();
-        return s && s.value.act == job_.act && !s.value.payload;
+        case Pc::AwaitOpen: {
+            const auto s = level.sample();
+            return s && s.value.act == job_.act && !s.value.payload;
+        }
+        case Pc::Chunk:
+        case Pc::Fill:
+        case Pc::Conclude:
+        case Pc::Finish:
+            return true;
+        case Pc::Open:
+        case Pc::Facts:
+        case Pc::Mount:
+        case Pc::Close:
+        case Pc::Cut:
+            return inbox.ring().size() < proto::kLinkTxCapacity;
     }
-    if (pc_ == Pc::Chunk || pc_ == Pc::Fill || pc_ == Pc::Conclude || pc_ == Pc::Finish) {
-        return true;
-    }
-    return inbox.ring().size() < proto::kLinkTxCapacity;
+
+    return false;
 }
 
 LoadLadder::Pass LoadLadder::step(Host& h) {
@@ -109,7 +121,7 @@ LoadLadder::Pass LoadLadder::open_(Host& h) {
         .wire_index = job_.wire_index.fio_byte(),
         .phase = proto::LinkOp::FileTxPhase::WindowOpen,
         .file = *id,
-        .total = bracket_length_(),
+        .total = bracket_length_().detail(),
         .act = job_.act
     };
     if (!h.inbox.push(op))
@@ -120,9 +132,7 @@ LoadLadder::Pass LoadLadder::open_(Host& h) {
 }
 
 LoadLadder::Pass LoadLadder::await_open_(Host& h) {
-    if (h.level == nullptr)
-        return Pass::Waiting;
-    const auto s = h.level->sample();
+    const auto s = h.level.sample();
     if (!s || s.value.act != job_.act || s.value.payload)
         return Pass::Waiting;
     if (!s.value.open) {
@@ -157,19 +167,19 @@ LoadLadder::Pass LoadLadder::chunk_(Host& h) {
         if (!job_.loader->place(row, piece, off_, window_))
             return cut_(h);
     } else {
-        const auto placed = row.stride == 1
+        const Ex<std::size_t> placed = row.stride == 1
             ? window_.write(static_cast<std::size_t>(off_), std::as_bytes(piece))
             : window_.write_lanes(
-                  static_cast<std::size_t>(off_ * row.stride + 2u * row.lane),
+                  row.spread_at(proto::FileSize{off_}).length_of(proto::BlockCount{1})
+                      + 2u * row.lane,
                   std::as_bytes(piece),
                   row.stride
               );
         if (!placed)
             return cut_(h);
         if (job_.mirror
-            && !job_.mirror->write(static_cast<std::size_t>(off_), std::as_bytes(piece))) {
+            && !job_.mirror->write(static_cast<std::size_t>(off_), std::as_bytes(piece)))
             return cut_(h);
-        }
     }
     off_ += n;
     progress_(h, false);
@@ -177,14 +187,16 @@ LoadLadder::Pass LoadLadder::chunk_(Host& h) {
         if (row.placed) {
             pc_ = Pc::Conclude;
         } else {
-            pc_ = extent_ > off_ * row.stride ? Pc::Fill : Pc::Finish;
+            const bool more = proto::FileSize{extent_} > row.spread_at(proto::FileSize{off_});
+            pc_ = more ? Pc::Fill : Pc::Finish;
         }
     }
     return Pass::Stepped;
 }
 
 LoadLadder::Pass LoadLadder::fill_(Host& h) {
-    const std::uint64_t from = job_.total * job_.row.stride;
+    const std::uint64_t from = job_.row.spread_bytes(proto::FileSize{job_.total})
+                                   .length_of(proto::BlockCount{1});
     if (fill_off_ < from)
         fill_off_ = from;
     if (fill_off_ >= extent_) {
@@ -216,7 +228,7 @@ LoadLadder::Pass LoadLadder::conclude_(Host& h) {
 }
 
 LoadLadder::Pass LoadLadder::finish_() {
-    if (!job_.loader->finish(&window_)) {
+    if (!job_.loader->finish(infra::OptRef<cores::ICoreWindow>{window_})) {
         pc_ = Pc::Cut;
         return Pass::Stepped;
     }
@@ -238,6 +250,7 @@ LoadLadder::Pass LoadLadder::facts_(Host& h) {
             return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
         if (!h.inbox.push(proto::LinkOp::LoadFacts{.facts = *id}))
             return Pass::Waiting;
+        facts_pushed_ = true;
     }
 
     const bool mounts = !job_.save.empty() && job_.row.bracket != cores::RowBracket::None;
@@ -248,7 +261,7 @@ LoadLadder::Pass LoadLadder::facts_(Host& h) {
 LoadLadder::Pass LoadLadder::mount_(Host& h) {
     if (h.inbox.ring().size() >= proto::kLinkTxCapacity)
         return Pass::Waiting;
-    auto id = h.inbox.intern_file_path(job_.save.view(), proto::FileSize{job_.save_bytes});
+    auto id = h.inbox.intern_file_path(job_.save.view(), job_.save_bytes);
     if (!id) {
         if (id.error().code == Errc::would_block)
             return Pass::Waiting;
@@ -274,11 +287,14 @@ LoadLadder::Pass LoadLadder::close_(Host& h) {
     auto id = h.inbox.intern_file_path(path_.view(), proto::FileSize{job_.total}, key_.value());
     if (!id)
         return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
+
+    if (facts_pushed_)
+        (void)h.inbox.stamp_remount(*id);
     const proto::LinkOp::FileTx op{
         .wire_index = job_.wire_index.fio_byte(),
         .phase = proto::LinkOp::FileTxPhase::WindowClose,
         .file = *id,
-        .total = bracket_length_()
+        .total = bracket_length_().detail()
     };
     if (!h.inbox.push(op))
         return Pass::Waiting;
@@ -295,7 +311,7 @@ LoadLadder::Pass LoadLadder::notify_(Host& h) {
 
         std::vector<std::uint8_t> words(n.words.size() * sizeof(std::uint16_t));
         infra::store_le_run(std::span<const std::uint16_t>(n.words), std::span(words));
-        auto id = h.inbox.intern_file(std::move(words), {}, path_.view(), hal::FabricAddr{});
+        auto id = h.inbox.intern_file(FileIntern{.bytes = std::move(words), .path = path_.view()});
         if (!id)
             return id.error().code == Errc::would_block ? Pass::Waiting : cut_(h);
         const proto::LinkOp::StagePayload op{
@@ -330,8 +346,8 @@ LoadLadder::Pass LoadLadder::cut_(Host& h) {
     return Pass::Failed;
 }
 
-std::uint32_t LoadLadder::bracket_length_() const noexcept {
-    return job_.row.length != 0 ? job_.row.length : static_cast<std::uint32_t>(extent_);
+proto::FileSize LoadLadder::bracket_length_() const noexcept {
+    return job_.row.bracket_length(proto::FileSize{extent_});
 }
 
 void LoadLadder::progress_(Host& h, bool edge) noexcept {
@@ -347,17 +363,9 @@ void LoadLadder::progress_(Host& h, bool edge) noexcept {
     );
 }
 
-bool LoadLadder::wants_pass(
-    const LinkTxChannel<SeatTag::Main>& inbox,
-    const FileTxLevelCell& level
-) const noexcept {
-    TASTY_SEAT_BODY(LoadLadder);
-    return wants_pass(inbox, &level);
-}
-
 Rung::Pass LoadLadder::step(const RungEdges& edges, cores::ILadderHost&) {
     TASTY_SEAT_BODY(LoadLadder);
-    Host h{edges.inbox, &edges.level, edges.events};
+    Host h{edges.inbox, edges.level, edges.events};
     switch (step(h)) {
         case Pass::Stepped:
             return Rung::Pass::Moved;

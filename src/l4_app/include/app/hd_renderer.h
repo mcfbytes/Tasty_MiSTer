@@ -11,6 +11,7 @@
 #include "app/backdrop_sampler.h"
 #include "app/backdrop_scaler.h"
 #include "app/canvas_gen.h"
+#include "app/hd_badge_view.h"
 #include "app/hd_dirty_ledger.h"
 #include "app/flip_buffer.h"
 #include "app/hd_layout.h"
@@ -90,6 +91,17 @@ private:
         CanvasGen gen{};
     };
 
+    struct AskGen {
+        std::uint32_t v = 0;
+        friend constexpr bool operator==(AskGen, AskGen) = default;
+    };
+
+    struct PanelDrawn {
+        AskGen gen{};
+        HdBadgeView view{};
+        CanvasGen fill{};
+    };
+
     static constexpr std::array<HdDirtyLedger::Region, 2> kCards{
         HdDirtyLedger::Region::Panel,
         HdDirtyLedger::Region::Band
@@ -98,6 +110,9 @@ private:
     void publish_() noexcept;
     [[nodiscard]] std::uint64_t now_ns_() const noexcept;
     [[nodiscard]] bool ask_moved_() const noexcept;
+    [[nodiscard]] bool panel_asked_() const noexcept;
+    [[nodiscard]] bool panel_owed_() const noexcept;
+    [[nodiscard]] bool canvas_fresh_() const noexcept;
     void reap_(bool hold, std::uint64_t now) noexcept;
     [[nodiscard]] bool owned_(FlipBuffer buffer, std::uint64_t now) const noexcept;
     [[nodiscard]] bool stale_(FlipBuffer buffer) const noexcept;
@@ -113,14 +128,15 @@ private:
     [[nodiscard]] bool retheme_(HdLook look) noexcept;
     void draw_(std::uint64_t now) noexcept;
     void start_epoch_(const HdLayout& layout) noexcept;
-    void panel_step_(const HdLayout& layout, bool asked) noexcept;
+    void panel_step_(const HdLayout& layout, PxPlane panel, bool asked) noexcept;
     void place_(std::uint64_t now, bool wrote = false) noexcept;
-    [[nodiscard]] std::int64_t in_place_px_() const noexcept;
+    [[nodiscard]] PixelCount in_place_px_() const noexcept;
     [[nodiscard]] bool copy_stale_(std::uint64_t now) noexcept;
     bool flip_(std::uint64_t now) noexcept;
     [[nodiscard]] bool slice_(std::uint64_t now) noexcept;
     [[nodiscard]] bool read_(std::uint64_t now) noexcept;
     void visible_(std::uint64_t now, bool by_flip) noexcept;
+    [[nodiscard]] PxPlane frame_plane_() noexcept;
     [[nodiscard]] BackdropJob::Canvas canvas_() noexcept;
     void copy_rect_(FlipBuffer buffer, HdRect rect) noexcept;
 
@@ -132,15 +148,13 @@ private:
     bool raster_open_ = false;
     bool scaler_uio_ = false;
     bool epoch_valid_ = false;
-    bool fresh_ask_ = false;
-    bool panel_owed_ = false;
-    bool bd_reset_ = false;
     bool pending_ = false;
     bool deadline_ = false;
-    bool canvas_fresh_ = false;
+
+    std::optional<PanelDrawn> drawn_{};
     std::uint64_t ticks_ = 0;
-    std::uint32_t epoch_seen_ = 0;
-    std::uint32_t seq_ = 0;
+    HdEpoch epoch_seen_{};
+    FlipSeq seq_{};
     HdOsdStatus st_{};
     HdLook look_{};
     HdTheme theme_ = hd_theme_tokens(HdLook{});

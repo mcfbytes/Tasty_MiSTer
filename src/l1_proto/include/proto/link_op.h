@@ -10,16 +10,19 @@
 #include "infra/message_sum.h"
 #include "infra/seat.h"
 #include "infra/spsc_ring.h"
+#include "proto/types.h"
 #include "proto/conf_switches.h"
+#include "proto/mailbox_act.h"
 #include "proto/mailbox_poll.h"
+#include "proto/osd_target.h"
 #include "proto/ps2_frame.h"
 #include "proto/reset_edge.h"
 #include "proto/rotation_dir.h"
 #include "proto/rtc_image.h"
-#include "proto/save_ask.h"
+#include "proto/save_kind.h"
 #include "proto/types.h"
-#include "proto/osd_target.h"
-#include "proto/volume_cmd.h"
+#include "proto/uio_opcodes.h"
+#include "proto/types.h"
 
 namespace mister::proto {
 
@@ -41,7 +44,6 @@ struct LinkOp {
         BindUart,
         BindSlotConfig,
         BindMount,
-        BindSlotPreviews,
         RebootNow,
         ApplyCore,
         AbortSwitch,
@@ -66,25 +68,28 @@ struct LinkOp {
         ApplyCheats,
         SetDip,
         SetCoreOption,
-        SetVolume,
+        SetMute,
+        SetAttenuation,
+        NudgeVolume,
+        ToggleMute,
         AnnounceMount,
         SetWideIndex,
         CoreReset,
         LoadFacts,
         MailboxWrite,
+        AttachSave,
+        DetachSave,
         kCount,
     };
     static constexpr std::size_t kStore = 12;
 
     enum class OsdShow : std::uint8_t { Off = 0, Menu = 1, Overlay = 2 };
-    enum class SlotBind : std::uint8_t {
-        Mount = 0,
-        Unmount = 1,
-        MountCd = 2,
-        Attach = 3,
-        Detach = 4
-    };
+    enum class SlotBind : std::uint8_t { Mount = 0, Unmount = 1, MountCd = 2 };
     enum class DecoderTable : std::uint8_t { Census = 0, PreSession = 1 };
+
+    [[nodiscard]] static constexpr std::uint32_t detail(SlotBind kind) noexcept {
+        return static_cast<std::uint32_t>(kind);
+    }
 
     struct HoldReset {
         static constexpr Kind kKind = Kind::HoldReset;
@@ -200,8 +205,6 @@ struct LinkOp {
 
     struct BindSlotConfig {
         static constexpr Kind kKind = Kind::BindSlotConfig;
-        std::uint8_t slot = 0;
-        std::uint8_t pad_{};
         FileId file{};
     };
 
@@ -212,16 +215,11 @@ struct LinkOp {
         FileId image{};
     };
 
-    struct BindSlotPreviews {
-        static constexpr Kind kKind = Kind::BindSlotPreviews;
-        std::uint8_t count = 0;
-    };
-
     struct RebootNow {
         static constexpr Kind kKind = Kind::RebootNow;
         bool cold = false;
         bool quiesce = false;
-        std::uint16_t seq = 0;
+        RebootSeq seq{};
     };
 
     struct ApplyCore {
@@ -384,10 +382,23 @@ struct LinkOp {
         FieldValue choice{};
     };
 
-    struct SetVolume {
-        static constexpr Kind kKind = Kind::SetVolume;
-        VolumeCmd cmd = VolumeCmd::Relative;
-        std::int8_t arg = 0;
+    struct SetMute {
+        static constexpr Kind kKind = Kind::SetMute;
+        bool on = false;
+    };
+
+    struct SetAttenuation {
+        static constexpr Kind kKind = Kind::SetAttenuation;
+        Attenuation attenuation{};
+    };
+
+    struct NudgeVolume {
+        static constexpr Kind kKind = Kind::NudgeVolume;
+        VolumeStep step = VolumeStep::Louder;
+    };
+
+    struct ToggleMute {
+        static constexpr Kind kKind = Kind::ToggleMute;
     };
 
     struct AnnounceMount {
@@ -411,12 +422,28 @@ struct LinkOp {
         TxSlabId facts{};
     };
 
+    struct AttachSave {
+        static constexpr Kind kKind = Kind::AttachSave;
+        SlotIndex slot{};
+        bool manual = false;
+        FileId path{};
+        ActKey act{};
+    };
+
+    struct DetachSave {
+        static constexpr Kind kKind = Kind::DetachSave;
+        SlotIndex slot{};
+        std::uint8_t pad_[3]{};
+        ActKey act{};
+    };
+
     struct MailboxWrite {
         static constexpr Kind kKind = Kind::MailboxWrite;
-        std::uint8_t opcode = 0;
+        UioOp opcode{};
         MailboxPoll poll = MailboxPoll::Keep;
-        std::uint16_t gen = 0;
-        std::array<std::uint16_t, 3> words{};
+        std::byte pad_{};
+        CompanionBindGen gen{};
+        MailboxWords words{};
     };
 
     using Alternatives = std::tuple<
@@ -435,7 +462,6 @@ struct LinkOp {
         BindUart,
         BindSlotConfig,
         BindMount,
-        BindSlotPreviews,
         RebootNow,
         ApplyCore,
         AbortSwitch,
@@ -460,12 +486,17 @@ struct LinkOp {
         ApplyCheats,
         SetDip,
         SetCoreOption,
-        SetVolume,
+        SetMute,
+        SetAttenuation,
+        NudgeVolume,
+        ToggleMute,
         AnnounceMount,
         SetWideIndex,
         CoreReset,
         LoadFacts,
-        MailboxWrite>;
+        MailboxWrite,
+        AttachSave,
+        DetachSave>;
     Kind kind = Kind::HoldReset;
     std::uint8_t pad_[3]{};
     alignas(std::uint32_t) std::array<std::byte, kStore> store{};
@@ -473,7 +504,7 @@ struct LinkOp {
 
 static_assert(infra::MessageSum<LinkOp> && infra::alternatives_are_total<LinkOp>());
 static_assert(sizeof(LinkOp) == 16 && alignof(LinkOp) == alignof(std::uint32_t));
-static_assert(infra::ordinal(LinkOp::Kind::kCount) == 46);
+static_assert(infra::ordinal(LinkOp::Kind::kCount) == 50);
 
 [[nodiscard]] constexpr bool sets_region(const LinkOp::StagePayload& a) noexcept {
     return a.region != RegionCode::kNone;

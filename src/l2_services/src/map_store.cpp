@@ -70,6 +70,17 @@ Ex<ButtonMap> MapStore::load(
     return out;
 }
 
+Ex<WireWords> MapStore::load_joy_words(
+    std::string_view core,
+    const DeviceIdentity& id,
+    bool mod
+) const {
+    auto map = load(core, id, MapKind::Joystick, mod);
+    if (!map)
+        return std::unexpected(map.error());
+    return map->words();
+}
+
 Ex<void> MapStore::save(
     std::string_view core,
     const DeviceIdentity& id,

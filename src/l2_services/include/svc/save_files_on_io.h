@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <cstdint>
+#include <optional>
 
 #include "infra/opt_ref.h"
 #include "proto/types.h"
 #include "svc/storage_backend.h"
+#include "svc/types.h"
 
 namespace mister::svc {
 
@@ -13,10 +14,10 @@ class ISaveFilesOnIo {
 public:
     struct Save {
         infra::OptRef<IStorageBackend> file{};
-        proto::FileSize size{};
-        bool exists = false;
+
+        std::optional<proto::FileSize> extent{};
         bool growable = false;
-        std::uint32_t gen = 0;
+        Generation gen{};
     };
 
     [[nodiscard]] virtual Save save_on_io(proto::SlotIndex slot) const noexcept = 0;

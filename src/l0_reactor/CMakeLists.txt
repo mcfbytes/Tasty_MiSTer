@@ -13,6 +13,7 @@ target_link_libraries(mister_reactor
   PRIVATE tasty_options)
 
 tasty_add_header_checks(tasty_reactor_header_checks LIB mister_reactor HEADERS
+  reactor/cause_decode.h
   reactor/cause_set.h
   reactor/core_notifiers.h
   reactor/core_state.h

@@ -4,9 +4,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 
 #include "cores/st_sysctrl.h"
 #include "cores/types.h"
+#include "infra/endian.h"
+#include "proto/status_word.h"
 #include "proto/types.h"
 #include "cores/st_slot.h"
 
@@ -91,6 +94,28 @@ struct CtrlWord {
 
     inline static constexpr std::size_t kMemConfigCount = kMemConfigField + 1u;
     inline static constexpr std::size_t kChoiceCount = kChoiceField + 1u;
+
+    constexpr void store_le(std::span<std::byte, 4> dst) const noexcept {
+        infra::store_le<std::uint32_t>(dst, v);
+    }
+
+    [[nodiscard]] constexpr std::uint32_t raw() const noexcept { return v; }
+
+    constexpr void store_raw(std::span<std::uint32_t, 1> dst) const noexcept { dst[0] = raw(); }
+
+    [[nodiscard]] constexpr proto::StatusWord status_word() const noexcept {
+        proto::StatusWord w{};
+        w.words[0] = static_cast<std::uint16_t>(v);
+        w.words[1] = static_cast<std::uint16_t>(v >> proto::StatusWord::kBitsPerWord);
+        return w;
+    }
+
+    [[nodiscard]] static constexpr CtrlWord of(const proto::StatusWord& w) noexcept {
+        return CtrlWord{
+            static_cast<std::uint32_t>(w.words[0])
+            | (static_cast<std::uint32_t>(w.words[1]) << proto::StatusWord::kBitsPerWord)
+        };
+    }
 
     [[nodiscard]] constexpr bool has(Bit b) const noexcept { return (v & b.v) != 0; }
 

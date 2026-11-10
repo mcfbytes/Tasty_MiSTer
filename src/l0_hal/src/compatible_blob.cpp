@@ -15,9 +15,11 @@ Ex<void> CompatibleBlob::assign(std::span<const char> raw) noexcept {
 }
 
 bool CompatibleBlob::contains(std::string_view s) const noexcept {
+    const std::span<const char> blob = raw();
     std::size_t i = 0;
-    while (i < len_) {
-        const std::string_view entry{data_.data() + i};
+    while (i < blob.size()) {
+        const std::string_view rest{blob.data() + i, blob.size() - i};
+        const std::string_view entry = rest.substr(0, rest.find('\0'));
         if (entry == s)
             return true;
         i += entry.size() + 1;

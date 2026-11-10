@@ -8,6 +8,7 @@
 #include "infra/seat.h"
 #include "proto/types.h"
 #include "svc/chd_geometry.h"
+#include "svc/disc_identity.h"
 #include "svc/toc.h"
 #include "svc/types.h"
 
@@ -27,6 +28,8 @@ struct DiscGeometry {
 
     ChdGeometry chd{};
     bool mounted = false;
+
+    DiscIdentity identity{};
 
     [[nodiscard]] std::optional<TrackIndex> track_for_lba(Lba lba) const noexcept {
         return svc::track_for_lba(toc, lba);

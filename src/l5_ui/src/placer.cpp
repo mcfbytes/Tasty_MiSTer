@@ -8,7 +8,7 @@
 #include "app/session_identity.h"
 #include "ui/option_host.h"
 #include "ui/options_model.h"
-#include "ui/options_page.h"
+#include "ui/option_item.h"
 
 namespace mister::ui {
 namespace {
@@ -31,7 +31,7 @@ constexpr std::array<KindPlace, kKindRowCount> kKindPlaces{{
     {Kind::Dip, Placement::CoreSettings, false, false},
     {Kind::Toggle, Placement::CoreSettings, false, true},
     {Kind::ToggleClose, Placement::CoreSettings, false, true},
-    {Kind::Option, Placement::CoreSettings, false, false},
+    {Kind::Cycle, Placement::CoreSettings, false, false},
     {Kind::Separator, Placement::CoreSettings, false, false},
     {Kind::Addon, Placement::Hidden, false, false},
     {Kind::DefMra, Placement::Hidden, false, false},
@@ -58,6 +58,8 @@ class PulseProbe final : public IOptionHost {
 public:
     void refuse() override {}
 
+    proto::FieldValue field(proto::BitField) const override { return {}; }
+
     void write_status(proto::BitField, proto::FieldValue) override {}
 
     void toggle(proto::BitField bits, bool ex) override {
@@ -67,6 +69,8 @@ public:
     }
 
     Transition open_browser(const OptionItem&) override { return Transition{}; }
+
+    PageId subpage_page() const override { return PageId::None; }
 
     bool pulsed = false;
     proto::StatusBit bit{};
@@ -81,12 +85,11 @@ Placer::Placer(
     const CoreVerbs& verbs,
     PlaceFacts facts
 )
-    : walk_(walk),
-      game_(walk, slots) {
+    : game_(walk, slots) {
     TASTY_SEAT_BODY(Placer);
-    placed_.reserve(walk_.items().size());
+    placed_.reserve(walk.items().size());
     bool reset_taken = false;
-    for (const std::unique_ptr<OptionItem>& it : walk_.items()) {
+    for (const std::unique_ptr<OptionItem>& it : walk.items()) {
         Placement p = classify_(*it, verbs, facts);
 
         if (p == Placement::ResetGame) {
@@ -94,7 +97,7 @@ Placer::Placer(
                 p = Placement::CoreSettings;
             reset_taken = true;
         }
-        placed_.push_back(p);
+        placed_.push_back(Placed{.item = it.get(), .placement = p});
         if (p == Placement::Slot && it->selectable_index && !it->disabled)
             slots_.push_back(it.get());
     }
@@ -102,10 +105,9 @@ Placer::Placer(
 
 Placement Placer::of(const OptionItem& item) const {
     TASTY_SEAT_BODY(Placer);
-    const auto items = walk_.items();
-    for (std::size_t i = 0; i < items.size() && i < placed_.size(); ++i) {
-        if (items[i].get() == &item)
-            return placed_[i];
+    for (const Placed& p : placed_) {
+        if (p.item == &item)
+            return p.placement;
     }
     return Placement::Hidden;
 }
@@ -114,8 +116,8 @@ bool Placer::resets_the_game_(const OptionItem& it) const {
     if (it.page != proto::kRootSubmenu || !it.screen_row || !it.selectable_index || it.disabled)
         return false;
     PulseProbe probe;
-    (void)it.activate(OptionItem::Press{.select = true, .at_root = true}, probe);
-    return probe.pulsed && !probe.ext && probe.bit == proto::StatusBit{0};
+    (void)it.select(probe);
+    return probe.pulsed && !probe.ext && probe.bit == proto::kResetBit;
 }
 
 Placement Placer::classify_(const OptionItem& it, const CoreVerbs& verbs, PlaceFacts facts) const {

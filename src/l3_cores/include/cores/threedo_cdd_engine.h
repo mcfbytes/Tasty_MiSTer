@@ -25,7 +25,11 @@ class ThreeDoCddEngine final : public CdEngine {
 public:
     static constexpr std::size_t kDiscInfoBytes = 2048;
 
-    ThreeDoCddEngine(const CdDialectFacts& facts, const os::IClock& c)
+    ThreeDoCddEngine(
+        const CdDialectFacts& facts,
+        const CdProfile::ThreeDoFacts&,
+        const os::IClock& c
+    )
         : CdEngine(facts.profile.ticks, c, 255),
           facts_(facts) {}
 
@@ -37,6 +41,16 @@ public:
     [[nodiscard]] bool disc_loaded() const noexcept { return loaded_; }
 
 private:
+    enum class Op : std::uint8_t { Nop = 0x00, Read = 0x10, Next = 0x20, Refused = 0xFF };
+
+    struct CddCommand {
+        static constexpr std::size_t kWords = 4;
+        Op op = Op::Refused;
+        HeadLba target{};
+        SectorCount blocks{};
+        [[nodiscard]] static CddCommand of(std::span<const std::uint16_t, kWords> words) noexcept;
+    };
+
     enum class State : std::uint8_t { Idle, Open, Read, Pause, Stop };
 
     [[nodiscard]] Ex<void> do_accept(
@@ -45,32 +59,29 @@ private:
     ) override;
     [[nodiscard]] Ex<void> do_tick(CdDialectPorts& p) override;
     [[nodiscard]] Ex<void> do_push_sector(CdDialectPorts&) override;
-    [[nodiscard]] Ex<void> do_notify_disc(bool loaded, const svc::DiscGeometry& geom) override;
+    void do_notify_disc(bool loaded, const svc::DiscGeometry& geom) noexcept override;
     void do_reset_machine() noexcept override;
     bool do_streaming(const svc::DiscGeometry& geom) const noexcept override;
     DriveView do_drive_view(const svc::DiscGeometry& geom) const noexcept override;
 
-    std::size_t do_command_word_count() const noexcept override { return 4; }
+    [[nodiscard]] CdDriveState drive_state_() const noexcept;
 
-    std::optional<std::uint16_t> do_command_selector() const noexcept override {
+    std::size_t do_command_word_count() const noexcept override { return CddCommand::kWords; }
+
+    std::optional<cdwire::Selector> do_command_selector() const noexcept override {
         return std::nullopt;
     }
 
     void do_after_command_round() noexcept override {}
 
-    std::size_t do_status_words(
-        std::uint64_t frame,
-        std::span<std::uint16_t, kMaxStatusWords> out
-    ) const noexcept override;
-
     [[nodiscard]] CdEngineStats do_stats() const noexcept override { return stats_; }
 
-    [[nodiscard]] Ex<std::size_t> do_disc_descriptor(
-        std::span<std::byte> out,
+    [[nodiscard]] Ex<std::span<const std::byte>> do_disc_descriptor(
+        std::span<std::byte, kMaxDescriptorBytes> out,
         const svc::DiscGeometry& geom
     ) override;
 
-    void command_exec_(const svc::DiscGeometry& geom);
+    void command_exec_(const CddCommand& command, const svc::DiscGeometry& geom);
     [[nodiscard]] Ex<void> update_(CdDialectPorts& p);
     void hint_at_(HeadLba lba, const svc::DiscGeometry& geom) noexcept;
     void read_data_(const svc::DiscGeometry& geom);
@@ -83,8 +94,7 @@ private:
     CdDialectFacts facts_;
     CdEngineStats stats_{};
 
-    std::uint8_t sec_buf_[svc::kCdDataSize] = {};
-    std::uint8_t comm_[8] = {};
+    std::uint8_t sec_buf_[svc::kRawFrameBytes] = {};
     State state_ = State::Open;
 
     HeadLba lba_{};

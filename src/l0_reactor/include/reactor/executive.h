@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -17,12 +16,14 @@
 #include "infra/opt_ref.h"
 #include "infra/rt_latency.h"
 #include "infra/rt_stats.h"
+#include "infra/telemetry.h"
 #include "infra/unique_fd.h"
 #include "infra/wake_flag.h"
 #include "reactor/core_state.h"
 #include "reactor/notifier.h"
 #include "reactor/notifier_slot.h"
 #include "reactor/round_timer.h"
+#include "reactor/service_slot.h"
 #include "reactor/tick.h"
 #include "reactor/link_decoder_decl.h"
 #include "infra/seat.h"
@@ -101,9 +102,7 @@ public:
 
     void service_on_caller(std::int64_t now_ns) noexcept;
 
-    [[nodiscard]] bool run_entered() const noexcept {
-        return run_entered_.load(std::memory_order_acquire);
-    }
+    [[nodiscard]] bool run_entered() const noexcept { return entered_.generation() != 0u; }
 
     [[nodiscard]] std::uint32_t caller_pass_refusals() const noexcept {
         return caller_pass_refusals_;
@@ -121,12 +120,14 @@ public:
 
     std::uint32_t doorbell_retirements() const noexcept { return retirements_total_; }
 
-    std::uint32_t row_fallbacks(std::size_t slot) const noexcept {
-        return slot < service_count_ ? row_fallbacks_[slot] : 0u;
+    std::uint32_t row_fallbacks(ServiceSlot row) const noexcept {
+        const auto state = rows_.find(row);
+        return state ? state->fallbacks : 0u;
     }
 
-    std::uint32_t row_retirements(std::size_t slot) const noexcept {
-        return slot < service_count_ ? row_retirements_[slot] : 0u;
+    std::uint32_t row_retirements(ServiceSlot row) const noexcept {
+        const auto state = rows_.find(row);
+        return state ? state->retirements : 0u;
     }
 
     static constexpr std::uint8_t kClaimStreakMax = 4;
@@ -140,7 +141,7 @@ public:
 
 private:
     Executive(xthread::RtStats& stats, const Wiring& wiring)
-        : stats_(&stats),
+        : stats_(stats),
           log_lane_(wiring.log_lane),
           round_timer_(wiring.round_timer) {
         for (auto& t : last_raise_)
@@ -148,15 +149,21 @@ private:
     }
 
     static constexpr std::uint64_t kNeverRaised = ~std::uint64_t{0};
+
+    [[nodiscard]] ServiceSlot live_end() const noexcept {
+        const std::optional<ServiceSlot> end = ServiceSlot::of(service_count_);
+        return end.value_or(ServiceSlot{});
+    }
+
     void dispatch_cause(Cause c, NotifierSlot line, std::int64_t wake_ns);
     bool notifier_carries(const LinkDecoderDecl& s) const noexcept;
     void service_round(bool swept, std::int64_t wake_ns);
-    void run_service(std::size_t slot, std::int64_t wake_ns, RoundSegment seg);
+    void run_service(ServiceSlot row, std::int64_t wake_ns, RoundSegment seg);
     void recompute_delivered() noexcept;
 
     void recompute_raise(Cause c) noexcept;
 
-    xthread::RtStats* stats_;
+    xthread::RtStats& stats_;
     xthread::RtLatency latency_{};
     UniqueFd epfd_;
     UniqueFd tick_fd_;
@@ -206,17 +213,22 @@ private:
         RaiseStamp stamp_{};
     };
 
+    struct RowState {
+        TASTY_SEAT_RESIDENT(RT);
+        std::uint64_t next_due = 0;
+        bool carried = false;
+        std::uint32_t fallbacks = 0;
+        std::uint32_t retirements = 0;
+        std::uint8_t claim_streak = 0;
+    };
+
     std::size_t notifier_count_ = 0;
     CauseSet delivered_;
 
     RaiseStamp last_raise_[static_cast<std::size_t>(Cause::kCount)] = {};
-    LinkDecoderDecl services_[kMaxServices] = {};
-    std::uint64_t next_due_[kMaxServices] = {};
 
-    bool row_carried_[kMaxServices] = {};
-    std::uint32_t row_fallbacks_[kMaxServices] = {};
-    std::uint32_t row_retirements_[kMaxServices] = {};
-    std::uint8_t claim_streak_[kMaxServices] = {};
+    infra::IndexedArray<LinkDecoderDecl, kMaxServices, ServiceSlot> services_{};
+    infra::IndexedArray<RowState, kMaxServices, ServiceSlot> rows_{};
     std::uint32_t claim_yields_ = 0;
     std::uint32_t fallbacks_total_ = 0;
     std::uint32_t retirements_total_ = 0;
@@ -239,7 +251,8 @@ private:
     epoll_event evs_[kMaxEvents] = {};
     int n_ready_ = 0;
     Ex<void> fault_{};
-    std::atomic<bool> run_entered_{false};
+
+    xthread::Telemetry<bool> entered_{};
     std::uint32_t caller_pass_refusals_ = 0;
 
     xthread::WakeFlag::Cursor stop_seen_;

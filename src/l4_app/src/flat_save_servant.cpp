@@ -33,9 +33,7 @@ proto::SaveAct FlatSaveServant::start(
     at_ = 0;
     asked_ = 0;
 
-    piece_ = static_cast<std::uint16_t>(
-        word.is_wide() ? proto::kSavePieceBytes : proto::kSavePieceBytes / 2u
-    );
+    piece_ = static_cast<std::uint16_t>(word.scale(proto::kSavePieceWords));
     phase_ = Phase::Opening;
     return proto::SaveAct{.kind = proto::SaveAct::Kind::Open, .index = index_};
 }

@@ -16,6 +16,8 @@ struct DoorbellStats {
     std::uint32_t fallbacks = 0;
     std::uint32_t retirements = 0;
     std::uint32_t release_failures = 0;
+
+    friend constexpr bool operator==(const DoorbellStats&, const DoorbellStats&) = default;
 };
 
 static_assert(std::is_trivially_copyable_v<DoorbellStats>);

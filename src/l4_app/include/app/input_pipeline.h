@@ -10,7 +10,9 @@
 #include "app/input_sample.h"
 #include "app/input_wire.h"
 #include "os/clock.h"
+#include "svc/input_service_counts.h"
 #include "svc/input_service.h"
+#include "svc/types.h"
 #include "infra/seat.h"
 
 namespace mister::app {
@@ -24,6 +26,7 @@ public:
         InputWire& wire,
         InputBuild& build,
         InputEmit& emit,
+        svc::InputService service,
         os::IClock& clock,
         InputDecode::Wiring decode_wiring
     ) noexcept;
@@ -56,8 +59,6 @@ public:
     const InputSample& sample() const noexcept { return sample_; }
 
 private:
-    [[nodiscard]] static svc::InputService open_service_(InputBuild& build) noexcept;
-
     InputWire& wire_;
     InputBuild& build_;
     InputEmit& emit_;
@@ -81,24 +82,15 @@ struct InputStats {
 
     std::uint32_t devices = 0;
     std::uint32_t registered = 0;
-    std::uint32_t mapped = 0;
-    std::uint32_t slotted = 0;
     InputGateBits gates{};
-    std::uint32_t mask_changes = 0;
-    std::uint32_t joy_seen = 0;
-    std::uint32_t joy_players = 0;
+    svc::JoyMask joy_seen{};
+    svc::PlayerMask joy_players{};
     std::uint32_t captures = 0;
-    std::uint32_t axis_edges = 0;
-    std::uint32_t mouse_remainder = 0;
-    std::uint32_t key_overflows = 0;
-    std::uint32_t quirk_drops = 0;
+
+    svc::InputServiceCounts service{};
     std::uint32_t rejected = 0;
     std::uint32_t ui_keys = 0;
     std::uint32_t ui_keys_dropped = 0;
-
-    svc::PlayerMask slot_live{};
-    std::uint32_t slot_ghosts = 0;
-    std::uint32_t slot_hash[svc::kMaxPlayers]{};
 
     std::uint32_t keys_dropped = 0;
     std::uint32_t key_sweeps = 0;

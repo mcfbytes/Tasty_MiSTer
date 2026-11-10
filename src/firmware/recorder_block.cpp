@@ -53,16 +53,14 @@ RecorderBlock::RecorderBlock(
       hasher_{app::FrameHasher::Wiring{
           .channel = raw_frames_,
           .out = sidecar_ring_,
-          .writer_wake = rec_write_wake_,
           .status = encode_status_,
           .clock = parts.wires.clock,
           .video = avi_encoder_
       }},
-      sidecar_writer_{app::SidecarWriter::Wiring{.in = sidecar_ring_, .status = rec_write_status_}},
+      sidecar_writer_{app::SidecarWriter::Wiring{.status = rec_write_status_}},
       avi_writer_{app::AviWriter::Wiring{.in = chunks_, .status = avi_write_status_}},
       recorder_{app::RecorderControl::Wiring{
-          .control = infra::OptRef<app::RecControlCell>{rec_control_},
-          .capture_wake = infra::OptRef<xthread::WakeFlag>{capture_wake_},
+          .control = infra::OptRef<app::RecControlChannel>{rec_control_},
           .status = infra::OptRef<const app::RecorderStatusCell>{rec_status_},
           .writer = infra::OptRef<const app::RecWriteStatusCell>{rec_write_status_},
           .diag = infra::OptRef<xthread::DiagLog>{parts.wires.diag},
@@ -78,7 +76,7 @@ RecorderBlock::RecorderBlock(
     } else {
         capture_main_.emplace(copier_, std::move(*c));
         encode_main_.emplace(hasher_, std::move(*e), encode_delay_);
-        rec_write_main_.emplace(sidecar_writer_, avi_writer_, std::move(*w));
+        rec_write_main_.emplace(sidecar_writer_, avi_writer_, sidecar_ring_, std::move(*w));
     }
 }
 

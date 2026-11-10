@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <span>
 
 #include "svc/vfs.h"
 
@@ -127,23 +128,17 @@ void CheatStore::take(const CheatCatalog& cat) {
     TASTY_SEAT_BODY(CheatStore);
     reset_();
     geom_ = cores::clamp_cheat_geometry(cat.geometry);
-    const std::size_t rows = cat.count <= CheatCatalog::kMaxRows ? cat.count
-                                                                 : CheatCatalog::kMaxRows;
-    for (std::size_t i = 0; i < rows; ++i) {
-        const CheatCatalog::Row& src = cat.rows[i];
-        const std::size_t end = std::size_t{src.offset} + src.len;
-        if (end > CheatCatalog::kArenaBytes) {
-            ++refusals_;
-            continue;
-        }
 
-        if (!geom_.unit.whole(proto::FileSize{src.len})) {
+    for (const CheatCatalog::Row& src : cat.rows_view()) {
+        const std::span<const std::uint8_t> body = cat.body(src);
+
+        if (!geom_.unit.whole(proto::FileSize{body.size()})) {
             ++refusals_;
             continue;
         }
         CheatRecord r{};
-        (void)r.name.assign(std::string_view{src.name});
-        r.bytes.assign(cat.data + src.offset, cat.data + end);
+        (void)r.name.assign(src.name.view());
+        r.bytes.assign(body.begin(), body.end());
         r.loaded = true;
         recs_.push_back(std::move(r));
     }
@@ -159,7 +154,7 @@ CheatRow CheatStore::row(std::size_t i) const noexcept {
 
 std::span<const std::uint8_t> CheatStore::blob() const noexcept {
     TASTY_SEAT_BODY(CheatStore);
-    return {blob_.bytes, blob_.len};
+    return blob_.body();
 }
 
 void CheatStore::publish_() noexcept {
@@ -183,7 +178,7 @@ void CheatStore::publish_() noexcept {
         pos += r.bytes.size();
     }
     blob_.len = static_cast<std::uint16_t>(pos);
-    blob_.unit = geom_.unit.v;
+    blob_.unit = geom_.unit;
     loaded_ = geom_.unit.count_of(proto::FileSize{pos});
     blob_cell_->publish(blob_);
 }

@@ -2,15 +2,16 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include "app/osd_grant.h"
-#include "app/osd_rows.h"
-#include "app/ui_page_record.h"
+#include "app/spi_osd_rows.h"
 #include "infra/error.h"
 #include "hal/spi_transport.h"
 #include "proto/link_op.h"
 #include "proto/osd_transport.h"
 #include "infra/seat.h"
+#include "svc/types.h"
 
 namespace mister::app {
 
@@ -28,6 +29,8 @@ public:
     OsdWire& operator=(const OsdWire&) = delete;
 
     bool flush_one() noexcept {
+        if (emit_info_window_())
+            return true;
         return route_ == OsdPageRoute::Lw ? lw_rows_.flush_one() : link_rows_.flush_one();
     }
 
@@ -35,13 +38,37 @@ public:
 
     [[nodiscard]] OsdPageRoute page_route() const noexcept { return route_; }
 
+    enum class ShowOwner : std::uint8_t { Policy, Bar };
+
     [[nodiscard]] Ex<void> set_show(proto::LinkOp::OsdShow s) noexcept {
         return set_show(s, target_);
     }
 
-    [[nodiscard]] Ex<void> set_show(proto::LinkOp::OsdShow s, proto::OsdTarget t) noexcept;
+    [[nodiscard]] Ex<void> set_show(proto::LinkOp::OsdShow s, proto::OsdTarget t) noexcept {
+        return show_as(s, ShowOwner::Policy, t);
+    }
 
-    void on_fabric_reprogrammed() noexcept { show_ = proto::LinkOp::OsdShow::Off; }
+    [[nodiscard]] Ex<void> show_as(proto::LinkOp::OsdShow s, ShowOwner owner) noexcept {
+        return show_as(s, owner, target_);
+    }
+
+    [[nodiscard]] Ex<void> show_as(
+        proto::LinkOp::OsdShow s,
+        ShowOwner owner,
+        proto::OsdTarget t
+    ) noexcept;
+
+    [[nodiscard]] Ex<void> release(ShowOwner owner) noexcept;
+
+    [[nodiscard]] bool opened_by(ShowOwner owner) const noexcept { return opener_ == owner; }
+
+    [[nodiscard]] Ex<void> reassert_show() noexcept;
+
+    void on_fabric_reprogrammed() noexcept {
+        show_ = proto::LinkOp::OsdShow::Off;
+        opener_.reset();
+        reasserted_ = false;
+    }
 
     [[nodiscard]] Ex<void> set_visible(bool on) noexcept {
         return set_show(on ? proto::LinkOp::OsdShow::Menu : proto::LinkOp::OsdShow::Off);
@@ -63,7 +90,11 @@ public:
 
     std::uint32_t status_rows_sent() const noexcept { return tally_.status_rows_sent; }
 
-    std::uint32_t visibility_writes() const noexcept { return vis_writes_; }
+    svc::Tally visibility_writes() const noexcept { return vis_writes_; }
+
+    svc::Tally info_window_writes() const noexcept { return info_writes_; }
+
+    svc::Tally info_window_failures() const noexcept { return info_failures_; }
 
     proto::LinkOp::OsdShow show() const noexcept { return show_; }
 
@@ -78,6 +109,19 @@ public:
     proto::OsdSurface& surface() noexcept { return *surface_; }
 
 private:
+    bool emit_info_window_() noexcept;
+
+    void latch_lit(proto::LinkOp::OsdShow s, ShowOwner owner, proto::OsdTarget t) noexcept {
+        show_ = s;
+        target_ = t;
+        if (s == proto::LinkOp::OsdShow::Menu) {
+            opener_.reset();
+        } else if (owner == ShowOwner::Bar && s != proto::LinkOp::OsdShow::Off) {
+            opener_ = owner;
+        }
+        vis_writes_.add();
+    }
+
     proto::OsdSurface* surface_;
     hal::ISpiTransport* link_;
     OsdRowTally tally_{};
@@ -85,8 +129,14 @@ private:
     SpiOsdRows<proto::OsdSurface::kStatusRow> lw_rows_;
     OsdPageRoute route_ = OsdPageRoute::Link;
     proto::OsdTransport osd_{};
-    std::uint32_t vis_writes_ = 0;
+    xthread::Telemetry<proto::InfoWindow>::Reader info_seen_{};
+    svc::Tally vis_writes_{};
+    svc::Tally info_writes_{};
+    svc::Tally info_failures_{};
     proto::LinkOp::OsdShow show_ = proto::LinkOp::OsdShow::Off;
+
+    std::optional<ShowOwner> opener_{};
+    bool reasserted_ = false;
     proto::OsdTarget target_ = proto::OsdTarget::All;
 };
 

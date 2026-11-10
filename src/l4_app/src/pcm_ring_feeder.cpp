@@ -15,7 +15,7 @@ constexpr std::size_t kAlignMask = static_cast<std::size_t>(kPcmSampleAlign) - 1
 
 void PcmRingFeeder::wake_main_() noexcept {
     wakes_.add();
-    commands_->kick_if_armed();
+    commands_.kick_if_armed();
 }
 
 void PcmRingFeeder::request_park() noexcept {
@@ -117,14 +117,15 @@ Ex<void> PcmRingFeeder::set_sheet(std::string_view sheet) {
     }
 
     PcmMedia m{};
-    (void)m.sheet.assign(sheet);
+    if (!m.sheet.assign(sheet))
+        return std::unexpected(Error{Errc::bad_format, ERR_SITE(), 0});
     if (auto r = hand_over_<PcmCommand::AttachSource>(m); !r)
         return r;
 
     parked_.store(false, std::memory_order_release);
 
     wakes_.add();
-    commands_->kick();
+    commands_.kick();
     return {};
 }
 
@@ -185,8 +186,8 @@ Ex<void> PcmRingFeeder::hand_over_(PcmMedia& media) noexcept {
     if (!lease)
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     *lease = std::move(media);
-    const std::uint8_t idx = media_.index_of(lease.get());
-    if (!commands_->push(infra::make<PcmCommand>(Alt{idx}))) {
+    const xthread::PoolSlot idx = *media_.index_of(lease.get());
+    if (!commands_.push(infra::make<PcmCommand>(Alt{idx}))) {
         drops_.add();
         media = std::move(*lease);
         *lease = PcmMedia{};
@@ -202,7 +203,7 @@ Ex<void> PcmRingFeeder::submit_(const PcmCommand& c) noexcept {
         discards_.add();
         return {};
     }
-    if (!commands_->push(c)) {
+    if (!commands_.push(c)) {
         drops_.add();
         return std::unexpected(Error{Errc::would_block, ERR_SITE(), 0});
     }
@@ -266,9 +267,9 @@ std::size_t PcmRingFeeder::size() const noexcept {
     return visible_len_.load(std::memory_order_acquire);
 }
 
-cores::IPcmFeed* PcmRingFeeder::pcm_feed() noexcept {
+infra::OptRef<cores::IPcmFeed> PcmRingFeeder::pcm_feed() noexcept {
     TASTY_SEAT_BODY_MEDIATOR(PcmRingFeeder, B);
-    return this;
+    return infra::OptRef<cores::IPcmFeed>{*this};
 }
 
 bool PcmRingFeeder::take_park_ask() noexcept {
@@ -324,16 +325,13 @@ void PcmRingFeeder::on(const PcmCommand::Resume&) noexcept {
     paused_ = false;
 }
 
-PcmMedia* PcmRingFeeder::leased_(std::uint8_t lease) noexcept {
-    return lease < kPcmMediaLeases ? &media_.at(lease) : nullptr;
-}
-
 void PcmRingFeeder::on(const PcmCommand::AttachRing& a) noexcept {
-    if (PcmMedia* m = leased_(a.lease); m != nullptr && m->ring.has_value()) {
+    PcmMedia& m = media_.at(a.lease);
+    if (m.ring.has_value()) {
         drop_ring_();
         rp_seen_ = 0;
         read_val_ = 0;
-        ring_.swap(m->ring);
+        ring_.swap(m.ring);
         ring_len_ = static_cast<std::uint32_t>(ring_->region().len);
         ring_mask_ = ring_len_ - 1u;
     }
@@ -342,13 +340,12 @@ void PcmRingFeeder::on(const PcmCommand::AttachRing& a) noexcept {
 }
 
 void PcmRingFeeder::on(const PcmCommand::AttachSource& a) noexcept {
-    if (PcmMedia* m = leased_(a.lease); m != nullptr) {
-        release_source_();
-        rp_seen_ = 0;
-        read_val_ = 0;
-        if (!m->sheet.empty() && vfs_) {
-            src_ = cores::make_pcm_source(m->sheet.view(), *vfs_);
-        }
+    PcmMedia& m = media_.at(a.lease);
+    release_source_();
+    rp_seen_ = 0;
+    read_val_ = 0;
+    if (!m.sheet.empty() && vfs_) {
+        src_ = cores::make_pcm_source(m.sheet.view(), *vfs_);
     }
     ++work_.attaches;
     publish_state_();
@@ -429,13 +426,13 @@ void PcmRingFeeder::apply_play_(std::uint8_t track, [[maybe_unused]] bool loop) 
                 std::uint32_t chunk = target - filled;
                 if (chunk > kPcmChunkBytes)
                     chunk = kPcmChunkBytes;
-                const Ex<std::size_t> got = src_->read_at(
+                const Ex<std::span<std::byte>> got = src_->read_at(
                     filled,
                     std::span<std::byte>{staging_, chunk}
                 );
-                if (!got || *got == 0)
+                if (!got || got->empty())
                     break;
-                const std::size_t n = *got & ~kAlignMask;
+                const std::size_t n = got->size() & ~kAlignMask;
                 if (n == 0)
                     break;
                 if (!ring_->write_at(filled, std::span<const std::byte>{staging_, n}))
@@ -469,19 +466,18 @@ void PcmRingFeeder::refresh_read_point_() noexcept {
     const std::uint32_t g = read_point_.generation();
     if (g == rp_seen_)
         return;
-    std::uint32_t v = 0;
-    const std::uint32_t got = read_point_.sample_into(v);
-    if (got == 0)
+    const auto s = read_point_.sample();
+    if (!s)
         return;
-    read_val_ = v;
-    rp_seen_ = got;
+    read_val_ = s.value;
+    rp_seen_ = s.generation;
 }
 
 void PcmRingFeeder::fill_() noexcept {
     if (!playing_ || paused_ || src_ == nullptr || !ring_.has_value())
         return;
 
-    const std::chrono::nanoseconds now = clock_->now();
+    const std::chrono::nanoseconds now = clock_.now().time_since_epoch();
     if (draining_) {
         if (now >= drain_until_) {
             playing_ = false;
@@ -516,10 +512,13 @@ void PcmRingFeeder::fill_() noexcept {
     if (to_write == 0)
         return;
 
-    const Ex<std::size_t> got = src_->read_at(position_, std::span<std::byte>{staging_, to_write});
-    if (!got || *got == 0)
+    const Ex<std::span<std::byte>> got = src_->read_at(
+        position_,
+        std::span<std::byte>{staging_, to_write}
+    );
+    if (!got || got->empty())
         return;
-    std::size_t n = *got & ~kAlignMask;
+    std::size_t n = got->size() & ~kAlignMask;
     if (n == 0)
         return;
 
@@ -539,15 +538,8 @@ void PcmRingFeeder::publish_state_() noexcept {
     s.drained = drained_;
     s.served = served_;
     s.attaches = work_.attaches;
-    if (s.write_point == published_.write_point
-        && s.playing == published_.playing
-        && s.primed == published_.primed
-        && s.drained == published_.drained
-        && s.served == published_.served
-        && s.attaches == published_.attaches
-        && state_.generation() != 0) {
+    if (s == published_ && state_.generation() != 0)
         return;
-    }
     published_ = s;
     state_.publish(s);
 }

@@ -23,7 +23,7 @@ class HdListPage final : public Page, public IMaskRebuild {
     TASTY_SEAT_RESIDENT(Ui);
 
 public:
-    HdListPage(std::unique_ptr<IHdPlan> plan, ItemId key, HdFocusMemory& memory);
+    HdListPage(std::unique_ptr<IHdPlan> plan, ItemId push_focus, HdFocusMemory& memory);
 
     PageId id() const override;
 
@@ -31,7 +31,7 @@ public:
 
     bool describe_hub(app::PageDescription& out) const override;
     Transition handle(const UiEvent& ev) override;
-    void on_facts(const SystemFacts& facts) override;
+    void on_facts(const SystemFacts& facts, const SessionFacts& session) override;
 
     infra::OptRef<IMaskRebuild> mask_rebuild() override;
     void rebuild(const proto::ItemTable& table, const BuildEnv& env) override;
@@ -51,7 +51,7 @@ public:
     static constexpr RowCount kMaxRows = menu_mask_rows();
 
 private:
-    struct Slots {
+    struct PageRows {
         RowCount body{};
         RowCount pinned{};
         RowCount dropped{};
@@ -75,15 +75,15 @@ private:
         [[nodiscard]] RowIndex operator[](RowIndex i) const noexcept { return at[i]; }
     };
 
-    [[nodiscard]] Slots slots_() const;
-    [[nodiscard]] IHdRow& row_(const Slots& s, RowIndex slot) const;
-    [[nodiscard]] bool shown_(const Slots& s, RowIndex slot) const;
-    [[nodiscard]] bool focusable_(RowIndex slot) const;
-    [[nodiscard]] std::optional<RowIndex> first_focusable_from_(RowIndex slot) const;
+    [[nodiscard]] PageRows page_rows_() const;
+    [[nodiscard]] IHdRow& row_(const PageRows& s, RowIndex page_row) const;
+    [[nodiscard]] bool shown_(const PageRows& s, RowIndex page_row) const;
+    [[nodiscard]] bool focusable_(RowIndex page_row) const;
+    [[nodiscard]] std::optional<RowIndex> first_focusable_from_(RowIndex page_row) const;
     [[nodiscard]] std::optional<RowIndex> recalled_() const;
 
     struct Window {
-        infra::IndexedArray<RowIndex, app::PageDescription::kMaxRows, RowIndex> slot{};
+        infra::IndexedArray<RowIndex, app::PageDescription::kMaxRows, RowIndex> page_row{};
         RowCount count{};
         RowCount pinned{};
         RowIndex first{};
@@ -96,7 +96,7 @@ private:
     void refocus_();
 
     std::unique_ptr<IHdPlan> plan_;
-    ItemId key_;
+    ItemId push_focus_;
     HdFocusMemory& memory_;
     RowIndex sel_{};
     std::uint32_t refusals_ = 0;

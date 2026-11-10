@@ -13,30 +13,27 @@
 #include "cores/loader_context.h"
 #include "cores/n64_analog.h"
 #include "cores/n64_core.h"
-#include "svc/vfs.h"
 
 namespace mister::cores::manifests {
 
 extern const CoreProfile kN64;
-
-inline constexpr svc::SearchDir kN64HomeDir[] = {svc::SearchDir::CoreDir};
 
 inline constexpr std::uint32_t kRomLoadAddr = 0x3200'0000;
 inline constexpr std::uint32_t kDdDiskLoadAddr = 0x3600'0000;
 inline constexpr std::uint32_t kDdIplLoadAddr = 0x30C0'0000;
 
 inline constexpr auto kN64StartAssets = std::to_array<BootAsset>({
-    {.name = "boot0.rom", .where = kN64HomeDir, .subdir = "N64", .dest = WideIoIndex{0x00}},
-    {.name = "boot1.rom", .where = kN64HomeDir, .subdir = "N64", .dest = WideIoIndex{0x40}},
-    {.name = "boot2.rom", .where = kN64HomeDir, .subdir = "N64", .dest = WideIoIndex{0x80}},
-    {.name = "boot.rom", .where = kN64HomeDir, .subdir = "N64", .dest = WideIoIndex{0x00}},
+    {.name = "boot0.rom", .where = kCoreHomeDir, .subdir = "N64", .dest = WideIoIndex{0x00}},
+    {.name = "boot1.rom", .where = kCoreHomeDir, .subdir = "N64", .dest = WideIoIndex{0x40}},
+    {.name = "boot2.rom", .where = kCoreHomeDir, .subdir = "N64", .dest = WideIoIndex{0x80}},
+    {.name = "boot.rom", .where = kCoreHomeDir, .subdir = "N64", .dest = WideIoIndex{0x00}},
 });
 
 inline constexpr auto kN64Slots = std::to_array<FileSlot>({
-    {N64Core::kRomIndex, "N64z64n64v64", "Load"},
-    {N64Core::kDdDiskIndex, "NDDndd", "Load 64DD Disk"},
-    {N64Core::kDdIplIndex, "N64z64n64v64binrom", "Load 64DD IPL"},
-    {N64Core::kGbIndex, "GBCGB ", "Load GB-Transfer"},
+    {.index = N64Core::kRomIndex, .extensions = "N64z64n64v64", .label = "Load"},
+    {.index = N64Core::kDdDiskIndex, .extensions = "NDDndd", .label = "Load 64DD Disk"},
+    {.index = N64Core::kDdIplIndex, .extensions = "N64z64n64v64binrom", .label = "Load 64DD IPL"},
+    {.index = N64Core::kGbIndex, .extensions = "GBCGB ", .label = "Load GB-Transfer"},
 });
 
 inline constexpr auto kN64Windows = std::to_array<CoreWindowDecl>({

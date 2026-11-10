@@ -1,35 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "app/cheat_link.h"
 
-#include <cstddef>
-#include <span>
-
 #include "cores/cheat_sink.h"
 #include "cores/core_support.h"
 
 namespace mister::app {
 
-void CheatLink::content_loaded(
-    cores::Core* core,
-    TxDigest::Kind kind,
-    std::string_view path,
-    svc::Crc32 crc,
-    bool same_game
-) noexcept {
+void CheatLink::content_loaded(cores::Core& core, const TxDigest& loaded) noexcept {
     TASTY_SEAT_BODY(CheatLink);
-    if (core != nullptr) {
-        if (cores::ICheatSink* sink = core->cheat_sink(); sink != nullptr) {
-            if (auto r = sink->apply({}, cores::kCheatDefaultUnit); !r) {
-                ++refusals_;
-            }
-        }
+    if (auto r = core.cheat_sink().apply({}, cores::CheatUnit{}); !r) {
+        ++refusals_;
     }
     blob_reader_.forget();
-    digest_scratch_ = TxDigest{};
-    digest_scratch_.kind = kind;
-    digest_scratch_.crc = crc;
-    digest_scratch_.same_game = same_game;
-    (void)digest_scratch_.path.assign(path);
+    digest_scratch_ = loaded;
     digest_cell_.publish(digest_scratch_);
 }
 
@@ -49,19 +32,9 @@ bool CheatLink::apply_cheats_counted(const CheatCall& call) noexcept {
         ++refusals_;
         return true;
     }
-    cores::ICheatSink* sink = call.core->cheat_sink();
-    if (sink == nullptr) {
-        ++refusals_;
-        return false;
-    }
-    const std::size_t n = blob_scratch_.len <= sizeof(blob_scratch_.bytes)
-        ? blob_scratch_.len
-        : sizeof(blob_scratch_.bytes);
-    if (auto r = sink->apply(
-            std::span<const std::uint8_t>(blob_scratch_.bytes, n),
-            blob_scratch_.unit
-        );
-        !r) {
+    cores::ICheatSink& sink = call.core->cheat_sink();
+
+    if (auto r = sink.apply(blob_scratch_.body(), blob_scratch_.unit); !r) {
         ++refusals_;
         return false;
     }

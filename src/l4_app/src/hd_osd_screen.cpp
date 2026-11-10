@@ -2,7 +2,6 @@
 #include "app/hd_osd_screen.h"
 
 #include "app/hps_framebuffer.h"
-#include "app/video_pump.h"
 
 namespace mister::app {
 
@@ -22,7 +21,7 @@ void HdOsdScreen::publish_ask_(bool is_open) noexcept {
         badge_sent_ = badge_;
         slots_sent_ = slots_;
     }
-    const auto ns = w_.clock.now().count();
+    const auto ns = w_.clock.now().time_since_epoch().count();
     ask.stamp_ns = ns < 0 ? 0 : static_cast<std::uint64_t>(ns);
     w_.ask.publish(ask);
     w_.wake.kick_if_armed();
@@ -127,16 +126,14 @@ void HdOsdScreen::release_console_() noexcept {
 }
 
 bool HdOsdScreen::try_open_() noexcept {
-    const std::uint32_t ow = w_.video.output_width();
-    const std::uint32_t oh = w_.video.output_height();
-    const auto fit = fit_surface(w_.fb.region_bytes(), ow, oh);
+    const OutputSize out = w_.output.output_size();
+    const auto fit = fit_surface(w_.fb.region_bytes(), out);
     if (!fit)
         return false;
     surface_ = *fit;
-    out_w_ = ow;
-    out_h_ = oh;
-    applies_seen_ = w_.video.stats().applies;
-    ++epoch_;
+    out_ = out;
+    applies_seen_ = w_.stats.sample().value.applies;
+    epoch_ = epoch_.next();
     open_ = true;
     intends_ = true;
     hide_cursor_();
@@ -159,12 +156,11 @@ bool HdOsdScreen::reraise_() noexcept {
 }
 
 void HdOsdScreen::on_applies_() noexcept {
-    const std::uint32_t applies = w_.video.stats().applies;
+    const std::uint32_t applies = w_.stats.sample().value.applies;
     if (applies == applies_seen_)
         return;
-    const std::uint32_t ow = w_.video.output_width();
-    const std::uint32_t oh = w_.video.output_height();
-    const bool sized = ow != out_w_ || oh != out_h_;
+    const OutputSize out = w_.output.output_size();
+    const bool sized = !(out == out_);
     covers_ = false;
     intends_ = false;
     applies_seen_ = applies;
@@ -174,15 +170,14 @@ void HdOsdScreen::on_applies_() noexcept {
             reraise_owed_ = !reraise_();
         return;
     }
-    const auto fit = fit_surface(w_.fb.region_bytes(), ow, oh);
+    const auto fit = fit_surface(w_.fb.region_bytes(), out);
     if (!fit) {
         close_();
         return;
     }
     surface_ = *fit;
-    out_w_ = ow;
-    out_h_ = oh;
-    ++epoch_;
+    out_ = out;
+    epoch_ = epoch_.next();
     shown_.reset();
     owed_.reset();
     reraise_owed_ = false;
@@ -234,7 +229,7 @@ void HdOsdScreen::take_jobs_() noexcept {
 }
 
 void HdOsdScreen::tick(
-    const PageDescription* page,
+    infra::OptRef<const PageDescription> page,
     HdOsdStatus::Badge badge,
     HdStatusSlots slots,
     HdLook look
@@ -245,7 +240,7 @@ void HdOsdScreen::tick(
     (void)status_seen_.take_if_changed(w_.status, status_);
     const bool live = status_.state == HdOsdStatus::State::Ready
         || status_.state == HdOsdStatus::State::Showing;
-    if (page == nullptr || !live) {
+    if (!page || !live) {
         close_();
         return;
     }

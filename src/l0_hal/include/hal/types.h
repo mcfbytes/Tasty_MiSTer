@@ -4,13 +4,23 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 #include "infra/decimal_text.h"
+#include "infra/json_out.h"
+#include "os/types.h"
 
 namespace mister::hal {
 
 struct SpiWord {
     std::uint16_t v = 0;
+
+    [[nodiscard]] constexpr SpiWord with_high_byte(std::uint8_t byte) const noexcept {
+        return SpiWord{static_cast<std::uint16_t>(
+            v | (static_cast<std::uint16_t>(byte) << std::numeric_limits<std::uint8_t>::digits)
+        )};
+    }
+
     friend constexpr bool operator==(SpiWord, SpiWord) = default;
 };
 
@@ -80,6 +90,29 @@ struct GpiWord {
     friend constexpr bool operator==(GpiWord, GpiWord) = default;
 };
 
+struct EventCount8 {
+    std::uint8_t v = 0;
+
+    friend constexpr void json_field(
+        infra::JsonOut& o,
+        infra::JsonName key,
+        EventCount8 c
+    ) noexcept {
+        o.field(key, c.v);
+    }
+
+    friend constexpr bool operator==(EventCount8, EventCount8) = default;
+
+private:
+    [[nodiscard]] static constexpr EventCount8 of_lane(
+        std::uint32_t word,
+        unsigned shift
+    ) noexcept {
+        return EventCount8{static_cast<std::uint8_t>(word >> shift)};
+    }
+    friend struct SectorBlock;
+};
+
 [[nodiscard]] constexpr std::uint32_t detail_of(GpiWord w) noexcept {
     return w.v;
 }
@@ -142,15 +175,13 @@ enum class Width : std::uint8_t { Byte = 0, Word = 1 };
     return (bytes + b - 1u) / b;
 }
 
-enum class SchedPolicy : std::uint8_t { Fifo, Other };
-
-[[nodiscard]] constexpr SchedPolicy sched_policy_of(int policy) noexcept {
-    constexpr int kSchedFifo = 1;
-    return policy == kSchedFifo ? SchedPolicy::Fifo : SchedPolicy::Other;
-}
+using SchedPolicy = os::SchedPolicy;
 
 struct FrameSeq {
     std::uint32_t v = 0;
+
+    [[nodiscard]] constexpr FrameSeq next() const noexcept { return FrameSeq{v + 1u}; }
+
     friend constexpr bool operator==(FrameSeq, FrameSeq) = default;
     friend constexpr auto operator<=>(FrameSeq, FrameSeq) = default;
 };
@@ -185,6 +216,8 @@ struct HeaderCtr {
         friend constexpr bool operator==(Lag, Lag) = default;
         friend constexpr auto operator<=>(Lag, Lag) = default;
     };
+
+    static constexpr Lag kReach = Lag{kMask};
 
     std::uint8_t v = 0;
 
