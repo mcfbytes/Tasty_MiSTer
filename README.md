@@ -2,6 +2,8 @@
 
 # MiSTer Tasty
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mcfbytes/Tasty_MiSTer)
+
 **Tool-assisted replays on real MiSTer FPGA cores.**
 
 MiSTer Tasty plays published TAS movies back on a MiSTer, right from the DE10-Nano's own ARM side, with no replay
