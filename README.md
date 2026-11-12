@@ -2,7 +2,13 @@
 
 # MiSTer Tasty
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mcfbytes/Tasty_MiSTer)
+[![CI](https://github.com/mcfbytes/Tasty_MiSTer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mcfbytes/Tasty_MiSTer/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/mcfbytes/Tasty_MiSTer?label=release)](https://github.com/mcfbytes/Tasty_MiSTer/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/mcfbytes/Tasty_MiSTer/total?label=downloads)](https://github.com/mcfbytes/Tasty_MiSTer/releases)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+[![Platform: MiSTer FPGA](https://img.shields.io/badge/platform-MiSTer%20FPGA%20%C2%B7%20DE10--Nano-orange)](https://github.com/MiSTer-devel/Wiki_MiSTer/wiki)
+[![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?logo=cplusplus&logoColor=white)](src)
+[![Ask DeepWiki](art/badges/deepwiki.svg)](https://deepwiki.com/mcfbytes/Tasty_MiSTer)
 
 **Tool-assisted replays on real MiSTer FPGA cores.**
 
