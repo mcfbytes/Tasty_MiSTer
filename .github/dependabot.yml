@@ -1,0 +1,27 @@
+# Dependabot keeps the GitHub Actions pins and the tasty-compare Python requirements current.
+# Actions stay pinned by full commit SHA with a "# vX.Y.Z" comment; Dependabot updates both.
+# The C libraries, fonts, Slint and the toolchain fetched by src/tools/ and ci.yml are pinned by
+# version and sha256, which Dependabot cannot recompute: deps-watch.yml reports those instead.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: ci
+      include: scope
+
+  - package-ecosystem: pip
+    directory: /tools/compare
+    schedule:
+      interval: weekly
+    groups:
+      python-minor-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build
+      include: scope

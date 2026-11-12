@@ -1,0 +1,201 @@
+name: Deps watch
+# Reports newer upstream releases of the dependencies pinned by version and sha256 (the static
+# build's C libraries, the Noto Sans faces, Slint and the Bootlin toolchain). A bump also needs the
+# tarball's sha256, so this downloads each new tarball, hashes it, and keeps ONE tracking issue
+# current. It never opens a pull request or pushes. Actions and pip pins are Dependabot's.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check upstream releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import ast, hashlib, json, os, re, subprocess, sys, tempfile
+          from pathlib import Path
+
+          TITLE = "Pinned dependency updates available"
+          DEPS = Path("src/tools/build-static-deps.py")
+          SLINT = Path("src/tools/build-static-slint.sh")
+          CI = Path(".github/workflows/ci.yml")
+          BOOTLIN = "https://toolchains.bootlin.com/downloads/releases/toolchains/armv7-eabihf/tarballs/"
+          LZO_PAGE = "https://www.oberhumer.com/opensource/lzo/download/"
+
+          def run(*cmd):
+              return subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+
+          def gh_api(path):
+              return json.loads(run("gh", "api", path))
+
+          def page(url):
+              return run("curl", "-fsSL", "--retry", "3", url)
+
+          def sha256_of(url):
+              with tempfile.TemporaryDirectory() as d:
+                  f = Path(d) / "download"
+                  run("curl", "-fsSL", "--retry", "3", "-o", str(f), url)
+                  h = hashlib.sha256()
+                  with f.open("rb") as fh:
+                      for chunk in iter(lambda: fh.read(1 << 20), b""):
+                          h.update(chunk)
+                  return h.hexdigest()
+
+          def key(v):
+              return tuple(int(x) for x in re.findall(r"\d+", v))
+
+          def latest_tag(repo):
+              return gh_api(f"repos/{repo}/releases/latest")["tag_name"]
+
+          consts = {}
+          for node in ast.parse(DEPS.read_text()).body:
+              if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                      and isinstance(node.targets[0], ast.Name)
+                      and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+                  consts[node.targets[0].id] = node.value.value
+
+          def zlib_ng():
+              cur, new = consts["ZLIB_NG_VER"], latest_tag("zlib-ng/zlib-ng").lstrip("v")
+              if key(new) <= key(cur):
+                  return None
+              url = f"https://github.com/zlib-ng/zlib-ng/archive/{new}/zlib-ng-{new}.tar.gz"
+              return cur, new, [("ZLIB_NG", url)], f"{DEPS}: ZLIB_NG_VER, ZLIB_NG_SHA"
+
+          def zlib():
+              cur, new = consts["ZLIB_VER"], latest_tag("madler/zlib").lstrip("v")
+              if key(new) <= key(cur):
+                  return None
+              url = f"https://github.com/madler/zlib/releases/download/v{new}/zlib-{new}.tar.xz"
+              return cur, new, [("ZLIB", url)], f"{DEPS}: ZLIB_VER, ZLIB_SHA (minizip ships inside it)"
+
+          def lzo():
+              cur = re.search(r"lzo-([0-9.]+)\.tar\.gz", consts["LZO_URL"]).group(1)
+              found = re.findall(r"lzo-([0-9]+\.[0-9]+)\.tar\.gz", page(LZO_PAGE))
+              if not found:
+                  raise RuntimeError(f"no lzo tarball listed on {LZO_PAGE}; check it by hand")
+              new = max(found, key=key)
+              if key(new) <= key(cur):
+                  return None
+              return cur, new, [("LZO", f"{LZO_PAGE}lzo-{new}.tar.gz")], f"{DEPS}: LZO_URL, LZO_SHA"
+
+          def libchdr():
+              repo = "rtissera/libchdr"
+              cur = consts["LIBCHDR_REV"]
+              branch = gh_api(f"repos/{repo}")["default_branch"]
+              new = gh_api(f"repos/{repo}/commits/{branch}")["sha"]
+              if new == cur:
+                  return None
+              ahead = gh_api(f"repos/{repo}/compare/{cur}...{new}").get("ahead_by", "?")
+              url = f"https://github.com/{repo}/archive/{new}.tar.gz"
+              return (cur[:12], f"{new[:12]} ({branch}, {ahead} commits ahead)", [("LIBCHDR", url)],
+                      f"{DEPS}: LIBCHDR_REV, LIBCHDR_SHA (no releases: tracks {branch})")
+
+          def noto():
+              cur = consts["NOTO_VER"]
+              tags = [r["tag_name"] for r in gh_api("repos/notofonts/latin-greek-cyrillic/releases?per_page=100")
+                      if not r.get("prerelease")]
+              vers = [m.group(1) for t in tags if (m := re.fullmatch(r"NotoSans-v([0-9.]+)", t))]
+              new = max(vers, key=key)
+              if key(new) <= key(cur):
+                  return None
+              url = (f"https://github.com/notofonts/latin-greek-cyrillic/releases/download/"
+                     f"NotoSans-v{new}/NotoSans-v{new}.zip")
+              return (cur, new, [("NOTO", url)],
+                      f"{DEPS}: NOTO_VER, NOTO_SHA (the pin matches the MiSTer image's copy; keep them in step)")
+
+          def slint():
+              cur = re.search(r"^SLINT_VERSION=(\S+)", SLINT.read_text(), re.M).group(1)
+              new = latest_tag("slint-ui/slint").lstrip("v")
+              if key(new) <= key(cur):
+                  return None
+              base = "https://github.com/slint-ui/slint"
+              return (cur, new,
+                      [("SLINT", f"{base}/archive/v{new}/slint-{new}.tar.gz"),
+                       ("COMPILER", f"{base}/releases/download/v{new}/slint-compiler-Linux-x86_64.tar.gz")],
+                      f"{SLINT}: SLINT_VERSION, SLINT_SHA256, COMPILER_SHA256; the patches must still apply, "
+                      f"and {CI} names the version in the Slint cache key")
+
+          def bootlin():
+              cur = re.search(r"armv7-eabihf--glibc--(stable-[0-9.]+-[0-9]+)\.tar\.xz", CI.read_text()).group(1)
+              found = re.findall(r"armv7-eabihf--glibc--(stable-[0-9.]+-[0-9]+)\.tar\.xz", page(BOOTLIN))
+              if not found:
+                  raise RuntimeError(f"no glibc stable tarball listed on {BOOTLIN}")
+              new = max(found, key=key)
+              if key(new) <= key(cur):
+                  return None
+              url = f"{BOOTLIN}armv7-eabihf--glibc--{new}.tar.xz"
+              return cur, new, [("TOOLCHAIN", url)], f"{CI}: every armv7-eabihf--glibc--{cur} and its sha256"
+
+          checks = [("zlib-ng", zlib_ng), ("zlib", zlib), ("lzo", lzo), ("libchdr", libchdr),
+                    ("Noto Sans", noto), ("Slint", slint), ("Bootlin glibc toolchain", bootlin)]
+          bumps, failed = [], []
+          for name, check in checks:
+              try:
+                  hit = check()
+              except Exception as e:  # one unreachable upstream must not hide the others
+                  detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
+                  failed.append((name, detail or repr(e)))
+                  print(f"{name}: check failed: {detail}", file=sys.stderr)
+                  continue
+              if hit is None:
+                  print(f"{name}: current")
+                  continue
+              cur, new, files, where = hit
+              hashed = [(label, url, sha256_of(url)) for label, url in files]
+              bumps.append((name, cur, new, where, hashed))
+              print(f"{name}: {cur} -> {new}")
+
+          server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+          run_url = f"{server}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          lines = ["Newer upstream releases of dependencies pinned by version and sha256.",
+                   "Each bump below lists the new tarball and the sha256 this workflow computed for it.", ""]
+          if bumps:
+              lines += ["| Dependency | Pinned | Available | Where |", "|---|---|---|---|"]
+              lines += [f"| {n} | {c} | {v} | {w} |" for n, c, v, w, _ in bumps]
+              for name, _, new, _, hashed in bumps:
+                  lines += ["", f"### {name} {new}", "", "```"]
+                  for label, url, digest in hashed:
+                      lines += [f"{label}_URL    {url}", f"{label}_SHA256 {digest}"]
+                  lines += ["```"]
+          if failed:
+              lines += ["", "### Not checked automatically", ""]
+              lines += [f"- **{n}**: {d.splitlines()[0][:300] if d else 'unknown error'}" for n, d in failed]
+          lines += ["", f"Last checked by [this run]({run_url}). This issue is rewritten on every run."]
+          body = "\n".join(lines) + "\n"
+
+          issues = json.loads(run("gh", "issue", "list", "--state", "open", "--limit", "200",
+                                  "--json", "number,title"))
+          open_ids = [i["number"] for i in issues if i["title"] == TITLE]
+          if bumps or failed:
+              with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+                  f.write(body)
+              if open_ids:
+                  run("gh", "issue", "edit", str(open_ids[0]), "--body-file", f.name)
+                  print(f"updated issue #{open_ids[0]}")
+              else:
+                  print(run("gh", "issue", "create", "--title", TITLE, "--body-file", f.name).strip())
+          elif open_ids:
+              run("gh", "issue", "close", str(open_ids[0]), "--comment",
+                  f"Every watched dependency is current as of [this run]({run_url}).")
+              print(f"closed issue #{open_ids[0]}")
+          else:
+              print("every watched dependency is current")
+          PY
